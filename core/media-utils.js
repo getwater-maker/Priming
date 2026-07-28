@@ -114,19 +114,23 @@ async function getMediaDuration(filePath) {
 
 /**
  * 동영상에서 오디오 트랙만 mp3 로 추출 (192k, 원본 샘플레이트 유지).
+ *
+ * ⚠ 태그 호환성: ffmpeg 기본값은 **ID3v2.4 + UTF-8** 인데, 안드로이드/삼성 뮤직 등 상당수 플레이어가
+ *   이를 못 읽어 한글 제목이 `?????` 로 깨져 보인다(실측 확인). `opts.compatTags` 를 주면
+ *   **ID3v2.3** 으로 쓰고(비-Latin1 은 ffmpeg 가 UTF-16 으로 자동 인코딩 → 인코딩바이트 1) 정상 표시된다.
+ *   오디오 스트림 자체는 동일(192k). STT 내부용 임시 추출은 태그가 무의미하므로 기본값 유지.
+ *
  * @param {string} videoPath - 입력 동영상 (mp4/mov/webm/mkv 등)
  * @param {string} outMp3Path - 출력 mp3 절대경로
+ * @param {{compatTags?: boolean}} [opts] - compatTags=true 면 ID3v2.3 으로 저장(스마트폰 호환).
+ *        원본 제목·아티스트 태그는 그대로 보존하고 **인코딩만** 호환 포맷으로 바꾼다(제목 덮어쓰지 않음).
  */
-async function extractAudioMp3(videoPath, outMp3Path) {
+async function extractAudioMp3(videoPath, outMp3Path, opts = {}) {
   if (!videoPath || !fs.existsSync(videoPath)) throw new Error('동영상 파일을 찾을 수 없습니다: ' + videoPath);
-  await _runFfmpeg([
-    '-y',
-    '-i', videoPath,
-    '-vn',
-    '-acodec', 'libmp3lame',
-    '-b:a', '192k',
-    outMp3Path,
-  ]);
+  const args = ['-y', '-i', videoPath, '-vn'];
+  if (opts.compatTags) args.push('-id3v2_version', '3'); // 한글 제목이 ????? 로 깨지지 않게(비-Latin1 은 UTF-16 자동)
+  args.push('-acodec', 'libmp3lame', '-b:a', '192k', outMp3Path);
+  await _runFfmpeg(args);
   if (!fs.existsSync(outMp3Path)) throw new Error('mp3 출력 파일이 생성되지 않았습니다.');
   return outMp3Path;
 }

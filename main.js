@@ -643,7 +643,7 @@ ipcMain.handle('extract-mp3', async () => {
     for (let i = 2; fs.existsSync(out); i++) out = path.join(dir, `${base} (${i}).mp3`);
     log(`🎵 mp3 추출: ${path.basename(file)} → ${path.basename(out)}`);
     try {
-      await media.extractAudioMp3(file, out);
+      await media.extractAudioMp3(file, out, { compatTags: true }); // ID3v2.3 — 스마트폰에서 한글 제목 ????? 방지
       const mb = (fs.statSync(out).size / 1048576).toFixed(1);
       log(`  ✓ 저장 완료 (${mb} MB)`);
       results.push({ file, mp3: out, ok: true });
