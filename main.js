@@ -615,6 +615,49 @@ ipcMain.handle('stt-transcribe', async () => {
   log(`🎧 STT 완료: 성공 ${okN}/${results.length}`);
   return { ok: true, results };
 });
+
+// 🎵 mp3 추출 — 영상(또는 다른 오디오)에서 mp3 를 뽑아 **원본과 같은 폴더에 같은 이름 .mp3** 로 저장.
+//   STT 와 별개(Whisper 서버 불필요, ffmpeg 만 사용). 같은 이름 파일이 있으면 덮지 않고 " (2)" 를 붙임.
+ipcMain.handle('extract-mp3', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'mp3 로 추출할 영상·음성 파일 선택 (여러 개 가능)',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '영상·음성', extensions: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'ts', 'mpg', 'mpeg', 'wmv', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma'] },
+      { name: '모든 파일', extensions: ['*'] },
+    ],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+  const media = require('./core/media-utils');
+  S.abort = false;
+  const results = [];
+  let lastDir = '';
+  for (const file of r.filePaths) {
+    if (S.abort) { log('⏹ mp3 추출 중단됨'); break; }
+    const dir = path.dirname(file);
+    const base = path.basename(file, path.extname(file));
+    const ext = path.extname(file).toLowerCase();
+    if (ext === '.mp3') { log(`⏭ 이미 mp3 — 건너뜀: ${path.basename(file)}`); results.push({ file, ok: false, skipped: true }); continue; }
+    // 기존 파일 보호 — 같은 이름이 있으면 " (2)", " (3)" … 로 피함(덮어쓰기 안 함)
+    let out = path.join(dir, base + '.mp3');
+    for (let i = 2; fs.existsSync(out); i++) out = path.join(dir, `${base} (${i}).mp3`);
+    log(`🎵 mp3 추출: ${path.basename(file)} → ${path.basename(out)}`);
+    try {
+      await media.extractAudioMp3(file, out);
+      const mb = (fs.statSync(out).size / 1048576).toFixed(1);
+      log(`  ✓ 저장 완료 (${mb} MB)`);
+      results.push({ file, mp3: out, ok: true });
+      lastDir = dir;
+    } catch (e) {
+      log(`  ✗ 실패: ${e.message}`);
+      results.push({ file, ok: false, error: e.message });
+    }
+  }
+  const okN = results.filter((x) => x.ok).length;
+  log(`🎵 mp3 추출 완료: 성공 ${okN}/${results.length}`);
+  if (okN && lastDir) { try { shell.openPath(lastDir); } catch {} } // 결과 폴더 열기
+  return { ok: true, results };
+});
 // 참조음성 목록 — ~/.flow-app/ref-audio 의 음성 파일들 (드롭다운 + 미리듣기용)
 ipcMain.handle('list-ref-audio', () => {
   const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');

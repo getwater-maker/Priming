@@ -438,6 +438,17 @@ export default function App() {
       setStatus(`STT 완료 (${okN}/${tot}) — 원본 폴더에 .txt 생성`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // 🎵 영상 → mp3 추출 (STT 와 별개 · Whisper 서버 불필요)
+  async function runExtractMp3() {
+    setStatus('mp3 추출 중… (영상 → mp3)');
+    try {
+      const r = await api.extractMp3();
+      if (!r || r.canceled) { setStatus('mp3 추출 취소'); return; }
+      const tot = (r.results || []).length;
+      const okN = (r.results || []).filter((x) => x.ok).length;
+      setStatus(`mp3 추출 완료 (${okN}/${tot}) — 원본 폴더에 .mp3 생성`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
   async function runTts(shortsNum) {
     setStatus('TTS 생성중…');
     try {
@@ -1489,6 +1500,7 @@ export default function App() {
                 <button onClick={openScript}>📂 열기</button>
                 <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
                 <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
+                <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}>🎵 mp3</button>
               </span>
               <span className="hgroup">
                 <span className="glabel">저장·불러오기</span>

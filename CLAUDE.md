@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎵 영상 → mp3 추출 버튼 신설 (STT 와 별개) (2026-07-28, v0.2.72)
+> 요청: "이전에 영상에서 mp3분리하고 STT추출하는 기능이 있었는데 사라진것같네" → 확인 결과 STT(🎧)는 그대로 있었고,
+>   mp3 는 STT 내부 단계로만 존재(임시폴더 생성 후 `fs.rmSync` 삭제 — main.js:611)해서 **파일이 남지 않았던 것.**
+>   "난 mp3파일이 필요한데" → 독립 버튼 신설(로이 선택).
+- **IPC `extract-mp3`**(stt-transcribe 바로 뒤): 파일 다중선택(영상 mp4·mov·mkv·webm·avi·m4v·ts·mpg·wmv + 음성 wav·m4a·
+  flac·ogg·aac·wma) → `media-utils.extractAudioMp3`(**기존 함수 재사용**, libmp3lame 192k) → **원본과 같은 폴더에 같은 이름
+  `.mp3`**(STT 가 .txt 만드는 것과 동일 규약). 끝나면 결과 폴더 `shell.openPath`.
+  **덮어쓰기 안 함** — 같은 이름이 있으면 `" (2)"`, `" (3)"` … 로 피함(기존 파일 보호). 입력이 이미 .mp3 면 건너뜀.
+  S.abort 로 중단 가능, 파일별 성공/실패 격리(한 파일 실패해도 다음 진행), 저장 크기(MB) 로그.
+- **UI**: 헤더 「대본」 그룹의 🎧 STT 옆에 **「🎵 mp3」** 버튼(App.jsx `runExtractMp3`). preload `extractMp3`.
+- **STT 와 완전 분리 — Whisper/OmniVoice 서버 불필요**(ffmpeg 만 사용) → 서버 꺼져 있어도 mp3 추출은 동작.
+  기존 🎧 STT 는 무변경(임시 mp3 생성·삭제 그대로).
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🧹 RunPod 전면 제거 + 설정 통합 팝업(⚙ 설정) (2026-07-24, v0.2.71)
 > 요청(로이): 런팟 안 씀 → 관련 기능 전부 제거. + 흩어진 API키/연결 버튼(제미나이·나노바나나·ComfyUI 이미지·비디오·
 >   xAI·TTS서버)을 **한 버튼 → 통합 팝업**으로.
