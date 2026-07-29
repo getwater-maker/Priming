@@ -27,6 +27,10 @@ const DEFAULTS = {
   heightNodeId: '',
   sendDims: true,          // 프로젝트 비율에 맞춰 해상도 주입(끄면 워크플로 기본 해상도 사용)
   timeoutSec: 300,
+  // 헤더 드롭다운의 「ComfyUI 로컬 / ComfyUI 클라우드」 전환용 — 각 모드의 주소를 따로 기억한다.
+  //   전환 시 baseUrl 을 여기서 꺼내 쓰므로, 로컬 주소를 고쳐도 클라우드로 갔다 오면 그대로 유지됨.
+  localBaseUrl: 'http://127.0.0.1:8188',
+  cloudBaseUrl: 'https://cloud.comfy.org',
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };

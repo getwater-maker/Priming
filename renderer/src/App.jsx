@@ -5,6 +5,25 @@ import BookView from './BookView.jsx';
 
 const media = (p) => 'media://' + encodeURIComponent(p);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ComfyUI = 드롭다운엔 **로컬 / 클라우드 2개만** 두고, 구체 워크플로(Krea2·Z-Image·LTX·Wan)는
+//   ⚙ ComfyUI 설정 팝업에서 고른다. (예전엔 워크플로마다 항목이 늘어나 드롭다운이 복잡했음)
+const COMFY_LOCAL = 'comfy-local';
+const COMFY_CLOUD = 'comfy-cloud';
+const DEF_LOCAL_URL = 'http://127.0.0.1:8188';
+const DEF_CLOUD_URL = 'https://cloud.comfy.org';
+// 엔진 값은 기존과 동일하게 'comfy' (레거시 'comfy::<path>' 도 comfy 로 인식) — main.js 무변경.
+const isComfyEngine = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') === 0;
+// select 에 표시할 값 — comfy 면 설정의 cloud 여부로 로컬/클라우드 결정.
+const comfySelectValue = (engine, cfg) => (isComfyEngine(engine) ? (cfg && cfg.cloud ? COMFY_CLOUD : COMFY_LOCAL) : engine);
+
+function ComfyEngineOptions({ kind = 'image', prefix = '' }) {
+  const suffix = kind === 'video' ? ' i2v' : '';
+  return (<>
+    <option value={COMFY_LOCAL}>{prefix}ComfyUI 로컬{suffix}</option>
+    <option value={COMFY_CLOUD}>{prefix}ComfyUI 클라우드{suffix}</option>
+  </>);
+}
 const CAP_POS_OPTIONS = [0.3, 0.15, 0, -0.15, -0.3]; // 상하위치 select 값 (capFine 으로 미세조정)
 // yOffset → {pos, fine} (가장 가까운 select 옵션 + 미세조정)
 function decomposeYOffset(yOffset) {
@@ -82,6 +101,8 @@ export default function App() {
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
+  const [chOrderOpen, setChOrderOpen] = useState(false); // 채널 순서 변경 모달
+  const [chOrder, setChOrder] = useState([]);            // 편집 중인 순서 [{name, group}]
   const [styles, setStyles] = useState([]);
 
   // 헤더 컨트롤
@@ -908,6 +929,27 @@ export default function App() {
       setStatus(`채널 "${ch.name}" 삭제됨`);
     } catch (e) { alert('채널 삭제 실패:\n' + e.message); }
   }
+  // ── 채널 순서 변경 ── 드롭다운에 보이는 순서를 ▲▼ 로 조정 후 저장.
+  function openChOrder() {
+    setChOrder((presets || []).map((p) => ({ name: p.name, group: p.group || '' })));
+    setChOrderOpen(true);
+  }
+  function moveChOrder(i, dir) {
+    setChOrder((cur) => {
+      const j = i + dir;
+      if (j < 0 || j >= cur.length) return cur;
+      const next = cur.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  }
+  async function saveChOrder() {
+    try {
+      const ps = await api.reorderPresets(chOrder.map((c) => c.name));
+      if (ps) setPresets(ps);
+      setChOrderOpen(false); setStatus('채널 순서 저장됨');
+    } catch (e) { logline('채널 순서 저장 오류: ' + e.message); }
+  }
   async function openChannelEditor(nameArg) {
     // ⚙ 버튼 onClick 은 이벤트 객체를 넘기므로, 문자열일 때만 인자 이름으로 사용.
     const useName = (typeof nameArg === 'string' && nameArg) ? nameArg : presetName;
@@ -1342,13 +1384,24 @@ export default function App() {
     const list = (comfyCfg.servers || []).filter((x) => x.name !== comfyCfg.activeServer);
     await saveComfyCfg({ servers: list, activeServer: '' });
   }
-  // 헤더 이미지 드롭다운에서 ComfyUI 워크플로별 항목(comfy::<path>) 선택 → 엔진=comfy + 활성 워크플로 지정
-  function onPickImgEngine(val) {
-    if (val && val.indexOf('comfy::') === 0) {
+  // 헤더 이미지 드롭다운 — ComfyUI 로컬/클라우드 선택 시 엔진='comfy' + 그 모드의 주소로 전환.
+  //   워크플로(Krea2·Z-Image)는 ⚙ ComfyUI 설정에서 고름. 워크플로가 아직 없으면 설정을 열어 안내.
+  async function onPickImgEngine(val) {
+    if (val === COMFY_LOCAL || val === COMFY_CLOUD) {
+      const cloud = (val === COMFY_CLOUD);
+      const cur = comfyCfg || {};
+      setImgEngine('comfy');
+      await saveComfyCfg({ cloud, baseUrl: cloud ? (cur.cloudBaseUrl || DEF_CLOUD_URL) : (cur.localBaseUrl || DEF_LOCAL_URL) });
+      if (!cur.workflowPath) openSettings('img'); // 워크플로 미지정 → 설정 열기
+      return;
+    }
+    if (val && val.indexOf('comfy::') === 0) { // 레거시 값 호환
       setImgEngine('comfy');
       const p = val.slice(7);
-      if (p) saveComfyCfg({ workflowPath: p }); else openComfy();
-    } else setImgEngine(val);
+      if (p) saveComfyCfg({ workflowPath: p }); else openSettings('img');
+      return;
+    }
+    setImgEngine(val);
   }
   async function testComfy() {
     setStatus('ComfyUI 연결 확인 중…');
@@ -1395,13 +1448,23 @@ export default function App() {
     const list = (cvidCfg.workflows || []).filter((w) => w.path !== cvidCfg.workflowPath);
     await saveCvidCfg({ workflows: list, workflowPath: list[0] ? list[0].path : '' });
   }
-  // 비디오 드롭다운에서 ComfyUI i2v 워크플로별 항목(comfy::<path>) 선택 → 엔진=comfy::path
-  function onPickVideoEngine(val) {
-    if (val && val.indexOf('comfy::') === 0) {
+  // 비디오 드롭다운 — ComfyUI 로컬/클라우드 선택 시 엔진='comfy'(설정의 활성 워크플로 사용) + 그 모드 주소로 전환.
+  async function onPickVideoEngine(val) {
+    if (val === COMFY_LOCAL || val === COMFY_CLOUD) {
+      const cloud = (val === COMFY_CLOUD);
+      const cur = cvidCfg || {};
+      setVideoEngine('comfy');
+      await saveCvidCfg({ cloud, baseUrl: cloud ? (cur.cloudBaseUrl || DEF_CLOUD_URL) : (cur.localBaseUrl || DEF_LOCAL_URL) });
+      if (!cur.workflowPath) openSettings('vid'); // i2v 워크플로 미지정 → 설정 열기
+      return;
+    }
+    if (val && val.indexOf('comfy::') === 0) { // 레거시 값 호환
       const p = val.slice(7);
       setVideoEngine(p ? `comfy::${p}` : 'comfy');
-      if (p) saveCvidCfg({ workflowPath: p }); else openCvid();
-    } else setVideoEngine(val);
+      if (p) saveCvidCfg({ workflowPath: p }); else openSettings('vid');
+      return;
+    }
+    setVideoEngine(val);
   }
   async function submitBatch() {
     setStatus('🌙 배치 제출 중…');
@@ -1492,6 +1555,7 @@ export default function App() {
               })()}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
+            <button className="ghost" title="채널 목록 순서 변경 (드롭다운에 보이는 순서)" style={{ padding: '6px 9px' }} onClick={openChOrder}>↕</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소" style={{ padding: '6px 9px' }} onClick={() => openSettings('img')}>⚙ 설정</button>
             {!isPl && !isBk && (<>
@@ -1546,17 +1610,19 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" onClick={() => setStyleEditOpen(true)}>✎</button>
-            <select title="이미지 생성 방식 — 순환(무료) / 유료(나노바나나2) / ComfyUI 워크플로별(z-image·Krea2 등)"
-              value={imgEngine === 'comfy' ? `comfy::${(comfyCfg && comfyCfg.workflowPath) || ''}` : imgEngine}
+            <select title="이미지 생성 방식 — 순환(무료) / 유료(나노바나나2) / ComfyUI 로컬·클라우드 (워크플로는 ⚙ ComfyUI 에서 선택)"
+              value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
               <option value="rotate">순환(무료)</option>
               <option value="gemini">유료(나노바나나2)</option>
-              {(comfyCfg && comfyCfg.workflows && comfyCfg.workflows.length)
-                ? comfyCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>ComfyUI: {w.name}</option>)
-                : <option value="comfy::">ComfyUI (워크플로 추가)</option>}
+              <ComfyEngineOptions />
             </select>
             <button className="ghost" title="이미지 순환 순서·계정 설정 (Genspark·Flow)" onClick={openImgRotation}>⚙</button>
-            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·워크플로(z-image·Krea2) 추가/전환" onClick={openComfy}>⚙ ComfyUI</button>}
+            {/* ⚙ ComfyUI = 이미지·비디오 공용 1개 버튼(설정 팝업에서 탭으로 전환). 이미지가 comfy 면 이미지 탭, 아니면 비디오 탭으로 연다. */}
+            {(isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) && (
+              <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키 · 워크플로 선택(이미지 Krea2·Z-Image / 비디오 LTX·Wan)"
+                onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : 'vid')}>⚙ ComfyUI</button>
+            )}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
@@ -1565,17 +1631,14 @@ export default function App() {
           </span>
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
-            <select title="i2v 비디오 엔진" value={videoEngine === 'comfy' ? `comfy::${(cvidCfg && cvidCfg.workflowPath) || ''}` : videoEngine} onChange={(e) => onPickVideoEngine(e.target.value)}>
+            <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 (워크플로 LTX·Wan 은 ⚙ ComfyUI 에서 선택)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <option value="grok">Grok (브라우저)</option>
               <option value="grok-api">Grok API (유료)</option>
-              {(cvidCfg && cvidCfg.workflows && cvidCfg.workflows.length)
-                ? cvidCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>ComfyUI: {w.name}</option>)
-                : <option value="comfy::">ComfyUI i2v (워크플로 추가)</option>}
+              <ComfyEngineOptions kind="video" />
               <option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
-            {(videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) && <button className="ghost" title="ComfyUI i2v 설정 — 로컬/클라우드·API키·워크플로(Wan/LTX)" onClick={openCvid}>⚙ ComfyUI</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
@@ -1603,12 +1666,10 @@ export default function App() {
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
             <span className="hgroup">
               <span className="glabel">배경</span>
-              <select title="배경 이미지 생성 방식" value={imgEngine === 'comfy' ? `comfy::${(comfyCfg && comfyCfg.workflowPath) || ''}` : imgEngine} onChange={(e) => onPickImgEngine(e.target.value)}>
+              <select title="배경 이미지 생성 방식" value={comfySelectValue(imgEngine, comfyCfg)} onChange={(e) => onPickImgEngine(e.target.value)}>
                 <option value="rotate">이미지: 순환(무료)</option>
                 <option value="gemini">이미지: 유료(나노바나나2)</option>
-                {(comfyCfg && comfyCfg.workflows && comfyCfg.workflows.length)
-                  ? comfyCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>이미지: ComfyUI {w.name}</option>)
-                  : <option value="comfy::">이미지: ComfyUI (워크플로 추가)</option>}
+                <ComfyEngineOptions prefix="이미지: " />
               </select>
               <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
                 <option value="grok">영상: Grok(심리스)</option>
@@ -1700,8 +1761,8 @@ export default function App() {
 
       {preview && (
         <div id="preview" className="show" onClick={(e) => { if (e.target.classList.contains('close')) setPreview(null); }}>
-          <button className="close">✕</button>
           <div id="previewBody">
+            <button className="close" title="닫기">✕</button>
             {preview.kind === 'vid'
               ? <video src={preview.src} controls autoPlay loop />
               : preview.kind === 'audio'
@@ -1734,7 +1795,7 @@ export default function App() {
       )}
 
       {nameAsk && (
-        <div className="modal-bg show">
+        <div className="modal-bg show name-ask-layer">
           <div className="modal-card" style={{ maxWidth: 420 }}>
             <h3>{nameAsk.title || '이름 입력'}</h3>
             <input autoFocus style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }} value={nameAsk.value}
@@ -1965,6 +2026,29 @@ export default function App() {
         </div>
       )}
 
+      {chOrderOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setChOrderOpen(false); }}>
+          <div className="modal-card" style={{ maxWidth: 460 }}>
+            <h3>↕ 채널 순서</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>▲▼ 로 순서를 바꾸고 <b>저장</b>하면 채널 드롭다운에 이 순서로 표시됩니다. (그룹 구분선은 그룹 이름이 같은 채널끼리 자동으로 묶여 표시됩니다)</div>
+            <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
+              {chOrder.map((c, i) => (
+                <div key={c.name} className="frow" style={{ gap: 6, alignItems: 'center', padding: '3px 0' }}>
+                  <span className="meta" style={{ width: 26, textAlign: 'right', flex: '0 0 auto' }}>{i + 1}.</span>
+                  <span style={{ flex: 1, fontWeight: c.name === presetName ? 700 : 400 }}>{c.name}{c.group ? <span className="meta"> · {c.group}</span> : null}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="위로" disabled={i === 0} onClick={() => moveChOrder(i, -1)}>▲</button>
+                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="아래로" disabled={i === chOrder.length - 1} onClick={() => moveChOrder(i, 1)}>▼</button>
+                </div>
+              ))}
+            </div>
+            <div className="mbtns" style={{ marginTop: 10 }}>
+              <button onClick={saveChOrder}>💾 저장</button>
+              <span style={{ flex: 1 }} />
+              <button className="ghost" onClick={() => setChOrderOpen(false)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
       {settingsOpen && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setSettingsOpen(false); }}>
           <div className="modal-card wide">
@@ -1981,16 +2065,18 @@ export default function App() {
                 <select style={{ flex: 1 }} value={comfyCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
                   onChange={(e) => { if (e.target.value) pickComfyServer(e.target.value); }}>
                   <option value="">— 서버 프로필 선택 —</option>
-                  {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+                  {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>[{s.cloud ? '클라우드' : '로컬'}] {s.name}</option>)}
                 </select>
                 <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveComfyServer}>💾 저장</button>
                 <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!comfyCfg.activeServer} onClick={removeComfyServer}>🗑</button></div>
               <div className="frow"><label>주소</label>
-                <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
+                {/* 주소는 현재 모드(로컬/클라우드)별로도 기억 — 드롭다운으로 전환해도 각 주소가 유지됨 */}
+                <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder={comfyCfg.cloud ? DEF_CLOUD_URL : DEF_LOCAL_URL}
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })}
+                  onBlur={() => { const u = (comfyCfg.baseUrl || '').trim(); saveComfyCfg(comfyCfg.cloud ? { baseUrl: u, cloudBaseUrl: u } : { baseUrl: u, localBaseUrl: u }); }} /></div>
               <div className="frow">
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, cloud: v }); saveComfyCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+                  <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; const u = v ? (comfyCfg.cloudBaseUrl || DEF_CLOUD_URL) : (comfyCfg.localBaseUrl || DEF_LOCAL_URL); setComfyCfg({ ...comfyCfg, cloud: v, baseUrl: u }); saveComfyCfg({ cloud: v, baseUrl: u }); }} /> 클라우드(comfy.org)
                 </label>
                 {comfyCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={comfyCfg.apiKey || ''}
                   onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
@@ -2020,16 +2106,17 @@ export default function App() {
                 <select style={{ flex: 1 }} value={cvidCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
                   onChange={(e) => { if (e.target.value) pickCvidServer(e.target.value); }}>
                   <option value="">— 서버 프로필 선택 —</option>
-                  {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+                  {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>[{s.cloud ? '클라우드' : '로컬'}] {s.name}</option>)}
                 </select>
                 <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveCvidServer}>💾 저장</button>
                 <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!cvidCfg.activeServer} onClick={removeCvidServer}>🗑</button></div>
               <div className="frow"><label>주소</label>
-                <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })} onBlur={() => saveCvidCfg({ baseUrl: (cvidCfg.baseUrl || '').trim() })} /></div>
+                <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder={cvidCfg.cloud ? DEF_CLOUD_URL : DEF_LOCAL_URL}
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })}
+                  onBlur={() => { const u = (cvidCfg.baseUrl || '').trim(); saveCvidCfg(cvidCfg.cloud ? { baseUrl: u, cloudBaseUrl: u } : { baseUrl: u, localBaseUrl: u }); }} /></div>
               <div className="frow">
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, cloud: v }); saveCvidCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+                  <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; const u = v ? (cvidCfg.cloudBaseUrl || DEF_CLOUD_URL) : (cvidCfg.localBaseUrl || DEF_LOCAL_URL); setCvidCfg({ ...cvidCfg, cloud: v, baseUrl: u }); saveCvidCfg({ cloud: v, baseUrl: u }); }} /> 클라우드(comfy.org)
                 </label>
                 {cvidCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={cvidCfg.apiKey || ''}
                   onChange={(e) => setCvidCfg({ ...cvidCfg, apiKey: e.target.value })} onBlur={() => saveCvidCfg({ apiKey: (cvidCfg.apiKey || '').trim() })} />}</div>

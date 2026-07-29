@@ -7,6 +7,29 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎛 ComfyUI 드롭다운 = 로컬/클라우드 2개 · ⚙ 버튼 1개 + 채널 순서 변경 + 대본 다중 열기 (2026-07-29, v0.2.75)
+> 요청(로이): ① 컴피UI 클라우드·로컬을 각각의 항목으로 ② ⚙ComfyUI 버튼 1개로 통합(Krea2/Z-Image 선택은 설정 팝업에서)
+>   ③ 채널 드롭다운 항목 순서 변경 ④ 대본 열기 다중 선택(2개 이상이면 작업큐에 순서대로).
+- **① 드롭다운 단순화**: 워크플로마다 항목이 늘어나던 것(`ComfyUI: Krea2 Turbo`·`Z-Image Turbo`·`Wan2.2 5B`·`LTX2.3`)을
+  **「ComfyUI 로컬」·「ComfyUI 클라우드」 2개**로. 엔진 값은 기존 `'comfy'` 그대로라 **main.js 무변경**(레거시 `comfy::<path>`
+  도 계속 인식). 서버 프로필 기반 `comfy-profile::` 조합 옵션·`activeComfyChoice`·`parseComfyChoice` 제거.
+  워크플로(Krea2/Z-Image·LTX/Wan) 선택은 **⚙ 설정 팝업의 「워크플로」 드롭다운**(이미 있던 UI)이 담당.
+- **주소를 모드별로 기억**: comfy-image/comfy-video DEFAULTS 에 `localBaseUrl`(127.0.0.1:8188)·`cloudBaseUrl`
+  (cloud.comfy.org) 추가. 로컬↔클라우드 전환 시 baseUrl 을 그 모드 값으로 복원 → 로컬 주소를 고쳐도 클라우드 갔다 와도 유지.
+  설정 팝업의 주소칸·클라우드 체크박스도 이 필드를 같이 갱신.
+- **② ⚙ ComfyUI 버튼 1개**: 이미지·비디오 각각 있던 두 개(`openComfy`/`openCvid`)를 **이미지 행의 1개**로 통합 —
+  이미지가 comfy 면 이미지 탭, 아니면 비디오 탭으로 설정 팝업을 연다(둘 중 하나라도 comfy 면 표시).
+- **③ 채널 순서 변경**: `preset-store.reorder(idsInOrder)` 가 **이미 있었으나 IPC 가 없었음** → IPC `reorder-presets({names})`
+  신설(이름→id 매핑, 목록에 없는 채널은 뒤에 보존). 헤더 채널 ⚙ 옆 **「↕」 버튼** → ▲▼ 로 순서 조정 후 💾저장.
+  ⚠ 드롭다운은 group 별로 다시 묶어 표시하므로, **그룹 순서는 그 그룹 첫 채널의 위치**로 정해짐(그룹 내 순서는 그대로 반영).
+- **④ 대본 다중 열기**: `open-script` 에 `multiSelections` + 파일 루프. OS 선택 순서가 제각각이라 **파일명 자연정렬**
+  (`localeCompare(ko,{numeric:true})`)로 큐 순서를 예측 가능하게. 파일별 모드 자동판별·outRoot 계산·addItem 그대로 재사용,
+  **한 파일 실패해도 나머지 계속**(격리). 마지막 파일이 활성. 2개 이상이면 로그로 안내(`⚡ 만들기` 로 큐 순서 제작).
+- 함께 발행(작업트리에 미커밋으로 남아 있던 UI 손질, v0.2.74 로 표시돼 있던 분): **미리보기 닫기(✕) 버튼을 이미지 우상단에
+  원형 반투명 버튼으로**(`#previewBody` position:relative + `.close` absolute) · **이름입력 모달 z-index 100**
+  (`.modal-bg.name-ask-layer`) — 다른 모달 위에서도 이름 입력이 보이게.
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🐞 추출한 mp3 제목이 스마트폰에서 `?????` → ID3v2.3 으로 저장 (2026-07-28, v0.2.73)
 > 증상: 🎵 mp3 로 추출해 스마트폰(삼성 뮤직)으로 옮기니 곡 제목이 `*NEW* ?????? ????????? 3 | …` 로 깨짐
 >   (아티스트는 "알 수 없는"). 한글이 전부 `?` 로.

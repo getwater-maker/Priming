@@ -28,6 +28,9 @@ const DEFAULTS = {
   videoMaxSec: 8,          // i2v 최대 길이(초) — 클라우드 GPU 시간/비용 상한. 0=제한없음(TTS 길이 그대로)
   sendDims: true,          // 비율에 맞춰 해상도 주입
   timeoutSec: 600,
+  // 헤더 드롭다운의 「ComfyUI 로컬 / ComfyUI 클라우드」 전환용 — 각 모드의 주소를 따로 기억(이미지와 동일 정책).
+  localBaseUrl: 'http://127.0.0.1:8188',
+  cloudBaseUrl: 'https://cloud.comfy.org',
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };

@@ -751,32 +751,46 @@ function detectFormatFromScript(scriptPath) {
 
 ipcMain.handle('open-script', async (_e, args = {}) => {
   const preset = P.getPreset(args.presetName || null);
-  const opt = { properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
+  // 여러 개 한 번에 선택 가능 — 고른 순서(파일명 정렬)대로 작업큐에 쌓인다.
+  const opt = { properties: ['openFile', 'multiSelections'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
   if (preset && preset.scriptFolder && fs.existsSync(preset.scriptFolder)) opt.defaultPath = preset.scriptFolder;
   const r = await dialog.showOpenDialog(win, opt);
-  if (r.canceled || !r.filePaths[0]) return null;
-  const scriptPath = r.filePaths[0];
-  S.scriptPath = scriptPath;
-  // 대본 형식 자동 판별 — 탭 선택과 무관하게 대본에 맞는 모드로 연다(잘못 열기 방지). 실패 시 탭 모드.
-  const detectedMode = detectScriptMode(scriptPath);
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return null;
   const requestedMode = (args.mode === 'longform') ? 'longform' : 'shorts';
-  S.mode = detectedMode || requestedMode;
-  if (detectedMode && detectedMode !== requestedMode) {
-    log(`🔀 대본 형식 감지 → ${detectedMode === 'longform' ? '롱폼' : '쇼츠'} 모드로 자동 전환`);
-  }
-  S.preset = preset;
-  S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
+  // 다중 선택은 OS 가 주는 순서가 제각각 → 파일명 자연정렬로 큐 순서를 예측 가능하게.
+  const paths = r.filePaths.slice().sort((a, b) => path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
+  if (paths.length > 1) log(`📂 대본 ${paths.length}개 열기 — 작업큐에 순서대로 추가합니다`);
+  let okN = 0;
+  for (const scriptPath of paths) {
+    try {
+      S.scriptPath = scriptPath;
+      // 대본 형식 자동 판별 — 탭 선택과 무관하게 대본에 맞는 모드로 연다(잘못 열기 방지). 실패 시 탭 모드.
+      const detectedMode = detectScriptMode(scriptPath);
+      S.mode = detectedMode || requestedMode;
+      if (detectedMode && detectedMode !== requestedMode) {
+        log(`🔀 대본 형식 감지 → ${detectedMode === 'longform' ? '롱폼' : '쇼츠'} 모드로 자동 전환`);
+      }
+      S.preset = preset;
+      S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
-  // 자동저장 복원 포함 파싱(구글독스식 이어받기)
-  const { parsed, note: restoreNote } = buildParsedForScript(scriptPath, S.mode, preset);
-  S.parsed = parsed;
-  ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
-  // 큐에 추가(append) + 활성화. (이전 항목은 같은 객체 참조라 이미 최신 — storeActive 불필요)
-  addItem(S.parsed, S.scriptPath, S.outRoot);
-  log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
-  if (restoreNote) log(restoreNote);
-  log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
-  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
+      // 자동저장 복원 포함 파싱(구글독스식 이어받기)
+      const { parsed, note: restoreNote } = buildParsedForScript(scriptPath, S.mode, preset);
+      S.parsed = parsed;
+      ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
+      // 큐에 추가(append) + 활성화. (이전 항목은 같은 객체 참조라 이미 최신 — storeActive 불필요)
+      addItem(S.parsed, S.scriptPath, S.outRoot);
+      log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
+      if (restoreNote) log(restoreNote);
+      log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
+      okN++;
+    } catch (e) {
+      // 한 파일이 실패해도 나머지는 계속 연다(격리)
+      log(`✗ 대본 열기 실패 (${path.basename(scriptPath)}): ${e.message}`);
+    }
+  }
+  if (!okN) return null;
+  if (paths.length > 1) log(`📂 총 ${okN}/${paths.length}개 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
+  return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
 
 // 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/
@@ -1794,6 +1808,18 @@ ipcMain.handle('add-preset', (_e, args = {}) => {
   copy.name = name;
   store.add(copy);
   log(`채널 "${name}" 추가 (복사 원본: ${src.name || '기본값'})`);
+  return P.listPresets();
+});
+// 채널 목록 순서 변경 — 드롭다운에 보이는 순서를 사용자가 정한다. names = 원하는 순서의 채널 이름 배열.
+//   preset-store.reorder(idsInOrder) 재사용(목록에 없는 채널은 뒤에 그대로 남음 → 손실 없음).
+ipcMain.handle('reorder-presets', (_e, args = {}) => {
+  const store = require('./tts/preset-store');
+  const names = Array.isArray(args.names) ? args.names : [];
+  const all = store.loadAll();
+  const ids = names.map((n) => (all.find((p) => p.name === n) || {}).id).filter(Boolean);
+  if (!ids.length) return P.listPresets();
+  store.reorder(ids);
+  log(`채널 순서 변경 (${ids.length}개)`);
   return P.listPresets();
 });
 // 채널 이름 변경 — id 는 유지하고 name 만 교체. 큐 항목이 참조하던 옛 이름도 새 이름으로 옮김.
