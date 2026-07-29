@@ -1678,6 +1678,18 @@ function warnGrokLimit(info) {
 
 // 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
 //   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
+// 큐 제작용 영상 범위 결정 — 헤더(common) 우선 → 항목(s) → 안전기본(G1만).
+//   반환: { fromNum, toNum }. 영상은 건당 비용이 크므로 "미지정 = 전체" 를 절대 만들지 않는다.
+function _batchRange(common = {}, s = {}) {
+  const num = (v) => (v != null && v !== '' && !isNaN(parseInt(v, 10)) ? parseInt(v, 10) : null);
+  const f = num(common.vidFrom) != null ? num(common.vidFrom) : num(s.vidFrom);
+  const t = num(common.vidTo) != null ? num(common.vidTo) : num(s.vidTo);
+  if (f == null || t == null) {
+    log('⚠ 영상 범위 미지정 — 안전을 위해 G1 만 생성합니다(비용 폭주 방지). 헤더 「범위」를 확인하세요.');
+    return { fromNum: 1, toNum: 1 };
+  }
+  return { fromNum: f, toNum: t };
+}
 function rangeNums(project, fromNum, toNum) {
   if (fromNum == null || toNum == null) return project.groups.map((g) => g.num);
   const a = Math.min(Number(fromNum), Number(toNum)), b = Math.max(Number(fromNum), Number(toNum));
@@ -2380,11 +2392,11 @@ async function runMakeAllCore(opts = {}) {
   } else if (videoPipeline) {
     log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
-    log('🎬 3단계 — 비디오 일괄 생성…');
+    log(`🎬 3단계 — 비디오 일괄 생성… (영상 범위 ${fromNum != null ? `G${fromNum}~G${toNum}` : '⚠ 미지정 = 전 그룹'})`);
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체)
+      const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _batchRange 가 미지정을 막음)
       const t0 = Date.now();
       try {
         const vr = await genGroupVideos(pr, dirs.media, vOnly, videoEngine);
@@ -2524,8 +2536,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       await runMakeAllCore({
         engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,
         styleId: s.styleId || null,
-        fromNum: (s.vidFrom != null && s.vidFrom !== '') ? parseInt(s.vidFrom, 10) : null,
-        toNum: (s.vidTo != null && s.vidTo !== '') ? parseInt(s.vidTo, 10) : null,
+        // ⚠ 영상 범위 = **헤더(공통) 우선**, 없으면 항목 저장값. 둘 다 없으면 G1 만(비용 폭주 방지).
+        //   과거엔 항목 저장값만 봐서, 대본을 열고 바로 만들기를 누르면(저장 전) null→rangeNums 가 **전 그룹**을
+        //   돌려 47개 영상이 생성되는 사고가 있었음. 영상은 건당 비용/시간이 크므로 기본값이 '전체' 여선 안 된다.
+        ..._batchRange(common, s),
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
         clipMaxSec: clipMaxOf(ve), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
