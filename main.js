@@ -1129,6 +1129,23 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
   }
 }
 
+// 생성된 이미지가 '검정(빈) 화면'인지 판정 — 동시 생성 시 서버가 completed 로 보고하면서도 거의 검은 이미지를
+//   내보내는 경우가 있어(실측: 순차 74장 검정 0 / 동시4 24장 검정 3), 받은 파일을 반드시 검증한다.
+//   1차 = 파일 크기(검정 PNG 는 단색이라 ~10KB, 정상은 ~1.5MB) · 2차 = ffmpeg 로 1x1 평균 픽셀 확인.
+function looksBlankImage(file) {
+  try {
+    const st = fs.statSync(file);
+    if (st.size > 120 * 1024) return false;        // 충분히 큰 파일은 내용이 있다(빠른 통과)
+    const ff = require('./core/media-utils').getFfmpegPath();
+    if (!ff) return st.size < 30 * 1024;           // ffmpeg 없으면 크기만으로 판정
+    const { execFileSync } = require('child_process');
+    const buf = execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-i', file,
+      '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20, timeout: 15000 });
+    if (!buf || buf.length < 3) return false;
+    return (buf[0] + buf[1] + buf[2]) < 30;        // 평균 RGB 합 30 미만 = 사실상 검정
+  } catch { return false; }                        // 판정 실패 시엔 정상으로 간주(오탐 방지)
+}
+
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy' 일 때. 워크플로 JSON(API 포맷) 필요.
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const CI = require('./core/comfy-image');
@@ -1151,13 +1168,21 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   let conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const blanks = [];    // 검정 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
   const genOne = async (g) => {
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
-    if (r.success) { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
-    else {
+    if (r.success) {
+      // ⚠ 검정(빈) 이미지 검증 — 서버가 completed 로 보고해도 내용이 없을 수 있다(동시 생성 시 발생).
+      if (looksBlankImage(r.imagePath)) {
+        try { fs.rmSync(r.imagePath, { force: true }); } catch {}
+        g.imagePath = null; g.imageStatus = 'fail';
+        blanks.push(g); // 아래에서 순차로 재생성
+        logger(`  ⬛ G${g.num} 검정 이미지 감지 — 폐기 후 재생성 대기`);
+      } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
+    } else {
       g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
     }
@@ -1181,6 +1206,21 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
       if (S.abort) { logger('⏹ 중단됨'); return; }
       await genOne(queue.shift());
     }
+  }
+  // ── 검정 이미지 복구 패스 ── 동시 생성이 원인이라 **반드시 순차로(동시성 0)** 다시 만든다. 그룹당 최대 2회.
+  if (blanks.length && !S.abort) {
+    const retry = blanks.splice(0, blanks.length);
+    logger(`  🔁 검정 이미지 ${retry.length}장 순차 재생성 (동시 생성이 원인 — 순차로는 정상 생성됨)`);
+    for (const g of retry) {
+      for (let att = 1; att <= 2; att++) {
+        if (S.abort) { logger('⏹ 중단됨'); return; }
+        await genOne(g);                 // 실패/검정이면 blanks 에 다시 쌓이지만 여기선 att 루프로 제어
+        if (g.imagePath) break;          // 정상 생성됨
+        if (att === 2) logger(`  ✗ G${g.num} 재생성 2회 실패 — 이 그룹 이미지 없음(프롬프트 확인 필요)`);
+      }
+    }
+    blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
+    pushDtoUpdate();
   }
 }
 
