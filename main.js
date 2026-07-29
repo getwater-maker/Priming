@@ -1265,8 +1265,13 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const wfName = (cfg.workflows.find((w) => w.path === cfg.workflowPath) || {}).name || path.basename(cfg.workflowPath);
   log(`🎬 ${prLabel(pr)} 비디오 생성 (ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}·${wfName} · ${targets.length}개 그룹)…`);
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 이미지 모델 비우고 Wan 로드
-  for (const g of targets) {
-    if (S.abort) { log('⏹ 중단됨'); break; }
+  // ── 동시 i2v(클라우드만) ── i2v 는 건당 수 분이라, 여러 개를 함께 올려야 벽시계 시간이 줄어든다.
+  //   imageToVideo 는 호출마다 업로드명·그래프·prompt_id·출력경로가 독립이라 동시 호출 안전(이미지와 동일 구조).
+  const wantConc = Math.max(1, Math.min(4, parseInt(cfg.concurrency, 10) || 1));
+  const conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
+  if (conc > 1) log(`  ⚡ 동시 ${conc}개 생성 (순차 대비 벽시계 단축 · 총 크레딧은 동일)`);
+  let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
     const durationSec = totalSec > 0 ? Math.ceil(totalSec) : 5;
@@ -1276,8 +1281,29 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
     const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
     if (r.success) { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
-    else { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`); if (/중단/.test(r.error || '')) break; }
+    else {
+      g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
+      if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
+    }
     pushDtoUpdate();
+  };
+  const queue = targets.slice();
+  const worker = async () => {
+    while (queue.length) {
+      if (S.abort || degraded) return;
+      const g = queue.shift();
+      if (!g) return;
+      await genOne(g);
+    }
+  };
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  if (S.abort) { log('⏹ 중단됨'); return; }
+  if (degraded && queue.length) {
+    log(`  ⚠ 클라우드가 동시 실행을 거부 — 남은 ${queue.length}개는 순차로 진행합니다(⚙ 설정에서 동시 개수를 1로 두면 항상 순차).`);
+    while (queue.length) {
+      if (S.abort) { log('⏹ 중단됨'); return; }
+      await genOne(queue.shift());
+    }
   }
 }
 

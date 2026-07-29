@@ -2143,7 +2143,13 @@ export default function App() {
                   onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
                 <label style={{ width: 'auto' }}>타임아웃(초)</label>
                 <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} />
+                <label style={{ width: 'auto' }}>동시</label>
+                <input type="number" min="1" max="4" style={{ width: 60 }} value={cvidCfg.concurrency != null ? cvidCfg.concurrency : 3}
+                  title="클라우드에서 한 번에 올릴 i2v 개수(1~4). i2v 는 건당 수 분이라 동시에 올리면 벽시계 시간이 크게 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1개씩."
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, concurrency: e.target.value })}
+                  onBlur={() => saveCvidCfg({ concurrency: Math.max(1, Math.min(4, parseInt(cvidCfg.concurrency, 10) || 1)) })} />
+                <span className="meta">개 (클라우드만 · 1=순차)</span></div>
               <div className="frow"><label>프롬프트 노드</label>
                 <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
                   onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />

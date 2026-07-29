@@ -31,6 +31,10 @@ const DEFAULTS = {
   // 헤더 드롭다운의 「ComfyUI 로컬 / ComfyUI 클라우드」 전환용 — 각 모드의 주소를 따로 기억(이미지와 동일 정책).
   localBaseUrl: 'http://127.0.0.1:8188',
   cloudBaseUrl: 'https://cloud.comfy.org',
+  // 클라우드 동시 i2v 개수 — i2v 는 건당 수 분이라 왕복 오버헤드 비중은 작지만, 여러 개를 동시에 올리면
+  //   **벽시계 시간**이 크게 줄어든다(5개×8분 순차 40분 → 동시 3이면 ~14분). 총 크레딧은 동일(생성당 과금).
+  //   ⚠ 로컬(cloud=false)은 VRAM 때문에 항상 1개씩 강제. 1 = 기존 순차(완전 동일 동작).
+  concurrency: 3,
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
