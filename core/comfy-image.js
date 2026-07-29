@@ -31,6 +31,10 @@ const DEFAULTS = {
   //   전환 시 baseUrl 을 여기서 꺼내 쓰므로, 로컬 주소를 고쳐도 클라우드로 갔다 오면 그대로 유지됨.
   localBaseUrl: 'http://127.0.0.1:8188',
   cloudBaseUrl: 'https://cloud.comfy.org',
+  // 클라우드 동시 생성 장수 — 한 장씩 순차 처리하면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초가 걸림
+  //   (서버 실제 생성은 5~6초). 동시에 여러 장을 큐에 넣어 GPU 를 쉬지 않게 한다. 1 = 기존 순차(완전 동일 동작).
+  //   ⚠ 로컬(cloud=false)은 VRAM 때문에 항상 1 로 강제 — 이 값은 클라우드에만 적용된다.
+  concurrency: 4,
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
@@ -174,7 +178,7 @@ class ComfyImage {
     const deadline = Date.now() + this.timeoutSec * 1000;
     while (Date.now() < deadline) {
       if (abortSignal && abortSignal()) throw new Error('중단됨');
-      await new Promise((res) => setTimeout(res, 2000));
+      await new Promise((res) => setTimeout(res, 800)); // 폴링 0.8초 — 2초였을 때 5초 작업을 6초에야 감지(장당 1~2초 낭비)
       let st;
       try {
         const r = await fetch(this._url(`/job/${promptId}/status`), { headers: this._headers() });

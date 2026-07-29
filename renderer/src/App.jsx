@@ -2093,6 +2093,12 @@ export default function App() {
               <div className="frow"><label>프롬프트 노드</label>
                 <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
                   onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
+              <div className="frow"><label>동시 생성</label>
+                <input type="number" min="1" max="8" style={{ width: 70 }} value={comfyCfg.concurrency != null ? comfyCfg.concurrency : 4}
+                  title="클라우드에서 한 번에 큐에 넣을 장수(1~8). 순차(1)면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초 걸립니다. 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1장씩."
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, concurrency: e.target.value })}
+                  onBlur={() => saveComfyCfg({ concurrency: Math.max(1, Math.min(8, parseInt(comfyCfg.concurrency, 10) || 1)) })} />
+                <span className="meta">장 (클라우드만 · 1=순차)</span></div>
               <div className="frow"><label>타임아웃(초)</label>
                 <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
                   onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />

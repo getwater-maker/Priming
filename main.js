@@ -1144,16 +1144,43 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const _wfName = _wf ? _wf.name : path.basename(cfg.workflowPath).replace(/\.json$/i, '');
   logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(${_wfName}) — ${targets.length}장 생성 (${eng.baseUrl})`);
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
-  for (const g of targets) {
-    if (S.abort) { logger('⏹ 중단됨'); break; }
+  // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
+  //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
+  //   textToImage 는 호출마다 그래프·seed·prompt_id·출력경로가 독립이라 동시 호출 안전.
+  const wantConc = Math.max(1, Math.min(8, parseInt(cfg.concurrency, 10) || 1));
+  let conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
+  if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
+  let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const genOne = async (g) => {
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
-    // 지금 만드는 이 그룹 카드에만 '🖼 이미지 생성 중…' 스피너. 순차 처리라 항상 1개만 켜짐.
-    g.imageStatus = 'generating'; pushDtoUpdate();
+    g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
     if (r.success) { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
-    else { g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); } // 성공/실패 모두 스피너 해제(고착 방지)
+    else {
+      g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
+      if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
+    }
     pushDtoUpdate();
+  };
+  const queue = targets.slice();
+  const worker = async () => {
+    while (queue.length) {
+      if (S.abort) { return; }
+      if (degraded) return; // 동시 제한 감지 → 이 워커 종료(남은 건 아래에서 순차 처리)
+      const g = queue.shift();
+      if (!g) return;
+      await genOne(g);
+    }
+  };
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  if (S.abort) { logger('⏹ 중단됨'); return; }
+  if (degraded && queue.length) {
+    logger(`  ⚠ 클라우드가 동시 실행을 거부 — 남은 ${queue.length}장은 순차로 진행합니다(⚙ 설정에서 동시 장수를 1로 두면 항상 순차).`);
+    while (queue.length) {
+      if (S.abort) { logger('⏹ 중단됨'); return; }
+      await genOne(queue.shift());
+    }
   }
 }
 
