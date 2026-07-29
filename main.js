@@ -2302,7 +2302,16 @@ async function runMakeAllCore(opts = {}) {
     ttsStageDone = true;
   };
   const imageStage = async () => {
-    log('🖼 2단계 — 이미지 일괄 생성…');
+    // 스타일이 실제로 적용되는지 눈으로 확인 가능하게 로그에 표기(스타일 누락 → 실사 이미지 사고 방지).
+    let _styleLbl = '⚠ 스타일 없음(실사로 나올 수 있음)';
+    if (styleId) {
+      try {
+        const _ss = require('./core/style-store');
+        const _nm = ((_ss.getById && _ss.getById(styleId)) || {}).name || styleId;
+        _styleLbl = `스타일 ${_nm}${(_ss.getPrompt(styleId) || '').trim() ? '' : ' ⚠(프롬프트 비어있음)'}`;
+      } catch { _styleLbl = `스타일 ${styleId}`; }
+    }
+    log(`🖼 2단계 — 이미지 일괄 생성… (${_styleLbl})`);
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
@@ -2535,7 +2544,9 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
       await runMakeAllCore({
         engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,
-        styleId: s.styleId || null,
+        // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
+        //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
+        styleId: (common.styleId != null ? common.styleId : (s.styleId || null)),
         // ⚠ 영상 범위 = **헤더(공통) 우선**, 없으면 항목 저장값. 둘 다 없으면 G1 만(비용 폭주 방지).
         //   과거엔 항목 저장값만 봐서, 대본을 열고 바로 만들기를 누르면(저장 전) null→rangeNums 가 **전 그룹**을
         //   돌려 47개 영상이 생성되는 사고가 있었음. 영상은 건당 비용/시간이 크므로 기본값이 '전체' 여선 안 된다.
