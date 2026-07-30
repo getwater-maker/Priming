@@ -2832,6 +2832,27 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
 
 // 그룹 프롬프트 직접 수정 — 대본 이미지/비디오 프롬프트를 사용자가 모달에서 고쳐 저장.
 //   저장 후 regen-group(이미지)·video-group(비디오)을 호출하면 이 프롬프트로 재생성됨.
+// 📝 프롬프트 팝업의 '실제 전송 프롬프트' 미리보기 — 생성 코드와 **같은 함수**로 만들어 표시값이 실제와 어긋나지 않게 한다.
+//   image = buildImagePrompt(스타일프롬프트, 대본프롬프트) (스타일 앞 + no text/no watermark + 얼굴 네거티브 자동)
+//   video = 대본 비디오프롬프트 → 없으면 모션노트 → 없으면 기본 모션 (⚠ 영상엔 스타일을 붙이지 않는 현재 정책 그대로)
+ipcMain.handle('final-prompt-preview', (_e, args = {}) => {
+  const { styleId = null, imagePrompt = '', videoPrompt = '', motionNote = '' } = args;
+  let stylePrompt = '';
+  let styleName = '없음';
+  if (styleId) {
+    try {
+      const SS = require('./core/style-store');
+      stylePrompt = SS.getPrompt(styleId) || '';
+      styleName = ((SS.getById && SS.getById(styleId)) || {}).name || styleId;
+    } catch {}
+  }
+  const image = P.buildImagePrompt(stylePrompt, imagePrompt);
+  const vRaw = String(videoPrompt || '').trim();
+  const vMotion = String(motionNote || '').trim();
+  const video = vRaw || vMotion || 'natural slow motion, subtle camera movement, cinematic';
+  const videoSrc = vRaw ? '대본 비디오 프롬프트' : (vMotion ? '모션 노트(비디오 프롬프트 없음)' : '기본 모션(둘 다 없음)');
+  return { image, video, styleName, styleHasPrompt: !!stylePrompt.trim(), videoSrc };
+});
 ipcMain.handle('set-group-prompt', (_e, args = {}) => {
   if (!S.parsed) return null;
   const { shortsNum, groupNum, imagePrompt, videoPrompt } = args;

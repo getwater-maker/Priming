@@ -191,6 +191,7 @@ export default function App() {
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
+  const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
   const [flowAccOpen, setFlowAccOpen] = useState(false);
   const [flowAcc, setFlowAcc] = useState(null);          // { dailyCap, accounts:[{id,label,used}] }
   const [imgRotOpen, setImgRotOpen] = useState(false);
@@ -786,6 +787,23 @@ export default function App() {
       motion: c.motionNote || '',
     });
   }
+  // 📝 팝업이 열려 있는 동안 '실제 전송 프롬프트'를 main 에서 계산해 표시(편집 중에도 300ms 디바운스로 갱신).
+  //    편집칸은 **대본 원문(raw)** 그대로 유지 — 저장 시 대본이 오염되지 않게. 최종본은 읽기전용으로만 보여준다.
+  useEffect(() => {
+    if (!promptView) { setFinalPrompt(null); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.finalPromptPreview({
+        styleId: styleId || null,
+        imagePrompt: promptView.image || '',
+        videoPrompt: promptView.video || '',
+        motionNote: promptView.motion || '',
+      }).then((r) => { if (!cancelled) setFinalPrompt(r || null); }).catch(() => {});
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [promptView && promptView.image, promptView && promptView.video, promptView && promptView.motion, styleId, promptView ? 1 : 0]);
+
   // 수정한 프롬프트 저장(+선택적으로 이미지/비디오 재생성). regen: 'image' | 'video' | null(저장만)
   async function savePromptView(regen) {
     if (!promptView) return;
@@ -2342,15 +2360,34 @@ export default function App() {
             <div className="meta" style={{ marginBottom: 4 }}>🖼️ 이미지 프롬프트 <span style={{ fontWeight: 400 }}>— 생성 시 앞에 <b>스타일 「{promptView.styleName}」</b> 이 자동으로 붙습니다</span></div>
             <textarea rows="6" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.image} onChange={(e) => setPromptView({ ...promptView, image: e.target.value })} placeholder="영문 이미지 프롬프트" />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button className="ghost" onClick={() => { try { navigator.clipboard.writeText((promptView.stylePfx || '') + promptView.image); } catch (_) {} setStatus('이미지 프롬프트 복사됨(스타일 포함)'); }}>📋 복사</button>
               <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 이미지를 새로 생성" onClick={() => savePromptView('image')}>🖼 이미지 생성</button>
+            </div>
+            {/* ▼ 실제 전송되는 최종 프롬프트(읽기전용) — main 이 생성 코드와 같은 함수로 계산 */}
+            <div className="meta" style={{ margin: '8px 0 3px' }}>
+              ✅ <b>실제 생성에 전송되는 이미지 프롬프트 전체</b>
+              <span style={{ fontWeight: 400 }}> — 스타일 「{(finalPrompt && finalPrompt.styleName) || promptView.styleName}」
+                {finalPrompt && !finalPrompt.styleHasPrompt ? ' ⚠(스타일 프롬프트 비어있음)' : ''} + 자동 네거티브 포함</span>
+            </div>
+            <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: '#f6f2ea' }}
+              value={(finalPrompt && finalPrompt.image) || '(계산 중…)'} />
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="ghost" disabled={!finalPrompt} onClick={() => { try { navigator.clipboard.writeText(finalPrompt.image); } catch (_) {} setStatus('최종 이미지 프롬프트 복사됨'); }}>📋 최종 프롬프트 복사</button>
             </div>
             {/* 🎬 비디오 프롬프트 (편집) */}
             <div className="meta" style={{ margin: '10px 0 4px' }}>🎬 영상(I2V) 프롬프트 <span style={{ fontWeight: 400 }}>— 모션만 (스타일은 원본 이미지가 이미 가짐)</span></div>
             <textarea rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.video} onChange={(e) => setPromptView({ ...promptView, video: e.target.value })} placeholder="영문 모션 프롬프트 (비우면 기본 모션)" />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button className="ghost" onClick={() => { try { navigator.clipboard.writeText(promptView.video); } catch (_) {} setStatus('영상 프롬프트 복사됨'); }}>📋 복사</button>
               <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 비디오를 새로 생성 (이미지 있어야 함)" onClick={() => savePromptView('video')}>🎬 비디오 생성</button>
+            </div>
+            {/* ▼ 실제 전송되는 최종 영상 프롬프트(읽기전용) — 비어있으면 모션노트/기본모션이 대신 전송됨 */}
+            <div className="meta" style={{ margin: '8px 0 3px' }}>
+              ✅ <b>실제 생성에 전송되는 영상 프롬프트 전체</b>
+              <span style={{ fontWeight: 400 }}> — 출처: {(finalPrompt && finalPrompt.videoSrc) || '…'} · 영상엔 스타일을 붙이지 않습니다(원본 이미지가 화풍을 가짐)</span>
+            </div>
+            <textarea readOnly rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: '#f6f2ea' }}
+              value={(finalPrompt && finalPrompt.video) || '(계산 중…)'} />
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="ghost" disabled={!finalPrompt} onClick={() => { try { navigator.clipboard.writeText(finalPrompt.video); } catch (_) {} setStatus('최종 영상 프롬프트 복사됨'); }}>📋 최종 프롬프트 복사</button>
             </div>
             {promptView.motion ? <div className="meta" style={{ marginTop: 6 }}>🎞 모션 노트: {promptView.motion}</div> : null}
             <div className="mbtns"><button onClick={() => savePromptView(null)}>💾 저장만</button><button className="ghost" onClick={() => setPromptView(null)}>닫기</button></div>
