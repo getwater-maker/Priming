@@ -1341,7 +1341,10 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
     const durationSec = totalSec > 0 ? Math.ceil(totalSec) : 5;
-    const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
+    // 부정 절(`NO text, no letters…`)이 프롬프트 **앞**에 있으면 오히려 그 대상이 강조된다(CLIP 은 부정 미이해,
+    //   앞쪽 토큰 가중치 큼) → 이미지와 동일하게 끝으로 모으고 중복 제거. 실제 대본에 앞쪽 부정문 사례가 있었음.
+    const prompt = P.normalizePromptNegations(
+      (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic');
     const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
@@ -2849,7 +2852,8 @@ ipcMain.handle('final-prompt-preview', (_e, args = {}) => {
   const image = P.buildImagePrompt(stylePrompt, imagePrompt);
   const vRaw = String(videoPrompt || '').trim();
   const vMotion = String(motionNote || '').trim();
-  const video = vRaw || vMotion || 'natural slow motion, subtle camera movement, cinematic';
+  // 실제 전송과 동일하게 부정 절 정리까지 반영(runComfyVideos 와 같은 함수)
+  const video = P.normalizePromptNegations(vRaw || vMotion || 'natural slow motion, subtle camera movement, cinematic');
   const videoSrc = vRaw ? '대본 비디오 프롬프트' : (vMotion ? '모션 노트(비디오 프롬프트 없음)' : '기본 모션(둘 다 없음)');
   return { image, video, styleName, styleHasPrompt: !!stylePrompt.trim(), videoSrc };
 });

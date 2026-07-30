@@ -327,10 +327,41 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 //   `<스타일>, <대본 이미지프롬프트>, no text, no watermark`
 // 공통 네거티브 — 지저분·비호감 캐릭터 방지(엔진들이 별도 네거티브칸이 없어 긍정 프롬프트에 자연어로 부착).
 const NEG_UGLY = 'no ugly faces, no deformed or distorted faces, no disfigured features, no mutated or extra limbs, no malformed hands, no creepy or unpleasant expressions';
+// 텍스트 억제용 **긍정** 표현 — CLIP 은 부정("no text")을 이해하지 못해 오히려 'text' 토큰을 활성화한다.
+//   반대로 이런 긍정 서술은 그대로 작동하므로, 부정문과 함께 넣어 실제 억제력을 만든다.
+const POS_CLEAN = 'plain unmarked surfaces, clean blank walls';
+
+/**
+ * 프롬프트의 부정 절(`no X` / `not X` / `without X`)을 **모두 맨 끝으로 모으고 중복을 없앤다.**
+ *
+ * 왜: CLIP 계열 텍스트 인코더는 부정을 이해하지 못하고, **앞쪽 토큰에 더 큰 가중치**를 준다.
+ *   → 부정문이 앞에 있으면 오히려 그 대상(text 등)이 강조된다. 끝으로 밀면 가중치가 최소화된다.
+ *   또 대본 끝에 `no text, no watermark` 가 이미 있는데 앱이 또 붙여 **중복**되면 'text' 토큰 가중치가 배가된다.
+ * ⚠ 이 워크플로(Krea2 Turbo)는 KSampler `cfg=1` + negative=`ConditioningZeroOut` 이라 **네거티브 프롬프트가
+ *   아예 없고 있어도 무효** → 부정을 옮길 곳이 없어, 긍정 프롬프트 안에서 위치·중복만 정리하는 것이 최선이다.
+ * @returns {string} 부정 절이 끝으로 정리된 프롬프트
+ */
+function normalizePromptNegations(prompt) {
+  const src = String(prompt || '').trim();
+  if (!src) return '';
+  const negs = [];
+  // 쉼표로 구분된 절 단위로만 처리(문장 중간의 'not' 을 잘못 떼지 않게) — 절이 부정으로 시작할 때만 추출.
+  const kept = src.split(',').map((c) => c.trim()).filter(Boolean).filter((c) => {
+    const m = c.match(/^(?:no|not|without)\b\s*(.+)$/i);
+    if (!m) return true;
+    const key = ('no ' + m[1].trim()).toLowerCase().replace(/\s+/g, ' ');
+    if (!negs.includes(key)) negs.push(key); // 중복 제거(대본 + 앱 꼬리 이중 부착 방지)
+    return false;
+  });
+  const head = kept.join(', ').replace(/[,\s]+$/, '');
+  return negs.length ? `${head}, ${negs.join(', ')}` : head;
+}
+
 function buildImagePrompt(stylePrompt, imagePrompt) {
   const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
   const body = String(imagePrompt || '').trim().replace(/[,\s]+$/, '');
-  return `${style}${body}, no text, no watermark, ${NEG_UGLY}`;
+  // 긍정 서술(POS_CLEAN)은 본문 뒤 · 부정 절은 정리 후 맨 끝으로.
+  return normalizePromptNegations(`${style}${body}, ${POS_CLEAN}, no text, no watermark, ${NEG_UGLY}`);
 }
 
 // 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.
@@ -648,5 +679,5 @@ module.exports = {
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,
-  mergeGroupsByTts, buildImagePrompt,
+  mergeGroupsByTts, buildImagePrompt, normalizePromptNegations,
 };
