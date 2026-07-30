@@ -151,6 +151,7 @@ export default function App() {
   const [cvidOpen, setCvidOpen] = useState(false);
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v Wan/LTX) 설정
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
+  const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   const [settingsTab, setSettingsTab] = useState('img');   // 'img' | 'vid' | 'keys' | 'tts'
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findText, setFindText] = useState('');
@@ -855,8 +856,14 @@ export default function App() {
     try { await api.setTtsServer({ id, baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(`TTS 서버(${id}) 저장됨`); } catch (e) { logline('TTS 서버 저장 오류: ' + e.message); }
   }
   async function testTtsSrv(id) {
-    setStatus(`${id} 연결 확인 중…`);
-    try { const r = await api.testTtsServer({ baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(r && r.ok ? `✓ ${id} 연결 OK` : `✗ ${id} 연결 실패${r && (r.error || r.status) ? ` (${r.error || r.status})` : ''}`); } catch (e) { logline(e.message); }
+    const url = (ttsSrv[id] && ttsSrv[id].baseUrl) || '';
+    setStatus(`${id} 연결 확인 중…`); setSettingsMsg(`⏳ ${id} 연결 확인 중… (${url || '주소 없음'})`);
+    try {
+      const r = await api.testTtsServer({ baseUrl: url });
+      const msg = r && r.ok ? `✅ ${id} 연결 OK — ${url}`
+        : `❌ ${id} 연결 실패 — ${url}${r && (r.error || r.status) ? ` (${r.error || r.status})` : ''}`;
+      setStatus(msg); setSettingsMsg(msg);
+    } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
   // Grok API(비디오) xAI 키
   // Grok 멀티계정
@@ -1268,7 +1275,13 @@ export default function App() {
       if (e.key !== 'Escape') return;
       if (preview) { setPreview(null); return; }
       if (playerOpen) { stopPlayer(); return; }
+      if (nameAsk) { nameAskCancel(); return; }        // 이름 입력(다른 모달 위에 뜸) — 가장 먼저
       if (promptView) { setPromptView(null); return; }
+      if (settingsOpen) { setSettingsOpen(false); return; }
+      if (chOrderOpen) { setChOrderOpen(false); return; }
+      if (ttsSrvOpen) { setTtsSrvOpen(false); return; }
+      if (comfyOpen) { setComfyOpen(false); return; }
+      if (cvidOpen) { setCvidOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
       if (grokAccOpen) { setGrokAccOpen(false); return; }
@@ -1284,7 +1297,8 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [preview, playerOpen, promptView, impOpen, scriptEditOpen, grokAccOpen, gsAccOpen, imgRotOpen, flowAccOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, impOpen, scriptEditOpen, grokAccOpen, gsAccOpen, imgRotOpen, flowAccOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -1339,6 +1353,7 @@ export default function App() {
   // ── 통합 설정 팝업 — ComfyUI 이미지·비디오 · API키(제미나이/나노바나나·xAI) · TTS서버를 한 곳에서(탭). ──
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
+    setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
     try {
       const ci = (await api.getComfyImageConfig()) || {};
       if ((!ci.workflows || !ci.workflows.length) && ci.workflowPath) ci.workflows = [{ name: (ci.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: ci.workflowPath }];
@@ -1414,9 +1429,13 @@ export default function App() {
     setImgEngine(val);
   }
   async function testComfy() {
-    setStatus('ComfyUI 연결 확인 중…');
-    try { const r = await api.testComfyImage(); setStatus(r && r.ok ? `✓ ComfyUI 연결 OK (${r.baseUrl})` : `✗ ComfyUI 연결 실패${r && r.error ? ': ' + r.error : ''}`); }
-    catch (e) { logline('연결 테스트 오류: ' + e.message); }
+    setStatus('ComfyUI 연결 확인 중…'); setSettingsMsg('⏳ ComfyUI 이미지 연결 확인 중…');
+    try {
+      const r = await api.testComfyImage();
+      const msg = r && r.ok ? `✅ ComfyUI 이미지 연결 OK — ${r.baseUrl}`
+        : `❌ ComfyUI 이미지 연결 실패${r && r.baseUrl ? ` — ${r.baseUrl}` : ''}${r && r.error ? ` (${r.error})` : ''}`;
+      setStatus(msg); setSettingsMsg(msg);
+    } catch (e) { logline('연결 테스트 오류: ' + e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
   // ── ComfyUI 비디오(i2v Wan/LTX) ──
   async function openCvid() { return openSettings('vid'); }
@@ -2022,8 +2041,9 @@ export default function App() {
         </div>
       )}
 
+      {/* 모달은 바깥 클릭으로 닫지 않음(ESC·닫기 버튼만) — 실수 클릭에 입력 유실 방지 */}
       {chOrderOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setChOrderOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 460 }}>
             <h3>↕ 채널 순서</h3>
             <div className="meta" style={{ marginBottom: 8 }}>▲▼ 로 순서를 바꾸고 <b>저장</b>하면 채널 드롭다운에 이 순서로 표시됩니다. (그룹 구분선은 그룹 이름이 같은 채널끼리 자동으로 묶여 표시됩니다)</div>
@@ -2046,12 +2066,12 @@ export default function App() {
         </div>
       )}
       {settingsOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setSettingsOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
               {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setSettingsTab(id)}>{lbl}</button>
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); }}>{lbl}</button>
               ))}
             </div>
 
@@ -2192,9 +2212,25 @@ export default function App() {
               <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
             </div>)}
 
+            {/* 연결테스트 결과를 팝업 안에서 바로 보여준다(로그창을 안 봐도 알 수 있게) */}
+            {settingsMsg && (
+              <div style={{
+                marginTop: 10, padding: '7px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.45, wordBreak: 'break-all',
+                background: /^✅/.test(settingsMsg) ? '#eef7ee' : /^❌/.test(settingsMsg) ? '#fdeeee' : '#f6f2ea',
+                border: '1px solid ' + (/^✅/.test(settingsMsg) ? '#bcd9bc' : /^❌/.test(settingsMsg) ? '#e6bcbc' : 'var(--line)'),
+              }}>{settingsMsg}</div>
+            )}
             <div className="mbtns" style={{ marginTop: 10 }}>
               {settingsTab === 'img' && <button onClick={testComfy}>🔌 연결 테스트</button>}
-              {settingsTab === 'vid' && <button onClick={async () => { setStatus('ComfyUI 비디오 연결 확인 중…'); try { const r = await api.testComfyVideo(); setStatus(r && r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패${r && r.error ? ': ' + r.error : ''}`); } catch (e) { logline(e.message); } }}>🔌 연결 테스트</button>}
+              {settingsTab === 'vid' && <button onClick={async () => {
+                setStatus('ComfyUI 비디오 연결 확인 중…'); setSettingsMsg('⏳ ComfyUI 비디오 연결 확인 중…');
+                try {
+                  const r = await api.testComfyVideo();
+                  const msg = r && r.ok ? `✅ ComfyUI 비디오 연결 OK — ${r.baseUrl}`
+                    : `❌ ComfyUI 비디오 연결 실패${r && r.baseUrl ? ` — ${r.baseUrl}` : ''}${r && r.error ? ` (${r.error})` : ''}`;
+                  setStatus(msg); setSettingsMsg(msg);
+                } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
+              }}>🔌 연결 테스트</button>}
               <span style={{ flex: 1 }} />
               <button className="ghost" onClick={() => setSettingsOpen(false)}>닫기</button>
             </div>
