@@ -2026,7 +2026,7 @@ ipcMain.handle('set-xai-key', (_e, key) => {
   try { require('./tts/secret-store').set('xai', { key: String(key || '').trim() }); log('xAI API 키 저장됨'); return true; }
   catch (e) { log('xAI 키 저장 실패: ' + e.message); return false; }
 });
-// TTS 서버 주소(OmniVoice/Supertonic) — PC마다 다름(LAN/Tailscale). 다른 PC에서 메인 GPU 서버를 가리키게 설정.
+// TTS 서버 주소(OmniVoice) — PC마다 다름(LAN/Tailscale). 다른 PC에서 메인 GPU 서버를 가리키게 설정.
 ipcMain.handle('get-tts-servers', () => { try { return require('./tts/tts-config').loadAll(); } catch { return {}; } });
 ipcMain.handle('set-tts-server', (_e, args = {}) => {
   try {
@@ -2034,7 +2034,7 @@ ipcMain.handle('set-tts-server', (_e, args = {}) => {
     let baseUrl = String(args.baseUrl || '').trim().replace(/\/+$/, '');
     if (baseUrl && !/^https?:\/\//i.test(baseUrl)) baseUrl = 'http://' + baseUrl; // 스킴 없이 입력해도 동작
     baseUrl = baseUrl.replace(/(:\d+)(?::\d+)+$/, '$1');                          // 포트 중복 오타 보정
-    if (id !== 'omnivoice' && id !== 'supertonic') throw new Error('알 수 없는 TTS provider');
+    if (id !== 'omnivoice') throw new Error('알 수 없는 TTS provider');
     require('./tts/tts-config').setProvider(id, { baseUrl });
     log(`TTS 서버 주소 저장: ${id} → ${baseUrl || '(비움)'}`);
     return require('./tts/tts-config').loadAll();
@@ -3969,24 +3969,6 @@ ipcMain.handle('read-audio', (_e, p) => {
     const mime = ext === '.wav' ? 'audio/wav' : (ext === '.mp3' || ext === '.mpga' || ext === '.mpeg') ? 'audio/mpeg' : 'application/octet-stream';
     return `data:${mime};base64,${buf.toString('base64')}`;
   } catch { return null; }
-});
-
-// Supertonic 음성 미리듣기 — 사전 정의 음성은 파일이 없으므로 백엔드로 짧은 샘플을 즉석 합성해 반환.
-ipcMain.handle('preview-supertonic', async (_e, args = {}) => {
-  try {
-    const { getProvider } = require('./tts/tts-config');
-    const cfg = getProvider('supertonic') || {};
-    const baseUrl = (cfg.baseUrl || 'http://127.0.0.1:9882').replace(/\/$/, '');
-    const { SupertonicProvider } = require('./tts/providers/supertonic-provider');
-    const p = new SupertonicProvider({ baseUrl, timeout: 30000 });
-    if (!(await p.init())) return { error: `Supertonic 백엔드 미기동 (${baseUrl})` };
-    const lang = (args.language === 'en') ? 'en' : 'ko';
-    const sample = lang === 'en'
-      ? 'Hello. This is a preview of this voice.'
-      : '안녕하세요. 이 목소리로 영상을 만들어 드립니다.';
-    const r = await p.synthesize(sample, { voice: args.voice || 'M1', language: lang, speed: 1.0, silenceDuration: 0.2 });
-    return { dataUrl: `data:audio/wav;base64,${Buffer.from(r.mp3Buffer).toString('base64')}` };
-  } catch (e) { return { error: e.message }; }
 });
 
 ipcMain.handle('open-folder', async () => {

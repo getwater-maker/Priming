@@ -114,7 +114,7 @@ async function main() {
     if (!preset) { console.error('프리셋 없음:', a.preset || '(default)'); process.exit(1); }
     ttsMgr = getTTS({ logger: (m) => console.log(m) });
     await ttsMgr.start();
-    // start()는 omnivoice/supertonic 연결을 await하지 않음 → refreshProvider로 연결 완료를 기다림
+    // start()는 omnivoice 연결을 await하지 않음 → refreshProvider로 연결 완료를 기다림
     const ok = await ttsMgr.refreshProvider(preset.engine);
     if (!ok) {
       console.error(`TTS 엔진 '${preset.engine}' 사용 불가 — 백엔드 미기동? (--dry 로 무음 검증 가능)`);

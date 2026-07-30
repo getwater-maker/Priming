@@ -199,8 +199,8 @@ export default function App() {
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
   const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
-  const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice/Supertonic) 설정 모달
-  const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' }, supertonic: { baseUrl: '' } });
+  const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice) 설정 모달
+  const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
@@ -849,7 +849,7 @@ export default function App() {
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
   function nameAskCancel() { if (nameAsk) { const r = nameAsk.resolve; setNameAsk(null); r(null); } }
-  // TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
+  // TTS 서버 주소(OmniVoice) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
   async function openTtsSrv() { return openSettings('tts'); }
   async function saveTtsSrv(id) {
     try { await api.setTtsServer({ id, baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(`TTS 서버(${id}) 저장됨`); } catch (e) { logline('TTS 서버 저장 오류: ' + e.message); }
@@ -1077,16 +1077,6 @@ export default function App() {
     setVdOpen(false);
     try { await api.qwenDesignStop(); } catch {}
   }
-  // Supertonic 음성 미리듣기 — 백엔드로 짧은 샘플을 즉석 합성해 재생.
-  async function previewSupertonicVoice() {
-    const v = /^[MF][1-5]$/.test(ch && ch.voice) ? ch.voice : 'M1';
-    try {
-      setStatus(`Supertonic ${v} 미리듣기 합성 중…`);
-      const r = await api.previewSupertonic({ voice: v, language: (ch && ch.language) || 'ko' });
-      if (r && r.dataUrl) { playPreviewUrl(r.dataUrl); setStatus(''); }
-      else { logline('미리듣기 실패: ' + ((r && r.error) || '알 수 없음')); setStatus('미리듣기 실패'); }
-    } catch (e) { logline('미리듣기 오류: ' + e.message); setStatus('미리듣기 실패'); }
-  }
   async function saveChannel() {
     if (!ch) return;
     const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d);
@@ -1095,7 +1085,7 @@ export default function App() {
       group: (ch.group || '').trim(),                     // 드롭다운 구분(그룹) — 같은 그룹끼리 묶고 ─── 그룹명 ─── 구분선
       engine: ch.engine || 'omnivoice',
       startMode: ch.startMode || 'longform',              // 이 채널 선택 시 시작할 화면(모드)
-      voice: ch.voice || '',                              // Supertonic 사전정의 음성(M1~F5) 등 — 저장
+      voice: ch.voice || '',                              // 음성 식별자(레거시 값 보존 — 표시용)
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
       scriptFolder: (ch.scriptFolder || '').trim(),       // 대본폴더 공유
@@ -1362,7 +1352,7 @@ export default function App() {
     try { setGiCfg(await api.getGeminiImageConfig()); } catch (_) {}
     try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
     try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
-    try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' }, supertonic: { baseUrl: (c.supertonic && c.supertonic.baseUrl) || '' } }); } catch (_) {}
+    try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
     setSettingsOpen(true);
   }
   async function openComfy() { return openSettings('img'); }
@@ -1846,35 +1836,21 @@ export default function App() {
               </select>
               <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
             </div>
-            {ch.engine === 'supertonic' ? (
-              /* Supertonic — 사전 정의 음성만 선택(참조음성·복제·시드·Clone강도 미적용) */
-              <div className="frow"><label>목소리</label>
-                <select style={{ flex: '0 0 220px', padding: 6 }} value={/^[MF][1-5]$/.test(ch.voice) ? ch.voice : 'M1'} onChange={(e) => setCh({ ...ch, voice: e.target.value })}>
-                  {['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'].map((v) => <option key={v} value={v}>{(/^M/.test(v) ? '♂ 남성 ' : '♀ 여성 ') + v} (Supertonic-3)</option>)}
-                </select>
-                <button className="ghost" style={{ flex: '0 0 auto' }} title="이 목소리 미리듣기 (짧은 샘플 합성)" onClick={previewSupertonicVoice}>▶</button>
-                <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
-                <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" style={{ width: 66 }} value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초 · CPU 로컬</span></div>
-            ) : (
-              <>
-                <div className="frow"><label>목소리</label><input readOnly title="참조음성 파일명" value={(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop() || ch.voice} style={{ flex: '0 0 170px' }} />
-                  <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
-                  <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
-                <div className="frow"><label>참조음성</label>
-                  <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                    {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop()}</option> : null}
-                    {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-                  </select>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
-              </>
-            )}
+            {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
+            <div className="frow"><label>목소리</label><input readOnly title="참조음성 파일명" value={(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop() || ch.voice} style={{ flex: '0 0 170px' }} />
+              <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
+              <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
+            <div className="frow"><label>참조음성</label>
+              <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
+                {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop()}</option> : null}
+                {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
+              </select>
+              <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
+              <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
+              <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
             <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
-            {ch.engine !== 'supertonic' && (
-              <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
-                <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
-            )}
+            <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
+              <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
 
             <div className="subhead">📝 본문 자막 (롱폼 / 쇼츠)</div>
             <div className="twocol">{capColumn('capLong', '롱폼 16:9', true)}{capColumn('capShort', '쇼츠 9:16', false)}</div>
@@ -2206,17 +2182,13 @@ export default function App() {
 
             {settingsTab === 'tts' && (<div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-                OmniVoice·Supertonic 은 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
+                OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
                 <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
               </div>
               <div className="frow"><label>OmniVoice</label>
-                <input style={{ flex: 1 }} placeholder="http://100.112.7.63:9881" value={ttsSrv.omnivoice.baseUrl}
+                <input style={{ flex: 1 }} placeholder="http://192.168.219.157:9881" value={ttsSrv.omnivoice.baseUrl}
                   onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
-              <div className="frow"><label>Supertonic</label>
-                <input style={{ flex: 1 }} placeholder="http://127.0.0.1:9882" value={ttsSrv.supertonic.baseUrl}
-                  onChange={(e) => setTtsSrv({ ...ttsSrv, supertonic: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('supertonic')} />
-                <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('supertonic')}>연결테스트</button></div>
               <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
             </div>)}
 

@@ -89,7 +89,7 @@ class GeminiProvider {
       const remainHuman = remainSec >= 3600
         ? `${Math.ceil(remainSec / 3600)}시간`
         : `${Math.ceil(remainSec / 60)}분`;
-      throw new Error(`Gemini 한도 초과 — ${remainHuman} 후 자동 재시도 가능 (또는 OmniVoice / Supertonic 사용)`);
+      throw new Error(`Gemini 한도 초과 — ${remainHuman} 후 자동 재시도 가능 (또는 OmniVoice 사용)`);
     }
 
     const voice = opts.voice || this.voice;

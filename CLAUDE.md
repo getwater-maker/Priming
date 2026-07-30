@@ -7,6 +7,27 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🧹 Supertonic TTS 전면 제거 + 아내 PC TTS 연결 장애 원인(Wi-Fi Public) (2026-07-31, v0.2.84)
+> ① 아내 PC TTS 연결 실패 ② "슈퍼톤은 제거하자, 옴니보이스 하나면 충분" (로이 결정)
+- **① 연결 장애 원인 = Windows 네트워크 프로필이 `Public` 로 바뀜 (앱 문제 아님)**. 점검 결과:
+  서버 정상(`localhost:9881/health` 200) · **0.0.0.0 리스닝** · IP 그대로(192.168.219.157) · 9881 방화벽 **Allow 지만
+  Profile=Private 전용** · 그런데 Wi-Fi `NetworkCategory=Public` → **Private 규칙이 적용 안 돼 LAN 인바운드 차단**.
+  프로필 이름이 `U+NetC7AC_5G 2`(끝에 " 2")인 게 단서 — Windows 가 같은 SSID 를 **새 프로필로 재생성하며 기본값
+  Public** 으로 잡음(어제까진 되던 이유). ⚠ 레지스트리 이력(NetworkList)은 관리자 권한 필요로 직접 확인 못 함.
+  → **설정에서 Wi-Fi 를 '개인(사설)'로 변경**하니 즉시 정상화(사용자 확인). ⚠ 방화벽·네트워크 설정은 코드로 바꾸지 않음.
+  ⚠ **아내 PC 엔 Tailscale 이 설치된 적 없음**(내 초기 추측은 오류 — `tailscale status` 의 offline 2대는 다른 기기).
+  즉 **경로는 LAN 하나뿐** → 집 밖에서 쓰려면 Tailscale 설치가 별도로 필요.
+- **② Supertonic 제거**: `tts/providers/supertonic-provider.js` **파일 삭제** · tts-manager `_connectSupertonic`·
+  start() 호출·refreshProvider 분기 제거 · tts-config DEFAULTS 에서 supertonic 삭제 · main 의 `preview-supertonic` IPC
+  + preload `previewSupertonic` 제거 · App.jsx 의 ttsSrv.supertonic 상태·설정탭 Supertonic 행·`previewSupertonicVoice`·
+  채널모달 `engine==='supertonic'` 분기(사전정의 음성 select) 제거 → 참조음성 UI 를 무조건 표시.
+  · preset-store: 시드 프리셋 2개(p_supertonic_ko_f1/m1) 삭제 + **loadAll 마이그레이션은 폐기 대신 `engine:
+  supertonic → omnivoice` 이관**(채널을 filter 로 버리면 출력폴더·자막·스타일 설정까지 통째로 유실되므로).
+  · gemini-provider 의 사용자 노출 에러문구에서 "Supertonic" 제거.
+- 검증: 8개 파일 문법 OK · **채널 13개 그대로**(유실 0, omnivoice 12/gemini 1) · 매 실행마다 찍히던
+  `[TTS] Supertonic 연결 중…` 로그 사라짐. ⚠ 앱 재시작 반영. deps 무변경. `~/.flow-app/tts-config.json` 의 supertonic
+  항목은 코드가 더는 안 읽으므로 방치 무해.
+
 ## 🔤 부정 절(`no text`)을 맨 끝으로 모으고 중복 제거 + 긍정 억제 표현 추가 (2026-07-30, v0.2.83)
 > 지적(로이): "no text 가 맨 앞에 있으면 부정문이 된다" → 위치/문구를 고쳐 이미지에 텍스트가 안 나오게.
 - **코드로 확정한 사실(중요)**:

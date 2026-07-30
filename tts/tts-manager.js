@@ -1,16 +1,15 @@
 /**
- * TTSManager — TTS provider 추상화 (OmniVoice 근간 + Gemini/Supertonic 보조)
+ * TTSManager — TTS provider 추상화 (OmniVoice 근간 + Gemini 보조)
  *
  * 지원:
- *   - omnivoice  : GPU 서버 (k2-fsa/OmniVoice, 포트 9881) — 원격 LAN/Tailscale
- *   - gemini     : Google Gemini TTS (API 키 필요)
- *   - supertonic : Supertonic-3 (로컬 CPU FastAPI, 포트 9882) — pre-defined voice
+ *   - omnivoice  : GPU 서버 (k2-fsa/OmniVoice, 포트 9881) — 원격 LAN/Tailscale · 근간 엔진
+ *   - gemini     : Google Gemini TTS (API 키 필요) — GPU 없는 PC 폴백
  *
  * OmniVoice 는 항상 원격 모드. GPU 머신에서 작업 스케줄러로 자동 시동된 백엔드에
  * baseUrl 로만 연결한다 (spawn 없음).
  *
- * Supertonic 은 로컬 머신에서 작업 스케줄러로 자동 시동되는 CPU 백엔드 — GPU PC
- * 없이도 동작하는 보조 엔진 (출장 시나리오 대비).
+ * ⚠ Supertonic(로컬 CPU 9882)은 2026-07-31 제거됨 — OmniVoice 하나로 충분(로이 결정).
+ *   매 실행마다 무의미한 연결 시도·로그만 남기고 있었다.
  */
 
 'use strict';
@@ -57,9 +56,6 @@ class TTSManager {
 
     // ─── omnivoice (원격 GPU) ───
     this._connectOmniVoice();
-
-    // ─── supertonic (로컬 CPU) ───
-    this._connectSupertonic();
   }
 
   /** OmniVoice 원격 모드 연결 — baseUrl 로 health 체크만 */
@@ -85,29 +81,6 @@ class TTSManager {
     }
   }
 
-  /** Supertonic-3 로컬 CPU 모드 연결 — baseUrl 로 health 체크만 */
-  async _connectSupertonic() {
-    const { getProvider: getCfg } = require('./tts-config');
-    const cfg = getCfg('supertonic');
-    const baseUrl = cfg.baseUrl;
-
-    if (!baseUrl) {
-      this.logger('[TTS] Supertonic 스킵 — 서버 URL 미설정');
-      return;
-    }
-
-    const { SupertonicProvider } = require('./providers/supertonic-provider');
-    const provider = new SupertonicProvider({ baseUrl });
-    this.logger(`[TTS] Supertonic 연결 중... (${baseUrl})`);
-    const ok = await provider.init();
-    if (ok) {
-      this.providers.set('supertonic', provider);
-      this.logger('[TTS] Supertonic 연결 완료');
-    } else {
-      this.logger('[TTS] Supertonic 연결 실패 (백엔드 미기동 또는 모델 로딩 중)');
-    }
-  }
-
   /**
    * 외부에서 secret/baseUrl 변경 후 특정 provider 재초기화
    */
@@ -120,11 +93,6 @@ class TTSManager {
 
     if (id === 'omnivoice') {
       await this._connectOmniVoice();
-      return this.isAvailable(id);
-    }
-
-    if (id === 'supertonic') {
-      await this._connectSupertonic();
       return this.isAvailable(id);
     }
 

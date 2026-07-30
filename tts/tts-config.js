@@ -4,9 +4,9 @@
  *
  * 구조:
  * {
- *   "omnivoice":  { "baseUrl": "http://192.168.219.157:9881" },
- *   "supertonic": { "baseUrl": "http://127.0.0.1:9882" }
+ *   "omnivoice": { "baseUrl": "http://192.168.219.157:9881" }
  * }
+ * ⚠ supertonic 은 2026-07-31 제거. 기존 설정파일에 남아 있어도 코드가 안 읽으므로 무해.
  */
 
 const fs = require('fs');
@@ -18,7 +18,6 @@ const CONFIG_PATH = path.join(STORE_DIR, 'tts-config.json');
 
 const DEFAULTS = {
   omnivoice:  { baseUrl: 'http://127.0.0.1:9881' },
-  supertonic: { baseUrl: 'http://127.0.0.1:9882' },
 };
 
 function loadAll() {

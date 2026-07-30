@@ -9,7 +9,7 @@
  *     // 기본 동작
  *     isDefault: false,           // 좌측 카드 첫 번째 표시
  *     // TTS
- *     engine: 'omnivoice' | 'gemini' | 'supertonic',
+ *     engine: 'omnivoice' | 'gemini',
  *     voice: 'clone' | 'default' | 'Kore' | 'M1' | 'F1' | ...,
  *     speed: 1.0,
  *     silenceSec: 0.8,            // 문장 사이 무음
@@ -95,34 +95,7 @@ const SEED_PRESETS = [
     profileId: 'default',
     instruct: '',
   },
-  {
-    id: 'p_supertonic_ko_f1',
-    name: 'Supertonic 여성 (CPU 한국어)',
-    isDefault: false,
-    engine: 'supertonic',
-    voice: 'F1',
-    speed: 1.0,
-    silenceSec: 0.5,
-    language: 'ko',
-    outputFolder: '',
-    logoPath: '',
-    profileId: 'default',
-    instruct: '',
-  },
-  {
-    id: 'p_supertonic_ko_m1',
-    name: 'Supertonic 남성 (CPU 한국어)',
-    isDefault: false,
-    engine: 'supertonic',
-    voice: 'M1',
-    speed: 1.0,
-    silenceSec: 0.5,
-    language: 'ko',
-    outputFolder: '',
-    logoPath: '',
-    profileId: 'default',
-    instruct: '',
-  },
+  // ⚠ Supertonic 시드 프리셋 2개(p_supertonic_ko_f1/m1)는 2026-07-31 제거 — OmniVoice 하나로 충분(로이 결정).
 ];
 
 function loadAll() {
@@ -130,9 +103,12 @@ function loadAll() {
     if (fs.existsSync(STORE_PATH)) {
       let data = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
       if (Array.isArray(data)) {
-        // 제거된 엔진(voxcpm/msedge/azure) 프리셋은 폐기
+        // 제거된 엔진 supertonic 은 **폐기하지 않고 omnivoice 로 이관** — 채널이 사라지면 사용자 설정(출력폴더·
+        //   자막·스타일)까지 통째로 날아간다. 이름은 그대로 두니 필요 없으면 사용자가 직접 삭제하면 된다.
+        for (const p of data) if (p.engine === 'supertonic') p.engine = 'omnivoice';
+        // 그 외 제거된 엔진(voxcpm/msedge/azure) 프리셋은 폐기
         const sizeBefore = data.length;
-        data = data.filter(p => p.engine === 'omnivoice' || p.engine === 'gemini' || p.engine === 'supertonic');
+        data = data.filter(p => p.engine === 'omnivoice' || p.engine === 'gemini');
         const dropped = sizeBefore - data.length;
 
         let foundDefault = false;
