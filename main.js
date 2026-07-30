@@ -1146,6 +1146,31 @@ function looksBlankImage(file) {
   } catch { return false; }                        // 판정 실패 시엔 정상으로 간주(오탐 방지)
 }
 
+// 생성된 '영상'이 사실상 검정인지 판정 — i2v 도 동시 생성 시 이미지와 같은 현상이 있을 수 있어 방어한다.
+//   ⚠ 영상은 파일 크기로 판정 불가(검정도 압축 후 수백KB) → **3개 프레임(25%·50%·75%)을 실제로 샘플링**한다.
+//   ⚠ 임계값은 이미지(30)보다 낮은 18 — 밤/어두운 장면을 검정으로 오판해 8분짜리 재생성을 낭비하지 않기 위해.
+//      셋 다 검정일 때만 검정으로 본다(페이드인으로 첫 프레임만 검은 경우를 배제).
+function looksBlankVideo(file) {
+  try {
+    const MU = require('./core/media-utils');
+    const ff = MU.getFfmpegPath();
+    if (!ff || !fs.existsSync(file)) return false;
+    const { execFileSync } = require('child_process');
+    // i2v 는 4~8초라 1·2·3초 지점을 샘플링하면 앞/중/뒤를 고르게 본다(짧으면 마지막 프레임으로 대체됨).
+    const spots = [1, 2, 3];
+    let dark = 0, ok = 0;
+    for (const t of spots) {
+      try {
+        const buf = execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-ss', String(t), '-i', file,
+          '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20, timeout: 20000 });
+        if (buf && buf.length >= 3) { ok++; if ((buf[0] + buf[1] + buf[2]) < 18) dark++; }
+      } catch {}
+    }
+    if (!ok) return false;          // 샘플링 실패 → 정상 취급(오탐 방지)
+    return dark === ok;             // 성공적으로 읽은 프레임이 전부 검정일 때만
+  } catch { return false; }
+}
+
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy' 일 때. 워크플로 JSON(API 포맷) 필요.
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const CI = require('./core/comfy-image');
@@ -1311,6 +1336,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) log(`  ⚡ 동시 ${conc}개 생성 (순차 대비 벽시계 단축 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const blanks = [];    // 검정 영상이 나온 그룹 — 동시 패스 후 '순차'로 재생성(이미지와 동일 방어)
   const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
@@ -1320,8 +1346,15 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
     const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
-    if (r.success) { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
-    else {
+    if (r.success) {
+      // ⚠ 검정(빈) 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.
+      if (looksBlankVideo(r.videoPath)) {
+        try { fs.rmSync(r.videoPath, { force: true }); } catch {}
+        g.videoPath = null; g.videoStatus = 'fail';
+        blanks.push(g);
+        log(`  ⬛ G${g.num} 검정 영상 감지 — 폐기 후 재생성 대기`);
+      } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
+    } else {
       g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
     }
@@ -1344,6 +1377,18 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
       if (S.abort) { log('⏹ 중단됨'); return; }
       await genOne(queue.shift());
     }
+  }
+  // ── 검정 영상 복구 패스 ── 순차로(동시성 0) 다시 만든다. ⚠ i2v 는 건당 수 분·크레딧이 크므로 **재시도 1회만**.
+  if (blanks.length && !S.abort) {
+    const retry = blanks.splice(0, blanks.length);
+    log(`  🔁 검정 영상 ${retry.length}개 순차 재생성 (1회만 시도 — i2v 는 건당 비용이 큼)`);
+    for (const g of retry) {
+      if (S.abort) { log('⏹ 중단됨'); return; }
+      await genOne(g);
+      if (!g.videoPath) log(`  ✗ G${g.num} 재생성 실패 — 이 그룹 영상 없음(이미지로 대체되어 .vrew 는 진행됩니다)`);
+    }
+    blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
+    pushDtoUpdate();
   }
 }
 
