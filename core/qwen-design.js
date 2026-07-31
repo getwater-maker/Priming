@@ -119,8 +119,10 @@ async function start(logger = () => {}, { timeoutMs = 20 * 60 * 1000 } = {}) {
 
   // ── 원격 모드 ── 다른 PC(메인 GPU PC)의 서버를 쓰므로 **spawn 하지 않는다**. 떠 있으면 쓰고, 없으면 안내만.
   if (rt) {
-    if (h0 && h0.loading) {
-      logger(`🎨 원격 보이스디자인(${rt.host}:${rt.port}) 로딩 중 — 대기…`);
+    // 지연 로딩 서버: 떠 있어도 모델은 안 올라가 있으므로 /prepare 로 로드를 요청한다(구버전 서버는 404 → 무해).
+    if (h0 && !h0.loaded && !h0.loading) { try { await _postJson('/prepare', {}, 5000); } catch {} }
+    if (h0 && (h0.loading || h0.lazy)) {
+      logger(`🎨 원격 보이스디자인(${rt.host}:${rt.port}) 모델 준비 중 — 대기…`);
     } else if (!h0) {
       return { ok: false, error: `메인 PC 의 보이스디자인 서버(${rt.host}:${rt.port})에 연결할 수 없습니다.\n메인 PC 에서 qwen-design 폴더의 "2_서버_수동테스트.bat" 을 실행해 서버를 켜 두고 다시 시도하세요.` };
     }
@@ -156,14 +158,16 @@ async function start(logger = () => {}, { timeoutMs = 20 * 60 * 1000 } = {}) {
     logger('🎨 보이스디자인 서버 이미 로딩 중 — 대기…');
   }
 
-  // /health 폴링(loaded 대기)
+  // /health 폴링(loaded 대기). 지연 로딩 서버는 /prepare 로 로드를 요청해야 올라간다.
   const t0 = Date.now();
-  let announced = false;
+  let announced = false, prepared = false;
   while (Date.now() - t0 < timeoutMs) {
     await new Promise((r) => setTimeout(r, 2000));
     const h = await health();
     if (h && h.error) return { ok: false, error: h.error };
     if (h && h.loaded) { S.started = true; logger('🎨 보이스디자인 준비 완료'); return { ok: true }; }
+    // 서버는 떴는데 로드 중도 아니면(=지연 로딩 대기 상태) 로드를 요청한다. 한 번만.
+    if (h && !h.loaded && !h.loading && !prepared) { prepared = true; try { await _postJson('/prepare', {}, 5000); } catch {} }
     if (h && h.loading && !announced) { announced = true; logger('🎨 모델 로딩 중… (첫 실행은 4.5GB 다운로드로 수 분 소요)'); }
   }
   return { ok: false, error: '보이스디자인 서버 준비 시간 초과' };
@@ -190,8 +194,14 @@ async function generate({ instruct, text, language = 'Korean' }, logger = () => 
 
 async function stop(logger = () => {}) {
   S.started = false;
-  // ⚠ 원격 모드에선 **끄지 않는다** — 메인 PC(또는 다른 사용자)가 쓰는 서버를 남이 내려버리면 안 된다.
-  if (isRemote()) { logger('🎨 원격 서버는 그대로 둡니다(다른 PC 가 쓰는 서버)'); return { ok: true, remote: true }; }
+  // ⚠ **우리가 띄운 서버가 아니면 죽이지 않는다** — 원격 서버, 또는 이 PC 에서 상시 실행(작업 스케줄러/배치)
+  //    중인 서버를 앱이 내려버리면 다른 PC 가 못 쓴다. 대신 `/release` 로 **모델만 내려 VRAM 을 반납**한다.
+  if (isRemote() || !S.child) {
+    try { await _postJson('/release', {}, 5000).catch(() => {}); } catch {}
+    logger(isRemote() ? '🎨 원격 서버 유지 — 모델만 해제 요청(VRAM 반납)' : '🎨 상시 실행 서버 유지 — 모델만 해제(VRAM 반납)');
+    return { ok: true, released: true };
+  }
+  // 우리가 spawn 한 서버면 완전히 종료(옛 동작).
   try { await _postJson('/shutdown', {}, 3000).catch(() => {}); } catch {}
   await new Promise((r) => setTimeout(r, 600));
   if (S.child) { try { S.child.kill(); } catch {} S.child = null; }
