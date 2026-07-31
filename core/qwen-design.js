@@ -125,8 +125,9 @@ async function start(logger = () => {}, { timeoutMs = 20 * 60 * 1000 } = {}) {
 // generate: 목소리 1개 생성 → { ok, buffer(wav) } 또는 { ok:false, error }
 async function generate({ instruct, text, language = 'Korean' }, logger = () => {}) {
   const h = await health();
-  if (!h) return { ok: false, error: '서버 미기동 — 먼저 start() 필요' };
-  if (!h.loaded) return { ok: false, error: '모델 로딩 중 — 잠시 후 다시' };
+  // 사용자에게 그대로 보이는 문구 — 개발자용("start() 필요")이 아니라 무엇을 해야 하는지 알려준다.
+  if (!h) return { ok: false, error: '디자인 서버가 떠 있지 않습니다 — 「🔄 서버 다시 준비」를 누르거나, 창을 닫고 다시 열어 주세요. (이 기능은 qwen-design 이 설치된 메인 GPU PC 에서만 동작합니다)' };
+  if (!h.loaded) return { ok: false, error: '모델 로딩 중입니다 — 준비 완료 메시지가 뜬 뒤 다시 눌러 주세요(첫 실행은 수 분 소요).' };
   try {
     const r = await _postJson('/design', { instruct, text, language }, 180000, true);
     if (r.status === 200 && r.buffer && r.buffer.length > 44) return { ok: true, buffer: r.buffer };

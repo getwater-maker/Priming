@@ -184,6 +184,7 @@ export default function App() {
   const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다.');
   const [vdStatus, setVdStatus] = useState('');
   const [vdBusy, setVdBusy] = useState(false);
+  const [vdReady, setVdReady] = useState(false);         // 디자인 서버 준비 완료 여부 — 준비 전엔 '목소리 생성' 잠금
   const [vdWavUrl, setVdWavUrl] = useState('');
   const [vdGenerated, setVdGenerated] = useState(false);
   const [vdFilename, setVdFilename] = useState('');
@@ -1039,14 +1040,22 @@ export default function App() {
   }
   // ── 🎨 보이스디자인 (Qwen3-TTS 온디맨드 서버) ─────────────────────────────
   async function openVoiceDesign() {
-    setVdOpen(true); setVdWavUrl(''); setVdGenerated(false); setVdFilename(''); setVdBusy(true); setVdStatus('설치 확인 중…');
+    setVdOpen(true); setVdWavUrl(''); setVdGenerated(false); setVdFilename('');
+    await vdPrepare();
+  }
+  // 서버 준비(설치 확인 → start). 실패해도 재시도할 수 있게 분리 — 준비 전엔 생성 버튼을 못 누르게 vdReady 로 잠근다.
+  async function vdPrepare() {
+    setVdReady(false); setVdBusy(true); setVdStatus('설치 확인 중…');
     try {
       const st = await api.qwenDesignStatus();
-      if (!st || !st.installed) { setVdStatus('⚠ 설치 안 됨 — qwen-design 폴더의 "1_최초설치.bat" 를 먼저 실행하세요.'); setVdBusy(false); return; }
-      setVdStatus('서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요)');
+      if (!st || !st.installed) {
+        setVdStatus('⚠ 설치 안 됨 — 이 PC 에는 보이스디자인이 없습니다.\n메인 GPU PC 의 qwen-design 폴더에서 "1_최초설치.bat" 을 실행해야 하며, 이 기능은 그 PC 에서만 동작합니다.');
+        setVdBusy(false); return;
+      }
+      setVdStatus('서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요 — 이 창을 닫지 마세요)');
       const r = await api.qwenDesignStart();
-      if (r && r.ok) setVdStatus('준비 완료 — 목소리 설명을 입력하고 생성하세요.');
-      else setVdStatus('⚠ 서버 준비 실패: ' + ((r && r.error) || '알 수 없음'));
+      if (r && r.ok) { setVdReady(true); setVdStatus('준비 완료 — 목소리 설명을 입력하고 생성하세요.'); }
+      else setVdStatus('⚠ 서버 준비 실패: ' + ((r && r.error) || '알 수 없음') + '\n「🔄 서버 다시 준비」 를 눌러 재시도할 수 있습니다.');
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
   }
@@ -1081,7 +1090,7 @@ export default function App() {
     setVdBusy(false);
   }
   async function closeVoiceDesign() {
-    setVdOpen(false);
+    setVdOpen(false); setVdReady(false); // 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
     try { await api.qwenDesignStop(); } catch {}
   }
   async function saveChannel() {
@@ -1980,7 +1989,10 @@ export default function App() {
             <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
               <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
             <div className="frow"><label></label>
-              <button onClick={vdGenerate} disabled={vdBusy}>🎨 목소리 생성</button>
+              {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
+              <button onClick={vdGenerate} disabled={vdBusy || !vdReady}
+                title={vdReady ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
+              {!vdReady && !vdBusy ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
               {vdWavUrl ? <button className="ghost" onClick={() => playPreviewUrl(vdWavUrl)}>▶ 다시 듣기</button> : null}
               <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
             </div>
