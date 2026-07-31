@@ -276,9 +276,42 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   try { writeSnapshotSync(); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장
   try { if (S.flowEng && S.flowEng.context) S.flowEng.context.close(); } catch {}
+  // 작업 중 강제 종료돼도 절전 차단이 남지 않게 확실히 해제(카운터 무시)
+  try {
+    if (_awake.id != null && powerSaveBlocker.isStarted(_awake.id)) powerSaveBlocker.stop(_awake.id);
+    _awake.id = null; _awake.n = 0;
+  } catch {}
 });
 
 const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
+
+// ── 절전 차단(작업 중에만) ───────────────────────────────────────────────────
+//  왜: 모니터가 절전으로 꺼지면 ① 복귀 시 해상도·DPI 가 기본값으로 떨어져 창 배치가 흐트러지고
+//      ② 브라우저 자동화(Genspark/Flow/Grok)의 좌표 클릭·타이머가 흔들린다. 긴 작업 중엔 막는 게 안전.
+//  ⚠ 'prevent-display-sleep' = 화면 끄기 + 시스템 절전 모두 차단. 작업이 끝나면 반드시 해제(전기·수명).
+//  참조 카운트: 여러 작업(TTS 큐 · 이미지 큐 · 비디오 · 플리)이 겹쳐도 마지막 하나가 끝날 때만 해제한다.
+const { powerSaveBlocker } = require('electron');
+const _awake = { n: 0, id: null };
+function awakeAcquire(label = '') {
+  _awake.n++;
+  if (_awake.id == null) {
+    try { _awake.id = powerSaveBlocker.start('prevent-display-sleep'); log(`🔌 절전 차단 — 작업 중 화면이 꺼지지 않습니다${label ? ` (${label})` : ''}`); }
+    catch (e) { _awake.id = null; }
+  }
+}
+function awakeRelease() {
+  _awake.n = Math.max(0, _awake.n - 1);
+  if (_awake.n === 0 && _awake.id != null) {
+    try { if (powerSaveBlocker.isStarted(_awake.id)) powerSaveBlocker.stop(_awake.id); } catch {}
+    _awake.id = null;
+    log('🔌 절전 차단 해제 (화면 끄기 정상 복귀)');
+  }
+}
+/** 긴 작업을 절전 차단으로 감싼다. 실패·예외에도 finally 로 반드시 해제. */
+async function withAwake(label, fn) {
+  awakeAcquire(label);
+  try { return await fn(); } finally { awakeRelease(); }
+}
 
 // 버전 표시 — app.getVersion() 은 electron 시작 시점의 package.json(=이번 실행 업데이트 적용 전) 을
 //   캐시해 한 박자 늦는다. 라이트 업데이터는 main.js 로드 전에 package.json 을 교체하므로,
@@ -1407,7 +1440,10 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 }
 
 // 비디오 생성 디스패치 — 'grok-api'=REST API, 'comfy[::path]'=ComfyUI i2v, 그 외('grok'/'grok10')=브라우저 Grok.
-async function genGroupVideos(pr, mediaDir, onlyNums, videoEngine) {
+//   ⚠ 절전 차단으로 감싼다 — i2v 는 수 분~수십 분이고, 브라우저 자동화(Grok)는 화면이 꺼지면 흔들린다.
+//     (TTS/이미지 큐를 안 타는 video-build·video-group 경로도 이걸로 함께 커버된다. 참조 카운트라 중첩 안전)
+async function genGroupVideos(...args) { return withAwake('비디오 생성', () => _genGroupVideosCore(...args)); }
+async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) {
     const wf = videoEngine.indexOf('comfy::') === 0 ? videoEngine.slice(7) : '';
@@ -1607,7 +1643,9 @@ function imagesNeeded(project) {
 }
 
 // 생성된 영상을 1080p 로 업스케일 (Real-ESRGAN 애니 모델, 없으면 ffmpeg 폴백). videoPath 교체.
-async function maybeUpscale(project, logger, enabled) {
+//   ⚠ 로컬 GPU 로 프레임 단위 처리라 오래 걸린다 → 절전 차단으로 감싼다.
+async function maybeUpscale(...args) { return withAwake('영상 업스케일', () => _maybeUpscaleCore(...args)); }
+async function _maybeUpscaleCore(project, logger, enabled) {
   if (!enabled) return;
   const targets = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
   if (!targets.length) return;
@@ -2933,7 +2971,7 @@ let imageJobPending = 0;
 function enqueueImageJob(label, fn) {
   imageJobPending++;
   if (imageJobPending > 1) log(`⏳ ${label} — 이미지 작업 큐 대기 (앞에 ${imageJobPending - 1}건)`);
-  const run = () => fn();
+  const run = () => withAwake(label, fn);
   const p = imageJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
   imageJobChain = p.then(() => { imageJobPending--; }, () => { imageJobPending--; });
   return p;
@@ -2948,7 +2986,7 @@ let ttsJobPending = 0;
 function enqueueTtsJob(label, fn) {
   ttsJobPending++;
   if (ttsJobPending > 1) log(`⏳ ${label} — TTS 작업 큐 대기 (앞에 ${ttsJobPending - 1}건 진행 중)`);
-  const run = () => fn();
+  const run = () => withAwake(label, fn);
   const p = ttsJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
   ttsJobChain = p.then(() => { ttsJobPending--; }, () => { ttsJobPending--; });
   return p;
