@@ -25,10 +25,11 @@ const { app, dialog } = require('electron');
 
 const OWNER = 'getwater-maker';
 // 저장소 이름은 2026-07-31 `Priming-Maker` → **`Priming`** 으로 변경됨(앱 이름과 통일).
-//   두 이름을 순서대로 시도한다 — 새 이름 우선, 실패 시 옛 이름 폴백.
-//   ⚠ 옛 이름을 남겨두는 이유: GitHub 리다이렉트가 언제 끊길지 보장이 없고, 구버전 코드가 남은 PC 를 위한 안전망.
-//      (실측 2026-07-31: 이름 변경 후에도 옛 raw URL 이 200 응답 — 리다이렉트 동작 확인)
-const REPOS = ['Priming', 'Priming-Maker'];
+//   ⚠ 옛 이름 폴백은 **제거함(2026-07-31)** — 쓸모가 없어서다:
+//      · 구버전 코드가 남은 PC 는 URL 이 하드코딩돼 있어 이 목록을 아예 안 읽는다(GitHub 리다이렉트로 동작).
+//      · 신버전 코드는 'Priming' 이 성공하므로 폴백까지 갈 일이 없다.
+//      → 남겨두면 앱 시작마다 무의미한 404 요청만 1회 더 든다. 사용자도 2명(나·아내)뿐.
+const REPOS = ['Priming'];
 const BRANCH = 'main';
 const rawBase = (repo) => `https://raw.githubusercontent.com/${OWNER}/${repo}/${BRANCH}/`;
 
