@@ -124,7 +124,7 @@ async function start(logger = () => {}, { timeoutMs = 20 * 60 * 1000 } = {}) {
     if (h0 && (h0.loading || h0.lazy)) {
       logger(`🎨 원격 보이스디자인(${rt.host}:${rt.port}) 모델 준비 중 — 대기…`);
     } else if (!h0) {
-      return { ok: false, error: `메인 PC 의 보이스디자인 서버(${rt.host}:${rt.port})에 연결할 수 없습니다.\n메인 PC 에서 qwen-design 폴더의 "2_서버_수동테스트.bat" 을 실행해 서버를 켜 두고 다시 시도하세요.` };
+      return { ok: false, error: `메인 PC 의 보이스디자인 서버(${rt.host}:${rt.port})에 연결할 수 없습니다.\n메인 PC 에서 qwen-design 폴더의 "4_서버_상시실행.bat" 을 실행해 두세요(한 번 켜 두면 계속 대기하며, 안 쓸 때는 VRAM 을 쓰지 않습니다).` };
     }
     const t0r = Date.now();
     while (Date.now() - t0r < timeoutMs) {

@@ -1058,7 +1058,7 @@ export default function App() {
       const msg = st.loaded ? `✅ 보이스디자인 준비됨 — ${where}`
         : st.loading ? `⏳ 모델 로딩 중 — ${where} (잠시 후 다시 확인)`
         : st.running ? `⏳ 서버는 떠 있으나 모델 미로드 — ${where}`
-        : st.remote ? `❌ 원격 서버에 연결할 수 없습니다 — ${where}\n메인 PC 에서 qwen-design 의 "2_서버_수동테스트.bat" 을 실행해 켜 두세요.`
+        : st.remote ? `❌ 원격 서버에 연결할 수 없습니다 — ${where}\n메인 PC 에서 qwen-design 의 "4_서버_상시실행.bat" 을 실행해 두세요(한 번 켜 두면 계속 대기).`
         : `❌ 서버가 꺼져 있습니다 — ${where}\n${st.installed ? '보이스디자인 창을 열면 자동으로 켜집니다.' : '이 PC 엔 설치돼 있지 않습니다(메인 PC 주소를 넣어 원격으로 쓰세요).'}`;
       setSettingsMsg(msg);
     } catch (e) { setSettingsMsg('❌ 오류: ' + e.message); }
