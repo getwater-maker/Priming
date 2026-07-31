@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   dictSave: (entries) => ipcRenderer.invoke('dict-save', entries),
   listRefAudio: () => ipcRenderer.invoke('list-ref-audio'),
   openRefFolder: (p) => ipcRenderer.invoke('open-ref-folder', p),
+  getQwenDesignConfig: () => ipcRenderer.invoke('get-qwen-design-config'),
+  setQwenDesignConfig: (args) => ipcRenderer.invoke('set-qwen-design-config', args),
   qwenDesignStatus: () => ipcRenderer.invoke('qwen-design-status'),
   qwenDesignStart: () => ipcRenderer.invoke('qwen-design-start'),
   qwenDesignStop: () => ipcRenderer.invoke('qwen-design-stop'),

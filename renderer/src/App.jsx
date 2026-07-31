@@ -185,6 +185,7 @@ export default function App() {
   const [vdStatus, setVdStatus] = useState('');
   const [vdBusy, setVdBusy] = useState(false);
   const [vdReady, setVdReady] = useState(false);         // 디자인 서버 준비 완료 여부 — 준비 전엔 '목소리 생성' 잠금
+  const [vdSrv, setVdSrv] = useState('');                // 보이스디자인 서버 주소(빈값=이 PC 로컬 실행)
   const [vdWavUrl, setVdWavUrl] = useState('');
   const [vdGenerated, setVdGenerated] = useState(false);
   const [vdFilename, setVdFilename] = useState('');
@@ -1043,16 +1044,37 @@ export default function App() {
     setVdOpen(true); setVdWavUrl(''); setVdGenerated(false); setVdFilename('');
     await vdPrepare();
   }
+  // 보이스디자인 서버 주소 저장/테스트 — 빈값이면 이 PC 에서 직접 실행(로컬), 값이 있으면 그 PC 의 서버 사용.
+  async function saveVdSrv() {
+    try { const c = await api.setQwenDesignConfig({ baseUrl: (vdSrv || '').trim() }); if (c && c.baseUrl != null) setVdSrv(c.baseUrl); }
+    catch (e) { logline('보이스디자인 주소 저장 오류: ' + e.message); }
+  }
+  async function testVdSrv() {
+    setSettingsMsg('⏳ 보이스디자인 서버 확인 중…');
+    try {
+      const st = await api.qwenDesignStatus();
+      if (!st) { setSettingsMsg('❌ 상태를 확인할 수 없습니다.'); return; }
+      const where = st.remote ? `원격 ${st.target}` : `이 PC (${st.target})`;
+      const msg = st.loaded ? `✅ 보이스디자인 준비됨 — ${where}`
+        : st.loading ? `⏳ 모델 로딩 중 — ${where} (잠시 후 다시 확인)`
+        : st.running ? `⏳ 서버는 떠 있으나 모델 미로드 — ${where}`
+        : st.remote ? `❌ 원격 서버에 연결할 수 없습니다 — ${where}\n메인 PC 에서 qwen-design 의 "2_서버_수동테스트.bat" 을 실행해 켜 두세요.`
+        : `❌ 서버가 꺼져 있습니다 — ${where}\n${st.installed ? '보이스디자인 창을 열면 자동으로 켜집니다.' : '이 PC 엔 설치돼 있지 않습니다(메인 PC 주소를 넣어 원격으로 쓰세요).'}`;
+      setSettingsMsg(msg);
+    } catch (e) { setSettingsMsg('❌ 오류: ' + e.message); }
+  }
   // 서버 준비(설치 확인 → start). 실패해도 재시도할 수 있게 분리 — 준비 전엔 생성 버튼을 못 누르게 vdReady 로 잠근다.
   async function vdPrepare() {
     setVdReady(false); setVdBusy(true); setVdStatus('설치 확인 중…');
     try {
       const st = await api.qwenDesignStatus();
       if (!st || !st.installed) {
-        setVdStatus('⚠ 설치 안 됨 — 이 PC 에는 보이스디자인이 없습니다.\n메인 GPU PC 의 qwen-design 폴더에서 "1_최초설치.bat" 을 실행해야 하며, 이 기능은 그 PC 에서만 동작합니다.');
+        setVdStatus('⚠ 이 PC 에는 보이스디자인이 설치돼 있지 않습니다.\n⚙ 설정 → 🖧 TTS 서버 의 「보이스디자인」 칸에 메인 PC 주소(예: http://100.112.7.63:9893)를 넣으면 원격으로 쓸 수 있습니다.');
         setVdBusy(false); return;
       }
-      setVdStatus('서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요 — 이 창을 닫지 마세요)');
+      setVdStatus(st.remote
+        ? `서버 준비 중… (원격 ${st.target})`
+        : '서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요 — 이 창을 닫지 마세요)');
       const r = await api.qwenDesignStart();
       if (r && r.ok) { setVdReady(true); setVdStatus('준비 완료 — 목소리 설명을 입력하고 생성하세요.'); }
       else setVdStatus('⚠ 서버 준비 실패: ' + ((r && r.error) || '알 수 없음') + '\n「🔄 서버 다시 준비」 를 눌러 재시도할 수 있습니다.');
@@ -1377,6 +1399,7 @@ export default function App() {
     try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
     try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
+    try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
     setSettingsOpen(true);
   }
   async function openComfy() { return openSettings('img'); }
@@ -2221,6 +2244,13 @@ export default function App() {
                 <input style={{ flex: 1 }} placeholder="http://192.168.219.157:9881" value={ttsSrv.omnivoice.baseUrl}
                   onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
+              {/* 보이스디자인(Qwen3-TTS) — 비우면 이 PC 에서 직접 실행, 주소를 넣으면 그 PC(메인 GPU)의 서버를 사용 */}
+              <div className="frow"><label>보이스디자인</label>
+                <input style={{ flex: 1 }} placeholder="비우면 이 PC 에서 실행 · 다른 PC 면 http://100.112.7.63:9893"
+                  value={vdSrv} onChange={(e) => setVdSrv(e.target.value)} onBlur={saveVdSrv} />
+                <button className="ghost" style={{ flex: '0 0 auto' }} onClick={testVdSrv}>연결테스트</button></div>
+              <div className="meta">보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.
+                {' '}메인 PC 에서는 <b>비워 두면</b> 창을 열 때 자동으로 서버가 켜집니다.</div>
               <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
             </div>)}
 

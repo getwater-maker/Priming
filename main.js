@@ -682,8 +682,19 @@ const QD = require('./core/qwen-design');
 ipcMain.handle('qwen-design-status', async () => {
   try { return await QD.status(); } catch (e) { return { installed: false, error: String((e && e.message) || e) }; }
 });
+// 보이스디자인 서버 주소 — 빈값=이 PC 로컬 spawn / 값 있으면 그 주소의 원격 서버 사용(GPU 없는 PC 용).
+ipcMain.handle('get-qwen-design-config', () => { try { return QD.loadConfig(); } catch { return {}; } });
+ipcMain.handle('set-qwen-design-config', (_e, args = {}) => {
+  try {
+    const baseUrl = String(args.baseUrl || '').trim().replace(/\/+$/, '');
+    const c = QD.saveConfig({ baseUrl });
+    log(`보이스디자인 주소 저장: ${baseUrl || '(비움 = 이 PC 로컬)'}`);
+    return QD.loadConfig();
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
 ipcMain.handle('qwen-design-start', async () => {
-  if (S.musicActive) { log('⚠ 음악 생성 중에는 보이스디자인을 열 수 없습니다. 끝난 뒤 다시 시도하세요.'); return { ok: false, error: 'gpu-busy' }; }
+  // 원격 모드는 이 PC GPU 를 쓰지 않으므로 음악 생성 중이어도 허용.
+  if (S.musicActive && !QD.isRemote()) { log('⚠ 음악 생성 중에는 보이스디자인을 열 수 없습니다. 끝난 뒤 다시 시도하세요.'); return { ok: false, error: 'gpu-busy' }; }
   const r = await QD.start(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
   if (r && r.ok) S.voiceDesignActive = true;
   return r;
