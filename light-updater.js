@@ -24,10 +24,10 @@ const crypto = require('crypto');
 const { app, dialog } = require('electron');
 
 const OWNER = 'getwater-maker';
-// 저장소 이름 변경(Priming-Maker → Priming) 전환기 대응 — **두 이름을 모두 시도**한다.
-//   ⚠ 반드시 이 코드를 **먼저 배포**하고 모든 PC 가 한 번 재시작해 받은 뒤에 GitHub 에서 이름을 바꿀 것.
-//      그러면 이름을 바꾸는 순간에도 어느 PC 든 업데이트가 끊기지 않는다(리다이렉트에 의존하지 않음).
-//      전환이 끝나면 옛 이름('Priming-Maker')은 목록에서 지워도 된다.
+// 저장소 이름은 2026-07-31 `Priming-Maker` → **`Priming`** 으로 변경됨(앱 이름과 통일).
+//   두 이름을 순서대로 시도한다 — 새 이름 우선, 실패 시 옛 이름 폴백.
+//   ⚠ 옛 이름을 남겨두는 이유: GitHub 리다이렉트가 언제 끊길지 보장이 없고, 구버전 코드가 남은 PC 를 위한 안전망.
+//      (실측 2026-07-31: 이름 변경 후에도 옛 raw URL 이 200 응답 — 리다이렉트 동작 확인)
 const REPOS = ['Priming', 'Priming-Maker'];
 const BRANCH = 'main';
 const rawBase = (repo) => `https://raw.githubusercontent.com/${OWNER}/${repo}/${BRANCH}/`;

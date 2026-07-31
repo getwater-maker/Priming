@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ✅ 저장소 이름 변경 완료 — `Priming-Maker` → `Priming` (2026-07-31, v0.2.87)
+> 사용자가 GitHub 웹에서 이름 변경 완료 → 나머지 배관 정리.
+- **실측 검증(중요)**: 변경 후 **두 raw URL 모두 200** — 새 이름은 물론 **옛 이름도 리다이렉트 없이 200** 응답.
+  → 아직 재시작 안 한 PC(구버전 업데이터, 옛 URL 하드코딩)도 **업데이트가 끊기지 않음**을 확인.
+- **정리 내역**: `git remote set-url` → `github.com/getwater-maker/Priming.git`(ls-remote 로 통신 확인) ·
+  package.json `build.publish.repo` → `Priming` · light-updater 주석 갱신.
+- **`REPOS = ['Priming', 'Priming-Maker']` 는 그대로 유지** — 옛 이름을 지우지 않는다. 이유: ① GitHub 리다이렉트가
+  언제까지 유지되는지 보장이 없음 ② 구버전 코드가 남은 PC 를 위한 안전망. 비용은 최초 1회 404 시도뿐.
+- ⚠ 아내 PC 는 git 을 안 쓰고 라이트 업데이터만 쓰므로 remote 관련 조치 불필요.
+- ⚠ **다음 커밋부터는 새 저장소(`Priming`)로 푸시**된다. 기존 커밋·태그·이력은 그대로 보존됨.
+
 ## 🔀 저장소 이름 변경 준비 — light-updater 가 두 이름 모두 시도 (2026-07-31, v0.2.86)
 > 요청(로이): GitHub 저장소명을 `Priming-Maker` → **`Priming`**(앱 이름과 동일)으로 변경. "문제 없다면".
 - **문제가 있었다**: 라이트 업데이터가 `const REPO = 'getwater-maker/Priming-Maker'` 를 **하드코딩**해 raw URL 을 만든다.
