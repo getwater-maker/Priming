@@ -23,9 +23,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { app, dialog } = require('electron');
 
-const REPO = 'getwater-maker/Priming-Maker';
+const OWNER = 'getwater-maker';
+// 저장소 이름 변경(Priming-Maker → Priming) 전환기 대응 — **두 이름을 모두 시도**한다.
+//   ⚠ 반드시 이 코드를 **먼저 배포**하고 모든 PC 가 한 번 재시작해 받은 뒤에 GitHub 에서 이름을 바꿀 것.
+//      그러면 이름을 바꾸는 순간에도 어느 PC 든 업데이트가 끊기지 않는다(리다이렉트에 의존하지 않음).
+//      전환이 끝나면 옛 이름('Priming-Maker')은 목록에서 지워도 된다.
+const REPOS = ['Priming', 'Priming-Maker'];
 const BRANCH = 'main';
-const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/`;
+const rawBase = (repo) => `https://raw.githubusercontent.com/${OWNER}/${repo}/${BRANCH}/`;
 
 function log(m) { try { process.stdout.write(`[updater] ${m}\n`); } catch (_) {} }
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
@@ -63,11 +68,18 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
   if (!app.isPackaged) { log('dev 모드 — 업데이트 건너뜀'); return; }
   const appDir = app.getAppPath(); // asar:false → resources/app
 
-  let manifest;
-  try {
-    const txt = await fetchWithTimeout(RAW_BASE + 'update-manifest.json?t=' + Date.now(), manifestTimeoutMs, true);
-    manifest = JSON.parse(txt);
-  } catch (e) { log(`매니페스트 조회 실패(오프라인일 수 있음) — 현재 버전으로 실행: ${e.message}`); return; }
+  // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
+  let manifest, RAW_BASE = null, lastErr = '';
+  for (const repo of REPOS) {
+    try {
+      const base = rawBase(repo);
+      const txt = await fetchWithTimeout(base + 'update-manifest.json?t=' + Date.now(), manifestTimeoutMs, true);
+      manifest = JSON.parse(txt); RAW_BASE = base;
+      if (repo !== REPOS[0]) log(`저장소 '${repo}' 로 조회 성공(옛 이름 폴백)`);
+      break;
+    } catch (e) { lastErr = e.message; }
+  }
+  if (!RAW_BASE) { log(`매니페스트 조회 실패(오프라인일 수 있음) — 현재 버전으로 실행: ${lastErr}`); return; }
   if (!manifest || !manifest.files || typeof manifest.files !== 'object') { log('매니페스트 형식 오류 — 건너뜀'); return; }
 
   // 로컬 package.json (버전·deps 비교용) — 루프에서 덮어쓰기 전에 미리 읽음
