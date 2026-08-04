@@ -7,8 +7,23 @@ rem  * Model loads on first request (/prepare or /design), takes ~20s.
 rem  * After 600s idle the model is unloaded and VRAM is released; server stays up.
 rem    -> Other PCs (wife's PC) can use it anytime, and the GPU is free when unused.
 rem
-rem  Auto start: Win+R -> shell:startup -> put a SHORTCUT of this file there.
-rem              (no admin rights needed; runs at every logon)
+rem  THIS FILE IS FOR MANUAL START ONLY.
+rem  Auto start at logon does NOT use this bat any more - the Startup shortcut
+rem  points straight at venv\Scripts\pythonw.exe (see below). Reason: cmd.exe
+rem  WAITS for its child no matter the subsystem, so launching the server through
+rem  a bat left a black console window on screen for as long as the server lived.
+rem  (actually happened 2026-08-05 - the "VoiceDesign server" window at boot)
+rem
+rem  Startup shortcut (Win+R -> shell:startup) must be:
+rem    Target : D:\Priming\qwen-design\venv\Scripts\pythonw.exe
+rem    Args   : qwen_design_server.py --host 0.0.0.0 --port 9893 --idle-timeout 600
+rem    Start in: D:\Priming\qwen-design
+rem  pythonw.exe has no console at all -> nothing shows up on screen.
+rem
+rem  Logging: the server writes server.log BY ITSELF (see _log() in the py file),
+rem  so no shell redirection is needed here. Do not add `>> server.log` back -
+rem  see the `start` warning below.
+rem
 rem  Firewall: inbound TCP 9893 must be allowed (already added).
 rem
 rem  !! ASCII ONLY IN THIS FILE !!
@@ -20,9 +35,6 @@ rem
 rem  !! DO NOT USE `start` HERE !!
 rem     `start ... >> server.log` makes cmd pass server.log as the file to launch,
 rem     which also triggers the same .log "open with" dialog.
-rem     pythonw.exe is a GUI-subsystem app, so cmd does not wait for it: calling it
-rem     directly returns immediately. Keep the redirection - pythonw has no console,
-rem     so our server's print() needs a real handle or it can raise.
 rem ============================================================================
 cd /d "%~dp0"
 if not exist "venv\Scripts\pythonw.exe" (
@@ -30,7 +42,7 @@ if not exist "venv\Scripts\pythonw.exe" (
   pause
   exit /b 1
 )
-"venv\Scripts\pythonw.exe" "qwen_design_server.py" --host 0.0.0.0 --port 9893 --idle-timeout 600 >> "server.log" 2>&1
-echo VoiceDesign server started in background - port 9893, lazy load, idle unload 600s.
+"venv\Scripts\pythonw.exe" "qwen_design_server.py" --host 0.0.0.0 --port 9893 --idle-timeout 600
+echo VoiceDesign server stopped.
 echo Log file: %~dp0server.log
 exit /b 0

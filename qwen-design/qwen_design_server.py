@@ -19,11 +19,32 @@ OmniVoice(9881)·voxcpm(9892) 와 같은 로컬 서버 패턴. 기본 포트 989
 import argparse
 import io
 import json
+import os
 import sys
 import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# ── 로그 ─────────────────────────────────────────────────────────────────────
+#  서버가 **스스로** server.log 에 쓴다. 왜: pythonw.exe(콘솔 없는 런처)로 띄우면 stdout 이 무효라
+#  print 가 실패할 수 있고, 셸 리다이렉션(`>> server.log`)에 의존하면 cmd 를 거쳐야 해서
+#  **검은 콘솔 창이 부팅 때마다 남는다**(실제 발생 2026-08-05). 자체 로깅이면 pythonw 직접 실행이 가능해진다.
+_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.log")
+
+
+def _log(msg):
+    line = "[%s] %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
+    try:
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    try:  # 콘솔이 있을 때만(수동 실행) 화면에도. pythonw 면 stdout 이 None 이라 조용히 건너뜀.
+        if sys.stdout is not None:
+            print(line, flush=True)
+    except Exception:
+        pass
 
 # ── 모델 상태 ────────────────────────────────────────────────────────────────
 #  지연 로딩(lazy) + 유휴 자동 해제 정책:
@@ -59,7 +80,7 @@ def _unload_model(reason="idle"):
                 torch.cuda.ipc_collect()
         except Exception:
             pass
-        print(f"[qwen-design] model unloaded ({reason}) - VRAM released", flush=True)
+        _log(f"model unloaded ({reason}) - VRAM released")
         return True
 
 
@@ -85,7 +106,7 @@ def _load_model():
     try:
         import torch
         from qwen_tts import Qwen3TTSModel
-        print(f"[qwen-design] loading model: {MODEL_ID} (bfloat16, sdpa)", flush=True)
+        _log(f"loading model: {MODEL_ID} (bfloat16, sdpa)")
         model = Qwen3TTSModel.from_pretrained(
             MODEL_ID,
             device_map="cuda:0",
@@ -96,10 +117,10 @@ def _load_model():
         _STATE["model"] = model
         _STATE["loaded"] = True
         _touch()
-        print("[qwen-design] model loaded - ready", flush=True)
+        _log("model loaded - ready")
     except Exception as e:
         _STATE["error"] = f"{type(e).__name__}: {e}"
-        print("[qwen-design] model load FAILED:\n" + traceback.format_exc(), flush=True)
+        _log("model load FAILED:\n" + traceback.format_exc())
     finally:
         _STATE["loading"] = False
 
@@ -209,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except Exception as e:
-            print("[qwen-design] /design ERROR:\n" + traceback.format_exc(), flush=True)
+            _log("/design ERROR:\n" + traceback.format_exc())
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
 
 
@@ -233,13 +254,13 @@ def main():
     threading.Thread(target=_idle_watchdog, daemon=True).start()
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"[qwen-design] server up: http://{args.host}:{args.port} "
-          f"(health/prepare/design/release/shutdown) · lazy-load, idle-timeout={IDLE_TIMEOUT}s", flush=True)
+    _log(f"server up: http://{args.host}:{args.port} "
+         f"(health/prepare/design/release/shutdown) · lazy-load, idle-timeout={IDLE_TIMEOUT}s")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
-    print("[qwen-design] server stopped", flush=True)
+    _log("server stopped")
 
 
 if __name__ == "__main__":
