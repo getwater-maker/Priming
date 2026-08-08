@@ -182,12 +182,18 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   } else if (sf !== 1 && onLine) {
     onLine(`🔊 음성 배속 ${sf}x 적용 (atempo MP3)`);
   }
+  // 참조음성이 `srv:<이름>` 이면 **서버 공용 라이브러리의 목소리** — 파일 업로드 없이 이름만 보낸다.
+  //   참조텍스트도 서버가 갖고 있으므로(.txt) 여기서 보내지 않는다(엉뚱한 텍스트 섞임 방지).
+  const _ref = String(preset.voiceCloneRefAudio || '');
+  const _srvName = _ref.startsWith('srv:') ? _ref.slice(4) : '';
   const synthOpts = {
     provider: preset.engine,
-    refAudioPath: preset.voiceCloneRefAudio || undefined,
+    refName: _srvName || undefined,
+    refAudioPath: (!_srvName && preset.voiceCloneRefAudio) ? preset.voiceCloneRefAudio : undefined,
     // 참조텍스트: 참조음성과 같은 이름의 .txt 가 있으면 그 내용을 사용(이전 프로그램 방식 — 직접입력 불필요).
     //   없으면 preset.voiceCloneRefText 폴백.
     refText: (() => {
+      if (_srvName) return undefined;                 // 서버 목소리 → 서버의 .txt 를 쓴다
       const a = preset.voiceCloneRefAudio;
       if (a) {
         try { const tp = a.replace(/\.[^.\\/]+$/, '.txt'); if (fs.existsSync(tp)) { const t = fs.readFileSync(tp, 'utf8').trim(); if (t) return t; } } catch {}

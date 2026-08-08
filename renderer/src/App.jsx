@@ -1034,6 +1034,12 @@ export default function App() {
     } catch {}
   }
   // 모달 내 참조음성 미리듣기
+  // 참조음성 표시 이름 — `srv:<이름>`(서버 공용 라이브러리)은 ☁ 를 붙여 구분한다.
+  function refLabel(p) {
+    const s = String(p || '');
+    if (!s) return '';
+    return s.startsWith('srv:') ? `☁ ${s.slice(4)}` : s.split(/[\\/]/).pop();
+  }
   async function playRef(p) {
     if (!p) return;
     try { const url = await api.readAudio(p); playPreviewUrl(url); }
@@ -1888,12 +1894,12 @@ export default function App() {
               <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
             </div>
             {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
-            <div className="frow"><label>목소리</label><input readOnly title="참조음성 파일명" value={(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop() || ch.voice} style={{ flex: '0 0 170px' }} />
+            <div className="frow"><label>목소리</label><input readOnly title="참조음성 (☁ = 서버 공용 라이브러리 — 이 PC 에 파일이 없어도 됨)" value={refLabel(ch.voiceCloneRefAudio) || ch.voice} style={{ flex: '0 0 170px' }} />
               <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
               <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
             <div className="frow"><label>참조음성</label>
               <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop()}</option> : null}
+                {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
                 {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
               </select>
               <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>

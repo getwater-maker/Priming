@@ -691,16 +691,40 @@ ipcMain.handle('extract-mp3', async () => {
   if (okN && lastDir) { try { shell.openPath(lastDir); } catch {} } // 결과 폴더 열기
   return { ok: true, results };
 });
-// 참조음성 목록 — ~/.flow-app/ref-audio 의 음성 파일들 (드롭다운 + 미리듣기용)
-ipcMain.handle('list-ref-audio', () => {
+// 참조음성 목록 — ① 서버 공용 라이브러리(☁, 이 PC 에 파일 없어도 됨) + ② 이 PC 의 ~/.flow-app/ref-audio
+//   서버 목소리는 path 를 **`srv:<이름>`** 으로 준다. 이 접두만 보고 합성 때 업로드 대신 이름을 보낸다
+//   (프리셋 필드를 늘리지 않으려는 의도적 선택 — 옛 프리셋의 일반 경로는 그대로 동작).
+ipcMain.handle('list-ref-audio', async () => {
+  const out = [];
+  try {
+    const ASR = require('./tts/asr-client');
+    for (const v of await ASR.listServerVoices()) {
+      if (v && v.name) out.push({ name: `☁ ${v.name}`, path: `srv:${v.name}`, server: true });
+    }
+  } catch {}
   const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
   try {
-    return fs.readdirSync(dir).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)).map((f) => ({ name: f, path: path.join(dir, f) }));
-  } catch { return []; }
+    for (const f of fs.readdirSync(dir).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f))) {
+      out.push({ name: f, path: path.join(dir, f) });
+    }
+  } catch {}
+  return out;
 });
+// `srv:<이름>`(서버 공용 목소리) → 이 PC 에 실제 파일이 있으면 그 경로, 없으면 null.
+//   메인 PC 는 라이브러리 폴더가 로컬에 있으므로 미리듣기·폴더열기가 그대로 된다.
+//   아내 PC 처럼 파일이 없는 곳에서는 null → 미리듣기만 안 되고 합성은 정상(서버가 갖고 있으므로).
+const SERVER_VOICE_DIR = 'D:\\TTS_Model\\ref-audio';
+function resolveRefPath(p) {
+  const s = String(p || '');
+  if (!s) return null;
+  if (!s.startsWith('srv:')) return s;
+  const f = path.join(SERVER_VOICE_DIR, s.slice(4) + '.wav');
+  try { return fs.existsSync(f) ? f : null; } catch { return null; }
+}
 // 참조음성 폴더 열기 — 선택된 참조음성이 있으면 그 폴더, 없으면 기본 ref-audio 폴더.
 //   (같은 이름의 .txt 파일이 참조텍스트로 자동 사용되므로, 사용자가 wav+txt 를 이 폴더에서 관리)
-ipcMain.handle('open-ref-folder', (_e, p) => {
+ipcMain.handle('open-ref-folder', (_e, p0) => {
+  const p = resolveRefPath(p0);
   let dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
   try { if (p && fs.existsSync(p)) dir = path.dirname(p); } catch {}
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
@@ -4020,7 +4044,9 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-ipcMain.handle('read-audio', (_e, p) => {
+ipcMain.handle('read-audio', (_e, p0) => {
+  const p = resolveRefPath(p0);   // `srv:<이름>` 도 이 PC 에 실제 파일이 있으면 미리듣기 가능
+  if (!p) return null;
   try {
     const buf = fs.readFileSync(p);
     const ext = path.extname(p).toLowerCase();

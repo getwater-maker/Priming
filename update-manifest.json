@@ -1,5 +1,5 @@
 {
-  "version": "0.2.96",
+  "version": "0.2.97",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "6f4248ef4ca8af29cf9ff5c6d2f2ed4d0c1f8cf0",
@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "64c1df2dbbb1671cfff6232130f5f14301e894b7",
-    "CLAUDE.md": "672705ecac6c79eb555ce4e778abb5e3ef0c4b9f",
+    "CLAUDE.md": "aa868d62f7f3400dff8532c41dbbc7df49e7dc5d",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
     "comfy/image_z_image_turbo.json": "f0eedbd0b79416b35eaa0ba0748b8d1e7a2f484d",
     "comfy/video_ltx2_3_i2v.json": "dd3d7d923b341e4dd88d1381a623e33eb610db08",
@@ -45,7 +45,7 @@
     "core/parsers/book-parser.js": "09dc44896aebcfb624486439f0062ac572155e62",
     "core/parsers/longform-parser.js": "d90fbe3f426cebee884ed76d553c1aff1f91164a",
     "core/parsers/playlist-parser.js": "0ec89f8cc8b0deb3b9b3d59844ae799c5481ecb6",
-    "core/pipeline.js": "0d53f1973dd5872b1b77fb19a59b8216e44e2fea",
+    "core/pipeline.js": "3d12947d576e5269bf1acfd1e58e1ea0003e9829",
     "core/playlist-video.js": "778de9f558cd66934fd944f3eb32611fabfc1828",
     "core/premiere-xml.js": "81070e3449d35d42f431805e565a72b83c5175c6",
     "core/project-model.js": "7c31feb413dbae38b8f683f1a56975ac36b0cf13",
@@ -68,15 +68,15 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "cf341221315558eeb1676b4279270976684389d2",
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
-    "main.js": "c6ee8f932596ba930ede77587fbb98d8ddd572b8",
+    "main.js": "f99b965738f802585f534e031fec332c497b67b4",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "d912b1740c3080e4e38b95fdb6adf00abc5874f4",
+    "package.json": "3a419c0eb81a4ecc8c4c6810447e2c2d720e6fe5",
     "preload.js": "333f7a1cc0075f5207583bd970a348226a5edf65",
-    "renderer/dist/assets/index-BAnea7GT.js": "638cc0cdb2f08533b461287cd0a30d6b049efeed",
+    "renderer/dist/assets/index-BlHOpCCZ.js": "747dcfc72a0379d4c4401c1d58824441888e7ebb",
     "renderer/dist/assets/index-CH0F46NE.css": "c7c1e4969c55dcdcb1f552fefdb77167e49ca59b",
-    "renderer/dist/index.html": "33009a0e544b1d6ef4d294349e4fdc26fcc43dae",
+    "renderer/dist/index.html": "e07d623dde5cf97f3f8fee12622bbbeaa4725000",
     "renderer/index.html": "11a8eca1c5cc6c227f210236f7b09853e35ad73b",
-    "tts/asr-client.js": "4f548bdd8e5e7f41ab4b7090e4ee86c1695a77d0",
+    "tts/asr-client.js": "2d9ef19290cac1be30151348383f78347f50a034",
     "tts/gemini-usage-store.js": "8d0948c2b8a0116d5465f3b6ee2be410bd9be68d",
     "tts/genspark-store.js": "9409bee953d0dec4ac33ed759587599d7a9f4335",
     "tts/grok-store.js": "26bf7c8040062794d3a29d01e7dbe8ffee5271b9",
@@ -84,7 +84,7 @@
     "tts/omnivoice-dict-store.js": "822c97239a605d3771471dd667c5d38fa2806935",
     "tts/preset-store.js": "b000be2c51d420be3523f93717670bcd3bda6989",
     "tts/providers/gemini-provider.js": "b687504f08bea8d15eae6365ac165b6b5d52e0df",
-    "tts/providers/omnivoice-provider.js": "191eda87b972d687d315a69d3dbef85cf9da8f23",
+    "tts/providers/omnivoice-provider.js": "6844ca3be3f76852968802df5b7cca7e32ff8024",
     "tts/quiet-http.js": "56b748aae951d217f6b512d260020f361aca4d18",
     "tts/secret-store.js": "412ad32d1a5d4a8b68ce9ef28c4e7a94b4cf380d",
     "tts/text-pronouncer.js": "479954cd238edbea37389c5a3e1f7646cb2d39eb",
@@ -105,6 +105,7 @@
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
     "vrew/vrew-builder.js": "195614ce5f546b784f765f0318b51d86a4b8abd1",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65",
-    "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad"
+    "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad",
+    "🟨네모의 꿈🟨- 옐리, 이핑구, 타코아끼, 채스터, 하네, 유이, 토뎀이, 김장미 커버ㅣ 로블록스 유튜버 합창.txt": "5926abf0e162003f0f725fffaa0aeb255bebd2a7"
   }
 }

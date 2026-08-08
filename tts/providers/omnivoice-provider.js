@@ -93,8 +93,16 @@ class OmniVoiceProvider {
     }
     if (opts.seed != null && opts.seed !== '') payload.seed = parseInt(opts.seed, 10);
 
-    // Voice Clone 모드 — 로컬 파일을 합성 직전 서버에 업로드 후 토큰화
-    if (opts.refAudioPath && opts.refText) {
+    // Voice Clone — 서버 공용 라이브러리의 목소리(이름만 보냄, 업로드 불필요).
+    //   서버가 wav 와 참조텍스트(.txt)를 모두 갖고 있으므로 **이 PC 에 파일이 없어도 된다.**
+    //   → 아내 PC 처럼 원격만 쓰는 PC 가 참조음성 파일을 들고 있을 필요가 사라진다.
+    //   ⚠ 서버에 그 이름이 없으면 400 으로 실패한다(조용히 다른 목소리로 나가지 않게 — 의도된 동작).
+    if (opts.refName) {
+      payload.ref_name = String(opts.refName);
+      if (opts.refText) payload.ref_text = opts.refText;   // 있으면 우선, 없으면 서버 .txt 사용
+    }
+    // Voice Clone(기존) — 로컬 파일을 합성 직전 서버에 업로드 후 토큰화
+    else if (opts.refAudioPath && opts.refText) {
       payload.ref_token = await this._ensureToken(opts.refAudioPath);
       payload.ref_text = opts.refText;
     }

@@ -26,6 +26,27 @@ function _authHeaders() {
 }
 
 /**
+ * /ref-voices — 서버 공용 참조음성 목록.
+ *   보이스디자인으로 만든 목소리는 서버(메인 PC)의 라이브러리에 모인다. 이걸 쓰면
+ *   **이 PC 에 wav 파일이 없어도** 이름만으로 합성할 수 있다(아내 PC 처럼 원격만 쓰는 PC 용).
+ *   서버가 구버전이면 404 → 빈 배열(호출부는 로컬 파일만 보여주면 된다).
+ */
+async function listServerVoices() {
+  const base = _baseUrl();
+  if (!base) return [];
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    let res;
+    try { res = await fetch(base + '/ref-voices', { headers: { ..._authHeaders() }, signal: ctrl.signal }); }
+    finally { clearTimeout(t); }
+    if (!res.ok) return [];
+    const j = await res.json();
+    return Array.isArray(j.voices) ? j.voices : [];
+  } catch (_) { return []; }
+}
+
+/**
  * /asr/status — Whisper 로드 여부 + 백엔드 도달 가능성. 실패해도 transcribe 는 시도 가능.
  */
 async function checkAsrStatus() {
@@ -136,4 +157,4 @@ async function transcribeLong(audioPath, opts = {}) {
   }
 }
 
-module.exports = { transcribe, transcribeLong, checkAsrStatus };
+module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices };
