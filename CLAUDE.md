@@ -7,6 +7,72 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎙 OmniVoice 를 `D:\TTS_Model\omnivoice` 로 이관 — TTS 를 앱에서 독립 (2026-08-08, 앱 코드 무변경)
+> 계기(로이): "TTS 모델을 Priming 에 종속시키지 말고 별도로 두고 Priming 이 활용하게. 그러면 TTS 구축 따로,
+>   Priming 수정 따로 할 수 있다." + "**기존처럼 PrimingFlow 하위에 TTS 모델이 있어서 안 쓰는 PrimingFlow 를
+>   삭제하지 못하는 상황**이 생기지 않을 것 같은데" → **정확한 진단이었다**(아래 정정 참조).
+- **새 구조 — 폴더 하나가 곧 그 모델의 전부(자족형)**:
+  ```
+  D:\TTS_Model\
+      omnivoice\   env\(전용 파이썬 7.6GB) hf\(가중치 4.6GB) data\(발음사전)
+                   api.py  apikey.txt  start_server.pyw  server.log  logs\
+      ref-audio\   참조음성 wav+txt (공용 — 모델이 늘어도 여기 하나)
+      goodvoice\   ← 새 모델은 이렇게 나란히 추가. 포트만 다르게(omnivoice 9881·보이스디자인 9893)
+  ```
+  Priming 은 `~/.flow-app/tts-config.json` 의 **주소만** 알면 된다 → 모델 교체 시 앱 수정 0.
+- **이관 방법**: `conda create --prefix … --clone D:\miniconda3\envs\OmniVoice` (**다운로드 없이 정확 복제** —
+  버전 어긋남 위험 0). 모델 캐시는 **`mv` 로 이동**(같은 드라이브라 즉시 + 심볼릭 링크 50개 보존).
+  ⚠ `cp -r` 은 링크를 실제 파일로 복제해 **4.6GB → 16GB 로 부푼다**(실측, 되돌렸음).
+- **`start_server.pyw` 가 하는 일**(런처를 따로 둔 이유): ① `HF_HOME`·`FLOW_DATA_DIR`·`FLOW_DICT_PATH` 를
+  **이 폴더 안으로 고정**(환경변수를 셸에서 넣으면 자동시작마다 빠뜨린다) ② `FLOW_API_KEY` 를 `apikey.txt`
+  에서 읽음(코드에 키를 안 박는다) ③ **stdout/stderr 를 server.log 파일로 돌린다**.
+- 🔑 **함정 3개(전부 실측으로 겪음)**:
+  1. **pythonw 로 띄우면 포트조차 안 열리고 조용히 죽는다** — 콘솔이 없어 `sys.stdout` 이 무효인데 tqdm 진행바·
+     logging 이 출력하다 예외. → 런처가 **api.py 를 import 하기 전에** 파일 핸들로 교체. (python.exe 로는 정상 기동
+     → 이 차이 때문에 원인을 놓치기 쉽다)
+  2. 인자는 `--host` 가 아니라 **`--address`** (api.py:618). 틀리면 즉시 종료.
+  3. 🔴 **`-s` 없이 실행하면 TTS 가 500** — `'numpy.ndarray' object has no attribute 'dim'`.
+     `C:\Users\Pink-Desktop\AppData\Roaming\Python\Python311\site-packages` 에 **omnivoice 0.1.5** 가 따로 깔려
+     있어 env 안의 **0.1.2** 를 가린다. 0.1.5 의 `generate()` 는 numpy 를 돌려주는데 api.py 는 tensor 를 기대한다.
+     **옛 서버가 멀쩡했던 건 SYSTEM 계정이라 그 사용자 폴더가 애초에 안 보였기 때문일 뿐**이다(내 계정으로 켰다면
+     똑같이 깨졌다). → 실행은 반드시 **`pythonw.exe -s start_server.pyw`**.
+- **자동시작**: 예약작업 **`OmniVoice_Backend`**(SYSTEM·부팅 시)의 대상을 새 경로로 변경.
+  ⚠ 이 작업은 **관리자 권한 필수**(비관리자는 `Get-ScheduledTask` 로 조회조차 안 된다).
+- **검증(실측)**: 앱의 실제 provider 코드로 호출 → **옛 서버와 동일 출력(177KB · 3.78초 음성)** ·
+  재부팅 후 **부팅 1분 만에 새 폴더에서 자동 기동**(20:16:46 부팅 → 20:17:47 모델 로드 완료) ·
+  로컬·**Tailscale 100.112.7.63:9881 둘 다 200** · **검은 콘솔 창 0개** · 유휴 GPU 점유 4,400→2,939MB.
+- 📌 **참조음성은 각 PC 에 로컬 파일이 있어야 한다**: provider `_ensureToken()` 이 `fs.readFileSync` 로 읽어
+  `/upload-ref-audio` 로 **파일 바이트를 올리고** 토큰을 받는 구조 — 서버는 클라이언트 경로를 모른다.
+  따라서 `D:\TTS_Model\ref-audio` 는 **메인 PC 용**이고 아내 PC 는 자기 `~/.flow-app/ref-audio` 를 쓴다.
+  ⏳ 미적용: main.js 3곳(`list-ref-audio`·폴더열기·보이스디자인 저장)이 `~/.flow-app/ref-audio` **하드코딩** →
+  `D:\TTS_Model\ref-audio` 우선 + 없으면 홈 폴더 폴백으로 바꿔야 정본이 된다(아내 PC 때문에 폴백 필수).
+  🔜 더 나은 해법: 서버가 참조음성 라이브러리를 갖고 클라이언트는 이름만 고르게(`/voices` + `ref_name`)
+      → 아내 PC 에 wav 가 아예 불필요해진다. [[tts-standard-contract]]
+- 🔴 **정정 2건(내 앞선 진단이 틀렸다)**:
+  1. **실제 돌던 OmniVoice 는 `D:\PrimingFlow\rebuild\tts\omnivoice-backend\api.py` 였다.** 내가 "PrimingFlow 가
+     아니라 D:\Work\TTS_Engine 에 있다"고 한 건 오진. 구분법 = **인증(X-API-Key)·`/upload-ref-audio`·`/asr-upload`
+     가 있는 쪽이 진짜**(`06_OmniVoice` 판에는 셋 다 없고 `/gpu` 만 있다).
+  2. **2026-07-22 GPU 온도 로거는 한 번도 동작한 적이 없다** — 돌지 않는 `06_OmniVoice\api.py` 에 넣었다
+     (`logs` 폴더조차 안 생겼다). 위 CLAUDE.md 항목의 "서버 재시작 필요" 기록도 틀렸다. GPU 온도는 미기록 상태.
+
+## 🧹 D: 대청소 — 236GB → 559GB (2026-08-08)
+- **삭제**: 휴지통 33,155개 48.3GB(대부분 옛 TTS 출력 wav) · **`D:\ComfyUI` 215.7GB**(로컬 GPU 이미지가 클라우드보다
+  12배 느려 버린 경로. 8188 미가동·마지막 로그 7/31. 앱 워크플로 4개는 전부 `D:\Priming\comfy\` 안이고 클라우드
+  모드라 무영향 확인 후 삭제) · **conda env 9개 46.7GB**(GPTSoVits·audiobook·CosyVoice·Qwen3TTS·CohereTranscribe·
+  VoxCPM2·OuteTTS·Zonos·Kokoro) · `D:\PrimingFlow` 14.6GB · `D:\Shots-maker` 3.1GB · `D:\PrimingBook` 1.3GB.
+- 🚫 **삭제 금지(확인된 의존)**: **`D:\miniconda3\envs\bgm`** — `D:\Priming\ace-step\venv` 가 **stdlib 을 여기서
+  읽는다**(venv 는 자기 stdlib 이 없다. 실측: `os.__file__` = `envs\bgm\Lib\os.py`) · **`D:\miniconda3` 본체** —
+  `qwen-design\venv` 가 의존 · `envs\OmniVoice` — 이관 원본이라 당분간 백업으로 남김.
+- 🔑 **권한 함정**: `D:\miniconda3` 를 지울 수 없었던 이유 = **윈도우 재설치 전 계정의 SID** 가 소유자로 남아 있고
+  현재 계정은 `Users(읽기·실행)` 뿐이었다(D: 는 포맷을 안 하니 옛 ACL 이 살아남는다). **혼자 쓰는 PC 라도 권한이
+  없을 수 있다.** → 관리자 창에서 `takeown /f … /r /d y` + `icacls … /grant "<계정>:(F)" /t` 로 해결(완료).
+  파일 20만 개면 10~20분 걸리는데 **진행 표시가 없어 멈춘 것처럼 보인다**(icacls 프로세스 존재로 확인 가능).
+- ⚠ 슈퍼토닉(9882)은 자동시작이 `PrimingFlow\...\supertonic-backend\start-autorun.bat` 을 가리켰기 때문에
+  **폴더 삭제로 함께 사라졌다**(재부팅 후 9882 닫힘 확인). 예약작업 검색으로는 못 찾았던 등록의 정체가 이것.
+- ⚠ Ollama: 설치돼 있고 모델 26GB(C:)가 있으나 **자동시작 등록이 없어 평소엔 꺼져 있다.** 게다가 사용자 환경변수
+  `OLLAMA_MODELS=D:\OllamaModels` 가 **빈 폴더**를 가리켜 모델 0개로 보인다(모델 실체는 `C:\Users\...\.ollama`).
+  프롬프트 자동작성·BGM 무드는 Ollama 실패 시 Gemini/기본값으로 폴백하므로 작업은 막히지 않는다.
+
 ## 🖥 부팅 때 뜨던 검은 「보이스디자인서버」 창 제거 — 파이썬 자체 로깅 + 바로가기 직접 pythonw (2026-08-05, v0.2.95)
 > 증상: 부팅하면 검은 콘솔 창(제목 `보이스디자인서버`)이 계속 떠 있음.
 - **원인 = 내가 v0.2.94 에서 잘못 판단한 것**. 그때 주석에 "pythonw.exe 는 GUI 서브시스템이라 cmd 가 대기하지 않는다"
