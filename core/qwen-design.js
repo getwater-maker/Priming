@@ -192,6 +192,36 @@ async function generate({ instruct, text, language = 'Korean' }, logger = () => 
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 }
 
+// ── 공용 목소리 라이브러리 (서버 보관) ───────────────────────────────────────
+//  왜: 보이스디자인은 **메인 PC 서버**가 만드는데 결과 wav 는 만든 사람 PC 에만 저장돼서
+//  나와 아내가 서로의 목소리를 못 썼고, 그 PC 를 초기화하면 사라졌다.
+//  → 저장할 때 서버에도 같은 것을 보내 한 곳(D:\TTS_Model\ref-audio)에 모은다.
+//  ⚠ 구버전 서버는 이 엔드포인트가 없어 404 → 호출부는 **경고만** 하고 진행한다(로컬 저장은 이미 끝난 상태).
+async function saveVoice({ name, text = '', instruct = '', wavBuffer }) {
+  if (!wavBuffer || wavBuffer.length < 44) return { ok: false, error: 'wav 데이터가 없습니다' };
+  try {
+    const r = await _postJson('/save-voice', {
+      name: String(name || '').trim(),
+      text: String(text || ''),
+      instruct: String(instruct || ''),
+      wav_b64: Buffer.from(wavBuffer).toString('base64'),
+    }, 60000);
+    if (r.status === 404) return { ok: false, error: 'unsupported' };  // 구버전 서버
+    const j = r.json || {};
+    if (r.status === 200 && j.ok) return { ok: true, name: j.name, path: j.path };
+    return { ok: false, error: j.error || `HTTP ${r.status}` };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+
+/** 서버에 모인 공용 목소리 목록. 서버가 없거나 구버전이면 빈 배열. */
+async function listVoices() {
+  try {
+    const r = await _get('/voices', 5000);
+    const j = r.json || {};
+    return { ok: true, dir: j.dir || '', voices: Array.isArray(j.voices) ? j.voices : [] };
+  } catch { return { ok: false, dir: '', voices: [] }; }
+}
+
 async function stop(logger = () => {}) {
   S.started = false;
   // ⚠ **우리가 띄운 서버가 아니면 죽이지 않는다** — 원격 서버, 또는 이 PC 에서 상시 실행(작업 스케줄러/배치)
@@ -221,4 +251,4 @@ async function status() {
   };
 }
 
-module.exports = { start, generate, stop, status, health, isInstalled, resolveDir, isRemote, remoteTarget, loadConfig, saveConfig, PORT };
+module.exports = { start, generate, stop, status, health, isInstalled, resolveDir, isRemote, remoteTarget, loadConfig, saveConfig, saveVoice, listVoices, PORT };

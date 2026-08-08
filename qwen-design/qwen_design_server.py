@@ -59,6 +59,31 @@ IDLE_TIMEOUT = 600             # 초. 0 이면 자동 해제 없음(--idle-timeo
 
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 
+# ── 목소리 라이브러리 (공용 참조음성 보관소) ──────────────────────────────────
+#  왜: 보이스디자인은 이 서버(메인 PC)가 만드는데, 예전엔 결과 wav 가 **만든 사람 PC 에만**
+#  저장돼서 나와 아내가 서로의 목소리를 못 썼고, 그 PC 를 초기화하면 사라졌다.
+#  → 저장 요청을 서버가 받아 여기에 모아 둔다(누가 만들든 한 곳에 + 백업 겸용).
+#  기본값은 실제 운용 경로 D:\TTS_Model\ref-audio, 없으면 이 스크립트 옆 ref-audio.
+VOICE_LIB = None  # main() 에서 확정
+
+
+def _default_voice_lib():
+    d = r"D:\TTS_Model\ref-audio"
+    if os.path.isdir(d):
+        return d
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "ref-audio")
+
+
+def _safe_name(name):
+    """파일명으로 쓸 수 없는 문자 제거 + 경로 탈출 차단(.. 이나 슬래시 금지)."""
+    name = str(name or "").strip()
+    for ch in '\\/:*?"<>|':
+        name = name.replace(ch, "")
+    name = name.replace("..", "").strip()
+    if name.lower().endswith(".wav"):
+        name = name[:-4]
+    return name.strip()
+
 
 def _touch():
     _STATE["last_used"] = time.time()
@@ -172,7 +197,31 @@ class Handler(BaseHTTPRequestHandler):
                 "lazy": True,
                 "idleTimeout": IDLE_TIMEOUT,
                 "idleSec": int(idle) if idle is not None else None,
+                # 공용 목소리 라이브러리 지원 여부(구버전 앱은 무시함)
+                "voiceLib": VOICE_LIB,
             })
+        # 공용 목소리 목록 — 누가 만들었든 이 서버에 모인 참조음성 전부.
+        elif self.path.rstrip("/") == "/voices":
+            items = []
+            try:
+                for fn in sorted(os.listdir(VOICE_LIB)):
+                    if not fn.lower().endswith(".wav"):
+                        continue
+                    stem = fn[:-4]
+                    txt = ""
+                    tp = os.path.join(VOICE_LIB, stem + ".txt")
+                    if os.path.isfile(tp):
+                        try:
+                            with open(tp, encoding="utf-8") as f:
+                                txt = f.read().strip()
+                        except Exception:
+                            pass
+                    p = os.path.join(VOICE_LIB, fn)
+                    items.append({"name": stem, "text": txt, "bytes": os.path.getsize(p)})
+            except Exception as e:
+                self._json(500, {"error": "%s: %s" % (type(e).__name__, e)})
+                return
+            self._json(200, {"dir": VOICE_LIB, "voices": items})
         else:
             self._json(404, {"error": "not found"})
 
@@ -193,6 +242,46 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/release":
             released = _unload_model("release")
             self._json(200, {"status": "released", "released": bool(released)})
+            return
+        # 공용 라이브러리에 목소리 등록 — 앱이 자기 PC 에 저장한 뒤 같은 것을 여기로도 보낸다.
+        #   body {name, text, instruct, wav_b64}. 같은 이름이 있으면 _2, _3… 으로 피한다(덮어쓰지 않음).
+        if path == "/save-voice":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                req = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                name = _safe_name(req.get("name"))
+                if not name:
+                    self._json(400, {"error": "name 이 비어 있습니다"})
+                    return
+                b64 = req.get("wav_b64") or ""
+                if not b64:
+                    self._json(400, {"error": "wav_b64 가 비어 있습니다"})
+                    return
+                import base64
+                data = base64.b64decode(b64)
+                if len(data) < 44 or data[:4] != b"RIFF":
+                    self._json(400, {"error": "wav 데이터가 아닙니다"})
+                    return
+                os.makedirs(VOICE_LIB, exist_ok=True)
+                base, i = name, 2
+                while os.path.exists(os.path.join(VOICE_LIB, base + ".wav")):
+                    base = "%s_%d" % (name, i)
+                    i += 1
+                wav_path = os.path.join(VOICE_LIB, base + ".wav")
+                with open(wav_path, "wb") as f:
+                    f.write(data)
+                # 같은 이름 .txt = 참조텍스트(OmniVoice Voice Clone 이 필요로 한다)
+                with open(os.path.join(VOICE_LIB, base + ".txt"), "w", encoding="utf-8") as f:
+                    f.write(str(req.get("text") or "").strip())
+                inst = str(req.get("instruct") or "").strip()
+                if inst:  # 어떤 설명으로 만든 목소리인지 남겨 둔다(나중에 재현·수정용)
+                    with open(os.path.join(VOICE_LIB, base + ".instruct.txt"), "w", encoding="utf-8") as f:
+                        f.write(inst)
+                _log("voice saved: %s.wav (%d bytes) -> %s" % (base, len(data), VOICE_LIB))
+                self._json(200, {"ok": True, "name": base, "path": wav_path})
+            except Exception:
+                _log("/save-voice ERROR:\n" + traceback.format_exc())
+                self._json(500, {"error": "save 실패"})
             return
         if path != "/design":
             self._json(404, {"error": "not found"})
@@ -235,7 +324,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global MODEL_ID, IDLE_TIMEOUT
+    global MODEL_ID, IDLE_TIMEOUT, VOICE_LIB
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9893)
@@ -244,9 +333,16 @@ def main():
                     help="이 초 동안 사용이 없으면 모델을 내려 VRAM 반납(0=해제 안 함)")
     ap.add_argument("--preload", action="store_true",
                     help="시작할 때 모델을 미리 로드(옛 동작). 기본은 지연 로딩.")
+    ap.add_argument("--voice-lib", default=None,
+                    help="공용 목소리 라이브러리 폴더(기본 D:\\TTS_Model\\ref-audio)")
     args = ap.parse_args()
     MODEL_ID = args.model
     IDLE_TIMEOUT = max(0, int(args.idle_timeout))
+    VOICE_LIB = args.voice_lib or _default_voice_lib()
+    try:
+        os.makedirs(VOICE_LIB, exist_ok=True)
+    except Exception:
+        pass
 
     # 기본 = 지연 로딩(서버만 즉시 뜨고 VRAM 0). --preload 면 옛 동작처럼 미리 올린다.
     if args.preload:
@@ -255,7 +351,8 @@ def main():
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     _log(f"server up: http://{args.host}:{args.port} "
-         f"(health/prepare/design/release/shutdown) · lazy-load, idle-timeout={IDLE_TIMEOUT}s")
+         f"(health/voices/prepare/design/save-voice/release/shutdown) · "
+         f"lazy-load, idle-timeout={IDLE_TIMEOUT}s, voice-lib={VOICE_LIB}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

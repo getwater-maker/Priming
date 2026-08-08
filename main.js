@@ -749,6 +749,7 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
     const tmpPath = path.join(tmpDir, 'preview.wav');
     fs.writeFileSync(tmpPath, r.buffer);
     S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용
+    S.vdLastInstruct = instruct;                   // 어떤 설명으로 만든 목소리인지 — 서버 라이브러리에 함께 남긴다
     return { ok: true, tempPath: tmpPath, text };
   } catch (e) { return { ok: false, error: '임시 저장 실패: ' + String((e && e.message) || e) }; }
 });
@@ -766,6 +767,14 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     fs.copyFileSync(S.vdLastTemp, wavPath);
     fs.writeFileSync(path.join(dir, base + '.txt'), S.vdLastText || '', 'utf8');  // 같은 이름 .txt = 참조텍스트
     log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)`);
+    // 서버(메인 PC)의 공용 목소리 라이브러리에도 등록 — 나·아내가 만든 목소리를 한 곳에 모아 서로 쓸 수 있게.
+    //   ⚠ 로컬 저장은 이미 끝났으므로 여기서 실패해도 **경고만** 하고 성공으로 반환한다(작업을 막지 않는다).
+    try {
+      const r = await QD.saveVoice({ name: base, text: S.vdLastText || '', instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
+      if (r.ok) log(`   ☁ 공용 라이브러리에도 등록: ${r.name}.wav (${r.path})`);
+      else if (r.error === 'unsupported') log('   ⚠ 서버가 공용 라이브러리를 지원하지 않습니다(구버전) — 이 PC 에만 저장됨');
+      else log(`   ⚠ 공용 라이브러리 등록 실패 — 이 PC 에만 저장됨 (${r.error})`);
+    } catch (e) { log('   ⚠ 공용 라이브러리 등록 오류: ' + String((e && e.message) || e)); }
     return { ok: true, path: wavPath, name: base + '.wav' };
   } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
 });

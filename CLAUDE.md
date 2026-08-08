@@ -7,6 +7,38 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ☁ 보이스디자인 목소리를 서버 공용 라이브러리에 모음 (B안 1단계) (2026-08-08, v0.2.96)
+> 문제(로이): "아내도 나도 보이스디자인으로 음성을 만들어 쓰는데 **그 파일을 서로 공유하지 않는다.**"
+- **원인(구조)**: 목소리는 **메인 PC 의 9893 서버**가 만드는데, 결과 wav 는 **요청한 PC 의**
+  `~/.flow-app/ref-audio` 에만 저장됐다 → 서로 못 쓰고, 그 PC 를 초기화하면 사라진다.
+- **선택지 비교 후 B안 채택**: (A) 구글드라이브 공유 폴더 — 코드는 쉽지만 **G: 가 멈추면 참조음성 읽기가 막혀
+  TTS 가 통째로 실패**(2026-08-07 실제로 G: 쓰기 불능 사고를 겪음) + 동기화 지연. **(B) 서버 보관** — 참조음성은
+  어차피 매번 서버로 업로드되는 구조이니 서버에 두는 게 자연스럽다. G: 의존을 늘리지 않는다.
+- **1단계 구현(이번)**: `qwen_design_server.py` 에 **`POST /save-voice`**(name·text·instruct·wav_b64) +
+  **`GET /voices`**(목록) 신설. 저장 위치 `VOICE_LIB` = `--voice-lib` 인자 · 기본 **`D:\TTS_Model\ref-audio`**
+  (없으면 스크립트 옆 `ref-audio`). `/health` 에 `voiceLib` 추가. 같은 이름은 **`_2`,`_3` 으로 피하고 덮어쓰지 않음**,
+  `_safe_name()` 이 `..`·슬래시·금지문자 제거(경로 탈출 차단), `RIFF` 헤더 검사로 비-wav 거부.
+  `<name>.txt`(참조텍스트) + `<name>.instruct.txt`(만든 설명 — 재현·수정용)도 함께 저장.
+- **앱**: `core/qwen-design.js` 에 `saveVoice()`·`listVoices()` 추가(원격/로컬 공용 `_target()` 사용).
+  `qwen-design-save` 가 **로컬 저장 후** 서버에도 등록 — ⚠ **실패해도 경고만** 하고 성공 반환(로컬 저장은 이미 끝났고,
+  구버전 서버는 404 → `unsupported` 로 구분해 안내). generate 시 `S.vdLastInstruct` 보관.
+- **검증(실측 4케이스)**: 정상 저장 · 같은 이름 → `_2` · `../../탈출시도` → 라이브러리 안에 `탈출시도.wav`(탈출 차단) ·
+  비-wav 거부. `/voices` 가 기존 목소리 10개를 그대로 목록화. 검증 파일은 삭제함.
+- ⏳ **2단계(미구현)**: OmniVoice 서버에 `/ref-voices` + `ref_name` 지원 → 클라이언트가 **이름만 골라** 합성.
+  그러면 **아내 PC 에 wav 파일이 아예 불필요**해진다. 현재는 합성 시 여전히 로컬 wav 를 업로드하는 구조라
+  (`_ensureToken` 이 `fs.readFileSync`), 각 PC 에 파일이 있어야 한다. [[tts-standard-contract]]
+- ⚠ `qwen-design/` 는 매니페스트 제외라 **서버 파일은 라이트 업데이트로 배포되지 않는다**(메인 PC 로컬).
+  앱 쪽(main.js·core/qwen-design.js)은 배포된다 → 아내 PC 는 앱만 최신이면 이 기능이 동작한다.
+
+## 🧹 ACE-Step(BGM·플리 음악) 제거 — 13.1GB (2026-08-08)
+- 판단 근거(실측): **BGM 기본값 OFF**(App.jsx:135) · 플리 출력 폴더에 파일럿 1개뿐 **음악 파일 0개**(7/12) ·
+  ace-step 설정 파일 없음 → 실질 미사용 확인.
+- **삭제**: `D:\Priming\ace-step\venv` 5.35GB + `C:\Users\…\.cache\ace-step` 7.71GB.
+- **남긴 것**(총 13KB): `1_최초설치.bat`·`ace_step_server.py` 등 스크립트 6개 + `core/ace-step.js`(매니페스트 포함).
+  → 나중에 필요하면 **`1_최초설치.bat` 한 번으로 복원**된다. BGM 을 켜도 서버가 없으면 "BGM 없이 진행"으로
+  graceful 처리되므로 작업이 깨지지 않는다.
+- ⚠ 참고: `C:\Users\…\.cache\huggingface\hub` 에 **61.5GB** 가 남아 있다(옛 실험 모델들). C: 정리 시 최대 후보.
+
 ## 🎙 OmniVoice 를 `D:\TTS_Model\omnivoice` 로 이관 — TTS 를 앱에서 독립 (2026-08-08, 앱 코드 무변경)
 > 계기(로이): "TTS 모델을 Priming 에 종속시키지 말고 별도로 두고 Priming 이 활용하게. 그러면 TTS 구축 따로,
 >   Priming 수정 따로 할 수 있다." + "**기존처럼 PrimingFlow 하위에 TTS 모델이 있어서 안 쓰는 PrimingFlow 를
