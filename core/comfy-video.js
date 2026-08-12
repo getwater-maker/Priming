@@ -149,10 +149,19 @@ class ComfyVideo {
     for (const k of Object.keys(j)) { if (j[k] && j[k].outputs) return j[k].outputs; }
     return j;
   }
+  // i2v 생성 해상도 — **처음부터 1080p 급으로 뽑는다**(로이 2026-08-12).
+  //   예전엔 1280x704 로 뽑고 로컬 Real-ESRGAN 으로 1920x1080 업스케일했는데, 실측 결과 그 방식이
+  //   모든 면에서 불리했다: ① 느리다(704 생성 24.5s + 업스케일 43.1s = 67.6s vs 직접 1080p 41.3s)
+  //   ② 업스케일은 **로컬 GPU** 라 OmniVoice TTS 와 경합해 **TTS 를 1.8배 느리게** 만든다
+  //      (서버 로그 실측: 업스케일 중 RTF 1.26 / 끝난 뒤 0.70) ③ 화질도 업스케일본이 더 뭉갠다.
+  //   → 직접 생성은 클라우드에서만 돌아 로컬 GPU 점유가 0 이고, 업스케일 단계 자체가 필요 없어진다.
+  //   ⚠ LTX 는 변 길이가 32 의 배수여야 하므로 1080 이 아니라 **1088**. (16:9 는 실측 검증됨)
+  //   되돌리려면 이 값만 옛 값(1280x704 / 960x960 / 704x1280)으로 바꾸면 된다 — 업스케일은
+  //   maybeUpscale 이 해상도를 보고 자동으로 다시 동작한다.
   _videoDims(aspect) {
-    if (aspect === '16:9') return { w: 1280, h: 704 };
-    if (aspect === '1:1') return { w: 960, h: 960 };
-    return { w: 704, h: 1280 }; // 9:16
+    if (aspect === '16:9') return { w: 1920, h: 1088 };
+    if (aspect === '1:1') return { w: 1440, h: 1440 };
+    return { w: 1088, h: 1920 }; // 9:16
   }
   _snap4(frames) { return Math.max(5, 4 * Math.round((frames - 1) / 4) + 1); } // Wan length = 4n+1
   _buildGraph(uploadName, prompt, aspect, durSec) {

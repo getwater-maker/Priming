@@ -1680,10 +1680,23 @@ function imagesNeeded(project) {
 async function maybeUpscale(...args) { return withAwake('영상 업스케일', () => _maybeUpscaleCore(...args)); }
 async function _maybeUpscaleCore(project, logger, enabled) {
   if (!enabled) return;
-  const targets = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
-  if (!targets.length) return;
   const Upscaler = require('./core/upscaler');
   const [W, H] = (project.aspect === '1:1') ? [1080, 1080] : (project.aspect === '16:9') ? [1920, 1080] : [1080, 1920];
+  const cand = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
+  // 이미 목표 해상도 이상이면 업스케일할 이유가 없다 — comfy 가 처음부터 1080p 로 뽑기 시작했으므로
+  //   (comfy-video._videoDims) 새 영상은 여기서 전부 걸러진다. 옛 저해상도(1280x704) 영상이나 다른
+  //   엔진(Grok 등) 결과는 그대로 업스케일된다. 해상도로 판단하므로 설정을 되돌려도 자동으로 맞는다.
+  const MU = require('./core/media-utils');
+  const targets = [];
+  let already = 0;
+  for (const g of cand) {
+    let info = null;
+    try { info = await MU.getMediaInfo(g.videoPath); } catch {}
+    if (info && info.width >= W && info.height >= H) { already++; continue; }
+    targets.push(g);
+  }
+  if (already) logger(`⬆ 업스케일 생략 — 이미 ${W}x${H} 이상인 영상 ${already}개 (로컬 GPU 사용 안 함)`);
+  if (!targets.length) return;
   let done = 0;
   // ⚠ 경로 교체(NN.mp4→NN_1080.mp4)를 루프 안에서 pushDtoUpdate 하면, 그 그룹 <video> src 가 바뀌어 썸네일이
   //   리로드(빈 화면→다시 뜸)된다. 순차 업스케일이라 "하나 끝날 때마다 하나씩 깜빡" 이 반복됨. → 경로 교체는
@@ -2450,12 +2463,12 @@ ipcMain.handle('load-project', async () => {
 
 // ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
 // 전체 제작 코어 — 현재 활성 대본(S.parsed/S.outRoot)에 대해 TTS→이미지→영상→.vrew.
-//   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
+//   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew 로 .vrew 자동열기만 제어(탐색기는 열지 않음).
 async function runMakeAllCore(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true, openFolder = true } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -2498,7 +2511,13 @@ async function runMakeAllCore(opts = {}) {
   // Grok 한도 쿨다운 중이면 이번 실행에선 영상 생략(이미지만) — 헛되이 브라우저 띄우지 않음. 한도 풀린 뒤 영상만 이어서.
   const _grokCool = grokVideoPipeline ? grokCoolUntil() : 0;
   if (_grokCool) log(`⏭ Grok 한도 — ${fmtClock(_grokCool)}까지 영상 생략(이미지만 생성). 한도 풀린 뒤 '만들기'를 다시 누르면 빠진 영상만 이어서 만듭니다.`);
-  const videoPipeline = canParallel && grokVideoPipeline;
+  // ComfyUI 클라우드 비디오도 파이프라인에 포함(로이 2026-08-12) — comfy 는 **클라우드**에서 돌아
+  //   로컬 GPU(TTS)와 자원이 겹치지 않으므로 TTS 와 동시에 돌려도 서로 느려지지 않는다.
+  //   실측 근거: 대본마다 TTS 가 끝난 뒤에야 비디오를 시작해 편당 약 1.2분(5편 5.2분) 동안 TTS 서버가 놀았다.
+  //   ⚠ 업스케일은 로컬 GPU 라 TTS 와 겹치면 TTS 가 1.8배 느려지지만, 이제 comfy 가 1080p 로 직접 뽑아
+  //     maybeUpscale 이 해상도를 보고 건너뛴다 → 이 파이프라인에서 로컬 GPU 를 쓰는 일이 없다.
+  const comfyVideoPipeline = String(videoEngine) === 'comfy' || String(videoEngine).indexOf('comfy::') === 0;
+  const videoPipeline = canParallel && (grokVideoPipeline || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
 
@@ -2594,8 +2613,9 @@ async function runMakeAllCore(opts = {}) {
         const dirs = shortsDirs(outRoot, pr.shortsNum);
         const t0 = Date.now();
         try {
-          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인·Grok)…`);
-          const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, nums, grokDurOf(videoEngine));
+          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지·음성 준비 — 즉시 비디오 생성(파이프라인·${comfyVideoPipeline ? 'Comfy 클라우드' : 'Grok'})…`);
+          // 엔진 분기는 genGroupVideos 가 담당(grok / grok-api / comfy[::path]) — Grok 은 기존과 동일 호출.
+          const vr = await genGroupVideos(pr, dirs.media, nums, videoEngine);
           if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
           if (!S.abort) await maybeUpscale(pr, log, true);
         } catch (e) { log(`G${nums.join(',G')} 영상 실패: ${e.message}`); }
@@ -2714,7 +2734,8 @@ async function runMakeAllCore(opts = {}) {
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-  if (openFolder && !S.abort) shell.openPath(outRoot); // 중단 시 탐색기 자동 열기 생략
+  // ⚠ 작업 완료 시 탐색기 자동 열기는 폐지(로이 2026-08-12) — .vrew 만 열리면 충분하다.
+  //   큐로 여러 대본을 돌리면 폴더 창이 그 수만큼 쌓여 방해가 됐다. 폴더가 필요하면 헤더 '출력폴더' 버튼.
   log(S.abort
     ? `⏹ 중단됨 — 완료된 자산만 보존 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s)`
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
@@ -2722,14 +2743,14 @@ async function runMakeAllCore(opts = {}) {
 
 
 ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
-  await runMakeAllCore({ ...args, openVrew: true, openFolder: true });
+  await runMakeAllCore({ ...args, openVrew: true });
   return P.toDTO(S.parsed);
 }));
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
 //   실패해도 해당 항목만 '실패' 표시 후 다음 진행.
 //   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
-//   큐가 끝난 뒤 출력폴더만 1번 열기(창 폭주 방지). 폴더 열기(openFolder)는 항목마다는 끔 — 끝에 1번만.
+//   탐색기(출력폴더)는 어느 경우에도 자동으로 열지 않는다 — 필요하면 헤더 '출력폴더' 버튼.
 ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작', async () => {
   const plan = Array.isArray(args.plan) ? args.plan : [];
   const common = args.common || {};
@@ -2777,7 +2798,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
         clipMaxSec: clipMaxOf(ve), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
-        dry: false, openVrew: openEach, openFolder: false, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 끝에 1번만
+        dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
       });
       it.status = 'done'; okN++;
     } catch (e) {
@@ -2787,7 +2808,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     pushDtoUpdate();
   }
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
-  if (!S.abort) { try { if (S.outRoot) shell.openPath(S.outRoot); } catch {} } // 중단 시엔 폴더 자동 열기 생략(완료된 것처럼 보이지 않게)
+  // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 }));
 
