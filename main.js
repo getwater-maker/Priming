@@ -3505,6 +3505,8 @@ function bookLayoutOpts(args = {}) {
     coverTextColor: l.coverTextColor,
     // 특별 섹션(반복 코너) 키워드 + 출력 제외 섹션(구조 패널 체크 해제 — 원고 보존)
     specialKeyword: l.specialKeyword, excluded: Array.isArray(l.excluded) ? l.excluded : [],
+    // 영상 대본 모드 — 제작용 블록을 조판에서만 제외(대본 파일 불변). 미리보기·PDF·ePub 공통.
+    scriptMode: !!l.scriptMode, scriptHideShots: !!l.scriptHideShots,
   };
 }
 

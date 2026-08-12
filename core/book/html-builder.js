@@ -77,13 +77,43 @@ function blockHtml(b, book, ctx, srcAttr) {
   }
 }
 
+// ── 영상 대본 모드 필터 ───────────────────────────────────────────────────────
+//  제작용 이모지 마커로 시작하는 인용만 걸러낸다(본문 인용은 마커가 없으므로 안전).
+const SCRIPT_NOTE_RE = /^\s*(?:🎯|📝|🎨|🖼️?|🎬|🎞)/;
+//  제목 꼬리의 제작 표기 — `— 0:00~0:30 · I2V 5샷` / `(0:30~3:50)` / ` ★`
+function stripScriptTitle(t) {
+  return String(t || '')
+    .replace(/\s*[—-]\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}.*$/, '')
+    .replace(/\s*\(\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}\s*\)\s*$/, '')
+    .replace(/\s*★/g, '')
+    .trim();
+}
+function scriptFilter(blocks, ctx) {
+  if (!ctx || !ctx.scriptMode) return blocks || [];
+  const out = [];
+  for (const b of blocks || []) {
+    if (!b) continue;
+    if (b.type === 'quote' && SCRIPT_NOTE_RE.test(String(b.text || ''))) continue;  // 제작메모·프롬프트
+    if (b.type === 'hr') continue;                                                  // `---` 구분선
+    if (ctx.scriptHideShots && (b.type === 'h4' || b.type === 'h3') && /^샷\s*\d/.test(String(b.text || b.title || ''))) continue;
+    if (b.type === 'h3' || b.type === 'h4') {
+      const t = stripScriptTitle(b.text || b.title);
+      out.push(t === (b.text || b.title) ? b : { ...b, text: t, title: t });
+      continue;
+    }
+    out.push(b);
+  }
+  return out;
+}
+
 function blocksHtml(blocks, book, ctx, srcAttr) {
-  return (blocks || []).map((b) => blockHtml(b, book, ctx, srcAttr)).join('\n');
+  return scriptFilter(blocks, ctx).map((b) => blockHtml(b, book, ctx, srcAttr)).join('\n');
 }
 
 // 장 본문 렌더 — 특별 섹션 키워드(예: '역사 노트')와 일치하는 소제목 구간을
 // 노트 박스(<div class="special-sec">)로 감싸 본문과 다르게 조판. 구간 = 그 소제목부터 다음 소제목(또는 장 끝).
-function chapterBlocksHtml(blocks, book, ctx, srcAttr, specials) {
+function chapterBlocksHtml(blocks0, book, ctx, srcAttr, specials) {
+  const blocks = scriptFilter(blocks0, ctx);   // 영상 대본 모드면 제작용 블록 제거 후 특별섹션 판정
   if (!specials || !specials.length) return blocksHtml(blocks, book, ctx, srcAttr);
   const out = [];
   let buf = [];
@@ -465,6 +495,12 @@ function buildBookHtml(book, opts = {}) {
     specialKeywords: String(opts.specialKeyword || '').split(',').map((s) => s.trim()).filter(Boolean),
     // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──
     excluded: Array.isArray(opts.excluded) ? opts.excluded : [],
+    // ── 영상 대본 모드 — 영상 제작용 블록을 **조판에서만** 제외(대본 파일은 손대지 않는다) ──
+    //   대본은 매일 새로 쓰는 영상 파이프라인의 입력이라 사람이 위치를 옮기는 건 지속 불가능하다.
+    //   제작 메모(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커)와 엔진 프롬프트(🖼️/🎬/🎞)만 걸러내고
+    //   **본문 인용(성경 낭독 등)은 그대로 남긴다** — 실측: 이 대본의 인용 9개 중 제작메모는 1개뿐이었다.
+    scriptMode: !!opts.scriptMode,
+    scriptHideShots: !!opts.scriptHideShots,   // 샷 제목(### 샷N)까지 숨겨 줄글로 읽기
     sourceMap: opts.sourceMap !== false,
   };
   o.fontStack = FONT_STACKS[o.fontKey];
@@ -474,6 +510,8 @@ function buildBookHtml(book, opts = {}) {
   const imageUrl = typeof opts.imageUrl === 'function' ? opts.imageUrl : (abs) => 'file:///' + abs.replace(/\\/g, '/');
   const ctx = {
     footnoteMode: o.footnoteMode,
+    scriptMode: o.scriptMode,               // 영상 대본 모드(제작용 블록 제외)
+    scriptHideShots: o.scriptHideShots,
     endnotes: [],
     resolveImage(src) {
       if (/^(https?|data|media|file):/i.test(src)) return src;

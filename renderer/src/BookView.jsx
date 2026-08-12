@@ -46,6 +46,10 @@ const LAYOUT_DEFAULTS = {
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
   colophonFields: null, coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
+  // 영상 대본 모드 — 제작용 블록(제작메모·엔진 프롬프트)을 **출력에서만** 제외. 대본 파일은 불변.
+  //   출판 탭의 2순위 목적(영상 대본을 깔끔히 정독)을 위한 스위치. 책 원고는 기본 OFF 로 영향 없음.
+  scriptMode: false,
+  scriptHideShots: false,
   excluded: [],       // 출력 제외 섹션 key 목록 (원고는 보존)
 };
 
@@ -547,6 +551,19 @@ body{overflow-y:scroll}
               <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
                 onChange={(e) => L('specialKeyword', e.target.value)} />
             </label>
+          </div>
+          {/* 영상 대본을 '읽기 좋게' 조판하는 스위치 — 대본 파일은 건드리지 않고 출력에서만 제외한다 */}
+          <div className="bkform">
+            <label title="영상 제작용 블록(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커 · 🖼️ 이미지/🎬 영상 프롬프트)과 `---` 구분선을 조판에서 제외하고, 제목의 타임코드(— 0:00~0:30 · I2V 5샷)를 지웁니다. 본문 인용(성경 낭독 등)은 그대로 남습니다. 대본 파일은 수정되지 않습니다.">
+              <input type="checkbox" checked={!!layout.scriptMode} onChange={(e) => L('scriptMode', e.target.checked)} />
+              🎬 영상 대본 모드 (제작용 블록 숨기고 읽기)
+            </label>
+            {layout.scriptMode ? (
+              <label title="샷 제목(### 샷1 — …)까지 숨겨 나레이션만 줄글로 읽습니다">
+                <input type="checkbox" checked={!!layout.scriptHideShots} onChange={(e) => L('scriptHideShots', e.target.checked)} />
+                샷 제목도 숨기기
+              </label>
+            ) : null}
           </div>
         </details>
         <details>
