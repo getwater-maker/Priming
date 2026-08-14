@@ -182,8 +182,19 @@ async function saveServerVoice({ name, text = '', instruct = '', wavBuffer }) {
     if (res.status === 404) return { ok: false, error: 'unsupported' };
     const j = await res.json().catch(() => ({}));
     if (res.ok && j.ok) return { ok: true, name: j.name, path: j.path };
-    return { ok: false, error: j.error || `HTTP ${res.status}` };
-  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+    return { ok: false, error: `${j.error || 'HTTP ' + res.status} (${base})` };
+  } catch (e) { return { ok: false, error: _netErr(e, base) }; }
+}
+
+/** undici 의 "fetch failed" 는 원인을 cause 에 숨긴다 — 실제 코드와 주소를 함께 보여준다. */
+function _netErr(e, base) {
+  const code = (e && e.cause && (e.cause.code || e.cause.message)) || '';
+  const why = { ECONNREFUSED: '서버가 그 주소에서 응답하지 않습니다', EHOSTUNREACH: '그 주소에 닿을 수 없습니다',
+    ENOTFOUND: '주소(호스트 이름)를 찾을 수 없습니다', ETIMEDOUT: '응답 시간 초과', ECONNRESET: '연결이 끊겼습니다',
+    // 대부분 **메인 PC 의 IP 가 바뀌었거나 꺼져 있는 경우** — 실제로 겪은 원인이라 문구로 못박아 둔다.
+    UND_ERR_CONNECT_TIMEOUT: '그 주소에 아무도 없습니다 — 메인 PC 의 IP 가 바뀌었는지 확인하세요',
+    UND_ERR_HEADERS_TIMEOUT: '서버가 응답을 시작하지 않습니다' }[code] || '';
+  return `${(e && e.message) || e}${code ? ` [${code}]` : ''}${why ? ` — ${why}` : ''} (${base})`;
 }
 
 module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices, saveServerVoice };

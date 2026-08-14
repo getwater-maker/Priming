@@ -768,7 +768,11 @@ ipcMain.handle('list-ref-audio', async () => {
       .map((v) => ({ name: `☁ ${v.name}`, path: `srv:${v.name}`, server: true }));
   }
   // 서버를 못 쓰는 상태(꺼짐·키 없음·구버전)에서는 로컬 파일로 폴백 — 앱이 멈추지 않게.
-  log('⚠ 서버 목소리 목록을 받지 못했습니다 — 이 PC 의 참조음성 파일을 대신 표시합니다.');
+  {
+    let where = '';
+    try { where = (require('./tts/tts-config').getProvider('omnivoice') || {}).baseUrl || ''; } catch {}
+    log(`⚠ 서버 목소리 목록을 받지 못했습니다 — 이 PC 의 참조음성 파일을 대신 표시합니다. (OmniVoice ${where || '주소 미설정'})`);
+  }
   return _localRefFiles().map((f) => ({ name: f, path: path.join(dir, f) }));
 });
 // `srv:<이름>`(서버 공용 목소리) → 이 PC 에 실제 파일이 있으면 그 경로, 없으면 null.
