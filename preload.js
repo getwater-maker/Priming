@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld('api', {
   importPrompts: (args) => ipcRenderer.invoke('import-prompts', args),
   generatePromptsApi: (args) => ipcRenderer.invoke('generate-prompts-api', args),
   openFolder: () => ipcRenderer.invoke('open-folder'),
+  // alert/confirm 직전에 창을 앞으로 — 네이티브 모달이 다른 창 뒤에 숨으면 앱 전체가 입력을 거부한다.
+  focusWindow: () => ipcRenderer.invoke('focus-window'),
   sttTranscribe: () => ipcRenderer.invoke('stt-transcribe'),
   extractMp3: () => ipcRenderer.invoke('extract-mp3'),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),

@@ -156,6 +156,12 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
   );
 }
 
+// 🔒 네이티브 alert/confirm 은 **창을 잠근다**(EnableWindow(false)) — 다른 창(Vrew·크롬) 뒤에 숨으면
+//   앱이 클릭·키·ESC 를 전부 거부하는 "입력 잠김"이 된다(로이 2026-08-14 증상).
+//   → 띄우기 직전에 창을 앞으로 끌어와 숨지 못하게 한다. main 은 별도 프로세스라 이 요청을 즉시 처리한다.
+function uiConfirm(msg) { try { api.focusWindow(); } catch (_) {} return window.confirm(msg); }
+function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.alert(msg); }
+
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리) | 'book'(출판)
   const isLf = mode === 'longform';
@@ -442,7 +448,9 @@ export default function App() {
   async function loadPresets() {
     const ps = await api.listPresets();
     setPresets(ps || []);
-    if (ps && ps.length && !presetName) setPresetName(ps[0].name);
+    // 목록은 **사용자가 ↕ 로 정한 순서** 그대로다(더는 기본채널을 맨 위로 올리지 않는다).
+    //   그래서 "처음에 고를 채널"은 순서가 아니라 isDefault 로 찾는다.
+    if (ps && ps.length && !presetName) setPresetName((ps.find((p) => p.isDefault) || ps[0]).name);
   }
   async function loadStyles() {
     const ss = await api.listStyles();
@@ -518,7 +526,7 @@ export default function App() {
   }
   // 저장 폴더(saves) 전체삭제 — 확인 팝업 필수
   async function deleteSaves() {
-    if (!window.confirm('저장 폴더(saves)의 「작업·큐 저장 파일」을 모두 삭제합니다.\n\n⚠ 되돌릴 수 없습니다.\n(진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다.)\n\n정말 모두 삭제할까요?')) return;
+    if (!uiConfirm('저장 폴더(saves)의 「작업·큐 저장 파일」을 모두 삭제합니다.\n\n⚠ 되돌릴 수 없습니다.\n(진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다.)\n\n정말 모두 삭제할까요?')) return;
     try { const r = await api.clearSaves(); setStatus(`🗑 저장 파일 ${(r && r.count) || 0}개 삭제됨`); }
     catch (e) { logline('전체삭제 오류: ' + e.message); }
   }
@@ -557,7 +565,7 @@ export default function App() {
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function deleteTtsAll() {
-    if (!window.confirm('이미 만든 TTS 음성 파일과 재활용 캐시를 모두 삭제하고, 화면의 시간기록도 지웁니다.\n(다음에 변환 버튼을 누르면 전부 새로 합성됩니다.)\n\n진행할까요?')) return;
+    if (!uiConfirm('이미 만든 TTS 음성 파일과 재활용 캐시를 모두 삭제하고, 화면의 시간기록도 지웁니다.\n(다음에 변환 버튼을 누르면 전부 새로 합성됩니다.)\n\n진행할까요?')) return;
     setStatus('TTS 삭제 중…');
     try { const d = await api.deleteTts(); if (d) setDto(d); setStatus('TTS 삭제 완료'); }
     catch (e) { logline('TTS 삭제 오류: ' + e.message); setStatus('TTS 삭제 실패'); }
@@ -742,7 +750,7 @@ export default function App() {
       setImpText('');
       setImpOpen(true);
       setStatus('GPU(Ollama) 미연결 — 복사·붙여넣기 방식으로 전환');
-      alert(
+      uiAlert(
         'GPU(Ollama)에 연결할 수 없습니다.\n'
         + (copied ? '요청서를 클립보드에 복사해 두었습니다.\n' : '※ 자동 복사 실패 — 붙여넣기 창의 [📤 요청서 복사] 버튼을 누르세요.\n')
         + '\n[복사·붙여넣기로 프롬프트 만들기]\n'
@@ -755,7 +763,7 @@ export default function App() {
   // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 두 그룹 프롬프트 초기화.
   async function splitGroup(shortsNum, groupNum) {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
-    catch (e) { logline('분할 오류: ' + e.message); alert('분할 실패:\n' + e.message); }
+    catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
   }
   // 제작 전 검사 — 빈 프롬프트 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
   //   opts.image/video = 'all'|'range'|'none' — 어느 그룹에 그 프롬프트가 필요한지.
@@ -784,7 +792,7 @@ export default function App() {
       }
     }
     if (missing.length) {
-      alert(`프롬프트가 비어 있어 진행할 수 없습니다.\n✍ 프롬프트작성 버튼으로 채운 뒤 다시 시도하세요.\n\n빈 그룹 ${missing.length}개:\n` + missing.slice(0, 20).join('\n') + (missing.length > 20 ? `\n…외 ${missing.length - 20}개` : ''));
+      uiAlert(`프롬프트가 비어 있어 진행할 수 없습니다.\n✍ 프롬프트작성 버튼으로 채운 뒤 다시 시도하세요.\n\n빈 그룹 ${missing.length}개:\n` + missing.slice(0, 20).join('\n') + (missing.length > 20 ? `\n…외 ${missing.length - 20}개` : ''));
       setStatus(`⛔ 빈 프롬프트 ${missing.length}개 — 진행 안 함`);
       return false;
     }
@@ -800,7 +808,7 @@ export default function App() {
   async function importViaApi() {
     setStatus(`🤖 ${impProvider} API로 프롬프트 작성 중…`); setImpBusy(true);
     try { const d = await api.generatePromptsApi({ provider: impProvider, styleName: styleName() }); setDto(d); setImpOpen(false); setStatus('API 자동작성 완료'); }
-    catch (e) { logline('API 오류: ' + e.message); setStatus('API 실패'); alert('API 호출 실패:\n' + e.message); }
+    catch (e) { logline('API 오류: ' + e.message); setStatus('API 실패'); uiAlert('API 호출 실패:\n' + e.message); }
     finally { setImpBusy(false); }
   }
   async function resetProject() {
@@ -838,7 +846,7 @@ export default function App() {
     if (r) { await refreshStyles(); setStatus('스타일 저장됨'); } else setStatus('스타일 저장 실패');
   }
   async function deleteStyle(id, name) {
-    if (!window.confirm(`스타일 「${name}」 삭제할까요?`)) return;
+    if (!uiConfirm(`스타일 「${name}」 삭제할까요?`)) return;
     const ok = await api.removeStyle(id);
     if (ok) { if (styleId === id) setStyleId(''); await refreshStyles(); setStatus('스타일 삭제됨'); }
     else setStatus('스타일 삭제 실패');
@@ -1023,17 +1031,17 @@ export default function App() {
       setNewChanOpen(false);
       setStatus(`채널 "${name}" 추가됨 — 세부 설정을 편집하세요`);
       await openChannelEditor(name);   // 바로 편집창 열기
-    } catch (e) { alert('채널 추가 실패:\n' + e.message); }
+    } catch (e) { uiAlert('채널 추가 실패:\n' + e.message); }
   }
   async function deleteChannel() {
     if (!ch || !ch.name) return;
-    if (!window.confirm(`채널 "${ch.name}" 을(를) 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    if (!uiConfirm(`채널 "${ch.name}" 을(를) 삭제할까요? 되돌릴 수 없습니다.`)) return;
     try {
       const ps = await api.removePreset({ name: ch.name });
       setChOpen(false); setPresets(ps || []);
-      if (ps && ps.length) setPresetName(ps[0].name);
+      if (ps && ps.length) setPresetName((ps.find((p) => p.isDefault) || ps[0]).name);
       setStatus(`채널 "${ch.name}" 삭제됨`);
-    } catch (e) { alert('채널 삭제 실패:\n' + e.message); }
+    } catch (e) { uiAlert('채널 삭제 실패:\n' + e.message); }
   }
   // ── 채널 순서 변경 ── 드롭다운에 보이는 순서를 ▲▼ 로 조정 후 저장.
   function openChOrder() {

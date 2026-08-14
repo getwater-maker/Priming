@@ -296,6 +296,50 @@ app.on('before-quit', () => {
 
 const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
 
+// ── 🔒 입력 잠김(창이 클릭·키를 전부 거부) 방지 + 자동복구 ────────────────────────────
+//  증상(로이 2026-08-14): 어떤 때는 **영문도 안 쳐지고 버튼·ESC 도 전혀 안 먹는다.** 화면은 멀쩡히 그려지고
+//    CPU 는 0. (v0.3.9 때 "대본수정에서 클릭도 수정도 안 된다"던 그 건과 같은 계열.)
+//  🔑 화면 안쪽(오버레이·포커스) 문제라면 **ESC 는 먹어야 한다**(window keydown 리스너가 받으므로).
+//    ESC 조차 안 먹는다 = **OS 가 창 자체를 잠근 상태**. 그걸 만드는 건 사실상 하나뿐이다 —
+//    **모달 대화상자가 열려 있는데 다른 창(Vrew·크롬) 뒤에 숨은 것.** Windows 는 모달이 뜨면
+//    부모 창을 EnableWindow(false) 로 잠그고, 그동안 클릭·키를 전부 버린다.
+//    이 앱의 통로: `dialog.show*(win, …)` 21곳 + 렌더러 alert/confirm 10곳. 작업이 끝나면 .vrew 를
+//    `shell.openPath` 로 자동으로 여는데(=Vrew 가 앞으로 튀어나옴) 그 직후 경고 팝업이 뜨면 딱 이 상황이 된다.
+//  대책 ① 대화상자를 열기 **직전에 창을 앞으로** 끌어와 뒤에 숨지 못하게 한다.
+//       ② 열려 있는 대화상자 수를 세고, **하나도 없는데 창이 잠겨 있으면 풀어준다**(자동복구 + 로그).
+//  ⚠ 이 로그가 실제로 찍히는지가 원인 확정의 증거다 — 찍히면 위 가설이 맞고, 안 찍히는데도 멈추면
+//    창 잠김이 아니라 렌더러가 멈춘 것이므로 그때 다른 곳을 봐야 한다.
+const DLG = { n: 0 };
+function _bringFront(w) {
+  try { if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } } catch {}
+}
+for (const _k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox']) {
+  const _orig = dialog[_k].bind(dialog);
+  dialog[_k] = (...a) => {
+    const parent = (a[0] && typeof a[0].isDestroyed === 'function') ? a[0] : null;
+    _bringFront(parent || win);
+    DLG.n++;
+    let p;
+    try { p = _orig(...a); } catch (e) { DLG.n--; throw e; }
+    return Promise.resolve(p).finally(() => { DLG.n--; });
+  };
+}
+// 렌더러의 alert/confirm 도 같은 통로 — 띄우기 직전에 창을 앞으로 (renderer 가 IPC 를 먼저 보낸다).
+ipcMain.handle('focus-window', () => { _bringFront(win); return true; });
+let _lockedSince = 0;
+setInterval(() => {
+  try {
+    if (!win || win.isDestroyed()) return;
+    // 대화상자가 실제로 열려 있으면(DLG.n>0) 잠긴 게 정상 — 사용자가 폴더를 오래 고르는 중일 수 있다.
+    if (win.isEnabled() || DLG.n > 0) { _lockedSince = 0; return; }
+    if (!_lockedSince) { _lockedSince = Date.now(); return; }
+    if (Date.now() - _lockedSince < 10000) return;   // 10초 이상 지속될 때만 (순간적인 전환 오탐 방지)
+    _lockedSince = 0;
+    win.setEnabled(true);   // ⚠ 포커스는 뺏지 않는다 — 렌더러 alert/confirm 이 떠 있으면 그 위를 덮어버린다
+    log('🩹 입력 잠김을 풀었습니다 — 창이 10초 넘게 잠긴 채였습니다(숨은 대화상자 추정). 이 줄이 보이면 알려주세요.');
+  } catch {}
+}, 2000);
+
 // ── 절전 차단(작업 중에만) ───────────────────────────────────────────────────
 //  왜: 모니터가 절전으로 꺼지면 ① 복귀 시 해상도·DPI 가 기본값으로 떨어져 창 배치가 흐트러지고
 //      ② 브라우저 자동화(Genspark/Flow/Grok)의 좌표 클릭·타이머가 흔들린다. 긴 작업 중엔 막는 게 안전.

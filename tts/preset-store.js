@@ -136,23 +136,20 @@ function loadAll() {
         }
         // 마이그레이션 결과 디스크 반영
         if (dropped > 0) saveAll(data);
-        return _sortByDefault(data);
+        return data;
       }
     }
   } catch (e) {
     console.error('[preset-store] 로드 실패:', e.message);
   }
   saveAll(SEED_PRESETS);
-  return _sortByDefault([...SEED_PRESETS]);
+  return [...SEED_PRESETS];
 }
-
-function _sortByDefault(list) {
-  return [...list].sort((a, b) => {
-    const da = a.isDefault ? 1 : 0;
-    const db = b.isDefault ? 1 : 0;
-    return db - da;
-  });
-}
+// 🔴 옛 `_sortByDefault` 제거(2026-08-14) — loadAll 이 읽을 때마다 **isDefault 채널을 맨 위로 끌어올려**
+//   사용자가 ↕ 로 정한 순서를 무시했다. 게다가 add/update/remove 가 `loadAll()` 결과를 그대로 `saveAll` 하므로
+//   **채널을 한 번 편집하면 그 뒤바뀐 순서가 파일에 영구히 박혔다**(순서가 조용히 망가지는 진짜 원인).
+//   → 파일에 저장된 순서가 유일한 진실. 기본 채널은 `getDefault()` 가 isDefault 로 직접 찾으므로 영향 없다.
+//   (원래 의도였던 "좌측 카드 첫 번째 표시" UI 는 오래전에 사라졌다.)
 
 function saveAll(presets) {
   try {
