@@ -694,21 +694,53 @@ ipcMain.handle('extract-mp3', async () => {
 // 참조음성 목록 — ① 서버 공용 라이브러리(☁, 이 PC 에 파일 없어도 됨) + ② 이 PC 의 ~/.flow-app/ref-audio
 //   서버 목소리는 path 를 **`srv:<이름>`** 으로 준다. 이 접두만 보고 합성 때 업로드 대신 이름을 보낸다
 //   (프리셋 필드를 늘리지 않으려는 의도적 선택 — 옛 프리셋의 일반 경로는 그대로 동작).
+// 참조음성 목록 = **서버 공용 라이브러리(☁)만** 보여준다 (로이 2026-08-14).
+//   예전엔 서버 목록 + 이 PC 로컬 파일을 둘 다 나열해 **같은 목소리가 두 줄씩** 보였다.
+//   ⚠ 그냥 로컬을 숨기면 "아직 서버에 안 올라간 목소리"가 목록에서 사라진다 →
+//     **먼저 올리고(동기화) 나서** 서버 목록만 반환한다. 이러면 아내 PC 에서 만든 목소리도
+//     그 PC 에서 목록을 한 번 여는 것만으로 서버에 모여 메인 PC 에도 보인다.
+const REF_DIR = () => path.join(os.homedir(), '.flow-app', 'ref-audio');
+function _localRefFiles() {
+  try { return fs.readdirSync(REF_DIR()).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)); } catch { return []; }
+}
 ipcMain.handle('list-ref-audio', async () => {
-  const out = [];
-  try {
-    const ASR = require('./tts/asr-client');
-    for (const v of await ASR.listServerVoices()) {
-      if (v && v.name) out.push({ name: `☁ ${v.name}`, path: `srv:${v.name}`, server: true });
+  const ASR = require('./tts/asr-client');
+  const dir = REF_DIR();
+  let server = [];
+  try { server = await ASR.listServerVoices(); } catch {}
+
+  // ── 로컬에만 있는 목소리를 서버로 올림 ──
+  const have = new Set(server.map((v) => String((v && v.name) || '')));
+  const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
+  if (missing.length) {
+    const QD = require('./core/qwen-design');
+    let up = 0;
+    for (const f of missing) {
+      const name = f.replace(/\.wav$/i, '');
+      let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
+      let r;
+      try { r = await QD.saveVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
+      catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
+      if (r && r.ok) { up++; continue; }
+      // 서버가 안 되면 나머지도 안 된다 — 실패를 반복하지 않고 멈춘다(목록 표시는 아래 폴백으로 계속).
+      log(`⚠ 참조음성 "${name}" 서버 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
+      break;
     }
-  } catch {}
-  const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
-  try {
-    for (const f of fs.readdirSync(dir).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f))) {
-      out.push({ name: f, path: path.join(dir, f) });
+    if (up) {
+      log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 서버 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
+      try { server = await ASR.listServerVoices(); } catch {}
     }
-  } catch {}
-  return out;
+  }
+
+  if (server.length) {
+    return server
+      .filter((v) => v && v.name)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko'))
+      .map((v) => ({ name: `☁ ${v.name}`, path: `srv:${v.name}`, server: true }));
+  }
+  // 서버를 못 쓰는 상태(꺼짐·키 없음·구버전)에서는 로컬 파일로 폴백 — 앱이 멈추지 않게.
+  log('⚠ 서버 목소리 목록을 받지 못했습니다 — 이 PC 의 참조음성 파일을 대신 표시합니다.');
+  return _localRefFiles().map((f) => ({ name: f, path: path.join(dir, f) }));
 });
 // `srv:<이름>`(서버 공용 목소리) → 이 PC 에 실제 파일이 있으면 그 경로, 없으면 null.
 //   메인 PC 는 라이브러리 폴더가 로컬에 있으므로 미리듣기·폴더열기가 그대로 된다.
@@ -718,8 +750,12 @@ function resolveRefPath(p) {
   const s = String(p || '');
   if (!s) return null;
   if (!s.startsWith('srv:')) return s;
-  const f = path.join(SERVER_VOICE_DIR, s.slice(4) + '.wav');
-  try { return fs.existsSync(f) ? f : null; } catch { return null; }
+  const name = s.slice(4);
+  // 메인 PC: 라이브러리 폴더가 로컬에 있음 → 그 파일. 아니면 이 PC 의 ref-audio 에 같은 이름이 있으면 그것.
+  for (const f of [path.join(SERVER_VOICE_DIR, name + '.wav'), path.join(REF_DIR(), name + '.wav')]) {
+    try { if (fs.existsSync(f)) return f; } catch {}
+  }
+  return null;   // 파일이 없는 PC 는 미리듣기만 안 되고 합성은 정상(서버가 갖고 있음)
 }
 // 참조음성 폴더 열기 — 선택된 참조음성이 있으면 그 폴더, 없으면 기본 ref-audio 폴더.
 //   (같은 이름의 .txt 파일이 참조텍스트로 자동 사용되므로, 사용자가 wav+txt 를 이 폴더에서 관리)

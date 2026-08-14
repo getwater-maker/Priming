@@ -111,7 +111,9 @@ function envelope(buf, hopSec = 0.02) {
  *   앞의 무음과 **뒤의 감쇠(페이드) 구간**을 잘라낸다. 임계값은 최대 RMS 대비 비율.
  *   ⚠ 자음 끝이 잘리지 않도록 뒤에 pad 를 붙이고, 실패하면 전체 구간을 돌려준다(안전).
  */
-function suggestRange(buf, { threshold = 0.2, padSec = 0.08 } = {}) {
+//   임계 0.35 / pad 0.04 는 실측으로 고른 값 — 0.2/0.08 은 꼬리에 감쇠가 남아 잘라도 끝이 약했다
+//   (같은 파일 기준 끝 에너지 20.3% → 26.2%). 더 올리면(0.5) 끝은 세지지만 말을 많이 버린다.
+function suggestRange(buf, { threshold = 0.35, padSec = 0.04 } = {}) {
   const { rms, hop, peak, info } = envelope(buf);
   if (!rms.length || peak <= 0) return { start: 0, end: info.durationSec };
   const th = peak * threshold;

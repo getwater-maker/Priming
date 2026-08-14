@@ -1208,24 +1208,37 @@ export default function App() {
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
   }
-  // 「≈N초」 — 시작점부터 약 N초 지점의 **말이 쉬는 곳**에서 끊는다.
-  //   그냥 N초에서 자르면 단어 중간이 잘려 참조텍스트와 맞추기가 어렵다 → ±1.2초 안에서 가장 조용한 지점을 찾는다.
+  // 「≈N초」 — 시작점부터 약 N초 지점에서, **소리가 아직 살아 있는 마지막 순간**에 끊는다.
+  //   🔴 처음엔 "가장 조용한 지점(말이 쉬는 곳)"을 찾게 만들었는데 **정반대였다** — 그 조용한 곳이 바로
+  //     우리가 없애려던 문장 끝 감쇠·무음이라, 잘라도 끝이 0%인 참조음성이 나왔다(실측 3.0%·0.1%).
+  //     에너지 임계 기준으로 끊으면 20~38% 로 살아난다. 끝맺음이 또렷한 게 목적이므로 이쪽을 택한다.
+  //   ⚠ 대신 단어 중간에서 끊길 수 있다 → 참조텍스트에서 마지막 조각 단어를 빼라고 안내한다.
   function vdCutAbout(sec) {
     if (!vdDur) return;
     const target = Math.min(vdDur, vdSel.s + sec);
     if (!vdPeaks || !vdPeaks.length) { setVdSel((p) => ({ ...p, e: Math.max(p.s + 0.02, target) })); return; }
     const secOf = (i) => (i / vdPeaks.length) * vdDur;
     const energy = (i) => Math.abs(vdPeaks[i].max) + Math.abs(vdPeaks[i].min);
-    let best = -1, bestE = Infinity;
+    // 임계는 **최대 진폭이 아니라 "말하는 구간의 대표 음량"** 기준. 최대값 기준(peak×0.4)으로 하면
+    //   순간적으로 튄 한 지점이 기준을 끌어올려 통과 지점이 드물어지고, 결과가 목표보다 훨씬 짧아졌다
+    //   (실측: 5초 요청에 3.50초). 대표음량×0.8 이면 4.93초·끝 27.5% 로 균형이 맞는다.
+    const all = vdPeaks.map((p) => Math.abs(p.max) + Math.abs(p.min));
+    const peak = Math.max(...all);
+    const loud = all.filter((v) => v >= peak * 0.1).sort((a, b) => a - b);
+    const th = (loud[Math.floor(loud.length / 2)] || peak) * 0.8;
+    // 목표(≈N초) 앞뒤 1.5초 안에서, 소리가 또렷한 지점 중 **목표에 가장 가까운** 곳.
+    //   앞쪽만 보면 직전에 긴 쉼이 있을 때 3.5초처럼 많이 짧아진다 → 뒤쪽도 함께 본다.
+    let at = -1, bestD = Infinity;
     for (let i = 0; i < vdPeaks.length; i++) {
       const t = secOf(i);
-      if (t < target - 1.2 || t > target + 1.2 || t <= vdSel.s + 0.5) continue;
-      const e = energy(i);
-      if (e < bestE) { bestE = e; best = i; }
+      if (t <= vdSel.s + 0.3 || t > Math.min(vdDur, target + 1.5)) continue;
+      if (energy(i) < th) continue;
+      const d = Math.abs(t - target);
+      if (d < bestD) { bestD = d; at = t; }
     }
-    const at = best >= 0 ? secOf(best) : target;
-    setVdSel((p) => ({ ...p, e: vdClamp(Math.max(p.s + 0.02, at)) }));
-    setVdStatus(`✂ ${sec}초 부근의 쉬는 지점(${at.toFixed(2)}초)에서 끊었습니다 — ⚠ 참조텍스트도 거기까지만 남기세요.`);
+    const end = vdClamp(Math.max(vdSel.s + 0.02, (at >= 0 ? at + 0.03 : target)));
+    setVdSel((p) => ({ ...p, e: end }));
+    setVdStatus(`✂ ${end.toFixed(2)}초에서 끊었습니다 (소리가 살아 있는 지점) — ⚠ 참조텍스트를 여기까지 들리는 말로 맞추세요. 끝이 잘린 단어는 빼는 게 좋습니다.`);
   }
   // 선택 구간만 재생 — 잘라낸 결과가 어떻게 들릴지 확인
   function vdPlaySel() {
@@ -1538,6 +1551,17 @@ export default function App() {
       g.fillStyle = col; g.fillRect(Math.max(0, Math.min(W - 2, x(sec) - 1)), 0, 3, H);
     }
   }, [vdPeaks, vdSel, vdDur, vdOpen]);
+  // 참조음성 목록이 **서버(☁) 기준**으로 바뀌었으므로, 옛 로컬 경로로 저장된 채널 값을 같은 이름의 ☁ 항목으로 맞춘다.
+  //   같은 목소리를 가리키는 값 정규화일 뿐이고, 실제 반영은 사용자가 「저장」을 눌러야 된다.
+  useEffect(() => {
+    if (!ch || !chRefList.length) return;
+    const cur = String(ch.voiceCloneRefAudio || '');
+    if (!cur || cur.startsWith('srv:')) return;
+    const base = (cur.split(/[\\/]/).pop() || '').replace(/\.[^.]+$/, '');
+    const hit = chRefList.find((r) => r.path === `srv:${base}`);
+    if (hit) setCh((c) => ({ ...c, voiceCloneRefAudio: hit.path }));
+    /* eslint-disable-next-line */
+  }, [chRefList, ch && ch.voiceCloneRefAudio]);
   // ComfyUI 설정을 마운트 시 로드 — 헤더 드롭다운이 등록된 워크플로(z-image·Krea2 등) 목록을 알도록.
   useEffect(() => {
     api.getComfyImageConfig().then((c) => {
