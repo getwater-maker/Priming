@@ -270,6 +270,17 @@ app.whenReady().then(() => {
   //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  // 참조음성 동기화 — **앱을 켜기만 해도** 이 PC 의 목소리가 공용 라이브러리로 올라가게 한다.
+  //   예전엔 채널편집(⚙)을 열 때만 돌아서, 앱만 켠 PC(아내)에서는 아무 일도 일어나지 않았다.
+  //   창을 막지 않도록 뒤로 미루고, 실패해도 조용히 넘어간다(오프라인·서버 꺼짐).
+  setTimeout(() => {
+    (async () => {
+      try {
+        const names = await require('./tts/asr-client').listServerVoices();
+        await syncRefAudioToServer(names);
+      } catch {}
+    })();
+  }, 4000);
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -703,34 +714,37 @@ const REF_DIR = () => path.join(os.homedir(), '.flow-app', 'ref-audio');
 function _localRefFiles() {
   try { return fs.readdirSync(REF_DIR()).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)); } catch { return []; }
 }
+// 이 PC 에만 있는 참조음성을 서버 공용 라이브러리로 올린다. 반환: 올린 개수.
+//   ⚠ 업로드는 **보이스디자인 서버(9893)** 의 `/save-voice` 를 쓴다 — 그 서버가 라이브러리 폴더의 주인이다.
+//     그래서 9893 이 떠 있어야 한다(그래서 stop() 이 서버를 죽이지 않게 고쳤다 — 2026-08-14).
+async function syncRefAudioToServer(serverNames) {
+  const dir = REF_DIR();
+  const have = new Set((serverNames || []).map((v) => String((v && v.name) || v || '')));
+  const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
+  if (!missing.length) return 0;
+  const QD = require('./core/qwen-design');
+  let up = 0;
+  for (const f of missing) {
+    const name = f.replace(/\.wav$/i, '');
+    let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
+    let r;
+    try { r = await QD.saveVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
+    catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
+    if (r && r.ok) { up++; continue; }
+    // 서버가 안 되면 나머지도 안 된다 — 반복 실패 대신 멈추고, 무엇을 해야 하는지 알려준다.
+    log(`⚠ 참조음성 "${name}" 공용 라이브러리 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
+    log('   ↳ 메인 PC 의 보이스디자인 서버(9893)가 떠 있어야 합니다. 꺼져 있으면 메인 PC 에서 시작프로그램의 「보이스디자인서버」를 실행하세요.');
+    break;
+  }
+  if (up) log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
+  return up;
+}
 ipcMain.handle('list-ref-audio', async () => {
   const ASR = require('./tts/asr-client');
   const dir = REF_DIR();
   let server = [];
   try { server = await ASR.listServerVoices(); } catch {}
-
-  // ── 로컬에만 있는 목소리를 서버로 올림 ──
-  const have = new Set(server.map((v) => String((v && v.name) || '')));
-  const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
-  if (missing.length) {
-    const QD = require('./core/qwen-design');
-    let up = 0;
-    for (const f of missing) {
-      const name = f.replace(/\.wav$/i, '');
-      let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
-      let r;
-      try { r = await QD.saveVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
-      catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
-      if (r && r.ok) { up++; continue; }
-      // 서버가 안 되면 나머지도 안 된다 — 실패를 반복하지 않고 멈춘다(목록 표시는 아래 폴백으로 계속).
-      log(`⚠ 참조음성 "${name}" 서버 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
-      break;
-    }
-    if (up) {
-      log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 서버 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
-      try { server = await ASR.listServerVoices(); } catch {}
-    }
-  }
+  if (await syncRefAudioToServer(server)) { try { server = await ASR.listServerVoices(); } catch {} }
 
   if (server.length) {
     return server

@@ -226,17 +226,14 @@ async function stop(logger = () => {}) {
   S.started = false;
   // ⚠ **우리가 띄운 서버가 아니면 죽이지 않는다** — 원격 서버, 또는 이 PC 에서 상시 실행(작업 스케줄러/배치)
   //    중인 서버를 앱이 내려버리면 다른 PC 가 못 쓴다. 대신 `/release` 로 **모델만 내려 VRAM 을 반납**한다.
-  if (isRemote() || !S.child) {
-    try { await _postJson('/release', {}, 5000).catch(() => {}); } catch {}
-    logger(isRemote() ? '🎨 원격 서버 유지 — 모델만 해제 요청(VRAM 반납)' : '🎨 상시 실행 서버 유지 — 모델만 해제(VRAM 반납)');
-    return { ok: true, released: true };
-  }
-  // 우리가 spawn 한 서버면 완전히 종료(옛 동작).
-  try { await _postJson('/shutdown', {}, 3000).catch(() => {}); } catch {}
-  await new Promise((r) => setTimeout(r, 600));
-  if (S.child) { try { S.child.kill(); } catch {} S.child = null; }
-  logger('🎨 보이스디자인 서버 정지(VRAM 반납)');
-  return { ok: true };
+  // 🔴 **어떤 경우에도 서버를 죽이지 않는다 — 모델만 내린다**(2026-08-14).
+  //   예전엔 우리가 spawn 한 서버는 /shutdown 으로 완전히 종료했는데, 그 결과 **보이스디자인 창을 닫는
+  //   순간 9893 이 꺼졌다.** 그러면 이 서버가 갖고 있는 **참조음성 공용 라이브러리(/save-voice)** 도 함께
+  //   막혀서, 다른 PC(아내)가 자기 목소리를 올릴 수 없다. 서버는 lazy-load + 유휴 자동해제라
+  //   **떠 있어도 VRAM 점유가 0** 이므로 살려 두는 게 맞다(v0.2.91 의 "상시 대기" 설계 의도대로).
+  try { await _postJson('/release', {}, 5000).catch(() => {}); } catch {}
+  logger(isRemote() ? '🎨 원격 서버 유지 — 모델만 해제 요청(VRAM 반납)' : '🎨 서버는 대기 상태로 유지 — 모델만 해제(VRAM 반납, 참조음성 업로드 계속 가능)');
+  return { ok: true, released: true };
 }
 
 async function status() {
