@@ -2070,6 +2070,9 @@ export default function App() {
               <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
             <div className="frow"><label>참조음성</label>
               <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
+                {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
+                    (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
+                {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
                 {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
                 {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
               </select>
@@ -2099,23 +2102,26 @@ export default function App() {
             <div className="twocol">
               <div className="col">
                 <div className="crow"><span className="l">이미지</span>
-                  <select value={ch.imgEngine || 'rotate'} onChange={(e) => setCh({ ...ch, imgEngine: e.target.value })}>
+                  {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
+                  <select value={comfySelectValue(ch.imgEngine || 'rotate', comfyCfg)}
+                    onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
                     <option value="rotate">순환(무료)</option>
                     <option value="gemini">유료(나노바나나2)</option>
-                    <option value="comfy">ComfyUI (Krea2·z-image 등)</option>
+                    <ComfyEngineOptions cfg={comfyCfg} />
                   </select></div>
               </div>
               <div className="col">
                 <div className="crow"><span className="l">비디오</span>
-                  <select value={ch.videoEngine || 'grok'} onChange={(e) => setCh({ ...ch, videoEngine: e.target.value })}>
-                    <option value="comfy">ComfyUI (LTX i2v)</option>
+                  <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
+                    onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
+                    <ComfyEngineOptions cfg={cvidCfg} kind="video" />
                     <option value="grok">Grok (브라우저)</option>
                     <option value="grok-api">Grok API (유료)</option>
                     <option value="none">없음(이미지 고정)</option>
                   </select></div>
               </div>
             </div>
-            <div className="meta" style={{ marginTop: 2 }}>ComfyUI 를 고르면 구체 워크플로(Krea2/LTX 등)·서버(RunPod/comfy.org)는 헤더 <b>⚙ ComfyUI</b> 설정을 따릅니다. 이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다.</div>
+            <div className="meta" style={{ marginTop: 2 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다.</div>
 
             <div className="subhead">📁 폴더 · 기타</div>
             <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>

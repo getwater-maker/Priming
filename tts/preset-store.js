@@ -118,7 +118,12 @@ function loadAll() {
             else foundDefault = true;
           }
           // OmniVoice 프리셋의 잘못된 voiceCloneRefAudio 정규화 (인덱스 문자열 "0", "1" 등)
-          if (p.engine === 'omnivoice' && p.voiceCloneRefAudio && !/[/\\]/.test(p.voiceCloneRefAudio)) {
+          // 🔴 `srv:<이름>`(서버 공용 라이브러리 목소리)은 **경로가 아니라 이름**이므로 슬래시가 없다.
+          //    이 예외가 없으면 여기서 통째로 지워져 → 참조음성 없이 합성 → **엉뚱한 목소리**가 나간다.
+          //    (2026-08-14 실제 사고: 3nd_조용한승리 채널이 `srv:1nd_고전_남성` 을 잃고 Auto 음성으로 나감)
+          if (p.engine === 'omnivoice' && p.voiceCloneRefAudio
+              && !/^srv:/.test(p.voiceCloneRefAudio)
+              && !/[/\\]/.test(p.voiceCloneRefAudio)) {
             p.voiceCloneRefAudio = '';
           }
         }
