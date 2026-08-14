@@ -240,8 +240,13 @@ function _mimeOf(p) {
 app.whenReady().then(() => {
   // media://<encoded-abs-path> → 로컬 파일. Range 직접 처리(비디오 스트리밍 — net.fetch(file://)는 Range에서 ERR_UNEXPECTED).
   protocol.handle('media', (request) => {
-    // 쿼리/프래그먼트 제거 — 미리보기 캐시버스터(?t=…)가 파일 경로를 오염시키지 않게
-    let p = decodeURIComponent(request.url.slice('media://'.length)).split(/[?#]/)[0].replace(/^\/+/, '');
+    // 쿼리/프래그먼트 제거 — 미리보기 캐시버스터(?t=…)가 파일 경로를 오염시키지 않게.
+    // 🔴 **자르기를 디코드보다 먼저** 해야 한다(2026-08-15). 예전엔 디코드 후 잘랐는데, 렌더러가
+    //    `encodeURIComponent` 로 보낸 `%23` 이 `#` 으로 되돌아온 뒤 거기서 경로가 잘렸다 →
+    //    출력 폴더 이름에 `#` 이 있는 채널(예: `G:\내 드라이브\## 유튜브채널\…`)은
+    //    **모든 이미지·영상 썸네일이 깨졌다**(경로가 `G:\내 드라이브\` 로 잘려 폴더를 열려고 함).
+    //    날것 URL 에서 자르면 경로 속 `#` 은 `%23` 이라 안 잘리고, 진짜 캐시버스터만 제거된다.
+    let p = decodeURIComponent(request.url.slice('media://'.length).split(/[?#]/)[0]).replace(/^\/+/, '');
     try {
       const stat = fs.statSync(p);
       const mime = _mimeOf(p);
