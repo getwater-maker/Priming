@@ -35,6 +35,7 @@ const DEFAULTS = {
   //   **벽시계 시간**이 크게 줄어든다(5개×8분 순차 40분 → 동시 3이면 ~14분). 총 크레딧은 동일(생성당 과금).
   //   ⚠ 로컬(cloud=false)은 VRAM 때문에 항상 1개씩 강제. 1 = 기존 순차(완전 동일 동작).
   concurrency: 3,
+  migratedLtx25: false,    // LTX2.3 → LTX2.5 1회성 이관 완료 표시(사용자가 되돌리면 그 선택 유지)
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
@@ -47,8 +48,9 @@ const COMFY_DIR = path.join(__dirname, '..', 'comfy');
 const BUNDLED = [
   { name: 'Wan2.2 5B', file: 'video_wan2_2_5B_ti2v.json' },
   { name: 'LTX2.3',    file: 'video_ltx2_3_i2v.json' },
+  { name: 'LTX2.5',    file: 'video_ltx2_5_i2v.json' },
 ];
-const DEFAULT_ACTIVE_FILE = 'video_ltx2_3_i2v.json'; // 활성값이 비었거나 실재하지 않을 때 기본
+const DEFAULT_ACTIVE_FILE = 'video_ltx2_5_i2v.json'; // 활성값이 비었거나 실재하지 않을 때 기본
 function _ensureBundled(cfg) {
   const wfs = Array.isArray(cfg.workflows) ? cfg.workflows : [];
   const bundledNames = new Set(BUNDLED.map((b) => b.file.toLowerCase()));
@@ -61,6 +63,17 @@ function _ensureBundled(cfg) {
     if (fs.existsSync(p)) bundled.push({ name: b.name, path: p });
   }
   cfg.workflows = [...bundled, ...customs];
+  // 2.5) LTX2.3 → LTX2.5 **1회성 이관** (2026-08-14 로이 지정: 비디오 도구를 LTX2.5 i2v 로 교체).
+  //   comfy.org 에 ltx-2.5 오픈웨이트(UNETLoader 계열)가 올라와, 파트너 API 노드(초당 과금) 없이
+  //   지금과 같은 **GPU 시간 과금**으로 2.5 를 쓸 수 있게 됐다. 플래그로 1회만 바꾸므로,
+  //   이후 사용자가 드롭다운에서 2.3 으로 되돌리면 그 선택이 유지된다.
+  if (!cfg.migratedLtx25) {
+    if (path.basename(String(cfg.workflowPath || '')).toLowerCase() === 'video_ltx2_3_i2v.json') {
+      const to = bundled.find((w) => path.basename(w.path).toLowerCase() === 'video_ltx2_5_i2v.json');
+      if (to) cfg.workflowPath = to.path;
+    }
+    cfg.migratedLtx25 = true;
+  }
   // 3) 활성 워크플로 경로 재해석/복구
   const curBn = path.basename(String(cfg.workflowPath || '')).toLowerCase();
   const curBundled = bundled.find((w) => path.basename(w.path).toLowerCase() === curBn);

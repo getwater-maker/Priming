@@ -1248,10 +1248,18 @@ function looksBlankVideo(file) {
   } catch { return false; }
 }
 
-// ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy' 일 때. 워크플로 JSON(API 포맷) 필요.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
+// ── ComfyUI 엔진 값 파싱 (이미지·비디오 공통) ──
+//   헤더 드롭다운이 **모델(워크플로)까지** 고르므로 값이 `comfy::<워크플로 경로>` 로 온다(2026-08-14).
+//   `comfy` 단독(구값)이면 설정의 활성 워크플로를 쓴다 — 하위호환.
+//   ⚠ 로컬/클라우드(서버 주소)는 값이 아니라 **설정파일**에 있다(드롭다운이 고를 때 함께 저장) — 단일 진실.
+const isComfyVal = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') === 0;
+const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).slice(7) : '');
+
+// ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath) {
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
+  if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
   if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 워크플로(API 포맷 JSON)를 지정하세요.'); return; }
   const eng = new CI.ComfyImage(cfg, logger);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
@@ -1478,18 +1486,14 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 async function genGroupVideos(...args) { return withAwake('비디오 생성', () => _genGroupVideosCore(...args)); }
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
-  if (videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) {
-    const wf = videoEngine.indexOf('comfy::') === 0 ? videoEngine.slice(7) : '';
-    await runComfyVideos(pr, mediaDir, onlyNums, wf);
-    return {};
-  }
+  if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
-  if (startEngine === 'comfy') return runComfyImages(project, imagesDir, logger, styleId, onlyNums);
+  if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine));
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
@@ -2516,7 +2520,7 @@ async function runMakeAllCore(opts = {}) {
   //   실측 근거: 대본마다 TTS 가 끝난 뒤에야 비디오를 시작해 편당 약 1.2분(5편 5.2분) 동안 TTS 서버가 놀았다.
   //   ⚠ 업스케일은 로컬 GPU 라 TTS 와 겹치면 TTS 가 1.8배 느려지지만, 이제 comfy 가 1080p 로 직접 뽑아
   //     maybeUpscale 이 해상도를 보고 건너뛴다 → 이 파이프라인에서 로컬 GPU 를 쓰는 일이 없다.
-  const comfyVideoPipeline = String(videoEngine) === 'comfy' || String(videoEngine).indexOf('comfy::') === 0;
+  const comfyVideoPipeline = isComfyVal(videoEngine);
   const videoPipeline = canParallel && (grokVideoPipeline || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
