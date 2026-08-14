@@ -407,7 +407,7 @@ ipcMain.handle('test-comfy-image', async () => {
   try { const CI = require('./core/comfy-image'); const eng = new CI.ComfyImage(CI.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
   catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
-// ComfyUI 비디오(i2v) 설정 — Wan 2.2 / LTX 등 워크플로 (이미지 comfy 와 별개 config)
+// ComfyUI 비디오(i2v) 설정 — LTX2.5/2.3 등 워크플로 (이미지 comfy 와 별개 config)
 ipcMain.handle('get-comfy-video-config', () => { try { return require('./core/comfy-video').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-comfy-video-config', (_e, patch) => { try { return require('./core/comfy-video').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 ipcMain.handle('pick-comfy-video-workflow', async () => {
@@ -1403,7 +1403,7 @@ async function runGrokApiVideos(pr, mediaDir, onlyNums) {
   }
 }
 
-// ComfyUI i2v (Wan 2.2 5B / LTX 등) — 이미지 있는 그룹만. workflowPath 지정 시 그 워크플로 사용.
+// ComfyUI i2v (LTX2.5/2.3 등) — 이미지 있는 그룹만. workflowPath 지정 시 그 워크플로 사용.
 async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const CV = require('./core/comfy-video');
   const cfg = CV.loadConfig();

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * core/comfy-video.js — ComfyUI(HTTP API) 이미지→비디오(i2v). Wan 2.2 5B / LTX 등 워크플로.
+ * core/comfy-video.js — ComfyUI(HTTP API) 이미지→비디오(i2v). LTX2.5/2.3 등 워크플로.
  *
  * 흐름: /upload/image 로 그룹 이미지 업로드 → 워크플로 LoadImage.image = 업로드명
  *   (LoadImage 노드가 없으면 하나를 자동 주입해 i2v latent 노드의 start_image 에 연결)
@@ -46,16 +46,25 @@ const DEFAULTS = {
 // 번들 워크플로를 보장(경로 재해석)하고 사용자 커스텀은 보존한다. __dirname='<install>/core' → COMFY_DIR='<install>/comfy'.
 const COMFY_DIR = path.join(__dirname, '..', 'comfy');
 const BUNDLED = [
-  { name: 'Wan2.2 5B', file: 'video_wan2_2_5B_ti2v.json' },
   { name: 'LTX2.3',    file: 'video_ltx2_3_i2v.json' },
   { name: 'LTX2.5',    file: 'video_ltx2_5_i2v.json' },
 ];
 const DEFAULT_ACTIVE_FILE = 'video_ltx2_5_i2v.json'; // 활성값이 비었거나 실재하지 않을 때 기본
+// 배포에서 뺀 옛 번들 워크플로 — 목록에서 지운다(로이 2026-08-14: Wan 2.2 제거).
+//   ⚠ 그냥 BUNDLED 에서 빼기만 하면 기존 PC 의 설정파일에 남은 항목이 "사용자 커스텀"으로 취급돼
+//     드롭다운에 계속 남는다. 파일도 저장소에서 지웠으므로 여기서 명시적으로 걸러야 한다.
+const RETIRED = ['video_wan2_2_5B_ti2v.json'];
 function _ensureBundled(cfg) {
   const wfs = Array.isArray(cfg.workflows) ? cfg.workflows : [];
   const bundledNames = new Set(BUNDLED.map((b) => b.file.toLowerCase()));
-  // 1) 기존 목록에서 번들 파일명과 겹치는 항목 제거(경로 표류·이름 변형 정리) — 커스텀만 남김
-  const customs = wfs.filter((w) => w && w.path && !bundledNames.has(path.basename(String(w.path)).toLowerCase()));
+  // 1) 기존 목록에서 번들 파일명과 겹치는 항목 제거(경로 표류·이름 변형 정리) + 폐기된 번들 제거 — 커스텀만 남김
+  const retired = new Set(RETIRED.map((f) => f.toLowerCase()));
+  const customs = wfs.filter((w) => {
+    const bn = w && w.path ? path.basename(String(w.path)).toLowerCase() : '';
+    return bn && !bundledNames.has(bn) && !retired.has(bn);
+  });
+  // 폐기된 워크플로가 활성이었다면 활성값도 비운다 → 아래 3) 이 기본(LTX2.5)으로 복구
+  if (retired.has(path.basename(String(cfg.workflowPath || '')).toLowerCase())) cfg.workflowPath = '';
   // 2) 번들 워크플로를 설치폴더 절대경로로 재구성(파일 존재하는 것만)
   const bundled = [];
   for (const b of BUNDLED) {
