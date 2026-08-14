@@ -714,9 +714,24 @@ const REF_DIR = () => path.join(os.homedir(), '.flow-app', 'ref-audio');
 function _localRefFiles() {
   try { return fs.readdirSync(REF_DIR()).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)); } catch { return []; }
 }
+// 목소리 1개를 공용 라이브러리에 올린다 — **OmniVoice(9881) 우선, 안 되면 보이스디자인(9893) 폴백**.
+//   🔑 9893 은 필요할 때만 켜지는 온디맨드라 대부분 꺼져 있다(아내 PC 에서 ETIMEDOUT 발생).
+//     OmniVoice 는 상시 실행이고 REF_LIB 의 주인이므로 이쪽이 정답. 9893 폴백은 구버전 OmniVoice 서버용.
+async function uploadRefVoice({ name, text, instruct, wavBuffer }) {
+  const ASR = require('./tts/asr-client');
+  let r = await ASR.saveServerVoice({ name, text, instruct, wavBuffer }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  if (r && r.ok) return r;
+  const why = (r && r.error) || '';
+  if (why !== 'unsupported') return r;                       // 진짜 실패는 그대로 보고(주소·키·용량 등)
+  // 구버전 OmniVoice 서버(=/save-ref-voice 없음) → 옛 경로로 시도
+  try {
+    const QD = require('./core/qwen-design');
+    const r2 = await QD.saveVoice({ name, text, instruct, wavBuffer });
+    if (r2 && r2.ok) log('   (OmniVoice 서버가 구버전이라 보이스디자인 서버로 저장했습니다)');
+    return r2;
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
 // 이 PC 에만 있는 참조음성을 서버 공용 라이브러리로 올린다. 반환: 올린 개수.
-//   ⚠ 업로드는 **보이스디자인 서버(9893)** 의 `/save-voice` 를 쓴다 — 그 서버가 라이브러리 폴더의 주인이다.
-//     그래서 9893 이 떠 있어야 한다(그래서 stop() 이 서버를 죽이지 않게 고쳤다 — 2026-08-14).
 async function syncRefAudioToServer(serverNames) {
   const dir = REF_DIR();
   const have = new Set((serverNames || []).map((v) => String((v && v.name) || v || '')));
@@ -728,12 +743,12 @@ async function syncRefAudioToServer(serverNames) {
     const name = f.replace(/\.wav$/i, '');
     let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
     let r;
-    try { r = await QD.saveVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
+    try { r = await uploadRefVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
     catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
     if (r && r.ok) { up++; continue; }
     // 서버가 안 되면 나머지도 안 된다 — 반복 실패 대신 멈추고, 무엇을 해야 하는지 알려준다.
     log(`⚠ 참조음성 "${name}" 공용 라이브러리 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
-    log('   ↳ 메인 PC 의 보이스디자인 서버(9893)가 떠 있어야 합니다. 꺼져 있으면 메인 PC 에서 시작프로그램의 「보이스디자인서버」를 실행하세요.');
+    log('   ↳ ⚙ 설정 → 🖧 TTS 서버 의 OmniVoice 주소가 메인 PC 를 가리키는지 확인하세요(합성이 되는 주소면 업로드도 됩니다).');
     break;
   }
   if (up) log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
@@ -868,7 +883,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     //   ⚠ 로컬 저장은 이미 끝났으므로 여기서 실패해도 **경고만** 하고 성공으로 반환한다(작업을 막지 않는다).
     try {
       // ⚠ 잘라낸 wav(wavPath)와 **그에 맞게 수정된 참조텍스트(refText)** 를 함께 올린다 — 둘이 어긋나면 복제 품질이 무너진다.
-      const r = await QD.saveVoice({ name: base, text: refText, instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
+      const r = await uploadRefVoice({ name: base, text: refText, instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
       if (r.ok) log(`   ☁ 공용 라이브러리에도 등록: ${r.name}.wav (${r.path})`);
       else if (r.error === 'unsupported') log('   ⚠ 서버가 공용 라이브러리를 지원하지 않습니다(구버전) — 이 PC 에만 저장됨');
       else log(`   ⚠ 공용 라이브러리 등록 실패 — 이 PC 에만 저장됨 (${r.error})`);

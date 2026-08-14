@@ -157,4 +157,33 @@ async function transcribeLong(audioPath, opts = {}) {
   }
 }
 
-module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices };
+/**
+ * /save-ref-voice — 공용 참조음성 라이브러리에 목소리 저장.
+ *   🔑 **업로드도 OmniVoice(9881) 로 한다** — 보이스디자인 서버(9893)는 필요할 때만 켜지는 온디맨드라
+ *     대부분 꺼져 있어 다른 PC 에서 업로드가 timeout 났다. OmniVoice 는 상시 실행이고 REF_LIB 의 주인이다.
+ *   구버전 서버면 404 → { ok:false, error:'unsupported' } (호출부가 9893 으로 폴백).
+ */
+async function saveServerVoice({ name, text = '', instruct = '', wavBuffer }) {
+  const base = _baseUrl();
+  if (!base) return { ok: false, error: 'OmniVoice 서버 주소가 없습니다' };
+  if (!wavBuffer || wavBuffer.length < 44) return { ok: false, error: 'wav 데이터가 없습니다' };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 60000);
+    let res;
+    try {
+      res = await fetch(base + '/save-ref-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: JSON.stringify({ name: String(name || '').trim(), text: String(text || ''), instruct: String(instruct || ''), wav_b64: Buffer.from(wavBuffer).toString('base64') }),
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(t); }
+    if (res.status === 404) return { ok: false, error: 'unsupported' };
+    const j = await res.json().catch(() => ({}));
+    if (res.ok && j.ok) return { ok: true, name: j.name, path: j.path };
+    return { ok: false, error: j.error || `HTTP ${res.status}` };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+
+module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices, saveServerVoice };
