@@ -1121,6 +1121,8 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   const incomplete = [];
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const bad = sweepBlankVisuals(pr);   // 검정이면 비운다 → 아래 게이트가 막고 어느 그룹인지 알려준다
+    if (bad.length) { log(`⬛ ${prLabel(pr)} — 검정 ${bad.length}개(G${bad.join(', G')}) 비움 — 🔄 로 다시 만든 뒤 저장하세요`); pushDtoUpdate(); }
     const miss = missingVisualGroups(pr);
     if (miss.length) {
       incomplete.push({ label: prLabel(pr), nums: miss });
@@ -1312,9 +1314,14 @@ function looksBlankImage(file) {
     const { execFileSync } = require('child_process');
     const buf = execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-i', file,
       '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20, timeout: 15000 });
-    if (!buf || buf.length < 3) return false;
+    if (!buf || buf.length < 3) return st.size < 40 * 1024;
     return (buf[0] + buf[1] + buf[2]) < 30;        // 평균 RGB 합 30 미만 = 사실상 검정
-  } catch { return false; }                        // 판정 실패 시엔 정상으로 간주(오탐 방지)
+  } catch {
+    // 🔴 판정 실패를 무조건 "정상"으로 넘기면 안 된다(fail-open 구멍) — G: 같은 네트워크 드라이브에서
+    //   ffmpeg 이 실패하면 검정 이미지가 그대로 통과한다(2026-08-14 실제 사고: 09.png 11KB·RGB 9 가 살아남음).
+    //   1344x768 짜리 정상 이미지는 40KB 미만이 될 수 없으므로, **작은 파일은 검정으로 본다**(fail-closed).
+    try { return fs.statSync(file).size < 40 * 1024; } catch { return false; }
+  }
 }
 
 // 생성된 '영상'이 사실상 검정인지 판정 — i2v 도 동시 생성 시 이미지와 같은 현상이 있을 수 있어 방어한다.
@@ -1979,6 +1986,26 @@ function missingVisualGroups(project) {
     const hasVid = g.videoPath && fs.existsSync(g.videoPath);
     return !hasImg && !hasVid;
   }).map((g) => g.num);
+}
+// ── 최종 검정 검사 ── .vrew 를 만들기 **직전에** 실제 파일을 다시 훑어, 검정으로 판정되면 비운다.
+//   생성 시점 검사(runComfyImages)만으로는 새는 경우가 있었다(판정 실패·다른 엔진·나중에 덮어쓰기 등).
+//   여기서 비우면 그 그룹은 missingVisualGroups 에 걸려 **.vrew 가 막히고 어느 그룹인지 팝업으로 알려진다.**
+//   반환: 비워진 그룹 번호 배열.
+function sweepBlankVisuals(project, logger = log) {
+  const cleared = [];
+  for (const g of (project.groups || [])) {
+    if (g.videoPath && fs.existsSync(g.videoPath) && looksBlankVideo(g.videoPath)) {
+      logger(`  ⬛ G${g.num} 검정 영상 — 비움 (${path.basename(g.videoPath)})`);
+      try { fs.rmSync(g.videoPath, { force: true }); } catch {}
+      g.videoPath = null; g.videoStatus = 'fail'; cleared.push(g.num);
+    }
+    if (g.imagePath && fs.existsSync(g.imagePath) && looksBlankImage(g.imagePath)) {
+      logger(`  ⬛ G${g.num} 검정 이미지 — 비움 (${path.basename(g.imagePath)})`);
+      try { fs.rmSync(g.imagePath, { force: true }); } catch {}
+      g.imagePath = null; g.imageStatus = 'fail'; cleared.push(g.num);
+    }
+  }
+  return [...new Set(cleared)];
 }
 // 미생성 그룹이 있는 편들을 팝업으로 알림. incomplete = [{ label, nums }]
 function warnIncompleteVisuals(incomplete) {
@@ -2799,6 +2826,19 @@ async function runMakeAllCore(opts = {}) {
   // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
     log('📦 4단계 — .vrew 일괄 생성…');
+    // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정이면 비우고 **그 그룹만 순차로 다시 만든다**.
+    //   (생성 시점 검사를 빠져나온 검정 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14)
+    for (const pr of projects) {
+      const bad = sweepBlankVisuals(pr);
+      if (!bad.length) continue;
+      log(`⬛ ${prLabel(pr)} — 검정 ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
+      pushDtoUpdate();
+      const dirs0 = shortsDirs(outRoot, pr.shortsNum);
+      try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
+      const still = sweepBlankVisuals(pr);
+      if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 검정: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
+      pushDtoUpdate();
+    }
     const incomplete = [];
     for (const pr of projects) {
       const miss = missingVisualGroups(pr);

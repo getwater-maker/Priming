@@ -1,5 +1,5 @@
 {
-  "version": "0.3.9",
+  "version": "0.3.10",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "6f4248ef4ca8af29cf9ff5c6d2f2ed4d0c1f8cf0",
@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "64c1df2dbbb1671cfff6232130f5f14301e894b7",
-    "CLAUDE.md": "1d2d0e5893717eefa27c6e282a402ebaba3f0a39",
+    "CLAUDE.md": "20a147c5f0924fd1f581c170a5a75f7e49e8a13b",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
     "comfy/image_z_image_turbo.json": "f0eedbd0b79416b35eaa0ba0748b8d1e7a2f484d",
     "comfy/video_ltx2_3_i2v.json": "dd3d7d923b341e4dd88d1381a623e33eb610db08",
@@ -69,9 +69,9 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "cf341221315558eeb1676b4279270976684389d2",
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
-    "main.js": "b4d471fbd5cd8cae8501e6e7521c28bf11d0d500",
+    "main.js": "6c77772a9ca5969091cb3871d172178a17a26266",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "1c254d4434bcb48fa033031c4a1950f48479e2aa",
+    "package.json": "57b293af49223bca268fcc34c4669484097183b8",
     "preload.js": "333f7a1cc0075f5207583bd970a348226a5edf65",
     "renderer/dist/assets/index-CH0F46NE.css": "c7c1e4969c55dcdcb1f552fefdb77167e49ca59b",
     "renderer/dist/assets/index-DnlSOEww.js": "414003d451086b4d60ff3e39215440d1af6de786",
