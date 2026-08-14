@@ -225,7 +225,8 @@ export default function App() {
   // 🎨 보이스디자인(Qwen3-TTS) 모달
   const [vdOpen, setVdOpen] = useState(false);
   const [vdInstruct, setVdInstruct] = useState('');
-  const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다.');
+  // 기본 문장을 길게 둔다(약 10초) — 끝의 감쇠 구간을 잘라내고도 참조음성으로 쓸 5초가 남도록.
+  const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.');
   const [vdStatus, setVdStatus] = useState('');
   const [vdBusy, setVdBusy] = useState(false);
   const [vdReady, setVdReady] = useState(false);         // 디자인 서버 준비 완료 여부 — 준비 전엔 '목소리 생성' 잠금
@@ -233,6 +234,14 @@ export default function App() {
   const [vdWavUrl, setVdWavUrl] = useState('');
   const [vdGenerated, setVdGenerated] = useState(false);
   const [vdFilename, setVdFilename] = useState('');
+  // ✂ 슬라이스 — 보이스디자인 음성은 **끝이 서서히 작아진다**(모델 특성). 그 구간이 참조음성에 들어가면
+  //   합성한 문장 끝이 계속 끊기는 느낌이 난다 → 길게 만들고 쓸 구간만 잘라 저장한다(로이 2026-08-14).
+  const [vdDur, setVdDur] = useState(0);              // 생성된 원본 길이(초)
+  const [vdSel, setVdSel] = useState({ s: 0, e: 0 }); // 저장할 구간(초)
+  const [vdPeaks, setVdPeaks] = useState(null);       // 파형 그리기용 [{min,max}...]
+  const [vdRefText, setVdRefText] = useState('');     // 잘라낸 구간에 실제로 들리는 말 = 저장될 참조텍스트
+  const vdCanvasRef = useRef(null);
+  const vdAudioRef = useRef(null);
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
@@ -1139,30 +1148,112 @@ export default function App() {
       if (r && r.ok) {
         const url = await api.readAudio(r.tempPath);
         setVdWavUrl(url || ''); setVdGenerated(true);
+        // 슬라이스 초기화 — 기본 구간은 서버가 제안한 "말이 있는 구간"(앞 무음·끝 감쇠 제외)
+        const dur = Number(r.durationSec) || 0;
+        setVdDur(dur);
+        const sg = r.suggest || {};
+        setVdSel({ s: Number(sg.start) || 0, e: Number(sg.end) || dur });
+        setVdRefText(r.text || vdText || '');
+        vdBuildPeaks(url);
         playPreviewUrl(url);
-        setVdStatus('생성 완료 — 들어보고, 마음에 들면 아래에 파일명을 입력해 저장하세요. (안 들면 설명을 바꿔 다시 생성)');
+        setVdStatus(`생성 완료 (${dur.toFixed(2)}초) — 들어보고, 쓸 구간을 파형에서 고른 뒤 파일명을 입력해 저장하세요.`);
       } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
+  }
+  // ── ✂ 슬라이스 도우미 ──
+  // 파형 봉우리 계산 — Web Audio 로 디코드(추가 의존성 없음). 실패하면 파형만 안 보이고 나머지는 정상 동작.
+  async function vdBuildPeaks(url) {
+    setVdPeaks(null);
+    if (!url) return;
+    try {
+      const ab = await (await fetch(url)).arrayBuffer();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const audio = await ctx.decodeAudioData(ab);
+      const ch = audio.getChannelData(0);
+      const N = 900, step = Math.max(1, Math.floor(ch.length / N));
+      const peaks = [];
+      for (let i = 0; i < N; i++) {
+        let mn = 1, mx = -1;
+        for (let j = i * step, end = Math.min(ch.length, j + step); j < end; j++) { const v = ch[j]; if (v < mn) mn = v; if (v > mx) mx = v; }
+        peaks.push(mn > mx ? { min: 0, max: 0 } : { min: mn, max: mx });
+      }
+      setVdPeaks(peaks);
+      try { ctx.close(); } catch {}
+    } catch (e) { logline('파형 표시 실패(기능엔 영향 없음): ' + e.message); }
+  }
+  const vdClamp = (v) => Math.max(0, Math.min(vdDur || 0, Math.round((Number(v) || 0) * 1000) / 1000));
+  // 캔버스 x 좌표 → 초
+  function vdSecAt(ev) {
+    const c = vdCanvasRef.current; if (!c || !vdDur) return 0;
+    const r = c.getBoundingClientRect();
+    return vdClamp(((ev.clientX - r.left) / r.width) * vdDur);
+  }
+  // 드래그: 손잡이 근처를 잡으면 그 쪽을 옮기고, 아니면 새 구간을 그린다
+  function vdMouseDown(ev) {
+    if (!vdDur) return;
+    const t = vdSecAt(ev);
+    const near = (vdDur / (vdCanvasRef.current?.clientWidth || 600)) * 8; // 8px 이내
+    let mode = 'new';
+    if (Math.abs(t - vdSel.s) <= near) mode = 's';
+    else if (Math.abs(t - vdSel.e) <= near) mode = 'e';
+    let anchor = t;
+    if (mode === 'new') setVdSel({ s: t, e: t });
+    const move = (e2) => {
+      const t2 = vdSecAt(e2);
+      if (mode === 's') setVdSel((p) => ({ s: Math.min(t2, p.e - 0.02), e: p.e }));
+      else if (mode === 'e') setVdSel((p) => ({ s: p.s, e: Math.max(t2, p.s + 0.02) }));
+      else setVdSel({ s: Math.min(anchor, t2), e: Math.max(anchor, t2) });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  }
+  // 「≈N초」 — 시작점부터 약 N초 지점의 **말이 쉬는 곳**에서 끊는다.
+  //   그냥 N초에서 자르면 단어 중간이 잘려 참조텍스트와 맞추기가 어렵다 → ±1.2초 안에서 가장 조용한 지점을 찾는다.
+  function vdCutAbout(sec) {
+    if (!vdDur) return;
+    const target = Math.min(vdDur, vdSel.s + sec);
+    if (!vdPeaks || !vdPeaks.length) { setVdSel((p) => ({ ...p, e: Math.max(p.s + 0.02, target) })); return; }
+    const secOf = (i) => (i / vdPeaks.length) * vdDur;
+    const energy = (i) => Math.abs(vdPeaks[i].max) + Math.abs(vdPeaks[i].min);
+    let best = -1, bestE = Infinity;
+    for (let i = 0; i < vdPeaks.length; i++) {
+      const t = secOf(i);
+      if (t < target - 1.2 || t > target + 1.2 || t <= vdSel.s + 0.5) continue;
+      const e = energy(i);
+      if (e < bestE) { bestE = e; best = i; }
+    }
+    const at = best >= 0 ? secOf(best) : target;
+    setVdSel((p) => ({ ...p, e: vdClamp(Math.max(p.s + 0.02, at)) }));
+    setVdStatus(`✂ ${sec}초 부근의 쉬는 지점(${at.toFixed(2)}초)에서 끊었습니다 — ⚠ 참조텍스트도 거기까지만 남기세요.`);
+  }
+  // 선택 구간만 재생 — 잘라낸 결과가 어떻게 들릴지 확인
+  function vdPlaySel() {
+    const a = vdAudioRef.current; if (!a) return;
+    a.currentTime = vdSel.s; a.play();
+    const stop = () => { if (a.currentTime >= vdSel.e) { a.pause(); a.removeEventListener('timeupdate', stop); } };
+    a.addEventListener('timeupdate', stop);
   }
   async function vdSave() {
     const fn = (vdFilename || '').trim();
     if (!fn) { setVdStatus('저장할 파일명을 입력하세요.'); return; }
     if (!vdGenerated) { setVdStatus('먼저 목소리를 생성하세요.'); return; }
+    if (vdDur && vdSel.e <= vdSel.s) { setVdStatus('⚠ 저장할 구간이 비어 있습니다.'); return; }
     setVdBusy(true); setVdStatus('저장 중…');
     try {
-      const r = await api.qwenDesignSave({ filename: fn });
+      const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText });
       if (r && r.ok) {
         try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
-        setCh((c) => ({ ...c, voiceCloneRefAudio: r.path, voiceCloneRefText: vdText }));
+        setCh((c) => ({ ...c, voiceCloneRefAudio: r.path, voiceCloneRefText: r.text || vdRefText }));
         setVdFilename('');
-        setVdStatus(`✔ 저장됨: ${r.name} — 참조음성 목록에 추가 + 이 채널에 지정했습니다. (채널편집 창에서 “저장”을 눌러야 최종 반영)`);
+        setVdStatus(`✔ 저장됨: ${r.name} (${(r.durationSec || 0).toFixed(2)}초) — 참조음성 목록에 추가 + 이 채널에 지정했습니다. (채널편집 창에서 “저장”을 눌러야 최종 반영)`);
       } else setVdStatus('⚠ 저장 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
   }
   async function closeVoiceDesign() {
     setVdOpen(false); setVdReady(false); // 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
+    setVdGenerated(false); setVdWavUrl(''); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 }); // 지난 파형·구간이 남지 않게
     try { await api.qwenDesignStop(); } catch {}
   }
   async function saveChannel() {
@@ -1415,6 +1506,38 @@ export default function App() {
     else findTimerRef.current = setTimeout(fire, 280);
   }
   function closeFind() { if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; } api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
+  // 보이스디자인 파형 그리기 — 봉우리/선택구간이 바뀔 때마다 다시 그린다.
+  useEffect(() => {
+    const c = vdCanvasRef.current;
+    if (!c || !vdOpen) return;
+    const W = c.width = c.clientWidth * (window.devicePixelRatio || 1);
+    const H = c.height = 110 * (window.devicePixelRatio || 1);
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = '#faf6ef'; g.fillRect(0, 0, W, H);
+    const x = (sec) => (vdDur ? (sec / vdDur) * W : 0);
+    // 선택 구간 강조 + 버리는 구간은 흐리게
+    if (vdDur) {
+      g.fillStyle = 'rgba(0,0,0,0.06)'; g.fillRect(0, 0, x(vdSel.s), H); g.fillRect(x(vdSel.e), 0, W - x(vdSel.e), H);
+      g.fillStyle = 'rgba(193,138,66,0.13)'; g.fillRect(x(vdSel.s), 0, x(vdSel.e) - x(vdSel.s), H);
+    }
+    if (vdPeaks && vdPeaks.length) {
+      const mid = H / 2;
+      for (let i = 0; i < vdPeaks.length; i++) {
+        const px = (i / vdPeaks.length) * W, sec = vdDur * (i / vdPeaks.length);
+        g.fillStyle = (sec >= vdSel.s && sec <= vdSel.e) ? '#8a6a3a' : '#c9c2b6';   // 선택 밖은 회색
+        const y1 = mid - vdPeaks[i].max * mid * 0.92, y2 = mid - vdPeaks[i].min * mid * 0.92;
+        g.fillRect(px, y1, Math.max(1, W / vdPeaks.length), Math.max(1, y2 - y1));
+      }
+    } else {
+      g.fillStyle = '#b9b2a6'; g.font = `${12 * (window.devicePixelRatio || 1)}px sans-serif`;
+      g.fillText('파형 준비 중…', 10, H / 2);
+    }
+    // 손잡이
+    if (vdDur) for (const [sec, col] of [[vdSel.s, '#c18a42'], [vdSel.e, '#c0392b']]) {
+      g.fillStyle = col; g.fillRect(Math.max(0, Math.min(W - 2, x(sec) - 1)), 0, 3, H);
+    }
+  }, [vdPeaks, vdSel, vdDur, vdOpen]);
   // ComfyUI 설정을 마운트 시 로드 — 헤더 드롭다운이 등록된 워크플로(z-image·Krea2 등) 목록을 알도록.
   useEffect(() => {
     api.getComfyImageConfig().then((c) => {
@@ -2036,7 +2159,8 @@ export default function App() {
         <div className="modal-bg show">
           <div className="modal-card wide">
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
-            <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → 마음에 들면 <b>파일명을 입력해 저장</b>하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)</p>
+            <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → <b>쓸 구간을 골라</b> 파일명을 입력해 저장하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)<br />
+              ✂ <b>끝은 잘라 쓰는 걸 권합니다</b> — 생성된 음성은 문장 끝이 서서히 작아지는데(모델 특성), 그대로 참조음성으로 쓰면 <b>TTS 문장 끝이 계속 끊기는 느낌</b>이 납니다. 길게 만들고 <b>또렷한 5초 남짓</b>만 남기세요.</p>
             <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
               <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
             <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
@@ -2049,13 +2173,38 @@ export default function App() {
               {vdWavUrl ? <button className="ghost" onClick={() => playPreviewUrl(vdWavUrl)}>▶ 다시 듣기</button> : null}
               <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
             </div>
-            {vdWavUrl ? <div className="frow"><label></label><audio controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
-            {vdGenerated ? (
+            {vdWavUrl ? <div className="frow"><label></label><audio ref={vdAudioRef} controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
+            {vdGenerated ? (<>
+              {/* ✂ 슬라이스 — 끝의 감쇠(페이드) 구간을 빼고 저장하면 합성 문장 끝이 끊기지 않는다 */}
+              <div className="frow" style={{ alignItems: 'flex-start' }}>
+                <label title="드래그해서 저장할 구간을 고르세요. 손잡이(주황=시작·빨강=끝)를 잡아 미세 조정할 수 있습니다.">쓸 구간</label>
+                <div style={{ flex: 1 }}>
+                  <canvas ref={vdCanvasRef} onMouseDown={vdMouseDown}
+                    style={{ width: '100%', height: 110, border: '1px solid var(--line)', borderRadius: 6, cursor: 'ew-resize', display: 'block' }} />
+                  <div className="frow" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+                    <span className="meta">시작</span>
+                    <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.s.toFixed(2)}
+                      onChange={(e) => setVdSel((p) => ({ ...p, s: Math.min(vdClamp(e.target.value), p.e - 0.02) }))} />
+                    <span className="meta">끝</span>
+                    <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.e.toFixed(2)}
+                      onChange={(e) => setVdSel((p) => ({ ...p, e: Math.max(vdClamp(e.target.value), p.s + 0.02) }))} />
+                    <span className="meta">초 · 길이 <b>{Math.max(0, vdSel.e - vdSel.s).toFixed(2)}초</b> / 원본 {vdDur.toFixed(2)}초</span>
+                    <button className="ghost" onClick={vdPlaySel} title="선택한 구간만 재생 — 저장될 소리를 그대로 확인">▶ 구간 듣기</button>
+                    <button className="ghost" onClick={() => vdCutAbout(5)} title="시작점부터 약 5초 — 단어가 잘리지 않게 그 부근의 쉬는 지점에서 끊습니다">✂ ≈5초</button>
+                    <button className="ghost" onClick={() => setVdSel({ s: 0, e: vdDur })} title="원본 전체로 되돌리기">↺ 전체</button>
+                  </div>
+                </div>
+              </div>
+              <div className="frow" style={{ alignItems: 'flex-start' }}>
+                <label title="참조음성(.wav)과 짝이 되는 .txt 입니다. 실제로 들리는 말과 다르면 음성 복제 품질이 떨어집니다.">참조텍스트</label>
+                <textarea rows="2" value={vdRefText} onChange={(e) => setVdRefText(e.target.value)}
+                  placeholder="선택 구간에서 실제로 들리는 말만 남기세요" /></div>
+              <div className="meta" style={{ margin: '-6px 0 8px 96px' }}>⚠ 구간을 잘랐으면 <b>이 문장도 들리는 부분만</b> 남겨야 합니다 — 음성과 글이 어긋나면 복제가 흐트러집니다.</div>
               <div className="frow"><label>파일명</label>
                 <input placeholder="예: 고전서재_내레이터" value={vdFilename} onChange={(e) => setVdFilename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') vdSave(); }} style={{ flex: 1 }} />
-                <button onClick={vdSave} disabled={vdBusy} title="이 목소리를 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
+                <button onClick={vdSave} disabled={vdBusy} title="선택한 구간만 잘라 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
               </div>
-            ) : null}
+            </>) : null}
             <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy ? '⏳ ' : ''}{vdStatus}</div>
             <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
           </div>

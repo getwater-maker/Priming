@@ -774,7 +774,14 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
     fs.writeFileSync(tmpPath, r.buffer);
     S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용
     S.vdLastInstruct = instruct;                   // 어떤 설명으로 만든 목소리인지 — 서버 라이브러리에 함께 남긴다
-    return { ok: true, tempPath: tmpPath, text };
+    // 길이 + 자동 구간 제안(앞 무음·끝 감쇠 제거) — 슬라이스 UI 의 초기값. 실패해도 생성 자체는 성공.
+    let durationSec = 0, suggest = null;
+    try {
+      const WS = require('./core/wav-slice');
+      durationSec = WS.parseWav(r.buffer).durationSec;
+      suggest = WS.suggestRange(r.buffer);
+    } catch (e) { log('⚠ 파형 분석 실패(슬라이스 기본값 없음): ' + String((e && e.message) || e)); }
+    return { ok: true, tempPath: tmpPath, text, durationSec, suggest };
   } catch (e) { return { ok: false, error: '임시 저장 실패: ' + String((e && e.message) || e) }; }
 });
 // 저장: 방금 생성한 미리듣기 wav 를 사용자가 지정한 파일명으로 ref-audio 에 정식 등록(+.txt 참조텍스트).
@@ -788,18 +795,36 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     let base = name, i = 2;
     while (fs.existsSync(path.join(dir, base + '.wav'))) { base = name + '_' + i; i++; }  // 같은 이름 있으면 _2, _3…
     const wavPath = path.join(dir, base + '.wav');
-    fs.copyFileSync(S.vdLastTemp, wavPath);
-    fs.writeFileSync(path.join(dir, base + '.txt'), S.vdLastText || '', 'utf8');  // 같은 이름 .txt = 참조텍스트
-    log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)`);
+    // ── 슬라이스 ── 지정 구간만 잘라 저장(무손실). 보이스디자인 음성은 **끝이 서서히 작아지므로**
+    //   그 구간이 참조음성에 들어가면 합성 문장 끝이 계속 끊기는 느낌이 된다(로이 2026-08-14).
+    //   ⚠ 잘라내면 실제로 들리는 말이 달라지므로 **참조텍스트도 함께 바뀌어야** 한다 → args.text 를 쓴다.
+    const src = fs.readFileSync(S.vdLastTemp);
+    let outBuf = src, cutLog = '';
+    const s0 = Number(args.startSec), e0 = Number(args.endSec);
+    if (isFinite(s0) && isFinite(e0) && e0 > s0) {
+      try {
+        const WS = require('./core/wav-slice');
+        const full = WS.parseWav(src).durationSec;
+        outBuf = WS.sliceWav(src, s0, e0);
+        if (outBuf !== src) cutLog = ` · ✂ ${s0.toFixed(2)}~${e0.toFixed(2)}초 (원본 ${full.toFixed(2)}초)`;
+      } catch (e) { return { ok: false, error: '구간 자르기 실패: ' + String((e && e.message) || e) }; }
+    }
+    const refText = (args.text != null ? String(args.text) : (S.vdLastText || '')).trim();
+    fs.writeFileSync(wavPath, outBuf);
+    fs.writeFileSync(path.join(dir, base + '.txt'), refText, 'utf8');  // 같은 이름 .txt = 참조텍스트
+    log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)${cutLog}`);
+    if (!refText) log('   ⚠ 참조텍스트가 비어 있습니다 — 음성 복제 품질이 떨어질 수 있습니다.');
     // 서버(메인 PC)의 공용 목소리 라이브러리에도 등록 — 나·아내가 만든 목소리를 한 곳에 모아 서로 쓸 수 있게.
     //   ⚠ 로컬 저장은 이미 끝났으므로 여기서 실패해도 **경고만** 하고 성공으로 반환한다(작업을 막지 않는다).
     try {
-      const r = await QD.saveVoice({ name: base, text: S.vdLastText || '', instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
+      // ⚠ 잘라낸 wav(wavPath)와 **그에 맞게 수정된 참조텍스트(refText)** 를 함께 올린다 — 둘이 어긋나면 복제 품질이 무너진다.
+      const r = await QD.saveVoice({ name: base, text: refText, instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
       if (r.ok) log(`   ☁ 공용 라이브러리에도 등록: ${r.name}.wav (${r.path})`);
       else if (r.error === 'unsupported') log('   ⚠ 서버가 공용 라이브러리를 지원하지 않습니다(구버전) — 이 PC 에만 저장됨');
       else log(`   ⚠ 공용 라이브러리 등록 실패 — 이 PC 에만 저장됨 (${r.error})`);
     } catch (e) { log('   ⚠ 공용 라이브러리 등록 오류: ' + String((e && e.message) || e)); }
-    return { ok: true, path: wavPath, name: base + '.wav' };
+    let savedSec = 0; try { savedSec = require('./core/wav-slice').parseWav(outBuf).durationSec; } catch {}
+    return { ok: true, path: wavPath, name: base + '.wav', text: refText, durationSec: savedSec };
   } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
 });
 
