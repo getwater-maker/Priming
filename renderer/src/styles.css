@@ -225,6 +225,12 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .modal-card{background:var(--card);border-radius:14px;padding:20px 22px;width:540px;max-width:92vw;
   box-shadow:0 10px 40px rgba(0,0,0,.4)}
 .modal-card.wide{width:736px;max-height:88vh;overflow-y:auto}
+/* 탭형 모달 — 세로 스크롤 대신 상단 탭으로 섹션을 나눈다 (채널편집 등). 탭을 바꿔도 창 높이가 튀지 않게 본문 최소높이 고정 */
+.modal-card.tabbed{overflow:visible}
+.modal-card.tabbed .tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px}
+.modal-card.tabbed .tabbody{min-height:246px}
+.modal-card.tabbed .tabbody>div>.frow:first-child{margin-top:0}
+.modal-card.tabbed .tabbody .subhead:first-child{margin-top:0;border-top:none;padding-top:0}
 /* ComfyUI 설정 — 넓은 2열 그리드 (한 화면에 모두) */
 .comfymodal{width:940px;max-width:96vw;max-height:92vh;overflow-y:auto}
 .comfymodal .cgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;align-items:center}

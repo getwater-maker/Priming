@@ -224,6 +224,7 @@ export default function App() {
 
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
+  const [chTab, setChTab] = useState('basic'); // 채널편집 탭 (basic·voice·caption·tools·folder)
   const [ch, setCh] = useState(null);          // 편집 중 프리셋 폼
   const [newChanOpen, setNewChanOpen] = useState(false); // 새 채널 이름 입력 모달
   const [newChanName, setNewChanName] = useState('');
@@ -1096,6 +1097,7 @@ export default function App() {
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
     });
+    setChTab('basic'); // 열 때마다 첫 탭부터
     setChOpen(true);
   }
   // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
@@ -2082,88 +2084,115 @@ export default function App() {
 
       {chOpen && ch && (
         <div className="modal-bg show">
-          <div className="modal-card wide">
+          <div className="modal-card wide tabbed">
             <h3>⚙ 채널(프리셋) 편집 — {(ch._raw && ch._raw.name) || ch.name}</h3>
-            <div className="frow"><label>채널 이름</label>
-              <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
-                onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
-            <div className="frow"><label>그룹(구분)</label>
-              <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 / 쇼츠 (비우면 구분 없음)" list="ch-group-list"
-                onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
-              <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
-            <div className="frow"><label>시작 화면</label>
-              <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
-                <option value="longform">롱폼 (16:9)</option>
-                <option value="shorts">쇼츠 (9:16)</option>
-                <option value="playlist">🎵 플리 (음악)</option>
-                <option value="book">📖 출판</option>
-              </select>
-              <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
+            {/* 섹션을 세로로 쌓지 않고 탭으로 나눈다 — 스크롤 없이 한 화면에 들어오게 (2026-08-14) */}
+            <div className="tabbar">
+              {[['basic', '🏠 기본'], ['voice', '🎙 음성'], ['caption', '📝 자막·분할'], ['tools', '🖼 제작 도구'], ['folder', '📁 폴더']].map(([id, lbl]) => (
+                <button key={id} className={chTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setChTab(id)}>{lbl}</button>
+              ))}
             </div>
-            {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
-            <div className="frow"><label>목소리</label><input readOnly title="참조음성 (☁ = 서버 공용 라이브러리 — 이 PC 에 파일이 없어도 됨)" value={refLabel(ch.voiceCloneRefAudio) || ch.voice} style={{ flex: '0 0 170px' }} />
-              <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
-              <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
-            <div className="frow"><label>참조음성</label>
-              <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
-                    (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
-                {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
-                {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
-                {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-              </select>
-              <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
-              <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
-              <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
-            <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
-            <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
-              <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
+            <div className="tabbody">
 
-            <div className="subhead">📝 본문 자막 (롱폼 / 쇼츠)</div>
-            <div className="twocol">{capColumn('capLong', '롱폼 16:9', true)}{capColumn('capShort', '쇼츠 9:16', false)}</div>
+              {chTab === 'basic' && (<div>
+                <div className="frow"><label>채널 이름</label>
+                  <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
+                    onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
+                <div className="frow"><label>그룹(구분)</label>
+                  <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 / 쇼츠 (비우면 구분 없음)" list="ch-group-list"
+                    onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
+                  <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
+                <div className="frow"><label>시작 화면</label>
+                  <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
+                    <option value="longform">롱폼 (16:9)</option>
+                    <option value="shorts">쇼츠 (9:16)</option>
+                    <option value="playlist">🎵 플리 (음악)</option>
+                    <option value="book">📖 출판</option>
+                  </select>
+                  <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
+                </div>
+                <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
+              </div>)}
 
-            <div className="subhead">🔊 음성 배속 · 🎨 이미지 스타일</div>
-            <div className="twocol">
-              <div className="col"><h4>롱폼 16:9</h4>
-                <div className="crow tri"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} />
-                  <span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-              </div>
-              <div className="col"><h4>쇼츠 9:16</h4>
-                <div className="crow tri"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedShort} onChange={(e) => setCh({ ...ch, speedShort: e.target.value })} />
-                  <span className="l">스타일</span><select value={ch.styleShort} onChange={(e) => setCh({ ...ch, styleShort: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-              </div>
+              {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
+              {chTab === 'voice' && (<div>
+                <div className="frow"><label>목소리</label><input readOnly title="참조음성 (☁ = 서버 공용 라이브러리 — 이 PC 에 파일이 없어도 됨)" value={refLabel(ch.voiceCloneRefAudio) || ch.voice} style={{ flex: '0 0 170px' }} />
+                  <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
+                  <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
+                <div className="frow"><label>참조음성</label>
+                  <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
+                    {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
+                        (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
+                    {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
+                    {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
+                    {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
+                  </select>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
+                <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
+                <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
+                  <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
+
+                <div className="subhead">🔊 음성 배속</div>
+                <div className="twocol">
+                  <div className="col"><h4>롱폼 16:9</h4>
+                    <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
+                  </div>
+                  <div className="col"><h4>쇼츠 9:16</h4>
+                    <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedShort} onChange={(e) => setCh({ ...ch, speedShort: e.target.value })} /></div>
+                  </div>
+                </div>
+              </div>)}
+
+              {chTab === 'caption' && (<div>
+                <div className="twocol">{capColumn('capLong', '롱폼 16:9', true)}{capColumn('capShort', '쇼츠 9:16', false)}</div>
+              </div>)}
+
+              {chTab === 'tools' && (<div>
+                <div className="subhead">🎨 이미지 스타일</div>
+                <div className="twocol">
+                  <div className="col"><h4>롱폼 16:9</h4>
+                    <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+                  </div>
+                  <div className="col"><h4>쇼츠 9:16</h4>
+                    <div className="crow"><span className="l">스타일</span><select value={ch.styleShort} onChange={(e) => setCh({ ...ch, styleShort: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+                  </div>
+                </div>
+
+                <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
+                <div className="twocol">
+                  <div className="col">
+                    <div className="crow"><span className="l">이미지</span>
+                      {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
+                      <select value={comfySelectValue(ch.imgEngine || 'rotate', comfyCfg)}
+                        onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
+                        <option value="rotate">순환(무료)</option>
+                        <option value="gemini">유료(나노바나나2)</option>
+                        <ComfyEngineOptions cfg={comfyCfg} />
+                      </select></div>
+                  </div>
+                  <div className="col">
+                    <div className="crow"><span className="l">비디오</span>
+                      <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
+                        onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
+                        <ComfyEngineOptions cfg={cvidCfg} kind="video" />
+                        <option value="grok">Grok (브라우저)</option>
+                        <option value="grok-api">Grok API (유료)</option>
+                        <option value="none">없음(이미지 고정)</option>
+                      </select></div>
+                  </div>
+                </div>
+                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다.</div>
+              </div>)}
+
+              {chTab === 'folder' && (<div>
+                <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
+                <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
+              </div>)}
+
             </div>
-
-            <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
-            <div className="twocol">
-              <div className="col">
-                <div className="crow"><span className="l">이미지</span>
-                  {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
-                  <select value={comfySelectValue(ch.imgEngine || 'rotate', comfyCfg)}
-                    onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                    <option value="rotate">순환(무료)</option>
-                    <option value="gemini">유료(나노바나나2)</option>
-                    <ComfyEngineOptions cfg={comfyCfg} />
-                  </select></div>
-              </div>
-              <div className="col">
-                <div className="crow"><span className="l">비디오</span>
-                  <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
-                    onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                    <ComfyEngineOptions cfg={cvidCfg} kind="video" />
-                    <option value="grok">Grok (브라우저)</option>
-                    <option value="grok-api">Grok API (유료)</option>
-                    <option value="none">없음(이미지 고정)</option>
-                  </select></div>
-              </div>
-            </div>
-            <div className="meta" style={{ marginTop: 2 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다.</div>
-
-            <div className="subhead">📁 폴더 · 기타</div>
-            <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
-            <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
-            <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
-            <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
             <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: '#c0392b' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
           </div>
         </div>
