@@ -55,6 +55,25 @@ function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
   </div>);
 }
 
+// 렌더 중 예외가 나면 React 는 트리를 통째로 버린다 → 화면이 그대로 멈춘 것처럼 보이고
+//   클릭·입력이 전부 안 먹는다(2026-08-14 "대본수정 창에서 아무것도 안 됨" 제보). 원인을 화면에 남긴다.
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) {
+    const where = String((info && info.componentStack) || '').trim().split(/\r?\n/)[0] || '';
+    try { window.__logline && window.__logline(`🐞 화면 오류: ${(err && err.message) || err} ${where}`); } catch (_) {}
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (<div style={{ padding: 16, margin: 12, border: '1px solid #c0392b', borderRadius: 8, background: '#fff5f5', color: '#c0392b', fontSize: 13 }}>
+      <b>🐞 화면 오류로 이 영역을 그릴 수 없습니다.</b>
+      <div style={{ margin: '6px 0', whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>{String(this.state.err && this.state.err.message)}</div>
+      <button className="ghost" onClick={() => this.setState({ err: null })}>다시 시도</button>
+    </div>);
+  }
+}
+
 function ComfyEngineOptions({ cfg, kind = 'image' }) {
   const suffix = kind === 'video' ? ' i2v' : '';
   const wfs = comfyWorkflows(cfg);
@@ -198,7 +217,6 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   const [settingsTab, setSettingsTab] = useState('img');   // 'img' | 'vid' | 'keys' | 'tts'
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
-  const [findText, setFindText] = useState('');
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
   const [logText, setLogText] = useState('');
@@ -218,6 +236,9 @@ export default function App() {
   const [preview, setPreview] = useState(null); // { kind, src }
   const [playerOpen, setPlayerOpen] = useState(false);
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
+  const impRef = useRef(null);          // 붙여넣기 textarea (비제어)
+  const scriptEditRef = useRef(null);   // 대본수정 textarea (비제어 — 재렌더 방지)
+  const findTextRef = useRef('');        // 검색어 (비제어)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
@@ -769,9 +790,10 @@ export default function App() {
     return true;
   }
   async function applyImport() {
-    if (!impText.trim()) { setStatus('붙여넣은 텍스트가 없습니다'); return; }
+    const text = (impRef.current && impRef.current.value != null) ? impRef.current.value : impText;
+    if (!text.trim()) { setStatus('붙여넣은 텍스트가 없습니다'); return; }
     setStatus('가져오기 적용 중…');
-    try { const d = await api.importPrompts({ text: impText }); setDto(d); setImpOpen(false); setStatus('가져오기 완료'); }
+    try { const d = await api.importPrompts({ text }); setDto(d); setImpOpen(false); setStatus('가져오기 완료'); }
     catch (e) { logline('가져오기 오류: ' + e.message); setStatus('가져오기 실패'); }
   }
   async function importViaApi() {
@@ -970,7 +992,8 @@ export default function App() {
   }
   async function applyScriptEdit() {
     setStatus('대본 수정 적용 중…');
-    try { const d = await api.applyScriptText({ text: scriptText }); if (d) { setDto(d); setFtitle(d.fileTitle || ftitle); } setScriptEditOpen(false); setStatus('대본 수정 적용 완료'); }
+    const text = (scriptEditRef.current && scriptEditRef.current.value != null) ? scriptEditRef.current.value : scriptText;
+    try { const d = await api.applyScriptText({ text }); if (d) { setDto(d); setFtitle(d.fileTitle || ftitle); } setScriptEditOpen(false); setStatus('대본 수정 적용 완료'); }
     catch (e) { logline('대본 수정 오류: ' + e.message); setStatus('오류'); }
   }
   async function changeAspect(v) {
@@ -1511,7 +1534,7 @@ export default function App() {
   // findInPage 는 무거운 DOM(대본 수십 컷+영상)에서 호출당 전체 스캔이라, 타이핑마다 부르면 프리징.
   //   → 타이핑(findNext=false)은 디바운스(280ms)로 멈춘 뒤 1번만, Enter/화살표(findNext=true)는 즉시.
   function runFind(text, findNext, forward) {
-    setFindText(text);
+    findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
     if (!text) { api.findStop(); setFindRes({ active: 0, total: 0 }); return; }
     const fire = () => api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
@@ -1551,6 +1574,18 @@ export default function App() {
       g.fillStyle = col; g.fillRect(Math.max(0, Math.min(W - 2, x(sec) - 1)), 0, 3, H);
     }
   }, [vdPeaks, vdSel, vdDur, vdOpen]);
+  // 렌더러에서 난 예외·거부를 로그창에 남긴다 — 예전엔 조용히 죽어 "아무것도 안 된다"만 남았다.
+  useEffect(() => {
+    window.__logline = logline;
+    const onErr = (e) => {
+      const m = (e && e.message) || (e && e.reason && e.reason.message) || String((e && e.reason) || '');
+      if (m) logline('🐞 화면 오류: ' + m);
+    };
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onErr);
+    return () => { window.removeEventListener('error', onErr); window.removeEventListener('unhandledrejection', onErr); };
+    /* eslint-disable-next-line */
+  }, []);
   // 참조음성 목록이 **서버(☁) 기준**으로 바뀌었으므로, 옛 로컬 경로로 저장된 채널 값을 같은 이름의 ☁ 항목으로 맞춘다.
   //   같은 목소리를 가리키는 값 정규화일 뿐이고, 실제 반영은 사용자가 「저장」을 눌러야 된다.
   useEffect(() => {
@@ -1756,12 +1791,13 @@ export default function App() {
     <>
       {findOpen && (
         <div style={{ position: 'fixed', top: 8, right: 16, zIndex: 9999, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--card, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 8px', boxShadow: '0 3px 12px rgba(0,0,0,.18)' }}>
-          <input id="find-input" value={findText} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)" style={{ width: 240 }}
+          {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(위 대본수정과 같은 원인) */}
+          <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)" style={{ width: 240 }}
             onChange={(e) => runFind(e.target.value, false)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findText, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } }} />
-          <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>{findText ? `${findRes.total ? findRes.active : 0}/${findRes.total}` : ''}</span>
-          <button className="ghost" title="이전 (Shift+Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findText, true, false)}>▲</button>
-          <button className="ghost" title="다음 (Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findText, true, true)}>▼</button>
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } }} />
+          <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
+          <button className="ghost" title="이전 (Shift+Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
+          <button className="ghost" title="다음 (Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
           <button className="ghost" title="닫기 (Esc)" style={{ padding: '2px 8px' }} onClick={closeFind}>✕</button>
         </div>
       )}
@@ -1979,12 +2015,12 @@ export default function App() {
               ))}
             </div>
           )}
-          <Cards dto={dto} isLf={isLf} capCharsN={effCap} bgmOn={bgmOn}
+          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} bgmOn={bgmOn}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} />
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} /></ErrorBoundary>
           </>)}
         </main>
         <aside id="logwrap" className={logCollapsed ? 'collapsed' : ''}>
@@ -2580,7 +2616,11 @@ export default function App() {
           <div className="modal-card" style={{ width: 820, maxWidth: '94vw' }}>
             <h3>✏ 대본 수정</h3>
             <div className="meta" style={{ marginBottom: 8 }}>대본 내용을 수정하고 [적용]하면 재파싱됩니다(원본 .md 파일도 갱신). ⚠ 기존 TTS/이미지는 초기화됩니다.</div>
-            <textarea rows="22" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 }} value={scriptText} onChange={(e) => setScriptText(e.target.value)} />
+            {/* 🔴 **비제어(uncontrolled)** — 제어 컴포넌트로 두면 글자 하나마다 App 이 다시 그려지고,
+                뒤에 컷 카드 수십 개(영상 포함)가 통째로 재렌더돼 **타이핑·클릭이 먹지 않는다**(2026-08-14 사고).
+                값은 [적용] 때 ref 에서 한 번만 읽는다. 모달은 열 때마다 새로 mount 되므로 defaultValue 로 충분. */}
+            <textarea ref={scriptEditRef} rows="22" defaultValue={scriptText} spellCheck={false}
+              style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 }} />
             <div className="mbtns"><button onClick={applyScriptEdit}>적용</button><button className="ghost" onClick={() => setScriptEditOpen(false)}>취소</button></div>
           </div>
         </div>
@@ -2592,7 +2632,8 @@ export default function App() {
             <h3>📥 복사·붙여넣기로 프롬프트 만들기</h3>
             <div className="meta" style={{ marginBottom: 8 }}>GPU(Ollama)에 연결되면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>GPU가 꺼져 있거나 출장(원격)·다른 PC라 연결이 안 될 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
             <div style={{ marginBottom: 6 }}><button className="ghost" disabled={!loaded} title="현재 모드(롱폼/쇼츠)에 맞는 요청서를 클립보드에 복사" onClick={exportPrompts}>📤 요청서 복사</button></div>
-            <textarea rows="12" placeholder="여기에 웹 LLM 답변(## [1-1] … 이미지: …)을 붙여넣으세요" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={impText} onChange={(e) => setImpText(e.target.value)} />
+            {/* 대본수정과 같은 이유로 비제어 — 긴 텍스트를 제어 state 로 두면 타이핑마다 전 화면이 재렌더된다 */}
+            <textarea ref={impRef} rows="12" defaultValue={impText} spellCheck={false} placeholder="여기에 웹 LLM 답변(## [1-1] … 이미지: …)을 붙여넣으세요" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} />
             <div className="mbtns"><button onClick={applyImport}>붙여넣은 텍스트 적용</button><button className="ghost" onClick={() => setImpOpen(false)}>닫기</button></div>
           </div>
         </div>
