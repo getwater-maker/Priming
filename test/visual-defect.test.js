@@ -54,13 +54,20 @@ check('어두운 밤 장면 → 유지', await looksBadImage(mk('dark.png', ['-f
 check('컬러바 → 유지', await looksBadImage(mk('bars.png', ['-f', 'lavfi', '-i', 'testsrc2=s=1344x768', '-frames:v', '1'])), false);
 // 결이 거친 그림(필름 그레인)은 거칠기가 올라가도 '구조'가 있으므로 유지돼야 한다 = AND 조건이 필요한 이유
 check('필름그레인 낀 그림 → 유지', await looksBadImage(mk('grain.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x203040:c1=0xc0b090', '-vf', 'noise=alls=18:allf=t+u', '-frames:v', '1'])), false);
+// ③ 색 깨짐 — 조건이 깨졌지만 노이즈까지는 안 간 것(얼굴 타일 + 형광색). 실제로 [고전_0826] 27.png 가 이랬다.
+check('색 깨짐(형광+색튐) → 폐기', await looksBadImage(mk('glitch.png', ['-f', 'lavfi', '-i', 'testsrc2=s=1344x768', '-vf', 'noise=alls=60:allf=t', '-frames:v', '1'])), true);
+// ⚠ 색만 거칠고 형광이 없으면 **유지**해야 한다 — AND 조건이 필요한 이유(형광만/색거칠기만 쓰면 멀쩡한 그림이 지워진다).
+check('색만 거친 그림 → 유지', await looksBadImage(mk('chromy.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x203040:c1=0xc0b090', '-vf', 'noise=alls=90:allf=t+u', '-frames:v', '1'])), false);
 check('없는 파일 → 유지(오탐 방지)', await looksBadImage(path.join(dir, 'nope.png')), false);
 
 console.log('▸ 영상');
 const H264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'];
 check('검정 영상 → 폐기', await looksBadVideo(mk('vblack.mp4', ['-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=5', ...H264])), true);
 check('노이즈 영상 → 폐기', await looksBadVideo(mk('vnoise.mp4', ['-f', 'lavfi', '-i', 'nullsrc=s=640x360:d=5', '-vf', NOISE_VF, ...H264, '-crf', '5'])), true);
-check('정상 영상 → 유지', await looksBadVideo(mk('vgood.mp4', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=5', ...H264])), false);
+// ⚠ 정상 영상 대역으로 `testsrc2`(컬러바)를 쓰면 안 된다 — **순수 원색만으로 이뤄진 합성 패턴**이라
+//   규칙 ③(형광 + 색 튐)이 겨냥하는 특징을 그대로 갖는다. 실제 생성물에는 그런 그림이 없다
+//   (실측: 대본 이미지 262장·영상 31개에서 형광 비율 0.00%, 오탐 0). 매끄러운 그라데이션이 현실적인 대역이다.
+check('정상 영상 → 유지', await looksBadVideo(mk('vgood.mp4', ['-f', 'lavfi', '-i', 'gradients=s=640x360:c0=0x1a2a3a:c1=0xd8c8a8:d=5', ...H264])), false);
 check('없는 영상 → 유지(오탐 방지)', await looksBadVideo(path.join(dir, 'nope.mp4')), false);
 
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}

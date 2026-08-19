@@ -1437,6 +1437,13 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
 const BAD_DARK_MEAN = 10;   // 8x8 평균 밝기 이 값 미만 = 사실상 검정(옛 'RGB 합 30' 과 같은 기준)
 const BAD_NOISE_ROUGH = 9;  // 이웃 픽셀차 이 값 이상 …그리고
 const BAD_NOISE_FLAT = 12;  // 8x8 표준편차 이 값 이하  → 노이즈
+// ③ 색 깨짐 — 조건(conditioning)이 깨졌는데 노이즈까지는 안 간 경우. 얼굴이 타일처럼 반복되고
+//    색이 형광으로 튄다(2026-08-19 [고전_0826] 27.png). 노이즈가 아니라 **구조는 있어서** ②로는 못 잡는다.
+//    실측 238장 대조 — 형광 픽셀 비율 6.07% vs 정상 최대 1.11% · 색 거칠기 7.97 vs 정상 최대 4.19.
+//    ⚠ **둘 다** 걸릴 때만 폐기한다. 형광만 보면 창밖 파랑 + 램프 주황처럼 대비가 센 정상 그림(1.11%)이,
+//      색 거칠기만 보면 붓질이 거친 그림(4.19)이 걸린다.
+const BAD_GLITCH_EXT = 2.5;    // 채널차 200 넘는 화소 비율(%) 이상 …그리고
+const BAD_GLITCH_CHROMA = 5;   // 이웃 화소 색차 평균 이상 → 색 깨짐
 
 // 🔴 **반드시 비동기로 돈다.** v0.3.14~17 에서 execFileSync 를 쓰다가 **앱이 통째로 얼어붙었다**
 //   (실측 2026-08-19: 이미지 1장 263ms · 영상 1개 1412ms → 42장+영상5개 한 번 훑는 데 18초,
@@ -1465,24 +1472,38 @@ async function visualStats(file, seek = null) {
   const pre = seek == null ? [] : ['-ss', String(seek)];
   const vf = '[0:v]crop=256:256[a];[0:v]scale=8:8,scale=256:256:flags=neighbor[b];[a][b]vstack=inputs=2';
   const buf = await _ffRun([...pre, '-i', file, '-frames:v', '1', '-filter_complex', vf,
-    '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], 1 << 20);
-  if (!buf || buf.length < 256 * 512) return null;
-  let d = 0, n = 0;
+    '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], 1 << 21);
+  if (!buf || buf.length < 256 * 512 * 3) return null;
+  const L = (i) => 0.299 * buf[i] + 0.587 * buf[i + 1] + 0.114 * buf[i + 2];
+  // ── 위쪽 256x256 = 원본 화소 ──
+  let d = 0, n = 0, chroma = 0, ext = 0, tot = 0;
   for (let y = 0; y < 256; y++) {
-    const o = y * 256;
-    for (let x = 0; x < 255; x++) { d += Math.abs(buf[o + x] - buf[o + x + 1]); n++; }
+    for (let x = 0; x < 256; x++) {
+      const i = (y * 256 + x) * 3;
+      const mx = Math.max(buf[i], buf[i + 1], buf[i + 2]);
+      const mn = Math.min(buf[i], buf[i + 1], buf[i + 2]);
+      if (mx - mn > 200) ext++;                       // 형광 원색 — 회화풍 그림엔 사실상 없다
+      tot++;
+      if (x === 255) continue;
+      const j = i + 3;
+      const y1 = L(i), y2 = L(j);
+      d += Math.abs(y1 - y2); n++;                    // 밝기 거칠기(노이즈 판정용)
+      chroma += Math.abs((buf[i + 2] - y1) - (buf[j + 2] - y2))
+              + Math.abs((buf[i] - y1) - (buf[j] - y2)); // 색 거칠기(깨진 조건 판정용)
+    }
   }
-  const rough = d / n;
+  // ── 아래쪽 = 8x8 을 최근접 확대한 것 ── 32x32 블록 중앙 한 점 = 8x8 원값
   const vals = [];
-  for (let by = 0; by < 8; by++) for (let bx = 0; bx < 8; bx++) vals.push(buf[(256 + by * 32 + 16) * 256 + bx * 32 + 16]);
+  for (let by = 0; by < 8; by++) for (let bx = 0; bx < 8; bx++) vals.push(L(((256 + by * 32 + 16) * 256 + bx * 32 + 16) * 3));
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   let v = 0; for (const x of vals) v += (x - mean) * (x - mean);
-  return { rough, mean, flat: Math.sqrt(v / vals.length) };
+  return { rough: d / n, chroma: chroma / n, ext: 100 * ext / tot, mean, flat: Math.sqrt(v / vals.length) };
 }
 function statsLookBad(s, darkMean = BAD_DARK_MEAN) {
   if (!s) return false;
   if (s.mean < darkMean) return true;                                        // ① 검정
-  return s.rough >= BAD_NOISE_ROUGH && s.flat <= BAD_NOISE_FLAT;             // ② 노이즈
+  if (s.rough >= BAD_NOISE_ROUGH && s.flat <= BAD_NOISE_FLAT) return true;    // ② 노이즈
+  return s.ext >= BAD_GLITCH_EXT && s.chroma >= BAD_GLITCH_CHROMA;            // ③ 색 깨짐
 }
 
 // 검사를 병렬로 돌리되 **동시에 너무 많이 띄우지 않는다.** 한 대본이 40~60장이라
@@ -1544,7 +1565,7 @@ const isComfyVal = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') ==
 const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).slice(7) : '');
 
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath) {
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0) {
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
   if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
@@ -1569,7 +1590,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
   const blanks = [];    // 검정·노이즈 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
-  const genOne = async (g, retryLevel = 0) => {
+  const genOne = async (g, retryLevel = baseRetryLevel) => {
     let prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     // 🔑 재시도 때는 **프롬프트 자체를 바꾼다.** 씨앗만 새로 뽑아 같은 글자를 보내면 소용없다 —
     //   comfy.org Krea2 CLIP 의 노이즈 버그는 **프롬프트 텍스트에 결정적**이라 몇 번을 해도 똑같이 노이즈가 나온다
@@ -1790,10 +1811,10 @@ async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
-async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
+async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
-  if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine));
+  if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
@@ -3432,7 +3453,13 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
     try {
       g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
-      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]); // Flow+Genspark 순환, 이 그룹만
+      // 🔑 **누를 때마다 프롬프트를 바꾼다.** 씨앗만 새로 뽑으면 같은 글자가 다시 나가는데, comfy.org Krea2 CLIP 의
+      //   조건 깨짐은 **프롬프트 텍스트에 결정적**이라 똑같이 망가진 그림이 또 온다(로이 2026-08-19:
+      //   "재생성 버튼을 클릭하였으나 동일한 이미지가 그대로 다시 들어와"). 1단계↔2단계를 번갈아 쓴다.
+      //   버리는 건 맨 끝 부정 절이라 그림 손실이 사실상 없다(cfg=1 + 네거티브 zero-out — v0.2.83).
+      g._regenN = (g._regenN || 0) + 1;
+      const _lv = ((g._regenN - 1) % 2) + 1;
+      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum], _lv); // Flow+Genspark 순환, 이 그룹만
       cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
       if (g.imagePath && g.imageStatus === 'done') log(`✓ G${groupNum} 재생성 완료`);
       else { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패 — 이미지가 생성되지 않았습니다 (엔진 한도·오류·결제 확인)`); } // 실패 시 'generating' 고착 방지
