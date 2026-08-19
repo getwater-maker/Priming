@@ -65,6 +65,16 @@ function _ensureBundled(cfg) {
     const def = bundled.find((w) => path.basename(w.path).toLowerCase() === DEFAULT_ACTIVE_FILE.toLowerCase()) || bundled[0];
     if (def) cfg.workflowPath = def.path;
   }
+  // ── 동시 생성 장수 안전 상한 ──────────────────────────────────────────────
+  // 🔴 이 값이 3 이상이면 클라우드가 **completed 로 보고하면서도 못 쓸 이미지**를 내보낸다(실측):
+  //     · 검정  — 동시 4, 24장 중 3장 (2026-07-30)
+  //     · 노이즈 — 동시 4, 203장 중 7장 (2026-08-19, [고전_0821]·[고전_0823])
+  //   순차(74장)·동시 2 에서는 한 건도 없었다. 사용자가 설정을 만질 필요 없이 늘 안전한 값으로
+  //   돌도록 **읽을 때마다 여기서 깎는다**(옛 설정파일에 4 가 저장돼 있어도 자동 교정된다).
+  //   ⚠ 되돌리려면 이 상한만 올리면 된다 — 속도보다 안정이 우선이라는 판단(로이 2026-08-19).
+  const MAX_CONC = 2;
+  const c = parseInt(cfg.concurrency, 10);
+  cfg.concurrency = Math.max(1, Math.min(MAX_CONC, Number.isFinite(c) ? c : MAX_CONC));
   return cfg;
 }
 function loadConfig() {

@@ -1170,8 +1170,8 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   const incomplete = [];
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
-    const bad = sweepBlankVisuals(pr);   // 검정이면 비운다 → 아래 게이트가 막고 어느 그룹인지 알려준다
-    if (bad.length) { log(`⬛ ${prLabel(pr)} — 검정 ${bad.length}개(G${bad.join(', G')}) 비움 — 🔄 로 다시 만든 뒤 저장하세요`); pushDtoUpdate(); }
+    const bad = sweepBadVisuals(pr);   // 검정·노이즈면 비운다 → 아래 게이트가 막고 어느 그룹인지 알려준다
+    if (bad.length) { log(`⬛ ${prLabel(pr)} — 이상 시각물 ${bad.length}개(G${bad.join(', G')}) 비움 — 🔄 로 다시 만든 뒤 저장하세요`); pushDtoUpdate(); }
     const miss = missingVisualGroups(pr);
     if (miss.length) {
       incomplete.push({ label: prLabel(pr), nums: miss });
@@ -1351,50 +1351,82 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
   }
 }
 
-// 생성된 이미지가 '검정(빈) 화면'인지 판정 — 동시 생성 시 서버가 completed 로 보고하면서도 거의 검은 이미지를
-//   내보내는 경우가 있어(실측: 순차 74장 검정 0 / 동시4 24장 검정 3), 받은 파일을 반드시 검증한다.
-//   1차 = 파일 크기(검정 PNG 는 단색이라 ~10KB, 정상은 ~1.5MB) · 2차 = ffmpeg 로 1x1 평균 픽셀 확인.
-function looksBlankImage(file) {
+// ── 생성된 시각물이 '내용 없음'인지 판정 ──────────────────────────────────────────────
+// 클라우드가 completed 로 보고하면서도 쓸 수 없는 결과를 내보내는 일이 있다(동시 생성 시 발생).
+// 실측된 모습이 **두 가지**다:
+//   ① 검정   — 거의 새까만 그림 (2026-08-14 [승리_0816] 09.png = 11KB · 평균 RGB 9)
+//   ② 노이즈 — 디노이즈가 한 번도 안 된 latent 가 그대로 VAE 디코드된 컬러 모래알
+//              (2026-08-19 [고전_0821]·[고전_0823], 동시 4 로 돌린 203장 중 7장 = 3.4%)
+// 🔑 ②는 옛 검사(작은 파일 + 평균 RGB<30)로는 **원리적으로 못 잡는다** — 난수는 압축이 안 돼
+//    파일이 오히려 정상보다 크고(2.0MB vs 1.0~1.3MB) 평균 밝기도 한가운데(115)다.
+//    그래서 "빈 화면"이 아니라 **"그림의 구조가 있는가"**를 본다. 지표 2개:
+//      · 거칠기 = 이웃 픽셀 밝기차 평균 → 노이즈는 크다  (실측 노이즈 13.4~13.6 / 정상 최대 4.8)
+//      · 구조   = 8x8 로 줄였을 때 표준편차 → 노이즈는 줄이면 평평해진다 (5.4~7.5 / 정상 최소 14.0)
+//    ⚠ **둘 다** 걸릴 때만 노이즈로 본다. 하나만 쓰면 어두운 그림(구조 14.0)이나 결이 거친
+//      그림(거칠기 4.8)을 멀쩡한데 지운다 — 실측 203장으로 적중 7·오탐 0 확인(2026-08-19).
+const BAD_DARK_MEAN = 10;   // 8x8 평균 밝기 이 값 미만 = 사실상 검정(옛 'RGB 합 30' 과 같은 기준)
+const BAD_NOISE_ROUGH = 9;  // 이웃 픽셀차 이 값 이상 …그리고
+const BAD_NOISE_FLAT = 12;  // 8x8 표준편차 이 값 이하  → 노이즈
+
+// 파일(이미지 또는 영상의 한 프레임)의 밝기·거칠기·구조를 잰다. 판정 불가면 null.
+//   seek=null 이면 이미지, 숫자면 영상의 그 초 지점 프레임.
+function visualStats(file, seek = null) {
   try {
-    const st = fs.statSync(file);
-    if (st.size > 120 * 1024) return false;        // 충분히 큰 파일은 내용이 있다(빠른 통과)
     const ff = require('./core/media-utils').getFfmpegPath();
-    if (!ff) return st.size < 30 * 1024;           // ffmpeg 없으면 크기만으로 판정
+    if (!ff) return null;
     const { execFileSync } = require('child_process');
-    const buf = execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-i', file,
-      '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20, timeout: 15000 });
-    if (!buf || buf.length < 3) return st.size < 40 * 1024;
-    return (buf[0] + buf[1] + buf[2]) < 30;        // 평균 RGB 합 30 미만 = 사실상 검정
-  } catch {
-    // 🔴 판정 실패를 무조건 "정상"으로 넘기면 안 된다(fail-open 구멍) — G: 같은 네트워크 드라이브에서
-    //   ffmpeg 이 실패하면 검정 이미지가 그대로 통과한다(2026-08-14 실제 사고: 09.png 11KB·RGB 9 가 살아남음).
-    //   1344x768 짜리 정상 이미지는 40KB 미만이 될 수 없으므로, **작은 파일은 검정으로 본다**(fail-closed).
-    try { return fs.statSync(file).size < 40 * 1024; } catch { return false; }
-  }
+    const pre = seek == null ? [] : ['-ss', String(seek)];
+    const run = (vf, max) => execFileSync(ff, ['-hide_banner', '-loglevel', 'error', ...pre, '-i', file,
+      '-frames:v', '1', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
+      { maxBuffer: max, timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] });   // stderr 를 삼킨다(파일이 없을 때 콘솔 오염 방지)
+    // ⚠ crop 을 쓰지 않는다 — 좌표가 해상도(9:16·1:1)에 따라 범위 밖이 될 수 있다. 전체 프레임이 더 정확하기도 했다.
+    const full = run('format=gray', 1 << 26);
+    if (!full || full.length < 4096) return null;
+    let d = 0;
+    for (let i = 0; i + 1 < full.length; i++) d += Math.abs(full[i] - full[i + 1]);
+    const rough = d / (full.length - 1);   // 행 경계에서 한 칸씩 어긋나지만 100만 화소 중 수백 개라 무시 가능
+    const small = run('scale=8:8,format=gray', 1 << 16);
+    if (!small || small.length < 64) return null;
+    let sum = 0; for (let i = 0; i < small.length; i++) sum += small[i];
+    const mean = sum / small.length;
+    let v = 0; for (let i = 0; i < small.length; i++) v += (small[i] - mean) * (small[i] - mean);
+    return { rough, mean, flat: Math.sqrt(v / small.length) };
+  } catch { return null; }
+}
+function statsLookBad(s, darkMean = BAD_DARK_MEAN) {
+  if (!s) return false;
+  if (s.mean < darkMean) return true;                                        // ① 검정
+  return s.rough >= BAD_NOISE_ROUGH && s.flat <= BAD_NOISE_FLAT;             // ② 노이즈
 }
 
-// 생성된 '영상'이 사실상 검정인지 판정 — i2v 도 동시 생성 시 이미지와 같은 현상이 있을 수 있어 방어한다.
-//   ⚠ 영상은 파일 크기로 판정 불가(검정도 압축 후 수백KB) → **3개 프레임(25%·50%·75%)을 실제로 샘플링**한다.
-//   ⚠ 임계값은 이미지(30)보다 낮은 18 — 밤/어두운 장면을 검정으로 오판해 8분짜리 재생성을 낭비하지 않기 위해.
-//      셋 다 검정일 때만 검정으로 본다(페이드인으로 첫 프레임만 검은 경우를 배제).
-function looksBlankVideo(file) {
+// 생성된 이미지가 못 쓸 물건(검정 또는 노이즈)인지.
+function looksBadImage(file) {
+  const s = visualStats(file);
+  // 🔴 판정 실패를 무조건 "정상"으로 넘기면 안 된다(fail-open 구멍) — G: 같은 네트워크 드라이브에서
+  //   ffmpeg 이 실패하면 검정 이미지가 그대로 통과한다(2026-08-14 실제 사고).
+  //   1344x768 짜리 정상 이미지는 40KB 미만이 될 수 없으므로, **작은 파일은 검정으로 본다**(fail-closed).
+  if (!s) { try { return fs.statSync(file).size < 40 * 1024; } catch { return false; } }
+  return statsLookBad(s);
+}
+
+// 생성된 '영상'이 못 쓸 물건인지 — i2v 도 동시 생성 시 이미지와 같은 현상이 있을 수 있어 방어한다.
+//   ⚠ 영상은 파일 크기로 판정 불가(검정도 압축 후 수백KB) → **1·2·3초 지점 프레임을 실제로 샘플링**한다.
+//   ⚠ 검정 임계는 이미지(10)보다 낮은 6 — 밤/어두운 장면을 검정으로 오판해 수 분짜리 재생성을 낭비하지 않기 위해.
+//      셋 다 나쁠 때만 폐기한다(페이드인으로 첫 프레임만 검은 경우를 배제).
+//      노이즈 임계는 이미지와 동일 — 실측 영상 25개의 거칠기는 최대 1.8·구조 최소 22.6 이라 마진이 크다.
+function looksBadVideo(file) {
   try {
     const MU = require('./core/media-utils');
-    const ff = MU.getFfmpegPath();
-    if (!ff || !fs.existsSync(file)) return false;
-    const { execFileSync } = require('child_process');
-    // i2v 는 4~8초라 1·2·3초 지점을 샘플링하면 앞/중/뒤를 고르게 본다(짧으면 마지막 프레임으로 대체됨).
-    const spots = [1, 2, 3];
-    let dark = 0, ok = 0;
-    for (const t of spots) {
-      try {
-        const buf = execFileSync(ff, ['-hide_banner', '-loglevel', 'error', '-ss', String(t), '-i', file,
-          '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 20, timeout: 20000 });
-        if (buf && buf.length >= 3) { ok++; if ((buf[0] + buf[1] + buf[2]) < 18) dark++; }
-      } catch {}
+    if (!MU.getFfmpegPath() || !fs.existsSync(file)) return false;
+    let bad = 0, ok = 0;
+    for (const t of [1, 2, 3]) {
+      const s = visualStats(file, t);
+      if (!s) continue;              // 그 지점 샘플링 실패 → 셈에서 제외
+      ok++;
+      if (statsLookBad(s, 6)) bad++;
     }
-    if (!ok) return false;          // 샘플링 실패 → 정상 취급(오탐 방지)
-    return dark === ok;             // 성공적으로 읽은 프레임이 전부 검정일 때만
+    if (!ok) return false;           // 전부 샘플링 실패 → 정상 취급(오탐 방지)
+    return bad === ok;
   } catch { return false; }
 }
 
@@ -1424,23 +1456,25 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
   //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
   //   textToImage 는 호출마다 그래프·seed·prompt_id·출력경로가 독립이라 동시 호출 안전.
-  const wantConc = Math.max(1, Math.min(8, parseInt(cfg.concurrency, 10) || 1));
+  // ⚠ 상한 2 — 3 이상은 검정·노이즈 이미지를 유발한다(comfy-image.loadConfig 에서도 같은 값으로 깎지만,
+  //   여기서도 막아 둔다. 설정이 어디서 오든 안전한 값으로 돌게 하기 위함)
+  const wantConc = Math.max(1, Math.min(2, parseInt(cfg.concurrency, 10) || 1));
   let conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
-  const blanks = [];    // 검정 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
+  const blanks = [];    // 검정·노이즈 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
   const genOne = async (g) => {
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
     if (r.success) {
-      // ⚠ 검정(빈) 이미지 검증 — 서버가 completed 로 보고해도 내용이 없을 수 있다(동시 생성 시 발생).
-      if (looksBlankImage(r.imagePath)) {
+      // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
+      if (looksBadImage(r.imagePath)) {
         try { fs.rmSync(r.imagePath, { force: true }); } catch {}
         g.imagePath = null; g.imageStatus = 'fail';
         blanks.push(g); // 아래에서 순차로 재생성
-        logger(`  ⬛ G${g.num} 검정 이미지 감지 — 폐기 후 재생성 대기`);
+        logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) 감지 — 폐기 후 재생성 대기`);
       } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
     } else {
       g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
@@ -1467,14 +1501,14 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       await genOne(queue.shift());
     }
   }
-  // ── 검정 이미지 복구 패스 ── 동시 생성이 원인이라 **반드시 순차로(동시성 0)** 다시 만든다. 그룹당 최대 2회.
+  // ── 이상 이미지(검정·노이즈) 복구 패스 ── 동시 생성이 원인이라 **반드시 순차로(동시성 0)** 다시 만든다. 그룹당 최대 2회.
   if (blanks.length && !S.abort) {
     const retry = blanks.splice(0, blanks.length);
-    logger(`  🔁 검정 이미지 ${retry.length}장 순차 재생성 (동시 생성이 원인 — 순차로는 정상 생성됨)`);
+    logger(`  🔁 이상 이미지 ${retry.length}장 순차 재생성 (동시 생성이 원인 — 순차로는 정상 생성됨)`);
     for (const g of retry) {
       for (let att = 1; att <= 2; att++) {
         if (S.abort) { logger('⏹ 중단됨'); return; }
-        await genOne(g);                 // 실패/검정이면 blanks 에 다시 쌓이지만 여기선 att 루프로 제어
+        await genOne(g);                 // 실패/이상이면 blanks 에 다시 쌓이지만 여기선 att 루프로 제어
         if (g.imagePath) break;          // 정상 생성됨
         if (att === 2) logger(`  ✗ G${g.num} 재생성 2회 실패 — 이 그룹 이미지 없음(프롬프트 확인 필요)`);
       }
@@ -1571,7 +1605,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) log(`  ⚡ 동시 ${conc}개 생성 (순차 대비 벽시계 단축 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
-  const blanks = [];    // 검정 영상이 나온 그룹 — 동시 패스 후 '순차'로 재생성(이미지와 동일 방어)
+  const blanks = [];    // 검정·노이즈 영상이 나온 그룹 — 동시 패스 후 '순차'로 재생성(이미지와 동일 방어)
   const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
@@ -1585,12 +1619,12 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
     const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
     if (r.success) {
-      // ⚠ 검정(빈) 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.
-      if (looksBlankVideo(r.videoPath)) {
+      // ⚠ 이상 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.
+      if (looksBadVideo(r.videoPath)) {
         try { fs.rmSync(r.videoPath, { force: true }); } catch {}
         g.videoPath = null; g.videoStatus = 'fail';
         blanks.push(g);
-        log(`  ⬛ G${g.num} 검정 영상 감지 — 폐기 후 재생성 대기`);
+        log(`  ⬛ G${g.num} 이상 영상(검정·노이즈) 감지 — 폐기 후 재생성 대기`);
       } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
     } else {
       g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
@@ -1616,10 +1650,10 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
       await genOne(queue.shift());
     }
   }
-  // ── 검정 영상 복구 패스 ── 순차로(동시성 0) 다시 만든다. ⚠ i2v 는 건당 수 분·크레딧이 크므로 **재시도 1회만**.
+  // ── 이상 영상(검정·노이즈) 복구 패스 ── 순차로(동시성 0) 다시 만든다. ⚠ i2v 는 건당 수 분·크레딧이 크므로 **재시도 1회만**.
   if (blanks.length && !S.abort) {
     const retry = blanks.splice(0, blanks.length);
-    log(`  🔁 검정 영상 ${retry.length}개 순차 재생성 (1회만 시도 — i2v 는 건당 비용이 큼)`);
+    log(`  🔁 이상 영상 ${retry.length}개 순차 재생성 (1회만 시도 — i2v 는 건당 비용이 큼)`);
     for (const g of retry) {
       if (S.abort) { log('⏹ 중단됨'); return; }
       await genOne(g);
@@ -2036,20 +2070,20 @@ function missingVisualGroups(project) {
     return !hasImg && !hasVid;
   }).map((g) => g.num);
 }
-// ── 최종 검정 검사 ── .vrew 를 만들기 **직전에** 실제 파일을 다시 훑어, 검정으로 판정되면 비운다.
+// ── 최종 이상 검사(검정·노이즈) ── .vrew 를 만들기 **직전에** 실제 파일을 다시 훑어, 못 쓸 물건이면 비운다.
 //   생성 시점 검사(runComfyImages)만으로는 새는 경우가 있었다(판정 실패·다른 엔진·나중에 덮어쓰기 등).
 //   여기서 비우면 그 그룹은 missingVisualGroups 에 걸려 **.vrew 가 막히고 어느 그룹인지 팝업으로 알려진다.**
 //   반환: 비워진 그룹 번호 배열.
-function sweepBlankVisuals(project, logger = log) {
+function sweepBadVisuals(project, logger = log) {
   const cleared = [];
   for (const g of (project.groups || [])) {
-    if (g.videoPath && fs.existsSync(g.videoPath) && looksBlankVideo(g.videoPath)) {
-      logger(`  ⬛ G${g.num} 검정 영상 — 비움 (${path.basename(g.videoPath)})`);
+    if (g.videoPath && fs.existsSync(g.videoPath) && looksBadVideo(g.videoPath)) {
+      logger(`  ⬛ G${g.num} 이상 영상(검정·노이즈) — 비움 (${path.basename(g.videoPath)})`);
       try { fs.rmSync(g.videoPath, { force: true }); } catch {}
       g.videoPath = null; g.videoStatus = 'fail'; cleared.push(g.num);
     }
-    if (g.imagePath && fs.existsSync(g.imagePath) && looksBlankImage(g.imagePath)) {
-      logger(`  ⬛ G${g.num} 검정 이미지 — 비움 (${path.basename(g.imagePath)})`);
+    if (g.imagePath && fs.existsSync(g.imagePath) && looksBadImage(g.imagePath)) {
+      logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — 비움 (${path.basename(g.imagePath)})`);
       try { fs.rmSync(g.imagePath, { force: true }); } catch {}
       g.imagePath = null; g.imageStatus = 'fail'; cleared.push(g.num);
     }
@@ -2875,17 +2909,17 @@ async function runMakeAllCore(opts = {}) {
   // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
     log('📦 4단계 — .vrew 일괄 생성…');
-    // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정이면 비우고 **그 그룹만 순차로 다시 만든다**.
-    //   (생성 시점 검사를 빠져나온 검정 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14)
+    // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
+    //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
-      const bad = sweepBlankVisuals(pr);
+      const bad = sweepBadVisuals(pr);
       if (!bad.length) continue;
-      log(`⬛ ${prLabel(pr)} — 검정 ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
+      log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
       const dirs0 = shortsDirs(outRoot, pr.shortsNum);
       try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
-      const still = sweepBlankVisuals(pr);
-      if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 검정: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
+      const still = sweepBadVisuals(pr);
+      if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
     const incomplete = [];
