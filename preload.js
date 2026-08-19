@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld('api', {
   imageBuild: (args) => ipcRenderer.invoke('image-build', args),
   videoBuild: (args) => ipcRenderer.invoke('video-build', args),
   exportVrew: (args) => ipcRenderer.invoke('export-vrew', args),
+  appendLog: (line) => ipcRenderer.invoke('append-log', line),
+  openLogs: () => ipcRenderer.invoke('open-logs'),
   attachAsset: (args) => ipcRenderer.invoke('attach-asset', args),
   clearAsset: (args) => ipcRenderer.invoke('clear-asset', args),
   bulkAttach: (args) => ipcRenderer.invoke('bulk-attach', args),

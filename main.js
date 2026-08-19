@@ -274,6 +274,9 @@ app.whenReady().then(() => {
   // 시작은 항상 빈 화면(초기화 상태) — 지난 세션 큐 자동복원 안 함(사용자 요청). 대본은 직접 열기.
   //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
   createWindow();
+  // 로그 파일에 세션 구분선 — 하루치 파일 안에서 "몇 시 실행의 로그인지" 가 보여야 한다.
+  //   ⚠ log() 가 아니라 logToFile() 이다 — 화면 로그창까지 이 줄로 시작할 필요는 없다.
+  try { logToFile(`──────── Priming v${app.getVersion()} 시작 ────────`); } catch {}
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   // 참조음성 동기화 — **앱을 켜기만 해도** 이 PC 의 목소리가 공용 라이브러리로 올라가게 한다.
   //   예전엔 채널편집(⚙)을 열 때만 돌아서, 앱만 켠 PC(아내)에서는 아무 일도 일어나지 않았다.
@@ -299,7 +302,54 @@ app.on('before-quit', () => {
   } catch {}
 });
 
-const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
+// ── 로그 파일 기록 (7일 보관) ────────────────────────────────────────────────────
+//  왜 필요한가: 지금까지 로그는 **화면 로그창에만** 있었다. 앱을 닫으면 사라지고, 문제가 났을 때
+//    "그때 로그를 보내 달라"고 할 수가 없었다(2026-08-19, 노이즈 이미지 재생성이 왜 안 됐는지
+//    확인하려는데 볼 기록이 없었다 — 결국 파일 mtime 으로 역추적해야 했다).
+//  · 위치: ~/.shots-maker/logs/YYYY-MM-DD.log  (⚠ 날짜·시각은 전부 KST — 전역 지침)
+//  · 보관: 7일. 앱 시작 때 한 번, 그리고 날짜가 바뀔 때 오래된 파일을 지운다.
+//  · 실패해도 앱은 그대로 간다(로그 때문에 작업이 멈추면 본말전도).
+const LOG_DIR = path.join(os.homedir(), '.shots-maker', 'logs');
+const LOG_KEEP_DAYS = 7;
+const LOG = { day: '', stream: null };
+function _kstDayStr(d = new Date()) {
+  // KST(UTC+9) 기준 YYYY-MM-DD. ⚠ toISOString() 은 UTC 라 밤 시간대에 하루가 밀린다.
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function _kstClock(d = new Date()) {
+  return new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(11, 19);
+}
+function _pruneOldLogs() {
+  try {
+    const cut = _kstDayStr(new Date(Date.now() - LOG_KEEP_DAYS * 86400 * 1000));
+    for (const f of fs.readdirSync(LOG_DIR)) {
+      const m = /^(\d{4}-\d{2}-\d{2})\.log$/.exec(f);
+      if (m && m[1] < cut) { try { fs.rmSync(path.join(LOG_DIR, f), { force: true }); } catch {} }
+    }
+  } catch {}
+}
+function _logStream() {
+  const day = _kstDayStr();
+  if (LOG.stream && LOG.day === day) return LOG.stream;
+  try { if (LOG.stream) LOG.stream.end(); } catch {}
+  LOG.stream = null; LOG.day = day;
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    _pruneOldLogs();                       // 날짜가 바뀌는 순간에도 정리된다(앱을 며칠씩 켜 두는 경우)
+    LOG.stream = fs.createWriteStream(path.join(LOG_DIR, `${day}.log`), { flags: 'a' });
+    LOG.stream.on('error', () => { LOG.stream = null; });   // 드라이브 문제 등 — 조용히 포기
+  } catch {}
+  return LOG.stream;
+}
+function logToFile(line) {
+  try { const s = _logStream(); if (s) s.write(`[${_kstClock()}] ${line}\n`); } catch {}
+}
+
+const log = (line) => {
+  const t = String(line);
+  logToFile(t);
+  if (win && !win.isDestroyed()) win.webContents.send('log', t);
+};
 
 // ── 🔒 입력 잠김(창이 클릭·키를 전부 거부) 방지 + 자동복구 ────────────────────────────
 //  증상(로이 2026-08-14): 어떤 때는 **영문도 안 쳐지고 버튼·ESC 도 전혀 안 먹는다.** 화면은 멀쩡히 그려지고
@@ -1159,7 +1209,7 @@ function resolveBgmPath(pr) {
 }
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false } = args;
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = S.preset || P.getPreset(presetName);
   if (preset && captionStyle) {
@@ -1170,8 +1220,21 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   const incomplete = [];
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
-    const bad = sweepBadVisuals(pr);   // 검정·노이즈면 비운다 → 아래 게이트가 막고 어느 그룹인지 알려준다
-    if (bad.length) { log(`⬛ ${prLabel(pr)} — 이상 시각물 ${bad.length}개(G${bad.join(', G')}) 비움 — 🔄 로 다시 만든 뒤 저장하세요`); pushDtoUpdate(); }
+    // 검정·노이즈면 비우고 **그 자리에서 순차 재생성**한다.
+    //   🔴 예전엔 비우기만 하고 "🔄 로 다시 만든 뒤 저장하세요" 라고 안내했는데, 그러면 **막다른 길**이 된다 —
+    //     파일은 사라졌는데 아무것도 안 만들어지고 게이트에 막혀 .vrew 도 안 나온다(로이 2026-08-19 실제로 겪음:
+    //     [고전_0821] G10·G19·G33 이 지워지기만 하고 끝났다). ⚡만들기 4단계와 동작을 맞춘다.
+    const bad = sweepBadVisuals(pr);
+    if (bad.length) {
+      log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
+      pushDtoUpdate();
+      const dirsB = shortsDirs(S.outRoot, pr.shortsNum);
+      try { await runRotatingImages(pr, dirsB.media, log, styleId, engine || 'rotate', bad); }
+      catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
+      const still = sweepBadVisuals(pr);
+      if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
+      pushDtoUpdate();
+    }
     const miss = missingVisualGroups(pr);
     if (miss.length) {
       incomplete.push({ label: prLabel(pr), nums: miss });
@@ -4299,6 +4362,14 @@ ipcMain.handle('read-audio', (_e, p0) => {
   } catch { return null; }
 });
 
+// 렌더러(화면)에서 난 줄도 파일에 남긴다 — 🐞 화면 오류처럼 main 을 거치지 않는 것들.
+//   ⚠ main 이 보낸 줄은 이미 파일에 있으므로 렌더러가 되보내지 않는다(중복 방지 — App.jsx onLog 참조).
+ipcMain.handle('append-log', (_e, line) => { logToFile(`[화면] ${String(line)}`); return true; });
+ipcMain.handle('open-logs', async () => {
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+  shell.openPath(LOG_DIR);
+  return LOG_DIR;
+});
 ipcMain.handle('open-folder', async () => {
   if (!S.outRoot) return;
   fs.mkdirSync(S.outRoot, { recursive: true });

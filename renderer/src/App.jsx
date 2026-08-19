@@ -326,12 +326,14 @@ export default function App() {
     return { size: capSize, yOffset: baseY + fine * 0.0025, align: capAlign, yAlign: capYAlign };
   }, [capPos, capFine, capSize, capAlign, capYAlign]);
 
-  const logline = useCallback((t) => {
+  // fromMain=true 면 main 이 보낸 줄 — 파일에는 이미 기록돼 있으므로 되보내지 않는다(중복 방지).
+  const logline = useCallback((t, fromMain) => {
     setLogText((prev) => prev + t + '\n');
+    if (!fromMain) { try { api.appendLog(String(t)); } catch (_) {} }
   }, []);
 
   useEffect(() => {
-    api.onLog((line) => logline(line));
+    api.onLog((line) => logline(line, true));
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
@@ -674,7 +676,7 @@ export default function App() {
   }
   async function runVrew(shortsNum) {
     setStatus('.vrew 내보내는 중…');
-    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice }); setStatus(`.vrew ${r.outs.length}개`); }
+    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine }); setStatus(`.vrew ${r.outs.length}개`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
@@ -2038,6 +2040,7 @@ export default function App() {
             <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
             <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
             <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
+            <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
           </div>
           <div id="log" ref={logRef}>{logText}</div>
         </aside>
