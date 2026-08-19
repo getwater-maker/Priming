@@ -1231,14 +1231,14 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     //   🔴 예전엔 비우기만 하고 "🔄 로 다시 만든 뒤 저장하세요" 라고 안내했는데, 그러면 **막다른 길**이 된다 —
     //     파일은 사라졌는데 아무것도 안 만들어지고 게이트에 막혀 .vrew 도 안 나온다(로이 2026-08-19 실제로 겪음:
     //     [고전_0821] G10·G19·G33 이 지워지기만 하고 끝났다). ⚡만들기 4단계와 동작을 맞춘다.
-    const bad = sweepBadVisuals(pr);
+    const bad = await sweepBadVisuals(pr);
     if (bad.length) {
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
       const dirsB = shortsDirs(S.outRoot, pr.shortsNum);
       try { await runRotatingImages(pr, dirsB.media, log, styleId, engine || 'rotate', bad); }
       catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
-      const still = sweepBadVisuals(pr);
+      const still = await sweepBadVisuals(pr);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
@@ -1438,30 +1438,46 @@ const BAD_DARK_MEAN = 10;   // 8x8 평균 밝기 이 값 미만 = 사실상 검�
 const BAD_NOISE_ROUGH = 9;  // 이웃 픽셀차 이 값 이상 …그리고
 const BAD_NOISE_FLAT = 12;  // 8x8 표준편차 이 값 이하  → 노이즈
 
+// 🔴 **반드시 비동기로 돈다.** v0.3.14~17 에서 execFileSync 를 쓰다가 **앱이 통째로 얼어붙었다**
+//   (실측 2026-08-19: 이미지 1장 263ms · 영상 1개 1412ms → 42장+영상5개 한 번 훑는 데 18초,
+//    생성·캐시프리필·.vrew 직전까지 세 번이면 54초. 그동안 클릭·화면이 전부 멎는다).
+//   메인 프로세스에서 동기 자식프로세스를 돌리면 IPC 도 렌더링도 같이 멈춘다 — 이 앱의 금기다.
+function _ffRun(args, maxBuffer) {
+  return new Promise((resolve) => {
+    try {
+      const ff = require('./core/media-utils').getFfmpegPath();
+      if (!ff) return resolve(null);
+      require('child_process').execFile(ff, args,
+        { maxBuffer, timeout: 20000, encoding: 'buffer' },
+        (err, stdout) => resolve(stdout && stdout.length ? stdout : null));   // stderr 는 버퍼로 삼킨다(콘솔 오염 방지)
+    } catch { resolve(null); }
+  });
+}
+
 // 파일(이미지 또는 영상의 한 프레임)의 밝기·거칠기·구조를 잰다. 판정 불가면 null.
 //   seek=null 이면 이미지, 숫자면 영상의 그 초 지점 프레임.
-function visualStats(file, seek = null) {
-  try {
-    const ff = require('./core/media-utils').getFfmpegPath();
-    if (!ff) return null;
-    const { execFileSync } = require('child_process');
-    const pre = seek == null ? [] : ['-ss', String(seek)];
-    const run = (vf, max) => execFileSync(ff, ['-hide_banner', '-loglevel', 'error', ...pre, '-i', file,
-      '-frames:v', '1', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
-      { maxBuffer: max, timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] });   // stderr 를 삼킨다(파일이 없을 때 콘솔 오염 방지)
-    // ⚠ crop 을 쓰지 않는다 — 좌표가 해상도(9:16·1:1)에 따라 범위 밖이 될 수 있다. 전체 프레임이 더 정확하기도 했다.
-    const full = run('format=gray', 1 << 26);
-    if (!full || full.length < 4096) return null;
-    let d = 0;
-    for (let i = 0; i + 1 < full.length; i++) d += Math.abs(full[i] - full[i + 1]);
-    const rough = d / (full.length - 1);   // 행 경계에서 한 칸씩 어긋나지만 100만 화소 중 수백 개라 무시 가능
-    const small = run('scale=8:8,format=gray', 1 << 16);
-    if (!small || small.length < 64) return null;
-    let sum = 0; for (let i = 0; i < small.length; i++) sum += small[i];
-    const mean = sum / small.length;
-    let v = 0; for (let i = 0; i < small.length; i++) v += (small[i] - mean) * (small[i] - mean);
-    return { rough, mean, flat: Math.sqrt(v / small.length) };
-  } catch { return null; }
+// 🔑 **ffmpeg 호출은 한 번**이다 — 비용의 대부분이 디코드라 호출을 반으로 줄이면 시간도 반이 된다.
+//   한 장의 세로로 붙인 그림을 받아 위/아래에서 서로 다른 지표를 읽는다:
+//     위 256x256 = 원본 화소 그대로   → 거칠기(이웃 픽셀차). 축소하면 노이즈가 사라지므로 원본이어야 한다.
+//     아래 256x256 = 8x8 을 최근접 확대 → 구조(32x32 블록마다 한 점만 읽으면 8x8 원값과 같다).
+//   ⚠ crop 은 가운데가 기본이다(x=(iw-256)/2). 출력물은 항상 256 보다 크다(1344x768·1920x1088 등).
+async function visualStats(file, seek = null) {
+  const pre = seek == null ? [] : ['-ss', String(seek)];
+  const vf = '[0:v]crop=256:256[a];[0:v]scale=8:8,scale=256:256:flags=neighbor[b];[a][b]vstack=inputs=2';
+  const buf = await _ffRun([...pre, '-i', file, '-frames:v', '1', '-filter_complex', vf,
+    '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], 1 << 20);
+  if (!buf || buf.length < 256 * 512) return null;
+  let d = 0, n = 0;
+  for (let y = 0; y < 256; y++) {
+    const o = y * 256;
+    for (let x = 0; x < 255; x++) { d += Math.abs(buf[o + x] - buf[o + x + 1]); n++; }
+  }
+  const rough = d / n;
+  const vals = [];
+  for (let by = 0; by < 8; by++) for (let bx = 0; bx < 8; bx++) vals.push(buf[(256 + by * 32 + 16) * 256 + bx * 32 + 16]);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  let v = 0; for (const x of vals) v += (x - mean) * (x - mean);
+  return { rough, mean, flat: Math.sqrt(v / vals.length) };
 }
 function statsLookBad(s, darkMean = BAD_DARK_MEAN) {
   if (!s) return false;
@@ -1469,14 +1485,37 @@ function statsLookBad(s, darkMean = BAD_DARK_MEAN) {
   return s.rough >= BAD_NOISE_ROUGH && s.flat <= BAD_NOISE_FLAT;             // ② 노이즈
 }
 
+// 검사를 병렬로 돌리되 **동시에 너무 많이 띄우지 않는다.** 한 대본이 40~60장이라
+//   Promise.all 로 한꺼번에 던지면 ffmpeg 프로세스가 수십 개 뜨면서 CPU 가 튀고 오히려 느려진다.
+async function _mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, worker));
+  return out;
+}
+
+// 같은 파일을 여러 단계에서 반복 검사한다(생성 직후 · 캐시 프리필 · .vrew 직전 sweep).
+//   내용이 안 바뀌었으면 다시 잴 필요가 없다 — 경로+수정시각+크기로 기억한다.
+const _visMemo = new Map();
+function _visKey(file) { try { const st = fs.statSync(file); return `${file}|${st.mtimeMs}|${st.size}`; } catch { return null; } }
+function _visRemember(key, val) {
+  if (!key) return val;
+  if (_visMemo.size > 500) _visMemo.clear();   // 무한 증가 방지(작업 하나가 수백 장이라 이 정도면 충분)
+  _visMemo.set(key, val);
+  return val;
+}
+
 // 생성된 이미지가 못 쓸 물건(검정 또는 노이즈)인지.
-function looksBadImage(file) {
-  const s = visualStats(file);
+async function looksBadImage(file) {
+  const key = _visKey(file);
+  if (key && _visMemo.has(key)) return _visMemo.get(key);
+  const s = await visualStats(file);
   // 🔴 판정 실패를 무조건 "정상"으로 넘기면 안 된다(fail-open 구멍) — G: 같은 네트워크 드라이브에서
   //   ffmpeg 이 실패하면 검정 이미지가 그대로 통과한다(2026-08-14 실제 사고).
   //   1344x768 짜리 정상 이미지는 40KB 미만이 될 수 없으므로, **작은 파일은 검정으로 본다**(fail-closed).
-  if (!s) { try { return fs.statSync(file).size < 40 * 1024; } catch { return false; } }
-  return statsLookBad(s);
+  if (!s) { try { return _visRemember(key, fs.statSync(file).size < 40 * 1024); } catch { return false; } }
+  return _visRemember(key, statsLookBad(s));
 }
 
 // 생성된 '영상'이 못 쓸 물건인지 — i2v 도 동시 생성 시 이미지와 같은 현상이 있을 수 있어 방어한다.
@@ -1484,19 +1523,16 @@ function looksBadImage(file) {
 //   ⚠ 검정 임계는 이미지(10)보다 낮은 6 — 밤/어두운 장면을 검정으로 오판해 수 분짜리 재생성을 낭비하지 않기 위해.
 //      셋 다 나쁠 때만 폐기한다(페이드인으로 첫 프레임만 검은 경우를 배제).
 //      노이즈 임계는 이미지와 동일 — 실측 영상 25개의 거칠기는 최대 1.8·구조 최소 22.6 이라 마진이 크다.
-function looksBadVideo(file) {
+//   🔑 세 지점을 **동시에** 잰다(순차로 하면 영상 1개에 1.4초가 걸렸다).
+async function looksBadVideo(file) {
   try {
-    const MU = require('./core/media-utils');
-    if (!MU.getFfmpegPath() || !fs.existsSync(file)) return false;
-    let bad = 0, ok = 0;
-    for (const t of [1, 2, 3]) {
-      const s = visualStats(file, t);
-      if (!s) continue;              // 그 지점 샘플링 실패 → 셈에서 제외
-      ok++;
-      if (statsLookBad(s, 6)) bad++;
-    }
-    if (!ok) return false;           // 전부 샘플링 실패 → 정상 취급(오탐 방지)
-    return bad === ok;
+    if (!require('./core/media-utils').getFfmpegPath() || !fs.existsSync(file)) return false;
+    const key = _visKey(file);
+    if (key && _visMemo.has(key)) return _visMemo.get(key);
+    const shots = await Promise.all([1, 2, 3].map((t) => visualStats(file, t)));
+    const ok = shots.filter(Boolean);
+    if (!ok.length) return _visRemember(key, false);   // 전부 샘플링 실패 → 정상 취급(오탐 방지)
+    return _visRemember(key, ok.every((s) => statsLookBad(s, 6)));
   } catch { return false; }
 }
 
@@ -1548,7 +1584,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
     if (r.success) {
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
-      if (looksBadImage(r.imagePath)) {
+      if (await looksBadImage(r.imagePath)) {
         try { fs.rmSync(r.imagePath, { force: true }); } catch {}
         try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
         g.imagePath = null; g.imageStatus = 'fail'; g.imageCleared = true; // 캐시로 되살아나지 않게
@@ -1700,7 +1736,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
     if (r.success) {
       // ⚠ 이상 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.
-      if (looksBadVideo(r.videoPath)) {
+      if (await looksBadVideo(r.videoPath)) {
         try { fs.rmSync(r.videoPath, { force: true }); } catch {}
         g.videoPath = null; g.videoStatus = 'fail';
         blanks.push(g);
@@ -1909,13 +1945,14 @@ function clearGeneratingStatus() {
 
 // ── 이미지 캐시(재활용) ── 키 = imagePrompt + style + aspect + engine. (H3=프롬프트 고정 → 잘 맞음)
 // 생성 전 프리필 — 캐시에 있으면 media-N 으로 복사하고 g.imagePath 설정(엔진이 건너뜀).
-function prefillImageCache(project, mediaDir, styleId, engine) {
+async function prefillImageCache(project, mediaDir, styleId, engine) {
   const MC = require('./core/media-cache');
-  let n = 0;
+  // 캐시에서 꺼낼 후보를 먼저 모은다(파일 복사까지) → 검사만 병렬로. 순차로 검사하면 42장에 10초 넘게 걸린다.
+  const picks = [];
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
-    if (hasVisual(g)) continue; // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
-    if (g.imageCleared) continue; // 사용자가 X로 지운 그룹 — 캐시로 되살리지 않고 새로 생성
+    if (hasVisual(g)) continue;   // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
+    if (g.imageCleared) continue; // ✕ 로 지웠거나 이상으로 폐기된 그룹 — 캐시로 되살리지 않고 새로 생성
     const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine);
     const hit = MC.get(key);
     if (!hit) continue;
@@ -1923,20 +1960,26 @@ function prefillImageCache(project, mediaDir, styleId, engine) {
       fs.mkdirSync(mediaDir, { recursive: true });
       const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`);
       fs.copyFileSync(hit.file, out);
-      // 🔴 **캐시에서 꺼낸 것도 반드시 검사한다.** 안 하면 한 번 캐시에 들어간 검정·노이즈가 영원히 되살아난다.
-      //   실제로 그랬다(로이 2026-08-19): 노이즈를 지웠는데 다음 실행에서 `♻ 이미지 3개 재활용(캐시)` 로
-      //   그대로 복구됐다. `imageCleared` 플래그는 **스냅샷에 저장되지 않아 앱을 껐다 켜면 사라진다** →
-      //   플래그에 기대면 안 되고, **캐시 항목 자체를 지워야** 한다. 여기가 캐시가 나가는 유일한 문이다.
-      if (looksBadImage(out)) {
-        try { fs.rmSync(out, { force: true }); } catch {}
-        try { MC.del(key); } catch {}
-        g.imageCleared = true;   // 이번 실행에서는 다시 캐시를 보지 않는다
-        log(`  ⬛ G${g.num} 캐시에 있던 이미지가 이상(검정·노이즈) — 캐시에서 삭제, 새로 생성합니다`);
-        continue;
-      }
-      g.imagePath = out; g.imageStatus = 'done'; n++;
+      picks.push({ g, key, out });
     } catch {}
   }
+  if (!picks.length) return 0;
+  // 🔴 **캐시에서 꺼낸 것도 반드시 검사한다.** 안 하면 한 번 캐시에 들어간 검정·노이즈가 영원히 되살아난다.
+  //   실제로 그랬다(로이 2026-08-19): 노이즈를 지웠는데 다음 실행에서 `♻ 이미지 3개 재활용(캐시)` 로
+  //   그대로 복구됐다. `imageCleared` 플래그는 **스냅샷에 저장되지 않아 앱을 껐다 켜면 사라진다** →
+  //   플래그에 기대면 안 되고, **캐시 항목 자체를 지워야** 한다. 여기가 캐시가 나가는 유일한 문이다.
+  const bad = await _mapLimit(picks, 4, (p) => looksBadImage(p.out));
+  let n = 0;
+  picks.forEach(({ g, key, out }, i) => {
+    if (bad[i]) {
+      try { fs.rmSync(out, { force: true }); } catch {}
+      try { MC.del(key); } catch {}
+      g.imageCleared = true;   // 이번 실행에서는 다시 캐시를 보지 않는다
+      log(`  ⬛ G${g.num} 캐시에 있던 이미지가 이상(검정·노이즈) — 캐시에서 삭제, 새로 생성합니다`);
+      return;
+    }
+    g.imagePath = out; g.imageStatus = 'done'; n++;
+  });
   if (n) { log(`♻ 이미지 ${n}개 재활용(캐시)`); pushDtoUpdate(); }
   return n;
 }
@@ -2136,7 +2179,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
     log(`🖼 ${prLabel(pr)} 이미지 생성 (${engine}${styleId ? ', 스타일=' + styleId : ''})…`);
     try {
       const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
-      prefillImageCache(pr, mediaDir, styleId, engine); // ♻ 캐시에 있는 그룹은 먼저 채움(엔진이 건너뜀)
+      await prefillImageCache(pr, mediaDir, styleId, engine); // ♻ 캐시에 있는 그룹은 먼저 채움(엔진이 건너뜀)
       if (imagesNeeded(pr) === 0) {
         log(`♻ ${prLabel(pr)} 전부 캐시 재활용 — 생성 생략`);
       } else {
@@ -2171,15 +2214,23 @@ function missingVisualGroups(project) {
 //   생성 시점 검사(runComfyImages)만으로는 새는 경우가 있었다(판정 실패·다른 엔진·나중에 덮어쓰기 등).
 //   여기서 비우면 그 그룹은 missingVisualGroups 에 걸려 **.vrew 가 막히고 어느 그룹인지 팝업으로 알려진다.**
 //   반환: 비워진 그룹 번호 배열.
-function sweepBadVisuals(project, logger = log) {
+async function sweepBadVisuals(project, logger = log) {
+  const groups = (project.groups || []);
+  // 🔑 **병렬로 훑는다.** 순차로 하면 42장+영상5개에 18초가 걸려 화면이 그만큼 멈춘 것처럼 보였다.
+  //   ⚠ `await` 를 빠뜨리면 Promise 는 **항상 truthy** 라 전부 '이상' 으로 판정돼 멀쩡한 자산을 몰살한다.
+  const verdicts = await _mapLimit(groups, 4, async (g) => ({
+    g,
+    badVideo: !!(g.videoPath && fs.existsSync(g.videoPath) && await looksBadVideo(g.videoPath)),
+    badImage: !!(g.imagePath && fs.existsSync(g.imagePath) && await looksBadImage(g.imagePath)),
+  }));
   const cleared = [];
-  for (const g of (project.groups || [])) {
-    if (g.videoPath && fs.existsSync(g.videoPath) && looksBadVideo(g.videoPath)) {
+  for (const { g, badVideo, badImage } of verdicts) {
+    if (badVideo) {
       logger(`  ⬛ G${g.num} 이상 영상(검정·노이즈) — 비움 (${path.basename(g.videoPath)})`);
       try { fs.rmSync(g.videoPath, { force: true }); } catch {}
       g.videoPath = null; g.videoStatus = 'fail'; cleared.push(g.num);
     }
-    if (g.imagePath && fs.existsSync(g.imagePath) && looksBadImage(g.imagePath)) {
+    if (badImage) {
       logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — 비움 (${path.basename(g.imagePath)})`);
       try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
       g.imageCleared = true;   // 캐시로 되살아나지 않게 (⚠ 플래그는 재시작 시 사라지므로 prefill 쪽 검사가 본 방어선)
@@ -2263,7 +2314,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     if (needImg.length && !S.abort) {
       log(`🖼 영상 전 — 이미지 없는 ${needImg.length}개 그룹 먼저 생성 (그룹 ${needImg.map((g) => g.num).join(',')})`);
       try {
-        prefillImageCache(pr, videoDir, styleId, imgEngine);
+        await prefillImageCache(pr, videoDir, styleId, imgEngine);
         await runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNums);
         cacheGeneratedImages(pr, styleId, imgEngine);
       } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
@@ -2866,7 +2917,7 @@ async function runMakeAllCore(opts = {}) {
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
+      await prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
       const t0 = Date.now();
       try {
         if (imagesNeeded(pr) > 0) {
@@ -3013,13 +3064,13 @@ async function runMakeAllCore(opts = {}) {
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
-      const bad = sweepBadVisuals(pr);
+      const bad = await sweepBadVisuals(pr);
       if (!bad.length) continue;
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
       const dirs0 = shortsDirs(outRoot, pr.shortsNum);
       try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
-      const still = sweepBadVisuals(pr);
+      const still = await sweepBadVisuals(pr);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
@@ -3315,7 +3366,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지·프롬프트 없어 영상 생략`); return P.toDTO(S.parsed); }
     log(`🖼 G${groupNum} 이미지 없음 — 먼저 생성 후 영상`);
     try {
-      prefillImageCache(pr, videoDir, styleId, imgEngine);
+      await prefillImageCache(pr, videoDir, styleId, imgEngine);
       await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum]);
       cacheGeneratedImages(pr, styleId, imgEngine);
     } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }

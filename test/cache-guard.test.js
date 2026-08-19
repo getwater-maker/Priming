@@ -15,9 +15,12 @@ const ff=require('../core/media-utils').getFfmpegPath();
 const MC=require('../core/media-cache');
 const src=fs.readFileSync(require('path').join(__dirname,'..','main.js'),'utf8');
 const cut=(startMark,endMark)=>{const a=src.indexOf(startMark);const b=src.indexOf('\n}\n', src.indexOf(endMark,a))+3;return src.slice(a,b);};
-const blk = cut('const BAD_DARK_MEAN','return bad === ok;')
-          + '\n' + cut('function hasVisual','return !!((g.imagePath')
-          + '\n' + cut('function prefillImageCache','return n;');
+const blk = [
+  cut('const BAD_DARK_MEAN','return _visRemember(key, ok.every'),
+  cut('async function _mapLimit','return out;'),
+  cut('function hasVisual','return !!((g.imagePath'),
+  cut('async function prefillImageCache','return n;'),
+].join(String.fromCharCode(10));
 const m={exports:{}};
 new Function('fs','path','require','log','pushDtoUpdate','module',
   blk+'\nmodule.exports={prefillImageCache};')
@@ -35,7 +38,8 @@ const kG=MC.imageKey(proj.groups[1].imagePrompt,'st','16:9','comfy');
 MC.put(kN,noise,'png'); MC.put(kG,good,'png');
 console.log('캐시 심음 — 노이즈',!!MC.get(kN),'/ 정상',!!MC.get(kG));
 const outDir=path.join(tmp,'media');
-const n=prefillImageCache(proj,outDir,'st','comfy');
+(async()=>{
+const n=await prefillImageCache(proj,outDir,'st','comfy');
 let pass=0,fail=0; const ck=(t,ok)=>{ok?(pass++,console.log('  ✓',t)):(fail++,console.log('  ✗',t))};
 ck('재활용 개수 = 1 (정상만)', n===1);
 ck('노이즈 그룹은 이미지 없음', !proj.groups[0].imagePath);
@@ -46,3 +50,4 @@ ck('정상 그룹은 그대로 재활용', !!proj.groups[1].imagePath && fs.exis
 ck('정상 캐시는 보존', !!MC.get(kG));
 try{MC.del(kG);}catch{} try{fs.rmSync(tmp,{recursive:true,force:true});}catch{}
 console.log(`\n${pass}/${pass+fail} 통과`); process.exit(fail?1:0);
+})();

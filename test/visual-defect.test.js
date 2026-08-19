@@ -23,7 +23,7 @@ if (!ff) { console.log('⚠ ffmpeg 없음 — 건너뜀'); process.exit(0); }
 // ── main.js 에서 판정 블록 추출 ──
 const src = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 const a = src.indexOf('const BAD_DARK_MEAN');
-const b = src.indexOf('\n}\n', src.indexOf('return bad === ok;', a)) + 3;
+const b = src.indexOf('\n}\n', src.indexOf('return _visRemember(key, ok.every', a)) + 3;
 if (a < 0 || b < 3) { console.error('❌ main.js 에서 판정 블록을 못 찾음 (함수명이 바뀌었나?)'); process.exit(1); }
 const mod = { exports: {} };
 new Function('fs', 'require', 'module', src.slice(a, b) + '\nmodule.exports={looksBadImage,looksBadVideo};')
@@ -43,25 +43,27 @@ const check = (name, got, want) => {
   else { fail++; console.log(`  ✗ ${name} — 판정 ${got}, 기대 ${want}`); }
 };
 
+(async () => {
 console.log('▸ 이미지');
-check('완전 검정 → 폐기', looksBadImage(mk('black.png', ['-f', 'lavfi', '-i', 'color=c=black:s=1344x768', '-frames:v', '1'])), true);
-check('거의 검정 → 폐기', looksBadImage(mk('near.png', ['-f', 'lavfi', '-i', 'color=c=0x050505:s=1344x768', '-frames:v', '1'])), true);
-check('랜덤 노이즈 → 폐기', looksBadImage(mk('noise.png', ['-f', 'lavfi', '-i', 'nullsrc=s=1344x768', '-vf', NOISE_VF, '-frames:v', '1'])), true);
+check('완전 검정 → 폐기', await looksBadImage(mk('black.png', ['-f', 'lavfi', '-i', 'color=c=black:s=1344x768', '-frames:v', '1'])), true);
+check('거의 검정 → 폐기', await looksBadImage(mk('near.png', ['-f', 'lavfi', '-i', 'color=c=0x050505:s=1344x768', '-frames:v', '1'])), true);
+check('랜덤 노이즈 → 폐기', await looksBadImage(mk('noise.png', ['-f', 'lavfi', '-i', 'nullsrc=s=1344x768', '-vf', NOISE_VF, '-frames:v', '1'])), true);
 // ⚠ 아래는 '지우면 안 되는' 쪽 — 오탐 1건이 멀쩡한 그림을 지우고 .vrew 를 막는다.
-check('그라데이션 → 유지', looksBadImage(mk('grad.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x102030:c1=0xd0c0a0', '-frames:v', '1'])), false);
-check('어두운 밤 장면 → 유지', looksBadImage(mk('dark.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x05070c:c1=0x2a3040', '-frames:v', '1'])), false);
-check('컬러바 → 유지', looksBadImage(mk('bars.png', ['-f', 'lavfi', '-i', 'testsrc2=s=1344x768', '-frames:v', '1'])), false);
+check('그라데이션 → 유지', await looksBadImage(mk('grad.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x102030:c1=0xd0c0a0', '-frames:v', '1'])), false);
+check('어두운 밤 장면 → 유지', await looksBadImage(mk('dark.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x05070c:c1=0x2a3040', '-frames:v', '1'])), false);
+check('컬러바 → 유지', await looksBadImage(mk('bars.png', ['-f', 'lavfi', '-i', 'testsrc2=s=1344x768', '-frames:v', '1'])), false);
 // 결이 거친 그림(필름 그레인)은 거칠기가 올라가도 '구조'가 있으므로 유지돼야 한다 = AND 조건이 필요한 이유
-check('필름그레인 낀 그림 → 유지', looksBadImage(mk('grain.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x203040:c1=0xc0b090', '-vf', 'noise=alls=18:allf=t+u', '-frames:v', '1'])), false);
-check('없는 파일 → 유지(오탐 방지)', looksBadImage(path.join(dir, 'nope.png')), false);
+check('필름그레인 낀 그림 → 유지', await looksBadImage(mk('grain.png', ['-f', 'lavfi', '-i', 'gradients=s=1344x768:c0=0x203040:c1=0xc0b090', '-vf', 'noise=alls=18:allf=t+u', '-frames:v', '1'])), false);
+check('없는 파일 → 유지(오탐 방지)', await looksBadImage(path.join(dir, 'nope.png')), false);
 
 console.log('▸ 영상');
 const H264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'];
-check('검정 영상 → 폐기', looksBadVideo(mk('vblack.mp4', ['-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=5', ...H264])), true);
-check('노이즈 영상 → 폐기', looksBadVideo(mk('vnoise.mp4', ['-f', 'lavfi', '-i', 'nullsrc=s=640x360:d=5', '-vf', NOISE_VF, ...H264, '-crf', '5'])), true);
-check('정상 영상 → 유지', looksBadVideo(mk('vgood.mp4', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=5', ...H264])), false);
-check('없는 영상 → 유지(오탐 방지)', looksBadVideo(path.join(dir, 'nope.mp4')), false);
+check('검정 영상 → 폐기', await looksBadVideo(mk('vblack.mp4', ['-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=5', ...H264])), true);
+check('노이즈 영상 → 폐기', await looksBadVideo(mk('vnoise.mp4', ['-f', 'lavfi', '-i', 'nullsrc=s=640x360:d=5', '-vf', NOISE_VF, ...H264, '-crf', '5'])), true);
+check('정상 영상 → 유지', await looksBadVideo(mk('vgood.mp4', ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=5', ...H264])), false);
+check('없는 영상 → 유지(오탐 방지)', await looksBadVideo(path.join(dir, 'nope.mp4')), false);
 
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 console.log(`\n${pass}/${pass + fail} 통과`);
 process.exit(fail ? 1 : 0);
+})();
