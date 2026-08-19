@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "롱폼(16:9)·쇼츠(9:16) 통합 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 (PrimingFlow + Shots-maker 통합)",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -10,7 +10,7 @@
     "build:renderer": "vite build",
     "dev:renderer": "vite",
     "test:parser": "node test/parser.test.js",
-    "test:visual": "node test/visual-defect.test.js && node test/log-file.test.js && node test/prompt-guard.test.js",
+    "test:visual": "node test/visual-defect.test.js && node test/log-file.test.js && node test/prompt-guard.test.js && node test/cache-guard.test.js",
     "test:book": "node test/book-parser.test.js && node test/book-pdf.smoke.js && node test/book-multi.smoke.js && node test/book-ui.smoke.js",
     "build:shorts": "node build-shorts.js",
     "pack": "vite build && electron-builder --win --dir",

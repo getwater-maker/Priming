@@ -276,7 +276,14 @@ app.whenReady().then(() => {
   createWindow();
   // 로그 파일에 세션 구분선 — 하루치 파일 안에서 "몇 시 실행의 로그인지" 가 보여야 한다.
   //   ⚠ log() 가 아니라 logToFile() 이다 — 화면 로그창까지 이 줄로 시작할 필요는 없다.
-  try { logToFile(`──────── Priming v${app.getVersion()} 시작 ────────`); } catch {}
+  // ⚠ `app.getVersion()` 은 **업데이트가 적용되기 전** 버전을 준다 — Electron 이 실행 시점의 package.json 을
+  //   읽어 두는데, 라이트 업데이트는 그 뒤 bootstrap 에서 파일을 갈아끼우기 때문이다. 실제로 로그에
+  //   v0.3.15 코드가 도는데 "v0.3.14 시작" 으로 찍혔다(2026-08-19). 그래서 **디스크의 package.json 을 다시 읽는다.**
+  try {
+    let v = app.getVersion();
+    try { v = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || v; } catch {}
+    logToFile(`──────── Priming v${v} 시작 ────────`);
+  } catch {}
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   // 참조음성 동기화 — **앱을 켜기만 해도** 이 PC 의 목소리가 공용 라이브러리로 올라가게 한다.
   //   예전엔 채널편집(⚙)을 열 때만 돌아서, 앱만 켠 PC(아내)에서는 아무 일도 일어나지 않았다.
@@ -1543,7 +1550,8 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
       if (looksBadImage(r.imagePath)) {
         try { fs.rmSync(r.imagePath, { force: true }); } catch {}
-        g.imagePath = null; g.imageStatus = 'fail';
+        try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
+        g.imagePath = null; g.imageStatus = 'fail'; g.imageCleared = true; // 캐시로 되살아나지 않게
         blanks.push(g); // 아래에서 순차로 재생성
         logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) 감지 — 폐기 후 재생성 대기`);
       } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
@@ -1908,9 +1916,26 @@ function prefillImageCache(project, mediaDir, styleId, engine) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
     if (hasVisual(g)) continue; // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
     if (g.imageCleared) continue; // 사용자가 X로 지운 그룹 — 캐시로 되살리지 않고 새로 생성
-    const hit = MC.get(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine));
+    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine);
+    const hit = MC.get(key);
     if (!hit) continue;
-    try { fs.mkdirSync(mediaDir, { recursive: true }); const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`); fs.copyFileSync(hit.file, out); g.imagePath = out; g.imageStatus = 'done'; n++; } catch {}
+    try {
+      fs.mkdirSync(mediaDir, { recursive: true });
+      const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`);
+      fs.copyFileSync(hit.file, out);
+      // 🔴 **캐시에서 꺼낸 것도 반드시 검사한다.** 안 하면 한 번 캐시에 들어간 검정·노이즈가 영원히 되살아난다.
+      //   실제로 그랬다(로이 2026-08-19): 노이즈를 지웠는데 다음 실행에서 `♻ 이미지 3개 재활용(캐시)` 로
+      //   그대로 복구됐다. `imageCleared` 플래그는 **스냅샷에 저장되지 않아 앱을 껐다 켜면 사라진다** →
+      //   플래그에 기대면 안 되고, **캐시 항목 자체를 지워야** 한다. 여기가 캐시가 나가는 유일한 문이다.
+      if (looksBadImage(out)) {
+        try { fs.rmSync(out, { force: true }); } catch {}
+        try { MC.del(key); } catch {}
+        g.imageCleared = true;   // 이번 실행에서는 다시 캐시를 보지 않는다
+        log(`  ⬛ G${g.num} 캐시에 있던 이미지가 이상(검정·노이즈) — 캐시에서 삭제, 새로 생성합니다`);
+        continue;
+      }
+      g.imagePath = out; g.imageStatus = 'done'; n++;
+    } catch {}
   }
   if (n) { log(`♻ 이미지 ${n}개 재활용(캐시)`); pushDtoUpdate(); }
   return n;
@@ -2156,6 +2181,8 @@ function sweepBadVisuals(project, logger = log) {
     }
     if (g.imagePath && fs.existsSync(g.imagePath) && looksBadImage(g.imagePath)) {
       logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — 비움 (${path.basename(g.imagePath)})`);
+      try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
+      g.imageCleared = true;   // 캐시로 되살아나지 않게 (⚠ 플래그는 재시작 시 사라지므로 prefill 쪽 검사가 본 방어선)
       try { fs.rmSync(g.imagePath, { force: true }); } catch {}
       g.imagePath = null; g.imageStatus = 'fail'; cleared.push(g.num);
     }
@@ -2534,6 +2561,7 @@ function buildSnapshot() {
         num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
+        imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro })),
       })),
     })),
@@ -2698,6 +2726,7 @@ function overlaySnapshot(parsed, snap) {
       if (gs.imagePrompt != null) g.imagePrompt = gs.imagePrompt;
       if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
       if (gs.motionNote != null) g.motionNote = gs.motionNote;
+      if (gs.imageCleared) g.imageCleared = true;  // ✕ 삭제·이상 폐기 표시 복원 — 없으면 캐시가 되살린다(2026-08-19)
       if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; touched++; }
       if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
       const sents = pr.getSentencesOfGroup(g);

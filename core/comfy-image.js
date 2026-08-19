@@ -91,6 +91,31 @@ function saveConfig(patch) {
   } catch { return loadConfig(); }
 }
 
+// ── 네트워크 오류 판별·설명 ───────────────────────────────────────────────────
+//  🔑 undici(node fetch)는 진짜 이유를 `e.cause` 에 숨기고 겉으론 **"fetch failed"** 만 준다.
+//    그 한 줄로는 아무것도 알 수 없다(2026-08-19 로그에 그대로 남았다). 원인 코드까지 함께 남긴다.
+//    같은 계열 사고가 v0.2.51·v0.2.84·v0.3.7 에 이어 반복되고 있다.
+const _NET_CODES = {
+  UND_ERR_CONNECT_TIMEOUT: '그 주소에 아무도 응답하지 않습니다(연결 시간초과)',
+  ECONNREFUSED: '연결이 거부됐습니다(서버가 꺼져 있음)',
+  ENOTFOUND: '주소를 찾을 수 없습니다(DNS)',
+  ECONNRESET: '연결이 끊겼습니다',
+  ETIMEDOUT: '시간초과',
+  EAI_AGAIN: '이름 조회 실패(일시적 DNS 오류)',
+  UND_ERR_SOCKET: '소켓이 끊겼습니다',
+};
+function _isNetErr(e) {
+  const code = (e && e.cause && e.cause.code) || (e && e.code) || '';
+  return !!_NET_CODES[code] || /fetch failed|network|socket|ECONN|ETIMEDOUT|EAI_AGAIN/i.test(String((e && e.message) || ''));
+}
+function _netMsg(e) {
+  const msg = String((e && e.message) || e || '');
+  const code = (e && e.cause && e.cause.code) || (e && e.code) || '';
+  if (!code) return msg;
+  const ko = _NET_CODES[code] || '';
+  return `${msg} [${code}]${ko ? ' — ' + ko : ''}`;
+}
+
 class ComfyImage {
   constructor(cfg = {}, logger = () => {}) {
     this.cloud = !!cfg.cloud;
@@ -238,15 +263,28 @@ class ComfyImage {
   }
   // 텍스트 → 이미지 1장. { success:true, imagePath } | { success:false, error }
   async textToImage({ prompt, aspect, outputPath, abortSignal }) {
-    try {
-      if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 에서 지정하세요.' };
-      if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}` };
-      const graph = this._buildWorkflow(prompt, aspect);
-      const promptId = await this._queue(graph);
-      const img = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
-      const out = await this._download(img, outputPath);
-      return { success: true, imagePath: out };
-    } catch (e) { return { success: false, error: e.message }; }
+    if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 에서 지정하세요.' };
+    // ⚠ 일시적 네트워크 장애로 한 장이 통째로 실패하던 것을 막는다(2026-08-19 로그: `✗ G10 실패: fetch failed`
+    //   — 같은 시각 서버는 정상이었다). 제출 전에 끊긴 경우가 대부분이라 재시도해도 크레딧이 이중으로 나가지 않는다.
+    //   ⚠ 네트워크 오류에만 재시도한다. 워크플로·키·모더레이션 오류를 반복하면 시간만 버린다.
+    let lastErr = '';
+    for (let att = 1; att <= 2; att++) {
+      if (abortSignal && abortSignal()) return { success: false, error: '중단됨' };
+      try {
+        if (!(await this.health())) throw new Error(`ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}`);
+        const graph = this._buildWorkflow(prompt, aspect);
+        const promptId = await this._queue(graph);
+        const img = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
+        const out = await this._download(img, outputPath);
+        return { success: true, imagePath: out };
+      } catch (e) {
+        lastErr = _netMsg(e);
+        if (att >= 2 || !_isNetErr(e)) break;
+        this.log(`  ↻ 네트워크 오류 — 5초 뒤 1회 재시도: ${lastErr}`);
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+    }
+    return { success: false, error: lastErr };
   }
 }
 
