@@ -54,55 +54,23 @@ const GENSPARK_SELECTORS = {
 };
 
 /**
- * 사용자의 기본 크롬 프로필을 genspark-profiles/userchrome/ 으로 한 번 복사.
- * grok-engine 과 동일 패턴 (별도 디렉토리 — 동시 실행 시 프로필 잠금 충돌 방지).
- * 이미 복사된 흔적(Cookies)이 있으면 건너뜀. 부분 실패/폴더 없음이면 null → 격리 프로필 폴백.
+ * (은퇴) 사용자의 기본 크롬 프로필을 genspark-profiles/userchrome/ 로 복사하려던 함수.
+ *
+ * 🔴 2026-08-19 확인 — **이 기능은 한 번도 작동한 적이 없다.** (grok-engine.js 의 같은 함수와 동일 버그)
+ *    완료 판정을 `userchrome/Default/Cookies` 존재로 했는데, 요즘 크롬은 쿠키를
+ *    **`Default/Network/Cookies`** 에 둔다 → 그 파일은 생길 수가 없다. 그래서 매 실행마다
+ *    10~30초짜리 복사를 헛돌린 뒤 "Cookies 복사 실패" 를 찍고 격리 프로필로 폴백해 왔다.
+ *
+ * 🔑 그럼 경로만 고치면 되지 않나? **고치면 오히려 깨진다.** 지금 실제로 로그인돼 있는 건
+ *    격리 프로필(`~/.flow-app/genspark-profiles/<id>`) 이고, 복사가 성공하면 그 순간부터 앱이
+ *    `userchrome`(= 평소 크롬 Default 프로필의 사본) 을 쓰게 된다. 이 PC 의 크롬은 프로필이
+ *    24개이고 Genspark 로그인은 Default 에 없다 → **잘 되던 로그인이 사라진다.**
+ *    게다가 "계정 = 프로필" 인 현재 설계(⚙ Genspark 멀티계정의 🔑 로그인 버튼)와도 어긋난다.
+ *
+ * 그래서 **의도적으로 no-op** 으로 남긴다(항상 null → 격리 프로필 사용 = 지금까지의 실제 동작).
+ * 다른 계정으로 쓰려면 ⚙ Genspark 멀티계정에서 계정을 추가하고 🔑 로그인을 한 번 하면 된다.
  */
-async function _ensureUserChromeProfileCopy(log) {
-  const targetDir = path.join(PROFILE_BASE, 'userchrome');
-  const targetCookies = path.join(targetDir, 'Default', 'Cookies');
-  if (fs.existsSync(targetCookies)) return targetDir;   // 이미 복사 완료 — 건너뜀
-
-  const sourceUserData = path.join(os.homedir(),
-    'AppData', 'Local', 'Google', 'Chrome', 'User Data');
-  if (!fs.existsSync(sourceUserData)) {
-    log('[Genspark] 사용자 크롬 프로필 폴더 없음 — 격리 프로필 사용');
-    return null;
-  }
-
-  log('[Genspark] 첫 실행: 사용자 크롬 프로필을 복사합니다 (10~30초). 크롬을 닫아두면 더 안전합니다...');
-  const targetDefault = path.join(targetDir, 'Default');
-  fs.mkdirSync(targetDefault, { recursive: true });
-
-  const ESSENTIAL = [
-    'Cookies', 'Cookies-journal',
-    'Login Data', 'Login Data-journal',
-    'Preferences', 'Bookmarks',
-    'Local Storage', 'Session Storage',
-    'History', 'Network',
-  ];
-  for (const item of ESSENTIAL) {
-    const src = path.join(sourceUserData, 'Default', item);
-    const dst = path.join(targetDefault, item);
-    try {
-      if (!fs.existsSync(src)) continue;
-      const stat = fs.statSync(src);
-      if (stat.isDirectory()) fs.cpSync(src, dst, { recursive: true, force: true });
-      else fs.copyFileSync(src, dst);
-    } catch (e) {
-      log(`[Genspark]   ${item} 복사 스킵: ${e.message}`);
-    }
-  }
-  try {
-    const ls = path.join(sourceUserData, 'Local State');
-    if (fs.existsSync(ls)) fs.copyFileSync(ls, path.join(targetDir, 'Local State'));
-  } catch {}
-
-  if (fs.existsSync(targetCookies)) {
-    log('[Genspark] 프로필 복사 완료 — 평소 크롬 로그인 세션이 따라옵니다.');
-    return targetDir;
-  }
-  log('[Genspark] Cookies 복사 실패 (크롬 실행 중일 수 있음) — 격리 프로필 사용. 첫 실행 시 Genspark 로그인 필요.');
+async function _ensureUserChromeProfileCopy(_log) {
   return null;
 }
 

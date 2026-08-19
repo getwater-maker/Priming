@@ -572,9 +572,12 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
         try { fs.copyFileSync(vhit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; log(`♻ 그룹${g.num} 영상 재활용(캐시)`); if (onProgress) { try { onProgress(); } catch {} } results.push({ num: g.num, success: true }); continue; } catch {}
       }
       if (autoDur) {
-        // 그룹 TTS 합이 6초 초과면 10초, 6초 이하면 6초 비디오로 자동 변환 (사용자 요구).
+        // 그룹 TTS 합에 맞춰 영상 길이 자동 결정 (로이 지정 2026-08-19):
+        //   13초 초과 → 15s · 6초 초과 → 10s · 그 외 → 6s
+        //   ⚠ 15s 는 grok.com 새 UI(2026-08)에서 생긴 옵션이고 **로그인 상태에서만** 칩이 보인다.
+        //     칩이 없으면 _pickRadio 가 실패 로그만 남기고 현재 값으로 진행한다(작업이 멈추지 않는다).
         const gsec = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-        eng._videoDuration = gsec > 6 ? '10s' : '6s';
+        eng._videoDuration = gsec > 13 ? '15s' : (gsec > 6 ? '10s' : '6s');
         log(`그룹${g.num}: TTS ${gsec.toFixed(1)}s → ${eng._videoDuration} 비디오`);
       }
       g.videoStatus = 'generating';

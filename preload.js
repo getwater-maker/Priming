@@ -53,6 +53,12 @@ contextBridge.exposeInMainWorld('api', {
   renameGrokAccount: (id, label) => ipcRenderer.invoke('rename-grok-account', { id, label }),
   setGrokCap: (n) => ipcRenderer.invoke('set-grok-cap', n),
   grokLogin: (accId) => ipcRenderer.invoke('grok-login', { accId }),
+  // 👤 계정 통합 관리 — 자격증명(OS 암호화)·로그인 상태. 🔒 비밀번호는 되돌려 받지 않는다(hasPassword 만).
+  credsAvailable: () => ipcRenderer.invoke('creds-available'),
+  getAccountCreds: (service, accId) => ipcRenderer.invoke('get-account-creds', { service, accId }),
+  setAccountCreds: (service, accId, username, password) => ipcRenderer.invoke('set-account-creds', { service, accId, username, password }),
+  clearAccountCreds: (service, accId) => ipcRenderer.invoke('clear-account-creds', { service, accId }),
+  getAccountStatus: (service) => ipcRenderer.invoke('get-account-status', { service }),
   openScript: (args) => ipcRenderer.invoke('open-script', args),
   ttsBuild: (args) => ipcRenderer.invoke('tts-build', args),
   deleteTts: () => ipcRenderer.invoke('delete-tts'),

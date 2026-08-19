@@ -222,6 +222,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   const [settingsTab, setSettingsTab] = useState('img');   // 'img' | 'vid' | 'keys' | 'tts'
+  // 👤 계정 탭 — {genspark|flow|grok: {dailyCap, accounts:[{id,label,used,creds,login}]}}
+  const [acct, setAcct] = useState(null);
+  const [acctEdit, setAcctEdit] = useState({});   // 입력 중인 아이디/비번 (비번은 저장 후 즉시 비움)
+  const [credsOk, setCredsOk] = useState(true);   // OS 암호화 가능 여부
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
@@ -276,8 +280,6 @@ export default function App() {
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
-  const [flowAccOpen, setFlowAccOpen] = useState(false);
-  const [flowAcc, setFlowAcc] = useState(null);          // { dailyCap, accounts:[{id,label,used}] }
   const [imgRotOpen, setImgRotOpen] = useState(false);
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
@@ -287,10 +289,6 @@ export default function App() {
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
-  const [gsAccOpen, setGsAccOpen] = useState(false);
-  const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
-  const [grokAccOpen, setGrokAccOpen] = useState(false);
-  const [grokAcc, setGrokAcc] = useState(null);          // Grok 멀티계정
 
   const logRef = useRef(null);
   const previewAudioRef = useRef(null);   // 미리듣기 오디오 1개만 재생(새로 누르면 이전 것 정지)
@@ -902,10 +900,6 @@ export default function App() {
     if (regen === 'image') { setPromptView(null); await runRegen(shortsNum, groupNum); }
     else if (regen === 'video') { setPromptView(null); await runGroupVid(shortsNum, groupNum); }
   }
-  async function openFlowAcc() {
-    try { const d = await api.getFlowAccounts(); setFlowAcc(d || { dailyCap: 45, accounts: [] }); setFlowAccOpen(true); }
-    catch (e) { logline('Flow 계정 읽기 오류: ' + e.message); }
-  }
   // 이미지 순환 설정
   async function openImgRotation() {
     try {
@@ -927,13 +921,6 @@ export default function App() {
     if (i < 0 || j < 0 || j >= order.length) return;
     [order[i], order[j]] = [order[j], order[i]]; saveImgRot({ ...imgRot, order });
   }
-  // Genspark 멀티계정
-  async function openGsAcc() { try { setGsAcc(await api.getGensparkAccounts()); setGsAccOpen(true); } catch (e) { logline('Genspark 계정 오류: ' + e.message); } }
-  async function addGsAcc() { try { setGsAcc(await api.addGensparkAccount('')); } catch (e) { logline(e.message); } }
-  async function removeGsAcc(id) { try { setGsAcc(await api.removeGensparkAccount(id)); } catch (e) { logline(e.message); } }
-  async function renameGsAcc(id, label) { try { setGsAcc(await api.renameGensparkAccount(id, label)); } catch (e) { logline(e.message); } }
-  async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
-  async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
@@ -954,28 +941,6 @@ export default function App() {
     } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
   // Grok API(비디오) xAI 키
-  // Grok 멀티계정
-  async function openGrokAcc() { try { setGrokAcc(await api.getGrokAccounts()); setGrokAccOpen(true); } catch (e) { logline('Grok 계정 오류: ' + e.message); } }
-  async function addGrokAcc() { try { setGrokAcc(await api.addGrokAccount('')); } catch (e) { logline(e.message); } }
-  async function removeGrokAcc(id) { try { setGrokAcc(await api.removeGrokAccount(id)); } catch (e) { logline(e.message); } }
-  async function renameGrokAcc(id, label) { try { setGrokAcc(await api.renameGrokAccount(id, label)); } catch (e) { logline(e.message); } }
-  async function changeGrokCap(n) { try { setGrokAcc(await api.setGrokCap(n)); } catch (e) { logline(e.message); } }
-  async function grokLogin(id) { setStatus('Grok(X) 로그인 창 여는 중…'); try { const r = await api.grokLogin(id); setStatus(r.ok ? '✓ Grok 로그인 완료' : 'Grok 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Grok 로그인 오류'); } }
-  async function addFlowAcc() {
-    try { setFlowAcc(await api.addFlowAccount('')); } catch (e) { logline('추가 오류: ' + e.message); }
-  }
-  async function removeFlowAcc(id) {
-    try { setFlowAcc(await api.removeFlowAccount(id)); } catch (e) { logline('삭제 오류: ' + e.message); }
-  }
-  async function renameFlowAcc(id, label) { try { setFlowAcc(await api.renameFlowAccount(id, label)); } catch (e) { logline(e.message); } }
-  async function changeFlowCap(n) {
-    try { setFlowAcc(await api.setFlowCap(n)); } catch (e) { logline('한도 오류: ' + e.message); }
-  }
-  async function flowLogin(id) {
-    setStatus('Flow 로그인 창 여는 중… 크롬에서 로그인하세요');
-    try { const r = await api.flowLogin(id); setStatus(r.ok ? '✓ Flow 로그인 완료' : 'Flow 로그인 실패: ' + (r.error || '')); }
-    catch (e) { logline('Flow 로그인 오류: ' + e.message); setStatus('Flow 로그인 오류'); }
-  }
   async function openOllama() {
     try {
       const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
@@ -1504,10 +1469,7 @@ export default function App() {
       if (cvidOpen) { setCvidOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
-      if (grokAccOpen) { setGrokAccOpen(false); return; }
-      if (gsAccOpen) { setGsAccOpen(false); return; }
       if (imgRotOpen) { setImgRotOpen(false); return; }
-      if (flowAccOpen) { setFlowAccOpen(false); return; }
       if (ollamaOpen) { setOllamaOpen(false); return; }
       if (vdOpen) { closeVoiceDesign(); return; }
       if (dictOpen) { setDictOpen(false); return; }
@@ -1518,7 +1480,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, impOpen, scriptEditOpen, grokAccOpen, gsAccOpen, imgRotOpen, flowAccOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, impOpen, scriptEditOpen, imgRotOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -1626,6 +1588,78 @@ export default function App() {
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
   // ── 통합 설정 팝업 — ComfyUI 이미지·비디오 · API키(제미나이/나노바나나·xAI) · TTS서버를 한 곳에서(탭). ──
+  // ── 👤 계정 통합 관리 (⚙ 설정 → 계정 탭) — 2026-08-19 ───────────────────────
+  // Genspark · Flow · Grok 계정이 서로 다른 모달 3개에 흩어져 있던 것을 한 화면으로 모았다.
+  // 🔒 비밀번호는 저장만 하고 되돌려 받지 않는다(hasPassword 플래그만). OS 암호화(safeStorage).
+  const ACCT_SVCS = [
+    { id: 'genspark', icon: '🖼', name: 'Genspark', note: '이미지 생성 (순환 1번)' },
+    { id: 'flow', icon: '🖼', name: 'Google Flow', note: '이미지 생성 (순환 2번)' },
+    { id: 'grok', icon: '🎬', name: 'Grok (X)', note: '비디오 생성 (브라우저)' },
+  ];
+  const ACCT_API = {
+    genspark: { add: 'addGensparkAccount', rm: 'removeGensparkAccount', ren: 'renameGensparkAccount', cap: 'setGensparkCap', login: 'gensparkLogin' },
+    flow: { add: 'addFlowAccount', rm: 'removeFlowAccount', ren: 'renameFlowAccount', cap: 'setFlowCap', login: 'flowLogin' },
+    grok: { add: 'addGrokAccount', rm: 'removeGrokAccount', ren: 'renameGrokAccount', cap: 'setGrokCap', login: 'grokLogin' },
+  };
+  async function loadAcct() {
+    try {
+      const out = {};
+      for (const s of ACCT_SVCS) out[s.id] = await api.getAccountStatus(s.id);
+      setAcct(out);
+    } catch (e) { logline('계정 목록 오류: ' + e.message); }
+    try { setCredsOk(await api.credsAvailable()); } catch (_) { setCredsOk(false); }
+  }
+  async function acctDo(svc, fn, ...args) {
+    try { await api[ACCT_API[svc][fn]](...args); } catch (e) { logline(`계정 작업 오류: ${e.message}`); }
+    await loadAcct();
+  }
+  async function acctAdd(svc) {
+    const label = (await askName('새 계정 이름 (예: 채널A, 부계정)', '')) || '';
+    if (!label.trim()) return;
+    await acctDo(svc, 'add', label.trim());
+  }
+  async function acctRemove(svc, id, label) {
+    if (!(await uiConfirm(`계정 "${label}" 을 목록에서 지울까요?\n(브라우저 프로필·쿠키는 남습니다)`))) return;
+    try { await api.clearAccountCreds(svc, id); } catch (_) {}
+    await acctDo(svc, 'rm', id);
+  }
+  async function acctLogin(svc, id) {
+    setStatus(`${svc} 로그인 창 여는 중…`);
+    setSettingsMsg('⏳ 로그인 창이 열립니다. 저장된 아이디·비밀번호가 있으면 자동 입력되고, CAPTCHA·2단계 인증이 나오면 직접 마무리하세요.');
+    try {
+      const r = await api[ACCT_API[svc].login](id);
+      const msg = r && r.ok ? '✅ 로그인 완료 — 쿠키가 프로필에 저장됐습니다.' : `❌ 로그인 실패${r && r.error ? ` (${r.error})` : ''}`;
+      setStatus(msg); setSettingsMsg(msg);
+    } catch (e) { setSettingsMsg('❌ 오류: ' + e.message); }
+    await loadAcct();
+  }
+  async function acctSaveCreds(svc, id) {
+    const u = (acctEdit[`${svc}:${id}:u`] || '').trim();
+    const p = acctEdit[`${svc}:${id}:p`] || '';
+    if (!u && !p) { setSettingsMsg('⏳ 저장할 아이디·비밀번호를 입력하세요.'); return; }
+    try {
+      const r = await api.setAccountCreds(svc, id, u || undefined, p || undefined);
+      setSettingsMsg(r && r.ok ? '✅ 저장했습니다 (OS 암호화). 비밀번호는 화면에 다시 표시되지 않습니다.'
+        : `❌ 저장 실패${r && r.error ? ` — ${r.error}` : ''}`);
+      // 입력칸의 비밀번호는 즉시 비운다(화면에 남겨두지 않는다)
+      setAcctEdit((s) => ({ ...s, [`${svc}:${id}:p`]: '' }));
+    } catch (e) { setSettingsMsg('❌ 저장 오류: ' + e.message); }
+    await loadAcct();
+  }
+  async function acctClearCreds(svc, id) {
+    if (!(await uiConfirm('저장된 아이디·비밀번호를 지울까요?\n(로그인 쿠키는 그대로 남습니다)'))) return;
+    try { await api.clearAccountCreds(svc, id); setSettingsMsg('🔒 자격증명을 지웠습니다.'); } catch (e) { setSettingsMsg('❌ ' + e.message); }
+    await loadAcct();
+  }
+  // 로그인 흔적 표시 — 쿠키 파일 mtime 기준(브라우저를 띄우지 않는다)
+  function acctLoginLabel(a) {
+    const l = a.login || {};
+    if (!l.exists) return { t: '· 로그인 안 함', c: '#a08b6a' };
+    if (!l.cookieAt) return { t: '· 로그인 안 함', c: '#a08b6a' };
+    if (l.days <= 0) return { t: '· 오늘 사용', c: '#5a8a5a' };
+    if (l.days <= 30) return { t: `· ${l.days}일 전 사용`, c: '#5a8a5a' };
+    return { t: `· ${l.days}일 전 (만료됐을 수 있음)`, c: '#b0762a' };
+  }
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
     setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
@@ -1644,6 +1678,7 @@ export default function App() {
     try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
     try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
+    if ((tab || 'img') === 'acct') { await loadAcct(); }
     setSettingsOpen(true);
   }
   async function openComfy() { return openSettings('img'); }
@@ -1923,7 +1958,7 @@ export default function App() {
               <ComfyEngineOptions cfg={cvidCfg} kind="video" />
               <option value="none">없음 (이미지만)</option>
             </select>
-            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
+            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}>⚙ 계정</button>}
             {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
@@ -2337,29 +2372,6 @@ export default function App() {
         </div>
       )}
 
-      {flowAccOpen && flowAcc && (
-        <div className="modal-bg show">
-          <div className="modal-card">
-            <h3>⚙ Flow 멀티계정</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인하세요(쿠키 저장). 생성 시 <b>오늘 한도 안 찬 계정</b>부터 사용하고, 한도에 도달하면 다음 계정으로 넘어갑니다.</div>
-            <div className="frow"><label>일일 한도</label><input className="n" type="number" style={{ width: 70 }} value={flowAcc.dailyCap} onChange={(e) => changeFlowCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한 (사람 같은 보수적 사용 권장)</span></div>
-            <div style={{ margin: '8px 0' }}>
-              {flowAcc.accounts.map((a) => (
-                <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input defaultValue={a.label} onBlur={(e) => renameFlowAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
-                    <span className="meta">(오늘 {a.used}/{flowAcc.dailyCap})</span>
-                  </span>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => flowLogin(a.id)}>🔑 로그인</button>
-                  {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeFlowAcc(a.id)}>✕</button>}
-                </div>
-              ))}
-            </div>
-            <div className="meta">⚠ 여러 계정으로 한도를 우회하는 것은 Flow 약관 위반·정지 위험이 있습니다. 계정당 보수적으로 사용하세요.</div>
-            <div className="mbtns"><button onClick={addFlowAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setFlowAccOpen(false)}>닫기</button></div>
-          </div>
-        </div>
-      )}
 
       {/* 모달은 바깥 클릭으로 닫지 않음(ESC·닫기 버튼만) — 실수 클릭에 입력 유실 방지 */}
       {chOrderOpen && (
@@ -2390,8 +2402,8 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); }}>{lbl}</button>
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); }}>{lbl}</button>
               ))}
             </div>
 
@@ -2508,6 +2520,81 @@ export default function App() {
               </div>
             </div>)}
 
+            {settingsTab === 'acct' && (<div>
+              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.55 }}>
+                브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
+                그 프로필에 쿠키가 남아 <b>한동안 다시 로그인하지 않아도</b> 됩니다(X 는 보통 몇 달).
+                아이디·비밀번호를 저장해 두면 로그인 창에서 <b>자동 입력</b>됩니다.
+              </div>
+              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.55, color: '#8a6d3b' }}>
+                ⚠ 완전 자동 로그인은 <b>구조적으로 불가능</b>합니다 — 구글은 자동화 브라우저의 비밀번호 로그인을
+                차단하고(“이 브라우저 또는 앱은 안전하지 않을 수 있습니다”), X 는 CAPTCHA·2단계 인증을 요구합니다.
+                그 화면이 나오면 앱이 <b>거기서 멈추고 창을 열어 둡니다</b> — 직접 마무리한 뒤 [로그인 완료]를 누르세요.
+                반복 실패는 계정 잠금으로 이어질 수 있어 <b>재시도하지 않습니다</b>.
+              </div>
+              {!credsOk && (
+                <div className="meta" style={{ marginBottom: 8, color: '#b03a3a' }}>
+                  ⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 <b>비밀번호를 저장하지 않습니다</b>
+                  (평문으로 몰래 남기지 않는 정책). 🔑 로그인에서 직접 입력하세요.
+                </div>
+              )}
+              {!acct && <div className="meta">불러오는 중…</div>}
+              {acct && ACCT_SVCS.map((s) => {
+                const d = acct[s.id] || { accounts: [] };
+                return (
+                  <div key={s.id} style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                    <div className="frow" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                      <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>{s.icon} {s.name}</label>
+                      <span className="meta" style={{ flex: 1 }}>{s.note}</span>
+                      <label style={{ width: 'auto' }}>일일 한도</label>
+                      <input className="n" type="number" min="0" style={{ width: 64 }} value={d.dailyCap != null ? d.dailyCap : 0}
+                        onChange={(e) => acctDo(s.id, 'cap', e.target.value)} />
+                      <span className="meta">0=무제한</span>
+                    </div>
+                    {(d.accounts || []).map((a) => {
+                      const st = acctLoginLabel(a);
+                      const ku = `${s.id}:${a.id}:u`;
+                      const kp = `${s.id}:${a.id}:p`;
+                      const hasPw = !!(a.creds && a.creds.hasPassword);
+                      return (
+                        <div key={a.id} style={{ borderTop: '1px dashed var(--line)', padding: '6px 0 4px' }}>
+                          <div className="frow" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                            <input defaultValue={a.label} onBlur={(e) => acctDo(s.id, 'ren', a.id, e.target.value)}
+                              title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 110px', fontWeight: 700 }} />
+                            <span className="meta">오늘 {a.used}/{d.dailyCap > 0 ? d.dailyCap : '무제한'}</span>
+                            <span className="meta" style={{ color: st.c, fontWeight: 600 }}>{st.t}</span>
+                            <span style={{ flex: 1 }} />
+                            <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => acctLogin(s.id, a.id)}>🔑 로그인</button>
+                            {a.id !== 'default' && (
+                              <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => acctRemove(s.id, a.id, a.label)}>✕</button>
+                            )}
+                          </div>
+                          <div className="frow" style={{ alignItems: 'center', flexWrap: 'wrap', marginTop: 2 }}>
+                            <input placeholder="아이디 / 이메일" style={{ flex: 1, minWidth: 140 }}
+                              value={acctEdit[ku] !== undefined ? acctEdit[ku] : ((a.creds && a.creds.username) || '')}
+                              onChange={(e) => setAcctEdit((v) => ({ ...v, [ku]: e.target.value }))} />
+                            <input type="password" placeholder={hasPw ? '비밀번호 (저장됨 — 바꿀 때만)' : '비밀번호'}
+                              style={{ flex: 1, minWidth: 140 }} value={acctEdit[kp] || ''}
+                              onChange={(e) => setAcctEdit((v) => ({ ...v, [kp]: e.target.value }))} />
+                            <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!credsOk}
+                              onClick={() => acctSaveCreds(s.id, a.id)}>💾 저장</button>
+                            {(hasPw || (a.creds && a.creds.username)) && (
+                              <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 아이디·비밀번호 삭제"
+                                onClick={() => acctClearCreds(s.id, a.id)}>🔒 지우기</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="frow" style={{ marginTop: 6 }}>
+                      <button onClick={() => acctAdd(s.id)}>+ 계정 추가</button>
+                      <span className="meta" style={{ flex: 1 }}>계정을 추가하면 <b>별도 브라우저 프로필</b>이 생깁니다 — 그 창에서 로그인한 계정이 곧 그 프로필의 계정입니다.</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="meta">⚠ 여러 계정으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로 쓰세요.</div>
+            </div>)}
             {settingsTab === 'tts' && (<div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
                 OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
@@ -2574,8 +2661,8 @@ export default function App() {
                       <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
                     </select>
                   )}
-                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openFlowAcc(); }}>🔑 Flow 계정</button>}
-                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openGsAcc(); }}>🔑 Genspark 계정</button>}
+                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openSettings('acct'); }}>🔑 Flow 계정</button>}
+                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openSettings('acct'); }}>🔑 Genspark 계정</button>}
                 </div>
               ))}
             </div>
@@ -2603,53 +2690,7 @@ export default function App() {
         </div>
       )}
 
-      {gsAccOpen && gsAcc && (
-        <div className="modal-bg show">
-          <div className="modal-card">
-            <h3>⚙ Genspark 멀티계정</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장). 생성 시 한도 안 찬 계정부터, 한도 도달 시 다음 계정으로.</div>
-            <div className="frow"><label>일일 한도</label><input className="n" type="number" min="0" style={{ width: 70 }} value={gsAcc.dailyCap} onChange={(e) => changeGsCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한 · <b>0 = 무제한</b> (Genspark 자체 한도 메시지로만 Flow 전환)</span></div>
-            <div style={{ margin: '8px 0' }}>
-              {gsAcc.accounts.map((a) => (
-                <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input defaultValue={a.label} onBlur={(e) => renameGsAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
-                    <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap > 0 ? gsAcc.dailyCap : '무제한'})</span>
-                  </span>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => gsLogin(a.id)}>🔑 로그인</button>
-                  {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGsAcc(a.id)}>✕</button>}
-                </div>
-              ))}
-            </div>
-            <div className="meta">⚠ 약관 위반·정지 위험. 계정당 보수적으로.</div>
-            <div className="mbtns"><button onClick={addGsAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setGsAccOpen(false)}>닫기</button></div>
-          </div>
-        </div>
-      )}
 
-      {grokAccOpen && grokAcc && (
-        <div className="modal-bg show">
-          <div className="modal-card">
-            <h3>⚙ Grok(X) 멀티계정 — 영상</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>Grok 영상 생성용 X(트위터) 계정. <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장).</div>
-            <div className="frow"><label>일일 한도</label><input className="n" type="number" style={{ width: 70 }} value={grokAcc.dailyCap} onChange={(e) => changeGrokCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한</span></div>
-            <div style={{ margin: '8px 0' }}>
-              {grokAcc.accounts.map((a) => (
-                <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input defaultValue={a.label} onBlur={(e) => renameGrokAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
-                    <span className="meta">(오늘 {a.used}/{grokAcc.dailyCap})</span>
-                  </span>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => grokLogin(a.id)}>🔑 로그인</button>
-                  {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGrokAcc(a.id)}>✕</button>}
-                </div>
-              ))}
-            </div>
-            <div className="meta">⚠ 약관 위반·정지 위험. 보수적으로.</div>
-            <div className="mbtns"><button onClick={addGrokAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setGrokAccOpen(false)}>닫기</button></div>
-          </div>
-        </div>
-      )}
 
       {scriptEditOpen && (
         <div className="modal-bg show">

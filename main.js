@@ -616,6 +616,88 @@ ipcMain.handle('pick-lora-dir', async () => {
 });
 ipcMain.handle('open-lora-folder', () => { try { const dir = require('./core/lora-collect').load().dir; fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } catch (e) { log('LoRA 폴더 열기 오류: ' + e.message); } return true; });
 
+// ── 👤 계정 통합 관리 (2026-08-19, v0.3.21) ─────────────────────────────────
+// Genspark · Flow · Grok 계정의 **아이디/비밀번호**를 OS 암호화(safeStorage)로 보관하고,
+// 🔑 로그인 창에서 자동 입력한다. CAPTCHA·2FA 는 사람이 마무리(core/login-autofill.js).
+// 🔒 **비밀번호는 렌더러로 되돌려 보내지 않는다** — hasPassword 플래그만 준다.
+ipcMain.handle('creds-available', () => require('./core/account-creds').available());
+ipcMain.handle('get-account-creds', (_e, args = {}) =>
+  require('./core/account-creds').getPublic(args.service, args.accId));
+ipcMain.handle('set-account-creds', (_e, args = {}) => {
+  const r = require('./core/account-creds').set(args.service, args.accId, {
+    username: args.username, password: args.password,
+  });
+  if (r.ok) log(`🔒 ${args.service} 계정 자격증명 저장 (${args.accId}) — OS 암호화`);
+  else log(`⚠ 자격증명 저장 실패: ${r.error}`);
+  return r;
+});
+ipcMain.handle('clear-account-creds', (_e, args = {}) => {
+  const r = require('./core/account-creds').clear(args.service, args.accId);
+  if (r.ok) log(`🔒 ${args.service} 계정 자격증명 삭제 (${args.accId})`);
+  return r;
+});
+
+/**
+ * 계정별 로그인 흔적 — 브라우저를 띄우지 않고 **프로필 폴더의 쿠키 파일 mtime** 만 본다.
+ *   (쿠키 DB 를 파싱하지 않는다 — 세션 갱신 때 파일이 쓰이므로 mtime 만으로 "언제까지 살아 있었나"를 안다)
+ *   요즘 크롬은 `Default/Network/Cookies` 에 둔다. 옛 경로(`Default/Cookies`)도 폴백으로 본다.
+ */
+function _accountLoginStatus(service, accId) {
+  const base = {
+    flow: path.join(os.homedir(), '.flow-app', 'profiles'),
+    genspark: path.join(os.homedir(), '.flow-app', 'genspark-profiles'),
+    grok: path.join(os.homedir(), '.flow-app', 'grok-profiles'),
+  }[service];
+  if (!base) return { exists: false };
+  const dir = path.join(base, accId || 'default');
+  if (!fs.existsSync(dir)) return { exists: false };
+  for (const rel of [['Default', 'Network', 'Cookies'], ['Default', 'Cookies']]) {
+    const f = path.join(dir, ...rel);
+    try {
+      if (fs.existsSync(f)) {
+        const st = fs.statSync(f);
+        return { exists: true, cookieAt: st.mtimeMs, days: Math.floor((Date.now() - st.mtimeMs) / 86400000) };
+      }
+    } catch (_) {}
+  }
+  return { exists: true, cookieAt: 0 };   // 프로필은 있지만 쿠키 파일이 없다 = 로그인 안 함
+}
+ipcMain.handle('get-account-status', (_e, args = {}) => {
+  const svc = args.service;
+  const Store = { flow: './core/flow-accounts', genspark: './core/genspark-accounts', grok: './core/grok-accounts' }[svc];
+  if (!Store) return { accounts: [] };
+  const d = require(Store).list();
+  const Creds = require('./core/account-creds');
+  return {
+    dailyCap: d.dailyCap,
+    credsAvailable: Creds.available(),
+    accounts: (d.accounts || []).map((a) => ({
+      ...a,
+      // 🔒 아이디는 보여주고 **비밀번호는 있는지만** 알려준다(값은 렌더러로 보내지 않는다).
+      creds: Creds.getPublic(svc, a.id),
+      login: _accountLoginStatus(svc, a.id),
+    })),
+  };
+});
+
+/**
+ * 🔑 로그인 창이 뜬 직후 자격증명을 자동 입력한다(저장돼 있을 때만).
+ *   저장된 게 없으면 아무것도 하지 않고 사용자가 직접 로그인한다 = 기존 동작.
+ *   ⚠ 복호화된 비밀번호는 이 함수 안에서만 쓰이고 로그·렌더러로 나가지 않는다.
+ */
+async function _autofillLogin(page, service, accId) {
+  try {
+    if (!page || (page.isClosed && page.isClosed())) return;
+    const { getSecret } = require('./core/account-creds');
+    const s = getSecret(service, accId);
+    if (!s.username && !s.password) return;
+    const { autofill } = require('./core/login-autofill');
+    await autofill(page, { service, username: s.username, password: s.password, logger: log, log });
+  } catch (e) {
+    log(`자격증명 자동 입력 건너뜀: ${e.message}`);
+  }
+}
+
 // Flow 멀티계정 — 목록/추가/삭제/한도/로그인
 ipcMain.handle('get-flow-accounts', () => require('./core/flow-accounts').list());
 ipcMain.handle('add-flow-account', (_e, label) => { require('./core/flow-accounts').add(label); return require('./core/flow-accounts').list(); });
@@ -627,7 +709,8 @@ ipcMain.handle('flow-login', async (_e, args = {}) => {
   log(`🔑 Flow 로그인 창 열기 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
   try {
     const eng = getFlowEng(flowProfileDir(accId));
-    await eng.login();
+    // 로그인 화면이 뜬 직후 저장된 자격증명 자동 입력(없으면 아무 일도 안 한다).
+    await eng.login(async (page) => { await _autofillLogin(page, 'flow', accId); });
     log('✓ Flow 로그인 완료(쿠키 저장). 이 계정으로 이미지 생성 가능합니다.');
     return { ok: true };
   } catch (e) { log('Flow 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
@@ -668,6 +751,7 @@ ipcMain.handle('genspark-login', async (_e, args = {}) => {
     const { GensparkEngine } = require('./genspark-engine');
     const eng = new GensparkEngine({ profileId: accId, logger: log });
     await eng.login(async () => {
+      await _autofillLogin(eng.page, 'genspark', accId);
       // 창을 연 채로, 사용자가 로그인 마치고 버튼 누를 때까지 대기 (자동 감지 미사용)
       await dialog.showMessageBox(win, {
         type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
@@ -694,6 +778,7 @@ ipcMain.handle('grok-login', async (_e, args = {}) => {
     const { GrokEngine } = require('./grok-engine');
     const eng = new GrokEngine({ profileId: accId, logger: log });
     await eng.login(async () => {
+      await _autofillLogin(eng.page, 'grok', accId);
       await dialog.showMessageBox(win, {
         type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
         title: 'Grok(X) 로그인',

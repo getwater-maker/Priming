@@ -227,7 +227,11 @@ class FlowAutomator {
     }
   }
 
-  async login() {
+  /**
+   * 로그인 창 열기. onReady(page) 를 주면 **로그인 화면이 뜬 직후 한 번** 호출한다
+   * (main 이 저장된 자격증명을 자동 입력하는 데 쓴다 — core/login-autofill.js).
+   */
+  async login(onReady) {
     // 기존 브라우저 세션 정리 (잠금 방지)
     if (this.context) {
       try { await this.context.close(); } catch {}
@@ -278,6 +282,8 @@ class FlowAutomator {
     await this.page.goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 });
     await this.page.waitForTimeout(3000);
     await this._dismissBanners();
+
+    if (typeof onReady === 'function') { try { await onReady(this.page); } catch (e) { this.log('[Flow] 자동 입력 건너뜀: ' + e.message); } }
 
     if (this.page.url().includes('accounts.google')) {
       this.log('[Flow] Google 로그인이 필요합니다. 브라우저에서 로그인하세요.');
