@@ -367,7 +367,38 @@ function buildImagePrompt(stylePrompt, imagePrompt) {
   const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
   const body = String(imagePrompt || '').trim().replace(/[,\s]+$/, '');
   // 긍정 서술(POS_CLEAN)은 본문 뒤 · 부정 절은 정리 후 맨 끝으로.
-  return normalizePromptNegations(`${style}${body}, ${POS_CLEAN}, no text, no watermark, ${NEG_UGLY}`);
+  const out = normalizePromptNegations(`${style}${body}, ${POS_CLEAN}, no text, no watermark, ${NEG_UGLY}`);
+  // 🔴 **끝에 마침표를 붙인다 — 장식이 아니라 버그 회피다.**
+  //   comfy.org 의 Krea2 CLIP(qwen3vl_4b, type=krea2)은 **어떤 토큰 길이에서 조건(conditioning)이
+  //   깨져 순수 노이즈 이미지를 내놓는다.** cfg=1 + ConditioningZeroOut 이라 붙잡아 줄 것이 없어
+  //   디노이즈가 사실상 0 이 된다. 실측(2026-08-19, 같은 프롬프트 989자):
+  //     985자 정상 · **989자(원본) 노이즈 3회 연속** · 989자 **+ 마침표 하나 → 정상**.
+  //   길이 문제가 아니다(다른 문장은 1300자도 정상). 토큰 수가 딱 그 경계에 떨어질 때만 터진다.
+  //   마침표 하나로 토큰 경계가 밀려 회피된다. 그래도 다른 프롬프트가 또 걸릴 수 있으므로
+  //   재시도 때 `nudgePromptForRetry` 로 프롬프트를 바꿔 가며 다시 만든다(main.js runComfyImages).
+  return /[.!?]$/.test(out) ? out : out + '.';
+}
+
+/**
+ * 노이즈가 나온 프롬프트를 **다르게** 만들어 재시도용으로 돌려준다.
+ *   🔑 씨앗(seed)만 바꿔 다시 만들면 소용없다 — 위 버그는 **프롬프트 텍스트에 결정적**이라
+ *     같은 글자를 보내면 몇 번을 해도 똑같이 노이즈가 나온다(로이 2026-08-19: "노이즈 이미지를 계속 만들고 있는데").
+ *   무엇을 버리는가: **맨 끝의 부정 절**부터. 이 워크플로는 cfg=1 + 네거티브 zero-out 이라
+ *     부정문이 애초에 거의 작동하지 않는다(v0.2.83 에서 확인) → 그림 내용 손실이 사실상 없다.
+ * @param {string} prompt 원본(빌드된) 프롬프트
+ * @param {number} level 1 = 마지막 부정 절 제거 · 2 = 부정 절 전부 제거
+ */
+function nudgePromptForRetry(prompt, level = 1) {
+  const src = String(prompt || '').trim().replace(/[.!?]+$/, '');
+  const parts = src.split(',').map((c) => c.trim()).filter(Boolean);
+  const isNeg = (c) => /^(?:no|not|without)\b/i.test(c);
+  let kept = parts;
+  if (level >= 2) kept = parts.filter((c) => !isNeg(c));
+  else { kept = parts.slice(); while (kept.length > 1 && isNeg(kept[kept.length - 1])) { kept.pop(); break; } }
+  if (!kept.length) kept = parts;                       // 전부 부정문인 이상한 입력 — 원본 유지
+  const out = kept.join(', ');
+  // 원본과 글자가 같으면(버릴 부정 절이 없었음) 토큰 경계라도 밀어 준다.
+  return out === src ? `${out} .` : `${out}.`;
 }
 
 // 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.
@@ -681,7 +712,7 @@ function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-module.exports = {
+module.exports = { nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,

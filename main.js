@@ -1526,8 +1526,16 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
   const blanks = [];    // 검정·노이즈 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
-  const genOne = async (g) => {
-    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
+  const genOne = async (g, retryLevel = 0) => {
+    let prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
+    // 🔑 재시도 때는 **프롬프트 자체를 바꾼다.** 씨앗만 새로 뽑아 같은 글자를 보내면 소용없다 —
+    //   comfy.org Krea2 CLIP 의 노이즈 버그는 **프롬프트 텍스트에 결정적**이라 몇 번을 해도 똑같이 노이즈가 나온다
+    //   (로이 2026-08-19: "노이즈 이미지를 계속 만들고 있는데"). 버리는 건 맨 끝 부정 절 — cfg=1 + 네거티브
+    //   zero-out 이라 어차피 거의 작동하지 않는 부분이라 그림 손실이 사실상 없다.
+    if (retryLevel > 0) {
+      prompt = P.nudgePromptForRetry(prompt, retryLevel);
+      logger(`  ↻ G${g.num} 프롬프트를 바꿔 재시도(${retryLevel}단계) — 같은 글자를 보내면 같은 노이즈가 나옵니다`);
+    }
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
@@ -1564,14 +1572,15 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       await genOne(queue.shift());
     }
   }
-  // ── 이상 이미지(검정·노이즈) 복구 패스 ── 동시 생성이 원인이라 **반드시 순차로(동시성 0)** 다시 만든다. 그룹당 최대 2회.
+  // ── 이상 이미지(검정·노이즈) 복구 패스 ── 순차로(동시성 0) + **프롬프트를 바꿔 가며** 다시 만든다. 그룹당 최대 2회.
+  //   ⚠ 검정은 동시 생성이 원인이라 '순차' 가 약이지만, **노이즈는 프롬프트에 결정적**이라 순차만으로는 안 낫는다.
   if (blanks.length && !S.abort) {
     const retry = blanks.splice(0, blanks.length);
-    logger(`  🔁 이상 이미지 ${retry.length}장 순차 재생성 (동시 생성이 원인 — 순차로는 정상 생성됨)`);
+    logger(`  🔁 이상 이미지 ${retry.length}장 재생성 — 순차 + 프롬프트를 바꿔 가며 시도`);
     for (const g of retry) {
       for (let att = 1; att <= 2; att++) {
         if (S.abort) { logger('⏹ 중단됨'); return; }
-        await genOne(g);                 // 실패/이상이면 blanks 에 다시 쌓이지만 여기선 att 루프로 제어
+        await genOne(g, att);            // ⚠ att 를 넘겨 **프롬프트를 바꿔** 재시도(같은 글자면 같은 노이즈)
         if (g.imagePath) break;          // 정상 생성됨
         if (att === 2) logger(`  ✗ G${g.num} 재생성 2회 실패 — 이 그룹 이미지 없음(프롬프트 확인 필요)`);
       }
