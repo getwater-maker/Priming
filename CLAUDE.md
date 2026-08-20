@@ -84,6 +84,34 @@
   `🎬 … 즉시 비디오 생성(파이프라인·Comfy 클라우드)` 이 뜨는지 확인할 것.
   ⚠ 크레딧: 픽셀이 2.3배라 GPU 시간 과금이면 비디오분이 늘 수 있다(생성당 과금이면 동일) — 대시보드 확인 권장.
 
+## 🔁 모델 파일명이 서버마다 달라 **로컬에서만 생성 실패**하던 것 — 자동 대체 (2026-08-20, v0.3.22)
+> 로이 로그: `✗ G1 실패: 워크플로 노드 오류: … unet_name: 'krea2_turbo_fp8_scaled.safetensors' not in
+>   ['krea2_turbo_int8_convrot.safetensors', 'z_image_turbo_bf16.safetensors']`
+- 🔑 **원인 = 같은 모델의 양자화 판이 서버마다 다르다.** 번들 워크플로 `image_krea2_turbo_t2i` 는
+  `krea2_turbo_**fp8_scaled**` 를 요구하는데 **클라우드엔 있고**(실측: krea2_turbo 판 5개 — fp8_scaled·bf16·
+  int8_convrot·mxfp8·nvfp4) **로컬엔 `int8_convrot` 뿐**이었다. CLIP(`qwen3vl_4b_fp8_scaled`)·VAE(`qwen_image_vae`)·
+  LoRA(`krea2_darkbrush`)는 **양쪽 다 있었다** → **UNET 파일명 하나 때문에** 로컬 생성이 통째로 실패.
+  즉 "한 워크플로로 로컬·클라우드 왕복"(2분할의 목적)을 하려면 앱이 이 차이를 흡수해야 한다.
+- 🔑 **미리 물어보지 않는다 — 실패 응답이 목록을 담아 준다.** ComfyUI `/prompt` 400 의 `node_errors` 에
+  `value_not_in_list` 와 함께 **그 서버가 가진 파일 목록**이 들어 있다(`extra_info.input_config[0]`, 없으면
+  `details` 문자열). → **정상일 때 추가 요청 0회**, 실패했을 때만 그 목록으로 고쳐 **1회 재제출**.
+  ⚠ 매 장 `/object_info` 를 받는 방식은 안 썼다 — **클라우드 응답이 수 MB**(UNET 항목만 376개)라 낭비다.
+  고친 내용은 `_modelFixes` 에 기억해 **두 번째 장부터는 헛왕복도 없다**(`applyRemembered`).
+- 🔑 **대체 규칙 — 정밀도·양자화 토큰만 떼고 나머지가 같을 때만 바꾼다**(`core/comfy-models.js`).
+  `krea2_turbo_fp8_scaled` ↔ `krea2_turbo_int8_convrot` → 둘 다 `krea2 turbo` = OK.
+  🔴 **`z_image_turbo_bf16` → `z_image_bf16` 은 안 바꾼다** — turbo·distilled·dev 는 **모델 정체성**이라 떼지 않는다.
+  (여기서 느슨하게 매칭하면 "엉뚱한 모델로 조용히 그려진다" = v0.3.20 의 '남의 영상' 계열 사고가 된다.)
+  후보가 여럿이면 원래 정밀도 토큰이 겹치는 것 → 이름 짧은 것 순. **같은 모델이 없으면 아무것도 안 바꾼다.**
+- **오류 메시지를 사람 말로**: 예전엔 raw JSON 이 300자에서 잘려 읽을 수가 없었다 → `explain()` 이
+  「로컬 ComfyUI 에 모델 'X' 가 없습니다 (unet_name). 그 서버에 있는 것: A, B → 헤더 「② 이미지」에서
+  ☁ 클라우드로 바꾸거나 그 파일을 설치하세요」로 바꾼다.
+- **실측 검증(이게 결정적)**: 로컬 ComfyUI(8188)로 **실제 1장 생성 성공** — 로그에
+  `🔁 모델 자동 대체: krea2_turbo_fp8_scaled → krea2_turbo_int8_convrot`, **28.7초 · 1344x768 · 1186KB 정상 그림**.
+  → RTX 3060(12GB)에서도 Krea2 Turbo **int8 판은 돌아간다**(참고: 클라우드는 장당 12~18초라 여전히 더 빠르다).
+- 검증: `npm run test:comfy` = 단위 **41/41**(위 로그 원문에서 목록 파싱 · turbo→비turbo 거부 · distilled→dev 거부 ·
+  대체본 없으면 그래프 불변 · **엔진 원문에 `_queueFixing` 배선이 남아 있는지 대조**) + 2분할 E2E 62/62.
+- ⏳ 남은 것: 비디오(LTX)는 같은 코드를 타지만 **실사용 미검증**(로컬 LTX2.5 는 22B 라 3060 에서 못 돈다).
+
 ## 🖥☁ ⚙ 설정의 ComfyUI 탭 = 로컬/클라우드 **2분할** + 이중 진입점 제거 (2026-08-20, v0.3.22)
 > 로이: "서버는 뭐고 주소는 뭐지? 그 아래 클라우드 체크표시는 뭐고? 워크플로우는 뭐야? 타임아웃은?
 >   컴피유아이 로컬과 클라우드를 화면 2분할 하여 만들 수는 없는 건가."

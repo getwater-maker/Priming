@@ -288,6 +288,25 @@ class ComfyVideo {
     }
     return graph;
   }
+  // 모델 파일이 그 서버에 없을 때(로컬↔클라우드 판이 달라서) **한 번만** 고쳐 재제출한다.
+  //   🔑 미리 /object_info 를 받지 않는다 — 정상일 때 추가 요청 0회. 실패 응답이 목록을 담아 준다.
+  //   고친 내용은 기억해서(_modelFixes) 두 번째 장부터는 헛왕복도 없다.
+  async _queueFixing(graph) {
+    const CM = require('./comfy-models');
+    this._modelFixes = this._modelFixes || {};
+    CM.applyRemembered(graph, this._modelFixes);
+    try { return await this._queue(graph); }
+    catch (e) {
+      if (!e.nodeErrors) throw e;
+      const r = CM.applyModelFixes(graph, e.nodeErrors);
+      if (!r.changes.length) throw e;                       // 같은 모델의 다른 판이 없으면 조용히 바꾸지 않는다
+      for (const c of r.changes) {
+        this._modelFixes[c.nodeId + '|' + c.input] = c.to;
+        this.log(`[ComfyVid] 🔁 모델 자동 대체: ${c.from} → ${c.to} (${this.cloud ? '클라우드' : '로컬'} 에 앞의 판이 없음)`);
+      }
+      return await this._queue(graph);
+    }
+  }
   async _queue(graph) {
     const payload = { prompt: graph, client_id: this.clientId };
     if (this.cloud && this.apiKey) payload.extra_data = { api_key_comfy_org: this.apiKey };
@@ -295,7 +314,14 @@ class ComfyVideo {
     if (r.status === 401 || r.status === 403) throw new Error('API 키 인증 실패 (401/403) — 키를 확인하세요.');
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`/prompt 큐 실패 (${r.status}): ${t.slice(0, 300)}`); }
     const j = await r.json();
-    if (j.node_errors && Object.keys(j.node_errors).length) throw new Error('워크플로 노드 오류: ' + JSON.stringify(j.node_errors).slice(0, 300));
+    if (j.node_errors && Object.keys(j.node_errors).length) {
+      // 원문 JSON 은 잘려서 읽을 수 없다 → 사람 말 안내를 만들고, **목록을 오류에 실어** 위에서 자동 보정하게 한다.
+      const CM = require('./comfy-models');
+      const why = CM.explain(j.node_errors, this.cloud, 'video');
+      const err = new Error(why || ('워크플로 노드 오류: ' + JSON.stringify(j.node_errors).slice(0, 300)));
+      err.nodeErrors = j.node_errors;
+      throw err;
+    }
     this.log(`[ComfyVid] 큐 접수 → prompt_id=${j.prompt_id || '(없음)'} (resp keys: ${Object.keys(j).join(',')})`);
     return j.prompt_id;
   }
@@ -370,7 +396,7 @@ class ComfyVideo {
         const imgVal = liIds.map((id) => graph[id].inputs && graph[id].inputs.image).join(', ');
         this.log(`[ComfyVid] 큐 전송 그래프 확인 → LoadImage=[${imgVal}] · 프롬프트="${String(prompt || '').slice(0, 45)}…" · 노드수 ${Object.keys(graph).length}`);
       } catch {}
-      const promptId = await this._queue(graph);
+      const promptId = await this._queueFixing(graph);
       const vid = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
       const out = await this._download(vid, outputPath);
       return { success: true, videoPath: out };

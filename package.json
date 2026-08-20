@@ -21,7 +21,7 @@
     "update:publish": "vite build && node scripts/gen-manifest.js",
     "test:grok": "node test/grok-selectors.test.js",
     "test:delmedia": "node test/delete-media.test.js",
-    "test:comfy": "node test/comfy-panes.smoke.js"
+    "test:comfy": "node test/comfy-models.test.js && node test/comfy-panes.smoke.js"
   },
   "dependencies": {
     "@vivliostyle/cli": "^11.0.4",
