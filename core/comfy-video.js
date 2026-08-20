@@ -97,6 +97,13 @@ function _ensureBundled(cfg) {
 function loadConfig() {
   let cfg = { ...DEFAULTS };
   try { if (fs.existsSync(CFG_PATH)) cfg = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
+  // 🔴 비디오는 **클라우드 전용**(로이 2026-08-20: "로컬 이용 항목은 제거하자. 성능이 따라가질 못해").
+  //   LTX2.5·2.3 은 22B 라 RTX 3060(12GB)에서 못 돌아간다. UI 에서 로컬을 없앴으니 **옛 설정에 남은
+  //   cloud:false 도 여기서 교정**한다 — 안 하면 드롭다운 값과 일치하는 항목이 없어 빈칸으로 보이고,
+  //   생성은 로컬로 나가 그대로 실패한다(v0.3.14 의 concurrency 상한 클램프와 같은 정책).
+  //   ⚠ 되돌리려면 이 두 줄을 지우고 App.jsx 의 COMFY_SIDES.video 에 false 를 넣으면 된다.
+  if (cfg.cloud === false) cfg.cloud = true;
+  if (!cfg.baseUrl || /127\.0\.0\.1|localhost/i.test(String(cfg.baseUrl))) cfg.baseUrl = cfg.cloudBaseUrl || DEFAULTS.cloudBaseUrl;
   return _ensureBundled(cfg);
 }
 function saveConfig(patch) {

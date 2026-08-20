@@ -57,14 +57,23 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
           text: card.innerText,
         };
       });
-      ok(r.panes.length === 2, '칸 2개 (로컬·클라우드): ' + r.panes.map((p) => p.head).join(' / '));
-      ok(r.panes[0].head.includes('로컬') && r.panes[1].head.includes('클라우드'), '왼쪽=로컬 · 오른쪽=클라우드');
-      ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
+      // 🔴 비디오는 **클라우드 전용**(2026-08-20) — 로컬 칸이 없어야 한다. 이미지는 2칸.
+      const vid = kind === 'vid';
+      const want = vid ? 1 : 2;
+      ok(r.panes.length === want, `칸 ${want}개: ` + r.panes.map((p) => p.head).join(' / '));
+      if (vid) {
+        ok(!r.panes.some((p) => p.head.includes('로컬')), '비디오 탭에 🖥 로컬 칸 없음(LTX 22B — 못 돌린다)');
+        ok(r.panes[0].hasKey, '클라우드 칸에 API 키');
+        ok(r.nowuse.includes('클라우드 전용'), '「클라우드 전용」 안내 표시');
+      } else {
+        ok(r.panes[0].head.includes('로컬') && r.panes[1].head.includes('클라우드'), '왼쪽=로컬 · 오른쪽=클라우드');
+        ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
+        ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
+      }
       const onIdx = r.panes.findIndex((p) => p.on);
-      ok(onIdx === (cfg.cloud ? 1 : 0), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
+      ok(onIdx === (vid ? 0 : (cfg.cloud ? 1 : 0)), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
       ok(r.panes[onIdx].head.includes('지금 사용'), '지금 쓰는 칸에 배지 표시');
-      ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
-      ok(r.panes[1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[1].url);
+      ok(r.panes[vid ? 0 : 1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[vid ? 0 : 1].url);
       ok(r.nowuse.includes(cfg.cloud ? '클라우드' : '로컬'), '「지금 보내는 곳」 표시: ' + r.nowuse.split('—')[0].trim());
       ok(r.selects === 0, '옛 「서버 프로필」 드롭다운 없음');
       ok(!r.text.includes('클라우드(comfy.org)') || !/클라우드(comfy.org)$/m.test(r.text), '옛 「클라우드」 체크박스 라벨 없음');
@@ -72,13 +81,13 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       ok(!/동시[ ]*생성[sS]{0,40}input/.test(r.text), '「동시 생성」 입력칸 없음');
 
       // 램프 — 열 때 자동 실측한 결과가 채워질 때까지 기다린다
-      await win.waitForFunction(() => {
+      await win.waitForFunction((k) => {
         const l = [...document.querySelectorAll('.modal-card .lamp')];
-        return l.length === 2 && l.every((x) => !x.className.includes('ing'));
-      }, null, { timeout: 20000 }).catch(() => {});
+        return l.length === k && l.every((x) => !x.className.includes('ing'));
+      }, want, { timeout: 20000 }).catch(() => {});
       const lamps = await win.evaluate(() => [...document.querySelectorAll('.modal-card .lamp')].map((x) => x.className.replace('lamp ', '') + ':' + x.textContent));
       console.log('  램프 → ' + lamps.join(' | '));
-      ok(lamps.length === 2 && lamps.every((x) => !x.startsWith('idle')), '두 칸 모두 자동 실측됨(미확인 아님)');
+      ok(lamps.length === want && lamps.every((x) => !x.startsWith('idle')), '모든 칸이 자동 실측됨(미확인 아님)');
 
       // 🔌 테스트 버튼도 실제로 동작하는지(지금 쓰는 쪽)
       await win.click(`.modal-card .tpane:nth-child(${onIdx + 1}) button:has-text("테스트")`);
@@ -89,6 +98,15 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     // ── 헤더 드롭다운 왕복 — ☁↔🖥 전환이 실제로 설정을 바꾸고 팝업 배지가 따라오는지 ──
     await win.click('.modal-card button:has-text("닫기")');
+    // 🔴 비디오 드롭다운에는 🖥 로컬 항목이 아예 없어야 한다(2026-08-20 — 성능이 못 따라간다)
+    const vidOpts = await win.locator('.hgroup select[title^="i2v 비디오 엔진"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
+    ok(!vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 없음');
+    ok(!vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 없음');
+    ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목은 있다');
+    const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
+    ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
+       '이미지 드롭다운은 로컬·클라우드 둘 다 유지');
+
     for (const [kind, file, cfg0] of [['image', 'comfy-image-config.json', before.img], ['video', 'comfy-video-config.json', before.vid]]) {
       const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[title^="i2v 비디오 엔진"]';
       const cur = await win.locator(sel).inputValue();

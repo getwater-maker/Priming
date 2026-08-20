@@ -104,12 +104,19 @@ function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
       </div>
     );
   };
+  // 🔴 비디오는 **클라우드 전용**(로이 2026-08-20) — 로컬 칸을 두면 못 쓰는 칸이 남아 헷갈린다.
+  //   되돌리려면 localAllowed 를 true 로 + ComfyEngineOptions 의 COMFY_SIDES.video 에 false 추가.
+  const localAllowed = kind !== "video";
   return (<>
     <div className="nowuse">
       <span>지금 보내는 곳 <b>{cloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}</b>{wfName ? <> · 모델 <b>{wfName}</b></> : <> · <span className="meta">워크플로 없음</span></>}</span>
-      <span className="meta">— 바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</span>
+      <span className="meta">— {localAllowed
+        ? <>바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</>
+        : <>비디오는 <b>클라우드 전용</b>입니다(LTX 는 22B — 내 PC GPU 로는 못 돌립니다). 모델은 헤더 「{hdr}」 드롭다운에서.</>}</span>
     </div>
-    <div className="split2">{pane("local")}{pane("cloud")}</div>
+    {localAllowed
+      ? <div className="split2">{pane("local")}{pane("cloud")}</div>
+      : <div className="split2 one">{pane("cloud")}</div>}
   </>);
 }
 
@@ -132,12 +139,16 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// 🔴 **비디오는 클라우드만** (로이 2026-08-20: "로컬 이용 항목은 제거하자. 성능이 따라가질 못해").
+//   LTX2.5·2.3 은 22B 라 RTX 3060(12GB)에서 못 돌아간다 — 고를 수 있게 두면 고르는 순간 실패한다.
+//   되돌리려면 이 배열에 false 를 다시 넣고 ComfyTargets 의 localAllowed 를 true 로.
+const COMFY_SIDES = { image: [true, false], video: [true] };
 function ComfyEngineOptions({ cfg, kind = 'image' }) {
   const suffix = kind === 'video' ? ' i2v' : '';
   const wfs = comfyWorkflows(cfg);
   if (!wfs.length) return <option value={mkComfyVal(true, '')}>ComfyUI{suffix} — 워크플로 없음(⚙ 에서 추가)</option>;
   return (<>
-    {[true, false].map((cloud) => (
+    {(COMFY_SIDES[kind] || [true, false]).map((cloud) => (
       <optgroup key={cloud ? 'c' : 'l'} label={`ComfyUI ${cloud ? '클라우드' : '로컬'}${suffix}`}>
         {/* 접힌 상태에선 optgroup 라벨이 안 보이므로 ☁/🖥 로 어느 쪽인지 드러낸다 */}
         {wfs.map((w) => <option key={(cloud ? 'c' : 'l') + w.path} value={mkComfyVal(cloud, w.path)}>{cloud ? '☁' : '🖥'} {w.name}</option>)}
@@ -1843,7 +1854,7 @@ export default function App() {
     setComfyProbe({}); setCvidProbe({});
     const _t = tab || 'img';
     if (_t === 'img') probeBoth('image');
-    if (_t === 'vid') probeBoth('video');
+    if (_t === 'vid') probeComfyTarget('video', 'cloud');   // 비디오는 클라우드 전용 — 로컬은 재지 않는다
     if ((tab || 'img') === 'acct') { await loadAcct(); }
     setSettingsOpen(true);
   }
@@ -2527,7 +2538,7 @@ export default function App() {
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
               {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeComfyTarget('video', 'cloud'); } }}>{lbl}</button>
               ))}
             </div>
 
@@ -2552,7 +2563,7 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'vid' && cvidCfg && (<div>
-              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
+              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(LTX2.5 · LTX2.3 — <b>클라우드 전용</b>). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
               <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
                 probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
               <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} />
@@ -2565,15 +2576,15 @@ export default function App() {
                 <label style={{ width: 'auto' }}>타임아웃(초)</label>
                 <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
                   onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} />
-                <span className="meta" title="앱이 정한 고정값입니다. i2v 는 건당 수 분이라 동시에 올려야 벽시계 시간이 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1개씩.">
-                  동시 <b>클라우드 3개</b> · <b>로컬 1개씩</b> — 앱 고정</span></div>
+                <span className="meta" title="앱이 정한 고정값입니다. i2v 는 건당 수 분이라 동시에 올려야 벽시계 시간이 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일.">
+                  동시 <b>3개</b> — 앱 고정</span></div>
               <div className="frow"><label>프롬프트 노드</label>
                 <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
                   onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
                 </label></div>
-              <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. LTX2.5·2.3 은 <b>22B</b> 라 로컬 RTX 3060(12GB)에선 못 돌아갑니다 — 로컬은 별도 워크플로를 ＋추가하세요. i2v는 그룹 이미지가 있어야 동작합니다.</div>
+              <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. LTX2.5·2.3 은 <b>22B</b> 라 내 PC GPU(RTX 3060 12GB)로는 못 돌아가서 <b>비디오는 클라우드만</b> 제공합니다. i2v는 그룹 이미지가 있어야 동작합니다.</div>
             </div>)}
 
             {settingsTab === 'keys' && (<div>
