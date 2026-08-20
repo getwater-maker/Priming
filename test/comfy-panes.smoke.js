@@ -57,23 +57,18 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
           text: card.innerText,
         };
       });
-      // 🔴 비디오는 **클라우드 전용**(2026-08-20) — 로컬 칸이 없어야 한다. 이미지는 2칸.
-      const vid = kind === 'vid';
-      const want = vid ? 1 : 2;
+      // 이미지·비디오 **둘 다 2칸**(2026-08-20 오후 — 로이 요청으로 비디오 로컬 칸 복구).
+      //   ⚠ "비디오는 클라우드 전용" 문구가 남아 있으면 안 된다(로컬을 고를 수 있게 됐으므로 거짓이 된다).
+      const want = 2;
       ok(r.panes.length === want, `칸 ${want}개: ` + r.panes.map((p) => p.head).join(' / '));
-      if (vid) {
-        ok(!r.panes.some((p) => p.head.includes('로컬')), '비디오 탭에 🖥 로컬 칸 없음(LTX 22B — 못 돌린다)');
-        ok(r.panes[0].hasKey, '클라우드 칸에 API 키');
-        ok(r.nowuse.includes('클라우드 전용'), '「클라우드 전용」 안내 표시');
-      } else {
-        ok(r.panes[0].head.includes('로컬') && r.panes[1].head.includes('클라우드'), '왼쪽=로컬 · 오른쪽=클라우드');
-        ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
-        ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
-      }
+      ok(r.panes[0].head.includes('로컬') && r.panes[1].head.includes('클라우드'), '왼쪽=로컬 · 오른쪽=클라우드');
+      ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
+      ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
+      ok(!r.text.includes('클라우드 전용'), '옛 「클라우드 전용」 문구 없음');
       const onIdx = r.panes.findIndex((p) => p.on);
-      ok(onIdx === (vid ? 0 : (cfg.cloud ? 1 : 0)), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
+      ok(onIdx === (cfg.cloud ? 1 : 0), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
       ok(r.panes[onIdx].head.includes('지금 사용'), '지금 쓰는 칸에 배지 표시');
-      ok(r.panes[vid ? 0 : 1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[vid ? 0 : 1].url);
+      ok(r.panes[1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[1].url);
       ok(r.nowuse.includes(cfg.cloud ? '클라우드' : '로컬'), '「지금 보내는 곳」 표시: ' + r.nowuse.split('—')[0].trim());
       ok(r.selects === 0, '옛 「서버 프로필」 드롭다운 없음');
       ok(!r.text.includes('클라우드(comfy.org)') || !/클라우드(comfy.org)$/m.test(r.text), '옛 「클라우드」 체크박스 라벨 없음');
@@ -98,11 +93,13 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     // ── 헤더 드롭다운 왕복 — ☁↔🖥 전환이 실제로 설정을 바꾸고 팝업 배지가 따라오는지 ──
     await win.click('.modal-card button:has-text("닫기")');
-    // 🔴 비디오 드롭다운에는 🖥 로컬 항목이 아예 없어야 한다(2026-08-20 — 성능이 못 따라간다)
+    // 비디오 드롭다운에 🖥 로컬 항목이 **있어야** 한다(2026-08-20 오후 로이: "비디오에서 로컬 LTX2.5도 추가해줘")
     const vidOpts = await win.locator('.hgroup select[title^="i2v 비디오 엔진"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
-    ok(!vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 없음');
-    ok(!vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 없음');
-    ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목은 있다');
+    ok(vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 있음');
+    ok(vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 있음');
+    ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목도 있다');
+    ok(vidOpts.some((o) => /::local::.*LTX2\.5/.test(o)), '🖥 로컬 × LTX2.5 조합이 목록에 있다: '
+       + (vidOpts.filter((o) => o.includes('::local::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
     const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
     ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
        '이미지 드롭다운은 로컬·클라우드 둘 다 유지');

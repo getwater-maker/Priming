@@ -37,6 +37,30 @@ ok(/const _imgLocalGpu = isComfyVal\(engine\)/.test(SRC), '이미지 로컬 GPU 
 }
 ok(/comfy-image'\)\.loadConfig\(\)\.cloud/.test(SRC), '이미지 설정의 cloud 를 실제로 읽는다');
 ok(/comfy-video'\)\.loadConfig\(\)\.cloud/.test(SRC), '비디오 설정의 cloud 를 실제로 읽는다');
+// 🔴 2026-08-20 오후 — 비디오 로컬(🖥 LTX2.5)을 되살렸다. loadConfig 가 예전처럼 `cloud:false → true` 로
+//   **강제 교정**하면 헤더에서 로컬을 골라도 다음 로드에 클라우드로 되돌아가 **선택이 먹지 않는다**(조용한 실패).
+{
+  const VSRC = fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-video.js'), 'utf8');
+  const code = VSRC.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join(' ');
+  ok(!/cfg\.cloud\s*=\s*true/.test(code), 'comfy-video.loadConfig 가 cloud 를 true 로 강제하지 않는다');
+  ok(/localBaseUrl/.test(code), 'cloud=false 일 때 로컬 주소를 쓸 수 있다');
+}
+// 🔴 수동 「🎬 비디오」 버튼은 로컬 i2v 일 때 'localGpu' 레인을 잡아야 한다(TTS 와 같은 3060).
+//   그러나 **make-all 본문은 이 래퍼를 쓰면 교착**된다(이미 TTS 레인을 쥔 상태) → 스코프를 대조해 고정.
+ok(/function _vidUsesLocalGpu\(engine\)/.test(SRC), '비디오 로컬 GPU 판정 함수 존재');
+ok(/function genGroupVideosManual\(/.test(SRC), '수동 경로용 래퍼(genGroupVideosManual) 존재');
+ok(/_runOnLanes\(\['localGpu'\]/.test(SRC), '그 래퍼가 localGpu 레인을 잡는다');
+{
+  const i = SRC.indexOf('async function runMakeAllCore(');
+  const start = SRC.indexOf(') {', i) + 2;
+  let d = 0, started = false, j = start;
+  for (; j < SRC.length; j++) {
+    const c = SRC[j];
+    if (c === '{') { d++; started = true; }
+    else if (c === '}') { d--; if (started && d === 0) { j++; break; } }
+  }
+  ok(!/genGroupVideosManual/.test(SRC.slice(i, j)), 'runMakeAllCore 는 그 래퍼를 쓰지 않는다(교착 방지)');
+}
 ok(/const canParallel = !dry && !_imgLocalGpu/.test(SRC), 'canParallel 이 로컬 이미지를 배제한다');
 ok(/videoPipeline = _pipeBase && \(\(canParallel && grokVideoPipeline\) \|\| comfyVideoPipeline\)/.test(SRC),
    '클라우드 비디오는 canParallel 과 무관하게 파이프라인 유지');
@@ -86,6 +110,11 @@ eq(d.branch, 'tts → img', '이미지 로컬 + Grok → 완전 순차(브라우
 // 비디오가 로컬 comfy = 파이프라인 제외(로컬 GPU 충돌)
 d = decide({ imgEngine: 'rotate', videoEngine: 'comfy::ltx', vidCloud: false });
 eq(d.branch, 'tts ∥ img', '비디오 로컬 → 비디오는 순차 3단계로');
+
+// 이미지·비디오 **둘 다 로컬** = 3060 하나를 세 작업이 다툰다 → 완전 순차
+d = decide({ imgEngine: 'comfy::krea2', imgCloud: false, videoEngine: 'comfy::ltx', vidCloud: false });
+eq(d.branch, 'tts → img', '이미지 로컬 + 비디오 로컬 → 완전 순차');
+eq(d.videoPipeline, false, '  로컬 비디오는 파이프라인에 넣지 않는다');
 
 // 비디오 없음
 d = decide({ imgEngine: 'comfy::krea2', imgCloud: false, videoEngine: 'none' });

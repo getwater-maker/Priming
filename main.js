@@ -2028,6 +2028,16 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 //   ⚠ 절전 차단으로 감싼다 — i2v 는 수 분~수십 분이고, 브라우저 자동화(Grok)는 화면이 꺼지면 흔들린다.
 //     (TTS/이미지 큐를 안 타는 video-build·video-group 경로도 이걸로 함께 커버된다. 참조 카운트라 중첩 안전)
 async function genGroupVideos(...args) { return withAwake('비디오 생성', () => _genGroupVideosCore(...args)); }
+// 🖥 **로컬** ComfyUI i2v 는 OmniVoice TTS·로컬 이미지와 **같은 3060** 을 쓴다 → 수동 「🎬 비디오」 버튼은
+//   'localGpu' 레인을 잡아 TTS 와 겹치지 않게 한다(2026-08-20 오후 로컬 비디오 복구와 함께 추가.
+//   이걸 빼면 「🎤 TTS」 누른 뒤 「🎬 비디오」를 누르면 그대로 동시에 돌아 VRAM 이 터진다 = 이미지에서
+//   겪은 "수동 버튼은 여전히 겹쳤다" 와 같은 계열 사고).
+//   ⚠ **make-all/run-batch 는 이 래퍼를 쓰지 않는다** — 그 경로는 이미 TTS 레인을 쥔 채 genGroupVideos 를
+//     직접 부르므로 여기서 또 레인을 잡으면 자기 자신을 기다려 **교착**된다(enqueueImageJob 과 같은 규칙).
+function genGroupVideosManual(pr, mediaDir, onlyNums, videoEngine, label) {
+  if (!_vidUsesLocalGpu(videoEngine)) return genGroupVideos(pr, mediaDir, onlyNums, videoEngine);
+  return _runOnLanes(['localGpu'], label, () => genGroupVideos(pr, mediaDir, onlyNums, videoEngine));
+}
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
@@ -2588,7 +2598,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     try {
       {
         if (engine === 'grok' || engine === 'grok10') log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
-        const vr = await genGroupVideos(pr, videoDir, onlyNums, engine);
+        const vr = await genGroupVideosManual(pr, videoDir, onlyNums, engine, `${prLabel(pr)} 영상 생성`);
         if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
       }
       if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
@@ -3694,7 +3704,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
   } catch {}
   try {
-    await genGroupVideos(pr, videoDir, [groupNum], engine);
+    await genGroupVideosManual(pr, videoDir, [groupNum], engine, `G${groupNum} 영상 생성`);
     await maybeUpscale(pr, log, true);
     if (g.videoPath) log(`✓ G${groupNum} 영상 완료`);
     else { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패 — 생성되지 않았습니다 (Grok 한도·오류 확인)`); } // 실패 시 'generating' 고착 방지
@@ -3735,6 +3745,12 @@ function _runOnLanes(lanes, label, fn) {
 function _imgUsesLocalGpu(engine) {
   if (!isComfyVal(engine)) return false;
   try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
+}
+// 비디오 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI i2v 이면서 클라우드가 아닐 때만 참.
+//   (Grok·Grok API 는 브라우저/원격이라 로컬 GPU 와 무관 → false.)
+function _vidUsesLocalGpu(engine) {
+  if (!isComfyVal(engine)) return false;
+  try { return !require('./core/comfy-video').loadConfig().cloud; } catch { return false; }
 }
 // 빈(또는 특정) 그룹 1개만 이미지 재생성 등 — 이미지 레인(+로컬 GPU 면 GPU 레인도) 사용.
 function enqueueImageJob(label, fn, engine) {

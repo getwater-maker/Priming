@@ -354,5 +354,5 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
   border-radius:8px;padding:6px 10px;font-size:12.5px;color:var(--strong)}
 .nowuse b{color:var(--hook)}
 
-/* 비디오 탭은 클라우드 전용 — 칸이 하나면 한 줄 전체를 쓴다(빈 칸을 남기지 않는다) */
+/* 한쪽만 보이는 kind(COMFY_SIDES 에서 한 값만 남긴 경우) — 칸이 하나면 한 줄 전체를 쓴다 */
 .split2.one{grid-template-columns:1fr}
