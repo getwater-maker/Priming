@@ -112,10 +112,12 @@ function explain(nodeErrors, cloud, kind) {
   if (!fixes.length) return '';
   const where = cloud ? '클라우드(comfy.org)' : '로컬 ComfyUI';
   const hdr = kind === 'video' ? '③ 비디오' : '② 이미지';
-  return fixes.map((f) => {
-    const list = f.allowed.filter((a) => MODEL_EXT.test(String(a))).slice(0, 6).join(', ');
-    return `${where} 에 모델 '${f.current}' 가 없습니다 (${f.input}). 그 서버에 있는 것: ${list || '(없음)'}`;
-  }).join(' / ') + ` → 헤더 「${hdr}」 드롭다운에서 ${cloud ? '🖥 로컬' : '☁ 클라우드'} 로 바꾸거나, 그 파일을 ${where} 에 설치하세요.`;
+  // 여러 건이면 첫 건만 보이고 나머지는 개수로 — 로그 한 줄이 화면을 넘기지 않게(LTX 를 로컬로 보내면 4건 난다).
+  const f = fixes[0];
+  const list = f.allowed.filter((a) => MODEL_EXT.test(String(a))).slice(0, 4).join(', ');
+  const more = fixes.length > 1 ? ` (그 밖에 ${fixes.length - 1}개 모델도 없음: ${fixes.slice(1).map((x) => x.input).join(', ')})` : '';
+  return `${where} 에 모델 '${f.current}' 가 없습니다 (${f.input}).${more} 그 서버에 있는 것: ${list || '(없음)'}`
+    + ` → 헤더 「${hdr}」 드롭다운에서 ${cloud ? '🖥 로컬' : '☁ 클라우드'} 로 바꾸거나, 그 파일을 ${where} 에 설치하세요.`;
 }
 
 module.exports = { baseKey, precToks, pickSubstitute, collectFixes, applyModelFixes, applyRemembered, explain, MODEL_EXT };

@@ -2432,7 +2432,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
   S.timings.image = (Date.now() - _imgT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
-  });
+  }, engine);   // engine 전달 = 로컬 ComfyUI 면 TTS 와 같은 'localGpu' 레인을 잡는다(OOM·감속 방지)
 });
 
 // 비주얼(이미지) 미생성 그룹 번호 — 이미지도 영상도 없는 그룹.
@@ -3116,9 +3116,14 @@ async function runMakeAllCore(opts = {}) {
   //   이미지가 로컬 GPU 를 안 쓰므로(Genspark/Flow 브라우저, 나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
   //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
   const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
-  // 이미지 = Flow+Genspark 순환(브라우저) — 로컬 GPU 미사용 → TTS(로컬 GPU)와 병렬 안전.
-  const noLocalGpuImg = true;
-  const canParallel = !dry && noLocalGpuImg && !projects.some(willRegroup);
+  // 이미지가 로컬 GPU 를 쓰는지 — 순환(Genspark/Flow 브라우저)·나노바나나(API)·ComfyUI **클라우드** 는 안 쓴다.
+  //   🔴 ComfyUI **로컬** 은 쓴다(2026-08-20): 그러면 이미지가 OmniVoice TTS 와 **같은 3060 을 다툰다** →
+  //     TTS 가 느려지고(실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐) VRAM 이 빠듯해진다.
+  //     예전엔 `noLocalGpuImg = true` 로 **하드코딩**돼 있어 로컬 이미지를 골라도 병렬로 돌았다.
+  const _imgLocalGpu = isComfyVal(imgEngine) && (() => {
+    try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
+  })();
+  const canParallel = !dry && !_imgLocalGpu && !projects.some(willRegroup);
 
   // ── 3단계 파이프라인 조건 ──
   //   Grok 비디오는 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와 충돌하지 않음 → 그룹 이미지(+그룹 TTS)가
@@ -3132,8 +3137,14 @@ async function runMakeAllCore(opts = {}) {
   //   실측 근거: 대본마다 TTS 가 끝난 뒤에야 비디오를 시작해 편당 약 1.2분(5편 5.2분) 동안 TTS 서버가 놀았다.
   //   ⚠ 업스케일은 로컬 GPU 라 TTS 와 겹치면 TTS 가 1.8배 느려지지만, 이제 comfy 가 1080p 로 직접 뽑아
   //     maybeUpscale 이 해상도를 보고 건너뛴다 → 이 파이프라인에서 로컬 GPU 를 쓰는 일이 없다.
-  const comfyVideoPipeline = isComfyVal(videoEngine);
-  const videoPipeline = canParallel && (grokVideoPipeline || comfyVideoPipeline);
+  //   🔑 **비디오가 클라우드면 로컬 이미지와도 겹쳐도 안전하다** → 이미지가 로컬이라 canParallel 이 꺼져도
+  //     비디오 파이프라인은 살린다(이미지 로컬 때문에 클라우드 비디오의 병렬 이득까지 버리는 건 과도하다).
+  //     이때는 「TTS → 이미지」를 순차로 묶고 그 옆에서 비디오를 돌린다(아래 실행부).
+  const comfyVideoPipeline = isComfyVal(videoEngine) && (() => {
+    try { return !!require('./core/comfy-video').loadConfig().cloud; } catch { return false; }
+  })();
+  const _pipeBase = !dry && !projects.some(willRegroup);
+  const videoPipeline = _pipeBase && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
 
@@ -3241,7 +3252,13 @@ async function runMakeAllCore(opts = {}) {
     }
   };
 
-  if (videoPipeline) {
+  if (videoPipeline && !canParallel && _imgLocalGpu) {
+    // 이미지 = 🖥 로컬 ComfyUI · 비디오 = ☁ 클라우드 (로이 2026-08-20 조합).
+    //   TTS 와 이미지는 **같은 로컬 GPU** 라 순차로 묶고, 클라우드 비디오만 그 옆에서 병렬로 돌린다.
+    log(`⚡ 파이프라인 — (TTS → 이미지: 둘 다 내 PC GPU 라 순차) ∥ 비디오(클라우드)`);
+    log('  🖥 이미지가 로컬 ComfyUI 라 TTS 와 동시에 돌리지 않습니다 — 같은 GPU 를 다투면 TTS 가 크게 느려집니다.');
+    await Promise.all([(async () => { await ttsStage(); if (!S.abort) await imageStage(); })(), videoStage()]);
+  } else if (videoPipeline) {
     log(`⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, ${grokVideoPipeline ? 'Grok' : 'Comfy 클라우드'})`);
     await Promise.all([ttsStage(), imageStage(), videoStage()]);
   } else if (canParallel) {
@@ -3646,33 +3663,49 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-// 빈(또는 특정) 그룹 1개만 이미지 재생성 (Genspark 단일)
-// ── 이미지 작업 직렬 큐 ── 단건 재생성/전체 생성이 동시에 돌면 같은 브라우저(Flow/Genspark)를
-//   두 작업이 잡아 먼저 것이 강제 종료됨("Target page ... has been closed") → 들어온 순서대로 하나씩 실행.
-let imageJobChain = Promise.resolve();
-let imageJobPending = 0;
-function enqueueImageJob(label, fn) {
-  imageJobPending++;
-  if (imageJobPending > 1) log(`⏳ ${label} — 이미지 작업 큐 대기 (앞에 ${imageJobPending - 1}건)`);
-  const run = () => withAwake(label, fn);
-  const p = imageJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
-  imageJobChain = p.then(() => { imageJobPending--; }, () => { imageJobPending--; });
+// ══════════ 작업 레인(직렬 큐) ══════════
+//   레인 3개를 두고, 한 작업이 필요한 레인을 **함께** 잡는다(앞선 작업이 다 끝난 뒤 실행).
+//     · tts      — 공용 TTS 매니저(getInstance 싱글톤) 보호. 두 작업이 겹치면 한쪽의 refreshProvider·
+//                  mgr.stop() 이 다른 쪽 provider 를 없애 'TTS provider not available' 로 죽는다.
+//     · image    — 같은 브라우저(Flow/Genspark) 보호. 겹치면 먼저 것이 강제 종료된다("Target page … closed").
+//     · localGpu — 🔴 **내 PC GPU(3060) 보호**(2026-08-20 로이 지적). OmniVoice TTS 와 **로컬 ComfyUI 이미지**는
+//                  같은 카드를 쓴다 → 동시에 돌면 VRAM 이 빠듯해지고(OOM 위험) TTS 가 크게 느려진다
+//                  (실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐). 예전엔 TTS 큐와 이미지 큐가 **별개**라
+//                  「🎤 TTS」 누른 뒤 「🖼 이미지」를 누르면 그대로 동시에 돌았다.
+//                  ⚠ 이미지가 순환(브라우저)·나노바나나(API)·ComfyUI **클라우드** 면 로컬 GPU 를 안 쓰므로
+//                    이 레인을 잡지 않는다(예전처럼 TTS 와 병렬 = 더 빠름).
+//   앞 작업이 실패해도 다음 작업은 실행한다(allSettled).
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0 };
+function _runOnLanes(lanes, label, fn) {
+  const prev = lanes.map((k) => _LANES[k]);
+  for (const k of lanes) _lanePending[k]++;
+  const busy = lanes.filter((k) => _lanePending[k] > 1);
+  if (busy.length) {
+    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU' };
+    log(`⏳ ${label} — ${busy.map((k) => ko[k]).join('·')} 작업이 끝난 뒤 시작합니다 (앞에 ${Math.max(...busy.map((k) => _lanePending[k])) - 1}건)`);
+  }
+  const p = Promise.allSettled(prev).then(() => withAwake(label, fn));
+  const done = () => { for (const k of lanes) _lanePending[k]--; };
+  const tail = p.then(done, done);
+  for (const k of lanes) _LANES[k] = tail;
   return p;
 }
-
-// TTS 작업 직렬 큐 — tts-build·tts-group·make-all·run-batch 는 공용 TTS 매니저(getInstance 싱글톤)를 쓴다.
-//   두 작업이 동시에 돌면 한쪽의 refreshProvider(provider 삭제 후 재연결)·mgr.stop()(provider 전부 비움)이
-//   다른 쪽이 쓰던 provider 를 없애 'TTS provider not available' 로 죽는다(+ 전체빌드의 전체삭제가 다른
-//   작업 결과물까지 지움). → 한 번에 하나만 실행되도록 줄 세운다. 뒤 작업은 앞 작업이 끝나면 자동 실행(손실 없음).
-let ttsJobChain = Promise.resolve();
-let ttsJobPending = 0;
+// 이미지 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI 이면서 클라우드가 아닐 때만 참.
+function _imgUsesLocalGpu(engine) {
+  if (!isComfyVal(engine)) return false;
+  try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
+}
+// 빈(또는 특정) 그룹 1개만 이미지 재생성 등 — 이미지 레인(+로컬 GPU 면 GPU 레인도) 사용.
+function enqueueImageJob(label, fn, engine) {
+  const lanes = _imgUsesLocalGpu(engine) ? ['image', 'localGpu'] : ['image'];
+  return _runOnLanes(lanes, label, fn);
+}
+// TTS 는 항상 로컬 GPU(OmniVoice)를 쓴다 → tts + localGpu 두 레인을 잡는다.
+//   ⚠ make-all·run-batch 도 이 큐를 타므로, 그 안의 로컬 이미지 생성은 **같은 작업 안에서** 순차로 돈다
+//     (runMakeAllCore 가 단계 순서를 정한다 — 내부에서 enqueueImageJob 을 다시 부르지 않으므로 교착 없음).
 function enqueueTtsJob(label, fn) {
-  ttsJobPending++;
-  if (ttsJobPending > 1) log(`⏳ ${label} — TTS 작업 큐 대기 (앞에 ${ttsJobPending - 1}건 진행 중)`);
-  const run = () => withAwake(label, fn);
-  const p = ttsJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
-  ttsJobChain = p.then(() => { ttsJobPending--; }, () => { ttsJobPending--; });
-  return p;
+  return _runOnLanes(['tts', 'localGpu'], label, fn);
 }
 
 ipcMain.handle('regen-group', (_e, args = {}) => {
@@ -3701,7 +3734,7 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     } catch (e) { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
     pushDtoUpdate(); // 성공/실패 최종 상태를 UI 에 반영(스피너 해제)
     return P.toDTO(S.parsed);
-  });
+  }, engine);   // 로컬 ComfyUI 면 TTS 와 같은 레인(내 PC GPU)에 줄 세운다
 });
 
 // ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────
