@@ -1440,6 +1440,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   preset = resolveAiNotice(preset, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
   const outs = [];
   const incomplete = [];
+  const noTts = [];   // 음성 누락으로 건너뛴 편
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     // 검정·노이즈면 비우고 **그 자리에서 순차 재생성**한다.
@@ -1463,6 +1464,12 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
       continue;
     }
+    const mtts = missingTtsNums(pr);
+    if (mtts.length) {
+      noTts.push({ label: prLabel(pr), n: mtts.length, total: (pr.sentences || []).length, head: mtts.slice(0, 8).join(', '), headN: 8 });
+      log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts.length}/${(pr.sentences || []).length}개 (컷 ${mtts.slice(0, 8).join(', ')}${mtts.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
+      continue;
+    }
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
@@ -1484,6 +1491,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     }
   }
   warnIncompleteVisuals(incomplete);
+  warnMissingTts(noTts);
   return { outRoot: S.outRoot, outs };
 });
 
@@ -2438,6 +2446,27 @@ ipcMain.handle('image-build', (_e, args = {}) => {
 // 비주얼(이미지) 미생성 그룹 번호 — 이미지도 영상도 없는 그룹.
 //   쇼츠는 이미지→영상 변환이므로 영상이 있으면 이미지가 있었던 것 → 둘 중 하나라도 있으면 OK.
 //   imagePrompt 가 있는(=비주얼이 있어야 하는) 그룹만 검사.
+// 🔴 **TTS 누락 게이트**(2026-08-20 사고) — 음성이 없는 문장이 있으면 .vrew 를 만들지 않는다.
+//   실제로 일어난 일: 로컬 이미지가 GPU 를 점유해 컷41 TTS 가 60초 타임아웃 3회 → 그 대본 TTS 단계가
+//   죽었는데, 4단계는 그대로 진행해 **음성 40개 / 누락 898개**인 반쪽 .vrew 가 나갔다(clip 59).
+//   이미지엔 게이트가 있었는데(v0.3.10) 음성엔 없었다 — vrew-builder 는 경고만 찍는다.
+function missingTtsNums(project) {
+  return (project.sentences || []).filter((s) => !(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))).map((s) => s.num);
+}
+function warnMissingTts(list) {
+  if (!list || !list.length) return;
+  const detail = list.map((x) => `• ${x.label}: ${x.n}개 누락 (컷 ${x.head}${x.n > x.headN ? ' …' : ''} / 전체 ${x.total}개)`).join('\n');
+  log(`⛔ 음성 누락으로 .vrew 미생성: ${list.length}건`);
+  try {
+    dialog.showMessageBox(win, {
+      type: 'warning',
+      title: '음성(TTS) 누락 — .vrew 를 만들지 않았습니다',
+      message: '음성이 없는 문장이 있어 해당 편의 .vrew 를 만들지 않았습니다. (그대로 만들면 앞부분만 소리가 나는 반쪽 영상이 됩니다)',
+      detail: `${detail}\n\n「🎤 TTS」를 다시 눌러 빠진 문장만 채운 뒤 다시 시도하세요.\n(이미 만든 음성은 건너뛰므로 빠진 것만 새로 합성합니다.)`,
+      buttons: ['확인'],
+    });
+  } catch {}
+}
 function missingVisualGroups(project) {
   return (project.groups || []).filter((g) => {
     if (!(g.imagePrompt && String(g.imagePrompt).trim())) return false; // 비주얼 대상 그룹만
@@ -3348,11 +3377,19 @@ async function runMakeAllCore(opts = {}) {
       pushDtoUpdate();
     }
     const incomplete = [];
+    const noTts = [];
     for (const pr of projects) {
       const miss = missingVisualGroups(pr);
       if (miss.length) {
         incomplete.push({ label: prLabel(pr), nums: miss });
         log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
+        continue;
+      }
+      // 🔴 음성 누락 게이트 — 반쪽 .vrew 가 조용히 나가는 것을 막는다(2026-08-20 사고: 음성 40/938)
+      const mtts4 = missingTtsNums(pr);
+      if (mtts4.length) {
+        noTts.push({ label: prLabel(pr), n: mtts4.length, total: (pr.sentences || []).length, head: mtts4.slice(0, 8).join(', '), headN: 8 });
+        log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts4.length}/${(pr.sentences || []).length}개 (컷 ${mtts4.slice(0, 8).join(', ')}${mtts4.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
         continue;
       }
       let ep = preset;
@@ -3371,6 +3408,7 @@ async function runMakeAllCore(opts = {}) {
       } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
     }
     warnIncompleteVisuals(incomplete);
+    warnMissingTts(noTts);
   } else {
     log('⏹ 중단됨 — .vrew 생성 및 이후 작업 생략');
   }

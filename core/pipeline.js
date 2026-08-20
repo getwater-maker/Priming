@@ -209,6 +209,9 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     language: preset.language,
     seed: preset.seed,
   };
+  const failed = [];            // 3회 시도해도 안 된 문장 번호 — 끝에 요약하고 .vrew 게이트가 막는다
+  let consecFail = 0;           // 연속 실패 수(서버가 죽었는지 판단)
+  const MAX_CONSEC_FAIL = 5;
   for (const s of sentences) {
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     // 이미 음성이 있으면 건너뜀 — '비어있는 것만' 채움. (분할 등으로 재구성돼도 문장은 그대로라 재사용)
@@ -228,17 +231,36 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       if (onProgress) { try { onProgress(); } catch {} }
       continue;
     }
-    // 일시적 'fetch failed'(서버 블립/네트워크) → 최대 3회 재시도. 그래도 실패면 명확한 에러.
-    let res;
-    for (let attempt = 1; ; attempt++) {
+    // 일시적 'fetch failed'(서버 블립/네트워크) → 최대 3회 재시도.
+    //   🔑 3회 실패해도 **그 문장만 건너뛰고 계속**한다(2026-08-20 사고): 예전엔 여기서 throw 해
+    //     대본 TTS 단계가 통째로 죽었고, 900문장 중 40개만 만든 채 4단계가 진행돼 **반쪽 .vrew** 가 나갔다.
+    //     이제 빠진 문장은 `_ttsFailed` 에 모이고 **.vrew 게이트(main.missingTtsNums)가 막는다** →
+    //     「🎤 TTS」를 다시 누르면 **빠진 것만** 새로 합성한다(있는 것은 건너뜀).
+    //   ⚠ 다만 서버가 완전히 죽은 경우 900문장 × 3회 × 60초를 헛돌면 안 되므로
+    //     **연속 5문장 실패면 그 대본 TTS 를 중단**한다(그 뒤 문장은 시도하지 않는다).
+    let res = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try { res = await ttsMgr.synthesize(s.text, synthOpts); break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
-        if (attempt >= 3) throw new Error(`TTS 실패(컷${s.num}, 3회 시도): ${e.message}`);
+        if (attempt >= 3) {
+          failed.push(s.num);
+          consecFail++;
+          if (onLine) onLine(`✗ 컷${s.num} TTS 실패(3회) — 이 문장은 건너뜁니다: ${e.message}`);
+          break;
+        }
         if (onLine) onLine(`⚠ 컷${s.num} TTS 실패(${attempt}/3) — 재시도: ${e.message}`);
         await new Promise((r) => setTimeout(r, 1500 * attempt));
       }
     }
+    if (!res) {
+      if (consecFail >= MAX_CONSEC_FAIL) {
+        if (onLine) onLine(`⛔ 연속 ${consecFail}문장 실패 — 서버 문제로 보고 이 대본의 음성 변환을 멈춥니다 (남은 문장은 시도하지 않음)`);
+        break;
+      }
+      continue;   // 다음 문장으로
+    }
+    consecFail = 0;
     if (sf !== 1) {
       // 정속 WAV → atempo 배속 MP3
       const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
@@ -263,6 +285,10 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     // 문장 한 개 변환 완료 → 즉시 화면 갱신(시간 표시). PrimingFlow 처럼 바로바로 진행상황 반영.
     if (onProgress) { try { onProgress(); } catch {} }
   }
+  if (failed.length && onLine) {
+    onLine(`⚠ ${label} 음성 실패 ${failed.length}개 (컷 ${failed.slice(0, 12).join(', ')}${failed.length > 12 ? ' …' : ''}) — 「🎤 TTS」를 다시 누르면 빠진 것만 다시 만듭니다.`);
+  }
+  return { failed };
 }
 
 // 프로젝트 전체 문장 TTS (fillTtsList 래퍼)

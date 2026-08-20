@@ -122,6 +122,14 @@ class OmniVoiceProvider {
         body: JSON.stringify(payload),
         signal: ctrl.signal,
       });
+    } catch (e) {
+      // ⚠ AbortError 의 기본 메시지는 "This operation was aborted" 뿐이라 원인을 알 수 없다(2026-08-20 로그).
+      //   실제 사고 원인은 **로컬 GPU 경합**이었다 — 같은 3060 에서 ComfyUI 이미지가 돌아 OmniVoice 가
+      //   60초 안에 답하지 못했다. 무엇을 봐야 하는지 메시지에 적어 둔다.
+      if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))) {
+        throw new Error(`OmniVoice 가 ${Math.round(this.timeout / 1000)}초 안에 응답하지 않았습니다 — 서버가 바쁘거나(같은 GPU 에서 이미지 생성 중) 멈춰 있습니다 (${this.baseUrl})`);
+      }
+      throw e;
     } finally {
       clearTimeout(t);
     }
