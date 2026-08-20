@@ -55,6 +55,64 @@ function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
   </div>);
 }
 
+
+// ⚙ 설정 — ComfyUI 「어디로 보낼까」 **2분할 패널** (이미지·비디오 공용 1벌).
+//   🔑 여기서는 **주소·API 키만** 관리한다. 로컬↔클라우드 전환은 **헤더 드롭다운(☁/🖥 × 모델) 하나로만.**
+//     예전엔 이 팝업에도 「클라우드」 체크박스 + 「서버 프로필」 이 있어 헤더와 같은 값을 두 곳에서 만졌다 →
+//     실제로 **"서버=comfy.org 인데 주소는 127.0.0.1"** 인 어긋난 상태가 만들어졌다(2026-08-20 로이 지적).
+//     v0.3.2 에서 워크플로 select 를 관리 전용으로 바꾼 것과 같은 정리다.
+//   설정파일이 로컬·클라우드 주소를 각각 기억하므로(localBaseUrl/cloudBaseUrl) 두 칸을 그대로 보여주면 된다.
+//   ⚠ 엔진이 실제로 쓰는 값은 `baseUrl` 이므로, **지금 쓰는 쪽을 고칠 때만** baseUrl 도 같이 갱신한다.
+function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
+  const cloud = !!cfg.cloud;
+  // 이름은 comfyWorkflows() 가 만든 목록에서 가져온다 — 활성 경로가 목록에 없어도 보강해 주므로 경로 파싱을 중복하지 않는다.
+  const wfName = (comfyWorkflows(cfg).find((w) => w.path === cfg.workflowPath) || {}).name || "";
+  const hdr = kind === "video" ? "③ 비디오" : "② 이미지";
+  const Lamp = ({ side }) => {
+    const st = probes && probes[side];
+    if (!st) return <span className="lamp idle">● 미확인</span>;
+    if (st.ing) return <span className="lamp ing">● 확인 중…</span>;
+    if (st.ok) return <span className="lamp ok" title={st.baseUrl}>● 연결됨{st.version ? <> · <b>{st.version}</b></> : null}</span>;
+    return <span className="lamp no" title={(st.baseUrl || "") + " " + (st.error || "")}>● 안 됨 — {st.error || "실패"}</span>;
+  };
+  // 한 칸(로컬/클라우드) — 주소(+키) 입력과 실측 버튼. 지금 쓰는 쪽은 테두리·배지로 표시.
+  const pane = (side) => {
+    const isCloud = side === "cloud";
+    const on = isCloud === cloud;
+    const url = (isCloud ? cfg.cloudBaseUrl : cfg.localBaseUrl) || "";
+    return (
+      <div className={"tpane" + (on ? " on" : "")}>
+        <div className="thead">{isCloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}{on && <span className="use">지금 사용</span>}</div>
+        <input value={url} placeholder={isCloud ? "https://cloud.comfy.org" : "http://127.0.0.1:8188"}
+          title={isCloud ? "comfy.org 클라우드 주소 (보통 그대로 두면 됩니다)" : "내 PC 에서 도는 ComfyUI 주소. 다른 PC 면 그 PC 의 IP:8188"}
+          onChange={(e) => setCfg({ ...cfg, [isCloud ? "cloudBaseUrl" : "localBaseUrl"]: e.target.value })}
+          onBlur={() => {
+            const u = (url || "").trim();
+            // 지금 쓰는 쪽을 고쳤으면 엔진이 읽는 baseUrl 까지 함께 갱신(안 하면 화면과 실제가 갈라진다)
+            save(isCloud ? { cloudBaseUrl: u, ...(cloud ? { baseUrl: u } : {}) }
+                         : { localBaseUrl: u, ...(cloud ? {} : { baseUrl: u }) });
+          }} />
+        {isCloud && <input type="password" value={cfg.apiKey || ""} placeholder="🔑 X-API-Key (Standard+ 구독)"
+          title="cloud.comfy.org 의 API 키. 이 키가 없으면 클라우드로는 생성할 수 없습니다."
+          onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })}
+          onBlur={() => save({ apiKey: (cfg.apiKey || "").trim() })} />}
+        <div className="tfoot">
+          <button className="ghost" title="이 주소에 실제로 요청을 보내 확인합니다(설정은 바뀌지 않습니다)"
+            onClick={() => onProbe(side, { baseUrl: (url || "").trim(), apiKey: isCloud ? (cfg.apiKey || "").trim() : "" })}>🔌 테스트</button>
+          <Lamp side={side} />
+        </div>
+      </div>
+    );
+  };
+  return (<>
+    <div className="nowuse">
+      <span>지금 보내는 곳 <b>{cloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}</b>{wfName ? <> · 모델 <b>{wfName}</b></> : <> · <span className="meta">워크플로 없음</span></>}</span>
+      <span className="meta">— 바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</span>
+    </div>
+    <div className="split2">{pane("local")}{pane("cloud")}</div>
+  </>);
+}
+
 // 렌더 중 예외가 나면 React 는 트리를 통째로 버린다 → 화면이 그대로 멈춘 것처럼 보이고
 //   클릭·입력이 전부 안 먹는다(2026-08-14 "대본수정 창에서 아무것도 안 됨" 제보). 원인을 화면에 남긴다.
 class ErrorBoundary extends React.Component {
@@ -114,6 +172,64 @@ function fmtMinSec(s) {
   s = Math.max(0, Math.round(Number(s) || 0));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h > 0 ? `${h}시간 ${m}분 ${sec}초` : `${m}분 ${sec}초`;
+}
+// ── 유튜브 설명글 타임스탬프(챕터) ─────────────────────────────────────────
+//  .vrew 타임라인은 문장 TTS 를 빈틈 없이 이어 붙인 것이므로(vrew-builder), 챕터 시작시각 =
+//  그 앞 그룹들의 TTS 길이 합. 챕터 단위는 **상위 H2 섹션**(cut.h2) — H3 단위로 잘게 쪼갠 그룹을
+//  다시 H2 로 묶는다. H2 가 없는 대본은 그룹 섹션명(phase)으로 폴백.
+function tsFmt(sec) {
+  const t = Math.max(0, Math.floor(Number(sec) || 0)); // 올림하면 챕터가 내용보다 뒤에서 시작한다 → 내림
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  const p2 = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${p2(m)}:${p2(s)}` : `${m}:${p2(s)}`;
+}
+// 섹션 제목의 제작 표기 꼬리 제거 — `— 0:00~0:30 · I2V 5샷` / `(0:30~3:50)` / ` ★`
+function tsCleanTitle(t) {
+  return String(t == null ? '' : t)
+    .replace(/\s*[—-]\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}.*$/, '')
+    .replace(/\s*\(\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}\s*\)\s*$/, '')
+    .replace(/\s*★/g, '')
+    .replace(/\s*[〔\[(][^〕\])]*(?:\d+\s*(?:샷|초|자|s)|I2V|콜드오픈|후킹)[^〕\])]*[〕\])]\s*$/, '') // 꼬리 제작메모 〔콜드오픈 · 5샷 · I2V〕
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+// 한 편(project) → 챕터 목록 [{start, dur, title}]
+function tsChaptersOf(pr) {
+  const cuts = (pr && pr.cuts) || [];
+  const useH2 = cuts.some((c) => c.h2 && String(c.h2).trim());
+  const out = [];
+  let t = 0, lastKey = '';
+  for (const c of cuts) {
+    const key = tsCleanTitle(useH2 ? c.h2 : c.phase) || lastKey; // 제목 없는 그룹은 앞 챕터에 붙인다
+    const dur = Number(c.groupDurationSec) || 0;
+    if (!out.length || key !== lastKey) out.push({ start: t, dur, title: key || '시작' });
+    else out[out.length - 1].dur += dur;
+    lastKey = key;
+    t += dur;
+  }
+  return out;
+}
+// dto → { text(붙여넣기용), total, warns[] }
+function tsBuild(dto) {
+  const projects = (dto && dto.projects) || [];
+  const many = projects.length > 1;
+  const lines = [], warns = [];
+  let total = 0, missing = 0, shortN = 0, chapN = 0;
+  for (const pr of projects) {
+    for (const c of (pr.cuts || [])) for (const st of (c.sentences || [])) if (!(Number(st.dur) > 0)) missing++;
+    const chs = tsChaptersOf(pr);
+    chapN += chs.length;
+    if (many) { if (lines.length) lines.push(''); lines.push(`[쇼츠 ${pr.shortsNum}]`); }
+    for (const ch of chs) {
+      if (ch.dur < 10) shortN++;
+      lines.push(`${tsFmt(ch.start)} ${ch.title}`);
+    }
+    total += chs.reduce((a, ch) => a + ch.dur, 0);
+  }
+  if (missing > 0) warns.push(`TTS 가 아직 없는 문장 ${missing}개 — 그만큼 시간이 실제보다 짧습니다. TTS 변환을 끝낸 뒤 다시 여세요.`);
+  if (chapN < 3) warns.push('챕터가 3개 미만입니다 — 유튜브는 챕터를 3개 이상일 때만 인식합니다.');
+  if (shortN > 0) warns.push(`10초 미만 챕터 ${shortN}개 — 유튜브가 목록 전체를 무시할 수 있습니다(각 챕터 10초 이상 필요).`);
+  return { text: lines.join('\n'), total, warns };
 }
 function phaseBadge(p, isLf) {
   if (!p) return ['', '-'];
@@ -240,6 +356,9 @@ export default function App() {
   const [newChanName, setNewChanName] = useState('');
   const [chStyles, setChStyles] = useState([]);
   const [chRefList, setChRefList] = useState([]); // 참조음성 파일 목록
+  const [tsOpen, setTsOpen] = useState(false);   // ⏱ 유튜브 타임스탬프(챕터) 모달
+  const [tsData, setTsData] = useState(null);    // { text, total, warns } — 열 때 계산
+  const tsRef = useRef(null);                    // 편집 가능한 textarea (복사는 여기서 읽는다)
   const [impOpen, setImpOpen] = useState(false);
   const [impText, setImpText] = useState('');
   const [impProvider, setImpProvider] = useState('ollama');
@@ -582,6 +701,20 @@ export default function App() {
     try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
+  //   ⚠ 일괄첨부로 넣은 **출력 폴더 밖 원본 파일은 지우지 않고 참조만 해제**한다(main.js 에서 판정).
+  async function deleteImagesAll() {
+    if (!uiConfirm('이 대본의 이미지 파일과 재활용 캐시를 모두 삭제합니다.\n(비디오는 그대로 남습니다. 다음에 이미지 버튼을 누르면 전부 새로 만듭니다.)\n\n진행할까요?')) return;
+    setStatus('이미지 삭제 중…');
+    try { const d = await api.deleteImages({ styleId: styleId || null, imgEngine }); if (d) setDto(d); setStatus('이미지 삭제 완료'); }
+    catch (e) { logline('이미지 삭제 오류: ' + e.message); setStatus('이미지 삭제 실패'); }
+  }
+  async function deleteVideosAll() {
+    if (!uiConfirm('이 대본의 비디오 파일과 재활용 캐시를 모두 삭제합니다.\n(이미지는 그대로 남아 켄번스로 진행할 수 있습니다.)\n\n진행할까요?')) return;
+    setStatus('비디오 삭제 중…');
+    try { const d = await api.deleteVideos(); if (d) setDto(d); setStatus('비디오 삭제 완료'); }
+    catch (e) { logline('비디오 삭제 오류: ' + e.message); setStatus('비디오 삭제 실패'); }
+  }
   async function runBulk(shortsNum) {
     setStatus('일괄첨부 폴더 선택…');
     try { const d = await api.bulkAttach({ shortsNum }); setDto(d); setStatus('일괄첨부 완료'); }
@@ -719,6 +852,18 @@ export default function App() {
     setStatus('그룹 합치는 중…');
     try { const d = await api.mergeGroups({ clipMaxSec: _clipMaxSec() }); setDto(d); setStatus('그룹 재구성 완료'); }
     catch (e) { logline('합치기 오류: ' + e.message); setStatus('합치기 실패'); }
+  }
+  // ⏱ 유튜브 타임스탬프 — TTS 길이 누적으로 챕터 목록을 만들어 창에 띄운다(편집 가능, 복사는 창에서).
+  function openTimestamps() {
+    if (!loaded) { setStatus('대본을 먼저 여세요'); return; }
+    const d = tsBuild(dto);
+    if (!d.text.trim()) { setStatus('타임스탬프를 만들 그룹이 없습니다'); return; }
+    setTsData(d); setTsOpen(true);
+  }
+  async function copyTimestamps() {
+    const text = (tsRef.current ? tsRef.current.value : (tsData && tsData.text)) || '';
+    try { await navigator.clipboard.writeText(text); setStatus('⏱ 타임스탬프 복사됨 — 유튜브 설명글에 붙여넣으세요'); }
+    catch (e) { logline('복사 실패: ' + e.message); setStatus('복사 실패'); }
   }
   const styleName = () => { const s = styles.find((x) => x.id === styleId); return s ? s.name : ''; };
   async function exportPrompts() {
@@ -1467,6 +1612,7 @@ export default function App() {
       if (ttsSrvOpen) { setTtsSrvOpen(false); return; }
       if (comfyOpen) { setComfyOpen(false); return; }
       if (cvidOpen) { setCvidOpen(false); return; }
+      if (tsOpen) { setTsOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
       if (imgRotOpen) { setImgRotOpen(false); return; }
@@ -1480,7 +1626,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, impOpen, scriptEditOpen, imgRotOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, tsOpen, impOpen, scriptEditOpen, imgRotOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -1660,6 +1806,21 @@ export default function App() {
     if (l.days <= 30) return { t: `· ${l.days}일 전 사용`, c: '#5a8a5a' };
     return { t: `· ${l.days}일 전 (만료됐을 수 있음)`, c: '#b0762a' };
   }
+  // ⚙ 설정의 로컬/클라우드 램프 — { local:{ing|ok|error}, cloud:{…} }. 실측 결과만 담는다(설정은 안 바뀜).
+  const [comfyProbe, setComfyProbe] = useState({});
+  const [cvidProbe, setCvidProbe] = useState({});
+  //   over = { baseUrl, apiKey } — 화면에서 방금 고친(아직 저장 전일 수 있는) 값. 없으면 저장된 설정으로 실측.
+  async function probeComfyTarget(kind, side, over) {
+    const set = kind === "video" ? setCvidProbe : setComfyProbe;
+    set((p) => ({ ...p, [side]: { ing: true } }));
+    const args = { side, ...(over || {}) };
+    try {
+      const r = kind === "video" ? await api.testComfyVideo(args) : await api.testComfyImage(args);
+      set((p) => ({ ...p, [side]: r || { ok: false, error: "응답 없음" } }));
+    } catch (e) { set((p) => ({ ...p, [side]: { ok: false, error: e.message } })); }
+  }
+  // 탭을 열 때 두 쪽을 함께 찔러 본다 — "로컬이 꺼져 있다"를 만들기 전에 알 수 있게.
+  function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
     setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
@@ -1678,6 +1839,11 @@ export default function App() {
     try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
     try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
+    // ⚙ 를 열면 로컬·클라우드 양쪽을 바로 찔러 본다 — "로컬이 꺼져 있는데 로컬로 보내고 있었다"를 미리 안다.
+    setComfyProbe({}); setCvidProbe({});
+    const _t = tab || 'img';
+    if (_t === 'img') probeBoth('image');
+    if (_t === 'vid') probeBoth('video');
     if ((tab || 'img') === 'acct') { await loadAcct(); }
     setSettingsOpen(true);
   }
@@ -1705,48 +1871,6 @@ export default function App() {
     if ((cur && cur.workflowPath) === p) patch.workflowPath = list[0] ? list[0].path : '';
     await saveCfg(patch);
   }
-  // ── 서버 프로필(comfy.org/RunPod 전환) — 이미지 ──
-  async function pickComfyServer(name) {
-    const s = (comfyCfg.servers || []).find((x) => x.name === name);
-    if (!s) return;
-    await saveComfyCfg({ baseUrl: s.baseUrl || '', cloud: !!s.cloud, apiKey: s.apiKey || '', activeServer: name });
-  }
-  async function saveComfyServer() {
-    const name = ((await askName('이 서버 프로필 이름 (예: comfy.org, RunPod)', comfyCfg.activeServer || '')) || '').trim();
-    if (!name) return;
-    const list = Array.isArray(comfyCfg.servers) ? comfyCfg.servers.slice() : [];
-    const entry = { name, baseUrl: (comfyCfg.baseUrl || '').trim(), cloud: !!comfyCfg.cloud, apiKey: (comfyCfg.apiKey || '').trim() };
-    const i = list.findIndex((x) => x.name === name);
-    if (i >= 0) list[i] = entry; else list.push(entry);
-    await saveComfyCfg({ servers: list, activeServer: name });
-  }
-  async function removeComfyServer() {
-    const list = (comfyCfg.servers || []).filter((x) => x.name !== comfyCfg.activeServer);
-    await saveComfyCfg({ servers: list, activeServer: '' });
-  }
-  // 헤더 이미지 드롭다운 — ComfyUI 항목은 **모델(워크플로)까지** 고른다.
-  //   고르면 그 모드의 주소 + 워크플로를 설정에 저장하고, 엔진 값엔 워크플로 경로만 담는다.
-  async function onPickImgEngine(val) { return pickComfy(val, setImgEngine, comfyCfg, saveComfyCfg, 'img'); }
-  // 이미지·비디오 공통 처리 (동작이 같아 한 함수로 — 예전엔 두 벌 복사돼 있었다)
-  async function pickComfy(val, setEngine, cur, saveCfg, tab) {
-    const c = parseComfyVal(val);
-    if (!c) { setEngine(val); return; }
-    const cloud = (c.cloud == null) ? !!(cur && cur.cloud) : c.cloud;   // 레거시 값이면 현재 모드 유지
-    setEngine(c.path ? `comfy::${c.path}` : 'comfy');
-    const patch = { cloud, baseUrl: cloud ? ((cur && cur.cloudBaseUrl) || DEF_CLOUD_URL) : ((cur && cur.localBaseUrl) || DEF_LOCAL_URL) };
-    if (c.path) patch.workflowPath = c.path;
-    await saveCfg(patch);
-    if (!c.path) openSettings(tab);                                     // 워크플로가 하나도 없을 때만 설정 안내
-  }
-  async function testComfy() {
-    setStatus('ComfyUI 연결 확인 중…'); setSettingsMsg('⏳ ComfyUI 이미지 연결 확인 중…');
-    try {
-      const r = await api.testComfyImage();
-      const msg = r && r.ok ? `✅ ComfyUI 이미지 연결 OK — ${r.baseUrl}`
-        : `❌ ComfyUI 이미지 연결 실패${r && r.baseUrl ? ` — ${r.baseUrl}` : ''}${r && r.error ? ` (${r.error})` : ''}`;
-      setStatus(msg); setSettingsMsg(msg);
-    } catch (e) { logline('연결 테스트 오류: ' + e.message); setSettingsMsg('❌ 오류: ' + e.message); }
-  }
   // ── ComfyUI 비디오(i2v LTX) ──
   async function openCvid() { return openSettings('vid'); }
   async function saveCvidCfg(patch) {
@@ -1763,25 +1887,6 @@ export default function App() {
       if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
       await saveCvidCfg({ workflows: list, workflowPath: r.path });
     } catch (e) { logline('i2v 워크플로 추가 오류: ' + e.message); }
-  }
-  // ── 서버 프로필(comfy.org/RunPod 전환) — 비디오 ──
-  async function pickCvidServer(name) {
-    const s = (cvidCfg.servers || []).find((x) => x.name === name);
-    if (!s) return;
-    await saveCvidCfg({ baseUrl: s.baseUrl || '', cloud: !!s.cloud, apiKey: s.apiKey || '', activeServer: name });
-  }
-  async function saveCvidServer() {
-    const name = ((await askName('이 서버 프로필 이름 (예: comfy.org, RunPod)', cvidCfg.activeServer || '')) || '').trim();
-    if (!name) return;
-    const list = Array.isArray(cvidCfg.servers) ? cvidCfg.servers.slice() : [];
-    const entry = { name, baseUrl: (cvidCfg.baseUrl || '').trim(), cloud: !!cvidCfg.cloud, apiKey: (cvidCfg.apiKey || '').trim() };
-    const i = list.findIndex((x) => x.name === name);
-    if (i >= 0) list[i] = entry; else list.push(entry);
-    await saveCvidCfg({ servers: list, activeServer: name });
-  }
-  async function removeCvidServer() {
-    const list = (cvidCfg.servers || []).filter((x) => x.name !== cvidCfg.activeServer);
-    await saveCvidCfg({ servers: list, activeServer: '' });
   }
   async function removeCvidWf(p) { return removeWf(p, cvidCfg, saveCvidCfg); }
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
@@ -1945,6 +2050,7 @@ export default function App() {
                 onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : 'vid')}>⚙ ComfyUI</button>
             )}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}>🗑 삭제</button>
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
@@ -1967,6 +2073,7 @@ export default function App() {
                   <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}>🎬 비디오</button>
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}>🖼→🎬 이미지+비디오</button>
                 </>)}
+            <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}>🗑 삭제</button>
           </span>
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
             <span className="glabel">④ 완성</span>
@@ -2024,6 +2131,9 @@ export default function App() {
           </span>
         )}
         <span className="grow" />
+        <button className="ghost" disabled={!loaded || prog.ttsD === 0}
+          title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
+          onClick={openTimestamps}>⏱ 타임스탬프</button>
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
         <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입. 기본값: 롱폼 표시 · 쇼츠 미표시 (언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
@@ -2403,42 +2513,21 @@ export default function App() {
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
               {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); }}>{lbl}</button>
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
 
             {settingsTab === 'img' && comfyCfg && (<div>
               <div className="meta" style={{ marginBottom: 8 }}>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</div>
-              <div className="frow"><label>서버</label>
-                <select style={{ flex: 1 }} value={comfyCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
-                  onChange={(e) => { if (e.target.value) pickComfyServer(e.target.value); }}>
-                  <option value="">— 서버 프로필 선택 —</option>
-                  {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>[{s.cloud ? '클라우드' : '로컬'}] {s.name}</option>)}
-                </select>
-                <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveComfyServer}>💾 저장</button>
-                <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!comfyCfg.activeServer} onClick={removeComfyServer}>🗑</button></div>
-              <div className="frow"><label>주소</label>
-                {/* 주소는 현재 모드(로컬/클라우드)별로도 기억 — 드롭다운으로 전환해도 각 주소가 유지됨 */}
-                <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder={comfyCfg.cloud ? DEF_CLOUD_URL : DEF_LOCAL_URL}
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })}
-                  onBlur={() => { const u = (comfyCfg.baseUrl || '').trim(); saveComfyCfg(comfyCfg.cloud ? { baseUrl: u, cloudBaseUrl: u } : { baseUrl: u, localBaseUrl: u }); }} /></div>
-              <div className="frow">
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; const u = v ? (comfyCfg.cloudBaseUrl || DEF_CLOUD_URL) : (comfyCfg.localBaseUrl || DEF_LOCAL_URL); setComfyCfg({ ...comfyCfg, cloud: v, baseUrl: u }); saveComfyCfg({ cloud: v, baseUrl: u }); }} /> 클라우드(comfy.org)
-                </label>
-                {comfyCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={comfyCfg.apiKey || ''}
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
-              </div>
+              <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image"
+                probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
               <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} />
               <div className="frow"><label>프롬프트 노드</label>
                 <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
                   onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
               <div className="frow"><label>동시 생성</label>
-                <input type="number" min="1" max="2" style={{ width: 70 }} value={comfyCfg.concurrency != null ? comfyCfg.concurrency : 2}
-                  title="클라우드에서 한 번에 큐에 넣을 장수(1~2). 3 이상은 검정·노이즈 이미지를 유발해 상한을 2 로 고정했습니다(실측: 동시 4 에서 203장 중 7장 노이즈). 순차(1)면 업로드·폴링·다운로드 동안 GPU 가 놉니다. 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1장씩."
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, concurrency: e.target.value })}
-                  onBlur={() => saveComfyCfg({ concurrency: Math.max(1, Math.min(2, parseInt(comfyCfg.concurrency, 10) || 1)) })} />
-                <span className="meta">장 (클라우드만 · 1=순차 · 안전 상한 2)</span></div>
+                <span className="meta" title="앱이 정한 고정값입니다. 3 이상은 검정·노이즈 이미지를 유발해(실측: 동시 4 에서 203장 중 7장) 코드가 상한 2 로 깎습니다. 로컬은 VRAM 때문에 항상 1장씩.">
+                  클라우드 <b>2장 동시</b> · 로컬 <b>1장씩</b> — 앱 고정(설정 불필요)</span></div>
               <div className="frow"><label>타임아웃(초)</label>
                 <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
                   onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
@@ -2450,24 +2539,8 @@ export default function App() {
 
             {settingsTab === 'vid' && cvidCfg && (<div>
               <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
-              <div className="frow"><label>서버</label>
-                <select style={{ flex: 1 }} value={cvidCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
-                  onChange={(e) => { if (e.target.value) pickCvidServer(e.target.value); }}>
-                  <option value="">— 서버 프로필 선택 —</option>
-                  {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>[{s.cloud ? '클라우드' : '로컬'}] {s.name}</option>)}
-                </select>
-                <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveCvidServer}>💾 저장</button>
-                <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!cvidCfg.activeServer} onClick={removeCvidServer}>🗑</button></div>
-              <div className="frow"><label>주소</label>
-                <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder={cvidCfg.cloud ? DEF_CLOUD_URL : DEF_LOCAL_URL}
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })}
-                  onBlur={() => { const u = (cvidCfg.baseUrl || '').trim(); saveCvidCfg(cvidCfg.cloud ? { baseUrl: u, cloudBaseUrl: u } : { baseUrl: u, localBaseUrl: u }); }} /></div>
-              <div className="frow">
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; const u = v ? (cvidCfg.cloudBaseUrl || DEF_CLOUD_URL) : (cvidCfg.localBaseUrl || DEF_LOCAL_URL); setCvidCfg({ ...cvidCfg, cloud: v, baseUrl: u }); saveCvidCfg({ cloud: v, baseUrl: u }); }} /> 클라우드(comfy.org)
-                </label>
-                {cvidCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={cvidCfg.apiKey || ''}
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, apiKey: e.target.value })} onBlur={() => saveCvidCfg({ apiKey: (cvidCfg.apiKey || '').trim() })} />}</div>
+              <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
+                probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
               <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} />
               <div className="frow"><label>최대 길이(초)</label>
                 <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8} title="0=제한없음(TTS 길이 그대로). 클라우드 GPU 시간/비용 상한"
@@ -2478,12 +2551,8 @@ export default function App() {
                 <label style={{ width: 'auto' }}>타임아웃(초)</label>
                 <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
                   onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} />
-                <label style={{ width: 'auto' }}>동시</label>
-                <input type="number" min="1" max="4" style={{ width: 60 }} value={cvidCfg.concurrency != null ? cvidCfg.concurrency : 3}
-                  title="클라우드에서 한 번에 올릴 i2v 개수(1~4). i2v 는 건당 수 분이라 동시에 올리면 벽시계 시간이 크게 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1개씩."
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, concurrency: e.target.value })}
-                  onBlur={() => saveCvidCfg({ concurrency: Math.max(1, Math.min(4, parseInt(cvidCfg.concurrency, 10) || 1)) })} />
-                <span className="meta">개 (클라우드만 · 1=순차)</span></div>
+                <span className="meta" title="앱이 정한 고정값입니다. i2v 는 건당 수 분이라 동시에 올려야 벽시계 시간이 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1개씩.">
+                  동시 <b>클라우드 3개</b> · <b>로컬 1개씩</b> — 앱 고정</span></div>
               <div className="frow"><label>프롬프트 노드</label>
                 <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
                   onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
@@ -2623,16 +2692,6 @@ export default function App() {
               }}>{settingsMsg}</div>
             )}
             <div className="mbtns" style={{ marginTop: 10 }}>
-              {settingsTab === 'img' && <button onClick={testComfy}>🔌 연결 테스트</button>}
-              {settingsTab === 'vid' && <button onClick={async () => {
-                setStatus('ComfyUI 비디오 연결 확인 중…'); setSettingsMsg('⏳ ComfyUI 비디오 연결 확인 중…');
-                try {
-                  const r = await api.testComfyVideo();
-                  const msg = r && r.ok ? `✅ ComfyUI 비디오 연결 OK — ${r.baseUrl}`
-                    : `❌ ComfyUI 비디오 연결 실패${r && r.baseUrl ? ` — ${r.baseUrl}` : ''}${r && r.error ? ` (${r.error})` : ''}`;
-                  setStatus(msg); setSettingsMsg(msg);
-                } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
-              }}>🔌 연결 테스트</button>}
               <span style={{ flex: 1 }} />
               <button className="ghost" onClick={() => setSettingsOpen(false)}>닫기</button>
             </div>
@@ -2703,6 +2762,30 @@ export default function App() {
             <textarea ref={scriptEditRef} rows="22" defaultValue={scriptText} spellCheck={false}
               style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 }} />
             <div className="mbtns"><button onClick={applyScriptEdit}>적용</button><button className="ghost" onClick={() => setScriptEditOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {tsOpen && tsData && (
+        <div className="modal-bg show">
+          <div className="modal-card" style={{ maxWidth: 620 }}>
+            <h3>⏱ 유튜브 타임스탬프(챕터)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>
+              각 그룹의 <b>TTS 길이를 누적</b>해 계산한 값입니다(챕터 단위 = 대본의 <b>H2 섹션</b>).
+              복사해서 설명글 첫 줄에 붙여넣으세요 — 첫 항목이 <b>0:00</b> 이어야 유튜브가 챕터로 인식합니다.
+              제목은 아래에서 바로 고쳐도 됩니다(대본은 바뀌지 않음).
+              총 길이 <b>{fmtMinSec(tsData.total)}</b>
+            </div>
+            {tsData.warns.map((w, i) => (
+              <div key={i} className="meta" style={{ marginBottom: 4, color: '#a3352b' }}>⚠ {w}</div>
+            ))}
+            {/* 비제어(uncontrolled) — 긴 텍스트를 제어 state 로 두면 타이핑마다 전 화면이 재렌더된다(2026-08-14 사고) */}
+            <textarea ref={tsRef} rows="14" defaultValue={tsData.text} spellCheck={false}
+              style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 }} />
+            <div className="mbtns">
+              <button onClick={copyTimestamps}>📋 복사</button>
+              <button className="ghost" onClick={() => setTsOpen(false)}>닫기</button>
+            </div>
           </div>
         </div>
       )}

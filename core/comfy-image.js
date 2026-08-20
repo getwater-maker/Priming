@@ -288,4 +288,4 @@ class ComfyImage {
   }
 }
 
-module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS };
+module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg };

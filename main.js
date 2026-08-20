@@ -520,9 +520,45 @@ ipcMain.handle('pick-comfy-workflow', async () => {
   if (r.canceled || !r.filePaths[0]) return null;
   return { path: r.filePaths[0] }; // 목록 등록·이름·활성 지정은 렌더러가 setComfyImageConfig 로 처리
 });
-ipcMain.handle('test-comfy-image', async () => {
-  try { const CI = require('./core/comfy-image'); const eng = new CI.ComfyImage(CI.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
-  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+// ── ComfyUI 연결 실측 ── ⚙ 설정의 로컬/클라우드 각 칸에 있는 「🔌 테스트」 전용.
+//   🔑 엔진의 health() 를 쓰지 않는다 — 그건 클라우드일 때 **API 키 유무만** 본다(생성 도중 일시적
+//     네트워크 오류로 작업이 통째로 죽지 않게 하려는 의도). 여기선 사람이 누른 것이니 실제로 찔러 본다.
+//   🔑 **저장된 설정을 바꾸지 않는다** — 엔진 인스턴스만 그 쪽 값으로 만들어(주소 정규화·/api 접두·
+//     X-API-Key 를 생성 경로와 **똑같은 코드**로 얻는다) /system_stats 만 호출한다.
+//     (로컬·클라우드 둘 다 200 을 주는 것을 실측 확인 — 클라우드 258바이트·약 0.4초)
+async function probeComfy(kind, cfg, side) {
+  const cloud = side === 'cloud';
+  const base = String((cloud ? cfg.cloudBaseUrl : cfg.localBaseUrl) || cfg.baseUrl || '').trim();
+  if (!base) return { ok: false, side, baseUrl: '', error: '주소가 비어 있습니다' };
+  if (cloud && !cfg.apiKey) return { ok: false, side, baseUrl: base, error: 'API 키가 비어 있습니다 (Standard+ 구독)' };
+  const M = kind === 'video' ? require('./core/comfy-video') : require('./core/comfy-image');
+  const eng = kind === 'video' ? new M.ComfyVideo({ ...cfg, cloud, baseUrl: base }, () => {})
+                               : new M.ComfyImage({ ...cfg, cloud, baseUrl: base }, () => {});
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000); // 로컬이 꺼져 있으면 즉시 실패, 켜져 있으면 수십 ms
+  try {
+    const r = await fetch(eng._url('/system_stats'), { headers: eng._headers(), signal: ctl.signal });
+    if (!r.ok) return { ok: false, side, baseUrl: eng.baseUrl, error: `HTTP ${r.status}${(r.status === 401 || r.status === 403) ? ' — API 키·구독 확인' : ''}` };
+    let ver = '';
+    try { const j = await r.json(); ver = (j && j.system && (j.system.comfyui_version || j.system.cloud_version)) || ''; } catch {}
+    return { ok: true, side, baseUrl: eng.baseUrl, version: ver };
+  } catch (e) {
+    const nm = (() => { try { return require('./core/comfy-image').netMsg(e); } catch { return String((e && e.message) || e); } })();
+    return { ok: false, side, baseUrl: eng.baseUrl, error: (e && e.name === 'AbortError') ? '8초 안에 응답이 없습니다' : nm };
+  } finally { clearTimeout(timer); }
+}
+ipcMain.handle('test-comfy-image', async (_e, args = {}) => {
+  try {
+    const CI = require('./core/comfy-image');
+    const cfg = CI.loadConfig();
+    const side = args.side || (cfg.cloud ? 'cloud' : 'local');
+    // 화면에서 방금 고친 값(저장 전)도 그대로 실측할 수 있게 — 버튼 클릭과 onBlur 저장의 경합 회피.
+    if (args.baseUrl) cfg[side === 'cloud' ? 'cloudBaseUrl' : 'localBaseUrl'] = String(args.baseUrl);
+    if (args.apiKey) cfg.apiKey = String(args.apiKey);   // 인자 없으면 지금 쓰는 쪽
+    const r = await probeComfy('image', cfg, side);
+    log(`${r.ok ? '✓' : '✗'} ComfyUI 이미지 ${side === 'cloud' ? '클라우드' : '로컬'} 연결 ${r.ok ? 'OK' : '실패'} (${r.baseUrl})${r.ok ? (r.version ? ' · ' + r.version : '') : ' — ' + r.error}`);
+    return r;
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
 // ComfyUI 비디오(i2v) 설정 — LTX2.5/2.3 등 워크플로 (이미지 comfy 와 별개 config)
 ipcMain.handle('get-comfy-video-config', () => { try { return require('./core/comfy-video').loadConfig(); } catch { return {}; } });
@@ -532,9 +568,18 @@ ipcMain.handle('pick-comfy-video-workflow', async () => {
   if (r.canceled || !r.filePaths[0]) return null;
   return { path: r.filePaths[0] };
 });
-ipcMain.handle('test-comfy-video', async () => {
-  try { const CV = require('./core/comfy-video'); const eng = new CV.ComfyVideo(CV.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 비디오 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 비디오 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
-  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+ipcMain.handle('test-comfy-video', async (_e, args = {}) => {
+  try {
+    const CV = require('./core/comfy-video');
+    const cfg = CV.loadConfig();
+    const side = args.side || (cfg.cloud ? 'cloud' : 'local');
+    // 화면에서 방금 고친 값(저장 전)도 그대로 실측할 수 있게 — 버튼 클릭과 onBlur 저장의 경합 회피.
+    if (args.baseUrl) cfg[side === 'cloud' ? 'cloudBaseUrl' : 'localBaseUrl'] = String(args.baseUrl);
+    if (args.apiKey) cfg.apiKey = String(args.apiKey);
+    const r = await probeComfy('video', cfg, side);
+    log(`${r.ok ? '✓' : '✗'} ComfyUI 비디오 ${side === 'cloud' ? '클라우드' : '로컬'} 연결 ${r.ok ? 'OK' : '실패'} (${r.baseUrl})${r.ok ? (r.version ? ' · ' + r.version : '') : ' — ' + r.error}`);
+    return r;
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
 
 // ── 나노바나나2 Lite 배치(Batch API) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
@@ -1213,6 +1258,91 @@ ipcMain.handle('delete-tts', async () => {
   let cached = 0;
   try { cached = require('./core/tts-cache').clearAll(); } catch {}
   log(`🗑 TTS 삭제 완료 — 음성파일 ${files}개 + 재활용캐시 ${cached}개 삭제, 시간기록 초기화. (다음 변환은 전부 새로 합성)`);
+  pushDtoUpdate();
+  return currentDTO();
+});
+
+// ── '이미지 삭제' / '비디오 삭제' ── TTS 삭제(🗑)와 같은 자리·같은 방식의 일괄 삭제.
+//   🔑 안전규칙 두 가지(둘 다 실제 사고를 막기 위한 것):
+//     ① **출력 폴더(media-N) 안의 파일만 지운다.** 일괄첨부(bulk-attach)는 g.videoPath 에 사용자가 고른
+//        **원본 경로**를 그대로 넣으므로, 참조만 보고 지우면 남의 폴더에 있는 원본 영상을 삭제해 버린다.
+//        폴더 밖 파일은 **참조만 끊고 파일은 남긴다.**
+//     ② **재활용 캐시(media-cache)까지 지운다.** 파일만 지우면 다음 「만들기」때 캐시가 그대로 되살린다
+//        (2026-08-19 노이즈 이미지 부활 사고와 같은 계열). 이미지는 `imageCleared` 플래그도 세워
+//        스냅샷(재시작)까지 넘어가게 한다.
+function _inDir(file, dir) {
+  try {
+    const f = path.resolve(file), d = path.resolve(dir);
+    return f.toLowerCase().startsWith(d.toLowerCase() + path.sep);
+  } catch { return false; }
+}
+// mediaDir 안에서 주어진 확장자 파일만 지운다(고아 파일·업스케일본 NN_1080.mp4 까지 정리).
+//   ⚠ BGM(bgm_*.wav/mp3)은 확장자가 달라 걸리지 않는다.
+function _wipeByExt(dir, re) {
+  let n = 0;
+  try {
+    if (!fs.existsSync(dir)) return 0;
+    for (const f of fs.readdirSync(dir)) {
+      if (!re.test(f)) continue;
+      try { fs.unlinkSync(path.join(dir, f)); n++; } catch {}
+    }
+  } catch {}
+  return n;
+}
+
+// 이미지 일괄 삭제 — 파일 + 캐시 항목 + 화면 표시. (영상은 건드리지 않는다)
+ipcMain.handle('delete-images', async (_e, args = {}) => {
+  if (!S.parsed || !S.parsed.projects) { log('열린 대본이 없습니다.'); return currentDTO(); }
+  const { styleId = null, imgEngine = null } = args;
+  const MC = require('./core/media-cache');
+  let files = 0, kept = 0, cached = 0;
+  for (const pr of S.parsed.projects) {
+    const mediaDir = S.outRoot ? shortsDirs(S.outRoot, pr.shortsNum).media : null;
+    for (const g of pr.groups) {
+      // 캐시 항목 삭제 — 이번 실행에서 쓴 키(_imgCacheKey) + 현재 스타일·엔진으로 계산한 키(재시작 후 대비)
+      const keys = [];
+      if (g._imgCacheKey) keys.push(g._imgCacheKey);
+      if (g.imagePrompt && g.imagePrompt.trim()) keys.push(MC.imageKey(g.imagePrompt, styleId || '', pr.aspect || '9:16', imgEngine));
+      for (const k of new Set(keys)) { try { if (MC.get(k)) { MC.del(k); cached++; } else MC.del(k); } catch {} }
+      g._imgCacheKey = null;
+      if (g.imagePath) {
+        if (mediaDir && _inDir(g.imagePath, mediaDir)) { try { fs.unlinkSync(g.imagePath); files++; } catch {} }
+        else kept++;  // 출력 폴더 밖(일괄첨부 원본 등) — 참조만 끊는다
+      }
+      g.imagePath = null; g.imageStatus = 'idle';
+      g.imageCleared = true; // 다음 만들기에서 캐시로 되살아나지 않게 (스냅샷에도 저장됨)
+    }
+    if (mediaDir) files += _wipeByExt(mediaDir, /\.(png|jpe?g|webp|bmp|gif)$/i); // 참조가 끊긴 고아 파일까지
+  }
+  log(`🗑 이미지 삭제 완료 — 파일 ${files}개 + 재활용캐시 ${cached}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. (다음 생성은 전부 새로 만듭니다)`);
+  pushDtoUpdate();
+  return currentDTO();
+});
+
+// 비디오 일괄 삭제 — 파일 + 영상 캐시 항목 + 화면 표시. (이미지는 그대로 남는다 → 켄번스로 진행 가능)
+ipcMain.handle('delete-videos', async () => {
+  if (!S.parsed || !S.parsed.projects) { log('열린 대본이 없습니다.'); return currentDTO(); }
+  const MC = require('./core/media-cache');
+  let files = 0, kept = 0, cached = 0;
+  for (const pr of S.parsed.projects) {
+    const mediaDir = S.outRoot ? shortsDirs(S.outRoot, pr.shortsNum).media : null;
+    for (const g of pr.groups) {
+      // 영상 캐시 키 = 영상프롬프트 + **원본 이미지 내용해시** → 이미지가 아직 있는 지금 계산해야 지울 수 있다.
+      if (g.imagePath && fs.existsSync(g.imagePath)) {
+        try {
+          const k = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', 'grok');
+          if (MC.get(k)) { MC.del(k); cached++; } else MC.del(k);
+        } catch {}
+      }
+      if (g.videoPath) {
+        if (mediaDir && _inDir(g.videoPath, mediaDir)) { try { fs.unlinkSync(g.videoPath); files++; } catch {} }
+        else kept++;  // 일괄첨부 원본 경로 — 지우면 사용자 원본이 사라진다
+      }
+      g.videoPath = null; g.videoStatus = 'idle'; g.videoSourceImage = null;
+    }
+    if (mediaDir) files += _wipeByExt(mediaDir, /\.(mp4|webm|mov|mkv|avi|m4v)$/i); // 업스케일본(NN_1080.mp4)·고아 파일까지
+  }
+  log(`🗑 비디오 삭제 완료 — 파일 ${files}개 + 재활용캐시 ${cached}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. 이미지는 그대로 남습니다.`);
   pushDtoUpdate();
   return currentDTO();
 });
@@ -2715,7 +2845,7 @@ function buildSnapshot() {
       bgStrokeOp: pr.bgStrokeOp, bgStrokeW: pr.bgStrokeW, bgRound: pr.bgRound, bgDashed: pr.bgDashed,
       bgmPath: pr._bgmPath || null, bgmVolume: pr._bgmVolume != null ? pr._bgmVolume : null, // BGM 재사용(재시작 후 💾 재export)
       groups: pr.groups.map((g) => ({
-        num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
+        num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
@@ -2838,16 +2968,36 @@ function applyWorkspace(ws, opts = {}) {
     return restored;
   } catch (e) { log('큐 복원 실패: ' + (e && e.message)); return 0; }
 }
+// 대본(.md) 을 훑어 「H3 섹션명 → 상위 H2 제목」 맵을 만든다.
+//   옛 스냅샷에는 h2Title 이 없다(2026-08-20 이전) → 유튜브 타임스탬프가 H3 단위로 잘게 쪼개진다.
+//   순서가 아니라 **섹션 이름**으로 잇기 때문에 그 뒤 그룹을 쪼개거나 합쳤어도 맞는다.
+function h2MapFromScript(scriptPath) {
+  const map = new Map();
+  try {
+    if (!scriptPath || !fs.existsSync(scriptPath)) return map;
+    let h2 = null;
+    for (const line of fs.readFileSync(scriptPath, 'utf8').split(/\r?\n/)) {
+      const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+      if (!m) continue;
+      const lv = m[1].length, t = m[2].trim();
+      if (lv <= 2) { h2 = t; map.set(t, t); }        // H1/H2 자신도(그 섹션이 곧 그룹인 경우)
+      else if (h2 && !map.has(t)) map.set(t, h2);    // H3+ → 상위 H2 (같은 이름이면 처음 것)
+    }
+  } catch (_) {}
+  return map;
+}
+
 // 스냅샷 JSON → Project[] 복원 (load-project / open-script 자동복원 공용)
 function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
+  const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
       const g = new Group({ num: gs.num, sentenceIds: [] });
       // isIntro: 신규 스냅샷은 저장값, 구 스냅샷은 phase 로 폴백(도입부 H2 → phase 에 '도입' 포함)
       const introFlag = gs.isIntro != null ? !!gs.isIntro : /도입/.test(gs.phase || '');
-      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
+      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, h2Title: gs.h2Title || h2map.get(gs.phase) || null, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
@@ -3622,7 +3772,7 @@ ipcMain.handle('split-group', (_e, args = {}) => {
   const firstS = sents.slice(0, best), secondS = sents.slice(best);
   const mk = (ss) => {
     const ng = new Group({ num: 0, sentenceIds: ss.map((s) => s.id) });
-    ng.phase = g.phase; ng.title = g.phase; ng.isIntro = g.isIntro;
+    ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;
     ng.imagePrompt = null; ng.videoPrompt = null; ng.motionNote = null; // ★ 두 그룹 프롬프트 초기화
     ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
     ng.isI2V = false; ng.mode = 'motion';

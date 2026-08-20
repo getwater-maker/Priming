@@ -397,6 +397,8 @@ function buildGroupsHybrid(items, thresholds) {
     currentGroup.isIntro = !!s.isIntro;
     currentGroup.isBracket = s.mode === 'bracket';
     currentGroup.title = (splitMode === 'h2' && s._h2Title) ? s._h2Title : (s.sectionTitle || null);
+    // 상위 H2 제목은 분할방식과 무관하게 항상 보관 — 유튜브 챕터(타임스탬프)가 H2 단위로 묶는다.
+    currentGroup.h2Title = s._h2Title || null;
     groups.push(currentGroup);
     currentCount = 0;
     currentIntroChars = 0;
@@ -510,10 +512,18 @@ function regroupIntroByTtsDuration(project, opts) {
   let currentGroup = null;
   let currentSec = 0;
 
+  // 재배치로 새로 만드는 도입부 그룹은 섹션 제목이 없다 → 원래 도입부 그룹의 제목을 물려받는다.
+  //   (유튜브 챕터가 '도입부' 를 잃고 다음 장에 붙어버리는 것을 막는다)
+  const _oldIntro = project.groups.find(g => g.isIntro) || null;
+  const _introH2 = _oldIntro ? (_oldIntro.h2Title || null) : null;
+  const _introTitle = _oldIntro ? (_oldIntro.title || _oldIntro.phase || null) : null;
+
   const startNewGroup = () => {
     currentGroup = new Group({ num: 0, sentenceIds: [] }); // num 은 finalize 후 재발번호
     currentGroup.isIntro = true;
     currentGroup.isOverDuration = false;
+    currentGroup.h2Title = _introH2;
+    if (_introTitle) { currentGroup.title = _introTitle; currentGroup.phase = _introTitle; }
     newIntroGroups.push(currentGroup);
     currentSec = 0;
   };
@@ -628,6 +638,7 @@ function splitGroupAt(project, groupId, splitAtSentenceId, opts) {
   const newGroup = new Group({ num: 0, sentenceIds: newSentenceIds });
   newGroup.isIntro = !!src.isIntro;
   if (src.title) newGroup.title = src.title;
+  if (src.h2Title) newGroup.h2Title = src.h2Title;
   if (src.isBracket) newGroup.isBracket = true;
   // 자산은 새 그룹에 복사하지 않음 (분할이면 어느 쪽에 속해야 할지 모호 → caller 가 정리)
 

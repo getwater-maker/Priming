@@ -105,6 +105,8 @@ function toDTO(parseResult) {
           return {
             num: g.num,
             phase: g.phase || null,
+            h2: g.h2Title || null,   // 상위 H2 제목 — 유튜브 챕터(타임스탬프) 묶음 단위
+
             isIntro: !!g.isIntro,
             mode: g.mode || (g.isI2V ? 'i2v' : 'motion'),
             isI2V: !!g.isI2V,
@@ -649,7 +651,7 @@ function mergeGroupsByTts(project, maxSec = 8.0) {
   const ordered = [];
   for (const g of groups) {
     for (const s of project.getSentencesOfGroup(g)) {
-      ordered.push({ s, phase: g.phase || null, imagePrompt: g.imagePrompt || null, videoPrompt: g.videoPrompt || null, motionNote: g.motionNote || null });
+      ordered.push({ s, phase: g.phase || null, h2Title: g.h2Title || null, imagePrompt: g.imagePrompt || null, videoPrompt: g.videoPrompt || null, motionNote: g.motionNote || null });
     }
   }
   if (!ordered.length) return { before: groups.length, after: groups.length, merged: 0 };
@@ -668,6 +670,7 @@ function mergeGroupsByTts(project, maxSec = 8.0) {
     const ng = new Group({ num: i + 1, sentenceIds: bucket.map((it) => it.s.id) });
     ng.phase = first.phase;
     ng.title = first.phase;
+    ng.h2Title = first.h2Title || null; // 상위 H2(유튜브 챕터 단위) 보존
     ng.imagePrompt = bucket.map((it) => it.imagePrompt).find((p) => p && p.trim()) || null;
     ng.videoPrompt = bucket.map((it) => it.videoPrompt).find((p) => p && p.trim()) || null;
     ng.motionNote = bucket.map((it) => it.motionNote).find((p) => p && p.trim()) || null;
