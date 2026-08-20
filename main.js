@@ -3149,7 +3149,9 @@ async function runMakeAllCore(opts = {}) {
   //   🔴 ComfyUI **로컬** 은 쓴다(2026-08-20): 그러면 이미지가 OmniVoice TTS 와 **같은 3060 을 다툰다** →
   //     TTS 가 느려지고(실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐) VRAM 이 빠듯해진다.
   //     예전엔 `noLocalGpuImg = true` 로 **하드코딩**돼 있어 로컬 이미지를 골라도 병렬로 돌았다.
-  const _imgLocalGpu = isComfyVal(imgEngine) && (() => {
+  //   ⚠ 이 함수에서 **이미지 엔진 변수명은 `engine`** 이다(비디오는 `videoEngine`). `imgEngine` 으로 쓰면
+  //     런타임 ReferenceError 가 나고 큐 7개가 전부 "imgEngine is not defined" 로 죽는다(2026-08-20 실사고).
+  const _imgLocalGpu = isComfyVal(engine) && (() => {
     try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
   })();
   const canParallel = !dry && !_imgLocalGpu && !projects.some(willRegroup);

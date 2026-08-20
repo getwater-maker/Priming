@@ -15,7 +15,26 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } };
 
 // ── 원문 대조 — 판정이 '엔진·설정을 실제로 보는' 형태로 남아 있는지 ──
 ok(!/const noLocalGpuImg = true/.test(SRC), '옛 하드코딩(noLocalGpuImg = true)이 사라졌다');
-ok(/const _imgLocalGpu = isComfyVal\(imgEngine\)/.test(SRC), '이미지 로컬 GPU 여부를 엔진+설정으로 판정');
+ok(/const _imgLocalGpu = isComfyVal\(engine\)/.test(SRC), '이미지 로컬 GPU 여부를 엔진+설정으로 판정');
+// 🔴 runMakeAllCore 안에서 **이미지 엔진 변수명은 `engine`** 이다(비디오는 videoEngine). `imgEngine` 을 쓰면
+//   런타임 ReferenceError 로 큐 전체가 죽는다 — 2026-08-20 실사고: 대본 7개가 전부
+//   "imgEngine is not defined" 로 실패. 빌드도 E2E 도 못 잡았으므로 **스코프를 대조해 고정**한다.
+{
+  const i = SRC.indexOf('async function runMakeAllCore(');
+  // ⚠ 인자 기본값에 `opts = {}` 가 있어 그냥 첫 `{` 부터 세면 **시그니처만** 잘린다 → `) {` 뒤부터 센다.
+  const start = SRC.indexOf(') {', i) + 2;
+  let d = 0, started = false, j = start;
+  for (; j < SRC.length; j++) {
+    const c = SRC[j];
+    if (c === '{') { d++; started = true; }
+    else if (c === '}') { d--; if (started && d === 0) { j++; break; } }
+  }
+  const body = SRC.slice(i, j);
+  ok(body.length > 3000, 'runMakeAllCore 본문을 제대로 잘라냈다 (' + body.length + '자)');
+  const code = body.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n'); // 주석 줄 제외
+  ok(!/\bimgEngine\b/.test(code), 'runMakeAllCore 안에 스코프 밖 변수 imgEngine 이 없다');
+  ok(/\bengine = 'genspark'/.test(code), 'runMakeAllCore 의 이미지 엔진 인자 이름은 engine');
+}
 ok(/comfy-image'\)\.loadConfig\(\)\.cloud/.test(SRC), '이미지 설정의 cloud 를 실제로 읽는다');
 ok(/comfy-video'\)\.loadConfig\(\)\.cloud/.test(SRC), '비디오 설정의 cloud 를 실제로 읽는다');
 ok(/const canParallel = !dry && !_imgLocalGpu/.test(SRC), 'canParallel 이 로컬 이미지를 배제한다');

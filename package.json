@@ -22,7 +22,8 @@
     "test:grok": "node test/grok-selectors.test.js",
     "test:delmedia": "node test/delete-media.test.js",
     "test:comfy": "node test/comfy-models.test.js && node test/pipeline-mode.test.js && node test/gpu-lanes.test.js && node test/comfy-panes.smoke.js",
-    "test:tts": "node test/tts-gate.test.js"
+    "test:tts": "node test/tts-gate.test.js",
+    "test:makeall": "node test/makeall-dry.smoke.js"
   },
   "dependencies": {
     "@vivliostyle/cli": "^11.0.4",
