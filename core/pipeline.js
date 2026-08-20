@@ -173,11 +173,51 @@ function atempoWavToMp3(wavPath, mp3Path, tempo) {
   return r.status === 0 && fs.existsSync(mp3Path);
 }
 
+// ── 💽 디스크 일시 장애 재시도 ─────────────────────────────
+// 🔴 2026-08-21 사고(이벤트로그 실측): 07:54:37 유선랜(Intel I211) 링크 끊김 → 07:54:50 복구(100Mbps) →
+//   **07:54:51 구글 드라이브가 G:·J:·K: 를 언마운트** → 07:55:07 재마운트. 그 16초 사이에
+//   ① `writeFileSync(…tts-1\70.wav)` 가 ENOENT 로 던져 [서재_0820] 대본이 통째로 죽고
+//   ② 큐에 남은 9개 대본이 `mkdirSync(…tts-1)` ENOENT 로 **같은 초(07:54:53)에 전부** 죽었다(성공 0).
+//   출력 폴더가 G:(구글 드라이브 스트리밍)이라 이 일시 장애는 **또 온다** → 던지지 말고 기다렸다 다시 한다.
+//   ⚠ 반드시 **비동기 대기**(setTimeout)여야 한다 — 동기 대기(Atomics.wait 등)는 메인 프로세스를
+//     통째로 얼려 클릭·IPC 가 멈춘다(v0.3.18 「execFileSync 프리징」과 같은 계열).
+const FS_RETRY_DELAYS = [1000, 2000, 4000, 8000, 15000];   // 합 30초 — 실사고 공백 16초를 넉넉히 덮는다
+
+// 마운트가 사라지면 경로의 뿌리부터 없어져 **ENOENT** 가 난다(파일이 진짜 없는 것과 코드가 같다).
+//   🔑 이 판정은 **쓰기·폴더생성 경로에서만** 쓰므로 ENOENT 도 일시 장애로 보고 재시도한다.
+//     끝까지 안 되면 그대로 던지므로, 진짜 잘못된 경로가 조용히 묻히지는 않는다(30초 늦게 드러날 뿐).
+function isTransientFsError(e) {
+  const c = e && e.code;
+  return c === 'ENOENT' || c === 'EBUSY' || c === 'EPERM' || c === 'EACCES'
+      || c === 'EIO' || c === 'EAGAIN' || c === 'ENXIO' || c === 'ENODEV'
+      || c === 'ENOTDIR' || c === 'UNKNOWN';
+}
+
+// fn 을 실행하고, 일시 장애면 FS_RETRY_DELAYS 간격으로 다시 시도. 끝내 실패하면 마지막 오류를 던진다.
+async function retryFs(fn, what, onLine, abortSignal) {
+  let last = null;
+  for (let i = 0; ; i++) {
+    try { return fn(); } catch (e) { last = e; }
+    if (!isTransientFsError(last) || i >= FS_RETRY_DELAYS.length) break;
+    if (abortSignal && abortSignal()) break;
+    const w = FS_RETRY_DELAYS[i];
+    if (onLine) onLine(`💽 ${what} 실패(${last.code}) — 출력 폴더가 잠시 사라진 듯합니다(구글 드라이브 재연결 등). ${w / 1000}초 뒤 다시 시도 ${i + 1}/${FS_RETRY_DELAYS.length}`);
+    await new Promise((r) => setTimeout(r, w));
+  }
+  throw last;
+}
+
 // ── 오디오 채우기 ───────────────────────────────────────
 // TTS 는 항상 정속(1.0) 합성 → speedFactor(기본 1.15) 만큼 atempo 로 배속 구운 MP3 로 변환.
 //   배속이 음성에 직접 반영되므로 Vrew 배속(playbackRate) 불필요. 8초 그룹·.vrew 모두 이 음성 사용.
 async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, label = '', onProgress = null, force = false) {
-  fs.mkdirSync(workDir, { recursive: true });
+  // 🔑 여기서 던지면 그 대본이 **한 문장도 시도하지 못하고** 죽는다(2026-08-21 사고: 큐 9개가 같은 초에 전멸).
+  try {
+    await retryFs(() => fs.mkdirSync(workDir, { recursive: true }), '출력 폴더 만들기', onLine, abortSignal);
+  } catch (e) {
+    throw new Error(`출력 폴더를 만들 수 없습니다 — ${workDir} (${e.code || e.message}). `
+      + '구글 드라이브(G:)가 연결돼 있는지, 그 경로가 아직 있는지 확인하세요.');
+  }
   const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
   if (sf !== 1 && (!ffmpegPath || !fs.existsSync(ffmpegPath))) {
     if (onLine) onLine(`⚠ ffmpeg 사용 불가 — 배속(${sf}x) 미적용, 정속 WAV 로 진행 (경로: ${ffmpegPath || '없음'})`);
@@ -223,7 +263,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
-      try { fs.copyFileSync(hit.file, out); s.ttsAudioPath = out; }
+      try { await retryFs(() => fs.copyFileSync(hit.file, out), `컷${s.num} 캐시 복사`, onLine, abortSignal); s.ttsAudioPath = out; }
       catch { s.ttsAudioPath = hit.file; }
       s.ttsDurationSec = hit.dur;
       s.ttsGenSec = (Date.now() - _genT0) / 1000;
@@ -261,22 +301,36 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       continue;   // 다음 문장으로
     }
     consecFail = 0;
-    if (sf !== 1) {
-      // 정속 WAV → atempo 배속 MP3
-      const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
-      fs.writeFileSync(wavTmp, res.mp3Buffer);
-      const mp3 = path.join(workDir, `${s.num}.mp3`);
-      const ok = atempoWavToMp3(wavTmp, mp3, sf);
-      try { fs.unlinkSync(wavTmp); } catch {}
-      if (ok) { s.ttsAudioPath = mp3; s.ttsDurationSec = res.durationSec / sf; }
-      else { // ffmpeg 실패 폴백: 정속 WAV 그대로
-        const wav = path.join(workDir, `${s.num}.wav`); fs.writeFileSync(wav, res.mp3Buffer);
-        s.ttsAudioPath = wav; s.ttsDurationSec = res.durationSec;
+    // 🔑 **파일 쓰기도 실패한다** — 합성만 감싸면 절반만 막은 것이다(2026-08-21 사고: 컷70 쓰기 ENOENT 로
+    //   [서재_0820] 대본 전체가 죽었다). 일시 장애면 재시도하고, 그래도 안 되면 **그 문장만** 건너뛴다.
+    try {
+      if (sf !== 1) {
+        // 정속 WAV → atempo 배속 MP3
+        const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
+        await retryFs(() => fs.writeFileSync(wavTmp, res.mp3Buffer), `컷${s.num} 임시 WAV 쓰기`, onLine, abortSignal);
+        const mp3 = path.join(workDir, `${s.num}.mp3`);
+        const ok = atempoWavToMp3(wavTmp, mp3, sf);
+        try { fs.unlinkSync(wavTmp); } catch {}
+        if (ok) { s.ttsAudioPath = mp3; s.ttsDurationSec = res.durationSec / sf; }
+        else { // ffmpeg 실패 폴백: 정속 WAV 그대로
+          const wav = path.join(workDir, `${s.num}.wav`);
+          await retryFs(() => fs.writeFileSync(wav, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);
+          s.ttsAudioPath = wav; s.ttsDurationSec = res.durationSec;
+        }
+      } else {
+        const out = path.join(workDir, `${s.num}.wav`);
+        await retryFs(() => fs.writeFileSync(out, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);
+        s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec;
       }
-    } else {
-      const out = path.join(workDir, `${s.num}.wav`);
-      fs.writeFileSync(out, res.mp3Buffer);
-      s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec;
+    } catch (e) {
+      failed.push(s.num);
+      consecFail++;
+      if (onLine) onLine(`✗ 컷${s.num} 저장 실패 — 이 문장은 건너뜁니다: ${e.code || ''} ${e.message}`);
+      if (consecFail >= MAX_CONSEC_FAIL) {
+        if (onLine) onLine(`⛔ 연속 ${consecFail}문장 저장 실패 — 출력 폴더에 쓸 수 없습니다(${workDir}). 이 대본의 음성 변환을 멈춥니다.`);
+        break;
+      }
+      continue;   // 다음 문장으로
     }
     s.ttsGenSec = (Date.now() - _genT0) / 1000; // 이 문장 생성에 걸린 실시간(초)
     // 캐시에 저장(다음 동일 작업 시 재활용)
@@ -749,4 +803,5 @@ module.exports = { nudgePromptForRetry,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,
   mergeGroupsByTts, buildImagePrompt, normalizePromptNegations,
+  retryFs, isTransientFsError,
 };
