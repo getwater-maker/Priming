@@ -1889,6 +1889,20 @@ export default function App() {
     } catch (e) { logline('i2v 워크플로 추가 오류: ' + e.message); }
   }
   async function removeCvidWf(p) { return removeWf(p, cvidCfg, saveCvidCfg); }
+  // 헤더 이미지 드롭다운 — ComfyUI 항목은 **모델(워크플로)까지** 고른다.
+  //   고르면 그 모드의 주소 + 워크플로를 설정에 저장하고, 엔진 값엔 워크플로 경로만 담는다.
+  async function onPickImgEngine(val) { return pickComfy(val, setImgEngine, comfyCfg, saveComfyCfg, 'img'); }
+  // 이미지·비디오 공통 처리 (동작이 같아 한 함수로 — 예전엔 두 벌 복사돼 있었다)
+  async function pickComfy(val, setEngine, cur, saveCfg, tab) {
+    const c = parseComfyVal(val);
+    if (!c) { setEngine(val); return; }
+    const cloud = (c.cloud == null) ? !!(cur && cur.cloud) : c.cloud;   // 레거시 값이면 현재 모드 유지
+    setEngine(c.path ? `comfy::${c.path}` : 'comfy');
+    const patch = { cloud, baseUrl: cloud ? ((cur && cur.cloudBaseUrl) || DEF_CLOUD_URL) : ((cur && cur.localBaseUrl) || DEF_LOCAL_URL) };
+    if (c.path) patch.workflowPath = c.path;
+    await saveCfg(patch);
+    if (!c.path) openSettings(tab);                                     // 워크플로가 하나도 없을 때만 설정 안내
+  }
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
   async function onPickVideoEngine(val) { return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid'); }
   async function submitBatch() {
