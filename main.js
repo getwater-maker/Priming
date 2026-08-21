@@ -2330,13 +2330,32 @@ async function _maybeUpscaleCore(project, logger, enabled) {
   const MU = require('./core/media-utils');
   const targets = [];
   let already = 0;
+  let unknown = 0;
   for (const g of cand) {
+    // 해상도 측정 — 일시 실패(구글드라이브 지연 등)에 대비해 1회 재시도.
     let info = null;
-    try { info = await MU.getMediaInfo(g.videoPath); } catch {}
-    if (info && info.width >= W && info.height >= H) { already++; continue; }
+    for (let a = 0; a < 2; a++) {
+      try { info = await MU.getMediaInfo(g.videoPath); } catch { info = null; }
+      if (info && info.width) break;
+      if (a === 0) await new Promise((r) => setTimeout(r, 1200));
+    }
+    // 🔴 못 재면 **건너뛴다(fail-closed)**. 예전엔 여기서 업스케일 대상에 넣었는데(width null → 비교 false),
+    //    그 결과 LTX 가 1080p 로 뽑은 영상까지 로컬 GPU 로 수십 분씩 업스케일했다(아내 PC 실사고 2026-08-21).
+    //    "못 재는 것"을 근거로 긴 GPU 작업을 하는 건 잘못된 기본값이다 — 재려면 ffmpeg 를 고쳐야 한다.
+    if (!info || !info.width || !info.height) {
+      unknown++;
+      logger(`⚠ G${g.num} 해상도를 재지 못해 업스케일을 건너뜁니다 (ffmpeg·파일 접근 확인) — ${g.videoPath}`);
+      continue;
+    }
+    if (info.width >= W && info.height >= H) {
+      already++;
+      continue;
+    }
+    logger(`⬆ G${g.num} ${info.width}x${info.height} → ${W}x${H} 업스케일 대상`);   // 왜 도는지 로그로 남긴다
     targets.push(g);
   }
   if (already) logger(`⬆ 업스케일 생략 — 이미 ${W}x${H} 이상인 영상 ${already}개 (로컬 GPU 사용 안 함)`);
+  if (unknown) logger(`⚠ 해상도 미측정 ${unknown}개 — 업스케일하지 않았습니다`);
   if (!targets.length) return;
   let done = 0;
   // ⚠ 경로 교체(NN.mp4→NN_1080.mp4)를 루프 안에서 pushDtoUpdate 하면, 그 그룹 <video> src 가 바뀌어 썸네일이
