@@ -358,6 +358,10 @@ export default function App() {
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
+  // 🔴 큐 순회용 중단 플래그 — main 의 S.abort 는 렌더러가 볼 수 없어서, 큐 루프가 중단을 모른 채
+  //    다음 대본을 계속 시작했다(실측 2026-08-21: 0826 중단 → 0827·0828 이 이어서 시작됨).
+  //    state 가 아니라 ref 인 이유: setState 는 비동기라 실행 중인 루프에 즉시 보이지 않는다.
+  const queueAbortRef = useRef(false);
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -745,9 +749,12 @@ export default function App() {
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
     const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
+    queueAbortRef.current = false;                       // 새 큐 시작 — 지난 중단 기록 초기화
     for (const ph of phases) {
+      if (queueAbortRef.current) break;
       const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
       for (let k = 0; k < items.length; k++) {
+        if (queueAbortRef.current) { logline(`⏹ 큐 ${plabel} 중단 — 남은 ${items.length - k}편은 건너뜁니다`); break; }
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
         try { await api.selectQueueItem(it.id); } catch (_) {}
@@ -759,7 +766,7 @@ export default function App() {
       }
     }
     try { const r = await api.selectQueueItem(origId); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
-    setStatus(`⚡ 큐 ${label} 완료`);
+    setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : `⚡ 큐 ${label} 완료`);
   }
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
   async function runImgVid(shortsNum) {
@@ -1148,7 +1155,7 @@ export default function App() {
     try { const d = await api.setAspect(v); if (d) setDto(d); setStatus('비율 ' + v); }
     catch (e) { logline('오류: ' + e.message); }
   }
-  function abort() { api.abort(); setStatus('중단 요청됨'); }
+  function abort() { queueAbortRef.current = true; api.abort(); setStatus('중단 요청됨'); }
 
   function updateTitleField(shortsNum, field, rawValue) {
     let v = rawValue;
