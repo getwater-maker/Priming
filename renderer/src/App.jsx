@@ -1238,6 +1238,7 @@ export default function App() {
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
       speedShort: p.speedShort != null ? p.speedShort : (sh.defaultTtsSpeed != null ? sh.defaultTtsSpeed : 1.25),
       styleLong: p.styleLong || p.styleId || 'chibi', styleShort: p.styleShort || p.styleId || 'chibi',
+      styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'rotate', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
       outLong: p.outLong || p.outputFolder || '', outShort: p.outShort || p.outputFolder || '',
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
@@ -1460,6 +1461,7 @@ export default function App() {
       capLong: capToStyle(ch.capLong), capShort: capToStyle(ch.capShort),
       speedLong: numOr(ch.speedLong, 1.15), speedShort: numOr(ch.speedShort, 1.25),
       styleLong: ch.styleLong, styleShort: ch.styleShort,
+      styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'rotate', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
       outLong: (ch.outLong || '').trim(), outShort: (ch.outShort || '').trim(),
       // 분할옵션(롱폼)
@@ -2355,6 +2357,13 @@ export default function App() {
                     <div className="crow"><span className="l">스타일</span><select value={ch.styleShort} onChange={(e) => setCh({ ...ch, styleShort: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
                   </div>
                 </div>
+
+                <div className="crow" style={{ marginTop: 4 }}><span className="l">🖼 썸네일</span>
+                  <select value={ch.styleThumb || ''} onChange={(e) => setCh({ ...ch, styleThumb: e.target.value })}>
+                    <option value="">— 롱폼과 같게 —</option>
+                    {chStyles.map((s2) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
+                  </select></div>
+                <div className="meta">☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</div>
 
                 <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
                 <div className="twocol">

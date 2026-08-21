@@ -297,6 +297,8 @@ app.whenReady().then(() => {
       // 🎨 이미지 스타일도 같은 서버에 모인다 — 앱을 켜기만 해도 다른 PC 가 만든 스타일이 내려온다.
       //   조용히(quiet) 한다 — 서버가 꺼진 PC 에서 켤 때마다 경고가 뜨면 소음이다(🎨 편집창을 열면 알려준다).
       try { await syncStylesFromServer(true); } catch {}
+      // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
+      try { exportChannelStyles(); } catch {}
     })();
   }, 4000);
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
@@ -449,6 +451,19 @@ ipcMain.handle('get-mode-profiles', () => {
   const { MODE_PROFILES } = require('./core/mode-profiles');
   return MODE_PROFILES;
 });
+// 🎨 채널 화풍을 파일로 내보낸다 — 아도나이로이 대시보드(localhost:8765)가 이걸 읽어
+//   패키징의 「이미지 프롬프트」 앞에 화풍을 붙여 **썸네일 프롬프트**를 만든다.
+//   화풍 문자열을 두 곳(앱 · 채널 지침 config.md)에 손으로 적어 두면 어긋난다 — 실제로 어긋나 있었다.
+//   그래서 **앱이 실제로 쓰는 값**을 그대로 내보낸다. 내용이 그대로면 파일을 다시 쓰지 않는다.
+function exportChannelStyles() {
+  try {
+    const r = require('./core/channel-styles').write();
+    if (!r.ok) log(`⚠ 채널 화풍 목록을 내보내지 못했습니다 — ${r.error}`);
+    else if (r.changed) log(`🎨 채널 화풍 목록 내보냄 — 채널 ${r.channels}개 · rev ${r.rev} → ${r.path}`);
+    return r;
+  } catch (e) { log(`⚠ 채널 화풍 내보내기 오류: ${(e && e.message) || e}`); return { ok: false }; }
+}
+ipcMain.handle('export-channel-styles', () => exportChannelStyles());
 ipcMain.handle('list-styles', () => {
   try { return require('./core/style-store').loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '', isBuiltIn: !!s.isBuiltIn })); }
   catch (e) { return []; }
@@ -486,25 +501,25 @@ ipcMain.handle('sync-styles', async () => syncStylesFromServer(false));
 ipcMain.handle('add-style', async (_e, style = {}) => {
   let r = null;
   try { r = require('./core/style-store').add(style || {}); } catch (e) { return null; }
-  if (r) await pushStylesToServer();
+  if (r) { await pushStylesToServer(); exportChannelStyles(); }
   return r;
 });
 ipcMain.handle('update-style', async (_e, args = {}) => {
   let r = null;
   try { r = require('./core/style-store').update(args.id, { name: args.name, prompt: args.prompt }); } catch (e) { return null; }
-  if (r) await pushStylesToServer();
+  if (r) { await pushStylesToServer(); exportChannelStyles(); }
   return r;
 });
 ipcMain.handle('remove-style', async (_e, id) => {
   let ok = false;
   try { ok = require('./core/style-store').remove(id); } catch (e) { return false; }
-  if (ok) await pushStylesToServer();
+  if (ok) { await pushStylesToServer(); exportChannelStyles(); }
   return ok;
 });
 ipcMain.handle('move-style', async (_e, args = {}) => {
   let ok = false;
   try { ok = require('./core/style-store').moveStyle(args.id, args.direction); } catch (e) { return false; }
-  if (ok) await pushStylesToServer();
+  if (ok) { await pushStylesToServer(); exportChannelStyles(); }
   return ok;
 });
 
@@ -2718,6 +2733,7 @@ ipcMain.handle('save-preset', (_e, args = {}) => {
   if (!p) throw new Error('프리셋을 찾을 수 없습니다.');
   store.update(p.id, args.patch || {});
   log(`채널 "${args.name}" 설정 저장`);
+  exportChannelStyles();
   return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault, group: x.group || '' }));
 });
 // 채널 추가 — 현재(또는 지정) 채널 설정을 복사해 새 이름으로 생성.
@@ -2733,6 +2749,7 @@ ipcMain.handle('add-preset', (_e, args = {}) => {
   copy.name = name;
   store.add(copy);
   log(`채널 "${name}" 추가 (복사 원본: ${src.name || '기본값'})`);
+  exportChannelStyles();
   return P.listPresets();
 });
 // 채널 목록 순서 변경 — 드롭다운에 보이는 순서를 사용자가 정한다. names = 원하는 순서의 채널 이름 배열.
@@ -2745,6 +2762,7 @@ ipcMain.handle('reorder-presets', (_e, args = {}) => {
   if (!ids.length) return P.listPresets();
   store.reorder(ids);
   log(`채널 순서 변경 (${ids.length}개)`);
+  exportChannelStyles();
   return P.listPresets();
 });
 // 채널 이름 변경 — id 는 유지하고 name 만 교체. 큐 항목이 참조하던 옛 이름도 새 이름으로 옮김.
@@ -2768,6 +2786,7 @@ ipcMain.handle('rename-preset', (_e, args = {}) => {
     if (S.preset && S.preset.name === oldName) S.preset.name = newName;
   } catch {}
   log(`채널 이름 변경: "${oldName}" → "${newName}"`);
+  exportChannelStyles();
   return P.listPresets();
 });
 // 채널 삭제 — 마지막 1개는 보호.
@@ -2780,6 +2799,7 @@ ipcMain.handle('remove-preset', (_e, args = {}) => {
   if (!p) throw new Error('채널을 찾을 수 없습니다.');
   store.remove(p.id);
   log(`채널 "${name}" 삭제`);
+  exportChannelStyles();
   return P.listPresets();
 });
 // Gemini API 키 (secret-store, gemini 엔진 공용) — GPU 없는 PC에서 음성 생성용

@@ -10,6 +10,7 @@ const os = require('os');
 const { _electron: electron } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 const STORE = path.join(os.homedir(), '.flow-app', 'styles.json');
+const EXPORT = path.join(os.homedir(), '.flow-app', 'channel-styles.json');   // 🎨 대시보드(8765)가 읽는 채널 화풍
 const readStore = () => { try { return JSON.parse(fs.readFileSync(STORE, 'utf8')); } catch { return []; } };
 
 let bad = 0, n = 0;
@@ -61,13 +62,37 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     console.log('  동기화 결과: ' + (note || '(안내문 없음 = 정상 동기화)'));
     ok(!/동기화 중…$/.test(note), '동기화가 끝났다(진행중 문구가 남아 있지 않다)');
     if (note) {
-      ok(/구버전|받지 못|주소|올리지/.test(note), '서버를 못 쓰면 무엇을 해야 하는지 알려준다');
+      // 서버가 살아 있으면 성공 문구, 못 쓰면 이유 + 무엇을 할지 — 둘 중 하나여야 한다(정체불명 문구 금지).
+      ok(/맞췄습니다|구버전|받지 못|주소|올리지/.test(note), '동기화 결과를 사람 말로 알려준다');
     }
 
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
     const closed = await win.evaluate(() => ![...document.querySelectorAll('.modal-card')].some((c) => (c.textContent || '').includes('이미지 스타일 편집')));
     ok(closed, 'ESC 로 닫힌다');
+    // 🎨 채널편집 → 제작 도구 탭: 롱폼·쇼츠 화풍 + **썸네일 화풍**(대시보드용) 칸이 있어야 한다.
+    await win.click('button[title*="채널(프리셋) 설정 편집"]');
+    await win.waitForSelector('.modal-card.tabbed', { timeout: 10000 });
+    await win.click('.modal-card button:has-text("제작 도구")');
+    await win.waitForTimeout(300);
+    const t = await win.evaluate(() => {
+      const card = [...document.querySelectorAll('.modal-card')].find((c) => (c.textContent || '').includes('이미지 스타일'));
+      const rows = [...card.querySelectorAll('.crow')];
+      const lab = (r) => ((r.querySelector('.l') || {}).textContent || '');
+      const thumb = rows.find((r) => lab(r).includes('썸네일'));
+      const sel = thumb && thumb.querySelector('select');
+      return {
+        styleRows: rows.filter((r) => lab(r).includes('스타일')).length,
+        firstOpt: sel && sel.options.length ? sel.options[0].text : '',
+        text: card.innerText,
+      };
+    });
+    ok(t.styleRows === 2, '롱폼·쇼츠 화풍 칸 2개 (' + t.styleRows + '개)');
+    ok(/롱폼과 같게/.test(t.firstOpt), '썸네일 화풍 칸의 기본값 = 롱폼과 같게 → ' + t.firstOpt);
+    ok(t.text.includes('channel-styles.json'), '내보내는 파일 경로를 화면이 알려 준다');
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(200);
+
     ok(errs.length === 0, '화면 오류 0건' + (errs.length ? ' → ' + errs.join(' / ') : ''));
   } finally {
     await app.close().catch(() => {});
@@ -78,6 +103,18 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
   const lost = before.filter((s) => !after.some((x) => x.id === s.id)).map((s) => s.name);
   ok(after.length >= before.length, '사용자 스타일 개수 ' + before.length + ' → ' + after.length + ' (줄지 않음)');
   ok(lost.length === 0, '사라진 스타일 없음' + (lost.length ? ' → ' + lost.join(', ') : ''));
+
+  // 🎨 앱을 켜면(4초 뒤) 채널 화풍이 내보내진다 — 아도나이로이 대시보드(8765)가 읽는 그 파일.
+  let ex = null;
+  try { ex = JSON.parse(fs.readFileSync(EXPORT, 'utf8')); } catch (_) {}
+  ok(!!ex, '채널 화풍 파일이 있다 → ' + EXPORT);
+  if (ex) {
+    ok(Array.isArray(ex.channels) && ex.channels.length > 0, '채널 ' + ex.channels.length + '개');
+    ok(/[+]09:00$/.test(ex.updatedAt || ''), 'updatedAt 이 KST(+09:00) → ' + ex.updatedAt);
+    const miss = ex.channels.filter((c) => !c.long || (!c.long.prompt && !c.long.missing));
+    ok(miss.length === 0, '모든 채널에 롱폼 화풍 문자열이 있다' + (miss.length ? ' → ' + miss.map((c) => c.channel).join(',') : ''));
+    ok(ex.channels.every((c) => c.thumb && c.thumb.from), '채널마다 썸네일 화풍이 확정돼 있다(폴백도 표기)');
+  }
 
   console.log('\n결과: ' + (n - bad) + '/' + n + (bad ? ' — 실패 ' + bad : ' 통과'));
   process.exit(bad ? 1 : 0);
