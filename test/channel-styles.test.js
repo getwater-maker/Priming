@@ -105,7 +105,9 @@ console.log('\n[5] 파일 쓰기 — 원자적 · 안 바뀌면 다시 쓰지 �
 
 console.log('\n[6] 앱 배선 — 원문 대조');
 {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  // ⚠ 줄끝을 정규화해서 본다 — main.js 가 한 번 CRLF 로 저장되면(python 편집의 단골 사고)
+  //   `\n` 으로 찾는 단언이 전부 헛되게 실패한다. 실제로 2026-08-21 에 그렇게 깨졌다.
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   chk(/function exportChannelStyles\(\)/.test(main), 'main.js 에 exportChannelStyles 정의');
   chk(/ipcMain\.handle\('export-channel-styles'/.test(main), '수동 내보내기 IPC');
   // 채널을 고치는 다섯 경로 + 스타일 편집 뒤 + 앱 시작
