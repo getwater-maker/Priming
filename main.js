@@ -294,6 +294,9 @@ app.whenReady().then(() => {
         const names = await require('./tts/asr-client').listServerVoices();
         await syncRefAudioToServer(names);
       } catch {}
+      // 🎨 이미지 스타일도 같은 서버에 모인다 — 앱을 켜기만 해도 다른 PC 가 만든 스타일이 내려온다.
+      //   조용히(quiet) 한다 — 서버가 꺼진 PC 에서 켤 때마다 경고가 뜨면 소음이다(🎨 편집창을 열면 알려준다).
+      try { await syncStylesFromServer(true); } catch {}
     })();
   }, 4000);
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
@@ -450,18 +453,59 @@ ipcMain.handle('list-styles', () => {
   try { return require('./core/style-store').loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '', isBuiltIn: !!s.isBuiltIn })); }
   catch (e) { return []; }
 });
+// ☁ 공용 스타일 동기화 — 여러 PC 가 같은 목록을 본다(참조음성 라이브러리와 같은 정책).
+//   실패해도 로컬 목록을 그대로 돌려준다 — 서버가 꺼져 있어도 스타일 편집·생성이 막히지 않게.
+async function syncStylesFromServer(quiet = false) {
+  const SS = require('./core/style-store');
+  let note = '';
+  try {
+    const r = await SS.pullFromServer(log);
+    if (!r.ok) {
+      note = r.unsupported
+        ? 'OmniVoice 서버가 구버전이라 스타일 공유를 못 씁니다 — 메인 PC 의 서버를 재시작하세요(이 PC 스타일은 그대로 씁니다).'
+        : `공용 스타일을 받지 못했습니다 — ${r.error} (이 PC 스타일을 그대로 씁니다)`;
+      if (!quiet) log(`⚠ ${note}`);
+    } else if (r.warn) {
+      note = `공용 목록에 올리지 못했습니다 — ${r.warn}`;
+      if (!quiet) log(`⚠ ${note}`);
+    }
+  } catch (e) { note = String((e && e.message) || e); if (!quiet) log(`⚠ 스타일 동기화 오류: ${note}`); }
+  let styles = [];
+  try { styles = SS.loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '', isBuiltIn: !!s.isBuiltIn })); } catch {}
+  return { styles, note };
+}
+// 이 PC 의 변경을 공용 목록으로 올린다(추가·수정·삭제·순서변경 직후). 실패는 알리기만.
+async function pushStylesToServer() {
+  try {
+    const r = await require('./core/style-store').pushToServer(log);
+    if (!r.ok && !r.unsupported) log(`⚠ 이미지 스타일을 공용 목록에 올리지 못했습니다 — ${r.error} (이 PC 에는 저장됐습니다)`);
+  } catch (e) { log(`⚠ 이미지 스타일 공유 오류: ${(e && e.message) || e}`); }
+}
+ipcMain.handle('sync-styles', async () => syncStylesFromServer(false));
 // 이미지 스타일 편집(사용자 스타일만 추가/수정/삭제/순서 — 기본 스타일은 스토어가 보호)
-ipcMain.handle('add-style', (_e, style = {}) => {
-  try { return require('./core/style-store').add(style || {}); } catch (e) { return null; }
+ipcMain.handle('add-style', async (_e, style = {}) => {
+  let r = null;
+  try { r = require('./core/style-store').add(style || {}); } catch (e) { return null; }
+  if (r) await pushStylesToServer();
+  return r;
 });
-ipcMain.handle('update-style', (_e, args = {}) => {
-  try { return require('./core/style-store').update(args.id, { name: args.name, prompt: args.prompt }); } catch (e) { return null; }
+ipcMain.handle('update-style', async (_e, args = {}) => {
+  let r = null;
+  try { r = require('./core/style-store').update(args.id, { name: args.name, prompt: args.prompt }); } catch (e) { return null; }
+  if (r) await pushStylesToServer();
+  return r;
 });
-ipcMain.handle('remove-style', (_e, id) => {
-  try { return require('./core/style-store').remove(id); } catch (e) { return false; }
+ipcMain.handle('remove-style', async (_e, id) => {
+  let ok = false;
+  try { ok = require('./core/style-store').remove(id); } catch (e) { return false; }
+  if (ok) await pushStylesToServer();
+  return ok;
 });
-ipcMain.handle('move-style', (_e, args = {}) => {
-  try { return require('./core/style-store').moveStyle(args.id, args.direction); } catch (e) { return false; }
+ipcMain.handle('move-style', async (_e, args = {}) => {
+  let ok = false;
+  try { ok = require('./core/style-store').moveStyle(args.id, args.direction); } catch (e) { return false; }
+  if (ok) await pushStylesToServer();
+  return ok;
 });
 
 // 발음사전 — 자막은 대본 그대로 두고 TTS 만 교정. entry = { source, pron, enabled }.

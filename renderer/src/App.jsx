@@ -384,6 +384,7 @@ export default function App() {
   const findTextRef = useRef('');        // 검색어 (비제어)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
+  const [styleSync, setStyleSync] = useState('');            // ☁ 공용 스타일 동기화 상태/경고
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
   const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
   // 🎨 보이스디자인(Qwen3-TTS) 모달
@@ -1010,6 +1011,18 @@ export default function App() {
     else setStatus('스타일 삭제 실패');
   }
   async function moveStyle(id, direction) { const ok = await api.moveStyle({ id, direction }); if (ok) await refreshStyles(); }
+  // ☁ 공용 스타일 동기화 — 스타일 목록은 **여러 PC 공용**이다(참조음성과 같은 서버).
+  //   편집창을 열 때 한 번 맞춘다 → 다른 PC 가 만든 스타일이 바로 보인다. 실패하면 이 PC 것만 쓴다.
+  async function syncStyles(showOk) {
+    setStyleSync('☁ 공용 스타일 동기화 중…');
+    try {
+      const r = await api.syncStyles();
+      setStyles((r && r.styles) || []);
+      if (r && r.note) setStyleSync('⚠ ' + r.note);
+      else setStyleSync(showOk ? '☁ 공용 스타일과 맞췄습니다 — 이 목록은 다른 PC 와 함께 씁니다.' : '');
+    } catch (e) { setStyleSync('⚠ 동기화 오류: ' + e.message); }
+  }
+  async function openStyleEditor() { setStyleEditOpen(true); await syncStyles(false); }
   // ── 발음사전(TTS 교정) ─────────────────────────────
   async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictOpen(true); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
   async function saveDict() {
@@ -2062,7 +2075,7 @@ export default function App() {
               <option value="">스타일 없음</option>
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" onClick={() => setStyleEditOpen(true)}>✎</button>
+            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
             <select title="이미지 생성 방식 — 순환(무료) / 유료(나노바나나2) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
@@ -2385,7 +2398,11 @@ export default function App() {
         <div className="modal-bg show">
           <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
             <h3>🎨 이미지 스타일 편집</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>기본 스타일은 <b>읽기전용</b>(프롬프트 복사만 가능). 사용자 스타일은 이름·프롬프트 수정·삭제·순서변경 가능. 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.</div>
+            <div className="meta" style={{ marginBottom: 8 }}>기본 스타일은 <b>읽기전용</b>(프롬프트 복사만 가능). 사용자 스타일은 이름·프롬프트 수정·삭제·순서변경 가능. 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.<br />☁ 사용자 스타일과 순서는 <b>여러 PC 공용</b>입니다(TTS 서버에 보관) — 여기서 고치면 다른 PC 에도 반영됩니다.</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <button className="ghost" style={{ flex: '0 0 auto' }} title="다른 PC 가 바꾼 스타일 받아오기 + 이 PC 것 올리기" onClick={() => syncStyles(true)}>☁ 동기화</button>
+              <span className="meta" style={{ flex: 1, color: /^⚠/.test(styleSync) ? '#c0392b' : undefined }}>{styleSync}</span>
+            </div>
             <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
               {styles.map((s, i) => (
                 <StyleRow key={s.id} s={s} index={i} total={styles.length}

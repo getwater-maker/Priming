@@ -193,4 +193,112 @@ function moveStyle(id, direction) {
   return _saveOrder(ids);
 }
 
-module.exports = { loadAll, getById, getPrompt, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, BUILT_IN_STYLES };
+// ── ☁ 여러 PC 공유 (OmniVoice 서버의 /styles) ────────────────────────────────
+//  왜: 목소리(참조음성)는 이미 서버 공용 라이브러리를 쓰는데 **스타일은 PC 마다 갈렸다**.
+//    나와 아내가 같은 채널을 쓰는데 스타일 목록이 다르면 같은 대본이 다른 화풍으로 나온다.
+//  어디에: 구글드라이브(G:)가 아니라 **상시 실행 서버**. G: 는 동기화 지연이 있고 실제로
+//    언마운트되어 작업이 죽은 적이 있다(2026-08-21). 스타일은 몇 KB 라 서버가 가볍다.
+//  정책: **로컬 파일이 작업 사본**이다 — loadAll() 은 그대로 동기·오프라인 동작.
+//    동기화는 ① 앱 시작 ② 🎨 편집창 열기 ③ 추가·수정·삭제·순서변경 직후에만 오간다.
+//    서버가 꺼져 있거나 구버전이면 조용히 이 PC 것만 쓴다(작업이 막히지 않는다).
+const SYNC_PATH = path.join(STORE_DIR, 'style-sync.json');   // { rev } — 마지막으로 맞춘 개정번호
+
+function _loadSyncState() {
+  try {
+    if (fs.existsSync(SYNC_PATH)) {
+      const d = JSON.parse(fs.readFileSync(SYNC_PATH, 'utf-8'));
+      if (d && Number.isFinite(Number(d.rev))) return { rev: Number(d.rev) };
+    }
+  } catch (_) {}
+  return { rev: null };                                       // null = 이 PC 는 아직 한 번도 안 맞췄다
+}
+
+function _saveSyncState(rev) {
+  try {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(SYNC_PATH, JSON.stringify({ rev: Number(rev) || 0, at: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch (e) { console.error('[style-store] 동기화 상태 저장 실패:', e.message); }
+}
+
+function _cleanList(arr) {
+  return (Array.isArray(arr) ? arr : [])
+    .filter((s) => s && typeof s === 'object' && String(s.id || '').trim() && String(s.name || '').trim() && String(s.prompt || '').trim())
+    .map((s) => ({ id: String(s.id).trim(), name: String(s.name).trim(), prompt: String(s.prompt).trim() }));
+}
+
+/** 두 목록을 id 기준으로 합친다(어느 쪽도 잃지 않는다). prefer = 같은 id 일 때 이기는 쪽. */
+function mergeStyles(serverList, localList, prefer = 'server') {
+  const srv = _cleanList(serverList), loc = _cleanList(localList);
+  const [first, second] = prefer === 'local' ? [loc, srv] : [srv, loc];
+  const out = [], seen = new Set(), added = [];
+  for (const s of first) if (!seen.has(s.id)) { seen.add(s.id); out.push(s); }
+  for (const s of second) if (!seen.has(s.id)) { seen.add(s.id); out.push(s); added.push(s); }
+  return { merged: out, added };
+}
+
+/** 순서 목록 합치기 — 앞 목록을 그대로 두고, 뒤 목록에만 있는 id 를 뒤에 붙인다. */
+function mergeOrder(firstOrder, secondOrder) {
+  const a = (Array.isArray(firstOrder) ? firstOrder : []).filter((x) => typeof x === 'string' && x.trim());
+  const b = (Array.isArray(secondOrder) ? secondOrder : []).filter((x) => typeof x === 'string' && x.trim());
+  const seen = new Set(a);
+  return [...a, ...b.filter((x) => !seen.has(x))];
+}
+
+/** 서버 → 이 PC. 첫 동기화는 **합치고**(양쪽 스타일 보존) 그 뒤부터는 서버가 정본(삭제도 전파). */
+async function pullFromServer(log = () => {}) {
+  const ASR = require('../tts/asr-client');
+  const r = await ASR.getSharedStyles();
+  if (!r.ok) return { ok: false, error: r.error, unsupported: r.error === 'unsupported' };
+  const local = _loadUserStyles(), localOrder = _loadOrder();
+  const known = _loadSyncState().rev;
+
+  if (known == null || r.rev === 0) {
+    // 처음 맞추는 것(또는 서버가 아직 빈 상태) = 합집합. 여기서 서버를 그냥 덮어쓰면 아내 PC 의
+    //   스타일이 사라지고, 서버로 그냥 덮어쓰면 내 스타일이 사라진다 → 합치고 올린다.
+    const { merged, added } = mergeStyles(r.styles, local, 'server');
+    const order = mergeOrder(r.order, localOrder);
+    _saveUserStyles(merged); _saveOrder(order);
+    if (added.length || r.rev === 0) {
+      const w = await ASR.putSharedStyles({ styles: merged, order, baseRev: r.rev });
+      if (w.ok) {
+        _saveSyncState(w.rev);
+        if (added.length) log(`☁ 이 PC 에만 있던 이미지 스타일 ${added.length}개를 공용 목록에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
+        return { ok: true, count: merged.length, pushed: added.length, rev: w.rev };
+      }
+      return { ok: true, count: merged.length, pushed: 0, warn: w.error };   // 로컬은 이미 합쳐 뒀다
+    }
+    _saveSyncState(r.rev);
+    return { ok: true, count: merged.length, pushed: 0, rev: r.rev };
+  }
+
+  if (r.rev === known) return { ok: true, unchanged: true, count: local.length, rev: r.rev };
+  const next = _cleanList(r.styles);
+  _saveUserStyles(next);
+  // 서버에 순서가 없으면 이 PC 순서를 유지한다(빈 값으로 멀쩡한 순서를 지우지 않게).
+  if ((r.order || []).length) _saveOrder(r.order);
+  _saveSyncState(r.rev);
+  log(`☁ 공용 이미지 스타일을 받았습니다 — 사용자 스타일 ${next.length}개 (rev ${r.rev})`);
+  return { ok: true, count: next.length, rev: r.rev, replaced: true };
+}
+
+/** 이 PC → 서버. 충돌(다른 PC 가 그 사이 저장)이면 합쳐서 한 번만 다시 시도한다.
+ *  ⚠ 충돌 합치기에서는 **방금 이 PC 가 한 편집이 이긴다**. 대신 그 사이 다른 PC 가 추가한
+ *    스타일도 함께 남는다(= 삭제한 것이 되살아날 수는 있다 — 잃는 것보다 낫다). */
+async function pushToServer(log = () => {}) {
+  const ASR = require('../tts/asr-client');
+  const styles = _loadUserStyles(), order = _loadOrder();
+  const known = _loadSyncState().rev;
+  let w = await ASR.putSharedStyles({ styles, order, baseRev: known == null ? -1 : known });
+  if (w.conflict) {
+    const { merged } = mergeStyles(w.styles, styles, 'local');
+    const order2 = mergeOrder(order, w.order);
+    _saveUserStyles(merged); _saveOrder(order2);
+    w = await ASR.putSharedStyles({ styles: merged, order: order2, baseRev: w.rev });
+    if (w.ok) log('☁ 다른 PC 가 그 사이 바꾼 이미지 스타일과 합쳐서 저장했습니다.');
+  }
+  if (w.ok) { _saveSyncState(w.rev); return { ok: true, rev: w.rev, count: (w.styles || []).length }; }
+  return { ok: false, error: w.error, unsupported: w.error === 'unsupported' };
+}
+
+module.exports = { loadAll, getById, getPrompt, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, BUILT_IN_STYLES,
+  pullFromServer, pushToServer, mergeStyles, mergeOrder, SYNC_PATH };

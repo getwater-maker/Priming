@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   listPresets: () => ipcRenderer.invoke('list-presets'),
   getModeProfiles: () => ipcRenderer.invoke('get-mode-profiles'),
   listStyles: () => ipcRenderer.invoke('list-styles'),
+  syncStyles: () => ipcRenderer.invoke('sync-styles'),   // ☁ 공용(여러 PC) 스타일 받아오기 + 이 PC 것 올리기
   addStyle: (style) => ipcRenderer.invoke('add-style', style),
   updateStyle: (args) => ipcRenderer.invoke('update-style', args),
   removeStyle: (id) => ipcRenderer.invoke('remove-style', id),

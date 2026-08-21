@@ -186,6 +186,66 @@ async function saveServerVoice({ name, text = '', instruct = '', wavBuffer }) {
   } catch (e) { return { ok: false, error: _netErr(e, base) }; }
 }
 
+/**
+ * 🎨 /styles — 여러 PC 가 함께 쓰는 이미지 스타일 목록.
+ *   왜 여기에 있나: 이 파일이 곧 **OmniVoice 서버 클라이언트**다(참조음성 라이브러리도 여기 있다).
+ *   주소·X-API-Key·네트워크 오류 문구를 만드는 코드가 한 곳에만 있어야 서로 어긋나지 않는다.
+ *   구버전 서버면 404 → { ok:false, error:'unsupported' } (호출부는 로컬 스타일만 쓰면 된다).
+ */
+async function getSharedStyles({ timeoutMs = 5000 } = {}) {
+  const base = _baseUrl();
+  if (!base) return { ok: false, error: 'OmniVoice 서버 주소가 없습니다' };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    try { res = await fetch(base + '/styles', { headers: { ..._authHeaders() }, signal: ctrl.signal }); }
+    finally { clearTimeout(t); }
+    if (res.status === 404) return { ok: false, error: 'unsupported' };
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status} (${base})` };
+    const j = await res.json().catch(() => ({}));
+    return {
+      ok: true,
+      styles: Array.isArray(j.styles) ? j.styles : [],
+      order: Array.isArray(j.order) ? j.order : [],
+      rev: Number(j.rev) || 0,
+      updatedAt: j.updatedAt || '',
+    };
+  } catch (e) { return { ok: false, error: _netErr(e, base) }; }
+}
+
+/** /styles 저장. baseRev 를 함께 보내 **그 사이 다른 PC 가 저장했으면 409**(+현재 문서)를 받는다.
+ *  baseRev 를 생략하면 -1(검사 없이 덮어쓰기) — 첫 씨딩·복구 전용. */
+async function putSharedStyles({ styles = [], order = [], baseRev = -1, timeoutMs = 8000 } = {}) {
+  const base = _baseUrl();
+  if (!base) return { ok: false, error: 'OmniVoice 서버 주소가 없습니다' };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(base + '/styles', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: JSON.stringify({ styles, order, baseRev: Number.isFinite(baseRev) ? baseRev : -1 }),
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(t); }
+    if (res.status === 404) return { ok: false, error: 'unsupported' };
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+      return {
+        ok: false, conflict: true, error: 'conflict',
+        styles: Array.isArray(j.styles) ? j.styles : [],
+        order: Array.isArray(j.order) ? j.order : [],
+        rev: Number(j.rev) || 0,
+      };
+    }
+    if (!res.ok) return { ok: false, error: `${j.error || 'HTTP ' + res.status} (${base})` };
+    return { ok: true, styles: j.styles || [], order: j.order || [], rev: Number(j.rev) || 0 };
+  } catch (e) { return { ok: false, error: _netErr(e, base) }; }
+}
+
 /** undici 의 "fetch failed" 는 원인을 cause 에 숨긴다 — 실제 코드와 주소를 함께 보여준다. */
 function _netErr(e, base) {
   const code = (e && e.cause && (e.cause.code || e.cause.message)) || '';
@@ -197,4 +257,4 @@ function _netErr(e, base) {
   return `${(e && e.message) || e}${code ? ` [${code}]` : ''}${why ? ` — ${why}` : ''} (${base})`;
 }
 
-module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices, saveServerVoice };
+module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles };

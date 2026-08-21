@@ -7,6 +7,52 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎨☁ 이미지 스타일도 **여러 PC 공용** — 참조음성과 같은 서버에 모은다 (2026-08-21, v0.3.24)
+> 로이: "참조음성 목소리를 내 PC 와 아내 PC 에서 공동으로 쓸 수 있는거지? 클라우드 형태로…
+>   **이미지 스타일도 같이 공유하며 활용**할 수 있도록 해줘."
+- 🔑 **먼저 사실 확인 — 참조음성은 이미 공유되고 있었다**(v0.2.96~v0.3.6 에 만든 그것). 실측:
+  `GET /ref-voices` → `dir D:\TTS_Model\ref-audio · voices 62개`. 채널의 목소리 값은 `srv:<이름>` 이고
+  합성 때 **이름만** 보내므로 **아내 PC 엔 wav 파일이 없어도 된다.** 앱을 켜면 4초 뒤 이 PC 에만 있는
+  목소리를 자동 업로드한다(`syncRefAudioToServer`). → 이번에 손댈 필요 없었다.
+- 🔴 **그런데 스타일은 PC 마다 갈려 있었다**(`~/.flow-app/styles.json` · `style-order.json` = 로컬 전용).
+  같은 채널·같은 대본인데 스타일 목록이 다르면 **같은 편이 다른 화풍으로 나온다.** 그래서 같은 방식으로 모았다.
+- **어디에 두나 = OmniVoice 서버(9881).** 구글드라이브(G:)에 두는 쪽이 코드는 쉽지만 **바로 오늘
+  G: 가 16초 사라져 큐 10개가 죽었다**(위 항목). 스타일은 몇 KB고, 이 서버는 SYSTEM 예약작업으로
+  **상시 실행** + 참조음성·발음사전의 주인이므로 공유 원장으로 이미 검증된 자리다.
+- **서버 `api.py` 에 `/styles` 신설**(발음사전 `/dict` 와 같은 꼴 + **rev**):
+  · `GET /styles` → `{styles, order, rev, updatedAt}` · `PUT /styles` `{styles, order, baseRev}`
+  · 🔑 **rev(개정번호) 낙관적 잠금** — 받아 간 rev 를 되보내고, 그 사이 다른 PC 가 저장했으면 **409 + 현재 문서**.
+    발음사전처럼 Last-Write-Wins 로 두면 **한쪽 PC 가 다른 PC 의 새 스타일을 조용히 지운다**(스타일엔 삭제가 있다).
+    `baseRev:-1` = 검사 없이 덮어쓰기(첫 씨딩·복구용). 저장은 tmp→`os.replace` 원자적, 필드는 id·name·prompt 만 남긴다.
+  · 보관 위치 `FLOW_STYLE_PATH`(런처가 `omnivoice\data\styles.shared.json` 으로 고정 — SYSTEM 홈에 흩어지지 않게).
+  · **기본 28개 스타일은 안 보낸다** — 앱 코드에 있으니까(서버엔 사용자 스타일 + 순서만).
+- **앱 쪽(`core/style-store.js`) — 로컬 파일이 작업 사본이다.** `loadAll()` 은 그대로 **동기·오프라인** 동작
+  (생성 경로가 네트워크를 기다리게 만들면 안 된다). 오가는 시점은 **① 앱 시작(조용히) ② 🎨 편집창 열기
+  ③ 추가·수정·삭제·순서변경 직후** 뿐. `pullFromServer` / `pushToServer` / `mergeStyles` / `mergeOrder`.
+  · 🔑 **첫 동기화는 합친다**(id 기준 union) — 서버로 덮으면 아내 스타일이 사라지고, 로컬로 덮으면 내 것이 사라진다.
+    **그 뒤부터는 서버가 정본**(안 그러면 삭제가 영원히 전파되지 않는다). 맞춘 rev 는 `~/.flow-app/style-sync.json`.
+  · 충돌(409)이면 **합쳐서 한 번만** 재시도 — 방금 이 PC 가 한 편집이 이기고, 그 사이 남이 추가한 것도 남는다
+    (⚠ 대신 남이 아직 모르는 삭제는 되살아날 수 있다 — 잃는 것보다 낫다).
+  · 서버가 꺼졌거나 구버전(404)이면 **조용히 이 PC 것만** 쓴다(작업이 막히지 않는다). 🎨 창을 열면 이유를 알려준다.
+- **UI**: 🎨 편집창을 열 때 자동 동기화 + 「☁ 동기화」 버튼 + 상태줄(실패는 빨강). 안내문에 "여러 PC 공용" 명시.
+- 검증 `npm run test:styles` = **단위 40/40**(`test/style-share.test.js` — **USERPROFILE 을 갈아끼우고 require
+  캐시를 지워 "두 PC" 를 만든다** + api.py 규약을 그대로 구현한 HTTP 스텁: 첫 동기화 합치기 · 양방향 전파 ·
+  삭제 전파 · **409 충돌에서 양쪽 새 스타일이 다 사는지** · 순서 공유 · 404/주소없음 폴백 · main.js 원문 배선 대조 ·
+  **실제 `~/.flow-app/styles.json` 무변경**) + **앱 E2E 9/9**(`style-share.smoke.js` — 실제로 ✎ 를 눌러 렌더 35개·
+  ☁ 버튼·동기화·ESC·화면오류 0 · 스타일이 사라지지 않았는지). 서버는 **FastAPI TestClient 12/12**(임시 경로라 프로덕션 무영향).
+  🔑 **A/B 역검증했다** — `baseRev` 검사를 없애면 `아내가먼저` 스타일이 조용히 사라지며 테스트가 **실패한다**.
+  회귀: 파서 11 · TTS 게이트 18 + fs-retry 31 · 만들기 무음 E2E 18 · 삭제 27 · comfy 41/31/14.
+- 🔴 **로이가 하실 일 — 메인 PC 서버를 한 번 재시작해야 켜진다.** 실측으로 지금 서버는 `/styles` **404**
+  (`/save-ref-voice` 는 200 계열 = 옛 코드가 돌고 있다). 예약작업이 **SYSTEM** 이라 비관리자로는 조회조차 안 된다
+  (`Get-ScheduledTask` 실패 확인). **관리자 PowerShell** 에서 한 줄씩:
+  `Get-ScheduledTask | Where-Object TaskName -like "*Omni*" | Format-Table TaskName,State` → `Stop-ScheduledTask -TaskName "OmniVoice_Backend"` → `Start-ScheduledTask -TaskName "OmniVoice_Backend"`
+  (모델 로딩 ~1분 뒤 `/health` 200). 그전까지는 양쪽 PC 가 각자 스타일을 쓰고, 재시작 후 **처음 🎨 를 여는 PC 의
+  스타일이 서버로 올라가고 그다음 PC 에서 합쳐진다.**
+- ⚠ `D:\TTS_Model\omnivoice\api.py`·`start_server.pyw` 는 **저장소 밖이라 라이트 업데이트로 배포되지 않는다**
+  (메인 PC 로컬 파일 — 백업 `api.py.bak-20260821-142505`). 앱 쪽(main·preload·App.jsx·style-store·asr-client)은 배포된다.
+- ⏳ **미검증**: 서버 재시작 후의 실제 왕복(내 PC ↔ 아내 PC). 아내 PC 는 앱 재시작 + ⚙ 설정의 OmniVoice 주소가
+  메인 PC 를 가리키고 있어야 한다(합성이 되는 주소면 스타일도 된다 — 같은 서버·같은 키).
+
 ## 🔴💽 G: 가 16초 사라져 **큐 10개가 전멸**했다 — 디스크 일시 장애 재시도 (2026-08-21, v0.3.23)
 > 로이: "중단된 이유가 뭐야?" — 14편 큐가 4편만 끝나고 `성공 0 · 실패 10` 으로 멎었다.
 > 로그: `ENOENT … tts-1\70.wav` → 남은 9개 대본이 전부 `ENOENT … mkdir …tts-1`.
