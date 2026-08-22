@@ -32,11 +32,75 @@ function stubServer() {
     ['https://cloud.comfy.org', false], ['http://192.168.219.145:8188', false], ['http://100.90.175.26:8188', false], ['', false],
   ]) chk(CL.isLocalUrl(u) === want, `isLocalUrl(${u || '빈값'}) = ${want}`);
 
-  console.log('\n[2] 설치 위치 후보');
+  console.log('\n[2] 설치 위치 후보 (Comfy Desktop = 폴백 전용)');
   {
     const c = CL.candidates();
     chk(c.length >= 2 && c.every((x) => /Comfy Desktop\.exe$/i.test(x)), '전역·사용자 설치 두 곳을 본다', c);
     chk(CL.candidates('D:/내가지정.exe')[0] === 'D:/내가지정.exe', '지정 경로가 있으면 그걸 먼저 본다');
+  }
+
+  console.log('\n[2b] 무엇을 띄울지 = installations.json 이 정본 (하드코딩 안 함)');
+  {
+    // 가짜 설치 2개를 만든다: 클라우드(무시돼야 함) · 로컬 2개(최근 실행한 쪽이 이겨야 함)
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cdfake-'));
+    const mk = (name, withVenv) => {
+      const root = path.join(tmp, name);
+      fs.mkdirSync(path.join(root, 'ComfyUI'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'ComfyUI', 'main.py'), '# fake');
+      if (withVenv) {
+        fs.mkdirSync(path.join(root, 'ComfyUI', '.venv', 'Scripts'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'ComfyUI', '.venv', 'Scripts', 'pythonw.exe'), 'x');
+      }
+      fs.mkdirSync(path.join(root, 'standalone-env'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'standalone-env', 'pythonw.exe'), 'x');
+      return root;
+    };
+    const oldRoot = mk('old', true);
+    const newRoot = mk('new', true);
+    const noMain = path.join(tmp, 'broken');
+    fs.mkdirSync(noMain, { recursive: true });                       // main.py 없음 → 후보 아님
+    fs.writeFileSync(path.join(tmp, 'installations.json'), JSON.stringify([
+      { id: 'cloudy', sourceId: 'cloud', remoteUrl: 'https://cloud.comfy.org/', lastLaunchedAt: 9e12 },
+      { id: 'inst-old', installPath: oldRoot, lastLaunchedAt: 1000 },
+      { id: 'inst-broken', installPath: noMain, lastLaunchedAt: 8e12 },
+      { id: 'inst-new', installPath: newRoot, lastLaunchedAt: 2000 },
+    ]));
+    const got = CL.findInstance(tmp);
+    chk(got && got.id === 'inst-new', '클라우드·main.py 없는 것을 걸러 최근 실행한 로컬을 고른다', got);
+
+    // 🔑 실행 파이썬은 .venv — standalone-env 가 아니다(실측: 후자는 torch 가 없어 즉사).
+    const py = CL.instancePython(newRoot);
+    chk(/\.venv[\\/]Scripts[\\/]pythonw\.exe$/i.test(py || ''), '.venv 의 pythonw 를 고른다 → ' + py);
+    const bare = mk('novenv', false);
+    chk(/standalone-env/i.test(CL.instancePython(bare) || ''), '.venv 가 없으면 기반 파이썬으로 폴백(런처가 재실행해 바로잡는다)');
+
+    const plan = CL.resolveLaunch({ appDataDir: tmp });
+    chk(plan && plan.kind === 'server', '서버 런처를 띄우는 계획이 나온다', plan && plan.kind);
+    chk(plan && /comfy-server\.pyw$/i.test(plan.args[plan.args.length - 1]), '인수 마지막이 런처 스크립트다', plan && plan.args);
+    chk(plan && plan.args.includes('-s'), '-s (사용자 site-packages 차단) 를 붙인다');
+
+    // 인스턴스를 못 찾으면 옛 Comfy Desktop 으로 폴백한다(옛 버전 PC 대비)
+    const plan2 = CL.resolveLaunch({ appDataDir: path.join(tmp, '없음'), exePath: __filename });
+    chk(plan2 && plan2.kind === 'desktop', '인스턴스가 없으면 Comfy Desktop 폴백', plan2 && plan2.kind);
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+
+  console.log('\n[2c] 런처 스크립트 원문 — 실측으로 얻은 함정 3개가 살아 있는지');
+  {
+    const p = path.join(__dirname, '..', 'comfy', 'comfy-server.pyw');
+    chk(fs.existsSync(p), '런처가 저장소에 있다(매니페스트 포함 → 아내 PC 에도 내려간다)');
+    const src = fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+    const iRedirect = src.indexOf('sys.stdout = _log');
+    const iRun = src.indexOf('runpy.run_path');
+    chk(iRedirect > 0 && iRun > iRedirect,
+      '출력 리다이렉트가 main.py 실행보다 **먼저** (pythonw 는 stdout 이 무효 → tqdm 이 서버를 죽인다)');
+    chk(/--disable-auto-launch/.test(src), '--disable-auto-launch (없으면 뜰 때마다 브라우저가 열린다)');
+    chk(/\.venv/.test(src) && /standalone-env/.test(src), '.venv 를 쓰고 기반 환경 문제를 기록해 뒀다');
+    chk(/--extra-model-paths-config/.test(src), '모델 경로 yaml 을 넘긴다(안 넘기면 모델 목록이 빈다)');
+    chk(/port_busy/.test(src), '이미 떠 있으면 두 번 띄우지 않는다(포트가 다른 곳으로 밀리는 것 방지)');
+    // 셸을 거치지 않는다 — cmd.exe 를 끼우면 서버가 사는 내내 검은 창이 남는다(v0.2.94 실측).
+    // runpy 로 **같은 프로세스에서** main.py 를 돌리므로 자식 프로세스가 아예 없다.
+    chk(!/\bos\.system\(|\bsubprocess\./.test(src), '셸·자식 프로세스를 쓰지 않는다(runpy 로 같은 프로세스에서 실행)');
   }
 
   console.log('\n[3] 살아 있는지 판정(ping)');
@@ -101,9 +165,14 @@ function stubServer() {
     const pf = process.env['ProgramFiles'], la = process.env.LOCALAPPDATA;
     process.env['ProgramFiles'] = tmp; process.env.LOCALAPPDATA = tmp;
     try {
-      const r = await CL.ensureLocalComfy({ baseUrl: 'http://127.0.0.1:34998', log: quiet, timeoutSec: 1, pollMs: 200 });
+      // appDataDir·appDir 도 빈 곳으로 돌린다 — 안 하면 이 PC 의 진짜 설치를 찾아내 성공해 버린다.
+      const r = await CL.ensureLocalComfy({
+        baseUrl: 'http://127.0.0.1:34998', log: quiet, timeoutSec: 1, pollMs: 200,
+        appDataDir: tmp, appDir: tmp,
+      });
       chk(!r.ok && r.reason === 'not-installed', '설치를 못 찾으면 그렇게 말한다', r);
       chk(/클라우드/.test(r.message || '') && /찾아본 곳/.test(r.message || ''), '대안(☁ 클라우드)과 찾아본 경로를 알려준다');
+      chk(/installations\.json/.test(r.message || ''), '어디를 봤는지(installations.json)까지 알려준다');
     } finally {
       process.env['ProgramFiles'] = pf; process.env.LOCALAPPDATA = la;
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
@@ -142,12 +211,21 @@ function stubServer() {
     chk(idxLaunch > 0 && idxFree > idxLaunch, '순서: 켜기 → VRAM 정리 → 생성 (꺼져 있는 서버에 /free 를 보내지 않는다)');
   }
 
-  console.log('\n[11] 부팅 자동 실행 — 시작프로그램 바로가기');
+  console.log('\n[11] 부팅 자동 실행 — 시작프로그램 바로가기가 **서버 런처**를 가리키는지');
   {
-    const lnk = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'ComfyUI (Priming 이미지용).lnk');
-    const exists = fs.existsSync(lnk);
-    chk(exists, '바로가기 존재 → ' + lnk);
-    if (exists) chk(fs.statSync(lnk).size > 200, '바로가기 내용이 있다(' + fs.statSync(lnk).size + ' bytes)');
+    const dir = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((f) => /\.lnk$/i.test(f) && /comfy/i.test(f)); } catch (_) {}
+    chk(names.length === 1, `ComfyUI 바로가기가 정확히 1개 (실제 ${names.length}개: ${names.join(', ')})`);
+    if (names.length) {
+      const buf = fs.readFileSync(path.join(dir, names[0]));
+      // .lnk 는 경로·인수를 UTF-16LE 로 담는다.
+      const txt = buf.toString('utf16le') + '\n' + buf.toString('latin1');
+      chk(/comfy-server\.pyw/i.test(txt), '런처 스크립트를 인수로 넘긴다');
+      chk(/pythonw\.exe/i.test(txt), 'pythonw.exe 로 띄운다(검은 콘솔 창 없음)');
+      chk(!/Comfy Desktop\.exe/i.test(txt),
+        '옛 대상(Comfy Desktop.exe)이 아니다 — v1.0.39 는 대시보드만 뜨고 서버가 안 뜬다');
+    }
   }
 
   console.log('\n결과: ' + ok + ' OK / ' + fail + ' FAIL');

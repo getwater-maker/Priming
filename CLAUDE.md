@@ -7,6 +7,57 @@
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
 
+## 🔴🖥 부팅 자동 실행이 **한 번도 서버를 띄운 적이 없었다** — Comfy Desktop 이 런처로 바뀜 (2026-08-22, v0.3.30)
+> v0.3.27 의 ⏳「실제 재부팅 후 자동 실행 확인」을 이번에 실측했다. **실패였다.**
+- 🔑 **증상은 "실행 안 됨"이 아니라 "실행됐는데 서버가 없음"이었다** — 여기서 헷갈리면 엉뚱한 곳을 고친다:
+  · 부팅 **18분 뒤** `Comfy Desktop` 프로세스가 **8개 살아 있고** 창도 응답(v1.0.39)한다. 바로가기·대상 파일 정상.
+  · 그런데 **그 PID 들이 연 포트가 0개**다(8188 리스너 없음). 열려 있던 9881·9893·8765 는 전부 무관한 pythonw.
+  · 앱 로그는 `App started` → `user-tier` → `git bootstrap` **4줄에서 멈춘다**(오류조차 없다).
+  · 결정적 증거: `%APPDATA%\Comfy Desktop\last-session.json` = **`{"kind":"dashboard"}`**.
+    → v1.0.39 는 **대시보드(런처)** 로 뜨고, ComfyUI 서버는 **사람이 인스턴스를 클릭할 때만** 시작된다.
+  · 즉 v0.3.27 의 전제(「앱을 띄우면 서버가 뜬다」)가 **버전 업으로 조용히 거짓이 됐다.** 방어선 2겹이 **둘 다** 무력:
+    앱 쪽 `comfy-launch` 도 이미 떠 있는 앱을 또 spawn 할 뿐이라 150초 타임아웃으로 끝난다.
+- ✅ **해결 = 앱 UI 에 의존하지 않고 서버를 직접 띄운다** — `comfy/comfy-server.pyw` 신설(로이 확정).
+  Comfy Desktop 의 UI 가 또 바뀌어도 안 깨지고, OmniVoice·보이스디자인이 쓰는 **검증된 패턴과 같다**.
+  · 시작프로그램 = 「**ComfyUI 서버 (Priming 이미지용).lnk**」 → `<install>\ComfyUI\.venv\Scripts\pythonw.exe -s <앱>\comfy\comfy-server.pyw`.
+    옛 「ComfyUI (Priming 이미지용).lnk」(Comfy Desktop.exe)는 **제거**했다 — 두 개면 8188 을 서로 다툰다.
+  · 앱 쪽(`core/comfy-launch.js`)도 **같은 런처**를 spawn 한다(진입점이 둘로 갈리면 다음 사람이 엉뚱한 쪽을 고친다).
+    `findInstance`/`instancePython`/`launcherScript`/`resolveLaunch` 를 export 해 테스트가 원문을 직접 돌린다.
+  · **경로 하드코딩 안 함** — `%APPDATA%\Comfy Desktop\installations.json` 이 정본이다(클라우드 항목 제외,
+    `ComfyUI\main.py` 실재 확인, `lastLaunchedAt` 최신 우선). 다시 설치하거나 드라이브를 옮겨도 따라간다.
+- 🔴 **함정 ① 실행 파이썬은 `ComfyUI\.venv` 다 — `standalone-env` 가 아니다.** 실측: standalone-env\pythonw.exe 로
+  돌리면 `ModuleNotFoundError: No module named 'torch'` 로 즉사한다(그건 기반 인터프리터일 뿐이고 torch 는
+  uv 가 만든 `.venv` 안에 있다 — `pyvenv.cfg` 의 `home` 이 standalone-env 를 가리킨다).
+  `.venv\Scripts\pythonw.exe` → **torch 2.12.1+cu130 · cuda True**. 런처는 잘못된 파이썬으로 불려도
+  **스스로 `.venv` 로 한 번 재실행**해 낫는다(`PRIMING_COMFY_REEXEC` 로 무한루프 방지) — 실측 확인.
+- 🔴 **함정 ② pythonw 는 콘솔이 없어 `sys.stdout` 이 무효다.** 그 상태로 ComfyUI 의 tqdm·logging 이 출력하면
+  **포트조차 안 열리고 조용히 죽는다**(v0.2.95 OmniVoice 에서 이미 밟은 그것). → **main.py 를 불러오기 전에**
+  진짜 파일 핸들로 바꾼다(`~/.shots-maker/logs/comfy-server.log`, 5MB 넘으면 새로 씀).
+  ⚠ 그 로그 파일은 앱의 7일 보관 청소에 **안 걸린다**(정규식이 `YYYY-MM-DD.log` 만 지운다 — 확인함).
+- 🔴 **함정 ③ 모델 경로 yaml 을 반드시 넘긴다** — `instance-model-paths\<id>.yaml`(Comfy Desktop 이 만든다).
+  안 넘기면 모델 목록이 비어 「로컬 ComfyUI 에 모델 'krea2_turbo…' 가 없습니다」로 생성이 통째로 실패한다.
+  `--disable-auto-launch` 도 필수(없으면 뜰 때마다 **브라우저가 열린다**). 입·출력 폴더는 settings.json 값을 따라간다.
+- 🔑 **셸을 안 거친다**: `runpy` 로 **같은 프로세스에서** main.py 를 돌린다(자식 프로세스 0). bat 을 끼우면
+  cmd.exe 가 자식을 기다려 **검은 창이 서버가 사는 내내 남는다**(v0.2.94 실측). 런처는 포트를 먼저 확인해
+  **이미 떠 있으면 아무것도 안 한다**(두 번 띄우면 뒤엣것이 다른 포트로 밀려 앱이 8188 에서 못 찾는다).
+- **검증(실측 — 전부 이 PC 에서 직접 돌렸다)**:
+  · 런처로 기동 → **약 55초**에 `Starting server` · 8188 LISTENING · ComfyUI **0.33.3** · RTX 3060 VRAM 11,245/12,287MB.
+  · **재실행 자동교정 확인** — 일부러 standalone-env pythonw 로 띄웠더니 `.venv` 로 다시 실행해 정상 기동.
+  · 모델 목록 정상: UNET 2개(`krea2_turbo_int8_convrot`·`z_image_turbo_bf16`) · CLIP 7 · VAE 3 · LoRA 3.
+  · 🔑 **앱의 실제 엔진 코드(`core/comfy-image.js`)로 1장 생성 성공** — `🔁 모델 자동 대체:
+    krea2_turbo_fp8_scaled → krea2_turbo_int8_convrot`(v0.3.22)까지 그대로 통과, **47.5초 · 1344x768 ·
+    1202KB · 노이즈/검정/글자 없는 정상 그림**(눈으로 확인). = Desktop 이 띄운 서버와 기능상 동일.
+  · `npm run test:comfylaunch` **46/46**(신설 [2b] 인스턴스 선택 5·[2c] 런처 원문 함정 7·[11] 바로가기 대상 4 포함).
+    **A/B 역검증**: 옛 `core/comfy-launch.js` 에는 `resolveLaunch`·`findInstance` 가 없어 [2b] 가 즉시 실패한다.
+  · 회귀: `test:comfy`(모델 41·파이프라인 31·GPU 레인 14·2분할 E2E 69) · `test:makeall` 무음 E2E 18/18.
+- ⏳ **미검증(이것만 남았다)**: **실제 재부팅 후** 자동 기동. 다음에 PC 를 켜고 1분쯤 뒤 8188 이 응답하면 성공이고,
+  안 되면 `~/.shots-maker/logs/comfy-server.log` 의 `[priming-launcher]` 줄이 이유를 말해 준다.
+- ⚠ **알아 둘 것**: 이제 8188 은 우리 서버가 쥔다. 그 상태에서 **Comfy Desktop 창으로 인스턴스를 열면** 그쪽이
+  다른 포트로 밀리고(`portConflict:auto`), 두 서버가 뜨면 **모델이 VRAM 에 두 벌** 올라가 3060 에선 위험하다.
+  로컬로 직접 작업할 일이 있으면 우리 서버를 먼저 끄는 편이 안전하다(작업관리자에서 그 pythonw 종료).
+  · Comfy Desktop 은 오늘 ComfyUI 를 **v0.32.0 → v0.33.3** 로 자동 업데이트했다(`autoUpdateComfyUI:true`).
+    UNET 목록은 그대로라 앱 동작에는 영향이 없었다.
+
 ## 🌡☁ GPU 온도 기록·자동 알림 + 공유(스타일·참조음성) 실결함 5건 수리 (2026-08-22, v0.3.29)
 > 로이: "열 제안 진행해줘. 몇 주 데이터가 쌓이면 나에게도 알려줄 장치 — 나도 분명 잊어버릴 것 같아. 그때 대책도."
 >   + "이미지 스타일과 참조음성 공유가 깔끔하게 잘 운영되는지 점검하고 수리해줘." (감사 워크플로 3방향 실측)
