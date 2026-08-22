@@ -128,4 +128,47 @@ const mixed = BK.parseBookText([
 const types = mixed.parts[0].chapters[0].blocks.map((b) => b.type).join(',');
 ok(types === 'p,quote,verse,image,hr,list,table,p', `블록 순서 유지 (실제: ${types})`);
 
+// ── [8] 출력 제외 — 원고는 그대로 두고 책에서만 뺀다 ────────────────────────
+//   §0 진행 현황(33행 트래커)·✅ 체크리스트처럼 원고에는 있어야 하지만 인쇄물에는 없어야 하는 장.
+ok(HB.chapterKey(' 0. 진행 현황 ') === 'ch:0. 진행 현황', '장 키는 제목 기준 + 앞뒤 공백 정리');
+ok(HB.chapterExcluded('3. 체크리스트', ['ch:3. 체크리스트']) === true, '제외 판정');
+ok(HB.chapterExcluded('3. 체크리스트', ['ch:다른 장']) === false, '다른 장은 안 걸린다');
+ok(HB.chapterExcluded('3. 체크리스트', []) === false, '빈 목록이면 전부 포함');
+const cut = HB.buildBookHtml(book, { baseDir: 'D:/x', excluded: ['ch:0. 진행 현황 (Progress Tracker)'] }).html;
+ok((cut.match(/<section class="chapter"/g) || []).length === 3, '제외한 장이 본문에서 빠진다');
+ok(!cut.includes('페리코페'), '제외한 장의 표 내용도 함께 사라진다');
+ok((cut.match(/toc-chapter/g) || []).length === 3, '제외한 장은 목차에서도 빠진다');
+ok(cut.includes('1. 책 이름과 위치'), '남은 장은 그대로');
+// 🔑 원고(BookModel)는 불변이어야 한다 — 조판이 원고를 깎으면 다음 조판이 어긋난다
+ok(book.parts.flatMap((p) => p.chapters).length === 4, '제외해도 파싱 결과(원고)는 그대로');
+// 부(部) 안의 장이 전부 빠지면 부 표제지도 안 나온다
+const withPart = BK.parseBookText('# 책\n> 저자: 나\n\n## 1부. 그림자\n\n## 1장. 하나\n본문.\n', 'x');
+const pcut = HB.buildBookHtml(withPart, { baseDir: 'D:/x', excluded: ['ch:1장. 하나'] }).html;
+ok(!/class="part-title"/.test(pcut), '장이 다 빠진 부는 표제지도 생략');
+
+// ── [9] 작업용 파일 경로 → 파일명만 ────────────────────────────────────────
+ok(HB.shortenPath('../참고문헌/지도교수/오광만_박사논문2008.pdf') === '오광만_박사논문2008.pdf', '폴더를 떼고 파일명만');
+ok(HB.shortenPath('A/B 실험') === 'A/B 실험', '확장자 없는 평범한 글자는 안 건드린다');
+ok(HB.shortenPath('그냥 글자') === '그냥 글자', '경로가 아니면 그대로');
+ok(HB.shortenPath('https://a.com/b.pdf') === 'https://a.com/b.pdf', '외부 주소는 그대로');
+ok(HB.shortenPath('D:\\작업\\원고.md') === '원고.md', '윈도우 경로도');
+ok(HB.inlineMd('본문 `../a/b/c.pdf` 끝') === '본문 <span class="code">../a/b/c.pdf</span> 끝', '기본은 경로 유지(조용히 안 바꾼다)');
+ok(HB.inlineMd('본문 `../a/b/c.pdf` 끝', { hidePaths: true }) === '본문 <span class="code">c.pdf</span> 끝', '옵션을 켜야 축약');
+
+// ── [10] ePub 정합 — 내지와 같은 제외·필터가 걸려야 한다 ───────────────────
+//   여태 ePub 은 excluded/scriptMode 를 아예 받지 않아 종이책과 내용이 갈렸다(기존 결함).
+const EB = require('../core/book/epub-builder');
+const ebSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'core', 'book', 'epub-builder.js'), 'utf8');
+ok(/chapterExcluded/.test(ebSrc), 'ePub 이 장 제외 판정을 쓴다');
+ok(/scriptFilter\(blocks0, ctx\)/.test(ebSrc), 'ePub 이 영상 대본 모드 필터를 쓴다');
+ok(/hidePaths: !!a\.hidePaths/.test(ebSrc), 'ePub 이 경로 축약 옵션을 받는다');
+const mainSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+ok(/excluded: lo\.excluded, scriptMode: lo\.scriptMode/.test(mainSrc), 'main.js 가 ePub 빌드에 조판 옵션을 넘긴다');
+ok(/hidePaths: !!l\.hidePaths/.test(mainSrc), 'main.js layoutOpts 에 hidePaths');
+const uiSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'src', 'BookView.jsx'), 'utf8');
+ok(/function toggleChapter/.test(uiSrc), '구조 패널에 장 포함/제외 토글');
+ok(/L\('hidePaths'/.test(uiSrc), '조판 패널에 경로 축약 체크박스');
+ok(/hidePaths: false/.test(uiSrc), '경로 축약 기본 OFF');
+ok(typeof EB.buildEpub === 'function', 'epub-builder 로드');
+
 console.log(`✅ book-md.test.js — ${n} 단언 전부 통과`);

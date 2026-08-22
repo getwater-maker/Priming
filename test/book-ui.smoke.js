@@ -58,6 +58,39 @@ ${para}
     const pageTxt = await win.locator('.bkpage').innerText();
     console.log('· 미리보기 조판 OK —', pageTxt.trim());
 
+    // ── 본문 장 출력 제외(v0.3.33) — 원고는 그대로 두고 책에서만 뺀다 ──
+    //   §0 진행 현황·체크리스트처럼 원고엔 있어야 하지만 인쇄물엔 없어야 하는 장을 클릭 한 번으로.
+    const chBoxes = win.locator('.bkch input[type=checkbox]');
+    const chCount = await chBoxes.count();
+    if (chCount !== 2) throw new Error(`장 체크박스 ${chCount}개 ≠ 2`);
+    if (!(await chBoxes.nth(0).isChecked())) throw new Error('장이 기본 제외 상태 — 기본은 전부 포함이어야 한다');
+    const pagesBefore = Number((await win.locator('.bkpage').innerText()).match(/(\d+)쪽/)[1]);
+    await chBoxes.nth(1).uncheck();
+    // 재조판 대기 — 장 하나가 빠졌으니 쪽수가 줄어야 한다
+    await win.waitForFunction((before) => {
+      const el = document.querySelector('.bkpage');
+      const m = el && el.textContent.match(/(\d+)쪽/);
+      return m && Number(m[1]) < before;
+    }, pagesBefore, { timeout: 60000 });
+    const pagesAfter = Number((await win.locator('.bkpage').innerText()).match(/(\d+)쪽/)[1]);
+    console.log(`· 장 제외 OK — ${pagesBefore}쪽 → ${pagesAfter}쪽 (원고 불변)`);
+    // 원고(.md)는 안 건드렸는지 — 제외는 조판 옵션일 뿐이다
+    const mdAfter = fs.readFileSync(SAMPLE, 'utf8');
+    if (!mdAfter.includes('## 2장. 둘')) throw new Error('장 제외가 원고를 지웠다(비파괴 위반)');
+    await chBoxes.nth(1).check(); // 되돌리기 — 복원되는지
+    await win.waitForFunction((after) => {
+      const el = document.querySelector('.bkpage');
+      const m = el && el.textContent.match(/(\d+)쪽/);
+      return m && Number(m[1]) > after;
+    }, pagesAfter, { timeout: 60000 });
+    console.log('· 장 복원 OK — 다시 체크하면 되돌아온다');
+
+    // 「📁 작업용 파일 경로 → 파일명만」 옵션이 조판 패널에 있는지
+    const hidePathsBox = win.locator('label:has-text("작업용 파일 경로") input[type=checkbox]');
+    if (await hidePathsBox.count() !== 1) throw new Error('경로 축약 체크박스 없음');
+    if (await hidePathsBox.isChecked()) throw new Error('경로 축약은 기본 OFF 여야 한다');
+    console.log('· 경로 축약 옵션 OK (기본 OFF)');
+
     // 목차 쪽번호 — target-counter 가 해석돼 숫자가 나와야 한다('??' = anchor 불일치 회귀).
     //   (미리보기 URL 에 쿼리 캐시버스터를 붙이면 vivliostyle 같은문서 판정이 깨져 '??' 가 남)
     const tocTxt = await win.evaluate(() => {

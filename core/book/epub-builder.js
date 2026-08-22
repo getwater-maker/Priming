@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { esc, inlineMd } = require('./html-builder');
+const { esc, inlineMd, chapterExcluded, scriptFilter } = require('./html-builder');
 
 // ── 미니 ZIP 라이터 ──
 // adm-zip 은 writeZip 때 엔트리를 이름순 정렬해 ePub 규격(mimetype=첫 엔트리·무압축)을
@@ -145,9 +145,10 @@ function listXhtml(b, book, ctx) {
 }
 
 // 블록 → xhtml (ePub 전용 — 각주는 noteref + 장 끝 aside)
-function blocksXhtml(blocks, book, ctx) {
+function blocksXhtml(blocks0, book, ctx) {
   const out = [];
-  for (const b of blocks || []) {
+  // 영상 대본 모드 필터를 내지와 똑같이 태운다 — 안 맞추면 종이책과 전자책 내용이 갈린다.
+  for (const b of scriptFilter(blocks0, ctx)) {
     switch (b.type) {
       case 'p': out.push(`<p>${inline(b.text, book, ctx)}</p>`); break;
       case 'lead': out.push(`<p class="chapter-lead">${inline(b.text, book, ctx)}</p>`); break;
@@ -174,13 +175,14 @@ function blocksXhtml(blocks, book, ctx) {
   return out.join('\n');
 }
 function inline(text, book, ctx) {
+  const io = { hidePaths: !!(ctx && ctx.hidePaths) };
   const parts = String(text || '').split(/(\[\^[^\]]+\])/);
   let out = '';
   for (const p of parts) {
     const m = p.match(/^\[\^([^\]]+)\]$/);
-    if (!m) { out += inlineMd(p); continue; }
+    if (!m) { out += inlineMd(p, io); continue; }
     const def = book.footnotes[m[1]];
-    if (!def) { out += inlineMd(p); continue; }
+    if (!def) { out += inlineMd(p, io); continue; }
     ctx.fnSeq++;
     const id = `fn-${ctx.fnSeq}`;
     ctx.notes.push({ id, num: ctx.fnSeq, text: def.text });
@@ -230,8 +232,11 @@ async function buildEpub(book, a) {
   const navItems = [];
   let imgSeq = 0;
 
+  const excluded = Array.isArray(a.excluded) ? a.excluded : [];
   const ctx = {
     fnSeq: 0, notes: [],
+    hidePaths: !!a.hidePaths,
+    scriptMode: !!a.scriptMode, scriptHideShots: !!a.scriptHideShots,
     addImage(src) {
       try {
         const abs = path.isAbsolute(src) ? src : path.join(a.baseDir || '.', src);
@@ -291,6 +296,7 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
   // 5) 앞부속 (목차 마커는 스킵 — ePub 은 nav 가 목차)
   for (const s of book.front) {
     if (s.key === 'toc') continue;
+    if (excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고 보존)
     addDoc(`front-${s.key}`, `front-${s.key}.xhtml`, s.title,
       `<section class="front ${s.key === 'dedication' ? 'dedication' : ''}" epub:type="frontmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`,
       { toc: s.title });
@@ -298,12 +304,13 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
 
   // 6) 본문 — 부/장
   for (const p of book.parts) {
-    if (p.title) {
+    const shownChapters = (p.chapters || []).filter((c) => !chapterExcluded(c.title, excluded));
+    if (p.title && shownChapters.length) {
       addDoc(`part-${p.num || 'x'}`, `part-${p.num || 'x'}.xhtml`, p.title,
         `<section epub:type="part" style="text-align:center"><h1 style="margin-top:35%">${p.num ? `제${p.num}부 ` : ''}${esc(p.title)}</h1></section>`,
         { toc: `${p.num ? `제${p.num}부 ` : ''}${p.title}` });
     }
-    for (const c of p.chapters) {
+    for (const c of shownChapters) {
       addDoc(`ch-${c.num}`, `ch-${String(c.num).padStart(3, '0')}.xhtml`, c.title,
         `<section epub:type="chapter"><h1 class="chapter-title">${esc(c.title)}</h1>\n${blocksXhtml(c.blocks, book, ctx)}</section>`,
         { toc: c.title });
@@ -313,10 +320,11 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
   // 7) 뒷부속 + 판권
   for (const s of book.back) {
     if (s.key === 'colophon') continue;
+    if (excluded.includes(s.key)) continue;
     addDoc(`back-${s.key}`, `back-${s.key}.xhtml`, s.title,
       `<section class="back" epub:type="backmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`, { toc: s.title });
   }
-  const col = book.back.find((s) => s.key === 'colophon');
+  const col = excluded.includes('colophon') ? null : book.back.find((s) => s.key === 'colophon');
   const colBody = col && col.blocks && col.blocks.length
     ? blocksXhtml(col.blocks, book, ctx)
     : `<p>${esc(meta.title || '')}</p><p>지은이 ${esc(meta.author || '')}</p>${meta.translator ? `<p>옮긴이 ${esc(meta.translator)}</p>` : ''}<p>펴낸곳 ${esc(meta.publisher || '')}</p>${meta.isbn ? `<p>ISBN ${esc(meta.isbn)}</p>` : ''}${meta.ebookPrice ? `<p>정가(전자책) ${esc(meta.ebookPrice)}</p>` : ''}`;
@@ -354,7 +362,8 @@ ${spine.join('\n')}
 
   fs.mkdirSync(path.dirname(a.outPath), { recursive: true });
   fs.writeFileSync(a.outPath, zip.toBuffer());
-  const chapters = book.parts.reduce((n, p) => n + p.chapters.length, 0);
+  const chapters = book.parts.reduce((n, p) =>
+    n + p.chapters.filter((c) => !chapterExcluded(c.title, excluded)).length, 0);
   log(`📱 ePub 완료 — 장 ${chapters}개${coverAdded ? ' + 표지' : ''} · ${(fs.statSync(a.outPath).size / 1024 / 1024).toFixed(1)}MB → ${path.basename(a.outPath)}`);
   return { success: true, epubPath: a.outPath };
 }

@@ -50,7 +50,10 @@ const LAYOUT_DEFAULTS = {
   //   출판 탭의 2순위 목적(영상 대본을 깔끔히 정독)을 위한 스위치. 책 원고는 기본 OFF 로 영향 없음.
   scriptMode: false,
   scriptHideShots: false,
-  excluded: [],       // 출력 제외 섹션 key 목록 (원고는 보존)
+  excluded: [],       // 출력 제외 key 목록 — 예약 섹션은 key, 본문 장은 `ch:<제목>` (원고는 보존)
+  // 작업용 파일 경로(`../참고문헌/…/x.pdf`) → 파일명만. 종이에선 경로를 찾아갈 수 없고 한 줄을
+  //   통째로 잡아먹는다. 기본 OFF — 켜고 끄는 건 사용자가 정한다(조용히 내용을 바꾸지 않는다).
+  hidePaths: false,
 };
 
 // 구조 패널 체크박스 한 줄 — 원고에 있으면 포함/제외 토글(비파괴), 없으면 체크 시 템플릿 삽입.
@@ -316,6 +319,15 @@ body{overflow-y:scroll}
       if (d) setDto(d);
     }
   }
+  // 본문 장 포함/제외 — 원고(.md)는 그대로 두고 출력에서만 뺀다. 키는 `ch:<제목>`.
+  //   §0 진행 현황·체크리스트처럼 원고에는 있어야 하지만 인쇄물에는 없어야 하는 장에 쓴다.
+  function toggleChapter(title, on) {
+    const key = 'ch:' + String(title || '').trim();
+    const ex = new Set(layout.excluded || []);
+    if (on) ex.delete(key); else ex.add(key);
+    L('excluded', [...ex]);
+    setStatus(on ? '장 포함' : '장 제외 (원고에는 남아 있음 — 다시 체크하면 복원)');
+  }
   async function setMeta(key, value) {
     if ((meta[key] || '') === value) return;
     const d = await api.bookSetMeta({ key, value });
@@ -425,9 +437,16 @@ body{overflow-y:scroll}
           {(dto.parts || []).map((p, pi) => (
             <React.Fragment key={pi}>
               {p.title ? <div className="bkpart">{p.num ? `제${p.num}부 ` : ''}{p.title}</div> : null}
-              {p.chapters.map((c) => (
-                <div key={c.num} className="bkch" title={`문단 ${c.blocks}개 — 미리보기에서 클릭해 수정`}>{c.title || `(제목 없음)`}</div>
-              ))}
+              {p.chapters.map((c) => {
+                const chOn = !(layout.excluded || []).includes('ch:' + String(c.title || '').trim());
+                return (
+                  <label key={c.num} className="bkch chk" style={chOn ? undefined : { opacity: 0.5, textDecoration: 'line-through' }}
+                    title={`문단 ${c.blocks}개 — 미리보기에서 클릭해 수정 · 체크 해제 = 책에서 제외(원고 보존)`}>
+                    <input type="checkbox" checked={chOn} disabled={!c.title}
+                      onChange={(e) => toggleChapter(c.title, e.target.checked)} /> {c.title || `(제목 없음)`}
+                  </label>
+                );
+              })}
             </React.Fragment>
           ))}
           {!chapters.length && <div className="meta">본문 장이 없습니다 — 원고에 <code>## 1장. 제목</code>을 추가하세요.</div>}
@@ -436,7 +455,7 @@ body{overflow-y:scroll}
         {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
         <div className="bkzone">표지 구성 (표지 PDF)</div>
         {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} cover />)}
-        <div className="meta" style={{ marginTop: 8 }}>원고에 쓴 섹션은 자동으로 체크됩니다. 체크를 해제하면 <b>원고는 그대로 두고 책에서만 제외</b>합니다.</div>
+        <div className="meta" style={{ marginTop: 8 }}>원고에 쓴 섹션·본문 장은 자동으로 체크됩니다. 체크를 해제하면 <b>원고는 그대로 두고 책에서만 제외</b>합니다 — 진행표·체크리스트 같은 작업용 장을 인쇄물에서 뺄 때 쓰세요.</div>
         {dto.footnoteCount > 0 && <div className="meta" style={{ marginTop: 8 }}>각주 {dto.footnoteCount}개 — {meta.footnoteMode === '미주' ? '미주(책 끝 모음)' : '각주(페이지 하단)'}</div>}
       </div>
 
@@ -564,6 +583,13 @@ body{overflow-y:scroll}
                 샷 제목도 숨기기
               </label>
             ) : null}
+          </div>
+          {/* 작업용 파일 경로 — 종이에선 찾아갈 수 없고 한 줄을 통째로 잡아먹는다. 폴더만 떼고 파일명은 남긴다. */}
+          <div className="bkform">
+            <label title="본문의 ../참고문헌/지도교수/오광만_박사논문2008_….pdf 같은 파일 경로에서 폴더를 떼고 파일명만 남깁니다. 원고는 수정되지 않습니다.">
+              <input type="checkbox" checked={!!layout.hidePaths} onChange={(e) => L('hidePaths', e.target.checked)} />
+              📁 작업용 파일 경로 → 파일명만
+            </label>
           </div>
         </details>
         <details>

@@ -45,29 +45,41 @@ function stripLinks(t) {
     return lab;
   });
 }
-function inlineMd(s) {
+// 작업용 파일 경로 → 파일명만. 종이책에서 `../참고문헌/지도교수/…/오광만_박사논문2008_….pdf` 같은
+//   경로는 찾아갈 수도 없고 한 줄을 통째로 잡아먹는다. 폴더만 떼고 파일명은 남긴다(무엇인지는 알 수 있게).
+//   ⚠ 슬래시 + 확장자로 끝나는 것만 — 'A/B 실험' 같은 평범한 글자를 자르면 안 된다.
+const LOCAL_PATH_RE = /^(?!https?:)[^\s]*[/\\][^\s/\\]+\.[A-Za-z0-9]{1,5}$/;
+function shortenPath(t) {
+  const bare = t.trim();
+  if (!LOCAL_PATH_RE.test(bare)) return t;
+  return bare.split(/[/\\]/).pop();
+}
+function inlineMd(s, opts) {
+  const hidePaths = !!(opts && opts.hidePaths);
   let t = stripLinks(esc(s));
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-  t = t.replace(/`([^`]+)`/g, '<span class="code">$1</span>');
+  t = t.replace(/`([^`]+)`/g, (m, code) =>
+    `<span class="code">${hidePaths ? shortenPath(code) : code}</span>`);
   return t;
 }
 
 // 각주 참조 [^id] → 각주(float) 또는 미주(sup) 마크업.
 function renderInline(text, book, ctx) {
+  const io = { hidePaths: !!(ctx && ctx.hidePaths) };
   const parts = String(text || '').split(/(\[\^[^\]]+\])/);
   let out = '';
   for (const p of parts) {
     const m = p.match(/^\[\^([^\]]+)\]$/);
-    if (!m) { out += inlineMd(p); continue; }
+    if (!m) { out += inlineMd(p, io); continue; }
     const def = book.footnotes[m[1]];
-    if (!def) { out += inlineMd(p); continue; }
+    if (!def) { out += inlineMd(p, io); continue; }
     if (ctx.footnoteMode === 'endnote') {
       ctx.endnotes.push({ id: m[1], text: def.text });
       const n = ctx.endnotes.length;
       out += `<sup class="enref"><a id="enref-${n}" href="#en-${n}">${n}</a></sup>`;
     } else {
-      out += `<span class="footnote">${inlineMd(def.text)}</span>`;
+      out += `<span class="footnote">${inlineMd(def.text, io)}</span>`;
     }
   }
   return out;
@@ -131,6 +143,15 @@ function blockHtml(b, book, ctx, srcAttr) {
     case 'hr': return `<hr class="scene"${src} />`;
     default: return '';
   }
+}
+
+// ── 출력 제외 ────────────────────────────────────────────────────────────────
+// 구조 패널에서 체크 해제한 **본문 장**. 키는 `ch:<장 제목>` — 장 번호로 잡으면 앞에 장을 하나
+//   추가하는 순간 엉뚱한 장이 사라진다. 제목이 바뀌면 제외가 풀려 다시 나오는데, 그건 눈에
+//   보이는 실패라 "조용히 다른 장이 사라지는 것"보다 낫다. 원고(.md)는 건드리지 않는다.
+function chapterKey(title) { return "ch:" + String(title == null ? "" : title).trim(); }
+function chapterExcluded(title, excluded) {
+  return Array.isArray(excluded) && excluded.includes(chapterKey(title));
 }
 
 // ── 영상 대본 모드 필터 ───────────────────────────────────────────────────────
@@ -317,9 +338,11 @@ function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
 function tocHtml(book, tocTitle, excluded = []) {
   const items = [];
   for (const p of book.parts) {
-    if (p.title) items.push(`<li class="toc-part"><span class="tt">${esc(p.title)}</span></li>`);
+    const shown = (p.chapters || []).filter((c) => c.title && !chapterExcluded(c.title, excluded));
+    if (p.title && shown.length) items.push(`<li class="toc-part"><span class="tt">${esc(p.title)}</span></li>`);
     for (const c of p.chapters) {
       if (!c.title) continue;
+      if (chapterExcluded(c.title, excluded)) continue; // 출력에서 뺀 장은 목차에도 안 나온다
       items.push(`<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
     }
   }
@@ -551,6 +574,7 @@ function buildBookHtml(book, opts = {}) {
     specialKeywords: String(opts.specialKeyword || '').split(',').map((s) => s.trim()).filter(Boolean),
     // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──
     excluded: Array.isArray(opts.excluded) ? opts.excluded : [],
+    hidePaths: !!opts.hidePaths,
     // ── 영상 대본 모드 — 영상 제작용 블록을 **조판에서만** 제외(대본 파일은 손대지 않는다) ──
     //   대본은 매일 새로 쓰는 영상 파이프라인의 입력이라 사람이 위치를 옮기는 건 지속 불가능하다.
     //   제작 메모(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커)와 엔진 프롬프트(🖼️/🎬/🎞)만 걸러내고
@@ -568,6 +592,7 @@ function buildBookHtml(book, opts = {}) {
     footnoteMode: o.footnoteMode,
     scriptMode: o.scriptMode,               // 영상 대본 모드(제작용 블록 제외)
     scriptHideShots: o.scriptHideShots,
+    hidePaths: o.hidePaths,   // 작업용 파일 경로 → 파일명만
     endnotes: [],
     resolveImage(src) {
       if (/^(https?|data|media|file):/i.test(src)) return src;
@@ -609,11 +634,12 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
 
   // 본문 — 부 표제지 + 장
   for (const p of book.parts) {
-    if (p.title) {
+    const shownChapters = (p.chapters || []).filter((c) => !chapterExcluded(c.title, o.excluded));
+    if (p.title && shownChapters.length) {
       bodyParts.push(`<section class="part-title" id="part-${p.num || p.lineStart}">
 <div class="pt-num">${p.num ? `제${p.num}부` : ''}</div><h2>${esc(p.title)}</h2></section>`);
     }
-    for (const c of p.chapters) {
+    for (const c of shownChapters) {
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
 ${c.title ? (() => {
         // 최종본 스타일: '제N회'와 제목을 2줄로 분리(중앙 정렬). 러닝헤드용 전체 원제는 숨김 앵커(.ch-rh)로.
@@ -684,4 +710,5 @@ function metaPlatformId(meta) {
   return 'bookk';
 }
 
-module.exports = { buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK };
+module.exports = {
+  chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK };

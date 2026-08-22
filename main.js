@@ -4074,6 +4074,8 @@ function bookLayoutOpts(args = {}) {
     specialKeyword: l.specialKeyword, excluded: Array.isArray(l.excluded) ? l.excluded : [],
     // 영상 대본 모드 — 제작용 블록을 조판에서만 제외(대본 파일 불변). 미리보기·PDF·ePub 공통.
     scriptMode: !!l.scriptMode, scriptHideShots: !!l.scriptHideShots,
+    // 작업용 파일 경로(../참고문헌/…/x.pdf) → 파일명만. 종이에선 경로가 무의미하고 줄만 잡아먹는다.
+    hidePaths: !!l.hidePaths,
   };
 }
 
@@ -4488,6 +4490,7 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   try {
     const { buildEpub } = require('./core/book/epub-builder');
+    const lo = bookLayoutOpts(args);   // 구조 패널 제외·대본 모드·경로 축약(내지와 동일)
     const { metaPlatformId } = require('./core/book/html-builder');
     const SC = require('./core/book/spine-calc');
     const PP = require('./core/book/platform-presets');
@@ -4508,6 +4511,9 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
       outPath: path.join(outRoot, `${base}.epub`),
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
       coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
+      // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
+      excluded: lo.excluded, scriptMode: lo.scriptMode, scriptHideShots: lo.scriptHideShots,
+      hidePaths: lo.hidePaths,
       spread, log,
     });
     if (r.success) { try { shell.openPath(outRoot); } catch {} }
