@@ -1,25 +1,29 @@
-# Priming-Maker — 작업 컨텍스트 노트
+# Priming — 작업 컨텍스트 노트
 
 > 다음 AI(또는 사람)가 5분 안에 컨텍스트를 복원하기 위한 노트.
 
 ## 프로젝트 한 줄 요약
-**롱폼(16:9)·쇼츠(9:16)를 한 앱에서** 만드는 Electron 통합 도구. 대본(.md) → TTS·이미지·(선택)비디오
-→ **Vrew 4.0.1 .vrew 파일** 자동 생성. PrimingFlow(롱폼) + Shots-maker(쇼츠)를 하나로 합친 것으로,
-**더 깨끗한 Shots-maker 아키텍처를 베이스**로 삼고 롱폼 파서/그룹화를 이식했다.
+**롱폼(16:9) 영상 제작** Electron 앱. 대본(.md) → TTS·이미지·(선택)비디오 → **Vrew 4.0.1 .vrew 파일**
+자동 생성 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다.
 
-## 통합 구조 (2026-06-20, v0.1.0)
-- **모드 추상화**: `core/mode-profiles.js` 가 쇼츠/롱폼 차이(파서·그룹화·자막 글자수·비율)를 단일 객체로 격리.
-  `Project.mode`('shorts'|'longform') + `aspect` 파생. `pipeline.parseScript(path, mode)` 가 파서 분기.
-  - 쇼츠: `cut-script-parser`(컷/그룹/줄글, 한 파일 3편) + TTS 8초 그리디 패킹(`mergeGroupsByTts`).
-  - 롱폼: `parsers/longform-parser`(= `sentence-splitter`+`group-builder`, 한 파일 1편) + 도입부 50자 캡.
-    롱폼은 TTS 후 8초 재패킹을 **건너뜀**(이미 의미 단위로 묶음). `.vrew`/SRT 접두사 `롱폼N`.
-- **UI = React + Vite** (`renderer/`): 기존 단일 `ui/index.html`(vanilla) 대체. 상단 **모드 토글**.
-  main 은 dev=`PM_DEV_URL`(vite) / prod=`renderer/dist`(loadFile, asar) 로드. `preload.js`(window.api) 그대로.
-- **공용 그대로**: `tts/*`, `image/*`, 엔진(flow/grok/genspark), `vrew/vrew-builder.js`(9:16·1:1·16:9 모두 지원).
-- **최종 렌더 없음**: 두 모드 모두 `.vrew` 까지만 생성(최종 MP4 는 Vrew 에서). video-renderer/remotion 미포함.
-- 검증: `npm run pack`(언팩 빌드) · `PM_DIAG=1` 로 렌더 스모크 · `test/parser.test.js`(쇼츠 회귀) · `build-shorts.js --dry`.
+## 🔴 쇼츠·플리·ACE-Step·BGM 전면 제거 (2026-08-22, v0.3.28 — 로이 확정)
+- 이 앱은 **더 이상 쇼츠(9:16)·플리(음악)·BGM 을 만들지 않는다.** 관련 코드·UI·문서·테스트 전부 삭제됨:
+  `cut-script-parser`·`playlist-parser`·`playlist-video`·`ace-step`(core+폴더)·`build-shorts.js`·
+  `mergeGroupsByTts`(8초 재구성)·제목/도형 트랙(`addTitleTrack`/`addShapeTrack`)·`addBgmTrack`·`deriveBgmMood`.
+- **아래 22행 이후의 옛 기록에 나오는 쇼츠·BGM·플리 세부는 전부 폐기된 이력이다 — 따라 하지 말 것.**
+- 이름만 쇼츠인 **공유 배관은 유지**(바꾸면 기존 작업물·스냅샷이 깨진다): `shortsDirs`(media-N/tts-N 폴더 구조)·
+  `shortsNum`(편 주소 키, 롱폼=1)·`~/.shots-maker/` 홈 폴더·grok-engine 의 `_shorts` 분기(16:9 칩 선택 코드).
+- 옛 저장 데이터(mode:'shorts'/'playlist' 인 workspace·.smproj·프리셋 startMode)는 **읽을 때 롱폼으로 정규화**
+  (`normalizeMode`/`normMode` 폴백). 채널 프리셋의 capShort·styleShort·outShort 저장값은 파일에 무해하게 남긴다
+  (마이그레이션 삭제 금지). `channel-styles.json` 의 `short` 필드 내보내기는 유지(아도나이로이 대시보드 계약).
 
-## (이하 Shots-maker 시절 기록 — 쇼츠 파이프라인 세부)
+## 구조 (현행)
+- `pipeline.parseScript(path)` = 롱폼 파서 단일 경로(`parsers/longform-parser` = `sentence-splitter`+`group-builder`).
+- **UI = React + Vite** (`renderer/`). main 은 dev=`PM_DEV_URL`(vite) / prod=`renderer/dist`. `preload.js`(window.api).
+- **최종 렌더 없음**: `.vrew` 까지만 생성(최종 MP4 는 Vrew 에서).
+- 검증: `npm run test:makeall`(무음 E2E — main.js 만졌으면 필수) 외 test:* 스위트.
+
+## (이하 Shots-maker 시절 기록 — ⚠ 전부 폐기된 옛 쇼츠 파이프라인 이력)
 
 ## 최근 버그픽스 (2026-06-17)
 - 🐞 **Genspark 이미지가 UI에 안 붙음**: `generateImagesGenspark`는 `g.imagePath`를 정상 매핑하지만,

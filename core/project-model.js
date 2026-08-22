@@ -150,8 +150,8 @@ class Project {
     this.sentences = sentences || [];
     this.groups = groups || [];
 
-    this.mode = 'shorts';   // 'shorts'(쇼츠 9:16) | 'longform'(롱폼 16:9) — 워크플로 분기 (mode-profiles.js)
-    this.aspect = '16:9';   // 영상 비율 — '16:9'(롱폼) | '9:16'(쇼츠). 이미지·렌더·내보내기 공통.
+    this.mode = 'longform'; // 'longform'(롱폼 16:9) — 워크플로 분기 (mode-profiles.js)
+    this.aspect = '16:9';   // 영상 비율 — 이미지·렌더·내보내기 공통.
     this.ttsSettings = { defaultPresetId: null };
     this.imgSettings = {};
   }

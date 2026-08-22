@@ -225,14 +225,12 @@ function tsChaptersOf(pr) {
 // dto → { text(붙여넣기용), total, warns[] }
 function tsBuild(dto) {
   const projects = (dto && dto.projects) || [];
-  const many = projects.length > 1;
   const lines = [], warns = [];
   let total = 0, missing = 0, shortN = 0, chapN = 0;
   for (const pr of projects) {
     for (const c of (pr.cuts || [])) for (const st of (c.sentences || [])) if (!(Number(st.dur) > 0)) missing++;
     const chs = tsChaptersOf(pr);
     chapN += chs.length;
-    if (many) { if (lines.length) lines.push(''); lines.push(`[쇼츠 ${pr.shortsNum}]`); }
     for (const ch of chs) {
       if (ch.dur < 10) shortN++;
       lines.push(`${tsFmt(ch.start)} ${ch.title}`);
@@ -244,15 +242,9 @@ function tsBuild(dto) {
   if (shortN > 0) warns.push(`10초 미만 챕터 ${shortN}개 — 유튜브가 목록 전체를 무시할 수 있습니다(각 챕터 10초 이상 필요).`);
   return { text: lines.join('\n'), total, warns };
 }
-function phaseBadge(p, isLf) {
+function phaseBadge(p) {
   if (!p) return ['', '-'];
-  if (isLf) return ['', p];   // 롱폼: 섹션 제목 그대로 (훅/본론 키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
-  if (/재훅/.test(p)) return ['b-rehook', '재훅'];
-  if (/^훅/.test(p)) return ['b-hook', '훅'];
-  if (/본론/.test(p)) return ['b-main', '본론'];
-  if (/절정/.test(p)) return ['b-climax', '절정'];
-  if (/CTA/i.test(p)) return ['b-cta', 'CTA'];
-  return ['', p];
+  return ['', p];   // 섹션 제목 그대로 (키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
@@ -292,9 +284,8 @@ function uiConfirm(msg) { try { api.focusWindow(); } catch (_) {} return window.
 function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.alert(msg); }
 
 export default function App() {
-  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리) | 'book'(출판)
+  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   const isLf = mode === 'longform';
-  const isPl = mode === 'playlist';
   const isBk = mode === 'book';
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
@@ -307,7 +298,6 @@ export default function App() {
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
   const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) — 유일 이미지 엔진
-  const [aspect, setAspect] = useState('16:9');
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -326,12 +316,9 @@ export default function App() {
   const [capPos, setCapPos] = useState('-0.15');
   const [capFine, setCapFine] = useState(10);
   const [capAlign, setCapAlign] = useState('start');
-  const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top) — 모드별
-  const [capChars, setCapChars] = useState(7);
+  const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top)
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
-  const [aiNotice, setAiNotice] = useState(false); // 쇼츠 AI 고지: 기본 OFF (롱폼은 항상 표시·필수)
-  const [bgmOn, setBgmOn] = useState(false);       // 배경음(BGM, ACE-Step) 삽입 — 기본 OFF (저장된 설정에 값 있으면 존중)
-  const [bgmMood, setBgmMood] = useState('');      // BGM 무드 태그(빈값=대본 자동분석)
+  const [aiNotice, setAiNotice] = useState(false); // AI 고지 — 작업바 체크박스(기본 ON, 마운트 시 세팅)
   const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
@@ -438,9 +425,8 @@ export default function App() {
   }
   const loaded = !!(dto && ((dto.projects && dto.projects.length) || dto.kind === 'book'));
 
-  const capCharsN = Math.max(2, parseInt(capChars, 10) || 7);
-  // 자막 한 줄 글자수 — 쇼츠는 클립글자수, 롱폼은 분할옵션의 '긴 n자'(longLen) 기준.
-  const effCap = isLf ? Math.max(2, parseInt(splitOpts.long, 10) || 20) : capCharsN;
+  // 자막 한 줄 글자수 — 분할옵션의 '긴 n자'(longLen) 기준.
+  const effCap = Math.max(2, parseInt(splitOpts.long, 10) || 20);
   // 제작 진행률(완료/전체) — TTS(문장 audio) · 이미지(group imagePath) · 영상(I2V 그룹 videoPath). PrimingFlow 진행률 패널 이식.
   const prog = (() => {
     let ttsD = 0, ttsT = 0, imgD = 0, imgT = 0, vidD = 0, vidT = 0;
@@ -454,7 +440,6 @@ export default function App() {
     }
     return { ttsD, ttsT, imgD, imgT, vidD, vidT };
   })();
-  const _clipMaxSec = () => 10.0; // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
@@ -477,9 +462,9 @@ export default function App() {
     api.listQueue().then((r) => {
       if (!r) return;
       if (r.queue) setQueue(r.queue);
-      if (r.mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+      if (r.mode) setMode(r.mode === 'book' ? 'book' : 'longform'); // 옛 저장값(shorts/playlist)은 롱폼으로 정규화
       if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
-      const m = r.mode || 'longform';
+      const m = (r.mode === 'book') ? 'book' : 'longform';
       const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
       if (it && it.settings) applySettings(it.settings);
     }).catch(() => {});
@@ -492,28 +477,28 @@ export default function App() {
   }, []);
 
   // 선택 채널 + 현재 모드의 자막/배속/스타일/분할 설정을 라이브 상태에 로드.
-  //   프리셋의 모드별 값(capLong/capShort, speedLong/Short, styleLong/Short, split) 우선, 없으면 mode-profile 기본.
+  //   프리셋의 값(capLong, speedLong, styleLong, split) 우선, 없으면 mode-profile 기본.
   useEffect(() => {
     if (!presetName) return;
     let cancelled = false;
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
       const prof = (modeProfiles && modeProfiles[mode]) || {};
-      const cap = mode === 'longform' ? p.capLong : p.capShort;
+      const cap = p.capLong;
       if (cap) {
         if (cap.size != null) setCapSize(String(cap.size));
         if (cap.align) setCapAlign(cap.align);
         if (cap.yAlign) setCapYAlign(cap.yAlign);
         if (cap.yOffset != null) applyCaptionYOffset(cap.yOffset);
       } else { applyCaptionDefaults(prof); }
-      const sp = mode === 'longform' ? p.speedLong : p.speedShort;
-      const st = mode === 'longform' ? p.styleLong : p.styleShort;
+      const sp = p.speedLong;
+      const st = p.styleLong;
       // 항목 복원 중이면 배속·스타일·AI고지는 항목별 저장값(applySettings)이 우선 — 프리셋 기본값으로 덮지 않음.
       //   (자막·분할은 항목별 저장 대상이 아니라 채널값을 그대로 따르므로 무조건 적용)
       if (!restoringItemRef.current) {
         setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
         setStyleId(st || p.styleId || 'chibi');
-        setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
+        setAiNotice(true); // AI 고지 기본값: ON (사용자가 토글로 변경)
         // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 레거시값은 정규화.
         if (p.imgEngine != null) setImgEngine(['genspark', 'flow'].includes(p.imgEngine) ? 'rotate' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
@@ -525,22 +510,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetName, mode, modeProfiles]);
 
-  // I2V 범위 기본값 — 롱폼=도입부 그룹 끝까지, 쇼츠=처음~끝.
+  // I2V 범위 기본값 — 도입부 그룹 끝까지.
   //   도입부(isIntro)·그룹수가 바뀌면(로드/복원/재분할) 다시 계산 → 도입부 인식이 늦게 채워져도 반영.
   const _cuts0 = (dto && dto.projects && dto.projects[0] && dto.projects[0].cuts) || [];
-  const _introSig = isLf ? _cuts0.filter((c) => c.isIntro).map((c) => c.num).join(',') : '';
+  const _introSig = _cuts0.filter((c) => c.isIntro).map((c) => c.num).join(',');
   const _lastNum = _cuts0.length ? _cuts0[_cuts0.length - 1].num : 0;
   useEffect(() => {
     if (!_cuts0.length) return;
     if (hasStoredRangeRef.current) return; // 항목에 저장된 영상범위가 있으면 기본값으로 덮어쓰지 않음(항목별 범위 유지)
-    if (isLf) {
-      const introNums = _cuts0.filter((c) => c.isIntro).map((c) => c.num);
-      setVidFrom(1); setVidTo(introNums.length ? Math.max(...introNums) : _lastNum);
-    } else {
-      setVidFrom(1); setVidTo(_lastNum);
-    }
+    const introNums = _cuts0.filter((c) => c.isIntro).map((c) => c.num);
+    setVidFrom(1); setVidTo(introNums.length ? Math.max(...introNums) : _lastNum);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dto && dto.fileTitle, isLf, _introSig, _lastNum]);
+  }, [dto && dto.fileTitle, _introSig, _lastNum]);
 
   // 분할옵션 변경 → 즉시 롱폼 재분할 (대본 로드 상태에서만).
   async function changeSplit(key, val) {
@@ -597,7 +578,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, bgmOn, bgmMood };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice };
   }
   function applySettings(s) {
     if (!s) return;
@@ -615,19 +596,15 @@ export default function App() {
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
-    if (s.bgmOn != null) setBgmOn(!!s.bgmOn);
-    if (s.bgmMood != null) setBgmMood(s.bgmMood || '');
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
     if (!r) return;
     hasStoredRangeRef.current = false; restoringItemRef.current = false; // 새 대본 = 기본 범위·채널 기본값 계산 허용
-    // 대본 형식 자동 판별 → 맞는 탭(롱폼/쇼츠)으로 전환 (잘못된 탭에서 열림 방지)
-    const switched = r.mode && r.mode !== mode;
-    if (switched) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+    if (mode !== 'longform') setMode('longform'); // 영상 대본은 롱폼 단일 모드
     setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
     try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 이 대본의 설정을 현재 헤더값으로 캡처
-    setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가${switched ? ` · ${r.mode === 'longform' ? '롱폼' : '쇼츠'} 모드로 전환` : ''}`);
+    setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가`);
   }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   async function selectQueueItem(id) {
@@ -653,9 +630,9 @@ export default function App() {
       const r = await api.loadQueue();
       if (!r || !r.ok) { if (r && r.reason !== 'cancel') logline('큐 불러오기 실패'); return; }
       if (r.queue) setQueue(r.queue);
-      if (r.mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+      if (r.mode) setMode(r.mode === 'book' ? 'book' : 'longform'); // 옛 저장값(shorts/playlist)은 롱폼으로 정규화
       if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
-      const m = r.mode || 'longform';
+      const m = (r.mode === 'book') ? 'book' : 'longform';
       const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
       if (it && it.settings) applySettings(it.settings);
       setStatus(`📂 큐 불러오기 — ${r.count}개 대본 복구`);
@@ -697,7 +674,7 @@ export default function App() {
   async function runTts(shortsNum) {
     setStatus('TTS 생성중…');
     try {
-      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() });
+      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null });
       setDto(d); setStatus('오디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -759,7 +736,7 @@ export default function App() {
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
         try { await api.selectQueueItem(it.id); } catch (_) {}
         try {
-          if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
+          if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
           if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
           if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
@@ -783,9 +760,8 @@ export default function App() {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
-      dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
-      aiNotice, // 양쪽 모드 사용자 선택 (기본값 롱폼 ON / 쇼츠 OFF 는 토글이 보유)
-      bgm: { enabled: bgmOn, moodOverride: bgmMood || null }, // 배경음(ACE-Step)
+      dry: false, videoEngine, flowVideoModel, flowCount,
+      aiNotice, // 사용자 선택(작업바 토글)
     };
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 만들기=전체 이미지 + 범위 i2v ('없음'은 i2v 불요)
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
@@ -796,22 +772,18 @@ export default function App() {
   async function runMakeOrBatch() {
     try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
     const L = (queue && queue.longform && queue.longform.items) || [];
-    const Sh = (queue && queue.shorts && queue.shorts.items) || [];
-    const total = L.length + Sh.length;
+    const total = L.length;
     if (total === 0) { setStatus('대본을 먼저 여세요'); return; }
     if (total === 1) return runMake(null);  // 단일 대본 → makeAll(.vrew·폴더 자동열기)
-    return runBatchAll();                    // 여러 대본 → 큐 전체 교차 순차
+    return runBatchAll();                    // 여러 대본 → 큐 전체 순차
   }
-  // ⚡⚡ 큐 전체 순차 제작 — 교차 순서(L1→S1→L2→S2…), 각 대본은 자기 설정으로.
+  // ⚡⚡ 큐 전체 순차 제작 — 각 대본은 자기 설정으로.
   async function runBatchAll() {
     const L = (queue && queue.longform && queue.longform.items) || [];
-    const Sh = (queue && queue.shorts && queue.shorts.items) || [];
     const plan = [];
-    const n = Math.max(L.length, Sh.length);
     // 이미 완료(done)된 항목은 제외 — 다시 만들지 않고 .vrew 도 다시 열지 않음(vrew 버튼으로 열면 됨).
-    for (let i = 0; i < n; i++) {
-      if (L[i] && L[i].status !== 'done') plan.push({ mode: 'longform', id: L[i].id, settings: L[i].settings || null });
-      if (Sh[i] && Sh[i].status !== 'done') plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
+    for (const it of L) {
+      if (it && it.status !== 'done') plan.push({ mode: 'longform', id: it.id, settings: it.settings || null });
     }
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'은 i2v 불요)
@@ -867,12 +839,6 @@ export default function App() {
     const pr = dto.projects.find((p) => p.shortsNum === shortsNum); if (!pr) return;
     const idx = pr.cuts.findIndex((c) => c.num === groupNum); if (idx < 0) return;
     playProjects([{ ...pr, cuts: pr.cuts.slice(idx) }], false); // 이 그룹부터 끝까지
-  }
-  async function mergeGroups() {
-    if (!dto) { setStatus('대본을 먼저 여세요'); return; }
-    setStatus('그룹 합치는 중…');
-    try { const d = await api.mergeGroups({ clipMaxSec: _clipMaxSec() }); setDto(d); setStatus('그룹 재구성 완료'); }
-    catch (e) { logline('합치기 오류: ' + e.message); setStatus('합치기 실패'); }
   }
   // ⏱ 유튜브 타임스탬프 — TTS 길이 누적으로 챕터 목록을 만들어 창에 띄운다(편집 가능, 복사는 창에서).
   function openTimestamps() {
@@ -988,7 +954,7 @@ export default function App() {
   }
   async function loadProject() {
     const r = await api.loadProject(); if (!r) return;
-    if (r.mode && r.mode !== mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+    if (r.mode && r.mode !== mode) setMode(r.mode === 'book' ? 'book' : 'longform');
     setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
     try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 불러온 항목 설정 캡처
     setStatus(`${r.dto.projects.length}편 불러옴`);
@@ -1150,19 +1116,7 @@ export default function App() {
     try { const d = await api.applyScriptText({ text }); if (d) { setDto(d); setFtitle(d.fileTitle || ftitle); } setScriptEditOpen(false); setStatus('대본 수정 적용 완료'); }
     catch (e) { logline('대본 수정 오류: ' + e.message); setStatus('오류'); }
   }
-  async function changeAspect(v) {
-    setAspect(v);
-    try { const d = await api.setAspect(v); if (d) setDto(d); setStatus('비율 ' + v); }
-    catch (e) { logline('오류: ' + e.message); }
-  }
   function abort() { queueAbortRef.current = true; api.abort(); setStatus('중단 요청됨'); }
-
-  function updateTitleField(shortsNum, field, rawValue) {
-    let v = rawValue;
-    if (typeof rawValue !== 'boolean' && /(Size|Op|Round|StrokeW)$/.test(field)) v = Number(rawValue);
-    setDto((d) => d ? ({ ...d, projects: d.projects.map((p) => p.shortsNum === shortsNum ? { ...p, [field]: v } : p) }) : d);
-    api.setTitle({ shortsNum, field, value: v }).catch(() => {});
-  }
 
   // ── 채널 설정 편집 ──
   // Electron 렌더러는 window.prompt 를 지원하지 않으므로(조용히 null) 이름 입력은 별도 모달로 받는다.
@@ -1219,8 +1173,7 @@ export default function App() {
     setChStyles(ss || []);
     try { setChRefList(await api.listRefAudio() || []); } catch (_) { setChRefList([]); }
     const lf = (modeProfiles && modeProfiles.longform) || {};
-    const sh = (modeProfiles && modeProfiles.shorts) || {};
-    // 저장된 모드별 캡션 or mode-profile 기본값 → {size, align, yAlign, pos, fine}
+    // 저장된 캡션 or mode-profile 기본값 → {size, align, yAlign, pos, fine}
     const mkCap = (saved, prof) => {
       const yOff = saved && saved.yOffset != null ? saved.yOffset : (prof.captionYOffset != null ? prof.captionYOffset : 0);
       const d = decomposeYOffset(yOff);
@@ -1233,21 +1186,21 @@ export default function App() {
     };
     const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
     setCh({
-      name: p.name || '', group: p.group || '', engine: p.engine || 'omnivoice', startMode: p.startMode || 'longform', voice: p.voice || '',
+      name: p.name || '', group: p.group || '', engine: p.engine || 'omnivoice',
+      // 옛 값('shorts'/'playlist')은 여는 순간 정규화 — 안 하면 저장할 때 제거된 값이 파일에 되쓰인다.
+      startMode: (p.startMode === 'book') ? 'book' : 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
       cfgValue: p.cfgValue != null ? p.cfgValue : 2,
-      // 모드별
-      capLong: mkCap(p.capLong, lf), capShort: mkCap(p.capShort, sh),
+      capLong: mkCap(p.capLong, lf),
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
-      speedShort: p.speedShort != null ? p.speedShort : (sh.defaultTtsSpeed != null ? sh.defaultTtsSpeed : 1.25),
-      styleLong: p.styleLong || p.styleId || 'chibi', styleShort: p.styleShort || p.styleId || 'chibi',
+      styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'rotate', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
-      outLong: p.outLong || p.outputFolder || '', outShort: p.outShort || p.outputFolder || '',
+      outLong: p.outLong || p.outputFolder || '',
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
     });
@@ -1260,9 +1213,9 @@ export default function App() {
     setPresetName(name);
     try {
       const p = await api.getPresetDetail(name);
-      const sm = (p && p.startMode) || 'longform';
+      // 옛 저장값(startMode:'shorts'|'playlist')은 롱폼으로 정규화 — 제거된 모드 화면에 진입하지 않게.
+      const sm = ((p && p.startMode) === 'book') ? 'book' : 'longform';
       setMode(sm);
-      setAspect(sm === 'shorts' ? '9:16' : '16:9');
     } catch {}
   }
   // 모달 내 참조음성 미리듣기
@@ -1464,13 +1417,14 @@ export default function App() {
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
       cfgValue: numOr(ch.cfgValue, 2),
-      // 모드별 — 캡션/배속/스타일/출력
-      capLong: capToStyle(ch.capLong), capShort: capToStyle(ch.capShort),
-      speedLong: numOr(ch.speedLong, 1.15), speedShort: numOr(ch.speedShort, 1.25),
-      styleLong: ch.styleLong, styleShort: ch.styleShort,
+      // 캡션/배속/스타일/출력 — ⚠ 옛 쇼츠 필드(capShort·speedShort·styleShort·outShort)는 patch 에서 빼기만 한다.
+      //   preset-store.update 가 {...old,...patch} 병합이라 기존 저장값은 파일에 무해하게 남는다(마이그레이션 삭제 금지 — v0.3.8 계열).
+      capLong: capToStyle(ch.capLong),
+      speedLong: numOr(ch.speedLong, 1.15),
+      styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'rotate', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
-      outLong: (ch.outLong || '').trim(), outShort: (ch.outShort || '').trim(),
+      outLong: (ch.outLong || '').trim(),
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
@@ -1488,7 +1442,6 @@ export default function App() {
   }
   async function pickRef() { const f = await api.pickFile({ filters: [{ name: '음성', extensions: ['wav', 'mp3', 'flac', 'm4a'] }] }); if (f) setCh((c) => ({ ...c, voiceCloneRefAudio: f })); }
   async function pickOutLong() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outLong: d })); }
-  async function pickOutShort() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outShort: d })); }
   async function pickScript() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, scriptFolder: d })); }
   function setSplitField(k, v) { setCh((cur) => ({ ...cur, split: { ...cur.split, [k]: v } })); }
   // 모달 본문자막 한 컬럼(모드별). withSplit=true 면 분할옵션도 포함(롱폼).
@@ -1523,7 +1476,6 @@ export default function App() {
   // ── 미리보기 재생 플레이어 (imperative, refs) ──
   const stageVisualRef = useRef(null);
   const stageCapRef = useRef(null);
-  const stageTitleRef = useRef(null);
   const playerInfoRef = useRef(null);
   const playAbortRef = useRef(false);
   const curAudioRef = useRef(null);
@@ -1553,16 +1505,6 @@ export default function App() {
       v.innerHTML = `<img class="kb kb${kbIdx}" src="${media(c.imagePath)}">`;
       const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
     } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
-  }
-  function setStageTitle(pr) {
-    const el = stageTitleRef.current; if (!el) return;
-    // 제목 세로 위치 — .vrew 와 동일: line1 y = 0.035 + yShift(9:16=0.05). 즉 쇼츠 8.5% / 롱폼 3.5%.
-    el.style.top = ((0.035 + (isLf ? 0 : 0.05)) * 100).toFixed(1) + '%';
-    const l1 = pr.titleLine1 != null ? pr.titleLine1 : (pr.hookCaption || ''); const l2 = pr.titleLine2 || '';
-    const esc = (t) => String(t).replace(/</g, '&lt;');
-    const mk = (txt, size, color, align) => txt ? `<div style="font-size:${Math.round((size || 110) / 90 * 18)}px;color:${color || '#fff'};text-align:${align || 'center'};line-height:1.32">${esc(txt)}</div>` : '';
-    el.innerHTML = mk(l1, pr.t1Size || 120, pr.t1Color || '#ffffff', pr.t1Align || 'center')
-      + mk(l2, pr.t2Size || 120, pr.t2Color || '#ffe08a', pr.t2Align || 'center');
   }
   async function stepCaptions(clips, durMs) {
     const total = clips.reduce((a, c) => a + Math.max(1, mLen(c)), 0) || 1;
@@ -1595,12 +1537,11 @@ export default function App() {
     playAbortRef.current = false; setPlayerOpen(true);
     await wait(0); applyCaptionStyle();
     for (let pi = 0; pi < projs.length; pi++) {
-      const pr = projs[pi]; setStageTitle(pr);
+      const pr = projs[pi];
       for (const c of pr.cuts) { if (playAbortRef.current) return; await playCut(c, `${pr.title} · G${c.num} ${c.phase || ''}`); }
       if (blackBetween && pi < projs.length - 1 && !playAbortRef.current) {
         if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
         if (stageCapRef.current) stageCapRef.current.textContent = '';
-        if (stageTitleRef.current) stageTitleRef.current.innerHTML = '';
         if (playerInfoRef.current) playerInfoRef.current.textContent = '— 다음 영상 —';
         await wait(1000);
       }
@@ -1623,14 +1564,13 @@ export default function App() {
     const pr = dto.projects.find((p) => p.shortsNum === shortsNum); if (!pr) return;
     const c = pr.cuts.find((x) => x.num === groupNum); if (!c) return;
     playAbortRef.current = false; setPlayerOpen(true);
-    (async () => { await wait(0); applyCaptionStyle(); setStageTitle(pr); await playCut(c, `${pr.title} · G${c.num}`); stopStageVideo(); if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; })();
+    (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`); stopStageVideo(); if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; })();
   }
   function stopPlayer() {
     playAbortRef.current = true;
     if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
     if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
     if (stageCapRef.current) stageCapRef.current.textContent = '';
-    if (stageTitleRef.current) stageTitleRef.current.innerHTML = '';
     setPlayerOpen(false);
   }
   // 팝업/모달 닫기 = 바깥 클릭이 아니라 ESC 또는 취소·닫기 버튼으로만 (실수 클릭에 입력 유실 방지).
@@ -1965,7 +1905,7 @@ export default function App() {
     const t = setTimeout(() => { api.setQueueSettings(currentSettings(), true).catch(() => {}); }, 300); // keepChannel: 채널은 열 때 값 유지(다음 대본용 채널 선택이 이 항목을 오염시키지 않게)
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, bgmOn, bgmMood]);
+  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice]);
 
   async function copyLog() {
     try { await navigator.clipboard.writeText(logText || ''); setStatus('로그 복사됨'); }
@@ -2011,8 +1951,6 @@ export default function App() {
             <button className="ghost" title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동" style={{ padding: '4px 8px' }} onClick={() => { setFindOpen(true); setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30); }}>🔍</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
-              <button className={mode === 'shorts' ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠</button>
-              <button className={mode === 'playlist' ? 'active' : ''} onClick={() => switchMode('playlist')}>🎵 플리</button>
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
             <select title="채널(프리셋) — 고르면 그 채널의 시작 화면으로 전환" value={presetName} onChange={(e) => switchModeForChannel(e.target.value)}>
@@ -2033,7 +1971,7 @@ export default function App() {
             <button className="ghost" title="채널 목록 순서 변경 (드롭다운에 보이는 순서)" style={{ padding: '6px 9px' }} onClick={openChOrder}>↕</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소" style={{ padding: '6px 9px' }} onClick={() => openSettings('img')}>⚙ 설정</button>
-            {!isPl && !isBk && (<>
+            {!isBk && (<>
               <span className="hgroup">
                 <span className="glabel">대본</span>
                 <button onClick={openScript}>📂 열기</button>
@@ -2051,8 +1989,6 @@ export default function App() {
                 <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
               </span>
             </>)}
-            {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
-            {isPl && <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>}
             {isBk && (<>
               <button onClick={openBook}>📖 원고 열기</button>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
@@ -2067,7 +2003,7 @@ export default function App() {
           </div>
         </div>
         {/* 제작 파이프라인 행 — 작업 순서대로 ①음성 → ②이미지 → ③비디오 → ④완성 그룹 */}
-        {!isPl && !isBk && (
+        {!isBk && (
         <div className="hrow" style={{ justifyContent: 'flex-start' }}>
           <span className="hgroup">
             <span className="glabel">① 음성</span>
@@ -2127,8 +2063,8 @@ export default function App() {
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
             <span className="glabel">④ 완성</span>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
-            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (<>
-              <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
+            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
+              <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 순서대로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
               {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
             </>); })()}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
@@ -2137,36 +2073,10 @@ export default function App() {
           </span>
         </div>
         )}
-        {isPl && (
-        <div className="hrow">
-          <div className="hright">
-            <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
-            <span className="hgroup">
-              <span className="glabel">배경</span>
-              <select title="배경 이미지 생성 방식" value={comfySelectValue(imgEngine, comfyCfg)} onChange={(e) => onPickImgEngine(e.target.value)}>
-                <option value="rotate">이미지: 순환(무료)</option>
-                <option value="gemini">이미지: 유료(나노바나나2)</option>
-                <ComfyEngineOptions cfg={comfyCfg} />
-              </select>
-              <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-                <option value="grok">영상: Grok(심리스)</option>
-                <option value="none">영상: 없음(이미지 고정)</option>
-              </select>
-              <button className="ghost" title="이미지 순환 순서·계정 설정 (Genspark·Flow)" onClick={openImgRotation}>⚙</button>
-            </span>
-            <span className="hgroup">
-              <span className="glabel">완성</span>
-              <button className="cta" disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(이미지→심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
-              <button className="ghost stop" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
-              <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
-            </span>
-          </div>
-        </div>
-        )}
       </header>
 
-      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (플리·출판 모드 제외) */}
-      {!isPl && !isBk && <div id="capbar">
+      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (출판 모드 제외) */}
+      {!isBk && <div id="capbar">
         {gsCool && gsCool.until > 0 && (
           <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. 이 시각 이후 자동으로 다시 시도합니다. 그 전까지는 순환(무료)이 Genspark 에 접속하지 않고 바로 Flow 로 이미지를 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
             style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -2184,10 +2094,7 @@ export default function App() {
           title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
           onClick={openTimestamps}>⏱ 타임스탬프</button>
         {splitBar}
-        {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
-        <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입. 기본값: 롱폼 표시 · 쇼츠 미표시 (언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
-        <label className="chk" title="배경음(BGM, ACE-Step) — 체크 시 ⚡만들기에서 대본 분위기에 맞는 음악을 생성해 나레이션 아래 낮은 볼륨으로 .vrew 에 삽입" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={bgmOn} onChange={(e) => setBgmOn(e.target.checked)} />🎵 BGM</label>
-        {bgmOn && <input type="text" value={bgmMood} onChange={(e) => setBgmMood(e.target.value)} placeholder="무드(빈값=대본 자동)" title="ACE-Step 스타일 태그. 비우면 대본 분석으로 자동 생성. 예: calm, cinematic, ambient piano, instrumental" style={{ width: 180 }} />}
+        <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
         <span className="hdiv" />
         <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
           ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
@@ -2198,17 +2105,12 @@ export default function App() {
 
       <div id="body">
         <main>
-          {isPl ? (
-            <PlaylistView dto={dto} onMakeOne={(num) => runMakePlaylist(num)}
-              onPreview={(src) => setPreview({ kind: 'audio', src })}
-              onPreviewMedia={(kind, src) => setPreview({ kind, src })}
-              onAttachBg={attachPlBg} onClearBg={clearPlBg} />
-          ) : isBk ? (
+          {isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
           ) : (<>
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
-              <span className="qlabel">{isLf ? '롱폼' : '쇼츠'} 큐 ({queue[mode].items.length})</span>
+              <span className="qlabel">롱폼 큐 ({queue[mode].items.length})</span>
               {queue[mode].items.map((it) => (
                 <div key={it.id}
                   className={'qchip' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
@@ -2221,11 +2123,11 @@ export default function App() {
               ))}
             </div>
           )}
-          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} bgmOn={bgmOn}
+          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
-            onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
+            onPreview={(kind, src) => setPreview({ kind, src })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} /></ErrorBoundary>
           </>)}
         </main>
@@ -2254,9 +2156,8 @@ export default function App() {
       )}
 
       <div id="player" className={playerOpen ? 'show' : ''}>
-        <div id="stage" className={isLf ? 'lf' : ''}>
+        <div id="stage" className="lf">
           <div id="stageVisual" ref={stageVisualRef} />
-          <div id="stageTitle" ref={stageTitleRef} />
           <div id="stageCap" ref={stageCapRef} />
         </div>
         <div id="playerBar"><span id="playerInfo" ref={playerInfoRef} /><button className="ghost" onClick={stopPlayer}>■ 닫기</button></div>
@@ -2304,19 +2205,17 @@ export default function App() {
                   <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
                     onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
                 <div className="frow"><label>그룹(구분)</label>
-                  <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 / 쇼츠 (비우면 구분 없음)" list="ch-group-list"
+                  <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 (비우면 구분 없음)" list="ch-group-list"
                     onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
                   <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
                 <div className="frow"><label>시작 화면</label>
-                  <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
+                  <select style={{ flex: '0 0 220px', padding: 6 }} value={(ch.startMode === 'book') ? 'book' : 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
                     <option value="longform">롱폼 (16:9)</option>
-                    <option value="shorts">쇼츠 (9:16)</option>
-                    <option value="playlist">🎵 플리 (음악)</option>
                     <option value="book">📖 출판</option>
                   </select>
                   <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
                 </div>
-                <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
+                <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 (언제든 변경)</span></div>
               </div>)}
 
               {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
@@ -2340,30 +2239,16 @@ export default function App() {
                   <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
 
                 <div className="subhead">🔊 음성 배속</div>
-                <div className="twocol">
-                  <div className="col"><h4>롱폼 16:9</h4>
-                    <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
-                  </div>
-                  <div className="col"><h4>쇼츠 9:16</h4>
-                    <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedShort} onChange={(e) => setCh({ ...ch, speedShort: e.target.value })} /></div>
-                  </div>
-                </div>
+                <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
               </div>)}
 
               {chTab === 'caption' && (<div>
-                <div className="twocol">{capColumn('capLong', '롱폼 16:9', true)}{capColumn('capShort', '쇼츠 9:16', false)}</div>
+                <div className="twocol">{capColumn('capLong', '본문 자막 (16:9)', true)}</div>
               </div>)}
 
               {chTab === 'tools' && (<div>
                 <div className="subhead">🎨 이미지 스타일</div>
-                <div className="twocol">
-                  <div className="col"><h4>롱폼 16:9</h4>
-                    <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-                  </div>
-                  <div className="col"><h4>쇼츠 9:16</h4>
-                    <div className="crow"><span className="l">스타일</span><select value={ch.styleShort} onChange={(e) => setCh({ ...ch, styleShort: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-                  </div>
-                </div>
+                <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
 
                 <div className="crow" style={{ marginTop: 4 }}><span className="l">🖼 썸네일</span>
                   <select value={ch.styleThumb || ''} onChange={(e) => setCh({ ...ch, styleThumb: e.target.value })}>
@@ -2399,9 +2284,8 @@ export default function App() {
               </div>)}
 
               {chTab === 'folder' && (<div>
-                <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
+                <div className="frow"><label>대본 폴더</label><input placeholder="대본(.md) 폴더" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
-                <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
               </div>)}
 
             </div>
@@ -2855,7 +2739,7 @@ export default function App() {
           <div className="modal-card" style={{ maxWidth: 680 }}>
             <h3>📥 복사·붙여넣기로 프롬프트 만들기</h3>
             <div className="meta" style={{ marginBottom: 8 }}>GPU(Ollama)에 연결되면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>GPU가 꺼져 있거나 출장(원격)·다른 PC라 연결이 안 될 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
-            <div style={{ marginBottom: 6 }}><button className="ghost" disabled={!loaded} title="현재 모드(롱폼/쇼츠)에 맞는 요청서를 클립보드에 복사" onClick={exportPrompts}>📤 요청서 복사</button></div>
+            <div style={{ marginBottom: 6 }}><button className="ghost" disabled={!loaded} title="이 대본의 프롬프트 요청서를 클립보드에 복사" onClick={exportPrompts}>📤 요청서 복사</button></div>
             {/* 대본수정과 같은 이유로 비제어 — 긴 텍스트를 제어 state 로 두면 타이핑마다 전 화면이 재렌더된다 */}
             <textarea ref={impRef} rows="12" defaultValue={impText} spellCheck={false} placeholder="여기에 웹 LLM 답변(## [1-1] … 이미지: …)을 붙여넣으세요" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} />
             <div className="mbtns"><button onClick={applyImport}>붙여넣은 텍스트 적용</button><button className="ghost" onClick={() => setImpOpen(false)}>닫기</button></div>
@@ -2910,12 +2794,12 @@ export default function App() {
   );
 
   async function switchMode(m) {
-    if (m === mode) return;
+    const nm = (m === 'book') ? 'book' : 'longform';
+    if (nm === mode) return;
     hasStoredRangeRef.current = false; restoringItemRef.current = false; // 모드 전환 = 그 모드 기본값 계산 허용
-    setMode(m);
-    setAspect(m === 'shorts' ? '9:16' : '16:9');
-    // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠/플리 대본은 독립.
-    try { const r = await api.setMode({ mode: m }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
+    setMode(nm);
+    // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/출판 대본은 독립.
+    try { const r = await api.setMode({ mode: nm }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
     catch (e) { logline('모드 전환 오류: ' + e.message); }
   }
 
@@ -2930,103 +2814,11 @@ export default function App() {
       setStatus('출판 원고 로드');
     } catch (e) { logline('원고 열기 오류: ' + e.message); }
   }
-  // 플리 스펙(.md) 열기 — 클로드가 채팅에서 만든 곡 목록 파일.
-  async function openPlaylist() {
-    try {
-      const r = await api.openPlaylistSpec({ presetName: presetName || null });
-      if (!r) return;
-      if (r.mode) setMode(r.mode);
-      setDto(r.dto); if (r.queue) setQueue(r.queue);
-      setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
-      setStatus(`플리 로드 · ${r.dto && r.dto.tracks ? r.dto.tracks.length : 0}곡`);
-    } catch (e) { logline('플리 열기 오류: ' + e.message); }
-  }
-  // 플리 음악 생성 — num=null 전체, 숫자=그 곡만 재생성.
-  async function runMakePlaylist(num) {
-    try {
-      setStatus(num ? `${num}번 곡 생성 중…` : '음악 전체 생성 중…');
-      const d = await api.makePlaylist({ num: num || null });
-      if (d) setDto(d);
-      setStatus('음악 생성 완료');
-    } catch (e) { logline('음악 생성 오류: ' + e.message); }
-  }
-  // 플리 배경(무한루프 영상) + 곡제목 자막 → .vrew 생성 (음악 mp3 가 있어야 함).
-  async function runMakePlaylistVideo() {
-    try {
-      setStatus('만들기 진행 중… (음악 + 배경 + .vrew)');
-      const d = await api.makePlaylistVideo({ imgEngine, videoEngine });
-      if (d) setDto(d);
-      setStatus('만들기 완료');
-    } catch (e) { logline('만들기 오류: ' + e.message); }
-  }
-  // 플리 배경 이미지/영상 첨부·삭제 (전 곡 공통 배경).
-  async function attachPlBg() {
-    try { const d = await api.playlistAttachBg(); if (d) setDto(d); setStatus('배경 첨부'); } catch (e) { logline('배경 첨부 오류: ' + e.message); }
-  }
-  async function clearPlBg() {
-    try { const d = await api.playlistClearBg(); if (d) setDto(d); setStatus('배경 삭제'); } catch (e) { logline('배경 삭제 오류: ' + e.message); }
-  }
-}
-
-// ── 플리(ACE-Step 음악) 화면 ──────────────────────────────
-const PL_STATUS = { idle: '대기', generating: '생성중…', done: '완료', fail: '실패' };
-function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, onClearBg }) {
-  if (!dto || dto.kind !== 'playlist' || !dto.tracks.length) {
-    return (
-      <div className="plempty">
-        <h2>🎵 플리 — AI 음악(ACE-Step)</h2>
-        <p>상단 <b>「🎵 플리 스펙 열기」</b>로 곡 목록(.md)을 불러오세요.</p>
-        <p className="meta">스펙은 <b>클로드가 이 채팅에서</b> 채널 컨셉에 맞춰 자동으로 만들어 줍니다. 생성은 로컬 ComfyUI(ACE-Step) API로 자동 실행되어 출력폴더에 저장됩니다.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="plwrap">
-      <div className="plhead">
-        <h2>🎵 {dto.fileTitle}</h2>
-        {dto.concept ? <span className="meta">{dto.concept}</span> : null}
-        <span className="meta">· {dto.tracks.length}곡</span>
-      </div>
-      {/* 배경(왼쪽 고정) + 곡 리스트(오른쪽) — 리스트만 스크롤되고 배경은 화면에 남음 */}
-      <div className="plmain" style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-        <div className="plbg" style={{ flex: '0 0 auto', width: 452, position: 'sticky', top: 8 }}>
-          <div className="lab" style={{ fontWeight: 600, marginBottom: 6 }}>🎬 배경 (전 곡 공통)</div>
-          <Thumb c={{ videoPath: dto.bgVideoPath, imagePath: dto.bgImagePath }} isLf={true}
-            onAttach={onAttachBg} onClear={onClearBg} onPreview={onPreviewMedia || onPreview} />
-          <div className="meta" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45 }}>
-            클릭해 이미지/영상 첨부(＋) · 삭제(✕). 첨부하면 그걸 배경으로, 비우면 배경 프롬프트로 자동 생성(심리스 반복 영상).
-          </div>
-        </div>
-        <div className="pltracks" style={{ flex: 1, minWidth: 0 }}>
-        {dto.tracks.map((t) => (
-          <div key={t.num} className={'pltrack s-' + t.status}>
-            <div className="plnum">{String(t.num).padStart(2, '0')}</div>
-            <div className="plbody">
-              <div className="pltitle">{t.title}
-                <span className="pllen">{t.durationSec || 180}s</span>
-                <span className={'plstatus s-' + t.status}>{PL_STATUS[t.status] || t.status}</span>
-              </div>
-              <div className="pltags" title={t.tags}>{t.tags || <span className="meta">스타일 태그 없음</span>}</div>
-              {t.lyrics
-                ? <div className="pllyrics" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>🎤 {t.lyrics}</div>
-                : <div className="pllyrics meta">연주곡 (보컬 없음)</div>}
-              {t.error ? <div className="plerr">✗ {t.error}</div> : null}
-              {t.audioPath ? <audio controls preload="none" src={media(t.audioPath)} className="plaudio" /> : null}
-            </div>
-            <div className="plactions">
-              <button className="ghost" title="이 곡만 (재)생성" onClick={() => onMakeOne(t.num)}>{t.status === 'done' ? '↻ 다시' : '▶ 생성'}</button>
-            </div>
-          </div>
-        ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
-  // dto.projects 부재 가드 — 출판/플리 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
+function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+  // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
   }
@@ -3055,11 +2847,9 @@ function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onImgVid, onB
                 <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
-            {!isLf && <TitleEditor pr={pr} onTitleField={onTitleField} />}
             <div className={'cuts-grid' + (isLf ? ' lf' : '')}>
               {pr.cuts.map((c, ci) => {
-                const ph = phaseBadge(c.phase, isLf);
-                const bgmText = pr.bgmUsed || pr.bgmMood || ''; // 실제 사용/대본 지정 BGM 프롬프트
+                const ph = phaseBadge(c.phase);
                 const lineEls = [];
                 (c.sentences || []).forEach((s) => {
                   for (const t of splitLines(s.text, capCharsN)) {
@@ -3087,13 +2877,6 @@ function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onImgVid, onB
                           </div>
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
-                        {ci === 0 && bgmOn && (
-                          <div className="bgm-line" title="배경음악(BGM) 프롬프트 — 대본 `> 🎵 배경음악:` 또는 자동분석 결과" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 12 }}>
-                            <span>🎵 BGM:</span>
-                            <span style={{ flex: 1, opacity: bgmText ? 1 : 0.6, wordBreak: 'break-word' }}>{bgmText || '자동 (대본 분석 — 만들기 후 표시)'}</span>
-                            {bgmText && <button className="gprev" title="BGM 프롬프트 복사" onClick={() => { try { navigator.clipboard.writeText(bgmText); } catch (_) {} }}>📋</button>}
-                          </div>
-                        )}
                       </div>
                       <div className="sents">{lineEls}</div>
                     </div>
@@ -3136,36 +2919,3 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
   return <div className={'thumb none' + cls} title="클릭: 이미지/영상 첨부" onClick={onAttach}>＋</div>;
 }
 
-function TitleEditor({ pr, onTitleField }) {
-  const sn = pr.shortsNum;
-  const l1 = pr.titleLine1 != null ? pr.titleLine1 : (pr.hookCaption || '');
-  const l2 = pr.titleLine2 || '';
-  const alignSel = (field, val) => (
-    <select className="tf tal" value={val || 'center'} onChange={(e) => onTitleField(sn, field, e.target.value)}>
-      <option value="center">가운데</option><option value="left">왼쪽</option><option value="right">오른쪽</option>
-    </select>
-  );
-  return (
-    <div className="titlebox">
-      <div className="trow"><span className="tlbl">1줄</span>
-        <input className="tf tline" value={l1} placeholder="제목 1줄(상단 고정)" onChange={(e) => onTitleField(sn, 'titleLine1', e.target.value)} />
-        <input className="tf tsz" type="number" value={pr.t1Size || 120} step="5" title="크기" onChange={(e) => onTitleField(sn, 't1Size', e.target.value)} />
-        <input className="tf tcol" type="color" value={pr.t1Color || '#ffffff'} title="색상" onChange={(e) => onTitleField(sn, 't1Color', e.target.value)} />
-        {alignSel('t1Align', pr.t1Align)}</div>
-      <div className="trow"><span className="tlbl">2줄</span>
-        <input className="tf tline" value={l2} placeholder="제목 2줄(선택)" onChange={(e) => onTitleField(sn, 'titleLine2', e.target.value)} />
-        <input className="tf tsz" type="number" value={pr.t2Size || 120} step="5" title="크기" onChange={(e) => onTitleField(sn, 't2Size', e.target.value)} />
-        <input className="tf tcol" type="color" value={pr.t2Color || '#ffe08a'} title="색상" onChange={(e) => onTitleField(sn, 't2Color', e.target.value)} />
-        {alignSel('t2Align', pr.t2Align)}</div>
-      <div className="trow"><span className="tlbl">배경</span>
-        <label className="bgchk"><input type="checkbox" checked={!!pr.bgEnabled} onChange={(e) => onTitleField(sn, 'bgEnabled', e.target.checked)} /> 도형</label>
-        <span className="bgseg">채우기 <input className="tf tcol" type="color" value={pr.bgFill || '#000000'} onChange={(e) => onTitleField(sn, 'bgFill', e.target.value)} />
-          <input className="tf" type="number" value={pr.bgFillOp != null ? pr.bgFillOp : 50} title="불투명도%" style={{ width: 46 }} onChange={(e) => onTitleField(sn, 'bgFillOp', e.target.value)} />%</span>
-        <span className="bgseg">테두리 <input className="tf tcol" type="color" value={pr.bgStroke || '#000000'} onChange={(e) => onTitleField(sn, 'bgStroke', e.target.value)} />
-          <input className="tf" type="number" value={pr.bgStrokeOp != null ? pr.bgStrokeOp : 0} title="불투명도%" style={{ width: 42 }} onChange={(e) => onTitleField(sn, 'bgStrokeOp', e.target.value)} />%
-          <input className="tf" type="number" value={pr.bgStrokeW || 0} title="두께" style={{ width: 42 }} onChange={(e) => onTitleField(sn, 'bgStrokeW', e.target.value)} /></span>
-        <span className="bgseg">모서리 <input className="tf" type="number" value={pr.bgRound || 0} title="둥글게%" style={{ width: 42 }} onChange={(e) => onTitleField(sn, 'bgRound', e.target.value)} />%</span>
-        <label className="bgchk"><input type="checkbox" checked={!!pr.bgDashed} onChange={(e) => onTitleField(sn, 'bgDashed', e.target.checked)} /> 점선</label></div>
-    </div>
-  );
-}

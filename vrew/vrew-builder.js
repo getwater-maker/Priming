@@ -114,17 +114,6 @@ const TEXTBOX_MEDIA_ID = 'uc-0010-simple-textbox';
 const TEXTBOX_DUMMY_BIN = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.bin');
 const TEXTBOX_DUMMY_META = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.meta.json');
 
-// 도형(제목 배경) — Vrew shape 트랙 + Svg(.vbin) 템플릿 (사용자 .vrew 분석 형식)
-const SHAPE_VBIN = path.join(__dirname, 'dummy', 'shape-square.vbin');
-// #RRGGBB + 불투명도(0~100) → #RRGGBBAA
-function _hex8(color6, opacityPct) {
-  let c = String(color6 || '#000000').replace('#', '');
-  if (c.length === 3) c = c.split('').map((x) => x + x).join('');
-  c = c.slice(0, 6).padEnd(6, '0');
-  const a = Math.max(0, Math.min(255, Math.round((Number(opacityPct) || 0) / 100 * 255)));
-  return '#' + c + a.toString(16).padStart(2, '0');
-}
-
 // 채널 로고 오버레이 프리셋
 const LOGO_POSITION_PRESETS = {
   'top-left':     { anchorX: 'left',  anchorY: 'top',    margin: 0.02 },
@@ -510,100 +499,6 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
   return { trackId: tid, assetId: aid };
 }
 
-// 제목 배경 도형 (shape 트랙 + Svg .vbin). 제목 줄을 덮는 박스. 색/테두리/모서리/점선 조절.
-//   세로 = 제목 시작~끝, 가로 = 제목 폰트크기·글자수 비례 (사용자 요구). 제목보다 아래(zIndex).
-function addShapeTrack(pj, bg, t, frameRatio, mediaZip, log, clipIds = null, yShift = 0) {
-  if (!fs.existsSync(SHAPE_VBIN)) { log('[Vrew] 도형 템플릿(.vbin) 없음 — 배경 생략'); return null; }
-  const mid = uid();
-  pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize: fs.statSync(SHAPE_VBIN).size, name: `${mid}.xml`, type: 'Svg', fileLocation: 'IN_MEMORY' });
-  mediaZip.push({ src: SHAPE_VBIN, name: `${mid}.vbin` });
-
-  // 도형 위치·크기 고정 — 사용자 .vrew 분석값으로 고정(폰트/줄수와 무관하게 항상 동일).
-  //   xPos 0(좌측 끝), yPos 0.012(상단), width 1(전체 폭), height 0.203.
-  const yTop = 0.012 + yShift;
-  const height = 0.203;
-  const width = 1;
-  const xPos = 0;
-
-  // 제목(web)보다 아래 zIndex
-  const imgZs = Object.values(pj.props.tracks).filter((x) => x.type === 'image' || x.type === 'video').map((x) => (Number.isFinite(x.zIndex) ? x.zIndex : 0));
-  const z = (imgZs.length ? Math.max(...imgZs) : 0) + 1;
-
-  const tid = sid();
-  pj.props.tracks[tid] = {
-    trackId: tid, mediaId: mid, xPos, yPos: yTop, height, width, rotation: 0, zIndex: z,
-    type: 'shape', dimensionType: 2, shapeType: 0, shapeSource: 'square',
-    stroke: {
-      color: _hex8(bg.borderColor || '#000000', bg.borderOpacity != null ? bg.borderOpacity : 0),
-      width: Number(bg.borderWidth) || 0,
-      isDashed: !!bg.dashed,
-      isRounded: (Number(bg.cornerRounding) || 0) > 0,
-    },
-    plane: { color: _hex8(bg.fillColor || '#000000', bg.fillOpacity != null ? bg.fillOpacity : 50) },
-    cornerRounding: Math.max(0, Math.min(1, (Number(bg.cornerRounding) || 0) / 100)),
-  };
-  const aid = uid();
-  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-  const targetClips = clipIds ? pj.transcript.clips.filter((c) => clipIds.includes(c.id)) : pj.transcript.clips;
-  for (const c of targetClips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; if (!c.assetIds.includes(aid)) c.assetIds.push(aid); }
-  return true;
-}
-
-// 제목(훅) 상단 고정 텍스트 트랙 — 최대 2줄, 줄별 크기·색상·정렬. 영상 전체에 표시.
-//   addAiNoticeTrack 과 동일한 web/textbox(uc-0010) 방식. 줄별 정렬 위해 줄마다 별도 트랙.
-function addTitleTrack(pj, title, frameRatio, log, clipIds = null, yShift = 0) {
-  const lines = [
-    { text: String(title.line1 || '').trim(), st: title.l1 || {}, y: 0.035 + yShift },
-    { text: String(title.line2 || '').trim(), st: title.l2 || {}, y: 0.115 + yShift },
-  ].filter((l) => l.text);
-  if (!lines.length) return null;
-
-  if (!pj.files.find((f) => f.mediaId === TEXTBOX_MEDIA_ID)) {
-    if (fs.existsSync(TEXTBOX_DUMMY_META)) pj.files.push(JSON.parse(fs.readFileSync(TEXTBOX_DUMMY_META, 'utf-8')));
-    else log('[Vrew] 제목: textbox meta 누락');
-  }
-  const baseZs = Object.values(pj.props.tracks)
-    .filter((t) => t.type === 'image' || t.type === 'video' || t.type === 'web')
-    .map((t) => (Number.isFinite(t.zIndex) ? t.zIndex : 0));
-  let z = (baseZs.length ? Math.max(...baseZs) : 0) + 2;
-
-  for (const ln of lines) {
-    const tid = sid();
-    const align = ln.st.align === 'left' ? 'start' : (ln.st.align === 'right' ? 'end' : 'center');
-    pj.props.tracks[tid] = {
-      trackId: tid, mediaId: TEXTBOX_MEDIA_ID,
-      xPos: 0.02, yPos: ln.y, height: 0, width: 0.96,
-      rotation: 0, zIndex: z++, type: 'web',
-      deltas: { textarea: { ops: [
-        { insert: ln.text, attributes: {
-          size: String(ln.st.size || 110), color: String(ln.st.color || '#ffffff'),
-          font: 'Pretendard-Vrew_700', 'outline-color': '#000000', 'outline-on': 'true', 'outline-width': '6',
-        } },
-        { insert: '\n' },
-      ] } },
-      loop: true, durationSeconds: 0, importType: 'copy_and_paste',
-      enabledInlineTypes: ['bold', 'italic', 'font', 'size', 'color', 'background', 'outline-color', 'shadow-color'],
-      customAttributes: [
-        { attributeName: '--textbox-color', type: 'color-hex', value: '#00000000' },
-        { attributeName: '--textbox-align', type: 'textbox-align', value: align },
-      ],
-      // 제목은 처음부터 항상 표시 — assetEffectInfo 필드 자체를 넣지 않는다(즉시 표시).
-      //   🔴 type:'none' 이라도 assetEffectInfo 가 web/textbox 트랙에 있으면 Vrew 내보내기가
-      //      실패한다(정상 .vrew 분석: 제목 web 트랙에 이 필드 없음). 필드 생략이 정답.
-      stats: { styledInFloatingMenu: true, styledInPanel: false },
-      scaleFactor: frameRatio || 0.5625,
-    };
-    const aid = uid();
-    pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-    const targetClips = clipIds ? pj.transcript.clips.filter((c) => clipIds.includes(c.id)) : pj.transcript.clips;
-    for (const c of targetClips) {
-      if (!Array.isArray(c.assetIds)) c.assetIds = [];
-      if (!c.assetIds.includes(aid)) c.assetIds.push(aid);
-    }
-  }
-  return true;
-}
-
 // 채널 로고 오버레이 트랙 추가 (image type, 모서리 배치, 모든 clip 에 표시)
 function addLogoTrack(pj, opt, mediaZip, zIndexBase, log) {
   if (!opt.path || typeof opt.path !== 'string' || !fs.existsSync(opt.path)) {
@@ -713,52 +608,6 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
   if (imgMissingClips > 0) warns.push(`이미지 누락 clip ${imgMissingClips}개 — 해당 sub-clip 은 vrew 에서 검은 배경`);
 
   return { errs, warns };
-}
-
-// ── 배경음(BGM) 트랙 — 영상 전체 길이에 걸쳐 나레이션 아래 낮은 볼륨으로 재생 ──
-//   ✅ 수동 BGM 삽입 .vrew 샘플 분석으로 확정한 형식(2026-07-04):
-//     - files[] 에 sourceFileType:'BGM' 파일 엔트리 (type AVMedia)
-//     - props.tracks[tid] 에 type:'bgm' 트랙 (fade in/out, loop, sourceOut=파일길이)
-//     - props.assets[aid] = { trackIds:[tid], role:'sub' }
-//     - ⚠ 그 aid 를 **모든 clip 의 assetIds** 에 추가 (수동삽입 .vrew 실측: 전 clip 이 bgm asset 참조).
-//       (v0.1.73 에서 asset·clip링크를 지웠던 게 원인 — 트랙만 있고 asset 없으면 Vrew 가 BGM 렌더 안 함)
-//   bgm = { audioPath, volume(0..1), loop }
-async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
-  if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
-  let fileDur = totalDurationSec;
-  try { const info = await require('../core/media-utils').getMediaInfo(bgm.audioPath); if (info.durationSec) fileDur = info.durationSec; } catch {}
-  const mid = uid();
-  const ext = (path.extname(bgm.audioPath) || '.mp3').replace(/^\./, '').toLowerCase();
-  const fn = `${mid}.${ext}`;
-  const bytes = fs.statSync(bgm.audioPath).size;
-  pj.files.push({
-    version: 1, mediaId: mid, sourceOrigin: 'USER',
-    fileSize: bytes, name: fn, type: 'AVMedia',
-    videoAudioMetaInfo: {
-      duration: fileDur,
-      audioInfo: { sampleRate: 44100, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: 2 },
-    },
-    sourceFileType: 'BGM', fileLocation: 'IN_MEMORY',
-  });
-  mediaZip.push({ src: bgm.audioPath, name: fn });
-
-  const tid = sid();
-  const aid = uid();
-  const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
-  pj.props.tracks[tid] = {
-    trackId: tid, mediaId: mid,
-    volume: vol,
-    fade: { in: true, out: true },
-    sourceIn: 0, sourceOut: fileDur,
-    loop: bgm.loop !== false, playbackRate: 1,
-    type: 'bgm',
-  };
-  // BGM asset(role:'sub', trackIds:[tid]) 을 만들고 **모든 clip** 의 assetIds 에 링크 → 전 타임라인 재생.
-  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-  const clips = (pj.transcript && pj.transcript.clips) || [];
-  for (const c of clips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; c.assetIds.push(aid); }
-  log(`[Vrew] BGM 트랙 추가(type:bgm · asset 전 clip(${clips.length}) 링크): vol=${vol} loop=${bgm.loop !== false} dur=${fileDur.toFixed(0)}s`);
-  return { mid, tid, aid };
 }
 
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
@@ -1242,37 +1091,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     }
   }
 
-  // ---------- 2.45. 제목 배경 도형 + 제목(훅) — 전체 클립 1회(연속) ----------
-  // 1번~마지막 클립까지 항상 표시되므로 그룹별로 자르지 않고 한 번에 전체 클립에 깔음(끊김·재페이드 없음).
-  // 위치: 9:16 캔버스면 상단 안전구역(살짝 아래)으로. (9:16 꽉찬 그룹=안전구역, 레터박스 그룹=상단 검정띠 안 → 둘 다 자연스러움)
-  if (opts.title && (opts.title.line1 || opts.title.line2)) {
-    const tinfo = { line1: opts.title.line1, line2: opts.title.line2, t1Size: opts.title.l1 && opts.title.l1.size, t2Size: opts.title.l2 && opts.title.l2.size };
-    const yShift = (_aspect === '9:16') ? 0.05 : 0; // 9:16 상단 안전구역
-    if (opts.titleBg && opts.titleBg.enabled) {
-      try { addShapeTrack(pj, opts.titleBg, tinfo, _frameRatio, mediaZip, log, null, yShift); }
-      catch (e) { log(`[Vrew] 제목 배경 도형 실패: ${e.message}`); }
-    }
-    try { addTitleTrack(pj, opts.title, _frameRatio, log, null, yShift); }
-    catch (e) { log(`[Vrew] 제목 트랙 실패: ${e.message}`); }
-    log(`[Vrew] 제목 상단 고정(전체 클립 1회, yShift=${yShift})`);
-  }
-
   // ---------- 2.5. AI 고지 자막 (web 트랙) ----------
   if (opts.aiNotice && opts.aiNotice.enabled) {
     try {
       addAiNoticeTrack(pj, opts.aiNotice, clipDurations, log, _frameRatio);
     } catch (e) {
       log(`[Vrew] AI 고지 자막 추가 실패: ${e.message}`);
-    }
-  }
-
-  // ---------- 2.55. 배경음(BGM) 트랙 — 전체 길이, 나레이션 아래 낮은 볼륨 ----------
-  if (opts.bgm && opts.bgm.enabled && opts.bgm.audioPath) {
-    try {
-      const _bgmTotal = clipDurations.reduce((a, d) => a + (d || 0), 0);
-      await addBgmTrack(pj, opts.bgm, _bgmTotal, mediaZip, log);
-    } catch (e) {
-      log(`[Vrew] BGM 트랙 추가 실패: ${e.message}`);
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- * pipeline.js — 대본 → TTS → .vrew 공유 파이프라인 (CLI build-shorts.js + Electron main.js 공용)
+ * pipeline.js — 대본 → TTS → .vrew 공유 파이프라인 (Electron main.js 가 사용)
  *
  * 권위 있는 데이터(Project/Sentence/Group 인스턴스)는 호출자가 메모리에 보유하고,
  * 이 모듈의 함수들이 그 위에서 동작한다. 렌더러로는 toDTO()로 직렬화해 보낸다.
@@ -9,7 +9,6 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { parseCutScriptFile } = require('./cut-script-parser');
 const { getModeProfile, normalizeMode } = require('./mode-profiles');
 const { splitCaptionLines, meaningfulLen } = require('./caption-splitter');
 const TtsCache = require('./tts-cache');
@@ -28,23 +27,13 @@ try {
 } catch {}
 
 // ── 파싱 ────────────────────────────────────────────────
-// mode 에 따라 파서 분기 (mode-profiles). shorts → cut-script-parser, longform → longform-parser.
+// 대본 파서 — 롱폼(longform-parser) 단일 경로. (쇼츠 cut-script-parser 는 2026-08-22 제거)
 //   결과 projects 에 mode 를 태깅해 이후 단계(그룹화/자막/.vrew)가 프로파일을 조회할 수 있게 한다.
-function parseScript(scriptPath, mode = 'shorts', thresholds = {}) {
+function parseScript(scriptPath, mode = 'longform', thresholds = {}) {
   const m = normalizeMode(mode);
-  const profile = getModeProfile(m);
-  let result;
-  if (profile.parser === 'sentence-splitter') {
-    // 롱폼 파서 — preset 분할옵션(thresholds) 적용. 미존재 시 cut-script 로 폴백(에러 대신 안전).
-    try {
-      const { parseLongformFile } = require('./parsers/longform-parser');
-      result = parseLongformFile(scriptPath, thresholds);
-    } catch (e) {
-      result = parseCutScriptFile(scriptPath);
-    }
-  } else {
-    result = parseCutScriptFile(scriptPath);
-  }
+  // 롱폼 파서 — preset 분할옵션(thresholds) 적용. 로드 실패는 조용히 폴백하지 않고 그대로 드러낸다.
+  const { parseLongformFile } = require('./parsers/longform-parser');
+  const result = parseLongformFile(scriptPath, thresholds);
   result.mode = m;
   // 화면/라벨용 제목은 대본 H1 이 아니라 파일명(.md 제외)으로 통일 — 사용자가 보는 파일명 그대로 노출.
   //   (텍스트 붙여넣기 parseScriptText 는 파일이 없으므로 H1 유지)
@@ -57,17 +46,10 @@ function parseScript(scriptPath, mode = 'shorts', thresholds = {}) {
 }
 
 // 텍스트로부터 파싱 (대본 수정 기능용) — 파일 대신 문자열.
-function parseScriptText(text, mode = 'shorts', thresholds = {}) {
+function parseScriptText(text, mode = 'longform', thresholds = {}) {
   const m = normalizeMode(mode);
-  const profile = getModeProfile(m);
-  let result;
-  if (profile.parser === 'sentence-splitter') {
-    const { parseLongform } = require('./parsers/longform-parser');
-    result = parseLongform(String(text || ''), '대본', thresholds);
-  } else {
-    const { parseCutScript } = require('./cut-script-parser');
-    result = parseCutScript(String(text || ''));
-  }
+  const { parseLongform } = require('./parsers/longform-parser');
+  const result = parseLongform(String(text || ''), '대본', thresholds);
   result.mode = m;
   for (const pr of result.projects) pr.mode = m;
   return result;
@@ -85,21 +67,11 @@ function toDTO(parseResult) {
     projects: projects.map((pr) => {
       let capN = 0; // 자막 줄 넘버링 — 그룹을 넘어 편 전체에서 이어짐
       return {
-        shortsNum: pr.shortsNum,
+        shortsNum: pr.shortsNum,   // 편 주소 키(롱폼=1 고정) — 스냅샷·IPC 호환을 위해 이름 유지
         title: pr.title,
         mode: pr.mode || mode,
         aspect: pr.aspect,
-        hookCaption: pr.hookCaption,
-        titleLine1: pr.titleLine1 != null ? pr.titleLine1 : (pr.hookCaption || ''),
-        titleLine2: pr.titleLine2 || '',
-        t1Size: pr.t1Size || 120, t1Color: pr.t1Color || '#ffffff', t1Align: pr.t1Align || 'center',
-        t2Size: pr.t2Size || 120, t2Color: pr.t2Color || '#ffe08a', t2Align: pr.t2Align || 'center',
-        bgEnabled: !!pr.bgEnabled, bgFill: pr.bgFill || '#000000', bgFillOp: pr.bgFillOp != null ? pr.bgFillOp : 50,
-        bgStroke: pr.bgStroke || '#000000', bgStrokeOp: pr.bgStrokeOp != null ? pr.bgStrokeOp : 0,
-        bgStrokeW: pr.bgStrokeW || 0, bgRound: pr.bgRound || 0, bgDashed: !!pr.bgDashed,
         voice: pr.voice,
-        bgmMood: pr.bgmMood || null,        // 대본에 적힌 배경음악 프롬프트(> 🎵 배경음악:)
-        bgmUsed: pr._bgmUsedMood || null,   // 실제 BGM 생성에 쓰인 무드(자동분석 결과 포함, 생성 후 채워짐)
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);
           return {
@@ -347,8 +319,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
 
 // 프로젝트 전체 문장 TTS (fillTtsList 래퍼)
 async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, onProgress = null, force = false) {
-  const lbl = project.mode === 'longform' ? '롱폼' : `쇼츠${project.shortsNum}`;
-  return fillTtsList(project.sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor, lbl, onProgress, force);
+  return fillTtsList(project.sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor, '롱폼', onProgress, force);
 }
 
 function makeSilentMp3(durSec, outPath) {
@@ -371,7 +342,7 @@ function fillSilent(project, workDir) {
 // ── .vrew 내보내기 (편별) ───────────────────────────────
 async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxChars, playbackRate) {
   const opts = {
-    aspect: project.aspect || '9:16',
+    aspect: project.aspect || '16:9',
     skipSelfCheck: true,            // 이미지 미연결 단계에서 누락을 에러로 막지 않음
     captionMaxChars: captionMaxChars || 7,
     playbackRate: (playbackRate != null && Number(playbackRate) > 0) ? Number(playbackRate) : 1, // Vrew 배속 미사용(음성에 이미 배속 반영) — 기본 1
@@ -381,30 +352,6 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = preset.aiNotice;
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
-    if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm; // 배경음(BGM) 트랙
-  }
-  // 제목(훅) 상단 고정 — 편별 titleLine1/2 + 줄별 스타일
-  const l1 = project.titleLine1 != null ? project.titleLine1 : (project.hookCaption || '');
-  const l2 = project.titleLine2 || '';
-  if (l1 || l2) {
-    opts.title = {
-      line1: l1, line2: l2,
-      l1: { size: project.t1Size || 120, color: project.t1Color || '#ffffff', align: project.t1Align || 'center' },
-      l2: { size: project.t2Size || 120, color: project.t2Color || '#ffe08a', align: project.t2Align || 'center' },
-    };
-    // 제목 배경 도형
-    if (project.bgEnabled) {
-      opts.titleBg = {
-        enabled: true,
-        fillColor: project.bgFill || '#000000',
-        fillOpacity: project.bgFillOp != null ? project.bgFillOp : 50,
-        borderColor: project.bgStroke || '#000000',
-        borderOpacity: project.bgStrokeOp != null ? project.bgStrokeOp : 0,
-        borderWidth: project.bgStrokeW || 0,
-        cornerRounding: project.bgRound || 0,
-        dashed: !!project.bgDashed,
-      };
-    }
   }
   return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
 }
@@ -516,7 +463,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
 
   const { GensparkEngine } = require('../genspark-engine');
   const eng = new GensparkEngine({ profileId: profileId || 'default', logger: log });
-  eng._aspectRatio = project.aspect || '9:16'; // 9:16 비율 강제 (config ratio override)
+  eng._aspectRatio = project.aspect || '16:9'; // 프로젝트 비율 (config ratio override)
 
   // Genspark 는 한 번 제출에 최대 6장 → 6개씩 묶어 배치 제출.
   //   배치가 6장 중 일부만 나오면 engine 이 순서 오매칭 방지로 통째 버림 → 여기서 재시도.
@@ -598,14 +545,8 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   });
   if (onProgress) { try { onProgress(); } catch {} }
   const ok = results.filter((r) => r && r.path).length;
-  log(`이미지 ${ok}/${idx.length} 생성 (쇼츠${project.shortsNum})`);
+  log(`이미지 ${ok}/${idx.length} 생성`);
   return { results, ok, total: idx.length, limitReached };
-}
-
-// 엔진 분기 (현재 genspark 구현, flow는 main.js에서 win 필요로 별도 처리)
-async function generateImages(project, engine, imagesDir, logger, abortSignal) {
-  if (engine === 'genspark') return generateImagesGenspark(project, imagesDir, logger, abortSignal);
-  throw new Error(`이미지 엔진 '${engine}' 미지원(파이프라인) — flow는 main.js 경로`);
 }
 
 // ── 앞에서 N개 그룹 → Grok image-to-video (PrimingFlow 방식: 개수 지정) ──────────
@@ -629,7 +570,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   const grokProfile = grokAccObj ? grokAccObj.id : 'default';
   if (grokAccObj && grokAccObj.id !== 'default') log(`🔑 Grok 계정: ${grokAccObj.label}`);
   const eng = new GrokEngine({ profileId: grokProfile, logger: log });
-  eng._aspectRatio = project.aspect || '9:16'; // 이미지 비율(9:16/1:1)에 맞춰 영상 생성
+  eng._aspectRatio = project.aspect || '16:9'; // 이미지 비율에 맞춰 영상 생성
   // 클립 길이: '6s'/'10s' 고정값이 오면 그대로 사용, 그 외('auto' 등)면 그룹별 TTS 시간 기준 자동 결정.
   const autoDur = !(videoDuration === '10s' || videoDuration === '6s');
   if (!autoDur) eng._videoDuration = videoDuration;
@@ -648,7 +589,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
       const outputPath = path.join(videoDir, `${String(g.num).padStart(2, '0')}.mp4`);
       const vprompt = g.videoPrompt || g.motionNote || g.videoMotionPrompt || '';
       // ♻ 영상 캐시 재활용 — 같은 (영상프롬프트 + 원본이미지) 면 재생성 안 함.
-      const vck = MediaCache.videoKey(vprompt, g.imagePath, project.aspect || '9:16', 'grok');
+      const vck = MediaCache.videoKey(vprompt, g.imagePath, project.aspect || '16:9', 'grok');
       const vhit = MediaCache.get(vck);
       if (vhit) {
         try { fs.copyFileSync(vhit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; log(`♻ 그룹${g.num} 영상 재활용(캐시)`); if (onProgress) { try { onProgress(); } catch {} } results.push({ num: g.num, success: true }); continue; } catch {}
@@ -666,7 +607,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
       if (onProgress) { try { onProgress(); } catch {} } // '영상 변환 중' 배지 즉시 표시
       // 영상 생성 — 실패(진입 타임아웃 등) 시 브라우저를 새로 띄워 1회 자동 재시도.
       //   generateVideoFromImage 가 예외를 던져도 여기서 잡아 {success:false} 로 처리 →
-      //   한 그룹 실패가 쇼츠 전체를 중단시키지 않고, 배지가 'generating' 에 고착되지 않음.
+      //   한 그룹 실패가 대본 전체를 중단시키지 않고, 배지가 'generating' 에 고착되지 않음.
       const ATTEMPTS = 2; // 1회 + 재시도 1회
       let res = null;
       for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
@@ -717,53 +658,6 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   return results;
 }
 
-// ── 그룹 재구성: 문장 기준 8초 미만 단위 (TTS 후 자동 호출) ──────────────
-// 모든 문장을 순서대로 그리디 패킹 — 각 그룹의 TTS 합이 maxSec(8.0)을 넘지 않게.
-//   · 큰 그룹(문장 多, >8초)은 쪼개지고, 작은 그룹들은 합쳐짐 → 결과 그룹은 모두 <8.0초.
-//   · 단일 문장이 maxSec 를 넘으면(드묾) 그 문장 단독 그룹(쪼갤 수 없음).
-//   · 각 새 그룹의 phase/프롬프트는 첫 문장이 속했던 원본 그룹 값을 보존(프롬프트 없으면 null).
-function mergeGroupsByTts(project, maxSec = 8.0) {
-  const { Group, finalizeGroupIds } = require('./project-model');
-  const groups = project.groups;
-  if (!groups || !groups.length) return { before: 0, after: 0, merged: 0 };
-
-  // 문장을 그룹 순서대로 평탄화 (원본 그룹의 phase/프롬프트 동반)
-  const ordered = [];
-  for (const g of groups) {
-    for (const s of project.getSentencesOfGroup(g)) {
-      ordered.push({ s, phase: g.phase || null, h2Title: g.h2Title || null, imagePrompt: g.imagePrompt || null, videoPrompt: g.videoPrompt || null, motionNote: g.motionNote || null });
-    }
-  }
-  if (!ordered.length) return { before: groups.length, after: groups.length, merged: 0 };
-
-  // 문장 단위 그리디 패킹 (8초 캡)
-  const buckets = [];
-  let cur = null, curDur = 0;
-  for (const it of ordered) {
-    const d = it.s.ttsDurationSec || 0;
-    if (cur && (curDur + d) <= maxSec + 1e-6) { cur.push(it); curDur += d; }
-    else { cur = [it]; curDur = d; buckets.push(cur); }
-  }
-
-  const newGroups = buckets.map((bucket, i) => {
-    const first = bucket[0];
-    const ng = new Group({ num: i + 1, sentenceIds: bucket.map((it) => it.s.id) });
-    ng.phase = first.phase;
-    ng.title = first.phase;
-    ng.h2Title = first.h2Title || null; // 상위 H2(유튜브 챕터 단위) 보존
-    ng.imagePrompt = bucket.map((it) => it.imagePrompt).find((p) => p && p.trim()) || null;
-    ng.videoPrompt = bucket.map((it) => it.videoPrompt).find((p) => p && p.trim()) || null;
-    ng.motionNote = bucket.map((it) => it.motionNote).find((p) => p && p.trim()) || null;
-    ng.isI2V = !!ng.videoPrompt;
-    ng.mode = ng.isI2V ? 'i2v' : 'motion';
-    return ng;
-  });
-
-  project.groups = newGroups;
-  finalizeGroupIds(newGroups, project.sentences); // sentence.groupId 재지정 + 안정 id
-  return { before: groups.length, after: newGroups.length, merged: groups.length - newGroups.length };
-}
-
 // ── SRT 자막 파일 (subtitles 폴더용) ────────────────────
 function _fmtSrt(t) {
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60);
@@ -801,7 +695,7 @@ function sanitize(name) {
 module.exports = { nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
-  generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,
-  mergeGroupsByTts, buildImagePrompt, normalizePromptNegations,
+  generateImagesGenspark, generateHookVideosGrok, writeSrt,
+  buildImagePrompt, normalizePromptNegations,
   retryFs, isTransientFsError,
 };

@@ -68,18 +68,9 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .total{font-size:12px;color:var(--ok);font-weight:700;background:#eef5ea;border:1px solid #d7e8cd;border-radius:6px;padding:1px 8px}
 /* 합계 옆 러닝타임(분:초) — 구분바 포함 */
 .total .rtf{margin-left:6px;padding-left:6px;color:var(--hook,#b9772f)}
-.titlebox{margin:2px 0 10px;background:#fbf6ee;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
-.trow{display:flex;align-items:center;gap:6px;margin:3px 0}
-.tlbl{color:var(--hook);font-weight:700;font-size:12.5px;min-width:34px}
-.tf{font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;color:var(--strong)}
-.tline{flex:0 0 380px;width:380px}
-.tsz{width:54px}
-.tcol{width:30px;height:24px;padding:0;vertical-align:middle}
-.bgchk{font-size:12.5px;color:var(--base);display:flex;align-items:center;gap:3px}
-.bgseg{font-size:12px;color:var(--base);display:flex;align-items:center;gap:3px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:2px 6px}
 .cardbtns{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardbtns button{padding:5px 9px;font-size:12px}
-/* 그룹 그리드 — 쇼츠 3열, 롱폼 2열(1줄 2화면) */
+/* 그룹 그리드 — 롱폼 2열(1줄 2화면) */
 .cuts-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 16px}
 .cuts-grid.lf{grid-template-columns:1fr 1fr;gap:4px 18px}
 /* 컷 = 썸네일 + 문장 (롱폼 16:9 큰 썸네일 320×180) */
@@ -91,8 +82,10 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .thumb.none{display:flex;align-items:center;justify-content:center;color:#c3b6a4;font-size:40px;cursor:default}
 .thumbwrap{position:relative;width:150px;height:264px}
 .thumbwrap.lf{width:320px;height:180px}
-/* 플리 배경 썸네일 — 상단에 크게(리스트 위) 배치 */
-.plbg .thumb.lf,.plbg .thumbwrap.lf{width:428px;height:240px}
+/* 출판 시작 화면(원고 열기 전 안내) — 구 .plempty(플리)에서 개명(2026-08-22) */
+.bkempty{max-width:620px;margin:48px auto;text-align:center;color:var(--base)}
+.bkempty h2{color:var(--strong);font-size:20px;margin:0 0 12px}
+.bkempty p{margin:8px 0;line-height:1.6}
 .playbadge{position:absolute;left:6px;bottom:6px;color:#fff;font-size:13px;background:rgba(125,79,163,.85);
   border-radius:5px;padding:1px 6px;pointer-events:none}
 /* 영상 썸네일 중앙 재생 버튼 (클릭 시에만 재생) */
@@ -211,8 +204,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 @keyframes kb9{from{transform:scale(1.10) translate(4%,4%)}to{transform:scale(1.20) translate(-2%,-2%)}}   /* 우하→중앙 */
 @keyframes kb10{from{transform:scale(1.08)}to{transform:scale(1.22) translate(5%,-5%)}}               /* 우상 코너 푸시 */
 @keyframes kb11{from{transform:scale(1.08)}to{transform:scale(1.22) translate(-5%,5%)}}              /* 좌하 코너 푸시 */
-#stageTitle{position:absolute;left:0;right:0;top:4%;text-align:center;font-weight:800;padding:0 5%;line-height:1.3;
-  text-shadow:0 2px 6px rgba(0,0,0,.9),0 0 3px rgba(0,0,0,.9)}
 #stageCap{position:absolute;left:0;right:0;bottom:8%;text-align:center;color:#fff;font-size:18px;font-weight:700;
   padding:0 6%;line-height:1.4;text-shadow:0 2px 6px rgba(0,0,0,.9),0 0 3px rgba(0,0,0,.9)}
 #playerBar{margin-top:14px;color:#e8dcc8;display:flex;gap:14px;align-items:center;font-size:13px}
@@ -272,32 +263,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .frow.chk{justify-content:flex-start}
 .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 
-/* ── 플리(ACE-Step 음악) 화면 ── */
-.plempty{max-width:620px;margin:48px auto;text-align:center;color:var(--base)}
-.plempty h2{color:var(--strong);font-size:20px;margin:0 0 12px}
-.plempty p{margin:8px 0;line-height:1.6}
-.plwrap{padding:8px 4px 40px}
-.plhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:6px 4px 12px;border-bottom:1px solid var(--line);margin-bottom:10px}
-.plhead h2{color:var(--strong);font-size:18px;margin:0}
-.pltracks{display:flex;flex-direction:column;gap:8px}
-.pltrack{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.pltrack.s-generating{border-color:var(--accent);box-shadow:0 0 0 2px rgba(212,165,116,.18)}
-.pltrack.s-done{border-color:var(--ok)}
-.pltrack.s-fail{border-color:var(--danger)}
-.plnum{font-size:18px;font-weight:800;color:var(--accent-d);min-width:30px;text-align:center;padding-top:2px}
-.plbody{flex:1;min-width:0}
-.pltitle{font-size:15px;font-weight:700;color:var(--strong);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pllen{font-size:11px;font-weight:600;color:var(--base);background:#f3ece0;border-radius:5px;padding:1px 6px}
-.plstatus{font-size:11px;font-weight:700;border-radius:5px;padding:1px 7px}
-.plstatus.s-idle{color:var(--base);background:#f0e8db}
-.plstatus.s-generating{color:#fff;background:var(--accent)}
-.plstatus.s-done{color:#fff;background:var(--ok)}
-.plstatus.s-fail{color:#fff;background:var(--danger)}
-.pltags{font-size:12.5px;color:var(--base);margin-top:4px;font-family:"D2Coding","Consolas",monospace;word-break:break-word}
-.pllyrics{font-size:12px;color:var(--base);margin-top:4px}
-.pllyrics.meta{color:#9a8f80}
-.plerr{font-size:12px;color:var(--danger);margin-top:4px}
-.plaudio{margin-top:8px;width:100%;max-width:420px;height:34px}
 
 /* ── 출판(book) 모드 — 3-pane: 구조 / 페이지 미리보기 / 설정 ── */
 .bkwrap{display:flex;gap:12px;align-items:stretch;padding:6px 2px 20px;height:calc(100vh - 130px);min-height:480px}
@@ -334,7 +299,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkactions button{flex:1;min-width:0;padding:8px 4px;font-size:13px;white-space:nowrap}
 .bkactions button:first-child{font-weight:700}
 .bkstatus{margin-top:10px;font-size:13px;color:var(--base);border-top:1px solid var(--line);padding-top:8px}
-.plactions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
 
 /* ⚙ 설정 — ComfyUI 「어디로 보낼까」 2분할 (🖥 로컬 / ☁ 클라우드). 각 칸은 주소·키만 관리하고,
    어느 쪽을 쓸지는 헤더 드롭다운(☁/🖥 × 모델)이 정한다 — 진입점을 하나로 두어 값이 어긋나지 않게. */

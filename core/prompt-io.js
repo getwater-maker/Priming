@@ -82,24 +82,21 @@ function sanitizeImagePrompt(text) {
 }
 
 // ── 요청서 생성 (그룹 = 이미지 1장) ─────────────────────
-// projects: Project[] (한 파일의 여러 편). 헤더는 편-그룹 복합 라벨 `## [쇼츠-그룹]` 로 충돌 방지.
+// 헤더는 편-그룹 복합 라벨 `## [편-그룹]` (롱폼은 편=1). ⚠ 이 라벨 형식은 기존 내보내기
+//   파일·LLM 답변과의 왕복 계약 — 바꾸면 옛 파일 가져오기가 깨진다.
 // 영상(🎬) 줄은 g.isI2V 그룹에만 요청. styleName 있으면 화풍 안내.
 function buildPromptRequestText(projects, opts = {}) {
   const list = Array.isArray(projects) ? projects : [projects];
   const styleName = (opts.styleName || '').trim();
-  // 모드 인식 — 롱폼(16:9 가로) vs 쇼츠(9:16 세로). 프로젝트의 mode/aspect 에서 판정.
-  const isLf = !!(list[0] && list[0].mode === 'longform');
-  const aspect = (list[0] && list[0].aspect) || (isLf ? '16:9' : '9:16');
-  const kind = isLf ? '롱폼' : '쇼츠';
+  const aspect = (list[0] && list[0].aspect) || '16:9';
+  const kind = '롱폼';
   const L = [];
   L.push(`# 이미지 프롬프트 요청 — Priming (${kind} ${aspect})`);
   L.push('');
   L.push('아래 각 그룹(= 이미지 1장)에 대해 **영어 이미지 생성 프롬프트**를 작성해 주세요. **(영상)** 표시 그룹은 **영어 영상 모션 프롬프트**도 함께 작성합니다.');
   L.push('');
   L.push('규칙:');
-  L.push(isLf
-    ? '- 결과물은 가로 **16:9 롱폼(가로형)**입니다 — 인물·배경을 가로로 넓게 배치한 **와이드(landscape) 구도**로, 좌우 여백과 배경을 살려 묘사하세요.'
-    : '- 결과물은 세로 **9:16 쇼츠(세로형)**입니다 — 인물·핵심 피사체를 **중앙**에 두고 **세로(portrait) 구도**로 묘사하세요.');
+  L.push('- 결과물은 가로 **16:9 롱폼(가로형)**입니다 — 인물·배경을 가로로 넓게 배치한 **와이드(landscape) 구도**로, 좌우 여백과 배경을 살려 묘사하세요.');
   L.push('- **🕰 시대·배경 명시 (필수)**: 대본 전체 맥락에서 시대·시기·장소·문화권을 스스로 판단해, 모든 프롬프트에 그 시대 배경을 **영어로 일관되게** 명시하세요 (예: `Joseon Dynasty Korea`, `Korean people with black hair`). 모든 그룹에서 같은 시대·동일 인물을 유지하세요.');
   L.push('- 전체 대본 맥락을 고려해 **등장인물의 성별·나이·외모·복장을 명시**하고, 모든 그룹에서 동일 인물은 동일하게 유지하세요.');
   L.push('- 각 프롬프트는 그 그룹 장면을 시각적으로 묘사하세요 (인물·배경·구도·분위기·조명). 영어로 작성.');
@@ -115,14 +112,14 @@ function buildPromptRequestText(projects, opts = {}) {
   L.push('');
   for (const project of list) {
     const sn = project.shortsNum;
-    L.push(isLf ? `# ── ${kind} ──` : `# ── ${kind} ${sn} ──`);
+    L.push(`# ── ${kind} ──`);
     L.push('');
     for (const g of project.groups) {
       // 청크 생성 — onlyKeys(Set<"sn-num">) 지정 시 그 그룹만 요청서에 포함 (긴 대본 분할용).
       if (opts.onlyKeys && !opts.onlyKeys.has(`${sn}-${g.num}`)) continue;
       const gnum2 = String(g.num).padStart(2, '0');
       const isVid = !!g.isI2V;
-      const label = (isLf ? `그룹 ${gnum2}` : `${kind} ${sn} · 그룹 ${gnum2}`) + (isVid ? ' (영상)' : '') + (g.phase ? ` — ${g.phase}` : '');
+      const label = `그룹 ${gnum2}` + (isVid ? ' (영상)' : '') + (g.phase ? ` — ${g.phase}` : '');
       L.push(`## [${sn}-${g.num}] ${label}`);
       const full = project.getSentencesOfGroup(g)
         .map((s) => String(s.text || '').replace(/\s+/g, ' ').trim())
@@ -137,7 +134,7 @@ function buildPromptRequestText(projects, opts = {}) {
   return L.join('\n');
 }
 
-// ── LLM 답변 파싱 → 그룹 매핑 (편-그룹 복합 라벨 `## [쇼츠-그룹]`) ──────
+// ── LLM 답변 파싱 → 그룹 매핑 (편-그룹 복합 라벨 `## [편-그룹]`) ──────
 function applyPromptsToProjects(projects, text) {
   const list = Array.isArray(projects) ? projects : [projects];
   const strip = (s) => String(s || '').replace(/^["'`*\s]+|["'`*\s]+$/g, '').trim();
@@ -167,8 +164,8 @@ function applyPromptsToProjects(projects, text) {
     const g = pr && pr.groups.find((x) => x.num === num);
     if (!g) continue;
     let did = false;
-    if (imgP) { const s = sanitizeImagePrompt(imgP); if (s.changed.length) sanitized.push(`쇼츠${sn} #${num} 이미지: ${s.changed.join(', ')}`); g.imagePrompt = s.text; img++; did = true; }
-    if (vidP) { const s2 = sanitizeImagePrompt(vidP); if (s2.changed.length) sanitized.push(`쇼츠${sn} #${num} 영상: ${s2.changed.join(', ')}`); g.videoPrompt = s2.text; g.isI2V = true; vid++; did = true; }
+    if (imgP) { const s = sanitizeImagePrompt(imgP); if (s.changed.length) sanitized.push(`G${num} 이미지: ${s.changed.join(', ')}`); g.imagePrompt = s.text; img++; did = true; }
+    if (vidP) { const s2 = sanitizeImagePrompt(vidP); if (s2.changed.length) sanitized.push(`G${num} 영상: ${s2.changed.join(', ')}`); g.videoPrompt = s2.text; g.isI2V = true; vid++; did = true; }
     if (did) groups++;
   }
   return { groups, img, vid, sanitized };

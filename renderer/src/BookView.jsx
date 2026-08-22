@@ -383,7 +383,7 @@ body{overflow-y:scroll}
 
   if (!loaded) {
     return (
-      <div className="plempty">
+      <div className="bkempty">
         <h2>📖 출판 — MD 원고 → POD 출판용 PDF</h2>
         <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
         <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>

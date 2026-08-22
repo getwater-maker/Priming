@@ -76,7 +76,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(add === 'ok', '임시 채널 생성: ' + add);
     chMade = add === 'ok';
     const sv = await win.evaluate(async ({ name, dir }) => {
-      try { await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, outShort: dir, scriptFolder: dir } }); return 'ok'; }
+      try { await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, scriptFolder: dir } }); return 'ok'; }
       catch (e) { return 'save:' + e.message; }
     }, { name: CH, dir: TMP });
     ok(sv === 'ok', '출력 폴더를 임시 폴더로 지정: ' + sv);

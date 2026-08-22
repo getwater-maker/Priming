@@ -123,15 +123,6 @@ eq(TS.tsCleanTitle('명량 (전자책)'), '명량 (전자책)', '숫자·제작�
   ok(r.warns.some((w) => w.includes('3개 미만')), '챕터 수 경고');
   ok(r.warns.some((w) => w.includes('10초 미만')), '짧은 챕터 경고');
 }
-{ // 쇼츠(여러 편) — 편마다 0:00 부터, 편 머리말
-  const dto = { projects: [
-    { shortsNum: 1, cuts: [{ h2: null, phase: '훅', groupDurationSec: 12, sentences: [{ dur: 12 }] }] },
-    { shortsNum: 2, cuts: [{ h2: null, phase: '훅', groupDurationSec: 15, sentences: [{ dur: 15 }] }] },
-  ] };
-  const r = TS.tsBuild(dto);
-  eq(r.text, '[쇼츠 1]\n0:00 훅\n\n[쇼츠 2]\n0:00 훅', '편별 블록');
-}
-
 // ── 6. 실제 롱폼 대본 — 파서 → DTO → 챕터 ───────────────────────────────
 const REAL = process.env.TS_TEST_SCRIPT
   || 'D:/## 아도나이로이/02_역사/01_역사이야기/대본/2026_08/[역사_0820] 강화에서 밭을 갈던 철종은 33살에 죽었습니다.md';

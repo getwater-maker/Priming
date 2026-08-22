@@ -8,13 +8,12 @@ const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const P = require('./core/pipeline');
 const { getModeProfile } = require('./core/mode-profiles');
-const { parsePlaylistText } = require('./core/parsers/playlist-parser');
 
 // 현재 작업 모드 — open-script 가 설정한 S.mode, 또는 파싱 결과/프로젝트에서 추론.
 function currentMode() {
-  return (S.parsed && S.parsed.mode) || S.mode || 'shorts';
+  return (S.parsed && S.parsed.mode) || S.mode || 'longform';
 }
-// .vrew(및 SRT) 파일명 — 대본 파일명과 동일. 한 파일에 편이 여럿(쇼츠 3편)이면 _N 접미.
+// .vrew(및 SRT) 파일명 — 대본 파일명과 동일. (편이 여럿인 옛 스냅샷 호환용 _N 접미 유지)
 function vrewBaseName(pr) {
   const src = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '')
     : (S.parsed && S.parsed.fileTitle) || getModeProfile(currentMode()).vrewPrefix;
@@ -22,11 +21,8 @@ function vrewBaseName(pr) {
   const n = (S.parsed && S.parsed.projects) ? S.parsed.projects.length : 1;
   return n > 1 ? `${base}_${pr.shortsNum}` : base;
 }
-// 로그 라벨 — 롱폼은 '롱폼', 쇼츠는 '쇼츠N'. (롱폼 프로젝트도 내부 shortsNum=1 이라 라벨만 모드로 구분)
-function prLabel(pr) {
-  const lf = (pr && pr.mode === 'longform') || currentMode() === 'longform';
-  return lf ? '롱폼' : `쇼츠${pr ? pr.shortsNum : ''}`;
-}
+// 로그 라벨 — 롱폼 단일 모드.
+function prLabel(pr) { return '롱폼'; }
 // 롱폼 분할옵션 — 프리셋의 split 객체(롱폼 전용) 우선, 없으면 평면 필드.
 function presetThresholds(preset) {
   if (!preset) return {};
@@ -42,19 +38,12 @@ function presetThresholds(preset) {
 }
 // 영상 엔진 → Grok 클립 길이. 'grok'=자동(그룹 TTS 기준 6/10초, pipeline 에서 결정), 레거시 'grok10'=10s 고정.
 function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
-// 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / comfy 8 / grok 10).
-//   Grok 은 그룹 TTS≤6→6초·>6→10초 자동이므로 캡을 10초로 둬야 6초 초과 그룹이 생긴다.
-function clipMaxOf(videoEngine) { return 10.0; } // Grok=10초 캡 (그룹 TTS≤6→6초·>6→10초 자동)
-// AI 고지 결정 — 양쪽 모드 모두 사용자 선택(want)을 따른다. 기본값(롱폼 ON / 쇼츠 OFF)은 렌더러가 정함.
-//   롱폼은 켜면 5초 후 5초간 표시(기존 타이밍 유지). 쇼츠는 preset 의 타이밍을 그대로 사용.
+// AI 고지 결정 — 사용자 선택(want)을 따른다. 켜면 5초 후 5초간 표시.
 const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
 function resolveAiNotice(preset, want) {
   if (!preset) return preset;
   const base = { text: AI_NOTICE_TEXT, ...(preset.aiNotice || {}) };
-  if (currentMode() === 'longform') {
-    return { ...preset, aiNotice: { ...base, enabled: !!want, startMode: 'seconds', startSeconds: 5, durationSeconds: 5 } };
-  }
-  return { ...preset, aiNotice: { ...base, enabled: !!want } };
+  return { ...preset, aiNotice: { ...base, enabled: !!want, startMode: 'seconds', startSeconds: 5, durationSeconds: 5 } };
 }
 
 // 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요).
@@ -73,10 +62,10 @@ let win = null;
 const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, mode: 'longform',
   // 작업 소요시간(초) — 백엔드에서 단계별 측정해 DTO 로 전송(make-all 의 각 단계 시간도 실시간 표시).
   timings: { tts: 0, image: 0, video: 0, make: 0 },
-  // 모드별 작업 큐 — 각 모드(롱폼/쇼츠)가 대본 여러 개(items)를 순서대로 보관.
+  // 모드별 작업 큐 — 각 모드(롱폼/출판)가 대본 여러 개(items)를 순서대로 보관.
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
-  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null }, playlist: { items: [], activeId: null }, book: { items: [], activeId: null } } };
+  modes: { longform: { items: [], activeId: null }, book: { items: [], activeId: null } } };
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -95,7 +84,7 @@ function syncActiveToS() {
 function storeActive() {
   const it = activeItem();
   if (it && S.parsed) { it.parsed = S.parsed; it.scriptPath = S.scriptPath; it.outRoot = S.outRoot; }
-  scheduleAutoSave(); // set-aspect/merge-groups 등 pushDtoUpdate 안 거치는 변경도 자동저장
+  scheduleAutoSave(); // pushDtoUpdate 를 안 거치는 변경도 자동저장
 }
 // 현재 모드 큐에 항목 추가 + 활성화 + S.* 미러 갱신.
 //   같은 scriptPath 가 이미 큐에 있으면 새로 만들지 않고 그 항목을 갱신·활성화(중복·자동저장 충돌 방지).
@@ -115,36 +104,18 @@ function setSingleItem(parsed, scriptPath, outRoot) {
   q.items = []; q.activeId = null;
   return addItem(parsed, scriptPath, outRoot);
 }
-// 모드 4-way 정규화 (롱폼/쇼츠/플리/출판)
-function normMode(m) { return m === 'longform' ? 'longform' : m === 'playlist' ? 'playlist' : m === 'book' ? 'book' : 'shorts'; }
+// 모드 정규화 (롱폼/출판) — 옛 저장값('shorts'/'playlist')은 롱폼으로 흡수(제거된 모드, 2026-08-22).
+function normMode(m) { return m === 'book' ? 'book' : 'longform'; }
 // 지정 모드로 전환 — 그 모드 활성 항목을 S.* 로 복원(재파싱 없음).
 function activateMode(m) {
   S.mode = normMode(m);
   syncActiveToS();
 }
-// 현재 모드 기준 렌더러 DTO — 플리/출판은 별도 형식, 그 외는 프로젝트 DTO.
+// 현재 모드 기준 렌더러 DTO — 출판은 별도 형식, 그 외는 프로젝트 DTO.
 function currentDTO() {
   if (!S.parsed) return null;
-  if (S.mode === 'playlist' || S.parsed.kind === 'playlist') return playlistDTO(S.parsed);
   if (S.mode === 'book' || S.parsed.kind === 'book') return bookDTO(S.parsed);
   return P.toDTO(S.parsed);
-}
-// 플리 파싱본 → 렌더러 DTO (생성 상태·오디오 경로 포함).
-function playlistDTO(parsed) {
-  return {
-    kind: 'playlist',
-    fileTitle: parsed.fileTitle || '플레이리스트',
-    concept: parsed.concept || '',
-    bgImagePath: parsed.bgImagePath || null,   // 전 곡 공통 배경 이미지 (첨부 or Krea2 생성)
-    bgVideoPath: parsed.bgVideoPath || null,    // 전 곡 공통 배경 영상 (첨부 or LTX 생성) — 있으면 미리보기 우선
-    tracks: (parsed.tracks || []).map((t) => ({
-      num: t.num, title: t.title, tags: t.tags, lyrics: t.lyrics || '',
-      durationSec: t.durationSec || 0,
-      status: t.status || 'idle', // idle | generating | done | fail
-      audioPath: t.audioPath || null,
-      error: t.error || null,
-    })),
-  };
 }
 
 // 출판(book) 파싱본 → 렌더러 DTO — 구조 요약(섹션 목록·부/장 트리·메타·표지·규격).
@@ -411,7 +382,7 @@ setInterval(() => {
 //  왜: 모니터가 절전으로 꺼지면 ① 복귀 시 해상도·DPI 가 기본값으로 떨어져 창 배치가 흐트러지고
 //      ② 브라우저 자동화(Genspark/Flow/Grok)의 좌표 클릭·타이머가 흔들린다. 긴 작업 중엔 막는 게 안전.
 //  ⚠ 'prevent-display-sleep' = 화면 끄기 + 시스템 절전 모두 차단. 작업이 끝나면 반드시 해제(전기·수명).
-//  참조 카운트: 여러 작업(TTS 큐 · 이미지 큐 · 비디오 · 플리)이 겹쳐도 마지막 하나가 끝날 때만 해제한다.
+//  참조 카운트: 여러 작업(TTS 큐 · 이미지 큐 · 비디오)이 겹쳐도 마지막 하나가 끝날 때만 해제한다.
 const { powerSaveBlocker } = require('electron');
 const _awake = { n: 0, id: null };
 function awakeAcquire(label = '') {
@@ -1115,7 +1086,6 @@ ipcMain.handle('set-qwen-design-config', (_e, args = {}) => {
 });
 ipcMain.handle('qwen-design-start', async () => {
   // 원격 모드는 이 PC GPU 를 쓰지 않으므로 음악 생성 중이어도 허용.
-  if (S.musicActive && !QD.isRemote()) { log('⚠ 음악 생성 중에는 보이스디자인을 열 수 없습니다. 끝난 뒤 다시 시도하세요.'); return { ok: false, error: 'gpu-busy' }; }
   const r = await QD.start(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
   if (r && r.ok) S.voiceDesignActive = true;
   return r;
@@ -1192,29 +1162,6 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
   } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
 });
 
-// 대본(.md) 내용으로 롱폼/쇼츠 자동 판별 — '## 쇼츠 N' 헤더가 있으면 쇼츠, 없으면 롱폼.
-//   (사용자가 탭을 잘못 골라 열어도 대본 형식에 맞는 모드로 연다.) 파일을 못 읽으면 null.
-function detectScriptMode(scriptPath) {
-  let txt = '';
-  try { txt = fs.readFileSync(scriptPath, 'utf8'); } catch { return null; }
-  if (/^##\s*쇼츠\s*\d/m.test(txt)) return 'shorts';            // 쇼츠 편 헤더 → 쇼츠 (확정)
-  const mq = txt.match(/^>\s?.*$/m);                              // 메타 줄(>)의 화면비 = 보조 신호
-  if (mq && /9:16/.test(mq[0]) && !/16:9/.test(mq[0])) return 'shorts';
-  return 'longform';
-}
-// 작업본(스냅샷) 복원 시, 원본 .md 에서 형식(grouped/cut/prose)을 다시 판별.
-//   옛 스냅샷엔 형식 정보가 없어 직접 나눈 그룹(grouped)이 TTS 후 자동 재구성으로 합쳐지던 문제 방지.
-//   .md 를 못 읽으면 null → 호출부에서 'grouped'(안전: 재구성 안 함) 로 폴백.
-function detectFormatFromScript(scriptPath) {
-  try {
-    if (scriptPath && fs.existsSync(scriptPath)) {
-      const { parseCutScript } = require('./core/cut-script-parser');
-      return parseCutScript(fs.readFileSync(scriptPath, 'utf8')).format || null;
-    }
-  } catch (_) {}
-  return null;
-}
-
 ipcMain.handle('open-script', async (_e, args = {}) => {
   const preset = P.getPreset(args.presetName || null);
   // 여러 개 한 번에 선택 가능 — 고른 순서(파일명 정렬)대로 작업큐에 쌓인다.
@@ -1222,7 +1169,6 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   if (preset && preset.scriptFolder && fs.existsSync(preset.scriptFolder)) opt.defaultPath = preset.scriptFolder;
   const r = await dialog.showOpenDialog(win, opt);
   if (r.canceled || !r.filePaths || !r.filePaths.length) return null;
-  const requestedMode = (args.mode === 'longform') ? 'longform' : 'shorts';
   // 다중 선택은 OS 가 주는 순서가 제각각 → 파일명 자연정렬로 큐 순서를 예측 가능하게.
   const paths = r.filePaths.slice().sort((a, b) => path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
   if (paths.length > 1) log(`📂 대본 ${paths.length}개 열기 — 작업큐에 순서대로 추가합니다`);
@@ -1230,12 +1176,7 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   for (const scriptPath of paths) {
     try {
       S.scriptPath = scriptPath;
-      // 대본 형식 자동 판별 — 탭 선택과 무관하게 대본에 맞는 모드로 연다(잘못 열기 방지). 실패 시 탭 모드.
-      const detectedMode = detectScriptMode(scriptPath);
-      S.mode = detectedMode || requestedMode;
-      if (detectedMode && detectedMode !== requestedMode) {
-        log(`🔀 대본 형식 감지 → ${detectedMode === 'longform' ? '롱폼' : '쇼츠'} 모드로 자동 전환`);
-      }
+      S.mode = 'longform';   // 영상 대본은 롱폼 단일 모드 (쇼츠 모드는 2026-08-22 제거)
       S.preset = preset;
       S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
@@ -1260,28 +1201,16 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
 });
 
 // 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/
-//   그 안에 media/(이미지+영상) · tts/(음성) · subtitles/(SRT) 하위폴더 + 쇼츠N.vrew.
+//   그 안에 media/(이미지+영상) · tts/(음성) · subtitles/(SRT) 하위폴더 + <대본명>.vrew.
 //   Windows 금지문자만 제거(대괄호·공백은 유지).
 function _safeFolder(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
 }
 function computeOutRoot(scriptPath, preset, mode) {
   const folder = _safeFolder(path.basename(scriptPath).replace(/\.md$/i, ''));
-  // 모드별 출력폴더(롱폼/쇼츠) 우선, 없으면 공용 outputFolder, 그것도 없으면 ./output
-  const modeOut = preset && (mode === 'longform' ? preset.outLong : preset.outShort);
-  const outBase = modeOut || (preset && preset.outputFolder) || path.join(__dirname, 'output');
-  return path.join(outBase, folder);
-}
-// 플리 스펙(.md) 파싱 — 파일 읽어 playlist-parser 로.
-function parsePlaylistFile(specPath) {
-  const text = fs.readFileSync(specPath, 'utf8');
-  return parsePlaylistText(text);
-}
-// 플리 출력 루트 — <채널 outputFolder>/<스펙파일명>/ (곡은 이 폴더에 NN_제목.mp3)
-function playlistOutRoot(specPath, preset) {
-  const folder = _safeFolder(path.basename(specPath).replace(/\.md$/i, ''));
+  // 롱폼 출력폴더(outLong) 우선, 없으면 공용 outputFolder, 그것도 없으면 ./output
   const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
-  return path.join(outBase, '플리', folder);
+  return path.join(outBase, folder);
 }
 // 출판 출력 루트 — <채널 outputFolder>/출판/<원고파일명>/ (내지·표지 PDF + _work 빌드폴더)
 function bookOutRoot(scriptPath, preset) {
@@ -1289,7 +1218,8 @@ function bookOutRoot(scriptPath, preset) {
   const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
   return path.join(outBase, '출판', folder);
 }
-// 쇼츠별 폴더: media-N(이미지+영상) · tts-N(음성) · subtitles-N(SRT). 루트에 쇼츠N.vrew.
+// 편별 폴더: media-N(이미지+영상) · tts-N(음성) · subtitles-N(SRT). 루트에 <대본명>.vrew.
+//   ⚠ 함수명·폴더명(media-1 등)은 기존 작업물·스냅샷 호환 때문에 바꾸지 않는다(롱폼 N=1).
 function shortsDirs(outRoot, n) {
   const d = { media: path.join(outRoot, `media-${n}`), tts: path.join(outRoot, `tts-${n}`), subtitles: path.join(outRoot, `subtitles-${n}`) };
   for (const k of Object.keys(d)) { try { fs.mkdirSync(d[k], { recursive: true }); } catch {} }
@@ -1410,7 +1340,6 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return { ok: false, error: 'gpu-busy' }; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
-  const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
   S.abort = false;
   if (!dry) {
     S.preset = P.getPreset(presetName);
@@ -1429,14 +1358,6 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
     if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ ${prLabel(pr)} 무음 오디오`); }
     else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); log(`✓ ${prLabel(pr)} 음성 완료`); }
-    // 음성변환 직후: (쇼츠만) 문장 기준 clipMaxSec(영상 엔진별 6/8초) 미만 단위로 그룹 자동 재구성.
-    //   롱폼은 group-builder 가 이미 의미 단위로 묶었으므로 8초 재패킹을 건너뛴다.
-    if (getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped') {
-      const m = P.mergeGroupsByTts(pr, clipMaxSec);
-      log(`  ↳ ${clipMaxSec}초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
-    } else if (pr.format === 'grouped') {
-      log(`  ↳ 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
-    }
     pushDtoUpdate();
   }
   S.timings.tts = (Date.now() - _ttsT0) / 1000;
@@ -1476,18 +1397,6 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
   return { outs };
 });
 
-// BGM 오디오 경로 해석 — 메모리(pr._bgmPath) 우선, 없으면 media 폴더의 bgm_*.mp3 재사용
-//   (다른 실행·재시작·💾재export 에서도 이미 만든 BGM 을 자동으로 찾아 .vrew 에 포함).
-function resolveBgmPath(pr) {
-  if (pr._bgmPath && fs.existsSync(pr._bgmPath)) return pr._bgmPath;
-  try {
-    const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
-    const files = fs.readdirSync(mediaDir).filter((f) => /^bgm_.*\.(mp3|wav)$/i.test(f));
-    const pick = files.find((f) => /_loop\.mp3$/i.test(f)) || files[0]; // 루프(전체 길이) 우선 — 원본(.wav)은 폴백
-    if (pick) return path.join(mediaDir, pick);
-  } catch {}
-  return null;
-}
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
@@ -1496,7 +1405,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (preset && captionStyle) {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
-  preset = resolveAiNotice(preset, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
+  preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
   const outs = [];
   const incomplete = [];
   const noTts = [];   // 음성 누락으로 건너뛴 편
@@ -1532,15 +1441,8 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
-    // ⚡만들기에서 생성한 BGM(또는 media 폴더에 이미 있는 bgm mp3)이 있으면 재export(.vrew)에도 포함.
-    let ep = preset;
-    const _bgmPath = resolveBgmPath(pr);
-    if (_bgmPath) {
-      ep = { ...ep, bgm: { enabled: true, audioPath: _bgmPath, volume: (pr._bgmVolume != null ? pr._bgmVolume : 0.15), loop: true } };
-      log(`🎵 ${prLabel(pr)} .vrew 에 BGM 포함: ${path.basename(_bgmPath)}`);
-    }
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -1556,7 +1458,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
 
 // Flow 이미지 — FlowAutomator는 win(IPC send)이 필요해 main에서 처리.
 // customPrompts에 group.imagePrompt를 그대로 넣어 번역 없이 사용.
-// Flow는 임시폴더에 생성 → 결과를 쇼츠N_images/cutM.ext 로 복사 (Genspark와 동일 위치, _flow 폴더 안 만듦).
+// Flow는 임시폴더에 생성 → 결과를 media-N/NN.ext 로 복사 (Genspark와 동일 위치, _flow 폴더 안 만듦).
 // 크롬 프로필 정리 — stale 락 제거 + 복원 프롬프트 억제(비정상 종료 후 about:blank 창 누적 방지)
 function cleanChromeProfile(profileDir) {
   for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
@@ -1655,7 +1557,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     try {
       res = await eng.run({
         paragraphs, customPrompts, mediaType: 'image', model: flowImageModel,
-        ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic',
+        ratio: project.aspect || '16:9', outputDir: workDir, style: styleId || 'cinematic',
         withSubtitle: false, vrewOnly: false, skipVrew: true,
         antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
       });
@@ -1697,7 +1599,7 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0'));
-    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '9:16', outPathNoExt: base });
+    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base });
     if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }
     else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
   }
@@ -1890,7 +1792,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     }
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
-    const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
+    const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort });
     if (r.success) {
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
       if (await looksBadImage(r.imagePath)) {
@@ -2232,15 +2134,14 @@ function queueDTO() {
         title: (it.parsed && it.parsed.fileTitle) || (it.scriptPath ? path.basename(it.scriptPath) : '대본'),
         file: it.scriptPath ? path.basename(it.scriptPath) : '',
         projects: (it.parsed && (it.parsed.projects ? it.parsed.projects.length
-          : it.parsed.parts ? it.parsed.parts.reduce((n, p) => n + p.chapters.length, 0)
-          : (it.parsed.tracks || []).length)) || 0,
+          : it.parsed.parts ? it.parsed.parts.reduce((n, p) => n + p.chapters.length, 0) : 0)) || 0,
         status: it.status || 'idle',
         settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
         active: it.id === q.activeId,
       })),
     };
   };
-  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts'), playlist: mk('playlist'), book: mk('book') };
+  return { mode: S.mode, longform: mk('longform'), book: mk('book') };
 }
 function pushDtoUpdate() {
   try { if (win && !win.isDestroyed() && S.parsed) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
@@ -2251,7 +2152,7 @@ function pushDtoUpdate() {
 //   자산 있으면 'done', 없으면 'idle' 로 정리한다. (in-flight 배치가 곧 끝나면 그때 done/fail 로 다시 갱신 — 무해)
 function clearGeneratingStatus() {
   try {
-    for (const key of ['longform', 'shorts']) {
+    for (const key of ['longform']) {
       const q = S.modes && S.modes[key];
       if (!q || !Array.isArray(q.items)) continue;
       for (const it of q.items) {
@@ -2284,7 +2185,7 @@ async function prefillImageCache(project, mediaDir, styleId, engine) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
     if (hasVisual(g)) continue;   // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
     if (g.imageCleared) continue; // ✕ 로 지웠거나 이상으로 폐기된 그룹 — 캐시로 되살리지 않고 새로 생성
-    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine);
+    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '16:9', engine);
     const hit = MC.get(key);
     if (!hit) continue;
     try {
@@ -2319,7 +2220,7 @@ function cacheGeneratedImages(project, styleId, engine) {
   const MC = require('./core/media-cache');
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePath || !fs.existsSync(g.imagePath)) continue;
-    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine);
+    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '16:9', engine);
     MC.put(key, g.imagePath, path.extname(g.imagePath).slice(1));
     g._imgCacheKey = key; g.imageCleared = false; // 새 이미지 캐시 저장 → 삭제플래그 해제(이후 재활용 허용)
   }
@@ -2473,45 +2374,6 @@ async function autoFillPrompts(projects, logger) {
   } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
 }
 
-// 대본 → ACE-Step BGM 무드 태그. moodOverride(작업바 수동값) → 대본 `배경음악:` 줄 → Ollama → Gemini → 기본값.
-const BGM_DEFAULT_MOOD = 'calm, cinematic, ambient, soft piano, slow tempo, warm, instrumental';
-async function deriveBgmMood(project, moodOverride, logger) {
-  if (moodOverride && String(moodOverride).trim()) return String(moodOverride).trim();
-  // 대본에 적힌 배경음악 프롬프트(파서가 proj.bgmMood 로 넣음) — 자동 분석보다 우선.
-  if (project && project.bgmMood && String(project.bgmMood).trim()) {
-    logger('  BGM 무드 = 대본 지정값 사용');
-    return String(project.bgmMood).trim();
-  }
-  const PromptIO = require('./core/prompt-io');
-  const sample = [project.title || project.fileTitle || '', ...project.sentences.slice(0, 8).map((s) => s.text || '')].join(' ').slice(0, 800);
-  const req = [
-    '다음 영상 대본의 분위기에 어울리는 "배경음악 스타일"을 ACE-Step 태그로 만들어줘.',
-    '규칙: 쉼표로 구분된 영어 태그 한 줄만 출력(설명·따옴표·줄바꿈 금지). 반드시 instrumental 포함, 보컬 없음.',
-    '예: calm, cinematic, ambient piano, slow tempo, warm, instrumental',
-    '대본: ' + sample,
-  ].join('\n');
-  const sanitize = (t) => String(t || '').replace(/[\r\n]+/g, ' ').replace(/^\s*tags?\s*[:：]/i, '').replace(/^["'`\s]+|["'`\s]+$/g, '').trim();
-  const ensureInst = (t) => (/instrumental/i.test(t) ? t : `${t}, instrumental`);
-  // 1순위 Ollama
-  try {
-    const oc = require('./core/ollama-config').load();
-    const r = await ollamaTags(oc.baseUrl);
-    if (r.ok) {
-      const t = sanitize(await PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }));
-      if (t) return ensureInst(t);
-    }
-  } catch (e) { logger('  BGM 무드 Ollama 실패: ' + e.message); }
-  // 2순위 Gemini
-  try {
-    let key = ''; try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
-    if (key.trim()) {
-      const t = sanitize(await PromptIO.callLlmTextApi('gemini', key, req));
-      if (t) return ensureInst(t);
-    }
-  } catch (e) { logger('  BGM 무드 Gemini 실패: ' + e.message); }
-  return BGM_DEFAULT_MOOD;
-}
-
 ipcMain.handle('image-build', (_e, args = {}) => {
   const { shortsNum = null, engine = 'genspark', styleId = null } = args;
   // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
@@ -2550,7 +2412,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
 });
 
 // 비주얼(이미지) 미생성 그룹 번호 — 이미지도 영상도 없는 그룹.
-//   쇼츠는 이미지→영상 변환이므로 영상이 있으면 이미지가 있었던 것 → 둘 중 하나라도 있으면 OK.
+//   영상이 있으면 이미지가 있었던 것 → 둘 중 하나라도 있으면 OK.
 //   imagePrompt 가 있는(=비주얼이 있어야 하는) 그룹만 검사.
 // 🔴 **TTS 누락 게이트**(2026-08-20 사고) — 음성이 없는 문장이 있으면 .vrew 를 만들지 않는다.
 //   실제로 일어난 일: 로컬 이미지가 GPU 를 점유해 컷41 TTS 가 60초 타임아웃 3회 → 그 대본 TTS 단계가
@@ -2621,7 +2483,7 @@ function warnIncompleteVisuals(incomplete) {
       type: 'warning',
       title: '이미지 미생성 — .vrew 를 만들지 않았습니다',
       message: '일부 그룹의 이미지가 생성되지 않아 해당 편의 .vrew 를 만들지 않았습니다.',
-      detail: `${detail}\n\n해당 그룹의 이미지를 생성한 뒤 다시 시도하세요.\n(쇼츠는 이미지 생성 후 영상으로 변환됩니다.)`,
+      detail: `${detail}\n\n해당 그룹의 이미지를 생성한 뒤 다시 시도하세요.`,
       buttons: ['확인'],
     });
   } catch {}
@@ -2932,12 +2794,13 @@ function snapshotFile(scriptPath) {
 function buildParsedForScript(scriptPath, mode, preset) {
   let note = '', snap = null;
   try { const { file } = snapshotFile(scriptPath); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  const sameMode = snap && ((snap.mode === 'longform' ? 'longform' : 'shorts') === mode);
+  // 옛 쇼츠 스냅샷(snap.mode==='shorts')은 이어받지 않는다 — 롱폼 파서로 새로 파싱(자산 overlay 도 안 함).
+  const sameMode = snap && snap.mode === 'longform' && mode === 'longform';
   let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
   let parsed;
   if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
     const projects = projectsFromSnapshot(snap);
-    const fmt = detectFormatFromScript(scriptPath) || 'grouped'; // 원본 .md 로 형식 재판별(옛 스냅샷 보정)
+    const fmt = 'longform';
     for (const pr of projects) { pr.mode = mode; if (!pr.format) pr.format = fmt; }
     parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode };
     note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
@@ -2976,14 +2839,8 @@ function buildSnapshot() {
     scriptPath: S.scriptPath, fileTitle: S.parsed.fileTitle, meta: S.parsed.meta, outRoot: S.outRoot, mode: currentMode(),
     savedAt: Date.now(),
     projects: S.parsed.projects.map((pr) => ({
-      shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, hookCaption: pr.hookCaption, voice: pr.voice,
-      format: pr.format || S.parsed.format || null, // 대본 형식 보존(grouped 면 자동 재구성 건너뜀)
-      titleLine1: pr.titleLine1, titleLine2: pr.titleLine2,
-      t1Size: pr.t1Size, t1Color: pr.t1Color, t1Align: pr.t1Align,
-      t2Size: pr.t2Size, t2Color: pr.t2Color, t2Align: pr.t2Align,
-      bgEnabled: pr.bgEnabled, bgFill: pr.bgFill, bgFillOp: pr.bgFillOp, bgStroke: pr.bgStroke,
-      bgStrokeOp: pr.bgStrokeOp, bgStrokeW: pr.bgStrokeW, bgRound: pr.bgRound, bgDashed: pr.bgDashed,
-      bgmPath: pr._bgmPath || null, bgmVolume: pr._bgmVolume != null ? pr._bgmVolume : null, // BGM 재사용(재시작 후 💾 재export)
+      shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
+      format: pr.format || S.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
@@ -2996,7 +2853,7 @@ function buildSnapshot() {
 }
 function writeSnapshotSync() {
   if (!S.parsed) return null;
-  if (S.parsed.kind === 'playlist' || S.parsed.kind === 'book') return null; // 플리/출판은 워크스페이스+원본(.md)이 진실 — .smproj 스냅샷 불필요
+  if (S.parsed.kind === 'book') return null; // 출판은 워크스페이스+원본(.md)이 진실 — .smproj 스냅샷 불필요
   try {
     const { projDir, file } = snapshotFile();
     fs.mkdirSync(projDir, { recursive: true });
@@ -3032,7 +2889,7 @@ function serializeQueue() {
     const q = S.modes[mode];
     return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
   };
-  return { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist'), book: ser('book') };
+  return { version: 1, mode: S.mode, longform: ser('longform'), book: ser('book') };
 }
 function writeWorkspace() {
   try {
@@ -3046,9 +2903,10 @@ function writeWorkspace() {
 function applyWorkspace(ws, opts = {}) {
   try {
     if (!ws) return 0;
-    if (opts.clear) { for (const m of ['longform', 'shorts', 'playlist', 'book']) { const q = S.modes[m]; if (q) { q.items = []; q.activeId = null; } } }
+    if (opts.clear) { for (const m of ['longform', 'book']) { const q = S.modes[m]; if (q) { q.items = []; q.activeId = null; } } }
     let restored = 0;
-    for (const mode of ['longform', 'shorts']) {
+    // ⚠ 옛 workspace.json 의 shorts/playlist 큐 항목은 더 이상 복원하지 않는다(모드 제거, 2026-08-22).
+    for (const mode of ['longform']) {
       const wq = ws[mode]; if (!wq || !Array.isArray(wq.items)) continue;
       const q = S.modes[mode]; let activeNewId = null;
       for (const wi of wq.items) {
@@ -3063,21 +2921,6 @@ function applyWorkspace(ws, opts = {}) {
           q.items.push(it); restored++;
           if (wi.id === wq.activeId) activeNewId = it.id;
         } catch (e) { log(`큐 항목 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
-      }
-      q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
-    }
-    // 플리 — 스펙(.md)을 playlist-parser 로 재파싱해 복원.
-    if (ws.playlist && Array.isArray(ws.playlist.items)) {
-      const q = S.modes.playlist; let activeNewId = null;
-      for (const wi of ws.playlist.items) {
-        if (!wi.scriptPath || !fs.existsSync(wi.scriptPath)) continue;
-        try {
-          const parsed = parsePlaylistFile(wi.scriptPath);
-          const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot: playlistOutRoot(wi.scriptPath, S.preset),
-            settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
-          q.items.push(it); restored++;
-          if (wi.id === ws.playlist.activeId) activeNewId = it.id;
-        } catch (e) { log(`플리 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
@@ -3147,12 +2990,7 @@ function projectsFromSnapshot(snap) {
     });
     finalizeGroupIds(groups, sentences);
     const proj = new Project({ sentences, groups });
-    Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect, title: ps.title, shortsNum: ps.shortsNum, hookCaption: ps.hookCaption, voice: ps.voice,
-      titleLine1: ps.titleLine1, titleLine2: ps.titleLine2,
-      t1Size: ps.t1Size, t1Color: ps.t1Color, t1Align: ps.t1Align, t2Size: ps.t2Size, t2Color: ps.t2Color, t2Align: ps.t2Align,
-      bgEnabled: ps.bgEnabled, bgFill: ps.bgFill, bgFillOp: ps.bgFillOp, bgStroke: ps.bgStroke,
-      bgStrokeOp: ps.bgStrokeOp, bgStrokeW: ps.bgStrokeW, bgRound: ps.bgRound, bgDashed: ps.bgDashed });
-    if (ps.bgmPath && fs.existsSync(ps.bgmPath)) { proj._bgmPath = ps.bgmPath; proj._bgmVolume = ps.bgmVolume; }
+    Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
     return proj;
   });
 }
@@ -3164,7 +3002,7 @@ function overlaySnapshot(parsed, snap) {
   (snap.projects || []).forEach((ps) => byShorts.set(ps.shortsNum, ps));
   for (const pr of parsed.projects) {
     const ps = byShorts.get(pr.shortsNum); if (!ps) continue;
-    for (const k of ['title','aspect','hookCaption','voice','titleLine1','titleLine2','t1Size','t1Color','t1Align','t2Size','t2Color','t2Align','bgEnabled','bgFill','bgFillOp','bgStroke','bgStrokeOp','bgStrokeW','bgRound','bgDashed']) {
+    for (const k of ['title', 'aspect', 'voice']) {
       if (ps[k] != null) pr[k] = ps[k];
     }
     const gmap = new Map(); (ps.groups || []).forEach((gs) => gmap.set(gs.num, gs));
@@ -3206,10 +3044,14 @@ ipcMain.handle('load-project', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], defaultPath: savesDir(), filters: [{ name: 'Priming 작업', extensions: ['smproj.json', 'json'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
   const snap = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
+  if (snap.mode && snap.mode !== 'longform' && snap.mode !== 'book') {
+    log(`⛔ 이 작업 파일은 제거된 모드(${snap.mode})의 것입니다 — 불러올 수 없습니다.`);
+    return null;
+  }
   const projects = projectsFromSnapshot(snap);
   S.scriptPath = snap.scriptPath; S.outRoot = snap.outRoot;
-  S.mode = (snap.mode === 'longform') ? 'longform' : 'shorts';
-  const fmt = detectFormatFromScript(snap.scriptPath) || 'grouped'; // 원본 .md 로 형식 재판별(옛 스냅샷 보정)
+  S.mode = 'longform';
+  const fmt = 'longform';
   for (const pr of projects) { pr.mode = S.mode; if (!pr.format) pr.format = fmt; }
   S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode: S.mode };
   addItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 추가 + 활성화
@@ -3224,7 +3066,7 @@ async function runMakeAllCore(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -3244,18 +3086,11 @@ async function runMakeAllCore(opts = {}) {
   S.timings = { tts: 0, image: 0, video: 0, make: 0 }; // 이번 작업 단계별 시간 (누적)
   pushDtoUpdate();
 
-  // 쇼츠 1·2·3 을 하나의 덩어리로 — 단계별 일괄 처리.
-  //   예전: 쇼츠마다 [TTS→이미지→영상→.vrew] 를 끝까지 돌리고 다음 쇼츠.
-  //   지금: 전 쇼츠의 TTS 를 1번 1그룹부터 마지막 쇼츠 마지막 그룹까지 먼저, 그다음 전 쇼츠 이미지,
-  //         그다음 전 쇼츠 영상, 마지막에 전 쇼츠 .vrew. (사용자 요청)
-  //   부수효과: 단계가 완전 순차라 ComfyUI(로컬 GPU) 이미지와 OmniVoice TTS 가 겹치지 않음 → VRAM 충돌 자동 해소.
-  //   (트레이드오프: 예전 Genspark/Flow 의 'TTS∥이미지' 동시 실행은 사라짐 — 의도된 변경.)
+  // 단계별 일괄 처리 — TTS → 이미지 → 영상 → .vrew (조건이 맞으면 단계 병렬).
   const projects = parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
   // ── 1·2단계: 음성(TTS) + 이미지 ──
   //   이미지가 로컬 GPU 를 안 쓰므로(Genspark/Flow 브라우저, 나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
-  //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
-  const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
   // 이미지가 로컬 GPU 를 쓰는지 — 순환(Genspark/Flow 브라우저)·나노바나나(API)·ComfyUI **클라우드** 는 안 쓴다.
   //   🔴 ComfyUI **로컬** 은 쓴다(2026-08-20): 그러면 이미지가 OmniVoice TTS 와 **같은 3060 을 다툰다** →
   //     TTS 가 느려지고(실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐) VRAM 이 빠듯해진다.
@@ -3265,7 +3100,7 @@ async function runMakeAllCore(opts = {}) {
   const _imgLocalGpu = isComfyVal(engine) && (() => {
     try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
   })();
-  const canParallel = !dry && !_imgLocalGpu && !projects.some(willRegroup);
+  const canParallel = !dry && !_imgLocalGpu;
 
   // ── 3단계 파이프라인 조건 ──
   //   Grok 비디오는 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와 충돌하지 않음 → 그룹 이미지(+그룹 TTS)가
@@ -3285,7 +3120,7 @@ async function runMakeAllCore(opts = {}) {
   const comfyVideoPipeline = isComfyVal(videoEngine) && (() => {
     try { return !!require('./core/comfy-video').loadConfig().cloud; } catch { return false; }
   })();
-  const _pipeBase = !dry && !projects.some(willRegroup);
+  const _pipeBase = !dry;
   const videoPipeline = _pipeBase && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
@@ -3299,12 +3134,6 @@ async function runMakeAllCore(opts = {}) {
       try {
         if (dry) P.fillSilent(pr, dirs.tts);
         else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
-        if (willRegroup(pr)) {
-          const m = P.mergeGroupsByTts(pr, clipMaxSec);
-          log(`  ↳ ${prLabel(pr)} ${clipMaxSec}초 미만 단위 그룹 재구성: ${m.before} → ${m.after}개`);
-        } else if (pr.format === 'grouped') {
-          log(`  ↳ ${prLabel(pr)} 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
-        }
         log(`✓ ${prLabel(pr)} 음성 완료`);
       } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
       S.timings.tts += (Date.now() - t0) / 1000;
@@ -3411,7 +3240,7 @@ async function runMakeAllCore(opts = {}) {
     if (!dry && !S.abort) await imageStage();
   }
 
-  // ── 3단계: 비디오 — 전 쇼츠 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
+  // ── 3단계: 비디오 일괄 생성 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
   if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
   } else if (_grokCool) {
@@ -3435,45 +3264,7 @@ async function runMakeAllCore(opts = {}) {
     }
   }
 
-  // ── 3.5단계: 배경음(BGM) — ACE-Step 독립 서버(플리 음악과 동일 경로, ComfyUI 불필요).
-  //   대본 무드 자동/수동 → ≤180초 생성 → 전체 길이 루프. (dry·중단·미설정·미설치면 생략) ──
-  const bgmOn = !dry && bgm && bgm.enabled;
-  if (bgmOn && !S.abort) {
-    log('🎵 3.5단계 — 배경음(BGM) 생성…');
-    const AS = require('./core/ace-step');
-    if (!AS.isInstalled()) { log('⚠ ACE-Step 미설치(ace-step/1_최초설치.bat) — BGM 없이 진행'); }
-    else if (S.voiceDesignActive) { log('⚠ 보이스디자인 사용 중 — BGM 없이 진행'); }
-    else {
-      S.musicActive = true; // BGM 생성 중 TTS·보이스디자인 차단(VRAM 뮤텍스)
-      try {
-        const st = await AS.start(log);
-        if (!st.ok) { log(`⚠ ACE-Step 시작 실패: ${st.error} — BGM 없이 진행`); }
-        else {
-          const MU = require('./core/media-utils');
-          for (const pr of projects) {
-            if (S.abort) break;
-            const totalSec = pr.sentences.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-            if (!totalSec) continue;
-            const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
-            pr._bgmUsedMood = tags; // UI 표시용 — 실제 사용된 BGM 무드
-            const dirs = shortsDirs(outRoot, pr.shortsNum);
-            const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.wav`);
-            log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
-            const r = await AS.generate({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180) }, log);
-            if (!r.ok) { log(`  ⚠ BGM 생성 실패: ${r.error} — 이 편은 BGM 없이`); continue; }
-            fs.writeFileSync(raw, r.buffer);
-            pr._bgmPath = await MU.loopAudioTo(raw, totalSec, log);
-            pr._bgmVolume = (bgm.volume != null ? bgm.volume : 0.15); // 💾 재export 에서 재사용
-            log(`  ✓ ${prLabel(pr)} BGM`);
-            pushDtoUpdate();
-          }
-        }
-      } catch (e) { log(`⚠ BGM 단계 오류: ${e.message} — BGM 없이 진행`); }
-      finally { try { await AS.stop(log); } catch {} S.musicActive = false; }
-    }
-  }
-
-  // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
+  // ── 4단계: .vrew 일괄 생성. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
     log('📦 4단계 — .vrew 일괄 생성…');
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
@@ -3507,9 +3298,7 @@ async function runMakeAllCore(opts = {}) {
       }
       let ep = preset;
       if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
-      ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
-      const _bgmPath4 = bgmOn ? resolveBgmPath(pr) : null; // 메모리 없으면 media 폴더 bgm mp3 재사용
-      if (_bgmPath4) { ep = { ...ep, bgm: { enabled: true, audioPath: _bgmPath4, volume: (bgm.volume != null ? bgm.volume : 0.15), loop: true } }; log(`🎵 ${prLabel(pr)} .vrew 에 BGM 포함: ${path.basename(_bgmPath4)}`); }
+      ep = resolveAiNotice(ep, aiNotice); // 사용자 선택(작업바 체크박스)
       const dirs = shortsDirs(outRoot, pr.shortsNum);
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);
@@ -3560,7 +3349,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
     const entry = plan[i] || {};
     storeActive(); // 직전 항목 편집분 저장
-    S.mode = (entry.mode === 'longform') ? 'longform' : 'shorts';
+    S.mode = 'longform';
     const q = S.modes[S.mode];
     const it = q.items.find((x) => x.id === entry.id);
     if (!it) { log(`(건너뜀) 큐 항목 없음 [${i + 1}/${plan.length}]`); continue; }
@@ -3571,7 +3360,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     if (!S.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
     it.status = 'running'; pushDtoUpdate();
     const label = (S.parsed.fileTitle) || (it.scriptPath || '');
-    log(`▶ [${i + 1}/${plan.length}] ${S.mode === 'longform' ? '롱폼' : '쇼츠'} · ${label}`);
+    log(`▶ [${i + 1}/${plan.length}] 롱폼 · ${label}`);
     // 항목 설정은 **서버쪽 it.settings(진짜 최신)** 우선 — 렌더러 plan(entry.settings)은 디바운스 저장이
     //   DTO 로 안 돌아와 stale 일 수 있음(예: 이미지 도구를 comfy 로 바꿔도 plan 엔 옛 rotate 가 실려 순환 실행됨).
     const s = { ...(entry.settings || {}), ...(it.settings || {}) };
@@ -3594,7 +3383,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         ..._batchRange(common, s),
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
-        clipMaxSec: clipMaxOf(ve), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
+        aiNotice: !!s.aiNotice, // AI 고지(사용자 선택)
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
       });
       it.status = 'done'; okN++;
@@ -3608,16 +3397,6 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 }));
-
-const TITLE_FIELDS = new Set(['titleLine1', 'titleLine2', 't1Size', 't1Color', 't1Align', 't2Size', 't2Color', 't2Align',
-  'bgEnabled', 'bgFill', 'bgFillOp', 'bgStroke', 'bgStrokeOp', 'bgStrokeW', 'bgRound', 'bgDashed']);
-ipcMain.handle('set-title', (_e, args = {}) => {
-  if (!S.parsed) return;
-  const { shortsNum, field, value } = args;
-  if (!TITLE_FIELDS.has(field)) return;
-  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
-  if (pr) pr[field] = value;
-});
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
 // 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
@@ -3647,7 +3426,7 @@ ipcMain.handle('list-queue', () => ({ queue: queueDTO(), dto: S.parsed ? P.toDTO
 // ── 큐 전체 저장/불러오기 ── 다중 작업 세트를 파일(.pmqueue.json)로 저장 후 통째로 복구.
 //   저장 = 대본목록·채널·설정·상태. 불러오기 = 그 목록을 다시 파싱(+.smproj 작업물 이어받기)해 큐 재구성.
 ipcMain.handle('save-queue', async () => {
-  const total = ['longform', 'shorts', 'playlist', 'book'].reduce((n, m) => n + ((S.modes[m] && S.modes[m].items.length) || 0), 0);
+  const total = ['longform', 'book'].reduce((n, m) => n + ((S.modes[m] && S.modes[m].items.length) || 0), 0);
   if (!total) { log('저장할 큐가 비어있습니다.'); return { ok: false, reason: 'empty' }; }
   const file = path.join(savesDir(), `큐_${_saveStamp()}.pmqueue.json`);
   try {
@@ -3916,7 +3695,7 @@ ipcMain.handle('import-prompts', (_e, args = {}) => {
     log(`📥 가져오기 적용 — ${r.groups}개 그룹 (🖼 이미지 ${r.img} · 🎬 영상 ${r.vid})`);
     if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건:`); r.sanitized.slice(0, 30).forEach((l) => log('   ' + l)); }
   } else {
-    log('⚠ 인식된 프롬프트가 없습니다 — 답변에 `## [쇼츠-그룹]` 헤더가 그대로 있는지 확인하세요');
+    log('⚠ 인식된 프롬프트가 없습니다 — 답변에 `## [편-그룹]` 헤더(예: `## [1-2]`)가 그대로 있는지 확인하세요');
   }
   return P.toDTO(S.parsed);
 });
@@ -4021,25 +3800,7 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-// 그룹 합치기 — TTS 시간 8초 미만 그룹들을 한 그룹으로 묶음 (TTS 변환 후 사용)
-ipcMain.handle('merge-groups', (_e, args = {}) => {
-  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null } = args;
-  const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0;
-  let total = 0, done = 0;
-  for (const pr of S.parsed.projects) {
-    if (shortsNum && pr.shortsNum !== shortsNum) continue;
-    const hasTts = pr.sentences.some((s) => s.ttsDurationSec != null);
-    if (!hasTts) { log(`${prLabel(pr)}: TTS를 먼저 변환하세요 (시간 정보 없음)`); continue; }
-    const r = P.mergeGroupsByTts(pr, clipMaxSec);
-    log(`🔗 ${prLabel(pr)} 문장 기준 ${clipMaxSec}초 미만 단위 재구성: ${r.before}개 → ${r.after}개`);
-    total += Math.abs(r.merged); done++;
-  }
-  if (!done) log('합칠 대상이 없습니다 — TTS 변환을 먼저 하세요.');
-  return P.toDTO(S.parsed);
-});
-
-// 모드 전환 — 모드별로 보관된 대본을 활성화(재파싱·초기화 없음). 롱폼/쇼츠 대본은 독립.
+// 모드 전환 — 모드별로 보관된 대본을 활성화(재파싱·초기화 없음). 롱폼/출판 대본은 독립.
 ipcMain.handle('set-mode', (_e, args = {}) => {
   storeActive();                 // 현재 모드 작업물 보관
   activateMode(args.mode);       // 새 모드 것으로 전환
@@ -4048,234 +3809,13 @@ ipcMain.handle('set-mode', (_e, args = {}) => {
   return { dto: currentDTO(), queue: queueDTO() };
 });
 
-// ── 플리(ACE-Step 음악) ──────────────────────────────────────────────
-// 플리 스펙(.md) 열기 → 곡 목록 파싱 → 플리 큐에 적재.
-ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
-  const preset = args.presetName ? P.getPreset(args.presetName) : (S.preset || null);
-  if (preset) S.preset = preset;
-  const defPath = (preset && (preset.scriptFolder || preset.outputFolder)) || undefined;
-  const r = await dialog.showOpenDialog(win, {
-    title: '플리 스펙(.md) 열기', defaultPath: defPath,
-    properties: ['openFile'], filters: [{ name: '플리 스펙', extensions: ['md'] }],
-  });
-  if (r.canceled || !r.filePaths.length) return null;
-  const specPath = r.filePaths[0];
-  try {
-    const parsed = parsePlaylistFile(specPath);
-    if (!parsed.tracks.length) { log('플리 스펙에 트랙이 없습니다 — 형식을 확인하세요.'); return null; }
-    S.mode = 'playlist';
-    const outRoot = playlistOutRoot(specPath, preset);
-    addItem(parsed, specPath, outRoot, args.settings || null);
-    log(`🎵 플리 열기: ${parsed.fileTitle} (${parsed.tracks.length}곡)`);
-    return { dto: currentDTO(), scriptPath: specPath, outRoot, queue: queueDTO(), mode: S.mode };
-  } catch (e) {
-    log('플리 스펙 파싱 실패: ' + e.message);
-    return null;
-  }
-});
-
-// 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
-// 음악 없는 곡만 ACE-Step 독립 서버로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
-//   반환 { done, fail, serverDown }. 이미 mp3 있는 곡은 건너뜀(재생성은 ⚡음악 버튼이 담당).
-// 오디오 끝 페이드아웃 — ACE-Step 은 곡 끝이 갑자기 뚝 끊기는 경향 → ffmpeg afade 로 자연스럽게.
-function fadeOutAudioFile(wavPath, durSec, fadeSec = 3) {
-  try {
-    const ff = require('./core/media-utils').getFfmpegPath();
-    if (!ff || !fs.existsSync(wavPath)) return;
-    const st = Math.max(0, (Number(durSec) || 0) - fadeSec);
-    const tmp = wavPath + '.fade.wav';
-    const r = require('child_process').spawnSync(ff, ['-y', '-i', wavPath, '-af', `afade=t=out:st=${st}:d=${fadeSec}`, tmp], { windowsHide: true });
-    if (r.status === 0 && fs.existsSync(tmp)) { fs.renameSync(tmp, wavPath); }
-    else { try { fs.unlinkSync(tmp); } catch {} }
-  } catch {}
-}
-
-// GPU 뮤텍스: 보이스디자인·음악 중엔 서로/음성변환을 막는다(한 번에 하나만 GPU 무겁게).
+// GPU 뮤텍스: 보이스디자인 중엔 음성변환·제작을 막는다(한 번에 하나만 GPU 무겁게).
+//   ⚠ 이 함수는 tts-build·tts-group·runMakeAllCore 가 부른다 — 지우면 셋이 런타임 즉사(2026-08-20 계열 사고).
 function gpuBusyReason() {
   if (S.voiceDesignActive) return '보이스디자인';
-  if (S.musicActive) return '음악 생성';
   return null;
 }
 
-// 주어진 곡들을 ACE-Step 독립 서버(로컬 GPU, ComfyUI 불필요)로 생성. 서버를 자동으로 켜고(모델 로딩) 끝나면 끔.
-// 음악 생성 동안 S.musicActive=true → TTS(OmniVoice)·Qwen 차단(VRAM 동시 사용 방지).
-async function runAceStepMusic(tracks) {
-  const AS = require('./core/ace-step');
-  if (!AS.isInstalled()) { log('⚠ ACE-Step 미설치 — ace-step/1_최초설치.bat 를 먼저 실행하세요.'); return { done: 0, fail: 0, notInstalled: true }; }
-  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 음악을 만들 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return { done: 0, fail: 0 }; }
-  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
-  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-  S.musicActive = true;
-  let done = 0, fail = 0;
-  try {
-    log(`🎵 음악 생성 — ${tracks.length}곡 → ${outRoot}`);
-    const st = await AS.start(log);
-    if (!st.ok) { log('✗ ACE-Step 시작 실패: ' + st.error); return { done, fail, startFail: true }; }
-    for (const t of tracks) {
-      if (S.abort) { log('⛔ 중단됨'); break; }
-      t.status = 'generating'; t.error = null; pushDtoUpdate();
-      const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
-      log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
-      const r = await AS.generate({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180 }, log);
-      if (r.ok) {
-        const wavPath = path.join(outRoot, base + '.wav');
-        fs.writeFileSync(wavPath, r.buffer);
-        t.status = 'done'; t.audioPath = wavPath; done++;
-        // 곡 길이 실측 보정 — 배경 루프·자막 길이 정합
-        try { const info = await require('./core/media-utils').getMediaInfo(wavPath); if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10; } catch {}
-        fadeOutAudioFile(wavPath, t.durationSec, 3);   // 끝 3초 페이드아웃(ACE-Step 특유의 갑작 끊김 완화)
-        log(`  ✓ ${base}.wav (${t.durationSec}초)`);
-      } else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
-      pushDtoUpdate();
-    }
-  } finally {
-    try { await AS.stop(log); } catch {}   // 서버 종료 → VRAM 반납
-    S.musicActive = false;
-  }
-  return { done, fail };
-}
-
-// 음악 없는 곡만 생성 — 「🎬 만들기」(음악+배경+vrew) 앞단계.
-async function ensurePlaylistMusic() {
-  const todo = (S.parsed.tracks || []).filter((t) => !(t.audioPath && fs.existsSync(t.audioPath)));
-  if (!todo.length) { log('🎵 모든 곡에 음악이 이미 있습니다 — 음악 생성 건너뜀'); return { done: 0, fail: 0 }; }
-  return await runAceStepMusic(todo);
-}
-
-// ⚡ 음악 전체 생성(또는 특정 곡 재생성) — ACE-Step 서버.
-ipcMain.handle('make-playlist', async (_e, args = {}) => {
-  if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
-  S.abort = false;
-  const only = (args && Number(args.num)) || null;   // 특정 곡만(재생성) — null=전체
-  const tracks = only ? S.parsed.tracks.filter((t) => t.num === only) : S.parsed.tracks;
-  const t0 = Date.now();
-  const r = await runAceStepMusic(tracks);
-  S.timings.make = Math.round((Date.now() - t0) / 1000);
-  log(`🎵 플리 생성 완료 — 성공 ${r.done}곡 · 실패 ${r.fail}곡 (${S.timings.make}초)`);
-  try { if (r.done > 0) shell.openPath(S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset)); } catch {}
-  return currentDTO();
-});
-
-// 플리 배경(전 곡 공통) 이미지/영상 첨부 — 파일 선택. 첨부하면 「🎬 배경+vrew」가 이걸 배경으로 사용(생성 생략).
-ipcMain.handle('playlist-attach-bg', async () => {
-  if (!S.parsed || S.parsed.kind !== 'playlist') return currentDTO();
-  const r = await dialog.showOpenDialog(win, {
-    properties: ['openFile'],
-    filters: [{ name: '이미지/비디오', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }],
-  });
-  if (r.canceled || !r.filePaths[0]) return currentDTO();
-  const fp = r.filePaths[0];
-  const ext = path.extname(fp).toLowerCase();
-  if (['.mp4', '.mov', '.webm', '.m4v'].includes(ext)) { S.parsed.bgVideoPath = fp; S.parsed.bgImagePath = null; log(`플리 배경(영상) 첨부: ${path.basename(fp)}`); }
-  else { S.parsed.bgImagePath = fp; S.parsed.bgVideoPath = null; log(`플리 배경(이미지) 첨부: ${path.basename(fp)}`); }
-  return currentDTO();
-});
-// 플리 배경 삭제 — 영상 있으면 영상만(이미지 유지), 없으면 이미지 비움. (롱폼 clear-asset 과 동일 단계)
-ipcMain.handle('playlist-clear-bg', () => {
-  if (!S.parsed || S.parsed.kind !== 'playlist') return currentDTO();
-  if (S.parsed.bgVideoPath) { S.parsed.bgVideoPath = null; log('플리 배경 영상 삭제(이미지 유지)'); }
-  else { S.parsed.bgImagePath = null; log('플리 배경 이미지 삭제'); }
-  return currentDTO();
-});
-
-// 플리 「🎬 만들기」 — 음악(ACE-Step, 없는 곡만) ∥ 배경(순환 이미지 → Grok i2v 짧은 클립) 병렬 →
-//   부메랑 seamless 루프를 곡 길이만큼 곡마다 반복 → 곡=클립[ 곡 오디오 + 배경 루프 + 곡 제목 자막 ] 로 .vrew.
-ipcMain.handle('make-playlist-video', async (_e, args = {}) => {
-  if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
-  const bgImgEngine = args.imgEngine === 'gemini' ? 'gemini' : null; // 배경 이미지: 순환(null) | 유료 나노바나나('gemini')
-  const bgVideoOn = args.videoEngine !== 'none';                     // 배경 영상: Grok 심리스(기본) | 없음=이미지 고정
-  S.abort = false;
-  const PV = require('./core/playlist-video');
-  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
-  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-  const t0 = Date.now();
-
-  // 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순.
-  const bgRaw = (S.parsed.bgPrompt && S.parsed.bgPrompt.trim()) || S.parsed.concept || S.parsed.fileTitle
-    || 'calm ambient scenery, slow gentle motion, cinematic, soft light';
-
-  // 배경 소스 — 첨부(영상/이미지) 우선. 스타일은 스펙 `> 배경:` 프롬프트가 그대로 제어.
-  let bgImg = (S.parsed.bgImagePath && fs.existsSync(S.parsed.bgImagePath)) ? S.parsed.bgImagePath : null;
-  let bgClipPath = (S.parsed.bgVideoPath && fs.existsSync(S.parsed.bgVideoPath)) ? S.parsed.bgVideoPath : null;
-
-  // 배경 이미지→영상 태스크 — Flow/Genspark(이미지) → Grok i2v(영상). 브라우저 엔진이라 GPU 안 씀 → 음악과 병렬.
-  const bgTask = (async () => {
-    if (bgClipPath) { log(`🎬 첨부된 배경 영상 사용: ${path.basename(bgClipPath)}`); return; }
-    const bgProj = { aspect: '16:9', fileTitle: S.parsed.fileTitle || 'bg',
-      groups: [{ id: 'bg', num: 1, phase: '훅', imagePrompt: `${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`, videoPrompt: bgRaw, motionNote: 'slow subtle motion, seamless loop', isI2V: true, sentences: [] }] };
-    const bgWork = path.join(outRoot, '_bgwork');
-    if (bgImg) { bgProj.groups[0].imagePath = bgImg; log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`); }
-    else {
-      try {
-        log(`🖼 배경 이미지 생성(${bgImgEngine === 'gemini' ? '유료 나노바나나2 Lite API' : '순환: Genspark/Flow'}) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
-        await runRotatingImages(bgProj, bgWork, log, null, bgImgEngine, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
-        bgImg = bgProj.groups[0].imagePath || null;
-        if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
-        else log('  ✗ 배경 이미지 생성 실패');
-      } catch (e) { log('  ✗ 배경 이미지 오류: ' + (e && e.message || e)); }
-    }
-    // 이미지 나오면 바로 영상(Grok i2v) — 심리스 무한루프용 짧은 클립. '없음' 선택 시 이미지 고정 배경.
-    if (!bgVideoOn) { if (bgImg) log('ℹ 배경 영상 「없음」 선택 — 이미지 고정 배경으로 진행'); }
-    else if (bgImg && !S.abort) {
-      try {
-        log('🎬 배경 영상(Grok i2v)…');
-        await P.generateHookVideosGrok(bgProj, bgWork, log, () => S.abort, 0, pushDtoUpdate, [1], 6);
-        const vp = bgProj.groups[0].videoPath;
-        if (vp && fs.existsSync(vp)) { bgClipPath = vp; S.parsed.bgVideoPath = bgClipPath; pushDtoUpdate(); log(`  ✓ 배경 영상: ${path.basename(bgClipPath)}`); }
-        else log('  ℹ 배경 영상 없음 — 이미지 배경으로 진행');
-      } catch (e) { log('  ✗ 배경 영상 오류: ' + (e && e.message || e) + ' — 이미지 배경으로 진행'); }
-    }
-    if (!bgImg && !bgClipPath) log('ℹ 배경을 못 만들었습니다 — 배경 없이 음악+제목 자막으로 .vrew 를 만듭니다.');
-    try { closeFlowEng(); } catch {}
-  })();
-
-  // ▶ 병렬: 음악(GPU, ACE-Step) ∥ 배경 이미지·영상(브라우저) — GPU 안 겹침
-  log('⚡ 만들기 — 음악(GPU) ∥ 배경 이미지·영상(브라우저) 병렬 진행…');
-  const [mSettled] = await Promise.allSettled([ensurePlaylistMusic(), bgTask]);
-  const mres = mSettled && mSettled.status === 'fulfilled' ? mSettled.value : {};
-  if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
-
-  const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
-  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.notInstalled ? ' — ace-step/1_최초설치.bat 를 먼저 실행하세요.' : ' (음악 생성 실패 — 로그 확인).')); return currentDTO(); }
-  // 곡 길이 실측 보정 — 배경 루프 길이 정합
-  for (const t of tracks) {
-    try {
-      const info = await require('./core/media-utils').getMediaInfo(t.audioPath);
-      if (info.durationSec > 1 && Math.abs(info.durationSec - (t.durationSec || 0)) > 1) t.durationSec = Math.round(info.durationSec * 10) / 10;
-    } catch {}
-  }
-
-  // 4) seamless 부메랑 → 곡 길이만큼 곡별 루프
-  let boomerang = null;
-  if (bgClipPath && fs.existsSync(bgClipPath)) {
-    try {
-      boomerang = path.join(outRoot, '_bg_boomerang.mp4');
-      await PV.makeBoomerang(bgClipPath, boomerang, log);
-      for (const t of tracks) {
-        if (S.abort) break;
-        const lp = path.join(outRoot, `_bgloop_${String(t.num).padStart(2, '0')}.mp4`);
-        try { await PV.loopBoomerangTo(boomerang, lp, t.durationSec || 180); t._bgLoop = lp; log(`  ✓ G${t.num} 배경 루프 (${(t.durationSec || 180)}초)`); }
-        catch (e) { log(`  ✗ G${t.num} 배경 루프 실패: ${e.message}`); }
-      }
-    } catch (e) { log('✗ 배경 루프 생성 실패: ' + e.message + ' — 이미지 배경으로 대체'); }
-    finally { try { if (boomerang) fs.unlinkSync(boomerang); } catch {} }
-  }
-
-  // 5) Project 구성 + .vrew
-  log('📦 플리 .vrew 생성…');
-  const proj = PV.buildPlaylistProject({ ...S.parsed, tracks }, { bgImagePath: bgImg });
-  const baseName = _safeFolder(S.parsed.fileTitle || '플레이리스트').slice(0, 60) || '플레이리스트';
-  const vrewPath = path.join(outRoot, `${baseName}.vrew`);
-  try {
-    const res = await P.buildProjectVrew(proj, vrewPath, null, log, 14, 1); // 제목 자막 14자 분할, 배속 1
-    log(`✓ ${path.basename(vrewPath)} (clip ${res.clipCount}) — Vrew 에서 열어 마무리하세요`);
-    shell.openPath(vrewPath);
-  } catch (e) { log('✗ .vrew 생성 실패: ' + e.message); }
-  S.timings.make = Math.round((Date.now() - t0) / 1000);
-  log(`🎬 플리 영상/​.vrew 완료 (${S.timings.make}초)`);
-  try { shell.openPath(outRoot); } catch {}
-  return currentDTO();
-});
 
 // ── 출판(POD) — MD 원고 → 내지·표지 PDF ─────────────────────────────
 // 다중 파일 원고: S.parsed._files = [{path, kind, startLine, lineCount}] (결합 라인 오프셋).
@@ -4845,13 +4385,6 @@ ipcMain.handle('apply-script-text', (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-ipcMain.handle('set-aspect', (_e, value) => {
-  if (!S.parsed) return null;
-  const a = (value === '1:1') ? '1:1' : (value === '16:9') ? '16:9' : '9:16';
-  for (const pr of S.parsed.projects) pr.aspect = a;
-  log(`이미지/영상 비율 → ${a}`);
-  return P.toDTO(S.parsed);
-});
 
 // 롱폼 재분할 — 분할옵션(도입부/본론/짧은/긴) 변경 시 대본을 새 임계값으로 다시 파싱.
 //   ⚠ 재파싱이라 기존 TTS/이미지 매핑은 초기화됨(PrimingFlow 자동 재분할과 동일).

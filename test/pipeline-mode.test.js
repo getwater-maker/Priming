@@ -70,13 +70,13 @@ ok(/await Promise\.all\(\[\(async \(\) => \{ await ttsStage\(\); if \(!S\.abort\
 
 // ── 판정식 재현 — main.js 의 식을 그대로 옮겨 조합별로 계산 ──
 //   (원문에서 뽑은 위 정규식이 통과했으므로, 아래 식은 그 형태와 일치한다)
-function decide({ imgEngine, imgCloud, videoEngine, vidCloud, dry = false, regroup = false }) {
+function decide({ imgEngine, imgCloud, videoEngine, vidCloud, dry = false }) {
   const isComfy = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') === 0;
   const _imgLocalGpu = isComfy(imgEngine) && !imgCloud;
-  const canParallel = !dry && !_imgLocalGpu && !regroup;
+  const canParallel = !dry && !_imgLocalGpu;
   const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
   const comfyVideoPipeline = isComfy(videoEngine) && !!vidCloud;
-  const _pipeBase = !dry && !regroup;
+  const _pipeBase = !dry;
   const videoPipeline = _pipeBase && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const branch = (videoPipeline && !canParallel && _imgLocalGpu) ? 'tts→img ∥ video'
     : videoPipeline ? 'tts ∥ img ∥ video'
@@ -122,11 +122,9 @@ eq(d.branch, 'tts → img', '이미지 로컬 + 비디오 없음 → 순차');
 d = decide({ imgEngine: 'rotate', videoEngine: 'none' });
 eq(d.branch, 'tts ∥ img', '순환 이미지 + 비디오 없음 → TTS∥이미지');
 
-// 무음(dry)·그룹 재구성(쇼츠 cut/prose)은 언제나 순차 — 기존 규칙 유지
+// 무음(dry)은 언제나 순차 — 기존 규칙 유지
 d = decide({ imgEngine: 'rotate', videoEngine: 'comfy::ltx', vidCloud: true, dry: true });
 eq(d.branch, 'tts → img', 'dry(무음)는 순차');
-d = decide({ imgEngine: 'rotate', videoEngine: 'comfy::ltx', vidCloud: true, regroup: true });
-eq(d.branch, 'tts → img', 'TTS 후 그룹 재구성이 있으면 순차(이미지가 그룹에 의존)');
 
 console.log(bad ? '\n❌ ' + bad + '/' + n + ' 실패' : '\n✅ 파이프라인 판정 ' + n + '/' + n + ' 통과');
 process.exit(bad ? 1 : 0);

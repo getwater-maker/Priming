@@ -1,11 +1,43 @@
-# Shots-maker — 작업 컨텍스트 노트
+# Priming — 작업 컨텍스트 노트
 
 > 다음 AI(또는 사람)가 5분 안에 컨텍스트를 복원하기 위한 노트. (PrimingFlow CLAUDE.md 스타일)
 
 ## 프로젝트 한 줄 요약
-컷 단위로 완성된 "역사이야기" 쇼츠 대본(.md, 한 파일 3편) → 편별 TTS·이미지·(선택)비디오 →
-**편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
-복사·재활용한 독립 클론.
+**롱폼(16:9) 대본(.md) → TTS·이미지·(선택)비디오 → Vrew 4.0.1 .vrew 자동 생성** Electron 앱
++ **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
+⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
+
+## 🧹 쇼츠·플리·ACE-Step·BGM **전면 제거** (2026-08-22, v0.3.28)
+> 로이: "쇼츠와 Ace-step의 흔적을 모두 지워줘." + "이 프로그램에서 쇼츠를 안만들꺼야."
+> 플리 모드 통째 제거·BGM 전체 제거·내부 배관 폴더명 유지 — 전부 로이 확정.
+- **지운 것(파일째)**: `build-shorts.js`(쇼츠 CLI) · `core/cut-script-parser.js`(쇼츠 파서) ·
+  `core/parsers/playlist-parser.js` · `core/playlist-video.js` · `core/ace-step.js` · `ace-step/` 폴더 ·
+  `test/parser.test.js` · `vrew/dummy/shape-square.vbin`(제목 도형) · 플리 docs 3개 · 로컬 `Ace Step/`·`playlist/` 폴더.
+- **지운 것(기능)**: 모드 토글 쇼츠/플리(→ 롱폼/출판 2-way) · `mergeGroupsByTts`(8초 재구성)+🔗합치기 ·
+  제목/도형 트랙(`addTitleTrack`/`addShapeTrack`+TitleEditor+set-title IPC) · BGM 전부(체크박스·3.5단계·
+  `deriveBgmMood`·`addBgmTrack`·`loopAudioTo`·파서 `> 🎵 배경음악:` 메타) · `set-aspect`/aspect 셀렉터 잔재 ·
+  채널편집의 쇼츠 열(배속·자막·화풍·출력폴더) · `detectScriptMode`(대본 자동 모드감지 — 이제 항상 롱폼).
+- 🔑 **이름만 쇼츠인 공유 배관은 유지**(매핑 워크플로 5개 에이전트로 전수 분류 후 결정 — 바꾸면 기존
+  작업물·스냅샷·IPC 가 깨진다): `shortsDirs`(media-N/tts-N/subtitles-N 폴더 구조 그 자체) · `shortsNum`
+  (편 주소 키, 롱폼=1 — 모든 IPC·스냅샷·gemini-batch 키) · `~/.shots-maker/` 홈 폴더 · grok-engine 의
+  `_shorts` 분기(롱폼 16:9 칩 선택 코드가 그 안에 있다) · vrew-builder 의 비율(9:16/1:1) 블록(죽은 가지지만
+  16:9 배선과 얽혀 있어 손대면 위험 — v0.2.x 세로 열림 사고 전례).
+- 🔑 **옛 저장 데이터는 읽을 때 정규화**: `normalizeMode`/`normMode` 폴백을 'shorts'→**'longform'** 으로 뒤집었다
+  (이걸 프로필 삭제보다 먼저 안 하면 `getModeProfile()` undefined 로 즉사). 옛 쇼츠 .smproj 는 이어받지 않고
+  새로 파싱, load-project 는 제거된 모드 파일을 명시적으로 거부. workspace.json 의 shorts/playlist 큐는 조용히 소멸.
+- 🔑 **채널 프리셋의 쇼츠 필드(capShort·speedShort·styleShort·outShort)는 파일에 남긴다** — UI 만 걷어냈고
+  saveChannel patch 에서 빼기만 한다(preset-store 가 병합 저장이라 무해. 마이그레이션 삭제는 v0.3.8 계열 사고).
+  **`channel-styles.json` 의 `short` 필드 내보내기도 유지** — 아도나이로이 대시보드(8765)와의 외부 계약 + 테스트 40개.
+- ⚠ **함정 회피 기록**: `gpuBusyReason` 이 플리 섹션 한가운데 정의돼 있었다 — 섹션 통삭제 전에 함수를 살려
+  옮겼다(안 그러면 tts-build·runMakeAllCore 가 런타임 즉사 = 이 저장소 3번째 미정의 식별자 사고가 될 뻔).
+  App.jsx 의 bgm deps 배열(디바운스 effect)도 state 삭제와 동시에 정리(남기면 렌더 즉시 ReferenceError → 백지).
+- **테스트 정비**: parser.test.js 삭제(test:parser 스크립트 제거) · timestamps 쇼츠 블록 삭제(53단언) ·
+  pipeline-mode 의 regroup 인자·단언 삭제(30/30) · style-share.smoke 화풍 칸 2→1 · makeall-dry 의 outShort 제거.
+  라이브 업데이트는 **삭제를 전파하지 않는다** — 아내 PC 에 옛 파일이 남지만 아무도 require 안 해서 무해.
+- **검증(전 스위트 통과)**: makeall 무음 E2E 18/18(runMakeAllCore 실제 완주 — 수술 후 핵심 증거) · tts 18+31 ·
+  comfy 41+30+14+69 · visual 14+10+13+7 · delmedia 27 · grok 81 · timestamps 53+UI · styles 40+40+17 ·
+  comfylaunch 29 · book 전체. vite build 통과 · main.js LF 유지.
+- deps 무변경 → **라이트 업데이트로 배포**. 쇼츠 흔적: 코드 443곳(27파일) + ACE 117곳 + BGM 152곳 정리.
 
 ## 🖥⚡ ComfyUI 로컬을 부팅 때 자동 실행 + **생성 뒤 VRAM 반납**(TTS 보호) (2026-08-22, v0.3.27)
 > 로이: "PC 가 켜질 때 컴피유아이 데스크탑이 자동으로 켜지고 셋팅되어 이미지를 로컬에서 즉시 생성하게.
@@ -2606,7 +2638,7 @@ npm install   # 첫 실행 시
 npm start     # → electron .
 ```
 
-## 대본 형식 (입력 계약) — 2형식 자동 감지 (core/cut-script-parser.js)
+## ⚠[폐기 2026-08-22] 대본 형식 (입력 계약) — 쇼츠 2형식 (core/cut-script-parser.js 는 삭제됨. 현행 형식은 docs/대본-작성-가이드.md)
 공통: H1 제목 + `>` 메타(목소리/9:16) + `## 쇼츠 N`(편) + `- 훅 자막(첫 프레임): ...`.
 감지: 본문에 `- 음성/자막:` 또는 `**…그룹 N`이 있으면 **신규(grouped)**, 없으면 **구(cut)**.
 

@@ -1,9 +1,8 @@
 /**
- * longform-parser.js — 롱폼(16:9) 대본(.md) 파서.
+ * longform-parser.js — 롱폼(16:9) 대본(.md) 파서. 한 파일 = 한 편의 긴 영상(Project 1개).
  *
- * 쇼츠(cut-script-parser)와 달리 한 파일 = 한 편의 긴 영상(Project 1개).
  * 본문을 sentence-splitter(splitHybrid)로 문장화하고 group-builder(buildGroupsHybrid)로
- * 묶어, cut-script-parser 와 동일한 { fileTitle, meta, projects: [Project] } 형태를 반환한다.
+ * 묶어 { fileTitle, meta, projects: [Project] } 형태를 반환한다.
  *
  *   - 마크다운 헤더(#…) 중 "도입" 키워드 → 도입부 그룹(작게 묶음, 50자 캡)
  *   - [대괄호] 섹션 → 섹션별 한 그룹
@@ -50,11 +49,7 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   // 파일 제목 — 첫 H1(# …) 또는 폴백(파일명)
   const h1 = raw.match(H1_RE);
   const fileTitle = (h1 ? h1[1].trim() : '') || fallbackTitle || '롱폼';
-  const meta = { raw: '', voice: null, aspect: '16:9', bgmMood: null };
-  // 배경음악(BGM) 프롬프트 — 메타 줄 `> 🎵 배경음악: <영문 ACE-Step 태그>` (배경음악/배경음/BGM 허용).
-  //   있으면 BGM 무드로 최우선 사용(대본 자동 분석보다 우선). `>` 줄이라 낭독에서는 자동 제외.
-  const _bgmM = raw.match(/(?:🎵\s*)?(?:배경\s*음악|배경음|bgm)\s*[:：]\s*([^\n·|]+)/i);
-  if (_bgmM && _bgmM[1].trim()) meta.bgmMood = _bgmM[1].trim();
+  const meta = { raw: '', voice: null, aspect: '16:9' };
 
   // 문장화 + 그룹화 (헤더/대괄호/도입 하이브리드)
   const { items } = splitHybrid(raw);
@@ -76,9 +71,7 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.hookCaption = null;
   proj.fileTitle = fileTitle;
   proj.voice = meta.voice;
-  proj.bgmMood = meta.bgmMood || null; // 대본에 적힌 배경음악 프롬프트(있으면 BGM 무드 최우선)
   proj.format = 'longform';
-  proj.bgEnabled = true;
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
 }
