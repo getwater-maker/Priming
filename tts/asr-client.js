@@ -29,21 +29,25 @@ function _authHeaders() {
  * /ref-voices — 서버 공용 참조음성 목록.
  *   보이스디자인으로 만든 목소리는 서버(메인 PC)의 라이브러리에 모인다. 이걸 쓰면
  *   **이 PC 에 wav 파일이 없어도** 이름만으로 합성할 수 있다(아내 PC 처럼 원격만 쓰는 PC 용).
- *   서버가 구버전이면 404 → 빈 배열(호출부는 로컬 파일만 보여주면 된다).
+ *
+ * 🔴 반환 규약(2026-08-22 변경): 성공 = 배열(비어 있을 수 있음) / **실패 = null**.
+ *   예전엔 타임아웃·HTTP 오류·네트워크 실패를 전부 빈 배열로 돌려줘 "서버에 목소리가 없음"과
+ *   구분이 안 됐고, 그 순간 자동 동기화가 **로컬 전 목소리를 재업로드해 _2/_3 사본 24개**를
+ *   만들었다(실측 — 2026-08-14 23개 + 2026-08-20 1개). 호출부는 null 이면 동기화를 건너뛴다.
  */
 async function listServerVoices() {
   const base = _baseUrl();
-  if (!base) return [];
+  if (!base) return null;                       // 주소 미설정 = 조회 불가(빈 라이브러리 아님)
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 5000);
     let res;
     try { res = await fetch(base + '/ref-voices', { headers: { ..._authHeaders() }, signal: ctrl.signal }); }
     finally { clearTimeout(t); }
-    if (!res.ok) return [];
+    if (!res.ok) return null;                   // 404(구버전)·401 등 — 목록을 믿을 수 없다
     const j = await res.json();
-    return Array.isArray(j.voices) ? j.voices : [];
-  } catch (_) { return []; }
+    return Array.isArray(j.voices) ? j.voices : null;
+  } catch (_) { return null; }                  // 타임아웃·네트워크 — 목록을 믿을 수 없다
 }
 
 /**

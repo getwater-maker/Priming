@@ -29,6 +29,9 @@ function keyFor(text, sf, opts = {}) {
     sf: Number(sf) || 1,
     e: opts.provider || '',
     r: opts.refAudioPath || '',
+    // 🔴 서버 공용 목소리(srv:<이름>) 정체성 — refName 없이는 srv: 모드에서 refAudioPath·refText 가
+    //   전부 undefined 라 **서로 다른 목소리끼리 캐시가 교차 적중**해 엉뚱한 목소리가 재활용됐다(2026-08-22).
+    rn: opts.refName || '',
     rt: opts.refText || '',
     sd: opts.seed != null ? opts.seed : '',
     cfg: opts.cfgValue != null ? opts.cfgValue : '',

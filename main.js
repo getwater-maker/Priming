@@ -270,6 +270,18 @@ app.whenReady().then(() => {
       try { await syncStylesFromServer(true); } catch {}
       // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
       try { exportChannelStyles(); } catch {}
+      // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
+      //   로이가 잊어도 앱이 먼저 말한다(2026-08-22 요청: "몇 주 데이터가 쌓이면 나에게도 알려줘").
+      try {
+        const GT = require('./core/gpu-temp');
+        GT.cleanupOld();
+        await GT.maybeReport({
+          log,
+          showDialog: async (title, text) => {
+            if (win && !win.isDestroyed()) await dialog.showMessageBox(win, { type: 'info', title, message: title, detail: text, buttons: ['확인'] });
+          },
+        });
+      } catch {}
     })();
   }, 4000);
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
@@ -391,6 +403,8 @@ function awakeAcquire(label = '') {
     try { _awake.id = powerSaveBlocker.start('prevent-display-sleep'); log(`🔌 절전 차단 — 작업 중 화면이 꺼지지 않습니다${label ? ` (${label})` : ''}`); }
     catch (e) { _awake.id = null; }
   }
+  // 🌡 작업이 도는 동안만 GPU 온도를 기록(60초 간격, 비동기 nvidia-smi) — 장시간 큐의 열 데이터 축적(2026-08-22).
+  if (_awake.n === 1) { try { require('./core/gpu-temp').startSampling(log); } catch {} }
 }
 function awakeRelease() {
   _awake.n = Math.max(0, _awake.n - 1);
@@ -399,6 +413,7 @@ function awakeRelease() {
     _awake.id = null;
     log('🔌 절전 차단 해제 (화면 끄기 정상 복귀)');
   }
+  if (_awake.n === 0) { try { require('./core/gpu-temp').stopSampling(); } catch {} }
 }
 /** 긴 작업을 절전 차단으로 감싼다. 실패·예외에도 finally 로 반드시 해제. */
 async function withAwake(label, fn) {
@@ -998,36 +1013,49 @@ async function uploadRefVoice({ name, text, instruct, wavBuffer }) {
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 }
 // 이 PC 에만 있는 참조음성을 서버 공용 라이브러리로 올린다. 반환: 올린 개수.
+//   🔴 serverNames 가 null(=목록 조회 실패)이면 **아무것도 올리지 않는다**(2026-08-22).
+//     예전엔 조회 실패를 빈 라이브러리로 오인해 로컬 전 목소리를 재업로드 → 서버에 바이트 동일
+//     _2/_3 사본 24개가 쌓였다(실측: 2026-08-14 같은 초에 _2·_3 동시 생성 = 동기화 2개 동시 실행).
+//   🔴 single-flight — 앱 시작 4초 타이머와 채널편집(list-ref-audio)이 겹쳐 동시에 돌지 않게.
+let _refSyncBusy = false;
 async function syncRefAudioToServer(serverNames) {
-  const dir = REF_DIR();
-  const have = new Set((serverNames || []).map((v) => String((v && v.name) || v || '')));
-  const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
-  if (!missing.length) return 0;
-  const QD = require('./core/qwen-design');
-  let up = 0;
-  for (const f of missing) {
-    const name = f.replace(/\.wav$/i, '');
-    let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
-    let r;
-    try { r = await uploadRefVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
-    catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
-    if (r && r.ok) { up++; continue; }
-    // 서버가 안 되면 나머지도 안 된다 — 반복 실패 대신 멈추고, 무엇을 해야 하는지 알려준다.
-    log(`⚠ 참조음성 "${name}" 공용 라이브러리 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
-    log('   ↳ ⚙ 설정 → 🖧 TTS 서버 의 OmniVoice 주소가 메인 PC 를 가리키는지 확인하세요(합성이 되는 주소면 업로드도 됩니다).');
-    break;
-  }
-  if (up) log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
-  return up;
+  if (serverNames == null) return 0;             // 목록을 못 믿으면 업로드 판단 자체를 보류
+  if (_refSyncBusy) return 0;                    // 이미 진행 중 — 재진입 금지(중복 업로드 방지)
+  _refSyncBusy = true;
+  try {
+    const dir = REF_DIR();
+    const have = new Set((serverNames || []).map((v) => String((v && v.name) || v || '')));
+    const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
+    if (!missing.length) return 0;
+    let up = 0, noText = 0;
+    for (const f of missing) {
+      const name = f.replace(/\.wav$/i, '');
+      let text = ''; try { text = fs.readFileSync(path.join(dir, name + '.txt'), 'utf8'); } catch {}
+      // 🔴 참조텍스트(.txt) 없는 wav 는 올리지 않는다 — 빈 .txt 로 등록되면 그 목소리로 합성할 때
+      //   참조음성 없이(Auto) 엉뚱한 목소리가 나간다(서버도 이제 400 으로 거부한다).
+      if (!text.trim()) { noText++; continue; }
+      let r;
+      try { r = await uploadRefVoice({ name, text, wavBuffer: fs.readFileSync(path.join(dir, f)) }); }
+      catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
+      if (r && r.ok) { up++; continue; }
+      // 서버가 안 되면 나머지도 안 된다 — 반복 실패 대신 멈추고, 무엇을 해야 하는지 알려준다.
+      log(`⚠ 참조음성 "${name}" 공용 라이브러리 업로드 실패 — ${(r && r.error) || '알 수 없음'}`);
+      log('   ↳ ⚙ 설정 → 🖧 TTS 서버 의 OmniVoice 주소가 메인 PC 를 가리키는지 확인하세요(합성이 되는 주소면 업로드도 됩니다).');
+      break;
+    }
+    if (noText) log(`⚠ 참조텍스트(.txt)가 없는 목소리 ${noText}개는 올리지 않았습니다 — 같은 이름의 .txt 에 그 음성이 말하는 문장을 넣어 주세요.`);
+    if (up) log(`☁ 이 PC 에만 있던 참조음성 ${up}개를 공용 라이브러리에 올렸습니다 — 이제 다른 PC 에서도 보입니다.`);
+    return up;
+  } finally { _refSyncBusy = false; }
 }
 ipcMain.handle('list-ref-audio', async () => {
   const ASR = require('./tts/asr-client');
   const dir = REF_DIR();
-  let server = [];
+  let server = null;                             // null = 조회 실패(빈 라이브러리와 구분 — 2026-08-22)
   try { server = await ASR.listServerVoices(); } catch {}
   if (await syncRefAudioToServer(server)) { try { server = await ASR.listServerVoices(); } catch {} }
 
-  if (server.length) {
+  if (server && server.length) {
     return server
       .filter((v) => v && v.name)
       .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko'))

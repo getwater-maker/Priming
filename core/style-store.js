@@ -207,17 +207,27 @@ function _loadSyncState() {
   try {
     if (fs.existsSync(SYNC_PATH)) {
       const d = JSON.parse(fs.readFileSync(SYNC_PATH, 'utf-8'));
-      if (d && Number.isFinite(Number(d.rev))) return { rev: Number(d.rev) };
+      if (d && Number.isFinite(Number(d.rev))) return { rev: Number(d.rev), dirty: !!d.dirty };
     }
   } catch (_) {}
-  return { rev: null };                                       // null = 이 PC 는 아직 한 번도 안 맞췄다
+  return { rev: null, dirty: false };                         // null = 이 PC 는 아직 한 번도 안 맞췄다
 }
 
-function _saveSyncState(rev) {
+// dirty = 서버로 아직 못 올라간 로컬 편집이 있다(push 실패). 이 표시가 있으면 pull 이
+//   서버본으로 **통째 교체하지 않고** 합쳐서 다시 올린다 — 오프라인 편집이 소리 없이 사라지는 것 방지(2026-08-22).
+function _saveSyncState(rev, dirty = false) {
   try {
     fs.mkdirSync(STORE_DIR, { recursive: true });
-    fs.writeFileSync(SYNC_PATH, JSON.stringify({ rev: Number(rev) || 0, at: new Date().toISOString() }, null, 2), 'utf-8');
+    fs.writeFileSync(SYNC_PATH, JSON.stringify({ rev: Number(rev) || 0, dirty: !!dirty, at: new Date().toISOString() }, null, 2), 'utf-8');
   } catch (e) { console.error('[style-store] 동기화 상태 저장 실패:', e.message); }
+}
+
+// push 실패 표시만 세운다(rev 는 그대로) — 다음 pull/push 기회에 로컬 편집을 되살려 올리기 위한 기억.
+function _markDirty() {
+  const st = _loadSyncState();
+  _saveSyncState(st.rev == null ? 0 : st.rev, true);
+  // ⚠ rev=null 이던 PC 는 0 으로 기록되지만, 0 은 pull 의 union 분기(r.rev===0 아님 → 정본 교체)로 가지 않고
+  //   dirty 가드가 합치기로 이끈다 — 어느 쪽이든 로컬 편집은 살아남는다.
 }
 
 function _cleanList(arr) {
@@ -271,7 +281,28 @@ async function pullFromServer(log = () => {}) {
     return { ok: true, count: merged.length, pushed: 0, rev: r.rev };
   }
 
-  if (r.rev === known) return { ok: true, unchanged: true, count: local.length, rev: r.rev };
+  const st = _loadSyncState();
+  if (r.rev === known) {
+    // 밀린 로컬 편집(dirty = 지난 push 실패)이 있으면 이번 기회에 올린다 —
+    //   ☁ 동기화가 안내문대로 「받기 + 올리기」 둘 다 하게(예전엔 받기만 해서 실패분이 영영 안 올라갔다).
+    if (st.dirty) {
+      const w = await pushToServer(log);
+      if (w.ok) { log('☁ 지난번에 못 올린 이미지 스타일 편집을 서버에 올렸습니다.'); return { ok: true, count: _loadUserStyles().length, rev: w.rev, pushedDirty: true }; }
+    }
+    return { ok: true, unchanged: true, count: local.length, rev: r.rev };
+  }
+  if (st.dirty) {
+    // 🔴 서버가 앞섰는데 이 PC 에도 못 올린 편집이 있다 — 통째 교체하면 그 편집이 소리 없이 사라진다
+    //   (실사고 경로: 서버 꺼짐 → 편집(push 실패) → 다른 PC 가 편집 → 이 PC pull 이 통째 교체).
+    //   → 합쳐서(로컬 우선 = 충돌 정책과 동일) 서버로 되올린다.
+    const { merged } = mergeStyles(r.styles, local, 'local');
+    const order2 = mergeOrder(localOrder, r.order);
+    _saveUserStyles(merged); if (order2.length) _saveOrder(order2);
+    const w = await ASR.putSharedStyles({ styles: merged, order: order2, baseRev: r.rev });
+    if (w.ok) { _saveSyncState(w.rev, false); log('☁ 서버 변경분과 이 PC 의 못 올린 편집을 합쳐 저장했습니다.'); return { ok: true, count: merged.length, rev: w.rev, mergedDirty: true }; }
+    _saveSyncState(r.rev, true);   // rev 는 맞추되 dirty 유지 — 다음 기회에 다시 올린다(로컬엔 이미 합쳐 둠)
+    return { ok: true, count: merged.length, rev: r.rev, warn: w.error };
+  }
   const next = _cleanList(r.styles);
   _saveUserStyles(next);
   // 서버에 순서가 없으면 이 PC 순서를 유지한다(빈 값으로 멀쩡한 순서를 지우지 않게).
@@ -286,9 +317,17 @@ async function pullFromServer(log = () => {}) {
  *    스타일도 함께 남는다(= 삭제한 것이 되살아날 수는 있다 — 잃는 것보다 낫다). */
 async function pushToServer(log = () => {}) {
   const ASR = require('../tts/asr-client');
+  let known = _loadSyncState().rev;
+  // 🔴 rev 를 모르는 PC(첫 동기화 전·style-sync.json 소실)가 baseRev -1(무검사 덮어쓰기)로 밀면
+  //   서버의 남의 스타일이 통째로 지워질 수 있다(2026-08-22) → 먼저 pull(union)로 rev 를 확보한 뒤 올린다.
+  if (known == null) {
+    const p = await pullFromServer(log);
+    if (!p.ok) { _markDirty(); return { ok: false, error: p.error, unsupported: !!p.unsupported }; }
+    known = _loadSyncState().rev;
+    if (known == null) { _markDirty(); return { ok: false, error: 'rev 확보 실패' }; }
+  }
   const styles = _loadUserStyles(), order = _loadOrder();
-  const known = _loadSyncState().rev;
-  let w = await ASR.putSharedStyles({ styles, order, baseRev: known == null ? -1 : known });
+  let w = await ASR.putSharedStyles({ styles, order, baseRev: known });
   if (w.conflict) {
     const { merged } = mergeStyles(w.styles, styles, 'local');
     const order2 = mergeOrder(order, w.order);
@@ -296,7 +335,8 @@ async function pushToServer(log = () => {}) {
     w = await ASR.putSharedStyles({ styles: merged, order: order2, baseRev: w.rev });
     if (w.ok) log('☁ 다른 PC 가 그 사이 바꾼 이미지 스타일과 합쳐서 저장했습니다.');
   }
-  if (w.ok) { _saveSyncState(w.rev); return { ok: true, rev: w.rev, count: (w.styles || []).length }; }
+  if (w.ok) { _saveSyncState(w.rev, false); return { ok: true, rev: w.rev, count: (w.styles || []).length }; }
+  _markDirty();   // 못 올렸다 — pull 이 통째 교체로 이 편집을 지우지 않도록 기억해 둔다
   return { ok: false, error: w.error, unsupported: w.error === 'unsupported' };
 }
 
