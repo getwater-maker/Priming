@@ -15,6 +15,8 @@
  *   ## 1장. 장 제목            ← 본문 장
  *   ### 절 제목                ← 절(h3) / #### 소절(h4)
  *   본문 문단…  **굵게** *기울임* [^1] 각주
+ *   | a | b |                  ← 표(구분행 |---|---| 이 있어야 표) — type:'table'
+ *   - 항목 / 1. 항목 / - [x] 항목  ← 목록(2칸 들여쓰기 = 하위 항목) — type:'list'
  *   > 인용문                   ← 블록 인용 (`> 🖼️`/`> 🎬` 프롬프트 줄은 영상용 — 책에선 무시)
  *   ```시 … ```                ← 시(행 보존·가운데)
  *   ![삽화 설명](경로)          ← 삽화 + 캡션
@@ -89,6 +91,34 @@ const META_KEYS = {
   'qr라벨': 'qrLabel', 'qr코드라벨': 'qrLabel',
 };
 
+// ── 표(마크다운 파이프 테이블) ──────────────────────────────────────────────
+// 한 줄 → 셀 배열. 이스케이프한 \| 는 셀 구분이 아니라 문자 '|'.
+function splitTableRow(line) {
+  const s = String(line).trim().replace(/^\|/, '').replace(/\|\s*$/, '');
+  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+}
+// 구분행(|---|:--:|--:|) 인가 — 표를 평문과 가르는 유일한 기준(파이프 든 평문 오인 방지).
+const TABLE_SEP_RE = /^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$/;
+function parseTableAlign(line) {
+  return splitTableRow(line).map((c) => {
+    const l = c.startsWith(':'), r = c.endsWith(':');
+    return (l && r) ? 'center' : r ? 'right' : l ? 'left' : null;
+  });
+}
+
+// ── 목록 ────────────────────────────────────────────────────────────────────
+// 들여쓰기 2칸 = 한 단계(탭은 2칸 환산). `- [x]` 는 체크박스 항목.
+const LIST_RE = /^(\s*)([-*+]|\d+[.)])\s+(\S.*)$/;
+function parseListItem(raw) {
+  const m = String(raw).match(LIST_RE);
+  if (!m) return null;
+  let text = m[3].trim();
+  let checked = null;
+  const cb = text.match(/^\[([ xX])\]\s*(.*)$/);
+  if (cb) { checked = /x/i.test(cb[1]); text = cb[2].trim(); }
+  const indent = m[1].replace(/\t/g, '  ').length;
+  return { text, level: Math.min(3, Math.floor(indent / 2)), ordered: /\d/.test(m[2]), checked };
+}
 const IMG_PROMPT_RE = /^>\s*🖼/;
 const VID_PROMPT_RE = /^>\s*🎬/;
 
@@ -247,6 +277,37 @@ function parseBookText(text, fallbackTitle) {
       continue;
     }
 
+    // 표 — 헤더행 바로 다음 줄이 구분행(|---|---|)일 때만 표로 본다.
+    if (/^\|/.test(t) && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1].trim())) {
+      flushPara(i - 1);
+      const start = i;
+      const header = splitTableRow(t);
+      const align = parseTableAlign(lines[i + 1].trim());
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
+      i--; // for 루프의 i++ 가 표 다음 줄을 가리키도록
+      cur.blocks.push({ type: 'table', header, align, rows, lineStart: start, lineEnd: i });
+      continue;
+    }
+
+    // 목록 — 연속 항목을 한 블록으로(중첩은 항목의 level 로 보관).
+    //   들여쓴 비항목 줄은 앞 항목의 이어짐으로 붙인다.
+    if (LIST_RE.test(line) && !/^(-{3,}|\*{3,})$/.test(t)) {
+      flushPara(i - 1);
+      const start = i;
+      const items = [];
+      while (i < lines.length) {
+        const it = parseListItem(lines[i]);
+        if (it) { items.push(it); i++; continue; }
+        if (items.length && /^\s{2,}\S/.test(lines[i])) { items[items.length - 1].text += ' ' + lines[i].trim(); i++; continue; }
+        break;
+      }
+      i--;
+      cur.blocks.push({ type: 'list', ordered: !!(items[0] && items[0].ordered), items, lineStart: start, lineEnd: i });
+      continue;
+    }
+
     // 삽화 ![캡션](경로)
     const img = t.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (img) { flushPara(i - 1); cur.blocks.push({ type: 'image', caption: img[1].trim(), src: img[2].trim(), lineStart: i, lineEnd: i }); continue; }
@@ -309,12 +370,18 @@ function sectionTemplate(key) {
 
 // 파일 종류 감지 — 'essential'(필수/부속물) | 'chapter'(회차=본문 장) | 'native'(우리 단일 형식)
 function detectBookFileKind(text) {
-  const head = String(text || '').slice(0, 4000);
+  const head = String(text || '').slice(0, 20000); // 표가 긴 원고도 H2 가 head 안에 들어오게
   if (/^===.*(앞부속물|뒷부속물|본문).*===$/m.test(head) || /^(책제목|제목)\s*[:：]/m.test(head)) return 'essential';
   // 구 앱(PrimingBook) 회차 파일: H1 이 '제N회/장/화' — 안에 '## [목차]' 마커·평문 메타가 섞여 있어도 회차.
   //   (이 규칙이 native 판정보다 먼저 — 실측: 02_출판용 세트가 native 로 오판돼 소제목이 장으로 승격되던 문제)
   if (/^#\s+제?\s*\d+\s*[회장화부]/m.test(head)) return 'chapter';
   if (/^##\s+\[/m.test(head) || /^>\s*(저자|책제목|부제|출판사)\s*[:：]/m.test(head)) return 'native';
+  // 우리 단일 형식(native) — `# 책 제목` + `## 섹션` 2개 이상.
+  //   구 앱 회차 파일은 H1 이 '제N회'(바로 위 규칙에서 이미 걸림)이거나 H1 이 아예 없다(평문 제목 승격).
+  //   🔴 이 규칙이 없으면 평범한 원고가 마지막 폴백 'chapter' 로 떨어져 normalizeChapterFile 이
+  //   모든 헤딩을 한 단계 밀어버린다 → 책 제목이 장 제목이 되고, meta.title 이 비어 반표제지·속표지에
+  //   파일명이 찍히며, 장이 1개뿐이라 목차·러닝헤드가 통째로 무너진다(실측: 서론_고린도전서.md).
+  if (/^#\s+\S/m.test(head) && (head.match(/^##\s+\S/gm) || []).length >= 2) return 'native';
   return 'chapter';
 }
 
@@ -420,6 +487,7 @@ function stripBookSections(text) {
 
 module.exports = {
   parseBookText, parseBookFiles, resolveSourceLine, detectBookFileKind,
+  splitTableRow, parseTableAlign, parseListItem, TABLE_SEP_RE, LIST_RE,
   reservedSections, sectionTemplate, isReservedHeading, stripBookSections,
   RESERVED, FRONT_ORDER, BACK_ORDER,
 };

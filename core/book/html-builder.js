@@ -29,9 +29,24 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// 최소 인라인 마크다운: **굵게** *기울임* `코드` — HTML 이스케이프 후 적용.
+// 최소 인라인 마크다운: [링크] **굵게** *기울임* `코드` — HTML 이스케이프 후 적용.
+//   링크: 종이책이라 클릭할 수 없다 → 주소는 버리고 글자만 남긴다. 외부 주소(http)만,
+//   글자와 다를 때 괄호로 병기한다(로컬 파일 경로는 인쇄물에서 무의미하므로 언제나 버린다).
+//   ⚠ 주소에 괄호가 들어갈 수 있다(`../개역개정4판(구약+신약).txt`) → 한 겹 중첩까지 허용.
+//   `![...](...)` 인라인 이미지는 블록 파서 몫이라 건드리지 않는다(앞의 ! 로 판별).
+const LINK_RE = /(!?)\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))*)\)/g;
+function stripLinks(t) {
+  return t.replace(LINK_RE, (m, bang, label, url) => {
+    if (bang) return m;
+    const lab = String(label).trim();
+    if (!lab) return "";
+    const u = String(url).trim();
+    if (/^https?:/i.test(u) && u !== lab && !lab.includes(u)) return `${lab} (${u})`;
+    return lab;
+  });
+}
 function inlineMd(s) {
-  let t = esc(s);
+  let t = stripLinks(esc(s));
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   t = t.replace(/`([^`]+)`/g, '<span class="code">$1</span>');
@@ -58,6 +73,45 @@ function renderInline(text, book, ctx) {
   return out;
 }
 
+// 표 — 머리행 + 본문행. 쪽을 넘으면 머리행을 반복(thead: table-header-group)해
+//   33행짜리 계획표가 여러 쪽에 걸쳐도 어느 열인지 읽을 수 있게 한다.
+function tableHtml(b, book, ctx, srcAttr) {
+  const align = (i) => (b.align && b.align[i]) ? ` style="text-align:${b.align[i]}"` : "";
+  const cells = (row, tag) => row.map((c, i) =>
+    `<${tag}${align(i)}>${renderInline(c, book, ctx)}</${tag}>`).join("");
+  const head = (b.header && b.header.length)
+    ? `<thead><tr>${cells(b.header, "th")}</tr></thead>` : "";
+  const n = (b.header || []).length;
+  const body = (b.rows || []).map((r) => {
+    // 셀 수가 머리행과 다른 줄이 실제로 있다 → 머리행 기준으로 맞춘다(빈 칸 채움).
+    const row = n ? Array.from({ length: n }, (_, i) => (r[i] == null ? "" : r[i])) : r;
+    return `<tr>${cells(row, "td")}</tr>`;
+  }).join("\n");
+  return `<div class="md-tablewrap"${srcAttr(b)}><table class="md-table">${head}<tbody>${body}</tbody></table></div>`;
+}
+
+// 목록 — 항목의 level 로 중첩 <ul>/<ol> 을 만든다. `- [x]` 는 체크박스 글자로.
+function listHtml(b, book, ctx, srcAttr) {
+  const items = b.items || [];
+  if (!items.length) return "";
+  let i = 0;
+  const build = (level) => {
+    const ordered = !!items[i].ordered;
+    const tag = ordered ? "ol" : "ul";
+    let out = `<${tag}>`;
+    while (i < items.length && items[i].level >= level) {
+      if (items[i].level > level) { out += build(items[i].level); continue; }
+      const it = items[i]; i++;
+      const box = it.checked == null ? "" : `<span class="cbox">${it.checked ? "☑" : "☐"}</span> `;
+      let inner = box + renderInline(it.text, book, ctx);
+      if (i < items.length && items[i].level > level) inner += build(items[i].level);
+      out += `<li${it.checked == null ? "" : ' class="task"'}>${inner}</li>`;
+    }
+    return out + `</${tag}>`;
+  };
+  return `<div class="md-listwrap"${srcAttr(b)}>${build(items[0].level)}</div>`;
+}
+
 function blockHtml(b, book, ctx, srcAttr) {
   const src = srcAttr(b);
   switch (b.type) {
@@ -72,6 +126,8 @@ function blockHtml(b, book, ctx, srcAttr) {
       const cap = b.caption ? `<figcaption>${inlineMd(b.caption)}</figcaption>` : '';
       return `<figure${src}><img src="${esc(url)}" alt="${esc(b.caption)}" />${cap}</figure>`;
     }
+    case 'table': return tableHtml(b, book, ctx, srcAttr);
+    case 'list': return listHtml(b, book, ctx, srcAttr);
     case 'hr': return `<hr class="scene"${src} />`;
     default: return '';
   }

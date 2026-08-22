@@ -18,6 +18,9 @@ body {
 p { margin: 0; text-indent: 1em; orphans: 2; widows: 2; }
 p.noindent { text-indent: 0; }
 em { font-style: italic; }
+/* 인라인 코드(`…`) — 스타일이 없어 긴 파일 경로가 한 덩어리로 붙었고, body 의 word-break:keep-all
+   때문에 끊기지도 않아 그 줄이 양쪽정렬 대공백으로 찢어졌다. anywhere = 필요할 때만 끊는다. */
+span.code { font-size: 0.94em; overflow-wrap: anywhere; }
 strong { font-weight: 700; }
 
 /* ── 표지 안내 페이지(미리보기 전용 — 내지 PDF 미포함) ── */
@@ -141,6 +144,51 @@ figure img { max-width: 100%; max-height: 120mm; }
 figcaption { font-size: 0.85em; color: #333; margin-top: 0.7em; }
 hr.scene { border: none; text-align: center; margin: 1.8em 0; }
 hr.scene::after { content: "✻"; color: #555; font-size: 0.9em; }
+
+/* ── 표 ── */
+/*  본문보다 작은 글자 + 가는 실선. 머리행은 쪽을 넘어가면 반복(table-header-group)한다 —
+    33행짜리 진행표·회차 계획표가 여러 쪽에 걸쳐도 어느 열인지 읽을 수 있어야 한다.
+    셀은 양쪽정렬 금지(justify 를 상속하면 짧은 셀이 대공백으로 찢어진다 — blockquote 와 같은 이유). */
+div.md-tablewrap { margin: 1.4em 0; text-indent: 0; }
+table.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86em;
+  line-height: 1.5;
+  text-indent: 0;
+  text-align: left;
+}
+table.md-table thead { display: table-header-group; }
+table.md-table tr { break-inside: avoid; page-break-inside: avoid; }
+table.md-table th, table.md-table td {
+  border: 0.4pt solid #8a8a8a;
+  padding: 0.34em 0.5em;
+  vertical-align: top;
+  text-indent: 0;
+  text-align: left;
+  overflow-wrap: break-word;
+}
+table.md-table th { font-weight: 700; background: #efeeeb; }
+
+/* ── 목록 ── */
+/*  들여쓰기(1em)는 문단용이라 항목엔 걸지 않는다. 하위 항목은 items[].level 로 중첩된 ul/ol. */
+div.md-listwrap { margin: 1.1em 0; text-indent: 0; }
+div.md-listwrap ul, div.md-listwrap ol { margin: 0; padding-left: 1.45em; }
+div.md-listwrap ul { list-style: disc; }
+div.md-listwrap ul ul { list-style: circle; }
+div.md-listwrap ul ul ul { list-style: square; }
+div.md-listwrap ol { list-style: decimal; }
+div.md-listwrap li {
+  margin: 0.3em 0;
+  text-indent: 0;
+  text-align: left;
+  orphans: 2;
+  widows: 2;
+}
+div.md-listwrap li > ul, div.md-listwrap li > ol { margin: 0.3em 0 0.1em; }
+/* 체크박스 항목은 ☑ 가 표지 노릇을 한다 — 불릿까지 찍으면 두 겹으로 보인다 */
+div.md-listwrap li.task { list-style: none; }
+div.md-listwrap .cbox { margin-right: 0.15em; }
 
 /* ── 각주 ── */
 span.footnote {

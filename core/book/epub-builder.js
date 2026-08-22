@@ -104,7 +104,45 @@ section.dedication p, section.epigraph p { text-indent: 0; margin-top: 30%; }
 .titlepage .pub { margin-top: 4em; color: #666; }
 aside.fn { font-size: 0.88em; color: #333; margin: 1.5em 0 0; padding-top: 0.6em; border-top: 1px solid #ccc; }
 .colophon p { text-indent: 0; margin: 0.25em 0; font-size: 0.9em; }
+table.md-table { width: 100%; border-collapse: collapse; font-size: 0.86em; text-indent: 0; text-align: left; margin: 1.2em 0; }
+table.md-table th, table.md-table td { border: 1px solid #8a8a8a; padding: 0.34em 0.5em; vertical-align: top; text-indent: 0; text-align: left; }
+table.md-table th { font-weight: bold; background: #efeeeb; }
+ul.md-list, ol.md-list { margin: 1em 0; padding-left: 1.45em; }
+ul.md-list li, ol.md-list li { margin: 0.3em 0; text-indent: 0; text-align: left; }
+ul.md-list li.task, ol.md-list li.task { list-style: none; }
+span.code { font-size: 0.94em; overflow-wrap: anywhere; }
 `;
+
+// 표·목록 — 내지(html-builder)와 같은 구조. ePub 은 페이지 개념이 없어 머리행 반복은 불필요.
+function tableXhtml(b, book, ctx) {
+  const cells = (row, tag) => row.map((c) => `<${tag}>${inline(c, book, ctx)}</${tag}>`).join("");
+  const head = (b.header && b.header.length) ? `<thead><tr>${cells(b.header, "th")}</tr></thead>` : "";
+  const n = (b.header || []).length;
+  const body = (b.rows || []).map((r) => {
+    const row = n ? Array.from({ length: n }, (_, i) => (r[i] == null ? "" : r[i])) : r;
+    return `<tr>${cells(row, "td")}</tr>`;
+  }).join("\n");
+  return `<table class="md-table">${head}<tbody>${body}</tbody></table>`;
+}
+function listXhtml(b, book, ctx) {
+  const items = b.items || [];
+  if (!items.length) return "";
+  let i = 0;
+  const build = (level) => {
+    const tag = items[i].ordered ? "ol" : "ul";
+    let out = `<${tag} class="md-list">`;
+    while (i < items.length && items[i].level >= level) {
+      if (items[i].level > level) { out += build(items[i].level); continue; }
+      const it = items[i]; i++;
+      const box = it.checked == null ? "" : (it.checked ? "☑ " : "☐ ");
+      let inner = box + inline(it.text, book, ctx);
+      if (i < items.length && items[i].level > level) inner += build(items[i].level);
+      out += `<li${it.checked == null ? "" : ' class="task"'}>${inner}</li>`;
+    }
+    return out + `</${tag}>`;
+  };
+  return build(items[0].level);
+}
 
 // 블록 → xhtml (ePub 전용 — 각주는 noteref + 장 끝 aside)
 function blocksXhtml(blocks, book, ctx) {
@@ -122,6 +160,8 @@ function blocksXhtml(blocks, book, ctx) {
         if (img) out.push(`<figure><img src="${img}" alt="${esc(b.caption || '')}"/>${b.caption ? `<figcaption>${inlineMd(b.caption)}</figcaption>` : ''}</figure>`);
         break;
       }
+      case 'table': out.push(tableXhtml(b, book, ctx)); break;
+      case 'list': out.push(listXhtml(b, book, ctx)); break;
       case 'hr': out.push('<hr class="scene"/>'); break;
       default: break;
     }

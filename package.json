@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.3.31",
+  "version": "0.3.32",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -11,7 +11,7 @@
     "dev:renderer": "vite",
     "test:timestamps": "node test/timestamps.test.js && node test/timestamps-ui.smoke.js",
     "test:visual": "node test/visual-defect.test.js && node test/log-file.test.js && node test/prompt-guard.test.js && node test/cache-guard.test.js",
-    "test:book": "node test/book-parser.test.js && node test/book-pdf.smoke.js && node test/book-multi.smoke.js && node test/book-ui.smoke.js",
+    "test:book": "node test/book-parser.test.js && node test/book-md.test.js && node test/book-pdf.smoke.js && node test/book-multi.smoke.js && node test/book-ui.smoke.js",
     "pack": "vite build && electron-builder --win --dir",
     "dist": "vite build && electron-builder --win nsis --x64 --publish never",
     "release": "vite build && electron-builder --win nsis --x64 --publish always",
