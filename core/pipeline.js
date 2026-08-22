@@ -64,6 +64,8 @@ function toDTO(parseResult) {
     fileTitle,
     meta,
     mode,
+    // 통합대본('> 📥 자산출처:' 메타) 여부 — 헤더 「📥 이어받기」 버튼 표시 조건. main 이 채운다.
+    mergeSources: parseResult.mergeSources || 0,
     projects: projects.map((pr) => {
       let capN = 0; // 자막 줄 넘버링 — 그룹을 넘어 편 전체에서 이어짐
       return {

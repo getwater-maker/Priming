@@ -1217,6 +1217,14 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
       log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
+      // 📥 통합대본(자산출처 메타)이면 자동으로 이어받기 — 로이가 수동 단계를 잊는 문제를 반복 겪었다.
+      //   이미 대부분 연결돼 있으면(작업본 이어받기 등) 4천 건 재복사를 피해 건너뛴다. 그때는 버튼으로 재실행.
+      if (scriptHasAssetSources(S.scriptPath)) {
+        const miss = _missingAudioRatio(S.parsed);
+        if (miss > 0.5) { S.abort = false; await withAwake('자산 이어받기', () => mergeAssetsInteractive({})); }
+        else if (miss > 0) log(`📥 이 대본은 자산출처가 있습니다 — 음성이 없는 문장 ${(miss * 100).toFixed(1)}% 는 「📥 이어받기」로 다시 연결할 수 있습니다.`);
+        else log('📥 이 대본은 자산출처가 있습니다 — 자산이 이미 연결돼 있어 이어받기를 건너뜁니다.');
+      }
       okN++;
     } catch (e) {
       // 한 파일이 실패해도 나머지는 계속 연다(격리)
@@ -2837,6 +2845,8 @@ function buildParsedForScript(scriptPath, mode, preset) {
     if (sameMode) { const n = overlaySnapshot(parsed, snap); if (n) note = `♻ 대본 수정 감지 — 기존 자산 ${n}개 복원`; }
   }
   applyIntroFromScript(parsed, scriptPath, mode); // 도입부(isIntro)는 .md 가 출처 — 항상 재계산(복원 대본 색 누락 방지)
+  // 통합대본이면 자산출처 개수를 실어 둔다 → toDTO 가 그대로 내보내 헤더 「📥 이어받기」 버튼이 뜬다.
+  try { parsed.mergeSources = require('./core/merge-assets').parseAssetSources(fs.readFileSync(scriptPath, 'utf8')).length; } catch { parsed.mergeSources = 0; }
   return { parsed, note };
 }
 // .md 의 '도입부' 영역(splitHybrid)에서 도입 문장 텍스트를 뽑아, 그룹의 문장과 매칭해 isIntro 재설정.
@@ -3052,6 +3062,149 @@ function overlaySnapshot(parsed, snap) {
   }
   return touched;
 }
+
+// ── 📥 자산 이어받기 (통합본) ─────────────────────────────────────────
+//   통합대본('> 📥 자산출처:' 메타를 가진 .md)이 각 부의 **이미 만들어진** TTS·이미지·비디오를 물려받는다.
+//   자세한 배경·함정은 core/merge-assets.js 머리말과 docs/통합본-자산이어받기-계획.md 참조.
+//   🔑 여기서 하는 일은 **복사 + 경로/길이 주입**뿐이다. 그 다음(🎤/🖼/🎬/⏱/💾)은 기존 코드가 무수정으로 한다.
+const MERGE_MIN_RATE = 0.95;  // 문장 매칭률 게이트 — 이 밑이면 멈추고 물어본다(계획서 §5-1)
+
+/** 통합대본에 자산출처 메타가 있는가 (파싱본 → 대본 파일을 읽어 확인) */
+function scriptHasAssetSources(scriptPath) {
+  try { return require('./core/merge-assets').fileHasAssetSources(scriptPath); } catch { return false; }
+}
+/** 아직 음성이 없는 문장 수 / 전체 — 자동 실행 여부 판단용 */
+function _missingAudioRatio(parsed) {
+  let total = 0, missing = 0;
+  for (const pr of (parsed && parsed.projects) || []) {
+    for (const s of pr.sentences) {
+      total++;
+      if (!(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))) missing++;
+    }
+  }
+  return total ? missing / total : 0;
+}
+
+/**
+ * 자산 이어받기 실행.
+ * @param {object} o.parsed  대상(통합대본) 파싱본 — 제자리에서 경로·길이가 주입된다
+ * @param {string} o.scriptPath  통합대본 .md
+ * @param {string} o.outRoot  통합대본 출력 루트
+ * @param {boolean} o.confirmed  게이트를 이미 통과(사용자 승인)했는가
+ * @param {boolean} o.dryRun  복사하지 않고 매칭만(검증용)
+ */
+async function runMergeAssets(o = {}) {
+  const MA = require('./core/merge-assets');
+  const parsed = o.parsed, scriptPath = o.scriptPath, outRoot = o.outRoot;
+  if (!parsed || !scriptPath) return { ok: false, error: '대본이 열려 있지 않습니다.' };
+  let text = '';
+  try { text = fs.readFileSync(scriptPath, 'utf8'); } catch (e) { return { ok: false, error: `대본을 읽을 수 없습니다: ${e.message}` }; }
+  const sources = MA.parseAssetSources(text);
+  if (!sources.length) return { ok: false, error: '이 대본에는 「> 📥 자산출처:」 줄이 없습니다.' };
+
+  const preset = S.preset || P.getPreset(null);
+  const th = presetThresholds(preset);
+  log(`📥 자산 이어받기 — 자산출처 ${sources.length}개 조사…`);
+
+  // 통합대본 basename 이 소스와 겹치면 스냅샷(.smproj)이 서로 덮인다(계획서 §6-7).
+  const myBase = path.basename(scriptPath).replace(/\.md$/i, '');
+  for (const src of sources) {
+    if (path.basename(String(src.scriptPath || '')).replace(/\.md$/i, '') === myBase) {
+      log(`   ⚠ 통합대본 파일명이 소스와 같습니다(${myBase}) — 작업본 스냅샷이 서로 덮어씁니다. 파일명을 바꾸세요.`);
+    }
+  }
+
+  const parseSource = (p) => {
+    const r = P.parseScript(p, 'longform', th);
+    const q = r.projects[0];
+    return { sentences: q.sentences, groups: q.groups };
+  };
+  const index = MA.buildSourceIndex(sources, parseSource, { log });
+
+  // 롱폼은 프로젝트 1개지만, 여러 편이어도 순서대로 이어서 매칭한다(색인 커서가 전역이라 그대로 성립).
+  const results = [];
+  let sTotal = 0, sMatched = 0;
+  for (const pr of parsed.projects) {
+    const sm = MA.matchSentences(pr.sentences, index);
+    const gm = MA.matchGroups(pr.groups, index);
+    const rep = MA.buildReport(pr, sm, gm, index);
+    results.push({ pr, sm, gm, rep });
+    sTotal += rep.sentences.total; sMatched += rep.sentences.matched;
+  }
+  const rate = sTotal ? sMatched / sTotal : 1;
+  const report = results[0] ? results[0].rep : null;
+  log(`📥 매칭 결과 — ${MA.formatReport(results[0].rep).split('\n').join(' · ')}`);
+
+  // ── 게이트(계획서 §5-1) ── 이게 없으면 오탈자 하나가 조용히 수 시간짜리 재합성으로 이어진다.
+  if (rate < MERGE_MIN_RATE && !o.confirmed) {
+    return { ok: false, needsConfirm: true, rate, report, sources: index.srcStats };
+  }
+  if (o.dryRun) return { ok: true, dryRun: true, rate, report, sources: index.srcStats };
+
+  const MU = require('./core/media-utils');
+  const probeDur = async (f) => { try { return await MU.getMediaDuration(f); } catch { return null; } };
+  const retry = (fn, what) => P.retryFs(fn, what, log, () => S.abort);
+
+  const totals = { audio: 0, images: 0, videos: 0, probed: 0, copyFailed: [], noDuration: [], aborted: false };
+  for (const r of results) {
+    const dirs = shortsDirs(outRoot, r.pr.shortsNum);
+    const c = await MA.copyIntoWorkdirs(r.pr, r.sm, r.gm, dirs, {
+      log, retryFs: retry, probeDur, abortSignal: () => S.abort,
+      onProgress: (n, all) => log(`   … 음성 ${n}/${all} 복사`),
+    });
+    totals.audio += c.audio; totals.images += c.images; totals.videos += c.videos; totals.probed += c.probed;
+    totals.copyFailed.push(...c.copyFailed); totals.noDuration.push(...c.noDuration);
+    if (c.aborted) totals.aborted = true;
+  }
+  log(`📥 자산 이어받기 완료 — 음성 ${totals.audio} · 이미지 ${totals.images} · 비디오 ${totals.videos} 연결`
+    + (totals.probed ? ` (길이 실측 ${totals.probed}개)` : ''));
+  if (totals.copyFailed.length) log(`   ⚠ 복사 실패 ${totals.copyFailed.length}개 (컷 ${totals.copyFailed.slice(0, 12).join(', ')}) — 그 문장은 새로 합성됩니다.`);
+  if (totals.noDuration.length) log(`   ⚠ 길이를 잴 수 없어 연결하지 않은 음성 ${totals.noDuration.length}개 — 새로 합성됩니다(길이 없이 넘기면 타임라인이 깨집니다).`);
+  const stillMissingImg = results.reduce((a, r) => a + r.rep.missingGroups.length, 0);
+  if (stillMissingImg) log(`   🖼 이미지 ${stillMissingImg}개는 새로 생성됩니다 — 「⚡ 만들기」 시 캐시/엔진이 채웁니다.`);
+  if (totals.aborted) log('   ⏹ 중단됨 — 「📥 이어받기」를 다시 누르면 이어서 연결합니다.');
+
+  return { ok: true, rate, report, sources: index.srcStats, copied: totals };
+}
+
+/** 자산 이어받기 결과 팝업(게이트 확인 포함). 승인되면 다시 실행한다. */
+async function mergeAssetsInteractive(opts = {}) {
+  const MA = require('./core/merge-assets');
+  let r = await runMergeAssets({ parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot });
+  if (r.needsConfirm) {
+    const body = `문장 매칭률이 ${(r.rate * 100).toFixed(1)}% 로 낮습니다(기준 ${MERGE_MIN_RATE * 100}%).\n\n`
+      + MA.formatReport(r.report)
+      + '\n\n통합대본의 문장이 원본과 한 글자라도 다르면 매칭에서 빠지고 **새로 합성**됩니다.\n'
+      + '그대로 진행하면 빠진 문장은 전부 새로 만들어집니다.';
+    const res = await dialog.showMessageBox(win, {
+      type: 'warning', buttons: ['취소', '그래도 진행'], defaultId: 0, cancelId: 0,
+      title: '자산 이어받기 — 매칭률이 낮습니다', message: '이어받기를 계속할까요?', detail: body,
+    });
+    if (res.response !== 1) { log('📥 자산 이어받기 취소 — 통합대본의 문장을 원본과 맞춘 뒤 다시 시도하세요.'); return r; }
+    r = await runMergeAssets({ parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot, confirmed: true });
+  }
+  if (r.ok && !opts.quiet) {
+    try {
+      await dialog.showMessageBox(win, {
+        type: 'info', buttons: ['확인'], title: '📥 자산 이어받기 완료',
+        message: `음성 ${r.copied.audio}개 · 이미지 ${r.copied.images}개 · 비디오 ${r.copied.videos}개를 이어받았습니다.`,
+        detail: MA.formatReport(r.report),
+      });
+    } catch {}
+  } else if (!r.ok && !r.needsConfirm) {
+    log(`📥 자산 이어받기 실패: ${r.error}`);
+  }
+  if (r.ok) { storeActive(); pushDtoUpdate(); writeSnapshotSync(); }
+  return r;
+}
+
+// 수동 재실행 — 헤더 「📥 이어받기」 버튼.
+ipcMain.handle('merge-prefill', async () => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  S.abort = false;
+  await withAwake('자산 이어받기', () => mergeAssetsInteractive({}));
+  return currentDTO();
+});
 
 // 프로젝트 저장/불러오기 (대본 1개 기준 스냅샷)
 // 저장 전용 폴더 — 작업(.smproj.json)·큐(.pmqueue.json) 파일만 모임. 전체삭제 대상. (자동이어받기 projects/ 와 분리)

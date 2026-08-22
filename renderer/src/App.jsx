@@ -424,6 +424,8 @@ export default function App() {
     a.play().catch(() => {});
   }
   const loaded = !!(dto && ((dto.projects && dto.projects.length) || dto.kind === 'book'));
+  // 통합대본('> 📥 자산출처:' 메타)의 소스 개수 — 0 이면 「📥 이어받기」 버튼을 아예 안 그린다.
+  const mergeSources = (dto && dto.mergeSources) || 0;
 
   // 자막 한 줄 글자수 — 분할옵션의 '긴 n자'(longLen) 기준.
   const effCap = Math.max(2, parseInt(splitOpts.long, 10) || 20);
@@ -535,6 +537,12 @@ export default function App() {
     setStatus('도입부 TTS + 10초 재배치…');
     try { const d = await api.introVideoPrep({ presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); setStatus('도입부 재배치 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
+  // 📥 통합본 자산 이어받기 — 기존 회차의 TTS·이미지·비디오를 이 작업폴더로 복사·연결(재실행 안전).
+  async function runMergePrefill() {
+    setStatus('📥 자산 이어받기…');
+    try { const d = await api.mergePrefill(); if (d) setDto(d); setStatus('이어받기 완료'); }
+    catch (e) { logline('이어받기 오류: ' + e.message); setStatus('오류'); }
   }
 
   // 모드의 기본 음성배속(mode-profiles). 미로딩 시 1.0 폴백.
@@ -1924,6 +1932,8 @@ export default function App() {
       짧은 <input type="number" value={splitOpts.short} onChange={(e) => changeSplit('short', e.target.value)} />
       긴 <input type="number" value={splitOpts.long} onChange={(e) => changeSplit('long', e.target.value)} />
       {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 10초 기준으로 도입부 그룹 재배치" onClick={runIntroVideo}>🎬 도입부 TTS+10초 재배치</button>}
+      {/* 📥 통합대본('> 📥 자산출처:' 메타)일 때만 — 각 부의 기존 음성·이미지·비디오를 이어받는다(재생성 0). */}
+      {mergeSources > 0 && <button className="ghost" disabled={!loaded} title={`자산출처 ${mergeSources}개에서 기존 TTS·이미지·비디오를 이 작업폴더로 복사해 연결합니다 (대본 열 때 자동 실행 — 이 버튼은 재실행용)`} onClick={runMergePrefill}>📥 이어받기</button>}
     </span>
   ) : null;
 
