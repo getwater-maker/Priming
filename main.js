@@ -1861,6 +1861,12 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   const _wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
   const _wfName = _wf ? _wf.name : path.basename(cfg.workflowPath).replace(/\.json$/i, '');
   logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(${_wfName}) — ${targets.length}장 생성 (${eng.baseUrl})`);
+  // 🖥 로컬이면 **꺼져 있어도 켜서 기다린다** — "ComfyUI 켜는 걸 깜빡했다" 로 생성이 통째로 실패하지 않게.
+  //   부팅 자동실행(시작프로그램 바로가기)이 1차, 이게 2차 방어선이다.
+  if (!cfg.cloud) {
+    const r = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log: logger });
+    if (!r.ok) throw new Error(r.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+  }
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
   //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
@@ -1935,6 +1941,10 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
     pushDtoUpdate();
   }
+  // 🧹 **끝난 뒤에도 반납한다** — 로컬 ComfyUI 는 생성이 끝나도 모델을 붙들고 있다.
+  //   실측(2026-08-22, RTX 3060 12GB): 큐가 비어 있는데 **6.6GB** 점유 → /free 후 GPU 10,110MB → 3,480MB.
+  //   그 상태로 두면 같은 GPU 를 쓰는 OmniVoice TTS 가 좁아진다(켜 두는 것 자체는 무해하게 만드는 장치).
+  if (!cfg.cloud) { logger('  🧹 로컬 VRAM 반납(모델 언로드) — TTS 가 쓸 자리를 비웁니다'); await eng.freeMemory(); }
 }
 
 // Genspark 한도 메시지의 재설정 시각 파싱 — "AI Image 5시간 제한에 도달했습니다. 7월 14일 오후 3:39에 재설정됩니다"
@@ -2017,6 +2027,12 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const eng = new CV.ComfyVideo(cfg, log);
   const wfName = (cfg.workflows.find((w) => w.path === cfg.workflowPath) || {}).name || path.basename(cfg.workflowPath);
   log(`🎬 ${prLabel(pr)} 비디오 생성 (ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}·${wfName} · ${targets.length}개 그룹)…`);
+  // 🖥 로컬 i2v 도 같은 방어선 — 꺼져 있으면 켜고 기다린다.
+  //   ⚠ 영상은 실패해도 이미지+켄번스로 .vrew 가 나가므로 **던지지 않고** 이 편만 건너뛴다(이미지와 다른 점).
+  if (!cfg.cloud) {
+    const r = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+    if (!r.ok) { log(`⚠ ${r.message || '로컬 ComfyUI 에 연결할 수 없습니다'} — 이 편 영상은 건너뜁니다(이미지로 진행)`); return; }
+  }
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 이미지 모델 비우고 Wan 로드
   // ── 동시 i2v(클라우드만) ── i2v 는 건당 수 분이라, 여러 개를 함께 올려야 벽시계 시간이 줄어든다.
   //   imageToVideo 는 호출마다 업로드명·그래프·prompt_id·출력경로가 독립이라 동시 호출 안전(이미지와 동일 구조).
@@ -2081,6 +2097,8 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
     pushDtoUpdate();
   }
+  // 🧹 i2v 모델은 크다(LTX 22B 급) — 끝나면 반납해서 TTS·다음 단계가 쓸 자리를 만든다.
+  if (!cfg.cloud) { log('  🧹 로컬 VRAM 반납(모델 언로드) — TTS 가 쓸 자리를 비웁니다'); await eng.freeMemory(); }
 }
 
 // 비디오 생성 디스패치 — 'grok-api'=REST API, 'comfy[::path]'=ComfyUI i2v, 그 외('grok'/'grok10')=브라우저 Grok.

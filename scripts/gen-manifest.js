@@ -72,6 +72,25 @@ function walk(dir, rel, out) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+// 🔢 **버전 역행 차단** — 2026-08-21·22 에 두 번 났다(0.3.25→0.2.99, 0.3.26→0.3.0).
+//   세션이 여러 개 도는 저장소에서 버전을 "내가 아는 값 + 1" 로 쓰면 이렇게 뒤로 간다.
+//   코드는 멀쩡해도 로그의 「v0.x.x 시작」이 **어느 코드인지 못 가리키게** 되므로 여기서 막는다.
+//   되돌리기가 정말 목적이면 ALLOW_VERSION_DOWNGRADE=1 을 붙여 실행한다.
+function _verNum(v) {
+  const p = String(v || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  return (p[0] || 0) * 1e6 + (p[1] || 0) * 1e3 + (p[2] || 0);
+}
+try {
+  const prev = JSON.parse(fs.readFileSync(OUT, 'utf8'));
+  if (prev && prev.version && _verNum(pkg.version) < _verNum(prev.version) && !process.env.ALLOW_VERSION_DOWNGRADE) {
+    console.error(`\n❌ 버전이 거꾸로 갑니다: 지금 배포본 v${prev.version} → package.json v${pkg.version}`);
+    console.error(`   package.json 의 version 을 v${prev.version} 보다 큰 값으로 올린 뒤 다시 실행하세요.`);
+    console.error(`   (정말 되돌리려면: ALLOW_VERSION_DOWNGRADE=1 npm run update:publish)\n`);
+    process.exit(1);
+  }
+} catch (_) { /* 첫 배포이거나 매니페스트가 없으면 검사 생략 */ }
+
 const files = {};
 walk(ROOT, '', files);
 const depsHash = sha1(Buffer.from(JSON.stringify(pkg.dependencies || {})));
