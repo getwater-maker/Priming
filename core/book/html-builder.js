@@ -56,7 +56,9 @@ function shortenPath(t) {
 }
 function inlineMd(s, opts) {
   const hidePaths = !!(opts && opts.hidePaths);
-  let t = stripLinks(esc(s));
+  // 문단 중간에 낀 HTML 주석도 지운다 — esc 보다 **먼저**(esc 뒤엔 &lt;!-- 가 되어 못 잡는다).
+  const src = String(s == null ? '' : s).replace(/<!--[\s\S]*?-->/g, '');
+  let t = stripLinks(esc(src));
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   t = t.replace(/`([^`]+)`/g, (m, code) =>

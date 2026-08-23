@@ -249,6 +249,14 @@ function parseBookText(text, fallbackTitle) {
       continue;
     }
 
+    // HTML 주석 <!-- … --> — 원고의 작업 메모. 마크다운 규약상 출력하지 않는다.
+    //   ⚠ 코드펜스(``` 양식 예시) 처리 뒤에 둬야 그 **안의** 주석은 예시로 보존된다.
+    if (/^<!--/.test(t)) {
+      flushPara(i - 1);
+      while (i < lines.length && !/-->/.test(lines[i])) i++; // 여러 줄 주석
+      continue;
+    }
+
     // 인용 (영상용 프롬프트 줄은 무시)
     if (/^>\s?/.test(t)) {
       if (IMG_PROMPT_RE.test(t) || VID_PROMPT_RE.test(t)) { continue; }

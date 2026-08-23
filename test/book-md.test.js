@@ -171,4 +171,19 @@ ok(/L\('hidePaths'/.test(uiSrc), '조판 패널에 경로 축약 체크박스');
 ok(/hidePaths: false/.test(uiSrc), '경로 축약 기본 OFF');
 ok(typeof EB.buildEpub === 'function', 'epub-builder 로드');
 
+// ── [11] HTML 주석은 조판에서 제외 ─────────────────────────────────────────
+//   실사고: 주해_고린도전서.md 의 마지막 줄 `<!-- ↓↓↓ 여기서부터 페리코페 주해를 … ↓↓↓ -->` 가
+//   책의 마지막 쪽에 그대로 인쇄됐다. 마크다운 규약상 주석은 출력되지 않는다.
+const cm = BK.parseBookText('## 1장\n앞 문단.\n\n<!-- 작업 메모 -->\n\n뒤 문단.\n', 'x');
+ok(cm.parts[0].chapters[0].blocks.map((b) => b.text).join('|') === '앞 문단.|뒤 문단.', '한 줄 주석 제거');
+const cm2 = BK.parseBookText('## 1장\n앞.\n\n<!-- 여러\n줄\n주석 -->\n\n뒤.\n', 'x');
+ok(cm2.parts[0].chapters[0].blocks.map((b) => b.text).join('|') === '앞.|뒤.', '여러 줄 주석 제거');
+ok(HB.inlineMd('앞 <!-- 숨김 --> 뒤') === '앞  뒤', '문단 중간의 주석도 제거(esc 전에)');
+// 🔑 코드펜스(양식 예시) **안**의 주석은 예시의 일부라 보존한다
+const cm3 = BK.parseBookText('## 1장\n```\n<!-- 예시 안 주석 -->\n양식\n```\n', 'x');
+const vb = cm3.parts[0].chapters[0].blocks[0];
+ok(vb.type === 'verse' && vb.lines.join('\n').includes('<!-- 예시 안 주석 -->'), '코드펜스 안 주석은 보존');
+const cmHtml = HB.buildBookHtml(cm, { baseDir: 'D:/x' }).html;
+ok(!/작업 메모/.test(cmHtml), '조판 결과에 주석 내용이 남지 않는다');
+
 console.log(`✅ book-md.test.js — ${n} 단언 전부 통과`);
