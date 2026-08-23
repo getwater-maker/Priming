@@ -7,6 +7,89 @@
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
 
+## 🔴🐌 이미지 1장이 28초 → **498초(17.6배)** · 타임아웃 실패 — 원인 2개 (2026-08-24, v0.3.35)
+> 로이: "이미지생성에 갑자기 너무나도 오랜시간이 소비되고 있는데, 원인 설명과 해결해줘."
+> 앱 로그엔 "느리다"는 흔적이 없다(성공/실패만 찍힌다). **ComfyUI 서버 로그 + 포트 + RAM** 을 봐야 갈렸다.
+- 🔑 **다음에 "이미지가 느리다" 가 오면 이 순서로 본다**(이번에 이 순서로 30분 안에 갈렸다):
+  ① `~/.shots-maker/logs/comfy-server.log` 의 `Prompt executed in N seconds` 와 **스텝 시간(`s/it`)**
+  ② `netstat -ano | grep :818` → **8188 말고 다른 포트에 ComfyUI 가 또 떠 있나**
+  ③ `Get-CimInstance Win32_OperatingSystem` 의 **FreePhysicalMemory**(여유 RAM) ④ `nvidia-smi`.
+  ⚠ 앱 로그만 보면 `✗ G1 실패: 타임아웃 (300초)` 뿐이라 "엔진 한도·오류·결제" 를 의심하며 헛다리를 짚는다.
+
+### 🔴 원인 ① ComfyUI 가 **두 벌** 떠 있었다 — 놀면서 RAM 12.4GB 점유
+- 실측: `8188` = 우리 런처(pid 21732, 07:21 부팅 기동) · **`8189` = Comfy Desktop 이 11:29 에 띄운 것**(pid 12140).
+  8188 이 이미 점유돼 있어 그쪽이 **8189 로 밀렸다**(`portConflict:auto`) — v0.3.30 에 적어 둔 경고 그대로다.
+- 🔑 **그 서버는 큐가 `running 0 · pending 0` 인데 RAM 12.36GB · VRAM 7.3GB 를 붙들고 있었다**(= 놀면서 점유).
+  → 시스템 RAM 여유 **31.9GB 중 2.2GB**(페이지파일 7.4GB 사용).
+- 그래서 느려진 메커니즘: Krea2 는 `12,530MB Staged` **dynamic VRAM loading** — 모델을 RAM 에 올려두고 VRAM 으로
+  흘려보낸다. 올릴 RAM 이 2.2GB 뿐이니 **페이지파일로 스왑** → 스텝 2.48s/it → **27.61s/it**, 첫 스텝 **299.97초**.
+  `Prompt executed in 498.28 seconds` → 앱의 300초 타임아웃에 걸려 실패.
+- ✅ 조치: 8189 서버 + Comfy Desktop 종료. **RAM 여유 2.2 → 16.8GB · VRAM 11,513 → 1,696MB · 온도 72 → 49°C.**
+  생성이 **타임아웃 실패 → 42초 성공**으로 즉시 복귀.
+
+### 🔴 원인 ② fp8 파일이 로컬에 생기자 **자동 대체가 멈춰** 에뮬레이션 경로로 떨어졌다
+- v0.3.22 의 모델 자동 대체는 **"그 서버에 파일이 없을 때"** 만 동작한다(`pickSubstitute` 첫 줄이
+  `if (allowed.includes(current)) return null`). 그런데 로컬 UNET 목록에 **`krea2_turbo_fp8_scaled` 가 새로 생겼다**
+  (예전엔 `int8_convrot` 뿐이었다 — v0.3.22 기록) → **대체가 조용히 멈추고** 워크플로가 요구한 fp8 을 그대로 썼다.
+- 🔑 **"파일이 있다 ≠ 이 GPU 에서 빠르다."** 서버 로그가 근거를 그대로 찍는다:
+  `Native ops: asym_w4a8_int8, int8_tensorwise, convrot_w4a4` / **`emulated ops: mxfp8, float8_e5m2, float8_e4m3fn, nvfp4`**
+  → 3060(Ampere)엔 fp8 텐서코어가 없다(Ada/RTX40 부터). **fp8 은 소프트웨어 에뮬레이션.**
+- **A/B 실측**(같은 프롬프트·워크플로·2장씩): `fp8_scaled` **44.0초** vs `int8_convrot` **25.4초** = **1.73배**.
+  (int8 의 25.4초는 v0.3.22 기록 28.7초와 일치 = 원래 성능)
+- ✅ `core/comfy-models.js` 에 **`isFp8NativeGpu` · `pickFasterQuant` · `applyFasterQuant`** 신설 —
+  로컬이고 GPU 가 fp8 네이티브가 **아닐 때만** 같은 모델의 int8/convrot 판으로 바꾼다.
+  · 🔑 **기존 `baseKey`/`precToks` 를 재사용**한다 — `z_image_turbo_fp8 → z_image_int8` 같은 **모델 정체성이
+    바뀌는 대체는 여전히 거부**한다(turbo·distilled 는 정밀도 토큰이 아니다. 테스트 #16 이 이걸 단언).
+  · 🔑 **GPU 이름을 모르면 아무것도 안 한다**(fail-open). ComfyUI 가 native/emulated 목록을 API 로 안 주므로
+    이름으로 판단할 수밖에 없다 — 낯선 이름에 손대면 "조용히 다른 모델로 그린다" 가 된다.
+  · **클라우드에선 하지 않는다**(최신 GPU 는 fp8 이 더 빠르다). 되돌리려면 설정에 `preferFastQuant:false`.
+  · 판단은 **세션당 1회** — `/object_info/<노드클래스>`(수 KB, 전체 목록은 수 MB 라 안 받는다) + `/system_stats`
+    를 첫 장에서만 조회하고 기억한다(두 번째 장부터 왕복 0).
+  · 실측 로그: `⚡ NVIDIA GeForce RTX 3060 는 fp8 을 하드웨어로 못 돌립니다 — 같은 모델의 빠른 판으로: … → int8_convrot`
+    ⚠ ComfyUI 는 GPU 이름을 `cuda:0 NVIDIA GeForce RTX 3060 : cudaMallocAsync` 로 준다 → 사람이 읽을 부분만 남긴다.
+
+### ✂ 덤 — 이미지에 안 쓰이는 LLM 프롬프트 확장 가지를 걷어낸다
+- Krea2 워크플로 `image_krea2_turbo_t2i (2).json` 은 프롬프트를 **`TextGenerate`(Qwen3VL 4B, 512토큰 자기회귀)**
+  로 부풀려 CLIP 에 넣는 체인을 갖는다. 그런데 `_buildWorkflow` 는 **`CLIPTextEncode.text` 를 리터럴로 덮어쓰므로**
+  그 결과는 **아무도 쓰지 않는다.** 그런데도 **`PreviewAny`(출력 노드)** 가 그 가지를 붙들어 ComfyUI 가 실행한다.
+- ✅ `pruneToImageOutputs(graph)` — **이미지 출력 노드(SaveImage·PreviewImage)에서 역방향 도달 가능한 노드만** 남긴다.
+  실측: 22노드 → **12노드**(TextGenerate·PreviewAny·StringConcatenate·ResolutionSelector 등 10개 제거),
+  CLIP·VAE·UNET·LoRA·KSampler·SaveImage 는 전부 보존.
+  · 🔑 **제목·클래스 이름 추측에 기대지 않는다** — 이 워크플로의 스위치 제목은 `Boolean (Refine Prompt?)` 라
+    비디오 쪽 `prompt enhance` 정규식(v0.2.63)에 **안 걸린다**. 도달 가능성만 본다.
+  · 🔑 **이미지 출력 노드를 못 찾으면 아무것도 안 한다**(fail-open — 낯선 워크플로를 망치지 않는다).
+  · **프롬프트를 우리가 덮어쓴 경우에만** 걷어낸다(안 덮어썼다면 그 체인이 실제로 프롬프트를 만든다).
+- ⚠ **내 첫 진단 정정**: "장당 14초 낭비" 라고 했는데 **틀렸다.** 서버 로그를 보면 `Generating tokens` 는
+  **첫 장에만** 찍힌다 — TextGenerate 의 **입력이 매번 같아서**(우리가 CLIP 을 덮어쓰므로 그 앞단 문자열은 불변)
+  **ComfyUI 노드 캐시가 적중**한다. 즉 실제 이득은 **첫 장 약 14초 + 캐시 메모리**뿐이다.
+  프루닝 전후 warm 시간이 42.5초로 같은 것이 그 증거다(프루닝만으로는 안 빨라진다 — 원인 ②가 본체였다).
+
+### 🔎 재발 방지 — `core/comfy-perf.js` 신설(로이 승인)
+- 로컬 생성 직전(`ensureLocalComfy` 뒤, VRAM 정리 앞)에 **이미지·비디오 두 경로 모두** 진단해 로그로 알린다:
+  · **`scanRivals`** — 우리 포트 +1~+6 에 ComfyUI 가 또 떠 있는지(`/system_stats` 의 `comfyui_version` 으로 확인).
+    ⚠ **우리 포트는 스캔하지 않는다**(자기 자신을 신고하면 안 된다 — 테스트 #32).
+  · **RAM 여유 8GB 미만** 경고(실측 기준선: 2.2GB=17.6배 느림 / 16.8GB=정상).
+  · 문구는 **무엇을 해야 하는지**까지 적는다(`… 로컬로 만들 거라면 그 창을 닫으세요`).
+- 🔑 **절대 막지 않는다 — 경고만 한다.** 오판으로 작업을 멈추게 하는 것이 더 나쁘다. 진단이 터져도 `try/catch` 로 삼킨다.
+
+### 검증
+- `npm run test:comfy` = 모델 41 + **`test/comfy-perf.test.js` 43 신설** + 파이프라인 30 + GPU 레인 14 + 2분할 E2E 69.
+  🔑 **A/B 역검증 2건**(둘 다 실제로 돌렸다): ⓐ `isFp8NativeGpu` 를 항상 null 로 무력화하면 **#1·#10·#19 실패**
+  ⓑ `pruneToImageOutputs` 를 no-op 으로 만들면 **#23·#26·#27·#28 실패**(39/43).
+- 회귀: **makeall 무음 E2E 18/18**(main.js 를 만졌으므로 필수) · comfylaunch 46/46 · visual 14+10+13+7.
+- **실측 전후**(같은 PC·같은 워크플로·warm):
+  | 상태 | 장당 |
+  |---|---|
+  | 사고 당시(ComfyUI 두 벌) | **300초 타임아웃 실패** |
+  | 중복 서버만 제거 | 42.5초 |
+  | + fp8 → int8 자동 교체 | **23.2초** |
+- ⚠ **로이가 알아 둘 것**: 로컬로 이미지를 만들 거면 **Comfy Desktop 창을 열지 않는다.** 열면 8189 로 서버가 하나 더
+  떠 RAM·VRAM 을 먹는다(부팅 자동 실행이 이미 8188 을 쥐고 있다). 이제는 앱이 그 상황을 로그로 알려 준다.
+- ⚠ **설정 확인 권장**: `comfy-image-config.json` 의 `activeServer` 가 `"comfy.org"` 인데 `cloud:false`·
+  `baseUrl:127.0.0.1:8188` 이라 **실제로는 로컬로 나간다**. `activeServer` 는 v0.3.22 이후 **표시용 라벨일 뿐**이고
+  실제 전송은 `cloud` 가 정한다. 클라우드로 보내려면 헤더 「② 이미지」 드롭다운에서 **☁** 를 고를 것
+  (클라우드는 장당 12~18초 — 로컬 23.2초보다 빠르지만 크레딧을 쓴다).
+
 ## 💬 출판 — HTML 주석이 본문에 인쇄되던 것 + "내용이 끝까지 안 나온다" 조사 (2026-08-23, v0.3.34)
 > 로이: 「고린도전서 주해」 원고(`주해_고린도전서.md`) 미리보기 캡처 + "내용이 끝까지 나오지 않네".
 - 🔴 **고친 것 — `<!-- … -->` 가 본문 문단으로 인쇄됐다.** 이 원고의 **마지막 줄**이

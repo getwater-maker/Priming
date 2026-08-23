@@ -116,6 +116,41 @@ function _netMsg(e) {
   return `${msg} [${code}]${ko ? ' — ' + ko : ''}`;
 }
 
+// 이미지 출력에 기여하지 않는 가지를 그래프에서 걷어낸다.
+//   🔑 왜 필요한가(2026-08-24 실측): Krea2 워크플로는 프롬프트를 `TextGenerate`(LLM 프롬프트 확장, Qwen3VL 4B)
+//   로 부풀린 뒤 CLIP 에 넣는 체인을 갖고 있다. 그런데 우리는 `CLIPTextEncode.text` 를 **리터럴로 덮어쓰므로**
+//   그 확장 결과는 **아무도 쓰지 않는다**. 그런데도 `PreviewAny`(출력 노드)가 그 가지를 붙들고 있어
+//   ComfyUI 가 매 장 512토큰 자기회귀 생성을 돌린다 → **장당 약 14초(33%)가 순수 낭비**였다.
+//   ⚠ 판정은 **이미지 출력 노드에서 역방향 도달 가능성**으로만 한다 — 노드 제목·클래스 이름 추측에 기대지 않는다
+//     (실측: 이 워크플로의 스위치 제목은 `Boolean (Refine Prompt?)` 라 비디오 쪽 'prompt enhance' 정규식에 안 걸린다).
+//   ⚠ 이미지 출력 노드를 하나도 못 찾으면 **아무것도 건드리지 않는다**(fail-open — 낯선 워크플로를 망치지 않는다).
+function pruneToImageOutputs(graph) {
+  const ids = Object.keys(graph);
+  const isImageOut = (id) => /^(SaveImage|PreviewImage|SaveImageWebsocket|SaveAnimatedWEBP|SaveAnimatedPNG)/i
+    .test(String(graph[id].class_type || ''));
+  const roots = ids.filter(isImageOut);
+  if (!roots.length) return { removed: [], summary: '', skipped: 'no-image-output' };
+  // 역방향 BFS — inputs 의 [nodeId, slot] 링크만 따라간다.
+  const keep = new Set(roots);
+  const queue = roots.slice();
+  while (queue.length) {
+    const cur = queue.shift();
+    const inp = (graph[cur] && graph[cur].inputs) || {};
+    for (const k of Object.keys(inp)) {
+      const v = inp[k];
+      if (Array.isArray(v) && typeof v[0] === 'string' && graph[v[0]] && !keep.has(v[0])) {
+        keep.add(v[0]); queue.push(v[0]);
+      }
+    }
+  }
+  const removed = ids.filter((id) => !keep.has(id));
+  const labels = removed.map((id) => String((graph[id] && graph[id].class_type) || id));
+  for (const id of removed) delete graph[id];
+  const head = labels.slice(0, 4).join(', ');
+  const summary = labels.length > 4 ? head + ' 외 ' + (labels.length - 4) + '개' : head;
+  return { removed, summary, kept: keep.size };
+}
+
 class ComfyImage {
   constructor(cfg = {}, logger = () => {}) {
     this.cloud = !!cfg.cloud;
@@ -131,6 +166,7 @@ class ComfyImage {
     this.widthNodeId = cfg.widthNodeId || '';
     this.heightNodeId = cfg.heightNodeId || '';
     this.sendDims = cfg.sendDims !== false;
+    this.preferFastQuant = cfg.preferFastQuant !== false;   // 이 GPU 에서 느린 fp8 판을 같은 모델의 빠른 판으로 (로컬 전용)
     this.timeoutSec = Number(cfg.timeoutSec) > 0 ? Number(cfg.timeoutSec) : 300;
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
@@ -174,12 +210,13 @@ class ComfyImage {
     let wf = JSON.parse(fs.readFileSync(this.workflowPath, 'utf8'));
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. ComfyUI 에서 "저장(API 포맷)"으로 저장하세요.');
     const graph = JSON.parse(JSON.stringify(wf));
+    let promptFixed = false;
     if (positive) {
       // CLIPTextEncode 계열(FLUX/Krea 포함) 우선 → 없으면 text 문자열 입력 가진 첫 노드(범용 폴백)
       const pId = this.promptNodeId
         || Object.keys(graph).find((id) => /CLIPTextEncode/i.test(graph[id].class_type || '') && 'text' in (graph[id].inputs || {}))
         || Object.keys(graph).find((id) => typeof (graph[id].inputs || {}).text === 'string');
-      if (pId && graph[pId] && graph[pId].inputs) graph[pId].inputs.text = String(positive);
+      if (pId && graph[pId] && graph[pId].inputs) { graph[pId].inputs.text = String(positive); promptFixed = true; }
     }
     if (this.sendDims) {
       const dim = this._dims(aspect);
@@ -198,6 +235,11 @@ class ComfyImage {
       const rnd = Math.floor(Math.random() * 1e15);
       if (typeof inp.seed === 'number') inp.seed = rnd;
       if (typeof inp.noise_seed === 'number') inp.noise_seed = rnd;
+    }
+    // 프롬프트를 우리가 직접 넣었을 때만 걷어낸다 — 안 넣었다면 확장 체인이 실제로 프롬프트를 만든다.
+    if (promptFixed) {
+      const pr = pruneToImageOutputs(graph);
+      if (pr.removed.length) this.log('[Comfy] ✂ 이미지에 안 쓰이는 노드 ' + pr.removed.length + '개 건너뜀 (' + pr.summary + ') — 프롬프트는 앱이 직접 넣습니다');
     }
     return graph;
   }
@@ -287,6 +329,74 @@ class ComfyImage {
     fs.writeFileSync(out, Buffer.from(await r.arrayBuffer()));
     return out;
   }
+  // 이 서버가 가진 모델 파일 목록을 **필요한 노드 종류만** 조회한다(세션당 1회 기억).
+  //   🔑 클라우드 `/object_info` 전체는 수 MB 라 받지 않는다 — 노드 종류별 조회는 수 KB 다.
+  async _modelLists(graph) {
+    if (this._availMemo) return this._availMemo;
+    const classes = new Set();
+    for (const id of Object.keys(graph)) {
+      const inp = graph[id].inputs || {};
+      if (Object.values(inp).some((v) => typeof v === 'string' && /[.](safetensors|sft|ckpt|pt|pth|bin|gguf)$/i.test(v))) {
+        if (graph[id].class_type) classes.add(graph[id].class_type);
+      }
+    }
+    const avail = {};
+    for (const c of classes) {
+      try {
+        const r = await fetch(this._url('/object_info/' + encodeURIComponent(c)), { headers: this._headers() });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const req = (((j || {})[c] || {}).input || {}).required || {};
+        for (const k of Object.keys(req)) {
+          const spec = req[k];
+          if (Array.isArray(spec) && Array.isArray(spec[0]) && spec[0].length) avail[k] = spec[0];
+        }
+      } catch (_) { /* 조회 실패는 무시 — 아무것도 바꾸지 않는다 */ }
+    }
+    this._availMemo = avail;
+    return avail;
+  }
+  // 이 GPU 이름(로컬 서버가 알려준다)을 한 번만 알아둔다.
+  async _gpuName() {
+    if (this._gpuNameMemo !== undefined) return this._gpuNameMemo;
+    this._gpuNameMemo = null;
+    try {
+      const r = await fetch(this._url('/system_stats'), { headers: this._headers() });
+      if (r.ok) { const j = await r.json(); const raw = ((j.devices || [])[0] || {}).name || '';
+        // ComfyUI 는 'cuda:0 NVIDIA GeForce RTX 3060 : cudaMallocAsync' 처럼 준다 — 사람이 읽을 이름만 남긴다.
+        this._gpuNameMemo = raw.replace(/^cuda:d+s*/i, '').replace(/s*:s*cudaw*s*$/i, '').trim() || null; }
+    } catch (_) {}
+    return this._gpuNameMemo;
+  }
+  /**
+   * fp8 판을 이 GPU 에서 빠른 int8/convrot 판으로 바꾼다(로컬 전용).
+   *   🔴 왜: fp8 파일이 로컬에 **있으면** 기존 자동 대체가 멈춘다 — 그런데 Ampere(3060)에서 fp8 은
+   *   에뮬레이션이라 int8 보다 느리다. 실측 44.0초 → 25.4초(1.73배). 자세한 근거는 comfy-models.js 참조.
+   *   ⚠ 판단은 세션당 1회. 정상 경로에 왕복을 더하지 않기 위해 **첫 장에서만** 조회한다.
+   */
+  async _preferFastQuant(graph) {
+    if (this.cloud || this.preferFastQuant === false) return;
+    const CM = require('./comfy-models');
+    if (this._fastQuantMemo) {                      // 두 번째 장부터는 기억한 값만 적용(왕복 0)
+      for (const nodeId of Object.keys(graph)) {
+        const inp = (graph[nodeId] || {}).inputs || {};
+        for (const input of Object.keys(inp)) {
+          const to = this._fastQuantMemo[nodeId + '|' + input];
+          if (to && typeof inp[input] === 'string') inp[input] = to;
+        }
+      }
+      return;
+    }
+    const gpu = await this._gpuName();
+    if (CM.isFp8NativeGpu(gpu) !== false) { this._fastQuantMemo = {}; return; }   // 네이티브·불명 → 손대지 않음
+    const avail = await this._modelLists(graph);
+    const r = CM.applyFasterQuant(graph, avail, gpu);
+    this._fastQuantMemo = {};
+    for (const c of r.changes) {
+      this._fastQuantMemo[c.nodeId + '|' + c.input] = c.to;
+      this.log(`[Comfy] ⚡ ${gpu} 는 fp8 을 하드웨어로 못 돌립니다 — 같은 모델의 빠른 판으로: ${c.from} → ${c.to}`);
+    }
+  }
   // 텍스트 → 이미지 1장. { success:true, imagePath } | { success:false, error }
   async textToImage({ prompt, aspect, outputPath, abortSignal }) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 에서 지정하세요.' };
@@ -299,6 +409,7 @@ class ComfyImage {
       try {
         if (!(await this.health())) throw new Error(`ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}`);
         const graph = this._buildWorkflow(prompt, aspect);
+        await this._preferFastQuant(graph);
         const promptId = await this._queueFixing(graph);
         const img = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
         const out = await this._download(img, outputPath);
@@ -314,4 +425,4 @@ class ComfyImage {
   }
 }
 
-module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg };
+module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg, pruneToImageOutputs };

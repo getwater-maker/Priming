@@ -1804,6 +1804,12 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   if (!cfg.cloud) {
     const r = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log: logger });
     if (!r.ok) throw new Error(r.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    // 🔎 느려질 조건을 **미리** 알린다 — 2026-08-24 사고(ComfyUI 두 벌 → 장당 28초가 498초)는
+    //   앱 로그만 봐서는 원인이 안 보여 한참 헤맸다. 막지 않고 경고만 한다.
+    try {
+      const d = await require('./core/comfy-perf').diagnoseLocal({ baseUrl: eng.baseUrl });
+      for (const w of d.warnings) logger('  ' + w);
+    } catch (_) {}
   }
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
@@ -1970,6 +1976,10 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   if (!cfg.cloud) {
     const r = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
     if (!r.ok) { log(`⚠ ${r.message || '로컬 ComfyUI 에 연결할 수 없습니다'} — 이 편 영상은 건너뜁니다(이미지로 진행)`); return; }
+    try {
+      const d = await require('./core/comfy-perf').diagnoseLocal({ baseUrl: eng.baseUrl });
+      for (const w of d.warnings) log('  ' + w);
+    } catch (_) {}
   }
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 이미지 모델 비우고 Wan 로드
   // ── 동시 i2v(클라우드만) ── i2v 는 건당 수 분이라, 여러 개를 함께 올려야 벽시계 시간이 줄어든다.

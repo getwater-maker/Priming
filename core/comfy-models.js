@@ -120,4 +120,78 @@ function explain(nodeErrors, cloud, kind) {
     + ` → 헤더 「${hdr}」 드롭다운에서 ${cloud ? '🖥 로컬' : '☁ 클라우드'} 로 바꾸거나, 그 파일을 ${where} 에 설치하세요.`;
 }
 
-module.exports = { baseKey, precToks, pickSubstitute, collectFixes, applyModelFixes, applyRemembered, explain, MODEL_EXT };
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * 이 GPU 에서 **느린 양자화 판**을 같은 모델의 빠른 판으로 바꾼다 (2026-08-24).
+ *
+ * 🔴 실사고: 사용자가 `krea2_turbo_fp8_scaled.safetensors` 를 로컬에 내려받은 순간
+ *   위의 자동 대체(`pickSubstitute`)가 **"파일이 있으니 대체 불필요"** 로 판단해 멈췄고,
+ *   RTX 3060 에서 **에뮬레이션되는 fp8** 경로로 떨어져 이미지가 느려졌다.
+ *   실측 A/B(같은 프롬프트·같은 워크플로, 3060): **fp8_scaled 44.0초 vs int8_convrot 25.4초 = 1.73배**.
+ *   (ComfyUI 서버 로그가 근거를 그대로 찍는다 — `Native ops: … int8_tensorwise, convrot_w4a4`,
+ *    `emulated ops: mxfp8, float8_e5m2, float8_e4m3fn, nvfp4`)
+ *
+ * 🔑 "파일이 있다 ≠ 이 GPU 에서 빠르다." fp8 텐서코어는 **Ada(RTX 40)/Blackwell(50)·H100 이상**만 있다.
+ *   Ampere(30xx·A100) 이하에서는 fp8 이 소프트웨어 에뮬레이션이라 int8 보다 느리다.
+ * ⚠ 판단은 **GPU 이름**으로 한다(ComfyUI 가 native/emulated 목록을 API 로 주지 않는다). 모르는 이름은
+ *   **건드리지 않는다**(fail-open) — 잘못 바꾸면 "조용히 다른 모델로 그린다" 가 된다.
+ * ⚠ 로컬에서만 쓴다. 클라우드 GPU 는 최신이라 fp8 이 오히려 빠르다.
+ * ⚠ 되돌리려면: 워크플로에서 원하는 판을 직접 고르고 `preferFastQuant:false` 를 설정에 넣으면 된다.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+// fp8 을 하드웨어로 처리하는 GPU 인가. 모르면 null(= 손대지 않는다).
+function isFp8NativeGpu(gpuName) {
+  const s = String(gpuName || '').toLowerCase();
+  if (!s) return null;
+  // Ada / Blackwell / Hopper 계열 = fp8 네이티브
+  if (/\brtx\s*(40|50)\d{2}\b/.test(s) || /\b(40|50)\d{2}\s*(ti|super)?\b/.test(s) && /rtx/.test(s)) return true;
+  if (/\b(h100|h200|l40|l4|gh200|b100|b200|rtx\s*(pro\s*)?(4500|5000|6000)\s*(ada|blackwell))\b/.test(s)) return true;
+  if (/\b(ada|blackwell|hopper)\b/.test(s)) return true;
+  // Ampere 이하 = 에뮬레이션
+  if (/\brtx\s*(20|30)\d{2}\b/.test(s) || /\b(a100|a10|a40|a6000|v100|t4|gtx)\b/.test(s)) return false;
+  return null;   // 낯선 이름 — 판단 보류
+}
+
+const FP8_TOK = /^(fp8|mxfp8|e4m3fn|e5m2|nvfp4|fp4)$/i;      // 에뮬레이션되는 판
+const FAST_TOK = /^(int8|int4|convrot)$/i;                   // Ampere 에서 네이티브
+
+// 같은 모델의 더 빠른 판을 고른다. 바꿀 이유가 없으면 null.
+function pickFasterQuant(current, allowed, gpuName) {
+  if (!current || !Array.isArray(allowed) || !allowed.length) return null;
+  if (isFp8NativeGpu(gpuName) !== false) return null;         // 네이티브거나 모르면 그대로
+  const toks = precToks(current);
+  if (!toks.some((t) => FP8_TOK.test(t))) return null;         // fp8 판이 아니면 볼 일 없다
+  if (toks.some((t) => FAST_TOK.test(t))) return null;         // 이미 int8 계열이 섞여 있으면 손대지 않는다
+  const key = baseKey(current);
+  if (!key) return null;
+  const cands = allowed.filter((a) => typeof a === 'string' && MODEL_EXT.test(a)
+    && a !== current && baseKey(a) === key && precToks(a).some((t) => FAST_TOK.test(t)));
+  if (!cands.length) return null;
+  // convrot(가장 빠른 실측 판) 우선 → 그다음 이름 짧은 것
+  cands.sort((a, b) => (/convrot/i.test(b) - /convrot/i.test(a)) || (a.length - b.length));
+  return cands[0];
+}
+
+/**
+ * 그래프의 모델 입력들을 이 GPU 에서 빠른 판으로 바꾼다.
+ * @param available { [inputName]: string[] }  그 서버가 가진 파일 목록(예: { unet_name: [...] })
+ * @returns {{changes: Array<{nodeId,input,from,to}>}}
+ */
+function applyFasterQuant(graph, available, gpuName) {
+  const changes = [];
+  if (!graph || !available || isFp8NativeGpu(gpuName) !== false) return { changes };
+  for (const nodeId of Object.keys(graph)) {
+    const inp = (graph[nodeId] || {}).inputs || {};
+    for (const input of Object.keys(inp)) {
+      const cur = inp[input];
+      if (typeof cur !== 'string' || !MODEL_EXT.test(cur)) continue;
+      const list = available[input];
+      if (!Array.isArray(list) || !list.length) continue;
+      const to = pickFasterQuant(cur, list, gpuName);
+      if (to) { inp[input] = to; changes.push({ nodeId, input, from: cur, to }); }
+    }
+  }
+  return { changes };
+}
+
+module.exports = { baseKey, precToks, pickSubstitute, collectFixes, applyModelFixes, applyRemembered, explain, MODEL_EXT, isFp8NativeGpu, pickFasterQuant, applyFasterQuant };
