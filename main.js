@@ -1560,7 +1560,19 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !hasVisual(g));
     if (!targets.length) { if (loopGuard === 0) logger('[Flow] 생성할 그룹 없음 (이미 이미지/영상 있음)'); break; }
     const acc = nextAcc();
-    if (!acc) { logger('⚠ 모든 Flow 계정 시도/소진 — 남은 이미지는 순환의 다음 엔진으로'); break; }
+    if (!acc) {
+      logger('⚠ 모든 Flow 계정 시도/소진 — 남은 이미지는 순환의 다음 엔진으로');
+      // 🔑 왜 각 계정을 못 쓰는지 적는다 — 이게 없으면 쿨다운을 "한도 소진" 으로 오해한다(2026-08-24).
+      try {
+        for (const a of FlowAccounts.list().accounts) {
+          const why = a.cooling ? `쉬는 중 — ${new Date(a.coolUntil).toLocaleTimeString('ko-KR')} 이후 재사용`
+            : (a.used >= cap ? '오늘 한도 도달'
+            : (tried.has(a.id) ? '이번에 시도했으나 0장' : '사용 가능'));
+          logger(`   · ${a.label}: ${why} (오늘 ${a.used}/${cap})`);
+        }
+      } catch (_) {}
+      break;
+    }
     tried.add(acc.id);
     if (++loopGuard > acctTotal + 2) { logger('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
     logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${cap}) · 대상 ${targets.length}장 · 모델 ${flowImageModel}`);
@@ -1590,6 +1602,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     };
     const poll = setInterval(() => { if (mapOnce(false) > 0) pushDtoUpdate(); }, 2500);
     let res = null;
+    let noAccess = false;   // 이 계정이 Flow 를 아예 못 쓰는가(구독 없음)
     try {
       res = await eng.run({
         paragraphs, customPrompts, mediaType: 'image', model: flowImageModel,
@@ -1597,7 +1610,12 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
         withSubtitle: false, vrewOnly: false, skipVrew: true,
         antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
       });
-    } catch (e) { logger(`[Flow] ${acc.label} 실행 오류: ${e.message}`); }
+    } catch (e) {
+      // flowNoAccess = 그 계정에 Google AI 구독이 없어 Flow 앱이 아니라 소개 페이지가 열린 경우
+      //   (flow-engine._diagnoseNoProjectButton 이 세운다). 계정을 더 추가해도 해결되지 않는다.
+      if (e && e.flowNoAccess) { noAccess = true; logger(`⛔ Flow 계정 "${acc.label}" — ${e.message}`); }
+      else logger(`[Flow] ${acc.label} 실행 오류: ${e.message}`);
+    }
     finally { clearInterval(poll); }
 
     const made = mapOnce(true);
@@ -1609,7 +1627,11 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
 
     // 한도(rateExhausted)·차단(비정상활동) → 이 계정 오늘 쉬게(rest) 하고 다음 계정으로.
     //   0장(생성 실패, 예: Flow UI 셀렉터 문제)은 계정 탓이 아닐 수 있어 하루 캡(rest)은 안 하고 이번 호출만 건너뜀.
-    if (res && res.rateExhausted) {
+    if (noAccess) {
+      // 구독이 생기기 전엔 몇 번을 시도해도 같다 → 오늘은 쉬게 한다(계정을 지우지는 않는다).
+      FlowAccounts.cooldown(acc.id, 12 * 60);
+      logger(`   → 이 계정은 12시간 쉽니다. 구독을 넣으면 바로 다시 쓰입니다.`);
+    } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30); // 하루 캡 대신 30분 쿨다운 — 0장이어도 계정을 하루 종일 태우지 않음
       logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 30분 쿨다운 후 재사용, 지금은 다음 계정으로 순환`);
     } else if (made === 0) {

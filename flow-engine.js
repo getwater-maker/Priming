@@ -2064,15 +2064,78 @@ class FlowAutomator {
     }
   }
 
+  /**
+   * Flow 홈에서 「새 프로젝트」를 눌러 프로젝트 안으로 들어간다.
+   *
+   * 🔴 2026-08-24 실사고: 이 함수가 **버튼을 못 찾으면 조용히 아무것도 안 했다.** 그러면 홈(프로젝트 목록)에
+   *   머문 채 다음 단계로 넘어가고, 프롬프트 입력칸이 홈에는 없으므로
+   *   `locator.waitFor: Timeout 10000ms exceeded ... div[role="textbox"]` 로만 실패했다.
+   *   사람이 읽어도 원인을 알 수 없는 메시지라 "Flow UI 가 바뀌었나" 를 한참 의심하게 됐다.
+   *   → 이제 **왜 못 들어갔는지 갈라서** 알린다.
+   *
+   * 🔑 가장 흔한 원인은 UI 변경이 아니라 **그 계정에 Google AI 구독이 없는 것**이다.
+   *   실측: 구독 없는 계정으로 같은 주소에 가면 앱이 아니라 **소개(마케팅) 페이지**가 열린다
+   *   (`Try in Google Flow` 버튼 9개 · `Pricing` · "Google AI 구독을 살펴보세요"). 프로젝트 목록도
+   *   「새 프로젝트」도 입력칸도 없다. 계정을 더 추가해도 구독이 없으면 절대 안 된다.
+   */
   async _createNewProject() {
     const btn = await this.page.$('button:has-text("새 프로젝트")') ||
                 await this.page.$('button:has-text("New project")');
-    if (btn && await btn.isVisible()) {
+    if (btn && await btn.isVisible().catch(() => false)) {
       await btn.click();
       await this.page.waitForTimeout(3000);
       await this._dismissBanners();
+      // 실제로 프로젝트 안으로 들어갔는지 확인 — 여기서 걸러야 다음 단계가 헛되게 10초를 기다리지 않는다.
+      const inProject = this.page.url().includes('/project/');
+      if (!inProject) {
+        await this.page.waitForTimeout(3000);   // 느린 전환 한 번 더 기다린다
+        if (!this.page.url().includes('/project/')) {
+          this.log('[Flow] ⚠ 「새 프로젝트」를 눌렀지만 프로젝트 화면으로 넘어가지 않았습니다 — 그대로 진행합니다');
+        }
+      }
+      return;
     }
+    // ── 버튼이 없다. 왜인지 갈라서 알린다. ──
+    const diag = await this._diagnoseNoProjectButton();
+    const err = new Error(diag.message);
+    if (diag.noAccess) err.flowNoAccess = true;    // main 이 이 계정을 길게 쉬게 하는 데 쓴다
+    throw err;
   }
+
+  /** 「새 프로젝트」가 없는 이유를 화면에서 읽어 사람 말로 만든다. */
+  async _diagnoseNoProjectButton() {
+    let sig = { landing: false, login: false, text: '', url: '' };
+    try {
+      sig = await this.page.evaluate(() => {
+        const t = (document.body.innerText || '').replace(/\s+/g, ' ');
+        return {
+          // 소개(마케팅) 페이지 신호 — 구독 없는 계정이 여기로 떨어진다
+          landing: /Try in Google Flow|Create with Google Flow|구독을 살펴보|subscription tier|Pricing/i.test(t)
+                   && !/새 프로젝트|New project/i.test(t),
+          login: /로그인|Sign in to|계정을 선택/i.test(t) && !/새 프로젝트/i.test(t),
+          text: t.slice(0, 200),
+          url: location.href,
+        };
+      });
+    } catch (_) {}
+    if (sig.landing) {
+      return {
+        noAccess: true,
+        message: '이 계정은 Flow 를 쓸 수 없습니다 — Google AI 구독(Pro/Ultra)이 없어 소개 페이지만 열립니다.'
+          + ' 계정을 더 추가해도 구독이 없으면 생성되지 않습니다.'
+          + ' 그 계정에서 구독하거나, 헤더 「② 이미지」를 🖥 ComfyUI 로컬(무료)·Genspark 로 바꾸세요.',
+      };
+    }
+    if (sig.login) {
+      return { noAccess: false, message: 'Flow 로그인이 풀렸습니다 — ⚙ 계정에서 「🔑 로그인」을 다시 눌러 주세요.' };
+    }
+    return {
+      noAccess: false,
+      message: 'Flow 홈에서 「새 프로젝트」 버튼을 못 찾았습니다(UI 변경 가능). '
+        + 'URL: ' + (sig.url || this.page.url()) + ' · 화면: ' + (sig.text || '(읽지 못함)'),
+    };
+  }
+
 
   // ─── 에이전트 모드 OFF 보장 ───
   // Flow 의 "에이전트" 토글이 켜져 있으면(aria-pressed="true") 자동 이미지 생성이

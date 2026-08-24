@@ -45,13 +45,18 @@ function _cooling(c, id) {
   const e = c.counts && c.counts[id];
   return !!(e && e.date === _today() && e.cooldownUntil && Date.now() < e.cooldownUntil);
 }
+// 쿨다운 해제 시각(ms) — 쿨다운 중이 아니면 0. 로그에 "언제 풀리는지" 를 적기 위해.
+function _coolUntil(c, id) {
+  const e = c.counts && c.counts[id];
+  return (e && e.date === _today() && e.cooldownUntil && Date.now() < e.cooldownUntil) ? e.cooldownUntil : 0;
+}
 // 사용 가능 = 오늘 한도 미도달 + 쿨다운 아님.
 function _available(c, id) {
   return countToday(c, id) < c.dailyCap && !_cooling(c, id);
 }
 function list() {
   const c = load();
-  return { dailyCap: c.dailyCap, accounts: _accounts(c).map((a) => ({ ...a, used: countToday(c, a.id), available: _available(c, a.id), cooling: _cooling(c, a.id) })) };
+  return { dailyCap: c.dailyCap, accounts: _accounts(c).map((a) => ({ ...a, used: countToday(c, a.id), available: _available(c, a.id), cooling: _cooling(c, a.id), coolUntil: _coolUntil(c, a.id) })) };
 }
 function add(label) {
   const c = load();
@@ -99,7 +104,10 @@ function pickNext(excludeIds) {
   const skip = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
   const idx = accs.findIndex((a) => a.id === c.lastUsedId);
   const ordered = idx >= 0 ? [...accs.slice(idx + 1), ...accs.slice(0, idx + 1)] : accs;
-  return ordered.find((a) => _available(c, a.id) && !skip.has(a.id)) || null;
+  const a = ordered.find((x) => _available(c, x.id) && !skip.has(x.id));
+  // ⚠ 원본 객체({id,label})를 그대로 돌려주면 호출부의 `acc.used` 가 undefined 가 된다
+  //   (실측 로그: `🔑 Flow 계정: 계정 1 (오늘 undefined/100)`). list() 와 같은 모양으로 맞춘다.
+  return a ? { ...a, used: countToday(c, a.id), available: true, cooling: false, coolUntil: 0 } : null;
 }
 // 오늘 사용 가능한 첫 계정 반환(한도 미도달 + 쿨다운 아님). 전부 불가면 null.
 function pickActive() {
@@ -131,4 +139,5 @@ function resetToday(id) {
   return list();
 }
 
-module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickNext, pickActive, cooldown, resetToday, FILE };
+module.exports = {
+  coolUntil: (id) => _coolUntil(load(), id), load, save, list, add, remove, rename, setCap, markUsed, pickNext, pickActive, cooldown, resetToday, FILE };
