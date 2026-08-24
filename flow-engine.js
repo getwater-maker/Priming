@@ -387,8 +387,9 @@ class FlowAutomator {
     {
       const _pid = (config && config.profileId) || 'default';
       const _pc = (limitCheck && Number.isFinite(limitCheck.profileCount)) ? limitCheck.profileCount : 0;
-      if (PER_PROFILE_DAILY_CAP > 0 && _pc >= PER_PROFILE_DAILY_CAP) {
-        this.log(`🛑 계정 ${_pid} 오늘 ${_pc}회 — 계정당 하루 한도(${PER_PROFILE_DAILY_CAP}회) 도달. 이 계정은 휴식하고 다음 프로필로 넘어갑니다 (구글 차단 예방).`);
+      const _cap = this._perProfileCap();
+      if (_cap > 0 && _pc >= _cap) {
+        this.log(`🛑 계정 ${_pid} 오늘 ${_pc}장 — 계정당 하루 한도(${_cap}장) 도달. 이 계정은 휴식하고 다음 프로필로 넘어갑니다 (구글 차단 예방).`);
         try {
           this.send('flow-rate-exhausted', {
             profileId: _pid,
@@ -399,7 +400,14 @@ class FlowAutomator {
         } catch (_) {}
         this._rateExhaustedFlag = true;
         this.send('done', { success: 0, total: paragraphs.length, outputDir, rateExhausted: true });
-        return;
+        // 🔑 반드시 **객체**를 돌려준다 — main 이 res.reason 으로 "하루 한도" 를 구분해
+        //   정확한 로그를 남기고 그 계정을 쉬게 한다. 예전 `return;` 은 res=undefined 였다.
+        return {
+          success: 0, total: paragraphs.length, outputDir,
+          rateExhausted: true, reason: 'daily-limit',
+          profileCount: _pc, dailyCap: _cap, profileId: _pid,
+          completedNums: [], remainingNums: paragraphs.map((_, j) => j + 1),
+        };
       }
     }
 
@@ -709,13 +717,14 @@ class FlowAutomator {
 
       // 계정당 하루 한도 — 작업 '중간'에도 검사 (run 시작 시에만 보면 세션 중 초과 가능).
       //   성공 카운트는 _saveImage 에서 증가하므로 매 그룹 진입 시 최신값으로 재확인.
-      if (PER_PROFILE_DAILY_CAP > 0 && this.antiDetect &&
+      const _midCap = this._perProfileCap();
+      if (_midCap > 0 && this.antiDetect &&
           typeof this.antiDetect.profileCount === 'function' &&
-          this.antiDetect.profileCount() >= PER_PROFILE_DAILY_CAP) {
+          this.antiDetect.profileCount() >= _midCap) {
         const _pid = this._currentProfileId || 'default';
         const remainingNums = [];
         for (let j = i; j < paragraphs.length; j++) remainingNums.push(j + 1);
-        this.log(`🛑 계정 ${_pid} 오늘 성공 ${this.antiDetect.profileCount()}장 — 작업 중 계정당 하루 한도(${PER_PROFILE_DAILY_CAP}장) 도달. 남은 ${remainingNums.length}개는 다음 프로필로 폴백 (구글 차단 예방).`);
+        this.log(`🛑 계정 ${_pid} 오늘 성공 ${this.antiDetect.profileCount()}장 — 작업 중 계정당 하루 한도(${_midCap}장) 도달. 남은 ${remainingNums.length}개는 다음 프로필로 폴백 (구글 차단 예방).`);
         this.send('flow-rate-exhausted', {
           profileId: _pid,
           completedNums: this._completedNums ? this._completedNums.slice() : [],
@@ -2078,6 +2087,17 @@ class FlowAutomator {
    *   (`Try in Google Flow` 버튼 9개 · `Pricing` · "Google AI 구독을 살펴보세요"). 프로젝트 목록도
    *   「새 프로젝트」도 입력칸도 없다. 계정을 더 추가해도 구독이 없으면 절대 안 된다.
    */
+  /**
+   * 계정(프로필)당 하루 한도. **⚙ 설정 → 👤 계정의 「일일 한도」 값이 정본**이고
+   * 모듈 상단 PER_PROFILE_DAILY_CAP 은 그 값이 안 넘어올 때의 폴백일 뿐이다.
+   *   🔴 2026-08-24: 예전엔 상수만 봤다 → 사용자가 UI 에서 「0=무제한」으로 바꿔도
+   *   여기서 45 로 막혀 "무제한이 안 먹는다" 가 됐다(한도 칸이 하나인데 판정이 두 곳).
+   * @returns {number} 0 이면 무제한
+   */
+  _perProfileCap() {
+    const v = this.antiDetect && this.antiDetect.dailyLimit;
+    return Number.isFinite(v) ? v : PER_PROFILE_DAILY_CAP;
+  }
   async _createNewProject() {
     const btn = await this.page.$('button:has-text("새 프로젝트")') ||
                 await this.page.$('button:has-text("New project")');

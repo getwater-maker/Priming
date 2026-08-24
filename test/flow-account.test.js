@@ -214,6 +214,21 @@ await okAsync('클릭했는데 프로젝트로 안 넘어가면 경고를 남긴
   assert.ok(eng.logs.some((l) => /넘어가지 않았습니다/.test(l)), '조용히 지나가면 다음 실패의 원인을 모른다');
 });
 
+console.log('\n[2-b] 계정당 하루 한도는 ⚙ 설정 값을 따른다 (하드코딩 45 가 아니라)');
+// 🔴 실사고: UI 에서 「0=무제한」으로 바꿔도 flow-engine 의 PER_PROFILE_DAILY_CAP=45 가 막았다.
+//   한도 칸이 하나인데 판정이 두 곳이면 반드시 어긋난다.
+const mkCapEng = (dailyLimit) => {
+  const eng = Object.create(FlowAutomator.prototype);
+  eng.antiDetect = dailyLimit === undefined ? null : { dailyLimit };
+  return eng;
+};
+ok('UI 한도 20 → 20 을 쓴다', () => assert.strictEqual(mkCapEng(20)._perProfileCap(), 20));
+ok('🔴 UI 한도 0(무제한) → 0 을 그대로 돌려준다', () =>
+  assert.strictEqual(mkCapEng(0)._perProfileCap(), 0, '0 이 아니면 무제한이 또 막힌다'));
+ok('UI 값이 없으면 하드코딩 폴백(45)', () => assert.strictEqual(mkCapEng(undefined)._perProfileCap(), 45));
+ok('UI 값이 숫자가 아니면 폴백', () => assert.strictEqual(mkCapEng('많이')._perProfileCap(), 45));
+ok('큰 값도 그대로(사용자 선택 존중)', () => assert.strictEqual(mkCapEng(500)._perProfileCap(), 500));
+
 console.log('\n[3] 앱 배선 원문 대조');
 const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const ENG = fs.readFileSync(path.join(__dirname, '..', 'flow-engine.js'), 'utf8');
@@ -241,6 +256,44 @@ ok('소진 요약이 무제한을 "한도 도달" 로 오판하지 않는다', (
 ok('flow 의 _available 이 무제한을 캡 없이 처리한다', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'flow-accounts.js'), 'utf8');
   assert.ok(/if \(!\(c\.dailyCap > 0\)\) return true;/.test(src));
+});
+ok('🔴 main 이 UI 의 일일 한도를 엔진에 넘긴다', () =>
+  assert.ok(/antiDetect: \{ enabled: true, preset: '기본', dailyLimit: cap \}/.test(MAIN),
+    '안 넘기면 엔진이 하드코딩 45 를 쓴다'));
+ok('🔴 매핑 수를 누적으로 센다 (폴링이 복사한 것도 포함)', () => {
+  assert.ok(/let copiedTotal = 0;/.test(MAIN), 'copiedTotal 선언');
+  assert.ok(/n\+\+; copiedTotal\+\+;/.test(MAIN), '복사할 때마다 누적');
+  assert.ok(/const made = copiedTotal;/.test(MAIN), 'markUsed 는 누적값을 써야 한다');
+  assert.ok(!/FlowAccounts\.markUsed\(acc\.id, mapOnce\(true\)\)/.test(MAIN));
+});
+ok('하루 한도 도달을 "UI 문제" 로 말하지 않는다', () => {
+  assert.ok(/res\.reason === 'daily-limit'/.test(MAIN), 'daily-limit 을 따로 잡아야 한다');
+  assert.ok(/계정당 하루 한도\(\$\{_cp\}장\) 도달/.test(MAIN));
+  assert.ok(/자정에 초기화/.test(MAIN), '언제 풀리는지 알려줘야 한다');
+});
+ok('🔴 엔진이 하루 한도 도달 시 객체를 반환한다(res=undefined 였던 것)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'flow-engine.js'), 'utf8');
+  const i = src.indexOf('계정당 하루 한도(${_cap}장) 도달');
+  assert.ok(i > 0, '진입 판정 로그를 못 찾음');
+  const blk = src.slice(i, i + 900);
+  assert.ok(/reason: 'daily-limit'/.test(blk), 'reason 을 실어야 main 이 구분한다');
+  assert.ok(/profileCount: _pc/.test(blk) && /dailyCap: _cap/.test(blk));
+  assert.ok(!/\n\s*return;\s*\n/.test(blk), '빈 return 이 남아 있으면 res 가 undefined 가 된다');
+});
+ok('엔진의 두 판정 모두 헬퍼를 쓴다(상수를 직접 비교하지 않는다)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'flow-engine.js'), 'utf8');
+  // 진입·중간 두 곳이 헬퍼를 쓴다
+  assert.ok(/const _cap = this\._perProfileCap\(\);/.test(src), '진입 판정');
+  assert.ok(/const _midCap = this\._perProfileCap\(\);/.test(src), '작업 중간 판정');
+  // 상수는 **폴백 한 곳**에서만 값으로 쓰인다 — 판정에 직접 등장하면 UI 값이 무시된다.
+  assert.ok(/Number\.isFinite\(v\) \? v : PER_PROFILE_DAILY_CAP;/.test(src), '폴백');
+  assert.ok(!/PER_PROFILE_DAILY_CAP\s*>\s*0/.test(src), '상수를 판정에 직접 쓰면 안 된다');
+  assert.ok(!/>=\s*PER_PROFILE_DAILY_CAP/.test(src), '상수와 직접 비교하면 안 된다');
+});
+ok('flow-engine 은 CRLF 로 저장돼 있다(원래 규약)', () => {
+  const raw = fs.readFileSync(path.join(__dirname, '..', 'flow-engine.js'), 'latin1');
+  const crlf = (raw.match(/\r\n/g) || []).length, lf = (raw.match(/\n/g) || []).length;
+  assert.strictEqual(crlf, lf, 'LF 로 저장하면 diff 가 4천 줄로 부푼다');
 });
 ok('main.js 는 LF 로 저장돼 있다', () => {
   const raw = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'latin1');

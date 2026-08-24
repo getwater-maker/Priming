@@ -1585,6 +1585,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     const paragraphs = targets.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
     const customPrompts = targets.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? P.buildImagePrompt(stylePrompt, g.imagePrompt) : null);
     // 대상(targets) 순서로 매핑 — Flow 출력은 제출 순서(01,02…) = targets 순서. 이미 채워진 그룹은 건드리지 않음.
+    let copiedTotal = 0;   // 이번 계정 실행에서 실제로 복사한 총 장수(폴링 포함) — markUsed 정확도
     const mapOnce = (final) => {
       let files = [];
       try { files = fs.readdirSync(imgDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).sort(); } catch { return 0; }
@@ -1596,7 +1597,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
         if (!f) return;
         const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
         const dest = path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`);
-        try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
+        try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; copiedTotal++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
         catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
       });
       return n;
@@ -1609,7 +1610,8 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
         paragraphs, customPrompts, mediaType: 'image', model: flowImageModel,
         ratio: project.aspect || '16:9', outputDir: workDir, style: styleId || 'cinematic',
         withSubtitle: false, vrewOnly: false, skipVrew: true,
-        antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
+        // 🔑 「일일 한도」는 ⚙ 설정의 값이 정본 — 0 이면 무제한(엔진의 하드코딩 45 를 쓰지 않는다).
+        antiDetect: { enabled: true, preset: '기본', dailyLimit: cap }, profileId: acc.id,
       });
     } catch (e) {
       // flowNoAccess = 그 계정에 Google AI 구독이 없어 Flow 앱이 아니라 소개 페이지가 열린 경우
@@ -1619,8 +1621,12 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     }
     finally { clearInterval(poll); }
 
-    const made = mapOnce(true);
-    FlowAccounts.markUsed(acc.id, made); // ✅ 실제 성공분만 카운트 (기존: 대상 전체 → 과다 카운트 버그)
+    mapOnce(true);
+    // 🔴 2026-08-24: 예전엔 `mapOnce(true)` 의 반환값(= 마지막 호출에서 새로 복사한 수)을 썼다.
+    //   폴링이 이미 복사한 것은 스킵되므로 실제 20장을 만들어도 1 로 기록돼, 앱의 일일 한도가
+    //   사실상 작동하지 않고 UI 도 「오늘 3/45」 같은 거짓을 보여 줬다(실측: 실제 45장).
+    const made = copiedTotal;
+    FlowAccounts.markUsed(acc.id, made);
     logger(`[Flow] ${acc.label} 이미지 매핑 ${made}/${targets.length}`);
     pushDtoUpdate();
     try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
@@ -1632,6 +1638,12 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
       // 구독이 생기기 전엔 몇 번을 시도해도 같다 → 오늘은 쉬게 한다(계정을 지우지는 않는다).
       FlowAccounts.cooldown(acc.id, 12 * 60);
       logger(`   → 이 계정은 12시간 쉽니다. 구독을 넣으면 바로 다시 쓰입니다.`);
+    } else if (res && res.rateExhausted && res.reason === 'daily-limit') {
+      // 계정당 하루 한도 도달 — 정당한 휴식이다. 'UI 문제' 로 말하면 엉뚱한 곳을 고치게 된다.
+      const _cnt = Number.isFinite(res.profileCount) ? res.profileCount : '?';
+      const _cp = Number.isFinite(res.dailyCap) ? res.dailyCap : cap;
+      logger(`🛑 Flow 계정 "${acc.label}" 오늘 ${_cnt}장 — 계정당 하루 한도(${_cp}장) 도달. 자정에 초기화됩니다.`);
+      logger(`   (한도를 늘리려면 ⚙ 설정 → 👤 계정의 「일일 한도」를 올리거나 0=무제한 — 다만 과하게 쓰면 구글이 계정을 차단할 수 있습니다)`);
     } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30); // 하루 캡 대신 30분 쿨다운 — 0장이어도 계정을 하루 종일 태우지 않음
       logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 30분 쿨다운 후 재사용, 지금은 다음 계정으로 순환`);
