@@ -43,6 +43,38 @@ console.log('[1] 실사고 회귀 (자막 14자)');
     '그 사고 분할이 14자/14자로 「균형 완벽」이었다 = 길이 균형만으로는 못 막는다');
 }
 
+// ─────────────── [1-b] 2차 실사고 회귀 — 「너무 짧은 자막」 (v0.3.41) ───────────────
+console.log('[1-b] 짧은 자막 회귀 (자막 20자)');
+{
+  const N = 20, MIN = 8;   // minCharsFor(20)
+  const cases = [
+    ['그리고 어느 날부터 여러분은 사람이 아니라 손이 됩니다.', '그리고'],
+    ['다만 여러분을 찾는 전화가 아니라 일을 찾는 전화입니다.', '다만'],
+    ['그런데 그 서운함은 오래 가지 않습니다.', '그런데'],
+    ['여러분, 우리 나이에는 이 계산이 아주 중요합니다.', '여러분,'],
+  ];
+  for (const [t, lone] of cases) {
+    const ls = splitCaptionLines(t, N);
+    ok(!ls.includes(lone), `「${lone}」 가 단독 줄로 떨어지지 않는다`);
+    ok(ls.join(' ') === t, `「${lone}」 문장의 원문이 보존된다`);
+  }
+  // 열거문 — 쉼표마다 한 어절씩 떨어지던 것
+  const enu = splitCaptionLines('살림, 내외 사이, 그 집 문, 대신 하는 일, 먼저 걸던 전화입니다.', N);
+  ok(!enu.includes('살림,') && !enu.includes('내외 사이,') && !enu.includes('그 집 문,'),
+    '열거문의 쉼표 조각이 각각 한 줄로 떨어지지 않는다');
+  ok(enu.every((l) => meaningfulLen(l) >= MIN), `열거문의 모든 줄이 하한(${MIN}자) 이상`);
+
+  // 287줄 사고 — 문장 끝부분만 남던 고아 꼬리
+  const tail = splitCaptionLines('송 선생님은 어릴 적에 아버지 소를 끌었다고 하셨습니다.', N);
+  ok(!tail.includes('하셨습니다.'), '「하셨습니다.」 만 남는 고아 꼬리가 없다');
+  ok(tail.every((l) => meaningfulLen(l) >= MIN), '그 문장의 모든 줄이 하한 이상');
+
+  // 하한은 「지향」이지 강제가 아니다 — 문장 자체가 짧으면 그대로 한 줄
+  const shortSent = splitCaptionLines('서운해합니다.', N);
+  ok(shortSent.length === 1 && shortSent[0] === '서운해합니다.',
+    '문장 자체가 하한보다 짧으면 그대로 한 줄(억지로 늘리지 않는다)');
+}
+
 // ─────────────────── [2] 금지 경계 — 절대 끊지 않아야 하는 자리 ───────────────────
 console.log('[2] 금지 경계');
 {
@@ -147,13 +179,10 @@ console.log('[4] 기존 규칙 보존');
   const one = splitCaptionLines('찾아보겠습니다', 3);
   ok(one.length === 1 && one[0] === '찾아보겠습니다', '한 어절이 상한을 넘으면 그 어절만 한 줄');
 
-  // 쉼표에서 끊고 쉼표는 앞 줄에 남는다
+  // 쉼표는 끊기 좋은 자리 — 다만 「짧아지지 않을 때」만 (v0.3.41 에서 강제 → 선호로 바뀜)
   const cm = splitCaptionLines('초저녁엔 가볍게, 깊은 밤엔 더 무겁게 다스렸지요.', 14);
-  ok(cm.some((l) => /가볍게,$/.test(l)), '쉼표에서 끊고 쉼표는 앞 줄에 유지');
-
-  // 접속부사 단독 줄
-  ok(splitCaptionLines('그런데 사람은 받는 데 익숙해지면 고마움을 셈하지 않게 됩니다.', 14)[0] === '그런데',
-    '접속부사가 첫 어절이면 단독 줄');
+  ok(cm.some((l) => /가볍게,$/.test(l)), '충분히 길면 쉼표에서 끊고 쉼표는 앞 줄에 유지');
+  ok(cm.join(' ') === '초저녁엔 가볍게, 깊은 밤엔 더 무겁게 다스렸지요.', '쉼표 분할이 원문을 보존한다');
 
   // 기본값 유지(하위호환) — maxChars 생략 = 7
   ok(JSON.stringify(splitCaptionLines('초저녁엔 가볍게, 깊은 밤엔 더 무겁게 다스렸지요.'))
@@ -236,22 +265,29 @@ console.log('[6] 실제 대본 회귀');
 
     // 🔑 「금지 위반」과 「감점 자리」는 성격이 다르다 — 반드시 나눠 센다.
     //    금지 = 절대 끊지 말아야 할 자리(0 이 목표) / 감점 = 다른 선택지가 없을 때만 밟는 자리(남아도 정상)
-    for (const N of [7, 14]) {
-      let lines = 0, banned = 0, penal = 0, over = 0, lost = 0;
+    for (const N of [7, 14, 20]) {
+      const minC = Math.max(4, Math.round(N * 0.4));
+      let lines = 0, banned = 0, penal = 0, over = 0, lost = 0, short = 0;
       for (const t of texts) {
         const ls = splitCaptionLines(t, N);
         lines += ls.length;
         for (const x of auditCaptionLines(ls)) { if (x.banned) banned++; else penal++; }
         if (ls.join(' ') !== t.trim().replace(/\s+/g, ' ')) lost++;
-        for (const l of ls) if (meaningfulLen(l) > N && l.split(/\s+/).length > 1) over++;
+        for (const l of ls) {
+          if (meaningfulLen(l) > N && l.split(/\s+/).length > 1) over++;
+          if (meaningfulLen(l) < minC) short++;
+        }
       }
-      const bRate = banned / lines * 1000;
-      console.log(`     ${N}자: 줄 ${lines} · 🔴금지 ${banned} (${bRate.toFixed(2)}‰) · 🟡감점 ${penal}`);
+      const bRate = banned / lines * 1000, sRate = short / lines * 100;
+      console.log(`     ${N}자: 줄 ${lines} · 🔴금지 ${banned} (${bRate.toFixed(2)}‰)`
+        + ` · 🟡감점 ${penal} · 🟠짧은줄 ${short} (${sRate.toFixed(1)}%)`);
       ok(lost === 0, `${N}자 — 어절 손실·변형 없이 원문이 보존된다`);
       ok(over === 0, `${N}자 — 글자수 상한 위반 0`);
-      // 실측 기준선(2026-08-24): 14자 = 0건 · 7자 = 4.66‰(폭이 좁아 피할 자리가 없다).
+      // 실측 기준선(2026-08-24): 14·20자 = 금지 0건 · 7자 = 4.79‰(폭이 좁아 피할 자리가 없다).
       ok(N >= 14 ? banned === 0 : bRate < 8,
         `${N}자 — 금지 위반이 기준선 아래 (${banned}건 · ${bRate.toFixed(2)}‰)`);
+      // 짧은 줄 실측: 20자 3.0% · 14자 2.2% · 7자 8.3%(남는 건 문장 자체가 짧은 경우).
+      ok(sRate < (N >= 14 ? 6 : 12), `${N}자 — 하한(${minC}자) 미만 줄이 기준선 아래 (${sRate.toFixed(1)}%)`);
     }
   }
 }

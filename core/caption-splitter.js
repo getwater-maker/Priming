@@ -6,18 +6,29 @@
  *    반드시 갈라진다(2026-08-24 이전이 그 상태였다).
  *
  * 규칙:
- *   1. 쉼표(, ， 、)에서 끊는다 (쉼표는 앞 줄에 유지).
- *   2. 어절(띄어쓰기 토큰, 조사 포함)은 절대 쪼개지 않는다. 한 어절이 maxChars 를 넘으면
+ *   1. 어절(띄어쓰기 토큰, 조사 포함)은 절대 쪼개지 않는다. 한 어절이 maxChars 를 넘으면
  *      그 어절만 한 줄(넘쳐도 1줄 유지 — "다." 같은 한 글자 고아 방지).
- *   3. 한 줄은 글자수(공백·문장부호 제외) maxChars(기본 7) 이하.
- *   4. ★ 한국어 「끊어 읽기」 경계를 지킨다 — 아래 ①~④. 길이 균형보다 이것이 우선.
- *   5. 접속부사(그런데/그리고/하지만…)가 첫 어절이면 단독 줄.
+ *   2. 한 줄은 글자수(공백·문장부호 제외) maxChars(기본 7) **이하**.
+ *   3. ★ 한 줄은 minCharsFor(maxChars) **이상**을 지향한다 — 상한만 있고 하한이 없으면
+ *      `그리고`·`살림,` 같은 한 어절짜리 자막이 스쳐 지나간다.
+ *   4. ★ 한국어 「끊어 읽기」 경계를 지킨다 — 아래 ①~⑦. 길이 균형보다 이것이 우선.
+ *   5. 쉼표·접속부사 뒤는 **강하게 선호**하되 강제하지 않는다(3번과 충돌하면 3번이 이긴다).
  *
  * ⚠ 4번이 왜 필요한가 (2026-08-24, 로이 신고):
  *   예전 알고리즘이 아는 것은 「어절 안 쪼갬」 + 「줄 길이를 고르게」 둘뿐이었다. 그래서
  *   `셈하지 않게 되면 다음부터는 받는` / `것이 아니라 …` 처럼 **14자/14자로 균형이 완벽한** 분할을
  *   최적해로 골랐다. 의존명사 「것」으로 시작하는 줄은 앞말 없이 뜻이 없어 시청자가 읽다 멈춘다.
- *   → 경계마다 금지/점수를 매겨 목적함수에 넣는다. 실측: 사고 138건 → 10건, 줄 수는 +0.7%.
+ *   → 경계마다 금지/점수를 매겨 목적함수에 넣는다.
+ *
+ * ⚠ 3·5번이 왜 필요한가 (2026-08-24 2차 신고, v0.3.41):
+ *   "너무 짧은 자막이 생성된다 — 다만, 살림, 여러분, 그리고" + "287줄은 문장 끝부분만 남았다".
+ *   원인은 **하한이 없다는 것 하나**였고, 옛 규칙 두 개가 그걸 증폭하고 있었다:
+ *     · 「접속부사는 무조건 단독 줄」 → `그리고` 가 통째로 한 줄
+ *     · 「쉼표에서 무조건 세그먼트 분리」 → `살림,` `내외 사이,` `그 집 문,` 이 각각 한 줄
+ *   두 규칙 다 **분리를 강제**해서 DP 가 합칠 방법이 없었다. → 세그먼트 분리를 걷어내고
+ *   문장 전체를 한 번에 DP 하되, 쉼표·접속부사 뒤에 높은 선호 점수(4)를 준다. 짧아지지 않는
+ *   한 그 자리에서 끊고, 짧아지면 붙인다. 실측(20자·31,472문장): 짧은 줄 10,205 → 1,476(-86%),
+ *   자막 줄 57,699 → 49,966(-13.4%), 금지 위반 0 유지.
  *
  * 글자수 카운트는 한글·영숫자만 (공백/쉼표/마침표/느낌표/물음표 제외).
  */
@@ -114,11 +125,16 @@ const ADVERB_SCORE = -3;
 const RE_GOOD3 = /(면|면서|니까|지만|는데|은데|어서|아서|해서|하고|이고|고|며|거나|든지|도록|려면|기에|므로|더니|길래|텐데|에게서|한테서|에서부터|으로부터|로부터|에게로|으로서|로서|으로써|로써|에다가|더러|에서|에게|에|으로|로|와|과|보다|까지|부터|마다|한테|께|처럼|이랑|랑)$/;
 const RE_GOOD1 = /(은|는|이|가|을|를|의|도|만|조차|마저)$/;
 
-// 목적함수 가중치 — 우선순위: 금지 회피 ≫ 관형절 회피 ≫ 줄 수 ≫ 좋은 경계 ≫ 길이 균형.
+// 목적함수 가중치 — 우선순위: 금지 회피 ≫ 관형절 회피 ≳ 짧은 줄 회피 ≫ 줄 수 ≫ 좋은 경계 ≫ 균형.
 //   VIOL(250) > LINE(100)   : 금지 자리를 피하려면 줄 하나를 더 쓴다.
 //   관형절 8×15 = 120 > 100 : 역시 줄 하나보다 비싸다.
-//   TAIL                    : 마지막 줄에도 약한 균형 페널티 — 꼬리 한 어절만 남는 고아 줄 방지.
-const W = { VIOL: 250, LINE: 100, GOOD: 8, BAL: 0.5, TAIL: 0.3 };
+//   SHORT                   : 하한보다 d 글자 모자라면 6d². `그리고`(3자, 하한 8) = 150 > 100
+//                             → 한 어절짜리 줄을 만드느니 다음 어절과 붙인다.
+//   TAIL                    : 마지막 줄에도 약한 균형 페널티(고아 꼬리 방지). SHORT 와 함께 작동한다.
+const W = { VIOL: 250, LINE: 100, GOOD: 8, BAL: 0.5, TAIL: 0.3, SHORT: 6 };
+// 줄 길이 하한 — 상한의 40%(최소 4자). 20자→8 · 14자→6 · 7자→4.
+//   ⚠ 하한은 「지향」이지 강제가 아니다. 문장 자체가 짧으면(`서운해합니다.` 6자) 그대로 한 줄이다.
+const minCharsFor = (maxChars) => Math.max(4, Math.round(maxChars * 0.4));
 const ADNOMINAL_SCORE = -15;
 
 function meaningfulLen(s) {
@@ -181,6 +197,7 @@ function wrapWords(words, maxChars) {
   if (!n) return [];
   const w = words.map(meaningfulLen);
   const bnd = words.map((_, i) => boundaryAt(words, i));
+  const minC = minCharsFor(maxChars);
   const memo = new Array(n + 1);
   memo[n] = { cost: 0, cuts: [] };
   for (let i = n - 1; i >= 0; i--) {
@@ -194,6 +211,7 @@ function wrapWords(words, maxChars) {
       const slack = maxChars - sum;
       const isLast = (j === n - 1);
       let cost = rest.cost + W.LINE;
+      if (sum < minC) { const d = minC - sum; cost += W.SHORT * d * d; }
       if (!isLast) {
         const b = bnd[j];
         if (b.banned) cost += W.VIOL;
@@ -215,15 +233,12 @@ function wrapWords(words, maxChars) {
 function splitCaptionLines(text, maxChars = 7) {
   const t = String(text == null ? '' : text).trim();
   if (!t) return [];
-  const segs = t.split(/(?<=[,，、])/).map((s) => s.trim()).filter(Boolean);
-  const out = [];
-  for (const seg of segs) {
-    let words = seg.split(/\s+/).filter(Boolean);
-    if (!words.length) continue;
-    const first = bareWord(words[0]);
-    if (words.length > 1 && CONNECTIVES.has(first)) { out.push(words[0]); words = words.slice(1); }
-    out.push(...wrapWords(words, maxChars));
-  }
+  // ⚠ 쉼표로 세그먼트를 미리 쪼개지 않는다(v0.3.41). 쪼개면 세그먼트끼리 다시 합칠 수 없어
+  //   `살림,` `내외 사이,` 처럼 한 어절짜리 줄이 강제로 생긴다. 쉼표 선호는 boundaryAt 의 점수 4 가
+  //   담당하고, 짧아질 때만 DP 가 붙인다. 접속부사 단독 줄 강제도 같은 이유로 없앴다.
+  const words = t.split(/\s+/).filter(Boolean);
+  if (!words.length) return [t];
+  const out = wrapWords(words, maxChars);
   return out.length ? out : [t];
 }
 
