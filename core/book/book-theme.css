@@ -206,35 +206,53 @@ section.endnotes ol { font-size: 0.9em; line-height: 1.6; padding-left: 1.5em; }
 section.endnotes li { margin: 0.4em 0; }
 sup.enref { font-size: 0.65em; }
 
-/* ── 판권지 — 사용자 확정 레이아웃(하단 배치·라벨｜값·구분선·고지·QR중앙·ⓒ), 고딕 ── */
+/* ── 판권지 — 실물 단행본 판권(레퍼런스: 비즈니스북스 『하루 한 장 고전 수업』) ──
+   책제목(볼드) → 발행 이력 → 「굵은 라벨 | 값」 행 → ISBN → 별표 고지문 → 테두리 박스 → ⓒ.
+   배치(위/아래)는 조판 옵션 — pageCss 가 .cp-wrap margin-top 을 덮어쓴다. */
 section.colophon {
   page: display;
   break-before: recto;
   font-family: 'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif;
   font-size: 0.8em;
-  line-height: 1.75;
+  line-height: 1.8;         /* 실물 판권은 행간이 넓다 — 라벨 행이 표처럼 읽히게 */
   text-align: left;
 }
-/* 목표 최종본: 내용이 페이지 하단쪽(제목 시작 ≈ 판면 34% 지점) — flex 하단정렬은
-   vivliostyle 조각화에서 height:100% 미해석이라 고정 마진 사용(전 항목 기입 기준 실측) */
-section.colophon .cp-wrap { margin-top: 44%; }
+/* 판권 첫 쪽의 러닝헤드 억제 — @page display 가 조각의 첫 쪽엔 한 쪽 늦게 적용되는 문제(실측)를
+   문자열을 비워 우회한다. 뒤 판권에만 넣으므로 본문 러닝헤드에는 영향이 없다. */
+.cp-rhclear { display: none; string-set: chapter-title "", book-title "", book-subtitle "", sec-title ""; }
 /* 앞 판권(판권위치=앞)은 관행상 속표지 '뒷면'(verso) — recto 강제하면 백면 끼고 홀수쪽으로 밀림 */
 section.colophon.cp-front { break-before: page; }
-section.colophon .cp-title { font-weight: 700; font-size: 1.2em; margin-bottom: 0.9em; text-indent: 0; }
+section.colophon .cp-title { font-weight: 700; font-size: 1.1em; margin: 0 0 1.5em; text-indent: 0; }
 section.colophon .cp-subtitle { font-weight: 400; font-size: 0.85em; color: #333; }
+/* 발행 이력 — 「1판 1쇄 발행   2026년 8월 24일」(라벨은 굵지 않고 구분선도 없다) */
+section.colophon .cp-dates { margin-bottom: 1.5em; }
+section.colophon .cp-date { text-indent: 0; }
+section.colophon .cp-date .dk { display: inline-block; min-width: 7.6em; }
+/* 라벨 | 값 — 라벨만 굵게, 구분선은 가는 회색 세로 막대 */
 section.colophon .cp-row { text-indent: 0; }
-section.colophon .cp-row .k { color: #111; }
-section.colophon .cp-row .sep { margin: 0 0.45em; color: #999; }
-section.colophon .cp-gap { height: 0.9em; }
-section.colophon hr.cp-rule { border: none; border-top: 0.4pt solid #bbbbbb; margin: 1.2em 0 1em; }
-section.colophon .cp-notes p { text-indent: 0; margin: 0.22em 0; white-space: pre-line; text-align: left; }
+section.colophon .cp-row .k { display: inline-block; min-width: 3.2em; font-weight: 700; color: #111; }
+/* 2글자 라벨(등록·주소·전화·팩스)은 3글자 폭에 균등 분산 — 실물 판권의 「등  록」 표기 */
+section.colophon .cp-row .k2 { display: inline-flex; justify-content: space-between; width: 3.2em; }
+section.colophon .cp-row .sep { margin: 0 0.45em 0 0.25em; color: #aaa; font-weight: 400; }
+section.colophon .cp-row .v { color: #111; }
+/* ISBN — 구분선 없이 「ISBN  979-…  03190」 (부가기호는 값 뒤에 띄워 붙인다) */
+section.colophon .cp-row.cp-isbn .sep { visibility: hidden; }
+section.colophon .cp-row.cp-isbn .v .addon { margin-left: 1.6em; }
+section.colophon .cp-gap { height: 1.6em; }
+/* 고지문 — 「* 잘못된 책은 …」 별표 줄은 내어쓰기(둘째 줄이 별표 아래로 들어가지 않게) */
+section.colophon .cp-notes { margin-top: 1.5em; }
+section.colophon .cp-notes p { text-indent: 0; margin: 0.1em 0; text-align: left; }
+section.colophon .cp-notes p.bul { padding-left: 0.95em; text-indent: -0.95em; }
+section.colophon .cp-notes h3 { font-size: 1em; margin: 1em 0 0.3em; }
 section.colophon .cp-notes hr.scene { margin: 0.9em 0; }
 section.colophon .cp-notes hr.scene::after { content: ""; }
-section.colophon .cp-notes h3 { font-size: 1em; margin: 1em 0 0.3em; }
-section.colophon .cp-qrbox { text-align: center; margin: 1.5em 0 0.2em; text-indent: 0; }
+/* 테두리 박스 — [판권] 안의 인용(`>`) 블록(투고 안내 등) */
+section.colophon .cp-box { border: 0.6pt solid #333333; padding: 0.9em 1.1em; margin-top: 1.4em; break-inside: avoid; }
+section.colophon .cp-box p { text-indent: 0; margin: 0.1em 0; text-align: left; }
+section.colophon .cp-qrbox { text-align: center; margin: 1.8em 0 0.2em; text-indent: 0; }
 section.colophon img.cp-qr { width: 16mm; height: 16mm; }
 section.colophon .cp-qrlabel { font-size: 0.85em; color: #888; margin-top: 0.3em; }
-section.colophon .cp-legal { margin-top: 1.5em; color: #222; text-indent: 0; }
+section.colophon .cp-legal { margin-top: 1.2em; color: #222; text-indent: 0; break-inside: avoid; }
 section.colophon .cp-legal p { text-indent: 0; margin: 0.15em 0; }
 
 /* ── 저자소개 등 뒷부속 본문 ── */

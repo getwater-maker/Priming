@@ -251,8 +251,12 @@ const COLOPHON_LABEL_KEYS = [
   [/^(대표전화|전화)\s+\S/, 'phone'],
   [/^팩스\s+\S/, 'fax'],
   [/^홈페이지\s+\S/, 'homepage'],
-  [/^(이메일|email)\s+\S/i, 'email'],
-  [/^출판등록\s+\S/, 'regNo'],
+  [/^(이메일|대표메일|email)\s+\S/i, 'email'],
+  [/^(출판등록|등 ?록)\s+\S/, 'regNo'],
+  [/^(편집인|편집자|편집)\s+\S/, 'editor'],
+  [/^블로그\s+\S/, 'blog'],
+  [/^페이스북\s+\S/, 'facebook'],
+  [/^(인스타그램|인스타)\s+\S/, 'instagram'],
 ];
 // [판권] 자유문의 한 줄이 '표·제목·ⓒ에 이미 나온 정보를 되풀이한 것'인가?
 //   되풀이면 버리고(표가 대신 보여줌), 표에 없는 고유 정보(고지문 등)는 보존 → 무손실.
@@ -286,27 +290,89 @@ function filterColophonSection(section, meta) {
   }
   return { ...section, blocks };
 }
-// 판권지 — 사용자 확정 레이아웃(구 Book Publishing 앱 실물과 동일):
-//   하단 배치 · 책제목(볼드) · 「라벨 ｜ 값」 행(발행/발행처/ISBN·가격) · 가는 구분선 ·
-//   고지문([판권] 자유문 중 표에 없는 줄만 — AI 활용·편집 저작권 등) · QR(중앙)+라벨 · ⓒ + 재사용 안내.
+// 판권 라벨 — 2글자 한글(등록·주소·전화·팩스)은 3글자 라벨과 폭을 맞춰 균등 분산한다
+//   (실물 판권 관행 「등  록 ｜ …」). flex 로 벌리므로 글꼴·자간에 상관없이 정확히 맞는다.
+function cpLabel(label) {
+  const bare = String(label == null ? '' : label).replace(/\s+/g, '');
+  if (/^[가-힣]{2}$/.test(bare)) return `<span class="k k2"><span>${esc(bare[0])}</span><span>${esc(bare[1])}</span></span>`;
+  return `<span class="k">${esc(bare || label || '')}</span>`;
+}
+// [판권] 자유문 — 별표 고지문은 **한 줄씩** 내어쓰기 문단으로(`* 잘못된 책은 …`),
+//   인용(`>`) 블록은 **테두리 박스**로(투고 안내 등). 실물 판권의 두 가지 표기를 그대로 옮긴 것.
+//   ⚠ data-src-line 은 바깥 컨테이너에 둔다 — 클릭-편집은 closest() 로 찾으므로 줄을 쪼개도
+//     편집 단위는 원래 블록 그대로다(원고의 그 문단 전체가 대상).
+function colophonNotesHtml(fsec, book, ctx, srcAttr) {
+  if (!fsec || !Array.isArray(fsec.blocks) || !fsec.blocks.length) return '';
+  const out = [];
+  for (const b of fsec.blocks) {
+    if (!b) continue;
+    if (b.type === 'p' && typeof b.text === 'string') {
+      const ps = b.text.split('\n').map((s) => s.trim()).filter(Boolean)
+        .map((ln) => `<p class="cp-note${/^[*※·•]/.test(ln) ? ' bul' : ''}">${renderInline(ln, book, ctx)}</p>`);
+      if (ps.length) out.push(`<div class="cp-notes"${srcAttr(b)}>${ps.join('')}</div>`);
+    } else if (b.type === 'list') {
+      // 판권 안의 목록(`* 잘못된 책은 …`)은 실물 판권의 **별표 고지문**이다 — 불릿 목록으로
+      //   조판하면 점(•)이 붙어 판권이 아니라 본문처럼 보인다. 별표를 글자로 찍고 내어쓰기.
+      const ps = (b.items || []).map((it) => `<p class="cp-note bul">* ${renderInline(it.text, book, ctx)}</p>`);
+      if (ps.length) out.push(`<div class="cp-notes"${srcAttr(b)}>${ps.join('')}</div>`);
+    } else if (b.type === 'quote') {
+      const ps = String(b.text || '').split('\n').map((s) => s.trim()).filter(Boolean)
+        .map((ln) => `<p>${renderInline(ln, book, ctx)}</p>`);
+      out.push(`<div class="cp-box"${srcAttr(b)}>${ps.join('')}</div>`);
+    } else {
+      out.push(blocksHtml([b], book, ctx, srcAttr));
+    }
+  }
+  return out.join('\n');
+}
+// 판권지 — 실물 단행본 판권(2026-08-24 로이 제시 레퍼런스: 비즈니스북스 『하루 한 장 고전 수업』)과 동일:
+//   책제목(볼드) · 발행 이력(라벨+날짜) · 「라벨 ｜ 값」 행(굵은 라벨) · ISBN(구분선 없이 값+부가기호) ·
+//   별표 고지문 · 테두리 박스(투고 안내 등) · ⓒ + 재사용 안내. 배치는 조판 옵션(위/아래).
 //   Option 1(2026-07-13): 자유문이 표·제목·ⓒ를 되풀이하면 그 줄만 빼고 고지문만 남김(중복 제거·무손실).
 function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
-  const row = (label, v) => (v ? `<div class="cp-row"><span class="k">${esc(label)}</span><span class="sep">｜</span><span class="v">${esc(v)}</span></div>` : '');
-  const g1 = [row('발행일', meta.issueDate), row('지은이', meta.author),
-    row(meta.translatorLabel || '옮긴이', meta.translator),
-    row('발행인', meta.issuer), row('발행처', meta.publisher), row('출판등록', meta.regNo),
-    row('주  소', meta.address), row('대표전화', meta.phone), row('팩스', meta.fax),
-    row('홈페이지', meta.homepage), row('이메일', meta.email)].join('');
-  const g2 = '';
-  const isbnStr = meta.isbn ? (meta.isbn + (meta.isbnAddon ? ` (부가기호 ${meta.isbnAddon})` : '')) : '';
-  const g3 = [row('ISBN', isbnStr), row('가격', meta.price), row('전자책', meta.ebookPrice)].join('')
-    + Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)).join('');
-  const groups = [g1, g2, g3].filter(Boolean).join('<div class="cp-gap"></div>');
+  const only = (Array.isArray(fields) && fields.length) ? new Set(fields) : null;
+  const on = (key) => !only || only.has(key);
+  const row = (key, label, v, cls) => (v && on(key)
+    ? `<div class="cp-row${cls ? ' ' + cls : ''}">${cpLabel(label)}<span class="sep">|</span><span class="v">${esc(v)}</span></div>`
+    : '');
 
-  const fsec = filterColophonSection(section, meta);
-  const notes = (fsec && fsec.blocks && fsec.blocks.length)
-    ? `<hr class="cp-rule" /><div class="cp-notes">${blocksHtml(fsec.blocks, book, ctx, srcAttr)}</div>`
-    : '';
+  // ── 발행 이력 ── 「1판 1쇄 발행   2026년 8월 24일」. 여러 쇄는 `;` 로 나눠 쓴다.
+  //   라벨/값은 **첫 연도(4자리) 앞**에서 가른다 — 라벨을 안 쓰면 「초판 1쇄 발행」.
+  const dates = on('issueDate')
+    ? String(meta.issueDate || '').split(/\s*[;；]\s*/).map((s) => s.trim()).filter(Boolean).map((s) => {
+      const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
+      const k = (m && m[1].trim()) || '초판 1쇄 발행';
+      const v = ((m ? m[2] : s) || '').trim();
+      return `<div class="cp-date"><span class="dk">${esc(k)}</span><span class="dv">${esc(v)}</span></div>`;
+    }).join('') : '';
+  const dateBlock = dates ? `<div class="cp-dates">${dates}</div>` : '';
+
+  // ── 라벨 ｜ 값 행 ── 레퍼런스 순서(사람·발행처 → 연락처 → ISBN)
+  const rows = [
+    row('author', '지은이', meta.author),
+    row('translator', meta.translatorLabel || '옮긴이', meta.translator),
+    row('issuer', '발행인', meta.issuer),
+    row('editor', '편집인', meta.editor),
+    row('publisher', '발행처', meta.publisher),
+    row('regNo', '등록', meta.regNo),
+    row('address', '주소', meta.address),
+    row('phone', '전화', meta.phone),
+    row('fax', '팩스', meta.fax),
+    row('email', '대표메일', meta.email),
+    row('homepage', '홈페이지', meta.homepage),
+    row('blog', '블로그', meta.blog),
+    row('facebook', '페이스북', meta.facebook),
+    row('instagram', '인스타그램', meta.instagram),
+    ...Object.entries(meta.extra || {}).map(([k, v]) => row('extra', k, v)),
+    // ISBN — 실물은 구분선 없이 「ISBN  979-…  03190」(부가기호를 값 뒤에 띄워 붙인다)
+    (meta.isbn && on('isbn'))
+      ? `<div class="cp-row cp-isbn">${cpLabel('ISBN')}<span class="sep">|</span><span class="v">${esc(meta.isbn)}${meta.isbnAddon ? `<span class="addon">${esc(meta.isbnAddon)}</span>` : ''}</span></div>`
+      : '',
+    row('price', '정가', meta.price),
+    row('ebookPrice', '전자책', meta.ebookPrice),
+  ].join('');
+
+  const notes = colophonNotesHtml(filterColophonSection(section, meta), book, ctx, srcAttr);
 
   const qrIsImg = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
   const qrBlock = (qrIsImg || meta.qrLabel || meta.qr)
@@ -324,10 +390,18 @@ function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
     ? `<div class="cp-legal"><p>${esc(owner)}</p><p>이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p></div>`
     : '';
 
+  // 러닝헤드 억제 — @page display 는 vivliostyle 에서 **조각의 첫 쪽에 한 쪽 늦게** 적용된다
+  //   (실측: 판권 둘째 쪽부터만 먹는다 → 첫 쪽에 장제목이 그대로 찍혔다). 그래서 러닝헤드는
+  //   문자열 자체를 비워 확실히 지운다. 판권은 책의 맨 뒤라 이후에 쓸 곳이 없다.
+  //   ⚠ 앞 판권(속표지 뒷면)은 앞부속(display) 페이지 뒤라 늦은 적용이 문제되지 않고,
+  //     여기서 비우면 **본문 러닝헤드가 통째로 사라진다** → isFront 면 넣지 않는다.
+  const rhClear = isFront ? '' : '<span class="cp-rhclear"></span>';
+
   return `<section class="colophon${isFront ? ' cp-front' : ''}">
-  <div class="cp-wrap">
+  ${rhClear}<div class="cp-wrap">
     <div class="cp-title">${esc(meta.title || '')}${meta.subtitle ? ` <span class="cp-subtitle">${esc(meta.subtitle)}</span>` : ''}</div>
-    <div class="cp-rows">${groups}</div>
+    ${dateBlock}
+    <div class="cp-rows">${rows}</div>
     ${notes}
     ${qrBlock}
     ${legal}
@@ -472,9 +546,16 @@ function pageCss(o) {
   ${headerOddBox}
   ${numOdd}
 }
-/* 디스플레이 페이지(표제지·부표제지·판권) + 앞부속: 러닝헤드·폴리오 없음 */
+/* 디스플레이 페이지(표제지·부표제지·판권) + 앞부속: 러닝헤드·폴리오 없음
+   [주의] 이름만 쓴 @page display 는 @page :left/:right (의사클래스가 특이도를 더한다)에 져서
+     러닝헤드·쪽번호가 그대로 찍혔다(실측 — 판권 페이지에 장제목이 나왔다).
+     이름+의사클래스(@page display:left)로 함께 적어야 이긴다. */
 @page display { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page display:left { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page display:right { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 @page front { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page front:left { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page front:right { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* recto 강제로 생긴 백면 */
 @page :blank { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* 러닝헤드 장제목 = 전체 원제(공백 포함) — h2 는 '제N회'를 .ch-no 로 쪼개 공백이 사라지므로
@@ -521,6 +602,9 @@ nav.toc a::after {
   content: target-counter(attr(href url), page);
   font-weight: 400; font-family: ${GOTHIC_STACK}; font-size: 0.95em;
 }
+/* 판권 배치 — 위(실물 단행본 다수·기본) / 아래(구 앱 최종본 스타일).
+   flex 하단정렬은 vivliostyle 조각화에서 height:100% 미해석 → 고정 마진(판면 폭 기준 %)으로. */
+section.colophon .cp-wrap { margin-top: ${o.colophonAlign === 'bottom' ? '44%' : '0'}; }
 `;
 }
 
@@ -572,6 +656,8 @@ function buildBookHtml(book, opts = {}) {
     h2MarginBottomPt: numAllowZero(opts.h2MarginBottomPt, 8),
     // ── 판권 자동 항목 선택 (null = 전부) ──
     colophonFields: Array.isArray(opts.colophonFields) ? opts.colophonFields : null,
+    // ── 판권 배치 — 판면 위(기본) / 아래 ──
+    colophonAlign: opts.colophonAlign === 'bottom' ? 'bottom' : 'top',
     // ── 특별 섹션 키워드(쉼표 구분) — 일치하는 소제목 구간을 노트 박스로 (예: '역사 노트') ──
     specialKeywords: String(opts.specialKeyword || '').split(',').map((s) => s.trim()).filter(Boolean),
     // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──

@@ -186,4 +186,96 @@ ok(vb.type === 'verse' && vb.lines.join('\n').includes('<!-- 예시 안 주석 -
 const cmHtml = HB.buildBookHtml(cm, { baseDir: 'D:/x' }).html;
 ok(!/작업 메모/.test(cmHtml), '조판 결과에 주석 내용이 남지 않는다');
 
+// ── [12] 판권지 — 실물 단행본 판권(레퍼런스: 비즈니스북스 『하루 한 장 고전 수업』, 2026-08-24) ──
+//   로이가 실물 스캔을 주며 "판권을 이 이미지처럼" 요청. 그 판권의 구성 요소를 전부 단언한다.
+//   ⚠ 라벨 행·발행 이력·별표 고지문·테두리 박스는 서로 다른 규약(메타/자유문/인용)에서 오므로
+//     하나만 고치면 나머지가 조용히 어긋난다 — 한 원고로 전부 함께 확인한다.
+const CP_MD = `# 하루 한 장 고전 수업
+
+> 부제: 365일 인생의 내공을 기르는
+> 발행일: 1판 1쇄 발행 2022년 11월 22일; 1판 6쇄 발행 2022년 12월 29일
+> 지은이: 조윤제
+> 발행인: 홍영태
+> 편집인: 김미란
+> 발행처: (주)비즈니스북스
+> 등록: 제2000-000225호(2000년 2월 28일)
+> 주소: 03991 서울시 마포구 월드컵북로6길 3
+> 전화: (02)338-9449
+> 팩스: (02)338-6543
+> 대표메일: bb@businessbooks.co.kr
+> 홈페이지: http://www.businessbooks.co.kr
+> 블로그: http://blog.naver.com/biz_books
+> 페이스북: thebizbooks
+> ISBN: 979-11-6254-314-6
+> 부가기호: 03190
+
+## 1장. 첫 장
+
+본문 문단.
+
+## [판권]
+
+* 잘못된 책은 구입하신 서점에서 바꾸어 드립니다.
+* 책값은 뒤표지에 있습니다.
+
+> 비즈니스북스는 독자 여러분의 원고 투고를 기다리고 있습니다.
+> 원고가 있으신 분은 ms1@businessbooks.co.kr 로 보내 주세요.
+`;
+const cpBook = BK.parseBookText(CP_MD, '판권');
+// (1) 새 메타 라벨 — 편집인·대표메일·블로그·페이스북이 extra 가 아니라 표준 키로 들어간다
+ok(cpBook.meta.editor === '김미란', '편집인 → editor');
+ok(cpBook.meta.email === 'bb@businessbooks.co.kr', '대표메일 → email');
+ok(cpBook.meta.blog === 'http://blog.naver.com/biz_books', '블로그 → blog');
+ok(cpBook.meta.facebook === 'thebizbooks', '페이스북 → facebook');
+ok(Object.keys(cpBook.meta.extra || {}).length === 0, '새 라벨은 extra 로 새지 않는다');
+
+const cpHtml = HB.buildBookHtml(cpBook, { baseDir: 'D:/x' }).html;
+const cpSec = (cpHtml.match(/<section class="colophon[\s\S]*?<\/section>/) || [''])[0];
+ok(cpSec.length > 0, '판권 섹션 생성');
+// (2) 발행 이력 — `;` 로 여러 쇄, 라벨/날짜는 첫 연도 앞에서 갈린다
+ok(/<span class="dk">1판 1쇄 발행<\/span><span class="dv">2022년 11월 22일<\/span>/.test(cpSec), '발행 이력 1쇄 라벨/날짜 분리');
+ok(/<span class="dk">1판 6쇄 발행<\/span><span class="dv">2022년 12월 29일<\/span>/.test(cpSec), '발행 이력 2쇄(;로 두 줄)');
+ok((cpSec.match(/class="cp-date"/g) || []).length === 2, '발행 이력이 두 줄');
+// 라벨 없이 날짜만 쓰면 기본 라벨
+const dOnly = HB.buildBookHtml(BK.parseBookText('# 책\n> 발행일: 2026년 8월 24일\n\n## 1장. ㄱ\n본문.\n\n## [판권]\n\n메모.\n', 'x'), { baseDir: 'D:/x' }).html;
+ok(/<span class="dk">초판 1쇄 발행<\/span><span class="dv">2026년 8월 24일<\/span>/.test(dOnly), '라벨 없으면 「초판 1쇄 발행」');
+// (3) 라벨 행 — 라벨 굵게(.k) + 구분선(|) + 값, 레퍼런스 순서
+ok(/<span class="k">지은이<\/span><span class="sep">\|<\/span><span class="v">조윤제<\/span>/.test(cpSec), '지은이 행');
+ok(/<span class="k">편집인<\/span>/.test(cpSec), '편집인 행');
+ok(cpSec.indexOf('발행인') < cpSec.indexOf('편집인') && cpSec.indexOf('편집인') < cpSec.indexOf('발행처'), '레퍼런스 순서(발행인→편집인→발행처)');
+ok(cpSec.indexOf('대표메일') < cpSec.indexOf('홈페이지') && cpSec.indexOf('홈페이지') < cpSec.indexOf('블로그'), '연락처 순서(대표메일→홈페이지→블로그)');
+// (4) 2글자 라벨은 3글자 폭에 균등 분산 — flex 로 쪼갠다(자간·글꼴과 무관하게 정확)
+ok(/<span class="k k2"><span>등<\/span><span>록<\/span><\/span>/.test(cpSec), '등 록 = 2글자 라벨 분산');
+ok(/<span class="k k2"><span>팩<\/span><span>스<\/span><\/span>/.test(cpSec), '팩 스 = 2글자 라벨 분산');
+ok(/<span class="k">홈페이지<\/span>/.test(cpSec), '4글자 라벨은 분산하지 않는다');
+// (5) ISBN — 구분선 없이 값 + 부가기호(값 뒤에 띄워 붙인다)
+ok(/class="cp-row cp-isbn"/.test(cpSec), 'ISBN 은 별도 클래스(구분선 숨김)');
+ok(/979-11-6254-314-6<span class="addon">03190<\/span>/.test(cpSec), '부가기호는 값 뒤 addon');
+ok(!/부가기호 03190/.test(cpSec), '옛 「(부가기호 …)」 표기가 아니다');
+// (6) 별표 고지문 — 마크다운 목록으로 파싱되지만 불릿 목록이 아니라 별표 문단으로 조판
+ok(/<div class="cp-notes"/.test(cpSec), '고지문 컨테이너(cp-notes)');
+ok(/<p class="cp-note bul">\* 잘못된 책은 구입하신 서점에서 바꾸어 드립니다\.<\/p>/.test(cpSec), '별표 고지문 한 줄씩');
+ok(!/<ul>/.test(cpSec), '판권 안 목록은 불릿(ul)으로 나가지 않는다');
+// (7) 인용(>) 블록 = 테두리 박스(투고 안내)
+ok(/<div class="cp-box"/.test(cpSec), '인용 블록 → 테두리 박스');
+ok(/원고 투고를 기다리고/.test(cpSec) && !/<blockquote/.test(cpSec), '박스 안은 문단(blockquote 아님)');
+// (8) 러닝헤드 억제 — @page display 가 조각 첫 쪽에 한 쪽 늦게 적용되는 문제(실측) 우회
+ok(/<span class="cp-rhclear"><\/span>/.test(cpSec), '뒤 판권은 러닝헤드 문자열을 비운다');
+const cpFront = HB.buildBookHtml(BK.parseBookText('# 책\n> 판권위치: 앞(속표지 뒷면)\n> 저자: 갑\n\n## 1장. ㄱ\n본문.\n\n## [판권]\n\n메모.\n', 'x'), { baseDir: 'D:/x' }).html;
+const cpFrontSec = (cpFront.match(/<section class="colophon[\s\S]*?<\/section>/) || [''])[0];
+ok(/class="colophon cp-front"/.test(cpFrontSec) && !/cp-rhclear/.test(cpFrontSec), '앞 판권은 비우지 않는다(본문 러닝헤드가 사라진다)');
+// (9) 판권 배치 — 기본 위(margin-top 0) / 옵션 아래
+ok(/section\.colophon \.cp-wrap \{ margin-top: 0; \}/.test(cpHtml), '판권 배치 기본 = 판면 위');
+const cpBottom = HB.buildBookHtml(cpBook, { baseDir: 'D:/x', colophonAlign: 'bottom' }).html;
+ok(/section\.colophon \.cp-wrap \{ margin-top: 44%; \}/.test(cpBottom), '판권 배치 아래 옵션');
+// (10) display/front 페이지는 러닝헤드·폴리오 없음 — 이름만 쓴 @page 는 :left/:right 에 지므로
+//      이름+의사클래스를 함께 적는다(특이도 보정)
+ok(/@page display:left \{/.test(cpHtml) && /@page display:right \{/.test(cpHtml), '@page display 에 :left/:right 동반');
+// (11) 배선 — 조판 패널·main.js 가 판권 배치를 실제로 넘긴다
+ok(/colophonAlign: l\.colophonAlign/.test(mainSrc), 'main.js layoutOpts 에 colophonAlign');
+ok(/colophonAlign: 'top'/.test(uiSrc), '조판 기본값 = top');
+ok(/L\('colophonAlign'/.test(uiSrc), '조판 패널에 판권 배치 select');
+ok(/\['editor', '편집인'\]/.test(uiSrc) && /\['blog', '블로그'\]/.test(uiSrc), '책 정보 폼에 편집인·블로그');
+ok(/editor: '편집인'/.test(mainSrc) && /facebook: '페이스북'/.test(mainSrc), 'main.js 메타 라벨에 편집인·페이스북');
+
 console.log(`✅ book-md.test.js — ${n} 단언 전부 통과`);

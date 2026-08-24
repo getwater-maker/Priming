@@ -8,9 +8,10 @@ import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 // 책 정보(메타) 폼 필드 정의 — key = main 의 BOOK_META_LABELS 표준키
 const META_FIELDS = [
   ['title', '책 제목'], ['subtitle', '부제'], ['author', '저자'], ['translator', '옮긴이'],
-  ['publisher', '출판사'], ['issuer', '발행인'], ['issueDate', '발행일'], ['isbn', 'ISBN'],
+  ['publisher', '출판사'], ['issuer', '발행인'], ['editor', '편집인'], ['issueDate', '발행일'], ['isbn', 'ISBN'],
   ['price', '정가(POD)'], ['ebookPrice', '전자책 가격'], ['regNo', '출판등록'],
-  ['address', '주소'], ['phone', '대표전화'], ['homepage', '홈페이지'], ['email', '이메일'],
+  ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
+  ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램'],
   ['copyright', '저작권(ⓒ)'], ['isbnAddon', '부가기호(5자리)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
 ];
 // 판권 법정 필수 7필드 — 미입력 경고
@@ -44,7 +45,7 @@ const LAYOUT_DEFAULTS = {
   headerLine: true, pageNum: 'outer',
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
-  colophonFields: null, coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  colophonFields: null, colophonAlign: 'top', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
   // 영상 대본 모드 — 제작용 블록(제작메모·엔진 프롬프트)을 **출력에서만** 제외. 대본 파일은 불변.
   //   출판 탭의 2순위 목적(영상 대본을 깔끔히 정독)을 위한 스위치. 책 원고는 기본 OFF 로 영향 없음.
@@ -527,6 +528,11 @@ body{overflow-y:scroll}
             <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
               <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
                 <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
+              </select>
+            </label>
+            <label title="판권 내용을 판면 위에서 시작할지, 아래쪽으로 내릴지 — 실물 단행본은 위쪽이 다수">판권 배치
+              <select value={layout.colophonAlign === 'bottom' ? 'bottom' : 'top'} onChange={(e) => L('colophonAlign', e.target.value)}>
+                <option value="top">위 (판면 상단)</option><option value="bottom">아래 (판면 하단)</option>
               </select>
             </label>
           </div>

@@ -4113,7 +4113,8 @@ function bookLayoutOpts(args = {}) {
     h2SizePt: l.h2SizePt, h2Gothic: l.h2Gothic, h2Weight: l.h2Weight, h2Align: l.h2Align,
     h2Prefix: l.h2Prefix, h2MarginTopPt: l.h2MarginTopPt, h2MarginBottomPt: l.h2MarginBottomPt,
     // 판권·표지
-    colophonFields: l.colophonFields, coverOverlay: l.coverOverlay, coverBarcode: l.coverBarcode,
+    colophonFields: l.colophonFields, colophonAlign: l.colophonAlign,
+    coverOverlay: l.coverOverlay, coverBarcode: l.coverBarcode,
     coverTextColor: l.coverTextColor,
     // 특별 섹션(반복 코너) 키워드 + 출력 제외 섹션(구조 패널 체크 해제 — 원고 보존)
     specialKeyword: l.specialKeyword, excluded: Array.isArray(l.excluded) ? l.excluded : [],
@@ -4438,6 +4439,7 @@ const BOOK_META_LABELS = {
   subtitle: '부제', author: '저자', translator: '옮긴이', publisher: '출판사', issuer: '발행인',
   issueDate: '발행일', isbn: 'ISBN', isbnAddon: '부가기호', price: '정가', ebookPrice: '전자책', regNo: '출판등록',
   address: '주소', phone: '전화', fax: '팩스', homepage: '홈페이지', email: '이메일',
+  editor: '편집인', blog: '블로그', facebook: '페이스북', instagram: '인스타그램',
   copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
