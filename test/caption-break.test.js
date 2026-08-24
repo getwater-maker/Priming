@@ -57,6 +57,13 @@ console.log('[2] 금지 경계');
     [['맡아', '본'], '보조용언'],
     [['해', '주는'], '보조용언'],
     [['잊어', '버린'], '보조용언'],
+    [['와', '있던'], '보조용언'],       // -던 형이 빠져 있던 구멍(실측)
+    [['여덟 해', '동안'], '의존명사'],   // '동안' 이 빠져 있던 구멍(실측)
+    [['안', '하는'], '부정부사'],
+    [['못', '보았는지를'], '부정부사'],
+    [['수백', '명의'], '수사+단위'],
+    [['서른', '해'], '수사+단위'],
+    [['네', '자리'], '수사+단위'],
   ];
   for (const [w, kind] of banned) {
     const b = boundaryAt(w, 0);
@@ -66,6 +73,17 @@ console.log('[2] 금지 경계');
   const adn = boundaryAt(['본', '사람에게서'], 0);
   ok(!adn.banned && adn.score <= -13, '관형절 「본 사람에게서」는 강한 감점(금지 아님)');
   ok(/관형절/.test(adn.why || ''), '관형절 사유가 사람 말로 붙는다');
+
+  // 부사는 「약한 감점」이어야 한다 — 금지로 걸면 오히려 나쁜 분할을 강요한다
+  for (const w of [['바로', '셈을'], ['함께', '읽어보겠습니다'], ['또', '될']]) {
+    const b = boundaryAt(w, 0);
+    ok(!b.banned && b.score < 0 && b.score > -10, `부사 「${w[0]}」 뒤는 약한 감점(금지 아님)`);
+  }
+  // 🔑 부사 검사가 RE_GOOD3 보다 먼저여야 한다 — '바로·서로·스스로'(로$)·'함께'(께$)는
+  //   조사 규칙에 걸려 오히려 +3 우대를 받고 있었다(실측 493건의 원인).
+  for (const a of ['바로', '서로', '스스로', '함께', '먼저']) {
+    ok(boundaryAt([a, '갔습니다'], 0).score < 0, `「${a}」 가 조사 규칙에 걸려 우대받지 않는다`);
+  }
 }
 
 // ─────────────────── [3] 오탐 방지 — 실측에서 밟은 함정들 ───────────────────
@@ -216,21 +234,24 @@ console.log('[6] 실제 대본 회귀');
     }
     ok(texts.length > 1000, `대본 문장을 충분히 읽었다 (${texts.length}개)`);
 
+    // 🔑 「금지 위반」과 「감점 자리」는 성격이 다르다 — 반드시 나눠 센다.
+    //    금지 = 절대 끊지 말아야 할 자리(0 이 목표) / 감점 = 다른 선택지가 없을 때만 밟는 자리(남아도 정상)
     for (const N of [7, 14]) {
-      let lines = 0, viol = 0, over = 0, lost = 0;
+      let lines = 0, banned = 0, penal = 0, over = 0, lost = 0;
       for (const t of texts) {
         const ls = splitCaptionLines(t, N);
         lines += ls.length;
-        viol += auditCaptionLines(ls).length;
+        for (const x of auditCaptionLines(ls)) { if (x.banned) banned++; else penal++; }
         if (ls.join(' ') !== t.trim().replace(/\s+/g, ' ')) lost++;
         for (const l of ls) if (meaningfulLen(l) > N && l.split(/\s+/).length > 1) over++;
       }
-      const rate = viol / lines * 1000;
-      console.log(`     ${N}자: 줄 ${lines} · 사고 ${viol} (${rate.toFixed(2)}‰)`);
+      const bRate = banned / lines * 1000;
+      console.log(`     ${N}자: 줄 ${lines} · 🔴금지 ${banned} (${bRate.toFixed(2)}‰) · 🟡감점 ${penal}`);
       ok(lost === 0, `${N}자 — 어절 손실·변형 없이 원문이 보존된다`);
       ok(over === 0, `${N}자 — 글자수 상한 위반 0`);
-      // 실측 기준선(2026-08-24): 14자 = 0.54‰ · 7자 = 13.2‰. 여유를 두고 상한을 건다.
-      ok(rate < (N >= 14 ? 3 : 20), `${N}자 — 끊어읽기 사고가 기준선 아래 (${rate.toFixed(2)}‰)`);
+      // 실측 기준선(2026-08-24): 14자 = 0건 · 7자 = 4.66‰(폭이 좁아 피할 자리가 없다).
+      ok(N >= 14 ? banned === 0 : bRate < 8,
+        `${N}자 — 금지 위반이 기준선 아래 (${banned}건 · ${bRate.toFixed(2)}‰)`);
     }
   }
 }
