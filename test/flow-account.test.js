@@ -85,6 +85,59 @@ ok('모두 소진되면 pickNext = null', () => {
   FA.cooldown(a2.id, 30);
   assert.strictEqual(FA.pickNext([]), null);
 });
+
+console.log('\n[1-b] 일일 한도 0 = 무제한 (UI 라벨이 거짓이던 것)');
+// 🔴 실사고: UI 에 「0=무제한」이라 적혀 있는데 Flow 만 0 을 못 받았다.
+//   setCap: `Math.max(1, parseInt(n,10) || 45)` → parseInt('0')||45 = 45, 통과해도 Math.max(1,0)=1.
+const a3 = FA.add('무제한 테스트');
+ok('🔴 setCap(0) 이 0 으로 저장된다 (예전엔 45 로 되돌아갔다)', () => {
+  FA.setCap(0);
+  assert.strictEqual(FA.list().dailyCap, 0, '0 이 아니면 UI 의 「0=무제한」이 거짓말이 된다');
+});
+ok('🔴 무제한이면 아무리 써도 계정을 계속 쓴다', () => {
+  FA.markUsed(a3.id, 999);
+  const acc = FA.list().accounts.find((x) => x.id === a3.id);
+  assert.strictEqual(acc.used, 999);
+  assert.strictEqual(acc.available, true, 'dailyCap 0 을 그냥 비교하면 전부 차단된다(무제한의 반대)');
+});
+ok('무제한이어도 쿨다운은 존중한다', () => {
+  FA.cooldown(a3.id, 30);
+  const acc = FA.list().accounts.find((x) => x.id === a3.id);
+  assert.strictEqual(acc.available, false, '엔진이 실제 한도를 본 뒤의 쿨다운은 무제한과 무관하게 지켜야 한다');
+});
+ok('문자열 "0" 도 무제한으로 받는다(UI 는 문자열을 보낸다)', () => {
+  FA.setCap(45); FA.setCap('0');
+  assert.strictEqual(FA.list().dailyCap, 0);
+});
+ok('음수·빈값·문자는 기본값(45)으로 — 무제한으로 오해하지 않는다', () => {
+  FA.setCap(-5); assert.strictEqual(FA.list().dailyCap, 45, '음수');
+  FA.setCap('abc'); assert.strictEqual(FA.list().dailyCap, 45, '문자');
+  FA.setCap(''); assert.strictEqual(FA.list().dailyCap, 45, '빈값');
+});
+ok('정상 숫자는 그대로', () => { FA.setCap(45); assert.strictEqual(FA.list().dailyCap, 45); });
+
+console.log('\n[1-c] 세 서비스의 한도 정책이 같은가 (UI 는 같은 라벨을 쓴다)');
+for (const k of Object.keys(require.cache)) if (/accounts/.test(k)) delete require.cache[k];
+const SVC = {
+  flow: require('../core/flow-accounts'),
+  genspark: require('../core/genspark-accounts'),
+  grok: require('../core/grok-accounts'),
+};
+for (const [name, S] of Object.entries(SVC)) {
+  ok(`${name}: setCap(0) → 0 (무제한)`, () => {
+    S.add('t_' + name);
+    S.setCap(0);
+    assert.strictEqual(S.list().dailyCap, 0);
+  });
+  ok(`${name}: 무제한이면 999회 써도 계정이 살아 있다`, () => {
+    const id = S.list().accounts[0].id;
+    S.markUsed(id, 999);
+    const avail = typeof S.activeAccounts === 'function'
+      ? S.activeAccounts().length > 0
+      : S.list().accounts.some((x) => x.available);
+    assert.strictEqual(avail, true);
+  });
+}
 process.env.USERPROFILE = realHome;
 try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch (_) {}
 ok('실제 홈의 계정 파일은 건드리지 않았다', () => {
@@ -171,7 +224,8 @@ ok('구독 없는 계정은 길게 쉬게 한다(12시간)', () =>
 ok('계정이 다 소진되면 각 계정의 이유를 로그로 남긴다', () =>
   assert.ok(/쉬는 중 — .*이후 재사용/.test(MAIN) && /오늘 한도 도달/.test(MAIN)));
 ok('🔴 계정 라벨과 used 를 함께 찍는다(undefined 재발 방지)', () =>
-  assert.ok(/오늘 \$\{acc\.used\}\/\$\{cap\}/.test(MAIN)));
+  assert.ok(/Flow 계정: \$\{acc\.label\}/.test(MAIN) && /오늘 \$\{acc\.used\}\//.test(MAIN),
+    '라벨과 used 가 로그에 있어야 한다(캡 표기는 capTxt — 아래 항목에서 따로 검사)'));
 ok('flow-engine 의 _createNewProject 가 조용히 넘어가지 않는다', () => {
   const body = ENG.slice(ENG.indexOf('async _createNewProject()'), ENG.indexOf('async _ensureAgentOff'));
   assert.ok(/throw err;/.test(body), '버튼을 못 찾으면 던져야 한다');
@@ -179,6 +233,15 @@ ok('flow-engine 의 _createNewProject 가 조용히 넘어가지 않는다', () 
 });
 ok('진단이 소개 페이지 신호를 실측 문구로 본다', () =>
   assert.ok(/Try in Google Flow\|Create with Google Flow\|구독을 살펴보/.test(ENG)));
+ok('🔴 로그가 한도 0 을 "3/0" 이라 적지 않는다', () =>
+  assert.ok(/const capTxt = cap > 0 \? String\(cap\) : '무제한'/.test(MAIN)
+    && /오늘 \$\{acc\.used\}\/\$\{capTxt\}/.test(MAIN), 'capTxt 로 표시해야 한다'));
+ok('소진 요약이 무제한을 "한도 도달" 로 오판하지 않는다', () =>
+  assert.ok(/\(cap > 0 && a\.used >= cap\)/.test(MAIN), 'cap=0 이면 used >= 0 이 항상 참이다'));
+ok('flow 의 _available 이 무제한을 캡 없이 처리한다', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'flow-accounts.js'), 'utf8');
+  assert.ok(/if \(!\(c\.dailyCap > 0\)\) return true;/.test(src));
+});
 ok('main.js 는 LF 로 저장돼 있다', () => {
   const raw = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'latin1');
   assert.strictEqual((raw.match(/\r\n/g) || []).length, 0);

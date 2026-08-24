@@ -1547,6 +1547,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   const flowImageModel = require('./core/image-rotation').load().flowImageModel;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const cap = FlowAccounts.load().dailyCap;
+  const capTxt = cap > 0 ? String(cap) : '무제한';   // 0 = 무제한 — 로그에 "3/0" 이라 적히지 않게
   const acctTotal = FlowAccounts.list().accounts.length;
   const tried = new Set(); // 이번 호출에서 이미 시도한 계정 (Flow 계정 순환용)
   // 라운드로빈: 마지막 사용 계정의 '다음'부터 — 단건 재생성을 연달아 눌러도 한 계정에 몰리지 않게 분산.
@@ -1566,16 +1567,16 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
       try {
         for (const a of FlowAccounts.list().accounts) {
           const why = a.cooling ? `쉬는 중 — ${new Date(a.coolUntil).toLocaleTimeString('ko-KR')} 이후 재사용`
-            : (a.used >= cap ? '오늘 한도 도달'
+            : ((cap > 0 && a.used >= cap) ? '오늘 한도 도달'
             : (tried.has(a.id) ? '이번에 시도했으나 0장' : '사용 가능'));
-          logger(`   · ${a.label}: ${why} (오늘 ${a.used}/${cap})`);
+          logger(`   · ${a.label}: ${why} (오늘 ${a.used}/${capTxt})`);
         }
       } catch (_) {}
       break;
     }
     tried.add(acc.id);
     if (++loopGuard > acctTotal + 2) { logger('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
-    logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${cap}) · 대상 ${targets.length}장 · 모델 ${flowImageModel}`);
+    logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${capTxt}) · 대상 ${targets.length}장 · 모델 ${flowImageModel}`);
 
     const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
     const imgDir = path.join(workDir, 'images');

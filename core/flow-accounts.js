@@ -51,8 +51,13 @@ function _coolUntil(c, id) {
   return (e && e.date === _today() && e.cooldownUntil && Date.now() < e.cooldownUntil) ? e.cooldownUntil : 0;
 }
 // 사용 가능 = 오늘 한도 미도달 + 쿨다운 아님.
+//   🔑 dailyCap <= 0 은 **무제한** — 캡을 보지 않는다. 그냥 `countToday < dailyCap` 로 두면
+//   0 일 때 모든 계정이 "한도 초과" 가 되어 무제한이 아니라 **전부 차단**이 된다.
+//   ⚠ 무제한이어도 쿨다운(엔진이 실제 한도·차단 메시지를 본 뒤 쉬는 것)은 존중한다.
 function _available(c, id) {
-  return countToday(c, id) < c.dailyCap && !_cooling(c, id);
+  if (_cooling(c, id)) return false;
+  if (!(c.dailyCap > 0)) return true;
+  return countToday(c, id) < c.dailyCap;
 }
 function list() {
   const c = load();
@@ -79,9 +84,14 @@ function rename(id, label) {
   const a = accs.find((x) => x.id === id);
   if (a) { a.label = String(label || '').trim() || a.label; c.accounts = accs; save(c); }
 }
+// 일일 한도 저장. **0 = 무제한**(앱이 막지 않고 엔진의 실제 한도 메시지에만 의존).
+//   🔴 2026-08-24: 기존 `Math.max(1, parseInt(n,10) || 45)` 는 0 을 두 번 막았다 —
+//   `parseInt('0') || 45` 가 45 를 주고(0 은 falsy), 통과해도 Math.max(1,0)=1 이 됐다.
+//   UI 에는 「0=무제한」이라 적혀 있어 라벨이 거짓이었다. core/accounts.js(Genspark·Grok)와 같은 정책으로 맞춘다.
 function setCap(n) {
   const c = load();
-  c.dailyCap = Math.max(1, parseInt(n, 10) || 45);
+  const v = parseInt(n, 10);
+  c.dailyCap = (Number.isFinite(v) && v >= 0) ? v : 45;   // 음수·빈값만 기본값으로
   save(c);
   return c.dailyCap;
 }
