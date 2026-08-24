@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.3.38",
+  "version": "0.3.39",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -26,7 +26,8 @@
     "test:styles": "node test/style-share.test.js && node test/channel-styles.test.js && node test/sync-guard.test.js && node test/style-share.smoke.js",
     "test:gputemp": "node test/gpu-temp.test.js",
     "test:merge": "node test/merge-assets.test.js && node test/merge-assets.smoke.js",
-    "test:flow": "node test/flow-account.test.js"
+    "test:flow": "node test/flow-account.test.js",
+    "test:caption": "node test/caption-break.test.js"
   },
   "dependencies": {
     "@vivliostyle/cli": "^11.0.4",
