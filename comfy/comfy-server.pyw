@@ -143,7 +143,13 @@ def main():
             os.environ['PRIMING_COMFY_REEXEC'] = '1'
             os.execv(want, [want, '-s', os.path.abspath(__file__)])
 
-    argv = [main_py, '--port', str(PORT), '--disable-auto-launch']
+    # --listen 0.0.0.0 = 다른 PC(아내 노트북)도 이 서버로 이미지를 만들 수 있게 한다.
+    #   OmniVoice(TTS)가 이미 같은 구조다(0.0.0.0:9881) — 그래서 아내 PC 가 LAN·Tailscale 로 TTS 를 쓴다.
+    #   ⚠ 실제 관문은 **Windows 방화벽**이다: Private 프로필에 8188 인바운드 허용 규칙이 있어야 들어온다
+    #     (Tailscale 인터페이스도 Private 로 잡히므로 규칙 하나가 LAN·Tailscale 둘 다 커버한다).
+    #     규칙이 없으면 바인딩만 열려 있고 밖에서는 여전히 못 들어온다 = 기본은 안전.
+    #   ⚠ ComfyUI 에는 인증이 없다 — 공용 와이파이(Public 프로필)에서는 규칙이 없어 자동으로 막힌다.
+    argv = [main_py, '--port', str(PORT), '--listen', '0.0.0.0', '--disable-auto-launch']
 
     # 모델 경로 — Comfy Desktop 이 만들어 두는 yaml. 이게 없으면 **모델 목록이 비어**
     # 「로컬 ComfyUI 에 모델 'krea2_turbo…' 가 없습니다」 로 생성이 통째로 실패한다.
