@@ -7,6 +7,59 @@
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
 
+## 🖼 Krea2 int4 판 추가 — "새 LoRA" 인 줄 알았던 게 본체 모델이었다 (2026-08-26, v0.3.44)
+> 로이: "이미지 생성하는데 로컬 krea2 를 이용하는 경우 새로운 로라를 다운받았는데, 새로운 로라로
+>   이미지 생성을 하려면 어떻게 해야해?" → 파일은 `krea2Int4Convrot_v10Turbo.safetensors`.
+- 🔑 **LoRA 가 아니라 본체 확산 모델(UNET)이었다.** 구분법(다음에도 이 순서로 본다):
+  ① **위치** — LoRA 는 `…/ComfyUI-Shared/models/loras/`, 본체는 `…/models/diffusion_models/`
+  ② **크기** — LoRA 는 수백MB(`krea2_darkbrush` 469MB), 본체는 수~십GB(이건 6.9GB)
+  ③ **결정적** — 로컬 `/object_info/LoraLoaderModelOnly` 와 `/object_info/UNETLoader` 중 어디에 잡히는가
+  · 모델 폴더의 정본은 `%APPDATA%\Comfy Desktop\instance-model-paths\<id>.yaml`(base_path + `loras:`/`unet:`).
+- **앱에는 LoRA 선택 UI 가 없다** — 엔진(`core/comfy-image.js`)은 프롬프트·해상도·seed 만 주입하고
+  로더는 워크플로 JSON 이 정한다. Krea2 워크플로의 로더 4개:
+  `30:10` UNETLoader · `30:11` CLIPLoader · `30:12` VAELoader · `30:15` LoraLoaderModelOnly(0.8).
+  → 모델이든 LoRA 든 **워크플로에서 지정하는 것이 유일한 방법**이다.
+- ✅ **`comfy/image_krea2_int4_turbo.json` 신설** — 원본에서 **UNETLoader 하나만** 바꿨다(CLIP·VAE·LoRA 동일).
+  `comfy-image.js` BUNDLED 에 「Krea2 int4 Turbo」로 등록 → 헤더 「② 이미지」 드롭다운에 나온다.
+  🔑 **기본값은 그대로 Krea2 Turbo** — 화질 판정은 로이 몫이라 자동으로 갈아타지 않는다.
+
+### A/B 실측 (RTX 3060 · 같은 프롬프트 · 같은 seed · 같은 LoRA · 1344x768)
+조건: 중복 ComfyUI 0 · VRAM 여유 11.2GB · RAM 여유 21.9GB · 큐 비어 있음(`comfy-perf.scanRivals` 로 확인).
+seed 는 **`Math.random` 을 고정**해 두 판이 같은 값을 받게 했다(엔진 코드 무수정).
+
+| | 1장째(모델 로딩 포함) | 2장째(warm) | 파일 |
+|---|---|---|---|
+| 현재 = fp8 요청 → **int8_convrot 자동 교체** | 30.4s (서버 29.9s) | **20.3s** | 1171·1073KB |
+| 신규 **int4** | 18.2s (서버 17.2s) | **13.5s** | 1162·1238KB |
+
+→ **1.50배 빠름.** ⚠ VRAM 점유는 둘 다 약 10GB 로 **차이가 없었다**(파일이 6.9GB vs 13.5GB 인데도 —
+  ComfyUI 가 그만큼 잡아 두는 듯. "파일이 작으니 VRAM 도 준다" 고 기대하지 말 것).
+⚠ **화질은 내가 판정 못 한다** — 4장(같은 seed 짝)을 로이에게 보냈다.
+
+### 🔑 모델 자동 대체가 int4 에는 개입하지 않는다 (실측)
+- `baseKey('krea2Int4Convrot_v10Turbo')` = `"krea2int4convrot v10turbo"` 로 `"krea2 turbo"` 와 달라
+  **`pickSubstitute`·`pickFasterQuant` 둘 다 null** → **요청한 그대로 int4 가 쓰인다.**
+  (정체성이 바뀌는 대체는 거부 = v0.3.22 의 의도된 동작. 이름이 camelCase 라 토큰 분해가 안 되는 것도 한몫한다.)
+- ⚠ 반대로 **지금 Krea2 워크플로는 fp8 을 요청하지만 3060 에서 실제로 쓰이는 건 int8_convrot 이다**(v0.3.35).
+  로그에 `⚡ … fp8 을 하드웨어로 못 돌립니다 — … → krea2_turbo_int8_convrot` 가 매번 찍힌다.
+
+### 검증
+- `npm run test:comfy` 에 **`test/comfy-workflows.test.js` 31/31 신설** — 번들 파일 실재 + **API 포맷**
+  (UI 포맷이면 앱이 못 읽는다) · **int4 는 UNETLoader 하나만 다르다** · LoRA/CLIP/VAE 동일 ·
+  자동 대체 무개입 4건 · fp8→int8 기존 동작 보존 · `loadConfig()` 목록에 실제 등록.
+  🔑 **A/B 역검증**: int4 워크플로의 CLIP 을 일부러 바꾸면 **2건 실패**(31→29).
+- 회귀: comfy 전량 통과(모델 · perf · pipeline-mode · gpu-lanes · **2분할 패널 E2E 69/69**).
+
+### ⚠ 로이가 알아 둘 것
+- 쓰려면 헤더 **「② 이미지」 → 🖥 Krea2 int4 Turbo** 를 고른다. 기본값은 안 건드렸다.
+- 아내 PC 에도 **항목은 보이지만** 그 PC 에 `krea2Int4Convrot_v10Turbo.safetensors` 가 없으면 실패한다
+  (v0.3.22 의 사람 말 오류로 "그 서버에 있는 것: …" 을 알려준다). 클라우드(☁)를 쓰면 무관.
+- 💡 파일명을 `krea2_turbo_int4_convrot.safetensors` 로 바꾸면 앱이 **같은 Krea2 Turbo 계열**로 인식한다
+  (클라우드↔로컬 왕복 시 자동 대체 대상이 됨). 선택 사항 — 지금 이름 그대로도 정상 동작한다.
+- **진짜 LoRA** 를 받았을 땐: 파일을 `…/models/loras/` 에 넣고 워크플로 `30:15` 의 `lora_name`·
+  `strength_model` 을 바꾼다. LoRA 를 여러 개 쌓으려면 ComfyUI 웹UI 에서 편집 후 **「API 포맷으로 저장」**
+  (⚠ 일반 저장은 앱이 못 읽는다) → ⚙ 설정 → 🖼 ComfyUI 이미지 → 워크플로 **＋추가**.
+
 ## 🔢 자막은 숫자 · TTS 는 발음 — 대본에 숫자를 한글로 쓸 필요가 없었다 (2026-08-25, v0.3.43)
 > 로이: "자막 만드는 텍스트하고 TTS 변환하는 텍스트가 서로 다르게 관리되고 있지? TTS 때문에 숫자를
 >   한글로 작성하고 있었는데, 자막이 너무나도 어색하고 이상하게 읽히는 부분이 있어. TTS 변환용으로는
