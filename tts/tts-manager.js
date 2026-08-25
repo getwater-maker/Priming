@@ -151,23 +151,39 @@ class TTSManager {
   async synthesize(text, opts = {}) {
     // 첫 호출(앱 시작 직후) 은 서버 동기화를 기다림 — 다른 노트북에서 LAN 으로 갱신된 사전 반영.
     // 이후 호출은 fire-and-forget (TTL 60초 안이면 refresh 도 스킵).
-    if (this._dictRefreshAt === 0) {
-      await this._maybeRefreshDictAsync();
-    } else {
-      this._maybeRefreshDictAsync();
-    }
-    // 순서: 사용자 사전 먼저 → 일반 정규화. 사전이 항상 우선되어 사용자 명시 발음이
-    // 자동 숫자 변환에 덮이지 않게 보장 (예: 사전 "6월"→"유월" 이 정규화 "6월"→"육월"
-    // 보다 우선되어야 한다).
-    const { applyOmniVoiceDict, normalizeForTTS } = require('./text-pronouncer');
-    const dictApplied = applyOmniVoiceDict(text, this._dictCache);
-    const processed = normalizeForTTS(dictApplied);
+    await this.prepareDict();
+    // 🔑 가공은 processForTTS 한 곳에서만 — TTS 캐시 키(core/pipeline)도 같은 함수를 탄다.
+    //   두 곳에서 각자 가공하면 "캐시가 옛 발음을 되살리는" 사고가 난다.
+    const processed = this.processText(text);
     const id = opts.provider || 'omnivoice';
     const p = this.providers.get(id);
     if (!p || !p.ready) {
       throw new Error(`TTS provider '${id}' not available`);
     }
     return await p.synthesize(processed, opts);
+  }
+
+  /**
+   * TTS 로 실제 보내지는 최종 문자열(발음사전 + 정규화 적용)을 sync 로 반환.
+   * synthesize 와 **같은 함수**(text-pronouncer.processForTTS)를 타므로, 이 값을 캐시 키에
+   * 쓰면 키와 실제 합성 텍스트가 어긋나지 않는다. (사전을 고쳤는데 옛 음성이 재활용되던 버그)
+   */
+  processText(text) {
+    const { processForTTS } = require('./text-pronouncer');
+    return processForTTS(text, this._dictCache);
+  }
+
+  /**
+   * 발음사전을 서버와 맞춘다. 첫 호출(앱 시작 직후)만 대기하고, 이후는 fire-and-forget
+   * (TTL 60초 안이면 refresh 도 스킵). 캐시 키를 계산하기 전에 불러야 첫 문장만 옛 사전으로
+   * 키가 계산되는 어긋남이 없다.
+   */
+  async prepareDict() {
+    if (this._dictRefreshAt === 0) {
+      await this._maybeRefreshDictAsync();
+    } else {
+      this._maybeRefreshDictAsync();
+    }
   }
 
   /** 모달 저장 직후 호출 — 메모리 캐시를 즉시 디스크 최신값으로 교체 */

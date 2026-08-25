@@ -223,6 +223,9 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     language: preset.language,
     seed: preset.seed,
   };
+  // 🔑 캐시 키가 "합성될 최종 문자열" 기준이므로, 루프 전에 발음사전을 서버와 한 번 맞춘다.
+  //   안 맞추면 첫 문장만 옛 사전으로 키가 계산돼 어긋난다.
+  try { if (typeof ttsMgr.prepareDict === 'function') await ttsMgr.prepareDict(); } catch {}
   const failed = [];            // 3회 시도해도 안 된 문장 번호 — 끝에 요약하고 .vrew 게이트가 막는다
   let consecFail = 0;           // 연속 실패 수(서버가 죽었는지 판단)
   const MAX_CONSEC_FAIL = 5;
@@ -233,7 +236,10 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     if (!force && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) { if (onProgress) { try { onProgress(); } catch {} } continue; }
     const _genT0 = Date.now(); // 생성 소요시간 측정 (RTF = 생성시간/음성길이)
     // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사. (force 면 건너뜀)
-    const cacheKey = TtsCache.keyFor(s.text, sf, synthOpts);
+    //   🔑 키는 원문이 아니라 **실제 합성될 문자열**(발음사전+정규화 적용) 기준이다. 원문으로
+    //     잡으면 발음사전·정규화를 고쳐도 같은 키가 나와 **옛 음성이 되살아난다**(2026-08-25).
+    const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.text) : s.text;
+    const cacheKey = TtsCache.keyFor(keyText, sf, synthOpts);
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
