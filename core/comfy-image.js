@@ -49,7 +49,8 @@ const BUNDLED = [
   // Krea2 Turbo 의 int4(convrot) 판 — 본체 모델만 다르고 CLIP·VAE·LoRA 는 동일.
   //   RTX 3060 실측(2026-08-26, 같은 프롬프트·seed): warm 13.5s vs int8 20.3s = 1.50배 빠름.
   //   ⚠ 그 서버에 krea2Int4Convrot_v10Turbo.safetensors 가 있어야 한다(없으면 사람 말 오류로 알려준다).
-  { name: 'Krea2 int4 Turbo', file: 'image_krea2_int4_turbo.json' },
+  //   ⚠ 클라우드(comfy.org)엔 이 파일이 없다(실측: krea 계열 9개 중 int4 판 없음) → 이름에 「로컬」 표시.
+  { name: 'Krea2 int4 Turbo (로컬)', file: 'image_krea2_int4_turbo.json' },
 ];
 const DEFAULT_ACTIVE_FILE = 'image_z_image_turbo.json'; // 활성값이 비었거나 실재하지 않을 때 기본
 function _ensureBundled(cfg) {

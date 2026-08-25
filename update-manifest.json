@@ -1,5 +1,5 @@
 {
-  "version": "0.3.44",
+  "version": "0.3.45",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "4e3074b7e2df3edc8f53a4c2668d01eb6749b416",
+    "CLAUDE.md": "8558f87e6cacc2584a8d55547b34a4646ceacaad",
     "comfy/comfy-server.pyw": "c3e57584186a08153ebb865ebe4f44cca99ee43d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
@@ -26,7 +26,7 @@
     "core/book/spine-calc.js": "daa92d8b552068d34b35cd9024ef63e9c7056eaf",
     "core/caption-splitter.js": "9baf53109f5e4706c83bbc21bceef48e514aec16",
     "core/channel-styles.js": "5be9d9e6167cf6b5e17b015d78c35b96002698d0",
-    "core/comfy-image.js": "9ba4858b943505d5a5fa66225c58db458ec9f801",
+    "core/comfy-image.js": "73a13199d4d3bc9c94a172c3ea2ffc117a9ec965",
     "core/comfy-launch.js": "682b7f7d1dcd6c89b083b79cc0e231b67ac4b70f",
     "core/comfy-models.js": "7ee083a1bf866f6440fabca9dab2ee9ef386fd60",
     "core/comfy-perf.js": "140c400a175f453f6ffe61982899a599921a1896",
@@ -74,7 +74,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "9bc6c533137ace753b768b30fe0a269bbd23b36d",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "5978f8b4f3ac1f71b76e7620ad882f5d6cf212d2",
+    "package.json": "c22fbf2be345c2cc51b66f8395e79753e0304888",
     "preload.js": "228a87ab60eb7442dd0b45bb1cdd27e15b481d02",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-CsSsZU6a.js": "377661d11c510f1eae67d6a90161d197d5902848",

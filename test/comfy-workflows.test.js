@@ -87,7 +87,7 @@ eq(oneOf(a, 'UNETLoader')[0].inputs.unet_name, 'krea2_turbo_fp8_scaled.safetenso
 
 // ── ⑤ 앱에 등록됐는지 (원문 + 실제 loadConfig 대조) ──
 ok(/image_krea2_int4_turbo\.json/.test(IMG_SRC), 'comfy-image.js BUNDLED 에 int4 워크플로가 있다');
-ok(/name: 'Krea2 int4 Turbo'/.test(IMG_SRC), '드롭다운 이름이 지정돼 있다');
+ok(IMG_SRC.includes("name: 'Krea2 int4 Turbo (로컬)'"), '드롭다운 이름에 「로컬」 표시가 있다(클라우드엔 이 모델이 없다)');
 const cfg = require('../core/comfy-image').loadConfig();   // 읽기 전용(파일 재기록 없음)
 const names = (cfg.workflows || []).map((w) => path.basename(String(w.path)).toLowerCase());
 ok(names.includes('image_krea2_int4_turbo.json'), 'loadConfig() 결과의 워크플로 목록에 실제로 등록된다');
