@@ -65,7 +65,8 @@ const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr:
   // 모드별 작업 큐 — 각 모드(롱폼/출판)가 대본 여러 개(items)를 순서대로 보관.
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
-  modes: { longform: { items: [], activeId: null }, book: { items: [], activeId: null } } };
+  // 🎬 remotion — TSV 기반이라 대본 큐를 쓰지 않지만, activateMode 가 모드마다 큐를 찾으므로 자리를 둔다.
+  modes: { longform: { items: [], activeId: null }, remotion: { items: [], activeId: null }, book: { items: [], activeId: null } } };
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -1439,6 +1440,100 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
   }
   if (outs.length) { try { shell.openPath(S.outRoot); } catch {} }
   return { outs };
+});
+
+// ── 🎬 리모션 모드 — TSV 를 열어 그 파일명 그대로 mp3 를 만든다 ──
+//   영상은 리모션이 만들고 이 앱은 **음성만** 담당한다(자막·이미지·비디오·.vrew 없음).
+//   목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 한 번 정하면 바꾸지 말 것(캐시 키라 전량 재합성).
+const TSV = require('./core/tsv-tts');
+ipcMain.handle('remotion-open-tsv', async (_e, args = {}) => {
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  const defPath = (preset && preset.scriptFolder) || undefined;
+  const r = await dialog.showOpenDialog(win, {
+    title: 'TSV 열기 — 한 줄에 「파일명<탭>문장」',
+    defaultPath: defPath,
+    properties: ['openFile'],
+    filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
+  });
+  if (r.canceled || !r.filePaths.length) return null;
+  const file = r.filePaths[0];
+  const parsed = TSV.parseTsv(fs.readFileSync(file, 'utf8'));
+  S.tsv = { path: file, rows: parsed.rows };
+  log(`📄 TSV 열기 — ${path.basename(file)} · ${parsed.rows.length}행`
+    + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
+  for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
+  return { path: file, name: path.basename(file), rows: parsed.rows, errors: parsed.errors };
+});
+
+ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리모션 TTS', async () => {
+  if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  const outRoot = preset.outLong || preset.outputFolder;
+  if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
+
+  // 목소리 — 채널의 참조음성. `srv:<이름>` 이면 서버 공용 목소리다.
+  const ref = preset.voiceCloneRefAudio || '';
+  const voice = /^srv:/.test(ref) ? ref.slice(4) : '';
+  if (!voice) throw new Error('채널 편집 → 🎙 음성 에서 서버 목소리(☁)를 고르세요.');
+
+  // ⚠ 배속의 정본은 모드별 필드 `speedLong` 이다(`speed` 는 옛 단일 필드 = 사실상 방치값 — v0.3.25 참조).
+  const speed = Number(preset.speedLong != null && preset.speedLong !== '' ? preset.speedLong : preset.speed) || 1;
+  const base = path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '');
+  const outDir = path.join(outRoot, _safeFolder(base));
+  const dict = args.dictPath && fs.existsSync(args.dictPath)
+    ? TSV.parseDictMd(fs.readFileSync(args.dictPath, 'utf8')) : [];
+
+  S.abort = false;
+  log(`🎤 리모션 TTS — ${S.tsv.rows.length}행 · 배속 ${speed} · 목소리 ${voice}`);
+  log(`   출력 ${outDir}`);
+  if (dict.length) log(`   발음사전 ${dict.length}항목`);
+  try {
+    const r = await withAwake('리모션 TTS', async () => TSV.runTsvBatch({
+      rows: S.tsv.rows, outDir, ttsMgr: (await P.makeTtsManager(log, preset.engine || 'omnivoice')).mgr,
+      voice, speed, seed: preset.seed != null && preset.seed !== '' ? preset.seed : undefined,
+      trim: args.trim !== false, dict, force: !!args.force,
+      onLine: (m) => log(m),
+      onProgress: (i, n) => { try { win.webContents.send('remotion-progress', { i, n }); } catch {} },
+      abortSignal: () => S.abort,
+    }));
+    log(`✅ 리모션 TTS — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length} / 전체 ${r.total}`
+      + ` · ${_dur(r.totalDurationSec)}`
+      + (r.totalTrimmedSec ? ` (무음 ${r.totalTrimmedSec.toFixed(1)}초 제거)` : ''));
+    if (r.failed.length) log(`   ⚠ 실패 목록: ${r.failedPath}`);
+    try { shell.openPath(outDir); } catch {}
+    return { ok: true, outDir, ...r };
+  } catch (e) {
+    log(`❌ 리모션 TTS 실패 — ${e.message}`);
+    throw e;
+  }
+}));
+
+// ── 🎬 리모션 내보내기 ──────────────────────────────────
+//   롱폼으로 만든 문장별 음성을 리모션이 쓸 수 있는 꼴(mp3 + 타임라인 JSON)로 낸다.
+//   🔑 **원본 tts-N 폴더와 .vrew 는 건드리지 않는다** — 사본만 가공한다(로이 결정 2026-08-26).
+//     무음 트림·mp3 변환이 여기서만 일어나므로 기존 작업물의 타이밍이 어긋나지 않는다.
+ipcMain.handle('export-remotion', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const RX = require('./core/remotion-export');
+  const { captionMaxChars = 7, gapSec = 0, trim = true } = args;
+  const base = _safeFolder(S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '') : '대본');
+  const outDir = path.join(S.outRoot, 'remotion', base);
+  log(`🎬 리모션 내보내기 — ${outDir}`);
+  try {
+    const r = await withAwake('리모션 내보내기', async () => RX.exportRemotion(S.parsed, outDir, {
+      captionMaxChars, gapSec, trim, title: base,
+      onLine: (m) => log(m),
+      abortSignal: () => S.abort,
+    }));
+    log(`✅ 리모션 내보내기 완료 — 문장 ${r.sentenceCount} · 장면 ${r.sceneCount} · ${_dur(r.durationSec)}`
+      + (r.trimmedSec ? ` (무음 ${r.trimmedSec.toFixed(1)}초 제거)` : ''));
+    try { shell.openPath(outDir); } catch {}
+    return { ok: true, ...r };
+  } catch (e) {
+    log(`❌ 리모션 내보내기 실패 — ${e.message}`);
+    throw e;
+  }
 });
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {

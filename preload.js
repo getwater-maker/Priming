@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld('api', {
   videoBuild: (args) => ipcRenderer.invoke('video-build', args),
   deleteVideos: () => ipcRenderer.invoke('delete-videos'),
   exportVrew: (args) => ipcRenderer.invoke('export-vrew', args),
+  // 🎬 리모션 — TSV 열기 / mp3 만들기 / (롱폼 대본용) 내보내기
+  remotionOpenTsv: (args) => ipcRenderer.invoke('remotion-open-tsv', args),
+  remotionRunTts: (args) => ipcRenderer.invoke('remotion-run-tts', args),
+  exportRemotion: (args) => ipcRenderer.invoke('export-remotion', args),
+  onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
   appendLog: (line) => ipcRenderer.invoke('append-log', line),
   openLogs: () => ipcRenderer.invoke('open-logs'),
   attachAsset: (args) => ipcRenderer.invoke('attach-asset', args),

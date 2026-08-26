@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import BookView from './BookView.jsx';
+import RemotionView from './RemotionView.jsx';
 
 const media = (p) => 'media://' + encodeURIComponent(p);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -286,6 +287,10 @@ export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   const isLf = mode === 'longform';
   const isBk = mode === 'book';
+  const isRx = mode === 'remotion';   // 🎬 리모션 — 음성(mp3)만 만드는 모드
+  // 제작 파이프라인(대본 열기·①음성~④완성·자막 분할바)이 **없는** 모드.
+  // 🔑 세 곳을 각각 `!isBk` 로 적으면 모드가 늘 때 반드시 한 곳을 빠뜨린다 → 플래그 하나로 묶는다.
+  const noProduction = isBk || isRx;
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
@@ -1193,7 +1198,8 @@ export default function App() {
     setCh({
       name: p.name || '', group: p.group || '', engine: p.engine || 'omnivoice',
       // 옛 값('shorts'/'playlist')은 여는 순간 정규화 — 안 하면 저장할 때 제거된 값이 파일에 되쓰인다.
-      startMode: (p.startMode === 'book') ? 'book' : 'longform', voice: p.voice || '',
+      // 🔴 새 모드를 여기 안 넣으면 **고르고 저장해도 다음에 열 때 롱폼으로 되돌아간다**(v0.3.50 과 같은 사고).
+      startMode: (p.startMode === 'book' || p.startMode === 'remotion') ? p.startMode : 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
@@ -1219,7 +1225,8 @@ export default function App() {
     try {
       const p = await api.getPresetDetail(name);
       // 옛 저장값(startMode:'shorts'|'playlist')은 롱폼으로 정규화 — 제거된 모드 화면에 진입하지 않게.
-      const sm = ((p && p.startMode) === 'book') ? 'book' : 'longform';
+      const _sm0 = p && p.startMode;
+      const sm = (_sm0 === 'book' || _sm0 === 'remotion') ? _sm0 : 'longform';
       setMode(sm);
     } catch {}
   }
@@ -1961,6 +1968,7 @@ export default function App() {
             <button className="ghost" title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동" style={{ padding: '4px 8px' }} onClick={() => { setFindOpen(true); setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30); }}>🔍</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
+              <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
             <select title="채널(프리셋) — 고르면 그 채널의 시작 화면으로 전환" value={presetName} onChange={(e) => switchModeForChannel(e.target.value)}>
@@ -1981,7 +1989,7 @@ export default function App() {
             <button className="ghost" title="채널 목록 순서 변경 (드롭다운에 보이는 순서)" style={{ padding: '6px 9px' }} onClick={openChOrder}>↕</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소" style={{ padding: '6px 9px' }} onClick={() => openSettings('img')}>⚙ 설정</button>
-            {!isBk && (<>
+            {!noProduction && (<>
               <span className="hgroup">
                 <span className="glabel">대본</span>
                 <button onClick={openScript}>📂 열기</button>
@@ -2013,7 +2021,7 @@ export default function App() {
           </div>
         </div>
         {/* 제작 파이프라인 행 — 작업 순서대로 ①음성 → ②이미지 → ③비디오 → ④완성 그룹 */}
-        {!isBk && (
+        {!noProduction && (
         <div className="hrow" style={{ justifyContent: 'flex-start' }}>
           <span className="hgroup">
             <span className="glabel">① 음성</span>
@@ -2085,7 +2093,7 @@ export default function App() {
       </header>
 
       {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (출판 모드 제외) */}
-      {!isBk && <div id="capbar">
+      {!noProduction && <div id="capbar">
         {gsCool && gsCool.until > 0 && (
           <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. 이 시각 이후 자동으로 다시 시도합니다. 그 전까지는 순환(무료)이 Genspark 에 접속하지 않고 바로 Flow 로 이미지를 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
             style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -2114,7 +2122,9 @@ export default function App() {
 
       <div id="body">
         <main>
-          {isBk ? (
+          {isRx ? (
+            <RemotionView presetName={presetName} setStatus={setStatus} logline={logline} />
+          ) : isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
           ) : (<>
           {queue && queue[mode] && queue[mode].items.length > 0 && (
@@ -2203,7 +2213,10 @@ export default function App() {
             <h3>⚙ 채널(프리셋) 편집 — {(ch._raw && ch._raw.name) || ch.name}</h3>
             {/* 섹션을 세로로 쌓지 않고 탭으로 나눈다 — 스크롤 없이 한 화면에 들어오게 (2026-08-14) */}
             <div className="tabbar">
-              {[['basic', '🏠 기본'], ['voice', '🎙 음성'], ['caption', '📝 자막·분할'], ['tools', '🖼 제작 도구'], ['folder', '📁 폴더']].map(([id, lbl]) => (
+              {/* 🎬 리모션 채널은 음성만 만든다 — 자막·이미지·비디오가 없으므로 그 두 탭을 감춘다. */}
+              {[['basic', '🏠 기본'], ['voice', '🎙 음성'],
+                ...(ch.startMode === 'remotion' ? [] : [['caption', '📝 자막·분할'], ['tools', '🖼 제작 도구']]),
+                ['folder', '📁 폴더']].map(([id, lbl]) => (
                 <button key={id} className={chTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setChTab(id)}>{lbl}</button>
               ))}
             </div>
@@ -2218,11 +2231,16 @@ export default function App() {
                     onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
                   <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
                 <div className="frow"><label>시작 화면</label>
-                  <select style={{ flex: '0 0 220px', padding: 6 }} value={(ch.startMode === 'book') ? 'book' : 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
+                  <select style={{ flex: '0 0 220px', padding: 6 }}
+                    value={(ch.startMode === 'book' || ch.startMode === 'remotion') ? ch.startMode : 'longform'}
+                    onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
                     <option value="longform">롱폼 (16:9)</option>
+                    <option value="remotion">🎬 리모션 (음성만)</option>
                     <option value="book">📖 출판</option>
                   </select>
-                  <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
+                  <span className="meta">{ch.startMode === 'remotion'
+                    ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
+                    : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</span>
                 </div>
                 <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 (언제든 변경)</span></div>
               </div>)}
@@ -2294,8 +2312,10 @@ export default function App() {
               </div>)}
 
               {chTab === 'folder' && (<div>
-                <div className="frow"><label>대본 폴더</label><input placeholder="대본(.md) 폴더" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
-                <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본 폴더'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
+                {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
+                <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                {ch.startMode === 'remotion' && <div className="meta" style={{ marginTop: 6 }}>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.</div>}
               </div>)}
 
             </div>
@@ -2814,7 +2834,8 @@ export default function App() {
   );
 
   async function switchMode(m) {
-    const nm = (m === 'book') ? 'book' : 'longform';
+    // 🔴 새 모드를 여기 안 넣으면 **버튼을 눌러도 롱폼으로 되돌아간다**(v0.3.50 과 같은 계열의 조용한 되돌림).
+    const nm = (m === 'book' || m === 'remotion') ? m : 'longform';
     if (nm === mode) return;
     hasStoredRangeRef.current = false; restoringItemRef.current = false; // 모드 전환 = 그 모드 기본값 계산 허용
     setMode(nm);
