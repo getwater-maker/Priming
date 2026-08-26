@@ -276,11 +276,15 @@ async function _retryFs(fn, label, onLine) {
  *   o.force     {boolean}  캐시·기존 파일을 무시하고 전부 다시 만든다
  *   o.onLine, o.onProgress, o.abortSignal
  *
- * 🔑 **speedMode 는 결과가 다르다.**
- *   · `server` — OmniVoice 에 `speed` 를 넘겨 **모델이 실제로 천천히 발화**한다(운율이 살아 있다).
- *   · `atempo` — 1.0 으로 합성한 뒤 ffmpeg 로 **파형을 늘린다**(피치는 유지되지만 늘어진 느낌이 날 수 있다).
- *   앱의 롱폼은 예부터 atempo 를 써 왔지만 **어느 쪽이 나은지는 들어 봐야 안다**(내가 판정할 수 없는 영역).
- *   그래서 둘 다 지원하고 기본은 검증된 atempo 로 둔다.
+ * 🔴 **speedMode: 느리게 하려면 `atempo` 뿐이다 — `server` 는 느린 방향으로 듣지 않는다(실측).**
+ *   · `atempo`(기본) — 1.0 으로 합성한 뒤 ffmpeg 로 파형을 늘린다. 피치 유지.
+ *   · `server` — OmniVoice 의 `speed` 파라미터. **빠른 방향으로만 작동한다.**
+ *   2026-08-26 실측(같은 문장·트림 끔): speed **2.0 → 2.01초**(1.0 은 3.86초 = 절반으로 줄어 정상),
+ *   그런데 speed **0.5 → 3.02초** 로 **늘어나기는커녕 오히려 짧아진다.**
+ *   ASR 전사로 확인하니 0.5 도 문장은 **온전하다**(「받을 것이 준비되어 있지 않으면 그냥 지나갑니다.」)
+ *   — 소리가 깨진 게 아니라 **그냥 느려지지 않는다.** 반대로 2.0 은 끝이 잘렸다(「그냥」에서 끝남).
+ *   ⇒ 실사용에서 `--speed-mode server --speed 0.9` 는 **사실상 원속**이다. 쓰지 말 것.
+ *   ⚠ 이 앱의 롱폼이 예부터 atempo 를 쓴 선택이 옳았다는 근거이기도 하다.
  */
 async function runTsvBatch(o) {
   const onLine = o.onLine || (() => {});

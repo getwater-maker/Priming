@@ -12,7 +12,9 @@
  *   --out <폴더>          (필수) 출력 폴더
  *   --voice <이름>        서버 공용 목소리. 기본 #01_득수_noBreath
  *   --speed <배속>        1=원래 속도, 0.9=조금 느리게. 기본 1
- *   --speed-mode <모드>   atempo(기본) | server — 아래 설명
+ *   --speed-mode <모드>   atempo(기본) | server
+ *                         🔴 느리게 하려면 atempo 뿐이다. server 는 빠른 방향으로만 듣는다(실측).
+ *                            `--speed-mode server --speed 0.9` 는 사실상 원속이다.
  *   --no-trim             앞뒤 무음을 자르지 않는다(기본은 자른다)
  *   --pad <초>            트림 여백. 기본 0.04 (파열음 보호)
  *   --dict <파일.md>      발음사전(마크다운 표)
