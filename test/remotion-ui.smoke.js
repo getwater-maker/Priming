@@ -29,7 +29,32 @@ fs.writeFileSync(TSV_PATH,
     String(i + 1).padStart(3, '0') + '.mp3\t미리듣기 시험 문장 ' + (i + 1) + '번입니다.').join('\n') + '\n',
   'utf8');
 
+// 🔑 실제 합성은 **GPU 를 쓴다** — 로이가 작업 중이면(서버 busy) 그걸 느리게 만든다(실측 1.7배).
+//   그래서 서버 상태를 먼저 보고, 바쁘거나 확인이 안 되면 합성 부분만 건너뛴다.
+let SYNTH_OK = false, SYNTH_SKIP = '';
+async function checkServerIdle() {
+  let key = '', base = 'http://127.0.0.1:9881';
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.flow-app', 'tts-config.json'), 'utf8'));
+    base = (c.omnivoice && c.omnivoice.baseUrl) || base;
+  } catch { return (SYNTH_SKIP = 'TTS 설정을 읽지 못함'), false; }
+  try {
+    // provider._authHeaders 와 같은 출처 — 여기가 갈리면 401 로 「확인 불가」가 되어 늘 건너뛴다.
+    const sec = require(path.join(ROOT, 'tts', 'secret-store')).get('omnivoice');
+    key = (sec && sec.apiKey) || '';
+  } catch {}
+  try {
+    const r = await fetch(base.replace(/\/$/, '') + '/busy', {
+      headers: key ? { 'X-API-Key': key } : {}, signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return (SYNTH_SKIP = '/busy 응답 ' + r.status + ' (구버전 서버면 확인 불가)'), false;
+    const j = await r.json();
+    if (j.busy) return (SYNTH_SKIP = '서버가 작업 중(busy)'), false;
+    return true;
+  } catch (e) { return (SYNTH_SKIP = '서버에 닿지 못함 — ' + e.message), false; }
+}
+
 (async () => {
+  SYNTH_OK = await checkServerIdle();
   console.log('── 원문 대조 (정규화가 선택을 되돌리지 않는가)');
   ok(/normalizeMode[\s\S]{0,200}remotion/.test(MP), 'normalizeMode 가 remotion 을 통과시킨다');
   ok(MP.includes('remotion: {'), 'MODE_PROFILES 에 remotion 이 있다');
@@ -92,6 +117,12 @@ fs.writeFileSync(TSV_PATH,
     ok(/onChange=\{\(\) => togglePick\(i, shiftRef\.current\)\}/.test(RV), '토글은 onChange 에서 한다');
     ok(/shiftRef\.current = e\.shiftKey/.test(RV), 'Shift 여부는 click 에서 받아 둔다');
     ok(/api\.remotionOpenOut/.test(RV), '「📁 출력 폴더」 버튼이 IPC 를 부른다');
+    // 🔴 만든 직후 재생을 `previews`(state)에서 찾으면 **이번 렌더의 옛 값**이라 첫 클릭에 안 들리고
+    //   두 번째 클릭에서야 들린다(로이 2026-08-27). 응답의 files 를 그대로 재생해야 한다.
+    ok(/playFiles\(r\.files\)/.test(RV), '만든 직후엔 응답(r.files)을 그대로 재생한다');
+    ok(!/playOne\(/.test(RV), '이름으로 state 를 되찾아 재생하는 경로가 남아 있지 않다');
+    ok(/q\.length\) playFile\(q\.shift\(\)\)/.test(RV),
+      '이어 듣기 대기열도 파일 객체 — onended 클로저가 state 를 읽지 않는다(첫 렌더 값에 묶이는 함정)');
   }
 
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
@@ -204,6 +235,35 @@ fs.writeFileSync(TSV_PATH,
     // 아직 안 들어본 행은 듣기 칸이 비어 있다(실제 합성은 이 테스트에서 하지 않는다 — GPU·시간).
     ok(!(await win.isVisible('table tbody tr:nth-child(1) button:has-text("▶")').catch(() => false)),
       '미리듣기 전에는 ▶ 버튼이 없다');
+
+    console.log('\n── 🎧 실제 합성 + 재생 (한 번 눌러 들리는가)');
+    if (!SYNTH_OK) {
+      console.log('  ⏭ 건너뜀 — ' + SYNTH_SKIP + ' (남의 GPU 작업을 방해하지 않는다)');
+    } else {
+      await win.click('table tbody tr:nth-child(1) input[type="checkbox"]');
+      await win.waitForTimeout(150);
+      ok(await win.isVisible('button:has-text("🎧 미리듣기 (1)")'), '한 개 고름');
+      // 🔑 **한 번만** 누른다 — 예전엔 두 번 눌러야 들렸다.
+      await win.click('button:has-text("🎧 미리듣기")');
+      let body = '';
+      for (let i = 0; i < 120; i++) {   // 문장당 2.4~2.7초 + 서버 warm 여유
+        body = await win.textContent('body');
+        if (body.includes('재생 중 —')) break;
+        await win.waitForTimeout(500);
+      }
+      ok(body.includes('🎧 미리듣기 1개'), '미리듣기 결과 줄이 뜬다');
+      ok(body.includes('재생 중 —'), '🔑 **한 번 눌러** 재생이 시작된다 (두 번 눌러야 하던 사고 회귀)');
+      ok(await win.isVisible('table tbody tr:nth-child(1) button:has-text("⏹")'),
+        '재생 중인 행의 버튼이 ⏹ 로 바뀐다');
+      // 만들어진 파일이 **임시 폴더**에 있어야 한다(MP3 출력 폴더를 오염시키지 않는다).
+      const pvDir = path.join(os.tmpdir(), 'priming-tsv-preview');
+      ok(fs.existsSync(pvDir), '미리듣기 파일이 임시 폴더에 만들어졌다');
+      await win.click('button:has-text("⏹ 정지")').catch(() => {});
+      await win.waitForTimeout(200);
+      ok(!(await win.textContent('body')).includes('재생 중 —'), '⏹ 정지가 먹는다');
+      ok(await win.isVisible('table tbody tr:nth-child(1) button:has-text("▶")'),
+        '들은 뒤에는 그 행에 ▶ 가 남는다(다시 듣기)');
+    }
 
     console.log('\n── ①②③ 채널 편집');
     await win.click('.modetoggle button:has-text("롱폼")');

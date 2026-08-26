@@ -74,31 +74,39 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   // ── 재생 ──
   //   🔑 media:// 가 아니라 **read-audio(base64)** 를 쓴다 — 렌더러에서 media:// fetch 가 막히는
   //     문제를 이미 이 앱의 다른 미리듣기들이 이 방식으로 우회하고 있다(App.jsx 와 같은 경로).
+  //   🔴 **재생 대상은 파일 객체로 다룬다 — 이름으로 `previews` 를 다시 찾지 않는다.**
+  //     `setPreviews` 직후의 `previews` 는 아직 옛 값이라(이번 렌더가 캡처한 클로저), 이름으로
+  //     찾으면 **첫 클릭에서는 아무것도 재생되지 않고 두 번째 클릭에서야 들린다**
+  //     (로이 2026-08-27: "미리듣기 버튼을 2번 눌러야 음성을 들을수 있네").
+  //     같은 이유로 `ensureAudio` 의 onended 클로저도 state 를 읽으면 안 된다 — 그건 첫 렌더의
+  //     값에 영원히 묶여 이어 듣기가 둘째 곡부터 멎는다. 그래서 대기열도 파일 객체를 담는다.
   function ensureAudio() {
     if (!audioRef.current) {
       const a = new Audio();
-      a.onended = () => { const q = queueRef.current; if (q.length) playOne(q.shift()); else setPlaying(''); };
+      a.onended = () => { const q = queueRef.current; if (q.length) playFile(q.shift()); else setPlaying(''); };
       a.onerror = () => { queueRef.current = []; setPlaying(''); };
       audioRef.current = a;
     }
     return audioRef.current;
   }
-  async function playOne(name) {
-    const f = previews[name];
-    if (!f) return;
+  async function playFile(f) {
+    if (!f || !f.path) return;
     try {
       const url = await api.readAudio(f.path);
-      if (!url) { setStatus && setStatus('음성 파일을 읽지 못했습니다 — ' + name); return; }
+      if (!url) { setStatus && setStatus('음성 파일을 읽지 못했습니다 — ' + f.name); return; }
       const a = ensureAudio();
-      a.src = url; setPlaying(name); a.play();
+      a.src = url; setPlaying(f.name); a.play();
     } catch (e) { setStatus && setStatus('재생 실패: ' + e.message); }
   }
-  function playSeq(names) {
-    const list = names.filter((x) => previews[x]);
+  // 파일 객체 목록을 순서대로 재생. 만든 직후엔 **응답의 files 를 그대로** 넘긴다(state 를 안 거친다).
+  function playFiles(files) {
+    const list = (files || []).filter((f) => f && f.path);
     if (!list.length) return;
     queueRef.current = list.slice(1);
-    playOne(list[0]);
+    playFile(list[0]);
   }
+  // 이름으로 재생(▶ · 이어 듣기) — 이쪽은 렌더 중 호출이라 previews 가 이미 최신이다.
+  function playSeq(names) { playFiles((names || []).map((nm) => previews[nm])); }
   function stopPlay() {
     queueRef.current = [];
     if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
@@ -133,10 +141,10 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       const map = {};
       (r.files || []).forEach((f) => { map[f.name] = f; });
       setPreviews((prev) => Object.assign({}, prev, map));
-      const order = (r.files || []).map((f) => f.name);
-      if (order.length) { queueRef.current = order.slice(1); playOne(order[0]); }
+      // 🔑 **응답을 그대로 재생한다** — `previews` 를 거치면 이번 렌더의 옛 값이라 첫 클릭에 안 들린다.
+      playFiles(r.files);
       const fail = (r.failed || []).length;
-      setStatus && setStatus(`🎧 미리듣기 ${order.length}개 준비` + (fail ? ` · 실패 ${fail}` : ''));
+      setStatus && setStatus(`🎧 미리듣기 ${(r.files || []).length}개 준비` + (fail ? ` · 실패 ${fail}` : ''));
     } catch (e) {
       setStatus && setStatus('미리듣기 실패: ' + e.message);
     } finally { setPvBusy(false); setProg(null); }
