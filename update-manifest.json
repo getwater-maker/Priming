@@ -1,5 +1,5 @@
 {
-  "version": "0.3.59",
+  "version": "0.3.60",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "b4a559cec8c47df11cf1e6f3c95bf7e2964da47a",
+    "CLAUDE.md": "c53730ba78084a636c2099a1455681322c07a4fe",
     "comfy/comfy-server.pyw": "c9c69bd8aef76f0374a236fec6769274bd11dc06",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
@@ -61,7 +61,7 @@
     "core/remotion-export.js": "a995b18b6dd26f30281c074509766144be7c7e42",
     "core/sentence-splitter.js": "b9d1b29983edd59530322499d12303e61978bba1",
     "core/style-store.js": "54f012bea5cdbbc30c5d7cc1c77f248351cb7625",
-    "core/tsv-tts.js": "11e0dc602e00b153e46445413f79f3c4de355729",
+    "core/tsv-tts.js": "d5db4f9bb4b28aa2dc7e04f93f65dc5faa7ad159",
     "core/tts-cache.js": "d5b80c09141d0733c17427d7889a9e46b07a7354",
     "core/upscale-config.js": "cf5e79339ff118f031d9ba79554de8e95a4fe74c",
     "core/upscaler.js": "31b4f1d8922f2e853250e0720e3b0ebdf7b19908",
@@ -79,7 +79,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "276a5ea7822ce1c12d0c3563e2f8e953c222a2e2",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "3d66c70e2b86f6515b42588ae42e3e1325dfe948",
+    "package.json": "bb2a6dae797e729640de97d97afcd5f2d6ccbd21",
     "preload.js": "763f6816b12b23dd5fea8711a9ecf0070047e63b",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-D_ShqHqx.js": "91df204c36d9bc9a2523954be1b90ec6b288ca6c",

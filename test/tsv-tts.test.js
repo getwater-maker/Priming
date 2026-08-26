@@ -239,6 +239,30 @@ t('트림 설정이 바뀌면 키가 바뀐다', () => {
   assert.notStrictEqual(K('안녕'), K('안녕', { trim: false }));
   assert.notStrictEqual(K('안녕'), K('안녕', { padSec: 0.08 }));
 });
+t('🔑 출력 포맷(mp3/wav)이 바뀌면 키가 바뀐다', () => {
+  assert.notStrictEqual(K('안녕', { ext: '.mp3' }), K('안녕', { ext: '.wav' }));
+  assert.strictEqual(K('안녕', { ext: '.MP3' }), K('안녕', { ext: '.mp3' }), '대소문자는 같게 본다');
+});
+
+// ══════════════════════════════════════════════════════════
+section('[4-b] 출력 포맷은 TSV 의 확장자가 정한다');
+
+t('🔑 앱 설정이 아니라 파일명이 포맷을 정한다 (이름과 내용이 어긋나지 않게)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'tsv-tts.js'), 'utf8');
+  assert.ok(/path\.extname\(outName\)/.test(src), '출력 이름의 확장자를 보지 않는다');
+  assert.ok(/wantWav\s*=\s*ext === '\.wav'/.test(src), 'wav 판정이 없다');
+});
+
+t('🔑 WAV + 배속 1 이면 ffmpeg 를 부르지 않는다 (문장당 0.06초 절약)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'tsv-tts.js'), 'utf8');
+  assert.ok(/if \(wantWav && Math\.abs\(tempo - 1\) <= 0\.001\)/.test(src),
+    'wav 지름길이 없다 — 트림한 버퍼를 그대로 쓰면 인코딩이 통째로 빠진다');
+});
+
+t('encodeMp3 에 옛 인자 이름이 남아 있지 않다 (미정의 식별자)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'tsv-tts.js'), 'utf8');
+  assert.ok(!/mp3Path/.test(src), 'mp3Path 가 남아 있다 — 실제로 mp3 출력이 통째로 실패했다(2026-08-26)');
+});
 
 // ══════════════════════════════════════════════════════════
 section('[5] 구조 — 공용 TTS 캐시와 섞이지 않는다');

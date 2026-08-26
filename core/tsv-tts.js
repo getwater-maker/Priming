@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const { trimSilence } = require('./audio-trim');
+const { parseWav } = require('./wav-slice');
 // 🔑 TTS 로 실제 보내지는 문자열은 **이 함수 하나로만** 만든다(발음사전 → 물결표 정규화).
 //   호출부가 넘기는 것을 잊으면 사전이 조용히 무시되므로 여기서 기본값으로 묶는다.
 const { processForTTS } = require('../tts/text-pronouncer');
@@ -180,13 +181,15 @@ function cacheKey(finalText, cfg) {
     cfgv: cfg.cfgValue != null ? cfg.cfgValue : '',
     it: cfg.inferenceTimesteps != null ? cfg.inferenceTimesteps : '',
     lang: cfg.language || '',
+    // 🔑 출력 포맷도 키다 — mp3 로 만든 것과 wav 로 만든 것은 다른 파일이다.
+    fmt: (cfg.ext || '.mp3').toLowerCase(),
     rate: OUT_RATE, ch: OUT_CHANNELS, br: OUT_BITRATE,
   });
   return crypto.createHash('sha1').update(sig).digest('hex');
 }
 
-function cacheGet(key) {
-  const f = path.join(CACHE_DIR, key + '.mp3');
+function cacheGet(key, ext) {
+  const f = path.join(CACHE_DIR, key + (ext || '.mp3'));
   const m = path.join(CACHE_DIR, key + '.json');
   try {
     if (!fs.existsSync(f) || !fs.existsSync(m)) return null;
@@ -195,10 +198,10 @@ function cacheGet(key) {
   } catch { return null; }
 }
 
-function cachePut(key, file, meta) {
+function cachePut(key, file, meta, ext) {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.copyFileSync(file, path.join(CACHE_DIR, key + '.mp3'));
+    fs.copyFileSync(file, path.join(CACHE_DIR, key + (ext || '.mp3')));
     fs.writeFileSync(path.join(CACHE_DIR, key + '.json'), JSON.stringify(meta || {}), 'utf8');
   } catch {}
 }
@@ -208,16 +211,18 @@ function cachePut(key, file, meta) {
  * WAV 파일 → mp3. tempo 가 1 이 아니면 atempo 로 배속(피치 유지). 성공 시 true.
  * ⚠ atempo 는 0.5~2.0 만 받는다. 그 밖이면 ffmpeg 가 실패하므로 호출부가 미리 막아야 한다.
  */
-function encodeMp3(wavPath, mp3Path, tempo) {
+function encodeMp3(wavPath, outPath, tempo) {
   if (!ffmpegPath) return { ok: false, durationSec: null };
+  const wav = /\.wav$/i.test(outPath);
   const args = ['-y', '-i', wavPath];
   if (tempo && Math.abs(tempo - 1) > 0.001) args.push('-filter:a', 'atempo=' + tempo);
-  args.push('-codec:a', 'libmp3lame', '-b:a', OUT_BITRATE,
-            '-ar', String(OUT_RATE), '-ac', String(OUT_CHANNELS), mp3Path);
+  if (wav) args.push('-codec:a', 'pcm_s16le');
+  else args.push('-codec:a', 'libmp3lame', '-b:a', OUT_BITRATE);
+  args.push('-ar', String(OUT_RATE), '-ac', String(OUT_CHANNELS), outPath);
   // 🔑 stderr 를 받아 **인코딩하면서 길이까지 읽는다.** 따로 재면 ffmpeg 를 한 번 더 띄우게 되는데,
   //   16,000문장 규모에서 그 왕복이 약 1.8시간이다(2026-08-26 실측: 문장당 3.54초 → 2.0초대).
   const r = spawnSync(ffmpegPath, args, { encoding: 'utf8' });
-  const ok = r.status === 0 && fs.existsSync(mp3Path);
+  const ok = r.status === 0 && fs.existsSync(outPath);
   return { ok, durationSec: ok ? _lastTime(r.stderr) : null };
 }
 
@@ -327,7 +332,7 @@ async function runTsvBatch(o) {
   // 🔑 RTF(생성시간 ÷ 음성길이)는 **새로 만든 것만**으로 잰다. 캐시 재활용분(0초 복사)이 섞이면
   //   RTF 가 0 에 가깝게 왜곡돼 아무 의미가 없어진다.
   //   단계별 합계도 같이 모은다 — 느릴 때 어디가 병목인지 로그만 보고 알 수 있게.
-  let madeDur = 0, madeGen = 0, sumTts = 0, sumTrim = 0, sumEnc = 0;
+  let madeDur = 0, madeGen = 0, sumTts = 0, sumTrim = 0, sumEnc = 0, stageN = 0;
   const t0 = Date.now();
   // 진행 중에도 RTF·남은 시간을 볼 수 있게 현재 누계를 넘긴다(355문장이면 15분이라 끝나서 보면 늦다).
   const _stat = () => ({
@@ -344,7 +349,11 @@ async function runTsvBatch(o) {
     const tag = '[' + (i + 1) + '/' + rows.length + '] ' + outName;
 
     const finalText = o.dictApply ? o.dictApply(row.text) : processForTTS(row.text, o.dict || []);
-    const key = cacheKey(finalText, cfg);
+    // 🔑 **출력 포맷은 TSV 의 확장자가 정한다.** 앱 설정으로 정하면 파일명과 내용이 어긋난다
+    //   (`001.mp3` 인데 내용이 wav). 이름을 정하는 곳을 한 군데(TSV)로 유지한다.
+    const ext = (path.extname(outName) || '.mp3').toLowerCase();
+    const wantWav = ext === '.wav';
+    const key = cacheKey(finalText, Object.assign({}, cfg, { ext }));
 
     // ── 이어받기: 파일이 그대로 있고 키가 같으면 건드리지 않는다 ──
     if (!o.force && manifest[outName] && manifest[outName].key === key && fs.existsSync(outPath)) {
@@ -356,7 +365,7 @@ async function runTsvBatch(o) {
 
     // ── 전용 캐시 ──
     if (!o.force) {
-      const hit = cacheGet(key);
+      const hit = cacheGet(key, ext);
       if (hit) {
         try {
           await _retryFs(() => fs.copyFileSync(hit.file, outPath), tag + ' 캐시 복사', onLine);
@@ -396,7 +405,7 @@ async function runTsvBatch(o) {
       continue;
     }
     consecFail = 0;
-    sumTts += Date.now() - _ttsT0;
+    sumTts += Date.now() - _ttsT0; stageN++;
 
     // ── 트림 → 배속 → mp3 ──
     const tmpWav = path.join(outDir, '_tmp_' + process.pid + '.wav');
@@ -410,15 +419,24 @@ async function runTsvBatch(o) {
         else if (t.reason) onLine(tag + '  트림 안 함: ' + t.reason);
       }
       sumTrim += Date.now() - _trimT0;
-      await _retryFs(() => fs.writeFileSync(tmpWav, buf), tag + ' 임시 WAV', onLine);
       const tempo = speedMode === 'atempo' ? speed : 1;
       const _encT0 = Date.now();
-      const enc = encodeMp3(tmpWav, outPath, tempo);
+      let dur;
+      // 🔑 **WAV 출력 + 배속 1 이면 ffmpeg 를 아예 안 부른다** — 모델 출력이 이미 24kHz 모노 WAV 라
+      //   트림한 버퍼를 그대로 쓰면 된다. 문장당 약 0.06초(전체의 2.5%)가 사라진다.
+      if (wantWav && Math.abs(tempo - 1) <= 0.001) {
+        await _retryFs(() => fs.writeFileSync(outPath, buf), tag + ' WAV 쓰기', onLine);
+        const w = parseWav(buf);
+        dur = w.dataSize / (w.sampleRate * w.channels * (w.bitsPerSample / 8));
+      } else {
+        await _retryFs(() => fs.writeFileSync(tmpWav, buf), tag + ' 임시 WAV', onLine);
+        const enc = encodeMp3(tmpWav, outPath, tempo);
+        if (!enc.ok) throw new Error((wantWav ? 'WAV' : 'mp3') + ' 인코딩 실패(ffmpeg)');
+        // 길이는 인코딩 로그에서 함께 얻는다. 못 읽었을 때만 따로 잰다(드문 경우).
+        dur = enc.durationSec || mp3DurationSec(outPath) || (res.durationSec ? res.durationSec / tempo : 0);
+      }
       sumEnc += Date.now() - _encT0;
-      if (!enc.ok) throw new Error('mp3 인코딩 실패(ffmpeg)');
-      // 길이는 인코딩 로그에서 함께 얻는다. 못 읽었을 때만 따로 잰다(드문 경우).
-      const dur = enc.durationSec || mp3DurationSec(outPath) || (res.durationSec ? res.durationSec / tempo : 0);
-      cachePut(key, outPath, { dur, trimmedSec, text: finalText });
+      cachePut(key, outPath, { dur, trimmedSec, text: finalText }, ext);
       manifest[outName] = { key, dur, text: finalText, trimmedSec };
       made.push(outName);
       totalDur += dur;
@@ -468,7 +486,7 @@ async function runTsvBatch(o) {
     madeGenSec: madeGen,
     perSentenceSec: made.length ? madeGen / n : null,
     // 단계별 문장당 평균(초) — 느릴 때 어디가 병목인지 바로 보이게.
-    stageSec: { tts: sumTts / 1000 / n, trim: sumTrim / 1000 / n, mp3: sumEnc / 1000 / n },
+    stageSec: (() => { const d = stageN || 1; return { tts: sumTts / 1000 / d, trim: sumTrim / 1000 / d, mp3: sumEnc / 1000 / d }; })(),
     elapsedSec: (Date.now() - t0) / 1000,
     manifestPath: manPath,
     failedPath: failed.length ? failPath : null,
