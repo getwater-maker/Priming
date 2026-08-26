@@ -12,8 +12,8 @@ let n = 0, bad = 0;
 const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } };
 
 // ── 원문 대조 — 레인 배선이 그대로 있는지(끊기면 아래 시뮬레이션이 무의미) ──
-ok(/const _LANES = \{ tts: Promise\.resolve\(\), image: Promise\.resolve\(\), localGpu: Promise\.resolve\(\) \}/.test(SRC),
-   '레인 3개(tts·image·localGpu) 정의');
+ok(SRC.includes("const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve() }"),
+   '레인 4개(tts·image·localGpu·upscale) 정의');
 ok(SRC.includes("_runOnLanes(['tts', 'localGpu'], label,"), 'TTS 작업은 tts+localGpu 레인을 잡는다');
 ok(/_imgUsesLocalGpu\(engine\) \? \['image', 'localGpu'\] : \['image'\]/.test(SRC),
    '이미지 작업은 로컬 ComfyUI 일 때만 localGpu 레인을 잡는다');
@@ -38,8 +38,8 @@ const _runOnLanes = new Function('log', 'withAwake', '_LANES', '_lanePending',
   extract('_runOnLanes') + '\nreturn _runOnLanes;')(
   (m) => logs.push(m),
   (label, fn) => fn(),                       // 절전차단 래퍼는 그대로 통과
-  { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve() },
-  { tts: 0, image: 0, localGpu: 0 },
+  { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve() },
+  { tts: 0, image: 0, localGpu: 0, upscale: 0 },
 );
 
 // 동시에 몇 개가 돌았는지 기록하는 가짜 작업

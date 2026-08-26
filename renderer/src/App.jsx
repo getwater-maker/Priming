@@ -404,6 +404,7 @@ export default function App() {
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
+  const [upCfg, setUpCfg] = useState(null);              // 영상 업스케일 방식 { mode, slowLimitSec }
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
   const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
@@ -1052,6 +1053,7 @@ export default function App() {
     if (regen === 'image') { setPromptView(null); await runRegen(shortsNum, groupNum); }
     else if (regen === 'video') { setPromptView(null); await runGroupVid(shortsNum, groupNum); }
   }
+  async function saveUpCfg(patch) { try { setUpCfg(await api.setUpscaleConfig(patch)); } catch (e) { logline('업스케일 설정 오류: ' + e.message); } }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
   async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('Gemini API 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
   async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
@@ -1792,6 +1794,7 @@ export default function App() {
     // 🆓 무료 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
     try { setImgRot(await api.getImageRotation()); } catch (_) {}
     try { setLora(await api.getLoraCollect()); } catch (_) {}
+    try { setUpCfg(await api.getUpscaleConfig()); } catch (_) {}
     setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
     try {
       const ci = (await api.getComfyImageConfig()) || {};
@@ -2499,6 +2502,20 @@ export default function App() {
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
                 </label></div>
+              {/* ⬆ 영상 업스케일 — Grok(720p) 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
+                  🔴 2026-08-26 아내 PC: NVIDIA GPU 가 없어 Real-ESRGAN 이 영상 하나에 수십 분 걸렸다. */}
+              <div className="frow" style={{ alignItems: "center", marginTop: 6, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+                <label style={{ flex: "0 0 auto", minWidth: 110 }}>영상 업스케일</label>
+                <select style={{ flex: "0 0 auto", width: "auto" }} value={(upCfg && upCfg.mode) || "auto"}
+                  title="저해상도 영상(Grok 720p 등)을 1080p 로 키우는 방식. 이미 1080p 이상이면 어느 방식이든 자동으로 건너뜁니다."
+                  onChange={(e) => saveUpCfg({ mode: e.target.value })}>
+                  <option value="auto">자동 (AI로 시작 · 너무 느리면 빠름으로)</option>
+                  <option value="ai">AI 고정 (Real-ESRGAN · 화질 우선 · GPU 필요)</option>
+                  <option value="fast">빠름 고정 (ffmpeg · 몇 초 · 화질 낮음)</option>
+                  <option value="off">끔 (원본 해상도 그대로)</option>
+                </select>
+              </div>
+              <div className="meta" style={{ marginTop: 4 }}>⬆ <b>이미 1920x1080 이상인 영상은 어느 방식이든 건너뜁니다</b>(☁ LTX2.5 는 1920x1088 로 나옵니다). Grok(720p)처럼 낮을 때만 동작합니다. <b>AI(Real-ESRGAN)는 프레임을 한 장씩 확대</b>해서 15초 영상이 361프레임 — <b>GPU 가 없는 PC 에서는 수십 분</b>이 걸립니다. 「자동」은 한 영상이 5분을 넘으면 남은 영상을 빠른 방식으로 낮춥니다.</div>
               <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</div>
             </div>)}
 

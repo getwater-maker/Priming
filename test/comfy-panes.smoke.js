@@ -65,12 +65,14 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
       ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
       ok(!r.text.includes('클라우드 전용'), '옛 「클라우드 전용」 문구 없음');
+      if (kind === 'vid') ok(r.text.includes('영상 업스케일'), '비디오 탭에 「영상 업스케일」 방식 선택이 있다');
       const onIdx = r.panes.findIndex((p) => p.on);
       ok(onIdx === (cfg.cloud ? 1 : 0), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
       ok(r.panes[onIdx].head.includes('지금 사용'), '지금 쓰는 칸에 배지 표시');
       ok(r.panes[1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[1].url);
       ok(r.nowuse.includes(cfg.cloud ? '클라우드' : '로컬'), '「지금 보내는 곳」 표시: ' + r.nowuse.split('—')[0].trim());
-      ok(r.selects === 0, '옛 「서버 프로필」 드롭다운 없음');
+      const wantSel = kind === 'vid' ? 1 : 0;   // 비디오 탭: 영상 업스케일 select 1개가 정상
+      ok(r.selects === wantSel, '옛 서버 프로필 드롭다운 없음 (select ' + r.selects + '개 · 기대 ' + wantSel + ')');
       ok(!r.text.includes('클라우드(comfy.org)') || !/클라우드(comfy.org)$/m.test(r.text), '옛 「클라우드」 체크박스 라벨 없음');
       ok(!r.text.includes('연결 테스트'), '하단 중복 「연결 테스트」 버튼 없음(각 칸의 🔌 테스트로 통일)');
       ok(!/동시[ ]*생성[sS]{0,40}input/.test(r.text), '「동시 생성」 입력칸 없음');

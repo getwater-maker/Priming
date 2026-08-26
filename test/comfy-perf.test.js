@@ -282,6 +282,42 @@ ok('계측이 실제 생성 호출을 감싼다', () => {
   assert(MAIN_SRC.includes('const _el = (Date.now() - _t0) / 1000;'), '경과시간 계산이 없다');
 });
 
+
+// ── ⑤ ⬆ 영상 업스케일 — 직렬화 + 방식 선택 (2026-08-26 아내 PC 실사고) ──
+//   Grok 영상은 1280x704 라 업스케일이 필요한데 그 PC 엔 NVIDIA GPU 가 없었다. Real-ESRGAN 은
+//   15초 영상 = 361프레임을 한 장씩 확대하므로 수십 분이 걸렸고, 게다가 maybeUpscale 이 여러 번
+//   겹쳐 돌아 같은 영상을 중복 업스케일했다(로그: [1/3] G1 이 도는 중에 [1/4] G1 이 또 시작).
+const UPC = require('../core/upscale-config');
+ok('업스케일이 전용 레인으로 직렬화된다(중복·동시 실행 차단)', () => {
+  assert(MAIN_SRC.includes("upscale: Promise.resolve()"), '_LANES 에 upscale 레인이 없다');
+  assert(MAIN_SRC.includes("_runOnLanes(['upscale'], '영상 업스케일'"), 'maybeUpscale 이 레인을 타지 않는다');
+});
+ok('업스케일은 localGpu 레인을 잡지 않는다(make-all 안에서 부르므로 교착)', () => {
+  const i = MAIN_SRC.indexOf('async function maybeUpscale(');
+  const line = MAIN_SRC.slice(i, MAIN_SRC.indexOf(String.fromCharCode(10), i));
+  assert(!line.includes('localGpu'), 'maybeUpscale 이 localGpu 를 잡으면 자기 자신을 기다린다');
+});
+ok('업스케일 방식 설정을 읽고 off 면 즉시 반환한다', () => {
+  assert(MAIN_SRC.includes("require('./core/upscale-config').load()"), '설정을 읽지 않는다');
+  assert(MAIN_SRC.includes("UP.mode === 'off'"), 'off 처리가 없다');
+});
+ok('자동 모드는 느리면 빠른 방식으로 낮춘다', () => {
+  assert(MAIN_SRC.includes("let method = UP.mode === 'auto' ? 'ai' : UP.mode"), 'auto 시작값이 없다');
+  assert(MAIN_SRC.includes('_el > UP.slowLimitSec'), '실측 시간으로 판단하지 않는다');
+  assert(MAIN_SRC.includes("method = 'fast'"), '강등이 없다');
+  assert(MAIN_SRC.includes('method, logger'), '엔진에 method 를 넘기지 않는다');
+});
+ok('upscaler 가 fast 면 AI 를 건너뛴다', () => {
+  const U = fs.readFileSync(path.join(__dirname, '..', 'core', 'upscaler.js'), 'utf8');
+  assert(U.includes("opts.method === 'fast' ? null : realesrganExe()"), 'fast 에서 AI 실행파일을 비우지 않는다');
+  assert(U.includes("opts.method !== 'fast' && opts.autoDownload"), 'fast 인데 AI 를 내려받으려 한다');
+});
+ok('업스케일 설정이 잘못된 값을 안전하게 되돌린다', () => {
+  assert.deepStrictEqual(UPC.MODES, ['auto', 'ai', 'fast', 'off']);
+  assert.strictEqual(UPC.DEFAULTS.mode, 'auto');
+  assert.strictEqual(UPC.DEFAULTS.slowLimitSec, 300);
+});
+
 console.log('\n' + (fails ? '❌' : '✅') + ' comfy-perf: ' + (n - fails) + '/' + n + ' 통과' + (fails ? ' · 실패 ' + fails : ''));
 process.exit(fails ? 1 : 0);
 

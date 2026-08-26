@@ -608,6 +608,9 @@ ipcMain.handle('test-comfy-image', async (_e, args = {}) => {
 // ComfyUI 비디오(i2v) 설정 — LTX2.5/2.3 등 워크플로 (이미지 comfy 와 별개 config)
 ipcMain.handle('get-comfy-video-config', () => { try { return require('./core/comfy-video').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-comfy-video-config', (_e, patch) => { try { return require('./core/comfy-video').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
+// 영상 업스케일 방식 — auto/ai/fast/off. GPU 없는 PC 가 Real-ESRGAN 에 수십 분 갇히는 것을 피한다(2026-08-26).
+ipcMain.handle('get-upscale-config', () => { try { return require('./core/upscale-config').load(); } catch { return {}; } });
+ipcMain.handle('set-upscale-config', (_e, patch) => { try { return require('./core/upscale-config').save(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 ipcMain.handle('pick-comfy-video-workflow', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'ComfyUI API 워크플로', extensions: ['json'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
@@ -2351,9 +2354,14 @@ function imagesNeeded(project) {
 
 // 생성된 영상을 1080p 로 업스케일 (Real-ESRGAN 애니 모델, 없으면 ffmpeg 폴백). videoPath 교체.
 //   ⚠ 로컬 GPU 로 프레임 단위 처리라 오래 걸린다 → 절전 차단으로 감싼다.
-async function maybeUpscale(...args) { return withAwake('영상 업스케일', () => _maybeUpscaleCore(...args)); }
+//   🔑 upscale 레인에 태워 **동시 실행을 원천 차단**한다. 직렬화만으로 중복도 사라진다 —
+//     앞 호출이 끝나면 경로가 NN_1080.mp4 로 교체돼 있어 다음 호출의 대상 필터에서 빠지기 때문.
+async function maybeUpscale(...args) { return _runOnLanes(['upscale'], '영상 업스케일', () => _maybeUpscaleCore(...args)); }
 async function _maybeUpscaleCore(project, logger, enabled) {
   if (!enabled) return;
+  // ⚙ 업스케일 방식 — auto(기본) / ai / fast / off. GPU 없는 PC 가 수십 분씩 갇히지 않게 한다.
+  const UP = require('./core/upscale-config').load();
+  if (UP.mode === 'off') { logger('⬆ 업스케일 꺼짐(설정) — 원본 해상도 그대로 사용합니다'); return; }
   const Upscaler = require('./core/upscaler');
   const [W, H] = (project.aspect === '1:1') ? [1080, 1080] : (project.aspect === '16:9') ? [1920, 1080] : [1080, 1920];
   const cand = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
@@ -2395,14 +2403,26 @@ async function _maybeUpscaleCore(project, logger, enabled) {
   //   리로드(빈 화면→다시 뜸)된다. 순차 업스케일이라 "하나 끝날 때마다 하나씩 깜빡" 이 반복됨. → 경로 교체는
   //   모아뒀다가 끝에 한 번만 반영. 루프 중엔 videoStatus(오버레이)만 바꿔 어느 그룹 처리 중인지만 표시(src 무변경).
   const swaps = [];
+  // auto 는 AI 로 시작해, 한 영상이 상한을 넘으면 남은 영상을 빠른 방식(ffmpeg)으로 낮춘다.
+  //   🔑 GPU 없는 PC 가 **스스로 빠져나온다** — 하드웨어를 탐지하는 대신 실제 걸린 시간으로 판단한다.
+  let method = UP.mode === 'auto' ? 'ai' : UP.mode;
   for (const g of targets) {
     if (S.abort) { logger('⏹ 업스케일 중단'); break; }
     const out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
     g.videoStatus = 'upscaling'; pushDtoUpdate(); // ← 오버레이만(src 그대로라 썸네일 리로드 없음)
     try {
-      logger(`⬆ [${done + 1}/${targets.length}] G${g.num} 영상 업스케일 → ${W}x${H}…`);
-      const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, logger, abortSignal: () => S.abort });
+      logger(`⬆ [${done + 1}/${targets.length}] G${g.num} 영상 업스케일 → ${W}x${H}… (${method === 'fast' ? '빠름·ffmpeg' : 'AI·Real-ESRGAN'})`);
+      const _t0 = Date.now();
+      const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, method, logger, abortSignal: () => S.abort });
+      const _el = (Date.now() - _t0) / 1000;
       if (r && r.ok) swaps.push([g, out]); // 경로 교체는 미룸(끝에 일괄)
+      if (r && r.ok) logger(`⬆ G${g.num} 업스케일 완료 (${_dur(_el)})`);
+      // 🐌 너무 느리면 남은 영상은 빠른 방식으로 — GPU 없는 PC 가 몇십 분씩 갇히는 것을 막는다.
+      if (UP.mode === 'auto' && method === 'ai' && _el > UP.slowLimitSec && !S.abort) {
+        method = 'fast';
+        logger(`  🐌 이 PC 에서 AI 업스케일이 너무 느립니다 (${_dur(_el)} > 상한 ${_dur(UP.slowLimitSec)}) — 남은 영상은 빠른 방식(ffmpeg)으로 진행합니다.`);
+        logger('     GPU 가 없거나 약한 PC 입니다. 방식을 고정하려면 ⚙ 설정 → 🎬 ComfyUI 비디오 → 영상 업스케일.');
+      }
     } catch (e) { logger(`업스케일 실패 G${g.num}: ${e.message}`); }
     g.videoStatus = 'done'; done++; pushDtoUpdate(); // ← 오버레이 해제(src 여전히 원본이라 리로드 없음)
   }
@@ -3864,14 +3884,21 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 //                  ⚠ 이미지가 순환(브라우저)·나노바나나(API)·ComfyUI **클라우드** 면 로컬 GPU 를 안 쓰므로
 //                    이 레인을 잡지 않는다(예전처럼 TTS 와 병렬 = 더 빠름).
 //   앞 작업이 실패해도 다음 작업은 실행한다(allSettled).
-const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve() };
-const _lanePending = { tts: 0, image: 0, localGpu: 0 };
+//     · upscale  — 🔴 **영상 업스케일 직렬화**(2026-08-26 아내 PC 실사고). maybeUpscale 은 파이프라인의
+//                  그룹 배치마다, 그리고 수동 「🎬 영상」(video-group)에서도 불린다. 그런데 경로 교체
+//                  (NN.mp4→NN_1080.mp4)를 **끝에 한 번만** 하므로(썸네일 깜빡임 방지, v0.2.65), 앞 호출이
+//                  끝나기 전에 다음 호출이 들어오면 **같은 영상을 또 대상으로 잡아 중복 업스케일**한다.
+//                  실제 로그: `⬆ [1/3] G1` 이 도는 중에 `⬆ [1/4] G1` 이 또 시작됐다. GPU 없는 PC 에선 치명적.
+//                  ⚠ **localGpu 를 잡지 않는다** — make-all 이 이미 그 레인을 쥔 채 내부에서 부르므로
+//                    자기 자신을 기다려 교착된다(enqueueImageJob 과 같은 규칙).
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0 };
 function _runOnLanes(lanes, label, fn) {
   const prev = lanes.map((k) => _LANES[k]);
   for (const k of lanes) _lanePending[k]++;
   const busy = lanes.filter((k) => _lanePending[k] > 1);
   if (busy.length) {
-    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU' };
+    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일' };
     log(`⏳ ${label} — ${busy.map((k) => ko[k]).join('·')} 작업이 끝난 뒤 시작합니다 (앞에 ${Math.max(...busy.map((k) => _lanePending[k])) - 1}건)`);
   }
   const p = Promise.allSettled(prev).then(() => withAwake(label, fn));

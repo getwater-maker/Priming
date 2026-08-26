@@ -136,8 +136,9 @@ async function upscaleVideo(input, output, opts = {}) {
   const model = opts.model || 'realesr-animevideov3';
   const scale = String(opts.scale || 2);
 
-  let exe = realesrganExe();
-  if (!exe && opts.autoDownload !== false) exe = await ensureRealesrgan(log);
+  // method:'fast' → AI 를 건너뛰고 ffmpeg lanczos 폴백(몇 초). GPU 가 없거나 너무 느린 PC 용.
+  let exe = opts.method === 'fast' ? null : realesrganExe();
+  if (!exe && opts.method !== 'fast' && opts.autoDownload !== false) exe = await ensureRealesrgan(log);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm_up_'));
   const inDir = path.join(tmp, 'in'), outDir = path.join(tmp, 'out');
