@@ -1505,7 +1505,7 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
       voice, speed, seed: preset.seed != null && preset.seed !== '' ? preset.seed : undefined,
       trim: args.trim !== false, dict, force: !!args.force,
       onLine: (m) => log(m),
-      onProgress: (i, n) => { try { win.webContents.send('remotion-progress', { i, n }); } catch {} },
+      onProgress: (i, n, st) => { try { win.webContents.send('remotion-progress', Object.assign({ i, n }, st || {})); } catch {} },
       abortSignal: () => S.abort,
     }));
     log(`✅ 리모션 TTS — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length} / 전체 ${r.total}`

@@ -329,6 +329,12 @@ async function runTsvBatch(o) {
   //   단계별 합계도 같이 모은다 — 느릴 때 어디가 병목인지 로그만 보고 알 수 있게.
   let madeDur = 0, madeGen = 0, sumTts = 0, sumTrim = 0, sumEnc = 0;
   const t0 = Date.now();
+  // 진행 중에도 RTF·남은 시간을 볼 수 있게 현재 누계를 넘긴다(355문장이면 15분이라 끝나서 보면 늦다).
+  const _stat = () => ({
+    rtf: madeDur > 0 ? madeGen / madeDur : null,
+    made: made.length,
+    perSentenceSec: made.length ? madeGen / made.length : null,
+  });
 
   for (let i = 0; i < rows.length; i++) {
     if (abort()) { onLine('중단되었습니다 — ' + i + '/' + rows.length + ' 까지 처리했습니다.'); break; }
@@ -344,7 +350,7 @@ async function runTsvBatch(o) {
     if (!o.force && manifest[outName] && manifest[outName].key === key && fs.existsSync(outPath)) {
       skipped.push(outName);
       totalDur += manifest[outName].dur || 0;
-      if (o.onProgress) o.onProgress(i + 1, rows.length);
+      if (o.onProgress) o.onProgress(i + 1, rows.length, _stat());
       continue;
     }
 
@@ -358,7 +364,7 @@ async function runTsvBatch(o) {
           made.push(outName);
           totalDur += hit.dur || 0;
           onLine(tag + '  재활용 ' + (hit.dur || 0).toFixed(2) + '초');
-          if (o.onProgress) o.onProgress(i + 1, rows.length);
+          if (o.onProgress) o.onProgress(i + 1, rows.length, _stat());
           continue;
         } catch (e) { /* 복사 실패면 아래에서 새로 만든다 */ }
       }
@@ -433,7 +439,7 @@ async function runTsvBatch(o) {
     } finally {
       try { fs.unlinkSync(tmpWav); } catch {}
     }
-    if (o.onProgress) o.onProgress(i + 1, rows.length);
+    if (o.onProgress) o.onProgress(i + 1, rows.length, _stat());
   }
 
   // ── 매니페스트 · 실패 리포트 ──

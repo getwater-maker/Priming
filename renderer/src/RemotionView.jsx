@@ -2,6 +2,15 @@ import React, { useEffect, useState } from 'react';
 
 const api = window.api;
 
+// 초 → "3분 20초" / "1시간 5분". 남은 시간 표시용(대략치라 초 단위까지는 안 쓴다).
+function fmtLeft(sec) {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return s + '초';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + '분';
+  return Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
+}
+
 /**
  * 🎬 리모션 화면 — TSV(`파일명<탭>문장`)를 열어 **그 파일명 그대로** mp3 를 만든다.
  *
@@ -122,7 +131,18 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           <div style={{ height: 8, background: '#eee', borderRadius: 4, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: (prog.n ? (prog.i / prog.n * 100) : 0) + '%', background: 'var(--accent,#c9884a)' }} />
           </div>
-          <div className="meta" style={{ marginTop: 4 }}>{prog.i} / {prog.n}</div>
+          <div className="meta" style={{ marginTop: 4 }}>
+            {prog.i} / {prog.n}
+            {prog.rtf != null && (
+              <span title="RTF = 생성시간 ÷ 음성길이 (낮을수록 빠름). 합성은 문장 길이와 거의 무관하게 문장당 2.4~2.7초가 걸리므로, 짧은 문장이 많을수록 RTF 는 나빠집니다 — 총 시간은 문장 수로 정해집니다.">
+                {' · '}⏱ RTF {prog.rtf.toFixed(2)}
+              </span>
+            )}
+            {prog.perSentenceSec > 0 && <>{' · '}문장당 {prog.perSentenceSec.toFixed(2)}초</>}
+            {prog.perSentenceSec > 0 && prog.n > prog.i && (
+              <>{' · '}남은 시간 약 {fmtLeft((prog.n - prog.i) * prog.perSentenceSec)}</>
+            )}
+          </div>
         </div>
       )}
 
