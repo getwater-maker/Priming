@@ -1846,6 +1846,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       for (const w of d.warnings) logger('  ' + w);
     } catch (_) {}
   }
+  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성', logger);   // 이 GPU 에서 TTS 중이면 대기(2단계)
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
   //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
@@ -2016,6 +2017,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
       for (const w of d.warnings) log('  ' + w);
     } catch (_) {}
   }
+  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 비디오 생성', log);   // 이 GPU 에서 TTS 중이면 대기(2단계)
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 이미지 모델 비우고 Wan 로드
   // ── 동시 i2v(클라우드만) ── i2v 는 건당 수 분이라, 여러 개를 함께 올려야 벽시계 시간이 줄어든다.
   //   imageToVideo 는 호출마다 업로드명·그래프·prompt_id·출력경로가 독립이라 동시 호출 안전(이미지와 동일 구조).
@@ -3862,6 +3864,52 @@ function _vidUsesLocalGpu(engine) {
 function enqueueImageJob(label, fn, engine) {
   const lanes = _imgUsesLocalGpu(engine) ? ['image', 'localGpu'] : ['image'];
   return _runOnLanes(lanes, label, fn);
+}
+// 🚦 **2단계 — 이 GPU 에서 TTS 가 도는 중이면 로컬 이미지·비디오 생성을 기다린다** (2026-08-26).
+//   1단계(awaitForeignComfyIdle)는 반대 방향만 막았다: TTS 를 **시작하기 전에** 이미지가 도는지 봤다.
+//   진행 중인 TTS 를 나중에 온 이미지 요청으로부터 지키려면 반대편도 필요하다 — 특히 아내 PC·외부
+//   노트북이 이 PC 의 ComfyUI 로 이미지를 보낼 때(앱 GPU 레인은 한 프로세스 안에서만 작동한다).
+//   🔑 OmniVoice api.py 에 GET /busy 를 신설해 물어본다(2026-08-26 2단계, 서버 파일은 저장소 밖).
+//     ⚠ 그냥 붙이면 소용없었다 — 합성이 **이벤트 루프를 막아** 정작 바쁠 때 대답을 못 했다(실측:
+//       합성 초반 약 5초 동안 /health 가 3초 타임아웃). 그래서 서버의 TTS 엔드포인트를 async def →
+//       def 로 바꿔 스레드풀에서 돌리고(await 를 쓰지 않아 안전) GPU 직렬화는 락으로 유지했다.
+//       수정 뒤 실측: 합성 내내 /busy 가 **1~4ms** 로 busy:true 를 정확히 반환한다.
+//   ⚠ **구버전 서버면 404/401 이 온다 → 그냥 진행**(fail-open). 서버를 재시작하기 전까지는 무동작.
+//   ⚠ 전제: 이 집 구성은 **GPU 머신이 하나**다. ComfyUI 가 로컬(비클라우드)이면 그 GPU 의 TTS 를 기다린다.
+const FOREIGN_TTS_WAIT_MS = 10 * 60 * 1000;   // 10분 — 넘으면 경고만 남기고 진행
+async function awaitForeignTtsIdle(label, logger) {
+  const say = typeof logger === "function" ? logger : log;
+  let base = "";
+  let headers = {};
+  try {
+    base = String(require("./tts/tts-config").getProvider("omnivoice").baseUrl || "").trim();
+    const s = require("./tts/secret-store").get("omnivoice");
+    if (s && s.apiKey) headers["X-API-Key"] = s.apiKey;
+  } catch { return; }
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  if (!base) return;
+  const t0 = Date.now();
+  let waited = false;
+  while (Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
+    let n = 0;
+    try {
+      const r = await fetch(base + "/busy", { headers, signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return;                       // 구버전 서버(404/401)·오류 → 그냥 진행
+      const j = await r.json();
+      if (!j || typeof j.busy === "undefined") return;
+      n = j.busy ? (j.n || 1) : 0;
+    } catch { return; }                        // 꺼져 있거나 못 닿으면 그냥 진행
+    if (!n) {
+      if (waited) say("  ▶ " + label + " — TTS 가 끝났습니다. 이미지 생성을 시작합니다 (" + ((Date.now() - t0) / 1000).toFixed(0) + "초 대기)");
+      return;
+    }
+    if (!waited) {
+      waited = true;
+      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지");
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  say("  ⚠ " + label + " — 음성 변환이 " + Math.round(FOREIGN_TTS_WAIT_MS / 60000) + "분 넘게 이어집니다. 더 기다리지 않고 시작합니다(둘 다 느려질 수 있습니다).");
 }
 // 🔴 **다른 PC 가 이 PC 의 로컬 ComfyUI 로 이미지를 만드는 중이면 TTS 를 기다린다** (2026-08-26, 1단계).
 //   앱의 GPU 레인(_runOnLanes)은 **같은 프로세스 안에서만** 작동한다. v0.3.46 에서 로컬 ComfyUI 를

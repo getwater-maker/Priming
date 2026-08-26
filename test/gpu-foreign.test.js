@@ -127,9 +127,106 @@ const BUSY = { queue_running: [{ id: 1 }], queue_pending: [] };
   const ttsFn = MAIN.slice(MAIN.indexOf('function enqueueTtsJob('), MAIN.indexOf('function enqueueTtsJob(') + 320);
   ok(ttsFn.indexOf('awaitForeignComfyIdle') >= 0, 'enqueueTtsJob 안에 있다');
   const imgFn = MAIN.slice(MAIN.indexOf('function enqueueImageJob('), MAIN.indexOf('function enqueueImageJob(') + 320);
-  eq(imgFn.indexOf('awaitForeignComfyIdle') >= 0, false, 'enqueueImageJob 에는 없다(교착 방지)');
+const imgBody = MAIN.slice(MAIN.indexOf('function enqueueImageJob('), MAIN.indexOf('}', MAIN.indexOf('function enqueueImageJob(')) + 1);
+eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에는 없다(자기 자신을 기다리는 교착 방지)');
   ok(MAIN.indexOf('const FOREIGN_GPU_WAIT_MS') >= 0, '대기 상한 상수가 있다');
   ok(BODY.indexOf('/queue') >= 0, 'ComfyUI 큐를 진실로 삼는다');
+
+
+  // ══════════ 2단계 — 이 GPU 에서 TTS 가 도는 중이면 로컬 이미지·비디오를 기다린다 ══════════
+  //   1단계의 반대 방향. OmniVoice api.py 의 GET /busy 를 본다(2026-08-26 신설).
+  //   ⚠ 그냥 붙였으면 소용없었다 — 합성이 이벤트 루프를 막아 정작 바쁠 때 대답을 못 했다(실측:
+  //     /health 가 3초 타임아웃). 서버의 TTS 엔드포인트를 async def → def 로 바꿔 스레드풀에서
+  //     돌린 뒤 실측하니 합성 내내 /busy 가 1~4ms 로 busy:true 를 정확히 반환했다.
+  const BODY2 = extractAsync(MAIN, "awaitForeignTtsIdle");
+  function build2({ baseUrl = "http://desktop-cbqlolj:9881", apiKey = "K", bodies = [], cap = 200, throwOn = null, status = 200 }) {
+    const logs = [];
+    const calls = [];
+    let idx = 0;
+    const fakeRequire = (m) => {
+      if (m.indexOf("tts-config") >= 0) return { getProvider: () => ({ baseUrl }) };
+      if (m.indexOf("secret-store") >= 0) return { get: () => (apiKey ? { apiKey } : null) };
+      return {};
+    };
+    const fakeFetch = async (url, opt) => {
+      calls.push({ url, headers: (opt && opt.headers) || {} });
+      if (throwOn === "net") throw new Error("fetch failed");
+      if (status !== 200) return { ok: false, status };
+      const b = bodies[Math.min(idx++, bodies.length - 1)];
+      return { ok: true, json: async () => b };
+    };
+    const fastTimeout = (fn) => { setTimeout(fn, 1); return 0; };
+    const fn = new Function(
+      "require", "fetch", "log", "FOREIGN_TTS_WAIT_MS", "setTimeout", "AbortSignal",
+      BODY2 + String.fromCharCode(10) + 'return awaitForeignTtsIdle;'
+    )(fakeRequire, fakeFetch, (m) => logs.push(m), cap, fastTimeout, { timeout: () => undefined });
+    return { fn, logs, calls };
+  }
+  const IDLE = { busy: false, n: 0 };
+  const TTSBUSY = { busy: true, n: 1 };
+
+  {
+    const t = build2({ bodies: [IDLE] });
+    await t.fn("로컬 이미지 생성");
+    eq(t.calls.length, 1, "[2단계] 유휴면 한 번만 묻는다");
+    eq(t.calls[0].url, "http://desktop-cbqlolj:9881/busy", "[2단계] /busy 로 정확히 요청한다");
+    eq(t.calls[0].headers["X-API-Key"], "K", "[2단계] API 키를 함께 보낸다(없으면 401)");
+    eq(t.logs.length, 0, "[2단계] 유휴면 조용하다");
+  }
+  {
+    const t = build2({ bodies: [TTSBUSY, TTSBUSY, IDLE] });
+    await t.fn("로컬 이미지 생성");
+    ok(t.calls.length >= 3, "[2단계] 끝날 때까지 폴링한다");
+    ok(t.logs.some((m) => m.indexOf("음성 변환이 도는 중") >= 0), "[2단계] 대기 이유를 사람 말로 알린다");
+    ok(t.logs.some((m) => m.indexOf("TTS 가 끝났습니다") >= 0), "[2단계] 시작할 때 알린다");
+    eq(t.logs.filter((m) => m.indexOf("도는 중") >= 0).length, 1, "[2단계] 대기 로그는 한 번만");
+  }
+  {
+    const t = build2({ bodies: [TTSBUSY], status: 404 });
+    await t.fn("x");
+    eq(t.calls.length, 1, "[2단계] 구버전 서버(404)면 그냥 진행한다 — 서버 재시작 전에는 무동작");
+  }
+  {
+    const t = build2({ bodies: [TTSBUSY], status: 401 });
+    await t.fn("x");
+    eq(t.calls.length, 1, "[2단계] 401 도 그냥 진행한다");
+  }
+  {
+    const t = build2({ bodies: [TTSBUSY], throwOn: "net" });
+    await t.fn("x");
+    eq(t.calls.length, 1, "[2단계] 서버에 못 닿으면 그냥 진행한다");
+  }
+  {
+    const t = build2({ baseUrl: "", bodies: [TTSBUSY] });
+    await t.fn("x");
+    eq(t.calls.length, 0, "[2단계] 주소가 비면 아무것도 하지 않는다");
+  }
+  {
+    const t = build2({ bodies: [{ ok: true }] });
+    await t.fn("x");
+    eq(t.calls.length, 1, "[2단계] busy 필드가 없는 응답이면 그냥 진행한다(형식이 다른 서버)");
+  }
+  {
+    const t = build2({ bodies: [TTSBUSY], cap: 120 });
+    const s0 = Date.now();
+    await t.fn("로컬 이미지 생성");
+    ok(Date.now() - s0 < 3000, "[2단계] 상한을 넘으면 빠져나온다");
+    ok(t.logs.some((m) => m.indexOf("더 기다리지 않고 시작") >= 0), "[2단계] 포기했음을 경고로 남긴다");
+  }
+  {
+    const t = build2({ baseUrl: "http://desktop-cbqlolj:9881///", bodies: [IDLE] });
+    await t.fn("x");
+    eq(t.calls[0].url, "http://desktop-cbqlolj:9881/busy", "[2단계] 꼬리 슬래시를 정리한다");
+  }
+
+  // 배선 — 로컬(비클라우드)일 때만, 이미지·비디오 두 경로 모두
+  ok(MAIN.indexOf("if (!cfg.cloud) await awaitForeignTtsIdle(") >= 0, "[2단계] !cfg.cloud 일 때만 부른다(클라우드는 무관)");
+  eq((MAIN.split("await awaitForeignTtsIdle(").length - 1), 2, "[2단계] 이미지·비디오 두 경로에 배선돼 있다");
+  // 🔴 미정의 식별자 재발 방지 — 호출부에 label 변수는 없다(두 함수 어디에도 정의돼 있지 않다).
+  eq(MAIN.includes('await awaitForeignTtsIdle(label'), false, '[2단계] 호출부가 없는 변수(label)를 쓰지 않는다');
+  ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 이미지 생성', logger)") >= 0, "[2단계] 이미지 경로는 리터럴 라벨 + logger");
+  ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 비디오 생성', log)") >= 0, "[2단계] 비디오 경로는 리터럴 라벨 + 전역 log");
+  ok(MAIN.indexOf("const FOREIGN_TTS_WAIT_MS") >= 0, "[2단계] 대기 상한 상수가 있다");
 
   console.log(bad ? '\n❌ ' + bad + '/' + n + ' 실패' : '\n✅ 남의 PC GPU 대기 ' + n + '/' + n + ' 통과');
   process.exit(bad ? 1 : 0);
