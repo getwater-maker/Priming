@@ -392,13 +392,10 @@ class GrokEngine {
     }
 
     fs.mkdirSync(this.profileDir, { recursive: true });
-    // 잠금 파일 제거 (이전 비정상 종료 흔적)
-    try {
-      for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
-        const p = path.join(this.profileDir, lock);
-        if (fs.existsSync(p)) fs.unlinkSync(p);
-      }
-    } catch {}
+    // 잠금 파일 제거 + 크래시 표시 정상화 (이전 비정상 종료 흔적)
+    //   ⚠ 락만 지우면 부족하다 — Preferences.exit_type='Crashed' 가 남으면 복원 안내가 떠
+    //     자동화 컨텍스트가 시작하자마자 닫힌다(2026-08-26 아내 PC 실사고: Grok 가 그렇게 죽었다).
+    require('./core/chrome-profile').cleanProfile(this.profileDir);
 
     this.log('[Grok] 브라우저 시작 (Grok Imagine)...');
     const _grokLaunchOpts = {
@@ -413,11 +410,27 @@ class GrokEngine {
       permissions: ['clipboard-read', 'clipboard-write'],
     };
     // 시스템 정식 Chrome 우선 → Playwright 전용 Chromium 다운로드 불필요(새 PC 호환). 없으면 번들 Chromium 폴백.
+    const _CP = require('./core/chrome-profile');
+    this.context = null;
     try {
       this.context = await chromium.launchPersistentContext(this.profileDir, { ..._grokLaunchOpts, channel: 'chrome' });
-    } catch (e) {
-      this.log(`[Grok] ⚠ 정식 Chrome 실행 실패 (${String(e.message).split('\n')[0].slice(0, 100)}) — 번들 Chromium 폴백 (Chrome 설치 권장: https://www.google.com/chrome)`);
-      this.context = await chromium.launchPersistentContext(this.profileDir, _grokLaunchOpts);
+    } catch (e1) {
+      // ① 프로필을 다시 정리하고 정식 Chrome 을 한 번 더 — 「시작하자마자 닫힘」 은 대개 이걸로 낫는다.
+      this.log('[Grok] ⚠ Chrome 실행 실패 — 프로필 정리 후 1회 재시도: ' + String(e1.message).slice(0, 90));
+      _CP.cleanProfile(this.profileDir);
+      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        this.context = await chromium.launchPersistentContext(this.profileDir, { ..._grokLaunchOpts, channel: 'chrome' });
+        this.log('[Grok] ✅ 재시도로 Chrome 실행 성공');
+      } catch (e2) {
+        // ② 그래도 안 되면 번들 Chromium 폴백. 그것도 없으면 **사람 말로** 알린다(영어 스택트레이스 금지).
+        this.log('[Grok] ⚠ Chrome 재시도도 실패 — 번들 Chromium 폴백');
+        try {
+          this.context = await chromium.launchPersistentContext(this.profileDir, _grokLaunchOpts);
+        } catch (e3) {
+          throw new Error(_CP.explainLaunchError(e3, 'Grok'));
+        }
+      }
     }
     this.page = this.context.pages()[0] || await this.context.newPage();
     await this.page.addInitScript(() => {

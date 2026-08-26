@@ -482,6 +482,8 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호. 감지 메시지(문자열)가 담기면 재설정 시각 파싱용.
   //   '__STALL__' = 한도 메시지 없이 연속 무응답(침묵 정체) — 과부하/한도 추정. 상위가 추정 쿨다운 설정.
   let consecMiss = 0; const STALL_LIMIT = 3; // 연속 무응답 N장이면 조기 종료 → 다음 엔진(Flow)
+  // 모더레이션 순화가 이 실행에서 몇 번 헛수고였나 — N번 넘으면 이후 컷은 순화를 건너뛰고 다음 엔진에 넘긴다.
+  let softenFutile = 0; const SOFTEN_GIVEUP = 2;
   try {
     for (let start = 0; start < idx.length; start += BATCH) {
       if (abortSignal && abortSignal()) break;
@@ -515,20 +517,33 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
           if (limitReached) break;
           const num = groups[idx[start + k]].num;
           let prevBlocked = false;
+          let didSoften = false;   // 이 컷에서 실제로 순화 재시도를 했나(헛수고 집계용)
           for (let attempt = 1; attempt <= MAX_SINGLE_TRY; attempt++) {
             // 직전이 NSFW 차단이면 프롬프트를 순화해 우회. transient 실패면 원본 그대로 재시도.
             const usePrompt = prevBlocked ? softenForModeration(ps[k]) : ps[k];
+            if (prevBlocked) didSoften = true;
             log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
             const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
             if (rr[0] && rr[0].path) { saved[k] = rr[0]; consecMiss = 0; break; }
             if (rr[0] && rr[0].limit) { limitReached = String(rr[0].error || true); break; } // 한도 → 단건 중단
             prevBlocked = !!(rr[0] && rr[0].blocked);
+            // 🔑 순화가 이 실행에서 이미 여러 번 헛수고였다면 더 시도하지 않고 **다음 엔진에 넘긴다**.
+            //   2026-08-26 아내 PC 실측: G5·G6·G7 모두 순화로도 막혔고, 그 뒤 Flow 가 전부 만들었다.
+            //   컷당 약 25초씩 버리던 것을 없앤다. (순화가 통하는 대본에서는 그대로 동작한다)
+            if (prevBlocked && softenFutile >= SOFTEN_GIVEUP) {
+              log(`[Genspark] G${num} NSFW 차단 — 이 실행에서 순화가 ${softenFutile}번 헛수고라 재시도를 건너뜁니다(다음 엔진이 이어 만듭니다)`);
+              break;
+            }
             if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
             else if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${num} 단건 실패 — 재시도`);
           }
           if (!(saved[k] && saved[k].path)) {
             const g = groups[idx[start + k]];
-            if (prevBlocked) { g.imageStatus = 'blocked'; log(`[Genspark] ⛔ G${num} 모더레이션(NSFW)으로 막힘 — 순화로도 실패. 프롬프트 수정 또는 다른 엔진(ComfyUI) 필요`); }
+            if (prevBlocked) {
+              g.imageStatus = 'blocked';
+              if (didSoften) softenFutile++;   // 순화까지 해봤는데 실패 → 다음 컷부터는 생략 판단에 쓴다
+              log(`[Genspark] ⛔ G${num} 모더레이션(NSFW)으로 막힘${didSoften ? ' — 순화로도 실패' : ''}. 프롬프트 수정 또는 다른 엔진(ComfyUI) 필요`);
+            }
             else {
               log(`[Genspark] ✗ G${num} 최종 실패`);
               // 한도 메시지 없이 연속 무응답(침묵 정체)이 STALL_LIMIT 장 쌓이면 과부하/한도로 추정 → 조기 종료(Flow 로).

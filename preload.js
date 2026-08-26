@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld('api', {
   testComfyImage: (args) => ipcRenderer.invoke('test-comfy-image', args),
   getComfyVideoConfig: () => ipcRenderer.invoke('get-comfy-video-config'),
   setComfyVideoConfig: (patch) => ipcRenderer.invoke('set-comfy-video-config', patch),
+  installBrowser: () => ipcRenderer.invoke('install-browser'),
   getUpscaleConfig: () => ipcRenderer.invoke('get-upscale-config'),
   setUpscaleConfig: (patch) => ipcRenderer.invoke('set-upscale-config', patch),
   pickComfyVideoWorkflow: () => ipcRenderer.invoke('pick-comfy-video-workflow'),

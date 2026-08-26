@@ -1053,6 +1053,17 @@ export default function App() {
     if (regen === 'image') { setPromptView(null); await runRegen(shortsNum, groupNum); }
     else if (regen === 'video') { setPromptView(null); await runGroupVid(shortsNum, groupNum); }
   }
+  const [browserBusy, setBrowserBusy] = useState(false);   // 폴백 브라우저 설치 중
+  async function installBrowser() {
+    if (browserBusy) return;
+    setBrowserBusy(true);
+    setSettingsMsg('⬇ 브라우저(Chromium) 설치 중… 수백 MB 라 몇 분 걸립니다. 로그창에 진행이 나옵니다.');
+    try {
+      const r = await api.installBrowser();
+      setSettingsMsg((r && r.ok ? '✅ ' : '❌ ') + ((r && r.message) || '알 수 없는 결과'));
+    } catch (e) { setSettingsMsg('❌ ' + e.message); }
+    setBrowserBusy(false);
+  }
   async function saveUpCfg(patch) { try { setUpCfg(await api.setUpscaleConfig(patch)); } catch (e) { logline('업스케일 설정 오류: ' + e.message); } }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
   async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('Gemini API 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
@@ -2586,6 +2597,16 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'acct' && (<div>
+              {/* ⬇ 폴백 브라우저 — Chrome 실행이 실패했을 때 앱이 쓰는 대체 브라우저.
+                  🔴 터미널에서 npx playwright install 을 돌리면 **엉뚱한 버전**이 깔린다(앱 playwright 와
+                     revision 불일치 — 2026-08-26 아내 PC 실측: 앱은 chromium-1223 인데 1234 가 설치됨).
+                     이 버튼은 앱 안의 playwright CLI 로 돌려 버전이 맞는다. */}
+              <div className="frow" style={{ alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
+                <span className="meta" style={{ flex: 1 }}>브라우저 자동화(Genspark·Flow·Grok)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 아래 버튼을 누르세요.</span>
+                <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
+                  title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
+                  {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
+              </div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.55 }}>
                 브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
                 그 프로필에 쿠키가 남아 <b>한동안 다시 로그인하지 않아도</b> 됩니다(X 는 보통 몇 달).

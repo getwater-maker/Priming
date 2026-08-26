@@ -609,6 +609,11 @@ ipcMain.handle('test-comfy-image', async (_e, args = {}) => {
 ipcMain.handle('get-comfy-video-config', () => { try { return require('./core/comfy-video').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-comfy-video-config', (_e, patch) => { try { return require('./core/comfy-video').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 // 영상 업스케일 방식 — auto/ai/fast/off. GPU 없는 PC 가 Real-ESRGAN 에 수십 분 갇히는 것을 피한다(2026-08-26).
+// 폴백 브라우저(번들 Chromium) 설치 — 터미널에서 npx 로 돌리면 엉뚱한 버전이 깔린다(앱 playwright 와 revision 불일치).
+ipcMain.handle('install-browser', async () => {
+  try { return await require('./core/chrome-profile').installBundledChromium(log); }
+  catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+});
 ipcMain.handle('get-upscale-config', () => { try { return require('./core/upscale-config').load(); } catch { return {}; } });
 ipcMain.handle('set-upscale-config', (_e, patch) => { try { return require('./core/upscale-config').save(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 ipcMain.handle('pick-comfy-video-workflow', async () => {

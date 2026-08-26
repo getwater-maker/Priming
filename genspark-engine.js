@@ -148,12 +148,10 @@ class GensparkEngine {
     }
 
     fs.mkdirSync(this.profileDir, { recursive: true });
-    try {
-      for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
-        const p = path.join(this.profileDir, lock);
-        if (fs.existsSync(p)) fs.unlinkSync(p);
-      }
-    } catch {}
+    // 잠금 파일 제거 + 크래시 표시 정상화 (이전 비정상 종료 흔적)
+    //   ⚠ 락만 지우면 부족하다 — Preferences.exit_type='Crashed' 가 남으면 복원 안내가 떠
+    //     자동화 컨텍스트가 시작하자마자 닫힌다(2026-08-26 아내 PC 실사고).
+    require('./core/chrome-profile').cleanProfile(this.profileDir);
 
     this.log('[Genspark] 브라우저 시작 (Genspark AI 이미지)...');
     const _gsLaunchOpts = {
@@ -168,11 +166,27 @@ class GensparkEngine {
       permissions: ['clipboard-read', 'clipboard-write'],
     };
     // 시스템 정식 Chrome 우선 → Playwright 전용 Chromium 다운로드 불필요(새 PC 호환). 없으면 번들 Chromium 폴백.
+    const _CP = require('./core/chrome-profile');
+    this.context = null;
     try {
       this.context = await chromium.launchPersistentContext(this.profileDir, { ..._gsLaunchOpts, channel: 'chrome' });
-    } catch (e) {
-      this.log(`[Genspark] ⚠ 정식 Chrome 실행 실패 (${String(e.message).split('\n')[0].slice(0, 100)}) — 번들 Chromium 폴백 (Chrome 설치 권장: https://www.google.com/chrome)`);
-      this.context = await chromium.launchPersistentContext(this.profileDir, _gsLaunchOpts);
+    } catch (e1) {
+      // ① 프로필을 다시 정리하고 정식 Chrome 을 한 번 더 — 「시작하자마자 닫힘」 은 대개 이걸로 낫는다.
+      this.log('[Genspark] ⚠ Chrome 실행 실패 — 프로필 정리 후 1회 재시도: ' + String(e1.message).slice(0, 90));
+      _CP.cleanProfile(this.profileDir);
+      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        this.context = await chromium.launchPersistentContext(this.profileDir, { ..._gsLaunchOpts, channel: 'chrome' });
+        this.log('[Genspark] ✅ 재시도로 Chrome 실행 성공');
+      } catch (e2) {
+        // ② 그래도 안 되면 번들 Chromium 폴백. 그것도 없으면 **사람 말로** 알린다(영어 스택트레이스 금지).
+        this.log('[Genspark] ⚠ Chrome 재시도도 실패 — 번들 Chromium 폴백');
+        try {
+          this.context = await chromium.launchPersistentContext(this.profileDir, _gsLaunchOpts);
+        } catch (e3) {
+          throw new Error(_CP.explainLaunchError(e3, 'Genspark'));
+        }
+      }
     }
     this.page = this.context.pages()[0] || await this.context.newPage();
     await this.page.addInitScript(() => {
@@ -320,6 +334,8 @@ class GensparkEngine {
           if (sel.includes(_ratio)) break;
         }
         _ratioSel = sel; _ratioOk = sel.includes(_ratio);
+        // 이 세션에서 실제로 맞춘 비율을 기억한다 — 나중에 팝오버가 안 열려 확인만 못 했을 때 근거가 된다.
+        if (_ratioOk) this._ratioConfirmed = _ratio;
         if (verbose || !sel.includes(_ratio)) {
           this.log(`[Genspark] 종횡비: ${_ratio} 선택 (현재 선택=${sel || '?'})`);
         }
@@ -562,7 +578,15 @@ class GensparkEngine {
       this.log(`[Genspark] ⚠️ 설정 미일치 (시도 ${attempt}/3) — 크기=${(_verified && _verified.sizeSel) || '?'}(원함 ${_verified && _verified.wantSize}) · 비율=${(_verified && _verified.ratioSel) || '?'}(원함 ${_verified && _verified.wantRatio}) — 재적용`);
       if (abortSignal && abortSignal()) return fail('사용자 중단');
     }
-    if (!_verified || !_verified.sizeOk || !_verified.ratioOk) {
+    // 🔑 팝오버가 안 열려 **확인만** 못 한 경우와, 설정이 실제로 틀린 경우를 가른다.
+    //   Genspark 는 한 번 고른 비율을 세션 내내 유지하므로, 이미 맞춘 적이 있으면 확인 실패 = 설정 오류가 아니다.
+    //   🔴 2026-08-26 아내 PC: 팝오버가 안 열려 `종횡비 '16:9' 못 찾음` → 3회 재시도 후 배치 포기 →
+    //      G8·G9 가 통째로 실패했다(그 세션에서 앞서 16:9 적용은 성공했었다).
+    const _ratioKept = _verified && _verified.sizeOk && !_verified.ratioOk
+      && this._ratioConfirmed && this._ratioConfirmed === _verified.wantRatio;
+    if (_ratioKept) {
+      this.log('[Genspark] ⚠️ 비율 옵션을 확인하지 못했지만 이 세션에서 이미 ' + this._ratioConfirmed + ' 로 맞춘 적이 있어 그대로 진행합니다.');
+    } else if (!_verified || !_verified.sizeOk || !_verified.ratioOk) {
       const msg = `Genspark 설정 적용 실패 (원함 ${_verified ? _verified.wantSize : '1K'}/${_verified ? _verified.wantRatio : '16:9'} · 실제 크기=${_verified ? (_verified.sizeSel || '?') : '?'}/비율=${_verified ? (_verified.ratioSel || '?') : '?'}) — 잘못된 크기 방지 위해 이 배치를 생성하지 않음`;
       this.log(`[Genspark] ❌ ${msg}`);
       return fail(msg);
