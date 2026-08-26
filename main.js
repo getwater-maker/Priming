@@ -1578,7 +1578,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
       const dirsB = shortsDirs(S.outRoot, pr.shortsNum);
-      try { await runRotatingImages(pr, dirsB.media, log, styleId, engine || 'rotate', bad); }
+      try { await runRotatingImages(pr, dirsB.media, log, styleId, engine || 'rotate', bad, 0, true); }
       catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
       const still = await sweepBadVisuals(pr);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
@@ -1662,7 +1662,7 @@ async function closeFlowEng() {
   } catch {}
 }
 
-async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
+async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, force = false) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const FlowAccounts = require('./core/flow-accounts');
   // 이미지 모델(기본 Nano Banana 2 / 선택 시 Nano Banana 2 Lite 등) — ⚙ 순환 설정에 저장.
@@ -1680,7 +1680,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   //   한 계정이 한도(45)·차단(비정상활동)·0장이면 그 계정을 오늘 쉬게(rest) 하고 다음 계정으로.
   //   (사용자 요청: Genspark 한도 후 Flow 로 넘어오면 Flow 계정 1→2→3→4 도 순환해야 함)
   while (!S.abort) {
-    const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !hasVisual(g));
+    const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !imgDone(g, force));
     if (!targets.length) { if (loopGuard === 0) logger('[Flow] 생성할 그룹 없음 (이미 이미지/영상 있음)'); break; }
     const acc = nextAcc();
     if (!acc) {
@@ -1779,12 +1779,12 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
 // ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.
 //   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
 // Nano Banana 2 Lite (Gemini 이미지 API) — 브라우저 없이 API 로 이미지 생성. imgEngine==='gemini' 일 때.
-async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
+async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force = false) {
   const GI = require('./core/gemini-image');
   if (!GI.hasKey()) { logger('⚠ Gemini API 키 없음 — ⚙ 채널편집의 「Gemini 키」를 설정하세요.'); return; }
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
-  if (!targets.length) return;
+  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!targets.length) { logger(noTargetMsg(onlyNums)); return; }
   try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
   const model = GI.loadConfig().model;
   logger(`🍌 Nano Banana 2 Lite (Gemini API · ${model}) — ${targets.length}장 즉시 생성`);
@@ -1942,15 +1942,15 @@ const isComfyVal = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') ==
 const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).slice(7) : '');
 
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0) {
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
   if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
   if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 워크플로(API 포맷 JSON)를 지정하세요.'); return; }
   const eng = new CI.ComfyImage(cfg, logger);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
-  if (!targets.length) return;
+  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!targets.length) { logger(noTargetMsg(onlyNums)); return; }
   try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
   // 활성 워크플로 이름(하드코딩 'z-image' 아님) — 실제 선택된 모델(Z-image/Krea2 등)을 로그에 표기.
   const _wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
@@ -2259,15 +2259,16 @@ async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
-async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0) {
+async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
-  if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
-  if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel);
+  if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
+  if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
+  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!need().length) { logger(noTargetMsg(onlyNums)); return; }
   logger(`🔄 이미지 순환: ${order.join(' → ')}`);
   for (const engineId of order) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
@@ -2310,9 +2311,9 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
           break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
         }
       } else if (engineId === 'flow') {
-        await runFlowImages(project, imagesDir, logger, styleId, nums);
+        await runFlowImages(project, imagesDir, logger, styleId, nums, force);
       } else if (engineId === 'gemini') {
-        await runGeminiImages(project, imagesDir, logger, styleId, nums);
+        await runGeminiImages(project, imagesDir, logger, styleId, nums, force);
       } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
     } catch (e) {
       logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
@@ -2465,6 +2466,22 @@ function cacheGeneratedImages(project, styleId, engine) {
 //   (일괄첨부로 영상만 넣은 그룹에 이미지를 또 만들던 문제 방지)
 function hasVisual(g) {
   return !!((g.imagePath && fs.existsSync(g.imagePath)) || (g.videoPath && fs.existsSync(g.videoPath)));
+}
+// 🔑 이미지 생성 대상 판정 — `force` 는 **명시적 재생성**(🔄 단건 · 검정·노이즈 복구 · 영상 전 선행 생성).
+//   🔴 평소 필터 `hasVisual` 은 **영상까지** 보는데, 재생성 경로는 `imagePath` 만 비우므로 그 그룹에 영상이
+//     있으면 「이미 자산 있음」으로 판정돼 **대상 0개 → 아무것도 안 만들고 성공 반환**한다. 그러면 호출부는
+//     이미지가 없으니 「실패」라고 찍는다 = 조용히 막다른 길(로이 2026-08-26 실측: [다산_0827] G1 은
+//     media-1/01.mp4 가 있어 🔄 가 **1초 만에** 실패했고, 같은 시각 영상 없는 [다산_0829] G1 은 30초 걸려
+//     정상 생성됐다. 로그가 「엔진 한도·오류·결제 확인」이라 원인을 한도로 오도하기까지 했다).
+//   ⇒ force 면 **이미지 유무만** 본다. 평소 경로(만들기 2단계)는 그대로 = 영상 있는 그룹은 안 만든다.
+//   ⚠ Genspark(core/pipeline.generateImagesGenspark)는 원래부터 이미지 유무만 봤다 — 나머지 엔진을 그쪽에 맞춘다.
+function imgDone(g, force) {
+  return force ? !!(g.imagePath && fs.existsSync(g.imagePath)) : hasVisual(g);
+}
+// 대상이 0개면 **조용히 넘어가지 않는다** — 위 사고가 로그만 보고는 안 보였던 이유가 이것이다.
+function noTargetMsg(onlyNums) {
+  const where = onlyNums && onlyNums.length ? ` (그룹 ${onlyNums.join(',')})` : '';
+  return `⏭ 이미지 생성 대상 없음${where} — 이미 이미지·영상이 있습니다`;
 }
 // 이미지 생성이 필요한(프롬프트 있고 아직 이미지·영상 둘 다 없는) 그룹 수.
 function imagesNeeded(project) {
@@ -3673,7 +3690,7 @@ async function runMakeAllCore(opts = {}) {
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
       const dirs0 = shortsDirs(outRoot, pr.shortsNum);
-      try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
+      try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad, 0, true); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
       const still = await sweepBadVisuals(pr);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
@@ -3968,7 +3985,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     log(`🖼 G${groupNum} 이미지 없음 — 먼저 생성 후 영상`);
     try {
       await prefillImageCache(pr, videoDir, styleId, imgEngine);
-      await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum]);
+      await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum], 0, true);
       cacheGeneratedImages(pr, styleId, imgEngine);
     } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
     pushDtoUpdate();
@@ -4149,6 +4166,9 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
     log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
     try {
+      // ⚠ 실패하면 **원래 있던 이미지 참조가 끊긴 채로 남는다**(파일은 폴더에 그대로인데 그룹은 이미지 없음
+      //   → .vrew 게이트에 막힌다). 그래서 이전 경로를 들고 있다가 실패 시 되돌린다(로이 2026-08-26).
+      const _prevImg = g.imagePath, _prevEng = g.imageEngine;
       g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
       // 🔑 **누를 때마다 프롬프트를 바꾼다.** 씨앗만 새로 뽑으면 같은 글자가 다시 나가는데, comfy.org Krea2 CLIP 의
       //   조건 깨짐은 **프롬프트 텍스트에 결정적**이라 똑같이 망가진 그림이 또 온다(로이 2026-08-19:
@@ -4156,10 +4176,13 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
       //   버리는 건 맨 끝 부정 절이라 그림 손실이 사실상 없다(cfg=1 + 네거티브 zero-out — v0.2.83).
       g._regenN = (g._regenN || 0) + 1;
       const _lv = ((g._regenN - 1) % 2) + 1;
-      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum], _lv); // Flow+Genspark 순환, 이 그룹만
+      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum], _lv, true); // Flow+Genspark 순환, 이 그룹만 (force = 영상이 있어도 이미지를 다시 만든다)
       cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
       if (g.imagePath && g.imageStatus === 'done') log(`✓ G${groupNum} 재생성 완료`);
-      else { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패 — 이미지가 생성되지 않았습니다 (엔진 한도·오류·결제 확인)`); } // 실패 시 'generating' 고착 방지
+      else {
+        g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패 — 이미지가 생성되지 않았습니다 (엔진 한도·오류·결제 확인)`); // 실패 시 'generating' 고착 방지
+        if (_prevImg && fs.existsSync(_prevImg)) { g.imagePath = _prevImg; g.imageEngine = _prevEng; g.imageStatus = 'done'; log(`↩ G${groupNum} 기존 이미지를 그대로 둡니다 (${path.basename(_prevImg)})`); }
+      }
     } catch (e) { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
     pushDtoUpdate(); // 성공/실패 최종 상태를 UI 에 반영(스피너 해제)
     return P.toDTO(S.parsed);

@@ -1,5 +1,5 @@
 {
-  "version": "0.3.60",
+  "version": "0.3.61",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "637c8a1adeac15248b7e159867ee66a3d45b7625",
+    "CLAUDE.md": "d13855258b24a1e1d5644adbf03488c63dca834a",
     "comfy/comfy-server.pyw": "c9c69bd8aef76f0374a236fec6769274bd11dc06",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
@@ -77,9 +77,9 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "cf341221315558eeb1676b4279270976684389d2",
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
-    "main.js": "276a5ea7822ce1c12d0c3563e2f8e953c222a2e2",
+    "main.js": "0613a997b9457f7c2552997e6f28141bf616b35b",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "bb2a6dae797e729640de97d97afcd5f2d6ccbd21",
+    "package.json": "aad1215b39fcffe46db214bf8fdf8f2cc6ecd41a",
     "preload.js": "763f6816b12b23dd5fea8711a9ecf0070047e63b",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-D_ShqHqx.js": "91df204c36d9bc9a2523954be1b90ec6b288ca6c",
