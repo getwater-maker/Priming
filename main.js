@@ -1527,13 +1527,32 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
         + ` (합성 ${s.tts.toFixed(2)} · 트림 ${s.trim.toFixed(2)} · mp3 ${s.mp3.toFixed(2)} · 기타 ${etc.toFixed(2)})`);
     }
     if (r.failed.length) log(`   ⚠ 실패 목록: ${r.failedPath}`);
-    try { shell.openPath(outDir); } catch {}
+    // ⛔ 끝났다고 탐색기를 자동으로 열지 않는다 — 여러 번 돌리면 창이 쌓인다(v0.2.99 에서 롱폼이
+    //   이미 폐지한 것). 화면 위의 「📁 출력 폴더」 버튼으로 필요할 때 연다.
     return { ok: true, outDir, ...r };
   } catch (e) {
     log(`❌ 리모션 TTS 실패 — ${e.message}`);
     throw e;
   }
 }));
+
+// 📁 출력 폴더 열기 — 만들기가 끝날 때 자동으로 열지 않으므로(창이 쌓인다) 버튼으로 연다.
+//   TSV 를 열었으면 그 TSV 폴더로, 아직 안 만들어졌으면 MP3 출력 뿌리로 연다.
+ipcMain.handle('remotion-open-out', async (_e, args = {}) => {
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  const outRoot = preset.outLong || preset.outputFolder;
+  if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
+  let dir = outRoot;
+  if (S.tsv && S.tsv.path) {
+    const base = path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '');
+    const d = path.join(outRoot, _safeFolder(base));
+    if (fs.existsSync(d)) dir = d;   // 아직 안 만들었으면 뿌리를 연다(없는 폴더를 열면 오류만 난다)
+  }
+  if (!fs.existsSync(dir)) throw new Error('폴더가 없습니다 — ' + dir);
+  shell.openPath(dir);
+  return dir;
+});
 
 // 🎧 **몇 문장만 먼저 만들어 들어본다** — 355문장을 15분 돌리기 전에 목소리·배속·발음사전을 확인하는 자리.
 //   🔑 **임시 폴더에 만든다**(MP3 출력 폴더를 건드리지 않는다) — 부분 결과가 그 폴더의 `_manifest.json`

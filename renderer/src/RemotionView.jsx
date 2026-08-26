@@ -34,6 +34,12 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const [pvBusy, setPvBusy] = useState(false);
   const audioRef = useRef(null);
   const lastPickRef = useRef(-1);   // Shift 범위 선택의 기준점
+  // 🔴 Shift 여부는 **click 에서 받아 두고 change 에서 쓴다.**
+  //   checkbox 는 click → (checked 토글) → change 순서라 이 방법이 안전하다.
+  //   ⛔ onClick 에서 preventDefault 를 하면 안 된다 — 제어 checkbox 의 기본 토글을 막으면
+  //     React 가 다음 렌더에서 DOM 에 새 값을 쓰지 않고 넘어가, **한 박자 늦게 체크가 나타난다**
+  //     (로이 2026-08-27: "클릭해도 체크가 안 되다가 다른 곳을 클릭하면 그때 체크된다").
+  const shiftRef = useRef(false);
   const queueRef = useRef([]);      // 이어 듣기 대기열
 
   useEffect(() => {
@@ -136,6 +142,13 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     } finally { setPvBusy(false); setProg(null); }
   }
 
+  // 📁 출력 폴더 — 작업이 끝날 때 탐색기를 **자동으로 열지 않는다**(큐를 돌리면 창이 쌓인다 — v0.2.99
+  //   에서 롱폼이 이미 폐지한 것). 대신 필요할 때 이 버튼으로 연다.
+  async function openOut() {
+    try { await api.remotionOpenOut({ presetName }); }
+    catch (e) { setStatus && setStatus('폴더 열기 실패: ' + e.message); }
+  }
+
   async function openTsv() {
     try {
       await refreshDict();
@@ -184,6 +197,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           <button className="ghost" onClick={() => { setPicked([]); lastPickRef.current = -1; }} disabled={busy}>선택 해제</button>
         )}
         {playing && <button className="ghost" onClick={stopPlay}>⏹ 정지</button>}
+        <button className="ghost" onClick={openOut} disabled={busy}
+          title="만들어진 mp3 가 있는 폴더를 엽니다">📁 출력 폴더</button>
         <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input type="checkbox" checked={trim} disabled={busy || pvBusy} onChange={(e) => setTrim(e.target.checked)} />
           앞뒤 무음 제거
@@ -293,8 +308,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
                   background: isPlaying ? '#fdf1e0' : (isPicked ? '#f6f1ea' : 'transparent') }}>
                   <td style={{ padding: '4px 4px', textAlign: 'center' }}>
                     <input type="checkbox" checked={isPicked} disabled={busy || pvBusy}
-                      onClick={(e) => { e.preventDefault(); togglePick(i, e.shiftKey); }}
-                      onChange={() => {}} />
+                      onClick={(e) => { shiftRef.current = e.shiftKey; }}
+                      onChange={() => togglePick(i, shiftRef.current)} />
                   </td>
                   <td style={{ padding: '4px 8px', color: '#999' }}>{i + 1}</td>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.name}</td>

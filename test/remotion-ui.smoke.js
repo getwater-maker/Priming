@@ -58,6 +58,14 @@ fs.writeFileSync(TSV_PATH,
   }
   // 🔴 목소리·배속·사전을 읽는 곳이 둘로 갈리면 미리듣기와 결과물이 달라진다 → 한 함수로 모았다.
   ok(MAIN.includes('function _remotionVoiceCfg('), '채널 설정을 읽는 헬퍼가 하나 있다');
+  ok(MAIN.includes("ipcMain.handle('remotion-open-out'"), 'remotion-open-out IPC 존재');
+  {
+    // ⛔ 끝났다고 탐색기를 자동으로 열지 않는다 — 여러 번 돌리면 창이 쌓인다(v0.2.99 롱폼과 같은 정책).
+    const i0 = MAIN.indexOf("ipcMain.handle('remotion-run-tts'");
+    const i1 = MAIN.indexOf("// 📁 출력 폴더 열기", i0);
+    const body = MAIN.slice(i0, i1 > 0 ? i1 : i0 + 6000);
+    ok(!/shell\.openPath/.test(body), '리모션 만들기가 끝나도 탐색기를 자동으로 열지 않는다');
+  }
   ok((MAIN.match(/_remotionVoiceCfg\(args\.presetName/g) || []).length === 2,
     '전체 만들기와 미리듣기가 **같은 헬퍼**로 목소리·배속·사전을 읽는다');
   {
@@ -78,6 +86,12 @@ fs.writeFileSync(TSV_PATH,
     ok(/function togglePick/.test(RV) && /shiftKey/.test(RV), 'Shift 클릭 범위 선택');
     // 🔑 TSV 를 새로 열면 고른 것·미리듣기 결과를 비운다 — 안 그러면 옛 TSV 의 음성을 듣게 된다.
     ok(/setPicked\(\[\]\); setPreviews\(\{\}\)/.test(RV), 'TSV 를 다시 열면 미리듣기 상태를 비운다');
+    // 🔴 제어 checkbox 의 click 기본동작을 막으면 React 가 다음 렌더에서 DOM 에 새 값을 쓰지 않아
+    //   **한 박자 늦게** 체크가 나타난다(로이 2026-08-27 실사고). shift 는 click 에서 받아 두고 change 에서 쓴다.
+    ok(!/preventDefault\(\); togglePick/.test(RV), '체크박스 click 에서 preventDefault 를 하지 않는다');
+    ok(/onChange=\{\(\) => togglePick\(i, shiftRef\.current\)\}/.test(RV), '토글은 onChange 에서 한다');
+    ok(/shiftRef\.current = e\.shiftKey/.test(RV), 'Shift 여부는 click 에서 받아 둔다');
+    ok(/api\.remotionOpenOut/.test(RV), '「📁 출력 폴더」 버튼이 IPC 를 부른다');
   }
 
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
@@ -149,9 +163,14 @@ fs.writeFileSync(TSV_PATH,
     ok(await win.isVisible('table thead th:has-text("🎧")'), '표에 고르기(🎧) 열이 있다');
     ok(await win.isDisabled('button:has-text("🎧 미리듣기")'), '아무것도 안 골랐으면 미리듣기 비활성');
 
+    ok(await win.isVisible('button:has-text("📁 출력 폴더")'), '「📁 출력 폴더」 버튼이 위에 있다');
+
     // 1행 체크 → 버튼에 개수가 뜬다
     await win.click('table tbody tr:nth-child(1) input[type="checkbox"]');
     await win.waitForTimeout(200);
+    // 🔴 클릭한 **그 순간** 체크 표시가 보여야 한다. 예전엔 다른 곳을 눌러야 그제야 나타났다.
+    ok(await win.isChecked('table tbody tr:nth-child(1) input[type="checkbox"]'),
+      '클릭 즉시 체크 표시가 보인다 (한 박자 늦던 사고 회귀)');
     ok(await win.isVisible('button:has-text("🎧 미리듣기 (1)")'), '한 개 고르면 「🎧 미리듣기 (1)」');
     ok(!(await win.isDisabled('button:has-text("🎧 미리듣기")')), '고른 뒤엔 활성');
 
@@ -159,6 +178,11 @@ fs.writeFileSync(TSV_PATH,
     await win.click('table tbody tr:nth-child(5) input[type="checkbox"]', { modifiers: ['Shift'] });
     await win.waitForTimeout(200);
     ok(await win.isVisible('button:has-text("🎧 미리듣기 (5)")'), 'Shift 클릭 = 범위 선택 (1~5행)');
+    {
+      // 범위 안의 중간 행도 **즉시** 체크돼 보여야 한다(state 와 DOM 이 어긋나지 않는다).
+      const mid = await win.isChecked('table tbody tr:nth-child(3) input[type="checkbox"]');
+      ok(mid, '범위 선택된 중간 행도 즉시 체크돼 보인다');
+    }
 
     // 🔴 상한 — 13개를 고르고 누르면 **합성하지 않고** 이유를 알려준다.
     for (let i = 6; i <= 13; i++) await win.click('table tbody tr:nth-child(' + i + ') input[type="checkbox"]');
@@ -175,6 +199,8 @@ fs.writeFileSync(TSV_PATH,
     await win.click('button:has-text("선택 해제")');
     await win.waitForTimeout(200);
     ok(await win.isDisabled('button:has-text("🎧 미리듣기")'), '선택 해제하면 다시 비활성');
+    ok(!(await win.isChecked('table tbody tr:nth-child(1) input[type="checkbox"]')),
+      '선택 해제하면 체크 표시도 즉시 사라진다');
     // 아직 안 들어본 행은 듣기 칸이 비어 있다(실제 합성은 이 테스트에서 하지 않는다 — GPU·시간).
     ok(!(await win.isVisible('table tbody tr:nth-child(1) button:has-text("▶")').catch(() => false)),
       '미리듣기 전에는 ▶ 버튼이 없다');
