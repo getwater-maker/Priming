@@ -1,5 +1,5 @@
 {
-  "version": "0.3.56",
+  "version": "0.3.57",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -79,11 +79,11 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "f0cca4b76c0acb43ae11525575c8f8267e7cdf66",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "6ddd822d97dc9eb304dde9a3efb61df8aa1f3086",
+    "package.json": "8c91db0f89f1e0513219d5f8c2771c43d8c655ff",
     "preload.js": "763f6816b12b23dd5fea8711a9ecf0070047e63b",
+    "renderer/dist/assets/index-BNwML0Uv.js": "8676f9ba4cfbce2f5cf7e1393036f71ad0e04022",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
-    "renderer/dist/assets/index-BZhN_9i6.js": "fe2b6cfdf8bab3b327bbcfccebc9f501239083b6",
-    "renderer/dist/index.html": "051f9a3a55d5cb256634bf5e28e47a0cee8d42cb",
+    "renderer/dist/index.html": "311965e180d7626d2d80747e221afd8fe4e215f4",
     "renderer/index.html": "11a8eca1c5cc6c227f210236f7b09853e35ad73b",
     "tsv-tts.js": "277ca128937e40516b8a8197275fcda5b4f6e642",
     "tts/asr-client.js": "fd9f8dbef3bd261aed282a7d5f09411b51260f2d",

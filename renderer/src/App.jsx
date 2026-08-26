@@ -359,6 +359,8 @@ export default function App() {
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
   const [chTab, setChTab] = useState('basic'); // 채널편집 탭 (basic·voice·caption·tools·folder)
+  // 채널 설정이 저장될 때마다 +1 — 채널 값을 읽어 쓰는 화면이 이걸 보고 다시 읽는다.
+  const [presetRev, setPresetRev] = useState(0);
   const [ch, setCh] = useState(null);          // 편집 중 프리셋 폼
   const [newChanOpen, setNewChanOpen] = useState(false); // 새 채널 이름 입력 모달
   const [newChanName, setNewChanName] = useState('');
@@ -1452,6 +1454,9 @@ export default function App() {
       if (newName !== origName) await api.renamePreset({ oldName: origName, newName }); // 이름부터 바꾸고(같은 id) 그 이름으로 설정 저장
       await api.savePreset({ name: newName, patch });
       await loadPresets(); setPresetName(newName); await loadStyles();
+      // 🔑 채널 값을 읽어 쓰는 화면(리모션의 발음사전 표시 등)에 **다시 읽으라**고 알린다.
+      //   이름이 안 바뀌면 presetName 이 그대로라 화면이 옛 값을 그대로 들고 있는다(2026-08-26 실사고).
+      setPresetRev((r) => r + 1);
       setChOpen(false); setStatus(newName !== origName ? `채널 이름 변경·저장됨 ("${origName}" → "${newName}")` : '채널 설정 저장됨');
     } catch (e) { logline('저장 오류: ' + e.message); }
   }
@@ -2132,7 +2137,7 @@ export default function App() {
       <div id="body">
         <main>
           {isRx ? (
-            <RemotionView presetName={presetName} setStatus={setStatus} logline={logline} />
+            <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
           ) : isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
           ) : (<>

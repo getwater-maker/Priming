@@ -9,7 +9,7 @@ const api = window.api;
  * 목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 헤더의 ⚙ 에서 바꾼다.
  * ⚠ 목소리·배속·시드·발음사전을 바꾸면 **전량 다시 만들어진다**(그 값들이 캐시 키다).
  */
-export default function RemotionView({ presetName, setStatus, logline }) {
+export default function RemotionView({ presetName, presetRev, setStatus, logline }) {
   const [tsv, setTsv] = useState(null);        // { path, name, rows, errors }
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState(null);      // { i, n }
@@ -23,7 +23,9 @@ export default function RemotionView({ presetName, setStatus, logline }) {
     if (api && api.onRemotionProgress) api.onRemotionProgress((d) => setProg(d));
   }, []);
 
-  // 채널이 바뀌면 물려 있는 사전을 다시 읽어 화면에 보여준다.
+  // 채널이 바뀌거나 **채널 설정이 저장되면**(presetRev) 물려 있는 사전을 다시 읽는다.
+  //   ⚠ presetRev 가 없으면, 채널 편집에서 사전을 지정해 저장해도 이름이 그대로라
+  //     화면이 「물려 있지 않습니다」를 계속 띄운다(2026-08-26 실사고 — 저장은 정상이었다).
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -35,10 +37,20 @@ export default function RemotionView({ presetName, setStatus, logline }) {
       } catch { if (!dead) setDict(null); }
     })();
     return () => { dead = true; };
-  }, [presetName]);
+  }, [presetName, presetRev]);
+
+  // 채널에 물린 사전을 다시 읽는다. 열기 직전에도 부른다 — 그 사이 채널을 고쳤을 수 있다.
+  async function refreshDict() {
+    try {
+      const p = presetName ? await api.getPresetDetail(presetName) : null;
+      const dp = (p && p.dictPath) || '';
+      setDict(dp ? { path: dp, name: dp.split(/[\\/]/).pop() } : null);
+    } catch { setDict(null); }
+  }
 
   async function openTsv() {
     try {
+      await refreshDict();
       const r = await api.remotionOpenTsv({ presetName });
       if (r) { setTsv(r); setResult(null); setProg(null); }
     } catch (e) { setStatus && setStatus('TSV 열기 실패: ' + e.message); }

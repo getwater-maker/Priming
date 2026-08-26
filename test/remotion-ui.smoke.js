@@ -34,6 +34,14 @@ const MP = fs.readFileSync(path.join(ROOT, 'core', 'mode-profiles.js'), 'utf8');
   ok(MAIN.includes("ipcMain.handle('remotion-run-tts'"), 'remotion-run-tts IPC 존재');
   ok(!/baseNameOf/.test(MAIN), 'main.js 에 미정의 식별자 baseNameOf 가 없다');
   ok(MAIN.includes('preset.speedLong'), '배속은 speedLong(모드별 필드)을 본다');
+  // 🔴 채널 저장 후 화면이 다시 읽지 않으면 「사전 물려 있지 않습니다」가 남는다(2026-08-26 사고).
+  ok(/setPresetRev\(\(r\) => r \+ 1\)/.test(APP), 'saveChannel 이 presetRev 를 올린다');
+  ok(/presetRev=\{presetRev\}/.test(APP), 'RemotionView 에 presetRev 를 내려준다');
+  {
+    const RV = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'RemotionView.jsx'), 'utf8');
+    ok(/\[presetName, presetRev\]/.test(RV), 'RemotionView 가 presetRev 를 deps 에 넣는다');
+    ok(/await refreshDict\(\)/.test(RV), 'TSV 를 열 때도 사전을 다시 읽는다(안전망)');
+  }
 
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
   try {
@@ -49,6 +57,41 @@ const MP = fs.readFileSync(path.join(ROOT, 'core', 'mode-profiles.js'), 'utf8');
     await win.waitForSelector('button:has-text("📄 TSV 열기")', { timeout: 10000 });
     ok(true, '리모션 화면이 뜬다 (📄 TSV 열기)');
     ok(await win.isVisible('button:has-text("🎤 mp3 만들기")'), '🎤 mp3 만들기 버튼');
+
+    // 🔴 채널에 사전이 저장돼 있으면 화면에 그 파일명이 보여야 한다.
+    //   2026-08-26 사고: 저장은 정상인데 화면이 「물려 있지 않습니다」를 계속 띄웠다
+    //   (presetName 이 안 바뀌어 useEffect 가 재실행되지 않았다).
+    //   ⚠ **지금 선택된 채널**의 사전을 봐야 한다 — 아무 채널이나 고르면 엉뚱한 걸 기대하게 된다.
+    //     사전이 있는 채널이 따로 있으면 그리로 전환해 로이 시나리오를 재현한다.
+    let chDict = '';
+    try {
+      const all = require(path.join(ROOT, 'tts', 'preset-store')).loadAll();
+      const withDict = all.find((p) => p.startMode === 'remotion' && p.dictPath);
+      if (withDict) {
+        await win.$$eval('select', (els, name) => {
+          const s = els.find((e) => Array.from(e.options).some((o) => o.value === name));
+          if (s) { s.value = name; s.dispatchEvent(new Event('change', { bubbles: true })); }
+        }, withDict.name);
+        await win.waitForTimeout(900);
+        chDict = withDict.dictPath;
+      } else {
+        const curName = await win.$eval('select', (s) => s.value).catch(() => '');
+        const cur = all.find((p) => p.name === curName);
+        chDict = (cur && cur.dictPath) || '';
+      }
+    } catch {}
+    if (chDict) {
+      const base = chDict.split(/[\\/]/).pop();
+      // 사전 조회는 IPC 왕복이라 잠깐 걸린다 — 나타날 때까지 기다린다(안 뜨면 진짜 버그).
+      let shown = false;
+      for (let i = 0; i < 20 && !shown; i++) {
+        shown = (await win.textContent('body')).includes(base);
+        if (!shown) await win.waitForTimeout(250);
+      }
+      ok(shown, '채널에 저장된 사전(' + base + ')이 화면에 보인다');
+    } else {
+      ok((await win.textContent('body')).includes('발음사전'), '발음사전 줄이 화면에 있다 (이 PC 채널엔 사전 미지정)');
+    }
     const disabled = await win.isDisabled('button:has-text("🎤 mp3 만들기")');
     ok(disabled, 'TSV 를 열기 전에는 만들기가 비활성');
     // 리모션 화면엔 자막·이미지·비디오 UI 가 없어야 한다.
