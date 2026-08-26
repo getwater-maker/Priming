@@ -1857,6 +1857,8 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   let conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) logger(`  ⚡ 동시 ${conc}장 생성 (순차 대비 대기시간 절감 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const imgTimes = [];  // 장당 생성 시간(초) — 끝에 평균·합계를 로그로 남긴다
+  const _stageT0 = Date.now();
   const blanks = [];    // 검정·노이즈 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
   const genOne = async (g, retryLevel = baseRetryLevel) => {
     let prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
@@ -1870,7 +1872,9 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     }
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
+    const _t0 = Date.now();
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort });
+    const _el = (Date.now() - _t0) / 1000;
     if (r.success) {
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
       if (await looksBadImage(r.imagePath)) {
@@ -1878,10 +1882,10 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
         try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
         g.imagePath = null; g.imageStatus = 'fail'; g.imageCleared = true; // 캐시로 되살아나지 않게
         blanks.push(g); // 아래에서 순차로 재생성
-        logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) 감지 — 폐기 후 재생성 대기`);
-      } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
+        logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) 감지 (${_dur(_el)}) — 폐기 후 재생성 대기`);
+      } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; imgTimes.push(_el); logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)} (${_dur(_el)})`); }
     } else {
-      g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
+      g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패 (${_dur(_el)}): ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
     }
     pushDtoUpdate();
@@ -1921,10 +1925,26 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
     pushDtoUpdate();
   }
+  // ⏱ 장당 몇 초였나 — 로이가 로그에서 바로 확인할 수 있게(동시 생성이면 벽시계 < 합계).
+  if (imgTimes.length) {
+    const sum = imgTimes.reduce((a, b) => a + b, 0);
+    const wall = (Date.now() - _stageT0) / 1000;
+    const fast = Math.min(...imgTimes), slow = Math.max(...imgTimes);
+    logger(`  ⏱ 이미지 ${imgTimes.length}장 — 장당 평균 ${_dur(sum / imgTimes.length)} (최소 ${_dur(fast)} · 최대 ${_dur(slow)}) · 전체 ${_dur(wall)}` + (conc > 1 ? ` · 동시 ${conc}장` : ''));
+  }
   // 🧹 **끝난 뒤에도 반납한다** — 로컬 ComfyUI 는 생성이 끝나도 모델을 붙들고 있다.
   //   실측(2026-08-22, RTX 3060 12GB): 큐가 비어 있는데 **6.6GB** 점유 → /free 후 GPU 10,110MB → 3,480MB.
   //   그 상태로 두면 같은 GPU 를 쓰는 OmniVoice TTS 가 좁아진다(켜 두는 것 자체는 무해하게 만드는 장치).
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 반납(모델 언로드) — TTS 가 쓸 자리를 비웁니다'); await eng.freeMemory(); }
+}
+
+// 초 → 사람이 읽는 시간. 60초 미만은 소수 1자리, 그 이상은 분·초.
+//   ⏱ 이미지·영상이 장당 몇 초 걸리는지 로그로 남기기 위한 것(2026-08-26 로이 요청).
+function _dur(sec) {
+  const s = Math.max(0, Number(sec) || 0);
+  if (s < 60) return s.toFixed(1) + '초';
+  const m = Math.floor(s / 60);
+  return m + '분 ' + Math.round(s - m * 60) + '초';
 }
 
 // Genspark 한도 메시지의 재설정 시각 파싱 — "AI Image 5시간 제한에 도달했습니다. 7월 14일 오후 3:39에 재설정됩니다"
@@ -2025,6 +2045,8 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const conc = cfg.cloud ? Math.min(wantConc, targets.length) : 1;
   if (conc > 1) log(`  ⚡ 동시 ${conc}개 생성 (순차 대비 벽시계 단축 · 총 크레딧은 동일)`);
   let degraded = false; // 클라우드가 동시 실행을 거부(429/동시제한)하면 순차로 자동 강등
+  const vidTimes = [];  // 개당 생성 시간(초)
+  const _stageT0 = Date.now();
   const blanks = [];    // 검정·노이즈 영상이 나온 그룹 — 동시 패스 후 '순차'로 재생성(이미지와 동일 방어)
   const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
@@ -2037,17 +2059,19 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
+    const _t0 = Date.now();
     const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
+    const _el = (Date.now() - _t0) / 1000;
     if (r.success) {
       // ⚠ 이상 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.
       if (await looksBadVideo(r.videoPath)) {
         try { fs.rmSync(r.videoPath, { force: true }); } catch {}
         g.videoPath = null; g.videoStatus = 'fail';
         blanks.push(g);
-        log(`  ⬛ G${g.num} 이상 영상(검정·노이즈) 감지 — 폐기 후 재생성 대기`);
-      } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
+        log(`  ⬛ G${g.num} 이상 영상(검정·노이즈) 감지 (${_dur(_el)}) — 폐기 후 재생성 대기`);
+      } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; vidTimes.push(_el); log(`  ✓ G${g.num} 완료 (${_dur(_el)})`); }
     } else {
-      g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
+      g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패 (${_dur(_el)}): ${r.error}`);
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
     }
     pushDtoUpdate();
@@ -2083,6 +2107,13 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     pushDtoUpdate();
   }
   // 🧹 i2v 모델은 크다(LTX 22B 급) — 끝나면 반납해서 TTS·다음 단계가 쓸 자리를 만든다.
+  // ⏱ 개당 몇 초였나 — i2v 는 건당 수 분이라 이 줄이 특히 유용하다.
+  if (vidTimes.length) {
+    const sum = vidTimes.reduce((a, b) => a + b, 0);
+    const wall = (Date.now() - _stageT0) / 1000;
+    const fast = Math.min(...vidTimes), slow = Math.max(...vidTimes);
+    log(`  ⏱ 영상 ${vidTimes.length}개 — 개당 평균 ${_dur(sum / vidTimes.length)} (최소 ${_dur(fast)} · 최대 ${_dur(slow)}) · 전체 ${_dur(wall)}`);
+  }
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 반납(모델 언로드) — TTS 가 쓸 자리를 비웁니다'); await eng.freeMemory(); }
 }
 

@@ -237,6 +237,51 @@ ok('main.js 는 LF 로 저장돼 있다', () => {
   assert.strictEqual((raw.match(/\r\n/g) || []).length, 0, 'CRLF 면 원문 대조 테스트들이 거짓 실패한다');
 });
 
+
+// ── ④ ⏱ 장당 생성 시간 로그 (2026-08-26 로이 요청: '이미지 생성에 몇 초가 걸리는지 확인하고 싶다') ──
+//   그전엔 `✓ G1 → 01.png` 만 남아 시간을 알 수 없었다. 앱 로그는 파일로도 남으므로(v0.3.15)
+//   나중에 되짚어 볼 수 있다.
+const MAIN_SRC = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+function extractFn(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  let d = 0, started = false, j = i;
+  for (; j < src.length; j++) {
+    const c = src[j];
+    if (c === '{') { d++; started = true; }
+    else if (c === '}') { d--; if (started && d === 0) { j++; break; } }
+  }
+  return src.slice(i, j);
+}
+ok('_dur 이 사람이 읽는 시간으로 바꾼다', () => {
+  const _dur = new Function(extractFn(MAIN_SRC, '_dur') + String.fromCharCode(10) + 'return _dur;')();
+  assert.strictEqual(_dur(23.24), '23.2초');
+  assert.strictEqual(_dur(59.9), '59.9초');
+  assert.strictEqual(_dur(60), '1분 0초');
+  assert.strictEqual(_dur(251), '4분 11초');
+  assert.strictEqual(_dur(498.28), '8분 18초');
+  assert.strictEqual(_dur(0), '0.0초');
+  assert.strictEqual(_dur('x'), '0.0초');
+});
+ok('이미지 성공 로그에 장당 시간이 찍힌다', () => {
+  assert(MAIN_SRC.includes('→ ${path.basename(r.imagePath)} (${_dur(_el)})'), '✓ G 로그에 시간이 없다');
+});
+ok('이미지 실패 로그에도 시간이 찍힌다 (타임아웃 진단용)', () => {
+  assert(MAIN_SRC.includes('✗ G${g.num} 실패 (${_dur(_el)})'), '✗ G 로그에 시간이 없다');
+});
+ok('이미지·영상 요약 줄이 있다 (평균·최소·최대·전체)', () => {
+  assert(MAIN_SRC.includes('⏱ 이미지 ${imgTimes.length}장'), '이미지 요약 줄이 없다');
+  assert(MAIN_SRC.includes('⏱ 영상 ${vidTimes.length}개'), '영상 요약 줄이 없다');
+  assert(MAIN_SRC.includes('장당 평균'), '평균 표기가 없다');
+  assert(MAIN_SRC.includes('최소 ${_dur(fast)}'), '최소/최대 표기가 없다');
+});
+ok('계측이 실제 생성 호출을 감싼다', () => {
+  const img = MAIN_SRC.indexOf('const _t0 = Date.now();' + String.fromCharCode(10) + '    const r = await eng.textToImage(');
+  const vid = MAIN_SRC.indexOf('const _t0 = Date.now();' + String.fromCharCode(10) + '    const r = await eng.imageToVideo(');
+  assert(img > 0, '이미지 계측 시작이 생성 호출 바로 앞이 아니다');
+  assert(vid > 0, '영상 계측 시작이 생성 호출 바로 앞이 아니다');
+  assert(MAIN_SRC.includes('const _el = (Date.now() - _t0) / 1000;'), '경과시간 계산이 없다');
+});
+
 console.log('\n' + (fails ? '❌' : '✅') + ' comfy-perf: ' + (n - fails) + '/' + n + ' 통과' + (fails ? ' · 실패 ' + fails : ''));
 process.exit(fails ? 1 : 0);
 
