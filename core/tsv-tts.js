@@ -324,6 +324,10 @@ async function runTsvBatch(o) {
 
   const made = [], skipped = [], failed = [];
   let consecFail = 0, totalDur = 0, totalTrimmed = 0;
+  // 🔑 RTF(생성시간 ÷ 음성길이)는 **새로 만든 것만**으로 잰다. 캐시 재활용분(0초 복사)이 섞이면
+  //   RTF 가 0 에 가깝게 왜곡돼 아무 의미가 없어진다.
+  //   단계별 합계도 같이 모은다 — 느릴 때 어디가 병목인지 로그만 보고 알 수 있게.
+  let madeDur = 0, madeGen = 0, sumTts = 0, sumTrim = 0, sumEnc = 0;
   const t0 = Date.now();
 
   for (let i = 0; i < rows.length; i++) {
@@ -361,7 +365,9 @@ async function runTsvBatch(o) {
     }
 
     // ── 합성 ──
+    const _genT0 = Date.now();
     let res = null, lastErr = null;
+    const _ttsT0 = Date.now();
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (abort()) break;
       try { res = await o.ttsMgr.synthesize(finalText, synthOpts); break; }
@@ -384,20 +390,25 @@ async function runTsvBatch(o) {
       continue;
     }
     consecFail = 0;
+    sumTts += Date.now() - _ttsT0;
 
     // ── 트림 → 배속 → mp3 ──
     const tmpWav = path.join(outDir, '_tmp_' + process.pid + '.wav');
     try {
       let buf = res.mp3Buffer;      // ⚠ 이름은 mp3 지만 실제 내용은 WAV 다(OmniVoice 출력).
       let trimmedSec = 0;
+      const _trimT0 = Date.now();
       if (doTrim) {
         const t = trimSilence(buf, { padSec, threshold: trimThreshold });
         if (t.changed) { buf = t.buf; trimmedSec = t.trimmedSec; }
         else if (t.reason) onLine(tag + '  트림 안 함: ' + t.reason);
       }
+      sumTrim += Date.now() - _trimT0;
       await _retryFs(() => fs.writeFileSync(tmpWav, buf), tag + ' 임시 WAV', onLine);
       const tempo = speedMode === 'atempo' ? speed : 1;
+      const _encT0 = Date.now();
       const enc = encodeMp3(tmpWav, outPath, tempo);
+      sumEnc += Date.now() - _encT0;
       if (!enc.ok) throw new Error('mp3 인코딩 실패(ffmpeg)');
       // 길이는 인코딩 로그에서 함께 얻는다. 못 읽었을 때만 따로 잰다(드문 경우).
       const dur = enc.durationSec || mp3DurationSec(outPath) || (res.durationSec ? res.durationSec / tempo : 0);
@@ -406,8 +417,11 @@ async function runTsvBatch(o) {
       made.push(outName);
       totalDur += dur;
       totalTrimmed += trimmedSec;
+      const genSec = (Date.now() - _genT0) / 1000;
+      madeDur += dur; madeGen += genSec;
       onLine(tag + '  ' + dur.toFixed(2) + '초'
-        + (trimmedSec ? ' (무음 ' + trimmedSec.toFixed(2) + '초 제거)' : ''));
+        + (trimmedSec ? ' (무음 ' + trimmedSec.toFixed(2) + '초 제거)' : '')
+        + ' · 생성 ' + genSec.toFixed(1) + '초');
     } catch (e) {
       failed.push({ name: outName, text: row.text, reason: e.message });
       consecFail++;
@@ -434,6 +448,7 @@ async function runTsvBatch(o) {
     }
   } catch {}
 
+  const n = made.length || 1;
   return {
     total: rows.length,
     made: made.length,
@@ -441,6 +456,13 @@ async function runTsvBatch(o) {
     failed,
     totalDurationSec: totalDur,
     totalTrimmedSec: totalTrimmed,
+    // RTF = 생성시간 ÷ 음성길이 (낮을수록 빠름). **새로 만든 것만** 기준.
+    rtf: madeDur > 0 ? madeGen / madeDur : null,
+    madeDurationSec: madeDur,
+    madeGenSec: madeGen,
+    perSentenceSec: made.length ? madeGen / n : null,
+    // 단계별 문장당 평균(초) — 느릴 때 어디가 병목인지 바로 보이게.
+    stageSec: { tts: sumTts / 1000 / n, trim: sumTrim / 1000 / n, mp3: sumEnc / 1000 / n },
     elapsedSec: (Date.now() - t0) / 1000,
     manifestPath: manPath,
     failedPath: failed.length ? failPath : null,

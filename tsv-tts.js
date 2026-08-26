@@ -149,6 +149,13 @@ async function main() {
     + (res.totalTrimmedSec ? ('  (무음 ' + res.totalTrimmedSec.toFixed(1) + '초 제거)') : ''));
   console.log('걸린 시간 ' + el.toFixed(1) + '초'
     + (res.made ? ('  · 문장당 ' + (el / res.made).toFixed(2) + '초') : ''));
+  if (res.rtf != null) {
+    const s = res.stageSec;
+    console.log('RTF ' + res.rtf.toFixed(2) + '  (생성시간 ÷ 음성길이 — 낮을수록 빠름)');
+    console.log('  문장당 ' + res.perSentenceSec.toFixed(2) + '초'
+      + ' = 합성 ' + s.tts.toFixed(2) + ' + 트림 ' + s.trim.toFixed(2) + ' + mp3 ' + s.mp3.toFixed(2)
+      + ' + 기타 ' + Math.max(0, res.perSentenceSec - s.tts - s.trim - s.mp3).toFixed(2));
+  }
   if (res.failed.length) {
     console.log('\n실패 목록 (' + res.failedPath + '):');
     res.failed.forEach((f) => console.log('  ' + f.name + ' — ' + f.reason));

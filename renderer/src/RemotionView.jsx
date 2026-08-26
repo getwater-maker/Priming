@@ -130,6 +130,13 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
           <b>완료</b> — 만듦 {result.made} · 건너뜀 {result.skipped} · 실패 {result.failed.length} / 전체 {result.total}
           {result.totalTrimmedSec > 0 && <> · 무음 {result.totalTrimmedSec.toFixed(1)}초 제거</>}
+          {result.rtf != null && (
+            <div className="meta" style={{ marginTop: 4 }}
+              title="RTF = 생성시간 ÷ 음성길이 (낮을수록 빠름). 합성은 문장 길이와 거의 무관하게 문장당 2.4~2.7초가 걸리므로, 짧은 문장이 많을수록 RTF 는 나빠집니다 — 총 시간은 문장 수로 정해집니다.">
+              ⏱ <b>RTF {result.rtf.toFixed(2)}</b> · 문장당 {result.perSentenceSec.toFixed(2)}초
+              {result.stageSec && <> (합성 {result.stageSec.tts.toFixed(2)} · 트림 {result.stageSec.trim.toFixed(2)} · mp3 {result.stageSec.mp3.toFixed(2)})</>}
+            </div>
+          )}
           <div className="meta" style={{ marginTop: 4 }}>{result.outDir}</div>
           {result.failed.length > 0 && (
             <ul style={{ margin: '6px 0 0 18px', color: '#c0392b' }}>

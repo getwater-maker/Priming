@@ -1511,6 +1511,14 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
     log(`✅ 리모션 TTS — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length} / 전체 ${r.total}`
       + ` · ${_dur(r.totalDurationSec)}`
       + (r.totalTrimmedSec ? ` (무음 ${r.totalTrimmedSec.toFixed(1)}초 제거)` : ''));
+    // RTF = 생성시간 ÷ 음성길이(낮을수록 빠름) — 롱폼 카드의 그 지표와 같은 정의.
+    //   단계별 평균을 함께 찍는다: 느릴 때 어디가 병목인지 로그만 보고 알 수 있다.
+    if (r.rtf != null) {
+      const s = r.stageSec;
+      const etc = Math.max(0, r.perSentenceSec - s.tts - s.trim - s.mp3);
+      log(`   ⏱ RTF ${r.rtf.toFixed(2)} · 문장당 ${r.perSentenceSec.toFixed(2)}초`
+        + ` (합성 ${s.tts.toFixed(2)} · 트림 ${s.trim.toFixed(2)} · mp3 ${s.mp3.toFixed(2)} · 기타 ${etc.toFixed(2)})`);
+    }
     if (r.failed.length) log(`   ⚠ 실패 목록: ${r.failedPath}`);
     try { shell.openPath(outDir); } catch {}
     return { ok: true, outDir, ...r };

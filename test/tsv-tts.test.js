@@ -306,13 +306,21 @@ if (!T.hasFfmpeg()) {
 // ══════════════════════════════════════════════════════════
 section('[7] 실제 입력 회귀 (파일이 있을 때만)');
 
-const REAL_TSV = 'D:/비즈니스PT/lecture-video/tts/003.tsv';
+// ⚠ 파일명을 못박지 않는다 — 대본 이름은 바뀐다(2026-08-26 에 003.tsv 가 개명되며
+//   이 회귀 2건이 조용히 skip 됐다). 폴더에서 **아무 .tsv 나** 찾아 쓴다.
+const REAL_DIR = 'D:/비즈니스PT/lecture-video/tts';
+const REAL_TSV = (() => {
+  try {
+    const f = fs.readdirSync(REAL_DIR).filter((x) => /\.tsv$/i.test(x)).sort()[0];
+    return f ? path.join(REAL_DIR, f) : '';
+  } catch { return ''; }
+})();
 const REAL_DICT = 'D:/비즈니스PT/_강의안기획/08_발음사전.md';
 
-if (!fs.existsSync(REAL_TSV)) {
+if (!REAL_TSV || !fs.existsSync(REAL_TSV)) {
   console.log('  skip 실제 대본이 없는 PC');
 } else {
-  t('003.tsv 가 오류 없이 파싱된다', () => {
+  t(path.basename(REAL_TSV) + ' 가 오류 없이 파싱된다', () => {
     const r = T.parseTsv(fs.readFileSync(REAL_TSV, 'utf8'));
     assert.strictEqual(r.errors.length, 0, JSON.stringify(r.errors.slice(0, 3)));
     assert.ok(r.rows.length > 0);
