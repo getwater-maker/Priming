@@ -14,7 +14,7 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } };
 // ── 원문 대조 — 레인 배선이 그대로 있는지(끊기면 아래 시뮬레이션이 무의미) ──
 ok(/const _LANES = \{ tts: Promise\.resolve\(\), image: Promise\.resolve\(\), localGpu: Promise\.resolve\(\) \}/.test(SRC),
    '레인 3개(tts·image·localGpu) 정의');
-ok(/return _runOnLanes\(\['tts', 'localGpu'\], label, fn\)/.test(SRC), 'TTS 작업은 tts+localGpu 레인을 잡는다');
+ok(SRC.includes("_runOnLanes(['tts', 'localGpu'], label,"), 'TTS 작업은 tts+localGpu 레인을 잡는다');
 ok(/_imgUsesLocalGpu\(engine\) \? \['image', 'localGpu'\] : \['image'\]/.test(SRC),
    '이미지 작업은 로컬 ComfyUI 일 때만 localGpu 레인을 잡는다');
 ok(/}, engine\);/.test(SRC), 'image-build·regen-group 이 engine 을 넘긴다(안 넘기면 레인을 안 잡는다)');

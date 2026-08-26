@@ -3863,11 +3863,53 @@ function enqueueImageJob(label, fn, engine) {
   const lanes = _imgUsesLocalGpu(engine) ? ['image', 'localGpu'] : ['image'];
   return _runOnLanes(lanes, label, fn);
 }
+// 🔴 **다른 PC 가 이 PC 의 로컬 ComfyUI 로 이미지를 만드는 중이면 TTS 를 기다린다** (2026-08-26, 1단계).
+//   앱의 GPU 레인(_runOnLanes)은 **같은 프로세스 안에서만** 작동한다. v0.3.46 에서 로컬 ComfyUI 를
+//   0.0.0.0 으로 열어 아내 PC·외부 노트북도 쓰게 했는데, 그 요청은 레인 밖이라 이 PC 의 TTS 와 3060 을
+//   동시에 다툰다 — 실측: TTS RTF 0.70→1.26(1.8배), 심하면 60초 타임아웃 3회 → **반쪽 .vrew**(v0.3.22).
+//   🔑 ComfyUI 는 큐 서버라 /queue 가 **누가 보냈든** 진실을 말해 준다 → 그게 빌 때까지 기다린다.
+//   🔑 교착 없음 — 우리 앱의 로컬 이미지·비디오도 localGpu 레인을 잡으므로, 이 함수가 도는 시점에
+//     큐에 있는 건 **남의 PC 것**뿐이다(우리 것이면 애초에 이 레인을 못 잡는다).
+//   ⚠ **막지 않는다** — 상한을 넘으면 경고만 남기고 진행한다. 무한 대기가 더 나쁘다.
+//   ⚠ 클라우드·서버 꺼짐·응답 이상은 전부 **fail-open**(그냥 진행). 진단이 작업을 멈추게 하지 않는다.
+const FOREIGN_GPU_WAIT_MS = 10 * 60 * 1000;   // 10분
+async function awaitForeignComfyIdle(label) {
+  let cfg = null;
+  try { cfg = require('./core/comfy-image').loadConfig(); } catch { return; }
+  if (!cfg || cfg.cloud) return;                 // 클라우드면 이 PC GPU 와 무관
+  let base = String(cfg.baseUrl || '').trim();
+  while (base.endsWith('/')) base = base.slice(0, -1);
+  if (!base) return;
+  const t0 = Date.now();
+  let waited = false;
+  while (Date.now() - t0 < FOREIGN_GPU_WAIT_MS) {
+    let busy = 0;
+    try {
+      const r = await fetch(base + '/queue', { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return;                           // 서버가 이상하면 그냥 진행
+      const q = await r.json();
+      busy = ((q && q.queue_running) || []).length + ((q && q.queue_pending) || []).length;
+    } catch { return; }                            // 꺼져 있거나 못 닿으면 그냥 진행
+    if (!busy) {
+      if (waited) log('▶ ' + label + ' — 로컬 ComfyUI 가 비었습니다. 시작합니다 (' + ((Date.now() - t0) / 1000).toFixed(0) + '초 대기)');
+      return;
+    }
+    if (!waited) {
+      waited = true;
+      log('⏳ ' + label + ' — 다른 PC 가 이 PC 의 ComfyUI 로 이미지를 만드는 중입니다(' + busy + '건). 끝나면 시작합니다 — GPU 경합 방지');
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  log('⚠ ' + label + ' — 로컬 ComfyUI 가 ' + Math.round(FOREIGN_GPU_WAIT_MS / 60000) + '분 넘게 바쁩니다. 더 기다리지 않고 시작합니다(TTS 가 느려질 수 있습니다).');
+}
 // TTS 는 항상 로컬 GPU(OmniVoice)를 쓴다 → tts + localGpu 두 레인을 잡는다.
 //   ⚠ make-all·run-batch 도 이 큐를 타므로, 그 안의 로컬 이미지 생성은 **같은 작업 안에서** 순차로 돈다
 //     (runMakeAllCore 가 단계 순서를 정한다 — 내부에서 enqueueImageJob 을 다시 부르지 않으므로 교착 없음).
 function enqueueTtsJob(label, fn) {
-  return _runOnLanes(['tts', 'localGpu'], label, fn);
+  return _runOnLanes(['tts', 'localGpu'], label, async () => {
+    await awaitForeignComfyIdle(label);   // 남의 PC 가 이 PC GPU 로 이미지 만드는 중이면 대기
+    return fn();
+  });
 }
 
 ipcMain.handle('regen-group', (_e, args = {}) => {
