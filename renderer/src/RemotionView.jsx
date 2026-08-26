@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const api = window.api;
 
@@ -27,6 +27,14 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   // 🔑 발음사전은 **채널에 저장된 것**을 쓴다. 여기서 고르게 하면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 그 TSV 전체가 재합성된다.
   const [dict, setDict] = useState(null);   // { path, name } | null
+  // 🎧 미리듣기 — 몇 문장만 먼저 만들어 듣는다(전체를 15분 돌리기 전에 목소리·배속·사전 확인).
+  const [picked, setPicked] = useState([]);      // 고른 파일명들(TSV 순서 유지)
+  const [previews, setPreviews] = useState({});  // { 파일명: { path, dur } }
+  const [playing, setPlaying] = useState('');    // 지금 재생 중인 파일명
+  const [pvBusy, setPvBusy] = useState(false);
+  const audioRef = useRef(null);
+  const lastPickRef = useRef(-1);   // Shift 범위 선택의 기준점
+  const queueRef = useRef([]);      // 이어 듣기 대기열
 
   useEffect(() => {
     if (api && api.onRemotionProgress) api.onRemotionProgress((d) => setProg(d));
@@ -57,11 +65,82 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     } catch { setDict(null); }
   }
 
+  // ── 재생 ──
+  //   🔑 media:// 가 아니라 **read-audio(base64)** 를 쓴다 — 렌더러에서 media:// fetch 가 막히는
+  //     문제를 이미 이 앱의 다른 미리듣기들이 이 방식으로 우회하고 있다(App.jsx 와 같은 경로).
+  function ensureAudio() {
+    if (!audioRef.current) {
+      const a = new Audio();
+      a.onended = () => { const q = queueRef.current; if (q.length) playOne(q.shift()); else setPlaying(''); };
+      a.onerror = () => { queueRef.current = []; setPlaying(''); };
+      audioRef.current = a;
+    }
+    return audioRef.current;
+  }
+  async function playOne(name) {
+    const f = previews[name];
+    if (!f) return;
+    try {
+      const url = await api.readAudio(f.path);
+      if (!url) { setStatus && setStatus('음성 파일을 읽지 못했습니다 — ' + name); return; }
+      const a = ensureAudio();
+      a.src = url; setPlaying(name); a.play();
+    } catch (e) { setStatus && setStatus('재생 실패: ' + e.message); }
+  }
+  function playSeq(names) {
+    const list = names.filter((x) => previews[x]);
+    if (!list.length) return;
+    queueRef.current = list.slice(1);
+    playOne(list[0]);
+  }
+  function stopPlay() {
+    queueRef.current = [];
+    if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
+    setPlaying('');
+  }
+  useEffect(() => () => { try { if (audioRef.current) audioRef.current.pause(); } catch {} }, []);
+
+  // ── 고르기 ── Shift 클릭이면 마지막 클릭부터 범위로.
+  function togglePick(i, shift) {
+    const all = (tsv && tsv.rows) || [];
+    const name = all[i] && all[i].name;
+    if (!name) return;
+    setPicked((prev) => {
+      const set = new Set(prev);
+      if (shift && lastPickRef.current >= 0) {
+        const [a, b] = [Math.min(lastPickRef.current, i), Math.max(lastPickRef.current, i)];
+        const add = !set.has(name);
+        for (let k = a; k <= b; k++) { const nm = all[k] && all[k].name; if (!nm) continue; if (add) set.add(nm); else set.delete(nm); }
+      } else if (set.has(name)) set.delete(name);
+      else set.add(name);
+      lastPickRef.current = i;
+      return all.map((r) => r.name).filter((nm) => set.has(nm));   // TSV 순서 유지
+    });
+  }
+
+  async function previewPicked() {
+    if (!picked.length) return;
+    stopPlay();
+    setPvBusy(true); setProg({ i: 0, n: picked.length, preview: true });
+    try {
+      const r = await api.remotionPreviewTts({ presetName, names: picked, trim });
+      const map = {};
+      (r.files || []).forEach((f) => { map[f.name] = f; });
+      setPreviews((prev) => Object.assign({}, prev, map));
+      const order = (r.files || []).map((f) => f.name);
+      if (order.length) { queueRef.current = order.slice(1); playOne(order[0]); }
+      const fail = (r.failed || []).length;
+      setStatus && setStatus(`🎧 미리듣기 ${order.length}개 준비` + (fail ? ` · 실패 ${fail}` : ''));
+    } catch (e) {
+      setStatus && setStatus('미리듣기 실패: ' + e.message);
+    } finally { setPvBusy(false); setProg(null); }
+  }
+
   async function openTsv() {
     try {
       await refreshDict();
       const r = await api.remotionOpenTsv({ presetName });
-      if (r) { setTsv(r); setResult(null); setProg(null); }
+      if (r) { setTsv(r); setResult(null); setProg(null); stopPlay(); setPicked([]); setPreviews({}); lastPickRef.current = -1; }
     } catch (e) { setStatus && setStatus('TSV 열기 실패: ' + e.message); }
   }
 
@@ -87,16 +166,26 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const rows = (tsv && tsv.rows) || [];
   const errs = (tsv && tsv.errors) || [];
   const chars = rows.reduce((a, r) => a + r.text.replace(/\s/g, '').length, 0);
+  const pickedSet = new Set(picked);
+  const pvNames = rows.map((r) => r.name).filter((nm) => previews[nm]);
 
   return (
     <div style={{ padding: '10px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={openTsv} disabled={busy}>📄 TSV 열기</button>
-        <button onClick={run} disabled={busy || !rows.length || errs.length > 0}>
+        <button onClick={openTsv} disabled={busy || pvBusy}>📄 TSV 열기</button>
+        <button onClick={run} disabled={busy || pvBusy || !rows.length || errs.length > 0}>
           {busy ? '만드는 중…' : '🎤 mp3 만들기'}
         </button>
+        <button onClick={previewPicked} disabled={busy || pvBusy || !picked.length}
+          title="고른 문장만 먼저 만들어 들어봅니다. 여기서 만든 음성은 전체 만들기에서 그대로 재활용됩니다(다시 합성하지 않습니다).">
+          {pvBusy ? '만드는 중…' : `🎧 미리듣기${picked.length ? ' (' + picked.length + ')' : ''}`}
+        </button>
+        {picked.length > 0 && !pvBusy && (
+          <button className="ghost" onClick={() => { setPicked([]); lastPickRef.current = -1; }} disabled={busy}>선택 해제</button>
+        )}
+        {playing && <button className="ghost" onClick={stopPlay}>⏹ 정지</button>}
         <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <input type="checkbox" checked={trim} disabled={busy} onChange={(e) => setTrim(e.target.checked)} />
+          <input type="checkbox" checked={trim} disabled={busy || pvBusy} onChange={(e) => setTrim(e.target.checked)} />
           앞뒤 무음 제거
         </label>
         <span style={{ flex: 1 }} />
@@ -115,6 +204,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       <div className="meta" style={{ marginTop: 6 }}>
         목소리·배속·시드·발음사전은 <b>채널 설정</b>을 따릅니다(헤더 ⚙). 출력은 <b>MP3 출력 폴더 / {tsv ? tsv.name.replace(/\.(tsv|txt)$/i, '') : '<TSV 이름>'}</b> 입니다.
         <br />⚠ 이 넷 중 하나라도 바꾸면 <b>전량 다시 만들어집니다</b>. 처음에 정하고 그 뒤로 건드리지 마세요.
+        <br />🎧 표에서 문장을 골라 <b>미리듣기</b>로 먼저 들어보세요(Shift 클릭 = 범위 선택 · 한 번에 12개까지).
+        여기서 만든 음성은 전체 만들기에서 <b>그대로 재활용</b>되므로 헛수고가 아니고, 들은 소리가 결과물에 그대로 들어갑니다.
       </div>
 
       {errs.length > 0 && (
@@ -132,7 +223,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
             <div style={{ height: '100%', width: (prog.n ? (prog.i / prog.n * 100) : 0) + '%', background: 'var(--accent,#c9884a)' }} />
           </div>
           <div className="meta" style={{ marginTop: 4 }}>
-            {prog.i} / {prog.n}
+            {prog.preview ? '🎧 미리듣기 ' : ''}{prog.i} / {prog.n}
             {prog.rtf != null && (
               <span title="RTF = 생성시간 ÷ 음성길이 (낮을수록 빠름). 합성은 문장 길이와 거의 무관하게 문장당 2.4~2.7초가 걸리므로, 짧은 문장이 많을수록 RTF 는 나빠집니다 — 총 시간은 문장 수로 정해집니다.">
                 {' · '}⏱ RTF {prog.rtf.toFixed(2)}
@@ -143,6 +234,17 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
               <>{' · '}남은 시간 약 {fmtLeft((prog.n - prog.i) * prog.perSentenceSec)}</>
             )}
           </div>
+        </div>
+      )}
+
+      {pvNames.length > 0 && (
+        <div style={{ marginTop: 10, padding: '6px 10px', border: '1px solid var(--border,#ddd)', borderRadius: 6,
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <b>🎧 미리듣기 {pvNames.length}개</b>
+          <button className="ghost" onClick={() => playSeq(pvNames)} disabled={busy}>▶ 이어 듣기</button>
+          {playing && <span className="meta">재생 중 — {playing}</span>}
+          <span style={{ flex: 1 }} />
+          <span className="meta">이 음성은 전체 만들기에서 그대로 재활용됩니다</span>
         </div>
       )}
 
@@ -175,18 +277,36 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,#fff)' }}>
+              <th style={{ textAlign: 'center', padding: '6px 4px', width: 30 }} title="미리듣기로 들어볼 문장을 고릅니다 (Shift 클릭 = 범위)">🎧</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 46 }}>#</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 180 }}>파일명</th>
               <th style={{ textAlign: 'left', padding: '6px 8px' }}>문장</th>
+              <th style={{ textAlign: 'center', padding: '6px 4px', width: 64 }}>듣기</th>
             </tr></thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.name} style={{ borderTop: '1px solid var(--border,#eee)' }}>
+              {rows.map((r, i) => {
+                const isPicked = pickedSet.has(r.name);
+                const pv = previews[r.name];
+                const isPlaying = playing === r.name;
+                return (
+                <tr key={r.name} style={{ borderTop: '1px solid var(--border,#eee)',
+                  background: isPlaying ? '#fdf1e0' : (isPicked ? '#f6f1ea' : 'transparent') }}>
+                  <td style={{ padding: '4px 4px', textAlign: 'center' }}>
+                    <input type="checkbox" checked={isPicked} disabled={busy || pvBusy}
+                      onClick={(e) => { e.preventDefault(); togglePick(i, e.shiftKey); }}
+                      onChange={() => {}} />
+                  </td>
                   <td style={{ padding: '4px 8px', color: '#999' }}>{i + 1}</td>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.name}</td>
                   <td style={{ padding: '4px 8px' }}>{r.text}</td>
-                </tr>
-              ))}
+                  <td style={{ padding: '4px 4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {pv
+                      ? <button className="ghost" style={{ padding: '0 6px' }} onClick={() => (isPlaying ? stopPlay() : playSeq([r.name]))}
+                          title={pv.dur ? pv.dur.toFixed(2) + '초' : ''}>{isPlaying ? '⏹' : '▶'}</button>
+                      : <span className="meta" style={{ opacity: 0.35 }}>—</span>}
+                  </td>
+                </tr>);
+              })}
             </tbody>
           </table>
         </div>

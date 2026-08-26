@@ -1446,6 +1446,30 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
 //   영상은 리모션이 만들고 이 앱은 **음성만** 담당한다(자막·이미지·비디오·.vrew 없음).
 //   목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 한 번 정하면 바꾸지 말 것(캐시 키라 전량 재합성).
 const TSV = require('./core/tsv-tts');
+// 🎧 리모션 — 채널에서 목소리·배속·발음사전을 읽는다.
+//   🔑 **전체 만들기와 미리듣기가 반드시 같은 값을 쓰게** 한 곳에 모은다. 여기가 갈리면
+//     미리듣기로 들은 소리와 실제 결과가 달라져 미리듣기의 존재 이유가 사라진다.
+function _remotionVoiceCfg(presetName, args = {}) {
+  const preset = presetName ? P.getPreset(presetName) : S.preset;
+  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  // 목소리 — 채널의 참조음성. `srv:<이름>` 이면 서버 공용 목소리다.
+  const ref = preset.voiceCloneRefAudio || '';
+  const voice = /^srv:/.test(ref) ? ref.slice(4) : '';
+  if (!voice) throw new Error('채널 편집 → 🎙 음성 에서 서버 목소리(☁)를 고르세요.');
+  // ⚠ 배속의 정본은 모드별 필드 `speedLong` 이다(`speed` 는 옛 단일 필드 = 사실상 방치값 — v0.3.25 참조).
+  const speed = Number(preset.speedLong != null && preset.speedLong !== '' ? preset.speedLong : preset.speed) || 1;
+  // 🔑 발음사전은 **채널에 저장된 것이 기본**이다. 매번 손으로 고르면 언젠가 한 번 빠지고,
+  //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 TSV 전체가 재합성**된다.
+  const dictPath = args.dictPath || preset.dictPath || '';
+  let dict = [];
+  if (dictPath) {
+    if (!fs.existsSync(dictPath)) throw new Error('발음사전 파일이 없습니다 — ' + dictPath);
+    dict = TSV.parseDictMd(fs.readFileSync(dictPath, 'utf8'));
+  }
+  const seed = preset.seed != null && preset.seed !== '' ? preset.seed : undefined;
+  return { preset, voice, speed, dict, dictPath, seed };
+}
+
 ipcMain.handle('remotion-open-tsv', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
   const defPath = (preset && preset.scriptFolder) || undefined;
@@ -1467,28 +1491,11 @@ ipcMain.handle('remotion-open-tsv', async (_e, args = {}) => {
 
 ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리모션 TTS', async () => {
   if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
-  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
-  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  const { preset, voice, speed, dict, dictPath, seed } = _remotionVoiceCfg(args.presetName, args);
   const outRoot = preset.outLong || preset.outputFolder;
   if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
-
-  // 목소리 — 채널의 참조음성. `srv:<이름>` 이면 서버 공용 목소리다.
-  const ref = preset.voiceCloneRefAudio || '';
-  const voice = /^srv:/.test(ref) ? ref.slice(4) : '';
-  if (!voice) throw new Error('채널 편집 → 🎙 음성 에서 서버 목소리(☁)를 고르세요.');
-
-  // ⚠ 배속의 정본은 모드별 필드 `speedLong` 이다(`speed` 는 옛 단일 필드 = 사실상 방치값 — v0.3.25 참조).
-  const speed = Number(preset.speedLong != null && preset.speedLong !== '' ? preset.speedLong : preset.speed) || 1;
   const base = path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '');
   const outDir = path.join(outRoot, _safeFolder(base));
-  // 🔑 발음사전은 **채널에 저장된 것이 기본**이다. 매번 손으로 고르면 언젠가 한 번 빠지고,
-  //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
-  const dictPath = args.dictPath || preset.dictPath || '';
-  let dict = [];
-  if (dictPath) {
-    if (!fs.existsSync(dictPath)) throw new Error('발음사전 파일이 없습니다 — ' + dictPath);
-    dict = TSV.parseDictMd(fs.readFileSync(dictPath, 'utf8'));
-  }
 
   S.abort = false;
   log(`🎤 리모션 TTS — ${S.tsv.rows.length}행 · 배속 ${speed} · 목소리 ${voice}`);
@@ -1502,7 +1509,7 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
   try {
     const r = await withAwake('리모션 TTS', async () => TSV.runTsvBatch({
       rows: S.tsv.rows, outDir, ttsMgr: (await P.makeTtsManager(log, preset.engine || 'omnivoice')).mgr,
-      voice, speed, seed: preset.seed != null && preset.seed !== '' ? preset.seed : undefined,
+      voice, speed, seed,
       trim: args.trim !== false, dict, force: !!args.force,
       onLine: (m) => log(m),
       onProgress: (i, n, st) => { try { win.webContents.send('remotion-progress', Object.assign({ i, n }, st || {})); } catch {} },
@@ -1524,6 +1531,62 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
     return { ok: true, outDir, ...r };
   } catch (e) {
     log(`❌ 리모션 TTS 실패 — ${e.message}`);
+    throw e;
+  }
+}));
+
+// 🎧 **몇 문장만 먼저 만들어 들어본다** — 355문장을 15분 돌리기 전에 목소리·배속·발음사전을 확인하는 자리.
+//   🔑 **임시 폴더에 만든다**(MP3 출력 폴더를 건드리지 않는다) — 부분 결과가 그 폴더의 `_manifest.json`
+//     에 섞이면 나중 전체 만들기가 그걸 「건너뜀」으로 잡아 무엇이 최신인지 알 수 없게 된다.
+//   🔑 그래도 **헛수고가 아니다** — 전용 캐시(`~/.shots-maker/tsv-tts-cache`)는 같은 것을 쓰므로
+//     여기서 만든 문장은 전체 만들기에서 **0초에 재활용**된다(캐시 키 = 텍스트+목소리+배속+사전+시드+확장자).
+//     ⇒ 미리듣기로 들은 그 소리가 결과물에 **그대로** 들어간다. 다시 합성되지 않으므로 달라질 수가 없다.
+//   ⚠ 같은 GPU 를 쓰므로 전체 만들기와 **같은 TTS 큐**(enqueueTtsJob)를 탄다 — 동시에 돌지 않는다.
+const REMOTION_PREVIEW_MAX = 12;
+ipcMain.handle('remotion-preview-tts', (_e, args = {}) => enqueueTtsJob('리모션 미리듣기', async () => {
+  if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
+  const names = Array.isArray(args.names) ? args.names.filter(Boolean) : [];
+  if (!names.length) throw new Error('들어볼 문장을 고르세요.');
+  if (names.length > REMOTION_PREVIEW_MAX) {
+    throw new Error(`미리듣기는 한 번에 ${REMOTION_PREVIEW_MAX}개까지입니다 (고른 것 ${names.length}개)`
+      + ' — 전체는 「🎤 mp3 만들기」로 만드세요.');
+  }
+  // TSV 순서를 지킨다(고른 순서가 아니라) — 이어 듣기가 대본 흐름대로 들리게.
+  const want = new Set(names);
+  const rows = S.tsv.rows.filter((r) => want.has(r.name));
+  if (!rows.length) throw new Error('고른 문장을 TSV 에서 찾지 못했습니다 — TSV 를 다시 여세요.');
+
+  const { voice, speed, dict, dictPath, seed } = _remotionVoiceCfg(args.presetName, args);
+  const base = path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '');
+  const outDir = path.join(os.tmpdir(), 'priming-tsv-preview', _safeFolder(base));
+
+  S.abort = false;
+  log(`🎧 리모션 미리듣기 — ${rows.length}개 · 배속 ${speed} · 목소리 ${voice}`
+    + (dict.length ? ` · 사전 ${dict.length}항목` : ' · 사전 없음'));
+  try {
+    const r = await withAwake('리모션 미리듣기', async () => TSV.runTsvBatch({
+      rows, outDir, ttsMgr: (await P.makeTtsManager(log, (args.presetName ? P.getPreset(args.presetName) : S.preset).engine || 'omnivoice')).mgr,
+      voice, speed, seed,
+      trim: args.trim !== false, dict,
+      // ⚠ force 를 켜지 않는다 — 이미 만든 문장은 캐시에서 즉시 나온다(그게 「빠르게」의 핵심).
+      onLine: (m) => log('   ' + m),
+      onProgress: (i, nn, st) => { try { win.webContents.send('remotion-progress', Object.assign({ i, n: nn, preview: true }, st || {})); } catch {} },
+      abortSignal: () => S.abort,
+    }));
+    // 개별 길이는 매니페스트에 있다(runTsvBatch 가 방금 쓴 것).
+    let man = {};
+    try { man = JSON.parse(fs.readFileSync(r.manifestPath, 'utf8')); } catch {}
+    const files = rows.map((row) => ({
+      name: row.name,
+      path: path.join(outDir, row.name),
+      dur: (man[row.name] && man[row.name].dur) || null,
+    })).filter((f) => fs.existsSync(f.path));
+    log(`🎧 미리듣기 준비 — ${files.length}개` + (r.failed.length ? ` · 실패 ${r.failed.length}` : '')
+      + (r.made ? ` (새로 만든 것 ${r.made} · ${_dur(r.madeGenSec || 0)})` : ' (전부 캐시 재활용)'));
+    if (dictPath) log(`   발음사전 ${path.basename(dictPath)}`);
+    return { ok: true, outDir, files, failed: r.failed, made: r.made, skipped: r.skipped };
+  } catch (e) {
+    log(`❌ 리모션 미리듣기 실패 — ${e.message}`);
     throw e;
   }
 }));
