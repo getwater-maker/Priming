@@ -86,6 +86,14 @@ const MP = fs.readFileSync(path.join(ROOT, 'core', 'mode-profiles.js'), 'utf8');
     const labels = await win.$$eval('.modal-card.tabbed .tabbody label', (l) => l.map((x) => x.textContent.trim()));
     ok(labels.some((t) => t.includes('MP3 출력')), '③ 「MP3 출력」 라벨 (' + labels.join(' / ') + ')');
     ok(!labels.some((t) => t.includes('롱폼 출력')), '③ 「롱폼 출력」 라벨 사라짐');
+    // 🔴 발음사전 — 물리는 칸이 없으면 사전이 **조용히 무시**된다(처음 만들 때 실제로 빠뜨렸다).
+    ok(labels.some((t) => t.includes('발음사전')), '발음사전 칸이 폴더 탭에 있다');
+    ok(APP.includes('dictPath: (ch.dictPath'), '저장 patch 에 dictPath 가 실린다');
+    ok(APP.includes('dictPath: p.dictPath'), '열 때 dictPath 를 읽는다 (안 실으면 저장 시 빈 값으로 덮인다)');
+    ok(MAIN.includes('args.dictPath || preset.dictPath'), 'main 이 채널 사전을 기본값으로 쓴다');
+    const RVX = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'RemotionView.jsx'), 'utf8');
+    ok(!/setDictPath/.test(RVX), '쓰지 않는 dictPath 상태가 남아 있지 않다');
+    ok(/window\.confirm/.test(RVX), '사전 없이 만들려 하면 한 번 물어본다');
 
     await win.click('.modal-card.tabbed .mbtns button:has-text("취소")');
     await win.waitForTimeout(300);

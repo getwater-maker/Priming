@@ -15,11 +15,27 @@ export default function RemotionView({ presetName, setStatus, logline }) {
   const [prog, setProg] = useState(null);      // { i, n }
   const [result, setResult] = useState(null);
   const [trim, setTrim] = useState(true);
-  const [dictPath, setDictPath] = useState('');
+  // 🔑 발음사전은 **채널에 저장된 것**을 쓴다. 여기서 고르게 하면 언젠가 한 번 빠지고,
+  //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 그 TSV 전체가 재합성된다.
+  const [dict, setDict] = useState(null);   // { path, name } | null
 
   useEffect(() => {
     if (api && api.onRemotionProgress) api.onRemotionProgress((d) => setProg(d));
   }, []);
+
+  // 채널이 바뀌면 물려 있는 사전을 다시 읽어 화면에 보여준다.
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const p = presetName ? await api.getPresetDetail(presetName) : null;
+        if (dead) return;
+        const dp = (p && p.dictPath) || '';
+        setDict(dp ? { path: dp, name: dp.split(/[\\/]/).pop() } : null);
+      } catch { if (!dead) setDict(null); }
+    })();
+    return () => { dead = true; };
+  }, [presetName]);
 
   async function openTsv() {
     try {
@@ -30,9 +46,15 @@ export default function RemotionView({ presetName, setStatus, logline }) {
 
   async function run() {
     if (!tsv || !tsv.rows.length) return;
+    // ⚠ 사전 없이 돌리면 나중에 물릴 때 전량 재합성이다. 한 번 물어본다.
+    if (!dict && !window.confirm(
+      '발음사전이 물려 있지 않습니다.\n\n'
+      + '이대로 만들면 나중에 사전을 지정할 때 이 TSV 전체가 다시 합성됩니다.\n'
+      + '(채널 편집 → 📁 폴더 → 「발음사전」 에서 지정할 수 있습니다)\n\n'
+      + '사전 없이 진행할까요?')) return;
     setBusy(true); setProg({ i: 0, n: tsv.rows.length }); setResult(null);
     try {
-      const r = await api.remotionRunTts({ presetName, trim, dictPath: dictPath || undefined });
+      const r = await api.remotionRunTts({ presetName, trim });
       setResult(r);
       setStatus && setStatus(`리모션 mp3 — 만듦 ${r.made} · 실패 ${r.failed.length}`);
     } catch (e) {
@@ -60,9 +82,18 @@ export default function RemotionView({ presetName, setStatus, logline }) {
         {tsv && <span className="meta">{tsv.name} · {rows.length}행 · {chars.toLocaleString()}자</span>}
       </div>
 
+      <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6,
+        border: '1px solid ' + (dict ? 'var(--border,#ddd)' : '#e8a33d'),
+        background: dict ? 'transparent' : '#fdf6e8' }}>
+        <b>📖 발음사전</b>{' '}
+        {dict
+          ? <span title={dict.path}>{dict.name}</span>
+          : <span style={{ color: '#b8791a' }}>물려 있지 않습니다 — 채널 편집 → 📁 폴더 → 「발음사전」 에서 지정하세요</span>}
+      </div>
+
       <div className="meta" style={{ marginTop: 6 }}>
-        목소리·배속·시드는 <b>채널 설정</b>을 따릅니다(헤더 ⚙). 출력은 <b>MP3 출력 폴더 / {tsv ? tsv.name.replace(/\.(tsv|txt)$/i, '') : '&lt;TSV 이름&gt;'}</b> 입니다.
-        <br />⚠ 목소리·배속·시드를 바꾸면 <b>전량 다시 만들어집니다</b>. 처음에 정하고 그 뒤로 건드리지 마세요.
+        목소리·배속·시드·발음사전은 <b>채널 설정</b>을 따릅니다(헤더 ⚙). 출력은 <b>MP3 출력 폴더 / {tsv ? tsv.name.replace(/\.(tsv|txt)$/i, '') : '<TSV 이름>'}</b> 입니다.
+        <br />⚠ 이 넷 중 하나라도 바꾸면 <b>전량 다시 만들어집니다</b>. 처음에 정하고 그 뒤로 건드리지 마세요.
       </div>
 
       {errs.length > 0 && (

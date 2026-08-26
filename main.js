@@ -1481,13 +1481,24 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
   const speed = Number(preset.speedLong != null && preset.speedLong !== '' ? preset.speedLong : preset.speed) || 1;
   const base = path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '');
   const outDir = path.join(outRoot, _safeFolder(base));
-  const dict = args.dictPath && fs.existsSync(args.dictPath)
-    ? TSV.parseDictMd(fs.readFileSync(args.dictPath, 'utf8')) : [];
+  // 🔑 발음사전은 **채널에 저장된 것이 기본**이다. 매번 손으로 고르면 언젠가 한 번 빠지고,
+  //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
+  const dictPath = args.dictPath || preset.dictPath || '';
+  let dict = [];
+  if (dictPath) {
+    if (!fs.existsSync(dictPath)) throw new Error('발음사전 파일이 없습니다 — ' + dictPath);
+    dict = TSV.parseDictMd(fs.readFileSync(dictPath, 'utf8'));
+  }
 
   S.abort = false;
   log(`🎤 리모션 TTS — ${S.tsv.rows.length}행 · 배속 ${speed} · 목소리 ${voice}`);
   log(`   출력 ${outDir}`);
-  if (dict.length) log(`   발음사전 ${dict.length}항목`);
+  if (dict.length) log(`   발음사전 ${dict.length}항목 — ${path.basename(dictPath)}`);
+  else if (dictPath) log(`   ⚠ 발음사전을 읽었지만 항목이 0개입니다 — 표 형식을 확인하세요 (${dictPath})`);
+  else {
+    log('   ⚠ 발음사전 없이 합성합니다 — 나중에 사전을 물리면 이 TSV 전체가 다시 합성됩니다.');
+    log('     (채널 편집 → 📁 폴더 → 「발음사전」 에서 지정하세요)');
+  }
   try {
     const r = await withAwake('리모션 TTS', async () => TSV.runTsvBatch({
       rows: S.tsv.rows, outDir, ttsMgr: (await P.makeTtsManager(log, preset.engine || 'omnivoice')).mgr,

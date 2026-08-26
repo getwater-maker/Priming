@@ -1202,6 +1202,8 @@ export default function App() {
       startMode: (p.startMode === 'book' || p.startMode === 'remotion') ? p.startMode : 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
+      dictPath: p.dictPath || '',   // 🎬 리모션 발음사전 — 안 실으면 저장할 때 빈 값으로 덮인다
+
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
@@ -1421,6 +1423,7 @@ export default function App() {
       group: (ch.group || '').trim(),                     // 드롭다운 구분(그룹) — 같은 그룹끼리 묶고 ─── 그룹명 ─── 구분선
       engine: ch.engine || 'omnivoice',
       startMode: ch.startMode || 'longform',              // 이 채널 선택 시 시작할 화면(모드)
+      dictPath: (ch.dictPath || '').trim(),               // 🎬 리모션 발음사전(.md) — 비우면 사전 없이 합성
       voice: ch.voice || '',                              // 음성 식별자(레거시 값 보존 — 표시용)
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
@@ -1455,6 +1458,12 @@ export default function App() {
   async function pickRef() { const f = await api.pickFile({ filters: [{ name: '음성', extensions: ['wav', 'mp3', 'flac', 'm4a'] }] }); if (f) setCh((c) => ({ ...c, voiceCloneRefAudio: f })); }
   async function pickOutLong() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outLong: d })); }
   async function pickScript() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, scriptFolder: d })); }
+  // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
+  //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
+  async function pickDict() {
+    const f = await api.pickFile({ filters: [{ name: '발음사전', extensions: ['md', 'txt'] }] });
+    if (f) setCh((c) => ({ ...c, dictPath: f }));
+  }
   function setSplitField(k, v) { setCh((cur) => ({ ...cur, split: { ...cur.split, [k]: v } })); }
   // 모달 본문자막 한 컬럼(모드별). withSplit=true 면 분할옵션도 포함(롱폼).
   function capColumn(key, label, withSplit) {
@@ -2315,7 +2324,14 @@ export default function App() {
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본 폴더'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
-                {ch.startMode === 'remotion' && <div className="meta" style={{ marginTop: 6 }}>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.</div>}
+                {ch.startMode === 'remotion' && (<>
+                  <div className="frow"><label>발음사전</label>
+                    <input placeholder="발음사전(.md) — 비우면 사전 없이 합성합니다" value={ch.dictPath || ''}
+                      onChange={(e) => setCh({ ...ch, dictPath: e.target.value })} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDict}>찾기</button></div>
+                  <div className="meta" style={{ marginTop: 6 }}>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.
+                    <br />⚠ <b>발음사전을 나중에 물리면 그 강 전체가 다시 합성됩니다</b>(사전이 캐시 키에 들어갑니다). 처음에 정해 두세요.</div>
+                </>)}
               </div>)}
 
             </div>
