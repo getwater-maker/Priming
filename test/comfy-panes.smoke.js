@@ -103,6 +103,45 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
     ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
        '이미지 드롭다운은 로컬·클라우드 둘 다 유지');
+    // ── 🆓 무료 이미지 — 옛 「⚙ 이미지 순환」 모달을 없애고 드롭다운·설정탭으로 분리 (2026-08-26 로이 요청) ──
+    //   ① 드롭다운은 Flow·Genspark 로 분리(고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다)
+    //   ② 이미지 줄 ⚙ 버튼은 1개(옛 ⚙순환 + ⚙ComfyUI 두 개를 통합)
+    //   ③ LoRA 수집은 ⚙ 설정 → 🆓 무료 이미지 탭으로 이동
+    const imgPairs = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
+    ok(imgPairs.some((o) => o.startsWith('flow|')), '이미지 드롭다운에 Flow 항목: ' + (imgPairs.find((o) => o.startsWith('flow|')) || ''));
+    ok(imgPairs.some((o) => o.startsWith('genspark|')), '이미지 드롭다운에 Genspark 항목: ' + (imgPairs.find((o) => o.startsWith('genspark|')) || ''));
+    ok(!imgPairs.some((o) => o.startsWith('rotate|')), '옛 「순환(무료)」 항목 없음');
+    const row = await win.evaluate(() => {
+      const sel = document.querySelector('.hgroup select[title^="이미지 생성 방식"]');
+      const grp = sel && sel.closest('.hgroup');
+      return grp ? [...grp.querySelectorAll('button')].map((b) => ((b.getAttribute('title') || '') + '~' + (b.textContent || '').trim())) : [];
+    });
+    const gearSet = row.filter((b) => b.startsWith('이미지 설정'));
+    ok(gearSet.length === 1, '이미지 설정 ⚙ 버튼이 1개 (옛 ⚙순환 + ⚙ComfyUI 통합)');
+    ok(!row.some((b) => b.includes('이미지 순환')), '옛 「⚙ 이미지 순환」 버튼 없음');
+    ok(!row.some((b) => (b.split('~')[1] || '') === '⚙ ComfyUI'), '옛 「⚙ ComfyUI」 버튼 없음');
+
+    await win.click('.hgroup select[title^="이미지 생성 방식"] ~ button:has-text("⚙")').catch(() => {});
+    await win.waitForSelector('.modal-card', { timeout: 10000 });
+    ok(await win.locator('.modal-card button:has-text("🆓 무료 이미지")').count() === 1, '설정에 「🆓 무료 이미지」 탭이 있다');
+    await win.click('.modal-card button:has-text("🆓 무료 이미지")');
+    await win.waitForTimeout(250);
+    const free = await win.evaluate(() => {
+      const c = document.querySelector('.modal-card');
+      return { text: c.innerText, opts: [...c.querySelectorAll('select option')].map((o) => o.value) };
+    });
+    ok(free.text.includes('LoRA 학습용 이미지 수집'), 'LoRA 수집 섹션이 설정 탭으로 옮겨졌다');
+    ok(free.text.includes('트리거'), 'LoRA 트리거 입력이 있다');
+    ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
+    ok(free.text.includes('이어서'), '한도 시 다른 쪽이 이어받는다는 안내가 있다');
+    await win.click('.modal-card button:has-text("닫기")');
+
+    // 옛 순환 모달·정규화가 남아 있지 않은지 (원문 대조)
+    ok(!APP.includes('imgRotOpen'), '옛 순환 모달 상태(imgRotOpen)가 사라졌다');
+    ok(!APP.includes('openImgRotation'), '옛 순환 모달 함수가 사라졌다');
+    ok(!APP.includes("['genspark', 'flow'].includes(p.imgEngine)"), '채널값을 순환으로 되돌리던 정규화가 사라졌다');
+    ok(!APP.includes("['genspark', 'flow'].includes(s.imgEngine)"), '항목값을 순환으로 되돌리던 정규화가 사라졌다');
+    ok(APP.includes("p.imgEngine === 'rotate' ? 'genspark'"), "옛 'rotate' 는 genspark 로 이관된다");
 
     for (const [kind, file, cfg0] of [['image', 'comfy-image-config.json', before.img], ['video', 'comfy-video-config.json', before.vid]]) {
       const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[title^="i2v 비디오 엔진"]';

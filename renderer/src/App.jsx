@@ -248,7 +248,6 @@ function phaseBadge(p) {
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
-const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' } };
 
 // 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
 function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
@@ -297,7 +296,7 @@ export default function App() {
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) — 유일 이미지 엔진
+  const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(무료 브라우저 · 한도면 서로 이어받음)|'gemini'|'comfy[::경로]'
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -404,7 +403,6 @@ export default function App() {
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
-  const [imgRotOpen, setImgRotOpen] = useState(false);
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
@@ -502,7 +500,9 @@ export default function App() {
         setStyleId(st || p.styleId || 'chibi');
         setAiNotice(true); // AI 고지 기본값: ON (사용자가 토글로 변경)
         // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 레거시값은 정규화.
-        if (p.imgEngine != null) setImgEngine(['genspark', 'flow'].includes(p.imgEngine) ? 'rotate' : p.imgEngine);
+        //   옛 'rotate'(순환) → 'genspark'. 드롭다운이 Flow·Genspark 로 분리됐고(2026-08-26), 고른 쪽을
+        //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
+        if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
@@ -594,8 +594,8 @@ export default function App() {
     if (s.presetName != null) setPresetName(s.presetName);
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
-    // comfy(z-image/Krea2)·gemini·rotate 는 유효 — 보존. 레거시 개별엔진(genspark/flow 단독)만 순환으로.
-    if (s.imgEngine != null) setImgEngine(['genspark', 'flow'].includes(s.imgEngine) ? 'rotate' : s.imgEngine);
+    // comfy(z-image/Krea2)·gemini·genspark·flow 는 유효 — 보존. 옛 'rotate' 만 genspark 로 이관.
+    if (s.imgEngine != null) setImgEngine(s.imgEngine === 'rotate' ? 'genspark' : s.imgEngine);
     // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
     if (s.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
@@ -1052,27 +1052,11 @@ export default function App() {
     if (regen === 'image') { setPromptView(null); await runRegen(shortsNum, groupNum); }
     else if (regen === 'video') { setPromptView(null); await runGroupVid(shortsNum, groupNum); }
   }
-  // 이미지 순환 설정
-  async function openImgRotation() {
-    try {
-      const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true }, flowImageModel: 'Nano Banana 2' });
-      try { setLora(await api.getLoraCollect()); } catch (_) {}
-      try { setGiCfg(await api.getGeminiImageConfig()); } catch (_) {}
-      try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
-      setImgRotOpen(true);
-    } catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
-  }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
   async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('Gemini API 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
   async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
   async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
   async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
-  function toggleRotEngine(id) { const en = { ...(imgRot.enabled || {}) }; en[id] = en[id] === false; saveImgRot({ ...imgRot, enabled: en }); }
-  function moveRotEngine(id, dir) {
-    const order = [...(imgRot.order || [])]; const i = order.indexOf(id); const j = i + dir;
-    if (i < 0 || j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]]; saveImgRot({ ...imgRot, order });
-  }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
@@ -1207,7 +1191,7 @@ export default function App() {
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
-      imgEngine: p.imgEngine || 'rotate', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
+      imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
       outLong: p.outLong || p.outputFolder || '',
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
@@ -1431,7 +1415,7 @@ export default function App() {
       speedLong: numOr(ch.speedLong, 1.15),
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
-      imgEngine: ch.imgEngine || 'rotate', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
+      imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
       outLong: (ch.outLong || '').trim(),
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
@@ -1598,7 +1582,6 @@ export default function App() {
       if (tsOpen) { setTsOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
-      if (imgRotOpen) { setImgRotOpen(false); return; }
       if (ollamaOpen) { setOllamaOpen(false); return; }
       if (vdOpen) { closeVoiceDesign(); return; }
       if (dictOpen) { setDictOpen(false); return; }
@@ -1609,7 +1592,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, tsOpen, impOpen, scriptEditOpen, imgRotOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -1806,6 +1789,9 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
+    // 🆓 무료 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
+    try { setImgRot(await api.getImageRotation()); } catch (_) {}
+    try { setLora(await api.getLoraCollect()); } catch (_) {}
     setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
     try {
       const ci = (await api.getComfyImageConfig()) || {};
@@ -2031,19 +2017,18 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
-            <select title="이미지 생성 방식 — 순환(무료) / 유료(나노바나나2) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
+            <select title="이미지 생성 방식 — Flow·Genspark(무료 브라우저, 한도면 서로 이어받음) / 유료(나노바나나2) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <option value="rotate">순환(무료)</option>
+              <option value="flow">Flow (무료)</option>
+              <option value="genspark">Genspark (무료)</option>
               <option value="gemini">유료(나노바나나2)</option>
               <ComfyEngineOptions cfg={comfyCfg} />
             </select>
-            <button className="ghost" title="이미지 순환 순서·계정 설정 (Genspark·Flow)" onClick={openImgRotation}>⚙</button>
-            {/* ⚙ ComfyUI = 이미지·비디오 공용 1개 버튼(설정 팝업에서 탭으로 전환). 이미지가 comfy 면 이미지 탭, 아니면 비디오 탭으로 연다. */}
-            {(isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) && (
-              <button className="ghost" title="ComfyUI 설정 — 주소·API키·최대길이 등. 워크플로(모델) 추가·삭제도 여기서 (선택은 위 드롭다운에서)"
-                onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : 'vid')}>⚙ ComfyUI</button>
-            )}
+            {/* ⚙ 설정 = 버튼 1개(2026-08-26 통합). 지금 고른 엔진에 맞는 탭으로 연다 —
+                comfy 면 ComfyUI 탭, Flow·Genspark 면 무료 이미지 탭, 나노바나나면 API 키 탭. */}
+            <button className="ghost" title="이미지 설정 — 지금 고른 엔진에 맞는 탭으로 엽니다 (ComfyUI 주소·워크플로 / Flow 모델·LoRA 수집 / API 키)"
+              onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : (isComfyEngine(videoEngine) ? 'vid' : (imgEngine === 'gemini' ? 'keys' : 'free')))}>⚙</button>
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}>🗑 삭제</button>
             {imgEngine === 'gemini' && (<>
@@ -2272,9 +2257,10 @@ export default function App() {
                   <div className="col">
                     <div className="crow"><span className="l">이미지</span>
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
-                      <select value={comfySelectValue(ch.imgEngine || 'rotate', comfyCfg)}
+                      <select value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <option value="rotate">순환(무료)</option>
+                        <option value="flow">Flow (무료)</option>
+                        <option value="genspark">Genspark (무료)</option>
                         <option value="gemini">유료(나노바나나2)</option>
                         <ComfyEngineOptions cfg={comfyCfg} />
                       </select></div>
@@ -2466,7 +2452,7 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🆓 무료 이미지'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -2514,6 +2500,45 @@ export default function App() {
                   <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
                 </label></div>
               <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</div>
+            </div>)}
+
+            {/* 🆓 무료 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
+                2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
+                분리됐으므로 순서/체크는 필요 없다 — 고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다. */}
+            {settingsTab === 'free' && (<div>
+              <div className="meta" style={{ marginBottom: 10 }}>
+                브라우저로 <b>무료</b> 생성하는 <b>Flow · Genspark</b> 설정입니다. 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
+                고른 쪽이 <b>한도</b>(Genspark 휴식/한도 메시지 · Flow 계정 한도)에 걸리면 <b>남은 이미지를 다른 쪽이 이어서</b> 만듭니다.
+              </div>
+              <div className="frow" style={{ alignItems: 'center' }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowImageModel) || 'Nano Banana 2'}
+                  title="Flow 이미지 생성 모델 — Lite 는 더 빠르고 저렴한 경량 모델. Flow 화면에 그 옵션이 없으면 조용히 기본 모델을 유지합니다(오류 없음)."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowImageModel: e.target.value })}>
+                  <option value="Nano Banana 2">Nano Banana 2</option>
+                  <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
+                </select>
+                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Flow 계정 추가·로그인·일일한도" onClick={() => { setSettingsTab('acct'); setSettingsMsg(''); loadAcct(); }}>👤 계정 관리</button>
+              </div>
+              <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
+              {lora && (
+                <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
+                    <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
+                    📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
+                  </label>
+                  <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 학습 오염을 막으려고 수집하지 않습니다.</div>
+                  <div className="frow" style={{ marginTop: 6, alignItems: 'center' }}>
+                    <label style={{ flex: '0 0 auto' }}>트리거</label>
+                    <input style={{ flex: '0 0 auto', width: 130 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
+                    <span className="meta" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lora.dir}>📁 {lora.dir}</span>
+                  </div>
+                  <div className="mbtns" style={{ marginTop: 6 }}>
+                    <button className="ghost" onClick={pickLoraDir}>폴더 변경</button>
+                    <button className="ghost" onClick={() => api.openLoraFolder()}>📂 데이터셋 열기</button>
+                  </div>
+                </div>
+              )}
             </div>)}
 
             {settingsTab === 'keys' && (<div>
@@ -2652,59 +2677,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {imgRotOpen && imgRot && (
-        <div className="modal-bg show">
-          <div className="modal-card">
-            <h3>⚙ 이미지 순환 (Genspark · Flow)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (유료 나노바나나 키는 <b>⚙ 설정 → 🔑 API 키</b>에서 관리)</div>
-            <div style={{ margin: '8px 0' }}>
-              {(imgRot.order || []).map((id, i) => (
-                <div key={id} className="frow" style={{ alignItems: 'center', gap: 4 }}>
-                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 7px' }} disabled={i === 0} onClick={() => moveRotEngine(id, -1)}>↑</button>
-                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 7px' }} disabled={i === imgRot.order.length - 1} onClick={() => moveRotEngine(id, 1)}>↓</button>
-                  <label style={{ flex: 1, display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input type="checkbox" checked={imgRot.enabled ? imgRot.enabled[id] !== false : true} onChange={() => toggleRotEngine(id)} />
-                    <b>{i + 1}. {ENGINE_META[id] ? ENGINE_META[id].name : id}</b>
-                  </label>
-                  {id === 'flow' && (
-                    <select style={{ flex: '0 0 auto', width: 'auto' }} value={imgRot.flowImageModel || 'Nano Banana 2'}
-                      title="Flow 이미지 생성 모델 — Lite는 더 빠르고 저렴한 경량 모델(2026-06-30 출시). Flow 화면에 옵션이 없으면 자동으로 기본 모델 유지."
-                      onChange={(e) => saveImgRot({ ...imgRot, flowImageModel: e.target.value })}>
-                      <option value="Nano Banana 2">Nano Banana 2</option>
-                      <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
-                    </select>
-                  )}
-                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openSettings('acct'); }}>🔑 Flow 계정</button>}
-                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openSettings('acct'); }}>🔑 Genspark 계정</button>}
-                </div>
-              ))}
-            </div>
-            <div className="meta">⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
-            {lora && (
-              <div style={{ borderTop: '1px solid var(--line)', marginTop: 10, paddingTop: 8 }}>
-                <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
-                  <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
-                  📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
-                </label>
-                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용.</div>
-                <div className="frow" style={{ marginTop: 4 }}>
-                  <label>트리거</label>
-                  <input style={{ width: 110 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
-                  <span className="meta" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lora.dir}>📁 {lora.dir}</span>
-                </div>
-                <div className="mbtns" style={{ marginTop: 4 }}>
-                  <button className="ghost" onClick={pickLoraDir}>폴더 변경</button>
-                  <button className="ghost" onClick={() => api.openLoraFolder()}>📂 데이터셋 열기</button>
-                </div>
-              </div>
-            )}
-            <div className="mbtns"><button className="ghost" onClick={() => setImgRotOpen(false)}>닫기</button></div>
-          </div>
-        </div>
-      )}
-
-
-
       {scriptEditOpen && (
         <div className="modal-bg show">
           <div className="modal-card" style={{ width: 820, maxWidth: '94vw' }}>
