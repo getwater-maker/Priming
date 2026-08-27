@@ -24,6 +24,15 @@ const MP = fs.readFileSync(path.join(ROOT, 'core', 'mode-profiles.js'), 'utf8');
 const os = require('os');
 const TSV_ROWS = 15;
 const TSV_PATH = path.join(os.tmpdir(), 'priming-smoke-' + process.pid + '.tsv');
+// 🖼 그림목록 — **헤더 한 줄 + 5칸**(음성 TSV 와 형식이 다르다).
+const IMG_ROWS = 4;
+const IMG_TSV_PATH = path.join(os.tmpdir(), 'priming-smoke-img-' + process.pid + '.tsv');
+fs.writeFileSync(IMG_TSV_PATH,
+  ['파일 경로\t장면\t화면 글\tpositive\tnegative'].concat(
+    Array.from({ length: IMG_ROWS }, (_, i) =>
+      ['999_smoke/S-' + (i + 1) + '.png', 'S-' + (i + 1), '시험 장면 ' + (i + 1),
+       'a simple test scene ' + (i + 1) + ', minimal line drawing', 'text, watermark'].join('\t'))
+  ).join('\n') + '\n', 'utf8');
 fs.writeFileSync(TSV_PATH,
   Array.from({ length: TSV_ROWS }, (_, i) =>
     String(i + 1).padStart(3, '0') + '.mp3\t미리듣기 시험 문장 ' + (i + 1) + '번입니다.').join('\n') + '\n',
@@ -84,6 +93,28 @@ async function checkServerIdle() {
   // 🔴 목소리·배속·사전을 읽는 곳이 둘로 갈리면 미리듣기와 결과물이 달라진다 → 한 함수로 모았다.
   ok(MAIN.includes('function _remotionVoiceCfg('), '채널 설정을 읽는 헬퍼가 하나 있다');
   ok(MAIN.includes("ipcMain.handle('remotion-open-out'"), 'remotion-open-out IPC 존재');
+  // 🖼 그림 — 강의 76강(D:\비즈니스PT)용. 음성 TSV 와 짝을 이룬다(2026-08-27).
+  ok(MAIN.includes("ipcMain.handle('remotion-open-image-tsv'"), 'remotion-open-image-tsv IPC 존재');
+  ok(MAIN.includes("ipcMain.handle('remotion-run-images'"), 'remotion-run-images IPC 존재');
+  ok(MAIN.includes("enqueueImageJob('리모션 그림 생성'"), '그림도 이미지 큐를 탄다(로컬이면 TTS 와 같은 GPU 레인)');
+  ok(/}, 'comfy'\)\);/.test(MAIN), "엔진 'comfy' 를 넘긴다 — 안 넘기면 레인을 안 잡아 TTS 와 겹친다");
+  ok(MAIN.includes('REMOTION_IMAGE_SEED = 20260826'), '시드를 고정한다(같은 그림을 다시 뽑을 수 있게)');
+  ok(MAIN.includes('REMOTION_IMAGE_DIMS = { w: 1024, h: 1024 }'), '1024x1024 정사각형');
+  {
+    // 🔑 프롬프트를 앱이 가공하지 않는다 — 화풍이 두 곳에서 관리되면 76강을 가는 동안 어긋난다.
+    const i0 = MAIN.indexOf("ipcMain.handle('remotion-run-images'");
+    const i1 = MAIN.indexOf('// 📁 출력 폴더 열기', i0);
+    const body = MAIN.slice(i0, i1 > 0 ? i1 : i0 + 4000);
+    ok(!/stylePrompt|buildImagePrompt/.test(body), '그림 경로는 스타일을 덧붙이지 않는다');
+    ok(!/shell\.openPath/.test(body), '끝나도 탐색기를 자동으로 열지 않는다(음성과 같은 정책)');
+  }
+  {
+    const PRE2 = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+    ok(PRE2.includes('remotionOpenImageTsv') && PRE2.includes('remotionRunImages'), 'preload 에 그림 IPC 배선');
+  }
+  // 🔴 채널에 저장하는 값은 **열 때도 실어야** 한다 — 안 실으면 저장 시 빈 값으로 덮인다(단골 사고).
+  ok(APP.includes('outImages: p.outImages'), '채널을 열 때 outImages 를 읽는다');
+  ok(APP.includes("outImages: (ch.outImages || '').trim()"), '채널 저장 patch 에 outImages 가 실린다');
   {
     // ⛔ 끝났다고 탐색기를 자동으로 열지 않는다 — 여러 번 돌리면 창이 쌓인다(v0.2.99 롱폼과 같은 정책).
     const i0 = MAIN.indexOf("ipcMain.handle('remotion-run-tts'");
@@ -194,7 +225,7 @@ async function checkServerIdle() {
     ok(await win.isVisible('table thead th:has-text("🎧")'), '표에 고르기(🎧) 열이 있다');
     ok(await win.isDisabled('button:has-text("🎧 미리듣기")'), '아무것도 안 골랐으면 미리듣기 비활성');
 
-    ok(await win.isVisible('button:has-text("📁 출력 폴더")'), '「📁 출력 폴더」 버튼이 위에 있다');
+    ok(await win.isVisible('button:has-text("📁 mp3 폴더")'), '「📁 mp3 폴더」 버튼이 위에 있다');
 
     // 1행 체크 → 버튼에 개수가 뜬다
     await win.click('table tbody tr:nth-child(1) input[type="checkbox"]');
@@ -265,6 +296,33 @@ async function checkServerIdle() {
         '들은 뒤에는 그 행에 ▶ 가 남는다(다시 듣기)');
     }
 
+    console.log('\n── 🖼 그림목록 (열기 · 표 · 탭)');
+    ok(await win.isVisible('button:has-text("🖼 그림목록")'), '「🖼 그림목록」 버튼');
+    ok(await win.isVisible('button:has-text("📁 그림 폴더")'), '「📁 그림 폴더」 버튼');
+    ok(await win.isDisabled('button:has-text("🖼 그림 만들기")'), '목록을 열기 전에는 만들기 비활성');
+    await app.evaluate(({ dialog }, p) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] });
+    }, IMG_TSV_PATH);
+    await win.click('button:has-text("🖼 그림목록")');
+    await win.waitForSelector('button:has-text("🖼 그림 만들기 (' + IMG_ROWS + ')")', { timeout: 10000 });
+    ok(true, '그림 ' + IMG_ROWS + '장을 읽었다(헤더 한 줄은 건너뛴다)');
+    ok(!(await win.isDisabled('button:has-text("🖼 그림 만들기")')), '읽은 뒤엔 만들기 활성');
+    {
+      const body = await win.textContent('body');
+      ok(body.includes('999_smoke/S-1.png'), '표에 저장 경로가 보인다');
+      ok(body.includes('시험 장면 1'), '표에 화면 글이 보인다');
+      ok(body.includes('1024x1024'), '해상도를 화면에 알린다');
+      ok(body.includes('이미 있는 파일은 건너뜁니다'), '이어받기 규칙을 화면에 알린다');
+    }
+    // 음성·그림 둘 다 열려 있으므로 탭이 나와야 한다.
+    ok(await win.isVisible('button:has-text("🎤 음성 ' + TSV_ROWS + '행")'), '음성 탭');
+    ok(await win.isVisible('button:has-text("🖼 그림 ' + IMG_ROWS + '장")'), '그림 탭');
+    await win.click('button:has-text("🎤 음성 ' + TSV_ROWS + '행")');
+    await win.waitForTimeout(250);
+    ok((await win.textContent('body')).includes('미리듣기 시험 문장 1번입니다.'), '음성 탭으로 돌아간다');
+    ok(!(await win.textContent('body')).includes('999_smoke/S-1.png'), '그림 표는 숨는다');
+    // ⚠ 실제 그림 생성은 여기서 하지 않는다 — GPU 를 쓴다(장당 20초 실측).
+
     console.log('\n── ①②③ 채널 편집');
     await win.click('.modetoggle button:has-text("롱폼")');
     await win.waitForTimeout(400);
@@ -296,6 +354,7 @@ async function checkServerIdle() {
     ok(!labels.some((t) => t.includes('롱폼 출력')), '③ 「롱폼 출력」 라벨 사라짐');
     // 🔴 발음사전 — 물리는 칸이 없으면 사전이 **조용히 무시**된다(처음 만들 때 실제로 빠뜨렸다).
     ok(labels.some((t) => t.includes('발음사전')), '발음사전 칸이 폴더 탭에 있다');
+    ok(labels.some((t) => t.includes('이미지 출력')), '🖼 이미지 출력 칸이 폴더 탭에 있다');
     ok(APP.includes('dictPath: (ch.dictPath'), '저장 patch 에 dictPath 가 실린다');
     ok(APP.includes('dictPath: p.dictPath'), '열 때 dictPath 를 읽는다 (안 실으면 저장 시 빈 값으로 덮인다)');
     ok(MAIN.includes('args.dictPath || preset.dictPath'), 'main 이 채널 사전을 기본값으로 쓴다');
@@ -311,6 +370,7 @@ async function checkServerIdle() {
   } finally {
     await app.close().catch(() => {});
     try { fs.rmSync(TSV_PATH, { force: true }); } catch {}
+    try { fs.rmSync(IMG_TSV_PATH, { force: true }); } catch {}
   }
 
   console.log('\n' + (bad ? '✗ ' : '✅ ') + '리모션 UI E2E ' + (n - bad) + '/' + n + (bad ? ' 실패 ' + bad : ' 통과'));

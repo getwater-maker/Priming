@@ -1205,6 +1205,7 @@ export default function App() {
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
       dictPath: p.dictPath || '',   // 🎬 리모션 발음사전 — 안 실으면 저장할 때 빈 값으로 덮인다
+      outImages: p.outImages || '', // 🖼 리모션 그림 출력 뿌리 — 위와 같은 이유로 반드시 싣는다
 
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
@@ -1426,6 +1427,7 @@ export default function App() {
       engine: ch.engine || 'omnivoice',
       startMode: ch.startMode || 'longform',              // 이 채널 선택 시 시작할 화면(모드)
       dictPath: (ch.dictPath || '').trim(),               // 🎬 리모션 발음사전(.md) — 비우면 사전 없이 합성
+      outImages: (ch.outImages || '').trim(),             // 🖼 리모션 그림 출력 뿌리(TSV 1번 칸이 그 아래 경로)
       voice: ch.voice || '',                              // 음성 식별자(레거시 값 보존 — 표시용)
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
@@ -1463,6 +1465,8 @@ export default function App() {
   async function pickRef() { const f = await api.pickFile({ filters: [{ name: '음성', extensions: ['wav', 'mp3', 'flac', 'm4a'] }] }); if (f) setCh((c) => ({ ...c, voiceCloneRefAudio: f })); }
   async function pickOutLong() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outLong: d })); }
   async function pickScript() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, scriptFolder: d })); }
+  // 🖼 그림 출력 뿌리 — 하위 폴더·파일명은 그림목록 TSV 의 1번 칸이 정한다.
+  async function pickOutImages() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outImages: d })); }
   // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
   async function pickDict() {
@@ -2334,7 +2338,13 @@ export default function App() {
                     <input placeholder="발음사전(.md) — 비우면 사전 없이 합성합니다" value={ch.dictPath || ''}
                       onChange={(e) => setCh({ ...ch, dictPath: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDict}>찾기</button></div>
+                  {/* 🖼 그림은 뿌리가 다르다 — 하위 폴더·파일명을 **그림목록 TSV 의 1번 칸**이 정한다. */}
+                  <div className="frow"><label>이미지 출력</label>
+                    <input placeholder="그림을 떨어뜨릴 뿌리 폴더 — 비우면 그림 생성을 쓰지 않습니다" value={ch.outImages || ''}
+                      onChange={(e) => setCh({ ...ch, outImages: e.target.value })} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutImages}>찾기</button></div>
                   <div className="meta" style={{ marginTop: 6 }}>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.
+                    <br />🖼 그림은 다릅니다 — <b>이미지 출력 + 그림목록 TSV 의 1번 칸</b>(하위 폴더 포함)에 그대로 만듭니다.
                     <br />⚠ <b>발음사전을 나중에 물리면 그 강 전체가 다시 합성됩니다</b>(사전이 캐시 키에 들어갑니다). 처음에 정해 두세요.</div>
                 </>)}
               </div>)}

@@ -74,6 +74,8 @@ contextBridge.exposeInMainWorld('api', {
   remotionRunTts: (args) => ipcRenderer.invoke('remotion-run-tts', args),
   remotionPreviewTts: (args) => ipcRenderer.invoke('remotion-preview-tts', args),
   remotionOpenOut: (args) => ipcRenderer.invoke('remotion-open-out', args),
+  remotionOpenImageTsv: (args) => ipcRenderer.invoke('remotion-open-image-tsv', args),
+  remotionRunImages: (args) => ipcRenderer.invoke('remotion-run-images', args),
   exportRemotion: (args) => ipcRenderer.invoke('export-remotion', args),
   onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
   appendLog: (line) => ipcRenderer.invoke('append-log', line),

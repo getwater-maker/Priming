@@ -221,8 +221,9 @@ await okAsync('진단이 예외를 던지지 않는다(작업을 막으면 본�
 console.log('\n[7] 앱 배선 원문 대조 (복사본이 아니라 실제로 호출되는지)');
 const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const IMG = fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-image.js'), 'utf8');
-ok('main.js 가 이미지·비디오 두 경로에서 진단을 부른다', () =>
-  assert.strictEqual((MAIN.match(/comfy-perf'\)\.diagnoseLocal/g) || []).length, 2));
+// 🖼 리모션 그림(강의용, 2026-08-27)도 로컬 GPU 를 쓰므로 같은 진단을 탄다 → 이미지·비디오·그림 3곳.
+ok('main.js 가 로컬 GPU 를 쓰는 세 경로에서 진단을 부른다', () =>
+  assert.strictEqual((MAIN.match(/comfy-perf'\)\.diagnoseLocal/g) || []).length, 3));
 ok('comfy-image 가 생성 직전 _preferFastQuant 를 부른다', () =>
   assert.ok(/await this\._preferFastQuant\(graph\);\s*\n\s*const promptId = await this\._queueFixing\(graph\)/.test(IMG),
     '그래프를 만든 뒤 큐에 넣기 전에 불려야 한다'));

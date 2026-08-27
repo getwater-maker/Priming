@@ -40,6 +40,12 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   //     React 가 다음 렌더에서 DOM 에 새 값을 쓰지 않고 넘어가, **한 박자 늦게 체크가 나타난다**
   //     (로이 2026-08-27: "클릭해도 체크가 안 되다가 다른 곳을 클릭하면 그때 체크된다").
   const shiftRef = useRef(false);
+  // 🖼 그림 — 같은 강의의 「그림목록 TSV」를 열어 로컬 ComfyUI 로 만든다. 음성 TSV 와 짝을 이룬다.
+  //   ⚠ 저장 위치가 음성과 다르다: 음성은 「MP3 출력/<TSV 이름>/」, 그림은 「이미지 출력 + TSV 1번 칸」.
+  const [imgTsv, setImgTsv] = useState(null);   // { path, name, rows, errors, headerSkipped }
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgResult, setImgResult] = useState(null);
+  const [tab, setTab] = useState('tts');        // 표에 무엇을 보일지 — 'tts' | 'img'
   const queueRef = useRef([]);      // 이어 듣기 대기열
 
   useEffect(() => {
@@ -157,6 +163,31 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     catch (e) { setStatus && setStatus('폴더 열기 실패: ' + e.message); }
   }
 
+  async function openImageTsv() {
+    try {
+      const r = await api.remotionOpenImageTsv({ presetName });
+      if (r) { setImgTsv(r); setImgResult(null); setTab('img'); }
+    } catch (e) { setStatus && setStatus('그림목록 열기 실패: ' + e.message); }
+  }
+
+  async function runImages() {
+    if (!imgTsv || !imgTsv.rows.length) return;
+    setImgBusy(true); setProg({ i: 0, n: imgTsv.rows.length, images: true }); setImgResult(null);
+    try {
+      const r = await api.remotionRunImages({ presetName });
+      setImgResult(r);
+      setStatus && setStatus(`🖼 그림 — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length}`);
+    } catch (e) {
+      setStatus && setStatus('그림 실패: ' + e.message);
+      setImgResult({ error: e.message });
+    } finally { setImgBusy(false); setProg(null); }
+  }
+
+  async function openImagesOut() {
+    try { await api.remotionOpenOut({ presetName, kind: 'images' }); }
+    catch (e) { setStatus && setStatus('폴더 열기 실패: ' + e.message); }
+  }
+
   async function openTsv() {
     try {
       await refreshDict();
@@ -189,6 +220,10 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const chars = rows.reduce((a, r) => a + r.text.replace(/\s/g, '').length, 0);
   const pickedSet = new Set(picked);
   const pvNames = rows.map((r) => r.name).filter((nm) => previews[nm]);
+  const imgRows = (imgTsv && imgTsv.rows) || [];
+  const imgErrs = (imgTsv && imgTsv.errors) || [];
+  // 하나만 열려 있으면 탭과 상관없이 그것을 보여 준다(빈 화면을 만들지 않는다).
+  const showTab = (rows.length && imgRows.length) ? tab : (imgRows.length ? 'img' : 'tts');
 
   return (
     <div style={{ padding: '10px 14px' }}>
@@ -206,7 +241,16 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         )}
         {playing && <button className="ghost" onClick={stopPlay}>⏹ 정지</button>}
         <button className="ghost" onClick={openOut} disabled={busy}
-          title="만들어진 mp3 가 있는 폴더를 엽니다">📁 출력 폴더</button>
+          title="만들어진 mp3 가 있는 폴더를 엽니다">📁 mp3 폴더</button>
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border,#ddd)', margin: '0 2px' }} />
+        <button onClick={openImageTsv} disabled={busy || imgBusy}
+          title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다">🖼 그림목록</button>
+        <button onClick={runImages} disabled={busy || imgBusy || !imgRows.length || imgErrs.length > 0}
+          title="로컬 ComfyUI 로 그림을 만듭니다. 이미 있는 파일은 건너뜁니다.">
+          {imgBusy ? '만드는 중…' : `🖼 그림 만들기${imgRows.length ? ' (' + imgRows.length + ')' : ''}`}
+        </button>
+        <button className="ghost" onClick={openImagesOut} disabled={imgBusy}
+          title="그림이 저장된 폴더를 엽니다">📁 그림 폴더</button>
         <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input type="checkbox" checked={trim} disabled={busy || pvBusy} onChange={(e) => setTrim(e.target.checked)} />
           앞뒤 무음 제거
@@ -246,7 +290,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
             <div style={{ height: '100%', width: (prog.n ? (prog.i / prog.n * 100) : 0) + '%', background: 'var(--accent,#c9884a)' }} />
           </div>
           <div className="meta" style={{ marginTop: 4 }}>
-            {prog.preview ? '🎧 미리듣기 ' : ''}{prog.i} / {prog.n}
+            {prog.images ? '🖼 그림 ' : (prog.preview ? '🎧 미리듣기 ' : '')}{prog.i} / {prog.n}
             {prog.rtf != null && (
               <span title="RTF = 생성시간 ÷ 음성길이 (낮을수록 빠름). 합성은 문장 길이와 거의 무관하게 문장당 2.4~2.7초가 걸리므로, 짧은 문장이 많을수록 RTF 는 나빠집니다 — 총 시간은 문장 수로 정해집니다.">
                 {' · '}⏱ RTF {prog.rtf.toFixed(2)}
@@ -296,7 +340,42 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         </div>
       )}
 
-      {rows.length > 0 && (
+      {imgErrs.length > 0 && (
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, background: '#fdf0ee' }}>
+          <b style={{ color: '#c0392b' }}>그림목록 오류 {imgErrs.length}건 — 하나라도 있으면 만들지 않습니다</b>
+          <ul style={{ margin: '6px 0 0 18px' }}>
+            {imgErrs.slice(0, 12).map((e, i) => <li key={i}>{e.line}행: {e.message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {imgResult && !imgResult.error && (
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+          <b>🖼 그림 완료</b> — 만듦 {imgResult.made} · 건너뜀 {imgResult.skipped} · 실패 {imgResult.failed.length} / 전체 {imgResult.total}
+          {imgResult.perImageSec != null && <> · 장당 {imgResult.perImageSec.toFixed(1)}초</>}
+          <div className="meta" style={{ marginTop: 4 }}>{imgResult.outRoot}</div>
+          {imgResult.failed.length > 0 && (
+            <ul style={{ margin: '6px 0 0 18px', color: '#c0392b' }}>
+              {imgResult.failed.slice(0, 10).map((f, i) => <li key={i}>{f.rel} — {f.reason}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+      {imgResult && imgResult.error && (
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, color: '#c0392b' }}>
+          {imgResult.error}
+        </div>
+      )}
+
+      {/* 음성·그림 표 — 둘 다 열려 있으면 탭으로 고른다. */}
+      {rows.length > 0 && imgRows.length > 0 && (
+        <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
+          <button className={showTab === 'tts' ? '' : 'ghost'} onClick={() => setTab('tts')}>🎤 음성 {rows.length}행</button>
+          <button className={showTab === 'img' ? '' : 'ghost'} onClick={() => setTab('img')}>🖼 그림 {imgRows.length}장</button>
+        </div>
+      )}
+
+      {showTab === 'tts' && rows.length > 0 && (
         <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,#fff)' }}>
@@ -335,7 +414,37 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         </div>
       )}
 
-      {!tsv && (
+      {showTab === 'img' && imgRows.length > 0 && (
+        <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,#fff)' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px', width: 46 }}>#</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', width: 70 }}>장면</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px', width: 300 }}>저장 경로</th>
+              <th style={{ textAlign: 'left', padding: '6px 8px' }}>화면 글(참고)</th>
+            </tr></thead>
+            <tbody>
+              {imgRows.map((r, i) => (
+                <tr key={r.rel} style={{ borderTop: '1px solid var(--border,#eee)' }}>
+                  <td style={{ padding: '4px 8px', color: '#999' }}>{i + 1}</td>
+                  <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.scene}</td>
+                  <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12 }} title={r.positive}>{r.rel}</td>
+                  <td style={{ padding: '4px 8px' }} title={r.positive}>{r.caption}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {imgTsv && (
+        <div className="meta" style={{ marginTop: 6 }}>
+          🖼 {imgTsv.name} · {imgRows.length}장 · 1024x1024 · <b>이미 있는 파일은 건너뜁니다</b>
+          (다시 만들려면 그 그림을 지우고 누르세요). 저장 위치는 <b>채널의 「이미지 출력」 + 표의 저장 경로</b>입니다.
+          <br />⚠ 프롬프트는 <b>그대로</b> 씁니다 — 앱이 화풍을 덧붙이지 않습니다(그림체는 대본 쪽에서 관리).
+        </div>
+      )}
+
+      {!tsv && !imgTsv && (
         <div className="meta" style={{ marginTop: 24, textAlign: 'center', opacity: 0.7 }}>
           「📄 TSV 열기」로 시작하세요.<br />
           형식: 한 줄에 <code>파일명&lt;탭&gt;문장</code> — 예 <code>R-01-1.mp3⇥안녕하세요.</code>

@@ -1446,6 +1446,7 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
 //   영상은 리모션이 만들고 이 앱은 **음성만** 담당한다(자막·이미지·비디오·.vrew 없음).
 //   목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 한 번 정하면 바꾸지 말 것(캐시 키라 전량 재합성).
 const TSV = require('./core/tsv-tts');
+const TSVIMG = require('./core/tsv-images');
 // 🎧 리모션 — 채널에서 목소리·배속·발음사전을 읽는다.
 //   🔑 **전체 만들기와 미리듣기가 반드시 같은 값을 쓰게** 한 곳에 모은다. 여기가 갈리면
 //     미리듣기로 들은 소리와 실제 결과가 달라져 미리듣기의 존재 이유가 사라진다.
@@ -1536,11 +1537,98 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
   }
 }));
 
+// ── 🖼 그림목록 TSV → 로컬 ComfyUI 일괄 생성 ────────────────────────
+//   강의 영상(D:\비즈니스PT)처럼 장면마다 그림이 필요한 작업용. 음성 TSV 와 짝을 이룬다.
+//   🔑 **프롬프트를 손대지 않는다** — 스타일까지 포함된 완성 프롬프트를 그대로 넘긴다.
+//     여기서 뭔가 덧붙이면 그림체가 두 곳에서 관리되어 76강을 가는 동안 반드시 어긋난다
+//     (로이 결정 2026-08-27: 스타일은 대본 만드는 쪽이 관리한다).
+//   🔑 **시드를 고정한다** — 같은 그림을 다시 뽑아야 할 때가 있다(대본 쪽 요청).
+const REMOTION_IMAGE_SEED = 20260826;
+const REMOTION_IMAGE_DIMS = { w: 1024, h: 1024 };
+ipcMain.handle('remotion-open-image-tsv', async (_e, args = {}) => {
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  const defPath = (preset && preset.scriptFolder) || undefined;
+  const r = await dialog.showOpenDialog(win, {
+    title: '그림목록 TSV 열기 — 경로·장면·한글·positive·negative',
+    defaultPath: defPath,
+    properties: ['openFile'],
+    filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
+  });
+  if (r.canceled || !r.filePaths.length) return null;
+  const file = r.filePaths[0];
+  const parsed = TSVIMG.parseImageTsv(fs.readFileSync(file, 'utf8'));
+  S.imgTsv = { path: file, rows: parsed.rows };
+  log(`🖼 그림목록 열기 — ${path.basename(file)} · ${parsed.rows.length}장`
+    + (parsed.headerSkipped ? ' (헤더 1줄 건너뜀)' : '')
+    + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
+  for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
+  return { path: file, name: path.basename(file), rows: parsed.rows, errors: parsed.errors, headerSkipped: parsed.headerSkipped };
+});
+
+// ⚠ 로컬 ComfyUI 는 TTS·롱폼 이미지와 **같은 3060** 을 쓴다 → `enqueueImageJob` 이 레인을 잡아
+//   동시에 돌지 않게 한다(엔진 'comfy' 를 넘겨야 로컬일 때 localGpu 레인을 잡는다).
+ipcMain.handle('remotion-run-images', (_e, args = {}) => enqueueImageJob('리모션 그림 생성', async () => {
+  if (!S.imgTsv || !S.imgTsv.rows.length) throw new Error('먼저 그림목록 TSV 를 여세요.');
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  const outRoot = preset.outImages;
+  if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「이미지 출력」 폴더를 정하세요.');
+
+  const CI = require('./core/comfy-image');
+  const cfg = CI.loadConfig();
+  const wfName = path.basename(cfg.workflowPath || '').replace(/\.json$/i, '') || '(워크플로 미지정)';
+  const eng = new CI.ComfyImage(cfg, log);
+
+  // 🖥 로컬이면 꺼져 있어도 켜서 기다린다(롱폼 이미지와 같은 방어선).
+  if (!cfg.cloud) {
+    const lc = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+    if (!lc.ok) throw new Error(lc.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    // 🔎 느려질 조건을 미리 알린다(중복 서버·RAM 부족) — 막지 않고 경고만 한다.
+    try {
+      const d = await require('./core/comfy-perf').diagnoseLocal({ baseUrl: eng.baseUrl });
+      for (const w of d.warnings) log('  ' + w);
+    } catch {}
+  }
+
+  const rows = Array.isArray(args.only) && args.only.length
+    ? S.imgTsv.rows.filter((r) => args.only.includes(r.rel))
+    : S.imgTsv.rows;
+  S.abort = false;
+  log(`🖼 리모션 그림 — ${rows.length}장 · ${REMOTION_IMAGE_DIMS.w}x${REMOTION_IMAGE_DIMS.h}`
+    + ` · 시드 ${REMOTION_IMAGE_SEED} · ${cfg.cloud ? '☁ 클라우드' : '🖥 로컬'}(${wfName})`);
+  log(`   출력 ${outRoot}`);
+  try {
+    const r = await withAwake('리모션 그림 생성', async () => TSVIMG.runImageBatch({
+      rows, outRoot, engine: eng,
+      seed: REMOTION_IMAGE_SEED, dims: REMOTION_IMAGE_DIMS, force: !!args.force,
+      onLine: (m) => log('   ' + m),
+      onProgress: (i, nn, st) => { try { win.webContents.send('remotion-progress', Object.assign({ i, n: nn, images: true }, st || {})); } catch {} },
+      abortSignal: () => S.abort,
+    }));
+    log(`✅ 리모션 그림 — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length} / 전체 ${r.total}`
+      + (r.perImageSec ? ` · 장당 ${r.perImageSec.toFixed(1)}초` : '') + ` · 전체 ${_dur(r.elapsedSec)}`);
+    if (r.failed.length) r.failed.slice(0, 10).forEach((f) => log(`   ✗ ${f.rel} — ${f.reason}`));
+    // ⛔ 끝났다고 탐색기를 자동으로 열지 않는다 — 「📁 그림 폴더」 버튼으로 연다(음성과 같은 정책).
+    return { ok: true, outRoot, ...r };
+  } catch (e) {
+    log(`❌ 리모션 그림 실패 — ${e.message}`);
+    throw e;
+  }
+}, 'comfy'));
+
 // 📁 출력 폴더 열기 — 만들기가 끝날 때 자동으로 열지 않으므로(창이 쌓인다) 버튼으로 연다.
 //   TSV 를 열었으면 그 TSV 폴더로, 아직 안 만들어졌으면 MP3 출력 뿌리로 연다.
 ipcMain.handle('remotion-open-out', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
   if (!preset) throw new Error('채널을 먼저 고르세요.');
+  // 🖼 그림 쪽은 뿌리가 다르다(채널의 「이미지 출력」). 하위 폴더는 TSV 1번 칸이 정하므로 뿌리를 연다.
+  if (args.kind === 'images') {
+    const root = preset.outImages;
+    if (!root) throw new Error('채널 편집 → 📁 폴더 에서 「이미지 출력」 폴더를 정하세요.');
+    if (!fs.existsSync(root)) throw new Error('폴더가 없습니다 — ' + root);
+    shell.openPath(root);
+    return root;
+  }
   const outRoot = preset.outLong || preset.outputFolder;
   if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
   let dir = outRoot;

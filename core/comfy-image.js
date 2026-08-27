@@ -211,7 +211,22 @@ class ComfyImage {
     if (aspect === '1:1') return { w: 1024, h: 1024 };
     return { w: 768, h: 1344 }; // 9:16
   }
-  _buildWorkflow(positive, aspect) {
+  // opts = { negative, seed, dims } — 강의 그림처럼 **프롬프트 두 칸을 그대로 쓰고 시드를 고정**해야 하는
+  //   경우에 쓴다. 안 넘기면 지금까지와 똑같이 동작한다(positive 만, 시드는 매번 랜덤).
+  // KSampler 계열의 `negative` 링크를 따라가 **CLIPTextEncode 면** 그 노드 id 를 준다.
+  //   ConditioningZeroOut 같은 노드면 넣을 자리가 없으므로 null.
+  _findNegativeNode(graph) {
+    for (const id of Object.keys(graph)) {
+      const inp = graph[id].inputs || {};
+      const link = inp.negative;
+      if (!Array.isArray(link) || !link.length) continue;
+      const tId = String(link[0]);
+      const t = graph[tId];
+      if (t && /CLIPTextEncode/i.test(t.class_type || '') && 'text' in (t.inputs || {})) return tId;
+    }
+    return null;
+  }
+  _buildWorkflow(positive, aspect, opts = {}) {
     let wf = JSON.parse(fs.readFileSync(this.workflowPath, 'utf8'));
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. ComfyUI 에서 "저장(API 포맷)"으로 저장하세요.');
     const graph = JSON.parse(JSON.stringify(wf));
@@ -223,8 +238,17 @@ class ComfyImage {
         || Object.keys(graph).find((id) => typeof (graph[id].inputs || {}).text === 'string');
       if (pId && graph[pId] && graph[pId].inputs) { graph[pId].inputs.text = String(positive); promptFixed = true; }
     }
+    // 🔴 **부정 프롬프트는 워크플로가 받아 줄 때만 들어간다.** KSampler 의 negative 가 CLIPTextEncode 로
+    //   이어져 있어야 자리가 있다. Krea2 Turbo 계열은 negative 가 `ConditioningZeroOut` 이고 cfg=1 이라
+    //   **자리도 없고 있어도 무효**다(v0.2.83). 그때는 조용히 넘기지 않고 호출부에 알린다.
+    this._lastNegApplied = null;
+    if (opts.negative) {
+      const nId = this._findNegativeNode(graph);
+      if (nId) { graph[nId].inputs.text = String(opts.negative); this._lastNegApplied = true; }
+      else this._lastNegApplied = false;
+    }
     if (this.sendDims) {
-      const dim = this._dims(aspect);
+      const dim = (opts.dims && opts.dims.w && opts.dims.h) ? opts.dims : this._dims(aspect);
       const setNum = (id, keys, val) => { const inp = id && graph[id] && graph[id].inputs; if (!inp) return false; for (const k of keys) { if (k in inp) { inp[k] = val; return true; } } return false; };
       let wSet = setNum(this.widthNodeId, ['value', 'width'], dim.w);
       let hSet = setNum(this.heightNodeId, ['value', 'height'], dim.h);
@@ -235,9 +259,12 @@ class ComfyImage {
         }
       }
     }
+    // 시드 — 주면 **고정**(같은 그림을 다시 뽑을 수 있게), 안 주면 지금까지처럼 매번 랜덤.
+    const fixed = (opts.seed != null && opts.seed !== '' && Number.isFinite(Number(opts.seed)))
+      ? Math.floor(Number(opts.seed)) : null;
     for (const id of Object.keys(graph)) {
       const inp = graph[id].inputs || {};
-      const rnd = Math.floor(Math.random() * 1e15);
+      const rnd = fixed != null ? fixed : Math.floor(Math.random() * 1e15);
       if (typeof inp.seed === 'number') inp.seed = rnd;
       if (typeof inp.noise_seed === 'number') inp.noise_seed = rnd;
     }
@@ -403,7 +430,7 @@ class ComfyImage {
     }
   }
   // 텍스트 → 이미지 1장. { success:true, imagePath } | { success:false, error }
-  async textToImage({ prompt, aspect, outputPath, abortSignal }) {
+  async textToImage({ prompt, negative, seed, dims, aspect, outputPath, abortSignal }) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 에서 지정하세요.' };
     // ⚠ 일시적 네트워크 장애로 한 장이 통째로 실패하던 것을 막는다(2026-08-19 로그: `✗ G10 실패: fetch failed`
     //   — 같은 시각 서버는 정상이었다). 제출 전에 끊긴 경우가 대부분이라 재시도해도 크레딧이 이중으로 나가지 않는다.
@@ -413,12 +440,12 @@ class ComfyImage {
       if (abortSignal && abortSignal()) return { success: false, error: '중단됨' };
       try {
         if (!(await this.health())) throw new Error(`ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}`);
-        const graph = this._buildWorkflow(prompt, aspect);
+        const graph = this._buildWorkflow(prompt, aspect, { negative, seed, dims });
         await this._preferFastQuant(graph);
         const promptId = await this._queueFixing(graph);
         const img = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
         const out = await this._download(img, outputPath);
-        return { success: true, imagePath: out };
+        return { success: true, imagePath: out, negApplied: this._lastNegApplied };
       } catch (e) {
         lastErr = _netMsg(e);
         if (att >= 2 || !_isNetErr(e)) break;
