@@ -208,6 +208,29 @@ const rows3 = T.parseImageTsv([HEADER,
     console.log('  ⏭ 건너뜀 — 이 PC 에 강의 그림목록이 없습니다');
   }
 
+    console.log('[6-b] 짝 찾기 — 음성 TSV ↔ 같은 번호의 그림목록');
+  {
+    // 🔑 main.js 원문에서 뽑아 실행한다(복사본을 두면 앱과 갈라져도 통과한다).
+    const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const ex = (src, name) => {
+      const i = src.indexOf('function ' + name + '(');
+      let d = 0, st = false, j = i;
+      for (; j < src.length; j++) { const c = src[j]; if (c === '{') { d++; st = true; } else if (c === '}') { d--; if (st && d === 0) { j++; break; } } }
+      return src.slice(i, j);
+    };
+    const M = new Function('fs', 'path', [ex(MAIN, '_lecNum'), ex(MAIN, '_pairImageTsv')].join(String.fromCharCode(10)) + String.fromCharCode(10) + 'return { _lecNum, _pairImageTsv };')(fs, path);
+    eq(M._lecNum('003_돈이_만들어지는_구조.tsv'), '003', '앞 숫자를 뽑는다');
+    eq(M._lecNum('노번호.tsv'), '', '숫자가 없으면 빈 문자열');
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pair-'));
+    fs.writeFileSync(path.join(d, '003_그림목록.tsv'), 'x');
+    fs.writeFileSync(path.join(d, '007_그림목록.tsv'), 'x');
+    eq(path.basename(M._pairImageTsv('/a/003_강.tsv', d) || ''), '003_그림목록.tsv', '같은 번호를 찾는다');
+    eq(M._pairImageTsv('/a/999_강.tsv', d), null, '없는 번호는 null(그 강은 음성만)');
+    eq(M._pairImageTsv('/a/노번호.tsv', d), null, '번호가 없으면 null');
+    eq(M._pairImageTsv('/a/003_강.tsv', ''), null, '폴더가 비면 null');
+    eq(M._pairImageTsv('/a/003_강.tsv', path.join(d, '없음')), null, '없는 폴더에도 안 던진다');
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+  }
   console.log('[7] 소스 위생');
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'core', 'tsv-images.js'), 'utf8');
   ok(SRC.indexOf(String.fromCharCode(0)) < 0, 'NUL 바이트 없음');

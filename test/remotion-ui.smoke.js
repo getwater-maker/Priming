@@ -97,7 +97,29 @@ async function checkServerIdle() {
   ok(MAIN.includes("ipcMain.handle('remotion-open-image-tsv'"), 'remotion-open-image-tsv IPC 존재');
   ok(MAIN.includes("ipcMain.handle('remotion-run-images'"), 'remotion-run-images IPC 존재');
   ok(MAIN.includes("enqueueImageJob('리모션 그림 생성'"), '그림도 이미지 큐를 탄다(로컬이면 TTS 와 같은 GPU 레인)');
-  ok(/}, 'comfy'\)\);/.test(MAIN), "엔진 'comfy' 를 넘긴다 — 안 넘기면 레인을 안 잡아 TTS 와 겹친다");
+  ok(MAIN.includes("_runRemotionImagesCore(args), 'comfy')"), "엔진 'comfy' 를 넘긴다 — 안 넘기면 레인을 안 잡아 TTS 와 겹친다");
+  // ── 🎬 강 여러 개 + 짝 자동 연결(2026-08-27) ──
+  ok(MAIN.includes("ipcMain.handle('remotion-select-tsv'"), 'remotion-select-tsv IPC 존재');
+  ok(MAIN.includes("ipcMain.handle('remotion-run-all'"), 'remotion-run-all IPC 존재');
+  ok(MAIN.includes("properties: ['openFile', 'multiSelections']"), 'TSV 를 여러 개 고를 수 있다');
+  ok(MAIN.includes('function _pairImageTsv('), '음성 TSV 의 짝 그림목록을 찾는 함수');
+  ok(MAIN.includes('function _remotionActivate('), '활성 강 전환 — S.tsv/S.imgTsv 를 한 곳에서 맞춘다');
+  ok(/localeCompare\(path\.basename\(b\), 'ko', \{ numeric: true \}\)/.test(MAIN),
+    '파일 선택 순서가 OS 마다 다르므로 이름 자연정렬로 큐 순서를 정한다');
+  {
+    // 🔴 run-all 이 스스로 레인을 잡으면 **자기 자신을 기다려 교착**된다 — 각 단계가 큐를 탄다.
+    const i0 = MAIN.indexOf("ipcMain.handle('remotion-run-all'");
+    const i1 = MAIN.indexOf("// 📁 출력 폴더 열기", i0);
+    const body = MAIN.slice(i0, i1 > 0 ? i1 : i0 + 4000);
+    ok(/enqueueTtsJob\('리모션 TTS', \(\) => _runRemotionTtsCore/.test(body), '음성 단계가 TTS 큐를 탄다');
+    ok(/enqueueImageJob\('리모션 그림 생성', \(\) => _runRemotionImagesCore/.test(body), '그림 단계가 이미지 큐를 탄다');
+    ok(!/_runOnLanes/.test(body), 'run-all 자신은 레인을 잡지 않는다(교착 방지)');
+    // 🔑 전 강 음성 → 전 강 그림 2패스(강마다 번갈면 GPU 모델이 그만큼 스왑된다).
+    ok(body.indexOf('for (const it of withTts)') < body.indexOf('for (const it of withImg)'),
+      '음성을 전부 끝낸 뒤 그림으로 넘어간다(2패스)');
+  }
+  ok(APP.includes('imgTsvFolder: p.imgTsvFolder'), '채널을 열 때 그림목록 폴더를 읽는다');
+  ok(APP.includes("imgTsvFolder: (ch.imgTsvFolder || '').trim()"), '채널 저장 patch 에 그림목록 폴더가 실린다');
   ok(MAIN.includes('REMOTION_IMAGE_SEED = 20260826'), '시드를 고정한다(같은 그림을 다시 뽑을 수 있게)');
   ok(MAIN.includes('REMOTION_IMAGE_DIMS = { w: 1024, h: 1024 }'), '1024x1024 정사각형');
   {
@@ -322,6 +344,57 @@ async function checkServerIdle() {
     ok((await win.textContent('body')).includes('미리듣기 시험 문장 1번입니다.'), '음성 탭으로 돌아간다');
     ok(!(await win.textContent('body')).includes('999_smoke/S-1.png'), '그림 표는 숨는다');
     // ⚠ 실제 그림 생성은 여기서 하지 않는다 — GPU 를 쓴다(장당 20초 실측).
+
+    console.log('\n── 🎬 여러 강 열기 + 그림목록 자동 연결');
+    {
+      // 강 3개 + 짝 그림목록 3개를 임시 폴더에 만든다(사용자 파일을 건드리지 않는다).
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-lec-'));
+      const imgDir = path.join(dir, 'images');
+      fs.mkdirSync(imgDir);
+      const ttsPaths = [];
+      for (const num of ['001', '002', '003']) {
+        const tp = path.join(dir, num + '_시험강.tsv');
+        fs.writeFileSync(tp, Array.from({ length: 3 }, (_, i) =>
+          num + '-' + (i + 1) + '.mp3\t' + num + '강 문장 ' + (i + 1) + '.').join('\n') + '\n', 'utf8');
+        ttsPaths.push(tp);
+        // 003 만 그림목록을 안 둔다 — 「짝 없음」도 견디는지 본다.
+        if (num !== '003') {
+          fs.writeFileSync(path.join(imgDir, num + '_그림목록.tsv'),
+            ['경로\t장면\t글\tpositive\tnegative'].concat(Array.from({ length: 2 }, (_, i) =>
+              [num + '_시험강/P-' + (i + 1) + '.png', 'P-' + (i + 1), '글 ' + (i + 1), 'a scene', 'text'].join('\t'))
+            ).join('\n') + '\n', 'utf8');
+        }
+      }
+      // 채널에 그림목록 폴더를 임시로 물린다 — 끝나면 되돌린다.
+      const PS = require(path.join(ROOT, 'tts', 'preset-store'));
+      const curName = await win.$eval('select', (el) => el.value).catch(() => '');
+      const cur = PS.loadAll().find((p) => p.name === curName);
+      const keepFolder = cur ? (cur.imgTsvFolder || '') : null;
+      if (cur) PS.update(cur.id, { imgTsvFolder: imgDir });
+      try {
+        await app.evaluate(({ dialog }, ps) => {
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ps });
+        }, ttsPaths);
+        await win.click('button:has-text("📄 TSV 열기")');
+        await win.waitForSelector('button:has-text("▶ 전체 만들기 (3강)")', { timeout: 10000 });
+        ok(true, 'TSV 3개를 한 번에 열었다');
+        const body = await win.textContent('body');
+        ok(body.includes('3강'), '강 목록에 3강이 보인다');
+        // 001 이 활성 — 자연정렬이므로 첫 강이 001 이어야 한다.
+        ok(body.includes('001강 문장 1.'), '자연정렬 — 첫 강(001)이 활성이다');
+        ok(await win.isVisible('button:has-text("🖼 그림 만들기 (2)")'), '🔑 같은 번호의 그림목록이 자동으로 붙었다(2장)');
+        // 003 으로 전환 — 그림 짝이 없으므로 그림 만들기가 비활성이어야 한다.
+        await win.click('button[title*="003_시험강.tsv"]');
+        await win.waitForTimeout(400);
+        const b3 = await win.textContent('body');
+        ok(b3.includes('003강 문장 1.'), '강을 전환하면 표가 바뀐다');
+        ok(await win.isDisabled('button:has-text("🖼 그림 만들기")'), '짝이 없는 강은 그림 만들기가 비활성');
+        // ⚠ 실제 생성은 여기서 하지 않는다 — GPU·시간.
+      } finally {
+        if (cur && keepFolder !== null) PS.update(cur.id, { imgTsvFolder: keepFolder });
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      }
+    }
 
     console.log('\n── ①②③ 채널 편집');
     await win.click('.modetoggle button:has-text("롱폼")');

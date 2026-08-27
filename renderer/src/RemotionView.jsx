@@ -19,7 +19,9 @@ function fmtLeft(sec) {
  * ⚠ 목소리·배속·시드·발음사전을 바꾸면 **전량 다시 만들어진다**(그 값들이 캐시 키다).
  */
 export default function RemotionView({ presetName, presetRev, setStatus, logline }) {
-  const [tsv, setTsv] = useState(null);        // { path, name, rows, errors }
+  // 🎬 **강 여러 개**를 큐로 다룬다 — 음성 TSV 하나 = 강 하나, 같은 번호의 그림목록이 자동으로 붙는다.
+  //   { items:[{id,num,ttsName,imgName,ttsCount,imgCount,…}], activeId, active:{name,rows,errors,img} }
+  const [queue, setQueue] = useState(null);
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState(null);      // { i, n }
   const [result, setResult] = useState(null);
@@ -42,14 +44,16 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const shiftRef = useRef(false);
   // 🖼 그림 — 같은 강의의 「그림목록 TSV」를 열어 로컬 ComfyUI 로 만든다. 음성 TSV 와 짝을 이룬다.
   //   ⚠ 저장 위치가 음성과 다르다: 음성은 「MP3 출력/<TSV 이름>/」, 그림은 「이미지 출력 + TSV 1번 칸」.
-  const [imgTsv, setImgTsv] = useState(null);   // { path, name, rows, errors, headerSkipped }
   const [imgBusy, setImgBusy] = useState(false);
   const [imgResult, setImgResult] = useState(null);
   const [tab, setTab] = useState('tts');        // 표에 무엇을 보일지 — 'tts' | 'img'
+  const [allBusy, setAllBusy] = useState(false);
   const queueRef = useRef([]);      // 이어 듣기 대기열
 
   useEffect(() => {
     if (api && api.onRemotionProgress) api.onRemotionProgress((d) => setProg(d));
+    // 전체 만들기 중에는 main 이 강을 바꿔 가며 돈다 — 화면도 따라 움직이게.
+    if (api && api.onRemotionActive) api.onRemotionActive((d) => { if (d) setQueue(d); });
   }, []);
 
   // 채널이 바뀌거나 **채널 설정이 저장되면**(presetRev) 물려 있는 사전을 다시 읽는다.
@@ -158,6 +162,32 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
 
   // 📁 출력 폴더 — 작업이 끝날 때 탐색기를 **자동으로 열지 않는다**(큐를 돌리면 창이 쌓인다 — v0.2.99
   //   에서 롱폼이 이미 폐지한 것). 대신 필요할 때 이 버튼으로 연다.
+  // 강 전환 — 표에 보이는 것과 개별 버튼(🎤/🖼/🎧)의 대상이 함께 바뀐다.
+  async function selectLec(id) {
+    if (busy || imgBusy || pvBusy || allBusy) return;
+    try {
+      const r = await api.remotionSelectTsv({ id });
+      if (r) { setQueue(r); stopPlay(); setPicked([]); setPreviews({}); lastPickRef.current = -1; }
+    } catch (e) { setStatus && setStatus('전환 실패: ' + e.message); }
+  }
+
+  // ▶ 열어 둔 **모든 강**을 순서대로 — 전 강 음성 → 전 강 그림(2패스).
+  async function runAll() {
+    if (!items.length) return;
+    if (!dict && !window.confirm(
+      '발음사전이 물려 있지 않습니다.' + String.fromCharCode(10, 10)
+      + '이대로 만들면 나중에 사전을 지정할 때 전체가 다시 합성됩니다.' + String.fromCharCode(10, 10)
+      + '사전 없이 진행할까요?')) return;
+    setAllBusy(true); setResult(null); setImgResult(null); stopPlay();
+    try {
+      const r = await api.remotionRunAll({ presetName });
+      if (r && r.dto) setQueue(r.dto);
+      setStatus && setStatus(`▶ 전체 만들기 — 🎤 ${r.tts} · 🖼 ${r.img}` + (r.fail.length ? ` · ✗ ${r.fail.length}` : ''));
+    } catch (e) {
+      setStatus && setStatus('전체 만들기 실패: ' + e.message);
+    } finally { setAllBusy(false); setProg(null); }
+  }
+
   async function openOut() {
     try { await api.remotionOpenOut({ presetName }); }
     catch (e) { setStatus && setStatus('폴더 열기 실패: ' + e.message); }
@@ -166,7 +196,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   async function openImageTsv() {
     try {
       const r = await api.remotionOpenImageTsv({ presetName });
-      if (r) { setImgTsv(r); setImgResult(null); setTab('img'); }
+      if (r) { setQueue(r); setImgResult(null); setTab('img'); }
     } catch (e) { setStatus && setStatus('그림목록 열기 실패: ' + e.message); }
   }
 
@@ -192,7 +222,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     try {
       await refreshDict();
       const r = await api.remotionOpenTsv({ presetName });
-      if (r) { setTsv(r); setResult(null); setProg(null); stopPlay(); setPicked([]); setPreviews({}); lastPickRef.current = -1; }
+      if (r) { setQueue(r); setResult(null); setImgResult(null); setProg(null); stopPlay(); setPicked([]); setPreviews({}); lastPickRef.current = -1; setTab('tts'); }
     } catch (e) { setStatus && setStatus('TSV 열기 실패: ' + e.message); }
   }
 
@@ -215,6 +245,10 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     } finally { setBusy(false); setProg(null); }
   }
 
+  // 🔑 아래 렌더 코드는 예전과 똑같이 `tsv`·`imgTsv` 를 본다 — **활성 강**에서 파생시켜 그대로 쓴다.
+  const items = (queue && queue.items) || [];
+  const tsv = (queue && queue.active) || null;
+  const imgTsv = (tsv && tsv.img) || null;
   const rows = (tsv && tsv.rows) || [];
   const errs = (tsv && tsv.errors) || [];
   const chars = rows.reduce((a, r) => a + r.text.replace(/\s/g, '').length, 0);
@@ -228,11 +262,16 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   return (
     <div style={{ padding: '10px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={openTsv} disabled={busy || pvBusy}>📄 TSV 열기</button>
-        <button onClick={run} disabled={busy || pvBusy || !rows.length || errs.length > 0}>
+        <button onClick={openTsv} disabled={busy || pvBusy || imgBusy || allBusy}>📄 TSV 열기</button>
+        <button onClick={runAll} disabled={busy || pvBusy || imgBusy || allBusy || !items.length}
+          title="열어 둔 모든 강을 순서대로 만듭니다 — 전 강 음성 → 전 강 그림">
+          {allBusy ? '전체 만드는 중…' : `▶ 전체 만들기${items.length > 1 ? ' (' + items.length + '강)' : ''}`}
+        </button>
+        <button onClick={run} disabled={busy || pvBusy || allBusy || !rows.length || errs.length > 0}
+          title="지금 고른 강의 음성만 만듭니다">
           {busy ? '만드는 중…' : '🎤 mp3 만들기'}
         </button>
-        <button onClick={previewPicked} disabled={busy || pvBusy || !picked.length}
+        <button onClick={previewPicked} disabled={busy || pvBusy || allBusy || !picked.length}
           title="고른 문장만 먼저 만들어 들어봅니다. 여기서 만든 음성은 전체 만들기에서 그대로 재활용됩니다(다시 합성하지 않습니다).">
           {pvBusy ? '만드는 중…' : `🎧 미리듣기${picked.length ? ' (' + picked.length + ')' : ''}`}
         </button>
@@ -243,9 +282,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         <button className="ghost" onClick={openOut} disabled={busy}
           title="만들어진 mp3 가 있는 폴더를 엽니다">📁 mp3 폴더</button>
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border,#ddd)', margin: '0 2px' }} />
-        <button onClick={openImageTsv} disabled={busy || imgBusy}
+        <button onClick={openImageTsv} disabled={busy || imgBusy || allBusy}
           title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다">🖼 그림목록</button>
-        <button onClick={runImages} disabled={busy || imgBusy || !imgRows.length || imgErrs.length > 0}
+        <button onClick={runImages} disabled={busy || imgBusy || allBusy || !imgRows.length || imgErrs.length > 0}
           title="로컬 ComfyUI 로 그림을 만듭니다. 이미 있는 파일은 건너뜁니다.">
           {imgBusy ? '만드는 중…' : `🖼 그림 만들기${imgRows.length ? ' (' + imgRows.length + ')' : ''}`}
         </button>
@@ -259,6 +298,21 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         {tsv && <span className="meta">{tsv.name} · {rows.length}행 · {chars.toLocaleString()}자</span>}
       </div>
 
+      {/* 🎬 강 목록 — 여러 개를 열면 여기서 고른다. 표·개별 버튼의 대상이 함께 바뀐다. */}
+      {items.length > 1 && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="meta">{items.length}강</span>
+          {items.map((it) => (
+            <button key={it.id} className={it.id === queue.activeId ? '' : 'ghost'}
+              onClick={() => selectLec(it.id)} disabled={busy || imgBusy || pvBusy || allBusy}
+              title={it.ttsName + (it.imgName ? String.fromCharCode(10) + it.imgName : String.fromCharCode(10) + '(그림목록 짝 없음)')}>
+              {it.num || it.ttsName} · 🎤{it.ttsCount}{it.imgCount ? ' · 🖼' + it.imgCount : ' · 🖼—'}
+              {(it.ttsErrors + it.imgErrors) > 0 ? ' ⚠' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6,
         border: '1px solid ' + (dict ? 'var(--border,#ddd)' : '#e8a33d'),
         background: dict ? 'transparent' : '#fdf6e8' }}>
@@ -271,6 +325,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       <div className="meta" style={{ marginTop: 6 }}>
         목소리·배속·시드·발음사전은 <b>채널 설정</b>을 따릅니다(헤더 ⚙). 출력은 <b>MP3 출력 폴더 / {tsv ? tsv.name.replace(/\.(tsv|txt)$/i, '') : '<TSV 이름>'}</b> 입니다.
         <br />⚠ 이 넷 중 하나라도 바꾸면 <b>전량 다시 만들어집니다</b>. 처음에 정하고 그 뒤로 건드리지 마세요.
+        <br />📄 <b>TSV 를 여러 개 골라 한 번에</b> 열 수 있습니다 — 같은 번호의 <b>그림목록</b>이 자동으로 붙고(<code>003_….tsv</code> ↔ <code>003_그림목록.tsv</code>),
+        <b>▶ 전체 만들기</b>가 전 강 음성 → 전 강 그림 순으로 돌립니다.
         <br />🎧 표에서 문장을 골라 <b>미리듣기</b>로 먼저 들어보세요(Shift 클릭 = 범위 선택 · 한 번에 12개까지).
         여기서 만든 음성은 전체 만들기에서 <b>그대로 재활용</b>되므로 헛수고가 아니고, 들은 소리가 결과물에 그대로 들어갑니다.
       </div>

@@ -66,7 +66,9 @@ const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr:
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
   // 🎬 remotion — TSV 기반이라 대본 큐를 쓰지 않지만, activateMode 가 모드마다 큐를 찾으므로 자리를 둔다.
-  modes: { longform: { items: [], activeId: null }, remotion: { items: [], activeId: null }, book: { items: [], activeId: null } } };
+  modes: { longform: { items: [], activeId: null }, remotion: { items: [], activeId: null }, book: { items: [], activeId: null } },
+  // 🎬 리모션 — 강 여러 개를 담는 큐. S.tsv/S.imgTsv 는 그중 **활성 강**을 가리킨다.
+  tsvList: [], tsvActiveId: null };
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -1447,6 +1449,52 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
 //   목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 한 번 정하면 바꾸지 말 것(캐시 키라 전량 재합성).
 const TSV = require('./core/tsv-tts');
 const TSVIMG = require('./core/tsv-images');
+// ── 🎬 리모션 작업 큐 — **강 여러 개를 한 번에** ─────────────────────────
+//   로이(2026-08-27): "tsv 불러와 작업하는것이 1개만 할수 있네, 여러개도 할수 있도록" +
+//   "대본TSV파일을 불러오면 그와 관련된 이미지 파일도 같이 불러와서 순차적으로 한번에".
+//   🔑 **음성 TSV 하나 = 강 하나**이고, 같은 번호의 그림목록을 **자동으로 붙인다**.
+//     `003_돈이_만들어지는_구조.tsv` ↔ `003_그림목록.tsv` — 앞 숫자가 유일한 열쇠다.
+//   ⚠ `S.tsv`·`S.imgTsv` 는 **활성 강**을 가리킨다 — 기존 코드(미리듣기·만들기·폴더열기)가
+//     그대로 동작하도록 남겨 둔 창구다. 큐를 건드릴 땐 반드시 `_remotionActivate` 로 맞춘다.
+function _lecNum(p) {
+  const m = path.basename(String(p || '')).match(/^(\d+)/);
+  return m ? m[1] : '';
+}
+// 음성 TSV 에 짝이 되는 그림목록을 찾는다. 없으면 null(그 강은 음성만 만든다).
+function _pairImageTsv(ttsPath, imgFolder) {
+  const num = _lecNum(ttsPath);
+  if (!num || !imgFolder) return null;
+  let files = [];
+  try { files = fs.readdirSync(imgFolder).filter((f) => /\.(tsv|txt)$/i.test(f)); } catch { return null; }
+  const hit = files.find((f) => _lecNum(f) === num);
+  return hit ? path.join(imgFolder, hit) : null;
+}
+// 활성 강 전환 — S.tsv/S.imgTsv 를 그 강으로 맞춘다(기존 경로가 이 둘만 본다).
+function _remotionActivate(id) {
+  const it = (S.tsvList || []).find((x) => x.id === id);
+  if (!it) return null;
+  S.tsvActiveId = id;
+  S.tsv = it.ttsPath ? { path: it.ttsPath, rows: it.ttsRows } : null;
+  S.imgTsv = it.imgPath ? { path: it.imgPath, rows: it.imgRows } : null;
+  return it;
+}
+// 화면에 보낼 큐 모양(행 배열은 활성 강만 실어 보낸다 — 820행 × N 을 매번 나르지 않는다).
+function _remotionDto() {
+  const act = (S.tsvList || []).find((x) => x.id === S.tsvActiveId) || null;
+  return {
+    items: (S.tsvList || []).map((x) => ({
+      id: x.id, num: x.num, ttsName: x.ttsName, imgName: x.imgName,
+      ttsCount: x.ttsRows.length, imgCount: x.imgRows.length,
+      ttsErrors: x.ttsErrors.length, imgErrors: x.imgErrors.length,
+    })),
+    activeId: S.tsvActiveId,
+    active: act ? {
+      id: act.id, name: act.ttsName, path: act.ttsPath, rows: act.ttsRows, errors: act.ttsErrors,
+      img: act.imgPath ? { name: act.imgName, path: act.imgPath, rows: act.imgRows, errors: act.imgErrors } : null,
+    } : null,
+  };
+}
+
 // 🎧 리모션 — 채널에서 목소리·배속·발음사전을 읽는다.
 //   🔑 **전체 만들기와 미리듣기가 반드시 같은 값을 쓰게** 한 곳에 모은다. 여기가 갈리면
 //     미리듣기로 들은 소리와 실제 결과가 달라져 미리듣기의 존재 이유가 사라진다.
@@ -1475,22 +1523,60 @@ ipcMain.handle('remotion-open-tsv', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
   const defPath = (preset && preset.scriptFolder) || undefined;
   const r = await dialog.showOpenDialog(win, {
-    title: 'TSV 열기 — 한 줄에 「파일명<탭>문장」',
+    title: 'TSV 열기 — 여러 개 고를 수 있습니다 (한 줄에 「파일명<탭>문장」)',
     defaultPath: defPath,
-    properties: ['openFile'],
+    properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
   });
   if (r.canceled || !r.filePaths.length) return null;
-  const file = r.filePaths[0];
-  const parsed = TSV.parseTsv(fs.readFileSync(file, 'utf8'));
-  S.tsv = { path: file, rows: parsed.rows };
-  log(`📄 TSV 열기 — ${path.basename(file)} · ${parsed.rows.length}행`
-    + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
-  for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
-  return { path: file, name: path.basename(file), rows: parsed.rows, errors: parsed.errors };
+  // 파일 선택 순서는 OS 마다 제각각이다 → **파일명 자연정렬**로 큐 순서를 예측 가능하게(대본 열기와 같은 정책).
+  const files = [...r.filePaths].sort((a, b) =>
+    path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
+  const imgFolder = (preset && preset.imgTsvFolder) || '';
+  S.tsvList = [];
+  let paired = 0;
+  for (const file of files) {
+    let parsed;
+    try { parsed = TSV.parseTsv(fs.readFileSync(file, 'utf8')); }
+    catch (e) { log(`⚠ TSV 를 읽지 못했습니다 — ${path.basename(file)} (${e.message})`); continue; }
+    const it = {
+      id: 'lec_' + S.tsvList.length + '_' + _lecNum(file),
+      num: _lecNum(file),
+      ttsPath: file, ttsName: path.basename(file), ttsRows: parsed.rows, ttsErrors: parsed.errors,
+      imgPath: null, imgName: '', imgRows: [], imgErrors: [],
+    };
+    // 🔑 짝 그림목록 자동 연결 — 채널의 「그림목록 폴더」에서 같은 번호를 찾는다.
+    const ip = _pairImageTsv(file, imgFolder);
+    if (ip) {
+      try {
+        const ipar = TSVIMG.parseImageTsv(fs.readFileSync(ip, 'utf8'));
+        it.imgPath = ip; it.imgName = path.basename(ip); it.imgRows = ipar.rows; it.imgErrors = ipar.errors;
+        paired++;
+      } catch (e) { log(`⚠ 그림목록을 읽지 못했습니다 — ${path.basename(ip)} (${e.message})`); }
+    }
+    S.tsvList.push(it);
+    log(`📄 ${it.ttsName} · 🎤 ${it.ttsRows.length}행`
+      + (it.imgPath ? ` · 🖼 ${it.imgName} ${it.imgRows.length}장` : ' · 🖼 (짝 없음)')
+      + (it.ttsErrors.length || it.imgErrors.length ? ` · ⚠ 오류 ${it.ttsErrors.length + it.imgErrors.length}건` : ''));
+    for (const e of it.ttsErrors.slice(0, 5)) log(`   음성 ${e.line}행: ${e.message}`);
+    for (const e of it.imgErrors.slice(0, 5)) log(`   그림 ${e.line}행: ${e.message}`);
+  }
+  if (!S.tsvList.length) throw new Error('읽을 수 있는 TSV 가 없습니다.');
+  _remotionActivate(S.tsvList[0].id);
+  const tot = S.tsvList.reduce((a, x) => a + x.ttsRows.length, 0);
+  const timg = S.tsvList.reduce((a, x) => a + x.imgRows.length, 0);
+  log(`📂 ${S.tsvList.length}강 열림 — 🎤 ${tot}행 · 🖼 ${timg}장 (그림 짝 ${paired}/${S.tsvList.length})`);
+  if (!imgFolder) log('   ⚠ 채널에 「그림목록 폴더」가 없어 그림을 자동으로 붙이지 못했습니다 (채널 편집 → 📁 폴더)');
+  return _remotionDto();
 });
 
-ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리모션 TTS', async () => {
+// 활성 강 전환 — 표에 무엇을 보일지, 개별 버튼이 무엇을 대상으로 할지 정한다.
+ipcMain.handle('remotion-select-tsv', (_e, args = {}) => {
+  if (!_remotionActivate(args.id)) throw new Error('그 강을 찾지 못했습니다 — TSV 를 다시 여세요.');
+  return _remotionDto();
+});
+
+async function _runRemotionTtsCore(args = {}) {
   if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
   const { preset, voice, speed, dict, dictPath, seed } = _remotionVoiceCfg(args.presetName, args);
   const outRoot = preset.outLong || preset.outputFolder;
@@ -1535,7 +1621,8 @@ ipcMain.handle('remotion-run-tts', async (_e, args = {}) => enqueueTtsJob('리�
     log(`❌ 리모션 TTS 실패 — ${e.message}`);
     throw e;
   }
-}));
+}
+ipcMain.handle('remotion-run-tts', (_e, args = {}) => enqueueTtsJob('리모션 TTS', () => _runRemotionTtsCore(args)));
 
 // ── 🖼 그림목록 TSV → 로컬 ComfyUI 일괄 생성 ────────────────────────
 //   강의 영상(D:\비즈니스PT)처럼 장면마다 그림이 필요한 작업용. 음성 TSV 와 짝을 이룬다.
@@ -1558,16 +1645,23 @@ ipcMain.handle('remotion-open-image-tsv', async (_e, args = {}) => {
   const file = r.filePaths[0];
   const parsed = TSVIMG.parseImageTsv(fs.readFileSync(file, 'utf8'));
   S.imgTsv = { path: file, rows: parsed.rows };
+  // 큐가 있으면 **활성 강에 붙인다** — 짝을 못 찾았거나 다른 목록으로 바꾸고 싶을 때의 수동 보정.
+  const act = (S.tsvList || []).find((x) => x.id === S.tsvActiveId);
+  if (act) {
+    act.imgPath = file; act.imgName = path.basename(file);
+    act.imgRows = parsed.rows; act.imgErrors = parsed.errors;
+  }
   log(`🖼 그림목록 열기 — ${path.basename(file)} · ${parsed.rows.length}장`
     + (parsed.headerSkipped ? ' (헤더 1줄 건너뜀)' : '')
+    + (act ? ` → ${act.ttsName} 에 연결` : '')
     + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
   for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
-  return { path: file, name: path.basename(file), rows: parsed.rows, errors: parsed.errors, headerSkipped: parsed.headerSkipped };
+  return _remotionDto();
 });
 
 // ⚠ 로컬 ComfyUI 는 TTS·롱폼 이미지와 **같은 3060** 을 쓴다 → `enqueueImageJob` 이 레인을 잡아
 //   동시에 돌지 않게 한다(엔진 'comfy' 를 넘겨야 로컬일 때 localGpu 레인을 잡는다).
-ipcMain.handle('remotion-run-images', (_e, args = {}) => enqueueImageJob('리모션 그림 생성', async () => {
+async function _runRemotionImagesCore(args = {}) {
   if (!S.imgTsv || !S.imgTsv.rows.length) throw new Error('먼저 그림목록 TSV 를 여세요.');
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
   if (!preset) throw new Error('채널을 먼저 고르세요.');
@@ -1614,7 +1708,48 @@ ipcMain.handle('remotion-run-images', (_e, args = {}) => enqueueImageJob('리모
     log(`❌ 리모션 그림 실패 — ${e.message}`);
     throw e;
   }
-}, 'comfy'));
+}
+ipcMain.handle('remotion-run-images', (_e, args = {}) =>
+  enqueueImageJob('리모션 그림 생성', () => _runRemotionImagesCore(args), 'comfy'));
+
+// ▶ **전체 만들기** — 열어 둔 모든 강을 순서대로. 「전 강 음성 → 전 강 그림」 2패스다.
+//   🔑 강마다 음성·그림을 번갈면 **GPU 에서 모델이 그만큼 스왑**된다(OmniVoice ↔ ComfyUI).
+//     롱폼 큐가 「전 항목 이미지 → 전 항목 비디오」로 가는 것과 같은 이유다(v0.1.68).
+//   ⚠ 여기서 레인을 잡지 않는다 — 각 단계가 스스로 enqueueTtsJob/enqueueImageJob 을 탄다.
+//     여기서 잡으면 자기 자신을 기다려 **교착**된다(enqueueImageJob 과 같은 규칙).
+ipcMain.handle('remotion-run-all', async (_e, args = {}) => {
+  if (!S.tsvList || !S.tsvList.length) throw new Error('먼저 TSV 를 여세요.');
+  const keep = S.tsvActiveId;
+  S.abort = false;
+  const withTts = S.tsvList.filter((x) => x.ttsRows.length);
+  const withImg = S.tsvList.filter((x) => x.imgRows.length);
+  log(`▶ 전체 만들기 — ${S.tsvList.length}강 · 🎤 ${withTts.length}개 · 🖼 ${withImg.length}개`);
+  const done = { tts: 0, img: 0, fail: [] };
+  try {
+    for (const it of withTts) {
+      if (S.abort) { log('⏹ 중단 — 남은 음성은 건너뜁니다'); break; }
+      _remotionActivate(it.id);
+      try { win.webContents.send('remotion-active', _remotionDto()); } catch {}
+      log(`🎤 [${done.tts + 1}/${withTts.length}] ${it.ttsName}`);
+      try { await enqueueTtsJob('리모션 TTS', () => _runRemotionTtsCore(args)); done.tts++; }
+      catch (e) { done.fail.push(it.ttsName + ' (음성) — ' + e.message); }
+    }
+    for (const it of withImg) {
+      if (S.abort) { log('⏹ 중단 — 남은 그림은 건너뜁니다'); break; }
+      _remotionActivate(it.id);
+      try { win.webContents.send('remotion-active', _remotionDto()); } catch {}
+      log(`🖼 [${done.img + 1}/${withImg.length}] ${it.imgName}`);
+      try { await enqueueImageJob('리모션 그림 생성', () => _runRemotionImagesCore(args), 'comfy'); done.img++; }
+      catch (e) { done.fail.push(it.imgName + ' (그림) — ' + e.message); }
+    }
+  } finally {
+    if (keep) _remotionActivate(keep);
+  }
+  log(`✅ 전체 만들기 끝 — 🎤 ${done.tts}/${withTts.length} · 🖼 ${done.img}/${withImg.length}`
+    + (done.fail.length ? ` · ✗ 실패 ${done.fail.length}` : ''));
+  for (const f of done.fail) log(`   ✗ ${f}`);
+  return { ok: true, ...done, dto: _remotionDto() };
+});
 
 // 📁 출력 폴더 열기 — 만들기가 끝날 때 자동으로 열지 않으므로(창이 쌓인다) 버튼으로 연다.
 //   TSV 를 열었으면 그 TSV 폴더로, 아직 안 만들어졌으면 MP3 출력 뿌리로 연다.
