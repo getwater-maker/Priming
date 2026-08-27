@@ -301,7 +301,7 @@ export default function App() {
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(무료 브라우저 · 한도면 서로 이어받음)|'gemini'|'comfy[::경로]'
+  const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -1830,7 +1830,7 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
-    // 🆓 무료 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
+    // 🌐 브라우저 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
     try { setImgRot(await api.getImageRotation()); } catch (_) {}
     try { setLora(await api.getLoraCollect()); } catch (_) {}
     try { setUpCfg(await api.getUpscaleConfig()); } catch (_) {}
@@ -2060,16 +2060,16 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
-            <select title="이미지 생성 방식 — Flow·Genspark(무료 브라우저, 한도면 서로 이어받음) / 유료(나노바나나2) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
+            <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나2(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <option value="flow">Flow (무료)</option>
-              <option value="genspark">Genspark (무료)</option>
+              <option value="flow">Flow (구독)</option>
+              <option value="genspark">Genspark (구독)</option>
               <option value="gemini">유료(나노바나나2)</option>
               <ComfyEngineOptions cfg={comfyCfg} />
             </select>
             {/* ⚙ 설정 = 버튼 1개(2026-08-26 통합). 지금 고른 엔진에 맞는 탭으로 연다 —
-                comfy 면 ComfyUI 탭, Flow·Genspark 면 무료 이미지 탭, 나노바나나면 API 키 탭. */}
+                comfy 면 ComfyUI 탭, Flow·Genspark 면 브라우저 이미지 탭, 나노바나나면 API 키 탭. */}
             <button className="ghost" title="이미지 설정 — 지금 고른 엔진에 맞는 탭으로 엽니다 (ComfyUI 주소·워크플로 / Flow 모델·LoRA 수집 / API 키)"
               onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : (isComfyEngine(videoEngine) ? 'vid' : (imgEngine === 'gemini' ? 'keys' : 'free')))}>⚙</button>
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
@@ -2116,7 +2116,7 @@ export default function App() {
       {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (출판 모드 제외) */}
       {!noProduction && <div id="capbar">
         {gsCool && gsCool.until > 0 && (
-          <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. 이 시각 이후 자동으로 다시 시도합니다. 그 전까지는 순환(무료)이 Genspark 에 접속하지 않고 바로 Flow 로 이미지를 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
+          <span title={`Genspark 이미지가 구독 한도에 도달했습니다. 그 전까지는 Genspark 에 접속하지 않고 바로 Flow 로 만들고, 이 시각이 지나면 만들던 대본 도중이라도 자동으로 Genspark 로 되돌아가 남은 이미지를 이어서 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
             style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
             🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
           </span>
@@ -2312,8 +2312,8 @@ export default function App() {
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
                       <select value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <option value="flow">Flow (무료)</option>
-                        <option value="genspark">Genspark (무료)</option>
+                        <option value="flow">Flow (구독)</option>
+                        <option value="genspark">Genspark (구독)</option>
                         <option value="gemini">유료(나노바나나2)</option>
                         <ComfyEngineOptions cfg={comfyCfg} />
                       </select></div>
@@ -2526,7 +2526,7 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🆓 무료 이미지'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -2590,13 +2590,13 @@ export default function App() {
               <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</div>
             </div>)}
 
-            {/* 🆓 무료 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
+            {/* 🌐 브라우저 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
                 2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
                 분리됐으므로 순서/체크는 필요 없다 — 고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다. */}
             {settingsTab === 'free' && (<div>
               <div className="meta" style={{ marginBottom: 10 }}>
-                브라우저로 <b>무료</b> 생성하는 <b>Flow · Genspark</b> 설정입니다. 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
-                고른 쪽이 <b>한도</b>(Genspark 휴식/한도 메시지 · Flow 계정 한도)에 걸리면 <b>남은 이미지를 다른 쪽이 이어서</b> 만듭니다.
+                브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
+                고른 쪽이 <b>한도</b>(Genspark 휴식/한도 메시지 · Flow 계정 한도)에 걸리면 <b>남은 이미지를 다른 쪽이 이어서</b> 만들고, <b>한도 재설정 시각이 지나면 같은 대본 도중이라도 원래 엔진으로 되돌아가</b> 이어서 만듭니다.
               </div>
               <div className="frow" style={{ alignItems: 'center' }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>

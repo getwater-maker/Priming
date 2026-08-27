@@ -105,14 +105,19 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
     ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
        '이미지 드롭다운은 로컬·클라우드 둘 다 유지');
-    // ── 🆓 무료 이미지 — 옛 「⚙ 이미지 순환」 모달을 없애고 드롭다운·설정탭으로 분리 (2026-08-26 로이 요청) ──
+    // ── 🌐 브라우저 이미지 — 옛 「⚙ 이미지 순환」 모달을 없애고 드롭다운·설정탭으로 분리 (2026-08-26 로이 요청) ──
     //   ① 드롭다운은 Flow·Genspark 로 분리(고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다)
     //   ② 이미지 줄 ⚙ 버튼은 1개(옛 ⚙순환 + ⚙ComfyUI 두 개를 통합)
-    //   ③ LoRA 수집은 ⚙ 설정 → 🆓 무료 이미지 탭으로 이동
+    //   ③ LoRA 수집은 ⚙ 설정 → 🌐 브라우저 이미지 탭으로 이동
     const imgPairs = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
     ok(imgPairs.some((o) => o.startsWith('flow|')), '이미지 드롭다운에 Flow 항목: ' + (imgPairs.find((o) => o.startsWith('flow|')) || ''));
     ok(imgPairs.some((o) => o.startsWith('genspark|')), '이미지 드롭다운에 Genspark 항목: ' + (imgPairs.find((o) => o.startsWith('genspark|')) || ''));
     ok(!imgPairs.some((o) => o.startsWith('rotate|')), '옛 「순환(무료)」 항목 없음');
+    // 🔴 Genspark·Flow 는 **무료가 아니다** — 각 서비스 구독 요금제(Genspark 구독 / Flow 는 Google AI Pro·Ultra).
+    //   라벨이 「무료」면 사용자가 과금 구조를 오해한다(2026-08-27 로이 지적 + v0.3.36 실측: 구독 없는 Flow 계정은 소개 페이지만 열림).
+    ok(!imgPairs.some((o) => /무료/.test(o)), '이미지 드롭다운에 「무료」 표기가 없다: ' + imgPairs.join(' / '));
+    ok(imgPairs.some((o) => o.startsWith('genspark|') && /구독/.test(o)), 'Genspark 항목이 「구독」으로 표기된다');
+    ok(imgPairs.some((o) => o.startsWith('flow|') && /구독/.test(o)), 'Flow 항목도 「구독」으로 표기된다(Google AI 구독 필요)');
     const row = await win.evaluate(() => {
       const sel = document.querySelector('.hgroup select[title^="이미지 생성 방식"]');
       const grp = sel && sel.closest('.hgroup');
@@ -125,8 +130,8 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     await win.click('.hgroup select[title^="이미지 생성 방식"] ~ button:has-text("⚙")').catch(() => {});
     await win.waitForSelector('.modal-card', { timeout: 10000 });
-    ok(await win.locator('.modal-card button:has-text("🆓 무료 이미지")').count() === 1, '설정에 「🆓 무료 이미지」 탭이 있다');
-    await win.click('.modal-card button:has-text("🆓 무료 이미지")');
+    ok(await win.locator('.modal-card button:has-text("🌐 브라우저 이미지")').count() === 1, '설정에 「🌐 브라우저 이미지」 탭이 있다');
+    await win.click('.modal-card button:has-text("🌐 브라우저 이미지")');
     await win.waitForTimeout(250);
     const free = await win.evaluate(() => {
       const c = document.querySelector('.modal-card');
@@ -136,6 +141,8 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(free.text.includes('트리거'), 'LoRA 트리거 입력이 있다');
     ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
     ok(free.text.includes('이어서'), '한도 시 다른 쪽이 이어받는다는 안내가 있다');
+    ok(free.text.includes('구독') && !free.text.includes('무료'), '탭 안내가 「구독 요금제」로 정정됐다(무료 아님)');
+    ok(free.text.includes('되돌아가'), '한도 재설정 후 원래 엔진으로 되돌아간다는 안내가 있다');
     await win.click('.modal-card button:has-text("닫기")');
 
     // 옛 순환 모달·정규화가 남아 있지 않은지 (원문 대조)

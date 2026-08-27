@@ -2564,6 +2564,30 @@ async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
+// 🔁 이미지 순환 엔진의 지금 상태 — 「지금 쓸 수 있나 · 아니면 언제 풀리나」.
+//   { ok:true }            = 지금 쓸 수 있다
+//   { ok:false, until:ts } = 그 시각(한도 재설정)이 지나면 다시 쓸 수 있다  ← 라운드 재시도 대상
+//   { ok:false, until:0 }  = 시간이 지나도 안 풀린다(오늘 일일 캡 소진 등) → 다시 시도해도 헛수고
+//   ⚠ 조회에 실패하면 { ok:true }(fail-open) — 판정 때문에 생성이 막히면 본말전도다.
+function imgEngineReady(engineId) {
+  try {
+    if (engineId === 'genspark') {
+      const A = require('./core/genspark-accounts');
+      if (A.activeAccounts().length) return { ok: true, until: 0 };
+      const ts = A.list().accounts.map((a) => A.cooldownUntil(a.id)).filter((t) => t > 0);
+      return { ok: false, until: ts.length ? Math.min(...ts) : 0 };
+    }
+    if (engineId === 'flow') {
+      const A = require('./core/flow-accounts');
+      const accs = A.list().accounts;
+      if (accs.some((a) => a.available)) return { ok: true, until: 0 };
+      const ts = accs.map((a) => a.coolUntil || 0).filter((t) => t > 0);
+      return { ok: false, until: ts.length ? Math.min(...ts) : 0 };
+    }
+  } catch (e) { /* 조회 실패 = 막지 않는다 */ }
+  return { ok: true, until: 0 };
+}
+
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
@@ -2575,59 +2599,90 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
   if (!need().length) { logger(noTargetMsg(onlyNums)); return; }
   logger(`🔄 이미지 순환: ${order.join(' → ')}`);
-  for (const engineId of order) {
+
+  // 🔁 **라운드 반복** — 한 바퀴(order 전부)를 돈 뒤에도 남은 이미지가 있으면, 그 사이에 **한도 재설정 시각이
+  //   지나 다시 쓸 수 있게 된 엔진**으로 돌아가 이어서 만든다. (2026-08-27 로이: "제한시간이 지난 다음에는
+  //   다시 젠스파크로 돌아가 이미지 생성 … 같은 대본에서라도 진행되면 좋겠어")
+  //   예) Genspark 한도 → Flow 가 30장을 만드는 20분 사이에 Genspark 쿨다운이 풀림 → 다음 라운드에 Genspark 복귀.
+  //   🔑 후보(cooledOut)는 **각 엔진을 시도한 직후** 기록한다 — 라운드가 끝난 뒤에 한꺼번에 재면 그 사이 이미
+  //      풀린 엔진이 후보에서 빠져(ok=true) 영영 복귀하지 못한다.
+  //   ⛔ **기다리지는 않는다** — 쿨다운이 5시간일 수 있고, 그동안 TTS/GPU 레인을 쥔 채 앱이 멎는 쪽이 더 나쁘다.
+  //      아직 안 풀렸으면 미생성으로 두고 「언제 이후에 다시 누르면 된다」를 로그로 알린다.
+  const MAX_ROUNDS = 8;        // 무한 루프 방지 상한(보통은 진전 0 또는 「아직 안 풀림」으로 그 전에 끝난다)
+  const cooledOut = new Set(); // 한도/쿨다운으로 못 쓴 채 남긴 엔진 = 다음 라운드 재시도 후보
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
-    const remaining = need();
-    if (!remaining.length) break;
-    const nums = remaining.map((g) => g.num);
-    logger(`🔄 [${engineId}] 남은 ${remaining.length}장 생성 시도 (그룹 ${nums.join(',')})`);
-    try {
-      if (engineId === 'genspark') {
-        // Genspark 멀티계정: 한 계정이 한도면 다음 계정으로, 계정 모두 소진 시 다음 엔진으로.
-        //   한도 감지 시 메시지의 '재설정 시각'을 기억(쿨다운) → 그 전엔 접속 시도 없이 바로 다음 엔진으로.
-        const GsAcc = require('./core/genspark-accounts');
-        const accounts = GsAcc.activeAccounts();
-        if (!accounts.length) {
-          const cools = GsAcc.list().accounts.map((a) => ({ a, t: GsAcc.cooldownUntil(a.id) })).filter((x) => x.t);
-          const till = cools.length ? ` (한도 재설정 ${fmtClock(Math.min(...cools.map((x) => x.t)))} 이후 재시도)` : '';
-          logger(`⏭ Genspark 건너뜀 — 모든 계정 한도/쿨다운${till} → 다음 엔진으로`);
-          continue;
-        }
-        for (const acc of accounts) {
-          if (S.abort) break;
-          const stillNeed = need(); if (!stillNeed.length) break;
-          const ns = stillNeed.map((g) => g.num);
-          logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
-          const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
-          if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
-          if (r && r.limitReached) {
-            if (r.limitReached === '__STALL__') {
-              // 한도 메시지 없이 침묵 정체 — 재설정 시각을 알 수 없으니 30분 추정 쿨다운. (실제론 과부하로 더 빨리 풀릴 수도)
-              const until = Date.now() + 30 * 60 * 1000;
-              GsAcc.setCooldown(acc.id, until);
-              logger(`⏸ Genspark 계정 "${acc.label}" 침묵 정체(무응답) — ${fmtClock(until)}까지 건너뜀(추정, 메시지 없음) → 다음 계정/엔진으로`);
-            } else {
-              const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
-              GsAcc.setCooldown(acc.id, until);
-              logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
-            }
-            continue;
-          }
-          break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
-        }
-      } else if (engineId === 'flow') {
-        await runFlowImages(project, imagesDir, logger, styleId, nums, force);
-      } else if (engineId === 'gemini') {
-        await runGeminiImages(project, imagesDir, logger, styleId, nums, force);
-      } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
-    } catch (e) {
-      logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
-      continue;
+    if (!need().length) break;
+    let targets = order;
+    if (round > 1) {
+      targets = order.filter((e) => cooledOut.has(e) && imgEngineReady(e).ok);
+      if (!targets.length) break; // 아직 아무도 안 풀렸다 → 여기서 끝(대기하지 않는다)
+      logger(`🔁 ${targets.join(',')} 한도 재설정 시각이 지났습니다 — 남은 ${need().length}장을 그 엔진으로 이어서 만듭니다 (${round}번째 순환)`);
     }
+    const before = need().length;
+    for (const engineId of targets) {
+      if (S.abort) break;
+      const remaining = need();
+      if (!remaining.length) break;
+      const nums = remaining.map((g) => g.num);
+      logger(`🔄 [${engineId}] 남은 ${remaining.length}장 생성 시도 (그룹 ${nums.join(',')})`);
+      try {
+        if (engineId === 'genspark') {
+          // Genspark 멀티계정: 한 계정이 한도면 다음 계정으로, 계정 모두 소진 시 다음 엔진으로.
+          //   한도 감지 시 메시지의 '재설정 시각'을 기억(쿨다운) → 그 전엔 접속 시도 없이 바로 다음 엔진으로.
+          const GsAcc = require('./core/genspark-accounts');
+          const accounts = GsAcc.activeAccounts();
+          if (!accounts.length) {
+            const st = imgEngineReady('genspark');
+            const till = st.until ? ` (한도 재설정 ${fmtClock(st.until)} 이후 재시도)` : '';
+            logger(`⏭ Genspark 건너뜀 — 모든 계정 한도/쿨다운${till} → 다음 엔진으로`);
+          } else {
+            for (const acc of accounts) {
+              if (S.abort) break;
+              const stillNeed = need(); if (!stillNeed.length) break;
+              const ns = stillNeed.map((g) => g.num);
+              logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
+              const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
+              if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
+              if (r && r.limitReached) {
+                if (r.limitReached === '__STALL__') {
+                  // 한도 메시지 없이 침묵 정체 — 재설정 시각을 알 수 없으니 30분 추정 쿨다운. (실제론 과부하로 더 빨리 풀릴 수도)
+                  const until = Date.now() + 30 * 60 * 1000;
+                  GsAcc.setCooldown(acc.id, until);
+                  logger(`⏸ Genspark 계정 "${acc.label}" 침묵 정체(무응답) — ${fmtClock(until)}까지 건너뜀(추정, 메시지 없음) → 다음 계정/엔진으로`);
+                } else {
+                  const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
+                  GsAcc.setCooldown(acc.id, until);
+                  logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
+                }
+                continue;
+              }
+              break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
+            }
+          }
+        } else if (engineId === 'flow') {
+          await runFlowImages(project, imagesDir, logger, styleId, nums, force);
+        } else if (engineId === 'gemini') {
+          await runGeminiImages(project, imagesDir, logger, styleId, nums, force);
+        } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
+      } catch (e) {
+        logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
+      }
+      // 🔑 시도 **직후** 판정 — 지금 한도/쿨다운이면 다음 라운드 복귀 후보로 남긴다(풀리면 되돌아온다).
+      const st = imgEngineReady(engineId);
+      if (!st.ok && st.until > 0) cooledOut.add(engineId); else cooledOut.delete(engineId);
+    }
+    if (round > 1 && need().length === before) break; // 다시 시도했는데 한 장도 못 만들었다 → 헛돌기 방지
   }
+
   const left = need();
-  if (left.length) logger(`⚠ 순환 엔진 모두 소진 — ${left.length}장 미생성 (그룹 ${left.map((g) => g.num).join(',')})`);
-  else logger('✅ 순환 이미지 생성 완료');
+  if (left.length) {
+    const waits = order.map((e) => ({ e, st: imgEngineReady(e) })).filter((x) => !x.st.ok && x.st.until > 0);
+    const till = waits.length
+      ? ` — ${fmtClock(Math.min(...waits.map((x) => x.st.until)))} 이후에 「🖼 이미지」를 다시 누르면 ${waits.map((x) => x.e).join('·')} 로 이어서 만듭니다`
+      : '';
+    logger(`⚠ 순환 엔진 모두 소진 — ${left.length}장 미생성 (그룹 ${left.map((g) => g.num).join(',')})${till}`);
+  } else logger('✅ 순환 이미지 생성 완료');
   collectForLora(project, styleId, logger); // 📦 Genspark/Flow 이미지를 LoRA 데이터셋에 적립
 }
 

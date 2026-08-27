@@ -3,7 +3,8 @@
 /**
  * image-rotation.js — 이미지 생성 "순환(rotation)" 설정 (~/.priming-maker/image-rotation.json)
  *
- * 한 엔진이 한도(Genspark 5시간/일일캡, Flow 계정 한도)에 걸리면 남은 이미지를 다음 엔진이 이어받는다.
+ * 한 엔진이 한도(Genspark 5시간/일일캡, Flow 계정 한도)에 걸리면 남은 이미지를 다음 엔진이 이어받고,
+ * 한도 재설정 시각이 지나면 **같은 대본 도중이라도** 원래 엔진으로 되돌아간다(main.js runRotatingImages 의 라운드 반복).
  *   - 순환 풀: order 순서대로 시도, enabled=false 인 엔진은 제외.
  *   - ComfyUI 는 순환에서 제외(한국사 부적합) — 별도 단독 선택용. 추후 엔진 추가 시 order/enabled 에 넣으면 합류.
  */
@@ -16,7 +17,7 @@ const STORE_DIR = path.join(os.homedir(), '.priming-maker');
 const CONFIG_PATH = path.join(STORE_DIR, 'image-rotation.json');
 
 const DEFAULTS = {
-  order: ['genspark', 'flow'],           // 순환(무료 브라우저)만. 나노바나나(유료 API)는 순환과 별개 — 시작화면에서 선택.
+  order: ['genspark', 'flow'],           // 순환(브라우저 · 각 서비스 구독제)만. 나노바나나(API 사용량 과금)는 순환과 별개 — 시작화면에서 선택.
   enabled: { genspark: true, flow: true },
   // Flow 이미지 생성 모델 — flow-engine.js run()이 opts.model 로 그대로 받아 드롭다운 선택(_selectModel).
   //   'Nano Banana 2 Lite'(2026-06-30 출시, gemini-3.1-flash-lite-image) 추가 — 더 빠르고 저렴한 경량 모델.
