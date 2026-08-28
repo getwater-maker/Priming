@@ -2620,7 +2620,16 @@ export default function App() {
                   <option value="Veo 3.1 - Quality">Veo 3.1 - Quality (고화질 · 크레딧↑)</option>
                 </select>
               </div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.</div>
+              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 첨부 방식</label>
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoAttach) || 'frame'}
+                  title="그룹 이미지를 어떻게 붙일지. 프레임 = 첫 프레임이 그 그림으로 고정(원본을 그대로 움직인다) · 애셋 = 참조로만 전달(구도·인물이 달라질 수 있다)."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoAttach: e.target.value })}>
+                  <option value="frame">프레임 — 첫 프레임 고정 (권장)</option>
+                  <option value="asset">애셋 — 참조 이미지</option>
+                </select>
+              </div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.</div>
               <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
               {lora && (
                 <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>

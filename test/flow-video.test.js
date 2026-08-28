@@ -65,15 +65,16 @@ ok(!/const defaultModel = opts\.mediaType === 'video' \? 'Veo 3\.1 - Fast'/.test
 ok(/모델 드롭다운 못 찾음/.test(ENG), '모델 드롭다운을 못 찾으면 로그로 알린다 (예전엔 조용히 실패했다)');
 
 console.log('[2] flow-engine — 시작 프레임 첨부 실패 시 그 컷을 만들지 않는가');
-ok(/const frameOk = await this\._attachFrameImage\(/.test(ENG),
-  '_attachFrameImage 의 반환값을 받는다 (예전엔 버리고 그대로 생성했다)');
+ok(/const frameOk = /.test(ENG) && ENG.indexOf(': await this._attachFrameImage(opts.frameImages[i], num)') >= 0,
+  '첨부 함수의 반환값을 받는다 (예전엔 버리고 그대로 생성했다)');
 ok(/if \(!frameOk && opts\.requireFrame !== false\)/.test(ENG),
   '첨부 실패면 그 컷을 건너뛴다 — 원본과 무관한 영상에 크레딧(10)을 쓰지 않는다');
 ok(!/\bfailCount\b/.test(ENG),
   '⛔ 미정의 식별자 failCount 가 없다 (이 저장소 단골 사고 — 기존 카운터는 consecutiveFails·_failedNums)');
 ok(/consecutiveFails\+\+;\r?\n\s*continue;/.test(ENG),
   '건너뛸 때 기존 실패 카운터(consecutiveFails)를 올린다');
-ok(/_clickTab\('프레임'\)/.test(ENG), "'프레임' 탭을 누른다 (2026-08-28 실측: 이게 있어야 [시작] 프레임 UI 가 뜬다)");
+ok(ENG.indexOf("const tabName = wantAsset ? '애셋' : '프레임';") >= 0 && /_clickTab\(tabName\)/.test(ENG),
+  "서브탭을 누른다 — 기본은 '프레임'(2026-08-28 실측: 이게 있어야 [시작] 프레임 UI 가 뜬다)");
 
 console.log('[3] flow-engine — CRLF 규약 유지');
 {
@@ -127,7 +128,7 @@ function mkProject(groups) {
 }
 
 // eng.run 을 흉내: workDir/images 에 `NN_본문.mp4` 를 만든다(= flow-engine 의 실제 저장 규약)
-function makeHarness({ groups, produce, accounts, aspect = '16:9' }) {
+function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'frame' }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flowvid-test-'));
   const mediaDir = path.join(tmp, 'media-1');
   const pr = mkProject(groups); pr.aspect = aspect;
@@ -146,7 +147,7 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9' }) {
   };
   const fakeRequire = (m) => {
     if (/flow-accounts/.test(m)) return FakeAccounts;
-    if (/image-rotation/.test(m)) return { load: () => ({ flowVideoModel: 'Veo 3.1 - Fast' }) };
+    if (/image-rotation/.test(m)) return { load: () => ({ flowVideoModel: 'Veo 3.1 - Fast', flowVideoAttach: attach }) };
     throw new Error('unexpected require: ' + m);
   };
   const eng = {
@@ -196,6 +197,7 @@ function img(dir, num) {
     eq(h.runCalls[0].model, 'Veo 3.1 - Fast', '설정의 flowVideoModel 을 그대로 넘긴다');
     eq(h.runCalls[0].ratio, '16:9', '프로젝트 비율을 넘긴다');
     eq(h.runCalls[0].frameImages.length, 2, '시작 프레임으로 그룹 이미지를 넘긴다');
+    eq(h.runCalls[0].attachMode, 'frame', "기본 첨부 방식은 'frame'(첫 프레임 고정 i2v)");
     ok(h.runCalls[0].frameImages[0].endsWith('01.png'), '첫 프레임 = G1 이미지');
     eq(h.runCalls[0].customPrompts[0], 'slow pan', '대본의 영상 프롬프트를 쓴다');
     eq(h.runCalls[0].customPrompts[1], 'drift', '영상 프롬프트가 없으면 모션 노트를 쓴다');
@@ -275,6 +277,37 @@ function img(dir, num) {
     ok(h.logs.some((l) => /영상화할/.test(l)), '이유를 로그로 남긴다');
     fs.rmSync(h.tmp, { recursive: true, force: true });
   }
+
+  // ── 6-7 설정이 'asset' 이면 그대로 엔진에 전달된다 ──
+  {
+    const tmpImg = fs.mkdtempSync(path.join(os.tmpdir(), 'flowvid-img7-'));
+    const groups = [{ num: 1, imagePath: img(tmpImg, 1), videoPrompt: 'p' }];
+    const h = makeHarness({ groups, attach: 'asset' });
+    await h.fn(h.pr, h.mediaDir, null);
+    eq(h.runCalls[0].attachMode, 'asset', "설정이 asset 이면 attachMode='asset' 으로 넘어간다");
+    ok(h.logs.some((l) => l.indexOf('애셋(참조)') >= 0), '로그에 어느 방식으로 붙였는지 남는다');
+    fs.rmSync(h.tmp, { recursive: true, force: true });
+    fs.rmSync(tmpImg, { recursive: true, force: true });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[9] 애셋 모드 — 프레임과 붙이는 자리가 다르다 (원문 대조)');
+  ok(ENG.indexOf('async _attachAssetImage(imagePath, num)') >= 0, '_attachAssetImage 가 존재한다');
+  ok(ENG.indexOf('aria-haspopup=\"dialog\"]:has-text(\"add_2\")') >= 0,
+    "프롬프트 바의 [+] 를 add_2 + aria-haspopup=dialog 로 찾는다 (상단 툴바의 'add 미디어 추가' 와 구분)");
+  ok(ENG.indexOf("_uploadAndAddToPrompt(imagePath, num, '애셋')") >= 0,
+    '업로드→「프롬프트에 추가」 는 프레임과 같은 다이얼로그를 쓴다(공통 헬퍼)');
+  ok(ENG.indexOf("const wantAsset = opts.attachMode === 'asset'") >= 0,
+    "설정 팝업에서 '애셋'/'프레임' 서브탭을 갈라 누른다");
+  ok(ENG.indexOf("? await this._attachAssetImage") >= 0, 'run() 이 방식에 따라 애셋/프레임 함수를 분기한다');
+  ok(ENG.indexOf('frameImages, attachMode, requireFrame,') >= 0,
+    '⛔ attachMode 가 _runSequentialMode 까지 전달된다 — 안 넘기면 골라도 늘 frame 으로 동작한다');
+  ok(ENG.indexOf("attachMode = 'frame',") >= 0, "run() 기본값은 'frame'(원본을 그대로 움직이는 쪽이 안전)");
+  ok(APP.indexOf('flowVideoAttach: e.target.value') >= 0, 'App.jsx 에서 첨부 방식을 저장한다');
+  ok(APP.indexOf('프레임 — 첫 프레임 고정 (권장)') >= 0, '설정에 첨부 방식 선택지가 있다');
+  ok(MAIN.indexOf('attachMode,') >= 0, 'runFlowVideos 가 attachMode 를 엔진에 넘긴다');
+  ok(MAIN.indexOf("_rot.flowVideoAttach === 'asset' ? 'asset' : 'frame'") >= 0,
+    '설정값이 asset 일 때만 asset — 그 외에는 안전한 frame 으로 떨어진다');
 
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');

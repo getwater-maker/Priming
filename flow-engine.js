@@ -319,6 +319,10 @@ class FlowAutomator {
       cooldownSeconds = 60,
       characterImages = [],
       frameImages = [],          // i2v: 영상 모드에서 각 단락의 소스 이미지를 프레임/애셋으로 첨부(길이 1:1)
+      // 소스 이미지를 붙이는 방식 — 'frame'(시작 프레임 고정 i2v · 기본) | 'asset'(참조 이미지).
+      //   ⚠ 이 값이 _runSequentialMode 까지 전달돼야 한다 — 안 넘기면 골라도 늘 frame 으로 동작한다.
+      attachMode = 'frame',
+      requireFrame = true,       // 첨부 실패 시 그 컷을 만들지 않는다(엉뚱한 영상·크레딧 낭비 방지)
       characterMap = [],
       kenburnsMode = 'uniform',
       kenburnsSpeed = 'normal',
@@ -602,7 +606,7 @@ class FlowAutomator {
       });
     } else {
       successCount = await this._runSequentialMode(paragraphs, prompts, imgDir, {
-        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution, frameImages,
+        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution, frameImages, attachMode, requireFrame,
       });
     }
 
@@ -784,7 +788,9 @@ class FlowAutomator {
 
         // i2v: 영상 모드에서 이 단락의 소스 이미지를 프레임/애셋으로 첨부 (단락마다)
         if (opts.mediaType === 'video' && opts.frameImages && opts.frameImages[i]) {
-          const frameOk = await this._attachFrameImage(opts.frameImages[i], num);
+          const frameOk = opts.attachMode === 'asset'
+            ? await this._attachAssetImage(opts.frameImages[i], num)
+            : await this._attachFrameImage(opts.frameImages[i], num);
           // 🔑 첨부에 실패했는데 그대로 만들면 **원본 이미지와 무관한 영상**이 나오고 크레딧만 나간다
           //   (Veo 3.1 Lite x1 = 10크레딧 · 2026-08-28 Flow UI 실측). i2v 로 쓰는 우리 용도에선
           //   그건 성공이 아니라 실패다 → 이 컷을 건너뛴다. 텍스트만으로 만들고 싶으면 frameImages 를 안 넘기면 된다.
@@ -1288,11 +1294,15 @@ class FlowAutomator {
     if (await this._clickTab(mediaTab)) this.log(`  [설정] ${mediaTab} 탭 ✓`);
     await this.page.waitForTimeout(400);   // 토글 후 비율/매수 재렌더 대기
 
-    // 2b) 동영상 i2v — '프레임' 서브탭 선택 (시작/종료 프레임으로 소스 이미지 첨부).
-    //     이걸 안 누르면 시작/종료 프레임 UI 가 안 떠서 텍스트만으로 생성됨(우리 이미지 무시). (2026-06-24 Flow UI 실측)
+    // 2b) 동영상에 소스 이미지를 붙이는 방식 — **서브탭이 곧 방식**이다 (2026-08-28 Flow UI 실측).
+    //   '프레임' = [시작]⇄[종료] 프레임 지정 → **첫 프레임이 그 이미지로 고정**되는 엄격한 i2v.
+    //   '애셋'  = 프롬프트 바의 [+](add_2) 로 붙이는 **참조 이미지** → Veo 가 참고하되 고정하지는 않는다.
+    //   ⚠ 어느 쪽도 안 고르면(=탭 미선택) 우리 이미지가 무시되고 **텍스트만으로** 생성된다.
     if (opts.mediaType === 'video' && (opts.frameImages && opts.frameImages.length)) {
-      if (await this._clickTab('프레임')) this.log('  [설정] 프레임(i2v) 탭 ✓');
-      else this.log('  [!] 프레임 탭 못 찾음 — 텍스트만으로 생성될 수 있음');
+      const wantAsset = opts.attachMode === 'asset';
+      const tabName = wantAsset ? '애셋' : '프레임';
+      if (await this._clickTab(tabName)) this.log(`  [설정] ${tabName}${wantAsset ? '(참조)' : '(i2v)'} 탭 ✓`);
+      else this.log(`  [!] ${tabName} 탭 못 찾음 — 텍스트만으로 생성될 수 있음`);
       await this.page.waitForTimeout(300);
     }
 
@@ -1648,6 +1658,63 @@ class FlowAutomator {
       this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
       return true;
     } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
+  }
+
+  // ─── 애셋(참조 이미지) 첨부 ───────────────────────────────────────────────
+  //   설정 팝업에서 '애셋' 탭을 고른 경우의 경로. 프레임과 **붙이는 자리가 다르다**(2026-08-28 실측):
+  //     프레임 = 프롬프트 위의 [시작] 버튼 / 애셋 = 프롬프트 바 왼쪽의 [+] 버튼
+  //     그 [+] 는 텍스트가 'add_2' 이고 aria-haspopup="dialog" 다(상단 툴바의 'add 미디어 추가' 와 다르다).
+  //   업로드하면 그 애셋이 **자동 선택**되고 「프롬프트에 추가」 버튼이 나타난다 → 그 뒤는 프레임과 같다.
+  //   ⚠ 애셋은 **참조**다 — 첫 프레임을 고정하지 않으므로 구도·인물이 원본과 달라질 수 있다.
+  //      원본 그림을 그대로 움직이게 하려면 '프레임' 을 쓴다.
+  async _attachAssetImage(imagePath, num) {
+    try {
+      if (!imagePath || !fs.existsSync(imagePath)) { this.log(`  [애셋 ${num}] 소스 이미지 없음: ${imagePath}`); return false; }
+      this.log(`  [애셋 ${num}] 참조 이미지 첨부: ${path.basename(imagePath)}`);
+
+      // 1) 프롬프트 바의 [+] (add_2 · 다이얼로그를 여는 쪽) 클릭
+      let opened = false;
+      for (const sel of ['button[aria-haspopup="dialog"]:has-text("add_2")',
+                         'button[aria-haspopup="dialog"]:has(i:text("add_2"))']) {
+        try {
+          const btn = this.page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1500 })) { await btn.click({ timeout: 2500 }); opened = true; break; }
+        } catch (_) {}
+      }
+      if (!opened) { this.log(`  [애셋 ${num}] ⚠ [+] 버튼 없음 — 동영상/애셋 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false; }
+      await this.page.waitForTimeout(900);
+
+      // 2)·3) 업로드 → 「프롬프트에 추가」 (프레임과 같은 다이얼로그를 쓴다)
+      return await this._uploadAndAddToPrompt(imagePath, num, '애셋');
+    } catch (e) { this.log(`  [애셋 ${num}] 첨부 예외: ${e.message}`); return false; }
+  }
+
+  // 미디어 선택 다이얼로그 공통 — hidden file input 에 직접 넣고(네이티브 대화상자 회피)
+  //   「프롬프트에 추가」 를 누른다. 프레임·애셋 양쪽이 같은 다이얼로그를 쓴다(2026-08-28 실측).
+  async _uploadAndAddToPrompt(imagePath, num, label) {
+    let set = false;
+    try {
+      const inputs = await this.page.$$('input[type="file"]');
+      for (const inp of inputs) {
+        const accept = (await inp.getAttribute('accept')) || '';
+        if (accept && !/image/i.test(accept)) continue;
+        await inp.setInputFiles(imagePath);
+        set = true; this.log(`  [${label} ${num}] 업로드 전송(accept="${accept}") — 처리 대기`); break;
+      }
+    } catch (e) { this.log(`  [${label} ${num}] setInputFiles 예외: ${e.message}`); }
+    if (!set) { this.log(`  [${label} ${num}] ⚠ 이미지 file input 못 찾음`); await this._dumpFrameAttachUI(); return false; }
+    await this.page.waitForTimeout(3500);
+
+    try {
+      const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false }).first();
+      await add.waitFor({ state: 'visible', timeout: 10000 });
+      await add.click({ timeout: 3000 });
+    } catch (_) {
+      this.log(`  [${label} ${num}] ⚠ '프롬프트에 추가' 못 찾음(업로드 지연?) — 덤프`); await this._dumpFrameAttachUI(); return false;
+    }
+    await this.page.waitForTimeout(1200);
+    this.log(`  [${label} ${num}] 첨부 완료 ✓`);
+    return true;
   }
 
   // i2v 첨부 UI 진단 — 버튼/입력 후보를 로그로 남겨 셀렉터 고정에 사용

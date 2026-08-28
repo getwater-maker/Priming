@@ -28,6 +28,11 @@ const DEFAULTS = {
   //   2026-08-28 Flow UI 실측 라벨 그대로다(글자가 다르면 _selectModel 이 못 찾아 기본 모델로 진행).
   //   ⚠ Veo 는 생성당 크레딧을 쓴다(Lite x1 = 10크레딧) — 화질을 올리면 크레딧도 오른다.
   flowVideoModel: 'Veo 3.1 - Lite',
+  // 소스 이미지를 붙이는 방식 (2026-08-28 Flow UI 실측 — 설정 팝업의 서브탭이 곧 방식이다):
+  //   'frame' = [시작]⇄[종료] 프레임 지정 → **첫 프레임이 그 이미지로 고정**되는 엄격한 i2v (기본).
+  //   'asset' = 프롬프트 바 [+] 로 붙이는 **참조 이미지** → Veo 가 참고만 하므로 구도·인물이 달라질 수 있다.
+  //   🔑 대본 그림을 그대로 움직이게 하려면 frame, 캐릭터·분위기만 참고시키려면 asset.
+  flowVideoAttach: 'frame',
 };
 
 function load() {
@@ -42,10 +47,11 @@ function load() {
         enabled: { ...DEFAULTS.enabled, ...(j.enabled || {}) },
         flowImageModel: j.flowImageModel || DEFAULTS.flowImageModel,
         flowVideoModel: j.flowVideoModel || DEFAULTS.flowVideoModel,
+        flowVideoAttach: (j.flowVideoAttach === 'asset') ? 'asset' : DEFAULTS.flowVideoAttach,
       };
     }
   } catch (e) { /* ignore */ }
-  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel };
+  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel, flowVideoAttach: DEFAULTS.flowVideoAttach };
 }
 
 function save(patch) {
