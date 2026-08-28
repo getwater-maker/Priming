@@ -1,0 +1,290 @@
+{
+  "119": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "120": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "121": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "120",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "122": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "125": {
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sampler": [
+        "184",
+        0
+      ],
+      "sigmas": [
+        "185",
+        0
+      ],
+      "latent_image": [
+        "141",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "126": {
+    "inputs": {
+      "model": [
+        "200",
+        0
+      ],
+      "conditioning": [
+        "141",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Basic Guider"
+    }
+  },
+  "127": {
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "128": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "129": {
+    "inputs": {
+      "noise_seed": 111222333
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "131": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "132",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "132": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Seconds"
+    }
+  },
+  "141": {
+    "inputs": {
+      "prompt": [
+        "186",
+        0
+      ],
+      "width": [
+        "145",
+        1
+      ],
+      "height": [
+        "145",
+        2
+      ],
+      "length": [
+        "131",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ],
+      "audio_vae": [
+        "120",
+        0
+      ],
+      "ref_images": [
+        "142",
+        0
+      ]
+    },
+    "class_type": "DenoMiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "(Deno) MiniMax H3 Reference to Video"
+    }
+  },
+  "142": {
+    "inputs": {
+      "image_paths": ""
+    },
+    "class_type": "DenoMiniMaxH3ReferenceImageLoader",
+    "_meta": {
+      "title": "(Deno) MiniMax H3 Multi Reference Image Loader"
+    }
+  },
+  "144": {
+    "inputs": {
+      "images": [
+        "122",
+        0
+      ],
+      "audio": [
+        "121",
+        0
+      ],
+      "filename_prefix": "minimax_h3",
+      "frame_rate": 24,
+      "loop_count": 0,
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "145": {
+    "inputs": {
+      "mode": "Preset Ratio",
+      "ratio_preset": "16:9",
+      "megapixels": 0.98,
+      "width": 1024,
+      "height": 1024,
+      "divisible_by": "32",
+      "resize_method": "Center Crop (Fill)",
+      "interpolation": "lanczos",
+      "crop_x": 0.5,
+      "crop_y": 0.5,
+      "crop_zoom": 1
+    },
+    "class_type": "DenoResolutionSetup",
+    "_meta": {
+      "title": "(Deno) Resize Box"
+    }
+  },
+  "184": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "185": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 4,
+      "denoise": 1,
+      "model": [
+        "200",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "186": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "DenoPromptText",
+    "_meta": {
+      "title": "Main prompt (manual)"
+    }
+  },
+  "200": {
+    "inputs": {
+      "model": [
+        "127",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 1
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "turbo4step"
+    }
+  }
+}

@@ -48,7 +48,14 @@ const COMFY_DIR = path.join(__dirname, '..', 'comfy');
 const BUNDLED = [
   { name: 'LTX2.3',    file: 'video_ltx2_3_i2v.json' },
   { name: 'LTX2.5',    file: 'video_ltx2_5_i2v.json' },
+  // 🖥 로컬 전용 — RTX 3060 실측 5초/9.4분(1312x736). 크레딧 0 · 오디오 동시 생성.
+  //   ⚠ 클라우드(comfy.org)엔 minimax_h3 계열 모델이 없다 → ☁ 로 고르면 실패한다(이름에 (로컬) 명시).
+  { name: 'MiniMax H3 turbo4 (로컬)', file: 'video_minimax_h3_turbo4_i2v.json' },
 ];
+// MiniMax H3 레퍼런스 프롬프트 접두사 — 대본은 그대로 두고 엔진이 붙인다(아래 _buildGraph 주석 참조).
+const MM_REF_PREFIX = '<Picture 1> is the exact scene: keep its composition, characters, clothing, colors and art style unchanged. ';
+// 0.98MP 실측 563초 — 기본 600초로는 실제로 타임아웃 났다(E2E). 여유를 둔 하한.
+const MM_MIN_TIMEOUT_SEC = 1500;
 const DEFAULT_ACTIVE_FILE = 'video_ltx2_5_i2v.json'; // 활성값이 비었거나 실재하지 않을 때 기본
 // 배포에서 뺀 옛 번들 워크플로 — 목록에서 지운다(로이 2026-08-14: Wan 2.2 제거).
 //   ⚠ 그냥 BUNDLED 에서 빼기만 하면 기존 PC 의 설정파일에 남은 항목이 "사용자 커스텀"으로 취급돼
@@ -199,8 +206,17 @@ class ComfyVideo {
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. ComfyUI 에서 "저장(API 포맷)"으로 저장하세요.');
     const graph = JSON.parse(JSON.stringify(wf));
     const ids = Object.keys(graph);
+    // ── MiniMax H3 레퍼런스 계열 감지 ──
+    //   i2v(start_image 고정)가 아니라 "레퍼런스 참조 생성"이라 배선·프롬프트 규약이 다르다.
+    //   · 이미지는 LoadImage 가 아니라 ReferenceImageLoader.image_paths(줄바꿈 구분 목록)로 들어간다.
+    //   · 프롬프트는 <Picture 1> 태그로 레퍼런스의 역할을 지정해야 원본 구도·화풍이 유지된다(실측).
+    const mmRefId = ids.find((id) => /MiniMaxH3ReferenceImageLoader/i.test(graph[id].class_type || ''));
     // ── 이미지 주입 (LoadImage) ──
-    if (this.imageNodeId && graph[this.imageNodeId]) {
+    if (mmRefId) {
+      graph[mmRefId].inputs = graph[mmRefId].inputs || {};
+      graph[mmRefId].inputs.image_paths = uploadName;   // 업로드된 이름 = input 폴더 상대경로
+      this.log('[ComfyVid] MiniMax H3 레퍼런스 이미지 주입 → image_paths=' + uploadName);
+    } else if (this.imageNodeId && graph[this.imageNodeId]) {
       graph[this.imageNodeId].inputs = graph[this.imageNodeId].inputs || {}; graph[this.imageNodeId].inputs.image = uploadName;
     } else {
       const imgIds = ids.filter((id) => graph[id].class_type === 'LoadImage');
@@ -220,6 +236,10 @@ class ComfyVideo {
     //   LTX 등(서브그래프): 프롬프트가 "Prompt" 문자열 Primitive → TextGenerate → CLIPTextEncode(text=링크)로 흐름
     //     → CLIPTextEncode 에 넣으면 링크라 무시(또는 네거티브 리터럴을 덮어쓸 위험) → 문자열 Primitive 의 value 에 주입.
     if (prompt) {
+      //   MiniMax H3: 대본은 그대로 두고 엔진이 <Picture 1> 접두사만 붙인다.
+      //   ⚠ 이게 없으면 레퍼런스가 "참고"에 그쳐 구도·인물·화풍이 통째로 바뀐다(실측: 왕+신하 5명 → 얼굴 클로즈업).
+      //   ⛔ 대본에 이 태그를 쓰게 하지 말 것 — 엔진을 LTX 로 되돌리면 대본 468편이 그 문법에 묶인다.
+      if (mmRefId) prompt = MM_REF_PREFIX + String(prompt);
       const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
       const isNeg = (id) => /negative|부정|worst|nsfw|bad ?quality/.test(titleOf(id)) || /negative/.test((graph[id].class_type || '').toLowerCase());
       const setLit = (n, keys) => { if (!n || !n.inputs) return false; for (const k of keys) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
@@ -227,7 +247,7 @@ class ComfyVideo {
       if (this.promptNodeId && graph[this.promptNodeId]) done = setLit(graph[this.promptNodeId], ['value', 'text', 'prompt', 'positive', 'positive_prompt', 'string']);
       if (!done) {
         // ① 문자열 Primitive("Prompt") — LTX 등 모던 서브그래프
-        const strIds = ids.filter((id) => /PrimitiveString|StringMultiline|String \(/i.test(graph[id].class_type || '') && !isNeg(id));
+        const strIds = ids.filter((id) => /PrimitiveString|StringMultiline|String \(|DenoPromptText/i.test(graph[id].class_type || '') && !isNeg(id));
         const pStr = strIds.find((id) => /prompt|positive|긍정|프롬프트/.test(titleOf(id))) || strIds[0];
         if (pStr) done = setLit(graph[pStr], ['value', 'string', 'text']);
       }
@@ -397,6 +417,15 @@ class ComfyVideo {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}` };
       const uploadName = await this._uploadImage(imagePath);
       const graph = this._buildGraph(uploadName, prompt, aspect, durationSec);
+      // ⏱ MiniMax H3(로컬)는 3060 실측 0.98MP **563초** — 기본 600초와 너무 가까워 실제로 타임아웃 났다(E2E).
+      //   그 워크플로일 때만 하한을 올린다. 타임아웃은 상한일 뿐이라 LTX(1~2분)에는 영향이 없다.
+      const _mmSlow = Object.values(graph).some((x) => /MiniMaxH3Reference/i.test(x.class_type || ''));
+      const _savedTimeout = this.timeoutSec;
+      if (_mmSlow && this.timeoutSec < MM_MIN_TIMEOUT_SEC) {
+        this.timeoutSec = MM_MIN_TIMEOUT_SEC;
+        this.log(`[ComfyVid] MiniMax H3 — 타임아웃 ${_savedTimeout}초 → ${MM_MIN_TIMEOUT_SEC}초 (실측 0.98MP 563초)`);
+      }
+      try {
       // 진단: 큐로 실제 전송되는 그래프에 우리 이미지·프롬프트가 들어갔는지 확인(클라우드가 이를 무시하는지 판별용)
       try {
         const liIds = Object.keys(graph).filter((id) => graph[id].class_type === 'LoadImage');
@@ -407,6 +436,7 @@ class ComfyVideo {
       const vid = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
       const out = await this._download(vid, outputPath);
       return { success: true, videoPath: out };
+      } finally { this.timeoutSec = _savedTimeout; }   // 인스턴스 재사용 시 다른 워크플로에 새지 않게
     } catch (e) { return { success: false, error: e.message }; }
   }
 }
