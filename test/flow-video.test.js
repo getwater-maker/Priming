@@ -381,7 +381,14 @@ function img(dir, num) {
 
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');
-  ok(/<option value="flow">Flow · Veo \(구독\)<\/option>/.test(APP), '③ 비디오 드롭다운에 「Flow · Veo (구독)」 항목이 있다');
+  {
+    // 🔑 비디오 엔진을 고르는 곳은 **두 군데**다 — 헤더 「③ 비디오」와 ⚙ 채널 편집.
+    //   한쪽만 고치면 채널에 Flow 를 지정할 수 없다(2026-08-29 로이 지적: 채널 편집에 VEO 가 없었다).
+    const cnt = (APP.match(/<option value="flow">Flow · Veo \(구독\)<\/option>/g) || []).length;
+    ok(cnt === 2, '「Flow · Veo (구독)」 항목이 **헤더와 채널 편집 양쪽**에 있다  (실제 ' + cnt + '곳)');
+  }
+  ok(APP.indexOf('<option value="flow">Flow (구독)</option>') >= 0,
+    '이미지 쪽 Flow 항목은 그대로다 (회귀)');
   ok(!/\['flow', 'wan', 'grok10'\]\.includes/.test(APP),
     "⛔ 'flow' 를 grok 으로 되돌리는 정규화가 없다 — 있으면 골라도 다음에 열 때 Grok 으로 돌아간다");
   eq((APP.match(/\['wan', 'grok10'\]\.includes/g) || []).length, 2,
