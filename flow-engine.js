@@ -1691,15 +1691,26 @@ class FlowAutomator {
 
       const opt = this.page.getByRole('menuitem').filter({ hasText: want }).first();
       await opt.waitFor({ state: 'visible', timeout: 4000 });
-      const [download] = await Promise.all([
-        this.page.waitForEvent('download', { timeout: 180000 }),
-        opt.click({ timeout: 3000 }),
-      ]);
+      // 🔑 여기서부터 **화면이 조용해진다** — Flow 서버가 업스케일본을 만드는 동안(실측 1~3분)
+      //   토스트 하나 말고는 아무 변화가 없어 「멈춘 것 같다」고 오해하게 된다(2026-08-28 로이).
+      //   → 시작을 알리고 20초마다 경과를 남긴다.
+      this.log(`  [DL ${num}] ${want} 요청 — Flow 가 업스케일본을 만드는 중입니다(보통 1~3분 · 그동안 화면은 조용합니다)`);
+      const _dlT0 = Date.now();
+      const _dlTick = setInterval(() => {
+        this.log(`  [DL ${num}] … ${Math.round((Date.now() - _dlT0) / 1000)}초 경과 (업스케일·다운로드 대기 중)`);
+      }, 20000);
+      let download;
+      try {
+        [download] = await Promise.all([
+          this.page.waitForEvent('download', { timeout: 300000 }),
+          opt.click({ timeout: 5000 }),
+        ]);
+      } finally { clearInterval(_dlTick); }
       const tmpPath = path.join(os.tmpdir(), `flow_vid_${Date.now().toString(36)}.mp4`);
       await download.saveAs(tmpPath);
       const buf = fs.readFileSync(tmpPath);
       try { fs.unlinkSync(tmpPath); } catch (_) {}
-      this.log(`  [DL ${num}] ${want} 다운로드 완료 (${Math.round(buf.length / 1024)}KB)`);
+      this.log(`  [DL ${num}] ${want} 다운로드 완료 (${Math.round(buf.length / 1024)}KB · ${Math.round((Date.now() - _dlT0) / 1000)}초)`);
       return buf;
     } catch (e) {
       this.log(`  [DL ${num}] ${want} 다운로드 실패: ${e.message} — 재생 소스로 폴백`);

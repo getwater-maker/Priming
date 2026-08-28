@@ -150,7 +150,9 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'fra
     if (/image-rotation/.test(m)) return { load: () => ({ flowVideoModel: 'Veo 3.1 - Fast', flowVideoAttach: attach, flowVideoDownload: dl }) };
     throw new Error('unexpected require: ' + m);
   };
+  const engLogs = [];
   const eng = {
+    log: (m) => engLogs.push(String(m)),
     run: async (opts) => {
       runCalls.push(opts);
       const imgDir = path.join(opts.outputDir, 'images');
@@ -169,7 +171,7 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'fra
     (id) => path.join(tmp, 'prof', id), () => '[테스트]',
     { normalizePromptNegations: (p) => p },
     fakeRequire, () => 0, () => {});
-  return { fn, pr, mediaDir, tmp, logs, runCalls, marked, cooled };
+  return { fn, pr, mediaDir, tmp, logs, runCalls, marked, cooled, engLogs, eng };
 }
 
 function img(dir, num) {
@@ -363,6 +365,19 @@ function img(dir, num) {
   ok(MAIN.indexOf('if (info.width >= W && info.height >= H) {') >= 0,
     '업스케일 생략 판정이 그대로다 — Flow 1080p(1920x1080)면 로컬 업스케일을 건너뛴다');
   ok(MAIN.indexOf('⬆ 업스케일 생략') >= 0, '생략했다는 사실을 로그로 남긴다');
+
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[13] 「멈춘 것 같다」 방지 — 조용한 구간에 진행을 남긴다');
+  ok(ENG.indexOf('const _dlTick = setInterval(') >= 0,
+    '1080p 업스케일·다운로드 대기 중 20초마다 경과를 남긴다 (실측 1~3분 동안 화면이 조용하다)');
+  ok(ENG.indexOf('업스케일본을 만드는 중입니다') >= 0, '대기 시작을 알린다 — 무엇을 기다리는지 적는다');
+  ok(ENG.indexOf('clearInterval(_dlTick)') >= 0, '끝나면 타이머를 반드시 정리한다(누수 방지)');
+  ok(ENG.indexOf("waitForEvent('download', { timeout: 300000 })") >= 0,
+    '다운로드 대기를 300초로 — 실사용에서 2분 넘게 걸린 적이 있다(로이 23:47~23:51)');
+  ok(MAIN.indexOf('eng._appLogHooked = true;') >= 0 && MAIN.indexOf("logToFile('[Flow] ' + msg)") >= 0,
+    '⛔ 엔진 로그를 앱 **로그 파일**에도 남긴다 — 예전엔 화면(send)에만 가서 나중에 되짚을 기록이 없었다');
+  ok(MAIN.indexOf("if (!eng._appLogHooked && typeof eng.log === 'function')") >= 0,
+    'eng 는 재사용 인스턴스라 **한 번만** 감싼다 (중복 기록 방지)');
 
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');

@@ -2163,6 +2163,14 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     const imgDir = path.join(workDir, 'images');
     fs.mkdirSync(imgDir, { recursive: true });
     const eng = getFlowEng(flowProfileDir(acc.id));
+    // 🔑 엔진 로그는 화면(send)으로만 가고 **파일에는 안 남았다** — 나중에 「멈춘 것 같다」를
+    //   되짚을 기록이 없다(2026-08-28). run() 이 쓰는 자체 log.txt 는 임시 workDir 이라 함께 지워진다.
+    //   → 앱 로그 파일에도 흘린다. ⚠ eng 는 재사용되는 인스턴스라 **한 번만** 감싼다(중복 기록 방지).
+    if (!eng._appLogHooked && typeof eng.log === 'function') {
+      const _engLog = eng.log.bind(eng);
+      eng.log = (msg) => { _engLog(msg); try { logToFile('[Flow] ' + msg); } catch (_) {} };
+      eng._appLogHooked = true;
+    }
 
     // 프롬프트: 대본의 영상 프롬프트 → 모션 노트 → 기본. 부정 절은 끝으로 모은다(이미지·ComfyUI 와 같은 정책).
     const paragraphs = targets.map((g) => pr.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
