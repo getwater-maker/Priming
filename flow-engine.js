@@ -1794,13 +1794,37 @@ class FlowAutomator {
     //   ⚠ 버튼은 **보이고 가려지지도 않았다** — 눈으로는 멀쩡해 보여 원인을 오해하기 쉽다(disabled 였다).
     //   → 고정 대기를 버리고 **활성화될 때까지** 기다린다(최대 40초).
     try {
-      const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false }).first();
-      await add.waitFor({ state: 'visible', timeout: 20000 });
+      // ① 버튼이 **활성화될 때까지** 기다린다(업로드 처리 실측 약 9초, 두 번째 컷은 더 걸린다).
       await this.page.waitForFunction(() => {
         const b = Array.from(document.querySelectorAll('button')).find((x) => (x.innerText || '').includes('프롬프트에 추가'));
         return !!b && !b.disabled;
-      }, null, { timeout: 40000 });
-      await add.click({ timeout: 5000 });
+      }, null, { timeout: 60000 });
+
+      // ② 클릭 — 🔴 **두 번째 컷에서 locator.click 이 5초 타임아웃 나는 것을 실측했다**(2026-08-29).
+      //   버튼은 화면에 활성 상태로 멀쩡히 떠 있었다 → 업로드 처리 중 DOM 이 갈아끼워져 옛 핸들이
+      //   죽었거나, .first() 가 보이지 않는 쪽을 집은 것으로 보인다.
+      //   → **매 시도마다 다시 찾고**(보이는 것만), 그래도 안 되면 DOM 클릭으로 확정한다.
+      //   ⚠ 여기서 실패하면 그 컷은 통째로 버려지므로(첨부 실패 = 생성 안 함) 폴백을 둘 겹으로 둔다.
+      let clicked = false;
+      for (let k = 0; k < 2 && !clicked; k++) {
+        try {
+          const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false })
+            .filter({ visible: true }).first();
+          await add.click({ timeout: 8000 });
+          clicked = true;
+        } catch (_) { await this.page.waitForTimeout(800); }
+      }
+      if (!clicked) {
+        clicked = await this.page.evaluate(() => {
+          const b = Array.from(document.querySelectorAll('button'))
+            .find((x) => (x.innerText || '').includes('프롬프트에 추가') && !x.disabled);
+          if (!b) return false;
+          b.click();
+          return true;
+        });
+        if (clicked) this.log(`  [${label} ${num}] (locator 클릭이 막혀 DOM 클릭으로 확정)`);
+      }
+      if (!clicked) throw new Error(`'프롬프트에 추가' 를 두 방식 모두로 누르지 못했습니다`);
     } catch (e) {
       this.log(`  [${label} ${num}] ⚠ '프롬프트에 추가' 를 누르지 못했습니다 (${(e && e.message || '').split('\n')[0].slice(0, 80)}) — 덤프`);
       await this._dumpFrameAttachUI(); return false;

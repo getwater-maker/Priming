@@ -350,6 +350,12 @@ function img(dir, num) {
     '⛔ 고정 3.5초 대기가 없다 — 실측 약 9초라 그 시점엔 버튼이 disabled 여서 클릭이 타임아웃됐다(2026-08-28 실사고)');
   ok(ENG.indexOf('waitForFunction') >= 0 && ENG.indexOf('!b.disabled') >= 0,
     '버튼이 **enabled 될 때까지** 기다린다 (고정 대기는 네트워크 상태에 따라 또 실패한다)');
+  ok(ENG.indexOf('.filter({ visible: true }).first()') >= 0,
+    '보이는 버튼만 집는다 (.first() 가 숨은 쪽을 집으면 클릭이 타임아웃난다)');
+  ok(ENG.indexOf('for (let k = 0; k < 2 && !clicked; k++)') >= 0,
+    '⛔ 클릭을 **매번 다시 찾아** 재시도한다 — 두 번째 컷에서 locator.click 5초 타임아웃을 실측했다(2026-08-29)');
+  ok(ENG.indexOf('locator 클릭이 막혀 DOM 클릭으로 확정') >= 0,
+    '그래도 안 되면 DOM 클릭으로 확정한다 (여기서 실패하면 그 컷이 통째로 버려진다)');
   ok(ENG.indexOf("await this._uploadAndAddToPrompt(imagePath, num, 'i2v')") >= 0,
     '⛔ 프레임 경로도 **같은 공통 헬퍼**를 쓴다 — 두 벌로 두면 한쪽만 고쳐져 어긋난다');
   {
