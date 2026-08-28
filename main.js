@@ -1975,8 +1975,14 @@ function flowProfileDir(accId) { return path.join(os.homedir(), '.flow-app', 'pr
 // FlowAutomator 단일 인스턴스 유지. 활성 계정(프로필)이 바뀌면 기존 크롬을 닫고 새 프로필로 교체
 //   → 동시에 크롬 여러 개 뜨는 것 방지(계정은 한 번에 하나만 사용).
 function getFlowEng(profileDir) {
-  if (S.flowEng && S.flowEngProfileDir === profileDir) return S.flowEng;
-  if (S.flowEng) { try { if (S.flowEng.context) S.flowEng.context.close(); } catch {} S.flowEng = null; }
+  // ♻ 같은 계정이면 **인스턴스를 그대로 쓴다** — 대본 하나를 범위로 한 번에 만들면 창은 하나뿐이다.
+  //   (엔진도 run() 안에서 context 가 살아 있으면 `[Flow] 기존 브라우저 재사용` 을 남긴다)
+  if (S.flowEng && S.flowEngProfileDir === profileDir) { log('♻ Flow 브라우저 재사용 (같은 계정 — 창을 새로 열지 않습니다)'); return S.flowEng; }
+  // 계정이 바뀔 때만 기존 창을 닫는다. 예전엔 조용해서 "왜 창이 새로 뜨지?" 를 알 수 없었다(2026-08-29).
+  if (S.flowEng) {
+    log(`🔀 Flow 계정이 바뀌어 기존 브라우저를 닫습니다 (${path.basename(S.flowEngProfileDir || '')} → ${path.basename(profileDir)})`);
+    try { if (S.flowEng.context) S.flowEng.context.close(); } catch {} S.flowEng = null;
+  }
   fs.mkdirSync(profileDir, { recursive: true });
   cleanChromeProfile(profileDir);
   const { FlowAutomator } = require('./flow-engine');
@@ -1989,6 +1995,9 @@ function getFlowEng(profileDir) {
 async function closeFlowEng() {
   const eng = S.flowEng;
   if (!eng) return;
+  // 작업(버튼 클릭) 하나가 끝나면 창을 닫는다 → **다음 클릭은 새 창**이다.
+  //   그래서 그룹을 하나씩 따로 만들면 매번 새로 열린다(기동 약 20초). 범위를 넓게 잡으면 한 창으로 끝난다.
+  log('🧹 Flow 브라우저를 닫습니다 (작업 완료 — 다음 작업은 새 창으로 시작합니다)');
   S.flowEng = null; S.flowEngProfileDir = null;
   try {
     if (typeof eng._closeContextAndCleanup === 'function') await eng._closeContextAndCleanup('작업 완료');
