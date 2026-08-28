@@ -96,6 +96,24 @@ async function checkServerIdle() {
   // 🖼 그림 — 강의 76강(D:\비즈니스PT)용. 음성 TSV 와 짝을 이룬다(2026-08-27).
   ok(MAIN.includes("ipcMain.handle('remotion-open-image-tsv'"), 'remotion-open-image-tsv IPC 존재');
   ok(MAIN.includes("ipcMain.handle('remotion-run-images'"), 'remotion-run-images IPC 존재');
+  {
+    // 🔴 로이(2026-08-28): 「설정창에서 그림목록폴더를 설정했는데 다른 폴더가 나오네」
+    //   — 그림 TSV 대화상자가 scriptFolder(음성 TSV 폴더)를 기본값으로 쓰고 있었다.
+    const i0 = MAIN.indexOf("ipcMain.handle('remotion-open-image-tsv'");
+    const i1 = MAIN.indexOf('_runRemotionImagesCore', i0);
+    const body = MAIN.slice(i0, i1);
+    ok(/defPath = \(preset && \(preset\.imgTsvFolder \|\| preset\.scriptFolder\)\)/.test(body),
+      '🔑 그림 TSV 대화상자의 기본 폴더 = 채널의 「그림목록 폴더」');
+    ok(/properties: \['openFile', 'multiSelections'\]/.test(body), '그림 TSV 도 여러 개 고를 수 있다');
+    // 🖼 **그림만 만드는 강** — 대본 없이 그림 TSV 만 열어도 큐에 들어간다.
+    ok(/ttsPath: null, ttsName: '', ttsRows: \[\], ttsErrors: \[\]/.test(body),
+      '🔑 맞는 강이 없으면 그림만 있는 강을 새로 만든다(음성 없이 그림만)');
+    ok(/if \(!it && !num\)/.test(body),
+      '번호가 없는 파일만 활성 강에 붙인다 — 번호가 다르면 엉뚱한 강에 붙지 않는다');
+    // ⚠ 대본 열기는 큐를 새로 만들지만(`S.tsvList = [];`) 그림 열기는 **더한다** — 그 줄이 없어야 한다.
+    //   (내 가드 `if (!Array.isArray(S.tsvList)) S.tsvList = [];` 는 줄 앞에 if 가 있어 안 걸린다)
+    ok(!/^\s*S\.tsvList = \[\];$/m.test(body), '그림 TSV 열기는 이미 열린 강들을 지우지 않는다(대본 열기와 다르다)');
+  }
   ok(MAIN.includes("enqueueImageJob('리모션 그림 생성'"), '그림도 이미지 큐를 탄다(로컬이면 TTS 와 같은 GPU 레인)');
   ok(MAIN.includes("_runRemotionImagesCore(args), 'comfy')"), "엔진 'comfy' 를 넘긴다 — 안 넘기면 레인을 안 잡아 TTS 와 겹친다");
   // ── 🎬 강 여러 개 + 짝 자동 연결(2026-08-27) ──
@@ -189,8 +207,8 @@ async function checkServerIdle() {
     console.log('\n── ④ 모드 토글 · 리모션 화면');
     ok(await win.isVisible('.modetoggle button:has-text("🎬 리모션")'), '모드 토글에 🎬 리모션 버튼');
     await win.click('.modetoggle button:has-text("🎬 리모션")');
-    await win.waitForSelector('button:has-text("📄 TSV 열기")', { timeout: 10000 });
-    ok(true, '리모션 화면이 뜬다 (📄 TSV 열기)');
+    await win.waitForSelector('button:has-text("📄 대본 TSV 열기")', { timeout: 10000 });
+    ok(true, '리모션 화면이 뜬다 (📄 대본 TSV 열기)');
     ok(await win.isVisible('button:has-text("🎤 mp3 만들기")'), '🎤 mp3 만들기 버튼');
 
     // 🔴 채널에 사전이 저장돼 있으면 화면에 그 파일명이 보여야 한다.
@@ -240,7 +258,7 @@ async function checkServerIdle() {
     await app.evaluate(({ dialog }, p) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] });
     }, TSV_PATH);
-    await win.click('button:has-text("📄 TSV 열기")');
+    await win.click('button:has-text("📄 대본 TSV 열기")');
     await win.waitForSelector('table tbody tr', { timeout: 10000 });
     const trN = await win.$$eval('table tbody tr', (r) => r.length);
     ok(trN === TSV_ROWS, '표에 ' + TSV_ROWS + '행이 뜬다 (실제 ' + trN + ')');
@@ -318,14 +336,14 @@ async function checkServerIdle() {
         '들은 뒤에는 그 행에 ▶ 가 남는다(다시 듣기)');
     }
 
-    console.log('\n── 🖼 그림목록 (열기 · 표 · 탭)');
-    ok(await win.isVisible('button:has-text("🖼 그림목록")'), '「🖼 그림목록」 버튼');
+    console.log('\n── 🖼 그림 TSV (열기 · 표 · 탭)');
+    ok(await win.isVisible('button:has-text("🖼 그림 TSV 열기")'), '「🖼 그림 TSV 열기」 버튼');
     ok(await win.isVisible('button:has-text("📁 그림 폴더")'), '「📁 그림 폴더」 버튼');
     ok(await win.isDisabled('button:has-text("🖼 그림 만들기")'), '목록을 열기 전에는 만들기 비활성');
     await app.evaluate(({ dialog }, p) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] });
     }, IMG_TSV_PATH);
-    await win.click('button:has-text("🖼 그림목록")');
+    await win.click('button:has-text("🖼 그림 TSV 열기")');
     await win.waitForSelector('button:has-text("🖼 그림 만들기 (' + IMG_ROWS + ')")', { timeout: 10000 });
     ok(true, '그림 ' + IMG_ROWS + '장을 읽었다(헤더 한 줄은 건너뛴다)');
     ok(!(await win.isDisabled('button:has-text("🖼 그림 만들기")')), '읽은 뒤엔 만들기 활성');
@@ -375,7 +393,7 @@ async function checkServerIdle() {
         await app.evaluate(({ dialog }, ps) => {
           dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ps });
         }, ttsPaths);
-        await win.click('button:has-text("📄 TSV 열기")');
+        await win.click('button:has-text("📄 대본 TSV 열기")');
         await win.waitForSelector('button:has-text("▶ 전체 만들기 (3강)")', { timeout: 10000 });
         ok(true, 'TSV 3개를 한 번에 열었다');
         const body = await win.textContent('body');
@@ -392,6 +410,35 @@ async function checkServerIdle() {
         // ⚠ 실제 생성은 여기서 하지 않는다 — GPU·시간.
       } finally {
         if (cur && keepFolder !== null) PS.update(cur.id, { imgTsvFolder: keepFolder });
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      }
+    }
+
+    // 🖼 **그림만 만드는 환경** — 대본 없이 그림 TSV 만 열어도 그 강이 큐에 들어간다.
+    //   ⚠ 이 블록은 **맨 뒤**에 둔다 — 큐를 늘리므로 앞 테스트의 상태를 흔든다
+    //     (v0.3.66 에서 순서를 잘못 놓아 「음성 탭」 테스트가 깨진 전례).
+    console.log('\n── 🖼 그림만 만드는 강 (대본 없이)');
+    {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-imgonly-'));
+      const only = path.join(dir, '777_그림목록.tsv');
+      fs.writeFileSync(only,
+        ['경로\t장면\t글\tpositive\tnegative'].concat(Array.from({ length: 3 }, (_, i) =>
+          ['777_그림만/Q-' + (i + 1) + '.png', 'Q-' + (i + 1), '그림만 ' + (i + 1), 'a scene', 'text'].join('\t')
+        )).join('\n') + '\n', 'utf8');
+      try {
+        await app.evaluate(({ dialog }, f) => {
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] });
+        }, only);
+        await win.click('button:has-text("🖼 그림 TSV 열기")');
+        await win.waitForSelector('button:has-text("🖼 그림 만들기 (3)")', { timeout: 10000 });
+        ok(true, '대본 없이 그림 TSV 만 열어도 그림 만들기가 활성된다(3장)');
+        const body = await win.textContent('body');
+        ok(body.includes('(그림만)'), '음성이 없는 강임을 화면이 알린다');
+        ok(body.includes('777_그림만/Q-1.png'), '그림 표가 보인다');
+        ok(!body.includes('003강 문장 1.'), '번호가 다른 그림목록이 003 강에 조용히 붙지 않았다');
+        ok(await win.isVisible('button[title*="777_그림목록.tsv"]'), '강 목록에 그림만 있는 강이 생겼다');
+        ok(await win.isDisabled('button:has-text("🎤 mp3 만들기")'), '음성이 없으니 mp3 만들기는 비활성');
+      } finally {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
       }
     }

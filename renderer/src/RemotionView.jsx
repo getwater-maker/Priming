@@ -193,11 +193,16 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     catch (e) { setStatus && setStatus('폴더 열기 실패: ' + e.message); }
   }
 
+  // 🖼 그림 TSV 열기 — 여러 개 고를 수 있고, **대본 없이 이것만** 열어도 된다(그림만 만드는 강).
+  //   ⚠ 활성 강이 바뀔 수 있으므로 재생·고르기 상태를 비운다(옛 강의 음성을 듣는 일이 없게).
   async function openImageTsv() {
     try {
       const r = await api.remotionOpenImageTsv({ presetName });
-      if (r) { setQueue(r); setImgResult(null); setTab('img'); }
-    } catch (e) { setStatus && setStatus('그림목록 열기 실패: ' + e.message); }
+      if (r) {
+        setQueue(r); setImgResult(null); setTab('img');
+        stopPlay(); setPicked([]); setPreviews({}); lastPickRef.current = -1;
+      }
+    } catch (e) { setStatus && setStatus('그림 TSV 열기 실패: ' + e.message); }
   }
 
   async function runImages() {
@@ -262,7 +267,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   return (
     <div style={{ padding: '10px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={openTsv} disabled={busy || pvBusy || imgBusy || allBusy}>📄 TSV 열기</button>
+        <button onClick={openTsv} disabled={busy || pvBusy || imgBusy || allBusy}>📄 대본 TSV 열기</button>
         <button onClick={runAll} disabled={busy || pvBusy || imgBusy || allBusy || !items.length}
           title="열어 둔 모든 강을 순서대로 만듭니다 — 전 강 음성 → 전 강 그림">
           {allBusy ? '전체 만드는 중…' : `▶ 전체 만들기${items.length > 1 ? ' (' + items.length + '강)' : ''}`}
@@ -283,7 +288,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           title="만들어진 mp3 가 있는 폴더를 엽니다">📁 mp3 폴더</button>
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border,#ddd)', margin: '0 2px' }} />
         <button onClick={openImageTsv} disabled={busy || imgBusy || allBusy}
-          title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다">🖼 그림목록</button>
+          title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다.
+여러 개 고를 수 있고, 대본 없이 이것만 열어 그림만 만들 수도 있습니다.">🖼 그림 TSV 열기</button>
         <button onClick={runImages} disabled={busy || imgBusy || allBusy || !imgRows.length || imgErrs.length > 0}
           title="로컬 ComfyUI 로 그림을 만듭니다. 이미 있는 파일은 건너뜁니다.">
           {imgBusy ? '만드는 중…' : `🖼 그림 만들기${imgRows.length ? ' (' + imgRows.length + ')' : ''}`}
@@ -295,7 +301,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           앞뒤 무음 제거
         </label>
         <span style={{ flex: 1 }} />
-        {tsv && <span className="meta">{tsv.name} · {rows.length}행 · {chars.toLocaleString()}자</span>}
+        {tsv && <span className="meta">{tsv.name} · {rows.length ? rows.length + '행 · ' + chars.toLocaleString() + '자' : '🖼 ' + imgRows.length + '장 (그림만)'}</span>}
       </div>
 
       {/* 🎬 강 목록 — 여러 개를 열면 여기서 고른다. 표·개별 버튼의 대상이 함께 바뀐다. */}
@@ -305,8 +311,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           {items.map((it) => (
             <button key={it.id} className={it.id === queue.activeId ? '' : 'ghost'}
               onClick={() => selectLec(it.id)} disabled={busy || imgBusy || pvBusy || allBusy}
-              title={it.ttsName + (it.imgName ? String.fromCharCode(10) + it.imgName : String.fromCharCode(10) + '(그림목록 짝 없음)')}>
-              {it.num || it.ttsName} · 🎤{it.ttsCount}{it.imgCount ? ' · 🖼' + it.imgCount : ' · 🖼—'}
+              title={(it.ttsName || '(대본 TSV 없음 — 그림만)') + (it.imgName ? String.fromCharCode(10) + it.imgName : String.fromCharCode(10) + '(그림 TSV 짝 없음)')}>
+              {it.num || it.ttsName || it.imgName} · {it.ttsCount ? '🎤' + it.ttsCount : '🎤—'}{it.imgCount ? ' · 🖼' + it.imgCount : ' · 🖼—'}
               {(it.ttsErrors + it.imgErrors) > 0 ? ' ⚠' : ''}
             </button>
           ))}
@@ -325,8 +331,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       <div className="meta" style={{ marginTop: 6 }}>
         목소리·배속·시드·발음사전은 <b>채널 설정</b>을 따릅니다(헤더 ⚙). 출력은 <b>MP3 출력 폴더 / {tsv ? tsv.name.replace(/\.(tsv|txt)$/i, '') : '<TSV 이름>'}</b> 입니다.
         <br />⚠ 이 넷 중 하나라도 바꾸면 <b>전량 다시 만들어집니다</b>. 처음에 정하고 그 뒤로 건드리지 마세요.
-        <br />📄 <b>TSV 를 여러 개 골라 한 번에</b> 열 수 있습니다 — 같은 번호의 <b>그림목록</b>이 자동으로 붙고(<code>003_….tsv</code> ↔ <code>003_그림목록.tsv</code>),
+        <br />📄 <b>대본 TSV 를 여러 개 골라 한 번에</b> 열 수 있습니다 — 채널의 「그림목록 폴더」에서 같은 번호의 <b>그림 TSV</b> 가 자동으로 붙고(<code>003_….tsv</code> ↔ <code>003_그림목록.tsv</code>),
         <b>▶ 전체 만들기</b>가 전 강 음성 → 전 강 그림 순으로 돌립니다.
+        <br />🖼 <b>그림만 만들 때</b>는 대본 없이 <b>「🖼 그림 TSV 열기」</b> 만 하면 됩니다(여러 개 가능). 그 강은 🎤— 로 표시되고 그림만 만듭니다.
         <br />🎧 표에서 문장을 골라 <b>미리듣기</b>로 먼저 들어보세요(Shift 클릭 = 범위 선택 · 한 번에 12개까지).
         여기서 만든 음성은 전체 만들기에서 <b>그대로 재활용</b>되므로 헛수고가 아니고, 들은 소리가 결과물에 그대로 들어갑니다.
       </div>
@@ -502,8 +509,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
 
       {!tsv && !imgTsv && (
         <div className="meta" style={{ marginTop: 24, textAlign: 'center', opacity: 0.7 }}>
-          「📄 TSV 열기」로 시작하세요.<br />
-          형식: 한 줄에 <code>파일명&lt;탭&gt;문장</code> — 예 <code>R-01-1.mp3⇥안녕하세요.</code>
+          <b>「📄 대본 TSV 열기」</b>로 음성을, <b>「🖼 그림 TSV 열기」</b>로 그림을 시작하세요 — <b>둘 중 하나만</b> 열어도 됩니다.<br />
+          대본 형식: 한 줄에 <code>파일명&lt;탭&gt;문장</code> — 예 <code>R-01-1.mp3⇥안녕하세요.</code><br />
+          그림 형식: 헤더 한 줄 + <code>경로⇥장면⇥한글⇥positive⇥negative</code>
         </div>
       )}
     </div>

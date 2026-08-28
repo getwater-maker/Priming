@@ -1489,7 +1489,8 @@ function _remotionDto() {
     })),
     activeId: S.tsvActiveId,
     active: act ? {
-      id: act.id, name: act.ttsName, path: act.ttsPath, rows: act.ttsRows, errors: act.ttsErrors,
+      id: act.id, name: act.ttsName || act.imgName, path: act.ttsPath, rows: act.ttsRows, errors: act.ttsErrors,
+      hasTts: !!act.ttsPath,
       img: act.imgPath ? { name: act.imgName, path: act.imgPath, rows: act.imgRows, errors: act.imgErrors } : null,
     } : null,
   };
@@ -1523,7 +1524,7 @@ ipcMain.handle('remotion-open-tsv', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
   const defPath = (preset && preset.scriptFolder) || undefined;
   const r = await dialog.showOpenDialog(win, {
-    title: 'TSV 열기 — 여러 개 고를 수 있습니다 (한 줄에 「파일명<탭>문장」)',
+    title: '대본 TSV 열기 — 여러 개 고를 수 있습니다 (한 줄에 「파일명<탭>문장」)',
     defaultPath: defPath,
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
@@ -1577,7 +1578,7 @@ ipcMain.handle('remotion-select-tsv', (_e, args = {}) => {
 });
 
 async function _runRemotionTtsCore(args = {}) {
-  if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
+  if (!S.tsv || !S.tsv.rows.length) throw new Error('이 강에는 음성 TSV 가 없습니다 — 「📄 대본 TSV 열기」로 여세요.');
   const { preset, voice, speed, dict, dictPath, seed } = _remotionVoiceCfg(args.presetName, args);
   const outRoot = preset.outLong || preset.outputFolder;
   if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
@@ -1634,28 +1635,56 @@ const REMOTION_IMAGE_SEED = 20260826;
 const REMOTION_IMAGE_DIMS = { w: 1024, h: 1024 };
 ipcMain.handle('remotion-open-image-tsv', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
-  const defPath = (preset && preset.scriptFolder) || undefined;
+  // 🔑 기본 폴더는 채널의 「그림목록 폴더」다 — 음성 TSV 와 다른 곳에 산다.
+  //   예전엔 scriptFolder(음성 TSV 폴더)를 열어 「설정했는데 다른 폴더가 나온다」고 불렸다.
+  const defPath = (preset && (preset.imgTsvFolder || preset.scriptFolder)) || undefined;
   const r = await dialog.showOpenDialog(win, {
-    title: '그림목록 TSV 열기 — 경로·장면·한글·positive·negative',
+    title: '그림 TSV 열기 — 경로·장면·한글·positive·negative (여러 개 가능)',
     defaultPath: defPath,
-    properties: ['openFile'],
+    properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
   });
   if (r.canceled || !r.filePaths.length) return null;
-  const file = r.filePaths[0];
-  const parsed = TSVIMG.parseImageTsv(fs.readFileSync(file, 'utf8'));
-  S.imgTsv = { path: file, rows: parsed.rows };
-  // 큐가 있으면 **활성 강에 붙인다** — 짝을 못 찾았거나 다른 목록으로 바꾸고 싶을 때의 수동 보정.
-  const act = (S.tsvList || []).find((x) => x.id === S.tsvActiveId);
-  if (act) {
-    act.imgPath = file; act.imgName = path.basename(file);
-    act.imgRows = parsed.rows; act.imgErrors = parsed.errors;
+  // 파일 선택 순서는 OS 마다 제각각 → 이름 자연정렬(대본 TSV 열기와 같은 정책).
+  const files = [...r.filePaths].sort((a, b) =>
+    path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
+  if (!Array.isArray(S.tsvList)) S.tsvList = [];
+  let firstId = null;
+  for (const file of files) {
+    let parsed;
+    try { parsed = TSVIMG.parseImageTsv(fs.readFileSync(file, 'utf8')); }
+    catch (e) { log(`⚠ 그림목록을 읽지 못했습니다 — ${path.basename(file)} (${e.message})`); continue; }
+    const num = _lecNum(file);
+    // 🔑 어디에 붙일지는 **앞 숫자**가 정한다 — 자동 연결과 같은 열쇠를 쓴다.
+    //   ① 같은 번호의 강이 열려 있으면 거기에 붙인다(003_그림목록 ↔ 003_…).
+    //   ② **번호가 없는 파일**은 활성 강에 붙인다 — 짝을 못 찾았을 때의 수동 보정.
+    //   ③ 번호가 있는데 맞는 강이 없으면 **그림만 있는 강**을 새로 만든다 = 음성 없이 그림만 만드는 자리.
+    //   ⛔ ②를 「번호가 안 맞아도 한 개면 활성에」로 넓히면, 777 그림목록을 열었을 때 엉뚱한 003 강에
+    //     조용히 붙어 다른 강의 그림을 만들게 된다.
+    let it = num ? S.tsvList.find((x) => x.num === num) : null;
+    if (!it && !num) it = S.tsvList.find((x) => x.id === S.tsvActiveId) || null;
+    let made = false;
+    if (!it) {
+      it = {
+        id: 'lec_' + S.tsvList.length + '_' + (num || 'img'),
+        num,
+        ttsPath: null, ttsName: '', ttsRows: [], ttsErrors: [],
+        imgPath: null, imgName: '', imgRows: [], imgErrors: [],
+      };
+      S.tsvList.push(it);
+      made = true;
+    }
+    it.imgPath = file; it.imgName = path.basename(file);
+    it.imgRows = parsed.rows; it.imgErrors = parsed.errors;
+    if (!firstId) firstId = it.id;
+    log(`🖼 그림 TSV — ${it.imgName} · ${parsed.rows.length}장`
+      + (parsed.headerSkipped ? ' (헤더 1줄 건너뜀)' : '')
+      + (made ? ' (그림만 만드는 강)' : ` → ${it.ttsName || '(음성 없음)'} 에 연결`)
+      + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
+    for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
   }
-  log(`🖼 그림목록 열기 — ${path.basename(file)} · ${parsed.rows.length}장`
-    + (parsed.headerSkipped ? ' (헤더 1줄 건너뜀)' : '')
-    + (act ? ` → ${act.ttsName} 에 연결` : '')
-    + (parsed.errors.length ? ` · ⚠ 오류 ${parsed.errors.length}건` : ''));
-  for (const e of parsed.errors.slice(0, 10)) log(`   ${e.line}행: ${e.message}`);
+  if (!firstId) throw new Error('읽을 수 있는 그림 TSV 가 없습니다.');
+  _remotionActivate(firstId);
   return _remotionDto();
 });
 
@@ -1718,7 +1747,7 @@ ipcMain.handle('remotion-run-images', (_e, args = {}) =>
 //   ⚠ 여기서 레인을 잡지 않는다 — 각 단계가 스스로 enqueueTtsJob/enqueueImageJob 을 탄다.
 //     여기서 잡으면 자기 자신을 기다려 **교착**된다(enqueueImageJob 과 같은 규칙).
 ipcMain.handle('remotion-run-all', async (_e, args = {}) => {
-  if (!S.tsvList || !S.tsvList.length) throw new Error('먼저 TSV 를 여세요.');
+  if (!S.tsvList || !S.tsvList.length) throw new Error('먼저 TSV 를 여세요 (대본 또는 그림).');
   const keep = S.tsvActiveId;
   S.abort = false;
   const withTts = S.tsvList.filter((x) => x.ttsRows.length);
@@ -1786,7 +1815,7 @@ ipcMain.handle('remotion-open-out', async (_e, args = {}) => {
 //   ⚠ 같은 GPU 를 쓰므로 전체 만들기와 **같은 TTS 큐**(enqueueTtsJob)를 탄다 — 동시에 돌지 않는다.
 const REMOTION_PREVIEW_MAX = 12;
 ipcMain.handle('remotion-preview-tts', (_e, args = {}) => enqueueTtsJob('리모션 미리듣기', async () => {
-  if (!S.tsv || !S.tsv.rows.length) throw new Error('먼저 TSV 를 여세요.');
+  if (!S.tsv || !S.tsv.rows.length) throw new Error('이 강에는 음성 TSV 가 없습니다 — 「📄 대본 TSV 열기」로 여세요.');
   const names = Array.isArray(args.names) ? args.names.filter(Boolean) : [];
   if (!names.length) throw new Error('들어볼 문장을 고르세요.');
   if (names.length > REMOTION_PREVIEW_MAX) {
