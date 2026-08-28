@@ -342,6 +342,28 @@ function img(dir, num) {
   ok(APP.indexOf('flowVideoDownload: e.target.value') >= 0, 'App.jsx 에서 다운로드 해상도를 저장한다');
   ok(APP.indexOf('1080p — 업스케일본 (권장)') >= 0, '설정에 다운로드 해상도 선택지가 있다');
 
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[11] 업로드 대기 — 「프롬프트에 추가」는 처리(약 9초)가 끝나야 활성화된다');
+  ok(ENG.indexOf('waitForTimeout(3500)') < 0,
+    '⛔ 고정 3.5초 대기가 없다 — 실측 약 9초라 그 시점엔 버튼이 disabled 여서 클릭이 타임아웃됐다(2026-08-28 실사고)');
+  ok(ENG.indexOf('waitForFunction') >= 0 && ENG.indexOf('!b.disabled') >= 0,
+    '버튼이 **enabled 될 때까지** 기다린다 (고정 대기는 네트워크 상태에 따라 또 실패한다)');
+  ok(ENG.indexOf("await this._uploadAndAddToPrompt(imagePath, num, 'i2v')") >= 0,
+    '⛔ 프레임 경로도 **같은 공통 헬퍼**를 쓴다 — 두 벌로 두면 한쪽만 고쳐져 어긋난다');
+  {
+    // 업로드→추가 로직이 정말 한 곳에만 있는가 (setInputFiles 호출 지점 = 1곳)
+    const cnt = (ENG.match(/setInputFiles\(imagePath\)/g) || []).length;
+    ok(cnt === 1, '업로드(setInputFiles) 구현이 한 곳뿐이다  (실제 ' + cnt + '곳)');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[12] 실물 검증 결과 고정 (2026-08-28 · 실제로 1개 만들어 확인)');
+  // 실측: 1920x1080 · h264 · 24fps · 8.00초 · aac · 6.7MB (네트워크 캡처 720p 는 2.6MB 였다)
+  //   → maybeUpscale 이 'width >= 1920 && height >= 1080' 이라 **로컬 GPU 업스케일을 건너뛴다**.
+  ok(MAIN.indexOf('if (info.width >= W && info.height >= H) {') >= 0,
+    '업스케일 생략 판정이 그대로다 — Flow 1080p(1920x1080)면 로컬 업스케일을 건너뛴다');
+  ok(MAIN.indexOf('⬆ 업스케일 생략') >= 0, '생략했다는 사실을 로그로 남긴다');
+
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');
   ok(/<option value="flow">Flow · Veo \(구독\)<\/option>/.test(APP), '③ 비디오 드롭다운에 「Flow · Veo (구독)」 항목이 있다');

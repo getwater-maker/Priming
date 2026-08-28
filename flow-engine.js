@@ -1725,32 +1725,11 @@ class FlowAutomator {
       if (!opened) { this.log(`  [i2v ${num}] ⚠ '시작' 프레임 버튼 없음 — 동영상/프레임 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false; }
       await this.page.waitForTimeout(900);
 
-      // 2) 숨김 file input(accept=image)에 직접 설정 — 네이티브 대화상자 회피 (미디어 업로드 버튼 클릭 대신)
-      let set = false;
-      try {
-        const inputs = await this.page.$$('input[type="file"]');
-        for (const inp of inputs) {
-          const accept = (await inp.getAttribute('accept')) || '';
-          if (accept && !/image/i.test(accept)) continue;
-          await inp.setInputFiles(imagePath);
-          set = true; this.log(`  [i2v ${num}] 업로드 전송(accept="${accept}") — 처리 대기`); break;
-        }
-      } catch (e) { this.log(`  [i2v ${num}] setInputFiles 예외: ${e.message}`); }
-      if (!set) { this.log(`  [i2v ${num}] ⚠ 이미지 file input 못 찾음`); await this._dumpFrameAttachUI(); return false; }
-      await this.page.waitForTimeout(3500); // 업로드+썸네일 처리
-
-      // 3) '프롬프트에 추가' 클릭 → 시작 프레임으로 확정
-      let added = false;
-      try {
-        const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false }).first();
-        await add.waitFor({ state: 'visible', timeout: 10000 });
-        await add.click({ timeout: 3000 });
-        added = true;
-      } catch (_) {}
-      if (!added) { this.log(`  [i2v ${num}] ⚠ '프롬프트에 추가' 못 찾음(업로드 지연?) — 덤프`); await this._dumpFrameAttachUI(); return false; }
-      await this.page.waitForTimeout(1200);
-      this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
-      return true;
+      // 2)·3) 업로드 → 「프롬프트에 추가」 — **애셋 모드와 같은 다이얼로그**라 공통 헬퍼를 쓴다.
+      //   (두 벌로 두면 한쪽만 고쳐져 어긋난다 — 실제로 업로드 대기 버그를 두 번 고칠 뻔했다)
+      const okAdd = await this._uploadAndAddToPrompt(imagePath, num, 'i2v');
+      if (okAdd) this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
+      return okAdd;
     } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
   }
 
@@ -1797,14 +1776,23 @@ class FlowAutomator {
       }
     } catch (e) { this.log(`  [${label} ${num}] setInputFiles 예외: ${e.message}`); }
     if (!set) { this.log(`  [${label} ${num}] ⚠ 이미지 file input 못 찾음`); await this._dumpFrameAttachUI(); return false; }
-    await this.page.waitForTimeout(3500);
 
+    // 🔴 업로드 처리(썸네일 생성 + 자동 선택)에 시간이 걸린다 — **실측 약 9초**(2026-08-28).
+    //   옛 코드는 고정 3.5초만 기다렸다 → 그 시점엔 「프롬프트에 추가」가 아직 **disabled** 라
+    //   Playwright 의 actionability 검사(enabled 대기)에서 3초 타임아웃 → 첨부가 통째로 실패했다.
+    //   ⚠ 버튼은 **보이고 가려지지도 않았다** — 눈으로는 멀쩡해 보여 원인을 오해하기 쉽다(disabled 였다).
+    //   → 고정 대기를 버리고 **활성화될 때까지** 기다린다(최대 40초).
     try {
       const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false }).first();
-      await add.waitFor({ state: 'visible', timeout: 10000 });
-      await add.click({ timeout: 3000 });
-    } catch (_) {
-      this.log(`  [${label} ${num}] ⚠ '프롬프트에 추가' 못 찾음(업로드 지연?) — 덤프`); await this._dumpFrameAttachUI(); return false;
+      await add.waitFor({ state: 'visible', timeout: 20000 });
+      await this.page.waitForFunction(() => {
+        const b = Array.from(document.querySelectorAll('button')).find((x) => (x.innerText || '').includes('프롬프트에 추가'));
+        return !!b && !b.disabled;
+      }, null, { timeout: 40000 });
+      await add.click({ timeout: 5000 });
+    } catch (e) {
+      this.log(`  [${label} ${num}] ⚠ '프롬프트에 추가' 를 누르지 못했습니다 (${(e && e.message || '').split('\n')[0].slice(0, 80)}) — 덤프`);
+      await this._dumpFrameAttachUI(); return false;
     }
     await this.page.waitForTimeout(1200);
     this.log(`  [${label} ${num}] 첨부 완료 ✓`);
