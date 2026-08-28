@@ -24,6 +24,10 @@ const DEFAULTS = {
   //   ⚠ Flow 웹 UI 드롭다운에 이 라벨이 실제로 존재하는지 실측 필요 — 없으면 _selectModel 이 조용히
   //   무시하고 기존 기본 모델로 진행(안전, 에러 없음).
   flowImageModel: 'Nano Banana 2',
+  // Flow 비디오(i2v) 모델 — 'Veo 3.1 - Lite'(기본·가장 쌈) / 'Veo 3.1 - Fast' / 'Veo 3.1 - Quality'.
+  //   2026-08-28 Flow UI 실측 라벨 그대로다(글자가 다르면 _selectModel 이 못 찾아 기본 모델로 진행).
+  //   ⚠ Veo 는 생성당 크레딧을 쓴다(Lite x1 = 10크레딧) — 화질을 올리면 크레딧도 오른다.
+  flowVideoModel: 'Veo 3.1 - Lite',
 };
 
 function load() {
@@ -37,10 +41,11 @@ function load() {
         order,
         enabled: { ...DEFAULTS.enabled, ...(j.enabled || {}) },
         flowImageModel: j.flowImageModel || DEFAULTS.flowImageModel,
+        flowVideoModel: j.flowVideoModel || DEFAULTS.flowVideoModel,
       };
     }
   } catch (e) { /* ignore */ }
-  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel };
+  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel };
 }
 
 function save(patch) {

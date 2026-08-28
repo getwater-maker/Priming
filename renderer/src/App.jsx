@@ -511,7 +511,7 @@ export default function App() {
         //   옛 'rotate'(순환) → 'genspark'. 드롭다운이 Flow·Genspark 로 분리됐고(2026-08-26), 고른 쪽을
         //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
-        if (p.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
+        if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -605,7 +605,7 @@ export default function App() {
     // comfy(z-image/Krea2)·gemini·genspark·flow 는 유효 — 보존. 옛 'rotate' 만 genspark 로 이관.
     if (s.imgEngine != null) setImgEngine(s.imgEngine === 'rotate' ? 'genspark' : s.imgEngine);
     // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
-    if (s.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
+    if (s.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
     hasStoredRangeRef.current = (s.vidFrom != null || s.vidTo != null); // 저장된 범위 있으면 기본값 effect 억제
@@ -2083,12 +2083,14 @@ export default function App() {
             <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <option value="grok">Grok (브라우저)</option>
+              <option value="flow">Flow · Veo (구독)</option>
               <option value="grok-api">Grok API (유료)</option>
               <ComfyEngineOptions cfg={cvidCfg} kind="video" />
               <option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}>⚙ 계정</button>}
             {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
+            {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}>⚙ Veo</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
@@ -2526,7 +2528,7 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지·비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -2608,6 +2610,17 @@ export default function App() {
                 </select>
                 <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Flow 계정 추가·로그인·일일한도" onClick={() => { setSettingsTab('acct'); setSettingsMsg(''); loadAcct(); }}>👤 계정 관리</button>
               </div>
+              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 비디오 모델</label>
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoModel) || 'Veo 3.1 - Lite'}
+                  title="Flow i2v 비디오 모델(Veo). 그룹 이미지를 시작 프레임으로 넣어 만듭니다. 생성당 크레딧을 씁니다 — Lite x1 = 10크레딧."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoModel: e.target.value })}>
+                  <option value="Veo 3.1 - Lite">Veo 3.1 - Lite (기본 · 10크레딧)</option>
+                  <option value="Veo 3.1 - Fast">Veo 3.1 - Fast</option>
+                  <option value="Veo 3.1 - Quality">Veo 3.1 - Quality (고화질 · 크레딧↑)</option>
+                </select>
+              </div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.</div>
               <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
               {lora && (
                 <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>

@@ -2110,6 +2110,123 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
   }
 }
 
+// ── Flow(Google Flow · Veo) i2v 비디오 ────────────────────────────────────────
+//   그룹 이미지를 **시작 프레임**으로 넣어 영상을 만든다(text-to-video 가 아니다 — 화풍이 튀지 않게).
+//   🔑 이미지 경로(runFlowImages)와 **같은 브라우저·같은 계정 스토어**를 쓴다 →
+//      파이프라인에서 TTS/이미지와 병렬로 돌리지 않는다(순차 3단계). videoPipeline 판정에서 제외돼 있다.
+//   🔑 Flow UI 에는 **길이 옵션이 없다**(2026-08-28 실측: 이미지/동영상 · 프레임/애셋 · 비율 · 모델 · 매수뿐).
+//      Veo 가 정하는 길이(약 8초)로 나오므로, 그룹 TTS 가 그보다 길면 .vrew 에서 뒷부분은 이미지가 채운다.
+//   ⚠ 생성당 크레딧을 쓴다(Veo 3.1 Lite x1 = 10크레딧). 매수는 x1 로 고정한다 — 우리는 그룹당 1개만 쓴다.
+async function runFlowVideos(pr, mediaDir, onlyNums) {
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const FlowAccounts = require('./core/flow-accounts');
+  const model = require('./core/image-rotation').load().flowVideoModel;
+  const cap = FlowAccounts.load().dailyCap;
+  const capTxt = cap > 0 ? String(cap) : '무제한';
+  const acctTotal = FlowAccounts.list().accounts.length;
+  const tried = new Set();
+  let loopGuard = 0;
+
+  while (!S.abort) {
+    // 이미지가 있어야 i2v 가 된다. 이미 영상이 있는 그룹은 건너뛴다(이어받기).
+    const targets = pr.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num))
+      && g.imagePath && fs.existsSync(g.imagePath)
+      && !(g.videoPath && fs.existsSync(g.videoPath)));
+    if (!targets.length) {
+      if (loopGuard === 0) log('🎬 Flow i2v — 영상화할(이미지 있는) 그룹이 없습니다');
+      break;
+    }
+    const acc = FlowAccounts.pickNext(tried);
+    if (!acc) {
+      log('⚠ 모든 Flow 계정 시도/소진 — 남은 영상은 만들지 못했습니다');
+      try {
+        for (const a of FlowAccounts.list().accounts) {
+          const why = a.cooling ? `쉬는 중 — ${new Date(a.coolUntil).toLocaleTimeString('ko-KR')} 이후 재사용`
+            : ((cap > 0 && a.used >= cap) ? '오늘 한도 도달'
+            : (tried.has(a.id) ? '이번에 시도했으나 0개' : '사용 가능'));
+          log(`   · ${a.label}: ${why} (오늘 ${a.used}/${capTxt})`);
+        }
+      } catch (_) {}
+      break;
+    }
+    tried.add(acc.id);
+    if (++loopGuard > acctTotal + 2) { log('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
+    log(`🎬 ${prLabel(pr)} 비디오 생성 (Flow ${model} · ${targets.length}개 그룹 · 계정 ${acc.label} 오늘 ${acc.used}/${capTxt})…`);
+
+    const workDir = path.join(os.tmpdir(), `sm_flowvid_${pr.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
+    const imgDir = path.join(workDir, 'images');
+    fs.mkdirSync(imgDir, { recursive: true });
+    const eng = getFlowEng(flowProfileDir(acc.id));
+
+    // 프롬프트: 대본의 영상 프롬프트 → 모션 노트 → 기본. 부정 절은 끝으로 모은다(이미지·ComfyUI 와 같은 정책).
+    const paragraphs = targets.map((g) => pr.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
+    const customPrompts = targets.map((g) => P.normalizePromptNegations(
+      (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim())
+      || 'natural slow motion, subtle camera movement, cinematic'));
+    const frameImages = targets.map((g) => g.imagePath);
+    targets.forEach((g) => { g.videoStatus = 'generating'; });
+    pushDtoUpdate();
+
+    // 출력 매핑 — flow-engine 은 `NN_<본문일부>.mp4` 로 저장한다(NN = 제출 순서 = targets 순서).
+    let copiedTotal = 0;
+    const mapOnce = (final) => {
+      let files = [];
+      try { files = fs.readdirSync(imgDir).filter((f) => /\.mp4$/i.test(f)).sort(); } catch { return 0; }
+      let n = 0;
+      targets.forEach((g, i) => {
+        if (g.videoPath && g.videoPath.startsWith(mediaDir) && fs.existsSync(g.videoPath)) return;
+        let f = files.find((x) => x.startsWith(String(i + 1).padStart(2, '0')));
+        if (!f && final) f = files[i];
+        if (!f) return;
+        const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+        try {
+          fs.copyFileSync(path.join(imgDir, f), dest);
+          g.videoPath = dest; g.videoStatus = 'done'; n++; copiedTotal++;
+          if (final) log(`  ✓ G${g.num} → ${path.basename(dest)}`);
+        } catch (e) { log(`영상 복사 실패 G${g.num}: ${e.message}`); }
+      });
+      return n;
+    };
+    const poll = setInterval(() => { if (mapOnce(false) > 0) pushDtoUpdate(); }, 3000);
+    let res = null; let noAccess = false;
+    try {
+      res = await eng.run({
+        paragraphs, customPrompts, mediaType: 'video', model, count: 'x1',
+        frameImages,                    // 시작 프레임 = 그룹 이미지 (첨부 실패하면 그 컷은 만들지 않는다)
+        ratio: pr.aspect || '16:9', outputDir: workDir,
+        withSubtitle: false, vrewOnly: false, skipVrew: true,
+        antiDetect: { enabled: true, preset: '기본', dailyLimit: cap }, profileId: acc.id,
+      });
+    } catch (e) {
+      if (e && e.flowNoAccess) { noAccess = true; log(`⛔ Flow 계정 \"${acc.label}\" — ${e.message}`); }
+      else log(`[Flow] ${acc.label} 영상 실행 오류: ${e.message}`);
+    } finally { clearInterval(poll); }
+
+    mapOnce(true);
+    const made = copiedTotal;
+    FlowAccounts.markUsed(acc.id, made);
+    log(`[Flow] ${acc.label} 영상 매핑 ${made}/${targets.length}`);
+    // 못 만든 그룹은 'generating' 에 고착되지 않게 정리한다(썸네일 스피너가 영원히 돈다 — v0.2.62 계열).
+    targets.forEach((g) => { if (g.videoStatus === 'generating') g.videoStatus = (g.videoPath ? 'done' : 'fail'); });
+    pushDtoUpdate();
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+    if (S.abort) break;
+
+    if (noAccess) {
+      FlowAccounts.cooldown(acc.id, 12 * 60);
+      log('   → 이 계정은 12시간 쉽니다. Google AI 구독(Pro/Ultra)을 넣으면 바로 다시 쓰입니다.');
+    } else if (res && res.rateExhausted && res.reason === 'daily-limit') {
+      log(`🛑 Flow 계정 \"${acc.label}\" 계정당 하루 한도 도달. 자정에 초기화됩니다.`);
+    } else if (res && res.rateExhausted) {
+      FlowAccounts.cooldown(acc.id, 30);
+      log(`⚠ Flow 계정 \"${acc.label}\" 한도/차단 — 30분 쿨다운, 지금은 다음 계정으로 순환`);
+    } else if (made === 0) {
+      log(`⚠ Flow 계정 \"${acc.label}\" 영상 0개 — 다음 계정으로 (Flow UI 문제이거나 시작 프레임 첨부 실패일 수 있음)`);
+    }
+  }
+  return {};
+}
+
 // ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.
 //   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
 // Nano Banana 2 Lite (Gemini 이미지 API) — 브라우저 없이 API 로 이미지 생성. imgEngine==='gemini' 일 때.
@@ -2590,6 +2707,8 @@ function genGroupVideosManual(pr, mediaDir, onlyNums, videoEngine, label) {
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
+  // Flow(Google Flow · Veo) i2v — 브라우저. 이미지 경로와 같은 크롬을 쓰므로 파이프라인 병렬에 넣지 않는다.
+  if (videoEngine === 'flow') { await runFlowVideos(pr, mediaDir, onlyNums); return {}; }
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
@@ -4172,9 +4291,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       // 이미지·비디오 생성 도구는 **헤더(공통=큐 단위) 우선** — "어느 서비스/GPU로 만드냐"는 큐 전체 공통 선택이라,
       //   헤더에서 고른 도구(예 ComfyUI Krea2)를 큐 전 항목에 적용한다. 헤더값이 없을 때만 항목 저장값 폴백.
       //   (예전엔 항목별 stale 값이 우선이라, 이어받기한 대본이 옛 순환/genspark 로 되돌아가던 문제 — 로이 결정 2026-07-22.)
-      //   제거된 영상엔진(flow/wan/grok10)은 grok 으로 보정. (comfy::path·grok-api 는 그대로)
+      //   제거된 영상엔진(wan/grok10)은 grok 으로 보정. (comfy::path·grok-api·flow 는 그대로)
+      //   ⚠ 'flow' 를 여기 넣지 말 것 — 2026-08-28 에 Flow·Veo 비디오가 부활했다. 넣으면 헤더에서 골라도 조용히 Grok 으로 만든다(v0.3.50 과 같은 계열의 사고).
       const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
-      const ve = (['flow', 'wan', 'grok10'].includes(rawVe)) ? 'grok' : rawVe;
+      const ve = (['wan', 'grok10'].includes(rawVe)) ? 'grok' : rawVe;
       const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
       await runMakeAllCore({
         engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,

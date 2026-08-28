@@ -784,7 +784,16 @@ class FlowAutomator {
 
         // i2v: 영상 모드에서 이 단락의 소스 이미지를 프레임/애셋으로 첨부 (단락마다)
         if (opts.mediaType === 'video' && opts.frameImages && opts.frameImages[i]) {
-          await this._attachFrameImage(opts.frameImages[i], num);
+          const frameOk = await this._attachFrameImage(opts.frameImages[i], num);
+          // 🔑 첨부에 실패했는데 그대로 만들면 **원본 이미지와 무관한 영상**이 나오고 크레딧만 나간다
+          //   (Veo 3.1 Lite x1 = 10크레딧 · 2026-08-28 Flow UI 실측). i2v 로 쓰는 우리 용도에선
+          //   그건 성공이 아니라 실패다 → 이 컷을 건너뛴다. 텍스트만으로 만들고 싶으면 frameImages 를 안 넘기면 된다.
+          if (!frameOk && opts.requireFrame !== false) {
+            this.log(`[${num}] ⏭ 시작 프레임 첨부 실패 — 이 컷은 만들지 않습니다(엉뚱한 영상·크레딧 낭비 방지)`);
+            if (this._failedNums) this._failedNums.push({ num, text: paragraphs[i].substring(0, 80) });
+            consecutiveFails++;
+            continue;
+          }
         }
 
         // 동영상 모드: 네트워크 캡처 시작
@@ -1298,11 +1307,9 @@ class FlowAutomator {
     if (countName && await this._clickTab(countName)) this.log(`  [설정] 매수 ${countName} ✓`);
     await this.page.waitForTimeout(200);
 
-    // 5) 모델 — 기본값과 다를 때만 드롭다운에서 변경
-    const defaultModel = opts.mediaType === 'video' ? 'Veo 3.1 - Fast' : 'Nano Banana 2';
-    if (opts.model && opts.model !== defaultModel) {
-      await this._selectModel(opts.model);
-    }
+    // 5) 모델 — _selectModel 이 **현재 라벨을 읽어** 같으면 스스로 건너뛴다.
+    //   ⛔ 여기서 defaultModel 을 하드코딩해 비교하던 옛 방식은 폐기했다(그 값이 실제와 달랐다).
+    if (opts.model) await this._selectModel(opts.model);
 
     await this.page.keyboard.press('Escape');
     await this.page.waitForTimeout(500);
@@ -2509,17 +2516,40 @@ class FlowAutomator {
     }
   }
 
+  // 모델 드롭다운에서 원하는 모델을 고른다. 성공하면 true.
+  //   🔑 **드롭다운 버튼의 라벨이 곧 현재 모델**이다 (2026-08-28 Flow UI 실측):
+  //     이미지 = "Nano Banana 2" / 동영상 = "Veo 3.1 - Lite"(기본)·"Veo 3.1 - Fast"·
+  //     "Veo 3.1 - Quality"·"Omni 1.1 Flash".
+  //   ⛔ 옛 코드는 'Nano Banana' 텍스트 버튼만 찾아 **동영상 모드에서 항상 실패**했고 로그도 없어,
+  //      Fast/Quality 를 골라도 조용히 Lite 로 생성됐다.
+  //   🔑 하드코딩된 '기본 모델' 가정도 버린다 — 현재 라벨을 읽어 비교하면 Flow 가 마지막 선택을
+  //      기억하고 있어도 정확하다(예전엔 defaultModel 을 'Veo 3.1 - Fast' 로 잘못 알고 있었다).
   async _selectModel(model) {
+    if (!model) return false;
     try {
-      const dropdown = await this.page.$('button:has-text("Nano Banana")');
-      if (dropdown && await dropdown.isVisible()) {
-        await dropdown.click();
-        await this.page.waitForTimeout(500);
-        const opt = await this.page.$(`text="${model}"`);
-        if (opt && await opt.isVisible()) await opt.click();
-        await this.page.waitForTimeout(300);
+      let dropdown = null;
+      for (const sel of ['button:has-text("Veo")', 'button:has-text("Nano Banana")', 'button:has-text("Omni")']) {
+        const el = await this.page.$(sel);
+        if (el && await el.isVisible().catch(() => false)) { dropdown = el; break; }
       }
-    } catch {}
+      if (!dropdown) { this.log(`  [!] 모델 드롭다운 못 찾음 — 기본 모델로 진행 (요청: ${model})`); return false; }
+      const cur = ((await dropdown.textContent()) || '').replace(/\s+/g, ' ').trim();
+      if (cur.includes(model)) { this.log(`  [설정] 모델 ${model} (이미 선택됨) ✓`); return true; }
+      await dropdown.click();
+      await this.page.waitForTimeout(600);
+      // 열린 메뉴의 role=menuitem 에서 고른다. 트리거 버튼도 같은 글자라 exact text 만으론 그쪽을 집는다.
+      let picked = false;
+      try {
+        const opt = this.page.getByRole('menuitem').filter({ hasText: model }).first();
+        await opt.waitFor({ state: 'visible', timeout: 3000 });
+        await opt.click({ timeout: 3000 });
+        picked = true;
+      } catch (_) {}
+      await this.page.waitForTimeout(400);
+      if (picked) this.log(`  [설정] 모델 ${model} ✓ (이전 ${cur})`);
+      else { this.log(`  [!] 모델 '${model}' 항목 없음 — ${cur} 로 진행`); try { await this.page.keyboard.press('Escape'); } catch (_) {} }
+      return picked;
+    } catch (e) { this.log(`  [!] 모델 선택 예외: ${e.message}`); return false; }
   }
 
   async _clickFinalCreateV2() {
