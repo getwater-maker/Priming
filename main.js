@@ -2125,6 +2125,8 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
   // 첨부 방식 — 'frame'(시작 프레임 고정 i2v · 기본) | 'asset'(참조 이미지). ⚙ 설정에서 고른다.
   const attachMode = _rot.flowVideoAttach === 'asset' ? 'asset' : 'frame';
   const attachTxt = attachMode === 'asset' ? '애셋(참조)' : '프레임(시작 프레임)';
+  // 완성된 영상을 받을 해상도 — 1080p 로 받으면 로컬 GPU 업스케일이 생략된다(maybeUpscale 이 해상도로 판단).
+  const videoDownload = ['1080p', '720p', 'off'].includes(_rot.flowVideoDownload) ? _rot.flowVideoDownload : '1080p';
   const cap = FlowAccounts.load().dailyCap;
   const capTxt = cap > 0 ? String(cap) : '무제한';
   const acctTotal = FlowAccounts.list().accounts.length;
@@ -2155,7 +2157,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     }
     tried.add(acc.id);
     if (++loopGuard > acctTotal + 2) { log('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
-    log(`🎬 ${prLabel(pr)} 비디오 생성 (Flow ${model} · ${attachTxt} · ${targets.length}개 그룹 · 계정 ${acc.label} 오늘 ${acc.used}/${capTxt})…`);
+    log(`🎬 ${prLabel(pr)} 비디오 생성 (Flow ${model} · ${attachTxt} · ${videoDownload === 'off' ? '원본' : videoDownload} · ${targets.length}개 그룹 · 계정 ${acc.label} 오늘 ${acc.used}/${capTxt})…`);
 
     const workDir = path.join(os.tmpdir(), `sm_flowvid_${pr.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
     const imgDir = path.join(workDir, 'images');
@@ -2197,6 +2199,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
       res = await eng.run({
         paragraphs, customPrompts, mediaType: 'video', model, count: 'x1',
         attachMode,                     // 'frame'(첫 프레임 고정) | 'asset'(참조 이미지)
+        videoDownload,                  // '1080p'(업스케일 · 로컬 업스케일 생략) | '720p' | 'off'
         frameImages,                    // 시작 프레임 = 그룹 이미지 (첨부 실패하면 그 컷은 만들지 않는다)
         ratio: pr.aspect || '16:9', outputDir: workDir,
         withSubtitle: false, vrewOnly: false, skipVrew: true,

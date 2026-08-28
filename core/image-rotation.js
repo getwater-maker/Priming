@@ -33,6 +33,11 @@ const DEFAULTS = {
   //   'asset' = 프롬프트 바 [+] 로 붙이는 **참조 이미지** → Veo 가 참고만 하므로 구도·인물이 달라질 수 있다.
   //   🔑 대본 그림을 그대로 움직이게 하려면 frame, 캐릭터·분위기만 참고시키려면 asset.
   flowVideoAttach: 'frame',
+  // 완성된 동영상을 어느 해상도로 **다운로드** 할지 (2026-08-28 실측 — Flow 카드 메뉴의 다운로드 항목):
+  //   '1080p' = 업스케일본(기본) · '720p' = 원본 크기 · 'off' = 다운로드 메뉴를 쓰지 않고 재생 소스 사용.
+  //   🔑 재생 소스(video src)는 **720p 원본**이다. 1080p 로 받으면 우리 쪽 로컬 GPU 업스케일
+  //     (Real-ESRGAN · 장당 수 분)이 통째로 생략된다 — maybeUpscale 이 해상도를 보고 스스로 건너뛴다.
+  flowVideoDownload: '1080p',
 };
 
 function load() {
@@ -48,10 +53,11 @@ function load() {
         flowImageModel: j.flowImageModel || DEFAULTS.flowImageModel,
         flowVideoModel: j.flowVideoModel || DEFAULTS.flowVideoModel,
         flowVideoAttach: (j.flowVideoAttach === 'asset') ? 'asset' : DEFAULTS.flowVideoAttach,
+        flowVideoDownload: ['1080p', '720p', 'off'].includes(j.flowVideoDownload) ? j.flowVideoDownload : DEFAULTS.flowVideoDownload,
       };
     }
   } catch (e) { /* ignore */ }
-  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel, flowVideoAttach: DEFAULTS.flowVideoAttach };
+  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel, flowVideoAttach: DEFAULTS.flowVideoAttach, flowVideoDownload: DEFAULTS.flowVideoDownload };
 }
 
 function save(patch) {

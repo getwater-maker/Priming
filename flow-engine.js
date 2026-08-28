@@ -323,6 +323,10 @@ class FlowAutomator {
       //   ⚠ 이 값이 _runSequentialMode 까지 전달돼야 한다 — 안 넘기면 골라도 늘 frame 으로 동작한다.
       attachMode = 'frame',
       requireFrame = true,       // 첨부 실패 시 그 컷을 만들지 않는다(엉뚱한 영상·크레딧 낭비 방지)
+      // 완성된 동영상을 어느 해상도로 **다운로드** 할지 — '1080p'(업스케일 · 기본) | '720p'(원본) | 'off'.
+      //   ⚠ 재생 소스(video src)는 **720p 원본**이다. 1080p 는 Flow 의 다운로드 메뉴에서만 받을 수 있고,
+      //     그걸 받으면 우리 쪽 로컬 GPU 업스케일(Real-ESRGAN, 수 분)이 통째로 생략된다.
+      videoDownload = '1080p',
       characterMap = [],
       kenburnsMode = 'uniform',
       kenburnsSpeed = 'normal',
@@ -606,7 +610,7 @@ class FlowAutomator {
       });
     } else {
       successCount = await this._runSequentialMode(paragraphs, prompts, imgDir, {
-        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution, frameImages, attachMode, requireFrame,
+        mediaType, ratio, model, count, withSubtitle, humanizedTyping, typingSpeed, downloadResolution, frameImages, attachMode, requireFrame, videoDownload,
       });
     }
 
@@ -843,6 +847,10 @@ class FlowAutomator {
           }
         }
 
+        // 🔑 제출 **전에** 지금 있는 결과 카드 id 를 적어 둔다 — 생성 뒤 '새로 생긴 것'만 집기 위해서다.
+        //   (Grok 에서 사이드바의 옛 영상을 받아가 .vrew 에 실은 v0.3.20 사고를 구조로 막는다)
+        const beforeIds = opts.mediaType === 'video' ? await this._mediaIds() : [];
+
         await this._clickFinalCreateV2();
 
         // 생성 대기
@@ -856,13 +864,29 @@ class FlowAutomator {
         await this._waitIfPaused();
         if (this._stopped) break;
 
-        if (imageBuffer || capturedVideos.length > 0) {
-          if (capturedVideos.length > 0) {
-            // 동영상: 가장 큰 캡처 저장
-            const largest = capturedVideos.sort((a, b) => b.length - a.length)[0];
+        // ── 동영상: **1080p 업스케일 다운로드를 우선** 시도한다 (2026-08-28 로이 지적) ──
+        //   재생 소스(video src)는 720p 원본이라, 그걸 받아 나중에 로컬 GPU 로 업스케일하면 훨씬 느리다.
+        //   Flow 는 카드 메뉴에서 270p(GIF)/720p(원본)/1080p(업스케일)/4K(플랜 업그레이드) 를 준다.
+        let videoBuf = null;
+        if (opts.mediaType === 'video') {
+          const want = opts.videoDownload || '1080p';
+          if (want !== 'off') {
+            const found = await this._newMediaCard(beforeIds);
+            if (found) videoBuf = await this._downloadVideoFromCard(found.card, num, want);
+            else this.log(`  [DL ${num}] ⚠ 새로 생긴 결과 카드를 못 찾음 — 재생 소스로 폴백`);
+          }
+          if (!videoBuf && capturedVideos.length > 0) {
+            videoBuf = capturedVideos.sort((a, b) => b.length - a.length)[0];
+            this.log(`  [DL ${num}] 재생 소스(720p 원본) 사용`);
+          }
+          if (!videoBuf && imageBuffer) { videoBuf = imageBuffer; this.log(`  [DL ${num}] 재생 소스 버퍼 사용`); }
+        }
+
+        if (imageBuffer || videoBuf) {
+          if (videoBuf) {
             const finalPath = path.join(imgDir, `${num}_${shortText}.mp4`);
-            fs.writeFileSync(finalPath, largest);
-            this.log(`[${num}] 동영상 저장: ${path.basename(finalPath)} (${Math.round(largest.length / 1024)}KB)`);
+            fs.writeFileSync(finalPath, videoBuf);
+            this.log(`[${num}] 동영상 저장: ${path.basename(finalPath)} (${Math.round(videoBuf.length / 1024)}KB)`);
           } else {
             await this._saveImage(imageBuffer, num, shortText, imgDir, opts);
           }
@@ -1612,6 +1636,76 @@ class FlowAutomator {
       this.log(`  [고해상도] 실패: ${err.message}`);
     }
     return null;
+  }
+
+  // ─── 결과 카드 식별 ──────────────────────────────────────────────────────
+  //   각 결과 카드는 링크 `/edit/<uuid>` 를 갖는다(2026-08-28 실측). 제출 전후를 비교하면
+  //   **방금 만든 것**을 정확히 집을 수 있다 — 갤러리의 옛 영상을 받아가는 사고를 원천 차단한다.
+  async _mediaIds() {
+    try {
+      return await this.page.$$eval('a[href*="/edit/"]', (els) => els
+        .map((a) => ((a.getAttribute('href') || '').split('/edit/')[1] || '').trim())
+        .filter(Boolean));
+    } catch (_) { return []; }
+  }
+
+  // 제출 후 새로 생긴 결과 카드. 아직 안 나타났으면 잠깐 기다린다.
+  async _newMediaCard(beforeIds, timeoutMs = 20000) {
+    const before = new Set(beforeIds || []);
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      try {
+        const links = await this.page.$$('a[href*="/edit/"]');
+        for (const a of links) {
+          const href = (await a.getAttribute('href')) || '';
+          const id = (href.split('/edit/')[1] || '').trim();
+          if (!id || before.has(id)) continue;
+          // 카드 본체 = 링크의 조상 button (그 안에 ♡ ↻ more_vert 툴바가 있다)
+          const h = await a.evaluateHandle((el) => el.closest('button') || el.parentElement);
+          const card = h.asElement();
+          if (card) return { card, id };
+        }
+      } catch (_) {}
+      await this.page.waitForTimeout(1000);
+    }
+    return null;
+  }
+
+  // ─── 완성된 동영상을 원하는 해상도로 다운로드 ────────────────────────────
+  //   실측 흐름(2026-08-28): 카드 hover → more_vert → 「다운로드」에 **hover**(클릭 아님) →
+  //   서브메뉴 [270p 애니메이션 GIF · 720p 원본 크기 · 1080p 업스케일 · 4K(업그레이드)] 중 선택.
+  //   ⚠ 1080p 는 **업스케일**이라 파일이 만들어지기까지 시간이 걸린다 → 다운로드 대기를 넉넉히 준다.
+  async _downloadVideoFromCard(card, num, want = '1080p') {
+    try {
+      await card.hover();
+      await this.page.waitForTimeout(600);
+      const moreBtn = await card.$('button:has-text("more_vert")');
+      if (!moreBtn) { this.log(`  [DL ${num}] ⚠ more_vert 버튼 없음`); return null; }
+      await moreBtn.click();
+      await this.page.waitForTimeout(700);
+
+      const dl = this.page.getByRole('menuitem').filter({ hasText: '다운로드' }).first();
+      await dl.waitFor({ state: 'visible', timeout: 4000 });
+      await dl.hover();                       // 🔑 hover 로 서브메뉴가 열린다
+      await this.page.waitForTimeout(800);
+
+      const opt = this.page.getByRole('menuitem').filter({ hasText: want }).first();
+      await opt.waitFor({ state: 'visible', timeout: 4000 });
+      const [download] = await Promise.all([
+        this.page.waitForEvent('download', { timeout: 180000 }),
+        opt.click({ timeout: 3000 }),
+      ]);
+      const tmpPath = path.join(os.tmpdir(), `flow_vid_${Date.now().toString(36)}.mp4`);
+      await download.saveAs(tmpPath);
+      const buf = fs.readFileSync(tmpPath);
+      try { fs.unlinkSync(tmpPath); } catch (_) {}
+      this.log(`  [DL ${num}] ${want} 다운로드 완료 (${Math.round(buf.length / 1024)}KB)`);
+      return buf;
+    } catch (e) {
+      this.log(`  [DL ${num}] ${want} 다운로드 실패: ${e.message} — 재생 소스로 폴백`);
+      try { await this.page.keyboard.press('Escape'); } catch (_) {}
+      return null;
+    }
   }
 
   // ─── i2v: 동영상 '프레임' 모드에서 소스 이미지를 '시작 프레임'으로 첨부 ───

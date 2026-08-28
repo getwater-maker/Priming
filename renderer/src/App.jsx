@@ -2629,7 +2629,17 @@ export default function App() {
                   <option value="asset">애셋 — 참조 이미지</option>
                 </select>
               </div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.</div>
+              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 다운로드</label>
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoDownload) || '1080p'}
+                  title="완성된 영상을 어느 해상도로 받을지. 1080p 로 받으면 이 PC 의 GPU 업스케일(장당 수 분)이 생략됩니다."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoDownload: e.target.value })}>
+                  <option value="1080p">1080p — 업스케일본 (권장)</option>
+                  <option value="720p">720p — 원본 크기</option>
+                  <option value="off">다운로드 안 함 — 재생 소스(720p)</option>
+                </select>
+              </div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.</div>
               <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
               {lora && (
                 <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>

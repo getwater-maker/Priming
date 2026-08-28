@@ -128,7 +128,7 @@ function mkProject(groups) {
 }
 
 // eng.run 을 흉내: workDir/images 에 `NN_본문.mp4` 를 만든다(= flow-engine 의 실제 저장 규약)
-function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'frame' }) {
+function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'frame', dl = '1080p' }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flowvid-test-'));
   const mediaDir = path.join(tmp, 'media-1');
   const pr = mkProject(groups); pr.aspect = aspect;
@@ -147,7 +147,7 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'fra
   };
   const fakeRequire = (m) => {
     if (/flow-accounts/.test(m)) return FakeAccounts;
-    if (/image-rotation/.test(m)) return { load: () => ({ flowVideoModel: 'Veo 3.1 - Fast', flowVideoAttach: attach }) };
+    if (/image-rotation/.test(m)) return { load: () => ({ flowVideoModel: 'Veo 3.1 - Fast', flowVideoAttach: attach, flowVideoDownload: dl }) };
     throw new Error('unexpected require: ' + m);
   };
   const eng = {
@@ -198,6 +198,7 @@ function img(dir, num) {
     eq(h.runCalls[0].ratio, '16:9', '프로젝트 비율을 넘긴다');
     eq(h.runCalls[0].frameImages.length, 2, '시작 프레임으로 그룹 이미지를 넘긴다');
     eq(h.runCalls[0].attachMode, 'frame', "기본 첨부 방식은 'frame'(첫 프레임 고정 i2v)");
+    eq(h.runCalls[0].videoDownload, '1080p', "기본 다운로드는 1080p(업스케일본) — 로컬 GPU 업스케일이 생략된다");
     ok(h.runCalls[0].frameImages[0].endsWith('01.png'), '첫 프레임 = G1 이미지');
     eq(h.runCalls[0].customPrompts[0], 'slow pan', '대본의 영상 프롬프트를 쓴다');
     eq(h.runCalls[0].customPrompts[1], 'drift', '영상 프롬프트가 없으면 모션 노트를 쓴다');
@@ -308,6 +309,38 @@ function img(dir, num) {
   ok(MAIN.indexOf('attachMode,') >= 0, 'runFlowVideos 가 attachMode 를 엔진에 넘긴다');
   ok(MAIN.indexOf("_rot.flowVideoAttach === 'asset' ? 'asset' : 'frame'") >= 0,
     '설정값이 asset 일 때만 asset — 그 외에는 안전한 frame 으로 떨어진다');
+
+  // ── 6-8 다운로드 해상도가 설정대로 전달된다 ──
+  {
+    const tmpImg = fs.mkdtempSync(path.join(os.tmpdir(), 'flowvid-img8-'));
+    const groups = [{ num: 1, imagePath: img(tmpImg, 1), videoPrompt: 'p' }];
+    const h = makeHarness({ groups, dl: '720p' });
+    await h.fn(h.pr, h.mediaDir, null);
+    eq(h.runCalls[0].videoDownload, '720p', '설정한 해상도가 그대로 넘어간다');
+    fs.rmSync(h.tmp, { recursive: true, force: true });
+    fs.rmSync(tmpImg, { recursive: true, force: true });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[10] 1080p 다운로드 — 재생 소스는 720p 원본이다 (원문 대조)');
+  ok(ENG.indexOf('async _downloadVideoFromCard(card, num, want = ' + String.fromCharCode(39) + '1080p' + String.fromCharCode(39) + ')') >= 0,
+    '_downloadVideoFromCard 가 존재한다 (기본 1080p)');
+  ok(ENG.indexOf('await dl.hover();') >= 0,
+    "「다운로드」는 **hover** 로 서브메뉴가 열린다 — 클릭이 아니다(2026-08-28 실측)");
+  ok(ENG.indexOf("getByRole('menuitem').filter({ hasText: '다운로드' })") >= 0,
+    '메뉴에서 다운로드 항목을 텍스트로 찾는다 (접근성 이름이 비어 있어 role 이름 매칭은 안 된다)');
+  ok(ENG.indexOf("waitForEvent('download'") >= 0, '브라우저 다운로드 이벤트를 받아 저장한다');
+  ok(ENG.indexOf('async _mediaIds()') >= 0 && ENG.indexOf('async _newMediaCard(beforeIds') >= 0,
+    '⛔ 제출 전후 카드 id 를 비교해 **방금 만든 것**만 집는다 (갤러리의 옛 영상을 받아가던 v0.3.20 계열 사고 방지)');
+  ok(ENG.indexOf('const beforeIds = ') >= 0 && ENG.indexOf('await this._clickFinalCreateV2()') > ENG.indexOf('const beforeIds = '),
+    '스냅샷은 **제출보다 먼저** 찍는다 (뒤에 찍으면 새 카드가 이미 포함돼 구분이 안 된다)');
+  ok(ENG.indexOf('frameImages, attachMode, requireFrame, videoDownload,') >= 0,
+    '⛔ videoDownload 가 _runSequentialMode 까지 전달된다 — 안 넘기면 설정이 조용히 무시된다');
+  ok(ENG.indexOf("videoDownload = '1080p',") >= 0, 'run() 기본값이 1080p 다');
+  ok(ENG.indexOf('재생 소스(720p 원본) 사용') >= 0, '다운로드가 안 되면 재생 소스로 폴백하고 그 사실을 로그로 남긴다');
+  ok(MAIN.indexOf('videoDownload,') >= 0, 'runFlowVideos 가 videoDownload 를 엔진에 넘긴다');
+  ok(APP.indexOf('flowVideoDownload: e.target.value') >= 0, 'App.jsx 에서 다운로드 해상도를 저장한다');
+  ok(APP.indexOf('1080p — 업스케일본 (권장)') >= 0, '설정에 다운로드 해상도 선택지가 있다');
 
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');
