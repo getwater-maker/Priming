@@ -97,10 +97,23 @@ function stubServer() {
     chk(/--disable-auto-launch/.test(src), '--disable-auto-launch (없으면 뜰 때마다 브라우저가 열린다)');
     chk(/\.venv/.test(src) && /standalone-env/.test(src), '.venv 를 쓰고 기반 환경 문제를 기록해 뒀다');
     chk(/--extra-model-paths-config/.test(src), '모델 경로 yaml 을 넘긴다(안 넘기면 모델 목록이 빈다)');
+    // 🔑 --enable-manager 가 없으면 웹 UI 에 커스텀 노드 매니저가 안 보여, 노드를 깔려면 Comfy Desktop 앱을
+    //   열 수밖에 없다 → Desktop 이 8188 을 가져가고 우리 서버(0.0.0.0)가 사라져 **아내 PC 원격 생성이 죽는다**
+    //   (2026-08-28 실측). Desktop 도 같은 플래그로 서버를 띄운다.
+    chk(/--enable-manager/.test(src), '--enable-manager (웹 UI 만으로 커스텀 노드·모델을 설치할 수 있게)');
+    chk(src.includes("'--listen', '0.0.0.0'"), '--listen 0.0.0.0 (아내 PC 원격 생성 — Desktop 서버는 127.0.0.1 이라 이게 죽는다)');
     chk(/port_busy/.test(src), '이미 떠 있으면 두 번 띄우지 않는다(포트가 다른 곳으로 밀리는 것 방지)');
     // 셸을 거치지 않는다 — cmd.exe 를 끼우면 서버가 사는 내내 검은 창이 남는다(v0.2.94 실측).
     // runpy 로 **같은 프로세스에서** main.py 를 돌리므로 자식 프로세스가 아예 없다.
     chk(!/\bos\.system\(|\bsubprocess\./.test(src), '셸·자식 프로세스를 쓰지 않는다(runpy 로 같은 프로세스에서 실행)');
+
+    // 웹 UI 진입 도구(바탕화면 바로가기가 부른다) — Desktop 앱을 열지 않고 같은 서버를 브라우저로 쓴다.
+    const op = path.join(__dirname, '..', 'comfy', 'comfy-open.pyw');
+    chk(fs.existsSync(op), 'comfy-open.pyw 가 저장소에 있다');
+    const osrc = fs.readFileSync(op, 'utf8');
+    chk(osrc.includes('--restart'), '--restart 로 8188 을 쥔 서버를 우리 런처로 되돌릴 수 있다');
+    chk(osrc.includes('comfy-server.pyw'), '같은 런처를 쓴다(진입점이 갈리면 다음 사람이 엉뚱한 쪽을 고친다)');
+    chk(osrc.split('print(').length === 1, 'pythonw 라 print 를 쓰지 않는다(파일 로그) — v0.2.95 와 같은 함정');
   }
 
   console.log('\n[3] 살아 있는지 판정(ping)');

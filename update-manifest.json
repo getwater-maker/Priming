@@ -1,5 +1,5 @@
 {
-  "version": "0.3.67",
+  "version": "0.3.68",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,8 +8,9 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "3b369fac7aa99726cd90052008fedcc3b468cdf8",
-    "comfy/comfy-server.pyw": "c9c69bd8aef76f0374a236fec6769274bd11dc06",
+    "CLAUDE.md": "75ae95391de375f91164f07399ac402b1f9b3563",
+    "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
+    "comfy/comfy-server.pyw": "c8d6ecc38797a221f1bbe9ce2f4da26cc9454d2d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
     "comfy/image_krea2_turbo_t2i (2).json": "8115c3e72e9303a36a9fc9ba066b8fa4bfcd0d7f",
     "comfy/image_z_image_turbo.json": "f0eedbd0b79416b35eaa0ba0748b8d1e7a2f484d",
@@ -80,7 +81,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "3697d39ef19ecde36a420190513f50d7c82c7be8",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "fec57cf53d3c29f95da8d29deb2c55808ae9f712",
+    "package.json": "dd3321ee94f24e7c41b00737e3ee1644dda68dfd",
     "preload.js": "fbd2f653da7b67d1fee9a73d119188149e39286c",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-DVh1I5E6.js": "087187b660f970092e62564618ae4bf47ea197c8",
