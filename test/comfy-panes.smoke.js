@@ -102,6 +102,11 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목도 있다');
     ok(vidOpts.some((o) => /::local::.*LTX2\.5/.test(o)), '🖥 로컬 × LTX2.5 조합이 목록에 있다: '
        + (vidOpts.filter((o) => o.includes('::local::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
+    // ☁ MiniMax H3 레퍼런스(클라우드) — 2026-08-30 신설. 번들 등록만으로 드롭다운에 떠야 한다
+    //   (ComfyUI 워크플로는 하드코딩 <option> 이 아니라 목록 기반이라 헤더·채널편집 양쪽에 자동 반영된다).
+    ok(vidOpts.some((o) => /::cloud::.*MiniMax H3 레퍼런스/.test(o)),
+       '☁ 클라우드 × MiniMax H3 레퍼런스 조합이 목록에 있다: '
+       + (vidOpts.filter((o) => o.includes('::cloud::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
     const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
     ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
        '이미지 드롭다운은 로컬·클라우드 둘 다 유지');

@@ -49,8 +49,14 @@ const BUNDLED = [
   { name: 'LTX2.3',    file: 'video_ltx2_3_i2v.json' },
   { name: 'LTX2.5',    file: 'video_ltx2_5_i2v.json' },
   // 🖥 로컬 전용 — RTX 3060 실측 5초/9.4분(1312x736). 크레딧 0 · 오디오 동시 생성.
-  //   ⚠ 클라우드(comfy.org)엔 minimax_h3 계열 모델이 없다 → ☁ 로 고르면 실패한다(이름에 (로컬) 명시).
+  //   ⚠ 이 파일은 Deno 커스텀 노드를 쓰므로 **클라우드에서는 실패한다**(이름에 (로컬) 명시).
   { name: 'MiniMax H3 turbo4 (로컬)', file: 'video_minimax_h3_turbo4_i2v.json' },
+  // ☁ 클라우드 전용 — 같은 MiniMax H3 레퍼런스 방식을 comfy.org 에서. 2026-08-29 실측으로 모델이
+  //   올라와 있음을 확인했다(unet minimax_h3_ref2va_pruned_int8_convrot · clip qwen3vl_32b_minimax_h3 ·
+  //   vae video/audio · lora minimax_h3_turbo_v4_step600). 로컬 Deno 노드 대신 **ComfyUI 네이티브**
+  //   MiniMaxH3ReferenceToVideo 를 쓴다(공식 템플릿 video_minimax_h3_r2v 를 API 포맷으로 변환).
+  //   ⚠ 이 파일은 로컬 ComfyUI 에 그 모델들이 없으면 실패한다(이름에 (클라우드) 명시).
+  { name: 'MiniMax H3 레퍼런스 (클라우드)', file: 'video_minimax_h3_ref2v_cloud.json' },
 ];
 // MiniMax H3 레퍼런스 프롬프트 접두사 — 대본은 그대로 두고 엔진이 붙인다(아래 _buildGraph 주석 참조).
 const MM_REF_PREFIX = '<Picture 1> is the exact scene: keep its composition, characters, clothing, colors and art style unchanged. ';
@@ -199,6 +205,15 @@ class ComfyVideo {
     if (aspect === '1:1') return { w: 1440, h: 1440 };
     return { w: 1088, h: 1920 }; // 9:16
   }
+  // MiniMax H3 는 **공식 768p(0.98MP) 격자**를 넘기면 손해다 (2026-08-30 클라우드 실측, 5초·turbo4):
+  //   1344x768(0.98MP) **57초** / 1920x1088(2.09MP) **208초** — 3.6배 느린데다 구도 이탈이 더 심했다
+  //   (규격 밖 해상도라 모델이 장면을 다시 상상한다). 로컬도 같은 이유로 0.98MP 를 쓴다(v0.3.70).
+  //   ⚠ 대신 1920x1080 미만이라 maybeUpscale 이 로컬 GPU 로 업스케일한다(영상당 30~40초).
+  _mmDims(aspect) {
+    if (aspect === '16:9') return { w: 1344, h: 768 };
+    if (aspect === '1:1') return { w: 992, h: 992 };
+    return { w: 768, h: 1344 }; // 9:16
+  }
   _snap4(frames) { return Math.max(5, 4 * Math.round((frames - 1) / 4) + 1); } // Wan length = 4n+1
   _buildGraph(uploadName, prompt, aspect, durSec) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) throw new Error('워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 비디오에서 지정하세요.');
@@ -210,11 +225,17 @@ class ComfyVideo {
     //   i2v(start_image 고정)가 아니라 "레퍼런스 참조 생성"이라 배선·프롬프트 규약이 다르다.
     //   · 이미지는 LoadImage 가 아니라 ReferenceImageLoader.image_paths(줄바꿈 구분 목록)로 들어간다.
     //   · 프롬프트는 <Picture 1> 태그로 레퍼런스의 역할을 지정해야 원본 구도·화풍이 유지된다(실측).
-    const mmRefId = ids.find((id) => /MiniMaxH3ReferenceImageLoader/i.test(graph[id].class_type || ''));
+    //   🔑 레퍼런스 계열은 **두 종류**다 — 로컬은 Deno 커스텀 노드(DenoMiniMaxH3Reference*),
+    //     클라우드(comfy.org)는 ComfyUI **네이티브** MiniMaxH3ReferenceToVideo 다. 이미지가 들어가는
+    //     자리는 다르지만(image_paths ↔ LoadImage) **<Picture 1> 접두사는 둘 다 필요**하다.
+    //     ⚠ 예전엔 이 판정이 Deno 이름 하나뿐이라 클라우드 판에는 접두사가 조용히 안 붙었다 →
+    //       구도·인물·화풍이 통째로 바뀐다(실측: 12회 중 여러 건이 엉뚱한 클로즈업으로 붕괴).
+    const mmLoaderId = ids.find((id) => /MiniMaxH3ReferenceImageLoader/i.test(graph[id].class_type || ''));
+    const mmRef = !!mmLoaderId || ids.some((id) => /MiniMaxH3ReferenceToVideo/i.test(graph[id].class_type || ''));
     // ── 이미지 주입 (LoadImage) ──
-    if (mmRefId) {
-      graph[mmRefId].inputs = graph[mmRefId].inputs || {};
-      graph[mmRefId].inputs.image_paths = uploadName;   // 업로드된 이름 = input 폴더 상대경로
+    if (mmLoaderId) {
+      graph[mmLoaderId].inputs = graph[mmLoaderId].inputs || {};
+      graph[mmLoaderId].inputs.image_paths = uploadName;   // 업로드된 이름 = input 폴더 상대경로
       this.log('[ComfyVid] MiniMax H3 레퍼런스 이미지 주입 → image_paths=' + uploadName);
     } else if (this.imageNodeId && graph[this.imageNodeId]) {
       graph[this.imageNodeId].inputs = graph[this.imageNodeId].inputs || {}; graph[this.imageNodeId].inputs.image = uploadName;
@@ -239,7 +260,7 @@ class ComfyVideo {
       //   MiniMax H3: 대본은 그대로 두고 엔진이 <Picture 1> 접두사만 붙인다.
       //   ⚠ 이게 없으면 레퍼런스가 "참고"에 그쳐 구도·인물·화풍이 통째로 바뀐다(실측: 왕+신하 5명 → 얼굴 클로즈업).
       //   ⛔ 대본에 이 태그를 쓰게 하지 말 것 — 엔진을 LTX 로 되돌리면 대본 468편이 그 문법에 묶인다.
-      if (mmRefId) prompt = MM_REF_PREFIX + String(prompt);
+      if (mmRef) prompt = MM_REF_PREFIX + String(prompt);
       const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
       const isNeg = (id) => /negative|부정|worst|nsfw|bad ?quality/.test(titleOf(id)) || /negative/.test((graph[id].class_type || '').toLowerCase());
       const setLit = (n, keys) => { if (!n || !n.inputs) return false; for (const k of keys) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
@@ -285,7 +306,7 @@ class ComfyVideo {
     const _titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
     const _isPrimNum = (id) => /Primitive(Int|Float)?/i.test(graph[id].class_type || '') && typeof (graph[id].inputs || {}).value === 'number';
     if (this.sendDims && aspect) {
-      const d = this._videoDims(aspect);
+      const d = mmRef ? this._mmDims(aspect) : this._videoDims(aspect);
       let set = false;
       // ① 같은 노드에 width+height 리터럴 (Wan 등)
       for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.width === 'number' && typeof inp.height === 'number') { inp.width = d.w; inp.height = d.h; set = true; break; } }
