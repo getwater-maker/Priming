@@ -88,8 +88,9 @@ console.log('[3] flow-engine — CRLF 규약 유지');
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n[4] main.js — 배선 (원문 대조)');
 ok(/async function runFlowVideos\(pr, mediaDir, onlyNums\)/.test(MAIN), 'runFlowVideos 가 존재한다');
-ok(/if \(videoEngine === 'flow'\) \{ await runFlowVideos\(pr, mediaDir, onlyNums\); return \{\}; \}/.test(MAIN),
-  "_genGroupVideosCore 가 videoEngine==='flow' 를 runFlowVideos 로 보낸다");
+ok(MAIN.indexOf("if (videoEngine === 'flow') {") >= 0
+   && MAIN.indexOf("_withFlowBrowser('Flow 비디오', () => runFlowVideos(pr, mediaDir, onlyNums))") >= 0,
+  "_genGroupVideosCore 가 videoEngine==='flow' 를 runFlowVideos 로 보낸다 (Flow 브라우저 레인으로)");
 ok(!/\['flow', 'wan', 'grok10'\]\.includes/.test(MAIN),
   "⛔ run-batch 정규화가 'flow' 를 grok 으로 되돌리지 않는다 (v0.3.50 계열 — 넣으면 선택이 조용히 무시된다)");
 ok(/\['wan', 'grok10'\]\.includes\(rawVe\)/.test(MAIN), "제거된 엔진(wan·grok10)은 여전히 grok 으로 보정한다");
@@ -415,6 +416,24 @@ function img(dir, num) {
   }
   ok(ENG.indexOf('⚠ 생성 실패 감지:') >= 0,
     '생성 실패 사유가 **파일에 남는 로그**로 나온다 (debug 는 파일에 안 남는다)');
+
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[16] 쓰는 중인 Flow 창을 남이 닫지 못한다 (2026-08-29 실사고)');
+  ok(MAIN.indexOf('flowBrowser: Promise.resolve()') >= 0 && MAIN.indexOf('flowBrowser: 0') >= 0,
+    'Flow 브라우저 전용 레인이 있다 — 이미지와 비디오가 같은 크롬 창을 쓰므로 직렬화한다');
+  ok(MAIN.indexOf('function _withFlowBrowser(label, fn)') >= 0, '_withFlowBrowser 헬퍼가 있다');
+  {
+    const cnt = (MAIN.match(/_withFlowBrowser\(/g) || []).length;
+    ok(cnt === 3, 'Flow 이미지·비디오 **둘 다** 레인을 탄다 (정의 1 + 호출 2 = 3, 실제 ' + cnt + ')');
+  }
+  ok(MAIN.indexOf('if ((S.flowBusy || 0) > 0) {') >= 0,
+    '⛔ 쓰는 중이면 closeFlowEng 가 닫지 않는다 — 이미지 작업이 돌고 있는 비디오 창을 닫아 죽였다');
+  ok(MAIN.indexOf('다른 작업이 쓰는 중이라 닫지 않습니다') >= 0, '안 닫았다는 사실을 로그로 남긴다');
+  {
+    // 카운터는 반드시 finally 로 되돌린다 — 예외가 나면 영영 busy 로 남아 창이 안 닫힌다
+    ok(MAIN.indexOf('} finally { S.flowBusy = Math.max(0, (S.flowBusy || 1) - 1); }') >= 0,
+      '사용 카운터를 finally 로 되돌린다 (예외에도 새지 않는다)');
+  }
 
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');

@@ -1995,6 +1995,13 @@ function getFlowEng(profileDir) {
 async function closeFlowEng() {
   const eng = S.flowEng;
   if (!eng) return;
+  // 🔴 **쓰는 중이면 닫지 않는다.** 이미지 작업이 끝나면서 이 함수를 부르는데, 그때 Flow 비디오가
+  //   아직 돌고 있으면 그 창을 닫아 버려 비디오가 통째로 죽는다(2026-08-29 실사고 — 5개 중 3개만 생성).
+  //   쓰던 작업이 끝나면 그쪽이 스스로 닫으므로 창이 남지 않는다.
+  if ((S.flowBusy || 0) > 0) {
+    log('⏸ Flow 브라우저를 다른 작업이 쓰는 중이라 닫지 않습니다 (그 작업이 끝나면 닫힙니다)');
+    return;
+  }
   // 작업(버튼 클릭) 하나가 끝나면 창을 닫는다 → **다음 클릭은 새 창**이다.
   //   그래서 그룹을 하나씩 따로 만들면 매번 새로 열린다(기동 약 20초). 범위를 넓게 잡으면 한 창으로 끝난다.
   log('🧹 Flow 브라우저를 닫습니다 (작업 완료 — 다음 작업은 새 창으로 시작합니다)');
@@ -2733,7 +2740,10 @@ async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
   // Flow(Google Flow · Veo) i2v — 브라우저. 이미지 경로와 같은 크롬을 쓰므로 파이프라인 병렬에 넣지 않는다.
-  if (videoEngine === 'flow') { await runFlowVideos(pr, mediaDir, onlyNums); return {}; }
+  if (videoEngine === 'flow') {
+    await _withFlowBrowser('Flow 비디오', () => runFlowVideos(pr, mediaDir, onlyNums));
+    return {};
+  }
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
@@ -2834,7 +2844,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
             }
           }
         } else if (engineId === 'flow') {
-          await runFlowImages(project, imagesDir, logger, styleId, nums, force);
+          await _withFlowBrowser('Flow 이미지', () => runFlowImages(project, imagesDir, logger, styleId, nums, force));
         } else if (engineId === 'gemini') {
           await runGeminiImages(project, imagesDir, logger, styleId, nums, force);
         } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
@@ -4561,8 +4571,21 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 //                  실제 로그: `⬆ [1/3] G1` 이 도는 중에 `⬆ [1/4] G1` 이 또 시작됐다. GPU 없는 PC 에선 치명적.
 //                  ⚠ **localGpu 를 잡지 않는다** — make-all 이 이미 그 레인을 쥔 채 내부에서 부르므로
 //                    자기 자신을 기다려 교착된다(enqueueImageJob 과 같은 규칙).
-const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve() };
-const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0 };
+// 🪟 flowBrowser — Flow 이미지와 Flow 비디오는 **같은 크롬 창·같은 page** 를 쓴다(getFlowEng 가 인스턴스를
+//   재사용). 둘이 동시에 돌면 같은 페이지를 서로 조작해 깨진다 → 전용 레인으로 **직렬화**한다.
+//   ⚠ image/localGpu 와는 별개 레인이라 교착이 없다(Flow 는 브라우저라 GPU 와 무관).
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, flowBrowser: 0 };
+// Flow 크롬을 쓰는 작업을 감싼다 — 레인으로 직렬화하고, **쓰는 동안 창이 닫히지 않게** 표시한다.
+//   🔴 2026-08-29 실사고: 비디오가 8분째 돌고 있는데 **다른 대본의 이미지 작업**이 끝나면서
+//     closeFlowEng() 로 그 창을 닫아 버렸다 → `Target page, context or browser has been closed`
+//     로 비디오가 죽고 5개 중 3개만 만들어졌다. 카운터가 있으면 그 상황에서 닫지 않는다.
+function _withFlowBrowser(label, fn) {
+  return _runOnLanes(['flowBrowser'], label, async () => {
+    S.flowBusy = (S.flowBusy || 0) + 1;
+    try { return await fn(); } finally { S.flowBusy = Math.max(0, (S.flowBusy || 1) - 1); }
+  });
+}
 function _runOnLanes(lanes, label, fn) {
   const prev = lanes.map((k) => _LANES[k]);
   for (const k of lanes) _lanePending[k]++;
