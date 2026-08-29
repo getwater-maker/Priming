@@ -1662,7 +1662,37 @@ class FlowAutomator {
   //   실측 흐름(2026-08-28): 카드 hover → more_vert → 「다운로드」에 **hover**(클릭 아님) →
   //   서브메뉴 [270p 애니메이션 GIF · 720p 원본 크기 · 1080p 업스케일 · 4K(업그레이드)] 중 선택.
   //   ⚠ 1080p 는 **업스케일**이라 파일이 만들어지기까지 시간이 걸린다 → 다운로드 대기를 넉넉히 준다.
+  // ─── 다운로드 메뉴 항목이 비활성인가 ───────────────────────────────────
+  //   Flow 는 잠긴 항목을 숨기지 않고 aria-disabled/data-disabled 로 남겨 둔다(4K 의 「업그레이드」와 같은 방식).
+  //   그래서 waitFor({visible}) 은 통과하고 click 에서만 5초 뒤 터진다 → 클릭 전에 직접 본다.
+  async _menuItemDisabled(loc) {
+    try {
+      return await loc.evaluate(el =>
+        el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('data-disabled') || el.disabled === true);
+    } catch (_) { return false; }   // 못 읽으면 막지 않는다(fail-open — 판정 때문에 다운로드를 포기하지 않는다)
+  }
+
+  // ─── 지금 열려 있는 다운로드 서브메뉴의 항목·활성 상태 덤프 ─────────────
+  //   무엇이 되고 무엇이 안 되는지가 로그에 남아야 「왜 720p 로 받았나」를 나중에 되짚을 수 있다.
+  async _dumpDownloadMenu() {
+    try {
+      const items = await this.page.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')]
+        .filter(el => el.offsetWidth || el.offsetHeight)
+        .map(el => {
+          const t = (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+          const off = el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('data-disabled');
+          return `${t}${off ? '(잠김)' : ''}`;
+        }));
+      return items.join(' · ');
+    } catch (_) { return ''; }
+  }
+
   async _downloadVideoFromCard(card, num, want = '1080p') {
+    // 이 계정에서 고화질 항목이 잠긴 것을 이미 확인했으면 메뉴를 열지 않는다(컷마다 5초 낭비 방지).
+    if (this._hiResBlockedFor === this.profileDir && want !== '720p') {
+      this.log(`  [DL ${num}] ⏭ 「${want}」 은 이 계정에서 비활성이라 건너뜁니다 — 720p 원본 사용`);
+      return null;
+    }
     try {
       await card.hover();
       await this.page.waitForTimeout(600);
@@ -1678,6 +1708,20 @@ class FlowAutomator {
 
       const opt = this.page.getByRole('menuitem').filter({ hasText: want }).first();
       await opt.waitFor({ state: 'visible', timeout: 4000 });
+
+      // 🔴 보이는데 **비활성**인 경우가 있다 — 실측(2026-08-29): 같은 앱·같은 모델인데 계정에 따라
+      //   「1080p 업스케일」 항목이 aria-disabled="true" 로 잠겨 있다(계정 1 성공 8건 / flow1 실패 2건).
+      //   그대로 click 하면 5초를 헛기다린 뒤 Playwright 스택트레이스 20줄만 남아 **원인이 로그에서 묻힌다**
+      //   → 먼저 확인해서 사람 말로 알리고, 이 계정에서는 다시 시도하지 않는다(컷마다 5초씩 버리지 않게).
+      if (await this._menuItemDisabled(opt)) {
+        const states = await this._dumpDownloadMenu();
+        this.log(`  [DL ${num}] ⛔ 이 계정에서는 「${want}」 항목이 비활성입니다 — Flow 플랜/크레딧 제한으로 보입니다.`);
+        if (states) this.log(`  [DL ${num}]   메뉴 상태: ${states}`);
+        this.log(`  [DL ${num}]   → 720p 원본으로 받습니다. 받은 뒤 내 PC GPU 로 업스케일하므로 영상당 수 분이 더 걸립니다(다른 계정을 쓰면 생략됩니다).`);
+        this._hiResBlockedFor = this.profileDir;
+        try { await this.page.keyboard.press('Escape'); } catch (_) {}
+        return null;
+      }
       // 🔑 여기서부터 **화면이 조용해진다** — Flow 서버가 업스케일본을 만드는 동안(실측 1~3분)
       //   토스트 하나 말고는 아무 변화가 없어 「멈춘 것 같다」고 오해하게 된다(2026-08-28 로이).
       //   → 시작을 알리고 20초마다 경과를 남긴다.
@@ -1700,7 +1744,8 @@ class FlowAutomator {
       this.log(`  [DL ${num}] ${want} 다운로드 완료 (${Math.round(buf.length / 1024)}KB · ${Math.round((Date.now() - _dlT0) / 1000)}초)`);
       return buf;
     } catch (e) {
-      this.log(`  [DL ${num}] ${want} 다운로드 실패: ${e.message} — 재생 소스로 폴백`);
+      // ⚠ Playwright 에러는 Call log 가 20줄씩 붙는다 — 첫 줄만 남긴다(원인이 묻히지 않게).
+      this.log(`  [DL ${num}] ${want} 다운로드 실패: ${String(e.message).split(String.fromCharCode(10))[0].slice(0, 140)} — 재생 소스로 폴백`);
       try { await this.page.keyboard.press('Escape'); } catch (_) {}
       return null;
     }

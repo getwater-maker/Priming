@@ -344,6 +344,43 @@ function img(dir, num) {
   ok(MAIN.indexOf('videoDownload,') >= 0, 'runFlowVideos 가 videoDownload 를 엔진에 넘긴다');
   ok(APP.indexOf('flowVideoDownload: e.target.value') >= 0, 'App.jsx 에서 다운로드 해상도를 저장한다');
   ok(APP.indexOf('1080p — 업스케일본 (권장)') >= 0, '설정에 다운로드 해상도 선택지가 있다');
+  // ══════════════════════════════════════════════════════════════════════
+  console.log("\n[10-b] 1080p 항목이 **계정에 따라 잠긴다** (2026-08-29 실사고)");
+  // 실측: 같은 앱·같은 모델(Veo 3.1 Lite)인데 계정 1 은 8건 전부 성공, flow1 은 2건 전부 실패.
+  //   실패 로그가 aria-disabled="true" · data-disabled 인 menuitem 을 5초간 클릭 시도한 것으로 남았다
+  //   → 720p 폴백 → 1280x720 → **로컬 GPU 업스케일**(영상당 수 분)이 다시 필요해졌다.
+  ok(ENG.indexOf("async _menuItemDisabled(loc)") >= 0,
+    "메뉴 항목의 비활성 여부를 클릭 **전에** 판정하는 헬퍼가 있다");
+  ok(ENG.indexOf("if (await this._menuItemDisabled(opt))") >= 0,
+    "⛔ 해상도 항목을 클릭하기 전에 비활성인지 본다 — 그냥 클릭하면 5초 타임아웃 + 스택트레이스만 남는다");
+  ok(ENG.indexOf("this._hiResBlockedFor = this.profileDir;") >= 0 &&
+     ENG.indexOf("if (this._hiResBlockedFor === this.profileDir && want !== ") >= 0,
+    "한 번 잠긴 것을 확인하면 그 계정에서는 다시 시도하지 않는다 (컷마다 5초씩 버리지 않게)");
+  ok(ENG.indexOf("async _dumpDownloadMenu()") >= 0 && ENG.indexOf("메뉴 상태: ") >= 0,
+    "무엇이 되고 무엇이 잠겼는지 로그에 남긴다 (나중에 「왜 720p 로 받았나」를 되짚을 수 있게)");
+  ok(ENG.indexOf("Flow 플랜/크레딧 제한으로 보입니다") >= 0,
+    "원인을 사람 말로 알린다 (Playwright 스택트레이스는 로이에게 아무것도 알려주지 않는다)");
+  ok(ENG.indexOf("String(e.message).split(String.fromCharCode(10))[0]") >= 0,
+    "다운로드 실패 로그는 첫 줄만 남긴다 (Call log 20줄이 붙으면 원인이 묻힌다)");
+
+  // 실제로 판정이 도는가 — 원문 메서드를 가짜 locator 로 실행한다
+  {
+    const { FlowAutomator } = require(path.join(ROOT, "flow-engine.js"));
+    const inst = Object.create(FlowAutomator.prototype);
+    const mk = attrs => ({ evaluate: async fn => fn({
+      getAttribute: k => (k in attrs ? attrs[k] : null),
+      hasAttribute: k => k in attrs,
+      disabled: !!attrs.disabled,
+    }) });
+    await (async () => {
+      eq(await inst._menuItemDisabled(mk({ "aria-disabled": "true" })), true, "aria-disabled=true 를 잠김으로 본다 (실사고 DOM)");
+      eq(await inst._menuItemDisabled(mk({ "data-disabled": "" })), true, "data-disabled 속성만 있어도 잠김이다");
+      eq(await inst._menuItemDisabled(mk({})), false, "평범한 항목은 활성으로 본다 (오탐 금지)");
+      eq(await inst._menuItemDisabled({ evaluate: async () => { throw new Error("x"); } }), false,
+        "못 읽으면 막지 않는다 (fail-open — 판정 때문에 다운로드를 포기하지 않는다)");
+    })();
+  }
+
 
   // ══════════════════════════════════════════════════════════════════════
   console.log('\n[11] 업로드 대기 — 「프롬프트에 추가」는 처리(약 9초)가 끝나야 활성화된다');
