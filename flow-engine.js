@@ -864,32 +864,11 @@ class FlowAutomator {
         await this._waitIfPaused();
         if (this._stopped) break;
 
-        // ── 동영상: **1080p 업스케일 다운로드를 우선** 시도한다 (2026-08-28 로이 지적) ──
-        //   재생 소스(video src)는 720p 원본이라, 그걸 받아 나중에 로컬 GPU 로 업스케일하면 훨씬 느리다.
-        //   Flow 는 카드 메뉴에서 270p(GIF)/720p(원본)/1080p(업스케일)/4K(플랜 업그레이드) 를 준다.
-        let videoBuf = null;
-        if (opts.mediaType === 'video') {
-          const want = opts.videoDownload || '1080p';
-          if (want !== 'off') {
-            const found = await this._newMediaCard(beforeIds);
-            if (found) videoBuf = await this._downloadVideoFromCard(found.card, num, want);
-            else this.log(`  [DL ${num}] ⚠ 새로 생긴 결과 카드를 못 찾음 — 재생 소스로 폴백`);
-          }
-          if (!videoBuf && capturedVideos.length > 0) {
-            videoBuf = capturedVideos.sort((a, b) => b.length - a.length)[0];
-            this.log(`  [DL ${num}] 재생 소스(720p 원본) 사용`);
-          }
-          if (!videoBuf && imageBuffer) { videoBuf = imageBuffer; this.log(`  [DL ${num}] 재생 소스 버퍼 사용`); }
-        }
-
-        if (imageBuffer || videoBuf) {
-          if (videoBuf) {
-            const finalPath = path.join(imgDir, `${num}_${shortText}.mp4`);
-            fs.writeFileSync(finalPath, videoBuf);
-            this.log(`[${num}] 동영상 저장: ${path.basename(finalPath)} (${Math.round(videoBuf.length / 1024)}KB)`);
-          } else {
-            await this._saveImage(imageBuffer, num, shortText, imgDir, opts);
-          }
+        // 저장은 **_saveResult 한 곳**에서만 한다 — 동영상이면 1080p 다운로드를 먼저 시도한다.
+        //   🔴 예전엔 이 자리에만 다운로드가 있고 **재시도 경로엔 없어서**, 재시도로 성공하면
+        //      720p 가 저장됐다(2026-08-29 실사고: 3,260KB). 그래서 세 저장 지점을 하나로 모았다.
+        const saved = await this._saveResult(imageBuffer, num, shortText, imgDir, opts, beforeIds, capturedVideos);
+        if (saved) {
           successCount++;
           consecutiveFails = 0;
           // v1.13.21: 성공 시 rate-limit 카운터 리셋 + 세션 누적 카운터 점진 리셋
@@ -943,13 +922,16 @@ class FlowAutomator {
             // 원본 프롬프트 1회 재시도 (단순화 X)
             this._rateLimitDetected = false;
             try {
+              // 재시도 전 소스 이미지 재첨부 (위 A 와 같은 이유 — 안 하면 t2v 가 된다)
+              const _reOk = await this._reattachSource(opts, i, num);
+              if (_reOk) {
               await this._typePrompt(prompt);
               await this.page.waitForTimeout(500);
               await this._clickFinalCreateV2();
               const retryTimeout = opts.mediaType === 'video' ? 180000 : 120000;
               const retryBuffer = await this._waitForImage(retryTimeout, opts.mediaType === 'video');
               if (retryBuffer) {
-                await this._saveImage(retryBuffer, num, shortText, imgDir, opts);
+                await this._saveResult(retryBuffer, num, shortText, imgDir, opts, beforeIds, null);
                 this.log(`[${num}] rate-limit 후 재시도 성공!`);
                 successCount++;
                 consecutiveFails = 0;
@@ -963,6 +945,7 @@ class FlowAutomator {
                 this._resetGroupRateLimitCounter();
                 rateLimitResolved = true;
               }
+              }   // _reOk
             } catch (retryErr) {
               this.debug(`  [rate-limit retry] ${retryErr.message}`);
             }
@@ -1026,13 +1009,17 @@ class FlowAutomator {
             this.debug(`  [단순화 L${simplifyLevel}] ${simplifiedPrompt.substring(0, 80)}`);
 
             try {
+              // 🔴 **소스 이미지를 다시 붙인다.** 제출하면 프롬프트 바가 비워지면서 첨부도 함께 사라진다 —
+              //   이걸 안 하면 재시도는 **텍스트만으로 생성(t2v)** 되어 화풍이 완전히 다른 실사 영상이 나온다.
+              //   (2026-08-29 실사고: 재시도로 '성공' 한 컷만 수채 그림 → 실사로 튀었다)
+              if (!(await this._reattachSource(opts, i, num))) continue;
               await this._typePrompt(simplifiedPrompt);
               await this.page.waitForTimeout(500);
               await this._clickFinalCreateV2();
               const retryTimeout = opts.mediaType === 'video' ? 180000 : 120000;
               const retryBuffer = await this._waitForImage(retryTimeout, opts.mediaType === 'video');
               if (retryBuffer) {
-                await this._saveImage(retryBuffer, num, shortText, imgDir, opts);
+                await this._saveResult(retryBuffer, num, shortText, imgDir, opts, beforeIds, null);
                 this.log(`[${num}] 재시도 ${retryN} 성공!`);
                 successCount++;
                 consecutiveFails = 0;
@@ -1717,6 +1704,56 @@ class FlowAutomator {
       try { await this.page.keyboard.press('Escape'); } catch (_) {}
       return null;
     }
+  }
+
+  // ─── 재시도 전 소스 이미지 **재첨부** ────────────────────────────────────
+  //   🔑 제출하면 프롬프트 바가 비워지고 붙여 둔 이미지도 함께 사라진다. 재시도할 때 다시 붙이지 않으면
+  //     **텍스트만으로 생성(t2v)** 되어 원본 그림과 화풍이 전혀 다른 영상이 나온다(실사로 튄다).
+  //   ⚠ 재첨부에 실패하면 그 재시도를 **하지 않는다** — 엉뚱한 화풍 + 크레딧 낭비를 막는다(첫 시도와 같은 원칙).
+  async _reattachSource(opts, i, num) {
+    if (opts.mediaType !== 'video') return true;
+    if (!opts.frameImages || !opts.frameImages[i]) return true;   // 애초에 t2v 로 쓰는 경우
+    const ok = opts.attachMode === 'asset'
+      ? await this._attachAssetImage(opts.frameImages[i], num)
+      : await this._attachFrameImage(opts.frameImages[i], num);
+    if (!ok) this.log(`  [${num}] ⚠ 재시도용 소스 이미지 재첨부 실패 — 이 재시도를 건너뜁니다(화풍이 튀는 것을 막는다)`);
+    return ok;
+  }
+
+  // ─── 결과 저장 (동영상/이미지 공통 · **유일한 저장 지점**) ────────────────
+  //   동영상이면 1080p 다운로드를 먼저 시도하고, 안 되면 네트워크 캡처 → 재생 소스 버퍼 순으로 떨어진다.
+  //   🔑 저장 지점을 하나로 모은 이유: 예전엔 첫 시도 경로에만 다운로드가 있고 **재시도 경로엔 없어서**,
+  //     재시도로 성공하면 720p 가 저장되고 로컬 GPU 업스케일이 다시 필요해졌다(2026-08-29 실사고).
+  async _saveResult(buffer, num, shortText, imgDir, opts, beforeIds, captured) {
+    if (opts.mediaType !== 'video') {
+      if (!buffer) return false;
+      await this._saveImage(buffer, num, shortText, imgDir, opts);
+      return true;
+    }
+    // 생성 성공 신호가 하나도 없으면 다운로드도 시도하지 않는다 — 실패 상황에서 헛되이 기다리고
+    //   로그만 어지럽힌다(실측: 실패한 컷에 「결과 카드를 못 찾음」이 찍혀 원인을 오해하게 했다).
+    if (!buffer && !(captured && captured.length)) return false;
+
+    let vbuf = null;
+    const want = opts.videoDownload || '1080p';
+    if (want !== 'off') {
+      const found = await this._newMediaCard(beforeIds, 15000);
+      if (found) vbuf = await this._downloadVideoFromCard(found.card, num, want);
+      else this.log(`  [DL ${num}] ⚠ 새로 생긴 결과 카드를 못 찾음 — 재생 소스로 폴백`);
+    }
+    if (!vbuf && captured && captured.length > 0) {
+      vbuf = captured.sort((a, b) => b.length - a.length)[0];
+      this.log(`  [DL ${num}] 재생 소스(720p 원본) 사용 — 로컬 GPU 업스케일이 필요할 수 있습니다`);
+    }
+    if (!vbuf && buffer) {
+      vbuf = buffer;
+      this.log(`  [DL ${num}] 재생 소스 버퍼 사용 — 로컬 GPU 업스케일이 필요할 수 있습니다`);
+    }
+    if (!vbuf) return false;
+    const finalPath = path.join(imgDir, `${num}_${shortText}.mp4`);
+    fs.writeFileSync(finalPath, vbuf);
+    this.log(`[${num}] 동영상 저장: ${path.basename(finalPath)} (${Math.round(vbuf.length / 1024)}KB)`);
+    return true;
   }
 
   // ─── i2v: 동영상 '프레임' 모드에서 소스 이미지를 '시작 프레임'으로 첨부 ───
@@ -2880,7 +2917,8 @@ class FlowAutomator {
           return null;
         }
         if (failureText) {
-          this.debug(`  [!] 생성 실패 감지: ${failureText}`);
+          // ⚠ debug 는 앱 로그 **파일**에 안 남는다 → 왜 실패했는지 나중에 되짚을 수 없었다(2026-08-29).
+          this.log(`  ⚠ 생성 실패 감지: ${failureText}`);
           // 실패 메시지 제거 (다음 프롬프트에 영향 안 주도록)
           await this._dismissFailure();
           return null;

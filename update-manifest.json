@@ -1,5 +1,5 @@
 {
-  "version": "0.3.79",
+  "version": "0.3.80",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "b490952664af6275f6e0b8cb5189136656e676f6",
+    "CLAUDE.md": "dc0b609a042040ac57943a49122805a7b4d7fabc",
     "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
     "comfy/comfy-server.pyw": "c8d6ecc38797a221f1bbe9ce2f4da26cc9454d2d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
@@ -75,7 +75,7 @@
     "docs/출판-원고-가이드.md": "1a13519b5ccf2fa88dcd56fe7505076414462deb",
     "docs/통합본-자산이어받기-계획.md": "e424670bb6040d8a8dbe551270a0f415179517b3",
     "dummy-tts.mp3": "59f63dcb6c2532ee673513a4a74ff6c3c678c851",
-    "flow-engine.js": "5223cfa4997aca5e5a0de874997984cbbf928033",
+    "flow-engine.js": "d48ef9b430c87db54ac43b8014ee8f72ef0d08ed",
     "genspark-engine.js": "c7b8b1121a10d9a7519ef38a10ccb56c36aa1a75",
     "grok-engine.js": "66ddba28def328fd9805705c00fbdf92ebd294e0",
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
@@ -83,7 +83,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "7b3c9704de80fc846ca0c5b995f594d8221bcf3f",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "f5ae01a971a5e300067f0e88b9ef033083250ce0",
+    "package.json": "c67f6a01d55ef78b9e1fc458dd1483f79b025fb5",
     "preload.js": "fbd2f653da7b67d1fee9a73d119188149e39286c",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-DDmA6h5a.js": "fe31423d3e9b4b38614efa8ad2b72d747e375cd9",

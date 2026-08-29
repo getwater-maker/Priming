@@ -396,6 +396,26 @@ function img(dir, num) {
   ok(ENG.indexOf('[Flow] 기존 브라우저 재사용') >= 0,
     '엔진 쪽 재사용 로그는 원래 있었다 (v0.3.75 부터 파일에도 남는다)');
 
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n[15] 재시도가 화풍을 잃지 않는다 — 소스 이미지 재첨부 (2026-08-29 실사고)');
+  ok(ENG.indexOf('async _reattachSource(opts, i, num)') >= 0, '_reattachSource 가 존재한다');
+  {
+    // 재시도 경로는 **두 곳**(일반 5회 · rate-limit 1회) — 한쪽만 고치면 그쪽에서 t2v 가 된다.
+    const cnt = (ENG.match(/this\._reattachSource\(opts, i, num\)/g) || []).length;
+    ok(cnt === 2, '두 재시도 경로가 모두 재첨부한다  (실제 ' + cnt + '곳)');
+  }
+  ok(ENG.indexOf('if (!(await this._reattachSource(opts, i, num))) continue;') >= 0,
+    '⛔ 재첨부에 실패하면 그 재시도를 건너뛴다 — 엉뚱한 화풍으로 크레딧을 쓰지 않는다');
+  ok(ENG.indexOf("opts.attachMode === 'asset'") >= 0 && ENG.indexOf('? await this._attachAssetImage(opts.frameImages[i], num)') >= 0,
+    '재첨부도 설정한 방식(프레임/애셋)을 따른다');
+  {
+    // 🔴 저장 지점이 다시 흩어지지 않게 — _saveImage 직접 호출은 이미지 전용 1곳뿐이어야 한다
+    const cnt = (ENG.match(/await this\._saveResult\(/g) || []).length;
+    ok(cnt === 3, '저장은 _saveResult 로만 한다 — 첫 시도 + 재시도 2곳  (실제 ' + cnt + '곳)');
+  }
+  ok(ENG.indexOf('⚠ 생성 실패 감지:') >= 0,
+    '생성 실패 사유가 **파일에 남는 로그**로 나온다 (debug 는 파일에 안 남는다)');
+
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n[7] App.jsx — 드롭다운·정규화·설정 UI');
   {
