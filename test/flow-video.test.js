@@ -383,6 +383,51 @@ function img(dir, num) {
 
 
   // ══════════════════════════════════════════════════════════════════════
+  console.log("\n[10-c] 다운로드가 남긴 빈 탭(about:blank) 정리 (2026-08-29 실사고)");
+  // 실측: Flow 다운로드는 새 탭에서 시작된다 → 전송이 시작되면 그 탭이 about:blank 로 남는다.
+  //   계정 1 창에서 1080p 2건 완료 → 화면에 about:blank **정확히 2개**(로이 스크린샷과 일치).
+  ok(ENG.indexOf("async _closeBlankTabs(where = ") >= 0, "빈 탭 정리 헬퍼가 있다");
+  {
+    const cnt = (ENG.match(/await this\._closeBlankTabs\(/g) || []).length;
+    ok(cnt >= 4, "다운로드 성공·실패·고해상도·컷 종료 네 곳에서 정리한다  (실제 " + cnt + "곳)");
+  }
+  ok(ENG.indexOf("await this._closeBlankTabs(`DL ${num}`);") > ENG.indexOf("await download.saveAs(tmpPath);"),
+    "⛔ 정리는 **saveAs 뒤**다 — 전송 중에 탭을 닫으면 다운로드가 취소된다");
+
+  // 원문 실행 — 무엇을 닫고 무엇을 남기는가
+  {
+    const { FlowAutomator } = require(path.join(ROOT, "flow-engine.js"));
+    const inst = Object.create(FlowAutomator.prototype);
+    inst.debug = () => {};
+    const mkPage = (url, closed) => {
+      const o = { url: () => url, isClosed: () => !!closed, closedByUs: false };
+      o.close = async () => { o.closedByUs = true; };
+      return o;
+    };
+    await (async () => {
+      const main = mkPage("https://labs.google/fx/ko/tools/flow/project/abc");
+      const blank1 = mkPage("about:blank"), blank2 = mkPage("");
+      const real = mkPage("https://labs.google/fx/ko/tools/flow/edit/xyz");
+      const gone = mkPage("about:blank", true);
+      inst.page = main;
+      inst.context = { pages: () => [main, blank1, blank2, real, gone] };
+      eq(await inst._closeBlankTabs("t"), 2, "빈 탭 2개만 닫는다");
+      eq(blank1.closedByUs && blank2.closedByUs, true, "about:blank 와 빈 URL 을 닫았다");
+      eq(main.closedByUs, false, "⛔ 메인 Flow 페이지는 절대 닫지 않는다");
+      eq(real.closedByUs, false, "내용이 있는 탭은 남긴다 (보수적 — 남의 작업을 지우지 않는다)");
+      eq(gone.closedByUs, false, "이미 닫힌 탭은 건드리지 않는다");
+
+      // 어떤 이유로 실패해도 작업을 멈추지 않는다
+      inst.context = null;
+      eq(await inst._closeBlankTabs(), 0, "context 가 없어도 던지지 않는다");
+      const boom = mkPage("about:blank");
+      boom.close = async () => { throw new Error("x"); };
+      inst.context = { pages: () => [main, boom] };
+      eq(await inst._closeBlankTabs(), 0, "닫기가 실패해도 던지지 않는다 (탭 정리 때문에 생성이 멈추면 본말전도)");
+    })();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   console.log('\n[11] 업로드 대기 — 「프롬프트에 추가」는 처리(약 9초)가 끝나야 활성화된다');
   ok(ENG.indexOf('waitForTimeout(3500)') < 0,
     '⛔ 고정 3.5초 대기가 없다 — 실측 약 9초라 그 시점엔 버튼이 disabled 여서 클릭이 타임아웃됐다(2026-08-28 실사고)');

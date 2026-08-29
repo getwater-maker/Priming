@@ -1128,6 +1128,9 @@ class FlowAutomator {
       }
 
       // 다음 단락 준비
+      //  🔑 컷마다 빈 탭을 치운다 — 다운로드 경로가 여러 갈래(1080p·캡처·폴백)라 어디서든 남을 수 있다.
+      //    여기는 그 컷의 다운로드가 모두 끝난 뒤라 안전하다.
+      await this._closeBlankTabs(`컷 ${num}`);
       if (i < paragraphs.length - 1) {
         this.log(`[${num}] 다음 단락 준비`);
         // 안티 디텍션: 가우시안 분포 (활성: 8~20초 + 10% 확률 30~60초 / 비활성: 2초 고정)
@@ -1617,6 +1620,7 @@ class FlowAutomator {
         const buf = fs.readFileSync(tmpPath);
         fs.unlinkSync(tmpPath);
         this.log(`  [고해상도] ${resolution} 다운로드 완료 (${Math.round(buf.length / 1024)}KB)`);
+        await this._closeBlankTabs('고해상도');
         return buf;
       }
     } catch (err) {
@@ -1662,6 +1666,29 @@ class FlowAutomator {
   //   실측 흐름(2026-08-28): 카드 hover → more_vert → 「다운로드」에 **hover**(클릭 아님) →
   //   서브메뉴 [270p 애니메이션 GIF · 720p 원본 크기 · 1080p 업스케일 · 4K(업그레이드)] 중 선택.
   //   ⚠ 1080p 는 **업스케일**이라 파일이 만들어지기까지 시간이 걸린다 → 다운로드 대기를 넉넉히 준다.
+  // ─── 다운로드가 남긴 빈 탭(about:blank) 정리 ─────────────────────────────
+  //   🔑 Flow 의 다운로드는 **새 탭에서 시작된다** — 서명 URL 을 새 탭으로 열고 파일 전송이 시작되면
+  //     그 탭에는 그릴 문서가 없어 `about:blank` 로 남는다(크롬의 정상 동작).
+  //     그래서 **다운로드 1건당 빈 탭 1개**가 쌓인다. 실측(2026-08-29): 1080p 다운로드 2건 완료 →
+  //     화면에 about:blank 2개. 그룹이 30개면 탭 30개 = 렌더러 프로세스 30개(메모리·CPU 낭비).
+  //   ⚠ 반드시 **다운로드가 끝난 뒤에** 닫는다. 전송 중에 닫으면 다운로드가 취소된다.
+  //   ⚠ 메인 페이지(this.page)와 URL 이 있는 탭은 건드리지 않는다 — 빈 탭만 치운다(보수적).
+  async _closeBlankTabs(where = '') {
+    try {
+      if (!this.context) return 0;
+      let n = 0;
+      for (const p of this.context.pages()) {
+        if (p === this.page || p.isClosed()) continue;
+        let u = '';
+        try { u = p.url() || ''; } catch (_) { continue; }
+        if (u !== '' && u !== 'about:blank') continue;   // 내용이 있는 탭은 남긴다
+        try { await p.close(); n++; } catch (_) {}
+      }
+      if (n) this.debug(`  [탭정리] 빈 탭 ${n}개 닫음${where ? ' (' + where + ')' : ''}`);
+      return n;
+    } catch (_) { return 0; }
+  }
+
   // ─── 다운로드 메뉴 항목이 비활성인가 ───────────────────────────────────
   //   Flow 는 잠긴 항목을 숨기지 않고 aria-disabled/data-disabled 로 남겨 둔다(4K 의 「업그레이드」와 같은 방식).
   //   그래서 waitFor({visible}) 은 통과하고 click 에서만 5초 뒤 터진다 → 클릭 전에 직접 본다.
@@ -1742,11 +1769,13 @@ class FlowAutomator {
       const buf = fs.readFileSync(tmpPath);
       try { fs.unlinkSync(tmpPath); } catch (_) {}
       this.log(`  [DL ${num}] ${want} 다운로드 완료 (${Math.round(buf.length / 1024)}KB · ${Math.round((Date.now() - _dlT0) / 1000)}초)`);
+      await this._closeBlankTabs(`DL ${num}`);   // 다운로드가 남긴 빈 탭 정리 (전송이 끝난 뒤라 안전)
       return buf;
     } catch (e) {
       // ⚠ Playwright 에러는 Call log 가 20줄씩 붙는다 — 첫 줄만 남긴다(원인이 묻히지 않게).
       this.log(`  [DL ${num}] ${want} 다운로드 실패: ${String(e.message).split(String.fromCharCode(10))[0].slice(0, 140)} — 재생 소스로 폴백`);
       try { await this.page.keyboard.press('Escape'); } catch (_) {}
+      await this._closeBlankTabs('DL fail');
       return null;
     }
   }
