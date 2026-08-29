@@ -1990,6 +1990,11 @@ function getFlowEng(profileDir) {
   S.flowEngProfileDir = profileDir;
   return S.flowEng;
 }
+// 💳 Flow 크레딧이 소진된 계정을 얼마나 쉬게 할까 — 크레딧은 하루가 아니라 **구독 주기**로 갱신되므로
+//   30분 쿨다운(rate-limit 용)은 의미가 없다. 6시간이면 같은 큐를 도는 동안 그 계정을 다시 태우지 않는다.
+//   ⚠ 그보다 길게 잡지 않는 이유: 일일 보너스 크레딧이 붙는 기간이 있어 그날 안에 회복되는 경우가 있다.
+const FLOW_CREDIT_REST_MIN = 6 * 60;
+
 // Flow 크롬 창을 닫고 정리 — 작업(이미지/영상 생성)이 끝나면 호출해 창을 남기지 않는다.
 //   (재사용은 한 번의 만들기 실행 안에서만. 다음 실행은 getFlowEng 가 새로 띄움.)
 async function closeFlowEng() {
@@ -2116,6 +2121,11 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
       const _cp = Number.isFinite(res.dailyCap) ? res.dailyCap : cap;
       logger(`🛑 Flow 계정 "${acc.label}" 오늘 ${_cnt}장 — 계정당 하루 한도(${_cp}장) 도달. 자정에 초기화됩니다.`);
       logger(`   (한도를 늘리려면 ⚙ 설정 → 👤 계정의 「일일 한도」를 올리거나 0=무제한 — 다만 과하게 쓰면 구글이 계정을 차단할 수 있습니다)`);
+    } else if (res && res.rateExhausted && res.reason === 'credit-exhausted') {
+      // 💳 Flow 크레딧 소진 — 기다린다고 30분 뒤에 돌아오지 않는다(구독 주기로 갱신). 오래 쉬게 한다.
+      FlowAccounts.cooldown(acc.id, FLOW_CREDIT_REST_MIN);
+      logger(`💳 Flow 계정 "${acc.label}" 크레딧 소진 — 이 계정은 ${FLOW_CREDIT_REST_MIN / 60}시간 쉽니다(크레딧은 구독 주기로 갱신됩니다).`);
+      logger(`   → 지금 만들려면 헤더 「② 이미지」를 🖥 ComfyUI 로 바꾸면 됩니다(크레딧을 쓰지 않습니다).`);
     } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30); // 하루 캡 대신 30분 쿨다운 — 0장이어도 계정을 하루 종일 태우지 않음
       logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 30분 쿨다운 후 재사용, 지금은 다음 계정으로 순환`);
@@ -2249,6 +2259,10 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
       log('   → 이 계정은 12시간 쉽니다. Google AI 구독(Pro/Ultra)을 넣으면 바로 다시 쓰입니다.');
     } else if (res && res.rateExhausted && res.reason === 'daily-limit') {
       log(`🛑 Flow 계정 \"${acc.label}\" 계정당 하루 한도 도달. 자정에 초기화됩니다.`);
+    } else if (res && res.rateExhausted && res.reason === 'credit-exhausted') {
+      FlowAccounts.cooldown(acc.id, FLOW_CREDIT_REST_MIN);
+      log(`💳 Flow 계정 \"${acc.label}\" 크레딧 소진 — 이 계정은 ${FLOW_CREDIT_REST_MIN / 60}시간 쉽니다(크레딧은 구독 주기로 갱신됩니다).`);
+      log(`   → 지금 만들려면 헤더 「③ 비디오」를 ☁ LTX2.5 로 바꾸면 됩니다 — ComfyUI 구독 GPU 시간만 쓰고 영상당 추가 과금이 없습니다.`);
     } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30);
       log(`⚠ Flow 계정 \"${acc.label}\" 한도/차단 — 30분 쿨다운, 지금은 다음 계정으로 순환`);

@@ -428,6 +428,66 @@ function img(dir, num) {
   }
 
   // ══════════════════════════════════════════════════════════════════════
+  console.log("\n[10-d] Flow 크레딧 소진 감지 (2026-08-29 실사고)");
+  // 실측 배너: 「Google Flow 크레딧이 소진되었습니다. 크레딧이 갱신될 때까지 기다리거나 지금 바로
+  //   업그레이드하여 더 많은 Google Flow 크레딧을 받으세요.」 — 옛 코드는 이걸 못 잡아 컷마다 헛돌았다.
+  ok(ENG.indexOf("KO_CREDIT") >= 0 && ENG.indexOf("EN_CREDIT") >= 0, "크레딧 소진 패턴이 있다(한국어·영어)");
+  ok(ENG.indexOf("type: 'credit-exhausted'") >= 0, "rate-limit 과 다른 타입으로 구분한다 (기다려도 회복되지 않는다)");
+  ok(ENG.indexOf("const isCredit = detectedType === 'credit-exhausted';") >= 0 &&
+     ENG.indexOf("if (isCredit) {") >= 0,
+    "⛔ 크레딧 소진은 60초 대기를 건너뛰고 즉시 다음 계정으로 (컷마다 60초는 순수한 낭비다)");
+  ok(MAIN.indexOf("FLOW_CREDIT_REST_MIN") >= 0 &&
+     MAIN.indexOf("res.reason === 'credit-exhausted'") >= 0,
+    "main 이 크레딧 소진을 따로 잡아 오래 쉬게 한다 (30분 쿨다운은 의미가 없다)");
+  {
+    const cnt = (MAIN.match(/FlowAccounts\.cooldown\(acc\.id, FLOW_CREDIT_REST_MIN\)/g) || []).length;
+    ok(cnt === 2, "이미지·비디오 두 경로 모두 처리한다  (실제 " + cnt + "곳)");
+  }
+  ok(MAIN.indexOf("☁ LTX2.5") >= 0, "크레딧이 없을 때 무엇을 하면 되는지 알려준다 (대안 엔진)");
+  ok(MAIN.indexOf("const FLOW_CREDIT_REST_MIN") < MAIN.indexOf("async function runFlowImages("),
+    "상수가 쓰는 곳보다 앞에 선언돼 있다 (이 저장소 단골인 미정의 식별자 사고 방지)");
+
+  // 원문 실행 — 실제 배너 문구로 판정한다
+  {
+    const { FlowAutomator } = require(path.join(ROOT, "flow-engine.js"));
+    const inst = Object.create(FlowAutomator.prototype);
+    const REAL = "Google Flow 크레딧이 소진되었습니다. 크레딧이 갱신될 때까지 기다리거나 지금 바로 업그레이드하여 더 많은 Google Flow 크레딧을 받으세요.";
+    // page.evaluate 스텁 — 가짜 document 를 심고 원문 콜백을 그대로 돌린다
+    const run = (els, bodyText) => {
+      const mkEl = e => ({
+        innerText: e.text, textContent: e.text,
+        getBoundingClientRect: () => ({ width: e.w === undefined ? 400 : e.w, height: e.h === undefined ? 60 : e.h }),
+      });
+      inst.page = {
+        isClosed: () => false,
+        evaluate: async fn => {
+          const g = global;
+          const prev = g.document;
+          g.document = { querySelectorAll: () => els.map(mkEl), body: { innerText: bodyText || "" } };
+          try { return await fn(); } finally { g.document = prev; }
+        },
+      };
+      return inst._detectRateLimitText();
+    };
+    await (async () => {
+      let r = await run([{ text: REAL, w: 1280 }]);
+      eq(r && r.type, "credit-exhausted", "실제 배너를 잡는다 — **폭 1280** 이라 옛 상한(1200)에 걸려 못 잡던 것");
+      r = await run([{ text: "생성 시 10크레딧이 사용됩니다", w: 300 }]);
+      eq(r, null, "⛔ 「생성 시 10크레딧이 사용됩니다」(설정 팝업)는 오탐하지 않는다");
+      r = await run([], REAL);
+      eq(r && r.type, "credit-exhausted", "셀렉터에 안 걸려도 본문에서 한 번 더 잡는다(안전망)");
+      r = await run([{ text: "요청이 너무 빨리 들어왔습니다. 잠시 후에 다시 시도해 주세요.", w: 400 }]);
+      eq(r && r.type, "rate-limit", "기존 rate-limit 판정은 그대로다 (회귀)");
+      r = await run([{ text: "비정상적인 활동이 감지되었습니다", w: 400 }]);
+      eq(r && r.type, "suspicious-activity", "기존 비정상활동 판정도 그대로다 (회귀)");
+      r = await run([{ text: "You are out of credits", w: 1300 }]);
+      eq(r && r.type, "credit-exhausted", "영어 배너도 잡는다");
+      r = await run([{ text: "오늘도 좋은 하루입니다", w: 400 }], "평범한 페이지 본문입니다");
+      eq(r, null, "평범한 화면에서는 아무것도 잡지 않는다 (오탐 금지)");
+    })();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   console.log('\n[11] 업로드 대기 — 「프롬프트에 추가」는 처리(약 9초)가 끝나야 활성화된다');
   ok(ENG.indexOf('waitForTimeout(3500)') < 0,
     '⛔ 고정 3.5초 대기가 없다 — 실측 약 9초라 그 시점엔 버튼이 disabled 여서 클릭이 타임아웃됐다(2026-08-28 실사고)');

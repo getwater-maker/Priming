@@ -85,6 +85,11 @@ class FlowAutomator {
         const KO_SUS = /비정상적?\s*(?:인|활동)|이상\s*활동|차단|의심.*감지|봇.*감지/;
         const EN_SUS = /abnormal\s*activity|unusual\s*activity|suspicious\s*activity|automated\s*behavior/i;
         // 일반 rate-limit (일시적 — 1회 재시도 안전망 가치 있음)
+        // 🔴 크레딧 소진 — rate-limit 과 성격이 다르다. 기다린다고 회복되지 않는다(구독 주기로 갱신).
+        //   실측 배너(2026-08-29): 「Google Flow 크레딧이 소진되었습니다. 크레딧이 갱신될 때까지 기다리거나…」
+        //   ⚠ 「생성 시 10크레딧이 사용됩니다」(설정 팝업) 같은 평범한 안내와 섞이지 않게 **소진/부족**을 함께 본다.
+        const KO_CREDIT = /크레딧이?\s*(?:모두\s*)?(?:소진|부족|다\s*떨어)|크레딧을?\s*모두\s*사용/;
+        const EN_CREDIT = /out\s+of\s+credits|no\s+credits\s+(?:left|remaining)|insufficient\s+credits|credits?\s+(?:have\s+)?run\s+out/i;
         const KO_RATE = /너무\s*빨리|잠시\s*후에?\s*다시|요청이\s*너무|속도\s*제한|일일\s*한도/;
         const EN_RATE = /too\s*quickly|rate[\s-]?limit|try\s*again\s*later|too\s*many\s*request|quota\s*exceeded/i;
         const sels = '[role="alert"],[role="status"],div[class*="toast"],div[class*="error"],div[class*="alert"],div[class*="snackbar"]';
@@ -92,10 +97,14 @@ class FlowAutomator {
         for (const el of candidates) {
           const rect = el.getBoundingClientRect();
           // v1.13.33: size 필터 완화 — 사용자가 본 큰 차단 토스트 (캔버스 전체 덮음) 도 잡히도록
-          if (rect.width === 0 || rect.width > 1200) continue;
-          if (rect.height === 0 || rect.height > 800) continue;
+          if (rect.width === 0 || rect.height === 0 || rect.height > 800) continue;
           const text = (el.innerText || el.textContent || '').trim();
           if (!text || text.length > 400) continue;
+          // 🔑 크레딧 배너는 **판면 전폭**이라 옛 폭 상한(1200)에 걸려 못 잡혔다 → 크레딧은 폭 무관하게 먼저 본다.
+          if (KO_CREDIT.test(text) || EN_CREDIT.test(text)) {
+            return { text: text.slice(0, 150), type: 'credit-exhausted' };
+          }
+          if (rect.width > 1200) continue;   // 그 밖의 토스트는 기존 필터 유지(페이지 전체를 오탐하지 않게)
           // 비정상 활동 우선 검사 (더 심각한 카테고리)
           if (KO_SUS.test(text) || EN_SUS.test(text)) {
             return { text: text.slice(0, 150), type: 'suspicious-activity' };
@@ -104,6 +113,15 @@ class FlowAutomator {
             return { text: text.slice(0, 150), type: 'rate-limit' };
           }
         }
+        // 안전망 — 배너가 위 셀렉터(alert/toast/…)에 안 걸릴 수도 있다. **크레딧 소진만** 본문에서 한 번 더 본다.
+        //   ⚠ 다른 패턴은 여기서 보지 않는다 — 본문 전체 검사는 오탐이 크다.
+        try {
+          const body = ((document.body && document.body.innerText) || '').slice(0, 4000);
+          if (KO_CREDIT.test(body) || EN_CREDIT.test(body)) {
+            const line = body.split(String.fromCharCode(10)).find(L => KO_CREDIT.test(L) || EN_CREDIT.test(L)) || '';
+            return { text: line.trim().slice(0, 150), type: 'credit-exhausted' };
+          }
+        } catch (_) {}
         return null;
       });
     } catch (e) {
@@ -889,10 +907,17 @@ class FlowAutomator {
           this._consecutiveSuccessForRateReset = 0;
           const detectedType = this._rateLimitDetectedType || 'rate-limit';
           const isSuspicious = detectedType === 'suspicious-activity';
+          // 💳 크레딧 소진도 **기다려서 회복되지 않는다**(구독 주기로 갱신) → 60초 대기를 건너뛰고 즉시 폴백한다.
+          const isCredit = detectedType === 'credit-exhausted';
 
           let rateLimitResolved = false;
 
-          if (isSuspicious) {
+          if (isCredit) {
+            // 💳 크레딧 소진 — 이 계정으로는 더 만들 수 없다. 컷마다 60초씩 기다리는 것은 순수한 낭비다.
+            this.log(`💳 프로필 ${this._currentProfileId || 'default'} Flow 크레딧 소진 (그룹 ${num}) — 대기 없이 다음 계정으로 넘어갑니다. 크레딧은 구독 주기로 갱신됩니다.`);
+            this.send('rate-limit', { waitSeconds: 0, reason: 'credit-exhausted', occurrence: 1 });
+            try { await this._dismissFailure(); } catch {}
+          } else if (isSuspicious) {
             // v1.13.26: 비정상 활동 감지 — 60초 대기 없이 즉시 폴백.
             this.log(`🚨 프로필 ${this._currentProfileId || 'default'} 비정상 활동 감지 (그룹 ${num}) — 계정 차단 의심, 60초 대기 건너뛰고 즉시 다음 프로필로 폴백`);
             this.send('rate-limit', { waitSeconds: 0, reason: 'suspicious-activity', occurrence: 1 });
@@ -959,7 +984,7 @@ class FlowAutomator {
               // 실제 그룹 num 은 renderer 의 _pendingGroupNums 로 매핑됨
               remainingNums.push(j + 1);
             }
-            const exhaustReason = isSuspicious ? 'suspicious-activity' : 'rate-limit';
+            const exhaustReason = isCredit ? 'credit-exhausted' : (isSuspicious ? 'suspicious-activity' : 'rate-limit');
             const headerEmoji = isSuspicious ? '🚨' : '🛑';
             const headerLabel = isSuspicious ? '비정상 활동 감지로 즉시 차단' : 'rate-limit 도달';
             this.log(`${headerEmoji} 프로필 ${this._currentProfileId || 'default'} ${headerLabel} — run 종료, 남은 ${remainingNums.length}개 그룹은 다른 프로필로 폴백 시도`);
@@ -2943,7 +2968,9 @@ class FlowAutomator {
           this._rateLimitDetectedText = rl.text;
           this._rateLimitDetectedType = rl.type || 'rate-limit';
           this._lastRateLimitAt = Date.now();
-          if (this._rateLimitDetectedType === 'suspicious-activity') {
+          if (this._rateLimitDetectedType === 'credit-exhausted') {
+            this.log(`💳 Flow 크레딧 소진 — "${rl.text.slice(0, 80)}"`);
+          } else if (this._rateLimitDetectedType === 'suspicious-activity') {
             this.log(`🚨 Flow 비정상 활동 감지 — "${rl.text.slice(0, 80)}" (계정 차단 의심, 즉시 다음 프로필로 폴백)`);
           } else {
             this.log(`⚠ Flow rate-limit 토스트 감지 — "${rl.text.slice(0, 80)}"`);
