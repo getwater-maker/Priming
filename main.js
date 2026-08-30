@@ -94,7 +94,8 @@ function storeActive() {
 function addItem(parsed, scriptPath, outRoot, settings) {
   const q = S.modes[S.mode];
   let it = scriptPath ? q.items.find((x) => x.scriptPath === scriptPath) : null;
-  if (it) { it.parsed = parsed; it.outRoot = outRoot; if (settings) it.settings = settings; }
+  // ⚠ settings 는 **병합**한다 — 통째로 덮으면 이미 저장된 항목 설정(스타일·범위 등)이 날아간다.
+  if (it) { it.parsed = parsed; it.outRoot = outRoot; if (settings) it.settings = { ...(it.settings || {}), ...settings }; }
   else { it = { id: newItemId(), parsed, scriptPath, outRoot, settings: settings || null, status: 'idle' }; q.items.push(it); }
   q.activeId = it.id;
   S.parsed = parsed; S.scriptPath = scriptPath; S.outRoot = outRoot;
@@ -1224,7 +1225,11 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
       S.parsed = parsed;
       ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
       // 큐에 추가(append) + 활성화. (이전 항목은 같은 객체 참조라 이미 최신 — storeActive 불필요)
-      addItem(S.parsed, S.scriptPath, S.outRoot);
+      // 🔴 **여는 즉시 채널을 항목에 박는다** (2026-08-31 실사고): 예전엔 settings 없이 항목을 만들어,
+      //   렌더러의 디바운스 자동저장이 닿는 **활성 항목(마지막에 연 것) 하나만** presetName 을 갖게 됐다.
+      //   그 상태로 「만들기」를 누르면 나머지 대본은 presetName=null → getPreset(null) = **기본 채널**로
+      //   합성돼 **엉뚱한 목소리**가 나갔다(고전서재 대본이 04_역사이야기 목소리·seed 5697 로 나감).
+      addItem(S.parsed, S.scriptPath, S.outRoot, (preset && preset.name) ? { presetName: preset.name } : null);
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
       log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
@@ -4098,7 +4103,15 @@ async function runMakeAllCore(opts = {}) {
   let ttsStageDone = false, imageStageDone = false;
 
   const ttsStage = async () => {
-    log('🎙 1단계 — 음성(TTS) 일괄 변환…');
+    // 🔑 어느 채널·목소리로 만드는지 로그에 남긴다 — 2026-08-31 사고 때 앱 로그만으로는
+    //   엉뚱한 목소리가 나간 것을 알 수 없어 OmniVoice 서버 로그의 seed 를 뒤져야 했다.
+    if (preset) {
+      const _rv = String(preset.voiceCloneRefAudio || '');
+      const _vn = _rv.startsWith('srv:') ? ('☁ ' + _rv.slice(4)) : (_rv ? path.basename(_rv) : '⚠ 참조음성 없음');
+      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (채널 「${preset.name}」 · 목소리 ${_vn} · 시드 ${preset.seed != null ? preset.seed : '-'} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1})`);
+    } else {
+      log('🎙 1단계 — 음성(TTS) 일괄 변환… (⚠ 채널을 찾지 못했습니다)');
+    }
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
@@ -4345,8 +4358,14 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
       const ve = (['wan', 'grok10'].includes(rawVe)) ? 'grok' : rawVe;
       const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
+      // 🔴 채널(목소리)은 **항목값 우선 → 헤더 폴백**. 둘 다 없으면 getPreset(null)=기본 채널이 되어
+      //   **엉뚱한 목소리로 조용히 합성**된다(2026-08-31 실사고). 배속·AI고지도 같은 구멍이라 함께 폴백한다.
+      const _pn = s.presetName || common.presetName || null;
+      if (!s.presetName && common.presetName) log(`  ⓘ 이 대본에 채널이 저장돼 있지 않아 헤더 채널 「${common.presetName}」 을 씁니다`);
+      if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
       await runMakeAllCore({
-        engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,
+        engine: ie, presetName: _pn,
+        speed: (s.ttsSpeed != null ? s.ttsSpeed : (common.ttsSpeed != null ? common.ttsSpeed : null)),
         // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
         //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
         styleId: (common.styleId != null ? common.styleId : (s.styleId || null)),
@@ -4356,7 +4375,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         ..._batchRange(common, s),
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
-        aiNotice: !!s.aiNotice, // AI 고지(사용자 선택)
+        aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
       });
       it.status = 'done'; okN++;

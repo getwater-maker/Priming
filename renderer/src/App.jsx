@@ -806,9 +806,12 @@ export default function App() {
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
       // 비디오·이미지 엔진은 헤더값(이번 실행 공통)으로 전달 — 큐 항목별 stale 값 무시(헤더 '없음'이면 전 대본 영상 없음)
+      // 채널(presetName)·배속·AI고지도 함께 보낸다 — 항목에 저장된 값이 우선이고, **없을 때만** 이 헤더값이
+      //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
+      //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
       //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, vidFrom, vidTo, styleId: styleId || null }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
