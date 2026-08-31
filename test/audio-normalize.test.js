@@ -79,6 +79,16 @@ console.log('[2] 게인 계산 — 상한/하한과 미세 보정');
   eq(AN.gainForTarget({ speechDb: -40, peakDb: -20 }, -15), AN.MAX_GAIN_DB, 'ⓓ 상한 — 바닥 잡음까지 끌어올리지 않는다');
   eq(AN.gainForTarget({ speechDb: 0, peakDb: 0 }, -15), AN.MIN_GAIN_DB, 'ⓔ 하한');
   eq(AN.gainForTarget(null, -15), 0, 'ⓕ 측정 실패면 0 (조용히 원본 유지)');
+  // 🔴 피크 여유를 넘겨 올리면 리미터가 과하게 물려 소리가 뭉개진다(2026-08-31 기계음 사고).
+  //   허용 리미팅은 MAX_LIMITING_DB 까지 — 그 이상 필요하면 목표를 포기하고 덜 올린다.
+  eq(AN.gainForTarget({ speechDb: -20, peakDb: -2 }, -15), 4,
+    'ⓖ 피크 여유가 없으면 목표(+5dB)보다 덜 올린다 (-1dB 상한 + 리미팅 3dB = +4dB)');
+  eq(AN.gainForTarget({ speechDb: -20.5, peakDb: -5.97 }, -15), 5.5,
+    'ⓗ 여유가 충분하면 목표대로 올린다 (실제 TTS 결과물 값)');
+  eq(AN.gainForTarget({ speechDb: -20, peakDb: -0.5 }, -15), 2.5,
+    'ⓘ 이미 피크가 꽉 찬 문장은 아주 조금만 올린다');
+  ok(AN.gainForTarget({ speechDb: -14, peakDb: -0.2 }, -15) <= 0,
+    'ⓙ 낮추는 쪽은 피크 제한과 무관하다');
 }
 
 console.log('[3] 필터 문자열 — 순서와 리미터 조건');
@@ -90,6 +100,10 @@ console.log('[3] 필터 문자열 — 순서와 리미터 조건');
   const f = AN.buildFilter(1.15, 5);
   ok(f.indexOf('atempo') < f.indexOf('volume'), 'ⓔ 배속이 증폭보다 앞');
   ok(f.indexOf('volume') < f.indexOf('alimiter'), 'ⓕ 리미터가 맨 끝 — 어떤 경우에도 클리핑이 안 남는다');
+  // 🔴 2026-08-31 실사고(기계음): alimiter 의 auto level 기본값(true)이 출력을 limit 까지
+  //   **다시 끌어올려** volume 게인과 겹쳤다 → 피크 0.00dBFS · 클리핑 88개.
+  ok(/level=disabled/.test(AN.buildFilter(1, 5)), 'ⓖ alimiter 의 auto level 을 반드시 끈다 (기계음의 직접 원인)');
+  ok(!/alimiter=limit=[d.]+$/.test(AN.buildFilter(1, 5)), 'ⓗ 옛 필터(level 옵션 없음)가 남아 있지 않다');
 }
 
 console.log('[4] 채널 설정 — 기본 켜짐, 명시적으로만 끈다');
@@ -185,6 +199,14 @@ console.log('[7] 실제 ffmpeg 로 돌려본다 — 음량이 맞고 억양이 �
       };
       const d0 = dyn(fs.readFileSync(src)), d1 = dyn(fs.readFileSync(out));
       ok(d1 > d0 - 1.5, 'ⓕ 다이내믹이 유지된다 — 정규화가 억양을 깎지 않는다 (' + d0.toFixed(1) + ' → ' + d1.toFixed(1) + 'dB)');
+
+      // 🔴 클리핑 샘플 실측 — 기계음은 여기서 드러난다(옛 코드는 88개였다)
+      const clipCount = (file) => {
+        const b = fs.readFileSync(file); let c = 0;
+        for (let p = 44; p + 1 < b.length; p += 2) if (Math.abs(b.readInt16LE(p)) >= 32766) c++;
+        return c;
+      };
+      eq(clipCount(out), 0, 'ⓖ 클리핑 샘플이 0 개다 (auto level 이 켜져 있으면 여기서 터진다)');
     }
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
   }
