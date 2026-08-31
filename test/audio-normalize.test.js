@@ -73,37 +73,44 @@ console.log('\n[1] 말 구간 RMS 측정 — 무음을 빼고 발화만 본다')
 
 console.log('[2] 게인 계산 — 상한/하한과 미세 보정');
 {
-  eq(AN.gainForTarget({ speechDb: -20, peakDb: -3 }, -15), 5, 'ⓐ -20dB → 목표 -15dB 면 +5dB');
+  // ⚠ 피크 여유가 넉넉할 때의 기본 계산. 여유가 좁으면 아래 ⓖ 처럼 덜 올린다.
+  eq(AN.gainForTarget({ speechDb: -20, peakDb: -10 }, -15), 5, 'ⓐ -20dB → 목표 -15dB 면 +5dB');
   eq(AN.gainForTarget({ speechDb: -10, peakDb: -1 }, -15), -5, 'ⓑ 큰 소리는 낮춘다');
   eq(AN.gainForTarget({ speechDb: -15.2, peakDb: -3 }, -15), 0, 'ⓒ 0.5dB 미만 차이는 손대지 않는다 (ffmpeg 헛돌기 방지)');
   eq(AN.gainForTarget({ speechDb: -40, peakDb: -20 }, -15), AN.MAX_GAIN_DB, 'ⓓ 상한 — 바닥 잡음까지 끌어올리지 않는다');
   eq(AN.gainForTarget({ speechDb: 0, peakDb: 0 }, -15), AN.MIN_GAIN_DB, 'ⓔ 하한');
   eq(AN.gainForTarget(null, -15), 0, 'ⓕ 측정 실패면 0 (조용히 원본 유지)');
-  // 🔴 피크 여유를 넘겨 올리면 리미터가 과하게 물려 소리가 뭉개진다(2026-08-31 기계음 사고).
-  //   허용 리미팅은 MAX_LIMITING_DB 까지 — 그 이상 필요하면 목표를 포기하고 덜 올린다.
-  eq(AN.gainForTarget({ speechDb: -20, peakDb: -2 }, -15), 4,
-    'ⓖ 피크 여유가 없으면 목표(+5dB)보다 덜 올린다 (-1dB 상한 + 리미팅 3dB = +4dB)');
-  eq(AN.gainForTarget({ speechDb: -20.5, peakDb: -5.97 }, -15), 5.5,
-    'ⓗ 여유가 충분하면 목표대로 올린다 (실제 TTS 결과물 값)');
-  eq(AN.gainForTarget({ speechDb: -20, peakDb: -0.5 }, -15), 2.5,
-    'ⓘ 이미 피크가 꽉 찬 문장은 아주 조금만 올린다');
+  // 🔴 **피크가 상한(-1dBFS)을 넘지 않는 만큼만 올린다** — 리미터를 안 쓰므로 이게 유일한 안전장치다.
+  //   (2026-08-31 「지지지」 사고: 리미터로 밀어 넣었더니 파형이 왜곡됐다.)
+  eq(AN.gainForTarget({ speechDb: -20, peakDb: -2 }, -15), 1,
+    'ⓖ 피크 여유가 1dB 뿐이면 +1dB 만 올린다 (목표 +5dB 를 포기한다)');
+  eq(AN.gainForTarget({ speechDb: -20.5, peakDb: -5.97 }, -15), 5,
+    'ⓗ 여유 안이면 그만큼 올린다 (실제 TTS 결과물 값)');
+  eq(AN.gainForTarget({ speechDb: -25, peakDb: -12 }, -15), 10,
+    'ⓘ 여유가 크면 목표까지 올린다');
   ok(AN.gainForTarget({ speechDb: -14, peakDb: -0.2 }, -15) <= 0,
     'ⓙ 낮추는 쪽은 피크 제한과 무관하다');
+  // 어떤 입력이든 결과 피크가 상한을 넘지 않는다
+  for (const [r, p] of [[-30, -20], [-20, -5], [-18, -1.5], [-25, -0.5]]) {
+    const g = AN.gainForTarget({ speechDb: r, peakDb: p }, -15);
+    // 상한을 넘지 않거나, 원본이 이미 그보다 크면 **더 키우지는 않는다**(그대로 둔다).
+    ok(p + g <= Math.max(AN.PEAK_CEIL_DB, p) + 0.05,
+      'ⓚ 결과 피크가 상한 이하이거나 원본보다 커지지 않는다 (RMS ' + r + ' 피크 ' + p + ' → +' + g + 'dB)');
+  }
 }
 
 console.log('[3] 필터 문자열 — 순서와 리미터 조건');
 {
   eq(AN.buildFilter(1, 0), null, 'ⓐ 배속·게인 둘 다 없으면 null (ffmpeg 를 안 부른다)');
   eq(AN.buildFilter(1.15, 0), 'atempo=1.15', 'ⓑ 배속만');
-  ok(/^volume=5dB,alimiter=/.test(AN.buildFilter(1, 5)), 'ⓒ 게인만 — 올릴 땐 리미터가 붙는다');
-  eq(AN.buildFilter(1, -5), 'volume=-5dB', 'ⓓ 낮출 땐 리미터를 붙이지 않는다 (다이내믹을 건드리지 않게)');
-  const f = AN.buildFilter(1.15, 5);
-  ok(f.indexOf('atempo') < f.indexOf('volume'), 'ⓔ 배속이 증폭보다 앞');
-  ok(f.indexOf('volume') < f.indexOf('alimiter'), 'ⓕ 리미터가 맨 끝 — 어떤 경우에도 클리핑이 안 남는다');
-  // 🔴 2026-08-31 실사고(기계음): alimiter 의 auto level 기본값(true)이 출력을 limit 까지
-  //   **다시 끌어올려** volume 게인과 겹쳤다 → 피크 0.00dBFS · 클리핑 88개.
-  ok(/level=disabled/.test(AN.buildFilter(1, 5)), 'ⓖ alimiter 의 auto level 을 반드시 끈다 (기계음의 직접 원인)');
-  ok(!/alimiter=limit=[d.]+$/.test(AN.buildFilter(1, 5)), 'ⓗ 옛 필터(level 옵션 없음)가 남아 있지 않다');
+  eq(AN.buildFilter(1, 5), 'volume=5dB', 'ⓒ 게인만 — 순수 볼륨 조절뿐');
+  eq(AN.buildFilter(1, -5), 'volume=-5dB', 'ⓓ 낮출 때도 마찬가지');
+  eq(AN.buildFilter(1.15, 5), 'atempo=1.15,volume=5dB', 'ⓔ 배속이 증폭보다 앞');
+  // 🔴 2026-08-31 「지지지」 사고: alimiter 의 attack 5ms 가 남성 저음 한 주기(84Hz≈12ms)보다
+  //   짧아 **파형 안에서 게인이 변했다** → 고조파 왜곡. 게인 +5.5dB 인데 대역별로 +7~+18dB 로
+  //   제각각 올랐다. 리미터를 빼고 피크 여유 안에서만 올리니 전 대역이 균일하게 +5dB 올랐다.
+  ok(!/alimiter/.test(AN.buildFilter(1, 5) || ''), 'ⓕ 리미터를 쓰지 않는다 (파형 왜곡의 원인)');
+  ok(!/acompressor|compand/.test(AN.buildFilter(1, 10) || ''), 'ⓖ 압축기도 쓰지 않는다');
 }
 
 console.log('[4] 채널 설정 — 기본 켜짐, 명시적으로만 끈다');
@@ -145,6 +152,13 @@ console.log('[6] 배선 — 실제로 쓰이는지 원문 대조');
   ok(/ttsTargetDb: numOr\(ch\.ttsTargetDb, -15\)/.test(A), 'ⓙ 목표도 patch 에 실린다');
   ok(/ttsNormalize: p\.ttsNormalize !== false/.test(A), 'ⓚ 편집창을 열 때 저장값을 싣는다');
   ok(/음량 맞추기/.test(A), 'ⓛ 채널편집에 UI 가 있다');
+  // 어떤 게인에서도 리미터·압축이 붙지 않는다 (소스 문자열 대신 실제 출력으로 확인)
+  let hasLim = false;
+  for (let g = -12; g <= 12; g += 0.5) {
+    const ff = AN.buildFilter(1, AN.gainForTarget({ speechDb: -15 - g, peakDb: -10 }, -15));
+    if (ff && /alimiter|acompressor|compand/.test(ff)) hasLim = true;
+  }
+  ok(!hasLim, 'ⓜ 어떤 게인에서도 리미터·압축이 붙지 않는다');
 }
 
 console.log('[7] 실제 ffmpeg 로 돌려본다 — 음량이 맞고 억양이 안 깎이는지');

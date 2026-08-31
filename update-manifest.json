@@ -1,5 +1,5 @@
 {
-  "version": "0.3.88",
+  "version": "0.3.89",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "d98594ad04dacbc29f551e2becce51ce5cb43700",
+    "CLAUDE.md": "e00391bcdb60c3bfde5e7e897f5278852c3ea6d6",
     "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
     "comfy/comfy-server.pyw": "c8d6ecc38797a221f1bbe9ce2f4da26cc9454d2d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
@@ -21,7 +21,7 @@
     "comfy/video_minimax_h3_turbo4_i2v.json": "0605b7d19dcf5bfa654bab491808c238b60e8f71",
     "core/account-creds.js": "b91305523143fabd4f8bba8db3bb6e00c3eca21c",
     "core/accounts.js": "ea5e8d12a37983e359ba1bc680502d480e939b18",
-    "core/audio-normalize.js": "fdba1576bec50d4322c6f4b497ac52ffe3882b09",
+    "core/audio-normalize.js": "f844b9fc4b0b196ed8a1401a561dbb01be440a70",
     "core/audio-trim.js": "5003dd746ec7e1475ab1a317b3190b44928f95d4",
     "core/book/book-theme.css": "b33ffe136e61eeec80c4c8d2b52501931ac12f63",
     "core/book/epub-builder.js": "453c717a2698eadbe9c9e5f37281397c1f365795",
@@ -85,7 +85,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "8538e93e45da578ade6238714e62552725c02c9f",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "a865f7389899c104b13e004dddf9c2fe653b68b5",
+    "package.json": "fd5bd3b63ce2e6b84a60e3b5a72c821e3f4e0aeb",
     "preload.js": "fbd2f653da7b67d1fee9a73d119188149e39286c",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-Cih1DbO8.js": "a08b9ff6c701f118eb4b4ac20c63923387d6b977",

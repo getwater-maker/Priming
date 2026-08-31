@@ -21,8 +21,12 @@
 const TARGET_DB_DEFAULT = -15;   // 실측 기준선: 기존 참조음성(#01)으로 만든 결과가 -14.6dB 였다
 const MAX_GAIN_DB = 12;          // 조용한 녹음의 바닥 잡음까지 끌어올리지 않도록 상한
 const MIN_GAIN_DB = -12;
-const LIMIT_PEAK = 0.89;         // alimiter 상한 ≈ -1dBFS. 게인을 올려도 클리핑이 안 생기게.
-const MAX_LIMITING_DB = 3;       // 리미터가 물어도 되는 최대치. 이보다 많이 물면 소리가 뭉개진다(실측).
+const PEAK_CEIL_DB = -1;         // 출력 피크 상한(dBFS). 게인은 여기까지만 올린다.
+// 🔴 **리미터를 쓰지 않는다**(2026-08-31 실사고: 「지지지」 소리).
+//   alimiter 의 attack 기본 5ms 는 남성 저음의 한 주기(84Hz ≈ 12ms)보다 짧아 **파형 안에서 게인이
+//   변한다** → 고조파 왜곡. 실측: 게인 +5.5dB 인데 대역별로 0.5-1.5k +16dB · 1.5-4k +18dB 로
+//   제각각 올랐다(균일하게 올라야 정상). 리미터를 걸지 않고 **피크 여유 안에서만** 올리면
+//   왜곡이 원천적으로 없다. 목표에 조금 못 미치는 문장이 생기지만 그게 훨씬 낫다.
 
 /** WAV 버퍼(PCM 16bit) 헤더를 훑어 data 청크 위치를 찾는다. 못 찾으면 null. */
 function _findData(buf) {
@@ -87,9 +91,9 @@ function gainForTarget(measured, targetDb = TARGET_DB_DEFAULT) {
   //   RMS 만 보고 올리면 피크가 큰 문장에서 리미터가 과하게 물려 소리가 뭉개진다.
   //   리미터가 물어도 되는 건 MAX_LIMITING_DB 까지 — 그 이상 필요하면 목표를 포기하고 덜 올린다.
   //   (문장 하나가 조금 작은 것보다 왜곡이 훨씬 나쁘다.)
+  // 🔴 **피크가 상한을 넘지 않는 만큼만 올린다** — 리미터를 쓰지 않으므로 이 제한이 유일한 안전장치다.
   if (g > 0 && isFinite(measured.peakDb)) {
-    const limitDb = 20 * Math.log10(LIMIT_PEAK);          // ≈ -1.01dBFS
-    const maxByPeak = (limitDb - measured.peakDb) + MAX_LIMITING_DB;
+    const maxByPeak = PEAK_CEIL_DB - measured.peakDb;
     if (g > maxByPeak) g = maxByPeak;
     if (g < 0) g = 0;
   }
@@ -98,20 +102,14 @@ function gainForTarget(measured, targetDb = TARGET_DB_DEFAULT) {
 
 /**
  * ffmpeg 오디오 필터 문자열을 만든다. tempo·gain 둘 다 없으면 null(= ffmpeg 불필요).
- * 🔑 순서가 중요하다 — **배속(atempo) → 증폭(volume) → 리미터** 순.
- *   리미터를 마지막에 두어야 어떤 경우에도 클리핑이 남지 않는다.
- * ⚠ 리미터는 게인을 **올릴 때만** 붙인다. 낮추는 쪽엔 필요 없고, 괜히 걸면 다이내믹만 건드린다.
+ * 순서는 **배속(atempo) → 증폭(volume)**. 리미터·압축은 쓰지 않는다(위 주석 참조).
  */
 function buildFilter(tempo, gainDb) {
   const parts = [];
   if (tempo && Math.abs(tempo - 1) > 1e-6) parts.push(`atempo=${tempo}`);
-  if (gainDb) {
-    parts.push(`volume=${gainDb}dB`);
-    // 🔴 **level=disabled 가 필수다** — alimiter 의 auto level 기본값(true)은 출력을 limit 까지
-    //   **다시 끌어올린다.** volume 게인과 겹쳐 과증폭 → 실측에서 피크 0.00dBFS · 클리핑 88개 →
-    //   기계음이 났다(2026-08-31 실사고). 여기서는 피크만 잡아야 한다.
-    if (gainDb > 0) parts.push(`alimiter=limit=${LIMIT_PEAK}:level=disabled`);
-  }
+  // 게인은 순수 볼륨 조절뿐 — 리미터·압축을 걸지 않으므로 파형이 그대로 유지된다(왜곡 0).
+  //   피크가 넘지 않는 것은 gainForTarget 이 이미 보장한다.
+  if (gainDb) parts.push(`volume=${gainDb}dB`);
   return parts.length ? parts.join(',') : null;
 }
 
@@ -126,5 +124,5 @@ function targetFromPreset(preset) {
 
 module.exports = {
   measureSpeech, gainForTarget, buildFilter, targetFromPreset,
-  TARGET_DB_DEFAULT, MAX_GAIN_DB, MIN_GAIN_DB, LIMIT_PEAK, MAX_LIMITING_DB,
+  TARGET_DB_DEFAULT, MAX_GAIN_DB, MIN_GAIN_DB, PEAK_CEIL_DB,
 };
