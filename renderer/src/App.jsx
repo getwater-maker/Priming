@@ -1217,6 +1217,8 @@ export default function App() {
       cfgValue: p.cfgValue != null ? p.cfgValue : 2,
       capLong: mkCap(p.capLong, lf),
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
+      ttsNormalize: p.ttsNormalize !== false,
+      ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
@@ -1445,6 +1447,9 @@ export default function App() {
       //   preset-store.update 가 {...old,...patch} 병합이라 기존 저장값은 파일에 무해하게 남는다(마이그레이션 삭제 금지 — v0.3.8 계열).
       capLong: capToStyle(ch.capLong),
       speedLong: numOr(ch.speedLong, 1.15),
+      // 🔊 음량 정규화 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열 사고).
+      ttsNormalize: ch.ttsNormalize !== false,
+      ttsTargetDb: numOr(ch.ttsTargetDb, -15),
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
@@ -2293,6 +2298,26 @@ export default function App() {
 
                 <div className="subhead">🔊 음성 배속</div>
                 <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
+                <div className="subhead">🔊 음량 맞추기</div>
+                <div className="crow">
+                  <span className="l">문장마다 같은 음량으로</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={ch.ttsNormalize !== false}
+                      onChange={(e) => setCh({ ...ch, ttsNormalize: e.target.checked })} />
+                    <span className="meta">켜기</span>
+                  </label>
+                  <span className="meta" style={{ marginLeft: 10 }}>목표</span>
+                  <input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="1" min="-30" max="-6"
+                    disabled={ch.ttsNormalize === false}
+                    value={ch.ttsTargetDb != null && ch.ttsTargetDb !== '' ? ch.ttsTargetDb : -15}
+                    onChange={(e) => setCh({ ...ch, ttsTargetDb: e.target.value })} />
+                  <span className="meta">dB</span>
+                </div>
+                <div className="meta" style={{ marginTop: 4, lineHeight: 1.5 }}>
+                  문장마다 들쭉날쭉한 음량을 한 레벨로 맞춥니다. 짧은 문장·의문문이 작게 나오는 것과,
+                  참조음성이 조용해 결과 전체가 작아지는 것을 함께 잡습니다.
+                  ⚠ 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
+                </div>
               </div>)}
 
               {chTab === 'caption' && (<div>

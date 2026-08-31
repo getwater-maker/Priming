@@ -16,3 +16,4 @@ usage-coach/
 qwen-design/venv/
 qwen-design/__pycache__/
 qwen-design/test.wav
+tts/sample_voice/

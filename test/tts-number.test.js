@@ -92,7 +92,9 @@ ok(!/normalizeForTTS|processForTTS|text-pronouncer/.test(VREW_SRC),
 
 // ── ④ TTS 캐시 키 = 실제 합성될 문자열 ──
 ok(/typeof ttsMgr\.processText === 'function'/.test(PIPE_SRC), 'pipeline 이 ttsMgr.processText 로 키 텍스트를 만든다');
-ok(/TtsCache\.keyFor\(keyText, sf, synthOpts\)/.test(PIPE_SRC), '캐시 키가 keyText 기준이다');
+// 2026-08-31: 음량 정규화 목표(normDb)가 키에 함께 들어가면서 세 번째 인자가 확장됐다.
+//   여기서 지키는 것은 첫 인자가 keyText(= 실제 합성될 문자열)라는 것 하나다.
+ok(PIPE_SRC.includes('TtsCache.keyFor(keyText, sf, { ...synthOpts'), '캐시 키가 keyText 기준이다');
 ok(!/TtsCache\.keyFor\(s\.text, sf, synthOpts\)/.test(PIPE_SRC), '옛 "원문 기준" 키가 사라졌다');
 ok(/prepareDict/.test(PIPE_SRC), '루프 전에 사전을 맞춘다(첫 문장만 옛 사전으로 계산되는 것 방지)');
 

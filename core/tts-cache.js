@@ -38,6 +38,9 @@ function keyFor(text, sf, opts = {}) {
     it: opts.inferenceTimesteps != null ? opts.inferenceTimesteps : '',
     lang: opts.language || '',
     ins: opts.instruct || '',
+    // 🔊 음량 정규화 목표(dB) — 목표가 바뀌면 소리가 달라지므로 정체성에 포함한다.
+    //   ⚠ 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 그대로 되살아난다**(2026-08-31).
+    nd: opts.normDb != null ? opts.normDb : '',
   });
   return crypto.createHash('sha1').update(sig).digest('hex');
 }

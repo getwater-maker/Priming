@@ -17,6 +17,7 @@ const { buildVrew } = require('../vrew/vrew-builder');
 const presetStore = require('../tts/preset-store');
 const { getInstance: getTTS } = require('../tts/tts-manager');
 
+const AudioNorm = require('./audio-normalize');
 let ffmpegPath = null;
 try {
   ffmpegPath = require('ffmpeg-static');
@@ -138,13 +139,19 @@ async function makeTtsManager(logger, engine, opts = {}) {
   return { mgr, ok };
 }
 
-// WAV(정속) → atempo 로 배속 구운 MP3. 피치 유지(atempo). 성공 시 true.
-function atempoWavToMp3(wavPath, mp3Path, tempo) {
+// WAV(정속) → atempo 배속 + (선택)음량 정규화 를 **한 번의 ffmpeg 호출**로 구운 MP3.
+//   피치는 atempo 라 유지된다. gainDb=0 이면 배속만, tempo=1 이면 정규화만 한다. 성공 시 true.
+//   ⚠ 필터 순서(배속→증폭→리미터)는 audio-normalize.buildFilter 가 정한다.
+function encodeTts(wavPath, outPath, tempo, gainDb, toMp3) {
   if (!ffmpegPath) return false;
-  const args = ['-y', '-i', wavPath, '-filter:a', `atempo=${tempo}`,
-    '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '24000', '-ac', '1', mp3Path];
+  const filt = AudioNorm.buildFilter(tempo, gainDb);
+  const args = ['-y', '-i', wavPath];
+  if (filt) args.push('-filter:a', filt);
+  if (toMp3) args.push('-codec:a', 'libmp3lame', '-b:a', '192k');
+  else args.push('-codec:a', 'pcm_s16le');
+  args.push('-ar', '24000', '-ac', '1', outPath);
   const r = spawnSync(ffmpegPath, args, { stdio: 'ignore' });
-  return r.status === 0 && fs.existsSync(mp3Path);
+  return r.status === 0 && fs.existsSync(outPath);
 }
 
 // ── 💽 디스크 일시 장애 재시도 ─────────────────────────────
@@ -198,6 +205,11 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   } else if (sf !== 1 && onLine) {
     onLine(`🔊 음성 배속 ${sf}x 적용 (atempo MP3)`);
   }
+  // 🔊 음량 정규화 — 문장마다 제각각인 음량을 한 레벨로 맞춘다(2026-08-31).
+  //   참조음성 음량이 결과에 1:1로 옮고, 짧은 문장일수록 작게 나오는 것을 여기서 흡수한다.
+  //   ⚠ ffmpeg 가 없으면 조용히 건너뛴다 — 정규화 때문에 음성 생성을 막지 않는다.
+  const normTarget = (ffmpegPath && fs.existsSync(ffmpegPath)) ? AudioNorm.targetFromPreset(preset) : null;
+  if (normTarget != null && onLine) onLine(`🔊 음량 정규화 ${normTarget}dB 로 맞춤 (문장별 편차 제거)`);
   // 참조음성이 `srv:<이름>` 이면 **서버 공용 라이브러리의 목소리** — 파일 업로드 없이 이름만 보낸다.
   //   참조텍스트도 서버가 갖고 있으므로(.txt) 여기서 보내지 않는다(엉뚱한 텍스트 섞임 방지).
   const _ref = String(preset.voiceCloneRefAudio || '');
@@ -239,7 +251,9 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     //   🔑 키는 원문이 아니라 **실제 합성될 문자열**(발음사전+정규화 적용) 기준이다. 원문으로
     //     잡으면 발음사전·정규화를 고쳐도 같은 키가 나와 **옛 음성이 되살아난다**(2026-08-25).
     const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.text) : s.text;
-    const cacheKey = TtsCache.keyFor(keyText, sf, synthOpts);
+    // 🔑 정규화 목표도 키에 넣는다 — 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 되살아난다**
+    //   (v0.3.43 에서 발음사전을 고쳐도 옛 음성이 나오던 것과 같은 계열).
+    const cacheKey = TtsCache.keyFor(keyText, sf, { ...synthOpts, normDb: normTarget });
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
@@ -284,15 +298,22 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     // 🔑 **파일 쓰기도 실패한다** — 합성만 감싸면 절반만 막은 것이다(2026-08-21 사고: 컷70 쓰기 ENOENT 로
     //   [서재_0820] 대본 전체가 죽었다). 일시 장애면 재시도하고, 그래도 안 되면 **그 문장만** 건너뛴다.
     try {
-      if (sf !== 1) {
-        // 정속 WAV → atempo 배속 MP3
+      // 이 문장에 필요한 게인(dB). 정규화가 꺼져 있거나 이미 목표 근처면 0.
+      let gainDb = 0;
+      if (normTarget != null) {
+        try { gainDb = AudioNorm.gainForTarget(AudioNorm.measureSpeech(res.mp3Buffer), normTarget); } catch { gainDb = 0; }
+      }
+      const needFfmpeg = (sf !== 1) || gainDb !== 0;
+      if (needFfmpeg) {
+        // 정속 WAV → (배속 + 정규화) 를 ffmpeg 한 번으로. 배속이 걸리면 mp3, 아니면 wav 로 낸다.
+        const toMp3 = (sf !== 1);
         const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
         await retryFs(() => fs.writeFileSync(wavTmp, res.mp3Buffer), `컷${s.num} 임시 WAV 쓰기`, onLine, abortSignal);
-        const mp3 = path.join(workDir, `${s.num}.mp3`);
-        const ok = atempoWavToMp3(wavTmp, mp3, sf);
+        const out = path.join(workDir, `${s.num}.${toMp3 ? 'mp3' : 'wav'}`);
+        const ok = encodeTts(wavTmp, out, sf, gainDb, toMp3);
         try { fs.unlinkSync(wavTmp); } catch {}
-        if (ok) { s.ttsAudioPath = mp3; s.ttsDurationSec = res.durationSec / sf; }
-        else { // ffmpeg 실패 폴백: 정속 WAV 그대로
+        if (ok) { s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec / sf; s.ttsGainDb = gainDb; }
+        else { // ffmpeg 실패 폴백: 정속 WAV 그대로 (배속·정규화 미적용)
           const wav = path.join(workDir, `${s.num}.wav`);
           await retryFs(() => fs.writeFileSync(wav, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);
           s.ttsAudioPath = wav; s.ttsDurationSec = res.durationSec;
@@ -315,7 +336,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     s.ttsGenSec = (Date.now() - _genT0) / 1000; // 이 문장 생성에 걸린 실시간(초)
     // 캐시에 저장(다음 동일 작업 시 재활용)
     try { TtsCache.put(cacheKey, s.ttsAudioPath, s.ttsDurationSec, path.extname(s.ttsAudioPath).slice(1).toLowerCase() || 'wav'); } catch {}
-    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
+    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
     // 문장 한 개 변환 완료 → 즉시 화면 갱신(시간 표시). PrimingFlow 처럼 바로바로 진행상황 반영.
     if (onProgress) { try { onProgress(); } catch {} }
   }
