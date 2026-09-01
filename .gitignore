@@ -17,3 +17,8 @@ qwen-design/venv/
 qwen-design/__pycache__/
 qwen-design/test.wav
 tts/sample_voice/
+
+# 화이트보드 렌더러 — 파이썬 venv(263MB)·바이트코드는 각 PC 가 만든다(커밋 제외)
+#   ⚠ 앱이 whiteboard/py/prepare_env.py 로 자동 생성한다. 지우면 다음 실행에 다시 만든다.
+whiteboard/.venv/
+whiteboard/py/__pycache__/

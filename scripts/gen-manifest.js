@@ -17,7 +17,11 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'update-manifest.json');
 
 // 폴더 단위 제외 (이름 일치) — 주의: 'dist' 는 여기 넣지 않는다(renderer/dist 는 포함해야 함).
-const EXCLUDE_DIR_NAMES = new Set(['node_modules', '.git', 'output', 'test', 'lora-dataset', 'scripts', 'kaggle-lora', 'qwen-design']);
+// ⚠ '__pycache__' — 파이썬이 만드는 .pyc 는 인터프리터 버전마다 달라 매번 해시가 바뀐다(배포할 것이 아니다).
+// ⚠ '.venv' 필수 — whiteboard/.venv 는 앱이 각 PC 에서 만드는 파이썬 가상환경(수백 MB)이다.
+//   안 막으면 매니페스트에 섞여 GitHub 에 올라가고 **모든 PC 가 그걸 받는다**(위 미디어 제외와 같은 이유).
+// ⚠ 'scripts' 는 이름만 보고 거르므로 whiteboard 의 파이썬 폴더를 'scripts' 로 두면 **조용히 배포에서 빠진다** → 'py' 로 둔 이유.
+const EXCLUDE_DIR_NAMES = new Set(['node_modules', '.git', 'output', 'test', 'lora-dataset', 'scripts', 'kaggle-lora', 'qwen-design', '.venv', '__pycache__']);
 // 상대경로(슬래시) 정규식 제외 — 대용량/정적/소스 + 루트 설치산출물 dist/
 const EXCLUDE_REL = [
   /^dist\//,            // electron-builder 설치파일 산출물 (renderer/dist 는 제외 안 됨)

@@ -1,0 +1,139 @@
+{
+  "sceneId": "scene-01",
+  "canvas": {
+    "width": 1672,
+    "height": 941
+  },
+  "storyBasis": "AI 에이전트가 일하는 흐름 — 요청을 받고, 도구를 스스로 고르고, 실행해 결과를 내고, 아니다 싶으면 되돌아가 다시 한다.",
+  "sceneDurationMs": 16000,
+  "elements": [
+    {
+      "id": "request",
+      "label": "사람의 요청",
+      "sequence": 1,
+      "narrativeRole": "장면 깔기 — 흐름의 출발점",
+      "subtitle": "사람이 할 일을 말로 던집니다.",
+      "type": "character",
+      "region": {
+        "x": 55,
+        "y": 230,
+        "width": 540,
+        "height": 400
+      },
+      "reveal": {
+        "direction": "left_to_right",
+        "startMs": 300,
+        "durationMs": 2900,
+        "maskPaddingPx": 16,
+        "protectedRegions": []
+      },
+      "handPath": {
+        "start": [
+          70,
+          430
+        ],
+        "end": [
+          580,
+          430
+        ],
+        "easing": "easeInOut"
+      }
+    },
+    {
+      "id": "agent",
+      "label": "에이전트와 도구",
+      "sequence": 2,
+      "narrativeRole": "핵심 주체 — 도구를 스스로 고른다",
+      "subtitle": "에이전트가 받아서, 필요한 도구를 스스로 고릅니다. 검색이든 파일이든 터미널이든요.",
+      "type": "structure",
+      "region": {
+        "x": 545,
+        "y": 60,
+        "width": 540,
+        "height": 592
+      },
+      "reveal": {
+        "direction": "top_to_bottom",
+        "startMs": 3500,
+        "durationMs": 4500,
+        "maskPaddingPx": 16,
+        "protectedRegions": []
+      },
+      "handPath": {
+        "start": [
+          815,
+          70
+        ],
+        "end": [
+          815,
+          640
+        ],
+        "easing": "easeInOut"
+      }
+    },
+    {
+      "id": "result",
+      "label": "결과물",
+      "sequence": 3,
+      "narrativeRole": "행동의 결과",
+      "subtitle": "그리고 실행해서 결과물을 만들어냅니다.",
+      "type": "object",
+      "region": {
+        "x": 1090,
+        "y": 320,
+        "width": 582,
+        "height": 320
+      },
+      "reveal": {
+        "direction": "left_to_right",
+        "startMs": 8300,
+        "durationMs": 2700,
+        "maskPaddingPx": 16,
+        "protectedRegions": []
+      },
+      "handPath": {
+        "start": [
+          1100,
+          480
+        ],
+        "end": [
+          1660,
+          480
+        ],
+        "easing": "easeInOut"
+      }
+    },
+    {
+      "id": "loop",
+      "label": "되돌아가는 고리",
+      "sequence": 4,
+      "narrativeRole": "반전·핵심 — 확인하고 다시 한다",
+      "subtitle": "여기가 핵심이에요. 결과를 다시 확인하고, 아니다 싶으면 돌아가서 다시 합니다.",
+      "type": "structure",
+      "region": {
+        "x": 790,
+        "y": 655,
+        "width": 680,
+        "height": 215
+      },
+      "reveal": {
+        "direction": "right_to_left",
+        "startMs": 11300,
+        "durationMs": 4200,
+        "maskPaddingPx": 16,
+        "protectedRegions": []
+      },
+      "handPath": {
+        "start": [
+          1460,
+          760
+        ],
+        "end": [
+          800,
+          700
+        ],
+        "easing": "easeInOut"
+      }
+    }
+  ]
+}

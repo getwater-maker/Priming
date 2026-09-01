@@ -1,5 +1,5 @@
 {
-  "version": "0.3.89",
+  "version": "0.3.90",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -8,7 +8,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "e00391bcdb60c3bfde5e7e897f5278852c3ea6d6",
+    "CLAUDE.md": "4ed3ced1938419b3d411460ef7355c1d7a23b23e",
     "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
     "comfy/comfy-server.pyw": "c8d6ecc38797a221f1bbe9ce2f4da26cc9454d2d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
@@ -72,6 +72,7 @@
     "core/upscale-config.js": "cf5e79339ff118f031d9ba79554de8e95a4fe74c",
     "core/upscaler.js": "31b4f1d8922f2e853250e0720e3b0ebdf7b19908",
     "core/wav-slice.js": "beb9abf908031c7acb414b0a8b2e036ca9b86609",
+    "core/whiteboard-render.js": "761917ad5c42677a71d1c323632b60f67ac4172c",
     "docs/대본-작성-가이드.md": "06823139751f6b51ad72222ed1c0b5452de88c33",
     "docs/대본-형식-변환-지침.md": "e0ac240adbb6d5b73a3054c0484718644e7733a5",
     "docs/출판-원고-가이드.md": "1a13519b5ccf2fa88dcd56fe7505076414462deb",
@@ -85,7 +86,7 @@
     "light-updater.js": "39b790b86588fc2dd2ab0e4cbcf6ba4abe7c68ab",
     "main.js": "8538e93e45da578ade6238714e62552725c02c9f",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "fd5bd3b63ce2e6b84a60e3b5a72c821e3f4e0aeb",
+    "package.json": "948a5dd4e03fe81081240f0cc3fdd4e2a53dda63",
     "preload.js": "fbd2f653da7b67d1fee9a73d119188149e39286c",
     "renderer/dist/assets/index-BoXHYMZz.css": "75b80ab99449e59b233c51b20f1bcdce4dfcb023",
     "renderer/dist/assets/index-Cih1DbO8.js": "a08b9ff6c701f118eb4b4ac20c63923387d6b977",
@@ -113,6 +114,8 @@
     "tts/sample_voice/008.m4a": "a1583d7fbdf906500a034c45f8344c8e9f2822d2",
     "tts/sample_voice/009.m4a": "f4515674c71ea7551fd1914e1a206601cbab9db6",
     "tts/sample_voice/010.m4a": "f2c3f7ec472f3d05dc738ad361c531c4661738ba",
+    "tts/sample_voice/0831_1531.m4a": "a2ed58e14bf08239dd1893bfaf8b952ae2970e1c",
+    "tts/sample_voice/0831_1812.m4a": "abdc774a541b96fc606fdacee53b10b29b4ab51e",
     "tts/sample_voice/녹음2.m4a": "b385a12db9b41c00cd068f0794090cd16125575c",
     "tts/sample_voice/녹음3.m4a": "aa04d3e07e2a5fff48e620355f3a58126ce8afb9",
     "tts/secret-store.js": "412ad32d1a5d4a8b68ce9ef28c4e7a94b4cf380d",
@@ -133,6 +136,17 @@
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
     "vrew/vrew-builder.js": "c24f5fc5ba220f854ab4570af54b664fb6af253f",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65",
-    "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad"
+    "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad",
+    "whiteboard/assets/drawing-hand.png": "790cd1817e8735e8ac90c92136169329cd5e895f",
+    "whiteboard/assets/preview.html": "0ea7e6204bb1fe5326ba6d69a34568241cba5766",
+    "whiteboard/examples/scene-01-agent-flow.annotation.json": "137220dfeae62eba9672df47fa0a0066d43704a6",
+    "whiteboard/LICENSE": "dfa1698365f36988c833624be0752f4c1eaa88d0",
+    "whiteboard/py/merge_scenes.py": "daed0a460c0ac93ef30b04e67f1ea9e6853246c7",
+    "whiteboard/py/parse_srt.py": "2ee2e77173093cf6106054a1f6e0f2e2b3f3633d",
+    "whiteboard/py/prepare_env.py": "c4c8779265260aa96badfc10ab3f73381ae3c960",
+    "whiteboard/py/render_annotation_preview.py": "5bd5b65c5488a4a3b01225b0088ce51ab1c07f22",
+    "whiteboard/py/render_stream_whiteboard.py": "fd95729716f8ee4249c98a996240062a72cd9ba6",
+    "whiteboard/py/stream_render.py": "ed8248169835bcfc05789a3c33ba313a7f5a51c2",
+    "whiteboard/UPSTREAM.md": "df23dd88b15eaf4ac371bb49108640a801b2b4bf"
   }
 }
