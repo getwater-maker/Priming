@@ -31,7 +31,9 @@ const EXCLUDE_REL = [
   // 프로젝트 루트에 임시로 둔 미디어(영상·음원)는 앱 파일이 아니므로 제외.
   //   ⚠ 안 막으면 mp3 하나만 놔둬도 매니페스트에 섞여 GitHub 에 올라가고 **모든 PC 가 수십MB 를 받는다.**
   //   dummy-tts.mp3(무음 더미)는 앱이 쓰므로 유지. 하위 폴더 미디어(vrew/dummy 등)는 영향 없음.
-  /^(?!dummy-tts\.mp3$)[^/]+\.(mp3|mp4|wav|m4a|flac|ogg|aac|mov|mkv|webm|avi|m4v)$/i,
+  //   🔴 **하위 폴더까지** 본다 — 예전엔 `^[^/]+\.mp4$` 라 루트만 걸러서, `video/` 에 둔 mp4 두 개(145MB)가
+  //     매니페스트에 그대로 섞였다(2026-09-01 발견, 푸시 직전에 잡음).
+  /(^|\/)(?!dummy-tts\.mp3$)[^/]+\.(mp3|mp4|wav|m4a|flac|ogg|aac|mov|mkv|webm|avi|m4v)$/i,
 ];
 // 파일명/경로 제외 (_ 로 시작하는 스크래치/노트 파일 전부 제외)
 const EXCLUDE_FILE = [/\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/];

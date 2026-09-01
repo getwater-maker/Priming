@@ -286,7 +286,7 @@ async function mergeScenes({ inputs, outputPath, abortSignal = null } = {}) {
 
 module.exports = {
   ROOT, PY_DIR, VENV_DIR,
-  venvPython, hasEnv, findSystemPython, ensureEnv,
+  venvPython, hasEnv, findSystemPython, ensureEnv, runPy,
   checkCanvas, checkUniform, makeProgressTracker,
   renderScene, renderPreview, mergeScenes,
 };

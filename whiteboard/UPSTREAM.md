@@ -16,8 +16,14 @@ whiteboard/
   py/          ← 상류의 scripts/*.py
   assets/      ← drawing-hand.png · preview.html
   examples/    ← 주석 형식 참조용 JSON 1개 (mp4·png 는 안 가져옴)
+  priming/     ← 🔵 **우리 것** — 상류 동기화 대상이 아니다 (아래)
   .venv/       ← 앱이 각 PC 에서 만든다 (git·매니페스트 제외)
 ```
+
+🔵 **`priming/` 만 우리가 쓰고 고친다.** 나머지(`py/` · `assets/` · `examples/` · `LICENSE`)는
+상류 사본이라 **여기서 고치지 않는다.** 같은 `.venv` 를 쓰므로 opencv·numpy·Pillow 를 그대로 쓸 수 있다.
+- `draft_regions.py` — 선화에서 **영역 초안**(OpenCV 연결요소 → 균형 분할 → 경계 상자).
+  성공 계약은 `REGIONS=<json>`, 실패는 `[err] ` 접두 — 상류와 같은 규약을 따른다.
 
 🔴 **`py/` 를 `scripts/` 로 두면 안 된다.** `scripts/gen-manifest.js` 의 `EXCLUDE_DIR_NAMES` 가
 **폴더 이름만 보고** 거르기 때문에, `whiteboard/scripts/` 는 매니페스트에서 **조용히 빠지고**

@@ -22,3 +22,6 @@ tts/sample_voice/
 #   ⚠ 앱이 whiteboard/py/prepare_env.py 로 자동 생성한다. 지우면 다음 실행에 다시 만든다.
 whiteboard/.venv/
 whiteboard/py/__pycache__/
+
+# 작업용 영상·음원은 저장소에 넣지 않는다(매니페스트에도 제외 — gen-manifest.js)
+video/
