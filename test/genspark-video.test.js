@@ -103,6 +103,49 @@ ok(/waitForEvent\('filechooser'[\s\S]{0,300}await plus\.click/.test(ENGSRC), '�
   ok(/LTX2\.5/.test(MAIN), '대안 엔진을 알려준다');
 }
 
+// ── [4-c] 🔴 참조 이미지를 안 받는 모델 — 만들지 않는다 ──
+//   2026-09-03 실사고(로이): Gemini Omni Flash 로 만들었더니 원본이 웹툰 일러스트인데 **실사**가 나왔다.
+//   첨부는 정상이었다(실측: data:image 0→1, 썸네일 붙음) — **그 모델이 참조 이미지를 받지 않는다.**
+{
+  ok(typeof ENG.gsVideoModelTakesImage === 'function', 'gsVideoModelTakesImage 를 export 한다');
+  ok(ENG.gsVideoModelTakesImage('Gemini Omni Flash') === false, '🔴 Gemini Omni Flash = 참조 이미지 안 받음(실사고 모델)');
+  ok(ENG.gsVideoModelTakesImage('MiniMax H3 Max') === true, 'MiniMax H3 Max = 받음');
+  ok(ENG.gsVideoModelTakesImage('Seedance 2.5') === true, 'Seedance 2.5 = 받음');
+  ok(ENG.gsVideoModelTakesImage('모델 자동 선택') === null, '자동 선택 = 알 수 없음');
+  ok(ENG.gsVideoModelTakesImage('없는모델') === null, '목록에 없으면 알 수 없음');
+  // 모든 항목이 imgRef 를 갖는가(빠뜨리면 조용히 통과한다)
+  ok(M.every((x) => x.imgRef === true || x.imgRef === false || x.imgRef === null), '모든 모델에 imgRef 가 있다');
+  ok(M.filter((x) => x.imgRef === true).length >= 12, '참조 가능 모델이 충분히 있다 (' + M.filter((x) => x.imgRef === true).length + '개)');
+  // 엔진이 그 모델을 막는지 — **분기 자체**를 단언한다
+  ok(ENGSRC.includes('if (takes === false) {'), '🔴 imgRef=false 면 만들지 않는 분기가 있다');
+  ok(/modelNoImage: true/.test(ENGSRC), '호출부가 구분할 수 있게 표시한다');
+  ok(/참조 이미지를 받지 않는 모델입니다/.test(ENGSRC), '사람 말로 알린다');
+  ok(/설정 → 🌐 브라우저 이미지·비디오 에서/.test(ENGSRC), '무엇으로 바꾸면 되는지 알려준다');
+  ok(ENGSRC.includes('if (takes === null)'), '알 수 없는 모델은 경고만 하고 진행한다');
+  // 🔑 판정이 **첨부보다 먼저** 와야 한다(무의미한 첨부로 시간을 버리지 않게)
+  const iChk = ENGSRC.indexOf('takes === false');
+  const iAtt = ENGSRC.indexOf('await this._attachVideoSourceImage(imagePath)');
+  ok(iChk > 0 && iAtt > 0 && iChk < iAtt, '🔴 모델 판정이 첨부보다 먼저다');
+  // 기본값이 참조 가능한 모델인가
+  ok(ROT.DEFAULTS.gensparkVideoModel === 'MiniMax H3 Max', '기본 모델을 참조 가능한 것으로 바꿨다');
+  ok(ENG.gsVideoModelTakesImage(ROT.DEFAULTS.gensparkVideoModel) === true, '🔴 기본 모델은 참조 이미지를 받는다');
+  // UI 경고
+  ok(/참조 이미지를 받지 않습니다/.test(APP), '설정 UI 가 미지원 모델을 경고한다');
+  ok(/imgRef: false/.test(APP), '렌더러 목록에 imgRef 가 있다');
+  // 🔴 엔진 ↔ 렌더러의 imgRef 까지 같은지
+  const rm = APP.match(/const GS_VIDEO_MODELS = \[([\s\S]*?)\n\];/);
+  ok(!!rm, '렌더러 목록을 찾았다');
+  if (rm) {
+    const pairs = [...rm[1].matchAll(/name: '([^']+)'[^}]*imgRef: (true|false|null)/g)].map((x) => [x[1], x[2]]);
+    ok(pairs.length === M.length, '렌더러도 imgRef 를 다 갖는다 (' + pairs.length + '/' + M.length + ')');
+    const mismatch = pairs.filter((p) => {
+      const eng = M.find((x) => x.name === p[0]);
+      return eng && String(eng.imgRef) !== p[1];
+    });
+    ok(mismatch.length === 0, '🔴 엔진 ↔ 렌더러 imgRef 가 같다 — 다른 것: ' + mismatch.map((x) => x[0]).join(', '));
+  }
+}
+
 // ── [5] 모델·등급 선택이 조용히 실패하지 않는지 ──
 ok(/선택을 확인하지 못했습니다/.test(ENGSRC), '🔴 모델 선택 실패를 로그로 알린다(Flow v0.3.71 사고 재발 방지)');
 ok(/txt\(el\) === name/.test(ENGSRC), '🔴 모델명을 **정확히 일치**로 찾는다 (MiniMax H3 ⊂ MiniMax H3 Max 오선택 방지)');
@@ -129,7 +172,8 @@ ok(!/comfyVideoPipeline[^\n]*genspark/.test(MAIN), 'genspark 는 Comfy 파이프
 {
   // ⚠ `load()` 는 **사용자가 고른 값**을 준다(로이가 설정에서 바꾸면 그 값이다 — 그게 정상 동작이다).
   //   기본값 단언은 **DEFAULTS** 로 한다.
-  ok(ROT.DEFAULTS.gensparkVideoModel === 'Gemini Omni Flash', '기본 모델 = Gemini Omni Flash (로이 지정)');
+  // ⚠ 로이가 처음 지정한 Gemini Omni Flash 는 **참조 이미지를 받지 않아** 기본에서 뺐다(2026-09-03 실측).
+  ok(ROT.DEFAULTS.gensparkVideoModel === 'MiniMax H3 Max', '기본 모델 = 참조 이미지를 받는 모델');
   ok(ROT.DEFAULTS.gensparkVideoTier === 'Standard', '기본 등급 = Standard');
   const c = ROT.load();
   ok(typeof c.gensparkVideoModel === 'string' && c.gensparkVideoModel, `설정에서 모델을 읽는다 (현재 ${c.gensparkVideoModel})`);

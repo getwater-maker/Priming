@@ -31,7 +31,9 @@ const DEFAULTS = {
   // 🎬 Genspark 비디오 — 로이 요청(2026-09-03): "성능과 비용을 아직 몰라서 설정에서 고르고 싶다".
   //   기본은 로이 지정 'Gemini Omni Flash'(3~10초·720p). 모델마다 길이·해상도가 달라
   //   엔진이 페이지에서 범위를 읽어 맞춘다(genspark-engine 의 GENSPARK_VIDEO_MODELS 참조).
-  gensparkVideoModel: 'Gemini Omni Flash',
+  // ⚠ 기본값을 MiniMax H3 Max 로 둔다 — 로이가 처음 지정한 Gemini Omni Flash 는 **참조 이미지를
+  //   받지 않아** 화풍이 통째로 바뀐다(2026-09-03 실측: 웹툰 일러스트 → 실사).
+  gensparkVideoModel: 'MiniMax H3 Max',
   gensparkVideoTier: 'Standard',
   // 소스 이미지를 붙이는 방식 (2026-08-28 Flow UI 실측 — 설정 팝업의 서브탭이 곧 방식이다):
   //   'frame' = [시작]⇄[종료] 프레임 지정 → **첫 프레임이 그 이미지로 고정**되는 엄격한 i2v (기본).

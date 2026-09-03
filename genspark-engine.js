@@ -102,28 +102,41 @@ const GS_VIDEO_MAX_SEC = 10;
  *   🔑 `res`(해상도)·`sec`(길이)는 로이가 고를 때 판단 근거로 UI 에 그대로 보여 준다.
  *      **720p 모델은 업스케일이 붙는다**(우리 목표는 1920x1080).
  */
+//   🔴 **`imgRef` 가 이 목록의 핵심이다**(2026-09-03 실사고). 로이가 Gemini Omni Flash 로 만들었더니
+//     원본이 웹툰 일러스트인데 **실사 영상**이 나왔다. 첨부는 정상이었다(실측: data:image 0 → 1,
+//     썸네일도 붙었다) — 그 **모델이 참조 이미지를 받지 않는다.** Genspark 목록의 설명이 그렇게 갈린다:
+//       · `⚠️ 최대 N개의 입력 이미지 지원`  → imgRef true
+//       · `첫/마지막 프레임` · `이미지-비디오 생성만` → imgRef true (프레임 입력)
+//       · **아무 언급 없음** → imgRef **false** = t2v 전용 → 첨부해도 무시되고 화풍이 통째로 바뀐다
+//     ⇒ 우리 파이프라인은 i2v(그룹 이미지로 화풍 유지)가 목적이므로 imgRef=false 모델은 **막는다**.
+//       크레딧을 쓰고 못 쓸 영상을 받는 것보다 낫다(Flow 첨부 실패 정책과 같은 태도).
 const GENSPARK_VIDEO_MODELS = [
-  { name: '모델 자동 선택',        note: '작업에 맞는 모델을 Genspark 이 고름' },
-  { name: 'Seedance 2.5',          note: '4~30초 · 1080p · 이미지 30장' },
-  { name: 'Seedance v2',           note: '4~15초 · 1080p · 이미지 9장' },
-  { name: 'MiniMax H3',            note: '2K · 이미지 9장' },
-  { name: 'MiniMax H3 Max',        note: '2K · 더 빠름 · 이미지 9장' },
-  { name: 'Wan 3.0',               note: '2~30초 · 1080p · 이미지 10장' },
-  { name: 'Gemini Omni Flash',     note: '3~10초 · 720p(업스케일 필요)' },
-  { name: 'Grok Imagine Video',    note: '1~15초 · 1080p · 이미지 7장' },
-  { name: 'FLUX 3 Video',          note: '5~20초 · 1080p · 이미지 10장' },
-  { name: 'PixVerse C1',           note: '1~15초 · 1080p · 이미지 7장' },
-  { name: 'Kling V3',              note: '3~15초 · 720p · 첫/마지막 프레임' },
-  { name: 'Happy Horse',           note: '3~15초 · 720p/1080p · 이미지 9장' },
-  { name: 'Gemini Veo 3.1',        note: '4·6·8초 · 최대 4K · 이미지 3장' },
-  { name: 'Gemini Veo 3',          note: '4·6·8초 · 720p' },
-  { name: 'Kling O3',              note: '3~15초 · 720p · 이미지 1~4장 필요' },
-  { name: 'PixVerse V6',           note: '5·8초 · 720p/1080p' },
-  { name: 'Seedance Pro Fast',     note: '5·10초 · 1080p · 빠르고 저렴' },
-  { name: 'Wan V2.7',              note: '5초 · 480p/720p' },
-  { name: 'Vidu Q3',               note: '1~16초 · 1080p · 이미지 1~4장' },
-  { name: 'Runway',                note: '5·10초 · 720p · 이미지 필요' },
+  { name: '모델 자동 선택',        note: 'Genspark 이 고름 — 참조 이미지를 쓸지 알 수 없음', imgRef: null },
+  { name: 'Seedance 2.5',          note: '4~30초 · 1080p · 이미지 30장', imgRef: true },
+  { name: 'Seedance v2',           note: '4~15초 · 1080p · 이미지 9장', imgRef: true },
+  { name: 'MiniMax H3',            note: '2K · 이미지 9장', imgRef: true },
+  { name: 'MiniMax H3 Max',        note: '2K · 더 빠름 · 이미지 9장', imgRef: true },
+  { name: 'Wan 3.0',               note: '2~30초 · 1080p · 이미지 10장', imgRef: true },
+  { name: 'Gemini Omni Flash',     note: '3~10초 · 720p · ❌ 참조 이미지 안 받음(실사로 나옴)', imgRef: false },
+  { name: 'Grok Imagine Video',    note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
+  { name: 'FLUX 3 Video',          note: '5~20초 · 1080p · 이미지 10장', imgRef: true },
+  { name: 'PixVerse C1',           note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
+  { name: 'Kling V3',              note: '3~15초 · 720p · 첫/마지막 프레임', imgRef: true },
+  { name: 'Happy Horse',           note: '3~15초 · 720p/1080p · 이미지 9장', imgRef: true },
+  { name: 'Gemini Veo 3.1',        note: '4·6·8초 · 최대 4K · 이미지 3장', imgRef: true },
+  { name: 'Gemini Veo 3',          note: '4·6·8초 · 720p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Kling O3',              note: '3~15초 · 720p · 이미지 1~4장 필요', imgRef: true },
+  { name: 'PixVerse V6',           note: '5·8초 · 720p/1080p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Seedance Pro Fast',     note: '5·10초 · 1080p · 첫/마지막 프레임', imgRef: true },
+  { name: 'Wan V2.7',              note: '5초 · 480p/720p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Vidu Q3',               note: '1~16초 · 1080p · 이미지 1~4장', imgRef: true },
+  { name: 'Runway',                note: '5·10초 · 720p · 이미지 필요', imgRef: true },
 ];
+/** 그 모델이 참조 이미지를 받나 — 목록에 없는 이름이면 `null`(알 수 없음). */
+function gsVideoModelTakesImage(name) {
+  const m = GENSPARK_VIDEO_MODELS.find((x) => x.name === String(name || '').trim());
+  return m ? m.imgRef : null;
+}
 /** 품질 등급(실측): Standard / Ultra */
 const GENSPARK_VIDEO_TIERS = ['Standard', 'Ultra'];
 
@@ -1124,6 +1137,22 @@ class GensparkEngine {
         this._videoSetupDone = true;
       }
 
+      // 🔴 **그 모델이 참조 이미지를 받는지 먼저 본다.** 안 받는 모델은 첨부해도 무시되고
+      //   **화풍이 통째로 바뀐다**(2026-09-03: 웹툰 일러스트 → 실사). 크레딧을 쓰고 못 쓸 영상을
+      //   받는 것보다 만들지 않는 게 낫다 — 무엇으로 바꾸면 되는지 함께 알린다.
+      if (imagePath && requireImage) {
+        const takes = gsVideoModelTakesImage(model);
+        if (takes === false) {
+          const alt = GENSPARK_VIDEO_MODELS.filter((x) => x.imgRef === true).slice(0, 4).map((x) => x.name).join(' · ');
+          return {
+            success: false, modelNoImage: true,
+            error: `「${model}」 은 참조 이미지를 받지 않는 모델입니다 — 첨부해도 무시되고 원본 화풍과 무관한 영상(실사)이 나옵니다.\n`
+              + `→ ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 **${alt}** 중 하나로 바꾸세요.`,
+          };
+        }
+        if (takes === null) this.log(`[Genspark] ⚠ 「${model}」 이 참조 이미지를 쓰는지 알 수 없습니다 — 결과 화풍을 확인하세요`);
+      }
+
       // 시작 이미지 첨부 — 실패하면 **만들지 않는다**(원본과 무관한 영상 + 크레딧 낭비 방지)
       if (imagePath) {
         const ok = await this._attachVideoSourceImage(imagePath);
@@ -1189,5 +1218,5 @@ module.exports = {
   GensparkEngine, GENSPARK_SELECTORS, PROFILE_BASE,
   GENSPARK_VIDEO_URL, GENSPARK_VIDEO_SELECTORS, GS_VIDEO_MIN_SEC, GS_VIDEO_MAX_SEC,
   GENSPARK_VIDEO_MODELS, GENSPARK_VIDEO_TIERS,
-  GS_BENIGN_NOTICE_RE, GS_HARD_LIMIT_RE,
+  GS_BENIGN_NOTICE_RE, GS_HARD_LIMIT_RE, gsVideoModelTakesImage,
 };

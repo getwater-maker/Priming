@@ -251,26 +251,26 @@ function phaseBadge(p) {
 // 🎬 Genspark 비디오 모델 — genspark-engine.js 의 GENSPARK_VIDEO_MODELS 와 **같아야 한다**
 //   (렌더러는 require 를 못 쓴다. 테스트가 두 목록의 이름을 대조해 어긋남을 막는다.)
 const GS_VIDEO_MODELS = [
-  { name: '모델 자동 선택', note: '작업에 맞는 모델을 Genspark 이 고름' },
-  { name: 'Seedance 2.5', note: '4~30초 · 1080p · 이미지 30장' },
-  { name: 'Seedance v2', note: '4~15초 · 1080p · 이미지 9장' },
-  { name: 'MiniMax H3', note: '2K · 이미지 9장' },
-  { name: 'MiniMax H3 Max', note: '2K · 더 빠름 · 이미지 9장' },
-  { name: 'Wan 3.0', note: '2~30초 · 1080p · 이미지 10장' },
-  { name: 'Gemini Omni Flash', note: '3~10초 · 720p(업스케일 필요)' },
-  { name: 'Grok Imagine Video', note: '1~15초 · 1080p · 이미지 7장' },
-  { name: 'FLUX 3 Video', note: '5~20초 · 1080p · 이미지 10장' },
-  { name: 'PixVerse C1', note: '1~15초 · 1080p · 이미지 7장' },
-  { name: 'Kling V3', note: '3~15초 · 720p · 첫/마지막 프레임' },
-  { name: 'Happy Horse', note: '3~15초 · 720p/1080p · 이미지 9장' },
-  { name: 'Gemini Veo 3.1', note: '4·6·8초 · 최대 4K · 이미지 3장' },
-  { name: 'Gemini Veo 3', note: '4·6·8초 · 720p' },
-  { name: 'Kling O3', note: '3~15초 · 720p · 이미지 1~4장 필요' },
-  { name: 'PixVerse V6', note: '5·8초 · 720p/1080p' },
-  { name: 'Seedance Pro Fast', note: '5·10초 · 1080p · 빠르고 저렴' },
-  { name: 'Wan V2.7', note: '5초 · 480p/720p' },
-  { name: 'Vidu Q3', note: '1~16초 · 1080p · 이미지 1~4장' },
-  { name: 'Runway', note: '5·10초 · 720p · 이미지 필요' },
+  { name: '모델 자동 선택', note: 'Genspark 이 고름 — 참조 이미지를 쓸지 알 수 없음', imgRef: null },
+  { name: 'Seedance 2.5', note: '4~30초 · 1080p · 이미지 30장', imgRef: true },
+  { name: 'Seedance v2', note: '4~15초 · 1080p · 이미지 9장', imgRef: true },
+  { name: 'MiniMax H3', note: '2K · 이미지 9장', imgRef: true },
+  { name: 'MiniMax H3 Max', note: '2K · 더 빠름 · 이미지 9장', imgRef: true },
+  { name: 'Wan 3.0', note: '2~30초 · 1080p · 이미지 10장', imgRef: true },
+  { name: 'Gemini Omni Flash', note: '3~10초 · 720p · ❌ 참조 이미지 안 받음(실사로 나옴)', imgRef: false },
+  { name: 'Grok Imagine Video', note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
+  { name: 'FLUX 3 Video', note: '5~20초 · 1080p · 이미지 10장', imgRef: true },
+  { name: 'PixVerse C1', note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
+  { name: 'Kling V3', note: '3~15초 · 720p · 첫/마지막 프레임', imgRef: true },
+  { name: 'Happy Horse', note: '3~15초 · 720p/1080p · 이미지 9장', imgRef: true },
+  { name: 'Gemini Veo 3.1', note: '4·6·8초 · 최대 4K · 이미지 3장', imgRef: true },
+  { name: 'Gemini Veo 3', note: '4·6·8초 · 720p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Kling O3', note: '3~15초 · 720p · 이미지 1~4장 필요', imgRef: true },
+  { name: 'PixVerse V6', note: '5·8초 · 720p/1080p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Seedance Pro Fast', note: '5·10초 · 1080p · 첫/마지막 프레임', imgRef: true },
+  { name: 'Wan V2.7', note: '5초 · 480p/720p · ❌ 참조 이미지 안 받음', imgRef: false },
+  { name: 'Vidu Q3', note: '1~16초 · 1080p · 이미지 1~4장', imgRef: true },
+  { name: 'Runway', note: '5·10초 · 720p · 이미지 필요', imgRef: true },
 ];
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
 
@@ -2734,12 +2734,24 @@ export default function App() {
               </div>
               <div className="frow" style={{ alignItems: 'center', marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 비디오 모델</label>
-                <select style={{ flex: '1 1 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoModel) || 'Gemini Omni Flash'}
+                <select style={{ flex: '1 1 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max'}
                   title="Genspark 비디오를 어느 모델로 만들지. 모델마다 길이·해상도·비용이 다릅니다. 괄호 안이 그 모델의 규격입니다."
                   onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
                   {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name}>{m.name} — {m.note}</option>)}
                 </select>
               </div>
+              {(() => {
+                const cur = (imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max';
+                const m = GS_VIDEO_MODELS.find((x) => x.name === cur);
+                if (!m || m.imgRef === true) return null;
+                return (
+                  <div className="meta" style={{ marginTop: 6, padding: '6px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontWeight: 700 }}>
+                    {m.imgRef === false
+                      ? <>⛔ 「{cur}」 은 <b>참조 이미지를 받지 않습니다</b> — 그룹 이미지를 첨부해도 무시되고 <b>화풍과 무관한 영상(실사)</b>이 나옵니다. 이 모델로는 <b>비디오를 만들지 않습니다</b>(크레딧 낭비 방지). 위에서 <b>이미지 장수가 적힌 모델</b>을 고르세요.</>
+                      : <>⚠ 「{cur}」 이 참조 이미지를 쓰는지 알 수 없습니다 — 결과 화풍을 확인하세요.</>}
+                  </div>
+                );
+              })()}
               <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 품질 등급</label>
                 <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoTier) || 'Standard'}
