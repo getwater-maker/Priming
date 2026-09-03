@@ -2813,6 +2813,103 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 // 비디오 생성 디스패치 — 'grok-api'=REST API, 'comfy[::path]'=ComfyUI i2v, 그 외('grok'/'grok10')=브라우저 Grok.
 //   ⚠ 절전 차단으로 감싼다 — i2v 는 수 분~수십 분이고, 브라우저 자동화(Grok)는 화면이 꺼지면 흔들린다.
 //     (TTS/이미지 큐를 안 타는 video-build·video-group 경로도 이걸로 함께 커버된다. 참조 카운트라 중첩 안전)
+// ── 🎬 Genspark 비디오 (agents?type=video_generation_agent) ─────────────────────
+//   로이 요청(2026-09-03): "비디오 생성기능에서 젠스파크를 추가해줘. 이미지 생성과 같은 개념".
+//   🔑 **이미지 순환과 같은 브라우저·같은 계정 스토어**를 쓴다 → 계정 순환·한도 쿨다운을 그대로 재사용한다.
+//   ⚠ 그래서 **Genspark 이미지와 동시에 돌 수 없다** — 같은 크롬 프로필의 같은 page 를 조작하면
+//     서로의 화면을 망가뜨린다(Flow 에서 겪은 v0.3.81 사고와 같은 계열) → gensparkBrowser 레인으로 직렬화.
+async function runGensparkVideos(pr, mediaDir, onlyNums) {
+  const { GensparkEngine } = require('./genspark-engine');
+  const GsAcc = require('./core/genspark-accounts');
+  const Rot = require('./core/image-rotation');
+  const cfg = Rot.load();
+  const model = cfg.gensparkVideoModel || 'Gemini Omni Flash';
+  const tier = cfg.gensparkVideoTier || 'Standard';
+
+  // 대상 — **이미지가 있는 그룹만**(i2v: 시작 프레임이 필요하다). 이미 영상이 있으면 건너뛴다(이어받기).
+  const groups = (pr.groups || []).filter((g) => {
+    if (Array.isArray(onlyNums) && onlyNums.length && !onlyNums.includes(g.num)) return false;
+    if (g.videoPath && fs.existsSync(g.videoPath)) return false;
+    return !!(g.imagePath && fs.existsSync(g.imagePath));
+  });
+  if (!groups.length) {
+    log('⏭ Genspark 비디오 — 대상 그룹 없음 (이미지가 있고 영상이 없는 그룹이 필요합니다)');
+    return {};
+  }
+
+  const accounts = GsAcc.activeAccounts();
+  if (!accounts.length) {
+    const st = imgEngineReady('genspark');
+    const till = st.until ? ` (한도 재설정 ${fmtClock(st.until)} 이후 재시도)` : '';
+    log(`⛔ Genspark 비디오 — 모든 계정 한도/쿨다운${till}`);
+    return { limitReached: true };
+  }
+
+  log(`🎬 Genspark 비디오 생성 (모델 ${model} · 등급 ${tier} · ${groups.length}개 그룹 · 계정 ${accounts[0].label})`);
+  const t0 = Date.now();
+  const durs = [];
+  let made = 0, limitReached = null;
+
+  for (const acc of accounts) {
+    if (S.abort || limitReached) break;
+    const eng = new GensparkEngine({ profileId: acc.id, logger: log });
+    try {
+      for (const g of groups) {
+        if (S.abort) { log('⏹ 중단됨'); break; }
+        if (g.videoPath && fs.existsSync(g.videoPath)) continue;
+        const out = path.join(mediaDir, String(g.num).padStart(2, '0') + '.mp4');
+        // 길이 — 기존 비디오 방식과 같다: 그룹 TTS 길이(없으면 기본 6초). 모델별 범위는 엔진이 맞춘다.
+        const ttsSec = (pr.sentences || []).filter((x) => x.groupId === g.id)
+          .reduce((a, x) => a + (x.ttsDurationSec > 0 ? x.ttsDurationSec : 0), 0);
+        const want = ttsSec > 0 ? Math.ceil(ttsSec) : 6;
+        const prompt = String(g.videoPrompt || g.motionNote || '').trim()
+          || 'natural slow motion, subtle camera movement, cinematic';
+        g.videoStatus = 'generating'; pushDtoUpdate();
+        const gt0 = Date.now();
+        const r = await eng.generateVideoFromImage({
+          prompt, imagePath: g.imagePath, outputPath: out,
+          aspect: pr.aspect || '16:9', durationSec: want, model, tier,
+          abortSignal: () => S.abort,
+        });
+        const sec = (Date.now() - gt0) / 1000;
+        if (r && r.success) {
+          g.videoPath = r.outputPath; g.videoStatus = 'done';
+          made++; durs.push(sec);
+          log(`  ✓ G${g.num} → ${path.basename(r.outputPath)} (${_dur(sec)})`);
+        } else if (r && r.limit) {
+          g.videoStatus = 'idle';
+          limitReached = r.limitMessage || '한도';
+          const until = parseLimitResetTime(String(limitReached));
+          GsAcc.setCooldown(acc.id, until);
+          log(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 건너뜁니다 → 다음 계정`);
+          break;
+        } else {
+          g.videoStatus = 'fail';
+          log(`  ✗ G${g.num} 실패 (${_dur(sec)}): ${(r && r.error) || '알 수 없는 오류'}`);
+        }
+        pushDtoUpdate();
+      }
+    } catch (e) {
+      log(`⚠ Genspark 비디오 오류: ${String(e.message).split('\n')[0].slice(0, 140)}`);
+    } finally {
+      try { await eng.stop(); } catch (_) {}
+    }
+    if (limitReached) { limitReached = null; continue; }   // 다음 계정으로
+    break;
+  }
+
+  // 스피너 고착 방지 — 남은 'generating' 을 정리한다(v0.2.62 계열).
+  for (const g of groups) if (g.videoStatus === 'generating') g.videoStatus = g.videoPath ? 'done' : 'fail';
+  pushDtoUpdate();
+
+  if (durs.length) {
+    const avg = durs.reduce((a, b) => a + b, 0) / durs.length;
+    log(`⏱ Genspark 영상 ${made}개 — 개당 평균 ${_dur(avg)} (최소 ${_dur(Math.min(...durs))} · 최대 ${_dur(Math.max(...durs))}) · 전체 ${_dur((Date.now() - t0) / 1000)}`);
+  }
+  if (!made) log('⚠ Genspark 비디오 — 만들어진 영상이 없습니다 (위 로그의 실패 사유를 보세요)');
+  return {};
+}
+
 async function genGroupVideos(...args) { return withAwake('비디오 생성', () => _genGroupVideosCore(...args)); }
 // 🖥 **로컬** ComfyUI i2v 는 OmniVoice TTS·로컬 이미지와 **같은 3060** 을 쓴다 → 수동 「🎬 비디오」 버튼은
 //   'localGpu' 레인을 잡아 TTS 와 겹치지 않게 한다(2026-08-20 오후 로컬 비디오 복구와 함께 추가.
@@ -2827,6 +2924,11 @@ function genGroupVideosManual(pr, mediaDir, onlyNums, videoEngine, label) {
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
+  // Genspark 비디오 — 브라우저. **이미지 순환과 같은 크롬 프로필**을 쓰므로 전용 레인으로 직렬화한다.
+  if (videoEngine === 'genspark') {
+    await _runOnLanes(['gensparkBrowser'], 'Genspark 비디오', () => runGensparkVideos(pr, mediaDir, onlyNums));
+    return {};
+  }
   // Flow(Google Flow · Veo) i2v — 브라우저. 이미지 경로와 같은 크롬을 쓰므로 파이프라인 병렬에 넣지 않는다.
   if (videoEngine === 'flow') {
     await _withFlowBrowser('Flow 비디오', () => runFlowVideos(pr, mediaDir, onlyNums));
@@ -2913,7 +3015,8 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
               const stillNeed = need(); if (!stillNeed.length) break;
               const ns = stillNeed.map((g) => g.num);
               logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
-              const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
+              // ⚠ Genspark 비디오와 **같은 크롬 프로필**을 쓰므로 같은 레인으로 직렬화한다(동시 조작 방지).
+              const r = await _runOnLanes(['gensparkBrowser'], 'Genspark 이미지', () => P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id));
               if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
               if (r && r.limitReached) {
                 if (r.limitReached === '__STALL__') {
@@ -4757,8 +4860,10 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 // 🪟 flowBrowser — Flow 이미지와 Flow 비디오는 **같은 크롬 창·같은 page** 를 쓴다(getFlowEng 가 인스턴스를
 //   재사용). 둘이 동시에 돌면 같은 페이지를 서로 조작해 깨진다 → 전용 레인으로 **직렬화**한다.
 //   ⚠ image/localGpu 와는 별개 레인이라 교착이 없다(Flow 는 브라우저라 GPU 와 무관).
-const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve() };
-const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, flowBrowser: 0 };
+// ⚠ gensparkBrowser — Genspark 이미지 순환과 비디오는 **같은 크롬 프로필의 같은 page** 를 쓴다.
+//   동시에 돌면 서로의 화면을 조작해 깨진다(Flow 에서 겪은 v0.3.81 과 같은 계열) → 직렬화한다.
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve(), gensparkBrowser: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, flowBrowser: 0, gensparkBrowser: 0 };
 // Flow 크롬을 쓰는 작업을 감싼다 — 레인으로 직렬화하고, **쓰는 동안 창이 닫히지 않게** 표시한다.
 //   🔴 2026-08-29 실사고: 비디오가 8분째 돌고 있는데 **다른 대본의 이미지 작업**이 끝나면서
 //     closeFlowEng() 로 그 창을 닫아 버렸다 → `Target page, context or browser has been closed`

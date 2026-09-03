@@ -28,6 +28,11 @@ const DEFAULTS = {
   //   2026-08-28 Flow UI 실측 라벨 그대로다(글자가 다르면 _selectModel 이 못 찾아 기본 모델로 진행).
   //   ⚠ Veo 는 생성당 크레딧을 쓴다(Lite x1 = 10크레딧) — 화질을 올리면 크레딧도 오른다.
   flowVideoModel: 'Veo 3.1 - Lite',
+  // 🎬 Genspark 비디오 — 로이 요청(2026-09-03): "성능과 비용을 아직 몰라서 설정에서 고르고 싶다".
+  //   기본은 로이 지정 'Gemini Omni Flash'(3~10초·720p). 모델마다 길이·해상도가 달라
+  //   엔진이 페이지에서 범위를 읽어 맞춘다(genspark-engine 의 GENSPARK_VIDEO_MODELS 참조).
+  gensparkVideoModel: 'Gemini Omni Flash',
+  gensparkVideoTier: 'Standard',
   // 소스 이미지를 붙이는 방식 (2026-08-28 Flow UI 실측 — 설정 팝업의 서브탭이 곧 방식이다):
   //   'frame' = [시작]⇄[종료] 프레임 지정 → **첫 프레임이 그 이미지로 고정**되는 엄격한 i2v (기본).
   //   'asset' = 프롬프트 바 [+] 로 붙이는 **참조 이미지** → Veo 가 참고만 하므로 구도·인물이 달라질 수 있다.
@@ -54,10 +59,12 @@ function load() {
         flowVideoModel: j.flowVideoModel || DEFAULTS.flowVideoModel,
         flowVideoAttach: (j.flowVideoAttach === 'asset') ? 'asset' : DEFAULTS.flowVideoAttach,
         flowVideoDownload: ['1080p', '720p', 'off'].includes(j.flowVideoDownload) ? j.flowVideoDownload : DEFAULTS.flowVideoDownload,
+        gensparkVideoModel: j.gensparkVideoModel || DEFAULTS.gensparkVideoModel,
+        gensparkVideoTier: (j.gensparkVideoTier === 'Ultra') ? 'Ultra' : DEFAULTS.gensparkVideoTier,
       };
     }
   } catch (e) { /* ignore */ }
-  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel, flowVideoAttach: DEFAULTS.flowVideoAttach, flowVideoDownload: DEFAULTS.flowVideoDownload };
+  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel, flowVideoModel: DEFAULTS.flowVideoModel, flowVideoAttach: DEFAULTS.flowVideoAttach, flowVideoDownload: DEFAULTS.flowVideoDownload, gensparkVideoModel: DEFAULTS.gensparkVideoModel, gensparkVideoTier: DEFAULTS.gensparkVideoTier };
 }
 
 function save(patch) {

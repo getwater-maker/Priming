@@ -53,6 +53,80 @@ const GENSPARK_SELECTORS = {
   loginIndicator:   'a[href*="login" i], button:has-text("Sign in"), button:has-text("Log in"), button:has-text("로그인")',
 };
 
+// ── 🎬 Genspark AI 비디오 (agents?type=video_generation_agent) ──────────────────
+//   로이 요청(2026-09-03): "비디오 생성기능에서 젠스파크를 추가해줘. 이미지 생성과 같은 개념".
+//   🔑 **셀렉터가 이미지 페이지와 거의 같다**(라이브 실측 2026-09-03) — 그래서 이 파일에 함께 둔다.
+//     프로필·로그인·다이얼로그 처리·한도 감지(_detectLimitMessage)를 그대로 재사용해야 하고,
+//     따로 떼면 그 네 가지가 두 벌이 되어 반드시 어긋난다.
+const GENSPARK_VIDEO_URL = 'https://www.genspark.ai/agents?type=video_generation_agent';
+const GENSPARK_VIDEO_SELECTORS = {
+  // 모델 칩 — 기본 "Gemini Omni Flash"(로이 지정). 이미지 페이지와 같은 model-button.
+  modelButton:      'div.model-button',
+  // 설정 칩 — 클릭하면 종횡비 / 재생 시간 / 생성 횟수 팝오버가 열린다.
+  //   ⚠ 실측 class = "model-button aspect-ratio-selector setting-button"
+  settingButton:    'div.setting-button',
+  // 종횡비 — Auto / 9:16 / 16:9. **이미지 페이지와 완전히 같은 구조**(선택됨 = .selected)
+  ratioOption:      'div.ratio-grid div.ratio-option',
+  ratioSelected:    'div.ratio-option.selected',
+  // 재생 시간 — 슬라이더 + **숫자 입력**(3~10초). 숫자 입력이 있어 값 지정이 쉽다.
+  durationInput:    'input.duration-input',
+  durationSlider:   'input.duration-slider',
+  // 생성 횟수 — 1 / 2. 이미지의 '크기'와 같은 div.size-options 를 재사용한다(팝오버 안).
+  countOption:      'div.settings-section div.size-options > *',
+  // 자동 프롬프트 토글 — 이미지와 동일(.active 면 ON → 우리 프롬프트를 그대로 쓰려면 끈다)
+  autoPromptToggle: 'div.reflection-toggle.tooltip-wrapper',
+  // 프롬프트 입력 / 전송 — 이미지와 동일
+  promptInput:      'textarea.search-input.j-search-input, textarea.search-input',
+  sendButton:       'div.right-icon-group div.enter-icon, div.right-icon-group div.input-icon',
+  // 이미지 첨부(i2v) — `+` → 「로컬 파일 찾기」 → **filechooser** 로 setFiles
+  //   ⚠ 「에셋」 패널은 **동영상** 업로드용이다(실측: "클릭하거나 드래그하여 동영상 업로드") — 우리 용도가 아니다.
+  addEntryBtn:      'div.add-entry-btn',
+  localFileItem:    'text=로컬 파일 찾기',
+  // 첨부된 썸네일 — 붙으면 프롬프트 바에 data:image 썸네일이 생긴다
+  attachedThumb:    'img[src^="data:image"], img[src^="blob:"]',
+  // 결과 영상 — ⏳ 실물 생성으로 확정 전. 여러 후보를 넓게 시도한다(못 찾으면 덤프 로그).
+  resultVideo:      'video[src], video source[src]',
+};
+/**
+ * 길이 범위 폴백(실측: Gemini Omni Flash 는 input.duration-input min=3 max=10).
+ * 🔴 **모델마다 다르다** — Seedance 2.5 는 4~30초, Wan 3.0 은 2~30초, Veo 3.1 은 4/6/8초뿐이다.
+ *   그래서 엔진은 **페이지의 min/max 를 읽어** 그 범위로 맞춘다. 이 상수는 못 읽을 때의 폴백이다.
+ */
+const GS_VIDEO_MIN_SEC = 3;
+const GS_VIDEO_MAX_SEC = 10;
+
+/**
+ * Genspark 비디오 모델 목록(라이브 실측 2026-09-03 · 23개 중 우리 용도에 맞는 것).
+ *   ⛔ 제외한 3개: `Fal Lipsync V3`(립싱크) · `ByteDance Video Upscaler`(업스케일러) ·
+ *      `Kling V3 Motion Control`(참조 **비디오**가 필요) — 우리 파이프라인(그룹 이미지 → 영상)과 무관.
+ *   🔑 `res`(해상도)·`sec`(길이)는 로이가 고를 때 판단 근거로 UI 에 그대로 보여 준다.
+ *      **720p 모델은 업스케일이 붙는다**(우리 목표는 1920x1080).
+ */
+const GENSPARK_VIDEO_MODELS = [
+  { name: '모델 자동 선택',        note: '작업에 맞는 모델을 Genspark 이 고름' },
+  { name: 'Seedance 2.5',          note: '4~30초 · 1080p · 이미지 30장' },
+  { name: 'Seedance v2',           note: '4~15초 · 1080p · 이미지 9장' },
+  { name: 'MiniMax H3',            note: '2K · 이미지 9장' },
+  { name: 'MiniMax H3 Max',        note: '2K · 더 빠름 · 이미지 9장' },
+  { name: 'Wan 3.0',               note: '2~30초 · 1080p · 이미지 10장' },
+  { name: 'Gemini Omni Flash',     note: '3~10초 · 720p(업스케일 필요)' },
+  { name: 'Grok Imagine Video',    note: '1~15초 · 1080p · 이미지 7장' },
+  { name: 'FLUX 3 Video',          note: '5~20초 · 1080p · 이미지 10장' },
+  { name: 'PixVerse C1',           note: '1~15초 · 1080p · 이미지 7장' },
+  { name: 'Kling V3',              note: '3~15초 · 720p · 첫/마지막 프레임' },
+  { name: 'Happy Horse',           note: '3~15초 · 720p/1080p · 이미지 9장' },
+  { name: 'Gemini Veo 3.1',        note: '4·6·8초 · 최대 4K · 이미지 3장' },
+  { name: 'Gemini Veo 3',          note: '4·6·8초 · 720p' },
+  { name: 'Kling O3',              note: '3~15초 · 720p · 이미지 1~4장 필요' },
+  { name: 'PixVerse V6',           note: '5·8초 · 720p/1080p' },
+  { name: 'Seedance Pro Fast',     note: '5·10초 · 1080p · 빠르고 저렴' },
+  { name: 'Wan V2.7',              note: '5초 · 480p/720p' },
+  { name: 'Vidu Q3',               note: '1~16초 · 1080p · 이미지 1~4장' },
+  { name: 'Runway',                note: '5·10초 · 720p · 이미지 필요' },
+];
+/** 품질 등급(실측): Standard / Ultra */
+const GENSPARK_VIDEO_TIERS = ['Standard', 'Ultra'];
+
 /**
  * (은퇴) 사용자의 기본 크롬 프로필을 genspark-profiles/userchrome/ 로 복사하려던 함수.
  *
@@ -193,7 +267,8 @@ class GensparkEngine {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
     });
 
-    await this.page.goto(GENSPARK_URL, { waitUntil: 'load', timeout: 30000 });
+    // 🔑 비디오 경로는 같은 프로필·같은 브라우저에서 **다른 URL** 을 쓴다(opts.url).
+    await this.page.goto(opts.url || GENSPARK_URL, { waitUntil: 'load', timeout: 30000 });
     await this.page.waitForTimeout(3000);
     await this._dismissAnyDialog();
 
@@ -703,6 +778,374 @@ class GensparkEngine {
     const [r] = await this.generateImagesBatch({ prompts: [prompt], outputPaths: [outputPath], abortSignal });
     return r || { error: '알 수 없는 오류' };
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  🎬 비디오 (agents?type=video_generation_agent)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** 비디오 페이지로 진입(브라우저는 재사용). 이미지 페이지에 있었으면 URL 만 옮긴다. */
+  async startVideo() {
+    await this.start({ url: GENSPARK_VIDEO_URL });
+    let onVideo = false;
+    try { onVideo = /video_generation_agent/.test(this.page.url()); } catch (_) {}
+    if (!onVideo) {
+      // 이미 이미지 페이지에 있던 브라우저를 재사용하는 경우 — 같은 창에서 URL 만 옮긴다.
+      await this.page.goto(GENSPARK_VIDEO_URL, { waitUntil: 'load', timeout: 30000 });
+      await this.page.waitForTimeout(2500);
+      await this._dismissAnyDialog();
+    }
+    this._videoSetupDone = false;   // 페이지가 바뀌었으면 설정을 다시 맞춘다
+  }
+
+  /**
+   * 모델 칩을 원하는 이름으로 맞춘다(로이 지정 기본 = Gemini Omni Flash).
+   * ⚠ **못 찾으면 조용히 넘어가지 않는다** — Flow 에서 `_selectModel` 이 라벨을 못 찾고 조용히
+   *   넘어가 「골라도 언제나 기본 모델」이던 사고가 있었다(v0.3.71). 로그를 남긴다.
+   */
+  async _selectVideoModel(want) {
+    const target = String(want || '').trim();
+    if (!target) return true;
+    try {
+      // 이미 그 모델이면 아무것도 하지 않는다(칩 라벨은 잘려 보일 수 있어 앞부분만 비교).
+      const chips = await this.page.$$(GENSPARK_VIDEO_SELECTORS.modelButton);
+      const chip0 = chips[0];
+      const cur = chip0 ? (((await chip0.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()) : '';
+      if (cur && target.toLowerCase().startsWith(cur.toLowerCase().replace(/\.\.\.$/, '').slice(0, 10))) {
+        this.log(`[Genspark] 비디오 모델: ${cur} (이미 선택됨)`);
+        return true;
+      }
+      if (!chip0) { this.log('[Genspark] ⚠ 모델 칩을 못 찾음'); return false; }
+
+      await chip0.click({ timeout: 5000 });
+      await this.page.waitForTimeout(1500);
+
+      // 🔑 **정확한 제목 매칭** — 목록 행은 "New Seedance 2.5 Next-gen Seedance with…" 처럼 길고,
+      //   `MiniMax H3` 는 `MiniMax H3 Max` 에도 포함된다. 그래서 **모델명과 글자까지 같은 리프 요소**를
+      //   찾아 그 행을 클릭한다(이미지 경로의 .ratio-label 방식과 같은 발상).
+      const clicked = await this.page.evaluate((name) => {
+        const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const txt = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        const leaves = [...document.querySelectorAll('div,span,p,h1,h2,h3,h4,strong,b')]
+          .filter((el) => vis(el) && el.children.length === 0 && txt(el) === name);
+        if (!leaves.length) return false;
+        // 클릭은 그 제목의 조상 중 「행」에 해야 한다(제목만 누르면 안 먹는 경우가 있다).
+        let el = leaves[0];
+        for (let i = 0; i < 5 && el.parentElement; i++) {
+          const p = el.parentElement;
+          if (txt(p).length > name.length + 10) { p.click(); return true; }
+          el = p;
+        }
+        leaves[0].click();
+        return true;
+      }, target).catch(() => false);
+
+      await this.page.waitForTimeout(1200);
+      if (!clicked) {
+        // 폴백: Playwright 텍스트 매칭(정확 일치)
+        const exact = this.page.locator(`text="${target}"`).first();
+        if (await exact.count()) { await exact.click({ timeout: 4000 }).catch(() => {}); await this.page.waitForTimeout(1000); }
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(600);
+
+      // 확인 — 칩 라벨이 바뀌었나
+      const chips2 = await this.page.$$(GENSPARK_VIDEO_SELECTORS.modelButton);
+      const now = chips2[0] ? (((await chips2[0].innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()) : '';
+      const ok = !!now && target.toLowerCase().startsWith(now.toLowerCase().replace(/\.\.\.$/, '').slice(0, 8));
+      if (ok) { this.log(`[Genspark] 비디오 모델 선택 ✓ ${target}`); return true; }
+      // ⚠ 조용히 넘어가지 않는다 — Flow 에서 「골라도 언제나 기본 모델」이던 사고(v0.3.71) 재발 방지.
+      this.log(`[Genspark] ⚠ 비디오 모델 「${target}」 선택을 확인하지 못했습니다 (칩 표시: ${now || '없음'}) — 그 상태로 진행합니다`);
+      return false;
+    } catch (e) {
+      this.log(`[Genspark] ⚠ 모델 선택 중 오류: ${String(e.message).slice(0, 80)}`);
+      return false;
+    }
+  }
+
+  /** 품질 등급(Standard/Ultra) 선택 — 없으면 조용히 넘어간다(등급 UI 가 없는 모델도 있다). */
+  async _selectVideoTier(tier) {
+    const want = String(tier || '').trim();
+    if (!want) return true;
+    try {
+      const trig = await this.page.$('.tier-dropdown-trigger');
+      if (!trig) return true;
+      const cur = ((await trig.innerText().catch(() => '')) || '').trim();
+      if (cur.toLowerCase() === want.toLowerCase()) return true;
+      await trig.click({ timeout: 4000 });
+      await this.page.waitForTimeout(1200);
+      const item = this.page.locator(`text="${want}"`).first();
+      if (await item.count()) { await item.click({ timeout: 4000 }).catch(() => {}); await this.page.waitForTimeout(700); }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      this.log(`[Genspark] 품질 등급: ${want}`);
+      return true;
+    } catch (_) { return true; }
+  }
+
+  /**
+   * 설정 팝오버에서 종횡비 · 재생 시간 · 생성 횟수를 맞춘다.
+   * 🔑 세션 1회만 — Genspark 은 같은 스레드에서 설정을 유지한다(이미지 경로와 같은 성질).
+   */
+  async _applyVideoSettings({ aspect = '16:9', durationSec = 5, count = 1 } = {}) {
+    const S = GENSPARK_VIDEO_SELECTORS;
+    const want = (aspect === '9:16') ? '9:16' : (aspect === '1:1' ? 'Auto' : '16:9'); // 1:1 은 목록에 없다 → Auto
+    let dur = Math.round(Number(durationSec) || 5);
+    let ratioOk = false, durOk = false;
+
+    // ① 자동 프롬프트 OFF — 우리 프롬프트를 그대로 쓰게 한다(대본의 🎬 영상: 지시가 바뀌면 안 된다).
+    try {
+      const tg = await this.page.$(S.autoPromptToggle);
+      if (tg) {
+        const cls = (await tg.getAttribute('class')) || '';
+        if (/\bactive\b/.test(cls)) {
+          await tg.click({ timeout: 4000 });
+          await this.page.waitForTimeout(600);
+          this.log('[Genspark] 자동 프롬프트 OFF');
+        }
+      }
+    } catch (_) {}
+
+    // ② 설정 팝오버 열기
+    try {
+      const btn = await this.page.$(S.settingButton);
+      if (!btn) { this.log('[Genspark] ⚠ 비디오 설정 칩(.setting-button)을 못 찾음 — 기본 설정으로 진행'); return { ratioOk, durOk }; }
+      await btn.click({ timeout: 5000 });
+      await this.page.waitForTimeout(1200);
+
+      // ③ 종횡비
+      const opts = await this.page.$$(S.ratioOption);
+      for (const o of opts) {
+        const t = ((await o.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (t !== want) continue;
+        const cls = (await o.getAttribute('class')) || '';
+        if (/\bselected\b/.test(cls)) { ratioOk = true; break; }
+        await o.click({ timeout: 4000 });
+        await this.page.waitForTimeout(500);
+        ratioOk = true;
+        break;
+      }
+      if (!ratioOk) this.log(`[Genspark] ⚠ 종횡비 「${want}」 을 못 찾음 (있는 것: ${(await Promise.all(opts.map(async (o) => ((await o.innerText().catch(() => '')) || '').trim()))).join(', ')})`);
+
+      // ④ 재생 시간 — 숫자 입력에 직접 넣는다(슬라이더 드래그보다 정확하다).
+      try {
+        const numEl = await this.page.$(S.durationInput);
+        if (numEl) {
+          // 🔴 **범위를 페이지에서 읽는다** — 모델마다 다르다(Omni Flash 3~10 · Seedance 2.5 4~30 ·
+          //   Veo 3.1 은 4/6/8 만). 하드코딩하면 모델을 바꾼 순간 조용히 엉뚱한 길이가 나간다.
+          const lo = Number(await numEl.getAttribute('min').catch(() => null)) || GS_VIDEO_MIN_SEC;
+          const hi = Number(await numEl.getAttribute('max').catch(() => null)) || GS_VIDEO_MAX_SEC;
+          const clamped = Math.max(lo, Math.min(hi, dur));
+          if (clamped !== dur) this.log(`[Genspark] 재생 시간 ${dur}초 → ${clamped}초 (이 모델의 범위 ${lo}~${hi}초)`);
+          dur = clamped;
+          await this.page.evaluate(({ sel, v }) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(el, String(v));
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }, { sel: S.durationInput, v: dur });
+          await this.page.waitForTimeout(400);
+          const got = await numEl.inputValue().catch(() => '');
+          durOk = String(got) === String(dur);
+          if (!durOk) {
+            // 폴백: 슬라이더에 값 주입
+            await this.page.evaluate(({ sel, v }) => {
+              const el = document.querySelector(sel);
+              if (!el) return;
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              setter.call(el, String(v));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, { sel: S.durationSlider, v: dur });
+            await this.page.waitForTimeout(400);
+            durOk = String(await numEl.inputValue().catch(() => '')) === String(dur);
+          }
+        }
+      } catch (_) {}
+      if (!durOk) this.log(`[Genspark] ⚠ 재생 시간 ${dur}초 설정 실패 — 페이지 기본값으로 나갑니다`);
+
+      // ⑤ 생성 횟수 — 1 로 고정(그룹당 1개만 쓴다. 2 는 크레딧 배수일 뿐)
+      try {
+        const cs = await this.page.$$(S.countOption);
+        for (const c of cs) {
+          const t = ((await c.innerText().catch(() => '')) || '').trim();
+          if (t !== String(count)) continue;
+          const cls = (await c.getAttribute('class')) || '';
+          if (!/\bselected\b/.test(cls)) { await c.click({ timeout: 3000 }).catch(() => {}); await this.page.waitForTimeout(400); }
+          break;
+        }
+      } catch (_) {}
+
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(500);
+      this.log(`[Genspark] 비디오 설정 — 종횡비 ${want}${ratioOk ? '' : '(실패)'} · ${dur}초${durOk ? '' : '(실패)'} · ${count}회`);
+    } catch (e) {
+      this.log(`[Genspark] ⚠ 비디오 설정 중 오류: ${String(e.message).slice(0, 90)}`);
+    }
+    return { ratioOk, durOk, durationSec: dur };
+  }
+
+  /**
+   * 시작 이미지 첨부(i2v) — `+` → 「로컬 파일 찾기」 → **filechooser** 로 파일 지정.
+   * 🔴 **실패를 성공으로 넘기지 않는다.** 첨부가 안 된 채 생성하면 원본과 무관한 영상이 나오고
+   *   크레딧만 나간다(Flow v0.3.71·v0.3.80 에서 실제로 겪은 사고). 호출부가 그 컷을 건너뛴다.
+   * @returns {Promise<boolean>} 첨부 성공 여부
+   */
+  async _attachVideoSourceImage(imagePath) {
+    const S = GENSPARK_VIDEO_SELECTORS;
+    if (!imagePath || !fs.existsSync(imagePath)) { this.log('[Genspark] ⚠ 첨부할 이미지가 없습니다'); return false; }
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const plus = await this.page.$(S.addEntryBtn);
+        if (!plus) { this.log('[Genspark] ⚠ 첨부 버튼(+ .add-entry-btn)을 못 찾음'); return false; }
+        // filechooser 를 먼저 걸어 둔다 — 클릭 뒤에 걸면 놓친다.
+        const waitChooser = this.page.waitForEvent('filechooser', { timeout: 15000 });
+        await plus.click({ timeout: 5000 });
+        await this.page.waitForTimeout(800);
+        const item = this.page.locator(S.localFileItem).first();
+        if (!(await item.count())) { this.log('[Genspark] ⚠ 「로컬 파일 찾기」 항목을 못 찾음'); await this.page.keyboard.press('Escape').catch(() => {}); return false; }
+        await item.click({ timeout: 5000 });
+        const chooser = await waitChooser;
+        await chooser.setFiles(imagePath);
+        // 썸네일이 붙을 때까지 기다린다(업로드 처리 시간 — Flow 는 약 9초였다).
+        try {
+          await this.page.waitForSelector(S.attachedThumb, { timeout: 30000, state: 'visible' });
+          this.log(`[Genspark] 시작 이미지 첨부 ✓ ${path.basename(imagePath)}`);
+          return true;
+        } catch (_) {
+          this.log('[Genspark] ⚠ 첨부 썸네일이 나타나지 않음' + (attempt < 2 ? ' — 1회 재시도' : ''));
+        }
+      } catch (e) {
+        this.log(`[Genspark] ⚠ 이미지 첨부 실패(${attempt}/2): ${String(e.message).split('\n')[0].slice(0, 90)}`);
+        await this.page.keyboard.press('Escape').catch(() => {});
+      }
+      await this.page.waitForTimeout(1200);
+    }
+    return false;
+  }
+
+  /** 결과 영상 src 를 DOM 순서대로(중복 제거) 반환 */
+  async _videoSrcs() {
+    try {
+      return await this.page.evaluate(() => {
+        const out = [];
+        for (const v of Array.from(document.querySelectorAll('video'))) {
+          const cands = [v.currentSrc, v.src, ...Array.from(v.querySelectorAll('source')).map((s) => s.src)];
+          for (const s of cands) {
+            if (!s) continue;
+            if (/^blob:/.test(s)) { out.push(s); continue; }
+            if (/^https?:/.test(s)) out.push(s);
+          }
+        }
+        return [...new Set(out)];
+      });
+    } catch (_) { return []; }
+  }
+
+  /** 결과 영상을 못 찾았을 때 무엇이 화면에 있었는지 남긴다(다음 사람이 셀렉터를 고칠 근거). */
+  async _dumpVideoResultUI() {
+    try {
+      const d = await this.page.evaluate(() => {
+        const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        return {
+          videos: Array.from(document.querySelectorAll('video')).map((v) => ({ src: (v.currentSrc || v.src || '').slice(0, 100), ready: v.readyState, dur: v.duration })),
+          dl: Array.from(document.querySelectorAll('a[download], a[href*="download"], button')).filter(vis)
+            .map((e) => ((e.innerText || '') + '|' + (e.getAttribute('href') || '')).replace(/\s+/g, ' ').trim().slice(0, 60)).filter((t) => /다운|download|저장/i.test(t)).slice(0, 6),
+          imgs: Array.from(document.querySelectorAll('img[src*="/api/files/"]')).map((i) => i.src.slice(0, 90)).slice(0, 4),
+          body: (document.body.innerText || '').replace(/\n{2,}/g, ' / ').slice(0, 400),
+        };
+      });
+      this.log('[Genspark] [DUMP 비디오결과] ' + JSON.stringify(d).slice(0, 900));
+    } catch (_) {}
+  }
+
+  /**
+   * 그룹 이미지 1장 → 영상 1개. (Grok `generateVideoFromImage` 와 같은 계약)
+   * @returns {{success:boolean, outputPath?:string, error?:string, limit?:boolean, limitMessage?:string}}
+   */
+  async generateVideoFromImage({ prompt, imagePath, outputPath, aspect = '16:9', durationSec = 5, abortSignal, model = 'Gemini Omni Flash', tier = 'Standard', requireImage = true }) {
+    const S = GENSPARK_VIDEO_SELECTORS;
+    const aborted = () => (typeof abortSignal === 'function' && abortSignal());
+    if (!outputPath) return { success: false, error: 'outputPath 필수' };
+    const t0 = Date.now();
+    try {
+      await this.startVideo();
+      if (aborted()) return { success: false, error: '중단됨' };
+
+      // 한도 먼저 — 헛되이 제출하지 않는다(이미지 경로와 같은 정책)
+      const lim0 = await this._detectLimitMessage();
+      if (lim0) { this.log(`[Genspark] ⛔ 한도/제한 감지: ${lim0.slice(0, 120)}`); return { success: false, limit: true, limitMessage: lim0, error: lim0 }; }
+
+      if (!this._videoSetupDone) {
+        await this._selectVideoModel(model);
+        await this._selectVideoTier(tier);
+        await this._applyVideoSettings({ aspect, durationSec, count: 1 });
+        this._videoSetupDone = true;
+      }
+
+      // 시작 이미지 첨부 — 실패하면 **만들지 않는다**(원본과 무관한 영상 + 크레딧 낭비 방지)
+      if (imagePath) {
+        const ok = await this._attachVideoSourceImage(imagePath);
+        if (!ok && requireImage) {
+          return { success: false, error: '시작 이미지 첨부 실패 — 이 컷을 만들지 않았습니다(원본과 무관한 영상이 나오는 것을 막기 위해)' };
+        }
+      }
+
+      const before = await this._videoSrcs();
+      await this._fillAndSubmit(String(prompt || '').trim() || 'natural slow motion, subtle camera movement, cinematic');
+      this.log('[Genspark] 비디오 생성 제출 — 결과를 기다립니다(보통 1~3분)');
+
+      // 폴링 — 새 video src 가 안정적으로 두 번 잡히면 완성으로 본다(Grok 과 같은 판정).
+      const deadline = Date.now() + 8 * 60 * 1000;
+      let stable = null, stableHits = 0, lastLog = 0;
+      while (Date.now() < deadline) {
+        if (aborted()) return { success: false, error: '중단됨' };
+        await this.page.waitForTimeout(4000);
+        const lim = await this._detectLimitMessage();
+        if (lim) { this.log(`[Genspark] ⛔ 생성 중 한도 감지: ${lim.slice(0, 120)}`); return { success: false, limit: true, limitMessage: lim, error: lim }; }
+        const now = await this._videoSrcs();
+        const fresh = now.filter((s) => !before.includes(s));
+        if (fresh.length) {
+          const cand = fresh[fresh.length - 1];
+          if (cand === stable) stableHits++; else { stable = cand; stableHits = 1; }
+          if (stableHits >= 2) break;
+        }
+        if (Date.now() - lastLog > 30000) { lastLog = Date.now(); this.log(`[Genspark] … 생성 중 (${Math.round((Date.now() - t0) / 1000)}초 경과)`); }
+      }
+      if (!stable || stableHits < 2) {
+        await this._dumpVideoResultUI();
+        return { success: false, error: `결과 영상을 찾지 못했습니다 (${Math.round((Date.now() - t0) / 1000)}초 대기) — 위 [DUMP 비디오결과] 로그를 확인하세요` };
+      }
+
+      // 저장 — https 는 request.get, blob 은 페이지에서 base64 로 꺼낸다.
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      if (/^blob:/.test(stable)) {
+        const b64 = await this.page.evaluate(async (u) => {
+          const r = await fetch(u); const b = await r.arrayBuffer();
+          let s = ''; const bytes = new Uint8Array(b);
+          for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+          return btoa(s);
+        }, stable).catch(() => null);
+        if (!b64) return { success: false, error: 'blob 영상을 읽지 못했습니다' };
+        fs.writeFileSync(outputPath, Buffer.from(b64, 'base64'));
+      } else {
+        const res = await this.page.context().request.get(stable);
+        if (!res.ok()) return { success: false, error: `영상 다운로드 실패: HTTP ${res.status()}` };
+        fs.writeFileSync(outputPath, await res.body());
+      }
+      const kb = (fs.statSync(outputPath).size / 1024).toFixed(0);
+      if (Number(kb) < 20) { try { fs.rmSync(outputPath, { force: true }); } catch (_) {} return { success: false, error: `영상이 너무 작습니다(${kb}KB) — 저장하지 않았습니다` }; }
+      GensparkStore.markUsed();
+      this.log(`[Genspark] ✅ 영상 저장 ${path.basename(outputPath)} (${kb}KB · ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+      return { success: true, outputPath };
+    } catch (e) {
+      return { success: false, error: `Genspark 비디오 예외: ${String(e.message).split('\n')[0].slice(0, 140)}` };
+    }
+  }
 }
 
-module.exports = { GensparkEngine, GENSPARK_SELECTORS, PROFILE_BASE };
+module.exports = {
+  GensparkEngine, GENSPARK_SELECTORS, PROFILE_BASE,
+  GENSPARK_VIDEO_URL, GENSPARK_VIDEO_SELECTORS, GS_VIDEO_MIN_SEC, GS_VIDEO_MAX_SEC,
+  GENSPARK_VIDEO_MODELS, GENSPARK_VIDEO_TIERS,
+};

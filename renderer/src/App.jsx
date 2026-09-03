@@ -248,6 +248,30 @@ function phaseBadge(p) {
   return ['', p];   // 섹션 제목 그대로 (키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
 }
 
+// 🎬 Genspark 비디오 모델 — genspark-engine.js 의 GENSPARK_VIDEO_MODELS 와 **같아야 한다**
+//   (렌더러는 require 를 못 쓴다. 테스트가 두 목록의 이름을 대조해 어긋남을 막는다.)
+const GS_VIDEO_MODELS = [
+  { name: '모델 자동 선택', note: '작업에 맞는 모델을 Genspark 이 고름' },
+  { name: 'Seedance 2.5', note: '4~30초 · 1080p · 이미지 30장' },
+  { name: 'Seedance v2', note: '4~15초 · 1080p · 이미지 9장' },
+  { name: 'MiniMax H3', note: '2K · 이미지 9장' },
+  { name: 'MiniMax H3 Max', note: '2K · 더 빠름 · 이미지 9장' },
+  { name: 'Wan 3.0', note: '2~30초 · 1080p · 이미지 10장' },
+  { name: 'Gemini Omni Flash', note: '3~10초 · 720p(업스케일 필요)' },
+  { name: 'Grok Imagine Video', note: '1~15초 · 1080p · 이미지 7장' },
+  { name: 'FLUX 3 Video', note: '5~20초 · 1080p · 이미지 10장' },
+  { name: 'PixVerse C1', note: '1~15초 · 1080p · 이미지 7장' },
+  { name: 'Kling V3', note: '3~15초 · 720p · 첫/마지막 프레임' },
+  { name: 'Happy Horse', note: '3~15초 · 720p/1080p · 이미지 9장' },
+  { name: 'Gemini Veo 3.1', note: '4·6·8초 · 최대 4K · 이미지 3장' },
+  { name: 'Gemini Veo 3', note: '4·6·8초 · 720p' },
+  { name: 'Kling O3', note: '3~15초 · 720p · 이미지 1~4장 필요' },
+  { name: 'PixVerse V6', note: '5·8초 · 720p/1080p' },
+  { name: 'Seedance Pro Fast', note: '5·10초 · 1080p · 빠르고 저렴' },
+  { name: 'Wan V2.7', note: '5초 · 480p/720p' },
+  { name: 'Vidu Q3', note: '1~16초 · 1080p · 이미지 1~4장' },
+  { name: 'Runway', note: '5·10초 · 720p · 이미지 필요' },
+];
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
 
 // 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
@@ -2117,6 +2141,7 @@ export default function App() {
             <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <option value="grok">Grok (브라우저)</option>
               <option value="flow">Flow · Veo (구독)</option>
+                <option value="genspark">Genspark (구독)</option>
               <option value="grok-api">Grok API (유료)</option>
               <ComfyEngineOptions cfg={cvidCfg} kind="video" />
               <option value="none">없음 (이미지만)</option>
@@ -2393,6 +2418,7 @@ export default function App() {
                         <ComfyEngineOptions cfg={cvidCfg} kind="video" />
                         <option value="grok">Grok (브라우저)</option>
                         <option value="flow">Flow · Veo (구독)</option>
+                <option value="genspark">Genspark (구독)</option>
                         <option value="grok-api">Grok API (유료)</option>
                         <option value="none">없음(이미지 고정)</option>
                       </select></div>
@@ -2706,6 +2732,24 @@ export default function App() {
                   <option value="off">다운로드 안 함 — 재생 소스(720p)</option>
                 </select>
               </div>
+              <div className="frow" style={{ alignItems: 'center', marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 비디오 모델</label>
+                <select style={{ flex: '1 1 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoModel) || 'Gemini Omni Flash'}
+                  title="Genspark 비디오를 어느 모델로 만들지. 모델마다 길이·해상도·비용이 다릅니다. 괄호 안이 그 모델의 규격입니다."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
+                  {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name}>{m.name} — {m.note}</option>)}
+                </select>
+              </div>
+              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
+                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 품질 등급</label>
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoTier) || 'Standard'}
+                  title="Standard / Ultra. Ultra 는 더 강한 모델 조합이지만 크레딧을 더 씁니다."
+                  onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoTier: e.target.value })}>
+                  <option value="Standard">Standard</option>
+                  <option value="Ultra">Ultra — 더 강함(크레딧 더 씀)</option>
+                </select>
+              </div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Genspark 비디오</b>는 헤더 「③ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).</div>
               <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.</div>
               <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
               {lora && (

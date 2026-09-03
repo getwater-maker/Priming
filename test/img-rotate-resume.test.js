@@ -92,6 +92,8 @@ function makeEnv(cfg) {
     isComfyVal: () => false,
     comfyWfOf: () => null,
     runGeminiImages: async () => {},
+    // Genspark 이미지는 비디오와 **같은 크롬**이라 gensparkBrowser 레인을 잡는다(v0.3.95) — 여기선 그냥 실행.
+    _runOnLanes: (_lanes, _label, fn) => fn(),
     runComfyImages: async () => {},
     runFlowImages: async (proj, dir, logger, styleId, nums) => { fl.calls++; return cfg.flow(proj, nums, { gs, fl }, clock); },
   };
