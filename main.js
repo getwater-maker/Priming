@@ -1902,9 +1902,69 @@ ipcMain.handle('export-remotion', async (_e, args = {}) => {
   }
 });
 
+// ── 📥 Vrew 음성 가져오기 ────────────────────────────────
+//   로이 워크플로(2026-09-03): ① 「🖼 화면만」으로 .vrew 를 내보낸다(음성 자리는 무음)
+//   ② Vrew 에서 AI 목소리를 입혀 **저장** ③ 여기서 그 음성만 되가져온다 ④ 이후는 기존 파이프라인 그대로.
+//   🔑 .vrew 를 **읽기만** 한다 — 고쳐 쓰지 않는다(core/vrew-audio.js 머리 주석 참조).
+ipcMain.handle('import-vrew-audio', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null } = args;
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Vrew 에서 음성을 만들어 저장한 .vrew 파일 선택',
+    defaultPath: S.outRoot || undefined,
+    properties: ['openFile'],
+    filters: [{ name: 'Vrew 프로젝트', extensions: ['vrew'] }, { name: '모든 파일', extensions: ['*'] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+  const file = r.filePaths[0];
+
+  const VA = require('./core/vrew-audio');
+  const media = require('./core/media-utils');
+  // 대상 편 — .vrew 는 편별로 하나씩이므로 지정된 편(없으면 첫 편)에만 물려준다.
+  const projects = (shortsNum != null)
+    ? S.parsed.projects.filter((p) => p.shortsNum === shortsNum)
+    : S.parsed.projects.slice(0, 1);
+  if (!projects.length) throw new Error('대상 편을 찾을 수 없습니다.');
+
+  const results = [];
+  for (const pr of projects) {
+    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+    log(`📥 ${prLabel(pr)} — Vrew 음성 가져오기: ${path.basename(file)}`);
+    try {
+      const rep = await VA.importVrewAudio(pr, file, dirs.tts, {
+        log,
+        // 길이는 **실측**한다 — 빌더가 파일 크기로 추정하면 4배까지 틀려 타임라인이 통째로 왜곡된다.
+        probeDur: (f) => media.getMediaDuration(f),
+      });
+      for (const w of rep.warn) log(`  ⚠ ${w}`);
+      log(`  ✓ 문장 ${rep.injected}/${rep.total}개에 음성 연결 (일치율 ${(rep.rate * 100).toFixed(1)}%)`);
+      if (rep.noAudio.length) log(`  ⚠ 음성을 못 가져온 문장 ${rep.noAudio.length}개: ${rep.noAudio.slice(0, 10).join(', ')}${rep.noAudio.length > 10 ? ' …' : ''}`);
+      results.push({ shortsNum: pr.shortsNum, ...rep });
+    } catch (e) {
+      log(`  ✗ 실패: ${e.message}`);
+      try {
+        dialog.showMessageBox(win, {
+          type: 'warning',
+          title: 'Vrew 음성 가져오기 실패',
+          message: '음성을 가져오지 못했습니다 — 대본은 그대로입니다.',
+          detail: e.message,
+          buttons: ['확인'],
+        });
+      } catch {}
+      results.push({ shortsNum: pr.shortsNum, error: e.message });
+    }
+  }
+  pushDtoUpdate();
+  const okN = results.filter((x) => !x.error).length;
+  log(`📥 Vrew 음성 가져오기 완료 — ${okN}/${results.length}편`);
+  return { ok: okN > 0, results, dto: P.toDTO(S.parsed) };
+});
+
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
+  const outMode = normOutMode(args.outMode);
+  if (outMode !== 'full') log(`💾 .vrew 내보내기 — ${outModeLabel(outMode)}`);
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = S.preset || P.getPreset(presetName);
   if (preset && captionStyle) {
@@ -1931,13 +1991,13 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
-    const miss = missingVisualGroups(pr);
+    const miss = gateVisual(outMode) ? missingVisualGroups(pr) : [];
     if (miss.length) {
       incomplete.push({ label: prLabel(pr), nums: miss });
       log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
       continue;
     }
-    const mtts = missingTtsNums(pr);
+    const mtts = gateTts(outMode) ? missingTtsNums(pr) : [];
     if (mtts.length) {
       noTts.push({ label: prLabel(pr), n: mtts.length, total: (pr.sentences || []).length, head: mtts.slice(0, 8).join(', '), headN: 8 });
       log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts.length}/${(pr.sentences || []).length}개 (컷 ${mtts.slice(0, 8).join(', ')}${mtts.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
@@ -1947,7 +2007,8 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
+      const build = () => P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
+      const res = (outMode === 'visual') ? await withSilentTts(pr, build) : await build();
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -3258,6 +3319,42 @@ ipcMain.handle('image-build', (_e, args = {}) => {
 //   실제로 일어난 일: 로컬 이미지가 GPU 를 점유해 컷41 TTS 가 60초 타임아웃 3회 → 그 대본 TTS 단계가
 //   죽었는데, 4단계는 그대로 진행해 **음성 40개 / 누락 898개**인 반쪽 .vrew 가 나갔다(clip 59).
 //   이미지엔 게이트가 있었는데(v0.3.10) 음성엔 없었다 — vrew-builder 는 경고만 찍는다.
+// ── 🔴 .vrew 출력 방식 ──────────────────────────────────────
+//   로이 요청(2026-09-03): ① TTS 를 Vrew 에서 만들고 싶다 → **화면만**(음성 없이) 내보내고,
+//   Vrew 에서 음성을 입힌 뒤 「📥 Vrew 음성」으로 되가져온다  ② 이미지를 안 쓰는 편은 **음성만** 내보낸다.
+//   🔑 **판정을 여기 한 곳에 모은다** — 두 경로(💾 export-vrew · ⚡만들기 4단계)가 각자 판단하면
+//     반드시 어긋난다(v0.3.76 드롭다운 2곳 · v0.3.50 정규화 3곳과 같은 계열).
+const OUT_MODES = new Set(['full', 'audio', 'visual']);
+function normOutMode(v) { return OUT_MODES.has(String(v)) ? String(v) : 'full'; }
+function outModeLabel(m) {
+  return m === 'audio' ? '🎤 음성만 (이미지·비디오 없이)'
+    : m === 'visual' ? '🖼 화면만 (TTS 없이 — Vrew 에서 음성 입히기)'
+    : '전체';
+}
+/** 이미지 누락 게이트를 볼까? — 「음성만」은 이미지가 없는 게 정상이므로 보지 않는다. */
+function gateVisual(m) { return normOutMode(m) !== 'audio'; }
+/** 음성 누락 게이트를 볼까? — 「화면만」은 음성이 없는 게 정상이므로 보지 않는다. */
+function gateTts(m) { return normOutMode(m) !== 'visual'; }
+
+/**
+ * 🖼 화면만 — 음성 자리를 **무음으로 채운 채** 빌드하고, 끝나면 원래대로 되돌린다.
+ *   왜 무음을 넣나: 빌더는 음성이 없는 문장을 통째로 건너뛴다(clip 이 안 생긴다). 무음을 넣으면
+ *   **구조가 완전히 정상인 .vrew** 가 되어 Vrew 가 확실히 열고, 거기서 AI 목소리로 덮으면 된다.
+ *   ⚠ **tts-N 을 오염시키지 않는다** — 임시 폴더에 만들고 끝나면 지운다. 그러지 않으면 나중에
+ *     「전체」로 만들 때 fillTts 가 그 무음을 「이미 있음」으로 건너뛰어 **무음 영상이 조용히 나간다**.
+ */
+async function withSilentTts(pr, fn) {
+  const backup = (pr.sentences || []).map((s2) => ({ s: s2, p: s2.ttsAudioPath, d: s2.ttsDurationSec }));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-silent-'));
+  try {
+    P.fillSilent(pr, dir);
+    return await fn();
+  } finally {
+    for (const b of backup) { b.s.ttsAudioPath = b.p; b.s.ttsDurationSec = b.d; }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
 function missingTtsNums(project) {
   return (project.sentences || []).filter((s) => !(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))).map((s) => s.num);
 }
@@ -4052,12 +4149,18 @@ async function runMakeAllCore(opts = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true } = opts;
+  // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
+  //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
+  const outMode = normOutMode(opts.outMode);
+  const skipTts = (outMode === 'visual');    // 화면만 → 음성은 Vrew 에서 만든다
+  const skipVisual = (outMode === 'audio');  // 음성만 → 이미지·비디오를 만들지 않는다
+  if (outMode !== 'full') log(`⚙ 출력 방식: ${outModeLabel(outMode)}`);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
   S.preset = preset;
   let ttsMgr = null;
-  if (!dry && preset) {
+  if (!dry && !skipTts && preset) {
     const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
     if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
     ttsMgr = mgr;
@@ -4216,7 +4319,15 @@ async function runMakeAllCore(opts = {}) {
     }
   };
 
-  if (videoPipeline && !canParallel && _imgLocalGpu) {
+  if (skipTts) {
+    // 🖼 화면만 — 음성 단계를 통째로 건너뛴다. .vrew 를 만들 때 무음으로 채워 구조를 맞춘다.
+    log('🎙 1단계 — 음성 건너뜀 (Vrew 에서 만듭니다 — 완성 후 「📥 Vrew 음성」으로 되가져오세요)');
+    if (!dry && !S.abort) await imageStage();
+  } else if (skipVisual) {
+    // 🎤 음성만 — 이미지·비디오 단계를 통째로 건너뛴다.
+    log('🖼 2단계 — 이미지 건너뜀 (음성만 출력)');
+    await ttsStage();
+  } else if (videoPipeline && !canParallel && _imgLocalGpu) {
     // 이미지 = 🖥 로컬 ComfyUI · 비디오 = ☁ 클라우드 (로이 2026-08-20 조합).
     //   TTS 와 이미지는 **같은 로컬 GPU** 라 순차로 묶고, 클라우드 비디오만 그 옆에서 병렬로 돌린다.
     log(`⚡ 파이프라인 — (TTS → 이미지: 둘 다 내 PC GPU 라 순차) ∥ 비디오(클라우드)`);
@@ -4234,7 +4345,9 @@ async function runMakeAllCore(opts = {}) {
   }
 
   // ── 3단계: 비디오 일괄 생성 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
-  if (videoEngine === 'none') {
+  if (skipVisual) {
+    log('🎬 3단계 — 비디오 건너뜀 (음성만 출력)');
+  } else if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
   } else if (_grokCool) {
     log(`🎬 3단계 — Grok 한도(${fmtClock(_grokCool)} 재설정)로 영상 생략 — 이미지만 사용`);
@@ -4259,7 +4372,7 @@ async function runMakeAllCore(opts = {}) {
 
   // ── 4단계: .vrew 일괄 생성. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
-    log('📦 4단계 — .vrew 일괄 생성…');
+    log(`📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
@@ -4276,14 +4389,14 @@ async function runMakeAllCore(opts = {}) {
     const incomplete = [];
     const noTts = [];
     for (const pr of projects) {
-      const miss = missingVisualGroups(pr);
+      const miss = gateVisual(outMode) ? missingVisualGroups(pr) : [];
       if (miss.length) {
         incomplete.push({ label: prLabel(pr), nums: miss });
         log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
         continue;
       }
       // 🔴 음성 누락 게이트 — 반쪽 .vrew 가 조용히 나가는 것을 막는다(2026-08-20 사고: 음성 40/938)
-      const mtts4 = missingTtsNums(pr);
+      const mtts4 = gateTts(outMode) ? missingTtsNums(pr) : [];
       if (mtts4.length) {
         noTts.push({ label: prLabel(pr), n: mtts4.length, total: (pr.sentences || []).length, head: mtts4.slice(0, 8).join(', '), headN: 8 });
         log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts4.length}/${(pr.sentences || []).length}개 (컷 ${mtts4.slice(0, 8).join(', ')}${mtts4.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
@@ -4296,7 +4409,8 @@ async function runMakeAllCore(opts = {}) {
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);
       try {
-        const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+        const build = () => P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+        const res = (outMode === 'visual') ? await withSilentTts(pr, build) : await build();
         P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
         log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
         if (openVrew) shell.openPath(vrewPath);
@@ -4384,6 +4498,8 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
         aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
+        // ⚠ 출력 방식은 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
+        outMode: (common.outMode != null ? common.outMode : (s.outMode || 'full')),
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
       });
       it.status = 'done'; okN++;

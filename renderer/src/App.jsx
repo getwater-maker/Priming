@@ -323,6 +323,11 @@ export default function App() {
   const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top)
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
   const [aiNotice, setAiNotice] = useState(false); // AI 고지 — 작업바 체크박스(기본 ON, 마운트 시 세팅)
+  // 🔴 .vrew 출력 방식 — 'full'(전체) / 'audio'(음성만, 이미지 없이) / 'visual'(화면만, TTS 없이).
+  //   'visual' 은 음성을 **Vrew 에서** 만들 때 쓴다 → 완성 후 「📥 Vrew 음성」으로 되가져온다.
+  //   ⚠ 고르는 곳은 여기 하나뿐이다(채널 기본값을 두지 않는다 — 작업마다 달라지는 선택이라
+  //     채널에 박으면 오히려 헷갈리고, 진입점이 둘이면 반드시 어긋난다).
+  const [outMode, setOutMode] = useState('full');
   const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
@@ -594,7 +599,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, outMode };
   }
   function applySettings(s) {
     if (!s) return;
@@ -612,6 +617,7 @@ export default function App() {
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
+    if (s.outMode != null) setOutMode(['full', 'audio', 'visual'].includes(s.outMode) ? s.outMode : 'full');
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -778,9 +784,15 @@ export default function App() {
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, flowVideoModel, flowCount,
       aiNotice, // 사용자 선택(작업바 토글)
+      outMode,  // 전체 / 음성만 / 화면만
     };
-    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 만들기=전체 이미지 + 범위 i2v ('없음'은 i2v 불요)
-    setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
+    // ⚠ 「🎤 음성만」은 이미지를 만들지 않으므로 이미지 프롬프트를 요구하지 않는다(요구하면 못 만든다).
+    const _needImg = (outMode === 'audio') ? 'none' : 'all';
+    const _needVid = (outMode === 'audio' || videoEngine === 'none') ? 'none' : 'range';
+    if (!ensurePromptsFilled(shortsNum, { image: _needImg, video: _needVid })) return; // 만들기=전체 이미지 + 범위 i2v
+    setStatus(outMode === 'audio' ? '⚡ 음성만 제작중… (TTS→.vrew)'
+      : outMode === 'visual' ? '⚡ 화면만 제작중… (이미지→.vrew · 음성은 Vrew 에서)'
+      : '⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -811,15 +823,28 @@ export default function App() {
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
       //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice, outMode }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
     } catch (e) { logline('큐 제작 오류: ' + e.message); setStatus('큐 제작 오류'); }
   }
+  // 📥 Vrew 에서 음성을 입혀 저장한 .vrew → 그 음성만 대본에 물려준다(.vrew 는 읽기만 한다).
+  async function runImportVrewAudio() {
+    if (!loaded) return;
+    setStatus('📥 Vrew 음성 가져오는 중…');
+    try {
+      const r = await api.importVrewAudio({ shortsNum: null });
+      if (!r || r.canceled) { setStatus(''); return; }
+      if (r.dto) setDto(r.dto);
+      const oks = (r.results || []).filter((x) => !x.error);
+      const n = oks.reduce((a, x) => a + (x.injected || 0), 0);
+      setStatus(oks.length ? `📥 문장 ${n}개에 Vrew 음성 연결` : '가져오기 실패 — 로그를 보세요');
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
   async function runVrew(shortsNum) {
     setStatus('.vrew 내보내는 중…');
-    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine }); setStatus(`.vrew ${r.outs.length}개`); }
+    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine, outMode }); setStatus(`.vrew ${r.outs.length}개`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
@@ -2138,6 +2163,19 @@ export default function App() {
           </span>
         )}
         <span className="grow" />
+        <label className="chk" title="무엇을 넣어 .vrew 를 만들지 정합니다.&#10;· 전체 — 음성 + 화면 (기본)&#10;· 🎤 음성만 — 이미지·비디오를 만들지 않습니다(그 단계를 건너뜁니다)&#10;· 🖼 화면만 — 음성을 만들지 않습니다(TTS 단계를 건너뛰고, 음성 자리는 무음). Vrew 에서 AI 목소리를 입힌 뒤 「📥 Vrew 음성」으로 되가져오세요."
+          style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          출력
+          <select style={{ width: 'auto' }} value={outMode} onChange={(e) => setOutMode(e.target.value)}>
+            <option value="full">전체</option>
+            <option value="audio">🎤 음성만</option>
+            <option value="visual">🖼 화면만</option>
+          </select>
+        </label>
+        <button className="ghost" disabled={!loaded}
+          title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
+          onClick={runImportVrewAudio}>📥 Vrew 음성</button>
+        <span className="hdiv" />
         <button className="ghost" disabled={!loaded || prog.ttsD === 0}
           title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
           onClick={openTimestamps}>⏱ 타임스탬프</button>

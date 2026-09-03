@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('api', {
   videoBuild: (args) => ipcRenderer.invoke('video-build', args),
   deleteVideos: () => ipcRenderer.invoke('delete-videos'),
   exportVrew: (args) => ipcRenderer.invoke('export-vrew', args),
+  // 📥 Vrew 에서 음성을 만들어 저장한 .vrew → 그 음성만 대본에 물려준다(읽기 전용).
+  importVrewAudio: (args) => ipcRenderer.invoke('import-vrew-audio', args),
   // 🎬 리모션 — TSV 열기 / mp3 만들기 / (롱폼 대본용) 내보내기
   remotionOpenTsv: (args) => ipcRenderer.invoke('remotion-open-tsv', args),
   remotionRunTts: (args) => ipcRenderer.invoke('remotion-run-tts', args),
