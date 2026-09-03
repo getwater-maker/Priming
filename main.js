@@ -2820,6 +2820,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 //     서로의 화면을 망가뜨린다(Flow 에서 겪은 v0.3.81 사고와 같은 계열) → gensparkBrowser 레인으로 직렬화.
 async function runGensparkVideos(pr, mediaDir, onlyNums) {
   const { GensparkEngine } = require('./genspark-engine');
+  const GensparkEngineCls = GensparkEngine;   // 정적 메서드(isPointExhausted) 호출용
   const GsAcc = require('./core/genspark-accounts');
   const Rot = require('./core/image-rotation');
   const cfg = Rot.load();
@@ -2879,9 +2880,19 @@ async function runGensparkVideos(pr, mediaDir, onlyNums) {
         } else if (r && r.limit) {
           g.videoStatus = 'idle';
           limitReached = r.limitMessage || '한도';
-          const until = parseLimitResetTime(String(limitReached));
+          // 🔑 **이미지와 성질이 다르다**(로이 2026-09-03): 이미지는 5시간 제한이라 시간이 지나면 풀리지만,
+          //   비디오는 **포인트 차감**이라 기다려도 생기지 않는다(구독 주기로 충전). Flow 의 크레딧 소진
+          //   처리(v0.3.84)와 같은 태도로 간다 — 오래 쉬게 하고 **무엇을 하면 되는지** 알린다.
+          const pointOut = GensparkEngineCls.isPointExhausted(limitReached);
+          const until = pointOut ? (Date.now() + 6 * 60 * 60 * 1000) : parseLimitResetTime(String(limitReached));
           GsAcc.setCooldown(acc.id, until);
-          log(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 건너뜁니다 → 다음 계정`);
+          if (pointOut) {
+            log(`⛔ Genspark 계정 "${acc.label}" — 비디오 포인트가 소진된 것으로 보입니다: ${String(limitReached).slice(0, 100)}`);
+            log(`   → 기다려도 충전되지 않습니다(구독 주기). 다른 비디오 엔진으로 바꾸세요 — 헤더 「③ 비디오」 → ☁ LTX2.5(구독 GPU 시간만, 추가 과금 없음)`);
+            log(`   이 계정은 ${fmtClock(until)}까지 건너뜁니다.`);
+          } else {
+            log(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 건너뜁니다 → 다음 계정`);
+          }
           break;
         } else {
           g.videoStatus = 'fail';

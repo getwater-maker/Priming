@@ -128,6 +128,23 @@ const GENSPARK_VIDEO_MODELS = [
 const GENSPARK_VIDEO_TIERS = ['Standard', 'Ultra'];
 
 /**
+ * 🔴 비디오 페이지에 **상시 떠 있는 평범한 안내 배너** — 한도가 아니다.
+ *   실사고(2026-09-03 18:04): 이미지용 한도 감지기를 그대로 쓰니 이 배너의 「사용량」·「크레딧」에 걸려
+ *     `⛔ 한도/제한 감지: 기획에는 무료 할당량을 사용합니다. 영상 및 오디오는 크레딧을 소모합니다.사용량 보기 › ×`
+ *   로 **6초 만에 중단하고 창을 닫았다.** 게다가 계정에 1시간 쿨다운까지 잘못 걸었다.
+ *   ⇒ Flow v0.3.84 와 같은 계열(「생성 시 10크레딧이 사용됩니다」를 한도로 오인하던 것)이다.
+ */
+const GS_BENIGN_NOTICE_RE = /무료\s*할당량|크레딧을\s*소모|사용량\s*보기|uses?\s*free\s*quota|credits?\s*(are|is)\s*used/i;
+/**
+ * 진짜로 못 만드는 상태 — 이 문구가 있으면 안내 배너와 섞여 있어도 그렇게 본다.
+ * 🔑 **이미지와 비디오의 성질이 다르다**(로이 2026-09-03): 이미지는 **5시간 제한**(시간이 지나면 풀린다),
+ *   비디오는 **포인트 차감**(기다려도 안 생기고 구독 주기로 충전된다). 그래서 문구도 다르게 나온다.
+ */
+const GS_HARD_LIMIT_RE = /(제한에\s*도달|한도에?\s*도달|재설정됩니다|\d+\s*시간\s*제한|소진|모두\s*사용|부족합니다|포인트가?\s*(부족|없)|남은\s*(횟수|크레딧|포인트)\s*(이|가)?\s*없|reached\s*your\s*limit|limit\s*reached|quota\s*exceeded|out\s*of\s*(credits?|points?)|no\s*(credits?|points?)\s*(left|remaining)|insufficient|too\s*many\s*requests|rate.?limit)/i;
+/** 그중 **포인트(크레딧) 소진** — 기다려도 안 풀린다. 시간 쿨다운이 아니라 「다른 방법」 안내가 답이다. */
+const GS_POINT_EXHAUSTED_RE = /(소진|포인트가?\s*(부족|없)|크레딧이?\s*(부족|없)|남은\s*(크레딧|포인트)\s*(이|가)?\s*없|out\s*of\s*(credits?|points?)|no\s*(credits?|points?)\s*(left|remaining)|insufficient)/i;
+
+/**
  * (은퇴) 사용자의 기본 크롬 프로필을 genspark-profiles/userchrome/ 로 복사하려던 함수.
  *
  * 🔴 2026-08-19 확인 — **이 기능은 한 번도 작동한 적이 없다.** (grok-engine.js 의 같은 함수와 동일 버그)
@@ -862,6 +879,30 @@ class GensparkEngine {
     }
   }
 
+  /**
+   * 비디오 페이지 전용 한도 판정.
+   * 🔴 이미지용 `_detectLimitMessage` 를 **그대로 쓰면 안 된다** — 비디오 페이지에는
+   *   「기획에는 무료 할당량을 사용합니다. 영상 및 오디오는 크레딧을 소모합니다」 배너가 **상시** 떠 있고,
+   *   거기 「사용량」·「크레딧」이 들어 있어 한도로 오판한다(2026-09-03 실사고: 6초 만에 창이 닫혔다).
+   * @returns {Promise<string|null>} 진짜 한도 문구 · 아니면 null
+   */
+  async _detectVideoLimit() {
+    const msg = await this._detectLimitMessage();
+    if (!msg) return null;
+    // ① 강한 문구가 있으면 그대로 본다(안내 배너와 한 덩어리로 잡혀도 이쪽이 이긴다).
+    if (GS_HARD_LIMIT_RE.test(msg)) return msg;
+    // ② 그 밖은 **한도로 보지 않는다.**
+    //   🔑 이미지 판정은 「사용량|크레딧|한도|플랜…」 을 넓게 잡는데, 비디오 페이지에는 그 단어가 든
+    //     안내 배너가 상시 떠 있다. 여기서 보수적으로 굴면 **매번 6초 만에 멈춘다**(2026-09-03 실사고).
+    //     비디오는 포인트 차감형이라 진짜 소진 시엔 위 강한 문구가 나오므로, 여기서는 흘려보내고
+    //     **로그만 남긴다** — 실제 소진 문구를 확정할 근거가 된다.
+    this.log(`[Genspark] ⓘ 경고성 문구를 봤지만 한도로 보지 않습니다: "${String(msg).slice(0, 120)}"`);
+    return null;
+  }
+
+  /** 그 한도 문구가 **포인트 소진**인가(기다려도 안 풀린다) — main 이 쿨다운 길이를 정할 때 쓴다. */
+  static isPointExhausted(msg) { return GS_POINT_EXHAUSTED_RE.test(String(msg || '')); }
+
   /** 품질 등급(Standard/Ultra) 선택 — 없으면 조용히 넘어간다(등급 UI 가 없는 모델도 있다). */
   async _selectVideoTier(tier) {
     const want = String(tier || '').trim();
@@ -1073,7 +1114,7 @@ class GensparkEngine {
       if (aborted()) return { success: false, error: '중단됨' };
 
       // 한도 먼저 — 헛되이 제출하지 않는다(이미지 경로와 같은 정책)
-      const lim0 = await this._detectLimitMessage();
+      const lim0 = await this._detectVideoLimit();
       if (lim0) { this.log(`[Genspark] ⛔ 한도/제한 감지: ${lim0.slice(0, 120)}`); return { success: false, limit: true, limitMessage: lim0, error: lim0 }; }
 
       if (!this._videoSetupDone) {
@@ -1101,7 +1142,7 @@ class GensparkEngine {
       while (Date.now() < deadline) {
         if (aborted()) return { success: false, error: '중단됨' };
         await this.page.waitForTimeout(4000);
-        const lim = await this._detectLimitMessage();
+        const lim = await this._detectVideoLimit();
         if (lim) { this.log(`[Genspark] ⛔ 생성 중 한도 감지: ${lim.slice(0, 120)}`); return { success: false, limit: true, limitMessage: lim, error: lim }; }
         const now = await this._videoSrcs();
         const fresh = now.filter((s) => !before.includes(s));
@@ -1148,4 +1189,5 @@ module.exports = {
   GensparkEngine, GENSPARK_SELECTORS, PROFILE_BASE,
   GENSPARK_VIDEO_URL, GENSPARK_VIDEO_SELECTORS, GS_VIDEO_MIN_SEC, GS_VIDEO_MAX_SEC,
   GENSPARK_VIDEO_MODELS, GENSPARK_VIDEO_TIERS,
+  GS_BENIGN_NOTICE_RE, GS_HARD_LIMIT_RE,
 };

@@ -74,6 +74,35 @@ ok(/시작 이미지 첨부 실패[\s\S]{0,120}만들지 않았습니다/.test(E
 ok(/waitForEvent\('filechooser'/.test(ENGSRC), 'filechooser 로 첨부한다(실측으로 동작 확인)');
 ok(/waitForEvent\('filechooser'[\s\S]{0,300}await plus\.click/.test(ENGSRC), '🔴 filechooser 를 **클릭 전에** 걸어 둔다(뒤에 걸면 놓친다)');
 
+// ── [4-b] 🔴 한도 오탐 — 비디오 페이지의 **상시 안내 배너**를 한도로 보지 않는지 ──
+//   2026-09-03 실사고: 이미지용 판정을 그대로 써서 「기획에는 무료 할당량을 사용합니다. 영상 및 오디오는
+//   크레딧을 소모합니다」 배너에 걸려 **6초 만에 창이 닫히고** 계정에 1시간 쿨다운까지 잘못 걸렸다.
+{
+  const REAL_BANNER = '기획에는 무료 할당량을 사용합니다. 영상 및 오디오는 크레딧을 소모합니다.사용량 보기 ›  ×';
+  const hard = (m) => ENG.GS_HARD_LIMIT_RE.test(m);
+  ok(!hard(REAL_BANNER), '🔴 실사고 배너를 한도로 보지 않는다');
+  ok(ENG.GS_BENIGN_NOTICE_RE.test(REAL_BANNER), '그 배너는 「평범한 안내」로 분류된다');
+  // 진짜 못 만드는 상태는 잡는다
+  ok(hard('AI Image 5시간 제한에 도달했습니다. 9월 3일 16:59에 재설정됩니다'), '시간 제한(이미지형)은 잡는다');
+  ok(hard('크레딧이 소진되었습니다'), '포인트 소진을 잡는다');
+  ok(hard('포인트가 부족합니다'), '포인트 부족을 잡는다');
+  ok(hard('You are out of credits'), '영문 소진을 잡는다');
+  ok(hard('영상 및 오디오는 크레딧을 소모합니다. 크레딧이 소진되었습니다'), '🔴 안내 배너와 섞여 있어도 소진을 잡는다');
+  // 포인트 소진 ↔ 시간 한도 구분 — 로이: "이미지는 시간한도, 비디오는 포인트 차감"
+  ok(ENG.GensparkEngine.isPointExhausted('크레딧이 소진되었습니다'), '포인트 소진으로 분류');
+  ok(!ENG.GensparkEngine.isPointExhausted('5시간 제한에 도달했습니다. 재설정됩니다'), '시간 제한은 포인트 소진이 아니다');
+  // 판정 함수가 비디오 전용을 쓰는지(이미지 판정을 그대로 쓰면 안 된다)
+  ok(/_detectVideoLimit/.test(ENGSRC), '_detectVideoLimit 이 있다');
+  ok(!/const lim0 = await this\._detectLimitMessage\(\)/.test(ENGSRC), '🔴 비디오 경로가 이미지 판정을 그대로 쓰지 않는다');
+  ok((ENGSRC.match(/await this\._detectVideoLimit\(\)/g) || []).length === 2, '비디오 한도 검사 2곳(제출 전 · 폴링 중) 모두 전용 판정');
+  ok(/한도로 보지 않습니다/.test(ENGSRC), '흘려보낸 경고는 로그로 남긴다(실제 소진 문구 확정 근거)');
+  // main 이 포인트 소진을 시간 쿨다운과 다르게 다루는지
+  ok(/isPointExhausted\(limitReached\)/.test(MAIN), 'main 이 포인트 소진을 구분한다');
+  ok(/6 \* 60 \* 60 \* 1000/.test(MAIN), '포인트 소진이면 6시간 쉰다(기다려도 안 충전되므로)');
+  ok(/기다려도 충전되지 않습니다/.test(MAIN), '무엇을 해야 하는지 알린다');
+  ok(/LTX2\.5/.test(MAIN), '대안 엔진을 알려준다');
+}
+
 // ── [5] 모델·등급 선택이 조용히 실패하지 않는지 ──
 ok(/선택을 확인하지 못했습니다/.test(ENGSRC), '🔴 모델 선택 실패를 로그로 알린다(Flow v0.3.71 사고 재발 방지)');
 ok(/txt\(el\) === name/.test(ENGSRC), '🔴 모델명을 **정확히 일치**로 찾는다 (MiniMax H3 ⊂ MiniMax H3 Max 오선택 방지)');
@@ -98,10 +127,14 @@ ok(!/comfyVideoPipeline[^\n]*genspark/.test(MAIN), 'genspark 는 Comfy 파이프
 
 // ── [7] 설정 저장소 ──
 {
+  // ⚠ `load()` 는 **사용자가 고른 값**을 준다(로이가 설정에서 바꾸면 그 값이다 — 그게 정상 동작이다).
+  //   기본값 단언은 **DEFAULTS** 로 한다.
+  ok(ROT.DEFAULTS.gensparkVideoModel === 'Gemini Omni Flash', '기본 모델 = Gemini Omni Flash (로이 지정)');
+  ok(ROT.DEFAULTS.gensparkVideoTier === 'Standard', '기본 등급 = Standard');
   const c = ROT.load();
-  ok(c.gensparkVideoModel === 'Gemini Omni Flash', `기본 모델 = Gemini Omni Flash (실제 ${c.gensparkVideoModel})`);
-  ok(c.gensparkVideoTier === 'Standard', '기본 등급 = Standard');
-  ok(ROT.DEFAULTS.gensparkVideoModel === 'Gemini Omni Flash', 'DEFAULTS 에 정의됨');
+  ok(typeof c.gensparkVideoModel === 'string' && c.gensparkVideoModel, `설정에서 모델을 읽는다 (현재 ${c.gensparkVideoModel})`);
+  ok(M.some((x) => x.name === c.gensparkVideoModel), '현재 설정된 모델이 목록에 있는 이름이다');
+  ok(['Standard', 'Ultra'].includes(c.gensparkVideoTier), `등급이 유효하다 (현재 ${c.gensparkVideoTier})`);
 }
 
 // ── [8] UI — 드롭다운 2곳 + 설정 select ──
