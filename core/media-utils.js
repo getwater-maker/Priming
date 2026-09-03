@@ -176,6 +176,9 @@ async function convertToRefWav(inPath, outWavPath, opts = {}) {
   return outWavPath;
 }
 
+/** 분할 꼬리 조각 판정선 — 이보다 짧으면 쓸 수 없는 조각으로 본다(segmentAudio 안 주석 참조). */
+const MIN_SEGMENT_SEC = 0.3;
+
 /**
  * 긴 오디오를 segmentSec 초 단위 청크로 분할 (스트림 복사 — 재인코딩 없이 빠름).
  * 긴 STT(7~8시간 등) 안정화용: 통째 업로드/타임아웃/메모리 문제를 청크로 회피.
@@ -204,7 +207,22 @@ async function segmentAudio(inPath, outDir, segmentSec, ext) {
     .sort()
     .map(f => path.join(outDir, f));
   if (!files.length) throw new Error('오디오 분할 결과가 없습니다.');
-  return files;
+
+  // 🔴 ffmpeg segment 는 끝에 **재생 불가한 꼬리 조각**을 남길 수 있다.
+  //   실측(2026-09-03): 15초 mp3 를 5초로 자르면 청크가 3개가 아니라 **4개**가 나오고
+  //   마지막 `chunk_0003.mp3` 는 1KB — ffprobe 조차 "Failed to find two consecutive MPEG
+  //   audio frames" 로 거부한다. 그걸 그대로 STT 서버에 올리면 HTTP 500 이 되어
+  //   **앞 청크가 다 성공했어도 전사 전체가 실패**한다(원인이 로그에 드러나지 않는 종류).
+  //   ⚠ 조용히 버리는 게 맞다 — 0.3초 미만 조각에 말이 담길 일은 없고, 남기면 전량 실패다.
+  const good = [];
+  for (const f of files) {
+    let d = 0;
+    try { d = (await getMediaDuration(f)) || 0; } catch (_) { d = 0; }   // 못 읽으면 0 → 버림
+    if (d >= MIN_SEGMENT_SEC) good.push(f);
+    else { try { fs.unlinkSync(f); } catch (_) {} }
+  }
+  if (!good.length) throw new Error('오디오 분할 결과가 모두 비어 있습니다(입력이 너무 짧거나 깨졌습니다).');
+  return good;
 }
 
 module.exports = {

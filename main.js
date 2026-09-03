@@ -895,6 +895,9 @@ ipcMain.handle('grok-login', async (_e, args = {}) => {
 
 // ── STT (음성·영상 → 텍스트) — OmniVoice Whisper. 원본과 같은 폴더에 같은 이름 .txt 생성. ──
 //   동영상은 ffmpeg 로 오디오 추출 후 전사. 긴 파일은 asr-client 가 청크 분할. ■ 중단(S.abort)으로 멈춤.
+// ⚠ **변환 여부를 정하는 목록이 아니다** — 로그 문구를 「동영상 추출」/「mp3 변환」으로
+//   가르는 용도뿐이다. 무엇을 변환할지는 asr.needsAudioConvert 하나가 정한다.
+//   (2026-09-03: 이 집합으로 변환을 판정하다 m4a·aac·ogg·wma 가 그대로 올라가 전부 HTTP 500)
 const STT_VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v', '.ts', '.mpg', '.mpeg', '.wmv']);
 ipcMain.handle('stt-transcribe', async () => {
   const r = await dialog.showOpenDialog(win, {
@@ -928,9 +931,14 @@ ipcMain.handle('stt-transcribe', async () => {
     let tmpAudio = null;
     log(`🎧 STT 시작: ${path.basename(file)}`);
     try {
-      if (STT_VIDEO_EXT.has(ext)) {
+      // 서버(soundfile)가 직접 읽는 포맷이 아니면 무엇이든 mp3 로 바꿔서 올린다.
+      //   영상뿐 아니라 **m4a·aac·ogg·wma 도 여기 걸린다** — 예전엔 영상만 변환해서
+      //   m4a 를 고를 수는 있는데 전사는 늘 실패하는 상태였다.
+      if (asr.needsAudioConvert(file)) {
         tmpAudio = path.join(os.tmpdir(), `pf-stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
-        log('  ↳ 동영상에서 오디오 추출 중…');
+        log(STT_VIDEO_EXT.has(ext)
+          ? '  ↳ 동영상에서 오디오 추출 중…'
+          : `  ↳ mp3 로 변환 중… (서버가 ${ext || '이 형식'} 을 직접 읽지 못합니다)`);
         await media.extractAudioMp3(file, tmpAudio);
         audioPath = tmpAudio;
       }

@@ -26,6 +26,21 @@ function _authHeaders() {
 }
 
 /**
+ * 🔴 서버 soundfile(libsndfile)이 **직접 읽는** 오디오 포맷.
+ *   그 밖의 것(m4a·aac·ogg·wma·모든 영상)을 그대로 올리면 /asr-upload 가 HTTP 500 을 낸다:
+ *     "Soundfile is either not in the correct format or is malformed …"
+ *   실측(2026-09-03): 같은 큐에서 **m4a 14건 전부 실패 · mp3 7건 전부 성공**.
+ *   ⚠ 확증 없이 이 목록을 넓히지 말 것 — 사용자에게는 원인을 알 수 없는 500 으로 되돌아온다.
+ *     대신 ffmpeg 로 mp3 로 바꿔 올린다.
+ */
+const ASR_DIRECT_EXT = new Set(['.mp3', '.wav', '.flac']);
+
+/** 그대로 올릴 수 있나? false 면 ffmpeg 로 mp3 변환이 필요하다. */
+function needsAudioConvert(p) {
+  return !ASR_DIRECT_EXT.has(path.extname(String(p || '')).toLowerCase());
+}
+
+/**
  * /ref-voices — 서버 공용 참조음성 목록.
  *   보이스디자인으로 만든 목소리는 서버(메인 PC)의 라이브러리에 모인다. 이걸 쓰면
  *   **이 PC 에 wav 파일이 없어도** 이름만으로 합성할 수 있다(아내 PC 처럼 원격만 쓰는 PC 용).
@@ -125,6 +140,19 @@ async function transcribeLong(audioPath, opts = {}) {
   if (!audioPath || !fs.existsSync(audioPath)) {
     throw new Error('오디오 파일이 없습니다: ' + audioPath);
   }
+  // 🔴 서버가 읽지 못하는 포맷은 **여기서** mp3 로 바꾼다. 이 함수가 /asr-upload 로 나가는
+  //   유일한 문이라, 호출부가 늘어도 같은 500 을 다시 밟지 않는다(2026-09-03 m4a 사고).
+  //   호출부(main.js)가 이미 변환해 넘기면 판정을 통과하므로 이중 변환은 없다.
+  if (!needsAudioConvert(audioPath)) return _transcribeLongDirect(audioPath, opts);
+  const media0 = require('../core/media-utils');
+  const tmpConv = path.join(require('os').tmpdir(), `pf-asr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
+  await media0.extractAudioMp3(audioPath, tmpConv);
+  try { return await _transcribeLongDirect(tmpConv, opts); }
+  finally { try { fs.rmSync(tmpConv, { force: true }); } catch (_) {} }
+}
+
+/** transcribeLong 의 본체 — 여기 오는 파일은 **서버가 직접 읽는 포맷**임이 보장된다. */
+async function _transcribeLongDirect(audioPath, opts = {}) {
   const os = require('os');
   const media = require('../core/media-utils');
   const chunkSec = (opts.chunkSec > 0) ? opts.chunkSec : 900;                       // 기본 15분
@@ -261,4 +289,4 @@ function _netErr(e, base) {
   return `${(e && e.message) || e}${code ? ` [${code}]` : ''}${why ? ` — ${why}` : ''} (${base})`;
 }
 
-module.exports = { transcribe, transcribeLong, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles };
+module.exports = { transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles };
