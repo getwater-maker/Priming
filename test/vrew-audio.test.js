@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
@@ -66,7 +67,9 @@ ok((MAIN.match(/gateVisual\(outMode\) \? missingVisualGroups\(pr\)/g) || []).len
 ok((MAIN.match(/gateTts\(outMode\) \? missingTtsNums\(pr\)/g) || []).length === 2, '음성 게이트 2곳 모두 gateTts 경유');
 ok(!/\n\s+const miss = missingVisualGroups\(pr\);/.test(MAIN), '🔴 게이트를 직접 부르는 옛 코드가 남지 않았다');
 ok(!/\n\s+const mtts4? = missingTtsNums\(pr\);/.test(MAIN), '🔴 음성 게이트도 직접 호출이 남지 않았다');
-ok((MAIN.match(/withSilentTts\(pr, build\)/g) || []).length === 2, '빌드 2곳 모두 화면만 모드에서 무음으로 감싼다');
+ok((MAIN.match(/await buildForMode\(outMode, pr, build\)/g) || []).length === 2, '빌드 2곳 모두 buildForMode 를 거친다(판정 한 곳)');
+ok(/if \(m === 'visual'\) return withSilentTts/.test(MAIN), '🖼 화면만 → 음성 자리를 무음으로 감싼다');
+ok(/if \(m === 'audio'\) return withoutVisuals/.test(MAIN), '🔴 🎤 음성만 → 이미지·비디오를 .vrew 에 넣지 않는다');
 ok(/outMode: \(common\.outMode != null \? common\.outMode/.test(MAIN), '큐(run-batch)는 헤더 우선으로 outMode 를 넘긴다');
 ok(/const skipTts = \(outMode === 'visual'\)/.test(MAIN) && /const skipVisual = \(outMode === 'audio'\)/.test(MAIN), '단계 스킵 플래그가 있다');
 ok(/if \(skipTts\) \{[\s\S]{0,400}음성 건너뜀/.test(MAIN), '🖼 화면만 = TTS 단계를 건너뛴다(로그로 알린다)');
@@ -110,10 +113,15 @@ function stage2() {
   ok(typeof VA.readVrewClips === 'function' && typeof VA.importVrewAudio === 'function', '모듈이 필요한 함수를 export');
   ok(/words \|\| \[\]\)\.flatMap/.test(VASRC) || /\(\(c\.words\) \|\| \[\]\)\.flatMap/.test(VASRC), '🔴 clip.words[].assetIds 를 훑는다 (여기가 음성이 붙는 자리)');
   ok(!/writeZip|addFile|addLocalFile/.test(VASRC), '🔴 .vrew 를 쓰지 않는다 — 읽기 전용');
-  ok(/normText/.test(VASRC) && /forwardMatch/.test(VASRC), 'merge-assets 의 정규화·전방커서를 재사용한다(매칭 규칙이 두 벌이 되지 않게)');
-  ok(/minRate/.test(VASRC) && /주입 전에 매칭률 게이트/.test(VASRC), '주입 **전에** 매칭률을 검사한다');
+  ok(/normText/.test(VASRC) && /normLoose/.test(VASRC), '정규화가 문장부호를 무시한다(Vrew 자막엔 마침표가 없다)');
+  ok(/minRate/.test(VASRC) && /게이트/.test(VASRC) && /주입 전에/.test(VASRC), '주입 전에 게이트를 검사한다');
+  ok(/clipRate = clips\.length \? usedClips \/ clips\.length/.test(VASRC), '🔴 게이트 기준이 「문장」이 아니라 「clip」이다(일부만 만든 경우를 막지 않게)');
+  ok(/entryOf\.get\(mediaId\)/.test(VASRC), '🔴 zip 엔트리를 mediaId 로 찾는다(files[].name 은 사람이 읽는 이름일 수 있다)');
+  ok(/sourceFileType === 'TTS'/.test(VASRC), 'Vrew 의 TTS 표시를 음성 판정에 쓴다');
+  ok(/clipWords/.test(VASRC) && /captions 보다 이걸 믿는다/.test(VASRC), '🔴 자막 텍스트를 words 에서 읽는다(captions 는 어긋날 수 있다)');
+  ok(/concatAudio/.test(VASRC), '한 문장이 clip 여러 개면 음성을 이어붙인다');
   ok((VASRC.match(/\r\n/g) || []).length === 0, 'core/vrew-audio.js 줄끝 LF');
-  ok(VASRC.indexOf(' ') < 0, 'NUL 바이트 없음');
+  ok(VASRC.indexOf(String.fromCharCode(0)) < 0, 'NUL 바이트 없음');
 
   // 배선
   ok(/importVrewAudio: \(args\) => ipcRenderer\.invoke\('import-vrew-audio', args\)/.test(PRELOAD), 'preload 배선');
@@ -229,6 +237,95 @@ function stage3() {
       fs.writeFileSync(junk, 'not a zip');
       try { VA.readVrewClips(junk); } catch (e) { threw3 = e; }
       ok(!!threw3, '망가진 파일에 안 죽고 오류를 낸다');
+
+      // ⑨ 🔴 **일부만 만든 .vrew** — 문장 기준으로는 일치율이 낮지만 통과해야 한다
+      //    (2026-09-03 실사고: 로이가 앞 3그룹만 음성을 만들었더니 247문장 중 4개만 맞아 1.6% →
+      //     옛 문장 기준 게이트가 정상 작업을 막았다. clip 기준이면 5/5=100% 로 통과한다.)
+      {
+        const prPart = P.parseScript(sp, 'longform').projects[0];
+        // stage1.vrew 의 clip 6개 중 앞 2개만 남긴 .vrew 를 만든다
+        const AdmZip = require(path.join(ROOT, 'node_modules', 'adm-zip'));
+        const zz = new AdmZip(vrew);
+        const pj = JSON.parse(zz.readAsText('project.json'));
+        const keep = pj.transcript.clips.slice(0, 2);
+        const keptMedia = new Set();
+        for (const c of keep) {
+          for (const aid of (c.words || []).flatMap((w) => w.assetIds || [])) {
+            for (const tid of ((pj.props.assets[aid] || {}).trackIds || [])) {
+              const t = pj.props.tracks[tid];
+              if (t) keptMedia.add(t.mediaId);
+            }
+          }
+        }
+        pj.transcript.clips = keep;
+        const partial = path.join(TMP, 'partial.vrew');
+        const out = new AdmZip();
+        out.addFile('project.json', Buffer.from(JSON.stringify(pj), 'utf8'));
+        for (const e of zz.getEntries()) {
+          if (e.entryName === 'project.json') continue;
+          const stem = e.entryName.replace(/^media\//, '').replace(/\.[^.]*$/, '');
+          if (keptMedia.has(stem)) out.addFile(e.entryName, e.getData());
+        }
+        out.writeZip(partial);
+
+        const rp = await VA.importVrewAudio(prPart, partial, path.join(TMP, 'tts-part'), { probeDur: (f) => media.getMediaDuration(f) });
+        ok(rp.injected === 2, `🔴 앞 2문장만 든 .vrew 도 막히지 않고 가져온다 (주입 ${rp.injected})`);
+        ok(rp.clipRate === 1, `clip 기준 일치율 100% (실제 ${(rp.clipRate * 100).toFixed(0)}%)`);
+        ok(rp.rate < 0.5, `문장 기준으로는 낮다 — 그래도 통과해야 한다 (${(rp.rate * 100).toFixed(0)}%)`);
+        ok(prPart.sentences.slice(2).every((s) => !s.ttsAudioPath), '가져오지 않은 문장은 건드리지 않았다');
+      }
+
+      // ⑩ 🔴 문장부호가 달라도 매칭된다 (Vrew 자막엔 마침표가 없다)
+      ok(VA.normLoose('있었습니다.') === VA.normLoose('있었습니다'), '마침표를 무시한다');
+      ok(VA.normLoose('이른 새벽, 한 관리가') === VA.normLoose('이른 새벽 한 관리가'), '쉼표를 무시한다');
+      ok(VA.normLoose('가나다') !== VA.normLoose('가나라'), '내용 글자는 구별한다(엉뚱한 매칭 방지)');
+      // 여러 clip → 한 문장 매칭
+      {
+        const sents = [{ num: 1, text: '그의 죄는 임금의 사위를 잡아 문초한 것이었습니다.' }];
+        const cs = [
+          { index: 0, text: '그의 죄는 임금의 사위를', mediaId: 'a', entryName: 'media/a.mp3' },
+          { index: 1, text: '잡아 문초한 것이었습니다', mediaId: 'b', entryName: 'media/b.mp3' },
+        ];
+        const mm = VA.matchClipsToSentences(sents, cs);
+        ok(mm[0] && mm[0].length === 2, '🔴 자막 줄 2개가 한 문장으로 합쳐진다 (실사고 케이스)');
+      }
+      // words 를 captions 보다 믿는다 (실사고: clip[0] captions 가 남의 문장이었다)
+      ok(VA.clipText({ words: [{ text: '진짜' }, { text: '내용' }], captions: [{ text: [{ insert: '남의 자막' }] }] }) === '진짜 내용',
+        '🔴 words 를 우선한다');
+      ok(VA.clipText({ captions: [{ text: [{ insert: '폴백 자막' }] }] }) === '폴백 자막', 'words 가 없으면 captions 폴백');
+
+      // ⑪ 🎤 음성만 — 이미지·비디오를 .vrew 에 넣지 않는지 (withoutVisuals 원문 실행)
+      {
+        const fn2 = new Function('async ' + extract(MAIN, 'withoutVisuals') + '\nreturn withoutVisuals;')();
+        const prV = { groups: [{ num: 1, imagePath: 'C:/img1.png', videoPath: 'C:/v1.mp4' }, { num: 2, imagePath: 'C:/img2.png', videoPath: null }] };
+        let inside = null;
+        await fn2(prV, async () => { inside = prV.groups.map((g) => [g.imagePath, g.videoPath]); return 1; });
+        ok(inside && inside.every((x) => x[0] === null && x[1] === null), '🔴 빌드 중에는 이미지·비디오가 비워진다');
+        ok(prV.groups[0].imagePath === 'C:/img1.png' && prV.groups[0].videoPath === 'C:/v1.mp4', '🔴 끝나면 원래대로 되돌아온다');
+        ok(prV.groups[1].imagePath === 'C:/img2.png', '두 번째 그룹도 복원된다');
+      }
+      // 실제로 「음성만」 빌드를 하면 image 0 인가
+      {
+        const prA = P.parseScript(sp, 'longform').projects[0];
+        P.fillSilent(prA, path.join(TMP, '_s2'));
+        // 이미지가 있는 상황을 만든다(실사고 조건: 이미 만들어 둔 이미지가 남아 있다)
+        const imgDir = path.join(TMP, 'media-a');
+        fs.mkdirSync(imgDir, { recursive: true });
+        const ff = media.getFfmpegPath();
+        const img = path.join(imgDir, '01.png');
+        execFileSync(ff, ['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180', '-frames:v', '1', img], { stdio: 'ignore' });
+        for (const g of prA.groups) g.imagePath = img;
+        const withImg = path.join(TMP, 'withimg.vrew');
+        const rA = await P.buildProjectVrew(prA, withImg, preset, () => {}, 20);
+        ok(rA.imageCount > 0, '(대조) 평소에는 이미지가 들어간다 — image ' + rA.imageCount);
+
+        const fn2 = new Function('async ' + extract(MAIN, 'withoutVisuals') + '\nreturn withoutVisuals;')();
+        const noImg = path.join(TMP, 'noimg2.vrew');
+        const rB = await fn2(prA, () => P.buildProjectVrew(prA, noImg, preset, () => {}, 20));
+        ok(rB.imageCount === 0, '🔴 「음성만」이면 이미지가 0개 — image ' + rB.imageCount);
+        ok(rB.clipCount === rA.clipCount, '음성·자막은 그대로 (clip ' + rB.clipCount + ')');
+        ok(prA.groups.every((g) => g.imagePath === img), '빌드 뒤 이미지 경로가 복원됐다');
+      }
     } finally {
       fs.rmSync(TMP, { recursive: true, force: true });
     }

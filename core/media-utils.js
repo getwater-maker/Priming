@@ -225,6 +225,31 @@ async function segmentAudio(inPath, outDir, segmentSec, ext) {
   return good;
 }
 
+/**
+ * 오디오 여러 개를 **재인코딩 없이** 하나로 이어붙인다(concat demuxer + stream copy).
+ *   Vrew 는 **자막 줄마다 clip 을 나누므로** 대본 한 문장이 clip 여러 개로 쪼개진다
+ *   → 그 음성들을 한 문장 음성으로 되붙일 때 쓴다(2026-09-03 실측).
+ *   ⚠ 입력은 같은 코덱·표본율이어야 한다(같은 TTS 가 만든 것들이므로 충족).
+ * @param {string[]} inPaths  이어붙일 순서대로
+ * @param {string} outPath
+ */
+async function concatAudio(inPaths, outPath) {
+  if (!Array.isArray(inPaths) || !inPaths.length) throw new Error('이어붙일 오디오가 없습니다.');
+  for (const p of inPaths) if (!fs.existsSync(p)) throw new Error('오디오 파일을 찾을 수 없습니다: ' + p);
+  if (inPaths.length === 1) { fs.copyFileSync(inPaths[0], outPath); return outPath; }
+  // concat demuxer 는 목록 파일을 받는다. 경로의 역슬래시는 슬래시로, 작은따옴표는 이스케이프한다.
+  const listPath = tmpFile('.txt');
+  const line = (p) => "file '" + String(p).split('\\').join('/').split("'").join("'\\''") + "'";
+  fs.writeFileSync(listPath, inPaths.map(line).join('\n'), 'utf8');
+  try {
+    await _runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outPath]);
+  } finally {
+    try { fs.rmSync(listPath, { force: true }); } catch (_) {}
+  }
+  if (!fs.existsSync(outPath)) throw new Error('오디오 이어붙이기 결과가 없습니다.');
+  return outPath;
+}
+
 module.exports = {
   getFfmpegPath,
   tmpFile,
@@ -233,4 +258,5 @@ module.exports = {
   extractAudioMp3,
   convertToRefWav,
   segmentAudio,
+  concatAudio,
 };

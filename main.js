@@ -2008,7 +2008,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
     try {
       const build = () => P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
-      const res = (outMode === 'visual') ? await withSilentTts(pr, build) : await build();
+      const res = await buildForMode(outMode, pr, build);
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -3355,6 +3355,32 @@ async function withSilentTts(pr, fn) {
   }
 }
 
+/**
+ * 🎤 음성만 — 이미지·비디오를 **.vrew 에 넣지 않고** 빌드하고, 끝나면 원래대로 되돌린다.
+ *   🔴 왜 필요한가(2026-09-03 로이 신고): 「음성만」은 이미지 **생성 단계**를 건너뛸 뿐이어서,
+ *     이미 만들어 둔 이미지(작업본 이어받기·지난 실행 산출물)가 g.imagePath 에 남아 있으면
+ *     빌더가 그것을 그대로 실어 **이미지가 든 .vrew** 가 나왔다. 「만들지 않는다」와
+ *     「넣지 않는다」는 다르고, 사용자가 기대하는 것은 후자다.
+ *   ⚠ 모델만 잠깐 비운다 — **파일은 지우지 않는다**(나중에 「전체」로 만들면 그대로 쓰인다).
+ */
+async function withoutVisuals(pr, fn) {
+  const backup = (pr.groups || []).map((g) => ({ g, i: g.imagePath, v: g.videoPath }));
+  try {
+    for (const b of backup) { b.g.imagePath = null; b.g.videoPath = null; }
+    return await fn();
+  } finally {
+    for (const b of backup) { b.g.imagePath = b.i; b.g.videoPath = b.v; }
+  }
+}
+
+/** 출력 방식에 맞게 빌드를 감싼다 — **판정을 한 곳에 모은다**(빌드 호출부는 두 곳이다). */
+async function buildForMode(outMode, pr, build) {
+  const m = normOutMode(outMode);
+  if (m === 'visual') return withSilentTts(pr, build);   // 음성 자리를 무음으로
+  if (m === 'audio') return withoutVisuals(pr, build);   // 화면을 넣지 않음
+  return build();
+}
+
 function missingTtsNums(project) {
   return (project.sentences || []).filter((s) => !(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))).map((s) => s.num);
 }
@@ -4410,7 +4436,7 @@ async function runMakeAllCore(opts = {}) {
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);
       try {
         const build = () => P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
-        const res = (outMode === 'visual') ? await withSilentTts(pr, build) : await build();
+        const res = await buildForMode(outMode, pr, build);
         P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
         log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
         if (openVrew) shell.openPath(vrewPath);
