@@ -58,7 +58,7 @@ ok(!/const dropdown = await this\.page\.\$\('button:has-text\("Nano Banana"\)'\)
   '⛔ 옛 단일 셀렉터(Nano Banana 전용)가 사라졌다 — 이게 동영상 모드 실패의 원인이었다');
 ok(/getByRole\('menuitem'\)\.filter\(\{ hasText: model \}\)/.test(ENG),
   '열린 메뉴의 role=menuitem 에서 고른다 (트리거 버튼과 글자가 같아 exact text 만으론 그쪽을 집는다)');
-ok(/if \(cur\.includes\(model\)\)/.test(ENG),
+ok(/if \(this\._modelMatches\(cur, model\)\)/.test(ENG),
   '현재 라벨을 읽어 같으면 건너뛴다 — 하드코딩된 기본 모델 가정을 쓰지 않는다');
 ok(!/const defaultModel = opts\.mediaType === 'video' \? 'Veo 3\.1 - Fast'/.test(ENG),
   "⛔ defaultModel='Veo 3.1 - Fast' 하드코딩이 사라졌다 (실제 기본은 Lite — 그 가정이 틀렸다)");

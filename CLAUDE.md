@@ -7,6 +7,69 @@
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
 
+## 🔴🖼 v0.3.98 을 넣어도 Flow 이미지가 안 만들어진 진짜 원인 — **Flow 가 `flow.google.com` 으로 이전하며 UI 를 통째로 바꿨다** (2026-09-04, v0.3.99)
+> 로이: "이미지가 안만들어지는데" (v0.3.98 배포 직후). 접속 대기(networkidle)는 겉증상이었고, 그 뒤 **화면의 어떤 셀렉터도
+> 맞지 않는 상태**였다. 로이 계정 프로필 **사본**으로 실물 진단·E2E 를 돌려 새 UI 를 실측하고 엔진을 적응시켰다.
+
+### 🔑 무엇이 바뀌었나 (2026-09-04 실측 — 다음에 또 바뀌면 이 표부터 다시 채운다)
+| 항목 | 옛 UI(labs.google/fx/ko/tools/flow) | **새 UI(flow.google.com · Angular Material)** |
+|---|---|---|
+| 주소 | `labs.google/fx/ko/tools/flow` | **`https://flow.google.com/`**(옛 주소는 리다이렉트) · 로그아웃이면 `/about` 소개 페이지 |
+| 프롬프트 입력칸 | `div[role="textbox"][contenteditable]` | **`div.ProseMirror[contenteditable]`**(`insertText` → 클립보드 → type 순으로 넣는다) |
+| 설정 팝업 열기 | `동영상 · 720p · x1` 칩 텍스트 | **`button[aria-label="설정 트리거"]`** |
+| 설정 팝업 탭 | `role="tab"` | **`role="radio"`(mat-button-toggle)** — 이미지/동영상 · 프레임/**소재**(애셋의 새 이름) · 비율 · 매수 `x1` 또는 `1x` |
+| 모델 드롭다운 | `button:has-text("Veo")` | **`button[aria-label="모델 제품군 선택"]`** · 메뉴 항목 `role=menuitem` |
+| 제출 | `arrow_forward 만들기` 텍스트 | **`button[aria-label="생성 시작"]`**(텍스트는 아이콘 `arrow_forward` 뿐) |
+| 결과 카드 | `a[href*="/edit/<uuid>"]` | **`flow-grid-tile-container`** 타일(링크 없음 → 미디어 src 가 정체) |
+| 결과 이미지 받기 | 페이지 안 `fetch(src)` | **`context.request.get(src)`** — CDN `flow-content.google` 이 CORS 로 페이지 fetch 를 막는다(`Failed to fetch`) |
+| 카드 메뉴 | `more_vert` | `more_vert` 또는 **`button[aria-label="옵션 더보기"]`** · 다운로드 서브메뉴 `1K/2K/4K`(이미지 기준) |
+| 소재(참조) 첨부 | 프롬프트 바 `add_2` | **`button[aria-label="프롬프트 상자에 소재 추가"]`** → 다이얼로그 |
+| 업로드 | hidden `input[type=file]` | 다이얼로그에 file input 이 **없다** → 「미디어 업로드」 버튼이 네이티브 선택기 → **`filechooser` 이벤트**로 받는다 |
+| 업로드 뒤 | 「프롬프트에 추가」 버튼 클릭 | **권리 확인창 「동의」** 를 눌러야 하고, 그 뒤 자산이 **프롬프트 바에 자동으로 붙는다**(버튼을 누를 필요가 없다) |
+| 프레임(시작) 첨부 | 「시작」→ 다이얼로그에서 업로드 | 「시작」 다이얼로그는 **프로젝트 자산만** 보여 준다 → 상단 **`button[aria-label="미디어 메뉴 추가"]`→업로드→동의** 뒤 다시 「시작」→ 첫 자산 |
+| 붙은 상태 | 썸네일 | **`button.*chip` 안의 `img`**(칩 텍스트는 `cancel`) — 「시작」 글자가 칩으로 바뀐다 |
+| 영상 길이 | 없음 | **4/6/8/10초 옵션이 생겼다**(⏳ 미구현 — 지금은 기본 8초) |
+- 🔑 **옛 셀렉터는 전부 폴백으로 남겼다**(role=tab · add_2 · `/edit/` 링크 · 만들기 버튼). 새 UI 가 계정별로 단계 배포되거나
+  되돌아가도 동작한다. `FLOW_HOST_RE` 가 두 호스트를 다 받는다.
+- 🔑 **접속 판정**: 새 UI 는 첫 로드 직후 잠깐 `/about`·「로 드 중 …」을 거쳐 홈으로 온다(같은 프로필이 한 번은 4초 만에
+  /about, 다음엔 홈). `_waitFlowReady` 는 **소개 페이지가 3초 이상 유지될 때만** 확정하고, `_createNewProject` 는 버튼을
+  최대 10초 기다린다(소개·로그인 화면이 3초 지속이면 조기 진단).
+
+### 🔴 진단·E2E 에서 밟은 함정 (전부 실측)
+1. **`run({ profileId })` 는 `~/.flow-app/profiles/<id>` 를 강제한다** — 진단용 프로필을 `%TEMP%` 에 두고 `profileId` 를
+   지정하면 **로그아웃된 다른 폴더**를 열어 `/about` 로 떨어진다(한 번 "UI 가 또 바뀌었나"로 오진했다).
+   진단 프로필은 반드시 `~/.flow-app/profiles/` 아래에 둔다.
+2. **프레임 다이얼로그 옵션 클릭이 backdrop 에 막혔다** → 원인은 셀렉터가 아니라 **업로드 권리 「동의」 확인창**이 위에
+   떠 있던 것. `_acceptUploadConsent`(동의/동의함/I agree · 15초)가 처리한다.
+3. **첨부는 됐는데 판정이 false**(두 번): ⓐ `_uploadAndAddToPrompt` 가 옛 UI 의 「프롬프트에 추가」 버튼을 60초 기다리다
+   실패 처리 — 화면엔 칩이 이미 붙어 있었다 → **`_promptBarHasAttachment()`** 를 동의 직후 폴링하고, 실패 처리 직전에도
+   한 번 더 본다. ⓑ `_attachFrameViaLibrary` 의 **`document.document` 오타**로 evaluate 가 던져 항상 false → 같은 헬퍼로 교체.
+   🔑 **「첨부 실패 = 그 컷을 만들지 않는다」 정책(v0.3.71) 때문에 이 오탐은 곧 "영상 0개"다** — 판정 헬퍼를 한 곳으로 모았다.
+4. **`_modelMatches` 가 `Nano Banana 2` 를 `Nano Banana 2 Lite` 라벨에 맞다고 봤다**(단어 경계만 봐서) → 뒤에 글자가
+   더 붙어 있으면(아이콘 `expand_more` 류 제외) 다른 모델로 본다. 안 고쳤으면 Lite 가 켜진 채 「2」를 골라도 조용히 Lite 로 그렸다.
+5. 🔴 **bash heredoc 이 `\b` 를 0x08(백스페이스)로 바꿔 넣었다** — 정규식 `\b` 가 제어문자가 되어 `_modelMatches` 가 조용히
+   틀렸다(테스트가 잡았다). 이미 v0.3.16 에 적힌 함정인데 또 밟았다. **백슬래시가 든 스크립트는 Write 도구로 쓴다**,
+   그리고 편집 뒤 `[\x00-\x08\x0b\x0c\x0e-\x1f]` 잔존을 검사한다(이번에 fix_ctrl.js 로 전 파일 0 확인).
+
+### 검증
+- **실물 E2E(로이 계정 프로필 사본 · 앱 엔진 원문 `run()`)**: 이미지 1장 생성 성공(`01_강가의 낡은 나무배.jpg` 211KB · 15초 ·
+  설정 4종 + Nano Banana 2 Lite 선택 포함) → **소재 첨부 true**(34초) → 칩 비우고 **프레임(라이브러리 경로) 첨부 true**(21초).
+  비디오 생성은 크레딧 때문에 **하지 않았다**. 진단으로 쓴 크레딧: 이미지 2장(사과·나무배).
+- `test/flow-connect.test.js` **22/22**(+9 — FLOW_URL·호스트 판정 · ProseMirror · aria-label 6종 · radio 탭 · request.get+타일 ·
+  filechooser+동의+라이브러리 경로 · 자동 첨부 감지 + `document.document` 금지 · **`_promptBarHasAttachment` 원문 실행 3** ·
+  **`_modelMatches` 원문 실행 6**). 🔑 **A/B**: 오타·모델 판정을 고치기 전 상태로 돌리면 **20/22**(그 두 건이 실패).
+  회귀: flow-video 159 · flow-account 46 · grok 81 · browser-recovery 37 · **makeall 18/18**.
+
+### ⚠ 로이가 알아 둘 것
+- **[다산_0906] 이미지 12장은 앱 재시작 후 「🖼 이미지」를 다시 누르면 된다.** 로그에 `[Flow] 접속 완료(접속) — 홈(새 프로젝트)` 와
+  `[설정] 모델 Nano Banana 2 Lite ✓` 가 찍히면 새 UI 경로를 탄 것이다.
+- ⏳ **Flow 비디오(Veo) 경로는 새 UI 에서 실물 미검증**이다 — 첨부까지는 확인했고 제출·진행률·1080p 다운로드 메뉴는 못 봤다
+  (이미지 카드의 다운로드 서브메뉴는 `1K/2K/4K` 로 바뀌었다 → 비디오도 `1080p 업스케일` 이 아닐 수 있다). 첫 영상 1개를 만들어
+  로그를 주면 맞춘다. 실패하면 폴백 사슬(네트워크 캡처 720p → 재생 소스)로 떨어지고 그 사실이 로그에 남는다.
+- ⏳ 새 UI 에 **영상 길이 4/6/8/10초** 옵션이 생겼다 — 원하면 그룹 TTS 길이에 맞춰 고르게 할 수 있다(지금은 기본 8초).
+- 진단으로 로이 Flow 계정에 **프로젝트 몇 개와 자산(사과·나무배 이미지, 업로드한 나무배 사본)** 이 생겼다 — Flow 홈에서 지우면 된다.
+  진단 프로필 사본(`flowdiag-e2e`·`e2e-diag`)은 삭제했다. anti-detect 상태에 `flowdiag-e2e:1` 카운트가 남아 있으나 무해하다.
+
 ## 🔴🖼 Flow 를 골랐는데 창만 뜨고 Genspark 로 넘어간 것 — 접속 대기가 `networkidle` 이었다 (2026-09-04, v0.3.98)
 > 로이: "방금 flow 선택하고 이미지를 만들었는데, 어떤 이유인지 플로우창이 뜨고 이미지가 안만들어진다음 젠스파크가 떴어"
 

@@ -99,6 +99,56 @@ async function await0() {
   });
   ok('후킹은 한 번만 (재사용 인스턴스 중복 기록 방지)', () => { assert.ok(/eng\._appLogHooked\)/.test(MAIN) || /eng\._appLogHooked \|\|/.test(MAIN)); });
 
+  console.log('\n[4] 2026-09-04 Flow 새 UI(flow.google.com · Angular Material) — 실측 셀렉터가 코드에 있다');
+  ok('FLOW_URL 이 flow.google.com 이고 옛 labs.google 도 호스트 판정에 남아 있다(리다이렉트 대비)', () => {
+    assert.ok(/^const FLOW_URL = 'https:\/\/flow\.google\.com\/';/m.test(ENGINE), 'FLOW_URL');
+    assert.ok(/^const FLOW_HOST_RE = .*labs\\.google.*flow\\.google\\.com/m.test(ENGINE), 'FLOW_HOST_RE 두 호스트');
+    assert.ok(!/waitForURL\(\/labs\\.google\//.test(ENGINE), 'waitForURL 에 labs.google 단독 판정 잔존');
+  });
+  ok('프롬프트 입력칸 = ProseMirror(contenteditable) 도 받는다 (옛 role=textbox 유지)', () => {
+    assert.ok(/^const PROMPT_BOX = .*ProseMirror.*contenteditable/m.test(ENGINE));
+    assert.ok(/^const PROMPT_BOX = .*div\[role="textbox"\]/m.test(ENGINE));
+  });
+  ok('aria-label 앵커 6종: 설정 트리거·생성 시작·모델 제품군 선택·프롬프트 상자에 소재 추가·미디어 메뉴 추가·옵션 더보기', () => {
+    for (const a of ['설정 트리거', '생성 시작', '모델 제품군 선택', '프롬프트 상자에 소재 추가', '미디어 메뉴 추가', '옵션 더보기'])
+      assert.ok(ENGINE.includes(`button[aria-label="${a}"]`), a + ' 없음');
+  });
+  ok('설정 팝업 탭은 role=radio(mat-button-toggle) 도 찾는다 — 옛 role=tab 만 보면 전부 실패', () => {
+    const i = ENGINE.indexOf('  _tabLocator(name) {');
+    assert.ok(i > 0, '_tabLocator 없음');
+    assert.ok(/radio/.test(ENGINE.slice(i, i + 800)), 'radio 없음');
+  });
+  ok('결과 이미지는 context.request.get 으로 받는다(페이지 fetch 는 CORS 로 막힌다) + 타일 = flow-grid-tile-container', () => {
+    assert.ok(/async _fetchDataUrl\(url\)/.test(ENGINE) && /ctx\.request\.get\(/.test(ENGINE));
+    assert.ok((ENGINE.match(/_fetchDataUrl\(/g) || []).length >= 4, '호출 4곳 이상(정의 포함)');
+    assert.ok(ENGINE.includes('flow-grid-tile-container'));
+  });
+  ok('업로드 = filechooser 폴백 + 권리 「동의」 확인창 처리 + 프레임은 라이브러리 경로가 있다', () => {
+    assert.ok(/async _uploadViaChooser\(imagePath, num, label\)/.test(ENGINE) && /waitForEvent\('filechooser'/.test(ENGINE));
+    assert.ok(/async _acceptUploadConsent\(num, label\)/.test(ENGINE) && /동의함/.test(ENGINE));
+    assert.ok(/async _attachFrameViaLibrary\(imagePath, num\)/.test(ENGINE) && /await this\._attachFrameViaLibrary\(imagePath, num\)/.test(ENGINE));
+  });
+  ok('자동 첨부 감지(_promptBarHasAttachment)가 있고 실패 처리 직전에 한 번 더 본다 (E2E 08:59 — 붙었는데 false)', () => {
+    assert.ok(/async _promptBarHasAttachment\(\)/.test(ENGINE));
+    assert.ok((ENGINE.match(/await this\._promptBarHasAttachment\(\)/g) || []).length >= 4, '호출 4곳 이상');
+    assert.ok(!ENGINE.includes('document.document'), 'document.document 오타(E2E 실사고) 잔존');
+  });
+  await okAsync('_promptBarHasAttachment — 칩에 이미지가 있으면 true, 없으면 false, evaluate 예외면 false(안 던짐)', async () => {
+    const mkP = (ret, throws) => { const e = mk({ async evaluate(fn) { if (throws) throw new Error('ctx destroyed'); return ret; } }); return e; };
+    assert.strictEqual(await mkP(true)._promptBarHasAttachment(), true);
+    assert.strictEqual(await mkP(false)._promptBarHasAttachment(), false);
+    assert.strictEqual(await mkP(true, true)._promptBarHasAttachment(), false);
+  });
+  ok('_modelMatches — 라벨 뒤에 글자가 더 있으면 다른 모델(Nano Banana 2 ≠ Nano Banana 2 Lite), 아이콘 글자는 무시', () => {
+    const e = mk({});
+    assert.strictEqual(e._modelMatches('Veo 3.1 - Lite', 'Veo 3.1 - Lite'), true);
+    assert.strictEqual(e._modelMatches('🍌 Nano Banana 2 Lite', 'Nano Banana 2 Lite'), true);
+    assert.strictEqual(e._modelMatches('Nano Banana 2 Lite expand_more', 'Nano Banana 2 Lite'), true);
+    assert.strictEqual(e._modelMatches('Nano Banana 2 Lite', 'Nano Banana 2'), false, 'Lite 를 2 로 오판');
+    assert.strictEqual(e._modelMatches('Veo 3.1 - Lite', 'Veo 3.1 - Fast'), false);
+    assert.strictEqual(e._modelMatches('', 'Veo 3.1 - Lite'), false);
+  });
+
   console.log(`\n${fails ? '❌' : '✅'} flow-connect: ${n - fails}/${n}`);
   process.exit(fails ? 1 : 0);
 }

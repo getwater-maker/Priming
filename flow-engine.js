@@ -25,7 +25,14 @@ const { AntiDetect } = require('./anti-detect');
 // run() 시작 시 + 생성 루프 중간(매 그룹)에 모두 검사해 작업 중 초과도 방지.
 const PER_PROFILE_DAILY_CAP = 45;
 
-const FLOW_URL = 'https://labs.google/fx/ko/tools/flow';
+// 🔴 2026-09-04: Flow 가 labs.google/fx/ko/tools/flow → **flow.google.com** 으로 옮겨 갔다(옛 주소는 리다이렉트).
+//   UI 도 Angular Material 로 통째로 바뀌었다 — 프롬프트 입력칸이 div[role=textbox] 가 아니라 **div.ProseMirror** 이고,
+//   설정 팝업은 role=tab 이 아니라 **role=radio**(mat-button-toggle), 제출은 aria-label="생성 시작" 버튼이다.
+//   옛 셀렉터는 폴백으로 남겨 둔다(구 UI 가 남은 계정·리전이 있을 수 있다).
+const FLOW_URL = 'https://flow.google.com/';
+const FLOW_HOST_RE = /(labs\.google|flow\.google\.com)/;
+// 프롬프트 입력칸 — 옛(role=textbox) · 새(ProseMirror) 둘 다
+const PROMPT_BOX = 'div[role="textbox"][contenteditable="true"], div.ProseMirror[contenteditable="true"]';
 const DEFAULT_PROFILE_DIR = path.join(os.homedir(), '.flow-app', 'profiles', 'default');
 
 // ════════════════════════════════════════════════════════════════════
@@ -304,7 +311,7 @@ class FlowAutomator {
 
     if (this.page.url().includes('accounts.google')) {
       this.log('[Flow] Google 로그인이 필요합니다. 브라우저에서 로그인하세요.');
-      await this.page.waitForURL('**/labs.google/**', { timeout: 300000 });
+      await this.page.waitForURL(FLOW_HOST_RE, { timeout: 300000 });
       this.log('[Flow] 로그인 완료!');
     } else {
       this.log('[Flow] 이미 로그인되어 있습니다.');
@@ -539,7 +546,7 @@ class FlowAutomator {
     // 로그인 리다이렉트 대기 (auth callback → Flow 메인)
     if (this.page.url().includes('accounts.google') || this.page.url().includes('auth/callback')) {
       this.log('[Flow] 로그인 리다이렉트 대기...');
-      await this.page.waitForURL('**/labs.google/fx/**', { timeout: 30000 }).catch(() => {});
+      await this.page.waitForURL(FLOW_HOST_RE, { timeout: 30000 }).catch(() => {});
       await this.page.waitForTimeout(5000);
     }
 
@@ -1338,7 +1345,9 @@ class FlowAutomator {
     if (opts.mediaType === 'video' && (opts.frameImages && opts.frameImages.length)) {
       const wantAsset = opts.attachMode === 'asset';
       const tabName = wantAsset ? '애셋' : '프레임';
-      if (await this._clickTab(tabName)) this.log(`  [설정] ${tabName}${wantAsset ? '(참조)' : '(i2v)'} 탭 ✓`);
+      let subOk = await this._clickTab(tabName);
+      if (!subOk && wantAsset) subOk = await this._clickTab('소재');   // 2026-09 새 UI 라벨
+      if (subOk) this.log(`  [설정] ${tabName}${wantAsset ? '(참조)' : '(i2v)'} 탭 ✓`);
       else this.log(`  [!] ${tabName} 탭 못 찾음 — 텍스트만으로 생성될 수 있음`);
       await this.page.waitForTimeout(300);
     }
@@ -1350,8 +1359,11 @@ class FlowAutomator {
 
     // 4) 매수 — Flow 표기 "1x"/"x2"/"x3"/"x4" (x1 입력은 1x 로 보정)
     const cm = String(opts.count || '').match(/(\d+)/);
-    const countName = cm ? (cm[1] === '1' ? '1x' : `x${cm[1]}`) : String(opts.count || '');
-    if (countName && await this._clickTab(countName)) this.log(`  [설정] 매수 ${countName} ✓`);
+    // 표기가 UI 마다 다르다 — 옛 UI '1x'/'x2', 새 UI(2026-09) 'x1'~'x4'. 둘 다 시도한다.
+    const countNames = cm ? [`x${cm[1]}`, `${cm[1]}x`] : [String(opts.count || '')];
+    for (const countName of countNames) {
+      if (countName && await this._clickTab(countName)) { this.log(`  [설정] 매수 ${countName} ✓`); break; }
+    }
     await this.page.waitForTimeout(200);
 
     // 5) 모델 — _selectModel 이 **현재 라벨을 읽어** 같으면 스스로 건너뛴다.
@@ -1368,8 +1380,10 @@ class FlowAutomator {
   //   → exact:true('16:9') 매칭 실패. exact 우선 시도 후 부분일치(substring) 폴백.
   //   부분일치 충돌 없음 검증: '16:9'↔"crop_16_9 16:9"만, '9:16'↔"crop_9_16 9:16"만 매칭.
   _tabLocator(name) {
-    return this.page.getByRole('tab', { name, exact: true }).or(
-           this.page.getByRole('tab', { name, exact: false })).first();
+    // 옛 UI = role=tab · 새 UI(2026-09) = role=radio. 둘을 합쳐 첫 번째 보이는 것을 쓴다.
+    const byTab = this.page.getByRole('tab', { name, exact: true }).or(this.page.getByRole('tab', { name, exact: false }));
+    const byRadio = this.page.getByRole('radio', { name, exact: true }).or(this.page.getByRole('radio', { name, exact: false }));
+    return byTab.or(byRadio).first();
   }
 
   async _isTabVisible(name) {
@@ -1398,7 +1412,7 @@ class FlowAutomator {
       try {
         const status = response.status();
         const url = response.url();
-        if ((status === 403 || status === 401) && url.includes('labs.google')) {
+        if ((status === 403 || status === 401) && FLOW_HOST_RE.test(url)) {
           this._403Count++;
           if (this._403Count >= 2 && !this._rateLimited) {
             this._rateLimited = true;
@@ -1439,7 +1453,7 @@ class FlowAutomator {
   // ─── v2.0: 휴먼화 타이핑 ───
   async _typePromptHumanized(text, speedMultiplier = 1.0) {
     // Locator + 재시도 — DOM 재렌더로 인한 "Element is not attached" 방지 (_typePrompt 와 동일 정책)
-    const inputLoc = this.page.locator('div[role="textbox"][contenteditable="true"]').first();
+    const inputLoc = this.page.locator(PROMPT_BOX).first();
     await inputLoc.waitFor({ state: 'visible', timeout: 10000 });
     let clicked = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -1483,7 +1497,7 @@ class FlowAutomator {
   // ─── v2.0: 텍스트박스 입력 가능 대기 ───
   async _waitForTextboxReady(timeout = 15000) {
     try {
-      await this.page.waitForSelector('div[role="textbox"][contenteditable="true"]', { timeout });
+      await this.page.waitForSelector(PROMPT_BOX, { timeout });
     } catch {
       // 타임아웃 시 페이지 새로고침 후 재시도
       this.log('  [!] 텍스트박스 미발견, 페이지 새로고침');
@@ -1581,19 +1595,7 @@ class FlowAutomator {
       const info = imgInfos[i];
       try {
         await this.page.waitForTimeout(500);
-        const fetchResult = await this.page.evaluate(async (url) => {
-          try {
-            const resp = await fetch(url);
-            if (!resp.ok) return null;
-            const blob = await resp.blob();
-            return new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result);
-              reader.onerror = () => resolve(null);
-              reader.readAsDataURL(blob);
-            });
-          } catch { return null; }
-        }, info.src);
+        const fetchResult = await this._fetchDataUrl(info.src);
 
         if (fetchResult) {
           const buf = Buffer.from(fetchResult.split(',')[1], 'base64');
@@ -1656,10 +1658,32 @@ class FlowAutomator {
   //   **방금 만든 것**을 정확히 집을 수 있다 — 갤러리의 옛 영상을 받아가는 사고를 원천 차단한다.
   async _mediaIds() {
     try {
-      return await this.page.$$eval('a[href*="/edit/"]', (els) => els
-        .map((a) => ((a.getAttribute('href') || '').split('/edit/')[1] || '').trim())
-        .filter(Boolean));
+      return await this.page.evaluate(() => {
+        const out = [];
+        for (const a of document.querySelectorAll('a[href*="/edit/"]')) {
+          const id = ((a.getAttribute('href') || '').split('/edit/')[1] || '').trim(); if (id) out.push(id);
+        }
+        // 2026-09 새 UI: 결과는 flow-grid-tile-container 타일이고 링크가 없다 → 미디어 src 가 그 카드의 정체다
+        for (const t of document.querySelectorAll('flow-grid-tile-container')) {
+          const m = t.querySelector('video, img');
+          const src = m ? (m.currentSrc || m.src || m.getAttribute('src') || '') : '';
+          if (src) out.push('tile:' + src);
+        }
+        return out;
+      });
     } catch (_) { return []; }
+  }
+
+  /** 새 UI 타일 중 beforeIds 에 없던 것을 찾는다 → { card(타일 핸들), id } */
+  async _newTileCard(before) {
+    const tiles = await this.page.$$('flow-grid-tile-container');
+    for (const t of tiles) {
+      const src = await t.evaluate((el) => { const m = el.querySelector('video, img'); return m ? (m.currentSrc || m.src || m.getAttribute('src') || '') : ''; }).catch(() => '');
+      if (!src) continue;
+      const id = 'tile:' + src;
+      if (!before.has(id)) return { card: t, id };
+    }
+    return null;
   }
 
   // 제출 후 새로 생긴 결과 카드. 아직 안 나타났으면 잠깐 기다린다.
@@ -1678,6 +1702,8 @@ class FlowAutomator {
           const card = h.asElement();
           if (card) return { card, id };
         }
+        const nt = await this._newTileCard(before);
+        if (nt) return nt;
       } catch (_) {}
       await this.page.waitForTimeout(1000);
     }
@@ -1695,6 +1721,42 @@ class FlowAutomator {
   //     화면에 about:blank 2개. 그룹이 30개면 탭 30개 = 렌더러 프로세스 30개(메모리·CPU 낭비).
   //   ⚠ 반드시 **다운로드가 끝난 뒤에** 닫는다. 전송 중에 닫으면 다운로드가 취소된다.
   //   ⚠ 메인 페이지(this.page)와 URL 이 있는 탭은 건드리지 않는다 — 빈 탭만 치운다(보수적).
+  /**
+   * 미디어 URL 을 data:URL 로 받는다. 2026-09 실측: 새 결과 이미지는 https://flow-content.google/image/… (서명 URL) 인데
+   * 페이지 안 fetch 는 **CORS 로 실패**한다(`Failed to fetch`). 브라우저 컨텍스트의 request(쿠키 공유·Node 쪽)로 받으면 200.
+   * 그게 안 되면 옛 방식(페이지 안 fetch)으로 폴백. 둘 다 실패하면 null.
+   */
+  async _fetchDataUrl(url) {
+    try {
+      const ctx = this.context || (this.page && this.page.context && this.page.context());
+      if (ctx && ctx.request) {
+        const r = await ctx.request.get(url, { timeout: 60000 });
+        if (r.ok()) {
+          const buf = await r.body();
+          if (buf && buf.length > 0) {
+            const ct = (r.headers()['content-type'] || 'application/octet-stream').split(';')[0];
+            return 'data:' + ct + ';base64,' + buf.toString('base64');
+          }
+        }
+      }
+    } catch (e) { this.debug('[Flow] request.get 실패 — 페이지 fetch 로 폴백: ' + String(e.message || e).split(String.fromCharCode(10))[0].slice(0, 80)); }
+    try {
+      return await this.page.evaluate(async (u) => {
+        try {
+          const resp = await fetch(u);
+          if (!resp.ok) return null;
+          const blob = await resp.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        } catch { return null; }
+      }, url);
+    } catch (_) { return null; }
+  }
+
   async _closeBlankTabs(where = '') {
     try {
       if (!this.context) return 0;
@@ -1745,7 +1807,18 @@ class FlowAutomator {
     try {
       await card.hover();
       await this.page.waitForTimeout(600);
-      const moreBtn = await card.$('button:has-text("more_vert")');
+      let moreBtn = await card.$('button:has-text("more_vert")');
+      if (!moreBtn) moreBtn = await card.$('button[aria-label="옵션 더보기"]');   // 2026-09 새 UI
+      if (!moreBtn) {
+        // 타일 밖(오버레이)에 그려지는 경우 — 카드 영역 안에 있는 「옵션 더보기」를 찾는다
+        try {
+          const box = await card.boundingBox();
+          for (const b of await this.page.$$('button[aria-label="옵션 더보기"]')) {
+            const bb = await b.boundingBox();
+            if (bb && box && bb.x >= box.x - 4 && bb.x <= box.x + box.width + 4 && bb.y >= box.y - 4 && bb.y <= box.y + box.height + 4) { moreBtn = b; break; }
+          }
+        } catch (_) {}
+      }
       if (!moreBtn) { this.log(`  [DL ${num}] ⚠ more_vert 버튼 없음`); return null; }
       await moreBtn.click();
       await this.page.waitForTimeout(700);
@@ -1866,12 +1939,19 @@ class FlowAutomator {
                          this.page.getByText('시작', { exact: true }).first()]) {
         try { if (await loc.isVisible({ timeout: 1500 })) { await loc.click({ timeout: 2500 }); opened = true; break; } } catch (_) {}
       }
-      if (!opened) { this.log(`  [i2v ${num}] ⚠ '시작' 프레임 버튼 없음 — 동영상/프레임 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false; }
+      if (!opened) {
+        // 새 UI: 시작 슬롯이 이미 채워져 있으면 「시작」 글자 대신 이미지 칩(cancel)이 보인다 → 붙은 것으로 본다.
+        if (await this._promptBarHasAttachment()) { this.log(`  [i2v ${num}] 시작 프레임 슬롯에 이미 이미지가 있습니다 — 그대로 씁니다`); return true; }
+        this.log(`  [i2v ${num}] ⚠ '시작' 프레임 버튼 없음 — 동영상/프레임 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false;
+      }
       await this.page.waitForTimeout(900);
 
       // 2)·3) 업로드 → 「프롬프트에 추가」 — **애셋 모드와 같은 다이얼로그**라 공통 헬퍼를 쓴다.
       //   (두 벌로 두면 한쪽만 고쳐져 어긋난다 — 실제로 업로드 대기 버그를 두 번 고칠 뻔했다)
-      const okAdd = await this._uploadAndAddToPrompt(imagePath, num, 'i2v');
+      // 2026-09 새 UI: 「프레임 이미지 선택」 창엔 업로드가 없다(자산 목록만) → 라이브러리에 먼저 올리고 고른다
+      const hasUpload = (await this.page.locator('input[type="file"]').count()) > 0
+        || (await this.page.locator('button:visible').filter({ hasText: /미디어 업로드/ }).count()) > 0;
+      const okAdd = hasUpload ? await this._uploadAndAddToPrompt(imagePath, num, 'i2v') : await this._attachFrameViaLibrary(imagePath, num);
       if (okAdd) this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
       return okAdd;
     } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
@@ -1891,7 +1971,8 @@ class FlowAutomator {
 
       // 1) 프롬프트 바의 [+] (add_2 · 다이얼로그를 여는 쪽) 클릭
       let opened = false;
-      for (const sel of ['button[aria-haspopup="dialog"]:has-text("add_2")',
+      for (const sel of ['button[aria-label="프롬프트 상자에 소재 추가"]',   // 2026-09 새 UI
+                         'button[aria-haspopup="dialog"]:has-text("add_2")',
                          'button[aria-haspopup="dialog"]:has(i:text("add_2"))']) {
         try {
           const btn = this.page.locator(sel).first();
@@ -1919,7 +2000,21 @@ class FlowAutomator {
         set = true; this.log(`  [${label} ${num}] 업로드 전송(accept="${accept}") — 처리 대기`); break;
       }
     } catch (e) { this.log(`  [${label} ${num}] setInputFiles 예외: ${e.message}`); }
+    if (!set) set = await this._uploadViaChooser(imagePath, num, label);
     if (!set) { this.log(`  [${label} ${num}] ⚠ 이미지 file input 못 찾음`); await this._dumpFrameAttachUI(); return false; }
+    await this._acceptUploadConsent(num, label);
+
+    // 2026-09 새 UI: 동의 뒤 자산이 프롬프트 바에 **자동으로** 붙는다(「프롬프트에 추가」 버튼이 없다) — 최대 20초 확인.
+    //   옛 UI(버튼이 있는 쪽)는 아래 경로로 이어진다. ⚠ 업로드 처리 시간이 20초를 넘길 수 있다(E2E 실측) → 60초.
+    {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 60000) {
+        if (await this._promptBarHasAttachment()) { this.log(`  [${label} ${num}] 업로드 자산이 프롬프트 바에 자동 첨부됨 ✓`); return true; }
+        const hasAddBtn = await this.page.evaluate(() => Array.from(document.querySelectorAll('button')).some((x) => (x.innerText || '').includes('프롬프트에 추가') && (x.offsetWidth || x.offsetHeight))).catch(() => false);
+        if (hasAddBtn) break;
+        await this.page.waitForTimeout(500);
+      }
+    }
 
     // 🔴 업로드 처리(썸네일 생성 + 자동 선택)에 시간이 걸린다 — **실측 약 9초**(2026-08-28).
     //   옛 코드는 고정 3.5초만 기다렸다 → 그 시점엔 「프롬프트에 추가」가 아직 **disabled** 라
@@ -1938,6 +2033,11 @@ class FlowAutomator {
       //   죽었거나, .first() 가 보이지 않는 쪽을 집은 것으로 보인다.
       //   → **매 시도마다 다시 찾고**(보이는 것만), 그래도 안 되면 DOM 클릭으로 확정한다.
       //   ⚠ 여기서 실패하면 그 컷은 통째로 버려지므로(첨부 실패 = 생성 안 함) 폴백을 둘 겹으로 둔다.
+      // 2026-09 새 UI: 업로드한 자산이 자동 선택되지 않으면 목록 첫 항목(최근순)을 고른다
+      try {
+        const selN = await this.page.locator('[role="option"][aria-selected="true"]').count();
+        if (!selN) { const opt = this.page.locator('[role="option"].asset-item').first(); if (await opt.count()) { await opt.click({ timeout: 3000 }); await this.page.waitForTimeout(500); } }
+      } catch (_) {}
       let clicked = false;
       for (let k = 0; k < 2 && !clicked; k++) {
         try {
@@ -1959,6 +2059,8 @@ class FlowAutomator {
       }
       if (!clicked) throw new Error(`'프롬프트에 추가' 를 두 방식 모두로 누르지 못했습니다`);
     } catch (e) {
+      // 새 UI: 버튼을 못 눌렀어도 그 사이 자동 첨부가 끝났으면 성공이다(E2E 08:59 — 실패 로그와 함께 칩이 이미 붙어 있었다).
+      if (await this._promptBarHasAttachment()) { this.log(`  [${label} ${num}] 업로드 자산이 프롬프트 바에 자동 첨부됨 ✓ (버튼 경로 생략)`); return true; }
       this.log(`  [${label} ${num}] ⚠ '프롬프트에 추가' 를 누르지 못했습니다 (${(e && e.message || '').split('\n')[0].slice(0, 80)}) — 덤프`);
       await this._dumpFrameAttachUI(); return false;
     }
@@ -1968,6 +2070,110 @@ class FlowAutomator {
   }
 
   // i2v 첨부 UI 진단 — 버튼/입력 후보를 로그로 남겨 셀렉터 고정에 사용
+  /**
+   * 2026-09 새 UI 업로드: 다이얼로그에 input[type=file] 이 없고 「미디어 업로드」 버튼이 **네이티브 파일 선택기**를 연다
+   * → Playwright 의 filechooser 이벤트로 받아 파일을 넣는다. 성공하면 true.
+   */
+  /**
+   * 프롬프트 바(또는 시작 프레임 슬롯)에 이미지·영상 칩이 붙어 있는가. 새 UI 는 첨부가 button.*chip 안의 img 로 그려진다.
+   *   ⚠ 어떤 경우에도 던지지 않는다(못 읽으면 false).
+   */
+  async _promptBarHasAttachment() {
+    try {
+      return await this.page.evaluate(() => {
+        const vis = (el) => !!(el.offsetWidth || el.offsetHeight);
+        const chips = Array.from(document.querySelectorAll('button[class*="chip"]')).filter(vis);
+        if (chips.some((c) => c.querySelector('img, video'))) return true;
+        // 폴백: 화면 아래쪽(프롬프트 바 영역)의 작은 썸네일
+        const h = window.innerHeight || 900;
+        return Array.from(document.images).some((i) => vis(i) && i.offsetWidth > 0 && i.offsetWidth < 200 && i.getBoundingClientRect().y > h * 0.66);
+      });
+    } catch (_) { return false; }
+  }
+
+  async _uploadViaChooser(imagePath, num, label) {
+    try {
+      const cand = [
+        this.page.locator('button:visible').filter({ hasText: /미디어 업로드/ }).first(),
+        this.page.getByRole('menuitem').filter({ hasText: /^\s*\S*\s*업로드\s*$/ }).first(),
+      ];
+      for (const btn of cand) {
+        if (!(await btn.count().catch(() => 0))) continue;
+        const fcP = this.page.waitForEvent('filechooser', { timeout: 8000 }).then((fc) => fc, () => null);
+        await btn.click({ timeout: 4000 }).catch(() => {});
+        const fc = await fcP;
+        if (!fc) continue;
+        await fc.setFiles(imagePath);
+        this.log(`  [${label} ${num}] 업로드 전송(파일 선택기) — 처리 대기`);
+        return true;
+      }
+    } catch (e) { this.log(`  [${label} ${num}] 파일 선택기 업로드 예외: ${String(e.message || e).split(String.fromCharCode(10))[0].slice(0, 80)}`); }
+    return false;
+  }
+
+  /**
+   * 업로드 직후 뜨는 「이 이미지를 사용할 권리 … 취소/동의」 확인창(2026-09 실측)을 넘긴다.
+   *   안 누르면 자산이 목록에 안 들어오고 뒤 클릭이 전부 backdrop 에 막힌다. 최대 15초 기다린다.
+   */
+  async _acceptUploadConsent(num, label) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 15000) {
+      try {
+        const b = this.page.locator('button:visible').filter({ hasText: /^\s*(동의|동의함|I agree|Agree)\s*$/ }).first();
+        if (await b.count()) { await b.click({ timeout: 3000 }); this.log(`  [${label} ${num}] 업로드 권리 동의 ✓`); await this.page.waitForTimeout(800); return true; }
+      } catch (_) {}
+      await this.page.waitForTimeout(500);
+    }
+    return false;
+  }
+
+  /**
+   * 새 UI 프레임 첨부 — 「시작」을 누르면 뜨는 「프레임 이미지 선택」 창은 **프로젝트 자산만** 보여 주고 업로드가 없다(실측).
+   *   → 상단 「미디어 메뉴 추가 → 업로드」로 자산을 먼저 올린 뒤(동의창 처리) 다시 「시작」→ 최근 자산(첫 항목)을 고른다.
+   *   성공 = 시작 칩에 이미지가 붙음.
+   */
+  async _attachFrameViaLibrary(imagePath, num) {
+    try {
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(400);
+      const before = await this.page.locator('flow-grid-tile-container').count().catch(() => 0);
+      const addBtn = this.page.locator('button[aria-label="미디어 메뉴 추가"]').first();
+      if (!(await addBtn.count())) { this.log(`  [i2v ${num}] ⚠ 「미디어 메뉴 추가」 버튼 없음`); return false; }
+      await addBtn.click({ timeout: 4000 });
+      await this.page.waitForTimeout(700);
+      const up = this.page.getByRole('menuitem').filter({ hasText: /업로드|upload/i }).first();
+      const fcP = this.page.waitForEvent('filechooser', { timeout: 8000 }).then((fc) => fc, () => null);
+      await up.click({ timeout: 4000 });
+      const fc = await fcP;
+      if (!fc) { this.log(`  [i2v ${num}] ⚠ 업로드 파일 선택기가 열리지 않음`); return false; }
+      await fc.setFiles(imagePath);
+      this.log(`  [i2v ${num}] 라이브러리 업로드 전송 — 처리 대기`);
+      await this._acceptUploadConsent(num, 'i2v');
+      // 타일이 하나 늘 때까지(최대 40초) — 업로드 처리 시간
+      const t0 = Date.now();
+      while (Date.now() - t0 < 40000) {
+        const n = await this.page.locator('flow-grid-tile-container').count().catch(() => 0);
+        if (n > before) break;
+        await this.page.waitForTimeout(1000);
+      }
+      await this.page.keyboard.press('Escape').catch(() => {});
+      await this.page.waitForTimeout(500);
+      // 다시 「시작」 → 최근 자산 첫 항목
+      const start = this.page.locator('button:visible').filter({ hasText: /^\s*(시작|start)\s*$/i }).first();
+      if (!(await start.count())) { this.log(`  [i2v ${num}] ⚠ 「시작」 프레임 버튼 없음(재시도)`); return false; }
+      await start.click({ timeout: 4000 });
+      await this.page.waitForTimeout(1200);
+      const opt = this.page.locator('.cdk-overlay-container [role="option"], .cdk-overlay-container button.asset-item, .cdk-overlay-container flow-image-tile').first();
+      await opt.waitFor({ state: 'visible', timeout: 8000 });
+      await opt.click({ timeout: 4000 });
+      await this.page.waitForTimeout(1200);
+      await this.page.keyboard.press('Escape').catch(() => {});
+      const ok = await this._promptBarHasAttachment();
+      if (!ok) this.log(`  [i2v ${num}] ⚠ 자산을 골랐지만 시작 칩에 이미지가 보이지 않습니다`);
+      return ok;
+    } catch (e) { this.log(`  [i2v ${num}] 라이브러리 첨부 예외: ${String(e.message || e).split(String.fromCharCode(10))[0].slice(0, 100)}`); return false; }
+  }
+
   async _dumpFrameAttachUI() {
     try {
       const info = await this.page.evaluate(() => {
@@ -2326,6 +2532,7 @@ class FlowAutomator {
    */
   async _waitFlowReady(timeoutMs = 30000) {
     const t0 = Date.now();
+    let landingSince = 0;
     while (Date.now() - t0 < timeoutMs) {
       let sig = null;
       try {
@@ -2334,15 +2541,21 @@ class FlowAutomator {
         else {
           sig = await this.page.evaluate(() => {
             const t = (document.body && document.body.innerText || '').replace(/s+/g, ' ');
-            if (document.querySelector('div[role="textbox"][contenteditable="true"]')) return '프롬프트 입력칸';
+            if (document.querySelector('div[role="textbox"][contenteditable="true"]') || document.querySelector('div.ProseMirror[contenteditable="true"]')) return '프롬프트 입력칸';
             if (/새 프로젝트|New project/.test(t)) return '홈(새 프로젝트)';
-            if (/Try in Google Flow|Create with Google Flow|구독을 살펴보/i.test(t)) return '소개 페이지';
+            if (/Try in Google Flow|Create with Google Flow|구독을 살펴보/i.test(t) || /^\/about(\/|$)/.test(location.pathname)) return '소개 페이지';
             if (/로그인|Sign in to|계정을 선택/.test(t)) return '로그인 화면';
             return null;
           });
         }
       } catch (_) { sig = null; }
-      if (sig) return sig;
+      // 🔑 소개 페이지는 **로그인 직후 잠깐** 스쳐 가는 화면일 수 있다(2026-09-04 실측: 같은 프로필이 한 번은
+      //   4초 만에 /about, 바로 다음 시도엔 홈). 3초 이상 그대로일 때만 확정하고, 그 사이 홈·입력칸이 뜨면 그쪽을 쓴다.
+      if (sig === '소개 페이지') {
+        if (!landingSince) landingSince = Date.now();
+        if (Date.now() - landingSince >= 3000) return sig;
+      } else if (sig) return sig;
+      else landingSince = 0;
       await this.page.waitForTimeout(500).catch(() => {});
     }
     return null;
@@ -2441,11 +2654,11 @@ class FlowAutomator {
   }
 
   async _ensureMainPage() {
-    if (!this.page.url().includes('/flow') || this.page.url().includes('/project/') || this.page.url().includes('auth/callback')) {
+    if (!FLOW_HOST_RE.test(this.page.url()) || this.page.url().includes('/project/') || this.page.url().includes('auth/callback')) {
       await this._gotoFlow('메인 복귀');
       // 리다이렉트 대기
       if (this.page.url().includes('auth/callback')) {
-        await this.page.waitForURL('**/labs.google/fx/**', { timeout: 30000 }).catch(() => {});
+        await this.page.waitForURL(FLOW_HOST_RE, { timeout: 30000 }).catch(() => {});
         await this.page.waitForTimeout(3000);
       }
       await this._dismissBanners();
@@ -2478,8 +2691,27 @@ class FlowAutomator {
     return Number.isFinite(v) ? v : PER_PROFILE_DAILY_CAP;
   }
   async _createNewProject() {
-    const btn = await this.page.$('button:has-text("새 프로젝트")') ||
-                await this.page.$('button:has-text("New project")');
+    // 2026-09 새 UI 는 SPA 부팅이 끝나기 전 「로 드 중 …」만 보인다 → 버튼이 나타날 때까지 최대 10초 기다린다.
+    //   단, 소개 페이지(/about)·로그인 화면이 3초 넘게 유지되면 더 기다리지 않고 진단으로 간다(헛대기 방지).
+    let btn = null;
+    const t0 = Date.now();
+    let stableSince = 0;
+    while (Date.now() - t0 < 10000) {
+      btn = await this.page.$('button:has-text("새 프로젝트")') || await this.page.$('button:has-text("New project")');
+      if (btn && await btn.isVisible().catch(() => false)) break;
+      btn = null;
+      let terminal = false;
+      try {
+        terminal = await this.page.evaluate(() => {
+          const t = (document.body && document.body.innerText || '').replace(/\s+/g, ' ');
+          return /^\/about(\/|$)/.test(location.pathname) || /Try in Google Flow|Create with Google Flow|구독을 살펴보/i.test(t)
+            || /accounts\.google/.test(location.href) || /계정을 선택|Sign in to/.test(t);
+        });
+      } catch (_) { terminal = false; }
+      if (terminal) { if (!stableSince) stableSince = Date.now(); if (Date.now() - stableSince >= 3000) break; }
+      else stableSince = 0;
+      await (this.page.waitForTimeout ? this.page.waitForTimeout(500) : new Promise((r) => setTimeout(r, 500)));
+    }
     if (btn && await btn.isVisible().catch(() => false)) {
       await btn.click();
       await this.page.waitForTimeout(3000);
@@ -2509,7 +2741,9 @@ class FlowAutomator {
         const t = (document.body.innerText || '').replace(/\s+/g, ' ');
         return {
           // 소개(마케팅) 페이지 신호 — 구독 없는 계정이 여기로 떨어진다
-          landing: /Try in Google Flow|Create with Google Flow|구독을 살펴보|subscription tier|Pricing/i.test(t)
+          // 2026-09 새 UI: 로그아웃·구독 없음이면 flow.google.com/about(소개 페이지)로 떨어진다 — 경로로도 본다
+          landing: (/Try in Google Flow|Create with Google Flow|구독을 살펴보|subscription tier|Pricing/i.test(t)
+                    || /^\/about(\/|$)/.test(location.pathname))
                    && !/새 프로젝트|New project/i.test(t),
           login: /로그인|Sign in to|계정을 선택/i.test(t) && !/새 프로젝트/i.test(t),
           text: t.slice(0, 200),
@@ -2633,7 +2867,7 @@ class FlowAutomator {
   async _typePrompt(text) {
     // ElementHandle 대신 Locator 사용 — 매 액션마다 셀렉터를 재조회하므로 DOM 재렌더로 인한
     // "Element is not attached to the DOM" 오류에 강함 (첫 단락: 캐릭터 업로드 직후 입력창 재렌더 대비).
-    const inputLoc = this.page.locator('div[role="textbox"][contenteditable="true"]').first();
+    const inputLoc = this.page.locator(PROMPT_BOX).first();
     await inputLoc.waitFor({ state: 'visible', timeout: 10000 });
     // 클릭 — stale/unstable(재렌더 애니메이션) 시 짧게 대기 후 재시도 (최대 3회)
     let clicked = false;
@@ -2656,13 +2890,39 @@ class FlowAutomator {
     await this.page.keyboard.press('Control+a');
     await this.page.keyboard.press('Backspace');
     await this.page.waitForTimeout(200);
-    await this.page.evaluate((t) => navigator.clipboard.writeText(t), text);
-    await this.page.keyboard.press('Control+v');
-    await this.page.waitForTimeout(1000);
+    await this._insertPromptText(inputLoc, text);
     this.debug('[Flow] 프롬프트 입력 완료');
   }
 
+  /**
+   * 입력칸에 글을 넣고 **실제로 들어갔는지 확인**한다(2026-09 새 UI 의 ProseMirror 대응).
+   *   ① keyboard.insertText(권한 불필요) → ② 클립보드 붙여넣기(옛 방식) → ③ 한 글자씩 타이핑.
+   *   ⚠ 조용히 넘어가면 빈 프롬프트로 제출돼 크레딧만 나간다 — 셋 다 실패하면 던진다.
+   */
+  async _insertPromptText(inputLoc, text) {
+    const head = String(text).slice(0, 20).replace(/\s+/g, ' ').trim();
+    const has = async () => {
+      try { const t = ((await inputLoc.innerText()) || '').replace(/\s+/g, ' '); return head ? t.includes(head) : t.length > 0; } catch (_) { return false; }
+    };
+    try { await this.page.keyboard.insertText(text); await this.page.waitForTimeout(400); if (await has()) return; } catch (_) {}
+    try {
+      await this.page.evaluate((t) => navigator.clipboard.writeText(t), text);
+      await this.page.keyboard.press('Control+v');
+      await this.page.waitForTimeout(800);
+      if (await has()) return;
+    } catch (_) {}
+    try { await inputLoc.click({ timeout: 3000 }); await this.page.keyboard.press('Control+a'); await this.page.keyboard.press('Backspace'); } catch (_) {}
+    await this.page.keyboard.type(text, { delay: 2 });
+    await this.page.waitForTimeout(400);
+    if (!(await has())) throw new Error('프롬프트 입력칸에 글이 들어가지 않았습니다(입력칸 구조 변경 의심)');
+  }
+
   async _openSettingsPopup() {
+    // 2026-09 새 UI: 설정 칩에 aria-label 이 있다 — 그걸 먼저 쓴다(텍스트 추측보다 안정).
+    try {
+      const trig = this.page.locator('button[aria-label="설정 트리거"]').first();
+      if (await trig.count() && await trig.isVisible()) { await trig.click({ timeout: 4000 }); this.debug('  [popup] 설정 트리거(aria-label) 클릭'); return; }
+    } catch (_) {}
     // 설정 칩 = 프롬프트 바에서 제출(→) 버튼 바로 왼쪽 버튼. 라벨은 모델·비율·매수·모드에 따라
     // 수시로 바뀜(예: "🍌 Nano Banana 2 crop_16_9 1x", "Veo 3.1 - Lite … x4", "동영상 x4").
     // → 라벨 변화에 안 흔들리는 단서로 찾는다:
@@ -2900,19 +3160,22 @@ class FlowAutomator {
     if (!model) return false;
     try {
       let dropdown = null;
-      for (const sel of ['button:has-text("Veo")', 'button:has-text("Nano Banana")', 'button:has-text("Omni")']) {
+      for (const sel of ['button[aria-label="모델 제품군 선택"]', 'button:has-text("Veo")', 'button:has-text("Nano Banana")', 'button:has-text("Omni")']) {
         const el = await this.page.$(sel);
         if (el && await el.isVisible().catch(() => false)) { dropdown = el; break; }
       }
       if (!dropdown) { this.log(`  [!] 모델 드롭다운 못 찾음 — 기본 모델로 진행 (요청: ${model})`); return false; }
       const cur = ((await dropdown.textContent()) || '').replace(/\s+/g, ' ').trim();
-      if (cur.includes(model)) { this.log(`  [설정] 모델 ${model} (이미 선택됨) ✓`); return true; }
+      if (this._modelMatches(cur, model)) { this.log(`  [설정] 모델 ${model} (이미 선택됨) ✓`); return true; }
       await dropdown.click();
       await this.page.waitForTimeout(600);
       // 열린 메뉴의 role=menuitem 에서 고른다. 트리거 버튼도 같은 글자라 exact text 만으론 그쪽을 집는다.
       let picked = false;
       try {
-        const opt = this.page.getByRole('menuitem').filter({ hasText: model }).first();
+        // 정확 일치 우선 — 'Nano Banana 2' 로 'Nano Banana 2 Lite' 를 집지 않게(끝 경계). 없으면 부분 일치 폴백.
+        const exactRe = new RegExp('(^|\\s)' + model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$');
+        let opt = this.page.getByRole('menuitem').filter({ hasText: exactRe }).first();
+        if (!(await opt.count())) opt = this.page.getByRole('menuitem').filter({ hasText: model }).first();
         await opt.waitFor({ state: 'visible', timeout: 3000 });
         await opt.click({ timeout: 3000 });
         picked = true;
@@ -2924,7 +3187,27 @@ class FlowAutomator {
     } catch (e) { this.log(`  [!] 모델 선택 예외: ${e.message}`); return false; }
   }
 
+  /** 현재 모델 라벨이 요청 모델과 같은가 — 이모지·앞뒤 공백을 떼고 **단어 끝 경계**까지 본다. */
+  _modelMatches(cur, model) {
+    const c = String(cur || '').replace(/\s+/g, ' ').trim();
+    const m = String(model || '').trim();
+    if (!c || !m) return false;
+    const esc = m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const hit = new RegExp('(^|[^A-Za-z0-9])' + esc + '(?=$|[^A-Za-z0-9])').exec(c);
+    if (!hit) return false;
+    // 🔴 뒤에 글자가 더 붙어 있으면 **다른 모델**이다 — 'Nano Banana 2' 는 'Nano Banana 2 Lite' 에 맞지 않는다.
+    //   단 드롭다운 아이콘 글자(expand_more 등)는 라벨의 일부가 아니므로 뗀다.
+    const rest = c.slice(hit.index + hit[0].length)
+      .replace(/\b(expand_more|expand_less|arrow_drop_down|arrow_drop_up|keyboard_arrow_down|unfold_more)\b/g, '').trim();
+    return !/[A-Za-z0-9가-힣]/.test(rest);
+  }
+
   async _clickFinalCreateV2() {
+    // 2026-09 새 UI: 제출 버튼 = aria-label="생성 시작"(type=submit, 텍스트는 아이콘 'arrow_forward' 뿐)
+    try {
+      const b = this.page.locator('button[aria-label="생성 시작"]').first();
+      if (await b.count() && await b.isVisible()) { await b.click({ timeout: 5000 }); return; }
+    } catch {}
     // 전략 1: "arrow_forward만들기"
     try {
       const btns = await this.page.$$('button');
@@ -3090,19 +3373,7 @@ class FlowAutomator {
           if (vs.src.includes('icon') || vs.src.includes('logo')) continue;
           // blob: URL이면 직접 fetch
           await this.page.waitForTimeout(2000);
-          const fetchResult = await this.page.evaluate(async (url) => {
-            try {
-              const resp = await fetch(url);
-              if (!resp.ok) return null;
-              const blob = await resp.blob();
-              return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => resolve(null);
-                reader.readAsDataURL(blob);
-              });
-            } catch { return null; }
-          }, vs.src);
+          const fetchResult = await this._fetchDataUrl(vs.src);
           if (fetchResult) {
             const buf = Buffer.from(fetchResult.split(',')[1], 'base64');
             if (buf.length > 50000) {
@@ -3139,18 +3410,7 @@ class FlowAutomator {
           const vids = await this.page.$$eval('video source, video[src]', els => els.map(el => el.src || el.getAttribute('src') || '').filter(s => s.length > 0));
           for (const vsrc of vids) {
             if (prevSrcs.has(vsrc)) continue;
-            const fetchResult = await this.page.evaluate(async (url) => {
-              try {
-                const resp = await fetch(url);
-                if (!resp.ok) return null;
-                const blob = await resp.blob();
-                return new Promise((resolve) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(reader.result);
-                  reader.readAsDataURL(blob);
-                });
-              } catch { return null; }
-            }, vsrc);
+            const fetchResult = await this._fetchDataUrl(vsrc);
             if (fetchResult) {
               const buf = Buffer.from(fetchResult.split(',')[1], 'base64');
               if (buf.length > 100000) {
@@ -3184,19 +3444,7 @@ class FlowAutomator {
           if (info.displayWidth < 100 || info.displayHeight < 100) continue;
 
           await this.page.waitForTimeout(2000);
-          const fetchResult = await this.page.evaluate(async (url) => {
-            try {
-              const resp = await fetch(url);
-              if (!resp.ok) return null;
-              const blob = await resp.blob();
-              return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => resolve(null);
-                reader.readAsDataURL(blob);
-              });
-            } catch { return null; }
-          }, info.src);
+          const fetchResult = await this._fetchDataUrl(info.src);
 
           if (fetchResult) {
             const base64 = fetchResult.split(',')[1];
