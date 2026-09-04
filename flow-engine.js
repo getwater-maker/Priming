@@ -297,8 +297,7 @@ class FlowAutomator {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
     });
 
-    await this.page.goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 });
-    await this.page.waitForTimeout(3000);
+    await this._gotoFlow('로그인');
     await this._dismissBanners();
 
     if (typeof onReady === 'function') { try { await onReady(this.page); } catch (e) { this.log('[Flow] 자동 입력 건너뜀: ' + e.message); } }
@@ -535,8 +534,7 @@ class FlowAutomator {
 
     // Flow 접속
     this.log('[Flow] Flow 접속 중...');
-    await this.page.goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 });
-    await this.page.waitForTimeout(3000);
+    await this._gotoFlow('접속');
 
     // 로그인 리다이렉트 대기 (auth callback → Flow 메인)
     if (this.page.url().includes('accounts.google') || this.page.url().includes('auth/callback')) {
@@ -1428,8 +1426,7 @@ class FlowAutomator {
 
     // 세션 복구: 페이지 새로고침 + 새 프로젝트
     this.log('[403] 세션 복구 중...');
-    await this.page.goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 });
-    await this.page.waitForTimeout(3000);
+    await this._gotoFlow('403 복구');
     await this._dismissBanners();
     await this._createNewProject();
     await this.page.waitForTimeout(2000);
@@ -1490,7 +1487,7 @@ class FlowAutomator {
     } catch {
       // 타임아웃 시 페이지 새로고침 후 재시도
       this.log('  [!] 텍스트박스 미발견, 페이지 새로고침');
-      await this.page.reload({ waitUntil: 'networkidle' });
+      await this.page.reload({ waitUntil: 'load', timeout: 60000 }).catch(() => {});
       await this.page.waitForTimeout(3000);
       await this._dismissBanners();
     }
@@ -2294,6 +2291,62 @@ class FlowAutomator {
 
   // ─── 기존 내부 메서드 (유지) ───
 
+  /**
+   * Flow 홈으로 이동한다 — 접속 대기 방식이 이 앱의 Flow 실패 원인이었다(2026-09-04 실사고).
+   *
+   * 🔴 옛 코드: goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 }).
+   *   Flow 는 SPA 라 백그라운드 API 호출(텔레메트리·폴링)이 끊이지 않아 「0.5초 무통신」에 30초 안에
+   *   못 닿는 날이 있다 → `page.goto: Timeout 30000ms exceeded` → 그 계정은 0장 → 순환이 Genspark 로.
+   *   실측: 정상일 때도 접속에 11~14초가 걸렸다(09-03 로그) — 30초 상한이 아슬아슬했다.
+   *   grok-engine 이 같은 이유로 networkidle → load 로 바꾼 전례(v0.1.x)와 같은 계열이다.
+   *
+   * ✅ 지금: 'load'(문서 로드)까지만 기다린 뒤 **화면이 실제로 준비됐는지**(새 프로젝트 버튼·입력칸·
+   *   로그인 화면·소개 페이지 중 하나)를 최대 30초 본다. 준비 신호를 못 봐도 던지지 않는다 —
+   *   다음 단계(_createNewProject 의 진단)가 화면을 읽어 사람 말로 알려 주기 때문이다.
+   */
+  async _gotoFlow(label = '') {
+    const t0 = Date.now();
+    try {
+      await this.page.goto(FLOW_URL, { waitUntil: 'load', timeout: 60000 });
+    } catch (e) {
+      // load 조차 60초를 넘겼다 — 네트워크·차단이 유력. 그래도 화면이 반쯤 떠 있을 수 있어 준비 대기는 시도한다.
+      this.log(`[Flow] ⚠ 페이지 로드가 늦습니다(${label}) — ${String(e.message || e).split('\n')[0].slice(0, 90)}`);
+    }
+    const ready = await this._waitFlowReady(30000);
+    const sec = ((Date.now() - t0) / 1000).toFixed(1);
+    if (ready) this.log(`[Flow] 접속 완료(${label}) — ${ready} · ${sec}초`);
+    else this.log(`[Flow] ⚠ 접속 후 30초 안에 화면 준비 신호를 못 봤습니다(${label}) — 그대로 진행합니다 (${sec}초)`);
+    await this.page.waitForTimeout(1000);
+  }
+
+  /**
+   * Flow 화면이 「쓸 수 있는 상태」가 됐는지 — 어떤 신호를 봤는지 문자열로 돌려준다(못 보면 null).
+   *   홈: 「새 프로젝트」 버튼 · 프로젝트 안: 프롬프트 입력칸 · 로그인 화면 · 소개(구독 없음) 페이지.
+   *   ⚠ 어떤 경우에도 던지지 않는다 — 판정 실패로 되던 생성을 막지 않는다(fail-open).
+   */
+  async _waitFlowReady(timeoutMs = 30000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      let sig = null;
+      try {
+        const url = this.page.url() || '';
+        if (url.includes('accounts.google')) sig = '로그인 화면';
+        else {
+          sig = await this.page.evaluate(() => {
+            const t = (document.body && document.body.innerText || '').replace(/s+/g, ' ');
+            if (document.querySelector('div[role="textbox"][contenteditable="true"]')) return '프롬프트 입력칸';
+            if (/새 프로젝트|New project/.test(t)) return '홈(새 프로젝트)';
+            if (/Try in Google Flow|Create with Google Flow|구독을 살펴보/i.test(t)) return '소개 페이지';
+            if (/로그인|Sign in to|계정을 선택/.test(t)) return '로그인 화면';
+            return null;
+          });
+        }
+      } catch (_) { sig = null; }
+      if (sig) return sig;
+      await this.page.waitForTimeout(500).catch(() => {});
+    }
+    return null;
+  }
   async _dismissBanners() {
     try {
       const agree = await this.page.$('button:has-text("Agree"), button:has-text("동의함")');
@@ -2389,8 +2442,7 @@ class FlowAutomator {
 
   async _ensureMainPage() {
     if (!this.page.url().includes('/flow') || this.page.url().includes('/project/') || this.page.url().includes('auth/callback')) {
-      await this.page.goto(FLOW_URL, { waitUntil: 'networkidle', timeout: 30000 });
-      await this.page.waitForTimeout(3000);
+      await this._gotoFlow('메인 복귀');
       // 리다이렉트 대기
       if (this.page.url().includes('auth/callback')) {
         await this.page.waitForURL('**/labs.google/fx/**', { timeout: 30000 }).catch(() => {});

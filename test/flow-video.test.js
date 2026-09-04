@@ -166,12 +166,12 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'fra
   };
   const fn = new Function(
     'fs', 'path', 'os', 'S', 'log', 'pushDtoUpdate', 'getFlowEng', 'flowProfileDir', 'prLabel', 'P',
-    'require', 'setInterval', 'clearInterval',
+    'require', 'setInterval', 'clearInterval', 'hookFlowEngLog',
     BODY_RFV + '\nreturn runFlowVideos;'
   )(fs, path, os, { abort: false }, (m) => logs.push(String(m)), () => {}, () => eng,
     (id) => path.join(tmp, 'prof', id), () => '[테스트]',
     { normalizePromptNegations: (p) => p },
-    fakeRequire, () => 0, () => {});
+    fakeRequire, () => 0, () => {}, () => {});
   return { fn, pr, mediaDir, tmp, logs, runCalls, marked, cooled, engLogs, eng };
 }
 
@@ -525,7 +525,7 @@ function img(dir, num) {
     '다운로드 대기를 300초로 — 실사용에서 2분 넘게 걸린 적이 있다(로이 23:47~23:51)');
   ok(MAIN.indexOf('eng._appLogHooked = true;') >= 0 && MAIN.indexOf("logToFile('[Flow] ' + msg)") >= 0,
     '⛔ 엔진 로그를 앱 **로그 파일**에도 남긴다 — 예전엔 화면(send)에만 가서 나중에 되짚을 기록이 없었다');
-  ok(MAIN.indexOf("if (!eng._appLogHooked && typeof eng.log === 'function')") >= 0,
+  ok(MAIN.indexOf("if (!eng || eng._appLogHooked || typeof eng.log !== 'function') return;") >= 0,
     'eng 는 재사용 인스턴스라 **한 번만** 감싼다 (중복 기록 방지)');
 
   // ══════════════════════════════════════════════════════════════════════

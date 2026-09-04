@@ -2064,6 +2064,15 @@ function getFlowEng(profileDir) {
   S.flowEngProfileDir = profileDir;
   return S.flowEng;
 }
+// 🔑 엔진 로그는 화면(send)으로만 가고 **파일에는 안 남는다** — 나중에 「멈춘 것 같다」를 되짚을 기록이
+//   없다(2026-08-28 비디오에서 처음 넣었고, 2026-09-04 이미지 경로에도 없어 접속 타임아웃의 앞뒤를 못 봤다).
+//   → 앱 로그 파일에도 흘린다. ⚠ eng 는 재사용되는 인스턴스라 **한 번만** 감싼다(중복 기록 방지).
+function hookFlowEngLog(eng) {
+  if (!eng || eng._appLogHooked || typeof eng.log !== 'function') return;
+  const _engLog = eng.log.bind(eng);
+  eng.log = (msg) => { _engLog(msg); try { logToFile('[Flow] ' + msg); } catch (_) {} };
+  eng._appLogHooked = true;
+}
 // 💳 Flow 크레딧이 소진된 계정을 얼마나 쉬게 할까 — 크레딧은 하루가 아니라 **구독 주기**로 갱신되므로
 //   30분 쿨다운(rate-limit 용)은 의미가 없다. 6시간이면 같은 큐를 도는 동안 그 계정을 다시 태우지 않는다.
 //   ⚠ 그보다 길게 잡지 않는 이유: 일일 보너스 크레딧이 붙는 기간이 있어 그날 안에 회복되는 경우가 있다.
@@ -2133,6 +2142,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
     const imgDir = path.join(workDir, 'images');
     fs.mkdirSync(imgDir, { recursive: true });
     const eng = getFlowEng(flowProfileDir(acc.id));
+    hookFlowEngLog(eng);   // 🔴 이미지 경로는 이 후킹이 없어 09-04 사고의 엔진 로그(접속 단계)가 파일에 없었다
     const paragraphs = targets.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
     const customPrompts = targets.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? P.buildImagePrompt(stylePrompt, g.imagePrompt) : null);
     // 대상(targets) 순서로 매핑 — Flow 출력은 제출 순서(01,02…) = targets 순서. 이미 채워진 그룹은 건드리지 않음.
@@ -2263,14 +2273,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     const imgDir = path.join(workDir, 'images');
     fs.mkdirSync(imgDir, { recursive: true });
     const eng = getFlowEng(flowProfileDir(acc.id));
-    // 🔑 엔진 로그는 화면(send)으로만 가고 **파일에는 안 남았다** — 나중에 「멈춘 것 같다」를
-    //   되짚을 기록이 없다(2026-08-28). run() 이 쓰는 자체 log.txt 는 임시 workDir 이라 함께 지워진다.
-    //   → 앱 로그 파일에도 흘린다. ⚠ eng 는 재사용되는 인스턴스라 **한 번만** 감싼다(중복 기록 방지).
-    if (!eng._appLogHooked && typeof eng.log === 'function') {
-      const _engLog = eng.log.bind(eng);
-      eng.log = (msg) => { _engLog(msg); try { logToFile('[Flow] ' + msg); } catch (_) {} };
-      eng._appLogHooked = true;
-    }
+    hookFlowEngLog(eng);
 
     // 프롬프트: 대본의 영상 프롬프트 → 모션 노트 → 기본. 부정 절은 끝으로 모은다(이미지·ComfyUI 와 같은 정책).
     const paragraphs = targets.map((g) => pr.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
