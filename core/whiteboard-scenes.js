@@ -129,7 +129,10 @@ function buildElements(buckets) {
  * @returns {{scenes:Array, summary:{groups:number, scenes:number, split:number, merged:number, lines:string[]}}}
  */
 function planScenes(project, opts = {}) {
-  const splitOver = opts.splitOverSec || SPLIT_OVER_SEC;
+  // noSplit — 4단계(2026-09-05) 정책: 3단계(장면별 이미지) 전까지는 **그룹 이미지 1장 = 장면 1개**라
+  //   긴 그룹을 쪼개면 같은 그림을 두 번 그리게 된다(되감기처럼 보인다). 그래서 분할을 끈다. 병합은 그대로.
+  const noSplit = !!opts.noSplit;
+  const splitOver = noSplit ? Infinity : (opts.splitOverSec || SPLIT_OVER_SEC);
   const mergeUnder = opts.mergeUnderSec != null ? opts.mergeUnderSec : MERGE_UNDER_SEC;
   const groups = (project && project.groups) || [];
   const getS = (g) => (project.getSentencesOfGroup ? project.getSentencesOfGroup(g) : []).filter(Boolean);
@@ -211,7 +214,9 @@ function planScenes(project, opts = {}) {
   }
   const longScene = scenes.filter((s) => s.durationSec > SPLIT_OVER_SEC);
   if (longScene.length) {
-    warn.push(`⚠ ${SPLIT_OVER_SEC}초를 넘는 장면 ${longScene.length}개 — 문장 하나가 그보다 길어 더 쪼갤 수 없었습니다`);
+    warn.push(noSplit
+      ? `⚠ ${SPLIT_OVER_SEC}초를 넘는 장면 ${longScene.length}개 — 그룹 이미지 1장으로 그리므로 분할하지 않았습니다(펜이 느리게 보일 수 있음 · 3단계에서 장면별 그림이 들어오면 쪼개집니다)`
+      : `⚠ ${SPLIT_OVER_SEC}초를 넘는 장면 ${longScene.length}개 — 문장 하나가 그보다 길어 더 쪼갤 수 없었습니다`);
   }
   lines.push(...warn);
 

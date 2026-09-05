@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld('api', {
   videoBuild: (args) => ipcRenderer.invoke('video-build', args),
   deleteVideos: () => ipcRenderer.invoke('delete-videos'),
   exportVrew: (args) => ipcRenderer.invoke('export-vrew', args),
+  // ✏ 화이트보드 MP4 (4단계 · 2026-09-05)
+  whiteboardPlan: (args) => ipcRenderer.invoke('whiteboard-plan', args),
+  whiteboardBuild: (args) => ipcRenderer.invoke('whiteboard-build', args),
+  getWhiteboardConfig: () => ipcRenderer.invoke('get-whiteboard-config'),
+  setWhiteboardConfig: (patch) => ipcRenderer.invoke('set-whiteboard-config', patch),
   // 📥 Vrew 에서 음성을 만들어 저장한 .vrew → 그 음성만 대본에 물려준다(읽기 전용).
   importVrewAudio: (args) => ipcRenderer.invoke('import-vrew-audio', args),
   // 🎬 리모션 — TSV 열기 / mp3 만들기 / (롱폼 대본용) 내보내기

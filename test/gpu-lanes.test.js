@@ -12,10 +12,10 @@ let n = 0, bad = 0;
 const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } };
 
 // ── 원문 대조 — 레인 배선이 그대로 있는지(끊기면 아래 시뮬레이션이 무의미) ──
-// ⚠ 레인이 늘 때마다 이 단언을 갱신한다(v0.3.51 upscale, v0.3.81 flowBrowser, v0.3.95 gensparkBrowser).
+// ⚠ 레인이 늘 때마다 이 단언을 갱신한다(v0.3.51 upscale, v0.3.81 flowBrowser, v0.3.95 gensparkBrowser, v0.4.1 whiteboard).
 //   flowBrowser = Flow 이미지·비디오가 같은 크롬 창을 쓰므로 직렬화하는 레인.
-ok(SRC.includes("localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve(), gensparkBrowser: Promise.resolve() }"),
-   '레인 6개(tts·image·localGpu·upscale·flowBrowser·gensparkBrowser) 정의');
+ok(SRC.includes("localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve(), gensparkBrowser: Promise.resolve(), whiteboard: Promise.resolve() }"),
+   '레인 7개(tts·image·localGpu·upscale·flowBrowser·gensparkBrowser·whiteboard) 정의');
 ok(SRC.includes("_runOnLanes(['tts', 'localGpu'], label,"), 'TTS 작업은 tts+localGpu 레인을 잡는다');
 ok(/_imgUsesLocalGpu\(engine\) \? \['image', 'localGpu'\] : \['image'\]/.test(SRC),
    '이미지 작업은 로컬 ComfyUI 일 때만 localGpu 레인을 잡는다');

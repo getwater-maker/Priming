@@ -352,6 +352,9 @@ export default function App() {
   //   ⚠ 고르는 곳은 여기 하나뿐이다(채널 기본값을 두지 않는다 — 작업마다 달라지는 선택이라
   //     채널에 박으면 오히려 헷갈리고, 진입점이 둘이면 반드시 어긋난다).
   const [outMode, setOutMode] = useState('full');
+  // ✏ 완성물 종류 — 'vrew'(Vrew 에서 마무리) | 'whiteboard'(손그림 MP4 · 4단계 2026-09-05). 헤더 「④ 출력」에서 고른다.
+  const [outTarget, setOutTarget] = useState('vrew');
+  const [wbCfg, setWbCfg] = useState(null);   // 화이트보드 렌더 설정(출력 긴변·동시 개수) — PC 별 파일
   const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
@@ -500,6 +503,7 @@ export default function App() {
     loadPresets().then(loadStyles);
     // 🎛 브라우저 이미지·비디오 설정(Flow 모델·Genspark 비디오 모델)을 부팅 때 읽는다 — 헤더 select 가 쓴다.
     api.getImageRotation().then((r) => { if (r) setImgRot(r); }).catch(() => {});
+    api.getWhiteboardConfig().then((c) => { if (c) setWbCfg(c); }).catch(() => {});
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
       if (!r) return;
@@ -546,6 +550,7 @@ export default function App() {
         //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
+        if (p.outTarget != null) setOutTarget(p.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew');
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -628,7 +633,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, outMode };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, outMode, outTarget };
   }
   function applySettings(s) {
     if (!s) return;
@@ -647,6 +652,7 @@ export default function App() {
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
     if (s.outMode != null) setOutMode(['full', 'audio', 'visual'].includes(s.outMode) ? s.outMode : 'full');
+    if (s.outTarget != null) setOutTarget(s.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew');
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -814,6 +820,7 @@ export default function App() {
       dry: false, videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel,
       aiNotice, // 사용자 선택(작업바 토글)
       outMode,  // 전체 / 음성만 / 화면만
+      outTarget, // .vrew / ✏ 화이트보드 MP4
     };
     // ⚠ 「🎤 음성만」은 이미지를 만들지 않으므로 이미지 프롬프트를 요구하지 않는다(요구하면 못 만든다).
     const _needImg = (outMode === 'audio') ? 'none' : 'all';
@@ -852,7 +859,7 @@ export default function App() {
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
       //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice, outMode }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
@@ -1134,6 +1141,19 @@ export default function App() {
   async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
   async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
   async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
+  // ✏ 화이트보드 — 설정 저장 · 장면 계획(관문 A 만) · 렌더(관문 A→B→렌더)
+  async function saveWbCfg(patch) {
+    const next = { ...(wbCfg || {}), ...patch }; setWbCfg(next);
+    try { const saved = await api.setWhiteboardConfig(patch); if (saved) setWbCfg(saved); } catch (e) { logline('화이트보드 설정 저장 오류: ' + e.message); }
+  }
+  async function showWhiteboardPlan() {
+    try { await api.whiteboardPlan({ shortsNum: null }); } catch (e) { logline('장면 계획 오류: ' + e.message); }
+  }
+  async function runWhiteboardBuild(shortsNum) {
+    setStatus('✏ 화이트보드 렌더 중… (관문 A → 확인 그림 → 렌더)');
+    try { const d = await api.whiteboardBuild({ shortsNum }); if (d) setDto(d); setStatus('✏ 화이트보드 완료'); }
+    catch (e) { logline('화이트보드 오류: ' + e.message); setStatus('오류'); }
+  }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
@@ -1276,6 +1296,7 @@ export default function App() {
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
+      outTarget: p.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ✏ 완성물 종류(채널 기본값)
       outLong: p.outLong || p.outputFolder || '',
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
@@ -1507,6 +1528,7 @@ export default function App() {
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
+      outTarget: ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       outLong: (ch.outLong || '').trim(),
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
@@ -2170,8 +2192,24 @@ export default function App() {
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}>🗑 삭제</button>
           </span>
+          <span className="hgroup">
+            <span className="glabel">④ 출력</span>
+            <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). ⚠ 화이트보드는 아직 무음입니다(5단계 전)." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
+              <option value="vrew">.vrew (Vrew)</option>
+              <option value="whiteboard">✏ 화이트보드 MP4</option>
+            </select>
+            {outTarget === 'whiteboard' && (<>
+              <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
+                <option value="1920">1920 (최종)</option>
+                <option value="1080">1080 (빠름)</option>
+                <option value="640">640 (시험)</option>
+              </select>
+              <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
+              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 렌더합니다 — 장면 계획(관문 A) → 확인 그림(관문 B) 두 번 물은 뒤 렌더. 이미 만든 장면은 건너뜁니다(이어받기)." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
+            </>)}
+          </span>
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
-            <span className="glabel">④ 완성</span>
+            <span className="glabel">⑤ 완성</span>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 순서대로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
@@ -2435,8 +2473,16 @@ export default function App() {
                         <option value="none">없음(이미지 고정)</option>
                       </select></div>
                   </div>
+                  <div className="col">
+                    <div className="crow"><span className="l">출력</span>
+                      <select value={ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew'}
+                        onChange={(e) => setCh({ ...ch, outTarget: e.target.value })}>
+                        <option value="vrew">.vrew (Vrew)</option>
+                        <option value="whiteboard">✏ 화이트보드 MP4</option>
+                      </select></div>
+                  </div>
                 </div>
-                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다.</div>
+                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다. <b>출력</b>은 완성물 종류 — .vrew 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 아직 무음).</div>
               </div>)}
 
               {chTab === 'folder' && (<div>

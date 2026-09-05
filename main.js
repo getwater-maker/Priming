@@ -1960,6 +1960,98 @@ ipcMain.handle('import-vrew-audio', async (_e, args = {}) => {
   return { ok: okN > 0, results, dto: P.toDTO(S.parsed) };
 });
 
+// ── ✏ 화이트보드 MP4 (4단계 배선 · 2026-09-05) ─────────────────────────────────────
+//   흐름·정책은 core/whiteboard-pipeline.js 에 있다. 여기는 Electron 쪽 접착만: 레인 · 대화상자(관문 A/B) · 로그 · IPC.
+//   🔑 **대화형(버튼)일 때만 관문을 묻는다.** 큐(⚡ 만들기·run-batch)는 로그만 남기고 그대로 렌더한다 —
+//     무인 큐가 팝업에 멈춰 밤새 서 있는 쪽이 손실이 더 크다(계획서 4단계 항목).
+//   ⚠ 결과물은 무음이다(5단계 오디오·자막 mux 전) — 로그와 관문 A 문구에 매번 적는다.
+const OUT_TARGETS = new Set(['vrew', 'whiteboard']);
+function normOutTarget(v) { return OUT_TARGETS.has(String(v)) ? String(v) : 'vrew'; }
+
+async function _wbGateA(plan) {
+  const r = await dialog.showMessageBox(win, {
+    type: 'question', title: '✏ 화이트보드 — 장면 계획 (관문 A)',
+    message: `장면 ${plan.scenes.length}개 · 총 ${require('./core/whiteboard-pipeline').fmtDur(plan.totalSec)} · 렌더 약 ${require('./core/whiteboard-pipeline').fmtDur(plan.estimateSec)} 예상`,
+    detail: plan.lines.join('\n') + '\n\n이 계획으로 진행하면 다음 단계에서 영역 번호가 그려진 확인 그림을 먼저 보여 드립니다.',
+    buttons: ['다음 (확인 그림 만들기)', '취소'], defaultId: 0, cancelId: 1, noLink: true,
+  });
+  return r.response === 0;
+}
+async function _wbGateB({ dir, files, plan }) {
+  const est = require('./core/whiteboard-pipeline').fmtDur(plan.estimateSec);
+  for (;;) {
+    const r = await dialog.showMessageBox(win, {
+      type: 'question', title: '✏ 화이트보드 — 확인 그림 (관문 B)',
+      message: `확인 그림 ${files.length}장을 만들었습니다. 영역 번호(그리는 순서)가 그림과 맞는지 보세요.`,
+      detail: `폴더: ${dir}\n\n영역·순서를 고치려면 그 폴더의 *.annotation.json 을 「✏ 영역 편집」(whiteboard/assets/preview.html)으로 고친 뒤 다시 렌더하세요.\n\n렌더는 약 ${est} 걸립니다(그동안 다른 작업은 계속할 수 있습니다). 결과는 무음 MP4 입니다(5단계 전).`,
+      buttons: ['📁 폴더 열어 확인', '✏ 렌더 시작', '취소'], defaultId: 1, cancelId: 2, noLink: true,
+    });
+    if (r.response === 0) { try { shell.openPath(dir); } catch (_) {} continue; }
+    return r.response === 1;
+  }
+}
+/** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
+async function runWhiteboardFor(pr, outRoot, { interactive = false, force = false } = {}) {
+  const WP = require('./core/whiteboard-pipeline');
+  const WCfg = require('./core/whiteboard-config');
+  const cfg = WCfg.load();
+  const conc = WCfg.effectiveConcurrency(cfg);
+  try {
+    return await _runOnLanes(['whiteboard'], `${prLabel(pr)} 화이트보드 렌더`, () => WP.runWhiteboard(pr, outRoot, {
+      log, isAborted: () => S.abort, baseName: vrewBaseName(pr),
+      capLongEdge: cfg.capLongEdge, concurrency: conc, force,
+      gateA: interactive ? _wbGateA : null,
+      gateB: interactive ? _wbGateB : null,
+      onProgress: () => pushDtoUpdate(),
+    }));
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+ipcMain.handle('get-whiteboard-config', () => require('./core/whiteboard-config').load());
+ipcMain.handle('set-whiteboard-config', (_e, patch) => require('./core/whiteboard-config').save(patch || {}));
+// 📋 장면 계획만 — 파이썬을 부르지 않는다(즉시). 관문 A 와 같은 문구를 보여 준다.
+ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const WP = require('./core/whiteboard-pipeline');
+  const WCfg = require('./core/whiteboard-config');
+  const cfg = WCfg.load();
+  const out = [];
+  for (const pr of S.parsed.projects) {
+    if (args.shortsNum && pr.shortsNum !== args.shortsNum) continue;
+    const plan = WP.planWhiteboard(pr, { capLongEdge: cfg.capLongEdge, concurrency: WCfg.effectiveConcurrency(cfg) });
+    for (const l of plan.lines) log(l);
+    out.push({ shortsNum: pr.shortsNum, lines: plan.lines, ok: plan.ok });
+    try {
+      await dialog.showMessageBox(win, {
+        type: 'info', title: '📋 화이트보드 장면 계획', message: `장면 ${plan.scenes.length}개 · 총 ${WP.fmtDur(plan.totalSec)} · 렌더 약 ${WP.fmtDur(plan.estimateSec)} 예상`,
+        detail: plan.lines.join('\n'), buttons: ['확인'], noLink: true,
+      });
+    } catch (_) {}
+  }
+  return out;
+});
+// ✏ 렌더 — 대화형(관문 A·B 를 묻는다). 게이트는 .vrew 와 같다(음성·이미지 누락이면 만들지 않는다).
+ipcMain.handle('whiteboard-build', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  S.abort = false;
+  const incomplete = [], noTts = [];
+  for (const pr of S.parsed.projects) {
+    if (args.shortsNum && pr.shortsNum !== args.shortsNum) continue;
+    // 화이트보드는 음성·화면이 **둘 다 필수**라 outMode 게이트(gateVisual/gateTts) 조건 없이 본다 — .vrew 의 두 게이트와 같은 판정 함수.
+    const missWb = missingVisualGroups(pr);
+    if (missWb.length) { incomplete.push({ label: prLabel(pr), nums: missWb }); log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${missWb.length}개 (G${missWb.join(', G')}) → 화이트보드 건너뜀`); continue; }
+    const mttsWb = missingTtsNums(pr);
+    if (mttsWb.length) { noTts.push({ label: prLabel(pr), n: mttsWb.length, total: (pr.sentences || []).length, head: mttsWb.slice(0, 8).join(', '), headN: 8 }); log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mttsWb.length}개 → 화이트보드 건너뜀`); continue; }
+    log(`✏ ${prLabel(pr)} 화이트보드 MP4 렌더…`);
+    const r = await runWhiteboardFor(pr, S.outRoot, { interactive: true, force: !!args.force });
+    if (r.ok) { try { shell.openPath(r.output); } catch (_) {} }
+    else if (!r.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${r.error}`);
+  }
+  warnIncompleteVisuals(incomplete);
+  warnMissingTts(noTts);
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
@@ -4314,6 +4406,8 @@ async function runMakeAllCore(opts = {}) {
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
+  // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
+  const outTarget = normOutTarget(opts.outTarget);
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
   //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
   const outMode = normOutMode(opts.outMode);
@@ -4537,7 +4631,11 @@ async function runMakeAllCore(opts = {}) {
 
   // ── 4단계: .vrew 일괄 생성. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
-    log(`📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
+    const wbHere = (outTarget === 'whiteboard');
+    if (wbHere && outMode !== 'full') log('⚠ 화이트보드는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 로 만듭니다');
+    const wbGo = wbHere && outMode === 'full';
+    log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (큐라 관문을 묻지 않고 진행 · 결과는 무음)'
+      : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
@@ -4565,6 +4663,13 @@ async function runMakeAllCore(opts = {}) {
       if (mtts4.length) {
         noTts.push({ label: prLabel(pr), n: mtts4.length, total: (pr.sentences || []).length, head: mtts4.slice(0, 8).join(', '), headN: 8 });
         log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts4.length}/${(pr.sentences || []).length}개 (컷 ${mtts4.slice(0, 8).join(', ')}${mtts4.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
+        continue;
+      }
+      if (wbGo) {
+        // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 큐라 관문 A/B 는 묻지 않는다.
+        const wr = await runWhiteboardFor(pr, outRoot, { interactive: false });
+        if (wr.ok) { if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} } }
+        else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
         continue;
       }
       let ep = preset;
@@ -4667,6 +4772,8 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
         // ⚠ 출력 방식은 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
         outMode: (common.outMode != null ? common.outMode : (s.outMode || 'full')),
+        // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
+        outTarget: (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew')),
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
       });
       it.status = 'done'; okN++;
@@ -4901,8 +5008,8 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 //   ⚠ image/localGpu 와는 별개 레인이라 교착이 없다(Flow 는 브라우저라 GPU 와 무관).
 // ⚠ gensparkBrowser — Genspark 이미지 순환과 비디오는 **같은 크롬 프로필의 같은 page** 를 쓴다.
 //   동시에 돌면 서로의 화면을 조작해 깨진다(Flow 에서 겪은 v0.3.81 과 같은 계열) → 직렬화한다.
-const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve(), gensparkBrowser: Promise.resolve() };
-const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, flowBrowser: 0, gensparkBrowser: 0 };
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), flowBrowser: Promise.resolve(), gensparkBrowser: Promise.resolve(), whiteboard: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, flowBrowser: 0, gensparkBrowser: 0, whiteboard: 0 };
 // Flow 크롬을 쓰는 작업을 감싼다 — 레인으로 직렬화하고, **쓰는 동안 창이 닫히지 않게** 표시한다.
 //   🔴 2026-08-29 실사고: 비디오가 8분째 돌고 있는데 **다른 대본의 이미지 작업**이 끝나면서
 //     closeFlowEng() 로 그 창을 닫아 버렸다 → `Target page, context or browser has been closed`
@@ -4918,7 +5025,7 @@ function _runOnLanes(lanes, label, fn) {
   for (const k of lanes) _lanePending[k]++;
   const busy = lanes.filter((k) => _lanePending[k] > 1);
   if (busy.length) {
-    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일' };
+    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일', flowBrowser: 'Flow 브라우저', gensparkBrowser: 'Genspark 브라우저', whiteboard: '화이트보드 렌더' };
     log(`⏳ ${label} — ${busy.map((k) => ko[k]).join('·')} 작업이 끝난 뒤 시작합니다 (앞에 ${Math.max(...busy.map((k) => _lanePending[k])) - 1}건)`);
   }
   const p = Promise.allSettled(prev).then(() => withAwake(label, fn));
