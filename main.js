@@ -2821,13 +2821,33 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 //   🔑 **이미지 순환과 같은 브라우저·같은 계정 스토어**를 쓴다 → 계정 순환·한도 쿨다운을 그대로 재사용한다.
 //   ⚠ 그래서 **Genspark 이미지와 동시에 돌 수 없다** — 같은 크롬 프로필의 같은 page 를 조작하면
 //     서로의 화면을 망가뜨린다(Flow 에서 겪은 v0.3.81 사고와 같은 계열) → gensparkBrowser 레인으로 직렬화.
+// 🎛 헤더 「③ 비디오」 옆 모델 select 가 고른 값을 **저장소(image-rotation.json)에 박는다** (2026-09-05).
+//   로이: "genspark 를 골랐을 때 그 옆에서 모델을 고르게 해 주고, 그 모델로 만들게. 아내 PC 에서는 설정한
+//   모델로 안 만들어지더라." — 모델은 ⚙ 설정 팝업(PC 별 파일)에만 있어 헤더에서 보이지 않았고, 그 PC 의
+//   파일에 무엇이 들어 있는지 알 길이 없었다. 이제 **헤더에 보이는 값 = 저장된 값 = 만드는 값** 이 한 줄로 묶인다.
+//   ⚠ 렌더러가 select 를 바꿀 때 이미 saveImgRot 로 저장하지만, 그 IPC 가 끝나기 전에 「🎬 비디오」를 누르는
+//     레이스가 있을 수 있어 **실행 인자로도 받아 여기서 한 번 더 박는다**(헤더 우선). 목록에 없는 이름도
+//     그대로 저장한다 — Genspark 목록이 바뀌었을 때 엔진이 라벨로 찾고, 못 찾으면 로그로 알리기 때문.
+function applyHeaderGsVideoModel(model) {
+  const v = String(model || '').trim();
+  if (!v) return null;
+  try {
+    const Rot = require('./core/image-rotation');
+    const cur = Rot.load().gensparkVideoModel;
+    if (cur !== v) { Rot.save({ gensparkVideoModel: v }); log(`🎛 Genspark 비디오 모델 ← 헤더 선택 「${v}」 (설정 저장값 「${cur || '없음'}」 을 갱신)`); }
+  } catch (e) { log(`⚠ Genspark 비디오 모델 저장 실패: ${String(e.message).slice(0, 80)} — 설정 저장값으로 진행`); }
+  return v;
+}
+
 async function runGensparkVideos(pr, mediaDir, onlyNums) {
   const { GensparkEngine } = require('./genspark-engine');
   const GensparkEngineCls = GensparkEngine;   // 정적 메서드(isPointExhausted) 호출용
   const GsAcc = require('./core/genspark-accounts');
   const Rot = require('./core/image-rotation');
   const cfg = Rot.load();
-  const model = cfg.gensparkVideoModel || 'Gemini Omni Flash';
+  // 🔑 모델은 **저장소 한 곳**에서만 읽는다 — 헤더 select 와 ⚙ 설정 select 가 둘 다 이 값을 쓰고,
+  //   IPC 인자로 온 헤더 값은 applyHeaderGsVideoModel 이 이미 여기에 박아 두었다(두 진실 금지).
+  const model = cfg.gensparkVideoModel || Rot.DEFAULTS.gensparkVideoModel;
   const tier = cfg.gensparkVideoTier || 'Standard';
 
   // 대상 — **이미지가 있는 그룹만**(i2v: 시작 프레임이 필요하다). 이미 영상이 있으면 건너뛴다(이어받기).
@@ -3605,8 +3625,9 @@ function rangeNums(project, fromNum, toNum) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
+  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
+  if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
   if (engine === 'grok' || engine === 'grok10') {
     const _gc = grokCoolUntil();
@@ -4291,7 +4312,8 @@ async function runMakeAllCore(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
+  if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
   //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
   const outMode = normOutMode(opts.outMode);
@@ -4639,6 +4661,8 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         //   돌려 47개 영상이 생성되는 사고가 있었음. 영상은 건당 비용/시간이 크므로 기본값이 '전체' 여선 안 된다.
         ..._batchRange(common, s),
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
+        // 🎛 Genspark 비디오 모델도 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
+        gensparkVideoModel: common.gensparkVideoModel || s.gensparkVideoModel || null,
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
         aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
         // ⚠ 출력 방식은 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
@@ -4811,8 +4835,9 @@ ipcMain.handle('set-group-prompt', (_e, args = {}) => {
 // 그룹 1개만 영상 변환 (이미지 → i2v)
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
+  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
+  if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
   if (engine === 'grok' || engine === 'grok10') {
     const _gc = grokCoolUntil();

@@ -162,7 +162,8 @@ ok(/videoPath && fs\.existsSync\(g\.videoPath\)\) return false/.test(MAIN), '이
 ok(/대상 그룹 없음/.test(MAIN), '대상이 0개면 조용히 넘어가지 않는다(v0.3.61 교훈)');
 ok(/videoStatus === 'generating'\) g\.videoStatus = g\.videoPath \? 'done' : 'fail'/.test(MAIN), '스피너 고착 방지(v0.2.62 계열)');
 ok(/GsAcc\.setCooldown/.test(MAIN) && /parseLimitResetTime/.test(MAIN), '한도 감지 시 계정 쿨다운을 기록한다');
-ok(/gensparkVideoModel \|\| 'Gemini Omni Flash'/.test(MAIN), '설정에서 모델을 읽는다(기본 = 로이 지정)');
+ok(/cfg\.gensparkVideoModel \|\| Rot\.DEFAULTS\.gensparkVideoModel/.test(MAIN), '설정 저장소에서 모델을 읽는다(폴백 = DEFAULTS · 두 진실 금지)');
+ok(!/gensparkVideoModel \|\| 'Gemini Omni Flash'/.test(MAIN), '옛 하드코딩 폴백(Omni Flash = 참조 이미지 안 받음)이 사라졌다');
 ok(/gensparkVideoTier \|\| 'Standard'/.test(MAIN), '설정에서 등급을 읽는다');
 // 파이프라인 — genspark 는 병렬에 넣지 않는다(브라우저 공유)
 ok(!/grokVideoPipeline = [^\n]*genspark/.test(MAIN), 'genspark 는 Grok 파이프라인에 들어가지 않는다');
@@ -215,6 +216,50 @@ try {
   ok(/Genspark 비디오 모델/.test(js), '빌드된 번들에 새 설정 UI 가 들어있다(vite build 를 돌렸다)');
   ok(/Seedance 2\.5/.test(js), '번들에 모델 목록이 들어있다');
 } catch (_) { ok(false, '번들을 읽을 수 없다'); }
+
+// ── [10] 헤더 「③ 비디오」 옆 모델 select + 칩 판정 교정 (2026-09-05 · 아내 PC "설정한 모델로 안 만들어짐") ──
+{
+  // (a) 칩 판정 — 순수 함수 원문 실행. 옛 앞글자 비교의 오판 사례가 전부 false 여야 한다.
+  ok(typeof ENG.gsModelChipMatches === 'function', '엔진이 gsModelChipMatches 를 export 한다');
+  const M2 = ENG.gsModelChipMatches;
+  ok(M2('MiniMax H3', 'MiniMax H3 Max') === false, '🔴 칩 「MiniMax H3」 ≠ 「MiniMax H3 Max」 (옛 slice(0,10) 은 같다고 봤다)');
+  ok(M2('Seedance v2', 'Seedance 2.5') === false, '🔴 「Seedance v2」 ≠ 「Seedance 2.5」 (옛 slice(0,8) 은 같다고 봤다)');
+  ok(M2('PixVerse C1', 'PixVerse V6') === false, '🔴 「PixVerse C1」 ≠ 「PixVerse V6」');
+  ok(M2('MiniMax H3 Max', 'MiniMax H3 Max') === true, '정확 일치는 true');
+  ok(M2('minimax  h3 max', 'MiniMax H3 Max') === true, '대소문자·연속 공백은 무시');
+  ok(M2('MiniMax H3 M...', 'MiniMax H3 Max') === true, '말줄임으로 잘린 라벨은 접두 비교');
+  ok(M2('MiniMax H3 M…', 'MiniMax H3 Max') === true, '유니코드 말줄임(…)도 잘린 라벨로 본다');
+  ok(M2('Min...', 'MiniMax H3 Max') === false, '잘린 앞부분이 4자 미만이면 믿지 않는다');
+  ok(M2('', 'MiniMax H3 Max') === false, '칩이 비면 false(모른다 → 다시 고른다)');
+  // (b) _selectVideoModel 이 그 함수를 쓰고, 옛 앞글자 비교가 남아 있지 않다
+  const sel = ENGSRC.slice(ENGSRC.indexOf('async _selectVideoModel('), ENGSRC.indexOf('async _selectVideoTier('));
+  ok((sel.match(/gsModelChipMatches\(/g) || []).length >= 2, '「이미 선택됨」·「확인」 두 판정이 모두 gsModelChipMatches 를 쓴다');
+  ok(!/slice\(0, 10\)/.test(sel) && !/slice\(0, 8\)/.test(sel), '🔴 옛 앞글자(slice) 비교가 사라졌다');
+  ok(/이미 선택됨 · 칩 「/.test(sel), '「이미 선택됨」 로그에 실제 칩 라벨을 남긴다(다음 진단 근거)');
+  // (c) main — 헤더 값이 저장소에 박히고, 4개 경로가 그 값을 받는다
+  ok(/function applyHeaderGsVideoModel\(/.test(MAIN), 'applyHeaderGsVideoModel 헬퍼가 있다');
+  ok(/Rot\.save\(\{ gensparkVideoModel: v \}\)/.test(MAIN), '헬퍼가 저장소에 박는다(헤더 = 저장값 = 만드는 값)');
+  ok((MAIN.match(/applyHeaderGsVideoModel\(gensparkVideoModel\)/g) || []).length === 3, '🔴 video-build · video-group · runMakeAllCore 세 경로가 헤더 값을 적용한다');
+  ok(/gensparkVideoModel: common\.gensparkVideoModel \|\| s\.gensparkVideoModel \|\| null/.test(MAIN), 'run-batch 는 헤더(공통) 우선 → 항목 폴백');
+  for (const h of ['video-build', 'video-group']) {
+    const i = MAIN.indexOf("ipcMain.handle('" + h + "'");
+    ok(i > 0 && /gensparkVideoModel = null \} = args/.test(MAIN.slice(i, i + 800)), h + ' 이 인자로 gensparkVideoModel 을 받는다');
+  }
+  // (d) 렌더러 — 헤더 select · 부팅 로드 · IPC 전달
+  const hdr = APP.slice(APP.indexOf('<span className="glabel">③ 비디오</span>'), APP.indexOf('<span className="glabel">③ 비디오</span>') + 4000);
+  ok(/videoEngine === 'genspark' && \(\s*<select[^]*?gensparkVideoModel: e\.target\.value/.test(hdr), '🔴 헤더에 genspark 를 골랐을 때만 모델 select 가 뜨고 gensparkVideoModel 을 저장한다');
+  ok(/GS_VIDEO_MODELS\.map\(\(m\) => <option key=\{m\.name\} value=\{m\.name\} title=\{m\.note\}/.test(hdr), '헤더 select 가 엔진과 같은 목록으로 렌더된다');
+  ok(/const gsVideoModel = \(imgRot && imgRot\.gensparkVideoModel\) \|\| 'MiniMax H3 Max'/.test(APP), '헤더·설정이 같은 저장값(imgRot.gensparkVideoModel)을 쓴다');
+  ok((APP.match(/api\.getImageRotation\(\)/g) || []).length >= 2, '🔴 부팅 때도 설정을 읽는다(예전엔 ⚙ 설정을 열 때만 읽어 헤더가 값을 몰랐다)');
+  ok((APP.match(/gensparkVideoModel: gsVideoModel/g) || []).length === 6, '🔴 videoBuild×3 · videoGroup · makeAll · runBatch 여섯 곳이 헤더 모델을 실어 보낸다');
+  ok(/fromNum: parseInt\(vidFrom, 10\) \|\| 1, toNum: parseInt\(vidTo, 10\) \|\| 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel/.test(APP), 'videoBuild 호출에 모델이 들어간다');
+  // (e) 번들 반영
+  try {
+    const dist = path.join(ROOT, 'renderer', 'dist', 'assets');
+    const js = fs.readdirSync(dist).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(dist, f), 'utf8')).join('');
+    ok(/이 모델로 비디오를 만듭니다/.test(js), '빌드된 번들에 헤더 모델 select 가 들어있다');
+  } catch (_) { ok(false, '번들을 읽을 수 없다'); }
+}
 
 console.log('\ngenspark-video: ' + (n - bad) + '/' + n + ' 통과');
 if (bad) process.exit(1);

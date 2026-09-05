@@ -440,6 +440,9 @@ export default function App() {
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
+  // 🎛 Genspark 비디오 모델 — 헤더 select 와 ⚙ 설정 select 가 **같은 저장값**(imgRot.gensparkVideoModel)을 쓴다.
+  //   두 곳이 각자 값을 들면 어긋난다(v0.3.50·v0.3.76 계열). 실행 IPC 에도 이 값을 실어 보낸다(헤더 우선).
+  const gsVideoModel = (imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max';
   const [upCfg, setUpCfg] = useState(null);              // 영상 업스케일 방식 { mode, slowLimitSec }
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
@@ -495,6 +498,8 @@ export default function App() {
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
     loadPresets().then(loadStyles);
+    // 🎛 브라우저 이미지·비디오 설정(Flow 모델·Genspark 비디오 모델)을 부팅 때 읽는다 — 헤더 select 가 쓴다.
+    api.getImageRotation().then((r) => { if (r) setImgRot(r); }).catch(() => {});
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
       if (!r) return;
@@ -739,7 +744,7 @@ export default function App() {
   async function runVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
     setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
@@ -784,7 +789,7 @@ export default function App() {
         try {
           if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
           if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
     }
@@ -797,7 +802,7 @@ export default function App() {
     setStatus('이미지→비디오 생성중…');
     try {
       let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d);
-      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -806,7 +811,7 @@ export default function App() {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
-      dry: false, videoEngine, flowVideoModel, flowCount,
+      dry: false, videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel,
       aiNotice, // 사용자 선택(작업바 토글)
       outMode,  // 전체 / 음성만 / 화면만
     };
@@ -847,7 +852,7 @@ export default function App() {
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
       //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice, outMode }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, aiNotice, outMode }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
@@ -899,7 +904,7 @@ export default function App() {
   }
   async function runGroupVid(shortsNum, groupNum) {
     setStatus(`G${groupNum} 비디오…`);
-    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
+    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   function playFrom(shortsNum, groupNum) {
@@ -2149,6 +2154,13 @@ export default function App() {
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}>⚙ 계정</button>}
             {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
             {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}>⚙ Veo</button>}
+            {videoEngine === 'genspark' && (
+              <select style={{ maxWidth: 190 }} value={gsVideoModel}
+                title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
+                onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
+                {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name} title={m.note}>{m.imgRef === false ? '❌ ' : ''}{m.name}</option>)}
+              </select>
+            )}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>

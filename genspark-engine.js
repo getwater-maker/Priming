@@ -132,6 +132,28 @@ const GENSPARK_VIDEO_MODELS = [
   { name: 'Vidu Q3',               note: '1~16초 · 1080p · 이미지 1~4장', imgRef: true },
   { name: 'Runway',                note: '5·10초 · 720p · 이미지 필요', imgRef: true },
 ];
+/**
+ * 🔴 모델 칩 라벨이 원하는 모델과 **같은가** (2026-09-05 — 아내 PC "설정한 모델로 안 만들어진다" 조사에서 잡음).
+ *   옛 판정은 `target.startsWith(chip.slice(0, 10))` 같은 **앞글자 비교**였다. 그러면
+ *     · 칩 「MiniMax H3」 인데 원하는 것이 「MiniMax H3 Max」 → "이미 선택됨" 으로 오판(앞 10자가 같다)
+ *     · 확인 단계의 slice(0, 8) 는 더 헐거워 「Seedance v2」↔「Seedance 2.5」 · 「PixVerse C1」↔「PixVerse V6」 도 통과
+ *   ⇒ 다른 모델이 켜져 있어도 **바꾸지 않고 "✓ 선택" 로그를 남기며 그대로 만든다**(조용히 틀리는 종류).
+ *   규칙: 칩이 말줄임(… / ...)으로 **잘려 있을 때만** 접두 비교(잘린 앞부분이 4자 이상), 아니면 **정확 일치**.
+ *   대소문자·연속 공백은 무시한다. 칩이 비었으면 false(모른다고 보고 다시 고른다).
+ */
+function gsModelChipMatches(chipText, target) {
+  const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const want = norm(target);
+  let chip = norm(chipText);
+  if (!want || !chip) return false;
+  const truncated = /(\.\.\.|…)$/.test(chip);
+  if (truncated) {
+    chip = chip.replace(/(\.\.\.|…)$/, '').trim();
+    return chip.length >= 4 && want.startsWith(chip);
+  }
+  return chip === want;
+}
+
 /** 그 모델이 참조 이미지를 받나 — 목록에 없는 이름이면 `null`(알 수 없음). */
 function gsVideoModelTakesImage(name) {
   const m = GENSPARK_VIDEO_MODELS.find((x) => x.name === String(name || '').trim());
@@ -840,10 +862,13 @@ class GensparkEngine {
       const chips = await this.page.$$(GENSPARK_VIDEO_SELECTORS.modelButton);
       const chip0 = chips[0];
       const cur = chip0 ? (((await chip0.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()) : '';
-      if (cur && target.toLowerCase().startsWith(cur.toLowerCase().replace(/\.\.\.$/, '').slice(0, 10))) {
-        this.log(`[Genspark] 비디오 모델: ${cur} (이미 선택됨)`);
+      // 🔑 정확 일치만 "이미 선택됨" 으로 본다(잘린 라벨만 접두 비교) — 옛 앞글자 비교는
+      //   「MiniMax H3」 칩을 「MiniMax H3 Max」 로 오판해 다른 모델로 만들었다.
+      if (gsModelChipMatches(cur, target)) {
+        this.log(`[Genspark] 비디오 모델: ${target} (이미 선택됨 · 칩 「${cur}」)`);
         return true;
       }
+      if (cur) this.log(`[Genspark] 비디오 모델 칩 「${cur}」 → 「${target}」 으로 바꿉니다`);
       if (!chip0) { this.log('[Genspark] ⚠ 모델 칩을 못 찾음'); return false; }
 
       await chip0.click({ timeout: 5000 });
@@ -881,7 +906,7 @@ class GensparkEngine {
       // 확인 — 칩 라벨이 바뀌었나
       const chips2 = await this.page.$$(GENSPARK_VIDEO_SELECTORS.modelButton);
       const now = chips2[0] ? (((await chips2[0].innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()) : '';
-      const ok = !!now && target.toLowerCase().startsWith(now.toLowerCase().replace(/\.\.\.$/, '').slice(0, 8));
+      const ok = gsModelChipMatches(now, target);
       if (ok) { this.log(`[Genspark] 비디오 모델 선택 ✓ ${target}`); return true; }
       // ⚠ 조용히 넘어가지 않는다 — Flow 에서 「골라도 언제나 기본 모델」이던 사고(v0.3.71) 재발 방지.
       this.log(`[Genspark] ⚠ 비디오 모델 「${target}」 선택을 확인하지 못했습니다 (칩 표시: ${now || '없음'}) — 그 상태로 진행합니다`);
@@ -1218,5 +1243,5 @@ module.exports = {
   GensparkEngine, GENSPARK_SELECTORS, PROFILE_BASE,
   GENSPARK_VIDEO_URL, GENSPARK_VIDEO_SELECTORS, GS_VIDEO_MIN_SEC, GS_VIDEO_MAX_SEC,
   GENSPARK_VIDEO_MODELS, GENSPARK_VIDEO_TIERS,
-  GS_BENIGN_NOTICE_RE, GS_HARD_LIMIT_RE, gsVideoModelTakesImage,
+  GS_BENIGN_NOTICE_RE, GS_HARD_LIMIT_RE, gsVideoModelTakesImage, gsModelChipMatches,
 };
