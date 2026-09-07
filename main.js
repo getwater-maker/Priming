@@ -2054,6 +2054,11 @@ ipcMain.handle('whiteboard-build', async (_e, args = {}) => {
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  // 🔴 앞서 누른 ⏹ 중단이 남아 있으면 아래 sweep 뒤의 **순차 재생성이 즉시 멈춰** 막다른 길이 된다 —
+  //   이미지는 지워졌는데 다시 만들어지지 않고 게이트가 .vrew 를 막아 눌러도 눌러도 같은 팝업만 뜬다
+  //   (로이 2026-09-07 실제로 겪음: `⏹ 중단됨` → `순환 엔진 모두 소진` → `.vrew 건너뜀` 4연속).
+  //   다른 핸들러 20여 곳은 전부 시작할 때 이걸 한다 — 여기만 빠져 있었다.
+  S.abort = false;
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
   const outMode = normOutMode(args.outMode);
   if (outMode !== 'full') log(`💾 .vrew 내보내기 — ${outModeLabel(outMode)}`);
@@ -2072,14 +2077,14 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     //   🔴 예전엔 비우기만 하고 "🔄 로 다시 만든 뒤 저장하세요" 라고 안내했는데, 그러면 **막다른 길**이 된다 —
     //     파일은 사라졌는데 아무것도 안 만들어지고 게이트에 막혀 .vrew 도 안 나온다(로이 2026-08-19 실제로 겪음:
     //     [고전_0821] G10·G19·G33 이 지워지기만 하고 끝났다). ⚡만들기 4단계와 동작을 맞춘다.
-    const bad = await sweepBadVisuals(pr);
+    const dirsB = shortsDirs(S.outRoot, pr.shortsNum);   // ⚠ sweep 은 이 폴더 안의 파일만 지운다(첨부 원본 보호)
+    const bad = await sweepBadVisuals(pr, log, dirsB.media);
     if (bad.length) {
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
-      const dirsB = shortsDirs(S.outRoot, pr.shortsNum);
       try { await runRotatingImages(pr, dirsB.media, log, styleId, engine || 'rotate', bad, 0, true); }
       catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
-      const still = await sweepBadVisuals(pr);
+      const still = await sweepBadVisuals(pr, log, dirsB.media);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
@@ -3639,30 +3644,52 @@ function missingVisualGroups(project) {
 //   생성 시점 검사(runComfyImages)만으로는 새는 경우가 있었다(판정 실패·다른 엔진·나중에 덮어쓰기 등).
 //   여기서 비우면 그 그룹은 missingVisualGroups 에 걸려 **.vrew 가 막히고 어느 그룹인지 팝업으로 알려진다.**
 //   반환: 비워진 그룹 번호 배열.
-async function sweepBadVisuals(project, logger = log) {
+// 🔑 사람이 직접 첨부한(📎 일괄첨부·썸네일 클릭 첨부) 자산인지.
+//   ⛔ **기계가 판정해 사람이 고른 그림을 지우지 않는다** — 순서가 거꾸로다(로이 2026-09-07).
+//   판정 임계는 AI 회화풍 생성물을 기준으로 실측해 정한 값이라, 도표·글자가 든 그래픽
+//   (배경이 고르고 경계가 또렷 → 거칠기↑·구조↓)은 「노이즈」로 오판된다.
+//   식별은 **경로+수정시각+크기**(`_visKey`)로 한다 — 같은 경로에 새로 생성되면 키가 달라져
+//   자동으로 보호가 풀린다(생성 코드를 한 줄도 안 고치고 재판정이 살아 있게 하는 방법).
+function _userAttached(g, kind) {
+  const rec = kind === 'image' ? g._userImage : g._userVideo;
+  const cur = kind === 'image' ? g.imagePath : g.videoPath;
+  return !!(rec && cur && rec === _visKey(cur));
+}
+async function sweepBadVisuals(project, logger = log, mediaDir = null) {
   const groups = (project.groups || []);
   // 🔑 **병렬로 훑는다.** 순차로 하면 42장+영상5개에 18초가 걸려 화면이 그만큼 멈춘 것처럼 보였다.
   //   ⚠ `await` 를 빠뜨리면 Promise 는 **항상 truthy** 라 전부 '이상' 으로 판정돼 멀쩡한 자산을 몰살한다.
   const verdicts = await _mapLimit(groups, 4, async (g) => ({
     g,
-    badVideo: !!(g.videoPath && fs.existsSync(g.videoPath) && await looksBadVideo(g.videoPath)),
-    badImage: !!(g.imagePath && fs.existsSync(g.imagePath) && await looksBadImage(g.imagePath)),
+    mineVideo: _userAttached(g, 'video'),
+    mineImage: _userAttached(g, 'image'),
+    // 사람이 첨부한 것은 **재지도 않는다**(ffmpeg 호출도 아낀다).
+    badVideo: !!(g.videoPath && !_userAttached(g, 'video') && fs.existsSync(g.videoPath) && await looksBadVideo(g.videoPath)),
+    badImage: !!(g.imagePath && !_userAttached(g, 'image') && fs.existsSync(g.imagePath) && await looksBadImage(g.imagePath)),
   }));
   const cleared = [];
-  for (const { g, badVideo, badImage } of verdicts) {
+  const mine = [];
+  for (const { g, badVideo, badImage, mineVideo, mineImage } of verdicts) {
+    if (mineVideo || mineImage) mine.push(g.num);
     if (badVideo) {
-      logger(`  ⬛ G${g.num} 이상 영상(검정·노이즈) — 비움 (${path.basename(g.videoPath)})`);
-      try { fs.rmSync(g.videoPath, { force: true }); } catch {}
+      // 🔴 첨부 자산은 **원본 경로를 그대로** 가리킨다(복사하지 않는다 — attach-asset·bulk-attach).
+      //   그래서 무조건 rmSync 하면 **사용자 원본 파일이 사라진다**(로이 2026-09-07 실제로 겪음).
+      //   「🗑 삭제」 경로에는 이미 이 가드가 있었는데(_inDir) 여기만 빠져 있었다.
+      const del = !!(mediaDir && _inDir(g.videoPath, mediaDir));
+      logger(`  ⬛ G${g.num} 이상 영상(검정·노이즈) — ${del ? '비움' : '참조만 해제(파일은 남깁니다)'} (${path.basename(g.videoPath)})`);
+      if (del) { try { fs.rmSync(g.videoPath, { force: true }); } catch {} }
       g.videoPath = null; g.videoStatus = 'fail'; cleared.push(g.num);
     }
     if (badImage) {
-      logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — 비움 (${path.basename(g.imagePath)})`);
+      const del = !!(mediaDir && _inDir(g.imagePath, mediaDir));
+      logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — ${del ? '비움' : '참조만 해제(파일은 남깁니다)'} (${path.basename(g.imagePath)})`);
       try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
       g.imageCleared = true;   // 캐시로 되살아나지 않게 (⚠ 플래그는 재시작 시 사라지므로 prefill 쪽 검사가 본 방어선)
-      try { fs.rmSync(g.imagePath, { force: true }); } catch {}
+      if (del) { try { fs.rmSync(g.imagePath, { force: true }); } catch {} }
       g.imagePath = null; g.imageStatus = 'fail'; cleared.push(g.num);
     }
   }
+  if (mine.length) logger(`  ⓘ 직접 첨부한 자산 ${mine.length}개(G${mine.join(', G')})는 검정·노이즈 판정에서 제외했습니다`);
   return [...new Set(cleared)];
 }
 // 미생성 그룹이 있는 편들을 팝업으로 알림. incomplete = [{ label, nums }]
@@ -3783,11 +3810,13 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
   const ext = path.extname(fp).toLowerCase();
+  // 🔑 「사람이 직접 넣은 것」으로 표시 — sweepBadVisuals 가 검정·노이즈 판정에서 제외한다(_userAttached).
+  //   ⚠ 이 경로는 파일을 미디어 폴더로 **복사하지 않고 원본을 가리킨다** — 지우면 사용자 원본이 사라진다.
   if (['.mp4', '.mov', '.webm', '.m4v'].includes(ext)) {
-    g.videoPath = fp; g.videoStatus = 'done';
+    g.videoPath = fp; g.videoStatus = 'done'; g._userVideo = _visKey(fp);
     log(`첨부(영상) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
   } else {
-    g.imagePath = fp; g.imageStatus = 'done';
+    g.imagePath = fp; g.imageStatus = 'done'; g._userImage = _visKey(fp);
     log(`첨부(이미지) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
   }
   return P.toDTO(S.parsed);
@@ -3965,8 +3994,9 @@ ipcMain.handle('bulk-attach', async (_e, args = {}) => {
     if (!matches.length) continue;
     const vid = matches.find(isVid);
     const img = matches.find(isImg);
-    if (vid) { g.videoPath = vid; g.videoStatus = 'done'; cnt++; }
-    else if (img) { g.imagePath = img; g.imageStatus = 'done'; cnt++; }
+    // 🔑 「사람이 직접 넣은 것」 표시 — sweepBadVisuals 가 판정에서 제외한다(위 attach-asset 과 같은 이유).
+    if (vid) { g.videoPath = vid; g.videoStatus = 'done'; g._userVideo = _visKey(vid); cnt++; }
+    else if (img) { g.imagePath = img; g.imageStatus = 'done'; g._userImage = _visKey(img); cnt++; }
   }
   log(`일괄첨부 ${pr.title}: 선택 ${picked.length}개 → ${cnt}개 그룹 매핑 (영상우선)`);
   return P.toDTO(S.parsed);
@@ -4041,6 +4071,8 @@ function buildSnapshot() {
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
+        // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
+        userImage: g._userImage || null, userVideo: g._userVideo || null,
         sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro })),
       })),
     })),
@@ -4207,6 +4239,9 @@ function overlaySnapshot(parsed, snap) {
       if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
       if (gs.motionNote != null) g.motionNote = gs.motionNote;
       if (gs.imageCleared) g.imageCleared = true;  // ✕ 삭제·이상 폐기 표시 복원 — 없으면 캐시가 되살린다(2026-08-19)
+      // 📎 직접 첨부 표시 복원 — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 지운다(2026-09-07)
+      if (gs.userImage) g._userImage = gs.userImage;
+      if (gs.userVideo) g._userVideo = gs.userVideo;
       if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; touched++; }
       if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
       const sents = pr.getSentencesOfGroup(g);
@@ -4639,13 +4674,13 @@ async function runMakeAllCore(opts = {}) {
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
-      const bad = await sweepBadVisuals(pr);
+      const dirs0 = shortsDirs(outRoot, pr.shortsNum);   // ⚠ sweep 은 이 폴더 안의 파일만 지운다(첨부 원본 보호)
+      const bad = await sweepBadVisuals(pr, log, dirs0.media);
       if (!bad.length) continue;
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
       pushDtoUpdate();
-      const dirs0 = shortsDirs(outRoot, pr.shortsNum);
       try { await runRotatingImages(pr, dirs0.media, log, styleId, engine, bad, 0, true); } catch (e) { log(`⚠ 재생성 오류: ${e.message}`); }
-      const still = await sweepBadVisuals(pr);
+      const still = await sweepBadVisuals(pr, log, dirs0.media);
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
