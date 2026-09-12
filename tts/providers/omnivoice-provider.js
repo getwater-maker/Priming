@@ -185,7 +185,9 @@ class OmniVoiceProvider {
     //   여기서 던지면 fillTts 의 3회 재시도가 받는다(대개 다음 시도에 정상 음성이 온다).
     const { durationSec } = measureWav(wavBuffer);
     if (!(durationSec >= MIN_AUDIO_SEC)) {
-      throw new Error(`OmniVoice 가 빈 음성을 돌려줬습니다 (${wavBuffer.length}바이트 · ${durationSec.toFixed(3)}초) — 그 문장을 합성하지 못했습니다`);
+      const err = new Error(`OmniVoice 가 빈 음성을 돌려줬습니다 (${wavBuffer.length}바이트 · ${durationSec.toFixed(3)}초) — 그 문장을 합성하지 못했습니다`);
+      err.emptyAudio = true;   // 🔑 호출부가 '시드를 바꿔 재시도'로 갈라내는 표식
+      throw err;
     }
 
     return {

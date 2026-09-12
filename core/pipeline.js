@@ -142,15 +142,20 @@ async function makeTtsManager(logger, engine, opts = {}) {
 // 🔴 합성 결과가 **실제 소리**인지 — provider 를 가리지 않는 마지막 안전망.
 //   2026-09-06 [서재_0920] 11부 컷857: OmniVoice 가 HTTP 200 으로 헤더만 든 44바이트 wav 를 돌려줬고,
 //   그게 0.50초짜리 정상 음성 행세를 하며 캐시·.vrew 까지 흘러가 Vrew 렌더링을 1339번 클립에서
-//   `C166/E01`(오디오 디코딩 실패)로 멈춰 세웠다. 여기서 던지면 위 3회 재시도가 받는다.
+//   `C166/E01`(오디오 디코딩 실패)로 멈춰 세웠다. 여기서 던지면 아래 재시도 루프가 받는다.
+//   🔑 `emptyAudio` 표식을 붙이는 이유 — 빈 음성은 **시드를 바꿔야** 빠져나온다(같은 입력이면 결정적).
 //   ⚠ 24kHz 16bit mono 0.025초 = 1200B. 어떤 포맷(wav·mp3)이든 이보다 작으면 소리가 들어 있을 수 없다.
 const MIN_TTS_BYTES = 1200;
 const MIN_TTS_SEC = 0.05;
+const TTS_MAX_ATTEMPT = 3;          // 일반 오류(네트워크·타임아웃) 재시도 상한
+const TTS_MAX_ATTEMPT_EMPTY = 6;    // 빈 음성 — 시드를 갈아끼우므로 여유를 더 준다(무작위라 실패 확률이 급감)
 function assertRealAudio(res, num) {
   const len = res && res.mp3Buffer ? res.mp3Buffer.length : 0;
   const dur = Number(res && res.durationSec) || 0;
   if (len < MIN_TTS_BYTES || dur < MIN_TTS_SEC) {
-    throw new Error(`빈 음성이 돌아왔습니다 (${len}바이트 · ${dur.toFixed(3)}초) — 서버가 컷${num} 을 합성하지 못했습니다`);
+    const err = new Error(`빈 음성이 돌아왔습니다 (${len}바이트 · ${dur.toFixed(3)}초) — 서버가 컷${num} 을 합성하지 못했습니다`);
+    err.emptyAudio = true;
+    throw err;
   }
 }
 
@@ -288,18 +293,39 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     //   ⚠ 다만 서버가 완전히 죽은 경우 900문장 × 3회 × 60초를 헛돌면 안 되므로
     //     **연속 5문장 실패면 그 대본 TTS 를 중단**한다(그 뒤 문장은 시도하지 않는다).
     let res = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try { res = await ttsMgr.synthesize(s.text, synthOpts); assertRealAudio(res, s.num); break; }
+    let seedOverride = null;              // 빈 음성 회피로 갈아낀 시드(성공하면 로그에 남긴다)
+    let maxAttempt = TTS_MAX_ATTEMPT;
+    for (let attempt = 1; attempt <= maxAttempt; attempt++) {
+      const attemptOpts = seedOverride == null ? synthOpts : { ...synthOpts, seed: seedOverride };
+      // 🔑 **검사를 통과한 뒤에만 `res` 에 담는다.** 먼저 대입하면 assertRealAudio 가 던져도 빈 결과가
+      //   res 에 남아, 루프를 다 쓰고 나온 뒤 `if (!res)` 를 통과해 **그 빈 음성이 그대로 저장된다**
+      //   (테스트 [6]-ⓑ 가 실제로 잡았다). provider 가 던지는 경우엔 안 드러나는 구멍이다.
+      try { const r = await ttsMgr.synthesize(s.text, attemptOpts); assertRealAudio(r, s.num); res = r; break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
-        if (attempt >= 3) {
+        // 🔴 **빈 음성은 같은 입력으로 다시 보내도 똑같이 빈 음성이 온다** — 시드를 주면 모델이 결정적이다.
+        //   실측(2026-09-13 · 컷857 '그렇습니다.' · seed 40469): 3회 전부 44바이트. 서버 로그도
+        //   예외 없이 `TTS 합성 완료: 44 bytes, 0.0초` 로 남았다(= 모델이 빈 오디오를 만든 것).
+        //   ⚠ 근접 시드(40468·40470·40471)도 **그대로 실패**했고 멀리 떨어진 시드(1·12345)에서만 정상이
+        //     나왔다 → ±1 로 밀지 말고 **무작위**로 갈아낀다. 무작위 시도는 확률적이라 여유를 더 준다.
+        //   ⚠ 빈 음성은 서버 부하가 아니므로 백오프 없이 바로 다시 보낸다(건당 2.6초 실측).
+        const empty = !!(e && e.emptyAudio);
+        if (empty) {
+          maxAttempt = TTS_MAX_ATTEMPT_EMPTY;
+          seedOverride = Math.floor(Math.random() * 2147483646) + 1;
+        }
+        if (attempt >= maxAttempt) {
           failed.push(s.num);
           consecFail++;
-          if (onLine) onLine(`✗ 컷${s.num} TTS 실패(3회) — 이 문장은 건너뜁니다: ${e.message}`);
+          if (onLine) onLine(`✗ 컷${s.num} TTS 실패(${attempt}회) — 이 문장은 건너뜁니다: ${e.message}`);
           break;
         }
-        if (onLine) onLine(`⚠ 컷${s.num} TTS 실패(${attempt}/3) — 재시도: ${e.message}`);
-        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        if (onLine) {
+          onLine(empty
+            ? `⚠ 컷${s.num} 빈 음성(${attempt}/${maxAttempt}) — 시드를 ${seedOverride} 로 바꿔 다시 만듭니다`
+            : `⚠ 컷${s.num} TTS 실패(${attempt}/${maxAttempt}) — 재시도: ${e.message}`);
+        }
+        await new Promise((r) => setTimeout(r, empty ? 200 : 1500 * attempt));
       }
     }
     if (!res) {
@@ -310,6 +336,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       continue;   // 다음 문장으로
     }
     consecFail = 0;
+    if (seedOverride != null) s.ttsSeedSwapped = seedOverride;   // 로그에 남긴다(왜 이 문장만 톤이 다를 수 있는지)
     // 🔑 **파일 쓰기도 실패한다** — 합성만 감싸면 절반만 막은 것이다(2026-08-21 사고: 컷70 쓰기 ENOENT 로
     //   [서재_0820] 대본 전체가 죽었다). 일시 장애면 재시도하고, 그래도 안 되면 **그 문장만** 건너뛴다.
     try {
@@ -351,7 +378,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     s.ttsGenSec = (Date.now() - _genT0) / 1000; // 이 문장 생성에 걸린 실시간(초)
     // 캐시에 저장(다음 동일 작업 시 재활용)
     try { TtsCache.put(cacheKey, s.ttsAudioPath, s.ttsDurationSec, path.extname(s.ttsAudioPath).slice(1).toLowerCase() || 'wav'); } catch {}
-    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
+    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
     // 문장 한 개 변환 완료 → 즉시 화면 갱신(시간 표시). PrimingFlow 처럼 바로바로 진행상황 반영.
     if (onProgress) { try { onProgress(); } catch {} }
   }

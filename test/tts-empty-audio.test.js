@@ -107,9 +107,14 @@ console.log('[2] assertRealAudio — pipeline.js 원문 실행');
   try { fn(null, 5); } catch { threw = true; }
   ok(threw, 'res 자체가 없으면 실패로 본다');
 
-  ok(/assertRealAudio\(res, s\.num\)/.test(src), '재시도 루프 안에서 호출한다(= 3회 재시도가 받는다)');
-  const loop = src.match(/for \(let attempt = 1; attempt <= 3; attempt\+\+\) \{[\s\S]*?\n    \}/);
+  // ⚠ 인자 **이름**을 못박지 않는다(호출된다는 사실만 본다) — 이름을 박으면 리팩터링에 헛실패한다.
+  ok(/assertRealAudio\(\s*\w+\s*,\s*s\.num\s*\)/.test(src), '재시도 루프 안에서 호출한다(= 재시도가 받는다)');
+  // 🔑 검사를 **통과한 뒤에만** res 에 담는다 — 먼저 대입하면 빈 결과가 res 에 남아 그대로 저장된다.
+  ok(!/res = await ttsMgr\.synthesize/.test(src), '🔴 synthesize 결과를 res 에 먼저 대입하지 않는다');
+  // ⚠ 상한이 상수화되어 `attempt <= maxAttempt` 다(빈 음성이면 상한을 늘리므로 숫자를 못박을 수 없다)
+  const loop = src.match(/for \(let attempt = 1; attempt <= maxAttempt; attempt\+\+\) \{[\s\S]*?\n    \}/);
   ok(!!loop && /assertRealAudio/.test(loop[0]), '🔑 호출 위치가 try 안(재시도 루프)이다');
+  ok(!!loop && /emptyAudio/.test(loop[0]), '🔑 그 루프가 빈 음성을 따로 갈라낸다(시드 교체 분기)');
 }
 
 console.log('[3] .vrew 게이트 — main.js 원문 실행');
@@ -181,5 +186,81 @@ console.log('[5] 소스 위생');
   ok(!/\r\n/.test(readSrc('main.js')), 'main.js 는 LF 유지(테스트가 원문을 LF 로 자른다)');
 }
 
-console.log(`\n${fails.length ? '❌' : '✅'} tts-empty-audio: ${pass}/${pass + fails.length}`);
-if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }
+// ── [6] 실사고 그대로 재현 — fillTtsList 를 **진짜로 돌려** 시드 교체가 그 문장을 구해내는지 ──
+//   2026-09-13 실측: '그렇습니다.' × seed 40469 → 서버가 44바이트를 돌려준다(3/3 재현).
+//   근접 시드(40468·40470·40471)도 그대로 실패했고 멀리 떨어진 시드에서만 정상이 나왔다.
+//   그래서 **같은 입력으로 3번 재시도한 것이 무의미**했다 — 시드를 갈아끼워야 빠져나온다.
+(async () => {
+  console.log('[6] 실사고 재현 — fillTtsList 실행(가짜 서버가 그 결함을 흉내낸다)');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ttspipe-'));
+  const savedHome = process.env.HOME, savedUp = process.env.USERPROFILE;
+  const realHomedir = os.homedir;
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  os.homedir = () => home;
+  for (const m of ['core/tts-cache.js', 'core/media-cache.js', 'core/pipeline.js']) {
+    try { delete require.cache[require.resolve(path.join(ROOT, m))]; } catch {}
+  }
+  const P = require(path.join(ROOT, 'core/pipeline.js'));
+
+  const preset = { voiceCloneRefAudio: 'srv:#05_득수_낭독2', seed: 40469, language: 'ko', ttsNormalize: false };
+  const GOOD = makeWav(24000);
+
+  // 가짜 서버: **결함 시드에서만** 헤더뿐인 WAV 를 돌려준다(실제 OmniVoice 와 똑같이 예외 없이 200).
+  function mkMgr(alwaysEmpty) {
+    const seeds = [];
+    return {
+      seeds,
+      processText: (t) => t,
+      prepareDict: async () => {},
+      synthesize: async (_text, opts) => {
+        seeds.push(opts.seed);
+        const empty = alwaysEmpty || opts.seed === 40469;
+        return empty
+          ? { mp3Buffer: EMPTY_44, durationSec: 0.5, format: 'wav' }   // 옛 provider 가 주던 그 모양
+          : { mp3Buffer: GOOD, durationSec: 1.0, format: 'wav' };
+      },
+    };
+  }
+
+  // ⓐ 결함 시드 → 시드를 갈아끼워 살아난다
+  {
+    const wd = fs.mkdtempSync(path.join(os.tmpdir(), 'ttswork-'));
+    const mgr = mkMgr(false);
+    const lines = [];
+    const sents = [{ num: 857, text: '그렇습니다.', charCount: 6 }];
+    const r = await P.fillTtsList(sents, preset, mgr, wd, (l) => lines.push(l), null, 1, '테스트');
+    eq(r.failed.length, 0, '🔴 실사고 문장이 실패 없이 완성된다');
+    eq(mgr.seeds[0], 40469, '첫 시도는 채널 시드 그대로(재현성 유지)');
+    ok(mgr.seeds.length >= 2, '빈 음성이라 다시 시도했다');
+    ok(mgr.seeds[1] !== 40469, '🔑 두 번째는 **다른 시드**다(같은 시드로 또 보내면 똑같이 빈 음성)');
+    ok(mgr.seeds.slice(1).every((s) => Math.abs(s - 40469) > 100), '근접 시드로 밀지 않는다(±1~2 는 실측에서 그대로 실패했다)');
+    ok(!!sents[0].ttsSeedSwapped, '시드를 바꿨다는 사실이 문장에 남는다');
+    ok(fs.statSync(sents[0].ttsAudioPath).size >= 1200, '저장된 파일에 실제 소리가 들어 있다');
+    ok(lines.some((l) => /시드를 .* 바꿔/.test(l)), '무슨 일이 있었는지 로그에 남는다');
+    ok(lines.some((l) => /시드 교체/.test(l)), '완료 로그에도 표시된다(왜 이 문장만 톤이 다를 수 있는지)');
+    fs.rmSync(wd, { recursive: true, force: true });
+  }
+
+  // ⓑ 어떤 시드로도 안 되면 — 조용히 넘어가지 않고 실패로 남긴다(게이트가 .vrew 를 막는다)
+  {
+    const wd = fs.mkdtempSync(path.join(os.tmpdir(), 'ttswork2-'));
+    const mgr = mkMgr(true);
+    const lines = [];
+    // ⚠ ⓐ 와 **다른 문장**이어야 한다 — 같은 문장이면 ⓐ 가 캐시에 넣은 음성이 적중해 합성을 아예 안 한다.
+    const sents = [{ num: 857, text: '어떤 시드로도 안 되는 문장입니다.', charCount: 18 }];
+    const r = await P.fillTtsList(sents, preset, mgr, wd, (l) => lines.push(l), null, 1, '테스트');
+    eq(r.failed[0], 857, '끝내 안 되면 실패 목록에 남는다');
+    ok(mgr.seeds.length >= 4, `빈 음성이면 재시도 여유를 더 준다 (실제 ${mgr.seeds.length}회)`);
+    ok(!sents[0].ttsAudioPath, '🔑 빈 파일을 남기지 않는다(= .vrew 에 실릴 물건이 없다)');
+    ok(!fs.existsSync(path.join(wd, '857.wav')), '작업폴더에도 빈 파일이 없다');
+    fs.rmSync(wd, { recursive: true, force: true });
+  }
+
+  os.homedir = realHomedir;
+  if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  if (savedUp === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUp;
+  fs.rmSync(home, { recursive: true, force: true });
+
+  console.log(`\n${fails.length ? '❌' : '✅'} tts-empty-audio: ${pass}/${pass + fails.length}`);
+  if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1); }
+})();
