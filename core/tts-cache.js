@@ -57,6 +57,9 @@ function get(key) {
 // 합성 결과를 캐시에 저장(파일 복사 + 인덱스 기록).
 function put(key, srcPath, dur, ext) {
   try {
+    // 🔴 빈 음성은 캐시에 넣지 않는다 — 넣으면 다시 만들어도 **깨진 음성이 그대로 되살아난다**
+    //   (2026-09-06 컷857 의 44바이트 wav 가 실제로 캐시에 들어가 있었다).
+    if (!(fs.statSync(srcPath).size >= 1200)) return;
     fs.mkdirSync(DIR, { recursive: true });
     fs.copyFileSync(srcPath, path.join(DIR, `${key}.${ext}`));
     const idx = _idx();

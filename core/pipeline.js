@@ -139,6 +139,21 @@ async function makeTtsManager(logger, engine, opts = {}) {
   return { mgr, ok };
 }
 
+// 🔴 합성 결과가 **실제 소리**인지 — provider 를 가리지 않는 마지막 안전망.
+//   2026-09-06 [서재_0920] 11부 컷857: OmniVoice 가 HTTP 200 으로 헤더만 든 44바이트 wav 를 돌려줬고,
+//   그게 0.50초짜리 정상 음성 행세를 하며 캐시·.vrew 까지 흘러가 Vrew 렌더링을 1339번 클립에서
+//   `C166/E01`(오디오 디코딩 실패)로 멈춰 세웠다. 여기서 던지면 위 3회 재시도가 받는다.
+//   ⚠ 24kHz 16bit mono 0.025초 = 1200B. 어떤 포맷(wav·mp3)이든 이보다 작으면 소리가 들어 있을 수 없다.
+const MIN_TTS_BYTES = 1200;
+const MIN_TTS_SEC = 0.05;
+function assertRealAudio(res, num) {
+  const len = res && res.mp3Buffer ? res.mp3Buffer.length : 0;
+  const dur = Number(res && res.durationSec) || 0;
+  if (len < MIN_TTS_BYTES || dur < MIN_TTS_SEC) {
+    throw new Error(`빈 음성이 돌아왔습니다 (${len}바이트 · ${dur.toFixed(3)}초) — 서버가 컷${num} 을 합성하지 못했습니다`);
+  }
+}
+
 // WAV(정속) → atempo 배속 + (선택)음량 정규화 를 **한 번의 ffmpeg 호출**로 구운 MP3.
 //   피치는 atempo 라 유지된다. gainDb=0 이면 배속만, tempo=1 이면 정규화만 한다. 성공 시 true.
 //   ⚠ 필터 순서(배속→증폭→리미터)는 audio-normalize.buildFilter 가 정한다.
@@ -274,7 +289,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     //     **연속 5문장 실패면 그 대본 TTS 를 중단**한다(그 뒤 문장은 시도하지 않는다).
     let res = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
-      try { res = await ttsMgr.synthesize(s.text, synthOpts); break; }
+      try { res = await ttsMgr.synthesize(s.text, synthOpts); assertRealAudio(res, s.num); break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
         if (attempt >= 3) {

@@ -3615,8 +3615,16 @@ async function buildForMode(outMode, pr, build) {
   return build();
 }
 
+// 🔑 음성이 **없거나 비어 있는** 문장 번호. 파일 존재만 보면 안 된다 —
+//   2026-09-06 [서재_0920] 11부 컷857 은 44바이트(헤더만) wav 가 '있는' 상태로 게이트를 통과해
+//   .vrew 에 실렸고, Vrew 렌더링이 1339번 클립에서 `C166/E01`(오디오 디코딩 실패)로 멈췄다.
+//   ⚠ 24kHz 16bit mono 0.025초 = 1200B. 어떤 포맷이든 이보다 작으면 소리가 들어 있을 수 없다.
+const MIN_TTS_FILE_BYTES = 1200;
+function ttsFileOk(p) {
+  try { return !!p && fs.statSync(p).size >= MIN_TTS_FILE_BYTES; } catch { return false; }
+}
 function missingTtsNums(project) {
-  return (project.sentences || []).filter((s) => !(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))).map((s) => s.num);
+  return (project.sentences || []).filter((s) => !ttsFileOk(s.ttsAudioPath)).map((s) => s.num);
 }
 function warnMissingTts(list) {
   if (!list || !list.length) return;
@@ -3626,7 +3634,7 @@ function warnMissingTts(list) {
     dialog.showMessageBox(win, {
       type: 'warning',
       title: '음성(TTS) 누락 — .vrew 를 만들지 않았습니다',
-      message: '음성이 없는 문장이 있어 해당 편의 .vrew 를 만들지 않았습니다. (그대로 만들면 앞부분만 소리가 나는 반쪽 영상이 됩니다)',
+      message: '음성이 없거나 비어 있는 문장이 있어 해당 편의 .vrew 를 만들지 않았습니다.\n(그대로 만들면 앞부분만 소리가 나는 반쪽 영상이 되거나, Vrew 렌더링이 그 클립에서 멈춥니다)',
       detail: `${detail}\n\n「🎤 TTS」를 다시 눌러 빠진 문장만 채운 뒤 다시 시도하세요.\n(이미 만든 음성은 건너뛰므로 빠진 것만 새로 합성합니다.)`,
       buttons: ['확인'],
     });
@@ -4271,7 +4279,7 @@ function _missingAudioRatio(parsed) {
   for (const pr of (parsed && parsed.projects) || []) {
     for (const s of pr.sentences) {
       total++;
-      if (!(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))) missing++;
+      if (!ttsFileOk(s.ttsAudioPath)) missing++;   // 🔑 '있지만 비어 있는' 파일도 없는 것으로 본다(컷857 계열)
     }
   }
   return total ? missing / total : 0;

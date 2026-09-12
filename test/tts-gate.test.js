@@ -28,9 +28,19 @@ function extract(src, name) {
 }
 
 // ── ① missingTtsNums — main.js 원문에서 뽑아 실행 ──
-const missingTtsNums = new Function('fs', extract(MAIN, 'missingTtsNums') + '\nreturn missingTtsNums;')(fs);
+//   ⚠ 게이트는 `ttsFileOk`(파일 크기까지 본다)에 의존한다 — 2026-09-13 부터 '있지만 비어 있는' 파일도
+//     누락으로 잡기 때문(컷857 · 44바이트 wav 가 .vrew 에 실려 Vrew 렌더링이 멈춘 사고).
+//     그래서 헬퍼와 임계 상수도 **원문에서 함께** 뽑는다(여기에 숫자를 적어 두면 앱과 갈라진다).
+const MIN_LINE = (MAIN.match(/const MIN_TTS_FILE_BYTES = \d+;/) || [''])[0];
+if (!MIN_LINE) throw new Error('MIN_TTS_FILE_BYTES 를 main.js 에서 찾을 수 없습니다');
+const missingTtsNums = new Function(
+  'fs',
+  MIN_LINE + '\n' + extract(MAIN, 'ttsFileOk') + '\n' + extract(MAIN, 'missingTtsNums') + '\nreturn missingTtsNums;'
+)(fs);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ttsgate-'));
-const mk = (name) => { const p = path.join(tmp, name); fs.writeFileSync(p, 'x'); return p; };
+// 🔑 '음성이 있다'의 대역은 **실제 음성만 한 크기**여야 한다. 예전엔 1바이트('x')였는데,
+//   그건 이제 '빈 파일'로 잡히는 게 맞다(그게 이 게이트가 새로 막는 사고다).
+const mk = (name) => { const p = path.join(tmp, name); fs.writeFileSync(p, Buffer.alloc(48000)); return p; };
 const prAll = { sentences: [{ num: 1, ttsAudioPath: mk('1.mp3') }, { num: 2, ttsAudioPath: mk('2.mp3') }] };
 const prSome = {
   sentences: [

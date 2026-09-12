@@ -24,6 +24,41 @@ const { quietGet } = require('../quiet-http');
 const PROVIDER_ID = 'omnivoice';
 const DEFAULT_BASE_URL = 'http://127.0.0.1:9881';
 
+// 이보다 짧으면 '소리가 없다'고 본다. 실제 가장 짧은 문장이 0.58초였으므로 0.05초는 충분히 보수적이다.
+const MIN_AUDIO_SEC = 0.05;
+
+/**
+ * WAV 버퍼의 실제 길이(초)를 잰다.
+ * 🔑 **헤더 44바이트 고정을 가정하지 않고 data 청크를 찾는다** — LIST/fact 청크가 붙으면
+ *   `length - 44` 는 과대 추정이 된다. 전송이 끊겨 헤더가 적은 크기보다 파일이 짧으면 실제 바이트로 자른다.
+ *   WAV 가 아니거나 data 가 없으면 0 을 돌려준다(= 호출부가 실패로 처리).
+ */
+function measureWav(buf) {
+  const fail = { durationSec: 0, sampleRate: 24000, dataSize: 0 };
+  if (!buf || buf.length < 44) return fail;
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return fail;
+  let sampleRate = 24000, channels = 1, bits = 16, dataSize = 0, seen = false;
+  let p = 12;
+  while (p + 8 <= buf.length) {
+    const id = buf.toString('ascii', p, p + 4);
+    const size = buf.readUInt32LE(p + 4);
+    const body = p + 8;
+    if (id === 'fmt ' && body + 16 <= buf.length) {
+      channels = buf.readUInt16LE(body + 2) || 1;
+      sampleRate = buf.readUInt32LE(body + 4) || 24000;
+      bits = buf.readUInt16LE(body + 14) || 16;
+    } else if (id === 'data') {
+      dataSize = Math.min(size, Math.max(0, buf.length - body));
+      seen = true;
+      break;
+    }
+    p = body + size + (size % 2);
+  }
+  if (!seen) dataSize = Math.max(0, buf.length - 44);
+  const bytesPerSec = sampleRate * channels * Math.max(1, Math.floor(bits / 8));
+  return { durationSec: bytesPerSec > 0 ? dataSize / bytesPerSec : 0, sampleRate, dataSize };
+}
+
 /** secret-store 의 omnivoice.apiKey 가 있으면 X-API-Key 헤더 반환 */
 function _authHeaders() {
   try {
@@ -142,10 +177,16 @@ class OmniVoiceProvider {
     const arrayBuffer = await response.arrayBuffer();
     const wavBuffer = Buffer.from(arrayBuffer);
 
-    // OmniVoice는 24kHz 16-bit mono WAV 반환
-    const dataSize = Math.max(0, wavBuffer.length - 44);
-    const sr = wavBuffer.length >= 28 ? wavBuffer.readUInt32LE(24) : 24000;
-    const durationSec = Math.max(0.5, dataSize / (sr * 2));
+    // OmniVoice는 24kHz 16-bit mono WAV 반환.
+    // 🔴 **빈 WAV 를 정상으로 넘기지 않는다** — 서버가 HTTP 200 으로 헤더만(샘플 0개) 돌려주는 일이
+    //   실제로 있었다(2026-09-06 [서재_0920] 비밀의 화원 11부 컷857 = 44바이트 wav).
+    //   옛 코드의 `Math.max(0.5, …)` 바닥값이 그걸 **0.50초짜리 정상 음성으로 위장**시켜
+    //   캐시·.vrew 까지 흘려보냈고, Vrew 렌더링이 1339번 클립에서 `C166/E01`(오디오 디코딩 실패)로 멈췄다.
+    //   여기서 던지면 fillTts 의 3회 재시도가 받는다(대개 다음 시도에 정상 음성이 온다).
+    const { durationSec } = measureWav(wavBuffer);
+    if (!(durationSec >= MIN_AUDIO_SEC)) {
+      throw new Error(`OmniVoice 가 빈 음성을 돌려줬습니다 (${wavBuffer.length}바이트 · ${durationSec.toFixed(3)}초) — 그 문장을 합성하지 못했습니다`);
+    }
 
     return {
       mp3Buffer: wavBuffer,
@@ -220,4 +261,4 @@ class OmniVoiceProvider {
   }
 }
 
-module.exports = { OmniVoiceProvider };
+module.exports = { OmniVoiceProvider, measureWav, MIN_AUDIO_SEC };
