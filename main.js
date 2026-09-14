@@ -4027,6 +4027,25 @@ function scriptHash(scriptPath) {
   try { return require('crypto').createHash('sha1').update(fs.readFileSync(scriptPath)).digest('hex').slice(0, 16); }
   catch { return ''; }
 }
+// 스냅샷 해시 규약 버전. 🔴 v0.4.6 은 **작업본을 이어받은 경우에도** 「현재 대본 해시」를 심어
+//   「바뀐 대본의 해시 + 옛 파싱 결과」를 기록했다(= 영구 고착). 그때 만들어진 srcHash 는 믿을 수 없으므로
+//   **hashVer 가 이 값 이상일 때만** 해시를 신뢰하고, 그 밖에는 문장 시퀀스로 다시 판정한다(일회성).
+const SNAP_HASH_VER = 2;
+// 스냅샷의 문장들이 지금 대본과 같은가 — 해시를 믿을 수 없을 때 쓰는 **정확한** 판정.
+//   🔑 ✂분할·병합·도입부 재배치는 **그룹 경계만** 바꾸고 문장 자체는 그대로다 → 문장 시퀀스는
+//      대본과 1:1 로 대응한다. 그래서 이 비교는 사용자의 편집을 잃지 않고 수정 여부만 가려낸다.
+function snapshotMatchesScript(parsed, snap) {
+  try {
+    const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+    const a = [];
+    for (const pr of parsed.projects) for (const g of pr.groups) for (const s of pr.getSentencesOfGroup(g)) a.push(norm(s.text));
+    const b = [];
+    for (const ps of (snap.projects || [])) for (const gs of (ps.groups || [])) for (const ss of (gs.sentences || [])) b.push(norm(ss.text));
+    if (!a.length || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  } catch { return false; }
+}
 // 대본(.md) 1개 → parsed 빌드(+자동저장 스냅샷 복원). open-script·큐복원 공용.
 //   대본 미수정 → 작업본 그대로, 수정됨 → 새로 파싱 후 자산 overlay.
 //   opts.force = 스냅샷을 무시하고 무조건 새로 파싱(「🔄 대본 다시 읽기」 버튼).
@@ -4035,17 +4054,26 @@ function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
   try { const { file } = snapshotFile(scriptPath); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   // 옛 쇼츠 스냅샷(snap.mode==='shorts')은 이어받지 않는다 — 롱폼 파서로 새로 파싱(자산 overlay 도 안 함).
   const sameMode = snap && snap.mode === 'longform' && mode === 'longform';
-  let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
   const mdHash = scriptHash(scriptPath);
-  // 🔴 실사고(2026-09-14): 예전 판정은 `snap.savedAt >= mdMtime` 이었다. savedAt 은 **앱이 마지막으로
-  //   자동저장한 시각**일 뿐이라, 대본을 고친 뒤 앱에서 아무거나 건드리면(자동저장 8곳·1.5초 디바운스)
-  //   savedAt 이 mtime 을 넘어서고 **그 대본은 몇 번을 다시 열어도 영원히 옛 작업본**이 나왔다.
-  //   (실측: 하이디 1부 — .md 18:14:02 수정 → 스냅샷 18:18:47 저장 → 최근 10개 중 9개가 이 상태)
-  //   ⇒ 이제 **파싱 당시 대본 해시**(snap.srcHash)와 지금 해시를 비교한다. 옛 스냅샷엔 srcHash 가
-  //      없으므로 그때만 예전 방식으로 폴백한다(하위호환 — 그 경우에도 자산은 overlay 로 살아난다).
-  const fresh = snap && (snap.srcHash
-    ? (!!mdHash && snap.srcHash === mdHash)
-    : (!!snap.savedAt && snap.savedAt >= mdMtime));
+  // 🔴 실사고 둘을 한 번에 막는다.
+  //   ① 원래 판정은 `snap.savedAt >= mdMtime` 이었다. savedAt 은 **앱이 마지막으로 자동저장한 시각**일
+  //      뿐이라, 대본을 고친 뒤 앱에서 아무거나 건드리면(자동저장 8곳·1.5초 디바운스) savedAt 이 mtime 을
+  //      넘어서고 **그 대본은 몇 번을 다시 열어도 영원히 옛 작업본**이 나왔다.
+  //      (실측: 하이디 1부 — .md 18:14:02 수정 → 스냅샷 18:18:47 저장. 최근 10개 중 9개가 그 상태)
+  //   ② v0.4.6 이 넣은 해시 판정은 **작업본 경로에서도 현재 대본 해시를 심어** 더 나쁘게 고착시켰다.
+  //   ⇒ **해시는 hashVer 가 찍힌 것만 믿고**, 그 밖에는 **문장 시퀀스**로 정확히 판정한다.
+  //      문장 비교는 파싱을 한 번 하지만 **그 결과를 그대로 재사용**하므로 낭비가 없고, 판정 뒤에는
+  //      hashVer 가 찍혀 다음부터는 해시(파일 읽기 1회)로 끝난다.
+  let preParsed = null, fresh = false;
+  if (sameMode) {
+    if (snap.srcHash && Number(snap.hashVer) >= SNAP_HASH_VER) {
+      fresh = !!mdHash && snap.srcHash === mdHash;
+    } else {
+      // 믿을 수 없는 스냅샷(옛 것 · v0.4.6 오염) — 실제 문장으로 가린다.
+      try { preParsed = P.parseScript(scriptPath, mode, presetThresholds(preset)); } catch { preParsed = null; }
+      fresh = !!preParsed && snapshotMatchesScript(preParsed, snap);
+    }
+  }
   let parsed;
   if (!opts.force && sameMode && fresh) {
     const projects = projectsFromSnapshot(snap);
@@ -4054,15 +4082,17 @@ function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
     parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode };
     note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
   } else {
-    parsed = P.parseScript(scriptPath, mode, presetThresholds(preset));
+    parsed = preParsed || P.parseScript(scriptPath, mode, presetThresholds(preset)); // 판정에 쓴 파싱 재사용
     if (sameMode) {
       const n = overlaySnapshot(parsed, snap);
       const why = opts.force ? '대본 다시 읽기' : '대본 수정 감지';
       note = n ? `♻ ${why} — 새로 파싱하고 기존 자산 ${n}개를 복원했습니다` : `♻ ${why} — 새로 파싱했습니다`;
     }
   }
-  // 🔑 **파싱한 그 순간의 해시를 심어 둔다.** 저장할 때 다시 계산하면(buildSnapshot) 그 사이 대본이
-  //   바뀐 경우 「바뀐 대본의 해시 + 옛 파싱 결과」가 기록돼 같은 사고가 그대로 재발한다.
+  // 🔑 **파싱(또는 「같다」고 확인)한 그 순간의 해시를 심는다.** 저장할 때 다시 계산하면(buildSnapshot)
+  //   그 사이 대본이 바뀐 경우 「바뀐 대본의 해시 + 옛 파싱 결과」가 기록돼 사고가 재발한다.
+  //   ⚠ 여기서 mdHash 를 쓰는 것이 안전한 이유는 **위 판정이 정확하기 때문**이다(작업본을 쓰는 경우는
+  //      해시가 같거나 문장이 같다고 확인된 때뿐). 판정을 느슨하게 되돌리면 이 줄이 고착을 만든다.
   try { Object.defineProperty(parsed, '_srcHash', { value: mdHash, enumerable: false, writable: true }); } catch { parsed._srcHash = mdHash; }
   applyIntroFromScript(parsed, scriptPath, mode); // 도입부(isIntro)는 .md 가 출처 — 항상 재계산(복원 대본 색 누락 방지)
   // 통합대본이면 자산출처 개수를 실어 둔다 → toDTO 가 그대로 내보내 헤더 「📥 이어받기」 버튼이 뜬다.
@@ -4098,6 +4128,7 @@ function buildSnapshot() {
     savedAt: Date.now(),
     // 🔑 **파싱 당시** 대본 해시(buildParsedForScript 가 심은 값). 여기서 다시 계산하지 않는다.
     srcHash: (S.parsed && S.parsed._srcHash) || '',
+    hashVer: SNAP_HASH_VER, // 이 버전이 찍힌 해시만 신뢰한다(v0.4.6 오염분 자동 재판정)
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
