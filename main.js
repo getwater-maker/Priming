@@ -4020,16 +4020,34 @@ function snapshotFile(scriptPath) {
   const base = P.sanitize(path.basename(sp || 'project').replace(/\.md$/i, ''));
   return { projDir, file: path.join(projDir, base + '.smproj.json') };
 }
+// 🔑 대본(.md) 내용 해시 — 「이 작업본이 어느 버전의 대본에서 나왔는가」를 가리는 유일한 기준.
+//   ⛔ mtime 을 쓰지 않는 이유: 구글드라이브 동기화가 내용은 그대로 둔 채 mtime 만 바꾸면
+//      멀쩡한 작업본(그룹 분할·제목 편집)을 버리게 된다. 해시는 내용이 진짜 바뀔 때만 반응한다.
+function scriptHash(scriptPath) {
+  try { return require('crypto').createHash('sha1').update(fs.readFileSync(scriptPath)).digest('hex').slice(0, 16); }
+  catch { return ''; }
+}
 // 대본(.md) 1개 → parsed 빌드(+자동저장 스냅샷 복원). open-script·큐복원 공용.
 //   대본 미수정 → 작업본 그대로, 수정됨 → 새로 파싱 후 자산 overlay.
-function buildParsedForScript(scriptPath, mode, preset) {
+//   opts.force = 스냅샷을 무시하고 무조건 새로 파싱(「🔄 대본 다시 읽기」 버튼).
+function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
   let note = '', snap = null;
   try { const { file } = snapshotFile(scriptPath); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   // 옛 쇼츠 스냅샷(snap.mode==='shorts')은 이어받지 않는다 — 롱폼 파서로 새로 파싱(자산 overlay 도 안 함).
   const sameMode = snap && snap.mode === 'longform' && mode === 'longform';
   let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
+  const mdHash = scriptHash(scriptPath);
+  // 🔴 실사고(2026-09-14): 예전 판정은 `snap.savedAt >= mdMtime` 이었다. savedAt 은 **앱이 마지막으로
+  //   자동저장한 시각**일 뿐이라, 대본을 고친 뒤 앱에서 아무거나 건드리면(자동저장 8곳·1.5초 디바운스)
+  //   savedAt 이 mtime 을 넘어서고 **그 대본은 몇 번을 다시 열어도 영원히 옛 작업본**이 나왔다.
+  //   (실측: 하이디 1부 — .md 18:14:02 수정 → 스냅샷 18:18:47 저장 → 최근 10개 중 9개가 이 상태)
+  //   ⇒ 이제 **파싱 당시 대본 해시**(snap.srcHash)와 지금 해시를 비교한다. 옛 스냅샷엔 srcHash 가
+  //      없으므로 그때만 예전 방식으로 폴백한다(하위호환 — 그 경우에도 자산은 overlay 로 살아난다).
+  const fresh = snap && (snap.srcHash
+    ? (!!mdHash && snap.srcHash === mdHash)
+    : (!!snap.savedAt && snap.savedAt >= mdMtime));
   let parsed;
-  if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
+  if (!opts.force && sameMode && fresh) {
     const projects = projectsFromSnapshot(snap);
     const fmt = 'longform';
     for (const pr of projects) { pr.mode = mode; if (!pr.format) pr.format = fmt; }
@@ -4037,8 +4055,15 @@ function buildParsedForScript(scriptPath, mode, preset) {
     note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
   } else {
     parsed = P.parseScript(scriptPath, mode, presetThresholds(preset));
-    if (sameMode) { const n = overlaySnapshot(parsed, snap); if (n) note = `♻ 대본 수정 감지 — 기존 자산 ${n}개 복원`; }
+    if (sameMode) {
+      const n = overlaySnapshot(parsed, snap);
+      const why = opts.force ? '대본 다시 읽기' : '대본 수정 감지';
+      note = n ? `♻ ${why} — 새로 파싱하고 기존 자산 ${n}개를 복원했습니다` : `♻ ${why} — 새로 파싱했습니다`;
+    }
   }
+  // 🔑 **파싱한 그 순간의 해시를 심어 둔다.** 저장할 때 다시 계산하면(buildSnapshot) 그 사이 대본이
+  //   바뀐 경우 「바뀐 대본의 해시 + 옛 파싱 결과」가 기록돼 같은 사고가 그대로 재발한다.
+  try { Object.defineProperty(parsed, '_srcHash', { value: mdHash, enumerable: false, writable: true }); } catch { parsed._srcHash = mdHash; }
   applyIntroFromScript(parsed, scriptPath, mode); // 도입부(isIntro)는 .md 가 출처 — 항상 재계산(복원 대본 색 누락 방지)
   // 통합대본이면 자산출처 개수를 실어 둔다 → toDTO 가 그대로 내보내 헤더 「📥 이어받기」 버튼이 뜬다.
   try { parsed.mergeSources = require('./core/merge-assets').parseAssetSources(fs.readFileSync(scriptPath, 'utf8')).length; } catch { parsed.mergeSources = 0; }
@@ -4071,6 +4096,8 @@ function buildSnapshot() {
   return {
     scriptPath: S.scriptPath, fileTitle: S.parsed.fileTitle, meta: S.parsed.meta, outRoot: S.outRoot, mode: currentMode(),
     savedAt: Date.now(),
+    // 🔑 **파싱 당시** 대본 해시(buildParsedForScript 가 심은 값). 여기서 다시 계산하지 않는다.
+    srcHash: (S.parsed && S.parsed._srcHash) || '',
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
@@ -4397,6 +4424,22 @@ async function mergeAssetsInteractive(opts = {}) {
   if (r.ok) { storeActive(); pushDtoUpdate(); writeSnapshotSync(); }
   return r;
 }
+
+// 🔄 대본 다시 읽기 — 스냅샷을 무시하고 .md 를 새로 파싱한다(자산은 overlay 로 유지).
+//   해시 판정(위)이 정상이면 누를 일이 없지만, 판정이 어떤 이유로든 어긋났을 때 빠져나올 길을 남긴다.
+ipcMain.handle('reload-script', async () => {
+  if (!S.parsed || !S.scriptPath) throw new Error('대본을 먼저 여세요.');
+  if (!fs.existsSync(S.scriptPath)) throw new Error(`대본 파일을 찾을 수 없습니다 — ${S.scriptPath}`);
+  const { parsed, note } = buildParsedForScript(S.scriptPath, currentMode(), S.preset, { force: true });
+  S.parsed = parsed;
+  applyIntroFromScript(S.parsed, S.scriptPath, currentMode());
+  storeActive();
+  log(note || '♻ 대본 다시 읽기 — 새로 파싱했습니다');
+  log(`편수 ${S.parsed.projects.length} · ${S.parsed.fileTitle}`);
+  scheduleAutoSave();   // 새 해시로 스냅샷을 갱신해 다음에 열 때도 이 상태가 이어진다
+  pushDtoUpdate();
+  return currentDTO();
+});
 
 // 수동 재실행 — 헤더 「📥 이어받기」 버튼.
 ipcMain.handle('merge-prefill', async () => {

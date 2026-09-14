@@ -586,6 +586,14 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 📥 통합본 자산 이어받기 — 기존 회차의 TTS·이미지·비디오를 이 작업폴더로 복사·연결(재실행 안전).
+  // 🔄 대본(.md)을 다시 읽는다 — 스냅샷(작업본)을 무시하고 새로 파싱(자산은 그대로 복원).
+  //   내용 해시 판정이 정상이면 누를 일이 없다. 판정이 어긋났을 때의 탈출구.
+  async function runReloadScript() {
+    setStatus('🔄 대본 다시 읽기…');
+    try { const d = await api.reloadScript(); if (d) setDto(d); setStatus('대본 다시 읽음'); }
+    catch (e) { logline('대본 다시 읽기 오류: ' + e.message); setStatus('오류'); }
+  }
+
   async function runMergePrefill() {
     setStatus('📥 자산 이어받기…');
     try { const d = await api.mergePrefill(); if (d) setDto(d); setStatus('이어받기 완료'); }
@@ -2044,6 +2052,8 @@ export default function App() {
       짧은 <input type="number" value={splitOpts.short} onChange={(e) => changeSplit('short', e.target.value)} />
       긴 <input type="number" value={splitOpts.long} onChange={(e) => changeSplit('long', e.target.value)} />
       {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 10초 기준으로 도입부 그룹 재배치" onClick={runIntroVideo}>🎬 도입부 TTS+10초 재배치</button>}
+      {/* 🔄 대본을 고쳤는데 옛 내용이 보일 때 — 스냅샷 무시하고 .md 를 새로 파싱(자산 유지). */}
+      <button className="ghost" disabled={!loaded} title="대본(.md)을 다시 읽습니다 — 만들어 둔 음성·이미지·비디오는 그대로 복원됩니다. (대본을 고치면 보통 자동으로 반영되므로, 그래도 옛 내용이 보일 때만 누르세요)" onClick={runReloadScript}>🔄 대본 다시 읽기</button>
       {/* 📥 통합대본('> 📥 자산출처:' 메타)일 때만 — 각 부의 기존 음성·이미지·비디오를 이어받는다(재생성 0). */}
       {mergeSources > 0 && <button className="ghost" disabled={!loaded} title={`자산출처 ${mergeSources}개에서 기존 TTS·이미지·비디오를 이 작업폴더로 복사해 연결합니다 (대본 열 때 자동 실행 — 이 버튼은 재실행용)`} onClick={runMergePrefill}>📥 이어받기</button>}
     </span>

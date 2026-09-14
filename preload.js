@@ -171,6 +171,7 @@ contextBridge.exposeInMainWorld('api', {
   introVideoPrep: (args) => ipcRenderer.invoke('intro-video-prep', args),
   // 📥 통합본 자산 이어받기 — 각 부의 기존 TTS·이미지·비디오를 통합대본 작업폴더로 복사·연결.
   mergePrefill: () => ipcRenderer.invoke('merge-prefill'),
+  reloadScript: () => ipcRenderer.invoke('reload-script'),
   exportPrompts: (args) => ipcRenderer.invoke('export-prompts', args),
   importPrompts: (args) => ipcRenderer.invoke('import-prompts', args),
   generatePromptsApi: (args) => ipcRenderer.invoke('generate-prompts-api', args),
