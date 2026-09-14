@@ -4595,7 +4595,8 @@ async function runMakeAllCore(opts = {}) {
     if (preset) {
       const _rv = String(preset.voiceCloneRefAudio || '');
       const _vn = _rv.startsWith('srv:') ? ('☁ ' + _rv.slice(4)) : (_rv ? path.basename(_rv) : '⚠ 참조음성 없음');
-      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (채널 「${preset.name}」 · 목소리 ${_vn} · 시드 ${preset.seed != null ? preset.seed : '-'} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1})`);
+      const _pd = Number(preset.silenceSec) > 0 ? ` · 문장무음 ${Number(preset.silenceSec)}초` : '';
+      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (채널 「${preset.name}」 · 목소리 ${_vn} · 시드 ${preset.seed != null ? preset.seed : '-'} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1}${_pd})`);
     } else {
       log('🎙 1단계 — 음성(TTS) 일괄 변환… (⚠ 채널을 찾지 못했습니다)');
     }

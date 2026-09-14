@@ -104,12 +104,18 @@ function gainForTarget(measured, targetDb = TARGET_DB_DEFAULT) {
  * ffmpeg 오디오 필터 문자열을 만든다. tempo·gain 둘 다 없으면 null(= ffmpeg 불필요).
  * 순서는 **배속(atempo) → 증폭(volume)**. 리미터·압축은 쓰지 않는다(위 주석 참조).
  */
-function buildFilter(tempo, gainDb) {
+function buildFilter(tempo, gainDb, padSec) {
   const parts = [];
   if (tempo && Math.abs(tempo - 1) > 1e-6) parts.push(`atempo=${tempo}`);
   // 게인은 순수 볼륨 조절뿐 — 리미터·압축을 걸지 않으므로 파형이 그대로 유지된다(왜곡 0).
   //   피크가 넘지 않는 것은 gainForTarget 이 이미 보장한다.
   if (gainDb) parts.push(`volume=${gainDb}dB`);
+  // 🔇 문장 뒤 무음(채널 「문장무음」) — **반드시 맨 끝**, 즉 atempo 보다 뒤여야 한다.
+  //   앞에 두면 배속에 눌려 1.5초가 0.9배속에서 1.67초가 되는 식으로 값이 흔들린다.
+  //   apad 는 **출력 시간 기준**으로 붙으므로 사용자가 넣은 초가 그대로 결과가 된다.
+  //   ⚠ pad_dur 없이 apad 만 쓰면 무한히 붙는다 — 항상 길이를 명시한다.
+  const pd = Number(padSec) || 0;
+  if (pd > 0) parts.push(`apad=pad_dur=${pd}`);
   return parts.length ? parts.join(',') : null;
 }
 

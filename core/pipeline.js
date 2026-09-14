@@ -162,9 +162,9 @@ function assertRealAudio(res, num) {
 // WAV(정속) → atempo 배속 + (선택)음량 정규화 를 **한 번의 ffmpeg 호출**로 구운 MP3.
 //   피치는 atempo 라 유지된다. gainDb=0 이면 배속만, tempo=1 이면 정규화만 한다. 성공 시 true.
 //   ⚠ 필터 순서(배속→증폭→리미터)는 audio-normalize.buildFilter 가 정한다.
-function encodeTts(wavPath, outPath, tempo, gainDb, toMp3) {
+function encodeTts(wavPath, outPath, tempo, gainDb, toMp3, padSec) {
   if (!ffmpegPath) return false;
-  const filt = AudioNorm.buildFilter(tempo, gainDb);
+  const filt = AudioNorm.buildFilter(tempo, gainDb, padSec);
   const args = ['-y', '-i', wavPath];
   if (filt) args.push('-filter:a', filt);
   if (toMp3) args.push('-codec:a', 'libmp3lame', '-b:a', '192k');
@@ -230,6 +230,15 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   //   ⚠ ffmpeg 가 없으면 조용히 건너뛴다 — 정규화 때문에 음성 생성을 막지 않는다.
   const normTarget = (ffmpegPath && fs.existsSync(ffmpegPath)) ? AudioNorm.targetFromPreset(preset) : null;
   if (normTarget != null && onLine) onLine(`🔊 음량 정규화 ${normTarget}dB 로 맞춤 (문장별 편차 제거)`);
+  // 🔇 문장 뒤 무음 — 채널편집의 「문장무음」(preset.silenceSec).
+  //   🔴 2026-09-14 까지 이 값은 **UI 에서 받아 저장만 되고 읽는 코드가 없었다**(고전서재 0.7 이 무효였다).
+  //   ⚠ 모델이 이미 문장마다 앞 0.200 + 뒤 0.150 = 0.350초를 붙인다 → **실제 간격 = 0.35 + silenceSec**.
+  //   ⚠ ffmpeg 가 없으면 붙일 수 없다(정속 WAV 폴백) — 그때는 조용히 넘어가지 않고 로그로 알린다.
+  const padSec = (() => { const v = Number(preset && preset.silenceSec); return (isFinite(v) && v > 0) ? Math.min(v, 5) : 0; })();
+  if (padSec > 0 && onLine) {
+    if (ffmpegPath && fs.existsSync(ffmpegPath)) onLine(`🔇 문장 뒤 무음 ${padSec}초 — 실제 문장 간격 약 ${(padSec + 0.35).toFixed(2)}초 (모델 고정 패딩 0.35초 포함)`);
+    else onLine(`⚠ 문장무음 ${padSec}초 미적용 — ffmpeg 를 쓸 수 없습니다`);
+  }
   // 참조음성이 `srv:<이름>` 이면 **서버 공용 라이브러리의 목소리** — 파일 업로드 없이 이름만 보낸다.
   //   참조텍스트도 서버가 갖고 있으므로(.txt) 여기서 보내지 않는다(엉뚱한 텍스트 섞임 방지).
   const _ref = String(preset.voiceCloneRefAudio || '');
@@ -273,7 +282,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.text) : s.text;
     // 🔑 정규화 목표도 키에 넣는다 — 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 되살아난다**
     //   (v0.3.43 에서 발음사전을 고쳐도 옛 음성이 나오던 것과 같은 계열).
-    const cacheKey = TtsCache.keyFor(keyText, sf, { ...synthOpts, normDb: normTarget });
+    const cacheKey = TtsCache.keyFor(keyText, sf, { ...synthOpts, normDb: normTarget, padSec });
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
@@ -345,16 +354,18 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       if (normTarget != null) {
         try { gainDb = AudioNorm.gainForTarget(AudioNorm.measureSpeech(res.mp3Buffer), normTarget); } catch { gainDb = 0; }
       }
-      const needFfmpeg = (sf !== 1) || gainDb !== 0;
+      // 🔇 배속·정규화가 없어도 무음이 있으면 ffmpeg 를 타야 한다(안 그러면 값이 조용히 무시된다).
+      const needFfmpeg = (sf !== 1) || gainDb !== 0 || padSec > 0;
       if (needFfmpeg) {
         // 정속 WAV → (배속 + 정규화) 를 ffmpeg 한 번으로. 배속이 걸리면 mp3, 아니면 wav 로 낸다.
         const toMp3 = (sf !== 1);
         const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
         await retryFs(() => fs.writeFileSync(wavTmp, res.mp3Buffer), `컷${s.num} 임시 WAV 쓰기`, onLine, abortSignal);
         const out = path.join(workDir, `${s.num}.${toMp3 ? 'mp3' : 'wav'}`);
-        const ok = encodeTts(wavTmp, out, sf, gainDb, toMp3);
+        const ok = encodeTts(wavTmp, out, sf, gainDb, toMp3, padSec);
         try { fs.unlinkSync(wavTmp); } catch {}
-        if (ok) { s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec / sf; s.ttsGainDb = gainDb; }
+        // 🔑 길이에 무음을 더한다 — 이 값이 .vrew 타임라인·그룹 길이·⏱챕터·SRT 의 유일한 근거다.
+        if (ok) { s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec / sf + padSec; s.ttsGainDb = gainDb; }
         else { // ffmpeg 실패 폴백: 정속 WAV 그대로 (배속·정규화 미적용)
           const wav = path.join(workDir, `${s.num}.wav`);
           await retryFs(() => fs.writeFileSync(wav, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);

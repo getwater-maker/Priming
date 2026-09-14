@@ -24,7 +24,7 @@ function _saveIdx(x) { try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFil
 
 // 캐시 키 — 텍스트 + 배속 + 목소리 정체성(엔진/참조음성/참조텍스트/시드/cfg/언어/instruct).
 function keyFor(text, sf, opts = {}) {
-  const sig = JSON.stringify({
+  const o = {
     t: String(text || ''),
     sf: Number(sf) || 1,
     e: opts.provider || '',
@@ -41,7 +41,16 @@ function keyFor(text, sf, opts = {}) {
     // 🔊 음량 정규화 목표(dB) — 목표가 바뀌면 소리가 달라지므로 정체성에 포함한다.
     //   ⚠ 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 그대로 되살아난다**(2026-08-31).
     nd: opts.normDb != null ? opts.normDb : '',
-  });
+    // 🔇 문장 뒤 무음(초) — 파일에 구워지므로 정체성에 포함한다.
+    //   ⚠ 안 넣으면 값을 바꿔도 **옛 간격의 캐시가 그대로 되살아난다**(배속 sf·정규화 nd 와 같은 계열).
+  };
+  // 🔇 문장 뒤 무음(초) — 파일에 구워지므로 정체성에 포함한다.
+  //   ⚠ 안 넣으면 값을 바꿔도 **옛 간격의 캐시가 그대로 되살아난다**(배속 sf·정규화 nd 와 같은 계열).
+  //   🔑 단, **0 일 때는 키에 넣지 않는다** — 필드가 생기는 것만으로 서명이 달라져
+  //      무음을 안 쓰는 채널의 기존 캐시 2만여 개까지 통째로 무효화된다. 쓰는 채널만 새 키를 갖는다.
+  const pd = Number(opts.padSec);
+  if (isFinite(pd) && pd > 0) o.pd = pd;
+  const sig = JSON.stringify(o);
   return crypto.createHash('sha1').update(sig).digest('hex');
 }
 
