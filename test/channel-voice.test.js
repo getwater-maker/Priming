@@ -122,22 +122,128 @@ console.log('[4] 렌더러 원문 — common 에 채널·배속·AI고지를 싣
   ok(/aiNotice/.test(call), 'ⓓ common.aiNotice 를 보낸다');
 }
 
-console.log('[5] 1단계 로그 — 어느 채널·목소리·시드·배속인지 남는다');
+console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드인지 한 줄로 남는다');
 {
-  ok(/채널 「\$\{preset\.name\}」/.test(MAIN), 'ⓐ 채널 이름을 찍는다');
-  ok(/목소리 \$\{_vn\}/.test(MAIN), 'ⓑ 목소리 이름을 찍는다');
-  ok(/시드 \$\{preset\.seed/.test(MAIN), 'ⓒ 시드를 찍는다 — 서버 로그와 대조할 수 있는 유일한 키');
-  ok(/배속 \$\{\(speed != null/.test(MAIN), 'ⓓ 배속을 찍는다');
-  ok(/⚠ 채널을 찾지 못했습니다/.test(MAIN), 'ⓔ 채널을 못 찾으면 그 사실이 로그에 남는다');
-  // 목소리 표기가 srv: 접두를 사람이 읽는 형태로 바꾸는지 (원문 조각 실행)
   const bs = String.fromCharCode(92);
-  const mk = (rv) => { const _rv = String(rv || ''); return _rv.startsWith('srv:') ? ('☁ ' + _rv.slice(4)) : (_rv ? path.basename(_rv) : '⚠ 참조음성 없음'); };
-  eq(mk('srv:#01_득수_noBreath'), '☁ #01_득수_noBreath', 'ⓕ 서버 목소리는 ☁ 로 표기');
-  eq(mk(['C:', 'x', 'ref-audio', '02_저음 2단계.wav'].join(bs)), '02_저음 2단계.wav', 'ⓖ 로컬 파일은 파일명만');
-  eq(mk(''), '⚠ 참조음성 없음', 'ⓗ 참조음성이 없으면 경고 표기');
+  const voiceLabel = new Function('path', extractFn(MAIN, 'voiceLabel') + '\nreturn voiceLabel;')(path);
+  eq(voiceLabel({ name: '06_고전서재', voiceCloneRefAudio: 'srv:#05_득수_낭독2', seed: 40469 }),
+    '채널 「06_고전서재」 · 목소리 ☁ #05_득수_낭독2 · 시드 40469', 'ⓐ 서버 목소리는 ☁ 로 표기 + 채널·시드');
+  eq(voiceLabel({ name: '출판', voiceCloneRefAudio: ['C:', 'x', 'ref-audio', '02_저음 2단계.wav'].join(bs), seed: 5697 }),
+    '채널 「출판」 · 목소리 02_저음 2단계.wav · 시드 5697', 'ⓑ 로컬 파일은 파일명만');
+  ok(/참조음성 없음/.test(voiceLabel({ name: 'X', voiceCloneRefAudio: '', seed: 1 })), 'ⓒ 참조음성이 없으면 경고 표기');
+  // 🔑 시드가 비면 서버가 매번 다른 시드를 쓴다 → 같은 채널인데 편마다 톤이 달라진다. 로그가 그걸 말해야 한다.
+  ok(/매번 톤이 달라집니다/.test(voiceLabel({ name: 'X', voiceCloneRefAudio: 'srv:a' })), 'ⓓ 시드가 없으면 경고로 알린다');
+  ok(/매번 톤이 달라집니다/.test(voiceLabel({ name: 'X', voiceCloneRefAudio: 'srv:a', seed: '' })), 'ⓔ 빈 문자열도 경고');
+  ok(/시드 0/.test(voiceLabel({ name: 'X', voiceCloneRefAudio: 'srv:a', seed: 0 })), 'ⓕ 시드 0 은 유효한 값이다(경고 금지)');
+  ok(/저장하지 않고|기존 시드를 그대로/.test(APP), 'ⓖ 렌더러: 숫자가 아닌 시드는 저장하지 않고 알린다(시드가 날아가면 톤이 매번 달라진다)');
+  eq(voiceLabel(null), '⚠ 채널 없음', 'ⓗ 채널이 없어도 던지지 않는다');
+  // 1단계·전체TTS·그룹TTS·도입부 네 경로가 **같은 함수**로 찍는다(표기가 갈리면 로그 대조가 안 된다)
+  eq((MAIN.match(/voiceLabel\(/g) || []).length - 1, 5, 'ⓘ voiceLabel 을 쓰는 곳 5군데(1단계·전체TTS·그룹TTS 2 ·도입부)');
+  ok(/🎙 1단계 — 음성\(TTS\) 일괄 변환… \(\$\{voiceLabel\(preset\)\}/.test(MAIN), 'ⓙ 1단계가 이 함수를 쓴다');
+  ok(/⚠ 채널을 찾지 못했습니다/.test(MAIN), 'ⓚ 채널을 못 찾으면 그 사실이 로그에 남는다');
 }
 
-console.log('[6] 소스 위생');
+console.log('[6] resolvePreset 원문 실행 — **이름이 낡은 전역을 이긴다**');
+{
+  // 🔴 실사고(2026-09-15): 큐에서 대본을 바꿔도 S.preset 은 '마지막에 연 대본'의 채널로 남았다.
+  //   그 상태에서 🎤 를 누르면 `S.preset || P.getPreset(name)` 이 **전역을 먼저** 골라 남의 목소리로 합성했다.
+  const CH = {
+    '06_고전서재': { name: '06_고전서재', voiceCloneRefAudio: 'srv:#05_득수_낭독2', seed: 40469 },
+    '08_다산의뜰': { name: '08_다산의뜰', voiceCloneRefAudio: 'srv:고전_ok', seed: 5697 },
+    '04_역사이야기': { name: '04_역사이야기', voiceCloneRefAudio: 'srv:02_저음 2단계', seed: 5697, isDefault: true },
+  };
+  const mk = (S) => {
+    const logs = [];
+    const P = { getPreset: (nm) => (nm ? (CH[nm] || null) : CH['04_역사이야기']) };
+    const fn = new Function('S', 'P', 'log', extractFn(MAIN, 'resolvePreset') + '\nreturn resolvePreset;')(S, P, (l) => logs.push(String(l)));
+    return { fn, logs };
+  };
+  // 실사고 재현: 전역은 다산인데 이 대본은 고전서재다
+  {
+    const S = { preset: CH['08_다산의뜰'] };
+    const { fn } = mk(S);
+    eq(fn('06_고전서재').voiceCloneRefAudio, 'srv:#05_득수_낭독2', 'ⓐ 이름이 이긴다 — 낡은 전역(다산)을 따르지 않는다');
+  }
+  { const S = { preset: CH['08_다산의뜰'] }; eq(mk(S).fn(null).name, '08_다산의뜰', 'ⓑ 이름이 없으면 전역(=활성 대본의 채널)'); }
+  { const S = { preset: null }; eq(mk(S).fn(null).name, '04_역사이야기', 'ⓒ 전역도 없으면 기본 채널'); }
+  {
+    const S = { preset: CH['08_다산의뜰'] }; const r = mk(S);
+    eq(r.fn('없는채널').name, '08_다산의뜰', 'ⓓ 이름을 못 찾으면 폴백하되');
+    ok(r.logs.some((l) => /없는채널/.test(l) && /찾지 못했/.test(l)), 'ⓔ **조용히 넘어가지 않고** 로그로 알린다');
+  }
+  // 🔑 A/B 역검증: 옛 표현식이면 같은 시나리오에서 남의 목소리가 나온다(이 테스트가 헛단언이 아님을 확인)
+  {
+    const S = { preset: CH['08_다산의뜰'] };
+    const P = { getPreset: (nm) => (nm ? (CH[nm] || null) : CH['04_역사이야기']) };
+    const old = new Function('S', 'P', 'return function (n) { return S.preset || P.getPreset(n); };')(S, P);
+    eq(old('06_고전서재').name, '08_다산의뜰', 'ⓕ (역검증) 옛 코드는 실제로 남의 채널을 골랐다');
+  }
+}
+
+console.log('[7] syncActiveToS 원문 실행 — 큐에서 대본을 바꾸면 채널도 따라온다');
+{
+  const CH = {
+    '06_고전서재': { name: '06_고전서재', voiceCloneRefAudio: 'srv:#05_득수_낭독2' },
+    '08_다산의뜰': { name: '08_다산의뜰', voiceCloneRefAudio: 'srv:고전_ok' },
+  };
+  const P = { getPreset: (nm) => (nm ? (CH[nm] || null) : null) };
+  const items = [
+    { id: 'q1', parsed: { t: 1 }, scriptPath: 'a.md', outRoot: 'A', settings: { presetName: '06_고전서재' } },
+    { id: 'q2', parsed: { t: 2 }, scriptPath: 'b.md', outRoot: 'B', settings: { presetName: '08_다산의뜰' } },
+    { id: 'q3', parsed: { t: 3 }, scriptPath: 'c.md', outRoot: 'C', settings: null },   // 옛 항목(채널 없음)
+  ];
+  const S = { modes: { longform: { items, activeId: 'q2' } }, mode: 'longform', preset: null };
+  const activeItem = () => S.modes[S.mode].items.find((x) => x.id === S.modes[S.mode].activeId) || null;
+  const fn = new Function('S', 'P', 'activeItem', extractFn(MAIN, 'syncActiveToS') + '\nreturn syncActiveToS;')(S, P, activeItem);
+
+  fn(); eq(S.preset && S.preset.name, '08_다산의뜰', 'ⓐ 활성 항목의 채널이 전역에 실린다');
+  S.modes.longform.activeId = 'q1'; fn();
+  eq(S.preset && S.preset.name, '06_고전서재', 'ⓑ **대본을 바꾸면 채널도 바뀐다** (이게 없어서 남의 목소리가 나갔다)');
+  eq(S.parsed.t, 1, 'ⓒ 대본 미러도 함께 바뀐다(기존 동작 보존)');
+  S.modes.longform.activeId = 'q3'; fn();
+  eq(S.preset && S.preset.name, '06_고전서재', 'ⓓ 항목에 채널이 없으면 **기존 채널 유지** — 기본 채널로 떨어뜨리지 않는다');
+  S.modes.longform.activeId = null; fn();
+  eq(S.parsed, null, 'ⓔ 활성 항목이 없으면 대본은 비우고');
+  eq(S.preset && S.preset.name, '06_고전서재', 'ⓕ 채널은 건드리지 않는다');
+}
+
+console.log('[8] 배선 원문 대조 — 합성·내보내기 경로에 낡은 전역 우선이 남아 있지 않다');
+{
+  const body = (marker, len) => { const i = MAIN.indexOf(marker); return i < 0 ? '' : MAIN.slice(i, i + len); };
+  const vrew = body("ipcMain.handle('export-vrew'", 1800);
+  const grp = body("ipcMain.handle('tts-group'", 2200);
+  const intro = body("ipcMain.handle('intro-video-prep'", 1400);
+  ok(vrew && grp && intro, 'ⓐ 세 핸들러를 원문에서 찾았다');
+  for (const [nm, src] of [['export-vrew', vrew], ['tts-group', grp], ['intro-video-prep', intro]]) {
+    ok(/resolvePreset\(/.test(src), `ⓑ ${nm} 가 resolvePreset 을 쓴다`);
+    ok(!/S\.preset \|\|/.test(src), `ⓒ ${nm} 에 옛 \`S.preset ||\` 가 남아 있지 않다`);
+  }
+  // 위험한 형태는 **이름을 넘기면서도 전역을 먼저 고르는 것**이다.
+  //   `S.preset || P.getPreset(null)`(=resolvePreset 내부 폴백·기본 채널)은 정상이므로 제외하고,
+  //   주석도 제외한 뒤(설명문에 옛 표현식이 적혀 있다) 실제 코드에만 남았는지 본다.
+  const code = MAIN.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const hits = (code.match(/S\.preset \|\| P\.getPreset\((?!null\))/g) || []);
+  eq(hits.length, 0, 'ⓓ 이름을 넘기면서 전역을 먼저 고르는 표현식 잔존 0');
+}
+
+console.log('[9] 그룹 TTS — **채널 시드 고정**, 다른 take 는 Shift+클릭일 때만');
+{
+  const i = MAIN.indexOf("ipcMain.handle('tts-group'");
+  const src = MAIN.slice(i, i + 2200);
+  ok(/roll = false/.test(src), 'ⓐ roll 인자를 받는다(기본 false = 고정)');
+  ok(/const rollPreset = roll \? \{ \.\.\.preset, seed: Math\.floor/.test(src), 'ⓑ **roll 일 때만** 시드를 갈아끼운다');
+  ok(/: preset;/.test(src), 'ⓒ 평소엔 채널 프리셋을 그대로 쓴다(시드 고정)');
+  ok(!/const rollPreset = \{ \.\.\.preset, seed: Math\.floor/.test(MAIN), 'ⓓ 옛 무조건 랜덤화가 남아 있지 않다');
+  ok(/voiceLabel\(preset\)/.test(src), 'ⓔ 어느 목소리·시드로 만드는지 로그에 남는다');
+  ok(/시드 \$\{rollPreset\.seed\}/.test(src), 'ⓕ 시드를 바꿨을 땐 바꾼 값을 분명히 남긴다');
+  // 렌더러: Shift 여부를 실제로 넘기는가
+  ok(/onGroupTts\(pr\.shortsNum, c\.num, e\.shiftKey\)/.test(APP), 'ⓖ 렌더러가 shiftKey 를 전달한다');
+  ok(/runGroupTts\(shortsNum, groupNum, roll = false\)/.test(APP), 'ⓗ 기본값은 고정(roll=false)');
+  ok(/roll: !!roll/.test(APP), 'ⓘ IPC 인자에 roll 을 싣는다 — 안 실으면 Shift 가 조용히 무시된다');
+  ok(/Shift\+클릭/.test(APP), 'ⓙ 버튼 설명에 Shift+클릭 동작이 적혀 있다(숨은 동작 금지)');
+}
+
+console.log('[10] 소스 위생');
 {
   ok(!/\r\n/.test(MAIN), 'ⓐ main.js 줄끝 LF 유지 (CRLF 로 저장하면 원문 대조 테스트들이 헛실패한다)');
   ok(MAIN.indexOf('\u0000') < 0, 'ⓑ main.js 에 NUL 없음');

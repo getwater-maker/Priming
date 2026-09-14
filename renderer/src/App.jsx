@@ -912,9 +912,11 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 그룹 단위 버튼 (PrimingFlow)
-  async function runGroupTts(shortsNum, groupNum) {
+  // roll(Shift+클릭) 일 때만 시드를 갈아끼워 '다른 take' 를 뽑는다. 평소엔 **채널 시드 고정** —
+  //   시드가 매번 달라지면 그 그룹만 톤이 달라져 한 영상 안에서 목소리가 바뀐 것처럼 들린다.
+  async function runGroupTts(shortsNum, groupNum, roll = false) {
     setStatus(`G${groupNum} TTS…`);
-    try { const d = await api.ttsGroup({ shortsNum, groupNum, presetName: presetName || null, speed: ttsSpeed || null }); setDto(d); setStatus(`G${groupNum} TTS 완료`); }
+    try { const d = await api.ttsGroup({ shortsNum, groupNum, presetName: presetName || null, speed: ttsSpeed || null, roll: !!roll }); setDto(d); setStatus(`G${groupNum} TTS 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runGroupVid(shortsNum, groupNum) {
@@ -1542,7 +1544,13 @@ export default function App() {
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
     };
-    if (ch.seed !== '' && ch.seed != null) patch.seed = parseInt(ch.seed, 10);
+    // 🔑 시드는 **목소리 고정의 핵심**이다 — 비거나 숫자가 아니면 서버가 매번 다른 시드를 써서
+    //   같은 채널인데 편마다 톤이 달라진다. 값이 이상하면 **저장하지 않고**(기존 시드 보존) 알린다.
+    if (ch.seed !== '' && ch.seed != null) {
+      const sd = parseInt(ch.seed, 10);
+      if (Number.isFinite(sd)) patch.seed = sd;
+      else logline(`⚠ 시드 "${ch.seed}" 를 숫자로 읽을 수 없어 기존 시드를 그대로 둡니다.`);
+    }
     const origName = (ch._raw && ch._raw.name) || ch.name;
     const newName = (ch.name || '').trim();
     if (!newName) { logline('채널 이름을 입력하세요'); return; }
@@ -3175,7 +3183,7 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onImgVid, onBulk, on
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>▶</button>
                             <button className="gprev" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>⏭</button>
-                            <button className="gprev" title="이 그룹만 TTS 변환" onClick={() => onGroupTts(pr.shortsNum, c.num)}>🎤</button>
+                            <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). Shift+클릭 = 시드를 바꿔 다른 take 로 새로 뽑기(그 그룹만 톤이 달라집니다)" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
                             <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
                             <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                           </div>

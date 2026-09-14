@@ -82,6 +82,34 @@ function syncActiveToS() {
   S.parsed = it ? it.parsed : null;
   S.scriptPath = it ? it.scriptPath : null;
   S.outRoot = it ? it.outRoot : null;
+  // 🔑 **채널(목소리)도 함께 옮긴다** — 안 하면 S.preset 이 '마지막에 연/만든 대본'의 채널로 남는다.
+  //   큐에서 다른 대본을 클릭해도 전역은 그대로라, 그 대본의 🎤 그룹 재변환이 **남의 채널 목소리**로 나갔다
+  //   (로이 2026-09-15: "같은 채널의 영상인데 음성이 바뀌는 것들이 있다").
+  //   ⚠ 항목에 채널이 없으면(옛 항목) 기존 S.preset 을 그대로 둔다 — 기본 채널로 떨어뜨리지 않는다.
+  const _pn = it && it.settings && it.settings.presetName;
+  if (_pn) { try { const p = P.getPreset(_pn); if (p) S.preset = p; } catch {} }
+}
+// 🔑 **채널의 정본은 호출자가 넘긴 이름**이다. 전역 S.preset 은 미러일 뿐 낡을 수 있다.
+//   🔴 예전엔 합성·내보내기 경로가 `S.preset || P.getPreset(name)` 이라 **낡은 전역이 이름을 이겼다**.
+//     이름을 정확히 보내도(렌더러는 늘 보낸다) 무시되어 엉뚱한 채널 목소리로 합성됐다.
+//   이름이 있으면 그 채널이 이긴다. 못 찾으면 **조용히 기본 채널로 떨어지지 않고 로그로 알린다**.
+function resolvePreset(presetName) {
+  if (presetName) {
+    const p = P.getPreset(presetName);
+    if (p) return p;
+    log(`⚠ 채널 「${presetName}」 을 찾지 못했습니다 — 채널 이름이 바뀌었는지 확인하세요(다른 채널 설정으로 진행합니다).`);
+  }
+  return S.preset || P.getPreset(null);
+}
+// 채널이 실제로 쓰는 목소리를 사람이 읽는 한 줄로 — 「어느 목소리로 만들었나」를 로그만 보고 알 수 있게.
+function voiceLabel(preset) {
+  if (!preset) return '⚠ 채널 없음';
+  const rv = String(preset.voiceCloneRefAudio || '');
+  const vn = rv.startsWith('srv:') ? ('☁ ' + rv.slice(4)) : (rv ? path.basename(rv) : '⚠ 참조음성 없음');
+  // ⚠ 시드가 비면 서버가 매번 다른 시드를 쓴다 → **같은 채널인데 편마다 톤이 달라진다**. 조용히 넘기지 않는다.
+  const sd = (preset.seed != null && preset.seed !== '' && isFinite(Number(preset.seed)))
+    ? preset.seed : '⚠ 없음(매번 톤이 달라집니다 — 채널편집에서 시드를 넣으세요)';
+  return `채널 「${preset.name}」 · 목소리 ${vn} · 시드 ${sd}`;
 }
 // 현재 S.* 를 활성 항목에 반영(제자리 편집 저장). 항목이 없으면 새로 만들지 않음.
 function storeActive() {
@@ -1404,7 +1432,7 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
-    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, 음성 배속 ${speed}x) 연결 중…`);
+    log(`🎙 전체 TTS — ${voiceLabel(S.preset)} · 배속 ${speed}x (${S.preset.engine}) 연결 중…`);
     const { mgr, ok } = await P.makeTtsManager(log, S.preset.engine);
     if (!ok) throw new Error(`TTS 엔진 '${S.preset.engine}' 미가동 (백엔드 확인)`);
     S.ttsMgr = mgr;
@@ -2063,7 +2091,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   const outMode = normOutMode(args.outMode);
   if (outMode !== 'full') log(`💾 .vrew 내보내기 — ${outModeLabel(outMode)}`);
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
-  let preset = S.preset || P.getPreset(presetName);
+  let preset = resolvePreset(presetName);   // 🔑 이름이 이긴다(낡은 전역이 자막·AI고지를 뒤바꾸지 않게)
   if (preset && captionStyle) {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
@@ -4593,10 +4621,8 @@ async function runMakeAllCore(opts = {}) {
     // 🔑 어느 채널·목소리로 만드는지 로그에 남긴다 — 2026-08-31 사고 때 앱 로그만으로는
     //   엉뚱한 목소리가 나간 것을 알 수 없어 OmniVoice 서버 로그의 seed 를 뒤져야 했다.
     if (preset) {
-      const _rv = String(preset.voiceCloneRefAudio || '');
-      const _vn = _rv.startsWith('srv:') ? ('☁ ' + _rv.slice(4)) : (_rv ? path.basename(_rv) : '⚠ 참조음성 없음');
       const _pd = Number(preset.silenceSec) > 0 ? ` · 문장무음 ${Number(preset.silenceSec)}초` : '';
-      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (채널 「${preset.name}」 · 목소리 ${_vn} · 시드 ${preset.seed != null ? preset.seed : '-'} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1}${_pd})`);
+      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (${voiceLabel(preset)} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1}${_pd})`);
     } else {
       log('🎙 1단계 — 음성(TTS) 일괄 변환… (⚠ 채널을 찾지 못했습니다)');
     }
@@ -4999,21 +5025,26 @@ ipcMain.handle('set-queue-settings', (_e, args = {}) => {
 ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환', async () => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, presetName = null, speed = null } = args;
+  const { shortsNum, groupNum, presetName = null, speed = null, roll = false } = args;
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
-  const preset = S.preset || P.getPreset(presetName);
+  const preset = resolvePreset(presetName);   // 🔑 이름이 이긴다 — 낡은 전역이 남의 채널 목소리를 끌고 오지 않게
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
   const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
   if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
   const ttsDir = shortsDirs(S.outRoot, shortsNum).tts;
   const sents = pr.getSentencesOfGroup(g);
   S.abort = false;
-  // 이 그룹만 재변환 = 사용자가 결과가 마음에 안 들어 '새로 뽑기'. 기존 음성·캐시를 무시(force=true)하고,
-  //   seed 를 매 클릭 랜덤화해 같은 문장이라도 매번 다른 take 가 나오게 한다(같은 seed 면 결정적=동일 결과).
-  const rollPreset = { ...preset, seed: Math.floor(Math.random() * 1e9) };
-  log(`🎤 G${groupNum} TTS 새로 뽑기 (${sents.length}문장, 기존 삭제·seed 랜덤)…`);
+  // 🔑 **기본은 채널 시드 고정**이다 — 시드가 다르면 화자는 같아도 톤·호흡이 달라져
+  //   그 그룹만 다른 소리로 들린다(로이 2026-09-15: "같은 채널 영상인데 음성이 바뀐다").
+  //   ⚠ 2026-09-15 까지는 **매 클릭 seed 를 랜덤화**했다(v0.1.73 쇼츠 시절의 '새로 뽑기'). 버튼 설명은
+  //     「이 그룹만 TTS 변환」이라 그 동작이 화면 어디에도 안 보였다 — 조용히 달라지는 종류였다.
+  //   다른 take 가 필요할 땐 **Shift+클릭**(roll) — 그때만 시드를 갈아끼우고 로그로 분명히 남긴다.
+  const rollPreset = roll ? { ...preset, seed: Math.floor(Math.random() * 1e9) } : preset;
+  log(roll
+    ? `🎲 G${groupNum} TTS 새로 뽑기 (${sents.length}문장 · ${voiceLabel(preset)} → 시드 ${rollPreset.seed} 로 교체 · 이 그룹만 톤이 달라집니다)`
+    : `🎤 G${groupNum} TTS 다시 변환 (${sents.length}문장 · ${voiceLabel(preset)} · 배속 ${(speed && Number(speed) > 0) ? Number(speed) : 1} · 지금 채널 설정으로)`);
   await P.fillTtsList(sents, rollPreset, mgr, ttsDir, log, () => S.abort, (speed && Number(speed) > 0) ? Number(speed) : 1.0, `G${groupNum}`, pushDtoUpdate, true);
   try { await mgr.stop(); } catch {}
   pushDtoUpdate();
@@ -6039,13 +6070,13 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const pr = S.parsed.projects[0];
   if (!pr) return P.toDTO(S.parsed);
-  const preset = S.preset || P.getPreset(args.presetName || null);
+  const preset = resolvePreset(args.presetName || null);   // 🔑 이름이 이긴다(낡은 전역 금지)
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
   const speed = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
   const introSents = pr.sentences.filter((s) => s.isIntro);
   if (!introSents.length) { log('도입부 문장이 없습니다 — 대본에 "## 도입" 헤더가 필요합니다.'); return P.toDTO(S.parsed); }
   S.abort = false;
-  log(`🎬 도입부 ${introSents.length}문장 TTS 후 10초 재배치…`);
+  log(`🎬 도입부 ${introSents.length}문장 TTS 후 10초 재배치… (${voiceLabel(preset)})`);
   const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
   if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
   const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
