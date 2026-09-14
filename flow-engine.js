@@ -77,6 +77,11 @@ class FlowAutomator {
     this._currentProfileId = '';              // run() 시작 시 셋, 로그/IPC 페이로드에 사용
     this._completedNums = [];                 // 이번 run 에서 성공한 num 들 (renderer 가 남은 그룹 계산용)
     this._rateExhaustedFlag = false;          // run() 종료 시 renderer 가 폴백 트리거할지 판단
+    // 🔴 run() 반환의 reason 이 여기서 온다. send('flow-rate-exhausted') 가 자동으로 기록하므로
+    //    새 폴백 지점을 추가해도 따라온다. 예전엔 반환이 'rate-limit' 하드코딩이라 main 의
+    //    credit-exhausted 분기(6시간 휴식)가 **영원히 false** 였다 → 크레딧 없는 계정이
+    //    30분마다 되살아나 브라우저를 띄우고 또 소진되는 헛돌이가 났다(v0.4.5 실사고).
+    this._exhaustReason = '';                 // 'credit-exhausted' | 'daily-limit' | 'suspicious-activity' | ...
   }
 
   // v1.13.21~v1.13.26: Flow toast 메시지에서 차단 키워드 감지 (HTTP 403 와 별개의 UI 신호)
@@ -152,6 +157,8 @@ class FlowAutomator {
   }
 
   send(channel, data) {
+    // 🔑 창(win) 유무보다 **먼저** 기록한다 — run() 반환의 reason 이 이 값이다.
+    if (channel === 'flow-rate-exhausted' && data && data.reason) this._exhaustReason = data.reason;
     if (this.win && !this.win.isDestroyed()) {
       this.win.webContents.send(channel, data);
     }
@@ -455,6 +462,7 @@ class FlowAutomator {
     this._currentProfileId = (config && config.profileId) || 'default';
     this._completedNums = [];
     this._rateExhaustedFlag = false;
+    this._exhaustReason = '';
     // v1.13.23: 적극적 순차 전환 — N개 그룹 성공 시 rate-limit 전에 자동 break + 폴백 트리거
     this._proactiveSwitchEveryN = (config && config.proactiveSwitchEveryN) | 0;
     this._proactiveSwitchTriggered = false;
@@ -702,7 +710,9 @@ class FlowAutomator {
       total: paragraphs.length,
       outputDir,
       rateExhausted: !!this._rateExhaustedFlag,
-      reason: this._proactiveSwitchTriggered ? 'proactive-switch' : (this._rateExhaustedFlag ? 'rate-limit' : 'completed'),
+      // 🔴 하드코딩 금지 — _exhaustReason 에 실제 이유가 들어 있다(크레딧 소진 등).
+      reason: this._proactiveSwitchTriggered ? 'proactive-switch'
+        : (this._rateExhaustedFlag ? (this._exhaustReason || 'rate-limit') : 'completed'),
       completedNums,
       remainingNums,
       profileId: this._currentProfileId || 'default',
@@ -990,8 +1000,9 @@ class FlowAutomator {
               remainingNums.push(j + 1);
             }
             const exhaustReason = isCredit ? 'credit-exhausted' : (isSuspicious ? 'suspicious-activity' : 'rate-limit');
-            const headerEmoji = isSuspicious ? '🚨' : '🛑';
-            const headerLabel = isSuspicious ? '비정상 활동 감지로 즉시 차단' : 'rate-limit 도달';
+            const headerEmoji = isSuspicious ? '🚨' : (isCredit ? '💳' : '🛑');
+            const headerLabel = isSuspicious ? '비정상 활동 감지로 즉시 차단'
+              : (isCredit ? '크레딧 소진' : 'rate-limit 도달');
             this.log(`${headerEmoji} 프로필 ${this._currentProfileId || 'default'} ${headerLabel} — run 종료, 남은 ${remainingNums.length}개 그룹은 다른 프로필로 폴백 시도`);
             this.send('flow-rate-exhausted', {
               profileId: this._currentProfileId || 'default',

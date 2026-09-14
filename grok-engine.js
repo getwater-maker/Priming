@@ -287,9 +287,11 @@ class GrokEngine {
         };
       });
       this.log(`[Grok] [DUMP 칩바] ${JSON.stringify(d).slice(0, 1500)}`);
+      return d;   // 🔑 호출부가 url·noForm 으로 진짜 원인을 가른다(explainNoChipBar)
     } catch (e) {
       this.log(`[Grok] [DUMP 칩바] 실패: ${e.message}`);
     }
+    return null;
   }
 
   // ── 새 UI 공통 헬퍼 (2026-08-19 개편) ──────────────────────────────────────
@@ -563,8 +565,12 @@ class GrokEngine {
       //   (옛 검증법 "480p 칩이 등장하는지" 보다 직접적이고, 칩 구성이 바뀌어도 안 깨진다)
       const videoChip = await this.page.$(GROK_SELECTORS.videoModeChip);
       if (!videoChip) {
-        await this._dumpChipBar();
-        return { success: false, error: '"비디오" 칩 못 찾음 — 사이트 UI 가 또 바뀐 듯합니다 (로그의 [DUMP 칩바] 확인)' };
+        // 🔴 "UI 가 바뀌었다" 로 단정하지 않는다 — 실사고(2026-09-14)의 진짜 원인은 **약관 동의
+        //    게이트**(grok.com/tos-gate)였고, 그 문구 때문에 셀렉터를 고치는 헛수고를 할 뻔했다.
+        const dump = await this._dumpChipBar();
+        const why = explainNoChipBar(dump);
+        this.log(`[Grok] ⛔ ${why}`);
+        return { success: false, error: why };
       }
       const _isVideoOn = async () => {
         try { return await videoChip.evaluate((e) => e.getAttribute('aria-checked') === 'true'); } catch { return false; }
@@ -877,4 +883,23 @@ class GrokEngine {
   }
 }
 
-module.exports = { GrokEngine, GROK_SELECTORS, PROFILE_BASE, _ensureUserChromeProfileCopy };
+/**
+ * 칩바를 못 찾은 진짜 이유를 가린다(_dumpChipBar 의 덤프 기준).
+ * ⚠ 낯선 화면이면 옛 문구(UI 변경)를 그대로 쓴다 — 모르는 것을 아는 척하지 않는다.
+ */
+function explainNoChipBar(dump) {
+  const url = String((dump && dump.url) || '');
+  if (/[/]tos-gate/i.test(url)) {
+    return 'Grok 약관 동의 화면(tos-gate)에 막혀 있습니다 — 사이트 UI 변경이 아닙니다. '
+      + '그 계정으로 grok.com 을 한 번 열어 약관에 동의한 뒤 다시 시도하세요.';
+  }
+  if (/[/](sign-?in|sign-?up|login|auth)/i.test(url)) {
+    return 'Grok 로그인이 풀렸습니다 — ⚙ 설정 → 👤 계정에서 「🔑 로그인」을 다시 하세요.';
+  }
+  if (dump && dump.noForm) {
+    return `입력 폼이 없는 화면입니다 (${url || '주소 불명'}) — 로그인·약관·점검 화면일 수 있습니다. 그 계정으로 직접 열어 확인하세요.`;
+  }
+  return '"비디오" 칩 못 찾음 — 사이트 UI 가 또 바뀐 듯합니다 (로그의 [DUMP 칩바] 확인)';
+}
+
+module.exports = { GrokEngine, GROK_SELECTORS, PROFILE_BASE, _ensureUserChromeProfileCopy, explainNoChipBar };

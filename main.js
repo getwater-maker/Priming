@@ -5021,7 +5021,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     await genGroupVideosManual(pr, videoDir, [groupNum], engine, `G${groupNum} 영상 생성`);
     await maybeUpscale(pr, log, true);
     if (g.videoPath) log(`✓ G${groupNum} 영상 완료`);
-    else { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패 — 생성되지 않았습니다 (Grok 한도·오류 확인)`); } // 실패 시 'generating' 고착 방지
+    else { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패 — 생성되지 않았습니다 (${engine} 한도·오류 — 위 로그의 이유를 보세요)`); } // 실패 시 'generating' 고착 방지
   } catch (e) { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패: ${e.message}`); }
   pushDtoUpdate();
   return P.toDTO(S.parsed);
