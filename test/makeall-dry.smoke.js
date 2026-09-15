@@ -24,17 +24,24 @@ let n = 0, bad = 0;
 const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else console.log('  · ' + m); };
 
 // 롱폼 대본(H2 = 챕터, H3 = 섹션) — 짧게 3섹션.
+// 🔴 **이미지 프롬프트를 반드시 넣는다.** 게이트(missingVisualGroups)는 `imagePrompt` 가 있는 그룹만
+//   세므로, 프롬프트가 없으면 셀 것이 없어 **게이트가 무력화**된다(= .vrew 가 그냥 만들어진다).
+//   2026-09-16 까지 이 테스트는 **앞선 실행이 남긴 스냅샷**(같은 파일명 → imagePrompt 복원)에 기대
+//   우연히 통과하고 있었다. 그 스냅샷을 지우자 ⑥번 단언이 실패하며 드러났다.
+//   ⚠ 프롬프트를 지우지 말 것 — 지우면 이 테스트가 **조용히** 아무것도 지키지 않게 된다.
 const SCRIPT = [
   '# 테스트 대본 (자동 생성 — 지워도 됩니다)',
   '',
   '## 첫째 마당',
   '',
   '### 도입부',
+  '> 🖼️ 이미지: an old man sitting quietly by a window at dawn, wide empty space',
   '',
   '어떤 사람은 말을 아낀다. 그 침묵이 오히려 힘이 된다.',
   '',
   '',
   '### 본론 하나',
+  '> 🖼️ 이미지: two people talking across a low wooden table, soft daylight',
   '',
   '급하게 말하면 속이 다 보인다. 한 박자만 늦추면 상대가 먼저 움직인다.',
   '',
@@ -42,6 +49,7 @@ const SCRIPT = [
   '## 둘째 마당',
   '',
   '### 마무리',
+  '> 🖼️ 이미지: a small notebook and a pen on a desk at dusk, warm lamp light',
   '',
   '오늘 배운 것을 한 문장으로 남긴다. 그 한 줄이 다음을 바꾼다.',
   '',
@@ -120,7 +128,8 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(/절전 차단 해제/.test(logText), '절전 차단이 해제됨(finally 통과)');
     // ⑥ 무음 모드는 **이미지가 없으므로 이미지 게이트가 .vrew 를 막는 것이 정상**이다.
     //    → 이 줄이 뜨는 것 자체가 v0.3.10 이미지 게이트가 살아 있다는 증거(반쪽 .vrew 방지).
-    ok(/이미지 미생성 그룹 3개/.test(logText), '이미지 게이트가 .vrew 를 막았다(무음 모드에선 정상)');
+    ok(/이미지 미생성 그룹 3개/.test(logText), '이미지 게이트가 .vrew 를 막았다(무음 모드에선 정상)'
+       + ' — 실패하면 대본의 「🖼️ 이미지:」 줄이 사라졌는지 먼저 보라(프롬프트가 없으면 게이트가 셀 것이 없다)');
     ok(!/음성 없는 문장/.test(logText), '무음 모드에선 TTS 누락 게이트가 걸리지 않는다(음성은 채워졌다)');
     // ⑦ 결과물 — 무음 음성 파일이 실제로 만들어졌는지
     const outs = fs.readdirSync(path.join(TMP, path.basename(SCRIPT_PATH).replace(/\.md$/, '')));

@@ -162,8 +162,10 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 헤더 = 좌(상단행 + ①~⑤ 세로 스택) / 우(로그창). 로그가 **맨 윗줄부터** 시작한다 (2026-09-16) */
 .hsplit{display:flex;align-items:flex-start;gap:10px}
 .hmain{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
-.pipecol{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-.pipecol > .hgroup{flex-wrap:wrap;max-width:100%}
+.pipecol{display:flex;flex-direction:column;align-items:stretch;gap:6px;align-self:stretch}
+/* 섹션 박스는 **너비를 통일**한다 (로이 2026-09-16: "크기가 들쭉날쭉한데 동일하게") —
+   내용 길이에 맞춰 제각각이면 세로로 쌓았을 때 오른쪽 끝이 톱니처럼 보인다. */
+.pipecol > .hgroup{flex-wrap:wrap;width:100%}
 /* 로그 패널 */
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;
   background:#2b2620;color:#d8cdbb;border:1px solid var(--accent);border-radius:10px;overflow:hidden;

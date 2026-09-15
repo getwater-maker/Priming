@@ -68,7 +68,7 @@ function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
   const cloud = !!cfg.cloud;
   // 이름은 comfyWorkflows() 가 만든 목록에서 가져온다 — 활성 경로가 목록에 없어도 보강해 주므로 경로 파싱을 중복하지 않는다.
   const wfName = (comfyWorkflows(cfg).find((w) => w.path === cfg.workflowPath) || {}).name || "";
-  const hdr = kind === "video" ? "④ 비디오" : "③ 이미지";
+  const hdr = kind === "video" ? "③ 비디오" : "② 이미지";
   const Lamp = ({ side }) => {
     const st = probes && probes[side];
     if (!st) return <span className="lamp idle">● 미확인</span>;
@@ -365,7 +365,7 @@ export default function App() {
   //   ⚠ 고르는 곳은 여기 하나뿐이다(채널 기본값을 두지 않는다 — 작업마다 달라지는 선택이라
   //     채널에 박으면 오히려 헷갈리고, 진입점이 둘이면 반드시 어긋난다).
   const [outMode, setOutMode] = useState('full');
-  // ✏ 완성물 종류 — 'vrew'(Vrew 에서 마무리) | 'whiteboard'(손그림 MP4 · 4단계 2026-09-05). 헤더 「⑤ 완성」에서 고른다.
+  // ✏ 완성물 종류 — 'vrew'(Vrew 에서 마무리) | 'whiteboard'(손그림 MP4 · 4단계 2026-09-05). 헤더 「④ 완성」에서 고른다.
   const [outTarget, setOutTarget] = useState('vrew');
   const [wbCfg, setWbCfg] = useState(null);   // 화이트보드 렌더 설정(출력 긴변·동시 개수) — PC 별 파일
   const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
@@ -2263,7 +2263,7 @@ export default function App() {
             )}
           </div>
         </div>
-        {/* 제작 파이프라인 — ①대본 → ②음성 → ③이미지 → ④비디오 → ⑤완성 을 **세로로** 쌓고(왼쪽 정렬),
+        {/* 제작 파이프라인 — ①대본·음성 → ②이미지 → ③비디오 → ④완성 을 **세로로** 쌓고(왼쪽 정렬),
             오른쪽 빈 자리에 **로그창**을 붙였다 (로이 2026-09-16).
             🔑 로그는 {!noProduction} 바깥에 둔다 — 출판·리모션엔 파이프라인이 없지만 로그는 늘 필요하다
             (그 모드에선 왼쪽이 비고 로그가 그 폭을 함께 쓴다). */}
@@ -2272,7 +2272,7 @@ export default function App() {
           {/* ① 대본 — 예전엔 상단행에 있었다. 「대본을 여는 것」이 파이프라인의 첫 단계라 번호를 주고 맨 위로 올렸다
               (로이 2026-09-16). 그래서 음성~완성이 한 칸씩 밀렸다(②③④⑤). */}
           <span className="hgroup">
-            <span className="glabel">① 대본</span>
+            <span className="glabel">① 대본·음성</span>
             <button onClick={openScript}>📂 열기</button>
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
@@ -2285,16 +2285,16 @@ export default function App() {
                 (대본마다 projects/<대본>.smproj.json + 큐 구성 workspace.json → 대본을 다시 열면 그대로 이어짐).
                 ⚠ 기능은 그대로다 — IPC 5개와 렌더러 함수 5개 무수정. 되살리려면 옛 hgroup 블록을 되돌리면 된다. */}
             <button className="ghost" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
-          </span>
-          <span className="hgroup">
-            <span className="glabel">② 음성</span>
+            {/* 대본 + 음성을 **한 섹션으로** 합쳤다 (로이 2026-09-16) — 대본을 열고 바로 음성을 만드는 한 호흡이다.
+                그래서 이미지·비디오·완성의 번호가 다시 한 칸씩 당겨졌다(②③④). */}
+            <span className="hdiv" />
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}>🎤 TTS</button>
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}>📖 발음사전</button>
           </span>
           <span className="hgroup">
-            <span className="glabel">③ 이미지</span>
+            <span className="glabel">② 이미지</span>
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" onClick={openOllama}>⚙</button>
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
@@ -2322,7 +2322,7 @@ export default function App() {
             </>)}
           </span>
           <span className="hgroup">
-            <span className="glabel">④ 비디오</span>
+            <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <option value="grok">Grok (브라우저)</option>
               <option value="flow">Flow · Veo (구독)</option>
@@ -2353,7 +2353,7 @@ export default function App() {
           {/* ④ 출력 + ⑤ 완성 **통합** (로이 2026-09-16) — 「무엇으로 낼까(.vrew·화이트보드)」와
               「만들기·내보내기」는 한 동작의 앞뒤라 한 그룹에 둔다. */}
           <span className="hgroup">
-            <span className="glabel">⑤ 완성</span>
+            <span className="glabel">④ 완성</span>
             <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). ⚠ 화이트보드는 아직 무음입니다(5단계 전)." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
               <option value="vrew">.vrew (Vrew)</option>
               <option value="whiteboard">✏ 화이트보드 MP4</option>
@@ -2859,7 +2859,7 @@ export default function App() {
             </div>
 
             {settingsTab === 'img' && comfyCfg && (<div>
-              <div className="meta" style={{ marginBottom: 8 }}>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「③ 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</div>
+              <div className="meta" style={{ marginBottom: 8 }}>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</div>
               <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image"
                 probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
               <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} />
@@ -2879,7 +2879,7 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'vid' && cvidCfg && (<div>
-              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「④ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
+              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
               <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
                 probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
               <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} />
@@ -2922,7 +2922,7 @@ export default function App() {
                 분리됐으므로 순서/체크는 필요 없다 — 고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다. */}
             {settingsTab === 'free' && (<div>
               <div className="meta" style={{ marginBottom: 10 }}>
-                브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「③ 이미지」</b> 드롭다운에서 고르세요.
+                브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
                 고른 쪽이 <b>한도</b>(Genspark 휴식/한도 메시지 · Flow 계정 한도)에 걸리면 <b>남은 이미지를 다른 쪽이 이어서</b> 만들고, <b>한도 재설정 시각이 지나면 같은 대본 도중이라도 원래 엔진으로 되돌아가</b> 이어서 만듭니다.
               </div>
               <div className="frow" style={{ alignItems: 'center' }}>
@@ -2993,8 +2993,8 @@ export default function App() {
                   <option value="Ultra">Ultra — 더 강함(크레딧 더 씀)</option>
                 </select>
               </div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Genspark 비디오</b>는 헤더 「④ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).</div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「④ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.</div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Genspark 비디오</b>는 헤더 「③ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).</div>
+              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.</div>
               <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
               {lora && (
                 <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>

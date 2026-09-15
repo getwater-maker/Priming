@@ -2494,7 +2494,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
       // 💳 Flow 크레딧 소진 — 기다린다고 30분 뒤에 돌아오지 않는다(구독 주기로 갱신). 오래 쉬게 한다.
       FlowAccounts.cooldown(acc.id, FLOW_CREDIT_REST_MIN);
       logger(`💳 Flow 계정 "${acc.label}" 크레딧 소진 — 이 계정은 ${FLOW_CREDIT_REST_MIN / 60}시간 쉽니다(크레딧은 구독 주기로 갱신됩니다).`);
-      logger(`   → 지금 만들려면 헤더 「③ 이미지」를 🖥 ComfyUI 로 바꾸면 됩니다(크레딧을 쓰지 않습니다).`);
+      logger(`   → 지금 만들려면 헤더 「② 이미지」를 🖥 ComfyUI 로 바꾸면 됩니다(크레딧을 쓰지 않습니다).`);
     } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30); // 하루 캡 대신 30분 쿨다운 — 0장이어도 계정을 하루 종일 태우지 않음
       logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 30분 쿨다운 후 재사용, 지금은 다음 계정으로 순환`);
@@ -2624,7 +2624,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     } else if (res && res.rateExhausted && res.reason === 'credit-exhausted') {
       FlowAccounts.cooldown(acc.id, FLOW_CREDIT_REST_MIN);
       log(`💳 Flow 계정 \"${acc.label}\" 크레딧 소진 — 이 계정은 ${FLOW_CREDIT_REST_MIN / 60}시간 쉽니다(크레딧은 구독 주기로 갱신됩니다).`);
-      log(`   → 지금 만들려면 헤더 「④ 비디오」를 ☁ LTX2.5 로 바꾸면 됩니다 — ComfyUI 구독 GPU 시간만 쓰고 영상당 추가 과금이 없습니다.`);
+      log(`   → 지금 만들려면 헤더 「③ 비디오」를 ☁ LTX2.5 로 바꾸면 됩니다 — ComfyUI 구독 GPU 시간만 쓰고 영상당 추가 과금이 없습니다.`);
     } else if (res && res.rateExhausted) {
       FlowAccounts.cooldown(acc.id, 30);
       log(`⚠ Flow 계정 \"${acc.label}\" 한도/차단 — 30분 쿨다운, 지금은 다음 계정으로 순환`);
@@ -3106,7 +3106,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
 //   🔑 **이미지 순환과 같은 브라우저·같은 계정 스토어**를 쓴다 → 계정 순환·한도 쿨다운을 그대로 재사용한다.
 //   ⚠ 그래서 **Genspark 이미지와 동시에 돌 수 없다** — 같은 크롬 프로필의 같은 page 를 조작하면
 //     서로의 화면을 망가뜨린다(Flow 에서 겪은 v0.3.81 사고와 같은 계열) → gensparkBrowser 레인으로 직렬화.
-// 🎛 헤더 「④ 비디오」 옆 모델 select 가 고른 값을 **저장소(image-rotation.json)에 박는다** (2026-09-05).
+// 🎛 헤더 「③ 비디오」 옆 모델 select 가 고른 값을 **저장소(image-rotation.json)에 박는다** (2026-09-05).
 //   로이: "genspark 를 골랐을 때 그 옆에서 모델을 고르게 해 주고, 그 모델로 만들게. 아내 PC 에서는 설정한
 //   모델로 안 만들어지더라." — 모델은 ⚙ 설정 팝업(PC 별 파일)에만 있어 헤더에서 보이지 않았고, 그 PC 의
 //   파일에 무엇이 들어 있는지 알 길이 없었다. 이제 **헤더에 보이는 값 = 저장된 값 = 만드는 값** 이 한 줄로 묶인다.
@@ -3196,7 +3196,7 @@ async function runGensparkVideos(pr, mediaDir, onlyNums) {
           GsAcc.setCooldown(acc.id, until);
           if (pointOut) {
             log(`⛔ Genspark 계정 "${acc.label}" — 비디오 포인트가 소진된 것으로 보입니다: ${String(limitReached).slice(0, 100)}`);
-            log(`   → 기다려도 충전되지 않습니다(구독 주기). 다른 비디오 엔진으로 바꾸세요 — 헤더 「④ 비디오」 → ☁ LTX2.5(구독 GPU 시간만, 추가 과금 없음)`);
+            log(`   → 기다려도 충전되지 않습니다(구독 주기). 다른 비디오 엔진으로 바꾸세요 — 헤더 「③ 비디오」 → ☁ LTX2.5(구독 GPU 시간만, 추가 과금 없음)`);
             log(`   이 계정은 ${fmtClock(until)}까지 건너뜁니다.`);
           } else {
             log(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 건너뜁니다 → 다음 계정`);
