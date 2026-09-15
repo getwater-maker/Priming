@@ -202,13 +202,29 @@ console.log('\n[7] 배선 — 화면·main·preload 가 실제로 이어져 있�
   ok(/ttsAudioPath = keep\.ttsAudioPath/.test(BODY), 'main: 텍스트가 그대로인 조각은 음성을 물려받는다');
 
   // 화면: 옛 ✏ 수정 버튼(롱폼)은 사라지고 인라인 편집 UI 가 있다
-  ok(/문장 클릭 또는 ✎/.test(APP), 'App: 롱폼 헤더의 ✏ 수정 버튼 제거(주석으로 사유 기록)');
+  ok(/✏ 수정 버튼은 없앴다 — 문장을 클릭해/.test(APP), 'App: 롱폼 헤더의 ✏ 수정 버튼 제거(주석으로 사유 기록)');
   eq((APP.match(/onClick=\{openScriptEdit\}/g) || []).length, 1,
     '🔑 App: openScriptEdit 진입점은 출판 탭 1곳만 남았다(롱폼에서는 문장 편집이 대체)');
   ok(/sblk editing/.test(APP), 'App: 문장 편집 블록');
   ok(/defaultValue=\{ed\.text\}/.test(APP), '🔑 App: 편집칸이 **비제어**(제어면 타이핑마다 전 화면 재렌더 — 2026-08-14 사고)');
-  ok(/edit\.merge\(pr\.shortsNum, c\.num, si, s\.text, sents\[si \+ 1\]\.text\)/.test(APP), 'App: 아래 문장과 병합 버튼');
   ok(/splitSentAtCursor/.test(APP), 'App: 커서 자리에서 나누기');
+
+  // 🔑 키보드 편집기 — 버튼이 아니라 키가 동작을 정한다(2026-09-15 로이 요청).
+  //   ⚠ 버튼을 없앴으므로 이 배선이 깨지면 **나누기·합치기·저장을 할 방법이 아예 사라진다**.
+  ok(/ev\.key === 'Enter' && !ev\.shiftKey.*edit\.splitAt\(\)/s.test(APP.slice(APP.indexOf('sblk editing'), APP.indexOf('sblk editing') + 2600)),
+    '🔑 App: Enter = 나누기 (저장이 아니다)');
+  ok(/ev\.key === 'Backspace' && caret === 0 && sel === 0/.test(APP), '🔑 App: 맨 앞 Backspace = 윗줄과 합치기');
+  ok(/edit\.mergeUp\(si, sents\[si - 1\]\.text\)/.test(APP), 'App: 합칠 윗문장 텍스트를 함께 넘긴다');
+  ok(/ev\.key === 'Delete' && caret === el\.value\.length && sel === el\.value\.length/.test(APP), '🔑 App: 맨 끝 Del = 아랫줄 올려 합치기');
+  ok(/edit\.mergeNext\(si, sents\[si \+ 1\]\.text\)/.test(APP), 'App: 합칠 아랫문장 텍스트를 함께 넘긴다');
+  ok(/onBlur=\{\(\) => edit\.commit\(\)\}/.test(APP), '🔑 App: 저장 버튼이 없으므로 **칸을 벗어나면 저장**한다');
+  ok(/sentDoneRef\.current/.test(APP), '🔑 App: 키로 처리한 뒤 blur 가 또 저장하지 않게 막는다(이중 전송 방지)');
+  ok(/setSentEdit\(\(cur\) => \(cur === e \? null : cur\)\)/.test(APP),
+    '🔑 App: 저장이 도는 사이 다른 문장을 열었으면 그건 닫지 않는다');
+  // 버튼·호버 도구는 사라졌다 — 남아 있으면 「버튼 없는 편집기」라는 이번 설계가 반쪽이 된다.
+  ok(!/sblk-edit-btns/.test(APP), 'App: 저장·취소·✂나누기·🗑 버튼 줄 제거');
+  ok(!/sblk-tools/.test(APP), 'App: 호버 ✎·⤋ 버튼 제거');
+  ok(!/sblk-edit-btns|sblk-tools/.test(read('renderer/src/styles.css')), 'App: 그 CSS 도 함께 제거');
   ok(/uiConfirm\(msg \+ '\\n\\n대본\(\.md\) 편집창을 열까요\?'\)/.test(APP), '🔑 App: 화면에서 못 고칠 때 대본 편집창으로 빠져나갈 길');
   ok(BUNDLE ? /sblk/.test(BUNDLE) : true, 'App: 번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
 }

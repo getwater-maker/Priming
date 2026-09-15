@@ -4,7 +4,8 @@
  *
  * 왜 필요한가: 단위 테스트는 core/main 을 검증하지만, 화면의 버튼이 실제로 눌리는지는 못 본다.
  *   이 저장소는 **미정의 식별자(`imgEngine`·`onPickImgEngine`)가 빌드를 통과하고 클릭할 때만 터지는**
- *   사고를 두 번 겪었다. 그래서 ✎ → 고치기 → 저장 → 병합 → 나누기를 **실제로 클릭**한다.
+ *   사고를 두 번 겪었다. 그래서 문장 클릭 → 고치기 → blur 저장 → Backspace/Del 합치기 → Enter 나누기를
+ *   **실제로 클릭하고 실제로 키를 누른다**. 버튼이 사라진 설계라 이 배선이 깨지면 고칠 방법이 아예 없어진다.
  *
  * ⚠ 사용자 대본은 건드리지 않는다 — 임시 .md 를 만들어 열고, 끝나면 대본·스냅샷을 지운다.
  */
@@ -61,67 +62,86 @@ const cleanup = () => {
     ok(await win.locator('.hgroup:has(.glabel:text-is("대본")) button:has-text("✏ 수정")').count() === 0,
       '롱폼 헤더에 ✏ 수정 버튼이 없다(문장 편집이 대체)');
 
-    // [2] 문장 블록 — 첫 그룹은 문장 3개
+    // [2] 문장 블록 — 첫 그룹은 문장 3개. 버튼은 하나도 없다(키보드 편집기).
     const blocks = win.locator('.cut').first().locator('.sblk');
     ok(await blocks.count() === 3, `첫 그룹에 문장 블록 3개 (실제 ${await blocks.count()})`);
     const firstText = (await blocks.first().innerText()).replace(/\s+/g, ' ');
     ok(/첫째 문장입니다/.test(firstText), '첫 블록이 첫 문장이다');
+    eqNum(await win.locator('.sblk button').count(), 0, '🔑 문장 블록에 버튼이 하나도 없다(호버 ✎·⤋ 제거)');
 
-    // [3] ✎ 클릭 → 편집칸 등장
-    await blocks.first().hover();
-    await blocks.first().locator('button:has-text("✎")').click();
+    // [3] 문장을 **클릭**하면 그 자리가 편집칸이 된다
+    await blocks.first().locator('.sblk-lines').click();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     ok(await win.locator('.sblk.editing textarea').inputValue() === '첫째 문장입니다.', '편집칸에 그 문장이 들어 있다');
+    eqNum(await win.locator('.sblk.editing button').count(), 0, '🔑 편집칸에도 저장·취소·나누기 버튼이 없다');
 
-    // [4] 고치고 저장 → 화면·대본(.md) 둘 다 바뀐다
+    // [4] 고치고 **칸을 벗어나면(blur) 저장** — 저장 버튼이 없으므로 이게 유일한 저장 방법이다
     await win.fill('.sblk.editing textarea', '고쳐 쓴 첫 문장입니다.');
-    await win.click('.sblk-edit-btns button:has-text("저장")');
+    await win.locator('.sblk.editing textarea').blur();
     await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 10000 });
     await win.waitForFunction(() => /고쳐 쓴 첫 문장/.test(document.body.innerText), null, { timeout: 10000 });
-    ok(true, '수정: 화면에 새 문장이 보인다');
+    ok(true, '수정: 칸을 벗어나자 저장됐다 — 화면에 새 문장이 보인다');
     const md1 = fs.readFileSync(MD, 'utf8');
     ok(/고쳐 쓴 첫 문장입니다\./.test(md1), '수정: 대본(.md)에 반영됐다');
     ok(/둘째 문장입니다\./.test(md1) && /셋째 문장입니다\./.test(md1), '수정: 같은 줄의 다른 문장은 그대로');
     ok(/> 🧭 \*\*\[메타/.test(md1), '수정: 지침 줄(머리말)은 그대로');
 
-    // [5] ⤋ 아래 문장과 합치기 → 편집칸이 두 문장을 담고, 저장하면 문장이 하나 준다
+    // [5] 🔑 **아랫줄 맨 앞에서 ←Backspace = 윗줄과 합치기** (로이가 요청한 그 동작)
     const b2 = win.locator('.cut').first().locator('.sblk');
-    await b2.first().hover();
-    await b2.first().locator('button:has-text("⤋")').click();
+    await b2.nth(1).locator('.sblk-lines').click();          // 둘째 문장을 연다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
-    const merged = await win.locator('.sblk.editing textarea').inputValue();
-    ok(/고쳐 쓴 첫 문장/.test(merged) && /둘째 문장입니다/.test(merged), '병합: 편집칸에 두 문장이 합쳐져 들어온다');
-    await win.click('.sblk-edit-btns button:has-text("저장")');
-    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 10000 });
+    await win.press('.sblk.editing textarea', 'Control+Home'); // 커서를 맨 앞으로
+    await win.press('.sblk.editing textarea', 'Backspace');
     await win.waitForFunction(() => document.querySelectorAll('.cut')[0].querySelectorAll('.sblk').length === 2, null, { timeout: 10000 });
-    ok(true, '병합: 첫 그룹 문장이 3개 → 2개');
+    ok(true, '합치기(Backspace): 첫 그룹 문장이 3개 → 2개');
     const md2 = fs.readFileSync(MD, 'utf8');
-    ok(!/고쳐 쓴 첫 문장입니다\. 둘째/.test(md2) && /둘째 문장입니다/.test(md2), '병합: 대본에서 두 문장이 한 문장이 됐다');
+    ok(/고쳐 쓴 첫 문장입니다 둘째 문장입니다\./.test(md2), '합치기: 대본에서 두 문장이 한 문장이 됐다');
 
-    // [6] ✂ 나누기 → 한 문장을 둘로
+    // [6] 🔑 **윗줄 맨 끝에서 Del = 아랫줄을 끌어올려 합치기**
     const b3 = win.locator('.cut').first().locator('.sblk');
-    await b3.first().hover();
-    await b3.first().locator('button:has-text("✎")').click();
+    await b3.first().locator('.sblk-lines').click();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
-    await win.fill('.sblk.editing textarea', '앞 조각입니다. 뒤 조각입니다.');
-    await win.click('.sblk-edit-btns button:has-text("저장")');
-    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 10000 });
-    await win.waitForFunction(() => document.querySelectorAll('.cut')[0].querySelectorAll('.sblk').length === 3, null, { timeout: 10000 });
-    ok(true, '나누기: 문장이 2개 → 3개 (마침표로 나뉜다)');
-    const md3 = fs.readFileSync(MD, 'utf8');
-    ok(/앞 조각입니다\. 뒤 조각입니다\./.test(md3), '나누기: 대본에 두 문장으로 들어갔다');
+    await win.press('.sblk.editing textarea', 'Control+End');   // 커서를 맨 끝으로
+    await win.press('.sblk.editing textarea', 'Delete');
+    await win.waitForFunction(() => document.querySelectorAll('.cut')[0].querySelectorAll('.sblk').length === 1, null, { timeout: 10000 });
+    ok(true, '합치기(Del): 문장이 2개 → 1개');
+    ok(/셋째 문장입니다\.?$/m.test(fs.readFileSync(MD, 'utf8').split('\n').find((l) => /고쳐 쓴 첫 문장/.test(l)) || ''),
+      '합치기(Del): 아랫문장이 윗문장 뒤에 붙었다');
 
-    // [7] Esc 로 취소하면 아무것도 안 바뀐다
+    // [7] 🔑 **Enter = 커서 자리에서 나누기** (저장이 아니다)
     const b4 = win.locator('.cut').first().locator('.sblk');
-    await b4.first().hover();
-    await b4.first().locator('button:has-text("✎")').click();
+    await b4.first().locator('.sblk-lines').click();
+    await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
+    await win.fill('.sblk.editing textarea', '앞 조각입니다 뒤 조각입니다');
+    await win.locator('.sblk.editing textarea').evaluate((el) => el.setSelectionRange(7, 7)); // '앞 조각입니다' 뒤
+    await win.press('.sblk.editing textarea', 'Enter');
+    await win.waitForFunction(() => document.querySelectorAll('.cut')[0].querySelectorAll('.sblk').length === 2, null, { timeout: 10000 });
+    ok(true, '나누기(Enter): 문장이 1개 → 2개');
+    ok(/앞 조각입니다\. 뒤 조각입니다/.test(fs.readFileSync(MD, 'utf8')), '나누기: 대본에 두 문장으로 들어갔다');
+
+    // [8] 그룹 첫 문장에서 Backspace → 윗 그룹과는 합치지 않는다(대본이 그대로여야 한다)
+    const mdBefore = fs.readFileSync(MD, 'utf8');
+    const b5 = win.locator('.cut').first().locator('.sblk');
+    await b5.first().locator('.sblk-lines').click();
+    await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
+    await win.press('.sblk.editing textarea', 'Control+Home');
+    await win.press('.sblk.editing textarea', 'Backspace');
+    await win.waitForTimeout(600);
+    ok(fs.readFileSync(MD, 'utf8') === mdBefore, '🔑 그룹 첫 문장의 Backspace 는 대본을 건드리지 않는다');
+    ok(await win.locator('.sblk.editing textarea').count() === 1, '그 경우 편집칸은 열린 채로 남는다');
+    await win.press('.sblk.editing textarea', 'Escape');
+    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 5000 });
+
+    // [9] Esc 로 취소하면 아무것도 안 바뀐다
+    const b6 = win.locator('.cut').first().locator('.sblk');
+    await b6.first().locator('.sblk-lines').click();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.fill('.sblk.editing textarea', '이건 취소할 글입니다.');
     await win.press('.sblk.editing textarea', 'Escape');
     await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 5000 });
     ok(!/이건 취소할 글입니다/.test(fs.readFileSync(MD, 'utf8')), 'Esc 취소: 대본이 바뀌지 않는다');
 
-    // [8] 🔑 이 기능의 존재 이유 — **고친 문장만 음성이 비고, 나머지 문장의 음성은 그대로 남는다.**
+    // [10] 🔑 이 기능의 존재 이유 — **고친 문장만 음성이 비고, 나머지 문장의 음성은 그대로 남는다.**
     //   옛 「✏ 대본 수정」은 적용할 때마다 재파싱이라 **전 문장의 TTS 가 통째로 초기화**됐다.
     //   무음(dry) 만들기로 음성을 채운 뒤 한 문장을 고쳐 확인한다(TTS 서버·GPU 를 쓰지 않는다).
     const chan = `__문장편집채널_${process.pid}`;
@@ -169,7 +189,7 @@ const cleanup = () => {
       try { fs.rmSync(path.join(os.homedir(), '.priming-maker', 'projects', `${TAG}.smproj.json`), { force: true }); } catch (_) {}
     }
 
-    // [9] 화면 오류 0 — 미정의 식별자·렌더 예외가 없었는가
+    // [11] 화면 오류 0 — 미정의 식별자·렌더 예외가 없었는가
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);
   } finally {
     await app.close().catch(() => {});
