@@ -3213,6 +3213,13 @@ export default function App() {
   }
 }
 
+// ✏ 편집칸을 글 높이에 딱 맞춘다 — 그 줄 자리에서 고치는 느낌이 나도록(빈 줄·스크롤 없음).
+function fitSentBox(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
@@ -3257,9 +3264,13 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                   if (edHere && si === ed.sentIdx) {
                     return (
                       <div className="sblk editing" key={'e' + si}>
-                        {/* 비제어 — 값은 저장할 때 ref 에서 한 번만 읽는다 */}
-                        <textarea ref={edit.ref} defaultValue={ed.text} rows={2} spellCheck={false} autoFocus
+                        {/* 비제어 — 값은 저장할 때 ref 에서 한 번만 읽는다.
+                            🔑 그 줄 자리에서 그대로 고친다 — 글 높이에 맞춰 늘어나므로 화면이 튀지 않는다. */}
+                        <textarea defaultValue={ed.text} rows={1} spellCheck={false} autoFocus
                           disabled={edit.busy}
+                          title="Enter 나누기 · 맨 앞 ←Backspace 윗줄과 합치기 · 맨 끝 Del 아랫줄 올리기 · Esc 취소"
+                          ref={(el) => { edit.ref.current = el; fitSentBox(el); }}
+                          onInput={(ev) => fitSentBox(ev.currentTarget)}
                           onBlur={() => edit.commit()}
                           onKeyDown={(ev) => {
                             const el = ev.currentTarget;
@@ -3279,7 +3290,6 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                               else edit.mergeNext(si, sents[si + 1].text);
                             }
                           }} />
-                        <div className="sblk-hint">Enter 나누기 · 맨 앞 ←Backspace 윗줄과 합치기 · 맨 끝 Del 아랫줄 올리기 · Esc 취소 · 칸을 벗어나면 저장(대본도 함께)</div>
                       </div>
                     );
                   }

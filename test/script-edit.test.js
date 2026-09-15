@@ -224,7 +224,10 @@ console.log('\n[7] 배선 — 화면·main·preload 가 실제로 이어져 있�
   // 버튼·호버 도구는 사라졌다 — 남아 있으면 「버튼 없는 편집기」라는 이번 설계가 반쪽이 된다.
   ok(!/sblk-edit-btns/.test(APP), 'App: 저장·취소·✂나누기·🗑 버튼 줄 제거');
   ok(!/sblk-tools/.test(APP), 'App: 호버 ✎·⤋ 버튼 제거');
-  ok(!/sblk-edit-btns|sblk-tools/.test(read('renderer/src/styles.css')), 'App: 그 CSS 도 함께 제거');
+  ok(!/sblk-hint/.test(APP), 'App: 편집칸 아래 안내문 제거(그 줄 자리에서 그대로 고친다)');
+  ok(!/sblk-edit-btns|sblk-tools|sblk-hint/.test(read('renderer/src/styles.css')), 'App: 그 CSS 도 함께 제거');
+  ok(/fitSentBox/.test(APP), '🔑 App: 편집칸 높이를 글에 맞춰 — 칸이 커지지 않는다');
+  ok(/rows=\{1\}/.test(APP), 'App: 편집칸은 한 줄에서 시작한다');
   ok(/uiConfirm\(msg \+ '\\n\\n대본\(\.md\) 편집창을 열까요\?'\)/.test(APP), '🔑 App: 화면에서 못 고칠 때 대본 편집창으로 빠져나갈 길');
   ok(BUNDLE ? /sblk/.test(BUNDLE) : true, 'App: 번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
 }

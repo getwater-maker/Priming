@@ -74,6 +74,16 @@ const cleanup = () => {
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     ok(await win.locator('.sblk.editing textarea').inputValue() === '첫째 문장입니다.', '편집칸에 그 문장이 들어 있다');
     eqNum(await win.locator('.sblk.editing button').count(), 0, '🔑 편집칸에도 저장·취소·나누기 버튼이 없다');
+    // 🔑 그 줄 자리에서 그대로 고친다 — 안내문도 없고 칸이 커지지도 않는다(로이 요청 2026-09-15).
+    eqNum(await win.locator('.sblk-hint').count(), 0, '🔑 편집칸 아래 안내문이 없다');
+    {
+      const grow = await win.evaluate(() => {
+        const ed = document.querySelector('.sblk.editing');
+        const plain = document.querySelector('.cut .sblk:not(.editing)');
+        return Math.round(ed.getBoundingClientRect().height - plain.getBoundingClientRect().height);
+      });
+      ok(grow <= 6, `🔑 편집칸이 그 줄보다 커지지 않는다 (차이 ${grow}px)`);
+    }
 
     // [4] 고치고 **칸을 벗어나면(blur) 저장** — 저장 버튼이 없으므로 이게 유일한 저장 방법이다
     await win.fill('.sblk.editing textarea', '고쳐 쓴 첫 문장입니다.');
