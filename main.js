@@ -927,6 +927,50 @@ ipcMain.handle('grok-login', async (_e, args = {}) => {
 //   가르는 용도뿐이다. 무엇을 변환할지는 asr.needsAudioConvert 하나가 정한다.
 //   (2026-09-03: 이 집합으로 변환을 판정하다 m4a·aac·ogg·wma 가 그대로 올라가 전부 HTTP 500)
 const STT_VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v', '.ts', '.mpg', '.mpeg', '.wmv']);
+/**
+ * 파일 하나를 전사해 같은 이름 `.txt` 로 저장한다.
+ * 🔑 **「🎧 STT」 버튼과 「🔗 URL」 경로가 이 함수를 함께 쓴다** — 「변환 → 전사 → 저장」을 두 벌로 두면
+ *    한쪽만 고쳐져 조용히 갈라진다(v0.3.92 가 변환 게이트를 `transcribeLong` 한 곳에 모은 것과 같은 이유).
+ */
+async function transcribeToTxt(file, opts = {}) {
+  const media = require('./core/media-utils');
+  const asr = require('./tts/asr-client');
+  const ext = path.extname(file).toLowerCase();
+  const outTxt = opts.outTxt || path.join(path.dirname(file), path.basename(file, path.extname(file)) + '.txt');
+  let audioPath = file;
+  let tmpAudio = null;
+  try {
+    // 서버(soundfile)가 직접 읽는 포맷이 아니면 무엇이든 mp3 로 바꿔서 올린다.
+    if (asr.needsAudioConvert(file)) {
+      tmpAudio = path.join(os.tmpdir(), `pf-stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
+      log(STT_VIDEO_EXT.has(ext)
+        ? '  ↳ 동영상에서 오디오 추출 중…'
+        : `  ↳ mp3 로 변환 중… (서버가 ${ext || '이 형식'} 을 직접 읽지 못합니다)`);
+      await media.extractAudioMp3(file, tmpAudio);
+      audioPath = tmpAudio;
+    }
+    const text = await asr.transcribeLong(audioPath, {
+      abortSignal: () => S.abort,
+      onProgress: (p) => { if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`); },
+    });
+    fs.writeFileSync(outTxt, String(text || '').trim() + '\n', 'utf8');
+    log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
+    return { ok: true, txt: outTxt, chars: String(text || '').length };
+  } finally {
+    if (tmpAudio) { try { fs.rmSync(tmpAudio, { force: true }); } catch {} }
+  }
+}
+
+/** Whisper 서버 상태를 미리 알린다(막지는 않는다 — 콜드스타트면 그냥 오래 걸릴 뿐이다). */
+async function warnAsrIfDown() {
+  try {
+    const asr = require('./tts/asr-client');
+    const st = await asr.checkAsrStatus();
+    if (!st.reachable) log('⚠ OmniVoice(STT) 백엔드 연결 안 됨 — Whisper 서버가 켜져 있는지 확인하세요. 그래도 시도합니다.');
+    else if (!st.loaded) log('ℹ Whisper 모델 미로드 — 첫 파일은 모델 로딩으로 5분+ 걸릴 수 있습니다.');
+  } catch {}
+}
+
 ipcMain.handle('stt-transcribe', async () => {
   const r = await dialog.showOpenDialog(win, {
     title: 'STT 할 음성·영상 파일 선택 (여러 개 가능)',
@@ -938,55 +982,152 @@ ipcMain.handle('stt-transcribe', async () => {
   });
   if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
 
-  const media = require('./core/media-utils');
-  const asr = require('./tts/asr-client');
   S.abort = false;
-
-  try {
-    const st = await asr.checkAsrStatus();
-    if (!st.reachable) log('⚠ OmniVoice(STT) 백엔드 연결 안 됨 — Whisper 서버가 켜져 있는지 확인하세요. 그래도 시도합니다.');
-    else if (!st.loaded) log('ℹ Whisper 모델 미로드 — 첫 파일은 모델 로딩으로 5분+ 걸릴 수 있습니다.');
-  } catch {}
+  await warnAsrIfDown();
 
   const results = [];
   for (const file of r.filePaths) {
     if (S.abort) { log('⏹ STT 중단됨'); break; }
-    const dir = path.dirname(file);
-    const base = path.basename(file, path.extname(file));
-    const ext = path.extname(file).toLowerCase();
-    const outTxt = path.join(dir, base + '.txt');
-    let audioPath = file;
-    let tmpAudio = null;
     log(`🎧 STT 시작: ${path.basename(file)}`);
     try {
-      // 서버(soundfile)가 직접 읽는 포맷이 아니면 무엇이든 mp3 로 바꿔서 올린다.
-      //   영상뿐 아니라 **m4a·aac·ogg·wma 도 여기 걸린다** — 예전엔 영상만 변환해서
-      //   m4a 를 고를 수는 있는데 전사는 늘 실패하는 상태였다.
-      if (asr.needsAudioConvert(file)) {
-        tmpAudio = path.join(os.tmpdir(), `pf-stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
-        log(STT_VIDEO_EXT.has(ext)
-          ? '  ↳ 동영상에서 오디오 추출 중…'
-          : `  ↳ mp3 로 변환 중… (서버가 ${ext || '이 형식'} 을 직접 읽지 못합니다)`);
-        await media.extractAudioMp3(file, tmpAudio);
-        audioPath = tmpAudio;
-      }
-      const text = await asr.transcribeLong(audioPath, {
-        abortSignal: () => S.abort,
-        onProgress: (p) => { if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`); },
-      });
-      fs.writeFileSync(outTxt, String(text || '').trim() + '\n', 'utf8');
-      log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
-      results.push({ file, txt: outTxt, ok: true });
+      const t = await transcribeToTxt(file);
+      results.push({ file, txt: t.txt, ok: true });
     } catch (e) {
       log(`✗ STT 실패 (${path.basename(file)}): ${e.message}`);
       results.push({ file, ok: false, error: e.message });
-    } finally {
-      if (tmpAudio) { try { fs.rmSync(tmpAudio, { force: true }); } catch {} }
     }
   }
   const okN = results.filter((x) => x.ok).length;
   log(`🎧 STT 완료: 성공 ${okN}/${results.length}`);
   return { ok: true, results };
+});
+
+// ── 🔗 URL 다운로드 → STT ───────────────────────────────
+ipcMain.handle('ytdlp-status', async () => {
+  const MD = require('./core/media-download');
+  try {
+    const f = await MD.findYtDlp();
+    return f ? { ok: true, found: true, version: f.version, ageDays: f.ageDays, stale: f.stale, kind: f.kind }
+             : { ok: true, found: false };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('ytdlp-update', async () => {
+  const MD = require('./core/media-download');
+  try {
+    const t = await MD.downloadYtDlp({ onLog: log });
+    return { ok: true, version: t.version };
+  } catch (e) { log(`✗ yt-dlp 업데이트 실패: ${e.message}`); return { ok: false, error: e.message }; }
+});
+
+/**
+ * 주소(유튜브·비메오·틱톡·인스타 …)에서 받아 바로 전사한다.
+ * 🔑 **자막이 있으면 STT 를 건너뛴다**(로이 확정) — 유튜브 자동자막은 그대로 쓸 수 있어 GPU 를 0초 쓴다.
+ *    자막이 없는 영상만 Whisper 로 돌린다. `forceStt` 면 자막이 있어도 전사한다.
+ */
+ipcMain.handle('stt-from-url', async (_e, args = {}) => {
+  const MD = require('./core/media-download');
+  const media = require('./core/media-utils');
+  const urls = (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
+  if (!urls.length) return { ok: false, error: '주소가 없습니다' };
+
+  const mode = ['audio', 'video', 'both'].includes(args.mode) ? args.mode : 'audio';
+  const forceStt = !!args.forceStt;
+  const doStt = args.stt !== false;
+
+  // 저장 폴더 — 채널의 「다운로드 폴더」가 정본, 없으면 그 자리에서 고르게 한다.
+  let outDir = args.outDir || '';
+  if (!outDir) {
+    const pr = resolvePreset(args.presetName);
+    outDir = (pr && pr.downloadFolder) || '';
+  }
+  if (!outDir) {
+    const pick = await dialog.showOpenDialog(win, {
+      title: '받은 파일을 저장할 폴더 선택 (채널편집 → 📁 폴더 에 지정해 두면 다음부터 안 묻습니다)',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (pick.canceled || !pick.filePaths?.length) return { ok: false, canceled: true };
+    outDir = pick.filePaths[0];
+  }
+  try { fs.mkdirSync(outDir, { recursive: true }); }
+  catch (e) { return { ok: false, error: `저장 폴더를 만들 수 없습니다 — ${outDir} (${e.message})` }; }
+
+  S.abort = false;
+  const results = [];
+
+  return await withAwake('URL 다운로드·STT', async () => {
+    let tool;
+    try {
+      tool = await MD.ensureYtDlp({ onLog: log });
+      log(`🔗 yt-dlp ${tool.version} · 저장 ${outDir}`);
+    } catch (e) {
+      log(`✗ ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+    if (doStt) await warnAsrIfDown();
+
+    let ffDir = '';
+    try { const fp = media.getFfmpegPath && media.getFfmpegPath(); if (fp) ffDir = path.dirname(fp); } catch {}
+
+    for (let i = 0; i < urls.length; i++) {
+      if (S.abort) { log('⏹ 중단됨'); break; }
+      const url = urls[i];
+      log(`🔗 [${i + 1}/${urls.length}] ${url}`);
+      try {
+        const info = await MD.probe(url, { tool, abortSignal: () => S.abort });
+        const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
+        log(`  「${info.title}」 · ${mmss}${info.channel ? ` · ${info.channel}` : ''}`);
+
+        const wantSubs = !forceStt;
+        const r = await MD.download(url, {
+          tool, mode, subs: wantSubs, outDir, language: info.language,
+          ffmpegDir: ffDir, abortSignal: () => S.abort, onLog: log,
+        });
+
+        const mediaFile = r.audio || r.video;
+        const base = mediaFile
+          ? path.join(path.dirname(mediaFile), path.basename(mediaFile, path.extname(mediaFile)))
+          : path.join(outDir, info.title.replace(/[\\/:*?"<>|]/g, '_'));
+        const outTxt = base + '.txt';
+
+        let txtFrom = null;
+        if (r.sub && !forceStt) {
+          // 자막이 있다 → 그대로 텍스트로. GPU 를 쓰지 않는다.
+          const text = MD.subtitleFileToText(r.sub);
+          if (text.length >= 20) {          // 너무 짧으면 자막이 사실상 비어 있는 것 → STT 로 넘긴다
+            fs.writeFileSync(outTxt, text + '\n', 'utf8');
+            log(`  📝 자막에서 추출: ${path.basename(outTxt)} (${text.length}자 · STT 생략)`);
+            txtFrom = 'subtitle';
+          } else {
+            log('  ⓘ 자막이 비어 있어 STT 로 진행합니다.');
+          }
+        }
+        // 받아 둔 .vtt 는 텍스트로 옮겼으니 남기지 않는다(출력 폴더가 지저분해진다).
+        for (const f of [r.sub, ...(r.subExtras || [])]) {
+          if (f) { try { fs.rmSync(f, { force: true }); } catch {} }
+        }
+
+        if (!txtFrom && doStt) {
+          if (!mediaFile) throw new Error('받은 음성·영상 파일이 없습니다');
+          log(`  🎧 STT 시작: ${path.basename(mediaFile)}`);
+          await transcribeToTxt(mediaFile, { outTxt });
+          txtFrom = 'stt';
+        }
+
+        results.push({ url, ok: true, title: info.title, audio: r.audio, video: r.video,
+          txt: txtFrom ? outTxt : null, from: txtFrom });
+      } catch (e) {
+        log(`  ✗ 실패: ${e.message}`);
+        results.push({ url, ok: false, error: e.message });
+      }
+    }
+
+    const okN = results.filter((x) => x.ok).length;
+    const subN = results.filter((x) => x.from === 'subtitle').length;
+    log(`🔗 완료: 성공 ${okN}/${results.length}${subN ? ` (자막 ${subN}건은 STT 생략)` : ''}`);
+    if (okN) { try { shell.openPath(outDir); } catch {} }
+    return { ok: true, results, outDir };
+  });
 });
 
 // 🎵 mp3 추출 — 영상(또는 다른 오디오)에서 mp3 를 뽑아 **원본과 같은 폴더에 같은 이름 .mp3** 로 저장.

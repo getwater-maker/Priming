@@ -399,6 +399,13 @@ export default function App() {
   const [chStyles, setChStyles] = useState([]);
   const [chRefList, setChRefList] = useState([]); // 참조음성 파일 목록
   const [tsOpen, setTsOpen] = useState(false);   // ⏱ 유튜브 타임스탬프(챕터) 모달
+  // 🔗 URL 다운로드 → STT
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
+  const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
+  const [ytInfo, setYtInfo] = useState(null);            // yt-dlp 유무·버전
+  const urlTextRef = useRef(null);                       // 비제어 — 글자마다 재렌더하지 않는다(v0.3.9)
   const [tsData, setTsData] = useState(null);    // { text, total, warns } — 열 때 계산
   const tsRef = useRef(null);                    // 편집 가능한 textarea (복사는 여기서 읽는다)
   const [impOpen, setImpOpen] = useState(false);
@@ -732,6 +739,38 @@ export default function App() {
       const okN = (r.results || []).filter((x) => x.ok).length;
       setStatus(`STT 완료 (${okN}/${tot}) — 원본 폴더에 .txt 생성`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
+  // 🔗 URL(유튜브·비메오·틱톡·인스타 …) → 받아서 바로 STT
+  //   🔑 **자막이 있으면 STT 를 건너뛴다** — 유튜브 자동자막을 그대로 쓰면 GPU 를 0초 쓰고 수 초에 끝난다.
+  async function openUrlDl() {
+    setUrlOpen(true);
+    try { setYtInfo(await api.ytdlpStatus()); } catch { setYtInfo(null); }
+  }
+  async function runUrlDl() {
+    const urls = String(urlTextRef.current?.value || '')
+      .split(/[\n\r]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s));
+    if (!urls.length) { logline('주소를 한 줄에 하나씩 붙여넣으세요 (http… 로 시작)'); return; }
+    setUrlOpen(false);
+    setUrlBusy(true);
+    setStatus(`🔗 ${urls.length}개 받는 중…`);
+    try {
+      const r = await api.sttFromUrl({ urls, mode: urlMode, forceStt: urlForceStt, presetName: presetName || null });
+      if (!r || r.canceled) { setStatus('취소'); return; }
+      if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
+      const okN = (r.results || []).filter((x) => x.ok).length;
+      const subN = (r.results || []).filter((x) => x.from === 'subtitle').length;
+      setStatus(`🔗 완료 (${okN}/${(r.results || []).length})${subN ? ` · 자막 ${subN}건은 STT 생략` : ''}`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+    finally { setUrlBusy(false); }
+  }
+  async function updateYtdlp() {
+    setUrlBusy(true);
+    try {
+      const r = await api.ytdlpUpdate();
+      if (r && r.ok) logline(`✓ yt-dlp ${r.version} 으로 업데이트했습니다`);
+      setYtInfo(await api.ytdlpStatus());
+    } catch (e) { logline('오류: ' + e.message); }
+    finally { setUrlBusy(false); }
   }
   // 🎵 영상 → mp3 추출 (STT 와 별개 · Whisper 서버 불필요)
   async function runExtractMp3() {
@@ -1372,6 +1411,7 @@ export default function App() {
       dictPath: p.dictPath || '',   // 🎬 리모션 발음사전 — 안 실으면 저장할 때 빈 값으로 덮인다
       outImages: p.outImages || '', // 🖼 리모션 그림 출력 뿌리 — 위와 같은 이유로 반드시 싣는다
       imgTsvFolder: p.imgTsvFolder || '', // 🖼 그림목록(TSV) 폴더 — 음성 TSV 의 짝을 여기서 찾는다
+      downloadFolder: p.downloadFolder || '', // 🔗 URL 로 받은 영상·음성·전사본을 떨어뜨릴 폴더
 
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
@@ -1598,6 +1638,7 @@ export default function App() {
       dictPath: (ch.dictPath || '').trim(),               // 🎬 리모션 발음사전(.md) — 비우면 사전 없이 합성
       outImages: (ch.outImages || '').trim(),             // 🖼 리모션 그림 출력 뿌리(TSV 1번 칸이 그 아래 경로)
       imgTsvFolder: (ch.imgTsvFolder || '').trim(),       // 🖼 그림목록 TSV 폴더(같은 번호끼리 자동 연결)
+      downloadFolder: (ch.downloadFolder || '').trim(),   // 🔗 URL 다운로드 폴더(비우면 받을 때 물어본다)
       voice: ch.voice || '',                              // 음성 식별자(레거시 값 보존 — 표시용)
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
@@ -1648,6 +1689,7 @@ export default function App() {
   // 🖼 그림 출력 뿌리 — 하위 폴더·파일명은 그림목록 TSV 의 1번 칸이 정한다.
   async function pickOutImages() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outImages: d })); }
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
+  async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
   // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
   async function pickDict() {
@@ -1798,6 +1840,7 @@ export default function App() {
       if (ttsSrvOpen) { setTtsSrvOpen(false); return; }
       if (comfyOpen) { setComfyOpen(false); return; }
       if (cvidOpen) { setCvidOpen(false); return; }
+      if (urlOpen) { setUrlOpen(false); return; }
       if (tsOpen) { setTsOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
@@ -1811,7 +1854,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -2198,6 +2241,7 @@ export default function App() {
                     화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
                 <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
                 <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}>🎵 mp3</button>
+                <button className="ghost" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 mp3(또는 영상)를 받아 바로 전사합니다 — 자막이 있으면 STT 없이 자막을 씁니다" onClick={openUrlDl}>🔗 URL</button>
               </span>
               <span className="hgroup">
                 <span className="glabel">저장·불러오기</span>
@@ -2592,6 +2636,11 @@ export default function App() {
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본 폴더'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
+                <div className="frow"><label>다운로드 폴더</label>
+                  <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 비우면 받을 때 물어봅니다" value={ch.downloadFolder || ''}
+                    onChange={(e) => setCh({ ...ch, downloadFolder: e.target.value })} />
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDownloadFolder}>찾기</button></div>
                 {ch.startMode === 'remotion' && (<>
                   <div className="frow"><label>발음사전</label>
                     <input placeholder="발음사전(.md) — 비우면 사전 없이 합성합니다" value={ch.dictPath || ''}
@@ -3102,6 +3151,53 @@ export default function App() {
             <textarea ref={scriptEditRef} rows="22" defaultValue={scriptText} spellCheck={false}
               style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12.5, lineHeight: 1.5 }} />
             <div className="mbtns"><button onClick={applyScriptEdit}>적용</button><button className="ghost" onClick={() => setScriptEditOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
+      {urlOpen && (
+        <div className="modal-bg show">
+          <div className="modal-card" style={{ maxWidth: 640 }}>
+            <h3>🔗 URL 에서 받아 전사</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>
+              유튜브·비메오·틱톡·인스타 등의 <b>주소를 한 줄에 하나씩</b> 붙여넣으세요(여러 개 가능).
+              <br />저장 위치 = 채널의 <b>다운로드 폴더</b>(⚙ 채널편집 → 📁 폴더). 비어 있으면 받을 때 물어봅니다.
+            </div>
+            <textarea ref={urlTextRef} rows={5} spellCheck={false} autoFocus
+              placeholder={'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
+              style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
+            <div className="frow" style={{ marginTop: 10 }}>
+              <label>받을 것</label>
+              <select value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
+                <option value="audio">🎵 MP3 (음성만 · 빠르고 작습니다)</option>
+                <option value="video">🎬 영상 (mp4)</option>
+                <option value="both">🎵+🎬 둘 다</option>
+              </select>
+            </div>
+            <label className="chk" style={{ marginTop: 8, display: 'block' }}>
+              <input type="checkbox" checked={urlForceStt} onChange={(e) => setUrlForceStt(e.target.checked)} />
+              {' '}자막이 있어도 <b>Whisper 로 전사</b>(자막보다 정확하지만 GPU 를 오래 씁니다)
+            </label>
+            <div className="meta" style={{ marginTop: 8 }}>
+              기본 동작: <b>자막이 있으면 그대로 .txt</b> 로 만들고 STT 를 건너뜁니다(수 초 · GPU 0). 자막이 없는 영상만 Whisper 로 전사합니다.
+              {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 그렇다고 통째로 숨기면 조회에 실패했을 때
+                  화면에 아무 단서도 안 남는다(「⬇ 업데이트」 버튼도 사라진다). 항상 그리고 내용만 바꾼다. */}
+              <div style={{ marginTop: 6 }}>
+                {!ytInfo
+                  ? <>yt-dlp 확인 중…</>
+                  : ytInfo.found
+                    ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale
+                        ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다</span>
+                        : ` · ${ytInfo.ageDays}일 전 판`}</>
+                    : <>이 PC 에 yt-dlp 가 없습니다 — 처음 받을 때 <b>자동으로 내려받습니다</b>(약 17MB · 한 번만).</>}
+                {' '}<button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px', marginLeft: 4 }} onClick={updateYtdlp}>⬇ 업데이트</button>
+              </div>
+            </div>
+            <div className="mbtns">
+              <button disabled={urlBusy} onClick={runUrlDl}>받아서 전사</button>
+              <button className="ghost" onClick={() => setUrlOpen(false)}>취소</button>
+            </div>
           </div>
         </div>
       )}

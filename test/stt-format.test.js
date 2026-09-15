@@ -63,8 +63,10 @@ ok(/finally \{ try \{ fs\.rmSync\(tmpConv/.test(ASRSRC), '임시 변환본을 fi
 // ── [4] main.js — 옛 블랙리스트 판정이 되살아나지 않았는지 ──
 ok(/asr\.needsAudioConvert\(file\)/.test(MAIN), 'STT 핸들러가 asr.needsAudioConvert 로 판정한다');
 {
-  const i = MAIN.indexOf("ipcMain.handle('stt-transcribe'");
-  ok(i > 0, 'STT 핸들러를 찾았다');
+  // 🔑 「파일 → .txt」 는 `transcribeToTxt` 로 분리됐다(🎧 STT 버튼과 🔗 URL 경로가 **공유**한다).
+  //    그래서 검사 범위도 그 함수다 — 핸들러만 보면 코드가 옳은데도 실패한다(v0.4.7 계열의 낡은 기대값).
+  const i = MAIN.indexOf('async function transcribeToTxt(');
+  ok(i > 0, '「파일 → .txt」 공용 함수를 찾았다');
   const blk = MAIN.slice(i, i + 3000);
   ok(!/if \(STT_VIDEO_EXT\.has\(ext\)\) \{/.test(blk), '🔴 옛 "영상 확장자면 변환" 판정이 사라졌다');
   ok(/STT_VIDEO_EXT\.has\(ext\)[\s\S]{0,140}동영상에서 오디오 추출/.test(blk), 'STT_VIDEO_EXT 는 로그 문구 구분에만 쓴다');
