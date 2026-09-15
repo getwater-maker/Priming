@@ -215,7 +215,12 @@ async function probe(url, { tool, abortSignal } = {}) {
   const t = tool || await ensureYtDlp();
   const r = await _spawnYt(t, ['--no-playlist', '--skip-download', '--dump-single-json', url],
     { abortSignal, timeoutMs: 3 * 60 * 1000 });
-  if (r.code !== 0) throw new Error(_explain(r.stderr) || `정보를 읽지 못했습니다 (코드 ${r.code})`);
+  // ⚠ 사람 말로 바꾼 메시지만 던지면 호출부가 원인을 못 가린다 → 원문을 `raw` 로 함께 준다(altUrl 판정에 쓴다).
+  if (r.code !== 0) {
+    const err = new Error(_explain(r.stderr) || `정보를 읽지 못했습니다 (코드 ${r.code})`);
+    err.raw = r.stderr;
+    throw err;
+  }
   const line = r.stdout.split('\n').find((x) => x.trim().startsWith('{'));
   if (!line) throw new Error('정보를 읽지 못했습니다 (응답 없음)');
   const j = JSON.parse(line);
@@ -232,21 +237,89 @@ async function probe(url, { tool, abortSignal } = {}) {
 }
 
 /**
+ * probe + **대안 주소 1회 재시도**. 성공한 주소를 함께 돌려주므로 호출부는 그 주소로 내려받으면 된다.
+ * 🔑 호출부가 「어느 주소로 받을지」를 따로 계산하지 않게 여기서 한 번에 정한다(두 곳이 각자 판단하면 어긋난다).
+ */
+async function probeSmart(url, o = {}) {
+  try {
+    return { url, info: await probe(url, o), switched: false };
+  } catch (e) {
+    const alt = altUrl(url, e.raw || e.message);
+    if (!alt) throw e;
+    if (o.onLog) o.onLog('  ↻ 비메오가 로그인을 요구합니다 — 플레이어 주소로 다시 시도합니다.');
+    const info = await probe(alt, o);   // 여기서 또 실패하면 그대로 던진다(조용히 삼키지 않는다)
+    return { url: alt, info, switched: true };
+  }
+}
+
+/**
  * 자막 언어 우선순위.
  * 🔑 **원본 언어만 쓴다** — 유튜브는 자동자막을 157개 언어로 기계번역해 준다. `ko` 를 무턱대고 요청하면
  *    일본어 영상의 **번역본**을 받아 STT 보다 나쁜 결과를 조용히 쓰게 된다.
  *    `<lang>-orig` 가 원본이고, 원본이 그 언어면 `<lang>` 도 같은 내용이다(실측: 두 파일 바이트 동일).
+ * 🔴 **정확 코드만 요청하면 사이트마다 조용히 놓친다** — 틱톡 자막 코드는 `eng-US` 라 `en` 과 안 맞아
+ *    `요청한 언어의 자막이 없습니다` 로 떨어졌다(자막이 있는데도 매번 Whisper 를 돌렸다 · 2026-09-15 실측).
+ *    → `<lang>.*` 를 **뒤에** 덧붙인다. 앞의 정확 코드가 먼저 걸리므로 유튜브 동작은 그대로다.
  */
 function subLangPref(language) {
   const L = String(language || '').split('-')[0].trim();
-  if (L) return [`${L}-orig`, L];
-  return ['ko-orig', 'ko', 'en-orig', 'en'];
+  if (L) return [`${L}-orig`, L, `${L}.*`];
+  return ['ko-orig', 'ko', 'ko.*', 'en-orig', 'en', 'en.*'];
+}
+
+/** 파일명에서 자막 언어코드를 뗀다 — `제목.eng-US.vtt` → `eng-us` */
+function _subCode(file) {
+  const m = String(file || '').match(/\.([A-Za-z0-9_-]+)\.vtt$/i);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * 내려온 자막 여러 개 중 하나를 고른다.
+ * 🔑 **`-orig`(원본)이 최우선** — 이름 길이로 고르면 `zh-Hant` 같은 긴 코드에서 조용히 번역본을 집는다.
+ *    그다음은 **요청한 순서**를 존중한다(정확 일치 → 접두 일치). 마지막에야 첫 파일로 떨어진다.
+ */
+function pickSubFile(files, prefs) {
+  const list = (files || []).filter(Boolean);
+  if (!list.length) return null;
+  const orig = list.find((f) => /-orig\.vtt$/i.test(f));
+  if (orig) return orig;
+  const bases = (prefs || []).map((p) => String(p).replace(/\.\*$/, '').toLowerCase()).filter(Boolean);
+  for (const b of bases) { const hit = list.find((f) => _subCode(f) === b); if (hit) return hit; }
+  for (const b of bases) { const hit = list.find((f) => _subCode(f).startsWith(b)); if (hit) return hit; }
+  return list[0];
+}
+
+/** 비메오가 「로그인해야 한다」고 거절했나 — 플레이어 주소로 갈아탈 조건이다. */
+function needsVimeoPlayer(stderr) {
+  return /only works when logged-in|--cookies|account credentials/i.test(String(stderr || ''));
+}
+
+// 🔑 `vimeo.com/76979871` · `vimeo.com/channels/staffpicks/76979871` · `/groups/x/videos/N` 등에서 번호만 뽑는다.
+const VIMEO_ID_RE = /^https?:\/\/(?:www\.)?vimeo\.com\/(?:channels\/[^/]+\/|groups\/[^/]+\/videos\/|album\/\d+\/video\/|manage\/videos\/)?(\d+)/i;
+
+/**
+ * 실패한 주소의 **대안 주소**. 지금은 비메오 하나뿐이다.
+ * 🔴 실측(2026-09-15): 비메오는 `vimeo.com/<번호>` 의 로그인 없는 접근을 막았다(공개 영상 4개 전부 · yt-dlp
+ *    최신·nightly 동일). 그런데 **`player.vimeo.com/video/<번호>` 는 그대로 된다**(16.6MB mp3 실제 수신 확인).
+ *    사용자는 주소창의 `vimeo.com/...` 를 붙여넣으므로 **앱이 바꿔 한 번 더 시도한다.**
+ * ⚠ 무조건 바꾸지 않는다 — 로그인 요구 오류일 때만. 쿠키가 있어 원래 주소가 되는 환경을 망치지 않는다.
+ */
+function altUrl(url, stderr) {
+  if (!needsVimeoPlayer(stderr)) return null;
+  const m = String(url || '').match(VIMEO_ID_RE);
+  return m ? `https://player.vimeo.com/video/${m[1]}` : null;
 }
 
 function _explain(stderr) {
   const s = String(stderr || '');
   if (/HTTP Error 403|Forbidden/i.test(s))
     return '유튜브가 다운로드를 거부했습니다(403) — yt-dlp 가 낡았을 때 나는 증상입니다. 「⬇ 업데이트」를 눌러 주세요.';
+  if (/DRM protected/i.test(s))
+    return 'DRM 으로 보호된 영상이라 소리를 받을 수 없습니다(비메오 일부 영상 · 자막만 가능). 저작권 보호라 우회하지 않습니다.';
+  if (needsVimeoPlayer(s))
+    return '비메오가 로그인을 요구합니다 — 이 영상은 로그인 없이 받을 수 없습니다(플레이어 주소로도 실패).';
+  if (/player\.vimeo\.com[\s\S]*404|404[\s\S]*player\.vimeo\.com/i.test(s))
+    return '이 비메오 영상은 외부 재생(임베드)이 막혀 있어 받을 수 없습니다.';
   if (/Private video|Sign in to confirm your age|members-only/i.test(s))
     return '비공개·연령제한·멤버십 전용 영상이라 받을 수 없습니다.';
   if (/Video unavailable|This video is not available/i.test(s))
@@ -317,7 +390,11 @@ async function download(url, o = {}) {
       if (/^\[(ExtractAudio|Merger|FixupM4a)\]/.test(ln)) o.onLog('  ↳ 변환 중…');
     },
   });
-  if (r.code !== 0) throw new Error(_explain(r.stderr) || `다운로드 실패 (코드 ${r.code})`);
+  if (r.code !== 0) {
+    const err = new Error(_explain(r.stderr) || `다운로드 실패 (코드 ${r.code})`);
+    err.raw = r.stderr;
+    throw err;
+  }
 
   // 새로 생긴 파일만 집는다(같은 폴더에 예전 파일이 있어도 헷갈리지 않게)
   const made = fs.readdirSync(outDir).filter((f) => !before.has(f));
@@ -325,10 +402,9 @@ async function download(url, o = {}) {
     const f = made.filter((x) => re.test(x)).sort((a, b) => b.length - a.length)[0];
     return f ? path.join(outDir, f) : null;
   };
-  // 🔑 자막은 **`-orig`(원본)을 명시적으로** 고른다 — `ko-orig.vtt`·`ko.vtt` 가 함께 내려오는데
-  //    이름 길이로 고르면 우연히 맞을 뿐이고, 언어 코드가 길어지는 순간(`zh-Hant`) 조용히 번역본을 집는다.
+  // 🔑 자막 고르기는 `pickSubFile` 한 곳에서만 한다(`-orig` 우선 → 요청 순서 → 첫 파일).
   const subFiles = made.filter((f) => /\.vtt$/i.test(f));
-  const subMain = subFiles.find((f) => /-orig\.vtt$/i.test(f)) || subFiles[0] || null;
+  const subMain = pickSubFile(subFiles, subLangPref(o.language));
   return {
     audio: wantAudio ? pick(/\.mp3$/i) : null,
     video: wantVideo ? pick(/\.(mp4|mkv|webm)$/i) : null,
@@ -342,7 +418,8 @@ module.exports = {
   BIN_DIR, OWN_EXE, RELEASE_URL, STALE_DAYS,
   parseVersionDate, versionAgeDays, isStale,
   findYtDlp, downloadYtDlp, ensureYtDlp,
-  vttToText, subtitleFileToText, subLangPref,
-  probe, download,
+  vttToText, subtitleFileToText, subLangPref, pickSubFile,
+  probe, probeSmart, download,
+  altUrl, needsVimeoPlayer, VIMEO_ID_RE,
   _explain,
 };

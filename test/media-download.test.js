@@ -96,10 +96,44 @@ console.log('\n[3] VTT 파서 — 그 밖의 형식');
 
 console.log('\n[4] 자막 언어 — 🔴 번역본을 집으면 STT 보다 나쁜 결과를 조용히 쓴다');
 {
-  eq(MD.subLangPref('ko').join(','), 'ko-orig,ko', '한국어 영상은 원본 자동자막 우선');
-  eq(MD.subLangPref('ja').join(','), 'ja-orig,ja', '일본어 영상은 **일본어** 원본 — ko 번역본을 받지 않는다');
-  eq(MD.subLangPref('en-US').join(','), 'en-orig,en', '지역 코드가 붙어도 기본 언어로 자른다');
-  eq(MD.subLangPref('').join(','), 'ko-orig,ko,en-orig,en', '언어를 모를 때만 폴백 목록');
+  eq(MD.subLangPref('ko').join(','), 'ko-orig,ko,ko.*', '한국어 영상은 원본 자동자막 우선');
+  eq(MD.subLangPref('ja').join(','), 'ja-orig,ja,ja.*', '일본어 영상은 **일본어** 원본 — ko 번역본을 받지 않는다');
+  eq(MD.subLangPref('en-US').join(','), 'en-orig,en,en.*', '지역 코드가 붙어도 기본 언어로 자른다');
+  eq(MD.subLangPref('').join(','), 'ko-orig,ko,ko.*,en-orig,en,en.*', '언어를 모를 때만 폴백 목록');
+  // 🔴 실사고(틱톡): 자막 코드가 `eng-US` 라 정확 코드 `en` 과 안 맞아 **자막이 있는데도 매번 STT** 를 돌렸다.
+  ok(MD.subLangPref('en').includes('en.*'), '🔑 변종 코드(eng-US)를 잡는 와일드카드가 들어 있다');
+  ok(MD.subLangPref('ko').indexOf('ko-orig') < MD.subLangPref('ko').indexOf('ko.*'),
+    '⚠ 와일드카드는 **뒤**에 온다 — 정확 코드가 먼저 걸려 유튜브 동작이 그대로다');
+}
+
+console.log('\n[4-b] 내려온 자막 고르기 — 번역본을 조용히 집지 않는다');
+{
+  eq(MD.pickSubFile(['제목.eng-US.vtt'], MD.subLangPref('')), '제목.eng-US.vtt',
+    '🔴 틱톡 실사례: 변종 코드 하나뿐이면 그것을 쓴다');
+  eq(MD.pickSubFile(['t.ko.vtt', 't.ko-orig.vtt'], MD.subLangPref('ko')), 't.ko-orig.vtt',
+    '원본(-orig)이 최우선');
+  eq(MD.pickSubFile(['t.zh-Hant.vtt', 't.zh-orig.vtt'], MD.subLangPref('zh')), 't.zh-orig.vtt',
+    '🔑 이름이 길어도(zh-Hant) 번역본을 안 집는다 — 길이 휴리스틱이 아니다');
+  eq(MD.pickSubFile(['t.fr.vtt', 't.en.vtt'], MD.subLangPref('en')), 't.en.vtt',
+    '-orig 가 없으면 **요청한 순서**를 존중한다');
+  eq(MD.pickSubFile([], MD.subLangPref('ko')), null, '자막이 없으면 null');
+}
+
+console.log('\n[4-c] 비메오 주소 — 🔴 로그인 요구를 플레이어 주소로 우회');
+{
+  // 실측 stderr(2026-09-15) 그대로
+  const LOGIN = 'ERROR: [vimeo] 76979871: The web client only works when logged-in. '
+    + 'Use --cookies, --cookies-from-browser, --username and --password ... to provide account credentials';
+  eq(MD.altUrl('https://vimeo.com/76979871', LOGIN), 'https://player.vimeo.com/video/76979871',
+    '🔑 사용자가 붙여넣는 주소를 플레이어 주소로 바꾼다');
+  eq(MD.altUrl('https://vimeo.com/channels/staffpicks/76979871', LOGIN), 'https://player.vimeo.com/video/76979871',
+    '채널·그룹 경로에서도 번호만 뽑는다');
+  eq(MD.altUrl('https://vimeo.com/76979871', 'ERROR: Video unavailable'), null,
+    '⚠ 로그인 요구가 아닌 오류에는 손대지 않는다(쿠키가 있는 환경을 망치지 않는다)');
+  eq(MD.altUrl('https://www.youtube.com/watch?v=abc123', LOGIN), null, '유튜브 주소는 건드리지 않는다');
+  eq(MD.altUrl('https://player.vimeo.com/video/76979871', LOGIN), null, '이미 플레이어 주소면 무한 반복하지 않는다');
+  ok(MD.needsVimeoPlayer(LOGIN) === true && MD.needsVimeoPlayer('ERROR: Video unavailable') === false,
+    '판정 함수가 로그인 요구만 잡는다');
 }
 
 console.log('\n[5] 실패 문구 — 무엇을 해야 하는지 알려준다');
@@ -111,6 +145,36 @@ console.log('\n[5] 실패 문구 — 무엇을 해야 하는지 알려준다');
   ok(/지원하지 않는/.test(MD._explain('ERROR: Unsupported URL: https://example.com/x')), '지원 안 하는 주소');
   ok(/네트워크/.test(MD._explain('ERROR: Unable to download webpage: getaddrinfo ENOTFOUND')), '네트워크 끊김');
   eq(MD._explain(''), '', '빈 stderr 는 빈 문자열(호출부가 기본 문구를 쓴다)');
+  // 🔴 비메오 3종 — 예전엔 영어 원문이 그대로 화면에 떴다(무엇을 해야 하는지 알 수 없었다)
+  ok(/DRM|저작권/.test(MD._explain('ERROR: This format is DRM protected; Try selecting another format')),
+    'DRM 영상은 이유를 밝히고 우회하지 않는다');
+  ok(/비메오|로그인/.test(MD._explain('ERROR: [vimeo] 1: The web client only works when logged-in. Use --cookies')),
+    '비메오 로그인 요구를 사람 말로');
+  ok(/임베드|외부 재생/.test(MD._explain('ERROR: [vimeo] 148751763: Unable to download webpage: HTTP Error 404: Not Found (player.vimeo.com)')),
+    '임베드 차단(404)을 구분해 알려준다');
+}
+
+console.log('\n[5-b] 전사 .txt 머리말 — 1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용 (로이 확정)');
+{
+  // main.js 원문에서 함수를 뽑아 그대로 실행한다(복사본을 두면 앱과 갈라져도 통과한다)
+  const src = read('main.js');
+  const m = src.match(/function txtWithHead\(text, head\) \{[\s\S]*?\n\}/);
+  ok(!!m, 'main.js 에 txtWithHead 가 있다');
+  const txtWithHead = m ? eval(`(${m[0].replace('function txtWithHead', 'function')})`) : null;
+  if (txtWithHead) {
+    const out = txtWithHead('첫 문장입니다. 둘째 문장입니다.',
+      { url: 'https://youtu.be/AAA', title: '제목입니다' });
+    const lines = out.split('\n');
+    eq(lines[0], 'https://youtu.be/AAA', '1줄 = 영상 주소');
+    eq(lines[1], '제목입니다', '2줄 = 제목');
+    eq(lines[2], '', '3줄 = 빈 줄');
+    eq(lines[3], '첫 문장입니다. 둘째 문장입니다.', '4줄부터 내용');
+    eq(txtWithHead(' 내용 ', null), '내용\n', '머리말이 없으면(🎧 STT 버튼) 예전처럼 내용만');
+    eq(txtWithHead('본문', { url: 'u', title: '두 줄\n제목' }).split('\n')[1], '두 줄 제목',
+      '⚠ 제목에 개행이 있어도 2줄을 침범하지 않는다(줄 규약이 깨진다)');
+    ok(txtWithHead('본문', { url: 'u', title: '' }).split('\n')[1] === '',
+      '제목을 못 읽어도 줄 수는 지킨다(4줄부터 내용)');
+  }
 }
 
 console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문으로 대조');
@@ -125,6 +189,17 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(calls >= 2, `두 경로가 그 함수를 공유한다 (호출 ${calls}곳)`);
   ok(!/asr\.needsAudioConvert/.test(main.split("ipcMain.handle('stt-transcribe'")[1] || ''),
     '옛 변환 코드가 STT 핸들러에 복제돼 남아 있지 않다');
+
+  // 🔑 머리말도 **한 함수**가 만든다 — 자막 경로와 STT 경로가 갈리면 파일 형식이 조용히 달라진다
+  const headCalls = (main.match(/txtWithHead\(/g) || []).length;
+  ok(headCalls >= 3, `자막·STT 두 경로가 머리말 함수를 공유한다 (정의+호출 ${headCalls}곳)`);
+  ok(/fs\.writeFileSync\(outTxt, txtWithHead\(text, head\)/.test(main), '자막 경로가 머리말을 붙인다');
+  ok(/transcribeToTxt\(mediaFile, \{ outTxt, head \}\)/.test(main), 'STT 경로도 같은 머리말을 넘긴다');
+
+  // 🔴 비메오: probe 만 바꾸고 download 를 옛 주소로 하면 그대로 막힌다 → **성공한 주소로 받는다**
+  ok(/MD\.probeSmart\(url,/.test(main), 'probeSmart 로 대안 주소까지 시도한다');
+  ok(/MD\.download\(dlUrl,/.test(main), '🔑 다운로드는 **probe 가 성공한 그 주소**로 한다');
+  ok(!/MD\.probe\(url,/.test(main), '옛 직접 호출이 남아 있지 않다(한쪽만 고쳐지는 사고 방지)');
 
   ok(/ipcMain\.handle\('stt-from-url'/.test(main), 'IPC stt-from-url');
   ok(/ipcMain\.handle\('ytdlp-status'/.test(main), 'IPC ytdlp-status');

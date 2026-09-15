@@ -932,6 +932,19 @@ const STT_VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v', 
  * 🔑 **「🎧 STT」 버튼과 「🔗 URL」 경로가 이 함수를 함께 쓴다** — 「변환 → 전사 → 저장」을 두 벌로 두면
  *    한쪽만 고쳐져 조용히 갈라진다(v0.3.92 가 변환 게이트를 `transcribeLong` 한 곳에 모은 것과 같은 이유).
  */
+/**
+ * 전사 .txt 본문 조립 — 🔑 **1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용**(로이 확정 규약 2026-09-15).
+ * ⚠ **자막 경로와 STT 경로가 이 함수 하나를 쓴다.** 두 벌로 두면 한쪽만 고쳐져 파일 형식이 조용히 갈린다
+ *   (v0.3.92 가 m4a 변환 게이트를 한 문으로 모은 것과 같은 이유).
+ * 머리말이 없으면(🎧 STT 버튼처럼 주소가 없는 경우) 예전처럼 내용만 쓴다.
+ */
+function txtWithHead(text, head) {
+  const body = String(text || '').trim();
+  if (!head || !head.url) return body + '\n';
+  const title = String(head.title || '').replace(/[\r\n]+/g, ' ').trim();
+  return `${String(head.url).trim()}\n${title}\n\n${body}\n`;
+}
+
 async function transcribeToTxt(file, opts = {}) {
   const media = require('./core/media-utils');
   const asr = require('./tts/asr-client');
@@ -953,7 +966,7 @@ async function transcribeToTxt(file, opts = {}) {
       abortSignal: () => S.abort,
       onProgress: (p) => { if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`); },
     });
-    fs.writeFileSync(outTxt, String(text || '').trim() + '\n', 'utf8');
+    fs.writeFileSync(outTxt, txtWithHead(text, opts.head), 'utf8');
     log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
     return { ok: true, txt: outTxt, chars: String(text || '').length };
   } finally {
@@ -1074,12 +1087,18 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       const url = urls[i];
       log(`🔗 [${i + 1}/${urls.length}] ${url}`);
       try {
-        const info = await MD.probe(url, { tool, abortSignal: () => S.abort });
+        // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
+        //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
+        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => S.abort, onLog: log });
+        const info = pr0.info;
+        const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
         log(`  「${info.title}」 · ${mmss}${info.channel ? ` · ${info.channel}` : ''}`);
 
+        // .txt 머리말에는 **사용자가 붙여넣은 원래 주소**를 쓴다(나중에 다시 열어볼 주소는 그쪽이다).
+        const head = { url, title: info.title };
         const wantSubs = !forceStt;
-        const r = await MD.download(url, {
+        const r = await MD.download(dlUrl, {
           tool, mode, subs: wantSubs, outDir, language: info.language,
           ffmpegDir: ffDir, abortSignal: () => S.abort, onLog: log,
         });
@@ -1095,7 +1114,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           // 자막이 있다 → 그대로 텍스트로. GPU 를 쓰지 않는다.
           const text = MD.subtitleFileToText(r.sub);
           if (text.length >= 20) {          // 너무 짧으면 자막이 사실상 비어 있는 것 → STT 로 넘긴다
-            fs.writeFileSync(outTxt, text + '\n', 'utf8');
+            fs.writeFileSync(outTxt, txtWithHead(text, head), 'utf8');
             log(`  📝 자막에서 추출: ${path.basename(outTxt)} (${text.length}자 · STT 생략)`);
             txtFrom = 'subtitle';
           } else {
@@ -1110,7 +1129,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         if (!txtFrom && doStt) {
           if (!mediaFile) throw new Error('받은 음성·영상 파일이 없습니다');
           log(`  🎧 STT 시작: ${path.basename(mediaFile)}`);
-          await transcribeToTxt(mediaFile, { outTxt });
+          await transcribeToTxt(mediaFile, { outTxt, head });
           txtFrom = 'stt';
         }
 
