@@ -399,7 +399,7 @@ export default function App() {
   //    state 가 아니라 ref 인 이유: setState 는 비동기라 실행 중인 루프에 즉시 보이지 않는다.
   const queueAbortRef = useRef(false);
   const [logText, setLogText] = useState('');
-  const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
+  const [logCollapsed, setLogCollapsed] = useState(false); // 헤더 오른쪽 전용 자리를 얻었으므로 펼친 채 시작(2026-09-16) — 바 클릭으로 접는다
 
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
@@ -2277,9 +2277,13 @@ export default function App() {
             )}
           </div>
         </div>
-        {/* 제작 파이프라인 행 — 작업 순서대로 ①음성 → ②이미지 → ③비디오 → ④완성 그룹 */}
-        {!noProduction && (
-        <div className="hrow" style={{ justifyContent: 'flex-start' }}>
+        {/* 제작 파이프라인 — ①음성 → ②이미지 → ③비디오 → ④완성 을 **세로로** 쌓고(왼쪽 정렬),
+            오른쪽 빈 자리에 **로그창**을 붙였다 (로이 2026-09-16).
+            🔑 로그는 {!noProduction} 바깥에 둔다 — 출판·리모션엔 파이프라인이 없지만 로그는 늘 필요하다
+            (그 모드에선 왼쪽이 비고 로그가 그 폭을 함께 쓴다). */}
+        <div className="piperow">
+          <div className="pipecol">
+          {!noProduction && (<>
           <span className="hgroup">
             <span className="glabel">① 음성</span>
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
@@ -2344,8 +2348,10 @@ export default function App() {
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}>🗑 삭제</button>
           </span>
+          {/* ④ 출력 + ⑤ 완성 **통합** (로이 2026-09-16) — 「무엇으로 낼까(.vrew·화이트보드)」와
+              「만들기·내보내기」는 한 동작의 앞뒤라 한 그룹에 둔다. */}
           <span className="hgroup">
-            <span className="glabel">④ 출력</span>
+            <span className="glabel">④ 완성</span>
             <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). ⚠ 화이트보드는 아직 무음입니다(5단계 전)." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
               <option value="vrew">.vrew (Vrew)</option>
               <option value="whiteboard">✏ 화이트보드 MP4</option>
@@ -2359,9 +2365,7 @@ export default function App() {
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
               <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 렌더합니다 — 장면 계획(관문 A) → 확인 그림(관문 B) 두 번 물은 뒤 렌더. 이미 만든 장면은 건너뜁니다(이어받기)." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
             </>)}
-          </span>
-          <span className="hgroup" style={{ marginLeft: 'auto' }}>
-            <span className="glabel">⑤ 완성</span>
+            <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 순서대로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
@@ -2371,8 +2375,20 @@ export default function App() {
             <button disabled={!loaded} title=".vrew 만 다시 내보내기 (이미 만든 음성·이미지 사용)" onClick={() => runVrew(null)}>💾 .vrew</button>
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </span>
+          </>)}
+          </div>
+          {/* 로그창 — 예전엔 우하단에 떠 있는 fixed 창이었다. 파이프라인 오른쪽이 늘 비어 있어 그 자리로 옮겼다.
+              접기(바 클릭)는 그대로 — 접으면 최근 2줄만 남는다. */}
+          <aside id="logwrap" className={'docked' + (logCollapsed ? ' collapsed' : '')}>
+            <div id="logbar" onClick={(e) => { if (e.target.tagName === 'BUTTON') return; setLogCollapsed((v) => !v); }}>
+              <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+            </div>
+            <div id="log" ref={logRef}>{logText}</div>
+          </aside>
         </div>
-        )}
       </header>
 
       {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (출판 모드 제외) */}
@@ -2452,15 +2468,6 @@ export default function App() {
             }} /></ErrorBoundary>
           </>)}
         </main>
-        <aside id="logwrap" className={logCollapsed ? 'collapsed' : ''}>
-          <div id="logbar" onClick={(e) => { if (e.target.tagName === 'BUTTON') return; setLogCollapsed((v) => !v); }}>
-            <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
-            <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
-            <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
-            <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
-          </div>
-          <div id="log" ref={logRef}>{logText}</div>
-        </aside>
       </div>
 
       {preview && (
