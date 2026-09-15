@@ -5373,6 +5373,91 @@ function renumberMediaFiles(project, mediaDir) {
   }
 }
 
+// ── ✏ 문장 인라인 편집 (화면에서 바로 고치기) ────────────────────────────────
+//   옛 「✏ 대본 수정」(전문 textarea)은 적용할 때마다 **재파싱이라 TTS·이미지가 통째로 초기화**됐다.
+//   여기서는 정반대로 간다:
+//     ① .md 는 **그 문장이 차지한 문자 범위만** 바꾼다(core/script-edit 의 마스킹+전방커서 매칭)
+//     ② 파싱본은 **재파싱하지 않고 제자리에서** 고친다 → 그룹 분할(✂)·프롬프트·이미지·다른 문장 음성이 그대로 산다
+//     ③ 고친 문장의 음성만 비운다 → 「🎤」를 누르면 그 문장만 새로 만들어진다
+//   🔑 ①과 ②가 어긋나면(=.md 와 화면이 다른 대본이 되면) 다음에 열 때 조용히 틀린다. 그래서
+//      **고친 .md 를 실제로 다시 파싱해 문장 시퀀스가 기대와 같은지 확인한 뒤에만** 파일을 쓴다(아래 검증 재파싱).
+ipcMain.handle('edit-sentences', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  if (S.parsed.kind === 'book') throw new Error('출판 원고는 이 방식으로 고칠 수 없습니다.');
+  if (!S.scriptPath || !fs.existsSync(S.scriptPath)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
+  const SE = require('./core/script-edit');
+  const { Sentence, hashId, finalizeGroupIds } = require('./core/project-model');
+  const { shortsNum, groupNum, sentIdx, count = 1, text = '' } = args;
+
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const g = pr.groups.find((x) => x.num === groupNum);
+  if (!g) throw new Error('그룹을 찾을 수 없습니다.');
+  const gs = pr.getSentencesOfGroup(g);
+  const n = Math.max(1, Number(count) || 1);
+  const si = Number(sentIdx);
+  if (!(si >= 0) || si + n > gs.length) throw new Error('문장 번호가 범위를 벗어납니다.');
+  // ⚠ 그룹의 문장을 전부 지우면 빈 그룹이 남아 이미지·타임라인이 갈 곳을 잃는다 → 거부.
+  if (!String(text).trim() && n >= gs.length) {
+    return { ok: false, error: '그룹의 마지막 문장은 지울 수 없습니다. 그룹째 지우려면 대본(.md)에서 그 부분을 지우세요.' };
+  }
+  const from = pr.sentences.indexOf(gs[si]);
+  if (from < 0) throw new Error('문장을 찾을 수 없습니다.');
+
+  const raw = fs.readFileSync(S.scriptPath, 'utf8');
+  const texts = pr.sentences.map((s) => s.text);
+  const plan = SE.planEdit({ raw, texts, from, count: n, newText: text });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  // 🔑 검증 재파싱 — 고친 .md 가 **정말 우리가 의도한 문장들**을 만들어 내는지 확인한다.
+  //   이게 없으면 매칭이 한 글자만 어긋나도 .md 와 화면이 갈린 채 조용히 진행된다.
+  const expect = SE.expectedTexts(texts, from, n, plan.newTexts);
+  let after = null;
+  try { after = P.parseScriptText(plan.raw, currentMode(), presetThresholds(S.preset)).projects[0]; } catch (e) {
+    return { ok: false, error: '고친 대본을 다시 읽지 못했습니다: ' + e.message };
+  }
+  if (!after || !SE.sameSequence(expect, after.sentences.map((s) => s.text))) {
+    return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.\n(따옴표·특수기호·줄바꿈을 빼고 다시 시도해 보세요.)' };
+  }
+
+  // ── 여기서부터 실제 반영 ── (.md 먼저, 그다음 파싱본 — .md 쓰기가 실패하면 화면도 안 바꾼다)
+  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); }
+  catch (e) { return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+
+  const old = gs.slice(si, si + n);
+  const used = new Set(pr.sentences.map((s) => s.id));
+  const made = plan.newTexts.map((t) => {
+    let id = hashId('s', t), k = 1;
+    while (used.has(id)) id = `${hashId('s', t)}_${++k}`;   // 같은 문장이 여러 번 나와도 id 충돌 없게
+    used.add(id);
+    const s = new Sentence({ id, num: 0, text: t });
+    s.isIntro = !!old[0].isIntro;
+    // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
+    const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
+    if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {
+      s.ttsAudioPath = keep.ttsAudioPath; s.ttsDurationSec = keep.ttsDurationSec; s.ttsStatus = 'done';
+    }
+    return s;
+  });
+  const gPos = g.sentenceIds.indexOf(old[0].id);
+  pr.sentences.splice(from, n, ...made);
+  g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
+  pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
+  finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
+
+  // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
+  //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
+  const nh = scriptHash(S.scriptPath);
+  try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
+
+  storeActive(); pushDtoUpdate();
+  const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
+  const lost = made.filter((s) => !s.ttsAudioPath).length;
+  log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
+    + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로'));
+  return { ok: true, dto: P.toDTO(S.parsed) };
+});
+
 // 그룹 분할 — TTS 길이 절반(균형)에 가장 가까운 문장 경계에서 2개로. 두 새 그룹은 프롬프트/이미지 초기화.
 //   다른 그룹의 프롬프트·자산은 절대 건드리지 않음(같은 Group 객체 유지). 미디어 파일은 새 num 에 맞춰 정렬.
 ipcMain.handle('split-group', (_e, args = {}) => {

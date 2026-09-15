@@ -410,6 +410,10 @@ export default function App() {
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
   const impRef = useRef(null);          // 붙여넣기 textarea (비제어)
   const scriptEditRef = useRef(null);   // 대본수정 textarea (비제어 — 재렌더 방지)
+  // ✏ 문장 인라인 편집 — 한 번에 한 문장만 열린다. 값은 ref 로만 읽는다(타이핑마다 재렌더 금지).
+  const sentEditRef = useRef(null);
+  const [sentEdit, setSentEdit] = useState(null);   // { shortsNum, groupNum, sentIdx, count, text }
+  const [sentBusy, setSentBusy] = useState(false);
   const findTextRef = useRef('');        // 검색어 (비제어)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
@@ -1208,6 +1212,54 @@ export default function App() {
     if (!loaded) { setStatus('대본을 먼저 여세요'); return; }
     try { const t = await api.getScriptText(); setScriptText(t || ''); setScriptEditOpen(true); }
     catch (e) { logline('대본 읽기 오류: ' + e.message); }
+  }
+
+  // ── ✏ 문장 인라인 편집 ──────────────────────────────────────────
+  //   화면의 문장을 그 자리에서 고친다 → main 이 .md 의 그 범위만 바꾸고 파싱본을 제자리에서 갱신한다.
+  //   ⚠ 편집칸은 **비제어(ref)** 다 — 제어 state 로 두면 글자마다 컷 카드 수십 개가 다시 그려져
+  //     타이핑이 멈춘다(2026-08-14 사고, 위 대본수정 textarea 와 같은 이유).
+  function startSentEdit(shortsNum, groupNum, sentIdx, text, count = 1) {
+    setSentEdit({ shortsNum, groupNum, sentIdx, count, text });
+  }
+  // 아래 문장과 합치기 — 앞 문장의 종결부호를 떼고 이어 붙인 뒤 **편집 상태로 연다**(사람이 다듬어 저장).
+  function mergeSentDown(shortsNum, groupNum, sentIdx, a, b) {
+    const merged = String(a || '').replace(/[.!?。]+\s*$/, '') + ' ' + String(b || '').trim();
+    setSentEdit({ shortsNum, groupNum, sentIdx, count: 2, text: merged });
+  }
+  // 편집칸 커서 자리에서 문장 나누기 — 파서는 종결부호로 문장을 가르므로 그 자리에 마침표를 넣는다.
+  function splitSentAtCursor() {
+    const el = sentEditRef.current; if (!el) return;
+    const p = (el.selectionStart != null) ? el.selectionStart : el.value.length;
+    const a = el.value.slice(0, p).trim(), b = el.value.slice(p).trim();
+    if (!a || !b) { setStatus('커서를 문장 가운데 두고 눌러주세요'); return; }
+    el.value = a.replace(/[.!?。]+$/, '') + '. ' + b;
+    el.focus(); el.setSelectionRange(a.length + 2, a.length + 2);
+  }
+  async function commitSentEdit(override) {
+    const e = sentEdit; if (!e || sentBusy) return;
+    const text = (override != null) ? override
+      : (sentEditRef.current && sentEditRef.current.value != null ? sentEditRef.current.value : e.text);
+    // 글자를 하나도 안 고쳤으면 서버에 보낼 것이 없다 — 단, **병합(count>1)은 글자가 같아도 실행해야 한다**
+    //   (합칠 두 문장을 이어 붙인 그대로 저장하는 것이 정상 사용이다. 이 조건을 count 로 막지 않으면 병합이 조용히 무시된다.)
+    if (override == null && e.count === 1 && String(text).trim() === String(e.text).trim()) { setSentEdit(null); return; }
+    setSentBusy(true);
+    try {
+      const r = await api.editSentences({ shortsNum: e.shortsNum, groupNum: e.groupNum, sentIdx: e.sentIdx, count: e.count, text });
+      if (!r || !r.ok) {
+        // 🔑 여기가 「✏ 대본 수정」의 탈출구다 — 지침 줄을 사이에 둔 문장·표처럼 화면에서 못 고치는 경우.
+        const msg = (r && r.error) || '문장을 고치지 못했습니다.';
+        logline('✏ ' + msg.replace(/\n/g, ' '));
+        if (uiConfirm(msg + '\n\n대본(.md) 편집창을 열까요?')) openScriptEdit();
+        return;
+      }
+      setDto(r.dto); setSentEdit(null);
+    } catch (err) { logline('문장 수정 오류: ' + err.message); }
+    finally { setSentBusy(false); }
+  }
+  function deleteSent() {
+    const e = sentEdit; if (!e) return;
+    if (!uiConfirm('이 문장을 대본에서 지울까요?\n(음성 파일은 남지만 이 문장은 영상에서 빠집니다)')) return;
+    commitSentEdit('');
   }
   async function applyScriptEdit() {
     setStatus('대본 수정 적용 중…');
@@ -2116,7 +2168,8 @@ export default function App() {
               <span className="hgroup">
                 <span className="glabel">대본</span>
                 <button onClick={openScript}>📂 열기</button>
-                <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
+                {/* ✏ 수정 버튼은 없앴다 — 문장을 화면에서 바로 고친다(문장 클릭 또는 ✎).
+                    화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
                 <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
                 <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}>🎵 mp3</button>
               </span>
@@ -2309,7 +2362,12 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} /></ErrorBoundary>
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup}
+            edit={{
+              cur: sentEdit, ref: sentEditRef, busy: sentBusy,
+              start: startSentEdit, merge: mergeSentDown, commit: commitSentEdit,
+              cancel: () => setSentEdit(null), splitAt: splitSentAtCursor, del: deleteSent,
+            }} /></ErrorBoundary>
           </>)}
         </main>
         <aside id="logwrap" className={logCollapsed ? 'collapsed' : ''}>
@@ -3129,7 +3187,7 @@ export default function App() {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3162,12 +3220,54 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onImgVid, onBulk, on
             <div className={'cuts-grid' + (isLf ? ' lf' : '')}>
               {pr.cuts.map((c, ci) => {
                 const ph = phaseBadge(c.phase);
-                const lineEls = [];
-                (c.sentences || []).forEach((s) => {
-                  for (const t of splitLines(s.text, capCharsN)) {
-                    capN += 1;
-                    lineEls.push(<div className="sent" key={capN}><span className="lineno">{String(capN).padStart(2, '0')} |</span>{t}</div>);
+                // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
+                //   한 문장이 자막 두 줄이 되기도 하므로(글자수 설정에 따라) 문장 경계를 블록으로 드러낸다.
+                const sents = c.sentences || [];
+                const ed = edit.cur;
+                const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
+                const lineEls = sents.map((s, si) => {
+                  const lines = splitLines(s.text, capCharsN).map((t) => ({ n: ++capN, t }));
+                  // 병합 편집(count 2) 중이면 뒤따르는 문장은 편집칸이 대표하므로 숨긴다(번호는 위에서 이미 셌다).
+                  if (edHere && si > ed.sentIdx && si < ed.sentIdx + ed.count) return null;
+                  if (edHere && si === ed.sentIdx) {
+                    return (
+                      <div className="sblk editing" key={'e' + si}>
+                        {/* 비제어 — 값은 저장할 때 ref 에서 한 번만 읽는다 */}
+                        <textarea ref={edit.ref} defaultValue={ed.text} rows={2} spellCheck={false} autoFocus
+                          disabled={edit.busy}
+                          onKeyDown={(ev) => {
+                            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); edit.commit(); }
+                            else if (ev.key === 'Escape') { ev.preventDefault(); edit.cancel(); }
+                          }} />
+                        <div className="sblk-edit-btns">
+                          <button onClick={() => edit.commit()} disabled={edit.busy}>저장</button>
+                          <button className="ghost" onClick={edit.cancel} disabled={edit.busy}>취소</button>
+                          <button className="ghost" title="커서 자리에서 두 문장으로 나눕니다 (마침표를 넣습니다)" onClick={edit.splitAt} disabled={edit.busy}>✂ 나누기</button>
+                          <span style={{ flex: 1 }} />
+                          <button className="ghost" style={{ color: '#c0392b' }} title="이 문장을 대본에서 지웁니다" onClick={edit.del} disabled={edit.busy}>🗑</button>
+                        </div>
+                        <div className="sblk-hint">
+                          {ed.count > 1 ? '두 문장을 합쳤습니다 — 어색한 곳을 다듬고 저장하세요. ' : ''}
+                          마침표로 나누면 문장이 나뉩니다 · Enter 저장 · Esc 취소 · 저장하면 대본(.md)도 함께 바뀝니다
+                        </div>
+                      </div>
+                    );
                   }
+                  const canMerge = si < sents.length - 1;
+                  return (
+                    <div className="sblk" key={si}>
+                      <div className="sblk-lines" title="클릭해서 이 문장 고치기"
+                        onClick={() => edit.start(pr.shortsNum, c.num, si, s.text)}>
+                        {lines.map((l) => (
+                          <div className="sent" key={l.n}><span className="lineno">{String(l.n).padStart(2, '0')} |</span>{l.t}</div>
+                        ))}
+                      </div>
+                      <div className="sblk-tools">
+                        <button title="이 문장 고치기 (나누기·지우기도 여기서)" onClick={() => edit.start(pr.shortsNum, c.num, si, s.text)}>✎</button>
+                        {canMerge && <button title="아래 문장과 합치기" onClick={() => edit.merge(pr.shortsNum, c.num, si, s.text, sents[si + 1].text)}>⤋</button>}
+                      </div>
+                    </div>
+                  );
                 });
                 return (
                   <div className={'cut' + (isLf ? ' lf' : '')} key={c.num}>

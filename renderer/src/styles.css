@@ -144,6 +144,23 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .sents{margin:10px 0 0}
 .sent{color:var(--strong);line-height:1.5;margin:2px 0;font-weight:500;font-size:14px}
 .lineno{display:inline-block;min-width:24px;color:#b08a52;font-family:Consolas,monospace;font-weight:700;margin-right:7px}
+/* ✏ 문장 블록 — 화면 번호는 자막 줄이지만 편집 단위는 '문장'이라 그 경계를 블록으로 드러낸다.
+   평소엔 테두리가 안 보이고, 마우스를 올리면 고칠 수 있다는 것이 드러난다. */
+.sblk{display:flex;align-items:flex-start;gap:4px;border:1px solid transparent;border-radius:6px;
+  padding:1px 2px;margin:1px 0;transition:background .12s,border-color .12s}
+.sblk:hover{background:#fbf6ec;border-color:#e5d9c4}
+.sblk-lines{flex:1;min-width:0;cursor:text}
+.sblk-tools{display:flex;gap:2px;opacity:0;transition:opacity .12s;flex-shrink:0}
+.sblk:hover .sblk-tools{opacity:1}
+.sblk-tools button{padding:1px 6px;font-size:12px;line-height:1.5;border:1px solid var(--line);
+  background:#fff;border-radius:5px;cursor:pointer;color:#7a6a55}
+.sblk-tools button:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sblk.editing{display:block;background:#fffdf7;border-color:var(--accent);padding:6px;margin:4px 0}
+.sblk.editing textarea{width:100%;box-sizing:border-box;font-size:14px;line-height:1.5;font-weight:500;
+  color:var(--strong);border:1px solid var(--line);border-radius:5px;padding:5px 7px;resize:vertical;font-family:inherit}
+.sblk-edit-btns{display:flex;gap:5px;margin-top:5px;align-items:center}
+.sblk-edit-btns button{padding:3px 10px;font-size:12px}
+.sblk-hint{margin-top:4px;font-size:11.5px;color:#a3927a;line-height:1.5}
 .empty{color:#b3a796;text-align:center;padding:60px 0;font-size:14px}
 /* 로그 패널 */
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;

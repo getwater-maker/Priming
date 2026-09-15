@@ -281,4 +281,16 @@ function splitHybrid(text) {
   return { items, hasBrackets, hasMdIntro };
 }
 
-module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid };
+// 🔑 인라인 대본 편집(core/script-edit.js)이 **원문에서 문장 위치를 찾을 때** 쓰는 규칙들.
+//   여기 정규식이 곧 "파서가 무엇을 버리는가"이므로, 복사해서 쓰면 반드시 어긋난다(두 벌 금지).
+//   ⚠ g 플래그가 붙은 것이 있으니 .test() 로 직접 쓰지 말고 .source 로 새 정규식을 만들 것(lastIndex 사고).
+const MATCH_PATTERNS = {
+  quote: QUOTE_CHARS,                 // 파서가 지우는 따옴표류
+  special: SPECIAL_NONTEXT,           // 파서가 지우는 이모지·기호
+  htmlComment: HTML_COMMENT,          // <!-- --> = TTS 제외
+  headerLine: HEADER_LINE_CAPTURE,    // 마크다운 헤더 줄 (문장 아님)
+  bracketLine: BRACKET_SECTION_RE,    // [섹션] 줄 (문장 아님)
+  blockquote: BLOCKQUOTE_TEST,        // '>' 줄 = 지침·프롬프트 (문장 아님)
+};
+
+module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS };
