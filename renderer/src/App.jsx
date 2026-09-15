@@ -3264,6 +3264,9 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                   if (edHere && si === ed.sentIdx) {
                     return (
                       <div className="sblk editing" key={'e' + si}>
+                        {/* 🔑 줄 번호는 편집 중에도 그대로 둔다 — 고치는 동안에도 몇 번째 자막인지 보이게(로이 2026-09-15).
+                            번호는 원문 기준이라 글자를 고쳐도 그 자리에서 움직이지 않는다(나누면 그때 다시 매겨진다). */}
+                        <span className="lineno">{String(lines.length ? lines[0].n : capN).padStart(2, '0')} |</span>
                         {/* 비제어 — 값은 저장할 때 ref 에서 한 번만 읽는다.
                             🔑 그 줄 자리에서 그대로 고친다 — 글 높이에 맞춰 늘어나므로 화면이 튀지 않는다. */}
                         <textarea defaultValue={ed.text} rows={1} spellCheck={false} autoFocus

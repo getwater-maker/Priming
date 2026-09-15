@@ -84,6 +84,26 @@ const cleanup = () => {
       });
       ok(grow <= 6, `🔑 편집칸이 그 줄보다 커지지 않는다 (차이 ${grow}px)`);
     }
+    // 🔑 번호(01 |)는 편집 중에도 그 자리에 그대로 있고, 글자 칸만 편집칸이 된다(로이 2026-09-15).
+    eqNum(await win.locator('.sblk.editing .lineno').count(), 1, '🔑 편집 중에도 줄 번호가 보인다');
+    ok((await win.locator('.sblk.editing .lineno').innerText()).trim() === '01 |',
+      `편집 중 번호가 그 줄의 번호다 (실제 ${(await win.locator('.sblk.editing .lineno').innerText()).trim()})`);
+    {
+      const m = await win.evaluate(() => {
+        const edNo = document.querySelector('.sblk.editing .lineno');
+        const ta = document.querySelector('.sblk.editing textarea');
+        const plain = document.querySelector('.cut .sblk:not(.editing) .sent');
+        const plainNo = plain.querySelector('.lineno');
+        // 평소 줄의 '글자 시작 x' 는 번호 span 다음 텍스트 노드에서 잰다
+        const r = document.createRange(); r.setStart(plain, 1); r.setEnd(plain, plain.childNodes.length);
+        return {
+          noDx: Math.round(edNo.getBoundingClientRect().left - plainNo.getBoundingClientRect().left),
+          txDx: Math.round(ta.getBoundingClientRect().left - r.getBoundingClientRect().left),
+        };
+      });
+      ok(Math.abs(m.noDx) <= 1, `🔑 번호 위치가 평소 줄과 같다 (차이 ${m.noDx}px)`);
+      ok(Math.abs(m.txDx) <= 2, `🔑 글자 시작 위치가 평소 줄과 같다 (차이 ${m.txDx}px)`);
+    }
 
     // [4] 고치고 **칸을 벗어나면(blur) 저장** — 저장 버튼이 없으므로 이게 유일한 저장 방법이다
     await win.fill('.sblk.editing textarea', '고쳐 쓴 첫 문장입니다.');
