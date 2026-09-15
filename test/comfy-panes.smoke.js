@@ -118,6 +118,44 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(imgPairs.some((o) => o.startsWith('flow|')), '이미지 드롭다운에 Flow 항목: ' + (imgPairs.find((o) => o.startsWith('flow|')) || ''));
     ok(imgPairs.some((o) => o.startsWith('genspark|')), '이미지 드롭다운에 Genspark 항목: ' + (imgPairs.find((o) => o.startsWith('genspark|')) || ''));
     ok(!imgPairs.some((o) => o.startsWith('rotate|')), '옛 「순환(무료)」 항목 없음');
+    // ── 「(로컬)」 중복 제거 (로이 2026-09-16: "컴피유아이에 로컬이 있는 이유는? 중복이면 제거해") ──
+    //   optgroup 이 이미 로컬/클라우드를 가르므로 **이름 접미사 「(로컬)」 은 표시에서 떼고**,
+    //   그 워크플로(= 클라우드에 없는 모델)는 ☁ 그룹에서 **아예 감춘다**(고르면 반드시 실패하는 항목).
+    const imgComfy = imgPairs.filter((o) => o.indexOf('comfy::') === 0);
+    // ⚠ 🖥 는 서로게이트 페어라 문자 클래스 [☁🖥] 로는 반쪽만 지워진다 → 대안(|)으로 통째 제거.
+    const labelOf = (o) => (o.split('|')[1] || '').replace(/^(?:☁|🖥)\s*/u, '').trim();
+    ok(!imgComfy.some((o) => /\((?:로컬|local)\)/i.test(labelOf(o))),
+       '드롭다운 라벨에 「(로컬)」 접미사 없음: ' + imgComfy.map(labelOf).join(' / '));
+    const side = (k) => imgComfy.filter((o) => o.includes('::' + k + '::')).map(labelOf);
+    const cloudNames = side('cloud'), localNames = side('local');
+    ok(cloudNames.length && localNames.length, '☁·🖥 양쪽 모두 항목이 있다');
+    ok(cloudNames.every((nm) => localNames.includes(nm)), '☁ 목록 ⊆ 🖥 목록 (클라우드에만 있는 유령 항목 없음)');
+    // 설정에 로컬 전용(이름 끝 「(로컬)」) 워크플로가 있으면 ☁ 에서 빠져 있어야 한다.
+    //   ⚠ 지금 클라우드를 쓰고 그 워크플로가 선택돼 있으면 일부러 보여 주므로(빈칸 방지) 그때는 건너뛴다.
+    const icfg = read('comfy-image-config.json');
+    const onlyLocal = ((icfg && icfg.workflows) || [])
+      .filter((w) => w && /\((?:로컬|local)\)\s*$/i.test(w.name || ''))
+      .map((w) => w.name.replace(/\s*\((?:로컬|local)\)\s*$/i, '').trim());
+    if (onlyLocal.length && !icfg.cloud) {
+      ok(onlyLocal.every((nm) => localNames.includes(nm) && !cloudNames.includes(nm)),
+         '로컬 전용 워크플로는 🖥 에만 나온다: ' + onlyLocal.join(', ')
+         + ' (☁ ' + cloudNames.join('/') + ' · 🖥 ' + localNames.join('/') + ')');
+    } else console.log('  · (로컬 전용 워크플로가 없거나 클라우드 모드 — 이 검사는 건너뜀)');
+    // 반대 방향도 대칭으로 — 「(클라우드)」 이름은 🖥 로컬 그룹에서 감춘다(로컬엔 그 노드가 없다, v0.3.85).
+    const vcfg = read('comfy-video-config.json');
+    const vComfy = vidOpts.filter((o) => o.indexOf('comfy::') === 0);
+    const vSide = (k) => vComfy.filter((o) => o.includes('::' + k + '::')).map(labelOf);
+    const vCloud = vSide('cloud'), vLocal = vSide('local');
+    ok(!vComfy.some((o) => /\((?:로컬|local|클라우드|cloud)\)/i.test(labelOf(o))),
+       '비디오 라벨에도 「(로컬)·(클라우드)」 접미사 없음: ' + vComfy.map(labelOf).join(' / '));
+    const onlyCloud = ((vcfg && vcfg.workflows) || [])
+      .filter((w) => w && /\((?:클라우드|cloud)\)\s*$/i.test(w.name || ''))
+      .map((w) => w.name.replace(/\s*\((?:클라우드|cloud)\)\s*$/i, '').trim());
+    if (onlyCloud.length) {
+      ok(onlyCloud.every((nm) => vCloud.includes(nm) && !vLocal.includes(nm)),
+         '클라우드 전용 워크플로는 ☁ 에만 나온다: ' + onlyCloud.join(', ')
+         + ' (☁ ' + vCloud.join('/') + ' · 🖥 ' + vLocal.join('/') + ')');
+    }
     // 🔴 Genspark·Flow 는 **무료가 아니다** — 각 서비스 구독 요금제(Genspark 구독 / Flow 는 Google AI Pro·Ultra).
     //   라벨이 「무료」면 사용자가 과금 구조를 오해한다(2026-08-27 로이 지적 + v0.3.36 실측: 구독 없는 Flow 계정은 소개 페이지만 열림).
     ok(!imgPairs.some((o) => /무료/.test(o)), '이미지 드롭다운에 「무료」 표기가 없다: ' + imgPairs.join(' / '));

@@ -146,7 +146,18 @@ class ErrorBoundary extends React.Component {
 //     (LTX2.5 = unet ltx-2.5-22b-* · clip gemma4-12b-with-proj-ltx-2.5-* · vae ltx-2.5-*-vae-*).
 //     없으면 comfy-models 가 「그 서버에 있는 것: …」 을 붙여 사람 말로 알려 준다.
 const COMFY_SIDES = { image: [true, false], video: [true, false] };
-function ComfyEngineOptions({ cfg, kind = 'image' }) {
+// 워크플로 이름 끝의 「(로컬)」·「(클라우드)」 = **그 모델이 반대쪽에는 없다**는 표시다.
+//   · Krea2 int4 (로컬) — comfy.org 에 그 모델이 없다(v0.3.45)
+//   · MiniMax H3 레퍼런스 (클라우드) — 클라우드는 ComfyUI 네이티브 노드, 로컬판은 Deno 커스텀 노드라 서로 안 돈다(v0.3.85)
+//   그런데 optgroup 이 이미 로컬/클라우드를 가르므로 이름에 또 쓰면 「ComfyUI 로컬 > 🖥 Krea2 int4 Turbo (로컬)」 처럼
+//   **같은 말이 두 번** 보인다(로이 2026-09-16 지적). → 표시에선 접미사를 떼고, **반대쪽 그룹에서는 아예 감춘다.**
+//   🔑 라벨로 경고하던 것을 **구조로** 바꾼 것이다 — 고르면 반드시 실패하는 항목을 애초에 보여주지 않는다.
+//   ⚠ 판정 근거는 설정의 이름 하나뿐이다(＋추가할 때 사용자가 붙인다). 한쪽에서만 도는 워크플로를 새로 등록할 땐
+//     이름 끝에 「(로컬)」 또는 「(클라우드)」 를 붙일 것 — 그러면 자동으로 그쪽 그룹에만 나온다.
+const WF_SIDE_RE = /\s*\((로컬|local|클라우드|cloud)\)\s*$/i;
+const wfSide = (w) => { const m = WF_SIDE_RE.exec((w && w.name) || ''); return m ? (/로컬|local/i.test(m[1]) ? 'local' : 'cloud') : null; };
+const wfLabel = (w) => String((w && w.name) || '').replace(WF_SIDE_RE, '').trim() || '워크플로';
+function ComfyEngineOptions({ cfg, kind = 'image', value = '' }) {
   const suffix = kind === 'video' ? ' i2v' : '';
   const wfs = comfyWorkflows(cfg);
   if (!wfs.length) return <option value={mkComfyVal(true, '')}>ComfyUI{suffix} — 워크플로 없음(⚙ 에서 추가)</option>;
@@ -154,7 +165,9 @@ function ComfyEngineOptions({ cfg, kind = 'image' }) {
     {(COMFY_SIDES[kind] || [true, false]).map((cloud) => (
       <optgroup key={cloud ? 'c' : 'l'} label={`ComfyUI ${cloud ? '클라우드' : '로컬'}${suffix}`}>
         {/* 접힌 상태에선 optgroup 라벨이 안 보이므로 ☁/🖥 로 어느 쪽인지 드러낸다 */}
-        {wfs.map((w) => <option key={(cloud ? 'c' : 'l') + w.path} value={mkComfyVal(cloud, w.path)}>{cloud ? '☁' : '🖥'} {w.name}</option>)}
+        {/* ⚠ 지금 선택된 값이면 감추지 않는다 — 일치하는 option 이 없으면 드롭다운이 **빈칸**으로 보인다(v0.3.1 함정) */}
+        {wfs.filter((w) => !wfSide(w) || wfSide(w) === (cloud ? 'cloud' : 'local') || value === mkComfyVal(cloud, w.path))
+            .map((w) => <option key={(cloud ? 'c' : 'l') + w.path} value={mkComfyVal(cloud, w.path)}>{cloud ? '☁' : '🖥'} {wfLabel(w)}</option>)}
       </optgroup>
     ))}
   </>);
@@ -2205,7 +2218,7 @@ export default function App() {
       )}
       <div className="topsticky">
       <header>
-        {/* 상단 행 — 대본·프로젝트 관리 (열기·수정·저장·불러오기·초기화 한 줄로) */}
+        {/* 상단 행 — 대본·채널 관리 (모드·채널·설정·대본 열기·초기화 한 줄로) */}
         <div className="hrow">
           <div className="hleft">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
@@ -2243,15 +2256,13 @@ export default function App() {
                 <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}>🎵 mp3</button>
                 <button className="ghost" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 mp3(또는 영상)를 받아 바로 전사합니다 — 자막이 있으면 STT 없이 자막을 씁니다" onClick={openUrlDl}>🔗 URL</button>
               </span>
-              <span className="hgroup">
-                <span className="glabel">저장·불러오기</span>
-                <button className="ghost" disabled={!loaded} title="현재 대본 작업을 파일로 저장 (saves 폴더에 '작업_제목_날짜.smproj.json'). 자동저장도 항상 켜져 있음" onClick={saveProject}>💾 작업저장</button>
-                <button className="ghost" title="저장한 작업 파일 불러오기 (saves 폴더)" onClick={loadProject}>📂 작업열기</button>
-                <button className="ghost" title="현재 작업 큐 전체(대본 목록·채널·설정)를 파일로 저장 (saves 폴더에 '큐_날짜.pmqueue.json')" onClick={saveQueueFile}>💾 큐저장</button>
-                <button className="ghost" title="저장한 큐를 통째로 불러오기 — 대본 목록 복구 + 각 대본 작업물 이어짐 (saves 폴더)" onClick={loadQueueFile}>📂 큐열기</button>
-                <button className="ghost" style={{ color: '#c0392b' }} title="저장 폴더(saves)의 작업·큐 파일을 모두 삭제 (확인 팝업 있음). 진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다." onClick={deleteSaves}>🗑 전체삭제</button>
-                <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-              </span>
+              {/* 「저장·불러오기」 그룹(작업저장·작업열기·큐저장·큐열기·전체삭제)은 **화면에서만** 뺐다 (로이 2026-09-16).
+                  근거: ~/.priming-maker/saves 가 **0개** = 한 번도 쓴 적이 없다. 작업물은 자동저장이 늘 이어받는다
+                  (대본마다 projects/<대본>.smproj.json + 큐 구성 workspace.json → 대본을 다시 열면 그대로 이어짐).
+                  ⚠ 기능은 그대로 살아 있다 — IPC(save-project·load-project·save-queue·load-queue·clear-saves) 와
+                    렌더러 함수(saveProject·loadProject·saveQueueFile·loadQueueFile·deleteSaves) 전부 무수정.
+                    되살리려면 이 자리에 옛 <span className="hgroup"> 블록을 되돌리면 된다. */}
+              <button className="ghost" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
             </>)}
             {isBk && (<>
               <button onClick={openBook}>📖 원고 열기</button>
@@ -2291,7 +2302,7 @@ export default function App() {
               <option value="flow">Flow (구독)</option>
               <option value="genspark">Genspark (구독)</option>
               <option value="gemini">유료(나노바나나2)</option>
-              <ComfyEngineOptions cfg={comfyCfg} />
+              <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             {/* ⚙ 설정 = 버튼 1개(2026-08-26 통합). 지금 고른 엔진에 맞는 탭으로 연다 —
                 comfy 면 ComfyUI 탭, Flow·Genspark 면 브라우저 이미지 탭, 나노바나나면 API 키 탭. */}
@@ -2311,7 +2322,7 @@ export default function App() {
               <option value="flow">Flow · Veo (구독)</option>
                 <option value="genspark">Genspark (구독)</option>
               <option value="grok-api">Grok API (유료)</option>
-              <ComfyEngineOptions cfg={cvidCfg} kind="video" />
+              <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
               <option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}>⚙ 계정</button>}
@@ -2605,14 +2616,14 @@ export default function App() {
                         <option value="flow">Flow (구독)</option>
                         <option value="genspark">Genspark (구독)</option>
                         <option value="gemini">유료(나노바나나2)</option>
-                        <ComfyEngineOptions cfg={comfyCfg} />
+                        <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
                     <div className="crow"><span className="l">비디오</span>
                       <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <ComfyEngineOptions cfg={cvidCfg} kind="video" />
+                        <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)} />
                         <option value="grok">Grok (브라우저)</option>
                         <option value="flow">Flow · Veo (구독)</option>
                 <option value="genspark">Genspark (구독)</option>

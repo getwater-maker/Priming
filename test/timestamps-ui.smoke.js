@@ -9,22 +9,33 @@ const { _electron: electron } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 // TTS 길이가 들어있는 롱폼 작업본을 하나 고른다(없으면 건너뜀).
 const SAVES = path.join(os.homedir(), '.priming-maker', 'projects');
-function pickSnapshot() {
-  if (!fs.existsSync(SAVES)) return null;
+// ⚠ 대본(.md) 이 실재하는 스냅샷만 고른다 — 「작업열기」 버튼이 없어졌으므로(2026-09-16) 이제
+//   **대본을 열어** 자동 이어받기(♻)로 작업본을 되살린다. 그 대본이 그새 수정됐으면 새로 파싱돼
+//   TTS 가 없을 수 있으므로 후보를 여러 개 모아 순서대로 시도한다.
+function pickSnapshots(max = 5) {
+  const out = [];
+  if (!fs.existsSync(SAVES)) return out;
   for (const f of fs.readdirSync(SAVES).sort()) {
     try {
       const j = JSON.parse(fs.readFileSync(path.join(SAVES, f), 'utf8'));
       if (j.mode !== 'longform' || !j.projects || !j.projects[0]) continue;
+      if (!j.scriptPath || !fs.existsSync(j.scriptPath)) continue;
       const tot = j.projects[0].groups.reduce((a, g) => a + (g.sentences || []).reduce((x, s) => x + (s.ttsDurationSec || 0), 0), 0);
-      if (tot > 300) return path.join(SAVES, f);
+      if (tot > 300) out.push(j.scriptPath);
+      if (out.length >= max) break;
     } catch (_) {}
   }
-  return null;
+  return out;
 }
+// 작업 큐(workspace.json) 백업/복원 — 이 테스트가 사용자의 큐를 바꿔 놓지 않게.
+const WS = path.join(os.homedir(), '.priming-maker', 'workspace.json');
+function wsBackup() { try { return fs.existsSync(WS) ? fs.readFileSync(WS, 'utf8') : null; } catch (_) { return null; } }
+function wsRestore(b) { try { if (b === null) { if (fs.existsSync(WS)) fs.unlinkSync(WS); } else fs.writeFileSync(WS, b, 'utf8'); } catch (_) {} }
 
 (async () => {
-  const snap = pickSnapshot();
-  if (!snap) { console.log('⚠ TTS 길이가 있는 롱폼 작업본이 없어 건너뜀'); return; }
+  const cands = pickSnapshots();
+  if (!cands.length) { console.log('⚠ TTS 길이가 있는 롱폼 작업본이 없어 건너뜀'); return; }
+  const wsSaved = wsBackup();
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
   try {
     const win = await app.firstWindow();
@@ -32,12 +43,18 @@ function pickSnapshot() {
     await win.waitForSelector('h1', { timeout: 20000 });
     console.log('· 부팅 OK');
 
-    // 파일 대화상자 스텁 — 실제 클릭 없이 작업본을 연다
-    await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, snap);
-    // IPC 를 직접 부르면 화면(React state)이 안 바뀐다 → 실제 버튼을 눌러 앱과 똑같은 경로로 연다
-    await win.click('button:has-text("작업열기")');
-    await win.waitForFunction(() => /TTS [1-9]/.test((document.querySelector('.worktimes') || {}).textContent || ''), null, { timeout: 20000 });
-    const nCuts = await win.locator('.cutrow, .gcard, .cuts-grid > *').count();
+    // 대본을 열어 **자동 이어받기(♻)** 로 작업본을 되살린다. 대화상자는 스텁하고, IPC 를 직접 부르지 않고
+    //   실제 버튼을 눌러 앱과 똑같은 경로로 연다(IPC 직접 호출은 화면 state 가 안 바뀐다).
+    let snap = null;
+    for (const p of cands) {
+      await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, p);
+      await win.click('.hgroup button:has-text("열기")');
+      try {
+        await win.waitForFunction(() => /TTS [1-9]/.test((document.querySelector('.worktimes') || {}).textContent || ''), null, { timeout: 25000 });
+        snap = p; break;
+      } catch (_) { console.log('  · TTS 없음(대본이 수정됐을 수 있음) — 다음 후보:', path.basename(p)); }
+    }
+    if (!snap) { console.log('⚠ 후보 ' + cands.length + '개 모두 TTS 가 없어 건너뜀'); return; }
     console.log('· 작업본 로드 OK —', path.basename(snap), '·', (await win.locator('.worktimes').innerText()).split('·')[0].trim());
 
     const btn = win.locator('#capbar button:has-text("타임스탬프")');
@@ -71,5 +88,6 @@ function pickSnapshot() {
     console.log('✅ timestamps-ui.smoke.js 통과');
   } finally {
     await app.close();
+    wsRestore(wsSaved); // 사용자의 작업 큐를 테스트가 바꿔 놓지 않게 되돌린다
   }
 })().catch((e) => { console.error('❌', e.message); process.exit(1); });
