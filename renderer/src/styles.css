@@ -159,9 +159,10 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
   font-weight:500;color:var(--strong);background:transparent;border:0;outline:none;padding:2px 0;margin:0;
   resize:none;overflow:hidden;font-family:inherit}
 .empty{color:#b3a796;text-align:center;padding:60px 0;font-size:14px}
-/* 제작 파이프라인 — 좌: ①②③④ 세로 스택(왼쪽 정렬) / 우: 로그창 (2026-09-16) */
-.piperow{display:flex;align-items:stretch;gap:10px;margin-top:7px}
-.pipecol{display:flex;flex-direction:column;align-items:flex-start;gap:6px;flex:1 1 auto;min-width:0}
+/* 헤더 = 좌(상단행 + ①~⑤ 세로 스택) / 우(로그창). 로그가 **맨 윗줄부터** 시작한다 (2026-09-16) */
+.hsplit{display:flex;align-items:flex-start;gap:10px}
+.hmain{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
+.pipecol{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .pipecol > .hgroup{flex-wrap:wrap;max-width:100%}
 /* 로그 패널 */
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;
@@ -169,10 +170,11 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
   display:flex;flex-direction:column;font-family:Consolas,monospace;font-size:12px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
 /* 최소화: 로그를 완전히 숨기지 않고 최근 2줄만 보이게 (바 + 2줄) */
 #logwrap.collapsed{height:auto}
-/* 헤더 오른쪽에 붙인 로그창 — fixed 를 풀고 파이프라인과 같은 높이로 늘어난다 */
-#logwrap.docked{position:static;right:auto;bottom:auto;width:auto;height:auto;flex:0 1 420px;min-width:280px;
-  align-self:stretch;min-height:132px;box-shadow:none;z-index:auto}
-#logwrap.docked.collapsed{align-self:flex-start;min-height:0}
+/* 헤더 오른쪽 로그창 — fixed 를 풀되 **높이는 고정**한다(파이프라인을 따라 늘어나면 지나치게 길어진다).
+   ⚠ align-self:stretch 를 쓰지 않는 이유가 그것이다(2026-09-16 로이: "이렇게 길어질 필요는 없어"). */
+#logwrap.docked{position:static;right:auto;bottom:auto;width:auto;flex:0 1 420px;min-width:280px;
+  height:186px;align-self:flex-start;box-shadow:none;z-index:auto}
+#logwrap.docked.collapsed{height:auto}
 #logwrap.collapsed #log{flex:0 0 auto;height:40px;padding-top:4px;padding-bottom:6px}
 #logbar{padding:6px 10px;background:#231f1a;color:#c7b89f;display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;flex-wrap:nowrap;white-space:nowrap}
 #logbar>b{flex:0 0 auto}

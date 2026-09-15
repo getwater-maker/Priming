@@ -111,7 +111,7 @@ function explain(nodeErrors, cloud, kind) {
   const fixes = collectFixes(nodeErrors);
   if (!fixes.length) return '';
   const where = cloud ? '클라우드(comfy.org)' : '로컬 ComfyUI';
-  const hdr = kind === 'video' ? '③ 비디오' : '② 이미지';
+  const hdr = kind === 'video' ? '④ 비디오' : '③ 이미지';
   // 여러 건이면 첫 건만 보이고 나머지는 개수로 — 로그 한 줄이 화면을 넘기지 않게(LTX 를 로컬로 보내면 4건 난다).
   const f = fixes[0];
   const list = f.allowed.filter((a) => MODEL_EXT.test(String(a))).slice(0, 4).join(', ');

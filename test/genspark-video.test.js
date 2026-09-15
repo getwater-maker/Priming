@@ -217,7 +217,7 @@ try {
   ok(/Seedance 2\.5/.test(js), '번들에 모델 목록이 들어있다');
 } catch (_) { ok(false, '번들을 읽을 수 없다'); }
 
-// ── [10] 헤더 「③ 비디오」 옆 모델 select + 칩 판정 교정 (2026-09-05 · 아내 PC "설정한 모델로 안 만들어짐") ──
+// ── [10] 헤더 「④ 비디오」 옆 모델 select + 칩 판정 교정 (2026-09-05 · 아내 PC "설정한 모델로 안 만들어짐") ──
 {
   // (a) 칩 판정 — 순수 함수 원문 실행. 옛 앞글자 비교의 오판 사례가 전부 false 여야 한다.
   ok(typeof ENG.gsModelChipMatches === 'function', '엔진이 gsModelChipMatches 를 export 한다');

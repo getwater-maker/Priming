@@ -2767,7 +2767,7 @@ class FlowAutomator {
         noAccess: true,
         message: '이 계정은 Flow 를 쓸 수 없습니다 — Google AI 구독(Pro/Ultra)이 없어 소개 페이지만 열립니다.'
           + ' 계정을 더 추가해도 구독이 없으면 생성되지 않습니다.'
-          + ' 그 계정에서 구독하거나, 헤더 「② 이미지」를 🖥 ComfyUI 로컬(무료)·Genspark 로 바꾸세요.',
+          + ' 그 계정에서 구독하거나, 헤더 「③ 이미지」를 🖥 ComfyUI 로컬(무료)·Genspark 로 바꾸세요.',
       };
     }
     if (sig.login) {

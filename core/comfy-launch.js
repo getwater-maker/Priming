@@ -150,7 +150,7 @@ async function ensureLocalComfy(opts = {}) {
       return {
         ok: false, reason: 'not-installed',
         message: `로컬 ComfyUI(${baseUrl})가 꺼져 있고 켤 방법도 못 찾았습니다.`
-          + ` Comfy Desktop 에서 인스턴스를 한 번 설치·실행하거나, 헤더 「② 이미지」에서 ☁ 클라우드로 바꾸세요.`
+          + ` Comfy Desktop 에서 인스턴스를 한 번 설치·실행하거나, 헤더 「③ 이미지」에서 ☁ 클라우드로 바꾸세요.`
           + ` (찾아본 곳: %APPDATA%\\Comfy Desktop\\installations.json · ${candidates(exePath).join(' · ')})`,
       };
     }
