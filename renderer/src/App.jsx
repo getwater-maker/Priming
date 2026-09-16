@@ -391,7 +391,6 @@ export default function App() {
   const [acct, setAcct] = useState(null);
   const [acctEdit, setAcctEdit] = useState({});   // 입력 중인 아이디/비번 (비번은 저장 후 즉시 비움)
   const [credsOk, setCredsOk] = useState(true);   // OS 암호화 가능 여부
-  const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
   // 🔴 큐 순회용 중단 플래그 — main 의 S.abort 는 렌더러가 볼 수 없어서, 큐 루프가 중단을 모른 채
@@ -399,7 +398,6 @@ export default function App() {
   //    state 가 아니라 ref 인 이유: setState 는 비동기라 실행 중인 루프에 즉시 보이지 않는다.
   const queueAbortRef = useRef(false);
   const [logText, setLogText] = useState('');
-  const [logCollapsed, setLogCollapsed] = useState(false); // 헤더 오른쪽 전용 자리를 얻었으므로 펼친 채 시작(2026-09-16) — 바 클릭으로 접는다
 
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
@@ -439,6 +437,7 @@ export default function App() {
   //   → 이 표시가 없으면 같은 편집이 두 번 전송된다.
   const sentDoneRef = useRef(false);
   const findTextRef = useRef('');        // 검색어 (비제어)
+  const findSessionRef = useRef('');                      // 지금 열려 있는 검색 세션의 문자열(Electron findNext 판정용)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [styleSync, setStyleSync] = useState('');            // ☁ 공용 스타일 동기화 상태/경고
@@ -651,15 +650,24 @@ export default function App() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logText, logCollapsed]);
+  }, [logText]);
 
 
+  // 처음에 고를 채널 = **드롭다운 맨 위에 보이는 채널** (로이 2026-09-16).
+  //   ⚠ 배열 첫 항목이 아니라 **화면 순서**를 따른다 — 드롭다운은 그룹 없는 채널을 먼저 묶어 보여준다.
+  //   (예전엔 isDefault 채널을 골랐다 → 목록 순서를 바꿔도 04_역사이야기가 계속 뜨는 이유였다)
+  function firstChannelName(ps) {
+    const list = ps || [];
+    if (!list.length) return '';
+    const noGroup = list.find((p) => !p.group);
+    return (noGroup || list[0]).name;
+  }
   async function loadPresets() {
     const ps = await api.listPresets();
     setPresets(ps || []);
     // 목록은 **사용자가 ↕ 로 정한 순서** 그대로다(더는 기본채널을 맨 위로 올리지 않는다).
     //   그래서 "처음에 고를 채널"은 순서가 아니라 isDefault 로 찾는다.
-    if (ps && ps.length && !presetName) setPresetName((ps.find((p) => p.isDefault) || ps[0]).name);
+    if (ps && ps.length && !presetName) setPresetName(firstChannelName(ps));
   }
   async function loadStyles() {
     const ss = await api.listStyles();
@@ -1367,7 +1375,7 @@ export default function App() {
     try {
       const ps = await api.removePreset({ name: ch.name });
       setChOpen(false); setPresets(ps || []);
-      if (ps && ps.length) setPresetName((ps.find((p) => p.isDefault) || ps[0]).name);
+      if (ps && ps.length) setPresetName(firstChannelName(ps));
       setStatus(`채널 "${ch.name}" 삭제됨`);
     } catch (e) { uiAlert('채널 삭제 실패:\n' + e.message); }
   }
@@ -1885,24 +1893,38 @@ export default function App() {
     api.onFindResult((r) => setFindRes(r || { active: 0, total: 0 }));
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault(); setFindOpen(true);
-        setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30);
+        // 검색창은 늘 떠 있으므로 **포커스만** 옮긴다(2026-09-16).
+        e.preventDefault();
+        const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   // findInPage 는 무거운 DOM(대본 수십 컷+영상)에서 호출당 전체 스캔이라, 타이핑마다 부르면 프리징.
-  //   → 타이핑(findNext=false)은 디바운스(280ms)로 멈춘 뒤 1번만, Enter/화살표(findNext=true)는 즉시.
-  function runFind(text, findNext, forward) {
+  //   → 타이핑은 디바운스(280ms)로 멈춘 뒤 1번만, Enter/▲▼(move)는 즉시.
+  // 🔴 **Electron 의 findNext 는 「다음으로 이동」이 아니라 「새 세션을 시작하는가」다**(2026-09-16 실측).
+  //   옛 코드는 반대로 써서 **타이핑만으로는 검색이 아예 안 됐다**(found-in-page 이벤트 0건 — 실측 확인).
+  //   그래서 문자열이 바뀌면 새 세션(true), 같은 문자열에서 이동이면 follow-up(false) 으로 보낸다.
+  function runFind(text, move, forward) {
     findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
-    if (!text) { api.findStop(); setFindRes({ active: 0, total: 0 }); return; }
-    const fire = () => api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
-    if (findNext) fire();
-    else findTimerRef.current = setTimeout(fire, 280);
+    if (!text) { api.findStop(); findSessionRef.current = ''; setFindRes({ active: 0, total: 0 }); return; }
+    const fire = () => {
+      const fresh = findSessionRef.current !== text;   // 세션이 잡고 있는 문자열과 다르면 새로 시작해야 한다
+      findSessionRef.current = text;
+      api.findInPage({ text, findNext: fresh, forward: forward !== false });
+    };
+    if (move) fire(); else findTimerRef.current = setTimeout(fire, 280);
   }
-  function closeFind() { if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; } api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
+  // 검색창은 상시 표시라 「닫기」가 없다 — Esc·✕ 는 **검색어를 지우고 강조를 푼다**.
+  //   ⚠ 비제어 입력이라 DOM 값을 직접 비운다(state 로 두면 타이핑마다 전 화면이 재렌더된다).
+  function clearFind() {
+    if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
+    findTextRef.current = ''; findSessionRef.current = '';
+    const el = document.getElementById('find-input'); if (el) el.value = '';
+    api.findStop(); setFindRes({ active: 0, total: 0 });
+  }
   // 보이스디자인 파형 그리기 — 봉우리/선택구간이 바뀔 때마다 다시 그린다.
   useEffect(() => {
     const c = vdCanvasRef.current;
@@ -2062,6 +2084,13 @@ export default function App() {
   }
   // 탭을 열 때 두 쪽을 함께 찔러 본다 — "로컬이 꺼져 있다"를 만들기 전에 알 수 있게.
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
+  // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
+  function settingsTabForEngine() {
+    if (isComfyEngine(imgEngine)) return 'img';
+    if (isComfyEngine(videoEngine)) return 'vid';
+    if (imgEngine === 'gemini') return 'keys';
+    return 'free';
+  }
   async function openSettings(tab) {
     setSettingsTab(tab || 'img');
     // 🌐 브라우저 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
@@ -2204,18 +2233,6 @@ export default function App() {
   // ── 렌더 ─────────────────────────────────────────────────
   return (
     <>
-      {findOpen && (
-        <div style={{ position: 'fixed', top: 8, right: 16, zIndex: 9999, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--card, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 8px', boxShadow: '0 3px 12px rgba(0,0,0,.18)' }}>
-          {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(위 대본수정과 같은 원인) */}
-          <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)" style={{ width: 240 }}
-            onChange={(e) => runFind(e.target.value, false)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } }} />
-          <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
-          <button className="ghost" title="이전 (Shift+Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
-          <button className="ghost" title="다음 (Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
-          <button className="ghost" title="닫기 (Esc)" style={{ padding: '2px 8px' }} onClick={closeFind}>✕</button>
-        </div>
-      )}
       <div className="topsticky">
       <header>
         {/* 헤더 = 좌(상단행 + ①~⑤ 세로) / 우(로그창). 로그를 **맨 윗줄부터** 시작시키려고
@@ -2226,7 +2243,10 @@ export default function App() {
         <div className="hrow">
           <div className="hleft">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
-            <button className="ghost" title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동" style={{ padding: '4px 8px' }} onClick={() => { setFindOpen(true); setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30); }}>🔍</button>
+            {/* ⚙ 설정을 **제목 바로 뒤**로 옮겼다 (로이 2026-09-16 — 옛 🔍 자리). 검색은 오른쪽 상시 검색창이 맡으므로 🔍 버튼은 없앴다.
+                🔑 지금 고른 엔진에 맞는 탭으로 연다 — 예전엔 「② 이미지」 줄에 같은 팝업을 여는 ⚙ 가 하나 더 있었다(중복이라 제거). */}
+            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
+              style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙ 설정</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
@@ -2249,7 +2269,6 @@ export default function App() {
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="채널 목록 순서 변경 (드롭다운에 보이는 순서)" style={{ padding: '6px 9px' }} onClick={openChOrder}>↕</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
-            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소" style={{ padding: '6px 9px' }} onClick={() => openSettings('img')}>⚙ 설정</button>
             {isBk && (<>
               <button onClick={openBook}>📖 원고 열기</button>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
@@ -2310,10 +2329,8 @@ export default function App() {
               <option value="gemini">유료(나노바나나2)</option>
               <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
-            {/* ⚙ 설정 = 버튼 1개(2026-08-26 통합). 지금 고른 엔진에 맞는 탭으로 연다 —
-                comfy 면 ComfyUI 탭, Flow·Genspark 면 브라우저 이미지 탭, 나노바나나면 API 키 탭. */}
-            <button className="ghost" title="이미지 설정 — 지금 고른 엔진에 맞는 탭으로 엽니다 (ComfyUI 주소·워크플로 / Flow 모델·LoRA 수집 / API 키)"
-              onClick={() => openSettings(isComfyEngine(imgEngine) ? 'img' : (isComfyEngine(videoEngine) ? 'vid' : (imgEngine === 'gemini' ? 'keys' : 'free')))}>⚙</button>
+            {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
+                대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}>🗑 삭제</button>
             {imgEngine === 'gemini' && (<>
@@ -2380,11 +2397,23 @@ export default function App() {
           </>)}
         </div>
         </div>
-        {/* 로그창 — 예전엔 우하단에 떠 있는 fixed 창이었다. 헤더 오른쪽이 늘 비어 있어 그 자리로 옮겼고,
-            **높이를 고정**했다(파이프라인 높이를 따라 늘어나면 지나치게 길어진다).
-            접기(바 클릭)는 그대로 — 접으면 최근 2줄만 남는다. */}
-        <aside id="logwrap" className={'docked' + (logCollapsed ? ' collapsed' : '')}>
-            <div id="logbar" onClick={(e) => { if (e.target.tagName === 'BUTTON') return; setLogCollapsed((v) => !v); }}>
+        {/* 오른쪽 열 = **검색창(위) + 로그창(아래)**. 로그를 한 줄 내리고 그 자리에 검색창을 상시 띄운다
+            (로이 2026-09-16 — 예전엔 Ctrl+F 로 뜨는 떠 있는 창이라 로그창을 가렸다).
+            ⚠ 로그 **접기 기능은 없앴다** — 전용 자리가 생겨 가릴 이유가 없다(바 클릭이 아무 일도 하지 않는다). */}
+        <div className="hcolR">
+          <div className="findbar">
+            <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
+            {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)"
+              onChange={(e) => runFind(e.target.value, false)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
+            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
+            <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
+            <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
+            <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
+          </div>
+        <aside id="logwrap" className="docked">
+            <div id="logbar">
               <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
               <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
               <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
@@ -2392,6 +2421,7 @@ export default function App() {
             </div>
             <div id="log" ref={logRef}>{logText}</div>
         </aside>
+        </div>
         </div>
       </header>
 
@@ -2660,7 +2690,7 @@ export default function App() {
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드 폴더</label>
-                  <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 비우면 받을 때 물어봅니다" value={ch.downloadFolder || ''}
+                  <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
                     onChange={(e) => setCh({ ...ch, downloadFolder: e.target.value })} />
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDownloadFolder}>찾기</button></div>
                 {ch.startMode === 'remotion' && (<>

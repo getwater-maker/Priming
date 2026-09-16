@@ -166,12 +166,15 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       const grp = sel && sel.closest('.hgroup');
       return grp ? [...grp.querySelectorAll('button')].map((b) => ((b.getAttribute('title') || '') + '~' + (b.textContent || '').trim())) : [];
     });
-    const gearSet = row.filter((b) => b.startsWith('이미지 설정'));
-    ok(gearSet.length === 1, '이미지 설정 ⚙ 버튼이 1개 (옛 ⚙순환 + ⚙ComfyUI 통합)');
+    // 🔑 「② 이미지」 줄의 ⚙(이미지 설정)은 **제거**했다 (로이 2026-09-16: "첫줄 설정버튼과 같은 기능이면 제거").
+    //   첫 줄 「⚙ 설정」이 지금 고른 엔진에 맞는 탭을 열어 준다(settingsTabForEngine).
+    ok(!row.some((b) => b.startsWith('이미지 설정')), '「② 이미지」 줄에 옛 ⚙(이미지 설정)이 없다 — 첫 줄 ⚙ 설정으로 통합');
     ok(!row.some((b) => b.includes('이미지 순환')), '옛 「⚙ 이미지 순환」 버튼 없음');
     ok(!row.some((b) => (b.split('~')[1] || '') === '⚙ ComfyUI'), '옛 「⚙ ComfyUI」 버튼 없음');
+    // Ollama 프롬프트 작성 설정 ⚙ 는 그대로 남아 있어야 한다(✍ 프롬프트 옆 — 설정 팝업과 다른 기능이다).
+    ok(row.some((b) => /Ollama/.test(b) && (b.split('~')[1] || '') === '⚙'), '✍ 프롬프트 옆 Ollama ⚙ 는 남아 있다');
 
-    await win.click('.hgroup select[title^="이미지 생성 방식"] ~ button:has-text("⚙")').catch(() => {});
+    await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card', { timeout: 10000 });
     ok(await win.locator('.modal-card button:has-text("🌐 브라우저 이미지")').count() === 1, '설정에 「🌐 브라우저 이미지」 탭이 있다');
     await win.click('.modal-card button:has-text("🌐 브라우저 이미지")');

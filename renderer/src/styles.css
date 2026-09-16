@@ -162,23 +162,29 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 헤더 = 좌(상단행 + ①~⑤ 세로 스택) / 우(로그창). 로그가 **맨 윗줄부터** 시작한다 (2026-09-16) */
 .hsplit{display:flex;align-items:flex-start;gap:10px}
 .hmain{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
-.pipecol{display:flex;flex-direction:column;align-items:stretch;gap:6px;align-self:stretch}
-/* 섹션 박스는 **너비를 통일**한다 (로이 2026-09-16: "크기가 들쭉날쭉한데 동일하게") —
-   내용 길이에 맞춰 제각각이면 세로로 쌓았을 때 오른쪽 끝이 톱니처럼 보인다. */
-.pipecol > .hgroup{flex-wrap:wrap;width:100%}
+/* 섹션 박스는 **가장 긴 섹션에 맞춰** 너비를 통일한다 (로이 2026-09-16: "끝까지 늘리지 말고 가장 긴 섹션 기준").
+   🔑 그래서 flex 가 아니라 **grid** 다 — 열 하나를 fit-content(100%) 로 두면
+   폭이 「가장 넓은 박스」로 정해지고(내용 너비), 창이 좁으면 100% 에서 멈춘다(넘치지 않는다).
+   그리드 항목은 기본이 stretch 라 **모든 박스가 그 열 너비로 같아진다.** */
+.pipecol{display:grid;grid-template-columns:fit-content(100%);gap:6px;justify-content:start;align-self:stretch}
+.pipecol > .hgroup{flex-wrap:wrap;width:auto}
 /* 로그 패널 */
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;
   background:#2b2620;color:#d8cdbb;border:1px solid var(--accent);border-radius:10px;overflow:hidden;
   display:flex;flex-direction:column;font-family:Consolas,monospace;font-size:12px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
-/* 최소화: 로그를 완전히 숨기지 않고 최근 2줄만 보이게 (바 + 2줄) */
-#logwrap.collapsed{height:auto}
-/* 헤더 오른쪽 로그창 — fixed 를 풀되 **높이는 고정**한다(파이프라인을 따라 늘어나면 지나치게 길어진다).
-   ⚠ align-self:stretch 를 쓰지 않는 이유가 그것이다(2026-09-16 로이: "이렇게 길어질 필요는 없어"). */
-#logwrap.docked{position:static;right:auto;bottom:auto;width:auto;flex:0 1 420px;min-width:280px;
-  height:186px;align-self:flex-start;box-shadow:none;z-index:auto}
-#logwrap.docked.collapsed{height:auto}
-#logwrap.collapsed #log{flex:0 0 auto;height:40px;padding-top:4px;padding-bottom:6px}
-#logbar{padding:6px 10px;background:#231f1a;color:#c7b89f;display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;flex-wrap:nowrap;white-space:nowrap}
+/* 헤더 오른쪽 열 = 검색창(위) + 로그창(아래). 로그를 **한 줄 내려** 상단행과 겹치지 않게 한다(2026-09-16). */
+.hcolR{display:flex;flex-direction:column;gap:6px;flex:0 1 420px;min-width:280px}
+/* 높이를 상단행(31px)과 맞춘다 — 그래야 아래 로그창이 ② 이미지 줄과 정확히 같은 높이에서 시작한다. */
+.findbar{display:flex;align-items:center;gap:6px;border:1px solid #e2d5c0;background:#fffdf9;
+  border-radius:11px;padding:0 9px;height:31px;box-sizing:border-box}
+.findbar input{flex:1 1 auto;min-width:0;padding:3px 7px;font-size:12.5px}
+.findbar button{padding:3px 8px;font-size:12px}
+.fcnt{font-size:11.5px;color:var(--muted);min-width:38px;text-align:center;white-space:nowrap}
+/* 로그창 — fixed 를 풀되 **높이는 고정**한다(파이프라인을 따라 늘어나면 지나치게 길어진다).
+   ⚠ 접기 기능은 없앴다(로이 2026-09-16) — 전용 자리가 생겨 가릴 이유가 없다. */
+#logwrap.docked{position:static;right:auto;bottom:auto;width:auto;
+  height:186px;box-shadow:none;z-index:auto}
+#logbar{padding:6px 10px;background:#231f1a;color:#c7b89f;display:flex;align-items:center;gap:8px;font-size:11px;flex-wrap:nowrap;white-space:nowrap}
 #logbar>b{flex:0 0 auto}
 #logbar>button{flex:0 0 auto}
 #log{flex:1;overflow:auto;padding:8px 10px;white-space:pre-wrap;line-height:1.55}

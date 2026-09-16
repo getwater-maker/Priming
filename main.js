@@ -1048,11 +1048,12 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const forceStt = !!args.forceStt;
   const doStt = args.stt !== false;
 
-  // 저장 폴더 — 채널의 「다운로드 폴더」가 정본, 없으면 그 자리에서 고르게 한다.
+  // 저장 폴더 — 채널의 「다운로드 폴더」가 정본, 없으면 **윈도우 「다운로드」 폴더**(2026-09-16),
+  //   그마저 못 찾을 때만 그 자리에서 고르게 한다.
   let outDir = args.outDir || '';
   if (!outDir) {
     const pr = resolvePreset(args.presetName);
-    outDir = (pr && pr.downloadFolder) || '';
+    outDir = (pr && pr.downloadFolder) || defaultDownloadDir();
   }
   if (!outDir) {
     const pick = await dialog.showOpenDialog(win, {
@@ -4040,9 +4041,18 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
 });
 
 // 채널(프리셋) 편집
+// 윈도우에 설정된 「다운로드」 폴더 — 채널의 다운로드 폴더 기본값 (로이 2026-09-16).
+//   🔑 홈+'Downloads' 로 조립하지 않는다. 사용자가 다운로드 폴더를 다른 드라이브로 옮겼을 수 있고,
+//     app.getPath('downloads') 는 그 OS 설정(셸 폴더)을 그대로 돌려준다.
+function defaultDownloadDir() {
+  try { const d = app.getPath('downloads'); return d && fs.existsSync(d) ? d : ''; } catch (_) { return ''; }
+}
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
-  return all.find((p) => p.name === name) || null;
+  const p = all.find((x) => x.name === name) || null;
+  // 다운로드 폴더를 한 번도 안 정한 채널이면 **윈도우 다운로드 폴더를 기본값으로 보여준다**
+  // (채널편집에서 그대로 저장되거나, 사용자가 다른 폴더로 바꾸면 그 값이 저장된다).
+  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir() } : null;
 });
 ipcMain.handle('save-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');

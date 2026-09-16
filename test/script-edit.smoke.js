@@ -55,11 +55,11 @@ const cleanup = () => {
 
     // 대본 열기 (대화상자 스텁)
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
-    await win.click('.hgroup:has(.glabel:text-is("대본")) button:has-text("열기")');
+    await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
 
     // [1] 헤더에 옛 ✏ 수정 버튼이 없다
-    ok(await win.locator('.hgroup:has(.glabel:text-is("대본")) button:has-text("✏ 수정")').count() === 0,
+    ok(await win.locator('.hgroup:has(.glabel:has-text("대본")) button:has-text("✏ 수정")').count() === 0,
       '롱폼 헤더에 ✏ 수정 버튼이 없다(문장 편집이 대체)');
 
     // [2] 문장 블록 — 첫 그룹은 문장 3개. 버튼은 하나도 없다(키보드 편집기).

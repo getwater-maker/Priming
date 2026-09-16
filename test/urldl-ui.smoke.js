@@ -69,7 +69,9 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('.modal-card:has-text("URL 에서 받아 전사")').count() === 0, 'ESC 로 닫힌다');
 
     // [9] 채널편집 → 📁 폴더 에 다운로드 폴더 칸
-    await win.click('button[title*="채널"], button:has-text("⚙")');
+    // ⚠ 「⚙」 로 뭉뚱그려 찾으면 첫 줄 「⚙ 설정」(통합 설정)이 먼저 잡힌다(2026-09-16 ⚙ 설정이 앞으로 옮겨짐).
+    //   채널편집은 title 로 정확히 집는다.
+    await win.click('button[title^="채널(프리셋) 설정 편집"]');
     await win.waitForTimeout(600);
     const chCard = win.locator('.modal-card').filter({ hasText: '폴더' });
     if (await chCard.count()) {
