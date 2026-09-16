@@ -154,6 +154,26 @@ async function prepareAnnotation(scene, imagePath, { ANN, WB, force, log, abortS
       try { fs.unlinkSync(annPath); } catch (_) {}
       ann = null;
     }
+    // 🔴 굶는 영역(뒤 영역에 통째로 덮여 그릴 게 없는 것)이 있으면 **순서만** 다시 잡는다.
+    //   영역 좌표는 그대로 두므로 사람이 고친 영역도 살아남는다 — 바뀌는 것은 그리는 차례뿐이다.
+    if (ann && Array.isArray(ann.elements) && ann.elements.length && ann.canvas && ANN.findStarved) {
+      const starved = ANN.findStarved(ann.elements);
+      if (starved.length) {
+        const lost = starved.reduce((a, x) => a + x.sec, 0);
+        const drafted = { canvas: ann.canvas, regions: ann.elements.map((e) => ({ region: e.region, direction: e.reveal && e.reveal.direction })) };
+        const next = ANN.buildAnnotation(scene, drafted, { imageSig: ANN.imageSig ? ANN.imageSig(imagePath) : null });
+        const still = ANN.findStarved(next.elements);
+        if (still.length < starved.length) {
+          try { fs.writeFileSync(annPath, JSON.stringify(next, null, 2), 'utf8'); }
+          catch (e) { return { ok: false, error: `주석을 쓰지 못했습니다: ${e.message}` }; }
+          const chk0 = WB.checkCanvas(imagePath, annPath);
+          if (!chk0.ok) return { ok: false, error: chk0.error };
+          log(`  🔧 장면 ${PAD(scene.num)} 영역 순서를 다시 잡았습니다 — 뒤 영역에 덮여 `
+            + `${lost.toFixed(1)}초 동안 아무것도 안 그리던 영역 ${starved.length}개를 살렸습니다`);
+          return { ok: true, path: annPath, reordered: true };
+        }
+      }
+    }
     if (ann && !annotationStale(ann, scene)) {
       const chk = WB.checkCanvas(imagePath, annPath);
       if (!chk.ok) return { ok: false, error: chk.error };
@@ -232,7 +252,7 @@ async function runWhiteboard(project, outRoot, opts = {}) {
     const img = imageForScene(project, s);
     const a = await withAbort(isAborted, (sig) => prepareAnnotation(s, img, { ANN, WB, force: !!opts.forceAnnotation, log, abortSignal: sig }));
     if (!a.ok) return { ok: false, error: `장면 ${PAD(s.num)} 주석 실패 — ${a.error}` };
-    if (a.created) created++; else if (a.refreshed) refreshed++; else kept++;
+    if (a.created) created++; else if (a.refreshed || a.reordered) refreshed++; else kept++;
     jobs.push({ scene: s, image: img, ann: a.path, out: path.join(wbDir, `scene-${PAD(s.num)}.${cap}.mp4`) });
   }
   log(`📝 주석 ${jobs.length}개 — 새로 ${created} · 유지 ${kept} · 타이밍 갱신 ${refreshed}`);

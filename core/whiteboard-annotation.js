@@ -87,9 +87,28 @@ function handPathFor(region, direction) {
  * @param scene planScenes() 가 낸 장면
  * @param drafted draftRegions() 결과
  */
-function buildAnnotation(scene, drafted, opts = {}) {
-  const regions = drafted.regions;
-  const els = scene.elements.map((e, i) => {
+/**
+ * 영역 배정 후보 두 가지 중 **굶는 영역이 적은 쪽**을 고른다.
+ * 🔑 무조건 넓이순으로 바꾸면 안 된다 — 로이 대본 실측에서 장면 1 은 넓이순이 옳았지만(굶음 2 → 0)
+ *   **장면 3 은 원래 순서가 옳았다**(굶음 0 → 넓이순이면 1). 규칙 하나를 강요하지 않고 **재 보고 고른다.**
+ * ⚠ 동률이면 **원래(초안) 순서**를 쓴다 — 이유 없이 그리는 흐름을 흔들지 않는다.
+ */
+function pickRegionOrder(scene, drafted, opts) {
+  const first = drafted.regions || [];
+  const cands = [first, orderRegionsForReveal(first)];
+  let best = null;
+  for (const regions of cands) {
+    const els = assignElements(scene, regions, opts);
+    const starved = findStarved(els).length;
+    if (!best || starved < best.starved) best = { els, starved };
+    if (best.starved === 0) break;
+  }
+  return best.els;
+}
+
+/** 장면의 element 마다 영역 하나를 붙인다(순서는 호출부가 정한다). */
+function assignElements(scene, regions, opts = {}) {
+  return scene.elements.map((e, i) => {
     // 영역이 element 보다 적으면 마지막 영역을 다시 쓴다(그리는 자리가 없는 것보다 낫다).
     const r = regions[Math.min(i, regions.length - 1)];
     const dir = r.direction || 'left_to_right';
@@ -110,6 +129,15 @@ function buildAnnotation(scene, drafted, opts = {}) {
       handPath: handPathFor(r.region, dir),
     };
   });
+}
+
+/**
+ * 장면 하나의 주석을 만든다. **파일에 쓰지는 않는다**(호출부가 결정).
+ * @param scene planScenes() 가 낸 장면
+ * @param drafted draftRegions() 결과
+ */
+function buildAnnotation(scene, drafted, opts = {}) {
+  const els = pickRegionOrder(scene, drafted, opts);
   const lastEnd = els.length ? Math.max(...els.map((e) => e.reveal.startMs + e.reveal.durationMs)) : 0;
   return {
     sceneId: `scene-${String(scene.num).padStart(2, '0')}`,
@@ -125,6 +153,72 @@ function buildAnnotation(scene, drafted, opts = {}) {
     _priming: { sceneNum: scene.num, groupNums: scene.groupNums, sentenceNums: scene.sentenceNums, imageSig: opts.imageSig || null },
     elements: els,
   };
+}
+
+/**
+ * 🔴 **굶는 영역** — 렌더러(`render_stream_whiteboard._allowed_mask`)는 자기 영역에서
+ *   **뒤에 오는 모든 영역**을 빼고 그린다(나중에 드러날 것을 미리 드러내지 않으려고).
+ *   그래서 **앞 영역이 뒤 영역들에 통째로 덮이면 그릴 게 하나도 없어 화면이 그 시간만큼 멈춘다.**
+ *
+ *   실사고(2026-09-16, 로이 "10초 동안 화면이 멈춰있다가 움직이기 시작"):
+ *     seq1 (762,0,582,397) 10.2초 · seq3 (0,0,858,768) · seq4 (858,0,486,768)
+ *     → seq3 가 왼쪽 전부, seq4 가 오른쪽 전부를 덮어 **seq1 에 남는 면적 0** → 10.2초 정지.
+ *     (영상 실측: 0.5~9초 구간의 변한 화소가 **0**)
+ *
+ *   ⚠ 기존 `findSwallowed` 는 **반대 방향**(뒤 영역이 앞 영역에 들어감)만 본다 — 이 사고는 못 잡는다.
+ */
+
+/** 직사각형에서 여러 직사각형을 뺀 **넓이**. 좌표를 압축해 격자로 센다(영역이 6개 남짓이라 저렴). */
+function areaMinus(base, others) {
+  const bx1 = base.x + base.width, by1 = base.y + base.height;
+  if (base.width <= 0 || base.height <= 0) return 0;
+  const xs = new Set([base.x, bx1]), ys = new Set([base.y, by1]);
+  for (const o of others) {
+    for (const v of [o.x, o.x + o.width]) if (v > base.x && v < bx1) xs.add(v);
+    for (const v of [o.y, o.y + o.height]) if (v > base.y && v < by1) ys.add(v);
+  }
+  const X = [...xs].sort((a, b) => a - b), Y = [...ys].sort((a, b) => a - b);
+  let area = 0;
+  for (let i = 0; i < X.length - 1; i++) {
+    for (let j = 0; j < Y.length - 1; j++) {
+      const cx = (X[i] + X[i + 1]) / 2, cy = (Y[j] + Y[j + 1]) / 2;
+      if (others.some((o) => cx >= o.x && cx < o.x + o.width && cy >= o.y && cy < o.y + o.height)) continue;
+      area += (X[i + 1] - X[i]) * (Y[j + 1] - Y[j]);
+    }
+  }
+  return area;
+}
+
+/**
+ * 그리는 차례에 **실제로 남는 면적이 거의 없는** element 를 찾는다.
+ * @returns [{ seq, ratio, sec }] — ratio = 남는 면적 / 자기 면적
+ */
+function findStarved(elements, minRatio = 0.12) {
+  const out = [];
+  for (let i = 0; i < elements.length; i++) {
+    const e = elements[i];
+    const mine = Math.max(1, e.region.width * e.region.height);
+    const others = elements.slice(i + 1).map((x) => x.region)
+      .concat(((e.reveal && e.reveal.protectedRegions) || []));
+    const ratio = areaMinus(e.region, others) / mine;
+    if (ratio < minRatio) out.push({ seq: e.sequence, ratio, sec: ((e.reveal && e.reveal.durationMs) || 0) / 1000 });
+  }
+  return out;
+}
+
+/**
+ * 영역을 **그리는 순서**로 정렬한다 — 넓은 것부터.
+ * 🔑 렌더러가 「뒤 영역을 뺀다」이므로 **넓은 영역이 앞에 와야** 뒤엣것을 빼도 그릴 자리가 남는다.
+ *   반대로 두면(좁은 것 먼저) 그 좁은 영역이 뒤의 큰 영역에 통째로 먹혀 화면이 멈춘다(위 실사고).
+ * ⚠ 같은 넓이면 **원래 순서**를 지킨다(초안의 왼→오 흐름을 헛되이 흔들지 않는다).
+ */
+function orderRegionsForReveal(regions) {
+  return (regions || []).map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const A = a.r.region.width * a.r.region.height, B = b.r.region.width * b.r.region.height;
+      return B !== A ? B - A : a.i - b.i;
+    })
+    .map((x) => x.r);
 }
 
 /**
@@ -179,6 +273,11 @@ async function writeAnnotation(scene, imagePath, { force = false, log = () => {}
     log(`⚠ 장면 ${scene.num} 영역 ${s2.seq} 가 영역 ${s2.insideOf} 안에 거의 다 들어갑니다 — `
       + `그 차례에 새로 드러날 게 없습니다. 「✏ 영역 편집」에서 경계를 옮기세요`);
   }
+  // 🔴 넓이순 배정으로도 남는 자리가 없으면(영역이 서로 거의 같은 자리) 그 시간만큼 화면이 멈춘다.
+  for (const st of findStarved(ann.elements)) {
+    log(`⚠ 장면 ${scene.num} 영역 ${st.seq} 는 뒤 영역들에 거의 다 덮입니다(남는 자리 ${(st.ratio * 100).toFixed(0)}%) — `
+      + `그 ${st.sec.toFixed(1)}초 동안 화면이 멈춘 것처럼 보입니다. 「✏ 영역 편집」에서 경계를 겹치지 않게 옮기세요`);
+  }
   return { ok: true, path: out, skipped: false, elements: ann.elements.length, swallowed };
 }
 
@@ -189,4 +288,4 @@ function removeAnnotation(imagePath) {
   return false;
 }
 
-module.exports = { annotationPathFor, imageSig, draftRegions, buildAnnotation, writeAnnotation, removeAnnotation, handPathFor, findSwallowed, ANN_EXT };
+module.exports = { annotationPathFor, imageSig, draftRegions, areaMinus, findStarved, orderRegionsForReveal, pickRegionOrder, assignElements, buildAnnotation, writeAnnotation, removeAnnotation, handPathFor, findSwallowed, ANN_EXT };

@@ -68,6 +68,7 @@ function mkDeps(calls, { failScene = null, failAudio = false, failBurn = false }
     annotationPathFor: ANNreal.annotationPathFor,
     buildAnnotation: ANNreal.buildAnnotation,
     imageSig: ANNreal.imageSig,
+    findStarved: ANNreal.findStarved,   // ⚠ 스텁에 안 실으면 파이프라인의 자동 보정이 통째로 건너뛴다
     writeAnnotation: async (scene, imagePath, { force }) => {
       const out = ANNreal.annotationPathFor(imagePath);
       if (fs.existsSync(out) && !force) return { ok: true, path: out, skipped: true };
@@ -540,6 +541,92 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(WP.imageChanged({ _priming: { imageSig: 'deadbeef:1' } }, p1, annB, ANNreal) === true, '지문이 다르면 바뀐 것');
     ok(WP.imageChanged({ _priming: { imageSig: sigNow } }, p1, annB, ANNreal) === false, '지문이 같으면 안 바뀐 것');
     ok(ANNreal.imageSig(path.join(rootB, '없는파일.png')) === null, '못 읽으면 null(판정 불가)');
+  }
+
+
+  head('[🕳] 굶는 영역 — 뒤 영역에 덮여 **그릴 게 없어 화면이 멈추던** 것 (2026-09-16 실사고)');
+  {
+    // 🔴 렌더러는 자기 영역에서 **뒤에 오는 모든 영역**을 뺀 자리만 그린다(_allowed_mask).
+    //   그래서 앞 영역이 뒤 영역들에 통째로 덮이면 그 시간 내내 아무 일도 일어나지 않는다.
+    //   로이 실측: 0.5~9초 구간 **변한 화소 0** → "10초 동안 멈춰있다가 움직이기 시작".
+    const REAL = [                                    // 로이의 실제 주석(01.annotation.json) 영역 그대로
+      { x: 762, y: 0, width: 582, height: 397 },      // seq1 — 10.2초
+      { x: 858, y: 0, width: 486, height: 323 },      // seq2 — seq1 안에 포함
+      { x: 0, y: 0, width: 858, height: 768 },        // seq3 — 왼쪽 전부
+      { x: 858, y: 0, width: 486, height: 768 },      // seq4 — 오른쪽 전부
+      { x: 626, y: 437, width: 111, height: 80 },     // seq5
+    ];
+    const mkEls = (rs, sec = 4) => rs.map((r, i) => ({ sequence: i + 1, region: r, reveal: { durationMs: sec * 1000, protectedRegions: [] } }));
+
+    // ⓐ areaMinus — 넓이 계산 자체
+    ok(ANNreal.areaMinus({ x: 0, y: 0, width: 10, height: 10 }, []) === 100, '아무것도 안 빼면 제 넓이');
+    ok(ANNreal.areaMinus({ x: 0, y: 0, width: 10, height: 10 }, [{ x: 0, y: 0, width: 10, height: 10 }]) === 0, '같은 상자를 빼면 0');
+    ok(ANNreal.areaMinus({ x: 0, y: 0, width: 10, height: 10 }, [{ x: 5, y: 0, width: 5, height: 10 }]) === 50, '절반을 빼면 절반');
+    ok(ANNreal.areaMinus({ x: 0, y: 0, width: 10, height: 10 }, [{ x: 20, y: 20, width: 5, height: 5 }]) === 100, '안 겹치면 그대로');
+    ok(ANNreal.areaMinus({ x: 0, y: 0, width: 10, height: 10 },
+      [{ x: 0, y: 0, width: 6, height: 10 }, { x: 4, y: 0, width: 6, height: 10 }]) === 0, '둘이 합쳐 덮으면 0(겹쳐도 이중으로 안 센다)');
+
+    // ⓑ 실사고 재현 — 그 순서 그대로면 seq1·seq2 가 굶는다
+    const bad = ANNreal.findStarved(mkEls(REAL));
+    ok(bad.length === 2 && bad[0].seq === 1 && bad[0].ratio === 0,
+      `🔑 실사고 재현 — seq1 이 **남는 자리 0%** 로 굶는다 (${JSON.stringify(bad.map((b) => b.seq))})`);
+
+    // ⓒ 넓이 내림차순으로 배정하면 전부 살아난다
+    const ordered = ANNreal.orderRegionsForReveal(REAL.map((region) => ({ region })));
+    ok(ANNreal.findStarved(mkEls(ordered.map((o) => o.region))).length === 0,
+      '🔑 **넓은 영역부터** 배정하면 굶는 영역이 사라진다(렌더러가 뒤 영역을 빼기 때문)');
+    const areas = ordered.map((o) => o.region.width * o.region.height);
+    ok(areas.every((a, i) => i === 0 || areas[i - 1] >= a), `넓이 내림차순 (${areas.join(' > ')})`);
+    const same = ANNreal.orderRegionsForReveal([{ region: { x: 0, y: 0, width: 10, height: 10 }, direction: 'a' }, { region: { x: 50, y: 0, width: 10, height: 10 }, direction: 'b' }]);
+    ok(same[0].direction === 'a', '넓이가 같으면 원래 순서를 지킨다(초안의 흐름을 헛되이 흔들지 않는다)');
+
+    // ⓓ buildAnnotation 이 그 순서로 배정한다
+    const scene = { num: 1, durationMs: 20000, groupNums: [1], sentenceNums: [1],
+      elements: REAL.map((_, i) => ({ seq: i + 1, startMs: i * 4000, durationMs: 4000, subtitle: 's' + i })) };
+    const built = ANNreal.buildAnnotation(scene, { canvas: { width: 1344, height: 768 }, regions: REAL.map((region) => ({ region })) });
+    ok(ANNreal.findStarved(built.elements).length === 0, 'buildAnnotation 결과에 굶는 영역이 없다');
+    ok(built.elements[0].region.width * built.elements[0].region.height === Math.max(...REAL.map((r) => r.width * r.height)),
+      '가장 넓은 영역이 첫 차례다');
+    ok(built.elements.every((e, i) => e.reveal.startMs === i * 4000), '타이밍(문장 순서)은 그대로 — 영역만 재배치한다');
+
+    // ⓓ-2 🔴 **무조건 넓이순으로 바꾸면 안 된다** — 로이 대본 장면 3 은 원래 순서가 옳았다(굶음 0).
+    //   넓이순으로 강제하면 오히려 1개가 굶는다. 그래서 두 배정을 **재 보고 적은 쪽**을 고른다.
+    const SC3 = [                                    // 로이의 03.annotation.json 영역 그대로
+      { x: 391, y: 358, width: 185, height: 261 }, { x: 576, y: 358, width: 93, height: 261 },
+      { x: 669, y: 358, width: 95, height: 261 }, { x: 764, y: 358, width: 171, height: 261 },
+      { x: 509, y: 407, width: 304, height: 159 },
+    ];
+    const scene3 = { num: 3, durationMs: 20000, groupNums: [3], sentenceNums: [3],
+      elements: SC3.map((_, i) => ({ seq: i + 1, startMs: i * 4000, durationMs: 4000, subtitle: 't' + i })) };
+    ok(ANNreal.findStarved(mkEls(SC3)).length === 0, '(전제) 장면3 은 원래 순서로 굶는 영역이 없다');
+    const forced = ANNreal.assignElements(scene3, ANNreal.orderRegionsForReveal(SC3.map((region) => ({ region }))));
+    ok(ANNreal.findStarved(forced).length > 0, '(전제) 그런데 넓이순으로 강제하면 굶는 영역이 생긴다');
+    const picked = ANNreal.buildAnnotation(scene3, { canvas: { width: 1344, height: 768 }, regions: SC3.map((region) => ({ region })) });
+    ok(ANNreal.findStarved(picked.elements).length === 0,
+      '🔑 더 나은 쪽을 고른다 — 규칙 하나를 강요하지 않는다');
+    ok(JSON.stringify(picked.elements.map((e) => e.region)) === JSON.stringify(SC3),
+      '동률(둘 다 0)이 아니라 원래가 더 나으므로 **원래 순서를 지킨다**');
+
+    // ⓔ 🔑 파이프라인이 **옛 주석을 자동으로 고친다** — 좌표는 그대로 두고 순서만 다시 잡는다
+    const root = fs.mkdtempSync(path.join(TMP, 'starve-'));
+    const pr = mkProject(root);
+    await WP.runWhiteboard(pr, root, { deps: mkDeps(freshCalls()), log: () => {}, baseName: '굶음', concurrency: 1 });
+    const annP = ANNreal.annotationPathFor(pr.groups[0].imagePath);
+    const j = JSON.parse(fs.readFileSync(annP, 'utf8'));
+    const n0 = j.elements.length;
+    // 굶는 배치로 바꿔 심는다 — seq1(오른쪽 위)을 seq3(왼쪽 전부)·seq4(오른쪽 전부)가 뒤에서 통째로 덮는 조합.
+    const BAD = [REAL[0], REAL[2], REAL[3]];
+    j.elements = j.elements.map((e, i) => ({ ...e, region: BAD[i % BAD.length] }));
+    fs.writeFileSync(annP, JSON.stringify(j, null, 2));
+    ok(ANNreal.findStarved(j.elements).length > 0, '(준비) 굶는 주석을 심었다');
+    const c = freshCalls(); const logs = [];
+    await WP.runWhiteboard(pr, root, { deps: mkDeps(c), log: (m) => logs.push(m), baseName: '굶음', concurrency: 1 });
+    const after = JSON.parse(fs.readFileSync(annP, 'utf8'));
+    ok(after.elements.length === n0, '영역 개수는 그대로');
+    ok(ANNreal.findStarved(after.elements).length === 0, '🔑 굶는 영역이 사라졌다(순서를 다시 잡았다)');
+    ok(logs.some((m) => m.indexOf('영역 순서를 다시 잡았습니다') > -1), '이유를 로그로 알린다');
+    ok(c.render.some((f) => f.indexOf('scene-01') === 0), '🔑 그 장면을 다시 렌더한다 — 멈춰 있던 영상을 그대로 두지 않는다');
+    ok(c.draft === 0, '영역을 새로 뽑지는 않는다(사람이 고친 좌표를 보존한다)');
   }
 
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
