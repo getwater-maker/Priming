@@ -67,11 +67,13 @@ function mkDeps(calls, { failScene = null, failAudio = false, failBurn = false }
   const ANN = {
     annotationPathFor: ANNreal.annotationPathFor,
     buildAnnotation: ANNreal.buildAnnotation,
+    imageSig: ANNreal.imageSig,
     writeAnnotation: async (scene, imagePath, { force }) => {
       const out = ANNreal.annotationPathFor(imagePath);
       if (fs.existsSync(out) && !force) return { ok: true, path: out, skipped: true };
       calls.draft++;
-      fs.writeFileSync(out, JSON.stringify(ANNreal.buildAnnotation(scene, drafted(scene.elements.length)), null, 2));
+      // ⚠ 실제 모듈처럼 **그림 지문**을 함께 적는다 — 안 적으면 다음 실행이 매번 「그림이 바뀌었다」로 본다.
+      fs.writeFileSync(out, JSON.stringify(ANNreal.buildAnnotation(scene, drafted(scene.elements.length), { imageSig: ANNreal.imageSig(imagePath) }), null, 2));
       return { ok: true, path: out, skipped: false };
     },
   };
@@ -478,6 +480,66 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     fs.writeFileSync(path.join(rootC, '치움_whiteboard.srt'), '옛 자막');
     const rC = await WP.runWhiteboard(prC, rootC, { deps: mkDeps(freshCalls()), log: () => {}, baseName: '치움', concurrency: 1 });
     ok(rC.ok && !fs.existsSync(path.join(rootC, '치움_whiteboard.srt')), '🔑 옛 이름의 .srt 를 치운다(안 치우면 겹쳐 보인다)');
+  }
+
+
+  head('[🖼] 그림을 다시 만들면 영역·장면도 다시 만든다 — 2026-09-16 실사고 회귀');
+  {
+    // 🔴 실사고: 앱 썸네일은 새 선그림인데 결과 MP4 는 옛 수채화였다.
+    //   원인 = 이어받기 판정이 「장면 mtime ≥ 주석 mtime」뿐이라 **그림이 바뀐 걸 아무도 안 봤다**
+    //   (실측 01.png 13:17 · 주석 12:10 · scene-01.mp4 12:12 → 건너뜀).
+    const root = fs.mkdtempSync(path.join(TMP, 'img-'));
+    const pr = mkProject(root);
+    const c1 = freshCalls();
+    const r1 = await WP.runWhiteboard(pr, root, { deps: mkDeps(c1), log: () => {}, baseName: '그림', concurrency: 1 });
+    ok(r1.ok && c1.render.length === 2, `처음엔 장면 2개를 렌더한다 (${c1.render.length})`);
+
+    // ⓐ 그림이 그대로면 건너뛴다 — 기존 이어받기는 그대로여야 한다(30분짜리 렌더다).
+    const c2 = freshCalls();
+    await WP.runWhiteboard(pr, root, { deps: mkDeps(c2), log: () => {}, baseName: '그림', concurrency: 1 });
+    ok(c2.render.length === 0 && c2.draft === 0, `그림이 그대로면 렌더·영역 뽑기 둘 다 건너뛴다 (렌더 ${c2.render.length})`);
+
+    // ⓑ 그림을 **내용까지** 바꾸면 그 장면만 다시 만든다
+    fs.writeFileSync(pr.groups[0].imagePath, Buffer.from('89504e470d0a1a0affee', 'hex'));
+    const c3 = freshCalls(); const logs3 = [];
+    await WP.runWhiteboard(pr, root, { deps: mkDeps(c3), log: (m) => logs3.push(m), baseName: '그림', concurrency: 1 });
+    ok(c3.draft === 1, `🔑 그림이 바뀐 장면의 영역을 새로 뽑는다 (${c3.draft}회)`);
+    ok(c3.render.length === 1 && c3.render[0].indexOf('scene-01') === 0,
+      `🔑 그 장면을 **다시 렌더한다** — 옛 영상을 그대로 내보내지 않는다 (${JSON.stringify(c3.render)})`);
+    ok(logs3.some((m) => m.indexOf('그림이 바뀌었습니다') > -1), '이유를 로그로 알린다');
+    ok(!logs3.some((m) => m.indexOf('깨져 있어') > -1), '「주석이 깨졌다」고 거짓말하지 않는다');
+
+    // ⓒ 🔑 내용은 같은데 mtime 만 새로워진 경우(미디어 캐시가 같은 그림을 복사) → **다시 렌더하지 않는다**
+    //   mtime 으로 판정했다면 여기서 30분짜리 렌더가 헛돈다. 지문(내용 해시)을 쓰는 이유다.
+    const t = Date.now() / 1000 + 600;
+    fs.utimesSync(pr.groups[0].imagePath, t, t);
+    const c4 = freshCalls();
+    await WP.runWhiteboard(pr, root, { deps: mkDeps(c4), log: () => {}, baseName: '그림', concurrency: 1 });
+    ok(c4.render.length === 0 && c4.draft === 0,
+      `🔑 내용이 같으면 mtime 이 새로워도 그대로 둔다 (렌더 ${c4.render.length} · 영역 ${c4.draft})`);
+
+    // ⓓ **실사고 그대로** — 지문이 없는 옛 주석 + 그보다 새로운 그림
+    const rootB = fs.mkdtempSync(path.join(TMP, 'img2-'));
+    const prB = mkProject(rootB);
+    await WP.runWhiteboard(prB, rootB, { deps: mkDeps(freshCalls()), log: () => {}, baseName: '옛주석', concurrency: 1 });
+    const annB = ANNreal.annotationPathFor(prB.groups[0].imagePath);
+    const j = JSON.parse(fs.readFileSync(annB, 'utf8'));
+    ok(j._priming && j._priming.imageSig, '새 주석에는 그림 지문이 적힌다');
+    delete j._priming.imageSig;                                   // 옛 주석처럼 지문을 지운다
+    fs.writeFileSync(annB, JSON.stringify(j, null, 2));
+    const past = Date.now() / 1000 - 3600;                        // 주석을 1시간 전으로(= 실사고의 12:10)
+    fs.utimesSync(annB, past, past);
+    const cB = freshCalls(); const logsB = [];
+    await WP.runWhiteboard(prB, rootB, { deps: mkDeps(cB), log: (m) => logsB.push(m), baseName: '옛주석', concurrency: 1 });
+    ok(cB.draft === 1 && cB.render.length === 1,
+      `🔑 지문이 없는 옛 주석은 **mtime 으로** 가른다 — 그림이 더 새로우면 다시 만든다 (영역 ${cB.draft} · 렌더 ${cB.render.length})`);
+
+    // ⓔ imageChanged 단독 — 판정 자체를 원문으로 확인
+    const p1 = path.join(rootB, 'media-1', '02.png');
+    const sigNow = ANNreal.imageSig(p1);
+    ok(WP.imageChanged({ _priming: { imageSig: 'deadbeef:1' } }, p1, annB, ANNreal) === true, '지문이 다르면 바뀐 것');
+    ok(WP.imageChanged({ _priming: { imageSig: sigNow } }, p1, annB, ANNreal) === false, '지문이 같으면 안 바뀐 것');
+    ok(ANNreal.imageSig(path.join(rootB, '없는파일.png')) === null, '못 읽으면 null(판정 불가)');
   }
 
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}

@@ -14,11 +14,25 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const WB = require('./whiteboard-render');
 
 const ANN_EXT = '.annotation.json';
 const TAIL_PAD_MS = 500;   // 마지막 영역이 끝난 뒤 여운 (SKILL.md: sceneDurationMs = 마지막 종료 + 0.5초)
+
+/**
+ * 그 그림의 **내용 지문**. 주석은 이 그림에서 뽑은 영역 좌표이므로, 그림이 바뀌면 주석도 낡는다.
+ * 🔑 mtime 이 아니라 **내용 해시**인 이유: 미디어 캐시가 같은 그림을 복사하면 mtime 만 바뀐다 —
+ *   그걸로 판정하면 내용이 같은데도 30분짜리 렌더를 다시 돌린다.
+ * 못 읽으면 null(판정 불가) — 호출부가 mtime 폴백을 쓴다.
+ */
+function imageSig(imagePath) {
+  try {
+    const b = fs.readFileSync(imagePath);
+    return crypto.createHash('sha1').update(b).digest('hex').slice(0, 16) + ':' + b.length;
+  } catch (_) { return null; }
+}
 
 /** `media-1/01.png` → `media-1/01.annotation.json` */
 function annotationPathFor(imagePath) {
@@ -106,7 +120,9 @@ function buildAnnotation(scene, drafted, opts = {}) {
     //     마지막 영역이 GAP_MS(300ms) 먼저 끝나도록 그려지기 때문이다.
     sceneDurationMs: scene.durationMs || (lastEnd + TAIL_PAD_MS),
     storyBasis: scene.text || '',
-    _priming: { sceneNum: scene.num, groupNums: scene.groupNums, sentenceNums: scene.sentenceNums },
+    // 🔑 imageSig = 이 영역을 뽑은 **그림의 지문**. 그림이 바뀌면 영역이 엉뚱한 자리를 가리키므로
+    //   다음 실행이 이 값을 보고 영역을 다시 뽑는다(2026-09-16 사고: 새 그림인데 옛 장면 영상이 나갔다).
+    _priming: { sceneNum: scene.num, groupNums: scene.groupNums, sentenceNums: scene.sentenceNums, imageSig: opts.imageSig || null },
     elements: els,
   };
 }
@@ -148,7 +164,7 @@ async function writeAnnotation(scene, imagePath, { force = false, log = () => {}
   const d = await draftRegions(imagePath, scene.elements.length, { abortSignal });
   if (!d.ok) return { ok: false, error: d.error };
 
-  const ann = buildAnnotation(scene, d);
+  const ann = buildAnnotation(scene, d, { imageSig: imageSig(imagePath) });
   try {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, JSON.stringify(ann, null, 2), 'utf8');
@@ -173,4 +189,4 @@ function removeAnnotation(imagePath) {
   return false;
 }
 
-module.exports = { annotationPathFor, draftRegions, buildAnnotation, writeAnnotation, removeAnnotation, handPathFor, findSwallowed, ANN_EXT };
+module.exports = { annotationPathFor, imageSig, draftRegions, buildAnnotation, writeAnnotation, removeAnnotation, handPathFor, findSwallowed, ANN_EXT };

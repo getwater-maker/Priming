@@ -123,6 +123,20 @@ function annotationStale(ann, scene) {
 }
 
 /**
+ * 🔴 **그림이 바뀌었나** — 주석의 영역 좌표는 **그 그림에서 뽑은 것**이다. 그림을 다시 만들었는데
+ *   주석을 그대로 두면 ① 펜이 엉뚱한 자리를 지나가고 ② 주석 mtime 이 그대로라 **장면 렌더가
+ *   「이미 있음」으로 건너뛰어 옛 그림 영상이 그대로 나간다**(2026-09-16 실사고: 앱 썸네일은 새 선그림인데
+ *   결과 MP4 는 옛 수채화. 실측 01.png 13:17 · 주석 12:10 · scene-01.mp4 12:12).
+ * 판정은 **내용 지문**이 정본이고, 지문이 없는 옛 주석만 mtime 으로 가른다.
+ */
+function imageChanged(ann, imagePath, annPath, ANN) {
+  const rec = ann && ann._priming && ann._priming.imageSig;
+  const now = ANN.imageSig ? ANN.imageSig(imagePath) : null;
+  if (rec && now) return rec !== now;
+  try { return fs.statSync(imagePath).mtimeMs > fs.statSync(annPath).mtimeMs + 1000; } catch (_) { return false; }
+}
+
+/**
  * 주석을 준비한다 — 없으면 초안, 있으면 **영역은 그대로 두고 타이밍만** 장면 계획에 맞춘다.
  *   🔑 TTS 를 다시 만들면 문장 길이가 바뀌어 주석의 startMs·durationMs 가 낡는다. 그렇다고 주석을
  *   통째로 다시 만들면 로이가 preview.html 로 고친 영역이 사라진다(v0.3.86 계열). 그래서 **영역은 보존**하고
@@ -133,6 +147,13 @@ async function prepareAnnotation(scene, imagePath, { ANN, WB, force, log, abortS
   if (fs.existsSync(annPath) && !force) {
     let ann = null;
     try { ann = JSON.parse(fs.readFileSync(annPath, 'utf8')); } catch (_) { ann = null; }
+    // 🔴 그림이 바뀌었으면 **영역부터 다시** 뽑는다 — 옛 그림 기준 영역은 새 그림에서 의미가 없다.
+    //   ⚠ 사람이 preview.html 로 고친 영역도 함께 사라진다. 그래도 이게 맞다 — 그 영역 역시 옛 그림 것이다.
+    if (ann && imageChanged(ann, imagePath, annPath, ANN)) {
+      log(`  🖼 장면 ${PAD(scene.num)} 그림이 바뀌었습니다 — 영역을 새로 뽑고 장면도 다시 렌더합니다`);
+      try { fs.unlinkSync(annPath); } catch (_) {}
+      ann = null;
+    }
     if (ann && !annotationStale(ann, scene)) {
       const chk = WB.checkCanvas(imagePath, annPath);
       if (!chk.ok) return { ok: false, error: chk.error };
@@ -140,7 +161,7 @@ async function prepareAnnotation(scene, imagePath, { ANN, WB, force, log, abortS
     }
     if (ann && Array.isArray(ann.elements) && ann.elements.length && ann.canvas) {
       const drafted = { canvas: ann.canvas, regions: ann.elements.map((e) => ({ region: e.region, direction: e.reveal && e.reveal.direction })) };
-      const next = ANN.buildAnnotation(scene, drafted);
+      const next = ANN.buildAnnotation(scene, drafted, { imageSig: ANN.imageSig ? ANN.imageSig(imagePath) : null });
       try { fs.writeFileSync(annPath, JSON.stringify(next, null, 2), 'utf8'); }
       catch (e) { return { ok: false, error: `주석을 쓰지 못했습니다: ${e.message}` }; }
       const chk = WB.checkCanvas(imagePath, annPath);
@@ -148,9 +169,11 @@ async function prepareAnnotation(scene, imagePath, { ANN, WB, force, log, abortS
       log(`  ♻ 장면 ${PAD(scene.num)} 주석 타이밍 갱신 (문장·길이가 바뀜 — 영역은 그대로)`);
       return { ok: true, path: annPath, refreshed: true };
     }
-    // 깨진 주석 → 새로 만든다(아래로)
-    log(`  ⚠ 장면 ${PAD(scene.num)} 주석이 깨져 있어 새로 만듭니다 (${path.basename(annPath)})`);
-    try { fs.unlinkSync(annPath); } catch (_) {}
+    // 깨진 주석 → 새로 만든다(아래로). ⚠ 그림이 바뀌어 위에서 비운 경우는 이미 알렸으니 또 말하지 않는다.
+    if (fs.existsSync(annPath)) {
+      log(`  ⚠ 장면 ${PAD(scene.num)} 주석이 깨져 있어 새로 만듭니다 (${path.basename(annPath)})`);
+      try { fs.unlinkSync(annPath); } catch (_) {}
+    }
   }
   const w = await ANN.writeAnnotation(scene, imagePath, { force: !!force, log, abortSignal });
   if (!w.ok) return { ok: false, error: w.error };
@@ -372,4 +395,4 @@ function moveFinals(files, dir, log = () => {}) {
   return { ok: map.size > 0, map };
 }
 
-module.exports = { planWhiteboard, runWhiteboard, moveFinals, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };
+module.exports = { planWhiteboard, runWhiteboard, moveFinals, imageChanged, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };
