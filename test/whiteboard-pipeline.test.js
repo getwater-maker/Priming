@@ -32,7 +32,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── 픽스처 — 그룹 3개(100초·28초·3초). 100초는 「분할」 대상(45초 초과), 3초는 「병합」 대상(앞 28초와 합쳐 31 ≤ 35). ──
 function mkProject(outRoot, opts = {}) {
   const media = path.join(outRoot, 'media-1');
-  const mk = (num, d) => ({ num, text: `문장${num}`, ttsDurationSec: d, ttsAudioPath: path.join(outRoot, 'tts-1', `${num}.wav`) });
+  const mk = (num, d) => {
+    const w = path.join(outRoot, 'tts-1', `${num}.wav`);
+    if (!opts.noTts) { fs.mkdirSync(path.dirname(w), { recursive: true }); fs.writeFileSync(w, 'wav'); }
+    return { num, text: `문장${num}`, ttsDurationSec: d, ttsAudioPath: w };
+  };
   const groups = [
     { num: 1, title: '도입', _s: [mk(1, 40), mk(2, 30), mk(3, 30)], imagePath: mkPng(path.join(media, '01.png')), imagePrompt: 'a' },
     { num: 2, title: '본론', _s: [mk(4, 7), mk(5, 7), mk(6, 7), mk(7, 7)], imagePath: mkPng(path.join(media, '02.png')), imagePrompt: 'b' },
@@ -42,7 +46,7 @@ function mkProject(outRoot, opts = {}) {
 }
 
 // ── 스텁 deps — 파이썬 없이 흐름을 돈다. 호출 기록을 남긴다. ──
-function mkDeps(calls, { failScene = null } = {}) {
+function mkDeps(calls, { failScene = null, failAudio = false } = {}) {
   const WB = {
     hasEnv: () => true,
     ensureEnv: async () => { calls.ensureEnv++; return { ok: true, python: 'stub' }; },
@@ -70,9 +74,18 @@ function mkDeps(calls, { failScene = null } = {}) {
       return { ok: true, path: out, skipped: false };
     },
   };
-  return { WB: () => WB, ANN: () => ANN };
+  // 🔊 음성 얹기(5단계) 스텁 — 실제 ffmpeg 는 별도 테스트(whiteboard-audio.test.js)가 돌린다.
+  const WA = {
+    attachAudio: async ({ videoPath, scenes }) => {
+      calls.audio.push(scenes.map((sc) => sc.audios.map((a) => path.basename(a)).join('+')));
+      if (failAudio) return { ok: false, error: '스텁 음성 실패' };
+      fs.writeFileSync(videoPath, 'merged+audio');
+      return { ok: true, output: videoPath, durationSec: 131 };
+    },
+  };
+  return { WB: () => WB, ANN: () => ANN, WA: () => WA };
 }
-const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], merge: [] });
+const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], merge: [], audio: [] });
 
 (async () => {
   // ── [1] 계획 — 장면 = 그룹(분할 0 · 짧은 것은 병합) · 예상 시간 · 무음 안내 ──
@@ -88,7 +101,8 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(plan.scenes[1].groupNums.join('+') === '2+3', '병합 장면의 groupNums 는 G2+G3');
     ok(WP.imageForScene(pr, plan.scenes[1]) === pr.groups[1].imagePath, '병합 장면은 첫 그룹의 이미지를 쓴다');
     ok(Math.abs(plan.totalSec - 131) < 0.01, `총 길이 = TTS 합 131초 (실제 ${plan.totalSec})`);
-    ok(plan.lines.some((l) => /무음/.test(l)), '무음(5단계 전) 안내가 들어 있다');
+    ok(plan.lines.some((l) => /음성은 얹힙니다/.test(l)), '음성이 얹힌다는 안내가 들어 있다(5단계 완료)');
+    ok(!plan.lines.some((l) => /무음/.test(l)), '옛 「무음」 안내가 남아 있지 않다');
     ok(plan.lines.some((l) => /렌더 약/.test(l)), '예상 렌더 시간 줄이 있다');
     ok(plan.lines.some((l) => /분할하지 않았습니다/.test(l)), '45초 초과 장면에 대해 「분할하지 않았다」고 알린다(noSplit 문구)');
     const e1920 = WP.estimateRenderSec(131, 1920, 1), e1080 = WP.estimateRenderSec(131, 1080, 1), e4 = WP.estimateRenderSec(131, 1920, 4);
@@ -123,7 +137,12 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(fs.existsSync(path.join(root2, '테스트편_whiteboard.mp4')), '결과 mp4 가 outRoot 에 생긴다');
     ok(r.rendered === 2 && r.skipped === 0, '새로 2 · 건너뜀 0');
     ok(fs.existsSync(path.join(root2, 'media-1', '01.annotation.json')), '주석은 그림 옆(media-1)에 같은 이름으로');
-    ok(logs.some((l) => /무음/.test(l)), '완료 로그에도 무음이라고 적는다');
+    ok(logs.some((l) => /🔊 음성 포함/.test(l)), '완료 로그에 「음성 포함」이라고 적는다');
+    ok(r.hasAudio === true, '반환값 hasAudio=true');
+    // 🔑 장면 → 문장 매핑: G1(문장1·2·3) · G2+G3(문장4~8)
+    ok(calls.audio.length === 1 && calls.audio[0].length === 2, `음성 얹기 1회 · 장면 2개 — ${JSON.stringify(calls.audio)}`);
+    ok(calls.audio[0][0] === '1.wav+2.wav+3.wav', `장면1 음성 = 그 장면 문장들 순서대로 — ${calls.audio[0][0]}`);
+    ok(calls.audio[0][1] === '4.wav+5.wav+6.wav+7.wav+8.wav', `병합 장면 음성도 문장 순서대로 — ${calls.audio[0][1]}`);
   }
 
   // ── [3] 이어받기 — 두 번째 실행은 렌더 0 · 주석 유지 ──
@@ -253,7 +272,9 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     for (const a of ['whiteboardPlan', 'whiteboardBuild', 'getWhiteboardConfig', 'setWhiteboardConfig']) ok(PRE.includes(a + ':'), `preload ${a}`);
     const optCnt = (APP.match(/<option value="whiteboard">✏ 화이트보드 MP4<\/option>/g) || []).length;
     ok(optCnt === 2, `🔴 출력 select 가 **두 곳**(헤더 + 채널편집) — 실제 ${optCnt} (v0.3.76 교훈)`);
-    ok(APP.includes('<span className="glabel">④ 출력</span>') && APP.includes('<span className="glabel">⑤ 완성</span>') && !APP.includes('④ 완성'), '헤더 번호 — ④ 출력 · ⑤ 완성');
+    // ⚠ v0.5.7 에서 「④ 출력」과 「⑤ 완성」을 **한 그룹으로 합쳤다**(출력 select 다음에 .hdiv).
+    //   그 뒤 이 단언을 안 고쳐 v0.5.7~v0.5.9 내내 깨져 있었다 — 라벨을 바꾸면 그 라벨로 찾는 테스트를 함께 본다.
+    ok(APP.includes('<span className="glabel">④ 완성</span>') && !APP.includes('<span className="glabel">⑤'), '헤더 번호 — ④ 완성 하나(출력+완성 통합)');
     ok(/aiNotice, outMode, outTarget \}/.test(APP), 'currentSettings 에 outTarget');
     ok(/if \(s\.outTarget != null\) setOutTarget/.test(APP), 'applySettings 가 outTarget 을 복원');
     ok(/outTarget, \/\/ \.vrew \/ ✏ 화이트보드 MP4/.test(APP), 'makeAll 인자에 outTarget');
@@ -271,10 +292,46 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
       const js = fs.readdirSync(dist).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(dist, f), 'utf8')).join('');
       ok(/화이트보드 MP4/.test(js) && /장면 계획/.test(js), '번들에 헤더 ④ 출력 UI 가 들어 있다(vite build 를 돌렸다)');
     } catch (_) { ok(false, '번들을 읽을 수 없다'); }
-    for (const f of ['core/whiteboard-pipeline.js', 'core/whiteboard-config.js', 'main.js', 'renderer/src/App.jsx']) {
+    for (const f of ['core/whiteboard-pipeline.js', 'core/whiteboard-audio.js', 'core/whiteboard-config.js', 'main.js', 'renderer/src/App.jsx']) {
       const s = fs.readFileSync(path.join(ROOT, f), 'utf8');
       ok(s.indexOf(String.fromCharCode(0)) < 0 && !/[\x01-\x08\x0b\x0c\x0e-\x1f]/.test(s), f + ' 제어문자 없음');
     }
+  }
+
+  // ── [🔊] 음성 얹기 — 실패해도 렌더 결과를 버리지 않는다 ──
+  head('[🔊] 음성 얹기(5단계)');
+  {
+    // ⓐ attachAudio 가 실패 → 경고만 하고 무음 MP4 는 남는다
+    const rootA = fs.mkdtempSync(path.join(TMP, 'au-'));
+    const prA = mkProject(rootA);
+    const callsA = freshCalls(); const logsA = [];
+    const rA = await WP.runWhiteboard(prA, rootA, { deps: mkDeps(callsA, { failAudio: true }), log: (l) => logsA.push(l), baseName: '음성실패', concurrency: 1 });
+    ok(rA.ok, '음성 얹기가 실패해도 전체는 성공으로 끝난다(30분 렌더를 버리지 않는다)');
+    ok(rA.hasAudio === false && /스텁 음성 실패/.test(rA.audioError || ''), '반환값에 실패 사유가 남는다');
+    ok(fs.existsSync(path.join(rootA, '음성실패_whiteboard.mp4')), '무음 MP4 는 그대로 남는다');
+    ok(logsA.some((l) => /음성 얹기 실패/.test(l)) && logsA.some((l) => /⚠ 무음/.test(l)), '로그가 무음이라고 알린다');
+
+    // ⓑ TTS 파일이 아예 없으면 ffmpeg 를 부르지 않고 안내한다
+    const rootB = fs.mkdtempSync(path.join(TMP, 'au2-'));
+    const prB = mkProject(rootB, { noTts: true });
+    const callsB = freshCalls(); const logsB = [];
+    const rB = await WP.runWhiteboard(prB, rootB, { deps: mkDeps(callsB), log: (l) => logsB.push(l), baseName: '음성없음', concurrency: 1 });
+    ok(rB.ok && rB.hasAudio === false, '음성 파일이 없어도 렌더는 완료된다');
+    ok(callsB.audio.length === 0, '음성 파일이 없으면 얹기를 시도조차 하지 않는다(헛 ffmpeg 호출 0)');
+    ok(logsB.some((l) => /🎤 TTS/.test(l)), '무엇을 하면 되는지(🎤 TTS) 알려 준다');
+
+    // ⓒ withAudio:false 면 건너뛴다
+    const rootC = fs.mkdtempSync(path.join(TMP, 'au3-'));
+    const prC = mkProject(rootC);
+    const callsC = freshCalls();
+    const rC = await WP.runWhiteboard(prC, rootC, { deps: mkDeps(callsC), log: () => {}, baseName: '음성끔', concurrency: 1, withAudio: false });
+    ok(rC.ok && callsC.audio.length === 0, 'withAudio:false 면 음성을 얹지 않는다');
+
+    // ⓓ sentenceAudioMap — 파일이 실제로 있는 것만
+    const m = WP.sentenceAudioMap(prA);
+    ok(m.size === 8, `문장 8개의 음성 경로를 찾는다 — ${m.size}`);
+    fs.unlinkSync(prA.groups[0]._s[0].ttsAudioPath);
+    ok(WP.sentenceAudioMap(prA).size === 7, '파일이 사라지면 그 문장은 빠진다(경로만 있고 없는 것은 안 센다)');
   }
 
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}

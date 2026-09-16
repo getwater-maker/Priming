@@ -14,7 +14,10 @@
  *   그건 펜이 느린 것보다 나쁘다(같은 장면이 되감기는 것처럼 보인다). 짧은 그룹 병합은 그대로 —
  *   병합된 장면은 **첫 그룹의 이미지**를 쓴다. 3단계가 들어오면 이 정책만 바꾸면 된다.
  *
- * ⚠ 결과물은 **무음**이다(5단계 오디오·자막 mux 전). 로그·반환값에 그 사실을 남긴다.
+ * 🔊 **5단계(2026-09-16) — 음성을 얹는다.** 장면 길이 = 그 장면 문장들의 TTS 합이라 타임라인이 이미
+ *   맞아떨어진다(v0.3.91). `core/whiteboard-audio` 가 장면마다 문장 음성을 이어붙여 **그 장면 영상
+ *   길이에 정확히** 맞춘 뒤(프레임 반올림 드리프트 제거) 한 번에 mux 한다.
+ *   ⚠ 음성 얹기가 실패해도 **무음 MP4 는 그대로 남긴다** — 30분 렌더 결과를 버리지 않는다.
  */
 
 const fs = require('fs');
@@ -24,6 +27,7 @@ const DEFAULT_DEPS = {
   WB: () => require('./whiteboard-render'),
   ANN: () => require('./whiteboard-annotation'),
   SC: () => require('./whiteboard-scenes'),
+  WA: () => require('./whiteboard-audio'),
 };
 
 // 실측(v0.3.90): 1920 긴변 · 60fps 렌더가 프레임당 0.173초. 22분 = 39,960프레임(≈30.3프레임/초 기준).
@@ -39,6 +43,22 @@ function imageForScene(project, scene) {
     if (g && g.imagePath && fs.existsSync(g.imagePath)) return g.imagePath;
   }
   return null;
+}
+
+/**
+ * 문장 번호 → TTS 음성 파일 경로.
+ * 🔑 장면은 `sentenceNums` 만 들고 있어(경로를 복사해 두면 TTS 를 다시 만들었을 때 낡는다)
+ *   얹는 시점에 project 에서 지금 경로를 다시 읽는다.
+ */
+function sentenceAudioMap(project) {
+  const m = new Map();
+  for (const g of (project.groups || [])) {
+    const ss = project.getSentencesOfGroup ? project.getSentencesOfGroup(g) : [];
+    for (const s of ss) {
+      if (s && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) m.set(s.num, s.ttsAudioPath);
+    }
+  }
+  return m;
 }
 
 /** 렌더 시간 추정(초) — 관문 A 에 「이 계획이면 몇 분」을 보여 주려는 것이지 정확한 예보가 아니다. */
@@ -70,7 +90,7 @@ function planWhiteboard(project, opts = {}) {
   if (missing.length) {
     lines.push(`⛔ 이미지가 없는 장면 ${missing.length}개 (G${missing.map((m) => m.groupNums.join('+')).join(', G')}) — 이미지를 먼저 만들어야 렌더할 수 있습니다`);
   }
-  lines.push('ⓘ 결과 MP4 는 아직 무음입니다(오디오·자막 얹기는 5단계). 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
+  lines.push('ⓘ 음성은 얹힙니다(5단계). 다만 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
   return { ok: missing.length === 0, scenes: plan.scenes, summary: plan.summary, missing, totalSec, estimateSec, lines };
 }
 
@@ -244,8 +264,32 @@ async function runWhiteboard(project, outRoot, opts = {}) {
   const output = path.join(outRoot, `${baseName}_whiteboard.mp4`);
   const m = await withAbort(isAborted, (sig) => WB.mergeScenes({ inputs: results.map((r) => r.output), outputPath: output, abortSignal: sig }));
   if (!m.ok) return { ok: false, error: `이어붙이기 실패 — ${m.error}` };
-  log(`✅ 화이트보드 MP4 — ${path.basename(output)} (장면 ${jobs.length}개 · ${fmtDur(plan.totalSec)}) ⚠ 무음입니다(5단계 전)`);
-  return { ok: true, output, wbDir, sceneCount: jobs.length, rendered, skipped, totalSec: plan.totalSec };
+
+  // 7) 🔊 음성 얹기(5단계)
+  //   ⚠ 여기서 실패해도 **던지지 않는다** — 무음 MP4 라도 남기는 편이 30분 렌더를 버리는 것보다 낫다.
+  let audio = { ok: false, error: '건너뜀' };
+  if (opts.withAudio !== false) {
+    const byNum = sentenceAudioMap(project);
+    const scenesForAudio = jobs.map((j) => ({
+      video: j.out,
+      audios: (j.scene.sentenceNums || []).map((n) => byNum.get(n)).filter(Boolean),
+    }));
+    const missing = scenesForAudio.filter((sc) => !sc.audios.length).length;
+    if (missing) {
+      audio = { ok: false, error: `음성이 없는 장면 ${missing}개` };
+      log(`⚠ 음성을 얹지 못했습니다 — ${audio.error}. 「🎤 TTS」를 만든 뒤 다시 누르면 얹힙니다(장면 렌더는 건너뜁니다).`);
+    } else {
+      audio = await withAbort(isAborted, (sig) => deps.WA().attachAudio({
+        videoPath: output, scenes: scenesForAudio, tmpDir: wbDir, log, abortSignal: sig,
+      }));
+      if (!audio.ok) log(`⚠ 음성 얹기 실패 — ${audio.error} (무음 MP4 는 그대로 남깁니다)`);
+    }
+  }
+
+  const tail = audio.ok ? '🔊 음성 포함' : '⚠ 무음';
+  log(`✅ 화이트보드 MP4 — ${path.basename(output)} (장면 ${jobs.length}개 · ${fmtDur(plan.totalSec)}) ${tail}`);
+  return { ok: true, output, wbDir, sceneCount: jobs.length, rendered, skipped, totalSec: plan.totalSec,
+    hasAudio: !!audio.ok, audioError: audio.ok ? null : audio.error };
 }
 
-module.exports = { planWhiteboard, runWhiteboard, imageForScene, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };
+module.exports = { planWhiteboard, runWhiteboard, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };

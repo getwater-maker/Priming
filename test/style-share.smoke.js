@@ -71,7 +71,7 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     const closed = await win.evaluate(() => ![...document.querySelectorAll('.modal-card')].some((c) => (c.textContent || '').includes('이미지 스타일 편집')));
     ok(closed, 'ESC 로 닫힌다');
     // 🎨 채널편집 → 제작 도구 탭: 롱폼 화풍 + **썸네일 화풍**(대시보드용) 칸이 있어야 한다. (쇼츠 화풍 칸은 2026-08-22 쇼츠 모드 제거와 함께 삭제)
-    await win.click('button[title*="채널(프리셋) 설정 편집"]');
+    await win.click('button[title^="채널(프리셋)"]');
     await win.waitForSelector('.modal-card.tabbed', { timeout: 10000 });
     await win.click('.modal-card button:has-text("제작 도구")');
     await win.waitForTimeout(300);

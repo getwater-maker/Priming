@@ -331,8 +331,7 @@ export default function App() {
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
-  const [chOrderOpen, setChOrderOpen] = useState(false); // 채널 순서 변경 모달
-  const [chOrder, setChOrder] = useState([]);            // 편집 중인 순서 [{name, group}]
+  // (채널 순서는 이제 편집창 「📋 채널」 탭에서 ▲▼ 로 바꾸고 **즉시 저장**한다 — 버퍼도 모달도 없다)
   const [styles, setStyles] = useState([]);
 
   // 헤더 컨트롤
@@ -405,7 +404,7 @@ export default function App() {
   // 채널 설정이 저장될 때마다 +1 — 채널 값을 읽어 쓰는 화면이 이걸 보고 다시 읽는다.
   const [presetRev, setPresetRev] = useState(0);
   const [ch, setCh] = useState(null);          // 편집 중 프리셋 폼
-  const [newChanOpen, setNewChanOpen] = useState(false); // 새 채널 이름 입력 모달
+  // (새 채널 이름 칸도 「📋 채널」 탭 안에 있다)
   const [newChanName, setNewChanName] = useState('');
   const [chStyles, setChStyles] = useState([]);
   const [chRefList, setChRefList] = useState([]); // 참조음성 파일 목록
@@ -1357,16 +1356,18 @@ export default function App() {
 
   // ── 채널 설정 편집 ──
   // Electron 렌더러는 window.prompt 를 지원하지 않으므로(조용히 null) 이름 입력은 별도 모달로 받는다.
-  function addChannel() { setNewChanName(''); setNewChanOpen(true); }
+  // 🔑 **만드는 기준은 「지금 편집창에서 보고 있는 채널」**이다(헤더 선택이 아니라) — 창 안에서 보고 있는
+  //   설정을 복사하는 것이 눈에 보이는 대로의 동작이다. 이름을 고치는 중일 수 있으므로 **원본 이름**(_raw)을 쓴다.
   async function createChannel() {
     const name = (newChanName || '').trim();
     if (!name) { setStatus('채널 이름을 입력하세요'); return; }
+    const from = (ch && ch._raw && ch._raw.name) || presetName || null;
     try {
-      const ps = await api.addPreset({ name, fromName: presetName || null });
-      setPresets(ps || []); setPresetName(name);
-      setNewChanOpen(false);
+      const ps = await api.addPreset({ name, fromName: from });
+      setPresets(ps || []); setPresetName(name); setNewChanName('');
       setStatus(`채널 "${name}" 추가됨 — 세부 설정을 편집하세요`);
-      await openChannelEditor(name);   // 바로 편집창 열기
+      await openChannelEditor(name);   // 만든 채널을 바로 편집 대상으로
+      setChTab('basic');
     } catch (e) { uiAlert('채널 추가 실패:\n' + e.message); }
   }
   async function deleteChannel() {
@@ -1379,25 +1380,19 @@ export default function App() {
       setStatus(`채널 "${ch.name}" 삭제됨`);
     } catch (e) { uiAlert('채널 삭제 실패:\n' + e.message); }
   }
-  // ── 채널 순서 변경 ── 드롭다운에 보이는 순서를 ▲▼ 로 조정 후 저장.
-  function openChOrder() {
-    setChOrder((presets || []).map((p) => ({ name: p.name, group: p.group || '' })));
-    setChOrderOpen(true);
-  }
-  function moveChOrder(i, dir) {
-    setChOrder((cur) => {
-      const j = i + dir;
-      if (j < 0 || j >= cur.length) return cur;
-      const next = cur.slice();
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
-  }
-  async function saveChOrder() {
+  // ── 채널 순서 ── 드롭다운에 보이는 순서. **▲▼ 를 누르면 그 자리에서 저장**한다.
+  //   🔑 따로 「저장」을 두면 누르지 않고 창을 닫아 순서가 조용히 사라진다 — 이 저장소가 반복해 겪은 유형이라
+  //     아예 버퍼를 두지 않았다. reorderPresets 는 작은 파일 쓰기라 즉시 저장이 싸다.
+  async function moveChannel(i, dir) {
+    const cur = (presets || []).map((p) => p.name);
+    const j = i + dir;
+    if (j < 0 || j >= cur.length) return;
+    const next = cur.slice();
+    [next[i], next[j]] = [next[j], next[i]];
     try {
-      const ps = await api.reorderPresets(chOrder.map((c) => c.name));
+      const ps = await api.reorderPresets(next);
       if (ps) setPresets(ps);
-      setChOrderOpen(false); setStatus('채널 순서 저장됨');
+      setStatus('채널 순서 저장됨');
     } catch (e) { logline('채널 순서 저장 오류: ' + e.message); }
   }
   async function openChannelEditor(nameArg) {
@@ -1857,7 +1852,6 @@ export default function App() {
       if (nameAsk) { nameAskCancel(); return; }        // 이름 입력(다른 모달 위에 뜸) — 가장 먼저
       if (promptView) { setPromptView(null); return; }
       if (settingsOpen) { setSettingsOpen(false); return; }
-      if (chOrderOpen) { setChOrderOpen(false); return; }
       if (ttsSrvOpen) { setTtsSrvOpen(false); return; }
       if (comfyOpen) { setComfyOpen(false); return; }
       if (cvidOpen) { setCvidOpen(false); return; }
@@ -1870,12 +1864,11 @@ export default function App() {
       if (dictOpen) { setDictOpen(false); return; }
       if (styleEditOpen) { setStyleEditOpen(false); return; }
       if (chOpen) { setChOpen(false); return; }
-      if (newChanOpen) { setNewChanOpen(false); return; }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, chOrderOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -2266,9 +2259,8 @@ export default function App() {
                 return out;
               })()}
             </select>
-            <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
-            <button className="ghost" title="채널 목록 순서 변경 (드롭다운에 보이는 순서)" style={{ padding: '6px 9px' }} onClick={openChOrder}>↕</button>
-            <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
+            {/* 채널 관리 = 이 버튼 하나. 추가·순서·편집·삭제가 전부 그 창의 탭에 있다(로이 2026-09-16 통합). */}
+            <button className="ghost" title="채널(프리셋) — 추가·순서·설정 편집·삭제" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             {isBk && (<>
               <button onClick={openBook}>📖 원고 열기</button>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
@@ -2525,19 +2517,6 @@ export default function App() {
         <div id="playerBar"><span id="playerInfo" ref={playerInfoRef} /><button className="ghost" onClick={stopPlayer}>■ 닫기</button></div>
       </div>
 
-      {newChanOpen && (
-        <div className="modal-bg show">
-          <div className="modal-card" style={{ maxWidth: 420 }}>
-            <h3>＋ 새 채널 추가</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>현재 채널 <b>「{presetName || '-'}」</b>의 설정을 복사해 새 채널을 만듭니다. 만든 뒤 편집창에서 세부 설정을 바꾸세요.</div>
-            <input autoFocus placeholder="새 채널 이름" style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }}
-              value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
-            <div className="mbtns"><button onClick={createChannel}>만들기</button><button className="ghost" onClick={() => setNewChanOpen(false)}>취소</button></div>
-          </div>
-        </div>
-      )}
-
       {nameAsk && (
         <div className="modal-bg show name-ask-layer">
           <div className="modal-card" style={{ maxWidth: 420 }}>
@@ -2557,13 +2536,52 @@ export default function App() {
             {/* 섹션을 세로로 쌓지 않고 탭으로 나눈다 — 스크롤 없이 한 화면에 들어오게 (2026-08-14) */}
             <div className="tabbar">
               {/* 🎬 리모션 채널은 음성만 만든다 — 자막·이미지·비디오가 없으므로 그 두 탭을 감춘다. */}
-              {[['basic', '🏠 기본'], ['voice', '🎙 음성'],
+              {[['list', '📋 채널'], ['basic', '🏠 기본'], ['voice', '🎙 음성'],
                 ...(ch.startMode === 'remotion' ? [] : [['caption', '📝 자막·분할'], ['tools', '🖼 제작 도구']]),
                 ['folder', '📁 폴더']].map(([id, lbl]) => (
                 <button key={id} className={chTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setChTab(id)}>{lbl}</button>
               ))}
             </div>
             <div className="tabbody">
+
+              {chTab === 'list' && (<div>
+                <div className="meta" style={{ marginBottom: 8 }}>
+                  <b>✎ = 지금 편집 중</b> · <b>★ = 헤더에서 고른 작업 채널</b>.
+                  <b>▲▼</b> 로 순서를 바꾸면 <b>바로 저장</b>됩니다(헤더 드롭다운에 이 순서로 보입니다).
+                  이름을 누르면 그 채널로 <b>편집 대상이 바뀝니다</b> —
+                  <b style={{ color: 'var(--danger)' }}>저장하지 않은 변경은 사라집니다.</b>
+                </div>
+                <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
+                  {(presets || []).map((p, i) => {
+                    const editing = p.name === ((ch._raw && ch._raw.name) || ch.name);
+                    return (
+                      <div key={p.name} className="frow" style={{ gap: 6, alignItems: 'center', padding: '2px 0' }}>
+                        <span className="meta" style={{ width: 24, textAlign: 'right', flex: '0 0 auto' }}>{i + 1}.</span>
+                        {/* 🔑 테두리를 주면 입력칸처럼 보인다 — 목록은 글자만, 편집 중인 줄만 배경으로 드러낸다. */}
+                        <button style={{ flex: 1, textAlign: 'left', padding: '4px 8px', cursor: editing ? 'default' : 'pointer',
+                          border: 0, borderRadius: 6, fontSize: 13, color: 'var(--strong)',
+                          background: editing ? '#f3ead9' : 'transparent',
+                          fontWeight: editing ? 700 : 400 }}
+                          title={editing ? '지금 편집 중인 채널입니다' : '이 채널 설정으로 바꿔 편집합니다'}
+                          onClick={() => { if (!editing) openChannelEditor(p.name); }}>
+                          {editing ? '✎ ' : ''}{p.name}{p.group ? <span className="meta"> · {p.group}</span> : null}
+                          {p.name === presetName ? <span className="meta" title="헤더 드롭다운에서 선택된 작업 채널"> ★</span> : null}
+                        </button>
+                        <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="위로" disabled={i === 0} onClick={() => moveChannel(i, -1)}>▲</button>
+                        <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="아래로" disabled={i === (presets || []).length - 1} onClick={() => moveChannel(i, 1)}>▼</button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="subhead" style={{ marginTop: 12 }}>＋ 새 채널</div>
+                <div className="meta" style={{ marginBottom: 6 }}>지금 편집 중인 <b>「{(ch._raw && ch._raw.name) || ch.name || '-'}」</b>의 설정을 복사해 만듭니다.</div>
+                <div className="frow" style={{ gap: 6 }}>
+                  <input style={{ flex: 1, padding: '6px 9px' }} placeholder="새 채널 이름"
+                    value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
+                  <button style={{ flex: '0 0 auto' }} onClick={createChannel}>만들기</button>
+                </div>
+              </div>)}
 
               {chTab === 'basic' && (<div>
                 <div className="frow"><label>채널 이름</label>
@@ -2855,29 +2873,6 @@ export default function App() {
 
 
       {/* 모달은 바깥 클릭으로 닫지 않음(ESC·닫기 버튼만) — 실수 클릭에 입력 유실 방지 */}
-      {chOrderOpen && (
-        <div className="modal-bg show">
-          <div className="modal-card" style={{ maxWidth: 460 }}>
-            <h3>↕ 채널 순서</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>▲▼ 로 순서를 바꾸고 <b>저장</b>하면 채널 드롭다운에 이 순서로 표시됩니다. (그룹 구분선은 그룹 이름이 같은 채널끼리 자동으로 묶여 표시됩니다)</div>
-            <div style={{ maxHeight: 380, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
-              {chOrder.map((c, i) => (
-                <div key={c.name} className="frow" style={{ gap: 6, alignItems: 'center', padding: '3px 0' }}>
-                  <span className="meta" style={{ width: 26, textAlign: 'right', flex: '0 0 auto' }}>{i + 1}.</span>
-                  <span style={{ flex: 1, fontWeight: c.name === presetName ? 700 : 400 }}>{c.name}{c.group ? <span className="meta"> · {c.group}</span> : null}</span>
-                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="위로" disabled={i === 0} onClick={() => moveChOrder(i, -1)}>▲</button>
-                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} title="아래로" disabled={i === chOrder.length - 1} onClick={() => moveChOrder(i, 1)}>▼</button>
-                </div>
-              ))}
-            </div>
-            <div className="mbtns" style={{ marginTop: 10 }}>
-              <button onClick={saveChOrder}>💾 저장</button>
-              <span style={{ flex: 1 }} />
-              <button className="ghost" onClick={() => setChOrderOpen(false)}>취소</button>
-            </div>
-          </div>
-        </div>
-      )}
       {settingsOpen && (
         <div className="modal-bg show">
           <div className="modal-card wide">
