@@ -22,6 +22,13 @@
  * 💬 **자막(2026-09-16)** — `core/whiteboard-subtitle` 이 `.srt` 를 내고, 스위치가 켜져 있으면 **영상에 굽는다**.
  *   Vrew 를 거치지 않는 최종물이라 소프트 자막은 「안 보인다」가 되기 때문이다. 굽기는 재인코딩이라
  *   비싸므로 ⚙ 에서 끌 수 있고, 꺼도 `.srt` 는 그대로 나온다(유튜브 업로드용).
+ *   ⚠ **구웠으면 `.srt` 이름을 바꿔 둔다**(`…_유튜브자막.srt`) — 영상과 **같은 이름**의 자막 파일이 옆에 있으면
+ *     동영상 플레이어가 그걸 **자동으로 켜서** 구운 자막과 **두 줄로 겹쳐 보인다**(로이 2026-09-16 신고).
+ *
+ * 📁 **완성물 위치(2026-09-16)** — 장면·중간 파일은 작업 폴더(`outRoot/whiteboard-N`)에 두고,
+ *   **완성된 MP4·자막만** `opts.finalDir`(채널의 「화이트보드 출력」 폴더)로 옮긴다.
+ *   🔑 중간 산출물을 그 폴더에 직접 만들지 않는 이유: ① 반쯤 만들어진 파일이 보이지 않게
+ *   ② `renameSync` 는 **드라이브가 다르면 실패**한다(G: → C:\Downloads) — 마지막 한 번만 복사로 넘긴다.
  */
 
 const fs = require('fs');
@@ -95,7 +102,7 @@ function planWhiteboard(project, opts = {}) {
   if (missing.length) {
     lines.push(`⛔ 이미지가 없는 장면 ${missing.length}개 (G${missing.map((m) => m.groupNums.join('+')).join(', G')}) — 이미지를 먼저 만들어야 렌더할 수 있습니다`);
   }
-  lines.push('ⓘ 음성·자막이 얹힙니다(5단계). 다만 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
+  lines.push('ⓘ 음성·자막이 얹힙니다. 다만 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
   return { ok: missing.length === 0, scenes: plan.scenes, summary: plan.summary, missing, totalSec, estimateSec, lines };
 }
 
@@ -293,31 +300,76 @@ async function runWhiteboard(project, outRoot, opts = {}) {
 
   // 8) 💬 자막 — `.srt` 는 **언제나** 옆에 남기고, 스위치가 켜져 있으면 영상에도 굽는다.
   //   ⚠ 굽기는 재인코딩이라 비싸다(1920 22분 = 수 분). 실패해도 영상은 그대로 둔다.
+  //   🔑 **구웠으면 `.srt` 이름을 바꾼다** — 영상과 같은 이름이면 플레이어가 자동으로 켜서 **자막이 두 줄로 겹친다**.
   const WS = deps.WS();
   let srtPath = null, subtitle = { ok: false, error: '건너뜀' };
   if (opts.withSubtitle !== false) {
     const scForSub = WS.scenesForSubtitle(project, plan.scenes);
-    const srt = WS.buildSrt(scForSub, { maxChars: opts.captionMaxChars || 7, sceneDurations: (audio && audio.durations) || [] });
-    if (srt.trim()) {
-      srtPath = path.join(outRoot, `${baseName}_whiteboard.srt`);
+    const cues = WS.buildCues(scForSub, { maxChars: opts.captionMaxChars || 7, sceneDurations: (audio && audio.durations) || [] });
+    if (cues.length) {
+      const burn = opts.burnSubtitle !== false;
+      // 굽는 경우엔 플레이어가 자동으로 물지 않는 이름으로(영상 basename 과 달라야 한다).
+      srtPath = path.join(outRoot, `${baseName}_whiteboard${burn ? '_유튜브자막' : ''}.srt`);
+      const srt = WS.srtFromCues(cues);
       try { fs.writeFileSync(srtPath, srt, 'utf8'); log(`📄 자막 파일 — ${path.basename(srtPath)}`); }
       catch (e) { srtPath = null; log(`⚠ 자막 파일을 쓰지 못했습니다 — ${e.message}`); }
-      if (opts.burnSubtitle !== false) {
-        const h = (results.find((r) => r && r.height) || {}).height || cap;
+      // 예전 이름(영상과 같은 basename)이 남아 있으면 치운다 — 그게 「자막 두 줄」의 원인이다.
+      if (burn) {
+        const legacy = path.join(outRoot, `${baseName}_whiteboard.srt`);
+        try { if (fs.existsSync(legacy) && legacy !== srtPath) { fs.rmSync(legacy, { force: true }); log('🧹 옛 자막 파일을 치웠습니다(영상과 같은 이름이면 플레이어가 자동으로 띄워 자막이 겹칩니다)'); } } catch (_) {}
+      }
+      if (burn) {
+        const rr = results.find((r) => r && r.height) || {};
         log('💬 자막을 영상에 굽는 중… (영상을 다시 인코딩합니다 — 길이에 비례해 몇 분 걸릴 수 있습니다)');
         subtitle = await withAbort(isAborted, (sig) => WS.burnSubtitle({
-          videoPath: output, srtText: srt, tmpDir: wbDir, height: h, log, abortSignal: sig,
+          videoPath: output, cues, tmpDir: wbDir, width: rr.width || 0, height: rr.height || cap,
+          style: opts.subtitleStyle || null, log, abortSignal: sig,
         }));
         if (!subtitle.ok) log(`⚠ 자막 굽기 실패 — ${subtitle.error} (영상은 그대로 두었습니다 · .srt 는 남아 있습니다)`);
       } else { subtitle = { ok: false, error: '굽기 꺼짐(.srt 만)' }; }
     } else { log('⚠ 자막으로 만들 문장이 없습니다'); }
   }
 
-  const tail = (audio.ok ? '🔊 음성 포함' : '⚠ 무음') + (subtitle.ok ? ' · 💬 자막 포함' : (srtPath ? ' · 📄 .srt 별도' : ''));
-  log(`✅ 화이트보드 MP4 — ${path.basename(output)} (장면 ${jobs.length}개 · ${fmtDur(plan.totalSec)}) ${tail}`);
-  return { ok: true, output, wbDir, sceneCount: jobs.length, rendered, skipped, totalSec: plan.totalSec,
+  // 9) 📁 완성물만 최종 폴더로 옮긴다(채널의 「화이트보드 출력」). 못 옮기면 작업 폴더에 그대로 둔다.
+  let finalOut = output, finalSrt = srtPath;
+  if (opts.finalDir && path.resolve(opts.finalDir) !== path.resolve(outRoot)) {
+    const moved = moveFinals([output, srtPath].filter(Boolean), opts.finalDir, log);
+    if (moved.ok) {
+      finalOut = moved.map.get(output) || output;
+      if (srtPath) finalSrt = moved.map.get(srtPath) || srtPath;
+      log(`📁 완성물을 옮겼습니다 → ${opts.finalDir}`);
+    }
+  }
+
+  const tail = (audio.ok ? '🔊 음성 포함' : '⚠ 무음') + (subtitle.ok ? ' · 💬 자막 포함' : (finalSrt ? ' · 📄 .srt 별도' : ''));
+  log(`✅ 화이트보드 MP4 — ${path.basename(finalOut)} (장면 ${jobs.length}개 · ${fmtDur(plan.totalSec)}) ${tail}`);
+  return { ok: true, output: finalOut, dir: path.dirname(finalOut), wbDir, sceneCount: jobs.length, rendered, skipped, totalSec: plan.totalSec,
     hasAudio: !!audio.ok, audioError: audio.ok ? null : audio.error,
-    srtPath, hasSubtitle: !!subtitle.ok, subtitleError: subtitle.ok ? null : subtitle.error };
+    srtPath: finalSrt, hasSubtitle: !!subtitle.ok, subtitleError: subtitle.ok ? null : subtitle.error };
 }
 
-module.exports = { planWhiteboard, runWhiteboard, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };
+/**
+ * 완성 파일들을 다른 폴더로 **옮긴다**(복사가 아니라 이동 — 같은 결과물을 두 곳에 두면 디스크만 먹는다).
+ * ⚠ `renameSync` 는 드라이브가 다르면 `EXDEV` 로 실패한다(G: → C:\Downloads) → 그때만 복사 후 지운다.
+ * 어떤 경우에도 던지지 않는다 — 옮기기에 실패해도 파일은 작업 폴더에 멀쩡히 있다.
+ */
+function moveFinals(files, dir, log = () => {}) {
+  const map = new Map();
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch (e) { log(`⚠ 화이트보드 출력 폴더를 만들 수 없어 작업 폴더에 둡니다 — ${e.message}`); return { ok: false, map }; }
+  for (const src of files) {
+    const dst = path.join(dir, path.basename(src));
+    try {
+      try { fs.renameSync(src, dst); }
+      catch (e) {
+        if (e.code !== 'EXDEV') throw e;
+        fs.copyFileSync(src, dst);
+        fs.rmSync(src, { force: true });
+      }
+      map.set(src, dst);
+    } catch (e) { log(`⚠ ${path.basename(src)} 를 옮기지 못했습니다 — ${e.message} (작업 폴더에 그대로 있습니다)`); }
+  }
+  return { ok: map.size > 0, map };
+}
+
+module.exports = { planWhiteboard, runWhiteboard, moveFinals, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };

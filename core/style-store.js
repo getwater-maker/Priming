@@ -1,11 +1,14 @@
 /**
  * 이미지 스타일 프리셋 스토어
- * 위치: ~/.flow-app/styles.json (사용자 추가/수정 스타일만 저장)
+ * 위치: ~/.flow-app/styles.json (모든 스타일)
  *
- * 정책:
- *  - 기본 스타일은 코드에 시드 (BUILT_IN_STYLES) — 항상 존재, 수정/삭제 불가.
- *  - 사용자 스타일만 ~/.flow-app/styles.json 에 저장 — 자유롭게 추가/수정/삭제.
- *  - loadAll() 은 기본 + 사용자 합쳐서 반환 (기본 먼저, 사용자 다음).
+ * 정책(2026-09-16 로이: "모두 동일한 기준으로 — 기본도 수정·삭제가 되게"):
+ *  - **기본/사용자 구분이 없다.** 스타일은 전부 같은 파일에 있고 전부 수정·삭제·순서변경이 된다.
+ *  - 코드의 `BUILT_IN_STYLES` 는 이제 **최초 1회 씨앗**일 뿐이다 — `_ensureSeeded()` 가 그 목록을
+ *    styles.json 에 한 번 옮겨 심고(`styles-seeded.json` 플래그), 그 뒤로는 아무도 강제로 되살리지 않는다.
+ *    🔑 그래서 **지운 스타일이 다음 실행에 되살아나지 않는다** — 씨앗을 매번 합치면 삭제가 무의미해진다.
+ *  - ⚠ 씨앗 심기는 **dirty 표시를 남긴다**(아래 `_markDirty`). 안 그러면 앱 시작 때 도는 서버 pull 이
+ *    「서버가 정본」 분기로 들어가 방금 심은 목록을 통째로 지운다 → 합치기 경로로 유도해 서버에도 올린다.
  */
 
 const fs = require('fs');
@@ -16,7 +19,8 @@ const STORE_DIR = path.join(os.homedir(), '.flow-app');
 const STORE_PATH = path.join(STORE_DIR, 'styles.json');
 const ORDER_PATH = path.join(STORE_DIR, 'style-order.json');
 
-// 기본 28개 스타일 — flow-engine.js 의 옛 STYLE_PROMPTS 객체에서 이관
+// 씨앗 스타일 28개 — flow-engine.js 의 옛 STYLE_PROMPTS 객체에서 이관.
+//   ⚠ 이 목록은 **처음 한 번만** styles.json 으로 옮겨 심는다(그 뒤엔 사용자가 자유롭게 고치고 지운다).
 const _RAW_STYLES = [
   { id: 'k-webtoon',         name: '한국 웹툰',           prompt: 'beautiful Korean webtoon style, manhwa art, soft shading, detailed characters, emotional expressions, Korean comic illustration, clean lineart, pastel colors' },
   { id: 'webtoon-illust',    name: '웹툰 일러스트',       prompt: 'webtoon illustration style, digital painting, semi-realistic, vivid colors, detailed background, Korean manhwa inspired, clean composition' },
@@ -54,16 +58,51 @@ const BEAUTY_BRIGHT = ', attractive good-looking characters (beautiful women and
 const _NO_ENHANCE = new Set(['infographic-3d', 'infographic-2d', 'stickman']);
 const BUILT_IN_STYLES = _RAW_STYLES.map((s) => (_NO_ENHANCE.has(s.id) ? s : { ...s, prompt: s.prompt + BEAUTY_BRIGHT }));
 
-function _loadUserStyles() {
+const SEED_PATH = path.join(STORE_DIR, 'styles-seeded.json');   // { seeded:true } — 씨앗을 한 번 심었다는 표시
+let _seedChecked = false;   // 이 프로세스에서 이미 확인함(파일 존재 검사도 한 번이면 족하다)
+let _seedOk = false;        // 심기(또는 이미 심어져 있음)가 확인됐다 → 아래 '보충' 안전망을 끈다
+
+/** 파일을 읽기만 한다(씨앗 심기를 거치지 않는 원시 읽기 — `_ensureSeeded` 안에서 쓴다). */
+function _readStylesFile() {
   try {
     if (fs.existsSync(STORE_PATH)) {
       const data = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
-    console.error('[style-store] 사용자 스타일 로드 실패:', e.message);
+    console.error('[style-store] 스타일 로드 실패:', e.message);
   }
   return [];
+}
+
+/**
+ * 씨앗 스타일을 **최초 1회만** styles.json 에 옮겨 심는다.
+ * 🔑 여기(파일 읽기)에서 하는 이유: loadAll 뿐 아니라 **서버 pull/push 도** 같은 상태를 봐야 한다.
+ *   한쪽만 심으면 「화면엔 있는데 서버엔 없다」가 되어 다른 PC 에서 스타일이 사라진다.
+ */
+function _ensureSeeded() {
+  if (_seedChecked) return;
+  _seedChecked = true;
+  try {
+    if (fs.existsSync(SEED_PATH)) { _seedOk = true; return; }
+    const cur = _readStylesFile();
+    const have = new Set(cur.map((s) => s && s.id).filter(Boolean));
+    const seeds = BUILT_IN_STYLES.filter((s) => !have.has(s.id)).map((s) => ({ id: s.id, name: s.name, prompt: s.prompt }));
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    if (seeds.length) {
+      fs.writeFileSync(STORE_PATH, JSON.stringify([...seeds, ...cur], null, 2), 'utf-8');
+      _markDirty();   // ⚠ 서버 pull 이 이 목록을 통째로 지우지 않게 — 합치기 경로로 유도한다
+    }
+    fs.writeFileSync(SEED_PATH, JSON.stringify({ seeded: true, count: seeds.length, at: new Date().toISOString() }, null, 2), 'utf-8');
+    _seedOk = true;
+  } catch (e) {
+    console.error('[style-store] 기본 스타일 이관 실패:', e.message);   // _seedOk=false → loadAll 이 보충한다
+  }
+}
+
+function _loadUserStyles() {
+  _ensureSeeded();
+  return _readStylesFile();
 }
 
 function _saveUserStyles(userStyles) {
@@ -72,7 +111,7 @@ function _saveUserStyles(userStyles) {
     fs.writeFileSync(STORE_PATH, JSON.stringify(userStyles, null, 2), 'utf-8');
     return true;
   } catch (e) {
-    console.error('[style-store] 사용자 스타일 저장 실패:', e.message);
+    console.error('[style-store] 스타일 저장 실패:', e.message);
     return false;
   }
 }
@@ -100,24 +139,33 @@ function _saveOrder(orderIds) {
   }
 }
 
-/** 기본 + 사용자 모든 스타일 반환. 각 항목에 isBuiltIn 플래그 포함.
- *  ~/.flow-app/style-order.json 이 있으면 그 순서대로, 없는 항목은 뒤에 (기본 → 사용자). */
+/** 모든 스타일 반환(전부 수정·삭제 가능).
+ *  ~/.flow-app/style-order.json 이 있으면 그 순서대로, 없는 항목은 파일에 있는 순서 그대로 뒤에.
+ *  ⚠ `isBuiltIn` 필드는 **호환을 위해 남겨 둔 표시**일 뿐 권한과 무관하다(채널 화풍 내보내기·대시보드가 읽는다).
+ *    씨앗 심기가 실패한 PC(홈 폴더 쓰기 불가)에서만 true 인 항목이 보인다. */
 function loadAll() {
   const user = _loadUserStyles();
-  const all = [
-    ...BUILT_IN_STYLES.map(s => ({ ...s, isBuiltIn: true })),
-    ...user.map(u => ({ ...u, isBuiltIn: false })),
-  ];
+  const all = [], seen = new Set();
+  for (const u of user) {
+    if (!u || !u.id || seen.has(u.id)) continue;   // 같은 id 가 두 번 있으면 앞엣것만(서버 합치기 잔재 방어)
+    seen.add(u.id);
+    all.push({ ...u, isBuiltIn: false });
+  }
+  // 안전망 — 씨앗을 못 심은 경우(파일 쓰기 실패)에만 코드의 목록으로 보충한다.
+  //   🔑 심기에 성공했으면 **보충하지 않는다** — 안 그러면 사용자가 지운 스타일이 매번 되살아난다.
+  if (!_seedOk) {
+    for (const b of BUILT_IN_STYLES) if (!seen.has(b.id)) { seen.add(b.id); all.push({ ...b, isBuiltIn: true }); }
+  }
   const order = _loadOrder();
   const indexOf = id => {
     const i = order.indexOf(id);
     return i < 0 ? Infinity : i;
   };
+  const pos = new Map(all.map((s, i) => [s.id, i]));
   all.sort((a, b) => {
     const ia = indexOf(a.id), ib = indexOf(b.id);
     if (ia !== ib) return ia - ib;
-    if (a.isBuiltIn !== b.isBuiltIn) return a.isBuiltIn ? -1 : 1;
-    return 0;
+    return pos.get(a.id) - pos.get(b.id);        // 순서 파일에 없으면 파일에 적힌 순서 그대로(안정 정렬)
   });
   return all;
 }
@@ -132,6 +180,8 @@ function getPrompt(id) {
   return s ? s.prompt : null;
 }
 
+/** 코드의 씨앗 목록에 있는 id 인가 — **권한 판정이 아니다**(수정·삭제는 누구나 된다).
+ *  씨앗 심기 전(또는 실패)에 그 항목을 고치면 `update` 가 파일로 승격시키는 데만 쓴다. */
 function isBuiltIn(id) {
   return BUILT_IN_STYLES.some(s => s.id === id);
 }
@@ -149,12 +199,18 @@ function add(style) {
   return { ...newStyle, isBuiltIn: false };
 }
 
-/** 사용자 스타일 수정 (기본 스타일은 수정 불가). */
+/** 스타일 수정 — **기본·사용자 구분 없이** 전부 된다(로이 2026-09-16).
+ *  ⚠ 씨앗 심기가 실패한 PC 에서는 그 항목이 파일에 없다 → 그때만 파일로 **승격**해 고친다
+ *    (안 그러면 그 PC 에서는 기본 스타일 수정이 조용히 실패한다). */
 function update(id, patch) {
-  if (isBuiltIn(id)) return null;
   const user = _loadUserStyles();
-  const idx = user.findIndex(s => s.id === id);
-  if (idx < 0) return null;
+  let idx = user.findIndex(s => s.id === id);
+  if (idx < 0) {
+    const seed = BUILT_IN_STYLES.find(s => s.id === id);
+    if (!seed) return null;
+    user.push({ id: seed.id, name: seed.name, prompt: seed.prompt });
+    idx = user.length - 1;
+  }
   const updated = {
     ...user[idx],
     ...(patch.name != null ? { name: String(patch.name).trim() } : {}),
@@ -165,9 +221,8 @@ function update(id, patch) {
   return { ...updated, isBuiltIn: false };
 }
 
-/** 사용자 스타일 삭제 (기본 스타일은 삭제 불가). */
+/** 스타일 삭제 — **기본·사용자 구분 없이** 전부 된다. 씨앗은 다시 심지 않으므로 되살아나지 않는다. */
 function remove(id) {
-  if (isBuiltIn(id)) return false;
   const user = _loadUserStyles();
   const filtered = user.filter(s => s.id !== id);
   if (filtered.length === user.length) return false;   // 존재 안 함
@@ -340,5 +395,5 @@ async function pushToServer(log = () => {}) {
   return { ok: false, error: w.error, unsupported: w.error === 'unsupported' };
 }
 
-module.exports = { loadAll, getById, getPrompt, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, BUILT_IN_STYLES,
+module.exports = { loadAll, getById, getPrompt, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, SEED_PATH, BUILT_IN_STYLES,
   pullFromServer, pushToServer, mergeStyles, mergeOrder, SYNC_PATH };

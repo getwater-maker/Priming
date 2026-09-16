@@ -287,7 +287,15 @@ const GS_VIDEO_MODELS = [
 ];
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
 
-// 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
+// ✏ 화이트보드 자막 기본값 — ⚠ core/whiteboard-subtitle.js 의 SUB_DEFAULTS·FONT_CANDIDATES 와 **같은 값**이어야 한다.
+//   렌더러는 core 를 require 할 수 없어 두 벌이다 → test/whiteboard-subtitle.test.js 가 어긋나면 실패시킨다.
+const WB_SUB_DEFAULT = { font: 'Malgun Gothic', sizePct: 5.2, pos: 'bottom', marginPct: 7.5, bold: true };
+const WB_SUB_FONTS = ['Malgun Gothic', 'Noto Sans KR', 'NanumGothic', 'Gulim', 'Batang'];
+const WB_SUB_POS = [['bottom', '아래'], ['middle', '가운데'], ['top', '위']];
+
+// 스타일 편집 모달의 한 행 — **모든 스타일이 같다**(이름·프롬프트 수정 · 삭제 · 순서변경).
+//   🔑 옛 「기본 · 읽기전용」 구분은 폐기했다(로이 2026-09-16) — 기본이라고 고칠 수 없을 이유가 없고,
+//     두 종류가 섞여 있으면 「왜 이건 안 고쳐지지」를 매번 다시 배워야 한다.
 function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
   const [name, setName] = useState(s.name);
   const [prompt, setPrompt] = useState(s.prompt);
@@ -300,16 +308,12 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
           <button className="ghost" title="위로" style={{ padding: '0 5px', lineHeight: 1.1 }} disabled={index === 0} onClick={() => onMove(s.id, 'up')}>▲</button>
           <button className="ghost" title="아래로" style={{ padding: '0 5px', lineHeight: 1.1 }} disabled={index === total - 1} onClick={() => onMove(s.id, 'down')}>▼</button>
         </span>
-        {s.isBuiltIn
-          ? <b style={{ flex: 1 }}>{s.name} <span className="meta" style={{ fontWeight: 400 }}>(기본 · 읽기전용)</span></b>
-          : <input style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="스타일 이름" />}
+        <input style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="스타일 이름" />
         <button className="ghost" title="이 스타일의 프롬프트 복사" onClick={() => onCopy(prompt)}>📋 복사</button>
-        {!s.isBuiltIn && <button title="저장" disabled={!dirty} onClick={() => onSave(s.id, name, prompt)}>저장</button>}
-        {!s.isBuiltIn && <button className="ghost" title="삭제" onClick={() => onDelete(s.id, s.name)}>🗑</button>}
+        <button title="저장" disabled={!dirty} onClick={() => onSave(s.id, name, prompt)}>저장</button>
+        <button className="ghost" title="삭제" onClick={() => onDelete(s.id, s.name)}>🗑</button>
       </div>
-      {s.isBuiltIn
-        ? <textarea readOnly value={prompt} rows={2} style={{ width: '100%', resize: 'vertical', opacity: 0.85 }} />
-        : <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} placeholder="영문 스타일 프롬프트" />}
+      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} placeholder="영문 스타일 프롬프트" />
     </div>
   );
 }
@@ -1449,6 +1453,10 @@ export default function App() {
       imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: p.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ✏ 완성물 종류(채널 기본값)
       outLong: p.outLong || p.outputFolder || '',
+      // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
+      outWhiteboard: p.outWhiteboard || '',
+      // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
+      wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
     });
@@ -1682,6 +1690,15 @@ export default function App() {
       imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       outLong: (ch.outLong || '').trim(),
+      outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
+      // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
+      wbSub: {
+        font: (ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font,
+        sizePct: numOr(ch.wbSub && ch.wbSub.sizePct, WB_SUB_DEFAULT.sizePct),
+        pos: (ch.wbSub && ch.wbSub.pos) || WB_SUB_DEFAULT.pos,
+        marginPct: numOr(ch.wbSub && ch.wbSub.marginPct, WB_SUB_DEFAULT.marginPct),
+        bold: !(ch.wbSub && ch.wbSub.bold === false),
+      },
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
@@ -1713,6 +1730,7 @@ export default function App() {
   async function pickOutImages() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outImages: d })); }
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
   async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
+  async function pickOutWhiteboard() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outWhiteboard: d })); }
   // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
   async function pickDict() {
@@ -2384,7 +2402,7 @@ export default function App() {
                 <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
               </label>
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
-              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 만듭니다 — 음성(TTS) → 이미지 → 장면 계획(관문 A) → 확인 그림(관문 B) → 렌더. 이미 만든 음성·이미지·장면은 건너뜁니다(이어받기). 비디오는 만들지 않습니다(화이트보드는 그룹 이미지만 씁니다)." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
+              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 만듭니다 — 음성(TTS) → 이미지 → 장면 렌더 → 음성·자막 얹기. 확인 팝업 없이 바로 시작합니다(진행은 로그에). 이미 만든 음성·이미지·장면은 건너뜁니다(이어받기). 완성물은 채널의 「화이트보드 출력」 폴더(기본 = 윈도우 다운로드)로 갑니다." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
             </>)}
             <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
@@ -2709,6 +2727,45 @@ export default function App() {
                       </select></div>
                   </div>
                 </div>
+                {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
+                <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
+                <div className="twocol">
+                  <div className="col">
+                    <div className="crow stack"><span className="l">글자 크기</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="number" min="1" max="20" step="0.1" style={{ width: 70 }}
+                          value={(ch.wbSub && ch.wbSub.sizePct) != null ? ch.wbSub.sizePct : WB_SUB_DEFAULT.sizePct}
+                          onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), sizePct: e.target.value } })} />
+                        <span className="meta">% (1080 기준 {Math.round(1080 * (Number((ch.wbSub && ch.wbSub.sizePct) ?? WB_SUB_DEFAULT.sizePct) || WB_SUB_DEFAULT.sizePct) / 100)}px)</span>
+                      </span></div>
+                    <div className="crow stack"><span className="l">가장자리 여백</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="number" min="0" max="45" step="0.5" style={{ width: 70 }}
+                          value={(ch.wbSub && ch.wbSub.marginPct) != null ? ch.wbSub.marginPct : WB_SUB_DEFAULT.marginPct}
+                          onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), marginPct: e.target.value } })} />
+                        <span className="meta">% (가운데일 땐 무시)</span>
+                      </span></div>
+                  </div>
+                  <div className="col">
+                    <div className="crow stack"><span className="l">위치</span>
+                      <select value={(ch.wbSub && ch.wbSub.pos) || WB_SUB_DEFAULT.pos}
+                        onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), pos: e.target.value } })}>
+                        {WB_SUB_POS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select></div>
+                    <div className="crow stack"><span className="l">폰트</span>
+                      <select value={(ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font}
+                        onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), font: e.target.value } })}>
+                        {WB_SUB_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
+                      </select></div>
+                  </div>
+                  <div className="col">
+                    <div className="crow stack"><span className="l">굵게</span>
+                      <input type="checkbox" style={{ width: 'auto' }} checked={!(ch.wbSub && ch.wbSub.bold === false)}
+                        onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), bold: e.target.checked } })} /></div>
+                  </div>
+                </div>
+                <div className="meta">글자는 <b>검정 + 흰 외곽선</b>입니다(화이트보드 종이색이 미색이라 흰 글자는 안 보입니다). 자막을 <b>구울지 말지</b>는 헤더 「④ 완성」의 <b>💬 자막</b> 체크박스가 정합니다 — 끄면 영상에 글자가 안 들어가고 <b>.srt 파일만</b> 옆에 남습니다.</div>
+
                 <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다. <b>출력</b>은 완성물 종류 — .vrew 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 음성·자막 포함).</div>
               </div>)}
 
@@ -2716,6 +2773,14 @@ export default function App() {
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본 폴더'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                {/* ✏ 화이트보드 완성물(MP4 + 자막)이 떨어질 폴더 — 비우면 윈도우 「다운로드」 폴더.
+                    ⚠ 장면·중간 파일은 여기가 아니라 작업 폴더(롱폼 출력/대본이름/whiteboard-N)에 남는다. */}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow"><label>화이트보드 출력</label>
+                    <input placeholder="✏ 화이트보드 MP4 와 자막(.srt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outWhiteboard || ''}
+                      onChange={(e) => setCh({ ...ch, outWhiteboard: e.target.value })} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutWhiteboard}>찾기</button></div>
+                )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드 폴더</label>
                   <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
@@ -2753,7 +2818,7 @@ export default function App() {
         <div className="modal-bg show">
           <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
             <h3>🎨 이미지 스타일 편집</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>기본 스타일은 <b>읽기전용</b>(프롬프트 복사만 가능). 사용자 스타일은 이름·프롬프트 수정·삭제·순서변경 가능. 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.<br />☁ 사용자 스타일과 순서는 <b>여러 PC 공용</b>입니다(TTS 서버에 보관) — 여기서 고치면 다른 PC 에도 반영됩니다.</div>
+            <div className="meta" style={{ marginBottom: 8 }}><b>모든 스타일을 똑같이</b> 고치고 지울 수 있습니다(이름·프롬프트·순서). 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.<br />☁ 목록과 순서는 <b>여러 PC 공용</b>입니다(TTS 서버에 보관) — 여기서 고치면 다른 PC 에도 반영됩니다. ⚠ 지운 스타일은 되살아나지 않습니다(그 스타일을 쓰던 채널은 다시 골라 주세요).</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
               <button className="ghost" style={{ flex: '0 0 auto' }} title="다른 PC 가 바꾼 스타일 받아오기 + 이 PC 것 올리기" onClick={() => syncStyles(true)}>☁ 동기화</button>
               <span className="meta" style={{ flex: 1, color: /^⚠/.test(styleSync) ? '#c0392b' : undefined }}>{styleSync}</span>

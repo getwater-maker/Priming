@@ -2150,49 +2150,30 @@ ipcMain.handle('import-vrew-audio', async (_e, args = {}) => {
 });
 
 // ── ✏ 화이트보드 MP4 (4단계 배선 · 2026-09-05) ─────────────────────────────────────
-//   흐름·정책은 core/whiteboard-pipeline.js 에 있다. 여기는 Electron 쪽 접착만: 레인 · 대화상자(관문 A/B) · 로그 · IPC.
-//   🔑 **대화형(버튼)일 때만 관문을 묻는다.** 큐(⚡ 만들기·run-batch)는 로그만 남기고 그대로 렌더한다 —
-//     무인 큐가 팝업에 멈춰 밤새 서 있는 쪽이 손실이 더 크다(계획서 4단계 항목).
-//   ⚠ 결과물은 무음이다(5단계 오디오·자막 mux 전) — 로그와 관문 A 문구에 매번 적는다.
+//   흐름·정책은 core/whiteboard-pipeline.js 에 있다. 여기는 Electron 쪽 접착만: 레인 · 로그 · IPC.
+//   🔑 **관문(확인 팝업)은 없앴다**(로이 2026-09-16: "화이트보드 렌더 팝업이 굳이 필요가 없을듯해").
+//     누르면 그대로 만든다 — 계획을 미리 보고 싶으면 「📋 장면 계획」 버튼이 따로 있고, 진행은 로그에 남는다.
+//     ⚠ 관문 B 를 없애면 **확인 그림(preview-NN.png)도 만들지 않는다**(파이프라인이 gateB 가 있을 때만 만든다) —
+//       그만큼 렌더가 빨리 시작된다. 영역을 눈으로 보려면 whiteboard-N 폴더의 주석을 편집기로 연다.
 const OUT_TARGETS = new Set(['vrew', 'whiteboard']);
 function normOutTarget(v) { return OUT_TARGETS.has(String(v)) ? String(v) : 'vrew'; }
 
-async function _wbGateA(plan) {
-  const r = await dialog.showMessageBox(win, {
-    type: 'question', title: '✏ 화이트보드 — 장면 계획 (관문 A)',
-    message: `장면 ${plan.scenes.length}개 · 총 ${require('./core/whiteboard-pipeline').fmtDur(plan.totalSec)} · 렌더 약 ${require('./core/whiteboard-pipeline').fmtDur(plan.estimateSec)} 예상`,
-    detail: plan.lines.join('\n') + '\n\n이 계획으로 진행하면 다음 단계에서 영역 번호가 그려진 확인 그림을 먼저 보여 드립니다.',
-    buttons: ['다음 (확인 그림 만들기)', '취소'], defaultId: 0, cancelId: 1, noLink: true,
-  });
-  return r.response === 0;
-}
-async function _wbGateB({ dir, files, plan }) {
-  const est = require('./core/whiteboard-pipeline').fmtDur(plan.estimateSec);
-  for (;;) {
-    const r = await dialog.showMessageBox(win, {
-      type: 'question', title: '✏ 화이트보드 — 확인 그림 (관문 B)',
-      message: `확인 그림 ${files.length}장을 만들었습니다. 영역 번호(그리는 순서)가 그림과 맞는지 보세요.`,
-      detail: `폴더: ${dir}\n\n영역·순서를 고치려면 그 폴더의 *.annotation.json 을 「✏ 영역 편집」(whiteboard/assets/preview.html)으로 고친 뒤 다시 렌더하세요.\n\n렌더는 약 ${est} 걸립니다(그동안 다른 작업은 계속할 수 있습니다). 결과는 무음 MP4 입니다(5단계 전).`,
-      buttons: ['📁 폴더 열어 확인', '✏ 렌더 시작', '취소'], defaultId: 1, cancelId: 2, noLink: true,
-    });
-    if (r.response === 0) { try { shell.openPath(dir); } catch (_) {} continue; }
-    return r.response === 1;
-  }
-}
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
-async function runWhiteboardFor(pr, outRoot, { interactive = false, force = false, captionMaxChars = 7 } = {}) {
+async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7 } = {}) {
   const WP = require('./core/whiteboard-pipeline');
   const WCfg = require('./core/whiteboard-config');
   const cfg = WCfg.load();
   const conc = WCfg.effectiveConcurrency(cfg);
+  // 📁 완성물이 떨어질 곳 — 채널의 「화이트보드 출력」, 비어 있으면 **윈도우 다운로드 폴더**(로이 2026-09-16).
+  //   그것도 못 구하면 작업 폴더에 그대로 둔다(작업이 막히면 안 된다).
+  const finalDir = String((preset && preset.outWhiteboard) || '').trim() || defaultDownloadDir() || '';
   try {
     return await _runOnLanes(['whiteboard'], `${prLabel(pr)} 화이트보드 렌더`, () => WP.runWhiteboard(pr, outRoot, {
       log, isAborted: () => S.abort, baseName: vrewBaseName(pr),
-      capLongEdge: cfg.capLongEdge, concurrency: conc, force,
-      // 💬 자막 — .srt 는 언제나 내고, 굽기는 ⚙ 스위치를 따른다(굽기는 재인코딩이라 비싸다).
+      capLongEdge: cfg.capLongEdge, concurrency: conc, force, finalDir,
+      // 💬 자막 — .srt 는 언제나 내고, 굽기는 ⚙ 스위치를, 모양(글자·위치·폰트)은 **채널 설정**을 따른다.
       captionMaxChars, burnSubtitle: cfg.subtitle !== false,
-      gateA: interactive ? _wbGateA : null,
-      gateB: interactive ? _wbGateB : null,
+      subtitleStyle: (preset && preset.wbSub) || null,
       onProgress: () => pushDtoUpdate(),
     }));
   } catch (e) { return { ok: false, error: e.message }; }
@@ -2220,17 +2201,17 @@ ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
   }
   return out;
 });
-// ✏ 렌더 — **전 과정**이다: 음성(TTS) → 이미지 → 화이트보드 렌더(관문 A·B 를 묻는다).
+// ✏ 렌더 — **전 과정**이다: 음성(TTS) → 이미지 → 화이트보드 렌더.
 //   🔴 예전엔 4단계(렌더)만 해서, 음성·이미지가 없으면 「이미지 미생성」 팝업만 띄우고 아무것도 만들지
 //     않았다(로이 2026-09-16: "렌더를 누르면 TTS·이미지 작업이 진행되고 렌더가 진행되어야지").
 //   🔑 1~3단계를 여기 복제하지 않는다 — `runMakeAllCore` 가 그 순서·게이트·이상 이미지 재생성·
 //     절전 차단·로그를 이미 갖고 있다. 두 벌로 두면 반드시 갈라진다(이 저장소의 단골 사고).
-//     여기서는 **출력만 화이트보드로 고정**하고 관문을 묻게(wbInteractive) 한다.
+//     여기서는 **출력만 화이트보드로 고정**한다.
 //   ⚠ TTS 를 돌리므로 `enqueueTtsJob`(직렬 큐)을 반드시 거친다 — 안 그러면 다른 TTS 작업과 겹쳐
 //     공용 TTS 매니저가 깨진다(v0.2.57 사고).
 ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트보드 렌더', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', wbInteractive: true, openVrew: true });
+  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: true });
   return P.toDTO(S.parsed);
 }));
 
@@ -4045,7 +4026,8 @@ ipcMain.handle('get-preset-detail', (_e, name) => {
   const p = all.find((x) => x.name === name) || null;
   // 다운로드 폴더를 한 번도 안 정한 채널이면 **윈도우 다운로드 폴더를 기본값으로 보여준다**
   // (채널편집에서 그대로 저장되거나, 사용자가 다른 폴더로 바꾸면 그 값이 저장된다).
-  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir() } : null;
+  // ✏ 화이트보드 출력도 같은 규칙 — 비어 있으면 다운로드 폴더가 기본값이다(로이 2026-09-16).
+  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir() } : null;
 });
 ipcMain.handle('save-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');
@@ -4717,7 +4699,6 @@ async function runMakeAllCore(opts = {}) {
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
   // ✏ 렌더 버튼으로 들어왔나 — 그때만 관문 A/B 를 묻는다(큐는 묻지 않고 그대로 렌더한다).
-  const wbInteractive = !!opts.wbInteractive;
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
   //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
   const outMode = normOutMode(opts.outMode);
@@ -4947,8 +4928,7 @@ async function runMakeAllCore(opts = {}) {
     const wbHere = (outTarget === 'whiteboard');
     if (wbHere && outMode !== 'full') log('⚠ 화이트보드는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 로 만듭니다');
     const wbGo = wbHere && outMode === 'full';
-    log(wbGo ? `📦 4단계 — ✏ 화이트보드 MP4 렌더…${wbInteractive ? ' (관문 A → 확인 그림 → 렌더)' : ' (큐라 관문을 묻지 않고 진행)'}`
-
+    log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (장면 렌더 → 음성 → 자막)'
       : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
@@ -4980,9 +4960,8 @@ async function runMakeAllCore(opts = {}) {
         continue;
       }
       if (wbGo) {
-        // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다.
-        // 관문 A/B 는 **대화형일 때만**(✏ 렌더 버튼) 묻는다 — 무인 큐가 팝업에 멎으면 손실이 더 크다.
-        const wr = await runWhiteboardFor(pr, outRoot, { interactive: wbInteractive, captionMaxChars });
+        // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 확인 팝업은 없다(누르면 바로 만든다).
+        const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars });
         if (wr.ok) { if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} } }
         else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
         continue;

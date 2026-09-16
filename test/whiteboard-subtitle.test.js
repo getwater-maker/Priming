@@ -24,6 +24,24 @@ const FF = MU.getFfmpegPath();
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'wbsub-'));
 const ff = (args) => execFileSync(FF, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 const probe = (args) => { const r = spawnSync(FF, args, { encoding: 'utf8' }); return (r.stderr || '') + (r.stdout || ''); };
+/** 영상 1.0초 프레임의 **진한 화소 분포** — 자막이 어디에 얼마나 크게 그려졌는지 픽셀로 잰다.
+ *  🔑 「자막이 들어갔나」가 아니라 **「어디에 얼마나 크게」**를 재야 이번 사고(3.75배 확대)를 잡는다. */
+function measure(video, W, H) {
+  const raw = path.join(TMP, '_m.gray');
+  ff(['-y', '-ss', '1.0', '-i', video, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'gray', raw]);
+  const b = fs.readFileSync(raw);
+  const ys = [];
+  for (let y = 0; y < H; y++) {
+    let cnt = 0;
+    for (let x = 0; x < W; x++) if (b[y * W + x] < 100) cnt++;
+    if (cnt) ys.push(y);
+  }
+  try { fs.rmSync(raw, { force: true }); } catch (_) {}
+  if (!ys.length) return { rows: 0, top: -1, bot: -1, h: 0, bottom: -1 };
+  const top = ys[0], bot = ys[ys.length - 1];
+  return { rows: ys.length, top, bot, h: bot - top + 1, bottom: H - 1 - bot };
+}
+
 /** SRT 한 덩어리 → [{start, end, text}] */
 const parseSrt = (s) => s.trim().split(/\n\n+/).map((b) => {
   const L = b.split('\n');
@@ -91,14 +109,58 @@ const parseSrt = (s) => s.trim().split(/\n\n+/).map((b) => {
     ok(miss[0].sentences.length === 1, '없는 문장 번호는 조용히 빠진다');
   }
 
-  head('[5] 스타일 — 글자·외곽·여백이 **영상 높이 비례**');
+  head('[5] buildAss — **PlayRes 를 영상 해상도로 박는다**(이 사고의 핵심)');
   {
-    const a = WS.styleArg(1080), b = WS.styleArg(360);
-    ok(/FontSize=56\b/.test(a) && /FontSize=19\b/.test(b), `높이에 비례한다 (1080→56 · 360→19)`);
-    ok(/Outline=3\b/.test(a) && /Outline=1\b/.test(b), '외곽선도 비례한다(고정값이면 작은 판에서 글자를 먹는다)');
-    ok(/PrimaryColour=&H00202020/.test(a) && /OutlineColour=&H00FFFFFF/.test(a),
-      '🔑 종이색(#F5EBD7) 위라 **진한 글자 + 흰 외곽**이다 — 흰 글자는 안 보인다');
-    ok(/FontName=Malgun Gothic/.test(a), '한글 폰트를 지정한다');
+    const cues = [{ start: 0, end: 2, text: '같은 기간에 그' }, { start: 2, end: 4, text: '사람이 한 일이라고는' }];
+    const a = WS.buildAss(cues, { width: 1920, height: 1080 });
+    ok(/PlayResX: 1920/.test(a) && /PlayResY: 1080/.test(a),
+      '🔑 PlayResX/Y 가 영상 크기다 — SRT 를 그냥 필터에 물리면 384x288 로 읽혀 글자가 3.75배로 커진다(2026-09-16 실사고)');
+    const sty = (t) => t.split('\n').find((l) => l.indexOf('Style: P,') === 0).split(',');
+    const style = sty(a);
+    ok(style[2] === '56', `FontSize 가 픽셀 그대로다 — 1080 x 5.2% = 56 (${style[2]})`);
+    ok(style[21] === '81', `MarginV 도 픽셀 그대로다 — 1080 x 7.5% = 81 (${style[21]})`);
+    ok(style[18] === '2', `기본 위치는 아래 가운데(Alignment 2) (${style[18]})`);
+    ok(style[3] === '&H00202020' && style[5] === '&H00FFFFFF', '종이색 위라 진한 글자 + 흰 외곽');
+    ok(style[7] === '-1', 'ASS 에서 굵게는 -1 이다(1 이 아니다)');
+    ok((a.match(/^Dialogue:/gm) || []).length === 2, '큐 수만큼 Dialogue 줄');
+    ok(a.indexOf('Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,같은 기간에 그') > -1, '시각·본문이 그대로 들어간다');
+
+    const hs = sty(WS.buildAss(cues, { width: 640, height: 360 }));
+    ok(hs[2] === '19' && hs[21] === '27', `작은 판에서도 같은 비율 (${hs[2]}px · 여백 ${hs[21]})`);
+    ok(Number(hs[16]) >= 1 && Number(hs[17]) === 0, `외곽선은 비례하고(${hs[16]}px) 그림자는 없다(${hs[17]})`);
+
+    ok(sty(WS.buildAss(cues, { width: 1920, height: 1080, style: { pos: 'middle' } }))[18] === '5', "위치 '가운데' → Alignment 5");
+    ok(sty(WS.buildAss(cues, { width: 1920, height: 1080, style: { pos: 'top' } }))[18] === '8', "위치 '위' → Alignment 8");
+    const big = sty(WS.buildAss(cues, { width: 1920, height: 1080, style: { sizePct: 8, marginPct: 12, font: 'NanumGothic', bold: false } }));
+    ok(big[1] === 'NanumGothic' && big[2] === '86' && big[21] === '130' && big[7] === '0',
+      `사용자 설정(폰트·크기·여백·굵기)이 그대로 먹는다 (${big[1]} ${big[2]}px 여백${big[21]} 굵기${big[7]})`);
+    ok(WS.buildAss([{ start: 0, end: 0, text: '길이 0' }], {}).indexOf('Dialogue:') < 0, '길이 0 인 큐는 안 넣는다');
+  }
+
+  head('[5-b] normSubStyle — 이상한 값은 기본값으로(자막이 깨지지 않게)');
+  {
+    const d = WS.normSubStyle(null);
+    ok(d.font === 'Malgun Gothic' && d.sizePct === 5.2 && d.pos === 'bottom' && d.marginPct === 7.5 && d.bold === true, '기본값');
+    ok(WS.normSubStyle({ sizePct: 999 }).sizePct === 5.2, '범위 밖 크기는 기본값');
+    ok(WS.normSubStyle({ sizePct: 0 }).sizePct === 5.2, '0 도 기본값(글자가 사라진다)');
+    ok(WS.normSubStyle({ marginPct: 0 }).marginPct === 0, '여백 0 은 허용(화면 끝에 붙이기)');
+    ok(WS.normSubStyle({ pos: '중앙' }).pos === 'bottom', '모르는 위치는 기본값');
+    ok(WS.normSubStyle({ pos: 'middle' }).pos === 'middle', '아는 위치는 그대로');
+    ok(WS.normSubStyle({ font: '  ' }).font === 'Malgun Gothic', '빈 폰트는 기본값');
+    ok(WS.normSubStyle({ bold: false }).bold === false, '굵기 끄기');
+    ok(WS.normSubStyle({ sizePct: '7.5' }).sizePct === 7.5, '문자열 숫자도 받는다(입력칸 값)');
+  }
+
+  head('[5-c] 이스케이프·시각 변환·SRT 왕복');
+  {
+    ok(WS.fmtAssTime(0) === '0:00:00.00' && WS.fmtAssTime(3661.239) === '1:01:01.24', `H:MM:SS.cc (${WS.fmtAssTime(3661.239)})`);
+    ok(WS.assText('여는 {괄호} 있음').indexOf('\\{') > -1, '중괄호는 이스케이프한다(태그로 먹히면 글자가 사라진다)');
+    ok(WS.assText('두\n줄') === '두\\N줄', '개행은 \\N 으로');
+    const round = WS.cuesFromSrt(WS.srtFromCues([{ start: 1.5, end: 2.25, text: '왕복' }]));
+    ok(round.length === 1 && round[0].text === '왕복' && Math.abs(round[0].start - 1.5) < 0.002, 'SRT → 큐 왕복');
+    ok(WS.cuesFromSrt('쓰레기').length === 0, '이상한 SRT 는 빈 배열(안 죽는다)');
+    ok(WS.srtFromCues(WS.buildCues([{ sentences: [{ text: '한 문장.', dur: 2 }] }], { maxChars: 7 })) === WS.buildSrt([{ sentences: [{ text: '한 문장.', dur: 2 }] }], { maxChars: 7 }),
+      'buildSrt 와 srtFromCues 가 같은 결과 — 파일과 화면 자막이 갈리지 않는다');
   }
 
   if (!FF) { console.log('⚠ ffmpeg 를 찾을 수 없어 굽기 검증을 건너뜁니다'); }
@@ -129,7 +191,7 @@ const parseSrt = (s) => s.trim().split(/\n\n+/).map((b) => {
       if (b[i] > 240 && b[i + 1] > 240 && b[i + 2] > 240) white++;
     }
     ok(dark > 200, `🔑 한글이 실제로 그려졌다 — 진한 화소 ${dark}개 (두부·미표시면 0 에 가깝다)`);
-    ok(white > 200, `흰 외곽선이 그려졌다 — ${white}개`);
+    ok(white > 60, `흰 외곽선이 그려졌다 — ${white}개 (640 시험본은 글자가 19px 라 개수가 적다)`);
 
     // 자막이 없는 구간(0.05초, 첫 자막 전은 아니므로 맨 끝 여백 대신 상단 절반)을 본다 — 글자는 하단에만 있어야 한다.
     const top = path.join(TMP, 'top.rgb');
@@ -138,6 +200,36 @@ const parseSrt = (s) => s.trim().split(/\n\n+/).map((b) => {
     let topDark = 0;
     for (let i = 0; i < tb.length; i += 3) if (tb[i] < 80 && tb[i + 1] < 80 && tb[i + 2] < 80) topDark++;
     ok(topDark < 50, `자막은 **아래쪽에만** 있다 — 위 절반의 진한 화소 ${topDark}개`);
+
+    head('[6-b] 🔴 1080 에서도 **작고 아래에** 있는가 — 이 사고의 회귀');
+    // ⚠ 640(=288 의 1.25배)만 재면 이 버그를 못 잡는다. 실사고는 1080(3.75배)·1920(6.67배)에서 터졌다.
+    const big = path.join(TMP, 'big.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0xF5EBD7:s=1920x1080:r=30', '-t', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', big]);
+    const cues2 = [{ start: 0, end: 2, text: '같은 기간에 그 사람이 한 일이라고는' }];
+    const rb = await WS.burnSubtitle({ videoPath: big, cues: cues2, tmpDir: TMP, width: 1920, height: 1080, log: () => {} });
+    ok(rb.ok, '1080 도 구웠다 — ' + (rb.error || ''));
+    const mm = measure(big, 1920, 1080);
+    ok(mm.rows > 0, `글자가 그려졌다 (진한 행 ${mm.rows})`);
+    ok(mm.bottom >= 55 && mm.bottom <= 140, `🔑 하단 여백이 요청값(81px) 근처다 — ${mm.bottom}px (옛 SRT 방식은 328px 였다)`);
+    ok(mm.h <= 90, `🔑 글자 블록 높이가 한 줄 크기다 — ${mm.h}px (옛 SRT 방식은 359px = 두 줄로 접힌 거대 자막)`);
+    ok(mm.top > 700, `자막이 화면 **아래쪽**에 있다 — 첫 진한 행 y=${mm.top} (옛 방식은 393 = 한복판)`);
+
+    // 위치 설정이 실제 화면에서도 먹는지 — '가운데'로 구우면 글자가 화면 중앙에 온다.
+    const midv = path.join(TMP, 'mid.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0xF5EBD7:s=1920x1080:r=30', '-t', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', midv]);
+    await WS.burnSubtitle({ videoPath: midv, cues: cues2, tmpDir: TMP, width: 1920, height: 1080, style: { pos: 'middle' }, log: () => {} });
+    const mc = measure(midv, 1920, 1080);
+    ok(mc.top > 450 && mc.bottom > 450, `위치 '가운데' 가 실제로 화면 중앙에 그린다 — y=${mc.top}, 하단여백 ${mc.bottom}`);
+
+    // A/B — 옛 방식(SRT + force_style)을 **같은 조건**으로 구워 실제로 몇 배 컸음을 확인한다(헛단언 방지).
+    const oldv = path.join(TMP, 'old.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0xF5EBD7:s=1920x1080:r=30', '-t', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', oldv]);
+    fs.writeFileSync(path.join(TMP, '_ab.srt'), WS.srtFromCues(cues2), 'utf8');
+    execFileSync(FF, ['-y', '-i', oldv, '-vf', "subtitles=_ab.srt:force_style='FontName=Malgun Gothic,FontSize=56,MarginV=81,Outline=3'",
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(TMP, 'old2.mp4')], { cwd: TMP, stdio: ['ignore', 'pipe', 'pipe'] });
+    const mo = measure(path.join(TMP, 'old2.mp4'), 1920, 1080);
+    ok(mo.h > mm.h * 2 && mo.bottom > mm.bottom * 2,
+      `A/B — 옛 SRT 방식은 글자 ${mo.h}px · 하단 ${mo.bottom}px 로 실제로 몇 배 크다(새 방식 ${mm.h}px · ${mm.bottom}px)`);
 
     head('[7] 방어 — 던지지 않고 이유를 준다');
     const e1 = await WS.burnSubtitle({ videoPath: path.join(TMP, '없다.mp4'), srtText: srt, tmpDir: TMP });

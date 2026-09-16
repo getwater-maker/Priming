@@ -46,7 +46,8 @@ console.log('\n[1] 화풍 문자열이 앱이 쓰는 것과 같은가(드리프�
   const bible = d.channels.find((c) => c.channel === '05_성경');
   chk(bible.long.prompt === SS.getPrompt('webtoon-illust'), 'long.prompt === style-store.getPrompt (글자까지 같다)');
   chk(bible.long.prompt.includes('attractive good-looking characters'), '기본 스타일의 공통보정 문구가 포함된다(앱이 실제로 보내는 형태)');
-  chk(bible.long.styleName === '웹툰 일러스트' && bible.long.isBuiltIn === true, '이름·기본스타일 표시', bible.long);
+  // ⚠ 2026-09-16 부터 기본/사용자 구분이 없다(전부 수정·삭제 가능) → isBuiltIn 은 **표시용 잔재**이고 늘 false 다.
+  chk(bible.long.styleName === '웹툰 일러스트' && bible.long.isBuiltIn === false, '이름 표시(isBuiltIn 은 호환용 필드일 뿐)', bible.long);
   chk(d.styles.length === SS.loadAll().length && d.styles.every((s) => s.id && s.prompt), '전체 스타일 목록도 함께 내보낸다(썸네일용 지목에 쓰인다)');
   chk(d.combineRule.includes('plain unmarked surfaces') && d.combineRule.includes('no text'), '조합 규칙을 문서로 함께 내보낸다', d.combineRule);
   const pipe = fs.readFileSync(path.join(__dirname, '..', 'core', 'pipeline.js'), 'utf8');

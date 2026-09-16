@@ -69,7 +69,11 @@ function pc(name) {
   return SS;
 }
 const userStyles = (SS) => JSON.parse(fs.existsSync(SS.STORE_PATH) ? fs.readFileSync(SS.STORE_PATH, 'utf8') : '[]');
-const names = (SS) => userStyles(SS).map((s) => s.name).sort();
+// 🔑 2026-09-16 부터 **기본 스타일도 styles.json 에 씨앗으로 심긴다**(전부 수정·삭제 가능).
+//   그래서 전파·삭제를 볼 때는 씨앗을 걸러 **사람이 만든 것만** 본다 — 안 그러면 기대값이 28개 노이즈에 묻힌다.
+const SEED_IDS = new Set(require('../core/style-store').BUILT_IN_STYLES.map((s) => s.id));
+const mine = (list) => list.filter((s) => !SEED_IDS.has(s.id));
+const names = (SS) => mine(userStyles(SS)).map((s) => s.name).sort();
 const quiet = () => {};
 
 (async () => {
@@ -97,11 +101,13 @@ const quiet = () => {};
   chk(!!A.add({ name: '내스타일1', prompt: 'watercolor' }) && !!A.add({ name: '내스타일2', prompt: 'ink' }), '메인 PC 에 스타일 2개');
   {
     const r = await A.pullFromServer(quiet);
-    chk(r.ok && r.pushed === 2, '첫 동기화 → 이 PC 스타일 2개가 공용 목록으로 올라간다', r);
-    eq(DOC.styles.map((s) => s.name), ['내스타일1', '내스타일2'], '서버에 실제로 저장됨');
+    chk(r.ok && r.pushed >= 2 && mine(DOC.styles).length === 2, '첫 동기화 → 이 PC 스타일 2개가 공용 목록으로 올라간다', { pushed: r.pushed, mine: mine(DOC.styles).length });
+    eq(mine(DOC.styles).map((s) => s.name), ['내스타일1', '내스타일2'], '서버에 실제로 저장됨(씨앗 제외)');
     chk(DOC.rev === 1, '서버 rev 1', DOC.rev);
     chk(A.loadAll().length === A.BUILT_IN_STYLES.length + 2, '기본 스타일 + 사용자 스타일 = loadAll');
-    chk(!DOC.styles.some((s) => A.isBuiltIn(s.id)), '기본 스타일은 서버로 보내지 않는다(코드에 있으니까)');
+    // 🔑 정책 변경(2026-09-16): 기본 스타일도 **전부 수정·삭제 가능**해졌으므로 서버에도 함께 올린다.
+    //   그래야 다른 PC 에서 고친 기본 스타일이 전파되고, 지운 것이 되살아나지 않는다.
+    chk(DOC.styles.filter((s) => SEED_IDS.has(s.id)).length === A.BUILT_IN_STYLES.length, '씨앗(옛 기본) 스타일도 공용 목록에 올라간다 — 모두 같은 기준');
   }
 
   // ── 3. 아내 PC 가 앱을 켜기만 해도 목록이 내려온다 ──────────────────────
@@ -110,7 +116,7 @@ const quiet = () => {};
   {
     const r = await B.pullFromServer(quiet);
     eq(names(B), ['내스타일1', '내스타일2'], '아내 PC 가 메인 PC 의 스타일을 받았다');
-    chk(r.ok && r.pushed === 0, '받을 것만 있으면 올리지 않는다', r);
+    chk(r.ok && mine(userStyles(B)).length === 2, '받을 것만 있으면 사람 스타일이 그대로 2개', { mine: mine(userStyles(B)).map((s) => s.name) });
     const w = userStyles(B).find((s) => s.name === '내스타일1');
     chk(B.getPrompt(w.id) === 'watercolor', '프롬프트까지 그대로');
   }
@@ -120,7 +126,7 @@ const quiet = () => {};
   {
     B.add({ name: '아내스타일', prompt: 'gouache' });
     const w = await B.pushToServer(quiet);
-    chk(w.ok && DOC.rev === 2 && DOC.styles.length === 3, '아내 PC 추가 → 서버 rev 2 · 3개', { rev: DOC.rev, n: DOC.styles.length });
+    chk(w.ok && mine(DOC.styles).length === 3, '아내 PC 추가 → 공용 목록의 사람 스타일 3개', { rev: DOC.rev, mine: mine(DOC.styles).length });
     const A2 = pc('A');
     await A2.pullFromServer(quiet);
     eq(names(A2), ['내스타일1', '내스타일2', '아내스타일'], '메인 PC 가 아내 스타일을 받았다');
@@ -133,7 +139,7 @@ const quiet = () => {};
     const target = userStyles(A3).find((s) => s.name === '내스타일2');
     chk(A3.remove(target.id), '메인 PC 에서 삭제');
     const w = await A3.pushToServer(quiet);
-    chk(w.ok && DOC.styles.length === 2, '서버에서도 사라짐', { n: DOC.styles.length });
+    chk(w.ok && mine(DOC.styles).length === 2, '서버에서도 사라짐', { mine: mine(DOC.styles).map((s) => s.name) });
     const B2 = pc('B');
     await B2.pullFromServer(quiet);
     eq(names(B2), ['내스타일1', '아내스타일'], '아내 PC 에서도 사라진다(합치기만 하면 삭제가 영원히 안 된다)');
@@ -151,7 +157,7 @@ const quiet = () => {};
     const w = await A5.pushToServer(quiet);
     chk(hits.conflicts === before + 1, '낡은 rev 로 보내면 서버가 409 로 막는다');
     chk(w.ok, '409 뒤 합쳐서 다시 저장 성공', w);
-    const got = DOC.styles.map((s) => s.name).sort();
+    const got = mine(DOC.styles).map((s) => s.name).sort();
     chk(got.indexOf('아내가먼저') >= 0 && got.indexOf('내가나중') >= 0, '양쪽 새 스타일이 모두 살아 있다(덮어쓰기 사고 없음)', got);
     chk(names(A5).indexOf('아내가먼저') >= 0, '이 PC 로컬에도 합쳐진 목록이 저장된다', names(A5));
   }
