@@ -756,12 +756,9 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
 }
 
 // ── SRT 자막 파일 (subtitles 폴더용) ────────────────────
-function _fmtSrt(t) {
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60);
-  const ms = Math.round((t - Math.floor(t)) * 1000);
-  const p = (n, l = 2) => String(n).padStart(l, '0');
-  return `${p(h)}:${p(m)}:${p(s)},${p(ms, 3)}`;
-}
+// 🔑 시각 포맷은 core/caption-splitter 하나만 쓴다 — 자막을 내는 곳이 셋(.srt · 프리미어 · 화이트보드)이라
+//   세 벌로 두면 어느 하나만 고쳐져 조용히 갈라진다.
+const _fmtSrt = require('./caption-splitter').fmtSrtTime;
 function writeSrt(project, srtPath, maxChars = 7) {
   fs.mkdirSync(path.dirname(srtPath), { recursive: true });
   let t = 0, idx = 1, out = '';

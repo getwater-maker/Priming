@@ -7,6 +7,8 @@
  *   · capLongEdge — 출력 긴 변(px). 1920 이 최종본. **렌더 시간은 픽셀 수에 비례**한다(실측: 16초 예제가
  *     1920 에서 83초 = 프레임당 0.173초 → 22분 편이면 4병렬로 29분). 1080 은 약 1/3, 640 은 시험용.
  *     ⚠ 튜닝·확인 중에는 반드시 낮춰서 돌린다 — 안 그러면 한 번 고칠 때마다 29분을 태운다.
+ *   · subtitle — 자막을 **영상에 구울지**(하드번). 화이트보드는 Vrew 를 안 거치는 최종물이라 기본 켬.
+ *     ⚠ 구우면 영상을 **다시 인코딩**한다(음성 얹기는 복사였다). 꺼도 `.srt` 파일은 옆에 남는다.
  *   · concurrency — 장면을 동시에 몇 개 렌더할지(파이썬 자식 프로세스 수). 0 = 자동(CPU 코어 - 2, 1~4).
  *     ⚠ 화이트보드 렌더는 **CPU 작업**이라 GPU 레인(TTS·로컬 ComfyUI)과 무관하다 — `whiteboard` 레인만 잡는다.
  *
@@ -25,6 +27,7 @@ const CAP_CHOICES = [1920, 1080, 640];
 const DEFAULTS = {
   capLongEdge: 1920,
   concurrency: 0,          // 0 = 자동
+  subtitle: true,          // 💬 자막을 영상에 굽는다(하드번). 끄면 .srt 파일만 옆에 남는다.
 };
 
 function autoConcurrency() {
@@ -40,6 +43,8 @@ function _norm(j, fallback = DEFAULTS) {
   return {
     capLongEdge: CAP_CHOICES.includes(cap) ? cap : fallback.capLongEdge,
     concurrency: (Number.isFinite(con) && con >= 0 && con <= 8) ? con : fallback.concurrency,
+    // ⚠ 값이 없으면(옛 설정 파일) **켠 것으로 본다** — 새로 생긴 기능이 조용히 꺼져 있으면 「자막이 안 나온다」가 된다.
+    subtitle: (j && typeof j.subtitle === 'boolean') ? j.subtitle : fallback.subtitle,
   };
 }
 

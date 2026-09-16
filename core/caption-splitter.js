@@ -262,7 +262,21 @@ function auditCaptionLines(lines) {
   return bad;
 }
 
-module.exports = { splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES };
+// ── SRT 시각 포맷 (00:00:01,234) ──────────────────────────────────
+//   🔑 자막을 내는 곳이 셋이다(.vrew 옆 .srt · 프리미어 · 화이트보드 하드번) — 포맷을 세 벌로 두면
+//     어느 하나만 고쳐져 조용히 갈라진다. 여기 한 곳에 둔다.
+function fmtSrtTime(t) {
+  // ⚠ 초와 ms 를 따로 반올림하면 59.9996 초가 `00:00:59,1000` 이 된다(옛 pipeline._fmtSrt 의 결함).
+  //   전체를 ms 로 한 번에 반올림한 뒤 쪼갠다.
+  const total = Math.max(0, Math.round((Number(t) || 0) * 1000));
+  const ms = total % 1000, sec = (total - ms) / 1000;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const p = (n, l = 2) => String(n).padStart(l, "0");
+  return p(h) + ":" + p(m) + ":" + p(s) + "," + p(ms, 3);
+}
+
+module.exports = { splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
+
 
 // ⚠ 「스크립트로 직접 실행했을 때만 도는 자기검사」 블록을 여기 두지 않는다.
 //   이 파일은 렌더러 번들(Vite)에도 들어가고, commonjs 변환이 그 CJS 런타임 참조를 브라우저로

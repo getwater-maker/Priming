@@ -62,8 +62,9 @@ ok(/_runOnLanes\(\['localGpu'\]/.test(SRC), '그 래퍼가 localGpu 레인을 �
   ok(!/genGroupVideosManual/.test(SRC.slice(i, j)), 'runMakeAllCore 는 그 래퍼를 쓰지 않는다(교착 방지)');
 }
 ok(/const canParallel = !dry && !_imgLocalGpu/.test(SRC), 'canParallel 이 로컬 이미지를 배제한다');
-ok(/videoPipeline = _pipeBase && \(\(canParallel && grokVideoPipeline\) \|\| comfyVideoPipeline\)/.test(SRC),
-   '클라우드 비디오는 canParallel 과 무관하게 파이프라인 유지');
+// ⚠ 화이트보드(✏ MP4)는 **그룹 이미지만** 쓴다 → 비디오를 아예 만들지 않는다(v0.5.12). 그래서 _wbTarget 이 끼어 있다.
+ok(/videoPipeline = _pipeBase && !_wbTarget && \(\(canParallel && grokVideoPipeline\) \|\| comfyVideoPipeline\)/.test(SRC),
+   '클라우드 비디오는 canParallel 과 무관하게 파이프라인 유지(단 화이트보드는 비디오 자체를 건너뛴다)');
 ok(/if \(videoPipeline && !canParallel && _imgLocalGpu\) \{/.test(SRC), '(TTS→이미지 순차) ∥ 비디오 분기 존재');
 ok(/await Promise\.all\(\[\(async \(\) => \{ await ttsStage\(\); if \(!S\.abort\) await imageStage\(\); \}\)\(\), videoStage\(\)\]\)/.test(SRC),
    '그 분기가 TTS→이미지를 순차로 묶고 비디오만 병렬로 돌린다');

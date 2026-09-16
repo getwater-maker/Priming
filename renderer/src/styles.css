@@ -251,7 +251,10 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 탭형 모달 — 세로 스크롤 대신 상단 탭으로 섹션을 나눈다 (채널편집 등). 탭을 바꿔도 창 높이가 튀지 않게 본문 최소높이 고정 */
 .modal-card.tabbed{overflow:visible}
 .modal-card.tabbed .tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px}
-.modal-card.tabbed .tabbody{min-height:246px}
+/* 🔑 탭을 눌러도 창 크기가 그대로여야 한다(로이 2026-09-16) — 기준은 **가장 긴 탭**(📋 채널, 실측 389px).
+   값을 낮추면 그 탭에서만 창이 커지고, 새 항목을 넣어 이 값을 넘기면 또 들쭉날쭉해진다 →
+   탭에 줄을 늘렸으면 test/comfy-panes.smoke.js 의 「탭 높이 일관」 단언이 잡는다. */
+.modal-card.tabbed .tabbody{min-height:389px}
 .modal-card.tabbed .tabbody>div>.frow:first-child{margin-top:0}
 .modal-card.tabbed .tabbody .subhead:first-child{margin-top:0;border-top:none;padding-top:0}
 /* ComfyUI 설정 — 넓은 2열 그리드 (한 화면에 모두) */
@@ -273,6 +276,11 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .crow select,.crow input{padding:3px 5px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--strong)}
 .crow .n{width:48px}
 /* 세로/위치/미세 — 한 줄 고정(줄바꿈 방지), 셀렉트는 유연 축소 */
+/* 🔑 라벨 위 · 고르는 칸 아래. select 글자 길이에 따라 어떤 칸만 줄바꿈되면 열 높이가 들쭉날쭉해진다
+   (로이 2026-09-16: "이미지와 출력의 선택항목을 비디오처럼 아랫줄로"). 셋을 처음부터 같은 모양으로 둔다. */
+.crow.stack{flex-direction:column;align-items:stretch;gap:3px}
+.crow.stack .l{min-width:0}
+.crow.stack select,.crow.stack input{width:100%}
 .crow.tri{flex-wrap:nowrap;gap:4px}
 .crow.tri .l{min-width:0;white-space:nowrap}
 .crow.tri select{flex:1 1 0;min-width:0;padding:3px 2px}

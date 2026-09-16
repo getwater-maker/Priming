@@ -18,6 +18,10 @@
  *   맞아떨어진다(v0.3.91). `core/whiteboard-audio` 가 장면마다 문장 음성을 이어붙여 **그 장면 영상
  *   길이에 정확히** 맞춘 뒤(프레임 반올림 드리프트 제거) 한 번에 mux 한다.
  *   ⚠ 음성 얹기가 실패해도 **무음 MP4 는 그대로 남긴다** — 30분 렌더 결과를 버리지 않는다.
+ *
+ * 💬 **자막(2026-09-16)** — `core/whiteboard-subtitle` 이 `.srt` 를 내고, 스위치가 켜져 있으면 **영상에 굽는다**.
+ *   Vrew 를 거치지 않는 최종물이라 소프트 자막은 「안 보인다」가 되기 때문이다. 굽기는 재인코딩이라
+ *   비싸므로 ⚙ 에서 끌 수 있고, 꺼도 `.srt` 는 그대로 나온다(유튜브 업로드용).
  */
 
 const fs = require('fs');
@@ -28,6 +32,7 @@ const DEFAULT_DEPS = {
   ANN: () => require('./whiteboard-annotation'),
   SC: () => require('./whiteboard-scenes'),
   WA: () => require('./whiteboard-audio'),
+  WS: () => require('./whiteboard-subtitle'),
 };
 
 // 실측(v0.3.90): 1920 긴변 · 60fps 렌더가 프레임당 0.173초. 22분 = 39,960프레임(≈30.3프레임/초 기준).
@@ -90,7 +95,7 @@ function planWhiteboard(project, opts = {}) {
   if (missing.length) {
     lines.push(`⛔ 이미지가 없는 장면 ${missing.length}개 (G${missing.map((m) => m.groupNums.join('+')).join(', G')}) — 이미지를 먼저 만들어야 렌더할 수 있습니다`);
   }
-  lines.push('ⓘ 음성은 얹힙니다(5단계). 다만 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
+  lines.push('ⓘ 음성·자막이 얹힙니다(5단계). 다만 3단계 전이라 그림은 기존 화풍 그대로 씁니다.');
   return { ok: missing.length === 0, scenes: plan.scenes, summary: plan.summary, missing, totalSec, estimateSec, lines };
 }
 
@@ -286,10 +291,33 @@ async function runWhiteboard(project, outRoot, opts = {}) {
     }
   }
 
-  const tail = audio.ok ? '🔊 음성 포함' : '⚠ 무음';
+  // 8) 💬 자막 — `.srt` 는 **언제나** 옆에 남기고, 스위치가 켜져 있으면 영상에도 굽는다.
+  //   ⚠ 굽기는 재인코딩이라 비싸다(1920 22분 = 수 분). 실패해도 영상은 그대로 둔다.
+  const WS = deps.WS();
+  let srtPath = null, subtitle = { ok: false, error: '건너뜀' };
+  if (opts.withSubtitle !== false) {
+    const scForSub = WS.scenesForSubtitle(project, plan.scenes);
+    const srt = WS.buildSrt(scForSub, { maxChars: opts.captionMaxChars || 7, sceneDurations: (audio && audio.durations) || [] });
+    if (srt.trim()) {
+      srtPath = path.join(outRoot, `${baseName}_whiteboard.srt`);
+      try { fs.writeFileSync(srtPath, srt, 'utf8'); log(`📄 자막 파일 — ${path.basename(srtPath)}`); }
+      catch (e) { srtPath = null; log(`⚠ 자막 파일을 쓰지 못했습니다 — ${e.message}`); }
+      if (opts.burnSubtitle !== false) {
+        const h = (results.find((r) => r && r.height) || {}).height || cap;
+        log('💬 자막을 영상에 굽는 중… (영상을 다시 인코딩합니다 — 길이에 비례해 몇 분 걸릴 수 있습니다)');
+        subtitle = await withAbort(isAborted, (sig) => WS.burnSubtitle({
+          videoPath: output, srtText: srt, tmpDir: wbDir, height: h, log, abortSignal: sig,
+        }));
+        if (!subtitle.ok) log(`⚠ 자막 굽기 실패 — ${subtitle.error} (영상은 그대로 두었습니다 · .srt 는 남아 있습니다)`);
+      } else { subtitle = { ok: false, error: '굽기 꺼짐(.srt 만)' }; }
+    } else { log('⚠ 자막으로 만들 문장이 없습니다'); }
+  }
+
+  const tail = (audio.ok ? '🔊 음성 포함' : '⚠ 무음') + (subtitle.ok ? ' · 💬 자막 포함' : (srtPath ? ' · 📄 .srt 별도' : ''));
   log(`✅ 화이트보드 MP4 — ${path.basename(output)} (장면 ${jobs.length}개 · ${fmtDur(plan.totalSec)}) ${tail}`);
   return { ok: true, output, wbDir, sceneCount: jobs.length, rendered, skipped, totalSec: plan.totalSec,
-    hasAudio: !!audio.ok, audioError: audio.ok ? null : audio.error };
+    hasAudio: !!audio.ok, audioError: audio.ok ? null : audio.error,
+    srtPath, hasSubtitle: !!subtitle.ok, subtitleError: subtitle.ok ? null : subtitle.error };
 }
 
 module.exports = { planWhiteboard, runWhiteboard, imageForScene, sentenceAudioMap, estimateRenderSec, annotationStale, prepareAnnotation, fmtDur };

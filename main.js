@@ -2180,7 +2180,7 @@ async function _wbGateB({ dir, files, plan }) {
   }
 }
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
-async function runWhiteboardFor(pr, outRoot, { interactive = false, force = false } = {}) {
+async function runWhiteboardFor(pr, outRoot, { interactive = false, force = false, captionMaxChars = 7 } = {}) {
   const WP = require('./core/whiteboard-pipeline');
   const WCfg = require('./core/whiteboard-config');
   const cfg = WCfg.load();
@@ -2189,6 +2189,8 @@ async function runWhiteboardFor(pr, outRoot, { interactive = false, force = fals
     return await _runOnLanes(['whiteboard'], `${prLabel(pr)} 화이트보드 렌더`, () => WP.runWhiteboard(pr, outRoot, {
       log, isAborted: () => S.abort, baseName: vrewBaseName(pr),
       capLongEdge: cfg.capLongEdge, concurrency: conc, force,
+      // 💬 자막 — .srt 는 언제나 내고, 굽기는 ⚙ 스위치를 따른다(굽기는 재인코딩이라 비싸다).
+      captionMaxChars, burnSubtitle: cfg.subtitle !== false,
       gateA: interactive ? _wbGateA : null,
       gateB: interactive ? _wbGateB : null,
       onProgress: () => pushDtoUpdate(),
@@ -2218,28 +2220,19 @@ ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
   }
   return out;
 });
-// ✏ 렌더 — 대화형(관문 A·B 를 묻는다). 게이트는 .vrew 와 같다(음성·이미지 누락이면 만들지 않는다).
-ipcMain.handle('whiteboard-build', async (_e, args = {}) => {
+// ✏ 렌더 — **전 과정**이다: 음성(TTS) → 이미지 → 화이트보드 렌더(관문 A·B 를 묻는다).
+//   🔴 예전엔 4단계(렌더)만 해서, 음성·이미지가 없으면 「이미지 미생성」 팝업만 띄우고 아무것도 만들지
+//     않았다(로이 2026-09-16: "렌더를 누르면 TTS·이미지 작업이 진행되고 렌더가 진행되어야지").
+//   🔑 1~3단계를 여기 복제하지 않는다 — `runMakeAllCore` 가 그 순서·게이트·이상 이미지 재생성·
+//     절전 차단·로그를 이미 갖고 있다. 두 벌로 두면 반드시 갈라진다(이 저장소의 단골 사고).
+//     여기서는 **출력만 화이트보드로 고정**하고 관문을 묻게(wbInteractive) 한다.
+//   ⚠ TTS 를 돌리므로 `enqueueTtsJob`(직렬 큐)을 반드시 거친다 — 안 그러면 다른 TTS 작업과 겹쳐
+//     공용 TTS 매니저가 깨진다(v0.2.57 사고).
+ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트보드 렌더', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  S.abort = false;
-  const incomplete = [], noTts = [];
-  for (const pr of S.parsed.projects) {
-    if (args.shortsNum && pr.shortsNum !== args.shortsNum) continue;
-    // 화이트보드는 음성·화면이 **둘 다 필수**라 outMode 게이트(gateVisual/gateTts) 조건 없이 본다 — .vrew 의 두 게이트와 같은 판정 함수.
-    const missWb = missingVisualGroups(pr);
-    if (missWb.length) { incomplete.push({ label: prLabel(pr), nums: missWb }); log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${missWb.length}개 (G${missWb.join(', G')}) → 화이트보드 건너뜀`); continue; }
-    const mttsWb = missingTtsNums(pr);
-    if (mttsWb.length) { noTts.push({ label: prLabel(pr), n: mttsWb.length, total: (pr.sentences || []).length, head: mttsWb.slice(0, 8).join(', '), headN: 8 }); log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mttsWb.length}개 → 화이트보드 건너뜀`); continue; }
-    log(`✏ ${prLabel(pr)} 화이트보드 MP4 렌더…`);
-    const r = await runWhiteboardFor(pr, S.outRoot, { interactive: true, force: !!args.force });
-    if (r.ok) { try { shell.openPath(r.output); } catch (_) {} }
-    else if (!r.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${r.error}`);
-  }
-  warnIncompleteVisuals(incomplete);
-  warnMissingTts(noTts);
-  pushDtoUpdate();
+  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', wbInteractive: true, openVrew: true });
   return P.toDTO(S.parsed);
-});
+}));
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -4723,6 +4716,8 @@ async function runMakeAllCore(opts = {}) {
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
+  // ✏ 렌더 버튼으로 들어왔나 — 그때만 관문 A/B 를 묻는다(큐는 묻지 않고 그대로 렌더한다).
+  const wbInteractive = !!opts.wbInteractive;
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
   //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
   const outMode = normOutMode(opts.outMode);
@@ -4783,7 +4778,9 @@ async function runMakeAllCore(opts = {}) {
     try { return !!require('./core/comfy-video').loadConfig().cloud; } catch { return false; }
   })();
   const _pipeBase = !dry;
-  const videoPipeline = _pipeBase && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
+  // 🔑 화이트보드는 **그룹 이미지만** 쓴다(영상 트랙이 없다) → 비디오를 만들면 시간·크레딧만 버린다.
+  const _wbTarget = (outTarget === 'whiteboard');
+  const videoPipeline = _pipeBase && !_wbTarget && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
 
@@ -4920,6 +4917,8 @@ async function runMakeAllCore(opts = {}) {
   // ── 3단계: 비디오 일괄 생성 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
   if (skipVisual) {
     log('🎬 3단계 — 비디오 건너뜀 (음성만 출력)');
+  } else if (_wbTarget) {
+    log('🎬 3단계 — 화이트보드는 그룹 이미지만 씁니다 — 비디오 건너뜀 (시간·크레딧 절약)');
   } else if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
   } else if (_grokCool) {
@@ -4948,7 +4947,8 @@ async function runMakeAllCore(opts = {}) {
     const wbHere = (outTarget === 'whiteboard');
     if (wbHere && outMode !== 'full') log('⚠ 화이트보드는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 로 만듭니다');
     const wbGo = wbHere && outMode === 'full';
-    log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (큐라 관문을 묻지 않고 진행 · 결과는 무음)'
+    log(wbGo ? `📦 4단계 — ✏ 화이트보드 MP4 렌더…${wbInteractive ? ' (관문 A → 확인 그림 → 렌더)' : ' (큐라 관문을 묻지 않고 진행)'}`
+
       : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
@@ -4980,8 +4980,9 @@ async function runMakeAllCore(opts = {}) {
         continue;
       }
       if (wbGo) {
-        // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 큐라 관문 A/B 는 묻지 않는다.
-        const wr = await runWhiteboardFor(pr, outRoot, { interactive: false });
+        // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다.
+        // 관문 A/B 는 **대화형일 때만**(✏ 렌더 버튼) 묻는다 — 무인 큐가 팝업에 멎으면 손실이 더 크다.
+        const wr = await runWhiteboardFor(pr, outRoot, { interactive: wbInteractive, captionMaxChars });
         if (wr.ok) { if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} } }
         else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
         continue;

@@ -887,8 +887,9 @@ export default function App() {
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
-  async function runMake(shortsNum) {
-    const args = {
+  // ⚡ 만들기·✏ 렌더가 **같은 인자**를 쓴다 — 두 벌로 두면 한쪽만 고쳐져 조용히 갈라진다.
+  function makeArgs(shortsNum) {
+    return {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
@@ -897,6 +898,9 @@ export default function App() {
       outMode,  // 전체 / 음성만 / 화면만
       outTarget, // .vrew / ✏ 화이트보드 MP4
     };
+  }
+  async function runMake(shortsNum) {
+    const args = makeArgs(shortsNum);
     // ⚠ 「🎤 음성만」은 이미지를 만들지 않으므로 이미지 프롬프트를 요구하지 않는다(요구하면 못 만든다).
     const _needImg = (outMode === 'audio') ? 'none' : 'all';
     const _needVid = (outMode === 'audio' || videoEngine === 'none') ? 'none' : 'range';
@@ -1226,9 +1230,12 @@ export default function App() {
   async function showWhiteboardPlan() {
     try { await api.whiteboardPlan({ shortsNum: null }); } catch (e) { logline('장면 계획 오류: ' + e.message); }
   }
+  // ✏ 렌더 = **전 과정**(음성 → 이미지 → 렌더). 예전엔 렌더만 해서 자산이 없으면 팝업만 떴다(로이 2026-09-16).
+  //   ⚠ 비디오는 요구하지 않는다 — 화이트보드는 그룹 이미지만 쓴다.
   async function runWhiteboardBuild(shortsNum) {
-    setStatus('✏ 화이트보드 렌더 중… (관문 A → 확인 그림 → 렌더)');
-    try { const d = await api.whiteboardBuild({ shortsNum }); if (d) setDto(d); setStatus('✏ 화이트보드 완료'); }
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return;
+    setStatus('✏ 화이트보드 — 음성·이미지 → 렌더 중… (관문 A → 확인 그림 → 렌더)');
+    try { const d = await api.whiteboardBuild({ ...makeArgs(shortsNum), outTarget: 'whiteboard' }); if (d) setDto(d); setStatus('✏ 화이트보드 완료'); }
     catch (e) { logline('화이트보드 오류: ' + e.message); setStatus('오류'); }
   }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
@@ -2363,7 +2370,7 @@ export default function App() {
               「만들기·내보내기」는 한 동작의 앞뒤라 한 그룹에 둔다. */}
           <span className="hgroup">
             <span className="glabel">④ 완성</span>
-            <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). ⚠ 화이트보드는 아직 무음입니다(5단계 전)." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
+            <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
               <option value="vrew">.vrew (Vrew)</option>
               <option value="whiteboard">✏ 화이트보드 MP4</option>
             </select>
@@ -2373,8 +2380,11 @@ export default function App() {
                 <option value="1080">1080 (빠름)</option>
                 <option value="640">640 (시험)</option>
               </select>
+              <label className="chk" title="자막을 영상에 굽습니다(하드번) — 화이트보드는 Vrew 를 거치지 않는 최종물이라 굽지 않으면 화면에 글자가 안 보입니다. ⚠ 구우면 영상을 다시 인코딩하므로 길이에 비례해 몇 분 더 걸립니다. 꺼도 .srt 파일은 옆에 남습니다." style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
+              </label>
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
-              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 렌더합니다 — 장면 계획(관문 A) → 확인 그림(관문 B) 두 번 물은 뒤 렌더. 이미 만든 장면은 건너뜁니다(이어받기)." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
+              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 만듭니다 — 음성(TTS) → 이미지 → 장면 계획(관문 A) → 확인 그림(관문 B) → 렌더. 이미 만든 음성·이미지·장면은 건너뜁니다(이어받기). 비디오는 만들지 않습니다(화이트보드는 그룹 이미지만 씁니다)." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
             </>)}
             <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
@@ -2668,7 +2678,7 @@ export default function App() {
                 <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
                 <div className="twocol">
                   <div className="col">
-                    <div className="crow"><span className="l">이미지</span>
+                    <div className="crow stack"><span className="l">이미지</span>
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
                       <select value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
@@ -2679,7 +2689,7 @@ export default function App() {
                       </select></div>
                   </div>
                   <div className="col">
-                    <div className="crow"><span className="l">비디오</span>
+                    <div className="crow stack"><span className="l">비디오</span>
                       <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
                         <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)} />
@@ -2691,7 +2701,7 @@ export default function App() {
                       </select></div>
                   </div>
                   <div className="col">
-                    <div className="crow"><span className="l">출력</span>
+                    <div className="crow stack"><span className="l">출력</span>
                       <select value={ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew'}
                         onChange={(e) => setCh({ ...ch, outTarget: e.target.value })}>
                         <option value="vrew">.vrew (Vrew)</option>
@@ -2699,7 +2709,7 @@ export default function App() {
                       </select></div>
                   </div>
                 </div>
-                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다. <b>출력</b>은 완성물 종류 — .vrew 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 아직 무음).</div>
+                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다. <b>출력</b>은 완성물 종류 — .vrew 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 음성·자막 포함).</div>
               </div>)}
 
               {chTab === 'folder' && (<div>

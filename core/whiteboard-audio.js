@@ -101,6 +101,7 @@ async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSig
   const tmps = [];
   try {
     const parts = [];
+    const durations = [];   // 🔑 장면 **실측** 길이 — 자막(whiteboard-subtitle)이 같은 기준을 써야 글자가 소리와 함께 간다.
     for (let i = 0; i < scenes.length; i++) {
       if (abortSignal && abortSignal.aborted) return { ok: false, cancelled: true, error: '중단됨' };
       const sc = scenes[i];
@@ -110,6 +111,7 @@ async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSig
       let dur = 0;
       try { dur = (await MU.getMediaDuration(sc.video)) || 0; } catch (_) { dur = 0; }
       if (!dur) return { ok: false, error: `장면 ${i + 1} 영상 길이를 잴 수 없습니다 (${path.basename(sc.video || '')})` };
+      durations.push(dur);
       const out = path.join(tmpDir, `_wa_scene_${String(i + 1).padStart(2, '0')}.wav`);
       await buildSceneAudio({ inputs: have, durationSec: dur, outPath: out, tmpDir, abortSignal });
       tmps.push(out); parts.push(out);
@@ -133,7 +135,7 @@ async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSig
     let outDur = 0;
     try { outDur = (await MU.getMediaDuration(videoPath)) || 0; } catch (_) {}
     log(`🔊 음성 얹기 완료 — 장면 ${scenes.length}개 · ${outDur ? outDur.toFixed(1) + '초' : '길이 미상'}`);
-    return { ok: true, output: videoPath, durationSec: outDur };
+    return { ok: true, output: videoPath, durationSec: outDur, durations };
   } catch (e) {
     return { ok: false, error: e.message };
   } finally {

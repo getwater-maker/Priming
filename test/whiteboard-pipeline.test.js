@@ -19,6 +19,7 @@ const WP = require('../core/whiteboard-pipeline');
 const ANNreal = require('../core/whiteboard-annotation');
 const WBreal = require('../core/whiteboard-render');
 const WCfg = require('../core/whiteboard-config');
+const WSreal = require('../core/whiteboard-subtitle');
 
 let n = 0, bad = 0;
 const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ❌ ' + m); } };
@@ -46,7 +47,7 @@ function mkProject(outRoot, opts = {}) {
 }
 
 // ── 스텁 deps — 파이썬 없이 흐름을 돈다. 호출 기록을 남긴다. ──
-function mkDeps(calls, { failScene = null, failAudio = false } = {}) {
+function mkDeps(calls, { failScene = null, failAudio = false, failBurn = false } = {}) {
   const WB = {
     hasEnv: () => true,
     ensureEnv: async () => { calls.ensureEnv++; return { ok: true, python: 'stub' }; },
@@ -83,9 +84,21 @@ function mkDeps(calls, { failScene = null, failAudio = false } = {}) {
       return { ok: true, output: videoPath, durationSec: 131 };
     },
   };
-  return { WB: () => WB, ANN: () => ANN, WA: () => WA };
+  // 💬 자막(5단계 나머지 절반) 스텁 — buildSrt·scenesForSubtitle 은 **실제 모듈을 그대로 쓰고**
+  //   굽기(ffmpeg)만 기록으로 대신한다. 스텁을 안 넣으면 이 테스트가 진짜 ffmpeg 를 돌린다.
+  const WS = {
+    buildSrt: WSreal.buildSrt,
+    scenesForSubtitle: WSreal.scenesForSubtitle,
+    burnSubtitle: async ({ videoPath, srtText, height }) => {
+      calls.subtitle.push({ video: path.basename(videoPath), lines: srtText.trim().split(/\n\n+/).length, height });
+      if (failBurn) return { ok: false, error: '스텁 굽기 실패' };
+      fs.writeFileSync(videoPath, 'merged+audio+sub');
+      return { ok: true, output: videoPath };
+    },
+  };
+  return { WB: () => WB, ANN: () => ANN, WA: () => WA, WS: () => WS };
 }
-const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], merge: [], audio: [] });
+const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], merge: [], audio: [], subtitle: [] });
 
 (async () => {
   // ── [1] 계획 — 장면 = 그룹(분할 0 · 짧은 것은 병합) · 예상 시간 · 무음 안내 ──
@@ -101,7 +114,7 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(plan.scenes[1].groupNums.join('+') === '2+3', '병합 장면의 groupNums 는 G2+G3');
     ok(WP.imageForScene(pr, plan.scenes[1]) === pr.groups[1].imagePath, '병합 장면은 첫 그룹의 이미지를 쓴다');
     ok(Math.abs(plan.totalSec - 131) < 0.01, `총 길이 = TTS 합 131초 (실제 ${plan.totalSec})`);
-    ok(plan.lines.some((l) => /음성은 얹힙니다/.test(l)), '음성이 얹힌다는 안내가 들어 있다(5단계 완료)');
+    ok(plan.lines.some((l) => /음성·자막이 얹힙니다/.test(l)), '음성·자막이 얹힌다는 안내가 들어 있다(5단계 완료)');
     ok(!plan.lines.some((l) => /무음/.test(l)), '옛 「무음」 안내가 남아 있지 않다');
     ok(plan.lines.some((l) => /렌더 약/.test(l)), '예상 렌더 시간 줄이 있다');
     ok(plan.lines.some((l) => /분할하지 않았습니다/.test(l)), '45초 초과 장면에 대해 「분할하지 않았다」고 알린다(noSplit 문구)');
@@ -143,6 +156,10 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(calls.audio.length === 1 && calls.audio[0].length === 2, `음성 얹기 1회 · 장면 2개 — ${JSON.stringify(calls.audio)}`);
     ok(calls.audio[0][0] === '1.wav+2.wav+3.wav', `장면1 음성 = 그 장면 문장들 순서대로 — ${calls.audio[0][0]}`);
     ok(calls.audio[0][1] === '4.wav+5.wav+6.wav+7.wav+8.wav', `병합 장면 음성도 문장 순서대로 — ${calls.audio[0][1]}`);
+    // 💬 자막도 같은 실행에서 함께 나간다
+    ok(fs.existsSync(path.join(root2, '테스트편_whiteboard.srt')), '.srt 파일이 영상 옆에 남는다');
+    ok(calls.subtitle.length === 1 && r.hasSubtitle === true, '자막을 굽는다(기본 켬)');
+    ok(logs.some((l) => /💬 자막 포함/.test(l)), '완료 로그 꼬리에 「자막 포함」');
   }
 
   // ── [3] 이어받기 — 두 번째 실행은 렌더 0 · 주석 유지 ──
@@ -261,13 +278,22 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(!/_runOnLanes\(\['whiteboard', 'localGpu'\]/.test(MAIN) && !/_runOnLanes\(\['localGpu', 'whiteboard'\]/.test(MAIN), '🔴 localGpu 레인은 잡지 않는다(CPU 작업 · make-all 이 그 레인을 쥔 채 부르면 교착)');
     ok(/async function runWhiteboardFor\(/.test(MAIN), 'runWhiteboardFor 헬퍼');
     ok(/function normOutTarget\(/.test(MAIN) && /const outTarget = normOutTarget\(opts\.outTarget\)/.test(MAIN), 'runMakeAllCore 가 outTarget 을 받는다');
-    ok(/if \(wbGo\) \{[\s\S]{0,400}runWhiteboardFor\(pr, outRoot, \{ interactive: false \}\)/.test(MAIN), '🔴 4단계에서 화이트보드로 갈라진다(큐 = 관문 없이)');
+    ok(/if \(wbGo\) \{[\s\S]{0,500}runWhiteboardFor\(pr, outRoot, \{ interactive: wbInteractive, captionMaxChars \}\)/.test(MAIN), '🔴 4단계에서 화이트보드로 갈라진다(관문은 대화형일 때만 · 자막 글자수도 함께 넘긴다)');
     // 게이트 뒤에 분기가 온다 — 게이트(음성·이미지 누락)를 .vrew 와 똑같이 지나야 한다
     const i4 = MAIN.indexOf('📦 4단계'), iGate = MAIN.indexOf('const mtts4 = gateTts(outMode)', i4), iWb = MAIN.indexOf('if (wbGo) {', i4);
     ok(i4 > 0 && iGate > 0 && iWb > iGate, '화이트보드 분기는 음성·이미지 게이트 **뒤**에 있다');
     ok(/outTarget: \(common\.outTarget != null \? common\.outTarget : \(s\.outTarget \|\| 'vrew'\)\)/.test(MAIN), 'run-batch 는 헤더(공통) 우선');
     for (const h of ['whiteboard-plan', 'whiteboard-build', 'get-whiteboard-config', 'set-whiteboard-config']) ok(MAIN.includes(`ipcMain.handle('${h}'`), `IPC ${h}`);
-    ok(/missingVisualGroups\(pr\)[\s\S]{0,300}missingTtsNums\(pr\)[\s\S]{0,600}runWhiteboardFor\(pr, S\.outRoot, \{ interactive: true/.test(MAIN), '✏ 렌더 버튼 경로도 두 게이트를 지난 뒤 대화형으로 부른다');
+    // 🔑 ✏ 렌더는 **runMakeAllCore 에 위임**한다(2026-09-16) — 음성 → 이미지 → 렌더 전 과정.
+    //   예전엔 렌더만 해서 자산이 없으면 「이미지 미생성」 팝업만 뜨고 아무것도 안 만들어졌다(로이 신고).
+    //   ⚠ 1~3단계를 여기에 복제하지 않는다 — 순서·게이트·이상 이미지 재생성·절전 차단이 이미 거기 있다.
+    ok(/ipcMain\.handle\('whiteboard-build'[\s\S]{0,400}runMakeAllCore\(\{ \.\.\.args, outTarget: 'whiteboard', outMode: 'full', wbInteractive: true/.test(MAIN),
+      '🔴 ✏ 렌더는 runMakeAllCore 에 위임한다(음성·이미지까지 만든다)');
+    ok(/ipcMain\.handle\('whiteboard-build'[\s\S]{0,120}enqueueTtsJob\(/.test(MAIN),
+      '🔴 TTS 를 돌리므로 직렬 큐(enqueueTtsJob)를 탄다 — 동시에 돌면 provider 가 깨진다(v0.2.57 사고)');
+    ok(/const wbInteractive = /.test(MAIN), 'wbInteractive 정의(미정의 식별자 방지)');
+    ok(/const _wbTarget = \(outTarget === 'whiteboard'\)/.test(MAIN) && /videoPipeline = _pipeBase && !_wbTarget/.test(MAIN),
+      '🔑 화이트보드는 그룹 이미지만 쓰므로 비디오 단계를 건너뛴다(시간·크레딧 절약)');
     ok(/interactive \? _wbGateA : null/.test(MAIN) && /interactive \? _wbGateB : null/.test(MAIN), '관문 A/B 는 대화형일 때만');
     for (const a of ['whiteboardPlan', 'whiteboardBuild', 'getWhiteboardConfig', 'setWhiteboardConfig']) ok(PRE.includes(a + ':'), `preload ${a}`);
     const optCnt = (APP.match(/<option value="whiteboard">✏ 화이트보드 MP4<\/option>/g) || []).length;
@@ -332,6 +358,52 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(m.size === 8, `문장 8개의 음성 경로를 찾는다 — ${m.size}`);
     fs.unlinkSync(prA.groups[0]._s[0].ttsAudioPath);
     ok(WP.sentenceAudioMap(prA).size === 7, '파일이 사라지면 그 문장은 빠진다(경로만 있고 없는 것은 안 센다)');
+  }
+
+  // ── [💬] 자막 — .srt 는 언제나 · 굽기는 스위치 · 실패해도 영상은 남는다 ──
+  head('[💬] 자막(5단계 나머지 절반)');
+  {
+    // ⓐ 굽기를 끄면 .srt 만 남는다
+    const rootA = fs.mkdtempSync(path.join(TMP, 'sub-'));
+    const prA = mkProject(rootA);
+    const callsA = freshCalls(); const logsA = [];
+    const rA = await WP.runWhiteboard(prA, rootA, { deps: mkDeps(callsA), log: (l) => logsA.push(l), baseName: '굽기끔', concurrency: 1, burnSubtitle: false });
+    ok(rA.ok && callsA.subtitle.length === 0, '굽기를 끄면 ffmpeg 를 부르지 않는다');
+    ok(fs.existsSync(path.join(rootA, '굽기끔_whiteboard.srt')), '그래도 .srt 는 남는다(유튜브 업로드용)');
+    ok(rA.srtPath && rA.hasSubtitle === false, '반환값 — srtPath 는 있고 hasSubtitle 은 false');
+    ok(logsA.some((l) => /📄 \.srt 별도/.test(l)) || logsA.some((l) => /📄 자막 파일/.test(l)), '로그가 .srt 를 알린다');
+
+    // ⓑ 굽기가 실패해도 영상은 그대로 남는다
+    const rootB = fs.mkdtempSync(path.join(TMP, 'sub2-'));
+    const prB = mkProject(rootB);
+    const callsB = freshCalls(); const logsB = [];
+    const rB = await WP.runWhiteboard(prB, rootB, { deps: mkDeps(callsB, { failBurn: true }), log: (l) => logsB.push(l), baseName: '굽기실패', concurrency: 1 });
+    ok(rB.ok, '자막 굽기가 실패해도 전체는 성공(렌더 결과를 버리지 않는다)');
+    ok(rB.hasSubtitle === false && /스텁 굽기 실패/.test(rB.subtitleError || ''), '실패 사유가 반환값에 남는다');
+    ok(fs.existsSync(path.join(rootB, '굽기실패_whiteboard.mp4')) && fs.existsSync(path.join(rootB, '굽기실패_whiteboard.srt')), '영상과 .srt 는 둘 다 남는다');
+    ok(logsB.some((l) => /자막 굽기 실패/.test(l)), '무슨 일이 있었는지 로그로 알린다');
+
+    // ⓒ withSubtitle:false 면 .srt 조차 만들지 않는다
+    const rootC = fs.mkdtempSync(path.join(TMP, 'sub3-'));
+    const prC = mkProject(rootC);
+    const callsC = freshCalls();
+    const rC = await WP.runWhiteboard(prC, rootC, { deps: mkDeps(callsC), log: () => {}, baseName: '자막끔', concurrency: 1, withSubtitle: false });
+    ok(rC.ok && callsC.subtitle.length === 0 && !rC.srtPath, 'withSubtitle:false 면 자막 단계를 통째로 건너뛴다');
+    ok(!fs.existsSync(path.join(rootC, '자막끔_whiteboard.srt')), '.srt 도 안 만든다');
+
+    // ⓓ 자막 글자수 설정이 실제로 전달된다
+    //   ⚠ 픽스처 문장은 「문장1」처럼 짧아 어떤 글자수로도 한 줄이다 — 긴 문장을 하나 넣어야 갈린다.
+    const LONG = '관계를 깨는 것은 거절이 아니라 지나친 다정입니다.';
+    const cnt = async (maxChars) => {
+      const root = fs.mkdtempSync(path.join(TMP, 'sub4-'));
+      const pr = mkProject(root);
+      pr.groups[0]._s[0].text = LONG;
+      const calls = freshCalls();
+      await WP.runWhiteboard(pr, root, { deps: mkDeps(calls), log: () => {}, baseName: '글자수', concurrency: 1, captionMaxChars: maxChars });
+      return calls.subtitle[0].lines;
+    };
+    const wide = await cnt(20), narrow = await cnt(3);
+    ok(narrow > wide, `글자수를 좁히면 자막 조각이 늘어난다(설정이 실제로 전달된다) — 20자 ${wide} · 3자 ${narrow}`);
   }
 
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
