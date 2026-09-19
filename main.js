@@ -1047,6 +1047,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const mode = ['audio', 'video', 'both'].includes(args.mode) ? args.mode : 'audio';
   const forceStt = !!args.forceStt;
   const doStt = args.stt !== false;
+  const channelMode = !!args.channel;
 
   // 저장 폴더 — 채널의 「다운로드 폴더」가 정본, 없으면 **윈도우 「다운로드」 폴더**(2026-09-16),
   //   그마저 못 찾을 때만 그 자리에서 고르게 한다.
@@ -1078,15 +1079,40 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       log(`✗ ${e.message}`);
       return { ok: false, error: e.message };
     }
-    if (doStt) await warnAsrIfDown();
-
     let ffDir = '';
     try { const fp = media.getFfmpegPath && media.getFfmpegPath(); if (fp) ffDir = path.dirname(fp); } catch {}
 
-    for (let i = 0; i < urls.length; i++) {
+    // 채널 모드만 목록을 펼친다. 평소 URL은 계속 단일 영상으로 고정돼 재생목록 폭주가 없다.
+    const jobs = [];
+    if (channelMode) {
+      for (const channelUrl of urls) {
+        if (S.abort) break;
+        try {
+          log(`📺 채널 영상 목록 확인: ${channelUrl}`);
+          const channel = await MD.listChannelVideos(channelUrl, { tool, abortSignal: () => S.abort, onLog: log });
+          const channelDir = path.join(outDir, MD.safeFolderName(channel.title));
+          log(`  ✓ 「${channel.title}」 일반 영상 ${channel.entries.length}개 · 저장 ${channelDir}`);
+          for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir });
+        } catch (e) {
+          log(`  ✗ 채널 목록 실패: ${e.message}`);
+          results.push({ url: channelUrl, ok: false, error: e.message });
+        }
+      }
+    } else {
+      for (const url of urls) jobs.push({ url, id: '', title: '', outDir });
+    }
+    if (!jobs.length) {
+      if (!results.length) results.push({ url: urls[0], ok: false, error: '채널에 받을 일반 영상이 없습니다' });
+      return { ok: true, results, outDir };
+    }
+    if (doStt) await warnAsrIfDown();
+
+    for (let i = 0; i < jobs.length; i++) {
       if (S.abort) { log('⏹ 중단됨'); break; }
-      const url = urls[i];
-      log(`🔗 [${i + 1}/${urls.length}] ${url}`);
+      const job = jobs[i];
+      const url = job.url;
+      const itemOutDir = job.outDir || outDir;
+      log(`🔗 [${i + 1}/${jobs.length}] ${job.title || url}`);
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
@@ -1100,18 +1126,23 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const head = { url, title: info.title };
         const wantSubs = !forceStt;
         const r = await MD.download(dlUrl, {
-          tool, mode, subs: wantSubs, outDir, language: info.language,
+          tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
+          filenameWithId: channelMode, mediaId: job.id || info.id,
           ffmpegDir: ffDir, abortSignal: () => S.abort, onLog: log,
         });
 
         const mediaFile = r.audio || r.video;
         const base = mediaFile
           ? path.join(path.dirname(mediaFile), path.basename(mediaFile, path.extname(mediaFile)))
-          : path.join(outDir, info.title.replace(/[\\/:*?"<>|]/g, '_'));
+          : path.join(itemOutDir, info.title.replace(/[\\/:*?"<>|]/g, '_'));
         const outTxt = base + '.txt';
 
         let txtFrom = null;
-        if (r.sub && !forceStt) {
+        if (channelMode && r.reused && fs.existsSync(outTxt)) {
+          log(`  ↷ 이미 완료됨: ${path.basename(outTxt)}`);
+          txtFrom = 'existing';
+        }
+        if (!txtFrom && r.sub && !forceStt) {
           // 자막이 있다 → 그대로 텍스트로. GPU 를 쓰지 않는다.
           const text = MD.subtitleFileToText(r.sub);
           if (text.length >= 20) {          // 너무 짧으면 자막이 사실상 비어 있는 것 → STT 로 넘긴다

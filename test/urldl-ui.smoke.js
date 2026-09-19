@@ -44,9 +44,16 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await sel.inputValue() === 'video', '영상으로 전환된다');
     await sel.selectOption('audio');
 
-    // [5] 자막 무시 체크박스 — 기본 꺼짐(자막 우선이 기본이다)
-    const chk = win.locator('.modal-card:has-text("URL 에서 받아 전사") input[type=checkbox]');
-    ok(await chk.count() === 1 && !(await chk.isChecked()), '「자막이 있어도 STT」 는 기본 꺼짐');
+    // [5] 채널 전체·자막 무시 체크박스 — 둘 다 명시적으로 켜야 한다
+    const card = win.locator('.modal-card:has-text("URL 에서 받아 전사")');
+    const channelChk = card.locator('label:has-text("유튜브 채널의 일반 영상 전체") input[type=checkbox]');
+    const forceChk = card.locator('label:has-text("Whisper 로 전사") input[type=checkbox]');
+    ok(await channelChk.count() === 1 && !(await channelChk.isChecked()), '「채널 전체」는 기본 꺼짐(단일 URL 안전 유지)');
+    ok(await forceChk.count() === 1 && !(await forceChk.isChecked()), '「자막이 있어도 STT」는 기본 꺼짐');
+    await channelChk.check();
+    ok((await card.locator('button:has-text("채널 전체 받아서 전사")').count()) === 1,
+      '채널 모드에서는 실행 버튼 문구가 분명히 바뀐다');
+    await channelChk.uncheck();
 
     // [6] yt-dlp 상태가 창에 보인다(조회가 비동기라 값이 올 때까지 기다린다)
     await win.waitForFunction(() => {

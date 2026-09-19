@@ -252,6 +252,73 @@ async function probeSmart(url, o = {}) {
   }
 }
 
+/** 유튜브 채널 첫 화면은 동영상·쇼츠·라이브가 섞일 수 있다. 「채널 전체 영상」은 일반 영상 탭으로 고정한다. */
+function normalizeChannelUrl(url) {
+  const raw = String(url || '').trim();
+  try {
+    const u = new URL(raw);
+    if (!/(^|\.)youtube\.com$/i.test(u.hostname)) return raw;
+    const parts = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+    if (!parts.length) return raw;
+    if (/^(videos|shorts|streams|featured)$/i.test(parts[parts.length - 1])) parts.pop();
+    if (/^@/.test(parts[0]) || /^(channel|c|user)$/i.test(parts[0])) {
+      u.pathname = '/' + parts.join('/') + '/videos';
+      u.search = '';
+      u.hash = '';
+      return u.toString().replace(/\/$/, '');
+    }
+  } catch {}
+  return raw;
+}
+
+/** yt-dlp flat-playlist 항목을 다시 받을 수 있는 실제 URL로 바꾼다. */
+function channelEntryUrl(e) {
+  if (!e) return '';
+  if (/^https?:\/\//i.test(String(e.webpage_url || ''))) return String(e.webpage_url);
+  if (/^https?:\/\//i.test(String(e.url || ''))) return String(e.url);
+  const id = String(e.id || '').trim();
+  const extractor = String(e.extractor_key || e.extractor || '').toLowerCase();
+  if (id && (extractor.includes('youtube') || /^[\w-]{11}$/.test(id))) {
+    return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+  }
+  return '';
+}
+
+function safeFolderName(name, fallback = '채널 영상') {
+  const s = String(name || '').replace(/[\\/:*?"<>|]/g, '_').replace(/[. ]+$/g, '').trim();
+  return (s || fallback).slice(0, 120);
+}
+
+/**
+ * 채널의 일반 영상 목록만 읽는다(다운로드는 하지 않음). 실제 다운로드는 각 URL을 기존 단일 영상 경로로 보낸다.
+ * 이렇게 해야 영상마다 자막 우선 → 필요할 때만 STT 규칙과 중단 처리가 그대로 유지된다.
+ */
+async function listChannelVideos(url, o = {}) {
+  const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
+  const channelUrl = normalizeChannelUrl(url);
+  const r = await _spawnYt(tool, [
+    '--flat-playlist', '--skip-download', '--dump-single-json', '--no-warnings', channelUrl,
+  ], { abortSignal: o.abortSignal, timeoutMs: o.timeoutMs || 10 * 60 * 1000 });
+  if (r.code !== 0) {
+    const err = new Error(_explain(r.stderr) || `채널 영상 목록을 읽지 못했습니다 (코드 ${r.code})`);
+    err.raw = r.stderr;
+    throw err;
+  }
+  const line = r.stdout.split('\n').find((x) => x.trim().startsWith('{'));
+  if (!line) throw new Error('채널 영상 목록 응답이 없습니다');
+  const j = JSON.parse(line);
+  const entries = (j.entries || []).map((e) => ({
+    id: String((e && e.id) || ''),
+    title: String((e && e.title) || (e && e.id) || '영상'),
+    url: channelEntryUrl(e),
+  })).filter((e) => e.url);
+  return {
+    url: channelUrl,
+    title: String(j.channel || j.uploader || j.title || '채널 영상'),
+    entries,
+  };
+}
+
 /**
  * 자막 언어 우선순위.
  * 🔑 **원본 언어만 쓴다** — 유튜브는 자동자막을 157개 언어로 기계번역해 준다. `ko` 를 무턱대고 요청하면
@@ -348,13 +415,14 @@ async function download(url, o = {}) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const before = new Set(fs.readdirSync(outDir));
+  const outputName = o.filenameWithId ? '%(title)s [%(id)s].%(ext)s' : '%(title)s.%(ext)s';
   const args = [
     '--no-playlist',            // 🔑 재생목록 주소 하나가 수백 개를 받는 사고를 막는다
     '--windows-filenames',      // ⚠ --restrict-filenames 를 쓰면 한글 제목이 통째로 사라진다
     '--no-overwrites',
     '--newline',                // 진행률을 줄 단위로 → 로그에 흘릴 수 있다
     '--no-color',
-    '-o', path.join(outDir, '%(title)s.%(ext)s'),
+    '-o', path.join(outDir, outputName),
   ];
 
   const wantAudio = o.mode === 'audio' || o.mode === 'both';
@@ -397,13 +465,17 @@ async function download(url, o = {}) {
   }
 
   // 새로 생긴 파일만 집는다(같은 폴더에 예전 파일이 있어도 헷갈리지 않게)
-  const made = fs.readdirSync(outDir).filter((f) => !before.has(f));
+  const after = fs.readdirSync(outDir);
+  const made = after.filter((f) => !before.has(f));
+  // 채널 재실행은 ID가 붙은 기존 파일도 결과로 돌려준다. 그래야 이미 받은 수백 건을 다시 STT 하지 않는다.
+  const idMark = o.mediaId ? `[${String(o.mediaId)}]` : '';
+  const candidates = idMark ? after.filter((f) => f.includes(idMark)) : made;
   const pick = (re) => {
-    const f = made.filter((x) => re.test(x)).sort((a, b) => b.length - a.length)[0];
+    const f = candidates.filter((x) => re.test(x)).sort((a, b) => b.length - a.length)[0];
     return f ? path.join(outDir, f) : null;
   };
   // 🔑 자막 고르기는 `pickSubFile` 한 곳에서만 한다(`-orig` 우선 → 요청 순서 → 첫 파일).
-  const subFiles = made.filter((f) => /\.vtt$/i.test(f));
+  const subFiles = candidates.filter((f) => /\.vtt$/i.test(f));
   const subMain = pickSubFile(subFiles, subLangPref(o.language));
   return {
     audio: wantAudio ? pick(/\.mp3$/i) : null,
@@ -411,6 +483,7 @@ async function download(url, o = {}) {
     sub: o.subs && subMain ? path.join(outDir, subMain) : null,
     subExtras: subFiles.filter((f) => f !== subMain).map((f) => path.join(outDir, f)),
     files: made.map((f) => path.join(outDir, f)),
+    reused: !!idMark && candidates.some((f) => before.has(f)),
   };
 }
 
@@ -419,7 +492,8 @@ module.exports = {
   parseVersionDate, versionAgeDays, isStale,
   findYtDlp, downloadYtDlp, ensureYtDlp,
   vttToText, subtitleFileToText, subLangPref, pickSubFile,
-  probe, probeSmart, download,
+  probe, probeSmart, download, listChannelVideos,
+  normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
   _explain,
 };

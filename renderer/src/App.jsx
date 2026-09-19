@@ -420,6 +420,7 @@ export default function App() {
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
+  const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
   const [ytInfo, setYtInfo] = useState(null);            // yt-dlp 유무·버전
   const urlTextRef = useRef(null);                       // 비제어 — 글자마다 재렌더하지 않는다(v0.3.9)
   const [tsData, setTsData] = useState(null);    // { text, total, warns } — 열 때 계산
@@ -778,9 +779,9 @@ export default function App() {
     if (!urls.length) { logline('주소를 한 줄에 하나씩 붙여넣으세요 (http… 로 시작)'); return; }
     setUrlOpen(false);
     setUrlBusy(true);
-    setStatus(`🔗 ${urls.length}개 받는 중…`);
+    setStatus(urlChannelAll ? '📺 채널 영상 목록 확인 중…' : `🔗 ${urls.length}개 받는 중…`);
     try {
-      const r = await api.sttFromUrl({ urls, mode: urlMode, forceStt: urlForceStt, presetName: presetName || null });
+      const r = await api.sttFromUrl({ urls, mode: urlMode, forceStt: urlForceStt, channel: urlChannelAll, presetName: presetName || null });
       if (!r || r.canceled) { setStatus('취소'); return; }
       if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
       const okN = (r.results || []).filter((x) => x.ok).length;
@@ -3289,8 +3290,12 @@ export default function App() {
               <br />저장 위치 = 채널의 <b>다운로드 폴더</b>(⚙ 채널편집 → 📁 폴더). 비어 있으면 받을 때 물어봅니다.
             </div>
             <textarea ref={urlTextRef} rows={5} spellCheck={false} autoFocus
-              placeholder={'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
+              placeholder={urlChannelAll ? 'https://www.youtube.com/@채널주소' : 'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
               style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
+            <label className="chk" style={{ marginTop: 8, display: 'block' }}>
+              <input type="checkbox" checked={urlChannelAll} onChange={(e) => setUrlChannelAll(e.target.checked)} />
+              {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(채널별 폴더 · 이미 완료한 영상은 건너뜀)
+            </label>
             <div className="frow" style={{ marginTop: 10 }}>
               <label>받을 것</label>
               <select value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
@@ -3319,7 +3324,7 @@ export default function App() {
               </div>
             </div>
             <div className="mbtns">
-              <button disabled={urlBusy} onClick={runUrlDl}>받아서 전사</button>
+              <button disabled={urlBusy} onClick={runUrlDl}>{urlChannelAll ? '채널 전체 받아서 전사' : '받아서 전사'}</button>
               <button className="ghost" onClick={() => setUrlOpen(false)}>취소</button>
             </div>
           </div>

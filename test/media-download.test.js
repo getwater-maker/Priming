@@ -154,6 +154,23 @@ console.log('\n[5] 실패 문구 — 무엇을 해야 하는지 알려준다');
     '임베드 차단(404)을 구분해 알려준다');
 }
 
+console.log('\n[5-a] 채널 전체 — 일반 영상 탭·항목 URL·안전한 폴더명');
+{
+  eq(MD.normalizeChannelUrl('https://www.youtube.com/@sample'), 'https://www.youtube.com/@sample/videos',
+    '채널 루트는 일반 영상 탭(/videos)으로 고정');
+  eq(MD.normalizeChannelUrl('https://www.youtube.com/@sample/shorts'), 'https://www.youtube.com/@sample/videos',
+    '쇼츠 탭을 붙여넣어도 일반 영상 전체로 정규화');
+  eq(MD.normalizeChannelUrl('https://www.youtube.com/channel/UC123/videos'), 'https://www.youtube.com/channel/UC123/videos',
+    '이미 /videos 면 중복해서 붙이지 않는다');
+  eq(MD.normalizeChannelUrl('https://vimeo.com/channels/staffpicks'), 'https://vimeo.com/channels/staffpicks',
+    '유튜브 외 주소는 임의 변경하지 않는다');
+  eq(MD.channelEntryUrl({ id: 'abcdefghijk', extractor: 'youtube' }),
+    'https://www.youtube.com/watch?v=abcdefghijk', 'flat 항목의 유튜브 ID를 실제 영상 URL로 복원');
+  eq(MD.channelEntryUrl({ id: 'x', webpage_url: 'https://example.com/video/x' }),
+    'https://example.com/video/x', 'webpage_url이 있으면 우선 사용');
+  eq(MD.safeFolderName('채널: 이름?'), '채널_ 이름_', '윈도우 금지문자를 채널 폴더명에서 제거');
+}
+
 console.log('\n[5-b] 전사 .txt 머리말 — 1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용 (로이 확정)');
 {
   // main.js 원문에서 함수를 뽑아 그대로 실행한다(복사본을 두면 앱과 갈라져도 통과한다)
@@ -205,6 +222,9 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/ipcMain\.handle\('ytdlp-status'/.test(main), 'IPC ytdlp-status');
   ok(/ipcMain\.handle\('ytdlp-update'/.test(main), 'IPC ytdlp-update');
   ok(/sttFromUrl:/.test(pre) && /ytdlpStatus:/.test(pre) && /ytdlpUpdate:/.test(pre), 'preload 3개');
+  ok(/MD\.listChannelVideos\(channelUrl,/.test(main), '채널 모드가 전체 영상 목록을 먼저 펼친다');
+  ok(/filenameWithId: channelMode, mediaId:/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다');
+  ok(/r\.reused && fs\.existsSync\(outTxt\)/.test(main), '중단 후 재실행은 이미 전사한 영상을 건너뛴다');
 
   // 재생목록 하나가 수백 개를 받는 사고를 구조로 막는다
   const dl = read('core/media-download.js');
@@ -221,6 +241,9 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/🔗 URL/.test(app), '헤더에 🔗 URL 버튼');
   ok(/urlMode, setUrlMode\] = useState\('audio'\)/.test(app), '받을 것 기본값은 MP3(로이 확정)');
   ok(/value="audio"[\s\S]{0,80}value="video"[\s\S]{0,80}value="both"/.test(app), 'MP3·영상·둘 다 를 고를 수 있다');
+  ok(/urlChannelAll, setUrlChannelAll/.test(app) && /channel: urlChannelAll/.test(app),
+    '채널 전체 체크값을 IPC에 전달한다');
+  ok(/유튜브 채널의 일반 영상 전체/.test(app), '채널 전체 옵션을 화면에 분명히 표시한다');
   ok(/if \(urlOpen\) \{ setUrlOpen\(false\); return; \}/.test(app), 'ESC 로 닫힌다');
   ok(/urlOpen, tsOpen/.test(app), 'ESC deps 배열에 들어 있다');
   ok(/downloadFolder: p\.downloadFolder/.test(app), '🔴 채널 편집이 다운로드 폴더를 싣는다(안 실으면 저장 시 빈 값으로 덮인다)');
