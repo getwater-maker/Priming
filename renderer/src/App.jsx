@@ -4,7 +4,9 @@ import { splitLines, mLen } from './lib/captions.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 
-const media = (p) => 'media://' + encodeURIComponent(p);
+// 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
+// main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
+const media = (p, version = '') => 'media://' + encodeURIComponent(p) + (version ? `?v=${encodeURIComponent(version)}` : '');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ComfyUI = 드롭다운에서 **모델(워크플로)까지 직접 고른다** (로이 2026-08-14).
@@ -1792,11 +1794,11 @@ export default function App() {
   }
   function setVisual(c) {
     const v = stageVisualRef.current; if (!v) return;
-    if (c.videoPath) v.innerHTML = `<video src="${media(c.videoPath)}" autoplay muted loop playsinline></video>`;
+    if (c.videoPath) v.innerHTML = `<video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline></video>`;
     else if (c.imagePath) {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) → 단조롭지 않게.
       const kbIdx = ((Number(c.num) || 0) * 7 + 3) % 12;
-      v.innerHTML = `<img class="kb kb${kbIdx}" src="${media(c.imagePath)}">`;
+      v.innerHTML = `<img class="kb kb${kbIdx}" src="${media(c.imagePath, c.imageVersion)}">`;
       const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
     } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
   }
@@ -3566,7 +3568,7 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
   if (c.videoPath) {
     return (
       <div className={'thumbwrap' + cls}>
-        <video className={'thumb' + cls} src={media(c.videoPath)} muted loop playsInline preload="metadata" />
+        <video className={'thumb' + cls} src={media(c.videoPath, c.videoVersion)} muted loop playsInline preload="metadata" />
         <button className="vidplay" title="재생 / 정지" onClick={(e) => { const v = e.currentTarget.parentElement.querySelector('video'); if (!v) return; if (v.paused) { v.play(); e.currentTarget.classList.add('playing'); } else { v.pause(); e.currentTarget.classList.remove('playing'); } }}>▶</button>
         <span className="playbadge">🎬 영상</span>{clearBtn}
         {c.videoStatus === 'upscaling' ? genOv('⬆ 업스케일 중…') : null}
@@ -3576,7 +3578,7 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
   if (c.imagePath) {
     return (
       <div className={'thumbwrap' + cls}>
-        <img className={'thumb' + cls} src={media(c.imagePath)} title="클릭: 미리보기" onClick={() => onPreview('img', media(c.imagePath))} alt="" />
+        <img className={'thumb' + cls} src={media(c.imagePath, c.imageVersion)} title="클릭: 미리보기" onClick={() => onPreview('img', media(c.imagePath, c.imageVersion))} alt="" />
         {c.videoStatus === 'generating' ? genOv('🎬 영상 변환 중…') : null}{clearBtn}
       </div>
     );
@@ -3584,6 +3586,11 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
   if (c.imageStatus === 'generating') {
     return <div className={'thumbwrap' + cls}><div className={'thumb none gen' + cls} />{genOv('🖼 이미지 생성 중…')}</div>;
   }
+  if (c.imageStale) {
+    return <div className={'thumbwrap' + cls} title="대본이 변경되어 새 이미지가 필요합니다" onClick={onAttach}>
+      <div className={'thumb none gen' + cls} />
+      <div className="genoverlay"><div>📝 새 이미지 필요</div></div>
+    </div>;
+  }
   return <div className={'thumb none' + cls} title="클릭: 이미지/영상 첨부" onClick={onAttach}>＋</div>;
 }
-

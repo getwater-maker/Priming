@@ -263,12 +263,12 @@ app.whenReady().then(() => {
         const len = end - start + 1;
         return new Response(Readable.toWeb(fs.createReadStream(p, { start, end })), { status: 206, headers: {
           'Content-Type': mime, 'Content-Length': String(len),
-          'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store',
         } });
       }
       // Range 없는 전체 요청 — 파일을 통째 메모리로 올리지 않고 스트림(일괄첨부로 큰 mp4 여러 개가 동시에 로드돼도 안 멈춤).
       return new Response(Readable.toWeb(fs.createReadStream(p)), { status: 200, headers: {
-        'Content-Type': mime, 'Content-Length': String(stat.size), 'Accept-Ranges': 'bytes',
+        'Content-Type': mime, 'Content-Length': String(stat.size), 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store',
       } });
     } catch (e) {
       return new Response('not found', { status: 404 });
@@ -3448,6 +3448,7 @@ async function prefillImageCache(project, mediaDir, styleId, engine) {
   const picks = [];
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
+    if (g.imageStale) continue;       // 대본이 바뀐 그룹은 옛 프롬프트 캐시를 절대 되살리지 않는다
     if (hasVisual(g)) continue;   // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
     if (g.imageCleared) continue; // ✕ 로 지웠거나 이상으로 폐기된 그룹 — 캐시로 되살리지 않고 새로 생성
     const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '16:9', engine);
@@ -3487,7 +3488,7 @@ function cacheGeneratedImages(project, styleId, engine) {
     if (!g.imagePrompt || !g.imagePath || !fs.existsSync(g.imagePath)) continue;
     const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '16:9', engine);
     MC.put(key, g.imagePath, path.extname(g.imagePath).slice(1));
-    g._imgCacheKey = key; g.imageCleared = false; // 새 이미지 캐시 저장 → 삭제플래그 해제(이후 재활용 허용)
+    g._imgCacheKey = key; g.imageCleared = false; g.imageStale = false; g.imagePromptStale = false; // 새 이미지 캐시 저장 → 삭제플래그 해제
   }
 }
 // 그룹에 이미지 '또는' 비디오가 이미 있으면 비주얼 완성 — 이미지 생성 건너뛰기 판정.
@@ -3504,6 +3505,7 @@ function hasVisual(g) {
 //   ⇒ force 면 **이미지 유무만** 본다. 평소 경로(만들기 2단계)는 그대로 = 영상 있는 그룹은 안 만든다.
 //   ⚠ Genspark(core/pipeline.generateImagesGenspark)는 원래부터 이미지 유무만 봤다 — 나머지 엔진을 그쪽에 맞춘다.
 function imgDone(g, force) {
+  if (g.imageStale) return false;
   return force ? !!(g.imagePath && fs.existsSync(g.imagePath)) : hasVisual(g);
 }
 // 대상이 0개면 **조용히 넘어가지 않는다** — 위 사고가 로그만 보고는 안 보였던 이유가 이것이다.
@@ -3513,7 +3515,7 @@ function noTargetMsg(onlyNums) {
 }
 // 이미지 생성이 필요한(프롬프트 있고 아직 이미지·영상 둘 다 없는) 그룹 수.
 function imagesNeeded(project) {
-  return project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g)).length;
+  return project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && (g.imageStale || !hasVisual(g))).length;
 }
 
 // 생성된 영상을 1080p 로 업스케일 (Real-ESRGAN 애니 모델, 없으면 ffmpeg 폴백). videoPath 교체.
@@ -3646,7 +3648,17 @@ async function generatePromptsChunked(projects, opts, callAnswer, logger) {
 //   건너뛰므로(hasVisual) 프롬프트가 쓸모없다. 예전엔 imagePrompt 텍스트 유무만 봐서, 이미지 다 붙어도
 //   대본에 `> 🖼️ 이미지:` 줄이 없으면 Ollama 가 전 그룹 프롬프트를 헛생성해 실행이 크게 지연됐다.
 async function autoFillPrompts(projects, logger) {
-  const needsPrompt = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) && !hasVisual(g);
+  // 이미지와 프롬프트 stale 은 별개다. .md 에 새 `> 이미지:` 프롬프트까지 적었다면 그것은 덮어쓰지 않는다.
+  const needsPrompt = (g) => (!!g.imagePromptStale || !g.imagePrompt || !g.imagePrompt.trim()) && (!!g.imageStale || !hasVisual(g));
+  const narrationFallback = () => {
+    let n = 0;
+    for (const pr of projects) for (const g of pr.groups) {
+      if (!needsPrompt(g) || (g.imagePrompt && g.imagePrompt.trim())) continue;
+      const text = pr.getSentencesOfGroup(g).map((s) => String(s.text || '').trim()).filter(Boolean).join(' ');
+      if (text) { g.imagePrompt = text; g.imagePromptStale = false; n++; }
+    }
+    if (n) logger(`📝 프롬프트 ${n}개 — LLM 대신 현재 대본 내용으로 생성합니다`);
+  };
   const need = projects.some((pr) => pr.groups.some(needsPrompt));
   if (!need) return;
   const PromptIO = require('./core/prompt-io');
@@ -3657,6 +3669,8 @@ async function autoFillPrompts(projects, logger) {
     try {
       logger(`🤖 프롬프트 없는 그룹 — Ollama(${oc.model})로 내용 맞는 프롬프트 자동 생성 중…`);
       const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }), logger);
+      for (const pr of projects) for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim()) g.imagePromptStale = false;
+      narrationFallback(); // LLM 응답에서 빠진 그룹도 옛 프롬프트를 쓰지 않는다
       logger(`📥 프롬프트 자동 생성 완료(Ollama) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
       return;
     } catch (e) { logger('Ollama 프롬프트 생성 실패: ' + e.message + ' — Gemini/나레이션으로 폴백'); }
@@ -3664,12 +3678,14 @@ async function autoFillPrompts(projects, logger) {
   // 2순위: Gemini 키
   let key = '';
   try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
-  if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹 — Ollama 미도달 & Gemini 키 없음(⚙에서 설정 권장). 지금은 나레이션으로 진행됩니다.'); return; }
+  if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹 — Ollama 미도달 & Gemini 키 없음(⚙에서 설정 권장). 지금은 나레이션으로 진행됩니다.'); narrationFallback(); return; }
   try {
     logger('🤖 프롬프트 없는 그룹 — Gemini API로 내용 맞는 프롬프트 자동 생성 중…');
     const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('gemini', key, req), logger);
+    for (const pr of projects) for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim()) g.imagePromptStale = false;
+    narrationFallback();
     logger(`📥 프롬프트 자동 생성 완료(Gemini) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
-  } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
+  } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); narrationFallback(); }
 }
 
 ipcMain.handle('image-build', (_e, args = {}) => {
@@ -4202,8 +4218,9 @@ function scriptHash(scriptPath) {
 }
 // 스냅샷 해시 규약 버전. 🔴 v0.4.6 은 **작업본을 이어받은 경우에도** 「현재 대본 해시」를 심어
 //   「바뀐 대본의 해시 + 옛 파싱 결과」를 기록했다(= 영구 고착). 그때 만들어진 srcHash 는 믿을 수 없으므로
-//   **hashVer 가 이 값 이상일 때만** 해시를 신뢰하고, 그 밖에는 문장 시퀀스로 다시 판정한다(일회성).
-const SNAP_HASH_VER = 2;
+//   **hashVer 가 이 값 이상일 때만** 해시를 신뢰한다. v3 는 문장뿐 아니라 대본에 직접 적힌 이미지
+//   프롬프트도 대조한다(0.5.15가 새 해시+옛 프롬프트를 저장한 오염 작업본 복구, 2026-09-19).
+const SNAP_HASH_VER = 3;
 // 스냅샷의 문장들이 지금 대본과 같은가 — 해시를 믿을 수 없을 때 쓰는 **정확한** 판정.
 //   🔑 ✂분할·병합·도입부 재배치는 **그룹 경계만** 바꾸고 문장 자체는 그대로다 → 문장 시퀀스는
 //      대본과 1:1 로 대응한다. 그래서 이 비교는 사용자의 편집을 잃지 않고 수정 여부만 가려낸다.
@@ -4216,6 +4233,19 @@ function snapshotMatchesScript(parsed, snap) {
     for (const ps of (snap.projects || [])) for (const gs of (ps.groups || [])) for (const ss of (gs.sentences || [])) b.push(norm(ss.text));
     if (!a.length || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    // 대본에 명시된 프롬프트가 작업본과 다르면 작업본 전체를 그대로 신뢰할 수 없다.
+    // 비어 있는 대본 프롬프트는 자동작성/수동편집 결과를 보존해야 하므로 비교하지 않는다.
+    const byShorts = new Map((snap.projects || []).map((ps) => [ps.shortsNum, ps]));
+    for (const pr of parsed.projects) {
+      const ps = byShorts.get(pr.shortsNum); if (!ps) continue;
+      const gmap = new Map((ps.groups || []).map((gs) => [gs.num, gs]));
+      for (const g of pr.groups) {
+        const freshPrompt = norm(g.imagePrompt);
+        if (!freshPrompt) continue;
+        const gs = gmap.get(g.num);
+        if (!gs || norm(gs.imagePrompt) !== freshPrompt) return false;
+      }
+    }
     return true;
   } catch { return false; }
 }
@@ -4257,9 +4287,11 @@ function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
   } else {
     parsed = preParsed || P.parseScript(scriptPath, mode, presetThresholds(preset)); // 판정에 쓴 파싱 재사용
     if (sameMode) {
-      const n = overlaySnapshot(parsed, snap);
+      const { restored, invalidated } = overlaySnapshot(parsed, snap);
       const why = opts.force ? '대본 다시 읽기' : '대본 수정 감지';
-      note = n ? `♻ ${why} — 새로 파싱하고 기존 자산 ${n}개를 복원했습니다` : `♻ ${why} — 새로 파싱했습니다`;
+      note = `♻ ${why} — 새로 파싱했습니다`
+        + (restored ? ` · 내용이 같은 기존 자산 ${restored}개 복원` : '')
+        + (invalidated ? ` · 내용이 바뀐 그룹 ${invalidated}개는 새 이미지 대상` : '');
     }
   }
   // 🔑 **파싱(또는 「같다」고 확인)한 그 순간의 해시를 심는다.** 저장할 때 다시 계산하면(buildSnapshot)
@@ -4309,6 +4341,8 @@ function buildSnapshot() {
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
+        imageStale: !!g.imageStale,
+        imagePromptStale: !!g.imagePromptStale,
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
@@ -4446,7 +4480,7 @@ function projectsFromSnapshot(snap) {
       const g = new Group({ num: gs.num, sentenceIds: [] });
       // isIntro: 신규 스냅샷은 저장값, 구 스냅샷은 phase 로 폴백(도입부 H2 → phase 에 '도입' 포함)
       const introFlag = gs.isIntro != null ? !!gs.isIntro : /도입/.test(gs.phase || '');
-      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, h2Title: gs.h2Title || h2map.get(gs.phase) || null, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
+      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, h2Title: gs.h2Title || h2map.get(gs.phase) || null, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath, imageStale: !!gs.imageStale, imagePromptStale: !!gs.imagePromptStale });
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
@@ -4460,10 +4494,12 @@ function projectsFromSnapshot(snap) {
     return proj;
   });
 }
-// 새로 파싱한 대본 위에 스냅샷의 "작업물"만 덮어쓰기(대본을 수정한 경우 — 자산/프롬프트 최대한 이어받기).
-//   그룹번호 일치 + (문장 텍스트 동일할 때만) TTS 복원. 파일이 실제 존재하는 자산만 복원.
+// 새로 파싱한 대본 위에 스냅샷의 "작업물"만 덮어쓰기.
+//   🔑 그룹번호뿐 아니라 **그룹의 모든 문장 내용이 같을 때만** 프롬프트·자산을 복원한다.
+//   번호만 맞추면 앞쪽 문장 삽입/수정 뒤 전혀 다른 장면의 옛 이미지가 붙는다.
 function overlaySnapshot(parsed, snap) {
-  let touched = 0;
+  const { sameGroupContent } = require('./core/group-freshness');
+  let restored = 0, invalidated = 0;
   const byShorts = new Map();
   (snap.projects || []).forEach((ps) => byShorts.set(ps.shortsNum, ps));
   for (const pr of parsed.projects) {
@@ -4474,16 +4510,31 @@ function overlaySnapshot(parsed, snap) {
     const gmap = new Map(); (ps.groups || []).forEach((gs) => gmap.set(gs.num, gs));
     for (const g of pr.groups) {
       const gs = gmap.get(g.num); if (!gs) continue;
-      if (gs.imagePrompt != null) g.imagePrompt = gs.imagePrompt;
-      if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
-      if (gs.motionNote != null) g.motionNote = gs.motionNote;
-      if (gs.imageCleared) g.imageCleared = true;  // ✕ 삭제·이상 폐기 표시 복원 — 없으면 캐시가 되살린다(2026-08-19)
-      // 📎 직접 첨부 표시 복원 — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 지운다(2026-09-07)
-      if (gs.userImage) g._userImage = gs.userImage;
-      if (gs.userVideo) g._userVideo = gs.userVideo;
-      if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; touched++; }
-      if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
       const sents = pr.getSentencesOfGroup(g);
+      if (!sameGroupContent(sents, gs.sentences || [])) {
+        // 새 파싱본의 대본 내 프롬프트는 보존한다. 프롬프트가 없다면 autoFillPrompts 가 현재 문장으로 새로 만든다.
+        g.imageStale = true;
+        g.imagePromptStale = !g.imagePrompt || !g.imagePrompt.trim(); // .md 에 새 프롬프트가 있으면 그것이 최신
+        g.imageCleared = true; // 이전 프롬프트 캐시가 이 그룹에 되살아나는 것도 차단
+        invalidated++;
+        continue;
+      }
+      const normPrompt = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+      const sourcePromptChanged = !!normPrompt(g.imagePrompt) && normPrompt(g.imagePrompt) !== normPrompt(gs.imagePrompt);
+      if (sourcePromptChanged) {
+        // 문장은 같아도 .md 의 명시 프롬프트가 바뀌었다면 옛 이미지/프롬프트를 복원하지 않는다.
+        g.imageStale = true; g.imagePromptStale = false; g.imageCleared = true; invalidated++;
+      } else {
+        if (gs.imagePrompt != null) g.imagePrompt = gs.imagePrompt;
+        if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
+        if (gs.motionNote != null) g.motionNote = gs.motionNote;
+        if (gs.imageCleared) g.imageCleared = true;  // ✕ 삭제·이상 폐기 표시 복원 — 없으면 캐시가 되살린다
+        // 📎 직접 첨부 표시 복원 — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 지운다
+        if (gs.userImage) g._userImage = gs.userImage;
+        if (gs.userVideo) g._userVideo = gs.userVideo;
+        if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; restored++; }
+        if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
+      }
       (gs.sentences || []).forEach((ss, i) => {
         const s = sents[i]; if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
@@ -4491,7 +4542,7 @@ function overlaySnapshot(parsed, snap) {
       });
     }
   }
-  return touched;
+  return { restored, invalidated };
 }
 
 // ── 📥 자산 이어받기 (통합본) ─────────────────────────────────────────
@@ -5231,7 +5282,7 @@ ipcMain.handle('set-group-prompt', (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
-  if (imagePrompt != null) g.imagePrompt = String(imagePrompt).trim();
+  if (imagePrompt != null) { g.imagePrompt = String(imagePrompt).trim(); g.imagePromptStale = false; }
   if (videoPrompt != null) { g.videoPrompt = String(videoPrompt).trim(); g.isI2V = !!g.videoPrompt; }
   scheduleAutoSave();
   pushDtoUpdate();
@@ -5451,6 +5502,8 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
     const g = pr && pr.groups.find((x) => x.num === groupNum);
     if (!g) return P.toDTO(S.parsed);
+    // 문장 인라인 수정 직후에는 옛 프롬프트도 함께 무효화된다. 단건 🔄 에서도 현재 문장으로 먼저 채운다.
+    if (!g.imagePrompt || !g.imagePrompt.trim()) await autoFillPrompts([pr], log);
     if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
     S.abort = false;
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
@@ -5527,8 +5580,8 @@ function renumberMediaFiles(project, mediaDir) {
 //   옛 「✏ 대본 수정」(전문 textarea)은 적용할 때마다 **재파싱이라 TTS·이미지가 통째로 초기화**됐다.
 //   여기서는 정반대로 간다:
 //     ① .md 는 **그 문장이 차지한 문자 범위만** 바꾼다(core/script-edit 의 마스킹+전방커서 매칭)
-//     ② 파싱본은 **재파싱하지 않고 제자리에서** 고친다 → 그룹 분할(✂)·프롬프트·이미지·다른 문장 음성이 그대로 산다
-//     ③ 고친 문장의 음성만 비운다 → 「🎤」를 누르면 그 문장만 새로 만들어진다
+//     ② 파싱본은 **재파싱하지 않고 제자리에서** 고친다 → 그룹 분할(✂)·다른 그룹 자산은 그대로 산다
+//     ③ 고친 그룹의 TTS·이미지 프롬프트/참조만 무효화한다 → 현재 대본으로 다시 만들 수 있다
 //   🔑 ①과 ②가 어긋나면(=.md 와 화면이 다른 대본이 되면) 다음에 열 때 조용히 틀린다. 그래서
 //      **고친 .md 를 실제로 다시 파싱해 문장 시퀀스가 기대와 같은지 확인한 뒤에만** 파일을 쓴다(아래 검증 재파싱).
 ipcMain.handle('edit-sentences', (_e, args = {}) => {
@@ -5595,6 +5648,18 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
 
+  // 이 그룹의 장면 내용도 달라졌다. 옛 이미지 참조와 프롬프트를 그대로 두면 상단 「이미지」가
+  // '이미 있음'으로 건너뛰거나, 같은 프롬프트 캐시를 다시 붙인다. 파일 자체는 지우지 않아 실패 시 수동 복구 가능하다.
+  try { if (g._imgCacheKey) require('./core/media-cache').del(g._imgCacheKey); } catch {}
+  g._imgCacheKey = null;
+  g.imagePath = null;
+  g.imagePrompt = null;
+  g.imageStatus = 'idle';
+  g.imageStale = true;
+  g.imagePromptStale = true;
+  g.imageCleared = true;
+  g._userImage = null;
+
   // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
   //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
   const nh = scriptHash(S.scriptPath);
@@ -5604,7 +5669,8 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
-    + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로'));
+    + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
+    + ' · 이 그룹 이미지는 현재 대본 기준으로 새로 생성됩니다(🖼)');
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
 

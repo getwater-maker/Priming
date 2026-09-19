@@ -94,6 +94,8 @@ function makeEnv(cfg) {
     runGeminiImages: async () => {},
     // Genspark 이미지는 비디오와 **같은 크롬**이라 gensparkBrowser 레인을 잡는다(v0.3.95) — 여기선 그냥 실행.
     _runOnLanes: (_lanes, _label, fn) => fn(),
+    // Flow 이미지도 실제 앱에서는 브라우저 수명주기 래퍼를 거친다 — 단위 테스트에서는 그대로 실행.
+    _withFlowBrowser: (_label, fn) => fn(),
     runComfyImages: async () => {},
     runFlowImages: async (proj, dir, logger, styleId, nums) => { fl.calls++; return cfg.flow(proj, nums, { gs, fl }, clock); },
   };

@@ -77,6 +77,12 @@ function toDTO(parseResult) {
         voice: pr.voice,
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);
+          const mediaVersion = (file) => {
+            try {
+              const st = file && fs.statSync(file);
+              return st ? `${Math.trunc(st.mtimeMs)}-${st.size}` : '';
+            } catch { return ''; }
+          };
           return {
             num: g.num,
             phase: g.phase || null,
@@ -100,6 +106,10 @@ function toDTO(parseResult) {
             // 실제 파일이 있을 때만 경로 노출 — 없으면 null → UI 가 깨진 썸네일 대신 '＋'(첨부) 표시.
             imagePath: (g.imagePath && fs.existsSync(g.imagePath)) ? g.imagePath : null,
             videoPath: (g.videoPath && fs.existsSync(g.videoPath)) ? g.videoPath : null,
+            // 같은 01.png 경로를 덮어써도 Chromium 이 옛 디코딩 이미지를 재사용하지 않게 URL 버전으로 쓴다.
+            imageVersion: mediaVersion(g.imagePath),
+            videoVersion: mediaVersion(g.videoPath),
+            imageStale: !!g.imageStale,
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
             videoStatus: g.videoStatus || null, // 'generating' | 'upscaling' | 'done' | 'fail'
           };

@@ -87,6 +87,16 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
   let localPkg = {};
   try { localPkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8')); } catch (_) {}
 
+  // 🔴 설치본보다 GitHub 매니페스트가 낮으면 절대 적용하지 않는다.
+  // 실제 사고(2026-09-19): v0.5.16 설치 직후 원격 manifest v0.5.15의 모든 파일을 받아
+  // package.json·main.js·렌더러까지 다시 v0.5.15로 내려갔다. 발행 쪽 역행 차단만으로는
+  // "새 설치본을 아직 GitHub에 올리기 전"의 이 창을 막지 못하므로 클라이언트에서도 차단한다.
+  const { compareVersions } = require('./core/version-order');
+  if (localPkg.version && manifest.version && compareVersions(manifest.version, localPkg.version) < 0) {
+    log(`원격 매니페스트가 더 낮아 건너뜀 (설치본 v${localPkg.version} > 원격 v${manifest.version})`);
+    return;
+  }
+
   // 의존성(node_modules) 변경은 파일 교체로 불가 → 재설치 안내 후 현재 버전 유지
   const localDeps = sha1(Buffer.from(JSON.stringify(localPkg.dependencies || {})));
   if (manifest.deps && manifest.deps !== localDeps) {

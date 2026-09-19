@@ -49,7 +49,7 @@ function decide({ snap, mdHash, sameMode = true, force = false, parseResult, par
     `${DECIDE_SRC}; return { fresh, preParsed, parses: P.__n || 0 };`);
   let parses = 0;
   const P2 = { parseScript: (...a) => { parses++; return P.parseScript(...a); } };
-  const r = fn(snap, mdHash, sameMode, 2, P2, '/x.md', 'longform', () => ({}), null, snapshotMatchesScript);
+  const r = fn(snap, mdHash, sameMode, 3, P2, '/x.md', 'longform', () => ({}), null, snapshotMatchesScript);
   const use = (!force && sameMode && r.fresh) ? '작업본' : '새파싱';
   return { use, parses, preParsed: r.preParsed };
 }
@@ -95,6 +95,11 @@ console.log('\n[2] snapshotMatchesScript — 원문 실행 (해시를 못 믿을
   ok(!snapshotMatchesScript(mkParsed(A), { projects: [] }), '스냅샷이 비면 false');
   ok(!snapshotMatchesScript(mkParsed([]), mkSnap(A)), '대본이 비면 false(0개끼리 같다고 보지 않는다)');
   ok(!snapshotMatchesScript(null, mkSnap(A)), 'null 에도 던지지 않고 false');
+  const withPrompt = mkParsed(A); withPrompt.projects[0].groups[0].imagePrompt = 'South Korean actors';
+  const oldPrompt = mkSnap(A); oldPrompt.projects[0].groups[0].imagePrompt = 'a younger woman';
+  ok(!snapshotMatchesScript(withPrompt, oldPrompt), '🔴 문장이 같아도 대본 명시 프롬프트가 달라지면 false');
+  oldPrompt.projects[0].groups[0].imagePrompt = 'South  Korean actors ';
+  ok(snapshotMatchesScript(withPrompt, oldPrompt), '프롬프트 공백 차이는 무시');
 }
 
 console.log('\n[3] 판정 — 원문 블록 실행');
@@ -103,13 +108,13 @@ console.log('\n[3] 판정 — 원문 블록 실행');
   const H = 'a'.repeat(16), H2 = 'b'.repeat(16);
   const A = ['문장 하나.', '문장 둘.'];
 
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: H }).use, '작업본',
-    'hashVer 2 + 해시 같음 → 작업본(빠른 경로)');
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: H }).parses, 0,
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: H }).use, '작업본',
+    'hashVer 3 + 해시 같음 → 작업본(빠른 경로)');
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: H }).parses, 0,
     '빠른 경로에서는 파싱하지 않는다(비용 0)');
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: H2 }).use, '새파싱',
-    'hashVer 2 + 해시 다름 → 새 파싱');
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: '' }).use, '새파싱',
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: H2 }).use, '새파싱',
+    'hashVer 3 + 해시 다름 → 새 파싱');
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: '' }).use, '새파싱',
     '대본을 못 읽어 해시가 비면 새 파싱(fail-safe)');
 
   // 🔴 v0.4.6 오염 — 해시는 「현재 대본」 것이라 같지만, 작업본은 옛 것이다
@@ -126,9 +131,9 @@ console.log('\n[3] 판정 — 원문 블록 실행');
   eq(decide({ snap: mkSnap(A), mdHash: H, parseThrows: true }).use, '새파싱',
     '파싱이 실패하면 작업본을 쓰지 않는다(fail-safe)');
 
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: H, force: true }).use, '새파싱',
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: H, force: true }).use, '새파싱',
     'force(🔄 다시 읽기)면 해시가 같아도 새 파싱');
-  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 2 }), mdHash: H, sameMode: false }).use, '새파싱',
+  eq(decide({ snap: mkSnap(A, { srcHash: H, hashVer: 3 }), mdHash: H, sameMode: false }).use, '새파싱',
     '모드가 다르면(옛 쇼츠 스냅샷) 이어받지 않는다(회귀)');
   eq(decide({ snap: mkSnap(A), mdHash: H, sameMode: false }).parses, 0,
     '모드가 다르면 판정용 파싱도 하지 않는다');
@@ -142,7 +147,7 @@ console.log('\n[4] 저장 규약 — 고착을 만들지 않는가');
   ok(/hashVer: SNAP_HASH_VER/.test(body), 'buildSnapshot 이 hashVer 를 찍는다(오염분 자동 재판정)');
   ok(!/scriptHash\(/.test(body),
     '⛔ buildSnapshot 안에서 scriptHash() 를 다시 부르지 않는다 — 부르면 「바뀐 대본의 해시 + 옛 파싱」이 저장된다');
-  ok(/const SNAP_HASH_VER = 2;/.test(MAIN), 'SNAP_HASH_VER 상수 정의');
+  ok(/const SNAP_HASH_VER = 3;/.test(MAIN), 'SNAP_HASH_VER 상수 정의');
   ok(/_srcHash', \{ value: mdHash/.test(MAIN), 'buildParsedForScript 가 파싱 직후 _srcHash 를 심는다');
   // ⚠ 주석에는 그 문구가 「무엇이 틀렸었나」의 기록으로 남아 있다 → **코드 줄만** 본다.
   const codeOnly = MAIN.split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
