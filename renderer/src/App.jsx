@@ -326,6 +326,8 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
 function uiConfirm(msg) { try { api.focusWindow(); } catch (_) {} return window.confirm(msg); }
 function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.alert(msg); }
 
+function normOutTargetUi(v) { return v === 'whiteboard' || v === 'mp4' ? v : 'vrew'; }
+
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   const isLf = mode === 'longform';
@@ -371,6 +373,9 @@ export default function App() {
   //     채널에 박으면 오히려 헷갈리고, 진입점이 둘이면 반드시 어긋난다).
   const [outMode, setOutMode] = useState('full');
   // ✏ 완성물 종류 — 'vrew'(Vrew 에서 마무리) | 'whiteboard'(손그림 MP4 · 4단계 2026-09-05). 헤더 「④ 완성」에서 고른다.
+  // 🎬 'mp4' = .vrew 를 만든 뒤 Vrew 없이 유튜브 업로드용 MP4 로 굽는다(core/vrew-render.js).
+  //   ⚠ 정규화는 반드시 이 함수 하나로 — 예전엔 4곳에 `=== 'whiteboard' ? 'whiteboard' : 'vrew'` 가 박혀 있어
+  //     새 값을 고르면 저장·복원 때 조용히 .vrew 로 되돌아갔다(v0.3.50 「골라도 되돌아가던 것」과 같은 계열).
   const [outTarget, setOutTarget] = useState('vrew');
   const [wbCfg, setWbCfg] = useState(null);   // 화이트보드 렌더 설정(출력 긴변·동시 개수) — PC 별 파일
   const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
@@ -583,7 +588,7 @@ export default function App() {
         //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
-        if (p.outTarget != null) setOutTarget(p.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew');
+        if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -702,7 +707,7 @@ export default function App() {
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
     if (s.outMode != null) setOutMode(['full', 'audio', 'visual'].includes(s.outMode) ? s.outMode : 'full');
-    if (s.outTarget != null) setOutTarget(s.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew');
+    if (s.outTarget != null) setOutTarget(normOutTargetUi(s.outTarget));
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -964,9 +969,13 @@ export default function App() {
       setStatus(oks.length ? `📥 문장 ${n}개에 Vrew 음성 연결` : '가져오기 실패 — 로그를 보세요');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
-  async function runVrew(shortsNum) {
-    setStatus('.vrew 내보내는 중…');
-    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine, outMode }); setStatus(`.vrew ${r.outs.length}개`); }
+  async function runVrew(shortsNum, mp4 = false) {
+    setStatus(mp4 ? '🎬 유튜브 MP4 굽는 중… (.vrew → MP4)' : '.vrew 내보내는 중…');
+    try {
+      const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine, outMode, mp4 });
+      const nMp4 = (r.outs || []).filter((o) => o.mp4Path).length;
+      setStatus(mp4 ? (nMp4 ? `🎬 유튜브 MP4 ${nMp4}개 완료` : '🎬 MP4 실패 — 로그 확인 (.vrew 는 만들어졌습니다)') : `.vrew ${r.outs.length}개`);
+    }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
@@ -1454,10 +1463,11 @@ export default function App() {
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
-      outTarget: p.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ✏ 완성물 종류(채널 기본값)
+      outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
       outLong: p.outLong || p.outputFolder || '',
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
+      outUpload: p.outUpload || '',
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
       wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
@@ -1691,9 +1701,10 @@ export default function App() {
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
-      outTarget: ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew', // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
+      outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
+      outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
         font: (ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font,
@@ -1733,6 +1744,7 @@ export default function App() {
   async function pickOutImages() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outImages: d })); }
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
   async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
+  async function pickOutUpload() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outUpload: d })); }
   async function pickOutWhiteboard() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outWhiteboard: d })); }
   // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
@@ -2394,7 +2406,11 @@ export default function App() {
             <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
               <option value="vrew">.vrew (Vrew)</option>
               <option value="whiteboard">✏ 화이트보드 MP4</option>
+              <option value="mp4">🎬 유튜브 MP4</option>
             </select>
+            {outTarget === 'mp4' && (
+              <button disabled={!loaded} title="이미 만든 음성·이미지로 .vrew 를 다시 만든 뒤, Vrew 를 거치지 않고 그 .vrew 를 유튜브 업로드용 MP4 로 굽습니다(1920x1080 · 30fps · 자막·AI 고지 포함). 음성·이미지까지 새로 만들려면 ⚡ 만들기. 저장 폴더 = 채널편집 → 📁 폴더 → 「유튜브 업로드」(비우면 윈도우 다운로드 폴더). .vrew 도 그대로 남습니다." onClick={() => runVrew(null, true)}>🎬 MP4 굽기</button>
+            )}
             {outTarget === 'whiteboard' && (<>
               <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
                 <option value="1920">1920 (최종)</option>
@@ -2723,10 +2739,11 @@ export default function App() {
                   </div>
                   <div className="col">
                     <div className="crow stack"><span className="l">출력</span>
-                      <select value={ch.outTarget === 'whiteboard' ? 'whiteboard' : 'vrew'}
+                      <select value={normOutTargetUi(ch.outTarget)}
                         onChange={(e) => setCh({ ...ch, outTarget: e.target.value })}>
                         <option value="vrew">.vrew (Vrew)</option>
                         <option value="whiteboard">✏ 화이트보드 MP4</option>
+                        <option value="mp4">🎬 유튜브 MP4</option>
                       </select></div>
                   </div>
                 </div>
@@ -2783,6 +2800,12 @@ export default function App() {
                     <input placeholder="✏ 화이트보드 MP4 와 자막(.srt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outWhiteboard || ''}
                       onChange={(e) => setCh({ ...ch, outWhiteboard: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutWhiteboard}>찾기</button></div>
+                )}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow"><label>유튜브 업로드</label>
+                    <input placeholder="🎬 유튜브 MP4(④ 완성 → 🎬 유튜브 MP4)가 떨어질 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outUpload || ''}
+                      onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드 폴더</label>

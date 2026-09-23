@@ -310,7 +310,7 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(/outTarget, \/\/ \.vrew \/ ✏ 화이트보드 MP4/.test(APP), 'makeAll 인자에 outTarget');
     ok(/outTarget, aiNotice, outMode \}, openEach: openEachVrew/.test(APP), 'runBatch common 에 outTarget(순서는 vrew-audio 의 `aiNotice, outMode }` 단언을 지킨다)');
     ok(/if \(p\.outTarget != null\) setOutTarget/.test(APP), '채널 기본값 → 헤더');
-    ok(/outTarget: p\.outTarget === 'whiteboard'/.test(APP) && /outTarget: ch\.outTarget === 'whiteboard'/.test(APP), '채널편집 열기·저장에 outTarget(저장 시 빈 값으로 덮이지 않게)');
+    ok(/outTarget: normOutTargetUi\(p\.outTarget\)/.test(APP) && /outTarget: normOutTargetUi\(ch\.outTarget\)/.test(APP), '채널편집 열기·저장에 outTarget(저장 시 빈 값으로 덮이지 않게 · 🎬 mp4 도 보존)');
     ok(/api\.getWhiteboardConfig\(\)\.then/.test(APP), '부팅 때 설정을 읽는다');
     ok(!/setBusy|\bbusy\b/.test(APP.slice(APP.indexOf('async function runWhiteboardBuild'), APP.indexOf('async function runWhiteboardBuild') + 600)), '존재하지 않는 busy 상태를 참조하지 않는다(미정의 식별자)');
     // 미정의 식별자 — 이 저장소 단골

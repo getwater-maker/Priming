@@ -2186,8 +2186,29 @@ ipcMain.handle('import-vrew-audio', async (_e, args = {}) => {
 //     누르면 그대로 만든다 — 계획을 미리 보고 싶으면 「📋 장면 계획」 버튼이 따로 있고, 진행은 로그에 남는다.
 //     ⚠ 관문 B 를 없애면 **확인 그림(preview-NN.png)도 만들지 않는다**(파이프라인이 gateB 가 있을 때만 만든다) —
 //       그만큼 렌더가 빨리 시작된다. 영역을 눈으로 보려면 whiteboard-N 폴더의 주석을 편집기로 연다.
-const OUT_TARGETS = new Set(['vrew', 'whiteboard']);
+// 🎬 'mp4' = .vrew 를 만든 뒤 **Vrew 없이** 그 .vrew 를 읽어 유튜브 업로드용 MP4 로 굽는다(core/vrew-render.js).
+//   .vrew 는 그대로 남는다(백업·수정용). 로이 2026-09-23: "바로 유튜브업로드할수 있는 영상으로 만드는 메뉴".
+const OUT_TARGETS = new Set(['vrew', 'whiteboard', 'mp4']);
 function normOutTarget(v) { return OUT_TARGETS.has(String(v)) ? String(v) : 'vrew'; }
+
+/**
+ * 🎬 .vrew → 유튜브 업로드용 MP4. 저장 폴더 = 채널의 「유튜브 업로드」(비우면 윈도우 다운로드 폴더).
+ * 어떤 경우에도 던지지 않는다 — 실패해도 .vrew 는 이미 있으므로 Vrew 로 마무리할 수 있다.
+ */
+async function renderUploadMp4(vrewPath, baseName, preset) {
+  const VR = require('./core/vrew-render');
+  const dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || path.dirname(vrewPath);
+  const outPath = path.join(dir, `${baseName}.mp4`);
+  // 화면이 꺼지면 인코딩이 흔들릴 수 있어 작업 동안 절전을 막는다(TTS·이미지와 같은 규칙).
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, isAborted: () => !!S.abort }));
+  if (r.ok) {
+    const t = r.timings || {};
+    log(`🎬 유튜브 MP4 완료 — ${outPath}`);
+    log(`   ${(r.durationSec / 60).toFixed(1)}분 영상 · 렌더 ${_dur(r.renderSec)} (${r.speed.toFixed(1)}배속 · ${r.encoder === 'nvenc' ? 'NVENC' : 'CPU'}) · 읽기 ${t.read}s · 화면 ${t.video}s · 음성 ${t.audio}s`);
+  } else if (r.cancelled) log('⏹ MP4 렌더 중단됨 — .vrew 는 남아 있습니다');
+  else log(`✗ 유튜브 MP4 실패 — ${r.error} (.vrew 는 남아 있으니 Vrew 에서 내보내기 할 수 있습니다)`);
+  return r;
+}
 
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
 async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7 } = {}) {
@@ -2256,6 +2277,9 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
   const outMode = normOutMode(args.outMode);
   if (outMode !== 'full') log(`💾 .vrew 내보내기 — ${outModeLabel(outMode)}`);
+  // 🎬 mp4:true = .vrew 를 다시 만든 뒤 그걸로 유튜브 MP4 까지 굽는다(음성·이미지는 이미 있는 것을 쓴다).
+  const mp4Go = !!args.mp4 && outMode === 'full';
+  if (args.mp4 && !mp4Go) log('⚠ 유튜브 MP4 는 출력 방식이 「전체」일 때만 만듭니다 — .vrew 만 만듭니다');
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = resolvePreset(presetName);   // 🔑 이름이 이긴다(낡은 전역이 자막·AI고지를 뒤바꾸지 않게)
   if (preset && captionStyle) {
@@ -2303,7 +2327,11 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
-      shell.openPath(vrewPath); // 생성 즉시 Vrew로 열어 바로 렌더 가능
+      if (mp4Go) {
+        const mr = await renderUploadMp4(vrewPath, baseName, preset);
+        if (mr.ok) { outs[outs.length - 1].mp4Path = mr.output; try { shell.openPath(mr.output); } catch (_) {} }
+        else if (!mr.cancelled) shell.openPath(vrewPath); // 실패하면 Vrew 로 마무리할 수 있게
+      } else shell.openPath(vrewPath); // 생성 즉시 Vrew로 열어 바로 렌더 가능
     } catch (e) {
       log(`✗ ${prLabel(pr)} 실패: ${e.message}`);
     }
@@ -4074,7 +4102,7 @@ ipcMain.handle('get-preset-detail', (_e, name) => {
   // 다운로드 폴더를 한 번도 안 정한 채널이면 **윈도우 다운로드 폴더를 기본값으로 보여준다**
   // (채널편집에서 그대로 저장되거나, 사용자가 다른 폴더로 바꾸면 그 값이 저장된다).
   // ✏ 화이트보드 출력도 같은 규칙 — 비어 있으면 다운로드 폴더가 기본값이다(로이 2026-09-16).
-  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir() } : null;
+  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir(), outUpload: p.outUpload || defaultDownloadDir() } : null;
 });
 ipcMain.handle('save-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');
@@ -5010,7 +5038,12 @@ async function runMakeAllCore(opts = {}) {
     const wbHere = (outTarget === 'whiteboard');
     if (wbHere && outMode !== 'full') log('⚠ 화이트보드는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 로 만듭니다');
     const wbGo = wbHere && outMode === 'full';
+    // 🎬 유튜브 MP4 — 음성·화면이 다 있어야 올릴 수 있는 영상이 된다. 「음성만/화면만」이면 .vrew 만 만든다.
+    const mp4Here = (outTarget === 'mp4');
+    if (mp4Here && outMode !== 'full') log('⚠ 유튜브 MP4 는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 만 만듭니다');
+    const mp4Go = mp4Here && outMode === 'full';
     log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (장면 렌더 → 음성 → 자막)'
+      : mp4Go ? '📦 4단계 — .vrew 생성 → 🎬 유튜브 MP4 렌더…'
       : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
@@ -5059,7 +5092,12 @@ async function runMakeAllCore(opts = {}) {
         const res = await buildForMode(outMode, pr, build);
         P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
         log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
-        if (openVrew) shell.openPath(vrewPath);
+        if (mp4Go) {
+          // .vrew 를 입력으로 굽는다 — Vrew 가 받는 것과 같은 입력이라 렌더 규칙이 두 벌이 되지 않는다.
+          const mr = await renderUploadMp4(vrewPath, baseName, preset);
+          if (mr.ok) { if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
+          else if (!mr.cancelled && openVrew) shell.openPath(vrewPath); // MP4 가 실패하면 Vrew 로 마무리할 수 있게
+        } else if (openVrew) shell.openPath(vrewPath);
       } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
     }
     warnIncompleteVisuals(incomplete);

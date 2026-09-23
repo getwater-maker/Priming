@@ -130,7 +130,7 @@ function stage2() {
   ok(/const \[outMode, setOutMode\] = useState\('full'\)/.test(APP), '렌더러 state 기본값 = 전체');
   ok((APP.match(/outMode/g) || []).length >= 8, '렌더러가 outMode 를 실제로 배선한다');
   ok(/aiNotice, outMode \}/.test(APP), '큐(common)에 outMode 를 실어 보낸다');
-  ok(/engine: imgEngine, outMode \}/.test(APP), '💾 .vrew 에도 outMode 를 넘긴다');
+  ok(/engine: imgEngine, outMode(, mp4)? \}/.test(APP), '💾 .vrew 에도 outMode 를 넘긴다');
   ok(/outMode,  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다');
   ok(/_needImg = \(outMode === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');
   ok(/📥 Vrew 음성<\/button>/.test(APP), '작업바에 「📥 Vrew 음성」 버튼');
