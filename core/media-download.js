@@ -448,14 +448,19 @@ async function download(url, o = {}) {
     abortSignal: o.abortSignal,
     timeoutMs: o.timeoutMs || 30 * 60 * 1000,
     onLine: (ln) => {
-      if (!o.onLog) return;
       const m = ln.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
-      if (m) {                                   // 진행률은 10% 단위로만(로그 폭주 방지)
-        const p = Math.floor(parseFloat(m[1]) / 10) * 10;
-        if (p !== lastPct) { lastPct = p; o.onLog(`  ↓ ${p}%`); }
+      if (m) {
+        const raw = parseFloat(m[1]);
+        // 화면 진행 표시용 — 1% 단위(o.onProgress). 로그는 10% 단위로만(폭주 방지).
+        if (o.onProgress) { try { o.onProgress({ pct: raw, stage: 'download' }); } catch {} }
+        const p = Math.floor(raw / 10) * 10;
+        if (o.onLog && p !== lastPct) { lastPct = p; o.onLog(`  ↓ ${p}%`); }
         return;
       }
-      if (/^\[(ExtractAudio|Merger|FixupM4a)\]/.test(ln)) o.onLog('  ↳ 변환 중…');
+      if (/^\[(ExtractAudio|Merger|FixupM4a)\]/.test(ln)) {
+        if (o.onProgress) { try { o.onProgress({ pct: 100, stage: 'convert' }); } catch {} }
+        if (o.onLog) o.onLog('  ↳ 변환 중…');
+      }
     },
   });
   if (r.code !== 0) {

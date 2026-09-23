@@ -211,7 +211,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   const headCalls = (main.match(/txtWithHead\(/g) || []).length;
   ok(headCalls >= 3, `자막·STT 두 경로가 머리말 함수를 공유한다 (정의+호출 ${headCalls}곳)`);
   ok(/fs\.writeFileSync\(outTxt, txtWithHead\(text, head\)/.test(main), '자막 경로가 머리말을 붙인다');
-  ok(/transcribeToTxt\(mediaFile, \{ outTxt, head \}\)/.test(main), 'STT 경로도 같은 머리말을 넘긴다');
+  ok(/transcribeToTxt\(mediaFile, \{ outTxt, head[ ,}]/.test(main), 'STT 경로도 같은 머리말을 넘긴다');
 
   // 🔴 비메오: probe 만 바꾸고 download 를 옛 주소로 하면 그대로 막힌다 → **성공한 주소로 받는다**
   ok(/MD\.probeSmart\(url,/.test(main), 'probeSmart 로 대안 주소까지 시도한다');
@@ -224,6 +224,11 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/sttFromUrl:/.test(pre) && /ytdlpStatus:/.test(pre) && /ytdlpUpdate:/.test(pre), 'preload 3개');
   ok(/MD\.listChannelVideos\(channelUrl,/.test(main), '채널 모드가 전체 영상 목록을 먼저 펼친다');
   ok(/filenameWithId: channelMode, mediaId:/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다');
+  // 🔴 2026-09-23 실사고: 단일 URL 에도 mediaId 를 넘겨 파일명에 없는 [ID] 로 찾다가 「받은 파일이 없습니다」로 전부 실패
+  ok(/mediaId: channelMode \? \(job\.id \|\| info\.id\) : ''/.test(main), '🔴 단일 URL 은 mediaId 를 넘기지 않는다(받은 파일을 못 찾는다)');
+  ok(/win\.webContents\.send\('urldl-progress'/.test(main) && /onUrldlProgress:/.test(pre), '📊 진행 상황을 화면으로 보낸다');
+  ok(/onProgress: \(p\) => \{ prog\.dl\.pct/.test(main), '다운로드 퍼센트를 진행 패널에 싣는다');
+  ok(/onChunk:/.test(main) && /opts\.onChunk/.test(main), '전사 청크 진행을 진행 패널에 싣는다');
   ok(/r\.reused && fs\.existsSync\(outTxt\)/.test(main), '중단 후 재실행은 이미 전사한 영상을 건너뛴다');
   // ⚡ 받기와 전사를 겹친다(2026-09-23) — 다운로드 루프가 전사를 기다리지 않는다
   {

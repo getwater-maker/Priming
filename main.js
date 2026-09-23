@@ -964,7 +964,10 @@ async function transcribeToTxt(file, opts = {}) {
     }
     const text = await asr.transcribeLong(audioPath, {
       abortSignal: () => S.abort,
-      onProgress: (p) => { if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`); },
+      onProgress: (p) => {
+        if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`);
+        if (opts.onChunk && p) { try { opts.onChunk(p); } catch {} }
+      },
     });
     fs.writeFileSync(outTxt, txtWithHead(text, opts.head), 'utf8');
     log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
@@ -1070,6 +1073,31 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   S.abort = false;
   const results = [];
 
+  // 📊 진행 상황 패널(2026-09-23 로이 「진행과정을 전혀 알 수 없네」) — 로그만으로는 받기·전사가
+  //   섞여 찍혀 지금 무엇이 몇 번째인지 알 수 없다. 상태를 한 객체로 모아 화면에 보낸다.
+  //   ⚠ 1% 마다 보내면 IPC 가 넘치므로 250ms 로 묶는다(단계가 바뀌는 순간은 즉시).
+  const prog = {
+    phase: 'prepare', total: 0, startedAt: Date.now(), outDir,
+    dl: { done: 0, idx: 0, title: '', pct: 0, stage: '' },
+    stt: { done: 0, pending: 0, cur: null },
+    sub: 0, skip: 0, fail: 0, fails: [],
+  };
+  let _progT = 0, _progTimer = null;
+  const sendProg = (now) => {
+    const fire = () => {
+      _progTimer = null; _progT = Date.now();
+      try { win.webContents.send('urldl-progress', JSON.parse(JSON.stringify(prog))); } catch {}
+    };
+    if (now) { if (_progTimer) { clearTimeout(_progTimer); _progTimer = null; } fire(); return; }
+    if (_progTimer) return;
+    _progTimer = setTimeout(fire, Math.max(0, 250 - (Date.now() - _progT)));
+  };
+  const noteFail = (idx, title, error) => {
+    prog.fail++; prog.fails.push({ idx, title: title || '', error: String(error || '').slice(0, 160) });
+    if (prog.fails.length > 30) prog.fails.shift();
+  };
+  sendProg(true);
+
   return await withAwake('URL 다운로드·STT', async () => {
     let tool;
     try {
@@ -1077,6 +1105,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       log(`🔗 yt-dlp ${tool.version} · 저장 ${outDir}`);
     } catch (e) {
       log(`✗ ${e.message}`);
+      prog.phase = 'done'; prog.okN = 0; prog.endedAt = Date.now(); noteFail(0, '', e.message); sendProg(true);
       return { ok: false, error: e.message };
     }
     let ffDir = '';
@@ -1084,6 +1113,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
 
     // 채널 모드만 목록을 펼친다. 평소 URL은 계속 단일 영상으로 고정돼 재생목록 폭주가 없다.
     const jobs = [];
+    prog.phase = channelMode ? 'listing' : 'prepare'; sendProg(true);
     if (channelMode) {
       for (const channelUrl of urls) {
         if (S.abort) break;
@@ -1103,9 +1133,12 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     }
     if (!jobs.length) {
       if (!results.length) results.push({ url: urls[0], ok: false, error: '채널에 받을 일반 영상이 없습니다' });
+      prog.phase = 'done'; prog.okN = 0; prog.endedAt = Date.now();
+      noteFail(0, '', results[0].error); sendProg(true);
       return { ok: true, results, outDir };
     }
     if (doStt) await warnAsrIfDown();
+    prog.total = jobs.length; prog.phase = 'running'; sendProg(true);
 
     // ⚡ 받기와 전사를 겹친다(2026-09-23 로이) — 예전엔 「받기 → 전사 → 다음 받기」 순차라
     //   전사하는 동안 네트워크가, 받는 동안 GPU 가 놀았다. 이제 받기는 쉬지 않고 이어 가고,
@@ -1117,17 +1150,27 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     let sttPending = 0;
     const enqueueStt = (i, t) => {
       sttPending++;
+      prog.stt.pending = sttPending; sendProg();
       sttChain = sttChain.then(async () => {
         try {
           if (S.abort) { slots[i] = { url: t.done.url, ok: false, error: '중단됨' }; return; }
           log(`  🎧 ${t.label} STT 시작: ${path.basename(t.mediaFile)}${sttPending > 1 ? ` (전사 대기 ${sttPending - 1}건)` : ''}`);
+          prog.stt.cur = { idx: i + 1, title: t.done.title || '', chunk: 0, chunks: 0, startedAt: Date.now() };
+          prog.stt.pending = sttPending - 1; sendProg(true);
           const mediaFile = t.mediaFile, outTxt = t.outTxt, head = t.head;
-          await transcribeToTxt(mediaFile, { outTxt, head });
+          await transcribeToTxt(mediaFile, { outTxt, head, onChunk: (p) => {
+            if (prog.stt.cur) { prog.stt.cur.chunk = p.done; prog.stt.cur.chunks = p.total; sendProg(); }
+          } });
           slots[i] = { ...t.done, txt: outTxt, from: 'stt' };
+          prog.stt.done++;
         } catch (e) {
           log(`  ✗ ${t.label} 전사 실패: ${e.message}`);
           slots[i] = { url: t.done.url, ok: false, error: e.message };
-        } finally { sttPending--; }
+          noteFail(i + 1, t.done.title, '전사 실패: ' + e.message);
+        } finally {
+          sttPending--;
+          prog.stt.cur = null; prog.stt.pending = sttPending; sendProg(true);
+        }
       });
     };
 
@@ -1138,6 +1181,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       const itemOutDir = job.outDir || outDir;
       const tag = `[${i + 1}/${jobs.length}]`;
       log(`🔗 ${tag} 받기: ${job.title || url}`);
+      prog.dl = { done: prog.dl.done, idx: i + 1, title: job.title || url, pct: 0, stage: 'probe' }; sendProg(true);
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
@@ -1146,15 +1190,18 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
         log(`  「${info.title}」 · ${mmss}${info.channel ? ` · ${info.channel}` : ''}`);
+        prog.dl.title = info.title; prog.dl.stage = 'download'; sendProg(true);
 
         // .txt 머리말에는 **사용자가 붙여넣은 원래 주소**를 쓴다(나중에 다시 열어볼 주소는 그쪽이다).
         const head = { url, title: info.title };
         const wantSubs = !forceStt;
         const r = await MD.download(dlUrl, {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
-          filenameWithId: channelMode, mediaId: job.id || info.id,
+          filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
           ffmpegDir: ffDir, abortSignal: () => S.abort, onLog: log,
+          onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
         });
+        prog.dl.done++; prog.dl.pct = 100; prog.dl.stage = 'done'; sendProg(true);
 
         const mediaFile = r.audio || r.video;
         const base = mediaFile
@@ -1166,6 +1213,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         if (channelMode && r.reused && fs.existsSync(outTxt)) {
           log(`  ↷ 이미 완료됨: ${path.basename(outTxt)}`);
           txtFrom = 'existing';
+          prog.skip++;
         }
         if (!txtFrom && r.sub && !forceStt) {
           // 자막이 있다 → 그대로 텍스트로. GPU 를 쓰지 않는다.
@@ -1174,6 +1222,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
             fs.writeFileSync(outTxt, txtWithHead(text, head), 'utf8');
             log(`  📝 자막에서 추출: ${path.basename(outTxt)} (${text.length}자 · STT 생략)`);
             txtFrom = 'subtitle';
+            prog.sub++;
           } else {
             log('  ⓘ 자막이 비어 있어 STT 로 진행합니다.');
           }
@@ -1195,8 +1244,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       } catch (e) {
         log(`  ✗ 실패: ${e.message}`);
         slots[i] = { url, ok: false, error: e.message };
+        noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
       }
     }
+    prog.dl.idx = 0; prog.dl.stage = ''; prog.phase = S.abort ? 'aborting' : (sttPending ? 'stt-only' : 'running');
+    sendProg(true);
     if (sttPending) log(`⬇ 다운로드 끝 — 남은 전사 ${sttPending}건을 마저 진행합니다`);
     await sttChain;
     for (const x of slots) if (x) results.push(x);
@@ -1204,6 +1256,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     const okN = results.filter((x) => x.ok).length;
     const subN = results.filter((x) => x.from === 'subtitle').length;
     log(`🔗 완료: 성공 ${okN}/${results.length}${subN ? ` (자막 ${subN}건은 STT 생략)` : ''}`);
+    prog.phase = S.abort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
     if (okN) { try { shell.openPath(outDir); } catch {} }
     return { ok: true, results, outDir };
   });

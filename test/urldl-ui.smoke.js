@@ -91,6 +91,35 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
       console.log('  ⓘ 채널편집 창을 못 열어 이 항목은 건너뜀');
     }
 
+    // [10] 📊 진행 패널 — main 이 보내는 urldl-progress 를 그대로 그린다(실제 다운로드 없이 이벤트만 흉내)
+    const sendProg = (p) => app.evaluate(({ BrowserWindow }, p) => {
+      BrowserWindow.getAllWindows()[0].webContents.send('urldl-progress', p);
+    }, p);
+    const base = { total: 40, startedAt: Date.now() - 65000, outDir: 'C:\\tmp\\채널', sub: 3, skip: 2, fail: 1,
+      fails: [{ idx: 7, title: '실패한 영상', error: '비공개 영상입니다' }] };
+    await sendProg({ ...base, phase: 'running',
+      dl: { done: 12, idx: 13, title: '열세 번째 영상', pct: 47.3, stage: 'download' },
+      stt: { done: 6, pending: 2, cur: { idx: 10, title: '열 번째 영상', chunk: 1, chunks: 3, startedAt: Date.now() - 20000 } } });
+    await win.waitForSelector('[data-testid="urldl-progress"]', { timeout: 5000 }).catch(() => {});
+    const pnl = win.locator('[data-testid="urldl-progress"]');
+    ok(await pnl.count() === 1, '진행 패널이 나타난다');
+    const pt = await pnl.innerText();
+    ok(/받기\s*12\s*\/\s*40/.test(pt), `받기 12 / 40 을 보여 준다`);
+    ok(/\[13\] 열세 번째 영상/.test(pt) && /받는 중 47%/.test(pt), '지금 받는 영상과 퍼센트를 보여 준다');
+    ok(/전사\s*6\s*\/\s*9/.test(pt) && /대기 2건/.test(pt), '전사 6 / 9 · 대기 2건(완료+대기+진행)을 보여 준다');
+    ok(/\[10\] 열 번째 영상/.test(pt) && /청크 1\/3/.test(pt), '지금 전사 중인 영상과 청크를 보여 준다');
+    ok(/\.txt 완료\s*11/.test(pt) && /실패 1/.test(pt), '.txt 완료(전사+자막+이미완료) · 실패 수');
+    ok(/받기 남은 시간 약/.test(pt), '받기 남은 시간을 어림한다');
+    ok(await pnl.locator('button:has-text("⏹ 중단")').count() === 1, '진행 중에는 ⏹ 중단 버튼');
+    await sendProg({ ...base, phase: 'done', okN: 39, endedAt: Date.now(),
+      dl: { done: 40, idx: 0, title: '', pct: 0, stage: '' }, stt: { done: 34, pending: 0, cur: null } });
+    await win.waitForTimeout(400);
+    const pt2 = await pnl.innerText();
+    ok(/✅ 끝/.test(pt2) && /저장: /.test(pt2), '끝나면 「끝」과 저장 폴더를 보여 준다');
+    await pnl.locator('button:has-text("닫기")').click();
+    await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="urldl-progress"]').count() === 0, '닫기로 패널이 사라진다');
+
     ok(errs.length === 0, `화면 오류 0건 (실제 ${errs.length}${errs.length ? ' — ' + errs.slice(0, 3).join(' / ') : ''})`);
   } finally {
     await app.close();

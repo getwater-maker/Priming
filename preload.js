@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('api', {
   onRemotionActive: (cb) => ipcRenderer.on('remotion-active', (_e, d) => cb(d)),
   exportRemotion: (args) => ipcRenderer.invoke('export-remotion', args),
   onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
+  onUrldlProgress: (cb) => ipcRenderer.on('urldl-progress', (_e, d) => cb(d)),
   appendLog: (line) => ipcRenderer.invoke('append-log', line),
   openLogs: () => ipcRenderer.invoke('open-logs'),
   attachAsset: (args) => ipcRenderer.invoke('attach-asset', args),
