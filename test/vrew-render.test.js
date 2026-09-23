@@ -38,14 +38,24 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
   ok(R.fmtAss(59.996) === '0:01:00.00', '1/100초 롤오버(59.996 → 1:00.00)');
   ok(R.fmtAss(3661.5) === '1:01:01.50', '시·분·초');
 
-  console.log('[3] 켄번스 — 🔴 zoompan x/y 는 원본 좌표');
+  console.log('[3] 켄번스 — 🔴 zoompan 금지(흔들림) · perspective 소수점 보간');
   const kb = { from: { scale: 0.926, centerX: 0.5, centerY: 0.5 }, to: { scale: 0.82, centerX: 0.45, centerY: 0.55 } };
   const f = R.kenBurnsFilter(kb, 100);
-  ok(/x='\(\(0\.5\+\(0\.45-0\.5\)\*on\/99\)\*1920-1920\/\(2\*/.test(f), 'x = cx*W − W/(2z) (문서식 cx*W*z − W/2 가 아니다)');
-  ok(!/\*zoom/.test(f), 'x/y 에 zoom 변수를 곱하지 않는다');
+  ok(/^perspective=/.test(f) && !/zoompan/.test(f), 'perspective 를 쓴다(zoompan 은 정수 반올림으로 흔들린다)');
+  ok(/sense=source/.test(f) && /interpolation=linear/.test(f) && /eval=frame/.test(f), 'source 좌표 · linear · 프레임마다 계산');
+  ok(f.includes("x0='((0.5+(0.45-0.5)*on/99)-(0.926+(0.82-0.926)*on/99)/2)*W'"), '보이는 사각형 왼쪽 = (cx − scale/2)·W');
   const f2 = R.kenBurnsFilter(kb, 100, 200, 400);
   ok(f2.includes('(on+200)/399'), '조각이면 진행률 = (on+off)/(전체−1)');
-  ok(R.kenBurnsFilter(null, 10).indexOf('zoompan') < 0, '켄번스 없으면 cover 만');
+  ok(R.kenBurnsFilter(null, 10) === 'null', '켄번스 없으면 그대로(입력이 이미 cover)');
+  // 🔴 인코더 B-프레임 — 낮은 비트레이트에서 4프레임 주기로 켄번스가 떤다(perspective 로 고친 뒤에도 남던 흔들림)
+  for (const enc of ['nvenc', 'x264']) {
+    const a = R.encArgs(enc, '950k'), at = (k) => a[a.indexOf(k) + 1];
+    ok(at('-bf') === '0', `${enc}: B-프레임을 끈다(-bf 0)`);
+    ok(at('-b:v') === '950k' && at('-maxrate') === '998k' && at('-bufsize') === '1900k',
+      `${enc}: 목표 950k · 상한 998k(bf0 만 주면 NVENC 가 2.5배 넘긴다)`);
+  }
+  const vr0 = read('core/vrew-render.js');
+  ok(!/zoompan=/.test(vr0.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), '코드에 zoompan 호출이 남아 있지 않다');
 
   console.log('[4] 조각 계획 — 누적 반올림');
   const segs = [{ start: 0, end: 6.9, type: 'image' }, { start: 6.9, end: 11.433, type: 'video' }, { start: 11.433, end: 86.7, type: 'image' }];
@@ -78,7 +88,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
   ok(/PlayResX: 1920/.test(a1) && /PlayResY: 1080/.test(a1), 'PlayRes = 영상 해상도(3.75배 확대 함정 방지)');
   ok(/\\1c&HFFFFFF&/.test(a1), '\\1c 태그 형식(&HBBGGRR&)');
 
-  console.log('[7] zoompan 좌표 — 실제 ffmpeg 로 확인(문서와 다른 동작의 회귀 방지)');
+  console.log('[7] 켄번스 — 실제 ffmpeg 로 위치·확대율 · 🔴 흔들림');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vrt-'));
   try {
     const pat = path.join(tmp, 'pat.png');
@@ -92,6 +102,32 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
     const cx = (x0 + x1) / 2, w = x1 - x0 + 1;
     ok(Math.abs(cx - 959.5) <= 2, `중심(0.5)이 화면 가운데에 남는다 (x ${cx})`);
     ok(Math.abs(w / 200 - 1 / 0.82) < 0.02, `확대율 = 1/scale (${(w / 200).toFixed(3)} ≈ ${(1 / 0.82).toFixed(3)})`);
+
+    // 🔴 흔들림 — 느린 세로 팬(프레임당 약 0.5px)을 구워 이웃 프레임 이동량의 변화(가속도)를 잰다.
+    //   정지 프레임만 비교하면 이 결함이 안 보인다(첫 대조에서 실제로 놓쳤다 — 로이가 영상을 보고 잡았다).
+    //   🔑 A/B: 같은 움직임을 zoompan 으로 구우면 **실제로 흔들려야** 이 측정이 헛단언이 아니다.
+    const tex = path.join(tmp, 'tex.png');
+    execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080', '-frames:v', '1', tex]);
+    const pan = { from: { scale: 0.862, centerX: 0.5, centerY: 0.52 }, to: { scale: 0.862, centerX: 0.5, centerY: 0.48 } };
+    const NF = 60;
+    const jerk = (vf, name) => {
+      const raw = path.join(tmp, name + '.raw');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-loop', '1', '-framerate', '30', '-i', tex, '-frames:v', String(NF),
+        '-vf', vf + ',crop=200:1080:860:0,format=gray', '-f', 'rawvideo', raw]);
+      const buf = fs.readFileSync(raw), S = 200 * 1080;
+      const prof = (k) => { const p = new Float64Array(1080); for (let y = 0; y < 1080; y++) { let s = 0; for (let x = 0; x < 200; x++) s += buf[k * S + y * 200 + x]; p[y] = s; } return p; };
+      const sh = (a, b) => { let best = 0, bv = 1e30; const e = []; for (let d = -4; d <= 4; d++) { let s = 0; for (let y = 100; y < 980; y++) { const v = a[y] - b[y + d]; s += v * v; } e.push(s); if (s < bv) { bv = s; best = d; } }
+        const i = best + 4; if (i > 0 && i < 8) { const den = e[i - 1] - 2 * e[i] + e[i + 1]; if (den > 0) return best + 0.5 * (e[i - 1] - e[i + 1]) / den; } return best; };
+      const P = [...Array(NF)].map((_, k) => prof(k));
+      const d = []; for (let k = 1; k < NF; k++) d.push(sh(P[k - 1], P[k]));
+      const j = d.slice(1).map((v, i) => Math.abs(v - d[i]));
+      return j.reduce((a, b) => a + b, 0) / j.length;
+    };
+    const jNew = jerk(R.kenBurnsFilter(pan, NF), 'jn');
+    const SC = '0.862', CY = `(0.52+(0.48-0.52)*on/${NF - 1})`;
+    const jOld = jerk(`zoompan=z='1/${SC}':x='0.5*iw-iw/(2*(1/${SC}))':y='${CY}*ih-ih/(2*(1/${SC}))':d=1:s=1920x1080:fps=30`, 'jo');
+    ok(jOld > 0.3, `A/B — zoompan 은 실제로 흔들린다 (가속도 ${jOld.toFixed(3)}px)`);
+    ok(jNew < 0.12, `🔴 perspective 는 부드럽다 (가속도 ${jNew.toFixed(3)}px · zoompan 의 ${(jNew / jOld * 100).toFixed(0)}%)`);
 
     console.log('[8] 실제 왕복 — 합성 .vrew → MP4');
     const vrew = path.join(tmp, 't.vrew');

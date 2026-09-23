@@ -28,7 +28,7 @@ if (fs.statSync(input).isDirectory()) {
 }
 const out = opt.out || vrew.replace(/\.vrew$/i, '.mp4');
 
-renderVrewToMp4({ vrewPath: vrew, outPath: out, par: opt.par, bitrate: opt.bitrate, keepTmp: !!opt.keep, log: (m) => console.log(m) })
+renderVrewToMp4({ vrewPath: vrew, outPath: out, par: opt.par, bitrate: opt.bitrate, limitSec: opt.limit ? +opt.limit : 0, filterThreads: opt.ft != null ? +opt.ft : undefined, keepTmp: !!opt.keep, log: (m) => console.log(m) })
   .then((r) => {
     if (!r.ok) { console.error('❌ ' + r.error); process.exit(1); }
     console.log(`✅ ${r.output}`);

@@ -1,5 +1,5 @@
 {
-  "version": "0.5.22",
+  "version": "0.5.23",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -9,7 +9,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
-    "CLAUDE.md": "bc4f2ec9b911023863c7cc96d605868efd4b1d32",
+    "CLAUDE.md": "5a0eaa4361fabb5776d52114f93430e8641d9b92",
     "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
     "comfy/comfy-server.pyw": "c8d6ecc38797a221f1bbe9ce2f4da26cc9454d2d",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
@@ -77,7 +77,7 @@
     "core/upscaler.js": "31b4f1d8922f2e853250e0720e3b0ebdf7b19908",
     "core/version-order.js": "71692ebc5460128fb34fcdb84ffd7ed558ac16b6",
     "core/vrew-audio.js": "7f6f2aadd36d6fd8287cb66e932c80edc49a49dd",
-    "core/vrew-render.js": "964ac3139fcffcb957695993c48ee9ef4c25a338",
+    "core/vrew-render.js": "9df0d6eea6b8b6213e8ac3b7031765c05056a422",
     "core/wav-slice.js": "beb9abf908031c7acb414b0a8b2e036ca9b86609",
     "core/whiteboard-annotation.js": "b9d22a1ba829d4c1780811da207dd2af3af3d5ef",
     "core/whiteboard-audio.js": "14aaa2f7b9dce6bf6c7e2e46c2dc1d396215a688",
@@ -100,7 +100,7 @@
     "light-updater.js": "61fa2a3211dfe5463acdf1b596107fa6d70f19c9",
     "main.js": "5c8fc738a02f46fb82d93e7fb1e90523ff56c1fb",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "3ae0eeca04db5aaad7b02359e27cef9dd33a721f",
+    "package.json": "06faadc1ea2fb9a2ca5d400886f9cd25736c24b5",
     "preload.js": "f9ea9437a9b9c9cb6bb2c53db945dc8b15a6dd72",
     "renderer/dist/assets/index-CT1BPqEK.css": "b5826e0b1ba4520335e2de95798b8d9d030b227f",
     "renderer/dist/assets/index-DQvgr00h.js": "f14b49725e6ca77d2a80b6fc7d7e1b01ed5afa37",

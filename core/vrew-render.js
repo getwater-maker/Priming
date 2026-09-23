@@ -12,7 +12,8 @@
  *   화면 오차 평균 5.81(0~255, 리샘플링 수준).
  *
  * 🔴 밟은 함정(다음 사람도 밟는다)
- *   ① zoompan 의 x/y 는 문서와 달리 **확대 전 좌표**다(내부에서 z 를 곱한다) — kenBurnsFilter 주석.
+ *   ① 🔴 켄번스에 zoompan 을 쓰면 **화면이 흔들린다**(정수 픽셀 반올림) → perspective 로 소수점 보간
+ *      — kenBurnsFilter 주석. (정지 프레임만 비교하면 이 결함이 안 보인다 — 이웃 프레임 이동량을 잴 것)
  *   ② mp3 실제 길이 합 ≠ .vrew 선언 길이 합(1030.3 vs 1036.0) — 그냥 붙이면 최대 3초 어긋난다.
  *   ③ ffmpeg 필터에 경로를 넣지 않는다(드라이브 콜론·한글) — cwd 를 작업 폴더로 두고 ASCII 파일명만.
  *   ④ SRT 를 subtitles 필터에 물리면 384x288 좌표계로 읽혀 3.75배 커진다 → ASS 를 직접 만든다.
@@ -83,10 +84,22 @@ async function pickEncoder(tmpDir, log) {
   }
   return _encCache;
 }
+/**
+ * 🔴 **B-프레임을 끈다(`-bf 0`)** — 로이 2026-09-23 「켄번스에서 화면이 흔들린다」(perspective 로 고친 뒤에도 남았다).
+ *   950k 같은 낮은 비트레이트에서 B-프레임을 쓰면 **4프레임마다 기준 프레임이 바뀌며** 느린 켄번스가
+ *   앞뒤로 미세하게 떤다(이웃 프레임 이동량이 0.24 −0.22 −0.04 −0.58 로 반복). 실측(같은 20초 켄번스 · 가로 가속도):
+ *     무손실 0.003 · nvenc 950k(기본 B) **0.484** · nvenc 950k bf0 0.032(단 2.4Mbps 로 넘친다)
+ *     · **nvenc bf0 + maxrate 1000k 0.056 · 크기는 기본과 같음(2487KB vs 2525KB)** ← 채택
+ *     · x264 medium 950k(기본 B) 0.183 · x264 veryfast bf0 0.066
+ *   ⚠ bf0 만 주면 NVENC 가 목표를 2.5배 넘긴다 → **maxrate 로 묶는다**(목표 × 1.05, 버퍼 × 2).
+ *   ⚠ 정지 프레임·raw 필터 출력만 재면 이 결함이 안 보인다 — **인코딩한 파일을 디코딩해** 잴 것.
+ */
 function encArgs(enc, bitrate) {
+  const kb = parseFloat(bitrate) * (/m$/i.test(String(bitrate)) ? 1000 : 1) || 950;
+  const rc = ['-b:v', bitrate, '-maxrate', `${Math.round(kb * 1.05)}k`, '-bufsize', `${Math.round(kb * 2)}k`, '-bf', '0'];
   return enc === 'nvenc'
-    ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', bitrate]
-    : ['-c:v', 'libx264', '-preset', 'veryfast', '-b:v', bitrate];
+    ? ['-c:v', 'h264_nvenc', '-preset', 'p4', ...rc]
+    : ['-c:v', 'libx264', '-preset', 'veryfast', ...rc];
 }
 
 // ── .vrew 읽기 ──────────────────────────────────────────────────────────────
@@ -339,33 +352,65 @@ function buildAss(cues, overlays, cs) {
 
 // ── 켄번스 ─────────────────────────────────────────────────────────────────
 /**
- * Vrew 이미지 트랙(켄번스) → ffmpeg 필터 체인.
+ * Vrew 이미지 트랙(켄번스) → ffmpeg 필터. **입력은 이미 캔버스(1920x1080)로 cover 된 그림**이다
+ * (coverImage 가 구간마다 한 번 만든다 — 매 프레임 lanczos 로 다시 키우면 그만큼 느리다).
  *
  * 🔑 Vrew 의 `scale` 은 확대배율이 아니라 **"이미지에서 보이는 영역의 비율"**(1.0=전체).
- *   캔버스로 cover 한 뒤 z = 1/scale.
- * 🔴 **zoompan 의 x/y 는 문서와 다르게 동작한다.** 문서는 "확대된 이미지 안의 좌상단"이라지만
- *   실제로는 **확대 전(원본) 좌표**로 받고 내부에서 z 를 곱한다(실측 z=1.2195: 요청 100 → 창 122.2).
- *   문서대로 `cx*W*z - W/2` 를 주면 z 가 또 곱해져 화면이 옆으로 밀리고, 스윕으로 재면
- *   "scale 이 틀린 것처럼" 보인다(첫 대조에서 이렇게 헤맸다).
- *     x = cx*W − W/(2z)   y = cy*H − H/(2z)
+ *   보이는 사각형 = 가운데 (cx, cy) · 폭 scale·W · 높이 scale·H → 그걸 화면 전체로 늘린다.
+ *
+ * 🔴 **zoompan 을 쓰지 않는다 — 화면이 흔들린다**(로이 2026-09-23: "완료된 영상이 흔들려").
+ *   zoompan 은 매 프레임 창 위치를 **정수 픽셀로 반올림**한다. 켄번스는 프레임당 0.5~0.8px 쯤
+ *   움직이므로 실제로는 0·1·1·0·1px 로 멈췄다 튀었다 한다. 실측(같은 구간, 이웃 프레임 이동량의 변화):
+ *     Vrew 가로 0.015 / 세로 0.112 · zoompan 0.124 / **1.020** · 4배 키운 zoompan 0.077 / 0.170(4배 느림)
+ *     · **perspective(linear) 0.025~0.028 / 0.12~0.15 ← Vrew 수준**
+ *   ✅ `perspective` 는 원본의 **소수점 좌표** 사각형을 보간해 화면으로 옮긴다(반올림 없음).
+ *   linear 를 고른 이유: Vrew 와의 오차가 가장 작고 선명도도 Vrew 에 가장 가깝다(cubic 은 오히려 더 날카롭다).
+ *   (예전 zoompan 판에서는 x/y 가 문서와 달리 '확대 전 좌표'라서 한 번 더 헤맸다 — 이제 무관하다.)
  * ⚠ 트랙 박스(width 1.008 등)는 반영하지 않는다 — 반영하면 오히려 오차가 커졌다(실측).
  * ⚠ 보간은 선형(실측 확인). 긴 구간을 조각으로 나누면 진행률은 **구간 전체** 기준이어야 이어진다.
  */
 function kenBurnsFilter(kb, frames, off = 0, total = 0) {
-  const cover = `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`;
-  if (!kb || !kb.from) return cover;
+  if (!kb || !kb.from) return 'null';
   const f = kb.from, to = kb.to || kb.from;
   const n = Math.max(1, (total > 0 ? total : frames) - 1);
   const prog = off > 0 ? `(on+${off})/${n}` : `on/${n}`;
   const num = (v, d) => (v == null || !isFinite(+v) ? d : +v);
   const lerp = (a, b) => `(${a}+(${b}-${a})*${prog})`;
-  const sc = lerp(num(f.scale, 1), num(to.scale, num(f.scale, 1)));
+  const sc = lerp(Math.min(1, num(f.scale, 1)), Math.min(1, num(to.scale, num(f.scale, 1))));
   const cx = lerp(num(f.centerX, 0.5), num(to.centerX, 0.5));
   const cy = lerp(num(f.centerY, 0.5), num(to.centerY, 0.5));
-  const z = `max(1.0001,1/${sc})`;
-  const x = `(${cx}*${W}-${W}/(2*(${z})))`;
-  const y = `(${cy}*${H}-${H}/(2*(${z})))`;
-  return `${cover},zoompan=z='${z}':x='${x}':y='${y}':d=1:s=${W}x${H}:fps=${FPS}`;
+  const X0 = `(${cx}-${sc}/2)*W`, X1 = `(${cx}+${sc}/2)*W`;
+  const Y0 = `(${cy}-${sc}/2)*H`, Y1 = `(${cy}+${sc}/2)*H`;
+  return `perspective=x0='${X0}':y0='${Y0}':x1='${X1}':y1='${Y0}':x2='${X0}':y2='${Y1}':x3='${X1}':y3='${Y1}'`
+    + ':sense=source:interpolation=linear:eval=frame';
+}
+
+/** 구간 그림을 캔버스로 한 번만 cover 해 둔다(같은 구간의 조각들이 함께 쓴다). */
+function coverImage(file, ctx) {
+  ctx.covers = ctx.covers || new Map();
+  if (!ctx.covers.has(file)) {
+    const name = `cov_${ctx.covers.size}.png`;
+    ctx.covers.set(file, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
+      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`,
+      '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
+  }
+  return ctx.covers.get(file);
+}
+
+/**
+ * 앞 N초만 남긴다(검증·벤치마크용). ⚠ 잘린 구간의 켄번스는 **원래 구간 길이 기준**으로 진행해야
+ * 전체 렌더와 같은 그림이 나온다 → kbTotalSec 에 원래 길이를 적어 둔다.
+ */
+function limitTimeline(tl, sec) {
+  if (!(sec > 0) || sec >= tl.totalSec) return tl;
+  tl.segments = tl.segments.filter((s) => s.start < sec).map((s) => ({ ...s, kbTotalSec: s.end - s.start, end: Math.min(s.end, sec) }));
+  tl.cues = tl.cues.filter((c) => c.start < sec).map((c) => ({ ...c, end: Math.min(c.end, sec) }));
+  tl.overlays = tl.overlays.filter((o) => o.start < sec).map((o) => ({ ...o, end: Math.min(o.end, sec) }));
+  let acc = 0; const au = [];
+  for (const a of tl.audio) { if (acc >= sec) break; const d = Math.min(a.dur, sec - acc); au.push({ ...a, dur: d }); acc += a.dur; }
+  tl.audio = au;
+  tl.totalSec = sec;
+  return tl;
 }
 
 // ── 조각 계획 ──────────────────────────────────────────────────────────────
@@ -380,10 +425,11 @@ function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC) {
     const f0 = Math.round(s.start * FPS), f1 = Math.round(s.end * FPS);
     const n = f1 - f0;
     if (n <= 0) continue;
-    if (s.type !== 'image' || n <= CH) { out.push({ ...s, f0, f1, kbOff: 0, kbTotal: n }); continue; }
+    const tot = s.kbTotalSec > 0 ? Math.max(n, Math.round(s.kbTotalSec * FPS)) : n;   // limitSec 로 잘린 구간
+    if (s.type !== 'image' || n <= CH) { out.push({ ...s, f0, f1, kbOff: 0, kbTotal: tot }); continue; }
     for (let o = 0; o < n; o += CH) {
       const len = Math.min(CH, n - o);
-      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: o, kbTotal: n });
+      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: o, kbTotal: tot });
     }
   }
   return out;
@@ -406,18 +452,24 @@ async function renderChunk(ch, i, ctx) {
 
   let args;
   const common = [...encArgs(enc, bitrate), '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an', out];
+  const pre = ctx.filterThreads > 0 ? ['-filter_threads', String(ctx.filterThreads)] : [];
   if (ch.type === 'image' && ch.file) {
     const tr = ch.track || {};
-    const vf = [kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal), assFilter].join(',');
-    args = ['-y', '-hide_banner', '-loglevel', 'error', '-loop', '1', '-framerate', String(FPS), '-i', ch.file,
+    const cov = await coverImage(ch.file, ctx);
+    // 🔑 그림을 **한 번만 디코딩**해 메모리에서 반복하고(loop 필터), YUV 로 켄번스를 돌린다.
+    //   `-loop 1 -i x.png` 는 **매 프레임 PNG 를 다시 디코딩**하고 perspective 가 RGB 전체 해상도에서 돈다
+    //   (실측 600프레임: 9.2초 → 5.3초 · 옛 zoompan 7.0초보다도 빠르다).
+    const vf = [`format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB`,
+      kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal), assFilter].join(',');
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov,
       '-frames:v', String(frames), '-vf', vf, ...common];
   } else if (ch.type === 'video' && ch.file) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
     const vf = [`scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos`, `crop=${W}:${H}`, `fps=${FPS}`,
       'tpad=stop_mode=clone:stop_duration=3600', assFilter].join(',');
-    args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
   } else {
-    args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`,
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`,
       '-frames:v', String(frames), '-vf', assFilter, ...common];
   }
   try { await ff(args, { cwd: tmpDir, signal: ctx.children, low: true }); }
@@ -500,6 +552,7 @@ async function renderVrewToMp4(opts = {}) {
     let t = Date.now();
     const { project, mediaDir } = loadVrew(opts.vrewPath, tmpDir);
     const tl = buildTimeline(project, mediaDir);
+    if (opts.limitSec > 0) limitTimeline(tl, +opts.limitSec);   // 검증·벤치마크용(앞 N초만)
     lap('read', t);
     if (!tl.segments.length || !(tl.totalSec > 0)) return { ok: false, error: '.vrew 에 타임라인이 없습니다' };
 
@@ -536,7 +589,7 @@ async function renderVrewToMp4(opts = {}) {
 
     // 조각 병렬 렌더
     t = Date.now();
-    Object.assign(ctx, { tmpDir, cs, cues: tl.cues, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts' });
+    Object.assign(ctx, { tmpDir, cs, cues: tl.cues, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
     const files = new Array(chunks.length);
     const queue = chunks.map((c, i) => i);
     let done = 0, nextPct = 10, firstErr = null;
@@ -599,6 +652,6 @@ async function renderVrewToMp4(opts = {}) {
 module.exports = {
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor,
+  buildTimeline, buildAss, captionAssStyle, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };
