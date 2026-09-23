@@ -225,6 +225,16 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/MD\.listChannelVideos\(channelUrl,/.test(main), '채널 모드가 전체 영상 목록을 먼저 펼친다');
   ok(/filenameWithId: channelMode, mediaId:/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다');
   ok(/r\.reused && fs\.existsSync\(outTxt\)/.test(main), '중단 후 재실행은 이미 전사한 영상을 건너뛴다');
+  // ⚡ 받기와 전사를 겹친다(2026-09-23) — 다운로드 루프가 전사를 기다리지 않는다
+  {
+    const loop = main.slice(main.indexOf('const enqueueStt = (i, t) =>'), main.indexOf('await sttChain;'));
+    ok(loop.length > 0, '전사 줄(enqueueStt)과 마감 대기(await sttChain)가 있다');
+    const dlLoop = loop.slice(loop.indexOf('for (let i = 0; i < jobs.length; i++)'));
+    ok(/enqueueStt\(i, \{/.test(dlLoop), 'STT 가 필요한 영상은 전사 줄에 세운다');
+    ok(!/await transcribeToTxt\(/.test(dlLoop), '🔑 다운로드 루프 안에서 전사를 기다리지 않는다(순차로 되돌아가지 않게)');
+    ok(/sttChain = sttChain\.then\(/.test(loop), '전사는 한 번에 하나씩(GPU 에 몰아넣지 않는다)');
+    ok(/for \(const x of slots\) if \(x\) results\.push\(x\)/.test(main), '결과는 영상 순서 그대로 모은다');
+  }
 
   // 재생목록 하나가 수백 개를 받는 사고를 구조로 막는다
   const dl = read('core/media-download.js');

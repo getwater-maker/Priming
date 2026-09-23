@@ -1107,12 +1107,37 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     }
     if (doStt) await warnAsrIfDown();
 
+    // ⚡ 받기와 전사를 겹친다(2026-09-23 로이) — 예전엔 「받기 → 전사 → 다음 받기」 순차라
+    //   전사하는 동안 네트워크가, 받는 동안 GPU 가 놀았다. 이제 받기는 쉬지 않고 이어 가고,
+    //   STT 가 필요한 영상은 **전사 줄(한 번에 하나)** 에 세워 받는 동안 앞 영상을 전사한다.
+    //   ⚠ 전사는 동시에 하나만 — ASR 서버(같은 GPU)에 여러 개를 한꺼번에 밀어 넣지 않는다.
+    //   결과 순서는 영상 순서 그대로(slots[i]).
+    const slots = new Array(jobs.length).fill(null);
+    let sttChain = Promise.resolve();
+    let sttPending = 0;
+    const enqueueStt = (i, t) => {
+      sttPending++;
+      sttChain = sttChain.then(async () => {
+        try {
+          if (S.abort) { slots[i] = { url: t.done.url, ok: false, error: '중단됨' }; return; }
+          log(`  🎧 ${t.label} STT 시작: ${path.basename(t.mediaFile)}${sttPending > 1 ? ` (전사 대기 ${sttPending - 1}건)` : ''}`);
+          const mediaFile = t.mediaFile, outTxt = t.outTxt, head = t.head;
+          await transcribeToTxt(mediaFile, { outTxt, head });
+          slots[i] = { ...t.done, txt: outTxt, from: 'stt' };
+        } catch (e) {
+          log(`  ✗ ${t.label} 전사 실패: ${e.message}`);
+          slots[i] = { url: t.done.url, ok: false, error: e.message };
+        } finally { sttPending--; }
+      });
+    };
+
     for (let i = 0; i < jobs.length; i++) {
-      if (S.abort) { log('⏹ 중단됨'); break; }
+      if (S.abort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
       const job = jobs[i];
       const url = job.url;
       const itemOutDir = job.outDir || outDir;
-      log(`🔗 [${i + 1}/${jobs.length}] ${job.title || url}`);
+      const tag = `[${i + 1}/${jobs.length}]`;
+      log(`🔗 ${tag} 받기: ${job.title || url}`);
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
@@ -1158,20 +1183,23 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           if (f) { try { fs.rmSync(f, { force: true }); } catch {} }
         }
 
+        const done = { url, ok: true, title: info.title, audio: r.audio, video: r.video,
+          txt: txtFrom ? outTxt : null, from: txtFrom };
         if (!txtFrom && doStt) {
           if (!mediaFile) throw new Error('받은 음성·영상 파일이 없습니다');
-          log(`  🎧 STT 시작: ${path.basename(mediaFile)}`);
-          await transcribeToTxt(mediaFile, { outTxt, head });
-          txtFrom = 'stt';
+          // 🔑 다운로드를 멈추지 않고 전사 줄에 세운다 — 다음 영상은 곧바로 받기 시작한다.
+          enqueueStt(i, { mediaFile, outTxt, head, done, label: tag });
+        } else {
+          slots[i] = done;
         }
-
-        results.push({ url, ok: true, title: info.title, audio: r.audio, video: r.video,
-          txt: txtFrom ? outTxt : null, from: txtFrom });
       } catch (e) {
         log(`  ✗ 실패: ${e.message}`);
-        results.push({ url, ok: false, error: e.message });
+        slots[i] = { url, ok: false, error: e.message };
       }
     }
+    if (sttPending) log(`⬇ 다운로드 끝 — 남은 전사 ${sttPending}건을 마저 진행합니다`);
+    await sttChain;
+    for (const x of slots) if (x) results.push(x);
 
     const okN = results.filter((x) => x.ok).length;
     const subN = results.filter((x) => x.from === 'subtitle').length;
