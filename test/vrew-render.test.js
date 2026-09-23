@@ -179,7 +179,8 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
   ok(!/=== 'whiteboard' \? 'whiteboard' : 'vrew'/.test(codeOnly), 'App: 옛 정규화(mp4 를 vrew 로 되돌림) 잔존 0');
   ok((app.match(/normOutTargetUi\(/g) || []).length >= 6, 'App: 정규화는 normOutTargetUi 하나로');
   ok(/outUpload: p\.outUpload \|\| ''/.test(app) && /outUpload: \(ch\.outUpload \|\| ''\)\.trim\(\)/.test(app), 'App: outUpload 읽기·저장 둘 다');
-  ok(/runVrew\(null, true\)/.test(app) && /mp4 \}\)/.test(app), 'App: 🎬 MP4 굽기 → exportVrew({mp4})');
+  ok(!/runVrew|🎬 MP4 굽기<\/button>/.test(app), 'App: 🎬 MP4 굽기 버튼 없음 — ⚡ 만들기로 통일(2026-09-24)');
+  ok(/outTarget, \/\/ \.vrew \/ ✏ 화이트보드 MP4/.test(app), 'App: ⚡ 만들기가 outTarget(mp4 포함)을 넘긴다');
   ok(/\^assets\\\/fonts\\\/book\\\//.test(man) && !/\^assets\\\/fonts\\\/,/.test(man), '매니페스트: 출판 폰트만 제외(Pretendard 는 배포)');
   ok(fs.existsSync(R.FONT_FILE), 'Pretendard-Bold.ttf 가 앱에 있다');
   const vr = read('core/vrew-render.js');

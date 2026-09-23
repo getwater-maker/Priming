@@ -4902,10 +4902,10 @@ async function runMakeAllCore(opts = {}) {
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
-  // ✏ 렌더 버튼으로 들어왔나 — 그때만 관문 A/B 를 묻는다(큐는 묻지 않고 그대로 렌더한다).
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
   //   게이트만 풀면 쓰지도 않을 TTS(수십 분)·이미지를 다 만들고 버리게 된다.
-  const outMode = normOutMode(opts.outMode);
+  //   ✏ 화이트보드는 음성·그림이 둘 다 필요하므로 **늘 전체**다(⚡ 만들기로 버튼을 통일하며 옛 ✏ 렌더의 강제를 여기로 옮겼다).
+  const outMode = outTarget === 'whiteboard' ? 'full' : normOutMode(opts.outMode);
   const skipTts = (outMode === 'visual');    // 화면만 → 음성은 Vrew 에서 만든다
   const skipVisual = (outMode === 'audio');  // 음성만 → 이미지·비디오를 만들지 않는다
   if (outMode !== 'full') log(`⚙ 출력 방식: ${outModeLabel(outMode)}`);

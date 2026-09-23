@@ -28,14 +28,18 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(values.join(',') === 'vrew,whiteboard,mp4', `선택지 3개 (${values.join(', ')})`);
     const orig = await sel.inputValue();
 
-    // [2] 고르면 「🎬 MP4 굽기」 버튼이 나타난다
+    // [2] 버튼 통일(2026-09-24) — 🎬 MP4 굽기·✏ 렌더·💾 .vrew 는 없고 ⚡ 만들기 하나가 선택대로 낸다
     await sel.selectOption('mp4');
     await win.waitForTimeout(300);
     ok(await sel.inputValue() === 'mp4', 'mp4 가 선택된 채로 남는다(정규화가 vrew 로 되돌리지 않는다)');
-    ok(await grp.locator('button:has-text("🎬 MP4 굽기")').count() === 1, '「🎬 MP4 굽기」 버튼이 나타난다');
-    await sel.selectOption('vrew');
+    for (const t of ['🎬 MP4 굽기', '✏ 렌더', '💾 .vrew']) {
+      ok(await win.locator(`button:has-text("${t}")`).count() === 0, `「${t}」 버튼이 없다(⚡ 만들기로 통일)`);
+    }
+    ok(await grp.locator('button:has-text("⚡ 만들기")').count() === 1, '「⚡ 만들기」 하나');
+    await sel.selectOption('whiteboard');
     await win.waitForTimeout(300);
-    ok(await grp.locator('button:has-text("🎬 MP4 굽기")').count() === 0, '.vrew 로 돌리면 버튼이 사라진다');
+    ok(await win.locator('button:has-text("✏ 렌더")').count() === 0, '화이트보드를 골라도 ✏ 렌더 없음');
+    ok(await grp.locator('button:has-text("📋 장면 계획")').count() === 1, '화이트보드면 「📋 장면 계획」(미리보기)은 남는다');
     await sel.selectOption(orig);
 
     // [3] 채널편집 — 📁 폴더 「유튜브 업로드」 칸(기본값 = 다운로드) · 🖼 제작 도구 「출력」 선택지

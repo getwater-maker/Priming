@@ -129,10 +129,10 @@ function stage2() {
   ok(/probeDur: \(f\) => media\.getMediaDuration\(f\)/.test(MAIN), '🔴 길이를 실측한다(파일 크기 추정은 4배까지 틀린다)');
   ok(/const \[outMode, setOutMode\] = useState\('full'\)/.test(APP), '렌더러 state 기본값 = 전체');
   ok((APP.match(/outMode/g) || []).length >= 8, '렌더러가 outMode 를 실제로 배선한다');
-  ok(/aiNotice, outMode \}/.test(APP), '큐(common)에 outMode 를 실어 보낸다');
-  ok(/engine: imgEngine, outMode(, mp4)? \}/.test(APP), '💾 .vrew 에도 outMode 를 넘긴다');
-  ok(/outMode,  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다');
-  ok(/_needImg = \(outMode === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');
+  ok(/aiNotice, outMode: effOutMode\(\) \}/.test(APP), '큐(common)에 outMode 를 실어 보낸다');
+  ok(!/💾 \.vrew<\/button>/.test(APP), '💾 .vrew 버튼은 없다 — ⚡ 만들기로 통일(2026-09-24)');
+  ok(/outMode: effOutMode\(\),  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다(화이트보드는 늘 전체)');
+  ok(/_needImg = \(om === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');
   ok(/📥 Vrew 음성<\/button>/.test(APP), '작업바에 「📥 Vrew 음성」 버튼');
   ok(/<option value="audio">🎤 음성만<\/option>/.test(APP) && /<option value="visual">🖼 화면만<\/option>/.test(APP), '출력 select 3항목');
   ok((APP.match(/<option value="visual">/g) || []).length === 1, '출력 select 는 **한 곳**만(진입점 이중화 금지)');

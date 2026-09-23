@@ -308,11 +308,13 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(/aiNotice, outMode, outTarget \}/.test(APP), 'currentSettings 에 outTarget');
     ok(/if \(s\.outTarget != null\) setOutTarget/.test(APP), 'applySettings 가 outTarget 을 복원');
     ok(/outTarget, \/\/ \.vrew \/ ✏ 화이트보드 MP4/.test(APP), 'makeAll 인자에 outTarget');
-    ok(/outTarget, aiNotice, outMode \}, openEach: openEachVrew/.test(APP), 'runBatch common 에 outTarget(순서는 vrew-audio 의 `aiNotice, outMode }` 단언을 지킨다)');
+    ok(/outTarget, aiNotice, outMode: effOutMode\(\) \}, openEach: openEachVrew/.test(APP), 'runBatch common 에 outTarget');
+    ok(!/runWhiteboardBuild|✏ 렌더<\/button>/.test(APP), '✏ 렌더 버튼 없음 — ⚡ 만들기로 통일(2026-09-24)');
+    ok(/const outMode = outTarget === 'whiteboard' \? 'full' : normOutMode\(opts\.outMode\)/.test(MAIN), '🔑 화이트보드는 서버에서도 늘 전체(옛 ✏ 렌더의 강제를 옮김)');
+    ok(/function needVideoPrompts\(\) \{ return \(outTarget === 'whiteboard'/.test(APP), '화이트보드는 비디오 프롬프트를 요구하지 않는다');
     ok(/if \(p\.outTarget != null\) setOutTarget/.test(APP), '채널 기본값 → 헤더');
     ok(/outTarget: normOutTargetUi\(p\.outTarget\)/.test(APP) && /outTarget: normOutTargetUi\(ch\.outTarget\)/.test(APP), '채널편집 열기·저장에 outTarget(저장 시 빈 값으로 덮이지 않게 · 🎬 mp4 도 보존)');
     ok(/api\.getWhiteboardConfig\(\)\.then/.test(APP), '부팅 때 설정을 읽는다');
-    ok(!/setBusy|\bbusy\b/.test(APP.slice(APP.indexOf('async function runWhiteboardBuild'), APP.indexOf('async function runWhiteboardBuild') + 600)), '존재하지 않는 busy 상태를 참조하지 않는다(미정의 식별자)');
     // 미정의 식별자 — 이 저장소 단골
     for (const id of ['runWhiteboardFor', 'normOutTarget', 'vrewBaseName', 'missingVisualGroups', 'missingTtsNums', 'warnIncompleteVisuals', 'warnMissingTts', 'pushDtoUpdate']) {
       ok(new RegExp('(function|const|let)\\s+' + id + '\\b').test(MAIN), `main.js 에 ${id} 정의`);

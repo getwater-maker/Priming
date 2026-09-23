@@ -913,20 +913,28 @@ export default function App() {
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel,
       aiNotice, // 사용자 선택(작업바 토글)
-      outMode,  // 전체 / 음성만 / 화면만
+      outMode: effOutMode(),  // 전체 / 음성만 / 화면만 (화이트보드는 늘 전체)
       outTarget, // .vrew / ✏ 화이트보드 MP4
     };
   }
+  // ✏ 화이트보드는 음성·그림이 **둘 다** 있어야 만들어진다 → 출력 방식을 늘 「전체」로 본다
+  //   (옛 ✏ 렌더 버튼이 서버에서 outMode:'full' 로 강제하던 것을 ⚡ 만들기로 옮겼다 — 2026-09-24 버튼 통일).
+  function effOutMode() { return outTarget === 'whiteboard' ? 'full' : outMode; }
+  // 이 완성 종류에 비디오 프롬프트가 필요한가 — 화이트보드는 그룹 이미지만 쓴다(비디오 단계를 건너뛴다).
+  function needVideoPrompts() { return (outTarget === 'whiteboard' || videoEngine === 'none') ? 'none' : 'range'; }
   async function runMake(shortsNum) {
     const args = makeArgs(shortsNum);
     // ⚠ 「🎤 음성만」은 이미지를 만들지 않으므로 이미지 프롬프트를 요구하지 않는다(요구하면 못 만든다).
-    const _needImg = (outMode === 'audio') ? 'none' : 'all';
-    const _needVid = (outMode === 'audio' || videoEngine === 'none') ? 'none' : 'range';
+    const om = effOutMode();
+    const _needImg = (om === 'audio') ? 'none' : 'all';
+    const _needVid = (om === 'audio') ? 'none' : needVideoPrompts();
     if (!ensurePromptsFilled(shortsNum, { image: _needImg, video: _needVid })) return; // 만들기=전체 이미지 + 범위 i2v
-    setStatus(outMode === 'audio' ? '⚡ 음성만 제작중… (TTS→.vrew)'
-      : outMode === 'visual' ? '⚡ 화면만 제작중… (이미지→.vrew · 음성은 Vrew 에서)'
-      : '⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
-    try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
+    const tgt = outTarget === 'whiteboard' ? '✏ 화이트보드 MP4' : outTarget === 'mp4' ? '.vrew → 🎬 유튜브 MP4' : '.vrew';
+    setStatus(om === 'audio' ? '⚡ 음성만 제작중… (TTS→.vrew)'
+      : om === 'visual' ? '⚡ 화면만 제작중… (이미지→.vrew · 음성은 Vrew 에서)'
+      : outTarget === 'whiteboard' ? '⚡ 제작중… (TTS+이미지 → ✏ 화이트보드 렌더)'
+      : `⚡ 전체 제작중… (TTS+이미지→영상→${tgt})`);
+    try { const d = await api.makeAll(args); setDto(d); setStatus(`⚡ 완료 — ${tgt}`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
@@ -947,7 +955,7 @@ export default function App() {
       if (it && it.status !== 'done') plan.push({ mode: 'longform', id: it.id, settings: it.settings || null });
     }
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
-    if (!ensurePromptsFilled(null, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'은 i2v 불요)
+    if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
       // 비디오·이미지 엔진은 헤더값(이번 실행 공통)으로 전달 — 큐 항목별 stale 값 무시(헤더 '없음'이면 전 대본 영상 없음)
@@ -956,7 +964,7 @@ export default function App() {
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
       //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
@@ -975,15 +983,9 @@ export default function App() {
       setStatus(oks.length ? `📥 문장 ${n}개에 Vrew 음성 연결` : '가져오기 실패 — 로그를 보세요');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
-  async function runVrew(shortsNum, mp4 = false) {
-    setStatus(mp4 ? '🎬 유튜브 MP4 굽는 중… (.vrew → MP4)' : '.vrew 내보내는 중…');
-    try {
-      const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice, styleId: styleId || null, engine: imgEngine, outMode, mp4 });
-      const nMp4 = (r.outs || []).filter((o) => o.mp4Path).length;
-      setStatus(mp4 ? (nMp4 ? `🎬 유튜브 MP4 ${nMp4}개 완료` : '🎬 MP4 실패 — 로그 확인 (.vrew 는 만들어졌습니다)') : `.vrew ${r.outs.length}개`);
-    }
-    catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
-  }
+  // 💾 .vrew · 🎬 MP4 굽기 · ✏ 렌더 버튼은 **⚡ 만들기 하나로 통일**했다(로이 2026-09-24).
+  //   ⚡ 만들기가 이미 만든 음성·이미지·영상은 건너뛰고(이어받기) ④ 완성의 선택(.vrew / ✏ 화이트보드 / 🎬 유튜브 MP4)대로
+  //   끝을 낸다 → 세 버튼은 결과가 사실상 같았다. IPC(export-vrew · whiteboard-build)는 테스트·CLI 용으로 남긴다.
   // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
   async function runPremiere(shortsNum) {
     setStatus('프리미어 XML 내보내는 중…');
@@ -1251,14 +1253,6 @@ export default function App() {
   }
   async function showWhiteboardPlan() {
     try { await api.whiteboardPlan({ shortsNum: null }); } catch (e) { logline('장면 계획 오류: ' + e.message); }
-  }
-  // ✏ 렌더 = **전 과정**(음성 → 이미지 → 렌더). 예전엔 렌더만 해서 자산이 없으면 팝업만 떴다(로이 2026-09-16).
-  //   ⚠ 비디오는 요구하지 않는다 — 화이트보드는 그룹 이미지만 쓴다.
-  async function runWhiteboardBuild(shortsNum) {
-    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return;
-    setStatus('✏ 화이트보드 — 음성·이미지 → 렌더 중… (관문 A → 확인 그림 → 렌더)');
-    try { const d = await api.whiteboardBuild({ ...makeArgs(shortsNum), outTarget: 'whiteboard' }); if (d) setDto(d); setStatus('✏ 화이트보드 완료'); }
-    catch (e) { logline('화이트보드 오류: ' + e.message); setStatus('오류'); }
   }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
@@ -2414,9 +2408,6 @@ export default function App() {
               <option value="whiteboard">✏ 화이트보드 MP4</option>
               <option value="mp4">🎬 유튜브 MP4</option>
             </select>
-            {outTarget === 'mp4' && (
-              <button disabled={!loaded} title="이미 만든 음성·이미지로 .vrew 를 다시 만든 뒤, Vrew 를 거치지 않고 그 .vrew 를 유튜브 업로드용 MP4 로 굽습니다(1920x1080 · 30fps · 자막·AI 고지 포함). 음성·이미지까지 새로 만들려면 ⚡ 만들기. 저장 폴더 = 채널편집 → 📁 폴더 → 「유튜브 업로드」(비우면 윈도우 다운로드 폴더). .vrew 도 그대로 남습니다." onClick={() => runVrew(null, true)}>🎬 MP4 굽기</button>
-            )}
             {outTarget === 'whiteboard' && (<>
               <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
                 <option value="1920">1920 (최종)</option>
@@ -2427,16 +2418,14 @@ export default function App() {
                 <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
               </label>
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
-              <button disabled={!loaded} title="이 대본을 화이트보드 MP4 로 만듭니다 — 음성(TTS) → 이미지 → 장면 렌더 → 음성·자막 얹기. 확인 팝업 없이 바로 시작합니다(진행은 로그에). 이미 만든 음성·이미지·장면은 건너뜁니다(이어받기). 완성물은 채널의 「화이트보드 출력」 폴더(기본 = 윈도우 다운로드)로 갑니다." onClick={() => runWhiteboardBuild(null)}>✏ 렌더</button>
             </>)}
             <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
-              <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 순서대로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
+              <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
               {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
             </>); })()}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
-            <button disabled={!loaded} title=".vrew 만 다시 내보내기 (이미 만든 음성·이미지 사용)" onClick={() => runVrew(null)}>💾 .vrew</button>
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </span>
           </>)}
@@ -2536,7 +2525,7 @@ export default function App() {
           <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
-            onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
+            onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup}
             edit={{
@@ -3485,7 +3474,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3511,7 +3500,6 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                 <button className="ghost" title="이 대본만 — 이미지 전부 만든 뒤 비디오까지 (한 번에)" onClick={() => onImgVid(pr.shortsNum)}>🖼→🎬</button>
                 <button className="ghost" onClick={() => onPlayShorts(pr.shortsNum)}>▶ 미리보기</button>
                 <button className="ghost" onClick={() => onMake(pr.shortsNum)}>⚡ 만들기</button>
-                <button onClick={() => onVrew(pr.shortsNum)}>💾 .vrew</button>
                 <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
