@@ -95,6 +95,7 @@ function toDTO(parseResult) {
               text: s.text || '',
               dur: s.ttsDurationSec || null,
               audio: s.ttsAudioPath || null,
+              mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
               lines: splitCaptionLines(s.text || '', capChars).map((t) => ({ n: ++capN, text: t })),
             })),

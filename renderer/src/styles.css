@@ -362,3 +362,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 
 /* 한쪽만 보이는 kind(COMFY_SIDES 에서 한 값만 남긴 경우) — 칸이 하나면 한 줄 전체를 쓴다 */
 .split2.one{grid-template-columns:1fr}
+/* ⤒ 합친 그룹 안의 옛 섹션 경계(2026-09-24) — 그림은 이어 쓰고 챕터만 여기서 갈린다 */
+.sblk:has(.smark){flex-wrap:wrap}
+.smark{flex-basis:100%;font-size:11px;color:#a0886a;border-top:1px dashed #d8c9ae;padding-top:3px;margin-top:2px}

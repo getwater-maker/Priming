@@ -230,13 +230,26 @@ function tsChaptersOf(pr) {
   const useH2 = cuts.some((c) => c.h2 && String(c.h2).trim());
   const out = [];
   let t = 0, lastKey = '';
+  // 합친 그룹(⤒ · 「이미지: 이어서」)은 안쪽 문장에 챕터 표식(mark)을 품고 있다 → 그 문장에서 가른다.
+  const segsOf = (c) => {
+    const ss = c.sentences || [];
+    if (!ss.some((st) => st.mark)) return [{ h2: c.h2, phase: c.phase, dur: Number(c.groupDurationSec) || 0 }];
+    const segs = [{ h2: c.h2, phase: c.phase, dur: 0 }];
+    for (const st of ss) {
+      if (st.mark) segs.push({ h2: st.mark.h2, phase: st.mark.phase, dur: 0 });
+      segs[segs.length - 1].dur += Number(st.dur) || 0;
+    }
+    return segs;
+  };
   for (const c of cuts) {
-    const key = tsCleanTitle(useH2 ? c.h2 : c.phase) || lastKey; // 제목 없는 그룹은 앞 챕터에 붙인다
-    const dur = Number(c.groupDurationSec) || 0;
-    if (!out.length || key !== lastKey) out.push({ start: t, dur, title: key || '시작' });
-    else out[out.length - 1].dur += dur;
-    lastKey = key;
-    t += dur;
+    for (const sg of segsOf(c)) {
+      const key = tsCleanTitle(useH2 ? sg.h2 : sg.phase) || lastKey; // 제목 없는 그룹은 앞 챕터에 붙인다
+      const dur = sg.dur;
+      if (!out.length || key !== lastKey) out.push({ start: t, dur, title: key || '시작' });
+      else out[out.length - 1].dur += dur;
+      lastKey = key;
+      t += dur;
+    }
   }
   return out;
 }
@@ -1078,6 +1091,11 @@ export default function App() {
     finally { setImpBusy(false); }
   }
   // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 두 그룹 프롬프트 초기화.
+  // ⤒ 앞 그룹과 합치기 — 앞 그림을 이 그룹 끝까지 이어 쓴다(로이 2026-09-24 「어디부터 어디까지 같은 그림」).
+  async function mergeGroup(shortsNum, groupNum) {
+    try { const d = await api.mergeGroup({ shortsNum, groupNum }); setDto(d); setStatus(`⤒ G${groupNum} 을 G${groupNum - 1} 에 합쳤습니다 — G${groupNum - 1} 그림을 이어 씁니다`); }
+    catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('⤒ 합치기: ' + m); setStatus(m); }
+  }
   async function splitGroup(shortsNum, groupNum) {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
     catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
@@ -2527,7 +2545,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -3474,7 +3492,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3536,12 +3554,14 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                             else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
                               ev.preventDefault();
                               if (si === 0) edit.note('그룹의 첫 문장입니다 — 윗 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+                              else if (s.mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
                               else edit.mergeUp(si, sents[si - 1].text);
                             }
                             // 🔑 맨 끝에서 Del = 아랫줄을 끌어올려 합치기.
                             else if (ev.key === 'Delete' && caret === el.value.length && sel === el.value.length) {
                               ev.preventDefault();
                               if (si >= sents.length - 1) edit.note('그룹의 마지막 문장입니다 — 아래 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+                              else if (sents[si + 1].mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
                               else edit.mergeNext(si, sents[si + 1].text);
                             }
                           }} />
@@ -3550,6 +3570,8 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                   }
                   return (
                     <div className="sblk" key={si}>
+                      {/* 합친 그룹 안의 옛 섹션 경계 — 그림은 앞 그림을 이어 쓰지만 챕터(타임스탬프)는 여기서 갈린다 */}
+                      {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
                       <div className="sblk-lines" title="클릭해서 이 문장 고치기"
                         onClick={() => edit.start(pr.shortsNum, c.num, si, s.text)}>
                         {lines.map((l) => (
@@ -3570,6 +3592,7 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                             {c.groupDurationSec ? <span className={'dur' + (c.groupDurationSec > 10 ? ' over' : '')}>▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
                             {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
                               <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(프롬프트 초기화)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>}
+                            {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로). 대본에 영구히 두려면 H3 아래에 「> 🖼️ 이미지: 이어서」`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>▶</button>
                             <button className="gprev" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>⏭</button>

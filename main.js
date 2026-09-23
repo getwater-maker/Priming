@@ -4439,6 +4439,13 @@ function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
     note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
   } else {
     parsed = preParsed || P.parseScript(scriptPath, mode, presetThresholds(preset)); // 판정에 쓴 파싱 재사용
+    // 🖼 `> 🖼️ 이미지: 이어서` 적용 결과를 알린다(합친 수 · 합치지 못한 그룹과 이유)
+    for (const pr of parsed.projects || []) {
+      const ci = pr.continueInfo;
+      if (!ci) continue;
+      if (ci.merged) log(`🖼 「이미지: 이어서」 ${ci.merged}곳 — 앞 그룹 그림을 이어 씁니다(그룹 ${pr.groups.length}개)`);
+      for (const k of ci.skipped || []) log(`⚠ G${k.num} 「이미지: 이어서」를 적용하지 못했습니다 — ${k.reason === 'no-prev' ? '첫 그룹이라 이을 그림이 없습니다' : k.reason === 'cross-intro' ? '도입부와 본론 사이는 잇지 않습니다' : k.reason} (이 그룹은 새 이미지 대상)`);
+    }
     if (sameMode) {
       const { restored, invalidated } = overlaySnapshot(parsed, snap);
       const why = opts.force ? '대본 다시 읽기' : '대본 수정 감지';
@@ -4499,7 +4506,7 @@ function buildSnapshot() {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null })),
       })),
     })),
   };
@@ -4637,6 +4644,7 @@ function projectsFromSnapshot(snap) {
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
+        if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -5792,12 +5800,14 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
 
   const old = gs.slice(si, si + n);
   const used = new Set(pr.sentences.map((s) => s.id));
-  const made = plan.newTexts.map((t) => {
+  const made = plan.newTexts.map((t, ti) => {
     let id = hashId('s', t), k = 1;
     while (used.has(id)) id = `${hashId('s', t)}_${++k}`;   // 같은 문장이 여러 번 나와도 id 충돌 없게
     used.add(id);
     const s = new Sentence({ id, num: 0, text: t });
     s.isIntro = !!old[0].isIntro;
+    // 합친 그룹의 챕터 표식은 그 자리의 첫 문장을 따라간다(나누거나 고쳐도 챕터가 안 사라지게)
+    if (ti === 0 && old[0].chapterMark) s.chapterMark = old[0].chapterMark;
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
     if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {
@@ -5835,6 +5845,41 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
     + ' · 이 그룹 이미지는 현재 대본 기준으로 새로 생성됩니다(🖼)');
   return { ok: true, dto: P.toDTO(S.parsed) };
+});
+
+// ⤒ 그룹 합치기 — 이 그룹을 **앞 그룹에** 합친다 = 앞 그림을 여기까지 이어 쓴다(로이 2026-09-24).
+//   앞 그룹의 그림·영상·프롬프트가 이긴다(core/group-merge). 이 그룹 자신의 그림 파일은 번호 정리 때 치워진다
+//   (media-N 안의 것만 — 사용자가 밖에서 첨부한 원본은 건드리지 않는다). 음성은 문장 것이라 그대로 산다.
+//   ⚠ 대본(.md)은 바꾸지 않는다 — ✂ 분할과 같다(대본이 그대로면 작업본 이어받기가 구조를 유지하고,
+//     대본을 고치면 새로 파싱돼 풀린다). 영구히 두려면 대본에 `> 🖼️ 이미지: 이어서` 를 쓴다.
+ipcMain.handle('merge-group', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const idx = pr.groups.findIndex((g) => g.num === groupNum);
+  if (idx < 0) throw new Error('그룹을 찾을 수 없습니다.');
+  const cur = pr.groups[idx];
+  const prevG = pr.groups[idx - 1];
+  const lostImg = !!(cur.imagePath && prevG && prevG.imagePath);
+  // 앞 그룹이 이기므로 버려지는 뒤 그룹 파일 — media-N 안에서 만든 것만 지운다(사용자 첨부 원본은 그대로)
+  const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  const orphans = [];
+  if (prevG && cur.imagePath && prevG.imagePath && cur.imagePath !== prevG.imagePath) orphans.push(cur.imagePath);
+  if (prevG && cur.videoPath && prevG.videoPath && cur.videoPath !== prevG.videoPath) orphans.push(cur.videoPath);
+  const r = require('./core/group-merge').mergeIntoPrev(pr, idx);
+  if (!r.ok) {
+    throw new Error(r.reason === 'no-prev' ? '첫 그룹은 합칠 앞 그룹이 없습니다.'
+      : r.reason === 'cross-intro' ? '도입부와 본론은 합칠 수 없습니다(도입부는 영상 범위·재배치의 기준입니다).'
+      : '합치지 못했습니다: ' + r.reason);
+  }
+  // 남겨 두면 뒤 그룹 번호의 옛 그림(NN.png)이 폴더에 떠돌아 엉뚱한 그룹 것으로 오해된다
+  for (const f of orphans) { if (_inDir(f, mediaDir)) { try { fs.rmSync(f, { force: true }); } catch {} } }
+  try { renumberMediaFiles(pr, mediaDir); } catch {}
+  storeActive(); pushDtoUpdate();
+  log(`⤒ ${prLabel(pr)} G${groupNum} → G${groupNum - 1} 에 합침 — G${groupNum - 1} 그림을 이어 씁니다`
+    + (lostImg ? ` · G${groupNum} 의 그림은 쓰지 않습니다` : '') + ` (그룹 ${pr.groups.length}개)`);
+  return P.toDTO(S.parsed);
 });
 
 // 그룹 분할 — TTS 길이 절반(균형)에 가장 가까운 문장 경계에서 2개로. 두 새 그룹은 프롬프트/이미지 초기화.

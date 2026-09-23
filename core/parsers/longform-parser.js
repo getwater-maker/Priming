@@ -72,6 +72,9 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.fileTitle = fileTitle;
   proj.voice = meta.voice;
   proj.format = 'longform';
+  // 🖼 `> 🖼️ 이미지: 이어서` — 그 H3 를 앞 그룹에 합쳐 **같은 그림**을 이어 쓴다(core/group-merge).
+  //   표식이 없는 대본은 한 글자도 안 바뀐다(레거시 대본 무영향).
+  proj.continueInfo = require('../group-merge').applyContinueMarkers(proj);
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
 }

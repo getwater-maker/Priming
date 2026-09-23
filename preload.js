@@ -169,6 +169,7 @@ contextBridge.exposeInMainWorld('api', {
   setGroupPrompt: (args) => ipcRenderer.invoke('set-group-prompt', args),
   finalPromptPreview: (args) => ipcRenderer.invoke('final-prompt-preview', args),
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
+  mergeGroup: (args) => ipcRenderer.invoke('merge-group', args),
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
   resplit: (args) => ipcRenderer.invoke('resplit', args),
