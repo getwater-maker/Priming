@@ -4,6 +4,7 @@ import { splitLines, mLen } from './lib/captions.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
+import Mp4Progress from './Mp4Progress.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -424,7 +425,8 @@ export default function App() {
   // 🔗 URL 다운로드 → STT
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
-  const [urlProg, setUrlProg] = useState(null);   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
+  const [urlProg, setUrlProg] = useState(null);
+  const [mp4Prog, setMp4Prog] = useState(null);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
   const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
@@ -538,6 +540,7 @@ export default function App() {
   useEffect(() => {
     api.onLog((line) => logline(line, true));
     if (api.onUrldlProgress) api.onUrldlProgress((d) => { if (d) setUrlProg(d); });
+    if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
@@ -3307,6 +3310,11 @@ export default function App() {
       )}
 
       {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
+      {mp4Prog && (
+        <Mp4Progress prog={mp4Prog}
+          onAbort={() => { abort(); }}
+          onClose={() => setMp4Prog(null)} />
+      )}
       {urlProg && (
         <UrlProgress prog={urlProg}
           onAbort={() => { abort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}

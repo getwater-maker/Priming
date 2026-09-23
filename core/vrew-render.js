@@ -544,6 +544,15 @@ async function renderVrewToMp4(opts = {}) {
   const lap = (k, t) => { timings[k] = +((Date.now() - t) / 1000).toFixed(1); };
   let tmpDir = null;
   const ctx = { children: [] };
+  // 📊 진행 상태(2026-09-23 로이 「진행과정을 눈으로 확인할 수 있게」) — 화면(main → 렌더러)이 그대로 그린다.
+  //   단계: read → video(조각 병렬) ∥ audio(동시) → concat → mux → done. 계산은 여기서, 표시는 화면에서.
+  const st = {
+    phase: 'read', startedAt: T0, outPath: opts.outPath || '', durationSec: 0, encoder: '', par,
+    video: { done: 0, total: 0, framesDone: 0, framesTotal: 0, active: [], startedAt: 0 },
+    audio: 'wait',   // wait → run → done · none(음성 없음)
+  };
+  const emit = () => { if (typeof opts.onProgress === 'function') { try { opts.onProgress(JSON.parse(JSON.stringify(st))); } catch (_) {} } };
+  emit();
   try {
     if (!opts.vrewPath || !fs.existsSync(opts.vrewPath)) return { ok: false, error: '.vrew 파일이 없습니다: ' + opts.vrewPath };
     if (!opts.outPath) return { ok: false, error: '출력 경로가 없습니다' };
@@ -554,6 +563,7 @@ async function renderVrewToMp4(opts = {}) {
     const tl = buildTimeline(project, mediaDir);
     if (opts.limitSec > 0) limitTimeline(tl, +opts.limitSec);   // 검증·벤치마크용(앞 N초만)
     lap('read', t);
+    st.durationSec = tl.totalSec; emit();
     if (!tl.segments.length || !(tl.totalSec > 0)) return { ok: false, error: '.vrew 에 타임라인이 없습니다' };
 
     // 폰트 — 앱에 들어 있는 Pretendard Bold(Vrew 자막 폰트). 없으면 맑은 고딕으로(글자 모양이 달라진다).
@@ -571,6 +581,8 @@ async function renderVrewToMp4(opts = {}) {
     const chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC);
     const totalFrames = chunks.length ? chunks[chunks.length - 1].f1 : 0;
     const enc = await pickEncoder(tmpDir, log);
+    Object.assign(st.video, { total: chunks.length, framesTotal: totalFrames, startedAt: Date.now() });
+    st.encoder = enc; st.phase = 'video'; st.audio = tl.audio.some((a) => a.file) ? 'run' : 'none'; emit();
     log(`🎬 MP4 렌더 — ${(tl.totalSec / 60).toFixed(1)}분 · 조각 ${chunks.length}개 · 자막 ${tl.cues.length}줄${tl.overlays.length ? ` · 오버레이 ${tl.overlays.length}개` : ''} · 동시 ${par} · ${enc === 'nvenc' ? 'NVENC' : 'CPU'}`);
 
     // 🔑 음성은 화면과 무관하다 → **조각 렌더와 동시에** 이어붙이고 AAC 로 인코딩해 둔다.
@@ -583,6 +595,7 @@ async function renderVrewToMp4(opts = {}) {
       await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', '-c:a', 'aac', '-b:a', '96k',
         '-ar', String(A_RATE), '-ac', '2', 'voice.m4a'], { cwd: tmpDir, signal: ctx.children });
       try { fs.unlinkSync(wav); } catch (_) {}
+      st.audio = 'done'; emit();
       return path.join(tmpDir, 'voice.m4a');
     })();
     audioJob.catch(() => {});   // 결과는 아래에서 await — 처리 안 된 거부 경고 방지
@@ -597,9 +610,14 @@ async function renderVrewToMp4(opts = {}) {
       while (queue.length && !firstErr) {
         if (isAborted()) return;
         const i = queue.shift();
-        try { files[i] = await renderChunk(chunks[i], i, ctx); }
+        const c = chunks[i];
+        st.video.active.push({ i: i + 1, start: c.f0 / FPS, end: c.f1 / FPS, type: c.type });
+        emit();
+        try { files[i] = await renderChunk(c, i, ctx); }
         catch (e) { firstErr = firstErr || e; return; }
+        finally { st.video.active = st.video.active.filter((a) => a.i !== i + 1); }
         done++;
+        st.video.done = done; st.video.framesDone += c.f1 - c.f0; emit();
         const pct = Math.floor(done / chunks.length * 100);
         if (pct >= nextPct) { log(`   🎬 MP4 ${pct}% (${done}/${chunks.length})`); nextPct = Math.floor(pct / 10) * 10 + 10; }
       }
@@ -611,17 +629,20 @@ async function renderVrewToMp4(opts = {}) {
 
     // 이어붙이기(무손실)
     t = Date.now();
+    st.phase = 'concat'; emit();
     fs.writeFileSync(path.join(tmpDir, 'list.txt'), files.map((f) => `file '${f}'`).join('\n'), 'utf8');
     await ff(['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'silent.mp4'],
       { cwd: tmpDir, signal: ctx.children });
     lap('concat', t);
 
     // 음성(동시에 돌던 것을 기다린다)
+    if (st.audio === 'run') { st.phase = 'audio'; emit(); }
     const voice = await audioJob;
     timings.audio = +((Date.now() - tA) / 1000).toFixed(1);   // 화면과 겹쳐 돈 시간(벽시계 합계가 아니다)
 
     // mux — 비디오는 다시 인코딩하지 않는다(자막은 이미 구워져 있다)
     t = Date.now();
+    st.phase = 'mux'; emit();
     fs.mkdirSync(path.dirname(opts.outPath), { recursive: true });
     const tmpOut = path.join(tmpDir, 'final.mp4');
     if (voice) {
@@ -640,6 +661,7 @@ async function renderVrewToMp4(opts = {}) {
 
     const renderSec = (Date.now() - T0) / 1000;
     const durationSec = totalFrames / FPS;
+    Object.assign(st, { phase: 'done', endedAt: Date.now(), speed: durationSec / renderSec }); emit();
     return { ok: true, output: opts.outPath, durationSec, renderSec, timings, speed: durationSec / renderSec, encoder: enc };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : String(e) };

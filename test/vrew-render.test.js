@@ -134,7 +134,8 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
     makeVrew(vrew, tmp);
     const mp4 = path.join(tmp, 'out', 't.mp4');
     const logs = [];
-    const r = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: (m) => logs.push(m), par: 2 });
+    const prog = [];
+    const r = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: (m) => logs.push(m), par: 2, onProgress: (p) => prog.push(p) });
     ok(r.ok, `성공 (${r.ok ? r.renderSec.toFixed(1) + '초 · ' + r.encoder : r.error})`);
     if (r.ok) {
       const info = probe(mp4);
@@ -151,6 +152,15 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
       ok(top05 < 50 && top15 > 300, `AI 고지는 1초 뒤에 위쪽에 나타난다 (0.5초 ${top05} → 1.8초 ${top15})`);
       ok(!fs.readdirSync(path.dirname(mp4)).some((f) => f !== 't.mp4'), '출력 폴더에 중간 파일이 남지 않는다');
       ok(logs.some((m) => /MP4 렌더/.test(m)), '진행 로그');
+      // 📊 진행 패널 신호 — 단계가 순서대로 오고, 조각·프레임 수가 끝에서 전체와 같다
+      const ph = prog.map((p) => p.phase).filter((x, i, a) => a[i - 1] !== x);
+      const order = ['read', 'video', 'concat', 'mux', 'done'];
+      ok(order.every((k) => ph.includes(k)) && order.every((k, i) => !i || ph.indexOf(k) > ph.indexOf(order[i - 1])),
+        `진행 단계가 순서대로 온다 (${ph.join('→')})`);
+      const last = prog[prog.length - 1] || {};
+      ok(last.video && last.video.done === last.video.total && last.video.framesDone === last.video.framesTotal && last.video.total > 0,
+        `끝나면 조각·프레임이 전체와 같다 (${last.video && last.video.done}/${last.video && last.video.total})`);
+      ok(last.audio === 'done' && last.video.active.length === 0 && last.speed > 0, '음성 완료 · 굽는 조각 0 · 배속');
     }
     const bad = await R.renderVrewToMp4({ vrewPath: path.join(tmp, 'none.vrew'), outPath: mp4 });
     ok(bad.ok === false && /없습니다/.test(bad.error), '없는 .vrew → 던지지 않고 {ok:false}');

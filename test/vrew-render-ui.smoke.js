@@ -57,6 +57,28 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
 
+    // 📊 진행 패널 — main 이 보내는 mp4-progress 를 흉내 내 숫자·단계·닫기를 확인한다(실제 렌더 없이)
+    const sendP = (p) => app.evaluate(({ BrowserWindow }, p) => { BrowserWindow.getAllWindows()[0].webContents.send('mp4-progress', p); }, p);
+    const base = { title: '[고전_0902] 시험', startedAt: Date.now() - 40000, outPath: 'C:\tmp\a.mp4', durationSec: 1196, encoder: 'nvenc', par: 6 };
+    await sendP({ ...base, phase: 'video', audio: 'run',
+      video: { done: 30, total: 77, framesDone: 14000, framesTotal: 35880, startedAt: Date.now() - 30000,
+        active: [{ i: 31, start: 600, end: 620, type: 'image' }, { i: 32, start: 620, end: 640, type: 'image' }] } });
+    await win.waitForSelector('[data-testid="mp4-progress"]', { timeout: 5000 }).catch(() => {});
+    const pnl = win.locator('[data-testid="mp4-progress"]');
+    ok(await pnl.count() === 1, '📊 MP4 진행 패널이 나타난다');
+    const t1 = await pnl.innerText();
+    ok(/조각 30\/77/.test(t1) && /39%/.test(t1), '화면 굽기 조각 30/77 · 39%');
+    ok(/남은 시간 약/.test(t1) && /10:00~10:20/.test(t1) && /화면과 동시에/.test(t1), '남은 시간 · 지금 굽는 구간 · 음성 동시 진행');
+    ok(await pnl.locator('button:has-text("⏹ 중단")').count() === 1, '진행 중에는 ⏹ 중단');
+    await sendP({ ...base, phase: 'done', audio: 'done', endedAt: Date.now(), speed: 10.7,
+      video: { done: 77, total: 77, framesDone: 35880, framesTotal: 35880, startedAt: 0, active: [] } });
+    await win.waitForTimeout(400);
+    const t2 = await pnl.innerText();
+    ok(/완료/.test(t2) && /100%/.test(t2) && /저장: /.test(t2) && /10\.7배속/.test(t2), '끝나면 100% · 저장 경로 · 배속');
+    await pnl.locator('button:has-text("닫기")').click();
+    await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="mp4-progress"]').count() === 0, '닫기로 사라진다');
+
     ok(errs.length === 0, `화면 오류 0건 (실제 ${errs.length}${errs.length ? ' — ' + errs.slice(0, 3).join(' / ') : ''})`);
   } finally {
     await app.close();

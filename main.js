@@ -2281,7 +2281,20 @@ async function renderUploadMp4(vrewPath, baseName, preset) {
   const dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || path.dirname(vrewPath);
   const outPath = path.join(dir, `${baseName}.mp4`);
   // 화면이 꺼지면 인코딩이 흔들릴 수 있어 작업 동안 절전을 막는다(TTS·이미지와 같은 규칙).
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, isAborted: () => !!S.abort }));
+  // 📊 진행 패널(mp4-progress) — 조각마다 오므로 250ms 로 묶고, 단계가 바뀌면 즉시 보낸다.
+  let _pt = 0, _pTimer = null, _pLast = null, _pPhase = '';
+  const send = () => { _pTimer = null; _pt = Date.now(); try { win.webContents.send('mp4-progress', _pLast); } catch {} };
+  const onProgress = (p) => {
+    _pLast = { ...p, title: baseName };
+    if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
+    if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
+  };
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort }));
+  if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
+  if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
+    _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
+    send();
+  }
   if (r.ok) {
     const t = r.timings || {};
     log(`🎬 유튜브 MP4 완료 — ${outPath}`);
