@@ -192,7 +192,9 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 #logbar{padding:6px 10px;background:#231f1a;color:#c7b89f;display:flex;align-items:center;gap:8px;font-size:11px;flex-wrap:nowrap;white-space:nowrap}
 #logbar>b{flex:0 0 auto}
 #logbar>button{flex:0 0 auto}
-#log{flex:1;overflow:auto;padding:8px 10px;white-space:pre-wrap;line-height:1.55}
+/* 로그 = 스크롤바 없이 휠로만 움직이고, 긴 줄(공백 없는 경로 포함)은 다음 줄로 넘긴다 — 로이 2026-09-25 */
+#log{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;scrollbar-width:none}
+#log::-webkit-scrollbar{display:none;width:0;height:0}
 /* 상태 텍스트 — 한 줄 고정, 길면 …로 줄임 (로그바가 2줄로 깨지는 것 방지) */
 #status{color:var(--accent);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 미리보기 모달 */

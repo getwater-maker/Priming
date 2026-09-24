@@ -107,7 +107,7 @@ function motion(mp4, t, dt = 0.4) {
   const ps = b.filter((x) => x.t === 'p');
   ok(ps[0].groupNum === 1 && ps[0].sents[1].speaker === '엄마' && ps[0].sents[1].i === 1, '문단 = 그룹 · 문장 번호(i)가 편집 주소와 같다 · 화자');
   ok(ps.length === 3 && ps[2].sents[0].i === 1, '합친 그룹은 표식에서 문단을 가른다(i 는 그룹 안 번호 그대로)');
-  ok(SR.readerBlocks(dto, { headings: false }).every((x) => x.t === 'h1' || x.t === 'p'), '섹션 제목 끄기');
+  ok(SR.readerBlocks(dto, { headings: false }).every((x) => x.t !== 'h3') && SR.readerBlocks(dto, { headings: false }).some((x) => x.t === 'h2'), '섹션 제목(###) 끄기 — ## 장 제목은 남는다');
   const html = SR.readerHtml(b, { fontPt: 12 });
   ok(/@page \{ size: A4/.test(html) && /font-size: 12pt/.test(html) && !/<script/i.test(html), 'A4 · 글자 크기 · 스크립트 없음');
   ok(SR.readerHtml([{ t: 'p', groupNum: 1, sents: [{ i: 0, text: '<b>x</b>' }] }]).includes('&lt;b&gt;x&lt;/b&gt;'), '본문 글자는 이스케이프');

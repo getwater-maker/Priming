@@ -22,11 +22,11 @@ function readerBlocks(pr, { headings = true } = {}) {
   if (!pr) return out;
   if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim() });
   let lastH2 = '', lastH3 = '';
+  // `##`(H2 = 장 제목)은 언제나 보인다. headings 는 **섹션 제목(### = H3)** 만 켜고 끈다(로이 2026-09-25 — 기본 끔).
   const head = (h2raw, phraw) => {
-    if (!headings) return;
     const h2 = cleanHead(h2raw), h3 = cleanHead(phraw);
     if (h2 && h2 !== lastH2) { out.push({ t: 'h2', text: h2 }); lastH2 = h2; lastH3 = ''; }
-    if (h3 && h3 !== lastH3 && h3 !== lastH2) { out.push({ t: 'h3', text: h3 }); lastH3 = h3; }
+    if (headings && h3 && h3 !== lastH3 && h3 !== lastH2) { out.push({ t: 'h3', text: h3 }); lastH3 = h3; }
   };
   for (const c of (pr.cuts || [])) {
     const ss = c.sentences || [];

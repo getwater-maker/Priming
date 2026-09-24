@@ -100,7 +100,7 @@ function caretOf(root) {
 
 export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log, presetName }) {
   const [fontPx, setFontPx] = useState(17);
-  const [headings, setHeadings] = useState(true);
+  const [headings, setHeadings] = useState(false);   // 섹션 제목(###) — 기본 끔. ## 장 제목은 언제나 보인다
   const [groupNums, setGroupNums] = useState(false);
   const [perSheet, setPerSheet] = useState(1);
   const [fontPt, setFontPt] = useState(11);
@@ -279,7 +279,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           <button className="ghost" style={{ padding: '3px 9px' }} onClick={() => setFontPx((f) => Math.max(12, f - 1))}>−</button>
           <span className="meta" style={{ width: 28, textAlign: 'center' }}>{fontPx}</span>
           <button className="ghost" style={{ padding: '3px 9px' }} onClick={() => setFontPx((f) => Math.min(28, f + 1))}>＋</button>
-          <label className="chk" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={headings} onChange={(e) => setHeadings(e.target.checked)} />섹션 제목</label>
+          <label className="chk" data-testid="reader-headings" title="섹션 제목(### 소제목)을 보입니다 — ## 장 제목은 언제나 보입니다. A4 PDF 에도 같이 적용됩니다" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={headings} onChange={(e) => setHeadings(e.target.checked)} />섹션 제목</label>
           <label className="chk" title="문단 앞에 그룹 번호(G3)를 작게 표시 — 앱 화면과 대조할 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={groupNums} onChange={(e) => setGroupNums(e.target.checked)} />그룹 번호</label>
           <span className="hdiv" />
           <span className="meta">A4 · 한 장에</span>

@@ -2456,7 +2456,7 @@ export default function App() {
             </>)}
             <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}>📄 대본 보기</button>
-            <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
+            {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
               {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}

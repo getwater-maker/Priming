@@ -65,7 +65,12 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     const txt = await R.innerText();
     ok(/대본 보기 테스트/.test(txt) && /첫째 문장입니다/.test(txt), '제목과 본문이 나온다');
     ok(!/SHOULD_NOT_APPEAR|a quiet room|지침이라/.test(txt), '🔑 이미지·영상 프롬프트·메타는 안 나온다');
-    ok(/도입부/.test(txt) && /1장\. 본론/.test(txt) && /두 번째 장면/.test(txt), '섹션 제목(H2·H3)');
+    ok(/도입부/.test(txt) && /1장\. 본론/.test(txt) && !/두 번째 장면/.test(txt), '기본 = ## 장 제목만 보이고 ### 섹션 제목은 숨김');
+    ok(!(await R.locator('[data-testid="reader-headings"] input').isChecked()), '「섹션 제목」 체크는 기본 꺼짐');
+    await R.locator('[data-testid="reader-headings"] input').check();
+    await win.waitForTimeout(400);
+    ok(/두 번째 장면/.test(await R.innerText()) && /1장\. 본론/.test(await R.innerText()), '「섹션 제목」을 켜면 ### 도 보인다');
+    ok(await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("미리보기")').count() === 0, '④ 완성에 ▶ 미리보기 버튼 없음(카드 아래에 있다)');
     ok(!/첫 장면/.test(txt), '제작메모뿐인 H3(〔… · 5샷 · I2V〕)는 ⏱ 챕터와 같은 규칙으로 뺀다');
     ok(!/5샷|I2V/.test(txt), '제작 표기 꼬리는 지운다');
 
