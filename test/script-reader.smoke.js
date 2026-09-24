@@ -23,7 +23,8 @@ const SCRIPT = [
   '### 〔첫 장면 · 5샷 · I2V〕',
   '> 🖼️ 이미지: a quiet room SHOULD_NOT_APPEAR',
   '> 🎬 영상: slow push in SHOULD_NOT_APPEAR',
-  '첫째 문장입니다. 둘째 문장입니다.',
+  '첫째 문장입니다.',
+  '둘째 문장입니다.',
   '',
   '## 1장. 본론',
   '### 〔두 번째 장면〕',
@@ -63,31 +64,62 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     ok(!/첫 장면/.test(txt), '제작메모뿐인 H3(〔… · 5샷 · I2V〕)는 ⏱ 챕터와 같은 규칙으로 뺀다');
     ok(!/5샷|I2V/.test(txt), '제작 표기 꼬리는 지운다');
 
-    // 고치기 — 첫 문장을 눌러 바꾸고 Enter
-    await R.locator('.rd-sent').first().click();
+    // ✏ 문단 편집 — 워드처럼 문단을 눌러 이어서 고친다 · 바뀐 문장만 저장 · 한글 조합 중엔 저장 안 함 (v0.5.34)
+    const readMd = () => fs.readFileSync(MD, 'utf8');
+    await R.locator('.rd-para').first().click();
     const ta = R.locator('[data-testid="reader-edit"]');
     await ta.waitFor({ timeout: 5000 });
-    ok((await ta.inputValue()) === '첫째 문장입니다.', '누른 문장이 편집칸에');
-    await ta.fill('처음 문장으로 바꿨습니다.');
+    ok((await ta.inputValue()) === '첫째 문장입니다. 둘째 문장입니다.', '누른 문단 전체가 한 편집칸에(문장을 이어서)');
+    ok(await R.locator('[data-testid="reader-edit"]').count() === 1, '편집칸은 하나');
+    // 둘째 문장만 고친다 — 조합(IME) 흉내: compositionstart → 값 바꿈 → 오래 기다려도 저장 안 됨 → compositionend → 저장
+    const setVal = (v) => ta.evaluate((el, v) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, v);
+    await ta.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+    await setVal('첫째 문장입니다. 두 번째로 바뀐 문장입니다.');
+    await win.waitForTimeout(2600);
+    ok(!readMd().includes('두 번째로 바뀐'), '🔑 한글 조합 중에는 2.6초가 지나도 저장하지 않는다');
+    await ta.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '다' })));
+    await win.waitForTimeout(2800);
+    let md = readMd();
+    ok(md.includes('두 번째로 바뀐 문장입니다.') && !md.includes('둘째 문장입니다.'), '조합이 끝나고 손을 멈추면 저장된다(.md 반영)');
+    ok(/^첫째 문장입니다\.$/m.test(md), '🔑 안 고친 첫 문장은 대본의 자기 줄 그대로(다시 쓰지 않았다)');
+    ok(await ta.count() === 1, '저장해도 편집칸이 닫히지 않는다 — 이어서 고친다');
+    // 이어서 — 맨 끝에 문장을 덧붙이고 Enter(저장 후 닫기)
+    await ta.focus();
+    await win.keyboard.press('End');
+    await win.keyboard.type(' 이어서 쓴 문장입니다.');
     await ta.press('Enter');
-    await win.waitForTimeout(1500);
-    const md = fs.readFileSync(MD, 'utf8');
-    ok(md.includes('처음 문장으로 바꿨습니다.') && !md.includes('첫째 문장입니다.'), '🔑 대본(.md) 파일이 실제로 바뀐다');
-    ok(/처음 문장으로 바꿨습니다/.test(await R.innerText()), '화면에도 바로 반영');
+    await win.waitForTimeout(1800);
+    md = readMd();
+    ok(md.includes('이어서 쓴 문장입니다.'), 'Enter = 저장');
+    ok(await R.locator('[data-testid="reader-edit"]').count() === 0, 'Enter 뒤 편집칸이 닫힌다');
+    ok(/이어서 쓴 문장입니다/.test(await R.innerText()), '화면에도 바로 반영');
     ok(md.includes('SHOULD_NOT_APPEAR'), '지침 줄은 그대로 남는다');
-    // Esc 는 고치지 않고 닫는다
-    await R.locator('.rd-sent').nth(1).click();
+    // Esc = 아직 저장 안 된 고침 취소
+    await R.locator('.rd-para').nth(1).click();
     await ta.waitFor({ timeout: 5000 });
-    await ta.fill('이건 저장되면 안 됩니다.');
+    await setVal('이건 저장되면 안 됩니다.');
     await ta.press('Escape');
-    await win.waitForTimeout(600);
-    ok(!fs.readFileSync(MD, 'utf8').includes('이건 저장되면 안 됩니다'), 'Esc = 취소(저장 안 함)');
+    await win.waitForTimeout(2000);
+    ok(!readMd().includes('이건 저장되면 안 됩니다'), 'Esc = 취소(저장 안 함)');
     ok(await R.count() === 1, 'Esc 한 번은 편집만 닫는다(창은 그대로)');
+    // 다른 곳을 누르면(blur) 저장
+    await R.locator('.rd-para').first().click();
+    await ta.waitFor({ timeout: 5000 });
+    await setVal((await ta.inputValue()).replace('첫째 문장입니다.', '맨 처음 문장입니다.'));
+    await R.locator('h1').first().click();
+    await win.waitForTimeout(1800);
+    md = readMd();
+    ok(md.includes('맨 처음 문장입니다.') && md.includes('두 번째로 바뀐 문장입니다.'), '다른 곳을 누르면 저장(고친 첫 문장만)');
 
     // A4 PDF — 1쪽 / 4쪽 (main 을 직접 불러 쪽수·크기를 잰다. 파일은 열지 않는다)
     const { PDFDocument } = require(path.join(ROOT, 'node_modules', 'pdf-lib'));
     const r1 = await win.evaluate(() => window.api.scriptReaderPdf({ perSheet: 1, fontPt: 11, open: false }));
     outRoot = path.dirname(r1.path);
+    const dl = await app.evaluate(({ app }) => app.getPath('downloads'));
+    ok(path.resolve(outRoot).toLowerCase() === path.resolve(dl).toLowerCase(), `PDF 저장 폴더 기본값 = 윈도우 다운로드 (${outRoot})`);
     const d1 = await PDFDocument.load(fs.readFileSync(r1.path));
     const s1 = d1.getPage(0).getSize();
     ok(d1.getPageCount() >= 3 && Math.abs(s1.width - 595.3) < 2 && Math.abs(s1.height - 841.9) < 2, `1쪽: A4 세로 ${d1.getPageCount()}쪽 (${Math.round(s1.width)}×${Math.round(s1.height)}pt)`);

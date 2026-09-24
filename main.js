@@ -2363,7 +2363,7 @@ function enqueueYtUpload(job) {
 }
 // ── 📄 대본 읽기 → A4 PDF (한 장에 N 쪽) (2026-09-24, v0.5.33) ─────────────────────
 //   내용은 core/script-reader.js(화면과 같은 블록) → 숨은 창에서 A4 로 printToPDF → N 쪽 모아 찍기는 pdf-lib
-//   (vivliostyle 이 이미 싣고 있다 — 의존성 추가 없음). 결과는 출력 폴더에 저장하고 열어 준다(거기서 인쇄).
+//   (vivliostyle 이 이미 싣고 있다 — 의존성 추가 없음). 결과는 채널의 「대본 PDF」 폴더(기본 = 윈도우 다운로드)에 저장하고 열어 준다(거기서 인쇄).
 async function nUpPdf(buf, per) {
   const R = require('./core/script-reader');
   const { PDFDocument, rgb } = require('pdf-lib');
@@ -2388,6 +2388,10 @@ async function nUpPdf(buf, per) {
   });
   return { buf: Buffer.from(await doc.save()), pages: pages.length, sheets: doc.getPageCount() };
 }
+// 저장 폴더 = 채널편집 📁 폴더 → 「대본 PDF」(비우면 윈도우 다운로드 폴더 · 그것도 없으면 출력 폴더) — 로이 2026-09-24
+function readerPdfDir(preset) {
+  return String((preset && preset.outReader) || '').trim() || defaultDownloadDir() || S.outRoot;
+}
 ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const R = require('./core/script-reader');
@@ -2411,8 +2415,9 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
   if (per > 1) out = await nUpPdf(pdf, per);
   else { try { const { PDFDocument } = require('pdf-lib'); const n = (await PDFDocument.load(pdf)).getPageCount(); out.pages = out.sheets = n; } catch (_) {} }
   const base = vrewBaseName(S.parsed.projects[0]);
-  const dest = path.join(S.outRoot, `${base}_대본${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
-  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch (_) {}
+  const dir = readerPdfDir(resolvePreset(args.presetName));
+  const dest = path.join(dir, `${base}_대본${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   try { fs.writeFileSync(dest, out.buf); }
   catch (e) { throw new Error(`PDF 를 저장하지 못했습니다(${e.code || e.message}) — 같은 PDF 가 열려 있으면 닫고 다시 누르세요.`); }
   log(`📄 대본 PDF — A4 ${out.pages}쪽${per > 1 ? ` → 한 장에 ${per}쪽 · ${out.sheets}장` : ''} · ${dest}`);
@@ -4436,7 +4441,7 @@ ipcMain.handle('get-preset-detail', (_e, name) => {
   // 다운로드 폴더를 한 번도 안 정한 채널이면 **윈도우 다운로드 폴더를 기본값으로 보여준다**
   // (채널편집에서 그대로 저장되거나, 사용자가 다른 폴더로 바꾸면 그 값이 저장된다).
   // ✏ 화이트보드 출력도 같은 규칙 — 비어 있으면 다운로드 폴더가 기본값이다(로이 2026-09-16).
-  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir(), outUpload: p.outUpload || defaultDownloadDir() } : null;
+  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir(), outUpload: p.outUpload || defaultDownloadDir(), outReader: p.outReader || defaultDownloadDir() } : null;
 });
 ipcMain.handle('save-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');

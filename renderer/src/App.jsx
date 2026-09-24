@@ -1460,6 +1460,7 @@ export default function App() {
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
       outUpload: p.outUpload || '',
+      outReader: p.outReader || '',   // 📄 대본 보기 → 🖨 A4 PDF 가 떨어질 폴더(비어 있으면 main 이 다운로드 폴더를 채워 보낸다)
       // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
@@ -1703,6 +1704,7 @@ export default function App() {
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
+      outReader: (ch.outReader || '').trim(),            // 📄 대본 A4 PDF 폴더 — ⚠ 마찬가지(안 실으면 덮인다)
       ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
@@ -1744,6 +1746,7 @@ export default function App() {
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
   async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
   async function pickOutUpload() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outUpload: d })); }
+  async function pickOutReader() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outReader: d })); }
   // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
   async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
   async function ytImport() {
@@ -2854,6 +2857,13 @@ export default function App() {
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
+                {/* 📄 대본 보기 → 🖨 A4 PDF 저장 폴더 — 비우면 윈도우 「다운로드」 폴더 */}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow"><label>대본 PDF</label>
+                    <input placeholder="📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outReader || ''}
+                      onChange={(e) => setCh({ ...ch, outReader: e.target.value })} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutReader}>찾기</button></div>
+                )}
                 {/* ⬆ 유튜브 자동 업로드 — MP4 를 구운 뒤 이 채널에 **비공개**로 올린다(제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" title="🎬 유튜브 MP4 를 구우면 고른 채널에 비공개로 올립니다. 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>⬆ 자동 업로드</label>
@@ -3403,7 +3413,7 @@ export default function App() {
 
       {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
       {readerOpen && (
-        <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline}
+        <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline} presetName={presetName}
           onClose={() => setReaderOpen(false)} />
       )}
       {ytProg && (
