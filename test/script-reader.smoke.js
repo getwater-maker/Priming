@@ -69,69 +69,105 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     ok(!/첫 장면/.test(txt), '제작메모뿐인 H3(〔… · 5샷 · I2V〕)는 ⏱ 챕터와 같은 규칙으로 뺀다');
     ok(!/5샷|I2V/.test(txt), '제작 표기 꼬리는 지운다');
 
-    // ✏ 문단 편집 — 워드처럼 문단을 눌러 이어서 고친다 · 바뀐 문장만 저장 · 한글 조합 중엔 저장 안 함 (v0.5.34)
+    // ✏ 대본 전체 = 하나의 편집면 (v0.5.36) — 바뀐 문장만 저장 · 한글 조합 중엔 저장 안 함 · 경계 셋은 잠금
     const readMd = () => fs.readFileSync(MD, 'utf8');
-    await R.locator('.rd-para').first().click();
-    const ta = R.locator('[data-testid="reader-edit"]');
-    await ta.waitFor({ timeout: 5000 });
-    ok((await ta.evaluate((el) => el.readerValue())) === '첫째 문장입니다. 둘째 문장입니다.', '누른 문단 전체가 한 편집칸에(문장을 이어서)');
-    ok(await R.locator('[data-testid="reader-edit"]').count() === 1, '편집칸은 하나');
-    // 둘째 문장만 고친다 — 조합(IME) 흉내: compositionstart → 값 바꿈 → 오래 기다려도 저장 안 됨 → compositionend → 저장
-    const setVal = (v) => ta.evaluate((el, v) => { el.textContent = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, v);
-    await ta.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
-    await setVal('첫째 문장입니다. 두 번째로 바뀐 문장입니다.');
+    const doc = R.locator('[data-testid="reader-doc"]');
+    ok(await doc.getAttribute('contenteditable') === 'true' && await R.locator('textarea').count() === 0, '대본 전체가 하나의 편집면(누를 필요 없이 어디든 커서)');
+    const paraN = () => doc.locator('p[data-key]').count();
+    const N0 = await paraN();
+    const val = (i) => doc.evaluate((el, i) => el.readerValue(i), i);
+    // 문단 i 의 글자 위치 off 에 커서(이름 칩은 건너뛰고 센다)
+    const caret = (i, off) => doc.evaluate((root, [i, off]) => {
+      const p = root.querySelectorAll('p[data-key]')[i]; let left = off, hit = null, last = null;
+      const walk = (n) => { for (const c of n.childNodes) { if (c.nodeType === 1 && c.hasAttribute('data-ne')) continue; if (c.nodeType === 3) { last = c; if (left <= c.nodeValue.length) { hit = [c, left]; return true; } left -= c.nodeValue.length; } else if (walk(c)) return true; } return false; };
+      walk(p); if (!hit) hit = [last, last.nodeValue.length];
+      root.focus(); const r = document.createRange(); r.setStart(hit[0], hit[1]); r.collapse(true);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }, [i, off]);
+    // 문단 i 의 글에서 a → b 로 바꾸고 input 을 알린다(사람이 친 것과 같은 경로)
+    const swap = (i, a, b) => doc.evaluate((root, [i, a, b]) => {
+      const p = root.querySelectorAll('p[data-key]')[i];
+      const t = [...p.childNodes].find((n) => n.nodeType === 3 && n.nodeValue.includes(a));
+      t.nodeValue = t.nodeValue.replace(a, b); root.dispatchEvent(new Event('input', { bubbles: true }));
+    }, [i, a, b]);
+    ok((await val(0)) === '첫째 문장입니다. 둘째 문장입니다.', '문단 글 = 문장들을 이은 글');
+
+    // 🔑 한글 조합 — compositionstart 뒤로는 오래 기다려도 저장 안 함 → compositionend 뒤 멈추면 저장
+    await caret(0, 12);
+    await doc.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+    await swap(0, '둘째 문장입니다.', '두 번째로 바뀐 문장입니다.');
     await win.waitForTimeout(2600);
     ok(!readMd().includes('두 번째로 바뀐'), '🔑 한글 조합 중에는 2.6초가 지나도 저장하지 않는다');
-    await ta.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '다' })));
+    await doc.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '다' })));
     await win.waitForTimeout(2800);
     let md = readMd();
     ok(md.includes('두 번째로 바뀐 문장입니다.') && !md.includes('둘째 문장입니다.'), '조합이 끝나고 손을 멈추면 저장된다(.md 반영)');
     ok(/^첫째 문장입니다\.$/m.test(md), '🔑 안 고친 첫 문장은 대본의 자기 줄 그대로(다시 쓰지 않았다)');
-    ok(await ta.count() === 1, '저장해도 편집칸이 닫히지 않는다 — 이어서 고친다');
-    // 이어서 — 맨 끝에 문장을 덧붙이고 Enter(저장 후 닫기)
-    await ta.focus();
-    await win.keyboard.press('Control+End');
-    await win.keyboard.type(' 이어서 쓴 문장입니다.');
-    await ta.press('Enter');
-    await win.waitForTimeout(1800);
-    md = readMd();
-    ok(md.includes('이어서 쓴 문장입니다.'), 'Enter = 저장');
-    ok(await R.locator('[data-testid="reader-edit"]').count() === 0, 'Enter 뒤 편집칸이 닫힌다');
-    ok(/이어서 쓴 문장입니다/.test(await R.innerText()), '화면에도 바로 반영');
-    ok(md.includes('SHOULD_NOT_APPEAR'), '지침 줄은 그대로 남는다');
-    // Esc = 아직 저장 안 된 고침 취소
-    await R.locator('.rd-para').nth(1).click();
-    await ta.waitFor({ timeout: 5000 });
-    await setVal('이건 저장되면 안 됩니다.');
-    await ta.press('Escape');
-    await win.waitForTimeout(2000);
-    ok(!readMd().includes('이건 저장되면 안 됩니다'), 'Esc = 취소(저장 안 함)');
-    ok(await R.count() === 1, 'Esc 한 번은 편집만 닫는다(창은 그대로)');
-    // 다른 곳을 누르면(blur) 저장
-    await R.locator('.rd-para').first().click();
-    await ta.waitFor({ timeout: 5000 });
-    await setVal((await ta.evaluate((el) => el.readerValue())).replace('첫째 문장입니다.', '맨 처음 문장입니다.'));
-    await R.locator('h1').first().click();
-    await win.waitForTimeout(1800);
-    md = readMd();
-    ok(md.includes('맨 처음 문장입니다.') && md.includes('두 번째로 바뀐 문장입니다.'), '다른 곳을 누르면 저장(고친 첫 문장만)');
 
-    // 🎭 화자 이름 — 편집면에 칩으로 보이고, 고칠 수 없고, 대사를 고쳐도 .md 의 [이름] 은 그대로
-    const spkPara = R.locator('.rd-para').filter({ hasText: '엄마의 대사' });
-    await spkPara.click();
-    await ta.waitFor({ timeout: 5000 });
-    ok(await ta.locator('[data-spk]').count() === 1 && (await ta.locator('[data-spk]').innerText()).trim() === '엄마', '🔑 편집면에 화자 이름(엄마)이 보인다');
-    ok((await ta.evaluate((el) => el.readerValue())) === '엄마의 대사입니다. 내레이션 문장입니다.', '이름은 글에 섞이지 않는다(비교·저장은 문장 글만)');
-    // 대사 맨 앞에 커서를 두고 Backspace — 이름이 지워지면 안 된다
-    await ta.evaluate((el) => { const t = [...el.childNodes].find((n) => n.nodeType === 3 && n.nodeValue.startsWith('엄마의')); const r = document.createRange(); r.setStart(t, 0); r.collapse(true); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); });
+    // 실제 키보드로 이어서 쓰기(문단 끝에 커서 → 타이핑 → 멈춤)
+    await caret(0, 9999);
+    await win.keyboard.type(' 이어서 쓴 문장입니다.');
+    await win.waitForTimeout(2600);
+    md = readMd();
+    ok(md.includes('이어서 쓴 문장입니다.'), '키보드로 이어서 쓴 글이 저장된다');
+
+    // 🔒 ① Enter = 새 문단 금지(지금 저장만)
+    await caret(0, 5);
+    await win.keyboard.press('Enter');
+    await win.waitForTimeout(500);
+    ok(await paraN() === N0 && (await val(0)).startsWith('첫째 문장입니다.'), '🔒 Enter 로 새 문단이 생기지 않는다');
+    ok(/새 문단은 만들 수 없습니다/.test(await R.locator('[data-testid="reader-msg"]').innerText()), 'Enter 를 막은 이유를 알린다');
+    // 🔒 ② 문단 잇기 — 둘째 문단 맨 앞 Backspace · 첫 문단 맨 끝 Delete
+    const v1 = await val(1);
+    await caret(1, 0);
     await win.keyboard.press('Backspace');
-    ok(await ta.locator('[data-spk]').count() === 1, 'Backspace 로 이름이 지워지지 않는다');
-    await ta.evaluate((el) => { const t = [...el.childNodes].find((n) => n.nodeType === 3 && n.nodeValue.includes('대사')); t.nodeValue = t.nodeValue.replace('대사', '말'); el.dispatchEvent(new Event('input', { bubbles: true })); });
-    await R.locator('h1').first().click();
+    await caret(0, 9999);
+    await win.keyboard.press('Delete');
+    await win.waitForTimeout(400);
+    ok(await paraN() === N0 && (await val(1)) === v1, '🔒 문단 맨 앞 Backspace · 맨 끝 Delete 로 문단이 이어지지 않는다');
+    ok(/문단을 잇거나/.test(await R.locator('[data-testid="reader-msg"]').innerText()), '문단 잇기를 막은 이유를 알린다');
+    // 🔒 문단을 걸친 선택 지우기
+    await doc.evaluate((root) => {
+      const ps = root.querySelectorAll('p[data-key]'); const a = ps[0].lastChild, b = ps[1].firstChild;
+      const r = document.createRange(); r.setStart(a, Math.max(0, a.nodeValue.length - 3)); r.setEnd(b, 3);
+      root.focus(); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await win.keyboard.press('Backspace');
+    await win.waitForTimeout(400);
+    ok(await paraN() === N0 && (await val(1)) === v1, '🔒 문단을 걸친 선택을 지워도 두 문단이 그대로');
+    ok(!/되돌렸습니다/.test(await R.locator('[data-testid="reader-msg"]').innerText()), '입력 전에 막았다(깨진 뒤 되돌린 것이 아니다)');
+    // 🔒 ③ 제목은 못 고친다
+    const h3 = doc.locator('h3').first();
+    const h3t = await h3.innerText();
+    await h3.click();
+    await win.keyboard.type('XYZ');
+    await win.waitForTimeout(300);
+    ok((await h3.innerText()) === h3t && await h3.getAttribute('contenteditable') === 'false', '🔒 섹션 제목은 고쳐지지 않는다');
+
+    // 🎭 화자 이름 — 칩으로 보이고, Backspace 로 안 지워지고, 대사를 고쳐도 .md 의 [엄마] 는 그대로
+    const pi = await doc.evaluate((root) => [...root.querySelectorAll('p[data-key]')].findIndex((p) => p.textContent.includes('엄마의 대사')));
+    const sp = doc.locator('p[data-key]').nth(pi);
+    ok(await sp.locator('[data-spk]').count() === 1 && (await sp.locator('[data-spk]').innerText()).trim() === '엄마', '🔑 편집면에 화자 이름(엄마)이 보인다');
+    ok((await val(pi)) === '엄마의 대사입니다. 내레이션 문장입니다.', '이름은 글에 섞이지 않는다(비교·저장은 문장 글만)');
+    await caret(pi, 0);
+    await win.keyboard.press('Backspace');
+    ok(await sp.locator('[data-spk]').count() === 1, 'Backspace 로 이름이 지워지지 않는다');
+    await swap(pi, '대사', '말');
+    await R.locator('.meta').last().click();   // 편집면 밖을 누르면 저장
     await win.waitForTimeout(1800);
     md = readMd();
-    ok(/^\[엄마\] 엄마의 말입니다\.\r?\n내레이션 문장입니다\.$/m.test(md), '대사를 고쳐도 .md 의 [엄마] 접두 · 다음 줄은 그대로');
-    ok(/엄마\s*엄마의 말입니다/.test(await R.innerText()), '화면에도 이름 + 고친 대사');
+    ok(/^\[엄마\] 엄마의 말입니다\.\r?\n내레이션 문장입니다\.$/m.test(md), '편집면 밖을 누르면 저장 — .md 의 [엄마] 접두 · 다음 줄 그대로');
+    ok(md.includes('SHOULD_NOT_APPEAR'), '지침 줄은 그대로 남는다');
+
+    // Esc = 저장 안 된 고침 되돌리기(창은 그대로)
+    await caret(0, 0);
+    await swap(0, '첫째', '이건저장되면안됨');
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(2000);
+    ok(!readMd().includes('이건저장되면안됨') && (await val(0)).startsWith('첫째'), 'Esc = 저장 안 된 고침 되돌리기');
+    ok(await R.count() === 1, 'Esc 한 번은 되돌리기만(창은 그대로)');
+    const fw = await R.locator('[data-testid="reader-fontpt"]').evaluate((el) => el.getBoundingClientRect().width);
+    ok(fw > 30 && fw < 90, `인쇄 글자(pt) 칸 폭이 적당하다 (${Math.round(fw)}px)`);
 
     // A4 PDF — 1쪽 / 4쪽 (main 을 직접 불러 쪽수·크기를 잰다. 파일은 열지 않는다)
     const { PDFDocument } = require(path.join(ROOT, 'node_modules', 'pdf-lib'));
