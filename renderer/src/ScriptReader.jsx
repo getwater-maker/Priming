@@ -18,6 +18,66 @@ function findPara(dto, shortsNum, groupNum, startI) {
   return sr.readerBlocks(pr, { headings: false }).find((b) => b.t === 'p' && b.groupNum === groupNum && b.sents.some((s) => s.i === startI)) || null;
 }
 
+// ── 편집면(contentEditable) — 화면 문단과 같은 모양에 **화자 이름은 고칠 수 없는 칩**으로 (v0.5.35) ──
+//   🔑 textarea 로는 화자 이름을 보여 줄 수 없다(글만 들어간다). 이름을 글에 섞으면 고친 글과 비교할 때 이름까지 문장으로 간다.
+//   그래서 이름은 contenteditable=false 칩으로 두고, 글을 읽을 때 칩을 건너뛴다(readValue). 칩의 뒤 공백도 칩 안에 둔다
+//   → 읽은 글 = 문장들을 공백 하나로 이은 글(joinParagraph)과 정확히 같다.
+//   ⚠ React 는 이 안을 다시 그리지 않는다(dangerouslySetInnerHTML 문자열을 세션 동안 고정) — 다시 그리면 커서·조합이 깨진다.
+const escHtml = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function paraHtml(sents) {
+  return sents.map((s, k) => (s.speaker ? `<b data-spk="1" contenteditable="false" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
+    + escHtml(s.text) + (k < sents.length - 1 ? ' ' : '')).join('');
+}
+const isChip = (n) => !!(n && n.nodeType === 1 && n.dataset && n.dataset.spk);
+function readValue(el) {
+  let out = '';
+  const walk = (n) => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) out += c.nodeValue.replace(/\u00a0/g, ' ');
+      else if (isChip(c)) continue;
+      else if (c.nodeName === 'BR') out += ' ';
+      else { if (/^(DIV|P)$/.test(c.nodeName) && out) out += ' '; walk(c); }
+    }
+  };
+  if (el) walk(el);
+  return out;
+}
+function placeCaret(el, pos) {
+  const sel = window.getSelection(), r = document.createRange();
+  let left = pos == null ? Infinity : pos, lastText = null;
+  const walk = (n) => {
+    for (const c of n.childNodes) {
+      if (isChip(c)) continue;
+      if (c.nodeType === 3) {
+        lastText = c;
+        if (left <= c.nodeValue.length) { r.setStart(c, left); return true; }
+        left -= c.nodeValue.length;
+      } else if (walk(c)) return true;
+    }
+    return false;
+  };
+  if (!walk(el)) { if (lastText) r.setStart(lastText, lastText.nodeValue.length); else r.selectNodeContents(el); }
+  r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+}
+// 커서 바로 앞(Backspace)/뒤(Delete)가 이름 칩인가 — 이름은 대본에서 따로 관리되므로 지우지 못하게 한다
+function chipAt(el, back) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  let n = sel.anchorNode, off = sel.anchorOffset;
+  if (n.nodeType === 3) {
+    if (back ? off > 0 : off < n.nodeValue.length) return false;
+    n = back ? n.previousSibling : n.nextSibling;
+  } else n = n.childNodes[back ? off - 1 : off];
+  return isChip(n);
+}
+// 칩이 섞인 선택을 지우면 이름이 사라진다 — 선택 안에 칩이 있는가
+function selHasChip(el) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return false;
+  const r = sel.getRangeAt(0);
+  return [...el.querySelectorAll('[data-spk]')].some((c) => r.intersectsNode(c));
+}
+
 export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log, presetName }) {
   const [fontPx, setFontPx] = useState(17);
   const [headings, setHeadings] = useState(true);
@@ -40,15 +100,13 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [edit, onClose]);
-  const fit = (el) => { if (!el) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
   useEffect(() => {
     const el = taRef.current;
     if (!edit || !el) return;
-    fit(el); el.focus();
-    const c = Math.max(0, Math.min(el.value.length, edit.caret == null ? el.value.length : edit.caret));
-    el.setSelectionRange(c, c);
+    el.readerValue = () => readValue(el);   // 테스트가 편집면의 글을 같은 규칙으로 읽는다
+    el.focus();
+    placeCaret(el, edit.caret);
   }, [edit && edit.key]);
-  useEffect(() => { fit(taRef.current); }, [fontPx]);
 
   // 누른 자리(글자)를 문단 글 안의 위치로 — 커서를 그 자리에 둔다
   function caretFromClick(e, b) {
@@ -73,7 +131,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     setMsg('');
     sessRef.current = {
       key, shortsNum: p.shortsNum, groupNum: b.groupNum, startI: b.sents[0].i, base: b.sents,
-      value: sr.joinParagraph(b.sents.map((s) => s.text)),
+      value: sr.joinParagraph(b.sents.map((s) => s.text)), html: paraHtml(b.sents),
       composing: false, saving: false, pending: false, timer: null, closing: false, cancelled: false,
     };
     setSaveSt('');
@@ -183,23 +241,32 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
                     return (
                       <div key={key} style={{ margin: '0 0 0.8em', display: 'flex', alignItems: 'flex-start' }}>
                         {gn}
-                        <textarea ref={taRef} data-testid="reader-edit" rows={1} spellCheck={false}
-                          defaultValue={sess ? sess.value : ''}
-                          title="이어서 고치세요 — 손을 멈추거나 다른 곳을 누르면 바뀐 문장만 대본(.md)에 저장됩니다 · Enter 저장 후 닫기 · Esc 저장 안 된 고침 취소"
-                          onInput={(e) => { fit(e.target); const ss = sessRef.current; if (!ss) return; ss.value = e.target.value; if (!ss.composing) schedule(ss); }}
+                        <p ref={taRef} data-testid="reader-edit" contentEditable suppressContentEditableWarning spellCheck={false}
+                          dangerouslySetInnerHTML={{ __html: sess ? sess.html : '' }}
+                          title="이어서 고치세요 — 손을 멈추거나 다른 곳을 누르면 바뀐 문장만 대본(.md)에 저장됩니다 · 화자 이름은 여기서 못 고칩니다(대본에서) · Enter 저장 후 닫기 · Esc 저장 안 된 고침 취소"
+                          onInput={(e) => { const ss = sessRef.current; if (!ss) return; ss.value = readValue(e.currentTarget); if (!ss.composing) schedule(ss); }}
                           onCompositionStart={() => { const ss = sessRef.current; if (ss) { ss.composing = true; clearTimeout(ss.timer); setSaveSt('dirty'); } }}
-                          onCompositionEnd={(e) => { const ss = sessRef.current; if (!ss) return; ss.composing = false; ss.value = e.target.value; schedule(ss); }}
+                          onCompositionEnd={(e) => { const ss = sessRef.current; if (!ss) return; ss.composing = false; ss.value = readValue(e.currentTarget); schedule(ss); }}
+                          onPaste={(e) => {   // 서식 없이 글만 — 붙여넣은 HTML 이 칩·구조를 흉내 내지 않게
+                            e.preventDefault();
+                            const t = (e.clipboardData.getData('text/plain') || '').replace(/\s*\r?\n\s*/g, ' ');
+                            if (t) document.execCommand('insertText', false, t);
+                          }}
                           onKeyDown={(e) => {
                             if (e.nativeEvent.isComposing || e.keyCode === 229) return;   // 한글 조합 중 Enter 는 조합을 끝내는 키다
                             if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
                             else if (e.key === 'Escape') {
                               e.preventDefault(); e.stopPropagation();
                               const ss = sessRef.current; if (ss) { ss.cancelled = true; clearTimeout(ss.timer); closeIf(ss); }
+                            } else if ((e.key === 'Backspace' || e.key === 'Delete') && (chipAt(e.currentTarget, e.key === 'Backspace') || selHasChip(e.currentTarget))) {
+                              e.preventDefault(); setMsg('ⓘ 화자 이름은 여기서 지우거나 고칠 수 없습니다 — 대본(.md)의 [이름] 을 고치세요.');
+                            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && selHasChip(e.currentTarget)) {
+                              e.preventDefault();   // 이름이 든 선택을 글자로 덮어쓰면 이름이 사라진다
                             }
                           }}
                           onFocus={() => { const ss = sessRef.current; if (ss) ss.closing = false; }}
                           onBlur={() => { const ss = sessRef.current; if (!ss || ss.cancelled) return; ss.closing = true; setTimeout(() => flush(ss), 0); }}
-                          style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', margin: 0, padding: '0 2px', border: 0, outline: '1px solid var(--accent)', borderRadius: 3, background: '#fffaf0', color: 'inherit', font: 'inherit', lineHeight: 'inherit', resize: 'none', overflow: 'hidden', wordBreak: 'keep-all' }} />
+                          style={{ flex: 1, minWidth: 0, margin: 0, padding: '0 2px', outline: '1px solid var(--accent)', borderRadius: 3, background: '#fffaf0', textAlign: 'left', whiteSpace: 'pre-wrap', cursor: 'text' }} />
                       </div>
                     );
                   }
