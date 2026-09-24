@@ -92,6 +92,16 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     }, [i, a, b]);
     ok((await val(0)) === '첫째 문장입니다. 둘째 문장입니다.', '문단 글 = 문장들을 이은 글');
 
+    // 🖼 첫 그룹에 그림을 붙여 둔다 — 문장을 고쳐도 그림이 남아야 한다(로이 2026-09-25)
+    const g1 = Number(await doc.locator('p[data-key]').first().getAttribute('data-g'));
+    const PNG = path.join(ROOT, 'whiteboard', 'assets', 'drawing-hand.png');
+    const pickFile = (fp) => app.evaluate(({ dialog }, fp) => { dialog.showOpenDialog = async () => (fp ? { canceled: false, filePaths: [fp] } : { canceled: true, filePaths: [] }); }, fp);
+    await pickFile(PNG);
+    await win.evaluate((g) => window.api.attachAsset({ shortsNum: 1, groupNum: g }), g1);
+    const cutOf = async () => { await pickFile(null); const d = await win.evaluate((g) => window.api.attachAsset({ shortsNum: 1, groupNum: g }), g1); return d.projects[0].cuts.find((c) => c.num === g1); };
+    ok(/drawing-hand\.png$/.test(String((await cutOf()).imagePath || '')), '(준비) 첫 그룹에 그림 첨부');
+    await win.waitForTimeout(300);
+
     // 🔑 한글 조합 — compositionstart 뒤로는 오래 기다려도 저장 안 함 → compositionend 뒤 멈추면 저장
     await caret(0, 12);
     await doc.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
@@ -103,6 +113,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     let md = readMd();
     ok(md.includes('두 번째로 바뀐 문장입니다.') && !md.includes('둘째 문장입니다.'), '조합이 끝나고 손을 멈추면 저장된다(.md 반영)');
     ok(/^첫째 문장입니다\.$/m.test(md), '🔑 안 고친 첫 문장은 대본의 자기 줄 그대로(다시 쓰지 않았다)');
+    { const c = await cutOf();
+      ok(/drawing-hand\.png$/.test(String(c.imagePath || '')) && !c.imageStale, '🔑 문장을 고쳐도 그 그룹 그림은 그대로(「새 이미지 필요」 아님)'); }
 
     // 실제 키보드로 이어서 쓰기(문단 끝에 커서 → 타이핑 → 멈춤)
     await caret(0, 9999);

@@ -23,7 +23,10 @@ ok(!F.sameGroupContent([], []), '빈 그룹은 안전하게 복원하지 않는�
 console.log('\n[2] 스냅샷·인라인 수정 보호');
 ok(/sameGroupContent\(sents, gs\.sentences \|\| \[\]\)/.test(main), '스냅샷 복원은 그룹 문장 내용까지 비교');
 ok(/g\.imageStale = true;[\s\S]{0,100}g\.imageCleared = true/.test(main), '바뀐 그룹은 새 이미지 대상으로 표시하고 캐시 복원 차단');
-ok(/g\.imagePath = null;[\s\S]{0,100}g\.imagePrompt = null;[\s\S]{0,140}g\.imageStale = true/.test(main), '인라인 문장 수정은 옛 이미지·프롬프트를 무효화');
+{ // 🖼 로이 2026-09-25: 앱 안 문장 수정은 이미지·프롬프트를 **유지**한다(새로 그릴지는 🔄 로 사람이 정한다)
+  const es = main.slice(main.indexOf("ipcMain.handle('edit-sentences'"), main.indexOf("ipcMain.handle('merge-group'"));
+  ok(es.length > 1000 && !/g\.imagePath = null|g\.imagePrompt = null|g\.imageStale = true|g\.imageCleared = true/.test(es), '인라인 문장 수정은 그룹 이미지·프롬프트를 지우지 않는다');
+}
 ok(/g\.imagePromptStale = !g\.imagePrompt/.test(main), '대본에 새 프롬프트가 있으면 stale 로 덮어쓰지 않는다');
 ok(/if \(g\.imageStale\) continue/.test(main), 'stale 그룹은 이미지 캐시 프리필 금지');
 ok(/if \(g\.imageStale\) return false/.test(main), 'stale 그룹은 기존 영상이 있어도 이미지 생성 대상');

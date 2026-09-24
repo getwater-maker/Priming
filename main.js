@@ -6072,17 +6072,10 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
 
-  // 이 그룹의 장면 내용도 달라졌다. 옛 이미지 참조와 프롬프트를 그대로 두면 상단 「이미지」가
-  // '이미 있음'으로 건너뛰거나, 같은 프롬프트 캐시를 다시 붙인다. 파일 자체는 지우지 않아 실패 시 수동 복구 가능하다.
-  try { if (g._imgCacheKey) require('./core/media-cache').del(g._imgCacheKey); } catch {}
-  g._imgCacheKey = null;
-  g.imagePath = null;
-  g.imagePrompt = null;
-  g.imageStatus = 'idle';
-  g.imageStale = true;
-  g.imagePromptStale = true;
-  g.imageCleared = true;
-  g._userImage = null;
+  // 🖼 **그룹 이미지·영상·프롬프트는 그대로 둔다**(로이 2026-09-25, v0.5.37).
+  //   예전(2026-09-19)엔 문장을 고치면 그 그룹 이미지·프롬프트를 비웠는데, 오타 하나에도 그림을 다시 만들어야 했다.
+  //   그림을 새로 만들지는 그룹의 🔄 로 사람이 정한다. ⚠ 앱 **밖에서** .md 를 고친 경우의 보호(overlaySnapshot 의
+  //   문장 비교 → imageStale)는 그대로다 — 여기서는 새 대본 해시를 심으므로 그 길을 타지 않는다.
 
   // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
   //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
@@ -6094,7 +6087,7 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
-    + ' · 이 그룹 이미지는 현재 대본 기준으로 새로 생성됩니다(🖼)');
+    + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
 
