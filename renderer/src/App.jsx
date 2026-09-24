@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
+import ytChapters from '../../core/yt-chapters.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
+import YtProgress from './YtProgress.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -230,75 +232,8 @@ function fmtMinSec(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h > 0 ? `${h}시간 ${m}분 ${sec}초` : `${m}분 ${sec}초`;
 }
-// ── 유튜브 설명글 타임스탬프(챕터) ─────────────────────────────────────────
-//  .vrew 타임라인은 문장 TTS 를 빈틈 없이 이어 붙인 것이므로(vrew-builder), 챕터 시작시각 =
-//  그 앞 그룹들의 TTS 길이 합. 챕터 단위는 **상위 H2 섹션**(cut.h2) — H3 단위로 잘게 쪼갠 그룹을
-//  다시 H2 로 묶는다. H2 가 없는 대본은 그룹 섹션명(phase)으로 폴백.
-function tsFmt(sec) {
-  const t = Math.max(0, Math.floor(Number(sec) || 0)); // 올림하면 챕터가 내용보다 뒤에서 시작한다 → 내림
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
-  const p2 = (n) => String(n).padStart(2, '0');
-  return h > 0 ? `${h}:${p2(m)}:${p2(s)}` : `${m}:${p2(s)}`;
-}
-// 섹션 제목의 제작 표기 꼬리 제거 — `— 0:00~0:30 · I2V 5샷` / `(0:30~3:50)` / ` ★`
-function tsCleanTitle(t) {
-  return String(t == null ? '' : t)
-    .replace(/\s*[—-]\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}.*$/, '')
-    .replace(/\s*\(\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}\s*\)\s*$/, '')
-    .replace(/\s*★/g, '')
-    .replace(/\s*[〔\[(][^〕\])]*(?:\d+\s*(?:샷|초|자|s)|I2V|콜드오픈|후킹)[^〕\])]*[〕\])]\s*$/, '') // 꼬리 제작메모 〔콜드오픈 · 5샷 · I2V〕
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-// 한 편(project) → 챕터 목록 [{start, dur, title}]
-function tsChaptersOf(pr) {
-  const cuts = (pr && pr.cuts) || [];
-  const useH2 = cuts.some((c) => c.h2 && String(c.h2).trim());
-  const out = [];
-  let t = 0, lastKey = '';
-  // 합친 그룹(⤒ · 「이미지: 이어서」)은 안쪽 문장에 챕터 표식(mark)을 품고 있다 → 그 문장에서 가른다.
-  const segsOf = (c) => {
-    const ss = c.sentences || [];
-    if (!ss.some((st) => st.mark)) return [{ h2: c.h2, phase: c.phase, dur: Number(c.groupDurationSec) || 0 }];
-    const segs = [{ h2: c.h2, phase: c.phase, dur: 0 }];
-    for (const st of ss) {
-      if (st.mark) segs.push({ h2: st.mark.h2, phase: st.mark.phase, dur: 0 });
-      segs[segs.length - 1].dur += Number(st.dur) || 0;
-    }
-    return segs;
-  };
-  for (const c of cuts) {
-    for (const sg of segsOf(c)) {
-      const key = tsCleanTitle(useH2 ? sg.h2 : sg.phase) || lastKey; // 제목 없는 그룹은 앞 챕터에 붙인다
-      const dur = sg.dur;
-      if (!out.length || key !== lastKey) out.push({ start: t, dur, title: key || '시작' });
-      else out[out.length - 1].dur += dur;
-      lastKey = key;
-      t += dur;
-    }
-  }
-  return out;
-}
-// dto → { text(붙여넣기용), total, warns[] }
-function tsBuild(dto) {
-  const projects = (dto && dto.projects) || [];
-  const lines = [], warns = [];
-  let total = 0, missing = 0, shortN = 0, chapN = 0;
-  for (const pr of projects) {
-    for (const c of (pr.cuts || [])) for (const st of (c.sentences || [])) if (!(Number(st.dur) > 0)) missing++;
-    const chs = tsChaptersOf(pr);
-    chapN += chs.length;
-    for (const ch of chs) {
-      if (ch.dur < 10) shortN++;
-      lines.push(`${tsFmt(ch.start)} ${ch.title}`);
-    }
-    total += chs.reduce((a, ch) => a + ch.dur, 0);
-  }
-  if (missing > 0) warns.push(`TTS 가 아직 없는 문장 ${missing}개 — 그만큼 시간이 실제보다 짧습니다. TTS 변환을 끝낸 뒤 다시 여세요.`);
-  if (chapN < 3) warns.push('챕터가 3개 미만입니다 — 유튜브는 챕터를 3개 이상일 때만 인식합니다.');
-  if (shortN > 0) warns.push(`10초 미만 챕터 ${shortN}개 — 유튜브가 목록 전체를 무시할 수 있습니다(각 챕터 10초 이상 필요).`);
-  return { text: lines.join('\n'), total, warns };
-}
+// ⏱ 유튜브 챕터(타임스탬프) 계산 = core/yt-chapters.js (⬆ 유튜브 업로드 설명글과 같은 함수)
+const { tsFmt, tsCleanTitle, tsChaptersOf, tsBuild } = ytChapters;
 function phaseBadge(p) {
   if (!p) return ['', '-'];
   return ['', p];   // 섹션 제목 그대로 (키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
@@ -466,6 +401,8 @@ export default function App() {
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlProg, setUrlProg] = useState(null);
+  const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
+  const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [mp4Prog, setMp4Prog] = useState(null);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
@@ -581,6 +518,7 @@ export default function App() {
     api.onLog((line) => logline(line, true));
     if (api.onUrldlProgress) api.onUrldlProgress((d) => { if (d) setUrlProg(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
+    if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
@@ -1520,12 +1458,15 @@ export default function App() {
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
       outUpload: p.outUpload || '',
+      // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
+      ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
       wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
     });
     setChTab('basic'); // 열 때마다 첫 탭부터
+    api.ytStatus().then((st) => { if (st) setYtSt(st); }).catch(() => {});
     setChOpen(true);
   }
   // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
@@ -1760,6 +1701,7 @@ export default function App() {
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
+      ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
         font: (ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font,
@@ -1800,6 +1742,28 @@ export default function App() {
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
   async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
   async function pickOutUpload() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outUpload: d })); }
+  // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
+  async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
+  async function ytImport() {
+    const r = await api.ytImportClient();
+    if (r && r.ok) setSettingsMsg(`✅ 연결 파일을 가져왔습니다 (프로젝트 ${r.projectId || '?'})${r.cleared ? ` — 다른 프로젝트라 기존 채널 연결 ${r.cleared}개를 지웠습니다. 다시 연결하세요.` : ' — 이제 「🔗 채널 연결」을 누르세요.'}`);
+    else if (r && !r.cancelled) setSettingsMsg(`❌ ${r.error}`);
+    ytLoad();
+  }
+  async function ytConnect() {
+    setSettingsMsg('⏳ 브라우저에서 구글 로그인 → 올릴 채널 선택 → 「확인되지 않은 앱」이면 고급 → Priming(으)로 이동 → 허용을 눌러 주세요 (5분 안에)');
+    const r = await api.ytConnect();
+    setSettingsMsg(r && r.ok ? `✅ 「${r.channel.title}」 연결됨 — ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 이 채널을 고르세요.` : `❌ ${(r && r.error) || '연결 실패'}`);
+    ytLoad();
+  }
+  async function ytDisconnect(c) {
+    if (!uiConfirm(`「${c.title}」 연결을 해제할까요?\n이 PC 에서 이 채널로 자동 업로드가 멈춥니다(다시 연결하면 됩니다).`)) return;
+    await api.ytDisconnect(c.id); ytLoad();
+  }
+  async function runYtUpload() {
+    try { const r = await api.ytUploadCurrent({ presetName }); if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)`); }
+    catch (e) { uiAlert(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+  }
   async function pickOutWhiteboard() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outWhiteboard: d })); }
   // 🎬 리모션 발음사전(.md 표) — 채널에 저장한다. 매번 손으로 고르면 언젠가 한 번 빠지고,
   //   사전 없이 합성된 것은 캐시 키가 달라 나중에 물릴 때 **그 강 전체가 재합성**된다.
@@ -2489,6 +2453,7 @@ export default function App() {
               {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
             </>); })()}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
+            {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}>⬆ 업로드</button>}
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </span>
           </>)}
@@ -2883,6 +2848,17 @@ export default function App() {
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
+                {/* ⬆ 유튜브 자동 업로드 — MP4 를 구운 뒤 이 채널에 **비공개**로 올린다(제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" title="🎬 유튜브 MP4 를 구우면 고른 채널에 비공개로 올립니다. 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>⬆ 자동 업로드</label>
+                    <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" disabled={!ch.ytChannelId} checked={!!ch.ytAuto && !!ch.ytChannelId} onChange={(e) => setCh({ ...ch, ytAuto: e.target.checked })} />
+                    <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value, ytAuto: !!e.target.value && (ch.ytChannelId ? !!ch.ytAuto : true) })}>
+                      <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 유튜브 채널 —' : '— 연결된 채널 없음 (⚙ 설정 → ▶ 유튜브) —'}</option>
+                      {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken ? ' (⚠ 다시 연결 필요)' : ''}</option>)}
+                      {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
+                    </select>
+                    <span className="meta" style={{ flex: '0 0 auto' }}>비공개</span></div>
+                )}
                 {/* 🎵 배경음악 — 내 음악 파일(또는 폴더)을 영상 전체에 낮게 깐다. .vrew 배경음 트랙 + 🎬 유튜브 MP4 · ✏ 화이트보드 MP4 에 섞인다.
                     폴더면 대본마다 그 안의 한 곡(같은 대본은 다시 만들어도 같은 곡). ⚠ 화이트보드 MP4 에는 아직 안 들어간다. */}
                 {ch.startMode !== 'remotion' && (
@@ -3065,8 +3041,8 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ 설정</h3>
             <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지·비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지·비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['yt', '▶ 유튜브'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'yt') ytLoad(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
 
@@ -3340,6 +3316,36 @@ export default function App() {
               })}
               <div className="meta">⚠ 여러 계정으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로 쓰세요.</div>
             </div>)}
+            {settingsTab === 'yt' && (<div>
+              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.6 }}>
+                🎬 유튜브 MP4 를 구우면 채널에 <b>비공개</b>로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
+                <b>공개·예약·썸네일·재생목록</b>은 Studio 에서 직접 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
+              </div>
+              {ytSt && !ytSt.available && <div className="meta" style={{ color: '#b03a3a', marginBottom: 8 }}>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</div>}
+              <div data-testid="yt-client" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                <div className="frow" style={{ alignItems: 'center' }}>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 연결 파일</label>
+                  <span className="meta" style={{ flex: 1 }}>{ytSt && ytSt.hasClient ? <>✅ 가져옴 · 프로젝트 <b>{ytSt.projectId || '?'}</b></> : <>구글 클라우드에서 받은 <b>client_secret_….json</b> 파일을 한 번만 고르세요(다운로드 폴더에 있습니다).</>}</span>
+                  <button className={ytSt && ytSt.hasClient ? 'ghost' : ''} style={{ flex: '0 0 auto' }} onClick={ytImport}>📥 파일 가져오기</button>
+                </div>
+              </div>
+              <div data-testid="yt-channels" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                <div className="frow" style={{ alignItems: 'center' }}>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널 연결</label>
+                  <span className="meta" style={{ flex: 1 }}>채널마다 한 번. 브라우저에서 로그인 → <b>올릴 채널 선택</b> → 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</span>
+                  <button style={{ flex: '0 0 auto' }} disabled={!ytSt || !ytSt.hasClient} onClick={ytConnect}>🔗 채널 연결</button>
+                </div>
+                {(!ytSt || !ytSt.channels || !ytSt.channels.length) && <div className="meta" style={{ marginTop: 6 }}>연결된 채널이 없습니다.</div>}
+                {((ytSt && ytSt.channels) || []).map((c) => (
+                  <div key={c.id} className="frow" style={{ alignItems: 'center', borderTop: '1px dashed var(--line)', paddingTop: 5, marginTop: 5 }}>
+                    <b style={{ flex: '0 0 auto' }}>▶ {c.title}</b>
+                    <span className="meta" style={{ flex: 1 }}>{c.handle ? `${c.handle} · ` : ''}{c.connectedAt ? `${c.connectedAt} 연결` : ''}{c.broken ? ' · ⚠ 연결이 끊겼습니다 — 다시 연결하세요' : ''}</span>
+                    <button className="ghost" style={{ flex: '0 0 auto' }} title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div className="meta" style={{ lineHeight: 1.6 }}>③ ⚙ 채널편집 → 📁 폴더 → <b>⬆ 자동 업로드</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</div>
+            </div>)}
             {settingsTab === 'tts' && (<div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
                 OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
@@ -3390,6 +3396,12 @@ export default function App() {
       )}
 
       {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
+      {ytProg && (
+        <YtProgress prog={ytProg}
+          onAbort={() => { api.ytAbort(); }}
+          onClose={() => setYtProg(null)}
+          openUrl={(u) => api.ytOpenUrl(u)} />
+      )}
       {mp4Prog && (
         <Mp4Progress prog={mp4Prog}
           onAbort={() => { abort(); }}

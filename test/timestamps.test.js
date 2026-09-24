@@ -9,10 +9,11 @@ const path = require('path');
 const assert = require('assert');
 
 // ── App.jsx 원문에서 타임스탬프 함수 4개를 뽑아 실행 ──────────────────────
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
+// ⚠ 2026-09-24 부터 정본은 core/yt-chapters.js(⬆ 유튜브 업로드와 공유). App.jsx 는 그걸 import 한다.
+const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'yt-chapters.js'), 'utf8');
 function pull(name) {
   const i = src.indexOf(`function ${name}(`);
-  assert.ok(i >= 0, `App.jsx 에 ${name} 없음`);
+  assert.ok(i >= 0, `core/yt-chapters.js 에 ${name} 없음`);
   // 함수 시작 '{' 부터 중괄호 균형으로 끝을 찾는다
   let j = src.indexOf('{', i), depth = 0, end = -1;
   for (let k = j; k < src.length; k++) {

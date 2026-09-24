@@ -89,7 +89,7 @@ const dto = P.toDTO(r);
 const c1 = dto.projects[0].cuts[0];
 ok(c1.sentences[2].mark && c1.sentences[2].mark.phase === '둘째 장면', 'DTO sentences[].mark');
 // 렌더러 원문에서 타임스탬프 함수를 뽑아 실행
-const APP = read('renderer/src/App.jsx');
+const APP = read('core/yt-chapters.js');   // 정본(App.jsx 가 import 한다 — 2026-09-24)
 const pick = (name) => { const i = APP.indexOf('function ' + name + '('); let d = 0, j = APP.indexOf('{', i); for (let k = j; k < APP.length; k++) { if (APP[k] === '{') d++; else if (APP[k] === '}') { d--; if (!d) return APP.slice(i, k + 1); } } return ''; };
 const tsChaptersOf = new Function(pick('tsFmt') + pick('tsCleanTitle') + pick('tsChaptersOf') + '; return tsChaptersOf;')();
 c1.sentences.forEach((s) => { s.dur = 5; }); c1.groupDurationSec = 20;
@@ -107,7 +107,8 @@ ok(/if \(_inDir\(f, mediaDir\)\)/.test(MAIN), '🔴 버리는 파일은 media-N 
 ok(/applyContinueMarkers\(proj\)/.test(read('core/parsers/longform-parser.js')), '파서가 표식을 적용한다');
 ok(/chapterMark: s\.chapterMark \|\| null/.test(MAIN) && /if \(ss\.chapterMark\) s\.chapterMark = ss\.chapterMark/.test(MAIN), '스냅샷에 챕터 표식 저장·복원(재시작해도 챕터 유지)');
 ok(/if \(ti === 0 && old\[0\]\.chapterMark\) s\.chapterMark = old\[0\]\.chapterMark/.test(MAIN), '문장 편집 뒤에도 표식이 첫 문장을 따라간다');
-ok(/onMerge=\{mergeGroup\}/.test(APP) && /c\.num > 1 && onMerge/.test(APP), '화면 ⤒ 버튼(첫 그룹엔 없음)');
+const APPJSX = read('renderer/src/App.jsx');   // (APP 는 챕터 정본 core/yt-chapters.js — 화면 단언은 App.jsx 로)
+ok(/onMerge=\{mergeGroup\}/.test(APPJSX) && /c\.num > 1 && onMerge/.test(APPJSX), '화면 ⤒ 버튼(첫 그룹엔 없음)');
 ok(/mark: s\.chapterMark \|\| null/.test(read('core/pipeline.js')), 'DTO 에 mark');
 ok(!/require\(['"]electron['"]\)/.test(read('core/group-merge.js')), 'core 는 Electron 을 모른다');
 

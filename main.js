@@ -2300,10 +2300,13 @@ function normOutTarget(v) { return OUT_TARGETS.has(String(v)) ? String(v) : 'vre
  * 🎬 .vrew → 유튜브 업로드용 MP4. 저장 폴더 = 채널의 「유튜브 업로드」(비우면 윈도우 다운로드 폴더).
  * 어떤 경우에도 던지지 않는다 — 실패해도 .vrew 는 이미 있으므로 Vrew 로 마무리할 수 있다.
  */
-async function renderUploadMp4(vrewPath, baseName, preset) {
+function uploadMp4Path(baseName, preset, vrewPath) {
+  const dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || (vrewPath ? path.dirname(vrewPath) : S.outRoot);
+  return path.join(dir, `${baseName}.mp4`);
+}
+async function renderUploadMp4(vrewPath, baseName, preset, pr = null) {
   const VR = require('./core/vrew-render');
-  const dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || path.dirname(vrewPath);
-  const outPath = path.join(dir, `${baseName}.mp4`);
+  const outPath = uploadMp4Path(baseName, preset, vrewPath);
   // 화면이 꺼지면 인코딩이 흔들릴 수 있어 작업 동안 절전을 막는다(TTS·이미지와 같은 규칙).
   // 📊 진행 패널(mp4-progress) — 조각마다 오므로 250ms 로 묶고, 단계가 바뀌면 즉시 보낸다.
   let _pt = 0, _pTimer = null, _pLast = null, _pPhase = '';
@@ -2325,8 +2328,143 @@ async function renderUploadMp4(vrewPath, baseName, preset) {
     log(`   ${(r.durationSec / 60).toFixed(1)}분 영상 · 렌더 ${_dur(r.renderSec)} (${r.speed.toFixed(1)}배속 · ${r.encoder === 'nvenc' ? 'NVENC' : 'CPU'}) · 읽기 ${t.read}s · 화면 ${t.video}s · 음성 ${t.audio}s`);
   } else if (r.cancelled) log('⏹ MP4 렌더 중단됨 — .vrew 는 남아 있습니다');
   else log(`✗ 유튜브 MP4 실패 — ${r.error} (.vrew 는 남아 있으니 Vrew 에서 내보내기 할 수 있습니다)`);
+  // ⬆ 채널에 「자동 업로드」가 켜져 있으면 비공개로 올린다 — **기다리지 않는다**(큐의 다음 대본이 멈추지 않게).
+  if (r.ok && pr) { try { maybeAutoUpload(pr, r.output || outPath, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
   return r;
 }
+
+// ── ⬆ 유튜브 비공개 업로드 (2026-09-24, v0.5.31) ─────────────────────────────
+//   로이: 비공개로 영상·제목·설명·AI 표시까지 → 나머지(공개·예약·썸네일·재생목록)는 Studio 에서 직접.
+//   업로드 전용 구글 프로젝트 「Priming Upload」(분석용 AdonaiRoy 와 분리). 엔진 = core/youtube-upload.js.
+//   🔑 제목·설명·태그의 정본은 아도나이로이 **패키징 파일**(core/yt-packaging.js). 설명 끝에 ⏱ 챕터를 붙인다.
+//   🔑 한 번에 하나씩(직렬) · 렌더와 병렬(네트워크만 쓴다) · 같은 파일은 두 번 올리지 않는다(youtube-uploads.json).
+let ytChain = Promise.resolve();
+let ytPending = 0;
+S.ytAbort = false;
+function ytSend(p) { try { win.webContents.send('yt-progress', p); } catch (_) {} }
+/** 한 편 → 업로드 메타(제목·설명·태그). 음성 길이로 챕터를 계산하므로 DTO 를 그 자리에서 만든다. */
+function ytMetaFor(pr) {
+  const dto = P.toDTO(S.parsed);
+  const dp = ((dto && dto.projects) || []).find((x) => x.shortsNum === pr.shortsNum) || null;
+  return require('./core/yt-packaging').buildUploadMeta({ scriptPath: S.scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr) });
+}
+/**
+ * 업로드 한 건을 줄에 세운다. 메타는 **지금** 계산해 붙인다 — 큐가 다음 대본으로 넘어가 S.parsed 가 바뀌어도
+ * 이 업로드는 자기 제목·설명을 들고 간다(전역 슬롯에 기대면 대본이 섞인다 — v0.2.76 계열).
+ */
+function enqueueYtUpload(job) {
+  ytPending++;
+  if (ytPending > 1) log(`⏳ 유튜브 업로드 대기 — 앞에 ${ytPending - 1}건 (${job.meta.title})`);
+  const run = ytChain.then(() => runYtUpload(job)).catch((e) => ({ ok: false, error: e.message })).finally(() => { ytPending--; });
+  ytChain = run;
+  return run;
+}
+async function runYtUpload({ file, channelId, meta }) {
+  const YT = require('./core/youtube-upload');
+  S.ytAbort = false;
+  const st = YT.status();
+  const ch = st.channels.find((c) => c.id === channelId);
+  const title = meta.title;
+  const base = { title, channel: ch ? ch.title : channelId, file };
+  if (!ch) {
+    const err = '이 채널이 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → ▶ 유튜브에서 「🔗 채널 연결」을 하세요.';
+    log(`✗ 유튜브 업로드 — ${err}`); ytSend({ ...base, phase: 'error', error: err, startedAt: Date.now(), endedAt: Date.now() });
+    return { ok: false, error: err };
+  }
+  log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · 비공개 · 제목 「${title}」`);
+  log(`   설명 ${meta.source === 'packaging' ? '패키징 파일' : '(패키징 없음)'} · 챕터 ${meta.chapters}개 · 태그 ${meta.tags.length}개 · AI 합성 표시 = 예`);
+  for (const n of (meta.notes || [])) log(`   ⓘ ${n}`);
+  let _pt = 0, _pTimer = null, _pLast = null, _pPhase = '';
+  const send = () => { _pTimer = null; _pt = Date.now(); ytSend(_pLast); };
+  let _logPct = 0;
+  const onProgress = (p) => {
+    _pLast = { ...base, ...p, queue: Math.max(0, ytPending - 1) };
+    const pct = p.total ? Math.floor((p.sent / p.total) * 100) : 0;
+    if (pct >= _logPct + 25 && pct < 100) { _logPct = pct - (pct % 25); log(`   ⬆ ${_logPct}% (${(p.sent / 1048576).toFixed(0)}/${(p.total / 1048576).toFixed(0)}MB)`); }
+    if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
+    if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
+  };
+  const r = await YT.uploadVideo({
+    channelId, file, title, description: meta.description, tags: meta.tags, synthetic: true,
+    log, onProgress, isAborted: () => !!S.ytAbort,
+  });
+  if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
+  if (r.ok) {
+    log(`✅ 유튜브 업로드 완료 — 비공개 · ${r.url} (${_dur(r.sec)})`);
+    log(`   공개·예약·썸네일·재생목록은 Studio 에서: ${r.studioUrl}`);
+  } else if (r.cancelled) {
+    ytSend({ ...(_pLast || base), phase: 'aborted', endedAt: Date.now() });
+  } else {
+    log(`✗ 유튜브 업로드 실패 — ${r.error}`);
+    ytSend({ ...(_pLast || base), phase: 'error', error: r.error, endedAt: Date.now() });
+  }
+  return r;
+}
+/** 렌더가 끝난 뒤 — 채널에 자동 업로드가 켜져 있을 때만. 이미 올린 파일이면 건너뛴다. */
+function maybeAutoUpload(pr, file, preset) {
+  if (!preset || !preset.ytAuto) return;
+  if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드'); return; }
+  const YT = require('./core/youtube-upload');
+  const done = YT.findUploaded(preset.ytChannelId, file);
+  if (done) { log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`); return; }
+  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr) });
+}
+ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
+// 📥 연결 파일 가져오기 — 사용자가 폴더에 복사할 필요 없다(앱이 받아 암호화 저장).
+ipcMain.handle('yt-import-client', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: '유튜브 연결 파일 고르기 (client_secret_….json)', properties: ['openFile'],
+    defaultPath: defaultDownloadDir() || undefined, filters: [{ name: '유튜브 연결 파일', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return { ok: false, cancelled: true };
+  const out = require('./core/youtube-upload').importClient(r.filePaths[0]);
+  if (out.ok) log(`📥 유튜브 연결 파일 가져옴 — 프로젝트 ${out.projectId || '?'}${out.cleared ? ` (다른 프로젝트라 기존 채널 연결 ${out.cleared}개를 지웠습니다 — 다시 연결하세요)` : ''}`);
+  else log(`✗ 유튜브 연결 파일 — ${out.error}`);
+  return out;
+});
+ipcMain.handle('yt-connect', async () => {
+  const r = await require('./core/youtube-upload').connectChannel({ openUrl: (u) => shell.openExternal(u), log });
+  if (!r.ok) log(`✗ 유튜브 채널 연결 — ${r.error}`);
+  try { if (win.isMinimized()) win.restore(); win.focus(); } catch (_) {}
+  return r;
+});
+ipcMain.handle('yt-disconnect', async (_e, id) => {
+  const r = await require('./core/youtube-upload').disconnect(id);
+  if (r.ok) log('🔌 유튜브 채널 연결 해제');
+  return r;
+});
+ipcMain.handle('yt-abort', () => { S.ytAbort = true; return true; });
+// Studio·영상 주소 열기 — 유튜브 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다).
+ipcMain.handle('yt-open-url', (_e, u) => {
+  const s = String(u || '');
+  if (!/^https:\/\/(studio\.youtube\.com|youtu\.be|www\.youtube\.com)\//.test(s)) return false;
+  shell.openExternal(s); return true;
+});
+// ⬆ 지금 대본의 MP4 를 올린다(자동 업로드를 끈 채널 · 실패 뒤 다시). MP4 는 이미 구워져 있어야 한다.
+ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const preset = resolvePreset(args.presetName);
+  const chId = preset && preset.ytChannelId;
+  if (!chId) throw new Error('이 채널에 올릴 유튜브 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → ⬆ 유튜브 채널에서 고르세요.');
+  const YT = require('./core/youtube-upload');
+  let n = 0;
+  for (const pr of S.parsed.projects) {
+    const baseName = vrewBaseName(pr);
+    const file = uploadMp4Path(baseName, preset, path.join(S.outRoot, `${baseName}.vrew`));
+    if (!fs.existsSync(file)) throw new Error(`MP4 가 없습니다 — ④ 완성을 「🎬 유튜브 MP4」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
+    const done = YT.findUploaded(chId, file);
+    if (done) {
+      const c = await dialog.showMessageBox(win, {
+        type: 'question', title: '이미 올린 영상', buttons: ['한 번 더 올리기', '취소'], defaultId: 1, cancelId: 1, noLink: true,
+        message: `이 파일은 ${done.at} 에 이미 올렸습니다.`, detail: `https://youtu.be/${done.videoId}\n\n한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다.`,
+      });
+      if (c.response !== 0) continue;
+    }
+    enqueueYtUpload({ file, channelId: chId, meta: ytMetaFor(pr) });
+    n++;
+  }
+  return { queued: n };
+});
 
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
 async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7 } = {}) {
@@ -2452,7 +2590,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
       if (mp4Go) {
-        const mr = await renderUploadMp4(vrewPath, baseName, preset);
+        const mr = await renderUploadMp4(vrewPath, baseName, preset, pr);
         if (mr.ok) { outs[outs.length - 1].mp4Path = mr.output; try { shell.openPath(mr.output); } catch (_) {} }
         else if (!mr.cancelled) shell.openPath(vrewPath); // 실패하면 Vrew 로 마무리할 수 있게
       } else shell.openPath(vrewPath); // 생성 즉시 Vrew로 열어 바로 렌더 가능
@@ -5229,7 +5367,7 @@ async function runMakeAllCore(opts = {}) {
         log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
         if (mp4Go) {
           // .vrew 를 입력으로 굽는다 — Vrew 가 받는 것과 같은 입력이라 렌더 규칙이 두 벌이 되지 않는다.
-          const mr = await renderUploadMp4(vrewPath, baseName, preset);
+          const mr = await renderUploadMp4(vrewPath, baseName, preset, pr);
           if (mr.ok) { if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
           else if (!mr.cancelled && openVrew) shell.openPath(vrewPath); // MP4 가 실패하면 Vrew 로 마무리할 수 있게
         } else if (openVrew) shell.openPath(vrewPath);
