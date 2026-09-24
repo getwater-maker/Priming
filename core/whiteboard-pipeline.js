@@ -335,7 +335,7 @@ async function runWhiteboard(project, outRoot, opts = {}) {
       log(`⚠ 음성을 얹지 못했습니다 — ${audio.error}. 「🎤 TTS」를 만든 뒤 다시 누르면 얹힙니다(장면 렌더는 건너뜁니다).`);
     } else {
       audio = await withAbort(isAborted, (sig) => deps.WA().attachAudio({
-        videoPath: output, scenes: scenesForAudio, tmpDir: wbDir, log, abortSignal: sig,
+        videoPath: output, scenes: scenesForAudio, tmpDir: wbDir, log, abortSignal: sig, bgm: opts.bgm || null,
       }));
       if (!audio.ok) log(`⚠ 음성 얹기 실패 — ${audio.error} (무음 MP4 는 그대로 남깁니다)`);
     }

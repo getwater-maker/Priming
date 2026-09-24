@@ -93,9 +93,10 @@ async function buildSceneAudio({ inputs, durationSec, outPath, tmpDir, abortSign
  * @param opts.scenes     [{ video, audios: string[] }] — 장면 순서대로
  * @param opts.tmpDir     중간 파일 폴더(whiteboard-N)
  * @param opts.log        로거
+ * @param opts.bgm        { file, volume, loop } — 🎵 배경음악(없으면 음성만). 유튜브 MP4 와 **같은 섞기**(vrew-render.bgmMixArgs)를 쓴다.
  * @returns {{ok:true, output}} | {{ok:false, error}}
  */
-async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSignal = null } = {}) {
+async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSignal = null, bgm = null } = {}) {
   if (!videoPath || !fs.existsSync(videoPath)) return { ok: false, error: '영상 파일이 없습니다' };
   if (!scenes || !scenes.length) return { ok: false, error: '장면이 없습니다' };
   const tmps = [];
@@ -125,17 +126,37 @@ async function attachAudio({ videoPath, scenes, tmpDir, log = () => {}, abortSig
     await _ff(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', full], abortSignal);
     tmps.push(full);
 
+    // 🎵 배경음악 — 음성 트랙에 섞는다. 🔑 유튜브 MP4 와 **같은 함수**(bgmMixArgs)를 쓴다 — 두 벌로 두면 음량·페이드가 갈린다.
+    //   ⚠ 실패해도 음성만으로 진행한다(배경음악 때문에 30분 렌더를 버리지 않는다).
+    let voiceTrack = full, bgmUsed = false;
+    if (bgm && bgm.file) {
+      if (!fs.existsSync(bgm.file)) log('⚠ 배경음악 파일이 없습니다 — ' + bgm.file + ' (음성만 얹습니다)');
+      else {
+        const total = durations.reduce((s, d) => s + d, 0);
+        const mixed = path.join(tmpDir, '_wa_bgm.wav');
+        try {
+          const R = require('./vrew-render');
+          await _ff(['-y', '-i', full, ...R.bgmMixArgs(bgm, total), '-ar', RATE, '-ac', '2', '-c:a', 'pcm_s16le', mixed], abortSignal);
+          tmps.push(mixed);
+          if (fs.existsSync(mixed)) { voiceTrack = mixed; bgmUsed = true; }
+        } catch (e) {
+          if (abortSignal && abortSignal.aborted) throw e;
+          log('⚠ 배경음악 섞기 실패 — ' + e.message + ' (음성만 얹습니다)');
+        }
+      }
+    }
+
     // mux — 영상은 **복사**(재인코딩 없음), 음성만 AAC.
     const muxed = path.join(tmpDir, '_wa_muxed.mp4');
-    await _ff(['-y', '-i', videoPath, '-i', full, '-map', '0:v:0', '-map', '1:a:0',
+    await _ff(['-y', '-i', videoPath, '-i', voiceTrack, '-map', '0:v:0', '-map', '1:a:0',
       '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', muxed], abortSignal);
     if (!fs.existsSync(muxed)) return { ok: false, error: '음성을 얹은 결과가 없습니다' };
     fs.rmSync(videoPath, { force: true });
     fs.renameSync(muxed, videoPath);
     let outDur = 0;
     try { outDur = (await MU.getMediaDuration(videoPath)) || 0; } catch (_) {}
-    log(`🔊 음성 얹기 완료 — 장면 ${scenes.length}개 · ${outDur ? outDur.toFixed(1) + '초' : '길이 미상'}`);
-    return { ok: true, output: videoPath, durationSec: outDur, durations };
+    log(`🔊 음성 얹기 완료 — 장면 ${scenes.length}개 · ${outDur ? outDur.toFixed(1) + '초' : '길이 미상'}${bgmUsed ? ' · 🎵 배경음악 포함' : ''}`);
+    return { ok: true, output: videoPath, durationSec: outDur, durations, bgm: bgmUsed };
   } catch (e) {
     return { ok: false, error: e.message };
   } finally {

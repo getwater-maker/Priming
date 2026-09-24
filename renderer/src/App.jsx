@@ -2883,10 +2883,10 @@ export default function App() {
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
-                {/* 🎵 배경음악 — 내 음악 파일(또는 폴더)을 영상 전체에 낮게 깐다. .vrew 배경음 트랙 + 🎬 유튜브 MP4 에 섞인다.
+                {/* 🎵 배경음악 — 내 음악 파일(또는 폴더)을 영상 전체에 낮게 깐다. .vrew 배경음 트랙 + 🎬 유튜브 MP4 · ✏ 화이트보드 MP4 에 섞인다.
                     폴더면 대본마다 그 안의 한 곡(같은 대본은 다시 만들어도 같은 곡). ⚠ 화이트보드 MP4 에는 아직 안 들어간다. */}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow" title="내 음악 파일을 영상 전체에 낮게 깝니다. 폴더를 고르면 대본마다 그 안의 한 곡이 정해집니다. 영상보다 짧으면 반복하고 앞뒤를 부드럽게 줄입니다."><label>🎵 배경음악</label>
+                  <div className="frow" title="내 음악 파일을 영상 전체에 낮게 깝니다. 폴더를 고르면 대본마다 그 안의 한 곡이 정해집니다. 영상보다 짧으면 반복하고 앞뒤를 부드럽게 줄입니다. .vrew · 유튜브 MP4 · 화이트보드 MP4 모두에 들어갑니다."><label>🎵 배경음악</label>
                     <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" checked={!!ch.bgmOn} onChange={(e) => setCh({ ...ch, bgmOn: e.target.checked })} />
                     <input readOnly placeholder="음악 파일 또는 폴더 — 비우면 배경음악 없음" title={ch.bgmPath || ''} value={ch.bgmPath || ''} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { const f = await api.pickFile({ filters: [{ name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'] }] }); if (f) setCh((c) => ({ ...c, bgmPath: f, bgmOn: true })); }}>파일</button>

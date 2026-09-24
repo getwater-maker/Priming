@@ -96,6 +96,34 @@ function meanDbSafe(mp4, ss, t) {
     ok(lateDb > -40, `🔑 곡(1.5초)이 끝난 뒤에도 소리가 난다 = 반복 (${lateDb} dB)`);
     ok(headDb < midDb - 3, `시작은 페이드인으로 작다 (${headDb} < ${midDb})`);
   } catch (e) { ok(false, '왕복 실패: ' + e.message); }
+
+  console.log('\n[5] ✏ 화이트보드 MP4 — attachAudio 에 배경음악');
+  try {
+    const WA = require('../core/whiteboard-audio');
+    const wdir = path.join(tmp, 'wb'); fs.mkdirSync(wdir);
+    const mkVid = (name, sec) => { const p = path.join(wdir, name); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=0xF5EBD7:s=320x180:r=30:d=${sec}`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', p]); return p; };
+    const silent = (name, sec) => { const p = path.join(wdir, name); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `anullsrc=r=24000:cl=mono`, '-t', String(sec), p]); return p; };
+    const s1 = mkVid('s1.mp4', 3), s2 = mkVid('s2.mp4', 3);
+    const song = tone('wbsong.mp3', 1.5, 330);
+    async function wb(name, bgm) {
+      const merged = path.join(wdir, name + '.mp4');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-i', s1, '-i', s2, '-filter_complex', '[0:v][1:v]concat=n=2:v=1[v]', '-map', '[v]', merged]);
+      const r = await WA.attachAudio({ videoPath: merged, tmpDir: wdir, bgm, log: () => {},
+        scenes: [{ video: s1, audios: [silent(name + 'a.wav', 3)] }, { video: s2, audios: [silent(name + 'b.wav', 3)] }] });
+      return { r, mp4: merged };
+    }
+    const off = await wb('wboff', null);
+    const on = await wb('wbon', { file: song, volume: 0.5, loop: true });
+    ok(off.r.ok && on.r.ok, '두 경우 모두 음성 얹기 성공');
+    ok(on.r.bgm === true && !off.r.bgm, '결과에 배경음악 여부가 남는다');
+    const offDb = meanDbSafe(off.mp4, 2, 1), midDb = meanDbSafe(on.mp4, 2, 1), lateDb = meanDbSafe(on.mp4, 4, 0.8);
+    console.log('   mean dB', JSON.stringify({ offDb, midDb, lateDb }));
+    ok(offDb < -80, 'BGM 없으면 무음 그대로');
+    ok(midDb > -40 && lateDb > -40, `🔑 화이트보드 MP4 에 BGM 이 섞이고 반복된다 (${midDb} / ${lateDb} dB)`);
+    const bad = await wb('wbbad', { file: path.join(tmp, 'gone.mp3'), volume: 0.5 });
+    ok(bad.r.ok && !bad.r.bgm, '곡 파일이 없어도 음성만으로 성공(막지 않는다)');
+    ok(/bgm: opts\.bgm/.test(read('core/whiteboard-pipeline.js')) && /bgm,\n\s+onProgress/.test(MAIN), '배선: main → pipeline → attachAudio');
+  } catch (e) { ok(false, '화이트보드 왕복 실패: ' + e.message); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} bgm ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);

@@ -2337,6 +2337,10 @@ async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, cap
   // 📁 완성물이 떨어질 곳 — 채널의 「화이트보드 출력」, 비어 있으면 **윈도우 다운로드 폴더**(로이 2026-09-16).
   //   그것도 못 구하면 작업 폴더에 그대로 둔다(작업이 막히면 안 된다).
   const finalDir = String((preset && preset.outWhiteboard) || '').trim() || defaultDownloadDir() || '';
+  // 🎵 배경음악 — 채널 설정(.vrew·유튜브 MP4 와 같은 resolveBgm). 화이트보드는 음성 트랙에 섞는다.
+  //   runMakeAllCore 가 이미 골라 뒀으면(preset.bgm) 그대로 쓴다 — 다시 고르면 로그가 두 번 찍힌다.
+  const _bg = (preset && preset.bgm) || resolveBgm(preset || {}, S.scriptPath, log).bgm;
+  const bgm = (_bg && _bg.enabled) ? { file: _bg.audioPath, volume: _bg.volume, loop: _bg.loop } : null;
   try {
     return await _runOnLanes(['whiteboard'], `${prLabel(pr)} 화이트보드 렌더`, () => WP.runWhiteboard(pr, outRoot, {
       log, isAborted: () => S.abort, baseName: vrewBaseName(pr),
@@ -2344,6 +2348,7 @@ async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, cap
       // 💬 자막 — .srt 는 언제나 내고, 굽기는 ⚙ 스위치를, 모양(글자·위치·폰트)은 **채널 설정**을 따른다.
       captionMaxChars, burnSubtitle: cfg.subtitle !== false,
       subtitleStyle: (preset && preset.wbSub) || null,
+      bgm,
       onProgress: () => pushDtoUpdate(),
     }));
   } catch (e) { return { ok: false, error: e.message }; }
