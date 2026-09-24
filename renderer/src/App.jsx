@@ -2339,6 +2339,10 @@ export default function App() {
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
               </span>
             )}
+            {/* 🆕 초기화 — 첫 줄 끝에서 남은 폭을 꽉 채운다(로이 2026-09-24: 눈에 잘 띄게). 출판은 위 원고 버튼 줄에 따로 있다. */}
+            {!isBk && (
+              <button className="reset-wide" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
+            )}
           </div>
         </div>
         {/* 제작 파이프라인 — ①대본·음성 → ②이미지 → ③비디오 → ④완성 을 **세로로** 쌓고(왼쪽 정렬),
@@ -2362,10 +2366,9 @@ export default function App() {
                 근거: ~/.priming-maker/saves 가 0개 = 한 번도 쓴 적이 없다. 작업물은 자동저장이 늘 이어받는다
                 (대본마다 projects/<대본>.smproj.json + 큐 구성 workspace.json → 대본을 다시 열면 그대로 이어짐).
                 ⚠ 기능은 그대로다 — IPC 5개와 렌더러 함수 5개 무수정. 되살리려면 옛 hgroup 블록을 되돌리면 된다. */}
-            <button className="ghost" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
-            {/* 대본 + 음성을 **한 섹션으로** 합쳤다 (로이 2026-09-16) — 대본을 열고 바로 음성을 만드는 한 호흡이다.
+            {/* 🆕 초기화는 상단 첫 줄 끝으로 옮겼다(로이 2026-09-24 — 눈에 잘 띄게, 남은 폭을 꽉 채워서).
+                대본 + 음성을 **한 섹션으로** 합쳤다 (로이 2026-09-16) — 대본을 열고 바로 음성을 만드는 한 호흡이다.
                 그래서 이미지·비디오·완성의 번호가 다시 한 칸씩 당겨졌다(②③④). */}
-            <span className="hdiv" />
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}>🎤 TTS</button>
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>

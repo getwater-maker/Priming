@@ -11,7 +11,10 @@ header{background:var(--bg);border-bottom:1px solid var(--line);padding:8px 16px
   display:flex;flex-direction:column;gap:6px}
 .hrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:space-between}
 /* 2×2 헤더 — 좌(1·3영역) 왼쪽정렬 / 우(2·4영역) 오른쪽정렬 */
-.hleft{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hleft{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 auto;min-width:0}
+/* 🆕 초기화 — 상단 첫 줄 끝에서 남은 폭을 꽉 채운다(로이 2026-09-24: 눈에 잘 띄게) */
+.reset-wide{flex:1 1 0;min-width:96px;white-space:nowrap;font-size:14px;font-weight:800;padding:7px 14px;background:var(--danger);border-color:var(--danger);color:#fff}
+.reset-wide:hover{background:#c96a6a;border-color:#c96a6a;color:#fff}
 .hright{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .hrow.r2{justify-content:flex-end}
 /* 생성행 — 가운데(TTS·이미지·비디오) 정렬 + 오른쪽(제작 액션). 좌우 1fr 가 같아 중앙 묶음이 항상 중앙. */
