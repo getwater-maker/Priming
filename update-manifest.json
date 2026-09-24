@@ -2,7 +2,6 @@
   "version": "0.5.34",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
-    "1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
     "anti-detect.js": "7659e0d0d6df942897721bae20d64737fd53a2e9",
     "assets/fonts/Pretendard-Bold.ttf": "0fc2ddb83e7ce4cdf6d4ab00ba2c3d87126a2e73",
