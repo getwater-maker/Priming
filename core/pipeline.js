@@ -482,6 +482,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = preset.aiNotice;
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
+    if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
   }
   return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
 }

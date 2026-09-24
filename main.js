@@ -46,6 +46,30 @@ function resolveAiNotice(preset, want) {
   return { ...preset, aiNotice: { ...base, enabled: !!want, startMode: 'seconds', startSeconds: 5, durationSeconds: 5 } };
 }
 
+// 🎵 배경음악 — 채널 설정(bgmOn · bgmPath = 파일 또는 폴더 · bgmVolume %)으로 이 편의 곡을 고른다(2026-09-24).
+//   폴더면 **대본 이름으로 정해지는 한 곡**(같은 대본은 다시 만들어도 같은 곡 · 편마다 곡이 돌아간다).
+//   ⚠ 파일이 없으면 막지 않는다 — 로그로 알리고 BGM 없이 만든다(음악 때문에 영상이 안 나오면 본말전도).
+const BGM_EXT = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
+function pickBgmFile(p, key) {
+  try {
+    if (!p || !fs.existsSync(p)) return null;
+    if (fs.statSync(p).isFile()) return BGM_EXT.test(p) ? p : null;
+    const list = fs.readdirSync(p).filter((f) => BGM_EXT.test(f)).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
+    if (!list.length) return null;
+    let h = 0; for (const ch of String(key || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return path.join(p, list[h % list.length]);
+  } catch { return null; }
+}
+function resolveBgm(preset, scriptPath, logger) {
+  if (!preset) return preset;
+  if (!preset.bgmOn || !preset.bgmPath) return { ...preset, bgm: { enabled: false } };
+  const f = pickBgmFile(preset.bgmPath, path.basename(scriptPath || ''));
+  const vol = Math.max(0, Math.min(100, isFinite(+preset.bgmVolume) ? +preset.bgmVolume : 15)) / 100;
+  if (!f) { if (logger) logger(`⚠ 배경음악을 찾지 못했습니다 — ${preset.bgmPath} (음악 파일 mp3·wav·m4a·flac·ogg). 배경음악 없이 만듭니다`); return { ...preset, bgm: { enabled: false } }; }
+  if (logger) logger(`🎵 배경음악: ${path.basename(f)} · 음량 ${Math.round(vol * 100)}% · 반복`);
+  return { ...preset, bgm: { enabled: true, audioPath: f, volume: vol, loop: true } };
+}
+
 // 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요).
 //   ⚠️ bootstrap.js 가 라이트 업데이터를 await 한 뒤 main.js 를 require 하므로, 이 시점엔 app 이 이미
 //   ready 일 수 있다. ready 이후엔 registerSchemesAsPrivileged 가 예외를 던져 main.js 로딩이 거기서
@@ -2380,6 +2404,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
   preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
+  preset = resolveBgm(preset, S.scriptPath, log);   // 🎵 채널 배경음악
   const outs = [];
   const incomplete = [];
   const noTts = [];   // 음성 누락으로 건너뛴 편
@@ -5188,6 +5213,7 @@ async function runMakeAllCore(opts = {}) {
       let ep = preset;
       if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
       ep = resolveAiNotice(ep, aiNotice); // 사용자 선택(작업바 체크박스)
+      ep = resolveBgm(ep, S.scriptPath, log);   // 🎵 채널 배경음악
       const dirs = shortsDirs(outRoot, pr.shortsNum);
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);

@@ -206,7 +206,14 @@ function buildTimeline(project, mediaDir) {
     const ov = webOverlay(sp.track, sp.start, sp.end);
     if (ov) overlays.push(ov);
   }
-  return { segments, cues, audio, overlays, capStyle, totalSec: t };
+  // 🎵 배경음(type:'bgm' 트랙) — vrew-builder.addBgmTrack 이 만든 것. 전 구간에 깔린다.
+  let bgm = null;
+  const trs = (project.props && project.props.tracks) || {};
+  for (const k of Object.keys(trs)) {
+    const tr = trs[k];
+    if (tr && tr.type === 'bgm') { const f = fileOf(tr); if (f) bgm = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false }; break; }
+  }
+  return { segments, cues, audio, overlays, capStyle, bgm, totalSec: t };
 }
 
 // ── 색 ─────────────────────────────────────────────────────────────────────
@@ -521,6 +528,22 @@ async function concatAudioOnce(inputs, out, tmpDir, ctx) {
 }
 const it_dur = (it) => (it.dur > 0 ? it.dur : 0.001).toFixed(4);
 
+// 🎵 배경음 섞기 — 음성(입력 0) 아래에 곡(입력 1)을 깐다. 없으면 [] (지금까지와 같다).
+//   Vrew 와 같은 뜻으로: volume 은 선형 배율(0.15 = 15%) · loop 면 곡을 되풀이 · 앞뒤 페이드.
+//   🔑 amix normalize=0 — 켜 두면 입력 수로 나눠 **음성까지 절반으로 작아진다**.
+//   🔑 duration=first — 음성 길이에서 끝낸다(곡이 길어도 영상보다 길어지지 않는다).
+function bgmMixArgs(bgm, totalSec) {
+  if (!bgm || !bgm.file) return [];
+  const T = Math.max(1, +totalSec || 0);
+  const fadeIn = Math.min(2, T / 4), fadeOut = Math.min(3, T / 4);
+  const vol = Math.max(0, Math.min(2, isFinite(+bgm.volume) ? +bgm.volume : 0.15));
+  const b = `[1:a]aresample=${A_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${vol.toFixed(3)},`
+    + `atrim=0:${T.toFixed(3)},asetpts=N/SR/TB,afade=t=in:d=${fadeIn.toFixed(2)},afade=t=out:st=${(T - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(2)}[b]`;
+  return [...(bgm.loop !== false ? ['-stream_loop', '-1'] : []), '-i', bgm.file,
+    '-filter_complex', `${b};[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[v];[v][b]amix=inputs=2:duration=first:normalize=0[out]`,
+    '-map', '[out]'];
+}
+
 async function concatAudio(inputs, out, tmpDir, ctx, depth = 0) {
   if (inputs.length <= AUDIO_CHUNK) return concatAudioOnce(inputs, out, tmpDir, ctx);
   const parts = [];
@@ -603,8 +626,8 @@ async function renderVrewToMp4(opts = {}) {
       if (!tl.audio.some((a) => a.file)) return null;
       const wav = path.join(tmpDir, 'voice.wav');
       await concatAudio(tl.audio, wav, tmpDir, ctx);
-      await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', '-c:a', 'aac', '-b:a', '96k',
-        '-ar', String(A_RATE), '-ac', '2', 'voice.m4a'], { cwd: tmpDir, signal: ctx.children });
+      await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', ...bgmMixArgs(tl.bgm, tl.totalSec),
+        '-c:a', 'aac', '-b:a', '96k', '-ar', String(A_RATE), '-ac', '2', 'voice.m4a'], { cwd: tmpDir, signal: ctx.children });
       try { fs.unlinkSync(wav); } catch (_) {}
       st.audio = 'done'; emit();
       return path.join(tmpDir, 'voice.m4a');
@@ -685,6 +708,6 @@ async function renderVrewToMp4(opts = {}) {
 module.exports = {
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };

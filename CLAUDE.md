@@ -5,7 +5,29 @@
 ## 프로젝트 한 줄 요약
 **롱폼(16:9) 대본(.md) → TTS·이미지·(선택)비디오 → Vrew 4.0.1 .vrew 자동 생성** Electron 앱
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
-⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
+⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
+  (🎵 BGM 은 2026-09-24 v0.5.29 에 **내 음악 파일 방식**으로 되살렸다 — 맨 위 항목. ACE-Step 생성은 여전히 없다.)
+
+## 🎵 배경음악 — **내 음악 파일(또는 폴더)** 을 영상 전체에 (2026-09-24, v0.5.29)
+> 로이: "배경음악을 넣는 기능도 있으면 좋겠네." — 2026-08-22 ACE-Step 과 함께 지웠던 BGM 을 **사용자 음악 파일** 방식으로 되살렸다.
+- **채널편집 → 📁 폴더 → 🎵 배경음악**: 켜기 · 파일/폴더 · 음량 %(기본 15). 저장값 `bgmOn · bgmPath · bgmVolume`.
+  ⚠ 🎙 음성 탭에 두었더니 그 탭만 667~708px 로 커져 **탭마다 창 높이가 튀었다**(v0.5.13 계열) → 📁 폴더 탭으로 옮겼다(661 동일 실측).
+- **곡 고르기**(main `resolveBgm` · `pickBgmFile`): 파일이면 그 곡, **폴더면 대본 이름 해시로 한 곡** —
+  같은 대본은 다시 만들어도 같은 곡, 편마다 곡이 돌아간다. 곡이 없으면 **막지 않고** 로그로 알린 뒤 BGM 없이.
+  ⚡ 만들기 4단계 · export-vrew **두 경로 모두**(`resolveAiNotice` 바로 뒤). 로그 `🎵 배경음악: 곡 · 음량 15% · 반복`.
+- **.vrew**(`vrew-builder.addBgmTrack` 복원 — v0.1.77 에 수동 .vrew 로 확정한 형식): files[] `sourceFileType:'BGM'` ·
+  트랙 `type:'bgm'`(fade in/out · loop · sourceOut=곡 길이) · asset role sub · 🔑 **그 asset 을 전 clip 이 참조**(없으면 Vrew 가 안 튼다).
+- **유튜브 MP4**(`core/vrew-render.js`): `buildTimeline` 이 bgm 트랙을 찾아 `tl.bgm`, 음성 AAC 인코딩 때 `bgmMixArgs` 로 섞는다 —
+  `-stream_loop -1` · volume(선형, Vrew 와 같은 뜻) · 앞 2초/끝 3초 페이드 · 🔑 `amix normalize=0`(켜면 **음성까지 절반**) ·
+  `duration=first`(영상보다 길어지지 않게). BGM 이 없으면 인자 0개 = 지금까지와 똑같다.
+- 검증: `npm run test:bgm` **26/26** — 곡 고르기 원문 실행 10 · 섞기 인자 5 · 배선 4 ·
+  🔑 **실제 왕복**(무음 음성 + 1.5초 곡 → 진짜 빌더 .vrew → 진짜 렌더러 MP4 → volumedetect): 끔 −91dB · 중간 −30.6 ·
+  **곡이 끝난 뒤(반복) −30.6** · 시작 −51.7(페이드인) · .vrew 트랙·전 clip 링크·zip 곡 파일.
+  A/B: 섞기를 빼면 **3건 실패**(−91dB). 회귀: vrew-render 70 · vrew-audio 99 · caption-look 20 · speaker 36+E2E 8 · group-merge 47 ·
+  merge-assets 98 · whiteboard 184 · timestamps 53+E2E · script-edit 92+E2E 32 · reload 51 · caption 102 · tts 전량 · MP4 화면 E2E 19 ·
+  makeall 무음 E2E 18/18(첫 실행 2건은 로그 도착 타이밍 레이스 — 연속 3회 통과, v0.3.86 과 같은 현상).
+- ⚠ **화이트보드 MP4 에는 아직 안 들어간다**(별도 파이프라인 — whiteboard-audio). 필요하면 같은 `bgmMixArgs` 로 붙이면 된다.
+- ⏳ Vrew 실물 확인: 이 형식은 2026-07 에 확정했지만 그 뒤 Vrew 가 업데이트됐다 — 첫 편을 Vrew 에서 열어 BGM 이 들리는지 한 번 볼 것.
 
 ## 🎨 자막 모양 — 글자색·굵게·테두리·배경 상자 (2026-09-24, v0.5.28)
 > 로이: "자막위치 및 자막 형태를 변경하는 기능도 있어야겠다."

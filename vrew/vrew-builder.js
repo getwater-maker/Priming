@@ -610,6 +610,51 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
   return { errs, warns };
 }
 
+// ── 배경음(BGM) 트랙 — 영상 전체 길이에 걸쳐 나레이션 아래 낮은 볼륨으로 재생 ──
+//   ✅ 수동 BGM 삽입 .vrew 샘플 분석으로 확정한 형식(2026-07-04, v0.1.77) — 2026-08-22 ACE-Step 과 함께 지웠다가
+//   2026-09-24 **사용자 음악 파일** 방식으로 되살렸다(로이 「배경음악을 넣는 기능도 있으면 좋겠네」).
+//     - files[] 에 sourceFileType:'BGM' 파일 엔트리 (type AVMedia)
+//     - props.tracks[tid] 에 type:'bgm' 트랙 (fade in/out, loop, sourceOut=파일길이)
+//     - props.assets[aid] = { trackIds:[tid], role:'sub' }
+//     - ⚠ 그 aid 를 **모든 clip 의 assetIds** 에 추가 (트랙만 있고 asset 링크가 없으면 Vrew 가 BGM 을 안 튼다 — v0.1.73 사고)
+//   bgm = { audioPath, volume(0..1), loop }
+async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
+  if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
+  let fileDur = totalDurationSec, sr = 44100, chn = 2;
+  try {
+    const info = await require('../core/media-utils').getMediaInfo(bgm.audioPath);
+    if (info && info.durationSec) fileDur = info.durationSec;
+    if (info && info.sampleRate) sr = info.sampleRate;
+    if (info && info.channels) chn = info.channels;
+  } catch {}
+  const mid = uid();
+  const ext = (path.extname(bgm.audioPath) || '.mp3').replace(/^\./, '').toLowerCase();
+  const fn = `${mid}.${ext}`;
+  const bytes = fs.statSync(bgm.audioPath).size;
+  pj.files.push({
+    version: 1, mediaId: mid, sourceOrigin: 'USER',
+    fileSize: bytes, name: fn, type: 'AVMedia',
+    videoAudioMetaInfo: { duration: fileDur, audioInfo: { sampleRate: sr, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: chn } },
+    sourceFileType: 'BGM', fileLocation: 'IN_MEMORY',
+  });
+  mediaZip.push({ src: bgm.audioPath, name: fn });
+  const tid = sid();
+  const aid = uid();
+  const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
+  pj.props.tracks[tid] = {
+    trackId: tid, mediaId: mid, volume: vol,
+    fade: { in: true, out: true },
+    sourceIn: 0, sourceOut: fileDur,
+    loop: bgm.loop !== false, playbackRate: 1,
+    type: 'bgm',
+  };
+  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+  const clips = (pj.transcript && pj.transcript.clips) || [];
+  for (const c of clips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; c.assetIds.push(aid); }
+  log(`[Vrew] BGM 트랙 추가(type:bgm · 전 clip(${clips.length}) 링크): vol=${vol} loop=${bgm.loop !== false} 곡 ${fileDur.toFixed(0)}s · 영상 ${(+totalDurationSec || 0).toFixed(0)}s`);
+  return { mid, tid, aid };
+}
+
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const log = typeof opts.logger === 'function' ? opts.logger : () => {};
 
@@ -1104,6 +1149,16 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       addAiNoticeTrack(pj, opts.aiNotice, clipDurations, log, _frameRatio);
     } catch (e) {
       log(`[Vrew] AI 고지 자막 추가 실패: ${e.message}`);
+    }
+  }
+
+  // ---------- 2.55. 배경음(BGM) 트랙 — 전체 길이, 나레이션 아래 낮은 볼륨 ----------
+  if (opts.bgm && opts.bgm.enabled && opts.bgm.audioPath) {
+    try {
+      const _bgmTotal = clipDurations.reduce((a, d) => a + (d || 0), 0);
+      await addBgmTrack(pj, opts.bgm, _bgmTotal, mediaZip, log);
+    } catch (e) {
+      log(`[Vrew] BGM 트랙 추가 실패: ${e.message}`);
     }
   }
 

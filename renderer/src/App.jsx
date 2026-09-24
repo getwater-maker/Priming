@@ -1509,6 +1509,8 @@ export default function App() {
       capLong: mkCap(p.capLong, lf),
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
       ttsNormalize: p.ttsNormalize !== false,
+      // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
+      bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
@@ -1740,6 +1742,7 @@ export default function App() {
       presetPrompt: ch.presetPrompt || '',
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
+      bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
       cfgValue: numOr(ch.cfgValue, 2),
@@ -2879,6 +2882,16 @@ export default function App() {
                     <input placeholder="🎬 유튜브 MP4(④ 완성 → 🎬 유튜브 MP4)가 떨어질 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outUpload || ''}
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
+                )}
+                {/* 🎵 배경음악 — 내 음악 파일(또는 폴더)을 영상 전체에 낮게 깐다. .vrew 배경음 트랙 + 🎬 유튜브 MP4 에 섞인다.
+                    폴더면 대본마다 그 안의 한 곡(같은 대본은 다시 만들어도 같은 곡). ⚠ 화이트보드 MP4 에는 아직 안 들어간다. */}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" title="내 음악 파일을 영상 전체에 낮게 깝니다. 폴더를 고르면 대본마다 그 안의 한 곡이 정해집니다. 영상보다 짧으면 반복하고 앞뒤를 부드럽게 줄입니다."><label>🎵 배경음악</label>
+                    <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" checked={!!ch.bgmOn} onChange={(e) => setCh({ ...ch, bgmOn: e.target.checked })} />
+                    <input readOnly placeholder="음악 파일 또는 폴더 — 비우면 배경음악 없음" title={ch.bgmPath || ''} value={ch.bgmPath || ''} />
+                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { const f = await api.pickFile({ filters: [{ name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'] }] }); if (f) setCh((c) => ({ ...c, bgmPath: f, bgmOn: true })); }}>파일</button>
+                    <button className="ghost" style={{ flex: '0 0 auto' }} title="폴더 — 대본마다 그 안의 한 곡을 고릅니다" onClick={async () => { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, bgmPath: d, bgmOn: true })); }}>폴더</button>
+                    <input className="nbox" type="number" min="0" max="100" step="5" style={{ width: 52, flex: '0 0 auto' }} title="음량 % (기본 15)" disabled={!ch.bgmOn} value={ch.bgmVolume} onChange={(e) => setCh({ ...ch, bgmVolume: e.target.value })} /><span className="meta">%</span></div>
                 )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드 폴더</label>
