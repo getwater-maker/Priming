@@ -7,6 +7,28 @@
 + **출판(POD) PDF** 모드. 모드는 **롱폼/출판 둘뿐**이다(쇼츠·플리는 2026-08-22 제거 — 아래 항목).
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·BGM·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
 
+## 🎨 자막 모양 — 글자색·굵게·테두리·배경 상자 (2026-09-24, v0.5.28)
+> 로이: "자막위치 및 자막 형태를 변경하는 기능도 있어야겠다."
+- 🔑 **위치·크기·정렬은 이미 있었다**(⚙ 채널편집 → 📝 자막·분할: 크기·정렬·세로·위치·미세). 빠진 것은 **모양**이었다.
+- **📝 자막 탭에 세 줄**: 글자색 + 굵게 / 테두리(켜기·색·두께) / 배경 상자(켜기·색·불투명 %). 채널 `capLong` 에 함께 저장.
+  · `CAP_LOOK_DEFAULT` = **지금까지의 모양**(흰 글자 · 검정 테두리 6 · 배경 없음) → 안 건드린 채널은 결과가 그대로.
+  · `capLookOf`(정리·범위) · `capLookToStyle`(→ vrew-builder 필드, 배경은 rgba 한 값) 모듈 헬퍼 하나를 채널편집·헤더가 같이 쓴다.
+  · ⚠ `openChannelEditor` 의 mkCap 이 **`...capLookOf(saved)` 로 싣는다**(안 실으면 저장 때 기본값으로 덮인다 — v0.3.8 계열).
+  · 헤더 `capOverride()` 에 채널 모양이 실려 ⚡ 만들기의 captionStyle 로 간다(`setCapLook(capLookOf(cap))`).
+- **vrew-builder**: 원래 받던 fontColor·outlineColor·bold 에 **outline-on false · outline-width · `--textbox-color`** 추가.
+- 🔑 **배경 상자는 글자 폭 상자다** — Vrew 자막 컴포넌트(`vrew/dummy/uc-0010-simple-textbox.bin`)의 CSS 가
+  `.textarea { background-color: var(--textbox-color); width: fit-content; padding: 3px 0 1px }` 이다(화면 전폭 띠가 아니다).
+- **MP4 렌더러**(`core/vrew-render.js`): `--textbox-color` 를 읽어 **ASS 층을 둘로** — 층 0 = BorderStyle 3 상자(글자 투명),
+  층 1 = 글자, 오버레이는 층 2. 🔑 **같은 층이면 libass 가 동시 이벤트를 위아래로 밀어** 상자와 글자가 따로 논다.
+  여백 = 글자 크기 × 0.14(위 CSS padding 을 글자 크기에 비례해 옮긴 값 — Vrew 실물 대조는 아직).
+- 검증: `npm run test:caplook` **20/20** — 헬퍼 원문 실행 6 · 배선 5 · 렌더러 스타일 4 ·
+  🔑 **실제 왕복**(진짜 빌더로 .vrew → 진짜 렌더러로 MP4 → 자막 띠 화소): 기본 = 검정 15,489px·빨강 0 /
+  상자·초록 글자·테두리 끔 = 빨강 38,603 · 초록 8,383 · 검정 0 · 상자가 띠의 절반 미만(글자 폭). 프레임도 눈으로 확인.
+  회귀: vrew-render 70 · vrew-audio 99 · whiteboard-subtitle 76 · caption 102 · group-merge 47 · speaker 36+E2E 8(**탭 5개 661 동일**) ·
+  MP4 화면 E2E 19 · styles E2E 17 · **makeall 무음 E2E 18/18**.
+- ⚠ 화이트보드 MP4 자막은 **따로**다(🖼 제작 도구 → 💬 화이트보드 자막 — v0.5.13). 이번 모양은 .vrew·유튜브 MP4 자막.
+- ⏳ Vrew 실물 대조 미완: 배경 상자의 여백·모서리를 Vrew 가 그린 것과 나란히 비교하지 못했다(첫 편에서 보면 된다).
+
 ## 🎭 화자별 목소리 — 대본 줄 맨 앞 `[이름] 대사` (2026-09-24, v0.5.27)
 > 로이: 등장인물마다 다른 목소리로. 형식은 예시 3종 중 **`[이름] 대사`** 로 로이가 골랐다.
 - **파서**(`core/sentence-splitter.js` `SPEAKER_LINE_RE`): 줄 맨 앞 `[이름]` + 공백 + 대사일 때만 화자.

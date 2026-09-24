@@ -178,6 +178,32 @@ function ComfyEngineOptions({ cfg, kind = 'image', value = '' }) {
 }
 const CAP_POS_OPTIONS = [0.3, 0.15, 0, -0.15, -0.3]; // 상하위치 select 값 (capFine 으로 미세조정)
 // yOffset → {pos, fine} (가장 가까운 select 옵션 + 미세조정)
+// 🎨 자막 모양(2026-09-24 로이 「자막 형태를 변경하는 기능」) — 채널 capLong 에 함께 저장한다.
+//   기본값 = 지금까지의 모양(흰 글자 · 검정 테두리 6 · 배경 없음) → 안 건드린 채널은 결과가 그대로다.
+const CAP_LOOK_DEFAULT = { fontColor: '#ffffff', bold: false, outlineOn: true, outlineColor: '#000000', outlineWidth: 6, boxOn: false, boxColor: '#000000', boxOpacity: 60 };
+function capLookOf(c) {
+  const o = { ...CAP_LOOK_DEFAULT };
+  if (!c) return o;
+  const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || '')) ? String(v).toLowerCase() : d);
+  const num = (v, d, lo, hi) => { const n = Number(v); return isFinite(n) && v !== '' && v != null ? Math.max(lo, Math.min(hi, n)) : d; };
+  o.fontColor = hex(c.fontColor, o.fontColor);
+  o.bold = !!c.bold;
+  o.outlineOn = c.outlineOn !== false;
+  o.outlineColor = hex(c.outlineColor, o.outlineColor);
+  o.outlineWidth = num(c.outlineWidth, o.outlineWidth, 0, 20);
+  o.boxOn = !!c.boxOn;
+  o.boxColor = hex(c.boxColor, o.boxColor);
+  o.boxOpacity = num(c.boxOpacity, o.boxOpacity, 0, 100);
+  return o;
+}
+// 모양 → vrew-builder 의 captionStyle 필드(fontColor·bold·outline*·boxColor). 배경은 rgba 한 값으로.
+function capLookToStyle(c) {
+  const l = capLookOf(c);
+  const h = l.boxColor;
+  const rgba = 'rgba(' + parseInt(h.slice(1, 3), 16) + ', ' + parseInt(h.slice(3, 5), 16) + ', ' + parseInt(h.slice(5, 7), 16) + ', ' + (l.boxOpacity / 100) + ')';
+  return { fontColor: l.fontColor, bold: l.bold, outlineOn: l.outlineOn, outlineColor: l.outlineColor, outlineWidth: l.outlineWidth, boxColor: l.boxOn ? rgba : null };
+}
+
 function decomposeYOffset(yOffset) {
   let best = CAP_POS_OPTIONS[0];
   for (const o of CAP_POS_OPTIONS) if (Math.abs(o - yOffset) < Math.abs(best - yOffset)) best = o;
@@ -376,6 +402,7 @@ export default function App() {
 
   // 자막/음성 — 초기값은 롱폼 기준(주 사용 모드). 마운트 시 mode-profiles 로 재확정.
   const [capSize, setCapSize] = useState('100');
+  const [capLook, setCapLook] = useState(CAP_LOOK_DEFAULT);   // 🎨 자막 모양(채널 capLong 에서 읽는다)
   const [capPos, setCapPos] = useState('-0.15');
   const [capFine, setCapFine] = useState(10);
   const [capAlign, setCapAlign] = useState('start');
@@ -541,8 +568,8 @@ export default function App() {
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
-    return { size: capSize, yOffset: baseY + fine * 0.0025, align: capAlign, yAlign: capYAlign };
-  }, [capPos, capFine, capSize, capAlign, capYAlign]);
+    return { size: capSize, yOffset: baseY + fine * 0.0025, align: capAlign, yAlign: capYAlign, ...capLookToStyle(capLook) };
+  }, [capPos, capFine, capSize, capAlign, capYAlign, capLook]);
 
   // fromMain=true 면 main 이 보낸 줄 — 파일에는 이미 기록돼 있으므로 되보내지 않는다(중복 방지).
   const logline = useCallback((t, fromMain) => {
@@ -594,6 +621,7 @@ export default function App() {
         if (cap.yAlign) setCapYAlign(cap.yAlign);
         if (cap.yOffset != null) applyCaptionYOffset(cap.yOffset);
       } else { applyCaptionDefaults(prof); }
+      setCapLook(capLookOf(cap));   // 없으면 기본 모양(지금까지와 같다)
       const sp = p.speedLong;
       const st = p.styleLong;
       // 항목 복원 중이면 배속·스타일·AI고지는 항목별 저장값(applySettings)이 우선 — 프리셋 기본값으로 덮지 않음.
@@ -1455,6 +1483,7 @@ export default function App() {
         align: (saved && saved.align) || prof.captionAlign || 'center',
         yAlign: (saved && saved.yAlign) || prof.captionYAlign || 'middle',
         pos: d.pos, fine: d.fine,
+        ...capLookOf(saved),   // 🎨 모양 — ⚠ 안 실으면 저장할 때 기본값으로 덮인다
       };
     };
     const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
@@ -1695,7 +1724,7 @@ export default function App() {
   async function saveChannel() {
     if (!ch) return;
     const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d);
-    const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c) });
+    const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c), ...capLookOf(c) });
     const patch = {
       group: (ch.group || '').trim(),                     // 드롭다운 구분(그룹) — 같은 그룹끼리 묶고 ─── 그룹명 ─── 구분선
       engine: ch.engine || 'omnivoice',
@@ -1788,6 +1817,14 @@ export default function App() {
         <div className="crow tri"><span className="l">세로</span><select value={c.yAlign} onChange={(e) => set({ yAlign: e.target.value })}><option value="middle">가운데</option><option value="bottom">아래</option><option value="top">위</option></select>
           <span className="l">위치</span><select value={c.pos} onChange={(e) => set({ pos: e.target.value })}><option value="0.3">아래</option><option value="0.15">약간↓</option><option value="0">가운데</option><option value="-0.15">약간↑</option><option value="-0.3">위</option></select>
           <span className="l">미세</span><input className="n" type="number" value={c.fine} step="10" onChange={(e) => set({ fine: e.target.value })} /></div>
+        <div className="crow" title="자막 글자색 · 굵게(기본 폰트가 이미 굵은 글꼴이라 더 두꺼워집니다)"><span className="l">글자색</span><input type="color" style={{ flex: '0 0 42px', height: 24, padding: 0 }} value={capLookOf(c).fontColor} onChange={(e) => set({ fontColor: e.target.value })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={!!c.bold} onChange={(e) => set({ bold: e.target.checked })} /><span className="meta">굵게</span></label></div>
+        <div className="crow" title="글자 테두리 — 두께는 px(1080 화면 기준)"><span className="l">테두리</span><label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={c.outlineOn !== false} onChange={(e) => set({ outlineOn: e.target.checked })} /><span className="meta">켜기</span></label>
+          <input type="color" style={{ flex: '0 0 42px', height: 24, padding: 0 }} disabled={c.outlineOn === false} value={capLookOf(c).outlineColor} onChange={(e) => set({ outlineColor: e.target.value })} />
+          <span className="l">두께</span><input className="n" type="number" min="0" max="20" disabled={c.outlineOn === false} value={capLookOf(c).outlineWidth} onChange={(e) => set({ outlineWidth: e.target.value })} /></div>
+        <div className="crow" title="글자 뒤 배경 상자 — 글자 폭에 맞춰 그려집니다(Vrew 자막 상자와 같은 방식)"><span className="l">배경</span><label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={!!c.boxOn} onChange={(e) => set({ boxOn: e.target.checked })} /><span className="meta">상자</span></label>
+          <input type="color" style={{ flex: '0 0 42px', height: 24, padding: 0 }} disabled={!c.boxOn} value={capLookOf(c).boxColor} onChange={(e) => set({ boxColor: e.target.value })} />
+          <span className="l">불투명</span><input className="n" type="number" min="0" max="100" step="10" disabled={!c.boxOn} value={capLookOf(c).boxOpacity} onChange={(e) => set({ boxOpacity: e.target.value })} /><span className="meta">%</span></div>
         {withSplit && (
           <>
             <div className="crow" style={{ borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span className="l" style={{ color: 'var(--hook)' }}>✂ 분할</span><span className="meta">대본 분할 기준</span></div>

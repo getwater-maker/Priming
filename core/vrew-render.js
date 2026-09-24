@@ -254,6 +254,11 @@ function captionAssStyle(capStyle, fontName) {
   else if (yAlign === 'top') { align = ALIGN_TOP[hAlign]; marginV = Math.round(CAP_BOTTOM_BASE + yOff * HALF_H); }
   else { align = ALIGN_MIDDLE[hAlign]; marginV = 0; }
   const outlineOn = String(at['outline-on'] ?? 'true') !== 'false';
+  // 🎨 배경 상자(--textbox-color) — Vrew 는 .textarea 에 background + width: fit-content 로 그린다(글자 폭 상자).
+  //   투명(알파 0)이면 없음. 여백은 그 CSS 의 padding(가로 5px·세로 약 2px @ 25px 글꼴)을 글자 크기에 비례해 옮긴다.
+  const boxRaw = (ca.find((x) => x.attributeName === '--textbox-color') || {}).value;
+  const boxAss = assColor(boxRaw, null);
+  const boxOn = !!boxAss && boxAss.slice(2, 4) !== 'FF';
   const calibrated = yAlign === 'bottom' && hAlign === 'start' && Math.abs(yOff + 0.125) < 1e-6
     && Math.abs(width - 0.96) < 1e-6 && Math.abs(xOff) < 1e-6;
   return {
@@ -265,6 +270,8 @@ function captionAssStyle(capStyle, fontName) {
     bold: /_(6|7|8|9)00$|bold/i.test(String(at.font || 'Pretendard-Vrew_700')) || !!at.bold,
     align, marginL, marginR, marginV, calibrated,
     yAlign, hAlign,
+    box: boxOn ? boxAss : null,
+    boxPad: Math.max(2, Math.round(size * 0.14)),
   };
 }
 
@@ -319,6 +326,8 @@ function buildAss(cues, overlays, cs) {
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     `Style: C,${cs.font},${cs.size},${cs.color},${cs.color},${cs.outlineColor},&H00000000,${b},0,0,0,100,100,0,0,1,${cs.outline},0,${cs.align},${cs.marginL},${cs.marginR},${cs.marginV},1`,
+    // 배경 상자 전용 스타일 — BorderStyle 3(불투명 상자, 색 = OutlineColour) · 글자는 완전 투명. 글자는 위 층(C)이 그린다.
+    ...(cs.box ? [`Style: B,${cs.font},${cs.size},&HFF000000,&HFF000000,${cs.box},&HFF000000,${b},0,0,0,100,100,0,0,3,${cs.boxPad},0,${cs.align},${cs.marginL},${cs.marginR},${cs.marginV},1`] : []),
     `Style: N,${cs.font},54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,7,0,0,0,1`,
     '', '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -326,7 +335,9 @@ function buildAss(cues, overlays, cs) {
   const ev = [];
   for (const c of cues) {
     if (!c.text || !(c.end > c.start)) continue;
-    ev.push(`Dialogue: 0,${fmtAss(c.start)},${fmtAss(c.end)},C,,0,0,0,,${assEsc(c.text)}`);
+    // 🔑 층을 나눈다 — 같은 층의 동시 이벤트는 libass 가 겹치지 않게 **위아래로 밀어 버린다**(상자와 글자가 따로 놀게 된다).
+    if (cs.box) ev.push(`Dialogue: 0,${fmtAss(c.start)},${fmtAss(c.end)},B,,0,0,0,,${assEsc(c.text)}`);
+    ev.push(`Dialogue: 1,${fmtAss(c.start)},${fmtAss(c.end)},C,,0,0,0,,${assEsc(c.text)}`);
   }
   const bgr = (c) => `&H${String(c).replace(/^&H/, '').slice(-6)}&`;   // '&HAABBGGRR' → '&HBBGGRR&'
   for (const o of overlays) {
@@ -345,7 +356,7 @@ function buildAss(cues, overlays, cs) {
         }
       }
     }
-    ev.push(`Dialogue: 1,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
+    ev.push(`Dialogue: 2,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
   }
   return head.join('\n') + '\n' + ev.join('\n') + '\n';
 }

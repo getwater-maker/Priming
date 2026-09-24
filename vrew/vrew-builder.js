@@ -682,6 +682,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     ...(resolvedSize          ? { size: String(resolvedSize) }                 : {}),
     ...(_userCap.fontColor    ? { color: _userCap.fontColor }                  : {}),
     ...(_userCap.outlineColor ? { 'outline-color': _userCap.outlineColor }     : {}),
+    ...(_userCap.outlineOn === false ? { 'outline-on': 'false' }             : {}),
+    ...(_userCap.outlineWidth != null && isFinite(+_userCap.outlineWidth) ? { 'outline-width': String(Math.max(0, Math.round(+_userCap.outlineWidth))) } : {}),
     ...(_userCap.bold         ? { bold: true }                                 : {}),
     ...(_userCap.italic       ? { italic: true }                               : {}),
   };
@@ -696,6 +698,11 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     customAttributes: CAPTION_STYLE.customAttributes.map(a => {
       if (a.attributeName === '--textbox-align' && resolvedAlign) {
         return { ...a, value: resolvedAlign };
+      }
+      // 🎨 배경 상자 — uc-0010-simple-textbox 의 .textarea 가 `background-color: var(--textbox-color); width: fit-content`
+      //   (vrew/dummy/uc-0010-simple-textbox.bin) → 글자 폭에 맞는 상자. 기본은 투명.
+      if (a.attributeName === '--textbox-color' && _userCap.boxColor) {
+        return { ...a, value: String(_userCap.boxColor) };
       }
       return { ...a };
     }),
