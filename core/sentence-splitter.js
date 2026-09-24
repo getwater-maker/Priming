@@ -28,6 +28,13 @@ const MARKDOWN_HEADER_LINE = /^\s{0,3}#{1,6}\s.*$/gm;
 // 대괄호 섹션 마커: 줄 전체가 [텍스트] 인 경우만 인식 (인라인 제외)
 const BRACKET_SECTION_RE = /^\s*\[([^\]]+?)\]\s*$/;
 
+// 화자 표기: 줄 맨 앞 `[이름] 대사` — 그 줄의 문장을 채널이 그 이름에 연결한 목소리로 읽는다(2026-09-24).
+//   🔑 대괄호**만** 있는 줄은 지금처럼 섹션이다(BRACKET_SECTION_RE). 뒤에 공백 + 대사가 있어야 화자다.
+//   🔑 이름은 한글·영문(공백·가운뎃점 허용, 12자) — 숫자·콜론을 막아 `[1] 도입`·`[카테고리]: …` 같은 메모를 화자로 오인하지 않는다.
+//   🔑 **그 줄에만** 적용한다 — 다음 줄 내레이션을 빈 줄 없이 이어 써도 화자가 새지 않게. 한 대사는 한 줄에.
+//   ⚠ 2026-09-24 실측: 채널 대본 폴더의 .md 에 이 모양 줄은 0개(레거시 무영향).
+const SPEAKER_LINE_RE = /^\s*\[([가-힣A-Za-z][가-힣A-Za-z ·]{0,11})\]\s+(\S.*)$/;
+
 // TTS 가 발음 어색한 특수문자 제거 — 일반 문장기호는 보존, 이모지/기호 제거.
 //   - 이모지 (다양한 유니코드 블록)
 //   - 화살표·도형·기호 (★ ※ § © ® ™ ♬ ♪ ◆ ▶ → 등)
@@ -239,6 +246,8 @@ function splitHybrid(text) {
     const vidM = line.match(PROMPT_VID_RE);
     if (vidM) { cur.videoPrompt = vidM[1].trim(); continue; }
     if (BLOCKQUOTE_TEST.test(line)) continue;   // 그 외 '>' 줄 = 일반 지침 주석 → 제외
+    const spkM = line.match(SPEAKER_LINE_RE);
+    if (spkM) { cur.lines.push({ speaker: spkM[1].trim(), text: spkM[2] }); continue; }
     const bracketM = line.match(BRACKET_SECTION_RE);
     const headerM = line.match(HEADER_LINE_CAPTURE);
     if (bracketM) {
@@ -260,11 +269,20 @@ function splitHybrid(text) {
   let hasBrackets = false;
   let hasMdIntro = false;
   for (const blk of blocks) {
-    const sents = _paragraphsToSentences(blk.lines.join('\n'));
+    // 화자 줄은 앞뒤 문단과 섞지 않고 따로 문장화한다(같은 문단으로 이어 붙이면 내레이션과 한 문장이 된다).
+    const sents = [];   // [{ t, speaker }]
+    let buf = [];
+    const flushBuf = () => { for (const t of _paragraphsToSentences(buf.join('\n'))) sents.push({ t, speaker: null }); buf = []; };
+    for (const ln of blk.lines) {
+      if (ln && typeof ln === 'object') { flushBuf(); for (const t of _paragraphsToSentences(ln.text)) sents.push({ t, speaker: ln.speaker }); }
+      else buf.push(ln);
+    }
+    flushBuf();
     if (sents.length === 0) continue;   // 본문 없는 블록(헤더/프롬프트만)은 그룹 생성 X
-    sents.forEach((t, i) => {
+    sents.forEach(({ t, speaker }, i) => {
       items.push({
         text: t,
+        speaker,
         mode: blk.mode,
         isIntro: blk.isIntro,
         sectionTitle: blk.sectionTitle,
@@ -291,6 +309,7 @@ const MATCH_PATTERNS = {
   headerLine: HEADER_LINE_CAPTURE,    // 마크다운 헤더 줄 (문장 아님)
   bracketLine: BRACKET_SECTION_RE,    // [섹션] 줄 (문장 아님)
   blockquote: BLOCKQUOTE_TEST,        // '>' 줄 = 지침·프롬프트 (문장 아님)
+  speakerLine: SPEAKER_LINE_RE,       // [이름] 대사 줄 (접두 [이름] 은 문장 아님)
 };
 
 module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS };

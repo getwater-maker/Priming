@@ -1473,6 +1473,9 @@ export default function App() {
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
+      // 🎭 화자별 목소리 [{name, voice}] — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
+      speakers: Array.isArray(p.speakers) ? p.speakers.map((r) => ({ name: r.name || '', voice: r.voice || '' }))
+        : (p.speakers && typeof p.speakers === 'object' ? Object.keys(p.speakers).map((k) => ({ name: k, voice: p.speakers[k] })) : []),
       cfgValue: p.cfgValue != null ? p.cfgValue : 2,
       capLong: mkCap(p.capLong, lf),
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
@@ -1708,6 +1711,8 @@ export default function App() {
       presetPrompt: ch.presetPrompt || '',
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
+      // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
+      speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
       cfgValue: numOr(ch.cfgValue, 2),
       // 캡션/배속/스타일/출력 — ⚠ 옛 쇼츠 필드(capShort·speedShort·styleShort·outShort)는 patch 에서 빼기만 한다.
       //   preset-store.update 가 {...old,...patch} 병합이라 기존 저장값은 파일에 무해하게 남는다(마이그레이션 삭제 금지 — v0.3.8 계열).
@@ -2686,6 +2691,24 @@ export default function App() {
                 <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
                   <span className="mini" title="문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.">문장무음</span><input className="nbox" type="number" step="0.1" min="0" max="5" title="0 = 사용 안 함. 권장 0.5~1.5초." value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
 
+                <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
+                <div style={{ maxHeight: 92, overflowY: 'auto' }}>
+                  {(ch.speakers || []).map((r, i) => (
+                    <div className="crow" key={i} style={{ gap: 6 }}>
+                      <input style={{ flex: '0 0 90px', width: 90 }} placeholder="이름" value={r.name}
+                        onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], name: e.target.value }; setCh({ ...ch, speakers: a }); }} />
+                      <select style={{ flex: 1, padding: 4 }} value={r.voice}
+                        onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], voice: e.target.value }; setCh({ ...ch, speakers: a }); }}>
+                        {!r.voice ? <option value="">— 목소리 선택 —</option> : null}
+                        {r.voice && chRefList.every((x) => x.path !== r.voice) ? <option value={r.voice}>{refLabel(r.voice)}</option> : null}
+                        {chRefList.map((x) => <option key={x.path} value={x.path}>{x.name}</option>)}
+                      </select>
+                      <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" disabled={!r.voice} onClick={() => playRef(r.voice)}>▶</button>
+                      <button className="ghost" style={{ flex: '0 0 auto' }} title="이 화자 지우기" onClick={() => setCh({ ...ch, speakers: ch.speakers.filter((_, j) => j !== i) })}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="crow"><button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button></div>
                 <div className="subhead">🔊 음성 배속</div>
                 <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
                 <div className="subhead">🔊 음량 맞추기</div>
@@ -3555,6 +3578,7 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                               ev.preventDefault();
                               if (si === 0) edit.note('그룹의 첫 문장입니다 — 윗 그룹과는 합칠 수 없습니다 (대본에서 직접)');
                               else if (s.mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
+                              else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
                               else edit.mergeUp(si, sents[si - 1].text);
                             }
                             // 🔑 맨 끝에서 Del = 아랫줄을 끌어올려 합치기.
@@ -3562,6 +3586,7 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                               ev.preventDefault();
                               if (si >= sents.length - 1) edit.note('그룹의 마지막 문장입니다 — 아래 그룹과는 합칠 수 없습니다 (대본에서 직접)');
                               else if (sents[si + 1].mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
+                              else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
                               else edit.mergeNext(si, sents[si + 1].text);
                             }
                           }} />
@@ -3574,8 +3599,8 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                       {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
                       <div className="sblk-lines" title="클릭해서 이 문장 고치기"
                         onClick={() => edit.start(pr.shortsNum, c.num, si, s.text)}>
-                        {lines.map((l) => (
-                          <div className="sent" key={l.n}><span className="lineno">{String(l.n).padStart(2, '0')} |</span>{l.t}</div>
+                        {lines.map((l, li) => (
+                          <div className="sent" key={l.n}><span className="lineno">{String(l.n).padStart(2, '0')} |</span>{li === 0 && s.speaker ? <span className="sspk" title={`화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리 로 읽습니다(자막에는 안 나옵니다)`}>{s.speaker}</span> : null}{l.t}</div>
                         ))}
                       </div>
                     </div>

@@ -95,6 +95,7 @@ function toDTO(parseResult) {
               text: s.text || '',
               dur: s.ttsDurationSec || null,
               audio: s.ttsAudioPath || null,
+              speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
               lines: splitCaptionLines(s.text || '', capChars).map((t) => ({ n: ++capN, text: t })),
@@ -252,22 +253,27 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   }
   // 참조음성이 `srv:<이름>` 이면 **서버 공용 라이브러리의 목소리** — 파일 업로드 없이 이름만 보낸다.
   //   참조텍스트도 서버가 갖고 있으므로(.txt) 여기서 보내지 않는다(엉뚱한 텍스트 섞임 방지).
-  const _ref = String(preset.voiceCloneRefAudio || '');
-  const _srvName = _ref.startsWith('srv:') ? _ref.slice(4) : '';
+  //   🎭 화자 목소리(`[이름] 대사`)도 같은 함수로 만든다 — 두 벌이면 참조텍스트 규칙이 갈린다.
+  const voiceOpts = (refAudio, fallbackText) => {
+    const _ref = String(refAudio || '');
+    const _srvName = _ref.startsWith('srv:') ? _ref.slice(4) : '';
+    return {
+      refName: _srvName || undefined,
+      refAudioPath: (!_srvName && _ref) ? _ref : undefined,
+      // 참조텍스트: 참조음성과 같은 이름의 .txt 가 있으면 그 내용을 사용(이전 프로그램 방식 — 직접입력 불필요).
+      //   없으면 preset.voiceCloneRefText 폴백(채널 기본 목소리일 때만 — 화자 목소리에 남의 텍스트를 섞지 않는다).
+      refText: (() => {
+        if (_srvName) return undefined;                 // 서버 목소리 → 서버의 .txt 를 쓴다
+        if (_ref) {
+          try { const tp = _ref.replace(/\.[^.\\/]+$/, '.txt'); if (fs.existsSync(tp)) { const t = fs.readFileSync(tp, 'utf8').trim(); if (t) return t; } } catch {}
+        }
+        return fallbackText || undefined;
+      })(),
+    };
+  };
   const synthOpts = {
     provider: preset.engine,
-    refName: _srvName || undefined,
-    refAudioPath: (!_srvName && preset.voiceCloneRefAudio) ? preset.voiceCloneRefAudio : undefined,
-    // 참조텍스트: 참조음성과 같은 이름의 .txt 가 있으면 그 내용을 사용(이전 프로그램 방식 — 직접입력 불필요).
-    //   없으면 preset.voiceCloneRefText 폴백.
-    refText: (() => {
-      if (_srvName) return undefined;                 // 서버 목소리 → 서버의 .txt 를 쓴다
-      const a = preset.voiceCloneRefAudio;
-      if (a) {
-        try { const tp = a.replace(/\.[^.\\/]+$/, '.txt'); if (fs.existsSync(tp)) { const t = fs.readFileSync(tp, 'utf8').trim(); if (t) return t; } } catch {}
-      }
-      return preset.voiceCloneRefText || undefined;
-    })(),
+    ...voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText),
     instruct: preset.instruct || undefined,
     cfgValue: preset.cfgValue,
     inferenceTimesteps: preset.inferenceTimesteps,
@@ -275,6 +281,26 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     language: preset.language,
     seed: preset.seed,
   };
+  // 🎭 화자별 목소리 — 채널 `preset.speakers`(이름 → 참조음성). 연결 안 된 화자는 채널 기본 목소리로 읽고 알린다.
+  //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
+  const spkMap = speakerVoiceMap(preset);
+  const spkOpts = new Map();
+  const optsFor = (s) => {
+    const name = s && s.speaker;
+    if (!name) return synthOpts;
+    if (!spkOpts.has(name)) spkOpts.set(name, spkMap[name] ? { ...synthOpts, ...voiceOpts(spkMap[name], null) } : synthOpts);
+    return spkOpts.get(name);
+  };
+  if (onLine) {
+    const used = [...new Set(sentences.map((x) => x && x.speaker).filter(Boolean))];
+    if (used.length) {
+      const lab = (v) => String(v).startsWith('srv:') ? '☁ ' + String(v).slice(4) : path.basename(String(v));
+      const ok = used.filter((n) => spkMap[n]).map((n) => `${n} → ${lab(spkMap[n])}`);
+      const miss = used.filter((n) => !spkMap[n]);
+      onLine(`🎭 화자 ${used.length}명${ok.length ? ' — ' + ok.join(' · ') : ''}`);
+      if (miss.length) onLine(`⚠ 목소리를 연결하지 않은 화자: ${miss.join(', ')} — 채널 기본 목소리로 읽습니다(⚙ 채널편집 → 🎙 음성 → 「화자별 목소리」)`);
+    }
+  }
   // 🔑 캐시 키가 "합성될 최종 문자열" 기준이므로, 루프 전에 발음사전을 서버와 한 번 맞춘다.
   //   안 맞추면 첫 문장만 옛 사전으로 키가 계산돼 어긋난다.
   try { if (typeof ttsMgr.prepareDict === 'function') await ttsMgr.prepareDict(); } catch {}
@@ -293,7 +319,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.text) : s.text;
     // 🔑 정규화 목표도 키에 넣는다 — 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 되살아난다**
     //   (v0.3.43 에서 발음사전을 고쳐도 옛 음성이 나오던 것과 같은 계열).
-    const cacheKey = TtsCache.keyFor(keyText, sf, { ...synthOpts, normDb: normTarget, padSec });
+    const sOpts = optsFor(s);
+    const cacheKey = TtsCache.keyFor(keyText, sf, { ...sOpts, normDb: normTarget, padSec });
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
@@ -316,7 +343,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     let seedOverride = null;              // 빈 음성 회피로 갈아낀 시드(성공하면 로그에 남긴다)
     let maxAttempt = TTS_MAX_ATTEMPT;
     for (let attempt = 1; attempt <= maxAttempt; attempt++) {
-      const attemptOpts = seedOverride == null ? synthOpts : { ...synthOpts, seed: seedOverride };
+      const attemptOpts = seedOverride == null ? sOpts : { ...sOpts, seed: seedOverride };
       // 🔑 **검사를 통과한 뒤에만 `res` 에 담는다.** 먼저 대입하면 assertRealAudio 가 던져도 빈 결과가
       //   res 에 남아, 루프를 다 쓰고 나온 뒤 `if (!res)` 를 통과해 **그 빈 음성이 그대로 저장된다**
       //   (테스트 [6]-ⓑ 가 실제로 잡았다). provider 가 던지는 경우엔 안 드러나는 구멍이다.
@@ -408,6 +435,16 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     onLine(`⚠ ${label} 음성 실패 ${failed.length}개 (컷 ${failed.slice(0, 12).join(', ')}${failed.length > 12 ? ' …' : ''}) — 「🎤 TTS」를 다시 누르면 빠진 것만 다시 만듭니다.`);
   }
   return { failed };
+}
+
+// 채널의 화자 → 참조음성 표. 저장 형태는 [{name, voice}](화면 순서) — 옛 객체 형태도 받는다. 빈 목소리는 뺀다.
+function speakerVoiceMap(preset) {
+  const out = {};
+  const sp = preset && preset.speakers;
+  const put = (n, v) => { n = String(n || '').trim(); v = String(v || '').trim(); if (n && v) out[n] = v; };
+  if (Array.isArray(sp)) sp.forEach((r) => r && put(r.name, r.voice));
+  else if (sp && typeof sp === 'object') Object.keys(sp).forEach((k) => put(k, sp[k]));
+  return out;
 }
 
 // 프로젝트 전체 문장 TTS (fillTtsList 래퍼)
@@ -797,7 +834,7 @@ function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-module.exports = { nudgePromptForRetry,
+module.exports = { speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,

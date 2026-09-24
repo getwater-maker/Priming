@@ -365,3 +365,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* ⤒ 합친 그룹 안의 옛 섹션 경계(2026-09-24) — 그림은 이어 쓰고 챕터만 여기서 갈린다 */
 .sblk:has(.smark){flex-wrap:wrap}
 .smark{flex-basis:100%;font-size:11px;color:#a0886a;border-top:1px dashed #d8c9ae;padding-top:3px;margin-top:2px}
+
+/* 🎭 화자 배지 — [이름] 대사(자막엔 안 나온다) */
+.sspk{display:inline-block;font-size:11px;line-height:1.4;padding:0 5px;margin-right:5px;border-radius:8px;background:#efe4cf;color:#7a5a2e;vertical-align:1px}

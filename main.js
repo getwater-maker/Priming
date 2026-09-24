@@ -4506,7 +4506,7 @@ function buildSnapshot() {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null })),
       })),
     })),
   };
@@ -4645,6 +4645,7 @@ function projectsFromSnapshot(snap) {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
         if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
+        if (ss.speaker) s.speaker = ss.speaker;               // [이름] 대사 — 화자 목소리
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -4699,6 +4700,7 @@ function overlaySnapshot(parsed, snap) {
       (gs.sentences || []).forEach((ss, i) => {
         const s = sents[i]; if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
+        if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
       });
     }
@@ -5808,6 +5810,9 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     s.isIntro = !!old[0].isIntro;
     // 합친 그룹의 챕터 표식은 그 자리의 첫 문장을 따라간다(나누거나 고쳐도 챕터가 안 사라지게)
     if (ti === 0 && old[0].chapterMark) s.chapterMark = old[0].chapterMark;
+    // 화자는 같은 자리의 옛 문장을 따른다(나누면 조각 모두 · 합치면 첫 문장). .md 의 [이름] 접두는 그대로 남아 있다.
+    const _spk = old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
+    if (_spk) s.speaker = _spk;
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
     if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {

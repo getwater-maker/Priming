@@ -371,6 +371,7 @@ function buildGroupsHybrid(items, thresholds) {
     s._h2Key = item.h2Key;              // 상위 H2 섹션 키 (h2 분할)
     s._h2Title = item.h2Title || null;  // 상위 H2 제목 (h2 그룹 라벨)
     s.mode = item.mode;
+    s.speaker = item.speaker || null;   // [이름] 대사 — TTS 가 채널의 화자 목소리로 읽는다
     s._imagePrompt = item.imagePrompt || null;   // 대본 내 프롬프트(섹션 첫 문장에만) — 그룹이 흡수
     s._videoPrompt = item.videoPrompt || null;
     s.vrewClips = _buildVrewClips(item.text, s.isLong, vrewMaxChars, disableLongSplit);
