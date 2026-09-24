@@ -201,5 +201,6 @@ contextBridge.exposeInMainWorld('api', {
   ytdlpUpdate: () => ipcRenderer.invoke('ytdlp-update'),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),
   onDtoUpdate: (cb) => ipcRenderer.on('dto-update', (_e, dto) => cb(dto)),
+  onScriptReloaded: (cb) => ipcRenderer.on('script-reloaded', (_e, d) => cb(d)),
   onAutosaved: (cb) => ipcRenderer.on('autosaved', (_e, info) => cb(info)),
 });

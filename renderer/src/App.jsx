@@ -321,6 +321,7 @@ export default function App() {
 
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
+  const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
   const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
@@ -522,6 +523,7 @@ export default function App() {
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
+    if (api.onScriptReloaded) api.onScriptReloaded(() => setReloadTick((t) => t + 1));   // 📄 대본 보기가 새로 그리게
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
     loadPresets().then(loadStyles);
@@ -611,13 +613,7 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 📥 통합본 자산 이어받기 — 기존 회차의 TTS·이미지·비디오를 이 작업폴더로 복사·연결(재실행 안전).
-  // 🔄 대본(.md)을 다시 읽는다 — 스냅샷(작업본)을 무시하고 새로 파싱(자산은 그대로 복원).
-  //   내용 해시 판정이 정상이면 누를 일이 없다. 판정이 어긋났을 때의 탈출구.
-  async function runReloadScript() {
-    setStatus('🔄 대본 다시 읽기…');
-    try { const d = await api.reloadScript(); if (d) setDto(d); setStatus('대본 다시 읽음'); }
-    catch (e) { logline('대본 다시 읽기 오류: ' + e.message); setStatus('오류'); }
-  }
+  // 🔁 밖에서 .md 가 바뀌면 main 이 자동으로 다시 읽는다(v0.5.39) — 옛 「🔄 대본 다시 읽기」 버튼은 뺐다(IPC 는 남김).
 
   async function runMergePrefill() {
     setStatus('📥 자산 이어받기…');
@@ -2288,8 +2284,6 @@ export default function App() {
       짧은 <input type="number" value={splitOpts.short} onChange={(e) => changeSplit('short', e.target.value)} />
       긴 <input type="number" value={splitOpts.long} onChange={(e) => changeSplit('long', e.target.value)} />
       {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 영상 한 개 길이(⚙ 설정의 비디오 최대 길이 · 기본 8초) 기준으로 도입부 그룹 재배치 — 그래도 남는 차이는 .vrew 를 만들 때 느리게·반복으로 채웁니다" onClick={runIntroVideo}>🎬 도입부 TTS+재배치</button>}
-      {/* 🔄 대본을 고쳤는데 옛 내용이 보일 때 — 스냅샷 무시하고 .md 를 새로 파싱(자산 유지). */}
-      <button className="ghost" disabled={!loaded} title="대본(.md)을 다시 읽습니다 — 만들어 둔 음성·이미지·비디오는 그대로 복원됩니다. (대본을 고치면 보통 자동으로 반영되므로, 그래도 옛 내용이 보일 때만 누르세요)" onClick={runReloadScript}>🔄 대본 다시 읽기</button>
       {/* 📥 통합대본('> 📥 자산출처:' 메타)일 때만 — 각 부의 기존 음성·이미지·비디오를 이어받는다(재생성 0). */}
       {mergeSources > 0 && <button className="ghost" disabled={!loaded} title={`자산출처 ${mergeSources}개에서 기존 TTS·이미지·비디오를 이 작업폴더로 복사해 연결합니다 (대본 열 때 자동 실행 — 이 버튼은 재실행용)`} onClick={runMergePrefill}>📥 이어받기</button>}
     </span>
@@ -3413,7 +3407,7 @@ export default function App() {
 
       {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
       {readerOpen && (
-        <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline} presetName={presetName}
+        <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline} presetName={presetName} reloadTick={reloadTick}
           onClose={() => setReaderOpen(false)} />
       )}
       {ytProg && (

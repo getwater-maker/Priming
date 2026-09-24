@@ -98,7 +98,7 @@ function caretOf(root) {
   return { idx: [...root.querySelectorAll('p[data-key]')].indexOf(p), off: readValue(box).length };
 }
 
-export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log, presetName }) {
+export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log, presetName, reloadTick = 0 }) {
   const [fontPx, setFontPx] = useState(17);
   const [headings, setHeadings] = useState(false);   // 섹션 제목(###) — 기본 끔. ## 장 제목은 언제나 보인다
   const [groupNums, setGroupNums] = useState(false);
@@ -113,7 +113,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const neCountRef = useRef(0);
   const dtoRef = useRef(dto); dtoRef.current = dto;
   const optRef = useRef({ headings, groupNums }); optRef.current = { headings, groupNums };
-  const st = useRef({ composing: false, saving: false, pending: false, timer: null, needRebuild: false, caret: null, lastErr: false });
+  const st = useRef({ composing: false, saving: false, pending: false, timer: null, needRebuild: false, caret: null, lastErr: false, extReload: false });
 
   const projects = (dto && dto.projects) || [];
   const stats = useMemo(() => projects.reduce((a, p) => { const x = sr.readerStats(p); return { chars: a.chars + x.chars, sents: a.sents + x.sents, dur: a.dur + x.dur }; }, { chars: 0, sents: 0, dur: 0 }), [dto]);
@@ -140,6 +140,18 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   useEffect(() => { (async () => { await settle(); rebuild(); })(); }, [headings, groupNums]);
   // 바깥에서 대본이 바뀌면(음성 생성 등) 편집 중이 아닐 때만 새로 그린다
   useEffect(() => { if (docHtml && !busyNow() && document.activeElement !== docRef.current) rebuild(); }, [dto]);
+
+  // 🔁 밖에서 바뀐 대본을 main 이 다시 읽었다 — 기준 문장이 전부 달라졌을 수 있으니 새로 그린다.
+  //   저장 안 된 고침은 옛 대본 기준이라 적용하지 않는다(엉뚱한 문장을 덮지 않게). 한글 조합 중이면 조합이 끝난 뒤.
+  function onExternalReload() {
+    if (st.current.composing) { st.current.extReload = true; return; }
+    st.current.extReload = false;
+    const lost = [...parasRef.current.values()].filter((p) => p.dirty).length;
+    clearTimeout(st.current.timer); setSaveSt('');
+    rebuild();
+    setMsg('🔁 대본(.md)이 밖에서 바뀌어 새로 읽었습니다' + (lost ? ` — 저장 안 된 고침 ${lost}곳은 적용하지 않았습니다(다시 고쳐 주세요)` : ''));
+  }
+  useEffect(() => { if (reloadTick) onExternalReload(); }, [reloadTick]);
 
   // ── 저장 ──────────────────────────────────────────────────────────────
   function schedule() {
@@ -181,7 +193,10 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
       try {
         for (const h of hunks.slice().reverse()) {
           const i0 = p.base[h.from].i, i1 = p.base[h.from + h.count - 1].i;
-          const r = await api.editSentences({ shortsNum: p.shortsNum, groupNum: p.groupNum, sentIdx: i0, count: i1 - i0 + 1, text: h.text });
+          // expect = 바꾸려는 문장 — 그 사이 대본이 밖에서 바뀌었으면 main 이 거부한다(엉뚱한 문장 덮어쓰기 방지)
+          const expect = (i1 - i0 + 1 === h.count) ? p.base.slice(h.from, h.from + h.count).map((s) => s.text) : undefined;
+          const r = await api.editSentences({ shortsNum: p.shortsNum, groupNum: p.groupNum, sentIdx: i0, count: i1 - i0 + 1, text: h.text, expect });
+          if (r && r.stale) { S.saving = false; for (const q of parasRef.current.values()) q.dirty = false; rebuild(); setSaveSt(''); setMsg('✗ ' + r.error); return; }
           if (!r || !r.ok) { err = (r && r.error) || '고치지 못했습니다'; break; }
           last = r.dto; sent++;
           refreshGroup(last, p.shortsNum, p.groupNum);
@@ -304,7 +319,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
               dangerouslySetInnerHTML={{ __html: docHtml }}
               onInput={() => { scan(); if (anyDirty() && !st.current.composing) schedule(); }}
               onCompositionStart={() => { st.current.composing = true; clearTimeout(st.current.timer); setSaveSt('dirty'); }}
-              onCompositionEnd={() => { st.current.composing = false; scan(); if (anyDirty()) schedule(); }}
+              onCompositionEnd={() => { st.current.composing = false; if (st.current.extReload) { onExternalReload(); return; } scan(); if (anyDirty()) schedule(); }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   if (anyDirty()) { e.preventDefault(); e.stopPropagation(); revertDirty(); }

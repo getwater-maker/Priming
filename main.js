@@ -5104,6 +5104,58 @@ ipcMain.handle('reload-script', async () => {
   return currentDTO();
 });
 
+// ── 🔁 밖에서 .md 가 바뀌면 자동으로 다시 읽는다 (로이 2026-09-25, v0.5.39) ─────────────
+//   앱을 켜 둔 채 메모장·Claude 세션에서 대본을 고치면 앱은 몰랐다(「🔄 대본 다시 읽기」를 눌러야 했다 — 그 버튼은 뺐다).
+//   🔑 fs.watch 가 아니라 **1.5초 간격 비동기 stat** — 구글드라이브(G:)에서는 fs.watch 이벤트가 오지 않거나 두 번 온다.
+//   🔑 판정 = **파일 해시 ≠ 앱이 마지막으로 파싱·저장한 해시(_srcHash)**. 앱 안 수정(edit-sentences)은 쓰자마자 새 해시를 심으므로
+//      절대 다시 읽기를 부르지 않는다. 해시는 mtime·크기가 바뀌었을 때만 계산한다(평소 비용 = stat 한 번).
+//   🔑 쓰는 도중을 읽지 않게 **mtime 이 한 틱(1.5초) 그대로일 때** 읽는다. 큐의 다른 대본으로 바꾸면 그 대본도 즉시 한 번 대조한다.
+//   ⚠ **작업 중(음성·이미지·영상·만들기 · 레인 대기 포함)에는 다시 읽지 않고 미룬다** — 도는 작업이 쥔 파싱본을 바꿔치기하면 대본이 섞인다.
+//   다시 읽기 = 지금 상태를 스냅샷으로 먼저 쓰고 → 「대본 수정 감지」 경로(buildParsedForScript) — 문장이 같은 그룹의 음성·이미지는 그대로 복원된다.
+const _extWatch = { path: '', mtime: 0, size: 0, changedAt: 0, deferLogged: false, running: false };
+function _jobsBusy() {
+  if (_awake.n > 0) return true;
+  try { return Object.values(_lanePending).some((n) => n > 0); } catch { return false; }
+}
+async function checkExternalScriptChange() {
+  const W = _extWatch;
+  if (W.running) return;
+  const p = S.scriptPath;
+  if (!p || !S.parsed || S.parsed.kind === 'book' || currentMode() !== 'longform') return;
+  let st;
+  try { st = await fs.promises.stat(p); } catch { return; }   // G: 가 잠깐 사라지면 다음 틱에 다시 본다
+  const fresh = W.path !== p;
+  if (fresh) { W.path = p; W.mtime = st.mtimeMs; W.size = st.size; W.changedAt = Date.now() - 2000; W.deferLogged = false; }
+  else if (st.mtimeMs !== W.mtime || st.size !== W.size) { W.mtime = st.mtimeMs; W.size = st.size; W.changedAt = Date.now(); return; }
+  else if (!W.changedAt) return;   // 바뀐 적 없음
+  if (Date.now() - W.changedAt < 1400) return;   // 아직 쓰는 중일 수 있다
+  const known = S.parsed._srcHash;
+  if (!known) { W.changedAt = 0; return; }     // 해시를 모르는 파싱본 — 헛다시읽기 대신 기준만 잡는다
+  const h = scriptHash(p);
+  if (!h || h === known) { W.changedAt = 0; W.deferLogged = false; return; }
+  if (_jobsBusy()) {
+    if (!W.deferLogged) { log('🔁 대본(.md)이 밖에서 바뀌었습니다 — 지금 작업이 끝나면 자동으로 다시 읽습니다.'); W.deferLogged = true; }
+    return;   // changedAt 을 남겨 두어 다음 틱에 다시 본다
+  }
+  W.running = true;
+  try {
+    try { writeSnapshotSync(); } catch (_) {}   // 방금까지의 음성·이미지·편집을 먼저 저장 → 새 파싱에 그대로 얹힌다
+    const { parsed, note } = buildParsedForScript(p, currentMode(), S.preset);
+    S.parsed = parsed;
+    applyIntroFromScript(S.parsed, p, currentMode());
+    storeActive();
+    log(`🔁 밖에서 바뀐 대본(.md)을 자동으로 다시 읽었습니다 — ${path.basename(p)}` + (note ? ` · ${note.replace(/^♻\s*/, '')}` : ''));
+    scheduleAutoSave();
+    pushDtoUpdate();
+    try { win && win.webContents.send('script-reloaded', { path: p }); } catch (_) {}
+  } catch (e) {
+    log(`⚠ 밖에서 바뀐 대본을 다시 읽지 못했습니다 — ${e.message}`);
+  } finally {
+    W.changedAt = 0; W.deferLogged = false; W.running = false;
+  }
+}
+setInterval(() => { checkExternalScriptChange().catch(() => {}); }, 1500).unref?.();
+
 // 수동 재실행 — 헤더 「📥 이어받기」 버튼.
 ipcMain.handle('merge-prefill', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -6025,6 +6077,15 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   }
   const from = pr.sentences.indexOf(gs[si]);
   if (from < 0) throw new Error('문장을 찾을 수 없습니다.');
+  // 🔁 호출자가 「바꾸려는 문장」을 함께 보냈으면 지금 대본과 대조한다 — 그 사이 대본이 밖에서 바뀌어 다시 읽혔다면
+  //   번호가 같아도 다른 문장일 수 있다(엉뚱한 문장을 덮어쓰는 것보다 거부가 낫다).
+  if (Array.isArray(args.expect)) {
+    const SEx = require('./core/script-edit');
+    const now = gs.slice(si, si + n).map((s) => s.text);
+    if (now.length !== args.expect.length || now.some((t, k) => SEx.sigOf(t) !== SEx.sigOf(args.expect[k]))) {
+      return { ok: false, stale: true, error: '그 사이 대본이 바뀌었습니다(밖에서 고쳐져 다시 읽혔습니다) — 화면을 새로 그렸으니 다시 고쳐 주세요.' };
+    }
+  }
 
   const raw = fs.readFileSync(S.scriptPath, 'utf8');
   const texts = pr.sentences.map((s) => s.text);

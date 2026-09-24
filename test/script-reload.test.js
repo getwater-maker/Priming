@@ -167,14 +167,17 @@ console.log('\n[5] 🔄 대본 다시 읽기 배선');
   ok(/pushDtoUpdate\(\)/.test(h), '화면을 갱신한다');
 
   ok(/reloadScript: \(\) => ipcRenderer\.invoke\('reload-script'\)/.test(read('preload.js')), 'preload: reloadScript');
+  // 🔁 v0.5.39 — 버튼 대신 **자동**(밖에서 .md 가 바뀌면 main 이 다시 읽는다). IPC 는 남겼다(테스트·탈출구).
   const app = read('renderer/src/App.jsx');
-  ok(/async function runReloadScript\(\)/.test(app), 'App: runReloadScript 핸들러 정의');
-  ok(/api\.reloadScript\(\)/.test(app), 'App: api.reloadScript 호출');
-  // ⚠ 라벨 문자열로 세지 말 것 — setStatus('🔄 대본 다시 읽기…') 에도 같은 글자가 있다(처음에 이걸로 헛실패했다).
-  eq((app.match(/onClick=\{runReloadScript\}/g) || []).length, 1, '버튼은 한 곳에만(진입점 이중화 금지)');
-  const dist = fs.readdirSync(path.join(ROOT, 'renderer', 'dist', 'assets')).filter((f) => f.endsWith('.js'));
-  ok(dist.some((f) => read(path.join('renderer', 'dist', 'assets', f)).includes('대본 다시 읽기')),
-    '번들(renderer/dist)에 반영됐다');
+  ok(!/onClick=\{runReloadScript\}/.test(app) && !/🔄 대본 다시 읽기<\/button>/.test(app), 'App: 「🔄 대본 다시 읽기」 버튼은 뺐다(자동이라)');
+  const w = cut(/async function checkExternalScriptChange\(\)[\s\S]*?\n\}\n/, '자동 다시 읽기 감시');
+  ok(/fs\.promises\.stat\(p\)/.test(w) && !/fs\.watch\(/.test(MAIN), '감시 = 비동기 stat(구글드라이브에서 fs.watch 는 믿을 수 없다)');
+  ok(/h === known/.test(w) && /_srcHash/.test(w), '판정 = 파일 해시 ≠ 앱이 마지막으로 파싱·저장한 해시(앱 안 수정은 부르지 않는다)');
+  ok(/Date\.now\(\) - W\.changedAt < 1400/.test(w), '쓰는 도중은 읽지 않는다(한 틱 그대로일 때)');
+  ok(w.indexOf('_jobsBusy()') > 0 && w.indexOf('_jobsBusy()') < w.indexOf('buildParsedForScript('), '🔑 작업 중이면 다시 읽지 않고 미룬다(파싱본 바꿔치기 금지)');
+  ok(w.indexOf('writeSnapshotSync()') > 0 && w.indexOf('writeSnapshotSync()') < w.indexOf('buildParsedForScript('), '다시 읽기 전에 지금 상태를 스냅샷으로(자산 복원)');
+  ok(/_awake\.n > 0/.test(MAIN) && /_lanePending/.test(cut(/function _jobsBusy\(\)[\s\S]*?\n\}/, '_jobsBusy')), '작업 중 = 절전 차단 중 또는 레인 대기 있음');
+  ok(/Array\.isArray\(args\.expect\)/.test(MAIN) && /stale: true/.test(MAIN), 'edit-sentences 가 expect 로 옛 기준 수정을 거부한다');
 }
 
 console.log('\n[6] 실사고 재현 + A/B 역검증');
