@@ -115,13 +115,13 @@ function buildUploadMeta(a = {}) {
   if (pf && !pk.title) notes.push('패키징 파일에 「## 제목」이 없어 대본 제목으로 올립니다.');
 
   // ⏱ 챕터 — 앱 「⏱ 타임스탬프」와 같은 계산. 유튜브 규칙(3개 이상 · 각 10초 이상)에 안 맞으면 넣지 않는다.
-  let chText = '', chN = 0;
+  let chText = '', chN = 0, chTotal = 0;
   const pr = a.dtoProject;
   if (pr) {
     const r = CH.tsBuild({ projects: [pr] });
     const chs = CH.tsChaptersOf(pr);
     const bad = chs.length < 3 || chs.some((c) => c.dur < 10);
-    if (!bad) { chText = r.text; chN = chs.length; }
+    if (!bad) { chText = r.text; chN = chs.length; chTotal = chs.reduce((x, c) => x + c.dur, 0); }
     else notes.push(`챕터가 유튜브 규칙(3개 이상 · 각 10초 이상)에 안 맞아 설명에 넣지 않았습니다(${chs.length}개).`);
   }
   const strip = (s) => String(s || '').replace(/^\s*\[[^\]]+\]\s*/, '').trim();   // "[고전_0930] …" → "…"
@@ -129,6 +129,9 @@ function buildUploadMeta(a = {}) {
   return {
     title,
     description: insertChapters(pk.description, chText),
+    // 🔑 업로드 직전에 실제 MP4 길이와 chapterTotalSec 를 대조해 어긋나면 이것으로 바꾼다(main.runYtUpload)
+    descriptionNoChapters: String(pk.description || '').trim(),
+    chapterTotalSec: chTotal,
     tags: pk.tags,
     source: pk.title ? 'packaging' : 'script',
     packagingPath: pf,

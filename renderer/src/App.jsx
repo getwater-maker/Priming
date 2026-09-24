@@ -7,6 +7,7 @@ import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import YtProgress from './YtProgress.jsx';
+import ScriptReader from './ScriptReader.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -401,6 +402,7 @@ export default function App() {
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlProg, setUrlProg] = useState(null);
+  const [readerOpen, setReaderOpen] = useState(false);   // 📄 대본 읽기(점검·수정 · A4 PDF)
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [mp4Prog, setMp4Prog] = useState(null);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
@@ -604,7 +606,7 @@ export default function App() {
     catch (e) { logline('재분할 오류: ' + e.message); }
   }
   async function runIntroVideo() {
-    setStatus('도입부 TTS + 10초 재배치…');
+    setStatus('도입부 TTS + 영상 길이 기준 재배치…');
     try { const d = await api.introVideoPrep({ presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); setStatus('도입부 재배치 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -2282,7 +2284,7 @@ export default function App() {
       </>)}
       짧은 <input type="number" value={splitOpts.short} onChange={(e) => changeSplit('short', e.target.value)} />
       긴 <input type="number" value={splitOpts.long} onChange={(e) => changeSplit('long', e.target.value)} />
-      {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 10초 기준으로 도입부 그룹 재배치" onClick={runIntroVideo}>🎬 도입부 TTS+10초 재배치</button>}
+      {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 영상 한 개 길이(⚙ 설정의 비디오 최대 길이 · 기본 8초) 기준으로 도입부 그룹 재배치 — 그래도 남는 차이는 .vrew 를 만들 때 느리게·반복으로 채웁니다" onClick={runIntroVideo}>🎬 도입부 TTS+재배치</button>}
       {/* 🔄 대본을 고쳤는데 옛 내용이 보일 때 — 스냅샷 무시하고 .md 를 새로 파싱(자산 유지). */}
       <button className="ghost" disabled={!loaded} title="대본(.md)을 다시 읽습니다 — 만들어 둔 음성·이미지·비디오는 그대로 복원됩니다. (대본을 고치면 보통 자동으로 반영되므로, 그래도 옛 내용이 보일 때만 누르세요)" onClick={runReloadScript}>🔄 대본 다시 읽기</button>
       {/* 📥 통합대본('> 📥 자산출처:' 메타)일 때만 — 각 부의 기존 음성·이미지·비디오를 이어받는다(재생성 0). */}
@@ -2450,6 +2452,7 @@ export default function App() {
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
             </>)}
             <span className="hdiv" />
+            <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}>📄 대본 보기</button>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
@@ -3399,6 +3402,10 @@ export default function App() {
       )}
 
       {/* 🔗 URL → 다운로드 → STT. 자막이 있으면 STT 를 건너뛴다(GPU 0초). */}
+      {readerOpen && (
+        <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline}
+          onClose={() => setReaderOpen(false)} />
+      )}
       {ytProg && (
         <YtProgress prog={ytProg}
           onAbort={() => { api.ytAbort(); }}

@@ -265,6 +265,8 @@ function _mimeOf(p) {
 }
 
 app.whenReady().then(() => {
+  // 🎞 길이 맞춘 영상 캐시(video-fit) — 14일 넘은 것 정리(배경에서, 막지 않는다)
+  setTimeout(() => { try { require('./core/video-fit').pruneCache(14); } catch (_) {} }, 6000);
   // media://<encoded-abs-path> → 로컬 파일. Range 직접 처리(비디오 스트리밍 — net.fetch(file://)는 Range에서 ERR_UNEXPECTED).
   protocol.handle('media', (request) => {
     // 쿼리/프래그먼트 제거 — 미리보기 캐시버스터(?t=…)가 파일 경로를 오염시키지 않게.
@@ -2359,6 +2361,66 @@ function enqueueYtUpload(job) {
   ytChain = run;
   return run;
 }
+// ── 📄 대본 읽기 → A4 PDF (한 장에 N 쪽) (2026-09-24, v0.5.33) ─────────────────────
+//   내용은 core/script-reader.js(화면과 같은 블록) → 숨은 창에서 A4 로 printToPDF → N 쪽 모아 찍기는 pdf-lib
+//   (vivliostyle 이 이미 싣고 있다 — 의존성 추가 없음). 결과는 출력 폴더에 저장하고 열어 준다(거기서 인쇄).
+async function nUpPdf(buf, per) {
+  const R = require('./core/script-reader');
+  const { PDFDocument, rgb } = require('pdf-lib');
+  const src = await PDFDocument.load(buf);
+  const doc = await PDFDocument.create();
+  const L = R.nUpLayout(per);
+  const [W, H] = L.landscape ? [841.89, 595.28] : [595.28, 841.89];   // A4 (pt)
+  const M = 20, G = 12;
+  const cw = (W - 2 * M - G * (L.cols - 1)) / L.cols, chh = (H - 2 * M - G * (L.rows - 1)) / L.rows;
+  const pages = await doc.embedPages(src.getPages());
+  let page = null;
+  pages.forEach((ep, k) => {
+    const slot = k % (L.cols * L.rows);
+    if (slot === 0) page = doc.addPage([W, H]);
+    const c = slot % L.cols, r = Math.floor(slot / L.cols);
+    const sc = Math.min(cw / ep.width, chh / ep.height);
+    const w = ep.width * sc, h = ep.height * sc;
+    const x = M + c * (cw + G) + (cw - w) / 2;
+    const y = H - M - r * (chh + G) - chh + (chh - h) / 2;
+    page.drawPage(ep, { x, y, width: w, height: h });
+    page.drawRectangle({ x, y, width: w, height: h, borderColor: rgb(0.78, 0.78, 0.78), borderWidth: 0.5 });
+  });
+  return { buf: Buffer.from(await doc.save()), pages: pages.length, sheets: doc.getPageCount() };
+}
+ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const R = require('./core/script-reader');
+  const per = R.PER_SHEET.includes(Number(args.perSheet)) ? Number(args.perSheet) : 1;
+  const dto = P.toDTO(S.parsed);
+  const blocks = [].concat(...(dto.projects || []).map((p) => R.readerBlocks(p, { headings: args.headings !== false })));
+  const html = R.readerHtml(blocks, { fontPt: args.fontPt, groupNums: !!args.groupNums });
+  const tmp = path.join(os.tmpdir(), `priming-reader-${process.pid}-${Date.now()}.html`);
+  fs.writeFileSync(tmp, html, 'utf8');
+  const bw = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true } });
+  let pdf;
+  try {
+    await bw.loadFile(tmp);
+    pdf = await bw.webContents.printToPDF({
+      pageSize: 'A4', printBackground: true, preferCSSPageSize: true, displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate: '<div style="font-size:8px;color:#999;width:100%;text-align:center;font-family:Malgun Gothic,sans-serif"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+    });
+  } finally { try { bw.destroy(); } catch (_) {} try { fs.rmSync(tmp, { force: true }); } catch (_) {} }
+  let out = { buf: pdf, pages: 0, sheets: 0 };
+  if (per > 1) out = await nUpPdf(pdf, per);
+  else { try { const { PDFDocument } = require('pdf-lib'); const n = (await PDFDocument.load(pdf)).getPageCount(); out.pages = out.sheets = n; } catch (_) {} }
+  const base = vrewBaseName(S.parsed.projects[0]);
+  const dest = path.join(S.outRoot, `${base}_대본${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
+  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch (_) {}
+  try { fs.writeFileSync(dest, out.buf); }
+  catch (e) { throw new Error(`PDF 를 저장하지 못했습니다(${e.code || e.message}) — 같은 PDF 가 열려 있으면 닫고 다시 누르세요.`); }
+  log(`📄 대본 PDF — A4 ${out.pages}쪽${per > 1 ? ` → 한 장에 ${per}쪽 · ${out.sheets}장` : ''} · ${dest}`);
+  if (args.open !== false) { try { shell.openPath(dest); } catch (_) {} }
+  return { path: dest, pages: out.pages, sheets: out.sheets, perSheet: per };
+});
+
+const CHAPTER_TOL_SEC = 1.0;   // ⏱ 챕터 합계와 MP4 실제 길이 허용 차이
 async function runYtUpload({ file, channelId, meta }) {
   const YT = require('./core/youtube-upload');
   S.ytAbort = false;
@@ -2370,6 +2432,16 @@ async function runYtUpload({ file, channelId, meta }) {
     const err = '이 채널이 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → ▶ 유튜브에서 「🔗 채널 연결」을 하세요.';
     log(`✗ 유튜브 업로드 — ${err}`); ytSend({ ...base, phase: 'error', error: err, startedAt: Date.now(), endedAt: Date.now() });
     return { ok: false, error: err };
+  }
+  // ⏱ 챕터 안전장치 — 챕터는 음성 길이 누적(= 영상 타임라인)으로 계산하지만, 완성 MP4 를 **실제로 재서** 대조한다.
+  //   1초 넘게 다르면 챕터가 엉뚱한 곳을 가리키므로 빼고 올린다(로이 2026-09-24).
+  if (meta.chapters > 0 && meta.chapterTotalSec > 0) {
+    let real = 0;
+    try { real = Number(await require('./core/media-utils').getMediaDuration(file)) || 0; } catch (_) {}
+    if (real > 0 && Math.abs(real - meta.chapterTotalSec) > CHAPTER_TOL_SEC) {
+      log(`⚠ 챕터 합계 ${meta.chapterTotalSec.toFixed(1)}초 ≠ MP4 실제 ${real.toFixed(1)}초 — 어긋나서 설명에서 챕터를 뺍니다`);
+      meta = { ...meta, description: meta.descriptionNoChapters, chapters: 0 };
+    } else if (real > 0) log(`   ⏱ 챕터 확인 — 합계 ${meta.chapterTotalSec.toFixed(1)}초 · MP4 ${real.toFixed(1)}초 (차이 ${Math.abs(real - meta.chapterTotalSec).toFixed(2)}초)`);
   }
   log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · 비공개 · 제목 「${title}」`);
   log(`   설명 ${meta.source === 'packaging' ? '패키징 파일' : '(패키징 없음)'} · 챕터 ${meta.chapters}개 · 태그 ${meta.tags.length}개 · AI 합성 표시 = 예`);
@@ -6766,8 +6838,12 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   await P.fillTtsList(introSents, preset, mgr, ttsDir, log, () => S.abort, speed, '도입부', pushDtoUpdate);
   try { await mgr.stop(); } catch {}
   const { regroupIntroByTtsDuration } = require('./core/group-builder');
-  const res = regroupIntroByTtsDuration(pr, { maxSec: 10 });
-  log(`✓ 도입부 10초 재배치 완료 (10초 초과 그룹 ${res.overGroupIds.length}개)`);
+  // 🔑 영상 한 개가 덮는 길이 = ComfyUI 비디오 최대 길이(videoMaxSec, 기본 8초). 10초로 묶으면 영상이 최대 2초 모자랐다(2026-09-24).
+  //   그래도 남는 차이는 .vrew 를 만들 때 core/video-fit 이 느리게·반복으로 채운다.
+  let maxSec = 10;
+  try { const vm = Number(require('./core/comfy-video').loadConfig().videoMaxSec); if (vm > 0 && vm < maxSec) maxSec = vm; } catch (_) {}
+  const res = regroupIntroByTtsDuration(pr, { maxSec });
+  log(`✓ 도입부 ${maxSec}초 재배치 완료 (${maxSec}초 초과 그룹 ${res.overGroupIds.length}개)`);
   pushDtoUpdate();
   return P.toDTO(S.parsed);
 });

@@ -164,12 +164,14 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .empty{color:#b3a796;text-align:center;padding:60px 0;font-size:14px}
 /* 헤더 = 좌(상단행 + ①~⑤ 세로 스택) / 우(로그창). 로그가 **맨 윗줄부터** 시작한다 (2026-09-16) */
 .hsplit{display:flex;align-items:flex-start;gap:10px}
-.hmain{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
+/* 상단 행과 ①~④ 섹션이 **같은 폭의 한 열**을 쓴다 — 🆕 초기화의 오른쪽 끝이 아래 섹션 끝과 맞는다(로이 2026-09-24).
+   열 폭 = max(상단 행 자연폭, 가장 넓은 섹션) — 창이 좁으면 그 안으로 줄어든다(fit-content). */
+.hmain{display:grid;grid-template-columns:fit-content(100%);row-gap:6px;align-content:start;justify-content:start;flex:1 1 auto;min-width:0}
 /* 섹션 박스는 **가장 긴 섹션에 맞춰** 너비를 통일한다 (로이 2026-09-16: "끝까지 늘리지 말고 가장 긴 섹션 기준").
    🔑 그래서 flex 가 아니라 **grid** 다 — 열 하나를 fit-content(100%) 로 두면
    폭이 「가장 넓은 박스」로 정해지고(내용 너비), 창이 좁으면 100% 에서 멈춘다(넘치지 않는다).
    그리드 항목은 기본이 stretch 라 **모든 박스가 그 열 너비로 같아진다.** */
-.pipecol{display:grid;grid-template-columns:fit-content(100%);gap:6px;justify-content:start;align-self:stretch}
+.pipecol{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;justify-content:stretch;align-self:stretch}
 .pipecol > .hgroup{flex-wrap:wrap;width:auto}
 /* 로그 패널 */
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;

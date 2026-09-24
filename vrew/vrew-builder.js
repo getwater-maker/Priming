@@ -796,14 +796,28 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     //     16:9 롱폼: 영상 있으면 그대로 사용.
     //     (Shots-maker: Grok이 _aspectRatio='9:16'로 세로 영상을 내므로 훅 컷 애니메이션 반영됨)
     if (g.videoPath && fs.existsSync(g.videoPath)) {
-      const _vmeta0 = readMp4VideoMeta(g.videoPath);
+      // 🎞 영상이 그룹 음성보다 짧으면 **그룹 길이에 맞춘 파일**을 넣는다(core/video-fit.js — 차이가 작으면 느리게,
+      //   크면 반복 + 이음새 크로스페이드). 전엔 🎬 MP4 가 남는 시간 동안 마지막 프레임에서 멈췄다(2026-09-24).
+      //   원본 g.videoPath 는 그대로 — 맞춘 파일은 캐시에 둔다. 실패하면 원본(예전 동작).
+      let _vsrc = g.videoPath;
+      let _vmeta0 = readMp4VideoMeta(_vsrc);
+      if (opts.fitVideo !== false && _vmeta0 && _vmeta0.duration > 0) {
+        let _gd = 0;
+        for (const s of sentences) if (s.groupId === g.id && s.ttsAudioPath && s.ttsDurationSec) _gd += s.ttsDurationSec;
+        if (_gd > 0) {
+          try {
+            const fit = await require('../core/video-fit').fitVideo(_vsrc, _vmeta0.duration, _gd, { log, label: `G${g.num} ` });
+            if (fit.path !== _vsrc) { const m2 = readMp4VideoMeta(fit.path); if (m2) { _vsrc = fit.path; _vmeta0 = m2; } }
+          } catch (e) { log(`⚠ G${g.num} 영상 길이 맞추기 오류: ${e.message}`); }
+        }
+      }
       { // 영상은 항상 사용 — 캔버스와 비율이 비슷하면 꽉 채우고, 다르면(가로↔9:16 등) 레터박스 가운데(전체 표시)
       const mid = uid();
       const aid = uid();
       const videoTid = sid();
       const audioTid = sid();
       const fn = `${mid}.mp4`;
-      const fileSize = fs.statSync(g.videoPath).size;
+      const fileSize = fs.statSync(_vsrc).size;
 
       // 비디오 메타데이터 — 실제 mp4 헤더(moov/tkhd/mvhd) 직접 파싱이 1순위.
       let videoWidth = 1280, videoHeight = 720, dur = 6;
@@ -812,7 +826,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         videoWidth  = realMeta.width;
         videoHeight = realMeta.height;
         if (realMeta.duration > 0) dur = realMeta.duration;
-        log(`[Vrew] mp4 메타: ${path.basename(g.videoPath)} ${videoWidth}x${videoHeight}, ${dur.toFixed(2)}초`);
+        log(`[Vrew] mp4 메타: ${path.basename(_vsrc)} ${videoWidth}x${videoHeight}, ${dur.toFixed(2)}초`);
       } else {
         // mp4 헤더 파싱 실패 시 기본값(Grok 720p 16:9) 사용
         videoWidth = 1280; videoHeight = 720; dur = 5;
@@ -876,7 +890,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
       groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid });
       groupTopY.set(g.id, _vMismatch ? _vy : 0); // 레터박스면 영상 상단 y(검정띠 끝)
-      mediaZip.push({ src: g.videoPath, name: fn });
+      mediaZip.push({ src: _vsrc, name: fn });
       groupIdx++;
       continue;
       }
