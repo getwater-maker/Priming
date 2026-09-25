@@ -181,6 +181,8 @@ contextBridge.exposeInMainWorld('api', {
   finalPromptPreview: (args) => ipcRenderer.invoke('final-prompt-preview', args),
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
   setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
+  setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
+  setAiNoticeRange: (args) => ipcRenderer.invoke('set-ai-notice-range', args),
   applyCaptionFormatAll: (args) => ipcRenderer.invoke('apply-caption-format-all', args),
   undo: (args) => ipcRenderer.invoke('undo', args),
   mergeSentenceAcross: (args) => ipcRenderer.invoke('merge-sentence-across', args),

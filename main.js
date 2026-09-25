@@ -102,6 +102,9 @@ function activeItem() {
 }
 // 활성 항목 → S.parsed/scriptPath/outRoot 미러 동기화 (없으면 비움)
 function syncActiveToS() {
+  // 🔴 바꾸기 **전에** 밀린 자동저장을 옛 대본으로 쓴다 — 자동저장은 1.5초 뒤에 도는데, 그 사이 초기화·다른 대본 선택으로
+  //   S.parsed 가 바뀌면 방금 고친 것이 저장되지 않고 사라졌다(2026-09-25 E2E 가 잡음). try = 앱 시작 중 호출(TDZ) 방어.
+  try { if (_asTimer && S.parsed) flushAutoSave(); } catch (_) {}
   const it = activeItem();
   S.parsed = it ? it.parsed : null;
   S.scriptPath = it ? it.scriptPath : null;
@@ -4395,6 +4398,7 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
+  undoPush('그림 첨부');
   const ext = path.extname(fp).toLowerCase();
   // 🔑 「사람이 직접 넣은 것」으로 표시 — sweepBadVisuals 가 검정·노이즈 판정에서 제외한다(_userAttached).
   //   ⚠ 이 경로는 파일을 미디어 폴더로 **복사하지 않고 원본을 가리킨다** — 지우면 사용자 원본이 사라진다.
@@ -4415,6 +4419,7 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (g) {
+    undoPush(g.videoPath ? '영상 삭제' : '그림 삭제');
     // 단계별 삭제: 영상이 있으면 영상만 지워 이미지가 다시 보이게, 영상이 없으면 이미지를 지워 빈칸으로.
     if (g.videoPath) {
       g.videoPath = null; g.videoStatus = 'idle'; g.videoSourceImage = null;
@@ -4577,6 +4582,7 @@ ipcMain.handle('bulk-attach', async (_e, args = {}) => {
   if (r.canceled || !r.filePaths.length) return P.toDTO(S.parsed);
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   if (!pr) return P.toDTO(S.parsed);
+  undoPush('일괄 첨부');
   const picked = r.filePaths; // 절대경로들
   const baseOf = (f) => path.basename(f);
   const isVid = (f) => /\.(mp4|mov|webm|m4v)$/i.test(f);
@@ -4742,12 +4748,14 @@ function buildSnapshot() {
     hashVer: SNAP_HASH_VER, // 이 버전이 찍힌 해시만 신뢰한다(v0.4.6 오염분 자동 재판정)
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
+      aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지 문장 범위
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
         imageStale: !!g.imageStale,
+        look: g.look || null,   // 🖼 채우기·반전·움직임
         imagePromptStale: !!g.imagePromptStale,
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
@@ -4887,6 +4895,7 @@ function projectsFromSnapshot(snap) {
       // isIntro: 신규 스냅샷은 저장값, 구 스냅샷은 phase 로 폴백(도입부 H2 → phase 에 '도입' 포함)
       const introFlag = gs.isIntro != null ? !!gs.isIntro : /도입/.test(gs.phase || '');
       Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, h2Title: gs.h2Title || h2map.get(gs.phase) || null, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath, imageStale: !!gs.imageStale, imagePromptStale: !!gs.imagePromptStale });
+      if (gs.look) g.look = gs.look;
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
@@ -4900,6 +4909,7 @@ function projectsFromSnapshot(snap) {
     finalizeGroupIds(groups, sentences);
     const proj = new Project({ sentences, groups });
     Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
+    if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
     return proj;
   });
 }
@@ -5756,6 +5766,7 @@ ipcMain.handle('set-group-prompt', (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
+  undoPush('프롬프트 수정');
   if (imagePrompt != null) { g.imagePrompt = String(imagePrompt).trim(); g.imagePromptStale = false; }
   if (videoPrompt != null) { g.videoPrompt = String(videoPrompt).trim(); g.isI2V = !!g.videoPrompt; }
   scheduleAutoSave();
@@ -6065,7 +6076,8 @@ function _toTrash(f) {
 function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj) });
+    // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -6104,6 +6116,7 @@ function _restoreState(st) {
     if (!pr) continue;
     pr.groups = sp.groups.map(_cloneObj);
     pr.sentences = sp.sentences.map(_cloneObj);
+    pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -6267,6 +6280,38 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
     + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
   return { ok: true, dto: P.toDTO(S.parsed) };
+});
+
+// 🖼 그룹 그림 모양 — 채우기(auto·cover·contain) · 반전(좌우·상하) · 움직임(켄번스). 그림 메뉴에서 바꾼다(Vrew 「채우기·반전·애니메이션」).
+ipcMain.handle('set-group-look', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) throw new Error('그룹을 찾을 수 없습니다.');
+  const VL = require('./core/visual-look');
+  const next = VL.normLook({ ...(g.look || {}), ...(args.patch || {}) });
+  undoPush('그림 모양');
+  g.look = VL.isDefault(next) ? undefined : next;
+  storeActive(); pushDtoUpdate();
+  log('🖼 ' + prLabel(pr) + ' G' + g.num + ' 그림 — ' + VL.describe(next));
+  return P.toDTO(S.parsed);
+});
+// 🏷 AI 고지를 보일 문장 범위(Vrew 텍스트 적용 범위). from/to = 편 전체 문장 번호(1부터). clear = 채널 기본(5초 뒤 5초)으로
+ipcMain.handle('set-ai-notice-range', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  undoPush('AI 고지 범위');
+  if (args.clear) { pr.aiNoticeRange = undefined; log('🏷 ' + prLabel(pr) + ' AI 고지 범위 — 채널 기본(5초 뒤 5초)'); }
+  else {
+    const n = pr.sentences.length;
+    const a = Math.max(1, Math.min(n, Math.floor(Number(args.from) || 1)));
+    const b = Math.max(a, Math.min(n, Math.floor(Number(args.to) || a)));
+    pr.aiNoticeRange = { from: a, to: b };
+    log('🏷 ' + prLabel(pr) + ' AI 고지 범위 → 문장 ' + a + '~' + b);
+  }
+  storeActive(); pushDtoUpdate();
+  return P.toDTO(S.parsed);
 });
 
 // 🧩 그룹 경계를 넘는 문장 합치기 — 그룹 마지막 문장 끝에서 Del(= 다음 그룹 첫 문장을 당겨 옴) ·

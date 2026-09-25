@@ -334,6 +334,27 @@ function _clampKbFrame(f) {
   const clamp = (v, d) => Math.min(1 - m, Math.max(m, (v == null ? d : Number(v))));
   return { scale: s, centerX: clamp(f.centerX, 0.5), centerY: clamp(f.centerY, 0.5) };
 }
+// 🖼 그룹 「움직임」(core/visual-look MOTIONS) → 켄번스. auto = 그룹 번호로 돌아가며 · none = 멈춘 그림(필드를 안 쓴다)
+function _kenBurnsForLook(g) {
+  const m = (g && g.look && g.look.motion) || 'auto';
+  if (m === 'none') return null;
+  const idx = { in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[m];
+  if (idx == null) return _kenBurnsFor(g.num);
+  const kb = KEN_BURNS_PATTERNS[idx];
+  return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
+}
+// 반전 — Vrew 설치본 JS 실측: track.editInfo.flip = {vertical, horizontal} (둘 다 false 면 필드 없음)
+function _editInfoForLook(g) {
+  const lk = (g && g.look) || {};
+  return (lk.flipH || lk.flipV) ? { flip: { vertical: !!lk.flipV, horizontal: !!lk.flipH } } : {};
+}
+// 채우기 — 트랙 박스(0..1 캔버스)를 비율로 계산한다. contain = 맞추기(레터박스) · cover = 꽉 채우기(넘치는 쪽은 잘린다)
+function _fillBox(fill, w, h, cW, cH) {
+  const s = fill === 'cover' ? Math.max(cW / w, cH / h) : Math.min(cW / w, cH / h);
+  const wF = (w * s) / cW, hF = (h * s) / cH;
+  return { x: (1 - wF) / 2, y: (1 - hF) / 2, w: wF, h: hF };
+}
+
 function _kenBurnsFor(groupIdx) {
   const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
   return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
@@ -885,7 +906,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       const _vRatio = videoHeight > 0 ? (videoWidth / videoHeight) : _frameRatio;
       const _vMismatch = Math.abs(_vRatio - _frameRatio) > 0.06;
       let _vx, _vy, _vw, _vh;
-      if (_vMismatch) {
+      const _vFill = (g.look && g.look.fill) || 'auto';
+      if (_vFill !== 'auto' && videoWidth > 0 && videoHeight > 0) {
+        const b = _fillBox(_vFill, videoWidth, videoHeight, _canvasW, _canvasH);
+        _vx = b.x; _vy = b.y; _vw = b.w; _vh = b.h;
+        log(`[Vrew] G${g.num} 영상 채우기 = ${_vFill === 'cover' ? '꽉 채우기' : '맞추기'}`);
+      } else if (_vMismatch) {
         const _scale = Math.min(_canvasW / videoWidth, _canvasH / videoHeight);
         _vw = (videoWidth * _scale) / _canvasW;
         _vh = (videoHeight * _scale) / _canvasH;
@@ -902,7 +928,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         sourceIn: 0, sourceOut: dur,
         originalWidthHeightRatio: _vRatio,
         isTrimmable: true, hasAlphaChannel: false,
-        editInfo: {},
+        editInfo: _editInfoForLook(g),
         fillType: 'cut',                 // 트랙 박스가 영상 비율과 동일 → cut 이어도 잘리지 않고 전체 표시
       };
       // 비디오 오디오 트랙 — volume:0 (PrimingFlow TTS 만 들리도록 음소거)
@@ -913,7 +939,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       };
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
       groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid });
-      groupTopY.set(g.id, _vMismatch ? _vy : 0); // 레터박스면 영상 상단 y(검정띠 끝)
+      groupTopY.set(g.id, (_vMismatch || _vFill === 'contain') ? Math.max(0, _vy) : 0); // 레터박스면 영상 상단 y(검정띠 끝)
       mediaZip.push({ src: _vsrc, name: fn });
       groupIdx++;
       continue;
@@ -943,32 +969,46 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     const isz = readImageSize(g.imagePath);
     const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? (isz.w / isz.h) : _frameRatio;
     const mismatch = Math.abs(imgRatio - _frameRatio) > 0.06;
+    const _iFill = (g.look && g.look.fill) || 'auto';
+    const _kbL = _kenBurnsForLook(g);
     let track;
-    if (mismatch) {
+    if (_iFill !== 'auto' && isz && isz.w > 0 && isz.h > 0) {
+      const b = _fillBox(_iFill, isz.w, isz.h, _canvasW, _canvasH);
+      track = {
+        trackId: tid, mediaId: mid,
+        xPos: b.x, yPos: b.y, height: b.h, width: b.w,
+        rotation: 0, zIndex: groupIdx, type: 'image',
+        originalWidthHeightRatio: imgRatio,
+        editInfo: _editInfoForLook(g),
+        stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
+      };
+      if (_kbL) track.kenburnsAnimationInfo = { type: 'custom', from: { ..._kbL.from }, to: { ..._kbL.to } };
+      log(`[Vrew] 그룹${g.num} 이미지 채우기 = ${_iFill === 'cover' ? '꽉 채우기' : '맞추기'}`);
+    } else if (mismatch) {
       // contain: 캔버스 안에 비율 유지로 맞춤 + 가운데. 그 박스 안에서 켄번스 적용(레터박스 유지).
       const scale = Math.min(_canvasW / isz.w, _canvasH / isz.h);
       const wF = (isz.w * scale) / _canvasW;
       const hF = (isz.h * scale) / _canvasH;
-      const kb = _kenBurnsFor(g.num);
+      const kb = _kbL;
       track = {
         trackId: tid, mediaId: mid,
         xPos: (1 - wF) / 2, yPos: (1 - hF) / 2, height: hF, width: wF,
         rotation: 0, zIndex: groupIdx, type: 'image',
         originalWidthHeightRatio: imgRatio,
-        kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } },
-        editInfo: {},
+        ...(kb ? { kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } } } : {}),
+        editInfo: _editInfoForLook(g),
         stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
       };
       log(`[Vrew] 그룹${g.num} 이미지 ${isz.w}x${isz.h}(비율${imgRatio.toFixed(2)}) — 가운데 비율유지 + 켄번스`);
     } else {
-      const kb = _kenBurnsFor(g.num);
+      const kb = _kbL;
       track = {
         trackId: tid, mediaId: mid,
         xPos: _aspect === '16:9' ? -0.004 : 0, yPos: 0, height: 1, width: _aspect === '16:9' ? 1.008 : 1,
         rotation: 0, zIndex: groupIdx, type: 'image',
         originalWidthHeightRatio: _frameRatio,
-        kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } },
-        editInfo: {},
+        ...(kb ? { kenburnsAnimationInfo: { type: 'custom', from: { ...kb.from }, to: { ...kb.to } } } : {}),
+        editInfo: _editInfoForLook(g),
         stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
       };
     }
@@ -1304,4 +1344,5 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   };
 }
 
-module.exports = { buildVrew, readImageSize };
+module.exports = {
+  _kenBurnsForLook, _editInfoForLook, _fillBox, buildVrew, readImageSize };

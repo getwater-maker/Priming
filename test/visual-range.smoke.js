@@ -37,7 +37,7 @@ const SCRIPT = [
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
-const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch (_) {} } };
+const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG}_g.png`)]) { try { if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch (_) {} } };
 
 (async () => {
   cleanup();
@@ -139,6 +139,49 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await key('Control+z');
     ok(await waitG(G3) && fs.readFileSync(MD, 'utf8') === SCRIPT, '↶ 되돌리기 — 모양·대본 원래대로');
 
+    // [4c] 🖼 그림 모양 — 그림이 있어야 메뉴에 나온다: 임시 그림을 G1 에 첨부
+    const png = path.join(os.tmpdir(), TAG + '_g.png');
+    fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAEElEQVR4nGP4z8DAwMDAAAAWAAH+0mZlpgAAAABJRU5ErkJggg==', 'base64'));
+    await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, png);
+    await win.locator('.cut').nth(0).locator('.thumb').first().click();
+    await win.click('[data-testid=vr-menu] button:has-text("첨부")');
+    await win.waitForSelector('.cut img.thumb', { timeout: 5000 });
+    await win.locator('.cut').nth(0).locator('img.thumb').click();
+    const items2 = await win.locator('[data-testid=vr-menu] button').allInnerTexts();
+    ok(items2.some((t) => t.includes('채우기')) && items2.some((t) => t.includes('반전')) && items2.some((t) => t.includes('움직임')), '그림 메뉴에 채우기 · 반전 · 움직임');
+    await win.click('[data-testid=vr-menu] button:has-text("반전")');
+    await win.click('[data-testid=vr-menu] button:has-text("좌우 반전")');
+    await win.waitForTimeout(500);
+    await win.locator('.sblk[data-ord="1"] .sblk-lines, .sent[data-ln="1"] .clip-cap').first().click({ position: { x: 3, y: 3 } }).catch(() => {});
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(400);
+    const tf = await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlook'); return e ? e.style.transform : ''; });
+    ok(/scale\(-1, ?1\)/.test(tf), `① 미리보기에 좌우 반전이 보인다 (${tf})`);
+    await win.locator('.cut').nth(0).locator('img.thumb').click();
+    await win.click('[data-testid=vr-menu] button:has-text("움직임")');
+    await win.click('[data-testid=vr-menu] button:has-text("없음")');
+    await win.waitForTimeout(400);
+    ok(await win.evaluate(() => !!document.querySelector('#stageVisual img.kbnone')), '움직임 없음 → 미리보기 켄번스 멈춤');
+    await key('Control+z');
+    await win.waitForTimeout(400);
+    ok(await win.evaluate(() => !document.querySelector('#stageVisual img.kbnone')), '↶ 움직임 되돌리기');
+
+    // [4d] 🏷 AI 고지 범위 — 꼬리표 → 이 클립부터 끝까지
+    const aiOn = await win.evaluate(() => !!document.querySelector('[data-testid=ai-tag]'));
+    if (!aiOn) { await win.locator('.menubar button:text-is("완성")').first().click(); await win.locator('label.chk:has-text("AI 고지") input').check(); await win.locator('.menubar button:text-is("대본·음성")').first().click(); }
+    await win.waitForSelector('[data-testid=ai-tag]', { timeout: 5000 });
+    ok((await win.locator('[data-testid=ai-tag]').innerText()).includes('기본'), '🏷 AI 고지 꼬리표(첫 문장 위 · 기본 5초 뒤 5초)');
+    await win.click('[data-testid=ai-tag]');
+    await win.click('[data-testid=vr-menu] button:has-text("직접 입력")');
+    await win.fill('.name-ask-layer input', '2-3');
+    await win.click('.name-ask-layer button:has-text("확인")');
+    await win.waitForFunction(() => document.querySelectorAll('.sblk.ai-in').length === 2, null, { timeout: 5000 }).catch(() => {});
+    ok(await win.locator('.sblk.ai-in').count() === 2 && (await win.locator('[data-testid=ai-tag]').innerText()).includes('2~3'), 'AI 고지 → 문장 2~3 (그 두 문장에 표시)');
+    await key('Control+z');
+    await win.waitForTimeout(400);
+    ok(await win.locator('.sblk.ai-in').count() === 0, '↶ AI 고지 범위 되돌리기');
+    await key('Control+z');   // 좌우 반전도 되돌린다
+
     // [5] ⤢ 자막 서식 전체에 적용
     await win.locator('.cut .cf-lineno').first().click();
     await win.waitForSelector('.cf-bar:not(.idle)', { timeout: 5000 });
@@ -156,6 +199,16 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     const bold2 = await win.evaluate(() => [...document.querySelectorAll('.cut .sent')].filter((s) => [...s.querySelectorAll('.capfmt')].some((e) => Number(getComputedStyle(e).fontWeight) >= 700)).length);
     ok(bold2 === 1, `↶ 전체 적용 되돌리기 — 처음 굵게 한 한 줄만 남는다 (${bold2})`);
 
+    // ⏳ 그림이 있는 채로 다시 열기 — 초기화 → 같은 대본 열기(작업본 이어받기로 그림이 되살아난다)
+    await win.click('button.reset-btn');
+    await win.waitForFunction(() => !document.querySelector('.sblk[data-ord]'), null, { timeout: 5000 }).catch(() => {});
+    await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
+    await win.locator('.menubar button:text-is("대본·음성")').first().click();
+    await win.click('.ribbon button:has-text("열기")');
+    await win.waitForSelector('.cut img.thumb', { timeout: 10000 }).catch(() => {});
+    await win.waitForTimeout(2500);
+    const logTxt = fs.readFileSync(path.join(os.homedir(), '.shots-maker', 'logs', new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10) + '.log'), 'utf8');
+    ok(/⏳ 그림·영상 불러오기 \d+\/\d+개 — [\d.]+초/.test(logTxt), '⏳ 그림·영상 불러오기 시간이 로그에 남는다');
     ok(errors.length === 0, `화면 오류 0 ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
   } catch (e) {
     fail++; console.log('  ✗ 예외: ' + e.message);

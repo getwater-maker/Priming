@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import ytChapters from '../../core/yt-chapters.js';
+import VLook from '../../core/visual-look.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
@@ -415,6 +416,10 @@ export default function App() {
   const [impProvider, setImpProvider] = useState('ollama');
   const [impBusy, setImpBusy] = useState(false);
   const [preview, setPreview] = useState(null); // { kind, src }
+  // ⏳ 그림·영상 불러오기 진행 — 작업했던 대본을 열면 썸네일이 한동안 검게 비어 있다(구글드라이브에서 받아 오는 중).
+  //   화면의 그림·영상 칸이 **실제로 다 그려질 때까지** 가운데 창으로 보여 준다(0.4초 안에 끝나면 띄우지 않는다).
+  const [mediaLoad, setMediaLoad] = useState(null);   // { done, total, img, imgT, vid, vidT, sec }
+  const mediaLoadKeyRef = useRef('');
   const [playerOpen, setPlayerOpen] = useState(false);
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
   const impRef = useRef(null);          // 붙여넣기 textarea (비제어)
@@ -1089,6 +1094,54 @@ export default function App() {
     try { const d = await api.mergeGroup({ shortsNum, groupNum }); setDto(d); setStatus(`⤒ G${groupNum} 을 G${groupNum - 1} 에 합쳤습니다 — G${groupNum - 1} 그림을 이어 씁니다`); }
     catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('⤒ 합치기: ' + m); setStatus(m); }
   }
+  // ⏳ 대본이 바뀌면(열기·큐 선택) 화면의 그림·영상이 다 뜰 때까지 센다
+  const _mlKey = dto && dto.projects && !isBk && !isRx ? (dto.fileTitle || '') + '|' + ((queue && queue[mode] && queue[mode].activeId) || '') : '';
+  useEffect(() => {
+    if (!_mlKey) { mediaLoadKeyRef.current = ''; return undefined; }   // 화면을 비우면 다음에 같은 대본을 열어도 다시 센다
+    if (_mlKey === mediaLoadKeyRef.current) return undefined;
+    mediaLoadKeyRef.current = _mlKey;
+    const t0 = performance.now();
+    let shown = false, stop = false, timer = null;
+    const scan = () => {
+      const imgs = [...document.querySelectorAll('.cut img.thumb, #stageVisual img')];
+      const vids = [...document.querySelectorAll('.cut video.thumb, #stageVisual video')];
+      // 영상 = 첫 장면이 그려질 때(readyState 2) · 오류가 나도 끝난 것으로 센다(창이 영원히 안 닫히면 안 된다)
+      const iDone = imgs.filter((e) => e.complete).length;
+      const vDone = vids.filter((e) => e.readyState >= 2 || e.error || e.networkState === 3).length;
+      const total = imgs.length + vids.length, done = iDone + vDone;
+      const sec = (performance.now() - t0) / 1000;
+      const st = { done, total, img: iDone, imgT: imgs.length, vid: vDone, vidT: vids.length, sec };
+      if (total === 0 && sec < 1.5) return false;   // 아직 목록이 안 그려졌을 수 있다
+      if (done >= total || sec > 90) {
+        if (total > 0) { try { api.appendLog(`⏳ 그림·영상 불러오기 ${done}/${total}개 — ${sec.toFixed(1)}초${done < total ? ' (시간 초과 — 나머지는 뒤에서 계속 받습니다)' : ''}`); } catch (_) {} }
+        setMediaLoad(null); return true;
+      }
+      if (shown || sec > 0.4) { shown = true; setMediaLoad(st); }
+      return false;
+    };
+    const tick = () => { if (stop) return; if (!scan()) timer = setTimeout(tick, 250); };
+    timer = setTimeout(tick, 120);
+    return () => { stop = true; clearTimeout(timer); };
+  }, [_mlKey]);
+  // 🖼 그림 모양(채우기·반전·움직임) · 🏷 AI 고지 범위
+  async function setGroupLook(shortsNum, groupNum, patch) {
+    try { const d = await api.setGroupLook({ shortsNum, groupNum, patch }); if (d) setDto(d); setStatus(`🖼 G${groupNum} 그림 모양을 바꿨습니다 (Ctrl+Z 되돌리기)`); }
+    catch (e) { logline('그림 모양 오류: ' + e.message); }
+  }
+  async function setAiRange(shortsNum, from, to, ask) {
+    try {
+      if (ask) {
+        const v = await askName(`AI 고지를 보일 문장 범위 (1~${ask.n}, 예: 1-3)`, ask.cur || '1-3');
+        if (v == null) return;
+        const mm = String(v).match(/(\d+)\s*[-~–]\s*(\d+)/) || String(v).match(/^\s*(\d+)\s*$/);
+        if (!mm) { setStatus('범위는 「1-3」처럼 적습니다'); return; }
+        from = Number(mm[1]); to = Number(mm[2] || mm[1]);
+      }
+      const d = await api.setAiNoticeRange(from == null ? { shortsNum, clear: true } : { shortsNum, from, to });
+      if (d) setDto(d);
+      setStatus(from == null ? '🏷 AI 고지 — 채널 기본(5초 뒤 5초)' : `🏷 AI 고지 → 문장 ${from}~${to}`);
+    } catch (e) { logline('AI 고지 범위 오류: ' + e.message); }
+  }
   // 🖼 그림 적용 범위 — 막대 끌기·썸네일 메뉴 공통. 통째로 덮여 사라지는 그룹의 그림이 있으면 먼저 묻는다.
   async function setVisualRange(shortsNum, groupNum, from, to, ask) {
     try {
@@ -1444,7 +1497,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (ev) => {
       if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
-      const k = String(ev.key || '').toLowerCase();
+      // 🔑 글자가 아니라 **키 자리**(ev.code)로 본다 — 한글 입력 상태에선 ev.key 가 'ㅋ'·'ㅛ' 가 되어 Ctrl+Z 가 안 먹는다
+      const k = ev.code === 'KeyZ' ? 'z' : ev.code === 'KeyY' ? 'y' : String(ev.key || '').toLowerCase();
       if (k !== 'z' && k !== 'y') return;
       const t = ev.target;
       // 글자칸·대본 보기 편집면 안에서는 그 칸의 되돌리기(타이핑 취소)를 쓴다
@@ -2169,15 +2223,20 @@ export default function App() {
     applyStageGeom(cs, g);
     return g.s;
   }
-  const visKey = (c) => (c ? [c.num, c.imagePath, c.videoPath, c.imageVersion, c.videoVersion].join('|') : '');
+  const visKey = (c) => (c ? [c.num, c.imagePath, c.videoPath, c.imageVersion, c.videoVersion, JSON.stringify(c.look || null)].join('|') : '');
   function setVisual(c) {
     const v = stageVisualRef.current; if (!v) return;
     lastVisRef.current = visKey(c);
-    if (c.videoPath) v.innerHTML = `<video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline></video>`;
+    // 🖼 그림 모양(core/visual-look) — 반전은 바깥 칸에(켄번스가 그림 자체의 transform 을 쓰므로) · 채우기 = object-fit · 움직임 = 켄번스 종류
+    const lk = VLook.normLook(c.look);
+    const flipT = (lk.flipH || lk.flipV) ? ` style="transform:scale(${lk.flipH ? -1 : 1},${lk.flipV ? -1 : 1})"` : '';
+    const fitS = lk.fill === 'auto' ? '' : ` style="object-fit:${lk.fill}"`;
+    if (c.videoPath) v.innerHTML = `<div class="vlook"${flipT}><video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline${fitS}></video></div>`;
     else if (c.imagePath) {
-      // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) → 단조롭지 않게.
-      const kbIdx = ((Number(c.num) || 0) * 7 + 3) % 12;
-      v.innerHTML = `<img class="kb kb${kbIdx}" src="${media(c.imagePath, c.imageVersion)}">`;
+      // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) → 단조롭지 않게. 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
+      const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
+      const kbCls = lk.motion === 'none' ? 'kbnone' : `kb kb${kbIdx}`;
+      v.innerHTML = `<div class="vlook"${flipT}><img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}></div>`;
       const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
     } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
   }
@@ -3114,7 +3173,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -3135,6 +3194,17 @@ export default function App() {
       </div>
       {!logDocked && logBox}
 
+      {mediaLoad && (
+        <div className="mload" data-testid="media-load">
+          <div className="mload-card">
+            <div className="mload-t"><span className="spin" /> 그림·영상을 불러오는 중… <b>{mediaLoad.done}/{mediaLoad.total}</b></div>
+            <div className="mload-bar"><i style={{ width: (mediaLoad.total ? (mediaLoad.done / mediaLoad.total) * 100 : 0).toFixed(1) + '%' }} /></div>
+            <div className="mload-d">이미지 {mediaLoad.img}/{mediaLoad.imgT} · 영상 {mediaLoad.vid}/{mediaLoad.vidT} · {mediaLoad.sec.toFixed(0)}초
+              <span className="mload-h">구글 드라이브에서 받아 오는 중이라 처음 열 때 오래 걸립니다 — 작업은 그대로 할 수 있습니다</span></div>
+            <button className="ghost" onClick={() => setMediaLoad(null)}>숨기기</button>
+          </div>
+        </div>
+      )}
       {preview && (
         <div id="preview" className="show" onClick={(e) => { if (e.target.classList.contains('close')) setPreview(null); }}>
           <div id="previewBody">
@@ -4175,7 +4245,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange }) {
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
   const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
   const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
@@ -4207,6 +4277,9 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
     document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
   }, [vrMenu]);
+  // 🏷 AI 고지가 보이는 문장 — 범위를 정했으면 그 문장들, 아니면 표시하지 않는다(기본 5초는 첫 문장 위 꼬리표로만)
+  const aiIn = (pr, ord) => !!(aiNotice && pr.aiNoticeRange && ord >= pr.aiNoticeRange.from && ord <= pr.aiNoticeRange.to);
+  const aiFirst = (pr) => (pr.aiNoticeRange ? pr.aiNoticeRange.from : 1);
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -4303,7 +4376,14 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     );
                   }
                   return (
-                    <div className={'sblk' + (vrR && gs + si >= vrR.from && gs + si <= vrR.to ? ' vr-hit' : '')} key={si} data-ord={gs + si} data-sn={pr.shortsNum}>
+                    <React.Fragment key={si}>
+                    {aiNotice && onAiRange && gs + si === aiFirst(pr) && (
+                      <button className="ai-tag" data-testid="ai-tag" title="AI 고지 문구가 보이는 범위 — 눌러서 바꾸기(Vrew 텍스트의 적용 범위)"
+                        onClick={(ev) => { ev.stopPropagation(); setVrMenu({ kind: 'ai', shortsNum: pr.shortsNum, n: nSent, cur: pr.aiNoticeRange, ord: gs + si, x: ev.clientX, y: ev.clientY }); }}>
+                        🏷 AI 고지 {pr.aiNoticeRange ? `${pr.aiNoticeRange.from}~${pr.aiNoticeRange.to}` : '· 5초 뒤 5초(기본)'}
+                      </button>
+                    )}
+                    <div className={'sblk' + (vrR && gs + si >= vrR.from && gs + si <= vrR.to ? ' vr-hit' : '') + (aiIn(pr, gs + si) ? ' ai-in' : '')} key={si} data-ord={gs + si} data-sn={pr.shortsNum}>
                       {/* 합친 그룹 안의 옛 섹션 경계 — 그림은 앞 그림을 이어 쓰지만 챕터(타임스탬프)는 여기서 갈린다 */}
                       {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
                       <div className={'sblk-lines' + (capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum && capSel.items.some((x) => x.groupNum === c.num && x.sentIdx === si) ? ' capsel' : '')}
@@ -4396,12 +4476,13 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         })}
                       </div>
                     </div>
+                    </React.Fragment>
                   );
                 });
                 return (
                   <div className={'cut' + (isLf ? ' lf' : '')} key={c.num}>
                     <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
-                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs, ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: false }) : null} />
+                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs, ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
                     <div>
                       <div className={'narr' + (c.isIntro ? ' intro' : '')}>
                         <div className="narr-top">
@@ -4438,8 +4519,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           </div>
         );
       })}
-      {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu({ ...vrMenu, sub: v })}
-        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} />}
+      {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu((cur) => (cur ? { ...cur, sub: v } : cur))}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} />}
       {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
   );
@@ -4451,16 +4532,34 @@ function vrRangeOf(d) {
   return { from: d.gs, to: Math.max(d.ord, d.gs) };
 }
 
-// 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 적용 범위 변경
-function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange }) {
-  const c = m.c, sn = m.shortsNum;
-  const has = !!(c.imagePath || c.videoPath);
+// 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange, onLook, onAiRange }) {
+  const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
-  const style = { left: Math.min(m.x, window.innerWidth - 250), top: Math.min(m.y, window.innerHeight - 290) };
-  if (m.sub) {
+  const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
+  const chk = (on) => <span className="vr-chk">{on ? '✓' : ''}</span>;
+  if (m.kind === 'ai') {
+    const cur = m.cur;
     return (
       <div className="vr-menu" style={style} data-testid="vr-menu">
-        <button className="vr-back" onClick={() => setSub(false)}>‹ 적용 범위 변경</button>
+        <div className="vr-cur">🏷 AI 고지 — 지금: {cur ? `문장 ${cur.from}~${cur.to}` : '5초 뒤 5초 동안(채널 기본)'}</div>
+        <button onClick={go(() => onAiRange(sn, 1, m.n))}>전체 클립으로</button>
+        <button onClick={go(() => onAiRange(sn, 1, m.ord))}>처음부터 이 클립까지</button>
+        <button onClick={go(() => onAiRange(sn, m.ord, m.n))}>이 클립부터 끝까지</button>
+        <button onClick={go(() => onAiRange(sn, null, null, { n: m.n, cur: cur ? `${cur.from}-${cur.to}` : '1-3' }))}>직접 입력…</button>
+        {cur && <><div className="vr-sep" /><button onClick={go(() => onAiRange(sn, null, null))}>채널 기본으로(5초 뒤 5초)</button></>}
+      </div>
+    );
+  }
+  const c = m.c;
+  const has = !!(c.imagePath || c.videoPath);
+  const lk = VLook.normLook(c.look);
+  const look = (patch) => go(() => onLook(sn, c.num, patch));
+  const back = <button className="vr-back" onClick={() => setSub(null)}>‹ {({ range: '적용 범위 변경', fill: '채우기', flip: '반전', motion: '움직임(애니메이션)' })[m.sub]}</button>;
+  if (m.sub === 'range') {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        {back}
         <div className="vr-cur">지금: 문장 {m.gs}~{m.ge} (편 전체 {m.n}문장)</div>
         <button onClick={go(() => onRange(sn, c.num, 1, m.n))}>전체 클립으로</button>
         <button onClick={go(() => onRange(sn, c.num, 1, m.ge))}>처음부터 이 그림 끝까지</button>
@@ -4469,15 +4568,47 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       </div>
     );
   }
+  if (m.sub === 'fill') {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        {back}
+        {VLook.FILLS.map((f) => <button key={f.id} title={f.hint} onClick={look({ fill: f.id })}>{chk(lk.fill === f.id)}{f.label}</button>)}
+      </div>
+    );
+  }
+  if (m.sub === 'flip') {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        {back}
+        <button onClick={look({ flipH: !lk.flipH })}>{chk(lk.flipH)}좌우 반전</button>
+        <button onClick={look({ flipV: !lk.flipV })}>{chk(lk.flipV)}상하 반전</button>
+        {(lk.flipH || lk.flipV) && <><div className="vr-sep" /><button onClick={look({ flipH: false, flipV: false })}>반전 없애기</button></>}
+      </div>
+    );
+  }
+  if (m.sub === 'motion') {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        {back}
+        {VLook.MOTIONS.map((x) => <button key={x.id} onClick={look({ motion: x.id })}>{chk(lk.motion === x.id)}{x.label}</button>)}
+      </div>
+    );
+  }
   return (
     <div className="vr-menu" style={style} data-testid="vr-menu">
       {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>
         : c.imagePath ? <button onClick={go(() => onPreview('img', media(c.imagePath, c.imageVersion)))}>🔍 크게 보기</button> : null}
+      {has && onLook && <>
+        <button onClick={() => setSub('fill')}>⛶ 채우기 <span className="vr-val">{VLook.FILLS.find((f) => f.id === lk.fill).label}</span> ›</button>
+        <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
+        {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}</span> ›</button>}
+        <div className="vr-sep" />
+      </>}
       <button onClick={go(() => onAttach(sn, c.num))}>🔁 {has ? '교체' : '첨부'} (파일)</button>
       <button onClick={go(() => onRegen(sn, c.num))}>🖼 AI로 이미지 생성</button>
       <button onClick={go(() => onGroupVid(sn, c.num))}>🎬 AI로 비디오 생성</button>
       <div className="vr-sep" />
-      <button onClick={() => setSub(true)}>↕ 적용 범위 변경 ›</button>
+      <button onClick={() => setSub('range')}>↕ 적용 범위 변경 ›</button>
       {has && <><div className="vr-sep" /><button className="vr-del" onClick={go(() => onClear(sn, c.num))}>🗑 삭제</button></>}
     </div>
   );

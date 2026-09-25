@@ -133,7 +133,8 @@ function stage2() {
   ok(!/💾 \.vrew<\/button>/.test(APP), '💾 .vrew 버튼은 없다 — ⚡ 만들기로 통일(2026-09-24)');
   ok(/outMode: effOutMode\(\),  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다(화이트보드는 늘 전체)');
   ok(/_needImg = \(om === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');
-  ok(/📥 Vrew 음성<\/button>/.test(APP), '작업바에 「📥 Vrew 음성」 버튼');
+  // v0.5.43 리본 큰 버튼 — 아이콘·글자가 span 둘로 나뉘었다(onClick 으로 찾는다)
+  ok(/onClick=\{runImportVrewAudio\}><span className="rb-ic">📥<\/span> <span className="rb-t">Vrew 음성<\/span><\/button>/.test(APP), '작업바에 「📥 Vrew 음성」 버튼');
   ok(/<option value="audio">🎤 음성만<\/option>/.test(APP) && /<option value="visual">🖼 화면만<\/option>/.test(APP), '출력 select 3항목');
   ok((APP.match(/<option value="visual">/g) || []).length === 1, '출력 select 는 **한 곳**만(진입점 이중화 금지)');
 

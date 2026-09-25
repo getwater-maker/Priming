@@ -448,15 +448,31 @@ function kenBurnsFilter(kb, frames, off = 0, total = 0) {
 }
 
 /** 구간 그림을 캔버스로 한 번만 cover 해 둔다(같은 구간의 조각들이 함께 쓴다). */
-function coverImage(file, ctx) {
+function coverImage(file, ctx, tr) {
   ctx.covers = ctx.covers || new Map();
-  if (!ctx.covers.has(file)) {
+  const fit = placeFilters(tr);
+  const key = file + '|' + fit;
+  if (!ctx.covers.has(key)) {
     const name = `cov_${ctx.covers.size}.png`;
-    ctx.covers.set(file, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
-      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}`,
+    ctx.covers.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
+      '-vf', fit,
       '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
   }
-  return ctx.covers.get(file);
+  return ctx.covers.get(key);
+}
+/**
+ * 🖼 .vrew 트랙 → 화면에 놓는 필터. **트랙 박스가 정본**이다(빌더가 채우기를 박스로 적는다):
+ *   박스가 캔버스보다 작으면(한쪽이 모자람) = 맞추기(검정 띠 · 가운데) · 아니면 = 꽉 채우기(가운데 자르기).
+ *   반전 = editInfo.flip(Vrew 형식). 옛 판은 이미지를 늘 꽉 채웠다 → 비율이 다른 그림이 .vrew 는 레터박스인데 MP4 는 잘렸다(이제 같다).
+ */
+function placeFilters(tr) {
+  const t = tr || {};
+  const contain = (typeof t.width === 'number' && t.width < 0.985) || (typeof t.height === 'number' && t.height < 0.985);
+  const fl = (t.editInfo && t.editInfo.flip) || {};
+  const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
+  return (contain
+    ? `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`
+    : `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H},setsar=1`) + flip;
 }
 
 /**
@@ -519,7 +535,7 @@ async function renderChunk(ch, i, ctx) {
   const pre = ctx.filterThreads > 0 ? ['-filter_threads', String(ctx.filterThreads)] : [];
   if (ch.type === 'image' && ch.file) {
     const tr = ch.track || {};
-    const cov = await coverImage(ch.file, ctx);
+    const cov = await coverImage(ch.file, ctx, tr);
     // 🔑 그림을 **한 번만 디코딩**해 메모리에서 반복하고(loop 필터), YUV 로 켄번스를 돌린다.
     //   `-loop 1 -i x.png` 는 **매 프레임 PNG 를 다시 디코딩**하고 perspective 가 RGB 전체 해상도에서 돈다
     //   (실측 600프레임: 9.2초 → 5.3초 · 옛 zoompan 7.0초보다도 빠르다).
@@ -529,7 +545,7 @@ async function renderChunk(ch, i, ctx) {
       '-frames:v', String(frames), '-vf', vf, ...common];
   } else if (ch.type === 'video' && ch.file) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
-    const vf = [`scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos`, `crop=${W}:${H}`, `fps=${FPS}`,
+    const vf = [placeFilters(ch.track), `fps=${FPS}`,
       'tpad=stop_mode=clone:stop_duration=3600', assFilter].join(',');
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
   } else {
@@ -761,6 +777,7 @@ async function renderVrewToMp4(opts = {}) {
 }
 
 module.exports = {
+  placeFilters,
   renderVrewToMp4,
   // 테스트·도구용
   buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,

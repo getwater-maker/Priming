@@ -75,6 +75,7 @@ function toDTO(parseResult) {
         mode: pr.mode || mode,
         aspect: pr.aspect,
         voice: pr.voice,
+        aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지를 보일 문장 범위(없으면 채널 기본 = 5초 뒤 5초)
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);
           const mediaVersion = (file) => {
@@ -113,6 +114,7 @@ function toDTO(parseResult) {
             imageVersion: mediaVersion(g.imagePath),
             videoVersion: mediaVersion(g.videoPath),
             imageStale: !!g.imageStale,
+            look: g.look || null,   // 🖼 채우기·반전·움직임(core/visual-look)
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
             videoStatus: g.videoStatus || null, // 'generating' | 'upscaling' | 'done' | 'fail'
           };
@@ -481,7 +483,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
   };
   if (preset) {
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
-    if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = preset.aiNotice;
+    if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
   }
