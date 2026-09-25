@@ -364,6 +364,8 @@ function _boxOfLook(g) {
   return (o.w > 0.02 && o.h > 0.02 && o.w < 10 && o.h < 10 && Math.abs(o.x) < 10 && Math.abs(o.y) < 10) ? o : null;
 }
 
+// 🎞 영상 길이 맞추기(core/video-fit)로 새 파일을 굽는 상한 — 넘으면 Vrew 반복 재생(파일 크기 폭증 방지 · v0.5.50)
+const FIT_MAX_SEC = 90;
 function _kenBurnsFor(groupIdx) {
   const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
   return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
@@ -867,9 +869,15 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       //   원본 g.videoPath 는 그대로 — 맞춘 파일은 캐시에 둔다. 실패하면 원본(예전 동작).
       let _vsrc = g.videoPath;
       let _vmeta0 = readMp4VideoMeta(_vsrc);
+      // 🔴 v0.5.50 — 그림 범위를 편 끝까지 늘린 5초 영상을 18분짜리 파일로 새로 구웠다(620MB) → .vrew 가 부풀어 Vrew 가 열다 멈췄다.
+      //   맞출 길이가 FIT_MAX_SEC 를 넘으면 파일을 늘리지 않고 **Vrew 의 반복 재생**(샘플.vrew: sourceOut = 파일 길이 + endBehavior loop)에 맡긴다.
+      let _loopNative = false;
       if (opts.fitVideo !== false && _vmeta0 && _vmeta0.duration > 0) {
         let _gd = _spanDur(g);   // 🖼 이어 깐 범위까지
-        if (_gd > 0) {
+        if (_gd > (opts.fitMaxSec > 0 ? opts.fitMaxSec : FIT_MAX_SEC) && _gd > _vmeta0.duration + 0.05) {
+          _loopNative = true;
+          log(`🎞 G${g.num} 영상 ${_vmeta0.duration.toFixed(1)}초 → ${_gd.toFixed(0)}초 구간은 Vrew 반복 재생으로(파일은 그대로)`);
+        } else if (_gd > 0) {
           try {
             const fit = await require('../core/video-fit').fitVideo(_vsrc, _vmeta0.duration, _gd, { log, label: `G${g.num} ` });
             if (fit.path !== _vsrc) { const m2 = readMp4VideoMeta(fit.path); if (m2) { _vsrc = fit.path; _vmeta0 = m2; } }
@@ -960,7 +968,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         loop: true, playbackRate: 1, type: 'videoAudio',
       };
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
-      groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid });
+      groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid, loopNative: _loopNative, fileDur: dur });
       groupTopY.set(g.id, (_vMismatch || _vFill === 'contain') ? Math.max(0, _vy) : 0); // 레터박스면 영상 상단 y(검정띠 끝)
       mediaZip.push({ src: _vsrc, name: fn });
       groupIdx++;
@@ -1251,8 +1259,14 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     if (groupDur > 0) {
       const vTrack = pj.props.tracks[ga.videoTid];
       const aTrack = pj.props.tracks[ga.audioTid];
-      if (vTrack) vTrack.sourceOut = groupDur;
-      if (aTrack) aTrack.sourceOut = groupDur;
+      if (ga.loopNative && ga.fileDur > 0) {
+        // 파일 길이만큼만 가리키고 Vrew 가 반복한다(샘플.vrew 와 같은 모양)
+        if (vTrack) { vTrack.sourceOut = ga.fileDur; vTrack.endBehavior = 'loop'; }
+        if (aTrack) { aTrack.sourceOut = ga.fileDur; aTrack.loop = true; }
+      } else {
+        if (vTrack) vTrack.sourceOut = groupDur;
+        if (aTrack) aTrack.sourceOut = groupDur;
+      }
     }
   }
 

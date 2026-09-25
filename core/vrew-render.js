@@ -73,6 +73,18 @@ function ff(args, { cwd, signal, low = false } = {}) {
 // ── 인코더: NVENC 가 있으면 쓰고, 없으면 CPU(libx264) ─────────────────────────
 //   🔑 아내 PC 는 NVIDIA 가 없다(nvidia-smi 응답 없음) — NVENC 만 가정하면 그 PC 에서는 전부 실패한다.
 let _encCache = null;
+
+// 🎞 영상 입력 인자 — Vrew 트랙이 endBehavior:'loop' 면(v0.5.50 · 긴 범위) 파일을 되풀이한다. offSec = 이 조각 전까지 보인 시간.
+function videoInArgs(tr, offSec) {
+  const t = tr || {};
+  const off = Math.max(0, +offSec || 0);
+  if (t.endBehavior === 'loop' && +t.sourceOut > 0.1) {
+    const r = off % (+t.sourceOut);
+    return ['-stream_loop', '-1', ...(r > 0.001 ? ['-ss', r.toFixed(3)] : [])];
+  }
+  return off > 0 ? ['-ss', off.toFixed(3)] : [];
+}
+
 async function pickEncoder(tmpDir, log) {
   if (_encCache) return _encCache;
   try {
@@ -597,8 +609,7 @@ async function renderChunk(ch, i, ctx) {
         ins.push('-i', png);
         parts.push(`[${k + 1}:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
       } else {
-        if (lo > 0) ins.push('-ss', (lo / FPS).toFixed(3));
-        ins.push('-i', l.file);
+        ins.push(...videoInArgs(tr, lo / FPS), '-i', l.file);
         parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600,format=yuv420p[l${k}]`);
       }
       parts.push(`${prev}[l${k}]overlay=x=${bx}:y=${by}:eof_action=repeat${k === L.length - 1 ? '' : `[b${k}]`}`);
@@ -620,7 +631,7 @@ async function renderChunk(ch, i, ctx) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
     const vf = [placeFilters(ch.track), `fps=${FPS}`,
       'tpad=stop_mode=clone:stop_duration=3600', assFilter].join(',');
-    const ss = ch.kbOff > 0 ? ['-ss', (ch.kbOff / FPS).toFixed(3)] : [];   // 🖼 아래층으로 이어진 영상 — 끊긴 데서 잇는다
+    const ss = videoInArgs(ch.track, ch.kbOff > 0 ? ch.kbOff / FPS : 0);   // 🖼 아래층으로 이어진 영상 — 끊긴 데서 잇는다 · 반복 영상이면 되풀이
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', ...ss, '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
   } else {
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`,
