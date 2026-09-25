@@ -179,6 +179,18 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForFunction(() => /재생/.test((document.querySelector('[data-testid=play-btn]') || {}).textContent || ''), null, { timeout: 3000 });
     await win.waitForTimeout(300);
     ok(/첫째 그룹 첫 문장/.test(await stageCap()), 'Space 한 번 더 = 멈춤 · ① 은 커서 자리 정지 화면으로');
+    // 🔑 v0.5.59 — 그룹 가운데 클립에서 Space = **그 클립부터**(예전엔 그룹 처음부터 틀었다)
+    {
+      const n2 = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('첫째 그룹 둘째')); return e ? Number(e.dataset.ln) : 0; });
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home');
+      for (let i = 1; i < n2; i++) await win.keyboard.press('ArrowDown');
+      await win.waitForTimeout(200);
+      await win.keyboard.press(' ');
+      await win.waitForTimeout(350);
+      const c = await stageCap();
+      ok(n2 > 1 && /첫째 그룹 둘째/.test(c) && !/첫 문장/.test(c), `🔑 그룹 둘째 클립(${n2})에서 Space → 그 클립부터 「${c}」`);
+      await win.keyboard.press(' '); await win.waitForTimeout(300);
+    }
 
     // [9] 보기 전환 — 카드
     await win.click('.clipbar button[data-view="cards"]');

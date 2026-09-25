@@ -575,11 +575,11 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
       pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize: fs.statSync(ov.file).size, name: fn, type: 'AVMedia',
         videoAudioMetaInfo: { duration: fileDur, audioInfo: { sampleRate: sr, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: chn } }, sourceFileType: 'BGM', fileLocation: 'IN_MEMORY' });
       const vol = (isFinite(+ov.volume) ? +ov.volume : 30) / 100;
-      pj.props.tracks[tid] = { trackId: tid, mediaId: mid, volume: vol, fade: { in: true, out: true }, sourceIn: 0, sourceOut: fileDur, loop: true, playbackRate: 1, type: 'bgm' };
+      pj.props.tracks[tid] = { trackId: tid, mediaId: mid, volume: vol, fade: { in: true, out: true }, sourceIn: 0, sourceOut: fileDur, loop: !ov.once, playbackRate: 1, type: 'bgm' };   // once = 1회 재생(끝나면 멈춘다 · v0.5.59)
       pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
       mediaZip.push({ src: ov.file, name: fn });
       out.set(i, aid);
-      log(`[Vrew] ➕ 삽입 ${i + 1}: ${path.basename(ov.file)} (오디오 · 음량 ${Math.round(vol * 100)}% · 반복)`);
+      log(`[Vrew] ➕ 삽입 ${i + 1}: ${path.basename(ov.file)} (오디오 · 음량 ${Math.round(vol * 100)}% · ${ov.once ? '1회' : '반복'})`);
       continue;
     }
     const mid = uid(), aid = uid(), tid = sid();
@@ -601,10 +601,10 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
       });
       const atid = sid();
       pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'video',
-        sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo: {}, endBehavior: 'loop', fillType: 'cut' };
+        sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo: {}, ...(ov.once ? {} : { endBehavior: 'loop' }), fillType: 'cut' };
       // 🔊 삽입 영상의 소리 — 음량 %(기본 100 · 0 = 끔). 그룹 영상은 내레이션과 겹치지 않게 늘 음소거(위 그룹 분기)
       const _vv = (isFinite(+ov.volume) ? +ov.volume : 100) / 100;
-      pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: _vv, sourceIn: 0, sourceOut: dur, loop: true, playbackRate: 1, type: 'videoAudio' };
+      pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: _vv, sourceIn: 0, sourceOut: dur, loop: !ov.once, playbackRate: 1, type: 'videoAudio' };
       pj.props.assets[aid] = { trackIds: [tid, atid], role: 'sub' };
     } else {
       pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize, name: fn, type: 'Image', isTransparent: ext === 'png', fileLocation: 'IN_MEMORY' });

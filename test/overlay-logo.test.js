@@ -110,6 +110,26 @@ const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입�
     const lL = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1 });
     ok(isG(px(fr2(s0 / 2), Math.round((lL.x + lL.w / 2) * 192), Math.round((lL.y + lL.h / 2) * 108))), 'MP4 에도 로고가 왼쪽 위');
 
+    console.log('\n[4b] 🎵 오디오 1회 재생(v0.5.59) — 반복하지 않는다 · 작업본에 남는다');
+    pr.overlays = [{ id: 'a1', file: tone, kind: 'audio', volume: 100, once: true, ...OL.idsFromOrds(pr, 2, 3) }];
+    const snapO = OL.toSnap(pr);
+    ok(snapO[0] && snapO[0].once === true, '작업본에 once 저장');
+    { const pr2 = { groups: pr.groups, sentences: pr.sentences }; OL.fromSnap(pr2, snapO); ok(pr2.overlays && pr2.overlays[0].once === true && OL.toDTO(pr2)[0].once === true, '다시 열어도 once · 화면(DTO)에도'); }
+    const vrewO = path.join(tmp, 'o.vrew');
+    await P.buildProjectVrew(pr, vrewO, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 } }, () => {}, 20, 1);
+    const pjO = JSON.parse(new AdmZip(vrewO).readAsText('project.json'));
+    const auO = Object.values(pjO.props.tracks).find((t) => t.type === 'bgm');
+    ok(auO && auO.loop === false, '🔑 .vrew 배경음 트랙 loop = false(1회)');
+    const mp4O = path.join(tmp, 'o.mp4');
+    const resO = await R.renderVrewToMp4({ vrewPath: vrewO, outPath: mp4O, log: () => {}, par: 1 });
+    ok(resO && resO.ok, '렌더 성공');
+    const s2 = pr.sentences[2].ttsDurationSec;
+    const volO = (x, y) => { let err = ''; try { const r = require('child_process').spawnSync(FF, ['-hide_banner', '-ss', String(x), '-t', String(y - x), '-i', mp4O, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }); err = r.stderr || ''; } catch (_) {} const m = err.match(/mean_volume:\s*(-?[\d.]+|-inf) dB/); return m ? (m[1] === '-inf' ? -200 : +m[1]) : -200; };
+    const o1 = volO(s0 + 0.15, s0 + 0.8), o2 = volO(s0 + 1.4, s0 + s1 + s2 - 0.2);
+    console.log('   1회 음량 dB', { 처음: o1, 끝난뒤: o2 });
+    ok(o1 > -35, `범위 첫 1초 = 소리 (${o1}dB)`);
+    ok(o2 < -60, `🔑 소리가 끝난 뒤 = 조용(되풀이하지 않는다 · ${o2}dB)`);
+
     console.log('\n[5] 🔊 삽입 영상의 소리(클립 2~3 · 100%) · 소리 없는 영상도 렌더가 안 깨진다');
     const vs = path.join(tmp, 'vs.mp4'), vn = path.join(tmp, 'vn.mp4');
     execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=660:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', vs]);

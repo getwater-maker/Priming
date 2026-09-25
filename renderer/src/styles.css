@@ -707,21 +707,7 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .cthumb{width:100px;height:56px;border-radius:6px;background:#1a1714;overflow:hidden;cursor:pointer}
 .cthumb img,.cthumb video{width:100%;height:100%;object-fit:cover;display:block}
 .clip-side .clip-time{font-size:11px;color:#8a7b66;white-space:nowrap}
-.ins-lanes{position:absolute;right:calc(100% + 18px);top:0;bottom:0;width:calc(var(--lanes, 1) * 28px);pointer-events:none}
-.ins-lanes .lane{position:absolute;top:-7px;bottom:-7px;width:28px}
-.ins-lanes .lane::before{content:'';position:absolute;left:12px;width:4px;top:0;bottom:0;border-radius:2px;background:#e3b066}
-.ins-lanes .lane.audio::before{background:#2ec4f0}
-.ins-lanes .lane.video::before{background:#8e6ad8}
-.ins-lanes .lane.s::before{top:40px}
-.ins-lanes .lane.e::before{bottom:18px}
-.ins-lanes .lane .ins-mark{position:absolute;top:11px;left:0;width:28px;height:28px;pointer-events:auto}
-.ins-lanes .lane.c{top:-190px}
-.ins-lanes .lane.c{top:-7px}
 .narr{position:relative}
-.narr .ins-lanes.nb{right:calc(100% + 1px);top:-28px;bottom:-12px}
-.narr .ins-lanes.nb .lane{top:0;bottom:0}
-.narr .ins-lanes.nb{right:calc(100% - 1px)}
-.narr .ins-lanes.nb{right:calc(100% + 2px)}
 
 /* ── 🎬 Vrew 식 — 그룹 머리줄 없음 · 그룹 그림 = 레일 옆 작은 아이콘(v0.5.58) ── */
 .cuts-grid.vrew .cut.lf{grid-template-columns:calc(var(--lanes, 1) * 28px + 62px) 1fr;margin-bottom:0}
@@ -733,7 +719,35 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .cuts-grid.vrew .gicon .genoverlay div:not(.spin){font-size:0}
 .cuts-grid.vrew .gicon .thumbwrap:has(.genoverlay){outline:2px solid var(--warn);outline-offset:1px;border-radius:8px}
 .cuts-grid.vrew .gicon .genoverlay .spin{width:14px;height:14px}
-.cuts-grid.vrew .ins-lanes{right:calc(100% + 58px)}
-.cuts-grid.vrew .sents > .ins-lanes.nb{right:calc(100% + 44px);top:-40px;bottom:auto;height:40px}
-.cuts-grid.vrew .sents > .ins-lanes.nb .lane{top:0;bottom:0}
-.cuts-grid.vrew .sents > .ins-lanes.nb{right:calc(100% + 46px)}
+
+/* ── 🎬 v0.5.59 — 그룹 머리줄 = Vrew 「씬」 · 삽입 범위 막대(이어진 한 줄 + 시작·끝 손잡이) · 겹친 작은 그림 ── */
+.cuts-grid.vrew{position:relative}
+.scene-h{display:flex;align-items:center;gap:6px;min-height:32px;margin:14px 0 6px;padding-top:12px;border-top:1px solid #eadfcd;font-size:14px;color:var(--strong)}
+.cuts-grid.vrew .cut:first-child .scene-h{border-top:0;padding-top:0;margin-top:2px}
+.scene-h .sc-fold{background:none;border:0;color:#8a7b66;font-size:17px;line-height:1;width:22px;padding:0;cursor:pointer}
+.scene-h .sc-fold:hover{color:var(--strong)}
+.scene-h .sc-num{font-weight:800;color:#8a7b66}
+.scene-h .sc-title{font-weight:700;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-h.intro .sc-num{color:var(--hook, #c0392b)}
+.scene-h .sc-btns{display:inline-flex;gap:2px;margin-left:4px}
+.scene-h .sc-btns .gprev{padding:1px 6px;font-size:13px}
+.scene-h .sc-time{font-size:12px;color:#8a7b66;white-space:nowrap}
+.scene-h .sc-time.over{color:var(--danger)}
+.cut.folded .sents{display:none}
+.lane-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:4}
+.lanev{position:absolute;width:28px}
+.lanev .lline{position:absolute;left:12px;width:4px;top:0;bottom:0;border-radius:2px;background:#e3b066}
+.lanev.audio .lline,.lanev.audio .lcap{background:#2ec4f0}
+.lanev.video .lline,.lanev.video .lcap{background:#8e6ad8}
+.lanev .lcap{position:absolute;left:7px;width:14px;height:8px;border-radius:4px;background:#e3b066;box-shadow:0 0 0 2px #fff;cursor:ns-resize;pointer-events:auto}
+.lanev .lcap.s{top:-4px}.lanev .lcap.e{bottom:-4px}
+.lanev .lcap:hover,.lanev.drag .lcap{transform:scaleX(1.25)}
+.lanev .ins-mark{position:absolute;top:8px;left:0;width:28px;height:28px;border-radius:7px;font-size:15px;line-height:26px;box-shadow:0 1px 3px rgba(0,0,0,.15);pointer-events:auto}
+.lanev .ins-mark.audio{background:#e8f6fd;border-color:#2ec4f0;color:#0b6f93}
+.lanev .ins-mark.video{background:#f3ecff;border-color:#8e6ad8}
+.cthumb{position:relative}
+.cthumb .cl-layer{position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden}
+.cthumb .cl-layer img{width:100%;height:100%;object-fit:cover;display:block}
+.cthumb .frame-wait{display:block;width:100%;height:100%;background:#3a332c}
+.cthumb.empty{background:#f1ebe1;display:flex;align-items:center;justify-content:center}
+.cthumb .cthumb-none{font-size:10px;color:#a89a84}

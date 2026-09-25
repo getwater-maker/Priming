@@ -6521,8 +6521,32 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
     if (!ov) return { ok: false, error: '위층을 찾지 못했습니다' };
     if (op === 'range') {
       const ids = OL.idsFromOrds(pr, args.from, args.to); if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
-      undoPush('삽입 범위'); Object.assign(ov, ids);
+      undoPush('삽입 범위'); Object.assign(ov, ids); delete ov.once;   // 사람이 범위를 고르면 「1회 재생」은 풀린다(다시 반복)
       log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 범위 → ${rangeTxt(ids)}`);
+    } else if (op === 'once') {
+      // 🎵 오디오 1회 재생까지(v0.5.59) — 시작 클립은 그대로, 끝 = 소리 길이만큼 흐른 클립 · 반복하지 않는다(끝나면 멈춘다)
+      if (ov.kind === 'image') return { ok: false, error: '그림에는 소리가 없습니다' };
+      let dur = 0;
+      try { dur = Number(await require('./core/media-utils').getMediaDuration(ov.file)) || 0; } catch (_) {}
+      if (!(dur > 0.2)) return { ok: false, error: '파일 길이를 읽지 못했습니다' };
+      const VS = require('./core/visual-span');
+      const c = VS.orderOf(pr); const r = OL.rangeOf(pr, ov, c);
+      if (!r) return { ok: false, error: '범위를 잃은 삽입입니다' };
+      const byId = new Map(pr.sentences.map((x) => [x.id, x]));
+      let t = 0, k = r.a, est = 0;
+      for (; k < c.order.length; k++) {
+        const se = byId.get(c.order[k]);
+        let d = se && se.ttsDurationSec > 0 ? se.ttsDurationSec : 0;
+        if (!d) { d = Math.max(1, String((se && se.text) || '').replace(/s/g, '').length * 0.18); est++; }
+        t += d;
+        if (t >= dur - 0.05) break;
+      }
+      k = Math.min(k, c.order.length - 1);
+      undoPush('삽입 1회 재생'); ov.startId = c.order[r.a]; ov.endId = c.order[k]; ov.once = true;
+      const mm = Math.floor(dur / 60), ss = Math.round(dur % 60);
+      log(`🎵 ${prLabel(pr)} ${ov.name || path.basename(ov.file)} — 1회 재생(${mm}분 ${ss}초) → 클립 ${r.a + 1}~${k + 1}${t < dur - 0.05 ? ' · ⚠ 편 끝까지 가도 소리가 남습니다' : ''}${est ? ` · 음성 없는 문장 ${est}개는 글자수로 어림` : ''}`);
+      storeActive(); pushDtoUpdate();
+      return { ok: true, dto: P.toDTO(S.parsed), from: r.a + 1, to: k + 1, dur, short: t < dur - 0.05, est };
     } else if (op === 'vol') {
       undoPush('삽입 음량', { coalesce: true }); ov.volume = ov.kind === 'video' ? OL.volOfVideo(args.volume) : OL.normVol(args.volume);
     } else if (op === 'box') {
@@ -7526,6 +7550,42 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   log(`✓ 도입부 ${maxSec}초 재배치 완료 (${maxSec}초 초과 그룹 ${res.overGroupIds.length}개)`);
   pushDtoUpdate();
   return P.toDTO(S.parsed);
+});
+
+// 🖼 영상의 한 장면(정지 그림) — ② 칸 오른쪽 작은 그림용(v0.5.59).
+//   🔴 클립마다 <video> 를 두면 331개 클립 = 영상 플레이어 331개 → Chromium 한도(약 75개)를 넘어 **검은 화면**이 됐다
+//   (0902 · 전체 클립에 깐 삽입 영상). 그래서 ffmpeg 로 한 장만 뽑아 캐시(~/.priming-maker/thumb-cache)에 둔다.
+//   t = 그 클립이 보일 때 영상이 흐른 시간(초) — 파일 길이로 나눈 나머지 · 0.5초 단위로 묶어 캐시를 나눠 쓴다.
+const _vfDur = new Map();
+const _vfQ = { n: 0, wait: [] };
+async function _vfSlot(fn) {
+  if (_vfQ.n >= 2) await new Promise((r) => _vfQ.wait.push(r));
+  _vfQ.n++;
+  try { return await fn(); } finally { _vfQ.n--; const nx = _vfQ.wait.shift(); if (nx) nx(); }
+}
+ipcMain.handle('video-frame', async (_e, args = {}) => {
+  const file = args.file;
+  try {
+    if (!file || !fs.existsSync(file)) return null;
+    const st = fs.statSync(file);
+    const sig = file + '|' + Math.trunc(st.mtimeMs) + '|' + st.size;
+    let dur = _vfDur.get(sig);
+    if (dur == null) { dur = Number(await require('./core/media-utils').getMediaDuration(file)) || 0; _vfDur.set(sig, dur); }
+    let t = Math.max(0, Number(args.t) || 0);
+    if (dur > 0.6) t = t % dur;
+    t = Math.max(0.5, Math.round(t * 2) / 2);   // 첫 프레임은 검은 경우가 많다(페이드 인)
+    if (dur > 0 && t > dur - 0.2) t = Math.max(0, dur - 0.3);
+    const dir = path.join(os.homedir(), '.priming-maker', 'thumb-cache');
+    const out = path.join(dir, require('crypto').createHash('sha1').update(sig + '|' + t).digest('hex').slice(0, 20) + '.jpg');
+    if (fs.existsSync(out) && fs.statSync(out).size > 200) return out;
+    fs.mkdirSync(dir, { recursive: true });
+    const FF = require('./core/media-utils').getFfmpegPath();
+    await _vfSlot(() => new Promise((resolve) => {
+      const cp = require('child_process').spawn(FF, ['-y', '-loglevel', 'error', '-ss', t.toFixed(2), '-i', file, '-frames:v', '1', '-vf', 'scale=240:-2', '-q:v', '5', out], { windowsHide: true });
+      cp.on('error', () => resolve()); cp.on('close', () => resolve());
+    }));
+    return fs.existsSync(out) && fs.statSync(out).size > 200 ? out : null;
+  } catch (_) { return null; }
 });
 
 ipcMain.handle('read-audio', (_e, p0) => {

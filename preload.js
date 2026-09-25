@@ -183,6 +183,7 @@ contextBridge.exposeInMainWorld('api', {
   setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
   setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),
+  videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
   bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),

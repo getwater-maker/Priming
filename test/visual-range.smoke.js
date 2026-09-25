@@ -76,11 +76,13 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     ok(JSON.stringify(await groups()) === JSON.stringify(G3), '처음 = 그룹 3개 · 문장 2개씩');
 
     // [1] G1 끝 손잡이를 문장 4 위로 끌기
+    await win.evaluate(() => { const e = document.querySelector('.sblk[data-ord="4"]'); if (e) e.scrollIntoView({ block: 'end' }); });   // 씬 머리줄로 목록이 길어졌다(v0.5.59)
+    await win.waitForTimeout(200);
     const hb = await win.locator('.cut').nth(0).locator('.vr-h.bot').boundingBox();
     const tgt = await win.locator('.sblk[data-ord="4"]').boundingBox();
     await win.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await win.mouse.down();
-    await win.mouse.move(tgt.x + 60, tgt.y + tgt.height / 2, { steps: 8 });
+    await win.mouse.move(tgt.x + 60, tgt.y + Math.min(tgt.height / 2, 18), { steps: 8 });   // 씬 머리줄로 목록이 길어져 가운데가 창 밖일 수 있다(v0.5.59)
     ok(await win.locator('.vr-tip').count() === 1 && (await win.locator('.vr-tip').innerText()).includes('1~4'), '끄는 동안 안내 「문장 1~4」');
     ok(await win.locator('.sblk.vr-hit').count() === 4, '끄는 동안 덮일 문장 4개 표시(다른 그룹까지)');
     await win.mouse.up();

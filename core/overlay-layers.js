@@ -2,7 +2,7 @@
 /**
  * overlay-layers.js — 🔝 위층 그림·영상(특정 그룹 ~ 특정 그룹 동안 모든 그림 위에 올리는 것) + 🏷 채널 로고 배치 (v0.5.52)
  *
- *   pr.overlays = [{ id, file, kind:'image'|'video', startId, endId, box? }]
+ *   pr.overlays = [{ id, file, kind:'image'|'video'|'audio', startId, endId, box?, once? }]  — once = 소리를 1회만(반복 안 함 · v0.5.59)
  *   · 범위는 **문장 id** 로 잡는다(그룹 번호는 나누기·합치기로 바뀐다) — 사람은 그룹으로 고르지만 저장은 그 그룹의 첫·끝 문장.
  *   · 작업본에는 순번으로(문장 id 는 다시 열면 새로 매겨진다) — visual-span 과 같은 방식.
  *   · 쌓는 순서 = 목록 순서(뒤에 넣은 것이 위) — 그룹 그림보다 늘 위(vrew-builder zIndex 900+).
@@ -61,13 +61,13 @@ function toDTO(pr) {
     const r = rangeOf(pr, ov, c);
     return { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : null), total: c.order.length,
       fromGroup: r ? groupNumOf(pr, c.order[r.a]) : null, toGroup: r ? groupNumOf(pr, c.order[r.b]) : null,
-      from: r ? r.a + 1 : null, to: r ? r.b + 1 : null, broken: !r };
+      from: r ? r.a + 1 : null, to: r ? r.b + 1 : null, broken: !r, once: !!ov.once };
   });
 }
 /** 작업본 저장·복원 — 순번으로 */
 function toSnap(pr) {
   const c = VS.orderOf(pr);
-  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : undefined), from: r.a, to: r.b } : null; }).filter(Boolean);
+  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : undefined), ...(ov.once ? { once: true } : {}), from: r.a, to: r.b } : null; }).filter(Boolean);
 }
 function fromSnap(pr, list) {
   if (!Array.isArray(list) || !list.length) return;
@@ -76,7 +76,7 @@ function fromSnap(pr, list) {
   for (const o of list) {
     if (!o || !o.file) continue;
     const a = Math.max(0, Math.min(n - 1, o.from | 0)), b = Math.max(a, Math.min(n - 1, o.to | 0));
-    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, ...(o.kind === 'audio' ? { volume: normVol(o.volume) } : (o.kind === 'video' ? { volume: volOfVideo(o.volume) } : {})), kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), startId: c.order[a], endId: c.order[b] });
+    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, ...(o.kind === 'audio' ? { volume: normVol(o.volume) } : (o.kind === 'video' ? { volume: volOfVideo(o.volume) } : {})), kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), ...(o.once ? { once: true } : {}), startId: c.order[a], endId: c.order[b] });
   }
   if (out.length) pr.overlays = out;
 }

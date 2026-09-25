@@ -149,9 +149,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(await win.evaluate(() => !document.querySelector('#stageVisual .vlayer[data-num^="O"] audio')), '① 칸에는 오디오가 그림으로 나오지 않는다');
     console.log('\n[5a] ▶ 미리보기 — ■ 로 바뀌고 누르면 멈춘다 · 삽입 오디오가 울린다 · 삽입 영상 소리');
     await menu('대본·음성');
-    // 🎬 v0.5.58 — 그룹 머리줄이 없다 → 왼쪽 그룹 그림 아이콘 → 메뉴의 미리듣기
-    const nNarr = await win.locator('.narr-top').count(), nIcon = await win.locator('[data-testid=gicon]').count();
-    ok(nNarr === 0 && nIcon === 3, `🔑 그룹 머리줄 없음 · 그룹 그림 = 왼쪽 아이콘 (머리줄 ${nNarr} · 아이콘 ${nIcon})`);
+    // 🎬 v0.5.59 — 그룹 머리줄 = Vrew 「씬」 머리줄(G번호 · 제목 · 그룹 단추 · 시각) · 그룹 그림 = 왼쪽 아이콘
+    const nNarr = await win.locator('.narr-top').count(), nIcon = await win.locator('[data-testid=gicon]').count(), nScene = await win.locator('[data-testid=scene-h]').count();
+    ok(nNarr === 0 && nScene === 3 && nIcon === 3, `🔑 그룹마다 씬 머리줄 · 옛 머리줄 없음 · 그룹 그림 = 왼쪽 아이콘 (씬 ${nScene} · 옛 ${nNarr} · 아이콘 ${nIcon})`);
+    const sh = await win.locator('[data-testid=scene-h]').nth(1).innerText();
+    ok(['G2', '▶', '⏭', '🎤', '🎬', '📝', '🔄'].every((t) => sh.includes(t)), `씬 머리줄에 그룹 단추(▶ ⏭ 🎤 🎬 📝 🔄) — 「${sh.replace(/\n/g, ' ')}」`);
+    await win.locator('[data-testid=scene-fold]').nth(1).click();
+    ok(await win.evaluate(() => { const c = document.querySelectorAll('.cut')[1]; const b = c && c.querySelector('.sents'); return !!b && getComputedStyle(b).display === 'none'; }), '⌄ 누르면 그 그룹이 접힌다');
+    await win.locator('[data-testid=scene-fold]').nth(1).click();
+    ok(await win.evaluate(() => { const b = document.querySelectorAll('.cut')[1].querySelector('.sents'); return getComputedStyle(b).display !== 'none'; }), '다시 누르면 펼쳐진다');
     const openG = async (k) => { await win.locator('[data-testid=gicon]').nth(k).locator('.thumb, .thumbwrap').first().click(); await win.waitForSelector('[data-testid=vr-menu]', { timeout: 3000 }); };
     await openG(0);
     const gm = await win.locator('[data-testid=vr-menu]').innerText();
@@ -183,22 +189,43 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(mf.includes('■ 멈춤'), '여기부터 재생 중 → 메뉴에 ■ 멈춤 (' + mf + ')');
     await win.click('[data-testid=mn-play-from]'); await win.waitForTimeout(400);
 
-    // ② 칸 표시 — 삽입이 시작하는 클립(1)에 그림 썸네일 + 🎵
-    const geo = await win.evaluate(() => { const m = document.querySelector('.sent[data-ln="1"] [data-testid=ins-marks]'); const c = document.querySelector('.sent[data-ln="1"]'); const r = document.querySelector('.cut .sents'); if (!m || !c || !r) return null; const a = m.getBoundingClientRect(), b = c.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { mRight: a.right, cardLeft: b.left, rail: rr.left, col: a.height > a.width }; });
-    ok(geo && geo.mRight < geo.rail && geo.mRight < geo.cardLeft, `🔑 표시가 클립 카드 밖 왼쪽(레일 왼쪽)에 — ${JSON.stringify(geo)}`);
-    ok(geo && geo.col, '범위 막대 칸(레인)');
-    const vr = await win.evaluate(() => ({ sides: document.querySelectorAll('.sent.clip [data-testid=clip-side]').length, clips: document.querySelectorAll('.sent.clip').length, gthumb: !!document.querySelector('.sent[data-ln="1"] [data-testid=clip-side] .cthumb img'), times: document.querySelectorAll('[data-testid=clip-side] .clip-time').length, lanes3: document.querySelectorAll('.sent[data-ln="3"] [data-testid=ins-lane]').length, bridge: document.querySelectorAll('.sents > .ins-lanes.nb .lane').length }));
+    // ② 칸 왼쪽 — 삽입마다 한 줄로 이어진 범위 막대(시작점·끝점 손잡이) · 시작점에 그림 썸네일 / 🎵
+    const geo = await win.evaluate(() => {
+      const L = [...document.querySelectorAll('[data-testid=ins-lane]')]; const c1 = document.querySelector('.sent[data-ln="1"]'), c3 = document.querySelector('.sent[data-ln="3"]');
+      if (!L.length || !c1 || !c3) return null;
+      const a = c1.getBoundingClientRect(), z = c3.getBoundingClientRect(), rail = document.querySelector('.cut .sents').getBoundingClientRect().left;
+      return L.map((l) => { const r = l.getBoundingClientRect(); return { from: l.dataset.from, to: l.dataset.to, right: r.right, top: Math.round(r.top - a.top), bot: Math.round(r.bottom - z.bottom), rail, caps: l.querySelectorAll('.lcap').length, h: r.height }; });
+    });
+    ok(geo && geo.every((g) => g.right < g.rail), `🔑 막대가 클립 카드 밖 왼쪽(레일 왼쪽)에 — ${JSON.stringify(geo)}`);
+    ok(geo && geo.every((g) => g.caps === 2), '막대마다 시작점·끝점 손잡이 2개');
+    ok(geo && geo.some((g) => g.from === '1' && g.to === '3' && Math.abs(g.top) <= 2 && Math.abs(g.bot) <= 2), '🔑 범위 막대 = 클립 1 윗변부터 클립 3 아랫변까지 **한 줄**(그룹 머리줄을 건너도 끊기지 않는다)');
+    ok(await win.evaluate(() => document.querySelectorAll('[data-testid=ins-lane]').length === document.querySelectorAll('[data-testid=ins-lane] .lline').length), '막대 하나 = 선 하나(조각나지 않는다)');
+    const vr = await win.evaluate(() => ({ sides: document.querySelectorAll('.sent.clip [data-testid=clip-side]').length, clips: document.querySelectorAll('.sent.clip').length, gthumb: !!document.querySelector('.sent[data-ln="1"] [data-testid=clip-side] .cthumb img'), vids: document.querySelectorAll('[data-testid=clip-side] video').length }));
     ok(vr.sides === vr.clips && vr.gthumb, `🔑 Vrew 식 — 클립마다 오른쪽에 그림 칸(${vr.sides}/${vr.clips}) · 첫 클립도 그 자리에 보이는 그림`);
-    ok(vr.lanes3 >= 1 && vr.bridge >= 1, `🔑 범위 막대가 그룹을 넘어 이어진다(클립 3 레인 ${vr.lanes3} · 그룹 사이 다리 ${vr.bridge})`);
-    const hit = await win.evaluate(() => { const b = document.querySelector('.sent[data-ln="1"] [data-testid=ins-mark]'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { ok: !!(e && (e === b || b.contains(e))), top: e ? (e.className || e.tagName) + ' < ' + ((e.parentElement && e.parentElement.className) || '') : null }; });
+    ok(vr.vids === 0, '🔑 오른쪽 작은 그림에 <video> 가 없다(영상 플레이어 한도로 검은 화면이 되던 것 — 정지 그림으로)');
+    const hit = await win.evaluate(() => { const b = document.querySelector('[data-testid=ins-mark]'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { ok: !!(e && (e === b || b.contains(e))), top: e ? (e.className || e.tagName) + ' < ' + ((e.parentElement && e.parentElement.className) || '') : null }; });
     ok(hit.ok, '표시를 누를 수 있다(가려지지 않음) ' + JSON.stringify(hit));
     if (!hit.ok) console.log(await win.evaluate(() => { const b = document.querySelector('[data-testid=ins-mark]'); const out = []; for (let e = b; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); out.push([e.className || e.tagName, cs.overflow, cs.position, cs.zIndex, cs.transform].join('|')); } return out; }));
-    const marks = await win.evaluate(() => [...document.querySelectorAll('.sent[data-ln="1"] [data-testid=ins-mark]')].map((b) => b.dataset.kind));
-    ok(marks.includes('image') && marks.includes('audio'), `② 칸 클립 1 에 삽입 표시 (${marks.join(', ')})`);
-    ok(await win.evaluate(() => !document.querySelector('.sent[data-ln="2"] [data-testid=ins-mark]')), '다른 클립에는 없다(시작 클립에만)');
-    ok(await win.evaluate(() => !!document.querySelector('.sent[data-ln="1"] img') && [...document.querySelectorAll('.sent[data-ln="1"] [data-testid=ins-mark]')].some((b) => b.title.includes('tone.wav'))), '그림은 썸네일 · 오디오는 이름이 툴팁에');
+    const marks = await win.evaluate(() => [...document.querySelectorAll('[data-testid=ins-mark]')].map((b) => b.dataset.kind));
+    ok(marks.includes('image') && marks.includes('audio'), `② 칸 왼쪽에 삽입 표시 (${marks.join(', ')})`);
+    ok(marks.length === await win.locator('[data-testid=ovchip]').count(), '표시는 삽입마다 하나(시작점에만)');
+    ok(await win.evaluate(() => !!document.querySelector('[data-testid=ins-mark][data-kind=image] img') && [...document.querySelectorAll('[data-testid=ins-mark]')].some((b) => b.title.includes('tone.wav'))), '그림은 썸네일 · 오디오는 이름이 툴팁에');
+    // 🎵 오디오 1회 재생까지 — 8초 소리 · 음성 없는 문장은 글자수로 어림 → 끝 클립이 정해지고 반복하지 않는다
+    await win.locator('[data-testid=ins-mark][data-kind=audio]').click();
+    await win.waitForSelector('[data-testid=ins-once]', { timeout: 3000 }).catch(() => {});
+    ok(await win.locator('[data-testid=ins-once]').count() === 1, '메뉴에 「오디오 1회 재생까지」');
+    await win.click('[data-testid=ins-once]');
+    await win.waitForFunction(() => [...document.querySelectorAll('[data-testid=ovchip]')].some((c) => c.innerText.includes('1회')), null, { timeout: 5000 }).catch(() => {});
+    const onceChip = (await win.locator('[data-testid=ovchip]').allInnerTexts()).find((t) => t.includes('tone.wav')) || '';
+    ok(onceChip.includes('1회'), `1회 재생 표시 — 「${onceChip.replace(/\n/g, ' ')}」`);
+    await win.locator('[data-testid=ins-mark][data-kind=audio]').click();
+    await win.waitForSelector('[data-testid=ins-menu]', { timeout: 3000 });
+    ok((await win.locator('[data-testid=ins-once]').innerText()).includes('✓'), '메뉴에 ✓ 표시');
+    await win.click('[data-testid=ins-menu] button:has-text("전체 클립으로")');
+    await win.waitForTimeout(600);
+    ok(!(await win.locator('[data-testid=ovchip]').allInnerTexts()).some((t) => t.includes('1회')), '범위를 다시 고르면 1회 재생이 풀린다(다시 반복)');
     // 표시를 누르면 메뉴 → 🗑 삭제
-    await win.locator('.sent[data-ln="1"] [data-testid=ins-mark][data-kind=audio]').click();
+    await win.locator('[data-testid=ins-mark][data-kind=audio]').click();
     await win.waitForSelector('[data-testid=ins-menu]', { timeout: 3000 }).catch(() => {});
     ok((await win.locator('[data-testid=ins-menu]').innerText()).includes('tone.wav'), '표시를 누르면 그 삽입의 메뉴');
     await win.click('[data-testid=ins-del]');
@@ -212,6 +239,41 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.locator('[data-testid=ovchip]').nth(1).locator('[data-testid=ov-del]').click();
     await win.waitForFunction(() => document.querySelectorAll('[data-testid=ovchip]').length === 1, null, { timeout: 5000 }).catch(() => {});
     ok(await win.locator('[data-testid=ovchip]').count() === 1, '목록의 🗑 도 삭제');
+
+    console.log('\n[5c] 🧭 클립을 누르고 Space = 그 클립부터 재생 · ➕ 막대 끝점 끌기 · 긴 파일 이름은 앞 몇 글자만');
+    await win.locator('.sent.clip[data-ln="2"] .clip-no').click();
+    await win.keyboard.press(' ');
+    await win.waitForTimeout(350);
+    const capNow = await win.locator('#stageCap').innerText().catch(() => '');
+    ok(capNow.includes('둘째'), `🔑 Space → 누른 클립(2)부터 — 첫 자막 「${capNow}」(그룹 처음이 아니다)`);
+    ok((await win.locator('[data-testid=play-btn]').innerText()).includes('■'), '재생 중 = ■ 멈춤');
+    await win.keyboard.press(' ');
+    await win.waitForTimeout(300);
+    ok((await win.locator('[data-testid=play-btn]').innerText()).includes('▶'), 'Space 한 번 더 = 멈춤');
+    // 막대 끝점(그림 삽입 · 지금 전체)을 클립 2 로 끌기
+    const lane = win.locator('[data-testid=ins-lane]').first();
+    const capE = await lane.locator('[data-testid=lane-cap-e]').boundingBox();
+    const c2 = await win.locator('.sent.clip[data-ln="2"]').boundingBox();
+    await win.mouse.move(capE.x + capE.width / 2, capE.y + capE.height / 2); await win.mouse.down();
+    await win.mouse.move(c2.x + c2.width / 2, c2.y + c2.height / 2, { steps: 8 }); await win.mouse.up();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=ov-range]') || {}).innerText.includes('1~2'), null, { timeout: 5000 }).catch(() => {});
+    ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('1~2'), '🔑 끝점 손잡이를 끌어 범위 → 클립 1~2');
+    const lg2 = await win.evaluate(() => { const l = document.querySelector('[data-testid=ins-lane]'); const c2 = document.querySelector('.sent[data-ln="2"]'); return l && c2 ? Math.round(l.getBoundingClientRect().bottom - c2.getBoundingClientRect().bottom) : null; });
+    ok(lg2 != null && Math.abs(lg2) <= 2, `막대 끝 = 클립 2 아랫변 (${lg2}px)`);
+    await key('Control+z'); await win.waitForTimeout(500);
+    ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('전체'), '↶ 되돌리면 전체');
+    // 긴 파일 이름
+    const LONG = path.join(TMP, 'BTS (방탄소년단) 2.0 Stage CAM @ iHeartRadio Music Festival 2026.wav');
+    fs.copyFileSync(TONE, LONG);
+    await menu('삽입'); await stub(LONG); await win.click('[data-testid=ins-audio]');
+    await win.waitForSelector('[data-testid=ins-menu]', { timeout: 5000 });
+    const head = await win.locator('[data-testid=ins-menu] .vr-cur').innerText();
+    const full = await win.locator('[data-testid=ins-menu] .vr-cur').getAttribute('title');
+    ok(head.includes('…') && !head.includes('Music Festival') && (full || '').includes('Music Festival'), `메뉴 첫 줄 = 이름 앞 몇 글자(${head}) · 전체 이름은 툴팁`);
+    const mw = (await win.locator('[data-testid=ins-menu]').boundingBox()).width;
+    ok(mw < 420, `메뉴 폭이 파일 이름 때문에 늘지 않는다 (${Math.round(mw)}px)`);
+    await win.click('[data-testid=ins-del]');
+    await win.waitForTimeout(500);
 
     console.log('\n[5b] 🎵 채널 배경음악 — 삽입 메뉴');
     await menu('삽입');
