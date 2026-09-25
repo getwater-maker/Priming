@@ -1372,6 +1372,14 @@ export default function App() {
     const x = await overlayOp({ shortsNum: sn, op: 'add', fromGroup: r.a, toGroup: r.b });
     if (x && x.ok) setStatus(`🔝 G${Math.min(r.a, r.b)}~G${Math.max(r.a, r.b)} 위층에 올렸습니다 — ① 칸에서 끌어 옮기고 모서리로 크기를 바꿉니다 (Ctrl+Z 되돌리기)`);
   }
+  // 리본 「🔝 위층」 — 지금 커서가 있는 그룹부터(커서가 없으면 첫 그룹)
+  function addOverlayHere() {
+    const pj = dto && dto.projects && (dto.projects.find((x) => cursor && x.shortsNum === cursor.shortsNum) || dto.projects[0]);
+    if (!pj) return;
+    const PL = linesMap.get(pj.shortsNum);
+    const ln = PL && cursor ? PL.list.find((x) => x.n === cursor.n) : null;
+    addOverlay(pj.shortsNum, (ln && ln.groupNum) || (pj.cuts[0] && pj.cuts[0].num) || 1);
+  }
   async function editOverlayRange(sn, o) {
     const r = await askGroupRange('🔝 위층 그룹 범위 (예: 3-7)', `${o.fromGroup || 1}-${o.toGroup || 1}`);
     if (r) await overlayOp({ shortsNum: sn, op: 'range', id: o.id, fromGroup: r.a, toGroup: r.b });
@@ -3260,6 +3268,7 @@ export default function App() {
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            {isLf && <button className="ghost" data-testid="ov-add" disabled={!loaded} title="🔝 위층 — 정한 그룹 범위 동안 모든 그림 위에 다른 그림·영상을 올립니다(지도·인물 사진·글 카드 등). 지금 커서가 있는 그룹부터 시작합니다. 그룹 썸네일 메뉴에도 있습니다." onClick={addOverlayHere}><span className="rb-ic">🔝</span> <span className="rb-t">위층</span></button>}
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
@@ -3295,6 +3304,7 @@ export default function App() {
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            {isLf && <button className="ghost" data-testid="ov-add-v" disabled={!loaded} title="🔝 위층 — 정한 그룹 범위 동안 모든 그림 위에 다른 그림·영상을 올립니다(지도·인물 사진·글 카드 등). 지금 커서가 있는 그룹부터 시작합니다. 그룹 썸네일 메뉴에도 있습니다." onClick={addOverlayHere}><span className="rb-ic">🔝</span> <span className="rb-t">위층</span></button>}
           </span>
             </>)}
             {menu === 'finish' && (<>

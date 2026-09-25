@@ -112,6 +112,19 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForSelector('[data-testid=ovchip]', { timeout: 5000 }).catch(() => {});
     ok((await chip()).includes('G2~G3'), '↶ 지운 위층이 돌아온다');
 
+    console.log('\n[4b] 리본 「이미지」 메뉴의 🔝 위층 버튼');
+    await key('End'); await win.waitForTimeout(300);
+    await win.locator('.menubar button:text-is("이미지")').first().click();
+    ok(await win.locator('[data-testid=ov-add]').count() === 1, '이미지 메뉴 리본에 「🔝 위층」');
+    await win.locator('[data-testid=ov-add]').click();
+    await win.waitForSelector('.name-ask-layer input', { timeout: 3000 });
+    ok((await win.inputValue('.name-ask-layer input')) === '3-3', `커서가 있는 그룹(G3)부터 — 기본값 ${await win.inputValue('.name-ask-layer input')}`);
+    await win.keyboard.press('Escape');
+    await win.waitForFunction(() => !document.querySelector('.name-ask-layer input'), null, { timeout: 3000 }).catch(() => {});
+    await win.locator('.menubar button:text-is("비디오")').first().click();
+    ok(await win.locator('[data-testid=ov-add-v]').count() === 1, '비디오 메뉴 리본에도');
+    await win.locator('.menubar button:text-is("대본·음성")').first().click();
+
     console.log('\n[5] 채널편집 — 🏷 채널 로고 칸');
     await win.click('button[title^="채널(프리셋)"]');
     await win.waitForSelector('.modal-card.tabbed', { timeout: 8000 });
