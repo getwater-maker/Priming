@@ -4443,7 +4443,14 @@ function applyCaretSide(el) {
   el.dataset.caretSet = '1';
   const side = _caretSide; _caretSide = null;
   const put = () => { try { const n = side === 'end' ? el.value.length : 0; el.setSelectionRange(n, n); } catch (_) {} };
-  put(); requestAnimationFrame(put);
+  // 🔴 한 프레임 뒤에 한 번 더 놓는 건 autoFocus 가 커서를 옮기는 경우 대비 — 그 사이 사람이 키·마우스로 커서를 옮겼으면
+  //   덮지 않는다(v0.5.51 · 누르자마자 → 를 치면 커서가 맨 앞으로 되돌아가 Enter 가 엉뚱한 자리에서 줄을 나눴다).
+  let touched = false;
+  const mark = () => { touched = true; };
+  el.addEventListener('keydown', mark, { once: true });
+  el.addEventListener('mousedown', mark, { once: true });
+  put();
+  requestAnimationFrame(() => { el.removeEventListener('keydown', mark); el.removeEventListener('mousedown', mark); if (!touched) put(); });
 }
 function fitSentBox(el) {
   if (!el) return;
