@@ -3,6 +3,7 @@ import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
+import VSpan from '../../core/visual-span.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
@@ -2391,12 +2392,14 @@ export default function App() {
     let o = 0, ord = 0; const out = [];
     for (const c of pr.cuts) { if (c === cut) { ord = o + 1 + (sentIdx || 0); break; } o += (c.sentences || []).length; }
     o = 0;
-    for (const c of pr.cuts) {
+    const rk = cutRanks(pr); const got = [];
+    pr.cuts.forEach((c, ci) => {
       const a = o + 1, b = o + (c.sentences || []).length; o = b;
-      if (!(c.imagePath || c.videoPath)) continue;
+      if (!(c.imagePath || c.videoPath)) return;
       const r = c.span || { from: a, to: b };
-      if (ord >= r.from && ord <= r.to) out.push(c);
-    }
+      if (ord >= r.from && ord <= r.to) got.push([rk[ci], c]);
+    });
+    got.sort((x, y) => x[0] - y[0]); for (const [, c] of got) out.push(c);   // 🖼 늘려 끌어온 그림이 위(v0.5.62)
     for (const o of (pr.overlays || [])) if (!o.broken && o.kind !== 'audio' && ord >= o.from && ord <= o.to) out.push(ovAsLayer(o));   // ➕ 삽입 그림·영상 — 늘 맨 위
     return out;
   }
@@ -5145,20 +5148,32 @@ function dragAutoScroll(getY) {
   requestAnimationFrame(tick);
   return () => { on = false; };
 }
+// 🖼 그룹 그림 쌓는 순위 — core/visual-span stackRanks 와 **같은 함수**(늘려 끌어온 그림이 그 그룹 그림을 덮는다 · v0.5.62)
+function cutRanks(pr) {
+  let o = 0;
+  const ranges = ((pr && pr.cuts) || []).map((c) => {
+    const a = o + 1, b = o + (c.sentences || []).length; o = b;
+    if (!(c.imagePath || c.videoPath) || b < a) return null;
+    return { own: { a, b }, eff: c.span ? { a: c.span.from, b: c.span.to } : { a, b } };
+  });
+  return VSpan.stackRanks(ranges);
+}
 // 🖼 편 문장 번호 ord 에 보이는 그림들(아래 → 위) — ① 칸 visLayersAt 과 같은 규칙(앞 그룹 이어 깔기 < 뒤 그룹 < ➕ 삽입).
 //   startOrd = 그 그림이 처음 보이는 문장(영상이면 거기서부터 흐른 시간으로 장면을 고른다 · v0.5.59)
 function layersAtOrd(pr, ord) {
   const out = [];
   let o = 0;
-  for (const c of (pr && pr.cuts) || []) {
+  const rk = cutRanks(pr);
+  for (const [ci, c] of ((pr && pr.cuts) || []).entries()) {
     const a = o + 1, b = o + (c.sentences || []).length; o = b;
     if (!(c.imagePath || c.videoPath)) continue;
     const r = c.span || { from: a, to: b };
     if (ord >= r.from && ord <= r.to) {
       const lk = c.look || null;
-      out.push({ key: 'g' + c.num, video: !!c.videoPath, file: c.videoPath || c.imagePath, version: c.videoPath ? c.videoVersion : c.imageVersion, box: lk && lk.box ? lk.box : null, flipH: !!(lk && lk.flipH), flipV: !!(lk && lk.flipV), startOrd: r.from });
+      out.push({ rank: rk[ci], key: 'g' + c.num, video: !!c.videoPath, file: c.videoPath || c.imagePath, version: c.videoPath ? c.videoVersion : c.imageVersion, box: lk && lk.box ? lk.box : null, flipH: !!(lk && lk.flipH), flipV: !!(lk && lk.flipV), startOrd: r.from });
     }
   }
+  out.sort((x, y) => x.rank - y.rank);
   for (const v of ((pr && pr.overlays) || [])) {
     if (v.broken || v.kind === 'audio' || ord < v.from || ord > v.to) continue;
     out.push({ key: 'o' + v.id, video: v.kind === 'video', file: v.file, version: v.version, box: v.box || null, fit: 'contain', startOrd: v.from });

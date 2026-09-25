@@ -1093,6 +1093,10 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
   // 🖼 문장 → 덮는 그림 그룹들(아래 → 위) — 자산이 실제로 등록된 그룹만
   const _layers = _VS.layersBySentence(_vsProj, (x) => groupImageAsset.has(x.id));
+  // 🖼 그룹 트랙 zIndex = 쌓는 순위(늘려 끌어온 그림이 덮는다 · v0.5.62) — 그룹 순번은 켄번스 무늬에만 쓴다
+  { const _rk = _VS.groupRanks(_vsProj, (x) => groupImageAsset.has(x.id));
+    groups.forEach((g, gi) => { const ga = groupImageAsset.get(g.id); const as = ga && pj.props.assets[ga.aid]; if (!as) return;
+      for (const tid of as.trackIds || []) { const t = pj.props.tracks[tid]; if (t && (t.type === 'image' || t.type === 'video')) t.zIndex = _rk[gi]; } }); }
   // 🔝 위층 그림·영상 — 문장 → [오버레이 순번](아래 → 위)
   const _ovProj = { groups, sentences, overlays: opts.overlays || [] };
   const _ovAid = await addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);

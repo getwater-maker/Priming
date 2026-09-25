@@ -37,7 +37,7 @@ const FF = require('../core/media-utils').getFfmpegPath();
     const mk = (name, color) => { const f = path.join(tmp, name + '.png'); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=${color}:s=1920x1080`, '-frames:v', '1', f]); return f; };
     pr.groups[0].imagePath = mk('red', 'red');
     pr.groups[1].imagePath = mk('blue', 'blue');
-    pr.groups[1].look = { box: { x: 0.35, y: 0.35, w: 0.3, h: 0.3 } };   // 📐 가운데 작게
+    pr.groups[0].look = { box: { x: 0.35, y: 0.35, w: 0.3, h: 0.3 } };   // 📐 G1 빨강을 가운데 작게 — 늘려서 G2 위를 덮는다(v0.5.62)
     P.fillSilent(pr, path.join(tmp, 'tts'));
     pr.sentences[0].capBreaks = [3];   // ✂ 「첫째」 / 「문장입니다.」
     const rr = GM.setVisualRange(pr, 0, 0, 2);   // G1 그림을 끝까지 아래층으로
@@ -48,9 +48,9 @@ const FF = require('../core/media-utils').getFfmpegPath();
     const T = pj.props.tracks, A = pj.props.assets;
     const imgs = Object.values(T).filter((t) => t.type === 'image');
     const aidOf = (tr) => Object.keys(A).find((k) => A[k].trackIds.includes(tr.trackId));
-    const red = imgs.find((t) => t.width > 0.9), blue = imgs.find((t) => t.width < 0.5);
-    ok(red && blue && blue.zIndex > red.zIndex, `파랑(G2)이 빨강(G1) 위층 (zIndex ${red && red.zIndex} < ${blue && blue.zIndex})`);
-    ok(blue && Math.abs(blue.xPos - 0.35) < 1e-6 && Math.abs(blue.width - 0.3) < 1e-6, '📐 옮기고 줄인 자리 = 트랙 박스');
+    const red = imgs.find((t) => t.width < 0.5), blue = imgs.find((t) => t.width > 0.9);
+    ok(red && blue && red.zIndex > blue.zIndex, `🔑 늘려 끌어온 빨강(G1)이 파랑(G2) 위층 (zIndex ${red && red.zIndex} > ${blue && blue.zIndex}) — v0.5.62 로이`);
+    ok(red && Math.abs(red.xPos - 0.35) < 1e-6 && Math.abs(red.width - 0.3) < 1e-6, '📐 옮기고 줄인 자리 = 트랙 박스');
     const clips = pj.transcript.clips;
     const has = (c, tr) => (c.assetIds || []).includes(aidOf(tr));
     ok(clips.length === 4, `클립 4개(첫 문장이 ✂ 로 두 줄) — ${clips.length}`);
@@ -67,9 +67,9 @@ const FF = require('../core/media-utils').getFfmpegPath();
     const isRed = (p) => p[0] > 150 && p[2] < 90, isBlue = (p) => p[2] > 150 && p[0] < 90;
     const fA = fr(s0 / 2), fB = fr(s0 + s1 / 2), fC = fr(s0 + s1 + 0.4);
     console.log('   화소', JSON.stringify([px(fA, 48, 27), px(fB, 48, 27), px(fB, 5, 5), px(fC, 48, 27)]), s0, s1);
-    ok(isRed(px(fA, 48, 27)) && isRed(px(fA, 5, 5)), 'G1 구간: 빨강');
-    ok(isBlue(px(fB, 48, 27)) && isRed(px(fB, 5, 5)) && isRed(px(fB, 90, 50)), '🔑 G2 구간: 가운데 파랑(옮기고 줄인 자리) · 가장자리는 아래층 빨강이 보인다');
-    ok(isRed(px(fC, 48, 27)), '🔑 G3 구간(그림 없음): 아래층 빨강이 이어진다');
+    ok(isRed(px(fA, 48, 27)) && !isRed(px(fA, 5, 5)), 'G1 구간: 가운데 빨강(작게) · 가장자리는 비어 있다');
+    ok(isRed(px(fB, 48, 27)) && isBlue(px(fB, 5, 5)) && isBlue(px(fB, 90, 50)), '🔑 G2 구간: 늘려 끌어온 빨강이 **위** — 가운데 빨강 · 가장자리는 아래층 파랑(G2 자기 그림)');
+    ok(isRed(px(fC, 48, 27)), '🔑 G3 구간(그림 없음): 빨강이 이어진다');
   } catch (e) { ok(false, '왕복 실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} visual-layer ${pass}/${pass + fail}`);

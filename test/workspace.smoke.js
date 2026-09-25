@@ -238,6 +238,29 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press(' '); await win.waitForTimeout(400);
       ok((await btn()).includes('▶'), '🔑 고르지 않고 Space → 멈춤');
     }
+    // 🖼 v0.5.62 — G1 그림 끝점을 G2 의 첫 클립까지 끌면, 그 클립에서는 **G1 이 위**(① 칸 · 오른쪽 작은 그림 · 재생 모두)
+    {
+      const n3 = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 문장')); return e ? Number(e.dataset.ln) : 0; });
+      const ord3 = await win.evaluate((n) => { const e = document.querySelector('.sent[data-ln="' + n + '"]'); const b = e && e.closest('.sblk'); return b ? Number(b.dataset.ord) : 0; }, n3);
+      await win.evaluate((o) => { const e = document.querySelector('.sblk[data-ord="' + o + '"]'); if (e) e.scrollIntoView({ block: 'end' }); }, ord3);
+      await win.waitForTimeout(200);
+      const he = await win.locator('[data-testid=rail][data-g="1"] [data-testid=rail-h-e]').boundingBox();
+      const tb = await win.locator('.sblk[data-ord="' + ord3 + '"]').boundingBox();
+      await win.mouse.move(he.x + he.width / 2, he.y + he.height / 2); await win.mouse.down();
+      await win.mouse.move(he.x + he.width / 2, tb.y + Math.min(18, tb.height / 2), { steps: 10 }); await win.mouse.up();
+      await win.waitForFunction(() => { const r = document.querySelector('[data-testid=rail][data-g="1"]'); return r && r.querySelector('[data-testid=rail-ext]'); }, null, { timeout: 6000 }).catch(() => {});
+      await win.waitForTimeout(600);
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home');
+      for (let i = 1; i < n3; i++) await win.keyboard.press('ArrowDown');
+      await win.waitForTimeout(500);
+      const top = await win.evaluate(() => { const L = [...document.querySelectorAll('#stageVisual .vlayer')]; return L.map((x) => x.dataset.num); });
+      ok(top.length === 2 && top[top.length - 1] === '1', `🔑 G2 첫 클립(${n3}) — ① 칸 맨 위 = 늘려 끌어온 G1 (아래→위 ${top.join(' → ')})`);
+      await win.keyboard.press(' '); await win.waitForTimeout(500);
+      const topP = await win.evaluate(() => [...document.querySelectorAll('#stageVisual .vlayer')].map((x) => x.dataset.num));
+      ok(topP[topP.length - 1] === '1', `재생 중에도 G1 이 위 (${topP.join(' → ')})`);
+      await win.keyboard.press(' '); await win.waitForTimeout(300);
+      await win.locator('.clipbar').click(); await win.keyboard.press('Control+z'); await win.waitForTimeout(600);
+    }
 
     // [9] 보기 전환 — 카드
     await win.click('.clipbar button[data-view="cards"]');

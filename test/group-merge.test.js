@@ -136,7 +136,7 @@ console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew �
   let p = mk(); let r = GM.setVisualRange(p, 0, 0, 10);
   ok(r.ok && p.groups.length === 4 && r.removed.length === 0 && p.groups.every((g) => g.imagePath), '「전체 클립으로」 — 그룹 4개 그대로 · 아무 그림도 지우지 않는다');
   ok(p.groups[0].visSpan && p.groups[0].visSpan.endId === 's10' && !p.groups[0].visSpan.startId, 'G1 그림이 끝 문장(s10)까지 아래층으로 이어진다');
-  ok(lay(p) === '1 1 1 1/2 1/2 1/3 1/3 1/3 1/3 1/4 1/4', `🔑 문장마다 쌓임 = G1 아래 · 그 그룹 그림 위 (${lay(p)})`);
+  ok(lay(p) === '1 1 1 2/1 2/1 3/1 3/1 3/1 3/1 4/1 4/1', `🔑 문장마다 쌓임 = 늘려 끌어온 G1 이 위 · 그 그룹 그림은 아래(v0.5.62) (${lay(p)})`);
   ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5,s6,s7,s8 | s9,s10' && chap(p) === CH0, '그룹·문장·챕터는 그대로');
 
   p = mk(); p.groups[2].imagePath = null;   // G3 에 그림이 없다
@@ -147,7 +147,7 @@ console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew �
 
   p = mk(); GM.setVisualRange(p, 1, 3, 6);
   ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5,s6,s7,s8 | s9,s10' && p.groups[1].visSpan.endId === 's6', '끝을 다음 그룹 안까지 끌기 — 이웃은 그대로 · G2 는 s6 까지 아래층');
-  ok(lay(p).split(' ').slice(3, 9).join(' ') === '2 2 2/3 2/3 3 3', `이웃 그룹의 앞 두 문장에서만 G2 가 아래에 깔린다 (${lay(p)})`);
+  ok(lay(p).split(' ').slice(3, 9).join(' ') === '2 2 3/2 3/2 3 3', `이웃 그룹의 앞 두 문장에서만 G2 가 그 위를 덮는다 (${lay(p)})`);
 
   p = mk(); GM.setVisualRange(p, 2, 6, 6);
   ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5 | s6 | s7,s8 | s9,s10', '범위를 가운데 한 문장으로 줄이기 — 앞뒤가 새 그룹(예전과 같다)');

@@ -30,7 +30,42 @@ function effRange(project, gi, ctx) {
   return { a, b };
 }
 /**
- * 문장마다 그 문장을 덮는 그림 그룹(아래 → 위 순서).
+ * 🖼 쌓는 순서(v0.5.62 · 로이) — **범위를 늘려 다른 그룹 문장 위로 끌어온 그림이 그 그룹 그림을 덮는다**.
+ *   (예: G9 그림을 G10 의 클립 79 까지 끌면 77~79 에서는 G9 가 위). 🔴 v0.5.47 의 「앞 그룹 = 아래층」을 뒤집었다 —
+ *   그 규칙에선 그림이 있는 그룹 위로 늘려도 화면이 바뀌지 않았다.
+ *   규칙: A 의 범위가 B 의 자기 문장에 걸치면 A 가 B 보다 위. 그 밖엔 그룹 순서. 서로 걸치면(순환) 그룹 순서로 끊는다.
+ * @param ranges [{own:{a,b}, eff:{a,b}} | null] — 그룹 순서대로(그림 없는 그룹은 null)
+ * @returns rank[] — 그룹 순번 → 쌓는 순위(클수록 위)
+ */
+function stackRanks(ranges) {
+  const n = ranges.length;
+  const below = ranges.map((A, i) => {
+    const s = [];
+    if (!A) return s;
+    ranges.forEach((B, j) => { if (j !== i && B && A.eff.a <= B.own.b && A.eff.b >= B.own.a) s.push(j); });
+    return s;
+  });
+  const rank = new Array(n).fill(-1); let r = 0;
+  while (r < n) {
+    let pick = -1;
+    for (let i = 0; i < n && pick < 0; i++) if (rank[i] < 0 && below[i].every((j) => rank[j] >= 0)) pick = i;
+    if (pick < 0) for (let i = 0; i < n && pick < 0; i++) if (rank[i] < 0) pick = i;   // 순환 — 그룹 순서로
+    rank[pick] = r++;
+  }
+  return rank;
+}
+function groupRanks(project, hasVisual, ctx) {
+  const c = ctx || orderOf(project);
+  const ranges = (project.groups || []).map((g, gi) => {
+    if (!hasVisual(g)) return null;
+    const ids = g.sentenceIds || []; if (!ids.length) return null;
+    const own = { a: c.pos.get(ids[0]), b: c.pos.get(ids[ids.length - 1]) };
+    return { own, eff: effRange(project, gi, c) || own };
+  });
+  return stackRanks(ranges);
+}
+/**
+ * 문장마다 그 문장을 덮는 그림 그룹(아래 → 위 순서 — stackRanks).
  * @param hasVisual (g) => boolean — 그림·영상이 실제로 있는지(파일 확인은 부르는 쪽이)
  * @returns Map(sentenceId → [groupIndex...])
  */
@@ -42,7 +77,8 @@ function layersBySentence(project, hasVisual) {
     const r = effRange(project, gi, c); if (!r) return;
     for (let k = r.a; k <= r.b; k++) m.get(c.order[k]).push(gi);
   });
-  for (const v of m.values()) v.sort((x, y) => x - y);
+  const rk = groupRanks(project, hasVisual, c);
+  for (const v of m.values()) v.sort((x, y) => rk[x] - rk[y]);
   return m;
 }
 /** 그림이 없는데 모든 문장이 다른 그룹의 이어진 그림 아래에 있는 그룹 → g._covered = 그 그룹 번호(표시·생성 제외용). 반환 = 덮인 그룹 수 */
@@ -79,4 +115,4 @@ function spanFromOrd(project, g, o) {
   if (s.startId || s.endId) g.visSpan = s;
 }
 
-module.exports = { orderOf, effRange, layersBySentence, markCovered, remapSpanIds, spanToOrd, spanFromOrd };
+module.exports = { orderOf, effRange, stackRanks, groupRanks, layersBySentence, markCovered, remapSpanIds, spanToOrd, spanFromOrd };
