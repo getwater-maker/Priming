@@ -722,3 +722,18 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .narr .ins-lanes.nb .lane{top:0;bottom:0}
 .narr .ins-lanes.nb{right:calc(100% - 1px)}
 .narr .ins-lanes.nb{right:calc(100% + 2px)}
+
+/* ── 🎬 Vrew 식 — 그룹 머리줄 없음 · 그룹 그림 = 레일 옆 작은 아이콘(v0.5.58) ── */
+.cuts-grid.vrew .cut.lf{grid-template-columns:calc(var(--lanes, 1) * 28px + 62px) 1fr;margin-bottom:0}
+.cuts-grid.vrew .gicon{position:absolute;right:calc(100% + 8px);top:10px;z-index:3}
+.cuts-grid.clips.vrew .gicon .thumbwrap.lf,.cuts-grid.clips.vrew .gicon .thumb.lf{width:36px;height:36px;border-radius:8px}
+.cuts-grid.vrew .gicon .thumb.none{font-size:18px}
+.cuts-grid.vrew .gicon .thumbx,.cuts-grid.vrew .gicon .playbadge,.cuts-grid.vrew .gicon .vidplay{display:none}
+/* 상태 문구(📝 새 이미지 필요 · 생성 중)는 36px 에 안 들어가 글자를 0 으로 — 글은 남겨 두고(툴팁·검색) 주황 테두리로 알린다 */
+.cuts-grid.vrew .gicon .genoverlay div:not(.spin){font-size:0}
+.cuts-grid.vrew .gicon .thumbwrap:has(.genoverlay){outline:2px solid var(--warn);outline-offset:1px;border-radius:8px}
+.cuts-grid.vrew .gicon .genoverlay .spin{width:14px;height:14px}
+.cuts-grid.vrew .ins-lanes{right:calc(100% + 58px)}
+.cuts-grid.vrew .sents > .ins-lanes.nb{right:calc(100% + 44px);top:-40px;bottom:auto;height:40px}
+.cuts-grid.vrew .sents > .ins-lanes.nb .lane{top:0;bottom:0}
+.cuts-grid.vrew .sents > .ins-lanes.nb{right:calc(100% + 46px)}

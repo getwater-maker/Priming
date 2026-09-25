@@ -424,6 +424,10 @@ export default function App() {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [playKey, setPlayKey] = useState(null);   // ▶ → ■ — 지금 재생 중인 미리보기(shorts:N · group:N:G · from:N:G · all)
   const playingRef = useRef(false);               // 재생 중(삽입 영상 소리를 켠다)
+  // 🔑 재생 번호표 — 멈춘 뒤 새로 재생하면 옛 재생의 타이머가 깨어나 「끝났다」며 새 재생을 닫아 버렸다(v0.5.58).
+  //   각 재생은 자기 번호를 들고, 번호가 바뀌었으면(= 멈췄거나 새 재생) 조용히 빠진다.
+  const playGenRef = useRef(0);
+  const stale = (g) => playAbortRef.current || playGenRef.current !== g;
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
   const impRef = useRef(null);          // 붙여넣기 textarea (비제어)
   const scriptEditRef = useRef(null);   // 대본수정 textarea (비제어 — 재렌더 방지)
@@ -2509,6 +2513,7 @@ export default function App() {
   useEffect(() => { if (stageSel && !(stageLayersRef.current.layers || []).some((c) => c.num === stageSel.num)) setStageSel(null); });
 
   async function stepCaptions(clips, durMs, s, where) {
+    const _g = playGenRef.current;
     // 🧭 재생 중에도 ② 커서가 따라간다 — where = { shortsNum, groupNum, sentIdx }
     const PLw = where ? linesMap.get(where.shortsNum) : null;
     const wLines = PLw ? (PLw.bySent.get(where.groupNum + ':' + where.sentIdx) || []) : [];
@@ -2519,7 +2524,7 @@ export default function App() {
     const base = CF.normFmt(capBase); base.size = capBase.size;
     for (let i = 0; i < clips.length; i++) {
       const cl = clips[i];
-      if (playAbortRef.current) return;
+      if (stale(_g)) return;
       const d = Math.max(250, durMs * (Math.max(1, mLen(cl)) / total));
       if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
       if (where && wLines[i]) setCursor({ shortsNum: where.shortsNum, n: wLines[i].n });
@@ -2545,6 +2550,7 @@ export default function App() {
     const u = await api.readAudio(file); if (u) audUrlRef.current.set(file, u); return u;
   }
   async function syncInsAudio(pr, ord) {
+    const _g = playGenRef.current;
     const want = [];
     for (const o of (pr && pr.overlays) || []) if (o.kind === 'audio' && !o.broken && ord >= o.from && ord <= o.to) want.push({ key: 'ov:' + o.id, file: o.file, vol: (o.volume == null ? 30 : o.volume) / 100, from: o.from });
     if (bgmCfg.on && bgmCfg.path) {
@@ -2558,7 +2564,7 @@ export default function App() {
     for (const w of want) {
       if (insAudRef.current.has(w.key)) { insAudRef.current.get(w.key).volume = Math.min(1, w.vol); continue; }
       const u = await audUrl(w.file);
-      if (!u || playAbortRef.current) continue;
+      if (!u || stale(_g)) continue;
       const a = new Audio(u); a.loop = true; a.volume = Math.min(1, Math.max(0, w.vol));
       // 🔑 구간 시작(from)부터 지금 문장(ord) 앞까지 흐른 시간만큼 건너뛴다 — 중간 그룹에서 재생을 시작해도 음악이 이어진다
       const off = secBetween(pr, w.from, ord);
@@ -2571,13 +2577,14 @@ export default function App() {
   function secBetween(pr, a, b) { let o = 0, t = 0; for (const x of pr.cuts) for (const se of (x.sentences || [])) { o++; if (o >= a && o < b) t += se.dur || 2.5; } return t; }
   function ordOf(pr, cut, si) { let o = 0; for (const x of pr.cuts) { if (x.num === cut.num) return o + si + 1; o += (x.sentences || []).length; } return 0; }
   async function playCut(c, info, sn) {
+    const _g = playGenRef.current;
     const _prP = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null;
     setVisual(c, _prP, 0); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
     const N = effCap;
     const sents = (c.sentences && c.sentences.length) ? c.sentences : [{ text: '', audio: null, dur: c.groupDurationSec || 2.5 }];
     for (let si = 0; si < sents.length; si++) {
       const s = sents[si];
-      if (playAbortRef.current) return;
+      if (stale(_g)) return;
       if (_prP && lastVisRef.current !== visKeyAt(c, _prP, si)) setVisual(c, _prP, si);
       if (_prP) syncInsAudio(_prP, ordOf(_prP, c, si));   // 🎵 삽입 오디오 · 배경음악
       if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
@@ -2589,17 +2596,17 @@ export default function App() {
           else logline('미리듣기: 오디오 파일을 읽지 못함 (' + s.audio + ')');
         } catch (e) { logline('미리듣기 오디오 실패: ' + e.message); }
       }
-      if (playAbortRef.current) return;
+      if (stale(_g)) return;
       await stepCaptions(clips.length ? clips : [''], dur * 1000, s, sn != null && c.sentences && c.sentences.length ? { shortsNum: sn, groupNum: c.num, sentIdx: si } : null);
     }
   }
   async function playProjects(projs, blackBetween, key) {
-    stopInsAudio(); playAbortRef.current = false; playingRef.current = true; setPlayerOpen(true); setPlayKey(key || 'all');
+    stopInsAudio(); playAbortRef.current = false; const _g = ++playGenRef.current; playingRef.current = true; setPlayerOpen(true); setPlayKey(key || 'all');
     await wait(0); applyCaptionStyle();
     for (let pi = 0; pi < projs.length; pi++) {
       const pr = projs[pi];
-      for (const c of pr.cuts) { if (playAbortRef.current) return; await playCut(c, `${pr.title} · G${c.num} ${c.phase || ''}`, pr.shortsNum); }
-      if (blackBetween && pi < projs.length - 1 && !playAbortRef.current) {
+      for (const c of pr.cuts) { if (stale(_g)) return; await playCut(c, `${pr.title} · G${c.num} ${c.phase || ''}`, pr.shortsNum); }
+      if (blackBetween && pi < projs.length - 1 && !stale(_g)) {
         if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
         if (stageCapRef.current) stageCapRef.current.textContent = '';
         if (playerInfoRef.current) playerInfoRef.current.textContent = '— 다음 영상 —';
@@ -2607,9 +2614,9 @@ export default function App() {
       }
     }
     stopStageVideo(); // 마지막 그룹 영상 무한반복 방지 — 시퀀스 끝나면 정지
-    if (!playAbortRef.current) { stopInsAudio(); playingRef.current = false; setPlayKey(null); }
-    if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료';
-    if (!playAbortRef.current && view === 'clips') setPlayerOpen(false);   // 🧭 클립 보기: 끝나면 커서 자리의 정지 화면으로
+    if (!stale(_g)) { stopInsAudio(); playingRef.current = false; setPlayKey(null); }
+    if (!stale(_g) && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료';
+    if (!stale(_g) && view === 'clips') setPlayerOpen(false);   // 🧭 클립 보기: 끝나면 커서 자리의 정지 화면으로
   }
   // 스테이지의 영상 정지 (loop 무한반복 차단)
   function stopStageVideo() {
@@ -2629,11 +2636,11 @@ export default function App() {
     const c = pr.cuts.find((x) => x.num === groupNum); if (!c) return;
     const key = 'group:' + shortsNum + ':' + groupNum;
     if (playerOpen && playKey === key) { stopPlayer(); return; }   // ■
-    stopInsAudio(); playAbortRef.current = false; playingRef.current = true; setPlayerOpen(true); setPlayKey(key);
-    (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`, shortsNum); stopStageVideo(); if (!playAbortRef.current) { stopInsAudio(); playingRef.current = false; setPlayKey(null); } if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; if (!playAbortRef.current && view === 'clips') setPlayerOpen(false); })();
+    stopInsAudio(); playAbortRef.current = false; const _g = ++playGenRef.current; playingRef.current = true; setPlayerOpen(true); setPlayKey(key);
+    (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`, shortsNum); stopStageVideo(); if (!stale(_g)) { stopInsAudio(); playingRef.current = false; setPlayKey(null); } if (!stale(_g) && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; if (!stale(_g) && view === 'clips') setPlayerOpen(false); })();
   }
   function stopPlayer() {
-    playAbortRef.current = true; playingRef.current = false; setPlayKey(null); stopInsAudio();
+    playAbortRef.current = true; playGenRef.current++; playingRef.current = false; setPlayKey(null); stopInsAudio();
     if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }   // 🎨 도는 자막 효과 멈춤
     if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
     if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
@@ -4911,7 +4918,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                 </div>
                                 {vrewLay && (
                                   <div className="clip-side" data-testid="clip-side" onClick={(ev) => ev.stopPropagation()} onMouseDown={(ev) => ev.stopPropagation()}>
-                                    {si === 0 && li === 0 ? thumbEl : (() => {
+                                    {(() => {
                                       const tv = topVisualAt(pr, ord);
                                       return (
                                         <div className="cthumb" title="이 클립에 보이는 그림" onClick={(ev) => { ev.stopPropagation(); if (onCursor) onCursor(pr.shortsNum, l.n); }}>
@@ -4946,7 +4953,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   <div className={'cut' + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '')} key={c.num}>
                     {vrewLay ? <div className="vgutter" /> : thumbEl}
                     <div>
-                      <div className={'narr' + (c.isIntro ? ' intro' : '')}>
+                      {!vrewLay && <div className={'narr' + (c.isIntro ? ' intro' : '')}>
                         {vrewLay && onInsMark && (() => {
                           // ➕ 앞 그룹에서 이어지는 삽입 — 그룹 머리줄 칸에도 막대를 그어 끊기지 않게
                           const br = (pr.overlays || []).map((o, oi) => (!o.broken && o.from < gs && o.to >= gs ? <span key={o.id} className={'lane ' + o.kind} style={{ right: oi * 28 }} /> : null)).filter(Boolean);
@@ -4968,8 +4975,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           </div>
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
-                      </div>
+                      </div>}
                       <div className={'sents' + (onRange && sents.length ? ' vr' : '') + (vrDrag && vrDrag.shortsNum === pr.shortsNum && vrDrag.groupNum === c.num ? ' vr-own' : '')}>
+                        {vrewLay && (
+                          <div className="gicon" data-testid="gicon" title={`G${c.num} · ${c.phase || ''}${c.groupDurationSec ? ' · ' + c.groupDurationSec.toFixed(1) + '초' : ''} — 누르면 그림 메뉴(미리듣기 · TTS · 프롬프트 · 합치기 …)`}>{thumbEl}</div>
+                        )}
+                        {vrewLay && onInsMark && (() => {
+                          const br = (pr.overlays || []).map((o, oi) => (!o.broken && o.from < gs && o.to >= gs ? <span key={o.id} className={'lane ' + o.kind} style={{ right: oi * 28 }} /> : null)).filter(Boolean);
+                          return br.length ? <span className="ins-lanes nb">{br}</span> : null;
+                        })()}
                         {onRange && sents.length ? <>
                           <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
                             onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.from : gs }); }} />
@@ -4988,7 +5002,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
         );
       })}
       {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu((cur) => (cur ? { ...cur, sub: v } : cur))}
-        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay} />}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay}
+        grp={vrewLay ? { onPlayGroup, onPlayFrom, onGroupTts, onShowPrompt, onMerge, onSplit, playing } : null} />}
       {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
   );
@@ -5026,7 +5041,7 @@ function ovAsLayer(o) {
     imageVersion: o.version, videoVersion: o.version, look: o.box ? { motion: 'none', box: o.box } : { motion: 'none', fill: 'contain' } };   // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다)
 }
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
-function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange, onLook, onAiRange, onOverlay }) {
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {
   const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
   const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
@@ -5087,8 +5102,19 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       </div>
     );
   }
+  const pk = grp && grp.playing ? grp.playing.key : null;
   return (
     <div className="vr-menu" style={style} data-testid="vr-menu">
+      {grp && <div className="vr-cur" data-testid="vr-grp">G{c.num} · {c.phase || ''}{c.groupDurationSec ? ` · ${c.groupDurationSec.toFixed(1)}초` : ''}</div>}
+      {grp && <>
+        <button data-testid="mn-play-group" title="이 그룹 미리듣기" onClick={go(() => grp.onPlayGroup(sn, c.num))}>{pk === 'group:' + sn + ':' + c.num ? '■ 멈춤' : '▶ 이 그룹 미리듣기'}</button>
+        <button data-testid="mn-play-from" title="여기부터 재생" onClick={go(() => grp.onPlayFrom(sn, c.num))}>{pk === 'from:' + sn + ':' + c.num ? '■ 멈춤' : '⏭ 여기부터 재생'}</button>
+        <button title="이 그룹만 TTS 변환 — Shift+클릭 = 시드를 바꿔 다른 take" onClick={(e) => { close(); grp.onGroupTts(sn, c.num, e.shiftKey); }}>🎤 이 그룹 TTS</button>
+        <button title="이 그룹 프롬프트 보기·수정" onClick={go(() => grp.onShowPrompt(sn, c, `G${c.num}`))}>📝 프롬프트</button>
+        {(c.num > 1 && grp.onMerge) && <button title={`앞 그룹(G${c.num - 1})과 합치기 — 앞 그룹 그림을 이 그룹 끝까지 이어 씁니다`} onClick={go(() => grp.onMerge(sn, c.num))}>⤒ 앞 그룹과 합치기</button>}
+        {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) && <button title="10초 초과 — 2개 그룹으로 분할(프롬프트 초기화)" onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>}
+        <div className="vr-sep" />
+      </>}
       {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>
         : c.imagePath ? <button onClick={go(() => onPreview('img', media(c.imagePath, c.imageVersion)))}>🔍 크게 보기</button> : null}
       {has && onLook && <>

@@ -195,7 +195,9 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     ok(!/capSpans|bold/.test(fs.readFileSync(MD, 'utf8')), '대본(.md)은 서식 때문에 바뀌지 않는다');
 
     // [10] 미리보기 재생 — 서식 구간으로 그린다
-    await win.click('.cut .gprev[title="이 그룹 미리듣기"]');
+    // 🎬 v0.5.58 — Vrew 식 화면엔 그룹 머리줄이 없다 → 그룹 그림 메뉴의 「▶ 이 그룹 미리듣기」
+    if (await win.locator('.cut .gprev[title="이 그룹 미리듣기"]').count()) await win.click('.cut .gprev[title="이 그룹 미리듣기"]');
+    else { await win.locator('.cut').first().locator('.thumb').first().click(); await win.click('[data-testid=mn-play-group]'); }
     await win.waitForSelector('#stageCap .cf-stageline', { timeout: 8000 });
     ok(await win.locator('#stageCap .cf-stageline span').count() >= 1, '미리보기 재생이 서식 구간으로 그린다');
     ok(await win.evaluate(() => getComputedStyle(document.getElementById('stageCap')).textAlign) === 'right', '📐 미리보기도 01 줄을 오른쪽 정렬로 그린다');
