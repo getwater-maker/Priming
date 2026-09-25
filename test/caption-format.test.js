@@ -230,6 +230,43 @@ head('[9] 배선 — 저장·복원·편집·IPC·화면');
   }
 }
 
+head('[9b] 📐 줄별 위치·정렬(v0.5.41) — 모델 · 규칙 · 배선');
+{
+  const p = CF.normPatch({ posH: 'end', posV: 'top', posX: '0.1', posY: 0.125, bad: 1 });
+  ok(p.posH === 'end' && p.posV === 'top' && p.posX === 0.1 && p.posY === 0.125 && !('bad' in p), 'normPatch: 위치 키 네 개를 받는다');
+  ok(!('posH' in CF.normPatch({ posH: 'left' })) && !('posV' in CF.normPatch({ posV: 'x' })), '모르는 정렬 값은 버린다');
+  ok(CF.normPatch({ posY: 5 }).posY === 1, '세로 위치는 -1~1 로 자른다');
+  ok(!('posH' in CF.FMT_DEFAULT) && !('posY' in CF.normFmt({ posY: 0.3 })), '🔑 채널 기본 서식(FMT_DEFAULT·normFmt)에는 위치 키가 없다 — 채널 위치는 align·yAlign·yOffset 이 따로 가진다(이름 충돌 방지)');
+  ok(CF.LINE_KEYS.includes('posH') && CF.LINE_KEYS.includes('posY'), '위치는 줄 단위 속성(글자 일부를 골라도 그 줄이 움직인다)');
+  const chan = { align: 'start', yAlign: 'bottom', yOffset: -0.125, xOffset: 0 };
+  let lp = CF.linePos(chan, {});
+  ok(lp.align === 'start' && lp.yAlign === 'bottom' && lp.yOffset === -0.125 && !lp.overridden, '덮어쓰기 없으면 채널 위치 그대로');
+  lp = CF.linePos(chan, { posV: 'top' });
+  ok(lp.yAlign === 'top' && lp.yOffset === 0.125, '세로만 위로 → 위 기본 위치(0.125 — 아래 -0.125 의 거울)');
+  lp = CF.linePos(chan, { posV: 'middle' });
+  ok(lp.yOffset === 0, '가운데 → 0');
+  lp = CF.linePos(chan, { posV: 'bottom' });
+  ok(lp.yOffset === -0.125, '채널과 같은 정렬이면 채널 세로 위치');
+  lp = CF.linePos(chan, { posH: 'end', posX: 0.1, posY: -0.2 });
+  ok(lp.align === 'end' && lp.xOffset === 0.1 && lp.yOffset === -0.2 && lp.overridden, '정렬·미세 둘 다 덮어쓴다');
+  const sp = CF.applySpan([], 20, 0, 10, { posH: 'end' });
+  ok(CF.lineProps(sp, { from: 5, to: 20 }, {}, 20).posH === 'end' && CF.lineProps(sp, { from: 10, to: 20 }, {}, 20).posH === undefined, '줄에 걸친 조각이 있으면 그 줄 · 안 걸친 줄은 채널 위치');
+  const APP = read('renderer/src/App.jsx');
+  ok(/\{!noProduction && \(\s*<div className="cf-barwrap">/.test(APP) && /active=\{!!capSel\}/.test(APP), '🔑 툴바는 늘 떠 있다(고른 게 없으면 active=false — 안내만)');
+  ok(/async function saveCapDefault\(\)/.test(APP) && /\{ \.\.\.old, size:/.test(APP) && /api\.savePreset\(\{ name: presetName, patch: \{ capLong \} \}\)/.test(APP), '💾 자막 서식 저장 = 채널 capLong 을 옛 값 위에 얹어 저장(빠진 키가 사라지지 않게)');
+  ok(/xFine: Math\.round/.test(APP) && /xOffset: \(parseFloat\(c\.xFine\) \|\| 0\) \* 0\.0025/.test(APP), '채널 편집 읽기·저장 둘 다 가로 미세(xOffset)를 싣는다');
+  ok(/applyCaptionStyle\(lp\)/.test(APP) && /CF\.linePos\(/.test(APP), '미리보기 재생이 줄별 위치를 따른다');
+  const VB = read('vrew/vrew-builder.js');
+  ok(/CF\.linePos\(\{ align: curAlign/.test(VB) && /st\.yAlign = pos\.yAlign; st\.yOffset = pos\.yOffset; st\.xOffset = pos\.xOffset;/.test(VB), '.vrew 빌더가 덮어쓴 줄의 캡션 style 위치를 바꾼다');
+  const VR = read('core/vrew-render.js');
+  ok(/cues\.push\(\{ start, end, text: txt, runs, line, style: st \}\)/.test(VR) && /const layOf = cueLayouts\(/.test(VR), 'MP4 렌더러가 큐마다 자기 style 로 배치한다');
+  const WS = require('../core/whiteboard-subtitle');
+  const ass = WS.buildAss([{ start: 0, end: 2, text: '오른쪽 줄', sentText: '오른쪽 줄', spans: [{ from: 0, to: 5, fmt: { posH: 'end' } }], range: { from: 0, to: 5 } },
+    { start: 2, end: 4, text: '보통 줄', sentText: '보통 줄', spans: [{ from: 0, to: 4, fmt: { bold: true } }], range: { from: 0, to: 4 } }], { width: 1920, height: 1080 });
+  const xs = [...ass.matchAll(/\\an(\d)\\pos\(([\d.]+),([\d.]+)\)/g)].map((m) => ({ an: +m[1], x: +m[2] }));
+  ok(xs.some((x) => x.an === 3 && x.x > 1700) && xs.some((x) => x.an === 2 && Math.abs(x.x - 960) < 2), `화이트보드: 덮어쓴 줄만 오른쪽(\\an3 x≈1824), 다른 줄은 가운데 (${JSON.stringify(xs.slice(0, 1).concat(xs.slice(-1)))})`);
+}
+
 head('[10] 실제 왕복 — 빌더로 .vrew → Vrew 형식 확인 → 렌더러로 MP4 → 화소 측정');
 const P = require('../core/pipeline');
 const R = require('../core/vrew-render');
@@ -272,6 +309,35 @@ const FF = require('../core/media-utils').getFfmpegPath();
     const early = white(grab(t2 + 0.06)), late = white(grab(t2 + 1.2));
     ok(late > 1500 && early < late * 0.6, `🔑 팝 효과: 줄 시작 직후엔 작게(흰 글자 ${early}px) → 끝난 뒤 원래 크기(${late}px)`);
     console.log(`   화소 — 형광펜 노랑 ${yellow} · 팝 시작 ${early} → 끝 ${late}`);
+
+    // [11] 📐 줄별 위치 — 채널은 아래·왼쪽. 1줄 = 오른쪽 정렬, 2줄 = 위로. 진짜 빌더 → 진짜 렌더러 → 흰 글자가 어디 있나
+    const r2 = P.parseScriptText('# t\n## 장\n### 장면\n오른쪽에 붙는 줄입니다.\n\n### 둘\n위로 올라간 줄입니다.\n\n### 셋\n그대로 있는 줄입니다.\n', 'longform', {});
+    const pr2 = r2.projects[0];
+    for (const g of pr2.groups) g.imagePath = img;
+    P.fillSilent(pr2, path.join(tmp, 'tts2'));
+    const [a1, a2] = pr2.sentences;
+    a1.capSpans = [{ from: 0, to: a1.text.length, fmt: { posH: 'end' } }];
+    a2.capSpans = [{ from: 0, to: a2.text.length, fmt: { posV: 'top', posY: 0.125 } }];
+    const vrew2 = path.join(tmp, 'p.vrew');
+    await P.buildProjectVrew(pr2, vrew2, { captionStyle: { size: '100', align: 'start', yAlign: 'bottom', yOffset: -0.125, fmt: CF.normFmt({}) } }, () => {}, 30, 1);
+    const pj2 = JSON.parse(new (require('adm-zip'))(vrew2).readAsText('project.json'));
+    const st2 = pj2.transcript.clips.map((c) => c.captions[0].style);
+    const alignOf = (st) => (st.customAttributes.find((x) => x.attributeName === '--textbox-align') || {}).value;
+    ok(alignOf(st2[0]) === 'end' && st2[0].yAlign === 'bottom' && alignOf(st2[2]) === 'start', `.vrew: 1줄만 --textbox-align end · 3줄은 채널(start) (${st2.map(alignOf).join(',')})`);
+    ok(st2[1].yAlign === 'top' && st2[1].yOffset === 0.125 && st2[2].yAlign === 'bottom' && st2[2].yOffset === -0.125, `.vrew: 2줄만 yAlign top 0.125 · 3줄은 bottom -0.125`);
+    ok(pj2.transcript.clips.every((c) => JSON.stringify(c.captions[1].style.yAlign) === JSON.stringify(c.captions[0].style.yAlign)), '.vrew: 캡션 두 칸의 style 이 같다(Vrew 형식)');
+    const tl2 = R.buildTimeline(pj2, null);
+    const mp42 = path.join(tmp, 'p.mp4');
+    const res2 = await R.renderVrewToMp4({ vrewPath: vrew2, outPath: mp42, log: () => {}, par: 1 });
+    ok(res2 && res2.ok, '위치 MP4 렌더 성공' + (res2 && !res2.ok ? ': ' + res2.error : ''));
+    const frame = (t) => execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
+    const bbox = (raw) => { let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1; for (let i = 0, p = 0; i < raw.length; i += 3, p++) { if (raw[i] > 230 && raw[i + 1] > 230 && raw[i + 2] > 230) { const x = p % 1920, y = (p / 1920) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } } return { x0, x1, y0, y1 }; };
+    const mid = (c) => (c.start + c.end) / 2;
+    const b1 = bbox(frame(mid(tl2.cues[0]))), b2 = bbox(frame(mid(tl2.cues[1]))), b3 = bbox(frame(mid(tl2.cues[2])));
+    ok(b1.x0 > 960 && b1.x1 > 1800, `🔑 MP4: 1줄 글자가 오른쪽에 (x ${b1.x0}~${b1.x1})`);
+    ok(b3.x0 < 120 && b3.x1 < 960 && b3.y0 > 700, `MP4: 3줄은 채널 위치(왼쪽·아래) 그대로 (x ${b3.x0}~${b3.x1} · y ${b3.y0})`);
+    ok(b2.y1 < 300 && b2.x0 < 120, `🔑 MP4: 2줄 글자가 위에 (y ${b2.y0}~${b2.y1})`);
+    console.log(`   위치 — 1줄 x ${b1.x0}~${b1.x1} · 2줄 y ${b2.y0}~${b2.y1} · 3줄 x ${b3.x0}~${b3.x1} y ${b3.y0}~${b3.y1}`);
   } catch (e) { ok(false, '왕복 실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} caption-format ${pass}/${pass + fail}`);

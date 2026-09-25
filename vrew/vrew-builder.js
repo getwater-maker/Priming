@@ -763,6 +763,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     ...(_userCap.yAlign ? { yAlign: _userCap.yAlign } : {}),
     ...(resolvedYOffset != null ? { yOffset: resolvedYOffset } : {}),
     ...(_userCap.width   != null ? { width:   _userCap.width   } : {}),
+    ...(_userCap.xOffset != null && isFinite(+_userCap.xOffset) && +_userCap.xOffset !== 0 ? { xOffset: +_userCap.xOffset } : {}),   // 📐 채널 가로 미세(v0.5.41)
     customAttributes: CAPTION_STYLE.customAttributes.map(a => {
       if (a.attributeName === '--textbox-align' && resolvedAlign) {
         return { ...a, value: resolvedAlign };
@@ -1145,6 +1146,13 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
             a.attributeName === '--textbox-color' ? { ...a, value: CF.boxColorValue(lp) } : { ...a })) };
           const eff = CF.animToVrew(lp.anim);
           if (eff) st.assetEffectInfo = eff;
+          // 📐 줄별 위치·정렬(v0.5.41) — 덮어쓴 줄만 캡션 style 의 yAlign·yOffset·xOffset·--textbox-align 을 바꾼다(나머지 줄은 채널 위치 그대로)
+          if (CF.POS_KEYS.some((k) => lp[k] != null)) {
+            const curAlign = (st.customAttributes.find((x) => x.attributeName === '--textbox-align') || {}).value;
+            const pos = CF.linePos({ align: curAlign, yAlign: st.yAlign, yOffset: st.yOffset, xOffset: st.xOffset }, lp);
+            st.yAlign = pos.yAlign; st.yOffset = pos.yOffset; st.xOffset = pos.xOffset;
+            st.customAttributes = st.customAttributes.map((x) => (x.attributeName === '--textbox-align' ? { ...x, value: pos.align } : x));
+          }
           return [
             { text: CF.lineToVrewDelta(runs, lp.lineHeight), style: st },
             { text: [{ insert: '\n', attributes: CF.fmtToVrewAttrs(baseFmt) }], style: { ...st, customAttributes: st.customAttributes.map((a) => ({ ...a })) } },

@@ -61,8 +61,9 @@ function makeLayout(o) {
   const yAlign = ['top', 'middle', 'bottom'].includes(o.yAlign) ? o.yAlign : 'bottom';
   const an = { bottom: { start: 1, center: 2, end: 3 }, middle: { start: 4, center: 5, end: 6 }, top: { start: 7, center: 8, end: 9 } }[yAlign][hAlign];
   const mL = Math.round(o.marginL || 0), mR = Math.round(o.marginR || 0), mV = Math.round(o.marginV || 0);
-  const ax = hAlign === 'start' ? mL : hAlign === 'end' ? W - mR : Math.round((mL + (W - mR)) / 2);
-  const ay = yAlign === 'bottom' ? H - mV : yAlign === 'top' ? mV : Math.round(H / 2);
+  // o.dx/o.dy — 기준점 이동(가운데 정렬의 세로 위치 · 화이트보드의 줄별 미세 위치). 여백으로 표현할 수 없는 이동만 여기로.
+  const ax = (hAlign === 'start' ? mL : hAlign === 'end' ? W - mR : Math.round((mL + (W - mR)) / 2)) + Math.round(Number(o.dx) || 0);
+  const ay = (yAlign === 'bottom' ? H - mV : yAlign === 'top' ? mV : Math.round(H / 2)) + Math.round(Number(o.dy) || 0);
   return {
     W, H, hAlign, yAlign, an, marginL: mL, marginR: mR, marginV: mV, ax, ay,
     sizeK: o.sizeK || (0.72 * H / 1080), pxK: o.pxK || (H / 1080),

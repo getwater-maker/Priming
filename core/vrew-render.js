@@ -188,7 +188,8 @@ function buildTimeline(project, mediaDir) {
         const ca = Array.isArray(st.customAttributes) ? st.customAttributes : [];
         const line = CF.boxFromValue((ca.find((x) => x.attributeName === '--textbox-color') || {}).value);
         line.anim = CF.animFromVrew(st.assetEffectInfo);
-        cues.push({ start, end, text: txt, runs, line });
+        // 📐 줄별 위치(v0.5.41) — 캡션마다 style 이 다를 수 있다(yAlign·yOffset·xOffset·--textbox-align) → 큐가 자기 style 을 들고 간다
+        cues.push({ start, end, text: txt, runs, line, style: st });
         if (!capStyle) capStyle = { style: cap.style || {}, attrs: (cap.text[0] && cap.text[0].attributes) || {} };
       }
     }
@@ -269,6 +270,8 @@ function captionAssStyle(capStyle, fontName) {
   if (yAlign === 'bottom') { align = ALIGN_BOTTOM[hAlign]; marginV = Math.round(CAP_BOTTOM_BASE + (-yOff) * HALF_H); }
   else if (yAlign === 'top') { align = ALIGN_TOP[hAlign]; marginV = Math.round(CAP_BOTTOM_BASE + yOff * HALF_H); }
   else { align = ALIGN_MIDDLE[hAlign]; marginV = 0; }
+  // 가운데 정렬의 세로 위치 — 여백으로는 표현이 안 돼 기준점을 옮긴다(+ = 아래). 예전엔 버려져 가운데 자막이 늘 정가운데였다.
+  const offsetY = yAlign === 'middle' ? Math.round(yOff * HALF_H) : 0;
   const outlineOn = String(at['outline-on'] ?? 'true') !== 'false';
   // 🎨 배경 상자(--textbox-color) — Vrew 는 .textarea 에 background + width: fit-content 로 그린다(글자 폭 상자).
   //   투명(알파 0)이면 없음. 여백은 그 CSS 의 padding(가로 5px·세로 약 2px @ 25px 글꼴)을 글자 크기에 비례해 옮긴다.
@@ -281,7 +284,7 @@ function captionAssStyle(capStyle, fontName) {
   const _line = CF.boxFromValue(boxRaw);
   _line.anim = CF.animFromVrew(st.assetEffectInfo);
   return {
-    fmt: _fmt, line: _line,
+    fmt: _fmt, line: _line, _attrs: at, offsetY,
     font: fontName,
     size,
     color: assColor(at.color, '&H00FFFFFF'),
@@ -340,8 +343,24 @@ const assEsc = (t) => String(t).replace(/\\/g, '\\\\').replace(/\{/g, '\\{').rep
  */
 /** captionAssStyle 결과 → 공용 자막 배치(caption-ass). 글꼴 표가 없으면 기본 글꼴 하나로. */
 function layoutFor(cs, fontMap, fallbackFamily) {
-  return CAS.makeLayout({ W, H, hAlign: cs.hAlign, yAlign: cs.yAlign, marginL: cs.marginL, marginR: cs.marginR, marginV: cs.marginV,
+  return CAS.makeLayout({ W, H, hAlign: cs.hAlign, yAlign: cs.yAlign, marginL: cs.marginL, marginR: cs.marginR, marginV: cs.marginV, dy: cs.offsetY || 0,
     sizeK: SIZE_K, pxK: 1, fontMap: fontMap || {}, fallbackFamily: fallbackFamily || cs.font, fps: FPS });
+}
+
+/**
+ * 📐 큐별 배치(v0.5.41) — 큐가 들고 온 캡션 style(줄별 위치)로 배치를 만든다. 같은 위치는 한 번만 계산한다.
+ *   style 이 없는 큐(옛 경로·테스트)는 기본 배치 그대로.
+ */
+function cueLayouts(cs, base, fontMap, fallbackFamily) {
+  const memo = new Map();
+  return (c) => {
+    const st = c && c.style;
+    if (!st) return base;
+    const ca = Array.isArray(st.customAttributes) ? st.customAttributes : [];
+    const key = [st.yAlign, st.yOffset, st.xOffset, st.width, (ca.find((x) => x.attributeName === '--textbox-align') || {}).value].join('|');
+    if (!memo.has(key)) memo.set(key, layoutFor(captionAssStyle({ style: st, attrs: cs._attrs || {} }, cs.font), fontMap || base.fontMap, fallbackFamily || base.fallbackFamily));
+    return memo.get(key);
+  };
 }
 
 /** 구간이 없는 옛 큐({text}) → 채널 기본 서식 한 구간. */
@@ -370,7 +389,7 @@ function buildAss(cues, overlays, cs, extra = {}) {
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
   const ev = extra.eventLines ? [...extra.eventLines]
-    : CAS.formatEvents((cues || []).filter((c) => c && c.text && c.end > c.start).flatMap((c) => CAS.cueEvents(normCue(c, cs), L)));
+    : (() => { const lay = cueLayouts(cs, L); return CAS.formatEvents((cues || []).filter((c) => c && c.text && c.end > c.start).flatMap((c) => CAS.cueEvents(normCue(c, cs), lay(c)))); })();
   const bgr = (c) => `&H${String(c).replace(/^&H/, '').slice(-6)}&`;   // '&HAABBGGRR' → '&HBBGGRR&'
   for (const o of overlays) {
     if (!(o.end > o.start)) continue;
@@ -640,7 +659,8 @@ async function renderVrewToMp4(opts = {}) {
 
     const cs = captionAssStyle(tl.capStyle, fontName);
     const layout = layoutFor(cs, fr.map, fr.fallback);
-    const capEvents = tl.cues.flatMap((c) => CAS.cueEvents(normCue(c, cs), layout)).sort((a, b) => a.start - b.start);
+    const layOf = cueLayouts(cs, layout, fr.map, fr.fallback);
+    const capEvents = tl.cues.flatMap((c) => CAS.cueEvents(normCue(c, cs), layOf(c))).sort((a, b) => a.start - b.start);
     const nAnim = tl.cues.filter((c) => c.line && c.line.anim).length;
     if (nAnim) log(`   ✨ 자막 효과 ${nAnim}줄 — 효과 구간은 프레임마다 그립니다(이벤트 ${capEvents.length}개)`);
     if (tl.capStyle && !cs.calibrated) log(`   ⓘ 자막 위치(${cs.yAlign}·${cs.hAlign})는 실측으로 맞춘 스타일이 아닙니다 — 첫 편은 Vrew 결과와 비교해 보세요`);
@@ -743,6 +763,6 @@ async function renderVrewToMp4(opts = {}) {
 module.exports = {
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };

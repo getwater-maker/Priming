@@ -37,7 +37,17 @@ const FMT_DEFAULT = {
 };
 
 // 줄 단위(조각이 줄 일부만 덮어도 줄 전체에 적용) — 캡션 style 쪽에 들어가는 것들
-const LINE_KEYS = ['boxOn', 'boxColor', 'boxOpacity', 'anim', 'lineHeight'];
+const LINE_KEYS = ['boxOn', 'boxColor', 'boxOpacity', 'anim', 'lineHeight', 'posH', 'posV', 'posX', 'posY'];
+
+// 📐 줄별 위치·정렬(2026-09-25 v0.5.41) — Vrew 툴바의 가로 정렬(왼/가운데/오른쪽 + 가로 미세)과 세로 정렬(위/가운데/아래 + 세로 미세).
+//   ⚠ FMT_DEFAULT 에는 넣지 않는다 — 없으면(undefined) = **채널 위치를 따른다**. 채널 위치는 capLong 의 align·yAlign·yOffset 이
+//     따로 가진다(이름이 겹치지 않게 pos* 로 지었다 — capToStyle 이 ...capLookOf 를 뒤에 펼치므로 같은 이름이면 덮인다).
+//   posH = --textbox-align(start|center|end) · posV = yAlign(top|middle|bottom) · posX = xOffset · posY = yOffset(Vrew 단위 — 1 = 화면 절반, + = 오른쪽/아래)
+const POS_KEYS = ['posH', 'posV', 'posX', 'posY'];
+// 세로 정렬을 바꿀 때의 기본 세로 위치 — 아래/위는 서로 거울(하단 여백 173px ↔ 상단 여백 173px), 가운데는 0
+const POS_Y_DEFAULT = { bottom: -0.125, top: 0.125, middle: 0 };
+const POS_H = ['start', 'center', 'end'];
+const POS_V = ['top', 'middle', 'bottom'];
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -66,6 +76,10 @@ const RULES = {
   shadowX: (v, d) => num(v, d, -30, 30),
   shadowY: (v, d) => num(v, d, -30, 30),
   anim: (v) => normAnim(v),
+  posH: (v) => (POS_H.includes(v) ? v : undefined),
+  posV: (v) => (POS_V.includes(v) ? v : undefined),
+  posX: (v) => { const n = num(v, undefined, -1, 1); return n === undefined ? undefined : Math.round(n * 10000) / 10000; },
+  posY: (v) => { const n = num(v, undefined, -1, 1); return n === undefined ? undefined : Math.round(n * 10000) / 10000; },
 };
 
 /** 효과 {type, duration, delay} 정리 — 모르는 효과 이름·빈 값이면 null(효과 없음). */
@@ -470,8 +484,29 @@ function animTypeFor(preset, timing, dir) {
   return hit[0];
 }
 
+/**
+ * 📐 줄 위치 = 채널 위치(chan: {align, yAlign, yOffset, xOffset}) + 줄 덮어쓰기(lp.posH/posV/posX/posY).
+ *   세로 정렬만 바꾸고 세로 위치를 안 줬으면 그 정렬의 기본 세로 위치(채널이 같은 정렬이면 채널 값)를 쓴다.
+ * @returns {{align, yAlign, yOffset, xOffset, overridden}}
+ */
+function linePos(chan, lp) {
+  const c = chan || {};
+  const l = lp || {};
+  const align = POS_H.includes(l.posH) ? l.posH : (POS_H.includes(c.align) ? c.align : 'center');
+  const cy = POS_V.includes(c.yAlign) ? c.yAlign : 'middle';
+  const yAlign = POS_V.includes(l.posV) ? l.posV : cy;
+  const cyOff = Number.isFinite(+c.yOffset) ? +c.yOffset : 0;
+  let yOffset;
+  if (Number.isFinite(+l.posY) && l.posY != null) yOffset = +l.posY;
+  else if (yAlign === cy) yOffset = cyOff;
+  else yOffset = POS_Y_DEFAULT[yAlign];
+  const xOffset = (Number.isFinite(+l.posX) && l.posX != null) ? +l.posX : (Number.isFinite(+c.xOffset) ? +c.xOffset : 0);
+  const overridden = POS_KEYS.some((k) => l[k] != null);
+  return { align, yAlign, yOffset, xOffset, overridden };
+}
+
 module.exports = {
-  FMT_DEFAULT, LINE_KEYS, normFmt, normPatch, normAnim,
+  FMT_DEFAULT, LINE_KEYS, POS_KEYS, POS_Y_DEFAULT, linePos, normFmt, normPatch, normAnim,
   cleanSpans, flattenSpans, applySpan, clearSpan, remapSpans, remapSpansMulti, fmtAt,
   lineRanges, lineRuns, lineProps,
   fmtToVrewAttrs, vrewAttrsToFmt, boxColorValue, boxFromValue, animToVrew, animFromVrew, lineToVrewDelta, vrewDeltaToRuns,

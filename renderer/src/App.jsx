@@ -338,6 +338,7 @@ export default function App() {
   const [capFine, setCapFine] = useState(10);
   const [capAlign, setCapAlign] = useState('start');
   const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top)
+  const [capXOff, setCapXOff] = useState(0);            // 📐 가로 미세(Vrew xOffset — 1 = 화면 폭 절반, + = 오른쪽) · 채널 capLong.xOffset
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
   const [aiNotice, setAiNotice] = useState(false); // AI 고지 — 작업바 체크박스(기본 ON, 마운트 시 세팅)
   // 🔴 .vrew 출력 방식 — 'full'(전체) / 'audio'(음성만, 이미지 없이) / 'visual'(화면만, TTS 없이).
@@ -515,8 +516,8 @@ export default function App() {
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
-    return { size: capSize, yOffset: baseY + fine * 0.0025, align: capAlign, yAlign: capYAlign, ...capLookToStyle(capLook) };
-  }, [capPos, capFine, capSize, capAlign, capYAlign, capLook]);
+    return { size: capSize, yOffset: baseY + fine * 0.0025, xOffset: Number(capXOff) || 0, align: capAlign, yAlign: capYAlign, ...capLookToStyle(capLook) };
+  }, [capPos, capFine, capSize, capAlign, capYAlign, capXOff, capLook]);
 
   // fromMain=true 면 main 이 보낸 줄 — 파일에는 이미 기록돼 있으므로 되보내지 않는다(중복 방지).
   const logline = useCallback((t, fromMain) => {
@@ -569,7 +570,8 @@ export default function App() {
         if (cap.align) setCapAlign(cap.align);
         if (cap.yAlign) setCapYAlign(cap.yAlign);
         if (cap.yOffset != null) applyCaptionYOffset(cap.yOffset);
-      } else { applyCaptionDefaults(prof); }
+        setCapXOff(Number(cap.xOffset) || 0);
+      } else { applyCaptionDefaults(prof); setCapXOff(0); }
       setCapLook(capLookOf(cap));   // 없으면 기본 모양(지금까지와 같다)
       const sp = p.speedLong;
       const st = p.styleLong;
@@ -1314,6 +1316,19 @@ export default function App() {
     if (!s) return base;
     return { ...base, ...CF.fmtAt(CF.cleanSpans(s.spans, String(s.text || '').length), it.from) };
   }
+  // 📐 채널 위치(헤더 상태) — 줄별 위치 덮어쓰기의 바탕
+  function capChanPos() {
+    return { align: capAlign === 'random' ? 'center' : capAlign, yAlign: capYAlign, yOffset: (parseFloat(capPos) || 0) + (parseFloat(capFine) || 0) * 0.0025, xOffset: Number(capXOff) || 0 };
+  }
+  // 📐 지금 위치 = 채널 위치 + 첫 고른 줄의 덮어쓰기(core/caption-format linePos — .vrew·MP4 와 같은 규칙)
+  function capSelPos() {
+    const chan = capChanPos();
+    if (!capSel || !capSel.items.length) return chan;
+    const it = capSel.items[0];
+    const s = capSentence(capSel.shortsNum, it.groupNum, it.sentIdx);
+    if (!s || !s.spans) return chan;
+    return CF.linePos(chan, CF.lineProps(s.spans, { from: it.from, to: it.to }, {}, String(s.text || '').length));
+  }
   function capSelLabel() {
     if (!capSel) return '';
     if (capSel.mode === 'chars') return `글자 ${capSel.items.reduce((a, it) => a + (it.to - it.from), 0)}자`;
@@ -1345,6 +1360,11 @@ export default function App() {
   }
   async function applyCapFmt(patch) {
     if (!capSel) return;
+    // 📐 세로 정렬만 바꿨으면 그 정렬의 세로 위치도 함께 정한다(채널이 같은 정렬이면 채널 위치 · 아니면 기본값) — 옛 세로 위치가 남아 엉뚱한 곳에 서지 않게
+    if (patch && patch.posV && !('posY' in patch)) {
+      const chan = capChanPos();
+      patch = { ...patch, posY: chan.yAlign === patch.posV ? chan.yOffset : CF.POS_Y_DEFAULT[patch.posV] };
+    }
     try {
       const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), patch });
       if (r && r.ok) { if (r.dto) setDto(r.dto); }
@@ -1357,6 +1377,24 @@ export default function App() {
       const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), clear: keys || true });
       if (r && r.ok && r.dto) setDto(r.dto);
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
+  }
+
+  /** 💾 자막 서식 저장 — 툴바의 지금 서식·위치를 **채널 기본값**(capLong)으로. 📝 자막 탭과 같은 값이라 채널 편집을 다시 열면 그대로 보인다.
+   *  ⚠ capLong 은 통째로 바뀌므로 옛 값 위에 얹는다(빠진 키가 사라지지 않게 — v0.3.8 계열). */
+  async function saveCapDefault() {
+    if (!presetName) { setStatus('⚠ 채널을 먼저 고르세요'); return; }
+    const f = capSelFmt(), p = capSelPos();
+    try {
+      const det = await api.getPresetDetail(presetName);
+      const old = (det && det.capLong) || {};
+      const capLong = { ...old, size: String(f.size || capSize), align: p.align, yAlign: p.yAlign, yOffset: +(+p.yOffset).toFixed(4), xOffset: +(+p.xOffset || 0).toFixed(4), ...capLookOf(f) };
+      await api.savePreset({ name: presetName, patch: { capLong } });
+      setCapSize(String(capLong.size)); setCapAlign(capLong.align); setCapYAlign(capLong.yAlign); applyCaptionYOffset(capLong.yOffset);
+      setCapXOff(capLong.xOffset); setCapLook(capLookOf(capLong));
+      setPresetRev((n) => n + 1);
+      setStatus(`💾 자막 서식을 채널 「${presetName}」 기본값으로 저장했습니다 — 앞으로 모든 자막에 적용됩니다`);
+      logline(`💾 자막 서식 저장 → 채널 「${presetName}」 (크기 ${capLong.size} · 정렬 ${capLong.align} · 세로 ${capLong.yAlign} ${capLong.yOffset})`);
+    } catch (e) { setStatus('⚠ 자막 서식 저장 실패: ' + e.message); }
   }
 
   function startSentEdit(shortsNum, groupNum, sentIdx, text, count = 1) {
@@ -1489,6 +1527,7 @@ export default function App() {
         align: (saved && saved.align) || prof.captionAlign || 'center',
         yAlign: (saved && saved.yAlign) || prof.captionYAlign || 'middle',
         pos: d.pos, fine: d.fine,
+        xFine: Math.round((saved && Number(saved.xOffset) || 0) / 0.0025),   // 📐 가로 미세 — ⚠ 안 실으면 저장할 때 0 으로 덮인다
         ...capLookOf(saved),   // 🎨 모양 — ⚠ 안 실으면 저장할 때 기본값으로 덮인다
       };
     };
@@ -1736,7 +1775,7 @@ export default function App() {
   async function saveChannel() {
     if (!ch) return;
     const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d);
-    const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c), ...capLookOf(c) });
+    const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c), xOffset: (parseFloat(c.xFine) || 0) * 0.0025, ...capLookOf(c) });
     const patch = {
       group: (ch.group || '').trim(),                     // 드롭다운 구분(그룹) — 같은 그룹끼리 묶고 ─── 그룹명 ─── 구분선
       engine: ch.engine || 'omnivoice',
@@ -1851,7 +1890,8 @@ export default function App() {
       <div className="col">
         <h4>{label}</h4>
         <div className="crow"><span className="l">크기</span><select value={c.size} onChange={(e) => set({ size: e.target.value })}>{['25', '50', '75', '90', '100', '110', '125', '150', '200', '250', '300'].map((v) => <option key={v}>{v}</option>)}</select>
-          <span className="l">정렬</span><select value={c.align} onChange={(e) => set({ align: e.target.value })}><option value="center">가운데</option><option value="start">왼쪽</option></select></div>
+          <span className="l">정렬</span><select value={c.align} onChange={(e) => set({ align: e.target.value })}><option value="center">가운데</option><option value="start">왼쪽</option><option value="end">오른쪽</option></select>
+          <span className="l" title="가로 미세 — 1칸 = 0.0025(화면 폭 절반 기준) · + = 오른쪽">가로</span><input className="n" type="number" value={c.xFine || 0} step="10" onChange={(e) => set({ xFine: e.target.value })} /></div>
         <div className="crow tri"><span className="l">세로</span><select value={c.yAlign} onChange={(e) => set({ yAlign: e.target.value })}><option value="middle">가운데</option><option value="bottom">아래</option><option value="top">위</option></select>
           <span className="l">위치</span><select value={c.pos} onChange={(e) => set({ pos: e.target.value })}><option value="0.3">아래</option><option value="0.15">약간↓</option><option value="0">가운데</option><option value="-0.15">약간↑</option><option value="-0.3">위</option></select>
           <span className="l">미세</span><input className="n" type="number" value={c.fine} step="10" onChange={(e) => set({ fine: e.target.value })} /></div>
@@ -1891,8 +1931,13 @@ export default function App() {
   const playAbortRef = useRef(false);
   const curAudioRef = useRef(null);
 
-  function applyCaptionStyle() {
-    const cap = capOverride(); const cs = stageCapRef.current; if (!cs) return;
+  /** 미리보기 자막 위치 — lp(줄 단위 속성)를 주면 그 줄의 위치 덮어쓰기(posH/posV/posX/posY)를 따른다(core/caption-format linePos). */
+  function applyCaptionStyle(lp) {
+    const cap0 = capOverride(); const cs = stageCapRef.current; if (!cs) return;
+    const pos = CF.linePos({ align: cap0.align, yAlign: cap0.yAlign, yOffset: cap0.yOffset, xOffset: cap0.xOffset }, lp || null);
+    const cap = { ...cap0, align: pos.align, yAlign: pos.yAlign, yOffset: pos.yOffset };
+    // 가로 미세 — xOffset 1 = 화면 폭 절반
+    cs.style.left = (pos.xOffset * 50) + '%'; cs.style.right = (-pos.xOffset * 50) + '%';
     if (cap.yAlign === 'bottom') {
       // 아래 기준: 하단 여백 8% + 위로 이동(yOffset 음수). 예: -0.125 → 하단 20.5%.
       const bottomPct = Math.max(2, Math.min(90, 8 + (-cap.yOffset) * 100));
@@ -1904,7 +1949,7 @@ export default function App() {
       const topPct = Math.max(6, Math.min(94, 50 + cap.yOffset * 50)); // 가운데 기준
       cs.style.top = topPct + '%'; cs.style.bottom = 'auto'; cs.style.transform = 'translateY(-50%)';
     }
-    cs.style.textAlign = cap.align === 'center' ? 'center' : 'left';
+    cs.style.textAlign = cap.align === 'center' ? 'center' : cap.align === 'end' ? 'right' : 'left';
     cs.style.fontSize = Math.round((parseFloat(cap.size) || 90) / 90 * 18) + 'px';
   }
   function setVisual(c) {
@@ -1933,10 +1978,11 @@ export default function App() {
         if (s && cl) {
           const runs = CF.lineRuns(text, s.spans, ranges[i], base);
           const lp = CF.lineProps(s.spans, ranges[i], base, text.length);
+          applyCaptionStyle(lp);   // 📐 줄별 위치
           const box = el.parentElement ? { w: el.parentElement.clientWidth, h: el.parentElement.clientHeight } : null;
           // 미리보기 글자 = size/90×18px → Vrew px 1 당 0.2/0.72 ≈ 0.28px (테두리·그림자 두께 환산)
           stopLineRef.current = renderStageLine(el, runs, lp, d, 0.2 / 0.72, box);
-        } else el.textContent = cl;
+        } else { applyCaptionStyle(); el.textContent = cl; }
       }
       await wait(d);
     }
@@ -2625,12 +2671,14 @@ export default function App() {
       </div>}
       {/* 🎨 자막 서식 툴바 — 목록에서 자막 줄(줄 번호 클릭)이나 글자(드래그)를 고르면 뜬다(Vrew 상단 서식 막대).
           🔑 고정 헤더(topsticky) **안**에 둔다 — 목록 쪽에 sticky 로 두면 헤더 밑에 깔려 눌리지 않는다(E2E 가 잡았다). */}
-      {capSel && !noProduction && (
+      {/* 📐 v0.5.41 — **늘 꺼내 둔다**(로이: 툴바가 안 떴다). 고른 게 없으면 안내만 보이고 칸은 잠긴다. */}
+      {!noProduction && (
         <div className="cf-barwrap">
-          <CaptionToolbar fmt={capSelFmt()} label={capSelLabel()} panel={capPanel}
+          <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
             onPatch={applyCapFmt} onClear={() => clearCapFmt(null)}
             onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
-            onDone={() => { setCapSel(null); setCapPanel(null); }} />
+            onDone={() => { setCapSel(null); setCapPanel(null); }}
+            onSaveDefault={saveCapDefault} />
         </div>
       )}
       </div>

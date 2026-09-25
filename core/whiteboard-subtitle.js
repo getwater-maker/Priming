@@ -188,6 +188,19 @@ function buildAss(cues, { width = 1920, height = 1080, style = null, fontMap = n
     marginL: mh, marginR: mh, marginV: mv, sizeK: 1, pxK, fontMap: { ...(fontMap || {}), [WB_FONT]: st.font }, fallbackFamily: st.font, fps: 30 });
   const base = CF.normFmt({ font: WB_FONT, fontColor: '#202020', outlineColor: '#ffffff', outlineWidth: outline / pxK, bold: st.bold });
   base.size = px;
+  // 📐 줄별 위치(v0.5.41) — 덮어쓴 줄만 정렬을 바꾸고, 미세 위치는 그 정렬의 기본값(CF.POS_Y_DEFAULT)과의 차이만큼 옮긴다
+  //   → 정렬만 바꾼 줄은 이 화이트보드 설정의 여백 그대로 선다(종이 위 모양 유지).
+  const posMemo = new Map();
+  const posLayout = (line) => {
+    if (!line || !CF.POS_KEYS.some((k) => line[k] != null)) return L;
+    const hA = line.posH || L.hAlign, vA = line.posV || L.yAlign;
+    const dy = line.posY != null ? (line.posY - CF.POS_Y_DEFAULT[vA]) * H / 2 : 0;
+    const dx = line.posX != null ? line.posX * W / 2 : 0;
+    const key = [hA, vA, dx, dy].join('|');
+    if (!posMemo.has(key)) posMemo.set(key, CAS.makeLayout({ W, H, hAlign: hA, yAlign: vA, marginL: mh, marginR: mh, marginV: mv, dx, dy,
+      sizeK: 1, pxK, fontMap: L.fontMap, fallbackFamily: st.font, fps: 30 }));
+    return posMemo.get(key);
+  };
   const head = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -212,7 +225,7 @@ function buildAss(cues, { width = 1920, height = 1080, style = null, fontMap = n
       const rg = c.range || { from: 0, to: String(c.sentText || c.text).length };
       const runs = CF.lineRuns(c.sentText || c.text, c.spans, rg, base);
       const line = CF.lineProps(c.spans, rg, base, String(c.sentText || c.text).length);
-      return CAS.formatEvents(CAS.cueEvents({ start: c.start, end: c.end, runs, line }, L)).join('\n');
+      return CAS.formatEvents(CAS.cueEvents({ start: c.start, end: c.end, runs, line }, posLayout(line))).join('\n');
     })
     .filter(Boolean)
     .join('\n');

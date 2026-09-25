@@ -380,6 +380,14 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .cf-barwrap{padding:0 16px 6px}
 .cf-bar{display:flex;align-items:center;gap:5px;flex-wrap:wrap;background:#2b2724;color:#eee;border-radius:10px;padding:6px 8px;box-shadow:0 3px 10px rgba(0,0,0,.18)}
 .cf-bar .cf-sel{font-weight:800;color:#ffd08a;margin-right:4px;white-space:nowrap}
+/* 📐 v0.5.41 — 툴바는 늘 떠 있다. 칸 묶음은 fieldset(disabled 로 한 번에 잠근다) · 레이아웃에는 끼지 않게 display:contents */
+.cf-bar .cf-ctrls{display:contents;border:0;margin:0;padding:0;min-width:0}
+.cf-bar .cf-ctrls:disabled > *{opacity:.45}
+.cf-bar .cf-hint{color:#d8cbb8;font-size:12px;margin-right:6px}
+.cf-bar.idle{background:#3a3430}
+.cf-bar .cf-grp{display:inline-flex;align-items:center;gap:2px}
+.cf-bar .cf-grp input.n{height:24px;padding:2px 4px}
+.cf-bar .cf-savedef{border-color:#8a6d3b !important;color:#ffd08a !important}
 .cf-bar button{padding:4px 8px;font-size:12px}
 .cf-bar button.ghost{color:#f0e3d0;border-color:#5a5048}
 .cf-bar button.ghost:hover,.cf-bar button.ghost.on{background:var(--accent-d);border-color:var(--accent-d);color:#fff}

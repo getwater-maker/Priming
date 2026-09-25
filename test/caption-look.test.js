@@ -29,7 +29,7 @@ ok(capLookOf({ outlineOn: false }).outlineOn === false && capLookOf({}).outlineO
 
 console.log('\n[2] 배선');
 ok(/\.\.\.capLookOf\(saved\)/.test(APP), '채널편집 열 때 모양을 싣는다(안 실으면 저장 때 기본값으로 덮인다)');
-ok(/yOffset: yOffsetOf\(c\), \.\.\.capLookOf\(c\)/.test(APP), '채널 저장 patch 에 모양');
+ok(/yOffset: yOffsetOf\(c\), (xOffset: [^\n]*?, )?\.\.\.capLookOf\(c\)/.test(APP), '채널 저장 patch 에 모양');
 ok(/\.\.\.capLookToStyle\(capLook\)/.test(APP) && /setCapLook\(capLookOf\(cap\)\)/.test(APP), '헤더 captionStyle(⚡ 만들기) 에 채널 모양');
 ok(/글자색/.test(APP) && /테두리/.test(APP) && /불투명/.test(APP), '📝 자막 탭에 글자색·테두리·배경 줄');
 const VB = read('vrew/vrew-builder.js');

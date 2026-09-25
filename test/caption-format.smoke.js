@@ -14,6 +14,7 @@ const { _electron: electron } = require('playwright');
 const ROOT = path.join(__dirname, '..');
 const TAG = `__자막서식테스트_${process.pid}`;
 const MD = path.join(os.tmpdir(), `${TAG}.md`);
+const CH = '__테스트채널_삭제해도됨_서식_' + process.pid;   // 📐 「자막 서식 저장」은 임시 채널에만(로이 채널을 덮지 않는다)
 const SNAP = path.join(os.homedir(), '.priming-maker', 'projects', `${TAG}.smproj.json`);
 const SCRIPT = [
   '# 자막 서식 테스트 대본',
@@ -25,7 +26,7 @@ const SCRIPT = [
   '',
 ].join('\n');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, chMade = false;
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
 const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch (_) {} } };
 
@@ -39,6 +40,18 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     win.on('pageerror', (e) => errors.push(String(e)));
     await win.waitForSelector('h1', { timeout: 20000 });
+    // 임시 채널 — 앞선 실행 잔재를 지우고 새로 만들어 헤더에서 고른다(채널 위치 = 아래·왼쪽·-0.125)
+    await win.evaluate(async (name) => {
+      const ps = (await window.api.listPresets()) || [];
+      for (const p of ps) if (p.name.indexOf('__테스트채널_삭제해도됨_서식_') === 0) { try { await window.api.removePreset({ name: p.name }); } catch (_) {} }
+      await window.api.addPreset({ name });
+      await window.api.savePreset({ name, patch: { capLong: { size: '100', align: 'start', yAlign: 'bottom', yOffset: -0.125 } } });
+    }, CH);
+    chMade = true;
+    await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
+    await win.waitForFunction((n) => [...document.querySelectorAll('select option')].some((o) => o.value === n), CH, { timeout: 8000 });
+    await win.selectOption('select[title^="채널(프리셋) — 고르면"]', CH);
+    await win.waitForTimeout(800);
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
@@ -51,9 +64,16 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     // [1] 줄 번호 → 툴바
     const nos = win.locator('.cut .cf-lineno');
     ok(await nos.count() >= 4, `줄 번호(서식 손잡이) ${await nos.count()}개`);
-    ok(await win.locator('[data-testid=cf-bar]').count() === 0, '처음엔 툴바가 없다');
+    // 📐 v0.5.41 — 툴바는 늘 떠 있다(고른 게 없으면 안내 + 잠김)
+    ok(await win.locator('[data-testid=cf-bar].idle').count() === 1, '🔑 고르지 않아도 툴바가 떠 있다(작업 화면에 상시)');
+    ok((await win.locator('[data-testid=cf-hint]').innerText()).includes('줄 번호'), '고른 게 없으면 「줄 번호를 누르거나 글자를 드래그」 안내');
+    ok(await win.locator('.cf-bar button[title="굵게"]').isDisabled(), '고른 게 없으면 칸은 잠겨 있다');
+    { const tb = await win.locator('[data-testid=cf-bar]').boundingBox(); const head = await win.locator('.topsticky').boundingBox();
+      ok(tb && head && tb.y >= head.y && tb.y + tb.height <= head.y + head.height + 1, `툴바가 고정 헤더 안(가려지지 않음) — 툴바 y ${tb && Math.round(tb.y)} · 헤더 ${head && Math.round(head.y)}~${head && Math.round(head.y + head.height)}`);
+      const hit = await win.evaluate(() => { const b = document.querySelector('.cf-bar [data-testid=cf-savedef]'); const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!(el && (el === b || b.contains(el))); });
+      ok(hit, '툴바 단추 위에 다른 것이 덮여 있지 않다(elementFromPoint)'); }
     await nos.nth(0).click();
-    await win.waitForSelector('[data-testid=cf-bar]', { timeout: 5000 });
+    await win.waitForSelector('[data-testid=cf-bar]:not(.idle)', { timeout: 5000 });
     ok((await win.locator('.cf-bar .cf-sel').innerText()).includes('자막 01'), '줄 번호를 누르면 툴바가 뜨고 「자막 01」을 고른다');
     ok(await win.locator('.sblk.editing').count() === 0, '🔑 줄 번호를 눌러도 문장 편집칸은 열리지 않는다');
     ok(await win.locator('.sent.picked').count() === 1, '고른 줄이 표시된다');
@@ -98,8 +118,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.waitForSelector('[data-testid=cf-side]', { state: 'detached', timeout: 3000 });
     ok(await win.locator('[data-testid=cf-bar]').count() === 1, 'Esc 한 번 = 옆 패널만 닫힌다');
     await win.keyboard.press('Escape');
-    await win.waitForSelector('[data-testid=cf-bar]', { state: 'detached', timeout: 3000 });
-    ok(true, 'Esc 두 번 = 선택 해제');
+    await win.waitForSelector('[data-testid=cf-bar].idle', { timeout: 3000 });
+    ok(true, 'Esc 두 번 = 선택 해제(툴바는 안내 상태로 남는다)');
 
     // [7] 글자 드래그 → 그 글자만 형광펜
     const lastBlk = win.locator('.cut .sblk').nth(2).locator('.sblk-lines');
@@ -111,7 +131,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     });
     await lastBlk.dispatchEvent('click');
-    await win.waitForSelector('[data-testid=cf-bar]', { timeout: 3000 });
+    await win.waitForSelector('[data-testid=cf-bar]:not(.idle)', { timeout: 3000 });
     ok((await win.locator('.cf-bar .cf-sel').innerText()).includes('글자 2자'), '🔑 글자를 드래그하면 그 글자만 고른다(「글자 2자」) · 편집칸은 열리지 않는다');
     ok(await win.locator('.sblk.editing').count() === 0, '글자 선택 때 문장 편집칸이 열리지 않는다');
     await win.click('.cf-bar button[title^="형광펜"]');
@@ -122,6 +142,35 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.waitForFunction(() => ![...document.querySelectorAll('.cut .sblk')[2].querySelectorAll('.capfmt')].some((e) => getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)'), null, { timeout: 5000 });
     ok(true, '서식 지우기 = 채널 기본으로');
     await win.keyboard.press('Escape');
+
+    // [P] 📐 줄별 위치·정렬 — 01 줄만 오른쪽 · 위
+    await nos.nth(0).click();
+    await win.waitForSelector('[data-testid=cf-bar]:not(.idle)', { timeout: 3000 });
+    ok(await win.locator('[data-testid=cf-posh] button[title="가로 왼쪽 정렬"].on').count() === 1, '처음 위치 = 채널 위치(왼쪽 정렬)');
+    await win.click('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"]');
+    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on', { timeout: 5000 });
+    ok(true, '가로 ⇥ 를 누르자 이 줄이 오른쪽 정렬');
+    await win.click('[data-testid=cf-posv] button[title="세로 위"]');
+    await win.waitForSelector('[data-testid=cf-posv] button[title="세로 위"].on', { timeout: 5000 });
+    ok(await win.locator('[data-testid=cf-posv] input').inputValue() === '50', `세로 위를 누르면 위 기본 위치(0.125 = 50칸) — ${await win.locator('[data-testid=cf-posv] input').inputValue()}`);
+    await win.locator('[data-testid=cf-posh] input').fill('40');
+    await win.waitForTimeout(600);
+    ok(await win.locator('[data-testid=cf-posh] input').inputValue() === '40', '가로 미세 40칸(0.1) 입력');
+    await nos.nth(1).click();
+    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 왼쪽 정렬"].on', { timeout: 3000 });
+    ok(true, '🔑 다른 줄(02)은 채널 위치(왼쪽) 그대로');
+    await nos.nth(0).click();
+    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on', { timeout: 3000 });
+    // [S] 💾 자막 서식 저장 → 채널 기본값
+    await win.click('[data-testid=cf-savedef]');
+    await win.waitForTimeout(900);
+    const cap = await win.evaluate(async (n) => ((await window.api.getPresetDetail(n)) || {}).capLong || {}, CH);
+    ok(cap.align === 'end' && cap.yAlign === 'top' && Math.abs(cap.yOffset - 0.125) < 1e-6 && Math.abs(cap.xOffset - 0.1) < 1e-6,
+      `💾 자막 서식 저장 → 채널 capLong (정렬 ${cap.align} · 세로 ${cap.yAlign} ${cap.yOffset} · 가로 ${cap.xOffset})`);
+    ok(!!cap.fontColor && !!cap.font && String(cap.size) === '100', `서식도 함께 저장(글꼴 ${cap.font} · 크기 ${cap.size})`);
+    await win.keyboard.press('Escape');
+    await win.waitForSelector('[data-testid=cf-bar].idle', { timeout: 3000 });
+    ok(await win.locator('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on').count() === 1, '저장 뒤 헤더(채널 위치)도 새 값 — 고른 게 없어도 오른쪽');
 
     // [8] 문장을 고쳐도 서식이 남는다(오타 고치기)
     await win.locator('.cut .sblk').nth(1).locator('.sblk-lines').click();
@@ -143,6 +192,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.click('.cut .gprev[title="이 그룹 미리듣기"]');
     await win.waitForSelector('#stageCap .cf-stageline', { timeout: 8000 });
     ok(await win.locator('#stageCap .cf-stageline span').count() >= 1, '미리보기 재생이 서식 구간으로 그린다');
+    ok(await win.evaluate(() => getComputedStyle(document.getElementById('stageCap')).textAlign) === 'right', '📐 미리보기도 01 줄을 오른쪽 정렬로 그린다');
     await win.keyboard.press('Escape');
 
     // [11] 채널 편집 → 📝 자막 → 🎨 서식 창
@@ -151,6 +201,15 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.click('.modal-card.tabbed button:has-text("📝 자막·분할")');
     await win.waitForSelector('[data-testid=ch-capfmt]', { timeout: 3000 });
     ok(true, '📝 자막 탭에 「🎨 글꼴·간격·형광펜·그림자」 버튼');
+    const chv = await win.evaluate(() => {
+      const sels = [...document.querySelectorAll('.modal-card.tabbed select')];
+      const al = sels.find((x) => [...x.options].some((o) => o.value === 'end') && [...x.options].some((o) => o.value === 'start'));
+      const ya = sels.find((x) => [...x.options].some((o) => o.value === 'top') && [...x.options].some((o) => o.value === 'middle'));
+      const xin = [...document.querySelectorAll('.modal-card.tabbed .crow')].find((r) => /가로/.test(r.textContent) && /정렬/.test(r.textContent));
+      const ins = xin ? [...xin.querySelectorAll('input.n')] : [];
+      return { align: al && al.value, yAlign: ya && ya.value, x: ins.length ? ins[ins.length - 1].value : null };
+    });
+    ok(chv.align === 'end' && chv.yAlign === 'top' && chv.x === '40', `🔑 채널 편집을 다시 열면 저장한 값이 남아 있다 (${JSON.stringify(chv)})`);
     await win.click('[data-testid=ch-capfmt]');
     await win.waitForSelector('[data-testid=capdlg] [data-testid=cf-panel]', { timeout: 3000 });
     ok(await win.locator('[data-testid=capdlg] [data-testid=cf-anim]').count() === 1, '채널 서식 창 = 고급 서식 + 애니메이션(모든 줄 기본 효과)');
@@ -163,6 +222,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
   } catch (e) {
     ok(false, 'E2E 예외: ' + (e && e.stack || e));
   } finally {
+    if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }
     try { await app.close(); } catch (_) {}
     cleanup();
     console.log(`\n${fail ? '❌' : '✅'} 자막 서식 E2E ${pass}/${pass + fail}`);
