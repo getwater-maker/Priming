@@ -944,7 +944,7 @@ export default function App() {
         try {
           if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
           if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
     }
@@ -1013,14 +1013,14 @@ export default function App() {
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
+    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 방금 고친 헤더(범위 등)를 지금 대본에 먼저 저장 — 디바운스 300ms 전에 눌러도 반영(v0.5.73)
     try {
       // 비디오·이미지 엔진은 헤더값(이번 실행 공통)으로 전달 — 큐 항목별 stale 값 무시(헤더 '없음'이면 전 대본 영상 없음)
       // 채널(presetName)·배속·AI고지도 함께 보낸다 — 항목에 저장된 값이 우선이고, **없을 때만** 이 헤더값이
       //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
-      // 영상 범위(vidFrom~vidTo)도 헤더값을 공통으로 전달 — 항목 저장값이 없어도 헤더 범위가 적용된다.
-      //   (안 보내면 서버가 '미지정'으로 보고 안전기본 G1 만 만든다 — 전 그룹 생성 사고 방지)
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, vidFrom, vidTo, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
+      // 영상 범위는 공통으로 보내지 않는다 — main 이 대본마다 자기 범위(저장값 → 도입부)를 쓴다(v0.5.73).
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
@@ -3535,7 +3535,7 @@ export default function App() {
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
                   <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-                  <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                  <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>

@@ -4410,17 +4410,18 @@ function warnGrokLimit(info) {
 
 // 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
 //   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
-// 큐 제작용 영상 범위 결정 — 헤더(common) 우선 → 항목(s) → 안전기본(G1만).
-//   반환: { fromNum, toNum }. 영상은 건당 비용이 크므로 "미지정 = 전체" 를 절대 만들지 않는다.
-function _batchRange(common = {}, s = {}) {
+// 큐 제작용 영상 범위 결정 — **대본마다 자기 범위**(v0.5.73, 로이: 대본마다 도입부가 다르다).
+//   ① 그 대본에 저장된 범위(큐에서 그 대본을 눌러 고쳐 둔 값) ② 없으면 그 대본의 도입부 그룹 끝까지
+//   ③ 도입부도 없으면 G1 만. ⚠ 헤더 범위를 모든 대본에 덮지 않는다 — 도입부가 짧은 대본이 본론까지 영상을 만들었다.
+//   ⚠ "미지정 = 전체" 는 절대 만들지 않는다(v0.2.76 47개 영상 사고). 반환: { fromNum, toNum, src }.
+function _itemRange(s = {}, parsed = null) {
   const num = (v) => (v != null && v !== '' && !isNaN(parseInt(v, 10)) ? parseInt(v, 10) : null);
-  const f = num(common.vidFrom) != null ? num(common.vidFrom) : num(s.vidFrom);
-  const t = num(common.vidTo) != null ? num(common.vidTo) : num(s.vidTo);
-  if (f == null || t == null) {
-    log('⚠ 영상 범위 미지정 — 안전을 위해 G1 만 생성합니다(비용 폭주 방지). 헤더 「범위」를 확인하세요.');
-    return { fromNum: 1, toNum: 1 };
-  }
-  return { fromNum: f, toNum: t };
+  const f = num(s.vidFrom), t = num(s.vidTo);
+  if (f != null && t != null) return { fromNum: Math.min(f, t), toNum: Math.max(f, t), src: '저장된 범위' };
+  const pr = parsed && parsed.projects && parsed.projects[0];
+  const intro = pr ? pr.groups.filter((g) => g.isIntro).map((g) => g.num) : [];
+  if (intro.length) return { fromNum: 1, toNum: Math.max(...intro), src: '도입부 기본' };
+  return { fromNum: 1, toNum: 1, src: '도입부 없음 — 안전을 위해 G1 만' };
 }
 // 🔗 영상 참조가 비었는데 출력 폴더(media-N)에 그 그룹 번호의 영상이 남아 있으면 다시 잇는다(v0.5.49 · 아내 PC 실사고).
 //   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(Grok·Comfy 크레딧 보호).
@@ -4446,7 +4447,15 @@ function rangeNums(project, fromNum, toNum) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
+  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
+  let { fromNum = null, toNum = null } = args;
+  // 큐 전체(상단 🎬) = perItem — 그 대본에 저장된 범위(없으면 도입부)를 쓴다. 헤더 값 하나로 모든 대본을 덮지 않는다(v0.5.73).
+  if (args.perItem) {
+    const _it = activeItem();
+    const _rg = _itemRange((_it && _it.settings) || {}, S.parsed);
+    fromNum = _rg.fromNum; toNum = _rg.toNum;
+    if (engine !== 'none') log(`🎬 ${(S.parsed && S.parsed.fileTitle) || ''} — 영상 범위 G${fromNum}~G${toNum} (${_rg.src})`);
+  }
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
   if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
@@ -5591,7 +5600,7 @@ async function runMakeAllCore(opts = {}) {
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      const vOnly0 = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _batchRange 가 미지정을 막음)
+      const vOnly0 = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _itemRange 가 미지정을 막음)
       const _rl = autoRelinkVideos(pr, dirs.media);
       if (_rl) { log(`🔗 ${prLabel(pr)} 출력 폴더에 남아 있던 영상 ${_rl}개를 다시 연결했습니다`); pushDtoUpdate(); }
       const vOnly = vOnly0.filter((n) => { const g = pr.groups.find((x) => x.num === n); return !(g && hasVideoFile(g)); });
@@ -5744,16 +5753,16 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       const _pn = s.presetName || common.presetName || null;
       if (!s.presetName && common.presetName) log(`  ⓘ 이 대본에 채널이 저장돼 있지 않아 헤더 채널 「${common.presetName}」 을 씁니다`);
       if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
+      const _rg = _itemRange(s, S.parsed);
+      if (ve !== 'none') log(`  🎬 영상 범위 G${_rg.fromNum}~G${_rg.toNum} (${_rg.src})`);
       await runMakeAllCore({
         engine: ie, presetName: _pn,
         speed: (s.ttsSpeed != null ? s.ttsSpeed : (common.ttsSpeed != null ? common.ttsSpeed : null)),
         // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
         //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
         styleId: (common.styleId != null ? common.styleId : (s.styleId || null)),
-        // ⚠ 영상 범위 = **헤더(공통) 우선**, 없으면 항목 저장값. 둘 다 없으면 G1 만(비용 폭주 방지).
-        //   과거엔 항목 저장값만 봐서, 대본을 열고 바로 만들기를 누르면(저장 전) null→rangeNums 가 **전 그룹**을
-        //   돌려 47개 영상이 생성되는 사고가 있었음. 영상은 건당 비용/시간이 크므로 기본값이 '전체' 여선 안 된다.
-        ..._batchRange(common, s),
+        // ⚠ 영상 범위 = **대본마다 자기 범위**(_itemRange) — 헤더 범위를 모든 대본에 덮지 않는다(v0.5.73).
+        fromNum: _rg.fromNum, toNum: _rg.toNum,
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         // 🎛 Genspark 비디오 모델도 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
         gensparkVideoModel: common.gensparkVideoModel || s.gensparkVideoModel || null,
