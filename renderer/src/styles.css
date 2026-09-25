@@ -696,3 +696,29 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .sent.clip .clip-no{border-radius:9px 0 0 9px}
 .sent .ins-mark.audio{background:#e8f6fd;border-color:#2ec4f0;color:#0b6f93}
 .sent .ins-mark.video{background:#f3ecff;border-color:#8e6ad8}
+
+/* ── 🎬 Vrew 식 화면(클립 · 상세) — v0.5.57 · 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대 ── */
+.cuts-grid.vrew .cut.lf{grid-template-columns:calc(var(--lanes, 1) * 28px + 22px) 1fr}
+.cuts-grid.vrew .vgutter{min-height:1px}
+.sent.clip.vside{grid-template-columns:44px 1fr 118px}
+.clip-side{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 8px;border-left:1px solid #efe6d6;background:#fcf9f4;border-radius:0 9px 9px 0}
+.cuts-grid.clips .clip-side .thumbwrap.lf,.cuts-grid.clips .clip-side .thumb.lf{width:100px;height:56px;border-radius:6px}
+.clip-side .thumbwrap .playbadge,.clip-side .thumbwrap .vidplay{display:none}
+.cthumb{width:100px;height:56px;border-radius:6px;background:#1a1714;overflow:hidden;cursor:pointer}
+.cthumb img,.cthumb video{width:100%;height:100%;object-fit:cover;display:block}
+.clip-side .clip-time{font-size:11px;color:#8a7b66;white-space:nowrap}
+.ins-lanes{position:absolute;right:calc(100% + 18px);top:0;bottom:0;width:calc(var(--lanes, 1) * 28px);pointer-events:none}
+.ins-lanes .lane{position:absolute;top:-7px;bottom:-7px;width:28px}
+.ins-lanes .lane::before{content:'';position:absolute;left:12px;width:4px;top:0;bottom:0;border-radius:2px;background:#e3b066}
+.ins-lanes .lane.audio::before{background:#2ec4f0}
+.ins-lanes .lane.video::before{background:#8e6ad8}
+.ins-lanes .lane.s::before{top:40px}
+.ins-lanes .lane.e::before{bottom:18px}
+.ins-lanes .lane .ins-mark{position:absolute;top:11px;left:0;width:28px;height:28px;pointer-events:auto}
+.ins-lanes .lane.c{top:-190px}
+.ins-lanes .lane.c{top:-7px}
+.narr{position:relative}
+.narr .ins-lanes.nb{right:calc(100% + 1px);top:-28px;bottom:-12px}
+.narr .ins-lanes.nb .lane{top:0;bottom:0}
+.narr .ins-lanes.nb{right:calc(100% - 1px)}
+.narr .ins-lanes.nb{right:calc(100% + 2px)}

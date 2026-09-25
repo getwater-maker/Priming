@@ -169,17 +169,29 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await ps.click();
     await win.waitForFunction(() => (document.querySelector('[data-testid=play-shorts]') || {}).innerText.includes('미리보기'), null, { timeout: 4000 }).catch(() => {});
     ok((await ps.innerText()).includes('▶ 미리보기'), '■ 멈춤 → ▶ 미리보기');
+    // 🔑 두 번째 그룹부터 재생 — 음악이 처음(0초)이 아니라 흐른 시간만큼 뒤에서 이어진다
+    const pf2 = win.locator('[data-testid=play-from]').nth(1);
+    await pf2.click(); await win.waitForTimeout(1200);
+    const au3 = await win.evaluate(() => (window.__pmInsAudio ? window.__pmInsAudio() : []));
+    const t3 = (au3.find((x) => x.key.startsWith('ov:')) || {}).t || 0;
+    ok(t3 > 3, `🔑 G2 부터 재생해도 삽입 음악은 이어서(${t3.toFixed(2)}초 지점 — 앞 그룹 길이만큼 건너뜀)`);
+    await pf2.click();
+    await win.waitForFunction(() => [...document.querySelectorAll('[data-testid=play-from]')].every((b) => b.innerText.trim() === '⏭'), null, { timeout: 4000 }).catch(() => {});
     const pf = win.locator('[data-testid=play-from]').first();
     await pf.click();
     await win.waitForFunction(() => (document.querySelector('[data-testid=play-from]') || {}).innerText.trim() === '■', null, { timeout: 4000 }).catch(() => {});
     ok((await pf.innerText()).trim() === '■', '⏭ 여기부터 → ■');
-    await pf.click(); await win.waitForTimeout(300);
+    await pf.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-from]') || {}).innerText.trim() === '⏭', null, { timeout: 4000 }).catch(() => {});
     ok((await pf.innerText()).trim() === '⏭', '■ → ⏭');
 
     // ② 칸 표시 — 삽입이 시작하는 클립(1)에 그림 썸네일 + 🎵
-    const geo = await win.evaluate(() => { const m = document.querySelector('.sent[data-ln="1"] .ins-marks'); const c = document.querySelector('.sent[data-ln="1"]'); const r = document.querySelector('.cut .sents'); if (!m || !c || !r) return null; const a = m.getBoundingClientRect(), b = c.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { mRight: a.right, cardLeft: b.left, rail: rr.left, col: a.height > a.width }; });
+    const geo = await win.evaluate(() => { const m = document.querySelector('.sent[data-ln="1"] [data-testid=ins-marks]'); const c = document.querySelector('.sent[data-ln="1"]'); const r = document.querySelector('.cut .sents'); if (!m || !c || !r) return null; const a = m.getBoundingClientRect(), b = c.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { mRight: a.right, cardLeft: b.left, rail: rr.left, col: a.height > a.width }; });
     ok(geo && geo.mRight < geo.rail && geo.mRight < geo.cardLeft, `🔑 표시가 클립 카드 밖 왼쪽(레일 왼쪽)에 — ${JSON.stringify(geo)}`);
-    ok(geo && geo.col, '여러 개면 세로로 쌓인다');
+    ok(geo && geo.col, '범위 막대 칸(레인)');
+    const vr = await win.evaluate(() => ({ sides: document.querySelectorAll('.sent.clip [data-testid=clip-side]').length, clips: document.querySelectorAll('.sent.clip').length, gthumb: !!document.querySelector('.sent[data-ln="1"] [data-testid=clip-side] .thumbwrap, .sent[data-ln="1"] [data-testid=clip-side] .thumb'), times: document.querySelectorAll('[data-testid=clip-side] .clip-time').length, lanes3: document.querySelectorAll('.sent[data-ln="3"] [data-testid=ins-lane]').length, bridge: document.querySelectorAll('.narr .ins-lanes.nb .lane').length }));
+    ok(vr.sides === vr.clips && vr.gthumb, `🔑 Vrew 식 — 클립마다 오른쪽에 그림 칸(${vr.sides}/${vr.clips}) · 첫 클립 = 그룹 그림`);
+    ok(vr.lanes3 >= 1 && vr.bridge >= 1, `🔑 범위 막대가 그룹을 넘어 이어진다(클립 3 레인 ${vr.lanes3} · 머리줄 다리 ${vr.bridge})`);
     const hit = await win.evaluate(() => { const b = document.querySelector('.sent[data-ln="1"] [data-testid=ins-mark]'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { ok: !!(e && (e === b || b.contains(e))), top: e ? (e.className || e.tagName) + ' < ' + ((e.parentElement && e.parentElement.className) || '') : null }; });
     ok(hit.ok, '표시를 누를 수 있다(가려지지 않음) ' + JSON.stringify(hit));
     if (!hit.ok) console.log(await win.evaluate(() => { const b = document.querySelector('[data-testid=ins-mark]'); const out = []; for (let e = b; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); out.push([e.className || e.tagName, cs.overflow, cs.position, cs.zIndex, cs.transform].join('|')); } return out; }));

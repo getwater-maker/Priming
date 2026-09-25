@@ -2546,24 +2546,29 @@ export default function App() {
   }
   async function syncInsAudio(pr, ord) {
     const want = [];
-    for (const o of (pr && pr.overlays) || []) if (o.kind === 'audio' && !o.broken && ord >= o.from && ord <= o.to) want.push({ key: 'ov:' + o.id, file: o.file, vol: (o.volume == null ? 30 : o.volume) / 100 });
+    for (const o of (pr && pr.overlays) || []) if (o.kind === 'audio' && !o.broken && ord >= o.from && ord <= o.to) want.push({ key: 'ov:' + o.id, file: o.file, vol: (o.volume == null ? 30 : o.volume) / 100, from: o.from });
     if (bgmCfg.on && bgmCfg.path) {
       if (!audUrlRef.current.has('__bgm:' + presetName)) { try { audUrlRef.current.set('__bgm:' + presetName, await api.bgmPreviewFile({ presetName })); } catch (_) {} }
       const b = audUrlRef.current.get('__bgm:' + presetName);
-      if (b && b.file) want.push({ key: 'bgm', file: b.file, vol: b.volume != null ? b.volume : 0.15 });
+      if (b && b.file) want.push({ key: 'bgm', file: b.file, vol: b.volume != null ? b.volume : 0.15, from: 1 });
     }
     const keys = new Set(want.map((w) => w.key));
-    try { window.__pmInsAudio = () => [...insAudRef.current].map(([k, x]) => ({ key: k, paused: x.paused, vol: x.volume })); } catch (_) {}   // 🧪 E2E 확인용(지금 울리는 삽입 소리)
+    try { window.__pmInsAudio = () => [...insAudRef.current].map(([k, x]) => ({ key: k, paused: x.paused, vol: x.volume, t: x.currentTime })); } catch (_) {}   // 🧪 E2E 확인용(지금 울리는 삽입 소리)
     for (const [k, a] of insAudRef.current) if (!keys.has(k)) { try { a.pause(); } catch (_) {} insAudRef.current.delete(k); }
     for (const w of want) {
       if (insAudRef.current.has(w.key)) { insAudRef.current.get(w.key).volume = Math.min(1, w.vol); continue; }
       const u = await audUrl(w.file);
       if (!u || playAbortRef.current) continue;
       const a = new Audio(u); a.loop = true; a.volume = Math.min(1, Math.max(0, w.vol));
+      // 🔑 구간 시작(from)부터 지금 문장(ord) 앞까지 흐른 시간만큼 건너뛴다 — 중간 그룹에서 재생을 시작해도 음악이 이어진다
+      const off = secBetween(pr, w.from, ord);
+      if (off > 0.05) a.addEventListener('loadedmetadata', () => { try { a.currentTime = a.duration > 0 ? off % a.duration : off; } catch (_) {} }, { once: true });
       insAudRef.current.set(w.key, a);
       a.play().catch((e) => logline('🎵 미리보기 소리 실패: ' + (w.file.split(/[\\/]/).pop()) + ' — ' + e.message));
     }
   }
+  // 편 문장 번호 a 부터 b 앞까지 음성 길이 합(초) — 미리보기에서 삽입 소리의 이어 틀 위치
+  function secBetween(pr, a, b) { let o = 0, t = 0; for (const x of pr.cuts) for (const se of (x.sentences || [])) { o++; if (o >= a && o < b) t += se.dur || 2.5; } return t; }
   function ordOf(pr, cut, si) { let o = 0; for (const x of pr.cuts) { if (x.num === cut.num) return o + si + 1; o += (x.sentences || []).length; } return 0; }
   async function playCut(c, info, sn) {
     const _prP = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null;
@@ -4650,6 +4655,8 @@ function fitSentBox(el) {
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange }) {
+  // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
+  const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
   const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
   const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
@@ -4715,7 +4722,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
-            <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '') + (detail ? ' detail' : '')}>
+            <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '') + (detail ? ' detail' : '') + (vrewLay ? ' vrew' : '')}
+              style={vrewLay ? { '--lanes': Math.max(1, (pr.overlays || []).length) } : undefined}>
               {pr.cuts.map((c, ci) => {
                 const ph = phaseBadge(c.phase);
                 // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
@@ -4725,6 +4733,10 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 const vrR = vrDrag && vrDrag.shortsNum === pr.shortsNum ? vrRangeOf(vrDrag) : null;
                 const ed = edit.cur;
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
+                const thumbEl = (
+                  <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
+                    onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
+                );
                 const lineEls = sents.map((s, si) => {
                   // 🧭 줄 번호는 App 의 linesMap(Workspace.buildProjLines)이 정본 — ①·키보드와 같은 번호
                   const _pl = linesMap && linesMap.get(pr.shortsNum);
@@ -4816,8 +4828,25 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                               onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
                               onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
                           );
-                          // ➕ 이 줄이 삽입의 시작이면 표시(문장 첫 줄에만) — 🎵 오디오 · 그림 썸네일 · 🎬 영상
-                          const insHere = li === 0 && onInsMark ? insMarksAt(pr, c, si) : [];
+                          // ➕ 삽입 범위 막대(Vrew 왼쪽 칸) — 삽입마다 한 줄(레인). 시작 클립에 아이콘 · 끝 클립에서 끝난다
+                          const ord = gs + si;
+                          const laneEls = (vrewLay && onInsMark) ? (pr.overlays || []).map((o, oi) => {
+                            if (o.broken || ord < o.from || ord > o.to) return null;
+                            const st = li === 0 && ord === o.from, en = li === lines.length - 1 && ord === o.to;
+                            return (
+                              <span key={o.id} className={'lane ' + o.kind + (st ? ' s' : '') + (en ? ' e' : '')} style={{ right: oi * 28 }} data-testid="ins-lane">
+                                {st && <button className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind}
+                                  title={`${o.kind === 'audio' ? '🎵 오디오' : o.kind === 'video' ? '🎬 영상' : '🖼 그림'} 「${o.name || ''}」 · ${o.from === 1 && o.to === o.total ? '전체' : `클립 ${o.from}~${o.to}`} — 누르면 적용 범위 · 삭제`}
+                                  onMouseDown={(ev) => ev.stopPropagation()}
+                                  onClick={(ev) => { ev.stopPropagation(); onInsMark(pr.shortsNum, o.id, ev.currentTarget); }}>
+                                  {o.kind === 'image' ? <img src={media(o.file, o.version)} alt="" /> : (o.kind === 'video' ? '🎬' : '🎵')}
+                                </button>}
+                              </span>
+                            );
+                          }).filter(Boolean) : [];
+                          const lanes = laneEls.length ? <span className="ins-lanes" data-testid="ins-marks">{laneEls}</span> : null;
+                          // ➕ (개요 보기) 이 줄이 삽입의 시작이면 표시(문장 첫 줄에만) — 🎵 오디오 · 그림 썸네일 · 🎬 영상
+                          const insHere = !vrewLay && li === 0 && onInsMark ? insMarksAt(pr, c, si) : [];
                           const insMarks = insHere.length ? (
                             <span className="ins-marks" data-testid="ins-marks">
                               {insHere.map((o) => (
@@ -4837,15 +4866,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             const tm = fmtClipTime(l.start, l.dur);
                             const lineEd = ed && ed.line && ed.where !== 'stage' && edHere && ed.sentIdx === si && ed.line.n === l.n;
                             return (
-                              <div className={'sent clip' + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
-                                {insMarks}
+                              <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
+                                {vrewLay ? lanes : insMarks}
                                 <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{l.n}</div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); } }}>
                                     <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
-                                    {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                    {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (
                                         <span key={w.from} className={'chip' + (selChars.some((x) => x.from < w.to && x.to > w.from) ? ' on' : '')}
@@ -4880,6 +4909,19 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                     <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) edit.fmtClip(pr.shortsNum, info); }}>가</button>
                                   </div>
                                 </div>
+                                {vrewLay && (
+                                  <div className="clip-side" data-testid="clip-side" onClick={(ev) => ev.stopPropagation()} onMouseDown={(ev) => ev.stopPropagation()}>
+                                    {si === 0 && li === 0 ? thumbEl : (() => {
+                                      const tv = topVisualAt(pr, ord);
+                                      return (
+                                        <div className="cthumb" title="이 클립에 보이는 그림" onClick={(ev) => { ev.stopPropagation(); if (onCursor) onCursor(pr.shortsNum, l.n); }}>
+                                          {tv && tv.videoPath ? <video src={media(tv.videoPath, tv.videoVersion)} muted preload="metadata" /> : tv && tv.imagePath ? <img src={media(tv.imagePath, tv.imageVersion)} alt="" /> : null}
+                                        </div>
+                                      );
+                                    })()}
+                                    {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                  </div>
+                                )}
                               </div>
                             );
                           }
@@ -4901,11 +4943,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   );
                 });
                 return (
-                  <div className={'cut' + (isLf ? ' lf' : '')} key={c.num}>
-                    <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
-                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
+                  <div className={'cut' + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '')} key={c.num}>
+                    {vrewLay ? <div className="vgutter" /> : thumbEl}
                     <div>
                       <div className={'narr' + (c.isIntro ? ' intro' : '')}>
+                        {vrewLay && onInsMark && (() => {
+                          // ➕ 앞 그룹에서 이어지는 삽입 — 그룹 머리줄 칸에도 막대를 그어 끊기지 않게
+                          const br = (pr.overlays || []).map((o, oi) => (!o.broken && o.from < gs && o.to >= gs ? <span key={o.id} className={'lane ' + o.kind} style={{ right: oi * 28 }} /> : null)).filter(Boolean);
+                          return br.length ? <span className="ins-lanes nb">{br}</span> : null;
+                        })()}
                         <div className="narr-top">
                           <span className="num">G{c.num}</span>
                           <div className="narr-btns">
@@ -4955,6 +5001,19 @@ function vrRangeOf(d) {
 }
 
 // 🔝 위층(DTO) → ① 칸 레이어 모양(그룹 cut 과 같은 필드) · 움직이지 않는다 · num = 'O' + id
+// 🖼 편 문장 번호 ord 에 보이는 맨 위 그림 — ① 칸 visLayersAt 과 같은 규칙(삽입 그림·영상 > 뒤 그룹 > 앞 그룹 이어 깔기)
+function topVisualAt(pr, ord) {
+  const ovs = ((pr && pr.overlays) || []).filter((o) => !o.broken && o.kind !== 'audio' && ord >= o.from && ord <= o.to);
+  if (ovs.length) { const o = ovs[ovs.length - 1]; return o.kind === 'video' ? { videoPath: o.file, videoVersion: o.version } : { imagePath: o.file, imageVersion: o.version }; }
+  let o = 0, top = null;
+  for (const c of (pr && pr.cuts) || []) {
+    const a = o + 1, b = o + (c.sentences || []).length; o = b;
+    if (!(c.imagePath || c.videoPath)) continue;
+    const r = c.span || { from: a, to: b };
+    if (ord >= r.from && ord <= r.to) top = c;
+  }
+  return top;
+}
 // ➕ 이 문장에서 시작하는 삽입(편 문장 번호 from 과 같을 때)
 function insMarksAt(pr, cut, si) {
   const L = (pr && pr.overlays) || []; if (!L.length) return [];
