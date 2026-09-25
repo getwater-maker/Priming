@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'update-manifest.json');
@@ -101,6 +102,22 @@ try {
 
 const files = {};
 walk(ROOT, '', files);
+
+// 🙈 **git 이 무시하는 파일은 싣지 않는다** — 클라이언트는 raw.githubusercontent 에서 받는데 그런 파일은 GitHub 에 없다
+//   → 앱을 켤 때마다 404 로 「다운로드 실패」가 쌓였다(usage-coach/ — .gitignore 14행, v0.5.41 무렵부터 섞임).
+//   ⚠ ls-files(추적 목록)로 거르면 안 된다 — 방금 vite build 한 renderer/dist 새 에셋은 아직 커밋 전이라 빠진다.
+//   check-ignore 는 추적 중인 파일을 무시 대상으로 보고하지 않는다(=기존 배포 파일에 영향 없음).
+try {
+  const cand = Object.keys(files);
+  // -z: 한글 경로가 따옴표·8진수로 바뀌지 않게(core.quotePath) NUL 로 주고받는다.
+  const out = execFileSync('git', ['check-ignore', '-z', '--stdin'], { cwd: ROOT, input: cand.join('\0') + '\0', encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const ign = out.split('\0').filter(Boolean);
+  for (const r of ign) delete files[r];
+  if (ign.length) console.log(`git 무시 파일 ${ign.length}개 제외 (예: ${ign.slice(0, 3).join(', ')})`);
+} catch (e) {
+  // check-ignore 는 무시 대상이 하나도 없으면 종료코드 1 — 정상.
+  if (!(e && e.status === 1)) console.warn('⚠ git check-ignore 실패 — 무시 파일 필터 없이 진행:', e && e.message);
+}
 const depsHash = sha1(Buffer.from(JSON.stringify(pkg.dependencies || {})));
 const manifest = { version: pkg.version, deps: depsHash, files };
 fs.writeFileSync(OUT, JSON.stringify(manifest, null, 2));
