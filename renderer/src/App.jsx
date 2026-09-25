@@ -1089,6 +1089,30 @@ export default function App() {
     try { const d = await api.mergeGroup({ shortsNum, groupNum }); setDto(d); setStatus(`⤒ G${groupNum} 을 G${groupNum - 1} 에 합쳤습니다 — G${groupNum - 1} 그림을 이어 씁니다`); }
     catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('⤒ 합치기: ' + m); setStatus(m); }
   }
+  // 🖼 그림 적용 범위 — 막대 끌기·썸네일 메뉴 공통. 통째로 덮여 사라지는 그룹의 그림이 있으면 먼저 묻는다.
+  async function setVisualRange(shortsNum, groupNum, from, to, ask) {
+    try {
+      if (ask) {
+        const v = await askName(`G${groupNum} 그림을 쓸 문장 범위 (1~${ask.n}, 예: ${ask.gs}-${ask.ge})`, `${ask.gs}-${ask.ge}`);
+        if (v == null) return;
+        const mm = String(v).match(/(\d+)\s*[-~–]\s*(\d+)/) || String(v).match(/^\s*(\d+)\s*$/);
+        if (!mm) { setStatus('범위는 「5-20」처럼 적습니다'); return; }
+        from = Number(mm[1]); to = Number(mm[2] || mm[1]);
+      }
+      const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === shortsNum) : null;
+      if (pr) {
+        let o = 0; const lost = [];
+        for (const c of pr.cuts) {
+          const a = o + 1, b = o + (c.sentences || []).length; o = b;
+          if (c.num !== groupNum && a >= from && b <= to && (c.imagePath || c.videoPath)) lost.push('G' + c.num);
+        }
+        if (lost.length && !uiConfirm(`${lost.join('·')} 가 이 범위에 통째로 덮여 사라집니다.\n그 그룹의 그림·영상은 쓰지 않게 됩니다(앱이 만든 파일은 지웁니다).\n\n계속할까요?`)) return;
+      }
+      const d = await api.setVisualRange({ shortsNum, groupNum, from, to });
+      if (d) setDto(d);
+      setStatus(`🖼 G${groupNum} 그림 범위 → 문장 ${from}~${to}`);
+    } catch (e) { logline('범위 변경 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
   async function splitGroup(shortsNum, groupNum) {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
     catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
@@ -1394,6 +1418,62 @@ export default function App() {
       else setStatus('⚠ ' + ((r && r.error) || '서식을 바꾸지 못했습니다'));
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
   }
+  // ⤢ 고른 줄(첫 글자)의 덮어쓴 서식을 대본 전체 자막에
+  async function applyCapFmtAll() {
+    if (!capSel || !capSel.items.length) return;
+    const it = capSel.items[0];
+    const s = capSentence(capSel.shortsNum, it.groupNum, it.sentIdx);
+    const patch = s ? CF.fmtAt(CF.cleanSpans(s.spans, String(s.text || '').length), it.from) : {};
+    if (!patch || !Object.keys(patch).length) { setStatus('⚠ 고른 줄에 따로 준 서식이 없습니다 — 먼저 이 줄을 꾸민 뒤 누르세요'); return; }
+    if (!uiConfirm(`${capSelLabel()} 의 서식을 이 대본의 모든 자막에 적용합니다.\n다른 줄에 따로 준 서식은 이 서식으로 바뀝니다(Ctrl+Z 로 되돌릴 수 있습니다).\n\n계속할까요?`)) return;
+    try {
+      const r = await api.applyCaptionFormatAll({ patch });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); setStatus(`⤢ 자막 ${r.count}문장에 적용했습니다 (Ctrl+Z 되돌리기)`); }
+      else setStatus('⚠ ' + ((r && r.error) || '적용하지 못했습니다'));
+    } catch (e) { logline('자막 서식 오류: ' + e.message); }
+  }
+  // ↶ 되돌리기 / ↷ 다시 하기 — main 이 바꾸기 직전 상태를 기억한다(문장·서식·그림 범위·그룹 합치기/분할)
+  async function runUndo(redo) {
+    if (sentEdit) return;   // 고치는 중엔 편집칸 자체의 되돌리기
+    try {
+      const r = await api.undo({ redo: !!redo });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); setCapSel(null); setCapPanel(null); setStatus((redo ? '↷ 다시 하기 — ' : '↶ 되돌리기 — ') + r.label); }
+      else setStatus((r && r.error) || '되돌릴 것이 없습니다');
+    } catch (e) { logline('되돌리기 오류: ' + e.message); }
+  }
+  useEffect(() => {
+    const onKey = (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+      const k = String(ev.key || '').toLowerCase();
+      if (k !== 'z' && k !== 'y') return;
+      const t = ev.target;
+      // 글자칸·대본 보기 편집면 안에서는 그 칸의 되돌리기(타이핑 취소)를 쓴다
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (isBk || isRx) return;
+      ev.preventDefault();
+      runUndo(k === 'y' || (k === 'z' && ev.shiftKey));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  // 🧩 그룹 경계를 넘는 합치기 — 그룹 마지막 문장 끝 Del / 첫 문장 맨 앞 Backspace
+  async function mergeAcross(dir, text) {
+    const e = sentEdit; if (!e || sentBusy) return;
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
+    const gi = pr ? pr.cuts.findIndex((c) => c.num === e.groupNum) : -1;
+    const other = pr ? pr.cuts[dir === 'prev' ? gi - 1 : gi + 1] : null;
+    if (!other) { setStatus(dir === 'prev' ? '맨 앞 클립입니다' : '맨 끝 클립입니다'); return; }
+    const gone = dir === 'prev' ? pr.cuts[gi] : other;   // 문장이 하나뿐이면 사라지는 그룹
+    if ((gone.sentences || []).length === 1 && (gone.imagePath || gone.videoPath)
+      && !uiConfirm(`G${gone.num} 은 이 문장 하나뿐이라 합치면 그룹이 사라집니다.\nG${gone.num} 의 그림·영상은 쓰지 않게 됩니다(Ctrl+Z 로 되돌릴 수 있습니다).\n\n계속할까요?`)) return;
+    sentDoneRef.current = true; setSentBusy(true);
+    try {
+      const r = await api.mergeSentenceAcross({ shortsNum: e.shortsNum, groupNum: e.groupNum, dir, text });
+      if (r && r.ok) { setDto(r.dto); closeSentEdit(e); setStatus('🧩 클립을 합쳤습니다 — 음성은 🎤 로 다시 만드세요 (Ctrl+Z 되돌리기)'); }
+      else { sentDoneRef.current = false; setStatus('⚠ ' + ((r && r.error) || '합치지 못했습니다')); }
+    } catch (err) { sentDoneRef.current = false; logline('클립 합치기 오류: ' + err.message); }
+    finally { setSentBusy(false); }
+  }
   async function clearCapFmt(keys) {
     if (!capSel) return;
     try {
@@ -1533,7 +1613,12 @@ export default function App() {
     const PL = linesMap.get(e.shortsNum); const sl = (PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx)) || [];
     const firstLine = !sl.length || sl[0].n === e.line.n, lastLine = !sl.length || sl[sl.length - 1].n === e.line.n;
     const oneRow = el.scrollHeight <= (parseFloat(getComputedStyle(el).lineHeight) || 20) * 1.6;
-    const { si, sents, s } = ctx || {};
+    let { si, sents, s } = ctx || {};
+    if (!sents) {   // ① 칸 팝업은 문맥을 안 넘긴다 — 지금 편집 중인 문장에서 찾는다
+      const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
+      const cut = pr ? pr.cuts.find((c) => c.num === e.groupNum) : null;
+      if (cut) { sents = cut.sentences || []; si = e.sentIdx; s = sents[si]; }
+    }
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); if (e.where === 'stage') commitSentEdit(); else splitSentAtCursor(); }
     else if (ev.key === 'Escape') { ev.preventDefault(); cancelSentEdit(); }
     else if (ev.key === 'ArrowUp' && (oneRow || (caret === 0 && sel === 0))) { ev.preventDefault(); navEdit(-1); }
@@ -1542,7 +1627,7 @@ export default function App() {
       ev.preventDefault();
       if (!firstLine) { navEdit(-1); return; }
       if (!sents) return;
-      if (si === 0) setStatus('그룹의 첫 문장입니다 — 윗 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+      if (si === 0) mergeAcross('prev', String(prevCutLastText(e) || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim());
       else if (s && s.mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
       else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
       else mergeSentUp(si, sents[si - 1].text);
@@ -1550,11 +1635,23 @@ export default function App() {
       ev.preventDefault();
       if (!lastLine) { navEdit(1); return; }
       if (!sents) return;
-      if (si >= sents.length - 1) setStatus('그룹의 마지막 문장입니다 — 아래 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+      if (si >= sents.length - 1) mergeAcross('next', sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextCutFirstText(e) || '').trim());
       else if (sents[si + 1].mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
       else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
       else mergeSentNext(si, sents[si + 1].text);
     }
+  }
+  function prevCutLastText(e) {
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
+    const gi = pr ? pr.cuts.findIndex((c) => c.num === e.groupNum) : -1;
+    const c = pr && gi > 0 ? pr.cuts[gi - 1] : null; const ss = c ? c.sentences || [] : [];
+    return ss.length ? ss[ss.length - 1].text : '';
+  }
+  function nextCutFirstText(e) {
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
+    const gi = pr ? pr.cuts.findIndex((c) => c.num === e.groupNum) : -1;
+    const c = pr && gi >= 0 ? pr.cuts[gi + 1] : null; const ss = c ? c.sentences || [] : [];
+    return ss.length ? ss[0].text : '';
   }
   /** 「가」 — 이 클립 하나를 고르고 ⚙ 고급(③ 칸)을 연다 */
   function fmtClip(sn, info) {
@@ -2951,7 +3048,7 @@ export default function App() {
             </>)}
             {menu === 'format' && (
               <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
-                onPatch={applyCapFmt} onClear={() => clearCapFmt(null)}
+                onPatch={applyCapFmt} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll}
                 onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
                 onDone={() => { setCapSel(null); setCapPanel(null); }}
                 onSaveDefault={saveCapDefault} />
@@ -2995,6 +3092,10 @@ export default function App() {
           <div className="clipbar" data-testid="clipbar">
             {workTimes}
             <span className="grow" />
+            <span className="seg" title="되돌리기 Ctrl+Z · 다시 하기 Ctrl+Y — 문장 고치기·클립 합치기·자막 서식·그림 적용 범위·그룹 합치기/분할">
+              <button data-testid="undo-btn" disabled={!loaded} onClick={() => runUndo(false)}>↶</button>
+              <button data-testid="redo-btn" disabled={!loaded} onClick={() => runUndo(true)}>↷</button>
+            </span>
             {view === 'clips' && (
               <span className="seg" title="개요 = 줄만 촘촘히 · 상세 = 클립마다 화자·시각 + 어절 칩(누르면 그 단어만 서식)">
                 <button className={!clipDetail ? 'on' : ''} data-detail="0" onClick={() => pickClipDetail(false)}>개요</button>
@@ -3013,12 +3114,13 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
               splitAt: splitSentAtCursor, mergeUp: mergeSentUp, mergeNext: mergeSentNext,
               note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, fmtClip,
+              across: (d) => { const e = sentEdit; if (!e) return; mergeAcross(d, d === 'prev' ? String(prevCutLastText(e) || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim() : sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextCutFirstText(e) || '').trim()); },
             }} /></ErrorBoundary>
           </>)}
         </main>
@@ -4073,7 +4175,38 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange }) {
+  // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
+  const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
+  const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
+  const vrDragRef = useRef(null); vrDragRef.current = vrDrag;
+  useEffect(() => {
+    if (!vrDrag) return undefined;
+    const move = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const b = el && el.closest ? el.closest('[data-ord]') : null;
+      const d = vrDragRef.current;
+      if (!b || !d || Number(b.dataset.sn) !== d.shortsNum) return;
+      const o = Number(b.dataset.ord);
+      if (o !== d.ord) setVrDrag({ ...d, ord: o });
+    };
+    const up = () => {
+      const d = vrDragRef.current; setVrDrag(null);
+      if (!d || !onRange) return;
+      const r = vrRangeOf(d);
+      if (r.from !== d.gs || r.to !== d.ge) onRange(d.shortsNum, d.groupNum, r.from, r.to);
+    };
+    const esc = (ev) => { if (ev.key === 'Escape') { vrDragRef.current = null; setVrDrag(null); } };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up); document.addEventListener('keydown', esc);
+    document.body.classList.add('vr-dragging');
+    return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); document.body.classList.remove('vr-dragging'); };
+  }, [!!vrDrag]);
+  useEffect(() => {
+    if (!vrMenu) return undefined;
+    const close = (ev) => { if (ev.type === 'keydown' ? ev.key === 'Escape' : !(ev.target.closest && ev.target.closest('.vr-menu'))) setVrMenu(null); };
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [vrMenu]);
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -4085,6 +4218,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
         const totalGen = pr.cuts.reduce((s, c) => s + (c.groupGenSec || 0), 0);
         const rtf = (total > 0 && totalGen > 0) ? (totalGen / total) : null;
         let capN = 0;
+        let ordN = 0;   // 🖼 편 전체 문장 번호(1부터) — 그림 적용 범위의 단위
+        const nSent = pr.cuts.reduce((a, c) => a + ((c.sentences || []).length), 0);
         const projLines = [];   // 🎨 이 편의 모든 자막 줄(화면 순서) — Shift 로 범위를 고를 때
         return (
           <div className="card" key={pr.shortsNum}>
@@ -4109,6 +4244,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
                 //   한 문장이 자막 두 줄이 되기도 하므로(글자수 설정에 따라) 문장 경계를 블록으로 드러낸다.
                 const sents = c.sentences || [];
+                const gs = ordN + 1, ge = ordN + sents.length; ordN = ge;
+                const vrR = vrDrag && vrDrag.shortsNum === pr.shortsNum ? vrRangeOf(vrDrag) : null;
                 const ed = edit.cur;
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
                 const lineEls = sents.map((s, si) => {
@@ -4125,7 +4262,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   for (const l of lines) projLines.push({ n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to });
                   if (edHere && si === ed.sentIdx && !ed.line && ed.where !== 'stage') {
                     return (
-                      <div className="sblk editing" key={'e' + si}>
+                      <div className="sblk editing" key={'e' + si} data-ord={gs + si} data-sn={pr.shortsNum}>
                         {/* 🔑 줄 번호는 편집 중에도 그대로 둔다 — 고치는 동안에도 몇 번째 자막인지 보이게(로이 2026-09-15).
                             번호는 원문 기준이라 글자를 고쳐도 그 자리에서 움직이지 않는다(나누면 그때 다시 매겨진다). */}
                         <span className="lineno">{String(lines.length ? lines[0].n : capN).padStart(2, '0')} |</span>
@@ -4148,7 +4285,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             // 🔑 맨 앞에서 ←Backspace = 윗줄과 합치기. 지울 글자가 없을 때만이라 평소 지우기를 가로채지 않는다.
                             else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
                               ev.preventDefault();
-                              if (si === 0) edit.note('그룹의 첫 문장입니다 — 윗 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+                              if (si === 0) edit.across('prev');
                               else if (s.mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
                               else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
                               else edit.mergeUp(si, sents[si - 1].text);
@@ -4156,7 +4293,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             // 🔑 맨 끝에서 Del = 아랫줄을 끌어올려 합치기.
                             else if (ev.key === 'Delete' && caret === el.value.length && sel === el.value.length) {
                               ev.preventDefault();
-                              if (si >= sents.length - 1) edit.note('그룹의 마지막 문장입니다 — 아래 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+                              if (si >= sents.length - 1) edit.across('next');
                               else if (sents[si + 1].mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
                               else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
                               else edit.mergeNext(si, sents[si + 1].text);
@@ -4166,7 +4303,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     );
                   }
                   return (
-                    <div className="sblk" key={si}>
+                    <div className={'sblk' + (vrR && gs + si >= vrR.from && gs + si <= vrR.to ? ' vr-hit' : '')} key={si} data-ord={gs + si} data-sn={pr.shortsNum}>
                       {/* 합친 그룹 안의 옛 섹션 경계 — 그림은 앞 그림을 이어 쓰지만 챕터(타임스탬프)는 여기서 갈린다 */}
                       {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
                       <div className={'sblk-lines' + (capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum && capSel.items.some((x) => x.groupNum === c.num && x.sentIdx === si) ? ' capsel' : '')}
@@ -4263,7 +4400,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 });
                 return (
                   <div className={'cut' + (isLf ? ' lf' : '')} key={c.num}>
-                    <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview} />
+                    <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
+                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs, ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: false }) : null} />
                     <div>
                       <div className={'narr' + (c.isIntro ? ' intro' : '')}>
                         <div className="narr-top">
@@ -4283,7 +4421,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
                       </div>
-                      <div className="sents">{lineEls}</div>
+                      <div className={'sents' + (onRange && sents.length ? ' vr' : '') + (vrDrag && vrDrag.shortsNum === pr.shortsNum && vrDrag.groupNum === c.num ? ' vr-own' : '')}>
+                        {onRange && sents.length ? <>
+                          <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs, ge, ord: gs }); }} />
+                          <span className="vr-h bot" title={`그림 끝 — 끌어서 이 그림(G${c.num})을 어느 문장까지 쓸지 정합니다(다른 그룹 문장 위로 끌면 그 문장까지 이 그림이 덮습니다)`}
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'end', gs, ge, ord: ge }); }} />
+                        </> : null}
+                        {lineEls}
+                      </div>
                     </div>
                   </div>
                 );
@@ -4292,19 +4438,63 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           </div>
         );
       })}
+      {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu({ ...vrMenu, sub: v })}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} />}
+      {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
   );
 }
 
-function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
+// 끌기 중 범위 — 시작 손잡이는 끝을, 끝 손잡이는 시작을 고정한다
+function vrRangeOf(d) {
+  if (d.edge === 'start') return { from: Math.min(d.ord, d.ge), to: d.ge };
+  return { from: d.gs, to: Math.max(d.ord, d.gs) };
+}
+
+// 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 적용 범위 변경
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange }) {
+  const c = m.c, sn = m.shortsNum;
+  const has = !!(c.imagePath || c.videoPath);
+  const go = (fn) => () => { close(); fn(); };
+  const style = { left: Math.min(m.x, window.innerWidth - 250), top: Math.min(m.y, window.innerHeight - 290) };
+  if (m.sub) {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        <button className="vr-back" onClick={() => setSub(false)}>‹ 적용 범위 변경</button>
+        <div className="vr-cur">지금: 문장 {m.gs}~{m.ge} (편 전체 {m.n}문장)</div>
+        <button onClick={go(() => onRange(sn, c.num, 1, m.n))}>전체 클립으로</button>
+        <button onClick={go(() => onRange(sn, c.num, 1, m.ge))}>처음부터 이 그림 끝까지</button>
+        <button onClick={go(() => onRange(sn, c.num, m.gs, m.n))}>이 그림부터 끝까지</button>
+        <button onClick={go(() => onRange(sn, c.num, null, null, { gs: m.gs, ge: m.ge, n: m.n }))}>직접 입력…</button>
+      </div>
+    );
+  }
+  return (
+    <div className="vr-menu" style={style} data-testid="vr-menu">
+      {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>
+        : c.imagePath ? <button onClick={go(() => onPreview('img', media(c.imagePath, c.imageVersion)))}>🔍 크게 보기</button> : null}
+      <button onClick={go(() => onAttach(sn, c.num))}>🔁 {has ? '교체' : '첨부'} (파일)</button>
+      <button onClick={go(() => onRegen(sn, c.num))}>🖼 AI로 이미지 생성</button>
+      <button onClick={go(() => onGroupVid(sn, c.num))}>🎬 AI로 비디오 생성</button>
+      <div className="vr-sep" />
+      <button onClick={() => setSub(true)}>↕ 적용 범위 변경 ›</button>
+      {has && <><div className="vr-sep" /><button className="vr-del" onClick={go(() => onClear(sn, c.num))}>🗑 삭제</button></>}
+    </div>
+  );
+}
+
+function Thumb({ c, isLf, onAttach, onClear, onPreview, onMenu }) {
   const cls = isLf ? ' lf' : '';
+  // 🖼 메뉴가 있으면 썸네일을 누르면 메뉴(Vrew 방식) — 크게 보기·교체는 메뉴 안에
+  const onImgClick = onMenu || (() => onPreview('img', media(c.imagePath, c.imageVersion)));
+  const onEmpty = onMenu || onAttach;
   const clearBtn = <button className="thumbx" title="첨부 삭제" onClick={(e) => { e.stopPropagation(); onClear(); }}>✕</button>;
   const genOv = (txt) => <div className="genoverlay"><div className="spin" /><div>{txt}</div></div>;
   if (c.videoPath) {
     return (
       <div className={'thumbwrap' + cls}>
-        <video className={'thumb' + cls} src={media(c.videoPath, c.videoVersion)} muted loop playsInline preload="metadata" />
-        <button className="vidplay" title="재생 / 정지" onClick={(e) => { const v = e.currentTarget.parentElement.querySelector('video'); if (!v) return; if (v.paused) { v.play(); e.currentTarget.classList.add('playing'); } else { v.pause(); e.currentTarget.classList.remove('playing'); } }}>▶</button>
+        <video className={'thumb' + cls} src={media(c.videoPath, c.videoVersion)} muted loop playsInline preload="metadata" onClick={onMenu || undefined} />
+        <button className="vidplay" title="재생 / 정지" onClick={(e) => { e.stopPropagation(); const v = e.currentTarget.parentElement.querySelector('video'); if (!v) return; if (v.paused) { v.play(); e.currentTarget.classList.add('playing'); } else { v.pause(); e.currentTarget.classList.remove('playing'); } }}>▶</button>
         <span className="playbadge">🎬 영상</span>{clearBtn}
         {c.videoStatus === 'upscaling' ? genOv('⬆ 업스케일 중…') : null}
       </div>
@@ -4313,7 +4503,7 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
   if (c.imagePath) {
     return (
       <div className={'thumbwrap' + cls}>
-        <img className={'thumb' + cls} src={media(c.imagePath, c.imageVersion)} title="클릭: 미리보기" onClick={() => onPreview('img', media(c.imagePath, c.imageVersion))} alt="" />
+        <img className={'thumb' + cls} src={media(c.imagePath, c.imageVersion)} title={onMenu ? '클릭: 메뉴(크게 보기 · 교체 · AI 생성 · 적용 범위)' : '클릭: 미리보기'} onClick={onImgClick} alt="" />
         {c.videoStatus === 'generating' ? genOv('🎬 영상 변환 중…') : null}{clearBtn}
       </div>
     );
@@ -4322,10 +4512,10 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
     return <div className={'thumbwrap' + cls}><div className={'thumb none gen' + cls} />{genOv('🖼 이미지 생성 중…')}</div>;
   }
   if (c.imageStale) {
-    return <div className={'thumbwrap' + cls} title="대본이 변경되어 새 이미지가 필요합니다" onClick={onAttach}>
+    return <div className={'thumbwrap' + cls} title="새 이미지가 필요합니다 — 클릭: 메뉴" onClick={onEmpty}>
       <div className={'thumb none gen' + cls} />
       <div className="genoverlay"><div>📝 새 이미지 필요</div></div>
     </div>;
   }
-  return <div className={'thumb none' + cls} title="클릭: 이미지/영상 첨부" onClick={onAttach}>＋</div>;
+  return <div className={'thumb none' + cls} title={onMenu ? '클릭: 메뉴(첨부 · AI 생성 · 적용 범위)' : '클릭: 이미지/영상 첨부'} onClick={onEmpty}>＋</div>;
 }

@@ -180,6 +180,11 @@ contextBridge.exposeInMainWorld('api', {
   setGroupPrompt: (args) => ipcRenderer.invoke('set-group-prompt', args),
   finalPromptPreview: (args) => ipcRenderer.invoke('final-prompt-preview', args),
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
+  setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
+  applyCaptionFormatAll: (args) => ipcRenderer.invoke('apply-caption-format-all', args),
+  undo: (args) => ipcRenderer.invoke('undo', args),
+  mergeSentenceAcross: (args) => ipcRenderer.invoke('merge-sentence-across', args),
+  applyCaptionFormatAll: (args) => ipcRenderer.invoke('apply-caption-format-all', args),
   mergeGroup: (args) => ipcRenderer.invoke('merge-group', args),
   // 🎨 자막 서식(줄·글자 범위) · 글꼴 · 저장된 서식
   setCaptionFormat: (args) => ipcRenderer.invoke('set-caption-format', args),

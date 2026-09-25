@@ -4219,7 +4219,8 @@ function warnMissingTts(list) {
 }
 function missingVisualGroups(project) {
   return (project.groups || []).filter((g) => {
-    if (!(g.imagePrompt && String(g.imagePrompt).trim())) return false; // 비주얼 대상 그룹만
+    // 비주얼 대상 그룹만 — 🖼 범위를 줄여 떨어져 나온 그룹(imageStale)은 프롬프트가 없어도 그림이 있어야 한다
+    if (!(g.imagePrompt && String(g.imagePrompt).trim()) && !g.imageStale) return false;
     const hasImg = g.imagePath && fs.existsSync(g.imagePath);
     const hasVid = g.videoPath && fs.existsSync(g.videoPath);
     return !hasImg && !hasVid;
@@ -6034,6 +6035,114 @@ ipcMain.handle('import-prompts', (_e, args = {}) => {
 
 // API 자동작성 — 등록된 LLM 키로 한 번에 프롬프트 작성 → 매핑
 // 분할/재구성 후 미디어 파일명을 그룹 새 num 에 맞춤(겹침 방지: 높은 num 부터). g.imagePath/videoPath 갱신.
+// ── ↶ 되돌리기 / ↷ 다시 하기 (Ctrl+Z · Ctrl+Y — 로이 2026-09-25) ─────────────────────────────
+//   바꾸기 **직전** 상태를 통째로 기억한다: 그룹·문장(서식·챕터 표식 포함) + (문장 편집이면) 대본(.md) 글 + media-N 파일의 「신원」.
+//   🔑 그림 파일은 복사하지 않는다 — 번호 정리(renumberMediaFiles)가 이름을 바꿔 놓으므로 **크기+수정시각**으로 파일을 찾아
+//      제 이름으로 되돌린다(rename 은 둘 다 그대로 남긴다). 지워질 파일은 지우지 않고 휴지통(<출력>/.priming-undo)으로 옮겨 둔다.
+//   ⚠ 대본이 바뀌면(다른 대본 선택 · 밖에서 고쳐 다시 읽음 · 새로 열기) 기억을 비운다 — 다른 대본에 옛 상태를 덮으면 안 된다.
+const UNDO = { key: null, parsed: null, outRoot: null, undo: [], redo: [], MAX: 40, seq: 0 };
+function _undoTrashDir(outRoot) { const r = outRoot || S.outRoot; return r ? path.join(r, '.priming-undo') : null; }
+function _undoReset() {
+  const tr = UNDO.outRoot ? _undoTrashDir(UNDO.outRoot) : null;
+  if (tr) { try { fs.rmSync(tr, { recursive: true, force: true }); } catch {} }
+  UNDO.undo = []; UNDO.redo = []; UNDO.key = S.scriptPath || null; UNDO.parsed = S.parsed || null; UNDO.outRoot = S.outRoot || null;
+}
+function _undoCheck() { if (UNDO.key !== (S.scriptPath || null) || UNDO.parsed !== S.parsed || UNDO.outRoot !== (S.outRoot || null)) _undoReset(); }
+function _fileId(f) { try { const st = fs.statSync(f); return st.isFile() ? st.size + '|' + Math.round(st.mtimeMs) : null; } catch { return null; } }
+function _cloneObj(o) {
+  let c; try { c = structuredClone(o); } catch { c = JSON.parse(JSON.stringify(o)); }
+  Object.setPrototypeOf(c, Object.getPrototypeOf(o));
+  return c;
+}
+/** 지우는 대신 휴지통으로(되돌리기가 되살릴 수 있게). 옮기지 못하면 지운다(예전 동작). */
+function _toTrash(f) {
+  const tr = _undoTrashDir();
+  try {
+    if (tr) { fs.mkdirSync(tr, { recursive: true }); fs.renameSync(f, path.join(tr, Date.now() + '_' + (++UNDO.seq) + '_' + path.basename(f))); return; }
+  } catch {}
+  try { fs.rmSync(f, { force: true }); } catch {}
+}
+function _captureState(label, opts = {}) {
+  const st = { label, at: Date.now(), projects: [], media: [] };
+  for (const pr of S.parsed.projects) {
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj) });
+    const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
+    for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
+      const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
+      const id = _fileId(f); if (id) st.media.push({ f, id, dir: mdir });
+    }
+  }
+  if (opts.md && S.scriptPath) { try { st.md = fs.readFileSync(S.scriptPath, 'utf8'); } catch {} }
+  return st;
+}
+/** 파일을 신원(크기+수정시각)으로 찾아 기억한 이름으로 되돌린다. 두 단계(임시 이름 → 제 이름)라 서로 자리를 바꾼 파일도 안 덮인다. */
+function _restoreMedia(list) {
+  const need = list.filter((m) => _fileId(m.f) !== m.id);
+  if (!need.length) return 0;
+  const pool = new Map();
+  const dirs = new Set(list.map((m) => m.dir)); const tr = _undoTrashDir(); if (tr) dirs.add(tr);
+  for (const d of dirs) {
+    let names = []; try { names = fs.readdirSync(d); } catch {}
+    for (const n of names) { const f = path.join(d, n); const id = _fileId(f); if (!id) continue; if (!pool.has(id)) pool.set(id, []); pool.get(id).push(f); }
+  }
+  const moves = [];
+  for (const m of need) {
+    const src = (pool.get(m.id) || []).find((x) => !moves.some((mv) => mv.src === x) && _fileId(x) === m.id && !list.some((o) => o !== m && o.f === x && o.id === m.id));
+    if (!src) continue;
+    const tmp = src + '.undo-' + (++UNDO.seq);
+    try { fs.renameSync(src, tmp); moves.push({ src, tmp, dst: m.f }); } catch {}
+  }
+  for (const mv of moves) {
+    if (fs.existsSync(mv.dst)) _toTrash(mv.dst);
+    try { fs.renameSync(mv.tmp, mv.dst); } catch { try { fs.renameSync(mv.tmp, mv.src); } catch {} }
+  }
+  return moves.length;
+}
+function _restoreState(st) {
+  for (const sp of st.projects) {
+    const pr = S.parsed.projects.find((x) => x.shortsNum === sp.shortsNum);
+    if (!pr) continue;
+    pr.groups = sp.groups.map(_cloneObj);
+    pr.sentences = sp.sentences.map(_cloneObj);
+  }
+  if (st.md != null && S.scriptPath) {
+    try {
+      fs.writeFileSync(S.scriptPath, st.md, 'utf8');
+      const nh = scriptHash(S.scriptPath);   // 🔑 밖에서 고친 것으로 보고 다시 읽지 않게
+      try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
+    } catch (e) { log('⚠ 되돌리기 — 대본(.md)을 쓰지 못했습니다: ' + e.message); }
+  }
+  return _restoreMedia(st.media);
+}
+/** 바꾸기 직전에 부른다. 같은 종류가 0.8초 안에 이어지면(색 고르기를 끌 때 등) 한 번으로 친다. */
+function undoPush(label, opts = {}) {
+  if (!S.parsed || S.parsed.kind === 'book') return null;
+  _undoCheck();
+  const last = UNDO.undo[UNDO.undo.length - 1];
+  if (opts.coalesce && last && last.label === label && Date.now() - last.at < 800 && !opts.md) { last.at = Date.now(); return null; }
+  const st = _captureState(label, opts);
+  UNDO.undo.push(st);
+  if (UNDO.undo.length > UNDO.MAX) UNDO.undo.shift();
+  UNDO.redo = [];
+  return st;
+}
+/** 바꾸지 않고 끝났으면 방금 넣은 기억을 뺀다 */
+function undoDrop(st) { if (st && UNDO.undo[UNDO.undo.length - 1] === st) UNDO.undo.pop(); }
+ipcMain.handle('undo', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '되돌릴 것이 없습니다' };
+  _undoCheck();
+  const redo = !!args.redo;
+  const from = redo ? UNDO.redo : UNDO.undo, to = redo ? UNDO.undo : UNDO.redo;
+  const st = from.pop();
+  if (!st) return { ok: false, error: redo ? '다시 할 것이 없습니다' : '되돌릴 것이 없습니다' };
+  to.push(_captureState(st.label, { md: st.md != null }));
+  const moved = _restoreState(st);
+  storeActive(); pushDtoUpdate();
+  log((redo ? '↷ 다시 하기' : '↶ 되돌리기') + ' — ' + st.label + (st.md != null ? ' · 대본(.md)도 되돌렸습니다' : '') + (moved ? ' · 그림 파일 ' + moved + '개 제자리로' : ''));
+  return { ok: true, label: st.label, dto: P.toDTO(S.parsed), undoLeft: UNDO.undo.length, redoLeft: UNDO.redo.length };
+});
+app.on('before-quit', () => { try { _undoReset(); } catch {} });
+
 function renumberMediaFiles(project, mediaDir) {
   const groups = [...project.groups].sort((a, b) => b.num - a.num);
   for (const g of groups) {
@@ -6044,7 +6153,7 @@ function renumberMediaFiles(project, mediaDir) {
       const ext = path.extname(p);
       const want = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);
       if (path.resolve(p) === path.resolve(want)) continue;
-      try { if (fs.existsSync(want)) fs.rmSync(want, { force: true }); fs.renameSync(p, want); g[key] = want; } catch (e) {}
+      try { if (fs.existsSync(want)) _toTrash(want); fs.renameSync(p, want); g[key] = want; } catch (e) {}   // 덮이는 파일은 휴지통으로(↶ 되돌리기)
     }
   }
 }
@@ -6106,8 +6215,9 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   }
 
   // ── 여기서부터 실제 반영 ── (.md 먼저, 그다음 파싱본 — .md 쓰기가 실패하면 화면도 안 바꾼다)
+  const _u = undoPush('문장 고치기', { md: true });
   try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); }
-  catch (e) { return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
   const old = gs.slice(si, si + n);
   // 🎨 줄별·글자별 자막 서식을 새 글로 옮긴다 — 오타 하나를 고쳤다고 서식이 사라지면 안 된다(나누기·합치기도 글자 위치로 따라간다)
@@ -6159,6 +6269,84 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
 
+// 🧩 그룹 경계를 넘는 문장 합치기 — 그룹 마지막 문장 끝에서 Del(= 다음 그룹 첫 문장을 당겨 옴) ·
+//   그룹 첫 문장 맨 앞에서 Backspace(= 앞 그룹 마지막 문장에 붙음). 합친 문장은 **앞쪽 그룹**에 남는다(Vrew 처럼 앞 클립에 붙는다).
+//   .md 는 두 번 고친다: 뒤 문장을 지우고 → 앞 문장을 합친 글로. 사이의 제목(###)·지침 줄은 그대로 남는다.
+//   뒤 그룹이 그 문장 하나뿐이면 그룹이 사라진다(그림은 휴지통 — ↶ 로 되살린다). 검증 재파싱은 edit-sentences 와 같다.
+ipcMain.handle('merge-sentence-across', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  if (!S.scriptPath || !fs.existsSync(S.scriptPath)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
+  const SE = require('./core/script-edit');
+  const { Sentence, hashId, finalizeGroupIds } = require('./core/project-model');
+  const { shortsNum, groupNum, dir } = args;
+  const pr = S.parsed.projects.find((x) => x.shortsNum === shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const gi = pr.groups.findIndex((x) => x.num === groupNum);
+  if (gi < 0) throw new Error('그룹을 찾을 수 없습니다.');
+  const A = dir === 'prev' ? pr.groups[gi - 1] : pr.groups[gi];
+  const B = dir === 'prev' ? pr.groups[gi] : pr.groups[gi + 1];
+  if (!A || !B) return { ok: false, error: dir === 'prev' ? '맨 앞 클립입니다 — 합칠 앞 클립이 없습니다' : '맨 끝 클립입니다 — 합칠 뒤 클립이 없습니다' };
+  const sMap = new Map(pr.sentences.map((x) => [x.id, x]));
+  const sa = sMap.get(A.sentenceIds[A.sentenceIds.length - 1]), sb = sMap.get(B.sentenceIds[0]);
+  if (!sa || !sb) return { ok: false, error: '문장을 찾을 수 없습니다.' };
+  if ((sa.speaker || null) !== (sb.speaker || null)) return { ok: false, error: '화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)' };
+  const ia = pr.sentences.indexOf(sa), ib = pr.sentences.indexOf(sb);
+  if (ib !== ia + 1) return { ok: false, error: '두 문장이 이웃해 있지 않습니다.' };
+  const text = String(args.text || '').trim();
+  if (!text) return { ok: false, error: '합친 글이 비었습니다.' };
+
+  const raw = fs.readFileSync(S.scriptPath, 'utf8');
+  const texts = pr.sentences.map((x) => x.text);
+  const p1 = SE.planEdit({ raw, texts, from: ib, count: 1, newText: '' });
+  if (!p1.ok) return { ok: false, error: p1.error };
+  const t1 = SE.expectedTexts(texts, ib, 1, p1.newTexts);
+  const p2 = SE.planEdit({ raw: p1.raw, texts: t1, from: ia, count: 1, newText: text });
+  if (!p2.ok) return { ok: false, error: p2.error };
+  if (p2.newTexts.length !== 1) return { ok: false, error: '합친 글이 한 문장이 아닙니다 — 가운데 마침표를 빼 주세요.' };
+  const expect = SE.expectedTexts(t1, ia, 1, p2.newTexts);
+  let after = null;
+  try { after = P.parseScriptText(p2.raw, currentMode(), presetThresholds(S.preset)).projects[0]; } catch (e) { return { ok: false, error: '고친 대본을 다시 읽지 못했습니다: ' + e.message }; }
+  if (!after || !SE.sameSequence(expect, after.sentences.map((x) => x.text))) {
+    return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.' };
+  }
+  const _u = undoPush('클립 합치기', { md: true });
+  try { fs.writeFileSync(S.scriptPath, p2.raw, 'utf8'); }
+  catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+
+  const merged = p2.newTexts[0];
+  const used = new Set(pr.sentences.map((x) => x.id));
+  let id = hashId('s', merged), k = 1; while (used.has(id)) id = hashId('s', merged) + '_' + (++k);
+  const ns = new Sentence({ id, num: 0, text: merged });
+  ns.isIntro = !!sa.isIntro;
+  if (sa.chapterMark) ns.chapterMark = sa.chapterMark;
+  if (sa.speaker) ns.speaker = sa.speaker;
+  if ((sa.capSpans && sa.capSpans.length) || (sb.capSpans && sb.capSpans.length)) {
+    const mv = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged]);
+    if (mv && mv[0] && mv[0].length) ns.capSpans = mv[0];
+  }
+  pr.sentences.splice(ia, 2, ns);
+  A.sentenceIds[A.sentenceIds.length - 1] = ns.id;
+  B.sentenceIds.shift();
+  const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  let goneG = null;
+  if (!B.sentenceIds.length) {
+    goneG = B.num;
+    const keepF = new Set(pr.groups.filter((x) => x !== B).flatMap((x) => [x.imagePath, x.videoPath]).filter(Boolean));
+    for (const f of [B.imagePath, B.videoPath]) if (f && !keepF.has(f) && _inDir(f, mediaDir)) _toTrash(f);
+    pr.groups.splice(pr.groups.indexOf(B), 1);
+  }
+  pr.groups.forEach((x, i) => { x.num = i + 1; });
+  pr.sentences.forEach((x, i) => { x.num = i + 1; });
+  finalizeGroupIds(pr.groups, pr.sentences);
+  if (goneG) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
+  const nh = scriptHash(S.scriptPath);
+  try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
+  storeActive(); pushDtoUpdate();
+  log('🧩 ' + prLabel(pr) + ' 클립 합치기(그룹 경계 넘음) — G' + A.num + ' 끝에 붙였습니다 · 대본(.md) 갱신'
+    + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '') + ' · 음성은 다시 만들어야 합니다(🎤)');
+  return { ok: true, dto: P.toDTO(S.parsed), goneGroup: goneG, intoGroup: A.num, sentIdx: A.sentenceIds.length - 1 };
+});
+
 // ⤒ 그룹 합치기 — 이 그룹을 **앞 그룹에** 합친다 = 앞 그림을 여기까지 이어 쓴다(로이 2026-09-24).
 //   앞 그룹의 그림·영상·프롬프트가 이긴다(core/group-merge). 이 그룹 자신의 그림 파일은 번호 정리 때 치워진다
 //   (media-N 안의 것만 — 사용자가 밖에서 첨부한 원본은 건드리지 않는다). 음성은 문장 것이라 그대로 산다.
@@ -6172,6 +6360,7 @@ ipcMain.handle('set-caption-format', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
   const CFm = require('./core/caption-format');
   const targets = Array.isArray(args.targets) ? args.targets : [];
+  const _u = undoPush('자막 서식', { coalesce: true });
   let n = 0;
   for (const t of targets) {
     const pr = S.parsed.projects.find((p) => p.shortsNum === t.shortsNum);
@@ -6189,17 +6378,38 @@ ipcMain.handle('set-caption-format', (_e, args = {}) => {
     sen.capSpans = next.length ? next : undefined;
     n++;
   }
-  if (!n) return { ok: false, error: '서식을 줄 자막을 찾지 못했습니다(대본이 그새 바뀌었을 수 있습니다).' };
+  if (!n) { undoDrop(_u); return { ok: false, error: '서식을 줄 자막을 찾지 못했습니다(대본이 그새 바뀌었을 수 있습니다).' }; }
   storeActive(); pushDtoUpdate();
   return { ok: true, count: n, dto: P.toDTO(S.parsed) };
 });
 // 이 대본의 줄별 서식을 전부 지운다(채널 기본 서식으로)
 ipcMain.handle('clear-all-caption-formats', () => {
   if (!S.parsed || S.parsed.kind === 'book') return { ok: false };
+  undoPush('줄별 자막 서식 모두 지우기');
   let n = 0;
   for (const pr of S.parsed.projects) for (const sen of pr.sentences) if (sen.capSpans) { sen.capSpans = undefined; n++; }
   storeActive(); pushDtoUpdate();
   log(`🎨 줄별 자막 서식 ${n}문장을 지웠습니다 — 채널 기본 서식으로 돌아갑니다`);
+  return { ok: true, count: n, dto: P.toDTO(S.parsed) };
+});
+// ⤢ 고른 줄의 서식을 **대본 전체 자막**에 — 한 줄을 다듬어 보고 마음에 들면 전부 같게(로이 2026-09-25).
+//   다른 줄의 기존 덮어쓰기는 지우고 이 서식 하나로 맞춘다(섞이면 「전체를 같게」가 아니다). 채널 기본 서식은 그대로.
+ipcMain.handle('apply-caption-format-all', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
+  const CFm = require('./core/caption-format');
+  const patch = CFm.normPatch(args.patch || {});
+  if (!Object.keys(patch).length) return { ok: false, error: '고른 줄에 따로 준 서식이 없습니다 — 채널 기본 서식을 바꾸려면 ⚙ 채널편집 → 📝 자막·분할' };
+  undoPush('자막 서식 전체에 적용');
+  let n = 0;
+  for (const pr of S.parsed.projects) for (const sen of pr.sentences) {
+    const L = String(sen.text || '').length;
+    if (!L) continue;
+    const next = CFm.applySpan([], L, 0, L, patch);
+    sen.capSpans = next.length ? next : undefined;
+    n++;
+  }
+  storeActive(); pushDtoUpdate();
+  log(`⤢ 자막 서식을 전체 ${n}문장에 적용했습니다 (${Object.keys(patch).join('·')})`);
   return { ok: true, count: n, dto: P.toDTO(S.parsed) };
 });
 // 글꼴 — Vrew 가 쓰는 글꼴 목록(앱·사용자·Vrew 설치본·Vrew 캐시). 미리보기는 변환한 ttf 를 base64 로 보낸다.
@@ -6252,18 +6462,57 @@ ipcMain.handle('merge-group', (_e, args = {}) => {
   const orphans = [];
   if (prevG && cur.imagePath && prevG.imagePath && cur.imagePath !== prevG.imagePath) orphans.push(cur.imagePath);
   if (prevG && cur.videoPath && prevG.videoPath && cur.videoPath !== prevG.videoPath) orphans.push(cur.videoPath);
+  const _u = undoPush('그룹 합치기');
   const r = require('./core/group-merge').mergeIntoPrev(pr, idx);
+  if (!r.ok) undoDrop(_u);
   if (!r.ok) {
     throw new Error(r.reason === 'no-prev' ? '첫 그룹은 합칠 앞 그룹이 없습니다.'
       : r.reason === 'cross-intro' ? '도입부와 본론은 합칠 수 없습니다(도입부는 영상 범위·재배치의 기준입니다).'
       : '합치지 못했습니다: ' + r.reason);
   }
   // 남겨 두면 뒤 그룹 번호의 옛 그림(NN.png)이 폴더에 떠돌아 엉뚱한 그룹 것으로 오해된다
-  for (const f of orphans) { if (_inDir(f, mediaDir)) { try { fs.rmSync(f, { force: true }); } catch {} } }
+  for (const f of orphans) { if (_inDir(f, mediaDir)) _toTrash(f); }   // ↶ 되돌리기가 되살릴 수 있게 휴지통으로
   try { renumberMediaFiles(pr, mediaDir); } catch {}
   storeActive(); pushDtoUpdate();
   log(`⤒ ${prLabel(pr)} G${groupNum} → G${groupNum - 1} 에 합침 — G${groupNum - 1} 그림을 이어 씁니다`
     + (lostImg ? ` · G${groupNum} 의 그림은 쓰지 않습니다` : '') + ` (그룹 ${pr.groups.length}개)`);
+  return P.toDTO(S.parsed);
+});
+
+// 🖼 적용 범위 — 그룹 그림이 편 문장 from~to(1부터, 끝 포함)를 덮게 한다(Vrew 「적용 범위 변경」·범위 막대 끌기).
+//   범위에 들어온 그룹은 남은 문장으로 줄어들고, 통째로 덮인 그룹은 사라진다. 떨어져 나간 문장은 새 이미지 필요 그룹.
+ipcMain.handle('set-visual-range', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const idx = pr.groups.findIndex((g) => g.num === groupNum);
+  if (idx < 0) throw new Error('그룹을 찾을 수 없습니다.');
+  const G = pr.groups[idx];
+  const _u = undoPush('그림 적용 범위');
+  const r = require('./core/group-merge').setVisualRange(pr, idx, Number(args.from) - 1, Number(args.to) - 1);
+  if (!r.ok || r.unchanged) undoDrop(_u);
+  if (!r.ok) {
+    throw new Error(r.reason === 'no-overlap' ? '범위가 이 그림의 원래 문장과 겹쳐야 합니다.'
+      : r.reason === 'bad-range' ? '문장 번호 범위가 올바르지 않습니다.' : '범위를 바꾸지 못했습니다: ' + r.reason);
+  }
+  if (r.unchanged) return P.toDTO(S.parsed);
+  // 사라진 그룹의 그림·영상 — media-N 안에서 만든 것만 지운다(사용자 첨부 원본은 그대로)
+  const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  const keep = new Set(pr.groups.flatMap((g) => [g.imagePath, g.videoPath]).filter(Boolean));
+  let lost = 0;
+  for (const g of r.removed) for (const f of [g.imagePath, g.videoPath]) {
+    if (!f || keep.has(f)) continue;
+    lost++;
+    if (_inDir(f, mediaDir)) _toTrash(f);   // 지우지 않고 휴지통으로 — ↶ 되돌리기가 되살린다
+  }
+  try { renumberMediaFiles(pr, mediaDir); } catch {}
+  storeActive(); pushDtoUpdate();
+  const ord = new Map(); let k = 0; for (const g of pr.groups) for (const id of g.sentenceIds) ord.set(id, ++k);
+  const nG = pr.groups.indexOf(G) + 1;
+  log(`🖼 ${prLabel(pr)} G${groupNum} 그림 범위 → 문장 ${ord.get(G.sentenceIds[0])}~${ord.get(G.sentenceIds[G.sentenceIds.length - 1])} (이제 G${nG})`
+    + (r.removed.length ? ` · 덮인 그룹 ${r.removed.length}개 사라짐${lost ? `(그림 ${lost}개 안 씀)` : ''}` : '')
+    + (r.orphans ? ` · 떨어져 나간 문장은 새 그룹 ${r.orphans}개(새 이미지 필요)` : '') + ` (그룹 ${pr.groups.length}개)`);
   return P.toDTO(S.parsed);
 });
 
@@ -6289,6 +6538,7 @@ ipcMain.handle('split-group', (_e, args = {}) => {
     if (diff < bestDiff) { bestDiff = diff; best = i; }
   }
   const firstS = sents.slice(0, best), secondS = sents.slice(best);
+  undoPush('그룹 분할');
   const mk = (ss) => {
     const ng = new Group({ num: 0, sentenceIds: ss.map((s) => s.id) });
     ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;

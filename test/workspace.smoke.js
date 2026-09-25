@@ -87,6 +87,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       // 화면의 ＋ 칸을 눌러 첨부한다(API 를 직접 부르면 화면 상태가 안 바뀐다)
       await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, img);
       await win.locator('.cut .thumb.none').first().click();
+      // 🖼 v0.5.45 — 썸네일을 누르면 메뉴(Vrew 방식) → 「첨부」
+      await win.click('[data-testid=vr-menu] button:has-text("첨부")');
       await win.waitForFunction((n) => document.querySelectorAll('.cut img.thumb').length >= n, g, { timeout: 5000 });
     }
     await win.waitForFunction(() => document.querySelectorAll('.cut img.thumb').length >= 2, null, { timeout: 8000 }).catch(() => {});

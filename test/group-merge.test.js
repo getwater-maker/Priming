@@ -112,5 +112,109 @@ ok(/onMerge=\{mergeGroup\}/.test(APPJSX) && /c\.num > 1 && onMerge/.test(APPJSX)
 ok(/mark: s\.chapterMark \|\| null/.test(read('core/pipeline.js')), 'DTO 에 mark');
 ok(!/require\(['"]electron['"]\)/.test(read('core/group-merge.js')), 'core 는 Electron 을 모른다');
 
+console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew 「적용 범위 변경」 · 막대 끌기)');
+{
+  const { Group } = require('../core/project-model');
+  const mk = () => {
+    const sentences = [], groups = []; let k = 0;
+    [[3, 'A'], [2, 'B'], [4, 'C'], [2, 'D']].forEach(([cnt, t], gi) => {
+      const ids = []; for (let i = 0; i < cnt; i++) { const id = 's' + (k++); sentences.push({ id, text: id }); ids.push(id); }
+      const g = new Group({ num: gi + 1, sentenceIds: ids }); g.phase = t; g.title = t; g.h2Title = 'H' + t; g.imagePath = 'img' + t; g.imagePrompt = 'p' + t; g.isIntro = gi === 0; groups.push(g);
+    });
+    return { groups, sentences };
+  };
+  const ids = (p) => p.groups.map((g) => g.sentenceIds.join(','));
+  const mark = (p, id) => { const s = p.sentences.find((x) => x.id === id); return s.chapterMark ? s.chapterMark.phase : null; };
+  const chap = (p) => require('../core/yt-chapters').tsChaptersOf({ cuts: p.groups.map((g) => ({ h2: g.h2Title, phase: g.phase, groupDurationSec: g.sentenceIds.length, sentences: g.sentenceIds.map((id) => { const s = p.sentences.find((x) => x.id === id); return { dur: 1, mark: s.chapterMark || null }; }) })) }).map((c) => `${c.title}@${c.start}`).join(' ');
+  const CH0 = 'HA@0 HB@3 HC@5 HD@9';
+
+  let p = mk(); let r = GM.setVisualRange(p, 0, 0, 10);
+  ok(r.ok && p.groups.length === 1 && p.groups[0].imagePath === 'imgA', '「전체 클립으로」 = 그룹 1개 · 그림은 범위 주인(A) 것');
+  ok(r.removed.length === 3, '통째로 덮인 그룹 3개를 돌려준다(main 이 그 그림 파일을 정리)');
+  ok(p.groups[0].isIntro === true, '🔑 도입부·본론 경계를 넘는다(결정 2ⓐ) — 도입부 여부는 범위 주인을 따른다');
+  ok(chap(p) === CH0, `🔑 챕터 그대로 (${chap(p)})`);
+
+  p = mk(); GM.setVisualRange(p, 1, 3, 6);
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4,s5,s6 | s7,s8 | s9,s10', `끝을 아래로 끌기 — 다음 그룹 앞 두 문장을 덮는다 (${ids(p).join(' | ')})`);
+  ok(p.groups[2].imagePath === 'imgC' && p.groups[2].imagePrompt === 'pC', '앞부분을 잃은 이웃 그룹은 자기 그림·프롬프트를 그대로 쓴다(Vrew 처럼 이웃 범위가 줄어든다)');
+  ok(mark(p, 's5') === 'C' && chap(p) === CH0, '덮인 섹션 머리에 챕터 표식 · 챕터 시각 그대로');
+
+  p = mk(); GM.setVisualRange(p, 2, 6, 6);
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5 | s6 | s7,s8 | s9,s10', '범위를 가운데 한 문장으로 줄이기 — 앞뒤가 새 그룹');
+  ok(!p.groups[2].imagePath && p.groups[2].imageStale && !p.groups[2].imagePrompt && !p.groups[4].imagePath && p.groups[4].imageStale, '🔑 떨어져 나간 문장 = 새 이미지 필요 그룹(결정 1ⓐ · 그림·프롬프트 없음)');
+  ok(p.groups[3].imagePath === 'imgC', '범위 안(s6)은 원래 그림');
+  ok(chap(p) === CH0, '줄여도 챕터 그대로');
+
+  p = mk(); GM.setVisualRange(p, 2, 1, 7);
+  ok(ids(p).join(' | ') === 's0 | s1,s2,s3,s4,s5,s6,s7 | s8 | s9,s10', '시작을 위로 끌기 + 끝 줄이기 동시(직접 입력)');
+  ok(p.groups[0].imagePath === 'imgA' && p.groups[1].imagePath === 'imgC' && p.groups[1].phase === 'A', '머리를 넓히면 그 머리의 섹션 제목을 물려받는다');
+  ok(chap(p) === CH0, `넓혀도 챕터 그대로 (${chap(p)})`);
+
+  p = mk(); GM.setVisualRange(p, 0, 0, 10); GM.setVisualRange(p, 0, 0, 4);
+  ok(ids(p).join(' | ') === 's0,s1,s2,s3,s4 | s5,s6,s7,s8,s9,s10' && p.groups[1].imageStale, '넓혔다 다시 줄이기 — 떨어진 뒤쪽은 새 이미지 필요');
+  ok(chap(p) === CH0, '넓혔다 줄여도 챕터 그대로');
+
+  p = mk();
+  ok(GM.setVisualRange(p, 0, 5, 8).reason === 'no-overlap', '원래 문장과 겹치지 않는 범위는 거부(이웃이 둘로 쪼개지는 것 방지)');
+  ok(GM.setVisualRange(p, 0, 0, 99).reason === 'bad-range' && GM.setVisualRange(p, 0, 3, 1).reason === 'bad-range', '범위 밖·뒤집힌 범위 거부');
+  ok(GM.setVisualRange(p, 1, 3, 4).unchanged === true && p.groups.length === 4, '그대로면 아무것도 안 바꾼다');
+  ok(p.groups.every((g, i) => g.num === i + 1), '그룹 번호 다시 매김');
+
+  const MAIN7 = read('main.js'), PRE7 = read('preload.js'), APP7 = read('renderer/src/App.jsx');
+  ok(/ipcMain\.handle\('set-visual-range'/.test(MAIN7) && /setVisualRange\(pr, idx, Number\(args\.from\) - 1, Number\(args\.to\) - 1\)/.test(MAIN7), 'IPC set-visual-range → 공용 setVisualRange(1부터 → 0부터)');
+  ok(/for \(const g of r\.removed\)[\s\S]{0,200}_inDir\(f, mediaDir\)/.test(MAIN7), '🔴 덮여 사라진 그룹 파일은 media-N 안의 것만 지운다');
+  ok(/!\(g\.imagePrompt && String\(g\.imagePrompt\)\.trim\(\)\) && !g\.imageStale\) return false/.test(MAIN7), '🔑 떨어져 나온 그룹(프롬프트 없음)도 그림이 없으면 .vrew 게이트가 막는다');
+  ok(/setVisualRange: \(args\) => ipcRenderer\.invoke\('set-visual-range', args\)/.test(PRE7), 'preload setVisualRange');
+  ok(/onRange=\{isLf \? setVisualRange : null\}/.test(APP7) && /className="vr-h top"/.test(APP7) && /className="vr-h bot"/.test(APP7), '화면: 범위 막대 손잡이 위·아래');
+  ok(/전체 클립으로/.test(APP7) && /처음부터 이 그림 끝까지/.test(APP7) && /이 그림부터 끝까지/.test(APP7) && /직접 입력/.test(APP7), '썸네일 메뉴 — 적용 범위 4가지');
+  ok(/통째로 덮여 사라집니다/.test(APP7), '그림이 있는 그룹을 통째로 덮으면 먼저 묻는다');
+}
+
+console.log('\n[8] ↶ 되돌리기 — 그림 파일이 제자리로(번호 정리로 이름이 바뀌고 · 합치며 치워진 파일까지)');
+{
+  // main.js 원문에서 되돌리기 엔진과 번호 정리를 뽑아 **실제 임시 파일로** 돌린다(복사본을 두면 앱과 갈라져도 통과한다)
+  const os = require('os'), vm = require('vm');
+  const M = read('main.js');
+  const a = M.indexOf('const UNDO = {'), b = M.indexOf("ipcMain.handle('undo'");
+  const c = M.indexOf('function renumberMediaFiles('), d = M.indexOf('\n}\n', c) + 3;
+  ok(a > 0 && b > a && c > b && d > c, '되돌리기 엔진·번호 정리 코드를 찾았다');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'undo-'));
+  const media = path.join(tmp, 'media-1'); fs.mkdirSync(media);
+  const mk = (n, body) => { const f = path.join(media, n); fs.writeFileSync(f, body); return f; };
+  const f1 = mk('01.png', 'AAAA-first'), f2 = mk('02.png', 'BB-second-longer'), f3 = mk('03.png', 'C-third-image-longest');
+  const { Group } = require('../core/project-model');
+  const gs = [f1, f2, f3].map((f, i) => { const g = new Group({ num: i + 1, sentenceIds: ['s' + i] }); g.imagePath = f; return g; });
+  const S = { scriptPath: path.join(tmp, 'x.md'), outRoot: tmp, parsed: { kind: 'longform', projects: [{ shortsNum: 1, groups: gs, sentences: [{ id: 's0' }, { id: 's1' }, { id: 's2' }] }] } };
+  const ctx = {
+    S, fs, path, structuredClone, console, Date, Math, JSON, Object, Set, Map,
+    shortsDirs: () => ({ media }),
+    _inDir: (f, dir) => path.resolve(f).toLowerCase().startsWith(path.resolve(dir).toLowerCase() + path.sep),
+    scriptHash: () => 'h', log: () => {}, storeActive: () => {}, pushDtoUpdate: () => {},
+    ipcMain: { handle: () => {} }, app: { on: () => {} }, P: { toDTO: () => null },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(M.slice(a, b) + M.slice(c, d) + '\nthis.api = { UNDO, undoPush, _toTrash, _restoreState, _captureState, renumberMediaFiles, _undoCheck };', ctx);
+  const U = ctx.api;
+  const pr = S.parsed.projects[0];
+  const st = U.undoPush('그룹 합치기');
+  ok(!!st && st.media.length === 3, '바꾸기 직전 — 그림 3개의 신원(크기·수정시각)을 기억');
+  // 합치기 흉내: G2 를 G1 에 합치고(G2 그림은 휴지통) → 번호 정리로 03.png 가 02.png 가 된다
+  U._toTrash(pr.groups[1].imagePath);
+  pr.groups.splice(1, 1); pr.groups.forEach((g, i) => { g.num = i + 1; });
+  U.renumberMediaFiles(pr, media);
+  ok(fs.readFileSync(path.join(media, '02.png'), 'utf8') === 'C-third-image-longest' && pr.groups[1].imagePath.endsWith('02.png'), '(합친 뒤) 옛 03 그림이 02.png 로 이름이 바뀌었다');
+  ok(fs.readdirSync(path.join(tmp, '.priming-undo')).length === 1, '치운 그림은 지우지 않고 휴지통(.priming-undo)으로');
+  const back = U._restoreState(st);
+  const txt = (n) => fs.readFileSync(path.join(media, n), 'utf8');
+  ok(txt('01.png') === 'AAAA-first' && txt('02.png') === 'BB-second-longer' && txt('03.png') === 'C-third-image-longest', `🔑 되돌리면 01·02·03 이 **제 그림**으로 (${back}개 옮김)`);
+  ok(pr.groups.length === 3 && pr.groups.map((g) => path.basename(g.imagePath)).join(',') === '01.png,02.png,03.png', '그룹 3개 · 각자 제 파일을 가리킨다');
+  ok(Object.getPrototypeOf(pr.groups[0]) === Group.prototype, '되살린 그룹은 Group 그대로(메서드 유지)');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const APP8 = read('renderer/src/App.jsx');
+  ok(/t\.tagName === 'INPUT' \|\| t\.tagName === 'TEXTAREA'/.test(APP8) && /runUndo\(k === 'y' \|\| \(k === 'z' && ev\.shiftKey\)\)/.test(APP8), 'Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) — 글자칸 안에서는 그 칸의 되돌리기');
+  ok(/undoPush\('문장 고치기', \{ md: true \}\)/.test(M) && /undoPush\('클립 합치기', \{ md: true \}\)/.test(M) && /undoPush\('그림 적용 범위'\)/.test(M) && /undoPush\('그룹 합치기'\)/.test(M) && /undoPush\('그룹 분할'\)/.test(M) && /undoPush\('자막 서식', \{ coalesce: true \}\)/.test(M), '되돌리기가 기억하는 동작 6가지(문장·클립 합치기는 .md 까지)');
+  ok(!/fs\.rmSync\(want/.test(M), '번호 정리가 덮이는 파일을 지우지 않고 휴지통으로');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} group-merge ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);

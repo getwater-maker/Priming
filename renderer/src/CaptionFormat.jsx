@@ -422,7 +422,7 @@ const posN = (v) => Math.round((Number(v) || 0) / POS_STEP);
  * @param pos     지금 위치 {align, yAlign, yOffset, xOffset} — 채널 위치 + 고른 줄의 덮어쓰기
  * @param onSaveDefault  지금 서식·위치를 **채널 기본값**으로 저장(📝 자막 탭과 같은 값)
  */
-export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPanel, onDone, onSaveDefault, label, panel }) {
+export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPanel, onDone, onSaveDefault, label, panel, onApplyAll }) {
   const f = fmt || CF.normFmt({});
   const p = pos || { align: 'center', yAlign: 'bottom', yOffset: -0.125, xOffset: 0 };
   const { fonts } = useCaptionFonts();
@@ -476,7 +476,8 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
         {onSaveDefault && <button className="ghost cf-savedef" data-testid="cf-savedef" title="지금 서식·위치를 이 채널의 기본값으로 저장합니다(⚙ 채널편집 → 📝 자막 과 같은 값 — 앞으로 모든 자막에 적용)" onClick={onSaveDefault}>💾 자막 서식 저장</button>}
       </fieldset>
       <span className="cf-gap" />
-      {active && <button className="ghost" title="선택 해제 (Esc)" onClick={onDone}>✕</button>}
+      {/* ✕(선택 해제) 는 뺐다 — 툴바가 늘 떠 있으니 Esc · 다른 곳 누르기로 충분하다(로이 2026-09-25) */}
+      {active && onApplyAll && <button className="ghost cf-applyall" title="이 줄의 서식을 대본의 모든 자막에 적용 — 한 줄을 꾸며 보고 마음에 들면 전체로 (Ctrl+Z 로 되돌리기)" onClick={onApplyAll}>⤢ 전체에 적용</button>}
     </div>
   );
 }

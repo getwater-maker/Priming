@@ -578,3 +578,33 @@ main.pane2{min-width:0}
 .sent.clip.editing{border-color:var(--accent)}
 .sent.clip.editing .clip-r2{background:#fff1c9}
 .clip-spk{background:none;border:0;padding:0}
+
+
+/* 🖼 그림 적용 범위 — 문장 목록 왼쪽의 막대 + 위/아래 손잡이(Vrew 방식) */
+.sents.vr{position:relative;border-left:3px solid #d8c7a8;padding-left:8px;margin-left:2px}
+.sents.vr.vr-own{border-left-color:var(--accent)}
+.vr-h{position:absolute;left:-8px;width:13px;height:9px;border-radius:5px;background:#b9a37e;cursor:ns-resize;z-index:3;box-shadow:0 0 0 2px #fff}
+.vr-h.top{top:-5px}.vr-h.bot{bottom:-5px}
+.vr-h:hover,.vr-own .vr-h{background:var(--accent)}
+.sblk.vr-hit{background:#fbecd0;border-color:var(--accent)}
+body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none !important}
+.vr-tip{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--strong);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;z-index:60;pointer-events:none}
+.vr-menu{position:fixed;z-index:70;min-width:220px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;display:flex;flex-direction:column}
+.vr-menu button{background:transparent;color:var(--strong);text-align:left;padding:7px 10px;border-radius:6px;font-size:13px;border:0;min-height:0}
+.vr-menu button:hover{background:#f3e8d6;color:var(--strong)}
+.vr-menu .vr-del{color:var(--danger)}
+.vr-menu .vr-back{font-weight:700}
+.vr-menu .vr-cur{font-size:12px;color:#8a7a62;padding:2px 10px 6px}
+.vr-menu .vr-sep{height:1px;background:var(--line);margin:4px 2px}
+
+/* 📏 리본 높이를 메뉴마다 같게(로이 2026-09-25) — 완성의 흰 상자(#capbar)·서식의 어두운 막대가 리본을 키워 아래 화면이 오르내렸다.
+   높이를 고정하고 한 줄로 두며, 창이 좁으면 리본 안에서만 가로로 밀린다. */
+.ribbon{height:57px;min-height:57px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.ribbon > *{flex-shrink:0}
+.ribbon .hgroup{flex-wrap:nowrap}
+.ribbon #capbar{padding:0 4px;background:transparent;border:0;border-left:1px solid var(--line);box-shadow:none;border-radius:0;margin:0}
+.ribbon .cf-bar{flex:1 1 auto;min-width:0;flex-wrap:wrap;row-gap:3px;column-gap:4px;padding:2px 8px;align-self:center;align-content:center;max-height:53px;box-sizing:border-box}
+/* 서식 막대는 창이 좁으면 두 줄로 — 칸 높이를 줄여 두 줄이어도 리본 높이(57px) 안에 들어간다 */
+.ribbon .cf-bar button,.ribbon .cf-bar select,.ribbon .cf-bar input:not([type=checkbox]):not([type=color]){height:23px;min-height:0;padding-top:0;padding-bottom:0;line-height:21px;box-sizing:border-box}
+.ribbon .cf-bar .cf-sel{line-height:23px}
+.ribbon .cf-bar .cf-hint{display:none}

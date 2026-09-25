@@ -80,4 +80,92 @@ function applyContinueMarkers(project) {
   return out;
 }
 
-module.exports = { mergeIntoPrev, applyContinueMarkers, isContinueMarker, CONTINUE_RE };
+/**
+ * 🖼 적용 범위 — groups[idx] 의 그림이 **문장 a~b(편 전체 순번, 0부터)** 를 덮게 한다(Vrew 「적용 범위 변경」).
+ *   그림의 범위 = 그룹 경계이므로, 범위를 바꾸는 일은 그룹 경계를 다시 긋는 일이다.
+ *   · 범위에 들어온 다른 그룹 문장은 이 그룹으로 온다. 그 그룹은 **남은 문장으로 줄어들고 자기 그림을 그대로** 쓴다
+ *     (Vrew 에서 이웃 그림의 범위가 줄어드는 것과 같다). 통째로 덮인 그룹은 사라진다(removed 로 돌려준다).
+ *   · 이 그룹에서 범위 밖으로 떨어져 나간 문장은 **새 그룹(그림·프롬프트 없음 = 새 이미지 필요)** — 로이 결정 1ⓐ.
+ *   · 도입부·본론 경계도 넘는다 — 로이 결정 2ⓐ. 합친 그룹의 도입부 여부는 **범위 주인**을 따른다.
+ *   · 챕터: 그룹 첫 문장이 남의 그룹 안으로 들어가면 그 문장에 chapterMark 를 남긴다(mergeIntoPrev 와 같은 규칙).
+ * ⚠ 범위는 이 그룹의 원래 문장과 겹쳐야 한다(안 겹치면 다른 그룹의 앞·뒤가 동시에 잘려 둘로 쪼개진다).
+ * @returns {{ok:boolean, reason?:string, removed?:object[], orphans?:number, into?:object}}
+ */
+function setVisualRange(project, idx, a, b) {
+  if (!project || !Array.isArray(project.groups)) return { ok: false, reason: 'no-project' };
+  const G = project.groups[idx];
+  if (!G) return { ok: false, reason: 'not-found' };
+  const sMap = new Map((project.sentences || []).map((s) => [s.id, s]));
+  // 편 전체 문장 순서 + 각 문장이 속한 「섹션」(챕터 제목) — 경계를 다시 그어도 챕터는 그대로 남아야 한다
+  const order = [], pos = new Map(), label = new Map(), secStart = new Set();
+  for (const g of project.groups) {
+    let cur = { h2: g.h2Title || null, phase: g.phase || g.title || null };
+    g.sentenceIds.forEach((id, i) => {
+      const s = sMap.get(id);
+      if (i === 0) secStart.add(id);
+      else if (s && s.chapterMark) { cur = { h2: s.chapterMark.h2 || null, phase: s.chapterMark.phase || null }; secStart.add(id); }
+      pos.set(id, order.length); order.push(id); label.set(id, cur);
+    });
+  }
+  const n = order.length;
+  a = Math.floor(Number(a)); b = Math.floor(Number(b));
+  if (!(a >= 0 && b >= a && b < n)) return { ok: false, reason: 'bad-range' };
+  const gs = pos.get(G.sentenceIds[0]);
+  const ge = gs + G.sentenceIds.length - 1;
+  if (b < gs || a > ge) return { ok: false, reason: 'no-overlap' };
+  if (a === gs && b === ge) return { ok: true, removed: [], orphans: 0, into: G, unchanged: true };
+
+  const { Group } = require('./project-model');
+  const mkOrphan = (ids, from) => {
+    const ng = new Group({ num: 0, sentenceIds: ids });
+    ng.isIntro = !!from.isIntro; if (from.isBracket) ng.isBracket = true;
+    ng.imagePrompt = null; ng.videoPrompt = null; ng.motionNote = null;
+    ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
+    ng.isI2V = false; ng.mode = 'motion'; ng.imageStale = true;   // 화면에 「새 이미지 필요」
+    return ng;
+  };
+  const out = [], removed = [];
+  let orphans = 0;
+  for (const g of project.groups) {
+    if (g === G) {
+      const before = G.sentenceIds.filter((id) => pos.get(id) < a);
+      const after = G.sentenceIds.filter((id) => pos.get(id) > b);
+      if (before.length) { out.push(mkOrphan(before, G)); orphans++; }
+      if (!out.includes(G)) out.push(G);
+      if (after.length) { out.push(mkOrphan(after, G)); orphans++; }
+      continue;
+    }
+    const keep = g.sentenceIds.filter((id) => { const k = pos.get(id); return k < a || k > b; });
+    if (!keep.length) { removed.push(g); continue; }
+    // G 뒤의 그룹이 앞부분을 잃었다 → 그 앞에 G 가 와야 한다
+    if (pos.get(keep[0]) > b && pos.get(g.sentenceIds[0]) <= b && !out.includes(G)) out.push(G);
+    g.sentenceIds = keep;
+    out.push(g);
+  }
+  if (!out.includes(G)) {
+    // G 가 통째로 뒤쪽 범위로 밀려 위 루프에서 자리를 못 잡은 경우 — 위치 순으로 끼운다
+    const k = out.findIndex((g) => pos.get(g.sentenceIds[0]) > a);
+    out.splice(k < 0 ? out.length : k, 0, G);
+  }
+  G.sentenceIds = order.slice(a, b + 1);
+  // 그룹 머리 문장 = 그 섹션 제목을 그룹 제목으로, 그 밖에서 섹션이 시작되는 문장엔 챕터 표식
+  for (const g of out) {
+    g.sentenceIds.forEach((id, i) => {
+      const s = sMap.get(id); if (!s) return;
+      const lb = label.get(id) || { h2: null, phase: null };
+      if (i === 0) {
+        g.h2Title = lb.h2; g.phase = lb.phase; g.title = lb.phase;
+        s.chapterMark = undefined;
+      } else if (secStart.has(id)) {
+        s.chapterMark = { h2: lb.h2, phase: lb.phase };
+      } else if (s.chapterMark) s.chapterMark = undefined;
+    });
+  }
+  out.sort((x, y) => pos.get(x.sentenceIds[0]) - pos.get(y.sentenceIds[0]));
+  project.groups.splice(0, project.groups.length, ...out);
+  project.groups.forEach((g, i) => { g.num = i + 1; });
+  finalizeGroupIds(project.groups, project.sentences || []);
+  return { ok: true, removed, orphans, into: G };
+}
+
+module.exports = { mergeIntoPrev, applyContinueMarkers, isContinueMarker, CONTINUE_RE, setVisualRange };
