@@ -127,16 +127,16 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
 
     // [4] Enter 고치기 · Esc
     await win.keyboard.press('Enter');
-    await win.waitForSelector('.sblk.editing textarea', { timeout: 3000 });
-    ok(true, 'Enter = 커서 줄 문장 고치기');
+    await win.waitForSelector('.sent.clip.editing .clip-edit', { timeout: 3000 });
+    ok(true, 'Enter = 커서 줄 고치기(상세 = 그 줄 글자만)');
     await win.keyboard.press('Escape');
-    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 3000 });
+    await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
 
     // [5] 마우스 — 글자 클릭 = 커서 이동 + 바로 고치기
-    await win.locator('.sent[data-ln="4"] .clip-cap').click();   // 상세 보기 — 자막 줄(아래 칸)을 누르면 고치기
-    await win.waitForSelector('.sblk.editing textarea', { timeout: 3000 });
+    await win.locator('.sent[data-ln="4"] .clip-cap').click();   // 상세 보기 — 자막 줄(🗨 칸)을 누르면 그 줄 고치기
+    await win.waitForSelector('.sent.clip.editing .clip-edit', { timeout: 3000 });
     await win.keyboard.press('Escape');
-    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 3000 });
+    await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
     ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '4' && /마지막 문장/.test(await stageCap()), '글자 클릭 = 커서 04 로 이동 + 편집칸(로이 확정) · ① 도 04');
 
     // [6] 줄 번호 → 서식 메뉴 · ⚙ 고급 → ③ 칸
@@ -229,6 +229,58 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       return ic && t ? { up: ic.getBoundingClientRect().bottom <= t.getBoundingClientRect().top + 1, h: b.getBoundingClientRect().height } : null;
     });
     ok(ob && ob.up && ob.h >= 44, `리본 큰 버튼 — 아이콘이 글자 위(버튼 높이 ${ob && Math.round(ob.h)}px)`);
+
+    // [11] 🧩 v0.5.44 — 클립 모양(번호 칸) · 줄 편집(모양 그대로) · ↑↓ 로 편집 채 이동 · Ctrl+A · ① 칸 팝업
+    await win.keyboard.press('Escape'); await win.keyboard.press('Escape');
+    ok(await win.locator('.sent.clip .clip-no').count() === 4 && await win.locator('.sent.clip .clip-r1').count() === 4 && await win.locator('.sent.clip .clip-r2 .clip-fmt').count() === 4,
+      '클립 = 왼쪽 번호 칸 | 1행(화자·시각·칩) / 2행(🗨 자막 + 가)');
+    const h0 = (await win.locator('.sent[data-ln="2"]').boundingBox()).height;
+    await win.locator('.sent[data-ln="2"] .clip-cap').click();
+    await win.waitForSelector('.sent.clip.editing[data-ln="2"] .clip-edit', { timeout: 3000 });
+    ok(await win.locator('.clip-edit').inputValue() === '첫째 그룹 둘째 문장입니다.', '편집칸에는 그 줄 글자만');
+    const h1 = (await win.locator('.sent[data-ln="2"]').boundingBox()).height;
+    ok(Math.abs(h1 - h0) <= 4 && await win.locator('.sent.clip.editing .clip-r1 .chip').count() > 0, `🔑 고치는 동안에도 클립 모양 그대로(높이 ${Math.round(h0)}→${Math.round(h1)}px · 칩 그대로)`);
+    await win.keyboard.press('ArrowDown');
+    await win.waitForSelector('.sent.clip.editing[data-ln="3"] .clip-edit', { timeout: 5000 });
+    ok(true, '🔑 고치는 중 ↓ = 다음 클립으로(고치는 채로)');
+    await win.fill('.clip-edit', '둘째 그룹 문장이에요.');
+    await win.keyboard.press('ArrowDown');
+    await win.waitForSelector('.sent.clip.editing[data-ln="4"] .clip-edit', { timeout: 10000 });
+    const md3 = fs.readFileSync(MD, 'utf8');
+    ok(/둘째 그룹 문장이에요\./.test(md3) && /첫째 그룹 둘째 문장입니다\./.test(md3), '고친 줄은 저장되고(.md) 다른 문장은 그대로');
+    await win.keyboard.press('ArrowUp');
+    await win.waitForSelector('.sent.clip.editing[data-ln="3"] .clip-edit', { timeout: 5000 });
+    ok(true, '↑ = 윗 클립으로');
+    await win.keyboard.press('Escape');
+    await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
+    // 번호 칸 = 원하는 클립만 골라 선택
+    await win.locator('.sent[data-ln="2"] .clip-no').click();
+    await win.locator('.sent[data-ln="4"] .clip-no').click({ modifiers: ['Control'] });
+    await win.waitForTimeout(200);
+    ok(await win.locator('.sent.clip.picked').count() === 2 && (await win.locator('.cf-bar .cf-sel').innerText()).includes('2줄'), '번호 칸 클릭 + Ctrl = 원하는 클립만(2·4)');
+    await win.locator('.clipbar').click();
+    await win.keyboard.press('Control+a');
+    await win.waitForTimeout(200);
+    ok(await win.locator('.sent.clip.picked').count() === 4 && (await win.locator('.cf-bar .cf-sel').innerText()).includes('4줄'), '🔑 Ctrl+A = 모든 클립 선택');
+    await win.keyboard.press('Escape');
+    // ① 칸 팝업
+    await win.locator('.clipbar').click();
+    await win.keyboard.press('Home');
+    await win.waitForTimeout(300);
+    await win.click('#stageCap .cf-stageline');
+    await win.waitForSelector('[data-testid=stage-ta]', { timeout: 3000 });
+    ok(await win.locator('[data-testid=cf-mini]').count() === 1 && await win.locator('[data-testid=stage-ta]').inputValue() === '첫째 그룹 첫 문장입니다.', '🔑 ① 자막을 누르면 팝업(작은 서식 막대 + 그 자리 글자칸)');
+    const tb = await win.locator('[data-testid=stage-ta]').boundingBox(), sb = await win.locator('#stage').boundingBox();
+    ok(tb && sb && tb.y > sb.y + sb.height * 0.6, `글자칸이 자막 자리(아래쪽)에 뜬다 (y ${Math.round((tb.y - sb.y) / sb.height * 100)}%)`);
+    await win.click('[data-testid=cf-mini] button[title="굵게"]');
+    await win.waitForFunction(() => [...document.querySelectorAll('.sent[data-ln="1"] .capfmt')].some((e) => Number(getComputedStyle(e).fontWeight) >= 700), null, { timeout: 5000 });
+    ok(await win.locator('[data-testid=stage-ta]').count() === 1, '팝업의 굵게 → ② 목록 01 에 반영 · 팝업은 그대로(글자칸 초점 유지)');
+    await win.fill('[data-testid=stage-ta]', '첫째 그룹 첫 문장을 고쳤습니다.');
+    await win.keyboard.press('Enter');
+    await win.waitForSelector('[data-testid=stage-ta]', { state: 'detached', timeout: 10000 });
+    await win.waitForFunction(() => /첫 문장을 고쳤습니다/.test((document.querySelector('.sent[data-ln="1"]') || {}).textContent || ''), null, { timeout: 10000 });
+    ok(/첫째 그룹 첫 문장을 고쳤습니다\./.test(fs.readFileSync(MD, 'utf8')), 'Enter = 저장 · .md 와 ② 목록에 반영');
+    ok(/첫 문장을 고쳤습니다/.test(await stageCap()), '① 자막도 새 글');
 
     ok(errors.length === 0, `화면 오류 0건 (${errors.slice(0, 3).join(' | ')})`);
   } catch (e) {

@@ -481,6 +481,43 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
   );
 }
 
+/**
+ * 🧩 ① 칸 팝업의 작은 서식 막대(Vrew 캡처 — 두 줄). 툴바와 **같은 onPatch** 로 고른 클립에 얹는다.
+ *   ⚠ 누를 때 글자칸 초점을 뺏지 않게 mousedown 을 막는다(선택칸·색칸은 제외 — 그건 초점이 필요하다).
+ */
+export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel }) {
+  const f = fmt || CF.normFmt({});
+  const p = pos || { align: 'center' };
+  const { fonts } = useCaptionFonts();
+  return (
+    <div className="cf-mini" data-testid="cf-mini" onMouseDown={(e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT') e.preventDefault(); }}>
+      <div className="cf-mini-r">
+        <Toggle on={f.bold} onChange={(v) => onPatch({ bold: v })} title="굵게"><b>B</b></Toggle>
+        <Toggle on={f.italic} onChange={(v) => onPatch({ italic: v })} title="기울임"><i>I</i></Toggle>
+        <select className="cf-fontsel" value={f.font} title="글꼴" style={{ fontFamily: fontCss(f.font).family }} onChange={(e) => onPatch({ font: e.target.value })}>
+          {!fonts.some((x) => x.vrewName === f.font) && <option value={f.font}>{fontLabel(fonts, f.font)}</option>}
+          {fonts.map((x) => <option key={x.vrewName} value={x.vrewName}>{x.label} {x.weight}</option>)}
+        </select>
+        <select value={String(f.size || 100)} title="글자 크기" onChange={(e) => onPatch({ size: Number(e.target.value) })}>
+          {[...new Set([...SIZES, Number(f.size || 100)])].sort((a, b) => a - b).map((v) => <option key={v} value={String(v)}>{v}</option>)}
+        </select>
+      </div>
+      <div className="cf-mini-r">
+        <label className="cf-cbtn" title="글자색"><span style={{ color: f.fontColor, WebkitTextStroke: '0.5px #555' }}>A</span><Color value={f.fontColor} onChange={(v) => onPatch({ fontColor: v })} /></label>
+        <Toggle on={f.outlineOn !== false} onChange={(v) => onPatch({ outlineOn: v })} title="테두리">테두리</Toggle>
+        <Toggle on={!!f.boxOn} onChange={(v) => onPatch({ boxOn: v })} title="배경 상자">배경</Toggle>
+        <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜">형광펜</Toggle>
+        <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
+        <span className="cf-div" />
+        {[['start', '⇤', '왼쪽'], ['center', '↔', '가운데'], ['end', '⇥', '오른쪽']].map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={`가로 ${t} 정렬`}>{ic}</Toggle>)}
+        <span className="cf-div" />
+        <button className={'ghost' + (panel === 'fmt' ? ' on' : '')} title="고급 — ③ 칸에서 자세히" onClick={() => onPanel && onPanel('fmt')}>⚙ 고급</button>
+        <button className={'ghost' + (panel === 'anim' ? ' on' : '')} title="효과" onClick={() => onPanel && onPanel('anim')}>✨ 효과</button>
+      </div>
+    </div>
+  );
+}
+
 // ── 미리보기 재생 — 한 줄을 서식·효과로 그린다 ────────────────────────────
 /**
  * @param el     자막 칸(#stageCap)

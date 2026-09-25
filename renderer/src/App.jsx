@@ -8,7 +8,7 @@ import UrlProgress from './UrlProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
-import { CF, CaptionToolbar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine } from './CaptionFormat.jsx';
+import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
@@ -1420,22 +1420,31 @@ export default function App() {
     } catch (e) { setStatus('⚠ 자막 서식 저장 실패: ' + e.message); }
   }
 
-  function startSentEdit(shortsNum, groupNum, sentIdx, text, count = 1) {
-    setCapSel(null); setCapPanel(null);   // 🎨 글을 고치는 동안은 서식 선택을 푼다(글자 위치가 바뀐다)
+  /**
+   * @param line   🧩 줄 단위 편집(상세 클립 · ① 칸 팝업) — { n, from, to }. 편집칸엔 그 줄 글자만 보이고, 저장할 땐 문장 앞뒤를 이어 붙인다.
+   * @param where  'stage' = ① 칸 팝업에서 고친다(② 목록은 평소 모양 그대로 · 서식 선택은 유지)
+   */
+  function startSentEdit(shortsNum, groupNum, sentIdx, text, count = 1, line = null, where = null) {
+    if (where !== 'stage') { setCapSel(null); setCapPanel(null); }   // 🎨 글을 고치는 동안은 서식 선택을 푼다(글자 위치가 바뀐다) — 팝업은 서식을 함께 고치므로 둔다
     sentDoneRef.current = false;
-    setSentEdit({ shortsNum, groupNum, sentIdx, count, text });
+    setSentEdit({ shortsNum, groupNum, sentIdx, count, text, line: line || null, where: where || null });
   }
   function cancelSentEdit() { sentDoneRef.current = true; setSentEdit(null); }
   /** 편집칸의 현재 글 (비제어라 ref 에서 읽는다) */
   function sentEditValue(fallback) {
     const el = sentEditRef.current;
-    return (el && el.value != null) ? el.value : String(fallback == null ? '' : fallback);
+    if (!(el && el.value != null)) return String(fallback == null ? '' : fallback);
+    const e = sentEdit;
+    if (e && e.line) { const t = String(e.text || ''); return t.slice(0, e.line.from) + el.value + t.slice(e.line.to); }   // 🧩 줄만 고쳤다 → 문장으로
+    return el.value;
   }
   // Enter — 커서 자리에서 나누기. 파서는 종결부호로 문장을 가르므로 그 자리에 마침표를 넣고 바로 저장한다.
   function splitSentAtCursor() {
     const el = sentEditRef.current; if (!el) return;
-    const p = (el.selectionStart != null) ? el.selectionStart : el.value.length;
-    const a = el.value.slice(0, p).trim(), b = el.value.slice(p).trim();
+    let p = (el.selectionStart != null) ? el.selectionStart : el.value.length;
+    if (sentEdit && sentEdit.line) p += sentEdit.line.from;   // 🧩 줄 안 커서 → 문장 안 위치
+    const full = sentEditValue('');
+    const a = full.slice(0, p).trim(), b = full.slice(p).trim();
     if (!a || !b) { setStatus('커서를 문장 가운데 두고 Enter 를 누르세요'); return; }
     commitSentEdit(a.replace(/[.!?。]+$/, '') + '. ' + b);
   }
@@ -1480,6 +1489,104 @@ export default function App() {
     } catch (err) { logline('문장 수정 오류: ' + err.message); }
     finally { setSentBusy(false); }
   }
+  // 🧩 ↑↓ 로 클립 이동 — 고치는 채로 다음 클립을 연다(Vrew 처럼). 저장이 끝난 뒤(대본이 바뀌었으면 새 줄 번호로) 연다.
+  const pendingEditRef = useRef(null);
+  function openLineEdit(sn, n, where) {
+    const PL = linesMap.get(sn); const l = PL && PL.list.find((x) => x.n === n);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null;
+    if (!l || !pr) return false;
+    const cut = pr.cuts[l.ci]; const sen = cut && cut.sentences ? cut.sentences[l.sentIdx] : null;
+    if (!sen) return false;
+    setCursor({ shortsNum: sn, n });
+    if (where === 'stage') setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n, groupNum: cut.num, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: n });
+    startSentEdit(sn, cut.num, l.sentIdx, sen.text, 1, { n, from: l.from, to: l.to }, where);
+    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
+    return true;
+  }
+  async function navEdit(delta) {
+    const e = sentEdit; if (!e || !e.line) return;
+    const PL = linesMap.get(e.shortsNum); if (!PL) return;
+    const n = e.line.n + delta;
+    if (n < 1 || n > PL.list.length) return;
+    pendingEditRef.current = { sn: e.shortsNum, n, where: e.where };
+    await commitSentEdit();
+  }
+  useEffect(() => {
+    if (sentEdit || !pendingEditRef.current) return;
+    const p = pendingEditRef.current; pendingEditRef.current = null;
+    openLineEdit(p.sn, p.n, p.where);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sentEdit, linesMap]);
+  // 개요 보기의 문장 편집칸 — 맨 앞 ↑ / 맨 끝 ↓ = 저장하고 윗/아랫 클립으로 커서만 옮긴다
+  function navOutOfSentence(delta) {
+    const e = sentEdit; if (!e) return;
+    const PL = linesMap.get(e.shortsNum); const sl = PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx);
+    if (!sl || !sl.length) return;
+    const n = delta < 0 ? sl[0].n - 1 : sl[sl.length - 1].n + 1;
+    if (n >= 1 && n <= PL.list.length) setCursor({ shortsNum: e.shortsNum, n });
+    commitSentEdit();
+  }
+  /** 🧩 줄 편집칸 키 — Enter 나누기 · ↑↓ 클립 이동 · 맨 앞 Backspace / 맨 끝 Del = 문장 합치기(문장 첫·끝 줄일 때) · Esc 취소 */
+  function lineEditKey(ev, ctx) {
+    const el = ev.currentTarget; const e = sentEdit; if (!e || !e.line) return;
+    const caret = el.selectionStart, sel = el.selectionEnd;
+    const PL = linesMap.get(e.shortsNum); const sl = (PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx)) || [];
+    const firstLine = !sl.length || sl[0].n === e.line.n, lastLine = !sl.length || sl[sl.length - 1].n === e.line.n;
+    const oneRow = el.scrollHeight <= (parseFloat(getComputedStyle(el).lineHeight) || 20) * 1.6;
+    const { si, sents, s } = ctx || {};
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); if (e.where === 'stage') commitSentEdit(); else splitSentAtCursor(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); cancelSentEdit(); }
+    else if (ev.key === 'ArrowUp' && (oneRow || (caret === 0 && sel === 0))) { ev.preventDefault(); navEdit(-1); }
+    else if (ev.key === 'ArrowDown' && (oneRow || (caret === el.value.length && sel === el.value.length))) { ev.preventDefault(); navEdit(1); }
+    else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
+      ev.preventDefault();
+      if (!firstLine) { navEdit(-1); return; }
+      if (!sents) return;
+      if (si === 0) setStatus('그룹의 첫 문장입니다 — 윗 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+      else if (s && s.mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
+      else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
+      else mergeSentUp(si, sents[si - 1].text);
+    } else if (ev.key === 'Delete' && caret === el.value.length && sel === el.value.length) {
+      ev.preventDefault();
+      if (!lastLine) { navEdit(1); return; }
+      if (!sents) return;
+      if (si >= sents.length - 1) setStatus('그룹의 마지막 문장입니다 — 아래 그룹과는 합칠 수 없습니다 (대본에서 직접)');
+      else if (sents[si + 1].mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
+      else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
+      else mergeSentNext(si, sents[si + 1].text);
+    }
+  }
+  /** 「가」 — 이 클립 하나를 고르고 ⚙ 고급(③ 칸)을 연다 */
+  function fmtClip(sn, info) {
+    setCursor({ shortsNum: sn, n: info.n });
+    setCapSel({ shortsNum: sn, mode: 'lines', items: [info], anchorN: info.n });
+    pickMenu('format'); setCapPanel('fmt');
+  }
+  /** Ctrl+A — 이 편의 모든 클립 선택 */
+  function selectAllClips() {
+    const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
+    const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length) return;
+    setCapSel({ shortsNum: sn, mode: 'lines', items: PL.list.map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), anchorN: PL.list[0].n });
+    pickMenu('format');
+    setStatus(`클립 ${PL.list.length}개를 모두 골랐습니다 — 서식을 바꾸면 전부에 적용됩니다 (Esc 해제)`);
+  }
+  /** ① 칸 자막을 누르면 — 그 자리에서 글자·서식을 고치는 팝업(Vrew). */
+  const [stageEditBox, setStageEditBox] = useState(null);   // { left, top, width, height } — 열 때 잰 자막 자리(스테이지 기준 px)
+  function openStageEdit() {
+    if (playerOpen || sentEdit) return;
+    const cap = stageCapRef.current, st = cap && cap.parentElement; if (!cap || !st) return;
+    const ln = cap.querySelector('.cf-stageline') || cap;
+    const r = ln.getBoundingClientRect(), sr = st.getBoundingClientRect();
+    setStageEditBox({ left: r.left - sr.left, top: r.top - sr.top, width: r.width, height: r.height, stageW: sr.width, stageH: sr.height });
+    if (cursor) openLineEdit(cursor.shortsNum, cursor.n, 'stage');
+  }
+  // 팝업 밖을 누르면 저장하고 닫는다(글자칸 blur 로 저장하지 않는다 — 막대의 색·글꼴 칸을 누를 때마다 닫히면 안 된다)
+  useEffect(() => {
+    if (!(sentEdit && sentEdit.where === 'stage')) return undefined;
+    const onDown = (ev) => { if (!(ev.target && ev.target.closest && ev.target.closest('.stage-edit'))) commitSentEdit(); };
+    document.addEventListener('mousedown', onDown, true);
+    return () => document.removeEventListener('mousedown', onDown, true);
+  });
   // ⚠ 그사이 사용자가 **다른 문장을 클릭해 열었으면** 그건 닫지 않는다(blur 저장과 클릭이 연달아 일어난다).
   function closeSentEdit(e) { setSentEdit((cur) => (cur === e ? null : cur)); }
   async function applyScriptEdit() {
@@ -2173,9 +2280,11 @@ export default function App() {
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
-      if (anyModal || sentEdit || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (anyModal || sentEdit || e.altKey) return;
       const t = e.target; const tag = t && t.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAllClips(); return; }   // 🧩 Ctrl+A = 모든 클립
+      if (e.ctrlKey || e.metaKey) return;
       if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1, e.shiftKey); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1, e.shiftKey); }
       else if (e.key === 'PageDown') { e.preventDefault(); moveCursor(10, e.shiftKey); }
@@ -2184,7 +2293,9 @@ export default function App() {
       else if (e.key === 'End') { e.preventDefault(); moveCursor(0, e.shiftKey, 'end'); }
       else if (e.key === 'Enter') {
         const ci = cursorInfo(); if (!ci || !ci.s) return;
-        e.preventDefault(); startSentEdit(ci.pr.shortsNum, ci.cut.num, ci.l.sentIdx, ci.s.text);
+        e.preventDefault();
+        if (clipDetail) openLineEdit(ci.pr.shortsNum, ci.l.n, null);
+        else startSentEdit(ci.pr.shortsNum, ci.cut.num, ci.l.sentIdx, ci.s.text);
       } else if (e.key === ' ') { e.preventDefault(); if (playerOpen) stopPlayer(); else playFromCursor(); }
     };
     window.addEventListener('keydown', onKey);
@@ -2554,9 +2665,30 @@ export default function App() {
 
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
-    <div id="stage" className="lf" data-testid="stage">
+    <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage">
       <div id="stageVisual" ref={stageVisualRef} />
-      <div id="stageCap" ref={stageCapRef} />
+      <div id="stageCap" ref={stageCapRef} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기' : undefined}
+        onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
+      {wsOn && sentEdit && sentEdit.where === 'stage' && stageEditBox && (() => {
+        // 🧩 Vrew 팝업 — 위: 작은 서식 막대 · 아래: 자막 자리 그대로의 글자칸(초록 테두리). Enter/밖 누르기 = 저장 · ↑↓ 다음 클립 · Esc 취소
+        const f = capSelFmt(); const k = stageEditBox.stageW / 1920;
+        const css = fmtCss(f, k, true);
+        const w = Math.max(220, stageEditBox.width + 24);
+        const left = Math.max(4, Math.min(stageEditBox.stageW - w - 4, stageEditBox.left - 12));
+        return (
+          <div className="stage-edit" data-testid="stage-edit">
+            <div className="stage-mini" style={{ left, bottom: stageEditBox.stageH - stageEditBox.top + 10 }}>
+              <CaptionMiniBar fmt={f} pos={capSelPos()} onPatch={applyCapFmt} onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))} panel={capPanel} />
+            </div>
+            <textarea className="stage-ta" rows={1} spellCheck={false} autoFocus data-testid="stage-ta"
+              defaultValue={String(sentEdit.text || '').slice(sentEdit.line.from, sentEdit.line.to)}
+              style={{ ...css, left, top: stageEditBox.top - 6, width: w, fontSize: (Number(f.size) || 100) * 0.72 * k, textAlign: capSelPos().align === 'end' ? 'right' : capSelPos().align === 'center' ? 'center' : 'left' }}
+              ref={(el) => { sentEditRef.current = el; fitSentBox(el); }}
+              onInput={(ev) => fitSentBox(ev.currentTarget)}
+              onKeyDown={(ev) => lineEditKey(ev, null)} />
+          </div>
+        );
+      })()}
     </div>
     <div id="playerBar">
       {wsOn && <button className={playerOpen ? 'ghost' : ''} data-testid="play-btn" title="커서 줄부터 재생 / 멈춤 (Space)" onClick={() => (playerOpen ? stopPlayer() : playFromCursor())}>{playerOpen ? '■ 멈춤' : '▶ 재생'}</button>}
@@ -2886,7 +3018,7 @@ export default function App() {
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
               splitAt: splitSentAtCursor, mergeUp: mergeSentUp, mergeNext: mergeSentNext,
-              note: setStatus,
+              note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, fmtClip,
             }} /></ErrorBoundary>
           </>)}
         </main>
@@ -3991,7 +4123,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
                   }
                   for (const l of lines) projLines.push({ n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to });
-                  if (edHere && si === ed.sentIdx) {
+                  if (edHere && si === ed.sentIdx && !ed.line && ed.where !== 'stage') {
                     return (
                       <div className="sblk editing" key={'e' + si}>
                         {/* 🔑 줄 번호는 편집 중에도 그대로 둔다 — 고치는 동안에도 몇 번째 자막인지 보이게(로이 2026-09-15).
@@ -4010,6 +4142,9 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             const caret = el.selectionStart, sel = el.selectionEnd;
                             if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); edit.splitAt(); }
                             else if (ev.key === 'Escape') { ev.preventDefault(); edit.cancel(); }
+                            // 🧩 맨 앞 ↑ / 맨 끝 ↓ = 저장하고 윗·아랫 클립으로(키보드로 클립 이동)
+                            else if (ev.key === 'ArrowUp' && caret === 0 && sel === 0 && edit.navOut) { ev.preventDefault(); edit.navOut(-1); }
+                            else if (ev.key === 'ArrowDown' && caret === el.value.length && sel === el.value.length && edit.navOut) { ev.preventDefault(); edit.navOut(1); }
                             // 🔑 맨 앞에서 ←Backspace = 윗줄과 합치기. 지울 글자가 없을 때만이라 평소 지우기를 가로채지 않는다.
                             else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
                               ev.preventDefault();
@@ -4042,8 +4177,10 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           if (rg) { onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
                           // 🧭 누른 줄로 커서 이동 + 바로 고치기(로이 확정)
                           const lnEl = ev.target && ev.target.closest ? ev.target.closest('[data-ln]') : null;
-                          if (onCursor) onCursor(pr.shortsNum, lnEl ? Number(lnEl.getAttribute('data-ln')) : (lines.length ? lines[0].n : 1));
-                          edit.start(pr.shortsNum, c.num, si, s.text);
+                          const clickN = lnEl ? Number(lnEl.getAttribute('data-ln')) : (lines.length ? lines[0].n : 1);
+                          if (onCursor) onCursor(pr.shortsNum, clickN);
+                          const cl = detail ? lines.find((x) => x.n === clickN) : null;
+                          edit.start(pr.shortsNum, c.num, si, s.text, 1, cl ? { n: cl.n, from: cl.range.from, to: cl.range.to } : null);
                         }}>
                         {lines.map((l, li) => {
                           const info = { n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to };
@@ -4058,32 +4195,54 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                               onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
                           );
                           if (detail) {
-                            // 🧩 Vrew 클립 모양 — ① 머리줄(번호·화자·시각·효과) ② 어절 칩 ③ 자막 줄(누르면 고치기)
+                            // 🧩 Vrew 클립 모양(로이 2026-09-25 캡처) — 왼쪽 번호 칸(누르면 이 클립 선택 · Shift 범위 · Ctrl 더하기) |
+                            //   1행 = 화자 · 시각 · 어절 칩(누르면 그 단어만 서식) / 2행 = 🗨 자막(누르면 **그 줄 글자만** 같은 모양 그대로 고치기) + 가(이 클립 서식)
                             const selChars = capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum ? capSel.items.filter((x) => x.groupNum === c.num && x.sentIdx === si) : [];
                             const tm = fmtClipTime(l.start, l.dur);
+                            const lineEd = ed && ed.line && ed.where !== 'stage' && edHere && ed.sentIdx === si && ed.line.n === l.n;
                             return (
-                              <div className={'sent clip' + (picked ? ' picked' : '') + (isCur ? ' cur' : '')} key={l.n} data-ln={l.n}>
-                                <div className="clip-meta">
-                                  {lineNo}
-                                  <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
-                                  {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
-                                  {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
+                              <div className={'sent clip' + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
+                                <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
+                                  onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
+                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{l.n}</div>
+                                <div className="clip-body">
+                                  <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); } }}>
+                                    <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
+                                    {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                    <span className="clip-chips">
+                                      {lineWords(s.text, l.range).map((w) => (
+                                        <span key={w.from} className={'chip' + (selChars.some((x) => x.from < w.to && x.to > w.from) ? ' on' : '')}
+                                          title="이 단어만 서식 고르기 — Shift = 같은 문장 안에서 범위"
+                                          onMouseDown={(ev) => { if (ev.shiftKey) ev.preventDefault(); }}
+                                          onClick={(ev) => {
+                                            ev.stopPropagation();
+                                            if (!onPickCapChars) return;
+                                            let from = w.from, to = w.to;
+                                            if (ev.shiftKey && selChars.length) { from = Math.min(from, ...selChars.map((x) => x.from)); to = Math.max(to, ...selChars.map((x) => x.to)); }
+                                            onPickCapChars(pr.shortsNum, c.num, si, { from, to });
+                                          }}>{w.w}</span>
+                                      ))}
+                                    </span>
+                                    {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
+                                  </div>
+                                  <div className="clip-r2">
+                                    <span className="clip-ic" aria-hidden="true">🗨</span>
+                                    {lineEd ? (
+                                      // 🔑 줄 글자만 고친다 — 모양(글꼴·크기·칸)은 평소 줄과 같게. 저장은 문장 앞뒤를 이어 붙여 기존 문장 저장 경로로.
+                                      <textarea className="clip-edit" defaultValue={String(s.text || '').slice(ed.line.from, ed.line.to)} rows={1} spellCheck={false} autoFocus
+                                        disabled={edit.busy}
+                                        title="Enter 나누기 · ↑↓ 다음 클립으로(고치는 채로) · 맨 앞 ←Backspace 윗문장과 합치기 · 맨 끝 Del 아랫문장 올리기 · Esc 취소"
+                                        ref={(el) => { edit.ref.current = el; fitSentBox(el); }}
+                                        onInput={(ev) => fitSentBox(ev.currentTarget)}
+                                        onBlur={() => edit.commit()}
+                                        onClick={(ev) => ev.stopPropagation()}
+                                        onKeyDown={(ev) => edit.lineKey(ev, { si, sents, s, l })} />
+                                    ) : (
+                                      <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
+                                    )}
+                                    <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) edit.fmtClip(pr.shortsNum, info); }}>가</button>
+                                  </div>
                                 </div>
-                                <div className="clip-chips">
-                                  {lineWords(s.text, l.range).map((w) => (
-                                    <span key={w.from} className={'chip' + (selChars.some((x) => x.from < w.to && x.to > w.from) ? ' on' : '')}
-                                      title="이 단어만 서식 고르기 — Shift = 같은 문장 안에서 범위"
-                                      onMouseDown={(ev) => { if (ev.shiftKey) ev.preventDefault(); }}
-                                      onClick={(ev) => {
-                                        ev.stopPropagation();
-                                        if (!onPickCapChars) return;
-                                        let from = w.from, to = w.to;
-                                        if (ev.shiftKey && selChars.length) { from = Math.min(from, ...selChars.map((x) => x.from)); to = Math.max(to, ...selChars.map((x) => x.to)); }
-                                        onPickCapChars(pr.shortsNum, c.num, si, { from, to });
-                                      }}>{w.w}</span>
-                                  ))}
-                                </div>
-                                <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
                               </div>
                             );
                           }

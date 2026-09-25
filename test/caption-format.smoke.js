@@ -175,11 +175,15 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     ok(await win.locator('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on').count() === 1, '저장 뒤 헤더(채널 위치)도 새 값 — 고른 게 없어도 오른쪽');
 
     // [8] 문장을 고쳐도 서식이 남는다(오타 고치기)
-    await win.locator('.cut .sblk').nth(1).locator('.sblk-lines').click();
-    await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
-    await win.fill('.sblk.editing textarea', '둘째 문장이에요.');
-    await win.locator('.sblk.editing textarea').blur();
-    await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 10000 });
+    // 🧩 v0.5.44 — 상세 보기는 자막 줄(🗨 칸)을 눌러 **그 줄 글자만** 같은 모양 그대로 고친다(짧은 문장이라 줄 = 문장)
+    const ED = '.sblk.editing textarea, .sent.clip.editing .clip-edit';
+    await ((await win.locator('.cut .sblk').nth(1).locator('.clip-cap').count())
+      ? win.locator('.cut .sblk').nth(1).locator('.clip-cap').first().click()
+      : win.locator('.cut .sblk').nth(1).locator('.sblk-lines').click());
+    await win.waitForSelector(ED, { timeout: 5000 });
+    await win.fill(ED, '둘째 문장이에요.');
+    await win.locator(ED).blur();
+    await win.waitForSelector(ED, { state: 'detached', timeout: 10000 });
     await win.waitForFunction(() => /둘째 문장이에요/.test(document.body.innerText), null, { timeout: 10000 });
     ok(await win.locator('.cut .sblk').nth(1).locator('.capfmt').count() >= 1, '🔑 문장을 고쳐도 그 문장의 서식이 남는다');
 
