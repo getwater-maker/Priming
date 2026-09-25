@@ -751,3 +751,16 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .cthumb .frame-wait{display:block;width:100%;height:100%;background:#3a332c}
 .cthumb.empty{background:#f1ebe1;display:flex;align-items:center;justify-content:center}
 .cthumb .cthumb-none{font-size:10px;color:#a89a84}
+/* ── 🖼 v0.5.61 — 그룹 그림 범위 선(RailLayer) · 그룹을 넘어 한 줄 · 밖은 점선(아래층) ── */
+.cuts-grid.vrew .sents.vr{border-left-color:transparent}
+.rail-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:3}
+.rail{position:absolute;width:24px}
+.rail .rseg{position:absolute;left:11px;width:3px;border-radius:2px;background:#d8c7a8}
+.rail .rseg.ext{left:4px;width:0;background:none;border-left:3px dashed #c9ad7c}
+.rail.live .rseg{background:var(--accent)}
+.rail.live .rseg.ext{background:none;border-left-color:var(--accent)}
+.rail .vr-h{left:6px;pointer-events:auto}
+.rail .vr-h.ext{left:-1px}
+.rail .vr-h.top{top:-5px}.rail .vr-h.bot{bottom:-5px;top:auto}
+.rail.live .vr-h{background:var(--accent)}
+.rail.noimg .rseg{opacity:.55}

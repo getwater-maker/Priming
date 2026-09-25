@@ -4727,6 +4727,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   const [folded, setFolded] = useState(() => new Set());
   const toggleFold = (k) => setFolded((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const vrDragRef = useRef(null); vrDragRef.current = vrDrag;
+  // 🖼 놓은 뒤 main 이 돌려줄 때까지 새 범위로 그려 둔다(v0.5.61 — 삽입 막대와 같다) · dto 가 바뀌면 · 4초 뒤 푼다
+  const [vrPending, setVrPending] = useState(null);   // {shortsNum, groupNum, from, to}
+  useEffect(() => { if (vrPending) setVrPending(null); /* eslint-disable-next-line */ }, [dto]);
+  useEffect(() => { if (!vrPending) return undefined; const t = setTimeout(() => setVrPending(null), 4000); return () => clearTimeout(t); }, [vrPending]);
+  const grabRail = (sn, c, edge, r) => setVrDrag({ shortsNum: sn, groupNum: c.num, edge, gs: r.from, ge: r.to, ord: edge === 'start' ? r.from : r.to });
   useEffect(() => {
     if (!vrDrag) return undefined;
     let lastY = null;
@@ -4743,7 +4748,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
       const d = vrDragRef.current; setVrDrag(null);
       if (!d || !onRange) return;
       const r = vrRangeOf(d);
-      if (r.from !== d.gs || r.to !== d.ge) onRange(d.shortsNum, d.groupNum, r.from, r.to);
+      if (r.from !== d.gs || r.to !== d.ge) { setVrPending({ shortsNum: d.shortsNum, groupNum: d.groupNum, from: r.from, to: r.to }); onRange(d.shortsNum, d.groupNum, r.from, r.to); }
     };
     const esc = (ev) => { if (ev.key === 'Escape') { vrDragRef.current = null; setVrDrag(null); } };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up); document.addEventListener('keydown', esc);
@@ -5000,7 +5005,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   );
                 });
                 return (
-                  <div className={'cut' + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '') + (vrewLay && folded.has(pr.shortsNum + ':' + c.num) ? ' folded' : '')} key={c.num}>
+                  <div className={'cut' + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '') + (vrewLay && folded.has(pr.shortsNum + ':' + c.num) ? ' folded' : '')} key={c.num} data-sn={pr.shortsNum} data-g={c.num}>
                     {vrewLay ? <div className="vgutter" /> : thumbEl}
                     <div>
                       {vrewLay && (() => {
@@ -5051,7 +5056,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         {vrewLay && (
                           <div className="gicon" data-testid="gicon" title={`G${c.num} · ${c.phase || ''}${c.groupDurationSec ? ' · ' + c.groupDurationSec.toFixed(1) + '초' : ''} — 누르면 그림 메뉴(미리듣기 · TTS · 프롬프트 · 합치기 …)`}>{thumbEl}</div>
                         )}
-                        {onRange && sents.length ? <>
+                        {onRange && sents.length && !vrewLay ? <>
                           <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
                             onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.from : gs }); }} />
                           <span className="vr-h bot" title={`그림 끝 — 끌어서 이 그림(G${c.num})을 어느 문장까지 쓸지 정합니다(다른 그룹 문장 위로 끌면 그 문장까지 이 그림이 덮습니다)`}
@@ -5064,6 +5069,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   </div>
                 );
               })}
+              {vrewLay && onRange ? <RailLayer pr={pr} drag={vrDrag && vrDrag.shortsNum === pr.shortsNum ? vrDrag : null} pending={vrPending && vrPending.shortsNum === pr.shortsNum ? vrPending : null} onGrab={(c, edge, r) => grabRail(pr.shortsNum, c, edge, r)} /> : null}
               {vrewLay && onInsMark && (pr.overlays || []).length ? <LaneLayer pr={pr} onInsMark={onInsMark} onInsRange={onInsRange} /> : null}
             </div>
           </div>
@@ -5278,6 +5284,75 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
         );
       })}
       {drag && (() => { const f = Math.min(drag.from, drag.to), t = Math.max(drag.from, drag.to); return <div className="vr-tip">➕ 삽입 범위 → 클립 {f}~{t} · 놓으면 적용 · Esc 취소</div>; })()}
+    </div>
+  );
+}
+// 🖼 그룹 그림 범위 선(Vrew 그림의 파란 선 · v0.5.61) — 시작 클립 윗변 ~ 끝 클립 아랫변을 화면에서 재서 **그룹을 넘어 한 줄로**.
+//   자기 그룹 안 = 실선 · 밖(다음 그룹 밑으로 이어 깔린 곳 = 아래층) = 조금 왼쪽의 점선(다음 그룹 선에 가려지지 않게).
+//   양 끝 손잡이 = 시작점·끝점 — 끌면 Cards 의 vrDrag 가 범위를 바꾸고, 선은 끄는 동안 · 놓은 직후(pending)에도 따라온다.
+function blockRect(grid, sn, ord, end) {
+  const b = grid.querySelector(`.sblk[data-sn="${sn}"][data-ord="${ord}"]`);
+  if (!b) return null;
+  if (b.offsetParent) {
+    const cl = b.querySelectorAll('.sent.clip');
+    const t = cl.length ? cl[end ? cl.length - 1 : 0] : b;
+    return t.getBoundingClientRect();
+  }
+  const cut = b.closest('.cut'); const h = cut && cut.querySelector('.scene-h');
+  return (h || cut || b).getBoundingClientRect();
+}
+function RailLayer({ pr, drag, pending, onGrab }) {
+  const ref = useRef(null);
+  const [geo, setGeo] = useState([]);
+  const measure = () => {
+    const layer = ref.current; if (!layer) return;
+    const grid = layer.parentElement; if (!grid) return;
+    const G = grid.getBoundingClientRect(); const sn = pr.shortsNum;
+    const out = []; let o = 0;
+    for (const c of pr.cuts) {
+      const n = (c.sentences || []).length; const gs = o + 1, ge = o + n; o = ge;
+      if (!n) continue;
+      const d = drag && drag.groupNum === c.num ? vrRangeOf(drag) : (pending && pending.groupNum === c.num ? pending : null);
+      const r = d || c.span || { from: gs, to: ge };
+      const a = blockRect(grid, sn, r.from, false), b = blockRect(grid, sn, r.to, true);
+      const a2 = blockRect(grid, sn, gs, false), b2 = blockRect(grid, sn, ge, true);
+      const cut = grid.querySelector(`.cut[data-sn="${sn}"][data-g="${c.num}"] .sents`);
+      if (!a || !b || !a2 || !b2 || !cut) continue;
+      out.push({ num: c.num, from: r.from, to: r.to, gs, ge, has: !!(c.imagePath || c.videoPath), live: !!d,
+        top: Math.round(a.top - G.top), bot: Math.round(b.bottom - G.top), ownTop: Math.round(a2.top - G.top), ownBot: Math.round(b2.bottom - G.top), x: Math.round(cut.getBoundingClientRect().left - G.left) });
+    }
+    setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+  };
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const grid = ref.current && ref.current.parentElement;
+    if (!grid || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => measure()); ro.observe(grid);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="rail-layer" ref={ref} data-testid="rail-layer">
+      {geo.map((g) => {
+        const c = pr.cuts.find((x) => x.num === g.num); if (!c) return null;
+        const segs = [];
+        const iT = Math.max(g.top, g.ownTop), iB = Math.min(g.bot, g.ownBot);
+        if (iB > iT) segs.push({ k: 'own', t: iT, b: iB, ext: false });
+        if (g.top < g.ownTop) segs.push({ k: 'up', t: g.top, b: Math.min(g.bot, g.ownTop), ext: true });
+        if (g.bot > g.ownBot) segs.push({ k: 'dn', t: Math.max(g.top, g.ownBot), b: g.bot, ext: true });
+        const topExt = g.top < g.ownTop, botExt = g.bot > g.ownBot;
+        const L = g.x - 10;   // 층 안 기준 — 실선 = +12 · 점선 = +5
+        const grab = (edge) => (ev) => { ev.preventDefault(); ev.stopPropagation(); onGrab(c, edge, { from: g.from, to: g.to }); };
+        const tip = `G${c.num} 그림 범위 — 문장 ${g.from}~${g.to}${g.to > g.ge || g.from < g.gs ? ' (자기 그룹 밖은 아래층으로 이어 깔림 — 점선)' : ''}`;
+        return (
+          <div key={g.num} className={'rail' + (g.live ? ' live' : '') + (g.has ? '' : ' noimg')} data-testid="rail" data-g={g.num} data-from={g.from} data-to={g.to}
+            style={{ left: L, top: g.top, height: Math.max(8, g.bot - g.top) }} title={tip}>
+            {segs.map((sg) => <span key={sg.k} className={'rseg' + (sg.ext ? ' ext' : '')} data-testid={sg.ext ? 'rail-ext' : 'rail-own'} style={{ top: sg.t - g.top, height: Math.max(2, sg.b - sg.t) }} />)}
+            <span className={'vr-h top' + (topExt ? ' ext' : '')} data-testid="rail-h-s" title={`그림 시작점 — 문장 ${g.from} · 끌어서 이 그림(G${c.num})이 어느 클립부터 보일지`} onMouseDown={grab('start')} />
+            <span className={'vr-h bot' + (botExt ? ' ext' : '')} data-testid="rail-h-e" title={`그림 끝점 — 문장 ${g.to} · 끌어서 이 그림(G${c.num})을 어느 클립까지 쓸지(다른 그룹 위로 끌면 그 밑에 이어 깔린다)`} onMouseDown={grab('end')} />
+          </div>
+        );
+      })}
     </div>
   );
 }

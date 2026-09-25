@@ -175,7 +175,7 @@ console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew �
   ok(/for \(const g of r\.removed\)[\s\S]{0,200}_inDir\(f, mediaDir\)/.test(MAIN7), '🔴 덮여 사라진 그룹 파일은 media-N 안의 것만 지운다');
   ok(/!\(g\.imagePrompt && String\(g\.imagePrompt\)\.trim\(\)\) && !g\.imageStale\) return false/.test(MAIN7), '🔑 떨어져 나온 그룹(프롬프트 없음)도 그림이 없으면 .vrew 게이트가 막는다');
   ok(/setVisualRange: \(args\) => ipcRenderer\.invoke\('set-visual-range', args\)/.test(PRE7), 'preload setVisualRange');
-  ok(/onRange=\{isLf \? setVisualRange : null\}/.test(APP7) && /className="vr-h top"/.test(APP7) && /className="vr-h bot"/.test(APP7), '화면: 범위 막대 손잡이 위·아래');
+  ok(/onRange=\{isLf \? setVisualRange : null\}/.test(APP7) && /className="vr-h top"/.test(APP7) && /vr-h bot/.test(APP7) && /function RailLayer/.test(APP7), '화면: 범위 막대 손잡이 위·아래');
   ok(/전체 클립으로/.test(APP7) && /처음부터 이 그림 끝까지/.test(APP7) && /이 그림부터 끝까지/.test(APP7) && /직접 입력/.test(APP7), '썸네일 메뉴 — 적용 범위 4가지');
   ok(!/통째로 덮여 사라집니다/.test(APP7) && /data-testid="thumb-covered"/.test(APP7), '지우지 않으니 확인창이 없다 · 덮인 그룹 썸네일에 「⤓ G1 그림」');
 }

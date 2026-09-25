@@ -78,19 +78,33 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     // [1] G1 끝 손잡이를 문장 4 위로 끌기
     await win.evaluate(() => { const e = document.querySelector('.sblk[data-ord="4"]'); if (e) e.scrollIntoView({ block: 'end' }); });   // 씬 머리줄로 목록이 길어졌다(v0.5.59)
     await win.waitForTimeout(200);
-    const hb = await win.locator('.cut').nth(0).locator('.vr-h.bot').boundingBox();
+    // 🖼 v0.5.61 — 그룹 그림 범위 선 = RailLayer(그룹을 넘어 한 줄). 처음엔 그룹마다 자기 문장만 · 점선 없음
+    const rail = (g) => win.evaluate((k) => { const r = document.querySelector('[data-testid=rail][data-g="' + k + '"]'); return r ? { from: +r.dataset.from, to: +r.dataset.to, ext: r.querySelectorAll('[data-testid=rail-ext]').length, own: r.querySelectorAll('[data-testid=rail-own]').length, bot: r.getBoundingClientRect().bottom } : null; }, g);
+    const r0 = await rail(1);
+    ok(r0 && r0.from === 1 && r0.to === 2 && r0.ext === 0 && r0.own === 1 && await win.locator('[data-testid=rail]').count() === 3, `그룹마다 그림 범위 선(G1 = 문장 1~2 · 실선만) — ${JSON.stringify(r0)}`);
+    ok(await win.locator('.cut .sents > .vr-h').count() === 0, '옛 그룹 안 손잡이는 없다(선 층으로 옮김)');
+    const hb = await win.locator('[data-testid=rail][data-g="1"] [data-testid=rail-h-e]').boundingBox();
     const tgt = await win.locator('.sblk[data-ord="4"]').boundingBox();
     await win.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await win.mouse.down();
-    await win.mouse.move(tgt.x + 60, tgt.y + Math.min(tgt.height / 2, 18), { steps: 8 });   // 씬 머리줄로 목록이 길어져 가운데가 창 밖일 수 있다(v0.5.59)
+    // 🔑 곧장 아래로(손잡이 칸 그대로) — 마우스 높이로 클립을 고른다(v0.5.60)
+    await win.mouse.move(hb.x + hb.width / 2, tgt.y + Math.min(tgt.height / 2, 18), { steps: 10 });
     ok(await win.locator('.vr-tip').count() === 1 && (await win.locator('.vr-tip').innerText()).includes('1~4'), '끄는 동안 안내 「문장 1~4」');
     ok(await win.locator('.sblk.vr-hit').count() === 4, '끄는 동안 덮일 문장 4개 표시(다른 그룹까지)');
+    const rl = await rail(1);
+    const c4 = await win.evaluate(() => { const b = document.querySelectorAll('.sblk[data-ord="4"] .sent.clip'); return b.length ? b[b.length - 1].getBoundingClientRect().bottom : 0; });
+    ok(rl && rl.to === 4 && rl.ext === 1 && Math.abs(rl.bot - c4) <= 2, `🔑 끄는 동안 선이 그룹을 넘어 클립 4 아랫변까지 따라온다(밖은 점선) — ${JSON.stringify(rl)} / ${Math.round(c4)}`);
     await win.mouse.up();
+    const rp = await rail(1);
+    ok(rp && rp.to === 4, '🔑 놓자마자 새 범위로 그려 둔다(옛 범위로 튀지 않는다)');
     // 🖼 v0.5.47 — 늘리면 겹쳐 깐다: 그룹은 그대로 · G1 에 「그림 범위 문장 1~4」
     const spanOf = async (i) => { const e = win.locator('.cut').nth(i).locator('[data-testid=vr-span]'); return (await e.count()) ? (await e.innerText()) : ''; };
     const waitSpan = (i, want) => win.waitForFunction(([k, w]) => { const e = document.querySelectorAll('.cut')[k]; const t = e && e.querySelector('[data-testid=vr-span]'); return (t ? t.textContent : '').includes(w); }, [i, want], { timeout: 8000 }).then(() => true, () => false);
     const waitNoSpan = (i) => win.waitForFunction((k) => { const e = document.querySelectorAll('.cut')[k]; return !(e && e.querySelector('[data-testid=vr-span]')); }, i, { timeout: 8000 }).then(() => true, () => false);
     ok(await waitSpan(0, '1~4') && JSON.stringify(await groups()) === JSON.stringify(G3), '🔑 놓으면 G1 그림이 문장 4까지 아래층으로 — 그룹 3개 그대로(지우지 않는다)');
+    await win.waitForTimeout(300);
+    const ra = await rail(1), rb2 = await rail(2);
+    ok(ra && ra.to === 4 && ra.ext === 1 && rb2 && rb2.from === 3 && rb2.own === 1, `적용 뒤에도 G1 선 = 1~4(G2 구간은 점선 = 아래층) · G2 선은 제자리 — ${JSON.stringify([ra, rb2])}`);
 
     // [2] ↶ ↷
     await key('Control+z');
