@@ -4985,6 +4985,9 @@ function h2MapFromScript(scriptPath) {
 function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
+  // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
+  let readerNotes = [];
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) readerNotes = require('./core/parsers/longform-parser').readerNotesOf(fs.readFileSync(snap.scriptPath, 'utf8')); } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -5010,6 +5013,7 @@ function projectsFromSnapshot(snap) {
     if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
     require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
     if (ps.logoSide === 'left') proj.logoSide = 'left';
+    if (readerNotes.length) proj.readerNotes = readerNotes;
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
     return proj;
   });

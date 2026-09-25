@@ -95,6 +95,19 @@ console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제�
   ok(!r.projects[0].sentences.some((s) => /근거|메모/.test(s.text)), '🔑 메모는 낭독(문장)에 들어가지 않는다');
   ok(/class="note">📝 \[강의안 근거/.test(R.readerHtml(b)), 'A4 PDF HTML 에도 메모 칸');
   ok(/b\.t === 'note'\) \{ html \+= `<div \$\{NE\}/.test(jsx), '화면의 메모 칸은 고칠 수 없는 칸(data-ne) — 문단 편집에 섞이지 않는다');
+
+  // 🔑 이어받기(작업본 복원 — 재파싱 없음)에서도 메모가 보인다: .md 에서 다시 읽는다(main.js projectsFromSnapshot 원문 실행)
+  const os = require('os');
+  const tmpMd = path.join(os.tmpdir(), `reader-notes-${process.pid}.md`);
+  fs.writeFileSync(tmpMd, md.replace(/\n/g, '\r\n'), 'utf8');   // 윈도우 줄끝(CRLF)으로도
+  const grab = (name) => { const i = main.indexOf('function ' + name + '('); const j = main.indexOf('\n}\n', i); return main.slice(i, j + 2); };
+  const req = (p) => require(p.replace(/^\.\/core\//, '../core/'));
+  const projectsFromSnapshot = new Function('require', 'fs', grab('h2MapFromScript') + '\n' + grab('projectsFromSnapshot') + '\nreturn projectsFromSnapshot;')(req, fs);
+  const snap = { scriptPath: tmpMd, format: 'longform', projects: [{ shortsNum: 1, title: '제목', groups: r.projects[0].groups.map((g) => ({ num: g.num, phase: g.phase, sentences: r.projects[0].getSentencesOfGroup(g).map((s) => ({ text: s.text })) })) }] };
+  const restored = projectsFromSnapshot(snap)[0];
+  ok(restored && eq((restored.readerNotes || []).map((n) => n.text), ['[강의안 근거 · 낭독 제외] 도입 근거입니다.', '[강의안 근거 · 낭독 제외] 첫 장 근거입니다.']), '🔑 작업본에서 복원해도 메모 2개(.md 에서 다시 읽음 · CRLF)');
+  fs.unlinkSync(tmpMd);
+  ok(!projectsFromSnapshot({ ...snap, scriptPath: tmpMd })[0].readerNotes, '대본 파일이 없으면 메모 없이 그대로 복원(오류 없음)');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} 대본 보기 문단 편집 ${pass}/${pass + fail}\n`);

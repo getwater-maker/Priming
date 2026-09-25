@@ -3400,7 +3400,7 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="🔍 검색" title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
               onChange={(e) => runFind(e.target.value, false)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
             <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
