@@ -169,6 +169,19 @@ console.log('\n[5-a] 채널 전체 — 일반 영상 탭·항목 URL·안전한 
   eq(MD.channelEntryUrl({ id: 'x', webpage_url: 'https://example.com/video/x' }),
     'https://example.com/video/x', 'webpage_url이 있으면 우선 사용');
   eq(MD.safeFolderName('채널: 이름?'), '채널_ 이름_', '윈도우 금지문자를 채널 폴더명에서 제거');
+  // 🔴 「채널 전체」 + 영상 주소 — yt-dlp 가 영상 한 편 정보만 준다(2026-09-26 실측) → 그 채널 주소로 다시 읽는다
+  eq(MD.channelUrlOfVideo({ _type: 'video', channel_url: 'https://www.youtube.com/channel/UCx', uploader_url: 'https://www.youtube.com/@x' }),
+    'https://www.youtube.com/channel/UCx', '영상 응답이면 channel_url 을 돌려준다');
+  eq(MD.channelUrlOfVideo({ _type: 'video', uploader_url: 'https://www.youtube.com/@x' }),
+    'https://www.youtube.com/@x', 'channel_url 이 없으면 uploader_url');
+  eq(MD.channelUrlOfVideo({ _type: 'playlist', entries: [{ id: 'a' }] }), '', '목록 응답이면 그대로(다시 읽지 않는다)');
+  eq(MD.channelUrlOfVideo({ _type: 'playlist', entries: [] }), '', '빈 목록(영상 없는 채널)도 다시 읽지 않는다 — 무한 반복 방지');
+  eq(MD.normalizeChannelUrl('https://www.youtube.com/channel/UCx'), 'https://www.youtube.com/channel/UCx/videos',
+    '돌려받은 채널 주소는 일반 영상 탭으로 정규화된다');
+  const dlSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
+  ok(/!o\._fromVideo && channelUrlOfVideo/.test(dlSrc), '다시 읽기는 한 번만(_fromVideo 가드)');
+  ok(/편 받기`, '취소'\][\s\S]{0,120}title: '채널 전체 받기'/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')),
+    '🔴 채널 전체는 받기 전에 편수를 보여 주고 묻는다(붙여넣기 즉시 시작 · 실측 505편)');
 }
 
 console.log('\n[5-b] 전사 .txt 머리말 — 1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용 (로이 확정)');
@@ -253,7 +266,10 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/PYTHONIOENCODING/.test(dl), '한글 제목이 CP949 로 깨지지 않게 UTF-8 을 지정한다');
 
   // 화면
-  ok(/🔗 URL/.test(app), '헤더에 🔗 URL 버튼');
+  ok(/rb-t">대본다운</.test(app), '④ 완성에 📥 대본다운 버튼(구 🔗 URL · 2026-09-26)');
+  ok(!/rb-t">URL</.test(app), '옛 「URL」 버튼 라벨이 남지 않았다');
+  ok(/pasteAndRunUrlDl/.test(app) && /📋 링크 붙여넣기/.test(app), '「📋 링크 붙여넣기」 버튼이 있다');
+  ok(/clipboard-read-text/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')), '클립보드는 main 에서 읽는다');
   ok(/urlMode, setUrlMode\] = useState\('audio'\)/.test(app), '받을 것 기본값은 MP3(로이 확정)');
   ok(/value="audio"[\s\S]{0,80}value="video"[\s\S]{0,80}value="both"/.test(app), 'MP3·영상·둘 다 를 고를 수 있다');
   ok(/urlChannelAll, setUrlChannelAll/.test(app) && /channel: urlChannelAll/.test(app),
@@ -271,7 +287,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
       return fs.readFileSync(path.join(d, f), 'utf8');
     } catch { return ''; }
   })();
-  ok(bundle ? bundle.includes('🔗 URL') : true, '번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
+  ok(bundle ? bundle.includes('대본다운') : true, '번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
 }
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);

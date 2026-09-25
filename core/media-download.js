@@ -293,6 +293,19 @@ function safeFolderName(name, fallback = '채널 영상') {
  * 채널의 일반 영상 목록만 읽는다(다운로드는 하지 않음). 실제 다운로드는 각 URL을 기존 단일 영상 경로로 보낸다.
  * 이렇게 해야 영상마다 자막 우선 → 필요할 때만 STT 규칙과 중단 처리가 그대로 유지된다.
  */
+/**
+ * 영상 한 편의 yt-dlp 응답이면 그 영상의 **채널 주소**를 돌려준다(목록 응답이면 '').
+ * 🔴 「채널 전체」를 켜고 영상 주소(watch?v=…)를 넣으면 yt-dlp 가 영상 한 편 정보만 돌려줘
+ *    목록이 0개 → 「채널에 받을 일반 영상이 없습니다」로 끝났다(2026-09-26 실측 · cXB_H0H2kDc).
+ *    그 응답의 channel_url(/channel/UC…) 로 한 번 더 읽는다.
+ */
+function channelUrlOfVideo(j) {
+  if (!j || (Array.isArray(j.entries) && j.entries.length)) return '';
+  if (j._type && j._type !== 'video') return '';
+  const u = String(j.channel_url || j.uploader_url || '');
+  return /^https?:\/\//i.test(u) ? u : '';
+}
+
 async function listChannelVideos(url, o = {}) {
   const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
   const channelUrl = normalizeChannelUrl(url);
@@ -307,6 +320,11 @@ async function listChannelVideos(url, o = {}) {
   const line = r.stdout.split('\n').find((x) => x.trim().startsWith('{'));
   if (!line) throw new Error('채널 영상 목록 응답이 없습니다');
   const j = JSON.parse(line);
+  const ofVideo = !o._fromVideo && channelUrlOfVideo(j);
+  if (ofVideo) {
+    if (o.onLog) o.onLog(`  ↳ 영상 주소입니다 — 이 영상의 채널 「${j.channel || j.uploader || ''}」 전체를 읽습니다`);
+    return listChannelVideos(ofVideo, { ...o, tool, _fromVideo: true });
+  }
   const entries = (j.entries || []).map((e) => ({
     id: String((e && e.id) || ''),
     title: String((e && e.title) || (e && e.id) || '영상'),
@@ -497,7 +515,7 @@ module.exports = {
   parseVersionDate, versionAgeDays, isStale,
   findYtDlp, downloadYtDlp, ensureYtDlp,
   vttToText, subtitleFileToText, subLangPref, pickSubFile,
-  probe, probeSmart, download, listChannelVideos,
+  probe, probeSmart, download, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
   _explain,

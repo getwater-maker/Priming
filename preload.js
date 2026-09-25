@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld('api', {
   sttTranscribe: () => ipcRenderer.invoke('stt-transcribe'),
   extractMp3: () => ipcRenderer.invoke('extract-mp3'),
   sttFromUrl: (a) => ipcRenderer.invoke('stt-from-url', a),
+  readClipboardText: () => ipcRenderer.invoke('clipboard-read-text'),   // 📋 대본다운 「링크 붙여넣기」
   ytdlpStatus: () => ipcRenderer.invoke('ytdlp-status'),
   ytdlpUpdate: () => ipcRenderer.invoke('ytdlp-update'),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),

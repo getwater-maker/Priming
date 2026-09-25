@@ -8,6 +8,7 @@
  */
 const path = require('path');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
@@ -23,17 +24,24 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('h1', { timeout: 20000 });
     console.log('· 부팅 OK');
 
-    // [1] 버튼이 🎧 STT · 🎵 mp3 옆에 있다
-    const btn = win.locator('button:has-text("🔗 URL")');
-    ok(await btn.count() === 1, '헤더에 🔗 URL 버튼이 하나 있다');
+    // [1] 버튼은 리본 오른쪽 끝(상시) 「📄 대본 보기」 바로 앞에 있다(2026-09-26 · 구 ① 「🔗 URL」)
+    ok(await win.locator('button:has-text("🔗 URL")').count() === 0, '옛 🔗 URL 버튼이 없다');
+    const btn = win.locator('[data-testid="urldl-open"]');
+    ok(await btn.count() === 1 && /대본다운/.test(await btn.innerText()), '📥 대본다운 버튼이 하나 있다');
+    const order = await win.locator('.rb-reader button').evaluateAll((bs) => bs.map((b) => b.dataset.testid || ''));
+    ok(order.join(',') === 'urldl-open,reader-open', `대본다운이 대본 보기 바로 앞 (${order.join(', ')})`);
+    for (const m of ['image', 'finish']) {
+      await menu(win, m);
+      ok(await btn.isVisible(), `${m} 메뉴에서도 보인다(상시)`);
+    }
 
     // [2] 눌러서 창이 뜬다 — 여기서 미정의 식별자가 있으면 터진다
     await btn.click();
-    await win.waitForSelector('.modal-card:has-text("URL 에서 받아 전사")', { timeout: 8000 });
+    await win.waitForSelector('.modal-card:has-text("대본다운")', { timeout: 8000 });
     ok(true, '창이 열린다(핸들러가 살아 있다)');
 
     // [3] 기본값 = MP3 (로이 확정)
-    const sel = win.locator('.modal-card:has-text("URL 에서 받아 전사") select');
+    const sel = win.locator('.modal-card:has-text("대본다운") select');
     ok(await sel.inputValue() === 'audio', '「받을 것」 기본값이 MP3');
     const opts = await sel.locator('option').allTextContents();
     ok(opts.length === 3 && /MP3/.test(opts[0]) && /영상/.test(opts[1]) && /둘 다/.test(opts[2]),
@@ -45,7 +53,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await sel.selectOption('audio');
 
     // [5] 채널 전체·자막 무시 체크박스 — 둘 다 명시적으로 켜야 한다
-    const card = win.locator('.modal-card:has-text("URL 에서 받아 전사")');
+    const card = win.locator('.modal-card:has-text("대본다운")');
     const channelChk = card.locator('label:has-text("유튜브 채널의 일반 영상 전체") input[type=checkbox]');
     const forceChk = card.locator('label:has-text("Whisper 로 전사") input[type=checkbox]');
     ok(await channelChk.count() === 1 && !(await channelChk.isChecked()), '「채널 전체」는 기본 꺼짐(단일 URL 안전 유지)');
@@ -57,23 +65,34 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 
     // [6] yt-dlp 상태가 창에 보인다(조회가 비동기라 값이 올 때까지 기다린다)
     await win.waitForFunction(() => {
-      const el = [...document.querySelectorAll('.modal-card')].find((x) => x.textContent.includes('URL 에서 받아 전사'));
+      const el = [...document.querySelectorAll('.modal-card')].find((x) => x.textContent.includes('대본다운'));
       return el && !el.textContent.includes('yt-dlp 확인 중');
     }, null, { timeout: 30000 }).catch(() => {});
-    const body = await win.locator('.modal-card:has-text("URL 에서 받아 전사")').innerText();
+    const body = await win.locator('.modal-card:has-text("대본다운")').innerText();
     ok(/yt-dlp|자동으로 내려받습니다/.test(body), 'yt-dlp 상태를 알려준다');
     ok(/⬇ 업데이트/.test(body), '「⬇ 업데이트」 버튼이 있다(유튜브가 바뀌면 여기서 갱신)');
 
     // [7] 주소가 없으면 받지 않는다(빈 입력 방어)
-    await win.click('.modal-card:has-text("URL 에서 받아 전사") button:has-text("받아서 전사")');
+    await win.click('.modal-card:has-text("대본다운") button:has-text("받아서 전사")');
     await win.waitForTimeout(400);
-    ok(await win.locator('.modal-card:has-text("URL 에서 받아 전사")').count() === 1,
+    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 1,
       '주소가 비면 창이 닫히지 않는다(실수로 실행되지 않는다)');
+
+    // [7-b] 📋 링크 붙여넣기 — 클립보드에 주소가 없으면 받지 않고 창을 그대로 둔다(네트워크 안 씀)
+    await app.evaluate(({ clipboard }) => clipboard.writeText('주소가 아닌 그냥 글'));
+    const pasteBtn = win.locator('.modal-card:has-text("대본다운") button:has-text("📋 링크 붙여넣기")');
+    ok(await pasteBtn.count() === 1, '「📋 링크 붙여넣기」 버튼이 있다');
+    const mb = await win.locator('.modal-card:has-text("대본다운") .mbtns button').allTextContents();
+    ok(mb[0].includes('링크 붙여넣기') && mb[1].includes('받아서 전사'), `「받아서 전사」 앞에 있다 (${mb.join(' | ')})`);
+    await pasteBtn.click();
+    await win.waitForTimeout(400);
+    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 1, '클립보드에 주소가 없으면 받지 않는다(창 유지)');
+    ok((await win.locator('.modal-card:has-text("대본다운") textarea').inputValue()) === '', '엉뚱한 글을 칸에 넣지 않는다');
 
     // [8] ESC 로 닫힌다
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
-    ok(await win.locator('.modal-card:has-text("URL 에서 받아 전사")').count() === 0, 'ESC 로 닫힌다');
+    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 0, 'ESC 로 닫힌다');
 
     // [9] 채널편집 → 📁 폴더 에 다운로드 폴더 칸
     // ⚠ 「⚙」 로 뭉뚱그려 찾으면 첫 줄 「⚙ 설정」(통합 설정)이 먼저 잡힌다(2026-09-16 ⚙ 설정이 앞으로 옮겨짐).

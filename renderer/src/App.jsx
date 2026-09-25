@@ -846,6 +846,17 @@ export default function App() {
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
     finally { setUrlBusy(false); }
   }
+  // 📋 링크 붙여넣기 — 클립보드의 주소를 칸에 넣고 곧바로 받는다(로이 2026-09-26).
+  //   🔑 클립보드는 main 에서 읽는다(렌더러 navigator.clipboard 는 창 포커스·권한에 따라 조용히 실패한다).
+  //   주소가 없으면 받지 않고 창을 그대로 둔다 — 엉뚱한 글이 복사돼 있어도 아무것도 시작하지 않는다.
+  async function pasteAndRunUrlDl() {
+    let text = '';
+    try { text = String((await api.readClipboardText()) || ''); } catch {}
+    const urls = text.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+    if (!urls.length) { logline('클립보드에 주소가 없습니다 — 유튜브 주소를 복사한 뒤 다시 눌러 주세요'); setStatus('클립보드에 주소 없음'); return; }
+    if (urlTextRef.current) urlTextRef.current.value = urls.join('\n');
+    await runUrlDl();
+  }
   async function updateYtdlp() {
     setUrlBusy(true);
     try {
@@ -3438,7 +3449,7 @@ export default function App() {
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
             <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}><span className="rb-ic">🎧</span> <span className="rb-t">STT</span></button>
             <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}><span className="rb-ic">🎵</span> <span className="rb-t">mp3</span></button>
-            <button className="ghost" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 mp3(또는 영상)를 받아 바로 전사합니다 — 자막이 있으면 STT 없이 자막을 씁니다" onClick={openUrlDl}><span className="rb-ic">🔗</span> <span className="rb-t">URL</span></button>
+            {/* 🔗 URL 버튼은 리본 오른쪽 끝 「📄 대본 보기」 바로 앞으로 옮기고 이름을 「📥 대본다운」으로 바꿨다(로이 2026-09-26). */}
             <span className="hdiv" />
             {/* 「저장·불러오기」 버튼들(작업저장·작업열기·큐저장·큐열기·전체삭제)은 화면에서만 뺐다 (2026-09-16).
                 근거: ~/.priming-maker/saves 가 0개 = 한 번도 쓴 적이 없다. 작업물은 자동저장이 늘 이어받는다
@@ -3598,6 +3609,8 @@ export default function App() {
             )}
             {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
             <span className="hgroup rb-reader">
+              {/* 📥 대본다운 — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞 · 이름·그림 변경). 대본이 없어도 쓴다(받는 중만 막힘). */}
+              <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 영상 대본을 받습니다 — 자막이 있으면 자막을 그대로 쓰고(GPU 0), 없으면 음성을 받아 STT 로 전사합니다" onClick={openUrlDl}><span className="rb-ic">📥</span> <span className="rb-t">대본다운</span></button>
               <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
             </span>
           </div>
@@ -4618,7 +4631,7 @@ export default function App() {
       {urlOpen && (
         <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 640 }}>
-            <h3>🔗 URL 에서 받아 전사</h3>
+            <h3>📥 대본다운</h3>
             <div className="meta" style={{ marginBottom: 8 }}>
               유튜브·비메오·틱톡·인스타 등의 <b>주소를 한 줄에 하나씩</b> 붙여넣으세요(여러 개 가능).
               <br />저장 위치 = 채널의 <b>다운로드 폴더</b>(⚙ 채널편집 → 📁 폴더). 비어 있으면 받을 때 물어봅니다.
@@ -4628,7 +4641,7 @@ export default function App() {
               style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
             <label className="chk" style={{ marginTop: 8, display: 'block' }}>
               <input type="checkbox" checked={urlChannelAll} onChange={(e) => setUrlChannelAll(e.target.checked)} />
-              {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(채널별 폴더 · 이미 완료한 영상은 건너뜀)
+              {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(영상 주소를 넣어도 그 영상의 채널 전체 · 받기 전에 편수를 묻습니다 · 채널별 폴더 · 이미 완료한 영상은 건너뜀)
             </label>
             <div className="frow" style={{ marginTop: 10 }}>
               <label>받을 것</label>
@@ -4658,6 +4671,7 @@ export default function App() {
               </div>
             </div>
             <div className="mbtns">
+              <button className="ghost" disabled={urlBusy} title="복사해 둔 주소를 붙여넣고 바로 받습니다 — 위 체크(채널 전체)·받을 것 설정을 그대로 따릅니다" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
               <button disabled={urlBusy} onClick={runUrlDl}>{urlChannelAll ? '채널 전체 받아서 전사' : '받아서 전사'}</button>
               <button className="ghost" onClick={() => setUrlOpen(false)}>취소</button>
             </div>

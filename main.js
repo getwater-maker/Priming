@@ -1066,6 +1066,11 @@ ipcMain.handle('ytdlp-status', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
+// 📋 대본다운 「링크 붙여넣기」 — 클립보드 글을 main 에서 읽는다(렌더러 navigator.clipboard 는 포커스·권한에 따라 조용히 실패).
+ipcMain.handle('clipboard-read-text', () => {
+  try { return require('electron').clipboard.readText() || ''; } catch { return ''; }
+});
+
 ipcMain.handle('ytdlp-update', async () => {
   const MD = require('./core/media-download');
   try {
@@ -1164,6 +1169,22 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         } catch (e) {
           log(`  ✗ 채널 목록 실패: ${e.message}`);
           results.push({ url: channelUrl, ok: false, error: e.message });
+        }
+      }
+      // 🔴 채널 전체는 편수를 보여 주고 한 번 묻는다(2026-09-26) — 「📋 링크 붙여넣기」는 누르자마자 시작하고,
+      //   체크가 켜진 채 영상 주소를 붙여넣으면 그 채널 전체(실측 505편)가 확인 없이 시작됐다.
+      if (jobs.length && !S.abort && !process.env.PM_UI_SMOKE) {
+        const names = [...new Set(jobs.map((j) => j.channelTitle))].join(' · ');
+        const ans = await dialog.showMessageBox(win, {
+          type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
+          title: '채널 전체 받기',
+          message: `「${names}」 일반 영상 ${jobs.length}편을 받아 전사합니다.`,
+          detail: '이미 전사한 영상은 건너뜁니다. 한 편만 받으려면 취소하고 「채널 전체」 체크를 끄세요.',
+        });
+        if (ans.response !== 0) {
+          log('⏹ 채널 전체 받기 취소');
+          prog.phase = 'done'; prog.okN = 0; prog.endedAt = Date.now(); sendProg(true);
+          return { ok: false, canceled: true };
         }
       }
     } else {
