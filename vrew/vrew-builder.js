@@ -1100,7 +1100,11 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   // 🔝 위층 그림·영상 — 문장 → [오버레이 순번](아래 → 위)
   const _ovProj = { groups, sentences, overlays: opts.overlays || [] };
   const _ovAid = await addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);
-  const _ovBy = _ovAid.size ? require('../core/overlay-layers').bySentence(_ovProj) : new Map();
+  const _OL = require('../core/overlay-layers');
+  const _ovBy = _ovAid.size ? _OL.bySentence(_ovProj) : new Map();
+  // ➕ 클립(자막 줄) 단위 범위(v0.5.65) — 문장 순번·범위를 미리 재 둔다(줄마다 clipIn 으로 거른다)
+  const _ovCtx = _ovAid.size ? _VS.orderOf(_ovProj) : null;
+  const _ovR = _ovCtx ? _ovProj.overlays.map((ov) => _OL.rangeOf(_ovProj, ov, _ovCtx)) : [];
 
   // ---------- 2. sentence 루프 ----------
   let imageGroupCount = groupImageAsset.size;
@@ -1182,8 +1186,15 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     const totalWeight = subClips.reduce((sum, c) => sum + (c.weight || 1), 0) || 1;
 
     // 🖼 이 문장을 덮는 그림 전부(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 이어진 그림(샘플.vrew: 한 자산이 여러 클립 · zIndex 로 쌓임)
-    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid)
-      .concat((_ovBy.get(s.id) || []).map((i) => _ovAid.get(i)).filter(Boolean));
+    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid);
+    const _ovHere = _ovBy.get(s.id) || [];
+    const _sOrd = _ovCtx ? _ovCtx.pos.get(s.id) : -1;
+    const _sLen = String(s.text || '').length;
+    // 이 줄(sub-clip)에 걸 삽입 자산 — 범위의 첫·끝 문장에서는 글자 위치로 줄을 거른다
+    const ovAssetsFor = (vc) => {
+      const rg = vc.range || { from: 0, to: _sLen };
+      return _ovHere.filter((i) => _OL.coversLine(_ovProj.overlays[i], _ovR[i], _sOrd, rg.from, rg.to)).map((i) => _ovAid.get(i)).filter(Boolean);
+    };
 
     let acc = 0;
     for (let i = 0; i < subClips.length; i++) {
@@ -1281,7 +1292,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
             { text: [{ insert: '\n', attributes: CF.fmtToVrewAttrs(baseFmt) }], style: { ...st, customAttributes: st.customAttributes.map((a) => ({ ...a })) } },
           ];
         })(),
-        assetIds: [...clipAssetIds],
+        assetIds: [...clipAssetIds, ...ovAssetsFor(vc)],
         dirty: { blankDeleted: false, caption: false, video: false },
         translationModified: { result: false, source: false },
       });

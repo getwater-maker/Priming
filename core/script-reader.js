@@ -7,7 +7,8 @@
  *   ⚠ 렌더러 번들에도 들어간다 — 정적 require('./yt-chapters') 외의 CJS 런타임 참조(typeof require 등)를 두지 말 것(v0.3.40 백지 화면 사고).
  *
  * 입력 = DTO 한 편(pr.title · cuts[].h2/phase/num/sentences[].text/speaker/mark). 이미지·영상 프롬프트·메타는 넣지 않는다.
- * 블록: {t:'h1'|'h2'|'h3', text} · {t:'p', groupNum, sents:[{i, text, speaker}]}
+ * 블록: {t:'h1'|'h2'|'h3', text} · {t:'note', text} · {t:'p', groupNum, sents:[{i, text, speaker}]}
+ *   note = 대본의 `> 📝 …` 제작 메모(낭독 제외 · 파서 readerNotes) — 그 장(H2) 제목 바로 아래. notes:false 면 뺀다(v0.5.66).
  *   i = 그 그룹 안 문장 번호(0부터) — 화면에서 고칠 때 edit-sentences 가 쓰는 주소와 같다.
  */
 
@@ -17,15 +18,24 @@ const { tsCleanTitle: cleanHead } = require('./yt-chapters');
 const { MATCH_PATTERNS } = require('./sentence-splitter');
 
 /** 한 편(DTO) → 읽기 블록 */
-function readerBlocks(pr, { headings = true } = {}) {
+function readerBlocks(pr, { headings = true, notes = true } = {}) {
   const out = [];
   if (!pr) return out;
   if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim() });
   let lastH2 = '', lastH3 = '';
+  const noteMap = new Map();   // 장 제목(정리한 것) → 메모들 · 한 장의 메모는 한 번만 싣는다
+  if (notes) for (const n of (pr.readerNotes || [])) {
+    const k = cleanHead(n.h2), t = String(n.text || '').trim();
+    if (k && t) { if (!noteMap.has(k)) noteMap.set(k, []); noteMap.get(k).push(t); }
+  }
   // `##`(H2 = 장 제목)은 언제나 보인다. headings 는 **섹션 제목(### = H3)** 만 켜고 끈다(로이 2026-09-25 — 기본 끔).
   const head = (h2raw, phraw) => {
     const h2 = cleanHead(h2raw), h3 = cleanHead(phraw);
-    if (h2 && h2 !== lastH2) { out.push({ t: 'h2', text: h2 }); lastH2 = h2; lastH3 = ''; }
+    if (h2 && h2 !== lastH2) {
+      out.push({ t: 'h2', text: h2 }); lastH2 = h2; lastH3 = '';
+      for (const text of (noteMap.get(h2) || [])) out.push({ t: 'note', text });
+      noteMap.delete(h2);
+    }
     if (headings && h3 && h3 !== lastH3 && h3 !== lastH2) { out.push({ t: 'h3', text: h3 }); lastH3 = h3; }
   };
   for (const c of (pr.cuts || [])) {
@@ -164,6 +174,7 @@ function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
     if (b.t === 'h1') return `<h1>${esc(b.text)}</h1>`;
     if (b.t === 'h2') return `<h2>${esc(b.text)}</h2>`;
     if (b.t === 'h3') return `<h3>${esc(b.text)}</h3>`;
+    if (b.t === 'note') return `<div class="note">📝 ${esc(b.text)}</div>`;
     const inner = b.sents.map((s) => (s.speaker ? `<b class="spk">${esc(s.speaker)}</b> ` : '') + esc(s.text)).join(' ');
     return `<p>${groupNums ? `<span class="gn">G${b.groupNum}</span>` : ''}${inner}</p>`;
   }).join('\n');
@@ -177,6 +188,7 @@ h2 { font-size: ${(f * 1.25).toFixed(1)}pt; margin: ${(f * 1.6).toFixed(1)}pt 0 
 h3 { font-size: ${(f * 1.02).toFixed(1)}pt; color: #6b5a47; margin: ${(f * 1.0).toFixed(1)}pt 0 ${(f * 0.3).toFixed(1)}pt; break-after: avoid; }
 p { margin: 0 0 ${(f * 0.75).toFixed(1)}pt; text-align: left; orphans: 2; widows: 2; }
 .spk { color: #8a4b1f; }
+.note { font-size: 0.82em; line-height: 1.55; color: #5b6470; background: #f3f5f8; border-left: 3pt solid #9fb0c4; padding: ${(f * 0.35).toFixed(1)}pt ${(f * 0.6).toFixed(1)}pt; margin: 0 0 ${(f * 0.6).toFixed(1)}pt; break-inside: avoid; }
 .gn { display: inline-block; min-width: 2.6em; color: #a89682; font-size: 0.78em; font-weight: 700; }
 </style></head><body>
 ${body}

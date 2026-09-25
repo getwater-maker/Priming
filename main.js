@@ -6488,7 +6488,9 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
   const list = pr.overlays || (pr.overlays = []);
   const op = args.op;
   const KIND = { image: ['그림', ['png', 'jpg', 'jpeg', 'webp']], video: ['영상', ['mp4', 'mov', 'webm', 'm4v']], audio: ['오디오', ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg']] };
-  const rangeTxt = (ids) => { const r = OL.rangeOf(pr, ids); const n = pr.sentences.length; return r ? (r.a === 0 && r.b === n - 1 ? '전체' : `클립(문장) ${r.a + 1}~${r.b + 1}`) : '?'; };
+  const rangeTxt = (ids) => { const r = OL.rangeOf(pr, ids); const n = pr.sentences.length; if (!r) return '?';
+    if (r.a === 0 && r.b === n - 1 && !(ids.sc > 0) && ids.ec == null) return '전체';
+    return `문장 ${r.a + 1}${ids.sc > 0 ? `(${ids.sc}자~)` : ''}~${r.b + 1}${ids.ec != null ? `(~${ids.ec}자 줄)` : ''}`; };
   if (op === 'add') {
     let file = args.file;
     if (!file) {
@@ -6500,7 +6502,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
     }
     const kind = OL.kindOf(file);
     if (!kind) return { ok: false, error: '그림(png·jpg·webp) · 영상(mp4·mov·webm) · 오디오(mp3·wav·m4a) 파일이어야 합니다' };
-    const ids = OL.idsFromOrds(pr, args.from, args.to);
+    const ids = OL.idsFromOrds(pr, args.from, args.to, args.sc, args.ec);
     if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
     // 작업 폴더로 복사(원본을 옮기거나 지워도 끊기지 않게) — media-N/overlays/ (그룹 그림 정리·번호 매기기와 섞이지 않는 하위 폴더)
     const id = 'ov' + Date.now().toString(36);
@@ -6512,7 +6514,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       fs.copyFileSync(file, dst);
     } catch (e) { dst = file; log('⚠ 삽입 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
     undoPush('삽입');
-    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}), ...ids });
+    { const ov = { id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}) }; OL.applyIds(ov, ids); list.push(ov); }
     log(`➕ ${prLabel(pr)} ${KIND[kind][0]} 삽입 — ${path.basename(file)} · ${rangeTxt(ids)}`);
     storeActive(); pushDtoUpdate();
     return { ok: true, id, dto: P.toDTO(S.parsed) };
@@ -6520,8 +6522,8 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
     const ov = list.find((o) => o.id === args.id);
     if (!ov) return { ok: false, error: '위층을 찾지 못했습니다' };
     if (op === 'range') {
-      const ids = OL.idsFromOrds(pr, args.from, args.to); if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
-      undoPush('삽입 범위'); Object.assign(ov, ids); delete ov.once;   // 사람이 범위를 고르면 「1회 재생」은 풀린다(다시 반복)
+      const ids = OL.idsFromOrds(pr, args.from, args.to, args.sc, args.ec); if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
+      undoPush('삽입 범위'); OL.applyIds(ov, ids); delete ov.once;   // 사람이 범위를 고르면 「1회 재생」은 풀린다(다시 반복)
       log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 범위 → ${rangeTxt(ids)}`);
     } else if (op === 'once') {
       // 🎵 오디오 1회 재생까지(v0.5.59) — 시작 클립은 그대로, 끝 = 소리 길이만큼 흐른 클립 · 반복하지 않는다(끝나면 멈춘다)
@@ -6537,12 +6539,12 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       for (; k < c.order.length; k++) {
         const se = byId.get(c.order[k]);
         let d = se && se.ttsDurationSec > 0 ? se.ttsDurationSec : 0;
-        if (!d) { d = Math.max(1, String((se && se.text) || '').replace(/s/g, '').length * 0.18); est++; }
+        if (!d) { d = Math.max(1, String((se && se.text) || '').replace(/\s/g, '').length * 0.18); est++; }
         t += d;
         if (t >= dur - 0.05) break;
       }
       k = Math.min(k, c.order.length - 1);
-      undoPush('삽입 1회 재생'); ov.startId = c.order[r.a]; ov.endId = c.order[k]; ov.once = true;
+      undoPush('삽입 1회 재생'); ov.startId = c.order[r.a]; ov.endId = c.order[k]; delete ov.ec; ov.once = true;   // 시작 클립(sc)은 그대로 · 끝은 문장 끝
       const mm = Math.floor(dur / 60), ss = Math.round(dur % 60);
       log(`🎵 ${prLabel(pr)} ${ov.name || path.basename(ov.file)} — 1회 재생(${mm}분 ${ss}초) → 클립 ${r.a + 1}~${k + 1}${t < dur - 0.05 ? ' · ⚠ 편 끝까지 가도 소리가 남습니다' : ''}${est ? ` · 음성 없는 문장 ${est}개는 글자수로 어림` : ''}`);
       storeActive(); pushDtoUpdate();

@@ -10,6 +10,17 @@
  *   ⚠ 렌더러 번들에 들어갈 수 있다 — CJS 런타임 참조 금지.
  */
 
+/**
+ * ➕ 클립(자막 줄) 단위 범위(v0.5.65) — 문장 순번 a~b + 첫 문장 안 글자 sc(그 글자가 든 줄부터) + 끝 문장 안 글자 ec(그 글자가 든 줄까지).
+ *   sc 가 없거나 0 이면 첫 문장 처음부터 · ec 가 없으면 끝 문장 끝까지. 글자 위치로 저장하므로 자막 글자수를 바꿔 줄이 다시 나뉘어도 그 글자를 따라간다.
+ *   k = 이 줄의 문장 순번(a·b 와 같은 기준) · lf~lt = 이 줄의 문장 안 글자 범위.
+ */
+function clipIn(a, sc, b, ec, k, lf, lt) {
+  if (k < a || k > b) return false;
+  if (k === a && sc > 0 && lt <= sc) return false;
+  if (k === b && ec != null && ec >= 0 && lf > ec) return false;
+  return true;
+}
 function orderOf(project) {
   const order = [], pos = new Map(), owner = new Map();
   (project.groups || []).forEach((g, gi) => {
@@ -115,4 +126,4 @@ function spanFromOrd(project, g, o) {
   if (s.startId || s.endId) g.visSpan = s;
 }
 
-module.exports = { orderOf, effRange, stackRanks, groupRanks, layersBySentence, markCovered, remapSpanIds, spanToOrd, spanFromOrd };
+module.exports = { clipIn, orderOf, effRange, stackRanks, groupRanks, layersBySentence, markCovered, remapSpanIds, spanToOrd, spanFromOrd };

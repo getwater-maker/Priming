@@ -72,5 +72,30 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 ok(/outReader: p\.outReader \|\| ''/.test(app) && /outReader: \(ch\.outReader \|\| ''\)\.trim\(\)/.test(app), '🔑 채널편집이 outReader 를 싣고 저장한다(안 실으면 덮인다)');
 ok(/<label>대본 PDF<\/label>/.test(app) && /pickOutReader/.test(app), '📁 폴더 탭에 「대본 PDF」 칸 + 찾기');
 
+console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제목 아래에만(v0.5.66)');
+{
+  const { parseLongform } = require('../core/parsers/longform-parser');
+  const P = require('../core/pipeline');
+  const md = [
+    '# 제목', '> 📝 **[주석 · 낭독 제외]** 머리말 메모입니다.', '',
+    '## 도입부', '> 📝 **[강의안 근거 · 낭독 제외]** 도입 근거입니다.', '', '### 샷 1 첫 장면', '첫 문장입니다. 둘째 문장입니다.', '',
+    '## 첫 장', '> 📝 **[강의안 근거 · 낭독 제외]** 첫 장 근거입니다.', '> 🖼️ 이미지: 그림 설명', '본문 문장입니다. 또 문장입니다.', '',
+    '```', '## 코드 안', '> 📝 가짜 메모', '```', '',
+    '## 마무리', '마지막 문장입니다.',
+  ].join('\n');
+  const r = parseLongform(md, 'x');
+  const pr = P.toDTO(r).projects[0];
+  ok(eq(pr.readerNotes.map((n) => n.text), ['[강의안 근거 · 낭독 제외] 도입 근거입니다.', '[강의안 근거 · 낭독 제외] 첫 장 근거입니다.']), '머리말(H2 앞)·코드펜스 안은 빼고 **굵게** 표시는 벗긴다');
+  const b = R.readerBlocks(pr);
+  const at = (t) => b.findIndex((x) => x.t === 'h2' && x.text === t);
+  ok(at('도입부') >= 0 && b[at('도입부') + 1].t === 'note' && b[at('첫 장') + 1].t === 'note', '메모는 그 장 제목 바로 다음 블록');
+  ok(b.filter((x) => x.t === 'note').length === 2, '메모 없는 장엔 아무것도 안 붙는다');
+  const b0 = R.readerBlocks(pr, { notes: false });
+  ok(!b0.some((x) => x.t === 'note') && eq(b0, b.filter((x) => x.t !== 'note')), 'notes:false = 메모만 빠지고 나머지 블록은 같다');
+  ok(!r.projects[0].sentences.some((s) => /근거|메모/.test(s.text)), '🔑 메모는 낭독(문장)에 들어가지 않는다');
+  ok(/class="note">📝 \[강의안 근거/.test(R.readerHtml(b)), 'A4 PDF HTML 에도 메모 칸');
+  ok(/b\.t === 'note'\) \{ html \+= `<div \$\{NE\}/.test(jsx), '화면의 메모 칸은 고칠 수 없는 칸(data-ne) — 문단 편집에 섞이지 않는다');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 대본 보기 문단 편집 ${pass}/${pass + fail}\n`);
 process.exit(fail ? 1 : 0);

@@ -81,6 +81,7 @@ function toDTO(parseResult) {
         voice: pr.voice,
         aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지를 보일 문장 범위(없으면 채널 기본 = 5초 뒤 5초)
         logoSide: pr.logoSide === 'left' ? 'left' : 'right',   // 🏷 이 대본 로고 자리
+        readerNotes: (pr.readerNotes && pr.readerNotes.length) ? pr.readerNotes : null,   // 📝 대본 읽기 전용 메모(장 제목 아래)
         overlays: (() => { const L = require('./overlay-layers').toDTO(pr); return L.map((o) => ({ ...o, version: (() => { try { const st = fs.statSync(o.file); return Math.trunc(st.mtimeMs) + '-' + st.size; } catch { return ''; } })() })); })(),   // 🔝 위층 그림·영상
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);

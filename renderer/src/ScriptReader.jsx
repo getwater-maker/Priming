@@ -20,6 +20,7 @@ const H_STYLE = {
   h1: 'font-size:1.55em;line-height:1.35;margin:0 0 0.9em;padding-bottom:0.4em;border-bottom:2px solid #333',
   h2: 'font-size:1.22em;margin:1.6em 0 0.4em',
   h3: 'font-size:1em;color:#6b5a47;margin:1.1em 0 0.25em',
+  note: 'font-size:0.8em;line-height:1.55;color:#5b6470;background:#f3f5f8;border-left:3px solid #9fb0c4;border-radius:4px;padding:0.45em 0.75em;margin:0 0 0.8em;user-select:text',
 };
 // 고칠 수 없는 조각(제목·화자 이름·그룹 번호) = data-ne. 글을 읽을 때 건너뛴다. 이름 칩의 뒤 공백도 칩 안에 둔다
 //   → 읽은 글 = 문장들을 공백 하나로 이은 글(joinParagraph)과 정확히 같다.
@@ -29,11 +30,12 @@ function paraInner(sents, groupNum, groupNums) {
     + sents.map((s, k) => (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
       + escHtml(s.text) + (k < sents.length - 1 ? ' ' : '')).join('');
 }
-function docModel(dto, headings, groupNums) {
+function docModel(dto, headings, groupNums, notes) {
   const paras = [];
   let html = '';
   for (const pr of ((dto && dto.projects) || [])) {
-    for (const b of sr.readerBlocks(pr, { headings })) {
+    for (const b of sr.readerBlocks(pr, { headings, notes })) {
+      if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">📝 ${escHtml(b.text)}</div>`; continue; }
       if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}</${b.t}>`; continue; }
       const key = 'p' + paras.length;
       paras.push({ key, shortsNum: pr.shortsNum, groupNum: b.groupNum, base: b.sents, last: sr.joinParagraph(b.sents.map((s) => s.text)), dirty: false });
@@ -102,6 +104,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const [fontPx, setFontPx] = useState(17);
   const [headings, setHeadings] = useState(false);   // 섹션 제목(###) — 기본 끔. ## 장 제목은 언제나 보인다
   const [groupNums, setGroupNums] = useState(false);
+  const [notes, setNotes] = useState(true);   // 📝 제작 메모(`> 📝 …` · 낭독 제외) — 기본 켬(로이 2026-09-26 「대본읽기에서 설명을 보고 싶다」)
   const [perSheet, setPerSheet] = useState(1);
   const [fontPt, setFontPt] = useState(11);
   const [busy, setBusy] = useState(false);
@@ -112,7 +115,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const parasRef = useRef(new Map());              // key → {shortsNum, groupNum, base, last, dirty}
   const neCountRef = useRef(0);
   const dtoRef = useRef(dto); dtoRef.current = dto;
-  const optRef = useRef({ headings, groupNums }); optRef.current = { headings, groupNums };
+  const optRef = useRef({ headings, groupNums, notes }); optRef.current = { headings, groupNums, notes };
   const st = useRef({ composing: false, saving: false, pending: false, timer: null, needRebuild: false, caret: null, lastErr: false, extReload: false });
 
   const projects = (dto && dto.projects) || [];
@@ -124,7 +127,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   function rebuild(d = dtoRef.current) {
     const root = docRef.current;
     st.current.caret = root && document.activeElement === root ? caretOf(root) : null;
-    const m = docModel(d, optRef.current.headings, optRef.current.groupNums);
+    const m = docModel(d, optRef.current.headings, optRef.current.groupNums, optRef.current.notes);
     parasRef.current = new Map(m.paras.map((p) => [p.key, p]));
     st.current.needRebuild = false;
     setDocHtml(m.html);
@@ -137,7 +140,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     if (c && c.idx >= 0) { const p = root.querySelectorAll('p[data-key]')[c.idx]; if (p) { root.focus(); placeCaret(p, c.off); } }
   }, [docHtml]);
   // 처음 · 섹션 제목/그룹 번호 토글 → 저장을 끝낸 뒤 다시 그린다
-  useEffect(() => { (async () => { await settle(); rebuild(); })(); }, [headings, groupNums]);
+  useEffect(() => { (async () => { await settle(); rebuild(); })(); }, [headings, groupNums, notes]);
   // 바깥에서 대본이 바뀌면(음성 생성 등) 편집 중이 아닐 때만 새로 그린다
   useEffect(() => { if (docHtml && !busyNow() && document.activeElement !== docRef.current) rebuild(); }, [dto]);
 
@@ -276,7 +279,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     await settle();
     setBusy(true); setMsg('⏳ A4 PDF 만드는 중…');
     try {
-      const r = await api.scriptReaderPdf({ perSheet, fontPt, headings, groupNums, presetName: presetName || null });
+      const r = await api.scriptReaderPdf({ perSheet, fontPt, headings, groupNums, notes, presetName: presetName || null });
       setMsg(`✓ A4 ${r.pages}쪽${r.perSheet > 1 ? ` → 한 장에 ${r.perSheet}쪽 · ${r.sheets}장` : ''} — 열린 PDF 에서 인쇄하세요 (${r.path})`);
     } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
     finally { setBusy(false); }
@@ -296,6 +299,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           <button className="ghost" style={{ padding: '3px 9px' }} onClick={() => setFontPx((f) => Math.min(28, f + 1))}>＋</button>
           <label className="chk" data-testid="reader-headings" title="섹션 제목(### 소제목)을 보입니다 — ## 장 제목은 언제나 보입니다. A4 PDF 에도 같이 적용됩니다" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={headings} onChange={(e) => setHeadings(e.target.checked)} />섹션 제목</label>
           <label className="chk" title="문단 앞에 그룹 번호(G3)를 작게 표시 — 앱 화면과 대조할 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={groupNums} onChange={(e) => setGroupNums(e.target.checked)} />그룹 번호</label>
+          <label className="chk" data-testid="reader-notes" title="대본의 📝 제작 메모(강의안 근거 등 · 낭독 제외)를 장 제목 아래에 보입니다 — 고칠 수 없는 칸입니다" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={notes} onChange={(e) => setNotes(e.target.checked)} />📝 메모</label>
           <span className="hdiv" />
           <span className="meta">A4 · 한 장에</span>
           <select value={perSheet} style={{ flex: '0 0 auto', width: 'auto' }} onChange={(e) => setPerSheet(Number(e.target.value))} title="한 장(A4)에 몇 쪽을 모아 찍을지 — 2·6쪽은 가로, 4·9쪽은 세로 용지">

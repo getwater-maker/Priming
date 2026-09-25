@@ -33,9 +33,11 @@ export function buildProjLines(pr, capChars) {
   const list = [];
   const bySent = new Map();
   let n = 0;
+  let so = 0;   // 편 전체 문장 번호(1부터) — 줄마다 ord 로 싣는다(➕ 클립 단위 삽입 범위 · v0.5.65)
   let t0 = 0;   // 🕒 편 시작부터의 누적 시각(초) — 문장 음성 길이의 합. 줄은 문장 안에서 **글자수 비례**(.vrew 빌더·미리보기 재생과 같은 규칙)
   (pr && pr.cuts ? pr.cuts : []).forEach((c, ci) => {
     (c.sentences || []).forEach((s, si) => {
+      const ord = ++so;
       const lt = splitLines(s.text, capChars, s.breaks);
       const rg = CF.lineRanges(s.text || '', lt);
       const dur = Number(s.dur) > 0 ? Number(s.dur) : 0;
@@ -43,7 +45,7 @@ export function buildProjLines(pr, capChars) {
       let acc = 0;
       const lines = lt.map((t, li) => {
         const w = Math.max(1, mLen(t));
-        const o = { n: ++n, t, range: rg[li], groupNum: c.num, sentIdx: si, from: rg[li].from, to: rg[li].to, ci,
+        const o = { n: ++n, t, range: rg[li], groupNum: c.num, sentIdx: si, from: rg[li].from, to: rg[li].to, ci, ord,
           start: dur ? t0 + dur * acc / tot : null, dur: dur ? dur * w / tot : null, speaker: s.speaker || null };
         acc += w;
         return o;

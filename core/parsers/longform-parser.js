@@ -75,8 +75,25 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   // 🖼 `> 🖼️ 이미지: 이어서` — 그 H3 를 앞 그룹에 합쳐 **같은 그림**을 이어 쓴다(core/group-merge).
   //   표식이 없는 대본은 한 글자도 안 바뀐다(레거시 대본 무영향).
   proj.continueInfo = require('../group-merge').applyContinueMarkers(proj);
+  // 📝 `> 📝 …` 제작 메모(낭독 제외) — 📄 대본 읽기에서만 그 장 제목 아래에 보인다(TTS·그룹·자막 무관 · v0.5.66)
+  proj.readerNotes = readerNotesOf(raw);
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
+}
+
+/** `## 장` 아래의 `> 📝 …` 줄 → [{h2, text}] (H2 앞 머리말 메모는 넣지 않는다 — 대본 전체 주석이라 읽기엔 소음) */
+function readerNotesOf(raw) {
+  const out = [];
+  let h2 = null, fence = false;
+  for (const line of String(raw || '').split('\n')) {
+    if (/^\s*```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    const h = line.match(/^##\s+(.+?)\s*$/);
+    if (h) { h2 = h[1]; continue; }
+    const m = h2 != null && line.match(/^\s*>\s*📝\s*(.+?)\s*$/u);
+    if (m) out.push({ h2, text: m[1].replace(/\*\*/g, '').trim() });
+  }
+  return out;
 }
 
 function parseLongformFile(filePath, thresholds = {}) {
@@ -84,4 +101,4 @@ function parseLongformFile(filePath, thresholds = {}) {
   return parseLongform(fs.readFileSync(filePath, 'utf8'), fallback, thresholds);
 }
 
-module.exports = { parseLongform, parseLongformFile };
+module.exports = { parseLongform, parseLongformFile, readerNotesOf };
