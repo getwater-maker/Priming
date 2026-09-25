@@ -8,6 +8,7 @@ const P = require('../core/pipeline');
 const R = require('../core/vrew-render');
 const OL = require('../core/overlay-layers');
 const FF = require('../core/media-utils').getFfmpegPath();
+const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입니다.\n### 둘\n둘째 문장입니다.\n', 'longform', {}).projects[0];
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ovlogo-'));
@@ -21,7 +22,8 @@ const FF = require('../core/media-utils').getFfmpegPath();
     ok(Math.abs(l1.x - 0.025) < 1e-9, '왼쪽 위');
     ok(!OL.logoOptsOf({ logoOn: false, logoPath: 'x.png' }).enabled && !OL.logoOptsOf({ logoOn: true }).enabled, '꺼져 있거나 파일이 없으면 끔');
     const lo = OL.logoOptsOf({ logoOn: true, logoPath: 'x.png', logoSide: 'left', logoSize: 99 });
-    ok(lo.enabled && lo.side === 'left' && lo.size === 0.4, '크기 상한 40%');
+    ok(lo.enabled && lo.side === 'right' && lo.size === 0.4, '크기 상한 40% · 채널 로고 자리 기본 = 오른쪽 위(자리는 대본마다)');
+    ok(OL.idsFromOrds(pr0(), 2, 99).endId && OL.kindOf('x.MP3') === 'audio' && OL.normVol('') === 30 && OL.normVol(0) === 0, '클립 번호 범위 · 오디오 종류 · 음량 기본 30%');
     ok(OL.logoOptsOf({ logoOn: true, logoPath: 'x.png' }, () => false).missing === 'x.png', '파일이 사라졌으면 알린다');
 
     console.log('\n[2] 범위 — 그룹으로 고르고 문장 id 로 저장');
@@ -80,6 +82,33 @@ const FF = require('../core/media-utils').getFfmpegPath();
     ok(isR(px(fA, ...lcorner)), '🔑 로고 모서리는 투명 — 아래 빨강이 보인다(검은 네모가 아니다)');
     ok(isB(px(fB, 96, 54)) && isR(px(fB, 10, 60)), '🔑 G2: 가운데 🔝 파랑 · 가장자리는 그룹 그림 빨강');
     ok(isG(px(fB, lcx, lcy)), 'G2 에도 로고');
+
+    console.log('\n[4] 🎵 오디오 삽입(클립 2~3 · 음량 100%) · 🏷 이 대본 로고 = 왼쪽 위');
+    const tone = path.join(tmp, 'tone.wav');
+    execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-ac', '2', tone]);
+    pr.overlays = [{ id: 'a1', file: tone, kind: 'audio', volume: 100, ...OL.idsFromOrds(pr, 2, 3) }];
+    pr.logoSide = 'left';
+    const vrew2 = path.join(tmp, 'y.vrew');
+    await P.buildProjectVrew(pr, vrew2, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 }, logo: OL.logoOptsOf({ logoOn: true, logoPath: logo, logoSize: 12 }) }, () => {}, 20, 1);
+    const pj2 = JSON.parse(new AdmZip(vrew2).readAsText('project.json'));
+    const T2 = Object.values(pj2.props.tracks), A2 = pj2.props.assets;
+    const au = T2.find((t) => t.type === 'bgm');
+    const auAid = au && Object.keys(A2).find((k) => A2[k].trackIds.includes(au.trackId));
+    ok(au && Math.abs(au.volume - 1) < 1e-9 && au.loop === true, '오디오 = 배경음 트랙(type bgm · 음량 100% · 반복)');
+    ok(!pj2.transcript.clips[0].assetIds.includes(auAid) && pj2.transcript.clips.slice(1).every((c) => c.assetIds.includes(auAid)), '🔑 오디오는 클립 2~3 에만 걸린다');
+    const lg2 = T2.find((t) => t.zIndex === 2000);
+    ok(lg2 && Math.abs(lg2.xPos - 0.025) < 1e-9, '🏷 이 대본 로고 = 왼쪽 위');
+    const mp42 = path.join(tmp, 'y.mp4');
+    const res2 = await R.renderVrewToMp4({ vrewPath: vrew2, outPath: mp42, log: () => {}, par: 1 });
+    ok(res2 && res2.ok, '렌더 성공');
+    const volOf = (a, b) => { let err = ''; try { const r = require('child_process').spawnSync(FF, ['-hide_banner', '-ss', String(a), '-t', String(b - a), '-i', mp42, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }); err = r.stderr || ''; } catch (_) {} const m = err.match(/mean_volume:\s*(-?[\d.]+|-inf) dB/); return m ? (m[1] === '-inf' ? -200 : +m[1]) : -200; };
+    const q0 = volOf(0.1, s0 - 0.2), q1 = volOf(s0 + 0.6, s0 + s1 - 0.2);
+    console.log('   음량 dB', { G1: q0, G2: q1 });
+    ok(q0 < -60, `G1(오디오 범위 밖) = 조용 (${q0}dB)`);
+    ok(q1 > -35, `🔑 G2(범위 안) = 소리가 난다 (${q1}dB)`);
+    const fr2 = (t) => execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-vf', 'scale=192:108', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+    const lL = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1 });
+    ok(isG(px(fr2(s0 / 2), Math.round((lL.x + lL.w / 2) * 192), Math.round((lL.y + lL.h / 2) * 108))), 'MP4 에도 로고가 왼쪽 위');
   } catch (e) { ok(false, '왕복 실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} overlay-logo ${pass}/${pass + fail}`);

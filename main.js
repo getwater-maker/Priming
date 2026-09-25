@@ -65,7 +65,7 @@ function withLogo(preset, logger) {
   if (!preset) return preset;
   const lo = require('./core/overlay-layers').logoOptsOf(preset, (f) => { try { return fs.existsSync(f); } catch { return false; } });
   if (lo.missing && logger) logger(`⚠ 채널 로고 파일을 찾지 못했습니다 — ${lo.missing}. 로고 없이 만듭니다`);
-  else if (lo.enabled && logger) logger(`🏷 채널 로고: ${path.basename(lo.path)} · 위 ${lo.side === 'left' ? '왼쪽' : '오른쪽'} · 너비 ${Math.round(lo.size * 100)}%`);
+  else if (lo.enabled && logger) logger(`🏷 채널 로고: ${path.basename(lo.path)} · 너비 ${Math.round(lo.size * 100)}% (자리는 대본마다 — 기본 오른쪽 위)`);
   return { ...preset, logo: lo };
 }
 function resolveBgm(preset, scriptPath, logger) { return withLogo(_resolveBgm(preset, scriptPath, logger), logger); }
@@ -4842,7 +4842,8 @@ function buildSnapshot() {
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지 문장 범위
-      overlays: require('./core/overlay-layers').toSnap(pr),   // 🔝 위층 그림·영상(문장 순번)
+      overlays: require('./core/overlay-layers').toSnap(pr),   // ➕ 삽입(문장 순번)
+      logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -5007,7 +5008,8 @@ function projectsFromSnapshot(snap) {
     const proj = new Project({ sentences, groups });
     Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
     if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
-    require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // 🔝 위층 그림·영상
+    require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
+    if (ps.logoSide === 'left') proj.logoSide = 'left';
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
     return proj;
   });
@@ -5025,11 +5027,12 @@ function overlaySnapshot(parsed, snap) {
     for (const k of ['title', 'aspect', 'voice']) {
       if (ps[k] != null) pr[k] = ps[k];
     }
-    // 🔝 위층 그림·영상 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
+    if (ps.logoSide === 'left') pr.logoSide = 'left';   // 🏷 로고 자리
+    // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
     if (Array.isArray(ps.overlays) && ps.overlays.length) {
       const nOld = (ps.groups || []).reduce((a, g) => a + ((g.sentences || []).length), 0);
       if (nOld === pr.sentences.length) require('./core/overlay-layers').fromSnap(pr, ps.overlays);
-      else log(`⚠ 대본 문장 수가 바뀌어(${nOld} → ${pr.sentences.length}) 🔝 위층 그림 ${ps.overlays.length}개를 다시 걸어야 합니다`);
+      else log(`⚠ 대본 문장 수가 바뀌어(${nOld} → ${pr.sentences.length}) ➕ 삽입 ${ps.overlays.length}개를 다시 걸어야 합니다`);
     }
     const gmap = new Map(); (ps.groups || []).forEach((gs) => gmap.set(gs.num, gs));
     for (const g of pr.groups) {
@@ -6209,7 +6212,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })) });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -6250,6 +6253,7 @@ function _restoreState(st) {
     pr.sentences = sp.sentences.map(_cloneObj);
     pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
     pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
+    pr.logoSide = sp.logoSide || undefined;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -6463,29 +6467,41 @@ ipcMain.handle('set-group-look', (_e, args = {}) => {
   log('🖼 ' + prLabel(pr) + ' G' + g.num + ' 그림 — ' + VL.describe(next));
   return P.toDTO(S.parsed);
 });
-// 🔝 위층 그림·영상 — 특정 그룹 ~ 특정 그룹 동안 모든 그림 위에(v0.5.52). op = add | range | box | remove | order
+// 🏷 이 대본의 로고 자리(채널 로고가 켜져 있을 때) — right(기본) | left. 켜기·파일·크기는 채널 설정.
+ipcMain.handle('set-logo-side', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  undoPush('로고 위치');
+  pr.logoSide = args.side === 'left' ? 'left' : undefined;
+  storeActive(); pushDtoUpdate();
+  log('🏷 ' + prLabel(pr) + ' 로고 위치 → ' + (pr.logoSide === 'left' ? '왼쪽 위' : '오른쪽 위'));
+  return P.toDTO(S.parsed);
+});
+// ➕ 삽입 — 그림·영상·오디오를 정한 **클립(문장) 범위** 동안(v0.5.52 · 「삽입」 메뉴 v0.5.54). 그림·영상은 모든 그룹 그림 위층.
+//   op = add {kind, from, to}(문장 번호 1부터 · 비우면 전체) | range {from, to} | box | vol {volume} | remove | order
 ipcMain.handle('overlay-op', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   const OL = require('./core/overlay-layers');
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
   if (!pr) throw new Error('편을 찾을 수 없습니다.');
   const list = pr.overlays || (pr.overlays = []);
-  const nums = pr.groups.map((g) => g.num);
-  const clampG = (n, d) => { const v = Math.floor(Number(n)); return isFinite(v) ? Math.max(nums[0], Math.min(nums[nums.length - 1], v)) : d; };
   const op = args.op;
+  const KIND = { image: ['그림', ['png', 'jpg', 'jpeg', 'webp']], video: ['영상', ['mp4', 'mov', 'webm', 'm4v']], audio: ['오디오', ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg']] };
+  const rangeTxt = (ids) => { const r = OL.rangeOf(pr, ids); const n = pr.sentences.length; return r ? (r.a === 0 && r.b === n - 1 ? '전체' : `클립(문장) ${r.a + 1}~${r.b + 1}`) : '?'; };
   if (op === 'add') {
     let file = args.file;
     if (!file) {
-      const r = await dialog.showOpenDialog(win, { title: '위층에 올릴 그림 또는 영상', properties: ['openFile'],
-        filters: [{ name: '그림·영상', extensions: ['png', 'jpg', 'jpeg', 'webp', 'mp4', 'mov', 'webm', 'm4v'] }] });
+      const K = KIND[args.kind] || null;
+      const r = await dialog.showOpenDialog(win, { title: '삽입할 ' + (K ? K[0] : '그림·영상·오디오'), properties: ['openFile'],
+        filters: [K ? { name: K[0], extensions: K[1] } : { name: '그림·영상·오디오', extensions: [].concat(KIND.image[1], KIND.video[1], KIND.audio[1]) }] });
       if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
       file = r.filePaths[0];
     }
     const kind = OL.kindOf(file);
-    if (!kind) return { ok: false, error: '그림(png·jpg·webp) 또는 영상(mp4·mov·webm) 파일이어야 합니다' };
-    const a = clampG(args.fromGroup, nums[0]), b = clampG(args.toGroup, a);
-    const ids = OL.idsFromGroups(pr, a, b);
-    if (!ids) return { ok: false, error: '그룹 범위를 찾지 못했습니다' };
+    if (!kind) return { ok: false, error: '그림(png·jpg·webp) · 영상(mp4·mov·webm) · 오디오(mp3·wav·m4a) 파일이어야 합니다' };
+    const ids = OL.idsFromOrds(pr, args.from, args.to);
+    if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
     // 작업 폴더로 복사(원본을 옮기거나 지워도 끊기지 않게) — media-N/overlays/ (그룹 그림 정리·번호 매기기와 섞이지 않는 하위 폴더)
     const id = 'ov' + Date.now().toString(36);
     let dst = file;
@@ -6494,27 +6510,30 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       fs.mkdirSync(dir, { recursive: true });
       dst = path.join(dir, id + path.extname(file).toLowerCase());
       fs.copyFileSync(file, dst);
-    } catch (e) { dst = file; log('⚠ 위층 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
-    undoPush('위층 추가');
-    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...ids });
-    log(`🔝 ${prLabel(pr)} 위층 ${kind === 'video' ? '영상' : '그림'} 추가 — ${path.basename(file)} · G${Math.min(a, b)}~G${Math.max(a, b)}`);
+    } catch (e) { dst = file; log('⚠ 삽입 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
+    undoPush('삽입');
+    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : {}), ...ids });
+    log(`➕ ${prLabel(pr)} ${KIND[kind][0]} 삽입 — ${path.basename(file)} · ${rangeTxt(ids)}`);
+    storeActive(); pushDtoUpdate();
+    return { ok: true, id, dto: P.toDTO(S.parsed) };
   } else {
     const ov = list.find((o) => o.id === args.id);
     if (!ov) return { ok: false, error: '위층을 찾지 못했습니다' };
     if (op === 'range') {
-      const a = clampG(args.fromGroup, nums[0]), b = clampG(args.toGroup, a);
-      const ids = OL.idsFromGroups(pr, a, b); if (!ids) return { ok: false, error: '그룹 범위를 찾지 못했습니다' };
-      undoPush('위층 범위'); Object.assign(ov, ids);
-      log(`🔝 ${prLabel(pr)} 위층 범위 → G${Math.min(a, b)}~G${Math.max(a, b)}`);
+      const ids = OL.idsFromOrds(pr, args.from, args.to); if (!ids) return { ok: false, error: '문장 범위를 찾지 못했습니다' };
+      undoPush('삽입 범위'); Object.assign(ov, ids);
+      log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 범위 → ${rangeTxt(ids)}`);
+    } else if (op === 'vol') {
+      undoPush('삽입 음량', { coalesce: true }); ov.volume = OL.normVol(args.volume);
     } else if (op === 'box') {
-      undoPush('위층 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
+      undoPush('삽입 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
     } else if (op === 'remove') {
-      undoPush('위층 지우기'); list.splice(list.indexOf(ov), 1);   // 파일은 남긴다(↶ 되돌리기)
-      log(`🔝 ${prLabel(pr)} 위층 지움 — ${path.basename(ov.file)}`);
+      undoPush('삽입 지우기'); list.splice(list.indexOf(ov), 1);   // 파일은 남긴다(↶ 되돌리기)
+      log(`➕ ${prLabel(pr)} 삽입 지움 — ${ov.name || path.basename(ov.file)}`);
     } else if (op === 'order') {
       const i = list.indexOf(ov), j = i + (args.dir === 'down' ? -1 : 1);
       if (j < 0 || j >= list.length) return { ok: true, dto: P.toDTO(S.parsed) };
-      undoPush('위층 순서'); list.splice(i, 1); list.splice(j, 0, ov);
+      undoPush('삽입 순서'); list.splice(i, 1); list.splice(j, 0, ov);
     } else return { ok: false, error: '알 수 없는 동작' };
   }
   storeActive(); pushDtoUpdate();

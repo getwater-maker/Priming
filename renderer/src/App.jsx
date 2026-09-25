@@ -589,7 +589,7 @@ export default function App() {
     let cancelled = false;
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
-      setStageLogo(p.logoOn && p.logoPath ? { path: p.logoPath, side: p.logoSide === 'left' ? 'left' : 'right', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) } : null);   // 🏷 ① 칸 로고 미리보기
+      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       const prof = (modeProfiles && modeProfiles[mode]) || {};
       const cap = p.capLong;
       if (cap) {
@@ -1349,40 +1349,55 @@ export default function App() {
     try { await api.whiteboardPlan({ shortsNum: null }); } catch (e) { logline('장면 계획 오류: ' + e.message); }
   }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
-  // 🏷 ① 칸에 채널 로고를 보여 준다(채널편집 📁 폴더에서 켠 채널만) · 🔝 위층 그림·영상
-  const [stageLogo, setStageLogo] = useState(null);
+  // ➕ 삽입 — 그림·영상·오디오를 정한 클립(문장) 범위 동안(v0.5.54) · 🏷 채널 로고
+  const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12 });
+  const curLogoSide = () => { const pj = curProject(); return (pj && pj.logoSide) === 'left' ? 'left' : 'right'; };
+  const stageLogo = logoCfg.on && logoCfg.path ? { ...logoCfg, side: curLogoSide() } : null;
+  async function setLogoSide(side) {
+    const pj = curProject(); if (!pj) return;
+    try { const d = await api.setLogoSide({ shortsNum: pj.shortsNum, side }); if (d) setDto(d); setStatus(`🏷 이 대본 로고 → ${side === 'left' ? '↖ 왼쪽 위' : '↗ 오른쪽 위'} (Ctrl+Z 되돌리기)`); }
+    catch (e) { logline('로고 위치 오류: ' + e.message); }
+  }
+  const [insMenu, setInsMenu] = useState(null);   // { sn, id, x, y } — 적용 범위 메뉴
   async function overlayOp(args) {
     try {
       const r = await api.overlayOp(args);
       if (r && r.dto) setDto(r.dto);
       if (r && r.error) setStatus('⚠ ' + r.error);
       return r;
-    } catch (e) { logline('위층 오류: ' + e.message); setStatus('⚠ ' + e.message); return null; }
+    } catch (e) { logline('삽입 오류: ' + e.message); setStatus('⚠ ' + e.message); return null; }
   }
-  async function askGroupRange(title, def) {
-    const v = await askName(title, def);
-    if (v == null) return null;
-    const mm = String(v).match(/(\d+)\s*[-~–]\s*(\d+)/) || String(v).match(/^\s*G?(\d+)\s*$/i);
-    if (!mm) { setStatus('그룹 범위는 「3-7」처럼 적습니다'); return null; }
-    return { a: Number(mm[1]), b: Number(mm[2] || mm[1]) };
+  // 지금 커서가 있는 클립의 문장 번호(편 전체 1부터) — 「현재 클립」
+  function curOrd(sn) {
+    const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null;
+    const PL = linesMap.get(sn);
+    const ln = PL && cursor && cursor.shortsNum === sn ? PL.list.find((x) => x.n === cursor.n) : null;
+    if (!pj || !ln) return 1;
+    let o = 0;
+    for (const c of pj.cuts) { if (c.num === ln.groupNum) return o + (ln.sentIdx || 0) + 1; o += (c.sentences || []).length; }
+    return 1;
   }
-  async function addOverlay(sn, fromG) {
-    const r = await askGroupRange('🔝 위층에 올릴 그룹 범위 (예: 3-7) — 확인을 누르면 그림·영상 파일을 고릅니다', `${fromG}-${fromG}`);
-    if (!r) return;
-    const x = await overlayOp({ shortsNum: sn, op: 'add', fromGroup: r.a, toGroup: r.b });
-    if (x && x.ok) setStatus(`🔝 G${Math.min(r.a, r.b)}~G${Math.max(r.a, r.b)} 위층에 올렸습니다 — ① 칸에서 끌어 옮기고 모서리로 크기를 바꿉니다 (Ctrl+Z 되돌리기)`);
+  function curProject() { return dto && dto.projects && (dto.projects.find((x) => cursor && x.shortsNum === cursor.shortsNum) || dto.projects[0]); }
+  async function insertMedia(kind, ev) {
+    const pj = curProject(); if (!pj) return;
+    const rect = ev && ev.currentTarget ? ev.currentTarget.getBoundingClientRect() : null;
+    const r = await overlayOp({ shortsNum: pj.shortsNum, op: 'add', kind });   // 기본 = 전체 클립
+    if (r && r.ok && r.id) {
+      setStatus(`➕ ${({ image: '그림', video: '영상', audio: '오디오' })[kind]}을 전체 클립에 넣었습니다 — 적용 범위를 고르세요${kind === 'audio' ? '' : ' · ① 칸에서 끌어 옮기고 모서리로 크기'} (Ctrl+Z 되돌리기)`);
+      setInsMenu({ sn: pj.shortsNum, id: r.id, x: rect ? rect.left : 200, y: rect ? rect.bottom + 4 : 120 });
+    }
   }
-  // 리본 「🔝 위층」 — 지금 커서가 있는 그룹부터(커서가 없으면 첫 그룹)
-  function addOverlayHere() {
-    const pj = dto && dto.projects && (dto.projects.find((x) => cursor && x.shortsNum === cursor.shortsNum) || dto.projects[0]);
-    if (!pj) return;
-    const PL = linesMap.get(pj.shortsNum);
-    const ln = PL && cursor ? PL.list.find((x) => x.n === cursor.n) : null;
-    addOverlay(pj.shortsNum, (ln && ln.groupNum) || (pj.cuts[0] && pj.cuts[0].num) || 1);
-  }
-  async function editOverlayRange(sn, o) {
-    const r = await askGroupRange('🔝 위층 그룹 범위 (예: 3-7)', `${o.fromGroup || 1}-${o.toGroup || 1}`);
-    if (r) await overlayOp({ shortsNum: sn, op: 'range', id: o.id, fromGroup: r.a, toGroup: r.b });
+  async function insRange(sn, id, from, to, ask) {
+    if (ask) {
+      const n = ask.n;
+      const v = await askName(`적용 범위 — 클립(문장) 번호 (1~${n}, 예: 5-20)`, ask.cur);
+      if (v == null) return;
+      const mm = String(v).match(/(\d+)\s*[-~–]\s*(\d+)/) || String(v).match(/^\s*(\d+)\s*$/);
+      if (!mm) { setStatus('범위는 「5-20」처럼 적습니다'); return; }
+      from = Number(mm[1]); to = Number(mm[2] || mm[1]);
+    }
+    const r = await overlayOp({ shortsNum: sn, op: 'range', id, from, to });
+    if (r && r.ok) setStatus(`➕ 적용 범위 → 클립(문장) ${Math.min(from, to)}~${Math.max(from, to)}`);
   }
   function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
@@ -1911,7 +1926,7 @@ export default function App() {
       ttsNormalize: p.ttsNormalize !== false,
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
-      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSide: p.logoSide === 'left' ? 'left' : 'right', logoSize: p.logoSize != null ? p.logoSize : 12,   // 🏷 채널 로고
+      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12,   // 🏷 채널 로고
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
@@ -2148,7 +2163,7 @@ export default function App() {
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
-      logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSide: ch.logoSide === 'left' ? 'left' : 'right', logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
+      logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
       cfgValue: numOr(ch.cfgValue, 2),
@@ -2331,7 +2346,7 @@ export default function App() {
       const r = c.span || { from: a, to: b };
       if (ord >= r.from && ord <= r.to) out.push(c);
     }
-    for (const o of (pr.overlays || [])) if (!o.broken && ord >= o.from && ord <= o.to) out.push(ovAsLayer(o));   // 🔝 위층 — 늘 맨 위
+    for (const o of (pr.overlays || [])) if (!o.broken && o.kind !== 'audio' && ord >= o.from && ord <= o.to) out.push(ovAsLayer(o));   // ➕ 삽입 그림·영상 — 늘 맨 위
     return out;
   }
   function setVisual(c, pr, sentIdx) {
@@ -3047,7 +3062,7 @@ export default function App() {
         <div className="ssel" data-testid="stage-sel" style={{ left: (stageSel.box.x * 100) + '%', top: (stageSel.box.y * 100) + '%', width: (stageSel.box.w * 100) + '%', height: (stageSel.box.h * 100) + '%' }}
           title="끌어서 옮기기 · 모서리를 끌어 크기(비율 유지) · 가운데에 가까우면 붙는다 · Esc 해제">
           {['tl', 'tr', 'bl', 'br'].map((k) => <span key={k} className={'ssel-h ' + k} data-c={k} />)}
-          <span className="ssel-tag">{String(stageSel.num)[0] === 'O' ? '🔝 위층' : 'G' + stageSel.num}</span>
+          <span className="ssel-tag">{String(stageSel.num)[0] === 'O' ? '➕ 삽입' : 'G' + stageSel.num}</span>
         </div>
       )}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
@@ -3268,7 +3283,6 @@ export default function App() {
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            {isLf && <button className="ghost" data-testid="ov-add" disabled={!loaded} title="🔝 위층 — 정한 그룹 범위 동안 모든 그림 위에 다른 그림·영상을 올립니다(지도·인물 사진·글 카드 등). 지금 커서가 있는 그룹부터 시작합니다. 그룹 썸네일 메뉴에도 있습니다." onClick={addOverlayHere}><span className="rb-ic">🔝</span> <span className="rb-t">위층</span></button>}
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
@@ -3304,7 +3318,6 @@ export default function App() {
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            {isLf && <button className="ghost" data-testid="ov-add-v" disabled={!loaded} title="🔝 위층 — 정한 그룹 범위 동안 모든 그림 위에 다른 그림·영상을 올립니다(지도·인물 사진·글 카드 등). 지금 커서가 있는 그룹부터 시작합니다. 그룹 썸네일 메뉴에도 있습니다." onClick={addOverlayHere}><span className="rb-ic">🔝</span> <span className="rb-t">위층</span></button>}
           </span>
             </>)}
             {menu === 'finish' && (<>
@@ -3339,6 +3352,21 @@ export default function App() {
         <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
               </span>
             </>)}
+            {menu === 'insert' && (
+              <span className="hgroup" data-testid="ins-ribbon">
+                <span className="glabel">➕ 삽입</span>
+                <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
+                <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
+                <span className="hdiv" />
+                <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
+                  <span className="meta">🏷 로고 위치</span>
+                  <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoSide()} onChange={(e) => setLogoSide(e.target.value)}>
+                    <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option></select>
+                  {!stageLogo && <span className="meta" data-testid="logo-off">(이 채널 로고 꺼짐)</span>}
+                </span>
+              </span>
+            )}
             {menu === 'format' && (
               <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
                 onPatch={applyCapFmt} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll}
@@ -3381,7 +3409,24 @@ export default function App() {
               ))}
             </div>
           )}
-          {/* ② 위 얇은 막대 — 진행 통계 + 보기 전환(Vrew 「개요/상세」 자리) */}
+          {insMenu && (() => {
+        const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === insMenu.sn) : null;
+        const o = pj && (pj.overlays || []).find((x) => x.id === insMenu.id);
+        if (!o) return null;
+        const n = o.total || 1, cur = curOrd(insMenu.sn);
+        const go = (fn) => () => { setInsMenu(null); fn(); };
+        return (<>
+          <div className="vr-menu-bg" onMouseDown={() => setInsMenu(null)} />
+          <div className="vr-menu" data-testid="ins-menu" style={{ left: Math.min(insMenu.x, window.innerWidth - 260), top: Math.min(insMenu.y, window.innerHeight - 260) }}>
+            <div className="vr-cur">적용 범위 — 지금: {o.from === 1 && o.to === n ? '전체' : `클립 ${o.from}~${o.to}`} · 현재 클립 {cur}</div>
+            <button onClick={go(() => insRange(insMenu.sn, o.id, 1, n))}>전체 클립으로</button>
+            <button onClick={go(() => insRange(insMenu.sn, o.id, 1, cur))}>처음부터 현재 클립까지</button>
+            <button onClick={go(() => insRange(insMenu.sn, o.id, cur, n))}>현재 클립부터 끝까지</button>
+            <button onClick={go(() => insRange(insMenu.sn, o.id, null, null, { n, cur: `${o.from}-${o.to}` }))}>직접 입력…</button>
+          </div>
+        </>);
+      })()}
+      {/* ② 위 얇은 막대 — 진행 통계 + 보기 전환(Vrew 「개요/상세」 자리) */}
           <div className="clipbar" data-testid="clipbar">
             {workTimes}
             <span className="grow" />
@@ -3404,12 +3449,15 @@ export default function App() {
             <div className="ovbar" data-testid="ovbar">
               {dto.projects.map((pj) => (pj.overlays || []).map((o, i, arr) => (
                 <span key={o.id} className={'ovchip' + (o.broken ? ' broken' : '')} data-testid="ovchip" title={o.file}>
-                  <b>🔝 {o.broken ? '범위 잃음' : `G${o.fromGroup}~G${o.toGroup}`}</b> {o.kind === 'video' ? '🎬' : '🖼'} {o.name || String(o.file || '').split(/[\\/]/).pop()}
-                  <button className="ghost" title="그룹 범위 바꾸기" onClick={() => editOverlayRange(pj.shortsNum, o)}>범위</button>
-                  {o.box && <button className="ghost" title="화면 가득으로(자리·크기 원래대로)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'box', id: o.id, box: null })}>⛶</button>}
-                  {arr.length > 1 && <button className="ghost" title="한 층 위로" disabled={i === arr.length - 1} onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'order', id: o.id, dir: 'up' })}>▲</button>}
+                  {o.kind === 'video' ? '🎬' : o.kind === 'audio' ? '🎵' : '🖼'} <b>{o.name || String(o.file || '').split(/[\\/]/).pop()}</b>
+                  <button className="ghost" data-testid="ov-range" title="적용 범위 변경" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setInsMenu({ sn: pj.shortsNum, id: o.id, x: r.left, y: r.bottom + 4 }); }}>
+                    {o.broken ? '범위 잃음' : (o.from === 1 && o.to === o.total ? '전체' : `클립 ${o.from}~${o.to}`)} ▾</button>
+                  {o.kind === 'audio' && <><input className="nbox" data-testid="ov-vol" type="number" min="0" max="200" step="5" style={{ width: 44 }} title="음량 %" value={o.volume}
+                    onChange={(e) => overlayOp({ shortsNum: pj.shortsNum, op: 'vol', id: o.id, volume: e.target.value })} /><span className="meta">%</span></>}
+                  {o.box && o.kind !== 'audio' && <button className="ghost" title="화면 가득으로(자리·크기 원래대로)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'box', id: o.id, box: null })}>⛶</button>}
+                  {arr.length > 1 && <button className="ghost" title="한 층 위로(그림·영상)" disabled={i === arr.length - 1} onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'order', id: o.id, dir: 'up' })}>▲</button>}
                   {arr.length > 1 && <button className="ghost" title="한 층 아래로" disabled={i === 0} onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'order', id: o.id, dir: 'down' })}>▼</button>}
-                  <button className="ghost" title="위층 지우기(파일은 남습니다 · Ctrl+Z 되돌리기)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'remove', id: o.id })}>✕</button>
+                  <button className="ghost" title="삽입 지우기(파일은 남습니다 · Ctrl+Z 되돌리기)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'remove', id: o.id })}>✕</button>
                 </span>
               )))}
             </div>
@@ -3421,7 +3469,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onOverlay={isLf ? addOverlay : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -3781,14 +3829,12 @@ export default function App() {
                     <button className="ghost" style={{ flex: '0 0 auto' }} title="폴더 — 대본마다 그 안의 한 곡을 고릅니다" onClick={async () => { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, bgmPath: d, bgmOn: true })); }}>폴더</button>
                     <input className="nbox" type="number" min="0" max="100" step="5" style={{ width: 52, flex: '0 0 auto' }} title="음량 % (기본 15)" disabled={!ch.bgmOn} value={ch.bgmVolume} onChange={(e) => setCh({ ...ch, bgmVolume: e.target.value })} /><span className="meta">%</span></div>
                 )}
-                {/* 🏷 채널 로고 — 켠 채널만 · 영상 전체 · 위쪽 왼쪽/오른쪽 · .vrew·유튜브 MP4 공통. 투명 PNG 권장. */}
+                {/* 🏷 채널 로고 — 켠 채널만 · 영상 전체 · .vrew·유튜브 MP4 공통. 투명 PNG 권장. 자리(↗ 오른쪽 위 기본 / ↖ 왼쪽 위)는 대본마다 ➕ 삽입 메뉴에서. */}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="logo-row" title="채널 로고를 영상 전체에 위쪽 모서리에 올립니다(맨 위층). 배경이 투명한 PNG 가 좋습니다. 크기 = 화면 너비 대비 %."><label>🏷 채널 로고</label>
+                  <div className="frow" data-testid="logo-row" title="이 채널의 모든 영상에 로고를 올립니다(맨 위층 · 기본 오른쪽 위 — 자리는 ➕ 삽입 메뉴에서 대본마다 바꿉니다). 배경이 투명한 PNG 가 좋습니다. 크기 = 화면 너비 대비 %."><label>🏷 채널 로고</label>
                     <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" checked={!!ch.logoOn} onChange={(e) => setCh({ ...ch, logoOn: e.target.checked })} />
                     <input readOnly placeholder="로고 그림(png·jpg·webp) — 비우면 로고 없음" title={ch.logoPath || ''} value={ch.logoPath || ''} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { const f = await api.pickFile({ filters: [{ name: '그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (f) setCh((c) => ({ ...c, logoPath: f, logoOn: true })); }}>파일</button>
-                    <select style={{ flex: '0 0 auto', width: 'auto' }} title="자리" disabled={!ch.logoOn} value={ch.logoSide || 'right'} onChange={(e) => setCh({ ...ch, logoSide: e.target.value })}>
-                      <option value="left">↖ 왼쪽 위</option><option value="right">↗ 오른쪽 위</option></select>
                     <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 48, flex: '0 0 auto' }} title="크기 — 화면 너비 대비 % (기본 12)" disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span></div>
                 )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
@@ -4903,7 +4949,6 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       <button onClick={go(() => onGroupVid(sn, c.num))}>🎬 AI로 비디오 생성</button>
       <div className="vr-sep" />
       <button onClick={() => setSub('range')}>↕ 적용 범위 변경 ›</button>
-      {onOverlay && <button title="이 그룹부터 정한 그룹까지 모든 그림 위에 다른 그림·영상을 올립니다(지도·인물 사진·글 카드 등)" onClick={go(() => onOverlay(sn, c.num))}>🔝 위층에 그림·영상 올리기…</button>}
       {has && <><div className="vr-sep" /><button className="vr-del" onClick={go(() => onClear(sn, c.num))}>🗑 삭제</button></>}
     </div>
   );

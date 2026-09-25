@@ -669,3 +669,14 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .ovchip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:2px 4px 2px 8px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--strong)}
 .ovchip.broken{border-color:var(--danger);color:var(--danger)}
 .ovchip button{padding:0 6px;font-size:11px;line-height:18px;min-height:0;color:var(--strong)}
+/* ➕ 삽입 메뉴 (v0.5.54) */
+.vr-menu-bg{position:fixed;inset:0;z-index:69}
+.ins-logo{display:inline-flex;align-items:center;gap:6px}
+.ins-logo select{width:auto}
+.ins-logo button{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ➕ 「삽입」 메뉴가 늘어 1366px 에서 메뉴 줄이 두 줄로 넘어갔다(v0.5.54 실측 62px 초과) — 좁은 창에서만 조금씩 줄인다 */
+@media (max-width:1500px){
+  .menubar .findbar{flex:0 1 110px;min-width:90px}
+  .menubar > select{max-width:130px}
+  .menubar .menus .menu{padding:6px 8px}
+}

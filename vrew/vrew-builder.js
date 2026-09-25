@@ -560,10 +560,28 @@ function addLogoTrack(pj, opt, mediaZip, canvas, log) {
 }
 
 // 🔝 위층 그림·영상(core/overlay-layers) — 그룹 그림보다 늘 위(zIndex 900+). 반환 = 오버레이 순번 → asset id
-function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
+async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
   const out = new Map();
-  (overlays || []).forEach((ov, i) => {
-    if (!ov || !ov.file || !fs.existsSync(ov.file)) { log(`⚠ 위층 ${i + 1} 파일이 없습니다 — 건너뜀 (${ov && ov.file})`); return; }
+  for (let i = 0; i < (overlays || []).length; i++) {
+    const ov = overlays[i];
+    if (!ov || !ov.file || !fs.existsSync(ov.file)) { log(`⚠ 삽입 ${i + 1} 파일이 없습니다 — 건너뜀 (${ov && ov.file})`); continue; }
+    if (ov.kind === 'audio') {
+      // 🎵 오디오 삽입 — Vrew 배경음 트랙(type bgm)을 **그 범위 clip 에만** 건다 · 반복 · 앞뒤 부드럽게
+      let fileDur = 10, sr = 44100, chn = 2;
+      try { const info = await require('../core/media-utils').getMediaInfo(ov.file); if (info && info.durationSec) fileDur = info.durationSec; if (info && info.sampleRate) sr = info.sampleRate; if (info && info.channels) chn = info.channels; } catch {}
+      const mid = uid(), aid = uid(), tid = sid();
+      const ext = (path.extname(ov.file) || '.mp3').replace(/^\./, '').toLowerCase();
+      const fn = `${mid}.${ext}`;
+      pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize: fs.statSync(ov.file).size, name: fn, type: 'AVMedia',
+        videoAudioMetaInfo: { duration: fileDur, audioInfo: { sampleRate: sr, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: chn } }, sourceFileType: 'BGM', fileLocation: 'IN_MEMORY' });
+      const vol = (isFinite(+ov.volume) ? +ov.volume : 30) / 100;
+      pj.props.tracks[tid] = { trackId: tid, mediaId: mid, volume: vol, fade: { in: true, out: true }, sourceIn: 0, sourceOut: fileDur, loop: true, playbackRate: 1, type: 'bgm' };
+      pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+      mediaZip.push({ src: ov.file, name: fn });
+      out.set(i, aid);
+      log(`[Vrew] ➕ 삽입 ${i + 1}: ${path.basename(ov.file)} (오디오 · 음량 ${Math.round(vol * 100)}% · 반복)`);
+      continue;
+    }
     const mid = uid(), aid = uid(), tid = sid();
     const isVid = ov.kind === 'video';
     let w0 = 0, h0 = 0, dur = 5;
@@ -594,8 +612,8 @@ function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
     }
     mediaZip.push({ src: ov.file, name: fn });
     out.set(i, aid);
-    log(`[Vrew] 🔝 위층 ${i + 1}: ${path.basename(ov.file)} (${isVid ? '영상 · 반복' : '그림'})`);
-  });
+    log(`[Vrew] ➕ 삽입 ${i + 1}: ${path.basename(ov.file)} (${isVid ? '영상 · 반복' : '그림'} · 위층)`);
+  }
   return out;
 }
 
@@ -1075,7 +1093,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const _layers = _VS.layersBySentence(_vsProj, (x) => groupImageAsset.has(x.id));
   // 🔝 위층 그림·영상 — 문장 → [오버레이 순번](아래 → 위)
   const _ovProj = { groups, sentences, overlays: opts.overlays || [] };
-  const _ovAid = addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);
+  const _ovAid = await addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);
   const _ovBy = _ovAid.size ? require('../core/overlay-layers').bySentence(_ovProj) : new Map();
 
   // ---------- 2. sentence 루프 ----------

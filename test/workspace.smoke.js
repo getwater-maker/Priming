@@ -68,7 +68,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
 
     // [1] 메뉴 줄 + 리본
     const menus = await win.locator('.menus button[data-menu]').allInnerTexts();
-    ok(menus.join(',') === '대본·음성,이미지,비디오,완성,서식', `메뉴 5개 (${menus.join(' · ')})`);
+    ok(menus.join(',') === '대본·음성,이미지,비디오,완성,서식,삽입', `메뉴 6개 — 서식 옆에 ➕ 삽입 (${menus.join(' · ')})`);
     ok(await win.locator('.ribbon[data-menu-on="script"]').count() === 1, '켤 때 메뉴 = 대본·음성');
     const mb = await win.locator('.menubar').boundingBox();
     ok(mb && mb.height < 56, `1366px 에서 메뉴 줄이 한 줄 (${mb && Math.round(mb.height)}px)`);

@@ -158,6 +158,7 @@ function buildTimeline(project, mediaDir) {
   const clips = (project.transcript && project.transcript.clips) || [];
   const segments = [], cues = [], audio = [];
   const webSpans = new Map();   // trackId → {start, end}
+  const bgmSpans = new Map();   // 🎵 배경음·➕ 오디오 삽입 — trackId → {start, end, track}(연결된 clip 구간 = 들리는 구간)
   let t = 0, curKey = null, curSeg = null, lastTts = null;
   let capStyle = null;
 
@@ -204,6 +205,7 @@ function buildTimeline(project, mediaDir) {
     // ④ 오버레이(web 텍스트박스) — 연결된 clip 구간이 곧 노출 구간이다(vrew-builder 규약)
     for (const aid of (c.assetIds || [])) {
       const tr = trackOf(aid);
+      if (tr && tr.type === 'bgm') { const bs = bgmSpans.get(tr.trackId); if (!bs) bgmSpans.set(tr.trackId, { start, end, track: tr }); else bs.end = end; continue; }
       if (!tr || tr.type !== 'web') continue;
       const sp = webSpans.get(tr.trackId);
       if (!sp) webSpans.set(tr.trackId, { start, end, track: tr });
@@ -250,13 +252,15 @@ function buildTimeline(project, mediaDir) {
     if (ov) overlays.push(ov);
   }
   // 🎵 배경음(type:'bgm' 트랙) — vrew-builder.addBgmTrack 이 만든 것. 전 구간에 깔린다.
+  //   전 구간이면 채널 배경음(bgm) · 일부 구간이면 ➕ 오디오 삽입(inserts — 그 구간에만 들린다, v0.5.54)
   let bgm = null;
-  const trs = (project.props && project.props.tracks) || {};
-  for (const k of Object.keys(trs)) {
-    const tr = trs[k];
-    if (tr && tr.type === 'bgm') { const f = fileOf(tr); if (f) bgm = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false }; break; }
+  const inserts = [];
+  for (const sp of bgmSpans.values()) {
+    const tr = sp.track, f = fileOf(tr); if (!f) continue;
+    const it = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false, t0: sp.start, t1: sp.end };
+    if (!bgm && sp.start < 0.05 && sp.end > t - 0.05) bgm = it; else inserts.push(it);
   }
-  return { segments, cues, audio, overlays, capStyle, bgm, totalSec: t };
+  return { segments, cues, audio, overlays, capStyle, bgm, inserts, totalSec: t };
 }
 
 // ── 색 ─────────────────────────────────────────────────────────────────────
@@ -679,6 +683,32 @@ const it_dur = (it) => (it.dur > 0 ? it.dur : 0.001).toFixed(4);
 //   Vrew 와 같은 뜻으로: volume 은 선형 배율(0.15 = 15%) · loop 면 곡을 되풀이 · 앞뒤 페이드.
 //   🔑 amix normalize=0 — 켜 두면 입력 수로 나눠 **음성까지 절반으로 작아진다**.
 //   🔑 duration=first — 음성 길이에서 끝낸다(곡이 길어도 영상보다 길어지지 않는다).
+/**
+ * 🎵 음성 + 배경음 + ➕ 오디오 삽입(구간마다)을 한 번에 섞는다. 삽입이 없으면 bgmMixArgs 그대로(예전과 같은 인자).
+ *   삽입 = 파일을 반복하고 구간 길이로 자른 뒤 시작 시각만큼 늦춘다(adelay) · 앞뒤 짧게 페이드 · normalize=0(음성이 줄지 않게).
+ */
+function mixArgs(tl) {
+  const ins = (tl && tl.inserts) || [];
+  if (!ins.length) return bgmMixArgs(tl && tl.bgm, tl && tl.totalSec);
+  const T = Math.max(1, +tl.totalSec || 0);
+  const items = [];
+  if (tl.bgm && tl.bgm.file) items.push({ ...tl.bgm, t0: 0, t1: T, full: true });
+  for (const x of ins) if (x.file && x.t1 > x.t0 + 0.05) items.push(x);
+  const args = [], parts = [];
+  items.forEach((x, k) => {
+    if (x.loop !== false) args.push('-stream_loop', '-1');
+    args.push('-i', x.file);
+    const D = Math.max(0.1, (x.full ? T : x.t1 - x.t0));
+    const fi = x.full ? Math.min(2, D / 4) : Math.min(0.5, D / 4), fo = x.full ? Math.min(3, D / 4) : Math.min(1, D / 4);
+    const vol = Math.max(0, Math.min(2, isFinite(+x.volume) ? +x.volume : 0.15));
+    const ms = Math.round((x.full ? 0 : x.t0) * 1000);
+    parts.push(`[${k + 1}:a]aresample=${A_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${vol.toFixed(3)},`
+      + `atrim=0:${D.toFixed(3)},asetpts=N/SR/TB,afade=t=in:d=${fi.toFixed(2)},afade=t=out:st=${(D - fo).toFixed(3)}:d=${fo.toFixed(2)}`
+      + (ms > 0 ? `,adelay=${ms}|${ms}` : '') + `[m${k}]`);
+  });
+  const labels = items.map((_, k) => `[m${k}]`).join('');
+  return [...args, '-filter_complex', `${parts.join(';')};[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[v];[v]${labels}amix=inputs=${items.length + 1}:duration=first:normalize=0[out]`, '-map', '[out]'];
+}
 function bgmMixArgs(bgm, totalSec) {
   if (!bgm || !bgm.file) return [];
   const T = Math.max(1, +totalSec || 0);
@@ -782,7 +812,7 @@ async function renderVrewToMp4(opts = {}) {
       if (!tl.audio.some((a) => a.file)) return null;
       const wav = path.join(tmpDir, 'voice.wav');
       await concatAudio(tl.audio, wav, tmpDir, ctx);
-      await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', ...bgmMixArgs(tl.bgm, tl.totalSec),
+      await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', ...mixArgs(tl),
         '-c:a', 'aac', '-b:a', '96k', '-ar', String(A_RATE), '-ac', '2', 'voice.m4a'], { cwd: tmpDir, signal: ctx.children });
       try { fs.unlinkSync(wav); } catch (_) {}
       st.audio = 'done'; emit();
@@ -865,6 +895,6 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };

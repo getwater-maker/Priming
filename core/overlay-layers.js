@@ -11,8 +11,20 @@
  */
 const VS = require('./visual-span');
 
-const IMG_EXT = /\.(png|jpe?g|webp)$/i, VID_EXT = /\.(mp4|mov|webm|m4v)$/i;
-function kindOf(file) { return VID_EXT.test(file || '') ? 'video' : (IMG_EXT.test(file || '') ? 'image' : null); }
+const IMG_EXT = /\.(png|jpe?g|webp)$/i, VID_EXT = /\.(mp4|mov|webm|m4v)$/i, AUD_EXT = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
+function kindOf(file) { return VID_EXT.test(file || '') ? 'video' : (IMG_EXT.test(file || '') ? 'image' : (AUD_EXT.test(file || '') ? 'audio' : null)); }
+/** 🎵 오디오 삽입 음량(%) — 기본 30 */
+function normVol(v) { const n = Number(v); return (v != null && v !== '' && isFinite(n)) ? Math.max(0, Math.min(200, Math.round(n))) : 30; }
+/** 편 전체 문장 번호(1부터) 범위 → 문장 id */
+function idsFromOrds(pr, from, to) {
+  const c = VS.orderOf(pr); const n = c.order.length; if (!n) return null;
+  let a = Math.floor(Number(from)), b = Math.floor(Number(to));
+  if (!isFinite(a)) a = 1;
+  if (!isFinite(b)) b = n;
+  a = Math.max(1, Math.min(n, a)); b = Math.max(1, Math.min(n, b));
+  if (a > b) { const t = a; a = b; b = t; }
+  return { startId: c.order[a - 1], endId: c.order[b - 1] };
+}
 
 /** 오버레이가 덮는 문장 순번 범위(0부터, 끝 포함). 끝 문장이 사라졌으면 null */
 function rangeOf(pr, ov, ctx) {
@@ -45,7 +57,7 @@ function toDTO(pr) {
   const c = VS.orderOf(pr);
   return (pr.overlays || []).map((ov) => {
     const r = rangeOf(pr, ov, c);
-    return { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null,
+    return { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : null, total: c.order.length,
       fromGroup: r ? groupNumOf(pr, c.order[r.a]) : null, toGroup: r ? groupNumOf(pr, c.order[r.b]) : null,
       from: r ? r.a + 1 : null, to: r ? r.b + 1 : null, broken: !r };
   });
@@ -53,7 +65,7 @@ function toDTO(pr) {
 /** 작업본 저장·복원 — 순번으로 */
 function toSnap(pr) {
   const c = VS.orderOf(pr);
-  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, from: r.a, to: r.b } : null; }).filter(Boolean);
+  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : undefined, from: r.a, to: r.b } : null; }).filter(Boolean);
 }
 function fromSnap(pr, list) {
   if (!Array.isArray(list) || !list.length) return;
@@ -62,7 +74,7 @@ function fromSnap(pr, list) {
   for (const o of list) {
     if (!o || !o.file) continue;
     const a = Math.max(0, Math.min(n - 1, o.from | 0)), b = Math.max(a, Math.min(n - 1, o.to | 0));
-    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), startId: c.order[a], endId: c.order[b] });
+    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, ...(o.kind === 'audio' ? { volume: normVol(o.volume) } : {}), kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), startId: c.order[a], endId: c.order[b] });
   }
   if (out.length) pr.overlays = out;
 }
@@ -97,7 +109,7 @@ function logoOptsOf(preset, exists) {
   if (!p.logoOn || !p.logoPath) return { enabled: false };
   if (exists && !exists(p.logoPath)) return { enabled: false, missing: p.logoPath };
   const pct = Math.max(4, Math.min(40, isFinite(+p.logoSize) ? +p.logoSize : 12));
-  return { enabled: true, path: p.logoPath, side: p.logoSide === 'left' ? 'left' : 'right', size: pct / 100 };
+  return { enabled: true, path: p.logoPath, side: 'right', size: pct / 100 };   // 자리는 대본마다(pipeline 이 project.logoSide 로 바꾼다)
 }
 
-module.exports = { kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, logoOptsOf, IMG_EXT, VID_EXT };
+module.exports = { normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, logoOptsOf, IMG_EXT, VID_EXT };
