@@ -1063,10 +1063,10 @@ export default function App() {
     try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
-  function playFrom(shortsNum, groupNum, start, tag) {
+  function playFrom(shortsNum, groupNum, start, tag, force) {
     if (!dto) return;
     const key = (tag === 'cursor' ? 'cursor:' : 'from:') + shortsNum + ':' + groupNum;
-    if (playerOpen && playKey === key) { stopPlayer(); return; }   // ■
+    if (!force && playerOpen && playKey === key) { stopPlayer(); return; }   // ■
     const pr = dto.projects.find((p) => p.shortsNum === shortsNum); if (!pr) return;
     const idx = pr.cuts.findIndex((c) => c.num === groupNum); if (idx < 0) return;
     playProjects([{ ...pr, cuts: pr.cuts.slice(idx) }], false, key, start || null); // 이 그룹(start 가 있으면 그 클립)부터 끝까지
@@ -1538,7 +1538,7 @@ export default function App() {
   /** 줄 번호 클릭 — 그 줄만 · Shift = 앞서 고른 줄부터 범위 · Ctrl = 더하기/빼기. allLines = 이 편의 모든 줄(화면 순서). */
   function pickCapLine(shortsNum, info, ev, allLines) {
     if (sentEdit) return;
-    setCursor({ shortsNum, n: info.n }); pickMenu('format');   // 🧭 커서 + 서식 메뉴
+    userCursor({ shortsNum, n: info.n }); pickMenu('format');   // 🧭 커서 + 서식 메뉴
     setCapSel((cur) => {
       const same = cur && cur.shortsNum === shortsNum && cur.mode === 'lines';
       if (ev && ev.shiftKey && same && cur.anchorN != null) {
@@ -1558,7 +1558,7 @@ export default function App() {
   function pickCapChars(shortsNum, groupNum, sentIdx, range) {
     if (sentEdit) return;
     { const PL = linesMap.get(shortsNum); const l = PL && (PL.bySent.get(groupNum + ':' + sentIdx) || []).find((x) => range.from >= x.from && range.from < x.to);
-      if (l) setCursor({ shortsNum, n: l.n }); pickMenu('format'); }
+      if (l) userCursor({ shortsNum, n: l.n }); pickMenu('format'); }
     setCapSel({ shortsNum, mode: 'chars', items: [{ groupNum, sentIdx, from: range.from, to: range.to, n: -1 }] });
   }
   async function applyCapFmt(patch) {
@@ -2376,7 +2376,7 @@ export default function App() {
     const bx = lk.box;
     const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
     let inner;
-    if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}" autoplay muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;
+    if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
     else {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
       const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
@@ -2427,6 +2427,27 @@ export default function App() {
       }
     }
     for (const im of v.querySelectorAll('img.kb')) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
+  }
+  // ⏸ ① 칸 평소 화면 = 커서 클립의 **정지 장면**(v0.5.62 · 로이) — 재생할 때만 움직인다.
+  //   영상은 멈춘 채 「그 클립이 보일 때 흐른 시간」으로 옮기고, 켄번스 그림은 같은 시점에서 멈춘다(재생과 같은 규칙).
+  function applyStill(pr, c, sentIdx, lineStart) {
+    const v = stageVisualRef.current; if (!v || !pr || !c) return;
+    const ord = ordOf(pr, c, sentIdx || 0);
+    const sSt = secBetween(pr, 1, ord);
+    const intra = lineStart != null ? Math.max(0, lineStart - sSt) : 0;
+    for (const L of (stageLayersRef.current.layers || [])) {
+      const el = v.querySelector('.vlayer[data-num="' + L.num + '"]'); if (!el) continue;
+      const so = L.ovId ? L.ovFrom : (L.span ? L.span.from : ordOf(pr, L, 0));
+      const t = Math.max(0, secBetween(pr, so, ord) + intra);
+      const vv = el.querySelector('video');
+      if (vv) {
+        try { vv.pause(); } catch (_) {}
+        const seek = () => { const d = vv.duration; if (!(d > 0)) return; try { vv.currentTime = (L.once && t >= d) ? Math.max(0, d - 0.05) : (t % d); } catch (_) {} };
+        if (vv.readyState >= 1) seek(); else vv.addEventListener('loadedmetadata', seek, { once: true });
+      }
+      const im = el.querySelector('img.kb');
+      if (im) { im.style.animationPlayState = 'paused'; im.style.animationDelay = (-Math.min(t, 7)).toFixed(2) + 's'; }
+    }
   }
   const visKeyAt = (c, pr, sentIdx) => (pr ? visLayersAt(pr, c, sentIdx) : [c]).map(visKey).join('/') || ('none|' + (c ? c.num : ''));
 
@@ -2687,6 +2708,7 @@ export default function App() {
     (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`, shortsNum); stopStageVideo(); if (!stale(_g)) { stopInsAudio(); playingRef.current = false; setPlayKey(null); } if (!stale(_g) && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; if (!stale(_g) && view === 'clips') setPlayerOpen(false); })();
   }
   function stopPlayer() {
+    userPickRef.current = null;
     playAbortRef.current = true; playGenRef.current++; playingRef.current = false; setPlayKey(null); stopInsAudio();
     if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }   // 🎨 도는 자막 효과 멈춤
     if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
@@ -2696,14 +2718,20 @@ export default function App() {
     setPlayerOpen(false);
   }
   /** 🧭 커서 줄부터 재생(클립 보기 · Space) — 그 줄이 든 그룹부터 끝까지. */
-  function playFromCursor() {
-    if (!dto || !cursor) return;
-    const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n);
+  // 🧭 재생 중 사람이 클립을 고르면 기억한다 — 그 뒤 Space = 지금 재생을 멈추고 **고른 클립부터** 다시(v0.5.62 · 로이).
+  //   재생이 자막마다 옮기는 커서(stepCaptions 의 setCursor)는 여기로 오지 않는다 → 고르지 않았으면 Space = 그냥 멈춤.
+  const userPickRef = useRef(null);
+  function userCursor(c) { setCursor(c); if (playingRef.current) userPickRef.current = c; }
+  function playFromCursor(cur0, force) {
+    const cur = cur0 || cursor;
+    userPickRef.current = null;
+    if (!dto || !cur) return;
+    const PL = linesMap.get(cur.shortsNum); const l = PL && PL.list.find((x) => x.n === cur.n);
     if (!l) return;
     // 🔑 그룹 처음이 아니라 **그 클립(자막 줄)부터** — 문장 안 몇 번째 줄인지까지(로이 2026-09-25)
     const same = PL.bySent.get(l.groupNum + ':' + l.sentIdx) || [];
     const li = Math.max(0, same.findIndex((x) => x.n === l.n));
-    playFrom(cursor.shortsNum, l.groupNum, { si: l.sentIdx || 0, li }, 'cursor');
+    playFrom(cur.shortsNum, l.groupNum, { si: l.sentIdx || 0, li }, 'cursor', force);
   }
   // 팝업/모달 닫기 = 바깥 클릭이 아니라 ESC 또는 취소·닫기 버튼으로만 (실수 클릭에 입력 유실 방지).
   //   여러 개가 겹쳐 떠 있어도 최상단(가장 나중에 연) 하나만 닫는다.
@@ -2752,6 +2780,7 @@ export default function App() {
     if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
     if (!ci || !ci.s) { el.textContent = ''; if (stageVisualRef.current && !ci) { stageVisualRef.current.innerHTML = ''; lastVisRef.current = null; } return; }
     if (lastVisRef.current !== visKeyAt(ci.cut, ci.pr, ci.l.sentIdx)) setVisual(ci.cut, ci.pr, ci.l.sentIdx);
+    applyStill(ci.pr, ci.cut, ci.l.sentIdx, ci.l.start);
     const text = String(ci.s.text || '');
     const base = CF.normFmt(capBase); base.size = capBase.size;
     const runs = CF.lineRuns(text, ci.s.spans, ci.l.range, base);
@@ -2790,7 +2819,7 @@ export default function App() {
     const ni = abs === 'home' ? 0 : abs === 'end' ? PL.list.length - 1 : Math.max(0, Math.min(PL.list.length - 1, idx + delta));
     const l = PL.list[ni];
     const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
-    setCursor({ shortsNum: cursor.shortsNum, n: l.n });
+    userCursor({ shortsNum: cursor.shortsNum, n: l.n });
     setCapSel((cur) => {
       if (extend && cur && cur.mode === 'lines' && cur.shortsNum === cursor.shortsNum && cur.anchorN != null) {
         const a = Math.min(cur.anchorN, l.n), b = Math.max(cur.anchorN, l.n);
@@ -2820,7 +2849,10 @@ export default function App() {
         e.preventDefault();
         if (clipDetail) openLineEdit(ci.pr.shortsNum, ci.l.n, null);
         else startSentEdit(ci.pr.shortsNum, ci.cut.num, ci.l.sentIdx, ci.s.text);
-      } else if (e.key === ' ') { e.preventDefault(); if (tag === 'BUTTON' && t.blur) t.blur(); if (playerOpen) stopPlayer(); else playFromCursor(); }
+      } else if (e.key === ' ') { e.preventDefault(); if (tag === 'BUTTON' && t.blur) t.blur();
+        const pick = userPickRef.current;
+        if (playerOpen && pick) { stopPlayer(); setCursor(pick); playFromCursor(pick, true); }   // 재생 중 클립을 골랐으면 → 그 클립부터
+        else if (playerOpen) stopPlayer(); else playFromCursor(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -3612,7 +3644,7 @@ export default function App() {
             </div>
           )}
           <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} detail={view === 'clips' && clipDetail} linesMap={linesMap}
-            cursor={cursor} onCursor={(sn, n) => setCursor({ shortsNum: sn, n })}
+            cursor={cursor} onCursor={(sn, n) => userCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSel} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}

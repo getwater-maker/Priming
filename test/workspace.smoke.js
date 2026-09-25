@@ -191,6 +191,53 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       ok(n2 > 1 && /첫째 그룹 둘째/.test(c) && !/첫 문장/.test(c), `🔑 그룹 둘째 클립(${n2})에서 Space → 그 클립부터 「${c}」`);
       await win.keyboard.press(' '); await win.waitForTimeout(300);
     }
+    // ⏸ v0.5.62 — ① 칸은 평소 **정지 장면**, 재생할 때만 움직인다(그림 켄번스 · 영상)
+    {
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home'); await win.waitForTimeout(300);
+      const kbState = () => win.evaluate(() => { const i = document.querySelector('#stageVisual img.kb'); return i ? getComputedStyle(i).animationPlayState : null; });
+      ok(await kbState() === 'paused', `평소 = 그림 켄번스 멈춤 (${await kbState()})`);
+      // 영상 삽입(전체) — 평소엔 멈춘 채 그 클립 장면
+      const VID = path.join(TMP, 'mov.mp4');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=12', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', VID]);
+      await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, VID);
+      await menu(win, 'insert');
+      await win.click('[data-testid=ins-video]');
+      await win.waitForSelector('[data-testid=ins-menu]', { timeout: 5000 });
+      await win.click('[data-testid=ins-menu] button:has-text("전체 클립으로")');
+      await win.waitForTimeout(800);
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home'); await win.waitForTimeout(800);
+      const vs = () => win.evaluate(() => { const v = document.querySelector('#stageVisual .vlayer[data-num^="O"] video'); return v ? { paused: v.paused, t: +v.currentTime.toFixed(2), auto: v.autoplay } : null; });
+      const v1 = await vs();
+      await win.waitForTimeout(700);
+      const v1b = await vs();
+      ok(v1 && v1.paused && !v1.auto && v1b && v1b.t === v1.t, `🔑 평소 = 영상 멈춤(자동재생 없음 · 시간이 흐르지 않는다) — ${JSON.stringify([v1, v1b])}`);
+      await win.keyboard.press('ArrowDown'); await win.keyboard.press('ArrowDown'); await win.waitForTimeout(800);
+      const v2 = await vs();
+      ok(v2 && v2.paused && v2.t > v1.t + 0.5, `🔑 클립을 옮기면 그 클립 장면으로(${v1 && v1.t}초 → ${v2 && v2.t}초 · 여전히 멈춤)`);
+      await win.keyboard.press(' '); await win.waitForTimeout(900);
+      const v3 = await vs();
+      ok(v3 && !v3.paused, '재생하면 영상이 움직인다');
+      await win.keyboard.press(' '); await win.waitForTimeout(600);
+      const v4 = await vs();
+      ok(v4 && v4.paused, '멈추면 다시 정지 장면');
+      // 정리 — 삽입 지우기
+      await win.locator('[data-testid=ov-range]').first().click();
+      await win.click('[data-testid=ins-del]'); await win.waitForTimeout(500);
+    }
+    // 🧭 v0.5.62 — 재생 중 클립을 고르고 Space = 멈추고 **고른 클립부터** 다시 · 안 골랐으면 Space = 멈춤
+    {
+      const btn = () => win.locator('[data-testid=play-btn]').innerText();
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home'); await win.waitForTimeout(300);
+      await win.keyboard.press(' '); await win.waitForTimeout(400);
+      ok((await btn()).includes('■'), '재생 시작');
+      const nLast = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 마지막')); return e ? Number(e.dataset.ln) : 0; });
+      await win.locator('.sent.clip[data-ln="' + nLast + '"] .clip-no').click();
+      await win.keyboard.press(' '); await win.waitForTimeout(400);
+      const c1 = await stageCap();
+      ok((await btn()).includes('■') && /둘째 그룹 마지막/.test(c1), `🔑 재생 중 클립(${nLast})을 고르고 Space → 멈추지 않고 그 클립부터 「${c1}」`);
+      await win.keyboard.press(' '); await win.waitForTimeout(400);
+      ok((await btn()).includes('▶'), '🔑 고르지 않고 Space → 멈춤');
+    }
 
     // [9] 보기 전환 — 카드
     await win.click('.clipbar button[data-view="cards"]');
