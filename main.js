@@ -2256,7 +2256,7 @@ ipcMain.handle('relink-work', async () => {
       }
       if (!(g.videoPath && fs.existsSync(g.videoPath))) {
         const v = [nn + '_1080.mp4', nn + '.mp4'].map((n) => path.join(dirs.media, n)).find((x) => fs.existsSync(x));
-        if (v) { g.videoPath = v; g.videoStatus = 'done'; out.videos++; }
+        if (v) { g.videoPath = v; g.videoStatus = 'done'; g.videoCleared = false; out.videos++; }
       }
     }
     const need = pr.sentences.filter((x) => !(x.ttsAudioPath && fs.existsSync(x.ttsAudioPath)));
@@ -4392,6 +4392,22 @@ function _batchRange(common = {}, s = {}) {
   }
   return { fromNum: f, toNum: t };
 }
+// 🔗 영상 참조가 비었는데 출력 폴더(media-N)에 그 그룹 번호의 영상이 남아 있으면 다시 잇는다(v0.5.49 · 아내 PC 실사고).
+//   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(Grok·Comfy 크레딧 보호).
+//   ⚠ ✕ 로 지운 영상(videoCleared)은 파일이 남아 있어도 되살리지 않는다. 그림이 없는 그룹도 건드리지 않는다.
+function autoRelinkVideos(pr, mediaDir) {
+  let n = 0;
+  for (const g of pr.groups) {
+    if (g.videoCleared) continue;
+    if (g.videoPath && fs.existsSync(g.videoPath)) continue;
+    if (!(g.imagePath && fs.existsSync(g.imagePath))) continue;
+    const nn = String(g.num).padStart(2, '0');
+    const v = [nn + '_1080.mp4', nn + '.mp4'].map((x) => path.join(mediaDir, x)).find((x) => { try { return fs.statSync(x).size > 0; } catch { return false; } });
+    if (v) { g.videoPath = v; g.videoStatus = 'done'; n++; }
+  }
+  return n;
+}
+function hasVideoFile(g) { return !!(g.videoPath && fs.existsSync(g.videoPath)); }
 function rangeNums(project, fromNum, toNum) {
   if (fromNum == null || toNum == null) return project.groups.map((g) => g.num);
   const a = Math.min(Number(fromNum), Number(toNum)), b = Math.max(Number(fromNum), Number(toNum));
@@ -4470,7 +4486,7 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   // 🔑 「사람이 직접 넣은 것」으로 표시 — sweepBadVisuals 가 검정·노이즈 판정에서 제외한다(_userAttached).
   //   ⚠ 이 경로는 파일을 미디어 폴더로 **복사하지 않고 원본을 가리킨다** — 지우면 사용자 원본이 사라진다.
   if (['.mp4', '.mov', '.webm', '.m4v'].includes(ext)) {
-    g.videoPath = fp; g.videoStatus = 'done'; g._userVideo = _visKey(fp);
+    g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp);
     log(`첨부(영상) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
   } else {
     g.imagePath = fp; g.imageStatus = 'done'; g._userImage = _visKey(fp);
@@ -4490,6 +4506,7 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
     // 단계별 삭제: 영상이 있으면 영상만 지워 이미지가 다시 보이게, 영상이 없으면 이미지를 지워 빈칸으로.
     if (g.videoPath) {
       g.videoPath = null; g.videoStatus = 'idle'; g.videoSourceImage = null;
+      g.videoCleared = true; // 파일은 폴더에 남는다 — 만들기의 자동 다시 연결이 되살리지 않게
       log(`영상 삭제: ${pr.title} G${groupNum} (이미지 유지)`);
     } else {
       g.imagePath = null; g.imageStatus = 'idle';
@@ -4825,6 +4842,7 @@ function buildSnapshot() {
         look: g.look || null,   // 🖼 채우기·반전·움직임
         visSpan: require('./core/visual-span').spanToOrd(pr, g),   // 🖼 아래층으로 이어 깐 범위(문장 순번)
         imagePromptStale: !!g.imagePromptStale,
+        videoCleared: !!g.videoCleared, // ✕ 로 지운 영상 — 만들기가 폴더의 파일로 되살리지 않게(v0.5.49)
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
@@ -5017,6 +5035,7 @@ function overlaySnapshot(parsed, snap) {
         if (gs.imagePrompt != null) g.imagePrompt = gs.imagePrompt;
         if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
         if (gs.motionNote != null) g.motionNote = gs.motionNote;
+        if (gs.videoCleared) g.videoCleared = true;
         if (gs.imageCleared) g.imageCleared = true;  // ✕ 삭제·이상 폐기 표시 복원 — 없으면 캐시가 되살린다
         // 📎 직접 첨부 표시 복원 — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 지운다
         if (gs.userImage) g._userImage = gs.userImage;
@@ -5427,6 +5446,17 @@ async function runMakeAllCore(opts = {}) {
     const done = new Set();
     const vmap = new Map();
     for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
+    {
+      let relinked = 0, have = 0, total = 0;
+      for (const pr of projects) {
+        relinked += autoRelinkVideos(pr, shortsDirs(outRoot, pr.shortsNum).media);
+        const vOnly = vmap.get(pr);
+        for (const g of pr.groups) if (vOnly.includes(g.num)) { total++; if (hasVideoFile(g)) have++; }
+      }
+      if (relinked) { log(`🔗 출력 폴더에 남아 있던 영상 ${relinked}개를 다시 연결했습니다 — 새로 만들지 않습니다`); pushDtoUpdate(); }
+      if (total && have === total) log(`🎬 3단계 — 영상 범위 ${total}개 모두 이미 있음 — 건너뜀`);
+      else if (have) log(`🎬 영상 ${have}/${total}개는 이미 있음 — 없는 ${total - have}개만 만듭니다`);
+    }
     const ttsReady = (pr, g) => {
       // Grok 'auto' 는 그룹 TTS 합으로 6s/10s 를 정하므로 TTS 필요. 고정(10s)이면 불필요.
       if (grokVideoPipeline) {
@@ -5443,6 +5473,7 @@ async function runMakeAllCore(opts = {}) {
         for (const g of pr.groups) {
           if (done.has(g)) continue;
           if (!vOnly.includes(g.num)) { done.add(g); continue; }                          // 영상 범위 밖
+          if (hasVideoFile(g)) { done.add(g); continue; }                                 // 이미 있음 — 다시 만들지 않는다
           if (!(g.imagePath && fs.existsSync(g.imagePath)) || !ttsReady(pr, g)) continue;  // 아직 준비 안 됨
           ready.push({ pr, g });
         }
@@ -5515,7 +5546,11 @@ async function runMakeAllCore(opts = {}) {
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _batchRange 가 미지정을 막음)
+      const vOnly0 = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _batchRange 가 미지정을 막음)
+      const _rl = autoRelinkVideos(pr, dirs.media);
+      if (_rl) { log(`🔗 ${prLabel(pr)} 출력 폴더에 남아 있던 영상 ${_rl}개를 다시 연결했습니다`); pushDtoUpdate(); }
+      const vOnly = vOnly0.filter((n) => { const g = pr.groups.find((x) => x.num === n); return !(g && hasVideoFile(g)); });
+      if (!vOnly.length) { log(`🎬 ${prLabel(pr)} 영상 범위 ${vOnly0.length}개 모두 이미 있음 — 건너뜀`); continue; }
       const t0 = Date.now();
       try {
         const vr = await genGroupVideos(pr, dirs.media, vOnly, videoEngine);
