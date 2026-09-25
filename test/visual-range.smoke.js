@@ -216,6 +216,10 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     await win.waitForTimeout(600);
     const wd = await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlayer[data-num="1"]'); return e ? parseFloat(e.style.width) : NaN; });
     ok(wd > 5 && wd < 90, `모서리를 끌면 크기가 바뀐다(너비 ${wd.toFixed(1)}%)`);
+    await key('Control+z');
+    await win.waitForTimeout(700);
+    const sz = await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlayer[data-num="1"]'), f = document.querySelector('[data-testid=stage-sel]'); return { lw: e ? parseFloat(e.style.width) : NaN, sw: f ? parseFloat(f.style.width) : null }; });
+    ok(sz.lw > 90 && (sz.sw == null || Math.abs(sz.sw - sz.lw) < 1), `🔑 ↶ 크기 되돌리면 선택 틀도 따라온다(그림 ${sz.lw.toFixed(1)}% · 틀 ${sz.sw == null ? '없음' : sz.sw.toFixed(1) + '%'})`);
     await win.locator('.cut').nth(0).locator('img.thumb').click();
     ok(await win.locator('[data-testid=vr-menu] button:has-text("자리·크기 원래대로")').count() === 1, '그림 메뉴에 「자리·크기 원래대로」');
     await win.click('[data-testid=vr-menu] button:has-text("자리·크기 원래대로")');

@@ -420,6 +420,7 @@ export default function App() {
   //   화면의 그림·영상 칸이 **실제로 다 그려질 때까지** 가운데 창으로 보여 준다(0.4초 안에 끝나면 띄우지 않는다).
   const [mediaLoad, setMediaLoad] = useState(null);   // { done, total, img, imgT, vid, vidT, sec }
   const mediaLoadKeyRef = useRef('');
+  const mediaLoadHiddenRef = useRef(false);   // 「숨기기」 — 이 대본이 다 뜰 때까지 다시 띄우지 않는다(세기·로그는 계속)
   const [playerOpen, setPlayerOpen] = useState(false);
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
   const impRef = useRef(null);          // 붙여넣기 textarea (비제어)
@@ -994,6 +995,17 @@ export default function App() {
       setStatus(oks.length ? `📥 문장 ${n}개에 Vrew 음성 연결` : '가져오기 실패 — 로그를 보세요');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // 🔗 작업물 다시 연결 — 출력 폴더에 파일은 있는데 그룹·문장이 가리키지 않을 때(그림 media-N/NN · 음성은 .vrew 에서 글자로 맞춰)
+  async function runRelinkWork() {
+    if (!loaded) return;
+    if (!(await uiConfirm('출력 폴더에 남아 있는 그림·영상·음성을 이 대본에 다시 연결합니다.\n\n· 그림·영상: 그룹 번호(media-N/01.png …)로 찾습니다\n· 음성: 음성이 없는 문장만, 출력 폴더의 .vrew 에서 글자로 맞춰 가져옵니다\n\n이미 연결된 것은 건드리지 않습니다. 계속할까요?'))) return;
+    setStatus('🔗 작업물 다시 연결하는 중…');
+    try {
+      const r = await api.relinkWork();
+      if (r && r.dto) setDto(r.dto);
+      setStatus(r && r.ok ? `🔗 그림 ${r.images} · 영상 ${r.videos} · 음성 ${r.voices} 연결${r.voiceMissing ? ` · 음성 못 찾음 ${r.voiceMissing}` : ''} (Ctrl+Z 되돌리기)` : '다시 연결 실패 — 로그를 보세요');
+    } catch (e) { logline('다시 연결 오류: ' + e.message); setStatus('다시 연결 오류'); }
+  }
   // 💾 .vrew · 🎬 MP4 굽기 · ✏ 렌더 버튼은 **⚡ 만들기 하나로 통일**했다(로이 2026-09-24).
   //   ⚡ 만들기가 이미 만든 음성·이미지·영상은 건너뛰고(이어받기) ④ 완성의 선택(.vrew / ✏ 화이트보드 / 🎬 유튜브 MP4)대로
   //   끝을 낸다 → 세 버튼은 결과가 사실상 같았다. IPC(export-vrew · whiteboard-build)는 테스트·CLI 용으로 남긴다.
@@ -1100,6 +1112,7 @@ export default function App() {
     if (!_mlKey) { mediaLoadKeyRef.current = ''; return undefined; }   // 화면을 비우면 다음에 같은 대본을 열어도 다시 센다
     if (_mlKey === mediaLoadKeyRef.current) return undefined;
     mediaLoadKeyRef.current = _mlKey;
+    mediaLoadHiddenRef.current = false;
     const t0 = performance.now();
     let shown = false, stop = false, timer = null;
     const scan = () => {
@@ -1116,7 +1129,7 @@ export default function App() {
         if (total > 0) { try { api.appendLog(`⏳ 그림·영상 불러오기 ${done}/${total}개 — ${sec.toFixed(1)}초${done < total ? ' (시간 초과 — 나머지는 뒤에서 계속 받습니다)' : ''}`); } catch (_) {} }
         setMediaLoad(null); return true;
       }
-      if (shown || sec > 0.4) { shown = true; setMediaLoad(st); }
+      if (!mediaLoadHiddenRef.current && (shown || sec > 0.4)) { shown = true; setMediaLoad(st); }
       return false;
     };
     const tick = () => { if (stop) return; if (!scan()) timer = setTimeout(tick, 250); };
@@ -2384,6 +2397,18 @@ export default function App() {
     return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // ↶ 되돌리기·다른 곳에서 그림 자리가 바뀌면 선택 틀도 지금 자리로 맞춘다(옛 틀이 남아 있었다 — 로이 2026-09-25)
+  useEffect(() => {
+    if (!stageSel || stageDragRef.current) return;
+    const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === stageSel.sn) : null;
+    const lay = pj && pj.cuts ? pj.cuts.find((c) => c.num === stageSel.num) : null;
+    if (!lay) return;
+    const st = stageVisualRef.current;
+    const el = st ? st.querySelector('.vlayer[data-num="' + lay.num + '"]') : null;
+    const b = defaultBoxOf(lay, el), o = stageSel.box;
+    if (Math.abs(b.x - o.x) + Math.abs(b.y - o.y) + Math.abs(b.w - o.w) + Math.abs(b.h - o.h) > 1e-4) setStageSel({ ...stageSel, box: b, guides: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dto]);
   // 커서가 다른 그룹으로 가면 선택을 푼다(그 그림이 안 보일 수 있다)
   useEffect(() => { if (stageSel && !(stageLayersRef.current.layers || []).some((c) => c.num === stageSel.num)) setStageSel(null); });
 
@@ -3105,7 +3130,7 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)"
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="🔍 검색" title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
               onChange={(e) => runFind(e.target.value, false)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
             <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
@@ -3169,6 +3194,9 @@ export default function App() {
         <button className="ghost" disabled={!loaded}
           title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
           onClick={runImportVrewAudio}><span className="rb-ic">📥</span> <span className="rb-t">Vrew 음성</span></button>
+        <button className="ghost" disabled={!loaded} data-testid="relink-work"
+          title="출력 폴더에 파일은 남아 있는데 화면에 그림·영상·음성이 비어 있을 때 — 다시 연결합니다.&#10;(그림·영상 = 그룹 번호 · 음성 = 출력 폴더 .vrew 의 자막 글자로 맞춤 · 이미 연결된 것은 그대로)"
+          onClick={runRelinkWork}><span className="rb-ic">🔗</span> <span className="rb-t">다시 연결</span></button>
               </span>
               {splitBar}
             </>)}
@@ -3359,7 +3387,7 @@ export default function App() {
             <div className="mload-bar"><i style={{ width: (mediaLoad.total ? (mediaLoad.done / mediaLoad.total) * 100 : 0).toFixed(1) + '%' }} /></div>
             <div className="mload-d">이미지 {mediaLoad.img}/{mediaLoad.imgT} · 영상 {mediaLoad.vid}/{mediaLoad.vidT} · {mediaLoad.sec.toFixed(0)}초
               <span className="mload-h">구글 드라이브에서 받아 오는 중이라 처음 열 때 오래 걸립니다 — 작업은 그대로 할 수 있습니다</span></div>
-            <button className="ghost" onClick={() => setMediaLoad(null)}>숨기기</button>
+            <button className="ghost" onClick={() => { mediaLoadHiddenRef.current = true; setMediaLoad(null); }}>숨기기</button>
           </div>
         </div>
       )}
@@ -4396,6 +4424,27 @@ export default function App() {
 }
 
 // ✏ 편집칸을 글 높이에 딱 맞춘다 — 그 줄 자리에서 고치는 느낌이 나도록(빈 줄·스크롤 없음).
+// 🖱 자막을 눌러 고치기 시작할 때 커서 자리 — 글자 위 = 맨 앞 · 글자 뒤 빈 곳 = 맨 끝(로이 2026-09-25)
+let _caretSide = null;
+function caretSideFromClick(ev, box) {
+  try {
+    if (!box) return 'start';
+    const r = document.createRange(); r.selectNodeContents(box);
+    const rs = [...r.getClientRects()].filter((q) => q.width > 0);
+    if (!rs.length) return 'end';
+    const last = rs[rs.length - 1];
+    if (ev.clientY > last.bottom + 1) return 'end';
+    if (ev.clientY >= last.top - 1 && ev.clientX > last.right + 1) return 'end';
+    return 'start';
+  } catch (_) { return 'start'; }
+}
+function applyCaretSide(el) {
+  if (!el || !_caretSide || el.dataset.caretSet) return;
+  el.dataset.caretSet = '1';
+  const side = _caretSide; _caretSide = null;
+  const put = () => { try { const n = side === 'end' ? el.value.length : 0; el.setSelectionRange(n, n); } catch (_) {} };
+  put(); requestAnimationFrame(put);
+}
 function fitSentBox(el) {
   if (!el) return;
   el.style.height = 'auto';
@@ -4502,7 +4551,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         <textarea defaultValue={ed.text} rows={1} spellCheck={false} autoFocus
                           disabled={edit.busy}
                           title="Enter 나누기 · 맨 앞 ←Backspace 윗줄과 합치기 · 맨 끝 Del 아랫줄 올리기 · Esc 취소"
-                          ref={(el) => { edit.ref.current = el; fitSentBox(el); }}
+                          ref={(el) => { edit.ref.current = el; fitSentBox(el); applyCaretSide(el); }}
                           onInput={(ev) => fitSentBox(ev.currentTarget)}
                           onBlur={() => edit.commit()}
                           onKeyDown={(ev) => {
@@ -4555,6 +4604,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           const clickN = lnEl ? Number(lnEl.getAttribute('data-ln')) : (lines.length ? lines[0].n : 1);
                           if (onCursor) onCursor(pr.shortsNum, clickN);
                           const cl = detail ? lines.find((x) => x.n === clickN) : null;
+                          _caretSide = caretSideFromClick(ev, lnEl ? (lnEl.querySelector('.clip-cap') || lnEl) : ev.currentTarget);
                           edit.start(pr.shortsNum, c.num, si, s.text, 1, cl ? { n: cl.n, from: cl.range.from, to: cl.range.to } : null);
                         }}>
                         {lines.map((l, li) => {
@@ -4607,7 +4657,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                       <textarea className="clip-edit" defaultValue={String(s.text || '').slice(ed.line.from, ed.line.to)} rows={1} spellCheck={false} autoFocus
                                         disabled={edit.busy}
                                         title="Enter 나누기 · ↑↓ 다음 클립으로(고치는 채로) · 맨 앞 ←Backspace 윗문장과 합치기 · 맨 끝 Del 아랫문장 올리기 · Esc 취소"
-                                        ref={(el) => { edit.ref.current = el; fitSentBox(el); }}
+                                        ref={(el) => { edit.ref.current = el; fitSentBox(el); applyCaretSide(el); }}
                                         onInput={(ev) => fitSentBox(ev.currentTarget)}
                                         onBlur={() => edit.commit()}
                                         onClick={(ev) => ev.stopPropagation()}

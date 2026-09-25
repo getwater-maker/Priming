@@ -2236,6 +2236,66 @@ ipcMain.handle('export-remotion', async (_e, args = {}) => {
 //   로이 워크플로(2026-09-03): ① 「🖼 화면만」으로 .vrew 를 내보낸다(음성 자리는 무음)
 //   ② Vrew 에서 AI 목소리를 입혀 **저장** ③ 여기서 그 음성만 되가져온다 ④ 이후는 기존 파이프라인 그대로.
 //   🔑 .vrew 를 **읽기만** 한다 — 고쳐 쓰지 않는다(core/vrew-audio.js 머리 주석 참조).
+// 🔗 작업물 다시 연결 — 그림·영상·음성 **파일은 폴더에 그대로 있는데 연결만 끊긴** 대본을 되살린다(2026-09-25 [고전_0907]·[고전_0908] 사고 복구).
+//   · 그림·영상: 연결이 없는 그룹만 media-N/NN.(png|jpg|webp) · NN_1080.mp4 → NN.mp4 (앱이 그룹 번호로 파일 이름을 짓는다 — renumberMediaFiles)
+//   · 음성: 연결이 없는 문장만 — 출력 폴더의 .vrew(그 대본으로 만든 것)를 **임시 폴더로** 읽어 글자로 맞춘 뒤 그 문장 것만 옮긴다.
+//     🔑 번호로 잇지 않는다 — 문장을 합치거나 나눈 뒤면 번호가 밀려 남의 음성이 붙는다. 이미 연결된 음성은 절대 건드리지 않는다.
+ipcMain.handle('relink-work', async () => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const VA = require('./core/vrew-audio');
+  const media = require('./core/media-utils');
+  undoPush('작업물 다시 연결');
+  const out = { images: 0, videos: 0, voices: 0, voiceMissing: 0, vrew: null, notes: [] };
+  for (const pr of S.parsed.projects) {
+    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+    for (const g of pr.groups) {
+      const nn = String(g.num).padStart(2, '0');
+      if (!(g.imagePath && fs.existsSync(g.imagePath))) {
+        const f = ['png', 'jpg', 'jpeg', 'webp'].map((e) => path.join(dirs.media, nn + '.' + e)).find((x) => fs.existsSync(x));
+        if (f) { g.imagePath = f; g.imageStatus = 'done'; g.imageStale = false; g.imagePromptStale = false; g.imageCleared = false; out.images++; }
+      }
+      if (!(g.videoPath && fs.existsSync(g.videoPath))) {
+        const v = [nn + '_1080.mp4', nn + '.mp4'].map((n) => path.join(dirs.media, n)).find((x) => fs.existsSync(x));
+        if (v) { g.videoPath = v; g.videoStatus = 'done'; out.videos++; }
+      }
+    }
+    const need = pr.sentences.filter((x) => !(x.ttsAudioPath && fs.existsSync(x.ttsAudioPath)));
+    if (!need.length) continue;
+    const base = path.basename(S.scriptPath || '', '.md');
+    const cands = [path.join(S.outRoot || '', base + '.vrew')].concat(
+      (() => { try { return fs.readdirSync(S.outRoot).filter((n) => /\.vrew$/i.test(n)).map((n) => path.join(S.outRoot, n)); } catch { return []; } })());
+    const vrew = cands.find((x) => x && fs.existsSync(x));
+    if (!vrew) { out.voiceMissing += need.length; out.notes.push('음성: 출력 폴더에 .vrew 가 없어 가져오지 못했습니다'); continue; }
+    out.vrew = path.basename(vrew);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-relink-'));
+    try {
+      const clone = { sentences: pr.sentences.map((x) => ({ num: x.num, text: x.text, id: x.id })) };
+      // 구글드라이브(G:)의 큰 .vrew(70MB)는 처음 읽을 때 받아 오느라 바로 읽으면 ETIMEDOUT 이 난다(실측 20초) → 먼저 임시 폴더로 복사
+      const local = path.join(tmp, 'src.vrew');
+      log(`🔗 ${path.basename(vrew)} 를 읽는 중… (구글 드라이브면 처음엔 수십 초)`);
+      try { await fs.promises.copyFile(vrew, local); } catch (e1) { await new Promise((r) => setTimeout(r, 3000)); await fs.promises.copyFile(vrew, local); }
+      const rep = await VA.importVrewAudio(clone, local, path.join(tmp, 'tts'), { log: () => {}, probeDur: (f) => media.getMediaDuration(f) });
+      const byId = new Map(clone.sentences.map((x) => [x.id, x]));
+      fs.mkdirSync(dirs.tts, { recursive: true });
+      for (const x of need) {
+        const c = byId.get(x.id);
+        if (!c || !c.ttsAudioPath || !(c.ttsDurationSec > 0)) { out.voiceMissing++; continue; }
+        const dst = path.join(dirs.tts, x.num + '.mp3');
+        try { fs.copyFileSync(c.ttsAudioPath, dst); } catch (e) { out.voiceMissing++; continue; }
+        x.ttsAudioPath = dst; x.ttsDurationSec = c.ttsDurationSec; x.ttsStatus = 'done';
+        const w = path.join(dirs.tts, x.num + '.wav'); if (fs.existsSync(w)) { try { fs.rmSync(w, { force: true }); } catch (_) {} }
+        out.voices++;
+      }
+      if (rep && rep.warn) for (const w of rep.warn) out.notes.push(w);
+    } catch (e) { out.voiceMissing += need.length; out.notes.push('음성: ' + e.message.split('\n')[0]); }
+    finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
+  }
+  storeActive(); pushDtoUpdate();
+  log(`🔗 작업물 다시 연결 — 그림 ${out.images} · 영상 ${out.videos} · 음성 ${out.voices}${out.vrew ? ' (' + out.vrew + ' 에서 글자로 맞춤)' : ''}`
+    + (out.voiceMissing ? ` · 음성 못 찾은 문장 ${out.voiceMissing}개(🎤 로 만드세요)` : '') + (out.notes.length ? ' · ' + out.notes.join(' · ') : ''));
+  return { ok: true, ...out, dto: P.toDTO(S.parsed) };
+});
+
 ipcMain.handle('import-vrew-audio', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null } = args;
@@ -5146,16 +5206,23 @@ async function checkExternalScriptChange() {
   if (W.running) return;
   const p = S.scriptPath;
   if (!p || !S.parsed || S.parsed.kind === 'book' || currentMode() !== 'longform') return;
+  // 🔴 이 대본·이 파싱본으로 시작한 대조다 — stat 을 기다리는 사이 큐에서 다른 대본을 고르면 **다른 대본의 해시와 비교해**
+  //   멀쩡한 대본을 「밖에서 바뀜」으로 다시 읽고, 그 결과를 **지금 활성인 다른 대본 칸에 넣었다**(2026-09-25 [고전_0907]·[고전_0908]
+  //   그림 36개가 「새 이미지 필요」가 된 사고 — 대본 4개를 3초 안에 번갈아 골랐다). 기다린 뒤 바뀌었으면 이번 틱은 버린다.
+  const parsed0 = S.parsed;
+  const same = () => S.scriptPath === p && S.parsed === parsed0;
   let st;
   try { st = await fs.promises.stat(p); } catch { return; }   // G: 가 잠깐 사라지면 다음 틱에 다시 본다
+  if (!same()) return;
   const fresh = W.path !== p;
   if (fresh) { W.path = p; W.mtime = st.mtimeMs; W.size = st.size; W.changedAt = Date.now() - 2000; W.deferLogged = false; }
   else if (st.mtimeMs !== W.mtime || st.size !== W.size) { W.mtime = st.mtimeMs; W.size = st.size; W.changedAt = Date.now(); return; }
   else if (!W.changedAt) return;   // 바뀐 적 없음
   if (Date.now() - W.changedAt < 1400) return;   // 아직 쓰는 중일 수 있다
-  const known = S.parsed._srcHash;
+  const known = parsed0._srcHash;
   if (!known) { W.changedAt = 0; return; }     // 해시를 모르는 파싱본 — 헛다시읽기 대신 기준만 잡는다
   const h = scriptHash(p);
+  if (!same()) return;
   if (!h || h === known) { W.changedAt = 0; W.deferLogged = false; return; }
   if (_jobsBusy()) {
     if (!W.deferLogged) { log('🔁 대본(.md)이 밖에서 바뀌었습니다 — 지금 작업이 끝나면 자동으로 다시 읽습니다.'); W.deferLogged = true; }
@@ -5163,8 +5230,10 @@ async function checkExternalScriptChange() {
   }
   W.running = true;
   try {
+    if (!same()) return;
     try { writeSnapshotSync(); } catch (_) {}   // 방금까지의 음성·이미지·편집을 먼저 저장 → 새 파싱에 그대로 얹힌다
     const { parsed, note } = buildParsedForScript(p, currentMode(), S.preset);
+    if (!same()) return;   // 파싱하는 사이 바뀌었으면 넣지 않는다(다른 대본 칸을 덮는다)
     S.parsed = parsed;
     applyIntroFromScript(S.parsed, p, currentMode());
     storeActive();

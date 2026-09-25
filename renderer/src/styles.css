@@ -646,3 +646,19 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 
 .vr-span{font-size:11px;color:#8a6d3b;background:#fbf1de;border:1px dashed #d8c7a8;border-radius:6px;padding:1px 8px;margin:2px 0 4px;display:inline-block}
 .thumb.none.covered{display:flex;align-items:center;justify-content:center;color:#8a7a62;font-size:13px;background:repeating-linear-gradient(45deg,#f4ecdd,#f4ecdd 8px,#efe4d0 8px,#efe4d0 16px)}
+
+/* 🔎 검색창 — 안쪽 입력칸을 둥근 틀과 한 몸으로(따로 테두리가 보이고 안내문이 잘렸다 — 로이 2026-09-25) */
+.findbar input,.findbar input:focus{border:0;outline:0;box-shadow:none;background:transparent;padding:0 2px;height:100%;font-size:12.5px;color:var(--strong)}
+.findbar:focus-within{border-color:var(--accent)}
+.findbar input::placeholder{color:#a8977c}
+
+/* 🎨 서식 메뉴 — 어두운 막대를 걷고 다른 메뉴(①~④)와 같은 밝은 결로(로이 2026-09-25) */
+.ribbon .cf-bar,.ribbon .cf-bar.idle{background:#fffdf9;color:var(--strong);border:1px solid #e2d5c0;border-radius:11px;box-shadow:none}
+.ribbon .cf-bar .cf-sel{color:#8a6f45;background:#f3ead9;border:1px solid #e8dcc4;border-radius:7px;padding:0 8px;font-size:11.5px}
+.ribbon .cf-bar .cf-hint{color:var(--muted)}
+.ribbon .cf-bar button.ghost{color:var(--accent-d);border-color:#d9c6a6;background:#fff}
+.ribbon .cf-bar button.ghost:hover,.ribbon .cf-bar button.ghost.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.ribbon .cf-bar select,.ribbon .cf-bar input.n{background:#fff;color:var(--strong);border:1px solid var(--line);border-radius:6px}
+.ribbon .cf-bar .cf-div{background:#e2d5c0}
+.ribbon .cf-bar .cf-cbtn{color:var(--strong)}
+.ribbon .cf-bar .cf-savedef{border-color:var(--accent) !important;color:var(--accent-d) !important}
