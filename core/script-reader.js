@@ -17,6 +17,39 @@ const { tsCleanTitle: cleanHead } = require('./yt-chapters');
 // 비교 지문은 파서가 지우는 문자(따옴표·이모지)를 뺀다 — 정규식 정본은 sentence-splitter(복제하지 않는다)
 const { MATCH_PATTERNS } = require('./sentence-splitter');
 
+/**
+ * 📝 한 장의 메모 줄들 → 보기 좋은 행 (v0.5.67 · 로이 「한 줄로 늘어놓으면 너무 혼란스럽다 — 깔끔하게」)
+ *   권장 대본 형식(한 항목 = 한 줄):
+ *     > 📝 **강의안 근거**                ← 제목(짧은 줄 · `- ` 없음)
+ *     > 📝 - 구성: 공감 질문 → 감정 인정   ← 항목(`- 이름: 내용` · 이름은 14자 이하)
+ *     > 📝 - 샷 5: 감정 인정 (1기 2강)
+ *   옛 형식 `[강의안 근거 · 낭독 제외] 긴 글` 은 제목 + 글 한 덩어리로 보인다(대본을 안 고쳐도 깨지지 않는다).
+ * @returns {{kind:'title'|'item'|'text', label?:string, text:string}[]}
+ */
+function noteRows(lines) {
+  const rows = [];
+  for (const raw of lines) {
+    let t = String(raw || '').replace(/\*\*/g, '').trim();
+    if (!t) continue;
+    const br = t.match(/^\[([^\]]+?)\]\s*(.*)$/);   // [강의안 근거 · 낭독 제외] …
+    if (br) {
+      const title = br[1].replace(/\s*·\s*낭독\s*제외\s*/g, '').trim();
+      if (title) rows.push({ kind: 'title', text: title });
+      t = br[2].trim();
+      if (!t) continue;
+    }
+    const it = t.match(/^[-•]\s+(.*)$/);
+    if (it) {
+      const body = it[1].trim();
+      const kv = body.match(/^([^:：]{1,14})\s*[:：]\s+(.+)$/);
+      rows.push(kv ? { kind: 'item', label: kv[1].trim(), text: kv[2].trim() } : { kind: 'item', label: '', text: body });
+      continue;
+    }
+    rows.push(!rows.length && t.length <= 20 ? { kind: 'title', text: t } : { kind: 'text', text: t });
+  }
+  return rows;
+}
+
 /** 한 편(DTO) → 읽기 블록 */
 function readerBlocks(pr, { headings = true, notes = true } = {}) {
   const out = [];
@@ -33,7 +66,8 @@ function readerBlocks(pr, { headings = true, notes = true } = {}) {
     const h2 = cleanHead(h2raw), h3 = cleanHead(phraw);
     if (h2 && h2 !== lastH2) {
       out.push({ t: 'h2', text: h2 }); lastH2 = h2; lastH3 = '';
-      for (const text of (noteMap.get(h2) || [])) out.push({ t: 'note', text });
+      const ls = noteMap.get(h2);
+      if (ls && ls.length) out.push({ t: 'note', text: ls.join('\n'), rows: noteRows(ls) });
       noteMap.delete(h2);
     }
     if (headings && h3 && h3 !== lastH3 && h3 !== lastH2) { out.push({ t: 'h3', text: h3 }); lastH3 = h3; }
@@ -165,6 +199,25 @@ function paragraphEdits(oldTexts, newText) {
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
+ * 📝 메모 칸 안쪽 HTML — 화면과 PDF 가 **같은 함수**(두 벌이면 보이는 모양이 갈린다).
+ *   st = 부분별 인라인 스타일(화면) · 없으면 class 만(PDF 는 <style> 에서 꾸민다).
+ */
+const NOTE_PART = { title: 'nt-title', list: 'nt-list', label: 'nt-label', text: 'nt-text', para: 'nt-para' };
+function noteInnerHtml(b, st = null) {
+  const a = (k) => `class="${NOTE_PART[k]}"` + (st && st[k] ? ` style="${st[k]}"` : '');
+  const rows = (b.rows && b.rows.length) ? b.rows : [{ kind: 'text', text: b.text || '' }];
+  let html = '', list = '';
+  const flush = () => { if (list) { html += `<div ${a('list')}>${list}</div>`; list = ''; } };
+  for (const r of rows) {
+    if (r.kind === 'item') { list += `<div ${a('label')}>${esc(r.label || '·')}</div><div ${a('text')}>${esc(r.text)}</div>`; continue; }
+    flush();
+    html += r.kind === 'title' ? `<div ${a('title')}>📝 ${esc(r.text)}</div>` : `<div ${a('para')}>${esc(r.text)}</div>`;
+  }
+  flush();
+  return html;
+}
+
+/**
  * A4 인쇄용 HTML(한 쪽 = A4 한 장 기준). 여러 쪽 모아 찍기는 main 이 PDF 단계에서 한다.
  * @param {object[]} blocks readerBlocks 결과(여러 편이면 이어 붙인 것)
  * @param {{fontPt?:number, groupNums?:boolean}} o
@@ -174,7 +227,7 @@ function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
     if (b.t === 'h1') return `<h1>${esc(b.text)}</h1>`;
     if (b.t === 'h2') return `<h2>${esc(b.text)}</h2>`;
     if (b.t === 'h3') return `<h3>${esc(b.text)}</h3>`;
-    if (b.t === 'note') return `<div class="note">📝 ${esc(b.text)}</div>`;
+    if (b.t === 'note') return `<div class="note">${noteInnerHtml(b)}</div>`;
     const inner = b.sents.map((s) => (s.speaker ? `<b class="spk">${esc(s.speaker)}</b> ` : '') + esc(s.text)).join(' ');
     return `<p>${groupNums ? `<span class="gn">G${b.groupNum}</span>` : ''}${inner}</p>`;
   }).join('\n');
@@ -188,7 +241,11 @@ h2 { font-size: ${(f * 1.25).toFixed(1)}pt; margin: ${(f * 1.6).toFixed(1)}pt 0 
 h3 { font-size: ${(f * 1.02).toFixed(1)}pt; color: #6b5a47; margin: ${(f * 1.0).toFixed(1)}pt 0 ${(f * 0.3).toFixed(1)}pt; break-after: avoid; }
 p { margin: 0 0 ${(f * 0.75).toFixed(1)}pt; text-align: left; orphans: 2; widows: 2; }
 .spk { color: #8a4b1f; }
-.note { font-size: 0.82em; line-height: 1.55; color: #5b6470; background: #f3f5f8; border-left: 3pt solid #9fb0c4; padding: ${(f * 0.35).toFixed(1)}pt ${(f * 0.6).toFixed(1)}pt; margin: 0 0 ${(f * 0.6).toFixed(1)}pt; break-inside: avoid; }
+.note { font-size: 0.8em; line-height: 1.5; color: #4d5663; background: #f3f5f8; border-left: 3pt solid #9fb0c4; padding: ${(f * 0.45).toFixed(1)}pt ${(f * 0.7).toFixed(1)}pt; margin: 0 0 ${(f * 0.7).toFixed(1)}pt; break-inside: avoid; }
+.nt-title { font-weight: 700; color: #3f5a78; margin-bottom: 0.3em; }
+.nt-list { display: grid; grid-template-columns: max-content 1fr; column-gap: 0.9em; row-gap: 0.2em; }
+.nt-label { font-weight: 700; color: #6a7686; white-space: nowrap; }
+.nt-para { margin: 0.15em 0; }
 .gn { display: inline-block; min-width: 2.6em; color: #a89682; font-size: 0.78em; font-weight: 700; }
 </style></head><body>
 ${body}
@@ -207,4 +264,4 @@ function nUpLayout(n) {
 }
 const PER_SHEET = [1, 2, 4, 6, 9];
 
-module.exports = { readerBlocks, readerStats, readerHtml, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };
+module.exports = { noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };

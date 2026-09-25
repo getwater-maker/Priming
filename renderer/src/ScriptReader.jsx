@@ -20,7 +20,15 @@ const H_STYLE = {
   h1: 'font-size:1.55em;line-height:1.35;margin:0 0 0.9em;padding-bottom:0.4em;border-bottom:2px solid #333',
   h2: 'font-size:1.22em;margin:1.6em 0 0.4em',
   h3: 'font-size:1em;color:#6b5a47;margin:1.1em 0 0.25em',
-  note: 'font-size:0.8em;line-height:1.55;color:#5b6470;background:#f3f5f8;border-left:3px solid #9fb0c4;border-radius:4px;padding:0.45em 0.75em;margin:0 0 0.8em;user-select:text',
+  note: 'font-size:0.8em;line-height:1.55;color:#4d5663;background:#f3f5f8;border-left:3px solid #9fb0c4;border-radius:4px;padding:0.6em 0.9em;margin:0 0 0.9em;user-select:text',
+};
+// 📝 메모 칸 안쪽(제목 · 「이름: 내용」 표) — 모양은 core noteInnerHtml(PDF 와 같은 함수), 여기선 인라인 스타일만 준다
+const NOTE_ST = {
+  title: 'font-weight:700;color:#3f5a78;margin-bottom:0.35em',
+  list: 'display:grid;grid-template-columns:max-content 1fr;column-gap:0.9em;row-gap:0.25em',
+  label: 'font-weight:700;color:#6a7686;white-space:nowrap',
+  text: '',
+  para: 'margin:0.15em 0',
 };
 // 고칠 수 없는 조각(제목·화자 이름·그룹 번호) = data-ne. 글을 읽을 때 건너뛴다. 이름 칩의 뒤 공백도 칩 안에 둔다
 //   → 읽은 글 = 문장들을 공백 하나로 이은 글(joinParagraph)과 정확히 같다.
@@ -35,7 +43,7 @@ function docModel(dto, headings, groupNums, notes) {
   let html = '';
   for (const pr of ((dto && dto.projects) || [])) {
     for (const b of sr.readerBlocks(pr, { headings, notes })) {
-      if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">📝 ${escHtml(b.text)}</div>`; continue; }
+      if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">${sr.noteInnerHtml(b, NOTE_ST)}</div>`; continue; }
       if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}</${b.t}>`; continue; }
       const key = 'p' + paras.length;
       paras.push({ key, shortsNum: pr.shortsNum, groupNum: b.groupNum, base: b.sents, last: sr.joinParagraph(b.sents.map((s) => s.text)), dirty: false });

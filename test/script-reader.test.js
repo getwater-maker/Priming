@@ -93,8 +93,24 @@ console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제�
   const b0 = R.readerBlocks(pr, { notes: false });
   ok(!b0.some((x) => x.t === 'note') && eq(b0, b.filter((x) => x.t !== 'note')), 'notes:false = 메모만 빠지고 나머지 블록은 같다');
   ok(!r.projects[0].sentences.some((s) => /근거|메모/.test(s.text)), '🔑 메모는 낭독(문장)에 들어가지 않는다');
-  ok(/class="note">📝 \[강의안 근거/.test(R.readerHtml(b)), 'A4 PDF HTML 에도 메모 칸');
-  ok(/b\.t === 'note'\) \{ html \+= `<div \$\{NE\}/.test(jsx), '화면의 메모 칸은 고칠 수 없는 칸(data-ne) — 문단 편집에 섞이지 않는다');
+  ok(/class="note"><div class="nt-title">📝 강의안 근거<\/div>/.test(R.readerHtml(b)), 'A4 PDF HTML 에도 메모 칸 — 옛 형식 [강의안 근거 · 낭독 제외] 은 제목으로');
+  ok(/b\.t === 'note'\) \{ html \+= `<div \$\{NE\}/.test(jsx) && /sr\.noteInnerHtml\(b, NOTE_ST\)/.test(jsx), '화면의 메모 칸은 고칠 수 없는 칸(data-ne) · 모양은 PDF 와 같은 함수');
+  // v0.5.67 — 한 항목 = 한 줄 형식(로이 「한 줄로 늘어놓으면 혼란스럽다」)
+  const rows = R.noteRows(['**강의안 근거**', '- 구성: 공감 질문 → 감정 인정', '- 샷 5: 감정 인정 (1기 2강)', '- 이름표 없는 항목', '그냥 긴 설명 문장이 여기에 한 줄 더 붙어 있습니다.']);
+  ok(eq(rows, [
+    { kind: 'title', text: '강의안 근거' },
+    { kind: 'item', label: '구성', text: '공감 질문 → 감정 인정' },
+    { kind: 'item', label: '샷 5', text: '감정 인정 (1기 2강)' },
+    { kind: 'item', label: '', text: '이름표 없는 항목' },
+    { kind: 'text', text: '그냥 긴 설명 문장이 여기에 한 줄 더 붙어 있습니다.' },
+  ]), '제목 · 「- 이름: 내용」 · 이름 없는 항목 · 글');
+  ok(eq(R.noteRows(['- 고증: 1851 『소품과 부록』: 2권']).map((x) => x.label), ['고증']), '첫 콜론에서만 가른다');
+  const md2 = ['# t', '## 장', '> 📝 **강의안 근거**', '> 📝 - 구성: 가 → 나', '> 📝 - 길이: 약 720자', '문장입니다.'].join('\n');
+  const b2 = R.readerBlocks(P.toDTO(parseLongform(md2, 'x')).projects[0]);
+  const n2 = b2.filter((x) => x.t === 'note');
+  ok(n2.length === 1 && n2[0].rows.length === 3, '한 장의 여러 메모 줄 = 칸 하나(제목 + 항목 둘)');
+  const h2html = R.noteInnerHtml(n2[0]);
+  ok(/nt-title">📝 강의안 근거/.test(h2html) && (h2html.match(/nt-label/g) || []).length === 2 && /nt-list/.test(h2html), '칸 안 = 제목 한 줄 + 「이름 | 내용」 표');
 
   // 🔑 이어받기(작업본 복원 — 재파싱 없음)에서도 메모가 보인다: .md 에서 다시 읽는다(main.js projectsFromSnapshot 원문 실행)
   const os = require('os');
