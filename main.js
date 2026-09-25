@@ -2469,7 +2469,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
   const R = require('./core/script-reader');
   const per = R.PER_SHEET.includes(Number(args.perSheet)) ? Number(args.perSheet) : 1;
   const dto = P.toDTO(S.parsed);
-  const blocks = [].concat(...(dto.projects || []).map((p) => R.readerBlocks(p, { headings: args.headings !== false })));
+  const blocks = [].concat(...(dto.projects || []).map((p) => R.readerBlocks(p, { headings: args.headings !== false, notes: args.notes !== false })));
   const html = R.readerHtml(blocks, { fontPt: args.fontPt, groupNums: !!args.groupNums });
   const tmp = path.join(os.tmpdir(), `priming-reader-${process.pid}-${Date.now()}.html`);
   fs.writeFileSync(tmp, html, 'utf8');
