@@ -784,3 +784,15 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .vr-menu .vr-grp-h{display:flex;width:0;min-width:100%;box-sizing:border-box}
 .vr-menu .vr-grp-h .t{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vr-menu .vr-grp-h .d{flex:none;white-space:nowrap}
+/* 📄 대본 보기 — 리본 오른쪽 끝에 늘(메뉴와 무관 · 가로로 넘쳐도 sticky 로 보임) */
+.ribbon .hgroup.rb-reader{margin-left:auto;position:sticky;right:0;background:var(--bg);z-index:2}
+.ribbon .hgroup + .hgroup.rb-reader,.ribbon .splitbar + .hgroup.rb-reader{border-left:1px solid var(--line);padding-left:10px}
+.ribbon .cf-bar + .hgroup.rb-reader{border-left:1px solid var(--line);padding-left:10px}
+/* 🖼 범위 선이 그룹 밖에서 7px 왼쪽 점선으로 꺾여 「끊기고 자리가 다르게」 보이던 것(로이 2026-09-26) — 같은 자리 · 같은 실선으로 이어 긋는다 */
+.rail .rseg.ext,.rail.live .rseg.ext,.rail.hov .rseg.ext{left:11px;width:3px;border-left:0;background:#d8c7a8}
+.rail.live .rseg.ext,.rail.hov .rseg.ext,.rail.pin .rseg.ext{background:var(--accent)}
+.rail .vr-h.ext{left:6px}
+/* ➕ 삽입 범위 메뉴(막대 아이콘·위 목록 칩) — 폭은 항목 기준, 머리줄은 폭에 안 낀다(그림 메뉴 .vr-grp-h 와 같은 방식) */
+.vr-menu .vr-ins-h{display:flex;flex-direction:column;width:0;min-width:100%;box-sizing:border-box}
+.vr-menu .vr-ins-h .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.vr-menu .vr-ins-h .s{white-space:normal;word-break:keep-all}

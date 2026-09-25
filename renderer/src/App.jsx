@@ -2029,6 +2029,7 @@ export default function App() {
   async function switchModeForChannel(name) {
     restoringItemRef.current = false; // 사용자가 채널을 직접 골랐으니 그 채널 기본값(배속·스타일·AI고지)을 적용
     setPresetName(name);
+    setMenu('script');   // 채널을 바꾸면 늘 「대본·음성」부터(로이 2026-09-26)
     try {
       const p = await api.getPresetDetail(name);
       // 옛 저장값(startMode:'shorts'|'playlist')은 롱폼으로 정규화 — 제거된 모드 화면에 진입하지 않게.
@@ -3549,7 +3550,7 @@ export default function App() {
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}><span className="rb-ic">📋</span> <span className="rb-t">장면 계획</span></button>
             </>)}
             <span className="hdiv" />
-            <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
+            {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
             {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
@@ -3572,7 +3573,8 @@ export default function App() {
                   <label className="chk"><input type="checkbox" data-testid="bgm-on" checked={!!bgmCfg.on} disabled={!presetName} onChange={(e) => (e.target.checked && !bgmCfg.path ? pickBgm(false) : saveBgm({ on: e.target.checked }))} />🎵 배경음악</label>
                   <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
                   <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
-                  <input className="nbox" data-testid="bgm-vol" type="number" min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
+                  <span className="meta">음량</span>
+                  <input className="nbox" data-testid="bgm-vol" type="number" min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
                 </span>
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
@@ -3594,6 +3596,10 @@ export default function App() {
                 onDone={() => { setCapSel(null); setCapPanel(null); }}
                 onSaveDefault={saveCapDefault} />
             )}
+            {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
+            <span className="hgroup rb-reader">
+              <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
+            </span>
           </div>
         )}
       </header>
@@ -3638,9 +3644,13 @@ export default function App() {
         const go = (fn) => () => { setInsMenu(null); fn(); };
         return (<>
           <div className="vr-menu-bg" onMouseDown={() => setInsMenu(null)} />
-          <div className="vr-menu" data-testid="ins-menu" style={{ left: Math.min(insMenu.x, window.innerWidth - 260), top: Math.min(insMenu.y, window.innerHeight - 260) }}>
+          <div className="vr-menu fit" data-testid="ins-menu" style={{ left: Math.min(insMenu.x, window.innerWidth - 260), top: Math.min(insMenu.y, window.innerHeight - 260) }}>
             {/* 🔑 파일 이름은 앞 몇 글자만 — 긴 이름이 메뉴 폭을 늘렸다(로이 2026-09-25) · 전체 이름은 툴팁 */}
-            <div className="vr-cur" title={o.name || ''}>{o.kind === 'audio' ? '🎵' : o.kind === 'video' ? '🎬' : '🖼'} {shortName(o.name)} — 지금: {ovClipTxt(cc)}{o.once ? ' · 1회' : ''} · 현재 클립 {cur}</div>
+            {/* 메뉴 폭 = 항목 기준(그림 메뉴와 같은 규칙 · 로이 2026-09-26) — 머리줄은 폭 계산에 안 끼고 이름은 …, 상태는 줄바꿈 */}
+            <div className="vr-cur vr-ins-h" title={`${o.name || ''} — 지금: ${ovClipTxt(cc)}${o.once ? ' · 1회' : ''} · 현재 클립 ${cur}`}>
+              <span className="t">{o.kind === 'audio' ? '🎵' : o.kind === 'video' ? '🎬' : '🖼'} {shortName(o.name)}</span>
+              <span className="s">지금: {ovClipTxt(cc)}{o.once ? ' · 1회' : ''} · 현재 클립 {cur}</span>
+            </div>
             <button onClick={go(() => insRange(insMenu.sn, o.id, 1, n))}>전체 클립으로</button>
             <button onClick={go(() => insRange(insMenu.sn, o.id, 1, cur))}>처음부터 현재 클립까지</button>
             <button onClick={go(() => insRange(insMenu.sn, o.id, cur, n))}>현재 클립부터 끝까지</button>

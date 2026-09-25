@@ -58,9 +58,17 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
 
+    // 📄 대본 보기 = 메뉴와 상관없이 늘 리본 오른쪽 끝(로이 2026-09-26) — ④ 완성에서는 뺐다
+    const btn = win.locator('[data-testid="reader-open"]');
+    const seen = [];
+    for (const m of ['script', 'image', 'video', 'finish', 'insert', 'format']) { await menu(win, m); seen.push(await btn.count()); }
+    ok(seen.every((n) => n === 1), `「📄 대본 보기」가 모든 메뉴에서 보인다 (${seen.join('/')})`);
+    ok(await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")').count() === 0, '④ 완성에는 없다');
+    const geo = await win.evaluate(() => { const r = document.querySelector('[data-testid=ribbon]').getBoundingClientRect(), b = document.querySelector('[data-testid=reader-open]').getBoundingClientRect();
+      const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = document.elementFromPoint(x, y);
+      return { gap: Math.round(r.right - b.right), hit: !!(hit && hit.closest('[data-testid=reader-open]')) }; });
+    ok(geo.gap <= 24 && geo.hit, `리본 오른쪽 끝(여백 ${geo.gap}px) · 눌린다`);
     await menu(win, 'finish');
-    const btn = win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")');
-    ok(await btn.count() === 1, '④ 완성에 「📄 대본 보기」');
     await btn.click();
     await win.waitForSelector('[data-testid="script-reader"]', { timeout: 5000 });
     const R = win.locator('[data-testid="script-reader"]');

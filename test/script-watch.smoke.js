@@ -84,7 +84,7 @@ const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (Date.now(
 
     // ④ 📄 대본 보기가 열려 있을 때 밖에서 고치면 새로 그리고 알린다
     await menu(win, 'finish');
-    await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")').click();
+    await win.locator('[data-testid="reader-open"]').click();
     const R = win.locator('[data-testid="script-reader"]');
     await R.waitFor({ timeout: 5000 });
     const cur = fs.readFileSync(MD, 'utf8');

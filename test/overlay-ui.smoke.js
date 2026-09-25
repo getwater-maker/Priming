@@ -321,7 +321,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const full = await win.locator('[data-testid=ins-menu] .vr-cur').getAttribute('title');
     ok(head.includes('…') && !head.includes('Music Festival') && (full || '').includes('Music Festival'), `메뉴 첫 줄 = 이름 앞 몇 글자(${head}) · 전체 이름은 툴팁`);
     const mw = (await win.locator('[data-testid=ins-menu]').boundingBox()).width;
-    ok(mw < 420, `메뉴 폭이 파일 이름 때문에 늘지 않는다 (${Math.round(mw)}px)`);
+    // 폭 = 가장 긴 항목 기준(그림 메뉴와 같은 규칙 · 로이 2026-09-26) — 머리줄(이름·상태)은 폭 계산에 안 낀다
+    const itemW = await win.evaluate(() => Math.max(...[...document.querySelectorAll('[data-testid=ins-menu] button')].map((b) => { const r = document.createRange(); r.selectNodeContents(b); return r.getBoundingClientRect().width; })));
+    ok(mw < 260 && mw <= itemW + 40, `메뉴 폭 = 항목 기준 (${Math.round(mw)}px · 가장 긴 항목 ${Math.round(itemW)}px)`);
     await win.click('[data-testid=ins-del]');
     await win.waitForTimeout(500);
 
