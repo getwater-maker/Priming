@@ -25,25 +25,35 @@ const MOTIONS = [
 const FILL_IDS = new Set(FILLS.map((x) => x.id));
 const MOTION_IDS = new Set(MOTIONS.map((x) => x.id));
 
+/** 📐 ① 칸에서 옮기고 줄인 자리(캔버스 0..1 · 넘쳐도 된다) — 이상하면 null */
+function normBox(b) {
+  if (!b || typeof b !== 'object') return null;
+  const r = (v) => Math.round(Number(v) * 10000) / 10000;
+  const o = { x: r(b.x), y: r(b.y), w: r(b.w), h: r(b.h) };
+  return [o.x, o.y, o.w, o.h].every((v) => isFinite(v)) && o.w > 0.02 && o.h > 0.02 && o.w < 10 && o.h < 10 && Math.abs(o.x) < 10 && Math.abs(o.y) < 10 ? o : null;
+}
 function normLook(l) {
   const o = l || {};
-  return {
+  const out = {
     fill: FILL_IDS.has(o.fill) ? o.fill : 'auto',
     flipH: !!o.flipH,
     flipV: !!o.flipV,
     motion: MOTION_IDS.has(o.motion) ? o.motion : 'auto',
   };
+  const bx = normBox(o.box);
+  if (bx) out.box = bx;
+  return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto';
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box;
 }
 function describe(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
   const m = MOTIONS.find((x) => x.id === n.motion).label;
   const fl = [n.flipH ? '좌우 반전' : '', n.flipV ? '상하 반전' : ''].filter(Boolean).join('·') || '반전 없음';
-  return `채우기 ${f} · ${fl} · 움직임 ${m}`;
+  return `채우기 ${f} · ${fl} · 움직임 ${m}` + (n.box ? ` · 자리 직접(${Math.round(n.box.w * 100)}% 크기)` : '');
 }
 
 /**
@@ -71,4 +81,4 @@ function aiNoticeForRange(aiNotice, project, logger) {
   return { ...aiNotice, startMode: 'seconds', startSeconds: Math.round(start * 1000) / 1000, durationSeconds: Math.max(0.1, Math.round(dur * 1000) / 1000) };
 }
 
-module.exports = { FILLS, MOTIONS, normLook, isDefault, describe, aiNoticeForRange };
+module.exports = { FILLS, MOTIONS, normBox, normLook, isDefault, describe, aiNoticeForRange };

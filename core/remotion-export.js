@@ -168,7 +168,7 @@ function exportRemotion(project, outDir, opts = {}) {
                        start: +start.toFixed(3), end: +end.toFixed(3), dur: +dur.toFixed(3) });
 
       // 자막 줄 — TTS 길이를 글자수 비율로 나눈다(.vrew·SRT 와 같은 규칙).
-      const lines = splitCaptionLines(s.text, maxChars);
+      const lines = splitCaptionLines(s.text, maxChars, s.capBreaks);
       const totW = lines.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
       let acc = start;
       lines.forEach((c, k) => {

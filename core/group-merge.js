@@ -91,7 +91,7 @@ function applyContinueMarkers(project) {
  * ⚠ 범위는 이 그룹의 원래 문장과 겹쳐야 한다(안 겹치면 다른 그룹의 앞·뒤가 동시에 잘려 둘로 쪼개진다).
  * @returns {{ok:boolean, reason?:string, removed?:object[], orphans?:number, into?:object}}
  */
-function setVisualRange(project, idx, a, b) {
+function _regroupRange(project, idx, a, b) {
   if (!project || !Array.isArray(project.groups)) return { ok: false, reason: 'no-project' };
   const G = project.groups[idx];
   if (!G) return { ok: false, reason: 'not-found' };
@@ -166,6 +166,33 @@ function setVisualRange(project, idx, a, b) {
   project.groups.forEach((g, i) => { g.num = i + 1; });
   finalizeGroupIds(project.groups, project.sentences || []);
   return { ok: true, removed, orphans, into: G };
+}
+
+/**
+ * 🖼 적용 범위 — v0.5.47 부터 **늘리면 겹쳐 깐다**(로이: "앞 그룹은 하위층, 다음 그룹은 상위층으로 — 지우지 않고").
+ *   · 자기 그룹 밖으로 늘린 쪽 = g.visSpan(core/visual-span) — 그 문장들 동안 이 그림이 **아래층**으로 계속 보인다.
+ *     그 사이 그룹들은 그대로 남고 자기 그림이 있으면 그 위에, 없으면 이 그림이 보인다. 아무것도 지우지 않는다.
+ *   · 자기 그룹 안으로 줄인 쪽 = 예전처럼 떨어진 문장이 새 그룹(새 이미지 필요 — 결정 1ⓐ).
+ * @returns {{ok, reason?, removed:[], orphans, into, unchanged?}}
+ */
+function setVisualRange(project, idx, a, b) {
+  if (!project || !Array.isArray(project.groups)) return { ok: false, reason: 'no-project' };
+  const G = project.groups[idx];
+  if (!G) return { ok: false, reason: 'not-found' };
+  const order = []; for (const g of project.groups) for (const id of g.sentenceIds) order.push(id);
+  const n = order.length;
+  a = Math.floor(Number(a)); b = Math.floor(Number(b));
+  if (!(a >= 0 && b >= a && b < n)) return { ok: false, reason: 'bad-range' };
+  const gs = order.indexOf(G.sentenceIds[0]), ge = gs + G.sentenceIds.length - 1;
+  if (b < gs || a > ge) return { ok: false, reason: 'no-overlap' };
+  const before = JSON.stringify(G.visSpan || null);
+  let r = { ok: true, removed: [], orphans: 0, into: G, unchanged: true };
+  const oa = Math.max(a, gs), ob = Math.min(b, ge);
+  if (oa !== gs || ob !== ge) { r = _regroupRange(project, project.groups.indexOf(G), oa - 0, ob); if (!r.ok) return r; }
+  const sp = { startId: a < gs ? order[a] : null, endId: b > ge ? order[b] : null };
+  G.visSpan = (sp.startId || sp.endId) ? sp : undefined;
+  const changed = !r.unchanged || before !== JSON.stringify(G.visSpan || null);
+  return { ok: true, removed: [], orphans: r.orphans || 0, into: G, unchanged: !changed };
 }
 
 module.exports = { mergeIntoPrev, applyContinueMarkers, isContinueMarker, CONTINUE_RE, setVisualRange };

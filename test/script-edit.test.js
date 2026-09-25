@@ -190,7 +190,9 @@ console.log('\n[7] 배선 — 화면·main·preload 가 실제로 이어져 있�
   ok(/api\.editSentences\(/.test(APP), 'App: api.editSentences 호출');
 
   // 🔑 검증 재파싱이 실제로 있는가 — 이게 없으면 .md 와 화면이 갈린 채 조용히 진행된다.
-  const H = MAIN.slice(MAIN.indexOf("ipcMain.handle('edit-sentences'"));
+  // v0.5.47 — 본문을 _editSentences 함수로 뺐다(✂ 줄 나누기가 「글 고치기 + 나누기」를 한 번에 부른다) · 핸들러는 그 함수를 부른다
+  ok(/ipcMain\.handle\('edit-sentences', \(_e, args = \{\}\) => _editSentences\(args\)\)/.test(MAIN), 'main: 핸들러 = _editSentences');
+  const H = MAIN.slice(MAIN.indexOf("function _editSentences("));
   const BODY = H.slice(0, H.indexOf("ipcMain.handle('split-group'"));
   ok(/SE\.sameSequence\(expect/.test(BODY), '🔑 main: 검증 재파싱으로 기대 시퀀스와 대조한다');
   ok(BODY.indexOf('sameSequence') < BODY.indexOf('fs.writeFileSync'), '🔑 main: 검증이 .md 쓰기보다 **먼저** 온다');

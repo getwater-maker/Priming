@@ -182,6 +182,7 @@ contextBridge.exposeInMainWorld('api', {
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
   setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
   setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
+  setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
   setAiNoticeRange: (args) => ipcRenderer.invoke('set-ai-notice-range', args),
   applyCaptionFormatAll: (args) => ipcRenderer.invoke('apply-caption-format-all', args),
   undo: (args) => ipcRenderer.invoke('undo', args),

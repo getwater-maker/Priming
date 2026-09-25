@@ -128,37 +128,47 @@ console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew �
   const chap = (p) => require('../core/yt-chapters').tsChaptersOf({ cuts: p.groups.map((g) => ({ h2: g.h2Title, phase: g.phase, groupDurationSec: g.sentenceIds.length, sentences: g.sentenceIds.map((id) => { const s = p.sentences.find((x) => x.id === id); return { dur: 1, mark: s.chapterMark || null }; }) })) }).map((c) => `${c.title}@${c.start}`).join(' ');
   const CH0 = 'HA@0 HB@3 HC@5 HD@9';
 
+  const VS = require('../core/visual-span');
+  const hv = (g) => !!g.imagePath;
+  const lay = (p) => { const L = VS.layersBySentence(p, hv); return p.sentences.map((x) => (L.get(x.id) || []).map((gi) => p.groups[gi].num).join('/')).join(' '); };
+
+  // 🖼 v0.5.47 — 늘리면 **겹쳐 깐다**(로이: 앞 그룹 = 아래층 · 다음 그룹 = 위층 · 지우지 않는다)
   let p = mk(); let r = GM.setVisualRange(p, 0, 0, 10);
-  ok(r.ok && p.groups.length === 1 && p.groups[0].imagePath === 'imgA', '「전체 클립으로」 = 그룹 1개 · 그림은 범위 주인(A) 것');
-  ok(r.removed.length === 3, '통째로 덮인 그룹 3개를 돌려준다(main 이 그 그림 파일을 정리)');
-  ok(p.groups[0].isIntro === true, '🔑 도입부·본론 경계를 넘는다(결정 2ⓐ) — 도입부 여부는 범위 주인을 따른다');
-  ok(chap(p) === CH0, `🔑 챕터 그대로 (${chap(p)})`);
+  ok(r.ok && p.groups.length === 4 && r.removed.length === 0 && p.groups.every((g) => g.imagePath), '「전체 클립으로」 — 그룹 4개 그대로 · 아무 그림도 지우지 않는다');
+  ok(p.groups[0].visSpan && p.groups[0].visSpan.endId === 's10' && !p.groups[0].visSpan.startId, 'G1 그림이 끝 문장(s10)까지 아래층으로 이어진다');
+  ok(lay(p) === '1 1 1 1/2 1/2 1/3 1/3 1/3 1/3 1/4 1/4', `🔑 문장마다 쌓임 = G1 아래 · 그 그룹 그림 위 (${lay(p)})`);
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5,s6,s7,s8 | s9,s10' && chap(p) === CH0, '그룹·문장·챕터는 그대로');
+
+  p = mk(); p.groups[2].imagePath = null;   // G3 에 그림이 없다
+  GM.setVisualRange(p, 0, 0, 10);
+  ok(VS.markCovered(p, hv) === 1 && p.groups[2]._covered === 1, '🔑 그림 없는 G3 = G1 그림이 보인다(따로 만들지 않는다 · .vrew 게이트 통과)');
+  p.groups[2].imagePath = null; GM.setVisualRange(p, 0, 0, 2);
+  ok(!p.groups[0].visSpan && VS.markCovered(p, hv) === 0, '다시 자기 그룹으로 줄이면 이어 깔기가 풀린다');
 
   p = mk(); GM.setVisualRange(p, 1, 3, 6);
-  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4,s5,s6 | s7,s8 | s9,s10', `끝을 아래로 끌기 — 다음 그룹 앞 두 문장을 덮는다 (${ids(p).join(' | ')})`);
-  ok(p.groups[2].imagePath === 'imgC' && p.groups[2].imagePrompt === 'pC', '앞부분을 잃은 이웃 그룹은 자기 그림·프롬프트를 그대로 쓴다(Vrew 처럼 이웃 범위가 줄어든다)');
-  ok(mark(p, 's5') === 'C' && chap(p) === CH0, '덮인 섹션 머리에 챕터 표식 · 챕터 시각 그대로');
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5,s6,s7,s8 | s9,s10' && p.groups[1].visSpan.endId === 's6', '끝을 다음 그룹 안까지 끌기 — 이웃은 그대로 · G2 는 s6 까지 아래층');
+  ok(lay(p).split(' ').slice(3, 9).join(' ') === '2 2 2/3 2/3 3 3', `이웃 그룹의 앞 두 문장에서만 G2 가 아래에 깔린다 (${lay(p)})`);
 
   p = mk(); GM.setVisualRange(p, 2, 6, 6);
-  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5 | s6 | s7,s8 | s9,s10', '범위를 가운데 한 문장으로 줄이기 — 앞뒤가 새 그룹');
-  ok(!p.groups[2].imagePath && p.groups[2].imageStale && !p.groups[2].imagePrompt && !p.groups[4].imagePath && p.groups[4].imageStale, '🔑 떨어져 나간 문장 = 새 이미지 필요 그룹(결정 1ⓐ · 그림·프롬프트 없음)');
-  ok(p.groups[3].imagePath === 'imgC', '범위 안(s6)은 원래 그림');
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5 | s6 | s7,s8 | s9,s10', '범위를 가운데 한 문장으로 줄이기 — 앞뒤가 새 그룹(예전과 같다)');
+  ok(!p.groups[2].imagePath && p.groups[2].imageStale && !p.groups[4].imagePath && p.groups[4].imageStale, '🔑 떨어져 나간 문장 = 새 이미지 필요 그룹(결정 1ⓐ)');
   ok(chap(p) === CH0, '줄여도 챕터 그대로');
 
   p = mk(); GM.setVisualRange(p, 2, 1, 7);
-  ok(ids(p).join(' | ') === 's0 | s1,s2,s3,s4,s5,s6,s7 | s8 | s9,s10', '시작을 위로 끌기 + 끝 줄이기 동시(직접 입력)');
-  ok(p.groups[0].imagePath === 'imgA' && p.groups[1].imagePath === 'imgC' && p.groups[1].phase === 'A', '머리를 넓히면 그 머리의 섹션 제목을 물려받는다');
-  ok(chap(p) === CH0, `넓혀도 챕터 그대로 (${chap(p)})`);
+  ok(ids(p).join(' | ') === 's0,s1,s2 | s3,s4 | s5,s6,s7 | s8 | s9,s10', '시작을 위로 늘리고 끝을 줄이기 — 앞쪽은 겹쳐 깔고 뒤쪽은 새 그룹');
+  ok(p.groups[2].visSpan && p.groups[2].visSpan.startId === 's1' && !p.groups[2].visSpan.endId && p.groups[3].imageStale, '앞쪽 이어 깔기(s1 부터) · 뒤 s8 은 새 이미지 필요');
 
-  p = mk(); GM.setVisualRange(p, 0, 0, 10); GM.setVisualRange(p, 0, 0, 4);
-  ok(ids(p).join(' | ') === 's0,s1,s2,s3,s4 | s5,s6,s7,s8,s9,s10' && p.groups[1].imageStale, '넓혔다 다시 줄이기 — 떨어진 뒤쪽은 새 이미지 필요');
-  ok(chap(p) === CH0, '넓혔다 줄여도 챕터 그대로');
+  // 문장 id 가 바뀌면(문장 고치기) 범위 끝도 따라간다 · 작업본은 순번으로
+  p = mk(); GM.setVisualRange(p, 0, 0, 6);
+  VS.remapSpanIds(p, new Map([['s6', 'n6']])); p.sentences[6].id = 'n6'; p.groups[2].sentenceIds[1] = 'n6';
+  ok(p.groups[0].visSpan.endId === 'n6' && VS.effRange(p, 0).b === 6, '문장을 고쳐 id 가 바뀌어도 범위 끝이 따라간다');
+  const o = VS.spanToOrd(p, p.groups[0]); const g0 = { sentenceIds: p.groups[0].sentenceIds }; VS.spanFromOrd(p, g0, o);
+  ok(o && o.to === 6 && o.from == null && g0.visSpan.endId === 'n6', '작업본 저장 = 순번(6) → 다시 열면 그 문장 id');
 
   p = mk();
-  ok(GM.setVisualRange(p, 0, 5, 8).reason === 'no-overlap', '원래 문장과 겹치지 않는 범위는 거부(이웃이 둘로 쪼개지는 것 방지)');
+  ok(GM.setVisualRange(p, 0, 5, 8).reason === 'no-overlap', '원래 문장과 겹치지 않는 범위는 거부');
   ok(GM.setVisualRange(p, 0, 0, 99).reason === 'bad-range' && GM.setVisualRange(p, 0, 3, 1).reason === 'bad-range', '범위 밖·뒤집힌 범위 거부');
   ok(GM.setVisualRange(p, 1, 3, 4).unchanged === true && p.groups.length === 4, '그대로면 아무것도 안 바꾼다');
-  ok(p.groups.every((g, i) => g.num === i + 1), '그룹 번호 다시 매김');
 
   const MAIN7 = read('main.js'), PRE7 = read('preload.js'), APP7 = read('renderer/src/App.jsx');
   ok(/ipcMain\.handle\('set-visual-range'/.test(MAIN7) && /setVisualRange\(pr, idx, Number\(args\.from\) - 1, Number\(args\.to\) - 1\)/.test(MAIN7), 'IPC set-visual-range → 공용 setVisualRange(1부터 → 0부터)');
@@ -167,7 +177,7 @@ console.log('\n[7] 🖼 적용 범위 — 그림 범위 = 그룹 경계 (Vrew �
   ok(/setVisualRange: \(args\) => ipcRenderer\.invoke\('set-visual-range', args\)/.test(PRE7), 'preload setVisualRange');
   ok(/onRange=\{isLf \? setVisualRange : null\}/.test(APP7) && /className="vr-h top"/.test(APP7) && /className="vr-h bot"/.test(APP7), '화면: 범위 막대 손잡이 위·아래');
   ok(/전체 클립으로/.test(APP7) && /처음부터 이 그림 끝까지/.test(APP7) && /이 그림부터 끝까지/.test(APP7) && /직접 입력/.test(APP7), '썸네일 메뉴 — 적용 범위 4가지');
-  ok(/통째로 덮여 사라집니다/.test(APP7), '그림이 있는 그룹을 통째로 덮으면 먼저 묻는다');
+  ok(!/통째로 덮여 사라집니다/.test(APP7) && /data-testid="thumb-covered"/.test(APP7), '지우지 않으니 확인창이 없다 · 덮인 그룹 썸네일에 「⤓ G1 그림」');
 }
 
 console.log('\n[8] ↶ 되돌리기 — 그림 파일이 제자리로(번호 정리로 이름이 바뀌고 · 합치며 치워진 파일까지)');

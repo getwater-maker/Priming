@@ -61,6 +61,10 @@ function toDTO(parseResult) {
   const { fileTitle, meta, projects } = parseResult;
   const mode = normalizeMode(parseResult.mode || (projects[0] && projects[0].mode));
   const capChars = getModeProfile(mode).captionMaxChars;
+  // 🖼 그림 범위(아래층으로 이어 깔기) — 그룹마다 실제 범위와 「앞 그림이 보이는 그룹」 표시
+  const VS = require('./visual-span');
+  const _hasVis = (g) => !!((g.imagePath && fs.existsSync(g.imagePath)) || (g.videoPath && fs.existsSync(g.videoPath)));
+  for (const pr of projects) { try { VS.markCovered(pr, _hasVis); } catch (_) {} }
   return {
     fileTitle,
     meta,
@@ -99,8 +103,9 @@ function toDTO(parseResult) {
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               spans: (s.capSpans && s.capSpans.length) ? s.capSpans : null,   // 🎨 줄별·글자별 자막 서식(문장 글자 위치)
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
+              breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
-              lines: splitCaptionLines(s.text || '', capChars).map((t) => ({ n: ++capN, text: t })),
+              lines: splitCaptionLines(s.text || '', capChars, s.capBreaks).map((t) => ({ n: ++capN, text: t })),
             })),
             groupDurationSec: sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0) || null,
             groupGenSec: sents.reduce((a, s) => a + (s.ttsGenSec || 0), 0) || null,
@@ -115,6 +120,8 @@ function toDTO(parseResult) {
             videoVersion: mediaVersion(g.videoPath),
             imageStale: !!g.imageStale,
             look: g.look || null,   // 🖼 채우기·반전·움직임(core/visual-look)
+            covered: g._covered || 0,   // 🖼 이 그룹엔 앞 그룹(번호) 그림이 아래층으로 이어져 보인다
+            span: (() => { const r = g.visSpan ? VS.effRange(pr, pr.groups.indexOf(g)) : null; return r ? { from: r.a + 1, to: r.b + 1 } : null; })(),   // 이어 깐 범위(편 문장 1부터)
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
             videoStatus: g.videoStatus || null, // 'generating' | 'upscaling' | 'done' | 'fail'
           };
@@ -587,6 +594,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const groups = project.groups;
   const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim()
     && !(groups[i].imagePath && fs.existsSync(groups[i].imagePath)) // 이미 있음(캐시 프리필) → 건너뜀
+    && !(groups[i]._covered && !onlyNums)   // 🖼 앞 그룹 그림이 아래층으로 이어져 보이는 그룹
     && (!onlyNums || onlyNums.includes(groups[i].num)));
   if (!idx.length) { (logger || (() => {}))('이미지 프롬프트가 있는 컷이 없음'); return []; }
 
@@ -817,7 +825,7 @@ function writeSrt(project, srtPath, maxChars = 7) {
   for (const g of project.groups) {
     for (const s of project.getSentencesOfGroup(g)) {
       const dur = s.ttsDurationSec || 2.5;
-      const clips = splitCaptionLines(s.text, maxChars);
+      const clips = splitCaptionLines(s.text, maxChars, s.capBreaks);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
       let acc = t;
       clips.forEach((c, i) => {

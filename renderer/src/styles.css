@@ -630,3 +630,19 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .mload-d{font-size:12px;color:#7a6a52;display:flex;flex-direction:column;gap:3px}
 .mload-h{color:#9a8a72}
 .mload-card button{align-self:flex-end}
+
+/* 🖼 ① 칸 레이어 — 아래 → 위로 쌓는다(앞 그룹 그림이 아래층) · 📐 선택 틀 · 가운데 안내선(Vrew) */
+#stageVisual{position:relative;overflow:hidden}
+#stageVisual .vlayer{position:absolute;overflow:hidden}
+#stageVisual .vlayer img,#stageVisual .vlayer video{width:100%;height:100%;display:block;background:transparent}
+#stage .ssel{position:absolute;border:2px solid #2ec4f0;box-sizing:border-box;cursor:move;z-index:4;pointer-events:none}
+#stage .ssel-h{position:absolute;width:12px;height:12px;background:#fff;border:2px solid #2ec4f0;border-radius:2px;pointer-events:auto;box-sizing:border-box}
+#stage .ssel-h.tl{left:-7px;top:-7px;cursor:nwse-resize}#stage .ssel-h.tr{right:-7px;top:-7px;cursor:nesw-resize}
+#stage .ssel-h.bl{left:-7px;bottom:-7px;cursor:nesw-resize}#stage .ssel-h.br{right:-7px;bottom:-7px;cursor:nwse-resize}
+#stage .ssel-tag{position:absolute;left:4px;top:4px;background:#2ec4f0;color:#fff;font-size:10px;padding:0 5px;border-radius:3px}
+#stage .sguide{position:absolute;background:#ff4d4d;z-index:5;pointer-events:none}
+#stage .sguide.v{left:50%;top:0;bottom:0;width:1px;transform:translateX(-0.5px)}
+#stage .sguide.h{top:50%;left:0;right:0;height:1px;transform:translateY(-0.5px)}
+
+.vr-span{font-size:11px;color:#8a6d3b;background:#fbf1de;border:1px dashed #d8c7a8;border-radius:6px;padding:1px 8px;margin:2px 0 4px;display:inline-block}
+.thumb.none.covered{display:flex;align-items:center;justify-content:center;color:#8a7a62;font-size:13px;background:repeating-linear-gradient(45deg,#f4ecdd,#f4ecdd 8px,#efe4d0 8px,#efe4d0 16px)}

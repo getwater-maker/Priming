@@ -230,8 +230,19 @@ function wrapWords(words, maxChars) {
   return lines;
 }
 
-function splitCaptionLines(text, maxChars = 7) {
-  const t = String(text == null ? '' : text).trim();
+/**
+ * @param breaks  ✂ 사람이 정한 줄 나눔(문장 글자 위치 — 새 줄이 시작하는 곳). 있으면 **그대로** 자른다(자동 줄바꿈 안 함).
+ *                Vrew 처럼 「이 줄은 여기서 끊는다」를 문장마다 고정할 때(자막 줄 나누기·합치기 — 2026-09-25). 음성은 그대로다.
+ */
+function splitCaptionLines(text, maxChars = 7, breaks) {
+  const raw = String(text == null ? '' : text);
+  const bk = normBreaks(raw, breaks);
+  if (bk) {
+    const out = []; let a = 0;
+    for (const b of [...bk, raw.length]) { const piece = raw.slice(a, b).trim(); if (piece) out.push(piece); a = b; }
+    if (out.length) return out;
+  }
+  const t = raw.trim();
   if (!t) return [];
   // ⚠ 쉼표로 세그먼트를 미리 쪼개지 않는다(v0.3.41). 쪼개면 세그먼트끼리 다시 합칠 수 없어
   //   `살림,` `내외 사이,` 처럼 한 어절짜리 줄이 강제로 생긴다. 쉼표 선호는 boundaryAt 의 점수 4 가
@@ -275,7 +286,25 @@ function fmtSrtTime(t) {
   return p(h) + ":" + p(m) + ":" + p(s) + "," + p(ms, 3);
 }
 
-module.exports = { splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
+/** 줄 나눔 위치 정리 — 글 안쪽(0 < 위치 < 길이) · 중복 없이 · 오름차순. 쓸 게 없으면 null(자동 줄바꿈) */
+function normBreaks(text, breaks) {
+  if (!Array.isArray(breaks) || !breaks.length) return null;
+  const L = String(text || '').length;
+  const out = [...new Set(breaks.map((x) => Math.floor(Number(x))).filter((x) => x > 0 && x < L))].sort((a, b) => a - b);
+  return out.length ? out : null;
+}
+/** 글이 바뀌면 줄 나눔 위치를 옮긴다 — 앞뒤 공통 부분은 그대로 · 고친 곳 안의 위치는 고친 곳 끝으로. 결과가 비면 null */
+function remapBreaks(oldText, newText, breaks) {
+  const a = String(oldText || ''), b = String(newText || '');
+  const bk = normBreaks(a, breaks); if (!bk) return null;
+  let pre = 0; while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let suf = 0; while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  const d = b.length - a.length;
+  const moved = bk.map((x) => (x <= pre ? x : x >= a.length - suf ? x + d : pre + (b.length - suf - pre)));
+  return normBreaks(b, moved);
+}
+
+module.exports = { normBreaks, remapBreaks, splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
 
 
 // ⚠ 「스크립트로 직접 실행했을 때만 도는 자기검사」 블록을 여기 두지 않는다.

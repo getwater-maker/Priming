@@ -149,21 +149,42 @@ function buildTimeline(project, mediaDir) {
   let t = 0, curKey = null, curSeg = null, lastTts = null;
   let capStyle = null;
 
+  // 🖼 그림마다 처음 보이는 시각·보이는 전체 길이 — 아래층으로 이어진 그림(샘플.vrew 처럼 한 자산이 여러 클립)은
+  //   구간이 바뀌어도 **처음부터 이어서** 움직여야 한다(켄번스 진행 · 영상 재생 위치).
+  const visSpan = new Map();
+  { let tt = 0;
+    for (const c of clips) {
+      const d = (c.words || []).reduce((s, w) => s + (+w.duration || 0), 0);
+      if (!(d > 0)) continue;
+      for (const aid of (c.assetIds || [])) {
+        const tr = trackOf(aid);
+        if (!tr || (tr.type !== 'image' && tr.type !== 'video')) continue;
+        const sp = visSpan.get(aid);
+        if (!sp) visSpan.set(aid, { t0: tt, t1: tt + d }); else sp.t1 = tt + d;
+      }
+      tt += d;
+    } }
+
   for (const c of clips) {
     const dur = (c.words || []).reduce((s, w) => s + (+w.duration || 0), 0);
     if (!(dur > 0)) continue;
     const start = t, end = t + dur;
     t = end;
 
-    // ① 시각 자산 — 같은 asset 이 이어지면 한 구간
-    let vTr = null, vAid = null;
+    // ① 시각 자산 — 이 클립의 그림 **전부**(zIndex 아래 → 위). 같은 묶음이 이어지면 한 구간
+    const layers = [];
     for (const aid of (c.assetIds || [])) {
       const tr = trackOf(aid);
-      if (tr && (tr.type === 'image' || tr.type === 'video')) { vTr = tr; vAid = aid; break; }
+      if (tr && (tr.type === 'image' || tr.type === 'video')) {
+        const sp = visSpan.get(aid) || { t0: start, t1: end };
+        layers.push({ aid, track: tr, type: tr.type, file: fileOf(tr), t0: sp.t0, tAll: sp.t1 - sp.t0 });
+      }
     }
-    const key = vAid || 'none';
+    layers.sort((x, y) => (Number(x.track.zIndex) || 0) - (Number(y.track.zIndex) || 0));
+    const top = layers[layers.length - 1] || null;
+    const key = layers.length ? layers.map((l) => l.aid).join('+') : 'none';
     if (key !== curKey) {
-      curSeg = { start, end, type: vTr ? vTr.type : 'none', track: vTr, file: fileOf(vTr) };
+      curSeg = { start, end, type: top ? top.type : 'none', track: top ? top.track : null, file: top ? top.file : null, layers };
       segments.push(curSeg);
       curKey = key;
     } else curSeg.end = end;
@@ -465,6 +486,24 @@ function coverImage(file, ctx, tr) {
  *   박스가 캔버스보다 작으면(한쪽이 모자람) = 맞추기(검정 띠 · 가운데) · 아니면 = 꽉 채우기(가운데 자르기).
  *   반전 = editInfo.flip(Vrew 형식). 옛 판은 이미지를 늘 꽉 채웠다 → 비율이 다른 그림이 .vrew 는 레터박스인데 MP4 는 잘렸다(이제 같다).
  */
+/** 📐 화면 가운데에 놓인 「꽉 채우기 · 맞추기」 박스인가(그러면 예전 빠른 길 — 한 장을 캔버스에 맞춰 굽는다) */
+function isStandardBox(tr) {
+  const t = tr || {};
+  const x = +t.xPos || 0, y = +t.yPos || 0, w = typeof t.width === 'number' ? t.width : 1, h = typeof t.height === 'number' ? t.height : 1;
+  const centered = Math.abs(x + w / 2 - 0.5) < 0.01 && Math.abs(y + h / 2 - 0.5) < 0.01;
+  return centered && (w >= 0.98 || h >= 0.98);
+}
+/** 겹칠 그림을 박스 크기로 한 번만 굽는다(반전 포함) */
+function boxImage(file, bw, bh, flip, ctx) {
+  ctx.boxes = ctx.boxes || new Map();
+  const key = [file, bw, bh, flip].join('|');
+  if (!ctx.boxes.has(key)) {
+    const name = `box_${ctx.boxes.size}.png`;
+    ctx.boxes.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
+      '-vf', `scale=${bw}:${bh}:flags=lanczos,setsar=1${flip}`, '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
+  }
+  return ctx.boxes.get(key);
+}
 function placeFilters(tr) {
   const t = tr || {};
   const contain = (typeof t.width === 'number' && t.width < 0.985) || (typeof t.height === 'number' && t.height < 0.985);
@@ -504,10 +543,16 @@ function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC) {
     const n = f1 - f0;
     if (n <= 0) continue;
     const tot = s.kbTotalSec > 0 ? Math.max(n, Math.round(s.kbTotalSec * FPS)) : n;   // limitSec 로 잘린 구간
-    if (s.type !== 'image' || n <= CH) { out.push({ ...s, f0, f1, kbOff: 0, kbTotal: tot }); continue; }
+    // 🖼 그림이 이 구간보다 먼저 시작했으면(아래층으로 이어진 그림) 그만큼 진행한 데서 잇는다
+    const L = s.layers && s.layers.length ? s.layers : null;
+    const top = L ? L[L.length - 1] : null;
+    const base = top && top.t0 < s.start - 1e-6 ? Math.round((s.start - top.t0) * FPS) : 0;
+    const totAll = top && top.tAll > 0 && base > 0 ? Math.max(base + n, Math.round(top.tAll * FPS)) : tot;
+    const splittable = L ? L.every((l) => l.type === 'image') : s.type === 'image';
+    if (!splittable || n <= CH) { out.push({ ...s, f0, f1, kbOff: base, kbTotal: totAll }); continue; }
     for (let o = 0; o < n; o += CH) {
       const len = Math.min(CH, n - o);
-      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: o, kbTotal: tot });
+      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: base + o, kbTotal: totAll });
     }
   }
   return out;
@@ -533,7 +578,35 @@ async function renderChunk(ch, i, ctx) {
   let args;
   const common = [...encArgs(enc, bitrate), '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an', out];
   const pre = ctx.filterThreads > 0 ? ['-filter_threads', String(ctx.filterThreads)] : [];
-  if (ch.type === 'image' && ch.file) {
+  const L = (ch.layers || []).filter((l) => l.file);
+  if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
+    // 🖼 겹친 그림(아래층으로 이어진 그림 위에 다음 그룹 그림) · 사람이 옮기고 줄인 그림 — 검은 바탕 위에 아래 → 위로 얹는다
+    const ins = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`];
+    const parts = [];
+    let prev = '[0:v]';
+    for (let k = 0; k < L.length; k++) {
+      const l = L[k], tr = l.track || {};
+      const bw = Math.max(2, Math.round(((+tr.width || 1) * W) / 2) * 2), bh = Math.max(2, Math.round(((+tr.height || 1) * H) / 2) * 2);
+      const bx = Math.round((+tr.xPos || 0) * W), by = Math.round((+tr.yPos || 0) * H);
+      const fl = (tr.editInfo && tr.editInfo.flip) || {};
+      const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
+      const lo = Math.max(0, Math.round((ch.f0 / FPS - l.t0) * FPS));   // 이 그림이 이 조각 전까지 보인 프레임 수
+      const lt = Math.max(lo + frames, Math.round((l.tAll || 0) * FPS));
+      if (l.type === 'image') {
+        const png = await boxImage(l.file, bw, bh, flip, ctx);
+        ins.push('-i', png);
+        parts.push(`[${k + 1}:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
+      } else {
+        if (lo > 0) ins.push('-ss', (lo / FPS).toFixed(3));
+        ins.push('-i', l.file);
+        parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600,format=yuv420p[l${k}]`);
+      }
+      parts.push(`${prev}[l${k}]overlay=x=${bx}:y=${by}:eof_action=repeat${k === L.length - 1 ? '' : `[b${k}]`}`);
+      prev = `[b${k}]`;
+    }
+    parts[parts.length - 1] += ',' + assFilter + '[vout]';
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', ...ins, '-filter_complex', parts.join(';'), '-map', '[vout]', '-frames:v', String(frames), ...common];
+  } else if (ch.type === 'image' && ch.file) {
     const tr = ch.track || {};
     const cov = await coverImage(ch.file, ctx, tr);
     // 🔑 그림을 **한 번만 디코딩**해 메모리에서 반복하고(loop 필터), YUV 로 켄번스를 돌린다.
@@ -547,7 +620,8 @@ async function renderChunk(ch, i, ctx) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
     const vf = [placeFilters(ch.track), `fps=${FPS}`,
       'tpad=stop_mode=clone:stop_duration=3600', assFilter].join(',');
-    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
+    const ss = ch.kbOff > 0 ? ['-ss', (ch.kbOff / FPS).toFixed(3)] : [];   // 🖼 아래층으로 이어진 영상 — 끊긴 데서 잇는다
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', ...ss, '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
   } else {
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`,
       '-frames:v', String(frames), '-vf', assFilter, ...common];
@@ -777,7 +851,7 @@ async function renderVrewToMp4(opts = {}) {
 }
 
 module.exports = {
-  placeFilters,
+  placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
   buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,

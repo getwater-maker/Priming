@@ -1152,15 +1152,7 @@ export default function App() {
         if (!mm) { setStatus('범위는 「5-20」처럼 적습니다'); return; }
         from = Number(mm[1]); to = Number(mm[2] || mm[1]);
       }
-      const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === shortsNum) : null;
-      if (pr) {
-        let o = 0; const lost = [];
-        for (const c of pr.cuts) {
-          const a = o + 1, b = o + (c.sentences || []).length; o = b;
-          if (c.num !== groupNum && a >= from && b <= to && (c.imagePath || c.videoPath)) lost.push('G' + c.num);
-        }
-        if (lost.length && !uiConfirm(`${lost.join('·')} 가 이 범위에 통째로 덮여 사라집니다.\n그 그룹의 그림·영상은 쓰지 않게 됩니다(앱이 만든 파일은 지웁니다).\n\n계속할까요?`)) return;
-      }
+      // 🖼 v0.5.47 — 늘려도 지우지 않는다(겹쳐 깐다) → 확인창이 필요 없다
       const d = await api.setVisualRange({ shortsNum, groupNum, from, to });
       if (d) setDto(d);
       setStatus(`🖼 G${groupNum} 그림 범위 → 문장 ${from}~${to}`);
@@ -1673,13 +1665,20 @@ export default function App() {
       const cut = pr ? pr.cuts.find((c) => c.num === e.groupNum) : null;
       if (cut) { sents = cut.sentences || []; si = e.sentIdx; s = sents[si]; }
     }
-    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); if (e.where === 'stage') commitSentEdit(); else splitSentAtCursor(); }
+    // ✂ 줄(클립) 단위: Enter = 이 줄을 커서 자리에서 둘로(음성 그대로) · Ctrl+Enter = 문장 나누기(마침표 — 예전 Enter)
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); splitSentAtCursor(); }
+    else if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      if (e.where === 'stage') commitSentEdit();
+      else if (caret > 0 && caret < el.value.length && caret === sel) lineBreakOp('split', caret);
+      else commitSentEdit();
+    }
     else if (ev.key === 'Escape') { ev.preventDefault(); cancelSentEdit(); }
     else if (ev.key === 'ArrowUp' && (oneRow || (caret === 0 && sel === 0))) { ev.preventDefault(); navEdit(-1); }
     else if (ev.key === 'ArrowDown' && (oneRow || (caret === el.value.length && sel === el.value.length))) { ev.preventDefault(); navEdit(1); }
     else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
       ev.preventDefault();
-      if (!firstLine) { navEdit(-1); return; }
+      if (!firstLine) { lineBreakOp('mergeUp'); return; }
       if (!sents) return;
       if (si === 0) mergeAcross('prev', String(prevCutLastText(e) || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim());
       else if (s && s.mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
@@ -1687,13 +1686,39 @@ export default function App() {
       else mergeSentUp(si, sents[si - 1].text);
     } else if (ev.key === 'Delete' && caret === el.value.length && sel === el.value.length) {
       ev.preventDefault();
-      if (!lastLine) { navEdit(1); return; }
+      if (!lastLine) { lineBreakOp('mergeDown'); return; }
       if (!sents) return;
       if (si >= sents.length - 1) mergeAcross('next', sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextCutFirstText(e) || '').trim());
       else if (sents[si + 1].mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
       else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
       else mergeSentNext(si, sents[si + 1].text);
     }
+  }
+  /**
+   * ✂ 자막 줄 나누기·합치기 — 한 문장 안에서. 지금 보이는 줄 시작 위치들을 사람이 정한 줄 나눔으로 굳힌 뒤 하나를 더하거나 뺀다.
+   *   편집칸에서 글자도 고쳤으면 그 글(문장 전체)을 함께 보낸다 — 뒤쪽 줄 위치는 글 길이 차이만큼 민다.
+   */
+  async function lineBreakOp(kind, caret) {
+    const e = sentEdit; if (!e || !e.line || sentBusy) return;
+    const PL = linesMap.get(e.shortsNum); const sl = (PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx)) || [];
+    if (!sl.length) return;
+    const full = sentEditValue('');
+    const d = full.length - String(e.text || '').length;
+    const starts = sl.slice(1).map((l) => (l.range.from > e.line.from ? l.range.from + d : l.range.from));
+    const me = sl.findIndex((l) => l.n === e.line.n);
+    let breaks = starts, focusN = e.line.n;
+    if (kind === 'split') { breaks = [...starts, e.line.from + caret].sort((a, b) => a - b); focusN = e.line.n + 1; }
+    else if (kind === 'mergeUp') { if (me <= 0) return; breaks = starts.filter((_, i) => i !== me - 1); focusN = e.line.n - 1; }
+    else if (kind === 'mergeDown') { if (me < 0 || me >= sl.length - 1) return; breaks = starts.filter((_, i) => i !== me); }
+    sentDoneRef.current = true; setSentBusy(true);
+    try {
+      const r = await api.setCaptionBreaks({ shortsNum: e.shortsNum, groupNum: e.groupNum, sentIdx: e.sentIdx, text: full, breaks });
+      if (r && r.ok) {
+        setDto(r.dto); closeSentEdit(e); setCursor({ shortsNum: e.shortsNum, n: focusN });
+        setStatus(r.note || (kind === 'split' ? '✂ 자막 줄을 나눴습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)' : '✂ 자막 줄을 합쳤습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)'));
+      } else { sentDoneRef.current = false; setStatus('⚠ ' + ((r && r.error) || '줄을 바꾸지 못했습니다')); }
+    } catch (err) { sentDoneRef.current = false; logline('자막 줄 오류: ' + err.message); }
+    finally { setSentBusy(false); }
   }
   function prevCutLastText(e) {
     const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
@@ -2224,22 +2249,144 @@ export default function App() {
     return g.s;
   }
   const visKey = (c) => (c ? [c.num, c.imagePath, c.videoPath, c.imageVersion, c.videoVersion, JSON.stringify(c.look || null)].join('|') : '');
-  function setVisual(c) {
-    const v = stageVisualRef.current; if (!v) return;
-    lastVisRef.current = visKey(c);
-    // 🖼 그림 모양(core/visual-look) — 반전은 바깥 칸에(켄번스가 그림 자체의 transform 을 쓰므로) · 채우기 = object-fit · 움직임 = 켄번스 종류
+  // 🖼 한 그림(레이어) — 반전은 바깥 칸에(켄번스가 그림 자체의 transform 을 쓰므로) · 채우기 = object-fit · 움직임 = 켄번스 종류
+  //   📐 사람이 옮기고 줄인 자리(look.box)가 있으면 그 자리 · 크기로(그림 비율 그대로 — object-fit:fill)
+  function layerHtml(c) {
     const lk = VLook.normLook(c.look);
     const flipT = (lk.flipH || lk.flipV) ? ` style="transform:scale(${lk.flipH ? -1 : 1},${lk.flipV ? -1 : 1})"` : '';
-    const fitS = lk.fill === 'auto' ? '' : ` style="object-fit:${lk.fill}"`;
-    if (c.videoPath) v.innerHTML = `<div class="vlook"${flipT}><video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline${fitS}></video></div>`;
-    else if (c.imagePath) {
-      // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) → 단조롭지 않게. 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
+    const fit = lk.box ? 'fill' : (lk.fill === 'auto' ? '' : lk.fill);
+    const fitS = fit ? ` style="object-fit:${fit}"` : '';
+    const bx = lk.box;
+    const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
+    let inner;
+    if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline${fitS}></video>`;
+    else {
+      // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
       const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
       const kbCls = lk.motion === 'none' ? 'kbnone' : `kb kb${kbIdx}`;
-      v.innerHTML = `<div class="vlook"${flipT}><img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}></div>`;
-      const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
-    } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
+      inner = `<img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}>`;
+    }
+    return `<div class="vlayer" data-num="${c.num}" style="${pos}"><div class="vlook"${flipT}>${inner}</div></div>`;
   }
+  // 🖼 이 문장을 덮는 그림(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 아래층으로 이어진 그림(core/visual-span 과 같은 규칙: 그룹 순서 = 쌓는 순서)
+  function visLayersAt(pr, cut, sentIdx) {
+    if (!pr || !cut) return cut && (cut.imagePath || cut.videoPath) ? [cut] : [];
+    let o = 0, ord = 0; const out = [];
+    for (const c of pr.cuts) { if (c === cut) { ord = o + 1 + (sentIdx || 0); break; } o += (c.sentences || []).length; }
+    o = 0;
+    for (const c of pr.cuts) {
+      const a = o + 1, b = o + (c.sentences || []).length; o = b;
+      if (!(c.imagePath || c.videoPath)) continue;
+      const r = c.span || { from: a, to: b };
+      if (ord >= r.from && ord <= r.to) out.push(c);
+    }
+    return out;
+  }
+  function setVisual(c, pr, sentIdx) {
+    const v = stageVisualRef.current; if (!v) return;
+    const layers = pr ? visLayersAt(pr, c, sentIdx) : (c && (c.imagePath || c.videoPath) ? [c] : []);
+    const key = layers.map(visKey).join('/') || ('none|' + (c ? c.num : ''));
+    lastVisRef.current = key;
+    stageLayersRef.current = { pr, layers };
+    if (!layers.length) { v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`; return; }
+    v.innerHTML = layers.map(layerHtml).join('');
+    for (const im of v.querySelectorAll('img.kb')) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
+  }
+  const visKeyAt = (c, pr, sentIdx) => (pr ? visLayersAt(pr, c, sentIdx) : [c]).map(visKey).join('/') || ('none|' + (c ? c.num : ''));
+
+  // 📐 ① 칸에서 그림 옮기기·크기 바꾸기(Vrew) — 누르면 맨 위 그림을 고르고 끌면 옮긴다 · 모서리 = 크기(비율 유지) · 가운데 선에 붙는다
+  const [stageSel, setStageSel] = useState(null);   // { sn, num, box:{x,y,w,h}, guides:{v,h} }
+  const stageLayersRef = useRef({ pr: null, layers: [] });
+  const stageDragRef = useRef(null);
+  function defaultBoxOf(c, el) {
+    const lk = VLook.normLook(c.look);
+    if (lk.box) return { ...lk.box };
+    const m = el && (el.querySelector('img') || el.querySelector('video'));
+    const nw = m ? (m.naturalWidth || m.videoWidth || 0) : 0, nh = m ? (m.naturalHeight || m.videoHeight || 0) : 0;
+    const st = stageVisualRef.current; const sw = st ? st.clientWidth : 16, sh = st ? st.clientHeight : 9;
+    if (!(nw > 0 && nh > 0)) return { x: 0, y: 0, w: 1, h: 1 };
+    const rImg = nw / nh, rSt = sw / sh;
+    const mode = lk.fill === 'auto' ? (Math.abs(rImg - rSt) > 0.06 ? 'contain' : 'full') : lk.fill;
+    if (mode === 'full') return { x: 0, y: 0, w: 1, h: 1 };
+    const sc = mode === 'cover' ? Math.max(sw / nw, sh / nh) : Math.min(sw / nw, sh / nh);
+    const w = (nw * sc) / sw, h = (nh * sc) / sh;
+    return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+  }
+  function onStageDown(ev) {
+    if (!wsOn || playerOpen || sentEdit || ev.button !== 0) return;
+    if (ev.target.closest && (ev.target.closest('.cf-stageline') || ev.target.closest('.stage-edit'))) return;
+    const st = stageVisualRef.current; if (!st) return;
+    const R = st.getBoundingClientRect();
+    const px = (ev.clientX - R.left) / R.width, py = (ev.clientY - R.top) / R.height;
+    const handle = ev.target.closest && ev.target.closest('.ssel-h');
+    const { pr, layers } = stageLayersRef.current || {};
+    if (!pr || !layers || !layers.length) return;
+    let pick = null;
+    if (handle && stageSel) pick = layers.find((c) => c.num === stageSel.num) || null;
+    else {
+      // 맨 위부터 — 누른 점을 덮는 그림
+      for (let i = layers.length - 1; i >= 0 && !pick; i--) {
+        const el = st.querySelector('.vlayer[data-num="' + layers[i].num + '"]');
+        const b = stageSel && stageSel.num === layers[i].num ? stageSel.box : defaultBoxOf(layers[i], el);
+        if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) pick = layers[i];
+      }
+    }
+    if (!pick) { setStageSel(null); return; }
+    ev.preventDefault();
+    const el = st.querySelector('.vlayer[data-num="' + pick.num + '"]');
+    const box = stageSel && stageSel.num === pick.num ? { ...stageSel.box } : defaultBoxOf(pick, el);
+    stageDragRef.current = { sn: pr.shortsNum, num: pick.num, start: box, px, py, corner: handle ? handle.dataset.c : null, moved: false, R, el };
+    setStageSel({ sn: pr.shortsNum, num: pick.num, box, guides: {} });
+  }
+  useEffect(() => {
+    const move = (ev) => {
+      const d = stageDragRef.current; if (!d) return;
+      const px = (ev.clientX - d.R.left) / d.R.width, py = (ev.clientY - d.R.top) / d.R.height;
+      const dx = px - d.px, dy = py - d.py;
+      if (!d.moved && Math.abs(dx) < 0.004 && Math.abs(dy) < 0.004) return;
+      d.moved = true;
+      let b = { ...d.start };
+      const SNAP = 0.012, g = { v: false, h: false };
+      if (!d.corner) {
+        b.x = d.start.x + dx; b.y = d.start.y + dy;
+        // 가운데 · 가장자리에 붙기 — 붙으면 선을 보인다(Vrew)
+        const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        if (Math.abs(cx - 0.5) < SNAP) { b.x = 0.5 - b.w / 2; g.v = true; }
+        else if (Math.abs(b.x) < SNAP) { b.x = 0; g.l = true; } else if (Math.abs(b.x + b.w - 1) < SNAP) { b.x = 1 - b.w; g.r = true; }
+        if (Math.abs(cy - 0.5) < SNAP) { b.y = 0.5 - b.h / 2; g.h = true; }
+        else if (Math.abs(b.y) < SNAP) { b.y = 0; g.t = true; } else if (Math.abs(b.y + b.h - 1) < SNAP) { b.y = 1 - b.h; g.b = true; }
+      } else {
+        // 모서리 — 맞은편 모서리를 고정하고 비율을 지킨다(화면 비율 보정: 가로 1 = 세로 H/W)
+        const ar = d.start.w / d.start.h;
+        const ax = d.corner.includes('l') ? d.start.x + d.start.w : d.start.x;
+        const ay = d.corner.includes('t') ? d.start.y + d.start.h : d.start.y;
+        let w = Math.max(0.05, Math.abs(px - ax));
+        let h = w / ar;
+        const hh = Math.max(0.05, Math.abs(py - ay));
+        if (hh > h) { h = hh; w = h * ar; }
+        b = { x: d.corner.includes('l') ? ax - w : ax, y: d.corner.includes('t') ? ay - h : ay, w, h };
+        if (Math.abs(b.x + b.w / 2 - 0.5) < SNAP) g.v = true;
+        if (Math.abs(b.y + b.h / 2 - 0.5) < SNAP) g.h = true;
+      }
+      d.box = b;
+      if (d.el) Object.assign(d.el.style, { left: (b.x * 100) + '%', top: (b.y * 100) + '%', width: (b.w * 100) + '%', height: (b.h * 100) + '%' });
+      const m = d.el && (d.el.querySelector('img') || d.el.querySelector('video')); if (m) m.style.objectFit = 'fill';
+      setStageSel({ sn: d.sn, num: d.num, box: b, guides: g });
+    };
+    const up = () => {
+      const d = stageDragRef.current; stageDragRef.current = null;
+      if (!d) return;
+      setStageSel((cur) => (cur ? { ...cur, guides: {} } : cur));
+      if (d.moved && d.box) setGroupLook(d.sn, d.num, { box: d.box });
+    };
+    const esc = (ev) => { if (ev.key === 'Escape' && !stageDragRef.current) setStageSel(null); };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 커서가 다른 그룹으로 가면 선택을 푼다(그 그림이 안 보일 수 있다)
+  useEffect(() => { if (stageSel && !(stageLayersRef.current.layers || []).some((c) => c.num === stageSel.num)) setStageSel(null); });
+
   async function stepCaptions(clips, durMs, s, where) {
     // 🧭 재생 중에도 ② 커서가 따라간다 — where = { shortsNum, groupNum, sentIdx }
     const PLw = where ? linesMap.get(where.shortsNum) : null;
@@ -2269,14 +2416,16 @@ export default function App() {
     }
   }
   async function playCut(c, info, sn) {
-    setVisual(c); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
+    const _prP = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null;
+    setVisual(c, _prP, 0); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
     const N = effCap;
     const sents = (c.sentences && c.sentences.length) ? c.sentences : [{ text: '', audio: null, dur: c.groupDurationSec || 2.5 }];
     for (let si = 0; si < sents.length; si++) {
       const s = sents[si];
       if (playAbortRef.current) return;
+      if (_prP && lastVisRef.current !== visKeyAt(c, _prP, si)) setVisual(c, _prP, si);
       if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
-      const clips = splitLines(s.text || '', N); const dur = s.dur || 2.5;
+      const clips = splitLines(s.text || '', N, s.breaks); const dur = s.dur || 2.5;
       if (s.audio) {
         try {
           const url = await api.readAudio(s.audio);
@@ -2383,7 +2532,7 @@ export default function App() {
     const ci = cursorInfo();
     if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
     if (!ci || !ci.s) { el.textContent = ''; if (stageVisualRef.current && !ci) { stageVisualRef.current.innerHTML = ''; lastVisRef.current = null; } return; }
-    if (lastVisRef.current !== visKey(ci.cut)) setVisual(ci.cut);
+    if (lastVisRef.current !== visKeyAt(ci.cut, ci.pr, ci.l.sentIdx)) setVisual(ci.cut, ci.pr, ci.l.sentIdx);
     const text = String(ci.s.text || '');
     const base = CF.normFmt(capBase); base.size = capBase.size;
     const runs = CF.lineRuns(text, ci.s.spans, ci.l.range, base);
@@ -2821,8 +2970,17 @@ export default function App() {
 
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
-    <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage">
+    <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown}>
       <div id="stageVisual" ref={stageVisualRef} />
+      {wsOn && stageSel && !playerOpen && (
+        <div className="ssel" data-testid="stage-sel" style={{ left: (stageSel.box.x * 100) + '%', top: (stageSel.box.y * 100) + '%', width: (stageSel.box.w * 100) + '%', height: (stageSel.box.h * 100) + '%' }}
+          title="끌어서 옮기기 · 모서리를 끌어 크기(비율 유지) · 가운데에 가까우면 붙는다 · Esc 해제">
+          {['tl', 'tr', 'bl', 'br'].map((k) => <span key={k} className={'ssel-h ' + k} data-c={k} />)}
+          <span className="ssel-tag">G{stageSel.num}</span>
+        </div>
+      )}
+      {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
+      {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
       <div id="stageCap" ref={stageCapRef} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기' : undefined}
         onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
       {wsOn && sentEdit && sentEdit.where === 'stage' && stageEditBox && (() => {
@@ -4328,7 +4486,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   let lines;
                   if (_got) { lines = _got.map((x) => ({ n: x.n, t: x.t, range: x.range, start: x.start, dur: x.dur })); capN = lines.length ? lines[lines.length - 1].n : capN; }
                   else {
-                    const _lt = splitLines(s.text, capCharsN);
+                    const _lt = splitLines(s.text, capCharsN, s.breaks);
                     const _rg = CF.lineRanges(s.text || '', _lt);
                     lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
                   }
@@ -4482,7 +4640,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 return (
                   <div className={'cut' + (isLf ? ' lf' : '')} key={c.num}>
                     <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
-                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs, ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
+                      onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
                     <div>
                       <div className={'narr' + (c.isIntro ? ' intro' : '')}>
                         <div className="narr-top">
@@ -4505,10 +4663,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                       <div className={'sents' + (onRange && sents.length ? ' vr' : '') + (vrDrag && vrDrag.shortsNum === pr.shortsNum && vrDrag.groupNum === c.num ? ' vr-own' : '')}>
                         {onRange && sents.length ? <>
                           <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
-                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs, ge, ord: gs }); }} />
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.from : gs }); }} />
                           <span className="vr-h bot" title={`그림 끝 — 끌어서 이 그림(G${c.num})을 어느 문장까지 쓸지 정합니다(다른 그룹 문장 위로 끌면 그 문장까지 이 그림이 덮습니다)`}
-                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'end', gs, ge, ord: ge }); }} />
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'end', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.to : ge }); }} />
                         </> : null}
+                        {c.span && <div className="vr-span" data-testid="vr-span" title="이 그림은 자기 그룹 밖까지 아래층으로 이어집니다 — 그 사이 그룹의 그림은 그 위에 보입니다">🖼 그림 범위 문장 {c.span.from}~{c.span.to} (아래층으로 이어 깔림)</div>}
                         {lineEls}
                       </div>
                     </div>
@@ -4601,6 +4760,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       {has && onLook && <>
         <button onClick={() => setSub('fill')}>⛶ 채우기 <span className="vr-val">{VLook.FILLS.find((f) => f.id === lk.fill).label}</span> ›</button>
         <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
+        {lk.box && <button onClick={look({ box: null })}>📐 자리·크기 원래대로</button>}
         {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}</span> ›</button>}
         <div className="vr-sep" />
       </>}
@@ -4647,6 +4807,9 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview, onMenu }) {
       <div className={'thumb none gen' + cls} />
       <div className="genoverlay"><div>📝 새 이미지 필요</div></div>
     </div>;
+  }
+  if (c.covered) {
+    return <div className={'thumb none covered' + cls} data-testid="thumb-covered" title={`G${c.covered} 그림이 아래층으로 이어져 이 그룹에도 보입니다 — 따로 그림을 넣으면 그 위에 얹힙니다 · 클릭: 메뉴`} onClick={onEmpty}><span>⤓ G{c.covered} 그림</span></div>;
   }
   return <div className={'thumb none' + cls} title={onMenu ? '클릭: 메뉴(첨부 · AI 생성 · 적용 범위)' : '클릭: 이미지/영상 첨부'} onClick={onEmpty}>＋</div>;
 }

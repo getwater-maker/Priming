@@ -355,6 +355,15 @@ function _fillBox(fill, w, h, cW, cH) {
   return { x: (1 - wF) / 2, y: (1 - hF) / 2, w: wF, h: hF };
 }
 
+// 📐 사람이 정한 자리·크기(캔버스 0..1) — 값이 이상하면 쓰지 않는다
+function _boxOfLook(g) {
+  const b = g && g.look && g.look.box;
+  if (!b) return null;
+  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : NaN);
+  const o = { x: n(b.x), y: n(b.y), w: n(b.w), h: n(b.h) };
+  return (o.w > 0.02 && o.h > 0.02 && o.w < 10 && o.h < 10 && Math.abs(o.x) < 10 && Math.abs(o.y) < 10) ? o : null;
+}
+
 function _kenBurnsFor(groupIdx) {
   const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
   return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
@@ -835,6 +844,18 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const groupClips = new Map();  // 그룹별 clip id 목록 (제목/도형을 그룹 클립에만 링크)
   let groupIdx = 0;
   const missingImg = [];
+  // 🖼 그림 범위(core/visual-span) — 그룹 그림이 자기 문장 밖으로 **아래층으로 이어질 때** 그 문장들 동안 계속 보인다.
+  //   영상 길이 맞추기·sourceOut 도 그 범위 길이로(안 그러면 이어진 구간에서 영상이 멈춘다).
+  const _VS = require('../core/visual-span');
+  const _vsProj = { groups, sentences };
+  const _vsCtx = _VS.orderOf(_vsProj);
+  const _sById = new Map(sentences.map((s) => [s.id, s]));
+  const _spanDur = (g) => {
+    const r = _VS.effRange(_vsProj, groups.indexOf(g), _vsCtx); if (!r) return 0;
+    let d = 0; for (let k = r.a; k <= r.b; k++) { const s = _sById.get(_vsCtx.order[k]); if (s && s.ttsAudioPath && s.ttsDurationSec) d += s.ttsDurationSec; }
+    return d;
+  };
+  _VS.markCovered(_vsProj, (x) => !!((x.videoPath && fs.existsSync(x.videoPath)) || (x.imagePath && fs.existsSync(x.imagePath))));
   for (const g of groups) {
     // (a) 비디오가 있으면 비디오 자산 + video/videoAudio 두 트랙 생성 (음소거)
     //     9:16 쇼츠 캔버스: 세로 영상만 사용(가로 16:9 그록영상은 흰 여백 → 이미지 폴백).
@@ -847,8 +868,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       let _vsrc = g.videoPath;
       let _vmeta0 = readMp4VideoMeta(_vsrc);
       if (opts.fitVideo !== false && _vmeta0 && _vmeta0.duration > 0) {
-        let _gd = 0;
-        for (const s of sentences) if (s.groupId === g.id && s.ttsAudioPath && s.ttsDurationSec) _gd += s.ttsDurationSec;
+        let _gd = _spanDur(g);   // 🖼 이어 깐 범위까지
         if (_gd > 0) {
           try {
             const fit = await require('../core/video-fit').fitVideo(_vsrc, _vmeta0.duration, _gd, { log, label: `G${g.num} ` });
@@ -921,6 +941,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         const SCALE = 1.08, OFFSET = (1 - SCALE) / 2;   // 8% 확대 cover + 가운데
         _vx = OFFSET; _vy = OFFSET; _vw = SCALE; _vh = SCALE;
       }
+      // 📐 ① 칸에서 사람이 옮기고 줄인 자리(look.box) — 채우기보다 우선
+      { const bx = _boxOfLook(g); if (bx) { _vx = bx.x; _vy = bx.y; _vw = bx.w; _vh = bx.h; } }
       pj.props.tracks[videoTid] = {
         trackId: videoTid, mediaId: mid,
         xPos: _vx, yPos: _vy, height: _vh, width: _vw,
@@ -948,6 +970,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
     // (b) 비디오 없으면 기존 이미지 분기 (이미지도 비율 다르면 가운데 레터박스)
     if (!g.imagePath || !fs.existsSync(g.imagePath)) {
+      if (g._covered) { log(`[Vrew] G${g.num} — 앞 그룹 G${g._covered} 그림이 아래층으로 이어져 보입니다`); continue; }
       missingImg.push(g.num ?? g.id);
       continue;
     }
@@ -1012,6 +1035,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
       };
     }
+    // 📐 ① 칸에서 사람이 옮기고 줄인 자리(look.box) — 채우기보다 우선
+    { const bx = _boxOfLook(g); if (bx) { track.xPos = bx.x; track.yPos = bx.y; track.width = bx.w; track.height = bx.h; } }
     pj.props.tracks[tid] = track;
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     groupImageAsset.set(g.id, { aid, mid, fn });
@@ -1019,6 +1044,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     mediaZip.push({ src: g.imagePath, name: fn });
     groupIdx++;
   }
+
+  // 🖼 문장 → 덮는 그림 그룹들(아래 → 위) — 자산이 실제로 등록된 그룹만
+  const _layers = _VS.layersBySentence(_vsProj, (x) => groupImageAsset.has(x.id));
 
   // ---------- 2. sentence 루프 ----------
   let imageGroupCount = groupImageAsset.size;
@@ -1091,7 +1119,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     if (opts && opts.disableLongSplit) {
       subClips = [{ text: s.text, weight: 1.0 }];
     } else {
-      const lines = splitCaptionLines(s.text, maxCap);
+      const lines = splitCaptionLines(s.text, maxCap, s.capBreaks);   // ✂ 사람이 정한 줄 나눔이 있으면 그대로
       const ranges = CF.lineRanges(s.text, lines);
       subClips = (lines.length > 0)
         ? lines.map((t, li) => ({ text: t, weight: Math.max(1, meaningfulLen(t)), range: ranges[li] }))
@@ -1099,8 +1127,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     }
     const totalWeight = subClips.reduce((sum, c) => sum + (c.weight || 1), 0) || 1;
 
-    const groupAsset = groupImageAsset.get(s.groupId);
-    const clipAssetIds = groupAsset ? [groupAsset.aid] : [];
+    // 🖼 이 문장을 덮는 그림 전부(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 이어진 그림(샘플.vrew: 한 자산이 여러 클립 · zIndex 로 쌓임)
+    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid);
 
     let acc = 0;
     for (let i = 0; i < subClips.length; i++) {
@@ -1219,12 +1247,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   for (const g of groups) {
     const ga = groupImageAsset.get(g.id);
     if (!ga || !ga.isVideo) continue;
-    let groupDur = 0;
-    for (const s of sentences) {
-      if (s.groupId === g.id && s.ttsAudioPath && s.ttsDurationSec) {
-        groupDur += s.ttsDurationSec;
-      }
-    }
+    const groupDur = _spanDur(g);   // 🖼 이어 깐 범위까지
     if (groupDur > 0) {
       const vTrack = pj.props.tracks[ga.videoTid];
       const aTrack = pj.props.tracks[ga.audioTid];

@@ -35,7 +35,7 @@ export function buildProjLines(pr, capChars) {
   let t0 = 0;   // 🕒 편 시작부터의 누적 시각(초) — 문장 음성 길이의 합. 줄은 문장 안에서 **글자수 비례**(.vrew 빌더·미리보기 재생과 같은 규칙)
   (pr && pr.cuts ? pr.cuts : []).forEach((c, ci) => {
     (c.sentences || []).forEach((s, si) => {
-      const lt = splitLines(s.text, capChars);
+      const lt = splitLines(s.text, capChars, s.breaks);
       const rg = CF.lineRanges(s.text || '', lt);
       const dur = Number(s.dur) > 0 ? Number(s.dur) : 0;
       const tot = lt.reduce((a, t) => a + Math.max(1, mLen(t)), 0) || 1;

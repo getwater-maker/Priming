@@ -84,15 +84,19 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     ok(await win.locator('.vr-tip').count() === 1 && (await win.locator('.vr-tip').innerText()).includes('1~4'), '끄는 동안 안내 「문장 1~4」');
     ok(await win.locator('.sblk.vr-hit').count() === 4, '끄는 동안 덮일 문장 4개 표시(다른 그룹까지)');
     await win.mouse.up();
-    ok(await waitG([[1, 2, 3, 4], [5, 6]]), '놓으면 G1 그림이 문장 4까지 — 그룹 2개');
+    // 🖼 v0.5.47 — 늘리면 겹쳐 깐다: 그룹은 그대로 · G1 에 「그림 범위 문장 1~4」
+    const spanOf = async (i) => { const e = win.locator('.cut').nth(i).locator('[data-testid=vr-span]'); return (await e.count()) ? (await e.innerText()) : ''; };
+    const waitSpan = (i, want) => win.waitForFunction(([k, w]) => { const e = document.querySelectorAll('.cut')[k]; const t = e && e.querySelector('[data-testid=vr-span]'); return (t ? t.textContent : '').includes(w); }, [i, want], { timeout: 8000 }).then(() => true, () => false);
+    const waitNoSpan = (i) => win.waitForFunction((k) => { const e = document.querySelectorAll('.cut')[k]; return !(e && e.querySelector('[data-testid=vr-span]')); }, i, { timeout: 8000 }).then(() => true, () => false);
+    ok(await waitSpan(0, '1~4') && JSON.stringify(await groups()) === JSON.stringify(G3), '🔑 놓으면 G1 그림이 문장 4까지 아래층으로 — 그룹 3개 그대로(지우지 않는다)');
 
     // [2] ↶ ↷
     await key('Control+z');
-    ok(await waitG(G3), '↶ Ctrl+Z — 그룹 3개로 되돌아간다');
+    ok(await waitNoSpan(0), '↶ Ctrl+Z — 이어 깔기가 풀린다');
     await key('Control+y');
-    ok(await waitG([[1, 2, 3, 4], [5, 6]]), '↷ Ctrl+Y — 다시 합쳐진다');
+    ok(await waitSpan(0, '1~4'), '↷ Ctrl+Y — 다시 이어 깔린다');
     await key('Control+z');
-    ok(await waitG(G3), '↶ 다시 되돌리기');
+    ok(await waitNoSpan(0), '↶ 다시 되돌리기');
 
     // [3] 메뉴 → 전체 클립으로 → 직접 입력으로 줄이기
     await win.locator('.cut').nth(0).locator('.thumb').first().click();
@@ -101,19 +105,41 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     ok(items.some((t) => t.includes('AI로 이미지')) && items.some((t) => t.includes('AI로 비디오')) && items.some((t) => t.includes('적용 범위')), `썸네일 메뉴 (${items.join(' / ')})`);
     await win.click('[data-testid=vr-menu] button:has-text("적용 범위")');
     await win.click('[data-testid=vr-menu] button:has-text("전체 클립으로")');
-    ok(await waitG([[1, 2, 3, 4, 5, 6]]), '「전체 클립으로」 = 그림 하나가 전부');
-    ok(await win.locator('.cut .smark').count() === 2, '챕터 표식 2개(둘째 장면 · 2장)');
+    ok(await waitSpan(0, '1~6') && JSON.stringify(await groups()) === JSON.stringify(G3), '「전체 클립으로」 = G1 그림이 끝까지 아래층 · 그룹은 그대로');
     await win.locator('.cut').nth(0).locator('.thumb').first().click();
     await win.click('[data-testid=vr-menu] button:has-text("적용 범위")');
     await win.click('[data-testid=vr-menu] button:has-text("직접 입력")');
     await win.waitForSelector('.name-ask-layer input', { timeout: 3000 });
-    await win.fill('.name-ask-layer input', '1-3');
+    await win.fill('.name-ask-layer input', '2-3');
     await win.click('.name-ask-layer button:has-text("확인")');
-    ok(await waitG([[1, 2, 3], [4, 5, 6]]), '직접 입력 1-3 → 뒤 문장은 새 그룹');
-    ok((await win.locator('.cut').nth(1).innerText()).includes('새 이미지 필요'), '🔑 떨어져 나간 그룹 = 「새 이미지 필요」(결정 1ⓐ)');
-    await key('Control+z'); await waitG([[1, 2, 3, 4, 5, 6]]);
+    ok(await waitG([[1], [2], [3, 4], [5, 6]]), '직접 입력 2-3 → 앞 문장(1)은 떨어져 새 그룹 · 3 까지 아래층');
+    ok((await win.locator('.cut').nth(0).innerText()).includes('새 이미지 필요'), '🔑 떨어져 나간 그룹 = 「새 이미지 필요」(결정 1ⓐ)');
+    await key('Control+z'); await waitSpan(0, '1~6');
     await key('Control+z');
-    ok(await waitG(G3), '↶ 두 번 — 처음 모양으로');
+    ok(await waitNoSpan(0) && JSON.stringify(await groups()) === JSON.stringify(G3), '↶ 두 번 — 처음 모양으로');
+
+    // [3b] ✂ 한 문장 안 자막 줄 나누기·합치기 — 문장 1 「첫째 문장입니다.」 를 「첫째」 / 「문장입니다.」 로
+    const lines1 = async () => win.evaluate(() => [...document.querySelectorAll('.sblk[data-ord="1"] .sent')].length);
+    const c1 = win.locator('.sent[data-ln="1"] .clip-cap');
+    if (await c1.count()) await c1.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
+    await win.locator('textarea:focus').waitFor({ timeout: 5000 });
+    await win.keyboard.press('Home'); for (let k = 0; k < 2; k++) await win.keyboard.press('ArrowRight');
+    await win.keyboard.press('Enter');
+    await win.waitForFunction(() => document.querySelectorAll('.sblk[data-ord="1"] .sent').length === 2, null, { timeout: 5000 }).catch(() => {});
+    ok(await lines1() === 2, '✂ Enter — 한 문장이 자막 두 줄(클립 두 개)로');
+    ok(fs.readFileSync(MD, 'utf8') === SCRIPT, '대본(.md)은 그대로 · 음성도 그대로(문장이 안 바뀐다)');
+    const c2 = win.locator('.sent[data-ln="2"] .clip-cap');
+    if (await c2.count()) await c2.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
+    await win.locator('textarea:focus').waitFor({ timeout: 5000 });
+    await win.keyboard.press('Home');
+    await win.keyboard.press('Backspace');
+    await win.waitForFunction(() => document.querySelectorAll('.sblk[data-ord="1"] .sent').length === 1, null, { timeout: 5000 }).catch(() => {});
+    ok(await lines1() === 1, '✂ 둘째 줄 맨 앞 Backspace — 다시 한 줄로');
+    await key('Control+z');
+    await win.waitForFunction(() => document.querySelectorAll('.sblk[data-ord="1"] .sent').length === 2, null, { timeout: 5000 }).catch(() => {});
+    ok(await lines1() === 2, '↶ 줄 합치기 되돌리기');
+    await key('Control+z');
+    await win.waitForFunction(() => document.querySelectorAll('.sblk[data-ord="1"] .sent').length === 1, null, { timeout: 5000 }).catch(() => {});
 
     // [4] 🧩 그룹 경계 넘기 — G1 마지막 문장(2) 끝에서 Del
     const cap = win.locator('.sent[data-ln="2"] .clip-cap');
@@ -165,6 +191,37 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     await key('Control+z');
     await win.waitForTimeout(400);
     ok(await win.evaluate(() => !document.querySelector('#stageVisual img.kbnone')), '↶ 움직임 되돌리기');
+
+    // [4c2] 📐 ① 칸에서 그림 옮기기·크기 — 누르면 선택 틀 · 끌면 옮김 · 가운데에 붙으며 안내선 · 모서리 = 크기
+    { const cc = win.locator('.sent[data-ln="1"] .clip-cap'); if (await cc.count()) await cc.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click(); await win.keyboard.press('Escape'); }
+    await win.waitForSelector('#stageVisual .vlayer[data-num="1"]', { timeout: 5000 });
+    const sv = await win.locator('#stageVisual').boundingBox();
+    const cx = sv.x + sv.width / 2, cy = sv.y + sv.height / 2;
+    await win.mouse.move(cx, cy); await win.mouse.down();
+    await win.waitForSelector('[data-testid=stage-sel]', { timeout: 3000 });
+    ok(true, '📐 ① 칸 그림을 누르면 선택 틀(모서리 손잡이 4개)');
+    await win.mouse.move(cx + sv.width * 0.2, cy + sv.height * 0.15, { steps: 6 });
+    const gAway = await win.locator('[data-testid=guide-v]').count();
+    await win.mouse.move(cx + 2, cy + 1, { steps: 6 });
+    const gNear = await win.locator('[data-testid=guide-v]').count() + await win.locator('[data-testid=guide-h]').count();
+    ok(gAway === 0 && gNear === 2, `🔑 가운데에 가까우면 붙고 빨간 안내선(세로·가로) — 멀면 없음 (${gAway} → ${gNear})`);
+    await win.mouse.move(cx + sv.width * 0.2, cy, { steps: 6 });
+    await win.mouse.up();
+    await win.waitForTimeout(600);
+    const lf = await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlayer[data-num="1"]'); return e ? parseFloat(e.style.left) : NaN; });
+    ok(lf > 10, `놓으면 옮긴 자리가 저장된다(왼쪽 ${lf.toFixed(1)}%)`);
+    const tl = await win.locator('[data-testid=stage-sel] .ssel-h.tl').boundingBox();   // 옮긴 뒤 오른쪽 모서리는 화면 밖이다
+    await win.mouse.move(tl.x + 5, tl.y + 5); await win.mouse.down();
+    await win.mouse.move(tl.x + sv.width * 0.3, tl.y + sv.height * 0.3, { steps: 6 }); await win.mouse.up();
+    await win.waitForTimeout(600);
+    const wd = await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlayer[data-num="1"]'); return e ? parseFloat(e.style.width) : NaN; });
+    ok(wd > 5 && wd < 90, `모서리를 끌면 크기가 바뀐다(너비 ${wd.toFixed(1)}%)`);
+    await win.locator('.cut').nth(0).locator('img.thumb').click();
+    ok(await win.locator('[data-testid=vr-menu] button:has-text("자리·크기 원래대로")').count() === 1, '그림 메뉴에 「자리·크기 원래대로」');
+    await win.click('[data-testid=vr-menu] button:has-text("자리·크기 원래대로")');
+    await win.waitForTimeout(500);
+    ok(await win.evaluate(() => { const e = document.querySelector('#stageVisual .vlayer[data-num="1"]'); return e && e.style.left === '0px' || (e && parseFloat(e.style.left) === 0); }), '원래대로 — 다시 화면 가득');
+    await win.keyboard.press('Escape');
 
     // [4d] 🏷 AI 고지 범위 — 꼬리표 → 이 클립부터 끝까지
     const aiOn = await win.evaluate(() => !!document.querySelector('[data-testid=ai-tag]'));

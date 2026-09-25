@@ -102,7 +102,7 @@ function buildCues(scenes, opts = {}) {
       const dur = Number(s && s.dur) || 0;
       const text = String((s && s.text) || '').trim();
       if (!text || dur <= 0) { t += dur; continue; }
-      const clips = splitCaptionLines(text, maxChars);
+      const clips = splitCaptionLines(String((s && s.text) || ''), maxChars, s && s.breaks);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
       // 🎨 문장별 서식·효과(s.capSpans) — 있으면 줄 범위와 함께 싣는다(없으면 예전과 똑같은 큐)
       const spans = CF.cleanSpans(s && s.spans, text.length);
@@ -146,7 +146,7 @@ function scenesForSubtitle(project, scenes) {
   return (scenes || []).map((sc) => ({
     sentences: (sc.sentenceNums || []).map((n) => {
       const s = byNum.get(n);
-      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0, spans: Array.isArray(s.capSpans) && s.capSpans.length ? s.capSpans : null } : null;
+      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0, spans: Array.isArray(s.capSpans) && s.capSpans.length ? s.capSpans : null, breaks: Array.isArray(s.capBreaks) && s.capBreaks.length ? s.capBreaks : null } : null;
     }).filter(Boolean),
   }));
 }

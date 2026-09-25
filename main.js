@@ -2762,6 +2762,7 @@ async function closeFlowEng() {
 }
 
 async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, force = false) {
+  require('./core/visual-span').markCovered(project, hasVisual);
   fs.mkdirSync(imagesDir, { recursive: true });
   const FlowAccounts = require('./core/flow-accounts');
   // 이미지 모델(기본 Nano Banana 2 / 선택 시 Nano Banana 2 Lite 등) — ⚙ 순환 설정에 저장.
@@ -3015,6 +3016,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
 //   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
 // Nano Banana 2 Lite (Gemini 이미지 API) — 브라우저 없이 API 로 이미지 생성. imgEngine==='gemini' 일 때.
 async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force = false) {
+  require('./core/visual-span').markCovered(project, hasVisual);
   const GI = require('./core/gemini-image');
   if (!GI.hasKey()) { logger('⚠ Gemini API 키 없음 — ⚙ 채널편집의 「Gemini 키」를 설정하세요.'); return; }
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
@@ -3178,6 +3180,7 @@ const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).s
 
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {
+  require('./core/visual-span').markCovered(project, hasVisual);
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
   if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
@@ -3657,6 +3660,7 @@ function imgEngineReady(engineId) {
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
+  { const nC = require('./core/visual-span').markCovered(project, hasVisual); if (nC && !onlyNums) (logger || log)(`🖼 앞 그룹 그림이 아래층으로 이어지는 그룹 ${nC}개는 따로 그림을 만들지 않습니다`); }
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
@@ -3906,6 +3910,7 @@ function hasVisual(g) {
 //   ⇒ force 면 **이미지 유무만** 본다. 평소 경로(만들기 2단계)는 그대로 = 영상 있는 그룹은 안 만든다.
 //   ⚠ Genspark(core/pipeline.generateImagesGenspark)는 원래부터 이미지 유무만 봤다 — 나머지 엔진을 그쪽에 맞춘다.
 function imgDone(g, force) {
+  if (!force && g._covered) return true;   // 🖼 앞 그룹 그림이 아래층으로 이어져 보이는 그룹 — 새로 만들지 않는다(🔄 는 force 라 만든다)
   if (g.imageStale) return false;
   return force ? !!(g.imagePath && fs.existsSync(g.imagePath)) : hasVisual(g);
 }
@@ -4221,7 +4226,9 @@ function warnMissingTts(list) {
   } catch {}
 }
 function missingVisualGroups(project) {
+  require('./core/visual-span').markCovered(project, hasVisual);   // 🖼 아래층 그림이 보이는 그룹은 따로 그림이 없어도 된다
   return (project.groups || []).filter((g) => {
+    if (g._covered) return false;
     // 비주얼 대상 그룹만 — 🖼 범위를 줄여 떨어져 나온 그룹(imageStale)은 프롬프트가 없어도 그림이 있어야 한다
     if (!(g.imagePrompt && String(g.imagePrompt).trim()) && !g.imageStale) return false;
     const hasImg = g.imagePath && fs.existsSync(g.imagePath);
@@ -4756,11 +4763,12 @@ function buildSnapshot() {
         imagePath: g.imagePath, videoPath: g.videoPath,
         imageStale: !!g.imageStale,
         look: g.look || null,   // 🖼 채우기·반전·움직임
+        visSpan: require('./core/visual-span').spanToOrd(pr, g),   // 🖼 아래층으로 이어 깐 범위(문장 순번)
         imagePromptStale: !!g.imagePromptStale,
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null })),
       })),
     })),
   };
@@ -4902,6 +4910,7 @@ function projectsFromSnapshot(snap) {
         if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
         if (ss.speaker) s.speaker = ss.speaker;               // [이름] 대사 — 화자 목소리
         if (Array.isArray(ss.capSpans) && ss.capSpans.length) s.capSpans = ss.capSpans;   // 🎨 줄별·글자별 자막 서식
+        if (Array.isArray(ss.capBreaks) && ss.capBreaks.length) s.capBreaks = ss.capBreaks;   // ✂ 사람이 정한 자막 줄 나눔
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -4910,6 +4919,7 @@ function projectsFromSnapshot(snap) {
     const proj = new Project({ sentences, groups });
     Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
     if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
+    (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
     return proj;
   });
 }
@@ -4958,6 +4968,7 @@ function overlaySnapshot(parsed, snap) {
         const s = sents[i]; if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
         if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
+        if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
       });
@@ -6179,7 +6190,7 @@ function renumberMediaFiles(project, mediaDir) {
 //     ③ 고친 그룹의 TTS·이미지 프롬프트/참조만 무효화한다 → 현재 대본으로 다시 만들 수 있다
 //   🔑 ①과 ②가 어긋나면(=.md 와 화면이 다른 대본이 되면) 다음에 열 때 조용히 틀린다. 그래서
 //      **고친 .md 를 실제로 다시 파싱해 문장 시퀀스가 기대와 같은지 확인한 뒤에만** 파일을 쓴다(아래 검증 재파싱).
-ipcMain.handle('edit-sentences', (_e, args = {}) => {
+function _editSentences(args = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   if (S.parsed.kind === 'book') throw new Error('출판 원고는 이 방식으로 고칠 수 없습니다.');
   if (!S.scriptPath || !fs.existsSync(S.scriptPath)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
@@ -6250,6 +6261,8 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     const _spk = old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
     if (_spk) s.speaker = _spk;
     if (_spansMoved && _spansMoved[ti] && _spansMoved[ti].length) s.capSpans = _spansMoved[ti];
+    // ✂ 사람이 정한 줄 나눔 — 한 문장을 고쳐 한 문장이 되면 새 글 위치로 옮긴다(나누거나 합치면 풀린다 = 자동 줄바꿈)
+    if (old.length === 1 && plan.newTexts.length === 1 && old[0].capBreaks) { const nb = require('./core/caption-splitter').remapBreaks(old[0].text, t, old[0].capBreaks); if (nb) s.capBreaks = nb; }
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
     if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {
@@ -6258,6 +6271,8 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     return s;
   });
   const gPos = g.sentenceIds.indexOf(old[0].id);
+  // 🖼 이어 깐 그림의 범위 끝이 이 문장을 가리키면 새 문장으로 옮긴다(첫 → 첫 · 끝 → 끝)
+  { const mp = new Map(); old.forEach((o, i) => mp.set(o.id, made[Math.min(i, made.length - 1)].id)); require('./core/visual-span').remapSpanIds(pr, mp); }
   pr.sentences.splice(from, n, ...made);
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
@@ -6280,6 +6295,34 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
     + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
   return { ok: true, dto: P.toDTO(S.parsed) };
+}
+ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));
+
+// ✂ 자막 줄 나누기·합치기 — 한 문장 안에서 사람이 줄 나눔을 정한다(음성은 그대로 · 대본 .md 무변경).
+//   breaks = 새 줄이 시작하는 글자 위치 배열(null/[] = 자동 줄바꿈으로). text 를 함께 보내면 먼저 그 글로 고친다(편집 중 나누기).
+ipcMain.handle('set-caption-breaks', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum, sentIdx } = args;
+  const pr = S.parsed.projects.find((x) => x.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return { ok: false, error: '그룹을 찾을 수 없습니다.' };
+  let sen = pr.getSentencesOfGroup(g)[Number(sentIdx)];
+  if (!sen) return { ok: false, error: '문장을 찾을 수 없습니다.' };
+  if (args.text != null && String(args.text) !== sen.text) {
+    const r = _editSentences({ shortsNum, groupNum, sentIdx, count: 1, text: String(args.text) });
+    if (!r || !r.ok) return r;
+    const g2 = pr.groups.find((x) => x.num === groupNum);
+    const ss = g2 ? pr.getSentencesOfGroup(g2) : [];
+    sen = ss[Number(sentIdx)];
+    if (!sen || String(sen.text) !== String(args.text).trim() && String(sen.text) !== String(args.text)) return { ok: true, dto: P.toDTO(S.parsed), note: '문장이 나뉘어 줄 나눔은 적용하지 않았습니다' };
+  }
+  const CS = require('./core/caption-splitter');
+  const nb = CS.normBreaks(sen.text, args.breaks);
+  undoPush(nb ? '자막 줄 나누기' : '자막 줄 자동으로');
+  sen.capBreaks = nb || undefined;
+  storeActive(); pushDtoUpdate();
+  log('✂ ' + prLabel(pr) + ' G' + groupNum + ' 문장 ' + (Number(sentIdx) + 1) + ' 자막 줄 — ' + (nb ? CS.splitCaptionLines(sen.text, 99, nb).map((x) => '「' + x + '」').join(' / ') : '자동 줄바꿈'));
+  return { ok: true, dto: P.toDTO(S.parsed) };
 });
 
 // 🖼 그룹 그림 모양 — 채우기(auto·cover·contain) · 반전(좌우·상하) · 움직임(켄번스). 그림 메뉴에서 바꾼다(Vrew 「채우기·반전·애니메이션」).
@@ -6289,7 +6332,9 @@ ipcMain.handle('set-group-look', (_e, args = {}) => {
   const g = pr && pr.groups.find((x) => x.num === args.groupNum);
   if (!g) throw new Error('그룹을 찾을 수 없습니다.');
   const VL = require('./core/visual-look');
-  const next = VL.normLook({ ...(g.look || {}), ...(args.patch || {}) });
+  const merged = { ...(g.look || {}), ...(args.patch || {}) };
+  if (args.patch && args.patch.box === null) delete merged.box;   // 📐 「자리 원래대로」
+  const next = VL.normLook(merged);
   undoPush('그림 모양');
   g.look = VL.isDefault(next) ? undefined : next;
   storeActive(); pushDtoUpdate();
@@ -6369,6 +6414,7 @@ ipcMain.handle('merge-sentence-across', (_e, args = {}) => {
     const mv = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged]);
     if (mv && mv[0] && mv[0].length) ns.capSpans = mv[0];
   }
+  require('./core/visual-span').remapSpanIds(pr, new Map([[sa.id, ns.id], [sb.id, ns.id]]));
   pr.sentences.splice(ia, 2, ns);
   A.sentenceIds[A.sentenceIds.length - 1] = ns.id;
   B.sentenceIds.shift();
@@ -6555,7 +6601,9 @@ ipcMain.handle('set-visual-range', (_e, args = {}) => {
   storeActive(); pushDtoUpdate();
   const ord = new Map(); let k = 0; for (const g of pr.groups) for (const id of g.sentenceIds) ord.set(id, ++k);
   const nG = pr.groups.indexOf(G) + 1;
-  log(`🖼 ${prLabel(pr)} G${groupNum} 그림 범위 → 문장 ${ord.get(G.sentenceIds[0])}~${ord.get(G.sentenceIds[G.sentenceIds.length - 1])} (이제 G${nG})`
+  const _er = require('./core/visual-span').effRange(pr, pr.groups.indexOf(G));
+  log(`🖼 ${prLabel(pr)} G${groupNum} 그림 범위 → 문장 ${_er ? _er.a + 1 : '?'}~${_er ? _er.b + 1 : '?'} (이제 G${nG})`
+    + (G.visSpan ? ' · 자기 그룹 밖은 **아래층**으로 깝니다(그 사이 그룹의 그림은 그대로 위에 · 그림 없는 그룹엔 이 그림이 보입니다)' : '')
     + (r.removed.length ? ` · 덮인 그룹 ${r.removed.length}개 사라짐${lost ? `(그림 ${lost}개 안 씀)` : ''}` : '')
     + (r.orphans ? ` · 떨어져 나간 문장은 새 그룹 ${r.orphans}개(새 이미지 필요)` : '') + ` (그룹 ${pr.groups.length}개)`);
   return P.toDTO(S.parsed);
