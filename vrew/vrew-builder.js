@@ -602,7 +602,9 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
       const atid = sid();
       pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'video',
         sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo: {}, endBehavior: 'loop', fillType: 'cut' };
-      pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: 0, sourceIn: 0, sourceOut: dur, loop: true, playbackRate: 1, type: 'videoAudio' };
+      // 🔊 삽입 영상의 소리 — 음량 %(기본 100 · 0 = 끔). 그룹 영상은 내레이션과 겹치지 않게 늘 음소거(위 그룹 분기)
+      const _vv = (isFinite(+ov.volume) ? +ov.volume : 100) / 100;
+      pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: _vv, sourceIn: 0, sourceOut: dur, loop: true, playbackRate: 1, type: 'videoAudio' };
       pj.props.assets[aid] = { trackIds: [tid, atid], role: 'sub' };
     } else {
       pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize, name: fn, type: 'Image', isTransparent: ext === 'png', fileLocation: 'IN_MEMORY' });

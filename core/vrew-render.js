@@ -55,6 +55,13 @@ function getFfmpeg() {
   try { return require('./media-utils').getFfmpegPath(); } catch (_) { return require('ffmpeg-static'); }
 }
 
+/** 파일에 소리 트랙이 있는가 — ffmpeg -i 의 스트림 목록으로 본다(실패하면 없음으로) */
+function hasAudioStream(file) {
+  return new Promise((res) => {
+    try { require('child_process').execFile(getFfmpeg(), ['-hide_banner', '-i', file], { windowsHide: true }, (_e, _o, se) => res(/Stream #\d+:\d+.*Audio:/.test(String(se || '')))); }
+    catch (_) { res(false); }
+  });
+}
 function ff(args, { cwd, signal, low = false } = {}) {
   return new Promise((res, rej) => {
     const cp = execFile(getFfmpeg(), args, { cwd, maxBuffer: 1 << 26, windowsHide: true }, (err, so, se) => {
@@ -206,6 +213,12 @@ function buildTimeline(project, mediaDir) {
     for (const aid of (c.assetIds || [])) {
       const tr = trackOf(aid);
       if (tr && tr.type === 'bgm') { const bs = bgmSpans.get(tr.trackId); if (!bs) bgmSpans.set(tr.trackId, { start, end, track: tr }); else bs.end = end; continue; }
+      // 🔊 소리를 켠 영상(➕ 삽입 영상 · 음량 > 0) — 그 구간 동안 영상 소리를 섞는다(그룹 영상은 음량 0 이라 빠진다)
+      //   ⚠ 영상 자산은 트랙이 둘(video · videoAudio)이고 trackOf 는 첫 트랙(그림)만 준다 → 소리 트랙을 따로 찾는다
+      for (const tid of ((assets[aid] && assets[aid].trackIds) || [])) {
+        const at = tracks[tid];
+        if (at && at.type === 'videoAudio' && +at.volume > 0) { const bs = bgmSpans.get(tid); if (!bs) bgmSpans.set(tid, { start, end, track: at, video: true }); else bs.end = end; }
+      }
       if (!tr || tr.type !== 'web') continue;
       const sp = webSpans.get(tr.trackId);
       if (!sp) webSpans.set(tr.trackId, { start, end, track: tr });
@@ -257,8 +270,8 @@ function buildTimeline(project, mediaDir) {
   const inserts = [];
   for (const sp of bgmSpans.values()) {
     const tr = sp.track, f = fileOf(tr); if (!f) continue;
-    const it = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false, t0: sp.start, t1: sp.end };
-    if (!bgm && sp.start < 0.05 && sp.end > t - 0.05) bgm = it; else inserts.push(it);
+    const it = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false, t0: sp.start, t1: sp.end, video: !!sp.video };
+    if (!bgm && !sp.video && sp.start < 0.05 && sp.end > t - 0.05) bgm = it; else inserts.push(it);
   }
   return { segments, cues, audio, overlays, capStyle, bgm, inserts, totalSec: t };
 }
@@ -812,6 +825,8 @@ async function renderVrewToMp4(opts = {}) {
       if (!tl.audio.some((a) => a.file)) return null;
       const wav = path.join(tmpDir, 'voice.wav');
       await concatAudio(tl.audio, wav, tmpDir, ctx);
+      // 🔊 소리 트랙이 없는 영상은 섞지 않는다(없는 [k:a] 를 가리키면 ffmpeg 가 통째로 실패한다)
+      if (tl.inserts && tl.inserts.some((x) => x.video)) { const keep = []; for (const x of tl.inserts) if (!x.video || await hasAudioStream(x.file)) keep.push(x); tl.inserts = keep; }
       await ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', 'voice.wav', ...mixArgs(tl),
         '-c:a', 'aac', '-b:a', '96k', '-ar', String(A_RATE), '-ac', '2', 'voice.m4a'], { cwd: tmpDir, signal: ctx.children });
       try { fs.unlinkSync(wav); } catch (_) {}

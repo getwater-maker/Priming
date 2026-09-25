@@ -27,7 +27,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
   const LOGO = img('logo', 'green', '300x150');
   const BLUE = img('blue', 'blue');
   const TONE = path.join(TMP, 'tone.wav');
-  execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=1', TONE]);
+  execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=8', TONE]);
   const errors = [];
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
   const stub = (p) => app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, p);
@@ -41,7 +41,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       const ps = (await window.api.listPresets()) || [];
       for (const p of ps) if (p.name.indexOf('__테스트채널_삭제해도됨_위층_') === 0) { try { await window.api.removePreset({ name: p.name }); } catch (_) {} }
       await window.api.addPreset({ name });
-      await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, scriptFolder: dir, logoOn: true, logoPath: logo, logoSize: 15 } });
+      await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, scriptFolder: dir, logoOn: true, logoPath: logo, logoSize: 15, voiceCloneRefAudio: logo.replace(/logo.png$/, 'tone.wav') } });
     }, { name: CH, dir: TMP, logo: LOGO });
     chMade = true;
     await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
@@ -147,8 +147,42 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(600);
     ok((await win.locator('[data-testid=ov-vol]').inputValue()) === '60', '음량 60%');
     ok(await win.evaluate(() => !document.querySelector('#stageVisual .vlayer[data-num^="O"] audio')), '① 칸에는 오디오가 그림으로 나오지 않는다');
-    // ② 칸 표시 — 삽입이 시작하는 클립(1)에 그림 썸네일 + 🎵
+    console.log('\n[5a] ▶ 미리보기 — ■ 로 바뀌고 누르면 멈춘다 · 삽입 오디오가 울린다 · 삽입 영상 소리');
     await menu('대본·음성');
+    const pg = win.locator('[data-testid=play-group]').first();
+    ok((await pg.innerText()).trim() === '▶', '그룹 ▶');
+    await pg.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-group]') || {}).innerText.trim() === '■', null, { timeout: 4000 }).catch(() => {});
+    ok((await pg.innerText()).trim() === '■', '재생 중 = ■');
+    await win.waitForTimeout(700);
+    const au = await win.evaluate(() => (window.__pmInsAudio ? window.__pmInsAudio() : []));
+    ok(au.some((x) => x.key.startsWith('ov:') && !x.paused && Math.abs(x.vol - 0.6) < 0.01), `🔑 미리보기에서 삽입 오디오가 울린다 (${JSON.stringify(au)})`);
+    await pg.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-group]') || {}).innerText.trim() === '▶', null, { timeout: 4000 }).catch(() => {});
+    ok((await pg.innerText()).trim() === '▶', '■ 누르면 멈춤 → ▶');
+    const au2 = await win.evaluate(() => (window.__pmInsAudio ? window.__pmInsAudio() : []));
+    ok(au2.length === 0, '멈추면 삽입 오디오도 멈춘다');
+    const ps = win.locator('[data-testid=play-shorts]').first();
+    await ps.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-shorts]') || {}).innerText.includes('멈춤'), null, { timeout: 4000 }).catch(() => {});
+    ok((await ps.innerText()).includes('■ 멈춤'), '▶ 미리보기 → ■ 멈춤');
+    await ps.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-shorts]') || {}).innerText.includes('미리보기'), null, { timeout: 4000 }).catch(() => {});
+    ok((await ps.innerText()).includes('▶ 미리보기'), '■ 멈춤 → ▶ 미리보기');
+    const pf = win.locator('[data-testid=play-from]').first();
+    await pf.click();
+    await win.waitForFunction(() => (document.querySelector('[data-testid=play-from]') || {}).innerText.trim() === '■', null, { timeout: 4000 }).catch(() => {});
+    ok((await pf.innerText()).trim() === '■', '⏭ 여기부터 → ■');
+    await pf.click(); await win.waitForTimeout(300);
+    ok((await pf.innerText()).trim() === '⏭', '■ → ⏭');
+
+    // ② 칸 표시 — 삽입이 시작하는 클립(1)에 그림 썸네일 + 🎵
+    const geo = await win.evaluate(() => { const m = document.querySelector('.sent[data-ln="1"] .ins-marks'); const c = document.querySelector('.sent[data-ln="1"]'); const r = document.querySelector('.cut .sents'); if (!m || !c || !r) return null; const a = m.getBoundingClientRect(), b = c.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { mRight: a.right, cardLeft: b.left, rail: rr.left, col: a.height > a.width }; });
+    ok(geo && geo.mRight < geo.rail && geo.mRight < geo.cardLeft, `🔑 표시가 클립 카드 밖 왼쪽(레일 왼쪽)에 — ${JSON.stringify(geo)}`);
+    ok(geo && geo.col, '여러 개면 세로로 쌓인다');
+    const hit = await win.evaluate(() => { const b = document.querySelector('.sent[data-ln="1"] [data-testid=ins-mark]'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { ok: !!(e && (e === b || b.contains(e))), top: e ? (e.className || e.tagName) + ' < ' + ((e.parentElement && e.parentElement.className) || '') : null }; });
+    ok(hit.ok, '표시를 누를 수 있다(가려지지 않음) ' + JSON.stringify(hit));
+    if (!hit.ok) console.log(await win.evaluate(() => { const b = document.querySelector('[data-testid=ins-mark]'); const out = []; for (let e = b; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); out.push([e.className || e.tagName, cs.overflow, cs.position, cs.zIndex, cs.transform].join('|')); } return out; }));
     const marks = await win.evaluate(() => [...document.querySelectorAll('.sent[data-ln="1"] [data-testid=ins-mark]')].map((b) => b.dataset.kind));
     ok(marks.includes('image') && marks.includes('audio'), `② 칸 클립 1 에 삽입 표시 (${marks.join(', ')})`);
     ok(await win.evaluate(() => !document.querySelector('.sent[data-ln="2"] [data-testid=ins-mark]')), '다른 클립에는 없다(시작 클립에만)');
@@ -199,6 +233,13 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(await row.count() === 1 && (await row.locator('input.nbox').inputValue()) === '15', '📁 폴더 탭에 「🏷 채널 로고」 · 크기 15%');
     ok(await row.locator('select').count() === 0, '위치는 채널편집이 아니라 삽입 메뉴에서');
     ok(!(await win.locator('.modal-card.tabbed').innerText()).includes('🎵 배경음악'), '🎵 배경음악은 채널편집에서 빠졌다(삽입 메뉴로)');
+    await win.locator('.modal-card.tabbed button:has-text("🎙 음성")').first().click();
+    const rb = win.locator('.modal-card.tabbed button[title="미리듣기 / 멈춤"]').first();
+    await rb.click();
+    await win.waitForFunction(() => { const b = document.querySelector('.modal-card.tabbed button[title="미리듣기 / 멈춤"]'); return b && b.innerText.trim() === '■'; }, null, { timeout: 4000 }).catch(() => {});
+    ok((await rb.innerText()).trim() === '■', '참조음성 ▶ → ■');
+    await rb.click(); await win.waitForTimeout(300);
+    ok((await rb.innerText()).trim() === '▶', '■ → ▶ (멈춤)');
     await win.keyboard.press('Escape');
     ok(errors.length === 0, `화면 오류 0 ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
   } catch (e) {

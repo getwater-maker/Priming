@@ -109,6 +109,29 @@ const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입�
     const fr2 = (t) => execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-vf', 'scale=192:108', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
     const lL = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1 });
     ok(isG(px(fr2(s0 / 2), Math.round((lL.x + lL.w / 2) * 192), Math.round((lL.y + lL.h / 2) * 108))), 'MP4 에도 로고가 왼쪽 위');
+
+    console.log('\n[5] 🔊 삽입 영상의 소리(클립 2~3 · 100%) · 소리 없는 영상도 렌더가 안 깨진다');
+    const vs = path.join(tmp, 'vs.mp4'), vn = path.join(tmp, 'vn.mp4');
+    execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=640x360:r=30:d=1', '-f', 'lavfi', '-i', 'sine=f=660:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', vs]);
+    execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=640x360:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', vn]);
+    pr.overlays = [
+      { id: 'v1', file: vs, kind: 'video', ...OL.idsFromOrds(pr, 2, 3), box: { x: 0.6, y: 0.6, w: 0.3, h: 0.3 } },
+      { id: 'v2', file: vn, kind: 'video', ...OL.idsFromOrds(pr, 1, 3), box: { x: 0.05, y: 0.6, w: 0.2, h: 0.2 } },
+    ];
+    delete pr.logoSide;
+    const vrew3 = path.join(tmp, 'z.vrew');
+    await P.buildProjectVrew(pr, vrew3, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 } }, () => {}, 20, 1);
+    const pj3 = JSON.parse(new AdmZip(vrew3).readAsText('project.json'));
+    const va = Object.values(pj3.props.tracks).filter((t) => t.type === 'videoAudio');
+    ok(va.length === 2 && va.every((t) => Math.abs(t.volume - 1) < 1e-9), '삽입 영상 소리 트랙 = 음량 100%(기본)');
+    const mp43 = path.join(tmp, 'z.mp4');
+    const res3 = await R.renderVrewToMp4({ vrewPath: vrew3, outPath: mp43, log: () => {}, par: 1 });
+    ok(res3 && res3.ok, `🔑 소리 없는 영상이 섞여 있어도 렌더 성공${res3 && res3.error ? ' — ' + res3.error : ''}`);
+    const vol3 = (a, b) => { const r = require('child_process').spawnSync(FF, ['-hide_banner', '-ss', String(a), '-t', String(b - a), '-i', mp43, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }); const m = (r.stderr || '').match(/mean_volume:\s*(-?[\d.]+) dB/); return m ? +m[1] : -200; };
+    const z0 = vol3(0.1, s0 - 0.2), z1 = vol3(s0 + 0.2, s0 + 0.9);
+    console.log('   음량 dB', { G1: z0, G2: z1 });
+    ok(z0 < -60, `G1: 영상 소리 없음 (${z0}dB)`);
+    ok(z1 > -35, `🔑 G2: 삽입 영상의 소리가 난다 (${z1}dB)`);
   } catch (e) { ok(false, '왕복 실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} overlay-logo ${pass}/${pass + fail}`);

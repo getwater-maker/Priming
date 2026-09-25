@@ -184,6 +184,7 @@ contextBridge.exposeInMainWorld('api', {
   setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
+  bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
   relinkWork: () => ipcRenderer.invoke('relink-work'),
   setAiNoticeRange: (args) => ipcRenderer.invoke('set-ai-notice-range', args),

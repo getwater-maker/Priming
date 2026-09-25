@@ -6512,7 +6512,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       fs.copyFileSync(file, dst);
     } catch (e) { dst = file; log('⚠ 삽입 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
     undoPush('삽입');
-    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : {}), ...ids });
+    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}), ...ids });
     log(`➕ ${prLabel(pr)} ${KIND[kind][0]} 삽입 — ${path.basename(file)} · ${rangeTxt(ids)}`);
     storeActive(); pushDtoUpdate();
     return { ok: true, id, dto: P.toDTO(S.parsed) };
@@ -6524,7 +6524,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       undoPush('삽입 범위'); Object.assign(ov, ids);
       log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 범위 → ${rangeTxt(ids)}`);
     } else if (op === 'vol') {
-      undoPush('삽입 음량', { coalesce: true }); ov.volume = OL.normVol(args.volume);
+      undoPush('삽입 음량', { coalesce: true }); ov.volume = ov.kind === 'video' ? OL.volOfVideo(args.volume) : OL.normVol(args.volume);
     } else if (op === 'box') {
       undoPush('삽입 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
     } else if (op === 'remove') {
@@ -7534,11 +7534,19 @@ ipcMain.handle('read-audio', (_e, p0) => {
   try {
     const buf = fs.readFileSync(p);
     const ext = path.extname(p).toLowerCase();
-    const mime = ext === '.wav' ? 'audio/wav' : (ext === '.mp3' || ext === '.mpga' || ext === '.mpeg') ? 'audio/mpeg' : 'application/octet-stream';
+    const mime = ({ '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mpga': 'audio/mpeg', '.mpeg': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.mp4': 'video/mp4' })[ext] || 'application/octet-stream';   // ⚠ 형식을 모르면 오디오 태그가 못 튼다(m4a·flac·ogg 삽입 음악이 미리듣기에서 안 나왔다)
     return `data:${mime};base64,${buf.toString('base64')}`;
   } catch { return null; }
 });
 
+// 🎵 미리보기 — 이 대본에서 실제로 쓰일 채널 배경음악 파일(폴더면 대본마다 고른 한 곡)
+ipcMain.handle('bgm-preview-file', (_e, args = {}) => {
+  try {
+    const p = args.presetName ? P.getPreset(args.presetName) : S.preset;
+    const r = _resolveBgm(p || {}, S.scriptPath, null);
+    return r && r.bgm && r.bgm.enabled ? { file: r.bgm.audioPath, volume: r.bgm.volume } : null;
+  } catch { return null; }
+});
 // 렌더러(화면)에서 난 줄도 파일에 남긴다 — 🐞 화면 오류처럼 main 을 거치지 않는 것들.
 //   ⚠ main 이 보낸 줄은 이미 파일에 있으므로 렌더러가 되보내지 않는다(중복 방지 — App.jsx onLog 참조).
 ipcMain.handle('append-log', (_e, line) => { logToFile(`[화면] ${String(line)}`); return true; });

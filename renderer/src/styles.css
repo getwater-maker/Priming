@@ -686,3 +686,13 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .ins-mark img{width:100%;height:100%;object-fit:cover;display:block}
 .ins-mark.audio{background:#1f2a33;color:#fff;border-color:#2ec4f0}
 .sent:not(.clip) .ins-marks{vertical-align:middle;margin-right:4px}
+/* ➕ ② 칸 삽입 표시 — 클립 카드 밖 왼쪽 칸에 세로로(Vrew · v0.5.56) */
+.sent{position:relative}
+.sent .ins-marks{position:absolute;right:calc(100% + 16px);top:4px;display:flex;flex-direction:column;gap:4px;margin:0;z-index:2}
+.sent .ins-mark{width:30px;height:30px;border-radius:7px;font-size:15px;line-height:28px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.sent:not(.clip) .ins-marks{vertical-align:initial;margin:0;top:0}
+/* 표시가 카드 밖(왼쪽)에 나오도록 클립 카드는 넘침을 자르지 않는다 — 대신 번호 칸이 자기 모서리를 둥글게(겉모양 그대로) */
+.sent.clip{overflow:visible}
+.sent.clip .clip-no{border-radius:9px 0 0 9px}
+.sent .ins-mark.audio{background:#e8f6fd;border-color:#2ec4f0;color:#0b6f93}
+.sent .ins-mark.video{background:#f3ecff;border-color:#8e6ad8}
