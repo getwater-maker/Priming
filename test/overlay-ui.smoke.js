@@ -260,6 +260,30 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('1~2'), '🔑 끝점 손잡이를 끌어 범위 → 클립 1~2');
     const lg2 = await win.evaluate(() => { const l = document.querySelector('[data-testid=ins-lane]'); const c2 = document.querySelector('.sent[data-ln="2"]'); return l && c2 ? Math.round(l.getBoundingClientRect().bottom - c2.getBoundingClientRect().bottom) : null; });
     ok(lg2 != null && Math.abs(lg2) <= 2, `막대 끝 = 클립 2 아랫변 (${lg2}px)`);
+    // 🔑 v0.5.60 — 손잡이를 **곧장 아래로**(마우스가 왼쪽 막대 칸에 머문 채) 끌어 그룹을 넘어 클립 3 까지 — 예전엔 반응이 없었다
+    {
+      const ce = await win.locator('[data-testid=ins-lane]').first().locator('[data-testid=lane-cap-e]').boundingBox();
+      const c3 = await win.locator('.sent.clip[data-ln="3"]').boundingBox();
+      const x = ce.x + ce.width / 2;
+      await win.mouse.move(x, ce.y + ce.height / 2); await win.mouse.down();
+      await win.mouse.move(x, c3.y + c3.height / 2, { steps: 10 });
+      const live = await win.evaluate(() => { const l = document.querySelector('[data-testid=ins-lane]'); return l ? l.dataset.to : null; });
+      ok(live === '3', `끄는 동안 막대가 클립 3 까지 따라온다(to=${live})`);
+      await win.mouse.up();
+      const soon = await win.evaluate(() => { const l = document.querySelector('[data-testid=ins-lane]'); return l ? l.dataset.to : null; });
+      ok(soon === '3', '🔑 놓자마자 새 범위로 그려 둔다(옛 범위로 튀지 않는다)');
+      await win.waitForFunction(() => (document.querySelector('[data-testid=ov-range]') || {}).innerText.includes('전체'), null, { timeout: 5000 }).catch(() => {});
+      ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('전체'), '🔑 막대 칸에서 곧장 아래로 끌어 클립 2 → 3(그룹 넘어) — 범위 1~3');
+      await key('End'); await win.waitForTimeout(300);
+      ok(await win.evaluate(() => !!document.querySelector('#stageVisual .vlayer[data-num^="O"]')), '클립 3 에서 ① 칸 맨 위에 삽입 그림');
+      // 시작점도 곧장 아래로 → 2
+      const cs = await win.locator('[data-testid=ins-lane]').first().locator('[data-testid=lane-cap-s]').boundingBox();
+      const c2b = await win.locator('.sent.clip[data-ln="2"]').boundingBox();
+      await win.mouse.move(cs.x + cs.width / 2, cs.y + cs.height / 2); await win.mouse.down();
+      await win.mouse.move(cs.x + cs.width / 2, c2b.y + c2b.height / 2, { steps: 8 }); await win.mouse.up();
+      await win.waitForFunction(() => (document.querySelector('[data-testid=ov-range]') || {}).innerText.includes('2~3'), null, { timeout: 5000 }).catch(() => {});
+      ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('2~3'), '시작점 곧장 아래로 → 클립 2~3');
+    }
     await key('Control+z'); await win.waitForTimeout(500);
     ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('전체'), '↶ 되돌리면 전체');
     // 긴 파일 이름

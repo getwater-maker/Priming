@@ -4729,14 +4729,16 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   const vrDragRef = useRef(null); vrDragRef.current = vrDrag;
   useEffect(() => {
     if (!vrDrag) return undefined;
-    const move = (ev) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      const b = el && el.closest ? el.closest('[data-ord]') : null;
-      const d = vrDragRef.current;
-      if (!b || !d || Number(b.dataset.sn) !== d.shortsNum) return;
-      const o = Number(b.dataset.ord);
-      if (o !== d.ord) setVrDrag({ ...d, ord: o });
+    let lastY = null;
+    const pick = () => {
+      const d = vrDragRef.current; if (!d || lastY == null) return;
+      const o = ordAtY(d.shortsNum, lastY, d.edge === 'start' ? 's' : 'e');
+      if (o != null && o !== d.ord) { vrDragRef.current = { ...d, ord: o }; setVrDrag(vrDragRef.current); }
     };
+    const move = (ev) => { lastY = ev.clientY; pick(); };
+    const stopScroll = dragAutoScroll(() => lastY);
+    const pane = document.querySelector('main.pane2');
+    if (pane) pane.addEventListener('scroll', pick);
     const up = () => {
       const d = vrDragRef.current; setVrDrag(null);
       if (!d || !onRange) return;
@@ -4746,7 +4748,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
     const esc = (ev) => { if (ev.key === 'Escape') { vrDragRef.current = null; setVrDrag(null); } };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up); document.addEventListener('keydown', esc);
     document.body.classList.add('vr-dragging');
-    return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); document.body.classList.remove('vr-dragging'); };
+    return () => { stopScroll(); if (pane) pane.removeEventListener('scroll', pick); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); document.body.classList.remove('vr-dragging'); };
   }, [!!vrDrag]);
   useEffect(() => {
     if (!vrMenu) return undefined;
@@ -5075,6 +5077,36 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   );
 }
 
+// 🧭 끌기 — **마우스 높이로** 문장(클립)을 고른다(v0.5.60). 🔴 예전엔 마우스 밑의 요소(elementFromPoint)로 찾아서,
+//   손잡이를 곧장 아래로 끌면 마우스가 왼쪽 막대 칸에 머물러 클립을 못 찾았다 → 늘리기가 「반응 없음」(로이 2026-09-25).
+//   끝 손잡이는 마우스가 그 클립 윗변을 넘으면 · 시작 손잡이는 아랫변 위면 그 클립. 접힌 그룹(높이 0)은 건너뛴다.
+function ordAtY(sn, clientY, edge) {
+  const bl = [...document.querySelectorAll('.sblk[data-sn="' + sn + '"][data-ord]')];
+  let best = null;
+  if (edge === 's') {
+    for (const b of bl) { const r = b.getBoundingClientRect(); if (!r.height) continue; if (clientY <= r.bottom) return Number(b.dataset.ord); best = Number(b.dataset.ord); }
+  } else {
+    for (const b of bl) { const r = b.getBoundingClientRect(); if (!r.height) continue; if (clientY >= r.top || best == null) best = Number(b.dataset.ord); else break; }
+  }
+  return best;
+}
+// 끌기 중 마우스가 목록 위·아래 끝에 가면 저절로 스크롤(긴 편에서도 끝까지 늘릴 수 있게)
+function dragAutoScroll(getY) {
+  let on = true;
+  const pane = document.querySelector('main.pane2') || document.scrollingElement;
+  const tick = () => {
+    if (!on) return;
+    const y = getY();
+    if (y != null && pane) {
+      const r = pane === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : pane.getBoundingClientRect();
+      const d = y < r.top + 50 ? -(r.top + 50 - y) : (y > r.bottom - 50 ? y - (r.bottom - 50) : 0);
+      if (d) pane.scrollTop += Math.max(-30, Math.min(30, d / 2));
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return () => { on = false; };
+}
 // 🖼 편 문장 번호 ord 에 보이는 그림들(아래 → 위) — ① 칸 visLayersAt 과 같은 규칙(앞 그룹 이어 깔기 < 뒤 그룹 < ➕ 삽입).
 //   startOrd = 그 그림이 처음 보이는 문장(영상이면 거기서부터 흐른 시간으로 장면을 고른다 · v0.5.59)
 function layersAtOrd(pr, ord) {
@@ -5140,6 +5172,16 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
   const [geo, setGeo] = useState([]);
   const [drag, setDrag] = useState(null);   // { id, edge:'s'|'e', from, to }
   const dragRef = useRef(null); dragRef.current = drag;
+  // 놓은 뒤 main 이 새 범위를 돌려줄 때까지 **새 범위로** 그려 둔다(예전엔 옛 범위로 튀었다가 한참 뒤 바뀌었다)
+  const [pending, setPending] = useState(null);   // { id, from, to, at }
+  const pendRef = useRef(null); pendRef.current = pending;
+  useEffect(() => {
+    if (!pending) return undefined;
+    const o = (pr.overlays || []).find((x) => x.id === pending.id);
+    if (!o || (o.from === pending.from && o.to === pending.to)) { setPending(null); return undefined; }
+    const t = setTimeout(() => setPending(null), 4000);
+    return () => clearTimeout(t);
+  }, [pending, pr]);
   const measure = () => {
     const layer = ref.current; if (!layer) return;
     const grid = layer.parentElement; if (!grid) return;
@@ -5162,7 +5204,7 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
     const out = [];
     (pr.overlays || []).forEach((o, oi) => {
       if (o.broken) return;
-      const d = dragRef.current && dragRef.current.id === o.id ? dragRef.current : null;
+      const d = dragRef.current && dragRef.current.id === o.id ? dragRef.current : (pendRef.current && pendRef.current.id === o.id ? pendRef.current : null);
       const f = d ? Math.min(d.from, d.to) : o.from, t = d ? Math.max(d.from, d.to) : o.to;
       const a = rectOf(f, false), b = rectOf(t, true);
       if (!a || !b) return;
@@ -5182,27 +5224,31 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
   // 끝점 끌기 — 놓은 자리의 문장까지
   useEffect(() => {
     if (!drag) return undefined;
-    const move = (ev) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      const b = el && el.closest ? el.closest('.sblk[data-ord]') : null;
-      const d = dragRef.current;
-      if (!b || !d || Number(b.dataset.sn) !== pr.shortsNum) return;
-      const o = Number(b.dataset.ord);
-      const nd = d.edge === 's' ? { ...d, from: o } : { ...d, to: o };
-      if (nd.from !== d.from || nd.to !== d.to) setDrag(nd);
+    let lastY = null;
+    const pick = () => {
+      const d = dragRef.current; if (!d || lastY == null) return;
+      const o = ordAtY(pr.shortsNum, lastY, d.edge); if (o == null) return;
+      // 시작점이 끝점을 넘거나 끝점이 시작점보다 앞으로 가지 않게(범위는 최소 한 클립)
+      const nd = d.edge === 's' ? { ...d, from: Math.min(o, d.to) } : { ...d, to: Math.max(o, d.from) };
+      if (nd.from !== d.from || nd.to !== d.to) { dragRef.current = nd; setDrag(nd); }
     };
+    const move = (ev) => { lastY = ev.clientY; pick(); };
+    const stopScroll = dragAutoScroll(() => lastY);
+    const onScroll = () => pick();
+    const pane = document.querySelector('main.pane2');
+    if (pane) pane.addEventListener('scroll', onScroll);
     const up = () => {
       const d = dragRef.current; setDrag(null);
       const ov = d && (pr.overlays || []).find((x) => x.id === d.id);
       if (d && ov && onInsRange) {
         const f = Math.min(d.from, d.to), t = Math.max(d.from, d.to);
-        if (f !== ov.from || t !== ov.to) onInsRange(pr.shortsNum, d.id, f, t);
+        if (f !== ov.from || t !== ov.to) { setPending({ id: d.id, from: f, to: t }); onInsRange(pr.shortsNum, d.id, f, t); }
       }
     };
     const esc = (ev) => { if (ev.key === 'Escape') { dragRef.current = null; setDrag(null); } };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up); document.addEventListener('keydown', esc);
     document.body.classList.add('vr-dragging');
-    return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); document.body.classList.remove('vr-dragging'); };
+    return () => { stopScroll(); if (pane) pane.removeEventListener('scroll', onScroll); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('keydown', esc); document.body.classList.remove('vr-dragging'); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!drag]);
   return (
@@ -5210,7 +5256,8 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
       {geo.map((g) => {
         const o = (pr.overlays || []).find((x) => x.id === g.id); if (!o) return null;
         const d = drag && drag.id === o.id ? drag : null;
-        const f = d ? Math.min(d.from, d.to) : o.from, t = d ? Math.max(d.from, d.to) : o.to;
+        const dp = d || (pending && pending.id === o.id ? pending : null);
+        const f = dp ? Math.min(dp.from, dp.to) : o.from, t = dp ? Math.max(dp.from, dp.to) : o.to;
         const label = `${o.kind === 'audio' ? '🎵 오디오' : o.kind === 'video' ? '🎬 영상' : '🖼 그림'} 「${o.name || ''}」 · ${f === 1 && t === o.total ? '전체' : `클립 ${f}~${t}`}${o.once ? ' · 1회 재생' : ''}`;
         const cap = (edge) => (
           <span className={'lcap ' + edge} data-testid={'lane-cap-' + edge}
