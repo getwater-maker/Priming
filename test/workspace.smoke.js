@@ -45,14 +45,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
   execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x2040aa:s=1920x1080', '-frames:v', '1', imgB]);
   const errors = [];
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
-  let chMade = false;
+  let chMade = false, lsSaved = null;
   try {
     const win = await app.firstWindow();
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 820); });
     win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     win.on('pageerror', (e) => errors.push(String(e)));
     await win.waitForSelector('h1', { timeout: 20000 });
-    await win.evaluate(() => { try { localStorage.removeItem('pm.view'); localStorage.removeItem('pm.pane1W'); } catch (_) {} });
+    // 🔑 로이 앱과 같은 사용자 폴더(localStorage) — 보기 설정을 적어 두고 끝날 때 되돌린다
+    lsSaved = await win.evaluate(() => { const o = {}; for (const k of ['pm.view', 'pm.pane1R', 'pm.clipDetail']) { try { o[k] = localStorage.getItem(k); localStorage.removeItem(k); } catch (_) {} } return o; });
     await win.evaluate(async ({ name, dir }) => {
       const ps = (await window.api.listPresets()) || [];
       for (const p of ps) if (p.name.indexOf('__테스트채널_삭제해도됨_화면_') === 0) { try { await window.api.removePreset({ name: p.name }); } catch (_) {} }
@@ -132,7 +133,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 3000 });
 
     // [5] 마우스 — 글자 클릭 = 커서 이동 + 바로 고치기
-    await win.locator('.sent[data-ln="4"]').click();
+    await win.locator('.sent[data-ln="4"] .clip-cap').click();   // 상세 보기 — 자막 줄(아래 칸)을 누르면 고치기
     await win.waitForSelector('.sblk.editing textarea', { timeout: 3000 });
     await win.keyboard.press('Escape');
     await win.waitForSelector('.sblk.editing', { state: 'detached', timeout: 3000 });
@@ -190,11 +191,51 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForSelector('[data-testid=pane1] #stage', { timeout: 3000 });
     ok(true, '클립 보기로 되돌아온다');
 
+    // [10] 🧩 2단계 — 상세(클립 머리줄 · 어절 칩) · 개요 전환 · 시각 · 리본 큰 버튼
+    ok(await win.locator('.cuts-grid.detail .sent.clip').count() === 4, `상세 보기가 기본 — 클립 4개(${await win.locator('.sent.clip').count()})`);
+    ok((await win.locator('.sent[data-ln="1"] .clip-spk').innerText()).includes('내레이션'), '클립마다 화자 표시(화자 없으면 「내레이션」)');
+    const chips = win.locator('.sent[data-ln="1"] .clip-chips .chip');
+    ok((await chips.allInnerTexts()).join('|') === '첫째|그룹|첫|문장입니다.', `어절 칩 = 공백으로 나눈 단어 (${(await chips.allInnerTexts()).join('|')})`);
+    await chips.nth(1).click();
+    await win.waitForSelector('.ribbon[data-menu-on="format"] .cf-bar:not(.idle)', { timeout: 3000 });
+    ok((await win.locator('.cf-bar .cf-sel').innerText()).includes('글자 2자') && await win.locator('.sent[data-ln="1"] .chip.on').count() === 1, '🔑 칩을 누르면 그 단어만 서식 선택(「글자 2자」) + 서식 메뉴');
+    ok(await win.locator('.sblk.editing').count() === 0, '칩을 눌러도 편집칸은 열리지 않는다');
+    await chips.nth(3).click({ modifiers: ['Shift'] });
+    await win.waitForTimeout(300);
+    ok((await win.locator('.cf-bar .cf-sel').innerText()).includes('글자 11자') && await win.locator('.sent[data-ln="1"] .chip.on').count() === 3, 'Shift+칩 = 같은 문장 안에서 범위(그룹 첫 문장입니다. = 11자)');
+    await win.click('.cf-bar button[title="굵게"]');
+    await win.waitForFunction(() => [...document.querySelectorAll('.sent[data-ln="1"] .capfmt')].some((e) => Number(getComputedStyle(e).fontWeight) >= 700), null, { timeout: 5000 });
+    ok(true, '칩으로 고른 단어에 굵게가 먹는다');
+    await win.keyboard.press('Escape');
+    await win.click('.clipbar button[data-detail="0"]');
+    await win.waitForTimeout(200);
+    ok(await win.locator('.sent.clip').count() === 0 && await win.locator('.sent[data-ln="1"] .cf-lineno').count() === 1, '개요 = 줄만 촘촘히(칩·머리줄 없음)');
+    await win.click('.clipbar button[data-detail="1"]');
+    // 시각 — 무음(dry)으로 음성 길이를 채운다(TTS 서버·GPU 안 씀 · 임시 채널 출력 = 임시 폴더)
+    const made = await win.evaluate(async (name) => {
+      try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; }
+      catch (e) { return String(e && e.message || e); }
+    }, CH);
+    await win.waitForFunction(() => document.querySelectorAll('.sent.clip .clip-time').length === 4, null, { timeout: 30000 }).catch(() => {});
+    const times = await win.locator('.sent.clip .clip-time').allInnerTexts();
+    const t0 = times.map((x) => { const m = /^(\d\d):(\d\d) \+ (\d+\.\d\d)초$/.exec(x); return m ? { s: +m[1] * 60 + +m[2], d: +m[3] } : null; });
+    ok(made === 'ok' && times.length === 4 && t0.every(Boolean), `🕒 클립 시각 「00:00 + 1.23초」 모양 (${times.join(' / ')})`);
+    ok(t0.every(Boolean) && t0[0].s === 0 && t0[3].s >= t0[1].s && t0.every((x) => x.d > 0), '시각은 앞 줄 길이만큼 누적된다(첫 줄 00:00)');
+    // 리본 큰 버튼 — 아이콘 위 · 글자 아래
+    await menu(win, 'script');
+    const ob = await win.evaluate(() => {
+      const b = [...document.querySelectorAll('.ribbon .hgroup button')].find((x) => /열기/.test(x.textContent));
+      const ic = b && b.querySelector('.rb-ic'), t = b && b.querySelector('.rb-t');
+      return ic && t ? { up: ic.getBoundingClientRect().bottom <= t.getBoundingClientRect().top + 1, h: b.getBoundingClientRect().height } : null;
+    });
+    ok(ob && ob.up && ob.h >= 44, `리본 큰 버튼 — 아이콘이 글자 위(버튼 높이 ${ob && Math.round(ob.h)}px)`);
+
     ok(errors.length === 0, `화면 오류 0건 (${errors.slice(0, 3).join(' | ')})`);
   } catch (e) {
     ok(false, 'E2E 예외: ' + (e && e.stack || e));
   } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }
+    if (lsSaved) { try { await (await app.firstWindow()).evaluate((o) => { for (const k of Object.keys(o)) { try { if (o[k] == null) localStorage.removeItem(k); else localStorage.setItem(k, o[k]); } catch (_) {} } }, lsSaved); } catch (_) {} }
     try { await app.close(); } catch (_) {}
     for (const f of [SNAP]) { try { fs.rmSync(f, { force: true }); } catch (_) {} }
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}

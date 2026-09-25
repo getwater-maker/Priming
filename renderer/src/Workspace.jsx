@@ -8,7 +8,7 @@
  *   · buildProjLines — 편의 자막 줄 목록(번호·그룹·문장·글자 범위). ①·②·키보드가 **같은 번호**를 쓴다(두 벌 금지).
  *   · stageCapGeom   — 미리보기 자막 크기·위치 = **유튜브 MP4 와 같은 공식**(core/vrew-render captionAssStyle).
  */
-import { splitLines } from './lib/captions.js';
+import { splitLines, mLen } from './lib/captions.js';
 import CF from '../../core/caption-format.js';
 
 // 메뉴(리본) — [id, 라벨]. 라벨은 Vrew 메뉴처럼 짧게.
@@ -32,11 +32,22 @@ export function buildProjLines(pr, capChars) {
   const list = [];
   const bySent = new Map();
   let n = 0;
+  let t0 = 0;   // 🕒 편 시작부터의 누적 시각(초) — 문장 음성 길이의 합. 줄은 문장 안에서 **글자수 비례**(.vrew 빌더·미리보기 재생과 같은 규칙)
   (pr && pr.cuts ? pr.cuts : []).forEach((c, ci) => {
     (c.sentences || []).forEach((s, si) => {
       const lt = splitLines(s.text, capChars);
       const rg = CF.lineRanges(s.text || '', lt);
-      const lines = lt.map((t, li) => ({ n: ++n, t, range: rg[li], groupNum: c.num, sentIdx: si, from: rg[li].from, to: rg[li].to, ci }));
+      const dur = Number(s.dur) > 0 ? Number(s.dur) : 0;
+      const tot = lt.reduce((a, t) => a + Math.max(1, mLen(t)), 0) || 1;
+      let acc = 0;
+      const lines = lt.map((t, li) => {
+        const w = Math.max(1, mLen(t));
+        const o = { n: ++n, t, range: rg[li], groupNum: c.num, sentIdx: si, from: rg[li].from, to: rg[li].to, ci,
+          start: dur ? t0 + dur * acc / tot : null, dur: dur ? dur * w / tot : null, speaker: s.speaker || null };
+        acc += w;
+        return o;
+      });
+      t0 += dur;
       bySent.set(c.num + ':' + si, lines);
       for (const l of lines) list.push(l);
     });
@@ -82,4 +93,25 @@ export function applyStageGeom(el, g) {
   el.style.top = g.top == null ? 'auto' : g.top + 'px';
   el.style.bottom = g.bottom == null ? 'auto' : g.bottom + 'px';
   el.style.transform = g.transform;
+}
+
+/** 🕒 클립 시각 표시 — Vrew 처럼 「00:11 + 1.70초」(시작 mm:ss · 길이 소수 둘째). 음성이 없으면 빈 문자열. */
+export function fmtClipTime(start, dur) {
+  if (start == null || !(dur > 0)) return '';
+  const s = Math.floor(start);
+  const mm = Math.floor(s / 60), ss = s % 60;
+  const hh = Math.floor(mm / 60);
+  const head = hh ? `${hh}:${String(mm % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  return `${head} + ${dur.toFixed(2)}초`;
+}
+
+/** 🧩 어절 칩 — 줄 글자를 공백으로 나눠 문장 안 글자 위치(from·to)를 붙인다. 누르면 그 단어만 서식 선택. */
+export function lineWords(text, range) {
+  const t = String(text || '');
+  const out = [];
+  const re = /\S+/g;
+  const seg = t.slice(range.from, range.to);
+  let m;
+  while ((m = re.exec(seg))) out.push({ w: m[0], from: range.from + m.index, to: range.from + m.index + m[0].length });
+  return out;
 }

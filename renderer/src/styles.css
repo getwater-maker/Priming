@@ -515,3 +515,30 @@ main.pane2{min-width:0}
 .menubar .menus .menu{padding:6px 10px}
 /* 메뉴 줄 검색창 — ▲▼ 는 Enter / Shift+Enter 로 된다(좁은 창에서 겹쳐 보였다) */
 .menubar .findbar button[title^="이전"],.menubar .findbar button[title^="다음"]{display:none}
+
+/* ── 🧩 v0.5.43 클립 상세(Vrew 클립 모양) — 머리줄 · 어절 칩 · 자막 줄 ─────────────── */
+.cuts-grid.detail .sents{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.cuts-grid.detail .sblk{margin:0}
+.sent.clip{display:block;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px 10px 7px;margin:0 0 6px}
+.sent.clip.cur{border-color:var(--accent);box-shadow:0 0 0 2px #f3d9a8 inset;background:#fffaf1}
+.sent.clip.picked{background:#fde9c9}
+.clip-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:#8a7b66;margin-bottom:5px}
+.clip-meta .cf-lineno{font-size:12px}
+.clip-spk{font-weight:700;color:var(--strong)}
+.clip-spk.narr{font-weight:500;color:#9a8b74}
+.clip-time{color:#a39580;font-variant-numeric:tabular-nums}
+.clip-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
+.clip-chips .chip{display:inline-block;padding:2px 8px;border:1px solid #e2d5c0;border-radius:7px;background:#faf6ef;font-size:13px;color:var(--strong);cursor:pointer;user-select:none}
+.clip-chips .chip:hover{border-color:var(--accent);background:#fff3e0}
+.clip-chips .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.clip-cap{font-size:14px;color:var(--strong);padding:2px 2px 0;border-top:1px dashed #eee3d2;cursor:text}
+/* 🎛 리본 큰 버튼(Vrew) — 아이콘 위 · 글자 아래. 입력칸·선택칸은 가운데 정렬로 둔다 */
+.ribbon{align-items:stretch;padding:4px 12px}
+.ribbon .hgroup{align-items:center;border:0;background:transparent;padding:0 4px;gap:3px}
+.ribbon .hgroup + .hgroup,.ribbon .hgroup + .splitbar{border-left:1px solid var(--line);padding-left:10px}
+.ribbon .hgroup > button,.ribbon .hgroup > span > button{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;min-width:48px;padding:3px 8px;line-height:1.1;border-color:transparent;background:transparent;color:var(--strong)}
+.ribbon .hgroup > button:hover:not(:disabled){background:#f3ead9;border-color:#e8dcc4;color:var(--strong)}
+.ribbon .hgroup > button:disabled{opacity:.45}
+.ribbon .rb-ic{font-size:19px;line-height:1}
+.ribbon .rb-t{font-size:11.5px;font-weight:600;white-space:nowrap}
+.ribbon .hgroup .glabel{writing-mode:horizontal-tb;align-self:center}

@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+let lsDetail = null;   // 로이 앱과 같은 localStorage — 끝날 때 되돌린다
 
 const ROOT = path.join(__dirname, '..');
 const TAG = `__문장편집테스트_${process.pid}`;
@@ -57,6 +58,9 @@ const cleanup = () => {
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
+    // 🧩 v0.5.43 — 클립 「상세」는 블록 한가운데가 어절 칩이라(누르면 단어 선택) 문장 블록 클릭을 보는 이 테스트는 「개요」로 돈다
+    lsDetail = await win.evaluate(() => { try { return localStorage.getItem('pm.clipDetail'); } catch (_) { return null; } });
+    if (await win.locator('.clipbar button[data-detail="0"]').count()) await win.click('.clipbar button[data-detail="0"]');
 
     // [1] 헤더에 옛 ✏ 수정 버튼이 없다
     ok(await win.locator('.hgroup:has(.glabel:has-text("대본")) button:has-text("✏ 수정")').count() === 0,
@@ -222,6 +226,7 @@ const cleanup = () => {
     // [11] 화면 오류 0 — 미정의 식별자·렌더 예외가 없었는가
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);
   } finally {
+    try { await (await app.firstWindow()).evaluate((v) => { try { if (v == null) localStorage.removeItem('pm.clipDetail'); else localStorage.setItem('pm.clipDetail', v); } catch (_) {} }, lsDetail); } catch (_) {}
     await app.close().catch(() => {});
     cleanup();
   }

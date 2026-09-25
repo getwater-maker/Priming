@@ -9,7 +9,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import { CF, CaptionToolbar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine } from './CaptionFormat.jsx';
-import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom } from './Workspace.jsx';
+import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -432,7 +432,11 @@ export default function App() {
   const pickMenu = (id) => { if (MENUS.some((x) => x[0] === id)) setMenu(id); };
   const [view, setView] = useState(() => (lsGet('pm.view', 'clips') === 'cards' ? 'cards' : 'clips'));
   const pickView = (v) => { setView(v); lsSet('pm.view', v); };
-  const [pane1W, setPane1W] = useState(() => { const d = Math.round((typeof window !== 'undefined' ? window.innerWidth : 1400) * 0.4); return Math.max(320, Math.min(1400, Number(lsGet('pm.pane1W', d)) || d)); });   // 기본 = 창의 40%(Vrew 와 비슷)
+  // 🧩 클립 보기의 개요/상세(Vrew 오른쪽 위 토글) — 상세 = 클립마다 화자·시각 머리줄 + 어절 칩 + 자막 줄
+  const [clipDetail, setClipDetail] = useState(() => lsGet('pm.clipDetail', '1') !== '0');
+  const pickClipDetail = (on) => { setClipDetail(on); lsSet('pm.clipDetail', on ? '1' : '0'); };
+  // ① 칸 폭 = **비율**(기본 40% — Vrew 와 비슷). 🔴 px 로 두면 창이 처음 뜰 때의 너비로 계산돼, 창을 줄인 뒤 ① 이 화면을 다 먹었다(실측).
+  const [pane1W, setPane1W] = useState(() => { const r = Number(lsGet('pm.pane1R', 0.4)); return r >= 0.2 && r <= 0.7 ? r : 0.4; });
   const [cursor, setCursor] = useState(null);       // { shortsNum, n } — ② 에서 지금 가리키는 자막 줄
   const lastVisRef = useRef(null);                   // ① 에 지금 깔린 그림/영상(같으면 다시 깔지 않는다 — 영상이 처음부터 다시 돈다)
   const stopLineRef = useRef(null);                 // 미리보기 재생 — 지금 도는 자막 효과 멈춤
@@ -2190,9 +2194,10 @@ export default function App() {
   /** ① ↔ ② 경계 끌기 — 폭을 기억한다. */
   function startPaneDrag(e) {
     e.preventDefault();
-    const x0 = e.clientX, w0 = pane1W;
-    const mv = (ev) => setPane1W(Math.max(320, Math.min(Math.round(window.innerWidth * 0.7), w0 + ev.clientX - x0)));
-    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); setPane1W((w) => { lsSet('pm.pane1W', w); return w; }); };
+    const body = document.getElementById('body'); const BW = body ? body.clientWidth : window.innerWidth;
+    const x0 = e.clientX, w0 = pane1W * BW;
+    const mv = (ev) => setPane1W(Math.max(0.2, Math.min(0.7, (w0 + ev.clientX - x0) / BW)));
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); setPane1W((w) => { lsSet('pm.pane1R', w.toFixed(3)); return w; }); };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   }
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
@@ -2686,12 +2691,12 @@ export default function App() {
             {menu === 'script' && (<>
           <span className="hgroup">
             <span className="glabel">① 대본·음성</span>
-            <button onClick={openScript}>📂 열기</button>
+            <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
-            <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
-            <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}>🎵 mp3</button>
-            <button className="ghost" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 mp3(또는 영상)를 받아 바로 전사합니다 — 자막이 있으면 STT 없이 자막을 씁니다" onClick={openUrlDl}>🔗 URL</button>
+            <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}><span className="rb-ic">🎧</span> <span className="rb-t">STT</span></button>
+            <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}><span className="rb-ic">🎵</span> <span className="rb-t">mp3</span></button>
+            <button className="ghost" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 mp3(또는 영상)를 받아 바로 전사합니다 — 자막이 있으면 STT 없이 자막을 씁니다" onClick={openUrlDl}><span className="rb-ic">🔗</span> <span className="rb-t">URL</span></button>
             <span className="hdiv" />
             {/* 「저장·불러오기」 버튼들(작업저장·작업열기·큐저장·큐열기·전체삭제)은 화면에서만 뺐다 (2026-09-16).
                 근거: ~/.priming-maker/saves 가 0개 = 한 번도 쓴 적이 없다. 작업물은 자동저장이 늘 이어받는다
@@ -2701,9 +2706,9 @@ export default function App() {
                 대본 + 음성을 **한 섹션으로** 합쳤다 (로이 2026-09-16) — 대본을 열고 바로 음성을 만드는 한 호흡이다.
                 그래서 이미지·비디오·완성의 번호가 다시 한 칸씩 당겨졌다(②③④). */}
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
-            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}>🎤 TTS</button>
-            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>
-            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}>📖 발음사전</button>
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS</span></button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
           </span>
               <span className="hgroup rb-extra">
         <label className="chk" title="무엇을 넣어 .vrew 를 만들지 정합니다.&#10;· 전체 — 음성 + 화면 (기본)&#10;· 🎤 음성만 — 이미지·비디오를 만들지 않습니다(그 단계를 건너뜁니다)&#10;· 🖼 화면만 — 음성을 만들지 않습니다(TTS 단계를 건너뛰고, 음성 자리는 무음). Vrew 에서 AI 목소리를 입힌 뒤 「📥 Vrew 음성」으로 되가져오세요."
@@ -2717,7 +2722,7 @@ export default function App() {
         </label>
         <button className="ghost" disabled={!loaded}
           title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
-          onClick={runImportVrewAudio}>📥 Vrew 음성</button>
+          onClick={runImportVrewAudio}><span className="rb-ic">📥</span> <span className="rb-t">Vrew 음성</span></button>
               </span>
               {splitBar}
             </>)}
@@ -2741,10 +2746,10 @@ export default function App() {
             </select>
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
-            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
-            <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}>🗑 삭제</button>
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             {imgEngine === 'gemini' && (<>
-              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
+              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
             </>)}
           </span>
@@ -2760,9 +2765,9 @@ export default function App() {
               <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
               <option value="none">없음 (이미지만)</option>
             </select>
-            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}>⚙ 계정</button>}
-            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
-            {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}>⚙ Veo</button>}
+            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}><span className="rb-ic">⚙</span> <span className="rb-t">계정</span></button>}
+            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}><span className="rb-ic">⚙</span> <span className="rb-t">키</span></button>}
+            {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}><span className="rb-ic">⚙</span> <span className="rb-t">Veo</span></button>}
             {videoEngine === 'genspark' && (
               <select style={{ maxWidth: 190 }} value={gsVideoModel}
                 title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
@@ -2774,10 +2779,10 @@ export default function App() {
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
                   <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-                  <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}>🎬 비디오</button>
-                  <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}>🖼→🎬 이미지+비디오</button>
+                  <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                  <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
-            <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}>🗑 삭제</button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
           </span>
             </>)}
             {menu === 'finish' && (<>
@@ -2797,18 +2802,18 @@ export default function App() {
               <label className="chk" title="자막을 영상에 굽습니다(하드번) — 화이트보드는 Vrew 를 거치지 않는 최종물이라 굽지 않으면 화면에 글자가 안 보입니다. ⚠ 구우면 영상을 다시 인코딩하므로 길이에 비례해 몇 분 더 걸립니다. 꺼도 .srt 파일은 옆에 남습니다." style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
               </label>
-              <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}>📋 장면 계획</button>
+              <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}><span className="rb-ic">📋</span> <span className="rb-t">장면 계획</span></button>
             </>)}
             <span className="hdiv" />
-            <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}>📄 대본 보기</button>
+            <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
-            {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}>⬆ 업로드</button>}
-            <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
+            {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
+            <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
           </span>
               <span className="hgroup rb-extra" id="capbar">
         <button className="ghost" disabled={!loaded || prog.ttsD === 0}
           title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
-          onClick={openTimestamps}>⏱ 타임스탬프</button>
+          onClick={openTimestamps}><span className="rb-ic">⏱</span> <span className="rb-t">타임스탬프</span></button>
         <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
               </span>
             </>)}
@@ -2826,7 +2831,7 @@ export default function App() {
       {/* 🧭 가로 3칸(Vrew) — ① 영상·이미지(커서 줄 자막) ② 자막 클립 목록 ③ 자세한 설정(열릴 때만) */}
       <div id="body" className={wsOn ? 'ws' : ''}>
         {wsOn && (<>
-          <section className="pane1" data-testid="pane1" style={{ width: pane1W }}>
+          <section className="pane1" data-testid="pane1" style={{ width: (pane1W * 100).toFixed(1) + '%' }}>
             {stageEl}
             {clipInfo}
             {logBox}
@@ -2858,12 +2863,18 @@ export default function App() {
           <div className="clipbar" data-testid="clipbar">
             {workTimes}
             <span className="grow" />
+            {view === 'clips' && (
+              <span className="seg" title="개요 = 줄만 촘촘히 · 상세 = 클립마다 화자·시각 + 어절 칩(누르면 그 단어만 서식)">
+                <button className={!clipDetail ? 'on' : ''} data-detail="0" onClick={() => pickClipDetail(false)}>개요</button>
+                <button className={clipDetail ? 'on' : ''} data-detail="1" onClick={() => pickClipDetail(true)}>상세</button>
+              </span>
+            )}
             <span className="seg" title="보기 — 클립(Vrew 식 3칸) / 카드(옛 3열 그룹 카드)">
               <button className={view === 'clips' ? 'on' : ''} data-view="clips" onClick={() => { if (playerOpen) stopPlayer(); pickView('clips'); }}>클립</button>
               <button className={view === 'cards' ? 'on' : ''} data-view="cards" onClick={() => { if (playerOpen) stopPlayer(); pickView('cards'); }}>카드</button>
             </span>
           </div>
-          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} linesMap={linesMap}
+          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} detail={view === 'clips' && clipDetail} linesMap={linesMap}
             cursor={cursor} onCursor={(sn, n) => setCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSel} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
@@ -3930,7 +3941,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, layout, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3960,7 +3971,7 @@ function Cards({ dto, isLf, capCharsN, layout, linesMap, cursor, onCursor, capBa
                 <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
-            <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '')}>
+            <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '') + (detail ? ' detail' : '')}>
               {pr.cuts.map((c, ci) => {
                 const ph = phaseBadge(c.phase);
                 // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
@@ -3973,7 +3984,7 @@ function Cards({ dto, isLf, capCharsN, layout, linesMap, cursor, onCursor, capBa
                   const _pl = linesMap && linesMap.get(pr.shortsNum);
                   const _got = _pl && _pl.bySent.get(c.num + ':' + si);
                   let lines;
-                  if (_got) { lines = _got.map((x) => ({ n: x.n, t: x.t, range: x.range })); capN = lines.length ? lines[lines.length - 1].n : capN; }
+                  if (_got) { lines = _got.map((x) => ({ n: x.n, t: x.t, range: x.range, start: x.start, dur: x.dur })); capN = lines.length ? lines[lines.length - 1].n : capN; }
                   else {
                     const _lt = splitLines(s.text, capCharsN);
                     const _rg = CF.lineRanges(s.text || '', _lt);
@@ -4040,6 +4051,42 @@ function Cards({ dto, isLf, capCharsN, layout, linesMap, cursor, onCursor, capBa
                           // ✨ 표시는 **이 줄에 따로 준 효과**만(채널 기본 효과까지 표시하면 모든 줄에 붙는다)
                           const lp = s.spans ? CF.lineProps(s.spans, l.range, {}, String(s.text || '').length) : null;
                           const ai = lp && lp.anim ? CF.ANIM_INFO[lp.anim.type] : null;
+                          const isCur = cursor && cursor.shortsNum === pr.shortsNum && cursor.n === l.n;
+                          const lineNo = (
+                            <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
+                              onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
+                              onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
+                          );
+                          if (detail) {
+                            // 🧩 Vrew 클립 모양 — ① 머리줄(번호·화자·시각·효과) ② 어절 칩 ③ 자막 줄(누르면 고치기)
+                            const selChars = capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum ? capSel.items.filter((x) => x.groupNum === c.num && x.sentIdx === si) : [];
+                            const tm = fmtClipTime(l.start, l.dur);
+                            return (
+                              <div className={'sent clip' + (picked ? ' picked' : '') + (isCur ? ' cur' : '')} key={l.n} data-ln={l.n}>
+                                <div className="clip-meta">
+                                  {lineNo}
+                                  <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
+                                  {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                  {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
+                                </div>
+                                <div className="clip-chips">
+                                  {lineWords(s.text, l.range).map((w) => (
+                                    <span key={w.from} className={'chip' + (selChars.some((x) => x.from < w.to && x.to > w.from) ? ' on' : '')}
+                                      title="이 단어만 서식 고르기 — Shift = 같은 문장 안에서 범위"
+                                      onMouseDown={(ev) => { if (ev.shiftKey) ev.preventDefault(); }}
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        if (!onPickCapChars) return;
+                                        let from = w.from, to = w.to;
+                                        if (ev.shiftKey && selChars.length) { from = Math.min(from, ...selChars.map((x) => x.from)); to = Math.max(to, ...selChars.map((x) => x.to)); }
+                                        onPickCapChars(pr.shortsNum, c.num, si, { from, to });
+                                      }}>{w.w}</span>
+                                  ))}
+                                </div>
+                                <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
+                              </div>
+                            );
+                          }
                           return (
                             <div className={'sent' + (picked ? ' picked' : '') + (cursor && cursor.shortsNum === pr.shortsNum && cursor.n === l.n ? ' cur' : '')} key={l.n} data-ln={l.n}>
                               <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
