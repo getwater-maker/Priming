@@ -607,7 +607,7 @@ async function renderChunk(ch, i, ctx) {
       if (l.type === 'image') {
         const png = await boxImage(l.file, bw, bh, flip, ctx);
         ins.push('-i', png);
-        parts.push(`[${k + 1}:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
+        parts.push(`[${k + 1}:v]format=${/\.png$/i.test(l.file) ? 'yuva420p' : 'yuv420p'},loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
       } else {
         ins.push(...videoInArgs(tr, lo / FPS), '-i', l.file);
         parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600,format=yuv420p[l${k}]`);

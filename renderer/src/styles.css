@@ -662,3 +662,10 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .ribbon .cf-bar .cf-div{background:#e2d5c0}
 .ribbon .cf-bar .cf-cbtn{color:var(--strong)}
 .ribbon .cf-bar .cf-savedef{border-color:var(--accent) !important;color:var(--accent-d) !important}
+
+/* 🏷 ① 칸 채널 로고 미리보기 · 🔝 위층 목록 (v0.5.52) */
+#stageVisual + .stage-logo, .stage-logo{position:absolute;height:auto;z-index:4;pointer-events:none}
+.ovbar{display:flex;flex-wrap:wrap;gap:6px;padding:4px 8px;border-bottom:1px solid var(--line);background:#fffdf9}
+.ovchip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:2px 4px 2px 8px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--strong)}
+.ovchip.broken{border-color:var(--danger);color:var(--danger)}
+.ovchip button{padding:0 6px;font-size:11px;line-height:18px;min-height:0;color:var(--strong)}

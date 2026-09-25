@@ -80,6 +80,7 @@ function toDTO(parseResult) {
         aspect: pr.aspect,
         voice: pr.voice,
         aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지를 보일 문장 범위(없으면 채널 기본 = 5초 뒤 5초)
+        overlays: (() => { const L = require('./overlay-layers').toDTO(pr); return L.map((o) => ({ ...o, version: (() => { try { const st = fs.statSync(o.file); return Math.trunc(st.mtimeMs) + '-' + st.size; } catch { return ''; } })() })); })(),   // 🔝 위층 그림·영상
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);
           const mediaVersion = (file) => {
@@ -493,7 +494,9 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
+    if (preset.logo && preset.logo.enabled && preset.logo.path) opts.logo = preset.logo;   // 🏷 채널 로고(core/overlay-layers.logoOptsOf)
   }
+  if (Array.isArray(project.overlays) && project.overlays.length) opts.overlays = project.overlays;   // 🔝 위층 그림·영상
   return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
 }
 

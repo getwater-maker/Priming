@@ -14,7 +14,7 @@ const FF = require('../core/media-utils').getFfmpegPath();
 
 // main.js 원문에서 곡 고르기를 뽑아 실행
 const i0 = MAIN.indexOf('const BGM_EXT'); const i1 = MAIN.indexOf('// 로컬 이미지/영상 미리보기용 커스텀 프로토콜', i0);
-const { pickBgmFile, resolveBgm } = new Function('fs', 'path', MAIN.slice(i0, i1) + '; return { pickBgmFile, resolveBgm };')(fs, path);
+const { pickBgmFile, resolveBgm } = new Function('fs', 'path', 'require', MAIN.slice(i0, i1) + '; return { pickBgmFile, resolveBgm };')(fs, path, (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m));   // withLogo 가 core/overlay-layers 를 부른다(v0.5.52)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bgm-'));
 const tone = (name, sec, f = 220) => { const p = path.join(tmp, name); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `sine=f=${f}:d=${sec}`, '-ac', '2', '-ar', '44100', p]); return p; };

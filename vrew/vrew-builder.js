@@ -115,19 +115,6 @@ const TEXTBOX_MEDIA_ID = 'uc-0010-simple-textbox';
 const TEXTBOX_DUMMY_BIN = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.bin');
 const TEXTBOX_DUMMY_META = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.meta.json');
 
-// 채널 로고 오버레이 프리셋
-const LOGO_POSITION_PRESETS = {
-  'top-left':     { anchorX: 'left',  anchorY: 'top',    margin: 0.02 },
-  'top-right':    { anchorX: 'right', anchorY: 'top',    margin: 0.02 },
-  'bottom-left':  { anchorX: 'left',  anchorY: 'bottom', margin: 0.02 },
-  'bottom-right': { anchorX: 'right', anchorY: 'bottom', margin: 0.02 },
-};
-const LOGO_SIZE_PRESETS = {
-  small:  { width: 0.10, height: 0.10 },
-  medium: { width: 0.15, height: 0.15 },
-  large:  { width: 0.20, height: 0.20 },
-};
-
 // mp4 헤더(moov/trak/tkhd/mvhd) 직접 파싱 — width/height/duration 추출.
 // grok-store 추정값(1280x720) 이 실제 영상(예: 1280x704) 과 어긋나면 Vrew 가
 // 메타와 실제 frame 차이만큼 흰 letterbox 띠를 그리므로 정확한 값이 필요.
@@ -532,53 +519,84 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
   return { trackId: tid, assetId: aid };
 }
 
-// 채널 로고 오버레이 트랙 추가 (image type, 모서리 배치, 모든 clip 에 표시)
-function addLogoTrack(pj, opt, mediaZip, zIndexBase, log) {
+// 🏷 채널 로고 — 위쪽 왼쪽/오른쪽 · 실제 그림 비율 · 모든 clip · 맨 위층(v0.5.52 · 옛 PrimingFlow 판은 정사각형으로 가정했다)
+function addLogoTrack(pj, opt, mediaZip, canvas, log) {
   if (!opt.path || typeof opt.path !== 'string' || !fs.existsSync(opt.path)) {
     log(`[Vrew] 로고 옵션 켜졌으나 파일 없음 — 트랙 생략 (path: ${opt.path})`);
     return null;
   }
-
-  const sizePreset = LOGO_SIZE_PRESETS[opt.size] || LOGO_SIZE_PRESETS.medium;
-  const posPreset = LOGO_POSITION_PRESETS[opt.position] || LOGO_POSITION_PRESETS['top-right'];
-  const w = sizePreset.width, h = sizePreset.height, m = posPreset.margin;
-  const xPos = (posPreset.anchorX === 'left') ? m : (1 - w - m);
-  const yPos = (posPreset.anchorY === 'top')  ? m : (1 - h - m);
-
+  const isz = readImageSize(opt.path);
+  const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? isz.w / isz.h : 1;
+  const b = require('../core/overlay-layers').logoBox({ side: opt.side, size: opt.size, imgRatio, canvasW: canvas.w, canvasH: canvas.h });
   const mid = uid();
   const aid = uid();
   const tid = sid();
   const ext = (path.extname(opt.path).toLowerCase().replace('.jpeg','.jpg').replace('.','')) || 'png';
   const fn = `${mid}.${ext}`;
   const fileSize = fs.statSync(opt.path).size;
-
   pj.files.push({
     version: 1, mediaId: mid, sourceOrigin: 'USER',
     fileSize, name: fn, type: 'Image',
     isTransparent: ext === 'png', fileLocation: 'IN_MEMORY',
   });
-
   pj.props.tracks[tid] = {
     trackId: tid, mediaId: mid,
-    xPos, yPos, height: h, width: w,
+    xPos: b.x, yPos: b.y, height: b.h, width: b.w,
     rotation: 0,
-    zIndex: zIndexBase + 1,
+    zIndex: 2000,
     type: 'image',
-    originalWidthHeightRatio: 1.0,
+    originalWidthHeightRatio: imgRatio,
     editInfo: {},
-    stats: { fillType: 'fit', fillMenu: 'floating', rearrangeCount: 0 },
+    stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 },
   };
   pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
   mediaZip.push({ src: opt.path, name: fn });
-
-  // 모든 clip 의 assetIds 에 logo asset 추가 (영상 전체에 노출)
   for (const c of pj.transcript.clips) {
     if (!Array.isArray(c.assetIds)) c.assetIds = [];
     if (!c.assetIds.includes(aid)) c.assetIds.push(aid);
   }
-
-  log(`[Vrew] 채널 로고 추가: ${path.basename(opt.path)} ${opt.position}/${opt.size}`);
+  log(`[Vrew] 🏷 채널 로고: ${path.basename(opt.path)} · 위 ${opt.side === 'left' ? '왼쪽' : '오른쪽'} · 너비 ${Math.round(b.w * 100)}%`);
   return { trackId: tid, assetId: aid, mediaId: mid };
+}
+
+// 🔝 위층 그림·영상(core/overlay-layers) — 그룹 그림보다 늘 위(zIndex 900+). 반환 = 오버레이 순번 → asset id
+function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
+  const out = new Map();
+  (overlays || []).forEach((ov, i) => {
+    if (!ov || !ov.file || !fs.existsSync(ov.file)) { log(`⚠ 위층 ${i + 1} 파일이 없습니다 — 건너뜀 (${ov && ov.file})`); return; }
+    const mid = uid(), aid = uid(), tid = sid();
+    const isVid = ov.kind === 'video';
+    let w0 = 0, h0 = 0, dur = 5;
+    if (isVid) { const m = readMp4VideoMeta(ov.file); if (m) { w0 = m.width; h0 = m.height; if (m.duration > 0) dur = m.duration; } }
+    else { const z = readImageSize(ov.file); if (z) { w0 = z.w; h0 = z.h; } }
+    const ratio = (w0 > 0 && h0 > 0) ? w0 / h0 : canvas.w / canvas.h;
+    const bx = ov.box || (w0 > 0 && h0 > 0 ? _fillBox('contain', w0, h0, canvas.w, canvas.h) : { x: 0, y: 0, w: 1, h: 1 });
+    const ext = isVid ? 'mp4' : ((path.extname(ov.file).toLowerCase().replace('.jpeg', '.jpg').replace('.', '')) || 'png');
+    const fn = `${mid}.${ext}`;
+    const fileSize = fs.statSync(ov.file).size;
+    if (isVid) {
+      pj.files.push({
+        version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize, name: fn, type: 'AVMedia',
+        videoAudioMetaInfo: { duration: dur, videoInfo: { size: { width: w0 || 1920, height: h0 || 1080, rotation: 0 }, frameRate: 24, codec: 'h264', colorSpace: 'unknown' },
+          audioInfo: { sampleRate: 48000, codec: 'aac', channelCount: 2 }, mediaContainer: 'm4a' },
+        sourceFileType: 'ASSET_VIDEO', fileLocation: 'IN_MEMORY',
+      });
+      const atid = sid();
+      pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'video',
+        sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo: {}, endBehavior: 'loop', fillType: 'cut' };
+      pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: 0, sourceIn: 0, sourceOut: dur, loop: true, playbackRate: 1, type: 'videoAudio' };
+      pj.props.assets[aid] = { trackIds: [tid, atid], role: 'sub' };
+    } else {
+      pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize, name: fn, type: 'Image', isTransparent: ext === 'png', fileLocation: 'IN_MEMORY' });
+      pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'image',
+        originalWidthHeightRatio: ratio, editInfo: {}, stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 } };
+      pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+    }
+    mediaZip.push({ src: ov.file, name: fn });
+    out.set(i, aid);
+    log(`[Vrew] 🔝 위층 ${i + 1}: ${path.basename(ov.file)} (${isVid ? '영상 · 반복' : '그림'})`);
+  });
+  return out;
 }
 
 function validateOutput(pj, sentenceCount, imageGroupCount) {
@@ -1055,6 +1073,10 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
   // 🖼 문장 → 덮는 그림 그룹들(아래 → 위) — 자산이 실제로 등록된 그룹만
   const _layers = _VS.layersBySentence(_vsProj, (x) => groupImageAsset.has(x.id));
+  // 🔝 위층 그림·영상 — 문장 → [오버레이 순번](아래 → 위)
+  const _ovProj = { groups, sentences, overlays: opts.overlays || [] };
+  const _ovAid = addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);
+  const _ovBy = _ovAid.size ? require('../core/overlay-layers').bySentence(_ovProj) : new Map();
 
   // ---------- 2. sentence 루프 ----------
   let imageGroupCount = groupImageAsset.size;
@@ -1136,7 +1158,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     const totalWeight = subClips.reduce((sum, c) => sum + (c.weight || 1), 0) || 1;
 
     // 🖼 이 문장을 덮는 그림 전부(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 이어진 그림(샘플.vrew: 한 자산이 여러 클립 · zIndex 로 쌓임)
-    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid);
+    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid)
+      .concat((_ovBy.get(s.id) || []).map((i) => _ovAid.get(i)).filter(Boolean));
 
     let acc = 0;
     for (let i = 0; i < subClips.length; i++) {
@@ -1292,7 +1315,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   // ---------- 2.6. 채널 로고 오버레이 (image 트랙) ----------
   if (opts.logo && opts.logo.enabled) {
     try {
-      addLogoTrack(pj, opts.logo, mediaZip, groupIdx, log);
+      addLogoTrack(pj, opts.logo, mediaZip, { w: _canvasW, h: _canvasH }, log);
     } catch (e) {
       log(`[Vrew] 로고 트랙 추가 실패: ${e.message}`);
     }

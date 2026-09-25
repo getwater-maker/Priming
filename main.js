@@ -60,7 +60,16 @@ function pickBgmFile(p, key) {
     return path.join(p, list[h % list.length]);
   } catch { return null; }
 }
-function resolveBgm(preset, scriptPath, logger) {
+// 🏷 채널 로고(채널편집 📁 폴더) — 켠 채널만 · 파일이 없으면 알리고 끈다
+function withLogo(preset, logger) {
+  if (!preset) return preset;
+  const lo = require('./core/overlay-layers').logoOptsOf(preset, (f) => { try { return fs.existsSync(f); } catch { return false; } });
+  if (lo.missing && logger) logger(`⚠ 채널 로고 파일을 찾지 못했습니다 — ${lo.missing}. 로고 없이 만듭니다`);
+  else if (lo.enabled && logger) logger(`🏷 채널 로고: ${path.basename(lo.path)} · 위 ${lo.side === 'left' ? '왼쪽' : '오른쪽'} · 너비 ${Math.round(lo.size * 100)}%`);
+  return { ...preset, logo: lo };
+}
+function resolveBgm(preset, scriptPath, logger) { return withLogo(_resolveBgm(preset, scriptPath, logger), logger); }
+function _resolveBgm(preset, scriptPath, logger) {
   if (!preset) return preset;
   if (!preset.bgmOn || !preset.bgmPath) return { ...preset, bgm: { enabled: false } };
   const f = pickBgmFile(preset.bgmPath, path.basename(scriptPath || ''));
@@ -4833,6 +4842,7 @@ function buildSnapshot() {
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지 문장 범위
+      overlays: require('./core/overlay-layers').toSnap(pr),   // 🔝 위층 그림·영상(문장 순번)
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -4997,6 +5007,7 @@ function projectsFromSnapshot(snap) {
     const proj = new Project({ sentences, groups });
     Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
     if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
+    require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // 🔝 위층 그림·영상
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
     return proj;
   });
@@ -5013,6 +5024,12 @@ function overlaySnapshot(parsed, snap) {
     const ps = byShorts.get(pr.shortsNum); if (!ps) continue;
     for (const k of ['title', 'aspect', 'voice']) {
       if (ps[k] != null) pr[k] = ps[k];
+    }
+    // 🔝 위층 그림·영상 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
+    if (Array.isArray(ps.overlays) && ps.overlays.length) {
+      const nOld = (ps.groups || []).reduce((a, g) => a + ((g.sentences || []).length), 0);
+      if (nOld === pr.sentences.length) require('./core/overlay-layers').fromSnap(pr, ps.overlays);
+      else log(`⚠ 대본 문장 수가 바뀌어(${nOld} → ${pr.sentences.length}) 🔝 위층 그림 ${ps.overlays.length}개를 다시 걸어야 합니다`);
     }
     const gmap = new Map(); (ps.groups || []).forEach((gs) => gmap.set(gs.num, gs));
     for (const g of pr.groups) {
@@ -6192,7 +6209,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })) });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -6232,6 +6249,7 @@ function _restoreState(st) {
     pr.groups = sp.groups.map(_cloneObj);
     pr.sentences = sp.sentences.map(_cloneObj);
     pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
+    pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -6376,7 +6394,7 @@ function _editSentences(args = {}) {
   });
   const gPos = g.sentenceIds.indexOf(old[0].id);
   // 🖼 이어 깐 그림의 범위 끝이 이 문장을 가리키면 새 문장으로 옮긴다(첫 → 첫 · 끝 → 끝)
-  { const mp = new Map(); old.forEach((o, i) => mp.set(o.id, made[Math.min(i, made.length - 1)].id)); require('./core/visual-span').remapSpanIds(pr, mp); }
+  { const mp = new Map(); old.forEach((o, i) => mp.set(o.id, made[Math.min(i, made.length - 1)].id)); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
   pr.sentences.splice(from, n, ...made);
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
@@ -6444,6 +6462,63 @@ ipcMain.handle('set-group-look', (_e, args = {}) => {
   storeActive(); pushDtoUpdate();
   log('🖼 ' + prLabel(pr) + ' G' + g.num + ' 그림 — ' + VL.describe(next));
   return P.toDTO(S.parsed);
+});
+// 🔝 위층 그림·영상 — 특정 그룹 ~ 특정 그룹 동안 모든 그림 위에(v0.5.52). op = add | range | box | remove | order
+ipcMain.handle('overlay-op', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const OL = require('./core/overlay-layers');
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const list = pr.overlays || (pr.overlays = []);
+  const nums = pr.groups.map((g) => g.num);
+  const clampG = (n, d) => { const v = Math.floor(Number(n)); return isFinite(v) ? Math.max(nums[0], Math.min(nums[nums.length - 1], v)) : d; };
+  const op = args.op;
+  if (op === 'add') {
+    let file = args.file;
+    if (!file) {
+      const r = await dialog.showOpenDialog(win, { title: '위층에 올릴 그림 또는 영상', properties: ['openFile'],
+        filters: [{ name: '그림·영상', extensions: ['png', 'jpg', 'jpeg', 'webp', 'mp4', 'mov', 'webm', 'm4v'] }] });
+      if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+      file = r.filePaths[0];
+    }
+    const kind = OL.kindOf(file);
+    if (!kind) return { ok: false, error: '그림(png·jpg·webp) 또는 영상(mp4·mov·webm) 파일이어야 합니다' };
+    const a = clampG(args.fromGroup, nums[0]), b = clampG(args.toGroup, a);
+    const ids = OL.idsFromGroups(pr, a, b);
+    if (!ids) return { ok: false, error: '그룹 범위를 찾지 못했습니다' };
+    // 작업 폴더로 복사(원본을 옮기거나 지워도 끊기지 않게) — media-N/overlays/ (그룹 그림 정리·번호 매기기와 섞이지 않는 하위 폴더)
+    const id = 'ov' + Date.now().toString(36);
+    let dst = file;
+    try {
+      const dir = path.join(shortsDirs(S.outRoot, pr.shortsNum).media, 'overlays');
+      fs.mkdirSync(dir, { recursive: true });
+      dst = path.join(dir, id + path.extname(file).toLowerCase());
+      fs.copyFileSync(file, dst);
+    } catch (e) { dst = file; log('⚠ 위층 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
+    undoPush('위층 추가');
+    list.push({ id, file: dst, name: path.basename(file), kind, box: null, ...ids });
+    log(`🔝 ${prLabel(pr)} 위층 ${kind === 'video' ? '영상' : '그림'} 추가 — ${path.basename(file)} · G${Math.min(a, b)}~G${Math.max(a, b)}`);
+  } else {
+    const ov = list.find((o) => o.id === args.id);
+    if (!ov) return { ok: false, error: '위층을 찾지 못했습니다' };
+    if (op === 'range') {
+      const a = clampG(args.fromGroup, nums[0]), b = clampG(args.toGroup, a);
+      const ids = OL.idsFromGroups(pr, a, b); if (!ids) return { ok: false, error: '그룹 범위를 찾지 못했습니다' };
+      undoPush('위층 범위'); Object.assign(ov, ids);
+      log(`🔝 ${prLabel(pr)} 위층 범위 → G${Math.min(a, b)}~G${Math.max(a, b)}`);
+    } else if (op === 'box') {
+      undoPush('위층 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
+    } else if (op === 'remove') {
+      undoPush('위층 지우기'); list.splice(list.indexOf(ov), 1);   // 파일은 남긴다(↶ 되돌리기)
+      log(`🔝 ${prLabel(pr)} 위층 지움 — ${path.basename(ov.file)}`);
+    } else if (op === 'order') {
+      const i = list.indexOf(ov), j = i + (args.dir === 'down' ? -1 : 1);
+      if (j < 0 || j >= list.length) return { ok: true, dto: P.toDTO(S.parsed) };
+      undoPush('위층 순서'); list.splice(i, 1); list.splice(j, 0, ov);
+    } else return { ok: false, error: '알 수 없는 동작' };
+  }
+  storeActive(); pushDtoUpdate();
+  return { ok: true, dto: P.toDTO(S.parsed) };
 });
 // 🏷 AI 고지를 보일 문장 범위(Vrew 텍스트 적용 범위). from/to = 편 전체 문장 번호(1부터). clear = 채널 기본(5초 뒤 5초)으로
 ipcMain.handle('set-ai-notice-range', (_e, args = {}) => {
@@ -6518,7 +6593,7 @@ ipcMain.handle('merge-sentence-across', (_e, args = {}) => {
     const mv = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged]);
     if (mv && mv[0] && mv[0].length) ns.capSpans = mv[0];
   }
-  require('./core/visual-span').remapSpanIds(pr, new Map([[sa.id, ns.id], [sb.id, ns.id]]));
+  { const mp = new Map([[sa.id, ns.id], [sb.id, ns.id]]); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
   pr.sentences.splice(ia, 2, ns);
   A.sentenceIds[A.sentenceIds.length - 1] = ns.id;
   B.sentenceIds.shift();
