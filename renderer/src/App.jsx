@@ -589,6 +589,7 @@ export default function App() {
     let cancelled = false;
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
+      setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       const prof = (modeProfiles && modeProfiles[mode]) || {};
       const cap = p.capLong;
@@ -1359,6 +1360,23 @@ export default function App() {
     catch (e) { logline('로고 위치 오류: ' + e.message); }
   }
   const [insMenu, setInsMenu] = useState(null);   // { sn, id, x, y } — 적용 범위 메뉴
+  // 🎵 채널 배경음악 — 영상 전체(채널의 모든 영상). 구간만 넣을 땐 🎵 오디오 삽입
+  const [bgmCfg, setBgmCfg] = useState({ on: false, path: '', volume: 15 });
+  async function saveBgm(patch) {
+    const next = { ...bgmCfg, ...patch };
+    setBgmCfg(next);
+    if (!presetName) return;
+    try {
+      const vol = Math.max(0, Math.min(100, Number(next.volume) || 0));
+      await api.savePreset({ name: presetName, patch: { bgmOn: !!next.on, bgmPath: next.path || '', bgmVolume: vol } });
+      setStatus(next.on && next.path ? `🎵 채널 「${presetName}」 배경음악 — ${String(next.path).split(/[\\/]/).pop()} · 음량 ${vol}% (이 채널의 모든 영상)` : `🎵 채널 「${presetName}」 배경음악 끔`);
+    } catch (e) { logline('배경음악 저장 오류: ' + e.message); }
+  }
+  async function pickBgm(dir) {
+    const f = dir ? await api.pickDir() : await api.pickFile({ filters: [{ name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'] }] });
+    if (f) saveBgm({ path: f, on: true });
+  }
+  function openInsMenu(sn, id, el) { const r = el.getBoundingClientRect(); setInsMenu({ sn, id, x: r.left, y: r.bottom + 4 }); }
   async function overlayOp(args) {
     try {
       const r = await api.overlayOp(args);
@@ -3359,6 +3377,13 @@ export default function App() {
                 <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
                 <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
                 <span className="hdiv" />
+                <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
+                  <label className="chk"><input type="checkbox" data-testid="bgm-on" checked={!!bgmCfg.on} disabled={!presetName} onChange={(e) => (e.target.checked && !bgmCfg.path ? pickBgm(false) : saveBgm({ on: e.target.checked }))} />🎵 배경음악</label>
+                  <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
+                  <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
+                  <input className="nbox" data-testid="bgm-vol" type="number" min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
+                </span>
+                <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
                   <span className="meta">🏷 로고 위치</span>
                   <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoSide()} onChange={(e) => setLogoSide(e.target.value)}>
@@ -3418,11 +3443,13 @@ export default function App() {
         return (<>
           <div className="vr-menu-bg" onMouseDown={() => setInsMenu(null)} />
           <div className="vr-menu" data-testid="ins-menu" style={{ left: Math.min(insMenu.x, window.innerWidth - 260), top: Math.min(insMenu.y, window.innerHeight - 260) }}>
-            <div className="vr-cur">적용 범위 — 지금: {o.from === 1 && o.to === n ? '전체' : `클립 ${o.from}~${o.to}`} · 현재 클립 {cur}</div>
+            <div className="vr-cur">{o.kind === 'audio' ? '🎵' : o.kind === 'video' ? '🎬' : '🖼'} {o.name || ''} — 지금: {o.from === 1 && o.to === n ? '전체' : `클립 ${o.from}~${o.to}`} · 현재 클립 {cur}</div>
             <button onClick={go(() => insRange(insMenu.sn, o.id, 1, n))}>전체 클립으로</button>
             <button onClick={go(() => insRange(insMenu.sn, o.id, 1, cur))}>처음부터 현재 클립까지</button>
             <button onClick={go(() => insRange(insMenu.sn, o.id, cur, n))}>현재 클립부터 끝까지</button>
             <button onClick={go(() => insRange(insMenu.sn, o.id, null, null, { n, cur: `${o.from}-${o.to}` }))}>직접 입력…</button>
+            <div className="vr-sep" />
+            <button className="vr-del" data-testid="ins-del" onClick={go(async () => { const r = await overlayOp({ shortsNum: insMenu.sn, op: 'remove', id: o.id }); if (r && r.ok) setStatus(`🗑 「${o.name || '삽입'}」을 지웠습니다 (Ctrl+Z 되돌리기)`); })}>🗑 삭제</button>
           </div>
         </>);
       })()}
@@ -3450,14 +3477,14 @@ export default function App() {
               {dto.projects.map((pj) => (pj.overlays || []).map((o, i, arr) => (
                 <span key={o.id} className={'ovchip' + (o.broken ? ' broken' : '')} data-testid="ovchip" title={o.file}>
                   {o.kind === 'video' ? '🎬' : o.kind === 'audio' ? '🎵' : '🖼'} <b>{o.name || String(o.file || '').split(/[\\/]/).pop()}</b>
-                  <button className="ghost" data-testid="ov-range" title="적용 범위 변경" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setInsMenu({ sn: pj.shortsNum, id: o.id, x: r.left, y: r.bottom + 4 }); }}>
+                  <button className="ghost" data-testid="ov-range" title="적용 범위 변경 · 삭제" onClick={(e) => openInsMenu(pj.shortsNum, o.id, e.currentTarget)}>
                     {o.broken ? '범위 잃음' : (o.from === 1 && o.to === o.total ? '전체' : `클립 ${o.from}~${o.to}`)} ▾</button>
                   {o.kind === 'audio' && <><input className="nbox" data-testid="ov-vol" type="number" min="0" max="200" step="5" style={{ width: 44 }} title="음량 %" value={o.volume}
                     onChange={(e) => overlayOp({ shortsNum: pj.shortsNum, op: 'vol', id: o.id, volume: e.target.value })} /><span className="meta">%</span></>}
                   {o.box && o.kind !== 'audio' && <button className="ghost" title="화면 가득으로(자리·크기 원래대로)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'box', id: o.id, box: null })}>⛶</button>}
                   {arr.length > 1 && <button className="ghost" title="한 층 위로(그림·영상)" disabled={i === arr.length - 1} onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'order', id: o.id, dir: 'up' })}>▲</button>}
                   {arr.length > 1 && <button className="ghost" title="한 층 아래로" disabled={i === 0} onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'order', id: o.id, dir: 'down' })}>▼</button>}
-                  <button className="ghost" title="삽입 지우기(파일은 남습니다 · Ctrl+Z 되돌리기)" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'remove', id: o.id })}>✕</button>
+                  <button className="ghost" title="삭제(파일은 남습니다 · Ctrl+Z 되돌리기)" data-testid="ov-del" onClick={() => overlayOp({ shortsNum: pj.shortsNum, op: 'remove', id: o.id })}>🗑</button>
                 </span>
               )))}
             </div>
@@ -3469,7 +3496,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -3819,16 +3846,7 @@ export default function App() {
                     </select>
                     <span className="meta" style={{ flex: '0 0 auto' }}>비공개</span></div>
                 )}
-                {/* 🎵 배경음악 — 내 음악 파일(또는 폴더)을 영상 전체에 낮게 깐다. .vrew 배경음 트랙 + 🎬 유튜브 MP4 · ✏ 화이트보드 MP4 에 섞인다.
-                    폴더면 대본마다 그 안의 한 곡(같은 대본은 다시 만들어도 같은 곡). ⚠ 화이트보드 MP4 에는 아직 안 들어간다. */}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" title="내 음악 파일을 영상 전체에 낮게 깝니다. 폴더를 고르면 대본마다 그 안의 한 곡이 정해집니다. 영상보다 짧으면 반복하고 앞뒤를 부드럽게 줄입니다. .vrew · 유튜브 MP4 · 화이트보드 MP4 모두에 들어갑니다."><label>🎵 배경음악</label>
-                    <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" checked={!!ch.bgmOn} onChange={(e) => setCh({ ...ch, bgmOn: e.target.checked })} />
-                    <input readOnly placeholder="음악 파일 또는 폴더 — 비우면 배경음악 없음" title={ch.bgmPath || ''} value={ch.bgmPath || ''} />
-                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { const f = await api.pickFile({ filters: [{ name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'] }] }); if (f) setCh((c) => ({ ...c, bgmPath: f, bgmOn: true })); }}>파일</button>
-                    <button className="ghost" style={{ flex: '0 0 auto' }} title="폴더 — 대본마다 그 안의 한 곡을 고릅니다" onClick={async () => { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, bgmPath: d, bgmOn: true })); }}>폴더</button>
-                    <input className="nbox" type="number" min="0" max="100" step="5" style={{ width: 52, flex: '0 0 auto' }} title="음량 % (기본 15)" disabled={!ch.bgmOn} value={ch.bgmVolume} onChange={(e) => setCh({ ...ch, bgmVolume: e.target.value })} /><span className="meta">%</span></div>
-                )}
+                {/* 🎵 배경음악은 ➕ 삽입 메뉴로 옮겼다(v0.5.55) — 값(bgmOn·bgmPath·bgmVolume)은 채널에 그대로 저장되고 이 창도 불러와 되돌려 쓴다 */}
                 {/* 🏷 채널 로고 — 켠 채널만 · 영상 전체 · .vrew·유튜브 MP4 공통. 투명 PNG 권장. 자리(↗ 오른쪽 위 기본 / ↖ 왼쪽 위)는 대본마다 ➕ 삽입 메뉴에서. */}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="logo-row" title="이 채널의 모든 영상에 로고를 올립니다(맨 위층 · 기본 오른쪽 위 — 자리는 ➕ 삽입 메뉴에서 대본마다 바꿉니다). 배경이 투명한 PNG 가 좋습니다. 크기 = 화면 너비 대비 %."><label>🏷 채널 로고</label>
@@ -4577,7 +4595,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange }) {
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
   const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
   const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
@@ -4744,6 +4762,20 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                               onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
                               onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
                           );
+                          // ➕ 이 줄이 삽입의 시작이면 표시(문장 첫 줄에만) — 🎵 오디오 · 그림 썸네일 · 🎬 영상
+                          const insHere = li === 0 && onInsMark ? insMarksAt(pr, c, si) : [];
+                          const insMarks = insHere.length ? (
+                            <span className="ins-marks" data-testid="ins-marks">
+                              {insHere.map((o) => (
+                                <button key={o.id} className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind}
+                                  title={`${o.kind === 'audio' ? '🎵 오디오' : o.kind === 'video' ? '🎬 영상' : '🖼 그림'} 「${o.name || ''}」 · ${o.from === 1 && o.to === o.total ? '전체' : `클립 ${o.from}~${o.to}`} — 누르면 적용 범위 · 삭제`}
+                                  onMouseDown={(ev) => ev.stopPropagation()}
+                                  onClick={(ev) => { ev.stopPropagation(); onInsMark(pr.shortsNum, o.id, ev.currentTarget); }}>
+                                  {o.kind === 'image' ? <img src={media(o.file, o.version)} alt="" /> : (o.kind === 'video' ? '🎬' : '🎵')}
+                                </button>
+                              ))}
+                            </span>
+                          ) : null;
                           if (detail) {
                             // 🧩 Vrew 클립 모양(로이 2026-09-25 캡처) — 왼쪽 번호 칸(누르면 이 클립 선택 · Shift 범위 · Ctrl 더하기) |
                             //   1행 = 화자 · 시각 · 어절 칩(누르면 그 단어만 서식) / 2행 = 🗨 자막(누르면 **그 줄 글자만** 같은 모양 그대로 고치기) + 가(이 클립 서식)
@@ -4757,6 +4789,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{l.n}</div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); } }}>
+                                    {insMarks}
                                     <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
                                     {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                     <span className="clip-chips">
@@ -4801,6 +4834,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                               <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
                                 onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}   // Shift+클릭이 브라우저 글자 선택을 만들지 않게
                                 onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
+                              {insMarks}
                               {li === 0 && s.speaker ? <span className="sspk" title={`화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리 로 읽습니다(자막에는 안 나옵니다)`}>{s.speaker}</span> : null}
                               <LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} />
                               {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
@@ -4867,6 +4901,13 @@ function vrRangeOf(d) {
 }
 
 // 🔝 위층(DTO) → ① 칸 레이어 모양(그룹 cut 과 같은 필드) · 움직이지 않는다 · num = 'O' + id
+// ➕ 이 문장에서 시작하는 삽입(편 문장 번호 from 과 같을 때)
+function insMarksAt(pr, cut, si) {
+  const L = (pr && pr.overlays) || []; if (!L.length) return [];
+  let o = 0;
+  for (const c of pr.cuts) { if (c === cut) { o += si + 1; break; } o += (c.sentences || []).length; }
+  return L.filter((x) => !x.broken && x.from === o);
+}
 function ovAsLayer(o) {
   return { num: 'O' + o.id, ovId: o.id, imagePath: o.kind === 'image' ? o.file : null, videoPath: o.kind === 'video' ? o.file : null,
     imageVersion: o.version, videoVersion: o.version, look: o.box ? { motion: 'none', box: o.box } : { motion: 'none', fill: 'contain' } };   // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다)

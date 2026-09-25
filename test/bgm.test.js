@@ -54,7 +54,7 @@ ok((MAIN.match(/resolveBgm\((ep|preset), S\.scriptPath, log\)/g) || []).length =
 ok(/if \(preset\.bgm && preset\.bgm\.enabled && preset\.bgm\.audioPath\) opts\.bgm = preset\.bgm/.test(read('core/pipeline.js')), 'pipeline → 빌더');
 const APP = read('renderer/src/App.jsx');
 ok(/bgmOn: !!p\.bgmOn, bgmPath: p\.bgmPath/.test(APP) && /bgmOn: !!ch\.bgmOn, bgmPath: \(ch\.bgmPath/.test(APP), '채널편집 싣기·저장');
-ok(/<label>🎵 배경음악<\/label>/.test(APP), '📁 폴더 탭에 🎵 배경음악');
+ok(/data-testid="ins-bgm"/.test(APP) && /bgmOn: !!next\.on, bgmPath: next\.path/.test(APP) && !/<label>🎵 배경음악<\/label>/.test(APP), '➕ 삽입 메뉴에 🎵 배경음악(채널에 저장) · 채널편집에서는 빠짐(v0.5.55)');
 
 console.log('\n[4] 실제 왕복 — 빌더로 .vrew(BGM 트랙) → 렌더러로 MP4 → 소리 측정');
 const P = require('../core/pipeline');

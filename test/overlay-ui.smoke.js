@@ -147,12 +147,49 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(600);
     ok((await win.locator('[data-testid=ov-vol]').inputValue()) === '60', '음량 60%');
     ok(await win.evaluate(() => !document.querySelector('#stageVisual .vlayer[data-num^="O"] audio')), '① 칸에는 오디오가 그림으로 나오지 않는다');
-    await win.locator('[data-testid=ovchip]').nth(1).locator('button[title^="삽입 지우기"]').click();
+    // ② 칸 표시 — 삽입이 시작하는 클립(1)에 그림 썸네일 + 🎵
+    await menu('대본·음성');
+    const marks = await win.evaluate(() => [...document.querySelectorAll('.sent[data-ln="1"] [data-testid=ins-mark]')].map((b) => b.dataset.kind));
+    ok(marks.includes('image') && marks.includes('audio'), `② 칸 클립 1 에 삽입 표시 (${marks.join(', ')})`);
+    ok(await win.evaluate(() => !document.querySelector('.sent[data-ln="2"] [data-testid=ins-mark]')), '다른 클립에는 없다(시작 클립에만)');
+    ok(await win.evaluate(() => !!document.querySelector('.sent[data-ln="1"] img') && [...document.querySelectorAll('.sent[data-ln="1"] [data-testid=ins-mark]')].some((b) => b.title.includes('tone.wav'))), '그림은 썸네일 · 오디오는 이름이 툴팁에');
+    // 표시를 누르면 메뉴 → 🗑 삭제
+    await win.locator('.sent[data-ln="1"] [data-testid=ins-mark][data-kind=audio]').click();
+    await win.waitForSelector('[data-testid=ins-menu]', { timeout: 3000 }).catch(() => {});
+    ok((await win.locator('[data-testid=ins-menu]').innerText()).includes('tone.wav'), '표시를 누르면 그 삽입의 메뉴');
+    await win.click('[data-testid=ins-del]');
     await win.waitForFunction(() => document.querySelectorAll('[data-testid=ovchip]').length === 1, null, { timeout: 5000 }).catch(() => {});
-    ok(await win.locator('[data-testid=ovchip]').count() === 1, '✕ 지우기');
+    ok(await win.locator('[data-testid=ovchip]').count() === 1, '🗑 삭제 — 목록에서 사라진다');
+    ok(await win.evaluate(() => ![...document.querySelectorAll('[data-testid=ins-mark]')].some((b) => b.dataset.kind === 'audio')), '② 칸 표시도 사라진다');
     await key('Control+z');
     await win.waitForFunction(() => document.querySelectorAll('[data-testid=ovchip]').length === 2, null, { timeout: 5000 }).catch(() => {});
     ok(await win.locator('[data-testid=ovchip]').count() === 2, '↶ 되돌아온다');
+    // 목록의 🗑
+    await win.locator('[data-testid=ovchip]').nth(1).locator('[data-testid=ov-del]').click();
+    await win.waitForFunction(() => document.querySelectorAll('[data-testid=ovchip]').length === 1, null, { timeout: 5000 }).catch(() => {});
+    ok(await win.locator('[data-testid=ovchip]').count() === 1, '목록의 🗑 도 삭제');
+
+    console.log('\n[5b] 🎵 채널 배경음악 — 삽입 메뉴');
+    await menu('삽입');
+    await stub(TONE);
+    await win.click('[data-testid=bgm-file]');
+    await win.waitForFunction(() => (document.querySelector('[data-testid=bgm-file]') || {}).innerText === 'tone.wav', null, { timeout: 5000 }).catch(() => {});
+    ok(await win.locator('[data-testid=bgm-on]').isChecked() && (await win.locator('[data-testid=bgm-file]').innerText()) === 'tone.wav', '파일을 고르면 켜진다');
+    await win.fill('[data-testid=bgm-vol]', '25');
+    await win.waitForTimeout(800);
+    const pd = await win.evaluate(async (n) => { const p = await window.api.getPresetDetail(n); return { on: p.bgmOn, path: p.bgmPath, vol: p.bgmVolume }; }, CH);
+    ok(pd.on === true && /tone\.wav$/.test(pd.path) && Number(pd.vol) === 25, `채널에 저장 (${JSON.stringify(pd)})`);
+    const rh = async () => (await win.locator('.ribbon').boundingBox()).height;
+    const hIns = await rh();
+    const ovf = await win.evaluate(() => { const r = document.querySelector('.ribbon'); return r.scrollWidth - r.clientWidth; });
+    await menu('서식'); const hFmt = await rh();
+    ok(Math.abs(hIns - hFmt) < 1 && ovf <= 1, `삽입 리본 높이 = 서식 리본 (${hIns} / ${hFmt}) · 넘침 ${ovf}px`);
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1366, 900); });
+    await win.waitForTimeout(500); await menu('삽입');
+    const ovf2 = await win.evaluate(() => { const r = document.querySelector('.ribbon'); return { o: r.scrollWidth - r.clientWidth, h: r.getBoundingClientRect().height }; });
+    ok(ovf2.o <= 1 && Math.abs(ovf2.h - hFmt) < 1, `1366px 에서도 넘치지 않는다 (${JSON.stringify(ovf2)})`);
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1600, 950); });
+    await win.waitForTimeout(400);
 
     console.log('\n[6] 채널편집 — 🏷 채널 로고(켜기·파일·크기)는 그대로');
     await win.click('button[title^="채널(프리셋)"]');
@@ -161,6 +198,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const row = win.locator('[data-testid=logo-row]');
     ok(await row.count() === 1 && (await row.locator('input.nbox').inputValue()) === '15', '📁 폴더 탭에 「🏷 채널 로고」 · 크기 15%');
     ok(await row.locator('select').count() === 0, '위치는 채널편집이 아니라 삽입 메뉴에서');
+    ok(!(await win.locator('.modal-card.tabbed').innerText()).includes('🎵 배경음악'), '🎵 배경음악은 채널편집에서 빠졌다(삽입 메뉴로)');
     await win.keyboard.press('Escape');
     ok(errors.length === 0, `화면 오류 0 ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
   } catch (e) {
