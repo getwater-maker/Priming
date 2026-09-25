@@ -6,6 +6,7 @@
  */
 const path = require('path');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
@@ -22,6 +23,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     console.log('· 부팅 OK');
 
     // [1] ④ 완성 드롭다운에 🎬 유튜브 MP4
+    await menu(win, 'finish');
     const grp = win.locator('.hgroup:has(.glabel:has-text("④ 완성"))');
     const sel = grp.locator('select').first();
     const values = await sel.locator('option').evaluateAll((os) => os.map((o) => o.value));
@@ -35,7 +37,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     for (const t of ['🎬 MP4 굽기', '✏ 렌더', '💾 .vrew']) {
       ok(await win.locator(`button:has-text("${t}")`).count() === 0, `「${t}」 버튼이 없다(⚡ 만들기로 통일)`);
     }
-    ok(await grp.locator('button:has-text("⚡ 만들기")').count() === 1, '「⚡ 만들기」 하나');
+    ok(await win.locator('.menubar button:has-text("⚡ 만들기")').count() === 1, '「⚡ 만들기」 하나(메뉴 줄 오른쪽 — 늘 보임)');
     await sel.selectOption('whiteboard');
     await win.waitForTimeout(300);
     ok(await win.locator('button:has-text("✏ 렌더")').count() === 0, '화이트보드를 골라도 ✏ 렌더 없음');

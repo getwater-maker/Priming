@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 const TAG = `__대본보기테스트_${process.pid}`;
@@ -57,6 +58,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
 
+    await menu(win, 'finish');
     const btn = win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")');
     ok(await btn.count() === 1, '④ 완성에 「📄 대본 보기」');
     await btn.click();

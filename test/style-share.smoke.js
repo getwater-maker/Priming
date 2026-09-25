@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 const ROOT = path.join(__dirname, '..');
 const STORE = path.join(os.homedir(), '.flow-app', 'styles.json');
 const EXPORT = path.join(os.homedir(), '.flow-app', 'channel-styles.json');   // 🎨 대시보드(8765)가 읽는 채널 화풍
@@ -28,6 +29,7 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     await win.waitForSelector('h1', { timeout: 20000 });
 
     // 🎨 편집창 열기 — 이 버튼이 openStyleEditor(동기화 포함)를 부른다.
+    await menu(win, 'image');   // 🧭 v0.5.42 — ✎ 스타일 편집은 「이미지」 메뉴 리본
     await win.click('button[title*="이미지 스타일 편집"]');
     await win.waitForSelector('.modal-card:has-text("이미지 스타일 편집")', { timeout: 10000 });
     await win.waitForTimeout(1200);                     // 동기화 1회(서버 응답 또는 실패)

@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 // TTS 길이가 들어있는 롱폼 작업본을 하나 고른다(없으면 건너뜀).
@@ -57,16 +58,14 @@ function wsRestore(b) { try { if (b === null) { if (fs.existsSync(WS)) fs.unlink
     if (!snap) { console.log('⚠ 후보 ' + cands.length + '개 모두 TTS 가 없어 건너뜀'); return; }
     console.log('· 작업본 로드 OK —', path.basename(snap), '·', (await win.locator('.worktimes').innerText()).split('·')[0].trim());
 
+    await menu(win, 'finish');
     const btn = win.locator('#capbar button:has-text("타임스탬프")');
     await btn.waitFor({ timeout: 10000 });
     if (await btn.isDisabled()) throw new Error('TTS 가 있는데 버튼이 비활성 — capbar: ' + (await win.locator('.worktimes').innerText()));
-    // capbar 안에서 '분할'(H3 선택) 보다 앞에 있어야 한다 — 요청된 위치
-    const order = await win.evaluate(() => {
-      const kids = [...document.querySelector('#capbar').children];
-      return kids.findIndex((e) => /타임스탬프/.test(e.textContent)) < kids.findIndex((e) => /분할/.test(e.textContent));
-    });
-    if (!order) throw new Error('버튼이 분할바 앞에 있지 않음');
-    console.log('· 버튼 위치 OK (분할바 앞)');
+    // 🧭 v0.5.42 — 타임스탬프는 「완성」 메뉴 리본(#capbar), 분할바는 「대본·음성」 메뉴로 갔다(한 줄에 같이 있지 않다)
+    const inFinish = await win.evaluate(() => !!document.querySelector('.ribbon[data-menu-on="finish"] #capbar'));
+    if (!inFinish) throw new Error('타임스탬프 버튼이 완성 메뉴에 없음');
+    console.log('· 버튼 위치 OK (완성 메뉴)');
 
     await btn.click();
     await win.waitForSelector('.modal-card:has-text("유튜브 타임스탬프")', { timeout: 5000 });

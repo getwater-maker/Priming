@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 const TAG = `__대본감시테스트_${process.pid}`;
@@ -82,6 +83,7 @@ const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (Date.now(
     ok(!fs.readFileSync(MD, 'utf8').includes('덮으면 안 됨'), '⑤ 대본(.md)은 그대로');
 
     // ④ 📄 대본 보기가 열려 있을 때 밖에서 고치면 새로 그리고 알린다
+    await menu(win, 'finish');
     await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")').click();
     const R = win.locator('[data-testid="script-reader"]');
     await R.waitFor({ timeout: 5000 });

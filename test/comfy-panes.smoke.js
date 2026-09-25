@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 const ROOT = path.join(__dirname, '..');
 const NL = String.fromCharCode(10);
 const BS = String.fromCharCode(92);
@@ -96,6 +97,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     // ── 헤더 드롭다운 왕복 — ☁↔🖥 전환이 실제로 설정을 바꾸고 팝업 배지가 따라오는지 ──
     await win.click('.modal-card button:has-text("닫기")');
     // 비디오 드롭다운에 🖥 로컬 항목이 **있어야** 한다(2026-08-20 오후 로이: "비디오에서 로컬 LTX2.5도 추가해줘")
+    await menu(win, 'video');
     const vidOpts = await win.locator('.hgroup select[title^="i2v 비디오 엔진"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
     ok(vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 있음');
     ok(vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 있음');
@@ -107,6 +109,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(vidOpts.some((o) => /::cloud::.*MiniMax H3 레퍼런스/.test(o)),
        '☁ 클라우드 × MiniMax H3 레퍼런스 조합이 목록에 있다: '
        + (vidOpts.filter((o) => o.includes('::cloud::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
+    await menu(win, 'image');
     const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
     ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
        '이미지 드롭다운은 로컬·클라우드 둘 다 유지');
@@ -199,6 +202,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(APP.includes("p.imgEngine === 'rotate' ? 'genspark'"), "옛 'rotate' 는 genspark 로 이관된다");
 
     for (const [kind, file, cfg0] of [['image', 'comfy-image-config.json', before.img], ['video', 'comfy-video-config.json', before.vid]]) {
+      await menu(win, kind);
       const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[title^="i2v 비디오 엔진"]';
       const cur = await win.locator(sel).inputValue();
       const opts = await win.locator(sel + ' option').evaluateAll((os) => os.map((o) => o.value));

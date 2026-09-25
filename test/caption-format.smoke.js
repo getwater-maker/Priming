@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { _electron: electron } = require('playwright');
+const menu = require('./_menu');
 
 const ROOT = path.join(__dirname, '..');
 const TAG = `__자막서식테스트_${process.pid}`;
@@ -65,6 +66,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     const nos = win.locator('.cut .cf-lineno');
     ok(await nos.count() >= 4, `줄 번호(서식 손잡이) ${await nos.count()}개`);
     // 📐 v0.5.41 — 툴바는 늘 떠 있다(고른 게 없으면 안내 + 잠김)
+    await menu(win, 'format');   // 🧭 v0.5.42 — 툴바는 「서식」 메뉴 리본에 있다
     ok(await win.locator('[data-testid=cf-bar].idle').count() === 1, '🔑 고르지 않아도 툴바가 떠 있다(작업 화면에 상시)');
     ok((await win.locator('[data-testid=cf-hint]').innerText()).includes('줄 번호'), '고른 게 없으면 「줄 번호를 누르거나 글자를 드래그」 안내');
     ok(await win.locator('.cf-bar button[title="굵게"]').isDisabled(), '고른 게 없으면 칸은 잠겨 있다');

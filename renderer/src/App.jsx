@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import ytChapters from '../../core/yt-chapters.js';
@@ -9,6 +9,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import { CF, CaptionToolbar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine } from './CaptionFormat.jsx';
+import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom } from './Workspace.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -425,6 +426,15 @@ export default function App() {
   const [capDlg, setCapDlg] = useState(null);       // { key: 'capLong', panel: 'fmt'|'anim' }
   const [capSel, setCapSel] = useState(null);       // { shortsNum, mode: 'lines'|'chars', items: [{ groupNum, sentIdx, from, to, n }] }
   const [capPanel, setCapPanel] = useState(null);   // 'fmt' | 'anim'
+  // 🧭 Vrew 식 작업 화면(v0.5.42) — 메뉴(리본) · 보기(클립/카드) · ① 칸 폭 · 커서(자막 줄)
+  // 메뉴는 켤 때마다 「대본·음성」부터(Vrew 도 홈부터) — 기억해 두면 다음 실행이 엉뚱한 메뉴로 열려 「열기」가 안 보인다
+  const [menu, setMenu] = useState('script');
+  const pickMenu = (id) => { if (MENUS.some((x) => x[0] === id)) setMenu(id); };
+  const [view, setView] = useState(() => (lsGet('pm.view', 'clips') === 'cards' ? 'cards' : 'clips'));
+  const pickView = (v) => { setView(v); lsSet('pm.view', v); };
+  const [pane1W, setPane1W] = useState(() => { const d = Math.round((typeof window !== 'undefined' ? window.innerWidth : 1400) * 0.4); return Math.max(320, Math.min(1400, Number(lsGet('pm.pane1W', d)) || d)); });   // 기본 = 창의 40%(Vrew 와 비슷)
+  const [cursor, setCursor] = useState(null);       // { shortsNum, n } — ② 에서 지금 가리키는 자막 줄
+  const lastVisRef = useRef(null);                   // ① 에 지금 깔린 그림/영상(같으면 다시 깔지 않는다 — 영상이 처음부터 다시 돈다)
   const stopLineRef = useRef(null);                 // 미리보기 재생 — 지금 도는 자막 효과 멈춤
   // 🎨 옆 패널은 고정 헤더(topsticky) 바로 아래에서 시작해야 툴바를 가리지 않는다 — 헤더 높이는 창 폭·툴바 유무로 바뀌므로 재서 넘긴다
   useEffect(() => {
@@ -500,6 +510,12 @@ export default function App() {
 
   // 자막 한 줄 글자수 — 분할옵션의 '긴 n자'(longLen) 기준.
   const effCap = Math.max(2, parseInt(splitOpts.long, 10) || 20);
+  // 🧭 편마다 자막 줄 목록 — ① 미리보기·② 목록(Cards)·키보드가 **같은 번호**를 쓴다(Workspace.buildProjLines 한 곳)
+  const linesMap = useMemo(() => {
+    const m = new Map();
+    for (const pr of ((dto && Array.isArray(dto.projects)) ? dto.projects : [])) if (pr && pr.cuts) m.set(pr.shortsNum, buildProjLines(pr, effCap));
+    return m;
+  }, [dto, effCap]);
   // 제작 진행률(완료/전체) — TTS(문장 audio) · 이미지(group imagePath) · 영상(I2V 그룹 videoPath). PrimingFlow 진행률 패널 이식.
   const prog = (() => {
     let ttsD = 0, ttsT = 0, imgD = 0, imgT = 0, vidD = 0, vidT = 0;
@@ -1338,6 +1354,7 @@ export default function App() {
   /** 줄 번호 클릭 — 그 줄만 · Shift = 앞서 고른 줄부터 범위 · Ctrl = 더하기/빼기. allLines = 이 편의 모든 줄(화면 순서). */
   function pickCapLine(shortsNum, info, ev, allLines) {
     if (sentEdit) return;
+    setCursor({ shortsNum, n: info.n }); pickMenu('format');   // 🧭 커서 + 서식 메뉴
     setCapSel((cur) => {
       const same = cur && cur.shortsNum === shortsNum && cur.mode === 'lines';
       if (ev && ev.shiftKey && same && cur.anchorN != null) {
@@ -1356,6 +1373,8 @@ export default function App() {
   /** 글자 드래그 — 한 문장 안의 글자 범위. */
   function pickCapChars(shortsNum, groupNum, sentIdx, range) {
     if (sentEdit) return;
+    { const PL = linesMap.get(shortsNum); const l = PL && (PL.bySent.get(groupNum + ':' + sentIdx) || []).find((x) => range.from >= x.from && range.from < x.to);
+      if (l) setCursor({ shortsNum, n: l.n }); pickMenu('format'); }
     setCapSel({ shortsNum, mode: 'chars', items: [{ groupNum, sentIdx, from: range.from, to: range.to, n: -1 }] });
   }
   async function applyCapFmt(patch) {
@@ -1932,28 +1951,20 @@ export default function App() {
   const curAudioRef = useRef(null);
 
   /** 미리보기 자막 위치 — lp(줄 단위 속성)를 주면 그 줄의 위치 덮어쓰기(posH/posV/posX/posY)를 따른다(core/caption-format linePos). */
+  /** 미리보기 자막 크기·위치 — **유튜브 MP4 와 같은 공식**(Workspace.stageCapGeom = core/vrew-render captionAssStyle 의 수치).
+   *  lp(줄 단위 속성)를 주면 그 줄의 위치 덮어쓰기(posH/posV/posX/posY)를 따른다(core/caption-format linePos). */
+  function stageBoxW() { const cs = stageCapRef.current; const st = cs && cs.parentElement; return st ? st.clientWidth : 0; }
   function applyCaptionStyle(lp) {
-    const cap0 = capOverride(); const cs = stageCapRef.current; if (!cs) return;
+    const cap0 = capOverride(); const cs = stageCapRef.current; if (!cs) return 0.28;
     const pos = CF.linePos({ align: cap0.align, yAlign: cap0.yAlign, yOffset: cap0.yOffset, xOffset: cap0.xOffset }, lp || null);
-    const cap = { ...cap0, align: pos.align, yAlign: pos.yAlign, yOffset: pos.yOffset };
-    // 가로 미세 — xOffset 1 = 화면 폭 절반
-    cs.style.left = (pos.xOffset * 50) + '%'; cs.style.right = (-pos.xOffset * 50) + '%';
-    if (cap.yAlign === 'bottom') {
-      // 아래 기준: 하단 여백 8% + 위로 이동(yOffset 음수). 예: -0.125 → 하단 20.5%.
-      const bottomPct = Math.max(2, Math.min(90, 8 + (-cap.yOffset) * 100));
-      cs.style.bottom = bottomPct + '%'; cs.style.top = 'auto'; cs.style.transform = 'none';
-    } else if (cap.yAlign === 'top') {
-      const topPct = Math.max(2, Math.min(90, 8 + cap.yOffset * 100));
-      cs.style.top = topPct + '%'; cs.style.bottom = 'auto'; cs.style.transform = 'none';
-    } else {
-      const topPct = Math.max(6, Math.min(94, 50 + cap.yOffset * 50)); // 가운데 기준
-      cs.style.top = topPct + '%'; cs.style.bottom = 'auto'; cs.style.transform = 'translateY(-50%)';
-    }
-    cs.style.textAlign = cap.align === 'center' ? 'center' : cap.align === 'end' ? 'right' : 'left';
-    cs.style.fontSize = Math.round((parseFloat(cap.size) || 90) / 90 * 18) + 'px';
+    const g = stageCapGeom(pos, parseFloat(cap0.size) || 100, stageBoxW());
+    applyStageGeom(cs, g);
+    return g.s;
   }
+  const visKey = (c) => (c ? [c.num, c.imagePath, c.videoPath, c.imageVersion, c.videoVersion].join('|') : '');
   function setVisual(c) {
     const v = stageVisualRef.current; if (!v) return;
+    lastVisRef.current = visKey(c);
     if (c.videoPath) v.innerHTML = `<video src="${media(c.videoPath, c.videoVersion)}" autoplay muted loop playsinline></video>`;
     else if (c.imagePath) {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) → 단조롭지 않게.
@@ -1962,7 +1973,10 @@ export default function App() {
       const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
     } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
   }
-  async function stepCaptions(clips, durMs, s) {
+  async function stepCaptions(clips, durMs, s, where) {
+    // 🧭 재생 중에도 ② 커서가 따라간다 — where = { shortsNum, groupNum, sentIdx }
+    const PLw = where ? linesMap.get(where.shortsNum) : null;
+    const wLines = PLw ? (PLw.bySent.get(where.groupNum + ':' + where.sentIdx) || []) : [];
     const total = clips.reduce((a, c) => a + Math.max(1, mLen(c)), 0) || 1;
     // 🎨 서식·효과 — 채널 기본 + 문장 덮어쓰기(core/caption-format)를 그대로 그리고, 효과는 core/caption-anim 로 움직인다(MP4 와 같은 키프레임)
     const text = s ? String(s.text || '') : '';
@@ -1973,25 +1987,26 @@ export default function App() {
       if (playAbortRef.current) return;
       const d = Math.max(250, durMs * (Math.max(1, mLen(cl)) / total));
       if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
+      if (where && wLines[i]) setCursor({ shortsNum: where.shortsNum, n: wLines[i].n });
       const el = stageCapRef.current;
       if (el) {
         if (s && cl) {
           const runs = CF.lineRuns(text, s.spans, ranges[i], base);
           const lp = CF.lineProps(s.spans, ranges[i], base, text.length);
-          applyCaptionStyle(lp);   // 📐 줄별 위치
+          const k = applyCaptionStyle(lp);   // 📐 줄별 위치 · k = 미리보기 px / 1080 화면 px(테두리·그림자 두께 환산)
           const box = el.parentElement ? { w: el.parentElement.clientWidth, h: el.parentElement.clientHeight } : null;
-          // 미리보기 글자 = size/90×18px → Vrew px 1 당 0.2/0.72 ≈ 0.28px (테두리·그림자 두께 환산)
-          stopLineRef.current = renderStageLine(el, runs, lp, d, 0.2 / 0.72, box);
+          stopLineRef.current = renderStageLine(el, runs, lp, d, k, box);
         } else { applyCaptionStyle(); el.textContent = cl; }
       }
       await wait(d);
     }
   }
-  async function playCut(c, info) {
+  async function playCut(c, info, sn) {
     setVisual(c); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
     const N = effCap;
     const sents = (c.sentences && c.sentences.length) ? c.sentences : [{ text: '', audio: null, dur: c.groupDurationSec || 2.5 }];
-    for (const s of sents) {
+    for (let si = 0; si < sents.length; si++) {
+      const s = sents[si];
       if (playAbortRef.current) return;
       if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
       const clips = splitLines(s.text || '', N); const dur = s.dur || 2.5;
@@ -2003,7 +2018,7 @@ export default function App() {
         } catch (e) { logline('미리듣기 오디오 실패: ' + e.message); }
       }
       if (playAbortRef.current) return;
-      await stepCaptions(clips.length ? clips : [''], dur * 1000, s);
+      await stepCaptions(clips.length ? clips : [''], dur * 1000, s, sn != null && c.sentences && c.sentences.length ? { shortsNum: sn, groupNum: c.num, sentIdx: si } : null);
     }
   }
   async function playProjects(projs, blackBetween) {
@@ -2011,7 +2026,7 @@ export default function App() {
     await wait(0); applyCaptionStyle();
     for (let pi = 0; pi < projs.length; pi++) {
       const pr = projs[pi];
-      for (const c of pr.cuts) { if (playAbortRef.current) return; await playCut(c, `${pr.title} · G${c.num} ${c.phase || ''}`); }
+      for (const c of pr.cuts) { if (playAbortRef.current) return; await playCut(c, `${pr.title} · G${c.num} ${c.phase || ''}`, pr.shortsNum); }
       if (blackBetween && pi < projs.length - 1 && !playAbortRef.current) {
         if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
         if (stageCapRef.current) stageCapRef.current.textContent = '';
@@ -2021,6 +2036,7 @@ export default function App() {
     }
     stopStageVideo(); // 마지막 그룹 영상 무한반복 방지 — 시퀀스 끝나면 정지
     if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료';
+    if (!playAbortRef.current && view === 'clips') setPlayerOpen(false);   // 🧭 클립 보기: 끝나면 커서 자리의 정지 화면으로
   }
   // 스테이지의 영상 정지 (loop 무한반복 차단)
   function stopStageVideo() {
@@ -2037,7 +2053,7 @@ export default function App() {
     const pr = dto.projects.find((p) => p.shortsNum === shortsNum); if (!pr) return;
     const c = pr.cuts.find((x) => x.num === groupNum); if (!c) return;
     playAbortRef.current = false; setPlayerOpen(true);
-    (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`); stopStageVideo(); if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; })();
+    (async () => { await wait(0); applyCaptionStyle(); await playCut(c, `${pr.title} · G${c.num}`, shortsNum); stopStageVideo(); if (!playAbortRef.current && playerInfoRef.current) playerInfoRef.current.textContent = '재생 완료'; if (!playAbortRef.current && view === 'clips') setPlayerOpen(false); })();
   }
   function stopPlayer() {
     playAbortRef.current = true;
@@ -2045,7 +2061,14 @@ export default function App() {
     if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
     if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
     if (stageCapRef.current) stageCapRef.current.textContent = '';
+    lastVisRef.current = null;   // 🧭 비웠으니 커서 화면을 다시 깐다
     setPlayerOpen(false);
+  }
+  /** 🧭 커서 줄부터 재생(클립 보기 · Space) — 그 줄이 든 그룹부터 끝까지. */
+  function playFromCursor() {
+    if (!dto || !cursor) return;
+    const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n);
+    if (l) playFrom(cursor.shortsNum, l.groupNum);
   }
   // 팝업/모달 닫기 = 바깥 클릭이 아니라 ESC 또는 취소·닫기 버튼으로만 (실수 클릭에 입력 유실 방지).
   //   여러 개가 겹쳐 떠 있어도 최상단(가장 나중에 연) 하나만 닫는다.
@@ -2077,6 +2100,101 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
+  const wsOn = !noProduction && view === 'clips';
+  function cursorInfo() {
+    if (!cursor || !dto || !dto.projects) return null;
+    const pr = dto.projects.find((p) => p.shortsNum === cursor.shortsNum); const PL = linesMap.get(cursor.shortsNum);
+    const l = PL && PL.list.find((x) => x.n === cursor.n);
+    if (!pr || !l) return null;
+    const cut = pr.cuts[l.ci]; const sen = cut && cut.sentences ? cut.sentences[l.sentIdx] : null;
+    return { pr, cut, s: sen, l, total: PL.list.length };
+  }
+  useEffect(() => {
+    if (!wsOn || playerOpen) return;
+    const el = stageCapRef.current; if (!el) return;
+    const ci = cursorInfo();
+    if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
+    if (!ci || !ci.s) { el.textContent = ''; if (stageVisualRef.current && !ci) { stageVisualRef.current.innerHTML = ''; lastVisRef.current = null; } return; }
+    if (lastVisRef.current !== visKey(ci.cut)) setVisual(ci.cut);
+    const text = String(ci.s.text || '');
+    const base = CF.normFmt(capBase); base.size = capBase.size;
+    const runs = CF.lineRuns(text, ci.s.spans, ci.l.range, base);
+    const lp = CF.lineProps(ci.s.spans, ci.l.range, base, text.length);
+    const k = applyCaptionStyle(lp);
+    const box = el.parentElement ? { w: el.parentElement.clientWidth, h: el.parentElement.clientHeight } : null;
+    renderStageLine(el, runs, { ...lp, anim: null }, 0, k, box);
+    if (playerInfoRef.current) playerInfoRef.current.textContent = `G${ci.cut.num} · 자막 ${ci.l.n} / ${ci.total}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsOn, playerOpen, cursor, linesMap, capLook, capSize, capPos, capFine, capAlign, capYAlign, capXOff, pane1W]);
+  // 커서가 없거나 사라진 줄이면 첫 줄로(대본을 열었을 때 · 문장을 합쳐 줄이 줄었을 때)
+  useEffect(() => {
+    if (!dto || !dto.projects || !dto.projects.length) { if (cursor) setCursor(null); return; }
+    const ok = cursor && linesMap.get(cursor.shortsNum) && linesMap.get(cursor.shortsNum).list.some((x) => x.n === cursor.n);
+    if (ok) return;
+    const pr = dto.projects[0]; const PL = linesMap.get(pr.shortsNum);
+    if (PL && PL.list.length) setCursor({ shortsNum: pr.shortsNum, n: Math.min(PL.list.length, cursor && cursor.shortsNum === pr.shortsNum ? cursor.n : 1) });
+    else if (cursor) setCursor(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linesMap]);
+  // ① 칸 폭이 바뀌면(창 크기·경계 끌기) 자막 배율을 다시 잰다
+  useEffect(() => {
+    if (!wsOn) return undefined;
+    const st = stageCapRef.current && stageCapRef.current.parentElement;
+    if (!st || typeof ResizeObserver === 'undefined') return undefined;
+    let w0 = st.clientWidth;
+    const ro = new ResizeObserver(() => { if (st.clientWidth !== w0) { w0 = st.clientWidth; setPane1W((x) => x); if (!playerOpen) setCursor((c) => (c ? { ...c } : c)); } });
+    ro.observe(st);
+    return () => ro.disconnect();
+  }, [wsOn, playerOpen]);
+  /** 🧭 키보드로 줄 이동(클립 보기) — ↑↓ 한 줄 · Shift 범위 · PageUp/Down 10줄 · Home/End · Enter 고치기 · Space 재생/멈춤.
+   *  입력칸·편집칸·열린 창이 있으면 손대지 않는다. */
+  function moveCursor(delta, extend, abs) {
+    const PL = cursor && linesMap.get(cursor.shortsNum); if (!PL || !PL.list.length) return;
+    const idx = Math.max(0, PL.list.findIndex((x) => x.n === cursor.n));
+    const ni = abs === 'home' ? 0 : abs === 'end' ? PL.list.length - 1 : Math.max(0, Math.min(PL.list.length - 1, idx + delta));
+    const l = PL.list[ni];
+    const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
+    setCursor({ shortsNum: cursor.shortsNum, n: l.n });
+    setCapSel((cur) => {
+      if (extend && cur && cur.mode === 'lines' && cur.shortsNum === cursor.shortsNum && cur.anchorN != null) {
+        const a = Math.min(cur.anchorN, l.n), b = Math.max(cur.anchorN, l.n);
+        return { ...cur, items: PL.list.filter((x) => x.n >= a && x.n <= b).map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })) };
+      }
+      return { shortsNum: cursor.shortsNum, mode: 'lines', items: [info], anchorN: extend ? cursor.n : l.n };
+    });
+    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + l.n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
+  }
+  const anyModal = !!(preview || nameAsk || capDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
+  useEffect(() => {
+    if (!wsOn) return undefined;
+    const onKey = (e) => {
+      if (anyModal || sentEdit || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target; const tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1, e.shiftKey); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1, e.shiftKey); }
+      else if (e.key === 'PageDown') { e.preventDefault(); moveCursor(10, e.shiftKey); }
+      else if (e.key === 'PageUp') { e.preventDefault(); moveCursor(-10, e.shiftKey); }
+      else if (e.key === 'Home') { e.preventDefault(); moveCursor(0, e.shiftKey, 'home'); }
+      else if (e.key === 'End') { e.preventDefault(); moveCursor(0, e.shiftKey, 'end'); }
+      else if (e.key === 'Enter') {
+        const ci = cursorInfo(); if (!ci || !ci.s) return;
+        e.preventDefault(); startSentEdit(ci.pr.shortsNum, ci.cut.num, ci.l.sentIdx, ci.s.text);
+      } else if (e.key === ' ') { e.preventDefault(); if (playerOpen) stopPlayer(); else playFromCursor(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  /** ① ↔ ② 경계 끌기 — 폭을 기억한다. */
+  function startPaneDrag(e) {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = pane1W;
+    const mv = (ev) => setPane1W(Math.max(320, Math.min(Math.round(window.innerWidth * 0.7), w0 + ev.clientX - x0)));
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); setPane1W((w) => { lsSet('pm.pane1W', w); return w; }); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  }
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -2429,28 +2547,94 @@ export default function App() {
     </span>
   ) : null;
 
+  // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
+  const stageEl = (<>
+    <div id="stage" className="lf" data-testid="stage">
+      <div id="stageVisual" ref={stageVisualRef} />
+      <div id="stageCap" ref={stageCapRef} />
+    </div>
+    <div id="playerBar">
+      {wsOn && <button className={playerOpen ? 'ghost' : ''} data-testid="play-btn" title="커서 줄부터 재생 / 멈춤 (Space)" onClick={() => (playerOpen ? stopPlayer() : playFromCursor())}>{playerOpen ? '■ 멈춤' : '▶ 재생'}</button>}
+      <span id="playerInfo" ref={playerInfoRef} />
+      {!wsOn && <button className="ghost" onClick={stopPlayer}>■ 닫기</button>}
+    </div>
+  </>);
+  // 🧭 클립 정보 상자(① 아래) — 커서 줄의 그룹 · 그림/영상 · 자주 쓰는 그룹 단추
+  const clipInfo = (() => {
+    if (!wsOn) return null;
+    const ci = cursorInfo();
+    if (!ci) return <div className="clipinfo" data-testid="clipinfo"><span className="meta">대본을 열면 커서 자리의 그림·자막이 여기에 보입니다</span></div>;
+    const c = ci.cut; const base = (p) => (p ? String(p).split(/[\\/]/).pop() : '');
+    return (
+      <div className="clipinfo" data-testid="clipinfo">
+        <b>G{c.num}</b> <span className="meta">{c.phase || ''} · 자막 {ci.l.n}/{ci.total}</span>
+        <span className="meta clipfile" title={c.videoPath || c.imagePath || ''}>{c.videoPath ? '🎬 ' + base(c.videoPath) : c.imagePath ? '🖼 ' + base(c.imagePath) : '그림 없음'}</span>
+        <span className="grow" />
+        <button className="gprev" title="이 그룹 그림/영상 첨부" onClick={() => attachAsset(ci.pr.shortsNum, c.num)}>📎</button>
+        {(c.imagePath || c.videoPath) && <button className="gprev" title="첨부 지우기" onClick={() => clearAsset(ci.pr.shortsNum, c.num)}>✕</button>}
+        <button className="gprev" title="이미지 재생성" onClick={() => runRegen(ci.pr.shortsNum, c.num)}>🔄</button>
+        <button className="gprev" title="이 그룹 미리듣기" onClick={() => playGroup(ci.pr.shortsNum, c.num)}>▶</button>
+      </div>
+    );
+  })();
+  // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
+  const logDocked = !noProduction && view === 'clips';
+  const logBox = (
+        <aside id="logwrap" className={logDocked ? 'docked' : ''}>
+            <div id="logbar">
+              <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
+              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+            </div>
+            <div id="log" ref={logRef}>{logText}</div>
+        </aside>
+  );
+  const workTimes = (
+        <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
+          ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
+          {timings.make > 0 && <> · ⚡전체 {fmtSec(timings.make)}</>}
+        </span>
+  );
   // ── 렌더 ─────────────────────────────────────────────────
   return (
     <>
       <div className="topsticky">
-      <header>
-        {/* 헤더 = 좌(상단행 + ①~⑤ 세로) / 우(로그창). 로그를 **맨 윗줄부터** 시작시키려고
-            헤더 전체를 2열로 감쌌다 (로이 2026-09-16 — "그 윗줄부터 시작하게 하고 크기 고정"). */}
-        <div className="hsplit">
-        <div className="hmain">
-        {/* 상단 행 — 모드·채널·설정 (대본 열기는 ① 대본 으로 내려갔다) */}
-        <div className="hrow">
-          <div className="hleft">
+      {/* 🧭 v0.5.42 — Vrew 처럼 **메뉴 줄 + 리본**(로이 2026-09-25: 「메뉴를 누르면 그 메뉴에 관련된 항목이 나오게」).
+          예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
+      <header className="vhead">
+        <div className="menubar">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
-            {/* ⚙ 설정을 **제목 바로 뒤**로 옮겼다 (로이 2026-09-16 — 옛 🔍 자리). 검색은 오른쪽 상시 검색창이 맡으므로 🔍 버튼은 없앴다.
-                🔑 지금 고른 엔진에 맞는 탭으로 연다 — 예전엔 「② 이미지」 줄에 같은 팝업을 여는 ⚙ 가 하나 더 있었다(중복이라 제거). */}
-            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
-              style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙ 설정</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
+          {!noProduction && (
+            <nav className="menus" data-testid="menus">
+              {MENUS.map(([id, label]) => (
+                <button key={id} data-menu={id} className={'menu' + (menu === id ? ' on' : '')} onClick={() => pickMenu(id)}>{label}</button>
+              ))}
+            </nav>
+          )}
+          <span className="grow" />
+        {gsCool && gsCool.until > 0 && (
+          <span title={`Genspark 이미지가 구독 한도에 도달했습니다. 그 전까지는 Genspark 에 접속하지 않고 바로 Flow 로 만들고, 이 시각이 지나면 만들던 대본 도중이라도 자동으로 Genspark 로 되돌아가 남은 이미지를 이어서 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
+            style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
+          </span>
+        )}
+        {grokCool && grokCool.until > 0 && (
+          <span title={`Grok 영상이 한도에 도달했습니다. 이 시각 이후 재설정됩니다. 그 전까지는 Grok(브라우저) 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 유지됩니다.`}
+            style={{ padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            🎬 Grok 비디오 생성가능시간: {fmtKoTime(grokCool.until)}
+          </span>
+        )}
+            {loaded && (
+              <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
+                {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
+              </span>
+            )}
             <select title="채널(프리셋) — 고르면 그 채널의 시작 화면으로 전환" value={presetName} onChange={(e) => switchModeForChannel(e.target.value)}>
               {(() => {
                 // 그룹별 묶기 + ──── 그룹명 ──── 구분선(선택 불가). 그룹 없는 채널은 위에 먼저.
@@ -2467,31 +2651,39 @@ export default function App() {
             </select>
             {/* 채널 관리 = 이 버튼 하나. 추가·순서·편집·삭제가 전부 그 창의 탭에 있다(로이 2026-09-16 통합). */}
             <button className="ghost" title="채널(프리셋) — 추가·순서·설정 편집·삭제" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
+          <div className="findbar">
+            <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
+            {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)"
+              onChange={(e) => runFind(e.target.value, false)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
+            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
+            <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
+            <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
+            <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
+          </div>
+            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
+              style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙ 설정</button>
             {isBk && (<>
               <button onClick={openBook}>📖 원고 열기</button>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
               <button className="ghost" disabled={!loaded} title="원고 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
               <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
             </>)}
-            {loaded && (
-              <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
-                {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
-              </span>
-            )}
-            {/* 🆕 초기화 — 첫 줄 끝에서 남은 폭을 꽉 채운다(로이 2026-09-24: 눈에 잘 띄게). 출판은 위 원고 버튼 줄에 따로 있다. */}
-            {!isBk && (
-              <button className="reset-wide" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
-            )}
-          </div>
-        </div>
-        {/* 제작 파이프라인 — ①대본·음성 → ②이미지 → ③비디오 → ④완성 을 **세로로** 쌓고(왼쪽 정렬),
-            오른쪽 빈 자리에 **로그창**을 붙였다 (로이 2026-09-16).
-            🔑 로그는 {!noProduction} 바깥에 둔다 — 출판·리모션엔 파이프라인이 없지만 로그는 늘 필요하다
-            (그 모드에선 왼쪽이 비고 로그가 그 폭을 함께 쓴다). */}
-        <div className="pipecol">
+          {!isBk && (
+            <button className="ghost reset-btn" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
+          )}
           {!noProduction && (<>
-          {/* ① 대본 — 예전엔 상단행에 있었다. 「대본을 여는 것」이 파이프라인의 첫 단계라 번호를 주고 맨 위로 올렸다
-              (로이 2026-09-16). 그래서 음성~완성이 한 칸씩 밀렸다(②③④⑤). */}
+            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
+              <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
+              {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
+            </>); })()}
+            <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
+          </>)}
+        </div>
+        {!noProduction && (
+          <div className="ribbon" data-testid="ribbon" data-menu-on={menu}>
+            {menu === 'script' && (<>
           <span className="hgroup">
             <span className="glabel">① 대본·음성</span>
             <button onClick={openScript}>📂 열기</button>
@@ -2513,6 +2705,23 @@ export default function App() {
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}>📖 발음사전</button>
           </span>
+              <span className="hgroup rb-extra">
+        <label className="chk" title="무엇을 넣어 .vrew 를 만들지 정합니다.&#10;· 전체 — 음성 + 화면 (기본)&#10;· 🎤 음성만 — 이미지·비디오를 만들지 않습니다(그 단계를 건너뜁니다)&#10;· 🖼 화면만 — 음성을 만들지 않습니다(TTS 단계를 건너뛰고, 음성 자리는 무음). Vrew 에서 AI 목소리를 입힌 뒤 「📥 Vrew 음성」으로 되가져오세요."
+          style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          출력
+          <select style={{ width: 'auto' }} value={outMode} onChange={(e) => setOutMode(e.target.value)}>
+            <option value="full">전체</option>
+            <option value="audio">🎤 음성만</option>
+            <option value="visual">🖼 화면만</option>
+          </select>
+        </label>
+        <button className="ghost" disabled={!loaded}
+          title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
+          onClick={runImportVrewAudio}>📥 Vrew 음성</button>
+              </span>
+              {splitBar}
+            </>)}
+            {menu === 'image' && (<>
           <span className="hgroup">
             <span className="glabel">② 이미지</span>
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
@@ -2539,6 +2748,8 @@ export default function App() {
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
             </>)}
           </span>
+            </>)}
+            {menu === 'video' && (<>
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
@@ -2568,8 +2779,8 @@ export default function App() {
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}>🗑 삭제</button>
           </span>
-          {/* ④ 출력 + ⑤ 완성 **통합** (로이 2026-09-16) — 「무엇으로 낼까(.vrew·화이트보드)」와
-              「만들기·내보내기」는 한 동작의 앞뒤라 한 그룹에 둔다. */}
+            </>)}
+            {menu === 'finish' && (<>
           <span className="hgroup">
             <span className="glabel">④ 완성</span>
             <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
@@ -2591,100 +2802,38 @@ export default function App() {
             <span className="hdiv" />
             <button className="ghost" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}>📄 대본 보기</button>
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
-            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
-              <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
-              {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
-            </>); })()}
-            <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
             {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}>⬆ 업로드</button>}
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </span>
-          </>)}
-        </div>
-        </div>
-        {/* 오른쪽 열 = **검색창(위) + 로그창(아래)**. 로그를 한 줄 내리고 그 자리에 검색창을 상시 띄운다
-            (로이 2026-09-16 — 예전엔 Ctrl+F 로 뜨는 떠 있는 창이라 로그창을 가렸다).
-            ⚠ 로그 **접기 기능은 없앴다** — 전용 자리가 생겨 가릴 이유가 없다(바 클릭이 아무 일도 하지 않는다). */}
-        <div className="hcolR">
-          <div className="findbar">
-            <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
-            {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)"
-              onChange={(e) => runFind(e.target.value, false)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
-            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
-            <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
-            <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
-            <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
-          </div>
-        <aside id="logwrap" className="docked">
-            <div id="logbar">
-              <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
-            </div>
-            <div id="log" ref={logRef}>{logText}</div>
-        </aside>
-        </div>
-        </div>
-      </header>
-
-      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (출판 모드 제외) */}
-      {!noProduction && <div id="capbar">
-        {gsCool && gsCool.until > 0 && (
-          <span title={`Genspark 이미지가 구독 한도에 도달했습니다. 그 전까지는 Genspark 에 접속하지 않고 바로 Flow 로 만들고, 이 시각이 지나면 만들던 대본 도중이라도 자동으로 Genspark 로 되돌아가 남은 이미지를 이어서 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
-          </span>
-        )}
-        {grokCool && grokCool.until > 0 && (
-          <span title={`Grok 영상이 한도에 도달했습니다. 이 시각 이후 재설정됩니다. 그 전까지는 Grok(브라우저) 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            🎬 Grok 비디오 생성가능시간: {fmtKoTime(grokCool.until)}
-          </span>
-        )}
-        <span className="grow" />
-        <label className="chk" title="무엇을 넣어 .vrew 를 만들지 정합니다.&#10;· 전체 — 음성 + 화면 (기본)&#10;· 🎤 음성만 — 이미지·비디오를 만들지 않습니다(그 단계를 건너뜁니다)&#10;· 🖼 화면만 — 음성을 만들지 않습니다(TTS 단계를 건너뛰고, 음성 자리는 무음). Vrew 에서 AI 목소리를 입힌 뒤 「📥 Vrew 음성」으로 되가져오세요."
-          style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          출력
-          <select style={{ width: 'auto' }} value={outMode} onChange={(e) => setOutMode(e.target.value)}>
-            <option value="full">전체</option>
-            <option value="audio">🎤 음성만</option>
-            <option value="visual">🖼 화면만</option>
-          </select>
-        </label>
-        <button className="ghost" disabled={!loaded}
-          title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
-          onClick={runImportVrewAudio}>📥 Vrew 음성</button>
-        <span className="hdiv" />
+              <span className="hgroup rb-extra" id="capbar">
         <button className="ghost" disabled={!loaded || prog.ttsD === 0}
           title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
           onClick={openTimestamps}>⏱ 타임스탬프</button>
-        {splitBar}
         <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
-        <span className="hdiv" />
-        <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
-          ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
-          {timings.make > 0 && <> · ⚡전체 {fmtSec(timings.make)}</>}
-        </span>
-      </div>}
-      {/* 🎨 자막 서식 툴바 — 목록에서 자막 줄(줄 번호 클릭)이나 글자(드래그)를 고르면 뜬다(Vrew 상단 서식 막대).
-          🔑 고정 헤더(topsticky) **안**에 둔다 — 목록 쪽에 sticky 로 두면 헤더 밑에 깔려 눌리지 않는다(E2E 가 잡았다). */}
-      {/* 📐 v0.5.41 — **늘 꺼내 둔다**(로이: 툴바가 안 떴다). 고른 게 없으면 안내만 보이고 칸은 잠긴다. */}
-      {!noProduction && (
-        <div className="cf-barwrap">
-          <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
-            onPatch={applyCapFmt} onClear={() => clearCapFmt(null)}
-            onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
-            onDone={() => { setCapSel(null); setCapPanel(null); }}
-            onSaveDefault={saveCapDefault} />
-        </div>
-      )}
+              </span>
+            </>)}
+            {menu === 'format' && (
+              <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
+                onPatch={applyCapFmt} onClear={() => clearCapFmt(null)}
+                onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
+                onDone={() => { setCapSel(null); setCapPanel(null); }}
+                onSaveDefault={saveCapDefault} />
+            )}
+          </div>
+        )}
+      </header>
       </div>
-
-      <div id="body">
-        <main className={capSel && capPanel && !noProduction ? "cf-side-open" : ""}>
+      {/* 🧭 가로 3칸(Vrew) — ① 영상·이미지(커서 줄 자막) ② 자막 클립 목록 ③ 자세한 설정(열릴 때만) */}
+      <div id="body" className={wsOn ? 'ws' : ''}>
+        {wsOn && (<>
+          <section className="pane1" data-testid="pane1" style={{ width: pane1W }}>
+            {stageEl}
+            {clipInfo}
+            {logBox}
+          </section>
+          <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절" onMouseDown={startPaneDrag} />
+        </>)}
+        <main className={wsOn ? 'pane2' : ''}>
           {isRx ? (
             <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
           ) : isBk ? (
@@ -2705,14 +2854,17 @@ export default function App() {
               ))}
             </div>
           )}
-          {capSel && capPanel && !isBk && (
-            <div className="cf-side" data-testid="cf-side">
-              {capPanel === 'fmt'
-                ? <CaptionFormatPanel value={capSelFmt()} onChange={applyCapFmt} title={capSelLabel() + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} />
-                : <CaptionAnimPanel value={capSelFmt().anim} onChange={(a) => applyCapFmt({ anim: a })} title={capSelLabel() + ' 애니메이션'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(['anim'])} />}
-            </div>
-          )}
-          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap}
+          {/* ② 위 얇은 막대 — 진행 통계 + 보기 전환(Vrew 「개요/상세」 자리) */}
+          <div className="clipbar" data-testid="clipbar">
+            {workTimes}
+            <span className="grow" />
+            <span className="seg" title="보기 — 클립(Vrew 식 3칸) / 카드(옛 3열 그룹 카드)">
+              <button className={view === 'clips' ? 'on' : ''} data-view="clips" onClick={() => { if (playerOpen) stopPlayer(); pickView('clips'); }}>클립</button>
+              <button className={view === 'cards' ? 'on' : ''} data-view="cards" onClick={() => { if (playerOpen) stopPlayer(); pickView('cards'); }}>카드</button>
+            </span>
+          </div>
+          <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} linesMap={linesMap}
+            cursor={cursor} onCursor={(sn, n) => setCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSel} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
@@ -2727,7 +2879,16 @@ export default function App() {
             }} /></ErrorBoundary>
           </>)}
         </main>
+        {/* ③ 자세한 설정 — ⚙ 고급·✨ 효과를 열 때만(예전엔 화면 위에 떠 있는 창이었다) */}
+        {capSel && capPanel && !noProduction && (
+          <aside className="cf-side pane3" data-testid="cf-side">
+            {capPanel === 'fmt'
+              ? <CaptionFormatPanel value={capSelFmt()} onChange={applyCapFmt} title={capSelLabel() + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} />
+              : <CaptionAnimPanel value={capSelFmt().anim} onChange={(a) => applyCapFmt({ anim: a })} title={capSelLabel() + ' 애니메이션'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(['anim'])} />}
+          </aside>
+        )}
       </div>
+      {!logDocked && logBox}
 
       {preview && (
         <div id="preview" className="show" onClick={(e) => { if (e.target.classList.contains('close')) setPreview(null); }}>
@@ -2742,13 +2903,10 @@ export default function App() {
         </div>
       )}
 
-      <div id="player" className={playerOpen ? 'show' : ''}>
-        <div id="stage" className="lf">
-          <div id="stageVisual" ref={stageVisualRef} />
-          <div id="stageCap" ref={stageCapRef} />
-        </div>
-        <div id="playerBar"><span id="playerInfo" ref={playerInfoRef} /><button className="ghost" onClick={stopPlayer}>■ 닫기</button></div>
-      </div>
+      {/* 카드 보기·출판·리모션 — 미리보기 재생은 예전처럼 화면을 덮는 창(스테이지 DOM 은 하나 — 클립 보기에선 ① 칸 안에 있다) */}
+      {!wsOn && (
+        <div id="player" className={playerOpen ? 'show' : ''}>{stageEl}</div>
+      )}
 
       {/* 🎨 채널 기본 자막 서식 — 채널 편집 창 위에 뜬다. 바꾸는 즉시 채널 편집 값(ch.capLong)에 들어가고, 채널 「저장」으로 저장된다 */}
       {capDlg && ch && ch[capDlg.key] && (() => {
@@ -3772,7 +3930,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
+function Cards({ dto, isLf, capCharsN, layout, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3802,7 +3960,7 @@ function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCap
                 <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
-            <div className={'cuts-grid' + (isLf ? ' lf' : '')}>
+            <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '')}>
               {pr.cuts.map((c, ci) => {
                 const ph = phaseBadge(c.phase);
                 // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
@@ -3811,9 +3969,16 @@ function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCap
                 const ed = edit.cur;
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
                 const lineEls = sents.map((s, si) => {
-                  const _lt = splitLines(s.text, capCharsN);
-                  const _rg = CF.lineRanges(s.text || '', _lt);
-                  const lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
+                  // 🧭 줄 번호는 App 의 linesMap(Workspace.buildProjLines)이 정본 — ①·키보드와 같은 번호
+                  const _pl = linesMap && linesMap.get(pr.shortsNum);
+                  const _got = _pl && _pl.bySent.get(c.num + ':' + si);
+                  let lines;
+                  if (_got) { lines = _got.map((x) => ({ n: x.n, t: x.t, range: x.range })); capN = lines.length ? lines[lines.length - 1].n : capN; }
+                  else {
+                    const _lt = splitLines(s.text, capCharsN);
+                    const _rg = CF.lineRanges(s.text || '', _lt);
+                    lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
+                  }
                   for (const l of lines) projLines.push({ n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to });
                   if (edHere && si === ed.sentIdx) {
                     return (
@@ -3864,6 +4029,9 @@ function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCap
                           // 🎨 글자를 드래그해 골랐으면 고치기 대신 서식 선택(Vrew 처럼 단어 하나만 굵게·색…)
                           const rg = onPickCapChars ? selectionRange(ev.currentTarget) : null;
                           if (rg) { onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
+                          // 🧭 누른 줄로 커서 이동 + 바로 고치기(로이 확정)
+                          const lnEl = ev.target && ev.target.closest ? ev.target.closest('[data-ln]') : null;
+                          if (onCursor) onCursor(pr.shortsNum, lnEl ? Number(lnEl.getAttribute('data-ln')) : (lines.length ? lines[0].n : 1));
                           edit.start(pr.shortsNum, c.num, si, s.text);
                         }}>
                         {lines.map((l, li) => {
@@ -3873,7 +4041,7 @@ function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCap
                           const lp = s.spans ? CF.lineProps(s.spans, l.range, {}, String(s.text || '').length) : null;
                           const ai = lp && lp.anim ? CF.ANIM_INFO[lp.anim.type] : null;
                           return (
-                            <div className={'sent' + (picked ? ' picked' : '')} key={l.n}>
+                            <div className={'sent' + (picked ? ' picked' : '') + (cursor && cursor.shortsNum === pr.shortsNum && cursor.n === l.n ? ' cur' : '')} key={l.n} data-ln={l.n}>
                               <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
                                 onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}   // Shift+클릭이 브라우저 글자 선택을 만들지 않게
                                 onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>

@@ -117,7 +117,10 @@ head('[4] 장면 규격 일치');
 // ── [5] 벤더링본 == 상류 ────────────────────────────────────────────────────
 head('[5] 벤더링본이 상류와 같은가');
 if (fs.existsSync(UPSTREAM)) {
-  const sha = (p) => crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex');
+  // 🔑 줄끝을 LF 로 맞춘 뒤 비교한다(scripts/gen-manifest.js 의 normalizeLF 와 같은 규칙).
+  //   상류(D:\화이트보드)는 CRLF, 저장소는 .gitattributes eol=lf 라 새로 받은 체크아웃(워크트리)은 LF 다 —
+  //   원본 바이트로 비교하면 내용이 같아도 6건이 실패했다(2026-09-25 실측).
+  const sha = (p) => crypto.createHash('sha1').update(fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')).digest('hex');
   for (const f of PY_FILES) {
     eq(sha(path.join(WB, 'py', f)), sha(path.join(UPSTREAM, 'scripts', f)), `${f} 가 상류와 동일`);
   }
