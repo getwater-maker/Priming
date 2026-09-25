@@ -238,23 +238,57 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press(' '); await win.waitForTimeout(400);
       ok((await btn()).includes('▶'), '🔑 고르지 않고 Space → 멈춤');
     }
-    // 🖼 v0.5.64 — 그룹 사이 선이 끊기지 않는다(이음선) · 그림 아이콘에 마우스를 올리면 선 강조 + 손잡이 + 큰 그림(Vrew)
+    // 🖼 v0.5.68 — 범위 선은 평소엔 안 보이고, 그림 아이콘에 마우스를 올리면 보인다 · 누르면 다음 클릭까지 보이고 메뉴는 선 오른쪽(로이)
     {
-      const j = await win.evaluate(() => {
-        const r1 = document.querySelector('[data-testid=rail][data-g="1"]'), r2 = document.querySelector('[data-testid=rail][data-g="2"]'), jn = document.querySelector('[data-testid=rail-join]');
-        if (!r1 || !r2 || !jn) return null;
-        const a = r1.getBoundingClientRect(), b = r2.getBoundingClientRect(), c = jn.getBoundingClientRect();
-        return { gapTop: Math.round(c.top - a.bottom), gapBot: Math.round(b.top - c.bottom), x: Math.round(c.left - (a.left + 11)) };
+      const railSt = () => win.evaluate(() => {
+        const r = document.querySelector('[data-testid=rail][data-g="1"]'); if (!r) return null;
+        const seg = r.querySelector('.rseg'), he = r.querySelector('[data-testid=rail-h-e]');
+        return { line: getComputedStyle(seg).opacity, h: getComputedStyle(he).opacity, pin: r.classList.contains('pin'), join: [...document.querySelectorAll('[data-testid=rail-join]')].filter((x) => x.offsetParent).length };
       });
-      ok(j && Math.abs(j.gapTop) <= 1 && Math.abs(j.gapBot) <= 1 && Math.abs(j.x) <= 2, `🔑 G1 선 끝 ~ G2 선 시작이 이음선으로 이어진다(틈 없음) — ${JSON.stringify(j)}`);
-      const op = () => win.evaluate(() => getComputedStyle(document.querySelector('[data-testid=rail][data-g="1"] [data-testid=rail-h-e]')).opacity);
-      ok(await op() === '0', '평소엔 손잡이가 안 보인다(Vrew 평소 화면)');
+      let st = await railSt();
+      ok(st && st.line === '0' && st.h === '0' && st.join === 0, `🔑 평소엔 선·손잡이·이음선이 안 보인다 ${JSON.stringify(st)}`);
+      const pos = await win.evaluate(() => {
+        const r = document.querySelector('[data-testid=rail][data-g="1"]'); const cut = document.querySelector('.cut[data-g="1"]');
+        const cl = cut ? [...cut.querySelectorAll('.sent.clip')] : [];
+        if (!r || !cl.length) return null;
+        const hs = r.querySelector('[data-testid=rail-h-s]').getBoundingClientRect(), he = r.querySelector('[data-testid=rail-h-e]').getBoundingClientRect();
+        return { s: Math.round(hs.top + hs.height / 2 - cl[0].getBoundingClientRect().top), e: Math.round(he.top + he.height / 2 - cl[cl.length - 1].getBoundingClientRect().bottom) };
+      });
+      ok(pos && Math.abs(pos.s) <= 2 && Math.abs(pos.e) <= 2, `🔑 시작 표식 = 그룹 첫 클립 윗변 · 끝 표식 = 끝 클립 아랫변 ${JSON.stringify(pos)}`);
       await win.locator('[data-testid=gicon]').first().hover();
       await win.waitForTimeout(300);
-      ok(await win.evaluate(() => document.querySelector('[data-testid=rail][data-g="1"]').classList.contains('hov')) && await op() === '1', '🔑 그림 아이콘에 마우스를 올리면 그 그룹 선 강조 + 손잡이');
+      st = await railSt();
+      ok(st.line === '1' && st.h === '1', '🔑 그림 아이콘에 마우스를 올리면 선 + 손잡이가 보인다');
       ok(await win.locator('[data-testid=rail-peek] img').count() === 1, '큰 그림이 뜬다');
       await win.mouse.move(5, 5); await win.waitForTimeout(250);
-      ok(await win.locator('[data-testid=rail-peek]').count() === 0, '마우스를 치우면 사라진다');
+      st = await railSt();
+      ok(st.line === '0' && await win.locator('[data-testid=rail-peek]').count() === 0, '마우스를 치우면 다시 안 보인다');
+      // 누르면 — 메뉴 + 다음 클릭까지 보인다
+      await win.locator('[data-testid=gicon]').first().locator('.thumb').first().click();
+      await win.waitForSelector('[data-testid=vr-menu]', { timeout: 3000 });
+      await win.mouse.move(5, 5); await win.waitForTimeout(250);
+      st = await railSt();
+      ok(st.pin && st.line === '1' && st.h === '1', `🔑 아이콘을 누르면 마우스를 치워도 선·손잡이가 보인다 ${JSON.stringify(st)}`);
+      ok(await win.locator('[data-testid=rail-peek]').count() === 0, '메뉴를 연 동안은 큰 그림을 띄우지 않는다(메뉴를 가리지 않게)');
+      const mg = await win.evaluate(() => {
+        const m = document.querySelector('[data-testid=vr-menu]'), r = document.querySelector('[data-testid=rail][data-g="1"]');
+        const he = r.querySelector('[data-testid=rail-h-e]').getBoundingClientRect(), hs = r.querySelector('[data-testid=rail-h-s]').getBoundingClientRect();
+        const hit = (b) => { const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest && e.closest('[data-testid=rail]')); };
+        const t = m.querySelector('.vr-grp-h .t'), d = m.querySelector('.vr-grp-h .d');
+        const btns = [...m.querySelectorAll(':scope > button')].map((b) => b.scrollWidth);
+        return { mLeft: Math.round(m.getBoundingClientRect().left), railRight: Math.round(r.getBoundingClientRect().right), hitS: hit(hs), hitE: hit(he),
+          w: Math.round(m.getBoundingClientRect().width), maxBtn: Math.max(...btns), ell: t ? getComputedStyle(t).textOverflow : null, fits: t ? m.querySelector('.vr-grp-h').getBoundingClientRect().right <= m.getBoundingClientRect().right + 1 : null, time: d ? d.innerText : '' };
+      });
+      ok(mg.mLeft >= mg.railRight && mg.hitS && mg.hitE, `🔑 메뉴가 선 오른쪽 — 시작·끝 손잡이가 가려지지 않는다 ${JSON.stringify({ l: mg.mLeft, r: mg.railRight, s: mg.hitS, e: mg.hitE })}`);
+      ok(mg.w <= mg.maxBtn + 40, `🔑 메뉴 폭 = 메뉴 항목 기준 (${mg.w}px · 가장 긴 항목 ${mg.maxBtn}px)`);
+      ok(mg.ell === 'ellipsis' && mg.fits, `제목은 메뉴 폭을 늘리지 않고 길면 「…」 (${mg.ell} · 안에 들어감 ${mg.fits})`);
+      // 손잡이를 잡아도 메뉴·선은 그대로(끌어 고칠 수 있게)
+      const hb = await win.locator('[data-testid=rail][data-g="1"] [data-testid=rail-h-e]').boundingBox();
+      await win.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await win.mouse.down(); await win.mouse.up(); await win.waitForTimeout(250);
+      ok(await win.locator('[data-testid=vr-menu]').count() === 1 && (await railSt()).line === '1', '손잡이를 잡아도 메뉴·선은 그대로');
+      await win.mouse.click(700, 5); await win.waitForTimeout(300);
+      st = await railSt();
+      ok(await win.locator('[data-testid=vr-menu]').count() === 0 && !st.pin && st.line === '0', '🔑 다음 클릭이면 메뉴가 닫히고 선도 다시 안 보인다');
     }
     // 🖼 v0.5.62 — G1 그림 끝점을 G2 의 첫 클립까지 끌면, 그 클립에서는 **G1 이 위**(① 칸 · 오른쪽 작은 그림 · 재생 모두)
     {
@@ -323,6 +357,14 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const t0 = times.map((x) => { const m = /^(\d\d):(\d\d) \+ (\d+\.\d\d)초$/.exec(x); return m ? { s: +m[1] * 60 + +m[2], d: +m[3] } : null; });
     ok(made === 'ok' && times.length === 4 && t0.every(Boolean), `🕒 클립 시각 「00:00 + 1.23초」 모양 (${times.join(' / ')})`);
     ok(t0.every(Boolean) && t0[0].s === 0 && t0[3].s >= t0[1].s && t0.every((x) => x.d > 0), '시각은 앞 줄 길이만큼 누적된다(첫 줄 00:00)');
+    // 🖼 v0.5.68 — 음성이 생기면 그림 메뉴 머리줄에 길이 · 제목이 줄어도 시간은 다 보인다
+    {
+      await win.locator('[data-testid=gicon]').first().locator('.thumb').first().click();
+      await win.waitForSelector('[data-testid=vr-menu] .vr-grp-h', { timeout: 3000 }).catch(() => {});
+      const hd = await win.evaluate(() => { const d = document.querySelector('[data-testid=vr-menu] .vr-grp-h .d'); return d ? { txt: d.innerText, full: d.scrollWidth <= d.clientWidth + 1 } : null; });
+      ok(hd && /· \d+\.\d초/.test(hd.txt) && hd.full, `그림 메뉴 머리줄 끝의 시간은 줄지 않는다 ${JSON.stringify(hd)}`);
+      await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    }
     // 리본 큰 버튼 — 아이콘 위 · 글자 아래
     await menu(win, 'script');
     const ob = await win.evaluate(() => {

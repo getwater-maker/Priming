@@ -4814,6 +4814,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   useEffect(() => { if (!vrPending) return undefined; const t = setTimeout(() => setVrPending(null), 4000); return () => clearTimeout(t); }, [vrPending]);
   // 🖼 그룹 그림 아이콘에 마우스를 올리면 그 그룹 선 강조(Vrew) — 목록 전체를 다시 그리지 않게 RailLayer 에만 알린다
   const railHover = (sn, num) => { try { window.dispatchEvent(new CustomEvent('pm-rail-hover', { detail: { sn, num } })); } catch (_) {} };
+  // 📌 그림 아이콘을 눌러 메뉴를 열면 그 그룹 범위 선을 **다음 클릭까지** 보여 둔다(마우스가 떠나도)
+  useEffect(() => {
+    const g = vrMenu && !vrMenu.kind && vrMenu.c ? { sn: vrMenu.shortsNum, num: vrMenu.c.num } : { sn: null, num: null };
+    try { window.dispatchEvent(new CustomEvent('pm-rail-pin', { detail: g })); } catch (_) {}
+  }, [vrMenu && !vrMenu.kind && vrMenu.c ? vrMenu.shortsNum + ':' + vrMenu.c.num : '']);
   const grabRail = (sn, c, edge, r) => setVrDrag({ shortsNum: sn, groupNum: c.num, edge, gs: r.from, ge: r.to, ord: edge === 'start' ? r.from : r.to });
   useEffect(() => {
     if (!vrDrag) return undefined;
@@ -4840,7 +4845,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   }, [!!vrDrag]);
   useEffect(() => {
     if (!vrMenu) return undefined;
-    const close = (ev) => { if (ev.type === 'keydown' ? ev.key === 'Escape' : !(ev.target.closest && ev.target.closest('.vr-menu'))) setVrMenu(null); };
+    // 범위 선 손잡이를 잡는 것은 「다음 클릭」으로 치지 않는다(메뉴를 연 채 범위를 고친다)
+    const close = (ev) => { if (ev.type === 'keydown' ? ev.key === 'Escape' : !(ev.target.closest && (ev.target.closest('.vr-menu') || ev.target.closest('.rail .vr-h')))) setVrMenu(null); };
     document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
   }, [vrMenu]);
@@ -4894,7 +4900,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
                 const thumbEl = (
                   <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
-                    onMenu={onRange ? (ev) => setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent, x: ev.clientX, y: ev.clientY, sub: null }) : null} />
+                    onMenu={onRange ? (ev) => {
+                      // 🖼 메뉴는 그 그룹 범위 선의 **오른쪽**에 — 선·손잡이를 가리지 않아 메뉴를 연 채 범위를 끌어 고칠 수 있다(v0.5.68 · 로이)
+                      const grid = ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest('.cuts-grid') : null;
+                      const rl = grid ? grid.querySelector(`.rail[data-g="${c.num}"]`) : null;
+                      const rr = rl ? rl.getBoundingClientRect() : null;
+                      const ic = ev.currentTarget && ev.currentTarget.getBoundingClientRect ? ev.currentTarget.getBoundingClientRect() : null;
+                      setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent,
+                        x: rr ? Math.round(rr.right + 8) : ev.clientX, y: ic ? Math.round(ic.top) : ev.clientY, byRail: !!rr, sub: null });
+                    } : null} />
                 );
                 const lineEls = sents.map((s, si) => {
                   // 🧭 줄 번호는 App 의 linesMap(Workspace.buildProjLines)이 정본 — ①·키보드와 같은 번호
@@ -5428,11 +5442,13 @@ function blockRect(grid, sn, ord, end) {
 function RailLayer({ pr, drag, pending, onGrab }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
+  const [pin, setPin] = useState(null);   // 📌 메뉴를 연 그룹 — 다음 클릭까지 보인다
   const onHover = setHover;
   useEffect(() => {
     const h = (e) => { if (e.detail && e.detail.sn === pr.shortsNum) setHover(e.detail.num); };
-    window.addEventListener('pm-rail-hover', h);
-    return () => window.removeEventListener('pm-rail-hover', h);
+    const hp = (e) => { if (e.detail) setPin(e.detail.sn === pr.shortsNum ? e.detail.num : null); };
+    window.addEventListener('pm-rail-hover', h); window.addEventListener('pm-rail-pin', hp);
+    return () => { window.removeEventListener('pm-rail-hover', h); window.removeEventListener('pm-rail-pin', hp); };
   }, [pr.shortsNum]);
   const [geo, setGeo] = useState([]);
   const measure = () => {
@@ -5479,16 +5495,17 @@ function RailLayer({ pr, drag, pending, onGrab }) {
         const topExt = g.top < g.ownTop, botExt = g.bot > g.ownBot;
         const L = g.x - 10;   // 층 안 기준 — 실선 = +12 · 점선 = +5
         const grab = (edge) => (ev) => { ev.preventDefault(); ev.stopPropagation(); onGrab(c, edge, { from: g.from, to: g.to }); };
-        const hov = hover === g.num || g.live;
+        const pinned = pin === g.num;
+        const hov = hover === g.num || g.live || pinned;
         const tip = `G${c.num} 그림 범위 — 문장 ${g.from}~${g.to}${g.to > g.ge || g.from < g.gs ? ' (자기 그룹 밖은 아래층으로 이어 깔림 — 점선)' : ''}`;
         return (
-          <div key={g.num} className={'rail' + (g.live ? ' live' : '') + (hov ? ' hov' : '') + (g.has ? '' : ' noimg')} data-testid="rail" data-g={g.num} data-from={g.from} data-to={g.to}
+          <div key={g.num} className={'rail' + (g.live ? ' live' : '') + (hov ? ' hov' : '') + (pinned ? ' pin' : '') + (g.has ? '' : ' noimg')} data-testid="rail" data-g={g.num} data-from={g.from} data-to={g.to}
             style={{ left: L, top: g.top, height: Math.max(8, g.bot - g.top) }} title={tip}
-            onMouseEnter={() => onHover && onHover(g.num)} onMouseLeave={() => onHover && !g.live && onHover(null)}>
+            onMouseEnter={() => onHover && onHover(g.num)} onMouseLeave={() => onHover && onHover(null)}>
             <span className="rhit" />
             {segs.map((sg) => <span key={sg.k} className={'rseg' + (sg.ext ? ' ext' : '')} data-testid={sg.ext ? 'rail-ext' : 'rail-own'} style={{ top: sg.t - g.top, height: Math.max(2, sg.b - sg.t) }} />)}
             <span className={'vr-h top' + (topExt ? ' ext' : '')} data-testid="rail-h-s" title={`그림 시작점 — 문장 ${g.from} · 끌어서 이 그림(G${c.num})이 어느 클립부터 보일지`} onMouseDown={grab('start')} />
-            {hov && g.has && !g.live && (() => {
+            {hov && g.has && !g.live && !pinned && (() => {
               // 🔍 큰 그림(Vrew — 아이콘에 마우스를 올리면) · 영상은 한 장면
               const H = { top: Math.max(0, g.ownTop - g.top) + 44 };
               return <span className="rail-peek" data-testid="rail-peek" style={H}>{c.videoPath ? <FrameImg file={c.videoPath} version={c.videoVersion} t={0.5} fit="contain" /> : <img src={media(c.imagePath, c.imageVersion)} alt="" />}</span>;
@@ -5536,6 +5553,15 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
   const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
   const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
+  // 메뉴가 화면 아래로 넘치면 실제 높이를 재서 올린다(가로 자리는 그대로 — 범위 선을 가리지 않게)
+  const [fixTop, setFixTop] = useState(null);
+  const mref = useRef(null);
+  useLayoutEffect(() => {
+    const el = document.querySelector('[data-testid=vr-menu]'); if (!el) return;
+    const h = el.getBoundingClientRect().height, top = Math.max(8, Math.min(m.y, window.innerHeight - h - 8));
+    if (top !== fixTop) setFixTop(top);
+  });
+  if (fixTop != null) style.top = fixTop;
   const chk = (on) => <span className="vr-chk">{on ? '✓' : ''}</span>;
   if (m.kind === 'ai') {
     const cur = m.cur;
@@ -5595,8 +5621,10 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
   }
   const pk = grp && grp.playing ? grp.playing.key : null;
   return (
-    <div className="vr-menu" style={style} data-testid="vr-menu">
-      {grp && <div className="vr-cur" data-testid="vr-grp">G{c.num} · {c.phase || ''}{c.groupDurationSec ? ` · ${c.groupDurationSec.toFixed(1)}초` : ''}</div>}
+    <div className={'vr-menu' + (grp ? ' fit' : '')} style={style} data-testid="vr-menu" ref={mref}>
+      {/* 🔑 폭은 메뉴 항목 기준 — 긴 제목은 「…」로 줄이고 뒤의 시간은 그대로(로이 2026-09-26) · 전체 제목은 툴팁 */}
+      {grp && <div className="vr-cur vr-grp-h" data-testid="vr-grp" title={`G${c.num} · ${c.phase || ''}${c.groupDurationSec ? ` · ${c.groupDurationSec.toFixed(1)}초` : ''}`}>
+        <span className="t">G{c.num} · {c.phase || ''}</span>{c.groupDurationSec ? <span className="d">&nbsp;· {c.groupDurationSec.toFixed(1)}초</span> : null}</div>}
       {grp && <>
         <button data-testid="mn-play-group" title="이 그룹 미리듣기" onClick={go(() => grp.onPlayGroup(sn, c.num))}>{pk === 'group:' + sn + ':' + c.num ? '■ 멈춤' : '▶ 이 그룹 미리듣기'}</button>
         <button data-testid="mn-play-from" title="여기부터 재생" onClick={go(() => grp.onPlayFrom(sn, c.num))}>{pk === 'from:' + sn + ':' + c.num ? '■ 멈춤' : '⏭ 여기부터 재생'}</button>

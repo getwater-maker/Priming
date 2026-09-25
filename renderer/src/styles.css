@@ -773,3 +773,14 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .rail.hov .rseg.ext{background:none;border-left-color:var(--accent)}
 .rail-peek{position:absolute;left:-40px;width:200px;height:200px;background:#e9e3d9;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);overflow:hidden;display:flex;align-items:center;pointer-events:none;z-index:6}
 .rail-peek img{width:100%;height:100%;object-fit:contain;display:block}
+
+/* 🖼 그룹 그림 범위 선 — 평소엔 안 보이고, 그림 아이콘·선에 마우스를 올리면 · 아이콘을 눌러 메뉴를 열면(다음 클릭까지) 보인다 (v0.5.68 · 로이) */
+.rail .rseg{opacity:0;transition:opacity .12s}
+.rail.hov .rseg,.rail.live .rseg,.rail.pin .rseg{opacity:1}
+.rail.pin .vr-h{opacity:1}
+.rail-join{display:none}
+/* 그림 메뉴 — 폭은 메뉴 항목 기준(제목은 줄임표) */
+.vr-menu.fit{min-width:0;width:max-content}
+.vr-menu .vr-grp-h{display:flex;width:0;min-width:100%;box-sizing:border-box}
+.vr-menu .vr-grp-h .t{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vr-menu .vr-grp-h .d{flex:none;white-space:nowrap}
