@@ -1375,6 +1375,20 @@ export default function App() {
   // ➕ 삽입 — 그림·영상·오디오를 정한 클립(문장) 범위 동안(v0.5.54) · 🏷 채널 로고
   const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12 });
   const curLogoSide = () => { const pj = curProject(); return (pj && pj.logoSide) === 'left' ? 'left' : 'right'; };
+  // 🏷 로고 크기(채널 값) — ➕ 삽입 메뉴에서 바꾸면 곧바로 채널(⚙ 채널편집 📁 폴더의 크기)에 저장한다(v0.5.64 · 로이)
+  const logoSaveRef = useRef(null);
+  function setLogoSize(v) {
+    const n = Math.max(4, Math.min(40, Math.round(Number(v) || 0)));
+    if (!(Number(v) >= 4)) { setLogoCfg((c) => ({ ...c, size: v })); return; }   // 치는 중(빈칸·한 자리)은 저장하지 않는다
+    setLogoCfg((c) => ({ ...c, size: n }));
+    if (logoSaveRef.current) clearTimeout(logoSaveRef.current);
+    const name = presetName;
+    logoSaveRef.current = setTimeout(async () => {
+      if (!name) return;
+      try { await api.savePreset({ name, patch: { logoSize: n } }); setStatus(`🏷 채널 「${name}」 로고 크기 ${n}% (채널편집에도 같은 값 · 이 채널 모든 영상)`); }
+      catch (e) { logline('로고 크기 저장 오류: ' + e.message); }
+    }, 350);
+  }
   const stageLogo = logoCfg.on && logoCfg.path ? { ...logoCfg, side: curLogoSide() } : null;
   async function setLogoSide(side) {
     const pj = curProject(); if (!pj) return;
@@ -3540,6 +3554,10 @@ export default function App() {
                   <span className="meta">🏷 로고 위치</span>
                   <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoSide()} onChange={(e) => setLogoSide(e.target.value)}>
                     <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option></select>
+                  <span className="meta">크기</span>
+                  <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
+                    title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"
+                    value={logoCfg.size} onChange={(e) => setLogoSize(e.target.value)} onBlur={() => { if (!(Number(logoCfg.size) >= 4)) setLogoSize(12); }} /><span className="meta">%</span>
                   {!stageLogo && <span className="meta" data-testid="logo-off">(이 채널 로고 꺼짐)</span>}
                 </span>
               </span>
@@ -4766,6 +4784,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   const [vrPending, setVrPending] = useState(null);   // {shortsNum, groupNum, from, to}
   useEffect(() => { if (vrPending) setVrPending(null); /* eslint-disable-next-line */ }, [dto]);
   useEffect(() => { if (!vrPending) return undefined; const t = setTimeout(() => setVrPending(null), 4000); return () => clearTimeout(t); }, [vrPending]);
+  // 🖼 그룹 그림 아이콘에 마우스를 올리면 그 그룹 선 강조(Vrew) — 목록 전체를 다시 그리지 않게 RailLayer 에만 알린다
+  const railHover = (sn, num) => { try { window.dispatchEvent(new CustomEvent('pm-rail-hover', { detail: { sn, num } })); } catch (_) {} };
   const grabRail = (sn, c, edge, r) => setVrDrag({ shortsNum: sn, groupNum: c.num, edge, gs: r.from, ge: r.to, ord: edge === 'start' ? r.from : r.to });
   useEffect(() => {
     if (!vrDrag) return undefined;
@@ -5089,7 +5109,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                       </div>}
                       <div className={'sents' + (onRange && sents.length ? ' vr' : '') + (vrDrag && vrDrag.shortsNum === pr.shortsNum && vrDrag.groupNum === c.num ? ' vr-own' : '')}>
                         {vrewLay && (
-                          <div className="gicon" data-testid="gicon" title={`G${c.num} · ${c.phase || ''}${c.groupDurationSec ? ' · ' + c.groupDurationSec.toFixed(1) + '초' : ''} — 누르면 그림 메뉴(미리듣기 · TTS · 프롬프트 · 합치기 …)`}>{thumbEl}</div>
+                          <div className="gicon" data-testid="gicon" onMouseEnter={() => railHover(pr.shortsNum, c.num)} onMouseLeave={() => railHover(pr.shortsNum, null)} title={`G${c.num} · ${c.phase || ''}${c.groupDurationSec ? ' · ' + c.groupDurationSec.toFixed(1) + '초' : ''} — 누르면 그림 메뉴(미리듣기 · TTS · 프롬프트 · 합치기 …)`}>{thumbEl}</div>
                         )}
                         {onRange && sents.length && !vrewLay ? <>
                           <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
@@ -5254,6 +5274,9 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
     };
     const any = grid.querySelector(`.sblk[data-sn="${sn}"] .sent.clip`);
     const x0 = any ? any.getBoundingClientRect().left - G.left : 120;
+    const pane = grid.closest('main') || null;
+    const h2 = grid.closest('.card') && grid.closest('.card').querySelector('h2');   // 편 제목 줄은 위에 붙어 있다(sticky) — 그 아래부터가 보이는 곳
+    const vis = pane ? Math.round(Math.max(pane.getBoundingClientRect().top, h2 ? h2.getBoundingClientRect().bottom : -1e9) - G.top) : -1e9;   // 지금 보이는 맨 위(층 좌표)
     const out = [];
     (pr.overlays || []).forEach((o, oi) => {
       if (o.broken) return;
@@ -5261,7 +5284,8 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
       const f = d ? Math.min(d.from, d.to) : o.from, t = d ? Math.max(d.from, d.to) : o.to;
       const a = rectOf(f, false), b = rectOf(t, true);
       if (!a || !b) return;
-      out.push({ id: o.id, oi, top: Math.round(a.top - G.top), bot: Math.round(b.bottom - G.top), left: Math.round(x0 - 58 - 28 * (oi + 1)) });
+      const top = Math.round(a.top - G.top), bot = Math.round(b.bottom - G.top);
+      out.push({ id: o.id, oi, top, bot, left: Math.round(x0 - 58 - 28 * (oi + 1)), mark: Math.max(8, Math.min(bot - top - 36, vis + 10 - top)) });
     });
     setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
   };
@@ -5271,7 +5295,11 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
     if (!grid || typeof ResizeObserver === 'undefined') return undefined;
     const ro = new ResizeObserver(() => measure());
     ro.observe(grid);
-    return () => ro.disconnect();
+    // 📜 스크롤하면 표시가 따라온다(한 프레임에 한 번)
+    const pane = grid.closest('main'); let q = 0;
+    const onScroll = () => { if (q) return; q = requestAnimationFrame(() => { q = 0; measure(); }); };
+    if (pane) pane.addEventListener('scroll', onScroll, { passive: true });
+    return () => { ro.disconnect(); if (pane) pane.removeEventListener('scroll', onScroll); if (q) cancelAnimationFrame(q); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // 끝점 끌기 — 놓은 자리의 문장까지
@@ -5322,7 +5350,7 @@ function LaneLayer({ pr, onInsMark, onInsRange }) {
             style={{ left: g.left, top: g.top, height: Math.max(8, g.bot - g.top) }} title={label}>
             <span className="lline" />
             {cap('s')}{cap('e')}
-            <button className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind} title={label + ' — 누르면 적용 범위 · 삭제'}
+            <button className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind} title={label + ' — 누르면 적용 범위 · 삭제'} style={{ top: g.mark }}
               onMouseDown={(ev) => ev.stopPropagation()}
               onClick={(ev) => { ev.stopPropagation(); onInsMark(pr.shortsNum, o.id, ev.currentTarget); }}>
               {o.kind === 'image' ? <img src={media(o.file, o.version)} alt="" /> : (o.kind === 'video' ? '🎬' : '🎵')}
@@ -5350,6 +5378,13 @@ function blockRect(grid, sn, ord, end) {
 }
 function RailLayer({ pr, drag, pending, onGrab }) {
   const ref = useRef(null);
+  const [hover, setHover] = useState(null);
+  const onHover = setHover;
+  useEffect(() => {
+    const h = (e) => { if (e.detail && e.detail.sn === pr.shortsNum) setHover(e.detail.num); };
+    window.addEventListener('pm-rail-hover', h);
+    return () => window.removeEventListener('pm-rail-hover', h);
+  }, [pr.shortsNum]);
   const [geo, setGeo] = useState([]);
   const measure = () => {
     const layer = ref.current; if (!layer) return;
@@ -5380,6 +5415,11 @@ function RailLayer({ pr, drag, pending, onGrab }) {
   }, []);
   return (
     <div className="rail-layer" ref={ref} data-testid="rail-layer">
+      {geo.map((g, i) => {
+        const nx = geo[i + 1];
+        if (!nx || nx.ownTop <= g.ownBot) return null;
+        return <span key={'j' + g.num} className="rail-join" data-testid="rail-join" style={{ left: g.x + 1, top: g.ownBot, height: nx.ownTop - g.ownBot }} />;
+      })}
       {geo.map((g) => {
         const c = pr.cuts.find((x) => x.num === g.num); if (!c) return null;
         const segs = [];
@@ -5390,12 +5430,20 @@ function RailLayer({ pr, drag, pending, onGrab }) {
         const topExt = g.top < g.ownTop, botExt = g.bot > g.ownBot;
         const L = g.x - 10;   // 층 안 기준 — 실선 = +12 · 점선 = +5
         const grab = (edge) => (ev) => { ev.preventDefault(); ev.stopPropagation(); onGrab(c, edge, { from: g.from, to: g.to }); };
+        const hov = hover === g.num || g.live;
         const tip = `G${c.num} 그림 범위 — 문장 ${g.from}~${g.to}${g.to > g.ge || g.from < g.gs ? ' (자기 그룹 밖은 아래층으로 이어 깔림 — 점선)' : ''}`;
         return (
-          <div key={g.num} className={'rail' + (g.live ? ' live' : '') + (g.has ? '' : ' noimg')} data-testid="rail" data-g={g.num} data-from={g.from} data-to={g.to}
-            style={{ left: L, top: g.top, height: Math.max(8, g.bot - g.top) }} title={tip}>
+          <div key={g.num} className={'rail' + (g.live ? ' live' : '') + (hov ? ' hov' : '') + (g.has ? '' : ' noimg')} data-testid="rail" data-g={g.num} data-from={g.from} data-to={g.to}
+            style={{ left: L, top: g.top, height: Math.max(8, g.bot - g.top) }} title={tip}
+            onMouseEnter={() => onHover && onHover(g.num)} onMouseLeave={() => onHover && !g.live && onHover(null)}>
+            <span className="rhit" />
             {segs.map((sg) => <span key={sg.k} className={'rseg' + (sg.ext ? ' ext' : '')} data-testid={sg.ext ? 'rail-ext' : 'rail-own'} style={{ top: sg.t - g.top, height: Math.max(2, sg.b - sg.t) }} />)}
             <span className={'vr-h top' + (topExt ? ' ext' : '')} data-testid="rail-h-s" title={`그림 시작점 — 문장 ${g.from} · 끌어서 이 그림(G${c.num})이 어느 클립부터 보일지`} onMouseDown={grab('start')} />
+            {hov && g.has && !g.live && (() => {
+              // 🔍 큰 그림(Vrew — 아이콘에 마우스를 올리면) · 영상은 한 장면
+              const H = { top: Math.max(0, g.ownTop - g.top) + 44 };
+              return <span className="rail-peek" data-testid="rail-peek" style={H}>{c.videoPath ? <FrameImg file={c.videoPath} version={c.videoVersion} t={0.5} fit="contain" /> : <img src={media(c.imagePath, c.imageVersion)} alt="" />}</span>;
+            })()}
             <span className={'vr-h bot' + (botExt ? ' ext' : '')} data-testid="rail-h-e" title={`그림 끝점 — 문장 ${g.to} · 끌어서 이 그림(G${c.num})을 어느 클립까지 쓸지(다른 그룹 위로 끌면 그 밑에 이어 깔린다)`} onMouseDown={grab('end')} />
           </div>
         );

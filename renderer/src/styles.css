@@ -764,3 +764,12 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .rail .vr-h.top{top:-5px}.rail .vr-h.bot{bottom:-5px;top:auto}
 .rail.live .vr-h{background:var(--accent)}
 .rail.noimg .rseg{opacity:.55}
+/* ── v0.5.64 — 그룹 사이 이음선 · 선 마우스 올림(Vrew) · 삽입 표시가 화면을 따라옴 ── */
+.rail-join{position:absolute;width:3px;background:#e2d5bd;border-radius:1px;pointer-events:none}
+.rail .rhit{position:absolute;left:6px;width:13px;top:0;bottom:0;pointer-events:auto;cursor:default}
+.rail .vr-h{opacity:0;transition:opacity .12s}
+.rail.hov .vr-h,.rail.live .vr-h{opacity:1}
+.rail.hov .rseg{background:var(--accent)}
+.rail.hov .rseg.ext{background:none;border-left-color:var(--accent)}
+.rail-peek{position:absolute;left:-40px;width:200px;height:200px;background:#e9e3d9;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);overflow:hidden;display:flex;align-items:center;pointer-events:none;z-index:6}
+.rail-peek img{width:100%;height:100%;object-fit:contain;display:block}

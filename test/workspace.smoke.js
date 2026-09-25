@@ -238,6 +238,24 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press(' '); await win.waitForTimeout(400);
       ok((await btn()).includes('▶'), '🔑 고르지 않고 Space → 멈춤');
     }
+    // 🖼 v0.5.64 — 그룹 사이 선이 끊기지 않는다(이음선) · 그림 아이콘에 마우스를 올리면 선 강조 + 손잡이 + 큰 그림(Vrew)
+    {
+      const j = await win.evaluate(() => {
+        const r1 = document.querySelector('[data-testid=rail][data-g="1"]'), r2 = document.querySelector('[data-testid=rail][data-g="2"]'), jn = document.querySelector('[data-testid=rail-join]');
+        if (!r1 || !r2 || !jn) return null;
+        const a = r1.getBoundingClientRect(), b = r2.getBoundingClientRect(), c = jn.getBoundingClientRect();
+        return { gapTop: Math.round(c.top - a.bottom), gapBot: Math.round(b.top - c.bottom), x: Math.round(c.left - (a.left + 11)) };
+      });
+      ok(j && Math.abs(j.gapTop) <= 1 && Math.abs(j.gapBot) <= 1 && Math.abs(j.x) <= 2, `🔑 G1 선 끝 ~ G2 선 시작이 이음선으로 이어진다(틈 없음) — ${JSON.stringify(j)}`);
+      const op = () => win.evaluate(() => getComputedStyle(document.querySelector('[data-testid=rail][data-g="1"] [data-testid=rail-h-e]')).opacity);
+      ok(await op() === '0', '평소엔 손잡이가 안 보인다(Vrew 평소 화면)');
+      await win.locator('[data-testid=gicon]').first().hover();
+      await win.waitForTimeout(300);
+      ok(await win.evaluate(() => document.querySelector('[data-testid=rail][data-g="1"]').classList.contains('hov')) && await op() === '1', '🔑 그림 아이콘에 마우스를 올리면 그 그룹 선 강조 + 손잡이');
+      ok(await win.locator('[data-testid=rail-peek] img').count() === 1, '큰 그림이 뜬다');
+      await win.mouse.move(5, 5); await win.waitForTimeout(250);
+      ok(await win.locator('[data-testid=rail-peek]').count() === 0, '마우스를 치우면 사라진다');
+    }
     // 🖼 v0.5.62 — G1 그림 끝점을 G2 의 첫 클립까지 끌면, 그 클립에서는 **G1 이 위**(① 칸 · 오른쪽 작은 그림 · 재생 모두)
     {
       const n3 = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 문장')); return e ? Number(e.dataset.ln) : 0; });

@@ -79,6 +79,16 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await key('Control+z');
     await win.waitForTimeout(500);
     ok((await win.locator('[data-testid=logo-side]').inputValue()) === 'right', '↶ 되돌리면 오른쪽 위');
+    // 🏷 v0.5.64 — 로고 크기(채널 값) — 삽입 메뉴에서 바꾸면 곧바로 채널에 저장 · ① 칸에 반영
+    await menu('삽입');
+    ok((await win.locator('[data-testid=logo-size]').inputValue()) === '15', '로고 크기 칸 = 채널편집 값(15)');
+    await win.fill('[data-testid=logo-size]', '22');
+    await win.waitForTimeout(900);
+    const ls = await win.evaluate(async (n) => (await window.api.getPresetDetail(n)).logoSize, CH);
+    ok(Number(ls) === 22, `🔑 바꾸자마자 채널에 저장 (logoSize ${ls})`);
+    lg = await logoPos();
+    ok(lg && Math.abs(lg.w - 0.22) < 0.01, `① 칸 로고 너비 22% (${lg && lg.w.toFixed(3)})`);
+    await win.fill('[data-testid=logo-size]', '15'); await win.waitForTimeout(900);
 
     console.log('\n[3] ➕ 이미지 삽입 → 적용 범위 메뉴(Vrew 식)');
     await key('Home'); await win.waitForTimeout(200);
@@ -286,6 +296,22 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     }
     await key('Control+z'); await win.waitForTimeout(500);
     ok((await win.locator('[data-testid=ov-range]').first().innerText()).includes('전체'), '↶ 되돌리면 전체');
+    // 📜 v0.5.64 — 삽입 표시가 화면을 따라온다(막대 안에서 지금 보이는 맨 위 클립 자리)
+    {
+      await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1600, 620); });
+      await win.waitForTimeout(500);
+      const markY = () => win.evaluate(() => { const m = document.querySelector('[data-testid=ins-lane] [data-testid=ins-mark]'); const p = document.querySelector('main.pane2'); const h = document.querySelector('.card h2'); if (!m || !p) return null; const r = m.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { m: Math.round(r.top), p: Math.round(Math.max(p.getBoundingClientRect().top, h ? h.getBoundingClientRect().bottom : 0)), sc: p.scrollHeight - p.clientHeight, hit: !!(e && (e === m || m.contains(e))) }; });
+      await win.evaluate(() => { const p = document.querySelector('main.pane2'); p.scrollTop = 0; });
+      await win.waitForTimeout(300);
+      const y0 = await markY();
+      await win.evaluate(() => { const p = document.querySelector('main.pane2'); p.scrollTop = Math.min(p.scrollHeight, 260); });
+      await win.waitForTimeout(400);
+      const y1 = await markY();
+      ok(y0 && y1 && y0.sc > 100 && y1.m >= y1.p && y1.m - y1.p < 30 && y1.hit, `🔑 스크롤해도 표시가 화면 맨 위에 붙어 따라온다 — ${JSON.stringify([y0, y1])}`);
+      await win.evaluate(() => { document.querySelector('main.pane2').scrollTop = 0; });
+      await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1600, 950); });
+      await win.waitForTimeout(400);
+    }
     // 긴 파일 이름
     const LONG = path.join(TMP, 'BTS (방탄소년단) 2.0 Stage CAM @ iHeartRadio Music Festival 2026.wav');
     fs.copyFileSync(TONE, LONG);
