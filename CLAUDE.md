@@ -8,6 +8,75 @@
 ⚠ 이 파일의 옛 항목들에 나오는 쇼츠·플리·ACE-Step 세부는 **폐기된 이력**이다 — 따라 하지 말 것.
   (🎵 BGM 은 2026-09-24 v0.5.29 에 **내 음악 파일 방식**으로 되살렸다 — 맨 위 항목. ACE-Step 생성은 여전히 없다.)
 
+## 🎨 자막 서식 = Vrew 자막 서식 창과 같은 기능 — 채널 기본 + 줄별·글자별 덮어쓰기 + 효과 · .vrew·MP4·화이트보드 공통 (2026-09-25, v0.5.40)
+> 로이: "브루에서 자막에 관련된 다양한 설정을 하는 창 … 우리 프로그램에서도 자막을 수정할수 있도록 동일한 기능" →
+>   결정(로이): **채널 기본 + 줄별 덮어쓰기** · 애니메이션 포함 · "vrew 뿐만 아니라 화이트보드, mp4 모두에 적용".
+
+### 쓰는 법
+- **줄별**: 메인 목록에서 **자막 줄 번호(`01 |`)를 누르면** 그 줄을 고르고 상단에 **서식 툴바**(Vrew 상단 막대)가 뜬다.
+  Shift = 범위 · Ctrl = 더하기 · 한 번 더 누르면 해제. **글자를 드래그하면 그 글자만**(단어 하나만 굵게·색…).
+  툴바: 서식 지우기 · 저장된 서식 · B I U S · 글꼴 · 크기 · 글자색 · 테두리 · 배경 · 형광펜 · 그림자 · **⚙ 고급**(옆 패널) · **✨ 효과**(옆 패널). Esc 1번 = 패널, 2번 = 선택 해제.
+- **채널 기본**: ⚙ 채널편집 → 📝 자막·분할 → 「🎨 글꼴·간격·형광펜·그림자…」·「✨ 효과」 → 창(고급 서식 + 애니메이션). 채널 「저장」으로 저장.
+- 서식은 **작업본(.smproj)에 저장**된다 — 대본(.md)은 안 바뀐다. 문장을 고치면(오타·합치기·나누기) 서식이 새 글자 위치로 따라간다.
+
+### 🔑 Vrew 저장 형식 — 로이의 `샘플.vrew` + **Vrew 설치본 JS**(`%LOCALAPPDATA%\Programs\vrew\resources\static\assets\scene-*.js`)에서 확정
+- 글자 속성(캡션 text = Quill delta — **구간마다 insert 하나**, 끝에 `\n` op): `bold/italic/underline/strike:"true"` · `font:"<가족>-Vrew_<굵기>"` · `size` · `color` ·
+  `outline-on/-color/-width` · 이중 테두리 `secondary-outline-on/-color/-width` · **형광펜 = `background-on`+`background`**(+`-alpha`) ·
+  그림자 `shadow-on/-color/-color-alpha/-blur-radius/-position-x/-y` · `letter-spacing`(em) · **`line-height` 는 줄바꿈 op 에** 붙는다.
+- 줄 단위(캡션 style): 배경 상자 = `customAttributes --textbox-color` · **효과 = `assetEffectInfo {type, duration, startDelay}`**.
+- 효과 목록 = 설치본의 `{type, menuState, preset, options:{direction, timing}}` 표 전체(등장/퇴장 54 + 강조 16) → `core/caption-format` ANIM_LIST.
+- 🔑 **Vrew 글꼴 이름 = 글꼴 파일 이름표의 typographic family(nid 16) + `-Vrew_` + OS/2 weight** — 실측(교보 손글씨 2025 · Pretendard 700). 그래서 파일을 열면 Vrew 이름을 되짚는다.
+
+### 모듈 (한 벌 — .vrew·MP4·화이트보드·화면이 같은 코드)
+- **`core/caption-format.js`** — 서식 모델(채널 기본 `FMT_DEFAULT` = 지금까지의 모양) · **조각 `s.capSpans=[{from,to,fmt}]`(문장 글자 위치)** ·
+  `applySpan/clearSpan/flattenSpans` · **`remapSpans(Multi)`**(글이 바뀌면 앞뒤 공통부 유지하며 옮김) · `lineRanges/lineRuns/lineProps`(줄 = 파생물이라
+  줄 번호로 저장하지 않는다) · Vrew 속성 변환 양방향 · 효과 목록. ⚠ 렌더러 번들에 들어간다 — CJS 런타임 참조 금지.
+- **`core/caption-anim.js` + `caption-anim-data.js`** — Vrew CSS `@keyframes`(animate.css 계열 · MIT) 68개를 데이터로(생성기 `scripts/gen-caption-anim-data.js`) ·
+  `sampleState(type, p)`(CSS 규칙: transform 은 한 속성 · 끝 비면 원래 모양 · 구간마다 ease) · `animWindows`(등장=지연 후 · 퇴장=끝에 · 전체=반씩 · 반복=되풀이).
+  🔴 `100vw → 0` 처럼 **단위가 다른 0** 을 보간하지 못해 이동이 뚝 끊겼다 → 0 은 상대 단위로(역검증: 되돌리면 2건 실패).
+- **`core/caption-ass.js`** — 줄 → ASS 이벤트. 층: 0 배경 상자(**BorderStyle 4 = 줄 전체에 하나** — 3 은 글꼴·크기·굵기가 바뀌는 곳마다 상자가 쪼개져 겹친 이음매가 생긴다, 실측) ·
+  1 형광펜(BorderStyle 3 · 구간마다 `\3a` 로 칠할 곳만 연다 — 실측 확인) · 2 그림자(위치를 옮겨 그림자색·흐림으로) · 3 이중 테두리 · 4 글자.
+  효과는 **도는 동안만 프레임마다 이벤트**(30fps) · 멈춘 줄은 `\pos` = 여백에서 정확히(글자 폭 추정 없음 → 기존 실측 위치 그대로, vrew-render 70/70 유지).
+  `\alpha` 한 번에 쓰지 않는다(층마다 알파가 다르다) · 크기는 정렬 기준점 중심이라 가운데 기준으로 기준점을 옮긴다.
+- **`core/font-store.js`** — Vrew 글꼴 찾기(앱 · `~/.priming-maker/fonts` · Vrew 설치본 · **Vrew 캐시 `%APPDATA%\vrew\Cache\Cache_Data\f_*` = woff2 원본**) →
+  🔴 **libass 는 woff2 를 못 연다**(실측) → **Node 만으로 ttf 변환**(brotli + WOFF2 §5 glyf/loca/hmtx 복원 · 파이썬 금지 — 아내 PC) + 이름표를 `PRM …` 고유 이름으로.
+  🔑 검증: Vrew 의 Pretendard woff2 → 변환본이 원본 ttf 와 **화소 차이 0**. 한글 없는 글꼴(Noto JP/TC)은 목록에서 뺀다. 못 찾으면 Pretendard 로 굽고 알린다.
+
+### 배선
+- `.vrew`(vrew-builder): 줄마다 `CF.lineRuns` → delta · `lineProps` → `--textbox-color`·`assetEffectInfo`. 옛 낱값(fontColor·boxColor rgba)도 서식으로 옮겨 같은 코드로.
+- 유튜브 MP4(vrew-render): `.vrew` 캡션을 `vrewDeltaToRuns`·`animFromVrew` 로 읽고 **전체 시각으로 이벤트를 한 번 만든 뒤 조각마다 자른다**
+  (조각 기준으로 다시 만들면 효과가 조각 경계에서 처음부터 다시 돈다) · 쓰인 글꼴을 `prepareFontsDir`.
+- 화이트보드(whiteboard-subtitle): **서식 없는 줄은 옛 이벤트 그대로**(76/76 무변경) · 덮어쓴 줄만 공용 생성기 · 채널 기본 서식은 안 쓴다(종이 위 모양이 따로 — 💬 화이트보드 자막 설정).
+- main: IPC `set-caption-format`(targets 여러 줄 · patch | clear) · `list-caption-fonts` · `caption-font-data`(미리보기 FontFace) · `add-caption-font` · `get/set-saved-cap-formats`(최대 18 · `~/.priming-maker/caption-formats.json`) ·
+  스냅샷 저장·복원 `capSpans` · overlaySnapshot(글이 같으면 되살림) · **edit-sentences 가 `remapSpansMulti`**. DTO `sentences[].spans`.
+- 화면: `renderer/src/CaptionFormat.jsx`(툴바·고급·효과 패널·`renderStageLine` 미리보기). App `capLookOf` = `CF.normFmt`(채널 편집 읽기·저장 두 곳이 쓰는 통로 — 여기서 빠지면 저장 때 사라진다) ·
+  `capLookToStyle` 이 `fmt` 를 실어 ⚡ 만들기·💾 .vrew 로. 목록에는 **덮어쓴 속성만** 보인다(채널 기본을 입히면 흰 글자가 안 보인다).
+
+### 🔴 작업 중 밟은 것
+- **툴바를 목록 쪽 sticky 로 두니 고정 헤더 밑에 깔려 안 눌렸다**(E2E 가 잡음) → 헤더(topsticky) 안으로. 옆 패널은 헤더 높이를 재서(`--tophead`) 그 아래부터.
+- `.modal-bg` 는 `show` 클래스가 있어야 보인다(빠뜨려서 창이 안 떴다).
+- 🔴 **셸(heredoc·node -e)이 역슬래시를 먹는 사고를 또 겪었다**(`\4c` 가 제어 문자 0x04 로 들어감) → 패치는 Write 도구로 쓴 스크립트로, 새 파일은 제어 문자 검사(테스트가 단언).
+- 조각을 줄 번호가 아니라 **문장 글자 위치**로 저장한 이유: 자막 글자수 설정을 바꾸면 줄이 다시 나뉜다.
+
+### 검증
+- `npm run test:capfmt` = **단위·왕복 100/100**(모델 10 · 조각·옮기기 9 · 줄 7 · **샘플.vrew 해석 20**(10줄 단어별 서식 포함) · 효과 11 · ASS 8 · 글꼴(화소 동일) 4 · 화이트보드 5 · 배선 21 ·
+  🔑 **실제 왕복**: 진짜 빌더 .vrew(형광펜 구간·팝 효과 필드) → 진짜 렌더러 MP4 → 형광펜 노랑 11,200px · 팝 시작 흰 글자 0 → 끝 11,329px)
+  + **E2E 29/29**(줄 번호→툴바·편집칸 안 열림 · 굵게 · Shift 범위 · 고급 그림자 · 글꼴 15종 · 효과 9종·팝·퇴장 · Esc 2단 · 글자 드래그 형광펜 · 서식 지우기 ·
+  **문장을 고쳐도 서식 유지** · 작업본 저장·.md 무변경 · 미리보기 · 채널 서식 창 · 오류 0).
+  🔑 **역검증 3건**: .vrew 효과 끄기 → 2건 실패 · 형광펜 층 끄기 → 2건(노랑 0px) · 옛 보간 → 2건.
+- 회귀(33종): makeall 18 · vrew-render 70 · MP4 화면 19 · 대본 보기 35+40 · watch 11 · merge 98+18 · youtube 109+13 · logui 4 · sentedit 92+32 · reload 55 · groupmerge 47 ·
+  whiteboard 48/62/20/76/184 · bgm 32 · videofit 42 · caption 102 · caplook 20 · speaker 36+8(**탭 높이 661 유지**) · timestamps 53+UI · vrewaudio 99 · styles 17 · comfy 2분할 89 · urldl 24 · tts 18/63/23.
+  ⚠ 낡은 단언 3건 갱신(코드가 옳고 기대값이 낡음): caption-look 상자 층(BorderStyle 3→4·층 번호) · 헬퍼에 CF 주입 · speaker 스냅샷 줄 끝 모양.
+  ⚠ `remotion-ui.smoke` 채널편집 대기 타임아웃은 **v0.5.25 부터 기록된 기존 결함**(이번 변경 무관).
+
+### ⏳ 로이가 확인할 것 / 알아 둘 것
+- 🔴 **Vrew 실물 확인 미완** — 형식은 샘플·설치본과 같게 맞췄지만, 이 앱이 만든 .vrew 를 Vrew 에서 열어 줄별 서식·효과가 보이는지는 로이가 한 번 봐야 한다.
+- 줄 **위치·정렬**(Vrew 툴바의 좌/가운데/우·위/가운데/아래)은 아직 **채널 단위**다(줄마다 다른 위치는 안 넣었다).
+- 글꼴: Vrew 에서 한 번 쓴 글꼴이 목록에 자동으로 뜬다. 아내 PC 는 그 PC 의 Vrew 캐시 기준이라 목록이 다를 수 있고, 없는 글꼴은 MP4 에서 Pretendard 로 굽는다(로그로 알림).
+  직접 추가한 글꼴은 Vrew 목록에 없으면 Vrew 에서 다른 글꼴로 보일 수 있다(목록에 ⚠ 표시).
+- 화이트보드: 줄별 서식·효과는 들어가고, 채널 기본 서식(흰 글자·테두리)은 안 들어간다(종이 위 자막은 💬 화이트보드 자막 설정).
+- 배경 상자는 회전 효과 때 함께 돌지 않는다(libass BorderStyle 4 한계).
+
 ## 🔁 밖에서 대본(.md)을 고치면 **자동으로 다시 읽기** · 「🔄 대본 다시 읽기」 버튼 제거 (2026-09-25, v0.5.39)
 > 로이: "밖에서 바뀌면 자동으로 새로 읽게 해줘" (v0.5.38 에서 버튼을 남긴 이유 = 파일 감시가 없었다 → 이제 있다)
 - main `checkExternalScriptChange()` — **1.5초 간격 비동기 stat**(구글드라이브 G: 에서 fs.watch 는 믿을 수 없다) → mtime·크기가 바뀌고 **한 틱 그대로**(쓰는 중 아님)면

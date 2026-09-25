@@ -8,6 +8,7 @@ import UrlProgress from './UrlProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
+import { CF, CaptionToolbar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine } from './CaptionFormat.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -183,28 +184,21 @@ const CAP_POS_OPTIONS = [0.3, 0.15, 0, -0.15, -0.3]; // 상하위치 select 값 
 // yOffset → {pos, fine} (가장 가까운 select 옵션 + 미세조정)
 // 🎨 자막 모양(2026-09-24 로이 「자막 형태를 변경하는 기능」) — 채널 capLong 에 함께 저장한다.
 //   기본값 = 지금까지의 모양(흰 글자 · 검정 테두리 6 · 배경 없음) → 안 건드린 채널은 결과가 그대로다.
-const CAP_LOOK_DEFAULT = { fontColor: '#ffffff', bold: false, outlineOn: true, outlineColor: '#000000', outlineWidth: 6, boxOn: false, boxColor: '#000000', boxOpacity: 60 };
+//   🎨 2026-09-25 — 채널 기본 **자막 서식** 전체(글꼴·기울임·밑줄·취소선·간격·이중 테두리·형광펜·그림자·효과)로 넓혔다.
+//   정리 규칙은 core/caption-format 하나(.vrew·MP4·화이트보드와 같은 코드). 키 이름이 옛 모양과 같아 옛 채널도 그대로 읽힌다.
+//   ⚠ capLookOf 가 채널 편집의 **읽기(mkCap)·저장(capToStyle) 두 곳**에서 쓰인다 — 여기서 키를 빠뜨리면 저장할 때 사라진다(v0.3.8 계열).
+const CAP_LOOK_DEFAULT = { ...CF.FMT_DEFAULT };
 function capLookOf(c) {
-  const o = { ...CAP_LOOK_DEFAULT };
-  if (!c) return o;
-  const hex = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v || '')) ? String(v).toLowerCase() : d);
-  const num = (v, d, lo, hi) => { const n = Number(v); return isFinite(n) && v !== '' && v != null ? Math.max(lo, Math.min(hi, n)) : d; };
-  o.fontColor = hex(c.fontColor, o.fontColor);
-  o.bold = !!c.bold;
-  o.outlineOn = c.outlineOn !== false;
-  o.outlineColor = hex(c.outlineColor, o.outlineColor);
-  o.outlineWidth = num(c.outlineWidth, o.outlineWidth, 0, 20);
-  o.boxOn = !!c.boxOn;
-  o.boxColor = hex(c.boxColor, o.boxColor);
-  o.boxOpacity = num(c.boxOpacity, o.boxOpacity, 0, 100);
+  const o = CF.normFmt(c);
+  delete o.size;   // 크기는 채널 자막 칸(size)이 따로 가진다
   return o;
 }
-// 모양 → vrew-builder 의 captionStyle 필드(fontColor·bold·outline*·boxColor). 배경은 rgba 한 값으로.
+// 모양 → vrew-builder 의 captionStyle 필드. fmt = 서식 전체(빌더가 이것을 쓴다) · 옛 낱값(fontColor·boxColor rgba …)도 함께 둔다.
 function capLookToStyle(c) {
   const l = capLookOf(c);
   const h = l.boxColor;
   const rgba = 'rgba(' + parseInt(h.slice(1, 3), 16) + ', ' + parseInt(h.slice(3, 5), 16) + ', ' + parseInt(h.slice(5, 7), 16) + ', ' + (l.boxOpacity / 100) + ')';
-  return { fontColor: l.fontColor, bold: l.bold, outlineOn: l.outlineOn, outlineColor: l.outlineColor, outlineWidth: l.outlineWidth, boxColor: l.boxOn ? rgba : null };
+  return { fontColor: l.fontColor, bold: l.bold, outlineOn: l.outlineOn, outlineColor: l.outlineColor, outlineWidth: l.outlineWidth, boxColor: l.boxOn ? rgba : null, fmt: l };
 }
 
 function decomposeYOffset(yOffset) {
@@ -426,6 +420,19 @@ export default function App() {
   // ✏ 문장 인라인 편집 — 한 번에 한 문장만 열린다. 값은 ref 로만 읽는다(타이핑마다 재렌더 금지).
   const sentEditRef = useRef(null);
   const [sentEdit, setSentEdit] = useState(null);   // { shortsNum, groupNum, sentIdx, count, text }
+  // 🎨 자막 서식(2026-09-25) — 채널 편집의 서식 창 · 목록에서 고른 자막 줄/글자 · 열린 옆 패널
+  const [capDlg, setCapDlg] = useState(null);       // { key: 'capLong', panel: 'fmt'|'anim' }
+  const [capSel, setCapSel] = useState(null);       // { shortsNum, mode: 'lines'|'chars', items: [{ groupNum, sentIdx, from, to, n }] }
+  const [capPanel, setCapPanel] = useState(null);   // 'fmt' | 'anim'
+  const stopLineRef = useRef(null);                 // 미리보기 재생 — 지금 도는 자막 효과 멈춤
+  // 🎨 옆 패널은 고정 헤더(topsticky) 바로 아래에서 시작해야 툴바를 가리지 않는다 — 헤더 높이는 창 폭·툴바 유무로 바뀌므로 재서 넘긴다
+  useEffect(() => {
+    const el = document.querySelector('.topsticky');
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const put = () => document.documentElement.style.setProperty('--tophead', Math.round(el.getBoundingClientRect().height) + 'px');
+    const ro = new ResizeObserver(put); ro.observe(el); put();
+    return () => ro.disconnect();
+  }, []);
   const [sentBusy, setSentBusy] = useState(false);
   // 🔑 이 편집 세션이 이미 끝났는가(키로 저장/나누기/합치기/취소했는가).
   //   저장 버튼이 없어 **칸을 벗어나면 저장**하는데, 키로 처리한 뒤 편집칸이 사라질 때도 blur 가 뜬다
@@ -1290,7 +1297,70 @@ export default function App() {
   //     · 칸을 벗어나면(blur) 저장 · Esc 취소 · 글을 다 지우면 그 문장을 삭제
   //   ⚠ 편집칸은 **비제어(ref)** 다 — 제어 state 로 두면 글자마다 컷 카드 수십 개가 다시 그려져
   //     타이핑이 멈춘다(2026-08-14 사고, 위 대본수정 textarea 와 같은 이유).
+  // ── 🎨 자막 서식 — 목록에서 고른 줄·글자에 서식을 얹는다(2026-09-25) ──────────────
+  //   저장 단위는 **문장 글자 위치**(core/caption-format) — 자막 줄은 글자수 설정에 따라 다시 계산되므로 줄 번호로 저장하지 않는다.
+  const capBase = { ...capLook, size: Number(capSize) || 100 };
+  function capSentence(shortsNum, groupNum, sentIdx) {
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === shortsNum) : null;
+    const c = pr ? pr.cuts.find((x) => x.num === groupNum) : null;
+    return c && c.sentences ? c.sentences[sentIdx] : null;
+  }
+  // 지금 서식 = 채널 기본 + 첫 고른 글자의 덮어쓰기(툴바·패널이 보여 줄 값)
+  function capSelFmt() {
+    if (!capSel || !capSel.items.length) return CF.normFmt(capBase);
+    const it = capSel.items[0];
+    const s = capSentence(capSel.shortsNum, it.groupNum, it.sentIdx);
+    const base = CF.normFmt(capBase); base.size = capBase.size;
+    if (!s) return base;
+    return { ...base, ...CF.fmtAt(CF.cleanSpans(s.spans, String(s.text || '').length), it.from) };
+  }
+  function capSelLabel() {
+    if (!capSel) return '';
+    if (capSel.mode === 'chars') return `글자 ${capSel.items.reduce((a, it) => a + (it.to - it.from), 0)}자`;
+    const ns = capSel.items.map((x) => x.n).sort((a, b) => a - b);
+    return ns.length === 1 ? `자막 ${String(ns[0]).padStart(2, '0')}` : `자막 ${ns.length}줄`;
+  }
+  /** 줄 번호 클릭 — 그 줄만 · Shift = 앞서 고른 줄부터 범위 · Ctrl = 더하기/빼기. allLines = 이 편의 모든 줄(화면 순서). */
+  function pickCapLine(shortsNum, info, ev, allLines) {
+    if (sentEdit) return;
+    setCapSel((cur) => {
+      const same = cur && cur.shortsNum === shortsNum && cur.mode === 'lines';
+      if (ev && ev.shiftKey && same && cur.anchorN != null) {
+        const a = Math.min(cur.anchorN, info.n), b = Math.max(cur.anchorN, info.n);
+        return { ...cur, items: allLines.filter((l) => l.n >= a && l.n <= b) };
+      }
+      if (ev && (ev.ctrlKey || ev.metaKey) && same) {
+        const has = cur.items.some((x) => x.n === info.n);
+        const items = has ? cur.items.filter((x) => x.n !== info.n) : [...cur.items, info].sort((x, y) => x.n - y.n);
+        return items.length ? { ...cur, items, anchorN: info.n } : null;
+      }
+      if (same && cur.items.length === 1 && cur.items[0].n === info.n) return null;   // 한 번 더 누르면 해제
+      return { shortsNum, mode: 'lines', items: [info], anchorN: info.n };
+    });
+  }
+  /** 글자 드래그 — 한 문장 안의 글자 범위. */
+  function pickCapChars(shortsNum, groupNum, sentIdx, range) {
+    if (sentEdit) return;
+    setCapSel({ shortsNum, mode: 'chars', items: [{ groupNum, sentIdx, from: range.from, to: range.to, n: -1 }] });
+  }
+  async function applyCapFmt(patch) {
+    if (!capSel) return;
+    try {
+      const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), patch });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); }
+      else setStatus('⚠ ' + ((r && r.error) || '서식을 바꾸지 못했습니다'));
+    } catch (e) { logline('자막 서식 오류: ' + e.message); }
+  }
+  async function clearCapFmt(keys) {
+    if (!capSel) return;
+    try {
+      const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), clear: keys || true });
+      if (r && r.ok && r.dto) setDto(r.dto);
+    } catch (e) { logline('자막 서식 오류: ' + e.message); }
+  }
+
   function startSentEdit(shortsNum, groupNum, sentIdx, text, count = 1) {
+    setCapSel(null); setCapPanel(null);   // 🎨 글을 고치는 동안은 서식 선택을 푼다(글자 위치가 바뀐다)
     sentDoneRef.current = false;
     setSentEdit({ shortsNum, groupNum, sentIdx, count, text });
   }
@@ -1793,6 +1863,10 @@ export default function App() {
         <div className="crow" title="글자 뒤 배경 상자 — 글자 폭에 맞춰 그려집니다(Vrew 자막 상자와 같은 방식)"><span className="l">배경</span><label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={!!c.boxOn} onChange={(e) => set({ boxOn: e.target.checked })} /><span className="meta">상자</span></label>
           <input type="color" style={{ flex: '0 0 42px', height: 24, padding: 0 }} disabled={!c.boxOn} value={capLookOf(c).boxColor} onChange={(e) => set({ boxColor: e.target.value })} />
           <span className="l">불투명</span><input className="n" type="number" min="0" max="100" step="10" disabled={!c.boxOn} value={capLookOf(c).boxOpacity} onChange={(e) => set({ boxOpacity: e.target.value })} /><span className="meta">%</span></div>
+        {/* 🎨 나머지 서식(글꼴·기울임·밑줄·간격·이중 테두리·형광펜·그림자)과 효과는 창으로 — 탭 높이를 늘리지 않는다(탭마다 창 크기가 튀지 않게) */}
+        <div className="crow" title="Vrew 자막 서식 창과 같은 항목 — 이 채널 모든 자막의 기본 서식. 줄마다 따로 바꾸려면 메인 화면에서 자막 줄 번호를 누르세요"><span className="l">서식</span>
+          <button className="ghost" data-testid="ch-capfmt" style={{ flex: '1 1 auto' }} onClick={() => setCapDlg({ key, panel: 'fmt' })}>🎨 글꼴·간격·형광펜·그림자…</button>
+          <button className="ghost" data-testid="ch-capanim" style={{ flex: '0 0 auto' }} onClick={() => setCapDlg({ key, panel: 'anim' })}>✨ 효과{capLookOf(c).anim ? ': ' + ((CF.ANIM_INFO[capLookOf(c).anim.type] || {}).label || '') : ''}</button></div>
         {withSplit && (
           <>
             <div className="crow" style={{ borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span className="l" style={{ color: 'var(--hook)' }}>✂ 분할</span><span className="meta">대본 분할 기준</span></div>
@@ -1843,12 +1917,28 @@ export default function App() {
       const im = v.querySelector('img.kb'); if (im) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
     } else v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`;
   }
-  async function stepCaptions(clips, durMs) {
+  async function stepCaptions(clips, durMs, s) {
     const total = clips.reduce((a, c) => a + Math.max(1, mLen(c)), 0) || 1;
-    for (const cl of clips) {
+    // 🎨 서식·효과 — 채널 기본 + 문장 덮어쓰기(core/caption-format)를 그대로 그리고, 효과는 core/caption-anim 로 움직인다(MP4 와 같은 키프레임)
+    const text = s ? String(s.text || '') : '';
+    const ranges = s ? CF.lineRanges(text, clips) : null;
+    const base = CF.normFmt(capBase); base.size = capBase.size;
+    for (let i = 0; i < clips.length; i++) {
+      const cl = clips[i];
       if (playAbortRef.current) return;
-      if (stageCapRef.current) stageCapRef.current.textContent = cl;
-      await wait(Math.max(250, durMs * (Math.max(1, mLen(cl)) / total)));
+      const d = Math.max(250, durMs * (Math.max(1, mLen(cl)) / total));
+      if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
+      const el = stageCapRef.current;
+      if (el) {
+        if (s && cl) {
+          const runs = CF.lineRuns(text, s.spans, ranges[i], base);
+          const lp = CF.lineProps(s.spans, ranges[i], base, text.length);
+          const box = el.parentElement ? { w: el.parentElement.clientWidth, h: el.parentElement.clientHeight } : null;
+          // 미리보기 글자 = size/90×18px → Vrew px 1 당 0.2/0.72 ≈ 0.28px (테두리·그림자 두께 환산)
+          stopLineRef.current = renderStageLine(el, runs, lp, d, 0.2 / 0.72, box);
+        } else el.textContent = cl;
+      }
+      await wait(d);
     }
   }
   async function playCut(c, info) {
@@ -1867,7 +1957,7 @@ export default function App() {
         } catch (e) { logline('미리듣기 오디오 실패: ' + e.message); }
       }
       if (playAbortRef.current) return;
-      await stepCaptions(clips.length ? clips : [''], dur * 1000);
+      await stepCaptions(clips.length ? clips : [''], dur * 1000, s);
     }
   }
   async function playProjects(projs, blackBetween) {
@@ -1905,6 +1995,7 @@ export default function App() {
   }
   function stopPlayer() {
     playAbortRef.current = true;
+    if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }   // 🎨 도는 자막 효과 멈춤
     if (curAudioRef.current) { try { curAudioRef.current.pause(); } catch (_) {} curAudioRef.current = null; }
     if (stageVisualRef.current) stageVisualRef.current.innerHTML = '';
     if (stageCapRef.current) stageCapRef.current.textContent = '';
@@ -1918,6 +2009,7 @@ export default function App() {
       if (preview) { setPreview(null); return; }
       if (playerOpen) { stopPlayer(); return; }
       if (nameAsk) { nameAskCancel(); return; }        // 이름 입력(다른 모달 위에 뜸) — 가장 먼저
+      if (capDlg) { setCapDlg(null); return; }          // 🎨 채널 편집 위의 자막 서식 창
       if (promptView) { setPromptView(null); return; }
       if (settingsOpen) { setSettingsOpen(false); return; }
       if (ttsSrvOpen) { setTtsSrvOpen(false); return; }
@@ -1932,11 +2024,13 @@ export default function App() {
       if (dictOpen) { setDictOpen(false); return; }
       if (styleEditOpen) { setStyleEditOpen(false); return; }
       if (chOpen) { setChOpen(false); return; }
+      if (capPanel) { setCapPanel(null); return; }      // 🎨 옆 패널 → 한 번 더 누르면 선택 해제
+      if (capSel && !sentEdit) { setCapSel(null); return; }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
@@ -2529,10 +2623,20 @@ export default function App() {
           {timings.make > 0 && <> · ⚡전체 {fmtSec(timings.make)}</>}
         </span>
       </div>}
+      {/* 🎨 자막 서식 툴바 — 목록에서 자막 줄(줄 번호 클릭)이나 글자(드래그)를 고르면 뜬다(Vrew 상단 서식 막대).
+          🔑 고정 헤더(topsticky) **안**에 둔다 — 목록 쪽에 sticky 로 두면 헤더 밑에 깔려 눌리지 않는다(E2E 가 잡았다). */}
+      {capSel && !noProduction && (
+        <div className="cf-barwrap">
+          <CaptionToolbar fmt={capSelFmt()} label={capSelLabel()} panel={capPanel}
+            onPatch={applyCapFmt} onClear={() => clearCapFmt(null)}
+            onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
+            onDone={() => { setCapSel(null); setCapPanel(null); }} />
+        </div>
+      )}
       </div>
 
       <div id="body">
-        <main>
+        <main className={capSel && capPanel && !noProduction ? "cf-side-open" : ""}>
           {isRx ? (
             <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
           ) : isBk ? (
@@ -2553,7 +2657,15 @@ export default function App() {
               ))}
             </div>
           )}
+          {capSel && capPanel && !isBk && (
+            <div className="cf-side" data-testid="cf-side">
+              {capPanel === 'fmt'
+                ? <CaptionFormatPanel value={capSelFmt()} onChange={applyCapFmt} title={capSelLabel() + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} />
+                : <CaptionAnimPanel value={capSelFmt().anim} onChange={(a) => applyCapFmt({ anim: a })} title={capSelLabel() + ' 애니메이션'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(['anim'])} />}
+            </div>
+          )}
           <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap}
+            capBase={capBase} capSel={capSel} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
@@ -2590,6 +2702,27 @@ export default function App() {
         <div id="playerBar"><span id="playerInfo" ref={playerInfoRef} /><button className="ghost" onClick={stopPlayer}>■ 닫기</button></div>
       </div>
 
+      {/* 🎨 채널 기본 자막 서식 — 채널 편집 창 위에 뜬다. 바꾸는 즉시 채널 편집 값(ch.capLong)에 들어가고, 채널 「저장」으로 저장된다 */}
+      {capDlg && ch && ch[capDlg.key] && (() => {
+        const key = capDlg.key;
+        const val = { ...capLookOf(ch[key]), size: Number(ch[key].size) || 100 };
+        const onChange = (p) => setCh((cur) => {
+          const next = { ...cur[key], ...p };
+          if (p.size != null) next.size = String(p.size);
+          return { ...cur, [key]: next };
+        });
+        return (
+          <div className="modal-bg show" style={{ zIndex: 95 }} data-testid="capdlg">
+            <div className="modal-card cf-dlg">
+              <div className="cf-dlgh"><h3>🎨 채널 기본 자막 서식</h3><span className="meta">이 채널의 모든 자막에 적용 · 줄마다 다르게 하려면 메인 화면에서 자막 줄 번호를 누르세요 · 「저장」을 눌러야 채널에 저장됩니다</span><button className="ghost" onClick={() => setCapDlg(null)}>닫기</button></div>
+              <div className="cf-dlgb">
+                <CaptionFormatPanel value={val} onChange={onChange} title="서식" />
+                <CaptionAnimPanel value={val.anim} onChange={(a) => onChange({ anim: a })} title="애니메이션(모든 줄)" />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {nameAsk && (
         <div className="modal-bg show name-ask-layer">
           <div className="modal-card" style={{ maxWidth: 420 }}>
@@ -3591,7 +3724,7 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
+function Cards({ dto, isLf, capCharsN, capBase, capSel, onPickCapLine, onPickCapChars, edit, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge }) {
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -3603,6 +3736,7 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
         const totalGen = pr.cuts.reduce((s, c) => s + (c.groupGenSec || 0), 0);
         const rtf = (total > 0 && totalGen > 0) ? (totalGen / total) : null;
         let capN = 0;
+        const projLines = [];   // 🎨 이 편의 모든 자막 줄(화면 순서) — Shift 로 범위를 고를 때
         return (
           <div className="card" key={pr.shortsNum}>
             <h2>🎞 {dto.mode === 'longform'
@@ -3629,7 +3763,10 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                 const ed = edit.cur;
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
                 const lineEls = sents.map((s, si) => {
-                  const lines = splitLines(s.text, capCharsN).map((t) => ({ n: ++capN, t }));
+                  const _lt = splitLines(s.text, capCharsN);
+                  const _rg = CF.lineRanges(s.text || '', _lt);
+                  const lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
+                  for (const l of lines) projLines.push({ n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to });
                   if (edHere && si === ed.sentIdx) {
                     return (
                       <div className="sblk editing" key={'e' + si}>
@@ -3673,11 +3810,31 @@ function Cards({ dto, isLf, capCharsN, edit, onTts, onImg, onVid, onImgVid, onBu
                     <div className="sblk" key={si}>
                       {/* 합친 그룹 안의 옛 섹션 경계 — 그림은 앞 그림을 이어 쓰지만 챕터(타임스탬프)는 여기서 갈린다 */}
                       {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
-                      <div className="sblk-lines" title="클릭해서 이 문장 고치기"
-                        onClick={() => edit.start(pr.shortsNum, c.num, si, s.text)}>
-                        {lines.map((l, li) => (
-                          <div className="sent" key={l.n}><span className="lineno">{String(l.n).padStart(2, '0')} |</span>{li === 0 && s.speaker ? <span className="sspk" title={`화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리 로 읽습니다(자막에는 안 나옵니다)`}>{s.speaker}</span> : null}{l.t}</div>
-                        ))}
+                      <div className={'sblk-lines' + (capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum && capSel.items.some((x) => x.groupNum === c.num && x.sentIdx === si) ? ' capsel' : '')}
+                        title="클릭해서 이 문장 고치기 · 글자를 드래그하면 그 글자만 서식 · 줄 번호를 누르면 그 줄 서식"
+                        onClick={(ev) => {
+                          // 🎨 글자를 드래그해 골랐으면 고치기 대신 서식 선택(Vrew 처럼 단어 하나만 굵게·색…)
+                          const rg = onPickCapChars ? selectionRange(ev.currentTarget) : null;
+                          if (rg) { onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
+                          edit.start(pr.shortsNum, c.num, si, s.text);
+                        }}>
+                        {lines.map((l, li) => {
+                          const info = { n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to };
+                          const picked = capSel && capSel.mode === 'lines' && capSel.shortsNum === pr.shortsNum && capSel.items.some((x) => x.n === l.n);
+                          // ✨ 표시는 **이 줄에 따로 준 효과**만(채널 기본 효과까지 표시하면 모든 줄에 붙는다)
+                          const lp = s.spans ? CF.lineProps(s.spans, l.range, {}, String(s.text || '').length) : null;
+                          const ai = lp && lp.anim ? CF.ANIM_INFO[lp.anim.type] : null;
+                          return (
+                            <div className={'sent' + (picked ? ' picked' : '')} key={l.n}>
+                              <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
+                                onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}   // Shift+클릭이 브라우저 글자 선택을 만들지 않게
+                                onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
+                              {li === 0 && s.speaker ? <span className="sspk" title={`화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리 로 읽습니다(자막에는 안 나옵니다)`}>{s.speaker}</span> : null}
+                              <LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} />
+                              {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );

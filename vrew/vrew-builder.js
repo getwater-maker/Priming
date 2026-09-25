@@ -24,6 +24,7 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 const { splitLongSentenceAlgo } = require('../core/long-sentence-splitter/algo-splitter');
 const { splitCaptionLines, meaningfulLen } = require('../core/caption-splitter');
+const CF = require('../core/caption-format');
 
 // ffmpeg 바이너리 경로 (ffmpeg-static 패키지). asar 패키징 시
 // app.asar.unpacked 로 풀려 있어야 spawn 가능 — package.json asarUnpack 참고.
@@ -732,6 +733,28 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     ...(_userCap.bold         ? { bold: true }                                 : {}),
     ...(_userCap.italic       ? { italic: true }                               : {}),
   };
+  // 🎨 자막 서식(2026-09-25) — 채널 기본 서식(base) + 문장별 덮어쓰기(s.capSpans).
+  //   화면은 captionStyle.fmt(= core/caption-format 의 서식)를 보낸다. 옛 호출(CLI·테스트)은 fontColor·bold·outline*·boxColor(rgba)
+  //   낱값만 보내므로 그걸 서식으로 옮긴다 → 두 경로가 **같은 코드**로 캡션을 만든다.
+  const _legacyFmt = (() => {
+    const o = {};
+    if (_userCap.fontColor) o.fontColor = _userCap.fontColor;
+    if (_userCap.bold) o.bold = true;
+    if (_userCap.italic) o.italic = true;
+    if (_userCap.outlineOn === false) o.outlineOn = false;
+    if (_userCap.outlineColor) o.outlineColor = _userCap.outlineColor;
+    if (_userCap.outlineWidth != null) o.outlineWidth = _userCap.outlineWidth;
+    const m = /^rgba?\(([^)]+)\)$/i.exec(String(_userCap.boxColor || ''));
+    if (m) {
+      const p = m[1].split(',').map((x) => parseFloat(x));
+      const h2 = (n) => Math.max(0, Math.min(255, Math.round(n || 0))).toString(16).padStart(2, '0');
+      const a = p.length > 3 && isFinite(p[3]) ? p[3] : 1;
+      if (a > 0) { o.boxOn = true; o.boxColor = '#' + h2(p[0]) + h2(p[1]) + h2(p[2]); o.boxOpacity = Math.round(a * 100); }
+    }
+    return o;
+  })();
+  const baseFmt = CF.normFmt({ ..._legacyFmt, ...(_userCap.fmt || {}) });
+  baseFmt.size = Number(resolvedSize || captionAttrs.size) || 90;
   // ★ 위치는 clips[].captions[].style 가 지배 (사용자 .vrew 분석 확정).
   //   yAlign: 'middle'(가운데) 등은 _userCap.yAlign 우선, 없으면 CAPTION_STYLE 기본('middle').
   const captionStyle = {
@@ -1028,8 +1051,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       subClips = [{ text: s.text, weight: 1.0 }];
     } else {
       const lines = splitCaptionLines(s.text, maxCap);
+      const ranges = CF.lineRanges(s.text, lines);
       subClips = (lines.length > 0)
-        ? lines.map((t) => ({ text: t, weight: Math.max(1, meaningfulLen(t)) }))
+        ? lines.map((t, li) => ({ text: t, weight: Math.max(1, meaningfulLen(t)), range: ranges[li] }))
         : [{ text: s.text, weight: 1.0 }];
     }
     const totalWeight = subClips.reduce((sum, c) => sum + (c.weight || 1), 0) || 1;
@@ -1112,16 +1136,20 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         words: wordsArr,
         // captions 마다 style 직접 박아 자막 위치(yOffset 등) 영구 보존
         // (사용자가 프리셋에서 변경한 size/align/yOffset/width/색상을 병합한 값 사용)
-        captions: [
-          {
-            text: [{ insert: vc.text + '\n', attributes: { ...captionAttrs } }],
-            style: { ...captionStyle, customAttributes: captionStyle.customAttributes.map(a => ({ ...a })) },
-          },
-          {
-            text: [{ insert: '\n', attributes: { ...captionAttrs } }],
-            style: { ...captionStyle, customAttributes: captionStyle.customAttributes.map(a => ({ ...a })) },
-          },
-        ],
+        captions: (() => {
+          // 🎨 이 줄의 서식 구간(채널 기본 + 문장 덮어쓰기) · 줄 단위 속성(배경 상자·효과·줄 간격)
+          const rg = vc.range || { from: 0, to: String(s.text || '').length };
+          const runs = CF.lineRuns(s.text, s.capSpans, rg, baseFmt);
+          const lp = CF.lineProps(s.capSpans, rg, baseFmt, String(s.text || '').length);
+          const st = { ...captionStyle, customAttributes: captionStyle.customAttributes.map((a) => (
+            a.attributeName === '--textbox-color' ? { ...a, value: CF.boxColorValue(lp) } : { ...a })) };
+          const eff = CF.animToVrew(lp.anim);
+          if (eff) st.assetEffectInfo = eff;
+          return [
+            { text: CF.lineToVrewDelta(runs, lp.lineHeight), style: st },
+            { text: [{ insert: '\n', attributes: CF.fmtToVrewAttrs(baseFmt) }], style: { ...st, customAttributes: st.customAttributes.map((a) => ({ ...a })) } },
+          ];
+        })(),
         assetIds: [...clipAssetIds],
         dirty: { blankDeleted: false, caption: false, video: false },
         translationModified: { result: false, source: false },

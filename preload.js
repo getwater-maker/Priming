@@ -181,6 +181,14 @@ contextBridge.exposeInMainWorld('api', {
   finalPromptPreview: (args) => ipcRenderer.invoke('final-prompt-preview', args),
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
   mergeGroup: (args) => ipcRenderer.invoke('merge-group', args),
+  // 🎨 자막 서식(줄·글자 범위) · 글꼴 · 저장된 서식
+  setCaptionFormat: (args) => ipcRenderer.invoke('set-caption-format', args),
+  clearAllCaptionFormats: () => ipcRenderer.invoke('clear-all-caption-formats'),
+  listCaptionFonts: () => ipcRenderer.invoke('list-caption-fonts'),
+  captionFontData: (vrewName) => ipcRenderer.invoke('caption-font-data', vrewName),
+  addCaptionFont: () => ipcRenderer.invoke('add-caption-font'),
+  getSavedCapFormats: () => ipcRenderer.invoke('get-saved-cap-formats'),
+  setSavedCapFormats: (list) => ipcRenderer.invoke('set-saved-cap-formats', list),
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
   resplit: (args) => ipcRenderer.invoke('resplit', args),

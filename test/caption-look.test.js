@@ -14,7 +14,8 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g,
 const APP = read('renderer/src/App.jsx');
 const cut = (start, end) => { const i = APP.indexOf(start); const j = APP.indexOf(end, i); return APP.slice(i, j); };
 const helpers = cut('const CAP_LOOK_DEFAULT', 'function decomposeYOffset(');
-const { CAP_LOOK_DEFAULT, capLookOf, capLookToStyle } = new Function(helpers + '; return { CAP_LOOK_DEFAULT, capLookOf, capLookToStyle };')();
+// 2026-09-25 — 모양이 자막 서식(core/caption-format)으로 넓어졌다: 앱이 가져오는 CF 를 그대로 넣어 준다
+const { CAP_LOOK_DEFAULT, capLookOf, capLookToStyle } = new Function('CF', helpers + '; return { CAP_LOOK_DEFAULT, capLookOf, capLookToStyle };')(require('../core/caption-format'));
 
 console.log('\n[1] 저장값 정리');
 ok(JSON.stringify(capLookOf(null)) === JSON.stringify(CAP_LOOK_DEFAULT), '없으면 기본 모양');
@@ -42,8 +43,8 @@ ok(cs.box === '&H000000FF' && cs.outline === 0 && cs.color === '&H0000FF00', `�
 const csNone = R.captionAssStyle({ style: { customAttributes: [{ attributeName: '--textbox-color', value: 'rgba(0, 0, 0, 0)' }] }, attrs: {} }, 'P');
 ok(csNone.box === null, '투명(기본)이면 상자 없음');
 const ass = R.buildAss([{ start: 0, end: 1, text: '가나다' }], [], cs);
-ok(/Style: B,.*,3,\d+,0,/.test(ass) && /Dialogue: 0,.*,B,/.test(ass) && /Dialogue: 1,.*,C,/.test(ass), '🔑 상자 층(0)과 글자 층(1)을 나눈다(같은 층이면 libass 가 위아래로 밀어낸다)');
-ok(!/,B,/.test(R.buildAss([{ start: 0, end: 1, text: '가' }], [], csNone)), '상자가 없으면 상자 층도 없다');
+ok(/Style: X,.*,4,\d+,0,/.test(ass) && /Dialogue: 0,.*,X,/.test(ass) && /Dialogue: 4,.*,C,/.test(ass), '🔑 상자 층(0 · BorderStyle 4 = 줄 전체에 하나)과 글자 층(4)을 나눈다(같은 층이면 libass 가 위아래로 밀어낸다)');
+ok(!/,X,/.test(R.buildAss([{ start: 0, end: 1, text: '가' }], [], csNone)), '상자가 없으면 상자 층도 없다');
 
 console.log('\n[4] 실제 왕복 — 빌더로 .vrew → 렌더러로 MP4 → 화소 측정');
 const P = require('../core/pipeline');

@@ -27,6 +27,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
+const CF = require('./caption-format');
+const CAS = require('./caption-ass');
+const FONTS = require('./font-store');
 
 const FPS = 30;
 const W = 1920;
@@ -179,7 +182,13 @@ function buildTimeline(project, mediaDir) {
     if (cap && Array.isArray(cap.text)) {
       const txt = cap.text.map((x) => String(x.insert || '')).join('').replace(/\r?\n/g, ' ').trim();
       if (txt) {
-        cues.push({ start, end, text: txt });
+        // 🎨 서식 구간(글자별 굵게·색·형광펜…)과 줄 단위 속성(배경 상자·효과) — core/caption-format 이 Vrew 저장 형식을 읽는다
+        const { runs } = CF.vrewDeltaToRuns(cap.text);
+        const st = cap.style || {};
+        const ca = Array.isArray(st.customAttributes) ? st.customAttributes : [];
+        const line = CF.boxFromValue((ca.find((x) => x.attributeName === '--textbox-color') || {}).value);
+        line.anim = CF.animFromVrew(st.assetEffectInfo);
+        cues.push({ start, end, text: txt, runs, line });
         if (!capStyle) capStyle = { style: cap.style || {}, attrs: (cap.text[0] && cap.text[0].attributes) || {} };
       }
     }
@@ -268,7 +277,11 @@ function captionAssStyle(capStyle, fontName) {
   const boxOn = !!boxAss && boxAss.slice(2, 4) !== 'FF';
   const calibrated = yAlign === 'bottom' && hAlign === 'start' && Math.abs(yOff + 0.125) < 1e-6
     && Math.abs(width - 0.96) < 1e-6 && Math.abs(xOff) < 1e-6;
+  const _fmt = CF.vrewAttrsToFmt(at);
+  const _line = CF.boxFromValue(boxRaw);
+  _line.anim = CF.animFromVrew(st.assetEffectInfo);
   return {
+    fmt: _fmt, line: _line,
     font: fontName,
     size,
     color: assColor(at.color, '&H00FFFFFF'),
@@ -325,27 +338,39 @@ const assEsc = (t) => String(t).replace(/\\/g, '\\\\').replace(/\{/g, '\\{').rep
  * @param cues      이 조각에 걸리는 자막(시각은 조각 기준으로 옮겨 둔 것)
  * @param overlays  이 조각에 걸리는 오버레이(같은 기준)
  */
-function buildAss(cues, overlays, cs) {
+/** captionAssStyle 결과 → 공용 자막 배치(caption-ass). 글꼴 표가 없으면 기본 글꼴 하나로. */
+function layoutFor(cs, fontMap, fallbackFamily) {
+  return CAS.makeLayout({ W, H, hAlign: cs.hAlign, yAlign: cs.yAlign, marginL: cs.marginL, marginR: cs.marginR, marginV: cs.marginV,
+    sizeK: SIZE_K, pxK: 1, fontMap: fontMap || {}, fallbackFamily: fallbackFamily || cs.font, fps: FPS });
+}
+
+/** 구간이 없는 옛 큐({text}) → 채널 기본 서식 한 구간. */
+function normCue(c, cs) {
+  if (c.runs && c.runs.length) return c;
+  return { ...c, runs: [{ text: String(c.text || ''), fmt: cs.fmt || CF.normFmt({}) }], line: c.line || cs.line || { boxOn: !!cs.box } };
+}
+
+/**
+ * @param cues   조각 기준 시각의 자막(옛 경로·테스트) — extra.eventLines 가 있으면 쓰지 않는다
+ * @param extra.eventLines  미리 만든 자막 이벤트 줄(렌더 조각 — 효과 시각이 조각 경계에서 끊기지 않게 전체 시각으로 만든 뒤 자른 것)
+ * @param extra.layout      caption-ass 배치
+ */
+function buildAss(cues, overlays, cs, extra = {}) {
+  const L = extra.layout || layoutFor(cs);
   const b = cs.bold ? -1 : 0;
   const head = [
     '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${W}`, `PlayResY: ${H}`,
     'WrapStyle: 0', 'ScaledBorderAndShadow: yes', 'YCbCr Matrix: None', '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: C,${cs.font},${cs.size},${cs.color},${cs.color},${cs.outlineColor},&H00000000,${b},0,0,0,100,100,0,0,1,${cs.outline},0,${cs.align},${cs.marginL},${cs.marginR},${cs.marginV},1`,
-    // 배경 상자 전용 스타일 — BorderStyle 3(불투명 상자, 색 = OutlineColour) · 글자는 완전 투명. 글자는 위 층(C)이 그린다.
-    ...(cs.box ? [`Style: B,${cs.font},${cs.size},&HFF000000,&HFF000000,${cs.box},&HFF000000,${b},0,0,0,100,100,0,0,3,${cs.boxPad},0,${cs.align},${cs.marginL},${cs.marginR},${cs.marginV},1`] : []),
+    // 자막 층(상자 X · 형광펜 B · 글자 C) — core/caption-ass 가 정한다(화이트보드와 같은 코드)
+    ...CAS.assStyles(L),
     `Style: N,${cs.font},54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,7,0,0,0,1`,
     '', '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
-  const ev = [];
-  for (const c of cues) {
-    if (!c.text || !(c.end > c.start)) continue;
-    // 🔑 층을 나눈다 — 같은 층의 동시 이벤트는 libass 가 겹치지 않게 **위아래로 밀어 버린다**(상자와 글자가 따로 놀게 된다).
-    if (cs.box) ev.push(`Dialogue: 0,${fmtAss(c.start)},${fmtAss(c.end)},B,,0,0,0,,${assEsc(c.text)}`);
-    ev.push(`Dialogue: 1,${fmtAss(c.start)},${fmtAss(c.end)},C,,0,0,0,,${assEsc(c.text)}`);
-  }
+  const ev = extra.eventLines ? [...extra.eventLines]
+    : CAS.formatEvents((cues || []).filter((c) => c && c.text && c.end > c.start).flatMap((c) => CAS.cueEvents(normCue(c, cs), L)));
   const bgr = (c) => `&H${String(c).replace(/^&H/, '').slice(-6)}&`;   // '&HAABBGGRR' → '&HBBGGRR&'
   for (const o of overlays) {
     if (!(o.end > o.start)) continue;
@@ -363,7 +388,7 @@ function buildAss(cues, overlays, cs) {
         }
       }
     }
-    ev.push(`Dialogue: 2,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
+    ev.push(`Dialogue: 6,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
   }
   return head.join('\n') + '\n' + ev.join('\n') + '\n';
 }
@@ -455,17 +480,19 @@ function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC) {
 
 // ── 조각 렌더 ──────────────────────────────────────────────────────────────
 async function renderChunk(ch, i, ctx) {
-  const { tmpDir, cs, cues, overlays, enc, bitrate, fontsDirName } = ctx;
+  const { tmpDir, cs, overlays, enc, bitrate, fontsDirName } = ctx;
   const frames = ch.f1 - ch.f0;
   const t0 = ch.f0 / FPS, dur = frames / FPS;
   const id = String(i).padStart(4, '0');
   const out = `seg_${id}.mp4`, assName = `seg_${id}.ass`;
 
-  const segCues = cues.filter((c) => c.end > t0 && c.start < t0 + dur)
-    .map((c) => ({ start: Math.max(0, c.start - t0), end: Math.min(dur, c.end - t0), text: c.text }));
+  // 🔑 자막 이벤트는 **전체 시각으로 한 번** 만들어 둔 것을 자른다 — 조각 기준으로 다시 만들면 효과가 조각 경계에서 처음부터 다시 돈다.
+  const segEv = [];
+  for (const e of (ctx.capEvents || [])) { if (e.end > t0 && e.start < t0 + dur) segEv.push(e); }
+  const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
-  fs.writeFileSync(path.join(tmpDir, assName), buildAss(segCues, segOv, cs), 'utf8');
+  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout }), 'utf8');
   const assFilter = `ass=${assName}:fontsdir=${fontsDirName}`;
 
   let args;
@@ -603,11 +630,19 @@ async function renderVrewToMp4(opts = {}) {
     // 폰트 — 앱에 들어 있는 Pretendard Bold(Vrew 자막 폰트). 없으면 맑은 고딕으로(글자 모양이 달라진다).
     const fontsDir = path.join(tmpDir, 'fonts');
     fs.mkdirSync(fontsDir, { recursive: true });
-    let fontName = 'Pretendard';
-    if (fs.existsSync(FONT_FILE)) fs.copyFileSync(FONT_FILE, path.join(fontsDir, 'Pretendard-Bold.ttf'));
-    else { fontName = 'Malgun Gothic'; log('   ⚠ Pretendard 폰트가 없어 맑은 고딕으로 굽습니다 — 앱을 최신으로 업데이트하세요'); }
+    // 🎨 쓰인 글꼴 전부 — 앱·사용자 글꼴·Vrew 설치본·Vrew 캐시에서 찾아 ttf 로 바꿔 둔다(core/font-store).
+    //   못 찾은 글꼴은 Pretendard 로 굽고 알린다(Vrew 에서 그 글꼴을 한 번 쓰면 이 PC 캐시에 생긴다).
+    const fr = FONTS.prepareFontsDir(CAS.fontsUsed(tl.cues), fontsDir);
+    const fontName = fr.fallback;
+    if (fontName === 'Malgun Gothic') log('   ⚠ Pretendard 폰트가 없어 맑은 고딕으로 굽습니다 — 앱을 최신으로 업데이트하세요');
+    if (fr.missing.length) log(`   ⚠ 이 PC 에 없는 글꼴 ${fr.missing.length}개 — Pretendard 로 굽습니다: ${fr.missing.join(', ')} (Vrew 에서 그 글꼴을 한 번 쓰면 이 PC 에서도 찾습니다)`);
+    if (fr.errors.length) log(`   ⚠ 글꼴 변환 문제: ${fr.errors.slice(0, 3).join(' / ')}`);
 
     const cs = captionAssStyle(tl.capStyle, fontName);
+    const layout = layoutFor(cs, fr.map, fr.fallback);
+    const capEvents = tl.cues.flatMap((c) => CAS.cueEvents(normCue(c, cs), layout)).sort((a, b) => a.start - b.start);
+    const nAnim = tl.cues.filter((c) => c.line && c.line.anim).length;
+    if (nAnim) log(`   ✨ 자막 효과 ${nAnim}줄 — 효과 구간은 프레임마다 그립니다(이벤트 ${capEvents.length}개)`);
     if (tl.capStyle && !cs.calibrated) log(`   ⓘ 자막 위치(${cs.yAlign}·${cs.hAlign})는 실측으로 맞춘 스타일이 아닙니다 — 첫 편은 Vrew 결과와 비교해 보세요`);
     const missAudio = tl.audio.filter((a) => !a.file).length;
     if (missAudio) log(`   ⚠ 음성 파일이 없는 문장 ${missAudio}개 — 그 자리는 무음으로 채웁니다`);
@@ -636,7 +671,7 @@ async function renderVrewToMp4(opts = {}) {
 
     // 조각 병렬 렌더
     t = Date.now();
-    Object.assign(ctx, { tmpDir, cs, cues: tl.cues, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
+    Object.assign(ctx, { tmpDir, cs, capEvents, layout, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
     const files = new Array(chunks.length);
     const queue = chunks.map((c, i) => i);
     let done = 0, nextPct = 10, firstErr = null;
@@ -708,6 +743,6 @@ async function renderVrewToMp4(opts = {}) {
 module.exports = {
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, bgmMixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };

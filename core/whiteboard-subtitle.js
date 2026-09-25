@@ -35,6 +35,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 const MU = require('./media-utils');
 const { splitCaptionLines, meaningfulLen, fmtSrtTime } = require('./caption-splitter');
+const CF = require('./caption-format');
+const CAS = require('./caption-ass');
+const FONTS = require('./font-store');
 
 // 글자 크기·가장자리 여백은 **영상 높이 비례**다(640 시험본과 1920 최종본이 같아 보이도록).
 const FONT_RATIO = 0.052;   // 1080 → 56px
@@ -101,12 +104,17 @@ function buildCues(scenes, opts = {}) {
       if (!text || dur <= 0) { t += dur; continue; }
       const clips = splitCaptionLines(text, maxChars);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
+      // 🎨 문장별 서식·효과(s.capSpans) — 있으면 줄 범위와 함께 싣는다(없으면 예전과 똑같은 큐)
+      const spans = CF.cleanSpans(s && s.spans, text.length);
+      const ranges = spans.length ? CF.lineRanges(text, clips) : null;
       let acc = t;
       clips.forEach((c, i) => {
         const cd = dur * (Math.max(1, meaningfulLen(c)) / totW);
         const start = acc;
         const end = (i === clips.length - 1) ? t + dur : acc + cd;
-        cues.push({ start, end, text: c });
+        const cue = { start, end, text: c };
+        if (spans.length) { cue.sentText = text; cue.spans = spans; cue.range = ranges[i]; }
+        cues.push(cue);
         acc = end;
       });
       t += dur;
@@ -138,7 +146,7 @@ function scenesForSubtitle(project, scenes) {
   return (scenes || []).map((sc) => ({
     sentences: (sc.sentenceNums || []).map((n) => {
       const s = byNum.get(n);
-      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0 } : null;
+      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0, spans: Array.isArray(s.capSpans) && s.capSpans.length ? s.capSpans : null } : null;
     }).filter(Boolean),
   }));
 }
@@ -160,7 +168,7 @@ function assText(t) {
  * 🔑 `PlayResX/Y` 를 영상 해상도로 박는 것이 이 함수의 존재 이유다 — 그래야 FontSize·MarginV 가
  *   픽셀 그대로 먹는다(SRT 를 그냥 물리면 288 기준으로 읽혀 몇 배로 커진다).
  */
-function buildAss(cues, { width = 1920, height = 1080, style = null } = {}) {
+function buildAss(cues, { width = 1920, height = 1080, style = null, fontMap = null } = {}) {
   const st = normSubStyle(style);
   const W = Math.max(16, Math.round(width)), H = Math.max(16, Math.round(height));
   const px = Math.max(12, Math.round(H * st.sizePct / 100));
@@ -170,6 +178,16 @@ function buildAss(cues, { width = 1920, height = 1080, style = null } = {}) {
   const mh = Math.max(10, Math.round(W * 0.05));            // 좌우 여백 — 긴 줄이 화면 끝에 붙지 않게
   const align = POSITIONS[st.pos] || POSITIONS.bottom;
   const bold = st.bold ? -1 : 0;                             // ASS 는 -1 = 굵게
+  // 🎨 문장별 서식·효과가 든 줄은 core/caption-ass(유튜브 MP4 와 같은 생성기)로 그린다.
+  //   화이트보드의 기본 모양(진한 글자·흰 외곽·이 설정의 글꼴·크기)을 바탕으로 덮어쓰기만 얹는다 — 채널 자막 서식은 쓰지 않는다
+  //   (종이 위 화면이라 모양이 따로다). 서식이 없는 줄은 예전과 **한 글자도 다르지 않게** 낸다.
+  const fancy = (cues || []).some((c) => c && c.spans && c.spans.length);
+  const pxK = H / 1080;
+  const WB_FONT = '__whiteboard__';
+  const L = CAS.makeLayout({ W, H, hAlign: 'center', yAlign: { 2: 'bottom', 5: 'middle', 8: 'top' }[align] || 'bottom',
+    marginL: mh, marginR: mh, marginV: mv, sizeK: 1, pxK, fontMap: { ...(fontMap || {}), [WB_FONT]: st.font }, fallbackFamily: st.font, fps: 30 });
+  const base = CF.normFmt({ font: WB_FONT, fontColor: '#202020', outlineColor: '#ffffff', outlineWidth: outline / pxK, bold: st.bold });
+  base.size = px;
   const head = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -182,13 +200,21 @@ function buildAss(cues, { width = 1920, height = 1080, style = null } = {}) {
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     `Style: P,${st.font},${px},${PRIMARY},${PRIMARY},${OUTLINE_COLOUR},&H00000000,${bold},0,0,0,100,100,0,0,1,${outline},0,${align},${mh},${mh},${mv},1`,
+    ...(fancy ? CAS.assStyles(L) : []),
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ].join('\n');
   const body = (cues || [])
     .filter((c) => c && String(c.text || '').trim() && Number(c.end) > Number(c.start))
-    .map((c) => `Dialogue: 0,${fmtAssTime(c.start)},${fmtAssTime(c.end)},P,,0,0,0,,${assText(c.text)}`)
+    .map((c) => {
+      if (!(c.spans && c.spans.length)) return `Dialogue: 0,${fmtAssTime(c.start)},${fmtAssTime(c.end)},P,,0,0,0,,${assText(c.text)}`;
+      const rg = c.range || { from: 0, to: String(c.sentText || c.text).length };
+      const runs = CF.lineRuns(c.sentText || c.text, c.spans, rg, base);
+      const line = CF.lineProps(c.spans, rg, base, String(c.sentText || c.text).length);
+      return CAS.formatEvents(CAS.cueEvents({ start: c.start, end: c.end, runs, line }, L)).join('\n');
+    })
+    .filter(Boolean)
     .join('\n');
   return head + '\n' + body + '\n';
 }
@@ -244,10 +270,18 @@ async function burnSubtitle({ videoPath, cues = null, srtText = '', tmpDir, widt
     }
     if (!H) H = 1080;
     if (!W) W = Math.round(H * 16 / 9);
-    fs.writeFileSync(subPath, buildAss(list, { width: W, height: H, style }), 'utf8');
+    // 🎨 문장 덮어쓰기에 글꼴이 있으면 그 글꼴 파일을 준비한다(core/font-store — Vrew 캐시·앱·사용자 글꼴)
+    const usedFonts = [...new Set(list.flatMap((c) => (c.spans || []).map((x) => x && x.fmt && x.fmt.font).filter(Boolean)))];
+    let fontMap = null, fontsArg = '';
+    if (usedFonts.length) {
+      const fr = FONTS.prepareFontsDir(usedFonts, path.join(tmpDir, '_wb_fonts'));
+      fontMap = fr.map; fontsArg = ':fontsdir=_wb_fonts';
+      if (fr.missing.length) log(`   ⚠ 이 PC 에 없는 글꼴 ${fr.missing.length}개 — 기본 글꼴로 굽습니다: ${fr.missing.join(', ')}`);
+    }
+    fs.writeFileSync(subPath, buildAss(list, { width: W, height: H, style, fontMap }), 'utf8');
     const t0 = Date.now();
     await _ff(['-y', '-i', videoPath,
-      '-vf', `subtitles=${subName}`,
+      '-vf', `subtitles=${subName}${fontsArg}`,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
       '-c:a', 'copy', '-movflags', '+faststart', outPath], { abortSignal, cwd: tmpDir });
     if (!fs.existsSync(outPath)) return { ok: false, error: '자막을 구운 결과가 없습니다' };
@@ -259,7 +293,7 @@ async function burnSubtitle({ videoPath, cues = null, srtText = '', tmpDir, widt
   } catch (e) {
     return { ok: false, error: e.message };
   } finally {
-    for (const f of [subPath, outPath]) { try { fs.rmSync(f, { force: true }); } catch (_) {} }
+    for (const f of [subPath, outPath, path.join(tmpDir, '_wb_fonts')]) { try { fs.rmSync(f, { force: true, recursive: true }); } catch (_) {} }
   }
 }
 

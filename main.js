@@ -4751,7 +4751,7 @@ function buildSnapshot() {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null })),
       })),
     })),
   };
@@ -4891,6 +4891,7 @@ function projectsFromSnapshot(snap) {
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
         if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
         if (ss.speaker) s.speaker = ss.speaker;               // [이름] 대사 — 화자 목소리
+        if (Array.isArray(ss.capSpans) && ss.capSpans.length) s.capSpans = ss.capSpans;   // 🎨 줄별·글자별 자막 서식
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -4945,6 +4946,7 @@ function overlaySnapshot(parsed, snap) {
       (gs.sentences || []).forEach((ss, i) => {
         const s = sents[i]; if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
+        if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
       });
@@ -6108,6 +6110,10 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
   catch (e) { return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
   const old = gs.slice(si, si + n);
+  // 🎨 줄별·글자별 자막 서식을 새 글로 옮긴다 — 오타 하나를 고쳤다고 서식이 사라지면 안 된다(나누기·합치기도 글자 위치로 따라간다)
+  const _spansMoved = old.some((o) => o.capSpans && o.capSpans.length)
+    ? require('./core/caption-format').remapSpansMulti(old.map((o) => o.text), old.map((o) => o.capSpans || []), plan.newTexts)
+    : null;
   const used = new Set(pr.sentences.map((s) => s.id));
   const made = plan.newTexts.map((t, ti) => {
     let id = hashId('s', t), k = 1;
@@ -6120,6 +6126,7 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
     // 화자는 같은 자리의 옛 문장을 따른다(나누면 조각 모두 · 합치면 첫 문장). .md 의 [이름] 접두는 그대로 남아 있다.
     const _spk = old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
     if (_spk) s.speaker = _spk;
+    if (_spansMoved && _spansMoved[ti] && _spansMoved[ti].length) s.capSpans = _spansMoved[ti];
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
     if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {
@@ -6157,6 +6164,79 @@ ipcMain.handle('edit-sentences', (_e, args = {}) => {
 //   (media-N 안의 것만 — 사용자가 밖에서 첨부한 원본은 건드리지 않는다). 음성은 문장 것이라 그대로 산다.
 //   ⚠ 대본(.md)은 바꾸지 않는다 — ✂ 분할과 같다(대본이 그대로면 작업본 이어받기가 구조를 유지하고,
 //     대본을 고치면 새로 파싱돼 풀린다). 영구히 두려면 대본에 `> 🖼️ 이미지: 이어서` 를 쓴다.
+// 🎨 자막 서식 — 줄·글자 범위에 서식을 얹거나 지운다(2026-09-25 로이: 브루 자막 서식 창과 같은 기능을).
+//   targets = [{ shortsNum, groupNum, sentIdx, from, to }] — 여러 줄을 한 번에(고른 줄들). from/to 는 **문장 글자 위치**.
+//   patch = 서식 조각(core/caption-format normPatch) · clear = true(전부 지우기) | ['키', …](그 키만).
+//   ⚠ 대본(.md)은 바꾸지 않는다 — 서식은 작업본에 저장된다(자막 글이 같으면 대본을 다시 읽어도 되살아난다).
+ipcMain.handle('set-caption-format', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
+  const CFm = require('./core/caption-format');
+  const targets = Array.isArray(args.targets) ? args.targets : [];
+  let n = 0;
+  for (const t of targets) {
+    const pr = S.parsed.projects.find((p) => p.shortsNum === t.shortsNum);
+    const g = pr && pr.groups.find((x) => x.num === t.groupNum);
+    const ss = g ? pr.getSentencesOfGroup(g) : [];
+    const sen = ss[Number(t.sentIdx)];
+    if (!sen) continue;
+    const L = String(sen.text || '').length;
+    const from = Math.max(0, Math.min(L, Math.floor(Number(t.from) || 0)));
+    const to = Math.max(from, Math.min(L, Math.floor(t.to == null ? L : Number(t.to))));
+    if (!(to > from)) continue;
+    let next;
+    if (args.clear) next = CFm.clearSpan(sen.capSpans, L, from, to, Array.isArray(args.clear) ? args.clear : null);
+    else next = CFm.applySpan(sen.capSpans, L, from, to, args.patch || {});
+    sen.capSpans = next.length ? next : undefined;
+    n++;
+  }
+  if (!n) return { ok: false, error: '서식을 줄 자막을 찾지 못했습니다(대본이 그새 바뀌었을 수 있습니다).' };
+  storeActive(); pushDtoUpdate();
+  return { ok: true, count: n, dto: P.toDTO(S.parsed) };
+});
+// 이 대본의 줄별 서식을 전부 지운다(채널 기본 서식으로)
+ipcMain.handle('clear-all-caption-formats', () => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false };
+  let n = 0;
+  for (const pr of S.parsed.projects) for (const sen of pr.sentences) if (sen.capSpans) { sen.capSpans = undefined; n++; }
+  storeActive(); pushDtoUpdate();
+  log(`🎨 줄별 자막 서식 ${n}문장을 지웠습니다 — 채널 기본 서식으로 돌아갑니다`);
+  return { ok: true, count: n, dto: P.toDTO(S.parsed) };
+});
+// 글꼴 — Vrew 가 쓰는 글꼴 목록(앱·사용자·Vrew 설치본·Vrew 캐시). 미리보기는 변환한 ttf 를 base64 로 보낸다.
+ipcMain.handle('list-caption-fonts', () => {
+  try { return { ok: true, fonts: require('./core/font-store').listFonts().map((x) => ({ vrewName: x.vrewName, label: x.label, family: x.family, weight: x.weight, src: x.src })) }; }
+  catch (e) { return { ok: false, error: e.message, fonts: [] }; }
+});
+ipcMain.handle('caption-font-data', (_e, vrewName) => {
+  try {
+    const c = require('./core/font-store').convertedFile(String(vrewName || ''));
+    if (!c) return { ok: false, error: '이 PC 에 없는 글꼴입니다' };
+    return { ok: true, family: c.family, data: fs.readFileSync(c.file).toString('base64') };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('add-caption-font', async () => {
+  const r = await dialog.showOpenDialog(win, { title: '자막 글꼴 추가 (ttf · otf · woff2)', properties: ['openFile', 'multiSelections'], filters: [{ name: '글꼴', extensions: ['ttf', 'otf', 'woff2'] }] });
+  if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+  const added = [], errors = [];
+  for (const fp of r.filePaths) {
+    try { added.push(require('./core/font-store').addUserFont(fp)); } catch (e) { errors.push(`${path.basename(fp)}: ${e.message}`); }
+  }
+  if (added.length) log(`🔤 자막 글꼴 추가 — ${added.map((a) => a.label + ' ' + a.weight).join(', ')}`);
+  if (errors.length) log(`⚠ 글꼴 추가 실패 — ${errors.join(' / ')}`);
+  return { ok: added.length > 0, added, errors };
+});
+// 저장된 서식(Vrew 의 「저장된 서식」 — 최대 18개) — 이 PC 에 저장한다.
+const CAP_FMT_FILE = path.join(os.homedir(), '.priming-maker', 'caption-formats.json');
+ipcMain.handle('get-saved-cap-formats', () => {
+  try { const j = JSON.parse(fs.readFileSync(CAP_FMT_FILE, 'utf8')); return Array.isArray(j) ? j : []; } catch (_) { return []; }
+});
+ipcMain.handle('set-saved-cap-formats', (_e, list) => {
+  const CFm = require('./core/caption-format');
+  const clean = (Array.isArray(list) ? list : []).slice(0, 18).map((x, i) => ({ id: String((x && x.id) || ('f' + Date.now() + i)), name: String((x && x.name) || ('서식 ' + (i + 1))).slice(0, 30), fmt: CFm.normPatch(x && x.fmt) }));
+  try { fs.mkdirSync(path.dirname(CAP_FMT_FILE), { recursive: true }); fs.writeFileSync(CAP_FMT_FILE, JSON.stringify(clean, null, 1), 'utf8'); return { ok: true, list: clean }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('merge-group', (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum } = args;

@@ -113,7 +113,8 @@ function wav(sec) {
 
   console.log('\n[5] 배선');
   const MAIN = read('main.js'), APP = read('renderer/src/App.jsx');
-  ok(/speaker: s\.speaker \|\| null \}\)\),/.test(MAIN) && /if \(ss\.speaker\) s\.speaker = ss\.speaker/.test(MAIN), '작업본(스냅샷)에 화자 저장·복원');
+  // (2026-09-25 — 스냅샷 줄 끝에 자막 서식 capSpans 가 붙었다: 줄 끝 모양이 아니라 「화자를 싣는가」만 본다)
+  ok(/sentences: pr\.getSentencesOfGroup\(g\)\.map\(\(s\) => \(\{[^\n]*speaker: s\.speaker \|\| null[,}]/.test(MAIN) && /if \(ss\.speaker\) s\.speaker = ss\.speaker/.test(MAIN), '작업본(스냅샷)에 화자 저장·복원');
   ok(/\(ss\.speaker \|\| null\) !== \(s\.speaker \|\| null\)\) return;/.test(MAIN), '🔑 대본에 [이름] 을 붙이면 옛 목소리 음성을 복원하지 않는다');
   ok(/const _spk = old\[Math\.min\(ti, old\.length - 1\)\]\.speaker/.test(MAIN), '문장 편집 뒤에도 화자 유지');
   ok(/speakers: Array\.isArray\(p\.speakers\)/.test(APP), '채널편집 열 때 speakers 를 싣는다(안 실으면 저장 때 지워진다)');
