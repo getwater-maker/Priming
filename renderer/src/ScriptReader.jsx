@@ -44,7 +44,8 @@ function docModel(dto, headings, groupNums, notes) {
   for (const pr of ((dto && dto.projects) || [])) {
     for (const b of sr.readerBlocks(pr, { headings, notes })) {
       if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">${sr.noteInnerHtml(b, NOTE_ST)}</div>`; continue; }
-      if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}</${b.t}>`; continue; }
+      // 📏 제목 옆 「/ 15,686 자」 — 볼 때마다 센다(대본 파일에는 적지 않는다 · 2026-09-26 로이)
+      if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}${b.t === 'h1' && b.chars ? ` <span data-cc="1" style="font-size:0.6em;font-weight:400;color:#777;white-space:nowrap">${sr.fmtChars(b.chars)}</span>` : ''}</${b.t}>`; continue; }
       const key = 'p' + paras.length;
       paras.push({ key, shortsNum: pr.shortsNum, groupNum: b.groupNum, base: b.sents, last: sr.joinParagraph(b.sents.map((s) => s.text)), dirty: false });
       html += `<p class="rd-para" data-key="${key}" data-g="${b.groupNum}" style="margin:0 0 0.8em;text-align:left">${paraInner(b.sents, b.groupNum, groupNums)}</p>`;

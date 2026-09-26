@@ -54,7 +54,8 @@ function noteRows(lines) {
 function readerBlocks(pr, { headings = true, notes = true } = {}) {
   const out = [];
   if (!pr) return out;
-  if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim() });
+  // 📏 제목 옆 글자 수 「/ 15,686 자」(2026-09-26 아도나이로이 로이 — 대본 파일에 적지 않고 여기서 볼 때마다 센다)
+  if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim(), chars: charsWithSpaces(pr) });
   let lastH2 = '', lastH3 = '';
   const noteMap = new Map();   // 장 제목(정리한 것) → 메모들 · 한 장의 메모는 한 번만 싣는다
   if (notes) for (const n of (pr.readerNotes || [])) {
@@ -90,6 +91,22 @@ function readerBlocks(pr, { headings = true, notes = true } = {}) {
   }
   return out;
 }
+
+/**
+ * 📏 낭독 글자 수 — **공백 포함 · 줄바꿈 제외**(문장을 공백 하나로 이은 길이).
+ *   아도나이로이 `대본검사.py` `낭독자수()` 와 같은 셈이다(강의 3기 1강 규칙 8 · 메모장 기준) — 한쪽을 바꾸면 둘 다.
+ *   제목 옆 「/ 15,686 자」로 보인다. 메모(>) · 프롬프트 · 제목 줄은 문장이 아니라 들어가지 않는다.
+ */
+function charsWithSpaces(pr) {
+  let n = 0, k = 0;
+  for (const c of ((pr && pr.cuts) || [])) for (const s of (c.sentences || [])) {
+    const t = String(s.text || '').trim();
+    if (!t) continue;
+    n += t.length; k++;
+  }
+  return n + Math.max(0, k - 1);
+}
+const fmtChars = (n) => `/ ${Number(n || 0).toLocaleString('en-US')} 자`;
 
 /** 통계 — 글자 수(공백 제외) · 문장 수 · 음성 길이 합 */
 function readerStats(pr) {
@@ -224,7 +241,7 @@ function noteInnerHtml(b, st = null) {
  */
 function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
   const body = blocks.map((b) => {
-    if (b.t === 'h1') return `<h1>${esc(b.text)}</h1>`;
+    if (b.t === 'h1') return `<h1>${esc(b.text)}${b.chars ? ` <span class="cc">${fmtChars(b.chars)}</span>` : ''}</h1>`;
     if (b.t === 'h2') return `<h2>${esc(b.text)}</h2>`;
     if (b.t === 'h3') return `<h3>${esc(b.text)}</h3>`;
     if (b.t === 'note') return `<div class="note">${noteInnerHtml(b)}</div>`;
@@ -237,6 +254,7 @@ function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
 html, body { margin: 0; padding: 0; background: #fff; color: #1d1a16; }
 body { font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', sans-serif; font-size: ${f}pt; line-height: 1.75; word-break: keep-all; overflow-wrap: anywhere; }
 h1 { font-size: ${(f * 1.6).toFixed(1)}pt; line-height: 1.35; margin: 0 0 ${(f * 1.2).toFixed(1)}pt; padding-bottom: ${(f * 0.5).toFixed(1)}pt; border-bottom: 1.2pt solid #333; }
+h1 .cc { font-size: 0.62em; font-weight: 400; color: #666; white-space: nowrap; }
 h2 { font-size: ${(f * 1.25).toFixed(1)}pt; margin: ${(f * 1.6).toFixed(1)}pt 0 ${(f * 0.5).toFixed(1)}pt; break-after: avoid; }
 h3 { font-size: ${(f * 1.02).toFixed(1)}pt; color: #6b5a47; margin: ${(f * 1.0).toFixed(1)}pt 0 ${(f * 0.3).toFixed(1)}pt; break-after: avoid; }
 p { margin: 0 0 ${(f * 0.75).toFixed(1)}pt; text-align: left; orphans: 2; widows: 2; }
@@ -264,4 +282,4 @@ function nUpLayout(n) {
 }
 const PER_SHEET = [1, 2, 4, 6, 9];
 
-module.exports = { noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };
+module.exports = { noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, charsWithSpaces, fmtChars, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };
