@@ -1502,12 +1502,32 @@ ipcMain.handle('qwen-design-stop', async () => {
   S.voiceDesignActive = false;
   return await QD.stop(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
 });
+/** 두 글이 글자 기준으로 얼마나 같은가(0~1) — 문장부호·공백·대소문자 무시, 편집 거리. 받아쓰기 확인용. */
+function textMatchRatio(a, b) {
+  const n = (s) => [...String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')];
+  const x = n(a), y = n(b);
+  if (!x.length) return 0;
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return Math.max(0, 1 - prev[y.length] / x.length);
+}
 ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
   const instruct = (args.instruct || '').trim();
   const text = (args.text || '').trim() || '안녕하세요. 이 목소리로 이야기를 들려드리겠습니다.';
   if (!instruct) return { ok: false, error: '목소리 설명이 비어 있습니다' };
-  const r = await QD.generate({ instruct, text, language: args.language || 'Korean' }, log);
+  // 🌏 베트남어 = OmniVoice 「목소리 설명」 모드(보이스디자인 Qwen3 은 베트남어를 지원하지 않는다 — 2026-09-26 실측).
+  //   그 밖(한국어·일본어)은 예전처럼 보이스디자인 서버.
+  const lang = args.language || 'Korean';
+  const useOmni = lang === 'vi';
+  const r = useOmni
+    ? await require('./tts/asr-client').designVoiceOmni({ text, instruct, language: 'vi', seed: args.seed != null ? args.seed : Math.floor(Math.random() * 1e6) })
+    : await QD.generate({ instruct, text, language: lang }, log);
   if (!r.ok) return r;
+  if (useOmni) log(`🎨 베트남어 목소리 생성(OmniVoice 목소리 설명: ${instruct})`);
   // 미리듣기용 임시 파일에만 저장(아직 참조음성 목록엔 넣지 않음) — 저장 버튼을 눌러야 정식 등록.
   try {
     const tmpDir = path.join(os.homedir(), '.shots-maker', 'voicedesign-temp');
@@ -1523,7 +1543,17 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
       durationSec = WS.parseWav(r.buffer).durationSec;
       suggest = WS.suggestRange(r.buffer);
     } catch (e) { log('⚠ 파형 분석 실패(슬라이스 기본값 없음): ' + String((e && e.message) || e)); }
-    return { ok: true, tempPath: tmpPath, text, durationSec, suggest };
+    // 🌏 외국어 목소리는 받아쓰기로 확인해 알려 준다 — 로이가 베트남어·일본어를 귀로 판정하기 어렵다(2026-09-26).
+    //   참조음성이 잘못 읽혔으면 그걸로 만드는 모든 문장이 흔들린다. 실패해도 생성 자체는 성공(확인만 못 한 것).
+    let asrText = null, asrMatch = null;
+    if (lang !== 'Korean') {
+      try {
+        const a = await require('./tts/asr-client').transcribe(tmpPath);
+        asrText = String((a && (a.text || a)) || '');
+        asrMatch = textMatchRatio(text, asrText);
+      } catch (e) { log('⚠ 받아쓰기 확인 실패: ' + String((e && e.message) || e)); }
+    }
+    return { ok: true, tempPath: tmpPath, text, durationSec, suggest, asrText, asrMatch };
   } catch (e) { return { ok: false, error: '임시 저장 실패: ' + String((e && e.message) || e) }; }
 });
 // 저장: 방금 생성한 미리듣기 wav 를 사용자가 지정한 파일명으로 ref-audio 에 정식 등록(+.txt 참조텍스트).

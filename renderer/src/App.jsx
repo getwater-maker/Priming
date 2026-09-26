@@ -308,6 +308,13 @@ function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.al
 
 function normOutTargetUi(v) { return v === 'whiteboard' || v === 'mp4' ? v : 'vrew'; }
 
+// 🌏 보이스디자인 언어별 기본 문장(약 10초 — 끝 감쇠를 잘라내고도 참조음성으로 쓸 5초가 남게)
+const VD_SAMPLE_TEXT = {
+  Korean: '안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',
+  Japanese: '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',
+  vi: 'Ngày xửa ngày xưa, ở một ngôi làng nhỏ bên bờ sông, có một chàng trai nghèo nhưng rất tốt bụng. Mỗi sáng, anh dậy thật sớm và lên núi nhặt củi.',
+};
+
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   const isLf = mode === 'longform';
@@ -485,7 +492,13 @@ export default function App() {
   // 기본 문장을 길게 둔다(약 10초) — 끝의 감쇠 구간을 잘라내고도 참조음성으로 쓸 5초가 남도록.
   const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.');
   const [vdStatus, setVdStatus] = useState('');
+  // 🌏 보이스디자인 언어(2026-09-26) — Korean·Japanese = 보이스디자인(Qwen3) · vi = OmniVoice 목소리 설명(Qwen3 은 베트남어 미지원).
+  //   베트남어 목소리 설명은 정해진 낱말만 받으므로 고르기 칸 셋(성별·나이·음높이)으로 만든다.
+  const [vdLang, setVdLang] = useState('Korean');
+  const [vdOmni, setVdOmni] = useState({ gender: 'male', age: 'middle-aged', pitch: 'low pitch' });
   const [vdBusy, setVdBusy] = useState(false);
+  // 보이스디자인(Qwen) 서버 준비 중 — 「생성 중」(vdBusy)과 따로 둔다. 베트남어는 OmniVoice 로 만들어 준비를 기다리지 않는다.
+  const [vdPreparing, setVdPreparing] = useState(false);
   const [vdReady, setVdReady] = useState(false);         // 디자인 서버 준비 완료 여부 — 준비 전엔 '목소리 생성' 잠금
   const [vdSrv, setVdSrv] = useState('');                // 보이스디자인 서버 주소(빈값=이 PC 로컬 실행)
   const [vdWavUrl, setVdWavUrl] = useState('');
@@ -2088,27 +2101,30 @@ export default function App() {
   }
   // 서버 준비(설치 확인 → start). 실패해도 재시도할 수 있게 분리 — 준비 전엔 생성 버튼을 못 누르게 vdReady 로 잠근다.
   async function vdPrepare() {
-    setVdReady(false); setVdBusy(true); setVdStatus('설치 확인 중…');
+    setVdReady(false); setVdPreparing(true); setVdStatus('설치 확인 중…');
     try {
       const st = await api.qwenDesignStatus();
       if (!st || !st.installed) {
         setVdStatus('⚠ 이 PC 에는 보이스디자인이 설치돼 있지 않습니다.\n⚙ 설정 → 🖧 TTS 서버 의 「보이스디자인」 칸에 메인 PC 주소(예: http://100.112.7.63:9893)를 넣으면 원격으로 쓸 수 있습니다.');
-        setVdBusy(false); return;
+        setVdPreparing(false); return;
       }
       setVdStatus(st.remote
         ? `서버 준비 중… (원격 ${st.target})`
         : '서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요 — 이 창을 닫지 마세요)');
       const r = await api.qwenDesignStart();
-      if (r && r.ok) { setVdReady(true); setVdStatus('준비 완료 — 목소리 설명을 입력하고 생성하세요.'); }
+      const keep = (msg) => (prev) => (/^(설치 확인|서버 준비)/.test(prev) ? msg : prev);   // 준비 중에 만든 베트남어 결과는 덮지 않는다
+      if (r && r.ok) { setVdReady(true); setVdStatus(keep('준비 완료 — 목소리 설명을 입력하고 생성하세요.')); }
       else setVdStatus('⚠ 서버 준비 실패: ' + ((r && r.error) || '알 수 없음') + '\n「🔄 서버 다시 준비」 를 눌러 재시도할 수 있습니다.');
     } catch (e) { setVdStatus('오류: ' + e.message); }
-    setVdBusy(false);
+    setVdPreparing(false);
   }
   async function vdGenerate() {
-    if (!vdInstruct.trim()) { setVdStatus('목소리 설명을 먼저 입력하세요.'); return; }
-    setVdBusy(true); setVdStatus('목소리 생성 중… (수 초)');
+    const isVi = vdLang === 'vi';
+    const instruct = isVi ? [vdOmni.gender, vdOmni.age, vdOmni.pitch].filter(Boolean).join(', ') : vdInstruct;
+    if (!String(instruct || '').trim()) { setVdStatus('목소리 설명을 먼저 입력하세요.'); return; }
+    setVdBusy(true); setVdStatus(isVi ? '베트남어 목소리 생성 중… (OmniVoice · 수 초 + 받아쓰기 확인)' : '목소리 생성 중… (수 초)');
     try {
-      const r = await api.qwenDesignGenerate({ instruct: vdInstruct, text: vdText || undefined });
+      const r = await api.qwenDesignGenerate({ instruct, text: vdText || undefined, language: vdLang });
       if (r && r.ok) {
         const url = await api.readAudio(r.tempPath);
         setVdWavUrl(url || ''); setVdGenerated(true);
@@ -2120,7 +2136,13 @@ export default function App() {
         setVdRefText(r.text || vdText || '');
         vdBuildPeaks(url);
         playPreviewUrl(url);
-        setVdStatus(`생성 완료 (${dur.toFixed(2)}초) — 들어보고, 쓸 구간을 파형에서 고른 뒤 파일명을 입력해 저장하세요.`);
+        // 🌏 외국어는 받아쓰기로 제대로 읽혔는지 알려 준다(로이가 귀로 판정하기 어렵다)
+        const chk = r.asrMatch != null
+          ? `
+🔎 받아쓰기 확인: ${Math.round(r.asrMatch * 100)}% 일치${r.asrMatch >= 0.95 ? ' ✅' : ' ⚠ — 다시 만들어 보세요(같은 설정으로도 매번 달라집니다)'}
+   「${String(r.asrText || '').slice(0, 120)}」`
+          : '';
+        setVdStatus(`생성 완료 (${dur.toFixed(2)}초) — 들어보고, 쓸 구간을 파형에서 고른 뒤 파일명을 입력해 저장하세요.${chk}`);
       } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
@@ -4176,15 +4198,41 @@ export default function App() {
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
             <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → <b>쓸 구간을 골라</b> 파일명을 입력해 저장하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)<br />
               ✂ <b>끝은 잘라 쓰는 걸 권합니다</b> — 생성된 음성은 문장 끝이 서서히 작아지는데(모델 특성), 그대로 참조음성으로 쓰면 <b>TTS 문장 끝이 계속 끊기는 느낌</b>이 납니다. 길게 만들고 <b>또렷한 5초 남짓</b>만 남기세요.</p>
-            <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
-              <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
+            <div className="frow"><label title="이 목소리로 읽을 언어. 베트남어는 보이스디자인 모델이 지원하지 않아 OmniVoice 목소리 설명으로 만듭니다(참조음성으로 쓰면 새 문장 12/12 정확 — 실측)">언어</label>
+              <select data-testid="vd-lang" value={vdLang} onChange={(e) => {
+                const nl = e.target.value;
+                // 예문이 이전 언어의 기본 문장 그대로면 새 언어의 기본 문장으로 바꿔 준다(직접 고친 문장은 그대로)
+                if (Object.values(VD_SAMPLE_TEXT).includes(vdText.trim())) setVdText(VD_SAMPLE_TEXT[nl] || vdText);
+                setVdLang(nl);
+              }}>
+                <option value="Korean">한국어</option>
+                <option value="Japanese">日本語 (일본어)</option>
+                <option value="vi">Tiếng Việt (베트남어 · OmniVoice)</option>
+              </select></div>
+            {vdLang === 'vi' ? (
+              <div className="frow"><label title="OmniVoice 목소리 설명은 정해진 낱말만 받습니다">목소리</label>
+                <select data-testid="vd-gender" value={vdOmni.gender} onChange={(e) => setVdOmni({ ...vdOmni, gender: e.target.value })}>
+                  <option value="male">남성</option><option value="female">여성</option></select>
+                <select data-testid="vd-age" value={vdOmni.age} onChange={(e) => setVdOmni({ ...vdOmni, age: e.target.value })}>
+                  <option value="child">어린이</option><option value="teenager">청소년</option><option value="young adult">청년</option>
+                  <option value="middle-aged">중년</option><option value="elderly">노년</option></select>
+                <select data-testid="vd-pitch" value={vdOmni.pitch} onChange={(e) => setVdOmni({ ...vdOmni, pitch: e.target.value })}>
+                  <option value="very low pitch">아주 낮게</option><option value="low pitch">낮게</option><option value="moderate pitch">보통</option>
+                  <option value="high pitch">높게</option><option value="very high pitch">아주 높게</option></select>
+                <span className="meta">같은 설정도 만들 때마다 목소리가 달라집니다 — 마음에 들 때까지 다시 만드세요</span>
+              </div>
+            ) : (
+              <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
+                <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
+            )}
             <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
               <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
             <div className="frow"><label></label>
               {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
-              <button onClick={vdGenerate} disabled={vdBusy || !vdReady}
-                title={vdReady ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
-              {!vdReady && !vdBusy ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
+              {/* 베트남어는 OmniVoice 로 만들므로 보이스디자인 서버 준비를 기다리지 않는다 */}
+              <button data-testid="vd-generate" onClick={vdGenerate} disabled={vdBusy || (vdLang !== 'vi' && (!vdReady || vdPreparing))}
+                title={vdReady || vdLang === 'vi' ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
+              {!vdReady && !vdBusy && !vdPreparing ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
               {vdWavUrl ? <button className="ghost" onClick={() => (prevKey === 'vd' ? stopPreviewAudio() : playPreviewUrl(vdWavUrl, 'vd'))}>{prevKey === 'vd' ? '■ 멈춤' : '▶ 다시 듣기'}</button> : null}
               <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
             </div>
@@ -4220,7 +4268,7 @@ export default function App() {
                 <button onClick={vdSave} disabled={vdBusy} title="선택한 구간만 잘라 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
               </div>
             </>) : null}
-            <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy ? '⏳ ' : ''}{vdStatus}</div>
+            <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy || vdPreparing ? '⏳ ' : ''}{vdStatus}</div>
             <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
           </div>
         </div>

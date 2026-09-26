@@ -289,4 +289,30 @@ function _netErr(e, base) {
   return `${(e && e.message) || e}${code ? ` [${code}]` : ''}${why ? ` — ${why}` : ''} (${base})`;
 }
 
-module.exports = { transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles };
+/**
+ * 🌏 OmniVoice 「목소리 설명」 모드로 새 목소리를 만든다(참조음성 없이 instruct 만) — 베트남어 참조음성 만들기용(2026-09-26).
+ *   왜: 보이스디자인(Qwen3)은 베트남어를 지원하지 않는다(지원 목록에 없음 — 실측 500).
+ *   OmniVoice 설명 모드로 만든 베트남어 목소리를 참조음성으로 쓰면 새 문장 12/12 가 정확했다(한국어 목소리는 0~1/3).
+ *   ⚠ instruct 는 정해진 낱말만 받는다: 성별(male/female) · 나이(child/teenager/young adult/middle-aged/elderly) ·
+ *     음높이(very low pitch/low pitch/moderate pitch/high pitch/very high pitch) · whisper · 억양(… accent). 쉼표+공백으로 잇는다.
+ * @returns {Promise<{ok:true, buffer:Buffer} | {ok:false, error:string}>}
+ */
+async function designVoiceOmni({ text, instruct, language, seed } = {}) {
+  const base = _baseUrl();
+  if (!base) return { ok: false, error: 'OmniVoice 주소가 없습니다(⚙ 설정 → 🖧 TTS 서버)' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 180000);
+  try {
+    const body = { text: String(text || ''), instruct: String(instruct || ''), language: language || undefined };
+    if (seed != null && seed !== '') body.seed = parseInt(seed, 10);
+    const res = await fetch(base + '/tts', { method: 'POST', headers: { 'Content-Type': 'application/json', ..._authHeaders() }, body: JSON.stringify(body), signal: ctrl.signal });
+    if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `OmniVoice ${res.status} ${t.slice(0, 300)}` }; }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length < 1200) return { ok: false, error: '빈 음성이 돌아왔습니다 — 설명이나 문장을 바꿔 다시 만드세요' };
+    return { ok: true, buffer };
+  } catch (e) {
+    return { ok: false, error: e && e.name === 'AbortError' ? 'OmniVoice 가 180초 안에 응답하지 않았습니다' : String((e && e.message) || e) };
+  } finally { clearTimeout(timer); }
+}
+
+module.exports = { transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
