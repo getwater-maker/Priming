@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const Lang = require('../core/lang'); // 🌏 일본어 자막 기본 글꼴
 const os = require('os');
 const { spawnSync } = require('child_process');
 const { splitLongSentenceAlgo } = require('../core/long-sentence-splitter/algo-splitter');
@@ -825,6 +826,11 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   })();
   const baseFmt = CF.normFmt({ ..._legacyFmt, ...(_userCap.fmt || {}) });
   baseFmt.size = Number(resolvedSize || captionAttrs.size) || 90;
+  // 🌏 일본어(한자) 문장은 채널 기본 글꼴이 Pretendard(가나·한자 없음)일 때 Vrew 의 일본어 기본 글꼴로 — Vrew 설치본 실측:
+  //   언어별 기본 글꼴표 {ko: Pretendard-Vrew_700, ja: Noto Sans JP-Vrew_700}. 사용자가 글자에 직접 준 글꼴(조각)은 그대로 이긴다.
+  //   🔑 한국어·베트남어 문장은 baseFmt 그대로(베트남어 성조 글자는 Pretendard 에 있다).
+  const JA_FONT = 'Noto Sans JP-Vrew_700';
+  const baseFmtFor = (text) => (Lang.isCjkLang(Lang.detectLang(text)) && /^Pretendard/.test(baseFmt.font || '') ? { ...baseFmt, font: JA_FONT } : baseFmt);
   // ★ 위치는 clips[].captions[].style 가 지배 (사용자 .vrew 분석 확정).
   //   yAlign: 'middle'(가운데) 등은 _userCap.yAlign 우선, 없으면 CAPTION_STYLE 기본('middle').
   const captionStyle = {
@@ -1274,8 +1280,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         captions: (() => {
           // 🎨 이 줄의 서식 구간(채널 기본 + 문장 덮어쓰기) · 줄 단위 속성(배경 상자·효과·줄 간격)
           const rg = vc.range || { from: 0, to: String(s.text || '').length };
-          const runs = CF.lineRuns(s.text, s.capSpans, rg, baseFmt);
-          const lp = CF.lineProps(s.capSpans, rg, baseFmt, String(s.text || '').length);
+          const bf = baseFmtFor(s.text);
+          const runs = CF.lineRuns(s.text, s.capSpans, rg, bf);
+          const lp = CF.lineProps(s.capSpans, rg, bf, String(s.text || '').length);
           const st = { ...captionStyle, customAttributes: captionStyle.customAttributes.map((a) => (
             a.attributeName === '--textbox-color' ? { ...a, value: CF.boxColorValue(lp) } : { ...a })) };
           const eff = CF.animToVrew(lp.anim);
@@ -1289,7 +1296,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
           }
           return [
             { text: CF.lineToVrewDelta(runs, lp.lineHeight), style: st },
-            { text: [{ insert: '\n', attributes: CF.fmtToVrewAttrs(baseFmt) }], style: { ...st, customAttributes: st.customAttributes.map((a) => ({ ...a })) } },
+            { text: [{ insert: '\n', attributes: CF.fmtToVrewAttrs(bf) }], style: { ...st, customAttributes: st.customAttributes.map((a) => ({ ...a })) } },
           ];
         })(),
         assetIds: [...clipAssetIds, ...ovAssetsFor(vc)],

@@ -378,8 +378,9 @@ async function uploadVideo(o = {}) {
       title,
       description: cleanDescription(o.description),
       tags: cleanTags(o.tags),
-      defaultLanguage: 'ko',
-      defaultAudioLanguage: 'ko',
+      // 🌏 영상 언어 — 대본 문장으로 판별한 값(일본어·베트남어 채널). 없으면 ko(예전 그대로).
+      defaultLanguage: o.language || 'ko',
+      defaultAudioLanguage: o.language || 'ko',
     },
     status: {
       privacyStatus: 'private',                          // 🔑 미심사 프로젝트는 어차피 비공개로 강제된다

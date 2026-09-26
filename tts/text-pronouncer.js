@@ -28,6 +28,7 @@
  */
 
 'use strict';
+const Lang = require('../core/lang'); // 🌏 일본어·베트남어 판별
 
 /**
  * 사용자 발음사전 치환 — 자막은 그대로 두고 TTS 만 교정.
@@ -55,6 +56,10 @@ function applyOmniVoiceDict(text, globalDict) {
  */
 function normalizeForTTS(text) {
   let out = String(text || '');
+  // 🌏 일본어·베트남어 문장에 한국어 「에서」를 끼우지 않는다(2026-09-26). 🔑 한국어 문장은 그대로.
+  const lang = Lang.detectLang(out);
+  if (Lang.isCjkLang(lang)) return out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1から$2');
+  if (lang === 'vi') return out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1 đến $2');
   out = out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1에서 $2');
   return out;
 }

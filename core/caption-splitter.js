@@ -33,6 +33,8 @@
  * 글자수 카운트는 한글·영숫자만 (공백/쉼표/마침표/느낌표/물음표 제외).
  */
 
+const { detectLang, isForeignLang, isCjkLang } = require('./lang');
+
 const CONNECTIVES = new Set([
   '그런데', '그리고', '하지만', '그러나', '그래서', '그러니', '그러면', '그러므로',
   '한편', '또한', '그래도', '그리하여', '즉', '결국', '따라서', '왜냐하면',
@@ -138,8 +140,82 @@ const minCharsFor = (maxChars) => Math.max(4, Math.round(maxChars * 0.4));
 const ADNOMINAL_SCORE = -15;
 
 function meaningfulLen(s) {
+  // 🌏 일본어·한자·베트남어(한글이 한 글자도 없을 때만)는 모든 글자·숫자를 센다 — 옛 규칙은 가나·한자를 0 으로,
+  //   베트남어 ư·ơ·đ·ạ 를 빼고 세어 줄이 설정보다 길어졌다(2026-09-26). 🔑 한국어는 옛 규칙 그대로.
+  //   ⚠ 어절 하나만 보면 `ngày` 처럼 베트남어 전용 글자가 없는 단어가 있다 → 한글이 없고 라틴 확장 글자가 하나라도 있으면 같은 규칙.
+  const str = String(s);
+  if (isForeignLang(detectLang(str)) || (!/[가-힣]/.test(str) && /[À-ɏḀ-ỿ]/.test(str))) {
+    const u = str.match(/[\p{L}\p{N}]/gu); return u ? u.length : 0;
+  }
   const m = String(s).match(/[가-힣A-Za-z0-9]/g);
   return m ? m.length : 0;
+}
+
+// ───────────────────────── 🌏 일본어(한자) 줄 나누기 ─────────────────────────
+//   띄어쓰기가 없어 어절 DP 를 못 쓴다(옛 코드는 한 문장을 통째로 한 줄에 넣었다). 글자 사이마다 경계 점수를 매겨
+//   같은 DP(줄 수·하한·균형)로 자른다. ⚠ 형태소 분석기는 쓰지 않는다(deps — 라이트 업데이트가 막힌다).
+//   금칙: 줄머리에 오면 안 되는 글자(구두점·닫는 괄호·작은 가나·장음) / 줄끝에 오면 안 되는 글자(여는 괄호).
+const JA_NO_START = new Set([...'、。，．,.！？!?」』）)】〕〉》・：；…ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ々〻ゝゞヽヾ']);
+const JA_NO_END = new Set([...'「『（(【〔〈《']);
+const JA_PUNCT = new Set([...'、。，．,！？!?']);
+// 조사 — 앞 글자가 한자·가타카나(내용어)일 때만 조사로 본다(「はし」의 は 같은 오판 방지).
+const JA_PARTICLES = new Set([...'はがをにでとへも']);   // ⚠ 「の」는 명사끼리 잇는다(「窓の|外」) — 넣지 않는다
+const isHanCh = (c) => /[㐀-鿿豈-﫿々]/.test(c);
+const isKataCh = (c) => /[゠-ヿ]/.test(c);
+const isHiraCh = (c) => /[぀-ゟ]/.test(c);
+const isAlnum = (c) => /[A-Za-z0-9０-９Ａ-Ｚａ-ｚ]/.test(c);
+const jaUnit = (c) => (/[\p{L}\p{N}]/u.test(c) ? 1 : 0);
+
+function jaBoundaryAt(chars, k) {   // chars[k-1] 과 chars[k] 사이
+  const a = chars[k - 1], b = chars[k];
+  if (JA_NO_START.has(b)) return { banned: true, score: 0 };
+  if (JA_NO_END.has(a)) return { banned: true, score: 0 };
+  if (isAlnum(a) && isAlnum(b)) return { banned: true, score: 0 };   // 숫자·영단어 안에서 자르지 않는다
+  if ((a === '」' || a === '』') && (b === 'と' || b === 'っ')) return { banned: false, score: -3 };   // 「…」と言った — 인용 조사는 앞 인용에 붙인다
+  if (JA_PUNCT.has(a)) return { banned: false, score: 4 };
+  if (JA_PARTICLES.has(a) && k >= 2 && (isHanCh(chars[k - 2]) || isKataCh(chars[k - 2]))) return { banned: false, score: 2 };
+  if (isHiraCh(a) && (isHanCh(b) || isKataCh(b))) return { banned: false, score: 1 };   // 새 어절이 한자로 시작하는 흔한 자리
+  if (a === 'を') return { banned: false, score: 2 };   // 「を」는 늘 조사다
+  if (isHiraCh(a) && isHiraCh(b)) return { banned: false, score: a === 'て' ? 0 : -6 };  // 활용어미 한가운데(「ので|すか」) · て형 뒤만 허용
+  if (isHanCh(a) && isHiraCh(b)) return { banned: false, score: -8 };   // 한자 + 오쿠리가나(「行|く」) — 한 낱말이다  // 히라가나끼리 = 대개 활용어미 한가운데(「ので|すか」)
+  if ((isHanCh(a) && isHanCh(b)) || (isKataCh(a) && isKataCh(b))) return { banned: false, score: -2 };  // 한자어·외래어 한가운데
+  return { banned: false, score: 0 };
+}
+
+function wrapCjk(text, maxChars) {
+  const chars = [...text];
+  const n = chars.length;
+  if (!n) return [];
+  const units = chars.map(jaUnit);
+  const minC = minCharsFor(maxChars);
+  const memo = new Array(n + 1);
+  memo[n] = { cost: 0, cuts: [] };
+  for (let i = n - 1; i >= 0; i--) {
+    let best = null, sum = 0;
+    for (let j = i; j < n; j++) {        // 줄 = chars[i..j]
+      sum += units[j];
+      if (sum > maxChars && j > i) break;
+      const rest = memo[j + 1];
+      if (!rest) continue;
+      const isLast = (j === n - 1);
+      const slack = maxChars - sum;
+      let cost = rest.cost + W.LINE;
+      if (sum < minC) { const d = minC - sum; cost += W.SHORT * d * d; }
+      if (!isLast) {
+        const b = jaBoundaryAt(chars, j + 1);
+        if (b.banned) cost += W.VIOL;
+        cost -= W.GOOD * b.score;
+        cost += W.BAL * slack * slack;
+      } else {
+        cost += W.TAIL * slack * slack;
+      }
+      if (!best || cost < best.cost) best = { cost, cuts: [j + 1, ...rest.cuts] };
+    }
+    memo[i] = best;
+  }
+  const lines = []; let start = 0;
+  for (const end of memo[0].cuts) { const ln = chars.slice(start, end).join('').trim(); if (ln) lines.push(ln); start = end; }
+  return lines;
 }
 
 const bareWord = (w) => String(w).replace(/[,，、.!?]+$/, '');
@@ -247,6 +323,8 @@ function splitCaptionLines(text, maxChars = 7, breaks) {
   // ⚠ 쉼표로 세그먼트를 미리 쪼개지 않는다(v0.3.41). 쪼개면 세그먼트끼리 다시 합칠 수 없어
   //   `살림,` `내외 사이,` 처럼 한 어절짜리 줄이 강제로 생긴다. 쉼표 선호는 boundaryAt 의 점수 4 가
   //   담당하고, 짧아질 때만 DP 가 붙인다. 접속부사 단독 줄 강제도 같은 이유로 없앴다.
+  // 🌏 일본어·한자 문장(한글 없음)은 글자 단위로 — 🔑 한국어·베트남어·영어는 아래 어절 DP 그대로.
+  if (isCjkLang(detectLang(t))) { const cj = wrapCjk(t, maxChars); return cj.length ? cj : [t]; }
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return [t];
   const out = wrapWords(words, maxChars);

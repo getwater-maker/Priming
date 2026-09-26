@@ -2441,7 +2441,16 @@ function ytSend(p) { try { win.webContents.send('yt-progress', p); } catch (_) {
 function ytMetaFor(pr) {
   const dto = P.toDTO(S.parsed);
   const dp = ((dto && dto.projects) || []).find((x) => x.shortsNum === pr.shortsNum) || null;
-  return require('./core/yt-packaging').buildUploadMeta({ scriptPath: S.scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr) });
+  const meta = require('./core/yt-packaging').buildUploadMeta({ scriptPath: S.scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr) });
+  // 🌏 영상 언어 = 문장 다수결(일본어·베트남어). 한국어·판별 불가는 ko — 예전 그대로.
+  meta.language = ytLangOf(pr);
+  return meta;
+}
+function ytLangOf(pr) {
+  const Lang = require('./core/lang');
+  const cnt = { ko: 0, ja: 0, vi: 0 };
+  for (const s of (pr && pr.sentences) || []) { const l = Lang.detectLang(s.text); if (l === 'ko') cnt.ko++; else if (l === 'ja' || l === 'cjk') cnt.ja++; else if (l === 'vi') cnt.vi++; }
+  return cnt.ja > cnt.ko && cnt.ja >= cnt.vi ? 'ja' : cnt.vi > cnt.ko ? 'vi' : 'ko';
 }
 /**
  * 업로드 한 건을 줄에 세운다. 메타는 **지금** 계산해 붙인다 — 큐가 다음 대본으로 넘어가 S.parsed 가 바뀌어도
@@ -2555,7 +2564,7 @@ async function runYtUpload({ file, channelId, meta }) {
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
   const r = await YT.uploadVideo({
-    channelId, file, title, description: meta.description, tags: meta.tags, synthetic: true,
+    channelId, file, title, description: meta.description, tags: meta.tags, synthetic: true, language: meta.language || 'ko',
     log, onProgress, isAborted: () => !!S.ytAbort,
   });
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }

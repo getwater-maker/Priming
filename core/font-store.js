@@ -456,6 +456,8 @@ function listFonts() {
   for (const c of listCandidates()) {
     const key = `${c.file}|${c.size}|${Math.round(c.mtime)}`;
     let rec = idx[key];
+    // 🌏 가나 여부(kana)를 모르는 옛 기록(한글 없음으로만 적힌 것)은 다시 읽는다(2026-09-26 일본어 지원).
+    if (rec && !rec.bad && rec.hangul === false && rec.kana === undefined) rec = null;
     if (!rec) {
       rec = { bad: true };
       try {
@@ -463,14 +465,16 @@ function listFonts() {
         if (kindOf(buf)) {
           const { tables } = readTables(buf);
           const id = fontIdentity(tables);
-          if (id.family) rec = { family: id.family, label: id.label, weight: id.weight, hangul: hasCodepoint(tables.cmap, 0xAC00) && hasCodepoint(tables.cmap, 0xD7A3) };
+          if (id.family) rec = { family: id.family, label: id.label, weight: id.weight, hangul: hasCodepoint(tables.cmap, 0xAC00) && hasCodepoint(tables.cmap, 0xD7A3), kana: hasCodepoint(tables.cmap, 0x3042) && hasCodepoint(tables.cmap, 0x30A2) };
         }
       } catch (_) {}
       idx[key] = rec; dirty = true;
     }
-    if (rec.bad || rec.hangul === false) continue;   // 한글이 없는 글꼴(일본어·중국어 Noto 등)은 자막에 못 쓴다
+    // 한글도 가나도 없는 글꼴(중국어 Noto 등)은 뺀다. 🌏 가나만 있는 글꼴(Noto Sans JP)은 일본어 자막용으로 남긴다 — `jaOnly` 표시.
+    if (rec.bad || (rec.hangul === false && !rec.kana)) continue;
     const vrewName = CF.vrewFontName(rec.family, rec.weight);
-    if (!seen.has(vrewName)) seen.set(vrewName, { vrewName, family: rec.family, label: rec.label || rec.family, weight: rec.weight, file: c.file, src: c.src });
+    const jaOnly = rec.hangul === false && !!rec.kana;
+    if (!seen.has(vrewName)) seen.set(vrewName, { vrewName, family: rec.family, label: (rec.label || rec.family) + (jaOnly ? ' (日本語 · 한글 없음)' : ''), weight: rec.weight, file: c.file, src: c.src, jaOnly });
   }
   // 없어진 파일의 기록은 정리
   const live = new Set(listCandidates().map((c) => `${c.file}|${c.size}|${Math.round(c.mtime)}`));

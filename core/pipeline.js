@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const Lang = require('./lang'); // 🌏 문장 언어 판별(일본어·베트남어 — 한국어 경로 무변경)
 const { spawnSync } = require('child_process');
 
 const { getModeProfile, normalizeMode } = require('./mode-profiles');
@@ -298,12 +299,25 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
   const spkMap = speakerVoiceMap(preset);
   const spkOpts = new Map();
-  const optsFor = (s) => {
+  const optsForVoice = (s) => {
     const name = s && s.speaker;
     if (!name) return synthOpts;
     if (!spkOpts.has(name)) spkOpts.set(name, spkMap[name] ? { ...synthOpts, ...voiceOpts(spkMap[name], null) } : synthOpts);
     return spkOpts.get(name);
   };
+  // 🌏 문장 언어 — 채널이 ko(·미지정)여도 일본어·베트남어 문장이면 그 언어로 보낸다(베트남어는 안 주면 한국어처럼 뭉개진다).
+  //   🔑 한국어 문장은 같은 객체를 그대로 돌려준다 → 캐시 키·합성 인자가 한 글자도 안 바뀐다.
+  const optsFor = (s) => {
+    const o = optsForVoice(s);
+    const L = Lang.ttsLangFor(s && s.text, o.language);
+    return (L && L !== o.language) ? { ...o, language: L } : o;
+  };
+  // 🌏 베트남어 경고 — 한국어 참조음성으로 베트남어를 읽으면 한국어처럼 뭉개진다(2026-09-26 실측: language=vi 를 줘도
+  //   한국어 목소리 두 개가 0/3·1/3, 목소리 설명(instruct)·원어민 목소리는 3/3 — Whisper 전사 대조). 일본어는 한국어 목소리로도 정확했다.
+  if (onLine) {
+    const viN = sentences.filter((x) => x && Lang.detectLang(x.text) === 'vi').length;
+    if (viN && !synthOpts.instruct) onLine(`⚠ 베트남어 문장 ${viN}개 — 참조음성이 한국어 목소리라면 한국어처럼 읽힙니다(실측). 베트남어 원어민 참조음성을 채널에 연결하세요`);
+  }
   if (onLine) {
     const used = [...new Set(sentences.map((x) => x && x.speaker).filter(Boolean))];
     if (used.length) {

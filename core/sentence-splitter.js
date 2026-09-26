@@ -20,6 +20,7 @@
 //   " " ' '  유니코드 곡선
 //   『 』 「 」  일본·한국 인용
 //   ‹ › « »  유럽
+const { detectLang, isForeignLang } = require('./lang');
 const QUOTE_CHARS = /["'""''‘’“”『』「」‹›«»]/g;
 
 // 마크다운 헤더: 줄 시작 # ~ ###### + 공백 + 본문
@@ -33,7 +34,10 @@ const BRACKET_SECTION_RE = /^\s*\[([^\]]+?)\]\s*$/;
 //   🔑 이름은 한글·영문(공백·가운뎃점 허용, 12자) — 숫자·콜론을 막아 `[1] 도입`·`[카테고리]: …` 같은 메모를 화자로 오인하지 않는다.
 //   🔑 **그 줄에만** 적용한다 — 다음 줄 내레이션을 빈 줄 없이 이어 써도 화자가 새지 않게. 한 대사는 한 줄에.
 //   ⚠ 2026-09-24 실측: 채널 대본 폴더의 .md 에 이 모양 줄은 0개(레거시 무영향).
-const SPEAKER_LINE_RE = /^\s*\[([가-힣A-Za-z][가-힣A-Za-z ·]{0,11})\]\s+(\S.*)$/;
+//   🌏 일본어·베트남어 이름(가나·한자·라틴 확장)도 받는다(2026-09-26). 숫자·콜론 금지는 그대로.
+const SPEAKER_LINE_RE = /^\s*\[([가-힣A-Za-z぀-ヿ一-鿿À-ɏḀ-ỿ][가-힣A-Za-z぀-ヿ一-鿿À-ɏḀ-ỿ ·・]{0,11})\]\s+(\S.*)$/;
+// 🌏 도입부 표제 — 한국어 「도입」 + 일본어·베트남어 표기(2026-09-26). 한국어 대본에는 영향 없다(더 잡을 뿐).
+const INTRO_HEAD_RE = /도입|導入|イントロ|mở đầu|giới thiệu/i;
 
 // TTS 가 발음 어색한 특수문자 제거 — 일반 문장기호는 보존, 이모지/기호 제거.
 //   - 이모지 (다양한 유니코드 블록)
@@ -73,6 +77,14 @@ function _paragraphsToSentences(text) {
   for (const para of paragraphs) {
     const flat = para.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
     if (!flat) continue;
+    // 🌏 일본어·한자·베트남어 문단(한글이 한 글자도 없을 때만) — 전각 ！？ 로도 나누고, 가나·한자·베트남어 글자만 있는
+    //   문장도 버리지 않는다. 아래 옛 필터(한글·영문·숫자)는 일본어 문장을 **전부** 버렸다(2026-09-26 실측 0문장).
+    //   🔑 한국어 문단은 아래 옛 경로 그대로 — 한 글자도 바뀌지 않는다.
+    if (isForeignLang(detectLang(flat))) {
+      const fm = flat.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g) || [flat];
+      for (const m of fm) { const t = m.trim(); if (t && /[\p{L}\p{N}]/u.test(t)) sentences.push(t); }
+      continue;
+    }
     const matches = flat.match(/[^.!?。]+[.!?。]+|[^.!?。]+$/g);
     if (matches && matches.length > 0) {
       for (const m of matches) {
@@ -182,7 +194,7 @@ function splitIntoSentencesWithIntro(text) {
     if (m) {
       flush();
       // H1/H2 가 도입 영역을 토글, H3+ 는 상위 영역 유지 → '## 도입부' 아래 '### …' 들도 도입부로 인식.
-      if (m[1].length <= 2) introRegion = /도입/.test(m[2]);
+      if (m[1].length <= 2) introRegion = INTRO_HEAD_RE.test(m[2]);
       curIntro = introRegion;
       curLines = [];
     } else {
@@ -258,7 +270,7 @@ function splitHybrid(text) {
       // H1/H2 가 도입 영역 토글 + h2 섹션 키·제목 갱신, H3+ 는 상위 H2 값을 상속.
       // 📏 H1 뒤 글자 수 표기(`# 제목 / 15,761 자`)는 제목이 아니다 — 챕터·배지 이름에서 뺀다.
       const hText = headerM[1].length === 1 ? stripCharCountTail(headerM[2]) : headerM[2].trim();
-      if (headerM[1].length <= 2) { introRegion = /도입/.test(headerM[2]); h2Idx++; h2Title = hText; }
+      if (headerM[1].length <= 2) { introRegion = INTRO_HEAD_RE.test(headerM[2]); h2Idx++; h2Title = hText; }
       // 마크다운 헤더(섹션명)는 sectionTitle 로 보존 → 그룹 배지에 섹션 내용 표시.
       cur = newBlock({ mode: 'md', isIntro: introRegion, sectionTitle: hText });
     } else {
