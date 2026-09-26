@@ -14,11 +14,14 @@ function currentMode() {
   return (S.parsed && S.parsed.mode) || S.mode || 'longform';
 }
 // .vrew(및 SRT) 파일명 — 대본 파일명과 동일. (편이 여럿인 옛 스냅샷 호환용 _N 접미 유지)
-function vrewBaseName(pr) {
-  const src = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '')
-    : (S.parsed && S.parsed.fileTitle) || getModeProfile(currentMode()).vrewPrefix;
+// ctx = { parsed, scriptPath } — 활성 대본이 아닌 큐 항목(⬆ 큐 전체 업로드)도 같은 이름을 얻게. 없으면 활성 대본.
+function vrewBaseName(pr, ctx = null) {
+  const sp = ctx ? ctx.scriptPath : S.scriptPath;
+  const parsed = ctx ? ctx.parsed : S.parsed;
+  const src = sp ? path.basename(sp).replace(/\.md$/i, '')
+    : (parsed && parsed.fileTitle) || getModeProfile(currentMode()).vrewPrefix;
   const base = _safeFolder(src);
-  const n = (S.parsed && S.parsed.projects) ? S.parsed.projects.length : 1;
+  const n = (parsed && parsed.projects) ? parsed.projects.length : 1;
   return n > 1 ? `${base}_${pr.shortsNum}` : base;
 }
 // 로그 라벨 — 롱폼 단일 모드.
@@ -2502,10 +2505,12 @@ let ytPending = 0;
 S.ytAbort = false;
 function ytSend(p) { try { win.webContents.send('yt-progress', p); } catch (_) {} }
 /** 한 편 → 업로드 메타(제목·설명·태그). 음성 길이로 챕터를 계산하므로 DTO 를 그 자리에서 만든다. */
-function ytMetaFor(pr) {
-  const dto = P.toDTO(S.parsed);
+function ytMetaFor(pr, ctx = null) {
+  const parsed = ctx ? ctx.parsed : S.parsed;
+  const scriptPath = ctx ? ctx.scriptPath : S.scriptPath;
+  const dto = P.toDTO(parsed);
   const dp = ((dto && dto.projects) || []).find((x) => x.shortsNum === pr.shortsNum) || null;
-  const meta = require('./core/yt-packaging').buildUploadMeta({ scriptPath: S.scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr) });
+  const meta = require('./core/yt-packaging').buildUploadMeta({ scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr, ctx) });
   // 🌏 영상 언어 = 문장 다수결(일본어·베트남어). 한국어·판별 불가는 ko — 예전 그대로.
   meta.language = ytLangOf(pr);
   return meta;
@@ -2685,33 +2690,91 @@ ipcMain.handle('yt-open-url', (_e, u) => {
   shell.openExternal(s); return true;
 });
 // ⬆ 지금 대본의 MP4 를 올린다(자동 업로드를 끈 채널 · 실패 뒤 다시). MP4 는 이미 구워져 있어야 한다.
+/** 한 편의 업로드 파일 경로 — ⬆ 업로드(이 대본 · 큐 전체)가 같은 규칙을 쓴다. */
+function ytFileFor(pr, ctx, preset, isWb) {
+  const baseName = vrewBaseName(pr, ctx);
+  return isWb
+    ? path.join(wbFinalDir(preset) || ctx.outRoot, `${baseName}_whiteboard.mp4`)
+    : uploadMp4Path(baseName, preset, path.join(ctx.outRoot, `${baseName}.vrew`));
+}
 ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const preset = resolvePreset(args.presetName);
-  const chId = preset && preset.ytChannelId;
-  if (!chId) throw new Error('이 채널에 올릴 유튜브 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고르세요.');
   const YT = require('./core/youtube-upload');
-  let n = 0;
   const isWb = args.kind === 'whiteboard';   // ✏ 화이트보드 MP4 도 같은 버튼으로(v0.5.81)
-  for (const pr of S.parsed.projects) {
-    const baseName = vrewBaseName(pr);
-    const file = isWb
-      ? path.join(wbFinalDir(preset) || S.outRoot, `${baseName}_whiteboard.mp4`)
-      : uploadMp4Path(baseName, preset, path.join(S.outRoot, `${baseName}.vrew`));
-    if (!fs.existsSync(file)) throw new Error(`${isWb ? '화이트보드 MP4' : 'MP4'} 가 없습니다 — ④ 완성을 「${isWb ? '✏ 화이트보드 MP4' : '🎬 유튜브 MP4'}」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
-    const done = YT.findUploaded(chId, file);
-    if (done) {
-      const c = await dialog.showMessageBox(win, {
-        type: 'question', title: '이미 올린 영상', buttons: ['한 번 더 올리기', '취소'], defaultId: 1, cancelId: 1, noLink: true,
-        message: `이 파일은 ${done.at} 에 이미 올렸습니다.`, detail: `https://youtu.be/${done.videoId}\n\n한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다.`,
-      });
-      if (c.response !== 0) continue;
-    }
-    enqueueYtUpload({ file, channelId: chId, meta: ytMetaFor(pr) });
-    n++;
+  const kindName = isWb ? '화이트보드 MP4' : 'MP4';
+  // ⬆ 큐에 대본이 여럿이면 「큐 전체 / 이 대본만」을 묻는다(로이 2026-09-27: 하이디 12편을 칩마다 눌러 올려야 했다).
+  const q = S.modes[S.mode];
+  const qItems = (q && q.items) || [];
+  let all = false;
+  if (qItems.length > 1) {
+    const c = await dialog.showMessageBox(win, {
+      type: 'question', title: '유튜브 업로드', buttons: [`큐 전체 ${qItems.length}편`, '이 대본만', '취소'], defaultId: 0, cancelId: 2, noLink: true,
+      message: `큐에 대본이 ${qItems.length}개 있습니다. 어디까지 올릴까요?`,
+      detail: '큐 전체 = 각 대본의 채널(업로드채널·업로드 폴더)로 차례로 비공개 업로드합니다.\n이미 올린 파일과 MP4 가 없는 대본은 건너뛰고 로그에 남깁니다.',
+    });
+    if (c.response === 2) return { queued: 0, cancelled: true };
+    all = c.response === 0;
   }
-  return { queued: n };
+
+  if (!all) {
+    const preset = resolvePreset(args.presetName);
+    const chId = preset && preset.ytChannelId;
+    if (!chId) throw new Error('이 채널에 올릴 유튜브 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고르세요.');
+    const ctx = { parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot };
+    let n = 0;
+    for (const pr of S.parsed.projects) {
+      const file = ytFileFor(pr, ctx, preset, isWb);
+      if (!fs.existsSync(file)) throw new Error(`${kindName} 가 없습니다 — ④ 완성을 「${isWb ? '✏ 화이트보드 MP4' : '🎬 유튜브 MP4'}」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
+      const done = YT.findUploaded(chId, file);
+      if (done) {
+        const c = await dialog.showMessageBox(win, {
+          type: 'question', title: '이미 올린 영상', buttons: ['한 번 더 올리기', '취소'], defaultId: 1, cancelId: 1, noLink: true,
+          message: `이 파일은 ${done.at} 에 이미 올렸습니다.`, detail: `https://youtu.be/${done.videoId}\n\n한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다.`,
+        });
+        if (c.response !== 0) continue;
+      }
+      enqueueYtUpload({ file, channelId: chId, meta: ytMetaFor(pr, ctx) });
+      n++;
+    }
+    return { queued: n };
+  }
+
+  const { jobs, skipped } = planQueueUploads(qItems, {
+    headerPresetName: args.presetName, resolvePreset, kindName,
+    fileFor: (pr, ctx, preset) => ytFileFor(pr, ctx, preset, isWb),
+    exists: (f) => fs.existsSync(f), findUploaded: (ch, f) => YT.findUploaded(ch, f),
+  });
+  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx) });
+  log(`⬆ 큐 전체 업로드 — ${jobs.length}편 줄 세움${skipped.length ? ` · 건너뜀 ${skipped.length}편` : ''}`);
+  for (const s of skipped) log(`   ⏭ ${s}`);
+  return { queued: jobs.length, skipped: skipped.length };
 });
+/**
+ * ⬆ 큐 전체 업로드 계획 — 무엇을 어느 채널로 올리고 무엇을 왜 건너뛰나(부작용 없음 · test:youtube 가 원문을 실행한다).
+ *   채널은 **항목 우선**(없으면 헤더 채널 — CLAUDE.md 큐 설정 우선순위) · 대본을 바꾸지 않고 항목의 parsed 로 계산.
+ *   이미 올린 파일은 묻지 않고 건너뛴다(한 편씩 「한 번 더」를 물으면 일괄의 뜻이 없다 — 다시 올리려면 그 대본만).
+ */
+function planQueueUploads(items, o) {
+  const jobs = [], skipped = [];
+  for (const it of items || []) {
+    const name = it.scriptPath ? String(it.scriptPath).split(/[\\/]/).pop().replace(/\.md$/i, '') : '대본';
+    const pn = (it.settings && it.settings.presetName) || o.headerPresetName;
+    const preset = o.resolvePreset(pn);
+    const chId = preset && preset.ytChannelId;
+    if (!it.parsed || !it.parsed.projects) { skipped.push(`${name} — 대본을 읽지 못함`); continue; }
+    if (!chId) { skipped.push(`${name} — 채널 「${pn || '?'}」에 업로드채널이 없음`); continue; }
+    const ctx = { parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot };
+    for (const pr of it.parsed.projects) {
+      const file = o.fileFor(pr, ctx, preset);
+      if (!o.exists(file)) { skipped.push(`${name} — ${o.kindName} 없음 (${file})`); continue; }
+      if (jobs.some((j) => j.channelId === chId && j.file === file)) continue;   // 같은 대본이 큐에 두 번
+      const done = o.findUploaded(chId, file);
+      if (done) { skipped.push(`${name} — ${done.at} 에 이미 올림 (https://youtu.be/${done.videoId})`); continue; }
+      jobs.push({ pr, ctx, file, channelId: chId });
+    }
+  }
+  return { jobs, skipped };
+}
 
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
 /** ✏ 화이트보드 완성물 폴더 — 채널 「화이트보드」 → 윈도우 다운로드 → ''(작업 폴더에 그대로). 렌더·⬆ 업로드가 같은 값을 쓴다. */
@@ -5011,13 +5074,23 @@ function serializeQueue() {
   };
   return { version: 1, mode: S.mode, longform: ser('longform'), book: ser('book') };
 }
+// ♻ 마지막으로 **비어 있지 않던** 큐 — 앱은 빈 화면으로 시작하므로(로이 2026-06-22) workspace.json 은 곧 빈 큐로 덮인다.
+//   그래서 대본이 하나라도 있을 때마다 이 파일에도 써 두고, 「♻ 지난 큐」 버튼이 여기서 되살린다(로이 2026-09-27:
+//   재시작했더니 열어 둔 하이디 13편 큐가 사라졌다). 빈 큐로는 절대 덮지 않는다.
+function lastWorkspaceFile() { return path.join(os.homedir(), '.priming-maker', 'workspace.last.json'); }
+function queueItemCount(ws) { return ['longform', 'book'].reduce((n, m) => n + (((ws && ws[m] && ws[m].items) || []).length), 0); }
 function writeWorkspace() {
   try {
     const ws = serializeQueue();
     const f = workspaceFile(); const tmp = f + '.tmp';
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(ws, null, 2), 'utf8'); fs.renameSync(tmp, f);
+    const body = JSON.stringify(ws, null, 2);
+    fs.writeFileSync(tmp, body, 'utf8'); fs.renameSync(tmp, f);
+    if (queueItemCount(ws) > 0) { const lf = lastWorkspaceFile(); fs.writeFileSync(lf + '.tmp', body, 'utf8'); fs.renameSync(lf + '.tmp', lf); }
   } catch { /* ignore */ }
+}
+function readLastWorkspace() {
+  try { const ws = JSON.parse(fs.readFileSync(lastWorkspaceFile(), 'utf8')); return queueItemCount(ws) > 0 ? ws : null; } catch { return null; }
 }
 // 앱 시작 시 큐 복원 — 저장된 대본들을 다시 파싱(+작업본 복원)해 큐 재구성.
 function applyWorkspace(ws, opts = {}) {
@@ -5929,6 +6002,21 @@ ipcMain.handle('load-queue', async () => {
   writeWorkspace();
   log(`📂 큐 불러오기: ${path.basename(r.filePaths[0])} — ${n}개 대본 복구`);
   return { ok: true, count: n, dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), mode: S.mode };
+});
+// ♻ 지난 큐 — 빈 화면에서 한 번에 되살린다(파일 고르기 없이). 사라진 대본은 applyWorkspace 가 건너뛴다.
+ipcMain.handle('last-queue-info', () => {
+  const ws = readLastWorkspace();
+  if (!ws) return { count: 0 };
+  const items = (ws.longform && ws.longform.items) || [];
+  return { count: queueItemCount(ws), first: items[0] ? path.basename(items[0].scriptPath || '').replace(/\.md$/i, '') : '' };
+});
+ipcMain.handle('restore-last-queue', async () => {
+  const ws = readLastWorkspace();
+  if (!ws) return { ok: false, reason: 'none', queue: queueDTO() };
+  const n = applyWorkspace(ws, { clear: true });
+  writeWorkspace();
+  log(`♻ 지난 큐 다시 열기 — ${n}개 대본`);
+  return { ok: n > 0, count: n, dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), mode: S.mode };
 });
 ipcMain.handle('select-queue-item', (_e, args = {}) => {
   const id = args && args.id;

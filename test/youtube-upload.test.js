@@ -252,6 +252,51 @@ const server = http.createServer(async (req, res) => {
   ok(M.includes("ipcMain.handle('yt-reorder'") && PL.includes('ytReorder:'), 'IPC·preload yt-reorder');
   ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '▶ 유튜브 채널 줄을 끌어서 놓기');
 
+  console.log('\n[10b] ⬆ 큐 전체 업로드 — planQueueUploads 원문 실행');
+  {
+    const i0 = M.indexOf('function planQueueUploads(');
+    let d = 0, j = i0, st = false;
+    for (; j < M.length; j++) { if (M[j] === '{') { d++; st = true; } else if (M[j] === '}') { d--; if (st && !d) { j++; break; } } }
+    const plan = new Function(M.slice(i0, j) + '\nreturn planQueueUploads;')();
+    const presets = { 서재: { ytChannelId: 'UCseo' }, 고전: { ytChannelId: 'UCgo' }, 빈채널: {} };
+    const mk = (id, pn, projects = 1) => ({ scriptPath: `D:\\대본\\${id}.md`, outRoot: `G:\\out\\${id}`, settings: pn ? { presetName: pn } : null,
+      parsed: { projects: Array.from({ length: projects }, (_, k) => ({ shortsNum: k + 1 })) } });
+    const have = new Set(['A', 'B', 'C', 'E', 'F'].map((x) => `U:\\${x}.mp4`));
+    const uploaded = { 'UCseo|U:\\B.mp4': { at: '2026-09-27 07:59', videoId: 'vid1' } };
+    const items = [mk('A', '서재'), mk('B', '서재'), mk('C', null), mk('D', '서재'), mk('E', '빈채널'), { scriptPath: 'X.md', settings: { presetName: '서재' } }, mk('A', '서재'), mk('F', '고전')];
+    const r = plan(items, {
+      headerPresetName: '고전', kindName: 'MP4', resolvePreset: (n) => presets[n] || null,
+      fileFor: (pr, ctx) => `U:\\${ctx.scriptPath.split('\\').pop().replace('.md', '')}.mp4`,
+      exists: (f) => have.has(f), findUploaded: (ch, f) => uploaded[`${ch}|${f}`] || null,
+    });
+    const got = r.jobs.map((x) => `${x.file.slice(3, 4)}→${x.channelId}`).join(' ');
+    ok(got === 'A→UCseo C→UCgo F→UCgo', `올릴 것 = A(서재) · C(항목 채널 없음 → 헤더 고전) · F(고전) — 실제 「${got}」`);
+    ok(r.skipped.some((s) => /^B — 2026-09-27 07:59 에 이미 올림 \(https:\/\/youtu\.be\/vid1\)/.test(s)), '이미 올린 B 는 묻지 않고 건너뛴다(주소 표시)');
+    ok(r.skipped.some((s) => /^D — MP4 없음/.test(s)), 'MP4 없는 D 는 건너뛰고 이유를 남긴다(던지지 않는다 — 나머지는 올라간다)');
+    ok(r.skipped.some((s) => /^E — 채널 「빈채널」에 업로드채널이 없음/.test(s)), '업로드채널 없는 채널은 건너뜀');
+    ok(r.skipped.some((s) => /^X — 대본을 읽지 못함/.test(s)), 'parsed 없는 항목은 건너뜀');
+    ok(r.jobs.filter((x) => x.file === 'U:\\A.mp4').length === 1, '큐에 같은 대본이 두 번이어도 한 번만 올린다');
+    ok(r.jobs[0].ctx.scriptPath === 'D:\\대본\\A.md' && r.jobs[0].ctx.outRoot === 'G:\\out\\A', '메타·파일은 **그 항목**의 대본·출력폴더로(활성 대본 아님)');
+    // 판정력 — 항목 채널이 헤더를 이긴다: 규칙을 뒤집으면 A 가 고전으로 가야 한다
+    const flip = plan([mk('A', '서재')], { headerPresetName: '고전', kindName: 'MP4', resolvePreset: (n) => presets[n === '서재' ? '고전' : n] || null,
+      fileFor: () => 'U:\\A.mp4', exists: () => true, findUploaded: () => null });
+    ok(flip.jobs[0].channelId === 'UCgo', '판정력: 채널 해석이 바뀌면 결과도 바뀐다(헛단언 아님)');
+    ok(/if \(qItems\.length > 1\) \{[\s\S]{0,200}buttons: \[`큐 전체 \$\{qItems\.length\}편`, '이 대본만', '취소'\]/.test(M), '큐에 대본이 여럿이면 ⬆ 업로드가 「큐 전체 / 이 대본만」을 묻는다');
+    ok(/for \(const j of jobs\) enqueueYtUpload\(\{ file: j\.file, channelId: j\.channelId, meta: ytMetaFor\(j\.pr, j\.ctx\) \}\)/.test(M), '큐 전체는 항목 ctx 로 메타(제목·챕터)를 만든다');
+    ok(/function vrewBaseName\(pr, ctx = null\)/.test(M) && /function ytMetaFor\(pr, ctx = null\)/.test(M), 'vrewBaseName·ytMetaFor 가 ctx 를 받는다(없으면 활성 대본 — 기존 호출 그대로)');
+  }
+
+  console.log('\n[10c] ♻ 지난 큐 — 빈 큐로 덮이지 않는 사본');
+  {
+    ok(/if \(queueItemCount\(ws\) > 0\) \{ const lf = lastWorkspaceFile\(\);/.test(M), 'workspace.last.json 은 대본이 있을 때만 쓴다(빈 큐로 덮지 않는다)');
+    ok(!/app\.whenReady\(\)[\s\S]{0,4000}applyWorkspace\(readLastWorkspace/.test(M), '🔑 시작은 여전히 빈 화면(로이 2026-06-22) — 자동 복원 안 함');
+    ok(M.includes("ipcMain.handle('last-queue-info'") && M.includes("ipcMain.handle('restore-last-queue'"), 'IPC last-queue-info · restore-last-queue');
+    ok(PL.includes('lastQueueInfo:') && PL.includes('restoreLastQueue:'), 'preload lastQueueInfo · restoreLastQueue');
+    ok(A.includes('data-testid="last-queue"') && A.includes('onClick={restoreLastQueue}'), '큐가 비면 「♻ 지난 큐 다시 열기」 버튼');
+    const qc = (() => { const i = M.indexOf('function queueItemCount('); return new Function(M.slice(i, M.indexOf('\n', i)) + '\nreturn queueItemCount;')(); })();
+    ok(qc({ longform: { items: [1, 2] }, book: { items: [3] } }) === 3 && qc({ longform: { items: [] } }) === 0 && qc(null) === 0, 'queueItemCount 원문 — 롱폼+출판 합 · 빈 값 0');
+  }
+
   console.log('\n[11] ↕ 채널 순서(reorderChannels)');
   {
     const d0 = JSON.parse(fs.readFileSync(YT.authFile(), 'utf8'));

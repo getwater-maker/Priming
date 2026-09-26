@@ -58,6 +58,7 @@
 - 출력: `<채널 출력폴더>/<대본이름>/` 아래 **`media-N`(그림·영상 `NN.png`·`NN.mp4`·`NN_1080.mp4`) · `tts-N`(`<문장번호>.wav/mp3`) · `subtitles-N`** + 루트 `.vrew`. 롱폼은 N=1(`shortsNum`·`shortsDirs` 이름은 옛 쇼츠 잔재 — ⛔ 바꾸지 말 것, 스냅샷·IPC 키다).
 - `~/.shots-maker/` 앱 상태(logs · tts-cache · electron userData · anti-detect) · `~/.priming-maker/` 설정(projects/*.smproj.json = **작업본, ⛔ 지우지 말 것** · comfy-*-config · *-accounts · image-rotation · youtube-auth · workspace.json) · `~/.flow-app/` TTS 채널·참조음성·스타일(`tts-presets.json`·`styles.json`·`channel-styles.json`).
 - 작업본(.smproj) 키 = **대본 파일명**(경로 아님). 대본을 옮겨도 이름이 같으면 이어받는다.
+- ⛔ **시작은 빈 화면**(로이 2026-06-22 — 큐 자동 복원 안 함). 지난 큐는 `workspace.last.json`(대본이 있을 때만 씀 · 빈 큐로 덮지 않음) → 큐 자리 「♻ 지난 큐 다시 열기」.
 - 🔑 **테스트는 로이 앱과 같은 userData·localStorage 를 쓴다** — 보기 설정·채널·workspace 를 바꾸는 E2E 는 적어 두고 끝날 때 되돌린다. 임시 채널·임시 출력폴더를 쓰고 지운다.
 
 ## 5. 외부 서버 (메인 PC)
@@ -131,7 +132,7 @@
 - **유튜브 MP4 = `.vrew` 를 읽어 굽는다**(`core/vrew-render.js`). ⛔ 앱 모델에서 렌더 규칙을 다시 계산하지 않는다(두 벌이 된다). 보정값(글자 ×0.72 · 여백 공식)·함정(zoompan 좌표 · mp3 선언 길이 맞춤 · web 트랙 · 폭 1.008 미반영)은 작업노트 2026-09 「Vrew 없이 유튜브 MP4」. 인코딩 `-bf 0` + maxrate(켄번스 떨림), ⛔ `-aac_coder fast` 금지(음질). 투명 PNG 는 `yuva420p`. 소리 없는 영상은 `hasAudioStream` 으로 거른다. 새 트랙 종류가 생기면 렌더러도 그려야 한다.
 - 📥 Vrew 음성 가져오기(`core/vrew-audio.js`): .vrew 는 **읽기만**. 음성 경로 = `clip.words[].assetIds → assets → tracks.mediaId → zip media/<mediaId>.*`(⚠ `files[].name` 은 사람용 이름 · `clip.assetIds` 엔 음성이 없다) · 자막은 `words` 우선(captions 는 남의 문장일 수 있다) · 문장부호 무시 매칭 · 한 문장 = clip 여러 개면 이어붙인다 · 게이트는 **쓴 clip 비율 80%**(일부만 만든 .vrew 는 통과).
 - 🔴 **ffmpeg 에 SRT 를 물리면 384x288 좌표계로 3.75배 커진다** → 자막은 PlayRes 를 영상 해상도로 박은 ASS 로. 테스트는 1080 이상에서 화소로 잰다.
-- 유튜브 업로드: 전용 GCP 프로젝트 `priming-upload`(youtube.upload+readonly). ⛔ 분석용 `adonairoy` 프로젝트 토큰 사용 금지. 비공개 + `containsSyntheticMedia` + ko(⚠ 언어 고정 — 다국어 시 분기 필요). 제목·설명·태그는 아도나이로이 패키징 파일. 챕터는 `core/yt-chapters.js` 하나(⏱ 창과 공유), 업로드 전 MP4 실측 길이와 대조. ⚠ client_secret 을 저장소에 넣지 말 것.
+- 유튜브 업로드: 전용 GCP 프로젝트 `priming-upload`(youtube.upload+readonly). ⛔ 분석용 `adonairoy` 프로젝트 토큰 사용 금지. 비공개 + `containsSyntheticMedia` + ko(⚠ 언어 고정 — 다국어 시 분기 필요). 제목·설명·태그는 아도나이로이 패키징 파일. 챕터는 `core/yt-chapters.js` 하나(⏱ 창과 공유), 업로드 전 MP4 실측 길이와 대조. ⚠ client_secret 을 저장소에 넣지 말 것. ⬆ 큐 전체 = `planQueueUploads` 한 곳(채널 항목 우선 · 이미 올린 파일·MP4 없음은 건너뛰고 로그). API 한도 = **하루 100편**(videos.insert 전용 버킷, 편당 1 — 옛 「1600단위·6편」 아님).
 - 화이트보드 MP4: 장면 = 그룹(결정론 · 분할은 문장 경계), 주석은 있으면 건너뛰고 그림 지문(`imageSig`)이 바뀌면 영역 재추출, 굶는 영역은 배정 순서로 해결(`findStarved`), 음성은 장면 실측 길이에 맞춰 얹고, 완성물만 다운로드 폴더로. 벤더링 `whiteboard/` 는 여기서 고치지 않는다(상류 `D:\화이트보드` → PATCHES.md). 화풍 이미지 단계는 미완(후처리 우선). 장면 길이 = 그 장면 문장 TTS 합(A/V 싱크) · 영역 하나 2.5초 이상 · 화이트보드로 낼 대본은 H3 당 문장 6개 안팎(25~30초) · 앱 이미지 스타일(스케치 등)은 화이트보드와 충돌한다.
 
 ### 자막
@@ -200,7 +201,7 @@
 - 원칙: **원문 함수를 뽑아 실행**(복사본 금지) · A/B 역검증(고치기 전 코드로 되돌리면 실패하는지) · 판정력 검증(틀린 입력이 실제로 다르게 나오는지 — 헛단언 방지) · 실측 가능한 것은 실측(ffmpeg 화소·volumedetect·ASR).
 - 필수 회귀: main.js 수정 → `test:makeall` · 화면 수정 → `test:workspace` · 자막 → `test:caption`·`test:capfmt` · TTS → `test:tts` · ComfyUI → `test:comfy` · 출력 → `test:mp4`·`test:vrewaudio`.
 - 스크립트 목록은 `package.json`(test:* 40여 개). 알려진 기존 실패: `img-rotate-resume`(27/34 — v0.3.84 부터, 원인 미확정) · `remotion-ui.smoke` 채널편집 대기 타임아웃 · `comfy-video-minimax` 의 「기본 활성」 단언(로이 PC 설정을 읽음).
-- 🔴 E2E 는 로이 앱과 같은 `~/.priming-maker/workspace.json`(큐 목록)을 덮는다 — **로이 큐가 도는 중엔 돌리지 않고**, 돌릴 땐 전후 백업·복원한다(v0.5.79 사고). 헤더에 버튼을 더하면 **대본을 연 상태**의 1366px 한 줄을 본다(`test:workspace`).
+- 🔴 E2E 는 로이 앱과 같은 `~/.priming-maker/workspace.json`·`workspace.last.json`(큐 목록·지난 큐)을 덮는다 — **로이 큐가 도는 중엔 돌리지 않고**, 돌릴 땐 전후 백업·복원한다(v0.5.79 사고). 헤더에 버튼을 더하면 **대본을 연 상태**의 1366px 한 줄을 본다(`test:workspace`).
 - 버튼·라벨을 고치면 그 라벨·title 로 찾는 테스트를 함께 grep 한다(완전 일치 선택자가 조용히 깨진 사고 여러 번). 화면 배치 검증은 `elementFromPoint` 로 **실제로 눌리는지**까지 본다.
 - E2E 는 Playwright `_electron` · `app.evaluate` 로 `dialog.showOpenDialog` 를 스텁해 실제 파일을 연다. E2E 는 상태를 바꾸는 블록을 뒤에 둔다.
 

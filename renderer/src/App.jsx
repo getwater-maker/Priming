@@ -436,6 +436,7 @@ export default function App() {
   // ⏳ 그림·영상 불러오기 진행 — 작업했던 대본을 열면 썸네일이 한동안 검게 비어 있다(구글드라이브에서 받아 오는 중).
   //   화면의 그림·영상 칸이 **실제로 다 그려질 때까지** 가운데 창으로 보여 준다(0.4초 안에 끝나면 띄우지 않는다).
   const [mediaLoad, setMediaLoad] = useState(null);   // { done, total, img, imgT, vid, vidT, sec }
+  const [lastQ, setLastQ] = useState(null);   // ♻ 지난 큐 { count, first } — 큐가 비었을 때만 버튼으로 보인다
   const mediaLoadKeyRef = useRef('');
   const mediaLoadHiddenRef = useRef(false);   // 「숨기기」 — 이 대본이 다 뜰 때까지 다시 띄우지 않는다(세기·로그는 계속)
   const [playerOpen, setPlayerOpen] = useState(false);
@@ -817,6 +818,20 @@ export default function App() {
       setStatus(`📂 큐 불러오기 — ${r.count}개 대본 복구`);
     } catch (e) { logline('큐 불러오기 오류: ' + e.message); }
   }
+  // ♻ 지난 큐 — 앱은 빈 화면으로 시작한다(로이 2026-06-22). 마지막으로 열어 둔 큐를 버튼 하나로 되살린다(2026-09-27).
+  async function restoreLastQueue() {
+    try {
+      const r = await api.restoreLastQueue();
+      if (!r || !r.ok) { setStatus('되살릴 지난 큐가 없습니다'); setLastQ(null); return; }
+      if (r.queue) setQueue(r.queue);
+      setMode(r.mode === 'book' ? 'book' : 'longform');
+      if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+      const m = (r.mode === 'book') ? 'book' : 'longform';
+      const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
+      if (it && it.settings) applySettings(it.settings);
+      setStatus(`♻ 지난 큐 — ${r.count}개 대본 다시 열기`);
+    } catch (e) { logline('지난 큐 오류: ' + e.message); }
+  }
   // 저장 폴더(saves) 전체삭제 — 확인 팝업 필수
   async function deleteSaves() {
     if (!uiConfirm('저장 폴더(saves)의 「작업·큐 저장 파일」을 모두 삭제합니다.\n\n⚠ 되돌릴 수 없습니다.\n(진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다.)\n\n정말 모두 삭제할까요?')) return;
@@ -1169,6 +1184,14 @@ export default function App() {
     try { const d = await api.mergeGroup({ shortsNum, groupNum }); setDto(d); setStatus(`⤒ G${groupNum} 을 G${groupNum - 1} 에 합쳤습니다 — G${groupNum - 1} 그림을 이어 씁니다`); }
     catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('⤒ 합치기: ' + m); setStatus(m); }
   }
+  // ♻ 큐가 비면 지난 큐가 있는지 본다(시작 직후 · 🆕 초기화 뒤 · 마지막 대본 제거 뒤)
+  const _qEmpty = !(queue && queue.longform && queue.longform.items && queue.longform.items.length);
+  useEffect(() => {
+    if (!_qEmpty) { setLastQ(null); return; }
+    let alive = true;
+    api.lastQueueInfo().then((r) => { if (alive) setLastQ(r && r.count ? r : null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [_qEmpty]);
   // ⏳ 대본이 바뀌면(열기·큐 선택) 화면의 그림·영상이 다 뜰 때까지 센다
   const _mlKey = dto && dto.projects && !isBk && !isRx ? (dto.fileTitle || '') + '|' + ((queue && queue[mode] && queue[mode].activeId) || '') : '';
   useEffect(() => {
@@ -2375,7 +2398,11 @@ export default function App() {
     await api.ytDisconnect(c.id); ytLoad();
   }
   async function runYtUpload() {
-    try { const r = await api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' }); if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)`); }
+    try {
+      const r = await api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' });
+      if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)${r.skipped ? ` · 건너뜀 ${r.skipped}건(로그 참고)` : ''}`);
+      else if (r && r.skipped) setStatus(`⬆ 올릴 영상이 없습니다 — ${r.skipped}건 건너뜀(로그 참고)`);
+    }
     catch (e) { uiAlert(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
   }
   async function pickOutWhiteboard() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outWhiteboard: d })); }
@@ -3675,6 +3702,13 @@ export default function App() {
           ) : isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
           ) : (<>
+          {mode === 'longform' && _qEmpty && lastQ && (
+            <div className="qstrip" data-testid="last-queue">
+              <span className="qlabel">지난 큐</span>
+              <button className="ghost" title={'마지막으로 열어 둔 대본 목록을 그대로 다시 엽니다(작업본도 이어받습니다)\n첫 대본: ' + (lastQ.first || '')}
+                onClick={restoreLastQueue}>♻ 지난 큐 다시 열기 ({lastQ.count}개)</button>
+            </div>
+          )}
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
               <span className="qlabel">롱폼 큐 ({queue[mode].items.length})</span>
