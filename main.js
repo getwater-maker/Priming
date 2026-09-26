@@ -2746,7 +2746,7 @@ ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
 //     공용 TTS 매니저가 깨진다(v0.2.57 사고).
 ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트보드 렌더', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: true });
+  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: args.openVrew !== false });
   return P.toDTO(S.parsed);
 }));
 
@@ -5759,7 +5759,8 @@ async function runMakeAllCore(opts = {}) {
 
 
 ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
-  await runMakeAllCore({ ...args, openVrew: true });
+  // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
+  await runMakeAllCore({ ...args, openVrew: args.openVrew !== false });
   return P.toDTO(S.parsed);
 }));
 

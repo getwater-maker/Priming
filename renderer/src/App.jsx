@@ -368,7 +368,10 @@ export default function App() {
   //     새 값을 고르면 저장·복원 때 조용히 .vrew 로 되돌아갔다(v0.3.50 「골라도 되돌아가던 것」과 같은 계열).
   const [outTarget, setOutTarget] = useState('vrew');
   const [wbCfg, setWbCfg] = useState(null);   // 화이트보드 렌더 설정(출력 긴변·동시 개수) — PC 별 파일
-  const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
+  // 📂 완성 후 열기 — 만든 .vrew·MP4 를 바로 열지(ON, 기본) · 열지 않을지(OFF — 자는 동안 돌릴 때 MP4 가 재생되지 않게, 로이 2026-09-26).
+  //   단건 ⚡ 만들기와 큐 순차 제작이 **같은 체크 하나**를 쓴다. PC 별로 기억한다(pm.openAfterMake).
+  const [openEachVrew, setOpenEachVrew] = useState(() => lsGet('pm.openAfterMake', '1') !== '0');
+  const pickOpenAfterMake = (on) => { setOpenEachVrew(on); lsSet('pm.openAfterMake', on ? '1' : '0'); };
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
   const [splitOpts, setSplitOpts] = useState({ intro: 3, main: 10, short: 10, long: 20, mode: 'h3' });
@@ -984,6 +987,7 @@ export default function App() {
       aiNotice, // 사용자 선택(작업바 토글)
       outMode: effOutMode(),  // 전체 / 음성만 / 화면만 (화이트보드는 늘 전체)
       outTarget, // .vrew / ✏ 화이트보드 MP4
+      openVrew: openEachVrew, // 📂 완성 후 열기(체크 해제 = 다 만들어도 열지 않는다)
     };
   }
   // ✏ 화이트보드는 음성·그림이 **둘 다** 있어야 만들어진다 → 출력 방식을 늘 「전체」로 본다
@@ -3456,7 +3460,7 @@ export default function App() {
           {!noProduction && (<>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
-              {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
+              {qc >= 1 && <label className="chk" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>}
             </>); })()}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
           </>)}

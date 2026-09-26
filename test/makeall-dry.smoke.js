@@ -137,6 +137,23 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     const ttsDir = path.join(TMP, path.basename(SCRIPT_PATH).replace(/\.md$/, ''), 'tts-1');
     const wavs = fs.existsSync(ttsDir) ? fs.readdirSync(ttsDir).filter((f) => /\.(wav|mp3)$/i.test(f)) : [];
     ok(wavs.length >= 3, '무음 음성 파일 ' + wavs.length + '개 생성(문장 수만큼)');
+
+    // ⑧ 📂 「완성 후 열기」(v0.5.79) — 해제하면 .vrew·MP4 를 **열지 않는다**(자는 동안 MP4 가 재생되던 문제).
+    //    🎤 음성만(audio)은 이미지 게이트가 없어 .vrew 까지 간다 → shell.openPath 호출 수를 센다.
+    //    판정력: 같은 조건에서 openVrew:true 면 1번 이상 열려야 한다(예전 코드는 false 를 무시하고 늘 열었다).
+    await app.evaluate(({ shell }) => { global.__opened = []; shell.openPath = async (p) => { global.__opened.push(p); return ''; }; });
+    const runAudio = (open) => win.evaluate(async ({ name, open }) => {
+      try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 7, aiNotice: false, outMode: 'audio', openVrew: open }); return 'ok'; }
+      catch (e) { return 'ERR: ' + e.message; }
+    }, { name: CH, open });
+    const rOff = await runAudio(false);
+    const openedOff = await app.evaluate(() => global.__opened.slice());
+    const vrewMade = fs.readdirSync(TMP).some((f) => /\.vrew$/i.test(f)) || fs.readdirSync(path.join(TMP, path.basename(SCRIPT_PATH).replace(/\.md$/, ''))).some((f) => /\.vrew$/i.test(f));
+    ok(rOff === 'ok' && vrewMade, '🎤 음성만 → .vrew 까지 만들어짐: ' + rOff);
+    ok(openedOff.length === 0, '📂 완성 후 열기 해제 → 아무것도 열지 않음 (' + openedOff.length + '번)');
+    const rOn = await runAudio(true);
+    const openedOn = await app.evaluate(() => global.__opened.slice());
+    ok(rOn === 'ok' && openedOn.length >= 1 && /\.vrew$/i.test(openedOn[0] || ''), '📂 완성 후 열기 체크 → .vrew 를 연다 (' + openedOn.length + '번, 판정력)');
   } finally {
     // 정리 — 임시 채널 삭제 후 앱 종료, 임시 폴더 삭제
     try {
