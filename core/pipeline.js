@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const Lang = require('./lang'); // 🌏 문장 언어 판별(일본어·베트남어 — 한국어 경로 무변경)
+const BC = require('./tts-backcheck'); // 🔎 역대조 게이트(일본어·베트남어만)
 const { spawnSync } = require('child_process');
 
 const { getModeProfile, normalizeMode } = require('./mode-profiles');
@@ -343,7 +344,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사. (force 면 건너뜀)
     //   🔑 키는 원문이 아니라 **실제 합성될 문자열**(발음사전+정규화 적용) 기준이다. 원문으로
     //     잡으면 발음사전·정규화를 고쳐도 같은 키가 나와 **옛 음성이 되살아난다**(2026-08-25).
-    const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.text) : s.text;
+    const keyText = typeof ttsMgr.processText === 'function' ? ttsMgr.processText(s.ttsText || s.text) : (s.ttsText || s.text);   // 🇯🇵 루비 읽기가 있으면 그것(ttsText)으로
     // 🔑 정규화 목표도 키에 넣는다 — 안 넣으면 목표를 바꿔도 **옛 음량의 캐시가 되살아난다**
     //   (v0.3.43 에서 발음사전을 고쳐도 옛 음성이 나오던 것과 같은 계열).
     const sOpts = optsFor(s);
@@ -374,7 +375,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       // 🔑 **검사를 통과한 뒤에만 `res` 에 담는다.** 먼저 대입하면 assertRealAudio 가 던져도 빈 결과가
       //   res 에 남아, 루프를 다 쓰고 나온 뒤 `if (!res)` 를 통과해 **그 빈 음성이 그대로 저장된다**
       //   (테스트 [6]-ⓑ 가 실제로 잡았다). provider 가 던지는 경우엔 안 드러나는 구멍이다.
-      try { const r = await ttsMgr.synthesize(s.text, attemptOpts); assertRealAudio(r, s.num); res = r; break; }
+      try { const r = await ttsMgr.synthesize(s.ttsText || s.text, attemptOpts); assertRealAudio(r, s.num); res = r; break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
         // 🔴 **빈 음성은 같은 입력으로 다시 보내도 똑같이 빈 음성이 온다** — 시드를 주면 모델이 결정적이다.
@@ -408,6 +409,29 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
         break;
       }
       continue;   // 다음 문장으로
+    }
+    // 🔎 역대조 게이트(일본어·베트남어 문장만) — 받아쓰기로 원문대로 들리는지 재고, 미달이면 다른 시드로 다시 만든다.
+    //   🔑 한국어 문장은 타지 않는다(Lang.isForeignLang). 받아쓰기가 실패·환각이면 「확인 불가」로 두고 다시 만들지 않는다.
+    const bcLang = Lang.detectLang(s.text);
+    if (Lang.isForeignLang(bcLang) && !(abortSignal && abortSignal())) {
+      let best = { res, chk: await BC.checkAudio(res.mp3Buffer, s.text, bcLang, workDir, null, s.ttsText), seed: seedOverride };
+      let retries = 0;
+      while (!best.chk.ok && !best.chk.unknown && retries < BC.MAX_RETRY && !(abortSignal && abortSignal())) {
+        retries++;
+        const sd = Math.floor(Math.random() * 2147483646) + 1;
+        try {
+          const r2 = await ttsMgr.synthesize(s.ttsText || s.text, { ...sOpts, seed: sd });
+          assertRealAudio(r2, s.num);
+          const c2 = await BC.checkAudio(r2.mp3Buffer, s.text, bcLang, workDir, null, s.ttsText);
+          if (c2.score != null && c2.score > (best.chk.score || 0)) best = { res: r2, chk: c2, seed: sd };
+          if (c2.ok) break;
+        } catch (_) { /* 재합성 실패는 무시 — 처음 것을 쓴다 */ }
+      }
+      res = best.res;
+      if (best.seed != null) seedOverride = best.seed;
+      const d = best.chk.detail || {};
+      s.backcheck = { lang: bcLang, score: best.chk.score, ok: !!best.chk.ok, unknown: !!best.chk.unknown, heard: best.chk.heard || '', retries, tone: d.toneErrors || 0 };
+      if (onLine && !best.chk.ok) onLine(`⚠ 컷${s.num} 역대조 미달 ${Math.round((best.chk.score || 0) * 100)}% (다시 만들기 ${retries}번) — 받아쓰기 「${String(best.chk.heard || '').slice(0, 60)}」 · 결과표에 표시합니다`);
     }
     consecFail = 0;
     if (seedOverride != null) s.ttsSeedSwapped = seedOverride;   // 로그에 남긴다(왜 이 문장만 톤이 다를 수 있는지)
@@ -451,13 +475,29 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       }
       continue;   // 다음 문장으로
     }
+    if (s.backcheck) s.backcheck.audio = s.ttsAudioPath;   // 이 결과가 어느 음성 파일에 대한 것인지(작업본 복원 때 대조)
     s.ttsGenSec = (Date.now() - _genT0) / 1000; // 이 문장 생성에 걸린 실시간(초)
     // 캐시에 저장(다음 동일 작업 시 재활용)
     try { TtsCache.put(cacheKey, s.ttsAudioPath, s.ttsDurationSec, path.extname(s.ttsAudioPath).slice(1).toLowerCase() || 'wav'); } catch {}
-    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
+    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''}${s.backcheck ? (s.backcheck.unknown ? ' · 🔎 확인 불가' : ` · 🔎 ${Math.round(s.backcheck.score * 100)}%`) : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
     // 문장 한 개 변환 완료 → 즉시 화면 갱신(시간 표시). PrimingFlow 처럼 바로바로 진행상황 반영.
     if (onProgress) { try { onProgress(); } catch {} }
   }
+  // 🔎 역대조 결과표 — 일본어·베트남어 문장이 있을 때만(대본마다 한 장, tts-N 옆). 본부(아도나이로이)가 이 파일로 편마다 판정한다.
+  try {
+    const fore = sentences.filter((x) => x && Lang.isForeignLang(Lang.detectLang(x.text)));
+    if (fore.length) {
+      const rows = fore.map((x) => {
+        const b = x.backcheck && x.backcheck.audio === x.ttsAudioPath ? x.backcheck : null;
+        if (!b) return { num: x.num, lang: Lang.detectLang(x.text), score: null, retries: 0, status: x.ttsAudioPath ? '확인 안 함(이전 음성)' : '음성 없음', text: x.text, heard: '' };
+        return { num: x.num, lang: b.lang, score: b.score, toneErrors: b.tone, retries: b.retries, status: b.unknown ? '확인 불가' : b.ok ? '통과' : '미달', text: x.text, heard: b.heard };
+      });
+      const file = path.join(path.dirname(workDir), `역대조_보고${label && label !== '롱폼' ? '_' + String(label).replace(/[\\/:*?"<>|]/g, '') : ''}.tsv`);
+      const kst = new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' KST';
+      const sum = BC.writeReport(file, rows, { title: path.basename(path.dirname(workDir)), when: kst, threshold: `vi ${BC.PASS.vi * 100}% · ja ${BC.PASS.ja * 100}%` });
+      if (onLine) onLine(`🔎 역대조 ${rows.length}문장 — 통과 ${sum.pass} · 미달 ${sum.flagged} · 확인 불가 ${sum.unknown} → ${file}`);
+    }
+  } catch (e) { if (onLine) onLine('⚠ 역대조 결과표 쓰기 실패: ' + e.message); }
   if (failed.length && onLine) {
     onLine(`⚠ ${label} 음성 실패 ${failed.length}개 (컷 ${failed.slice(0, 12).join(', ')}${failed.length > 12 ? ' …' : ''}) — 「🎤 TTS」를 다시 누르면 빠진 것만 다시 만듭니다.`);
   }

@@ -86,6 +86,44 @@ for (const f of ['core/lang.js', 'core/caption-splitter.js', 'core/sentence-spli
   ok(!/require\.main/.test(src) && !/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(src), `${f} — 렌더러 번들 안전(require.main 없음) · 제어문자 없음`);
 }
 
+console.log('[6b] 🔎 역대조 게이트');
+const BCK = require('../core/tts-backcheck');
+ok(BCK.scoreText('Mỗi sáng, anh dậy thật sớm.', 'Mỗi sáng anh dậy thật sớm', 'vi').score === 1, '베트남어 — 문장부호·대소문자 무시하고 같으면 100%');
+const tb = BCK.scoreText('Đôi chân anh mỏi nhừ.', 'Đôi chân anh mọi nhừ', 'vi');
+ok(tb.toneErrors === 1 && tb.score === 0.8, `베트남어 — 성조만 다른 낱말은 성조 오류로 센다(mỏi→mọi · ${tb.score})`);
+ok(BCK.scoreText('此所でもただ', 'ここでもただ', 'ja').score < 1, '일본어 — 표기가 다르면 글자 점수는 떨어진다(그래서 루비 읽기와도 대조)');
+ok(BCK.scoreText('ここでもただ', 'ここでもただ', 'ja').score === 1, '일본어 — 읽기와 같으면 100%');
+ok(BCK.isHallucination('Hãy subscribe cho kênh Ghiền Mì Gõ Để không bỏ lỡ những video hấp dẫn') && BCK.isHallucination('ご視聴ありがとうございました') && !BCK.isHallucination('Mỗi sáng, anh dậy'), 'Whisper 환각 문장 감지(음성 탓이 아님)');
+{
+  const WS = require('../core/wav-slice');
+  const sr = 24000, n = sr; const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + n * 2, 4); h.write('WAVE', 8); h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(sr, 24); h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(n * 2, 40);
+  const wav = Buffer.concat([h, Buffer.alloc(n * 2, 1)]);
+  const p = WS.parseWav(BCK.padWav(wav, 0.5));
+  ok(Math.abs(p.durationSec - 2.0) < 0.001, `무음 0.5초 덧대기 — 1초 → ${p.durationSec}초(앞뒤) · 형식 유지`);
+}
+ok(BCK.PASS.vi === 0.9 && BCK.PASS.ja === 0.85 && BCK.MAX_RETRY === 2, '기준 vi 90% · ja 85% · 다시 만들기 최대 2번(2026-09-26 실측으로 정함)');
+ok(/Lang\.isForeignLang\(bcLang\)/.test(PL) && /BC\.checkAudio\(res\.mp3Buffer, s\.text, bcLang, workDir, null, s\.ttsText\)/.test(PL), '합성 루프 — 외국어 문장만 역대조 · 루비 읽기도 대조');
+ok(/역대조_보고/.test(PL) && /BC\.writeReport/.test(PL), '대본마다 결과표(역대조_보고.tsv)');
+ok(/bc: s\.backcheck \|\| null, tt: s\.ttsText \|\| null/.test(MJ) && /ss\.bc\.audio === ss\.ttsAudioPath/.test(MJ) && /if \(ss\.tt\) s\.ttsText = ss\.tt/.test(MJ), '작업본에 역대조 결과·루비 읽기 저장·복원(같은 음성 파일일 때만)');
+
+console.log('[6c] 🇯🇵 아오조라문고 표기');
+const AO = [
+  '-------------------------------------------------------', '【テキスト中に現れる記号について】', '', '《》：ルビ', '（例）私《わたくし》', '', '｜：ルビの付く文字列の始まりを特定する記号', '-------------------------------------------------------', '',
+  '［＃５字下げ］一［＃「一」は中見出し］', '',
+  '　私《わたくし》はその人を常に先生と呼んでいた。その時私はまだ若々しい｜書生《しょせい》であった。世間を憚《はばか》る遠慮である。［＃「遠慮」に傍点］', '',
+  '底本：「こころ」新潮文庫', '入力：富田倫生',
+].join('\n');
+const PM = require('../core/project-model');
+const aoItems = S.splitHybrid(AO).items.map((it) => new PM.Sentence({ text: it.text }));
+ok(aoItems.length === 3, `머리말 기호 설명·장 제목 표시(見出し)·底本 정보가 문장이 되지 않는다 (${aoItems.length}문장)`);
+ok(aoItems[0].text === '私はその人を常に先生と呼んでいた。' && aoItems[0].ttsText === 'わたくしはその人を常に先生と呼んでいた。', '루비 — 자막은 한자 · TTS 는 읽기');
+ok(aoItems[1].text === 'その時私はまだ若々しい書生であった。' && aoItems[1].ttsText === 'その時私はまだ若々しいしょせいであった。', '｜ 로 시작점을 정한 루비');
+ok(aoItems[2].text === '世間を憚る遠慮である。' && !/［|］|＃/.test(aoItems[2].text), '［＃…］ 주석은 자막·낭독 모두에서 빠진다');
+const koBook = S.splitIntoSentences('사마천은 《사기》를 썼다. 그 시대 ｜ 왕이 없던 때.');
+ok(eq(koBook, ['사마천은 《사기》를 썼다.', '그 시대 ｜ 왕이 없던 때.']), '🔑 한국어 문장의 《》·｜ 는 그대로(아오조라 처리는 일본어 문단에서만)');
+ok(new PM.Sentence({ text: '관계를 깨는 것은.' }).ttsText === undefined, '표식이 없으면 ttsText 가 생기지 않는다');
+ok(/s\.ttsText \|\| s\.text, attemptOpts/.test(PL) && /processText\(s\.ttsText \|\| s\.text\)/.test(PL), 'TTS·캐시 키가 루비 읽기(ttsText)를 쓴다');
+
 console.log('[7] 🔑 한국어 무변경 — 기존 대본 전체를 옛 모듈(4bc557f)과 대조');
 (() => {
   let old;
@@ -120,6 +158,30 @@ console.log('[7] 🔑 한국어 무변경 — 기존 대본 전체를 옛 모듈
   ex.forEach((x) => console.log('    ' + x));
   ok(diff === 0, `대본 ${files.size}편 · 문장 ${nS}개 — 문장·화자·도입부·자막 줄(20/7)·글자 수·TTS 문자열이 옛 코드와 같다 (다름 ${diff})`);
 })();
+
+console.log('\n[6d] 보이스디자인 저장 — 외국어는 잘라낸 구간을 받아쓰기해 참조텍스트로');
+{
+  const m = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const body = m.slice(m.indexOf("ipcMain.handle('qwen-design-save'"), m.indexOf("ipcMain.handle('open-script'"));
+  ok(m.includes('S.vdLastLang = lang'), '생성 때 언어를 기억한다(S.vdLastLang)');
+  ok(body.includes('vdLang && outBuf !== src'), '잘랐을 때만 받아쓰기한다(외국어 · 자르지 않았으면 입력 그대로)');
+  ok(body.includes("tts-backcheck').checkAudio(outBuf") && body.includes('refTextForCut(refText, c.heard'), '잘라낸 음성(outBuf)의 받아쓰기로 참조텍스트를 맞춘다');
+  ok(body.indexOf('refText = nt') > 0 && body.indexOf('refText = nt') < body.indexOf('fs.writeFileSync(wavPath'), '바꾼 뒤에 .txt·서버 등록을 한다');
+  ok(m.includes("lang !== 'Korean' && WS.suggestPauseRange"), '외국어는 끝을 문장 사이 쉼에서 자르도록 제안한다(한국어는 예전 그대로)');
+  const BCm = require('../core/tts-backcheck');
+  const O = '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。';
+  ok(BCm.refTextForCut(O, '昔向かいある村に貧しいけれど心の優しい若者が住んでいました', 'ja') === '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。', '받아쓰기 오인식이 있어도 첫 문장이면 원문 표기를 쓴다');
+  ok(BCm.refTextForCut(O, '昔々ある村に貧しいけれど心の優しい若者が住んでいました彼は前', 'ja').endsWith('彼は前'), '문장 중간에서 끊겼으면 받아쓰기를 쓴다');
+  ok(BCm.refTextForCut(O, '', 'ja') === O, '받아쓰기가 없으면 원문 그대로');
+  // 쉼에서 자르기 — 합성 신호: 소리 2초 · 쉼 0.4초 · 소리 2초 · 끝 감쇠
+  const WSm = require('../core/wav-slice');
+  const sr = 16000, seg = (sec, amp) => Array.from({ length: Math.round(sr * sec) }, (_, i) => Math.round(amp * Math.sin(i / 8)));
+  const smp = [...seg(0.3, 0), ...seg(2, 12000), ...seg(0.4, 0), ...seg(2, 12000), ...seg(0.5, 3000), ...seg(0.3, 0)];
+  const pcm = Buffer.alloc(smp.length * 2); smp.forEach((v, i) => pcm.writeInt16LE(v, i * 2));
+  const hd = Buffer.alloc(44); hd.write('RIFF', 0); hd.writeUInt32LE(36 + pcm.length, 4); hd.write('WAVEfmt ', 8); hd.writeUInt32LE(16, 16); hd.writeUInt16LE(1, 20); hd.writeUInt16LE(1, 22); hd.writeUInt32LE(sr, 24); hd.writeUInt32LE(sr * 2, 28); hd.writeUInt16LE(2, 32); hd.writeUInt16LE(16, 34); hd.write('data', 36); hd.writeUInt32LE(pcm.length, 40);
+  const pr = WSm.suggestPauseRange(Buffer.concat([hd, pcm]), { minSec: 1 });
+  ok(pr && pr.pauseAt >= 2.2 && pr.pauseAt <= 2.4 && pr.end < 2.8, `끝을 문장 사이 쉼에서 자른다 (쉼 ${pr && pr.pauseAt}초 · 끝 ${pr && pr.end}초)`);
+}
 
 console.log(`\n🌏 lang-support ${pass}/${pass + fail} ${fail ? '실패' : '통과'}`);
 process.exit(fail ? 1 : 0);

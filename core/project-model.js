@@ -87,6 +87,12 @@ class Sentence {
   constructor({ id, num, text }) {
     this.id = id || nextId('s');
     this.num = num;                     // 1부터 시작하는 표시 번호
+    // 🇯🇵 아오조라 루비 표식(본문읽기, sentence-splitter.aozoraMark) → 자막은 본문(한자), TTS 는 읽기.
+    //   표식이 없으면(한국어 등 모든 옛 대본) 아무것도 안 한다 — ttsText 는 생기지 않는다.
+    if (typeof text === 'string' && text.indexOf('') >= 0) {
+      this.ttsText = text.replace(/([^]*)([^]*)/g, '$2').replace(/[-]/g, '');
+      text = text.replace(/([^]*)[^]*/g, '$1').replace(/[-]/g, '');
+    }
     this.text = text;
     this.charCount = countMeaningful(text);
 

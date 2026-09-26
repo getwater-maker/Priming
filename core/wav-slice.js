@@ -126,4 +126,28 @@ function suggestRange(buf, { threshold = 0.35, padSec = 0.04 } = {}) {
   return { start: Math.round(start * 1000) / 1000, end: Math.round(end * 1000) / 1000 };
 }
 
-module.exports = { parseWav, sliceWav, envelope, suggestRange };
+/**
+ * 🌏 외국어 참조음성용 — 끝을 **문장 사이의 쉼(무음 구간)** 에서 자른다(2026-09-26 일본어 실측).
+ *   suggestRange 의 끝 자르기는 마지막 낱말 한가운데를 벨 수 있다. 참조텍스트와 소리가 어긋나면 모델이
+ *   남은 글자(「ました」)를 새 문장 앞에 읽어 버렸다(20문장 중 11개). 쉼에서 자르면 낱말이 온전하다.
+ *   minSec 보다 뒤에 있는 쉼 중 **마지막 것**(= suggestRange 끝보다 앞) — 없으면 null(호출부가 기존 방식으로).
+ */
+function suggestPauseRange(buf, { minSec = 3, pauseSec = 0.18, quiet = 0.06 } = {}) {
+  const sg = suggestRange(buf);
+  const { rms, hop, peak } = envelope(buf);
+  if (!rms.length || peak <= 0) return null;
+  const th = peak * quiet, need = Math.ceil(pauseSec / hop);
+  let best = null;
+  for (let i = 0; i < rms.length; i++) {
+    if (rms[i] >= th) continue;
+    let j = i; while (j < rms.length && rms[j] < th) j++;
+    const s = i * hop, e = j * hop;
+    if (j - i >= need && s >= sg.start + minSec && e < sg.end) best = { s, e };
+    i = j;
+  }
+  if (!best) return null;
+  const end = Math.min(best.e, best.s + 0.12);   // 쉼 안쪽 조금(숨·잔향까지만)
+  return { start: sg.start, end: Math.round(end * 1000) / 1000, pauseAt: Math.round(best.s * 1000) / 1000 };
+}
+
+module.exports = { parseWav, sliceWav, envelope, suggestRange, suggestPauseRange };

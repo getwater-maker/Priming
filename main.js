@@ -1535,13 +1535,15 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
     const tmpPath = path.join(tmpDir, 'preview.wav');
     fs.writeFileSync(tmpPath, r.buffer);
     S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용
+    S.vdLastLang = lang;
     S.vdLastInstruct = instruct;                   // 어떤 설명으로 만든 목소리인지 — 서버 라이브러리에 함께 남긴다
     // 길이 + 자동 구간 제안(앞 무음·끝 감쇠 제거) — 슬라이스 UI 의 초기값. 실패해도 생성 자체는 성공.
     let durationSec = 0, suggest = null;
     try {
       const WS = require('./core/wav-slice');
       durationSec = WS.parseWav(r.buffer).durationSec;
-      suggest = WS.suggestRange(r.buffer);
+      // 🌏 외국어는 끝을 문장 사이 쉼에서 자른다(낱말 한가운데를 베면 남은 글자가 새 문장 앞에 샌다)
+      suggest = (lang !== 'Korean' && WS.suggestPauseRange(r.buffer)) || WS.suggestRange(r.buffer);
     } catch (e) { log('⚠ 파형 분석 실패(슬라이스 기본값 없음): ' + String((e && e.message) || e)); }
     // 🌏 외국어 목소리는 받아쓰기로 확인해 알려 준다 — 로이가 베트남어·일본어를 귀로 판정하기 어렵다(2026-09-26).
     //   참조음성이 잘못 읽혔으면 그걸로 만드는 모든 문장이 흔들린다. 실패해도 생성 자체는 성공(확인만 못 한 것).
@@ -1581,7 +1583,18 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
         if (outBuf !== src) cutLog = ` · ✂ ${s0.toFixed(2)}~${e0.toFixed(2)}초 (원본 ${full.toFixed(2)}초)`;
       } catch (e) { return { ok: false, error: '구간 자르기 실패: ' + String((e && e.message) || e) }; }
     }
-    const refText = (args.text != null ? String(args.text) : (S.vdLastText || '')).trim();
+    let refText = (args.text != null ? String(args.text) : (S.vdLastText || '')).trim();
+    // 🌏 외국어(일본어·베트남어)는 잘라낸 구간을 **받아쓰기한 글을 참조텍스트로** 쓴다(2026-09-26 실측).
+    //   끝 감쇠를 자르면 마지막 낱말이 일부 잘리는데 참조텍스트가 원문 그대로면, 모델이 남은 글자를 새 문장 앞에
+    //   읽어 버렸다(일본어 20문장 중 20문장 · 평균 17%). 사람이 그 차이를 귀로 못 잡으므로 앱이 맞춘다.
+    const vdLang = S.vdLastLang === 'vi' ? 'vi' : (S.vdLastLang === 'Japanese' ? 'ja' : null);
+    if (vdLang && outBuf !== src) {
+      try {
+        const c = await require('./core/tts-backcheck').checkAudio(outBuf, refText, vdLang, path.dirname(S.vdLastTemp));
+        if (c && !c.unknown && c.heard) { const nt = require('./core/tts-backcheck').refTextForCut(refText, c.heard, vdLang); log(`   🔎 잘라낸 구간 받아쓰기 → 참조텍스트: ${nt}`); refText = nt; }
+        else log('   ⚠ 잘라낸 구간을 받아쓰지 못했습니다 — 입력한 참조텍스트를 그대로 씁니다(끝 낱말이 잘렸다면 고쳐 주세요)');
+      } catch (e) { log('   ⚠ 받아쓰기 실패: ' + String((e && e.message) || e)); }
+    }
     fs.writeFileSync(wavPath, outBuf);
     fs.writeFileSync(path.join(dir, base + '.txt'), refText, 'utf8');  // 같은 이름 .txt = 참조텍스트
     log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)${cutLog}`);
@@ -4926,7 +4939,7 @@ function buildSnapshot() {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null })),
       })),
     })),
   };
@@ -5067,11 +5080,13 @@ function projectsFromSnapshot(snap) {
       if (gs.look) g.look = gs.look;
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
+        if (ss.tt) s.ttsText = ss.tt;   // 🇯🇵 루비 읽기(TTS 용) — 작업본만으로 복원해도 한자를 읽기대로 읽게
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
         if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
         if (ss.speaker) s.speaker = ss.speaker;               // [이름] 대사 — 화자 목소리
         if (Array.isArray(ss.capSpans) && ss.capSpans.length) s.capSpans = ss.capSpans;   // 🎨 줄별·글자별 자막 서식
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length) s.capBreaks = ss.capBreaks;   // ✂ 사람이 정한 자막 줄 나눔
+        if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath) s.backcheck = ss.bc;   // 🔎 역대조 결과(그 음성 파일에 대한 것일 때만)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -5141,6 +5156,7 @@ function overlaySnapshot(parsed, snap) {
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
         if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
+        if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath && ss.text === s.text) s.backcheck = ss.bc;   // 🔎 역대조 결과(같은 문장·같은 음성일 때만)
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
       });

@@ -55,6 +55,33 @@ const BLOCKQUOTE_LINE = /^[ \t]*>.*$/gm;
 const PROMPT_IMG_RE = /^[ \t]*>.*?이미지\s*[:：]\s*(.+)$/;
 const PROMPT_VID_RE = /^[ \t]*>.*?(?:비디오|영상)[^:：]*[:：]\s*(.+)$/;
 const BLOCKQUOTE_TEST = /^[ \t]*>/;
+// ── 🇯🇵 아오조라문고(青空文庫) 표기 (2026-09-26) ─────────────────────────────────────
+//   루비 `漢字《かんじ》` · `｜本文《よみ》` → 표식 본문읽기 으로 바꿔 문장 분리를 통과시키고,
+//   Sentence 가 만들어질 때(project-model) 자막용(본문) · TTS 용(읽기)으로 가른다 — 지우기만 하면 한자를 잘못 읽는다.
+//   `［＃…］` 편집 주석 · `※［＃「…」、第3水準…］` 외자 주기는 낭독·자막 모두에서 뺀다.
+//   🔑 **일본어 문단에서만** 쓴다 — 한국어 대본에도 `《사기》`·`｜` 가 실제로 있다(225편 중 4편 · 2026-09-26 실측).
+const RUBY_EXPLICIT = /｜([^｜《》\n]+)《([^《》\n]+)》/g;
+const RUBY_IMPLICIT = /([㐀-鿿豈-﫿々〆〇ヶヵ]+|[゠-ヿ]+|[A-Za-z0-9Ａ-Ｚａ-ｚ０-９]+)《([^《》\n]+)》/g;
+function aozoraMark(s) {
+  let t = String(s);
+  if (!/[《》｜]|［＃/.test(t)) return t;
+  // 제목 표시가 붙은 글(`一［＃「一」は中見出し］`)은 본문이 아니다 — 장 제목은 대본의 `##`·`###` 가 맡는다.
+  t = t.replace(/(\S+?)［＃「?\1」?は[大中小]?見出し］/g, '');   // 따옴표(「」)는 앞 단계에서 이미 지워졌을 수 있다
+  t = t.replace(/※?［＃[^］]*］/g, '');
+  t = t.replace(RUBY_EXPLICIT, '$1$2');
+  t = t.replace(RUBY_IMPLICIT, '$1$2');
+  return t.replace(/[《》｜]/g, '');
+}
+// 아오조라 파일의 머리말 기호 설명(【テキスト中に現れる記号について】 — 점선 사이)과 끝의 底本 정보는 본문이 아니다.
+function stripAozoraFrame(text) {
+  let t = String(text);
+  if (t.includes('【テキスト中に現れる記号について】')) {
+    t = t.replace(/^-{10,}[^\n]*\n[\s\S]*?【テキスト中に現れる記号について】[\s\S]*?\n-{10,}[^\n]*$/m, '');
+  }
+  const m = t.match(/^底本：/m);
+  if (m && /[぀-ヿ]/.test(t)) t = t.slice(0, m.index);
+  return t;
+}
 function _stripNonTts(text) {
   return (typeof text === 'string') ? text.replace(HTML_COMMENT, '').replace(BLOCKQUOTE_LINE, '') : text;
 }
@@ -81,7 +108,11 @@ function _paragraphsToSentences(text) {
     //   문장도 버리지 않는다. 아래 옛 필터(한글·영문·숫자)는 일본어 문장을 **전부** 버렸다(2026-09-26 실측 0문장).
     //   🔑 한국어 문단은 아래 옛 경로 그대로 — 한 글자도 바뀌지 않는다.
     if (isForeignLang(detectLang(flat))) {
-      const fm = flat.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g) || [flat];
+      // 🇯🇵 아오조라 표기(루비·주석)는 일본어 문단에서만 — 표식으로 바꾼 뒤 나눈다(읽기에는 。！？ 가 없다)
+      const lf = detectLang(flat);
+      const src = (lf === 'ja' || lf === 'cjk') ? aozoraMark(flat).replace(/\s+/g, ' ').trim() : flat;
+      if (!src) continue;
+      const fm = src.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g) || [src];
       for (const m of fm) { const t = m.trim(); if (t && /[\p{L}\p{N}]/u.test(t)) sentences.push(t); }
       continue;
     }
@@ -104,7 +135,7 @@ function _paragraphsToSentences(text) {
  */
 function splitIntoSentences(text) {
   if (!text || typeof text !== 'string' || !text.trim()) return [];
-  return _paragraphsToSentences(text);
+  return _paragraphsToSentences(stripAozoraFrame(text));
 }
 
 /**
@@ -118,7 +149,7 @@ function splitWithSections(text) {
   if (!text || typeof text !== 'string' || !text.trim()) {
     return { items: [], hasSections: false };
   }
-  text = _stripNonTts(text);   // <!-- 메모 --> 제거 (여러 줄 주석을 라인 스캔 전에)
+  text = _stripNonTts(stripAozoraFrame(text));   // <!-- 메모 --> 제거 (여러 줄 주석을 라인 스캔 전에) · 🇯🇵 아오조라 머리말·底本
 
   const lines = text.split(/\r?\n/);
   const segments = []; // [{title, text}]
@@ -178,7 +209,7 @@ function splitIntoSentencesWithIntro(text) {
   if (!text || typeof text !== 'string' || !text.trim()) {
     return { items: [], hasIntro: false };
   }
-  text = _stripNonTts(text);   // <!-- 메모 --> 제거 (여러 줄 주석을 라인 스캔 전에)
+  text = _stripNonTts(stripAozoraFrame(text));   // <!-- 메모 --> 제거 (여러 줄 주석을 라인 스캔 전에) · 🇯🇵 아오조라 머리말·底本
   const lines = text.split(/\r?\n/);
 
   // 줄들을 헤더 기준으로 블록 분할 → 각 블록에 isIntro 플래그
@@ -237,7 +268,7 @@ function splitHybrid(text) {
   if (!text || typeof text !== 'string' || !text.trim()) {
     return { items: [], hasBrackets: false, hasMdIntro: false };
   }
-  text = String(text).replace(HTML_COMMENT, '');   // HTML 주석만 먼저 제거 (블록쿼트 프롬프트는 라인 루프에서 추출)
+  text = stripAozoraFrame(String(text)).replace(HTML_COMMENT, '');   // 🇯🇵 아오조라 머리말·底本 제거 · HTML 주석만 먼저 제거 (블록쿼트 프롬프트는 라인 루프에서 추출)
   const lines = text.split(/\r?\n/);
 
   // 블록: { mode, isIntro, sectionTitle, lines, imagePrompt, videoPrompt }
@@ -332,4 +363,4 @@ const MATCH_PATTERNS = {
 const CHAR_COUNT_TAIL_RE = /\s*\/\s*[\d,]+\s*자\s*$/;
 function stripCharCountTail(s) { return String(s == null ? '' : s).replace(CHAR_COUNT_TAIL_RE, '').trim(); }
 
-module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS, stripCharCountTail, CHAR_COUNT_TAIL_RE };
+module.exports = { aozoraMark, stripAozoraFrame, splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS, stripCharCountTail, CHAR_COUNT_TAIL_RE };
