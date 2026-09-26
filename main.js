@@ -485,6 +485,27 @@ function awakeRelease() {
   }
   if (_awake.n === 0) { try { require('./core/gpu-temp').stopSampling(); } catch {} }
 }
+// ── 🌙 모니터 끄기 (2026-09-26, v0.5.80) ──────────────────────────────────────
+//   로이: 「작업을 진행할 때 PC 의 모니터를 끄는 기능」 — 자는 동안 큐를 돌릴 때.
+//   위의 절전 차단은 **그대로 둔다**(Windows 가 알아서 끄는 것만 막는다). 이 버튼은 **지금 바로** 모니터만 끈다 —
+//   PC·GPU·작업은 계속 돈다. 마우스·키보드를 건드리면 다시 켜진다(Windows 동작).
+//   방법 = WM_SYSCOMMAND / SC_MONITORPOWER(2 = 끄기)를 PostMessage 로 방송(SendMessage 방송은 응답 없는 창에 걸려 멈출 수 있다).
+//   🔴 비동기 자식 프로세스(메인 동기 실행 금지 규칙) · 0.8초 뒤에 보낸다 — 버튼을 누른 손의 마우스 떨림이 곧바로 다시 켜지 않게.
+const MONITOR_OFF_PS = [
+  "Add-Type -Namespace PrimingMon -Name U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);'",
+  'Start-Sleep -Milliseconds 800',
+  '[void][PrimingMon.U]::PostMessage([System.IntPtr]0xffff, 0x0112, [System.IntPtr]0xF170, [System.IntPtr]2)',
+].join('; ');
+ipcMain.handle('monitor-off', () => new Promise((resolve) => {
+  if (process.platform !== 'win32') { resolve({ ok: false, error: '윈도우에서만 됩니다.' }); return; }
+  const enc = Buffer.from(MONITOR_OFF_PS, 'utf16le').toString('base64');
+  require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc],
+    { windowsHide: true, timeout: 20000 }, (err) => {
+      if (err) { log(`✗ 모니터 끄기 실패 — ${err.message}`); resolve({ ok: false, error: err.message }); return; }
+      log(`🌙 모니터를 껐습니다 — 작업은 계속됩니다${_awake.n > 0 ? '' : ' (지금 도는 작업은 없습니다)'} · 마우스·키보드를 건드리면 켜집니다`);
+      resolve({ ok: true });
+    });
+}));
 /** 긴 작업을 절전 차단으로 감싼다. 실패·예외에도 finally 로 반드시 해제. */
 async function withAwake(label, fn) {
   awakeAcquire(label);
