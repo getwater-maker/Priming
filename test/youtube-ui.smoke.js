@@ -34,6 +34,24 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await conn.count() === 1, '② 「🔗 채널 연결」 버튼');
     ok((await conn.isDisabled()) === !st.hasClient, '연결 파일이 없으면 채널 연결 버튼이 잠긴다');
     ok(await win.locator('text=비공개').count() > 0 && await win.locator('text=AI 합성 콘텐츠 표시').count() === 1, '안내: 비공개 · AI 합성 표시');
+    // ↕ 끌어서 순서 바꾸기(v0.5.81) — 채널이 2개 이상일 때만. 🔴 로이 PC 의 실제 순서를 바꾸므로 **끝나면 원래 순서로 되돌린다**.
+    if (st.channels.length >= 2) {
+      const orig = st.channels.map((c) => c.id);
+      const rows = win.locator('[data-testid="yt-ch-row"]');
+      ok(await rows.count() === orig.length, `채널 줄 ${orig.length}개 · 끌 수 있음(draggable)`);
+      try {
+        await rows.nth(0).dragTo(rows.nth(1));
+        await win.waitForTimeout(600);
+        const now = (await win.evaluate(() => window.api.ytStatus())).channels.map((c) => c.id);
+        ok(now[0] === orig[1] && now[1] === orig[0] && now.length === orig.length, '1번 줄을 2번 자리에 놓으면 저장 순서가 바뀐다');
+        const shown = await rows.allInnerTexts();
+        ok(shown[1].includes(st.channels[0].title), '화면 목록도 새 순서');
+      } finally {
+        await win.evaluate((ids) => window.api.ytReorder(ids), orig);
+        const back = (await win.evaluate(() => window.api.ytStatus())).channels.map((c) => c.id);
+        ok(back.join() === orig.join(), '(원래 순서로 되돌림)');
+      }
+    }
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
 
@@ -47,8 +65,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
       await win.waitForTimeout(250);
       heights[t] = await card.evaluate((el) => Math.round(el.getBoundingClientRect().height));
     }
-    const row = card.locator('.frow:has(label:has-text("⬆ 자동 업로드"))');
-    ok(await row.count() === 1, '📁 폴더 탭에 「⬆ 자동 업로드」 줄');
+    const row = card.locator('.frow:has(label:text-is("업로드채널"))');
+    ok(await row.count() === 1, '📁 폴더 탭에 「업로드채널」 줄');
     const sel = row.locator('select');
     const firstOpt = await sel.locator('option').first().textContent();
     ok(st.channels.length ? /올릴 유튜브 채널/.test(firstOpt) : /연결된 채널 없음/.test(firstOpt), `채널 목록 첫 줄: 「${firstOpt}」`);

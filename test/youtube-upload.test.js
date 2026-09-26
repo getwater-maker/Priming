@@ -244,7 +244,26 @@ const server = http.createServer(async (req, res) => {
   ok(/ytAuto: !!ch\.ytAuto && !!ch\.ytChannelId, ytChannelId: ch\.ytChannelId/.test(A), '저장 patch 에 ytAuto·ytChannelId(안 실으면 덮인다)');
   ok(A.includes("['yt', '▶ 유튜브']") && A.includes("if (id === 'yt') ytLoad();"), '⚙ 설정 ▶ 유튜브 탭');
   ok(A.includes("import ytChapters from '../../core/yt-chapters.js'") && !/\nfunction tsChaptersOf\(/.test(A), '🔑 챕터 계산은 core 하나(App.jsx 에 복사본 없음)');
-  ok(/outTarget === 'mp4' && <button[^>]*onClick=\{runYtUpload\}/.test(A), '헤더 ⬆ 업로드(유튜브 MP4 일 때)');
+  ok(/\(outTarget === 'mp4' \|\| outTarget === 'whiteboard'\) && <button[^>]*onClick=\{runYtUpload\}/.test(A), '헤더 ⬆ 업로드(유튜브 MP4 · 화이트보드 MP4 일 때)');
+  ok(A.includes("api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' })"), '⬆ 업로드가 완성 종류(kind)를 넘긴다');
+  ok(/isWb[\s\S]{0,160}wbFinalDir\(preset\)[\s\S]{0,60}_whiteboard\.mp4/.test(M), '수동 업로드: 화이트보드는 「화이트보드」 폴더의 _whiteboard.mp4');
+  ok(M.includes('const finalDir = wbFinalDir(preset);'), '렌더와 업로드가 같은 화이트보드 폴더 함수');
+  ok(M.includes('if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset)'), '✏ 화이트보드 성공 뒤 자동 업로드 — 🔴 음성 있을 때만');
+  ok(M.includes("ipcMain.handle('yt-reorder'") && PL.includes('ytReorder:'), 'IPC·preload yt-reorder');
+  ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '▶ 유튜브 채널 줄을 끌어서 놓기');
+
+  console.log('\n[11] ↕ 채널 순서(reorderChannels)');
+  {
+    const d0 = JSON.parse(fs.readFileSync(YT.authFile(), 'utf8'));
+    const extra = { UCaaa: { title: 'A', refresh: 'x' }, UCbbb: { title: 'B', refresh: 'x' }, UCccc: { title: 'C', refresh: 'x' } };
+    fs.writeFileSync(YT.authFile(), JSON.stringify({ ...d0, channels: { ...extra } }), 'utf8');
+    let r = YT.reorderChannels(['UCccc', 'UCaaa', 'UCbbb']);
+    ok(r.ok && YT.status().channels.map((c) => c.id).join() === 'UCccc,UCaaa,UCbbb', '끌어 놓은 순서 = status() 순서(설정·업로드채널 목록 공통)');
+    r = YT.reorderChannels(['UCbbb', 'UCzzz']);
+    ok(YT.status().channels.map((c) => c.id).join() === 'UCbbb,UCccc,UCaaa', '모르는 ID 는 무시 · 빠진 채널은 원래 순서로 뒤에(잃지 않는다)');
+    ok(YT.status().channels.length === 3 && JSON.parse(fs.readFileSync(YT.authFile(), 'utf8')).channels.UCaaa.refresh === 'x', '연결 정보(토큰)는 그대로');
+    fs.writeFileSync(YT.authFile(), JSON.stringify(d0), 'utf8');
+  }
   const CS = read('core/yt-chapters.js');
   ok(!/require\(/.test(CS.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'core/yt-chapters.js 에 CJS 런타임 참조 없음(렌더러 번들 백지 사고 방지)');
   const pj = JSON.parse(read('package.json'));

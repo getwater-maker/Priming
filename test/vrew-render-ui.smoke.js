@@ -50,8 +50,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const card = win.locator('.modal-card').filter({ hasText: '폴더' }).first();
     await card.locator('button:has-text("📁")').first().click();
     await win.waitForTimeout(300);
-    const row = card.locator('.frow:has(label:has-text("유튜브 업로드"))');
-    ok(await row.count() === 1, '📁 폴더 탭에 「유튜브 업로드」 칸');
+    const row = card.locator('.frow:has(label:text-is("MP4"))');
+    ok(await row.count() === 1, '📁 폴더 탭에 「MP4」 칸');
     const v = await row.locator('input').inputValue().catch(() => '');
     ok(/Downloads|다운로드/i.test(v) || v.length > 3, `기본값이 채워져 있다 (${v})`);
     ok(await row.locator('button:has-text("찾기")').count() === 1, '「찾기」 버튼');

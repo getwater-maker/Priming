@@ -2646,7 +2646,7 @@ async function runYtUpload({ file, channelId, meta }) {
 /** 렌더가 끝난 뒤 — 채널에 자동 업로드가 켜져 있을 때만. 이미 올린 파일이면 건너뛴다. */
 function maybeAutoUpload(pr, file, preset) {
   if (!preset || !preset.ytAuto) return;
-  if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드'); return; }
+  if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); return; }
   const YT = require('./core/youtube-upload');
   const done = YT.findUploaded(preset.ytChannelId, file);
   if (done) { log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`); return; }
@@ -2676,6 +2676,7 @@ ipcMain.handle('yt-disconnect', async (_e, id) => {
   if (r.ok) log('🔌 유튜브 채널 연결 해제');
   return r;
 });
+ipcMain.handle('yt-reorder', (_e, ids) => require('./core/youtube-upload').reorderChannels(ids));   // ↕ 채널 순서(끌어서)
 ipcMain.handle('yt-abort', () => { S.ytAbort = true; return true; });
 // Studio·영상 주소 열기 — 유튜브 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다).
 ipcMain.handle('yt-open-url', (_e, u) => {
@@ -2688,13 +2689,16 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const preset = resolvePreset(args.presetName);
   const chId = preset && preset.ytChannelId;
-  if (!chId) throw new Error('이 채널에 올릴 유튜브 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → ⬆ 유튜브 채널에서 고르세요.');
+  if (!chId) throw new Error('이 채널에 올릴 유튜브 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고르세요.');
   const YT = require('./core/youtube-upload');
   let n = 0;
+  const isWb = args.kind === 'whiteboard';   // ✏ 화이트보드 MP4 도 같은 버튼으로(v0.5.81)
   for (const pr of S.parsed.projects) {
     const baseName = vrewBaseName(pr);
-    const file = uploadMp4Path(baseName, preset, path.join(S.outRoot, `${baseName}.vrew`));
-    if (!fs.existsSync(file)) throw new Error(`MP4 가 없습니다 — ④ 완성을 「🎬 유튜브 MP4」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
+    const file = isWb
+      ? path.join(wbFinalDir(preset) || S.outRoot, `${baseName}_whiteboard.mp4`)
+      : uploadMp4Path(baseName, preset, path.join(S.outRoot, `${baseName}.vrew`));
+    if (!fs.existsSync(file)) throw new Error(`${isWb ? '화이트보드 MP4' : 'MP4'} 가 없습니다 — ④ 완성을 「${isWb ? '✏ 화이트보드 MP4' : '🎬 유튜브 MP4'}」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
     const done = YT.findUploaded(chId, file);
     if (done) {
       const c = await dialog.showMessageBox(win, {
@@ -2710,6 +2714,8 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
 });
 
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
+/** ✏ 화이트보드 완성물 폴더 — 채널 「화이트보드」 → 윈도우 다운로드 → ''(작업 폴더에 그대로). 렌더·⬆ 업로드가 같은 값을 쓴다. */
+function wbFinalDir(preset) { return String((preset && preset.outWhiteboard) || '').trim() || defaultDownloadDir() || ''; }
 async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7 } = {}) {
   const WP = require('./core/whiteboard-pipeline');
   const WCfg = require('./core/whiteboard-config');
@@ -2717,7 +2723,7 @@ async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, cap
   const conc = WCfg.effectiveConcurrency(cfg);
   // 📁 완성물이 떨어질 곳 — 채널의 「화이트보드 출력」, 비어 있으면 **윈도우 다운로드 폴더**(로이 2026-09-16).
   //   그것도 못 구하면 작업 폴더에 그대로 둔다(작업이 막히면 안 된다).
-  const finalDir = String((preset && preset.outWhiteboard) || '').trim() || defaultDownloadDir() || '';
+  const finalDir = wbFinalDir(preset);
   // 🎵 배경음악 — 채널 설정(.vrew·유튜브 MP4 와 같은 resolveBgm). 화이트보드는 음성 트랙에 섞는다.
   //   runMakeAllCore 가 이미 골라 뒀으면(preset.bgm) 그대로 쓴다 — 다시 고르면 로그가 두 번 찍힌다.
   const _bg = (preset && preset.bgm) || resolveBgm(preset || {}, S.scriptPath, log).bgm;
@@ -5736,7 +5742,12 @@ async function runMakeAllCore(opts = {}) {
       if (wbGo) {
         // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 확인 팝업은 없다(누르면 바로 만든다).
         const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars });
-        if (wr.ok) { if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} } }
+        if (wr.ok) {
+          if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} }
+          // ⬆ 화이트보드 MP4 도 채널의 「업로드채널」로 비공개 업로드(v0.5.81 로이) — 🔴 음성 얹기가 실패한 **무음 영상은 올리지 않는다**.
+          if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
+          else if (preset && preset.ytAuto) log(`⏭ 유튜브 업로드 건너뜀 — 화이트보드 MP4 에 음성이 없습니다(${wr.audioError || '음성 얹기 실패'})`);
+        }
         else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
         continue;
       }

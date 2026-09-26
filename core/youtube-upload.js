@@ -498,8 +498,22 @@ async function uploadVideo(o = {}) {
   }
 }
 
+/**
+ * ↕ 연결된 채널 순서 바꾸기(⚙ 설정 → ▶ 유튜브에서 끌어서 · v0.5.81) — 저장 파일의 channels 순서가 곧 표시 순서다
+ *   (설정 목록 · 채널편집 「업로드채널」 목록 둘 다 status() 순서). 모르는 ID 는 무시, 빠진 채널은 뒤에 원래 순서로 붙인다(잃지 않는다).
+ *   채널 ID 는 「UC…」 라 숫자 키 정렬 규칙에 걸리지 않는다. 다시 연결해도 자리는 그대로(기존 키에 덮어쓰기).
+ */
+function reorderChannels(ids) {
+  const d = _load();
+  const next = {};
+  for (const id of (Array.isArray(ids) ? ids : [])) if (d.channels[id] && !next[id]) next[id] = d.channels[id];
+  for (const id of Object.keys(d.channels)) if (!next[id]) next[id] = d.channels[id];
+  d.channels = next;
+  return _save(d) ? { ok: true, order: Object.keys(next) } : { ok: false, error: '설정 파일 저장 실패' };
+}
+
 module.exports = {
-  SCOPES, available, status, parseClientJson, importClient, connectChannel, disconnect, accessToken,
+  SCOPES, available, status, parseClientJson, importClient, connectChannel, disconnect, accessToken, reorderChannels,
   uploadVideo, findUploaded, cleanTitle, cleanDescription, cleanTags, explainApiError,
   authFile, uploadsFile, _setEndpoints, _setCrypto,
 };

@@ -2345,6 +2345,19 @@ export default function App() {
   async function pickOutReader() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outReader: d })); }
   // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
   async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
+  // ↕ 연결된 채널 순서 — 끌어서 놓으면 바로 저장(이 PC). 채널편집 「업로드채널」 목록도 이 순서를 따른다.
+  const ytDragRef = useRef(null);
+  const [ytDragOver, setYtDragOver] = useState(null);
+  async function ytDrop(toIdx) {
+    const from = ytDragRef.current; ytDragRef.current = null; setYtDragOver(null);
+    const list = (ytSt && ytSt.channels) || [];
+    if (from == null || from === toIdx || !list[from]) return;
+    const next = list.slice(); const [moved] = next.splice(from, 1); next.splice(toIdx, 0, moved);
+    setYtSt({ ...ytSt, channels: next });   // 먼저 보여 주고
+    const r = await api.ytReorder(next.map((c) => c.id));
+    if (!r || !r.ok) setSettingsMsg(`❌ 순서 저장 실패 — ${(r && r.error) || ''}`);
+    ytLoad();                                // 저장된 순서로 다시 맞춘다
+  }
   async function ytImport() {
     const r = await api.ytImportClient();
     if (r && r.ok) setSettingsMsg(`✅ 연결 파일을 가져왔습니다 (프로젝트 ${r.projectId || '?'})${r.cleared ? ` — 다른 프로젝트라 기존 채널 연결 ${r.cleared}개를 지웠습니다. 다시 연결하세요.` : ' — 이제 「🔗 채널 연결」을 누르세요.'}`);
@@ -2354,7 +2367,7 @@ export default function App() {
   async function ytConnect() {
     setSettingsMsg('⏳ 브라우저에서 구글 로그인 → 올릴 채널 선택 → 「확인되지 않은 앱」이면 고급 → Priming(으)로 이동 → 허용을 눌러 주세요 (5분 안에)');
     const r = await api.ytConnect();
-    setSettingsMsg(r && r.ok ? `✅ 「${r.channel.title}」 연결됨 — ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 이 채널을 고르세요.` : `❌ ${(r && r.error) || '연결 실패'}`);
+    setSettingsMsg(r && r.ok ? `✅ 「${r.channel.title}」 연결됨 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 이 채널을 고르세요.` : `❌ ${(r && r.error) || '연결 실패'}`);
     ytLoad();
   }
   async function ytDisconnect(c) {
@@ -2362,7 +2375,7 @@ export default function App() {
     await api.ytDisconnect(c.id); ytLoad();
   }
   async function runYtUpload() {
-    try { const r = await api.ytUploadCurrent({ presetName }); if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)`); }
+    try { const r = await api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' }); if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)`); }
     catch (e) { uiAlert(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
   }
   async function pickOutWhiteboard() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outWhiteboard: d })); }
@@ -3460,9 +3473,7 @@ export default function App() {
           {!noProduction && (<>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
-              {qc >= 1 && <label className="chk" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>}
             </>); })()}
-            <button className="ghost" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
           </>)}
         </div>
@@ -3576,6 +3587,8 @@ export default function App() {
               <option value="whiteboard">✏ 화이트보드 MP4</option>
               <option value="mp4">🎬 유튜브 MP4</option>
             </select>
+            {/* 📂 완성 후 열기(v0.5.79) — 헤더(⚡ 만들기 옆)에 두면 1366px 에서 ■ 중단이 둘째 줄로 밀린다(v0.5.81 실측) → 완성 종류 옆으로 */}
+            <label className="chk" data-testid="open-after-make" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>
             {outTarget === 'whiteboard' && (<>
               <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
                 <option value="1920">1920 (최종)</option>
@@ -3590,7 +3603,7 @@ export default function App() {
             <span className="hdiv" />
             {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
-            {outTarget === 'mp4' && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4 를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → ⬆ 자동 업로드에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
+            {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
           </span>
               <span className="hgroup rb-extra" id="capbar">
@@ -3636,6 +3649,8 @@ export default function App() {
             )}
             {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
             <span className="hgroup rb-reader">
+              {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}
+              <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
               {/* 📥 대본다운 — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞 · 이름·그림 변경). 대본이 없어도 쓴다(받는 중만 막힘). */}
               <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 영상 대본을 받습니다 — 자막이 있으면 자막을 그대로 쓰고(GPU 0), 없으면 음성을 받아 STT 로 전사합니다" onClick={openUrlDl}><span className="rb-ic">📥</span> <span className="rb-t">대본다운</span></button>
               <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
@@ -4062,19 +4077,19 @@ export default function App() {
               </div>)}
 
               {chTab === 'folder' && (<div>
-                <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본 폴더'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
+                <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
-                <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : '롱폼 출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
+                <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : 'Vrew출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
                 {/* ✏ 화이트보드 완성물(MP4 + 자막)이 떨어질 폴더 — 비우면 윈도우 「다운로드」 폴더.
                     ⚠ 장면·중간 파일은 여기가 아니라 작업 폴더(롱폼 출력/대본이름/whiteboard-N)에 남는다. */}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow"><label>화이트보드 출력</label>
+                  <div className="frow"><label>화이트보드</label>
                     <input placeholder="✏ 화이트보드 MP4 와 자막(.srt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outWhiteboard || ''}
                       onChange={(e) => setCh({ ...ch, outWhiteboard: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutWhiteboard}>찾기</button></div>
                 )}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow"><label>유튜브 업로드</label>
+                  <div className="frow"><label>MP4</label>
                     <input placeholder="🎬 유튜브 MP4(④ 완성 → 🎬 유튜브 MP4)가 떨어질 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outUpload || ''}
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
@@ -4088,7 +4103,7 @@ export default function App() {
                 )}
                 {/* ⬆ 유튜브 자동 업로드 — MP4 를 구운 뒤 이 채널에 **비공개**로 올린다(제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow" title="🎬 유튜브 MP4 를 구우면 고른 채널에 비공개로 올립니다. 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>⬆ 자동 업로드</label>
+                  <div className="frow" title="🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 비공개로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>업로드채널</label>
                     <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" disabled={!ch.ytChannelId} checked={!!ch.ytAuto && !!ch.ytChannelId} onChange={(e) => setCh({ ...ch, ytAuto: e.target.checked })} />
                     <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value, ytAuto: !!e.target.value && (ch.ytChannelId ? !!ch.ytAuto : true) })}>
                       <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 유튜브 채널 —' : '— 연결된 채널 없음 (⚙ 설정 → ▶ 유튜브) —'}</option>
@@ -4109,7 +4124,7 @@ export default function App() {
                     <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 48, flex: '0 0 auto' }} title="크기 — 화면 너비 대비 % (기본 12)" disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span></div>
                 )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
-                <div className="frow"><label>다운로드 폴더</label>
+                <div className="frow"><label>다운로드</label>
                   <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
                     onChange={(e) => setCh({ ...ch, downloadFolder: e.target.value })} />
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDownloadFolder}>찾기</button></div>
@@ -4583,7 +4598,7 @@ export default function App() {
             </div>)}
             {settingsTab === 'yt' && (<div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.6 }}>
-                🎬 유튜브 MP4 를 구우면 채널에 <b>비공개</b>로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
+                🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
                 <b>공개·예약·썸네일·재생목록</b>은 Studio 에서 직접 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
               </div>
               {ytSt && !ytSt.available && <div className="meta" style={{ color: '#b03a3a', marginBottom: 8 }}>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</div>}
@@ -4601,15 +4616,23 @@ export default function App() {
                   <button style={{ flex: '0 0 auto' }} disabled={!ytSt || !ytSt.hasClient} onClick={ytConnect}>🔗 채널 연결</button>
                 </div>
                 {(!ytSt || !ytSt.channels || !ytSt.channels.length) && <div className="meta" style={{ marginTop: 6 }}>연결된 채널이 없습니다.</div>}
-                {((ytSt && ytSt.channels) || []).map((c) => (
-                  <div key={c.id} className="frow" style={{ alignItems: 'center', borderTop: '1px dashed var(--line)', paddingTop: 5, marginTop: 5 }}>
+                {((ytSt && ytSt.channels) || []).map((c, i) => (
+                  <div key={c.id} className="frow" data-testid="yt-ch-row" draggable
+                    title="끌어서 순서를 바꿉니다(채널편집 「업로드채널」 목록도 이 순서)"
+                    onDragStart={(e) => { ytDragRef.current = i; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id); } catch (_) {} }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (ytDragOver !== i) setYtDragOver(i); }}
+                    onDragLeave={() => { if (ytDragOver === i) setYtDragOver(null); }}
+                    onDrop={(e) => { e.preventDefault(); ytDrop(i); }}
+                    onDragEnd={() => { ytDragRef.current = null; setYtDragOver(null); }}
+                    style={{ alignItems: 'center', borderTop: ytDragOver === i ? '2px solid var(--hook)' : '1px dashed var(--line)', paddingTop: 5, marginTop: 5, cursor: 'grab' }}>
+                    <span className="meta" style={{ flex: '0 0 auto', cursor: 'grab', userSelect: 'none' }}>⠿</span>
                     <b style={{ flex: '0 0 auto' }}>▶ {c.title}</b>
                     <span className="meta" style={{ flex: 1 }}>{c.handle ? `${c.handle} · ` : ''}{c.connectedAt ? `${c.connectedAt} 연결` : ''}{c.broken ? ' · ⚠ 연결이 끊겼습니다 — 다시 연결하세요' : ''}</span>
                     <button className="ghost" style={{ flex: '0 0 auto' }} title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
                   </div>
                 ))}
               </div>
-              <div className="meta" style={{ lineHeight: 1.6 }}>③ ⚙ 채널편집 → 📁 폴더 → <b>⬆ 자동 업로드</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</div>
+              <div className="meta" style={{ lineHeight: 1.6 }}>③ ⚙ 채널편집 → 📁 폴더 → <b>업로드채널</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</div>
             </div>)}
             {settingsTab === 'tts' && (<div>
               <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>

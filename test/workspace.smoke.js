@@ -83,6 +83,17 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
+    // 🔴 대본을 연 뒤(큐 1개 · ⚡ 만들기 활성)에도 메뉴 줄이 한 줄 — v0.5.79 「완성 후 열기」를 헤더에 두어 ■ 중단이 둘째 줄로 밀렸는데
+    //    위 [1] 은 대본을 열기 전에 재서 못 잡았다(v0.5.81). 새 헤더 버튼을 넣으면 여기가 먼저 깨진다.
+    {
+      const mb2 = await win.locator('.menubar').boundingBox();
+      ok(mb2 && mb2.height < 56, `대본을 연 뒤에도 1366px 메뉴 줄이 한 줄 (${mb2 && Math.round(mb2.height)}px)`);
+      await win.locator('.menus button[data-menu]', { hasText: '완성' }).first().click(); await win.waitForTimeout(250);
+      ok(await win.locator('[data-testid="open-after-make"]').isVisible(), '④ 완성 메뉴에 「완성 후 열기」 체크');
+      const mo = await win.locator('[data-testid="monitor-off"]').boundingBox();
+      ok(!!mo && await win.evaluate(({ x, y }) => !!(document.elementFromPoint(x, y) || {}).closest?.('[data-testid="monitor-off"]'), { x: mo.x + mo.width / 2, y: mo.y + mo.height / 2 }), '🌙 모니터 끄기 버튼이 보이고 눌리는 자리(누르지는 않는다)');
+      await win.locator('.menus button[data-menu]', { hasText: '대본·음성' }).first().click(); await win.waitForTimeout(250);
+    }
     for (const [g, img] of [[1, imgR], [2, imgB]]) {
       // 화면의 ＋ 칸을 눌러 첨부한다(API 를 직접 부르면 화면 상태가 안 바뀐다)
       await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, img);

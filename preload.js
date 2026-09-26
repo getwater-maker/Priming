@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('api', {
   ytImportClient: () => ipcRenderer.invoke('yt-import-client'),
   ytConnect: () => ipcRenderer.invoke('yt-connect'),
   ytDisconnect: (id) => ipcRenderer.invoke('yt-disconnect', id),
+  ytReorder: (ids) => ipcRenderer.invoke('yt-reorder', ids),
   ytUploadCurrent: (args) => ipcRenderer.invoke('yt-upload-current', args),
   ytAbort: () => ipcRenderer.invoke('yt-abort'),
   ytOpenUrl: (u) => ipcRenderer.invoke('yt-open-url', u),

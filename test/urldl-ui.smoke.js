@@ -104,7 +104,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
       const tab = chCard.locator('button:has-text("📁")');
       if (await tab.count()) { await tab.first().click(); await win.waitForTimeout(300); }
       const t = await chCard.first().innerText();
-      ok(/다운로드 폴더/.test(t), '채널편집 📁 폴더 탭에 「다운로드 폴더」 칸이 있다');
+      ok(await chCard.first().locator('.frow label', { hasText: /^다운로드$/ }).count() === 1 && /다운로드/.test(t), '채널편집 📁 폴더 탭에 「다운로드」 칸이 있다(v0.5.81 라벨)');
       await win.keyboard.press('Escape');
     } else {
       console.log('  ⓘ 채널편집 창을 못 열어 이 항목은 건너뜀');
