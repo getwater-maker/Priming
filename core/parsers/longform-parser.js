@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Project } = require('../project-model');
-const { splitHybrid } = require('../sentence-splitter');
+const { splitHybrid, stripCharCountTail } = require('../sentence-splitter');
 const { buildGroupsHybrid } = require('../group-builder');
 const { getModeProfile } = require('../mode-profiles');
 
@@ -48,7 +48,8 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
 
   // 파일 제목 — 첫 H1(# …) 또는 폴백(파일명)
   const h1 = raw.match(H1_RE);
-  const fileTitle = (h1 ? h1[1].trim() : '') || fallbackTitle || '롱폼';
+  //   📏 `# 제목 / 15,761 자` 의 글자 수 꼬리는 벗긴다 — 대본 읽기·PDF·업로드 폴백 제목·헤더에 새지 않게.
+  const fileTitle = (h1 ? stripCharCountTail(h1[1]) : '') || fallbackTitle || '롱폼';
   const meta = { raw: '', voice: null, aspect: '16:9' };
 
   // 문장화 + 그룹화 (헤더/대괄호/도입 하이브리드)

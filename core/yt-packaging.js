@@ -124,7 +124,8 @@ function buildUploadMeta(a = {}) {
     if (!bad) { chText = r.text; chN = chs.length; chTotal = chs.reduce((x, c) => x + c.dur, 0); }
     else notes.push(`챕터가 유튜브 규칙(3개 이상 · 각 10초 이상)에 안 맞아 설명에 넣지 않았습니다(${chs.length}개).`);
   }
-  const strip = (s) => String(s || '').replace(/^\s*\[[^\]]+\]\s*/, '').trim();   // "[고전_0930] …" → "…"
+  // "[고전_0930] …" → "…" · 📏 끝의 글자 수 표기 "… / 15,761 자" 도 뗀다(업로드 제목에 새지 않게 · 이중 방어)
+  const strip = (s) => String(s || '').replace(/^\s*\[[^\]]+\]\s*/, '').replace(/\s*\/\s*[\d,]+\s*자\s*$/, '').trim();
   const title = pk.title || strip(pr && pr.title) || strip(a.fallbackTitle) || strip(path.basename(String(a.scriptPath || ''), '.md'));
   return {
     title,

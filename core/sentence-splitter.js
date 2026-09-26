@@ -256,9 +256,11 @@ function splitHybrid(text) {
     } else if (headerM) {
       flush();
       // H1/H2 가 도입 영역 토글 + h2 섹션 키·제목 갱신, H3+ 는 상위 H2 값을 상속.
-      if (headerM[1].length <= 2) { introRegion = /도입/.test(headerM[2]); h2Idx++; h2Title = headerM[2].trim(); }
+      // 📏 H1 뒤 글자 수 표기(`# 제목 / 15,761 자`)는 제목이 아니다 — 챕터·배지 이름에서 뺀다.
+      const hText = headerM[1].length === 1 ? stripCharCountTail(headerM[2]) : headerM[2].trim();
+      if (headerM[1].length <= 2) { introRegion = /도입/.test(headerM[2]); h2Idx++; h2Title = hText; }
       // 마크다운 헤더(섹션명)는 sectionTitle 로 보존 → 그룹 배지에 섹션 내용 표시.
-      cur = newBlock({ mode: 'md', isIntro: introRegion, sectionTitle: headerM[2].trim() });
+      cur = newBlock({ mode: 'md', isIntro: introRegion, sectionTitle: hText });
     } else {
       cur.lines.push(line);
     }
@@ -312,4 +314,10 @@ const MATCH_PATTERNS = {
   speakerLine: SPEAKER_LINE_RE,       // [이름] 대사 줄 (접두 [이름] 은 문장 아님)
 };
 
-module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS };
+// 📏 대본 H1 뒤 글자 수 표기 — `# 제목 / 15,761 자` (2026-09-26 아도나이로이 로이 지정 · 전 채널).
+//   제목 문자열을 쓰는 곳(파일 제목 · 챕터 · 대본 읽기 · 업로드 폴백 제목)은 모두 이것으로 벗긴다.
+//   아도나이로이 `대본검사.py` `RE_자수꼬리` 와 같은 식이다 — 한쪽을 바꾸면 둘 다 바꾼다.
+const CHAR_COUNT_TAIL_RE = /\s*\/\s*[\d,]+\s*자\s*$/;
+function stripCharCountTail(s) { return String(s == null ? '' : s).replace(CHAR_COUNT_TAIL_RE, '').trim(); }
+
+module.exports = { splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS, stripCharCountTail, CHAR_COUNT_TAIL_RE };
