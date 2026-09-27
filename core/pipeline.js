@@ -175,6 +175,7 @@ async function makeTtsManager(logger, engine, opts = {}) {
 const MIN_TTS_BYTES = 1200;
 const MIN_TTS_SEC = 0.05;
 const TTS_MAX_ATTEMPT = 3;          // 일반 오류(네트워크·타임아웃) 재시도 상한
+const TTS_PROGRESS_GAP_MS = 1000;   // 📺 TTS 중 화면 갱신(전체 DTO) 최소 간격 — 통합본 응답없음 사고(v0.5.84)
 const TTS_MAX_ATTEMPT_EMPTY = 6;    // 빈 음성 — 시드를 갈아끼우므로 여유를 더 준다(무작위라 실패 확률이 급감)
 function assertRealAudio(res, num) {
   const len = res && res.mp3Buffer ? res.mp3Buffer.length : 0;
@@ -332,6 +333,19 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   // 🔑 캐시 키가 "합성될 최종 문자열" 기준이므로, 루프 전에 발음사전을 서버와 한 번 맞춘다.
   //   안 맞추면 첫 문장만 옛 사전으로 키가 계산돼 어긋난다.
   try { if (typeof ttsMgr.prepareDict === 'function') await ttsMgr.prepareDict(); } catch {}
+  // 📺 화면 갱신(onProgress = main.pushDtoUpdate — 대본 **전체** DTO 를 새로 만들어 보낸다)은 **몰아서** 한다(2026-09-27, v0.5.84).
+  //   🔴 예전엔 이미 있는 음성을 건너뛸 때마다 불렀다 → 통합본(3,534문장 전부 있음)에서 **전체 DTO × 3,534번**을
+  //     한 번도 쉬지 않고 돌려(동기 루프) 앱이 「응답 없음」으로 두 번 굳었다(로이 2026-09-27 19:08·19:17).
+  //   이제: 건너뛰기·캐시 = 표시만 해 두고 **끝에 한 번** · 새로 만든 문장 = 1초에 한 번까지 · 루프 끝에 남은 것 한 번.
+  //   그리고 건너뛰기 100개마다 이벤트 루프에 한 번 양보한다(G: 존재 확인 3,534개 ≈ 6초를 한 번에 막지 않게).
+  let _progPending = false, _progLast = 0, _skipN = 0;
+  const progress = (now) => {
+    if (!onProgress) return;
+    if (!now || Date.now() - _progLast < TTS_PROGRESS_GAP_MS) { _progPending = true; return; }
+    _progPending = false;
+    try { onProgress(); } catch {}
+    _progLast = Date.now();
+  };
   const failed = [];            // 3회 시도해도 안 된 문장 번호 — 끝에 요약하고 .vrew 게이트가 막는다
   let consecFail = 0;           // 연속 실패 수(서버가 죽었는지 판단)
   const MAX_CONSEC_FAIL = 5;
@@ -339,7 +353,11 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     // 이미 음성이 있으면 건너뜀 — '비어있는 것만' 채움. (분할 등으로 재구성돼도 문장은 그대로라 재사용)
     //   force=true('🔁 다시 변환') 면 기존 음성·캐시를 모두 무시하고 무조건 재합성.
-    if (!force && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) { if (onProgress) { try { onProgress(); } catch {} } continue; }
+    if (!force && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) {
+      progress(false);
+      if (++_skipN % 100 === 0) await new Promise((r) => setImmediate(r));
+      continue;
+    }
     const _genT0 = Date.now(); // 생성 소요시간 측정 (RTF = 생성시간/음성길이)
     // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사. (force 면 건너뜀)
     //   🔑 키는 원문이 아니라 **실제 합성될 문자열**(발음사전+정규화 적용) 기준이다. 원문으로
@@ -357,7 +375,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       s.ttsDurationSec = hit.dur;
       s.ttsGenSec = (Date.now() - _genT0) / 1000;
       if (onLine) onLine(`♻ ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s 재활용(캐시)`);
-      if (onProgress) { try { onProgress(); } catch {} }
+      progress(true);   // 캐시 복사는 파일 쓰기(await)가 있어 루프가 쉰다 — 1초 간격이면 충분
       continue;
     }
     // 일시적 'fetch failed'(서버 블립/네트워크) → 최대 3회 재시도.
@@ -480,9 +498,10 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     // 캐시에 저장(다음 동일 작업 시 재활용)
     try { TtsCache.put(cacheKey, s.ttsAudioPath, s.ttsDurationSec, path.extname(s.ttsAudioPath).slice(1).toLowerCase() || 'wav'); } catch {}
     if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''}${s.backcheck ? (s.backcheck.unknown ? ' · 🔎 확인 불가' : ` · 🔎 ${Math.round(s.backcheck.score * 100)}%`) : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
-    // 문장 한 개 변환 완료 → 즉시 화면 갱신(시간 표시). PrimingFlow 처럼 바로바로 진행상황 반영.
-    if (onProgress) { try { onProgress(); } catch {} }
+    // 문장 한 개 변환 완료 → 화면 갱신(시간 표시). 1초에 한 번까지(TTS_PROGRESS_GAP_MS) — 나머지는 다음 갱신·끝에 같이 나간다.
+    progress(true);
   }
+  if (_progPending && onProgress) { try { onProgress(); } catch {} }   // 몰아 둔 갱신 — 루프가 끝나면(중단·break 포함) 반드시 한 번
   // 🔎 역대조 결과표 — 일본어·베트남어 문장이 있을 때만(대본마다 한 장, tts-N 옆). 본부(아도나이로이)가 이 파일로 편마다 판정한다.
   try {
     const fore = sentences.filter((x) => x && Lang.isForeignLang(Lang.detectLang(x.text)));
