@@ -362,6 +362,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
   try { writeSnapshotSync(); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장
+  try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙 감시가 앱보다 오래 남지 않게
   try { if (S.flowEng && S.flowEng.context) S.flowEng.context.close(); } catch {}
   // 작업 중 강제 종료돼도 절전 차단이 남지 않게 확실히 해제(카운터 무시)
   try {
@@ -494,20 +495,70 @@ function awakeRelease() {
 //   PC·GPU·작업은 계속 돈다. 마우스·키보드를 건드리면 다시 켜진다(Windows 동작).
 //   방법 = WM_SYSCOMMAND / SC_MONITORPOWER(2 = 끄기)를 PostMessage 로 방송(SendMessage 방송은 응답 없는 창에 걸려 멈출 수 있다).
 //   🔴 비동기 자식 프로세스(메인 동기 실행 금지 규칙) · 0.8초 뒤에 보낸다 — 버튼을 누른 손의 마우스 떨림이 곧바로 다시 켜지 않게.
+//   🛡 저절로 다시 켜짐 막기(2026-09-27, v0.5.83 · 요청서_모니터끄기_재점등): 끈 지 약 137초 뒤 **아무도 안 건드렸는데** 한 번 켜진다.
+//     실측(Kernel-Power 566 + 1초 간격 기록): 켜진 이유 = `InputHid`(Reason 32) · 그 순간 **커서 좌표 그대로 · 모니터 3대 그대로**
+//     → 어떤 HID 장치의 보고 한 번이 입력으로 잡힌 것(「DP 모니터가 빠져 커서가 옮겨진다」 가설은 기록과 맞지 않았다).
+//     그래서 원인 장치와 무관하게: 끈 뒤 6분 동안 입력이 생기면 **이유가 InputHid 이고 커서가 그대로일 때만** 다시 끈다(최대 3번).
+//     키보드(31)·커서 이동·이벤트를 못 읽음 = 사람이 깨운 것으로 보고 손대지 않는다(fail-open — 사람을 이기지 않는다).
+//     ⚠ 다시 끄기 전까지 1초 안팎 번쩍임은 남는다(원인 장치를 찾으면 사라진다 — 작업노트 2026-09).
+const MONITOR_GUARD_SEC = 360;
 const MONITOR_OFF_PS = [
-  "Add-Type -Namespace PrimingMon -Name U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);'",
+  "$ProgressPreference = 'SilentlyContinue'",   // 진행 표시(CLIXML)가 stderr 에 섞여 실패 문구를 가리지 않게
+  "Add-Type -Namespace PrimingMon -Name G -MemberDefinition @'",
+  '[DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);',
+  '[DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);',
+  '[DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO i);',
+  'public struct POINT { public int X; public int Y; }',
+  'public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }',
+  "'@",
+  'function Off { [void][PrimingMon.G]::PostMessage([IntPtr]0xffff, 0x0112, [IntPtr]0xF170, [IntPtr]2) }',
+  'function Last { $i = New-Object PrimingMon.G+LASTINPUTINFO; $i.cbSize = 8; [void][PrimingMon.G]::GetLastInputInfo([ref]$i); $i.dwTime }',
+  'function Cur { $p = New-Object PrimingMon.G+POINT; [void][PrimingMon.G]::GetCursorPos([ref]$p); "$($p.X),$($p.Y)" }',
+  // 켜진 이유 — 가장 최근 566 중 「끄기(12)」가 아닌 것. 기록이 늦게 올 수 있어 3초까지 기다린다. 못 읽으면 ''(= 사람으로 본다).
+  "function WakeReason($since) { for ($k = 0; $k -lt 12; $k++) { try { $e = Get-WinEvent -FilterHashtable @{LogName='System'; Id=566; StartTime=$since} -MaxEvents 1 -ErrorAction Stop; $x = [xml]$e.ToXml(); $r = ($x.Event.EventData.Data | Where-Object { $_.Name -eq 'Reason' }).'#text'; if ($r -and $r -ne '12') { return $r } } catch {}; Start-Sleep -Milliseconds 250 }; return '' }",
   'Start-Sleep -Milliseconds 800',
-  '[void][PrimingMon.U]::PostMessage([System.IntPtr]0xffff, 0x0112, [System.IntPtr]0xF170, [System.IntPtr]2)',
-].join('; ');
+  'Off',
+  "'OFF'",
+  'Start-Sleep -Milliseconds 1500',
+  '$c0 = Cur; $l0 = Last; $t0 = Get-Date; $n = 0',
+  `while (((Get-Date) - $t0).TotalSeconds -lt ${MONITOR_GUARD_SEC} -and $n -lt 3) {`,
+  '  Start-Sleep -Milliseconds 300',
+  '  if ((Last) -eq $l0) { continue }',
+  '  $wake = Get-Date; $c = Cur; $r = WakeReason $wake.AddSeconds(-3); $sec = [int]($wake - $t0).TotalSeconds + 2',
+  "  if ($c -eq $c0 -and $r -eq '32') { Off; $n++; \"REOFF $sec\"; Start-Sleep -Milliseconds 1500; $c0 = Cur; $l0 = Last; continue }",
+  '  "WAKE $sec reason=$r moved=$([int]($c -ne $c0))"; break',
+  '}',
+  "'END'",
+].join('\n');
+let _monGuard = null;   // 지금 도는 감시(🌙 를 다시 누르면 옛 감시를 끝내고 새로)
 ipcMain.handle('monitor-off', () => new Promise((resolve) => {
   if (process.platform !== 'win32') { resolve({ ok: false, error: '윈도우에서만 됩니다.' }); return; }
+  try { if (_monGuard) _monGuard.kill(); } catch (_) {}
   const enc = Buffer.from(MONITOR_OFF_PS, 'utf16le').toString('base64');
-  require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc],
-    { windowsHide: true, timeout: 20000 }, (err) => {
-      if (err) { log(`✗ 모니터 끄기 실패 — ${err.message}`); resolve({ ok: false, error: err.message }); return; }
-      log(`🌙 모니터를 껐습니다 — 작업은 계속됩니다${_awake.n > 0 ? '' : ' (지금 도는 작업은 없습니다)'} · 마우스·키보드를 건드리면 켜집니다`);
-      resolve({ ok: true });
-    });
+  const cp = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc], { windowsHide: true });
+  _monGuard = cp;
+  let done = false, buf = '', errTxt = '';
+  const finish = (r) => { if (!done) { done = true; resolve(r); } };
+  const killer = setTimeout(() => { try { cp.kill(); } catch (_) {} }, (MONITOR_GUARD_SEC + 60) * 1000);
+  cp.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    let k;
+    while ((k = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, k).trim(); buf = buf.slice(k + 1);
+      if (line === 'OFF') {
+        log(`🌙 모니터를 껐습니다 — 작업은 계속됩니다${_awake.n > 0 ? '' : ' (지금 도는 작업은 없습니다)'} · 마우스·키보드를 건드리면 켜집니다`);
+        finish({ ok: true });
+      } else if (/^REOFF /.test(line)) log(`🌙 모니터가 저절로 켜져(${line.slice(6)}초 뒤 · 장치 신호 · 커서 그대로) 다시 껐습니다`);
+      else if (/^WAKE /.test(line)) { const m = /^WAKE (\d+) reason=(\S*) moved=(\d)/.exec(line); if (m) log(`🌙 모니터 켜짐 — ${m[1]}초 뒤 · ${m[2] === '31' ? '키보드' : m[3] === '1' ? '마우스 움직임' : '입력(' + (m[2] || '이유 못 읽음') + ')'} → 사람이 깨운 것으로 보고 그대로 둡니다`); }
+    }
+  });
+  cp.stderr.on('data', (d) => { errTxt += d.toString('utf8'); });
+  cp.on('error', (e) => { clearTimeout(killer); log(`✗ 모니터 끄기 실패 — ${e.message}`); finish({ ok: false, error: e.message }); });
+  cp.on('close', (code) => {
+    clearTimeout(killer);
+    if (_monGuard === cp) _monGuard = null;
+    if (!done) { const m = (errTxt.trim().split('\n')[0] || `종료 코드 ${code}`).slice(0, 200); log(`✗ 모니터 끄기 실패 — ${m}`); finish({ ok: false, error: m }); }
+  });
 }));
 /** 긴 작업을 절전 차단으로 감싼다. 실패·예외에도 finally 로 반드시 해제. */
 async function withAwake(label, fn) {
