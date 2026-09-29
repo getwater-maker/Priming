@@ -399,7 +399,13 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
     for (let i = 0; i < Math.min(n, clipDurations.length); i++) acc += clipDurations[i];
     startDelayMs = Math.round(acc * 1000);
   }
-  const durationSeconds = Math.max(0, parseFloat(opt.durationSeconds) || 0); // 0 = 끝까지
+  let durationSeconds = Math.max(0, parseFloat(opt.durationSeconds) || 0); // 0 = 끝까지
+  // 🏷 끝을 클립으로(v0.5.87 — 채널 「AI 고지 → 클립 단위」): endClip 번째 클립(1부터)이 끝날 때 사라진다
+  if (opt.endMode === 'clip' && parseInt(opt.endClip, 10) >= 1) {
+    const e = Math.min(clipDurations.length, parseInt(opt.endClip, 10));
+    let accE = 0; for (let i = 0; i < e; i++) accE += clipDurations[i] || 0;
+    durationSeconds = Math.max(0.1, accE - startDelayMs / 1000 - 0.001);
+  }
 
   // zIndex — image 트랙 최상단 위에 한 칸. 사용자가 직접 추가한 .vrew 형식과 일치.
   const imageZs = Object.values(pj.props.tracks)

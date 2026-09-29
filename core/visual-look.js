@@ -78,7 +78,7 @@ function aiNoticeForRange(aiNotice, project, logger) {
     if (i < a - 1) start += d; else if (i < b) dur += d;
   });
   if (missing && logger) logger(`⚠ AI 고지 범위 — 음성이 없는 문장 ${missing}개가 있어 시각이 실제와 다를 수 있습니다`);
-  return { ...aiNotice, startMode: 'seconds', startSeconds: Math.round(start * 1000) / 1000, durationSeconds: Math.max(0.1, Math.round(dur * 1000) / 1000) };
+  return { ...aiNotice, startMode: 'seconds', endMode: 'seconds', endClip: null, startSeconds: Math.round(start * 1000) / 1000, durationSeconds: Math.max(0.1, Math.round(dur * 1000) / 1000) };
 }
 
 module.exports = { FILLS, MOTIONS, normBox, normLook, isDefault, describe, aiNoticeForRange };

@@ -1178,7 +1178,7 @@ export default function App() {
     }
     finally { setImpBusy(false); }
   }
-  // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 두 그룹 프롬프트 초기화.
+  // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 그림·영상은 두 그룹 모두에 유지(앞 그림을 뒤 그룹 끝까지 이어 깐다 · v0.5.87).
   // ⤒ 앞 그룹과 합치기 — 앞 그림을 이 그룹 끝까지 이어 쓴다(로이 2026-09-24 「어디부터 어디까지 같은 그림」).
   async function mergeGroup(shortsNum, groupNum) {
     try { const d = await api.mergeGroup({ shortsNum, groupNum }); setDto(d); setStatus(`⤒ G${groupNum} 을 G${groupNum - 1} 에 합쳤습니다 — G${groupNum - 1} 그림을 이어 씁니다`); }
@@ -1258,7 +1258,7 @@ export default function App() {
     } catch (e) { logline('범위 변경 오류: ' + e.message); setStatus('⚠ ' + e.message); }
   }
   async function splitGroup(shortsNum, groupNum) {
-    try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
+    try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 그림·영상은 두 그룹 모두 그대로(뒤 그룹에 새 그림이 필요하면 그 그룹의 🔄)'); }
     catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
   }
   // 제작 전 검사 — 빈 프롬프트 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
@@ -2043,6 +2043,10 @@ export default function App() {
       downloadFolder: p.downloadFolder || '', // 🔗 URL 로 받은 영상·음성·전사본을 떨어뜨릴 폴더
 
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
+      // 🏷 AI 고지 문구·시간(v0.5.87) — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
+      aiText: (p.aiNotice && p.aiNotice.text) || '', aiUnit: (p.aiNotice && p.aiNotice.unit) === 'clip' ? 'clip' : 'time',
+      aiFromSec: p.aiNotice && p.aiNotice.fromSec != null ? p.aiNotice.fromSec : 5, aiToSec: p.aiNotice && p.aiNotice.toSec != null ? p.aiNotice.toSec : 10,
+      aiFromClip: p.aiNotice && p.aiNotice.fromClip != null ? p.aiNotice.fromClip : 1, aiToClip: p.aiNotice && p.aiNotice.toClip != null ? p.aiNotice.toClip : 3,
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
       // 🎭 화자별 목소리 [{name, voice}] — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
@@ -2335,7 +2339,9 @@ export default function App() {
       },
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
-      aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
+      aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice,
+        text: String(ch.aiText || '').trim(), unit: ch.aiUnit === 'clip' ? 'clip' : 'time',
+        fromSec: numOr(ch.aiFromSec, 5), toSec: numOr(ch.aiToSec, 0), fromClip: Math.max(1, Math.floor(numOr(ch.aiFromClip, 1))), toClip: Math.max(0, Math.floor(numOr(ch.aiToClip, 0))) },
     };
     // 🔑 시드는 **목소리 고정의 핵심**이다 — 비거나 숫자가 아니면 서버가 매번 다른 시드를 써서
     //   같은 채널인데 편마다 톤이 달라진다. 값이 이상하면 **저장하지 않고**(기존 시드 보존) 알린다.
@@ -3954,6 +3960,19 @@ export default function App() {
                     : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</span>
                 </div>
                 <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 (언제든 변경)</span></div>
+                {/* 🏷 AI 고지 문구·나타나는 때·사라지는 때(v0.5.87 로이) — 단위는 시간(초) 또는 클립(자막 줄 번호) */}
+                <div className="frow"><label>고지 문구</label><input data-testid="ai-text" placeholder="본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다." value={ch.aiText || ''} onChange={(e) => setCh({ ...ch, aiText: e.target.value })} /></div>
+                <div className="frow"><label>고지 시간</label>
+                  <select data-testid="ai-unit" style={{ flex: '0 0 auto', width: 'auto' }} value={ch.aiUnit || 'time'} onChange={(e) => setCh({ ...ch, aiUnit: e.target.value })}><option value="time">시간(초)</option><option value="clip">클립(자막 줄 번호)</option></select>
+                  {(ch.aiUnit || 'time') === 'time' ? (<>
+                    <input data-testid="ai-from" type="number" min="0" step="0.5" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiFromSec} onChange={(e) => setCh({ ...ch, aiFromSec: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>초부터</span>
+                    <input data-testid="ai-to" type="number" min="0" step="0.5" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiToSec} onChange={(e) => setCh({ ...ch, aiToSec: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>초까지 (0 = 끝까지)</span>
+                  </>) : (<>
+                    <input data-testid="ai-from" type="number" min="1" step="1" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiFromClip} onChange={(e) => setCh({ ...ch, aiFromClip: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>번 클립부터</span>
+                    <input data-testid="ai-to" type="number" min="0" step="1" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiToClip} onChange={(e) => setCh({ ...ch, aiToClip: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>번 클립까지 (0 = 끝까지)</span>
+                  </>)}
+                </div>
+                <div className="frow"><label></label><span className="meta">대본 화면에서 🏷 로 문장 범위를 따로 정한 대본은 그 범위가 이깁니다. Vrew 는 클립 단위로 사라지므로 「초」 끝은 그 시각이 든 클립이 끝날 때 사라집니다.</span></div>
               </div>)}
 
               {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
@@ -5103,7 +5122,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     {aiNotice && onAiRange && gs + si === aiFirst(pr) && (
                       <button className="ai-tag" data-testid="ai-tag" title="AI 고지 문구가 보이는 범위 — 눌러서 바꾸기(Vrew 텍스트의 적용 범위)"
                         onClick={(ev) => { ev.stopPropagation(); setVrMenu({ kind: 'ai', shortsNum: pr.shortsNum, n: nSent, cur: pr.aiNoticeRange, ord: gs + si, x: ev.clientX, y: ev.clientY }); }}>
-                        🏷 AI 고지 {pr.aiNoticeRange ? `${pr.aiNoticeRange.from}~${pr.aiNoticeRange.to}` : '· 5초 뒤 5초(기본)'}
+                        🏷 AI 고지 {pr.aiNoticeRange ? `${pr.aiNoticeRange.from}~${pr.aiNoticeRange.to}` : '· 채널 설정대로'}
                       </button>
                     )}
                     <div className={'sblk' + (vrR && gs + si >= vrR.from && gs + si <= vrR.to ? ' vr-hit' : '') + (aiIn(pr, gs + si) ? ' ai-in' : '')} key={si} data-ord={gs + si} data-sn={pr.shortsNum}>
@@ -5251,7 +5270,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             <span className="sc-title" title={c.phase || ''}>{c.phase || ''}</span>
                             <span className="sc-btns">
                               {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
-                                <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(프롬프트 초기화)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂</button>}
+                                <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂</button>}
                               {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로)`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
                               <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                               <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
@@ -5271,7 +5290,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           <div className="narr-btns">
                             {c.groupDurationSec ? <span className={'dur' + (c.groupDurationSec > 10 ? ' over' : '')}>▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
                             {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
-                              <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(프롬프트 초기화)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>}
+                              <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>}
                             {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로). 대본에 영구히 두려면 H3 아래에 「> 🖼️ 이미지: 이어서」`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
@@ -5765,7 +5784,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
         <button title="이 그룹만 TTS 변환 — Shift+클릭 = 시드를 바꿔 다른 take" onClick={(e) => { close(); grp.onGroupTts(sn, c.num, e.shiftKey); }}>🎤 이 그룹 TTS</button>
         <button title="이 그룹 프롬프트 보기·수정" onClick={go(() => grp.onShowPrompt(sn, c, `G${c.num}`))}>📝 프롬프트</button>
         {(c.num > 1 && grp.onMerge) && <button title={`앞 그룹(G${c.num - 1})과 합치기 — 앞 그룹 그림을 이 그룹 끝까지 이어 씁니다`} onClick={go(() => grp.onMerge(sn, c.num))}>⤒ 앞 그룹과 합치기</button>}
-        {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) && <button title="10초 초과 — 2개 그룹으로 분할(프롬프트 초기화)" onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>}
+        {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) && <button title="10초 초과 — 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)" onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>}
         <div className="vr-sep" />
       </>}
       {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>

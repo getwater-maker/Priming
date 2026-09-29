@@ -41,12 +41,27 @@ function presetThresholds(preset) {
 }
 // 영상 엔진 → Grok 클립 길이. 'grok'=자동(그룹 TTS 기준 6/10초, pipeline 에서 결정), 레거시 'grok10'=10s 고정.
 function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
-// AI 고지 결정 — 사용자 선택(want)을 따른다. 켜면 5초 후 5초간 표시.
+// AI 고지 결정 — 켤지는 사용자 선택(want · 작업바). **문구·나타나는 때·사라지는 때는 채널 설정**(2026-09-29 로이 · v0.5.87).
+//   채널 aiNotice = { text, unit: 'time'|'clip', fromSec, toSec, fromClip, toClip } — 끝을 비우면(0) 영상 끝까지.
+//   클립 = 화면의 자막 줄 번호(= .vrew 클립). 대본에서 문장 범위를 따로 정했으면(🏷 · pr.aiNoticeRange) 그것이 이긴다(visual-look).
 const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
+function aiNoticeTiming(a) {
+  a = a || {};
+  const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 ? n : d; };
+  if (a.unit === 'clip') {
+    const from = Math.max(1, Math.floor(num(a.fromClip, 1)));
+    const to = Math.floor(num(a.toClip, 0));
+    return { startMode: 'clip', startClip: from, endMode: to >= from ? 'clip' : 'end', endClip: to >= from ? to : null, durationSeconds: 0 };
+  }
+  const from = num(a.fromSec, 5);
+  const to = num(a.toSec, 10);
+  return { startMode: 'seconds', startSeconds: from, endMode: 'seconds', durationSeconds: to > from ? to - from : 0 };
+}
 function resolveAiNotice(preset, want) {
   if (!preset) return preset;
-  const base = { text: AI_NOTICE_TEXT, ...(preset.aiNotice || {}) };
-  return { ...preset, aiNotice: { ...base, enabled: !!want, startMode: 'seconds', startSeconds: 5, durationSeconds: 5 } };
+  const a = preset.aiNotice || {};
+  const text = String(a.text || '').trim() || AI_NOTICE_TEXT;
+  return { ...preset, aiNotice: { ...a, text, enabled: !!want, ...aiNoticeTiming(a) } };
 }
 
 // 🎵 배경음악 — 채널 설정(bgmOn · bgmPath = 파일 또는 폴더 · bgmVolume %)으로 이 편의 곡을 고른다(2026-09-24).
@@ -6641,7 +6656,37 @@ function renumberMediaFiles(project, mediaDir) {
 //     ③ 고친 그룹의 TTS·이미지 프롬프트/참조만 무효화한다 → 현재 대본으로 다시 만들 수 있다
 //   🔑 ①과 ②가 어긋나면(=.md 와 화면이 다른 대본이 되면) 다음에 열 때 조용히 틀린다. 그래서
 //      **고친 .md 를 실제로 다시 파싱해 문장 시퀀스가 기대와 같은지 확인한 뒤에만** 파일을 쓴다(아래 검증 재파싱).
-function _editSentences(args = {}) {
+// 🔗 문장 합치기·나누기의 음성(2026-09-29 로이 기준 · v0.5.87) — 「빈 음성이 생기지 않게」.
+//   글자가 그대로인 **순수한** 합치기(여러 문장 → 한 문장)면 옛 음성들을 순서대로 이어 붙이고,
+//   순수한 나누기(한 문장 → 여러 문장)면 옛 음성을 나뉜 글자 비율에 가장 가까운 쉼에서 자른다.
+//   글자를 고친 경우는 소리가 달라져야 하므로 예전처럼 비운다(🎤 로 다시). 옛 음성 파일은 지우지 않는다(↶ 되돌리기).
+async function _spliceSentenceAudio(old, made, logf) {
+  const SE = require('./core/script-edit');
+  const has = (s) => !!(s && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath));
+  const sig = (arr) => SE.sigOf(arr.map((x) => x.text).join(''));
+  if (!old.length || !made.length || made.every(has) || sig(old) !== sig(made)) return null;
+  const AS = require('./core/audio-splice');
+  const dir = old.find(has) ? path.dirname(old.find(has).ttsAudioPath) : null;
+  if (!dir) return null;
+  try {
+    if (old.length >= 2 && made.length === 1) {
+      if (!old.every(has)) { if (logf) logf('⚠ 합친 문장 중 음성이 없는 것이 있어 이어 붙이지 못했습니다 — 🎤 로 만들어 주세요'); return null; }
+      const out = P.claimPath(path.join(dir, made[0].num + '.wav'), null);
+      const r = await AS.concatAudio(old.map((o) => o.ttsAudioPath), out);
+      Object.assign(made[0], { ttsAudioPath: out, ttsDurationSec: r.durationSec, ttsStatus: 'done' });
+      return 'merge';
+    }
+    if (old.length === 1 && made.length >= 2 && has(old[0])) {
+      const outs = [];
+      for (const m of made) { const o = P.claimPath(path.join(dir, m.num + '.wav'), null, ['.wav', '.mp3']); outs.push(outs.includes(o) ? o.replace(/\.wav$/, '_' + outs.length + '.wav') : o); }
+      const r = await AS.splitAudio(old[0].ttsAudioPath, made.map((m) => m.text), outs);
+      r.forEach((x, k) => Object.assign(made[k], { ttsAudioPath: x.path, ttsDurationSec: x.durationSec, ttsStatus: 'done' }));
+      return 'split';
+    }
+  } catch (e) { if (logf) logf('⚠ 음성을 ' + (made.length === 1 ? '이어 붙이지' : '나누지') + ' 못했습니다: ' + e.message + ' — 🎤 로 다시 만들어 주세요'); }
+  return null;
+}
+async function _editSentences(args = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   if (S.parsed.kind === 'book') throw new Error('출판 원고는 이 방식으로 고칠 수 없습니다.');
   if (!S.scriptPath || !fs.existsSync(S.scriptPath)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
@@ -6728,6 +6773,7 @@ function _editSentences(args = {}) {
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
+  const _spl = await _spliceSentenceAudio(old, made, log);   // 🔗 합치기 = 음성 이어 붙이기 · 나누기 = 쉼에서 자르기
 
   // 🖼 **그룹 이미지·영상·프롬프트는 그대로 둔다**(로이 2026-09-25, v0.5.37).
   //   예전(2026-09-19)엔 문장을 고치면 그 그룹 이미지·프롬프트를 비웠는데, 오타 하나에도 그림을 다시 만들어야 했다.
@@ -6743,15 +6789,16 @@ function _editSentences(args = {}) {
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
-    + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : ' · 음성 그대로')
+    + (_spl === 'merge' ? ' · 음성은 두 문장 것을 이어 붙였습니다' : _spl === 'split' ? ' · 음성은 쉼에서 나눠 각 문장에 붙였습니다' : '')
+    + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : (_spl ? '' : ' · 음성 그대로'))
     + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
   return { ok: true, dto: P.toDTO(S.parsed) };
 }
-ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));
+ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));   // async
 
 // ✂ 자막 줄 나누기·합치기 — 한 문장 안에서 사람이 줄 나눔을 정한다(음성은 그대로 · 대본 .md 무변경).
 //   breaks = 새 줄이 시작하는 글자 위치 배열(null/[] = 자동 줄바꿈으로). text 를 함께 보내면 먼저 그 글로 고친다(편집 중 나누기).
-ipcMain.handle('set-caption-breaks', (_e, args = {}) => {
+ipcMain.handle('set-caption-breaks', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum, sentIdx } = args;
   const pr = S.parsed.projects.find((x) => x.shortsNum === shortsNum);
@@ -6760,7 +6807,7 @@ ipcMain.handle('set-caption-breaks', (_e, args = {}) => {
   let sen = pr.getSentencesOfGroup(g)[Number(sentIdx)];
   if (!sen) return { ok: false, error: '문장을 찾을 수 없습니다.' };
   if (args.text != null && String(args.text) !== sen.text) {
-    const r = _editSentences({ shortsNum, groupNum, sentIdx, count: 1, text: String(args.text) });
+    const r = await _editSentences({ shortsNum, groupNum, sentIdx, count: 1, text: String(args.text) });
     if (!r || !r.ok) return r;
     const g2 = pr.groups.find((x) => x.num === groupNum);
     const ss = g2 ? pr.getSentencesOfGroup(g2) : [];
@@ -6896,7 +6943,7 @@ ipcMain.handle('set-ai-notice-range', (_e, args = {}) => {
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
   if (!pr) throw new Error('편을 찾을 수 없습니다.');
   undoPush('AI 고지 범위');
-  if (args.clear) { pr.aiNoticeRange = undefined; log('🏷 ' + prLabel(pr) + ' AI 고지 범위 — 채널 기본(5초 뒤 5초)'); }
+  if (args.clear) { pr.aiNoticeRange = undefined; log('🏷 ' + prLabel(pr) + ' AI 고지 범위 — 채널 설정대로(⚙ 채널편집 → 기본 → AI 고지)'); }
   else {
     const n = pr.sentences.length;
     const a = Math.max(1, Math.min(n, Math.floor(Number(args.from) || 1)));
@@ -6912,7 +6959,7 @@ ipcMain.handle('set-ai-notice-range', (_e, args = {}) => {
 //   그룹 첫 문장 맨 앞에서 Backspace(= 앞 그룹 마지막 문장에 붙음). 합친 문장은 **앞쪽 그룹**에 남는다(Vrew 처럼 앞 클립에 붙는다).
 //   .md 는 두 번 고친다: 뒤 문장을 지우고 → 앞 문장을 합친 글로. 사이의 제목(###)·지침 줄은 그대로 남는다.
 //   뒤 그룹이 그 문장 하나뿐이면 그룹이 사라진다(그림은 휴지통 — ↶ 로 되살린다). 검증 재파싱은 edit-sentences 와 같다.
-ipcMain.handle('merge-sentence-across', (_e, args = {}) => {
+ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   if (!S.scriptPath || !fs.existsSync(S.scriptPath)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
   const SE = require('./core/script-edit');
@@ -6979,11 +7026,13 @@ ipcMain.handle('merge-sentence-across', (_e, args = {}) => {
   pr.sentences.forEach((x, i) => { x.num = i + 1; });
   finalizeGroupIds(pr.groups, pr.sentences);
   if (goneG) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
+  const _spl = await _spliceSentenceAudio([sa, sb], [ns], log);   // 🔗 두 문장 음성을 순서대로 이어 붙인다(로이 2026-09-29)
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
   storeActive(); pushDtoUpdate();
   log('🧩 ' + prLabel(pr) + ' 클립 합치기(그룹 경계 넘음) — G' + A.num + ' 끝에 붙였습니다 · 대본(.md) 갱신'
-    + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '') + ' · 음성은 다시 만들어야 합니다(🎤)');
+    + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '')
+    + (_spl ? ' · 음성은 두 문장 것을 이어 붙였습니다' : ' · 음성은 다시 만들어야 합니다(🎤)'));
   return { ok: true, dto: P.toDTO(S.parsed), goneGroup: goneG, intoGroup: A.num, sentIdx: A.sentenceIds.length - 1 };
 });
 
@@ -7158,7 +7207,10 @@ ipcMain.handle('set-visual-range', (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-// 그룹 분할 — TTS 길이 절반(균형)에 가장 가까운 문장 경계에서 2개로. 두 새 그룹은 프롬프트/이미지 초기화.
+// 그룹 분할 — TTS 길이 절반(균형)에 가장 가까운 문장 경계에서 2개로.
+//   🔒 그림·영상은 **나뉜 두 그룹 모두에 유지**(로이 2026-09-29 — 「나누기를 하더라도 빈 공간이 없게」): 앞 그룹이 원래 그룹을 그대로
+//   이어받고(그림·영상·프롬프트) 그 그림을 뒤 그룹 끝까지 **이어 깐다**(visSpan — 영상도 끊기지 않고 이어 재생).
+//   뒤 그룹은 프롬프트만 물려받아 「덮인 그룹」이 된다 — 새 그림이 필요하면 그 그룹의 🔄 로 만든다(자동으로는 만들지 않는다).
 //   다른 그룹의 프롬프트·자산은 절대 건드리지 않음(같은 Group 객체 유지). 미디어 파일은 새 num 에 맞춰 정렬.
 ipcMain.handle('split-group', (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -7181,22 +7233,28 @@ ipcMain.handle('split-group', (_e, args = {}) => {
   }
   const firstS = sents.slice(0, best), secondS = sents.slice(best);
   undoPush('그룹 분할');
-  const mk = (ss) => {
-    const ng = new Group({ num: 0, sentenceIds: ss.map((s) => s.id) });
-    ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;
-    ng.imagePrompt = null; ng.videoPrompt = null; ng.motionNote = null; // ★ 두 그룹 프롬프트 초기화
-    ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
-    ng.isI2V = false; ng.mode = 'motion';
-    return ng;
-  };
-  pr.groups.splice(idx, 1, mk(firstS), mk(secondS)); // 원본 1개 → 새 2개로 교체(나머지 그대로)
+  const ng = new Group({ num: 0, sentenceIds: secondS.map((s) => s.id) });
+  ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;
+  ng.imagePrompt = g.imagePrompt || null; ng.videoPrompt = g.videoPrompt || null; ng.motionNote = g.motionNote || null;   // 🔄 로 새로 그릴 때 쓸 것
+  ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
+  ng.isI2V = false; ng.mode = g.mode || 'motion';
+  const _had = !!((g.imagePath && fs.existsSync(g.imagePath)) || (g.videoPath && fs.existsSync(g.videoPath)));
+  g.sentenceIds = firstS.map((s) => s.id);   // 앞 조각 = 원래 그룹 그대로(그림·영상·프롬프트·보기 설정 유지)
+  if (_had) {
+    const lastId = secondS[secondS.length - 1].id;
+    const ordNow = new Map(); pr.sentences.forEach((s, i) => ordNow.set(s.id, i));
+    const cur = g.visSpan && g.visSpan.endId;
+    if (!cur || !(ordNow.get(cur) > ordNow.get(lastId))) g.visSpan = { ...(g.visSpan || {}), endId: lastId };   // 뒤 조각 끝까지 이어 깔기
+  }
+  pr.groups.splice(idx + 1, 0, ng);   // 원본 뒤에 새 그룹 하나(나머지 그대로)
   pr.groups.forEach((gg, i) => { gg.num = i + 1; });  // 재번호
   finalizeGroupIds(pr.groups, pr.sentences);          // sentence.groupId 재지정
   try { renumberMediaFiles(pr, shortsDirs(S.outRoot, pr.shortsNum).media); } catch {}
   storeActive(); pushDtoUpdate();
   const t1 = firstS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
   const t2 = secondS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-  log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장). 두 그룹 프롬프트 초기화.`);
+  log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장)`
+    + (_had ? ` · 그림·영상은 G${groupNum + 1} 끝까지 그대로 이어 씁니다(G${groupNum + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음'));
   return P.toDTO(S.parsed);
 });
 
