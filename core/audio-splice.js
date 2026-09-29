@@ -141,11 +141,14 @@ function pickCuts(env, totalSec, weights, { quiet = 0.08, minPause = 0.08 } = {}
 /**
  * 한 음성을 texts 조각 수만큼 나눠 outPaths(.wav)에. → [{ path, durationSec }]
  */
-async function splitAudio(file, texts, outPaths) {
+async function splitAudio(file, texts, outPaths) { return splitAudioWeights(file, texts.map(textWeight), outPaths); }
+/** 글자 무게(조각별 숫자)로 나누기 — 문장 재구성(클립 끌어올리기)에서 조각 글자 수를 그대로 준다 */
+async function splitAudioWeights(file, weights, outPaths) {
+  const texts = weights;
   const buf = await decodeWav(file);
   const info = parseWav(buf);
   const env = envelope(buf, 0.01);
-  const cuts = pickCuts(env, info.durationSec, texts.map(textWeight));
+  const cuts = pickCuts(env, info.durationSec, weights);
   const bounds = [0, ...cuts, info.durationSec];
   const res = [];
   for (let k = 0; k < texts.length; k++) {
@@ -158,4 +161,4 @@ async function splitAudio(file, texts, outPaths) {
   return res;
 }
 
-module.exports = { decodeWav, makeWav, concatAudio, splitAudio, pickCuts, textWeight };
+module.exports = { decodeWav, makeWav, concatAudio, splitAudio, splitAudioWeights, pickCuts, textWeight };

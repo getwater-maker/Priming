@@ -4,6 +4,7 @@ import { splitLines, mLen } from './lib/captions.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
+import ClipJoin from '../../core/clip-join.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
@@ -1694,20 +1695,43 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+  // 🧩 클립(자막 줄) 단위 합치기 계획(v0.5.88 로이 — 「클립 전체가 따라 올라와야지」) — 위 문장 마지막 줄 뒤에 아래 문장 **첫 줄 하나만**.
+  //   up/low = { groupNum, si, text, edited } · 남은 줄은 제 문장·제 그룹에 그대로(core/clip-join).
+  function clipJoinPlan(e, up, low) {
+    const PL = linesMap.get(e.shortsNum);
+    const starts = (w) => {
+      let st = ((PL && PL.bySent.get(w.groupNum + ':' + w.si)) || []).slice(1).map((l) => l.range.from);
+      if (w.edited && e.line) { const d = String(w.text).length - String(e.text || '').length; st = st.map((x) => (x > e.line.from ? x + d : x)); }
+      return st;
+    };
+    return ClipJoin.joinClips(up.text, starts(up), low.text, starts(low));
+  }
+  function acrossPlan(dir) {
+    const e = sentEdit; if (!e) return null;
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
+    const gi = pr ? pr.cuts.findIndex((c) => c.num === e.groupNum) : -1;
+    const other = pr ? pr.cuts[dir === 'prev' ? gi - 1 : gi + 1] : null;
+    if (!other || !(other.sentences || []).length) return null;
+    const me = { groupNum: e.groupNum, si: e.sentIdx, text: sentEditValue('').trim(), edited: true };
+    return dir === 'prev'
+      ? clipJoinPlan(e, { groupNum: other.num, si: other.sentences.length - 1, text: other.sentences[other.sentences.length - 1].text }, me)
+      : clipJoinPlan(e, me, { groupNum: other.num, si: 0, text: other.sentences[0].text });
+  }
   // 🧩 그룹 경계를 넘는 합치기 — 그룹 마지막 문장 끝 Del / 첫 문장 맨 앞 Backspace
-  async function mergeAcross(dir, text) {
+  async function mergeAcross(dir) {
     const e = sentEdit; if (!e || sentBusy) return;
     const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null;
     const gi = pr ? pr.cuts.findIndex((c) => c.num === e.groupNum) : -1;
     const other = pr ? pr.cuts[dir === 'prev' ? gi - 1 : gi + 1] : null;
     if (!other) { setStatus(dir === 'prev' ? '맨 앞 클립입니다' : '맨 끝 클립입니다'); return; }
+    const plan = acrossPlan(dir); if (!plan) return;
     const gone = dir === 'prev' ? pr.cuts[gi] : other;   // 문장이 하나뿐이면 사라지는 그룹
-    if ((gone.sentences || []).length === 1 && (gone.imagePath || gone.videoPath)
+    if (!plan.rest && (gone.sentences || []).length === 1 && (gone.imagePath || gone.videoPath)
       && !uiConfirm(`G${gone.num} 은 이 문장 하나뿐이라 합치면 그룹이 사라집니다.\nG${gone.num} 의 그림·영상은 쓰지 않게 됩니다(Ctrl+Z 로 되돌릴 수 있습니다).\n\n계속할까요?`)) return;
     sentDoneRef.current = true; setSentBusy(true);
     try {
-      const r = await api.mergeSentenceAcross({ shortsNum: e.shortsNum, groupNum: e.groupNum, dir, text });
-      if (r && r.ok) { setDto(r.dto); closeSentEdit(e); setStatus('🧩 클립을 합쳤습니다 — 음성은 🎤 로 다시 만드세요 (Ctrl+Z 되돌리기)'); }
+      const r = await api.mergeSentenceAcross({ shortsNum: e.shortsNum, groupNum: e.groupNum, dir, text: plan.merged, rest: plan.rest, breaks: plan.rest ? [plan.breaksMerged, plan.breaksRest] : [plan.breaksMerged] });
+      if (r && r.ok) { setDto(r.dto); closeSentEdit(e); setStatus('🧩 클립을 합쳤습니다 (Ctrl+Z 되돌리기)'); }
       else { sentDoneRef.current = false; setStatus('⚠ ' + ((r && r.error) || '합치지 못했습니다')); }
     } catch (err) { sentDoneRef.current = false; logline('클립 합치기 오류: ' + err.message); }
     finally { setSentBusy(false); }
@@ -1768,13 +1792,15 @@ export default function App() {
   }
   // Backspace(맨 앞) — 윗문장과 합치기. 두 문장 범위(sentIdx-1, 2개)를 한 문장으로 치환한다.
   function mergeSentUp(sentIdx, prevText) {
-    const merged = String(prevText || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim();
-    commitSentEdit(merged, { sentIdx: sentIdx - 1, count: 2 });
+    const e = sentEdit; if (!e) return;
+    const p = clipJoinPlan(e, { groupNum: e.groupNum, si: sentIdx - 1, text: String(prevText || '') }, { groupNum: e.groupNum, si: sentIdx, text: sentEditValue('').trim(), edited: true });
+    commitSentEdit(p.merged + (p.rest ? ' ' + p.rest : ''), { sentIdx: sentIdx - 1, count: 2, breaks: p.rest ? [p.breaksMerged, p.breaksRest] : [p.breaksMerged] });
   }
   // Delete(맨 끝) — 아랫문장을 끌어올려 합치기.
   function mergeSentNext(sentIdx, nextText) {
-    const merged = sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextText || '').trim();
-    commitSentEdit(merged, { sentIdx, count: 2 });
+    const e = sentEdit; if (!e) return;
+    const p = clipJoinPlan(e, { groupNum: e.groupNum, si: sentIdx, text: sentEditValue('').trim(), edited: true }, { groupNum: e.groupNum, si: sentIdx + 1, text: String(nextText || '') });
+    commitSentEdit(p.merged + (p.rest ? ' ' + p.rest : ''), { sentIdx, count: 2, breaks: p.rest ? [p.breaksMerged, p.breaksRest] : [p.breaksMerged] });
   }
   /**
    * 편집 한 건을 보낸다.
@@ -1795,6 +1821,7 @@ export default function App() {
         sentIdx: range ? range.sentIdx : e.sentIdx,
         count: range ? range.count : e.count,
         text,
+        breaks: range && range.breaks ? range.breaks : undefined,   // 🧩 클립 끌어올리기 — 나머지 줄 나눔 그대로
       });
       if (!r || !r.ok) {
         // 🔑 여기가 「✏ 대본 수정」의 탈출구다 — 지침 줄을 사이에 둔 문장·표처럼 화면에서 못 고치는 경우.
@@ -1872,7 +1899,7 @@ export default function App() {
       ev.preventDefault();
       if (!firstLine) { lineBreakOp('mergeUp'); return; }
       if (!sents) return;
-      if (si === 0) mergeAcross('prev', String(prevCutLastText(e) || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim());
+      if (si === 0) mergeAcross('prev');
       else if (s && s.mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
       else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
       else mergeSentUp(si, sents[si - 1].text);
@@ -1880,7 +1907,7 @@ export default function App() {
       ev.preventDefault();
       if (!lastLine) { lineBreakOp('mergeDown'); return; }
       if (!sents) return;
-      if (si >= sents.length - 1) mergeAcross('next', sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextCutFirstText(e) || '').trim());
+      if (si >= sents.length - 1) mergeAcross('next');
       else if (sents[si + 1].mark) setStatus('합친 그룹 안의 섹션 경계입니다 — 여기서는 합칠 수 없습니다');
       else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) setStatus('화자가 다른 문장입니다 — 합칠 수 없습니다');
       else mergeSentNext(si, sents[si + 1].text);
@@ -1904,7 +1931,7 @@ export default function App() {
     else if (kind === 'mergeDown') { if (me < 0 || me >= sl.length - 1) return; breaks = starts.filter((_, i) => i !== me); }
     sentDoneRef.current = true; setSentBusy(true);
     try {
-      const r = await api.setCaptionBreaks({ shortsNum: e.shortsNum, groupNum: e.groupNum, sentIdx: e.sentIdx, text: full, breaks });
+      const r = await api.setCaptionBreaks({ shortsNum: e.shortsNum, groupNum: e.groupNum, sentIdx: e.sentIdx, text: full, breaks, fixed: true });   // 🔒 이 줄 나눔 그대로 굳힌다(합쳐 한 줄이 된 것이 길어도 다시 쪼개지 않는다 · v0.5.88)
       if (r && r.ok) {
         setDto(r.dto); closeSentEdit(e); setCursor({ shortsNum: e.shortsNum, n: focusN });
         setStatus(r.note || (kind === 'split' ? '✂ 자막 줄을 나눴습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)' : '✂ 자막 줄을 합쳤습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)'));
@@ -3808,7 +3835,7 @@ export default function App() {
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
               splitAt: splitSentAtCursor, mergeUp: mergeSentUp, mergeNext: mergeSentNext,
               note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, fmtClip,
-              across: (d) => { const e = sentEdit; if (!e) return; mergeAcross(d, d === 'prev' ? String(prevCutLastText(e) || '').replace(/[.!?。]+\s*$/, '') + ' ' + sentEditValue('').trim() : sentEditValue('').replace(/[.!?。]+\s*$/, '').trim() + ' ' + String(nextCutFirstText(e) || '').trim()); },
+              across: (d) => { if (!sentEdit) return; mergeAcross(d); },
             }} /></ErrorBoundary>
           </>)}
         </main>

@@ -74,9 +74,9 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
     console.log('\n[2] 문장 합치기·나누기 → 음성 이어 붙이기·나누기(main.js _spliceSentenceAudio 원문)');
     {
       const M = read('main.js');
-      const i0 = M.indexOf('async function _spliceSentenceAudio('), i1 = M.indexOf('\n}\n', i0) + 3;
+      const i0 = M.indexOf('function _looseSig('), i1 = M.indexOf('\n}\n', M.indexOf('async function _spliceSentenceAudio(')) + 3;
       ok(i0 > 0, '_spliceSentenceAudio 를 찾았다');
-      const ctx = { fs, path, require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: require('../core/pipeline'), console };
+      const ctx = { fs, path, require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: require('../core/pipeline'), console, UNDO: { seq: 0 } };
       vm.createContext(ctx);
       vm.runInContext(M.slice(i0, i1) + '\nthis.fn = _spliceSentenceAudio;', ctx);
       const td = path.join(tmp, 'tts-1'); fs.mkdirSync(td);
@@ -102,7 +102,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const noAudio = { ...s6, ttsAudioPath: path.join(td, 'none.wav') };
       ok((await ctx.fn([s5, noAudio], m4, () => {})) === null && !m4[0].ttsAudioPath, '한쪽 음성이 없으면 반쪽만 붙이지 않는다(엉뚱한 길이 방지)');
       // 연결: 편집 두 경로 모두 부른다
-      ok(/const _spl = await _spliceSentenceAudio\(old, made, log\)/.test(M) && /const _spl = await _spliceSentenceAudio\(\[sa, sb\], \[ns\], log\)/.test(M), '문장 편집(Backspace/Del/Ctrl+Enter)·그룹 경계 클립 합치기 두 경로 모두 음성을 잇고 나눈다');
+      ok(/const _spl = await _spliceSentenceAudio\(old, made, log\)/.test(M) && /const _spl = await _spliceSentenceAudio\(\[sa, sb\], nr \? \[ns, nr\] : \[ns\], log\)/.test(M), '문장 편집(Backspace/Del/Ctrl+Enter)·그룹 경계 클립 합치기 두 경로 모두 음성을 잇고 나눈다');
       ok(/async function _editSentences/.test(M) && /const r = await _editSentences\(/.test(M), '편집은 비동기(ffmpeg 를 기다린다 · main 이 멈추지 않게)');
     }
 
@@ -196,6 +196,66 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       ok(/aiText: \(p\.aiNotice && p\.aiNotice\.text\) \|\| ''/.test(APP) && /aiUnit: \(p\.aiNotice && p\.aiNotice\.unit\) === 'clip'/.test(APP), '편집 창: 문구·단위·시작·끝을 **읽는다**');
       ok(/text: String\(ch\.aiText \|\| ''\)\.trim\(\), unit: ch\.aiUnit === 'clip' \? 'clip' : 'time'/.test(APP) && /fromClip: Math\.max\(1/.test(APP), '편집 창: 문구·단위·시작·끝을 **저장한다**');
       ok(/data-testid="ai-text"/.test(APP) && /data-testid="ai-unit"/.test(APP) && /<option value="clip">클립/.test(APP), '편집 창: 문구 칸 · 단위(시간/클립) 고르기 · 시작·끝 칸');
+    }
+    console.log('\n[5] 🧩 클립 하나만 끌어올리기 — 로이 화면(2026-09-29) 그대로: 2번 클립 끝에서 Del');
+    {
+      const CJ = require('../core/clip-join');
+      const CS = require('../core/caption-splitter');
+      const up = '대문에서 세어서 일곱째 칸입니다.', low = '그 방은 가운데가 막혀 두 칸으로 나뉩니다.';
+      const k = low.indexOf('막혀');
+      const p = CJ.joinClips(up, [], low, [k]);
+      ok(p.merged === '대문에서 세어서 일곱째 칸입니다 그 방은 가운데가.' && p.rest === '막혀 두 칸으로 나뉩니다.', `🔑 3번 클립 「그 방은 가운데가」 전체가 올라오고 4번 「막혀 두 칸으로 나뉩니다.」는 남는다 — 「${p.merged}」 / 「${p.rest}」`);
+      ok(CS.splitCaptionLines(p.merged, 7, [...p.breaksMerged, p.merged.length]).length === 1, '🔑 합친 클립은 길어도 **한 줄 그대로**(끝 표식 — 자동 줄바꿈이 다시 쪼개지 않는다)');
+      ok(CS.splitCaptionLines(p.merged, 7, null).length > 1, '(판정력) 끝 표식이 없으면 자동 줄바꿈이 둘 이상으로 쪼갠다 — 예전 증상');
+      const p2 = CJ.joinClips('첫 줄 가나다 둘째 줄 라마바.', [7], '하나.', []);
+      ok(p2.merged === '첫 줄 가나다 둘째 줄 라마바 하나.' && p2.rest === '' && p2.breaksMerged.join() === '7', '아래 문장이 한 줄이면 통째로 올라오고 위 문장의 줄 나눔은 그대로');
+      const p3 = CJ.joinClips('위.', [], '가 나 다 라 마 바 사 아.', [4, 10]);
+      ok(p3.rest === '다 라 마 바 사 아.' && p3.breaksRest.join() === '6', '남은 줄들의 줄 나눔도 그대로 옮긴다(4번 뒤 클립들 무변경)');
+      ok(CS.normBreaks('가나다', [3]).join() === '3' && CS.normBreaks('가나다', [1, 9]).join() === '1' && CS.remapBreaks('가나다', '가나다라', [1, 3]).join() === '1,4', 'normBreaks 끝 표식 보존 · 글이 바뀌어도 끝으로 따라간다');
+
+      // 실제 handler(merge-sentence-across) — .md · 그룹 · 음성 · 줄 나눔
+      const M = read('main.js');
+      const grab = (name) => { const i = M.indexOf('function ' + name + '('); return M.slice(i - (M.slice(i - 6, i) === 'async ' ? 6 : 0), M.indexOf('\n}\n', i) + 3); };
+      const h0 = M.indexOf("ipcMain.handle('merge-sentence-across'"), h1 = M.indexOf('\n});\n', h0) + 5;
+      const md = path.join(tmp, '대본.md');
+      fs.writeFileSync(md, '# t\n## 장\n### ① 소설 하나가 방 이야기로 시작합니다\n소설 하나가 방 이야기로 시작합니다. 대문에서 세어서 일곱째 칸입니다.\n\n### ② 그 방은 가운데가 막혀 있습니다\n그 방은 가운데가 막혀 두 칸으로 나뉩니다. 다음 문장입니다.\n');
+      const P = require('../core/pipeline');
+      const parsed = P.parseScriptText(fs.readFileSync(md, 'utf8'), 'longform', {});
+      const pr = parsed.projects[0];
+      const td = path.join(tmp, 'tts-x'); fs.mkdirSync(td, { recursive: true });
+      const segs = [[[0.2, 0], [1.0, 1], [0.3, 0]], [[0.2, 0], [1.2, 1], [0.3, 0]], [[0.2, 0], [0.8, 1], [0.35, 0], [0.9, 1], [0.3, 0]], [[0.2, 0], [0.7, 1], [0.3, 0]]];
+      pr.sentences.forEach((x, i) => { const fp = path.join(td, (i + 1) + '.wav'); fs.writeFileSync(fp, wavOf(segs[i])); x.ttsAudioPath = fp; x.ttsDurationSec = durOf(fp); });
+      const before = pr.sentences.map((x) => ({ p: x.ttsAudioPath, d: x.ttsDurationSec, b: fs.readFileSync(x.ttsAudioPath) }));
+      const media = path.join(tmp, 'media-x'); fs.mkdirSync(media, { recursive: true });
+      const i1p = path.join(media, '01.png'), i2p = path.join(media, '02.png'); fs.writeFileSync(i1p, 'G1'); fs.writeFileSync(i2p, 'G2');
+      pr.groups[0].imagePath = i1p; pr.groups[1].imagePath = i2p;
+      const handlers = {};
+      const ctx = { fs, path, console, S: { parsed, scriptPath: md, outRoot: tmp, preset: null }, ipcMain: { handle: (n, fn) => { handlers[n] = fn; } },
+        require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: { ...P, toDTO: () => null }, UNDO: { seq: 0 },
+        currentMode: () => 'longform', presetThresholds: () => ({}), undoPush: () => ({}), undoDrop: () => {}, scriptHash: () => 'h',
+        storeActive: () => {}, pushDtoUpdate: () => {}, log: () => {}, prLabel: () => '[t]', shortsDirs: () => ({ media }),
+        _inDir: () => true, _toTrash: () => {}, renumberMediaFiles: () => {} };
+      vm.createContext(ctx);
+      vm.runInContext(grab('_looseSig') + grab('_spliceSentenceAudio') + grab('_applyBreaks') + M.slice(h0, h1), ctx);
+      const r = await handlers['merge-sentence-across'](null, { shortsNum: pr.shortsNum, groupNum: 1, dir: 'next', text: p.merged, rest: p.rest, breaks: [p.breaksMerged, p.breaksRest] });
+      ok(r && r.ok, '합치기 성공 ' + (r && r.error ? r.error : ''));
+      const txt = fs.readFileSync(md, 'utf8');
+      ok(/대문에서 세어서 일곱째 칸입니다 그 방은 가운데가\.\n\n### ② 그 방은 가운데가 막혀 있습니다\n막혀 두 칸으로 나뉩니다\. 다음 문장입니다\./.test(txt), '대본(.md): 3번 클립만 ① 끝으로 · 4번 클립은 ② 제목 아래 그대로');
+      const [G1, G2] = pr.groups; const sOf = (g) => g.sentenceIds.map((id) => pr.sentences.find((x) => x.id === id));
+      ok(sOf(G1).map((x) => x.text).join('|') === '소설 하나가 방 이야기로 시작합니다.|대문에서 세어서 일곱째 칸입니다 그 방은 가운데가.' && sOf(G2)[0].text === '막혀 두 칸으로 나뉩니다.', '🔑 4번 클립은 G2 에 남는다(G2 그림 그대로 — 다른 클립의 그림이 바뀌지 않는다)');
+      ok(G1.imagePath === i1p && G2.imagePath === i2p, '그림은 두 그룹 모두 그대로');
+      const ns = sOf(G1)[1], nr = sOf(G2)[0];
+      const lines = CS.splitCaptionLines(ns.text, 7, ns.capBreaks), lines2 = CS.splitCaptionLines(nr.text, 7, nr.capBreaks);
+      ok(lines.length === 1 && lines2.length === 1, `🔑 줄(클립) 모양: 「${lines.join('/')}」 · 「${lines2.join('/')}」 — 합친 클립 한 줄 · 남은 클립 한 줄(쪼개지지 않음)`);
+      ok(ns.ttsAudioPath && nr.ttsAudioPath && fs.existsSync(ns.ttsAudioPath) && fs.existsSync(nr.ttsAudioPath), '🔑 두 문장 모두 음성 있음(빈 음성 없음)');
+      ok(Math.abs(ns.ttsDurationSec + nr.ttsDurationSec - (before[1].d + before[2].d)) < 0.003 && ns.ttsDurationSec > before[1].d + 1.0 && ns.ttsDurationSec < before[1].d + 1.5, `음성: 2번 소리 + 3번 클립 소리(쉼에서 자름) · 합 보존 (${ns.ttsDurationSec.toFixed(2)} + ${nr.ttsDurationSec.toFixed(2)}초)`);
+      const s1 = sOf(G1)[0], s4 = sOf(G2)[1];
+      ok(s1.ttsAudioPath === before[0].p && fs.readFileSync(s1.ttsAudioPath).equals(before[0].b) && s4.ttsAudioPath === before[3].p && fs.readFileSync(s4.ttsAudioPath).equals(before[3].b), '건드리지 않은 문장(1번·다음 문장) 음성은 파일·내용 그대로');
+      ok(fs.readdirSync(td).every((n) => !/^_piece_/.test(n)), '자르는 중 임시 조각은 남기지 않는다');
+      // 렌더러가 이 계획을 쓰는가
+      const APP = read('renderer/src/App.jsx');
+      ok(/import ClipJoin from '..\/..\/core\/clip-join\.js'/.test(APP) && (APP.match(/clipJoinPlan\(e,/g) || []).length >= 4 && !/mergeAcross\('next', sentEditValue/.test(APP), '화면: Del·Backspace 다섯 곳(그룹 경계 앞뒤 · 같은 그룹 위아래 · 문장 편집칸)이 모두 클립 단위 계획을 쓴다');
+      ok(/breaks, fixed: true/.test(APP) && /args\.fixed \?/.test(M), '한 문장 안 줄 합치기·나누기도 결과를 굳힌다(합쳐진 줄이 다시 쪼개지지 않게)');
     }
   } catch (e) { ok(false, '실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }

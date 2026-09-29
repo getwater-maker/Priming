@@ -6656,35 +6656,58 @@ function renumberMediaFiles(project, mediaDir) {
 //     ③ 고친 그룹의 TTS·이미지 프롬프트/참조만 무효화한다 → 현재 대본으로 다시 만들 수 있다
 //   🔑 ①과 ②가 어긋나면(=.md 와 화면이 다른 대본이 되면) 다음에 열 때 조용히 틀린다. 그래서
 //      **고친 .md 를 실제로 다시 파싱해 문장 시퀀스가 기대와 같은지 확인한 뒤에만** 파일을 쓴다(아래 검증 재파싱).
-// 🔗 문장 합치기·나누기의 음성(2026-09-29 로이 기준 · v0.5.87) — 「빈 음성이 생기지 않게」.
-//   글자가 그대로인 **순수한** 합치기(여러 문장 → 한 문장)면 옛 음성들을 순서대로 이어 붙이고,
-//   순수한 나누기(한 문장 → 여러 문장)면 옛 음성을 나뉜 글자 비율에 가장 가까운 쉼에서 자른다.
-//   글자를 고친 경우는 소리가 달라져야 하므로 예전처럼 비운다(🎤 로 다시). 옛 음성 파일은 지우지 않는다(↶ 되돌리기).
+// 🔗 문장 합치기·나누기의 음성(2026-09-29 로이 기준 · v0.5.87 → v0.5.88 일반화) — 「빈 음성이 생기지 않게」.
+//   옛 문장들 → 새 문장들이 **글자가 그대로인 재구성**(합치기 · 나누기 · 클립 하나 끌어올리기)이면, 옛 음성을 새 문장 경계에서
+//   자르고(쉼에 가장 가까운 곳 — 경계가 옛 문장 경계와 같으면 자르지 않는다) 새 문장마다 순서대로 이어 붙인다.
+//   비교는 공백·따옴표·**문장 끝 부호(.!?。)** 를 뺀 글자 — 합칠 때 가운데 마침표를 빼고 나눌 때 넣기 때문이다
+//   (v0.5.87 은 마침표까지 비교해서 실제로는 한 번도 잇지 못했다 — 로그 12:23~12:27 「음성은 다시 만들어야」).
+//   글자를 고친 경우는 소리가 달라져야 하므로 비운다(🎤 로 다시). 옛 음성 파일은 지우지 않는다(↶ 되돌리기).
+function _looseSig(t) { return require('./core/script-edit').sigOf(t).replace(/[.!?。]/g, ''); }
 async function _spliceSentenceAudio(old, made, logf) {
-  const SE = require('./core/script-edit');
-  const has = (s) => !!(s && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath));
-  const sig = (arr) => SE.sigOf(arr.map((x) => x.text).join(''));
-  if (!old.length || !made.length || made.every(has) || sig(old) !== sig(made)) return null;
+  const has = (x) => !!(x && x.ttsAudioPath && fs.existsSync(x.ttsAudioPath));
+  if (!old.length || !made.length || made.every(has)) return null;
+  const os_ = old.map((o) => _looseSig(o.text)), ms = made.map((m) => _looseSig(m.text));
+  if (os_.join('') !== ms.join('')) return null;
+  const any = old.find(has); if (!any) return null;
+  const dir = path.dirname(any.ttsAudioPath);
   const AS = require('./core/audio-splice');
-  const dir = old.find(has) ? path.dirname(old.find(has).ttsAudioPath) : null;
-  if (!dir) return null;
+  const oc = [0]; os_.forEach((x) => oc.push(oc[oc.length - 1] + x.length));
+  const mc = [0]; ms.forEach((x) => mc.push(mc[mc.length - 1] + x.length));
+  const temps = [];
+  let done = 0;
   try {
-    if (old.length >= 2 && made.length === 1) {
-      if (!old.every(has)) { if (logf) logf('⚠ 합친 문장 중 음성이 없는 것이 있어 이어 붙이지 못했습니다 — 🎤 로 만들어 주세요'); return null; }
-      const out = P.claimPath(path.join(dir, made[0].num + '.wav'), null);
-      const r = await AS.concatAudio(old.map((o) => o.ttsAudioPath), out);
-      Object.assign(made[0], { ttsAudioPath: out, ttsDurationSec: r.durationSec, ttsStatus: 'done' });
-      return 'merge';
+    // ① 옛 문장마다 — 새 경계가 그 안에 떨어지면 거기서 자른다
+    const segs = [];   // { a, b, file, whole, dur }
+    for (let j = 0; j < old.length; j++) {
+      const inner = mc.filter((v) => v > oc[j] && v < oc[j + 1]);
+      if (!inner.length) { segs.push({ a: oc[j], b: oc[j + 1], file: has(old[j]) ? old[j].ttsAudioPath : null, whole: true, dur: old[j].ttsDurationSec }); continue; }
+      const pts = [oc[j], ...inner, oc[j + 1]];
+      if (!has(old[j])) { for (let q = 0; q + 1 < pts.length; q++) segs.push({ a: pts[q], b: pts[q + 1], file: null }); continue; }
+      const outs = pts.slice(1).map(() => { const t = path.join(dir, '_piece_' + Date.now().toString(36) + '_' + (++UNDO.seq) + '.wav'); temps.push(t); return t; });
+      const r = await AS.splitAudioWeights(old[j].ttsAudioPath, pts.slice(1).map((v, q) => Math.max(1, v - pts[q])), outs);
+      r.forEach((x, q) => segs.push({ a: pts[q], b: pts[q + 1], file: x.path, whole: false, dur: x.durationSec }));
     }
-    if (old.length === 1 && made.length >= 2 && has(old[0])) {
-      const outs = [];
-      for (const m of made) { const o = P.claimPath(path.join(dir, m.num + '.wav'), null, ['.wav', '.mp3']); outs.push(outs.includes(o) ? o.replace(/\.wav$/, '_' + outs.length + '.wav') : o); }
-      const r = await AS.splitAudio(old[0].ttsAudioPath, made.map((m) => m.text), outs);
-      r.forEach((x, k) => Object.assign(made[k], { ttsAudioPath: x.path, ttsDurationSec: x.durationSec, ttsStatus: 'done' }));
-      return 'split';
+    // ② 새 문장마다 — 덮는 조각들을 순서대로
+    for (let k = 0; k < made.length; k++) {
+      if (has(made[k])) continue;
+      const parts = segs.filter((g) => g.a >= mc[k] && g.b <= mc[k + 1] && g.b > g.a);
+      if (!parts.length || parts.some((g) => !g.file)) continue;
+      if (parts.length === 1 && parts[0].whole) { Object.assign(made[k], { ttsAudioPath: parts[0].file, ttsDurationSec: parts[0].dur, ttsStatus: 'done' }); done++; continue; }
+      const out = P.claimPath(path.join(dir, made[k].num + '.wav'), null, ['.wav', '.mp3']);
+      const r = await AS.concatAudio(parts.map((g) => g.file), out);
+      Object.assign(made[k], { ttsAudioPath: out, ttsDurationSec: r.durationSec, ttsStatus: 'done' });
+      done++;
     }
-  } catch (e) { if (logf) logf('⚠ 음성을 ' + (made.length === 1 ? '이어 붙이지' : '나누지') + ' 못했습니다: ' + e.message + ' — 🎤 로 다시 만들어 주세요'); }
-  return null;
+  } catch (e) { if (logf) logf('⚠ 음성을 잇거나 나누지 못했습니다: ' + e.message + ' — 🎤 로 다시 만들어 주세요'); }
+  finally { for (const t of temps) { try { fs.rmSync(t, { force: true }); } catch {} } }
+  if (!done) return null;
+  return old.length > made.length ? 'merge' : old.length < made.length ? 'split' : 'move';
+}
+// 🧩 사람이 정한 줄 나눔(args.breaks = 새 문장마다 줄 시작 위치 배열) — 클립 하나를 끌어올린 뒤 줄이 흘러내리지 않게 굳힌다
+function _applyBreaks(made, breaks) {
+  if (!Array.isArray(breaks) || breaks.length !== made.length) return;
+  const CS = require('./core/caption-splitter');
+  made.forEach((m, i) => { if (Array.isArray(breaks[i])) { const nb = CS.normBreaks(m.text, [...breaks[i], String(m.text).length]); m.capBreaks = nb || undefined; } });   // 끝 표식 = 굳힘
 }
 async function _editSentences(args = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -6774,6 +6797,7 @@ async function _editSentences(args = {}) {
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
   const _spl = await _spliceSentenceAudio(old, made, log);   // 🔗 합치기 = 음성 이어 붙이기 · 나누기 = 쉼에서 자르기
+  _applyBreaks(made, args.breaks);                          // 🧩 클립 끌어올리기 — 나머지 줄 나눔 그대로
 
   // 🖼 **그룹 이미지·영상·프롬프트는 그대로 둔다**(로이 2026-09-25, v0.5.37).
   //   예전(2026-09-19)엔 문장을 고치면 그 그룹 이미지·프롬프트를 비웠는데, 오타 하나에도 그림을 다시 만들어야 했다.
@@ -6789,7 +6813,7 @@ async function _editSentences(args = {}) {
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
-    + (_spl === 'merge' ? ' · 음성은 두 문장 것을 이어 붙였습니다' : _spl === 'split' ? ' · 음성은 쉼에서 나눠 각 문장에 붙였습니다' : '')
+    + (_spl === 'merge' ? ' · 음성은 두 문장 것을 이어 붙였습니다' : _spl === 'split' ? ' · 음성은 쉼에서 나눠 각 문장에 붙였습니다' : _spl === 'move' ? ' · 음성은 클립 경계에서 잘라 그대로 옮겼습니다' : '')
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : (_spl ? '' : ' · 음성 그대로'))
     + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
   return { ok: true, dto: P.toDTO(S.parsed) };
@@ -6815,7 +6839,8 @@ ipcMain.handle('set-caption-breaks', async (_e, args = {}) => {
     if (!sen || String(sen.text) !== String(args.text).trim() && String(sen.text) !== String(args.text)) return { ok: true, dto: P.toDTO(S.parsed), note: '문장이 나뉘어 줄 나눔은 적용하지 않았습니다' };
   }
   const CS = require('./core/caption-splitter');
-  const nb = CS.normBreaks(sen.text, args.breaks);
+  // 🔒 fixed = 사람이 정한 줄 나눔 그대로 굳힘(끝 표식) — 줄을 합쳐 한 줄이 돼도 자동 줄바꿈이 다시 쪼개지 않는다(v0.5.88)
+  const nb = CS.normBreaks(sen.text, args.fixed ? [...(Array.isArray(args.breaks) ? args.breaks : []), String(sen.text).length] : args.breaks);
   undoPush(nb ? '자막 줄 나누기' : '자막 줄 자동으로');
   sen.capBreaks = nb || undefined;
   storeActive(); pushDtoUpdate();
@@ -6980,11 +7005,14 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   if (ib !== ia + 1) return { ok: false, error: '두 문장이 이웃해 있지 않습니다.' };
   const text = String(args.text || '').trim();
   if (!text) return { ok: false, error: '합친 글이 비었습니다.' };
+  // 🧩 클립 하나만 끌어올릴 때(v0.5.88) — 아래 문장의 남은 줄(rest)은 제 그룹에 제 문장으로 남는다
+  const rest = String(args.rest || '').trim();
 
   const raw = fs.readFileSync(S.scriptPath, 'utf8');
   const texts = pr.sentences.map((x) => x.text);
-  const p1 = SE.planEdit({ raw, texts, from: ib, count: 1, newText: '' });
+  const p1 = SE.planEdit({ raw, texts, from: ib, count: 1, newText: rest });
   if (!p1.ok) return { ok: false, error: p1.error };
+  if (rest && p1.newTexts.length !== 1) return { ok: false, error: '남는 줄이 한 문장이 아닙니다.' };
   const t1 = SE.expectedTexts(texts, ib, 1, p1.newTexts);
   const p2 = SE.planEdit({ raw: p1.raw, texts: t1, from: ia, count: 1, newText: text });
   if (!p2.ok) return { ok: false, error: p2.error };
@@ -7010,10 +7038,22 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
     const mv = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged]);
     if (mv && mv[0] && mv[0].length) ns.capSpans = mv[0];
   }
-  { const mp = new Map([[sa.id, ns.id], [sb.id, ns.id]]); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
-  pr.sentences.splice(ia, 2, ns);
+  let nr = null;   // 🧩 남은 줄 문장(끌어올리고 남은 아래 클립들 — 제 그룹 · 제 그림 그대로)
+  if (rest) {
+    const rt = p1.newTexts[0];
+    let rid = hashId('s', rt), rk = 1; while (used.has(rid) || rid === ns.id) rid = hashId('s', rt) + '_' + (++rk);
+    nr = new Sentence({ id: rid, num: 0, text: rt });
+    nr.isIntro = !!sb.isIntro; if (sb.chapterMark) nr.chapterMark = sb.chapterMark; if (sb.speaker) nr.speaker = sb.speaker;
+    if (ns.chapterMark && ns.chapterMark === sb.chapterMark && !sa.chapterMark) delete ns.chapterMark;
+    if ((sa.capSpans && sa.capSpans.length) || (sb.capSpans && sb.capSpans.length)) {
+      const mv2 = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged, rt]);
+      ns.capSpans = (mv2 && mv2[0] && mv2[0].length) ? mv2[0] : undefined; nr.capSpans = (mv2 && mv2[1] && mv2[1].length) ? mv2[1] : undefined;
+    }
+  }
+  { const mp = new Map([[sa.id, ns.id], [sb.id, nr ? nr.id : ns.id]]); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
+  if (nr) pr.sentences.splice(ia, 2, ns, nr); else pr.sentences.splice(ia, 2, ns);
   A.sentenceIds[A.sentenceIds.length - 1] = ns.id;
-  B.sentenceIds.shift();
+  if (nr) B.sentenceIds[0] = nr.id; else B.sentenceIds.shift();
   const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
   let goneG = null;
   if (!B.sentenceIds.length) {
@@ -7026,13 +7066,15 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   pr.sentences.forEach((x, i) => { x.num = i + 1; });
   finalizeGroupIds(pr.groups, pr.sentences);
   if (goneG) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
-  const _spl = await _spliceSentenceAudio([sa, sb], [ns], log);   // 🔗 두 문장 음성을 순서대로 이어 붙인다(로이 2026-09-29)
+  const _spl = await _spliceSentenceAudio([sa, sb], nr ? [ns, nr] : [ns], log);   // 🔗 음성은 클립 경계에서 잘라 이어 붙인다(로이 2026-09-29)
+  _applyBreaks(nr ? [ns, nr] : [ns], args.breaks);   // 🧩 나머지 줄 나눔 그대로
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
   storeActive(); pushDtoUpdate();
   log('🧩 ' + prLabel(pr) + ' 클립 합치기(그룹 경계 넘음) — G' + A.num + ' 끝에 붙였습니다 · 대본(.md) 갱신'
     + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '')
-    + (_spl ? ' · 음성은 두 문장 것을 이어 붙였습니다' : ' · 음성은 다시 만들어야 합니다(🎤)'));
+    + (nr ? ' · 끌어올린 클립만 G' + A.num + ' 로(남은 줄은 G' + B.num + ' 그대로)' : '')
+    + (_spl ? ' · 음성은 클립 경계에서 잘라 이어 붙였습니다' : ' · 음성은 다시 만들어야 합니다(🎤)'));
   return { ok: true, dto: P.toDTO(S.parsed), goneGroup: goneG, intoGroup: A.num, sentIdx: A.sentenceIds.length - 1 };
 });
 

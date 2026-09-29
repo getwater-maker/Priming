@@ -368,18 +368,24 @@ function fmtSrtTime(t) {
 function normBreaks(text, breaks) {
   if (!Array.isArray(breaks) || !breaks.length) return null;
   const L = String(text || '').length;
-  const out = [...new Set(breaks.map((x) => Math.floor(Number(x))).filter((x) => x > 0 && x < L))].sort((a, b) => a - b);
+  const nums = breaks.map((x) => Math.floor(Number(x)));
+  const out = [...new Set(nums.filter((x) => x > 0 && x < L))].sort((a, b) => a - b);
+  // 🔒 끝 표식(= 글 길이) — 「사람이 정한 줄 나눔 · 자동 줄바꿈 안 함」(v0.5.88). 한 줄짜리도 굳힐 수 있게.
+  //   없으면 [] = 자동 줄바꿈이라, 클립을 합쳐 한 줄로 만든 것이 길면 다시 둘로 쪼개졌다(로이 2026-09-29).
+  if (L > 0 && nums.includes(L)) out.push(L);
   return out.length ? out : null;
 }
 /** 글이 바뀌면 줄 나눔 위치를 옮긴다 — 앞뒤 공통 부분은 그대로 · 고친 곳 안의 위치는 고친 곳 끝으로. 결과가 비면 null */
 function remapBreaks(oldText, newText, breaks) {
   const a = String(oldText || ''), b = String(newText || '');
-  const bk = normBreaks(a, breaks); if (!bk) return null;
+  const bk0 = normBreaks(a, breaks); if (!bk0) return null;
+  const fixed = bk0[bk0.length - 1] === a.length;   // 🔒 끝 표식은 늘 새 글의 끝으로
+  const bk = fixed ? bk0.slice(0, -1) : bk0;
   let pre = 0; while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
   let suf = 0; while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
   const d = b.length - a.length;
   const moved = bk.map((x) => (x <= pre ? x : x >= a.length - suf ? x + d : pre + (b.length - suf - pre)));
-  return normBreaks(b, moved);
+  return normBreaks(b, fixed ? [...moved, b.length] : moved);
 }
 
 module.exports = { normBreaks, remapBreaks, splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
