@@ -224,6 +224,65 @@ console.log('\n[8] ↶ 되돌리기 — 그림 파일이 제자리로(번호 정
   ok(/t\.tagName === 'INPUT' \|\| t\.tagName === 'TEXTAREA'/.test(APP8) && /runUndo\(k === 'y' \|\| \(k === 'z' && ev\.shiftKey\)\)/.test(APP8), 'Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) — 글자칸 안에서는 그 칸의 되돌리기');
   ok(/undoPush\('문장 고치기', \{ md: true \}\)/.test(M) && /undoPush\('클립 합치기', \{ md: true \}\)/.test(M) && /undoPush\('그림 적용 범위'\)/.test(M) && /undoPush\('그룹 합치기'\)/.test(M) && /undoPush\('그룹 분할'\)/.test(M) && /undoPush\('자막 서식', \{ coalesce: true \}\)/.test(M), '되돌리기가 기억하는 동작 6가지(문장·클립 합치기는 .md 까지)');
   ok(!/fs\.rmSync\(want/.test(M), '번호 정리가 덮이는 파일을 지우지 않고 휴지통으로');
+
+  // 🔴 [8-2] 아내 PC 사고(2026-09-29) — 뒤에 그룹이 **여럿** 있을 때 가운데를 합치면 뒤 그림이 전부 사라졌다.
+  //   (위 3개짜리 검사는 옮길 그룹이 하나뿐이라 사슬이 안 생겨 통과했다)
+  const run = (N, mutate) => {
+    const t2 = fs.mkdtempSync(path.join(os.tmpdir(), 'renum-'));
+    const md = path.join(t2, 'media-1'); fs.mkdirSync(md);
+    const g2 = [];
+    for (let k = 1; k <= N; k++) { const f = path.join(md, String(k).padStart(2, '0') + '.png'); fs.writeFileSync(f, 'IMG' + k); const g = new Group({ num: k, sentenceIds: ['s' + k] }); g.imagePath = f; g._orig = 'IMG' + k; g2.push(g); }
+    const p2 = { shortsNum: 1, groups: g2 };
+    const ctx2 = { ...ctx, S: { ...S, outRoot: t2 } };
+    vm.createContext(ctx2);
+    vm.runInContext(M.slice(a, b) + M.slice(c, d) + '\nthis.api = { renumberMediaFiles, _toTrash };', ctx2);
+    mutate(p2, ctx2.api);
+    ctx2.api.renumberMediaFiles(p2, md);
+    const res = p2.groups.map((g) => ({ num: g.num, name: g.imagePath ? path.basename(g.imagePath) : null, body: g.imagePath && fs.existsSync(g.imagePath) ? fs.readFileSync(g.imagePath, 'utf8') : null, orig: g._orig }));
+    const left = fs.readdirSync(md).filter((n) => /\.renum-/.test(n)).length;
+    fs.rmSync(t2, { recursive: true, force: true });
+    return { res, left };
+  };
+  const good = (r) => r.res.every((x) => x.body === x.orig && x.name === String(x.num).padStart(2, '0') + '.png');
+  // 합치기: G5 → G4 (G5 그림은 휴지통) · 뒤 5개가 한 칸씩 당겨진다
+  const m1 = run(10, (p, A) => { A._toTrash(p.groups[4].imagePath); p.groups.splice(4, 1); p.groups.forEach((g, i) => { g.num = i + 1; }); });
+  ok(good(m1) && m1.left === 0, '🔑 10그룹 중 G5 합치기 → 뒤 G6~G10 그림이 **제 그림 그대로** 05~09.png (' + m1.res.map((x) => x.num + ':' + (x.body || '없음')).join(' ') + ')');
+  // 여러 그룹이 한꺼번에 사라짐(그림 범위로 덮기): G3·G4 제거
+  const m2 = run(9, (p, A) => { for (const i of [3, 2]) { A._toTrash(p.groups[i].imagePath); p.groups.splice(i, 1); } p.groups.forEach((g, i) => { g.num = i + 1; }); });
+  ok(good(m2) && m2.left === 0, '두 그룹이 사라져 두 칸씩 당겨져도 그림이 섞이지 않는다');
+  // 분할(번호가 늘어남): G2 뒤에 새 그룹(그림 없음)
+  const m3 = run(6, (p) => { const ng = new Group({ num: 0, sentenceIds: ['x'] }); ng._orig = undefined; p.groups.splice(2, 0, ng); p.groups.forEach((g, i) => { g.num = i + 1; }); });
+  ok(m3.res.filter((x) => x.orig).every((x) => x.body === x.orig) && m3.res.filter((x) => x.orig).map((x) => x.name).join(',') === '01.png,02.png,04.png,05.png,06.png,07.png', '분할(번호 늘어남)도 그대로 맞다');
+  // 판정력: 옛 코드(높은 번호부터 한 번에)는 같은 합치기에서 그림을 잃는다
+  const OLD = "function renumberMediaFiles(project, mediaDir) {\n  const groups = [...project.groups].sort((a, b) => b.num - a.num);\n  for (const g of groups) {\n    for (const key of ['imagePath', 'videoPath']) {\n      const p = g[key];\n      if (!p || !fs.existsSync(p)) continue;\n      if (!p.startsWith(mediaDir)) continue;\n      const ext = path.extname(p);\n      const want = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);\n      if (path.resolve(p) === path.resolve(want)) continue;\n      try { if (fs.existsSync(want)) _toTrash(want); fs.renameSync(p, want); g[key] = want; } catch (e) {}\n    }\n  }\n}\n";
+  { const sv = [c, d]; const M0 = M; const Mold = M0.slice(0, c) + OLD + M0.slice(d);
+    const c2 = Mold.indexOf('function renumberMediaFiles('), d2 = Mold.indexOf('\n}\n', c2) + 3;
+    const t3 = fs.mkdtempSync(path.join(os.tmpdir(), 'renum-old-')); const md = path.join(t3, 'media-1'); fs.mkdirSync(md);
+    const g3 = []; for (let k = 1; k <= 10; k++) { const f = path.join(md, String(k).padStart(2, '0') + '.png'); fs.writeFileSync(f, 'IMG' + k); const g = new Group({ num: k, sentenceIds: ['s' + k] }); g.imagePath = f; g._orig = 'IMG' + k; g3.push(g); }
+    const cx = { ...ctx, S: { ...S, outRoot: t3 } }; vm.createContext(cx);
+    vm.runInContext(Mold.slice(a, b) + Mold.slice(c2, d2) + '\nthis.api = { renumberMediaFiles, _toTrash };', cx);
+    cx.api._toTrash(g3[4].imagePath); g3.splice(4, 1); g3.forEach((g, i) => { g.num = i + 1; });
+    cx.api.renumberMediaFiles({ groups: g3 }, md);
+    const lost = g3.filter((g) => !fs.existsSync(g.imagePath) || fs.readFileSync(g.imagePath, 'utf8') !== g._orig).length;
+    fs.rmSync(t3, { recursive: true, force: true });
+    ok(lost >= 4, `(A/B) 옛 코드는 같은 합치기에서 그림 ${lost}개를 잃는다 — 위 검사가 헛단언이 아니다`); void sv; }
+
+  // 🔴 [8-3] 휴지통은 앱을 끄거나 대본을 바꿔도 7일 남는다(옛 코드는 통째로 지웠다)
+  {
+    const t4 = fs.mkdtempSync(path.join(os.tmpdir(), 'trash-')); const tr = path.join(t4, '.priming-undo'); fs.mkdirSync(tr);
+    const now = Date.now();
+    fs.writeFileSync(path.join(tr, (now - 3600e3) + '_1_05.png'), 'x');
+    fs.writeFileSync(path.join(tr, (now - 8 * 86400e3) + '_2_06.png'), 'x');
+    fs.writeFileSync(path.join(tr, 'memo.txt'), 'x');
+    const cx = { ...ctx }; vm.createContext(cx);
+    vm.runInContext(M.slice(a, b) + '\nthis.api = { _undoPruneTrash };', cx);
+    const n = cx.api._undoPruneTrash(tr, now);
+    const rest = fs.readdirSync(tr).sort().join(',');
+    fs.rmSync(t4, { recursive: true, force: true });
+    ok(n === 1 && rest === (now - 3600e3) + '_1_05.png,memo.txt', '7일 지난 것만 지우고 1시간 전 것·이름 모를 파일은 남긴다');
+    const R = M.slice(M.indexOf('function _undoReset('), M.indexOf('function _undoCheck('));
+    ok(!/rmSync\(tr/.test(R) && /_undoPruneTrash\(tr\)/.test(R), '되돌리기 기억을 비울 때(앱 종료·대본 바꿈) 휴지통을 통째로 지우지 않는다');
+  }
 }
 
 console.log(`\n${fail ? '❌' : '✅'} group-merge ${pass}/${pass + fail}`);

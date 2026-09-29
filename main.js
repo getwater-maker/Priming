@@ -6449,9 +6449,22 @@ ipcMain.handle('import-prompts', (_e, args = {}) => {
 //   ⚠ 대본이 바뀌면(다른 대본 선택 · 밖에서 고쳐 다시 읽음 · 새로 열기) 기억을 비운다 — 다른 대본에 옛 상태를 덮으면 안 된다.
 const UNDO = { key: null, parsed: null, outRoot: null, undo: [], redo: [], MAX: 40, seq: 0 };
 function _undoTrashDir(outRoot) { const r = outRoot || S.outRoot; return r ? path.join(r, '.priming-undo') : null; }
+// 🔴 휴지통은 되돌리기 기억이 비워져도 **7일 동안 남긴다**(2026-09-29 v0.5.85). 옛 코드는 앱을 끄거나 대본을 바꿀 때
+//   통째로 지워서, 번호 정리 버그로 휴지통에 간 그림이 앱을 끄는 순간 영영 사라졌다. 파일 이름 앞 숫자 = 치운 시각(ms).
+const UNDO_TRASH_KEEP_MS = 7 * 24 * 3600 * 1000;
+function _undoPruneTrash(tr, now = Date.now()) {
+  let names = []; try { names = fs.readdirSync(tr); } catch { return 0; }
+  let n = 0;
+  for (const nm of names) {
+    const t = Number((/^(\d{12,})_/.exec(nm) || [])[1]);
+    if (!(t > 0) || now - t < UNDO_TRASH_KEEP_MS) continue;
+    try { fs.rmSync(path.join(tr, nm), { force: true }); n++; } catch {}
+  }
+  return n;
+}
 function _undoReset() {
   const tr = UNDO.outRoot ? _undoTrashDir(UNDO.outRoot) : null;
-  if (tr) { try { fs.rmSync(tr, { recursive: true, force: true }); } catch {} }
+  if (tr) _undoPruneTrash(tr);
   UNDO.undo = []; UNDO.redo = []; UNDO.key = S.scriptPath || null; UNDO.parsed = S.parsed || null; UNDO.outRoot = S.outRoot || null;
 }
 function _undoCheck() { if (UNDO.key !== (S.scriptPath || null) || UNDO.parsed !== S.parsed || UNDO.outRoot !== (S.outRoot || null)) _undoReset(); }
@@ -6554,18 +6567,48 @@ ipcMain.handle('undo', (_e, args = {}) => {
 });
 app.on('before-quit', () => { try { _undoReset(); } catch {} });
 
+// 🔴 두 단계로 옮긴다: ① 옮길 파일을 전부 임시 이름으로 비켜 두고 ② 제 번호로. (2026-09-29 v0.5.85)
+//   옛 코드는 「높은 번호부터」 한 번에 옮겼다 — 분할(번호가 늘어남)엔 맞지만 합치기(번호가 줄어듦)에선
+//   G10→09.png 가 **아직 안 옮긴 G9 의 09.png** 를 「덮이는 파일」로 보고 휴지통에 넣었고, 이것이 사슬로 이어져
+//   합친 자리 뒤 그룹의 그림이 전부 사라졌다(아내 PC 사고). 휴지통으로 가는 것은 **어느 그룹도 가리키지 않는** 파일뿐이다.
 function renumberMediaFiles(project, mediaDir) {
-  const groups = [...project.groups].sort((a, b) => b.num - a.num);
-  for (const g of groups) {
+  const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const moves = [];   // { refs:[{g,key}], src, want, tmp }
+  for (const g of project.groups) {
     for (const key of ['imagePath', 'videoPath']) {
       const p = g[key];
       if (!p || !fs.existsSync(p)) continue;
-      if (!p.startsWith(mediaDir)) continue; // media-N 안의 파일만(외부 첨부는 그대로)
-      const ext = path.extname(p);
-      const want = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);
-      if (path.resolve(p) === path.resolve(want)) continue;
-      try { if (fs.existsSync(want)) _toTrash(want); fs.renameSync(p, want); g[key] = want; } catch (e) {}   // 덮이는 파일은 휴지통으로(↶ 되돌리기)
+      if (!_inDir(p, mediaDir)) continue; // media-N 안의 파일만(외부 첨부는 그대로)
+      const want = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${path.extname(p)}`);
+      if (same(p, want)) continue;
+      const dup = moves.find((m) => same(m.src, p));   // 두 그룹이 한 파일을 가리키면 한 번만 옮긴다
+      if (dup) { dup.refs.push({ g, key }); continue; }
+      moves.push({ refs: [{ g, key }], src: p, want, tmp: null });
     }
+  }
+  if (!moves.length) return;
+  // ① 비켜 두기
+  for (const m of moves) {
+    const tmp = m.src + '.renum-' + (++UNDO.seq);
+    try { fs.renameSync(m.src, tmp); m.tmp = tmp; } catch {}
+  }
+  // ② 제 번호로 — 자리에 남은 파일이 **다른 그룹이 가리키는 것**이면 절대 치우지 않는다(그땐 옮기기를 포기)
+  const placed = [];   // 이번에 제자리에 놓은 파일
+  const refd = (f) => placed.some((x) => same(x, f))
+    || project.groups.some((g) => ['imagePath', 'videoPath'].some((k) => g[k] && same(g[k], f) && !moves.some((m) => m.tmp && same(m.src, f))));
+  for (const m of moves) {
+    if (!m.tmp) continue;
+    let dst = m.want;
+    if (fs.existsSync(dst)) {
+      if (refd(dst)) dst = fs.existsSync(m.src) ? m.tmp : m.src;   // 남의 그림 — 원래 이름으로(그것도 차 있으면 임시 이름 그대로)
+      else _toTrash(dst);           // 아무도 안 쓰는 옛 파일만 휴지통으로(↶ 되돌리기)
+    }
+    if (dst !== m.tmp) {
+      try { fs.renameSync(m.tmp, dst); }
+      catch { try { fs.renameSync(m.tmp, m.src); dst = m.src; } catch { dst = m.tmp; } }
+    }
+    placed.push(dst);
+    for (const r of m.refs) r.g[r.key] = dst;
   }
 }
 
