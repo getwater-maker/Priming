@@ -330,6 +330,8 @@ class FlowAutomator {
   }
 
   async run(config) {
+    // 📥 받는 파일은 %TEMP% 가 아니라 앱이 준 받기 폴더(대본 폴더 안 _받기)에 잠깐 둔다(2026-09-29 v0.5.86)
+    this._dlDir = (config && config.outputDir) || null;
     const {
       paragraphs,
       // 하이브리드 분할 — 대괄호 그룹은 한국어+스타일 그대로 입력 (번역 스킵).
@@ -1650,7 +1652,7 @@ class FlowAutomator {
           resBtn.click(),
         ]);
         // 임시 파일로 저장 후 버퍼로 읽기
-        const tmpPath = path.join(os.tmpdir(), `flow_dl_${Date.now()}`);
+        const tmpPath = path.join(this._dlDir || os.tmpdir(), `flow_dl_${Date.now()}`);
         await download.saveAs(tmpPath);
         const buf = fs.readFileSync(tmpPath);
         fs.unlinkSync(tmpPath);
@@ -1870,7 +1872,7 @@ class FlowAutomator {
           opt.click({ timeout: 5000 }),
         ]);
       } finally { clearInterval(_dlTick); }
-      const tmpPath = path.join(os.tmpdir(), `flow_vid_${Date.now().toString(36)}.mp4`);
+      const tmpPath = path.join(this._dlDir || os.tmpdir(), `flow_vid_${Date.now().toString(36)}.mp4`);
       await download.saveAs(tmpPath);
       const buf = fs.readFileSync(tmpPath);
       try { fs.unlinkSync(tmpPath); } catch (_) {}

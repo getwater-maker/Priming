@@ -223,6 +223,22 @@ function isTransientFsError(e) {
 }
 
 // fn 을 실행하고, 일시 장애면 FS_RETRY_DELAYS 간격으로 다시 시도. 끝내 실패하면 마지막 오류를 던진다.
+// 🔒 쓰기 자리 잡기(2026-09-29 v0.5.86) — 새 그림·영상·음성은 **다른 그룹·문장이 쓰는 파일 위에 절대 쓰지 않는다**.
+//   번호 이름(NN.png · <문장번호>.wav)은 합치기·나누기로 번호가 밀린 뒤엔 **이웃 것**일 수 있다(문장을 나누면 뒤 문장들의 번호가
+//   하나씩 밀리지만 음성 파일 이름은 그대로 — 새 문장 6이 6.wav 를 쓰면 옛 6번(이제 7번) 음성이 덮였다).
+//   그 이름에 파일이 있고 이 항목 자신의 파일(own)이 아니면 NN_2 · NN_3 … 로 비켜 쓴다.
+//   exts = 같은 이름으로 볼 확장자들(엔진이 확장자를 스스로 정할 때 — 05.png 가 있으면 05.jpg 도 피한다).
+function claimPath(want, own, exts) {
+  const ext = path.extname(want), stem = want.slice(0, want.length - ext.length);
+  const all = exts && exts.length ? exts : [ext];
+  const same = (a, b) => !!(a && b) && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const free = (st) => all.every((e) => { const x = st + e; return same(x, own) || !fs.existsSync(x); });
+  if (free(stem)) return want;
+  for (let k = 2; k < 1000; k++) if (free(stem + '_' + k)) return stem + '_' + k + ext;
+  return stem + '_' + Date.now() + ext;
+}
+const IMG_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
+
 async function retryFs(fn, what, onLine, abortSignal) {
   let last = null;
   for (let i = 0; ; i++) {
@@ -369,7 +385,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     const cacheKey = TtsCache.keyFor(keyText, sf, { ...sOpts, normDb: normTarget, padSec });
     const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
-      const out = path.join(workDir, `${s.num}.${hit.ext}`);
+      const out = claimPath(path.join(workDir, `${s.num}.${hit.ext}`), s.ttsAudioPath);
       try { await retryFs(() => fs.copyFileSync(hit.file, out), `컷${s.num} 캐시 복사`, onLine, abortSignal); s.ttsAudioPath = out; }
       catch { s.ttsAudioPath = hit.file; }
       s.ttsDurationSec = hit.dur;
@@ -468,18 +484,18 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
         const toMp3 = (sf !== 1);
         const wavTmp = path.join(workDir, `_raw_${s.num}.wav`);
         await retryFs(() => fs.writeFileSync(wavTmp, res.mp3Buffer), `컷${s.num} 임시 WAV 쓰기`, onLine, abortSignal);
-        const out = path.join(workDir, `${s.num}.${toMp3 ? 'mp3' : 'wav'}`);
+        const out = claimPath(path.join(workDir, `${s.num}.${toMp3 ? 'mp3' : 'wav'}`), s.ttsAudioPath);
         const ok = encodeTts(wavTmp, out, sf, gainDb, toMp3, padSec);
         try { fs.unlinkSync(wavTmp); } catch {}
         // 🔑 길이에 무음을 더한다 — 이 값이 .vrew 타임라인·그룹 길이·⏱챕터·SRT 의 유일한 근거다.
         if (ok) { s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec / sf + padSec; s.ttsGainDb = gainDb; }
         else { // ffmpeg 실패 폴백: 정속 WAV 그대로 (배속·정규화 미적용)
-          const wav = path.join(workDir, `${s.num}.wav`);
+          const wav = claimPath(path.join(workDir, `${s.num}.wav`), s.ttsAudioPath);
           await retryFs(() => fs.writeFileSync(wav, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);
           s.ttsAudioPath = wav; s.ttsDurationSec = res.durationSec;
         }
       } else {
-        const out = path.join(workDir, `${s.num}.wav`);
+        const out = claimPath(path.join(workDir, `${s.num}.wav`), s.ttsAudioPath);
         await retryFs(() => fs.writeFileSync(out, res.mp3Buffer), `컷${s.num} WAV 쓰기`, onLine, abortSignal);
         s.ttsAudioPath = out; s.ttsDurationSec = res.durationSec;
       }
@@ -679,7 +695,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const log = logger || (() => {});
   // 모든 엔진(Genspark/Flow/…) 공통 최종 프롬프트 — 스타일 앞 + 대본 + no text/no watermark.
   const prompts = idx.map((i) => buildImagePrompt(stylePrompt, groups[i].imagePrompt));
-  const outputPaths = idx.map((i) => path.join(imagesDir, `${String(groups[i].num).padStart(2, '0')}.png`));
+  const outputPaths = idx.map((i) => claimPath(path.join(imagesDir, `${String(groups[i].num).padStart(2, '0')}.png`), groups[i].imagePath, IMG_EXTS));
 
   const { GensparkEngine } = require('../genspark-engine');
   const eng = new GensparkEngine({ profileId: profileId || 'default', logger: log });
@@ -821,7 +837,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
         continue;
       }
       if (g.videoPath && fs.existsSync(g.videoPath)) { results.push({ num: g.num, success: true }); continue; }
-      const outputPath = path.join(videoDir, `${String(g.num).padStart(2, '0')}.mp4`);
+      const outputPath = claimPath(path.join(videoDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);
       const vprompt = g.videoPrompt || g.motionNote || g.videoMotionPrompt || '';
       // ♻ 영상 캐시 재활용 — 같은 (영상프롬프트 + 원본이미지) 면 재생성 안 함.
       const vck = MediaCache.videoKey(vprompt, g.imagePath, project.aspect || '16:9', 'grok');
@@ -929,5 +945,5 @@ module.exports = { speakerVoiceMap, nudgePromptForRetry,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations,
-  retryFs, isTransientFsError,
+  retryFs, isTransientFsError, claimPath, IMG_EXTS,
 };

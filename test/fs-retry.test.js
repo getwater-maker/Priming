@@ -117,19 +117,35 @@ ok(sumMs >= 16000, '재시도 총 대기 ' + (sumMs / 1000) + '초 >= 실사고 
     ok(lines.some((m) => /다시 시도/.test(m)), '무슨 일이 있었는지 로그에 남는다 — ' + (lines.find((m) => /다시 시도/.test(m)) || '없음'));
   }
 
-  // 시나리오 B: 한 문장만 영구히 못 쓴다(그 자리에 같은 이름의 폴더가 있음) → 그 문장만 건너뛰고 계속
+  // 시나리오 B: 한 문장만 영구히 못 쓴다 → 그 문장만 건너뛰고 계속
+  //   (v0.5.86 부터 같은 이름의 **폴더**가 자리를 막고 있으면 claimPath 가 3_2.wav 로 비켜 쓴다 → 쓰기 자체를 막아 재현한다)
   {
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.mkdirSync(workDir, { recursive: true });
-    fs.mkdirSync(path.join(workDir, '3.wav'));            // 3번은 절대 쓸 수 없다
+    const realWrite = fs.writeFileSync;
+    fs.writeFileSync = function (p, ...rest) {
+      if (/[\\/]3(_\d+)?\.wav$/.test(String(p))) { const e = new Error("EISDIR: illegal operation on a directory, open '" + p + "'"); e.code = 'EISDIR'; throw e; }
+      return realWrite.call(fs, p, ...rest);
+    };
     const sents = mkSents(5);
     const lines = [];
     const ttsMgr = { async synthesize() { return { mp3Buffer: buf, durationSec: 1.5 }; } };
-    const r = await P.fillTtsList(sents, {}, ttsMgr, workDir, (m) => lines.push(m), null, 1, '테스트', null, true);
+    let r;
+    try { r = await P.fillTtsList(sents, {}, ttsMgr, workDir, (m) => lines.push(m), null, 1, '테스트', null, true); }
+    finally { fs.writeFileSync = realWrite; }
     const made = sents.filter((s) => s.ttsAudioPath && fs.statSync(s.ttsAudioPath).isFile()).length;
     ok(made === 4, '못 쓰는 문장 하나가 나머지를 죽이지 않는다 — 4개 성공 (실제 ' + made + '개)');
     ok(r.failed.length === 1 && r.failed[0] === 3, '실패한 컷 번호를 돌려준다 → .vrew 게이트가 막는다 (실제 ' + JSON.stringify(r.failed) + ')');
     ok(lines.some((m) => /컷3 저장 실패/.test(m)), '어느 컷이 왜 실패했는지 알린다');
+  }
+  // 시나리오 B-2: 같은 이름의 폴더가 자리를 막고 있으면 비켜 쓴다(v0.5.86 — 남의 파일·폴더 위에 쓰지 않는다)
+  {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(workDir, '3.wav'), { recursive: true });
+    const sents = mkSents(5);
+    const ttsMgr = { async synthesize() { return { mp3Buffer: buf, durationSec: 1.5 }; } };
+    const r = await P.fillTtsList(sents, {}, ttsMgr, workDir, () => {}, null, 1, '테스트', null, true);
+    ok(r.failed.length === 0 && path.basename(sents[2].ttsAudioPath) === '3_2.wav', '3.wav 자리에 폴더가 있으면 3_2.wav 로 비켜 5개 모두 만든다');
   }
 
   // 시나리오 C: 출력 폴더를 아예 만들 수 없다 → 사람이 읽을 수 있는 이유로 던진다

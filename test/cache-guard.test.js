@@ -22,9 +22,9 @@ const blk = [
   cut('async function prefillImageCache','return n;'),
 ].join(String.fromCharCode(10));
 const m={exports:{}};
-new Function('fs','path','require','log','pushDtoUpdate','module',
+new Function('fs','path','require','log','pushDtoUpdate','module','P',
   blk+'\nmodule.exports={prefillImageCache};')
-  (fs,path,(x)=>require(x.startsWith('./')?path.join(__dirname,'..',x):x),(s)=>console.log('   [로그]',s),()=>{},m);
+  (fs,path,(x)=>require(x.startsWith('./')?path.join(__dirname,'..',x):x),(s)=>console.log('   [로그]',s),()=>{},m,require('../core/pipeline'));
 const {prefillImageCache}=m.exports;
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'cachetest-'));
 const mk=(n,args)=>{const o=path.join(tmp,n);execFileSync(ff,['-y','-hide_banner','-loglevel','error',...args,o]);return o;};

@@ -7,7 +7,9 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 const a = src.indexOf('function autoRelinkVideos(');
 const b = src.indexOf('function rangeNums(', a);
 if (a < 0 || b < 0) { console.log('❌ main.js 에서 헬퍼를 못 찾음'); process.exit(1); }
-const mod = new Function('fs', 'path', src.slice(a, b) + '\nreturn { autoRelinkVideos, hasVideoFile };')(fs, path);
+// v0.5.86 — 다시 잇기는 이웃 그룹이 쓰는 파일을 집지 않는다(_usedByOther 원문도 함께)
+const u0 = src.indexOf('function _usedByOther('), u1 = src.indexOf('\n}\n', u0) + 3;
+const mod = new Function('fs', 'path', src.slice(u0, u1) + src.slice(a, b) + '\nreturn { autoRelinkVideos, hasVideoFile };')(fs, path);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vskip-'));
 const w = (n, t = 'x') => { const f = path.join(dir, n); fs.writeFileSync(f, t); return f; };

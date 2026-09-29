@@ -836,10 +836,10 @@ ipcMain.handle('gemini-batch-retrieve', async () => {
     try {
       const dir = shortsDirs(job.outRoot, it.shortsNum).media;
       fs.mkdirSync(dir, { recursive: true });
-      const out = path.join(dir, `${String(it.groupNum).padStart(2, '0')}.${r.ext}`);
-      fs.writeFileSync(out, r.buffer); saved++;
       const pr = S.parsed.projects.find((p) => p.shortsNum === it.shortsNum);
       const g = pr && pr.groups.find((x) => x.num === it.groupNum);
+      const out = P.claimPath(path.join(dir, `${String(it.groupNum).padStart(2, '0')}.${r.ext}`), g && g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
+      fs.writeFileSync(out, r.buffer); saved++;
       if (g) { g.imagePath = out; g.imageStatus = 'done'; }
     } catch (e) { log(`  저장 실패 ${r.key}: ${e.message}`); }
   }
@@ -1797,6 +1797,26 @@ ipcMain.handle('delete-tts', async () => {
 //     ② **재활용 캐시(media-cache)까지 지운다.** 파일만 지우면 다음 「만들기」때 캐시가 그대로 되살린다
 //        (2026-08-19 노이즈 이미지 부활 사고와 같은 계열). 이미지는 `imageCleared` 플래그도 세워
 //        스냅샷(재시작)까지 넘어가게 한다.
+// 🔒 이 파일을 **다른 그룹**이 쓰고 있는가 — 번호로 파일을 다시 잇거나(relink) 새로 쓸 때 이웃 것을 집지 않게(v0.5.86)
+function _usedByOther(pr, g, f) {
+  const k = path.resolve(f).toLowerCase();
+  return ((pr && pr.groups) || []).some((o) => o !== g && ['imagePath', 'videoPath'].some((key) => o[key] && path.resolve(o[key]).toLowerCase() === k));
+}
+// 📥 Flow 받기 폴더 — 예전엔 %TEMP% 에 받았다가 복사했다(로이 2026-09-29: 「임시폴더에 받지 말고 vrew 기준 폴더에」).
+//   이제 <대본 폴더(.vrew 가 있는 곳)>/_받기/<실행> 에 받고 media-N 으로 옮긴다. 다 옮겼으면 받기 폴더를 치우고,
+//   **옮기지 못한 파일이 하나라도 있으면 남겨 둔다**(크레딧을 쓴 결과물 — 예전엔 매핑 실패분까지 통째로 지웠다).
+function _flowStageDir(mediaDir, tag) {
+  const d = path.join(path.dirname(mediaDir), '_받기', tag);
+  fs.mkdirSync(path.join(d, 'images'), { recursive: true });
+  return d;
+}
+function _flowUnstage(workDir, imgDir, re, moved, logger) {
+  let files = []; try { files = fs.readdirSync(imgDir).filter((x) => re.test(x)); } catch {}
+  if (files.length > moved) { if (logger) logger(`📥 받았지만 그룹에 잇지 못한 파일 ${files.length - moved}개는 지우지 않고 남겨 둡니다 — ${imgDir}`); return false; }
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+  try { const top = path.dirname(workDir); if (!fs.readdirSync(top).length) fs.rmdirSync(top); } catch {}
+  return true;
+}
 function _inDir(file, dir) {
   try {
     const f = path.resolve(file), d = path.resolve(dir);
@@ -2399,11 +2419,11 @@ ipcMain.handle('relink-work', async () => {
     for (const g of pr.groups) {
       const nn = String(g.num).padStart(2, '0');
       if (!(g.imagePath && fs.existsSync(g.imagePath))) {
-        const f = ['png', 'jpg', 'jpeg', 'webp'].map((e) => path.join(dirs.media, nn + '.' + e)).find((x) => fs.existsSync(x));
+        const f = ['png', 'jpg', 'jpeg', 'webp'].map((e) => path.join(dirs.media, nn + '.' + e)).find((x) => fs.existsSync(x) && !_usedByOther(pr, g, x));
         if (f) { g.imagePath = f; g.imageStatus = 'done'; g.imageStale = false; g.imagePromptStale = false; g.imageCleared = false; out.images++; }
       }
       if (!(g.videoPath && fs.existsSync(g.videoPath))) {
-        const v = [nn + '_1080.mp4', nn + '.mp4'].map((n) => path.join(dirs.media, n)).find((x) => fs.existsSync(x));
+        const v = [nn + '_1080.mp4', nn + '.mp4'].map((n) => path.join(dirs.media, n)).find((x) => fs.existsSync(x) && !_usedByOther(pr, g, x));
         if (v) { g.videoPath = v; g.videoStatus = 'done'; g.videoCleared = false; out.videos++; }
       }
     }
@@ -3083,7 +3103,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
     if (++loopGuard > acctTotal + 2) { logger('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
     logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${capTxt}) · 대상 ${targets.length}장 · 모델 ${flowImageModel}`);
 
-    const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
+    const workDir = _flowStageDir(imagesDir, `flow_${acc.id}_${Date.now().toString(36)}`);   // 📥 임시폴더가 아니라 대본(.vrew) 폴더 안
     const imgDir = path.join(workDir, 'images');
     fs.mkdirSync(imgDir, { recursive: true });
     const eng = getFlowEng(flowProfileDir(acc.id));
@@ -3102,7 +3122,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
         if (!f && final) f = files[i];
         if (!f) return;
         const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
-        const dest = path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`);
+        const dest = P.claimPath(path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`), g.imagePath, P.IMG_EXTS);   // 🔒
         try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; copiedTotal++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
         catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
       });
@@ -3135,7 +3155,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, forc
     FlowAccounts.markUsed(acc.id, made);
     logger(`[Flow] ${acc.label} 이미지 매핑 ${made}/${targets.length}`);
     pushDtoUpdate();
-    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+    _flowUnstage(workDir, imgDir, /\.(png|jpe?g|webp)$/i, copiedTotal, logger);
     if (S.abort) break;
 
     // 한도(rateExhausted)·차단(비정상활동) → 이 계정 오늘 쉬게(rest) 하고 다음 계정으로.
@@ -3214,7 +3234,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     if (++loopGuard > acctTotal + 2) { log('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
     log(`🎬 ${prLabel(pr)} 비디오 생성 (Flow ${model} · ${attachTxt} · ${videoDownload === 'off' ? '원본' : videoDownload} · ${targets.length}개 그룹 · 계정 ${acc.label} 오늘 ${acc.used}/${capTxt})…`);
 
-    const workDir = path.join(os.tmpdir(), `sm_flowvid_${pr.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
+    const workDir = _flowStageDir(mediaDir, `flowvid_${acc.id}_${Date.now().toString(36)}`);   // 📥 임시폴더가 아니라 대본(.vrew) 폴더 안
     const imgDir = path.join(workDir, 'images');
     fs.mkdirSync(imgDir, { recursive: true });
     const eng = getFlowEng(flowProfileDir(acc.id));
@@ -3240,7 +3260,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
         let f = files.find((x) => x.startsWith(String(i + 1).padStart(2, '0')));
         if (!f && final) f = files[i];
         if (!f) return;
-        const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+        const dest = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
         try {
           fs.copyFileSync(path.join(imgDir, f), dest);
           g.videoPath = dest; g.videoStatus = 'done'; n++; copiedTotal++;
@@ -3273,7 +3293,7 @@ async function runFlowVideos(pr, mediaDir, onlyNums) {
     // 못 만든 그룹은 'generating' 에 고착되지 않게 정리한다(썸네일 스피너가 영원히 돈다 — v0.2.62 계열).
     targets.forEach((g) => { if (g.videoStatus === 'generating') g.videoStatus = (g.videoPath ? 'done' : 'fail'); });
     pushDtoUpdate();
-    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+    _flowUnstage(workDir, imgDir, /\.mp4$/i, copiedTotal, log);
     if (S.abort) break;
 
     if (noAccess) {
@@ -3311,7 +3331,7 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, fo
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
-    const base = path.join(imagesDir, String(g.num).padStart(2, '0'));
+    const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS).replace(/\.png$/, '');   // 🔒
     const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base });
     if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }
     else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
@@ -3513,7 +3533,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       prompt = P.nudgePromptForRetry(prompt, retryLevel);
       logger(`  ↻ G${g.num} 프롬프트를 바꿔 재시도(${retryLevel}단계) — 같은 글자를 보내면 같은 노이즈가 나옵니다`);
     }
-    const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
+    const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
     const _t0 = Date.now();
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort });
@@ -3647,7 +3667,7 @@ async function runGrokApiVideos(pr, mediaDir, onlyNums) {
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
     const durationSec = totalSec > 0 ? Math.max(1, Math.min(15, Math.ceil(totalSec))) : 6;
     const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
-    const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → Grok API (${durationSec}초, ${pr.aspect})…`);
     try {
@@ -3699,7 +3719,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
     //   앞쪽 토큰 가중치 큼) → 이미지와 동일하게 끝으로 모으고 중복 제거. 실제 대본에 앞쪽 부정문 사례가 있었음.
     const prompt = P.normalizePromptNegations(
       (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic');
-    const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
     const _t0 = Date.now();
@@ -3828,7 +3848,7 @@ async function runGensparkVideos(pr, mediaDir, onlyNums) {
       for (const g of groups) {
         if (S.abort) { log('⏹ 중단됨'); break; }
         if (g.videoPath && fs.existsSync(g.videoPath)) continue;
-        const out = path.join(mediaDir, String(g.num).padStart(2, '0') + '.mp4');
+        const out = P.claimPath(path.join(mediaDir, String(g.num).padStart(2, '0') + '.mp4'), g.videoPath);   // 🔒
         // 길이 — 기존 비디오 방식과 같다: 그룹 TTS 길이(없으면 기본 6초). 모델별 범위는 엔진이 맞춘다.
         const ttsSec = (pr.sentences || []).filter((x) => x.groupId === g.id)
           .reduce((a, x) => a + (x.ttsDurationSec > 0 ? x.ttsDurationSec : 0), 0);
@@ -4070,7 +4090,7 @@ function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
     if (!f && allowOrder) f = files[i];
     if (!f) return;
     const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
-    const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);
+    const dest = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`), g.imagePath, P.IMG_EXTS);   // 🔒
     try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
     catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
   });
@@ -4144,7 +4164,7 @@ async function prefillImageCache(project, mediaDir, styleId, engine) {
     if (!hit) continue;
     try {
       fs.mkdirSync(mediaDir, { recursive: true });
-      const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`);
+      const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`), g.imagePath, P.IMG_EXTS);   // 🔒
       fs.copyFileSync(hit.file, out);
       picks.push({ g, key, out });
     } catch {}
@@ -4263,7 +4283,8 @@ async function _maybeUpscaleCore(project, logger, enabled) {
   let method = UP.mode === 'auto' ? 'ai' : UP.mode;
   for (const g of targets) {
     if (S.abort) { logger('⏹ 업스케일 중단'); break; }
-    const out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
+    let out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
+    if (_usedByOther(project, g, out)) out = g.videoPath.replace(/\.mp4$/i, '_' + Date.now().toString(36) + '_1080.mp4');   // 🔒 이웃 그룹 업스케일본 위에 쓰지 않는다
     g.videoStatus = 'upscaling'; pushDtoUpdate(); // ← 오버레이만(src 그대로라 썸네일 리로드 없음)
     try {
       logger(`⬆ [${done + 1}/${targets.length}] G${g.num} 영상 업스케일 → ${W}x${H}… (${method === 'fast' ? '빠름·ffmpeg' : 'AI·Real-ESRGAN'})`);
@@ -4626,7 +4647,7 @@ function autoRelinkVideos(pr, mediaDir) {
     if (g.videoPath && fs.existsSync(g.videoPath)) continue;
     if (!(g.imagePath && fs.existsSync(g.imagePath))) continue;
     const nn = String(g.num).padStart(2, '0');
-    const v = [nn + '_1080.mp4', nn + '.mp4'].map((x) => path.join(mediaDir, x)).find((x) => { try { return fs.statSync(x).size > 0; } catch { return false; } });
+    const v = [nn + '_1080.mp4', nn + '.mp4'].map((x) => path.join(mediaDir, x)).find((x) => { try { return fs.statSync(x).size > 0 && !_usedByOther(pr, g, x); } catch { return false; } });
     if (v) { g.videoPath = v; g.videoStatus = 'done'; n++; }
   }
   return n;

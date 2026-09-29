@@ -120,6 +120,8 @@ console.log('[5] main.js — Flow 는 로컬 GPU 레인을 잡지 않는다 (브
 console.log('\n[6] runFlowVideos 원문 실행 — 대상 선정·출력 매핑·계정 순환');
 
 const BODY_RFV = extractAsync(MAIN, 'runFlowVideos');
+// 📥 v0.5.86 받기 폴더 도우미(원문) — runFlowVideos 가 부른다
+const FLOW_STAGE_SRC = ['_flowStageDir', '_flowUnstage'].map((n) => { const i = MAIN.indexOf('function ' + n + '('); return MAIN.slice(i, MAIN.indexOf('\n}\n', i) + 3); }).join('');
 
 function mkProject(groups) {
   return {
@@ -167,10 +169,10 @@ function makeHarness({ groups, produce, accounts, aspect = '16:9', attach = 'fra
   const fn = new Function(
     'fs', 'path', 'os', 'S', 'log', 'pushDtoUpdate', 'getFlowEng', 'flowProfileDir', 'prLabel', 'P',
     'require', 'setInterval', 'clearInterval', 'hookFlowEngLog',
-    BODY_RFV + '\nreturn runFlowVideos;'
+    BODY_RFV + '\n' + FLOW_STAGE_SRC + '\nreturn runFlowVideos;'
   )(fs, path, os, { abort: false }, (m) => logs.push(String(m)), () => {}, () => eng,
     (id) => path.join(tmp, 'prof', id), () => '[테스트]',
-    { normalizePromptNegations: (p) => p },
+    { normalizePromptNegations: (p) => p, claimPath: require('../core/pipeline').claimPath },
     fakeRequire, () => 0, () => {}, () => {});
   return { fn, pr, mediaDir, tmp, logs, runCalls, marked, cooled, engLogs, eng };
 }
