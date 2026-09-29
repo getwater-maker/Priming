@@ -78,6 +78,8 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.continueInfo = require('../group-merge').applyContinueMarkers(proj);
   // 📝 `> 📝 …` 제작 메모(낭독 제외) — 📄 대본 읽기에서만 그 장 제목 아래에 보인다(TTS·그룹·자막 무관 · v0.5.66)
   proj.readerNotes = readerNotesOf(raw);
+  // 🎨 `> 🎨 화풍: <id> (<이름>)` — 이 편의 본문 이미지 화풍(채널 화풍보다 우선 · 채널사업부 요청 2026-09-29 · v0.5.89)
+  proj.scriptStyle = scriptStyleOf(raw);
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
 }
@@ -97,9 +99,33 @@ function readerNotesOf(raw) {
   return out;
 }
 
+/**
+ * 🎨 대본 화풍 줄 — `# 제목` 과 첫 장 제목(##) 사이의 `> 🎨 화풍: watercolor (수채화)`. 여러 줄이면 첫 줄. 콜론은 `:`·`：`.
+ *   → { id, name, raw } | null. **id 로 찾는다**(이름은 사람용 — 같은 이름의 스타일이 둘 있을 수 있다).
+ *   이 줄은 원래도 `>` 메모라 낭독·그룹·자막에 들어가지 않는다(여기서 값만 읽는다).
+ */
+function scriptStyleOf(raw) {
+  let seenH1 = false, fence = false;
+  for (const line of String(raw || '').split('\n')) {
+    if (/^\s*```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    if (/^#\s+/.test(line)) { if (seenH1) break; seenH1 = true; continue; }
+    if (/^#{2,}\s+/.test(line)) break;
+    if (!seenH1) continue;
+    const m = line.match(/^\s*>\s*🎨\s*화풍\s*[:：]\s*(.+?)\s*$/u);
+    if (!m) continue;
+    const v = m[1].replace(/\*\*/g, '').trim();
+    const pm = v.match(/^([^\s(（]+)\s*(?:[(（]\s*(.*?)\s*[)）])?/);
+    const id = pm ? pm[1] : v;
+    const name = pm && pm[2] ? pm[2] : null;
+    return id ? { id, name, raw: v } : null;
+  }
+  return null;
+}
+
 function parseLongformFile(filePath, thresholds = {}) {
   const fallback = path.basename(filePath).replace(/\.md$/i, '');
   return parseLongform(fs.readFileSync(filePath, 'utf8'), fallback, thresholds);
 }
 
-module.exports = { parseLongform, parseLongformFile, readerNotesOf };
+module.exports = { parseLongform, parseLongformFile, readerNotesOf, scriptStyleOf };

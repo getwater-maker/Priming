@@ -3590,6 +3590,15 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
+            {(() => {   // 🎨 이번 대본 화풍의 출처(v0.5.89) — 대본 `> 🎨 화풍:` 줄이 있으면 그것이 이긴다
+              const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
+              if (!loaded) return null;
+              const nm = (id) => ((styles.find((x) => x.id === id) || {}).name) || id || '없음';
+              if (!ssp) return <span className="meta" data-testid="style-src" title="이 대본에는 🎨 화풍 줄이 없어 채널(헤더) 화풍을 씁니다">채널: {nm(styleId)}</span>;
+              const hit = styles.find((x) => x.id === ssp.id) || (ssp.name ? (styles.filter((x) => x.name === ssp.name).length === 1 ? styles.find((x) => x.name === ssp.name) : null) : null);
+              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 id 가 없어 채널 화풍으로 그립니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 채널: {nm(styleId)}</span>;
+              return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄이 채널·헤더 화풍보다 우선합니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
+            })()}
             <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나2(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>

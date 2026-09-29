@@ -801,7 +801,7 @@ ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
   if (!S.parsed || !S.parsed.projects) return { ok: false, error: '대본을 먼저 여세요.' };
   const GI = require('./core/gemini-image');
   if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키 없음 — ⚙ 채널편집에서 Gemini 키를 넣으세요.' };
-  const styleId = args.styleId || null;
+  const styleId = effStyleId(args.styleId || null);   // 🎨 대본 화풍 우선
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const requests = []; const items = [];
   for (const pr of S.parsed.projects) {
@@ -1832,6 +1832,31 @@ function _flowUnstage(workDir, imgDir, re, moved, logger) {
   try { const top = path.dirname(workDir); if (!fs.readdirSync(top).length) fs.rmdirSync(top); } catch {}
   return true;
 }
+// 🎨 이번 대본의 본문 이미지 화풍(채널사업부 요청 2026-09-29 · 로이 지정 · v0.5.89) — **대본 `> 🎨 화풍:` > 헤더/채널 styleLong > 기본값**.
+//   모든 이미지 입구(⚡ 만들기 · 이미지 · 영상 선행 이미지 · 🔄 한 장 · 배치 · 캐시 지우기 · 프롬프트 보기)가 여기를 거친다 —
+//   캐시 키에도 이 값이 들어가므로 채널 화풍으로 만든 옛 그림이 캐시에서 되살아나지 않는다.
+//   모르는 id 면 멈추지 않고 경고 + 받은 값(채널 화풍)으로. 이름과 정확히 같은 스타일이 하나뿐이면 그것으로.
+const _styleWarned = new Set();
+function resolveScriptStyle(pr, requested) {
+  const ss = pr && pr.scriptStyle;
+  if (!ss || !ss.id) return { id: requested || null, from: 'channel' };
+  const SS = require('./core/style-store');
+  let st = SS.getById(ss.id);
+  if (!st && ss.name) { const same = SS.loadAll().filter((x) => x.name === ss.name); if (same.length === 1) st = same[0]; }
+  if (!st) return { id: requested || null, from: 'channel', unknown: ss };
+  return { id: st.id, from: 'script', name: st.name };
+}
+function effStyleId(requested, logf, pr) {
+  const p = pr || (S.parsed && S.parsed.projects && S.parsed.projects[0]);
+  const r = resolveScriptStyle(p, requested);
+  const lg = logf || log;
+  const key = (S.scriptPath || '') + '|' + (p && p.scriptStyle ? p.scriptStyle.raw : '') + '|' + (requested || '');
+  if (!_styleWarned.has(key)) {
+    if (r.unknown) { _styleWarned.add(key); lg(`⚠ 대본의 🎨 화풍 「${r.unknown.raw}」 — 이런 스타일 id 가 없습니다. 채널 화풍(${requested || '없음'})으로 그립니다(이미지 ✎ 스타일 목록의 id 를 확인하세요)`); }
+    else if (r.from === 'script' && r.id !== requested) { _styleWarned.add(key); lg(`🎨 화풍 = 대본 「${r.name}」(${r.id}) — 채널·헤더 화풍(${requested || '없음'}) 대신 씁니다`); }
+  }
+  return r.id;
+}
 function _inDir(file, dir) {
   try {
     const f = path.resolve(file), d = path.resolve(dir);
@@ -1855,7 +1880,8 @@ function _wipeByExt(dir, re) {
 // 이미지 일괄 삭제 — 파일 + 캐시 항목 + 화면 표시. (영상은 건드리지 않는다)
 ipcMain.handle('delete-images', async (_e, args = {}) => {
   if (!S.parsed || !S.parsed.projects) { log('열린 대본이 없습니다.'); return currentDTO(); }
-  const { styleId = null, imgEngine = null } = args;
+  const { styleId: _styleArg = null, imgEngine = null } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(캐시 키도 같은 값)
   const MC = require('./core/media-cache');
   let files = 0, kept = 0, cached = 0;
   for (const pr of S.parsed.projects) {
@@ -2933,7 +2959,8 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   //   (로이 2026-09-07 실제로 겪음: `⏹ 중단됨` → `순환 엔진 모두 소진` → `.vrew 건너뜀` 4연속).
   //   다른 핸들러 20여 곳은 전부 시작할 때 이걸 한다 — 여기만 빠져 있었다.
   S.abort = false;
-  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId = null, engine = null } = args;
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId: _styleArg = null, engine = null } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   const outMode = normOutMode(args.outMode);
   if (outMode !== 'full') log(`💾 .vrew 내보내기 — ${outModeLabel(outMode)}`);
   // 🎬 mp4:true = .vrew 를 다시 만든 뒤 그걸로 유튜브 MP4 까지 굽는다(음성·이미지는 이미 있는 것을 쓴다).
@@ -4414,7 +4441,8 @@ async function autoFillPrompts(projects, logger) {
 }
 
 ipcMain.handle('image-build', (_e, args = {}) => {
-  const { shortsNum = null, engine = 'genspark', styleId = null } = args;
+  const { shortsNum = null, engine = 'genspark', styleId: _styleArg = null } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
   return enqueueImageJob(shortsNum ? `${shortsNum}편 이미지 생성` : '이미지 전체 생성', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -4676,7 +4704,8 @@ function rangeNums(project, fromNum, toNum) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
+  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null, gensparkVideoModel = null } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   let { fromNum = null, toNum = null } = args;
   // 큐 전체(상단 🎬) = perItem — 그 대본에 저장된 범위(없으면 도입부)를 쓴다. 헤더 값 하나로 모든 대본을 덮지 않는다(v0.5.73).
   if (args.perItem) {
@@ -5101,6 +5130,7 @@ function buildSnapshot() {
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지 문장 범위
+      scriptStyle: pr.scriptStyle || null,       // 🎨 대본 화풍(정해진 화풍 — 한 장만 다시 뽑아도 같은 화풍)
       overlays: require('./core/overlay-layers').toSnap(pr),   // ➕ 삽입(문장 순번)
       logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
       format: pr.format || S.parsed.format || null, // 대본 형식 보존
@@ -5255,8 +5285,8 @@ function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
-  let readerNotes = [];
-  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) readerNotes = require('./core/parsers/longform-parser').readerNotesOf(fs.readFileSync(snap.scriptPath, 'utf8')); } catch (_) {}
+  let readerNotes = [], scriptStyle = null;
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); } } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -5285,6 +5315,8 @@ function projectsFromSnapshot(snap) {
     require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
     if (ps.logoSide === 'left') proj.logoSide = 'left';
     if (readerNotes.length) proj.readerNotes = readerNotes;
+    // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
+    proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
     return proj;
   });
@@ -5613,7 +5645,8 @@ async function runMakeAllCore(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
@@ -5714,7 +5747,7 @@ async function runMakeAllCore(opts = {}) {
       try {
         const _ss = require('./core/style-store');
         const _nm = ((_ss.getById && _ss.getById(styleId)) || {}).name || styleId;
-        _styleLbl = `스타일 ${_nm}${(_ss.getPrompt(styleId) || '').trim() ? '' : ' ⚠(프롬프트 비어있음)'}`;
+        _styleLbl = `스타일 ${_nm}${resolveScriptStyle(S.parsed && S.parsed.projects && S.parsed.projects[0], _styleArg).from === 'script' ? '(🎨 대본)' : ''}${(_ss.getPrompt(styleId) || '').trim() ? '' : ' ⚠(프롬프트 비어있음)'}`;
       } catch { _styleLbl = `스타일 ${styleId}`; }
     }
     log(`🖼 2단계 — 이미지 일괄 생성… (${_styleLbl})`);
@@ -6174,7 +6207,8 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
 //   image = buildImagePrompt(스타일프롬프트, 대본프롬프트) (스타일 앞 + no text/no watermark + 얼굴 네거티브 자동)
 //   video = 대본 비디오프롬프트 → 없으면 모션노트 → 없으면 기본 모션 (⚠ 영상엔 스타일을 붙이지 않는 현재 정책 그대로)
 ipcMain.handle('final-prompt-preview', (_e, args = {}) => {
-  const { styleId = null, imagePrompt = '', videoPrompt = '', motionNote = '' } = args;
+  const { styleId: _styleArg = null, imagePrompt = '', videoPrompt = '', motionNote = '' } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(프롬프트 보기도 실제로 쓸 화풍으로)
   let stylePrompt = '';
   let styleName = '없음';
   if (styleId) {
@@ -6209,7 +6243,8 @@ ipcMain.handle('set-group-prompt', (_e, args = {}) => {
 // 그룹 1개만 영상 변환 (이미지 → i2v)
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null, gensparkVideoModel = null } = args;
+  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null, gensparkVideoModel = null } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
   if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
@@ -6413,7 +6448,8 @@ function enqueueTtsJob(label, fn) {
 }
 
 ipcMain.handle('regen-group', (_e, args = {}) => {
-  const { shortsNum, groupNum, styleId = null, engine = 'genspark' } = args;
+  const { shortsNum, groupNum, styleId: _styleArg = null, engine = 'genspark' } = args;
+  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(한 장만 다시 뽑아도 같은 화풍)
   return enqueueImageJob(`G${groupNum} 이미지 재생성`, async () => {
     if (!S.parsed) throw new Error('대본을 먼저 여세요.');
     const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
