@@ -1804,10 +1804,11 @@ export default function App() {
     const gone = dir === 'prev' ? pr.cuts[gi] : other;   // 문장이 하나뿐이면 사라지는 그룹
     if (!plan.rest && (gone.sentences || []).length === 1 && (gone.imagePath || gone.videoPath)
       && !uiConfirm(`G${gone.num} 은 이 문장 하나뿐이라 합치면 그룹이 사라집니다.\nG${gone.num} 의 그림·영상은 쓰지 않게 됩니다(Ctrl+Z 로 되돌릴 수 있습니다).\n\n계속할까요?`)) return;
+    const reopen = mergeReopenAt(dir);
     sentDoneRef.current = true; setSentBusy(true);
     try {
       const r = await api.mergeSentenceAcross({ shortsNum: e.shortsNum, groupNum: e.groupNum, dir, text: plan.merged, rest: plan.rest, breaks: plan.rest ? [plan.breaksMerged, plan.breaksRest] : [plan.breaksMerged] });
-      if (r && r.ok) { setDto(r.dto); closeSentEdit(e); setStatus('🧩 클립을 합쳤습니다 (Ctrl+Z 되돌리기)'); }
+      if (r && r.ok) { pendingEditRef.current = reopen; setDto(r.dto); closeSentEdit(e); setStatus('🧩 클립을 합쳤습니다 (Ctrl+Z 되돌리기)'); }
       else { sentDoneRef.current = false; setStatus('⚠ ' + ((r && r.error) || '합치지 못했습니다')); }
     } catch (err) { sentDoneRef.current = false; logline('클립 합치기 오류: ' + err.message); }
     finally { setSentBusy(false); }
@@ -1869,12 +1870,14 @@ export default function App() {
   // Backspace(맨 앞) — 윗문장과 합치기. 두 문장 범위(sentIdx-1, 2개)를 한 문장으로 치환한다.
   function mergeSentUp(sentIdx, prevText) {
     const e = sentEdit; if (!e) return;
+    pendingEditRef.current = mergeReopenAt('prev');   // ⌨ 합친 뒤 그 클립의 칸 · 커서는 이은 자리
     const p = clipJoinPlan(e, { groupNum: e.groupNum, si: sentIdx - 1, text: String(prevText || '') }, { groupNum: e.groupNum, si: sentIdx, text: sentEditValue('').trim(), edited: true });
     commitSentEdit(p.merged + (p.rest ? ' ' + p.rest : ''), { sentIdx: sentIdx - 1, count: 2, breaks: p.rest ? [p.breaksMerged, p.breaksRest] : [p.breaksMerged] });
   }
   // Delete(맨 끝) — 아랫문장을 끌어올려 합치기.
   function mergeSentNext(sentIdx, nextText) {
     const e = sentEdit; if (!e) return;
+    pendingEditRef.current = mergeReopenAt('next');   // ⌨ 합친 뒤 그 클립의 칸 · 커서는 이은 자리
     const p = clipJoinPlan(e, { groupNum: e.groupNum, si: sentIdx, text: sentEditValue('').trim(), edited: true }, { groupNum: e.groupNum, si: sentIdx + 1, text: String(nextText || '') });
     commitSentEdit(p.merged + (p.rest ? ' ' + p.rest : ''), { sentIdx, count: 2, breaks: p.rest ? [p.breaksMerged, p.breaksRest] : [p.breaksMerged] });
   }
@@ -1902,6 +1905,7 @@ export default function App() {
       if (!r || !r.ok) {
         // 🔑 여기가 「✏ 대본 수정」의 탈출구다 — 지침 줄을 사이에 둔 문장·표처럼 화면에서 못 고치는 경우.
         const msg = (r && r.error) || '문장을 고치지 못했습니다.';
+        pendingEditRef.current = null;
         sentDoneRef.current = false;   // 🔓 거절돼도 열린 편집칸은 계속 고칠 수 있다(예전엔 「처리함」 표시가 켜진 채 남아 다음 저장이 조용히 무시됐다 — 로이 2026-09-30 「락」)
         logline('✏ ' + msg.replace(/\n/g, ' '));
         if (uiConfirm(msg + '\n\n대본(.md) 편집창을 열까요?')) openScriptEdit();
@@ -1925,18 +1929,71 @@ export default function App() {
     setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
     return true;
   }
+  // ⌨ 클립 n 의 자막 칸을 연다(자세히 = 그 줄 · 개요 = 그 문장) — caret: 'start' | 'end' | 글자 위치(v0.5.95 로이 「키보드로 클립을 오갈 때는 항상 자막 칸에 커서」)
+  function openEditAt(sn, n, where, caret) {
+    _caretSide = caret == null ? 'end' : caret;
+    if (clipDetail || where === 'stage') return openLineEdit(sn, n, where);
+    const PL = linesMap.get(sn); const l = PL && PL.list.find((x) => x.n === n);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null;
+    const cut = l && pr ? pr.cuts[l.ci] : null; const sen = cut && cut.sentences ? cut.sentences[l.sentIdx] : null;
+    if (!sen) { _caretSide = null; return false; }
+    setCursor({ shortsNum: sn, n });
+    startSentEdit(sn, cut.num, l.sentIdx, sen.text);
+    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
+    return true;
+  }
+  // 합친 뒤 다시 열 자리 — 합친 클립 · 커서는 **이어 붙인 자리**(원래 글의 끝)
+  function mergeReopenAt(dir) {
+    const e = sentEdit; if (!e) return null;
+    const END = /[.!?。]+\s*$/;
+    const core = (t) => String(t || '').replace(END, '').replace(/\s+$/, '').length;
+    const PL = linesMap.get(e.shortsNum); if (!PL) return null;
+    const sl = PL.bySent.get(e.groupNum + ':' + e.sentIdx) || [];
+    const curN = e.line ? e.line.n : (sl.length ? (dir === 'next' ? sl[sl.length - 1].n : sl[0].n) : null);
+    if (curN == null) return null;
+    if (dir === 'next') {
+      const txt = e.line ? (sentEditRef.current ? sentEditRef.current.value : '') : sentEditValue('');
+      return { sn: e.shortsNum, n: curN, where: e.where, caret: core(txt) };
+    }
+    const pl = PL.list.find((x) => x.n === curN - 1); if (!pl) return null;
+    let txt = pl.t;
+    if (!e.line) { const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === e.shortsNum) : null; const cut = pr ? pr.cuts[pl.ci] : null; const ps = cut && cut.sentences ? cut.sentences[pl.sentIdx] : null; if (ps) txt = ps.text; }
+    return { sn: e.shortsNum, n: curN - 1, where: e.where, caret: core(txt) };
+  }
+  // ⌨ 편집 중 멀리 옮기기(v0.5.95) — 편집칸 안에서 Home/End 는 글자 커서(텍스트 칸 기본)라, 클립 처음·끝은 Ctrl+Home/End · 10개씩은 PageUp/Down
+  function navEditTo(target) {
+    const e = sentEdit; if (!e) return;
+    const PL = linesMap.get(e.shortsNum); if (!PL || !PL.list.length) return;
+    const sl = PL.bySent.get(e.groupNum + ':' + e.sentIdx) || [];
+    const curN = e.line ? e.line.n : (sl.length ? sl[0].n : 1);
+    let n = target === 'first' ? 1 : target === 'last' ? PL.list.length : curN + Number(target);
+    n = Math.max(1, Math.min(PL.list.length, n)); if (n === curN) return;
+    setCursor({ shortsNum: e.shortsNum, n });
+    pendingEditRef.current = { sn: e.shortsNum, n, where: e.where, caret: 'start' };
+    commitSentEdit();
+  }
+  // ⌨ 편집 중 재생 — 칸 안의 Space 는 글자라서 Ctrl+Space = 이 클립부터 재생 · 한 번 더 = 멈춤(v0.5.95)
+  function playFromEdit() {
+    const e = sentEdit; if (!e) return;
+    if (playerOpen) { stopPlayer(); return; }
+    const PL = linesMap.get(e.shortsNum); const sl = PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx);
+    const n = e.line ? e.line.n : (sl && sl.length ? sl[0].n : null);
+    if (n) playFromCursor({ shortsNum: e.shortsNum, n }, true);
+  }
+  // ⌨ 재생 중에 칸 안에서 Space = 멈춤(글자로 들어가지 않게 — 습관적으로 Space 로 멈추면 자막에 빈칸이 들어가고 음성이 무효가 된다)
+  function stopIfPlaying() { if (!playerOpen) return false; stopPlayer(); return true; }
   async function navEdit(delta) {
     const e = sentEdit; if (!e || !e.line) return;
     const PL = linesMap.get(e.shortsNum); if (!PL) return;
     const n = e.line.n + delta;
     if (n < 1 || n > PL.list.length) return;
-    pendingEditRef.current = { sn: e.shortsNum, n, where: e.where };
+    pendingEditRef.current = { sn: e.shortsNum, n, where: e.where, caret: delta < 0 ? 'end' : 'start' };
     await commitSentEdit();
   }
   useEffect(() => {
     if (sentEdit || !pendingEditRef.current) return;
     const p = pendingEditRef.current; pendingEditRef.current = null;
-    openLineEdit(p.sn, p.n, p.where);
+    openEditAt(p.sn, p.n, p.where, p.caret);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sentEdit, linesMap]);
   // 개요 보기의 문장 편집칸 — 맨 앞 ↑ / 맨 끝 ↓ = 저장하고 윗/아랫 클립으로 커서만 옮긴다
@@ -1945,7 +2002,7 @@ export default function App() {
     const PL = linesMap.get(e.shortsNum); const sl = PL && PL.bySent.get(e.groupNum + ':' + e.sentIdx);
     if (!sl || !sl.length) return;
     const n = delta < 0 ? sl[0].n - 1 : sl[sl.length - 1].n + 1;
-    if (n >= 1 && n <= PL.list.length) setCursor({ shortsNum: e.shortsNum, n });
+    if (n >= 1 && n <= PL.list.length) { setCursor({ shortsNum: e.shortsNum, n }); pendingEditRef.current = { sn: e.shortsNum, n, where: e.where, caret: delta < 0 ? 'end' : 'start' }; }   // ⌨ 옮긴 클립의 칸을 바로 연다
     commitSentEdit();
   }
   /** 🧩 줄 편집칸 키 — Enter 나누기 · ↑↓ 클립 이동 · 맨 앞 Backspace / 맨 끝 Del = 문장 합치기(문장 첫·끝 줄일 때) · Esc 취소 */
@@ -1962,7 +2019,8 @@ export default function App() {
       if (cut) { sents = cut.sentences || []; si = e.sentIdx; s = sents[si]; }
     }
     // ✂ 줄(클립) 단위: Enter = 이 줄을 커서 자리에서 둘로(음성 그대로) · Ctrl+Enter = 문장 나누기(마침표 — 예전 Enter)
-    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); splitSentAtCursor(); }
+    if (ev.key === ' ' && !ev.ctrlKey && !ev.metaKey && playerOpen) { ev.preventDefault(); stopPlayer(); }   // ⌨ 재생 중 Space = 멈춤
+    else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); splitSentAtCursor(); }
     else if (ev.key === 'Enter' && !ev.shiftKey) {
       ev.preventDefault();
       if (e.where === 'stage') commitSentEdit();
@@ -1970,6 +2028,9 @@ export default function App() {
       else commitSentEdit();
     }
     else if (ev.key === 'Escape') { ev.preventDefault(); cancelSentEdit(); }
+    else if ((ev.ctrlKey || ev.metaKey) && ((ev.key === 'Home' && caret === 0 && sel === 0) || (ev.key === 'End' && caret === el.value.length && sel === el.value.length))) { ev.preventDefault(); navEditTo(ev.key === 'Home' ? 'first' : 'last'); }   // ⌨ 이미 글 처음·끝이면 처음·마지막 클립(아니면 텍스트 칸 기본 = 글 처음·끝)
+    else if (ev.key === 'PageUp' || ev.key === 'PageDown') { ev.preventDefault(); navEditTo(ev.key === 'PageDown' ? 10 : -10); }   // ⌨ 10개씩
+    else if (ev.key === ' ' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); playFromEdit(); }   // ⌨ Ctrl+Space = 이 클립부터 재생/멈춤
     else if (ev.key === 'ArrowUp' && (oneRow || (caret === 0 && sel === 0))) { ev.preventDefault(); navEdit(-1); }
     else if (ev.key === 'ArrowDown' && (oneRow || (caret === el.value.length && sel === el.value.length))) { ev.preventDefault(); navEdit(1); }
     else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
@@ -2010,6 +2071,8 @@ export default function App() {
     try {
       const r = await api.setCaptionBreaks({ shortsNum: e.shortsNum, groupNum: e.groupNum, sentIdx: e.sentIdx, text: full, breaks, fixed: true });   // 🔒 이 줄 나눔 그대로 굳힌다(합쳐 한 줄이 된 것이 길어도 다시 쪼개지 않는다 · v0.5.88)
       if (r && r.ok) {
+        { const prevT = kind === 'mergeUp' ? ((sl.find((l) => l.n === e.line.n - 1) || {}).t || '') : ''; const cur = sentEditRef.current ? sentEditRef.current.value : '';
+          pendingEditRef.current = { sn: e.shortsNum, n: focusN, where: e.where, caret: kind === 'split' ? 'start' : kind === 'mergeDown' ? cur.replace(/\s+$/, '').length : prevT.replace(/\s+$/, '').length }; }   // ⌨ 그 자리 칸을 다시 연다
         setDto(r.dto); closeSentEdit(e); setCursor({ shortsNum: e.shortsNum, n: focusN });
         setStatus(r.note || (kind === 'split' ? '✂ 자막 줄을 나눴습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)' : '✂ 자막 줄을 합쳤습니다 — 음성은 그대로 (Ctrl+Z 되돌리기)'));
       } else { sentDoneRef.current = false; setStatus('⚠ ' + ((r && r.error) || '줄을 바꾸지 못했습니다')); }
@@ -2696,7 +2759,8 @@ export default function App() {
     return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
   }
   function onStageDown(ev) {
-    if (!wsOn || playerOpen || sentEdit || ev.button !== 0) return;
+    // ⌨ v0.5.95 — 키보드로 옮기면 늘 자막 칸이 열려 있다 → 목록의 칸이 열려 있어도 ① 칸 그림은 한 번에 고른다(칸은 blur 로 저장된다) · ① 칸 자막 편집 중만 막는다
+    if (!wsOn || playerOpen || (sentEdit && sentEdit.where === 'stage') || ev.button !== 0) return;
     if (ev.target.closest && (ev.target.closest('.cf-stageline') || ev.target.closest('.stage-edit'))) return;
     const st = stageVisualRef.current; if (!st) return;
     const R = st.getBoundingClientRect();
@@ -3056,6 +3120,7 @@ export default function App() {
     const l = PL.list[ni];
     const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
     userCursor({ shortsNum: cursor.shortsNum, n: l.n });
+    if (!extend && !playerOpen) { openEditAt(cursor.shortsNum, l.n, null, abs === 'home' ? 'start' : (delta < 0 || abs === 'end') ? 'end' : 'start'); return; }   // ⌨ 키보드로 옮기면 늘 자막 칸에 커서(v0.5.95 로이)
     setCapSel((cur) => {
       if (extend && cur && cur.mode === 'lines' && cur.shortsNum === cursor.shortsNum && cur.anchorN != null) {
         const a = Math.min(cur.anchorN, l.n), b = Math.max(cur.anchorN, l.n);
@@ -3995,7 +4060,7 @@ export default function App() {
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
               splitAt: splitSentAtCursor, mergeUp: mergeSentUp, mergeNext: mergeSentNext,
-              note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, fmtClip,
+              note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, navTo: navEditTo, play: playFromEdit, stopIfPlaying, fmtClip,
               across: (d) => { if (!sentEdit) return; mergeAcross(d); },
             }} /></ErrorBoundary>
           </>)}
@@ -5128,7 +5193,7 @@ function applyCaretSide(el) {
   if (!el || !_caretSide || el.dataset.caretSet) return;
   el.dataset.caretSet = '1';
   const side = _caretSide; _caretSide = null;
-  const put = () => { try { const n = side === 'end' ? el.value.length : 0; el.setSelectionRange(n, n); } catch (_) {} };
+  const put = () => { try { const n = typeof side === 'number' ? Math.max(0, Math.min(el.value.length, side)) : side === 'end' ? el.value.length : 0; el.setSelectionRange(n, n); } catch (_) {} };   // ⌨ 숫자 = 그 글자 자리(합친 자리 · v0.5.95)
   // 🔴 한 프레임 뒤에 한 번 더 놓는 건 autoFocus 가 커서를 옮기는 경우 대비 — 그 사이 사람이 키·마우스로 커서를 옮겼으면
   //   덮지 않는다(v0.5.51 · 누르자마자 → 를 치면 커서가 맨 앞으로 되돌아가 Enter 가 엉뚱한 자리에서 줄을 나눴다).
   let touched = false;
@@ -5145,6 +5210,8 @@ function fitSentBox(el) {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
+// ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
+const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
 function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onInsRange }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
@@ -5200,6 +5267,56 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   // 🏷 AI 고지가 보이는 문장 — 범위를 정했으면 그 문장들, 아니면 표시하지 않는다(기본 5초는 첫 문장 위 꼬리표로만)
   const aiIn = (pr, ord) => !!(aiNotice && pr.aiNoticeRange && ord >= pr.aiNoticeRange.from && ord <= pr.aiNoticeRange.to);
   const aiFirst = (pr) => (pr.aiNoticeRange ? pr.aiNoticeRange.from : 1);
+  // ⚡ **바뀐 그룹만 다시 그린다**(v0.5.95 · 로이 2026-09-30 「클립 합치기·Del 합치기 딜레이가 심하다」).
+  //   실측(627문장 · 903줄 · 어절 칩 수천 개): 합치기 한 번에 서버 73ms · 화면 다시 그리기 약 0.5초 × 2번(밀어 받은 DTO + 응답 DTO).
+  //   그룹(씬)마다 그 그룹 모양에 영향을 주는 값을 모두 담은 **열쇠(rk)** 를 만들고, 열쇠가 같으면 React 가 그 그룹을 건너뛴다(MemoCut).
+  //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
+  //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
+  const _L = useRef({});
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, linesMap, dto };
+  const _S = useMemo(() => {
+    const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
+    const o = {};
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark']) o[k] = mk(k);
+    // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
+    o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
+    o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
+    o.infoAt = (sn, el) => { const n = o.nAt(el); const l = n ? o.lineAt(sn, n) : null; return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to } : null; };
+    o.ordRangeOf = (el) => { const cut = el && el.closest ? el.closest('.cut') : null; const bl = cut ? cut.querySelectorAll('.sblk[data-ord]') : []; if (!bl.length) return null; return { gs: Number(bl[0].getAttribute('data-ord')), ge: Number(bl[bl.length - 1].getAttribute('data-ord')) }; };
+    o.nSentOf = (sn) => { const d = _L.current.dto; const p = d && d.projects ? d.projects.find((x) => x.shortsNum === sn) : null; return p ? p.cuts.reduce((a, c) => a + ((c.sentences || []).length), 0) : null; };
+    o.projLinesOf = (sn) => ((((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list) || []).map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to }));
+    return o;
+  }, []);
+  const _E = useMemo(() => {
+    const o = {};
+    for (const k of ['start', 'commit', 'cancel', 'splitAt', 'mergeUp', 'mergeNext', 'note', 'lineKey', 'navOut', 'navTo', 'play', 'stopIfPlaying', 'fmtClip', 'across']) o[k] = (...a) => { const e = _L.current.edit; return e && typeof e[k] === 'function' ? e[k](...a) : undefined; };
+    return o;
+  }, []);
+  useLayoutEffect(() => {
+    if (!dto || !dto.projects) return;
+    for (const pr of dto.projects) {
+      const PL = linesMap && linesMap.get(pr.shortsNum); if (!PL) continue;
+      const card = document.querySelector('#cards .card[data-pr="' + pr.shortsNum + '"]'); if (!card) continue;
+      const bl = card.querySelectorAll('.sblk[data-ord]');
+      let k = 0;
+      for (const c of pr.cuts) (c.sentences || []).forEach((_, si) => {
+        const el = bl[k++]; if (!el) return;
+        const ord = String(k); if (el.getAttribute('data-ord') !== ord) el.setAttribute('data-ord', ord);
+        const ls = PL.bySent.get(c.num + ':' + si) || [];
+        const rows = el.querySelectorAll('.sent[data-ln]');
+        if (rows.length === ls.length) ls.forEach((l, i) => {
+          const r = rows[i]; const nn = String(l.n);
+          if (r.getAttribute('data-ln') !== nn) {
+            r.setAttribute('data-ln', nn);
+            const no = r.querySelector('.cf-lineno');
+            if (no) no.textContent = no.classList.contains('clip-no') ? nn : nn.padStart(2, '0') + ' |';
+          }
+        });
+        const edNo = el.classList.contains('editing') ? el.querySelector(':scope > .lineno') : null;
+        if (edNo && ls.length) { const t = String(ls[0].n).padStart(2, '0') + ' |'; if (edNo.textContent !== t) edNo.textContent = t; }
+      });
+    }
+  });
   // dto.projects 부재 가드 — 출판 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -5213,12 +5330,33 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
         let capN = 0;
         let ordN = 0;   // 🖼 편 전체 문장 번호(1부터) — 그림 적용 범위의 단위
         const nSent = pr.cuts.reduce((a, c) => a + ((c.sentences || []).length), 0);
-        const projLines = [];   // 🎨 이 편의 모든 자막 줄(화면 순서) — Shift 로 범위를 고를 때
+        const projLines = [];   // 🎨 이 편의 모든 자막 줄(화면 순서) — Shift 로 범위를 고를 때(⚡ 처리기는 _S.projLinesOf 로 최신 목록을 쓴다)
+        const _PL = linesMap && linesMap.get(pr.shortsNum);
+        // 🖼 편 전체 그림 서명 — 다른 그룹의 그림·범위·삽입이 이 그룹 썸네일(겹쳐 보이는 그림)·삽입 표시에 영향을 준다
+        const visSig = JSON.stringify([(pr.cuts || []).map((x) => [x.num, x.imagePath, x.imageVersion, x.videoPath, x.videoVersion, x.span, x.look, x.imageStatus, x.videoStatus]), pr.overlays || null, (pr.overlays || []).length && _PL ? _PL.list.length : 0]);   // 줄 수는 삽입(범위 표시)이 있을 때만
         // ⏱ 편 문장 번호(1부터) → 시작 초(음성 길이 누적 — .vrew 와 같다) · 없으면 2.5초로 어림
         const sStart = [0, 0];
         for (const c0 of pr.cuts) for (const se of (c0.sentences || [])) sStart.push(sStart[sStart.length - 1] + (se.dur || 2.5));
+        // ⚡ 그룹 열쇠 — 이 그룹 모양에 영향을 주는 값 전부(하나라도 바뀌면 다시 그린다)
+        const cutKey = (pr0, c, gs, sig, PL) => {
+          const sn = pr0.shortsNum, ss = c.sentences || [], ge = gs + ss.length - 1;
+          const lineNs = [];
+          const lines = PL ? ss.map((_, si) => (PL.bySent.get(c.num + ':' + si) || []).map((x) => { lineNs.push(x.n); return x.from + ',' + x.to + ',' + fmtClipTime(x.start, x.dur); }).join(';')).join('|') : '';   // 시각은 **보이는 정밀도로만**(mp3 를 풀면 몇십 ms 길어져 뒤 그룹 전체가 다시 그려졌다)
+          const rel = (n) => lineNs.indexOf(n);   // 그룹 안 몇 번째 줄인가(번호가 당겨져도 같다)
+          const sel = capSel && capSel.shortsNum === sn ? capSel.mode + ':' + capSel.items.filter((x) => x.groupNum === c.num).map((x) => rel(x.n) + '/' + x.sentIdx + '/' + x.from + '-' + x.to).join(',') : '';
+          const cur = cursor && cursor.shortsNum === sn && lineNs.includes(cursor.n) ? 'c' + rel(cursor.n) : '';
+          const ec = edit && edit.cur;
+          const ed = ec && ec.shortsNum === sn && ec.groupNum === c.num ? JSON.stringify(ec) + (edit.busy ? 'B' : '') : '';
+          const vr = vrDrag && vrDrag.shortsNum === sn ? (vrDrag.groupNum === c.num ? 'own' : '') + ':' + (() => { const r = vrRangeOf(vrDrag); return Math.max(gs, r.from) + '-' + Math.min(ge, r.to); })() : '';
+          const play = playing && playing.key && (playing.key === 'group:' + sn + ':' + c.num || playing.key === 'from:' + sn + ':' + c.num) ? playing.key : '';
+          const ai = aiNotice ? ss.map((_, si) => (aiIn(pr0, gs + si) ? 'i' : '-') + (gs + si === aiFirst(pr0) ? 'F' : '')).join('') + '|' + JSON.stringify(pr0.aiNoticeRange || null) : '';   // 순번 대신 이 그룹 안 몇 번째 문장인가
+          // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
+          const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
+          return [cj, lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0].join('#');
+        };
         return (
-          <div className="card" key={pr.shortsNum}>
+          <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
             <h2>🎞 {dto.mode === 'longform'
               ? (dto.fileTitle || pr.title)
               : <>{dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title}</>} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
@@ -5237,23 +5375,26 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
             <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '') + (detail ? ' detail' : '') + (vrewLay ? ' vrew' : '')}
               style={vrewLay ? { '--lanes': Math.max(1, (pr.overlays || []).length) } : undefined}>
               {pr.cuts.map((c, ci) => {
+                const _gs0 = ordN + 1; ordN = ordN + (c.sentences || []).length;
+                return <MemoCut key={c.num} rk={cutKey(pr, c, _gs0, visSig, _PL)} render={() => {
                 const ph = phaseBadge(c.phase);
                 // ✏ 문장 단위 블록 — 화면 번호(01|02|…)는 **자막 줄** 번호이고, 편집 단위는 **문장**이다.
                 //   한 문장이 자막 두 줄이 되기도 하므로(글자수 설정에 따라) 문장 경계를 블록으로 드러낸다.
                 const sents = c.sentences || [];
-                const gs = ordN + 1, ge = ordN + sents.length; ordN = ge;
+                const gs = _gs0, ge = _gs0 + sents.length - 1;
                 const vrR = vrDrag && vrDrag.shortsNum === pr.shortsNum ? vrRangeOf(vrDrag) : null;
                 const ed = edit.cur;
                 const edHere = ed && ed.shortsNum === pr.shortsNum && ed.groupNum === c.num;
                 const thumbEl = (
-                  <Thumb c={c} isLf={isLf} onAttach={() => onAttach(pr.shortsNum, c.num)} onClear={() => onClear(pr.shortsNum, c.num)} onPreview={onPreview}
+                  <Thumb c={c} isLf={isLf} onAttach={() => _S.onAttach(pr.shortsNum, c.num)} onClear={() => _S.onClear(pr.shortsNum, c.num)} onPreview={_S.onPreview}
                     onMenu={onRange ? (ev) => {
                       // 🖼 메뉴는 그 그룹 범위 선의 **오른쪽**에 — 선·손잡이를 가리지 않아 메뉴를 연 채 범위를 끌어 고칠 수 있다(v0.5.68 · 로이)
                       const grid = ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest('.cuts-grid') : null;
                       const rl = grid ? grid.querySelector(`.rail[data-g="${c.num}"]`) : null;
                       const rr = rl ? rl.getBoundingClientRect() : null;
                       const ic = ev.currentTarget && ev.currentTarget.getBoundingClientRect ? ev.currentTarget.getBoundingClientRect() : null;
-                      setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, n: nSent,
+                      const _or = _S.ordRangeOf(ev.currentTarget) || { gs, ge };
+                      setVrMenu({ shortsNum: pr.shortsNum, c, gs: c.span ? c.span.from : _or.gs, ge: c.span ? c.span.to : _or.ge, n: _S.nSentOf(pr.shortsNum) || nSent,
                         x: rr ? Math.round(rr.right + 8) : ev.clientX, y: ic ? Math.round(ic.top) : ev.clientY, byRail: !!rr, sub: null });
                     } : null} />
                 );
@@ -5282,30 +5423,34 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           title="Enter 나누기 · 맨 앞 ←Backspace 윗줄과 합치기 · 맨 끝 Del 아랫줄 올리기 · Esc 취소"
                           ref={(el) => { edit.ref.current = el; fitSentBox(el); applyCaretSide(el); }}
                           onInput={(ev) => fitSentBox(ev.currentTarget)}
-                          onBlur={() => edit.commit()}
+                          onBlur={() => _E.commit()}
                           onKeyDown={(ev) => {
                             const el = ev.currentTarget;
                             const caret = el.selectionStart, sel = el.selectionEnd;
-                            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); edit.splitAt(); }
-                            else if (ev.key === 'Escape') { ev.preventDefault(); edit.cancel(); }
+                            if (ev.key === ' ' && !ev.ctrlKey && !ev.metaKey && _E.stopIfPlaying()) { ev.preventDefault(); }   // ⌨ 재생 중 Space = 멈춤(글자로 안 들어감)
+                            else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); _E.splitAt(); }
+                            else if (ev.key === 'Escape') { ev.preventDefault(); _E.cancel(); }
+                            else if ((ev.ctrlKey || ev.metaKey) && ((ev.key === 'Home' && caret === 0 && sel === 0) || (ev.key === 'End' && caret === el.value.length && sel === el.value.length))) { ev.preventDefault(); _E.navTo(ev.key === 'Home' ? 'first' : 'last'); }
+                            else if (ev.key === 'PageUp' || ev.key === 'PageDown') { ev.preventDefault(); _E.navTo(ev.key === 'PageDown' ? 10 : -10); }
+                            else if (ev.key === ' ' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); _E.play(); }
                             // 🧩 맨 앞 ↑ / 맨 끝 ↓ = 저장하고 윗·아랫 클립으로(키보드로 클립 이동)
-                            else if (ev.key === 'ArrowUp' && caret === 0 && sel === 0 && edit.navOut) { ev.preventDefault(); edit.navOut(-1); }
-                            else if (ev.key === 'ArrowDown' && caret === el.value.length && sel === el.value.length && edit.navOut) { ev.preventDefault(); edit.navOut(1); }
+                            else if (ev.key === 'ArrowUp' && caret === 0 && sel === 0 && edit.navOut) { ev.preventDefault(); _E.navOut(-1); }
+                            else if (ev.key === 'ArrowDown' && caret === el.value.length && sel === el.value.length && edit.navOut) { ev.preventDefault(); _E.navOut(1); }
                             // 🔑 맨 앞에서 ←Backspace = 윗줄과 합치기. 지울 글자가 없을 때만이라 평소 지우기를 가로채지 않는다.
                             else if (ev.key === 'Backspace' && caret === 0 && sel === 0) {
                               ev.preventDefault();
-                              if (si === 0) edit.across('prev');
-                              else if (s.mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
-                              else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
-                              else edit.mergeUp(si, sents[si - 1].text);
+                              if (si === 0) _E.across('prev');
+                              else if (s.mark) _E.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
+                              else if ((s.speaker || null) !== (sents[si - 1].speaker || null)) _E.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
+                              else _E.mergeUp(si, sents[si - 1].text);
                             }
                             // 🔑 맨 끝에서 Del = 아랫줄을 끌어올려 합치기.
                             else if (ev.key === 'Delete' && caret === el.value.length && sel === el.value.length) {
                               ev.preventDefault();
-                              if (si >= sents.length - 1) edit.across('next');
-                              else if (sents[si + 1].mark) edit.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
-                              else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) edit.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
-                              else edit.mergeNext(si, sents[si + 1].text);
+                              if (si >= sents.length - 1) _E.across('next');
+                              else if (sents[si + 1].mark) _E.note('합친 그룹 안의 섹션 경계입니다(대본에선 제목 줄이 사이에 있습니다) — 여기서는 합칠 수 없습니다');
+                              else if ((s.speaker || null) !== (sents[si + 1].speaker || null)) _E.note('화자가 다른 문장입니다 — 합칠 수 없습니다(대본의 [이름] 이 다릅니다)');
+                              else _E.mergeNext(si, sents[si + 1].text);
                             }
                           }} />
                       </div>
@@ -5315,7 +5460,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     <React.Fragment key={si}>
                     {aiNotice && onAiRange && gs + si === aiFirst(pr) && (
                       <button className="ai-tag" data-testid="ai-tag" title="AI 고지 문구가 보이는 범위 — 눌러서 바꾸기(Vrew 텍스트의 적용 범위)"
-                        onClick={(ev) => { ev.stopPropagation(); setVrMenu({ kind: 'ai', shortsNum: pr.shortsNum, n: nSent, cur: pr.aiNoticeRange, ord: gs + si, x: ev.clientX, y: ev.clientY }); }}>
+                        onClick={(ev) => { ev.stopPropagation(); setVrMenu({ kind: 'ai', shortsNum: pr.shortsNum, n: _S.nSentOf(pr.shortsNum) || nSent, cur: pr.aiNoticeRange, ord: ((_S.ordRangeOf(ev.currentTarget) || { gs }).gs) + si, x: ev.clientX, y: ev.clientY }); }}>
                         🏷 AI 고지 {pr.aiNoticeRange ? `${pr.aiNoticeRange.from}~${pr.aiNoticeRange.to}` : '· 채널 설정대로'}
                       </button>
                     )}
@@ -5327,14 +5472,14 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         onClick={(ev) => {
                           // 🎨 글자를 드래그해 골랐으면 고치기 대신 서식 선택(Vrew 처럼 단어 하나만 굵게·색…)
                           const rg = onPickCapChars ? selectionRange(ev.currentTarget) : null;
-                          if (rg) { onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
+                          if (rg) { _S.onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
                           // 🧭 누른 줄로 커서 이동 + 바로 고치기(로이 확정)
                           const lnEl = ev.target && ev.target.closest ? ev.target.closest('[data-ln]') : null;
-                          const clickN = lnEl ? Number(lnEl.getAttribute('data-ln')) : (lines.length ? lines[0].n : 1);
-                          if (onCursor) onCursor(pr.shortsNum, clickN);
-                          const cl = detail ? lines.find((x) => x.n === clickN) : null;
+                          const clickN = lnEl ? Number(lnEl.getAttribute('data-ln')) : (_S.nAt(ev.currentTarget.querySelector('[data-ln]')) || (lines.length ? lines[0].n : 1));
+                          if (onCursor) _S.onCursor(pr.shortsNum, clickN);
+                          const cl = detail ? (_S.lineAt(pr.shortsNum, clickN) || lines.find((x) => x.n === clickN)) : null;
                           _caretSide = caretSideFromClick(ev, lnEl ? (lnEl.querySelector('.clip-cap') || lnEl) : ev.currentTarget);
-                          edit.start(pr.shortsNum, c.num, si, s.text, 1, cl ? { n: cl.n, from: cl.range.from, to: cl.range.to } : null);
+                          _E.start(pr.shortsNum, c.num, si, s.text, 1, cl ? { n: cl.n, from: cl.range.from, to: cl.range.to } : null);
                         }}>
                         {lines.map((l, li) => {
                           const info = { n: l.n, groupNum: c.num, sentIdx: si, from: l.range.from, to: l.range.to };
@@ -5346,7 +5491,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           const lineNo = (
                             <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
                               onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
-                              onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
+                              onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{String(l.n).padStart(2, '0')} |</span>
                           );
                           const ord = gs + si;
                           // ➕ (개요 보기) 이 줄(클립)이 삽입의 시작이면 표시 — 🎵 오디오 · 그림 썸네일 · 🎬 영상
@@ -5357,7 +5502,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                 <button key={o.id} className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind}
                                   title={`${o.kind === 'audio' ? '🎵 오디오' : o.kind === 'video' ? '🎬 영상' : '🖼 그림'} 「${o.name || ''}」 · ${ovClipTxt(ovClips(_pl && _pl.list, o))} — 누르면 적용 범위 · 삭제`}
                                   onMouseDown={(ev) => ev.stopPropagation()}
-                                  onClick={(ev) => { ev.stopPropagation(); onInsMark(pr.shortsNum, o.id, ev.currentTarget); }}>
+                                  onClick={(ev) => { ev.stopPropagation(); _S.onInsMark(pr.shortsNum, o.id, ev.currentTarget); }}>
                                   {o.kind === 'image' ? <img src={media(o.file, o.version)} alt="" /> : (o.kind === 'video' ? '🎬' : '🎵')}
                                 </button>
                               ))}
@@ -5374,9 +5519,9 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                 {vrewLay ? null : insMarks}
                                 <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
-                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{l.n}</div>
+                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{l.n}</div>
                                 <div className="clip-body">
-                                  <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); } }}>
+                                  <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); } }}>
                                     <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
                                     {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                     <span className="clip-chips">
@@ -5389,7 +5534,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                             if (!onPickCapChars) return;
                                             let from = w.from, to = w.to;
                                             if (ev.shiftKey && selChars.length) { from = Math.min(from, ...selChars.map((x) => x.from)); to = Math.max(to, ...selChars.map((x) => x.to)); }
-                                            onPickCapChars(pr.shortsNum, c.num, si, { from, to });
+                                            _S.onPickCapChars(pr.shortsNum, c.num, si, { from, to });
                                           }}>{w.w}</span>
                                       ))}
                                     </span>
@@ -5404,13 +5549,13 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                         title="Enter 나누기 · ↑↓ 다음 클립으로(고치는 채로) · 맨 앞 ←Backspace 윗문장과 합치기 · 맨 끝 Del 아랫문장 올리기 · Esc 취소"
                                         ref={(el) => { edit.ref.current = el; fitSentBox(el); applyCaretSide(el); }}
                                         onInput={(ev) => fitSentBox(ev.currentTarget)}
-                                        onBlur={() => edit.commit()}
+                                        onBlur={() => _E.commit()}
                                         onClick={(ev) => ev.stopPropagation()}
-                                        onKeyDown={(ev) => edit.lineKey(ev, { si, sents, s, l })} />
+                                        onKeyDown={(ev) => _E.lineKey(ev, { si, sents, s, l })} />
                                     ) : (
                                       <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
                                     )}
-                                    <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) edit.fmtClip(pr.shortsNum, info); }}>가</button>
+                                    <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
                                   </div>
                                 </div>
                                 {vrewLay && (
@@ -5420,7 +5565,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                       const lays = layersAtOrd(pr, ord, l.range);
                                       const at = l.start != null ? l.start : sStart[ord];
                                       return (
-                                        <div className={'cthumb' + (lays.length ? '' : ' empty')} title={lays.length ? '이 클립에 보이는 그림 — 누르면 이 클립으로' : '그림 없음'} data-testid="cthumb" onClick={(ev) => { ev.stopPropagation(); if (onCursor) onCursor(pr.shortsNum, l.n); }}>
+                                        <div className={'cthumb' + (lays.length ? '' : ' empty')} title={lays.length ? '이 클립에 보이는 그림 — 누르면 이 클립으로' : '그림 없음'} data-testid="cthumb" onClick={(ev) => { ev.stopPropagation(); if (onCursor) _S.onCursor(pr.shortsNum, _S.nAt(ev.currentTarget) || l.n); }}>
                                           {lays.length ? <ClipThumb layers={lays} tAt={(so) => Math.max(0, at - (sStart[so] || 0))} /> : <span className="cthumb-none">그림 없음</span>}
                                         </div>
                                       );
@@ -5435,7 +5580,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             <div className={'sent' + (picked ? ' picked' : '') + (cursor && cursor.shortsNum === pr.shortsNum && cursor.n === l.n ? ' cur' : '')} key={l.n} data-ln={l.n}>
                               <span className="lineno cf-lineno" title="이 자막 줄 서식 고르기 — Shift 범위 · Ctrl 더하기"
                                 onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}   // Shift+클릭이 브라우저 글자 선택을 만들지 않게
-                                onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) onPickCapLine(pr.shortsNum, info, ev, projLines); }}>{String(l.n).padStart(2, '0')} |</span>
+                                onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{String(l.n).padStart(2, '0')} |</span>
                               {insMarks}
                               {li === 0 && s.speaker ? <span className="sspk" title={`화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리 로 읽습니다(자막에는 안 나옵니다)`}>{s.speaker}</span> : null}
                               <LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} />
@@ -5464,14 +5609,14 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             <span className="sc-title" title={c.phase || ''}>{c.phase || ''}</span>
                             <span className="sc-btns">
                               {/* ✂ 분할은 늘 보인다(v0.5.90 로이 — 「어느 때는 나오고 어느 때는 안 나온다」 · 예전엔 10초 넘는 그룹만) · 문장 1개면 흐리게 */}
-                              <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => onSplit(pr.shortsNum, c.num)}>✂</button>
-                              {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로)`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
-                              <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
-                              <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
-                              <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
-                              <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
-                              <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
-                              <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
+                              <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => _S.onSplit(pr.shortsNum, c.num)}>✂</button>
+                              {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로)`} onClick={() => _S.onMerge(pr.shortsNum, c.num)}>⤒</button>}
+                              <button className="gprev" title="첨부 이미지 재생성" onClick={() => _S.onRegen(pr.shortsNum, c.num)}>🔄</button>
+                              <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => _S.onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
+                              <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => _S.onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
+                              <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲" onClick={(e) => _S.onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
+                              <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => _S.onGroupVid(pr.shortsNum, c.num)}>🎬</button>
+                              <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => _S.onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                             </span>
                             <span className="grow" />
                             {dur > 0 && <span className={'sc-time' + (dur > 10 ? ' over' : '')} title="그룹 시작 시각 + 길이">{head} + {dur < 10 ? dur.toFixed(1) : Math.round(dur)}초</span>}
@@ -5483,14 +5628,14 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           <span className="num">G{c.num}</span>
                           <div className="narr-btns">
                             {c.groupDurationSec ? <span className={'dur' + (c.groupDurationSec > 10 ? ' over' : '')}>▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
-                            <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>
-                            {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로). 대본에 영구히 두려면 H3 아래에 「> 🖼️ 이미지: 이어서」`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
-                            <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
-                            <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
-                            <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
-                            <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲(그 그룹만 톤이 달라집니다)" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
-                            <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
-                            <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
+                            <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => _S.onSplit(pr.shortsNum, c.num)}>✂ 분할</button>
+                            {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로). 대본에 영구히 두려면 H3 아래에 「> 🖼️ 이미지: 이어서」`} onClick={() => _S.onMerge(pr.shortsNum, c.num)}>⤒</button>}
+                            <button className="gprev" title="첨부 이미지 재생성" onClick={() => _S.onRegen(pr.shortsNum, c.num)}>🔄</button>
+                            <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => _S.onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
+                            <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => _S.onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
+                            <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲(그 그룹만 톤이 달라집니다)" onClick={(e) => _S.onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
+                            <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => _S.onGroupVid(pr.shortsNum, c.num)}>🎬</button>
+                            <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => _S.onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                           </div>
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
@@ -5501,9 +5646,9 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                         )}
                         {onRange && sents.length && !vrewLay ? <>
                           <span className="vr-h top" title={`그림 시작 — 끌어서 이 그림(G${c.num})이 어느 문장부터 보일지 정합니다`}
-                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.from : gs }); }} />
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); const _or = _S.ordRangeOf(ev.currentTarget) || { gs, ge }; setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'start', gs: c.span ? c.span.from : _or.gs, ge: c.span ? c.span.to : _or.ge, ord: c.span ? c.span.from : _or.gs }); }} />
                           <span className="vr-h bot" title={`그림 끝 — 끌어서 이 그림(G${c.num})을 어느 문장까지 쓸지 정합니다(다른 그룹 문장 위로 끌면 그 문장까지 이 그림이 덮습니다)`}
-                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'end', gs: c.span ? c.span.from : gs, ge: c.span ? c.span.to : ge, ord: c.span ? c.span.to : ge }); }} />
+                            onMouseDown={(ev) => { ev.preventDefault(); ev.stopPropagation(); const _or = _S.ordRangeOf(ev.currentTarget) || { gs, ge }; setVrDrag({ shortsNum: pr.shortsNum, groupNum: c.num, edge: 'end', gs: c.span ? c.span.from : _or.gs, ge: c.span ? c.span.to : _or.ge, ord: c.span ? c.span.to : _or.ge }); }} />
                         </> : null}
                         {c.span && <div className="vr-span" data-testid="vr-span" title="이 그림은 자기 그룹 밖까지 아래층으로 이어집니다 — 그 사이 그룹의 그림은 그 위에 보입니다">🖼 그림 범위 문장 {c.span.from}~{c.span.to} (아래층으로 이어 깔림)</div>}
                         {lineEls}
@@ -5511,6 +5656,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                     </div>
                   </div>
                 );
+                }} />;
               })}
               {vrewLay && onRange ? <RailLayer pr={pr} drag={vrDrag && vrDrag.shortsNum === pr.shortsNum ? vrDrag : null} pending={vrPending && vrPending.shortsNum === pr.shortsNum ? vrPending : null} onGrab={(c, edge, r) => grabRail(pr.shortsNum, c, edge, r)} /> : null}
               {vrewLay && onInsMark && (pr.overlays || []).length ? <LaneLayer pr={pr} lines={(linesMap && linesMap.get(pr.shortsNum) || {}).list || []} onInsMark={onInsMark} onInsRange={onInsRange} /> : null}

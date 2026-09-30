@@ -195,6 +195,7 @@
 - 🔴 **미정의 식별자는 빌드·단위테스트가 못 잡는다**(`imgEngine`·`onPickImgEngine`·`label`·`failCount` 사고). main.js 를 고치면 **`npm run test:makeall`(무음 E2E, 20초)** 을 반드시 돌린다. 함수 블록을 지울 땐 아래 어디까지 지워지는지 눈으로 확인.
 - 🔴 **셸이 역슬래시·백틱을 먹는다**(heredoc·`node -e` 에서 `\b`→0x08, `\n`→줄바꿈, `'\0'` NUL). 백슬래시가 든 코드는 **Write/Edit 도구**로, 편집 뒤 제어문자 검사. 한글 파일명 비교는 node 로(PowerShell 5.1 은 ANSI 로 읽는다).
 - 줄끝: `.gitattributes` `* text=auto eol=lf` → 커밋 blob 은 LF. `flow-engine.js` 작업 사본은 CRLF 유지(테스트가 단언 · `git stash pop` 후 LF 로 바뀌면 되돌린다). 원문을 `\n` 으로 자르는 테스트는 먼저 정규화. ⛔ `grep -c $'\r'` 로 재지 말 것(Git Bash 에서 글자 r 을 센다).
+- ⚡ **목록(Cards)은 그룹마다 `MemoCut` — 열쇠(`cutKey`)가 같으면 다시 그리지 않는다**(v0.5.95). 그룹 모양에 새 값을 쓰면 **`cutKey` 에 넣을 것**(안 넣으면 바뀌어도 화면이 그대로) · 그룹 안 처리기는 **안정 래퍼 `_S`·`_E` 로만**(옛 렌더의 함수·상태를 쓰지 않게) · 줄 번호·순번은 누르는 순간 DOM(효과가 고쳐 둔 `data-ln`·`data-ord`)에서. 응답으로 DTO 를 돌려주는 명령은 `pushDtoUpdate` 대신 `dtoByReply`(같은 DTO 두 번 = 두 번 다시 그리기). `test:editspeed` 가 다시 그린 그룹 수를 센다.
 - React: ⛔ `setState` 직후 그 state 를 읽지 않는다(값을 직접 넘긴다) · 한 번 만든 클로저(`onended` 등)에서 state 읽지 않는다 · ⛔ 제어 checkbox/radio 의 click 에서 `preventDefault` 금지 · 편집면(contentEditable)은 React 가 다시 그리지 않게 고정 · 한글 조합 중(`isComposing`)엔 저장·Enter 처리 안 함 · 서식 막대는 mousedown 을 막아 초점을 지킨다.
 - 비동기 재생·루프는 **번호표**(`playGenRef` 식)로 「내가 아직 현재 작업인가」를 확인한다 — 멈춘 옛 재생의 await 가 깨어나 새 재생을 닫은 사고. 대본 전환 전 밀린 자동저장을 먼저 쓴다(`syncActiveToS` → `flushAutoSave`).
 - 목록에 `<video>` 를 수백 개 두지 않는다(Chromium 플레이어 한도 ≈75 — 썸네일은 `video-frame` 한 장 이미지). 렌더 예외는 `ErrorBoundary` + `window.onerror` 가 로그창(`🐞 화면 오류`)에 남긴다.

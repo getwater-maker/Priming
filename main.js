@@ -5224,6 +5224,9 @@ let _asTimer = null, _asPendingSince = 0;
 //   .md 는 즉시 바뀌는데 작업본 저장은 1.5~8초 늦다 — 그 사이에 대본이 다시 읽히면(큐에서 다른 대본을 골랐다 돌아옴 · 앱을 바로 끔 · 다시 열기)
 //   작업본의 옛 문장과 .md 의 새 문장이 달라 「내용이 바뀐 그룹」으로 보고 **그림·영상을 되살리지 않았다**. 앱 안 수정은 늘 즉시 맞춘다.
 function syncSnapshotNow() { try { flushAutoSave(); } catch (_) {} }
+// ⚡ 응답으로 DTO 를 돌려주는 편집 명령용 — 화면에 DTO 를 **밀어 보내지 않는다**(화면은 응답으로 한 번만 받는다 · v0.5.95 · 같은 DTO 두 번 = 903줄 두 번 다시 그리기 ≈ 0.5초).
+//   자동저장만 예약한다(syncSnapshotNow 를 부르는 곳은 그것으로 즉시 쓴다).
+function dtoByReply() { scheduleAutoSave(); }
 function scheduleAutoSave() {
   if (!S.parsed) return;
   const now = Date.now();
@@ -6696,7 +6699,7 @@ ipcMain.handle('undo', (_e, args = {}) => {
   if (!st) return { ok: false, error: redo ? '다시 할 것이 없습니다' : '되돌릴 것이 없습니다' };
   to.push(_captureState(st.label, { md: st.md != null }));
   const moved = _restoreState(st);
-  storeActive(); pushDtoUpdate(); if (st.md != null) syncSnapshotNow();   // 💾 .md 를 되돌렸으면 작업본도 같은 순간에
+  storeActive(); dtoByReply(); if (st.md != null) syncSnapshotNow();   // 💾 .md 를 되돌렸으면 작업본도 같은 순간에
   log((redo ? '↷ 다시 하기' : '↶ 되돌리기') + ' — ' + st.label + (st.md != null ? ' · 대본(.md)도 되돌렸습니다' : '') + (moved ? ' · 그림 파일 ' + moved + '개 제자리로' : ''));
   return { ok: true, label: st.label, dto: P.toDTO(S.parsed), undoLeft: UNDO.undo.length, redoLeft: UNDO.redo.length };
 });
@@ -6908,7 +6911,7 @@ async function _editSentences(args = {}) {
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
 
-  storeActive(); pushDtoUpdate(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
+  storeActive(); dtoByReply(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
@@ -6942,7 +6945,7 @@ ipcMain.handle('set-caption-breaks', async (_e, args = {}) => {
   const nb = CS.normBreaks(sen.text, args.fixed ? [...(Array.isArray(args.breaks) ? args.breaks : []), String(sen.text).length] : args.breaks);
   undoPush(nb ? '자막 줄 나누기' : '자막 줄 자동으로');
   sen.capBreaks = nb || undefined;
-  storeActive(); pushDtoUpdate();
+  storeActive(); dtoByReply(); syncSnapshotNow();
   log('✂ ' + prLabel(pr) + ' G' + groupNum + ' 문장 ' + (Number(sentIdx) + 1) + ' 자막 줄 — ' + (nb ? CS.splitCaptionLines(sen.text, 99, nb).map((x) => '「' + x + '」').join(' / ') : '자동 줄바꿈'));
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
@@ -7169,7 +7172,7 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   _applyBreaks(nr ? [ns, nr] : [ns], args.breaks);   // 🧩 나머지 줄 나눔 그대로
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
-  storeActive(); pushDtoUpdate(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
+  storeActive(); dtoByReply(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
   log('🧩 ' + prLabel(pr) + ' 클립 합치기(그룹 경계 넘음) — G' + A.num + ' 끝에 붙였습니다 · 대본(.md) 갱신'
     + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '')
     + (nr ? ' · 끌어올린 클립만 G' + A.num + ' 로(남은 줄은 G' + B.num + ' 그대로)' : '')
@@ -7206,7 +7209,7 @@ function _clipSents(pr, sents) {
 }
 /** 한 문장 음성을 줄 조각으로 — [{…line, file, dur, temp}] · 음성이 없으면 null (임시 파일은 호출자가 지운다) */
 async function _linePieces(s, lines, tmpDir) {
-  if (!(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))) return null;
+  if (!ttsFileOk(s.ttsAudioPath)) return null;   // 헤더만 있는 빈 음성도 없는 것(게이트와 같은 판정)
   if (lines.length === 1) return [{ ...lines[0], file: s.ttsAudioPath, dur: s.ttsDurationSec, temp: false }];
   const AS = require('./core/audio-splice');
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -7289,7 +7292,7 @@ function _afterClipOp(pr, idMap) {
   if (gone.length) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
-  storeActive(); pushDtoUpdate(); syncSnapshotNow();
+  storeActive(); dtoByReply(); syncSnapshotNow();
   return gone.length;
 }
 const _rmTemps = (list) => { for (const p of list || []) if (p && p.temp && p.file) { try { fs.rmSync(p.file, { force: true }); } catch {} } };
@@ -7471,7 +7474,7 @@ ipcMain.handle('merge-clips', async (_e, args = {}) => {
     const starts = []; j.lines.forEach((l, b) => { if (b > 0 && !(b > A.b && b <= B.b)) starts.push(l.from); });
     undoPush('클립 합치기');
     j.s.capBreaks = require('./core/caption-splitter').normBreaks(j.s.text, [...starts, String(j.s.text).length]) || undefined;
-    storeActive(); pushDtoUpdate(); syncSnapshotNow();
+    storeActive(); dtoByReply(); syncSnapshotNow();
     log(`⊟ ${prLabel(pr)} 클립 ${B.b - A.b + 1}개를 한 클립으로 — 음성·대본은 그대로(자막 줄만)`);
     return { ok: true, dto: P.toDTO(S.parsed) };
   }
@@ -7667,7 +7670,7 @@ ipcMain.handle('merge-group', (_e, args = {}) => {
   // 남겨 두면 뒤 그룹 번호의 옛 그림(NN.png)이 폴더에 떠돌아 엉뚱한 그룹 것으로 오해된다
   for (const f of orphans) { if (_inDir(f, mediaDir)) _toTrash(f); }   // ↶ 되돌리기가 되살릴 수 있게 휴지통으로
   try { renumberMediaFiles(pr, mediaDir); } catch {}
-  storeActive(); pushDtoUpdate();
+  storeActive(); dtoByReply();
   log(`⤒ ${prLabel(pr)} G${groupNum} → G${groupNum - 1} 에 합침 — G${groupNum - 1} 그림을 이어 씁니다`
     + (lostImg ? ` · G${groupNum} 의 그림은 쓰지 않습니다` : '') + ` (그룹 ${pr.groups.length}개)`);
   return P.toDTO(S.parsed);
@@ -7755,7 +7758,7 @@ ipcMain.handle('split-group', (_e, args = {}) => {
   pr.groups.forEach((gg, i) => { gg.num = i + 1; });  // 재번호
   finalizeGroupIds(pr.groups, pr.sentences);          // sentence.groupId 재지정
   try { renumberMediaFiles(pr, shortsDirs(S.outRoot, pr.shortsNum).media); } catch {}
-  storeActive(); pushDtoUpdate();
+  storeActive(); dtoByReply();
   const t1 = firstS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
   const t2 = secondS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
   log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장)`

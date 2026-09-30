@@ -51,7 +51,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await stub(MD);
     await win.click('.ribbon button:has-text("열기")');
     await win.waitForSelector('.sblk[data-ord]', { timeout: 20000 });
-    const key = async (k) => { await win.click('[data-testid=clipbar]', { position: { x: 5, y: 5 } }); await win.keyboard.press(k); };
+    // ⌨ v0.5.95 — 키보드로 옮기면 자막 칸이 열린다 → 커서만 옮기는 이 검사는 칸이 열려 있으면 먼저 Esc(칸 안에선 Home/End 가 글자 커서)
+    const key = async (k) => { if (await win.locator('textarea:focus').count()) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); } await win.click('[data-testid=clipbar]', { position: { x: 5, y: 5 } }); await win.keyboard.press(k); };
     const menu = async (t) => win.locator(`.menubar button:text-is("${t}")`).first().click();
 
     console.log('[1] 메뉴 — 「삽입」이 서식 옆에 · 이미지 메뉴에는 없다');

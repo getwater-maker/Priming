@@ -213,13 +213,13 @@ console.log('\n[7] 배선 — 화면·main·preload 가 실제로 이어져 있�
 
   // 🔑 키보드 편집기 — 버튼이 아니라 키가 동작을 정한다(2026-09-15 로이 요청).
   //   ⚠ 버튼을 없앴으므로 이 배선이 깨지면 **나누기·합치기·저장을 할 방법이 아예 사라진다**.
-  ok(/ev\.key === 'Enter' && !ev\.shiftKey.*edit\.splitAt\(\)/s.test(APP.slice(APP.indexOf('sblk editing'), APP.indexOf('sblk editing') + 2600)),
+  ok(/ev\.key === 'Enter' && !ev\.shiftKey.*_E\.splitAt\(\)/s.test(APP.slice(APP.indexOf('sblk editing'), APP.indexOf('sblk editing') + 2600)),
     '🔑 App: Enter = 나누기 (저장이 아니다)');
   ok(/ev\.key === 'Backspace' && caret === 0 && sel === 0/.test(APP), '🔑 App: 맨 앞 Backspace = 윗줄과 합치기');
-  ok(/edit\.mergeUp\(si, sents\[si - 1\]\.text\)/.test(APP), 'App: 합칠 윗문장 텍스트를 함께 넘긴다');
+  ok(/_E\.mergeUp\(si, sents\[si - 1\]\.text\)/.test(APP), 'App: 합칠 윗문장 텍스트를 함께 넘긴다(안정 래퍼 _E — v0.5.95)');
   ok(/ev\.key === 'Delete' && caret === el\.value\.length && sel === el\.value\.length/.test(APP), '🔑 App: 맨 끝 Del = 아랫줄 올려 합치기');
-  ok(/edit\.mergeNext\(si, sents\[si \+ 1\]\.text\)/.test(APP), 'App: 합칠 아랫문장 텍스트를 함께 넘긴다');
-  ok(/onBlur=\{\(\) => edit\.commit\(\)\}/.test(APP), '🔑 App: 저장 버튼이 없으므로 **칸을 벗어나면 저장**한다');
+  ok(/_E\.mergeNext\(si, sents\[si \+ 1\]\.text\)/.test(APP), 'App: 합칠 아랫문장 텍스트를 함께 넘긴다(안정 래퍼 _E)');
+  ok(/onBlur=\{\(\) => _E\.commit\(\)\}/.test(APP), '🔑 App: 저장 버튼이 없으므로 **칸을 벗어나면 저장**한다(안정 래퍼 _E)');
   ok(/sentDoneRef\.current/.test(APP), '🔑 App: 키로 처리한 뒤 blur 가 또 저장하지 않게 막는다(이중 전송 방지)');
   ok(/setSentEdit\(\(cur\) => \(cur === e \? null : cur\)\)/.test(APP),
     '🔑 App: 저장이 도는 사이 다른 문장을 열었으면 그건 닫지 않는다');

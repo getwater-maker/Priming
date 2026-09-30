@@ -50,9 +50,9 @@ function setup() {
     require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: { ...P, toDTO: () => ({}) }, UNDO: { seq: 0 },
     ipcMain: { handle: (n, f) => { handlers[n] = f; } }, enqueueTtsJob: (l, f) => f, gpuBusyReason: () => null, currentDTO: () => ({}),
     currentMode: () => 'longform', presetThresholds: () => ({}), undoPush: () => ({}), undoDrop: () => {}, scriptHash: () => 'h',
-    storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, log: () => {}, prLabel: () => '[t]',
+    storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]',
     shortsDirs: () => ({ media, tts }), _inDir: () => true, _toTrash: (f) => trashed.push(f), renumberMediaFiles: () => {},
-    resolvePreset: () => null, voiceLabel: () => '' };
+    resolvePreset: () => null, voiceLabel: () => '', ttsFileOk: (p) => { try { return !!p && fs.statSync(p).size >= 1200; } catch { return false; } } };
   vm.createContext(ctx); vm.runInContext(BLOCK, ctx);
   const before = pr.sentences.map((s) => ({ id: s.id, text: s.text, audio: s.ttsAudioPath, buf: fs.readFileSync(s.ttsAudioPath) }));
   // 화면이 보내는 모양: 문장마다 그 문장의 모든 줄(7자 폭 자동 줄) + 고른 표시

@@ -138,7 +138,7 @@ console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드�
   ok(/저장하지 않고|기존 시드를 그대로/.test(APP), 'ⓖ 렌더러: 숫자가 아닌 시드는 저장하지 않고 알린다(시드가 날아가면 톤이 매번 달라진다)');
   eq(voiceLabel(null), '⚠ 채널 없음', 'ⓗ 채널이 없어도 던지지 않는다');
   // 1단계·전체TTS·그룹TTS·도입부 네 경로가 **같은 함수**로 찍는다(표기가 갈리면 로그 대조가 안 된다)
-  eq((MAIN.match(/voiceLabel\(/g) || []).length - 1, 5, 'ⓘ voiceLabel 을 쓰는 곳 5군데(1단계·전체TTS·그룹TTS 2 ·도입부)');
+  eq((MAIN.match(/voiceLabel\(/g) || []).length - 1, 7, 'ⓘ voiceLabel 을 쓰는 곳 7군데(1단계·전체TTS·그룹TTS 2 ·도입부 · 🧩 클립 목소리 수정 2 — v0.5.94)');
   ok(/🎙 1단계 — 음성\(TTS\) 일괄 변환… \(\$\{voiceLabel\(preset\)\}/.test(MAIN), 'ⓙ 1단계가 이 함수를 쓴다');
   ok(/⚠ 채널을 찾지 못했습니다/.test(MAIN), 'ⓚ 채널을 못 찾으면 그 사실이 로그에 남는다');
 }

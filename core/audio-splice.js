@@ -61,20 +61,50 @@ function makeWav(info, body) {
 }
 
 /** 여러 음성을 순서대로 이어 outPath(.wav)에. → { durationSec } */
+/** 이미 PCM16 WAV 인가(ffmpeg 없이 바로 이을 수 있나) → parseWav 정보 | null */
+function _pcmInfo(file) {
+  if (!/\.wav$/i.test(file)) return null;
+  try { const i = parseWav(fs.readFileSync(file)); return i.audioFormat === 1 && i.bitsPerSample === 16 ? i : null; } catch (_) { return null; }
+}
+/** 여러 음성을 순서대로 이어 outPath(.wav)에. → { durationSec }
+ *  ⚡ v0.5.95: 전부 PCM16 WAV(형식 같음)면 ffmpeg 없이 바로 · 아니면 **ffmpeg 한 번**으로 한꺼번에 읽는다(예전엔 파일마다 한 번 — mp3 두 개 ≈ 170ms). */
 async function concatAudio(files, outPath) {
   if (!files.length) throw new Error('이을 음성이 없습니다');
-  const first = await decodeWav(files[0]);
-  const fi = parseWav(first);
-  const bodies = [first.subarray(fi.dataOffset, fi.dataOffset + fi.frames * fi.frameBytes)];
-  for (const f of files.slice(1)) {
-    let b = await decodeWav(f);
-    let i = parseWav(b);
-    if (i.sampleRate !== fi.sampleRate || i.channels !== fi.channels) { b = await decodeWav(f, fi.sampleRate, fi.channels); i = parseWav(b); }
-    bodies.push(b.subarray(i.dataOffset, i.dataOffset + i.frames * i.frameBytes));
+  const infos = files.map(_pcmInfo);
+  if (infos.every((i) => i && i.sampleRate === infos[0].sampleRate && i.channels === infos[0].channels)) {
+    const bodies = files.map((f2, k) => { const buf = fs.readFileSync(f2); const i = infos[k]; return buf.subarray(i.dataOffset, i.dataOffset + i.frames * i.frameBytes); });
+    const body = Buffer.concat(bodies);
+    fs.writeFileSync(outPath, makeWav(infos[0], body));
+    return { durationSec: body.length / infos[0].frameBytes / infos[0].sampleRate };
   }
-  const body = Buffer.concat(bodies);
-  fs.writeFileSync(outPath, makeWav(fi, body));
-  return { durationSec: body.length / fi.frameBytes / fi.sampleRate };
+  const ff = _ffmpeg();
+  if (!ff || files.length === 1) {
+    // 한 개면 그대로 읽어 쓴다 / ffmpeg 가 없으면 예전 방식(파일마다)
+    const first = await decodeWav(files[0]); const fi = parseWav(first);
+    const bodies = [first.subarray(fi.dataOffset, fi.dataOffset + fi.frames * fi.frameBytes)];
+    for (const f2 of files.slice(1)) { let bb = await decodeWav(f2, fi.sampleRate, fi.channels); const i = parseWav(bb); bodies.push(bb.subarray(i.dataOffset, i.dataOffset + i.frames * i.frameBytes)); }
+    const body = Buffer.concat(bodies);
+    fs.writeFileSync(outPath, makeWav(fi, body));
+    return { durationSec: body.length / fi.frameBytes / fi.sampleRate };
+  }
+  // 형식 기준 = 첫 WAV 의 형식 · 없으면 TTS 기본(24kHz · 1ch — pipeline.encodeTts 가 그렇게 굽는다)
+  const ref = infos.find(Boolean);
+  const rate = ref ? ref.sampleRate : 24000, ch = ref ? ref.channels : 1;
+  const args = ['-hide_banner', '-loglevel', 'error'];
+  for (const f2 of files) args.push('-i', f2);
+  const pre = files.map((_, k) => `[${k}:a]aresample=${rate},aformat=sample_fmts=s16:channel_layouts=${ch === 1 ? 'mono' : 'stereo'}[a${k}]`).join(';');
+  args.push('-filter_complex', pre + ';' + files.map((_, k) => `[a${k}]`).join('') + `concat=n=${files.length}:v=0:a=1[o]`, '-map', '[o]', '-acodec', 'pcm_s16le', '-f', 'wav', 'pipe:1');
+  const buf = await new Promise((resolve, reject) => {
+    const p = spawn(ff, args, { windowsHide: true });
+    const out = []; let err = '';
+    p.stdout.on('data', (d) => out.push(d)); p.stderr.on('data', (d) => { err += d; });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error('음성 잇기 실패: ' + (err.trim().split('\n')[0] || code)))));
+  });
+  const i = parseWav(buf);
+  const body = buf.subarray(i.dataOffset, i.dataOffset + i.frames * i.frameBytes);
+  fs.writeFileSync(outPath, makeWav(i, body));
+  return { durationSec: body.length / i.frameBytes / i.sampleRate };
 }
 
 /** 글자 무게 — 공백·문장부호는 소리가 없다 */

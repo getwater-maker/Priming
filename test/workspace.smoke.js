@@ -131,12 +131,16 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.keyboard.press('ArrowUp');
     await win.waitForTimeout(200);
     ok(/red\.png/.test(await stageImg()), '↑ 로 돌아가면 다시 빨강');
-    await win.keyboard.press('End');
-    await win.waitForTimeout(200);
-    ok(/마지막 문장/.test(await stageCap()), 'End = 마지막 줄');
-    await win.keyboard.press('Home');
-    await win.waitForTimeout(200);
-    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '1', 'Home = 첫 줄');
+    // ⌨ v0.5.95 — 키보드로 옮기면 그 클립 자막 칸이 열린다(커서가 늘 칸 안) · 칸 안에서 Home/End 는 글자 커서 → 처음·마지막 클립은 Ctrl+Home/End
+    ok(await win.locator('textarea:focus').count() === 1, '⌨ ↑↓ 로 옮기면 자막 칸에 커서가 있다');
+    // Ctrl+End — 커서가 글 끝이면 마지막 클립 · 아니면 먼저 글 끝(텍스트 칸 기본) → 많아야 두 번
+    for (let i = 0; i < 2 && !/마지막 문장/.test(await stageCap()); i++) { await win.keyboard.press('Control+End'); await win.waitForTimeout(400); }
+    ok(/마지막 문장/.test(await stageCap()) && await win.locator('textarea:focus').count() === 1, 'Ctrl+End = 마지막 줄(칸 안 그대로 · 글 끝에서 누르면 바로)');
+    for (let i = 0; i < 2 && (await win.locator('.sent.cur').getAttribute('data-ln')) !== '1'; i++) { await win.keyboard.press('Control+Home'); await win.waitForTimeout(400); }
+    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '1' && await win.locator('textarea:focus').count() === 1, 'Ctrl+Home = 첫 줄(칸 안 그대로)');
+    await win.keyboard.press('PageDown'); await win.waitForTimeout(400);
+    ok((await win.locator('.sent.cur').getAttribute('data-ln')) !== '1' && await win.locator('textarea:focus').count() === 1, 'PageDown = 아래로 여러 클립(칸 안 그대로)');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(200);
 
     // [4] Enter 고치기 · Esc
     await win.keyboard.press('Enter');
@@ -182,7 +186,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(geo && Math.abs(geo.bottom - 897 / 1080) < 0.02, `① 자막 아래끝 = ${geo && (geo.bottom * 1080).toFixed(0)}/1080 (MP4 897)`);
     ok(geo && Math.abs(geo.font - 72) < 1, `① 글자 크기 = ${geo && geo.font.toFixed(1)}px@1920 (MP4 = size 100 × 0.72 = 72)`);
 
-    // [8] Space 재생 · 멈춤
+    // [8] Space 재생 · 멈춤 — 자막 칸 밖에서(칸 안의 Space 는 글자) · ⌨ v0.5.95 키보드로 옮기면 칸이 열려 있다
+    if (await win.locator('textarea:focus').count()) { await win.keyboard.press('Escape'); await win.waitForTimeout(200); }
     await win.keyboard.press(' ');
     await win.waitForFunction(() => /멈춤/.test((document.querySelector('[data-testid=play-btn]') || {}).textContent || ''), null, { timeout: 3000 });
     ok(true, 'Space = 커서 줄부터 재생');
@@ -225,12 +230,16 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press('ArrowDown'); await win.keyboard.press('ArrowDown'); await win.waitForTimeout(800);
       const v2 = await vs();
       ok(v2 && v2.paused && v2.t > v1.t + 0.5, `🔑 클립을 옮기면 그 클립 장면으로(${v1 && v1.t}초 → ${v2 && v2.t}초 · 여전히 멈춤)`);
-      await win.keyboard.press(' '); await win.waitForTimeout(900);
+      // ⌨ v0.5.95 — 키보드로 옮기면 자막 칸이 열려 있다 → 칸 안에서는 Ctrl+Space 로 재생(Space 는 글자)
+      ok(await win.locator('textarea:focus').count() === 1, '⌨ 옮긴 뒤 자막 칸에 커서');
+      await win.keyboard.press('Control+Space'); await win.waitForTimeout(900);
       const v3 = await vs();
       ok(v3 && !v3.paused, '재생하면 영상이 움직인다');
-      await win.keyboard.press(' '); await win.waitForTimeout(600);
+      const txtBefore = await win.locator('textarea:focus').inputValue().catch(() => null);
+      await win.keyboard.press(' '); await win.waitForTimeout(600);   // 재생 중 칸 안 Space = 멈춤
       const v4 = await vs();
-      ok(v4 && v4.paused, '멈추면 다시 정지 장면');
+      ok(v4 && v4.paused, '멈추면 다시 정지 장면(칸 안에서 Space)');
+      ok(txtBefore == null || (await win.locator('textarea').first().inputValue().catch(() => txtBefore)) === txtBefore, '🔑 재생 중 칸 안의 Space 는 자막에 빈칸을 넣지 않는다');
       // 정리 — 삽입 지우기
       await win.locator('[data-testid=ov-range]').first().click();
       await win.click('[data-testid=ins-del]'); await win.waitForTimeout(500);
@@ -238,7 +247,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     // 🧭 v0.5.62 — 재생 중 클립을 고르고 Space = 멈추고 **고른 클립부터** 다시 · 안 골랐으면 Space = 멈춤
     {
       const btn = () => win.locator('[data-testid=play-btn]').innerText();
+      if (await win.locator('textarea:focus').count()) { await win.keyboard.press('Escape'); await win.waitForTimeout(200); }
       await win.locator('.clipbar').click(); await win.keyboard.press('Home'); await win.waitForTimeout(300);
+      if (await win.locator('textarea:focus').count()) { await win.keyboard.press('Escape'); await win.waitForTimeout(200); }   // 칸 밖 Space = 재생(칸이 열려 있으면 닫고)
       await win.keyboard.press(' '); await win.waitForTimeout(400);
       ok((await btn()).includes('■'), '재생 시작');
       const nLast = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 마지막')); return e ? Number(e.dataset.ln) : 0; });

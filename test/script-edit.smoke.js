@@ -130,10 +130,14 @@ const cleanup = () => {
     ok(true, '합치기(Backspace): 첫 그룹 문장이 3개 → 2개');
     const md2 = fs.readFileSync(MD, 'utf8');
     ok(/고쳐 쓴 첫 문장입니다 둘째 문장입니다\./.test(md2), '합치기: 대본에서 두 문장이 한 문장이 됐다');
+    // ⌨ v0.5.95 — 합친 뒤 편집칸이 **그 자리에 다시 열리고** 커서는 이어 붙인 자리(원래 윗문장 글의 끝)
+    await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
+    { const st = await win.evaluate(() => { const t = document.querySelector('.sblk.editing textarea'); return { v: t.value, c: t.selectionStart, f: document.activeElement === t }; });
+      ok(st.f && /고쳐 쓴 첫 문장입니다 둘째/.test(st.v) && st.c === '고쳐 쓴 첫 문장입니다'.length, `⌨ 합친 뒤 칸이 열려 있고 커서는 이은 자리(${st.c}자째)`); }
 
     // [6] 🔑 **윗줄 맨 끝에서 Del = 아랫줄을 끌어올려 합치기**
     const b3 = win.locator('.cut').first().locator('.sblk');
-    await b3.first().locator('.sblk-lines').click();
+    if (!(await win.locator('.sblk.editing textarea').count())) await b3.first().locator('.sblk-lines').click();   // 합친 뒤 이미 열려 있다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.press('.sblk.editing textarea', 'Control+End');   // 커서를 맨 끝으로
     await win.press('.sblk.editing textarea', 'Delete');
@@ -144,7 +148,7 @@ const cleanup = () => {
 
     // [7] 🔑 **Enter = 커서 자리에서 나누기** (저장이 아니다)
     const b4 = win.locator('.cut').first().locator('.sblk');
-    await b4.first().locator('.sblk-lines').click();
+    if (!(await win.locator('.sblk.editing textarea').count())) await b4.first().locator('.sblk-lines').click();   // 합친 뒤 이미 열려 있다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.fill('.sblk.editing textarea', '앞 조각입니다 뒤 조각입니다');
     await win.locator('.sblk.editing textarea').evaluate((el) => el.setSelectionRange(7, 7)); // '앞 조각입니다' 뒤

@@ -122,7 +122,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const handlers = {};
       const ctx = { fs, path, console, S: { parsed, outRoot: tmp }, ipcMain: { handle: (n, f) => { handlers[n] = f; } },
         require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), undoPush: () => {}, renumberMediaFiles: () => {},
-        shortsDirs: () => ({ media }), storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, log: () => {}, prLabel: () => '[t]', P: { toDTO: () => null } };
+        shortsDirs: () => ({ media }), storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]', P: { toDTO: () => null } };
       vm.createContext(ctx); vm.runInContext(M.slice(h0, h1), ctx);
       await handlers['split-group'](null, { shortsNum: pr.shortsNum, groupNum: 1 });
       const [A, B] = pr.groups;
@@ -233,7 +233,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const ctx = { fs, path, console, S: { parsed, scriptPath: md, outRoot: tmp, preset: null }, ipcMain: { handle: (n, fn) => { handlers[n] = fn; } },
         require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: { ...P, toDTO: () => null }, UNDO: { seq: 0 },
         currentMode: () => 'longform', presetThresholds: () => ({}), undoPush: () => ({}), undoDrop: () => {}, scriptHash: () => 'h',
-        storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, log: () => {}, prLabel: () => '[t]', shortsDirs: () => ({ media }),
+        storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]', shortsDirs: () => ({ media }),
         _inDir: () => true, _toTrash: () => {}, renumberMediaFiles: () => {} };
       vm.createContext(ctx);
       vm.runInContext(grab('_looseSig') + grab('_spliceSentenceAudio') + grab('_applyBreaks') + M.slice(h0, h1), ctx);
