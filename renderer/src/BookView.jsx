@@ -135,6 +135,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     try { localStorage.setItem(confirmKey, JSON.stringify(n)); } catch (_) {}
     return n;
   });
+  const [regBusy, setRegBusy] = useState(false);
   const [outputs, setOutputs] = useState([]);
   const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
   useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
@@ -331,6 +332,24 @@ body{overflow-y:scroll}
         : 'PDF 실패 — 로그 확인');
     } catch (e) { logline('PDF 오류: ' + e.message); }
     setBuilding(false); refreshOutputs();
+  }
+  // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
+  async function runRegister(platform) {
+    const bk = platform === 'bookk';
+    const msg = bk
+      ? ['부크크 「새종이책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 선택 → 「Step2」에서 임시서재에 초안이 만들어집니다(삭제 가능).', '③ 2단계 입력과 내지 PDF 업로드까지 하고 멈춥니다. 표지·가격·최종확인·제출은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10))
+      : ['작가와 「도서정보 입력」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 입력칸만 채우고 멈춥니다. 「도서 정보 저장하기」와 이후 업로드·유통 신청은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10));
+    if (!window.confirm(msg)) return;
+    setRegBusy(true); setStatus('🤖 ' + (bk ? '부크크' : '작가와') + ' 자동 입력 중 — 열린 크롬 창에서 로그인해 주세요');
+    try {
+      const r = await api.bookRegisterRun({ platform });
+      if (!r || r.error) { setStatus('⚠ 자동 입력 실패: ' + ((r && r.error) || '알 수 없음')); }
+      else {
+        setStatus(r.ok ? '✅ 자동 입력 완료 — 크롬 창에서 확인하고 저장·제출은 직접 하세요' : '⚠ 일부 칸 실패: ' + (r.failed || []).join(', '));
+        if ((r.manual || []).length) logline('📤 직접 해야 할 것: ' + r.manual.join(' · '));
+      }
+    } catch (e) { logline('자동 입력 오류: ' + e.message); setStatus('⚠ 자동 입력 오류 — 로그 확인'); }
+    setRegBusy(false);
   }
   async function buildEpubFile() {
     setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
@@ -554,6 +573,11 @@ body{overflow-y:scroll}
 
         <div className="bkzone">등록 도우미</div>
         <div className="meta bknote">{RG.AUTO_UPLOAD.note}</div>
+        <div className="bkactions">
+          <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
+            title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
+            onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : ('🤖 ' + (isBookk ? '부크크' : '작가와') + '에 자동 입력')}</button>
+        </div>
         <div className="bklinks">
           {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
           <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>

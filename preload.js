@@ -175,6 +175,7 @@ contextBridge.exposeInMainWorld('api', {
   bookBuildEpub: (args) => ipcRenderer.invoke('book-build-epub', args),
   bookOutputs: () => ipcRenderer.invoke('book-outputs'),
   bookOpenPlatform: (u) => ipcRenderer.invoke('book-open-platform', u),
+  bookRegisterRun: (args) => ipcRenderer.invoke('book-register-run', args),
   bookRevealFile: (p) => ipcRenderer.invoke('book-reveal-file', p),
   bookSaveGuide: () => ipcRenderer.invoke('book-save-guide'),
   exportPremiere: (args) => ipcRenderer.invoke('export-premiere', args),

@@ -8568,6 +8568,34 @@ ipcMain.handle('book-open-platform', (_e, u) => {
   if (!/^https:\/\/([a-z0-9-]+\.)?(bookk\.co\.kr|jakkawa\.com)(\/|$)/.test(s)) return false;
   shell.openExternal(s); return true;
 });
+// 🤖 등록 도우미 자동 입력 — 로그인·저장·제출은 사람이 한다(core/book/register-browser.js 머리말).
+let _bookRegBusy = false;
+ipcMain.handle('book-register-run', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
+  if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };
+  const platform = args.platform === 'jakkawa' ? 'jakkawa' : 'bookk';
+  _bookRegBusy = true;
+  try {
+    const RF = require('./core/book/register-fill');
+    const RB = require('./core/book/register-browser');
+    const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+    const files = fs.existsSync(root) ? fs.readdirSync(root) : [];
+    const pick = (suf) => { const f = files.filter((x) => x.endsWith(suf)).map((x) => path.join(root, x)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]; return f || ''; };
+    let plan;
+    if (platform === 'jakkawa') {
+      plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
+    } else {
+      const spec = bookSpec(S.parsed.meta || {}, S.parsed._lastPages || 0);
+      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf') });
+    }
+    log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
+    const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });
+    return { ok: r.ok, done: r.done, failed: r.failed, manual: r.manual };
+  } catch (e) {
+    log('✗ [등록 도우미] ' + e.message);
+    return { ok: false, error: e.message };
+  } finally { _bookRegBusy = false; }
+});
 // 파일 위치 보기(탐색기에서 선택)
 ipcMain.handle('book-reveal-file', (_e, p) => {
   const s = String(p || '');
