@@ -21,6 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
+const JB = require('./jakkawa-biblio');
 
 const THEME_CSS_PATH = path.join(__dirname, 'book-theme.css');
 
@@ -390,6 +391,11 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
     row('ebookPrice', '전자책', meta.ebookPrice),
   ].join('');
 
+  // 📱 작가와 전자책 — 판권 자리에 작가와 「서지정보 페이지」 공식 양식(출판일·저자명·출판사·ISBN·판매가 + 재사용 문구)
+  const jw = (ctx && ctx.edition === 'ebook' && JB.isJakkawaMeta(meta0)) ? JB.biblio(meta0) : null;
+  const jwRows = jw ? jw.rows.map(([k, v]) =>
+    `<div class="cp-row">${cpLabel(k)}<span class="sep">|</span><span class="v">${esc(v)}</span></div>`).join('') : '';
+
   const notes = colophonNotesHtml(filterColophonSection(section, meta), book, ctx, srcAttr);
 
   const qrIsImg = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
@@ -405,8 +411,8 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   const cpName = meta.translator || meta.author;
   const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
   const legal = owner
-    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p></div>`
-    : '';
+    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>${jw ? esc(jw.legal) : '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.'}</p></div>`
+    : (jw ? `<div class="cp-legal"><p>${esc(jw.legal)}</p></div>` : '');
 
   // 러닝헤드 억제 — @page display 는 vivliostyle 에서 **조각의 첫 쪽에 한 쪽 늦게** 적용된다
   //   (실측: 판권 둘째 쪽부터만 먹는다 → 첫 쪽에 장제목이 그대로 찍혔다). 그래서 러닝헤드는
@@ -418,8 +424,8 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   return `<section class="colophon${isFront ? ' cp-front' : ''}">
   ${rhClear}<div class="cp-wrap">
     <div class="cp-title">${esc(meta.title || '')}${meta.subtitle ? ` <span class="cp-subtitle">${esc(meta.subtitle)}</span>` : ''}</div>
-    ${dateBlock}
-    <div class="cp-rows">${rows}</div>
+    ${jw ? '' : dateBlock}
+    <div class="cp-rows">${jw ? jwRows : rows}</div>
     ${notes}
     ${qrBlock}
     ${legal}
@@ -813,4 +819,4 @@ function metaPlatformId(meta) {
 
 module.exports = {
   specialKeywordsOf, splitSpecialBlocks,
-  chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK };
+  chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

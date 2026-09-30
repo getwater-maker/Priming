@@ -13,7 +13,8 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { esc, inlineMd, chapterExcluded, scriptFilter, specialKeywordsOf, splitSpecialBlocks } = require('./html-builder');
+const { esc, inlineMd, chapterExcluded, scriptFilter, specialKeywordsOf, splitSpecialBlocks, filterColophonSection } = require('./html-builder');
+const JB = require('./jakkawa-biblio');
 
 // ── 미니 ZIP 라이터 ──
 // adm-zip 은 writeZip 때 엔트리를 이름순 정렬해 ePub 규격(mimetype=첫 엔트리·무압축)을
@@ -341,7 +342,18 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
       `<section class="back" epub:type="backmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`, { toc: s.title });
   }
   const col = excluded.includes('colophon') ? null : book.back.find((s) => s.key === 'colophon');
-  const colBody = col && col.blocks && col.blocks.length
+  // 📱 작가와 전자책 — 작가와 「서지정보 페이지」 공식 양식(판권 자리 · 마지막 쪽 한 곳) + [판권]의 고지문
+  let jwBody = '';
+  if (JB.isJakkawaMeta(meta)) {
+    const jb = JB.biblio(meta);
+    const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
+    const cpName = meta.translator || meta.author;
+    const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
+    const kept = col && col.blocks && col.blocks.length ? blocksXhtml(filterColophonSection(col, meta).blocks, book, ctx) : '';
+    jwBody = jb.rows.map(([k, v]) => `<p>${esc(k)} | ${esc(v)}</p>`).join('\n')
+      + (kept ? `\n${kept}` : '') + (owner ? `\n<p>${esc(owner)}</p>` : '') + `\n<p>${esc(jb.legal)}</p>`;
+  }
+  const colBody = jwBody ? jwBody : col && col.blocks && col.blocks.length
     ? blocksXhtml(col.blocks, book, ctx)
     : `<p>${esc(meta.title || '')}</p><p>지은이 ${esc(meta.author || '')}</p>${meta.translator ? `<p>옮긴이 ${esc(meta.translator)}</p>` : ''}<p>펴낸곳 ${esc(meta.publisher || '')}</p>${meta.isbn ? `<p>ISBN ${esc(meta.isbn)}</p>` : ''}${meta.ebookPrice ? `<p>정가(전자책) ${esc(meta.ebookPrice)}</p>` : ''}`;
   addDoc('colophon', 'colophon.xhtml', '판권', `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">판권</h1>\n${colBody}</section>`, { toc: '판권' });

@@ -10,8 +10,9 @@
  * 상태(state): ok(충족) · todo(해야 함) · manual(사람이 직접 확인 — confirmed[id] 로 체크) · info(안내만)
  */
 
-const REVIEWED = '2026-09-30';
+const REVIEWED = '2026-10-01';
 const MB50 = 50 * 1024 * 1024;
+const JB = require('./jakkawa-biblio');
 
 const LINKS = {
   bookk: [
@@ -100,7 +101,7 @@ function jakkawaChecklist(ctx) {
     item('ebookPrice', '판매가(서지정보)', has(m.ebookPrice) ? 'ok' : 'todo', '판권 › 전자책 가격 — 저자 몫은 서점 판매가의 약 60%(세전)', { tab: 'colophon' }),
     item('toc', '목차 포함(필수)', (ctx.excluded || []).includes('toc') ? 'todo' : 'ok', '목차가 없으면 서점 업로드 불가 — 구조 › 목차 체크', { tab: 'structure' }),
     item('biblio', '서지정보 페이지(표지 다음 또는 마지막 쪽 한 곳)', sectionIncluded(ctx, 'colophon') ? 'ok' : 'todo',
-      '판권 섹션이 서지정보 역할 — 출판일·저자명·출판사·ISBN·판매가 + 저작권 문구(아래 「서지정보」 복사)', { tab: 'structure' }),
+      '판권이 작가와 서지정보 양식으로 조판됩니다(출판사·플랫폼에 「작가와」 표기 시) — 출판일(ISBN 받은 날)·저자명·출판사·ISBN(작가와 발급 신청 시 빈칸)·판매가 + 저작권 문구. 한 곳에만', { tab: 'structure' }),
     item('cover', '전자책 표지 이미지', (has(m.ebookCover) || ctx.coverImagePath) ? 'ok' : 'todo',
       has(m.ebookCover) || ctx.coverImagePath ? '' : '전자책 표지 메타 또는 인쇄 표지(앞면 자동 크롭). 작가와 표지 규격(px·비율)은 로그인 뒤 화면 확인 필요 🔒', { tab: 'cover' }),
     item('file', '원고 파일 생성(EPUB 권장·PDF 가능)', file ? 'ok' : 'todo',
@@ -131,19 +132,10 @@ function checklist(platform, ctx) { return platform === 'jakkawa' ? jakkawaCheck
 /** 필수 항목 중 아직 안 끝난 수(todo + manual) */
 function remaining(list) { return list.required.filter((i) => i.state !== 'ok').length; }
 
-/** 작가와 서지정보 페이지 양식(공식 양식 원문) */
+/** 작가와 서지정보 페이지 양식(공식 양식 원문 · jakkawa.com/book-info-guide) — 전자책 판권과 같은 함수를 쓴다 */
 function ebookBiblio(meta, opts) {
-  const m = meta || {};
-  const dateStr = has(m.issueDate) ? m.issueDate : '0000.00.00';
-  const lines = [
-    `출판일 | ${dateStr}`,
-    `저자명 | ${has(m.author) ? m.author : 'OOO'}`,
-    `출판사 | ${has(m.publisher) ? m.publisher : '작가와'}`,
-    `ISBN | ${has(m.ebookIsbn) ? m.ebookIsbn : ''}`,
-    `판매가 | ${has(m.ebookPrice) ? m.ebookPrice : '0,000 원'}`,
-    '',
-    '이 책 내용의 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 받아야 합니다.',
-  ];
+  const { rows, legal } = JB.biblio(meta, { placeholder: true });
+  const lines = [...rows.map(([k, v]) => `${k} | ${v}`), '', legal];
   return lines.join('\n') + ((opts && opts.trailingNewline) ? '\n' : '');
 }
 

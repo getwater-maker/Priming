@@ -50,7 +50,7 @@ ok(RG.remaining(l) === l.required.filter((i) => i.state !== 'ok').length && RG.r
 
 console.log('\n[5] 서지정보 양식·요약');
 const bib = RG.ebookBiblio({ issueDate: '2026.10.01', author: '나관중', publisher: '고전서재', ebookPrice: '8,000원', ebookIsbn: '979-11-000-0001-0' });
-ok(/출판일 \| 2026\.10\.01/.test(bib) && /판매가 \| 8,000원/.test(bib) && /서면 동의/.test(bib), '작가와 공식 양식');
+ok(/출판일 \| 2026\.10\.01/.test(bib) && /판매가 \| 8,000 원/.test(bib) && /서면 동의/.test(bib), '작가와 공식 양식');
 ok(/출판사 \| 작가와/.test(RG.ebookBiblio({})), '출판사 없으면 작가와');
 const sum = RG.summary('bookk', { ...base, meta: { title: 'T' }, paperId: '미색모조 100g', spread: { spineMm: 14.36, widthMm: 316.36, heightMm: 216, widthPx: 3737, heightPx: 2551 } });
 ok(sum.find(([k]) => k === '표지 재질')[1] === RG.DEFAULT_COVER_MATERIAL, '표지 재질 기본값');

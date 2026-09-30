@@ -31,8 +31,12 @@ function sectionText(sec) {
 function findSection(book, key) {
   return [...(book.front || []), ...(book.back || []), ...(book.covers || [])].find((s) => s.key === key) || null;
 }
+/** 작가와 목차 입력 규칙 — 더블 스페이스(서점에서 「?」로 보임)·꺾쇠·대괄호 같은 특수문자(「&」로 보임) 금지 */
+function cleanTocLine(t) {
+  return String(t || '').replace(/[『』「」\[\]<>《》]/g, '').replace(/\s+/g, ' ').trim();
+}
 function tocText(book) {
-  return (book.parts || []).flatMap((p) => p.chapters).map((c) => c.title).filter(Boolean).join('\n');
+  return (book.parts || []).flatMap((p) => p.chapters).map((c) => cleanTocLine(c.title)).filter(Boolean).join('\n');
 }
 function digits(s) { return String(s || '').replace(/[^0-9]/g, ''); }
 /** KST 오늘 + n일 → YYYY.MM.DD */
