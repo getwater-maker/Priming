@@ -3173,8 +3173,10 @@ export default function App() {
       const el = [...document.querySelectorAll('.sent[data-ln="' + firstN + '"]')].find((x) => x.offsetParent !== null);
       if (!el) { setClipTb(null); return; }
       const r = el.getBoundingClientRect();
-      const top = Math.round(Math.max(4, r.top - 44)), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
-      const hidden = r.bottom < 40 || r.top > window.innerHeight - 20;
+      // 고른 클립이 화면 밖으로 스크롤돼도 막대는 사라지지 않고 화면 위/아래 가장자리에 붙어 따라온다(로이 2026-09-30 「또 사라졌네」 —
+      //   예전엔 숨겨서 스크롤·재생 중 막대가 없어진 것처럼 보였다). 그 클립 위에 있을 땐 전과 같다.
+      const top = Math.round(Math.min(window.innerHeight - 56, Math.max(4, r.top - 44))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
+      const hidden = false;
       setClipTb((cur) => (cur && cur.top === top && cur.left === left && cur.hidden === hidden ? cur : { top, left, hidden }));
     };
     place();
