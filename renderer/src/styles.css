@@ -313,18 +313,53 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 
 
-/* ── 출판(book) 모드 — 3-pane: 구조 / 페이지 미리보기 / 설정 ── */
+/* ── 출판(book) 모드 — 2-pane: 왼쪽(메뉴 · 내용 · 맨 아래 로그) / 페이지 미리보기 ── */
 .bkwrap{display:flex;gap:12px;align-items:stretch;padding:6px 2px 20px;height:calc(100vh - 130px);min-height:480px}
 .bkpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto}
-.bkleft{flex:0 0 235px}
-/* 우측 설정 패널 하단 여백 — 떠 있는 로그창(우하단 330×230)에 내용이 가려 답답하지 않게 */
-.bkright{flex:0 0 315px;padding-bottom:250px}
+/* 왼쪽 = 메뉴(위) → 내용(가운데, 스크롤) → 로그(맨 아래 고정). 로그는 App 의 logBox 를 그대로 받는다. */
+.bkside{flex:0 0 400px;display:flex;flex-direction:column;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bknav{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid var(--line);background:#faf6ee}
+.bktab{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 2px;font-size:11.5px;line-height:1.25;background:transparent;color:var(--base);border:1px solid transparent;border-radius:8px;cursor:pointer}
+.bktab:hover{background:#f1e8d8}
+.bktab.on{background:#fff;border-color:var(--accent);color:var(--strong);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.bkti{font-size:16px}
+.bkcnt{position:absolute;top:1px;right:3px;font-style:normal;font-size:10px;font-weight:700;background:#c0392b;color:#fff;border-radius:9px;min-width:15px;height:15px;line-height:15px;text-align:center}
+.bkside>.bkstatus{margin:0;padding:6px 12px;border-top:0;border-bottom:1px solid var(--line);font-size:12px}
+.bkbody{flex:1 1 auto;min-height:0;overflow-y:auto;padding:8px 12px 14px}
+.bklog{flex:0 0 190px;display:flex;min-height:0}
+.bklog #logwrap.docked{flex:1;height:auto;width:100%;border-radius:0;border:0;border-top:1px solid var(--accent)}
+.bkbadge{font-style:normal;font-size:10px;font-weight:700;border-radius:8px;padding:0 6px;margin-left:3px}
+.bkbadge.req{background:#fbeae6;color:#b0483a}
+.bkbadge.opt{background:#eef1ee;color:#6b7a6b}
+.bkform label.bkmiss input,.bkform label.bkmiss select{border-color:#d9776a;background:#fff8f6}
+.bkreg .bkprog{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13.5px;color:var(--strong)}
+.bkreg .bkprog .bkok{color:#2e7d32;font-weight:700}
+.bkchk{display:flex;gap:7px;align-items:flex-start;padding:4px 0;border-bottom:1px dashed #efe6d6;font-size:12.5px}
+.bkchk .bkic{flex:0 0 18px;text-align:center}
+.bkchk input[type=checkbox]{flex:0 0 auto;width:auto;margin-top:2px}
+.bkchk-t{color:var(--strong);font-weight:600}
+.bkchk.st-ok .bkchk-t{color:#2e7d32}
+.bkchk.st-todo .bkchk-t{color:#b0483a}
+.bklink{margin-left:6px;padding:0 6px;font-size:11px;background:none;border:1px solid var(--line);border-radius:8px;color:var(--accent-d);cursor:pointer}
+.bksum{display:flex;flex-direction:column;gap:3px}
+.bksum-row{display:flex;justify-content:space-between;gap:8px;text-align:left;padding:4px 8px;font-size:12px;background:#fdfaf4;color:var(--base);border:1px solid var(--line);border-radius:6px;cursor:copy}
+.bksum-row b{color:var(--strong);font-weight:600;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.bksum-row:disabled{opacity:.55;cursor:default}
+.bkfile{display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0}
+.bkfile>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bklinks{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+.bklinks button{padding:3px 8px;font-size:11.5px}
+.bknote{margin:6px 0;line-height:1.55}
+.bkbody details{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:8px;background:#fdfaf4}
+.bkbody summary{font-size:13px;font-weight:700;color:var(--strong);cursor:pointer}
+.bkbody label.chk{display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer}
+.bkbody label.chk input{width:auto}
 .bkcenter{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .bktitle{font-size:15px;font-weight:800;color:var(--strong);margin-bottom:10px}
 .bkzone{font-size:12px;font-weight:700;color:var(--accent-d);border-bottom:1px solid var(--line);margin:12px 0 6px;padding-bottom:3px}
 .bkpanel label.chk{display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer}
 .bkpanel label.chk input{width:auto}
-.bkchapters{max-height:34vh;overflow-y:auto}
+.bkchapters{max-height:30vh;overflow-y:auto}
 .bkpart{font-size:12.5px;font-weight:800;color:var(--strong);margin:6px 0 2px}
 .bkch{font-size:12.5px;color:var(--base);padding:2px 0 2px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bkbar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line);background:#faf6ee}
@@ -340,8 +375,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkrow{display:flex;gap:8px}
 .bkrow label{flex:1;min-width:0}
 .bkform input[type=text],.bkform input[type=number],.bkform select{width:100%;box-sizing:border-box}
-.bkright details{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:8px;background:#fdfaf4}
-.bkright summary{font-size:13px;font-weight:700;color:var(--strong);cursor:pointer}
 .bkwarn{font-size:12px;color:#b0483a;background:#fbeae6;border:1px solid #ecc9c2;border-radius:7px;padding:6px 9px;margin:6px 0}
 .bkcoverspec{line-height:1.75;background:#f6efe3;border-radius:7px;padding:8px 10px}
 .bkactions{display:flex;gap:8px;margin-top:10px}
@@ -807,3 +840,10 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .clip-tb-menu{position:absolute;top:40px}
 .clip-tb-menu i{font-style:normal;font-size:11px;color:var(--muted,#999);margin-left:6px}
 .clip-tb-menu .soon{opacity:.5}
+
+/* 출판 — 좁은 창에서도 미리보기 막대·상태줄이 줄바꿈으로 깨지지 않게 */
+.bkbar{min-width:0;overflow:hidden}
+.bkbar button,.bkbar .bkpage{white-space:nowrap;flex:0 0 auto}
+.bkbar .meta{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bkbar .grow{min-width:0}
+.bkside>.bkstatus .bkwarn{display:inline-block;margin:0 0 0 6px;padding:1px 7px}

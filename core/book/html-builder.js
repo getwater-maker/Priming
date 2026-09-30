@@ -442,51 +442,6 @@ function tocHtml(book, tocTitle, excluded = []) {
   }
   return `<nav class="toc"><h2>${esc(tocTitle || '목차')}</h2><ol>${items.join('\n')}</ol></nav>`;
 }
-// 표지 안내 페이지 — 미리보기 전용 1쪽(내지 PDF 에는 넣지 않음).
-//   스프레드 치수 전부 + 축소 다이어그램(재단선·안전선·책등·날개 구획). 표지 이미지가 첨부돼 있으면
-//   다이어그램 배경에 깔아 "치수가 맞게 만들어졌는지"를 눈으로 확인.
-function coverInfoHtml(ci, meta, o) {
-  const sp = ci.spread;
-  if (!sp) return '';
-  // 판면 폭에 맞춰 스케일(mm 기준) — 다이어그램이 페이지를 넘지 않게
-  const bodyWmm = o.trimW - o.marginsMm.inner - o.marginsMm.outer;
-  const scale = Math.min(1, bodyWmm / sp.widthMm);
-  const W = sp.widthMm * scale, H = sp.heightMm * scale;
-  const bleed = 3 * scale, safe = (3 + (sp.safeMm || 5)) * scale;
-  // 구획 상자들
-  let x = 0;
-  const partDivs = sp.parts.map((p) => {
-    const left = x * scale; x += p.mm;
-    if (p.name === 'bleed') return '';
-    return `<div style="position:absolute; left:${left.toFixed(2)}mm; top:0; width:${(p.mm * scale).toFixed(2)}mm; height:${H.toFixed(2)}mm; border-left:0.3pt dashed #2a6fb0; box-sizing:border-box;">
-      <div style="position:absolute; left:0; right:0; top:42%; text-align:center; font-size:6.5pt; color:#2a6fb0; background:rgba(255,255,255,.55);">${esc(p.name)}<br/>${p.mm}mm</div>
-    </div>`;
-  }).join('');
-  const bg = ci.coverImageUrl
-    ? `<img src="${esc(ci.coverImageUrl)}" style="position:absolute; left:0; top:0; width:${W.toFixed(2)}mm; height:${H.toFixed(2)}mm; object-fit:fill;" />`
-    : '';
-  const row = (k, v) => `<tr><td style="padding:1pt 8pt 1pt 0; color:#555; white-space:nowrap;">${esc(k)}</td><td>${esc(v)}</td></tr>`;
-  return `<section class="cover-info">
-  <h2 style="font-size:12pt; margin:0 0 6pt;">📐 표지 스프레드 안내</h2>
-  <p class="noindent" style="font-size:8pt; color:#777; margin:0 0 8pt;">이 페이지는 미리보기 전용입니다 — 내지 PDF 에는 포함되지 않습니다. 표지 이미지를 첨부하면 아래 다이어그램에 겹쳐 표시되어 치수 정합을 확인할 수 있습니다.</p>
-  <table style="font-size:8.5pt; border-collapse:collapse; margin-bottom:8pt;">
-    ${row('판형(내지)', `${o.trimW} × ${o.trimH} mm`)}
-    ${row('스프레드 전체', `${sp.widthMm} × ${sp.heightMm} mm  =  ${sp.widthPx} × ${sp.heightPx} px @${sp.dpi}dpi`)}
-    ${row('책등', `${sp.spineMm} mm (총 ${ci.pages || '?'}쪽 · ${esc(ci.paperLabel || '')} 기준)`)}
-    ${row('날개', ci.flaps ? '있음 — 앞뒤 각 100 mm' : '없음')}
-    ${row('재단여백', '사방 3 mm — 배경을 끝까지 채우세요 (재단 시 잘림)')}
-    ${row('안전여백', `재단선 안쪽 ${sp.safeMm || 5} mm — 글자·로고는 이 안에`)}
-    ${ci.coverImageUrl ? row('첨부 표지', ci.coverName || '') : row('첨부 표지', '없음 — 우측 패널에서 이미지를 첨부하세요')}
-  </table>
-  <div style="position:relative; width:${W.toFixed(2)}mm; height:${H.toFixed(2)}mm; background:#eee; outline:0.5pt solid #999; overflow:hidden;">
-    ${bg}
-    ${partDivs}
-    <div style="position:absolute; left:${bleed.toFixed(2)}mm; top:${bleed.toFixed(2)}mm; right:${bleed.toFixed(2)}mm; bottom:${bleed.toFixed(2)}mm; border:0.5pt solid #d32f2f;"></div>
-    <div style="position:absolute; left:${safe.toFixed(2)}mm; top:${safe.toFixed(2)}mm; right:${safe.toFixed(2)}mm; bottom:${safe.toFixed(2)}mm; border:0.4pt dotted #2e7d32;"></div>
-  </div>
-  <p class="noindent" style="font-size:7.5pt; color:#777; margin-top:5pt;">🔴 빨간 실선=재단선 · 🟢 초록 점선=안전선 · 파란 점선=책등/날개 구획 (축척 ${(scale * 100).toFixed(0)}%)</p>
-</section>`;
-}
 
 function endnotesHtml(ctx) {
   if (!ctx.endnotes.length) return '';
@@ -754,8 +709,6 @@ function buildBookHtml(book, opts = {}) {
   if (o.edition === 'ebook' && opts.ebookCoverPath) {
     bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.ebookCoverPath))}" alt="표지" /></section>`);
   }
-  // 표지 안내 페이지 — 미리보기 전용(opts.coverInfo 전달 시에만). 내지 PDF 빌드에서는 전달 안 함.
-  if (opts.coverInfo) bodyParts.push(coverInfoHtml(opts.coverInfo, meta, o));
 
   // 앞부속 — 반표제지(기본 on) → 속표지 → (앞판권) → 예약섹션들(목차는 자동 생성)
   if (truthyDefault(meta.halfTitle, true)) bodyParts.push(halfTitleHtml(meta, book.fileTitle));

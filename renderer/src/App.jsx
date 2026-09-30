@@ -3606,7 +3606,7 @@ export default function App() {
     );
   })();
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
-  const logDocked = !noProduction && view === 'clips';
+  const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
   const logBox = (
         <aside id="logwrap" className={logDocked ? 'docked' : ''}>
             <div id="logbar">
@@ -3913,7 +3913,7 @@ export default function App() {
           {isRx ? (
             <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
           ) : isBk ? (
-            <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
+            <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} logBox={logBox} />
           ) : (<>
           {mode === 'longform' && _qEmpty && lastQ && (
             <div className="qstrip" data-testid="last-queue">

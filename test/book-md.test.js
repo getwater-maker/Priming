@@ -275,7 +275,7 @@ ok(/@page display:left \{/.test(cpHtml) && /@page display:right \{/.test(cpHtml)
 ok(/colophonAlign: l\.colophonAlign/.test(mainSrc), 'main.js layoutOpts 에 colophonAlign');
 ok(/colophonAlign: 'top'/.test(uiSrc), '조판 기본값 = top');
 ok(/L\('colophonAlign'/.test(uiSrc), '조판 패널에 판권 배치 select');
-ok(/\['editor', '편집인'\]/.test(uiSrc) && /\['blog', '블로그'\]/.test(uiSrc), '책 정보 폼에 편집인·블로그');
+ok(/\['editor', '편집인'[,\]]/.test(uiSrc) && /\['blog', '블로그'\]/.test(uiSrc), '책 정보 폼에 편집인·블로그');
 ok(/editor: '편집인'/.test(mainSrc) && /facebook: '페이스북'/.test(mainSrc), 'main.js 메타 라벨에 편집인·페이스북');
 
 console.log(`✅ book-md.test.js — ${n} 단언 전부 통과`);

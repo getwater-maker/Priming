@@ -4,15 +4,30 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import api from './lib/ipc.js';
 import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
+import RG from '../../core/book/register-guide.js';
 
-// 책 정보(메타) 폼 필드 정의 — key = main 의 BOOK_META_LABELS 표준키
-const META_FIELDS = [
-  ['title', '책 제목'], ['subtitle', '부제'], ['author', '저자'], ['translator', '옮긴이'],
-  ['publisher', '출판사'], ['issuer', '발행인'], ['editor', '편집인'], ['issueDate', '발행일'], ['isbn', 'ISBN'],
-  ['price', '정가(POD)'], ['ebookPrice', '전자책 가격'], ['regNo', '출판등록'],
-  ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
+// 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
+const TABS = [
+  ['structure', '📚', '구조'], ['info', '📋', '책 정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지'],
+  ['layout', '📐', '조판'], ['bookk', '📕', '종이책·부크크'], ['jakkawa', '📱', '전자책·작가와'],
+];
+// 책 정보 탭 — [키, 이름, 필수?, 도움말]
+const INFO_FIELDS = [
+  ['title', '책 제목', true, ''], ['author', '저자(필명)', true, 'AI가 집필에 개입했다면 저자명에 「AI」 표기(작가와 정책)'],
+  ['subtitle', '부제', false, ''], ['translator', '옮긴이', false, ''], ['editor', '편집인', false, ''],
+];
+// 플랫폼 등록 화면에 입력하는 정보(조판에는 안 들어간다) — 로그인 뒤 화면의 실제 항목·한도는 등록 때 확인
+const REG_FIELDS = [
+  ['category', '카테고리', '부크크·작가와 등록 화면 항목(목록은 로그인 뒤 확인)'],
+  ['keywords', '키워드(쉼표)', ''], ['tagline', '한줄 소개', ''],
+];
+// 판권 탭 — 법정 필수 5필드(제목·저자는 책 정보) + 선택
+const COLO_REQ = [['issuer', '발행인'], ['publisher', '출판사'], ['issueDate', '발행일'], ['isbn', 'ISBN(종이책)'], ['price', '정가(종이책)']];
+const COLO_OPT = [
+  ['ebookIsbn', '전자책 ISBN'], ['ebookPrice', '전자책 가격'], ['isbnAddon', '부가기호(5자리)'], ['regNo', '출판등록'],
+  ['copyright', '저작권(ⓒ)'], ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
   ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램'],
-  ['copyright', '저작권(ⓒ)'], ['isbnAddon', '부가기호(5자리)'], ['ebookIsbn', '전자책 ISBN'], ['specialSections', '특별 섹션(예: 역사 노트)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
+  ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
 ];
 // 판권 법정 필수 7필드 — 미입력 경고
 const REQUIRED_KEYS = [['title', '제목'], ['author', '저자'], ['issuer', '발행인'], ['issueDate', '발행일'], ['publisher', '출판사'], ['isbn', 'ISBN'], ['price', '정가']];
@@ -74,7 +89,7 @@ function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
   );
 }
 
-export default function BookView({ dto, setDto, setStatus, logline }) {
+export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const [layout, setLayout] = useState(LAYOUT_DEFAULTS);
   // 원고 전환 시 저장된 조판 설정 복원(없으면 기본값)
   const layoutLoadedFor = useRef('');
@@ -106,6 +121,23 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
 
   const meta = (dto && dto.meta) || {};
   const loaded = !!(dto && dto.kind === 'book');
+
+  // ── 왼쪽 메뉴 · 등록 점검(개인 편의값은 이 PC 브라우저에만 — 실패해도 화면은 정상) ──
+  const [tab, setTabRaw] = useState(() => { try { return localStorage.getItem('bk-tab') || 'structure'; } catch (_) { return 'structure'; } });
+  const setTab = (t) => { setTabRaw(t); try { localStorage.setItem('bk-tab', t); } catch (_) {} };
+  const confirmKey = 'bk-confirm:' + ((dto && dto.scriptPath) || '');
+  const [confirmed, setConfirmed] = useState({});
+  useEffect(() => {
+    try { setConfirmed(JSON.parse(localStorage.getItem(confirmKey) || '{}') || {}); } catch (_) { setConfirmed({}); }
+  }, [confirmKey]);
+  const setConfirm = (id, on) => setConfirmed((c) => {
+    const n = { ...c, [id]: !!on };
+    try { localStorage.setItem(confirmKey, JSON.stringify(n)); } catch (_) {}
+    return n;
+  });
+  const [outputs, setOutputs] = useState([]);
+  const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
+  useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
 
   // ── 미리보기 조판 ──
   const refreshPreview = useCallback(async () => {
@@ -195,12 +227,11 @@ body{overflow-y:scroll}
     });
     viewer.addListener('readystatechange', () => {
       if (viewer.readyState === 'complete') {
-        // 첫 페이지 = 표지 안내(미리보기 전용, 내지 아님) → 내지 쪽수는 -1
-        const total = Math.max(0, (viewer.getPageSizes() || []).length - 1);
+        const total = Math.max(0, (viewer.getPageSizes() || []).length);
         setPageInfo((pi) => ({ ...pi, total }));
         setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
         try { fdoc.body.style.zoom = zoomRef.current; } catch (_) {}
-        alignSingleSpreads(fdoc); // 홀로 있는 페이지(표지안내·마지막 홀수쪽)를 펼침면과 같은 위치(오른쪽/왼쪽)에 고정
+        alignSingleSpreads(fdoc); // 홀로 있는 페이지(첫 쪽·마지막 홀수쪽)를 펼침면과 같은 위치(오른쪽/왼쪽)에 고정
         // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
         if (total > 0 && total !== lastPagesRef.current) {
           lastPagesRef.current = total;
@@ -299,7 +330,7 @@ body{overflow-y:scroll}
           : (r.coverError ? `⚠ 내지 ${r.pages}쪽 완료 · 표지 실패 — 로그 확인` : `종이책 PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}`))
         : 'PDF 실패 — 로그 확인');
     } catch (e) { logline('PDF 오류: ' + e.message); }
-    setBuilding(false);
+    setBuilding(false); refreshOutputs();
   }
   async function buildEpubFile() {
     setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
@@ -308,7 +339,7 @@ body{overflow-y:scroll}
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
     } catch (e) { logline('ePub 오류: ' + e.message); }
-    setBuilding(false);
+    setBuilding(false); refreshOutputs();
   }
   // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
   //   원고에 없는 섹션을 체크하면 템플릿을 원고에 삽입.
@@ -401,38 +432,146 @@ body{overflow-y:scroll}
 
   if (!loaded) {
     return (
-      <div className="bkempty">
-        <h2>📖 출판 — MD 원고 → POD 출판용 PDF</h2>
-        <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
-        <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>
-        <p className="meta">
-          핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
-          대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 부크크·교보POD·작가와 규격의 내지/표지 PDF 와 ePub 을 만듭니다.
-        </p>
+      <div className="bkwrap">
+        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 부크크 · 작가와)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
+        <div className="bkcenter"><div className="bkempty">
+          <h2>📖 출판 — MD 원고 → 종이책(부크크) · 전자책(작가와)</h2>
+          <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
+          <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>
+          <p className="meta">
+            핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
+            대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 부크크 규격 내지/표지 PDF, 전자책은 작가와용 ePub·PDF 를 만듭니다.
+          </p>
+        </div></div>
       </div>
     );
   }
 
   const presentKeys = new Set([...(dto.front || []), ...(dto.back || []), ...(dto.covers || [])].map((s) => s.key));
   const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
+  const missSet = new Set(missing.map(([k]) => k));
   const spread = dto.spread || {};
   const chapters = (dto.parts || []).flatMap((p) => p.chapters);
+  const pf = (dto.platforms || []).find((p) => p.id === dto.platformId);
 
-  return (
-    <div className="bkwrap">
-      {/* 생성 진행 모달 — 화면 중앙, 경과 시간 표시 */}
-      {building && (
-        <div className="modal-bg show" style={{ zIndex: 90 }}>
-          <div className="modal-card" style={{ width: 400, textAlign: 'center' }}>
-            <div className="spin" style={{ width: 38, height: 38, border: '4px solid #eee', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
-            <div style={{ fontWeight: 700, color: 'var(--strong)', marginBottom: 6 }}>{buildMsg || '생성 중…'}</div>
-            <div className="meta">내지 조판(Vivliostyle)은 원고 길이에 따라 수 분 걸릴 수 있습니다 · 경과 {buildElapsed}초</div>
-          </div>
+  // 📤 점검표 입력 — 두 플랫폼 공통 컨텍스트
+  const rgCtx = {
+    meta, fileTitle: dto.fileTitle, pages: dto.lastPages || 0, trimId: dto.trimId, paperId: dto.paperId, flaps: dto.flaps,
+    spread, spineMm: spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
+    outputs, excluded: layout.excluded || [], presentKeys: [...presentKeys], confirmed,
+  };
+  const lists = { bookk: RG.checklist('bookk', rgCtx), jakkawa: RG.checklist('jakkawa', rgCtx) };
+  const badge = {
+    info: ['title', 'author'].filter((k) => missSet.has(k)).length,
+    colophon: COLO_REQ.filter(([k]) => missSet.has(k)).length,
+    bookk: RG.remaining(lists.bookk), jakkawa: RG.remaining(lists.jakkawa),
+  };
+
+  // ── 작은 부품(함수로 호출 — 컴포넌트로 만들면 렌더마다 새로 마운트돼 입력칸 초점을 잃는다) ──
+  const field = (k, label, req, help) => (
+    <label key={k} className={req && missSet.has(k) ? 'bkmiss' : ''} title={help || ''}>
+      <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
+      <input type="text" defaultValue={k === 'title' ? (meta.title || dto.fileTitle || '') : (meta[k] || '')}
+        key={dto.scriptPath + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+      {help ? <span className="meta">{help}</span> : null}
+    </label>
+  );
+  const select = (k, label, opts, req, help) => (
+    <label key={k} title={help || ''}>
+      <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
+      <select value={meta[k] || ''} onChange={(e) => setMeta(k, e.target.value)}>
+        {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+      </select>
+      {help ? <span className="meta">{help}</span> : null}
+    </label>
+  );
+  const copy = async (text, what) => {
+    try { await navigator.clipboard.writeText(String(text)); setStatus(`📋 복사됨 — ${what}`); }
+    catch (_) { setStatus('⚠ 복사 실패 — 직접 선택해서 복사하세요'); }
+  };
+
+  // 📤 등록 도우미 패널(부크크/작가와 공통 골격)
+  const registerPanel = (platform) => {
+    const isBookk = platform === 'bookk';
+    const list = lists[platform];
+    const doneReq = list.required.filter((i) => i.state === 'ok').length;
+    const rows = RG.summary(platform, rgCtx);
+    const stIcon = { ok: '✅', todo: '⬜', manual: '☐', info: '·' };
+    const row = (it) => (
+      <div className={'bkchk st-' + it.state} key={it.id}>
+        {it.manual
+          ? <input type="checkbox" checked={it.state === 'ok'} onChange={(e) => setConfirm(it.id, e.target.checked)} />
+          : <span className="bkic">{stIcon[it.state]}</span>}
+        <div className="bkchk-body">
+          <div className="bkchk-t">{it.label}{it.tab && it.state !== 'ok' && !it.manual
+            ? <button className="bklink" onClick={() => setTab(it.tab)}>이동 ›</button> : null}</div>
+          {it.hint ? <div className="meta">{it.hint}</div> : null}
         </div>
-      )}
-      {/* ── 좌: 책 구조 ── */}
-      <div className="bkpanel bkleft">
-        <div className="bktitle">📚 책 구조</div>
+      </div>
+    );
+    const outs = (outputs || []).filter((o) => isBookk ? (o.kind === 'interior' || o.kind === 'cover') : (o.kind === 'epub' || o.kind === 'ebookPdf'));
+    return (
+      <div className="bkreg" data-testid={'bk-reg-' + platform}>
+        <div className="bkprog">
+          <b>{isBookk ? '📕 종이책 → 부크크' : '📱 전자책 → 작가와'}</b>
+          <span className={doneReq === list.required.length ? 'bkok' : ''}>필수 {doneReq}/{list.required.length}</span>
+        </div>
+        <div className="bkzone">필수</div>
+        {list.required.map(row)}
+        <div className="bkzone">선택 · 참고</div>
+        {list.optional.map(row)}
+
+        <div className="bkzone">등록 화면에 옮겨 적을 값 <span className="meta">(클릭 = 복사)</span></div>
+        <div className="bksum">
+          {rows.map(([k, v]) => (
+            <button key={k} className="bksum-row" disabled={!v} title={v ? '클릭하면 복사' : '아직 값이 없습니다'} onClick={() => copy(v, k)}>
+              <span>{k}</span><b>{v || '—'}</b>
+            </button>
+          ))}
+          {!isBookk && (
+            <button className="bksum-row bksum-wide" onClick={() => copy(RG.ebookBiblio(meta), '서지정보 페이지')} title="작가와 공식 양식 — 표지 다음 쪽 또는 마지막 쪽에 한 번만 넣습니다">
+              <span>서지정보 페이지(공식 양식)</span><b>복사 📋</b>
+            </button>
+          )}
+        </div>
+
+        <div className="bkzone">완성 파일</div>
+        {outs.length ? outs.map((o) => (
+          <div className="bkfile" key={o.name}>
+            <span title={o.path}>📄 {o.name}</span>
+            <span className="meta">{(o.bytes / 1024 / 1024).toFixed(1)}MB</span>
+            <button className="ghost" onClick={() => api.bookRevealFile(o.path)}>위치</button>
+          </div>
+        )) : <div className="meta">아직 없습니다 — 아래 버튼으로 만드세요</div>}
+        <div className="bkactions">
+          {isBookk
+            ? <button disabled={building} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 PDF (내지+표지)'}</button>
+            : (<>
+                <button disabled={building} title="같은 원고로 전자책(ePub 3.0) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭" onClick={buildEpubFile}>📱 ePub</button>
+                <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="전자책 업로드용 PDF 한 파일 — 1쪽 앞표지 + 본문, 백면 없음, 안/바깥 같은 여백, 링크 살림" onClick={() => buildPdf('ebook')}>📱 전자책 PDF</button>
+              </>)}
+        </div>
+
+        <div className="bkzone">등록 도우미</div>
+        <div className="meta bknote">{RG.AUTO_UPLOAD.note}</div>
+        <div className="bklinks">
+          {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
+          <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>
+        </div>
+        <div className="meta bknote">
+          {isBookk
+            ? '심사 2~3일 · 승인 후 「승인확인」→ 표지·내지 다운로드 검토 → 「최종 입점」. 이때부터 수정 제약이 큽니다(개정판: 20쪽↑ 6개월 · 미만 1년).'
+            : '검수 3~7일(유통 신청 후) · 서점 노출은 신청 2일~근무일 3~5일. 출간 후 수정은 「문의/수정 › 원고 보완 신청」(반영 2일~30일+).'}
+          {' '}조사 {RG.REVIEWED} · 정책은 자주 바뀌니 등록 직전에 공식 페이지를 다시 확인하세요.
+        </div>
+      </div>
+    );
+  };
+
+  // ── 왼쪽 탭 내용 ──
+  const sideBody = (() => {
+    switch (tab) {
+      case 'structure': return (<>
         <div className="bkzone">앞부속</div>
         <label className="chk"><input type="checkbox" checked={!/^(off|no|없음|아니오|false|0|x)$/i.test(String(meta.halfTitle || 'on'))}
           onChange={(e) => setMeta('halfTitle', e.target.checked ? '' : '없음')} /> 반표제지 <span className="meta">(자동)</span></label>
@@ -463,51 +602,83 @@ body{overflow-y:scroll}
         {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} cover />)}
         <div className="meta" style={{ marginTop: 8 }}>원고에 쓴 섹션·본문 장은 자동으로 체크됩니다. 체크를 해제하면 <b>원고는 그대로 두고 책에서만 제외</b>합니다 — 진행표·체크리스트 같은 작업용 장을 인쇄물에서 뺄 때 쓰세요.</div>
         {dto.footnoteCount > 0 && <div className="meta" style={{ marginTop: 8 }}>각주 {dto.footnoteCount}개 — {meta.footnoteMode === '미주' ? '미주(책 끝 모음)' : '각주(페이지 하단)'}</div>}
-      </div>
-
-      {/* ── 중앙: 실제 페이지 미리보기 ── */}
-      <div className="bkcenter">
-        <div className="bkbar">
-          <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
-          <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
-          <span className="bkpage" title="1번째 화면은 표지 안내(내지 아님)">{pageInfo.cur === 1 ? '표지' : (pageInfo.cur > 1 ? pageInfo.cur - 1 : '–')} / {pageInfo.total || '–'}쪽</span>
-          <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
-          <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
-          <input type="range" title="페이지 빠른 이동(드래그)" min={1} max={Math.max(1, (pageInfo.total || 0) + 1)} value={Math.max(1, pageInfo.cur || 1)}
-            style={{ width: 150 }} onChange={(e) => { const v = parseInt(e.target.value, 10); try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, v - 1); } catch (_) {} }} />
-          <span className="hdiv" />
-          <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
-          <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
-          <button className="ghost" onClick={() => applyZoom(zoomRef.current * 1.2)} title="확대">🔍＋</button>
-          <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
-          <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
-          <span className="grow" />
-          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · 휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
-          <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
-        </div>
-        <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
-        {edit && (
-          <div className="bkedit">
-            <div className="meta">{edit.file ? `${edit.file} — ` : '원고 '}수정 후 저장하면 원본 .md 에 반영되고 재조판됩니다</div>
-            <textarea value={edit.text} rows={Math.min(8, edit.text.split('\n').length + 1)}
-              onChange={(e) => setEdit({ ...edit, text: e.target.value })} autoFocus />
-            <div className="mbtns">
-              <button onClick={saveEdit}>저장</button>
-              <button className="ghost" onClick={() => setEdit(null)}>취소</button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── 우: 설정 ── */}
-      <div className="bkpanel bkright">
-        <div className="bktitle">⚙ 출판 설정</div>
+      </>);
+      case 'info': return (<div className="bkform">
+        <div className="bkzone">책의 기본 정보</div>
+        {INFO_FIELDS.map(([k, l, req, help]) => field(k, l, req, help))}
+        <div className="bkzone">플랫폼 등록 정보 <span className="meta">(책에는 인쇄되지 않음)</span></div>
+        {REG_FIELDS.map(([k, l, help]) => field(k, l, false, help))}
+        {select('printColor', '내지 색(종이책)', [['', '흑백 (기본)'], ['컬러', '컬러']], false, '부크크 인세: 사이트 흑백 35% · 컬러 15% / 외부유통 흑백 15% · 컬러 10%')}
+        {select('aiDisclosure', 'AI 사용 표기(전자책)',
+          [['', '— 선택 안 됨 —'], ['없음', '없음(직접 집필·번역)'], ['있음', '있음(AI 활용 — 저자명에 「AI」 표기)']], true,
+          '작가와 업로드 2단계 자가 체크(퇴고·AI 표기). 정직한 표기가 안전합니다')}
+        <div className="meta">값은 원고 상단 <code>&gt; 라벨: 값</code> 메타 줄로 저장됩니다.</div>
+      </div>);
+      case 'colophon': return (<div className="bkform">
         {missing.length > 0 && (
           <div className="bkwarn" title="출판문화산업진흥법상 간행물 필수 기재사항">
             ⚠ 판권 필수 미입력: {missing.map(([, l]) => l).join(' · ')}
             <div style={{ fontWeight: 400, marginTop: 3 }}>※ [판권] 섹션에 자유문을 쓴 경우 이 검사는 책 정보 폼만 봅니다 — 자유문에 ISBN·발행일·발행처 등이 실제로 들어갔는지 직접 확인하세요.</div>
           </div>
         )}
+        <div className="bkzone">판권 필수 (출판문화산업진흥법)</div>
+        {COLO_REQ.map(([k, l]) => field(k, l, true))}
+        <div className="meta">부크크는 ISBN 없이도 자체 판매가 되지만(외부유통 불가), 판권지 법정 기재사항이라 필수로 표시합니다.</div>
+        <div className="bkzone">선택 — 전자책·연락처·SNS</div>
+        {COLO_OPT.map(([k, l]) => field(k, l, false))}
+        <div className="bkzone">판권 페이지</div>
+        <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
+          <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
+            <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
+          </select>
+        </label>
+        <label title="판권 내용을 판면 위에서 시작할지, 아래쪽으로 내릴지 — 실물 단행본은 위쪽이 다수">판권 배치
+          <select value={layout.colophonAlign === 'bottom' ? 'bottom' : 'top'} onChange={(e) => L('colophonAlign', e.target.value)}>
+            <option value="top">위 (판면 상단)</option><option value="bottom">아래 (판면 하단)</option>
+          </select>
+        </label>
+        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다. 작가와 서지정보 양식은 「전자책·작가와」 탭에서 복사하세요.</div>
+      </div>);
+      case 'cover': return (<div className="bkform">
+        <div className="bkzone">종이책 표지 스프레드</div>
+        <div className="meta bkcoverspec">
+          책등 <b>{spread.spineMm}mm</b> (총 {dto.lastPages || '?'}쪽 기준)<br />
+          스프레드 <b>{spread.widthMm}×{spread.heightMm}mm</b><br />
+          = <b>{spread.widthPx}×{spread.heightPx}px</b> @300dpi{dto.flaps ? ' · 날개 포함' : ''}<br />
+          <span title="재단 시 잘리는 영역 — 배경을 끝까지 채우세요">재단여백 3mm · 안전여백 5mm</span>
+        </div>
+        {dto.coverImagePath
+          ? (<>
+              <div className="meta" style={{ wordBreak: 'break-all' }}>🖼 {dto.coverImagePath.split(/[\\/]/).pop()}</div>
+              {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px</div>}
+              {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
+              <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
+            </>)
+          : <button onClick={attachCover}>🖼 표지 이미지 첨부 (배경)</button>}
+        <label className="chk" title="배경 이미지 위에 제목·부제·저자·출판사 글자를 얹어 조판 — 완성 이미지에 글자가 이미 있으면 끄세요">
+          <input type="checkbox" checked={!!layout.coverOverlay} onChange={(e) => L('coverOverlay', e.target.checked)} /> 앞표지에 제목·저자 얹기
+        </label>
+        <label className="chk" title="뒷표지 오른쪽 하단에 ISBN 바코드+정가 자동 배치">
+          <input type="checkbox" checked={layout.coverBarcode !== false} onChange={(e) => L('coverBarcode', e.target.checked)} disabled={!meta.isbn} /> 뒷표지 바코드·정가 {!meta.isbn && <span className="meta">(ISBN 필요)</span>}
+        </label>
+        {(layout.coverOverlay || (dto.covers || []).length > 0) && (
+          <label>표지 글자색 <input type="color" value={layout.coverTextColor || '#111111'} onChange={(e) => L('coverTextColor', e.target.value)} style={{ width: 60, padding: 0, height: 26 }} /></label>
+        )}
+        <label className="chk" title="부크크 무료 표지는 날개가 없고, 날개 없이 승인된 도서에 나중에 날개를 추가할 수 없습니다">
+          <input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)
+        </label>
+        {select('coverMaterial', '표지 재질(부크크)',
+          [['', RG.DEFAULT_COVER_MATERIAL + ' (기본)'], ...RG.COVER_MATERIALS.slice(1).map((m) => [m, m])], false,
+          '두께·가격·표지 크기에 영향 없음(기록용). 글자가 있는 표지는 스노우 권장 · 재질 변경은 매주 금요일 무료')}
+        <div className="meta">뒷표지 소개글·날개 글·책등 문구는 「구조」 탭의 「표지 구성」에 쓰면 표지 PDF 에 조판됩니다.</div>
+        <div className="mbtns">
+          <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
+          <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
+        </div>
+        <div className="bkzone">전자책 표지</div>
+        {field('ebookCover', '전자책 표지 이미지 경로', false, '비우면 종이책 표지의 앞면을 자동으로 잘라 씁니다. 작가와 표지 규격(px·비율)은 로그인 뒤 화면에서 확인 필요')}
+      </div>);
+      case 'layout': return (<>
         <details open>
           <summary>규격 (플랫폼·판형·용지)</summary>
           <div className="bkform">
@@ -518,10 +689,7 @@ body{overflow-y:scroll}
             </label>
             <label>판형
               <select value={dto.trimId} onChange={(e) => setMeta('trim', e.target.value)}>
-                {(dto.trims || []).filter((t) => {
-                  const pf = (dto.platforms || []).find((p) => p.id === dto.platformId);
-                  return !pf || pf.trims.includes(t.id);
-                }).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                {(dto.trims || []).filter((t) => !pf || pf.trims.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
             </label>
             <label title={dto.paperLocked ? '부크크는 쪽수가 용지를 정합니다 — 399쪽까지 미색모조 100g, 400쪽부터 미색모조 80g (부크크 화면 실측)' : ''}>내지 용지
@@ -534,17 +702,6 @@ body{overflow-y:scroll}
               <input type="text" data-testid="bk-spine" defaultValue={dto.spineManual || ''} key={'sp:' + (dto.spineManual || '') + ':' + dto.paperId}
                 placeholder={`자동 ${dto.spread && dto.spread.spineMm}`}
                 onBlur={(e) => setMeta('spineMm', e.target.value.trim())} />
-            </label>
-            <label className="chk"><input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)</label>
-            <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
-              <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
-                <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
-              </select>
-            </label>
-            <label title="판권 내용을 판면 위에서 시작할지, 아래쪽으로 내릴지 — 실물 단행본은 위쪽이 다수">판권 배치
-              <select value={layout.colophonAlign === 'bottom' ? 'bottom' : 'top'} onChange={(e) => L('colophonAlign', e.target.value)}>
-                <option value="top">위 (판면 상단)</option><option value="bottom">아래 (판면 하단)</option>
-              </select>
             </label>
           </div>
         </details>
@@ -588,22 +745,18 @@ body{overflow-y:scroll}
                 onChange={(e) => L('specialKeyword', e.target.value)} />
             </label>
           </div>
-          {/* 영상 대본을 '읽기 좋게' 조판하는 스위치 — 대본 파일은 건드리지 않고 출력에서만 제외한다 */}
           <div className="bkform">
-            <label title="영상 제작용 블록(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커 · 🖼️ 이미지/🎬 영상 프롬프트)과 `---` 구분선을 조판에서 제외하고, 제목의 타임코드(— 0:00~0:30 · I2V 5샷)를 지웁니다. 본문 인용(성경 낭독 등)은 그대로 남습니다. 대본 파일은 수정되지 않습니다.">
+            <label className="chk" title="영상 제작용 블록(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커 · 🖼️ 이미지/🎬 영상 프롬프트)과 `---` 구분선을 조판에서 제외하고, 제목의 타임코드(— 0:00~0:30 · I2V 5샷)를 지웁니다. 본문 인용(성경 낭독 등)은 그대로 남습니다. 대본 파일은 수정되지 않습니다.">
               <input type="checkbox" checked={!!layout.scriptMode} onChange={(e) => L('scriptMode', e.target.checked)} />
               🎬 영상 대본 모드 (제작용 블록 숨기고 읽기)
             </label>
             {layout.scriptMode ? (
-              <label title="샷 제목(### 샷1 — …)까지 숨겨 나레이션만 줄글로 읽습니다">
+              <label className="chk" title="샷 제목(### 샷1 — …)까지 숨겨 나레이션만 줄글로 읽습니다">
                 <input type="checkbox" checked={!!layout.scriptHideShots} onChange={(e) => L('scriptHideShots', e.target.checked)} />
                 샷 제목도 숨기기
               </label>
             ) : null}
-          </div>
-          {/* 작업용 파일 경로 — 종이에선 찾아갈 수 없고 한 줄을 통째로 잡아먹는다. 폴더만 떼고 파일명은 남긴다. */}
-          <div className="bkform">
-            <label title="본문의 ../참고문헌/지도교수/오광만_박사논문2008_….pdf 같은 파일 경로에서 폴더를 떼고 파일명만 남깁니다. 원고는 수정되지 않습니다.">
+            <label className="chk" title="본문의 ../참고문헌/지도교수/오광만_박사논문2008_….pdf 같은 파일 경로에서 폴더를 떼고 파일명만 남깁니다. 원고는 수정되지 않습니다.">
               <input type="checkbox" checked={!!layout.hidePaths} onChange={(e) => L('hidePaths', e.target.checked)} />
               📁 작업용 파일 경로 → 파일명만
             </label>
@@ -620,7 +773,7 @@ body{overflow-y:scroll}
               <label title="제본되는 안쪽(책등 쪽) — 무선제본은 파묻히므로 바깥보다 넓게">안쪽 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.inner} onChange={(e) => Lm('inner', e.target.value)} /></label>
               <label>바깥 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.outer} onChange={(e) => Lm('outer', e.target.value)} /></label>
             </div>
-            <div className="meta">기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다.</div>
+            <div className="meta">기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다. 부크크 권고: 중요한 내용은 끝선에서 10~15mm 안쪽.</div>
           </div>
         </details>
         <details>
@@ -689,63 +842,75 @@ body{overflow-y:scroll}
             <label className="chk"><input type="checkbox" checked={layout.h2Gothic} onChange={(e) => L('h2Gothic', e.target.checked)} /> 고딕체 사용 (해제 시 본문 폰트)</label>
           </div>
         </details>
-        <details open>
-          <summary>표지 (완성 이미지 첨부)</summary>
-          <div className="bkform">
-            <div className="meta bkcoverspec">
-              책등 <b>{spread.spineMm}mm</b> (총 {dto.lastPages || '?'}쪽 기준)<br />
-              스프레드 <b>{spread.widthMm}×{spread.heightMm}mm</b><br />
-              = <b>{spread.widthPx}×{spread.heightPx}px</b> @300dpi{dto.flaps ? ' · 날개 포함' : ''}<br />
-              <span title="재단 시 잘리는 영역 — 배경을 끝까지 채우세요">재단여백 3mm · 안전여백 5mm</span>
-            </div>
-            {dto.coverImagePath
-              ? (<>
-                  <div className="meta" style={{ wordBreak: 'break-all' }}>🖼 {dto.coverImagePath.split(/[\\/]/).pop()}</div>
-                  {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px</div>}
-                  {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
-                  <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
-                </>)
-              : <button onClick={attachCover}>🖼 표지 이미지 첨부 (배경)</button>}
-            <label className="chk" title="배경 이미지 위에 제목·부제·저자·출판사 글자를 얹어 조판 — 완성 이미지에 글자가 이미 있으면 끄세요">
-              <input type="checkbox" checked={!!layout.coverOverlay} onChange={(e) => L('coverOverlay', e.target.checked)} /> 앞표지에 제목·저자 얹기
-            </label>
-            <label className="chk" title="뒷표지 오른쪽 하단에 ISBN 바코드+정가 자동 배치">
-              <input type="checkbox" checked={layout.coverBarcode !== false} onChange={(e) => L('coverBarcode', e.target.checked)} disabled={!meta.isbn} /> 뒷표지 바코드·정가 {!meta.isbn && <span className="meta">(ISBN 필요)</span>}
-            </label>
-            {(layout.coverOverlay || (dto.covers || []).length > 0) && (
-              <label>표지 글자색 <input type="color" value={layout.coverTextColor || '#111111'} onChange={(e) => L('coverTextColor', e.target.value)} style={{ width: 60, padding: 0, height: 26 }} /></label>
-            )}
-            <div className="meta">뒷표지 소개글·날개 글·책등 문구는 좌측 「표지 구성」 섹션에 쓰면 표지 PDF 에 조판됩니다.</div>
-            <div className="mbtns">
-              <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
-              <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
-            </div>
-            <div className="meta">표지 = 뒷표지+책등+앞표지(+날개) 통합 한 장. 위 픽셀 치수로 만들어 첨부하면 표지 PDF 로 변환됩니다.</div>
+      </>);
+      case 'bookk': return registerPanel('bookk');
+      case 'jakkawa': return registerPanel('jakkawa');
+      default: return null;
+    }
+  })();
+
+  return (
+    <div className="bkwrap">
+      {/* 생성 진행 모달 — 화면 중앙, 경과 시간 표시 */}
+      {building && (
+        <div className="modal-bg show" style={{ zIndex: 90 }}>
+          <div className="modal-card" style={{ width: 400, textAlign: 'center' }}>
+            <div className="spin" style={{ width: 38, height: 38, border: '4px solid #eee', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
+            <div style={{ fontWeight: 700, color: 'var(--strong)', marginBottom: 6 }}>{buildMsg || '생성 중…'}</div>
+            <div className="meta">내지 조판(Vivliostyle)은 원고 길이에 따라 수 분 걸릴 수 있습니다 · 경과 {buildElapsed}초</div>
           </div>
-        </details>
-        <details>
-          <summary>책 정보 (판권지 자동 생성)</summary>
-          <div className="bkform">
-            {META_FIELDS.map(([k, label]) => (
-              <label key={k}>{label}
-                <input type="text" defaultValue={k === 'title' ? (meta.title || dto.fileTitle || '') : (meta[k] || '')}
-                  key={dto.scriptPath + ':' + k + ':' + (meta[k] || '')}
-                  onBlur={(e) => setMeta(k, e.target.value.trim())} />
-              </label>
-            ))}
-            <div className="meta">값은 원고 상단 <code>&gt; 라벨: 값</code> 메타 줄로 저장됩니다.</div>
-          </div>
-        </details>
-        <div className="bkactions">
-          <button disabled={building} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 PDF (내지+표지)'}</button>
-          <button disabled={building} data-testid="bk-pdf-ebook" title="전자책 업로드용 PDF 한 파일 — 1쪽 앞표지 + 본문, 백면 없음, 안/바깥 같은 여백, 링크 살림, 판권은 전자책 ISBN·가격" onClick={() => buildPdf('ebook')}>📱 전자책 PDF</button>
-          <button className="ghost" disabled={building} title="같은 원고로 전자책(ePub 3.0) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭" onClick={buildEpubFile}>📱 ePub</button>
-          <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>
         </div>
+      )}
+      {/* ── 왼쪽: 메뉴 + 내용 + (맨 아래) 로그 ── */}
+      <div className="bkside" data-testid="bk-side">
+        <nav className="bknav" data-testid="bk-nav">
+          {TABS.map(([id, ic, name]) => (
+            <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
+              <span className="bkti">{ic}</span><span>{name}</span>
+              {badge[id] > 0 ? <em className="bkcnt" title="아직 남은 필수 항목">{badge[id]}</em> : null}
+            </button>
+          ))}
+        </nav>
         <div className="bkstatus">
-          총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b>
-          {(() => { const pf = (dto.platforms || []).find((p) => p.id === dto.platformId); return pf && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> · ⚠ {pf.label} 최소 {pf.minPages}쪽</span> : null; })()}
+          총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {pf ? pf.label : dto.platformId} {dto.trimId}
+          {pf && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> ⚠ 최소 {pf.minPages}쪽</span> : null}
         </div>
+        <div className="bkbody" key={tab}>{sideBody}</div>
+        <div className="bklog">{logBox}</div>
+      </div>
+
+      {/* ── 오른쪽: 실제 페이지 미리보기 ── */}
+      <div className="bkcenter">
+        <div className="bkbar">
+          <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
+          <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
+          <span className="bkpage">{pageInfo.cur > 0 ? pageInfo.cur : '–'} / {pageInfo.total || '–'}쪽</span>
+          <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
+          <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
+          <input type="range" title="페이지 빠른 이동(드래그)" min={1} max={Math.max(1, pageInfo.total || 0)} value={Math.max(1, pageInfo.cur || 1)}
+            style={{ width: 150 }} onChange={(e) => { const v = parseInt(e.target.value, 10); try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, v - 1); } catch (_) {} }} />
+          <span className="hdiv" />
+          <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
+          <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
+          <button className="ghost" onClick={() => applyZoom(zoomRef.current * 1.2)} title="확대">🔍＋</button>
+          <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
+          <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
+          <span className="grow" />
+          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · 휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
+          <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
+        </div>
+        <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
+        {edit && (
+          <div className="bkedit">
+            <div className="meta">{edit.file ? `${edit.file} — ` : '원고 '}수정 후 저장하면 원본 .md 에 반영되고 재조판됩니다</div>
+            <textarea value={edit.text} rows={Math.min(8, edit.text.split('\n').length + 1)}
+              onChange={(e) => setEdit({ ...edit, text: e.target.value })} autoFocus />
+            <div className="mbtns">
+              <button onClick={saveEdit}>저장</button>
+              <button className="ghost" onClick={() => setEdit(null)}>취소</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

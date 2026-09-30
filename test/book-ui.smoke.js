@@ -85,11 +85,41 @@ ${para}
     }, pagesAfter, { timeout: 60000 });
     console.log('· 장 복원 OK — 다시 체크하면 되돌아온다');
 
+    // 왼쪽 메뉴 — 7개 탭 + 로그가 왼쪽 맨 아래 + 표지 안내 쪽 없음(미리보기 1쪽 = 반표제지)
+    const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
+    if (tabs !== 7) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 7');
+    const geo = await win.evaluate(() => {
+      const side = document.querySelector('[data-testid=bk-side]').getBoundingClientRect();
+      const log = document.querySelector('#logwrap').getBoundingClientRect();
+      const nav = document.querySelector('[data-testid=bk-nav]').getBoundingClientRect();
+      return { sideL: side.left, sideR: side.right, sideB: side.bottom, logL: log.left, logR: log.right, logB: log.bottom, logT: log.top, navB: nav.bottom };
+    });
+    if (!(geo.logL >= geo.sideL - 1 && geo.logR <= geo.sideR + 1 && Math.abs(geo.logB - geo.sideB) < 3 && geo.logT > geo.navB)) throw new Error('로그가 왼쪽 패널 맨 아래가 아님 ' + JSON.stringify(geo));
+    console.log('· 왼쪽 메뉴 7탭 + 로그 왼쪽 하단 OK');
+    const firstPage = await win.evaluate(() => { const f = document.querySelector('.bkviewport'); return f && f.contentDocument ? f.contentDocument.body.innerText : ''; });
+    if (/표지 스프레드 안내/.test(firstPage)) throw new Error('표지 스프레드 안내 쪽이 아직 있음');
+    await win.click('[data-tab=layout]');
     // 「📁 작업용 파일 경로 → 파일명만」 옵션이 조판 패널에 있는지
     const hidePathsBox = win.locator('label:has-text("작업용 파일 경로") input[type=checkbox]');
     if (await hidePathsBox.count() !== 1) throw new Error('경로 축약 체크박스 없음');
     if (await hidePathsBox.isChecked()) throw new Error('경로 축약은 기본 OFF 여야 한다');
     console.log('· 경로 축약 옵션 OK (기본 OFF)');
+
+    // 📤 등록 도우미 — 부크크(종이책)·작가와(전자책) 탭: 점검표 · 복사값 · 빌드 버튼
+    for (const [tabId, label, btn] of [['bookk', '부크크', 'bk-pdf-print'], ['jakkawa', '작가와', 'bk-pdf-ebook']]) {
+      await win.click(`[data-tab=${tabId}]`);
+      await win.waitForSelector(`[data-testid=bk-reg-${tabId}]`, { timeout: 5000 });
+      const nChk = await win.locator(`[data-testid=bk-reg-${tabId}] .bkchk`).count();
+      if (nChk < 10) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
+      if (await win.locator(`[data-testid=bk-reg-${tabId}] .bksum-row`).count() < 8) throw new Error(`${label} 복사값 부족`);
+      if (await win.locator(`[data-testid=${btn}]`).count() !== 1) throw new Error(`${label} 빌드 버튼 없음`);
+      await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', `ui-${tabId}.png`) });
+      console.log(`· ${label} 등록 도우미 OK — 점검 ${nChk}항목`);
+    }
+    await win.click('[data-tab=info]');
+    if (await win.locator('.bkbadge.req').count() < 3 || await win.locator('.bkbadge.opt').count() < 3) throw new Error('필수/선택 배지 없음');
+    await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-info.png') });
+    await win.click('[data-tab=layout]');
 
     // 목차 쪽번호 — target-counter 가 해석돼 숫자가 나와야 한다('??' = anchor 불일치 회귀).
     //   (미리보기 URL 에 쿼리 캐시버스터를 붙이면 vivliostyle 같은문서 판정이 깨져 '??' 가 남)

@@ -84,6 +84,13 @@ const META_KEYS = {
   '특별섹션': 'specialSections', '특별 섹션': 'specialSections',
   // 책등 두께(mm) — 플랫폼 화면이 알려 준 값. 적으면 계산을 이긴다(부크크 「새종이책」 화면 값)
   '책등두께': 'spineMm', '책등 두께': 'spineMm',
+  // 플랫폼 등록 화면용 정보(조판에 안 들어간다 — 작가와·부크크 입력 항목)
+  '카테고리': 'category', '분야': 'category',
+  '키워드': 'keywords', '태그': 'keywords',
+  '한줄소개': 'tagline', '한줄 소개': 'tagline',
+  '표지재질': 'coverMaterial', '표지 재질': 'coverMaterial',
+  '내지색': 'printColor', '내지 색': 'printColor',
+  'ai사용': 'aiDisclosure', 'ai표기': 'aiDisclosure',
   '출판등록': 'regNo', '등록': 'regNo',
   '주소': 'address', '전화': 'phone', '대표전화': 'phone', '팩스': 'fax',
   '홈페이지': 'homepage', '이메일': 'email', 'email': 'email', '대표메일': 'email',

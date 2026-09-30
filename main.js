@@ -7998,24 +7998,12 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
     const { bundledFontCss } = require('./core/book/pdf-builder');
     rememberBookLayout(args.layout);
     const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
-    // 표지 안내 페이지(미리보기 전용) — 스프레드 치수 + 첨부 표지 이미지 정합 확인
-    const d0 = bookDTO(S.parsed);
-    const PP = require('./core/book/platform-presets');
-    const coverInfo = {
-      spread: d0.spread,
-      pages: d0.lastPages || 0,
-      flaps: d0.flaps,
-      paperLabel: (PP.getPaper(d0.paperId) || {}).label || d0.paperId,
-      coverImageUrl: (S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath)) ? mediaUrl(S.parsed.coverImagePath) : null,
-      coverName: S.parsed.coverImagePath ? path.basename(S.parsed.coverImagePath) : null,
-    };
     const { html } = buildBookHtml(S.parsed, {
       ...bookLayoutOpts(args),
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
       imageUrl: mediaUrl,
       fontCss: bundledFontCss(mediaUrl),
       sourceMap: true,
-      coverInfo,
     });
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
     fs.mkdirSync(dir, { recursive: true });
@@ -8279,6 +8267,7 @@ const BOOK_META_LABELS = {
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
   ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
+  ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
@@ -8556,6 +8545,35 @@ ipcMain.handle('open-logs', async () => {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
   shell.openPath(LOG_DIR);
   return LOG_DIR;
+});
+// 📤 등록 도우미 — 완성 파일 목록(크기 포함). 작가와 50MB 제한 등 사전 점검용.
+ipcMain.handle('book-outputs', () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return [];
+  const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+  const kinds = [['_내지.pdf', 'interior'], ['_표지.pdf', 'cover'], ['_전자책.pdf', 'ebookPdf'], ['.epub', 'epub']];
+  const out = [];
+  try {
+    for (const f of fs.readdirSync(root)) {
+      const k = kinds.find(([suf]) => f.endsWith(suf));
+      if (!k) continue;
+      const full = path.join(root, f); const st = fs.statSync(full);
+      out.push({ kind: k[1], name: f, path: full, bytes: st.size, mtime: st.mtimeMs });
+    }
+  } catch (_) {}
+  return out;
+});
+// 📤 등록 도우미 — 두 플랫폼 공식 주소만 외부 브라우저로 연다(로그인·최종 제출은 사람이 한다).
+ipcMain.handle('book-open-platform', (_e, u) => {
+  const s = String(u || '');
+  if (!/^https:\/\/([a-z0-9-]+\.)?(bookk\.co\.kr|jakkawa\.com)(\/|$)/.test(s)) return false;
+  shell.openExternal(s); return true;
+});
+// 파일 위치 보기(탐색기에서 선택)
+ipcMain.handle('book-reveal-file', (_e, p) => {
+  const s = String(p || '');
+  const root = S.outRoot || (S.scriptPath ? bookOutRoot(S.scriptPath, S.preset) : '');
+  if (!root || !path.resolve(s).startsWith(path.resolve(root))) return false;
+  shell.showItemInFolder(s); return true;
 });
 ipcMain.handle('open-folder', async () => {
   if (!S.outRoot) return;
