@@ -578,6 +578,21 @@ function fillSilent(project, workDir) {
   }
 }
 
+// 무음(dry) 만들기용 — 문장마다 ffmpeg 를 동기로 부르므로 긴 대본이면 main 이 수십 초 굳는다(IPC·화면이 그동안 멈춘다).
+//   몇 문장마다 이벤트 루프에 양보한다. 세계 분리 E2E(test/world-isolation.smoke.js)가 「제작 도중 다른 호출이 처리되는지」를 보려면 필요하다.
+async function fillSilentYield(project, workDir) {
+  fs.mkdirSync(workDir, { recursive: true });
+  let i = 0;
+  for (const s of project.sentences) {
+    const dur = Math.min(6.5, Math.max(2.2, 1.0 + (s.charCount || 0) * 0.16));
+    const mp3 = path.join(workDir, `${s.num}.mp3`);
+    makeSilentMp3(dur, mp3);
+    s.ttsAudioPath = mp3;
+    s.ttsDurationSec = dur;
+    if (++i % 4 === 0) await new Promise((r) => setImmediate(r));
+  }
+}
+
 // ── .vrew 내보내기 (편별) ───────────────────────────────
 async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxChars, playbackRate) {
   const opts = {
@@ -949,7 +964,7 @@ function sanitize(name) {
 
 module.exports = { speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
-  makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
+  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,

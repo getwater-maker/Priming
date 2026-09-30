@@ -110,16 +110,25 @@ if (!app.isReady()) {
 }
 
 let win = null;
-const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, mode: 'longform',
+const S = { ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false,   // parsed·scriptPath·outRoot·preset·mode 는 아래 「세계」 접근자(core/world-ctx.js)
   // 작업 소요시간(초) — 백엔드에서 단계별 측정해 DTO 로 전송(make-all 의 각 단계 시간도 실시간 표시).
   timings: { tts: 0, image: 0, video: 0, make: 0 },
   // 모드별 작업 큐 — 각 모드(롱폼/출판)가 대본 여러 개(items)를 순서대로 보관.
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
-  // 🎬 remotion — TSV 기반이라 대본 큐를 쓰지 않지만, activateMode 가 모드마다 큐를 찾으므로 자리를 둔다.
+  // 🎬 remotion — TSV 기반이라 대본 큐를 쓰지 않지만, 모드마다 큐를 찾는 코드가 있어 자리를 둔다.
   modes: { longform: { items: [], activeId: null }, remotion: { items: [], activeId: null }, book: { items: [], activeId: null } },
   // 🎬 리모션 — 강 여러 개를 담는 큐. S.tsv/S.imgTsv 는 그중 **활성 강**을 가리킨다.
   tsvList: [], tsvActiveId: null };
+
+// 🌐 세계(롱폼/출판) 분리 — 작업이 도는 중에 출판 탭을 열어도 작업이 출판 원고를 읽지 않게(로이 2026-10-01). 설명은 core/world-ctx.js 머리말.
+//   S.parsed·scriptPath·outRoot·preset·mode 는 「지금 실행 중인 흐름의 세계」 칸을 읽고 쓴다. IPC 호출은 아래 규칙으로 세계가 정해진다:
+//   ① 첫 인자 객체의 __world(명시) > ② 출판 채널(book-*·open-book-*) = 출판 > ③ 화면을 따르는 채널(큐·모드·폴더) = 보고 있는 세계 > ④ 그 밖(제작·편집 전부) = 롱폼.
+//   🔑 ④ 가 핵심이다 — 화면이 출판으로 바뀐 뒤에 오는 제작 호출(예: 이미지→비디오 두 번째 호출)도 롱폼 세계로 간다.
+const WORLD = require('./core/world-ctx').createWorlds(S, { worlds: ['longform', 'book'], norm: (w) => (w === 'book' ? 'book' : 'longform') });
+const VIEW_FOLLOW_CHANNELS = new Set(['set-mode', 'reset-project', 'list-queue', 'save-queue', 'load-queue', 'last-queue-info', 'restore-last-queue',
+  'select-queue-item', 'remove-queue-item', 'set-queue-settings', 'get-script-text', 'apply-script-text', 'open-folder', 'clear-saves']);
+WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ? 'book' : VIEW_FOLLOW_CHANNELS.has(ch) ? view : 'longform'));
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -131,7 +140,7 @@ function activeItem() {
 function syncActiveToS() {
   // 🔴 바꾸기 **전에** 밀린 자동저장을 옛 대본으로 쓴다 — 자동저장은 1.5초 뒤에 도는데, 그 사이 초기화·다른 대본 선택으로
   //   S.parsed 가 바뀌면 방금 고친 것이 저장되지 않고 사라졌다(2026-09-25 E2E 가 잡음). try = 앱 시작 중 호출(TDZ) 방어.
-  try { if (_asTimer && S.parsed) flushAutoSave(); } catch (_) {}
+  try { if (_asW().t && S.parsed) flushAutoSave(); } catch (_) {}
   const it = activeItem();
   S.parsed = it ? it.parsed : null;
   S.scriptPath = it ? it.scriptPath : null;
@@ -192,11 +201,6 @@ function setSingleItem(parsed, scriptPath, outRoot) {
 }
 // 모드 정규화 (롱폼/출판) — 옛 저장값('shorts'/'playlist')은 롱폼으로 흡수(제거된 모드, 2026-08-22).
 function normMode(m) { return m === 'book' ? 'book' : 'longform'; }
-// 지정 모드로 전환 — 그 모드 활성 항목을 S.* 로 복원(재파싱 없음).
-function activateMode(m) {
-  S.mode = normMode(m);
-  syncActiveToS();
-}
 // 현재 모드 기준 렌더러 DTO — 출판은 별도 형식, 그 외는 프로젝트 DTO.
 function currentDTO() {
   if (!S.parsed) return null;
@@ -390,7 +394,7 @@ app.whenReady().then(() => {
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
-  try { writeSnapshotSync(); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장
+  try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장(롱폼·출판 세계 모두)
   try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙 감시가 앱보다 오래 남지 않게
   try { if (S.flowEng && S.flowEng.context) S.flowEng.context.close(); } catch {}
   // 작업 중 강제 종료돼도 절전 차단이 남지 않게 확실히 해제(카운터 무시)
@@ -1736,6 +1740,7 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
     try {
       S.scriptPath = scriptPath;
       S.mode = 'longform';   // 영상 대본은 롱폼 단일 모드 (쇼츠 모드는 2026-08-22 제거)
+      WORLD.setView('longform');   // 열기 응답(r.mode)으로 화면이 롱폼으로 바뀐다 — 호출을 따르는 세계도 같이
       S.preset = preset;
       S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
@@ -4199,10 +4204,11 @@ function queueDTO() {
       })),
     };
   };
-  return { mode: S.mode, longform: mk('longform'), book: mk('book') };
+  return { mode: WORLD.getView(), longform: mk('longform'), book: mk('book') };
 }
 function pushDtoUpdate() {
-  try { if (win && !win.isDestroyed() && S.parsed) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
+  // 🌐 화면이 보고 있지 않은 세계(예: 출판 탭을 보는 중에 도는 롱폼 제작)의 DTO 는 화면으로 밀어 보내지 않는다 — 출판 화면이 롱폼 DTO 로 덮이던 것을 막는다(저장은 그대로).
+  try { if (win && !win.isDestroyed() && S.parsed && WORLD.isViewed()) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
 // 중단·종료 시 '생성 중' 스피너 고착 해제 — 어느 엔진 경로든(comfy 순차·genspark 배치·flow) 실제로 만들다 만 그룹의
@@ -5237,7 +5243,9 @@ function writeSnapshotSync() {
     return file;
   } catch (e) { log('자동저장 실패: ' + (e && e.message)); return null; }
 }
-let _asTimer = null, _asPendingSince = 0;
+// 자동저장 타이머는 세계마다 따로 — 한 벌이면 롱폼 제작이 1초마다 예약하는 동안 출판 쪽 예약이 계속 밀리거나 엉뚱한 세계 것을 저장한다.
+const _asWorlds = { longform: { t: null, since: 0 }, book: { t: null, since: 0 } };
+function _asW() { return _asWorlds[WORLD.key()]; }
 // 💾 대본(.md)을 고친 **바로 그 순간** 작업본도 함께 쓴다(2026-09-30 로이 「자막 수정하면 이미지·비디오가 사라진다」).
 //   .md 는 즉시 바뀌는데 작업본 저장은 1.5~8초 늦다 — 그 사이에 대본이 다시 읽히면(큐에서 다른 대본을 골랐다 돌아옴 · 앱을 바로 끔 · 다시 열기)
 //   작업본의 옛 문장과 .md 의 새 문장이 달라 「내용이 바뀐 그룹」으로 보고 **그림·영상을 되살리지 않았다**. 앱 안 수정은 늘 즉시 맞춘다.
@@ -5248,14 +5256,16 @@ function dtoByReply() { scheduleAutoSave(); }
 function scheduleAutoSave() {
   if (!S.parsed) return;
   const now = Date.now();
-  if (!_asPendingSince) _asPendingSince = now;
-  if (_asTimer) clearTimeout(_asTimer);
-  const wait = (now - _asPendingSince > 8000) ? 0 : 1500; // 최대 8초 안에는 무조건 기록(연속변경 기아 방지)
-  _asTimer = setTimeout(flushAutoSave, wait);
+  const A = _asW(), wk = WORLD.key();
+  if (!A.since) A.since = now;
+  if (A.t) clearTimeout(A.t);
+  const wait = (now - A.since > 8000) ? 0 : 1500; // 최대 8초 안에는 무조건 기록(연속변경 기아 방지)
+  A.t = setTimeout(() => WORLD.run(wk, flushAutoSave), wait);   // 예약한 세계에서 저장(타이머가 세계를 잃지 않게 명시)
 }
 function flushAutoSave() {
-  if (_asTimer) { clearTimeout(_asTimer); _asTimer = null; }
-  _asPendingSince = 0;
+  const A = _asW();
+  if (A.t) { clearTimeout(A.t); A.t = null; }
+  A.since = 0;
   const f = writeSnapshotSync();
   writeWorkspace(); // 큐 구성(목록/설정/상태)도 함께 저장
   if (f && win && !win.isDestroyed()) { try { win.webContents.send('autosaved', { file: f, at: Date.now() }); } catch {} }
@@ -5336,8 +5346,8 @@ function applyWorkspace(ws, opts = {}) {
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
-    S.mode = normMode(ws.mode);
-    syncActiveToS();
+    S.mode = normMode(ws.mode);   // 흐름 밖(시작 코드) 대입 = 화면 세계만 바꾼다
+    for (const w of WORLD.names) WORLD.run(w, syncActiveToS);   // 두 세계 모두 활성 항목 → 미러
     if (restored) log(`♻ 작업 큐 복원: ${restored}개 대본 (${S.mode})`);
     return restored;
   } catch (e) { log('큐 복원 실패: ' + (e && e.message)); return 0; }
@@ -5711,6 +5721,7 @@ ipcMain.handle('load-project', async () => {
   const projects = projectsFromSnapshot(snap);
   S.scriptPath = snap.scriptPath; S.outRoot = snap.outRoot;
   S.mode = 'longform';
+  WORLD.setView('longform');
   const fmt = 'longform';
   for (const pr of projects) { pr.mode = S.mode; if (!pr.format) pr.format = fmt; }
   S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode: S.mode };
@@ -5812,7 +5823,7 @@ async function runMakeAllCore(opts = {}) {
       const dirs = shortsDirs(outRoot, pr.shortsNum);
       const t0 = Date.now();
       try {
-        if (dry) P.fillSilent(pr, dirs.tts);
+        if (dry) await P.fillSilentYield(pr, dirs.tts);   // 무음은 문장 몇 개마다 이벤트 루프에 양보(IPC·화면이 굳지 않게)
         else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
         log(`✓ ${prLabel(pr)} 음성 완료`);
       } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
@@ -7828,11 +7839,15 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
 
 // 모드 전환 — 모드별로 보관된 대본을 활성화(재파싱·초기화 없음). 롱폼/출판 대본은 독립.
 ipcMain.handle('set-mode', (_e, args = {}) => {
-  storeActive();                 // 현재 모드 작업물 보관
-  activateMode(args.mode);       // 새 모드 것으로 전환
-  writeWorkspace();
-  log(`↔ 모드 전환: ${S.mode}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
-  return { dto: currentDTO(), queue: queueDTO() };
+  storeActive();                 // 지금 보던 세계의 작업물 보관
+  const nm = normMode(args.mode);
+  WORLD.setView(nm);             // 이 순간부터 화면을 따르는 호출은 새 세계로 간다 — 돌고 있는 작업은 자기 세계에 그대로 남는다
+  return WORLD.run(nm, () => {
+    syncActiveToS();             // 그 세계 활성 항목 → 미러(재파싱 없음)
+    writeWorkspace();
+    log(`↔ 모드 전환: ${nm}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
+    return { dto: currentDTO(), queue: queueDTO() };
+  });
 });
 
 // GPU 뮤텍스: 보이스디자인 중엔 음성변환·제작을 막는다(한 번에 하나만 GPU 무겁게).
@@ -7960,6 +7975,7 @@ function openBookPaths(paths, preset) {
     const files = sorted.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
     const parsed = BK.parseBookFiles(files, path.basename(sorted[0]).replace(/\.md$/i, ''));
     S.mode = 'book';
+    WORLD.setView('book');   // 열기 응답(r.mode)으로 화면이 출판으로 바뀐다
     // 출력 폴더 — 책제목(메타) 우선, 없으면 첫 파일명
     const folderKey = parsed.meta.title || path.basename(sorted[0]).replace(/\.md$/i, '');
     const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset);

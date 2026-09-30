@@ -126,9 +126,9 @@ contextBridge.exposeInMainWorld('api', {
   saveProject: () => ipcRenderer.invoke('save-project'),
   loadProject: () => ipcRenderer.invoke('load-project'),
   listQueue: () => ipcRenderer.invoke('list-queue'),
-  selectQueueItem: (id) => ipcRenderer.invoke('select-queue-item', { id }),
-  removeQueueItem: (id) => ipcRenderer.invoke('remove-queue-item', { id }),
-  setQueueSettings: (settings, keepChannel) => ipcRenderer.invoke('set-queue-settings', { settings, keepChannel: !!keepChannel }),
+  selectQueueItem: (id, world) => ipcRenderer.invoke('select-queue-item', { id, ...(world ? { __world: world } : {}) }),   // world = 호출이 돌 세계('longform'|'book') — 생략하면 화면이 보는 세계
+  removeQueueItem: (id, world) => ipcRenderer.invoke('remove-queue-item', { id, ...(world ? { __world: world } : {}) }),
+  setQueueSettings: (settings, keepChannel, world) => ipcRenderer.invoke('set-queue-settings', { settings, keepChannel: !!keepChannel, ...(world ? { __world: world } : {}) }),
   gensparkCooldown: () => ipcRenderer.invoke('genspark-cooldown'),
   grokCooldown: () => ipcRenderer.invoke('grok-cooldown'),
   findInPage: (args) => ipcRenderer.invoke('find-in-page', args),

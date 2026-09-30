@@ -317,14 +317,25 @@ const VD_SAMPLE_TEXT = {
 };
 
 export default function App() {
-  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
+  const [mode, setModeRaw] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
+  // 🌐 화면이 보는 모드를 ref 로도 든다 — setMode 는 비동기라, 바로 뒤의 setDto 가 「지금 어느 모드인가」를 정확히 알아야 한다.
+  const modeRef = useRef('longform');
+  const setMode = useCallback((m) => { if (typeof m === 'string') modeRef.current = m; setModeRaw(m); }, []);
   const isLf = mode === 'longform';
   const isBk = mode === 'book';
   const isRx = mode === 'remotion';   // 🎬 리모션 — 음성(mp3)만 만드는 모드
   // 제작 파이프라인(대본 열기·①음성~④완성·자막 분할바)이 **없는** 모드.
   // 🔑 세 곳을 각각 `!isBk` 로 적으면 모드가 늘 때 반드시 한 곳을 빠뜨린다 → 플래그 하나로 묶는다.
   const noProduction = isBk || isRx;
-  const [dto, setDto] = useState(null);
+  const [dto, setDtoRaw] = useState(null);
+  // 🌐 출판 화면을 보는 중에 끝난 롱폼 작업의 응답(또는 그 반대)은 **버린다** — 다른 세계의 DTO 로 화면이 덮이면 출판 화면이 빈 화면이 된다.
+  //   작업은 자기 세계에서 계속 돌고, 그 모드로 돌아오면 set-mode 가 최신 DTO 를 준다.
+  const setDto = useCallback((d) => {
+    if (d && typeof d === 'object' && typeof d !== 'function') {
+      if ((d.kind === 'book') !== (modeRef.current === 'book')) return;
+    }
+    setDtoRaw(d);
+  }, []);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
   // (채널 순서는 이제 편집창 「📋 채널」 탭에서 ▲▼ 로 바꾸고 **즉시 저장**한다 — 버퍼도 모달도 없다)
@@ -344,6 +355,7 @@ export default function App() {
   //   restoringItemRef: 항목 복원 중이면 프리셋/모드 기본값(배속·스타일·AI고지) 덮어쓰기를 건너뜀.
   const hasStoredRangeRef = useRef(false);
   const restoringItemRef = useRef(false);
+  const modeSwitchingRef = useRef(false);   // 모드 전환 중 — 헤더 값이 바뀌어도 활성 항목에 저장하지 않는다
   const [timings, setTimings] = useState({ tts: 0, image: 0, video: 0, make: 0 }); // 작업 소요시간(초)
   const [flowVideoModel, setFlowVideoModel] = useState('Veo 3.1 - Lite');
   const [flowCount, setFlowCount] = useState('1x');
@@ -957,7 +969,7 @@ export default function App() {
   // ── 상단 버튼 = 큐 전체(현재 모드) ── 그 단계를 큐의 모든 대본에 순차 적용. 기존 단건 핸들러를 항목마다 재사용(안정).
   //   stage: 'tts' | 'image' | 'video' | 'imgvid'(이미지 전부 → 비디오). 대본 위 버튼은 그대로 그 대본만.
   async function runStageQueue(stage) {
-    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 헤더값을 활성 항목에 반영
+    try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 헤더값을 활성 항목에 반영
     const items = (queue && queue[mode] && queue[mode].items) || [];
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
     const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오' }[stage] || stage;
@@ -973,7 +985,7 @@ export default function App() {
         if (queueAbortRef.current) { logline(`⏹ 큐 ${plabel} 중단 — 남은 ${items.length - k}편은 건너뜁니다`); break; }
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
-        try { await api.selectQueueItem(it.id); } catch (_) {}
+        try { await api.selectQueueItem(it.id, 'longform'); } catch (_) {}   // 🌐 제작 루프는 화면이 출판으로 바뀌어도 롱폼 세계로
         try {
           if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
           if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
@@ -981,7 +993,7 @@ export default function App() {
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
     }
-    try { const r = await api.selectQueueItem(origId); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
+    try { const r = await api.selectQueueItem(origId, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
     setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : `⚡ 큐 ${label} 완료`);
   }
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
@@ -1029,7 +1041,7 @@ export default function App() {
   }
   // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
   async function runMakeOrBatch() {
-    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
+    try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
     const L = (queue && queue.longform && queue.longform.items) || [];
     const total = L.length;
     if (total === 0) { setStatus('대본을 먼저 여세요'); return; }
@@ -1047,7 +1059,7 @@ export default function App() {
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
-    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 방금 고친 헤더(범위 등)를 지금 대본에 먼저 저장 — 디바운스 300ms 전에 눌러도 반영(v0.5.73)
+    try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 방금 고친 헤더(범위 등)를 지금 대본에 먼저 저장 — 디바운스 300ms 전에 눌러도 반영(v0.5.73)
     try {
       // 비디오·이미지 엔진은 헤더값(이번 실행 공통)으로 전달 — 큐 항목별 stale 값 무시(헤더 '없음'이면 전 대본 영상 없음)
       // 채널(presetName)·배속·AI고지도 함께 보낸다 — 항목에 저장된 값이 우선이고, **없을 때만** 이 헤더값이
@@ -2258,7 +2270,7 @@ export default function App() {
       // 옛 저장값(startMode:'shorts'|'playlist')은 롱폼으로 정규화 — 제거된 모드 화면에 진입하지 않게.
       const _sm0 = p && p.startMode;
       const sm = (_sm0 === 'book' || _sm0 === 'remotion') ? _sm0 : 'longform';
-      setMode(sm);
+      await switchMode(sm, { keepChannel: true });   // 🌐 main 의 「보는 세계」도 함께 바꾼다(UI 만 바뀌면 출판 호출이 롱폼 세계로 간다)
     } catch {}
   }
   // 모달 내 참조음성 미리듣기
@@ -3519,7 +3531,8 @@ export default function App() {
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
     if (!aid) return;
-    const t = setTimeout(() => { api.setQueueSettings(currentSettings(), true).catch(() => {}); }, 300); // keepChannel: 채널은 열 때 값 유지(다음 대본용 채널 선택이 이 항목을 오염시키지 않게)
+    if (modeSwitchingRef.current) return;   // 모드 전환 중(채널·기본값이 바뀌는 중)엔 저장하지 않는다 — 전환이 끝나 값이 제자리를 찾으면 다시 돈다
+    const t = setTimeout(() => { api.setQueueSettings(currentSettings(), true, mode === 'book' ? 'book' : 'longform').catch(() => {}); }, 300); // keepChannel: 채널은 열 때 값 유지(다음 대본용 채널 선택이 이 항목을 오염시키지 않게)
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice]);
@@ -5153,24 +5166,39 @@ export default function App() {
     </>
   );
 
-  async function switchMode(m) {
+  async function switchMode(m, opts = {}) {
     // 🔴 새 모드를 여기 안 넣으면 **버튼을 눌러도 롱폼으로 되돌아간다**(v0.3.50 과 같은 계열의 조용한 되돌림).
     const nm = (m === 'book' || m === 'remotion') ? m : 'longform';
     if (nm === mode) return;
+    const fromBook = mode === 'book';
     hasStoredRangeRef.current = false; restoringItemRef.current = false; // 모드 전환 = 그 모드 기본값 계산 허용
-    // 📖 출판 탭 = 「출판」 채널로 자동 선택(로이 2026-10-01). 나올 땐 들어오기 전 채널로 되돌린다.
-    //   출판 채널 = startMode 가 book 인 채널 중 이름이 「출판」인 것(없으면 첫 book 채널). 없으면 건드리지 않는다.
-    if (nm === 'book') {
-      const bk = (presets || []).find((p) => p.startMode === 'book' && p.name === '출판') || (presets || []).find((p) => p.startMode === 'book');
-      if (bk && bk.name !== presetName) { preBookPresetRef.current = presetName; setPresetName(bk.name); }
-    } else if (mode === 'book' && preBookPresetRef.current) {
-      const back = preBookPresetRef.current; preBookPresetRef.current = '';
-      if ((presets || []).some((p) => p.name === back)) setPresetName(back);
-    }
+    modeSwitchingRef.current = true;   // 채널·기본값이 바뀌는 동안 헤더 값을 활성 항목에 저장하지 않는다(돌고 있는 작업의 설정을 건드리지 않게)
+    // 롱폼으로 돌아갈 땐 그 대본이 저장해 둔 설정을 그대로 되살린다 — 채널 기본값이 덮지 않게 미리 표시
+    const _q0 = queue && queue[nm];
+    const _it0 = _q0 && (_q0.items || []).find((x) => x.id === _q0.activeId);
+    if (fromBook && nm !== 'book' && _it0 && _it0.settings) restoringItemRef.current = true;
     setMode(nm);
     // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/출판 대본은 독립.
-    try { const r = await api.setMode({ mode: nm }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
-    catch (e) { logline('모드 전환 오류: ' + e.message); }
+    try {
+      const r = await api.setMode({ mode: nm });
+      if (r && r.queue) setQueue(r.queue);
+      setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : '');
+      if (!opts.keepChannel) {
+        // 📖 출판 탭 = 「출판」 채널로 자동 선택(로이 2026-10-01). 나올 땐 그 모드 대본이 저장해 둔 설정(없으면 들어오기 전 채널)으로 되돌린다.
+        //   main 이 새 모드로 바뀐 **뒤에** 바꾼다 — 그래야 바뀐 값이 다른 모드의 활성 항목으로 저장되지 않는다.
+        if (nm === 'book') {
+          const bk = (presets || []).find((p) => p.startMode === 'book' && p.name === '출판') || (presets || []).find((p) => p.startMode === 'book');
+          if (bk && bk.name !== presetName) { preBookPresetRef.current = presetName; setPresetName(bk.name); }
+        } else if (fromBook) {
+          const q1 = r && r.queue && r.queue[nm];
+          const it1 = q1 && (q1.items || []).find((x) => x.id === q1.activeId);
+          if (it1 && it1.settings) applySettings(it1.settings);
+          else if (preBookPresetRef.current && (presets || []).some((p) => p.name === preBookPresetRef.current)) setPresetName(preBookPresetRef.current);
+          preBookPresetRef.current = '';
+        }
+      }
+    } catch (e) { logline('모드 전환 오류: ' + e.message); }
+    setTimeout(() => { modeSwitchingRef.current = false; }, 50);   // 값이 제자리를 찾은 뒤 저장 재개(그 사이 바뀐 값은 새 모드의 항목으로 저장된다)
   }
 
   // 출판 원고(.md) 열기 — book-parser 로 파싱해 출판 큐에 적재.
