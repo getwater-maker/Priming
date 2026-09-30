@@ -2416,8 +2416,14 @@ export default function App() {
   }
   async function ytImport() {
     const r = await api.ytImportClient();
-    if (r && r.ok) setSettingsMsg(`✅ 연결 파일을 가져왔습니다 (프로젝트 ${r.projectId || '?'})${r.cleared ? ` — 다른 프로젝트라 기존 채널 연결 ${r.cleared}개를 지웠습니다. 다시 연결하세요.` : ' — 이제 「🔗 채널 연결」을 누르세요.'}`);
+    if (r && r.ok) setSettingsMsg(`✅ 내 프로젝트 파일을 가져왔습니다 (프로젝트 ${r.projectId || '?'})${r.cleared ? ` — 다른 프로젝트라 기존 채널 연결 ${r.cleared}개를 지웠습니다. 다시 연결하세요.` : ' — 이제 「🔗 채널 연결」을 누르세요.'}`);
     else if (r && !r.cancelled) setSettingsMsg(`❌ ${r.error}`);
+    ytLoad();
+  }
+  async function ytUseDefault() {
+    if (!uiConfirm('내 프로젝트 파일 대신 Priming 기본 연결을 쓸까요?\n(내 프로젝트로 연결한 채널은 다시 연결해야 합니다)')) return;
+    const r = await api.ytUseDefaultClient();
+    setSettingsMsg(r && r.ok ? `↩ Priming 기본 연결로 돌아왔습니다${r.cleared ? ` — 기존 채널 연결 ${r.cleared}개는 다시 연결하세요.` : '.'}` : `❌ ${(r && r.error) || '실패'}`);
     ytLoad();
   }
   async function ytConnect() {
@@ -4693,9 +4699,15 @@ export default function App() {
               {ytSt && !ytSt.available && <div className="meta" style={{ color: '#b03a3a', marginBottom: 8 }}>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</div>}
               <div data-testid="yt-client" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
-                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 연결 파일</label>
-                  <span className="meta" style={{ flex: 1 }}>{ytSt && ytSt.hasClient ? <>✅ 가져옴 · 프로젝트 <b>{ytSt.projectId || '?'}</b></> : <>구글 클라우드에서 받은 <b>client_secret_….json</b> 파일을 한 번만 고르세요(다운로드 폴더에 있습니다).</>}</span>
-                  <button className={ytSt && ytSt.hasClient ? 'ghost' : ''} style={{ flex: '0 0 auto' }} onClick={ytImport}>📥 파일 가져오기</button>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 앱 연결</label>
+                  <span className="meta" style={{ flex: 1 }} data-testid="yt-source">{ytSt && ytSt.hasClient
+                    ? (ytSt.clientSource === 'own'
+                      ? <>✅ <b>내 구글 프로젝트</b>({ytSt.projectId || '?'}) 사용 중 — 업로드 한도는 내 프로젝트의 것입니다(앱 상한 없음).</>
+                      : <>✅ <b>Priming 기본 연결</b>이 들어 있습니다 — 파일을 가져올 필요 없습니다. 오늘 이 PC <b>{ytSt.uploadsToday || 0}/{ytSt.dailyCap || '?'}편</b>(구글 하루 한도를 모든 사용자가 나눠 씁니다).</>)
+                    : <>이 앱에 연결 정보가 없습니다 — 아래 「고급」에서 내 구글 프로젝트 파일(client_secret_….json)을 가져오세요.</>}</span>
+                  {ytSt && ytSt.clientSource === 'own'
+                    ? <button className="ghost" style={{ flex: '0 0 auto' }} data-testid="yt-use-default" onClick={ytUseDefault}>↩ 기본으로</button>
+                    : <button className="ghost" style={{ flex: '0 0 auto' }} data-testid="yt-import" title="고급 — 내 구글 클라우드 프로젝트의 client_secret_….json 을 쓰면 업로드 한도를 나 혼자 씁니다(대량 업로드용)" onClick={ytImport}>고급: 내 프로젝트 파일…</button>}
                 </div>
               </div>
               <div data-testid="yt-channels" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>

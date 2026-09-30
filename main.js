@@ -2787,10 +2787,16 @@ function maybeAutoUpload(pr, file, preset) {
   enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr) });
 }
 ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
-// 📥 연결 파일 가져오기 — 사용자가 폴더에 복사할 필요 없다(앱이 받아 암호화 저장).
+// ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
+ipcMain.handle('yt-use-default-client', () => {
+  const out = require('./core/youtube-upload').useDefaultClient();
+  if (out.ok) log(`↩ 유튜브 연결 — 앱 기본(Priming Upload)으로 돌아갔습니다${out.cleared ? ` (다른 프로젝트라 기존 채널 연결 ${out.cleared}개를 지웠습니다 — 다시 연결하세요)` : ''}`);
+  return out;
+});
+// 📥 (고급) 내 구글 프로젝트 파일 가져오기 — 기본 연결이 앱에 들어 있어 보통은 필요 없다. 자기 한도를 쓰고 싶을 때만.
 ipcMain.handle('yt-import-client', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: '유튜브 연결 파일 고르기 (client_secret_….json)', properties: ['openFile'],
+    title: '내 구글 프로젝트 연결 파일 고르기 (client_secret_….json) — 고급', properties: ['openFile'],
     defaultPath: defaultDownloadDir() || undefined, filters: [{ name: '유튜브 연결 파일', extensions: ['json'] }],
   });
   if (r.canceled || !r.filePaths[0]) return { ok: false, cancelled: true };

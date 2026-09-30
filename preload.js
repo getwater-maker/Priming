@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('api', {
   // ⬆ 유튜브 비공개 업로드 (core/youtube-upload.js)
   ytStatus: () => ipcRenderer.invoke('yt-status'),
   ytImportClient: () => ipcRenderer.invoke('yt-import-client'),
+  ytUseDefaultClient: () => ipcRenderer.invoke('yt-use-default-client'),
   ytConnect: () => ipcRenderer.invoke('yt-connect'),
   ytDisconnect: (id) => ipcRenderer.invoke('yt-disconnect', id),
   ytReorder: (ids) => ipcRenderer.invoke('yt-reorder', ids),

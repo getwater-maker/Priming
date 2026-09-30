@@ -104,7 +104,7 @@ function importClient(filePath) {
   const p = parseClientJson(text);
   if (!p.ok) return p;
   const d = _load();
-  const prev = _getClient(d);
+  const prev = _getClient(d);   // 지금 쓰는 것(앱 기본 포함) — 다른 프로젝트로 바꾸면 그 위의 채널 연결은 못 쓴다
   d.client = ci.enc(JSON.stringify({ clientId: p.clientId, clientSecret: p.clientSecret, projectId: p.projectId }));
   // 🔑 다른 프로젝트의 파일로 바꾸면 기존 채널 연결(갱신 토큰)은 **그 프로젝트 것**이라 못 쓴다 → 비운다(재연결 안내).
   let cleared = 0;
@@ -114,21 +114,64 @@ function importClient(filePath) {
   return { ok: true, projectId: p.projectId, cleared };
 }
 
-function _getClient(d = _load()) {
+// 🎬 기본 연결(앱에 들어 있는 Priming Upload 클라이언트 — core/youtube-default-client) · 자기 프로젝트 파일이 있으면 그것이 먼저(자기 한도).
+//   v0.5.91(2026-09-30 로이): 「파일 옮기기」 없이 채널 연결만 하면 되게. 테스트는 _setDefaultClient 로 바꾼다.
+let _defaultOverride;   // undefined = 실제 파일
+function _setDefaultClient(c) { _defaultOverride = c; }
+function _defaultClient() {
+  if (_defaultOverride !== undefined) return _defaultOverride;
+  try {
+    const c = require('./youtube-default-client');
+    return c && c.clientId && c.clientSecret ? { clientId: String(c.clientId), clientSecret: String(c.clientSecret), projectId: String(c.projectId || '') } : null;
+  } catch (_) { return null; }
+}
+function _ownClient(d = _load()) {
   const ci = _cipher();
   if (!ci || !d.client) return null;
   try { const c = JSON.parse(ci.dec(d.client) || 'null'); return c && c.clientId && c.clientSecret ? c : null; } catch (_) { return null; }
 }
+/** 지금 쓰는 클라이언트 = 자기 것 > 앱 기본 */
+function _getClient(d = _load()) { return _ownClient(d) || _defaultClient(); }
+
+// 📊 기본(공용) 클라이언트를 쓸 때의 **PC 하루 업로드 상한** — 구글 한도는 프로젝트 하나에 걸려 모든 사용자가 나눠 쓴다.
+//   한 PC 가 다 써 버리지 않게 앱이 센다(KST 하루). 자기 프로젝트 파일을 쓰면 앱 상한은 없다(구글 한도만).
+const DEFAULT_DAILY_CAP = 30;
+function uploadsToday() {
+  const day = _kst().slice(0, 10);
+  let n = 0;
+  for (const r of Object.values(_uploads())) if (r && typeof r.at === 'string' && r.at.startsWith(day)) n++;
+  return n;
+}
+function _capState(d = _load()) {
+  const own = !!_ownClient(d);
+  const cap = own ? null : DEFAULT_DAILY_CAP;
+  const n = uploadsToday();
+  return { source: own ? 'own' : (_defaultClient() ? 'default' : null), cap, today: n, full: cap != null && n >= cap };
+}
 
 /** UI 용 상태 — 비밀값은 하나도 내보내지 않는다. */
+/** ↩ 자기 프로젝트 파일을 버리고 앱 기본으로 돌아간다(다른 프로젝트면 채널 연결을 비운다) */
+function useDefaultClient() {
+  const d = _load();
+  const prev = _getClient(d);
+  if (!d.client) return { ok: true, cleared: 0 };
+  d.client = '';
+  const now = _defaultClient();
+  let cleared = 0;
+  if (prev && (!now || prev.clientId !== now.clientId)) { cleared = Object.keys(d.channels).length; d.channels = {}; }
+  _tok.clear();
+  return _save(d) ? { ok: true, cleared } : { ok: false, error: '설정 파일 저장 실패' };
+}
+
 function status() {
   const d = _load();
   const c = _getClient(d);
+  const cs = _capState(d);
   const channels = Object.keys(d.channels).map((id) => {
     const x = d.channels[id] || {};
     return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken };
   });
-  return { available: available(), hasClient: !!c, projectId: c ? c.projectId : '', channels };
+  return { available: available(), hasClient: !!c, projectId: c ? c.projectId : '', clientSource: cs.source, dailyCap: cs.cap, uploadsToday: cs.today, channels };
 }
 
 // ── 채널 연결(OAuth 루프백 + PKCE) ───────────────────────────────────────────
@@ -371,6 +414,7 @@ async function uploadVideo(o = {}) {
   let size;
   try { size = fs.statSync(o.file).size; } catch (e) { return { ok: false, error: `영상 파일이 없습니다: ${o.file}` }; }
   if (!size) return { ok: false, error: '영상 파일이 비어 있습니다.' };
+  { const cs = _capState(); if (cs.full) return { ok: false, capReached: true, error: `이 PC 의 오늘 업로드 상한(${cs.cap}편)에 도달했습니다 — 공용 유튜브 연결의 하루 한도를 모두가 나눠 쓰기 때문입니다. 내일 다시 올리거나, ⚙ 설정 → ▶ 유튜브 → 고급에서 내 구글 프로젝트 파일을 쓰면 제한이 없습니다.` }; }
   const title = cleanTitle(o.title);
   if (!title) return { ok: false, error: '제목이 비어 있습니다.' };
   const meta = {
@@ -513,7 +557,7 @@ function reorderChannels(ids) {
 }
 
 module.exports = {
-  SCOPES, available, status, parseClientJson, importClient, connectChannel, disconnect, accessToken, reorderChannels,
+  SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels,
   uploadVideo, findUploaded, cleanTitle, cleanDescription, cleanTags, explainApiError,
-  authFile, uploadsFile, _setEndpoints, _setCrypto,
+  authFile, uploadsFile, _setEndpoints, _setCrypto, _setDefaultClient,
 };

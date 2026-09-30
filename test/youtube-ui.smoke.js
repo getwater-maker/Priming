@@ -29,7 +29,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForTimeout(500);
     await win.locator('.modal-card.wide button:has-text("▶ 유튜브")').first().click();
     await win.waitForTimeout(500);
-    ok(await win.locator('[data-testid="yt-client"] button:has-text("📥 파일 가져오기")').count() === 1, '① 「📥 파일 가져오기」 버튼');
+    ok(await win.locator('[data-testid="yt-client"] [data-testid="yt-source"]').count() === 1 && /Priming 기본 연결|내 구글 프로젝트/.test(await win.locator('[data-testid="yt-source"]').innerText()), '① 「앱 연결」 — Priming 기본 연결이 들어 있어 파일을 가져올 필요가 없다(v0.5.91)');
+    ok(await win.locator('[data-testid="yt-client"] [data-testid="yt-import"], [data-testid="yt-client"] [data-testid="yt-use-default"]').count() === 1, '고급: 내 프로젝트 파일… / ↩ 기본으로 버튼 한 개');
     const conn = win.locator('[data-testid="yt-channels"] button:has-text("🔗 채널 연결")');
     ok(await conn.count() === 1, '② 「🔗 채널 연결」 버튼');
     ok((await conn.isDisabled()) === !st.hasClient, '연결 파일이 없으면 채널 연결 버튼이 잠긴다');

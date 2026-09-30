@@ -315,7 +315,7 @@ const server = http.createServer(async (req, res) => {
   ok(!Object.keys(pj.dependencies || {}).some((k) => /googleapis|google-auth/.test(k)), 'npm 의존성 추가 없음(라이트 업데이트 유지)');
   const leak = [];
   (function walk(d, depth) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (['node_modules', '.git', 'dist', 'output'].includes(e.name)) continue; const p = path.join(d, e.name); if (e.isDirectory() && depth < 4) walk(p, depth + 1); else if (/^client_secret.*\.json$/i.test(e.name)) leak.push(p); } })(ROOT, 0);
-  ok(leak.length === 0, '🔴 저장소 안에 client_secret 파일 없음(공개 GitHub)');
+  ok(leak.length === 0, '🔴 저장소 안에 client_secret_….json 파일 없음(공개 GitHub) — 기본 연결은 core/youtube-default-client.js 한 곳에만(v0.5.91 로이 결정: 앱에 넣어 배포)');
 
   server.close();
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
