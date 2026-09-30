@@ -316,6 +316,8 @@ const VD_SAMPLE_TEXT = {
   vi: 'Ngày xửa ngày xưa, ở một ngôi làng nhỏ bên bờ sông, có một chàng trai nghèo nhưng rất tốt bụng. Mỗi sáng, anh dậy thật sớm và lên núi nhặt củi.',
 };
 
+// 헤더 버전 표시 — 0.5.103 → 5.10 (앞 「0.」 생략 · 소수 둘째 자리까지 · 로이 2026-10-01). 전체 버전은 마우스를 올리면.
+const shortVer = (v) => { const m = /^0\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? m[1] + '.' + String(m[2]).slice(0, 2) : String(v || ''); };
 export default function App() {
   const [mode, setModeRaw] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   // 🌐 화면이 보는 모드를 ref 로도 든다 — setMode 는 비동기라, 바로 뒤의 setDto 가 「지금 어느 모드인가」를 정확히 알아야 한다.
@@ -3648,7 +3650,7 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className="vhead">
         <div className="menubar">
-            <h1>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{String(appVersion).replace(/^0\./, '')}</span> : null}</h1>
+            <h1>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
@@ -5029,7 +5031,7 @@ export default function App() {
       )}
       {urlProg && (
         <UrlProgress prog={urlProg}
-          onAbort={() => { abort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
+          onAbort={() => { api.dlAbort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setUrlProg(null)} />
       )}
       {urlOpen && (

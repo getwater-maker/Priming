@@ -1095,6 +1095,9 @@ function txtWithHead(text, head) {
   return `${String(head.url).trim()}\n${title}\n\n${body}\n`;
 }
 
+// 📥 받기·전사(대본다운·STT)는 **자기 중단 플래그**를 쓴다(v0.5.104) — 제작(S.abort)과 공유하면 받기를 시작할 때 제작의 중단 요청이 풀리고,
+//   받기 패널의 ⏹ 가 돌고 있는 제작까지 멈췄다. 헤더 ■ 중단은 제작만 멈추고(제작이 없을 때만 받기도), 받기 패널 ⏹ 는 받기만 멈춘다.
+let _dlAbort = false, _dlActive = 0;
 async function transcribeToTxt(file, opts = {}) {
   const media = require('./core/media-utils');
   const asr = require('./tts/asr-client');
@@ -1112,13 +1115,15 @@ async function transcribeToTxt(file, opts = {}) {
       await media.extractAudioMp3(file, tmpAudio);
       audioPath = tmpAudio;
     }
-    const text = await asr.transcribeLong(audioPath, {
-      abortSignal: () => S.abort,
+    // 🎮 전사는 이 PC 의 GPU(Whisper, TTS 와 같은 서버)를 쓴다 — 제작(음성 변환)이 도는 중이면 그 단계가 끝난 뒤 차례로(레인 localGpu).
+    //   겹치면 TTS 문장이 서버 대기 때문에 시간초과로 빠질 수 있다. 받기(다운로드)는 그대로 계속되고 전사만 줄을 선다.
+    const text = await _runOnLanes(['localGpu'], 'STT 전사', () => asr.transcribeLong(audioPath, {
+      abortSignal: () => _dlAbort,
       onProgress: (p) => {
         if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`);
         if (opts.onChunk && p) { try { opts.onChunk(p); } catch {} }
       },
-    });
+    }));
     fs.writeFileSync(outTxt, txtWithHead(text, opts.head), 'utf8');
     log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
     return { ok: true, txt: outTxt, chars: String(text || '').length };
@@ -1148,12 +1153,12 @@ ipcMain.handle('stt-transcribe', async () => {
   });
   if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
 
-  S.abort = false;
+  _dlAbort = false;
   await warnAsrIfDown();
 
   const results = [];
   for (const file of r.filePaths) {
-    if (S.abort) { log('⏹ STT 중단됨'); break; }
+    if (_dlAbort) { log('⏹ STT 중단됨'); break; }
     log(`🎧 STT 시작: ${path.basename(file)}`);
     try {
       const t = await transcribeToTxt(file);
@@ -1225,7 +1230,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   try { fs.mkdirSync(outDir, { recursive: true }); }
   catch (e) { return { ok: false, error: `저장 폴더를 만들 수 없습니다 — ${outDir} (${e.message})` }; }
 
-  S.abort = false;
+  _dlAbort = false;
   const results = [];
 
   // 📊 진행 상황 패널(2026-09-23 로이 「진행과정을 전혀 알 수 없네」) — 로그만으로는 받기·전사가
@@ -1253,7 +1258,8 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   };
   sendProg(true);
 
-  return await withAwake('URL 다운로드·STT', async () => {
+  _dlActive++;
+  try { return await withAwake('URL 다운로드·STT', async () => {
     let tool;
     try {
       tool = await MD.ensureYtDlp({ onLog: log });
@@ -1271,10 +1277,10 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     prog.phase = channelMode ? 'listing' : 'prepare'; sendProg(true);
     if (channelMode) {
       for (const channelUrl of urls) {
-        if (S.abort) break;
+        if (_dlAbort) break;
         try {
           log(`📺 채널 영상 목록 확인: ${channelUrl}`);
-          const channel = await MD.listChannelVideos(channelUrl, { tool, abortSignal: () => S.abort, onLog: log });
+          const channel = await MD.listChannelVideos(channelUrl, { tool, abortSignal: () => _dlAbort, onLog: log });
           const channelDir = path.join(outDir, MD.safeFolderName(channel.title));
           log(`  ✓ 「${channel.title}」 일반 영상 ${channel.entries.length}개 · 저장 ${channelDir}`);
           for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir });
@@ -1285,7 +1291,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       }
       // 🔴 채널 전체는 편수를 보여 주고 한 번 묻는다(2026-09-26) — 「📋 링크 붙여넣기」는 누르자마자 시작하고,
       //   체크가 켜진 채 영상 주소를 붙여넣으면 그 채널 전체(실측 505편)가 확인 없이 시작됐다.
-      if (jobs.length && !S.abort && !process.env.PM_UI_SMOKE) {
+      if (jobs.length && !_dlAbort && !process.env.PM_UI_SMOKE) {
         const names = [...new Set(jobs.map((j) => j.channelTitle))].join(' · ');
         const ans = await dialog.showMessageBox(win, {
           type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
@@ -1324,7 +1330,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       prog.stt.pending = sttPending; sendProg();
       sttChain = sttChain.then(async () => {
         try {
-          if (S.abort) { slots[i] = { url: t.done.url, ok: false, error: '중단됨' }; return; }
+          if (_dlAbort) { slots[i] = { url: t.done.url, ok: false, error: '중단됨' }; return; }
           log(`  🎧 ${t.label} STT 시작: ${path.basename(t.mediaFile)}${sttPending > 1 ? ` (전사 대기 ${sttPending - 1}건)` : ''}`);
           prog.stt.cur = { idx: i + 1, title: t.done.title || '', chunk: 0, chunks: 0, startedAt: Date.now() };
           prog.stt.pending = sttPending - 1; sendProg(true);
@@ -1346,7 +1352,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     };
 
     for (let i = 0; i < jobs.length; i++) {
-      if (S.abort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
+      if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
       const job = jobs[i];
       const url = job.url;
       const itemOutDir = job.outDir || outDir;
@@ -1356,7 +1362,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
-        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => S.abort, onLog: log });
+        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log });
         const info = pr0.info;
         const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
@@ -1369,7 +1375,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const r = await MD.download(dlUrl, {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
           filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
-          ffmpegDir: ffDir, abortSignal: () => S.abort, onLog: log,
+          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log,
           onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
         });
         prog.dl.done++; prog.dl.pct = 100; prog.dl.stage = 'done'; sendProg(true);
@@ -1418,7 +1424,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
       }
     }
-    prog.dl.idx = 0; prog.dl.stage = ''; prog.phase = S.abort ? 'aborting' : (sttPending ? 'stt-only' : 'running');
+    prog.dl.idx = 0; prog.dl.stage = ''; prog.phase = _dlAbort ? 'aborting' : (sttPending ? 'stt-only' : 'running');
     sendProg(true);
     if (sttPending) log(`⬇ 다운로드 끝 — 남은 전사 ${sttPending}건을 마저 진행합니다`);
     await sttChain;
@@ -1427,10 +1433,10 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     const okN = results.filter((x) => x.ok).length;
     const subN = results.filter((x) => x.from === 'subtitle').length;
     log(`🔗 완료: 성공 ${okN}/${results.length}${subN ? ` (자막 ${subN}건은 STT 생략)` : ''}`);
-    prog.phase = S.abort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
+    prog.phase = _dlAbort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
     if (okN) { try { shell.openPath(outDir); } catch {} }
     return { ok: true, results, outDir };
-  });
+  }); } finally { _dlActive--; }
 });
 
 // 🎵 mp3 추출 — 영상(또는 다른 오디오)에서 mp3 를 뽑아 **원본과 같은 폴더에 같은 이름 .mp3** 로 저장.
@@ -1446,11 +1452,11 @@ ipcMain.handle('extract-mp3', async () => {
   });
   if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
   const media = require('./core/media-utils');
-  S.abort = false;
+  _dlAbort = false;
   const results = [];
   let lastDir = '';
   for (const file of r.filePaths) {
-    if (S.abort) { log('⏹ mp3 추출 중단됨'); break; }
+    if (_dlAbort) { log('⏹ mp3 추출 중단됨'); break; }
     const dir = path.dirname(file);
     const base = path.basename(file, path.extname(file));
     const ext = path.extname(file).toLowerCase();
@@ -6161,8 +6167,11 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
 // 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
+// 📥 받기·전사 패널의 ⏹ — 제작(S.abort)은 건드리지 않는다.
+ipcMain.handle('dl-abort', () => { _dlAbort = true; log('⏹ 받기·전사 중단 요청 — 현재 단계 마치는 대로 멈춥니다'); return true; });
 ipcMain.handle('abort', () => {
   S.abort = true;
+  if (_awake.n - _dlActive <= 0) _dlAbort = true;   // 받기·전사만 돌고 있을 때는 헤더 ■ 이 그것도 멈춘다(제작이 같이 돌면 제작만)
   // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
   try { if (S.flowEng && typeof S.flowEng.stop === 'function') S.flowEng.stop(); } catch {}
   // 중단 즉시 '생성 중' 스피너 고착 해제 — 만들다 만 그룹 카드가 계속 스피너를 돌리지 않게.

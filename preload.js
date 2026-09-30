@@ -181,6 +181,7 @@ contextBridge.exposeInMainWorld('api', {
   exportPremiere: (args) => ipcRenderer.invoke('export-premiere', args),
   makeAll: (args) => ipcRenderer.invoke('make-all', args),
   abort: () => ipcRenderer.invoke('abort'),
+  dlAbort: () => ipcRenderer.invoke('dl-abort'),   // 받기·전사만 멈춘다(제작은 그대로)
   resetProject: () => ipcRenderer.invoke('reset-project'),
   regenGroup: (args) => ipcRenderer.invoke('regen-group', args),
   ttsGroup: (args) => ipcRenderer.invoke('tts-group', args),
