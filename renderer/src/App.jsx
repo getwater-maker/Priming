@@ -1826,12 +1826,13 @@ export default function App() {
       if (!r || !r.ok) {
         // 🔑 여기가 「✏ 대본 수정」의 탈출구다 — 지침 줄을 사이에 둔 문장·표처럼 화면에서 못 고치는 경우.
         const msg = (r && r.error) || '문장을 고치지 못했습니다.';
+        sentDoneRef.current = false;   // 🔓 거절돼도 열린 편집칸은 계속 고칠 수 있다(예전엔 「처리함」 표시가 켜진 채 남아 다음 저장이 조용히 무시됐다 — 로이 2026-09-30 「락」)
         logline('✏ ' + msg.replace(/\n/g, ' '));
         if (uiConfirm(msg + '\n\n대본(.md) 편집창을 열까요?')) openScriptEdit();
         return;
       }
       setDto(r.dto); closeSentEdit(e);
-    } catch (err) { logline('문장 수정 오류: ' + err.message); }
+    } catch (err) { sentDoneRef.current = false; logline('문장 수정 오류: ' + err.message); setStatus('⚠ 문장 수정 오류: ' + err.message); }   // 🔓 예외로 끝나도 잠그지 않는다
     finally { setSentBusy(false); }
   }
   // 🧩 ↑↓ 로 클립 이동 — 고치는 채로 다음 클립을 연다(Vrew 처럼). 저장이 끝난 뒤(대본이 바뀌었으면 새 줄 번호로) 연다.

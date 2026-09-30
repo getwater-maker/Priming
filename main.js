@@ -5188,6 +5188,10 @@ function writeSnapshotSync() {
   } catch (e) { log('자동저장 실패: ' + (e && e.message)); return null; }
 }
 let _asTimer = null, _asPendingSince = 0;
+// 💾 대본(.md)을 고친 **바로 그 순간** 작업본도 함께 쓴다(2026-09-30 로이 「자막 수정하면 이미지·비디오가 사라진다」).
+//   .md 는 즉시 바뀌는데 작업본 저장은 1.5~8초 늦다 — 그 사이에 대본이 다시 읽히면(큐에서 다른 대본을 골랐다 돌아옴 · 앱을 바로 끔 · 다시 열기)
+//   작업본의 옛 문장과 .md 의 새 문장이 달라 「내용이 바뀐 그룹」으로 보고 **그림·영상을 되살리지 않았다**. 앱 안 수정은 늘 즉시 맞춘다.
+function syncSnapshotNow() { try { flushAutoSave(); } catch (_) {} }
 function scheduleAutoSave() {
   if (!S.parsed) return;
   const now = Date.now();
@@ -6659,7 +6663,7 @@ ipcMain.handle('undo', (_e, args = {}) => {
   if (!st) return { ok: false, error: redo ? '다시 할 것이 없습니다' : '되돌릴 것이 없습니다' };
   to.push(_captureState(st.label, { md: st.md != null }));
   const moved = _restoreState(st);
-  storeActive(); pushDtoUpdate();
+  storeActive(); pushDtoUpdate(); if (st.md != null) syncSnapshotNow();   // 💾 .md 를 되돌렸으면 작업본도 같은 순간에
   log((redo ? '↷ 다시 하기' : '↶ 되돌리기') + ' — ' + st.label + (st.md != null ? ' · 대본(.md)도 되돌렸습니다' : '') + (moved ? ' · 그림 파일 ' + moved + '개 제자리로' : ''));
   return { ok: true, label: st.label, dto: P.toDTO(S.parsed), undoLeft: UNDO.undo.length, redoLeft: UNDO.redo.length };
 });
@@ -6871,7 +6875,7 @@ async function _editSentences(args = {}) {
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
 
-  storeActive(); pushDtoUpdate();
+  storeActive(); pushDtoUpdate(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
   const lost = made.filter((s) => !s.ttsAudioPath).length;
   log(`✏ ${prLabel(pr)} G${groupNum} 문장 ${si + 1} ${kind} — 대본(.md) 갱신`
@@ -7132,7 +7136,7 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   _applyBreaks(nr ? [ns, nr] : [ns], args.breaks);   // 🧩 나머지 줄 나눔 그대로
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
-  storeActive(); pushDtoUpdate();
+  storeActive(); pushDtoUpdate(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
   log('🧩 ' + prLabel(pr) + ' 클립 합치기(그룹 경계 넘음) — G' + A.num + ' 끝에 붙였습니다 · 대본(.md) 갱신'
     + (goneG ? ' · 문장이 하나뿐이던 G' + goneG + ' 는 사라졌습니다(↶ Ctrl+Z 로 되돌릴 수 있습니다)' : '')
     + (nr ? ' · 끌어올린 클립만 G' + A.num + ' 로(남은 줄은 G' + B.num + ' 그대로)' : '')
