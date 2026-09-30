@@ -28,8 +28,13 @@ function orderOf(project) {
   });
   return { order, pos, owner };
 }
-/** 그룹 gi 그림의 실제 범위(편 문장 순번 0부터, 끝 포함) */
-function effRange(project, gi, ctx) {
+/**
+ * 그룹 gi 그림의 실제 범위(편 문장 순번 0부터, 끝 포함)
+ * 🪶 soft 범위(visSpan.soft — ✂ 그룹 분할이 만든 「빈 곳 메우기」 · v0.5.90): 뒤 그룹이 **자기 그림·영상을 가지면 그 그룹 앞에서 멈춘다**.
+ *   (로이 2026-09-30: 나눈 뒤 그룹에 그림을 교체했는데 앞 그림이 위에 깔려 안 보였다.) 손으로 늘린 범위(soft 없음)는 예전대로 위에 깐다.
+ *   hasVisual 을 못 받으면 soft 도 끝까지(화면 표시용 호출 등).
+ */
+function effRange(project, gi, ctx, hasVisual) {
   const c = ctx || orderOf(project);
   const g = project.groups[gi];
   const ids = (g && g.sentenceIds) || [];
@@ -37,7 +42,18 @@ function effRange(project, gi, ctx) {
   let a = c.pos.get(ids[0]), b = c.pos.get(ids[ids.length - 1]);
   const sp = g.visSpan || {};
   if (sp.startId && c.pos.has(sp.startId)) a = Math.min(a, c.pos.get(sp.startId));
-  if (sp.endId && c.pos.has(sp.endId)) b = Math.max(b, c.pos.get(sp.endId));
+  if (sp.endId && c.pos.has(sp.endId)) {
+    let e = c.pos.get(sp.endId);
+    if (sp.soft && typeof hasVisual === 'function') {
+      const gs = project.groups || [];
+      for (let j = gi + 1; j < gs.length; j++) {
+        const f = c.pos.get(((gs[j] && gs[j].sentenceIds) || [])[0]);
+        if (f == null || f > e) break;
+        if (hasVisual(gs[j])) { e = f - 1; break; }
+      }
+    }
+    b = Math.max(b, e);
+  }
   return { a, b };
 }
 /**
@@ -71,7 +87,7 @@ function groupRanks(project, hasVisual, ctx) {
     if (!hasVisual(g)) return null;
     const ids = g.sentenceIds || []; if (!ids.length) return null;
     const own = { a: c.pos.get(ids[0]), b: c.pos.get(ids[ids.length - 1]) };
-    return { own, eff: effRange(project, gi, c) || own };
+    return { own, eff: effRange(project, gi, c, hasVisual) || own };
   });
   return stackRanks(ranges);
 }
@@ -85,7 +101,7 @@ function layersBySentence(project, hasVisual) {
   const m = new Map(c.order.map((id) => [id, []]));
   (project.groups || []).forEach((g, gi) => {
     if (!hasVisual(g)) return;
-    const r = effRange(project, gi, c); if (!r) return;
+    const r = effRange(project, gi, c, hasVisual); if (!r) return;
     for (let k = r.a; k <= r.b; k++) m.get(c.order[k]).push(gi);
   });
   const rk = groupRanks(project, hasVisual, c);
@@ -117,12 +133,14 @@ function spanToOrd(project, g) {
   const sp = g && g.visSpan; if (!sp) return null;
   const c = orderOf(project);
   const o = { from: sp.startId && c.pos.has(sp.startId) ? c.pos.get(sp.startId) : null, to: sp.endId && c.pos.has(sp.endId) ? c.pos.get(sp.endId) : null };
+  if (sp.soft) o.soft = true;   // 🪶 분할이 만든 빈 곳 메우기(작업본에도)
   return (o.from == null && o.to == null) ? null : o;
 }
 function spanFromOrd(project, g, o) {
   if (!o) return;
   const c = orderOf(project);
   const s = { startId: o.from != null ? c.order[o.from] || null : null, endId: o.to != null ? c.order[o.to] || null : null };
+  if (o.soft) s.soft = true;
   if (s.startId || s.endId) g.visSpan = s;
 }
 

@@ -5305,8 +5305,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             <span className="sc-num">G{c.num}</span>
                             <span className="sc-title" title={c.phase || ''}>{c.phase || ''}</span>
                             <span className="sc-btns">
-                              {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
-                                <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂</button>}
+                              {/* ✂ 분할은 늘 보인다(v0.5.90 로이 — 「어느 때는 나오고 어느 때는 안 나온다」 · 예전엔 10초 넘는 그룹만) · 문장 1개면 흐리게 */}
+                              <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => onSplit(pr.shortsNum, c.num)}>✂</button>
                               {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로)`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
                               <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                               <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
@@ -5325,8 +5325,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           <span className="num">G{c.num}</span>
                           <div className="narr-btns">
                             {c.groupDurationSec ? <span className={'dur' + (c.groupDurationSec > 10 ? ' over' : '')}>▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
-                            {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
-                              <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>}
+                            <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>
                             {c.num > 1 && onMerge && <button className="gprev" title={`앞 그룹(G${c.num - 1})과 합치기 — G${c.num - 1} 그림을 이 그룹 끝까지 이어 씁니다(이 그룹의 그림은 쓰지 않습니다 · 음성은 그대로). 대본에 영구히 두려면 H3 아래에 「> 🖼️ 이미지: 이어서」`} onClick={() => onMerge(pr.shortsNum, c.num)}>⤒</button>}
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
@@ -5820,7 +5819,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
         <button title="이 그룹만 TTS 변환 — Shift+클릭 = 시드를 바꿔 다른 take" onClick={(e) => { close(); grp.onGroupTts(sn, c.num, e.shiftKey); }}>🎤 이 그룹 TTS</button>
         <button title="이 그룹 프롬프트 보기·수정" onClick={go(() => grp.onShowPrompt(sn, c, `G${c.num}`))}>📝 프롬프트</button>
         {(c.num > 1 && grp.onMerge) && <button title={`앞 그룹(G${c.num - 1})과 합치기 — 앞 그룹 그림을 이 그룹 끝까지 이어 씁니다`} onClick={go(() => grp.onMerge(sn, c.num))}>⤒ 앞 그룹과 합치기</button>}
-        {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) && <button title="10초 초과 — 2개 그룹으로 분할(그림·영상·음성은 그대로 이어 씁니다)" onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>}
+        <button disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>
         <div className="vr-sep" />
       </>}
       {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>

@@ -257,6 +257,57 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       ok(/import ClipJoin from '..\/..\/core\/clip-join\.js'/.test(APP) && (APP.match(/clipJoinPlan\(e,/g) || []).length >= 4 && !/mergeAcross\('next', sentEditValue/.test(APP), '화면: Del·Backspace 다섯 곳(그룹 경계 앞뒤 · 같은 그룹 위아래 · 문장 편집칸)이 모두 클립 단위 계획을 쓴다');
       ok(/breaks, fixed: true/.test(APP) && /args\.fixed \?/.test(M), '한 문장 안 줄 합치기·나누기도 결과를 굳힌다(합쳐진 줄이 다시 쪼개지지 않게)');
     }
+    console.log('\n[6] 🪶 나눈 뒤 그룹에 그림을 교체하면 그 그림이 보인다(로이 2026-09-30 · v0.5.90)');
+    {
+      const VS = require('../core/visual-span');
+      const P = require('../core/pipeline');
+      const R = require('../core/vrew-render');
+      const M = read('main.js');
+      ok(/g\.visSpan = \{ \.\.\.\(g\.visSpan \|\| \{\}\), endId: lastId, soft: true \}/.test(M), '✂ 분할이 만든 범위는 soft(빈 곳 메우기)');
+      // 모델: A(빨강) 가 soft 로 B 를 덮는다 → B 에 파랑이 생기면 B 문장들은 B
+      const mk = () => {
+        const r = P.parseScriptText('# t\n## 장\n### 가\n첫째 문장입니다. 둘째 문장입니다.\n### 나\n셋째 문장입니다. 넷째 문장입니다.\n', 'longform', { splitMode: 'h3' });
+        return r.projects[0];
+      };
+      const red = path.join(tmp, 'red.png'), blue = path.join(tmp, 'blue.png');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=320x180', '-frames:v', '1', red]);
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180', '-frames:v', '1', blue]);
+      const hasV = (g) => !!(g.imagePath && fs.existsSync(g.imagePath));
+      const pr = mk(); const [A, B] = pr.groups;
+      A.imagePath = red; A.visSpan = { endId: B.sentenceIds[1], soft: true };
+      let L = VS.layersBySentence(pr, hasV);
+      ok(B.sentenceIds.every((id) => L.get(id).join() === '0'), 'B 에 그림이 없을 땐 A 가 B 자리까지 보인다(빈 곳 없음)');
+      B.imagePath = blue;
+      L = VS.layersBySentence(pr, hasV);
+      ok(B.sentenceIds.every((id) => { const l = L.get(id); return l[l.length - 1] === 1 && !l.includes(0); }), '🔑 B 에 자기 그림이 생기면 A 는 B 앞에서 멈춘다 → B 문장에선 B(파랑)');
+      const hard = mk(); hard.groups[0].imagePath = red; hard.groups[1].imagePath = blue; hard.groups[0].visSpan = { endId: hard.groups[1].sentenceIds[0] };
+      const LH = VS.layersBySentence(hard, hasV); const top = LH.get(hard.groups[1].sentenceIds[0]);
+      ok(top[top.length - 1] === 0, '(판정력) 손으로 늘린 범위(soft 없음)는 예전대로 위에 깐다(v0.5.62 규칙 그대로)');
+      const o = VS.spanToOrd(pr, A); const A2 = { sentenceIds: A.sentenceIds }; VS.spanFromOrd(pr, A2, o);
+      ok(o.soft === true && A2.visSpan && A2.visSpan.soft === true, '작업본 저장·복원에도 soft 가 산다');
+      // 실제 .vrew → MP4 화소: B 구간은 파랑
+      P.fillSilent(pr, path.join(tmp, 'tts-soft'));
+      const vrew = path.join(tmp, 'soft.vrew'), mp4 = path.join(tmp, 'soft.mp4');
+      await P.buildProjectVrew(pr, vrew, {}, () => {}, 40, 1);
+      const res = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: () => {}, par: 1 });
+      const d = pr.sentences.map((x) => x.ttsDurationSec);
+      const px = (t) => { const raw = execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', '-vf', 'scale=16:9', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']); const i = (4 * 16 + 8) * 3; return [raw[i], raw[i + 1], raw[i + 2]]; };
+      const pA = px(d[0] * 0.5), pB = px(d[0] + d[1] + d[2] * 0.5);
+      ok(res && res.ok && pA[0] > 150 && pA[2] < 90, `MP4: A 구간은 빨강 (${pA})`);
+      ok(pB[2] > 150 && pB[0] < 90, `🔑 MP4: 나눈 뒤 그룹(B)에 넣은 그림(파랑)이 실제로 보인다 (${pB}) — 예전엔 A 빨강이 위에 깔렸다`);
+      // 옛 작업본(v0.5.87~89 — soft 없이 늘린 범위) → 그림을 넣는 순간 soft 로
+      const i0 = M.indexOf('function _softenCoverOf('), i1 = M.indexOf('\n}\n', i0) + 3;
+      const ctx = { require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), log: () => {}, console };
+      vm.createContext(ctx); vm.runInContext(M.slice(i0, i1) + '\nthis.f = _softenCoverOf;', ctx);
+      const old = mk(); old.groups[0].visSpan = { endId: old.groups[1].sentenceIds[1] };
+      ok(ctx.f(old, old.groups[1]) === 1 && old.groups[0].visSpan.soft === true, '옛 작업본: B 를 통째로 덮던 A 범위가 B 에 그림을 넣는 순간 soft 로');
+      const part = mk(); part.groups[0].visSpan = { endId: part.groups[1].sentenceIds[0] };
+      ok(ctx.f(part, part.groups[1]) === 0 && !part.groups[0].visSpan.soft, '(판정력) 일부만 걸친 범위(손으로 늘린 겹침)는 그대로');
+      ok((M.match(/_softenCoverOf\(pr, g\);/g) || []).length === 3, '파일 교체 · 🔄 이미지 재생성 · 🎬 그룹 영상 세 곳에서 부른다');
+      // ✂ 은 늘 보인다
+      const APP = read('renderer/src/App.jsx');
+      ok(!/groupDurationSec > 10 && \(c\.sentences && c\.sentences\.length >= 2\) &&/.test(APP) && (APP.match(/disabled=\{!\(c\.sentences && c\.sentences\.length >= 2\)\}/g) || []).length === 3, '🔑 ✂ 분할은 세 곳(그룹 줄 두 모양 · 그룹 메뉴) 모두 늘 보인다(문장 1개면 흐리게 + 이유)');
+    }
   } catch (e) { ok(false, '실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} clip-keep ${pass}/${pass + fail}`);

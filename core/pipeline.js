@@ -127,7 +127,7 @@ function toDTO(parseResult) {
             imageStale: !!g.imageStale,
             look: g.look || null,   // 🖼 채우기·반전·움직임(core/visual-look)
             covered: g._covered || 0,   // 🖼 이 그룹엔 앞 그룹(번호) 그림이 아래층으로 이어져 보인다
-            span: (() => { const r = g.visSpan ? VS.effRange(pr, pr.groups.indexOf(g)) : null; return r ? { from: r.a + 1, to: r.b + 1 } : null; })(),   // 이어 깐 범위(편 문장 1부터)
+            span: (() => { const r = g.visSpan ? VS.effRange(pr, pr.groups.indexOf(g), null, _hasVis) : null; return r ? { from: r.a + 1, to: r.b + 1 } : null; })(),   // 이어 깐 범위(편 문장 1부터)
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
             videoStatus: g.videoStatus || null, // 'generating' | 'upscaling' | 'done' | 'fail'
           };

@@ -902,8 +902,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const _vsProj = { groups, sentences };
   const _vsCtx = _VS.orderOf(_vsProj);
   const _sById = new Map(sentences.map((s) => [s.id, s]));
+  const _hasVisF = (x) => !!((x.videoPath && fs.existsSync(x.videoPath)) || (x.imagePath && fs.existsSync(x.imagePath)));
   const _spanDur = (g) => {
-    const r = _VS.effRange(_vsProj, groups.indexOf(g), _vsCtx); if (!r) return 0;
+    const r = _VS.effRange(_vsProj, groups.indexOf(g), _vsCtx, _hasVisF); if (!r) return 0;   // 🪶 soft 범위는 뒤 그룹 자기 그림 앞에서 멈춘다
     let d = 0; for (let k = r.a; k <= r.b; k++) { const s = _sById.get(_vsCtx.order[k]); if (s && s.ttsAudioPath && s.ttsDurationSec) d += s.ttsDurationSec; }
     return d;
   };

@@ -1857,6 +1857,23 @@ function effStyleId(requested, logf, pr) {
   }
   return r.id;
 }
+// 🪶 이 그룹이 **자기 그림**을 받는 순간(파일 교체 · 🔄 · AI 이미지/비디오) — 이 그룹을 **통째로 덮던** 앞 그룹의 범위를 soft 로 바꾼다.
+//   soft 범위는 자기 그림이 있는 그룹 앞에서 멈추므로 새 그림이 보인다(로이 2026-09-30: 나눈 뒤 그룹에 교체한 그림이 안 보였다).
+//   v0.5.87~89 의 ✂ 분할은 soft 표시 없이 범위를 늘렸다 → 이 길로 옛 작업본도 풀린다. 일부만 걸친 범위(손으로 늘린 겹침)는 그대로.
+function _softenCoverOf(pr, g) {
+  if (!pr || !g || !(g.sentenceIds || []).length) return 0;
+  const VS = require('./core/visual-span');
+  const c = VS.orderOf(pr);
+  const gi = pr.groups.indexOf(g);
+  const a = c.pos.get(g.sentenceIds[0]), b = c.pos.get(g.sentenceIds[g.sentenceIds.length - 1]);
+  let n = 0;
+  pr.groups.forEach((A, ai) => {
+    if (ai === gi || !A.visSpan || A.visSpan.soft) return;
+    const r = VS.effRange(pr, ai, c); if (!r) return;
+    if (r.a <= a && r.b >= b && ai < gi) { A.visSpan = { ...A.visSpan, soft: true }; n++; log(`🪶 G${A.num} 그림이 G${g.num} 를 덮고 있었습니다 — G${g.num} 에 자기 그림이 생겨 G${A.num} 그림은 그 앞까지만 보입니다`); }
+  });
+  return n;
+}
 function _inDir(file, dir) {
   try {
     const f = path.resolve(file), d = path.resolve(dir);
@@ -4779,6 +4796,7 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
   undoPush('그림 첨부');
+  _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 그림을 가리지 않게
   const ext = path.extname(fp).toLowerCase();
   // 🔑 「사람이 직접 넣은 것」으로 표시 — sweepBadVisuals 가 검정·노이즈 판정에서 제외한다(_userAttached).
   //   ⚠ 이 경로는 파일을 미디어 폴더로 **복사하지 않고 원본을 가리킨다** — 지우면 사용자 원본이 사라진다.
@@ -6256,6 +6274,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
   S.abort = false;
+  _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 영상을 가리지 않게
   const videoDir = shortsDirs(S.outRoot, shortsNum).media;
   // 이미지가 없으면 먼저 생성(비어있는 것 채움) → 그 이미지로 영상.
   if (!g.imagePath || !fs.existsSync(g.imagePath)) {
@@ -6460,6 +6479,7 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
     S.abort = false;
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
+    _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 그림을 가리지 않게
     log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
     try {
       // ⚠ 실패하면 **원래 있던 이미지 참조가 끊긴 채로 남는다**(파일은 폴더에 그대로인데 그룹은 이미지 없음
@@ -7322,7 +7342,7 @@ ipcMain.handle('split-group', (_e, args = {}) => {
     const lastId = secondS[secondS.length - 1].id;
     const ordNow = new Map(); pr.sentences.forEach((s, i) => ordNow.set(s.id, i));
     const cur = g.visSpan && g.visSpan.endId;
-    if (!cur || !(ordNow.get(cur) > ordNow.get(lastId))) g.visSpan = { ...(g.visSpan || {}), endId: lastId };   // 뒤 조각 끝까지 이어 깔기
+    if (!cur || !(ordNow.get(cur) > ordNow.get(lastId))) g.visSpan = { ...(g.visSpan || {}), endId: lastId, soft: true };   // 뒤 조각 끝까지 이어 깔기 — 🪶 soft: 뒤 그룹이 자기 그림을 가지면 그 앞에서 멈춘다(v0.5.90)
   }
   pr.groups.splice(idx + 1, 0, ng);   // 원본 뒤에 새 그룹 하나(나머지 그대로)
   pr.groups.forEach((gg, i) => { gg.num = i + 1; });  // 재번호
