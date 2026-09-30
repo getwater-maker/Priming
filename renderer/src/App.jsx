@@ -1491,6 +1491,82 @@ export default function App() {
     return ln ? ln.n : 1;
   }
   function curProject() { return dto && dto.projects && (dto.projects.find((x) => cursor && x.shortsNum === cursor.shortsNum) || dto.projects[0]); }
+
+  // ── 🧩 클립 도구 막대(v0.5.94 · 로이 2026-09-30 — Vrew: 클립을 고르면 그 위에 ✂ ⧉ 📋 🗑 · 2개 이상이면 ⊟ 클립 합치기 · 삽입 · 효과 · ⏩ · 목소리 수정) ──
+  //   클립 = 자막 줄. 서버(main)는 문장마다 그 문장의 모든 줄과 고른 표시를 받아 음성까지 줄 경계에서 자르고 잇는다.
+  const [clipBoard, setClipBoard] = useState(null);   // { chunks, n } — ⧉ 복사한 클립(글 + 음성 조각)
+  const [clipTb, setClipTb] = useState(null);         // { left, top, hidden } — 막대 자리(고른 첫 클립 바로 위)
+  const [clipMenu, setClipMenu] = useState(null);     // 'ins' | 'fx' | 'voice'
+  function clipSelOk() { return !!(capSel && capSel.mode === 'lines' && capSel.items && capSel.items.length && !sentEdit); }
+  function clipPayload(sel) {
+    const PL = linesMap.get(sel.shortsNum); const by = new Map();
+    for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!by.has(k)) by.set(k, new Set()); by.get(k).add(it.n); }
+    const sents = [];
+    for (const [k, ns] of by) {
+      const [g, si] = k.split(':').map(Number);
+      const ls = (PL && PL.bySent.get(k)) || [];
+      sents.push({ groupNum: g, sentIdx: si, lines: ls.map((l) => ({ from: l.from, to: l.to, sel: ns.has(l.n) })) });
+    }
+    return { shortsNum: sel.shortsNum, sents };
+  }
+  const clipErr = (r, what) => setStatus('⚠ ' + ((r && r.error) || what + '에 실패했습니다'));
+  async function clipDelete() {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
+    try {
+      const r = await api.deleteClips(clipPayload(sel));
+      if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`🗑 클립 ${r.deleted}개 삭제${r.goneGroups ? ` · 클립이 모두 지워진 그룹 ${r.goneGroups}개 사라짐` : ''} (Ctrl+Z 되돌리기)`); }
+      else clipErr(r, '삭제');
+    } catch (e) { logline('클립 삭제 오류: ' + e.message); clipErr(null, '삭제'); }
+  }
+  async function clipCopy(cut) {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
+    try {
+      const r = await api.copyClips(clipPayload(sel));
+      if (!r || !r.ok) { clipErr(r, cut ? '잘라내기' : '복사'); return; }
+      setClipBoard({ chunks: r.chunks, n: sel.items.length });
+      if (cut) await clipDelete(); else setStatus(`⧉ 클립 ${sel.items.length}개 복사(글 + 음성) — 붙일 자리의 클립을 고르고 📋 (Ctrl+V)`);
+    } catch (e) { logline('클립 복사 오류: ' + e.message); clipErr(null, '복사'); }
+  }
+  async function clipPaste() {
+    if (!clipSelOk() || !clipBoard) return; const sel = capSel; setClipMenu(null);
+    const last = [...sel.items].sort((a, b) => b.n - a.n)[0];
+    const PL = linesMap.get(sel.shortsNum);
+    const ls = (PL && PL.bySent.get(last.groupNum + ':' + last.sentIdx)) || [];
+    const after = Math.max(0, ls.findIndex((l) => l.n === last.n));
+    try {
+      const r = await api.pasteClips({ shortsNum: sel.shortsNum, at: { groupNum: last.groupNum, sentIdx: last.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after }, chunks: clipBoard.chunks });
+      if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`📋 클립 ${clipBoard.n}개 붙여넣기 — 고른 클립 뒤 · 음성도 함께 (Ctrl+Z 되돌리기)`); }
+      else clipErr(r, '붙여넣기');
+    } catch (e) { logline('붙여넣기 오류: ' + e.message); clipErr(null, '붙여넣기'); }
+  }
+  async function clipMerge() {
+    if (!clipSelOk() || capSel.items.length < 2) return; const sel = capSel; setClipMenu(null);
+    try {
+      const r = await api.mergeClips(clipPayload(sel));
+      if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`⊟ 클립 ${sel.items.length}개를 한 클립으로 (Ctrl+Z 되돌리기)`); }
+      else clipErr(r, '합치기');
+    } catch (e) { logline('클립 합치기 오류: ' + e.message); clipErr(null, '합치기'); }
+  }
+  async function clipTts(roll) {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
+    const items = []; const seen = new Set();
+    for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    setStatus(roll ? '🎲 고른 클립 음성을 다른 톤으로 새로 뽑는 중…' : '🎤 고른 클립 음성을 다시 만드는 중…');
+    try {
+      const d = await api.ttsSentences({ shortsNum: sel.shortsNum, items, roll: !!roll, presetName: presetName || null, speed: ttsSpeed || null });
+      if (d) setDto(d);
+      setStatus(`${roll ? '🎲' : '🎤'} 고른 클립 음성 완료 (${items.length}문장)`);
+    } catch (e) { logline('클립 음성 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
+  function clipPlay() { if (!clipSelOk()) return; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; setClipMenu(null); playFromCursor({ shortsNum: capSel.shortsNum, n: first.n }, true); }
+  async function clipInsertFile() {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
+    const ns = sel.items.map((x) => x.n); const a = Math.min(...ns), b = Math.max(...ns);
+    const r = await overlayOp({ shortsNum: sel.shortsNum, op: 'add' });   // 그림·영상·오디오 무엇이든
+    if (r && r.ok && r.id) await insRange(sel.shortsNum, r.id, a, b);
+  }
+  function clipGroup() { if (!clipSelOk()) return null; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; return { sn: capSel.shortsNum, g: first.groupNum }; }
+  function clipSoon(t) { setClipMenu(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); }
   async function insertMedia(kind, ev) {
     const pj = curProject(); if (!pj) return;
     const rect = ev && ev.currentTarget ? ev.currentTarget.getBoundingClientRect() : null;
@@ -2997,6 +3073,13 @@ export default function App() {
       const t = e.target; const tag = t && t.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAllClips(); return; }   // 🧩 Ctrl+A = 모든 클립
+      // 🧩 클립 도구 — 고른 클립이 있을 때만(글자를 드래그로 고른 중이면 평소 복사)
+      if (clipSelOk() && (e.ctrlKey || e.metaKey) && !String((window.getSelection && window.getSelection()) || '').trim()) {
+        if (e.code === 'KeyC') { e.preventDefault(); clipCopy(false); return; }
+        if (e.code === 'KeyX') { e.preventDefault(); clipCopy(true); return; }
+        if (e.code === 'KeyV' && clipBoard) { e.preventDefault(); clipPaste(); return; }
+      }
+      if (!e.ctrlKey && !e.metaKey && e.key === 'Delete' && clipSelOk()) { e.preventDefault(); clipDelete(); return; }   // 🗑 선택 + Del = 클립 삭제
       if (e.ctrlKey || e.metaKey) return;
       if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1, e.shiftKey); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1, e.shiftKey); }
@@ -3018,6 +3101,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
+  useLayoutEffect(() => {
+    if (!wsOn || !clipSelOk()) { setClipTb(null); setClipMenu(null); return undefined; }
+    const firstN = Math.min(...capSel.items.map((x) => x.n));
+    const place = () => {
+      const el = [...document.querySelectorAll('.sent[data-ln="' + firstN + '"]')].find((x) => x.offsetParent !== null);
+      if (!el) { setClipTb(null); return; }
+      const r = el.getBoundingClientRect();
+      const top = Math.round(Math.max(4, r.top - 44)), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
+      const hidden = r.bottom < 40 || r.top > window.innerHeight - 20;
+      setClipTb((cur) => (cur && cur.top === top && cur.left === left && cur.hidden === hidden ? cur : { top, left, hidden }));
+    };
+    place();
+    window.addEventListener('scroll', place, true); window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsOn, capSel, sentEdit, dto, linesMap]);
   /** ① ↔ ② 경계 끌기 — 폭을 기억한다. */
   function startPaneDrag(e) {
     e.preventDefault();
@@ -3773,6 +3872,52 @@ export default function App() {
               ))}
             </div>
           )}
+          {wsOn && clipTb && !clipTb.hidden && clipSelOk() && (() => {
+        const n = capSel.items.length;
+        const cg = clipGroup();
+        const soon = (icon, t) => <button className="soon" onClick={() => clipSoon(t)}>{icon} {t} <i>준비 중</i></button>;
+        return (<>
+          {clipMenu && <div className="vr-menu-bg" onMouseDown={() => setClipMenu(null)} />}
+          <div className="clip-tb" data-testid="clip-tb" style={{ left: clipTb.left, top: clipTb.top }} onMouseDown={(e) => { if (e.target.tagName !== 'INPUT') e.preventDefault(); }}>
+            <button title="잘라내기 (Ctrl+X) — 글·음성을 복사하고 지웁니다" data-testid="ctb-cut" onClick={() => clipCopy(true)}>✂</button>
+            <button title="복사 (Ctrl+C) — 글과 그 구간 음성을 함께" data-testid="ctb-copy" onClick={() => clipCopy(false)}>⧉</button>
+            <button title={clipBoard ? `붙여넣기 (Ctrl+V) — 고른 클립 뒤에 ${clipBoard.n}개` : '붙여넣기 — 먼저 ⧉ 복사하거나 ✂ 잘라내세요'} data-testid="ctb-paste" disabled={!clipBoard} onClick={clipPaste}>📋</button>
+            <button title="클립 삭제 (Del) — 음성도 그 구간만 빠집니다 · Ctrl+Z 되돌리기" data-testid="ctb-del" onClick={clipDelete}>🗑</button>
+            {n >= 2 && <button className="lbl" data-testid="ctb-merge" title="고른 클립을 한 클립으로 — 이어진 클립만 · 음성은 이어 붙입니다" onClick={clipMerge}>⊟ 클립 합치기</button>}
+            <span className="sep" />
+            <button className={'lbl' + (clipMenu === 'ins' ? ' on' : '')} data-testid="ctb-ins" onClick={() => setClipMenu(clipMenu === 'ins' ? null : 'ins')}>⊞ 삽입 {clipMenu === 'ins' ? '▴' : '▾'}</button>
+            <button className={'lbl' + (clipMenu === 'fx' ? ' on' : '')} data-testid="ctb-fx" onClick={() => setClipMenu(clipMenu === 'fx' ? null : 'fx')}>🎛 효과 {clipMenu === 'fx' ? '▴' : '▾'}</button>
+            <span className="sep" />
+            <button title="고른 클립부터 재생" data-testid="ctb-play" onClick={clipPlay}>⏩</button>
+            <span className="sep" />
+            <button className={'lbl' + (clipMenu === 'voice' ? ' on' : '')} data-testid="ctb-voice" onClick={() => setClipMenu(clipMenu === 'voice' ? null : 'voice')}>☰ 목소리 수정</button>
+            {clipMenu === 'ins' && <div className="vr-menu clip-tb-menu" data-testid="ctb-ins-menu" style={{ left: n >= 2 ? 250 : 150 }}>
+              <button data-testid="ctb-ins-pc" title="그림·영상·오디오 파일을 고른 클립 구간에 위층으로 넣습니다(➕ 삽입과 같은 기능)" onClick={clipInsertFile}>🖥 PC에서 불러오기</button>
+              {soon('📱', '모바일에서 불러오기')}
+              {soon('🗂', '내 이미지 · 비디오')}
+              {soon('🖼', '무료 이미지 · 비디오')}
+              <button data-testid="ctb-ins-aiimg" title="이 클립이 든 그룹의 그림을 AI 로 다시 만듭니다(그룹의 🔄 와 같다)" onClick={() => { setClipMenu(null); if (cg) runRegen(cg.sn, cg.g); }}>✨ AI 이미지 <i>G{cg ? cg.g : ''}</i></button>
+              <button data-testid="ctb-ins-aivid" title="이 클립이 든 그룹의 그림으로 AI 영상을 만듭니다(그룹의 🎬 와 같다)" onClick={() => { setClipMenu(null); if (cg) runGroupVid(cg.sn, cg.g); }}>🎬 AI 비디오 <i>G{cg ? cg.g : ''}</i></button>
+              {soon('T', '기본 텍스트')}
+              {soon('𝕋', '디자인 텍스트')}
+            </div>}
+            {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230 }}>
+              {soon('✳', '필터')}
+              {soon('⤢', '확대 및 회전')}
+              <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
+              <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
+              {soon('◐', '화면 전환')}
+              {soon('🔉', '볼륨 조절')}
+              {soon('⏩', '배속 효과')}
+              {soon('🎨', '클립 배경색')}
+            </div>}
+            {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0 }}>
+              <button data-testid="ctb-voice-redo" title="고른 클립의 문장 음성을 채널 목소리·시드 그대로 다시 만듭니다(글을 고친 뒤)" onClick={() => clipTts(false)}>🎤 다시 만들기</button>
+              <button data-testid="ctb-voice-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 문장들만 톤이 달라집니다)" onClick={() => clipTts(true)}>🎲 다른 톤으로 새로 뽑기</button>
+            </div>}
+          </div>
+        </>);
+      })()}
           {insMenu && (() => {
         const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === insMenu.sn) : null;
         const o = pj && (pj.overlays || []).find((x) => x.id === insMenu.id);

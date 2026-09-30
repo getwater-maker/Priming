@@ -7177,6 +7177,370 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   return { ok: true, dto: P.toDTO(S.parsed), goneGroup: goneG, intoGroup: A.num, sentIdx: A.sentenceIds.length - 1 };
 });
 
+// ── 🧩 클립 도구 막대(v0.5.94 · 로이 2026-09-30 — Vrew 처럼 클립을 고르면 뜨는 ✂ 잘라내기 · ⧉ 복사 · 📋 붙여넣기 · 🗑 삭제 · ⊟ 합치기) ──
+//   클립 = 자막 줄(문장 안의 글자 범위). 음성은 **문장** 단위라 줄 경계의 쉼에서 자르고 잇는다(core/audio-splice) — 빈 음성·빈 그림을 만들지 않는다.
+//   화면은 문장마다 그 문장의 **모든 줄**(지금 보이는 모양)과 고른 줄 표시를 보낸다: sents = [{ groupNum, sentIdx, lines:[{from, to, sel}] }].
+//   대본(.md)은 문장 단위로만 바꾸고 **검증 재파싱 뒤에만** 쓴다 · 되돌리기(Ctrl+Z) 한 번에 통째로 · 남은 줄 모양은 굳힌다(끝 표식).
+const _END_P = /[.!?。]+\s*$/;
+function _clipCtx(shortsNum) {
+  if (!S.parsed || S.parsed.kind === 'book') return { error: '대본을 먼저 여세요.' };
+  if (!S.scriptPath || !fs.existsSync(S.scriptPath)) return { error: '대본 파일(.md)을 찾을 수 없습니다.' };
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  return pr ? { pr } : { error: '편을 찾을 수 없습니다.' };
+}
+function _sentAt(pr, groupNum, sentIdx) { const g = pr.groups.find((x) => x.num === groupNum); return g ? (pr.getSentencesOfGroup(g)[sentIdx] || null) : null; }
+/** 화면이 보낸 문장·줄 → [{ s, idx, lines:[{from,to,sel,t}] }] (pr.sentences 순서) · 대본이 그새 바뀌었으면 null */
+function _clipSents(pr, sents) {
+  const out = [];
+  for (const it of sents || []) {
+    const s = _sentAt(pr, it.groupNum, it.sentIdx); if (!s) return null;
+    const T = String(s.text || ''), L = T.length;
+    const lines = (it.lines || []).map((l) => {
+      const from = Math.max(0, Math.min(L, Math.floor(Number(l.from) || 0))), to = Math.max(from, Math.min(L, Math.floor(Number(l.to) || 0)));
+      return { from, to, sel: !!l.sel, t: T.slice(from, to).trim() };
+    }).filter((l) => l.to > l.from);
+    if (!lines.length) return null;
+    out.push({ s, idx: pr.sentences.indexOf(s), lines });
+  }
+  return out.sort((a, b) => a.idx - b.idx);
+}
+/** 한 문장 음성을 줄 조각으로 — [{…line, file, dur, temp}] · 음성이 없으면 null (임시 파일은 호출자가 지운다) */
+async function _linePieces(s, lines, tmpDir) {
+  if (!(s.ttsAudioPath && fs.existsSync(s.ttsAudioPath))) return null;
+  if (lines.length === 1) return [{ ...lines[0], file: s.ttsAudioPath, dur: s.ttsDurationSec, temp: false }];
+  const AS = require('./core/audio-splice');
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const outs = lines.map(() => path.join(tmpDir, '_piece_' + Date.now().toString(36) + '_' + (++UNDO.seq) + '.wav'));
+  const r = await AS.splitAudioWeights(s.ttsAudioPath, lines.map((l) => AS.textWeight(l.t)), outs);
+  return lines.map((l, k) => ({ ...l, file: r[k].path, dur: r[k].durationSec, temp: true }));
+}
+/** 조각들을 이어 새 음성 파일로(하나뿐이고 임시가 아니면 새로 복사) → {file, dur} | null */
+async function _joinPieces(pieces, ttsDir, stem) {
+  if (!pieces || !pieces.length || pieces.some((p) => !p.file)) return null;
+  const out = P.claimPath(path.join(ttsDir, stem + '.wav'), null, ['.wav', '.mp3']);
+  const r = await require('./core/audio-splice').concatAudio(pieces.map((p) => p.file), out);
+  return { file: out, dur: r.durationSec };
+}
+/** 여러 문장을 한 번에 고친다 — edits = [{idx, text, n}] (text '' = 지움 · n = 나와야 할 문장 수). 높은 번호부터 치환 → 검증 재파싱. */
+function _planMdEdits(pr, edits) {
+  const SE = require('./core/script-edit');
+  let raw = fs.readFileSync(S.scriptPath, 'utf8');
+  let texts = pr.sentences.map((x) => x.text);
+  const outs = new Map();
+  for (const e of [...edits].sort((a, b) => b.idx - a.idx)) {
+    const p = SE.planEdit({ raw, texts, from: e.idx, count: 1, newText: e.text });
+    if (!p.ok) return { ok: false, error: p.error };
+    if (e.n != null && p.newTexts.length !== e.n) return { ok: false, error: '고친 글이 예상과 다른 수의 문장으로 나뉩니다 — 문장 부호(. ? !)를 확인하세요.' };
+    texts = SE.expectedTexts(texts, e.idx, 1, p.newTexts);
+    // 🧹 문장을 지우면 앞뒤 띄어쓰기가 겹친다(「…입니다.  다섯째」) — **바뀐 자리 안에서만** 겹친 칸을 하나로(대본의 다른 곳은 손대지 않는다)
+    let nr = p.raw;
+    { let a = 0; while (a < raw.length && a < nr.length && raw[a] === nr[a]) a++;
+      let b = 0; while (b < raw.length - a && b < nr.length - a && raw[raw.length - 1 - b] === nr[nr.length - 1 - b]) b++;
+      const s0 = Math.max(0, a - 2), s1 = Math.min(nr.length, nr.length - b + 2);
+      nr = nr.slice(0, s0) + nr.slice(s0, s1).replace(/ {2,}/g, ' ') + nr.slice(s1); }
+    raw = nr; outs.set(e.idx, p.newTexts);
+  }
+  let after = null;
+  try { after = P.parseScriptText(raw, currentMode(), presetThresholds(S.preset)).projects[0]; } catch (e) { return { ok: false, error: '고친 대본을 다시 읽지 못했습니다: ' + e.message }; }
+  if (!after || !SE.sameSequence(texts, after.sentences.map((x) => x.text))) return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.' };
+  return { ok: true, raw, outs };
+}
+function _mkSent(text, like, used) {
+  const { Sentence, hashId } = require('./core/project-model');
+  let id = hashId('s', text), k = 1; while (used.has(id)) id = hashId('s', text) + '_' + (++k);
+  used.add(id);
+  const s = new Sentence({ id, num: 0, text });
+  if (like) { s.isIntro = !!like.isIntro; if (like.speaker) s.speaker = like.speaker; }
+  return s;
+}
+/** 줄 텍스트들 → 그 문장의 줄 시작 위치(끝 표식 포함 — 굳힘). 각 줄의 첫머리를 새 글에서 **찾아서** 잡는다(합칠 때 마침표를 빼므로 길이로 세면 어긋난다). */
+function _fixedBreaks(text, parts) {
+  const T = String(text); const starts = []; let cur = 0;
+  parts.forEach((p, k) => {
+    const key = String(p).replace(_END_P, '').trim().slice(0, 8);
+    let at = key ? T.indexOf(key, cur) : -1;
+    if (at < 0) at = cur;
+    if (k > 0) starts.push(at);
+    cur = at + Math.max(1, key.length);
+  });
+  return require('./core/caption-splitter').normBreaks(T, [...starts, T.length]) || undefined;
+}
+function _endMark(t) { return _END_P.test(t) ? t : t + '.'; }
+/** 공통 마무리 — 빈 그룹 치우기(그림은 휴지통 · ↶ 로 되살린다) · 번호 · 범위 끝 정리 · 해시 · 저장 */
+function _afterClipOp(pr, idMap) {
+  const { finalizeGroupIds } = require('./core/project-model');
+  if (idMap && idMap.size) { require('./core/visual-span').remapSpanIds(pr, idMap); require('./core/overlay-layers').remapIds(pr, idMap); }
+  const gone = pr.groups.filter((g) => !(g.sentenceIds || []).length);
+  const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  if (gone.length) {
+    const keep = new Set(pr.groups.filter((x) => !gone.includes(x)).flatMap((x) => [x.imagePath, x.videoPath]).filter(Boolean));
+    for (const B of gone) { for (const f of [B.imagePath, B.videoPath]) if (f && !keep.has(f) && _inDir(f, mediaDir)) _toTrash(f); pr.groups.splice(pr.groups.indexOf(B), 1); }
+  }
+  pr.groups.forEach((x, i) => { x.num = i + 1; });
+  pr.sentences.forEach((x, i) => { x.num = i + 1; });
+  finalizeGroupIds(pr.groups, pr.sentences);
+  const ids = new Set(pr.sentences.map((x) => x.id));
+  for (const g of pr.groups) {
+    const sp = g.visSpan; if (!sp) continue;
+    if (sp.startId && !ids.has(sp.startId)) sp.startId = null;
+    if (sp.endId && !ids.has(sp.endId)) sp.endId = null;
+    if (!sp.startId && !sp.endId) g.visSpan = undefined;
+  }
+  if (gone.length) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
+  const nh = scriptHash(S.scriptPath);
+  try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
+  storeActive(); pushDtoUpdate(); syncSnapshotNow();
+  return gone.length;
+}
+const _rmTemps = (list) => { for (const p of list || []) if (p && p.temp && p.file) { try { fs.rmSync(p.file, { force: true }); } catch {} } };
+
+// 🗑 클립 삭제(선택 + Del · 도구 막대 🗑) — 고른 줄만 지운다. 문장의 줄을 다 지우면 문장째 · 그룹이 비면 그룹째(그림은 휴지통).
+ipcMain.handle('delete-clips', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const list = _clipSents(pr, args.sents);
+  if (!list) return { ok: false, error: '클립을 찾을 수 없습니다(대본이 그새 바뀌었을 수 있습니다) — 다시 골라 주세요.' };
+  const jobs = [];
+  for (const j of list) {
+    if (!j.lines.some((l) => l.sel)) continue;
+    const kept = j.lines.filter((l) => !l.sel && l.t);
+    let text = kept.map((l) => l.t).join(' ').trim();
+    if (text && _END_P.test(j.s.text) && !_END_P.test(text)) text += String(j.s.text).match(_END_P)[0].trim();
+    jobs.push({ ...j, kept, text });
+  }
+  if (!jobs.length) return { ok: false, error: '지울 클립을 고르세요.' };
+  if (jobs.filter((j) => !j.text).length >= pr.sentences.length) return { ok: false, error: '모든 클립을 지울 수는 없습니다 — 대본에 한 문장은 남아야 합니다.' };
+  const plan = _planMdEdits(pr, jobs.map((j) => ({ idx: j.idx, text: j.text, n: j.text ? 1 : 0 })));
+  if (!plan.ok) return plan;
+  const _u = undoPush('클립 삭제', { md: true });
+  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  const used = new Set(pr.sentences.map((x) => x.id));
+  const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+  const tmp = path.join(ttsDir, '.clip-tmp');
+  const idMap = new Map();
+  let nDel = 0, lost = 0;
+  for (const j of jobs) {
+    nDel += j.lines.filter((l) => l.sel).length;
+    const g = pr.groups.find((x) => x.sentenceIds.includes(j.s.id));
+    if (!j.text) {
+      const gi = g.sentenceIds.indexOf(j.s.id);
+      if (j.s.chapterMark && g.sentenceIds[gi + 1]) { const nx = pr.sentences.find((x) => x.id === g.sentenceIds[gi + 1]); if (nx && !nx.chapterMark) nx.chapterMark = j.s.chapterMark; }
+      pr.sentences.splice(pr.sentences.indexOf(j.s), 1); g.sentenceIds.splice(gi, 1);
+      continue;
+    }
+    const ns = _mkSent(plan.outs.get(j.idx)[0], j.s, used);
+    if (j.s.chapterMark) ns.chapterMark = j.s.chapterMark;
+    ns.capBreaks = _fixedBreaks(ns.text, j.kept.map((l) => l.t));
+    let pieces = null;
+    try {
+      pieces = await _linePieces(j.s, j.lines, tmp);
+      const got = pieces ? await _joinPieces(pieces.filter((p) => !p.sel), ttsDir, String(j.s.num)) : null;
+      if (got) Object.assign(ns, { ttsAudioPath: got.file, ttsDurationSec: got.dur, ttsStatus: 'done' }); else lost++;
+    } catch (e) { lost++; log('⚠ 클립 삭제 — 음성을 자르지 못했습니다: ' + e.message); }
+    finally { _rmTemps(pieces); }
+    pr.sentences.splice(pr.sentences.indexOf(j.s), 1, ns);
+    g.sentenceIds[g.sentenceIds.indexOf(j.s.id)] = ns.id;
+    idMap.set(j.s.id, ns.id);
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  const goneG = _afterClipOp(pr, idMap);
+  log(`🗑 ${prLabel(pr)} 클립 ${nDel}개 삭제 — 대본(.md) 갱신`
+    + (goneG ? ` · 클립이 모두 지워진 그룹 ${goneG}개는 사라졌습니다(그림은 휴지통)` : '')
+    + (lost ? ` · 음성 ${lost}문장은 다시 만들어야 합니다(🎤)` : ' · 남은 클립의 음성은 그대로 이어 붙였습니다') + ' (Ctrl+Z 되돌리기)');
+  return { ok: true, dto: P.toDTO(S.parsed), deleted: nDel, goneGroups: goneG };
+});
+
+// ⧉ 복사 — 고른 줄의 글 + 그 구간 음성(줄 경계 쉼에서 잘라 클립보드 폴더에). 문장마다 이어진 줄 묶음 = 붙여넣을 때 한 문장.
+ipcMain.handle('copy-clips', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const list = _clipSents(pr, args.sents);
+  if (!list) return { ok: false, error: '클립을 찾을 수 없습니다 — 다시 골라 주세요.' };
+  const dir = path.join(S.outRoot, '.priming-clip');
+  try { fs.mkdirSync(dir, { recursive: true }); for (const n of fs.readdirSync(dir)) { const f = path.join(dir, n); try { if (Date.now() - fs.statSync(f).mtimeMs > 86400e3) fs.rmSync(f, { force: true }); } catch {} } } catch {}
+  const chunks = [];
+  for (const j of list) {
+    const runs = []; let cur = null;
+    j.lines.forEach((l, k) => { if (l.sel) { if (cur && cur.end === k - 1) { cur.end = k; } else { cur = { start: k, end: k }; runs.push(cur); } } });
+    if (!runs.length) continue;
+    let pieces = null;
+    try { pieces = await _linePieces(j.s, j.lines, path.join(dir, 'tmp')); } catch (e) { pieces = null; log('⚠ 클립 복사 — 음성을 자르지 못했습니다(글만 복사): ' + e.message); }
+    for (const r of runs) {
+      const ls = j.lines.slice(r.start, r.end + 1);
+      const text = _endMark(ls.map((l) => l.t).join(' ').trim());
+      let audio = null, dur = null;
+      if (pieces) {
+        try {
+          const out = path.join(dir, Date.now().toString(36) + '_' + (++UNDO.seq) + '.wav');
+          const got = await require('./core/audio-splice').concatAudio(pieces.slice(r.start, r.end + 1).map((p) => p.file), out);
+          audio = out; dur = got.durationSec;
+        } catch (e) { log('⚠ 클립 복사 — 음성 조각을 만들지 못했습니다: ' + e.message); }
+      }
+      chunks.push({ text, parts: ls.map((l) => l.t), audio, dur, speaker: j.s.speaker || null, isIntro: !!j.s.isIntro });
+    }
+    _rmTemps(pieces);
+  }
+  try { fs.rmSync(path.join(dir, 'tmp'), { recursive: true, force: true }); } catch {}
+  if (!chunks.length) return { ok: false, error: '복사할 클립을 고르세요.' };
+  log(`⧉ 클립 ${chunks.reduce((a, x) => a + x.parts.length, 0)}개 복사${chunks.some((x) => !x.audio) ? ' (음성이 없는 클립은 글만)' : ''}`);
+  return { ok: true, chunks };
+});
+
+// 📋 붙여넣기 — 고른 클립 **뒤**에. 줄 가운데면 그 문장을 줄 경계에서 둘로 나눠(음성도 쉼에서) 사이에 넣는다. 음성은 복사한 조각을 그대로.
+ipcMain.handle('paste-clips', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const list = _clipSents(pr, [args.at]);
+  if (!list || !list.length) return { ok: false, error: '붙일 자리를 찾을 수 없습니다 — 클립을 다시 고르세요.' };
+  const j = list[0];
+  const chunks = (args.chunks || []).filter((x) => x && String(x.text || '').trim());
+  if (!chunks.length) return { ok: false, error: '붙여넣을 클립이 없습니다 — 먼저 ⧉ 복사하거나 ✂ 잘라내세요.' };
+  if (chunks.some((x) => (x.speaker || null) !== (j.s.speaker || null))) return { ok: false, error: '화자가 다른 클립은 이 자리에 붙일 수 없습니다(대본의 [이름] 이 다릅니다).' };
+  const li = Math.max(0, Math.min(j.lines.length - 1, Number(args.at.after) | 0));
+  const isLast = li >= j.lines.length - 1;
+  const headParts = j.lines.slice(0, li + 1).map((l) => l.t), tailParts = isLast ? [] : j.lines.slice(li + 1).map((l) => l.t);
+  const head = isLast ? String(j.s.text).trim() : _endMark(headParts.join(' ').trim());
+  const tail = tailParts.join(' ').trim();
+  const texts = [head, ...chunks.map((x) => _endMark(String(x.text).trim())), ...(tail ? [tail] : [])];
+  const plan = _planMdEdits(pr, [{ idx: j.idx, text: texts.join(' '), n: texts.length }]);
+  if (!plan.ok) return plan;
+  const _u = undoPush('클립 붙여넣기', { md: true });
+  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  const made = plan.outs.get(j.idx);
+  const used = new Set(pr.sentences.map((x) => x.id));
+  const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+  const g = pr.groups.find((x) => x.sentenceIds.includes(j.s.id));
+  const idMap = new Map();
+  const out = [];
+  let pieces = null, lost = 0;
+  try {
+    let hs = j.s, ts = null;
+    if (!isLast) {
+      pieces = await _linePieces(j.s, j.lines, path.join(ttsDir, '.clip-tmp')).catch(() => null);
+      hs = _mkSent(made[0], j.s, used); if (j.s.chapterMark) hs.chapterMark = j.s.chapterMark;
+      hs.capBreaks = _fixedBreaks(hs.text, headParts);
+      const gh = pieces ? await _joinPieces(pieces.slice(0, li + 1), ttsDir, String(j.s.num)) : null;
+      if (gh) Object.assign(hs, { ttsAudioPath: gh.file, ttsDurationSec: gh.dur, ttsStatus: 'done' }); else lost++;
+      ts = _mkSent(made[made.length - 1], j.s, used);
+      ts.capBreaks = _fixedBreaks(ts.text, tailParts);
+      const gt = pieces ? await _joinPieces(pieces.slice(li + 1), ttsDir, String(j.s.num)) : null;
+      if (gt) Object.assign(ts, { ttsAudioPath: gt.file, ttsDurationSec: gt.dur, ttsStatus: 'done' }); else lost++;
+      idMap.set(j.s.id, hs.id);
+    }
+    out.push(hs);
+    chunks.forEach((x, k) => {
+      const ns = _mkSent(made[1 + k], { isIntro: j.s.isIntro, speaker: j.s.speaker }, used);
+      if (Array.isArray(x.parts) && x.parts.length > 1) ns.capBreaks = _fixedBreaks(ns.text, x.parts);
+      if (x.audio && fs.existsSync(x.audio)) {
+        const dst = P.claimPath(path.join(ttsDir, 'p' + (j.s.num) + '_' + (k + 1) + '.wav'), null, ['.wav', '.mp3']);
+        try { fs.copyFileSync(x.audio, dst); Object.assign(ns, { ttsAudioPath: dst, ttsDurationSec: Number(x.dur) || null, ttsStatus: 'done' }); } catch { lost++; }
+      } else lost++;
+      out.push(ns);
+    });
+    if (ts) out.push(ts);
+  } finally { _rmTemps(pieces); try { fs.rmSync(path.join(ttsDir, '.clip-tmp'), { recursive: true, force: true }); } catch {} }
+  const si = pr.sentences.indexOf(j.s), gi = g.sentenceIds.indexOf(j.s.id);
+  pr.sentences.splice(si, 1, ...out);
+  g.sentenceIds.splice(gi, 1, ...out.map((x) => x.id));
+  _afterClipOp(pr, idMap);
+  const firstNew = pr.sentences.indexOf(out[1]);
+  log(`📋 ${prLabel(pr)} 클립 ${chunks.reduce((a, x) => a + ((x.parts && x.parts.length) || 1), 0)}개 붙여넣기 — G${g.num} · 대본(.md) 갱신`
+    + (lost ? ` · 음성 ${lost}문장은 다시 만들어야 합니다(🎤)` : ' · 음성도 함께') + ' (Ctrl+Z 되돌리기)');
+  return { ok: true, dto: P.toDTO(S.parsed), groupNum: g.num, firstSentence: firstNew };
+});
+
+// ⊟ 클립 합치기(2개 이상 고름) — 이어진 클립들을 **한 클립**으로. 한 문장 안이면 줄 나눔만 · 여러 문장에 걸치면 그 문장들을 하나로 잇는다
+//   (앞 그룹 그림이 이긴다 · 음성은 이어 붙이고 끝 문장의 남은 줄은 제 그룹에 그대로 — 클립 합치기 기준 2026-09-29).
+ipcMain.handle('merge-clips', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const list = _clipSents(pr, args.sents);
+  if (!list) return { ok: false, error: '클립을 찾을 수 없습니다 — 다시 골라 주세요.' };
+  const flat = []; list.forEach((j, a) => j.lines.forEach((l, b) => flat.push({ a, b, sel: l.sel })));
+  const selIdx = flat.map((x, i) => (x.sel ? i : -1)).filter((i) => i >= 0);
+  if (selIdx.length < 2) return { ok: false, error: '합칠 클립을 2개 이상 고르세요.' };
+  if (selIdx[selIdx.length - 1] - selIdx[0] + 1 !== selIdx.length) return { ok: false, error: '이어진 클립만 합칠 수 있습니다(사이에 고르지 않은 클립이 있습니다).' };
+  const A = flat[selIdx[0]], B = flat[selIdx[selIdx.length - 1]];
+  const js = list.slice(A.a, B.a + 1);
+  for (let k = 1; k < js.length; k++) if (js[k].idx !== js[k - 1].idx + 1) return { ok: false, error: '이웃한 문장의 클립만 합칠 수 있습니다.' };
+  if (js.some((j) => (j.s.speaker || null) !== (js[0].s.speaker || null))) return { ok: false, error: '화자가 다른 클립은 합칠 수 없습니다(대본의 [이름] 이 다릅니다).' };
+  // 한 문장 안 — 줄 나눔만 바꾼다(음성·대본 그대로)
+  if (js.length === 1) {
+    const j = js[0];
+    const parts = []; j.lines.forEach((l, b) => { if (b > A.b && b <= B.b) parts[parts.length - 1] += ' ' + l.t; else parts.push(l.t); });
+    const starts = []; j.lines.forEach((l, b) => { if (b > 0 && !(b > A.b && b <= B.b)) starts.push(l.from); });
+    undoPush('클립 합치기');
+    j.s.capBreaks = require('./core/caption-splitter').normBreaks(j.s.text, [...starts, String(j.s.text).length]) || undefined;
+    storeActive(); pushDtoUpdate(); syncSnapshotNow();
+    log(`⊟ ${prLabel(pr)} 클립 ${B.b - A.b + 1}개를 한 클립으로 — 음성·대본은 그대로(자막 줄만)`);
+    return { ok: true, dto: P.toDTO(S.parsed) };
+  }
+  // 여러 문장 — 첫 문장(앞 줄 + 고른 줄) · 끝 문장의 남은 줄은 따로
+  const first = js[0], last = js[js.length - 1];
+  const strip = (t) => String(t).replace(_END_P, '').trim();
+  const lastSelParts = last.lines.slice(0, B.b + 1).map((l) => l.t);
+  const trailParts = last.lines.slice(B.b + 1).map((l) => l.t);
+  const leadParts = first.lines.slice(0, A.b).map((l) => l.t);
+  const selParts = [...first.lines.slice(A.b).map((l) => l.t), ...js.slice(1, -1).flatMap((j) => j.lines.map((l) => l.t)), ...lastSelParts];
+  let mergedLine = selParts.map((t, k) => (k < selParts.length - 1 ? strip(t) : t)).join(' ').replace(/\s+/g, ' ').trim();
+  const trail = trailParts.join(' ').trim();
+  let merged = [...leadParts.map(strip), mergedLine].filter(Boolean).join(' ').trim();
+  if (trail) merged = _endMark(merged);
+  const edits = js.map((j, k) => ({ idx: j.idx, text: k === 0 ? merged : (k === js.length - 1 ? trail : ''), n: k === 0 ? 1 : (k === js.length - 1 && trail ? 1 : 0) }));
+  const plan = _planMdEdits(pr, edits);
+  if (!plan.ok) return plan;
+  const _u = undoPush('클립 합치기', { md: true });
+  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  const used = new Set(pr.sentences.map((x) => x.id));
+  const ns = _mkSent(plan.outs.get(first.idx)[0], first.s, used); if (first.s.chapterMark) ns.chapterMark = first.s.chapterMark;
+  ns.num = first.s.num;
+  ns.capBreaks = _fixedBreaks(ns.text, [...leadParts, mergedLine]);
+  let nr = null;
+  if (trail) { nr = _mkSent(plan.outs.get(last.idx)[0], last.s, used); nr.num = last.s.num; nr.capBreaks = _fixedBreaks(nr.text, trailParts); if (last.s.chapterMark) nr.chapterMark = last.s.chapterMark; }
+  if ((first.s.capSpans && first.s.capSpans.length) || js.some((j) => j.s.capSpans && j.s.capSpans.length)) {
+    const mv = require('./core/caption-format').remapSpansMulti(js.map((j) => j.s.text), js.map((j) => j.s.capSpans || []), nr ? [ns.text, nr.text] : [ns.text]);
+    if (mv) { ns.capSpans = (mv[0] && mv[0].length) ? mv[0] : undefined; if (nr) nr.capSpans = (mv[1] && mv[1].length) ? mv[1] : undefined; }
+  }
+  const spl = await _spliceSentenceAudio(js.map((j) => j.s), nr ? [ns, nr] : [ns], log);
+  const idMap = new Map(); js.forEach((j, k) => idMap.set(j.s.id, (k === js.length - 1 && nr) ? nr.id : ns.id));
+  // 모델 — 첫 문장 자리에 ns · 끝 문장 자리에 nr · 가운데는 뺀다(비는 그룹은 사라진다 — 앞 그림이 이긴다)
+  for (let k = js.length - 1; k >= 0; k--) {
+    const j = js[k]; const g = pr.groups.find((x) => x.sentenceIds.includes(j.s.id)); const gi = g.sentenceIds.indexOf(j.s.id);
+    const rep = k === 0 ? ns : (k === js.length - 1 ? nr : null);
+    if (rep) { pr.sentences.splice(pr.sentences.indexOf(j.s), 1, rep); g.sentenceIds[gi] = rep.id; }
+    else { pr.sentences.splice(pr.sentences.indexOf(j.s), 1); g.sentenceIds.splice(gi, 1); }
+  }
+  const goneG = _afterClipOp(pr, idMap);
+  log(`⊟ ${prLabel(pr)} 클립 ${selIdx.length}개를 한 클립으로 — 문장 ${js.length}개를 이었습니다 · 대본(.md) 갱신`
+    + (goneG ? ` · 모두 합쳐진 그룹 ${goneG}개는 앞 그룹 그림을 씁니다` : '')
+    + (spl ? ' · 음성은 이어 붙였습니다' : ' · 음성은 다시 만들어야 합니다(🎤)') + ' (Ctrl+Z 되돌리기)');
+  return { ok: true, dto: P.toDTO(S.parsed) };
+});
+
+// 🎤 목소리 수정 — 고른 클립의 **문장** 음성만 다시(채널 시드 그대로) · roll = 🎲 다른 톤으로 새로 뽑기
+ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 변환', async () => {
+  { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }
+  const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
+  const pr = c.pr;
+  const seen = new Set(); const sents = [];
+  for (const it of args.items || []) { const s = _sentAt(pr, it.groupNum, it.sentIdx); if (s && !seen.has(s.id)) { seen.add(s.id); sents.push(s); } }
+  if (!sents.length) return P.toDTO(S.parsed);
+  const preset = resolvePreset(args.presetName || null);
+  if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
+  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
+  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const roll = !!args.roll;
+  const usePreset = roll ? { ...preset, seed: Math.floor(Math.random() * 1e9) } : preset;
+  const sp = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
+  S.abort = false;
+  log(roll ? `🎲 클립 음성 새로 뽑기 (${sents.length}문장 · ${voiceLabel(preset)} → 시드 ${usePreset.seed} · 이 문장들만 톤이 달라집니다)`
+    : `🎤 클립 음성 다시 만들기 (${sents.length}문장 · ${voiceLabel(preset)} · 채널 시드 그대로)`);
+  await P.fillTtsList(sents, usePreset, mgr, shortsDirs(S.outRoot, pr.shortsNum).tts, log, () => S.abort, sp, '클립', pushDtoUpdate, true);
+  try { await mgr.stop(); } catch {}
+  pushDtoUpdate(); syncSnapshotNow();
+  return P.toDTO(S.parsed);
+}));
+
 // ⤒ 그룹 합치기 — 이 그룹을 **앞 그룹에** 합친다 = 앞 그림을 여기까지 이어 쓴다(로이 2026-09-24).
 //   앞 그룹의 그림·영상·프롬프트가 이긴다(core/group-merge). 이 그룹 자신의 그림 파일은 번호 정리 때 치워진다
 //   (media-N 안의 것만 — 사용자가 밖에서 첨부한 원본은 건드리지 않는다). 음성은 문장 것이라 그대로 산다.

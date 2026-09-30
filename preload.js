@@ -208,6 +208,12 @@ contextBridge.exposeInMainWorld('api', {
   setSavedCapFormats: (list) => ipcRenderer.invoke('set-saved-cap-formats', list),
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
+  // 🧩 클립 도구 막대(v0.5.94)
+  deleteClips: (args) => ipcRenderer.invoke('delete-clips', args),
+  copyClips: (args) => ipcRenderer.invoke('copy-clips', args),
+  pasteClips: (args) => ipcRenderer.invoke('paste-clips', args),
+  mergeClips: (args) => ipcRenderer.invoke('merge-clips', args),
+  ttsSentences: (args) => ipcRenderer.invoke('tts-sentences', args),
   resplit: (args) => ipcRenderer.invoke('resplit', args),
   introVideoPrep: (args) => ipcRenderer.invoke('intro-video-prep', args),
   // 📥 통합본 자산 이어받기 — 각 부의 기존 TTS·이미지·비디오를 통합대본 작업폴더로 복사·연결.
