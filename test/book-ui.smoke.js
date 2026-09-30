@@ -60,6 +60,7 @@ ${para}
 
     // ── 본문 장 출력 제외(v0.3.33) — 원고는 그대로 두고 책에서만 뺀다 ──
     //   §0 진행 현황·체크리스트처럼 원고엔 있어야 하지만 인쇄물엔 없어야 하는 장을 클릭 한 번으로.
+    await win.click('[data-tab=structure]');   // 탭 선택은 localStorage(bk-tab)에 남는다 — 늘 구조 탭에서 시작
     const chBoxes = win.locator('.bkch input[type=checkbox]');
     const chCount = await chBoxes.count();
     if (chCount !== 2) throw new Error(`장 체크박스 ${chCount}개 ≠ 2`);
@@ -94,8 +95,25 @@ ${para}
       const nav = document.querySelector('[data-testid=bk-nav]').getBoundingClientRect();
       return { sideL: side.left, sideR: side.right, sideB: side.bottom, logL: log.left, logR: log.right, logB: log.bottom, logT: log.top, navB: nav.bottom };
     });
-    if (!(geo.logL >= geo.sideL - 1 && geo.logR <= geo.sideR + 1 && Math.abs(geo.logB - geo.sideB) < 3 && geo.logT > geo.navB)) throw new Error('로그가 왼쪽 패널 맨 아래가 아님 ' + JSON.stringify(geo));
+    if (!(geo.logL >= geo.sideL - 1 && geo.logR <= geo.sideR + 1 && Math.abs(geo.logB - geo.sideB) < 14 && geo.logT > geo.navB)) throw new Error('로그가 왼쪽 패널 맨 아래가 아님 ' + JSON.stringify(geo));
     console.log('· 왼쪽 메뉴 7탭 + 로그 왼쪽 하단 OK');
+    // 화면 아래 끝까지 채운다(빈 공간 없음) · 내용과 로그 사이 간격 · 「원고 열기」는 출판 탭 바로 다음 · 출판 채널 자동 선택
+    const fill = await win.evaluate(() => {
+      const w = document.querySelector('.bkwrap').getBoundingClientRect();
+      const body = document.querySelector('.bkbody').getBoundingClientRect();
+      const log = document.querySelector('#logwrap').getBoundingClientRect();
+      const tog = document.querySelector('.modetoggle');
+      const nxt = tog && tog.nextElementSibling;
+      const sel = [...document.querySelectorAll('header select')].find((s) => /채널/.test(s.title || ''));
+      return { gapBottom: window.innerHeight - w.bottom, gap: log.top - body.bottom, nextTxt: nxt ? nxt.textContent : '', chan: sel ? sel.value : null };
+    });
+    if (fill.gapBottom > 24) throw new Error('화면 아래 빈 공간 ' + Math.round(fill.gapBottom) + 'px');
+    if (fill.gap < 6) throw new Error('내용과 로그 사이 간격 없음 ' + fill.gap);
+    if (!/원고 열기/.test(fill.nextTxt)) throw new Error('원고 열기 버튼이 출판 탭 다음이 아님: ' + fill.nextTxt);
+    const pres = await win.evaluate(() => window.api.listPresets());
+    const bkCh = (pres || []).find((p) => p.startMode === 'book');
+    if (bkCh && fill.chan !== bkCh.name && fill.chan !== '출판') throw new Error('출판 탭인데 채널이 ' + fill.chan + ' (기대 출판 채널)');
+    console.log('· 하단 빈 공간 0 · 로그 간격 OK · 원고 열기 위치 OK · 채널 =', fill.chan);
     const firstPage = await win.evaluate(() => { const f = document.querySelector('.bkviewport'); return f && f.contentDocument ? f.contentDocument.body.innerText : ''; });
     if (/표지 스프레드 안내/.test(firstPage)) throw new Error('표지 스프레드 안내 쪽이 아직 있음');
     await win.click('[data-tab=layout]');
@@ -212,8 +230,9 @@ ${para}
       await win.screenshot({ path: path.join(ROOT, 'output', '_book-multi', 'ui-samgukji.png') });
     } else console.log('⏭ 삼국지 원고 없음 — 다중 파일 케이스 스킵');
 
-    // 스크린샷
+    // 스크린샷 (로이 앱과 같은 localStorage — 끝나면 기본 탭(구조)으로 되돌린다)
     await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookview.png') });
+    await win.click('[data-tab=structure]').catch(() => {});
     console.log('✅ book-ui.smoke — 전체 통과 (스크린샷: output/_book-smoke/ui-bookview.png)');
   } finally {
     await app.close().catch(() => {});

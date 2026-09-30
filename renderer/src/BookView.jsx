@@ -1,7 +1,7 @@
 // BookView.jsx — 출판(POD) 모드 화면: 구조 패널 / 실제 페이지 미리보기(vivliostyle) / 설정 패널.
 //   미리보기 = main 이 조판 HTML 을 media:// 로 서빙 → @vivliostyle/core 가 브라우저에서
 //   PDF 와 동일한 CSS Paged Media 조판으로 펼침면 렌더. 문단 클릭 → 원고(.md) 해당 줄 수정.
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import api from './lib/ipc.js';
 import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
@@ -118,6 +118,15 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const viewportRef = useRef(null); // 뷰포트 DOM
   const loadedForRef = useRef('');  // 마지막으로 로드한 url (중복 로드 방지)
   const lastPagesRef = useRef(0);   // 마지막 보고 쪽수 (동일 값 재보고 방지)
+
+  // 🖥 화면 아래 끝까지 채운다 — 위쪽(헤더) 높이를 재서 남은 만큼(고정 130px 는 아래 빈 공간을 남겼다)
+  const wrapRef = useRef(null);
+  useLayoutEffect(() => {
+    const fit = () => { const el = wrapRef.current; if (!el) return; const top = el.getBoundingClientRect().top; el.style.height = Math.max(480, window.innerHeight - top - 10) + 'px'; };
+    fit(); window.addEventListener('resize', fit);
+    const t = setTimeout(fit, 400);   // 헤더가 늦게 자리 잡는 경우
+    return () => { window.removeEventListener('resize', fit); clearTimeout(t); };
+  });
 
   const meta = (dto && dto.meta) || {};
   const loaded = !!(dto && dto.kind === 'book');
@@ -451,7 +460,7 @@ body{overflow-y:scroll}
 
   if (!loaded) {
     return (
-      <div className="bkwrap">
+      <div className="bkwrap" ref={wrapRef}>
         <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 부크크 · 작가와)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
         <div className="bkcenter"><div className="bkempty">
           <h2>📖 출판 — MD 원고 → 종이책(부크크) · 전자책(작가와)</h2>
@@ -874,7 +883,7 @@ body{overflow-y:scroll}
   })();
 
   return (
-    <div className="bkwrap">
+    <div className="bkwrap" ref={wrapRef}>
       {/* 생성 진행 모달 — 화면 중앙, 경과 시간 표시 */}
       {building && (
         <div className="modal-bg show" style={{ zIndex: 90 }}>

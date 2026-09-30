@@ -332,6 +332,7 @@ export default function App() {
 
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
+  const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
   const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
@@ -3640,6 +3641,7 @@ export default function App() {
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
+            {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
           {!noProduction && (
             <nav className="menus" data-testid="menus">
               {MENUS.map(([id, label]) => (
@@ -3695,7 +3697,6 @@ export default function App() {
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
               style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙ 설정</button>
             {isBk && (<>
-              <button onClick={openBook}>📖 원고 열기</button>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
               <button className="ghost" disabled={!loaded} title="원고 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
               <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
@@ -5157,6 +5158,15 @@ export default function App() {
     const nm = (m === 'book' || m === 'remotion') ? m : 'longform';
     if (nm === mode) return;
     hasStoredRangeRef.current = false; restoringItemRef.current = false; // 모드 전환 = 그 모드 기본값 계산 허용
+    // 📖 출판 탭 = 「출판」 채널로 자동 선택(로이 2026-10-01). 나올 땐 들어오기 전 채널로 되돌린다.
+    //   출판 채널 = startMode 가 book 인 채널 중 이름이 「출판」인 것(없으면 첫 book 채널). 없으면 건드리지 않는다.
+    if (nm === 'book') {
+      const bk = (presets || []).find((p) => p.startMode === 'book' && p.name === '출판') || (presets || []).find((p) => p.startMode === 'book');
+      if (bk && bk.name !== presetName) { preBookPresetRef.current = presetName; setPresetName(bk.name); }
+    } else if (mode === 'book' && preBookPresetRef.current) {
+      const back = preBookPresetRef.current; preBookPresetRef.current = '';
+      if ((presets || []).some((p) => p.name === back)) setPresetName(back);
+    }
     setMode(nm);
     // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/출판 대본은 독립.
     try { const r = await api.setMode({ mode: nm }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
