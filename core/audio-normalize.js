@@ -79,6 +79,21 @@ function measureSpeech(buf) {
 }
 
 /**
+ * 🔇 완전 무음인가 — 길이는 멀쩡한데 소리가 하나도 없는 PCM16 WAV (2026-09-30 로이: 「변환 완료인데 소리가 안 들린다」).
+ *   assertRealAudio 는 크기·길이만 봐서 이런 결과가 통과했다. 피크 16/32768(≈ -66dB) 미만 = 디지털 무음.
+ *   ⚠ WAV(PCM16)가 아니거나 0.3초 미만이면 false — 모르면 막지 않는다(fail-open).
+ */
+function isSilentWav(buf) {
+  const d = _findData(buf);
+  if (!d || d.bits !== 16) return false;
+  const n = Math.floor((d.end - d.offset) / 2);
+  if (n < d.sampleRate * 0.3) return false;
+  const step = Math.max(1, Math.floor(n / 200000));   // 아주 긴 것도 빠르게(20만 점 표본)
+  for (let i = 0; i < n; i += step) if (Math.abs(buf.readInt16LE(d.offset + i * 2)) >= 16) return false;
+  return true;
+}
+
+/**
  * 목표 레벨에 맞출 게인(dB)을 정한다. 0 이면 손댈 필요 없음.
  * ⚠ 아주 작은 보정(±0.5dB 미만)은 하지 않는다 — ffmpeg 를 한 번 더 돌릴 값어치가 없다.
  */
@@ -129,6 +144,6 @@ function targetFromPreset(preset) {
 }
 
 module.exports = {
-  measureSpeech, gainForTarget, buildFilter, targetFromPreset,
+  measureSpeech, isSilentWav, gainForTarget, buildFilter, targetFromPreset,
   TARGET_DB_DEFAULT, MAX_GAIN_DB, MIN_GAIN_DB, PEAK_CEIL_DB,
 };

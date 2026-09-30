@@ -186,6 +186,12 @@ function assertRealAudio(res, num) {
     err.emptyAudio = true;
     throw err;
   }
+  // 🔇 길이는 정상인데 소리가 없는 결과 — 시드를 바꿔 다시 만든다(같은 입력이면 같은 무음이 나온다)
+  if (AudioNorm.isSilentWav(res.mp3Buffer)) {
+    const err = new Error(`무음 음성이 돌아왔습니다 (${dur.toFixed(2)}초 동안 소리 없음) — 서버가 컷${num} 을 소리 없이 합성했습니다`);
+    err.emptyAudio = true; err.silentAudio = true;
+    throw err;
+  }
 }
 
 // WAV(정속) → atempo 배속 + (선택)음량 정규화 를 **한 번의 ffmpeg 호출**로 구운 MP3.
@@ -432,7 +438,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
         }
         if (onLine) {
           onLine(empty
-            ? `⚠ 컷${s.num} 빈 음성(${attempt}/${maxAttempt}) — 시드를 ${seedOverride} 로 바꿔 다시 만듭니다`
+            ? `⚠ 컷${s.num} ${e.silentAudio ? '무음 음성' : '빈 음성'}(${attempt}/${maxAttempt}) — 시드를 ${seedOverride} 로 바꿔 다시 만듭니다`
             : `⚠ 컷${s.num} TTS 실패(${attempt}/${maxAttempt}) — 재시도: ${e.message}`);
         }
         await new Promise((r) => setTimeout(r, empty ? 200 : 1500 * attempt));

@@ -5324,7 +5324,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                               <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                               <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
                               <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
-                              <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). Shift+클릭 = 시드를 바꿔 다른 take 로 새로 뽑기" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
+                              <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
                               <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
                               <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                             </span>
@@ -5343,7 +5343,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" data-testid="play-group" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>{playing && playing.key === 'group:' + pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
                             <button className="gprev" data-testid="play-from" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>{playing && playing.key === 'from:' + pr.shortsNum + ':' + c.num ? '■' : '⏭'}</button>
-                            <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). Shift+클릭 = 시드를 바꿔 다른 take 로 새로 뽑기(그 그룹만 톤이 달라집니다)" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
+                            <button className="gprev" title="이 그룹만 TTS 변환 — 채널 목소리·시드 그대로(같은 소리). 다른 톤으로 새로 뽑기 = Shift+클릭 또는 그룹 메뉴의 🎲(그 그룹만 톤이 달라집니다)" onClick={(e) => onGroupTts(pr.shortsNum, c.num, e.shiftKey)}>🎤</button>
                             <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
                             <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                           </div>
@@ -5829,7 +5829,8 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       {grp && <>
         <button data-testid="mn-play-group" title="이 그룹 미리듣기" onClick={go(() => grp.onPlayGroup(sn, c.num))}>{pk === 'group:' + sn + ':' + c.num ? '■ 멈춤' : '▶ 이 그룹 미리듣기'}</button>
         <button data-testid="mn-play-from" title="여기부터 재생" onClick={go(() => grp.onPlayFrom(sn, c.num))}>{pk === 'from:' + sn + ':' + c.num ? '■ 멈춤' : '⏭ 여기부터 재생'}</button>
-        <button title="이 그룹만 TTS 변환 — Shift+클릭 = 시드를 바꿔 다른 take" onClick={(e) => { close(); grp.onGroupTts(sn, c.num, e.shiftKey); }}>🎤 이 그룹 TTS</button>
+        <button title="이 그룹만 TTS 변환 — 채널 시드 그대로(같은 목소리·같은 톤)" onClick={(e) => { close(); grp.onGroupTts(sn, c.num, e.shiftKey); }}>🎤 이 그룹 TTS</button>
+        <button data-testid="mn-tts-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 그룹만 톤이 달라집니다). 문장을 고쳤는데 소리가 그대로 같게 들릴 때 쓰세요" onClick={() => { close(); grp.onGroupTts(sn, c.num, true); }}>🎲 이 그룹 새로 뽑기 (다른 톤)</button>
         <button title="이 그룹 프롬프트 보기·수정" onClick={go(() => grp.onShowPrompt(sn, c, `G${c.num}`))}>📝 프롬프트</button>
         {(c.num > 1 && grp.onMerge) && <button title={`앞 그룹(G${c.num - 1})과 합치기 — 앞 그룹 그림을 이 그룹 끝까지 이어 씁니다`} onClick={go(() => grp.onMerge(sn, c.num))}>⤒ 앞 그룹과 합치기</button>}
         <button disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={go(() => grp.onSplit(sn, c.num))}>✂ 그룹 분할</button>

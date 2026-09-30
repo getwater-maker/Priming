@@ -1734,6 +1734,8 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
       log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
+      if (restoreNote && /작업본 이어받기/.test(restoreNote)) verifyRestoredAudio(S.parsed, S.outRoot).catch(() => {});   // 🔊 음성 파일이 실제로 있는지(비동기 — 열기를 막지 않는다)
+      { const bn = path.basename(scriptPath).replace(/\.md$/i, '').trim(); if (/^(대본|script|untitled|new|새\s*대본|제목\s*없음)$/i.test(bn)) log(`⚠ 대본 파일 이름이 「${bn}.md」 입니다 — 출력 폴더와 작업본이 이름이 같은 다른 영상과 섞여 엉뚱한 음성·그림이 붙을 수 있습니다. 파일 이름에 영상 제목이나 번호를 넣으세요.`); }
       // 📥 통합대본(자산출처 메타)이면 자동으로 이어받기 — 로이가 수동 단계를 잊는 문제를 반복 겪었다.
       //   이미 대부분 연결돼 있으면(작업본 이어받기 등) 4천 건 재복사를 피해 건너뛴다. 그때는 버튼으로 재실행.
       if (scriptHasAssetSources(S.scriptPath)) {
@@ -4578,6 +4580,36 @@ const MIN_TTS_FILE_BYTES = 1200;
 function ttsFileOk(p) {
   try { return !!p && fs.statSync(p).size >= MIN_TTS_FILE_BYTES; } catch { return false; }
 }
+// 🔊 이어받은 작업본의 음성 파일 확인(2026-09-30 로이: 아내 PC — 「이미 변환 완료인데 소리가 안 들린다」).
+//   작업본을 그대로 이어받는 경로(projectsFromSnapshot)는 저장된 경로를 믿고 파일이 있는지 보지 않는다 → 화면은 「변환됨」인데 파일이 없어 소리가 안 났다
+//   (다른 PC·다른 드라이브 글자·지운 폴더). 여기서 비동기로 확인해 ① 출력 폴더의 같은 이름 파일이 있으면 다시 잇고 ② 없으면 「변환 안 됨」으로 되돌려
+//   ⚡/🎤 가 다시 만들게 하고 ③ 로그로 알린다. 출력 폴더 자체에 못 닿으면(구글드라이브가 아직 안 열림) 아무것도 지우지 않는다(fail-open).
+async function verifyRestoredAudio(parsed, outRootGuess) {
+  const items = [];
+  for (const pr of (parsed && parsed.projects) || []) for (const s of pr.sentences || []) if (s.ttsAudioPath) items.push({ pr, s });
+  if (!items.length) return null;
+  const okFile = async (p) => { try { return (await fs.promises.stat(p)).size >= MIN_TTS_FILE_BYTES; } catch { return false; } };
+  const dirOk = async (p) => { try { await fs.promises.access(path.dirname(p)); return true; } catch { return false; } };
+  let missing = 0, relinked = 0, unreachable = 0, first = null, i = 0;
+  const one = async ({ pr, s }) => {
+    if (await okFile(s.ttsAudioPath)) return;
+    const base = path.basename(s.ttsAudioPath);
+    for (const r of [outRootGuess, S.outRoot].filter(Boolean)) {
+      const cand = path.join(r, `tts-${pr.shortsNum}`, base);
+      if (await okFile(cand)) { s.ttsAudioPath = cand; relinked++; return; }
+    }
+    if (!(await dirOk(s.ttsAudioPath))) { unreachable++; if (!first) first = s.ttsAudioPath; return; }   // 폴더째 안 보임 → 드라이브 문제일 수 있다 — 지우지 않는다
+    if (!first) first = s.ttsAudioPath;
+    s.ttsAudioPath = null; s.ttsDurationSec = null; missing++;
+  };
+  await Promise.all(Array.from({ length: 12 }, async () => { while (i < items.length) await one(items[i++]); }));
+  if (!missing && !relinked && !unreachable) return { checked: items.length };
+  if (relinked) log(`🔗 이어받은 작업본의 음성 ${relinked}개는 경로가 달라 출력 폴더(tts)의 같은 이름 파일로 다시 이었습니다`);
+  if (missing) log(`⚠ 이어받은 작업본의 음성 ${missing}개(전체 ${items.length}개 중)는 파일이 없어 「변환 안 됨」으로 되돌렸습니다 — 🎤/⚡ 로 다시 만드세요 (예: ${first})`);
+  if (unreachable) log(`⚠ 음성 ${unreachable}개는 폴더에 접근할 수 없어 확인하지 못했습니다 — 구글드라이브가 아직 안 열렸거나 폴더를 옮겼을 수 있습니다 (예: ${first}). 드라이브가 열린 뒤 대본을 다시 여세요`);
+  if (S.parsed === parsed) { storeActive(); pushDtoUpdate(); }
+  return { checked: items.length, missing, relinked, unreachable };
+}
 function missingTtsNums(project) {
   return (project.sentences || []).filter((s) => !ttsFileOk(s.ttsAudioPath)).map((s) => s.num);
 }
@@ -6224,6 +6256,7 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
     ? `🎲 G${groupNum} TTS 새로 뽑기 (${sents.length}문장 · ${voiceLabel(preset)} → 시드 ${rollPreset.seed} 로 교체 · 이 그룹만 톤이 달라집니다)`
     : `🎤 G${groupNum} TTS 다시 변환 (${sents.length}문장 · ${voiceLabel(preset)} · 배속 ${(speed && Number(speed) > 0) ? Number(speed) : 1} · 지금 채널 설정으로)`);
   await P.fillTtsList(sents, rollPreset, mgr, ttsDir, log, () => S.abort, (speed && Number(speed) > 0) ? Number(speed) : 1.0, `G${groupNum}`, pushDtoUpdate, true);
+  if (!roll) log(`ℹ G${groupNum} 는 채널 시드(${preset.seed}) 그대로 만들었습니다 — 문장을 조금만 고쳤다면 소리도 거의 같게 들리는 게 정상입니다. 다른 억양·톤이 필요하면 그룹 메뉴 → 🎲 이 그룹 새로 뽑기 (Shift+🎤)`);
   try { await mgr.stop(); } catch {}
   pushDtoUpdate();
   return P.toDTO(S.parsed);

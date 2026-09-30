@@ -47,6 +47,8 @@ function makeWav(samples, { sampleRate = 24000, channels = 1, bits = 16, extraCh
   p += 24;
   buf.write('data', p, 'ascii');
   buf.writeUInt32LE(dataSize, p + 4);
+  // 🔊 실제 소리(작은 사인파)를 채운다 — v0.5.93 부터 완전 무음 WAV 는 「무음 음성」으로 걸러지므로 「정상 음성」 픽스처가 무음이면 안 된다
+  if (bits === 16) for (let i = 0, o = p + 8; o + 1 < buf.length; i++, o += 2) buf.writeInt16LE(Math.round(Math.sin(i / 8) * 6000), o);
   return truncateTo == null ? buf : buf.subarray(0, truncateTo);
 }
 // 실사고 파일과 같은 것: RIFF 헤더 44바이트, data 크기 0
@@ -89,7 +91,7 @@ console.log('[2] assertRealAudio — pipeline.js 원문 실행');
   const src = readSrc('core/pipeline.js');
   const m = src.match(/const MIN_TTS_BYTES[\s\S]*?\nfunction assertRealAudio\(res, num\) \{[\s\S]*?\n\}/);
   ok(!!m, 'pipeline.js 에서 assertRealAudio 블록을 찾았다');
-  const fn = vm.runInNewContext(m[0] + '; assertRealAudio');
+  const fn = vm.runInNewContext(m[0] + '; assertRealAudio', { AudioNorm: require('../core/audio-normalize') });   // v0.5.93 — 무음 판정도 이 함수에서
 
   let threw = false;
   try { fn({ mp3Buffer: EMPTY_44, durationSec: 0.5 }, 857); } catch { threw = true; }
