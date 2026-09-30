@@ -79,6 +79,11 @@ const META_KEYS = {
   '정가': 'price', '가격': 'price', 'pod가격': 'price', 'pod 가격': 'price',
   '전자책': 'ebookPrice', '전자책가격': 'ebookPrice', '전자책 가격': 'ebookPrice',
   '전자책표지': 'ebookCover', '전자책 표지': 'ebookCover',
+  '전자책isbn': 'ebookIsbn', '전자책 isbn': 'ebookIsbn',
+  // 반복 코너(예: 역사 노트) — 이 소제목 구간을 노트 상자로(쉼표로 여러 개 · 조판 설정 「특별 섹션」과 합친다)
+  '특별섹션': 'specialSections', '특별 섹션': 'specialSections',
+  // 책등 두께(mm) — 플랫폼 화면이 알려 준 값. 적으면 계산을 이긴다(부크크 「새종이책」 화면 값)
+  '책등두께': 'spineMm', '책등 두께': 'spineMm',
   '출판등록': 'regNo', '등록': 'regNo',
   '주소': 'address', '전화': 'phone', '대표전화': 'phone', '팩스': 'fax',
   '홈페이지': 'homepage', '이메일': 'email', 'email': 'email', '대표메일': 'email',

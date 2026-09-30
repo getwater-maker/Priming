@@ -56,9 +56,16 @@ function shortenPath(t) {
 }
 function inlineMd(s, opts) {
   const hidePaths = !!(opts && opts.hidePaths);
+  const keepLinks = !!(opts && opts.keepLinks);   // 📱 전자책 PDF — 바깥 주소(http)는 누를 수 있는 링크로
   // 문단 중간에 낀 HTML 주석도 지운다 — esc 보다 **먼저**(esc 뒤엔 &lt;!-- 가 되어 못 잡는다).
   const src = String(s == null ? '' : s).replace(/<!--[\s\S]*?-->/g, '');
-  let t = stripLinks(esc(src));
+  let t = keepLinks
+    ? esc(src).replace(LINK_RE, (m, bang, label, url) => {
+      if (bang) return m;
+      const u = String(url).trim(), lab = String(label).trim();
+      return /^https?:/i.test(u) ? `<a href="${u}">${lab || u}</a>` : lab;
+    })
+    : stripLinks(esc(src));
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
   t = t.replace(/`([^`]+)`/g, (m, code) =>
@@ -68,7 +75,7 @@ function inlineMd(s, opts) {
 
 // 각주 참조 [^id] → 각주(float) 또는 미주(sup) 마크업.
 function renderInline(text, book, ctx) {
-  const io = { hidePaths: !!(ctx && ctx.hidePaths) };
+  const io = { hidePaths: !!(ctx && ctx.hidePaths), keepLinks: !!(ctx && ctx.keepLinks) };
   const parts = String(text || '').split(/(\[\^[^\]]+\])/);
   let out = '';
   for (const p of parts) {
@@ -191,14 +198,14 @@ function blocksHtml(blocks, book, ctx, srcAttr) {
 
 // 장 본문 렌더 — 특별 섹션 키워드(예: '역사 노트')와 일치하는 소제목 구간을
 // 노트 박스(<div class="special-sec">)로 감싸 본문과 다르게 조판. 구간 = 그 소제목부터 다음 소제목(또는 장 끝).
-function chapterBlocksHtml(blocks0, book, ctx, srcAttr, specials) {
-  const blocks = scriptFilter(blocks0, ctx);   // 영상 대본 모드면 제작용 블록 제거 후 특별섹션 판정
-  if (!specials || !specials.length) return blocksHtml(blocks, book, ctx, srcAttr);
+// 블록 → [{special, blocks}] 조각. 특별 섹션 키워드가 든 소제목부터 다음 소제목·장 끝까지가 special.
+//   내지(html-builder)와 ePub(epub-builder)가 **같은 분할**을 쓴다(둘이 갈리면 종이책과 전자책 내용이 달라진다).
+function splitSpecialBlocks(blocks, specials) {
   const out = [];
   let buf = [];
   let sbuf = null;
-  const flushBuf = () => { if (buf.length) { out.push(blocksHtml(buf, book, ctx, srcAttr)); buf = []; } };
-  const flushSpecial = () => { if (sbuf) { out.push(`<div class="special-sec">\n${blocksHtml(sbuf, book, ctx, srcAttr)}\n</div>`); sbuf = null; } };
+  const flushBuf = () => { if (buf.length) { out.push({ special: false, blocks: buf }); buf = []; } };
+  const flushSpecial = () => { if (sbuf) { out.push({ special: true, blocks: sbuf }); sbuf = null; } };
   for (const b of blocks || []) {
     if (b.type === 'h3' || b.type === 'h4') {
       const hit = specials.some((k) => (b.text || '').trim().includes(k));
@@ -208,7 +215,14 @@ function chapterBlocksHtml(blocks0, book, ctx, srcAttr, specials) {
     if (sbuf) sbuf.push(b); else buf.push(b);
   }
   flushBuf(); flushSpecial();
-  return out.join('\n');
+  return out;
+}
+function chapterBlocksHtml(blocks0, book, ctx, srcAttr, specials) {
+  const blocks = scriptFilter(blocks0, ctx);   // 영상 대본 모드면 제작용 블록 제거 후 특별섹션 판정
+  if (!specials || !specials.length) return blocksHtml(blocks, book, ctx, srcAttr);
+  return splitSpecialBlocks(blocks, specials).map((p) => p.special
+    ? `<div class="special-sec">\n${blocksHtml(p.blocks, book, ctx, srcAttr)}\n</div>`
+    : blocksHtml(p.blocks, book, ctx, srcAttr)).join('\n');
 }
 
 // ── 자동 생성 페이지 ──
@@ -329,7 +343,11 @@ function colophonNotesHtml(fsec, book, ctx, srcAttr) {
 //   책제목(볼드) · 발행 이력(라벨+날짜) · 「라벨 ｜ 값」 행(굵은 라벨) · ISBN(구분선 없이 값+부가기호) ·
 //   별표 고지문 · 테두리 박스(투고 안내 등) · ⓒ + 재사용 안내. 배치는 조판 옵션(위/아래).
 //   Option 1(2026-07-13): 자유문이 표·제목·ⓒ를 되풀이하면 그 줄만 빼고 고지문만 남김(중복 제거·무손실).
-function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
+function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
+  // 📱 전자책 판 — ISBN 은 전자책 ISBN(있으면) · 종이책 정가(POD)는 싣지 않는다
+  const meta = (ctx && ctx.edition === 'ebook')
+    ? { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '' }
+    : meta0;
   const only = (Array.isArray(fields) && fields.length) ? new Set(fields) : null;
   const on = (key) => !only || only.has(key);
   const row = (key, label, v, cls) => (v && on(key)
@@ -503,6 +521,7 @@ function pageCss(o) {
   const rhContent = (kind) => kind === 'title' ? (o.hasSubtitle ? 'string(book-title) " / " string(book-subtitle)' : 'string(book-title)')
     : kind === 'subtitle' ? 'string(book-subtitle)'
     : kind === 'chapter' ? 'string(chapter-title, first-except)'
+    : kind === 'chapterNo' ? 'string(chapter-no, first-except)'   // 「제N회」만 — 긴 회목이 두 줄로 꺾이지 않게(삼국지 R1)
     : kind === 'section' ? 'string(sec-title)' : 'none';
   // 정렬 — vivliostyle 마진 박스는 폭이 내용 기준(@top-left/right 는 세로 쌓임, @top-center 는
   //   width:100% 무시하고 가운데 배치 — 실측). 판면 폭을 mm 로 명시해 text-align 이 작동하게 한다.
@@ -561,6 +580,7 @@ function pageCss(o) {
 /* 러닝헤드 장제목 = 전체 원제(공백 포함) — h2 는 '제N회'를 .ch-no 로 쪼개 공백이 사라지므로
    숨김 앵커(.ch-rh)의 원문에서 문자열을 뽑는다(예: "제16회 여포의 신궁, 전위의 최후"). */
 .ch-rh { string-set: chapter-title content(); display: none; }
+.ch-rh-no { string-set: chapter-no content(); display: none; }   /* 「제N회」 부분만(제N회 형식이 아니면 전체 제목) */
 section.chapter h3 { string-set: sec-title content(); }
 .book-title-anchor { string-set: book-title content(); display: none; }
 .book-subtitle-anchor { string-set: book-subtitle content(); display: none; }
@@ -605,7 +625,33 @@ nav.toc a::after {
 /* 판권 배치 — 위(실물 단행본 다수·기본) / 아래(구 앱 최종본 스타일).
    flex 하단정렬은 vivliostyle 조각화에서 height:100% 미해석 → 고정 마진(판면 폭 기준 %)으로. */
 section.colophon .cp-wrap { margin-top: ${o.colophonAlign === 'bottom' ? '44%' : '0'}; }
+${o.edition === 'ebook' ? ebookCss(o) : ''}`;
+}
+
+// 📱 전자책 PDF — 화면으로 읽는다: 홀수쪽 맞추기(recto)가 만드는 백면을 없애고 쪽을 그냥 잇는다.
+//   테마의 break-before: recto 를 전부 page 로 덮는다(!important — 테마가 먼저 실린다).
+//   앞표지 쪽은 여백 0 · 머리글·쪽번호 없음(이름+의사클래스로 함께 — @page 특이도 함정, 위 display 주석).
+function ebookCss(o) {
+  const none = '@top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; }';
+  return `
+/* ── 📱 전자책 판 ── */
+section.halftitle, section.titlepage, section.front-section, section.back-section, nav.toc,
+section.part-title, section.chapter, section.colophon, section.endnotes { break-before: page !important; }
+section.part-title { break-after: page !important; }
+@page ebookcover { margin: 0; ${none} }
+@page ebookcover:left { margin: 0; ${none} }
+@page ebookcover:right { margin: 0; ${none} }
+section.ebook-cover { page: ebookcover; break-after: page; margin: 0; padding: 0; }
+section.ebook-cover img { display: block; width: ${o.trimW}mm; height: ${o.trimH}mm; object-fit: cover; }
+a[href^="http"] { color: #1a4d8f; }
 `;
+}
+
+// 특별 섹션 키워드 — 조판 설정(쉼표) + 원고 메타 `> 특별섹션:`(쉼표) 합집합. 내지·ePub 공통(삼국지 R6 —
+//   설정은 권마다 다시 넣어야 하지만 원고 메타는 원고와 함께 다닌다).
+function specialKeywordsOf(meta, opts) {
+  const split = (v) => String(v || '').split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  return [...new Set([...split(opts && opts.specialKeyword), ...split(meta && meta.specialSections)])];
 }
 
 /**
@@ -639,8 +685,8 @@ function buildBookHtml(book, opts = {}) {
     footnoteMode: (meta.footnoteMode === '미주' || opts.footnoteMode === 'endnote') ? 'endnote' : 'footnote',
     // ── 머리글/쪽번호 노출 선택 ──
     //   내용: 책제목/부제/장제목/소제목(절)/없음 · 정렬: 왼쪽/가운데/오른쪽 (기본=바깥쪽 정렬 관행)
-    headerEven: pick(opts.headerEven, ['title', 'subtitle', 'chapter', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
-    headerOdd: pick(opts.headerOdd, ['title', 'subtitle', 'chapter', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽)
+    headerEven: pick(opts.headerEven, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
+    headerOdd: pick(opts.headerOdd, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽) · chapterNo = 「제N회」만
     headerEvenAlign: pick(opts.headerEvenAlign, ['left', 'center', 'right'], 'left'),   // 짝수쪽 바깥=왼쪽
     headerOddAlign: pick(opts.headerOddAlign, ['left', 'center', 'right'], 'right'),    // 홀수쪽 바깥=오른쪽
     headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선
@@ -659,7 +705,7 @@ function buildBookHtml(book, opts = {}) {
     // ── 판권 배치 — 판면 위(기본) / 아래 ──
     colophonAlign: opts.colophonAlign === 'bottom' ? 'bottom' : 'top',
     // ── 특별 섹션 키워드(쉼표 구분) — 일치하는 소제목 구간을 노트 박스로 (예: '역사 노트') ──
-    specialKeywords: String(opts.specialKeyword || '').split(',').map((s) => s.trim()).filter(Boolean),
+    specialKeywords: specialKeywordsOf(meta, opts),
     // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──
     excluded: Array.isArray(opts.excluded) ? opts.excluded : [],
     hidePaths: !!opts.hidePaths,
@@ -670,7 +716,14 @@ function buildBookHtml(book, opts = {}) {
     scriptMode: !!opts.scriptMode,
     scriptHideShots: !!opts.scriptHideShots,   // 샷 제목(### 샷N)까지 숨겨 줄글로 읽기
     sourceMap: opts.sourceMap !== false,
+    // ── 📕 종이책(print) / 📱 전자책(ebook) — 전자책은 앞표지가 1쪽 · 백면 없이 이어서 · 좌우 같은 여백 · 링크 살림 ──
+    edition: opts.edition === 'ebook' ? 'ebook' : 'print',
   };
+  if (o.edition === 'ebook') {
+    const m = o.marginsMm; const side = Math.round(((Number(m.inner) || 0) + (Number(m.outer) || 0)) / 2 * 10) / 10;
+    o.marginsMm = { ...m, inner: side, outer: side };   // 제본이 없다 — 안쪽 여백을 따로 둘 까닭이 없다
+    o.chapterStart = 'page';
+  }
   o.fontStack = FONT_STACKS[o.fontKey];
   o.hasSubtitle = !!(meta.subtitle && String(meta.subtitle).trim()); // 헤더 '제목 / 부제' 병기용
 
@@ -681,6 +734,8 @@ function buildBookHtml(book, opts = {}) {
     scriptMode: o.scriptMode,               // 영상 대본 모드(제작용 블록 제외)
     scriptHideShots: o.scriptHideShots,
     hidePaths: o.hidePaths,   // 작업용 파일 경로 → 파일명만
+    edition: o.edition,
+    keepLinks: o.edition === 'ebook',
     endnotes: [],
     resolveImage(src) {
       if (/^(https?|data|media|file):/i.test(src)) return src;
@@ -695,6 +750,10 @@ function buildBookHtml(book, opts = {}) {
   bodyParts.push(`<span class="book-title-anchor">${esc(meta.title || book.fileTitle || '')}</span>`);
   bodyParts.push(`<span class="book-subtitle-anchor">${esc(meta.subtitle || meta.title || book.fileTitle || '')}</span>`);
 
+  // 📱 전자책 PDF 1쪽 = 앞표지(opts.ebookCoverPath — 전자책표지 메타 또는 인쇄 표지에서 자른 앞면)
+  if (o.edition === 'ebook' && opts.ebookCoverPath) {
+    bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.ebookCoverPath))}" alt="표지" /></section>`);
+  }
   // 표지 안내 페이지 — 미리보기 전용(opts.coverInfo 전달 시에만). 내지 PDF 빌드에서는 전달 안 함.
   if (opts.coverInfo) bodyParts.push(coverInfoHtml(opts.coverInfo, meta, o));
 
@@ -734,6 +793,7 @@ ${c.title ? (() => {
         const mCh = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
         const inner = mCh ? `<span class="ch-no">${esc(mCh[1])}</span>${esc(mCh[2])}` : esc(c.title);
         return `<span class="ch-rh" aria-hidden="true">${esc(c.title)}</span>`
+          + `<span class="ch-rh-no" aria-hidden="true">${esc(mCh ? mCh[1] : c.title)}</span>`
           + `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${inner}</h2>`;
       })() : ''}
 ${chapterBlocksHtml(c.blocks, book, ctx, srcAttr, o.specialKeywords)}
@@ -799,4 +859,5 @@ function metaPlatformId(meta) {
 }
 
 module.exports = {
+  specialKeywordsOf, splitSpecialBlocks,
   chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK };

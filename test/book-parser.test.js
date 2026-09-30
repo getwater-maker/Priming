@@ -131,8 +131,11 @@ ok(spineWidthMm(300, '백색모조 80g') === 15, '책등: 300p 모조80g = 15mm'
 ok(Math.abs(spineWidthMm(200, '백색모조 100g') - 11.5) < 0.01, '책등: 200p 모조100g = 11.5mm');
 const sp = coverSpread({ platformId: 'bookk', trimId: '46판', paperId: '백색모조 80g', totalPages: 0, flaps: false });
 ok(sp.widthMm === 260 && sp.heightMm === 194, `46판 0p 표지 = 260×194 (실제 ${sp.widthMm}×${sp.heightMm})`);
+// 부크크 책등은 화면 실측 공식(1.6 + 0.055×쪽수) — 300쪽 = 18.1mm (v0.5.96 · 옛 (쪽수÷2)×두께 는 부크크에선 약 1mm 모자랐다)
 const sp2 = coverSpread({ platformId: 'bookk', trimId: '46판', paperId: '백색모조 80g', totalPages: 300, flaps: true });
-ok(sp2.widthMm === 475 && sp2.spineMm === 15, `46판 300p 날개 표지 = 475mm (실제 ${sp2.widthMm}, 책등 ${sp2.spineMm})`);
+ok(sp2.widthMm === 478.1 && sp2.spineMm === 18.1, `46판 300p 날개 표지 = 478.1mm (실제 ${sp2.widthMm}, 책등 ${sp2.spineMm})`);
+const spK = coverSpread({ platformId: 'kyobo', trimId: '신국판', paperId: '백색모조 80g', totalPages: 300, flaps: false });
+ok(spK.spineMm === 15, `교보 300p 모조80g = 15mm (부크크 공식이 다른 플랫폼에 새지 않는다 — ${spK.spineMm})`);
 const v = validateCoverImage({ imgW: sp2.widthPx, imgH: sp2.heightPx, spread: sp2 });
 ok(v.ok && v.exact, '표지 이미지 검증(정확 일치)');
 const v2 = validateCoverImage({ imgW: Math.round(sp2.widthPx / 2), imgH: Math.round(sp2.heightPx / 2), spread: sp2 });

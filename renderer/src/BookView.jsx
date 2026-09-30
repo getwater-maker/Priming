@@ -12,7 +12,7 @@ const META_FIELDS = [
   ['price', '정가(POD)'], ['ebookPrice', '전자책 가격'], ['regNo', '출판등록'],
   ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
   ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램'],
-  ['copyright', '저작권(ⓒ)'], ['isbnAddon', '부가기호(5자리)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
+  ['copyright', '저작권(ⓒ)'], ['isbnAddon', '부가기호(5자리)'], ['ebookIsbn', '전자책 ISBN'], ['specialSections', '특별 섹션(예: 역사 노트)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
 ];
 // 판권 법정 필수 7필드 — 미입력 경고
 const REQUIRED_KEYS = [['title', '제목'], ['author', '저자'], ['issuer', '발행인'], ['issueDate', '발행일'], ['publisher', '출판사'], ['isbn', 'ISBN'], ['price', '정가']];
@@ -285,13 +285,18 @@ body{overflow-y:scroll}
   }, [building]);
 
   // ── 액션 ──
-  async function buildPdf() {
-    setBuilding(true); setBuildMsg('📕 PDF 생성 중 — 내지 조판 + 표지'); setStatus('PDF 생성 중… (내지 조판 + 표지)');
+  // 📕 종이책(POD 입고: 내지+표지 PDF) / 📱 전자책(화면 읽기용 PDF 한 파일) — 같은 원고, 판만 다르다
+  async function buildPdf(edition) {
+    const ebook = edition === 'ebook';
+    setBuilding(true);
+    setBuildMsg(ebook ? '📱 전자책 PDF 생성 중 — 표지 1쪽 + 본문' : '📕 종이책 PDF 생성 중 — 내지 조판 + 표지');
+    setStatus(ebook ? '전자책 PDF 생성 중…' : 'PDF 생성 중… (내지 조판 + 표지)');
     try {
-      const r = await api.bookBuildPdf({ layout });
+      const r = await api.bookBuildPdf({ layout, edition: ebook ? 'ebook' : 'print' });
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error
-        ? (r.coverError ? `⚠ 내지 ${r.pages}쪽 완료 · 표지 실패 — 로그 확인` : `PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}`)
+        ? (ebook ? `전자책 PDF 완료 — ${r.pages || '?'}쪽`
+          : (r.coverError ? `⚠ 내지 ${r.pages}쪽 완료 · 표지 실패 — 로그 확인` : `종이책 PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}`))
         : 'PDF 실패 — 로그 확인');
     } catch (e) { logline('PDF 오류: ' + e.message); }
     setBuilding(false);
@@ -519,10 +524,16 @@ body{overflow-y:scroll}
                 }).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
             </label>
-            <label>내지 용지
-              <select value={dto.paperId} onChange={(e) => setMeta('paper', e.target.value)}>
+            <label title={dto.paperLocked ? '부크크는 쪽수가 용지를 정합니다 — 399쪽까지 미색모조 100g, 400쪽부터 미색모조 80g (부크크 화면 실측)' : ''}>내지 용지
+              <select value={dto.paperId} disabled={!!dto.paperLocked} data-testid="bk-paper" onChange={(e) => setMeta('paper', e.target.value)}>
                 {(dto.papers || []).map((p) => <option key={p} value={p}>{p}</option>)}
+                {!(dto.papers || []).includes(dto.paperId) && <option value={dto.paperId}>{dto.paperId}</option>}
               </select>
+            </label>
+            <label title="부크크 「새종이책」 화면이 알려 주는 책등 두께(mm)를 적으면 계산보다 이 값을 씁니다. 비우면 자동 계산(부크크: 1.6 + 0.055×쪽수, 400쪽부터 0.045)">책등 두께(mm)
+              <input type="text" data-testid="bk-spine" defaultValue={dto.spineManual || ''} key={'sp:' + (dto.spineManual || '') + ':' + dto.paperId}
+                placeholder={`자동 ${dto.spread && dto.spread.spineMm}`}
+                onBlur={(e) => setMeta('spineMm', e.target.value.trim())} />
             </label>
             <label className="chk"><input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)</label>
             <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
@@ -632,7 +643,7 @@ body{overflow-y:scroll}
             <div className="bkrow">
               <label>홀수쪽 머리글
                 <select value={layout.headerOdd} onChange={(e) => L('headerOdd', e.target.value)}>
-                  <option value="chapter">장 제목 (관행)</option><option value="section">소제목(절)</option>
+                  <option value="chapter">장 제목 (관행)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
                   <option value="title">책 제목</option><option value="subtitle">책 부제</option>
                   <option value="none">표시 안 함</option>
                 </select>
@@ -726,7 +737,8 @@ body{overflow-y:scroll}
           </div>
         </details>
         <div className="bkactions">
-          <button disabled={building} onClick={buildPdf}>{building ? '⏳ 생성 중…' : '📕 PDF 생성 (내지+표지)'}</button>
+          <button disabled={building} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 PDF (내지+표지)'}</button>
+          <button disabled={building} data-testid="bk-pdf-ebook" title="전자책 업로드용 PDF 한 파일 — 1쪽 앞표지 + 본문, 백면 없음, 안/바깥 같은 여백, 링크 살림, 판권은 전자책 ISBN·가격" onClick={() => buildPdf('ebook')}>📱 전자책 PDF</button>
           <button className="ghost" disabled={building} title="같은 원고로 전자책(ePub 3.0) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭" onClick={buildEpubFile}>📱 ePub</button>
           <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>
         </div>

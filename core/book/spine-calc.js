@@ -11,13 +11,14 @@
  *   전체높이 = 판형높이 + bleed×2
  */
 
-const { getPlatform, getTrim, getPaper } = require('./platform-presets');
+const { getPlatform, getTrim, getPaper, bookkSpineMm } = require('./platform-presets');
 
 // mm → px (dpi 기준, 300dpi: 1mm = 11.811px)
 function mmToPx(mm, dpi = 300) { return Math.round((mm / 25.4) * dpi); }
 
-// 책등폭(mm) — 소수 1자리 반올림.
-function spineWidthMm(totalPages, paperId) {
+// 책등폭(mm) — 소수 1자리 반올림. 부크크(spineFormula)는 화면 실측 공식(소수 2자리 — 부크크 화면 표기와 같게).
+function spineWidthMm(totalPages, paperId, platformId) {
+  if (platformId && getPlatform(platformId).spineFormula === 'bookk') return bookkSpineMm(totalPages);
   const paper = getPaper(paperId);
   const sheets = Math.ceil((Number(totalPages) || 0) / 2);
   return Math.round(sheets * paper.sheetMm * 10) / 10;
@@ -28,14 +29,16 @@ function spineWidthMm(totalPages, paperId) {
  * @returns {{ spineMm, widthMm, heightMm, widthPx, heightPx, dpi, parts }}
  *   parts = 왼쪽부터 각 구간 폭(mm) — 가이드 렌더링용.
  */
-function coverSpread({ platformId = 'bookk', trimId = 'A5', paperId, totalPages = 0, flaps = false }) {
+//   spineOverrideMm > 0 = 사람이 적은 책등 두께(원고 `> 책등두께:` — 부크크 화면 값)가 계산을 이긴다.
+function coverSpread({ platformId = 'bookk', trimId = 'A5', paperId, totalPages = 0, flaps = false, spineOverrideMm = 0 }) {
   const pf = getPlatform(platformId);
   const trim = getTrim(trimId);
   const bleed = pf.coverBleedMm;
   const flap = flaps ? pf.coverFlapMm : 0;
-  const spine = spineWidthMm(totalPages, paperId || pf.defaultPaper);
+  const manual = Number(spineOverrideMm) > 0 ? Math.round(Number(spineOverrideMm) * 100) / 100 : 0;
+  const spine = manual || spineWidthMm(totalPages, paperId || pf.defaultPaper, platformId);
 
-  const widthMm = Math.round((bleed + flap + trim.width + spine + trim.width + flap + bleed) * 10) / 10;
+  const widthMm = Math.round((bleed + flap + trim.width + spine + trim.width + flap + bleed) * 100) / 100;
   const heightMm = trim.height + bleed * 2;
   const parts = [];
   parts.push({ name: 'bleed', mm: bleed });
@@ -47,7 +50,7 @@ function coverSpread({ platformId = 'bookk', trimId = 'A5', paperId, totalPages 
   parts.push({ name: 'bleed', mm: bleed });
 
   return {
-    spineMm: spine,
+    spineMm: spine, spineManual: !!manual,
     widthMm, heightMm,
     widthPx: mmToPx(widthMm, pf.dpi), heightPx: mmToPx(heightMm, pf.dpi),
     dpi: pf.dpi, safeMm: pf.coverSafeMm, toleranceMm: pf.toleranceMm,

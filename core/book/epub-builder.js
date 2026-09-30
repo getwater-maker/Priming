@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { esc, inlineMd, chapterExcluded, scriptFilter } = require('./html-builder');
+const { esc, inlineMd, chapterExcluded, scriptFilter, specialKeywordsOf, splitSpecialBlocks } = require('./html-builder');
 
 // ── 미니 ZIP 라이터 ──
 // adm-zip 은 writeZip 때 엔트리를 이름순 정렬해 ePub 규격(mimetype=첫 엔트리·무압축)을
@@ -96,6 +96,9 @@ hr.scene { border: none; text-align: center; margin: 1.6em 0; }
 hr.scene:after { content: "✻"; color: #777; }
 section.front h1, section.back h1 { font-size: 1.25em; text-align: center; margin: 3em 0 2.5em; }
 section.dedication, section.epigraph { text-align: center; }
+div.special-sec { background: #f4f1ea; padding: 0.7em 0.9em; margin: 1.4em 0 1em; font-size: 0.93em; }
+div.special-sec h2.sec, div.special-sec h3.sec { margin: 0 0 0.6em; }
+div.special-sec p { text-indent: 0; margin-bottom: 0.4em; }
 section.dedication p, section.epigraph p { text-indent: 0; margin-top: 30%; }
 .titlepage { text-align: center; }
 .titlepage .t { font-size: 1.7em; font-weight: bold; margin-top: 30%; }
@@ -145,7 +148,16 @@ function listXhtml(b, book, ctx) {
 }
 
 // 블록 → xhtml (ePub 전용 — 각주는 noteref + 장 끝 aside)
-function blocksXhtml(blocks0, book, ctx) {
+function blocksXhtml(blocks0, book, ctx, specials) {
+  if (specials && specials.length) {
+    // 특별 섹션(역사 노트 등) — 종이책처럼 상자로(R5①). 각주 모으기는 아래 한 번만.
+    const filtered = scriptFilter(blocks0, ctx);
+    const parts = splitSpecialBlocks(filtered, specials).map((p) => {
+      const inner = blocksXhtml(p.blocks, book, { ...ctx, __noFlush: true, __sharedNotes: true }, null);
+      return p.special ? `<div class="special-sec">${inner}</div>` : inner;
+    });
+    return parts.join('\n') + flushNotes(ctx);
+  }
   const out = [];
   // 영상 대본 모드 필터를 내지와 똑같이 태운다 — 안 맞추면 종이책과 전자책 내용이 갈린다.
   for (const b of scriptFilter(blocks0, ctx)) {
@@ -167,12 +179,15 @@ function blocksXhtml(blocks0, book, ctx) {
       default: break;
     }
   }
-  // 이 문서에서 나온 각주들 — 장/섹션 끝에 aside(epub:type footnote)
-  if (ctx.notes.length) {
-    out.push(ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)}</p></aside>`).join('\n'));
-    ctx.notes = [];
-  }
-  return out.join('\n');
+  // 이 문서에서 나온 각주들 — 장/섹션 끝에 aside(epub:type footnote). 특별 섹션 조각 안에서는 미루고 바깥이 한 번에.
+  if (!ctx.__noFlush) out.push(flushNotes(ctx));
+  return out.filter(Boolean).join('\n');
+}
+function flushNotes(ctx) {
+  if (!ctx.notes.length) return '';
+  const h = ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)}</p></aside>`).join('\n');
+  ctx.notes.length = 0;
+  return h;
 }
 function inline(text, book, ctx) {
   const io = { hidePaths: !!(ctx && ctx.hidePaths) };
@@ -211,8 +226,8 @@ async function cropFrontCover(spreadImage, spread, outJpg) {
     const { getFfmpegPath } = require('../media-utils');
     const ff = getFfmpegPath();
     if (!ff) return null;
-    const { execFileSync } = require('child_process');
-    execFileSync(ff, ['-y', '-i', spreadImage, '-vf', `crop=${cw}:${ch}:${cx}:${cy}`, '-q:v', '3', outJpg], { windowsHide: true, stdio: 'ignore' });
+    const { execFile } = require('child_process');
+    await new Promise((res, rej) => execFile(ff, ['-y', '-i', spreadImage, '-vf', `crop=${cw}:${ch}:${cx}:${cy}`, '-q:v', '3', outJpg], { windowsHide: true }, (e) => (e ? rej(e) : res())));
     return fs.existsSync(outJpg) ? outJpg : null;
   } catch (_) { return null; }
 }
@@ -233,6 +248,7 @@ async function buildEpub(book, a) {
   let imgSeq = 0;
 
   const excluded = Array.isArray(a.excluded) ? a.excluded : [];
+  const specials = specialKeywordsOf(meta, { specialKeyword: a.specialKeyword });   // 설정 + 원고 메타 `> 특별섹션:`
   const ctx = {
     fnSeq: 0, notes: [],
     hidePaths: !!a.hidePaths,
@@ -312,7 +328,7 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
     }
     for (const c of shownChapters) {
       addDoc(`ch-${c.num}`, `ch-${String(c.num).padStart(3, '0')}.xhtml`, c.title,
-        `<section epub:type="chapter"><h1 class="chapter-title">${esc(c.title)}</h1>\n${blocksXhtml(c.blocks, book, ctx)}</section>`,
+        `<section epub:type="chapter"><h1 class="chapter-title">${esc(c.title)}</h1>\n${blocksXhtml(c.blocks, book, ctx, specials)}</section>`,
         { toc: c.title });
     }
   }
@@ -337,7 +353,7 @@ ${navLis}
 </ol></nav>`, { nav: true, skipSpine: true });
 
   // 9) opf
-  const uid = 'urn:isbn:' + (String(meta.isbn || '').replace(/[^0-9Xx]/g, '') || 'priming-' + Buffer.from(meta.title || 'book').toString('hex').slice(0, 12));
+  const uid = 'urn:isbn:' + (String(meta.ebookIsbn || meta.isbn || '').replace(/[^0-9Xx]/g, '') || 'priming-' + Buffer.from(meta.title || 'book').toString('hex').slice(0, 12));
   const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   zip.addFile('OEBPS/content.opf', Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="ko">
@@ -368,4 +384,4 @@ ${spine.join('\n')}
   return { success: true, epubPath: a.outPath };
 }
 
-module.exports = { buildEpub };
+module.exports = { buildEpub, cropFrontCover };

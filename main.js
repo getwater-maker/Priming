@@ -204,6 +204,23 @@ function currentDTO() {
   return P.toDTO(S.parsed);
 }
 
+// 📐 출판 규격 한 곳 — 플랫폼·판형·용지·날개·책등(표지 스프레드). bookDTO · 종이책 PDF · ePub 이 모두 이걸 쓴다
+//   (예전엔 세 곳이 같은 식을 따로 가졌다). 부크크는 용지가 쪽수로 정해지고(미색모조 100g · 400쪽부터 80g)
+//   책등은 부크크 화면 공식 · 원고 `> 책등두께:` 를 적으면 그 값이 이긴다.
+function bookSpec(meta, pages) {
+  const SC = require('./core/book/spine-calc');
+  const PP = require('./core/book/platform-presets');
+  const { metaPlatformId } = require('./core/book/html-builder');
+  meta = meta || {};
+  const platformId = metaPlatformId(meta);
+  const pf = PP.getPlatform(platformId);
+  const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
+  const paperId = PP.effectivePaper(platformId, meta.paper, pages);
+  const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
+  const spineOverrideMm = Number(String(meta.spineMm || '').replace(/[^0-9.]/g, '')) || 0;
+  const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: pages || 0, flaps, spineOverrideMm });
+  return { platformId, pf, trimId, paperId, flaps, spread };
+}
 // 출판(book) 파싱본 → 렌더러 DTO — 구조 요약(섹션 목록·부/장 트리·메타·표지·규격).
 function bookDTO(parsed) {
   const BK = require('./core/parsers/book-parser');
@@ -211,13 +228,8 @@ function bookDTO(parsed) {
   const PP = require('./core/book/platform-presets');
   const { metaPlatformId } = require('./core/book/html-builder');
   const meta = parsed.meta || {};
-  const platformId = metaPlatformId(meta);
-  const pf = PP.getPlatform(platformId);
-  const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
-  const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
-  const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
   const pages = parsed._lastPages || 0;
-  const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: pages, flaps });
+  const { platformId, pf, trimId, paperId, flaps, spread } = bookSpec(meta, pages);
   const secDTO = (s) => ({ key: s.key, label: s.label, title: s.title, lineStart: s.lineStart, blocks: (s.blocks || []).length });
   return {
     kind: 'book',
@@ -239,10 +251,12 @@ function bookDTO(parsed) {
     coverCheck: parsed._coverCheck || null,
     lastPages: pages,
     platformId, trimId, paperId, flaps, spread,
+    paperLocked: !!pf.spineFormula,          // 부크크 = 용지를 쪽수가 정한다(고를 수 없다)
+    spineManual: meta.spineMm || '',
     layoutSaved: (activeItem() && activeItem().settings && activeItem().settings.book) || {},
     platforms: Object.entries(PP.PLATFORMS).map(([id, p]) => ({ id, label: p.label, trims: p.trims, note: p.note, minPages: p.minPages })),
     trims: Object.entries(PP.TRIM_SIZES).map(([id, t]) => ({ id, label: t.label })),
-    papers: Object.keys(PP.PAPERS),
+    papers: pf.papers || Object.keys(PP.PAPERS),
   };
 }
 
@@ -8048,6 +8062,9 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     const PP = require('./core/book/platform-presets');
     rememberBookLayout(args.layout);
     const outRoot = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+    // 📕 종이책(POD 입고용: 내지.pdf + 표지.pdf) / 📱 전자책(화면 읽기용 한 파일: 표지 1쪽 + 본문 · 백면 없음 · 링크 살림)
+    const edition = args.edition === 'ebook' ? 'ebook' : 'print';
+    if (edition === 'ebook') return buildEbookPdf(args, outRoot, t0);
     const workDir = path.join(outRoot, '_work');
     const assets = PB.prepareWorkAssets(workDir);
     const { html } = buildBookHtml(S.parsed, {
@@ -8063,12 +8080,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
 
     // 규격 리포트 — 플랫폼 최소쪽수 경고 + 책등/표지 스프레드 안내
     const meta = S.parsed.meta || {};
-    const platformId = metaPlatformId(meta);
-    const pf = PP.getPlatform(platformId);
-    const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
-    const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
-    const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
-    const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: S.parsed._lastPages, flaps });
+    const { pf, paperId, flaps, spread } = bookSpec(meta, S.parsed._lastPages);
     if (pf.minPages && S.parsed._lastPages < pf.minPages) {
       log(`⚠ ${pf.label} 최소 ${pf.minPages}쪽 — 현재 ${S.parsed._lastPages}쪽 (승인 거부될 수 있음)`);
     }
@@ -8127,6 +8139,47 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     return { dto: currentDTO(), error: e.message };
   }
 });
+
+// 📱 전자책 PDF — 종이책과 같은 원고·같은 조판 옵션에서 **판만 다르다**(buildBookHtml edition:'ebook').
+//   1쪽 = 앞표지(전자책표지 메타 > 인쇄 표지에서 앞면 크롭 > 없음) · 백면 없이 이어서 · 안/바깥 같은 여백 ·
+//   바깥 주소 링크 살림 · 판권은 전자책 ISBN·전자책 가격. 표지 PDF·책등 계산은 없다(종이책 전용).
+async function buildEbookPdf(args, outRoot, t0) {
+  const { buildBookHtml } = require('./core/book/html-builder');
+  const PB = require('./core/book/pdf-builder');
+  const meta = S.parsed.meta || {};
+  const workDir = path.join(outRoot, '_work_ebook');
+  const assets = PB.prepareWorkAssets(workDir);
+  // 표지 — 전자책표지 메타 > 인쇄 표지(스프레드)의 앞면
+  let coverImg = null;
+  const baseDir = S.scriptPath ? path.dirname(S.scriptPath) : outRoot;
+  if (meta.ebookCover) {
+    const p = path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(baseDir, meta.ebookCover);
+    if (fs.existsSync(p)) coverImg = p;
+  }
+  if (!coverImg && S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath) && (S.parsed._lastPages || 0) > 0) {
+    const { spread } = bookSpec(meta, S.parsed._lastPages);
+    const { cropFrontCover } = require('./core/book/epub-builder');
+    coverImg = await cropFrontCover(S.parsed.coverImagePath, spread, path.join(workDir, '_ebook-cover.jpg'));
+    if (coverImg) log('🖼 인쇄 표지에서 앞표지 자동 크롭 → 전자책 PDF 1쪽');
+  }
+  if (!coverImg) log('ℹ 전자책 표지 없음 — 표지 쪽 없이 본문부터 시작합니다(`> 전자책표지:` 메타 또는 인쇄 표지를 첨부하세요).');
+  const { html, options } = buildBookHtml(S.parsed, {
+    ...bookLayoutOpts(args),
+    baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
+    imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
+    edition: 'ebook', ebookCoverPath: coverImg,
+  });
+  const base = _safeFolder(meta.title || S.parsed.fileTitle || '책');
+  const outPdf = path.join(outRoot, `${base}_전자책.pdf`);
+  const r = await PB.buildInteriorPdf({ html, outPdf, workDir, log });
+  if (!r.success) { log('✗ 전자책 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
+  S.timings.make = Math.round((Date.now() - t0) / 1000);
+  log(`📱 전자책 PDF 완료 — ${r.pages || '?'}쪽${coverImg ? ' (표지 1쪽 포함)' : ''} (${S.timings.make}초) → ${outPdf}`);
+  try { shell.openPath(outRoot); } catch {}
+  storeActive();
+  // ⚠ 종이책 쪽수(_lastPages)는 건드리지 않는다 — 전자책 쪽수는 표지·백면 차이로 달라 책등 계산에 쓰면 안 된다.
+  return { dto: currentDTO(), pages: r.pages, edition: 'ebook', ebookPdf: outPdf, interiorPdf: null, coverPdf: null };
+}
 
 // 표지 이미지 첨부 — 스프레드 기대 치수와 검증(±1mm 또는 비율 1%).
 ipcMain.handle('book-attach-cover', async () => {
@@ -8225,6 +8278,7 @@ const BOOK_META_LABELS = {
   copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
+  ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
@@ -8327,12 +8381,7 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
     const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
     const base = _safeFolder(meta.title || S.parsed.fileTitle || '책');
     // 전자책 표지 크롭용 스프레드 정보 (인쇄 표지가 첨부돼 있을 때)
-    const platformId = metaPlatformId(meta);
-    const pf = PP.getPlatform(platformId);
-    const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
-    const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
-    const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
-    const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: S.parsed._lastPages || 0, flaps });
+    const { spread } = bookSpec(meta, S.parsed._lastPages || 0);
     // 쪽수 미확정(책등 0mm)이면 인쇄 표지 크롭 위치가 어긋남 → 표지 크롭 생략(전자책표지 메타가 있으면 그걸 사용).
     const pagesKnown = (S.parsed._lastPages || 0) > 0;
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
@@ -8342,7 +8391,7 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
       coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
       // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
       excluded: lo.excluded, scriptMode: lo.scriptMode, scriptHideShots: lo.scriptHideShots,
-      hidePaths: lo.hidePaths,
+      hidePaths: lo.hidePaths, specialKeyword: lo.specialKeyword,
       spread, log,
     });
     if (r.success) { try { shell.openPath(outRoot); } catch {} }
