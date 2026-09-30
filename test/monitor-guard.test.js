@@ -16,37 +16,50 @@ const a = M.indexOf('const MONITOR_GUARD_SEC');
 const b = M.indexOf("].join('\\n');", a) + "].join('\\n');".length;
 ok(a > 0 && b > a, 'main.js 에서 MONITOR_OFF_PS 원문을 찾음');
 const SRC = new Function(M.slice(a, b) + '\nreturn { MONITOR_OFF_PS, MONITOR_GUARD_SEC };')();
-ok(SRC.MONITOR_GUARD_SEC === 360, '감시 6분');
+ok(SRC.MONITOR_GUARD_SEC >= 4 * 3600, '감시는 자는 동안 내내(6분 아님 — 137초·315초 뒤 켜짐이 실측)');
 const S = SRC.MONITOR_OFF_PS;
 
-console.log('\n[1] 판정 규칙(원문)');
-ok(/if \(\$c -eq \$c0 -and \$r -eq '32'\) \{ Off;/.test(S), '다시 끄기 = 커서 그대로 AND 이유 InputHid(32) 둘 다');
-ok(/-and \$n -lt 3\)/.test(S), '다시 끄기는 최대 3번');
-ok(/\$r -ne '12'/.test(S), '끄기 이벤트(12)는 켜진 이유로 치지 않는다');
-ok(/catch \{\}; Start-Sleep -Milliseconds 250 \}; return '' \}/.test(S), '이벤트를 못 읽으면 빈 이유 → 다시 끄지 않음(fail-open)');
+console.log('\n[1] 판정 규칙(원문) — v0.5.102: 전원 기록(566) 새 켜짐을 본다');
+ok(/-Id=566|Id=566/.test(S) && /RecordId/.test(S), '켜짐 감지 = Kernel-Power 566 의 RecordId(입력 시각 GetLastInputInfo 아님 — 137초 HID 켜짐은 입력 시각을 안 바꾼다)');
+ok(!/GetLastInputInfo/.test(S), '입력 시각 API 를 더는 쓰지 않는다');
+ok(/-ne '12'/.test(S), '끄기 기록(12)은 켜짐으로 치지 않는다');
+ok(/if \(\$r -eq '31' -or \$c -ne \$c0\) \{ "WAKE/.test(S), '사람 = 키보드(31) 또는 커서 이동 → 그대로 둔다');
+ok(/Off; \$n\+\+; "REOFF/.test(S), '그 밖(장치 신호 32 · 이유 불명 · 커서 그대로)은 다시 끈다 — 이유를 못 읽어도 사람으로 보지 않는다');
+ok(/-lt 400\)/.test(S), '다시 끄기 상한 400회(무한 루프 방지)');
 ok(/Start-Sleep -Milliseconds 800\nOff\n'OFF'/.test(S), '0.8초 뒤 끄고 곧바로 OFF 를 알린다(IPC 는 여기서 끝난다)');
-ok(M.includes("if (line === 'OFF') {") && M.includes('finish({ ok: true });'), 'main: OFF 줄에서 버튼 응답(6분 감시를 기다리지 않는다)');
+ok(M.includes("if (line === 'OFF') {") && M.includes('finish({ ok: true });'), 'main: OFF 줄에서 버튼 응답(감시를 기다리지 않는다)');
 ok(M.includes('try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙'), '앱 종료 때 감시를 끝낸다');
 ok(!/execFileSync\([^)]*MONITOR/.test(M), '🔴 메인에서 동기 실행 안 함');
 
-console.log('\n[2] 실제 PowerShell 실행 — Off 만 비우고 4초 감시');
-const dry = S.replace(/^function Off \{.*\}$/m, 'function Off { }').replace('-lt 360 -and', '-lt 4 -and');
-ok(dry !== S && /function Off \{ \}/.test(dry) && /-lt 4 -and/.test(dry), '화면을 끄지 않는 판(치환 확인)');
+console.log('\n[2] 실제 PowerShell 실행 — Off 만 비우고 5초 감시');
+const dry = S.replace(/^function Off \{.*\}$/m, 'function Off { }').replace(/-lt \d+ -and \$n/, '-lt 5 -and $n');
+ok(dry !== S && /function Off \{ \}/.test(dry) && /-lt 5 -and/.test(dry), '화면을 끄지 않는 판(치환 확인)');
 let out = '';
 try { out = ps(dry); } catch (e) { out = 'ERR ' + (e.stderr || e.message); }
 const lines = out.trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 ok(lines[0] === 'OFF', `첫 줄 OFF (실제: ${lines[0]})`);
 ok(lines[lines.length - 1] === 'END', `끝 줄 END — 컴파일·루프 정상 (실제: ${lines.slice(-2).join(' / ')})`);
-ok(!lines.some((l) => /^REOFF/.test(l)), '가만히 두면(또는 사람이 움직이면) 다시 끄지 않는다');
+ok(!lines.some((l) => /^REOFF/.test(l)), '가만히 두면 다시 끄지 않는다(새 켜짐 기록이 없다)');
 
-console.log('\n[3] 함수 원문 — 커서 · 마지막 입력 · 켜진 이유');
-const head = S.slice(0, S.indexOf('Start-Sleep -Milliseconds 800'));
-const probe = ps(head + "\n\"CUR=$(Cur)\"\n\"LAST=$(Last)\"\n\"WR=$(WakeReason (Get-Date).AddDays(-3))\"\n\"NONE=$(WakeReason (Get-Date).AddMinutes(5))\"");
-const cur = /CUR=(-?\d+),(-?\d+)/.exec(probe), last = /LAST=(\d+)/.exec(probe), wr = /WR=(\S*)/.exec(probe), none = /NONE=(\S*)/.exec(probe);
+console.log('\n[3] 함수 원문 — 커서 · 새 켜짐 기록 판정');
+const head = S.slice(0, S.indexOf("$script:t0 = (Get-Date).AddSeconds(-5)"));
+const probe = ps(head + [
+  '',
+  '$script:t0 = (Get-Date).AddDays(-3)',
+  '"CUR=$(Cur)"',
+  '"W0=$(NewWake 0)"',
+  '$mx = [int64](MaxId)',
+  '"MAX=$mx"',
+  '"AFTER=$(NewWake $mx)"',
+  '$script:t0 = (Get-Date).AddMinutes(1)',
+  '"NONE=$(NewWake 0)"',
+].join('\n'));
+const cur = /CUR=(-?\d+),(-?\d+)/.exec(probe), w0 = /W0=(\d+),(\d+)/.exec(probe), mx = /MAX=(\d+)/.exec(probe), aft = /AFTER=(.*)/.exec(probe), none = /NONE=(.*)/.exec(probe);
 ok(!!cur, `GetCursorPos (${cur && cur[0]})`);
-ok(!!last && Number(last[1]) > 0, 'GetLastInputInfo 값');
-ok(!!wr && /^\d+$/.test(wr[1]) && wr[1] !== '12', `최근 3일 566 에서 켜진 이유를 읽음 (${wr && wr[1]} — 12 제외)`);
-ok(!!none && none[1] === '', '판정력: 이벤트가 없는 구간이면 빈 이유(= 다시 끄지 않음)');
+ok(!!w0 && w0[2] !== '12', `최근 3일 566 에서 새 켜짐 기록을 읽음 (id ${w0 && w0[1]} · 이유 ${w0 && w0[2]} — 12 제외)`);
+ok(!!mx && Number(mx[1]) >= Number(w0 && w0[1]), 'MaxId 는 가장 최근 기록 번호');
+ok(!!aft && aft[1].trim() === '', '판정력: 이미 본 번호 이후엔 새 켜짐이 없다(같은 기록으로 다시 끄지 않는다)');
+ok(!!none && none[1].trim() === '', '판정력: 기록이 없는 구간이면 빈 값(= 다시 끄지 않는다)');
 
 console.log(`\n${fail ? '❌' : '✅'} monitor-guard ${pass}/${pass + fail}`);
 process.exit(fail ? 1 : 0);

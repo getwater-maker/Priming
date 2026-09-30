@@ -3635,7 +3635,7 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className="vhead">
         <div className="menubar">
-            <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
+            <h1>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{String(appVersion).replace(/^0\./, '')}</span> : null}</h1>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>

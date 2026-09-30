@@ -530,32 +530,36 @@ function awakeRelease() {
 //     그래서 원인 장치와 무관하게: 끈 뒤 6분 동안 입력이 생기면 **이유가 InputHid 이고 커서가 그대로일 때만** 다시 끈다(최대 3번).
 //     키보드(31)·커서 이동·이벤트를 못 읽음 = 사람이 깨운 것으로 보고 손대지 않는다(fail-open — 사람을 이기지 않는다).
 //     ⚠ 다시 끄기 전까지 1초 안팎 번쩍임은 남는다(원인 장치를 찾으면 사라진다 — 작업노트 2026-09).
-const MONITOR_GUARD_SEC = 360;
+const MONITOR_GUARD_SEC = 8 * 3600;   // 자는 동안 내내(사람이 깨우면 그 즉시 끝난다)
 const MONITOR_OFF_PS = [
   "$ProgressPreference = 'SilentlyContinue'",   // 진행 표시(CLIXML)가 stderr 에 섞여 실패 문구를 가리지 않게
   "Add-Type -Namespace PrimingMon -Name G -MemberDefinition @'",
   '[DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);',
   '[DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);',
-  '[DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO i);',
   'public struct POINT { public int X; public int Y; }',
-  'public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }',
   "'@",
   'function Off { [void][PrimingMon.G]::PostMessage([IntPtr]0xffff, 0x0112, [IntPtr]0xF170, [IntPtr]2) }',
-  'function Last { $i = New-Object PrimingMon.G+LASTINPUTINFO; $i.cbSize = 8; [void][PrimingMon.G]::GetLastInputInfo([ref]$i); $i.dwTime }',
   'function Cur { $p = New-Object PrimingMon.G+POINT; [void][PrimingMon.G]::GetCursorPos([ref]$p); "$($p.X),$($p.Y)" }',
-  // 켜진 이유 — 가장 최근 566 중 「끄기(12)」가 아닌 것. 기록이 늦게 올 수 있어 3초까지 기다린다. 못 읽으면 ''(= 사람으로 본다).
-  "function WakeReason($since) { for ($k = 0; $k -lt 12; $k++) { try { $e = Get-WinEvent -FilterHashtable @{LogName='System'; Id=566; StartTime=$since} -MaxEvents 1 -ErrorAction Stop; $x = [xml]$e.ToXml(); $r = ($x.Event.EventData.Data | Where-Object { $_.Name -eq 'Reason' }).'#text'; if ($r -and $r -ne '12') { return $r } } catch {}; Start-Sleep -Milliseconds 250 }; return '' }",
+  // 🔑 켜짐 감지 = 「입력 시각(GetLastInputInfo)」이 아니라 **전원 기록(Kernel-Power 566)** 의 새 켜짐 기록.
+  //   실측(2026-10-01): 끈 지 137초에 HID 보고로 켜졌는데 입력 시각은 안 바뀌어 감시가 못 봤고, 180초(윈도우 절전 시간) 뒤 다시 꺼지며
+  //   ~315초에야 입력이 잡혀 「사람」으로 오판했다. 기록의 RecordId 로 「내가 끈 뒤 새로 생긴 켜짐」만 본다.
+  //   Reason 12 = 꺼짐(우리 것 포함) · 31 = 키보드 · 32 = HID(장치 신호). 기록이 늦게 와도 다음 1초 주기에서 잡는다.
+  "function NewWake($after) { try { $ev = Get-WinEvent -FilterHashtable @{LogName='System'; Id=566; StartTime=$script:t0} -MaxEvents 8 -ErrorAction Stop } catch { return $null }; foreach ($e in ($ev | Sort-Object RecordId)) { if ($e.RecordId -le $after) { continue }; $x = [xml]$e.ToXml(); $r = ($x.Event.EventData.Data | Where-Object { $_.Name -eq 'Reason' }).'#text'; if ($r -ne '12') { return \"$($e.RecordId),$r\" } }; return $null }",
+  "function MaxId { try { (Get-WinEvent -FilterHashtable @{LogName='System'; Id=566; StartTime=$script:t0} -MaxEvents 8 -ErrorAction Stop | Measure-Object RecordId -Maximum).Maximum } catch { 0 } }",
+  '$script:t0 = (Get-Date).AddSeconds(-5)',
   'Start-Sleep -Milliseconds 800',
   'Off',
   "'OFF'",
-  'Start-Sleep -Milliseconds 1500',
-  '$c0 = Cur; $l0 = Last; $t0 = Get-Date; $n = 0',
-  `while (((Get-Date) - $t0).TotalSeconds -lt ${MONITOR_GUARD_SEC} -and $n -lt 3) {`,
-  '  Start-Sleep -Milliseconds 300',
-  '  if ((Last) -eq $l0) { continue }',
-  '  $wake = Get-Date; $c = Cur; $r = WakeReason $wake.AddSeconds(-3); $sec = [int]($wake - $t0).TotalSeconds + 2',
-  "  if ($c -eq $c0 -and $r -eq '32') { Off; $n++; \"REOFF $sec\"; Start-Sleep -Milliseconds 1500; $c0 = Cur; $l0 = Last; continue }",
-  '  "WAKE $sec reason=$r moved=$([int]($c -ne $c0))"; break',
+  'Start-Sleep -Milliseconds 2500',
+  '$c0 = Cur; $seen = [int64](MaxId); $n = 0; $t1 = Get-Date',
+  `while (((Get-Date) - $t1).TotalSeconds -lt ${MONITOR_GUARD_SEC} -and $n -lt 400) {`,
+  '  Start-Sleep -Milliseconds 700',
+  '  $w = NewWake $seen',
+  '  if (-not $w) { continue }',
+  '  $id, $r = $w -split ","; $seen = [int64]$id; $c = Cur; $sec = [int]((Get-Date) - $t1).TotalSeconds',
+  // 키보드(31) 이거나 커서가 움직였으면 사람 — 그대로 둔다. 그 밖(장치 신호 32 · 이유 불명 · 커서 그대로)은 사람이 아니라 보고 다시 끈다.
+  "  if ($r -eq '31' -or $c -ne $c0) { \"WAKE $sec reason=$r moved=$([int]($c -ne $c0))\"; break }",
+  '  Off; $n++; "REOFF $sec reason=$r"; Start-Sleep -Milliseconds 2500; $c0 = Cur; $seen = [int64](MaxId)',
   '}',
   "'END'",
 ].join('\n');
@@ -568,7 +572,7 @@ ipcMain.handle('monitor-off', () => new Promise((resolve) => {
   _monGuard = cp;
   let done = false, buf = '', errTxt = '';
   const finish = (r) => { if (!done) { done = true; resolve(r); } };
-  const killer = setTimeout(() => { try { cp.kill(); } catch (_) {} }, (MONITOR_GUARD_SEC + 60) * 1000);
+  const killer = setTimeout(() => { try { cp.kill(); } catch (_) {} }, (MONITOR_GUARD_SEC + 120) * 1000);
   cp.stdout.on('data', (d) => {
     buf += d.toString('utf8');
     let k;
@@ -577,7 +581,7 @@ ipcMain.handle('monitor-off', () => new Promise((resolve) => {
       if (line === 'OFF') {
         log(`🌙 모니터를 껐습니다 — 작업은 계속됩니다${_awake.n > 0 ? '' : ' (지금 도는 작업은 없습니다)'} · 마우스·키보드를 건드리면 켜집니다`);
         finish({ ok: true });
-      } else if (/^REOFF /.test(line)) log(`🌙 모니터가 저절로 켜져(${line.slice(6)}초 뒤 · 장치 신호 · 커서 그대로) 다시 껐습니다`);
+      } else if (/^REOFF /.test(line)) log(`🌙 모니터가 저절로 켜져(${line.slice(6).replace(' reason=', '초 뒤 · 이유 ')} · 커서 그대로) 다시 껐습니다`);
       else if (/^WAKE /.test(line)) { const m = /^WAKE (\d+) reason=(\S*) moved=(\d)/.exec(line); if (m) log(`🌙 모니터 켜짐 — ${m[1]}초 뒤 · ${m[2] === '31' ? '키보드' : m[3] === '1' ? '마우스 움직임' : '입력(' + (m[2] || '이유 못 읽음') + ')'} → 사람이 깨운 것으로 보고 그대로 둡니다`); }
     }
   });
