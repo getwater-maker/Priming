@@ -44,6 +44,15 @@ function sectionIncluded(ctx, key) {
 }
 
 /** 종이책 → 부크크 점검표 */
+// 표지 날개 — 자체 제작 표지(PDF/JPG 첨부)는 날개 가능(스프레드 가로 +200mm · A4 만 불가). **무료 표지**만 날개가 없다(부크크 FAQ).
+//   날개 없이 승인된 책에는 나중에 날개를 추가할 수 없다 → 어느 쪽이든 등록 전 최종 확인을 안내한다(로이 2026-10-01 · 삼국지 R11).
+function flapsItem(ctx) {
+  const A4 = ctx.trimId === 'A4';
+  if (ctx.flaps && A4) return item('flaps', '표지 날개', 'todo', 'A4 는 날개를 쓸 수 없습니다(부크크) — 날개를 끄세요', { tab: 'cover' });
+  if (ctx.flaps) return item('flaps', '표지 날개 있음(자체 제작 표지)', 'ok',
+    `표지 스프레드는 날개 포함(가로 +200mm)으로 만들어 첨부해야 합니다 — 부크크 무료 표지는 날개가 없습니다. 날개 없이 승인된 책에는 나중에 날개를 추가할 수 없으니 등록 전 최종 확인하세요`, { tab: 'cover' });
+  return item('flaps', '표지 날개 없음', 'ok', '날개 없이 승인되면 나중에 날개를 추가할 수 없습니다 — 날개가 필요하면 등록 전에 켜세요(A4 제외)', { tab: 'cover' });
+}
 function bookkChecklist(ctx) {
   const m = ctx.meta || {}; const c = ctx.confirmed || {};
   const pages = ctx.pages || 0;
@@ -62,10 +71,9 @@ function bookkChecklist(ctx) {
     item('cover', '표지 스프레드(앞표지+책등+뒷표지)',
       (cover && cover.ok && !cover.lowDpi) || coverOut ? 'ok' : 'todo',
       !ctx.coverImagePath && !coverOut ? '표지 탭에서 완성 이미지를 첨부 — 300dpi 이상'
-        : (cover && !cover.ok ? '치수 불일치 — 쪽수가 바뀌면 책등도 바뀝니다. 표지 탭의 치수로 다시 만드세요'
+        : (cover && !cover.ok ? (cover.flapHint ? `이 표지 파일은 날개 ${cover.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${ctx.flaps ? '있음' : '없음'})` : '치수 불일치 — 쪽수가 바뀌면 책등도 바뀝니다. 표지 탭의 치수로 다시 만드세요')
           : (cover && cover.lowDpi ? `해상도 낮음(실효 ${cover.effectiveDpi}dpi) — 반려 사유 1위` : '')), { tab: 'cover' }),
-    item('flaps', '표지 날개 없음(무료 표지)', ctx.flaps ? 'todo' : 'ok',
-      ctx.flaps ? '무료 표지는 날개가 없고, 날개 없이 승인된 책에 나중에 날개를 추가할 수 없습니다 — 끄세요' : '', { tab: 'cover' }),
+    flapsItem(ctx),
     item('price', '정가', has(m.price) ? 'ok' : 'todo', '판권 › 정가 — 부크크 화면의 정가·인세 계산기로 권당 실수령액을 확인하세요', { tab: 'colophon' }),
     manual('account', '부크크 회원가입·로그인(직접)', '계정 생성·로그인·최종 「제출」은 사람이 합니다', c),
     manual('nodup', '같은 책이 판매용으로 이미 등록돼 있지 않음', '판매용 도서는 중복 등록 불가 · 개정판은 초판보다 20쪽 이상 늘면 6개월 뒤, 미만이면 1년 뒤', c),

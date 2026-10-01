@@ -60,7 +60,9 @@ function coverSpread({ platformId = 'bookk', trimId = 'A5', paperId, totalPages 
 
 // 첨부한 표지 이미지 치수 검증 — px 를 mm 로 환산해 스프레드 기대치와 비교(±tolerance).
 //   dpi 를 모르는 이미지가 많으므로 "가로/세로 비율" + "300dpi 가정 mm" 둘 다 검사해 관대하게 판단.
-function validateCoverImage({ imgW, imgH, spread }) {
+//   altSpread = 날개 설정을 **반대로** 했을 때의 스프레드(있으면) — 틀렸지만 반대 설정에는 맞는 파일이면 flapHint 로 「날개 설정을 확인하세요」를 알린다
+//   (날개 켬 516.3mm ↔ 끔 316.3mm: 날개 파일을 날개 없는 설정에 올리거나 그 반대일 때).
+function validateCoverImage({ imgW, imgH, spread, altSpread }) {
   const expW = spread.widthMm, expH = spread.heightMm;
   const mmW = (imgW / spread.dpi) * 25.4;
   const mmH = (imgH / spread.dpi) * 25.4;
@@ -70,8 +72,16 @@ function validateCoverImage({ imgW, imgH, spread }) {
   // 비율 검사(±1%) — dpi 가 달라도 비율이 맞으면 스케일 인쇄 가능.
   const ratioOk = Math.abs((imgW / imgH) - (expW / expH)) / (expW / expH) <= 0.01;
   const dpiEff = (imgW / expW) * 25.4; // 폭 기준 실효 dpi
+  let flapHint = null;
+  if (!(exact || ratioOk) && altSpread) {
+    const tolA = Math.max(altSpread.toleranceMm || 1, 1);
+    const aW = Math.abs(mmW - altSpread.widthMm), aH = Math.abs(mmH - altSpread.heightMm);
+    const aRatio = Math.abs((imgW / imgH) - (altSpread.widthMm / altSpread.heightMm)) / (altSpread.widthMm / altSpread.heightMm) <= 0.01;
+    // 반대 설정에 맞는 파일이면, 그 파일은 「지금 설정과 반대」 — 지금 날개가 켜져 있으면 날개 없는 파일이다
+    if ((aW <= tolA && aH <= tolA) || aRatio) flapHint = spread.parts.some((p) => p.name === '앞날개') ? 'file-has-no-flaps' : 'file-has-flaps';
+  }
   return {
-    ok: exact || ratioOk,
+    ok: exact || ratioOk, flapHint,
     exact, ratioOk,
     mmW: Math.round(mmW * 10) / 10, mmH: Math.round(mmH * 10) / 10,
     effectiveDpi: Math.round(dpiEff),

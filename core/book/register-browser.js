@@ -98,12 +98,18 @@ async function fillBookk(page, plan, log) {
   await step('내지 색', () => page.locator('strong', { hasText: new RegExp('^' + s1.color + '$') }).first().click({ timeout: 5000 }));
   await step('판형 ' + s1.trim, () => page.locator('strong', { hasText: new RegExp('^' + s1.trim + '$') }).first().click({ timeout: 5000 }));
   await step('표지 재질', () => page.locator('strong', { hasText: s1.material }).first().click({ timeout: 5000 }));
-  await step('날개 없음', () => page.locator('a', { hasText: /^날개 없음$/ }).first().click({ timeout: 5000 }));
+  // 🪽 날개 — 원고 메타 `날개` 를 따른다(plan.step1.wings). 글자가 정확히 같은 「날개 있음/없음」 선택만 누르고, 못 찾으면 **추측 클릭하지 않고** 실패로 남긴다.
+  await step(s1.wings ? '날개 있음' : '날개 없음', () => page.locator('a', { hasText: s1.wings ? /^날개 있음$/ : /^날개 없음$/ }).first().click({ timeout: 5000 }));
   if (s1.pages) await step('쪽수', async () => { const n = page.locator('input[type=number]').first(); await n.fill(String(s1.pages)); await n.blur(); });
   await sleep(600);
   // 선택이 화면 요약에 반영됐는지 확인(판형·재질)
   const summary = await page.evaluate(() => document.body.innerText).catch(() => '');
   log(`[등록] 1단계 요약 확인: 판형 ${summary.includes(s1.trim) ? '✓' : '?'} · 쪽수 ${summary.includes(String(s1.pages)) ? '✓' : '?'}`);
+  // 오른쪽 요약의 「날개 <있음|없음> 두께」 가 우리가 고른 값인지 — 다르면 실패로 남긴다(화면 문구·구조가 바뀐 경우를 조용히 넘기지 않는다)
+  { const wm = /날개\s*(있음|없음)\s*두께/.exec(summary); const got = wm ? wm[1] : '';
+    const want = s1.wings ? '있음' : '없음';
+    if (got && got !== want) { failed.push('날개 ' + want + '(요약이 ' + got + ')'); log(`[등록] ⚠ 날개: 요약에 「${got}」 로 보입니다(원하는 값 ${want}) — 부크크 화면에서 직접 확인하세요`); }
+    else log(`[등록] 날개 ${want}: 요약 ${got ? '✓' : '? (요약 문구를 찾지 못함)'}`); }
   // ▶ Step2 — 임시서재에 초안이 만들어진다(삭제 가능). 제출이 아니다.
   await page.locator('a', { hasText: 'Step2 원고등록' }).first().click({ timeout: 8000 });
   await page.waitForSelector('input[placeholder*="도서명 기재"]', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 2단계'); throw new Error('2단계(원고등록) 화면으로 넘어가지 못했습니다 — 1단계 필수 선택을 확인하세요'); });

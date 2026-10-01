@@ -3,6 +3,7 @@
 //   흐름: 부팅 → 원고 로드(open-book-path) → 📖 출판 탭 → BookView → vivliostyle 미리보기 페이지 수.
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { _electron: electron } = require('playwright');
 
 const ROOT = path.join(__dirname, '..');
@@ -134,6 +135,29 @@ ${para}
       if (await win.locator(`[data-testid=bk-register-${tabId}]`).count() !== 1) throw new Error(`${label} 자동 입력 버튼 없음`);
       await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', `ui-${tabId}.png`) });
       console.log(`· ${label} 등록 도우미 OK — 점검 ${nChk}항목`);
+    }
+    // 🪽 표지 날개 — 첨부한 표지 판정이 **날개 설정을 따라 그때그때** 바뀌고, 반대 설정 치수면 「날개 설정을 확인하세요」(R11)
+    {
+      const specNow = await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '' }).then((d) => d && d.spread));   // 날개 메타 비움 = 없음
+      const mkPng = (w, h) => { const b = Buffer.alloc(64); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0); b.writeUInt32BE(13, 8); b.write('IHDR', 12); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b; };
+      const png = path.join(os.tmpdir(), 'flap-cover-test.png');
+      fs.writeFileSync(png, mkPng(specNow.widthPx, specNow.heightPx));   // 날개 없는 스프레드 치수(헤더만 있는 PNG — 치수 판정만 본다)
+      await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, png);
+      const a1 = await win.evaluate(() => window.api.bookAttachCover().then((d) => d && d.coverCheck));
+      if (!a1 || !a1.ok) throw new Error('날개 없는 설정 + 날개 없는 치수 파일이 통과하지 못함: ' + JSON.stringify(a1));
+      const a2 = await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '있음' }).then((d) => d && { flaps: d.flaps, cc: d.coverCheck, w: d.spread && d.spread.widthMm }));
+      if (!a2 || !a2.flaps || a2.cc.ok || a2.cc.flapHint !== 'file-has-no-flaps') throw new Error('날개를 켜면 같은 파일이 「날개 없는 파일」 힌트와 함께 불일치여야 한다: ' + JSON.stringify(a2));
+      if (!(a2.w - specNow.widthMm > 199 && a2.w - specNow.widthMm < 201)) throw new Error('날개를 켜면 스프레드가 +200mm 여야 한다: ' + a2.w + ' vs ' + specNow.widthMm);
+      // 화면 — API 로 바꾼 값은 React 상태에 안 실리니, 실제 체크박스로 날개를 켜서 화면의 경고를 본다
+      await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '' }));
+      await win.click('[data-tab=cover]');
+      await win.locator('label.chk:has-text("표지 날개") input[type=checkbox]').check();
+      await win.waitForFunction(() => [...document.querySelectorAll('.bkwarn')].some((e) => /날개 설정을 확인하세요/.test(e.textContent)), null, { timeout: 15000 })
+        .catch(async () => { throw new Error('표지 탭에 「날개 설정을 확인하세요」 경고가 없음: ' + (await win.locator('.bkwarn').allInnerTexts()).join(' | ')); });
+      await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '' }));   // 되돌림
+      await win.evaluate(() => window.api.bookClearCover());
+      fs.rmSync(png, { force: true });
+      console.log('· 표지 날개 판정 OK — 없음 통과 → 날개 켬 +200mm·불일치+힌트 → 화면 경고 → 되돌림');
     }
     await win.click('[data-tab=info]');
     if (await win.locator('.bkbadge.req').count() < 3 || await win.locator('.bkbadge.opt').count() < 3) throw new Error('필수/선택 배지 없음');

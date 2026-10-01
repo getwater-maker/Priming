@@ -226,6 +226,15 @@ function bookSpec(meta, pages) {
   return { platformId, pf, trimId, paperId, flaps, spread };
 }
 // 출판(book) 파싱본 → 렌더러 DTO — 구조 요약(섹션 목록·부/장 트리·메타·표지·규격).
+// 🖼 표지 이미지 치수 검증 — 지금 설정(날개·판형·쪽수)의 기대치로 **그때그때** 다시 잰다(첨부 때의 판정이 낡지 않게) +
+//   날개를 반대로 했을 때의 치수에 맞으면 「날개 설정을 확인하세요」 힌트(flapHint).
+function coverCheckFor(parsed, imgW, imgH, pages) {
+  const SC = require('./core/book/spine-calc');
+  const meta = parsed.meta || {};
+  const cur = bookSpec(meta, pages);
+  const alt = bookSpec({ ...meta, flaps: cur.flaps ? '없음' : '있음' }, pages).spread;
+  return { ...SC.validateCoverImage({ imgW, imgH, spread: cur.spread, altSpread: alt }), imgW, imgH };
+}
 function bookDTO(parsed) {
   const BK = require('./core/parsers/book-parser');
   const SC = require('./core/book/spine-calc');
@@ -252,7 +261,7 @@ function bookDTO(parsed) {
     fontOptions: require('./core/book/html-builder').FONT_OPTIONS,
     colophonFieldDefs: require('./core/book/html-builder').COLOPHON_FIELDS,
     coverImagePath: parsed.coverImagePath || null,
-    coverCheck: parsed._coverCheck || null,
+    coverCheck: (parsed._coverCheck && parsed._coverCheck.imgW) ? coverCheckFor(parsed, parsed._coverCheck.imgW, parsed._coverCheck.imgH, pages) : (parsed._coverCheck || null),
     lastPages: pages,
     platformId, trimId, paperId, flaps, spread,
     paperLocked: !!pf.spineFormula,          // 부크크 = 용지를 쪽수가 정한다(고를 수 없다)
@@ -7907,10 +7916,12 @@ function rebuildBook() {
   if (!paths.length) return currentDTO();
   const prevCover = S.parsed && S.parsed.coverImagePath;
   const prevPages = S.parsed && S.parsed._lastPages;
+  const prevCoverCheck = S.parsed && S.parsed._coverCheck;   // 이미지 치수(imgW·imgH)를 이어 가야 bookDTO 가 지금 설정으로 다시 잰다(예전엔 메타를 고칠 때마다 판정이 사라졌다)
   const files = paths.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
   S.parsed = BK.parseBookFiles(files, path.basename(paths[0]).replace(/\.md$/i, ''));
   if (prevCover) S.parsed.coverImagePath = prevCover;
   if (prevPages) S.parsed._lastPages = prevPages;
+  if (prevCover && prevCoverCheck) S.parsed._coverCheck = prevCoverCheck;
   storeActive();
   return currentDTO();
 }
@@ -8134,8 +8145,9 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
           const { readImageSize } = require('./vrew/vrew-builder');
           const dim = readImageSize(S.parsed.coverImagePath); // {w,h}
           if (dim && dim.w) {
-            const chk = SC.validateCoverImage({ imgW: dim.w, imgH: dim.h, spread });
-            S.parsed._coverCheck = { ...chk, imgW: dim.w, imgH: dim.h };
+            const chk = coverCheckFor(S.parsed, dim.w, dim.h, S.parsed._lastPages || 0);
+            S.parsed._coverCheck = chk;
+            if (!chk.ok && chk.flapHint) log(`⚠ 이 표지 파일은 날개 ${chk.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금 설정: 날개 ${flaps ? '있음' : '없음'})`);
             if (!chk.ok) log(`⚠ 표지 치수 불일치(최종 쪽수 기준): ${dim.w}×${dim.h}px — 기대 ${chk.expected.widthPx}×${chk.expected.heightPx}px (${chk.expected.widthMm}×${chk.expected.heightMm}mm). 그대로 진행하면 이미지가 강제로 늘어나 책등이 어긋날 수 있습니다.`);
           }
         } catch (_) {}
@@ -8231,10 +8243,9 @@ ipcMain.handle('book-attach-cover', async () => {
     const { readImageSize } = require('./vrew/vrew-builder');
     const dim = readImageSize ? readImageSize(fp) : null;
     if (dim && dim.w) {
-      const d = bookDTO(S.parsed);
-      const SC = require('./core/book/spine-calc');
-      S.parsed._coverCheck = { ...SC.validateCoverImage({ imgW: dim.w, imgH: dim.h, spread: d.spread }), imgW: dim.w, imgH: dim.h };
+      S.parsed._coverCheck = coverCheckFor(S.parsed, dim.w, dim.h, S.parsed._lastPages || 0);
       const c = S.parsed._coverCheck;
+      if (!c.ok && c.flapHint) log(`⚠ 이 표지 파일은 날개 ${c.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요`);
       log(c.ok
         ? `🖼 표지 첨부: ${path.basename(fp)} (${dim.w}×${dim.h}px${c.lowDpi ? ' · ⚠ 실효 ' + c.effectiveDpi + 'dpi < 300' : ''})`
         : `⚠ 표지 치수 불일치: ${dim.w}×${dim.h}px — 기대 ${c.expected.widthPx}×${c.expected.heightPx}px (${c.expected.widthMm}×${c.expected.heightMm}mm)`);

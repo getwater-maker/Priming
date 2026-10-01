@@ -106,7 +106,10 @@ function bookkPlan(book, ctx) {
   const color = /컬러/.test(String(m.printColor || '')) ? '컬러' : '흑백';
   const material = BOOKK_MATERIAL[m.coverMaterial] || BOOKK_MATERIAL['스노우 250g 무광코팅'];
   const trim = c.trimId || 'A5';
-  const step1 = { color, trim, material, wings: false, pages: Number(c.pages) || 0 };
+  // 날개 = 원고 메타 `날개`(bookSpec 과 같은 판정 — 없음·no·off·false·x 가 아니면 켬). 부크크 A4 는 날개 불가 → 켜져 있어도 누르지 않고 알린다.
+  const flapsOn = has(m.flaps) && !/^(없음|no|off|false|x)$/i.test(String(m.flaps).trim());
+  const wings = flapsOn && trim !== 'A4';
+  const step1 = { color, trim, material, wings, pages: Number(c.pages) || 0 };
   const hasIsbn = has(m.isbn);
   const step2 = {
     title: cleanTitle(m.title || (book && book.fileTitle) || ''),
@@ -126,6 +129,7 @@ function bookkPlan(book, ctx) {
   if (!step2.author) manual.push('저자(필수)');
   if (!step2.pdf) manual.push('내지 PDF 업로드(파일 없음)');
   if (hasIsbn) manual.push('보유 ISBN 입력칸(2단계에서 직접)');
+  if (flapsOn && trim === 'A4') manual.push('날개(원고는 날개 있음이지만 부크크 A4 는 날개 불가 — 날개 없이 진행)');
   manual.push('대표 장르(필수 — 카테고리가 목록과 안 맞으면)', '3단계 표지 등록 · 4단계 가격 · 5단계 최종확인·제출');
   return { step1, step2, manual };
 }

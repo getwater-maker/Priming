@@ -683,7 +683,7 @@ body{overflow-y:scroll}
         {dto.coverImagePath
           ? (<>
               <div className="meta" style={{ wordBreak: 'break-all' }}>🖼 {dto.coverImagePath.split(/[\\/]/).pop()}</div>
-              {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px</div>}
+              {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px{dto.coverCheck.flapHint ? <><br />이 파일은 날개 {dto.coverCheck.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — <b>날개 설정을 확인하세요</b>(지금: 날개 {dto.flaps ? '있음' : '없음'})</> : null}</div>}
               {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
               <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
             </>)
