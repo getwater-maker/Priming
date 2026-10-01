@@ -132,6 +132,8 @@ contextBridge.exposeInMainWorld('api', {
   gensparkCooldown: () => ipcRenderer.invoke('genspark-cooldown'),
   grokCooldown: () => ipcRenderer.invoke('grok-cooldown'),
   findInPage: (args) => ipcRenderer.invoke('find-in-page', args),
+  bookEpubCheck: (args) => ipcRenderer.invoke('book-epubcheck', args),
+  bookPreflight: (args) => ipcRenderer.invoke('book-preflight', args),
   findStop: () => ipcRenderer.invoke('find-stop'),
   onFindResult: (cb) => ipcRenderer.on('find-result', (_e, r) => cb(r)),
   getComfyImageConfig: () => ipcRenderer.invoke('get-comfy-image-config'),

@@ -140,14 +140,22 @@ ${para}
     console.log('· 경로 축약 옵션 OK (기본 OFF)');
 
     // 📤 등록 도우미 — 부크크(종이책)·작가와(전자책) 탭: 점검표 · 복사값 · 빌드 버튼
-    for (const [tabId, label, btn] of [['bookk', '부크크', 'bk-pdf-print'], ['jakkawa', '작가와', 'bk-pdf-ebook']]) {
+    for (const [tabId, label, btn] of [['bookk', '종이책·부크크', 'bk-pdf-print'], ['ebook', '전자책·부크크', 'bk-epub']]) {
       await win.click(`[data-tab=${tabId}]`);
       await win.waitForSelector(`[data-testid=bk-reg-${tabId}]`, { timeout: 5000 });
       const nChk = await win.locator(`[data-testid=bk-reg-${tabId}] .bkchk`).count();
       if (nChk < 10) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
       if (await win.locator(`[data-testid=bk-reg-${tabId}] .bksum-row`).count() < 8) throw new Error(`${label} 복사값 부족`);
       if (await win.locator(`[data-testid=${btn}]`).count() !== 1) throw new Error(`${label} 빌드 버튼 없음`);
-      if (await win.locator(`[data-testid=bk-register-${tabId}]`).count() !== 1) throw new Error(`${label} 자동 입력 버튼 없음`);
+      const autoBtn = await win.locator(`[data-testid=bk-register-${tabId}]`).count();
+      if (tabId === 'bookk' ? autoBtn !== 1 : autoBtn !== 0) throw new Error(`${label} 자동 입력 버튼 개수 ${autoBtn} (부크크 종이책만 있고 전자책은 첫 권 확인 뒤 추가)`);
+      await win.waitForSelector(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`, { timeout: 8000 }).catch(() => {});
+      if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`).count() !== 1) throw new Error(`${label} 출고 전 점검 패널 없음`);
+      if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-build-all]`).count() !== 1) throw new Error(`${label} 「한 번에 만들기」 버튼 없음`);
+      if (tabId === 'ebook') {
+        if (await win.locator('[data-testid=bk-epubcheck]').count() !== 1) throw new Error('ePub 검증 버튼 없음');
+        if (await win.locator('[data-testid=bk-reg-ebook]').locator('text=작가와').count() > 0) throw new Error('전자책 탭에 작가와 문구가 남아 있음');
+      }
       await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', `ui-${tabId}.png`) });
       console.log(`· ${label} 등록 도우미 OK — 점검 ${nChk}항목`);
     }

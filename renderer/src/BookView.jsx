@@ -10,16 +10,16 @@ import HK from '../../core/book/header-kind.js';
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
 const TABS = [
   ['structure', '📚', '구조'], ['info', '📋', '책 정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지'],
-  ['layout', '📐', '조판'], ['bookk', '📕', '종이책·부크크'], ['jakkawa', '📱', '전자책·작가와'],
+  ['layout', '📐', '조판'], ['bookk', '📕', '종이책·부크크'], ['ebook', '📱', '전자책·부크크'],
 ];
 // 책 정보 탭 — [키, 이름, 필수?, 도움말]
 const INFO_FIELDS = [
-  ['title', '책 제목', true, ''], ['author', '저자(필명)', true, 'AI가 집필에 개입했다면 저자명에 「AI」 표기(작가와 정책)'],
+  ['title', '책 제목', true, ''], ['author', '저자(필명)', true, 'AI가 집필에 개입했다면 저자명에 「AI」 표기(부크크 권고)'],
   ['subtitle', '부제', false, ''], ['translator', '옮긴이', false, ''], ['editor', '편집인', false, ''],
 ];
 // 플랫폼 등록 화면에 입력하는 정보(조판에는 안 들어간다) — 로그인 뒤 화면의 실제 항목·한도는 등록 때 확인
 const REG_FIELDS = [
-  ['category', '카테고리', '부크크·작가와 등록 화면 항목(목록은 로그인 뒤 확인)'],
+  ['category', '카테고리', '부크크 등록 화면 항목(목록은 로그인 뒤 확인)'],
   ['keywords', '키워드(쉼표)', ''], ['tagline', '한줄 소개', ''],
 ];
 // 판권 탭 — 법정 필수 5필드(제목·저자는 책 정보) + 선택
@@ -134,7 +134,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const loaded = !!(dto && dto.kind === 'book');
 
   // ── 왼쪽 메뉴 · 등록 점검(개인 편의값은 이 PC 브라우저에만 — 실패해도 화면은 정상) ──
-  const [tab, setTabRaw] = useState(() => { try { return localStorage.getItem('bk-tab') || 'structure'; } catch (_) { return 'structure'; } });
+  const [tab, setTabRaw] = useState(() => { try { const t = localStorage.getItem('bk-tab') || 'structure'; return t === 'jakkawa' ? 'ebook' : t; } catch (_) { return 'structure'; } });   // 옛 「전자책·작가와」 탭 → 부크크 전자책
   const setTab = (t) => { setTabRaw(t); try { localStorage.setItem('bk-tab', t); } catch (_) {} };
   const confirmKey = 'bk-confirm:' + ((dto && dto.scriptPath) || '');
   const [confirmed, setConfirmed] = useState({});
@@ -226,6 +226,14 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     }, 350);
     return () => { live = false; clearTimeout(t); };
   }, [loaded, contentSig]);
+  // 🔎 출고 전 점검 — 부크크 탭(종이책·전자책)을 열 때·완성 파일이 바뀔 때·쪽수가 정해질 때 다시 본다
+  const [pfx, setPfx] = useState(null);
+  const loadPf = useCallback(() => { api.bookPreflight({ layout }).then((r) => setPfx(r || null)).catch(() => setPfx(null)); }, [layout]);
+  useEffect(() => {
+    if (!loaded || (tab !== 'bookk' && tab !== 'ebook')) return undefined;
+    const t = setTimeout(loadPf, 300);
+    return () => clearTimeout(t);
+  }, [loaded, tab, outputs, dto && dto.lastPages, dto && dto.coverImagePath, contentSig]);
 
   // ── vivliostyle 로드 ──
   //   ⚠ 반드시 iframe 안에 렌더 — 같은 document 에 렌더하면 앱 전역 CSS(p 마진·폰트 14px 등)가
@@ -417,7 +425,20 @@ body{overflow-y:scroll}
     } catch (e) { logline('자동 입력 오류: ' + e.message); setStatus('⚠ 자동 입력 오류 — 로그 확인'); }
     setRegBusy(false);
   }
+  // ✔ ePub 규격 검증(EPUBCheck) — 결과는 점검표(전자책)에 반영. ePub 을 다시 만들면 지운다.
+  const [epubChk, setEpubChk] = useState(null);
+  const [epubChkBusy, setEpubChkBusy] = useState(false);
+  async function runEpubCheckUi() {
+    setEpubChkBusy(true); setStatus('✔ ePub 검증 중…');
+    try {
+      const r = await api.bookEpubCheck({});
+      setEpubChk(r || { error: '응답 없음' });
+      setStatus(!r || r.error ? '⚠ ePub 검증 실패: ' + ((r && r.error) || '') : r.missing ? 'ℹ 이 PC 에는 EPUBCheck 도구가 없습니다' : (r.ok ? `✅ ePub 규격 통과 (EPUB ${r.epubVersion})` : `⚠ ePub 오류 ${r.nFatal + r.nError}개 — 점검표 아래 목록 확인`));
+    } catch (e) { setEpubChk({ error: e.message }); }
+    setEpubChkBusy(false);
+  }
   async function buildEpubFile() {
+    setEpubChk(null);
     setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
     try {
       const r = await api.bookBuildEpub({});
@@ -425,6 +446,16 @@ body{overflow-y:scroll}
       setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
     } catch (e) { logline('ePub 오류: ' + e.message); }
     setBuilding(false); refreshOutputs();
+  }
+  // 📦 부크크용 한 번에 만들기 — 내지·표지 PDF → (쪽수가 정해진 뒤) ePub → 규격 검증. 순서가 중요하다: 표지 크롭과 책등은 쪽수 확정 뒤에만 맞는다.
+  async function buildAll() {
+    if (building) return;
+    setStatus('📦 한 번에 만드는 중 — 내지·표지 PDF 부터…');
+    await buildPdf('print');
+    await buildEpubFile();
+    await runEpubCheckUi();
+    refreshOutputs(); loadPf();
+    setStatus('📦 한 번에 만들기 끝 — 아래 「출고 전 점검」을 확인하세요');
   }
   // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
   //   원고에 없는 섹션을 체크하면 템플릿을 원고에 삽입.
@@ -532,14 +563,14 @@ body{overflow-y:scroll}
   if (!loaded) {
     return (
       <div className="bkwrap" ref={wrapRef}>
-        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 부크크 · 작가와)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
+        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 종이책·부크크 · 전자책·부크크)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
         <div className="bkcenter"><div className="bkempty">
-          <h2>📖 출판 — MD 원고 → 종이책(부크크) · 전자책(작가와)</h2>
+          <h2>📖 출판 — MD 원고 → 종이책(부크크) · 전자책(부크크)</h2>
           <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
           <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>
           <p className="meta">
             핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
-            대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 부크크 규격 내지/표지 PDF, 전자책은 작가와용 ePub·PDF 를 만듭니다.
+            대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 부크크 규격 내지/표지 PDF, 전자책은 부크크용 ePub(EPUB 2.0)을 만듭니다.
           </p>
         </div></div>
       </div>
@@ -558,13 +589,13 @@ body{overflow-y:scroll}
   const rgCtx = {
     meta, fileTitle: dto.fileTitle, pages: dto.lastPages || 0, trimId: dto.trimId, paperId: dto.paperId, flaps: dto.flaps,
     spread, spineMm: spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
-    outputs, excluded: layout.excluded || [], presentKeys: [...presentKeys], confirmed,
+    outputs, excluded: layout.excluded || [], presentKeys: [...presentKeys], confirmed, epubCheck: epubChk,
   };
-  const lists = { bookk: RG.checklist('bookk', rgCtx), jakkawa: RG.checklist('jakkawa', rgCtx) };
+  const lists = { bookk: RG.checklist('bookk', rgCtx), ebook: RG.checklist('ebook', rgCtx) };
   const badge = {
     info: ['title', 'author'].filter((k) => missSet.has(k)).length,
     colophon: COLO_REQ.filter(([k]) => missSet.has(k)).length,
-    bookk: RG.remaining(lists.bookk), jakkawa: RG.remaining(lists.jakkawa),
+    bookk: RG.remaining(lists.bookk), ebook: RG.remaining(lists.ebook),
   };
 
   // ── 작은 부품(함수로 호출 — 컴포넌트로 만들면 렌더마다 새로 마운트돼 입력칸 초점을 잃는다) ──
@@ -609,12 +640,35 @@ body{overflow-y:scroll}
         </div>
       </div>
     );
-    const outs = (outputs || []).filter((o) => isBookk ? (o.kind === 'interior' || o.kind === 'cover') : (o.kind === 'epub' || o.kind === 'ebookPdf'));
+    const outs = (outputs || []).filter((o) => isBookk ? (o.kind === 'interior' || o.kind === 'cover') : (o.kind === 'epub'));
     return (
       <div className="bkreg" data-testid={'bk-reg-' + platform}>
         <div className="bkprog">
-          <b>{isBookk ? '📕 종이책 → 부크크' : '📱 전자책 → 작가와'}</b>
+          <b>{isBookk ? '📕 종이책 → 부크크' : '📱 전자책 → 부크크'}</b>
           <span className={doneReq === list.required.length ? 'bkok' : ''}>필수 {doneReq}/{list.required.length}</span>
+        </div>
+        <div className="bkzone">🔎 부크크에 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
+        {pfx ? (
+          <div className="bkpf" data-testid="bk-preflight">
+            <div className={'bkpf-sum ' + (pfx.ready ? 'ok' : 'bad')}>
+              {pfx.ready ? '✅ 막히는 항목 없음' : `⛔ 고쳐야 할 것 ${pfx.summary.error}개`}{pfx.summary.warn ? ` · ⚠ 확인 ${pfx.summary.warn}개` : ''}
+            </div>
+            {pfx.items.filter((i) => i.state !== 'ok' || i.id === 'pages' || i.id === 'cover').map((i) => (
+              <div className={'bkpf-row st-' + i.state} key={i.id}>
+                <span className="bkic">{{ ok: '✅', warn: '⚠', error: '⛔', info: 'ℹ' }[i.state]}</span>
+                <div className="bkchk-body">
+                  <div className="bkchk-t">{i.label}{i.tab && i.state !== 'ok' ? <button className="bklink" onClick={() => setTab(i.tab)}>이동 ›</button> : null}</div>
+                  <div className="meta">{i.detail}</div>
+                </div>
+              </div>
+            ))}
+            <details className="meta"><summary>통과한 항목 {pfx.items.filter((i) => i.state === 'ok').length}개</summary>
+              {pfx.items.filter((i) => i.state === 'ok').map((i) => <div key={i.id}>✅ {i.label} — {i.detail}</div>)}
+            </details>
+          </div>
+        ) : <div className="meta">점검 중…</div>}
+        <div className="bkactions">
+          <button disabled={building || epubChkBusy} data-testid="bk-build-all" title="내지 PDF + 표지 PDF → ePub(EPUB 2.0) → 규격 검증을 순서대로 한 번에 — 쪽수가 정해진 뒤에 표지·ePub 을 만들도록 순서를 지킵니다" onClick={buildAll}>📦 부크크용 한 번에 만들기</button>
         </div>
         <div className="bkzone">필수</div>
         {list.required.map(row)}
@@ -628,11 +682,6 @@ body{overflow-y:scroll}
               <span>{k}</span><b>{v || '—'}</b>
             </button>
           ))}
-          {!isBookk && (
-            <button className="bksum-row bksum-wide" onClick={() => copy(RG.ebookBiblio(meta), '서지정보 페이지')} title="작가와 공식 양식 — 표지 다음 쪽 또는 마지막 쪽에 한 번만 넣습니다">
-              <span>서지정보 페이지(공식 양식)</span><b>복사 📋</b>
-            </button>
-          )}
         </div>
 
         <div className="bkzone">완성 파일</div>
@@ -647,18 +696,25 @@ body{overflow-y:scroll}
           {isBookk
             ? <button disabled={building} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 PDF (내지+표지)'}</button>
             : (<>
-                <button disabled={building} title="같은 원고로 전자책(ePub 3.0) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭" onClick={buildEpubFile}>📱 ePub</button>
-                <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="전자책 업로드용 PDF 한 파일 — 1쪽 앞표지 + 본문, 백면 없음, 안/바깥 같은 여백, 링크 살림" onClick={() => buildPdf('ebook')}>📱 전자책 PDF</button>
+                <button disabled={building} data-testid="bk-epub" title="같은 원고로 부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭(쪽수 확정 뒤)" onClick={buildEpubFile}>{building ? '⏳ 생성 중…' : '📱 ePub 만들기'}</button>
+                <button className="ghost" disabled={building || epubChkBusy} data-testid="bk-epubcheck" title="W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다 — 도구가 있는 PC 에서만" onClick={runEpubCheckUi}>{epubChkBusy ? '⏳ 검증 중…' : '✔ ePub 검증'}</button>
+                <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="참고용 — 전자책 PDF 한 파일(1쪽 앞표지 + 본문). 부크크 전자책은 ePub 을 올립니다" onClick={() => buildPdf('ebook')}>📄 전자책 PDF(참고)</button>
               </>)}
         </div>
+        {!isBookk && epubChk && epubChk.messages && epubChk.messages.length > 0 && (
+          <div className="bkfit warn" data-testid="bk-epubcheck-msgs">
+            <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
+            {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
+          </div>
+        )}
 
         <div className="bkzone">등록 도우미</div>
-        <div className="meta bknote">{RG.AUTO_UPLOAD.note}</div>
-        <div className="bkactions">
+        <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책 등록 화면은 로그인 뒤라 아직 읽지 못했습니다. 첫 전자책을 올리면서 입력 칸·표지 규격·가격 범위를 확인해 점검표와 자동 입력에 반영합니다 — 그때까지는 위 「옮겨 적을 값」을 눌러 복사해 직접 입력하세요.'}</div>
+        {isBookk && <div className="bkactions">
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
             title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
-            onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : ('🤖 ' + (isBookk ? '부크크' : '작가와') + '에 자동 입력')}</button>
-        </div>
+            onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 부크크에 자동 입력'}</button>
+        </div>}
         <div className="bklinks">
           {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
           <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>
@@ -666,7 +722,7 @@ body{overflow-y:scroll}
         <div className="meta bknote">
           {isBookk
             ? '심사 2~3일 · 승인 후 「승인확인」→ 표지·내지 다운로드 검토 → 「최종 입점」. 이때부터 수정 제약이 큽니다(개정판: 20쪽↑ 6개월 · 미만 1년).'
-            : '검수 3~7일(유통 신청 후) · 서점 노출은 신청 2일~근무일 3~5일. 출간 후 수정은 「문의/수정 › 원고 보완 신청」(반영 2일~30일+).'}
+            : '전자책도 부크크에서 등록합니다(2026-10-01 결정). 승인·유통 절차와 소요 기간은 첫 권을 올리며 확인해 채웁니다 🔒.'}
           {' '}조사 {RG.REVIEWED} · 정책은 자주 바뀌니 등록 직전에 공식 페이지를 다시 확인하세요.
         </div>
       </div>
@@ -734,7 +790,7 @@ body{overflow-y:scroll}
         {select('printColor', '내지 색(종이책)', [['', '흑백 (기본)'], ['컬러', '컬러']], false, '부크크 인세: 사이트 흑백 35% · 컬러 15% / 외부유통 흑백 15% · 컬러 10%')}
         {select('aiDisclosure', 'AI 사용 표기(전자책)',
           [['', '— 선택 안 됨 —'], ['없음', '없음(직접 집필·번역)'], ['있음', '있음(AI 활용 — 저자명에 「AI」 표기)']], true,
-          '작가와 업로드 2단계 자가 체크(퇴고·AI 표기). 정직한 표기가 안전합니다')}
+          '등록 화면의 AI 사용 표기 항목(부크크 요구 여부는 로그인 뒤 확인). 정직한 표기가 안전합니다')}
         <div className="meta">값은 원고 상단 <code>&gt; 라벨: 값</code> 메타 줄로 저장됩니다.</div>
       </div>);
       case 'colophon': return (<div className="bkform">
@@ -760,7 +816,7 @@ body{overflow-y:scroll}
             <option value="top">위 (판면 상단)</option><option value="bottom">아래 (판면 하단)</option>
           </select>
         </label>
-        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다. 작가와 서지정보 양식은 「전자책·작가와」 탭에서 복사하세요.</div>
+        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다. 전자책 점검표는 「전자책·부크크」 탭에 있습니다.</div>
       </div>);
       case 'cover': return (<div className="bkform">
         <div className="bkzone">종이책 표지 스프레드</div>
@@ -799,7 +855,7 @@ body{overflow-y:scroll}
           <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
         </div>
         <div className="bkzone">전자책 표지</div>
-        {field('ebookCover', '전자책 표지 이미지 경로', false, '비우면 종이책 표지의 앞면을 자동으로 잘라 씁니다. 작가와 표지 규격(px·비율)은 로그인 뒤 화면에서 확인 필요')}
+        {field('ebookCover', '전자책 표지 이미지 경로', false, '비우면 종이책 표지의 앞면을 자동으로 잘라 씁니다. 부크크 전자책 표지 규격(px·비율)은 로그인 뒤 화면에서 확인 필요')}
       </div>);
       case 'layout': return (<>
         <details open>
@@ -973,7 +1029,7 @@ body{overflow-y:scroll}
         </details>
       </>);
       case 'bookk': return registerPanel('bookk');
-      case 'jakkawa': return registerPanel('jakkawa');
+      case 'ebook': return registerPanel('ebook');
       default: return null;
     }
   })();

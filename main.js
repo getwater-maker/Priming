@@ -257,6 +257,7 @@ function bookDTO(parsed) {
     })),
     covers: (parsed.covers || []).map(secDTO),
     footnoteCount: Object.keys(parsed.footnotes || {}).length,
+    footnoteIssues: (() => { try { const F = require('./core/book/footnote-check'); const fx = F.footnoteIssues(parsed); return { ...fx, warnings: F.warnings(fx) }; } catch (_) { return null; } })(),
     reserved: BK.reservedSections(),
     fontOptions: require('./core/book/html-builder').FONT_OPTIONS,
     colophonFieldDefs: require('./core/book/html-builder').COLOPHON_FIELDS,
@@ -8070,7 +8071,21 @@ function warnLongTitles(layoutOpts, label) {
     return fit;
   } catch (_) { return null; }
 }
+let _footnoteWarnSig = '';
+// 각주 번호 중복·정의 없는 참조를 조판 때 로그로 — 같은 내용은 한 번만(R20 · 로이 2026-10-01 「전부 진행」)
+function warnFootnotes(label) {
+  try {
+    if (!S.parsed || S.parsed.kind !== 'book') return;
+    const F = require('./core/book/footnote-check');
+    const w = F.warnings(F.footnoteIssues(S.parsed)).filter((x) => !x.startsWith('ℹ'));
+    const sig = w.join('|');
+    if (sig === _footnoteWarnSig) return;
+    _footnoteWarnSig = sig;
+    for (const x of w) log(x + (label ? ` (${label})` : ''));
+  } catch (_) {}
+}
 let _glyphWarnSig = '';
+let _lastGlyph = null;
 let _fontFileWarnSig = null;
 // 선언했는데 설치 폴더에 없는 동봉 글꼴 — 조용히 시스템 대체(고딕)로 넘어가지 않게(삼국지 R15). 같은 목록은 한 번만 알린다.
 function warnMissingFontFiles(label) {
@@ -8089,6 +8104,7 @@ function warnMissingGlyphs(html, label) {
     // 🔑 판정 기준 = 지금 실행 중인 앱의 폴더(__dirname)에 실제로 있는 글꼴 파일. 못 읽는 글꼴이 있으면 「누락 0」이라 하지 않는다.
     const r = G.missingGlyphs(G.visibleText(html), G.defaultChain(path.join(__dirname, 'assets', 'fonts', 'book')));
     const unread = (r.unreadable || []);
+    _lastGlyph = r;   // 출고 전 점검이 마지막 조판의 결과를 쓴다
     const sig = r.missing.map((m) => m.cp).join(',') + '|' + unread.join(',');
     if (sig === _glyphWarnSig) return r;
     _glyphWarnSig = sig;
@@ -8298,6 +8314,7 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
       sourceMap: true,
     });
     warnMissingFontFiles('미리보기');
+    warnFootnotes('미리보기');
     warnMissingGlyphs(html, '미리보기');
     warnLongTitles(bookLayoutOpts(args), '미리보기');
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
@@ -8356,6 +8373,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
       imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
     });
     warnMissingFontFiles('내지 PDF');
+    warnFootnotes('내지 PDF');
     warnMissingGlyphs(html, '내지 PDF');
     warnLongTitles(bookLayoutOpts(args), '내지 PDF');
     const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');
@@ -8650,6 +8668,26 @@ ipcMain.handle('book-apply-edit', (_e, args = {}) => {
 });
 
 // ePub(전자책) 생성 — 같은 원고로 POD PDF 와 병행 산출.
+// ✔ ePub 규격 검증(W3C EPUBCheck) — 도구가 있는 PC(메인 PC)에서만. 가장 최근 .epub 또는 args.path.
+ipcMain.handle('book-epubcheck', async (_e, args = {}) => {
+  try {
+    const EC = require('./core/book/epubcheck');
+    let target = args.path;
+    if (!target) {
+      const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+      const files = fs.existsSync(root) ? fs.readdirSync(root).filter((f) => /\.epub$/i.test(f)).map((f) => path.join(root, f)) : [];
+      target = files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+    }
+    if (!target || !fs.existsSync(target)) return { error: 'ePub 파일이 없습니다 — 먼저 「ePub 만들기」를 누르세요' };
+    log(`✔ ePub 검증 중 — ${path.basename(target)}`);
+    const r = await EC.runEpubCheck(target);
+    if (r.missing) log('ℹ 이 PC 에는 EPUBCheck 도구가 없어 검증을 건너뜁니다(~/.priming-maker/tools)');
+    else if (r.error) log('✗ ePub 검증 실패: ' + r.error);
+    else log(`${r.ok ? '✅' : '⚠'} ePub 검증 — EPUB ${r.epubVersion} · 치명 ${r.nFatal} · 오류 ${r.nError} · 경고 ${r.nWarning} (EPUBCheck ${r.version})`);
+    if (r.messages) for (const m of r.messages.slice(0, 12)) log(`   ${m.severity} ${m.id} ${m.where} — ${m.message}`);
+    return { ...r, file: path.basename(target) };
+  } catch (e) { return { error: e.message }; }
+});
 ipcMain.handle('book-build-epub', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   try {
@@ -8841,6 +8879,36 @@ ipcMain.handle('open-logs', async () => {
   return LOG_DIR;
 });
 // 📤 등록 도우미 — 완성 파일 목록(크기 포함). 작가와 50MB 제한 등 사전 점검용.
+// 🔎 부크크에 올리기 전 점검 — 흩어진 경고를 한 곳에(core/book/preflight.js). 사실만 모아 순수 함수에 넘긴다.
+ipcMain.handle('book-preflight', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  try {
+    const PF = require('./core/book/preflight');
+    const F = require('./core/book/footnote-check');
+    const dto = bookDTO(S.parsed);
+    let titleFit = null; try { titleFit = bookTitleFit(bookLayoutOpts(args)); } catch (_) {}
+    let missingFonts = []; try { missingFonts = require('./core/book/pdf-builder').missingBundledFonts(); } catch (_) {}
+    let sourceMtime = 0; for (const p of bookFilePaths()) { try { sourceMtime = Math.max(sourceMtime, fs.statSync(p).mtimeMs); } catch (_) {} }
+    return PF.preflight({
+      meta: S.parsed.meta || {}, pages: dto.lastPages, spineMm: dto.spread && dto.spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
+      titleFit, footnotes: F.footnoteIssues(S.parsed), glyph: _lastGlyph, missingFonts, sourceMtime, outputs: listBookOutputs(),
+    });
+  } catch (e) { log('출고 전 점검 오류: ' + e.message); return null; }
+});
+function listBookOutputs() {
+  const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+  const kinds = [['_내지.pdf', 'interior'], ['_표지.pdf', 'cover'], ['_전자책.pdf', 'ebookPdf'], ['.epub', 'epub']];
+  const out = [];
+  try {
+    for (const f of fs.readdirSync(root)) {
+      const k = kinds.find(([suf]) => f.endsWith(suf));
+      if (!k) continue;
+      const full = path.join(root, f); const st = fs.statSync(full);
+      out.push({ kind: k[1], name: f, path: full, bytes: st.size, mtime: st.mtimeMs });
+    }
+  } catch (_) {}
+  return out;
+}
 ipcMain.handle('book-outputs', () => {
   if (!S.parsed || S.parsed.kind !== 'book') return [];
   const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);

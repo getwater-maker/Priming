@@ -162,6 +162,7 @@ function parseBookText(text, fallbackTitle) {
   const covers = []; // 표지 구성([뒷표지]/[앞날개]/[뒷날개]/[책등]) — 내지 제외, 표지 PDF 조판용
   const parts = [];   // { title:null|string, lineStart, chapters: [{num,title,lineStart,blocks}] }
   const footnotes = {}; // id → { text, line }
+  const footnoteDups = []; // 같은 id 를 두 번 정의한 목록 — 뒤의 정의가 앞을 덮는다(footnote-check 가 알린다)
 
   let seenHeading = false;   // 첫 ##/[섹션] 이전 = 메타 영역
   let cur = null;            // 현재 컨테이너 { blocks: [] } (예약섹션 or 장)
@@ -268,7 +269,7 @@ function parseBookText(text, fallbackTitle) {
 
     // 각주 정의 [^id]: …
     const fn = t.match(/^\[\^([^\]]+)\]:\s*(.+)$/);
-    if (fn) { flushPara(i - 1); footnotes[fn[1]] = { text: fn[2].trim(), line: i }; continue; }
+    if (fn) { flushPara(i - 1); if (footnotes[fn[1]]) footnoteDups.push(fn[1]); footnotes[fn[1]] = { text: fn[2].trim(), line: i }; continue; }
 
     // 코드펜스 = 시/보존 블록 (```시 / ```verse / ``` 무엇이든)
     if (/^```/.test(t)) {
@@ -383,7 +384,7 @@ function parseBookText(text, fallbackTitle) {
   // 메타의 책제목(예: 필수파일 `책제목:` 줄)이 있으면 파일 제목으로
   if (meta.title) fileTitle = meta.title;
 
-  return { kind: 'book', fileTitle, meta, front, parts, back, covers, footnotes, totalLines: lines.length };
+  return { kind: 'book', fileTitle, meta, front, parts, back, covers, footnotes, footnoteDups, totalLines: lines.length };
 }
 
 // 예약 섹션 목록(구조 패널·템플릿 삽입용) — ignore(속표지·표제지 지시)는 UI 비노출

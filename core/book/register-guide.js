@@ -1,6 +1,6 @@
 'use strict';
 /**
- * register-guide.js — 📤 등록 도우미: 전자책 = 작가와(jakkawa.com) / 종이책 = 부크크(bookk.co.kr) 점검표·입력값 요약.
+ * register-guide.js — 📤 등록 도우미: 종이책·전자책 모두 부크크(bookk.co.kr) 점검표·입력값 요약 (2026-10-01 로이 결정 — 작가와 제외, 작가와 점검표는 남아 있지만 화면에서 쓰지 않는다).
  *
  * 근거: D:\## 출판\_공통\삼국지_출판_플랫폼_가이드_작가와_부크크.md (2026-09-30 공식 페이지·뉴스레터 원문 조사).
  *   🔒 = 로그인 뒤 화면이라 아직 못 읽은 항목 → 「확인 필요」로 표시하고 단정하지 않는다.
@@ -12,6 +12,7 @@
 
 const REVIEWED = '2026-10-01';
 const MB50 = 50 * 1024 * 1024;
+const MB20 = 20 * 1024 * 1024;   // 부크크 전자책 EPUB 업로드 한도(부크크 고객센터 회신 2026-10-01)
 const JB = require('./jakkawa-biblio');
 
 const LINKS = {
@@ -19,6 +20,10 @@ const LINKS = {
     ['부크크 홈', 'https://bookk.co.kr/'],
     ['자주 묻는 질문(표지 규격·반려·유통)', 'https://bookk.co.kr/community/faq'],
     ['서비스 소개(인세·ISBN)', 'https://bookk.co.kr/introduce'],
+  ],
+  ebook: [
+    ['부크크 홈', 'https://bookk.co.kr/'],
+    ['자주 묻는 질문(전자책·인세·ISBN)', 'https://bookk.co.kr/community/faq'],
   ],
   jakkawa: [
     ['작가와 홈', 'https://www.jakkawa.com/'],
@@ -96,7 +101,44 @@ function bookkChecklist(ctx) {
   return { required, optional };
 }
 
-/** 전자책 → 작가와 점검표 */
+
+/** 전자책 → 부크크 점검표 (2026-10-01 로이 결정: 종이책·전자책 모두 부크크 · 작가와 제외) — EPUB 업로드 20MB 이하.
+ *  🔒 부크크 전자책 등록 화면(가격 범위·표지 규격·소개글 한도 등)은 로그인 뒤라 아직 못 읽었다 — 첫 권을 올리며 확인해 채운다. */
+function ebookChecklist(ctx) {
+  const m = ctx.meta || {}; const c = ctx.confirmed || {};
+  const epub = outputOf(ctx, 'epub');
+  const chk = ctx.epubCheck;   // { missing } | { ok, nError, nWarning, nFatal, version } | { error } | undefined(안 돌림)
+  const required = [
+    item('title', '책 제목', has(m.title || ctx.fileTitle) ? 'ok' : 'todo', '책 정보 › 책 제목', { tab: 'info' }),
+    item('author', '저자명', has(m.author) ? 'ok' : 'todo', '책 정보 › 저자', { tab: 'info' }),
+    item('toc', '목차 포함', (ctx.excluded || []).includes('toc') ? 'todo' : 'ok', '전자책은 목차(toc.ncx)가 길잡이 — 구조 › 목차 체크', { tab: 'structure' }),
+    item('cover', '전자책 표지 이미지', (has(m.ebookCover) || ctx.coverImagePath) ? 'ok' : 'todo',
+      has(m.ebookCover) || ctx.coverImagePath ? '' : '전자책표지 메타 또는 인쇄 표지(앞면 자동 크롭 — 쪽수 확정 뒤). 부크크 전자책 표지 규격은 로그인 뒤 화면 확인 필요 🔒', { tab: 'cover' }),
+    item('file', 'ePub 파일 생성(EPUB 2.0)', epub ? 'ok' : 'todo', epub ? `${epub.name} (${fmtMB(epub.bytes)})` : '아래 「📱 ePub 만들기」를 누르세요'),
+    item('size', 'ePub 20MB 이하(부크크 한도)', !epub ? 'todo' : (epub.bytes > MB20 ? 'todo' : 'ok'),
+      !epub ? '파일을 먼저 생성하세요' : (epub.bytes > MB20 ? `${epub.name} ${fmtMB(epub.bytes)} — 20MB 초과: 한자 글꼴 동봉을 끄거나 표지 이미지를 줄이세요` : `${fmtMB(epub.bytes)} / 20MB`)),
+    item('valid', 'ePub 규격 검증(EPUBCheck)',
+      !chk ? (epub ? 'todo' : 'todo') : chk.missing ? 'manual' : chk.error ? 'todo' : (chk.ok ? 'ok' : 'todo'),
+      !chk ? '아래 「✔ ePub 검증」을 누르세요 — W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다'
+        : chk.missing ? '이 PC 에는 EPUBCheck 도구가 없어 검증을 못 했습니다(메인 PC 에서 검증됨)' : chk.error ? `검증 실패: ${chk.error}`
+        : (chk.ok ? `EPUB ${chk.epubVersion} 규격 통과 — 치명 ${chk.nFatal} · 오류 ${chk.nError} · 경고 ${chk.nWarning} (EPUBCheck ${chk.version})` : `오류 ${chk.nFatal + chk.nError}개 · 경고 ${chk.nWarning}개 — 아래 목록 확인`)),
+    item('price', '전자책 판매가', has(m.ebookPrice) ? 'ok' : 'todo', '판권 › 전자책 가격 — 부크크 화면의 인세 계산기로 확인(전자책 외부유통 예: 저자 60%)', { tab: 'colophon' }),
+    manual('account', '부크크 로그인(직접)', '계정·로그인·최종 제출은 사람이 합니다', c),
+    manual('nodup', '같은 책이 이미 등록돼 있지 않음', '종이책과 전자책을 각각 등록(같은 표지·제목)', c),
+    manual('final', '편집 완성본임을 확인', '승인 뒤에는 수정 제약이 큽니다', c),
+  ];
+  const optional = [
+    item('ebookIsbn', '전자책 ISBN', has(m.ebookIsbn) ? 'ok' : 'info', has(m.ebookIsbn) ? m.ebookIsbn : '종이책 ISBN 과 별개 — 부크크 등록 화면에서 발급/입력(🔒 확인 필요)', { tab: 'colophon', optional: true }),
+    item('category', '카테고리', has(m.category) ? 'ok' : 'info', has(m.category) ? m.category : '등록 화면 입력 항목(목록은 로그인 뒤 확인)', { tab: 'info' }),
+    item('keywords', '키워드', has(m.keywords) ? 'ok' : 'info', has(m.keywords) ? m.keywords : '등록 화면 입력 항목', { tab: 'info' }),
+    item('tagline', '한줄 소개', has(m.tagline) ? 'ok' : 'info', has(m.tagline) ? m.tagline : '등록 화면 입력 항목', { tab: 'info' }),
+    item('aiDisclosure', 'AI 사용 표기', has(m.aiDisclosure) ? 'ok' : 'info', has(m.aiDisclosure) ? m.aiDisclosure : '부크크 요구 여부는 등록 화면에서 확인(🔒). 저자명에 AI 개입 표기 권고', { tab: 'info' }),
+    manual('readers', '실제 리더에서 열어 확인(한자·각주 이동·목차)', 'Calibre · 리디 · 교보 앱 등에서 한 번 열어 보세요 — 앱은 규격만 검증합니다', c),
+  ];
+  return { required, optional };
+}
+
+/** 전자책 → 작가와 점검표 (더는 쓰지 않음 — 2026-10-01 부크크로 일원화 · 코드·테스트는 남김) */
 function jakkawaChecklist(ctx) {
   const m = ctx.meta || {}; const c = ctx.confirmed || {};
   const file = outputOf(ctx, 'epub') || outputOf(ctx, 'ebookPdf');
@@ -135,7 +177,7 @@ function jakkawaChecklist(ctx) {
   return { required, optional };
 }
 
-function checklist(platform, ctx) { return platform === 'jakkawa' ? jakkawaChecklist(ctx) : bookkChecklist(ctx); }
+function checklist(platform, ctx) { return platform === 'jakkawa' ? jakkawaChecklist(ctx) : platform === 'ebook' ? ebookChecklist(ctx) : bookkChecklist(ctx); }
 
 /** 필수 항목 중 아직 안 끝난 수(todo + manual) */
 function remaining(list) { return list.required.filter((i) => i.state !== 'ok').length; }
@@ -151,6 +193,12 @@ function ebookBiblio(meta, opts) {
 function summary(platform, ctx) {
   const m = ctx.meta || {}; const sp = ctx.spread || {};
   const title = m.title || ctx.fileTitle || '';
+  if (platform === 'ebook') {
+    return [
+      ['책 제목', title], ['저자', m.author || ''], ['출판사', m.publisher || ''], ['판매가(전자책)', m.ebookPrice || ''], ['전자책 ISBN', m.ebookIsbn || ''],
+      ['카테고리', m.category || ''], ['키워드', m.keywords || ''], ['한줄 소개', m.tagline || ''], ['AI 사용', m.aiDisclosure || ''],
+    ];
+  }
   if (platform === 'jakkawa') {
     return [
       ['책 제목', title], ['저자명', m.author || ''], ['출판사', m.publisher || '작가와'], ['출판일', m.issueDate || ''],
@@ -174,6 +222,6 @@ const AUTO_UPLOAD = {
 };
 
 module.exports = {
-  REVIEWED, LINKS, COVER_MATERIALS, DEFAULT_COVER_MATERIAL, AUTO_UPLOAD, MB50,
+  REVIEWED, LINKS, COVER_MATERIALS, DEFAULT_COVER_MATERIAL, AUTO_UPLOAD, MB50, MB20,
   checklist, remaining, ebookBiblio, summary,
 };
