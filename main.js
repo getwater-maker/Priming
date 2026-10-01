@@ -8671,6 +8671,8 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
       // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
       excluded: lo.excluded, scriptMode: lo.scriptMode, scriptHideShots: lo.scriptHideShots,
       hidePaths: lo.hidePaths, specialKeyword: lo.specialKeyword,
+      // 📘 기본 EPUB 2.0(부크크 전자책) + 한자 글꼴 동봉 — 화면/호출에서 epubVersion:'3'·embedFonts:'none' 으로 바꿀 수 있다
+      epubVersion: args.epubVersion, embedFonts: args.embedFonts,
       spread, log,
     });
     if (r.success) { try { shell.openPath(outRoot); } catch {} }

@@ -66,7 +66,7 @@ const OUT = path.join(__dirname, '..', 'output', '_book-multi');
   const first = entries[0];
   if (first.entryName !== 'mimetype' || first.header.method !== 0) { console.error('❌ mimetype 규격 위반:', first.entryName, first.header.method); process.exit(1); }
   const names = entries.map((e) => e.entryName);
-  for (const need of ['META-INF/container.xml', 'OEBPS/content.opf', 'OEBPS/nav.xhtml', 'OEBPS/ch-001.xhtml', 'OEBPS/ch-015.xhtml', 'OEBPS/colophon.xhtml']) {
+  for (const need of ['META-INF/container.xml', 'OEBPS/content.opf', 'OEBPS/toc.ncx', 'OEBPS/ch-001.xhtml', 'OEBPS/ch-015.xhtml', 'OEBPS/colophon.xhtml']) {
     if (!names.includes(need)) { console.error('❌ ePub 엔트리 누락:', need); process.exit(1); }
   }
   console.log(`· ePub 구조 OK — ${entries.length}개 엔트리, mimetype STORED`);

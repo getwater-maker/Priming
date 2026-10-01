@@ -51,14 +51,14 @@ console.log('\n[4] ePub');
   const { buildEpub } = require('../core/book/epub-builder');
   const AdmZip = require('adm-zip');
   const out = path.join(os.tmpdir(), `jw-biblio-${Date.now()}.epub`);
-  await buildEpub(jw, { outPath: out });
+  await buildEpub(jw, { outPath: out, epubVersion: '3' });
   const z = new AdmZip(out);
   const x = z.readAsText('OEBPS/colophon.xhtml');
   ok(x.includes('<p>출판일 | 2026.10.15</p>') && x.includes('<p>저자명 | 나관중</p>') && x.includes('<p>출판사 | 작가와</p>') && x.includes('<p>ISBN | </p>') && x.includes('<p>판매가 | 8,000 원</p>'), 'ePub 판권 = 서지정보 양식');
   ok(x.includes('서면 동의를 받아야 합니다.') && x.includes('번역·기획: 고전서재'), 'ePub: 재사용 문구 + 고지문');
   ok((z.readAsText('OEBPS/nav.xhtml').match(/colophon\.xhtml/g) || []).length === 1, '서지정보는 책에 한 곳만');
   const out2 = path.join(os.tmpdir(), `jw-biblio-b-${Date.now()}.epub`);
-  await buildEpub(bk, { outPath: out2 });
+  await buildEpub(bk, { outPath: out2, epubVersion: '3' });
   ok(!new AdmZip(out2).readAsText('OEBPS/colophon.xhtml').includes('출판일'), 'ePub: 부크크 원고는 기존 판권');
   try { fs.unlinkSync(out); fs.unlinkSync(out2); } catch (_) { /* 임시 파일 */ }
 

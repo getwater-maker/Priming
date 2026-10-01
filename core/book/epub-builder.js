@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * epub-builder.js — BookModel → ePub 3.0 (전자책). adm-zip 재사용(신규 의존성 없음).
+ * epub-builder.js — BookModel → ePub (전자책). 기본 **EPUB 2.0**(부크크 전자책 업로드 · 로이 결정 2026-10-01) / 옵션 epubVersion:'3' = EPUB 3.0.
+ *   2.0 = OPF 2.0 + toc.ncx + XHTML 1.1(section/aside/nav/figure 없음·epub:type 없음·blockquote 안에 p). 신규 의존성 없음.
  *
  * 구성: mimetype(무압축·첫 엔트리) + META-INF/container.xml + OEBPS/(content.opf ·
  *   nav.xhtml · style.css · titlepage · 부속물 · 장별 xhtml · 판권).
@@ -69,7 +70,26 @@ class MiniZip {
   }
 }
 
-function wrapXhtml(title, body, cssHref = 'style.css') {
+// 📘 EPUB 2.0 — 내용 문서는 XHTML 1.1: HTML5 요소(section·aside·nav·figure)와 epub:type 이 없다. 3.0 용 마크업을 이 한 곳에서 2.0 으로 바꾼다.
+function toXhtml11(html) {
+  return String(html)
+    .replace(/ epub:type="[^"]*"/g, '')
+    .replace(/<(\/?)(section|aside)(?![a-z])/g, '<$1div')
+    .replace(/<figure[^>]*>/g, '<div class="figure">').replace(/<\/figure>/g, '</div>')
+    .replace(/<figcaption[^>]*>/g, '<p class="figcaption">').replace(/<\/figcaption>/g, '</p>')
+    .replace(/<blockquote>([\s\S]*?)<\/blockquote>/g, '<blockquote><p>$1</p></blockquote>');
+}
+function wrapXhtml(title, body, cssHref = 'style.css', v2 = false) {
+  if (v2) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko">
+<head><meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8"/><title>${esc(title)}</title><link rel="stylesheet" type="text/css" href="${cssHref}"/></head>
+<body>
+${toXhtml11(body)}
+</body>
+</html>`;
+  }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ko" lang="ko">
@@ -89,24 +109,25 @@ h1.chapter-title { font-size: 1.4em; line-height: 1.5; margin: 2.5em 0 2em; }
 h2.sec { font-size: 1.1em; margin: 2em 0 0.8em; }
 h3.sec { font-size: 1em; margin: 1.6em 0 0.6em; }
 blockquote { margin: 1.2em 1.4em; white-space: pre-line; font-size: 0.95em; }
+blockquote p { text-indent: 0; }
 div.verse { margin: 1.4em auto; text-align: center; white-space: pre-wrap; line-height: 2; }
-figure { margin: 1.5em 0; text-align: center; }
-figure img { max-width: 100%; }
-figcaption { font-size: 0.85em; color: #555; margin-top: 0.5em; }
+.figure { margin: 1.5em 0; text-align: center; }
+.figure img { max-width: 100%; }
+.figcaption { text-indent: 0; text-align: center; font-size: 0.85em; color: #555; margin-top: 0.5em; }
 hr.scene { border: none; text-align: center; margin: 1.6em 0; }
 hr.scene:after { content: "✻"; color: #777; }
-section.front h1, section.back h1 { font-size: 1.25em; text-align: center; margin: 3em 0 2.5em; }
-section.dedication, section.epigraph { text-align: center; }
+.front h1, .back h1 { font-size: 1.25em; text-align: center; margin: 3em 0 2.5em; }
+.dedication, .epigraph { text-align: center; }
 div.special-sec { background: #f4f1ea; padding: 0.7em 0.9em; margin: 1.4em 0 1em; font-size: 0.93em; }
 div.special-sec h2.sec, div.special-sec h3.sec { margin: 0 0 0.6em; }
 div.special-sec p { text-indent: 0; margin-bottom: 0.4em; }
-section.dedication p, section.epigraph p { text-indent: 0; margin-top: 30%; }
+.dedication p, .epigraph p { text-indent: 0; margin-top: 30%; }
 .titlepage { text-align: center; }
 .titlepage .t { font-size: 1.7em; font-weight: bold; margin-top: 30%; }
 .titlepage .s { color: #555; margin-top: 1em; }
 .titlepage .a { margin-top: 3em; }
 .titlepage .pub { margin-top: 4em; color: #666; }
-aside.fn { font-size: 0.88em; color: #333; margin: 1.5em 0 0; padding-top: 0.6em; border-top: 1px solid #ccc; }
+.fn { font-size: 0.88em; color: #333; margin: 1.5em 0 0; padding-top: 0.6em; border-top: 1px solid #ccc; }
 .colophon p { text-indent: 0; margin: 0.25em 0; font-size: 0.9em; }
 table.md-table { width: 100%; border-collapse: collapse; font-size: 0.86em; text-indent: 0; text-align: left; margin: 1.2em 0; }
 table.md-table th, table.md-table td { border: 1px solid #8a8a8a; padding: 0.34em 0.5em; vertical-align: top; text-indent: 0; text-align: left; }
@@ -171,7 +192,7 @@ function blocksXhtml(blocks0, book, ctx, specials) {
       case 'verse': out.push(`<div class="verse">${(b.lines || []).map(esc).join('\n')}</div>`); break;
       case 'image': {
         const img = ctx.addImage(b.src);
-        if (img) out.push(`<figure><img src="${img}" alt="${esc(b.caption || '')}"/>${b.caption ? `<figcaption>${inlineMd(b.caption)}</figcaption>` : ''}</figure>`);
+        if (img) out.push(`<figure class="figure"><img src="${img}" alt="${esc(b.caption || '')}"/>${b.caption ? `<figcaption class="figcaption">${inlineMd(b.caption)}</figcaption>` : ''}</figure>`);
         break;
       }
       case 'table': out.push(tableXhtml(b, book, ctx)); break;
@@ -241,6 +262,7 @@ async function cropFrontCover(spreadImage, spread, outJpg) {
 async function buildEpub(book, a) {
   const log = a.log || (() => {});
   const meta = book.meta || {};
+  const V2 = String(a.epubVersion == null ? '2' : a.epubVersion).replace(/\D.*$/, '') !== '3';   // 기본 EPUB 2.0
   const zip = new MiniZip();
   zip.addFile = (name, data) => zip.add(name, data); // 기존 호출부 호환
   const manifest = [];
@@ -274,11 +296,30 @@ async function buildEpub(book, a) {
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
 </container>`));
-  zip.addFile('OEBPS/style.css', Buffer.from(EPUB_CSS));
+  // 🔤 한자 글꼴 동봉 — 기본 켬(embedFonts !== 'none'): HanjaSerif-Light(한자 12,421자) + Noto Serif KR Light(한자·기호). 한글은 글꼴에 없어 리더 글꼴로 나온다(글자 단위 폴백).
+  //   부크크 전자책 EPUB 업로드 한도 20MB — 실측 크기는 작업노트 2026-10(v0.6.4). 'none' = 글꼴 미동봉(≈ 본문 크기 + 표지만).
+  let fontCss = '';
+  if (a.embedFonts !== 'none') {
+    const FD = path.join(__dirname, '..', '..', 'assets', 'fonts', 'book');
+    const faces = [['Priming Hanja Serif', 'HanjaSerif-Light.ttf', 'hanja'], ['Noto Serif KR', 'NotoSerifKR-Light.ttf', 'noto']];
+    const used = [];
+    for (const [fam, file, id] of faces) {
+      const fp = path.join(FD, file);
+      if (!fs.existsSync(fp)) continue;
+      zip.addFile(`OEBPS/fonts/${file}`, fs.readFileSync(fp));
+      manifest.push(`<item id="font-${id}" href="fonts/${file}" media-type="application/x-font-ttf"/>`);
+      fontCss += `@font-face { font-family: "${fam}"; src: url(fonts/${file}); font-weight: normal; font-style: normal; }
+`;
+      used.push(`"${fam}"`);
+    }
+    if (used.length) fontCss += `body { font-family: ${used.join(', ')}, serif; }
+`;
+  }
+  zip.addFile('OEBPS/style.css', Buffer.from(EPUB_CSS + fontCss));
   manifest.push('<item id="css" href="style.css" media-type="text/css"/>');
 
   const addDoc = (id, name, title, bodyHtml, opts = {}) => {
-    zip.addFile(`OEBPS/${name}`, Buffer.from(wrapXhtml(title, bodyHtml)));
+    zip.addFile(`OEBPS/${name}`, Buffer.from(wrapXhtml(title, bodyHtml, 'style.css', V2)));
     manifest.push(`<item id="${id}" href="${name}" media-type="application/xhtml+xml"${opts.nav ? ' properties="nav"' : ''}/>`);
     if (!opts.skipSpine) spine.push(`<itemref idref="${id}"${opts.linear === false ? ' linear="no"' : ''}/>`);
     if (opts.toc) navItems.push({ href: name, title: opts.toc });
@@ -296,7 +337,7 @@ async function buildEpub(book, a) {
   if (coverSrc) {
     const ext = path.extname(coverSrc).toLowerCase().replace('.', '') || 'jpg';
     zip.addFile(`OEBPS/cover.${ext}`, fs.readFileSync(coverSrc));
-    manifest.push(`<item id="cover-img" href="cover.${ext}" media-type="image/${ext === 'jpg' ? 'jpeg' : ext}" properties="cover-image"/>`);
+    manifest.push(`<item id="cover-img" href="cover.${ext}" media-type="image/${ext === 'jpg' ? 'jpeg' : ext}"${V2 ? '' : ' properties="cover-image"'}/>`);
     addDoc('cover', 'cover.xhtml', '표지', `<div style="text-align:center"><img src="cover.${ext}" alt="표지" style="max-width:100%"/></div>`);
     coverAdded = true;
   }
@@ -359,17 +400,36 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
   addDoc('colophon', 'colophon.xhtml', '판권', `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">판권</h1>\n${colBody}</section>`, { toc: '판권' });
 
   // 8) nav
-  const navLis = navItems.map((n) => `<li><a href="${n.href}">${esc(n.title)}</a></li>`).join('\n');
-  addDoc('nav', 'nav.xhtml', '목차', `<nav epub:type="toc" id="toc"><h1>목차</h1><ol>
+  const uid = 'urn:isbn:' + (String(meta.ebookIsbn || meta.isbn || '').replace(/[^0-9Xx]/g, '') || 'priming-' + Buffer.from(meta.title || 'book').toString('hex').slice(0, 12));
+  if (V2) {
+    // 📘 EPUB 2.0 — 목차는 toc.ncx (nav.xhtml 없음). 모든 navPoint 는 spine 문서를 가리킨다.
+    const pts = navItems.map((n, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navLabel><text>${esc(n.title)}</text></navLabel><content src="${n.href}"/></navPoint>`).join('\n');
+    zip.addFile('OEBPS/toc.ncx', Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="ko">
+  <head>
+    <meta name="dtb:uid" content="${esc(uid)}"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle><text>${esc(meta.title || book.fileTitle || '책')}</text></docTitle>
+  <navMap>
+${pts}
+  </navMap>
+</ncx>`));
+    manifest.push('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>');
+  } else {
+    const navLis = navItems.map((n) => `<li><a href="${n.href}">${esc(n.title)}</a></li>`).join('\n');
+    addDoc('nav', 'nav.xhtml', '목차', `<nav epub:type="toc" id="toc"><h1>목차</h1><ol>
 ${navLis}
 </ol></nav>`, { nav: true, skipSpine: true });
+  }
 
   // 9) opf
-  const uid = 'urn:isbn:' + (String(meta.ebookIsbn || meta.isbn || '').replace(/[^0-9Xx]/g, '') || 'priming-' + Buffer.from(meta.title || 'book').toString('hex').slice(0, 12));
   const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   zip.addFile('OEBPS/content.opf', Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="ko">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<package xmlns="http://www.idpf.org/2007/opf" version="${V2 ? '2.0' : '3.0'}" unique-identifier="uid"${V2 ? '' : ' xml:lang="ko"'}>
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"${V2 ? ' xmlns:opf="http://www.idpf.org/2007/opf"' : ''}>
     <dc:identifier id="uid">${esc(uid)}</dc:identifier>
     <dc:title>${esc(meta.title || book.fileTitle || '책')}</dc:title>
     ${meta.subtitle ? `<dc:description>${esc(meta.subtitle)}</dc:description>` : ''}
@@ -377,15 +437,15 @@ ${navLis}
     ${meta.translator ? `<dc:contributor>${esc(meta.translator)}</dc:contributor>` : ''}
     ${meta.publisher ? `<dc:publisher>${esc(meta.publisher)}</dc:publisher>` : ''}
     <dc:language>ko</dc:language>
-    <meta property="dcterms:modified">${modified}</meta>
+    ${V2 ? '' : `<meta property="dcterms:modified">${modified}</meta>`}
     ${coverAdded ? '<meta name="cover" content="cover-img"/>' : ''}
   </metadata>
   <manifest>
 ${manifest.join('\n')}
   </manifest>
-  <spine>
+  <spine${V2 ? ' toc="ncx"' : ''}>
 ${spine.join('\n')}
-  </spine>
+  </spine>${V2 && coverAdded ? '\n  <guide><reference type="cover" title="표지" href="cover.xhtml"/></guide>' : ''}
 </package>`));
 
   fs.mkdirSync(path.dirname(a.outPath), { recursive: true });
