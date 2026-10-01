@@ -46,6 +46,23 @@ function fakePage(body) {
   pg = fakePage('작업규격 문구 없음'); r = await RB.fillBookkCover(pg, plan, () => {});
   ok(pg.calls.some((c) => c.startsWith('upload')), '규격 문구를 못 읽으면 대조만 건너뛰고 올린다(fail-open — 화면에서 사람이 확인)');
   fs.rmSync(T, { recursive: true, force: true });
+  console.log('\n[2b] 🔔 사이트 확인창(alert/confirm) — 자동 취소로 사라지던 문제');
+  {
+    const mk = (type, message) => { const r = { acc: 0, dis: 0 }; return { type: () => type, message: () => message, accept: async () => { r.acc++; }, dismiss: async () => { r.dis++; }, r }; };
+    const hook = async (asker) => { let h; RB.setDialogAsker(asker); RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {}); return h; };
+    let asked = [];
+    let h = await hook(async (t, m) => { asked.push(t + ':' + m); return true; });
+    let d = mk('confirm', '표지를 이대로 진행할까요?'); await h(d);
+    ok(d.r.acc === 1 && d.r.dis === 0 && asked[0] === 'confirm:표지를 이대로 진행할까요?', 'confirm → 앱 창에서 묻고 「확인」이면 accept');
+    h = await hook(async () => false); d = mk('confirm', 'x'); await h(d);
+    ok(d.r.dis === 1 && d.r.acc === 0, '판별: 「취소」면 dismiss');
+    h = await hook(async () => { throw new Error('창 없음'); }); d = mk('confirm', 'x'); await h(d);
+    ok(d.r.dis === 1, '못 물으면 취소(안전한 쪽)');
+    asked = []; h = await hook(async (t, m) => { asked.push(t); return true; }); d = mk('alert', '파일 형식이 맞지 않습니다'); await h(d);
+    ok(d.r.acc === 1 && asked[0] === 'alert', 'alert → 내용을 앱 창에 보여 주고 accept(읽을 새 없이 사라지지 않게)');
+    h = await hook(null); d = mk('confirm', 'x'); await h(d);
+    ok(d.r.dis === 1, '앱이 질문 함수를 못 넣은 경우에도 멈추지 않는다(취소)');
+  }
   console.log('\n[3] 안전');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const clicks = src.split(String.fromCharCode(10)).filter((l) => /\.click\(/.test(l));

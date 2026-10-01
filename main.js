@@ -8952,6 +8952,19 @@ ipcMain.handle('book-open-platform', (_e, u) => {
 });
 // 🤖 등록 도우미 자동 입력 — 로그인·저장·제출은 사람이 한다(core/book/register-browser.js 머리말).
 let _bookRegBusy = false;
+// 🔔 등록용 크롬의 사이트 확인창(alert/confirm)을 앱 창에서 보여 주고 답을 받는다 — 자동화 크롬은 이런 창을 자동 취소해 로이가 읽을 새 없이 사라졌다.
+try {
+  require('./core/book/register-browser').setDialogAsker(async (type, msg) => {
+    try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } catch (_) {}
+    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 120000);
+    try {
+      const c = await dialog.showMessageBox(win, type === 'alert'
+        ? { type: 'info', title: '부크크 알림', message: '부크크 화면의 알림', detail: msg, buttons: ['확인'], noLink: true, signal: ac.signal }
+        : { type: 'question', title: '부크크 확인', message: '부크크 화면의 확인창', detail: msg + '\n\n(120초 안에 고르지 않으면 취소됩니다)', buttons: ['확인', '취소'], defaultId: 1, cancelId: 1, noLink: true, signal: ac.signal });
+      return type === 'alert' ? true : c.response === 0;
+    } catch (_) { return false; } finally { clearTimeout(timer); }
+  });
+} catch (_) {}
 ipcMain.handle('book-register-run', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
   if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };

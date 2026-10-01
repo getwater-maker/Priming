@@ -18,6 +18,26 @@ const SITES = {
 };
 
 let _ctx = null;   // 열려 있는 컨텍스트(한 번에 하나)
+// 🔔 사이트의 alert/confirm 창 처리(로이 2026-10-02 「3단계에서 다음으로 넘어가려니 팝업이 뜨는데 바로 사라져버리네」).
+//   자동화 크롬(Playwright)은 자바스크립트 대화상자를 **자동으로 취소**하고 사용자에게 보이지 않는다 → 사이트의 확인창이 눈 깜빡할 새 사라져 다음 단계로 못 넘어갔다.
+//   이제 창 내용을 로그에 남기고, alert 는 확인(내용을 읽을 수 있게 앱에 알림), confirm/prompt 는 **앱 창에서 로이에게 묻는다**(askDialog — main 이 넣는다).
+let _dialogAsker = null;
+function setDialogAsker(fn) { _dialogAsker = fn; }
+const _hooked = new WeakSet();
+function _hookDialogs(page, log) {
+  if (_hooked.has(page)) return;
+  _hooked.add(page);
+  page.on('dialog', async (d) => {
+    const type = d.type(); const msg = String(d.message() || '');
+    log(`[등록] 🔔 부크크 ${type} 창: ${msg.replace(/\s+/g, ' ').slice(0, 240)}`);
+    let accept = true;
+    if (type === 'confirm' || type === 'prompt') {
+      accept = false;
+      try { if (_dialogAsker) accept = !!(await _dialogAsker(type, msg)); } catch (_) { accept = false; }   // 못 물으면 취소(안전한 쪽)
+    } else if (type === 'alert' && _dialogAsker) { try { await _dialogAsker('alert', msg); } catch (_) {} }
+    try { if (accept) await d.accept(); else await d.dismiss(); } catch (_) {}
+  });
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function _launch(log) {
@@ -39,6 +59,8 @@ async function _launch(log) {
     }
   }
   _ctx.on('close', () => { _ctx = null; });
+  for (const p of _ctx.pages()) _hookDialogs(p, log);
+  _ctx.on('page', (p) => _hookDialogs(p, log));
   return _ctx;
 }
 
@@ -142,7 +164,6 @@ async function fillBookk(page, plan, log) {
   // ▶ Step3 표지디자인(로이 2026-10-02 「3페이지도 자동으로」) — 이동만 한다(저장·제출 아님). 4단계 이후는 손대지 않는다.
   if (plan.step3 && plan.step3.coverPdf) {
     try {
-      page.on('dialog', (d) => { log(`[등록] 대화상자(${d.type()}): ${String(d.message()).slice(0, 80)}`); (d.type() === 'alert' ? d.accept() : d.dismiss()).catch(() => {}); });
       await page.locator('a', { hasText: 'Step3 표지디자인' }).first().click({ timeout: 8000 });
       await page.waitForSelector('text=표지 주의사항', { timeout: 30000 });
       const r3 = await fillBookkCover(page, plan, log);
@@ -221,4 +242,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { PROFILE_DIR, SITES, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };
+module.exports = { PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };
