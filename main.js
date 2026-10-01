@@ -8011,6 +8011,24 @@ function warnMissingGlyphs(html, label) {
     return r;
   } catch (_) { return null; }
 }
+// 🖼 표지 계획 한 곳 — 표지 PDF 와 **미리보기 첫 화면(표지 펼침면)** 이 같은 입력을 쓴다(미리보기 = 실제 PDF 에 들어갈 모습).
+//   이미지(첨부) 유무 · 표지 문구 섹션(구조 탭에서 체크 해제한 것 제외) · 앞표지 글 얹기 · ISBN 바코드. 아무것도 없으면 표지가 없다.
+function bookCoverPlan(layoutOpts, meta, log) {
+  const imagePath = (S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath)) ? S.parsed.coverImagePath : null;
+  const covers = (S.parsed.covers || []).filter((s) => !(layoutOpts.excluded || []).includes(s.key));
+  const hasText = covers.some((s) => (s.blocks || []).length) || !!layoutOpts.coverOverlay;
+  let barcode = null;
+  if (layoutOpts.coverBarcode !== false && meta.isbn) {
+    // 바 높이 200px(≈17.6mm@80%배율) — 표준 스캔 높이 확보. quiet 11모듈 = GS1 좌측 최소.
+    try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '', { height: 200, quiet: 11 }); } catch (_) {}
+    if (!barcode && log) log(`⚠ ISBN 체크섬/형식 오류 — 표지에 바코드가 포함되지 않습니다: ${meta.isbn}`);
+  }
+  return {
+    hasImg: !!imagePath, imagePath, covers, hasText,
+    has: !!(imagePath || hasText),
+    compose: { meta, covers, overlay: !!layoutOpts.coverOverlay, textColor: layoutOpts.coverTextColor, barcode },
+  };
+}
 function bookLayoutOpts(args = {}) {
   const it = activeItem();
   const saved = (it && it.settings && it.settings.book) || {};
@@ -8114,6 +8132,41 @@ ipcMain.handle('book-save-guide', async () => {
 });
 
 // 실제 페이지 미리보기 — 조판 HTML 을 출력폴더에 쓰고 media:// URL 반환(렌더러 vivliostyle 이 로드).
+// 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13 · 로이 2026-10-01 「맨 첫 페이지에서 표지·책등·뒷표지가 한눈에」) — **미리보기 전용**.
+//   표지 장은 Vivliostyle 문서에 넣지 않는다(쪽번호·목차 쪽이 실제 PDF 와 어긋나지 않게) — 화면(BookView)이 표지를 맨 앞 한 화면으로 얹는다.
+//   내용 = 표지 PDF 가 실제로 만들 모습(같은 bookCoverPlan + buildCoverHtml): 첨부 표지 이미지(+ 구조 탭에서 켜 둔 표지 문구) 또는 원고 [뒷표지]·[앞날개]·[뒷날개]·[책등] 조판.
+ipcMain.handle('book-cover-preview', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  try {
+    const PB = require('./core/book/pdf-builder');
+    const layoutOpts = bookLayoutOpts(args);
+    const meta = S.parsed.meta || {};
+    const pages = S.parsed._lastPages || 0;
+    const { spread, flaps } = bookSpec(meta, pages);
+    const plan = bookCoverPlan(layoutOpts, meta, null);
+    if (!plan.has) return { kind: null };
+    const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
+    const bgTag = plan.hasImg ? `<img class="bg" src="${mediaUrl(plan.imagePath).replace(/"/g, '&quot;')}" />` : '';
+    const html = PB.buildCoverHtml({ spread, bgTag, compose: plan.compose, fontCss: PB.bundledFontCss(mediaUrl) });
+    const warnings = [];
+    const fileName = plan.hasImg ? path.basename(plan.imagePath) : '';
+    if (plan.hasImg && /시안/.test(fileName)) warnings.push(`파일 이름에 「시안」 — 인쇄용이 아닙니다(접힘선·자리 표시가 들어 있을 수 있습니다): ${fileName}`);
+    const cc = S.parsed._coverCheck;
+    if (plan.hasImg && cc && cc.imgW) {
+      const chk = coverCheckFor(S.parsed, cc.imgW, cc.imgH, pages);
+      if (!chk.ok && chk.flapHint) warnings.push(`이 표지 파일은 날개 ${chk.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${flaps ? '있음' : '없음'})`);
+      else if (!chk.ok) warnings.push(`표지 치수 불일치 — 기대 ${chk.expected.widthPx}×${chk.expected.heightPx}px (${chk.expected.widthMm}×${chk.expected.heightMm}mm), 파일 ${cc.imgW}×${cc.imgH}px`);
+      else if (chk.lowDpi) warnings.push(`해상도 낮음(실효 ${chk.effectiveDpi}dpi < 300)`);
+    }
+    if (plan.hasImg && plan.hasText) warnings.push('첨부 표지 위에 원고의 표지 문구([뒷표지]·[앞날개]…)·앞표지 글이 얹혀 표지 PDF 가 만들어집니다 — 완성 표지라면 구조 탭 「표지 구성」을 체크 해제하세요');
+    if (pages <= 0) warnings.push('쪽수 미확정 — 조판이 끝나면 책등 두께가 정해집니다');
+    return {
+      kind: plan.hasImg ? (plan.hasText ? 'image+text' : 'image') : 'composed',
+      html, fileName, warnings, flaps,
+      spread: { widthMm: spread.widthMm, heightMm: spread.heightMm, spineMm: spread.spineMm, safeMm: spread.safeMm, parts: spread.parts },
+    };
+  } catch (e) { log('표지 미리보기 오류: ' + e.message); return { kind: null, error: e.message }; }
+});
 ipcMain.handle('book-preview', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
   try {
@@ -8202,10 +8255,9 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     // 표지 — 배경 이미지(선택) + 표지 문구([뒷표지]/[앞날개]/[뒷날개]/[책등])·제목 오버레이·바코드 조판.
     let coverResult = null;
     const layoutOpts = bookLayoutOpts(args);
-    const coverHasImg = S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath);
-    const coverSecsAll = (S.parsed.covers || []).filter((s) => !(layoutOpts.excluded || []).includes(s.key));
-    const coverHasText = coverSecsAll.some((s) => (s.blocks || []).length) || layoutOpts.coverOverlay;
-    if (coverHasImg || coverHasText) {
+    const cvPlan = bookCoverPlan(layoutOpts, meta, log);   // 미리보기 첫 화면(표지 펼침면)과 같은 계획
+    const coverHasImg = cvPlan.hasImg, coverSecsAll = cvPlan.covers, coverHasText = cvPlan.hasText;
+    if (cvPlan.has) {
       // 🔍 표지 이미지 재검증 — 첨부 시점이 아니라 "최종 쪽수로 계산된 스프레드" 기준으로 다시 확인.
       //   (원고 수정으로 쪽수·책등이 변하면 첨부 때 맞았던 이미지도 어긋남 — 무경고 스트레치 방지)
       if (coverHasImg) {
@@ -8220,17 +8272,11 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
           }
         } catch (_) {}
       }
-      let barcode = null;
-      if (layoutOpts.coverBarcode !== false && meta.isbn) {
-        // 바 높이 200px(≈17.6mm@80%배율) — 표준 스캔 높이 확보. quiet 11모듈 = GS1 좌측 최소.
-        try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '', { height: 200, quiet: 11 }); } catch (_) {}
-        if (!barcode) log(`⚠ ISBN 체크섬/형식 오류 — 표지에 바코드가 포함되지 않습니다: ${meta.isbn}`);
-      }
       const coverPdf = path.join(outRoot, `${base}_표지.pdf`);
       coverResult = await PB.buildCoverPdf({
         imagePath: coverHasImg ? S.parsed.coverImagePath : null,
         spread, outPdf: coverPdf, workDir, log,
-        compose: { meta, covers: coverSecsAll, overlay: !!layoutOpts.coverOverlay, textColor: layoutOpts.coverTextColor, barcode },
+        compose: cvPlan.compose,
       });
       if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
     } else {

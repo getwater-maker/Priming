@@ -851,3 +851,16 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .bkbar .meta{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bkbar .grow{min-width:0}
 .bkside>.bkstatus .bkwarn{display:inline-block;margin:0 0 0 6px;padding:1px 7px}
+
+/* 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13) — 내지 뷰어(iframe) 위에 얹는 미리보기 전용 화면 */
+.bkstage{position:relative;flex:1;min-height:0;display:flex}
+.bkstage>.bkviewport{flex:1;min-height:0}
+.bkcover{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;background:#8a8177;outline:none}
+.bkcover-top{display:flex;align-items:center;gap:10px;padding:7px 12px;background:#faf6ee;border-bottom:1px solid var(--line);font-size:12.5px;flex-wrap:wrap}
+.bkcover-top .meta{font-size:12px}
+.bkcover-warns{padding:4px 12px 0;background:#faf6ee}
+.bkcover-warns .bkwarn{margin:3px 0}
+.bkcover-canvas{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.bkcover-sheet{position:relative;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.45);flex:0 0 auto}
+.bkcover-frame{position:absolute;left:0;top:0;border:0;background:#fff;pointer-events:none}
+.bkcover-lines{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}

@@ -146,10 +146,35 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     try { localStorage.setItem(confirmKey, JSON.stringify(n)); } catch (_) {}
     return n;
   });
+  // 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13) — 미리보기 전용. Vivliostyle 문서에는 넣지 않고(쪽번호가 PDF 와 어긋나지 않게) 화면이 맨 앞 한 화면으로 얹는다.
+  const [cover, setCover] = useState(null);          // main 의 book-cover-preview: { kind, html, spread, warnings, fileName, flaps } | null
+  const [showCover, setShowCover] = useState(true);  // 지금 표지 화면을 보고 있나
+  const [coverLines, setCoverLines] = useState(true); // 책등 mm · 접힘선 · 재단선 표시
+  const [coverFit, setCoverFit] = useState(0.4);     // 표지 펼침면 배율(mm → 화면 맞춤)
+  const coverRef = useRef(null), showCoverRef = useRef(true), curRef = useRef(0), navRef = useRef(null);
+  const coverBoxRef = useRef(null), coverCanvasRef = useRef(null);
+  coverRef.current = cover; showCoverRef.current = showCover;
   const [regBusy, setRegBusy] = useState(false);
   const [outputs, setOutputs] = useState([]);
   const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
   useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
+  useEffect(() => { setShowCover(true); }, [dto && dto.scriptPath]);   // 원고를 열면 표지부터
+  useEffect(() => { if (!cover && showCover) setShowCover(false); }, [cover]);
+  // 표지 배율 — 칸 크기에 맞춘다(펼침면 가로·세로 모두 들어가게)
+  useEffect(() => {
+    const el = coverCanvasRef.current;
+    if (!el || !cover || !showCover) return undefined;
+    const fit = () => {
+      const w = el.clientWidth - 28, h = el.clientHeight - 28;
+      const Wpx = cover.spread.widthMm * 3.7795, Hpx = cover.spread.heightMm * 3.7795;
+      if (w > 20 && h > 20) setCoverFit(Math.max(0.1, Math.min(w / Wpx, h / Hpx)));
+    };
+    fit();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (ro) ro.observe(el);
+    return () => { if (ro) ro.disconnect(); };
+  }, [cover, showCover]);
+  useEffect(() => { if (showCover && cover && coverBoxRef.current) { try { coverBoxRef.current.focus(); } catch (_) {} } }, [showCover, cover]);
 
   // ── 미리보기 조판 ──
   const refreshPreview = useCallback(async () => {
@@ -181,6 +206,16 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     const t = setTimeout(refreshPreview, 600);
     return () => clearTimeout(t);
   }, [contentSig]);
+  // 표지 펼침면 정보 — 가볍다(조판 없음). 내용·쪽수(책등)·날개·첨부 표지가 바뀌면 다시 받는다.
+  useEffect(() => {
+    if (!loaded) { setCover(null); return undefined; }
+    let live = true;
+    const t = setTimeout(async () => {
+      try { const r = await api.bookCoverPreview({ layout }); if (live) setCover(r && r.kind ? r : null); }
+      catch (_) { if (live) setCover(null); }
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [loaded, contentSig, dto && dto.lastPages, dto && dto.flaps, dto && dto.coverImagePath, dto && dto.coverCheck && dto.coverCheck.ok]);
 
   // ── vivliostyle 로드 ──
   //   ⚠ 반드시 iframe 안에 렌더 — 같은 document 에 렌더하면 앱 전역 CSS(p 마진·폰트 14px 등)가
@@ -214,18 +249,17 @@ body{overflow-y:scroll}
       const now = Date.now();
       if (now - lastWheel < 250 || Math.abs(e.deltaY) < 4) return;
       lastWheel = now;
-      try { viewerRef.current && viewerRef.current.navigateToPage(e.deltaY > 0 ? Navigation.NEXT : Navigation.PREVIOUS); } catch (_) {}
+      try { navRef.current && navRef.current(e.deltaY > 0 ? Navigation.NEXT : Navigation.PREVIOUS); } catch (_) {}
     }, { passive: false });
     // ⌨ 키보드 페이지 이동 — ←→/PgUp·PgDn/Space = 펼침면 넘기기, Home/End = 처음/끝.
     fdoc.addEventListener('keydown', (e) => {
-      const v = viewerRef.current; if (!v) return;
+      if (!viewerRef.current) return;
       const k = e.key;
-      try {
-        if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { e.preventDefault(); v.navigateToPage(Navigation.NEXT); }
-        else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); v.navigateToPage(Navigation.PREVIOUS); }
-        else if (k === 'Home') { e.preventDefault(); v.navigateToPage(Navigation.FIRST); }
-        else if (k === 'End') { e.preventDefault(); v.navigateToPage(Navigation.LAST); }
-      } catch (_) {}
+      const go = (d) => { e.preventDefault(); try { navRef.current && navRef.current(d); } catch (_) {} };
+      if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') go(Navigation.NEXT);
+      else if (k === 'ArrowLeft' || k === 'PageUp') go(Navigation.PREVIOUS);
+      else if (k === 'Home') go(Navigation.FIRST);
+      else if (k === 'End') go(Navigation.LAST);
     });
     // iframe 이 포커스를 받아야 키가 먹음 — 클릭 시 body 포커스
     try { fdoc.body.tabIndex = -1; fdoc.addEventListener('mousedown', () => { try { fdoc.body.focus(); } catch (_) {} }); } catch (_) {}
@@ -235,7 +269,7 @@ body{overflow-y:scroll}
     });
     viewerRef.current = viewer;
     viewer.addListener('nav', (p) => {
-      if (p && typeof p.epage === 'number') setPageInfo((pi) => ({ ...pi, cur: Math.round(p.epage) + 1 }));
+      if (p && typeof p.epage === 'number') { curRef.current = Math.round(p.epage) + 1; setPageInfo((pi) => ({ ...pi, cur: Math.round(p.epage) + 1 })); }
     });
     viewer.addListener('readystatechange', () => {
       if (viewer.readyState === 'complete') {
@@ -458,7 +492,21 @@ body{overflow-y:scroll}
       setStatus(`표지 가이드 저장 — ${W}×${H}px. 이 위에 디자인하고 가이드 레이어는 지우세요`);
     } catch (e) { logline('표지 가이드 오류: ' + e.message); }
   }
-  const nav = (dir) => { try { viewerRef.current && viewerRef.current.navigateToPage(dir); } catch {} };
+  // ⏮ ◀ ▶ ⏭ — 표지 화면이 맨 앞이다: ⏮ = 표지 · 표지에서 ▶ = 1쪽 · 1쪽에서 ◀ = 표지
+  const nav = (dir) => {
+    const hasCover = !!coverRef.current;
+    try {
+      if (dir === Navigation.FIRST) { if (hasCover) { setShowCover(true); return; } viewerRef.current && viewerRef.current.navigateToPage(dir); return; }
+      if (showCoverRef.current) {
+        if (dir === Navigation.NEXT) { setShowCover(false); viewerRef.current && viewerRef.current.navigateToPage(Navigation.FIRST); }
+        else if (dir === Navigation.LAST) { setShowCover(false); viewerRef.current && viewerRef.current.navigateToPage(Navigation.LAST); }
+        return;
+      }
+      if (dir === Navigation.PREVIOUS && hasCover && curRef.current <= 1) { setShowCover(true); return; }
+      viewerRef.current && viewerRef.current.navigateToPage(dir);
+    } catch {}
+  };
+  navRef.current = nav;
 
   if (!loaded) {
     return (
@@ -926,11 +974,16 @@ body{overflow-y:scroll}
         <div className="bkbar">
           <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
           <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
-          <span className="bkpage">{pageInfo.cur > 0 ? pageInfo.cur : '–'} / {pageInfo.total || '–'}쪽</span>
+          <span className="bkpage" title={cover ? '맨 앞 화면 = 표지 펼침면(미리보기 전용 — 내지 PDF 에는 들어가지 않습니다)' : ''}>{showCover && cover ? '표지' : (pageInfo.cur > 0 ? pageInfo.cur : '–')} / {pageInfo.total || '–'}쪽</span>
           <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
           <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
-          <input type="range" title="페이지 빠른 이동(드래그)" min={1} max={Math.max(1, pageInfo.total || 0)} value={Math.max(1, pageInfo.cur || 1)}
-            style={{ width: 150 }} onChange={(e) => { const v = parseInt(e.target.value, 10); try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, v - 1); } catch (_) {} }} />
+          <input type="range" title="페이지 빠른 이동(드래그)" min={cover ? 0 : 1} max={Math.max(1, pageInfo.total || 0)} value={cover && showCover ? 0 : Math.max(1, pageInfo.cur || 1)}
+            style={{ width: 150 }} onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (cover && v <= 0) { setShowCover(true); return; }
+              setShowCover(false);
+              try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, Math.max(1, v) - 1); } catch (_) {}
+            }} />
           <span className="hdiv" />
           <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
           <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
@@ -941,7 +994,51 @@ body{overflow-y:scroll}
           <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · 휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
-        <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
+        <div className="bkstage">
+          <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
+          {cover && showCover && (() => {
+            const sp = cover.spread, k = coverFit, Wpx = sp.widthMm * 3.7795, Hpx = sp.heightMm * 3.7795;
+            let x = 0; const bounds = []; const regions = [];
+            for (const part of sp.parts) { regions.push({ ...part, x }); x += part.mm; if (part.name !== 'bleed') bounds.push(x); }
+            bounds.pop();   // 맨 끝(재단 안쪽)은 재단선이 따로 그린다
+            const flapFolds = regions.filter((r) => r.name === '뒷날개' || r.name === '앞날개');
+            const spine = regions.find((r) => r.name === '책등');
+            return (
+              <div className="bkcover" ref={coverBoxRef} tabIndex={0} data-testid="bk-cover"
+                onKeyDown={(e) => { if (['ArrowRight', 'PageDown', ' ', 'End', 'ArrowDown'].includes(e.key)) { e.preventDefault(); nav(e.key === 'End' ? Navigation.LAST : Navigation.NEXT); } }}
+                onWheel={(e) => { if (e.deltaY > 0) nav(Navigation.NEXT); }}>
+                <div className="bkcover-top">
+                  <b>🖼 표지 펼침면</b>
+                  <span className="meta">{cover.kind === 'composed' ? '원고 [뒷표지]·[앞날개]… 로 조판한 표지' : `첨부 표지${cover.fileName ? ' — ' + cover.fileName : ''}${cover.kind === 'image+text' ? ' + 원고 표지 문구' : ''}`} · {sp.widthMm}×{sp.heightMm}mm · 책등 {sp.spineMm}mm · 날개 {cover.flaps ? '있음' : '없음'}</span>
+                  <span className="grow" />
+                  <label className="chk"><input type="checkbox" checked={coverLines} onChange={(e) => setCoverLines(e.target.checked)} /> 책등·접힘선·재단선</label>
+                  <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="내지 1쪽으로">내지 보기 ▶</button>
+                </div>
+                {cover.warnings && cover.warnings.length > 0 && (
+                  <div className="bkcover-warns">{cover.warnings.map((w, i) => <div key={i} className="bkwarn" data-testid="bk-cover-warn">⚠ {w}</div>)}</div>
+                )}
+                <div className="bkcover-canvas" ref={coverCanvasRef}>
+                  <div className="bkcover-sheet" style={{ width: Wpx * k, height: Hpx * k }}>
+                    <iframe className="bkcover-frame" title="표지 펼침면" srcDoc={cover.html}
+                      style={{ width: Wpx, height: Hpx, transform: `scale(${k})`, transformOrigin: '0 0' }} />
+                    {coverLines && (
+                      <svg className="bkcover-lines" viewBox={`0 0 ${sp.widthMm} ${sp.heightMm}`} preserveAspectRatio="none">
+                        <rect x="3" y="3" width={sp.widthMm - 6} height={sp.heightMm - 6} fill="none" stroke="#d32f2f" strokeWidth="0.35" strokeDasharray="2 1.5" opacity="0.7" />
+                        {spine && <rect x={spine.x} y="0" width={spine.mm} height={sp.heightMm} fill="#2a6fb0" opacity="0.10" />}
+                        {bounds.map((bx, i) => <line key={i} x1={bx} y1="0" x2={bx} y2={sp.heightMm} stroke="#2a6fb0" strokeWidth="0.3" strokeDasharray="3 2" opacity="0.65" />)}
+                        {regions.filter((r) => r.name !== 'bleed').map((r) => (
+                          <text key={r.name} x={r.x + r.mm / 2} y={sp.heightMm - 4} fontSize="3.6" textAnchor="middle" fill="#2a6fb0" opacity="0.8">{r.name}</text>
+                        ))}
+                        {spine && <text x={spine.x + spine.mm / 2} y="9" fontSize="3.4" textAnchor="middle" fill="#2a6fb0" fontWeight="700">{spine.mm}mm</text>}
+                        {flapFolds.map((r) => <text key={'f' + r.name} x={r.x + r.mm / 2} y="9" fontSize="3.2" textAnchor="middle" fill="#2a6fb0" opacity="0.85">{r.name} 접힘 {r.mm}mm</text>)}
+                      </svg>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
         {edit && (
           <div className="bkedit">
             <div className="meta">{edit.file ? `${edit.file} — ` : '원고 '}수정 후 저장하면 원본 .md 에 반영되고 재조판됩니다</div>

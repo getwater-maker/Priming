@@ -162,6 +162,7 @@ contextBridge.exposeInMainWorld('api', {
   openBookScript: (args) => ipcRenderer.invoke('open-book-script', args),
   openBookPath: (args) => ipcRenderer.invoke('open-book-path', args),
   bookPreview: (args) => ipcRenderer.invoke('book-preview', args),
+  bookCoverPreview: (args) => ipcRenderer.invoke('book-cover-preview', args),
   bookReportPages: (args) => ipcRenderer.invoke('book-report-pages', args),
   bookBuildPdf: (args) => ipcRenderer.invoke('book-build-pdf', args),
   bookAttachCover: () => ipcRenderer.invoke('book-attach-cover'),

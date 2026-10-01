@@ -301,4 +301,4 @@ function lastLines(s, n = 4) {
   return lines.slice(-n).join(' | ').slice(0, 400);
 }
 
-module.exports = { buildInteriorPdf, buildCoverPdf, bundledFontCss, prepareWorkAssets, pdfPageCount };
+module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, prepareWorkAssets, pdfPageCount };

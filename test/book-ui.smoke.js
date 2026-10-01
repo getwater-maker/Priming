@@ -159,6 +159,58 @@ ${para}
       fs.rmSync(png, { force: true });
       console.log('· 표지 날개 판정 OK — 없음 통과 → 날개 켬 +200mm·불일치+힌트 → 화면 경고 → 되돌림');
     }
+    // 🖼 R13 — 미리보기 첫 화면 = 표지 펼침면(미리보기 전용): 첨부 표지 → 표지 화면 · ▶ 1쪽 · ⏮ 표지 · 「시안」·날개 경고 · 쪽번호는 내지 그대로
+    {
+      const pageNow = async () => { const t = (await win.locator('.bkpage').innerText()).trim(); return { label: t.split('/')[0].trim(), total: Number((t.match(/(\d+)쪽/) || [])[1]) }; };
+      // 앞 블록이 API 로 바꾼 값은 화면 상태에 안 실려 있다 — 화면 버튼으로 깨끗이 되돌린 뒤 시작한다
+      await win.click('[data-tab=cover]');
+      const rm = win.locator('button:has-text("제거")');
+      if (await rm.count()) await rm.first().click();
+      const fl = win.locator('label.chk:has-text("표지 날개") input[type=checkbox]');
+      if (await fl.isChecked()) await fl.uncheck();
+      await win.waitForSelector('button:has-text("표지 이미지 첨부")', { timeout: 15000 });
+      await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]') || true);
+      const before = await pageNow();
+      const spec = await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '' }).then((d) => d && d.spread));
+      const mkPng = (w, h) => { const b = Buffer.alloc(64); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0); b.writeUInt32BE(13, 8); b.write('IHDR', 12); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b; };
+      const png = path.join(os.tmpdir(), '삼국지연의_제1권_표지_시안.png');
+      fs.writeFileSync(png, mkPng(spec.widthPx, spec.heightPx));
+      await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, png);
+      await win.click('button:has-text("표지 이미지 첨부")');
+      await win.waitForSelector('[data-testid=bk-cover]', { timeout: 15000 });
+      let st = await pageNow();
+      if (st.label !== '표지') throw new Error('표지 화면의 쪽 표시가 「표지」가 아님: ' + JSON.stringify(st));
+      if (st.total !== before.total) throw new Error(`표지 화면이 내지 쪽수를 바꿨다(쪽번호가 PDF 와 어긋남): ${before.total} → ${st.total}`);
+      const warns = await win.locator('[data-testid=bk-cover-warn]').allInnerTexts();
+      if (!warns.some((t) => /시안/.test(t) && /인쇄용이 아닙니다/.test(t))) throw new Error('「시안」 파일 경고가 없음: ' + warns.join(' | '));
+      const srcdoc = await win.locator('iframe.bkcover-frame').getAttribute('srcdoc');
+      if (!/<img class="bg" src="media:\/\//.test(srcdoc || '') || !/width:\d+(\.\d+)?mm/.test(srcdoc || '')) throw new Error('표지 펼침면 iframe 에 첨부 이미지(media://)·스프레드 치수가 없음');
+      const svgTxt = await win.locator('.bkcover-lines').innerHTML();
+      if (!/책등|뒤표지|앞표지/.test(svgTxt) || !new RegExp(String(spec.spineMm)).test(svgTxt)) throw new Error('책등 mm·구획 표시가 없음');
+      // ▶ = 내지 1쪽(표지는 사라진다) · ⏮ = 표지 · 1쪽에서 ◀ = 표지
+      await win.click('.bkbar button[title="다음 펼침면"]');
+      await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });
+      st = await pageNow();
+      if (!/^1$/.test(st.label)) throw new Error('▶ 뒤 쪽 표시가 1 이 아님: ' + JSON.stringify(st));
+      await win.click('.bkbar button[title="이전 펼침면"]');
+      await win.waitForSelector('[data-testid=bk-cover]', { timeout: 8000 });
+      await win.click('.bkbar button[title="다음 펼침면"]');
+      await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });
+      await win.click('.bkbar button[title="첫 페이지"]');
+      await win.waitForSelector('[data-testid=bk-cover]', { timeout: 8000 });
+      // 날개를 켜면 같은 파일이 날개 없는 치수 → 경고
+      await win.locator('label.chk:has-text("표지 날개") input[type=checkbox]').check().catch(async () => { await win.click('[data-tab=cover]'); await win.locator('label.chk:has-text("표지 날개") input[type=checkbox]').check(); });
+      await win.waitForFunction(() => [...document.querySelectorAll('[data-testid=bk-cover-warn]')].some((e) => /날개 설정을 확인하세요/.test(e.textContent)), null, { timeout: 15000 });
+      // 첨부를 지우면 표지 화면이 사라진다(문구 섹션도 없을 때)
+      await win.evaluate(() => window.api.bookSetMeta({ key: 'flaps', value: '' }));
+      await win.click('[data-tab=cover]');
+      await win.locator('button:has-text("제거")').first().click();
+      await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 15000 });
+      st = await pageNow();
+      if (st.label === '표지') throw new Error('표지가 없는데 표지 표시가 남음');
+      fs.rmSync(png, { force: true });
+      console.log('· 표지 펼침면 OK — 표지 화면(쪽번호 불변) · 시안 경고 · 책등 mm 표시 · ▶/◀/⏮ 이동 · 날개 경고 · 제거하면 사라짐');
+    }
     await win.click('[data-tab=info]');
     if (await win.locator('.bkbadge.req').count() < 3 || await win.locator('.bkbadge.opt').count() < 3) throw new Error('필수/선택 배지 없음');
     await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-info.png') });
