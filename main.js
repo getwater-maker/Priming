@@ -615,6 +615,10 @@ async function withAwake(label, fn) {
 // 버전 표시 — app.getVersion() 은 electron 시작 시점의 package.json(=이번 실행 업데이트 적용 전) 을
 //   캐시해 한 박자 늦는다. 라이트 업데이터는 main.js 로드 전에 package.json 을 교체하므로,
 //   파일에서 직접 읽으면 방금 적용된 최신 버전이 보인다.
+// 디스크의 package.json 버전(라이트 업데이트 직후 값) — .vrew 건너뛰기 지문이 쓴다(앱 코드가 바뀌면 한 번은 다시 만든다).
+function appDiskVersion() {
+  try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || ''; } catch { return ''; }
+}
 ipcMain.handle('get-app-version', () => {
   try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || app.getVersion(); }
   catch { try { return app.getVersion(); } catch { return ''; } }
@@ -6089,14 +6093,30 @@ async function runMakeAllCore(opts = {}) {
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);
       try {
-        const build = () => P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
-        const res = await buildForMode(outMode, pr, build);
-        P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
-        log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
+        // ⏭ 이미 최신이면 건너뛴다(로이 2026-10-01) — 지문(입력 전부 + 출력 방식 + 앱 버전)이 같고 .vrew(·MP4)가 기록 그대로일 때만.
+        //   계산·읽기 실패는 fail-closed(= 새로 만든다). 판정은 core/build-fingerprint 한 곳.
+        const BF = require('./core/build-fingerprint');
+        const fp = await BF.fingerprint({ v: appDiskVersion(), outMode, inputs: P.vrewInputsOf(pr, ep, captionMaxChars) });
+        const mp4Path = mp4Go ? uploadMp4Path(baseName, preset, vrewPath) : null;
+        const utd = await BF.checkUpToDate({ outRoot, baseName, fp, vrewPath, mp4Path });
+        let vrewReady = false;
+        if (utd.vrewOk && (!mp4Go || utd.mp4Ok)) {
+          log(`⏭ ${pr.title} — 입력이 그대로이고 ${mp4Go ? '.vrew·MP4 가' : '.vrew 가'} 이미 있어 다시 만들지 않습니다 (강제로 다시 만들려면 .priming-build 폴더의 기록을 지우세요)`);
+          continue;
+        }
+        if (utd.vrewOk && mp4Go) { vrewReady = true; log(`⏭ ${pr.title} — .vrew 는 최신이라 MP4 만 굽습니다`); }
+        else if (utd.why && utd.why !== '이전 기록 없음') log(`🔁 ${pr.title} — .vrew 를 새로 만듭니다 (${utd.why})`);
+        if (!vrewReady) {
+          const build = () => P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+          const res = await buildForMode(outMode, pr, build);
+          P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+          log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
+          await BF.recordBuilt({ outRoot, baseName, fp, vrewPath });   // MP4 는 아래에서 구운 뒤 덧붙인다
+        }
         if (mp4Go) {
           // .vrew 를 입력으로 굽는다 — Vrew 가 받는 것과 같은 입력이라 렌더 규칙이 두 벌이 되지 않는다.
           const mr = await renderUploadMp4(vrewPath, baseName, preset, pr);
-          if (mr.ok) { if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
+          if (mr.ok) { await BF.recordMp4({ outRoot, baseName, mp4Path }); if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
           else if (!mr.cancelled && openVrew) shell.openPath(vrewPath); // MP4 가 실패하면 Vrew 로 마무리할 수 있게
         } else if (openVrew) shell.openPath(vrewPath);
       } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }

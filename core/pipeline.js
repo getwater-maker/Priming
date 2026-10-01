@@ -594,6 +594,26 @@ async function fillSilentYield(project, workDir) {
 }
 
 // ── .vrew 내보내기 (편별) ───────────────────────────────
+// 🔑 .vrew 를 결정하는 입력 전부 — buildProjectVrew 가 읽는 것과 **같은 조건**으로 모은다(건너뛰기 지문의 재료).
+//   ⚠ buildProjectVrew 에 새 입력을 넣으면 여기도 같이 넣을 것(빠뜨리면 바뀐 설정이 반영되지 않은 채 건너뛴다) — test:buildfp 가 소스로 대조한다.
+function vrewInputsOf(project, preset, captionMaxChars) {
+  const inp = {
+    aspect: project.aspect || '16:9',
+    captionMaxChars: captionMaxChars || 7,
+    sentences: project.sentences,
+    groups: project.groups,
+    overlays: (Array.isArray(project.overlays) && project.overlays.length) ? project.overlays : null,
+  };
+  if (preset) {
+    if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
+    if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
+    if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
+    if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
+    if (preset.logo && preset.logo.enabled && preset.logo.path) inp.logo = { ...preset.logo, side: project.logoSide === 'left' ? 'left' : 'right' };
+  }
+  return inp;
+}
+
 async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxChars, playbackRate) {
   const opts = {
     aspect: project.aspect || '16:9',
@@ -964,7 +984,7 @@ function sanitize(name) {
 
 module.exports = { speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
-  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, sanitize,
+  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,
