@@ -8968,7 +8968,12 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
     } else {
       const spec = bookSpec(S.parsed.meta || {}, S.parsed._lastPages || 0);
-      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf') });
+      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread });
+    }
+    if (args.only === 'cover' && platform === 'bookk') {
+      log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4단계 이후·저장·제출은 누르지 않습니다');
+      const rc = await RB.runBookkCoverOnly({ plan, log });
+      return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }
     log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
     const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });

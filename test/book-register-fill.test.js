@@ -49,10 +49,11 @@ console.log('\n[3] 🔴 제출/저장 버튼을 누르지 않는다(소스 검�
 const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
 const clicks = src.split('\n').filter((l) => /\.click\(/.test(l));
 ok(clicks.length >= 5, `click 호출 ${clicks.length}곳 확인`);
-ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종|승인|Step3|Step4|Step5|삭제|결제|로그아웃/.test(l)), '금지 버튼(저장·제출·유통신청·최종·승인·Step3~5·삭제·결제·로그아웃) 클릭 없음');
+ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종|승인|Step4|Step5|삭제|결제|로그아웃/.test(l)), '금지 버튼(저장·제출·유통신청·최종·승인·Step4~5·삭제·결제·로그아웃) 클릭 없음');
 ok(!/\.(fill|type|press)\([^)]*(password|비밀번호)/i.test(src) && !/input\[type=password\]/.test(src), '비밀번호 입력 코드 없음');
 const allowed = clicks.map((l) => l.trim()).join('\n');
-ok(/Step2 원고등록/.test(allowed), '허용된 진행 버튼은 Step2 뿐(초안 생성)');
+ok(/Step2 원고등록/.test(allowed) && /Step3 표지디자인/.test(allowed), '허용된 진행 버튼은 Step2(초안 생성)·Step3(표지디자인 — 로이 2026-10-02) 뿐');
+ok(!/Step4|가격정책/.test(clicks.join('\n')), '4단계(가격정책) 이후는 누르지 않는다');
 
 // ── 부크크 2단계 대표 장르 기본값(로이 2026-10-02) ──
 {

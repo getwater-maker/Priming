@@ -408,15 +408,15 @@ body{overflow-y:scroll}
     setBuilding(false); refreshOutputs();
   }
   // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
-  async function runRegister(platform) {
+  async function runRegister(platform, only) {
     const bk = platform === 'bookk';
-    const msg = bk
+    const msg = only === 'cover' ? ['부크크 3단계(표지디자인)를 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에서 3단계 화면(표지 주의사항)이 떠 있어야 합니다.', '② 「직접 올리기」 탭을 고르고 표지 PDF 를 올립니다. 화면의 작업규격이 우리 표지와 다르면 올리지 않습니다.', '③ 4단계(가격정책)부터·저장·제출은 직접 하세요.', '', '진행할까요?'].join('\n') : bk
       ? ['부크크 「새종이책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 선택 → 「Step2」에서 임시서재에 초안이 만들어집니다(삭제 가능).', '③ 2단계 입력과 내지 PDF 업로드까지 하고 멈춥니다. 표지·가격·최종확인·제출은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10))
       : ['작가와 「도서정보 입력」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 입력칸만 채우고 멈춥니다. 「도서 정보 저장하기」와 이후 업로드·유통 신청은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10));
     if (!window.confirm(msg)) return;
     setRegBusy(true); setStatus('🤖 ' + (bk ? '부크크' : '작가와') + ' 자동 입력 중 — 열린 크롬 창에서 로그인해 주세요');
     try {
-      const r = await api.bookRegisterRun({ platform });
+      const r = await api.bookRegisterRun({ platform, only });
       if (!r || r.error) { setStatus('⚠ 자동 입력 실패: ' + ((r && r.error) || '알 수 없음')); }
       else {
         setStatus(r.ok ? '✅ 자동 입력 완료 — 크롬 창에서 확인하고 저장·제출은 직접 하세요' : '⚠ 일부 칸 실패: ' + (r.failed || []).join(', '));
@@ -711,6 +711,7 @@ body{overflow-y:scroll}
         <div className="bkzone">등록 도우미</div>
         <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책 등록 화면은 로그인 뒤라 아직 읽지 못했습니다. 첫 전자책을 올리면서 입력 칸·표지 규격·가격 범위를 확인해 점검표와 자동 입력에 반영합니다 — 그때까지는 위 「옮겨 적을 값」을 눌러 복사해 직접 입력하세요.'}</div>
         {isBookk && <div className="bkactions">
+          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아 직접 올리기 + 표지 PDF 를 올립니다 — 4단계부터·저장·제출은 직접" onClick={() => runRegister('bookk', 'cover')}>🖼 3단계 표지만 채우기</button>
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
             title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
             onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 부크크에 자동 입력'}</button>

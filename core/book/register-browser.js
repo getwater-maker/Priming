@@ -139,7 +139,65 @@ async function fillBookk(page, plan, log) {
       await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
     });
   }
+  // ▶ Step3 표지디자인(로이 2026-10-02 「3페이지도 자동으로」) — 이동만 한다(저장·제출 아님). 4단계 이후는 손대지 않는다.
+  if (plan.step3 && plan.step3.coverPdf) {
+    try {
+      page.on('dialog', (d) => { log(`[등록] 대화상자(${d.type()}): ${String(d.message()).slice(0, 80)}`); (d.type() === 'alert' ? d.accept() : d.dismiss()).catch(() => {}); });
+      await page.locator('a', { hasText: 'Step3 표지디자인' }).first().click({ timeout: 8000 });
+      await page.waitForSelector('text=표지 주의사항', { timeout: 30000 });
+      const r3 = await fillBookkCover(page, plan, log);
+      done.push(...r3.done); failed.push(...r3.failed);
+    } catch (e) {
+      failed.push('3단계 이동'); log(`[등록] ⚠ 3단계(표지디자인)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 3단계는 직접 열고 「🖼 3단계 표지만 채우기」를 누르세요`);
+      await _dump(page, log, '부크크 2→3단계');
+    }
+  }
   return { done, failed };
+}
+
+/**
+ * 부크크 3단계 「표지디자인」 — 직접 올리기 탭 + 표지 PDF 업로드. 4단계(가격정책) 이후 버튼은 누르지 않는다.
+ * 화면 「작업규격」(가로×세로 mm·책등)을 읽어 우리 표지 규격과 대조한다 — 폭이 ±1mm 밖이면 **올리지 않고** 실패로 알린다(틀린 표지를 올리지 않는다).
+ */
+async function fillBookkCover(page, plan, log) {
+  const s3 = plan.step3 || {};
+  const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('text=표지 주의사항', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 3단계'); throw new Error('3단계(표지디자인) 화면을 찾지 못했습니다'); });
+  // 화면의 규격 읽기 → 대조
+  const body = await page.evaluate(() => document.body.innerText).catch(() => '');
+  const m = /(\d+(?:\.\d+)?)\s*mm\s*\(?\s*가로\s*\)?\s*[*×xX]\s*(\d+(?:\.\d+)?)\s*mm/.exec(body);
+  const sm = /책등\s*(\d+(?:\.\d+)?)\s*mm/.exec(body);
+  let specOk = true;
+  if (m && s3.expect) {
+    const w = Number(m[1]), h = Number(m[2]);
+    const dw = Math.abs(w - s3.expect.widthMm), dh = Math.abs(h - s3.expect.heightMm);
+    log(`[등록] 3단계 작업규격 ${w}×${h}mm${sm ? ` · 책등 ${sm[1]}mm` : ''} — 우리 표지 ${s3.expect.widthMm}×${s3.expect.heightMm}mm (책등 ${s3.expect.spineMm}mm)`);
+    if (dw > 1 || dh > 1) { specOk = false; failed.push('표지 규격 불일치'); log(`[등록] ⚠ 표지 규격이 다릅니다(가로 ${dw.toFixed(2)}mm · 세로 ${dh.toFixed(2)}mm 차이) — 쪽수가 바뀌었다면 표지를 새 책등으로 다시 만든 뒤 올리세요. 틀린 표지는 올리지 않습니다`); }
+  } else log('[등록] ℹ 3단계 작업규격 문구를 읽지 못해 규격 대조는 건너뜁니다');
+  await step('직접 올리기 탭', () => page.locator('a, button, li, div, span').filter({ hasText: /^\s*직접\s*올리기\s*$/ }).first().click({ timeout: 8000 }));
+  if (specOk && s3.coverPdf && fs.existsSync(s3.coverPdf)) {
+    await step('표지 PDF 업로드', async () => {
+      await page.locator('input[type=file]').first().setInputFiles(s3.coverPdf);
+      await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+    });
+  } else if (!s3.coverPdf || !fs.existsSync(s3.coverPdf)) { failed.push('표지 PDF 없음'); log('[등록] ⚠ 올릴 표지 PDF 가 없습니다 — 「종이책 PDF」로 표지 PDF 를 먼저 만드세요'); }
+  return { done, failed };
+}
+
+/** 🖼 3단계 표지만 채우기 — 이미 열려 있는 이 앱의 등록용 크롬에서 3단계 화면(표지 주의사항)이 떠 있는 탭을 찾아 이어서 한다. */
+async function runBookkCoverOnly(o) {
+  const log = o.log || (() => {});
+  if (!_ctx) throw new Error('열려 있는 등록용 크롬 창이 없습니다 — 먼저 「🤖 부크크에 자동 입력」으로 크롬을 열어 3단계 화면까지 가세요(앱을 껐다 켜면 창과 연결이 끊깁니다)');
+  let page = null;
+  for (const p of _ctx.pages()) {
+    const t = await p.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
+    if (/표지 주의사항/.test(t)) { page = p; break; }
+  }
+  if (!page) throw new Error('등록용 크롬에 3단계(표지디자인) 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');
+  const r = await fillBookkCover(page, o.plan, log);
+  log(`[등록] ✅ 3단계 입력 ${r.done.length}칸 완료${r.failed.length ? ' · 실패 ' + r.failed.join(', ') : ''} — 4단계(가격정책)부터는 직접 하세요`);
+  return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [] };
 }
 
 /**
@@ -163,4 +221,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { PROFILE_DIR, SITES, runRegister, fillJakkawa, fillBookk };
+module.exports = { PROFILE_DIR, SITES, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };

@@ -126,15 +126,21 @@ function bookkPlan(book, ctx) {
     pages: Number(c.pages) || 0,
     pdf: c.interiorPdf || '',
   };
+  // 3단계 「표지디자인」(로이 2026-10-02 실측 화면): 탭 무료 표지 / **직접 올리기** / 구매한 템플릿 · 파일 JPG·PDF 만(PNG 불가) · 100MB 이하 · 300dpi ·
+  //   화면 「작업규격」 = 가로 518.50mm(앞날개100+뒷표지151+책등16.505+앞표지151+앞날개100) × 세로 216mm(사방 3mm 재단 포함). 우리 표지 PDF 를 올린다(PNG 시안은 올리지 않는다).
+  const sp = c.spread || null;
+  const step3 = { coverPdf: c.coverPdf || '', expect: sp ? { widthMm: sp.widthMm, heightMm: sp.heightMm, spineMm: sp.spineMm } : null, tab: '직접 올리기' };
   const manual = [];
+  if (!step3.coverPdf) manual.push('3단계 표지 PDF(없음 — 먼저 「종이책 PDF」로 표지 PDF 를 만드세요)');
+  manual.push('3단계 로고 선택(화면 기본값 그대로 두거나 직접 — 표지에 로고를 직접 넣었다면 불필요)');
   if (!step1.pages) manual.push('쪽수(내지 PDF 를 먼저 만드세요)');
   if (!step2.title) manual.push('도서명(필수)');
   if (!step2.author) manual.push('저자(필수)');
   if (!step2.pdf) manual.push('내지 PDF 업로드(파일 없음)');
   if (hasIsbn) manual.push('보유 ISBN 입력칸(2단계에서 직접)');
   if (flapsOn && trim === 'A4') manual.push('날개(원고는 날개 있음이지만 부크크 A4 는 날개 불가 — 날개 없이 진행)');
-  manual.push('3단계 표지 등록 · 4단계 가격 · 5단계 최종확인·제출');
-  return { step1, step2, manual };
+  manual.push('4단계 가격정책 · 5단계 최종확인·제출');
+  return { step1, step2, step3, manual };
 }
 
 module.exports = { JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };
