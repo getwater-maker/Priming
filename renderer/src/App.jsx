@@ -4760,11 +4760,11 @@ export default function App() {
 
             {/* 🌐 브라우저 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
                 2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
-                분리됐으므로 순서/체크는 필요 없다 — 고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다. */}
+                분리됐고(2026-10-02부터 이어받기도 없다) 순서/체크는 필요 없다 — 고른 쪽만 돈다. */}
             {settingsTab === 'free' && (<div>
               <div className="meta" style={{ marginBottom: 10 }}>
                 브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
-                고른 쪽이 <b>한도</b>(Genspark 휴식/한도 메시지 · Flow 계정 한도)에 걸리면 <b>남은 이미지를 다른 쪽이 이어서</b> 만들고, <b>한도 재설정 시각이 지나면 같은 대본 도중이라도 원래 엔진으로 되돌아가</b> 이어서 만듭니다.
+                <b>Flow 와 Genspark 는 서로 이어받지 않습니다</b> — 고른 쪽이 한도에 걸리면 남은 이미지는 만들어지지 않은 채로 멈추고(.vrew 도 막힙니다), 한도가 풀린 뒤 다시 누르면 이어서 만듭니다. 다른 쪽으로 만들고 싶으면 헤더 드롭다운을 직접 바꾸세요.
               </div>
               <div className="frow" style={{ alignItems: 'center' }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>
