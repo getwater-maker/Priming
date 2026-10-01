@@ -3698,7 +3698,7 @@ export default function App() {
             </span>
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
             {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
-            {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
+            {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
           {!noProduction && (
             <nav className="menus" data-testid="menus">
               {MENUS.map(([id, label]) => (
@@ -3957,7 +3957,7 @@ export default function App() {
             {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
             <span className="hgroup rb-reader">
               {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}
-              <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
+              <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
               {/* 📥 대본다운 — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞 · 이름·그림 변경). 대본이 없어도 쓴다(받는 중만 막힘). */}
               <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 영상 대본을 받습니다 — 자막이 있으면 자막을 그대로 쓰고(GPU 0), 없으면 음성을 받아 STT 로 전사합니다" onClick={openUrlDl}><span className="rb-ic">📥</span> <span className="rb-t">대본다운</span></button>
               <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>

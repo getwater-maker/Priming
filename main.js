@@ -401,8 +401,10 @@ app.whenReady().then(() => {
     })();
   }, 4000);
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
+  registerMonitorHotkeys();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('will-quit', () => { try { require('electron').globalShortcut.unregisterAll(); } catch (_) {} });
 app.on('before-quit', () => {
   try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장(롱폼·출판 세계 모두)
   try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙 감시가 앱보다 오래 남지 않게
@@ -578,7 +580,7 @@ const MONITOR_OFF_PS = [
   "'END'",
 ].join('\n');
 let _monGuard = null;   // 지금 도는 감시(🌙 를 다시 누르면 옛 감시를 끝내고 새로)
-ipcMain.handle('monitor-off', () => new Promise((resolve) => {
+function monitorOff() { return new Promise((resolve) => {
   if (process.platform !== 'win32') { resolve({ ok: false, error: '윈도우에서만 됩니다.' }); return; }
   try { if (_monGuard) _monGuard.kill(); } catch (_) {}
   const enc = Buffer.from(MONITOR_OFF_PS, 'utf16le').toString('base64');
@@ -606,7 +608,25 @@ ipcMain.handle('monitor-off', () => new Promise((resolve) => {
     if (_monGuard === cp) _monGuard = null;
     if (!done) { const m = (errTxt.trim().split('\n')[0] || `종료 코드 ${code}`).slice(0, 200); log(`✗ 모니터 끄기 실패 — ${m}`); finish({ ok: false, error: m }); }
   });
-}));
+}); }
+ipcMain.handle('monitor-off', () => monitorOff());
+// ⌨ 모니터 끄기 단축키(로이 2026-10-02 「마우스를 꺼둬야 하니 키보드 특수키로」) — **앱이 뒤에 있어도** 눌리는 전역 단축키.
+//   ScrollLock(대부분 키보드에 있고 거의 안 쓴다). 키를 누른 손의 입력이 곧바로 모니터를 다시 켜지 않도록
+//   monitorOff 가 0.8초 뒤에 끈다(위 설명). 등록 실패는 로그로만 알린다(다른 프로그램이 이미 쓰는 키).
+const MONITOR_HOTKEYS = ['Scrolllock'];   // ⚠ 'Pause' 는 Electron 이 받지 않는 이름(실측: 변환 오류)
+function registerMonitorHotkeys() {
+  try {
+    const { globalShortcut } = require('electron');
+    const got = [];
+    for (const k of MONITOR_HOTKEYS) {
+      let okk = false;
+      try { okk = globalShortcut.register(k, () => { log(`⌨ 단축키 ${k} → 모니터 끄기`); monitorOff().then((r) => { if (r && !r.ok) log('✗ 모니터 끄기 실패 — ' + (r.error || '')); }); }); } catch (_) {}
+      if (okk) got.push(k);
+    }
+    log(got.length ? `⌨ 모니터 끄기 단축키: ${got.join(' · ')} (앱이 뒤에 있어도 동작)` : 'ℹ 모니터 끄기 단축키를 등록하지 못했습니다(다른 프로그램이 쓰는 키일 수 있음) — 🌙 버튼을 쓰세요');
+    return got;
+  } catch (_) { return []; }
+}
 /** 긴 작업을 절전 차단으로 감싼다. 실패·예외에도 finally 로 반드시 해제. */
 async function withAwake(label, fn) {
   awakeAcquire(label);
