@@ -189,9 +189,9 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(free.text.includes('LoRA 학습용 이미지 수집'), 'LoRA 수집 섹션이 설정 탭으로 옮겨졌다');
     ok(free.text.includes('트리거'), 'LoRA 트리거 입력이 있다');
     ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
-    ok(free.text.includes('이어서'), '한도 시 다른 쪽이 이어받는다는 안내가 있다');
+    ok(free.text.includes('이어받지 않습니다'), 'Flow·Genspark 는 서로 이어받지 않는다는 안내가 있다');
     ok(free.text.includes('구독') && !free.text.includes('무료'), '탭 안내가 「구독 요금제」로 정정됐다(무료 아님)');
-    ok(free.text.includes('되돌아가'), '한도 재설정 후 원래 엔진으로 되돌아간다는 안내가 있다');
+    ok(!free.text.includes('되돌아가'), '옛 「원래 엔진으로 되돌아간다」 안내는 없다');
     await win.click('.modal-card button:has-text("닫기")');
 
     // 옛 순환 모달·정규화가 남아 있지 않은지 (원문 대조)

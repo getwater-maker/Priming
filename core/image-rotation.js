@@ -3,9 +3,9 @@
 /**
  * image-rotation.js — 이미지 생성 "순환(rotation)" 설정 (~/.priming-maker/image-rotation.json)
  *
- * 한 엔진이 한도(Genspark 5시간/일일캡, Flow 계정 한도)에 걸리면 남은 이미지를 다음 엔진이 이어받고,
- * 한도 재설정 시각이 지나면 **같은 대본 도중이라도** 원래 엔진으로 되돌아간다(main.js runRotatingImages 의 라운드 반복).
- *   - 순환 풀: order 순서대로 시도, enabled=false 인 엔진은 제외.
+ * ⚠ 2026-10-02 로이 지시로 Flow ↔ Genspark **이어받기(순환)는 폐기**됐다 — 고른 엔진 하나만 쓴다(`activeOrder`).
+ *   (옛 동작: 한도에 걸리면 다음 엔진이 이어받고, 재설정 시각이 지나면 원래 엔진으로 복귀.)
+ *   order/enabled 는 옛 설정 파일 호환용으로 남아 있을 뿐 읽는 곳이 없다.
  *   - ComfyUI 는 순환에서 제외(한국사 부적합) — 별도 단독 선택용. 추후 엔진 추가 시 order/enabled 에 넣으면 합류.
  */
 
@@ -78,13 +78,11 @@ function save(patch) {
   } catch (e) { return load(); }
 }
 
-// 활성(enabled) 엔진을 order 순서로. startEngine 이 주어지면 그 엔진을 맨 앞으로(사용자 선택 우선).
+// 🔒 Flow 와 Genspark 는 **완전히 분리**한다(로이 2026-10-02) — 고른 엔진 하나만 돌고, 한도에 걸려도
+//   다른 쪽이 이어받지 않는다(남은 이미지는 미생성으로 두고 게이트가 알린다). 옛 「이어받기」는 폐기.
+//   startEngine 이 flow/genspark 가 아니면(옛 'rotate'·미지정) 헤더 UI 의 이관 규칙과 같이 genspark 로 본다.
 function activeOrder(startEngine) {
-  const c = load();
-  let list = (c.order || []).filter((e) => c.enabled && c.enabled[e] !== false);
-  if (startEngine && list.includes(startEngine)) list = [startEngine, ...list.filter((e) => e !== startEngine)];
-  else if (startEngine && (startEngine === 'genspark' || startEngine === 'flow')) list = [startEngine, ...list.filter((e) => e !== startEngine)];
-  return list;
+  return [(startEngine === 'flow') ? 'flow' : 'genspark'];
 }
 
 module.exports = { load, save, activeOrder, CONFIG_PATH, DEFAULTS };
