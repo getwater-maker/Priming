@@ -50,6 +50,8 @@ function normDate(s) {
   return m ? `${m[1]}.${m[2].padStart(2, '0')}.${m[3].padStart(2, '0')}` : '';
 }
 
+// 부크크 2단계 「대표 장르(필수)」 기본값 — 로이가 지정(2026-10-02, 화면: 「소설 - 고전 문학」). 원고 `> 카테고리:` 가 있고 목록에 맞으면 그것이 이긴다.
+const BOOKK_DEFAULT_GENRE = '소설 - 고전 문학';
 /** 카테고리 문자열 → 후보 목록에서 가장 알맞은 것(정확 일치 > 끝 일치 > 포함). 없으면 '' */
 function pickOption(want, options) {
   const w = String(want || '').trim();
@@ -118,7 +120,8 @@ function bookkPlan(book, ctx) {
     purpose: 'external',                       // ISBN 출판 판매용 (외부유통 가능)
     isbnMode: hasIsbn ? 'other' : 'bookk',     // 부크크 무료 ISBN / 보유 ISBN
     isbn: hasIsbn ? m.isbn : '',
-    genre: m.category || '',                   // 부크크 선택지와 대조는 브라우저에서 (옵션 텍스트가 계층형)
+    genre: m.category || BOOKK_DEFAULT_GENRE,  // 부크크 선택지와 대조는 브라우저에서 (옵션 텍스트가 계층형) · 원고에 카테고리가 없으면 기본 「소설 - 고전 문학」(로이 2026-10-02)
+    genreFallback: BOOKK_DEFAULT_GENRE,        // 원고 카테고리가 부크크 목록과 안 맞으면 이것
     adult: 'all',
     pages: Number(c.pages) || 0,
     pdf: c.interiorPdf || '',
@@ -130,8 +133,8 @@ function bookkPlan(book, ctx) {
   if (!step2.pdf) manual.push('내지 PDF 업로드(파일 없음)');
   if (hasIsbn) manual.push('보유 ISBN 입력칸(2단계에서 직접)');
   if (flapsOn && trim === 'A4') manual.push('날개(원고는 날개 있음이지만 부크크 A4 는 날개 불가 — 날개 없이 진행)');
-  manual.push('대표 장르(필수 — 카테고리가 목록과 안 맞으면)', '3단계 표지 등록 · 4단계 가격 · 5단계 최종확인·제출');
+  manual.push('3단계 표지 등록 · 4단계 가격 · 5단계 최종확인·제출');
   return { step1, step2, manual };
 }
 
-module.exports = { JAKKAWA_CATEGORIES, BOOKK_MATERIAL, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };
+module.exports = { JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };

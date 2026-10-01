@@ -54,5 +54,20 @@ ok(!/\.(fill|type|press)\([^)]*(password|비밀번호)/i.test(src) && !/input\[t
 const allowed = clicks.map((l) => l.trim()).join('\n');
 ok(/Step2 원고등록/.test(allowed), '허용된 진행 버튼은 Step2 뿐(초안 생성)');
 
+// ── 부크크 2단계 대표 장르 기본값(로이 2026-10-02) ──
+{
+  const RFx = require('../core/book/register-fill');
+  const BKx = require('../core/parsers/book-parser');
+  const p1 = RFx.bookkPlan(BKx.parseBookText('# t\n> 저자: a\n', 'x'), { trimId: 'A5', pages: 100, interiorPdf: 'a.pdf' });
+  ok(p1.step2.genre === '소설 - 고전 문학' && !p1.manual.some((s) => /대표 장르/.test(s)), '카테고리가 없으면 대표 장르 = 「소설 - 고전 문학」 (직접 해야 할 목록에서도 뺐다)');
+  const p2 = RFx.bookkPlan(BKx.parseBookText('# t\n> 저자: a\n> 카테고리: 에세이\n', 'x'), { trimId: 'A5', pages: 100, interiorPdf: 'a.pdf' });
+  ok(p2.step2.genre === '에세이' && p2.step2.genreFallback === '소설 - 고전 문학', '판별: 원고 카테고리가 있으면 그것을 먼저, 안 맞을 때만 기본값');
+  const opts = ['선택', '소설 - 현대 문학', '소설 - 고전 문학', '에세이'];
+  ok(RFx.pickOption('소설 - 고전 문학', opts) === '소설 - 고전 문학', 'pickOption: 정확 일치');
+  const bsrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
+  ok(/pickOption\(s2\.genre, texts\) \|\| RF\.pickOption\(s2\.genreFallback/.test(bsrc), '브라우저: 원고 카테고리가 목록에 없으면 기본 장르로 폴백');
+}
+
+
 console.log(`\n${fail ? '❌' : '✅'} book-register-fill — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

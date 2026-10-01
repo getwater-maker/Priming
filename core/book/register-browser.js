@@ -123,8 +123,10 @@ async function fillBookk(page, plan, log) {
     await step('대표 장르', async () => {
       const opts = await sel.nth(2).locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
       const RF = require('./register-fill');
-      const hit = RF.pickOption(s2.genre, opts.map((o) => o.t));
-      if (!hit) throw new Error(`「${s2.genre}」에 맞는 장르 없음`);
+      const texts = opts.map((o) => o.t);
+      const hit = RF.pickOption(s2.genre, texts) || RF.pickOption(s2.genreFallback || RF.BOOKK_DEFAULT_GENRE, texts);   // 원고 카테고리가 안 맞으면 기본 장르
+      if (!hit) throw new Error(`「${s2.genre}」에 맞는 장르 없음(기본 「${RF.BOOKK_DEFAULT_GENRE}」도 목록에 없음)`);
+      if (hit !== s2.genre) log(`ℹ 대표 장르: 「${hit}」 선택`);
       await sel.nth(2).selectOption(opts.find((o) => o.t === hit).v);
     });
   }
