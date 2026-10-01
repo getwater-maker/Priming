@@ -62,7 +62,7 @@ ok(/s1\.wings \? '날개 있음' : '날개 없음'/.test(br) && /s1\.wings \? \/
 ok(!/await step\('날개 없음'/.test(br), '옛 무조건 클릭 줄 없음');
 ok(/날개\\s\*\(있음\|없음\)\\s\*두께/.test(br) && /failed\.push\('날개 /.test(br), '요약의 「날개 있음/없음」이 원하는 값과 다르면 failed 로 남긴다(추측 클릭 없음)');
 const clicks = br.split('\n').filter((l) => /\.click\(/.test(l));
-ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종|승인|Step4|Step5|삭제|결제|로그아웃/.test(l)), '금지 버튼 클릭은 여전히 없다');
+ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종(?!확인)|승인|삭제|결제|로그아웃/.test(l)), '금지 버튼 클릭은 여전히 없다(이동 버튼 Step4·Step5 는 로이 허용 2026-10-02)');
 
 console.log('\n[5] 화면·main 배선');
 const M = R('main.js'), BV = R('renderer/src/BookView.jsx');

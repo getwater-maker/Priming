@@ -3,7 +3,8 @@
  * register-browser.js — 📤 등록 도우미 「자동 입력」 브라우저 구동(작가와 · 부크크).
  *
  * 흐름: 전용 크롬 프로필(로그인 유지) 실행 → 사이트 열기 → **로이가 로그인**(우리는 아이디·비밀번호를 다루지 않는다) → 입력·파일 첨부 → **멈춘다**.
- * 🔴 저장 · 제출 · 유통 신청 · 최종 입점 · 승인 버튼은 누르지 않는다(코드에 그런 클릭이 없다 — 테스트가 소스를 검사한다).
+ * 🔴 저장 · 제출 · 유통 신청 · 최종 입점 · 승인 버튼은 누르지 않는다(코드에 그런 클릭이 없다 — 테스트가 소스를 검사한다). 5단계 「도서제출」은 로이가 직접(로이 2026-10-02 「자동제출은 금지」).
+ *   누르는 이동 버튼은 Step2 원고등록 · Step3 표지디자인 · Step4 가격정책 · Step5 최종확인 뿐이다.
  * 🔑 셀렉터 정책: 클래스(해시)·nth-child 금지. 작가와는 폼 칸 이름(G-…), 부크크는 글자·placeholder·role 로 찾는다.
  *   못 찾으면 화면 상태를 `[DUMP …]` 로 남긴다(다음 수정의 근거).
  */
@@ -168,6 +169,7 @@ async function fillBookk(page, plan, log) {
       await page.waitForSelector('text=표지 주의사항', { timeout: 30000 });
       const r3 = await fillBookkCover(page, plan, log);
       done.push(...r3.done); failed.push(...r3.failed);
+      if (!r3.failed.length) { const r45 = await continueFromStep4(page, plan, log); done.push(...r45.done); failed.push(...r45.failed); }
     } catch (e) {
       failed.push('3단계 이동'); log(`[등록] ⚠ 3단계(표지디자인)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 3단계는 직접 열고 「🖼 3단계 표지만 채우기」를 누르세요`);
       await _dump(page, log, '부크크 2→3단계');
@@ -206,18 +208,139 @@ async function fillBookkCover(page, plan, log) {
   return { done, failed };
 }
 
+/** 라디오/선택 글자를 눌러 고른다 — 라벨 글자로 찾고, 고른 뒤 실제로 체크됐는지 확인한다(아니면 실패) */
+async function _pickRadio(page, re, textForLocator) {
+  await page.locator('label', { hasText: textForLocator }).first().click({ timeout: 6000 });
+  const checked = await page.evaluate((src) => {
+    const r = new RegExp(src);
+    return [...document.querySelectorAll('input[type=radio]')].some((i) => i.checked && r.test(((i.closest('label') || i.parentElement || {}).innerText || '')));
+  }, re.source).catch(() => null);
+  if (checked === false) throw new Error('선택이 반영되지 않았습니다');
+}
+
+/**
+ * 부크크 4단계 「가격정책」 — 정가 · 정가인하 아니요 · 외부서점 입점 네. 「Step5 최종확인」으로 넘어가는 건 호출 쪽(이동만, 제출 아님).
+ * 정가는 화면의 「최소가격 N원」 이상 · 최대 3배 · 100원 단위일 때만 넣는다(아니면 화면 기본값 그대로 두고 알린다).
+ */
+async function fillBookkPrice(page, plan, log) {
+  const s4 = plan.step4 || {};
+  const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 4단계'); throw new Error('4단계(가격정책) 화면을 찾지 못했습니다'); });
+  const body = await page.evaluate(() => document.body.innerText).catch(() => '');
+  const mm = /최소가격\s*([\d,]+)\s*원/.exec(body);
+  const min = mm ? Number(mm[1].replace(/,/g, '')) : 0;
+  if (s4.price) {
+    const bad = s4.price % 100 !== 0 ? '100원 단위가 아닙니다' : (min && s4.price < min ? `최소가격 ${min.toLocaleString('ko-KR')}원보다 낮습니다` : (min && s4.price > min * 3 ? `최소가격의 3배(${(min * 3).toLocaleString('ko-KR')}원)를 넘습니다` : ''));
+    if (bad) { failed.push('정가'); log(`[등록] ⚠ 원고 정가 ${s4.price.toLocaleString('ko-KR')}원: ${bad} — 정가는 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
+    else await step('정가 ' + s4.price, async () => {
+      const inp = page.locator('input[type=text], input[type=number], input:not([type])').first();
+      await inp.fill(String(s4.price)); await inp.blur();
+    });
+  } else log(`[등록] ℹ 원고에 정가가 없어 화면의 최소가격${min ? ' ' + min.toLocaleString('ko-KR') + '원' : ''} 그대로 둡니다`);
+  await step('정가인하 안 함', () => _pickRadio(page, /인하하지\s*않/, '인하하지 않겠습니다'));
+  if (s4.external) await step('외부서점 입점', () => _pickRadio(page, /외부\s*온라인\s*서점/, '입점 원합니다'));
+  await sleep(500);
+  const after = await page.evaluate(() => document.body.innerText).catch(() => '');
+  const fm = /최종\s*정가\s*([\d,]+)\s*원/.exec(after);
+  if (fm) log(`[등록] 4단계 최종정가 ${fm[1]}원${s4.price && Number(fm[1].replace(/,/g, '')) !== s4.price && !failed.includes('정가') ? ' ⚠ 원고 정가와 다릅니다' : ''}`);
+  return { done, failed, min };
+}
+
+/** 5단계 화면의 카드 요약을 우리 값과 대조한다(읽기만) */
+function checkFinalSummary(body, plan) {
+  const out = [];
+  const pg = /페이지수\s*([\d,]+)/.exec(body), th = /두께\s*([\d.]+)\s*mm/.exec(body), pr = /판매가\s*([\d,]+)\s*원/.exec(body);
+  if (pg && plan.step1 && plan.step1.pages && Number(pg[1].replace(/,/g, '')) !== plan.step1.pages) out.push(`페이지수 화면 ${pg[1]} ≠ 우리 ${plan.step1.pages}`);
+  if (th && plan.step3 && plan.step3.expect && Math.abs(Number(th[1]) - plan.step3.expect.spineMm) > 0.05) out.push(`두께 화면 ${th[1]}mm ≠ 우리 ${plan.step3.expect.spineMm}mm`);
+  if (pr && plan.step4 && plan.step4.price && Number(pr[1].replace(/,/g, '')) !== plan.step4.price) out.push(`판매가 화면 ${pr[1]}원 ≠ 원고 ${plan.step4.price}원`);
+  return out;
+}
+
+/**
+ * 부크크 5단계 「최종확인」 — 도서소개·도서목차·저자경력 + AI 사용 · 저작권 보유 선택.
+ * 🔴 「도서제출」은 누르지 않는다 — 로이가 화면을 확인하고 직접 누른다.
+ */
+async function fillBookkFinal(page, plan, log) {
+  const s5 = plan.step5 || {};
+  const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('text=서점소개정보', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 5단계'); throw new Error('5단계(최종확인) 화면을 찾지 못했습니다'); });
+  const text = async (label, key, value) => { if (value) await step(label, async () => { const t = page.locator(`textarea[placeholder*="${key}"]`).first(); await t.fill(value); await t.blur(); }); };
+  await text('도서소개', '도서의 설명', s5.intro);
+  await text('도서목차', '색인', s5.toc);
+  await text('저자경력·소개', '저자를 소개', s5.bio);
+  const choose = async (label, selHas, want) => step(label, async () => {
+    const sel = page.locator('select').filter({ hasText: selHas }).first();
+    const opts = await sel.locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
+    const hit = opts.find((o) => o.t.replace(/^[^가-힣A-Za-z]+/, '') === want) || opts.find((o) => o.t.includes(want));
+    if (!hit) throw new Error(`선택지에 「${want}」 없음`);
+    await sel.selectOption(hit.v);
+  });
+  await choose('AI 사용여부 ' + s5.ai, 'AI 활용 여부', s5.ai);
+  await choose('초상/저작권 ' + s5.rights, '초상/저작권 보유여부', s5.rights);
+  const body = await page.evaluate(() => document.body.innerText).catch(() => '');
+  const diffs = checkFinalSummary(body, plan);
+  if (diffs.length) { failed.push('최종확인 요약 불일치'); log(`[등록] ⚠ 5단계 요약이 우리 값과 다릅니다: ${diffs.join(' · ')}`); }
+  else log('[등록] 5단계 요약(쪽수·두께·판매가) 우리 값과 일치');
+  return { done, failed };
+}
+
+
+/**
+ * 3단계 → 4단계 → 5단계로 이어서 채운다. 각 단계 사이는 「Step4 가격정책」·「Step5 최종확인」 이동 버튼만 누른다(저장·제출 아님).
+ * 앞 단계가 실패하면 거기서 멈춘다(틀린 값으로 다음 화면을 채우지 않는다). 🔴 5단계의 「도서제출」은 누르지 않는다 — 로이가 직접.
+ */
+async function continueFromStep4(page, plan, log) {
+  const done = []; const failed = [];
+  try {
+    await page.locator('a, button', { hasText: 'Step4 가격정책' }).first().click({ timeout: 8000 });
+  } catch (e) { failed.push('4단계 이동'); log(`[등록] ⚠ 4단계(가격정책)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 직접 넘어간 뒤 「이어서 채우기」를 누르세요`); await _dump(page, log, '부크크 3→4단계'); return { done, failed }; }
+  const r4 = await fillBookkPrice(page, plan, log).catch((e) => ({ done: [], failed: ['4단계 화면'], err: e }));
+  done.push(...r4.done); failed.push(...r4.failed);
+  if (r4.err) { log(`[등록] ⚠ ${r4.err.message}`); return { done, failed }; }
+  if (r4.failed.some((f) => f !== '정가')) return { done, failed };   // 정가인하·외부서점 선택이 안 됐으면 멈춘다(정가만 못 넣은 건 알리고 계속)
+  try {
+    await page.locator('a, button', { hasText: 'Step5 최종확인' }).first().click({ timeout: 8000 });
+  } catch (e) { failed.push('5단계 이동'); log(`[등록] ⚠ 5단계(최종확인)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)}`); await _dump(page, log, '부크크 4→5단계'); return { done, failed }; }
+  const r5 = await fillBookkFinal(page, plan, log).catch((e) => ({ done: [], failed: ['5단계 화면'], err: e }));
+  done.push(...r5.done); failed.push(...r5.failed);
+  if (r5.err) log(`[등록] ⚠ ${r5.err.message}`);
+  else log('[등록] 🛑 5단계 입력까지 끝났습니다 — 화면을 확인하고 「도서제출」은 직접 누르세요(자동 제출 없음)');
+  return { done, failed };
+}
+
 /** 🖼 3단계 표지만 채우기 — 이미 열려 있는 이 앱의 등록용 크롬에서 3단계 화면(표지 주의사항)이 떠 있는 탭을 찾아 이어서 한다. */
 async function runBookkCoverOnly(o) {
   const log = o.log || (() => {});
   if (!_ctx) throw new Error('열려 있는 등록용 크롬 창이 없습니다 — 먼저 「🤖 부크크에 자동 입력」으로 크롬을 열어 3단계 화면까지 가세요(앱을 껐다 켜면 창과 연결이 끊깁니다)');
-  let page = null;
+  // 열려 있는 탭에서 어느 단계 화면인지 찾는다 — 3단계(표지 주의사항) / 4단계(정가설정) / 5단계(서점소개정보). 가장 앞 단계부터 이어서 한다.
+  let page = null, at = 0;
   for (const p of _ctx.pages()) {
     const t = await p.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
-    if (/표지 주의사항/.test(t)) { page = p; break; }
+    const n = /표지 주의사항/.test(t) ? 3 : /정가설정/.test(t) ? 4 : /서점소개정보/.test(t) ? 5 : 0;
+    if (n && (!page || n < at)) { page = p; at = n; }
   }
-  if (!page) throw new Error('등록용 크롬에 3단계(표지디자인) 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');
-  const r = await fillBookkCover(page, o.plan, log);
-  log(`[등록] ✅ 3단계 입력 ${r.done.length}칸 완료${r.failed.length ? ' · 실패 ' + r.failed.join(', ') : ''} — 4단계(가격정책)부터는 직접 하세요`);
+  if (!page) throw new Error('등록용 크롬에 3~5단계(표지디자인·가격정책·최종확인) 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');
+  const r = { done: [], failed: [] };
+  if (at === 3) {
+    const r3 = await fillBookkCover(page, o.plan, log);
+    r.done.push(...r3.done); r.failed.push(...r3.failed);
+    log(`[등록] ✅ 3단계 입력 ${r3.done.length}칸 완료${r3.failed.length ? ' · 실패 ' + r3.failed.join(', ') : ''}`);
+  }
+  if (at === 3 && !r.failed.length) { const r45 = await continueFromStep4(page, o.plan, log); r.done.push(...r45.done); r.failed.push(...r45.failed); }
+  else if (at === 4) {
+    const r4 = await fillBookkPrice(page, o.plan, log); r.done.push(...r4.done); r.failed.push(...r4.failed);
+    if (!r4.failed.some((f) => f !== '정가')) {
+      try { await page.locator('a, button', { hasText: 'Step5 최종확인' }).first().click({ timeout: 8000 });
+        const r5 = await fillBookkFinal(page, o.plan, log); r.done.push(...r5.done); r.failed.push(...r5.failed);
+        log('[등록] 🛑 5단계 입력까지 끝났습니다 — 「도서제출」은 직접 누르세요'); }
+      catch (e) { r.failed.push('5단계 이동'); log(`[등록] ⚠ 5단계로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)}`); }
+    }
+  } else if (at === 5) {
+    const r5 = await fillBookkFinal(page, o.plan, log); r.done.push(...r5.done); r.failed.push(...r5.failed);
+    log('[등록] 🛑 5단계 입력까지 끝났습니다 — 「도서제출」은 직접 누르세요');
+  }
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [] };
 }
 
@@ -242,4 +365,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };
+module.exports = { fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };

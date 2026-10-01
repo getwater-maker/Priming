@@ -8181,6 +8181,8 @@ function bookLayoutOpts(args = {}) {
     hidePaths: !!l.hidePaths,
     // 목차 글자(pt)·행간 — 0/빈칸 = 본문과 같음. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이긴다(html-builder)
     tocSizePt: l.tocSizePt, tocLineHeight: l.tocLineHeight,
+    // 줄바꿈 방식(어절|글자|절충) — 원고 메타 `> 줄바꿈:` 이 있으면 메타가 이긴다(html-builder)
+    lineBreak: l.lineBreak,
   };
 }
 
@@ -8596,7 +8598,7 @@ const BOOK_META_LABELS = {
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
   ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
-  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대', headerGap: '머리글간격',
+  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대', headerGap: '머리글간격', lineBreak: '줄바꿈',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
@@ -8984,7 +8986,7 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread });
     }
     if (args.only === 'cover' && platform === 'bookk') {
-      log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4단계 이후·저장·제출은 누르지 않습니다');
+      log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');
       const rc = await RB.runBookkCoverOnly({ plan, log });
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }

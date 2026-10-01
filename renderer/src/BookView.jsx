@@ -23,15 +23,16 @@ const REG_FIELDS = [
   ['keywords', '키워드(쉼표)', ''], ['tagline', '한줄 소개', ''],
 ];
 // 판권 탭 — 법정 필수 5필드(제목·저자는 책 정보) + 선택
-const COLO_REQ = [['issuer', '발행인'], ['publisher', '출판사'], ['issueDate', '발행일'], ['isbn', 'ISBN(종이책)'], ['price', '정가(종이책)']];
+const COLO_REQ = [['issuer', '발행인'], ['publisher', '출판사'], ['issueDate', '발행일']];   // ISBN·정가는 필수 아님 — 부크크 등록 과정(2단계 ISBN 발급·4단계 가격정책)에서 입력·확인(로이 2026-10-02)
 const COLO_OPT = [
+  ['isbn', 'ISBN(종이책)'], ['price', '정가(종이책)'],
   ['ebookIsbn', '전자책 ISBN'], ['ebookPrice', '전자책 가격'], ['isbnAddon', '부가기호(5자리)'], ['regNo', '출판등록'],
   ['copyright', '저작권(ⓒ)'], ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
   ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램'],
   ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
 ];
 // 판권 법정 필수 7필드 — 미입력 경고
-const REQUIRED_KEYS = [['title', '제목'], ['author', '저자'], ['issuer', '발행인'], ['issueDate', '발행일'], ['publisher', '출판사'], ['isbn', 'ISBN'], ['price', '정가']];
+const REQUIRED_KEYS = [['title', '제목'], ['author', '저자'], ['issuer', '발행인'], ['issueDate', '발행일'], ['publisher', '출판사']];
 
 // SVG 문자열 → PNG dataURL (렌더러 캔버스 사용)
 function svgToPngDataUrl(svg, w, h) {
@@ -62,6 +63,7 @@ const LAYOUT_DEFAULTS = {
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
   colophonFields: null, colophonAlign: 'top', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  lineBreak: 'word',   // 줄바꿈 방식 — word(어절·기본) / char(글자) / smart(절충) · 원고 메타 `> 줄바꿈:` 이 이긴다
   tocSizePt: 0, tocLineHeight: 0,   // 목차 글자(pt)·행간 — 0 = 본문과 같음(원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다)
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
   // 영상 대본 모드 — 제작용 블록(제작메모·엔진 프롬프트)을 **출력에서만** 제외. 대본 파일은 불변.
@@ -698,7 +700,7 @@ body{overflow-y:scroll}
             : (<>
                 <button disabled={building} data-testid="bk-epub" title="같은 원고로 부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭(쪽수 확정 뒤)" onClick={buildEpubFile}>{building ? '⏳ 생성 중…' : '📱 ePub 만들기'}</button>
                 <button className="ghost" disabled={building || epubChkBusy} data-testid="bk-epubcheck" title="W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다 — 도구가 있는 PC 에서만" onClick={runEpubCheckUi}>{epubChkBusy ? '⏳ 검증 중…' : '✔ ePub 검증'}</button>
-                <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="참고용 — 전자책 PDF 한 파일(1쪽 앞표지 + 본문). 부크크 전자책은 ePub 을 올립니다" onClick={() => buildPdf('ebook')}>📄 전자책 PDF(참고)</button>
+                <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="참고용 — 전자책 PDF 한 파일(1쪽 앞표지 + 본문). 부크크 전자책은 ePub 을 올립니다" onClick={() => buildPdf('ebook')}>📄 전자책 PDF</button>
               </>)}
         </div>
         {!isBookk && epubChk && epubChk.messages && epubChk.messages.length > 0 && (
@@ -711,7 +713,7 @@ body{overflow-y:scroll}
         <div className="bkzone">등록 도우미</div>
         <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책 등록 화면은 로그인 뒤라 아직 읽지 못했습니다. 첫 전자책을 올리면서 입력 칸·표지 규격·가격 범위를 확인해 점검표와 자동 입력에 반영합니다 — 그때까지는 위 「옮겨 적을 값」을 눌러 복사해 직접 입력하세요.'}</div>
         {isBookk && <div className="bkactions">
-          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아 직접 올리기 + 표지 PDF 를 올립니다 — 4단계부터·저장·제출은 직접" onClick={() => runRegister('bookk', 'cover')}>🖼 3단계 표지만 채우기</button>
+          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요" onClick={() => runRegister("bookk", "cover")}>🖼 3단계부터 이어 채우기</button>
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
             title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
             onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 부크크에 자동 입력'}</button>
@@ -803,7 +805,7 @@ body{overflow-y:scroll}
         )}
         <div className="bkzone">판권 필수 (출판문화산업진흥법)</div>
         {COLO_REQ.map(([k, l]) => field(k, l, true))}
-        <div className="meta">부크크는 ISBN 없이도 자체 판매가 되지만(외부유통 불가), 판권지 법정 기재사항이라 필수로 표시합니다.</div>
+        <div className="meta">ISBN(종이책)·정가는 부크크 등록 과정(2단계 ISBN 발급·4단계 가격정책)에서 입력·확인하므로 필수로 두지 않았습니다 — 원고에 적어 두면 판권지에 실리고, 정가는 4단계 자동 입력에도 쓰입니다.</div>
         <div className="bkzone">선택 — 전자책·연락처·SNS</div>
         {COLO_OPT.map(([k, l]) => field(k, l, false))}
         <div className="bkzone">판권 페이지</div>
@@ -923,6 +925,15 @@ body{overflow-y:scroll}
               특별 섹션 (예: 역사 노트)
               <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
                 onChange={(e) => L('specialKeyword', e.target.value)} />
+            </label>
+            <label title="양쪽 정렬 줄의 띄어쓰기가 크게 벌어지는 것을 줄입니다. 어절 = 지금 방식(어절 단위로만 줄바꿈) · 글자 = 어절 중간에서도 끊음(간격은 고르지만 낱말이 쪼개짐) · 절충 = 어절 단위를 지키되 많이 벌어질 줄만 다음 낱말을 글자 단위로 넘김(권장 시험). 마지막 줄에 한 글자만 남지 않게 끝 두 글자를 묶습니다. 원고 메타 `> 줄바꿈: 어절|글자|절충` 이 있으면 메타가 이깁니다">
+              줄바꿈{meta.lineBreak ? ' 🔒' : ''}
+              <select value={({ 어절: 'word', 글자: 'char', 절충: 'smart' })[String(meta.lineBreak || '').trim()] || layout.lineBreak || 'word'} disabled={!!meta.lineBreak}
+                onChange={(e) => L('lineBreak', e.target.value)}>
+                <option value="word">어절 (기본)</option>
+                <option value="smart">절충 — 벌어질 줄만 글자 단위</option>
+                <option value="char">글자 단위</option>
+              </select>
             </label>
             <div className="bkrow" title="목차 항목의 글자 크기·행간 — 비우면 본문과 같습니다. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이깁니다(삼국지: 9.5pt · 1.45)">
               <label>목차 글자(pt){(meta.tocSize) ? ' 🔒' : ''} <input type="number" step="0.5" min="7" max="14" placeholder="본문과 같음" value={meta.tocSize ? meta.tocSize : (layout.tocSizePt || '')} disabled={!!meta.tocSize}

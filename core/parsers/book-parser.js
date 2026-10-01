@@ -93,6 +93,8 @@ const META_KEYS = {
   // 쪽번호 바닥 ↔ 재단선(mm) — 기본 8.5(부크크 권장 여백 6mm 밖). 머리글간격과 같은 이유(R22)
   '쪽번호안전': 'pageNumSafe', '쪽번호 안전': 'pageNumSafe',
   '머리글간격': 'headerGap', '머리글 간격': 'headerGap',
+  // 줄바꿈 방식 — 어절(기본) / 글자 / 절충(어절 + 벌어질 줄만 글자 단위). 양쪽 정렬 줄의 띄어쓰기가 크게 벌어지는 걸 줄인다(core/book/line-break.js)
+  '줄바꿈': 'lineBreak', '줄 바꿈': 'lineBreak',
   // 목차에 쓸 회목 — 짧은제목(기본, 있는 회만) / 전체(원문 번역 회목 전체)
   '목차제목': 'tocTitleMode', '목차 제목': 'tocTitleMode',
   '목차글자': 'tocSize', '목차 글자': 'tocSize', '목차행간': 'tocLine', '목차 행간': 'tocLine',

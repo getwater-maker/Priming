@@ -24,6 +24,8 @@ const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
 const JB = require('./jakkawa-biblio');
 const { headerKindOf } = require('./header-kind');
 const { HEADER_PT } = require('./title-fit');
+const LB = require('./line-break');
+const BOOK_FONT_DIR = path.join(__dirname, '..', '..', 'assets', 'fonts', 'book');
 
 const THEME_CSS_PATH = path.join(__dirname, 'book-theme.css');
 
@@ -91,7 +93,8 @@ function renderInline(text, book, ctx) {
       const n = ctx.endnotes.length;
       out += `<sup class="enref"><a id="enref-${n}" href="#en-${n}">${n}</a></sup>`;
     } else {
-      out += `<span class="footnote">${inlineMd(def.text, io)}</span>`;
+      ctx.fnN = (ctx.fnN || 0) + 1;   // 각주 번호(문서 순서) — ::footnote-call 글자 폭을 줄바꿈 계산(line-break)이 알도록
+      out += `<span class="footnote" data-n="${ctx.fnN}">${inlineMd(def.text, io)}</span>`;
     }
   }
   return out;
@@ -136,11 +139,14 @@ function listHtml(b, book, ctx, srcAttr) {
   return `<div class="md-listwrap"${srcAttr(b)}>${build(items[0].level)}</div>`;
 }
 
+// 📐 R18 줄바꿈 방식(글자·절충)일 때만 문단 HTML 을 고친다 — 어절(기본)이면 그대로.
+function fitInline(html, ctx) { return ctx && ctx.lb ? LB.fitParagraph(html, ctx.lb) : html; }
+
 function blockHtml(b, book, ctx, srcAttr) {
   const src = srcAttr(b);
   switch (b.type) {
-    case 'p': return `<p${src}>${renderInline(b.text, book, ctx)}</p>`;
-    case 'lead': return `<p class="chapter-lead noindent"${src}>${renderInline(b.text, book, ctx)}</p>`;
+    case 'p': return `<p${src}>${fitInline(renderInline(b.text, book, ctx), ctx)}</p>`;
+    case 'lead': return `<p class="chapter-lead noindent"${src}>${fitInline(renderInline(b.text, book, ctx), ctx)}</p>`;
     case 'h3': return `<h3${src}>${renderInline(b.text, book, ctx)}</h3>`;
     case 'h4': return `<h4${src}>${renderInline(b.text, book, ctx)}</h4>`;
     case 'quote': return `<blockquote${src}>${renderInline(b.text, book, ctx)}</blockquote>`;
@@ -579,6 +585,9 @@ body {
 }
 p { text-indent: ${o.indentPt}pt; margin-bottom: ${o.paragraphSpacingPt}pt; }
 p.noindent, p.chapter-lead { text-indent: 0; }
+/* 📐 R18 줄바꿈 — .nw = 마지막 줄 고아 방지(끝 두 글자 묶음) · 글자 방식은 본문 문단만 어절 중간에서도 끊는다 */
+span.nw { white-space: nowrap; }
+${o.lineBreak === 'char' ? 'section.chapter p, section.front-section p, section.back-section p { word-break: normal; }' : ''}
 strong { font-weight: ${Math.min(900, o.fontWeight + 400)}; }
 /* 소제목(원고 ## = 절) */
 section.chapter h3 {
@@ -737,6 +746,8 @@ function resolveBookOptions(book, opts = {}) {
     sourceMap: opts.sourceMap !== false,
     // ── 📕 종이책(print) / 📱 전자책(ebook) — 전자책은 앞표지가 1쪽 · 백면 없이 이어서 · 좌우 같은 여백 · 링크 살림 ──
     edition: opts.edition === 'ebook' ? 'ebook' : 'print',
+    // 📐 R18 줄바꿈 — 어절(기본 · keep-all) / 글자(normal) / 절충(어절 + 벌어질 줄만 글자 단위). 원고 메타 `> 줄바꿈:` 이 이긴다
+    lineBreak: LB.modeOf(meta.lineBreak) || LB.modeOf(opts.lineBreak) || 'word',
   };
   if (o.edition === 'ebook') {
     const m = o.marginsMm; const side = Math.round(((Number(m.inner) || 0) + (Number(m.outer) || 0)) / 2 * 10) / 10;
@@ -758,6 +769,7 @@ function buildBookHtml(book, opts = {}) {
     scriptHideShots: o.scriptHideShots,
     hidePaths: o.hidePaths,   // 작업용 파일 경로 → 파일명만
     edition: o.edition,
+    lb: LB.contextFor(o, BOOK_FONT_DIR),   // 줄바꿈 계산 문맥(어절이면 null)
     keepLinks: o.edition === 'ebook',
     endnotes: [],
     resolveImage(src) {

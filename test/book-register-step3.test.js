@@ -27,7 +27,7 @@ function fakePage(body) {
   console.log('\n[1] 계획');
   const plan = RF.bookkPlan(book, { trimId: 'A5', pages: 271, interiorPdf: 'a_내지.pdf', coverPdf: pdf, spread });
   ok(plan.step3.coverPdf === pdf && plan.step3.expect.widthMm === 518.5 && plan.step3.tab === '직접 올리기', '3단계 계획: 표지 PDF·기대 규격·탭');
-  ok(!plan.manual.some((s) => /3단계 표지 등록/.test(s)) && plan.manual.some((s) => /로고/.test(s)) && plan.manual.some((s) => /4단계/.test(s)), '직접 목록: 로고 선택·4~5단계(3단계 표지 등록은 자동으로 옮김)');
+  ok(!plan.manual.some((s) => /3단계 표지 등록/.test(s)) && plan.manual.some((s) => /로고/.test(s)) && plan.manual.some((s) => /도서제출/.test(s)), '직접 목록: 로고 선택·도서제출(3~5단계 입력은 자동으로 옮김)');
   ok(RF.bookkPlan(book, { trimId: 'A5', pages: 271, interiorPdf: 'x' }).manual.some((s) => /표지 PDF\(없음/.test(s)), '표지 PDF 가 없으면 직접 목록에 이유');
   console.log('\n[2] 흐름 (가짜 페이지)');
   let pg = fakePage(BODY); const logs = [];
@@ -66,7 +66,7 @@ function fakePage(body) {
   console.log('\n[3] 안전');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const clicks = src.split(String.fromCharCode(10)).filter((l) => /\.click\(/.test(l));
-  ok(!clicks.some((l) => /Step4|Step5|가격정책|최종|제출|저장/.test(l)), 'Step4·Step5·저장·제출 클릭 코드 없음');
+  ok(!clicks.some((l) => /제출|저장|승인|유통\s*신청|최종(?!확인)/.test(l)), '저장·제출·승인 클릭 코드 없음(Step4·Step5 이동만 허용 — book-register-step45 가 검사)');
   console.log(`\n${fail ? '❌' : '✅'} book-register-step3 — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
