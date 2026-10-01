@@ -254,9 +254,11 @@ function buildCoverHtml({ spread, bgTag, compose, fontCss }) {
   const spineR = region['책등'];
   if (spineR && spineR.w >= 3) {
     const spineSec = covers.find((v) => v.key === 'spine');
+    // 🔴 완성 표지 이미지가 있으면 책등 글씨는 이미지에 이미 구워져 있다 — 메타(제목·저자·출판사)로 자동 생성한 책등 글씨를 또 얹으면
+    //   글씨가 두 겹으로 겹친다(삼국지 R20 · 로이 2026-10-01). 이미지가 있을 땐 **원고에 [책등] 섹션을 직접 쓴 경우에만** 얹는다.
     const spineTxt = spineSec && spineSec.blocks.length
       ? spineSec.blocks.map((b) => esc(b.text || '')).join(' ')
-      : [meta.title, meta.author, meta.publisher].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+      : (bgTag ? '' : [meta.title, meta.author, meta.publisher].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;'));
     if (spineTxt) areas.push(`<div class="spine" style="left:${spineR.x}mm; width:${spineR.w}mm; top:${3 + safe}mm; height:${H - 6 - safe * 2}mm;"><span>${spineTxt}</span></div>`);
   }
   // 앞표지 — 제목/부제/저자/출판사 얹기(옵션 — 완성 이미지에 이미 있으면 끔)

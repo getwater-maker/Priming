@@ -1,0 +1,20 @@
+'use strict';
+/** node test/book-cover-spine.test.js — R20: 완성 표지 이미지가 있으면 메타로 자동 만든 책등 글씨를 얹지 않는다(이중 글씨 방지) */
+const { buildCoverHtml } = require('../core/book/pdf-builder');
+const SC = require('../core/book/spine-calc');
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const spread = SC.coverSpread({ platformId: 'bookk', trimId: 'A5', totalPages: 273, flaps: true });
+const meta = { title: '삼국지 완역 1', author: '나관중', publisher: '고전서재' };
+const hasSpine = (h) => /<div class="spine"/.test(h);
+const img = '<img class="bg" src="x.png" />';
+ok(!hasSpine(buildCoverHtml({ spread, bgTag: img, compose: { meta, covers: [] } })), '이미지 있음 + [책등] 없음 → 자동 책등 글씨 없음');
+const noImg = buildCoverHtml({ spread, bgTag: '', compose: { meta, covers: [] } });
+ok(hasSpine(noImg) && /삼국지 완역 1/.test(noImg) && /나관중/.test(noImg), '판별: 이미지 없음(직접 구성) → 제목·저자·출판사 책등 글씨');
+const explicit = buildCoverHtml({ spread, bgTag: img, compose: { meta, covers: [{ key: 'spine', blocks: [{ type: 'p', text: '직접 쓴 책등' }] }] } });
+ok(hasSpine(explicit) && /직접 쓴 책등/.test(explicit), '이미지 있음 + 원고에 [책등] 섹션 → 직접 쓴 글만 얹는다(의도한 것)');
+ok(!/나관중/.test(explicit), '그때도 메타 자동 문구는 섞지 않는다');
+const flaps = buildCoverHtml({ spread, bgTag: img, compose: { meta, covers: [] } });
+ok(!/class="area flap"/.test(flaps) && !/class="area back"/.test(flaps), '[뒷표지]·날개 섹션이 없으면 그 글씨도 없다');
+console.log(`\n${fail ? '❌' : '✅'} book-cover-spine — ${pass} 통과 / ${fail} 실패`);
+process.exit(fail ? 1 : 0);
