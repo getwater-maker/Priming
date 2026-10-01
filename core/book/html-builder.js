@@ -496,7 +496,8 @@ function pageCss(o) {
   // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959)
   // 📏 R17 — 본문과 한눈에 구분: 본문보다 작은 고딕 8.5pt · 회색 #595959(검정 65% — 흑백 인쇄에서도 안 옅다) · 본문과 간격 `headerGapMm`
   const rh = `font-family: ${GOTHIC_STACK}; font-size: ${HEADER_PT}pt; color: #595959;`;
-  const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000;`;
+  // 쪽번호 — 재단선 아래끝에서 `o.pageNumSafeMm`(기본 8.5mm, 원고 `> 쪽번호안전:`) 위로 올린다: 아래 여백 상자의 바닥에 붙이고(vertical-align: bottom) 그만큼 띄운다(R22 · 부크크 권장 여백 6.0mm 안에 걸리지 않게).
+  const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000; vertical-align: bottom; padding-bottom: ${(o.pageNumSafeMm + 0.5).toFixed(1)}mm;`;   // +0.5: mupdf 글줄 상자 바닥이 상자보다 0.5mm 낮다(실측) — 값 = 상자 기준 거리
   // 머리글 내용 — 책제목/부제/장제목(first-except: 장 시작 페이지 생략)/소제목(절)
   // 최종본 스타일: 책제목 헤더는 부제가 있으면 '제목 / 부제' 병기.
   const rhContent = (kind) => kind === 'title' ? (o.hasSubtitle ? 'string(book-title) " / " string(book-subtitle)' : 'string(book-title)')
@@ -650,11 +651,21 @@ function specialKeywordsOf(meta, opts) {
 /**
  * BookModel → { html, css } (css 는 html 에 인라인 포함돼 있음 — html 만 쓰면 됨)
  */
-// 머리글 ↔ 본문 간격(mm). 기본 8.5(실조판 실측: 글줄 상자 간격 = 값 그대로). 머리글 글줄 윗끝이 재단선에서 7mm(안전영역 5mm + 여유) 안으로 들어오게 `윗여백 − 11mm` 를 넘지 않는다.
+// 머리글 ↔ 본문 간격(mm). 실조판 실측: 글줄 상자 간격 = 값 그대로(머리글 글줄 높이 ≈4.2mm). 🔴 R22(로이 2026-10-02): 부크크 「규격체크」 실측 — 권장 여백 위 6.4 · 아래 6.0 ·
+//   바깥 6.7 · 제본쪽 11.3mm → 머리글·쪽번호는 재단선에서 **8.5mm 이상 안쪽**(HEADER_SAFE_MM). 그래서 머리글 글줄 윗끝 ≥ 8.5mm 가 되도록 간격 상한 = 윗여백 − 8.5 − 4.2.
+//   기본은 7mm(R17 의 8.5mm 는 머리글 윗끝이 7.3mm 라 권장 여백 띠에 걸렸다) — 본문과의 구분은 크기·색·선으로 유지.
+const HEADER_SAFE_MM = 8.5, HEADER_LINE_MM = 4.2;
 function headerGapOf(metaV, optV, topMm) {
   const n = (v) => { const x = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(x) && x > 0 ? x : 0; };
-  const want = n(metaV) || n(optV) || 8.5;
-  const max = Math.max(0, (Number(topMm) || 20) - 11);
+  const want = n(metaV) || n(optV) || 7;
+  const max = Math.max(0, (Number(topMm) || 20) - HEADER_SAFE_MM - HEADER_LINE_MM);
+  return Math.round(Math.min(want, max) * 10) / 10;
+}
+// 쪽번호 바닥 ↔ 재단선(mm) — 기본 8.5, 아래 여백 − 4.8(쪽번호 글줄 높이≈3.8 + 본문과의 최소 간격 1) 을 넘으면 본문과 겹치니 상한.
+function pageNumSafeOf(metaV, optV, bottomMm) {
+  const n = (v) => { const x = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(x) && x > 0 ? x : 0; };
+  const want = n(metaV) || n(optV) || HEADER_SAFE_MM;
+  const max = Math.max(1, (Number(bottomMm) || 15) - 3.8 - 1);
   return Math.round(Math.min(want, max) * 10) / 10;
 }
 const numOrZero = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? n : 0; };
@@ -696,6 +707,7 @@ function resolveBookOptions(book, opts = {}) {
     headerEvenAlign: pick(opts.headerEvenAlign, ['left', 'center', 'right'], 'left'),   // 짝수쪽 바깥=왼쪽
     headerOddAlign: pick(opts.headerOddAlign, ['left', 'center', 'right'], 'right'),    // 홀수쪽 바깥=오른쪽
     headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선
+    pageNumSafeMm: pageNumSafeOf(meta.pageNumSafe, opts.pageNumSafeMm, (Object.assign({ bottom: 15 }, opts.marginsMm || {})).bottom),
     headerGapMm: headerGapOf(meta.headerGap, opts.headerGapMm, (Object.assign({ top: 20 }, opts.marginsMm || {})).top),
     pageNum: pick(opts.pageNum, ['outer', 'center', 'none'], 'outer'),
     // ── 소제목(원고의 ## = 절) 스타일 — 구 앱: 고딕 800, ❖ 접두, 위25pt/아래10pt ──
@@ -869,6 +881,6 @@ function metaPlatformId(meta) {
 }
 
 module.exports = {
-  headerGapOf,
+  headerGapOf, pageNumSafeOf, HEADER_SAFE_MM,
   specialKeywordsOf, splitSpecialBlocks,
   chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, resolveBookOptions, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

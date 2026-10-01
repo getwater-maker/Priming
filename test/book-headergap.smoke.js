@@ -1,7 +1,7 @@
 'use strict';
 /**
  * node test/book-headergap.smoke.js — R17 머리글 ↔ 본문 구분(삼국지): 간격·크기·색을 실조판 PDF(mupdf)로 잰다.
- *   · 머리글 글자 아래끝 ↔ 본문 첫 줄 윗끝 간격이 기본 약 8.5mm(옛 방식은 한 줄 남짓)
+ *   · 머리글 글자 아래끝 ↔ 본문 첫 줄 윗끝 간격이 기본 약 7mm(옛 방식은 한 줄 남짓)
  *   · 머리글은 본문보다 작고 회색(≥ 검정 50%) · 재단선에서 7mm 이상 안쪽
  *   · 본문 영역 높이는 그대로 → 쪽수 불변(옛 방식과 같은 쪽수)
  *   · 원고 메타 `> 머리글간격: 6` 이 이긴다 · 윗여백이 작으면 안전영역 안으로 자동 제한
@@ -54,10 +54,10 @@ function measure(pages) {
 }
 (async () => {
   console.log('\n[1] 순수 계산');
-  ok(headerGapOf('', 0, 20) === 8.5, '기본 8.5mm');
+  ok(headerGapOf('', 0, 20) === 7, '기본 7mm (R22 — 머리글 윗끝이 재단선에서 8.5mm 이상)');
   ok(headerGapOf('6', 0, 20) === 6 && headerGapOf('6mm', 0, 20) === 6, '메타 6 / 6mm');
-  ok(headerGapOf('15', 0, 20) === 9, '윗여백 20mm → 최대 9mm 로 제한(재단선 안전영역)');
-  ok(headerGapOf('9', 0, 14) === 3, '윗여백이 작으면 더 줄인다');
+  ok(headerGapOf('15', 0, 20) === 7.3, '윗여백 20mm → 최대 7.3mm 로 제한(머리글 윗끝 ≥ 8.5mm)');
+  ok(headerGapOf('9', 0, 14) === 1.3, '윗여백이 작으면 더 줄인다');
   console.log('\n[2] 실조판 — 새 방식 vs 옛 방식(padding 제거 + 9pt·#ccc 선, A/B)');
   const nw = await build('new', md());
   const old = await build('old', md(), { tweak: (h) => h.replace(/padding-bottom: [0-9.]+mm;/g, 'margin-bottom: 7pt;') });
@@ -65,9 +65,9 @@ function measure(pages) {
   ok(a && b, '머리글·본문 줄을 찾음(새 p' + (a && a.page) + ' · 옛 p' + (b && b.page) + ')');
   if (a && b) {
     console.log(`    새 간격 ${a.gapMm.toFixed(1)}mm · 옛 ${b.gapMm.toFixed(1)}mm · 머리글 윗끝 ${a.headTopMm.toFixed(1)}mm`);
-    ok(a.gapMm >= 8 && a.gapMm <= 11, `새 방식: 머리글 ↔ 본문 첫 줄 ${a.gapMm.toFixed(1)}mm (목표 8~10 · 글줄 상자 기준)`);
-    ok(a.gapMm - b.gapMm >= 5, `판별력: 옛 방식(${b.gapMm.toFixed(1)}mm)보다 5mm 이상 넓다`);
-    ok(a.headTopMm >= 7, `머리글 윗끝이 재단선에서 ${a.headTopMm.toFixed(1)}mm (≥ 7mm 안전영역)`);
+    ok(a.gapMm >= 6.5 && a.gapMm <= 7.5, `새 방식: 머리글 ↔ 본문 첫 줄 ${a.gapMm.toFixed(1)}mm (기본 7 · 글줄 상자 기준)`);
+    ok(a.gapMm - b.gapMm >= 4, `판별력: 옛 방식(${b.gapMm.toFixed(1)}mm)보다 4mm 이상 넓다`);
+    ok(a.headTopMm >= 8.5, `머리글 윗끝이 재단선에서 ${a.headTopMm.toFixed(1)}mm (≥ 8.5mm — 부크크 규격체크 권장 여백 6.7 + 여유)`);
     ok(a.head.size < a.body.size, `머리글 글자(${a.head.size.toFixed(1)}pt)가 본문(${a.body.size.toFixed(1)}pt)보다 작다`);
   }
   ok(nw.pages.length === old.pages.length, `쪽수 불변: 새 ${nw.pages.length}쪽 = 옛 ${old.pages.length}쪽(본문 영역 높이를 줄이지 않는다)`);
@@ -76,7 +76,7 @@ function measure(pages) {
   console.log('\n[3] 메타 `> 머리글간격:`');
   const m6 = await build('m6', md('> 머리글간격: 6\n'));
   const c = measure(m6.pages);
-  ok(c && Math.abs(c.gapMm - (a.gapMm - 2.5)) < 0.8, `메타 6 → 간격 ${c && c.gapMm.toFixed(1)}mm (기본보다 2.5mm 좁다)`);
+  ok(c && Math.abs(c.gapMm - (a.gapMm - 1)) < 0.8, `메타 6 → 간격 ${c && c.gapMm.toFixed(1)}mm (기본보다 1mm 좁다)`);
   console.log(`\n${fail ? '❌' : '✅'} book-headergap — ${pass} 통과 / ${fail} 실패  (PDF: output/_book-hgap/*.pdf)`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

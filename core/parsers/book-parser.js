@@ -90,6 +90,8 @@ const META_KEYS = {
   '회목최대': 'titleMax', '회목 최대': 'titleMax', '제목최대': 'titleMax', '제목 최대': 'titleMax',
   // 목차 글자 크기(pt)·행간 — 비우면 본문과 같다(삼국지: 9.5pt · 1.45)
   // 머리글 아래 간격(mm) — 머리글 ↔ 본문 첫 줄. 비우면 기본(9mm · 재단선 안전영역 안으로 자동 제한)
+  // 쪽번호 바닥 ↔ 재단선(mm) — 기본 8.5(부크크 권장 여백 6mm 밖). 머리글간격과 같은 이유(R22)
+  '쪽번호안전': 'pageNumSafe', '쪽번호 안전': 'pageNumSafe',
   '머리글간격': 'headerGap', '머리글 간격': 'headerGap',
   // 목차에 쓸 회목 — 짧은제목(기본, 있는 회만) / 전체(원문 번역 회목 전체)
   '목차제목': 'tocTitleMode', '목차 제목': 'tocTitleMode',
