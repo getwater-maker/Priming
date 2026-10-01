@@ -8544,7 +8544,7 @@ const BOOK_META_LABELS = {
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
   ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
-  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대',
+  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대', headerGap: '머리글간격',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {

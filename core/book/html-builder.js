@@ -23,6 +23,7 @@ const path = require('path');
 const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
 const JB = require('./jakkawa-biblio');
 const { headerKindOf } = require('./header-kind');
+const { HEADER_PT } = require('./title-fit');
 
 const THEME_CSS_PATH = path.join(__dirname, 'book-theme.css');
 
@@ -485,7 +486,8 @@ const GOTHIC_STACK = FONT_STACKS['kopub-dotum'];
 function pageCss(o) {
   const m = o.marginsMm;
   // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959)
-  const rh = `font-family: ${GOTHIC_STACK}; font-size: 9pt; color: #595959;`;
+  // 📏 R17 — 본문과 한눈에 구분: 본문보다 작은 고딕 8.5pt · 회색 #595959(검정 65% — 흑백 인쇄에서도 안 옅다) · 본문과 간격 `headerGapMm`
+  const rh = `font-family: ${GOTHIC_STACK}; font-size: ${HEADER_PT}pt; color: #595959;`;
   const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000;`;
   // 머리글 내용 — 책제목/부제/장제목(first-except: 장 시작 페이지 생략)/소제목(절)
   // 최종본 스타일: 책제목 헤더는 부제가 있으면 '제목 / 부제' 병기.
@@ -502,15 +504,17 @@ function pageCss(o) {
     //   그려지므로 장 시작 페이지(first-except 로 러닝헤드 글자가 빔)엔 밑줄도 자동으로 안 나온다.
     //   (border-bottom 은 내용이 비어도 빈 상자에 선을 그려 장 시작 페이지에 '떠 있는 줄'이 생겼음.)
     const line = o.headerLine
-      ? ' text-decoration: underline; text-decoration-color: #cccccc; text-decoration-thickness: 0.4pt; text-underline-offset: 5pt; margin-bottom: 7pt;'
+      ? ' text-decoration: underline; text-decoration-color: #666666; text-decoration-thickness: 0.25pt; text-underline-offset: 4pt;'
       : '';
+    // 머리글 ↔ 본문 간격 — 판면(본문) 위치는 그대로 두고 머리글 상자를 위로 올린다(= 본문 높이·쪽수 불변). 값은 o.headerGapMm(안전영역 안으로 제한됨).
+    const gap = ` padding-bottom: ${o.headerGapMm}mm;`;
     if (kind === 'none') return ''; // 러닝헤드 없음 = 상자·밑줄 모두 없음
     const content = rhContent(kind);
     // 단일 @top-center 박스(판면 폭 명시) + text-align — 모든 정렬 공통.
     //   ⚠ @top-left 와 @top-center 를 함께 쓰면 두 박스가 공간을 나눠 가져 왼쪽 글이
     //   중앙으로 밀리는 충돌(실측) → 박스는 하나만 쓴다.
     //   🔒 한 줄 안전망 — 어떤 설정(긴 회목 등)에서도 두 줄로 꺾이지 않는다(nowrap + 판면 폭 안에서 말줄임 · 삼국지 R12).
-    return `@top-center { content: ${content}; width: ${bodyW}mm; max-width: ${bodyW}mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: ${align}; vertical-align: bottom; ${rh}${line} }`;
+    return `@top-center { content: ${content}; width: ${bodyW}mm; max-width: ${bodyW}mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: ${align}; vertical-align: bottom; ${rh}${line}${gap} }`;
   };
   const headerEvenBox = headerBoxes(o.headerEven, o.headerEvenAlign);
   const headerOddBox = headerBoxes(o.headerOdd, o.headerOddAlign);
@@ -634,6 +638,13 @@ function specialKeywordsOf(meta, opts) {
 /**
  * BookModel → { html, css } (css 는 html 에 인라인 포함돼 있음 — html 만 쓰면 됨)
  */
+// 머리글 ↔ 본문 간격(mm). 기본 8.5(실조판 실측: 글줄 상자 간격 = 값 그대로). 머리글 글줄 윗끝이 재단선에서 7mm(안전영역 5mm + 여유) 안으로 들어오게 `윗여백 − 11mm` 를 넘지 않는다.
+function headerGapOf(metaV, optV, topMm) {
+  const n = (v) => { const x = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(x) && x > 0 ? x : 0; };
+  const want = n(metaV) || n(optV) || 8.5;
+  const max = Math.max(0, (Number(topMm) || 20) - 11);
+  return Math.round(Math.min(want, max) * 10) / 10;
+}
 const numOrZero = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? n : 0; };
 // 조판 옵션 해석 한 곳 — buildBookHtml 과 제목 길이 검사(title-fit)가 같은 값(머리글 종류·판면 폭·목차 크기…)을 쓴다.
 function resolveBookOptions(book, opts = {}) {
@@ -673,6 +684,7 @@ function resolveBookOptions(book, opts = {}) {
     headerEvenAlign: pick(opts.headerEvenAlign, ['left', 'center', 'right'], 'left'),   // 짝수쪽 바깥=왼쪽
     headerOddAlign: pick(opts.headerOddAlign, ['left', 'center', 'right'], 'right'),    // 홀수쪽 바깥=오른쪽
     headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선
+    headerGapMm: headerGapOf(meta.headerGap, opts.headerGapMm, (Object.assign({ top: 20 }, opts.marginsMm || {})).top),
     pageNum: pick(opts.pageNum, ['outer', 'center', 'none'], 'outer'),
     // ── 소제목(원고의 ## = 절) 스타일 — 구 앱: 고딕 800, ❖ 접두, 위25pt/아래10pt ──
     h2SizePt: num(opts.h2SizePt, 10.5),
@@ -844,5 +856,6 @@ function metaPlatformId(meta) {
 }
 
 module.exports = {
+  headerGapOf,
   specialKeywordsOf, splitSpecialBlocks,
   chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, resolveBookOptions, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

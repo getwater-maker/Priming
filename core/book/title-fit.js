@@ -13,6 +13,7 @@ const path = require('path');
 const G = require('./glyph-check');
 
 const PT_PER_MM = 72 / 25.4;
+const HEADER_PT = 8.5;   // 머리글 글자 크기 — html-builder 의 머리글 CSS 와 같은 값(R17 에서 9 → 8.5). 한 곳(여기)에서 정한다
 const _met = new Map();
 /** 글꼴 → { upm, adv(cp) → em | null } (hmtx + cmap) */
 function metricsOf(file) {
@@ -96,10 +97,10 @@ function analyze(book, o, fontDir, x = {}) {
   const batang = metricsOf(path.join(fontDir, 'KoPubWorld-Batang-Light.ttf'));
   const noto = metricsOf(path.join(fontDir, 'NotoSerifKR-Light.ttf'));
   const hanja = metricsOf(path.join(fontDir, 'HanjaSerif-Light.ttf'));
-  const headFonts = [dotum, noto, hanja];            // 머리글 = 고딕 9pt(한자는 폴백 명조)
+  const headFonts = [dotum, noto, hanja];            // 머리글 = 고딕 8.5pt(한자는 폴백 명조)
   const bodyFonts = [batang, noto, hanja];           // 목차 = 본문 명조
   const bodyWpt = (o.trimW - o.marginsMm.inner - o.marginsMm.outer) * PT_PER_MM;
-  const headPt = 9;
+  const headPt = HEADER_PT;
   const headCap = bodyWpt - 1;                       // 머리글 상자 폭(판면 폭)
   const tocSize = o.tocSizePt || o.fontSizePt || 10;
   const tocLS = o.letterSpacingPt || 0;
@@ -158,4 +159,4 @@ function warnings(fit) {
   if (mx.length) out.push(`⚠ 원고 기준 \`> 회목최대: ${fit.limitChars}\`자를 넘는 회목 ${mx.length}개: ${names(mx)}`);
   return out;
 }
-module.exports = { analyze, warnings, metricsOf, widthPt, countLines, CH_RE };
+module.exports = { HEADER_PT, analyze, warnings, metricsOf, widthPt, countLines, CH_RE };
