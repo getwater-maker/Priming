@@ -615,7 +615,9 @@ nav.toc a::after {
 }
 /* 판권 배치 — 위(실물 단행본 다수·기본) / 아래(구 앱 최종본 스타일).
    flex 하단정렬은 vivliostyle 조각화에서 height:100% 미해석 → 고정 마진(판면 폭 기준 %)으로. */
-section.colophon .cp-wrap { margin-top: ${o.colophonAlign === 'bottom' ? '44%' : '0'}; }
+${o.colophonAlign === 'bottom'
+    ? 'section.colophon { height: var(--content-h); display: flex; flex-direction: column; justify-content: flex-end; } section.colophon .cp-wrap { margin-top: 0; }'
+    : 'section.colophon .cp-wrap { margin-top: 0; }'}
 ${o.edition === 'ebook' ? ebookCss(o) : ''}`;
 }
 
@@ -708,7 +710,7 @@ function resolveBookOptions(book, opts = {}) {
     // ── 판권 자동 항목 선택 (null = 전부) ──
     colophonFields: Array.isArray(opts.colophonFields) ? opts.colophonFields : null,
     // ── 판권 배치 — 판면 위(기본) / 아래 ──
-    colophonAlign: opts.colophonAlign === 'bottom' ? 'bottom' : 'top',
+    colophonAlign: /하단|아래|bottom/i.test(String(meta.colophonAlignMeta || '')) ? 'bottom' : /상단|위|top/i.test(String(meta.colophonAlignMeta || '')) ? 'top' : (opts.colophonAlign === 'bottom' ? 'bottom' : 'top'),
     // ── 특별 섹션 키워드(쉼표 구분) — 일치하는 소제목 구간을 노트 박스로 (예: '역사 노트') ──
     specialKeywords: specialKeywordsOf(meta, opts),
     // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──

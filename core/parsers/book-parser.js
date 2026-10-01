@@ -110,6 +110,8 @@ const META_KEYS = {
   '저작권': 'copyright', 'copyright': 'copyright', 'ⓒ': 'copyright',
   '판형': 'trim', '플랫폼': 'platform', '용지': 'paper', '날개': 'flaps',
   '판권위치': 'colophonPos',
+  // 판권 쪽 안의 세로 위치 — 하단(쪽 아래에 붙임) / 상단(기본). 원고 메타가 조판 설정을 이긴다
+  '판권정렬': 'colophonAlignMeta', '판권 정렬': 'colophonAlignMeta',
   '반표제지': 'halfTitle', '면지': 'endpaper',
   '각주방식': 'footnoteMode', // 각주 | 미주
   '로고': 'logo', '출판사로고': 'logo',

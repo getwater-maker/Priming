@@ -267,7 +267,7 @@ ok(/class="colophon cp-front"/.test(cpFrontSec) && !/cp-rhclear/.test(cpFrontSec
 // (9) 판권 배치 — 기본 위(margin-top 0) / 옵션 아래
 ok(/section\.colophon \.cp-wrap \{ margin-top: 0; \}/.test(cpHtml), '판권 배치 기본 = 판면 위');
 const cpBottom = HB.buildBookHtml(cpBook, { baseDir: 'D:/x', colophonAlign: 'bottom' }).html;
-ok(/section\.colophon \.cp-wrap \{ margin-top: 44%; \}/.test(cpBottom), '판권 배치 아래 옵션');
+ok(/section\.colophon \{ height: var\(--content-h\); display: flex; flex-direction: column; justify-content: flex-end; \}/.test(cpBottom) && !/margin-top: 44%/.test(cpBottom), '판권 배치 아래 옵션(판면 높이 flex 하단 정렬 — 44% 마진 근사 폐기, R19 · 실조판은 book-colophon.smoke)');
 // (10) display/front 페이지는 러닝헤드·폴리오 없음 — 이름만 쓴 @page 는 :left/:right 에 지므로
 //      이름+의사클래스를 함께 적는다(특이도 보정)
 ok(/@page display:left \{/.test(cpHtml) && /@page display:right \{/.test(cpHtml), '@page display 에 :left/:right 동반');

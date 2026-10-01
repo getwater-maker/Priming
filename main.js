@@ -8271,6 +8271,8 @@ ipcMain.handle('book-cover-preview', (_e, args = {}) => {
       if (!chk.ok && chk.flapHint) warnings.push(`이 표지 파일은 날개 ${chk.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${flaps ? '있음' : '없음'})`);
       else if (!chk.ok) warnings.push(`표지 치수 불일치 — 기대 ${chk.expected.widthPx}×${chk.expected.heightPx}px (${chk.expected.widthMm}×${chk.expected.heightMm}mm), 파일 ${cc.imgW}×${cc.imgH}px`);
       else if (chk.lowDpi) warnings.push(`해상도 낮음(실효 ${chk.effectiveDpi}dpi < 300)`);
+      // 폭이 허용 오차(±1mm) 밖인데 비율 검사(±1%)로만 통과한 경우 — 책등 두께가 어긋난 인쇄용 표지일 수 있다(예: 책등 14.3mm 로 만든 표지인데 쪽수로는 16.6mm)
+      if (chk.ok && !chk.exact && pages > 0) warnings.push(`표지 폭이 기대와 ${Math.abs(chk.mmW - chk.expected.widthMm).toFixed(1)}mm 다릅니다(파일 ${chk.mmW}mm · 기대 ${chk.expected.widthMm}mm, 허용 ±1mm) — 쪽수 ${pages}쪽 기준 책등 ${spread.spineMm}mm 로 표지를 다시 만드세요`);
     }
     if (plan.hasImg && plan.hasText) warnings.push('첨부 표지 위에 원고의 표지 문구([뒷표지]·[앞날개]…)·앞표지 글이 얹혀 표지 PDF 가 만들어집니다 — 완성 표지라면 구조 탭 「표지 구성」을 체크 해제하세요');
     if (pages <= 0) warnings.push('쪽수 미확정 — 조판이 끝나면 책등 두께가 정해집니다');
