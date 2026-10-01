@@ -202,6 +202,28 @@ ${para}
       await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });
       await win.click('.bkbar button[title="첫 페이지"]');
       await win.waitForSelector('[data-testid=bk-cover]', { timeout: 8000 });
+      // ‹ › 화면 양쪽 끝 화살표(로이 2026-10-01): 표지 → 1쪽 → 다음 → 이전 → 표지
+      await win.locator('[data-testid=bk-next]').click();
+      await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });
+      const a1 = await pageNow();
+      await win.locator('[data-testid=bk-next]').click(); await win.waitForTimeout(600);
+      const a2 = await pageNow();
+      if (!/^1$/.test(a1.label) || a2.label === a1.label) throw new Error(`화살표 › 로 쪽이 안 넘어감: ${a1.label} → ${a2.label}`);
+      await win.locator('[data-testid=bk-prev]').click(); await win.waitForTimeout(600);
+      if ((await pageNow()).label !== a1.label) throw new Error('화살표 ‹ 로 이전 쪽으로 못 돌아옴');
+      // 책 밖(회색) 클릭: 오른쪽 = 다음 · 왼쪽 = 이전. 쪽 안 클릭은 넘기지 않는다(판별)
+      const outClick = (x) => win.evaluate((cx) => { const d = document.querySelector('iframe.bkviewport').contentDocument; d.body.dispatchEvent(new MouseEvent('click', { clientX: cx, clientY: 300, bubbles: true, view: d.defaultView })); return d.defaultView.innerWidth; }, x);
+      const W = await outClick(5);   // 왼쪽 끝 = 이전 → a1 의 앞(표지 또는 1쪽 앞)
+      await win.waitForTimeout(500);
+      const b1 = await pageNow();
+      await outClick(W - 5); await win.waitForTimeout(600);
+      const b2 = await pageNow();
+      if (b1.label !== '표지') throw new Error(`책 밖 왼쪽 클릭으로 이전(표지)으로 안 감: ${a1.label} → ${b1.label}`);
+      if (b2.label !== a1.label) throw new Error(`책 밖 오른쪽 클릭으로 다음 쪽으로 안 감: ${b1.label} → ${b2.label}`);
+      await win.evaluate(() => { const d = document.querySelector('iframe.bkviewport').contentDocument; const pg = d.querySelector('[data-vivliostyle-page-container]'); if (pg) pg.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 300, bubbles: true, view: d.defaultView })); });
+      await win.waitForTimeout(400);
+      if ((await pageNow()).label !== b2.label) throw new Error('쪽 안을 눌렀는데 쪽이 넘어감');
+      while (!(await win.locator('[data-testid=bk-cover]').count())) { await win.locator('[data-testid=bk-prev]').click(); await win.waitForTimeout(500); }
       // 날개를 켜면 같은 파일이 날개 없는 치수 → 경고
       await win.locator('label.chk:has-text("표지 날개") input[type=checkbox]').check().catch(async () => { await win.click('[data-tab=cover]'); await win.locator('label.chk:has-text("표지 날개") input[type=checkbox]').check(); });
       await win.waitForFunction(() => [...document.querySelectorAll('[data-testid=bk-cover-warn]')].some((e) => /날개 설정을 확인하세요/.test(e.textContent)), null, { timeout: 15000 });

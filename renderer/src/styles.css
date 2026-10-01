@@ -855,6 +855,10 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 /* 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13) — 내지 뷰어(iframe) 위에 얹는 미리보기 전용 화면 */
 .bkstage{position:relative;flex:1;min-height:0;display:flex}
 .bkstage>.bkviewport{flex:1;min-height:0}
+.bknavarrow{position:absolute;top:50%;transform:translateY(-50%);z-index:8;width:34px;height:84px;border:none;border-radius:8px;background:rgba(40,34,28,.28);color:#fff;font-size:34px;line-height:1;cursor:pointer;padding:0 0 4px;opacity:.55;transition:opacity .15s,background .15s}
+.bknavarrow:hover{opacity:1;background:rgba(40,34,28,.6)}
+.bknavarrow.left{left:8px}
+.bknavarrow.right{right:22px}   /* 오른쪽은 미리보기 세로 스크롤 막대를 피한다 */
 .bkcover{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;background:#8a8177;outline:none}
 .bkcover-top{display:flex;align-items:center;gap:10px;padding:7px 12px;background:#faf6ee;border-bottom:1px solid var(--line);font-size:12.5px;flex-wrap:wrap}
 .bkcover-top .meta{font-size:12px}

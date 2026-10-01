@@ -337,6 +337,17 @@ body{overflow-y:scroll}
 
   // ── 문단 클릭 → 편집 ── (iframe 내부 click 리스너가 ref 를 통해 항상 최신 핸들러 호출)
   const onPreviewClick = useCallback(async (e) => {
+    // 📖 책 밖(회색 바탕) 클릭 = 쪽 넘기기 — 왼쪽 절반 = 이전 · 오른쪽 절반 = 다음 (로이 2026-10-01). 쪽(page container) 안을 누른 클릭·글자 드래그 뒤의 클릭은 제외.
+    {
+      const t = e.target;
+      const inPage = !!(t && t.closest && t.closest('[data-vivliostyle-page-container], [data-src-line]'));
+      const sel = e.view && e.view.getSelection && e.view.getSelection();
+      if (!inPage && !(sel && !sel.isCollapsed)) {
+        const w = (e.view && e.view.innerWidth) || 1;
+        try { navRef.current && navRef.current(e.clientX < w / 2 ? Navigation.PREVIOUS : Navigation.NEXT); } catch (_) {}
+        return;
+      }
+    }
     const el = e.target && e.target.closest && e.target.closest('[data-src-line]');
     if (!el) return;
     const lineStart = parseInt(el.getAttribute('data-src-line'), 10);
@@ -1019,11 +1030,14 @@ body{overflow-y:scroll}
           <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
           <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
           <span className="grow" />
-          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · 휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
+          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '글 클릭=수정 · 책 밖 좌/우 클릭·‹ ›·휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
         <div className="bkstage">
           <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
+          {/* 화면 양쪽 끝 넘기기 화살표(로이 2026-10-01) — 표지 화면에서도 같은 nav(표지 ↔ 1쪽) */}
+          <button className="bknavarrow left" data-testid="bk-prev" title="이전 쪽 (←) — 책 밖 왼쪽을 눌러도 됩니다" onClick={() => nav(Navigation.PREVIOUS)}>‹</button>
+          <button className="bknavarrow right" data-testid="bk-next" title="다음 쪽 (→) — 책 밖 오른쪽을 눌러도 됩니다" onClick={() => nav(Navigation.NEXT)}>›</button>
           {cover && showCover && (() => {
             const sp = cover.spread, k = coverFit, Wpx = sp.widthMm * 3.7795, Hpx = sp.heightMm * 3.7795;
             let x = 0; const bounds = []; const regions = [];
