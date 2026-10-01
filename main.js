@@ -1810,7 +1810,10 @@ function computeOutRoot(scriptPath, preset, mode) {
   return path.join(outBase, folder);
 }
 // 출판 출력 루트 — <채널 outputFolder>/출판/<원고파일명>/ (내지·표지 PDF + _work 빌드폴더)
-function bookOutRoot(scriptPath, preset) {
+function bookOutRoot(scriptPath, preset, realScriptPath) {
+  // 📁 원고가 `<작품>\원고\` 안이면 산출물은 `<작품>\완성\`(작품 폴더 구조 · core/book/work-folder.js) — 채널 outputFolder 를 쓰지 않는다
+  const fin = realScriptPath ? require('./core/book/work-folder').finishedDirFor(realScriptPath) : null;
+  if (fin) return fin;
   const folder = _safeFolder(path.basename(scriptPath).replace(/\.md$/i, ''));
   const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
   return path.join(outBase, '출판', folder);
@@ -5387,7 +5390,8 @@ function applyWorkspace(ws, opts = {}) {
           const parsed = BK.parseBookFiles(files, path.basename(paths[0]).replace(/\.md$/i, ''));
           if (wi.settings && wi.settings.book && wi.settings.book.coverImage) parsed.coverImagePath = wi.settings.book.coverImage;
           const folderKey = parsed.meta.title || path.basename(paths[0]).replace(/\.md$/i, '');
-          const it = { id: newItemId(), parsed, scriptPath: paths[0], outRoot: bookOutRoot(folderKey + '.md', S.preset),
+          attachWorkCover(parsed, paths[0], wi.settings && wi.settings.book && wi.settings.book.coverImage);
+          const it = { id: newItemId(), parsed, scriptPath: paths[0], outRoot: bookOutRoot(folderKey + '.md', S.preset, paths[0]),
             settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
           q.items.push(it); restored++;
           if (wi.id === ws.book.activeId) activeNewId = it.id;
@@ -8117,6 +8121,30 @@ ipcMain.handle('open-book-path', (_e, args = {}) => {
   if (!paths.length) { log('원고 파일이 없습니다 — 대본을 먼저 여세요.'); return null; }
   return openBookPaths(paths, S.preset);
 });
+// 📁 원고를 열 때 표지를 자동으로 붙인다 — 메타 `> 표지파일:` > 수동 첨부 기억값 > `../표지/` 의 유일한 `표지*.png|jpg`(시안 제외).
+//   수동 첨부 경로(settings.book.coverImage)만 쓰던 옛 동작은 그대로(메타·후보가 없으면 그것). 치수 판정(R11 날개)은 첨부와 같은 coverCheckFor.
+function attachWorkCover(parsed, scriptPath, manual, verbose) {
+  try {
+    const WF = require('./core/book/work-folder');
+    const r = WF.resolveCoverFile({ meta: parsed.meta, scriptPath, manual });
+    if (r.warn) log(r.warn);
+    if (!r.path) return null;
+    parsed.coverImagePath = r.path;
+    if (r.note) log('🖼 ' + r.note);
+    else if (r.source === 'meta' && manual && manual !== r.path) log(`🖼 원고 메타 「표지파일」을 씁니다: ${path.basename(r.path)} (이전 수동 첨부 ${path.basename(manual)} 보다 우선)`);
+    try {
+      const { readImageSize } = require('./vrew/vrew-builder');
+      const dim = readImageSize ? readImageSize(r.path) : null;
+      if (dim && dim.w) {
+        parsed._coverCheck = coverCheckFor(parsed, dim.w, dim.h, parsed._lastPages || 0);
+        const c = parsed._coverCheck;
+        if (!c.ok && c.flapHint) log(`⚠ 이 표지 파일은 날개 ${c.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요`);
+        if (verbose) log(`🖼 표지 첨부(${r.source === 'meta' ? '원고 메타' : r.source === 'auto' ? '자동 후보' : '수동'}): ${path.basename(r.path)} (${dim.w}×${dim.h}px)`);
+      }
+    } catch (_) {}
+    return r;
+  } catch (e) { log('표지 자동 첨부 실패: ' + e.message); return null; }
+}
 function openBookPaths(paths, preset) {
   try {
     const BK = require('./core/parsers/book-parser');
@@ -8134,13 +8162,11 @@ function openBookPaths(paths, preset) {
     WORLD.setView('book');   // 열기 응답(r.mode)으로 화면이 출판으로 바뀐다
     // 출력 폴더 — 책제목(메타) 우선, 없으면 첫 파일명
     const folderKey = parsed.meta.title || path.basename(sorted[0]).replace(/\.md$/i, '');
-    const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset);
+    const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset, sorted[0]);
     try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
     const it = addItem(parsed, sorted[0], outRoot);
     it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), files: sorted } };
-    if (it.settings.book.coverImage && fs.existsSync(it.settings.book.coverImage)) {
-      parsed.coverImagePath = it.settings.book.coverImage;
-    }
+    attachWorkCover(parsed, sorted[0], it.settings.book.coverImage, true);
     writeWorkspace();
     const chapters = parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
     log(`📖 출판 원고 열기: ${parsed.fileTitle} — 파일 ${sorted.length}개 · 장 ${chapters}개 · 앞부속 ${parsed.front.length} · 뒷부속 ${parsed.back.length}`);

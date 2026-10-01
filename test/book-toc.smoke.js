@@ -121,7 +121,7 @@ function tocEntries(tp) {
   ok(rare.missing.length === 1 && /희귀 한자/.test(G.formatWarning(rare)), '확장 A 희귀 한자는 경고로 알린다(동봉 부분집합에서 뺐다)');
   const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   ok(/warnMissingGlyphs\(html, '미리보기'\)/.test(M) && /warnMissingGlyphs\(html, '내지 PDF'\)/.test(M), 'main: 미리보기·내지 PDF 조판 때 경고');
-  const py = path.join('D:/## 출판/고전완역/삼국지/작품사전/글리프검사.py');
+  const py = path.join('D:/## 출판/삼국지/기준/작품사전/글리프검사.py');
   if (fs.existsSync(py)) {
     try {
       const tf = path.join(OUT, 'sample.md'); fs.writeFileSync(tf, SAMPLE + '\n');
