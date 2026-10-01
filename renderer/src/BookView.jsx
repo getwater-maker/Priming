@@ -914,7 +914,7 @@ body{overflow-y:scroll}
             <div className="bkrow">
               <label title={hdrOddMeta ? '원고 메타 `> 머리글홀수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : ''}>홀수쪽 머리글{hdrOddMeta ? ' 🔒' : ''}
                 <select value={hdrOddMeta || layout.headerOdd} disabled={!!hdrOddMeta} onChange={(e) => L('headerOdd', e.target.value)}>
-                  <option value="chapter">장 제목 (관행)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
+                  <option value="chapter">장 제목 (관행)</option><option value="chapterShort">「제N회 + 짧은 제목」(원고 `> 짧은제목:`)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
                   <option value="title">책 제목</option><option value="subtitle">책 부제</option>
                   <option value="none">표시 안 함</option>
                 </select>
@@ -1047,7 +1047,7 @@ body{overflow-y:scroll}
                 )}
                 <div className="bkcover-canvas" ref={coverCanvasRef}>
                   <div className="bkcover-sheet" style={{ width: Wpx * k, height: Hpx * k }}>
-                    <iframe className="bkcover-frame" title="표지 펼침면" srcDoc={cover.html}
+                    <iframe className="bkcover-frame" title="표지 펼침면" srcDoc={cover.html} scrolling="no"
                       style={{ width: Wpx, height: Hpx, transform: `scale(${k})`, transformOrigin: '0 0' }} />
                     {coverLines && (
                       <svg className="bkcover-lines" viewBox={`0 0 ${sp.widthMm} ${sp.heightMm}`} preserveAspectRatio="none">

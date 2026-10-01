@@ -437,7 +437,15 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
 // 목차 — 사용자 최종본([POD] 원고_고전의뜰 삼국지_01.pdf p.11)과 동일: **본문 장(제N회)만** 나열
 //   (서문·프롤로그 등 부속물 제외), 각 행 = 제목 + 점선 리더 + 우측 쪽번호.
 //   점선은 leader() 대신 flex 빈칸의 border-bottom(dotted) — 미리보기(코어)·CLI 양쪽 동일 렌더.
-function tocHtml(book, tocTitle, excluded = []) {
+// 머리글 「제N회 + 짧은 제목」 문구 — 짧은 제목이 없는 회는 「제N회」만(제N회 형식이 아니면 전체 제목)
+function headerShortText(c) {
+  const m = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title || '');
+  const no = m ? m[1] : (c.title || '');
+  return c.shortTitle && m ? `${no} ${c.shortTitle}` : no;
+}
+// 목차에 짧은 제목 대신 전체 회목을 쓰나 — 원고 메타 `> 목차제목: 전체`(기본 = 짧은 제목이 있는 회만 짧은 제목)
+const tocUsesFull = (book) => /전체|full/i.test(String((book.meta || {}).tocTitleMode || ''));
+function tocHtml(book, tocTitle, excluded = [], useFull = false) {
   const items = [];
   for (const p of book.parts) {
     const shown = (p.chapters || []).filter((c) => c.title && !chapterExcluded(c.title, excluded));
@@ -448,7 +456,7 @@ function tocHtml(book, tocTitle, excluded = []) {
       // 「제N회」 라벨 칸 + 회목 칸(내어쓰기 · 2~3줄) — 점선·쪽번호는 마지막 줄에 붙는다(삼국지 R14). 형식이 아닌 장은 통째(예전 그대로).
       const mT = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
       items.push(mT
-        ? `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="no">${esc(mT[1])}</span><span class="tt">${esc(mT[2])}</span><span class="dots"></span></a></li>`
+        ? `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="no">${esc(mT[1])}</span><span class="tt">${esc((c.shortTitle && !useFull) ? c.shortTitle : mT[2])}</span><span class="dots"></span></a></li>`
         : `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
     }
   }
@@ -494,6 +502,7 @@ function pageCss(o) {
   const rhContent = (kind) => kind === 'title' ? (o.hasSubtitle ? 'string(book-title) " / " string(book-subtitle)' : 'string(book-title)')
     : kind === 'subtitle' ? 'string(book-subtitle)'
     : kind === 'chapter' ? 'string(chapter-title, first-except)'
+    : kind === 'chapterShort' ? 'string(chapter-short, first-except)'   // 「제N회 짧은제목」(짧은 제목이 없는 회는 「제N회」만 · R18)
     : kind === 'chapterNo' ? 'string(chapter-no, first-except)'   // 「제N회」만 — 긴 회목이 두 줄로 꺾이지 않게(삼국지 R1)
     : kind === 'section' ? 'string(sec-title)' : 'none';
   // 정렬 — vivliostyle 마진 박스는 폭이 내용 기준(@top-left/right 는 세로 쌓임, @top-center 는
@@ -556,6 +565,7 @@ function pageCss(o) {
 /* 러닝헤드 장제목 = 전체 원제(공백 포함) — h2 는 '제N회'를 .ch-no 로 쪼개 공백이 사라지므로
    숨김 앵커(.ch-rh)의 원문에서 문자열을 뽑는다(예: "제16회 여포의 신궁, 전위의 최후"). */
 .ch-rh { string-set: chapter-title content(); display: none; }
+.ch-rh-short { string-set: chapter-short content(); display: none; }
 .ch-rh-no { string-set: chapter-no content(); display: none; }   /* 「제N회」 부분만(제N회 형식이 아니면 전체 제목) */
 section.chapter h3 { string-set: sec-title content(); }
 .book-title-anchor { string-set: book-title content(); display: none; }
@@ -676,8 +686,8 @@ function resolveBookOptions(book, opts = {}) {
     // ── 머리글/쪽번호 노출 선택 ──
     //   내용: 책제목/부제/장제목/소제목(절)/없음 · 정렬: 왼쪽/가운데/오른쪽 (기본=바깥쪽 정렬 관행)
     //   🔑 원고 메타 `> 머리글짝수:` `> 머리글홀수:` 가 있으면 **메타가 이긴다**(조판 설정은 원고별 저장이라 새 원고마다 다시 골라야 했다 — 삼국지 R12).
-    headerEven: pick(headerKindOf(meta.headerEven) || opts.headerEven, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
-    headerOdd: pick(headerKindOf(meta.headerOdd) || opts.headerOdd, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽) · chapterNo = 「제N회」만
+    headerEven: pick(headerKindOf(meta.headerEven) || opts.headerEven, ['title', 'subtitle', 'chapter', 'chapterNo', 'chapterShort', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
+    headerOdd: pick(headerKindOf(meta.headerOdd) || opts.headerOdd, ['title', 'subtitle', 'chapter', 'chapterNo', 'chapterShort', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽) · chapterNo = 「제N회」만
     // 목차 글자(pt)·행간 — 0/빈칸 = 본문과 같음. 원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다(삼국지: 9.5pt · 1.45).
     tocSizePt: numOrZero(meta.tocSize) || numOrZero(opts.tocSizePt),
     tocLineHeight: numOrZero(meta.tocLine) || numOrZero(opts.tocLineHeight),
@@ -763,7 +773,7 @@ function buildBookHtml(book, opts = {}) {
   if (colFront && colIncluded) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr, o.colophonFields));
   for (const s of book.front) {
     if (o.excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고는 보존)
-    if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title, o.excluded)); continue; }
+    if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title, o.excluded, tocUsesFull(book))); continue; }
     bodyParts.push(`<section class="front-section sec-${s.key}" id="sec-${s.key}">
 <h2${o.sourceMap ? ` data-src-line="${s.lineStart}" data-src-end="${s.lineStart}"` : ''}>${esc(s.title)}</h2>
 ${blocksHtml(s.blocks, book, ctx, srcAttr)}
@@ -773,7 +783,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
   // 목차 자동 생성 — 원고에 [목차] 섹션이 없으면 프로그램이 만들어 제공(원고에 있으면 그 위치가 우선).
   //   구조 패널에서 '목차' 체크 해제(excluded)하면 자동 생성도 생략.
   if (!book.front.some((s) => s.key === 'toc') && !o.excluded.includes('toc')) {
-    bodyParts.push(tocHtml(book, '목차', o.excluded));
+    bodyParts.push(tocHtml(book, '목차', o.excluded, tocUsesFull(book)));
   }
 
   // 본문 — 부 표제지 + 장
@@ -791,6 +801,7 @@ ${c.title ? (() => {
         const inner = mCh ? `<span class="ch-no">${esc(mCh[1])}</span>${esc(mCh[2])}` : esc(c.title);
         return `<span class="ch-rh" aria-hidden="true">${esc(c.title)}</span>`
           + `<span class="ch-rh-no" aria-hidden="true">${esc(mCh ? mCh[1] : c.title)}</span>`
+          + `<span class="ch-rh-short" aria-hidden="true">${esc(headerShortText(c))}</span>`
           + `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${inner}</h2>`;
       })() : ''}
 ${chapterBlocksHtml(c.blocks, book, ctx, srcAttr, o.specialKeywords)}

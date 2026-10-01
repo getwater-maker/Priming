@@ -106,7 +106,15 @@ function analyze(book, o, fontDir, x = {}) {
   const tocLS = o.letterSpacingPt || 0;
   const tocWidth = bodyWpt - (TOC_LABEL_EM + TOC_RESERVE_EM) * tocSize;
   const emH = (dotum && dotum.adv(0xAC00)) || 1, emB = (batang && batang.adv(0xAC00)) || 1;
-  const usesFull = (k) => k === 'chapter';
+  const usesFull = (k) => k === 'chapter' || k === 'chapterShort';   // 「제N회 + 짧은 제목」도 한 줄에 들어가야 한다
+  const tocFull = /전체|full/i.test(String(meta.tocTitleMode || ''));
+  // 머리글에 실릴 글 — chapter = 전체 회목 · chapterShort = 「제N회 + 짧은제목」(짧은 제목이 없는 회는 「제N회」만) · 그 밖(홀수쪽이 아닌 쪽)은 전체 회목으로 보수적으로
+  const headerTextFor = (c) => {
+    const m = CH_RE.exec(c.title);
+    const kinds = [o.headerEven, o.headerOdd];
+    if (kinds.includes('chapter') || !kinds.includes('chapterShort')) return c.title;
+    return m ? (c.shortTitle ? `${m[1]} ${c.shortTitle}` : m[1]) : c.title;
+  };
   const limitChars = Number(String(meta.titleMax || '').replace(/[^0-9]/g, '')) || 0;
   const items = [];
   const excluded = x.excluded || [];
@@ -116,14 +124,19 @@ function analyze(book, o, fontDir, x = {}) {
       if (x.chapterExcluded && x.chapterExcluded(c.title, excluded)) continue;
       const mc = CH_RE.exec(c.title);
       const name = mc ? mc[2] : c.title;
-      const hw = widthPt(c.title, headFonts, headPt);           // 머리글에 전체 회목이 실릴 때의 폭
-      const tocLines = countLines(name, bodyFonts, tocSize, tocWidth, tocLS);
+      // 🔖 R18 짧은 제목(`> 짧은제목:`) — 머리글 「제N회 + 짧은제목」·목차에 실리는 글이 달라지므로 실제로 실릴 글로 잰다
+      const short = (mc && c.shortTitle) ? c.shortTitle : '';
+      const tocName = (short && !tocFull) ? short : name;
+      const hdrText = headerTextFor(c);
+      const hw = widthPt(hdrText, headFonts, headPt);           // 머리글에 실릴 글의 폭
+      const tocLines = countLines(tocName, bodyFonts, tocSize, tocWidth, tocLS);
       const flags = [];
       const headerUses = usesFull(o.headerEven) || usesFull(o.headerOdd);
       if (headerUses && hw > headCap) flags.push('header');
       if (tocLines > 3) flags.push('toc3'); else if (tocLines > 2) flags.push('toc2');
-      if (limitChars && Array.from(name).length > limitChars) flags.push('max');
-      items.push({ num: c.num, title: c.title, name, chars: Array.from(name).length, headerPt: Math.round(hw * 10) / 10, tocLines, flags });
+      const maxName = short || name;   // 짧은 제목이 있으면 그 길이가 기준(회목최대 = 짧은 제목 상한으로 쓸 수 있다)
+      if (limitChars && Array.from(maxName).length > limitChars) flags.push('max');
+      items.push({ num: c.num, title: c.title, name: maxName, shortTitle: short || null, chars: Array.from(maxName).length, headerPt: Math.round(hw * 10) / 10, tocLines, flags });
     }
   }
   // 책 제목 머리글(title/subtitle)이 한 줄에 드는지

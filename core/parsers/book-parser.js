@@ -91,6 +91,8 @@ const META_KEYS = {
   // 목차 글자 크기(pt)·행간 — 비우면 본문과 같다(삼국지: 9.5pt · 1.45)
   // 머리글 아래 간격(mm) — 머리글 ↔ 본문 첫 줄. 비우면 기본(9mm · 재단선 안전영역 안으로 자동 제한)
   '머리글간격': 'headerGap', '머리글 간격': 'headerGap',
+  // 목차에 쓸 회목 — 짧은제목(기본, 있는 회만) / 전체(원문 번역 회목 전체)
+  '목차제목': 'tocTitleMode', '목차 제목': 'tocTitleMode',
   '목차글자': 'tocSize', '목차 글자': 'tocSize', '목차행간': 'tocLine', '목차 행간': 'tocLine',
   // 책등 두께(mm) — 플랫폼 화면이 알려 준 값. 적으면 계산을 이긴다(부크크 「새종이책」 화면 값)
   '책등두께': 'spineMm', '책등 두께': 'spineMm',
@@ -235,7 +237,7 @@ function parseBookText(text, fallbackTitle) {
         cur = null;
         continue;
       }
-      const ch = { title, lineStart: i, blocks: [] };
+      const ch = { title, lineStart: i, blocks: [], isChapter: true };
       ensurePart(i).chapters.push(ch);
       cur = ch;
       continue;
@@ -249,6 +251,10 @@ function parseBookText(text, fallbackTitle) {
       if (cur) cur.blocks.push({ type: h34[1].length === 3 ? 'h3' : 'h4', text: h34[2].trim(), lineStart: i, lineEnd: i });
       continue;
     }
+
+    // 회마다 짧은 제목(≤20자 권장) — 회 제목줄 바로 아래 `> 짧은제목: 도원결의`(본문 시작 전 한 줄). 머리글 「제N회 + 짧은 제목」·목차에 쓰고, 본문 표제는 전체 회목 그대로(R18)
+    const sm = t.match(/^>\s*(?:짧은\s*제목|회목\s*요약)\s*[:：]\s*(.+)$/);
+    if (sm && cur && cur.isChapter && !cur.blocks.length && !para) { cur.shortTitle = sm[1].trim(); continue; }
 
     if (!seenHeading) continue; // 메타 영역의 잡줄 무시
     if (!cur) { // 부 표제지 직후 등 컨테이너 없음 — 장 없는 본문은 무시하지 않고 임시 장 생성
