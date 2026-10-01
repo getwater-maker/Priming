@@ -4743,6 +4743,17 @@ function _userAttached(g, kind) {
   const cur = kind === 'image' ? g.imagePath : g.videoPath;
   return !!(rec && cur && rec === _visKey(cur));
 }
+// 📐 그림 비율이 프로젝트 비율(16:9 등)과 다르면 `'1024x1024'` 식 문자열, 맞거나 못 재면 ''.
+//   🔴 정사각형 그림이 .vrew 에 레터박스(좌우 검정)로 실려 나간 사고(아내 PC, 2026-10-01) — 이전 실행에서 잘못 만든
+//   그림이 「이미지 유지」로 이월되면 생성 때 검사로는 못 잡는다. 판정 폭은 vrew-builder 의 mismatch(0.06)와 같다.
+function _imageRatioWrong(p, aspect) {
+  try {
+    const z = require('./vrew/vrew-builder').readImageSize(p);
+    if (!z || !(z.w > 0) || !(z.h > 0)) return '';
+    const want = aspect === '9:16' ? 0.5625 : (aspect === '1:1' ? 1 : 16 / 9);
+    return Math.abs(z.w / z.h - want) > 0.06 ? `${z.w}x${z.h}` : '';
+  } catch { return ''; }
+}
 async function sweepBadVisuals(project, logger = log, mediaDir = null) {
   const groups = (project.groups || []);
   // 🔑 **병렬로 훑는다.** 순차로 하면 42장+영상5개에 18초가 걸려 화면이 그만큼 멈춘 것처럼 보였다.
@@ -4754,10 +4765,11 @@ async function sweepBadVisuals(project, logger = log, mediaDir = null) {
     // 사람이 첨부한 것은 **재지도 않는다**(ffmpeg 호출도 아낀다).
     badVideo: !!(g.videoPath && !_userAttached(g, 'video') && fs.existsSync(g.videoPath) && await looksBadVideo(g.videoPath)),
     badImage: !!(g.imagePath && !_userAttached(g, 'image') && fs.existsSync(g.imagePath) && await looksBadImage(g.imagePath)),
+    wrongRatio: !!(g.imagePath && !_userAttached(g, 'image') && fs.existsSync(g.imagePath) && _imageRatioWrong(g.imagePath, project.aspect)),
   }));
   const cleared = [];
   const mine = [];
-  for (const { g, badVideo, badImage, mineVideo, mineImage } of verdicts) {
+  for (const { g, badVideo, badImage, wrongRatio, mineVideo, mineImage } of verdicts) {
     if (mineVideo || mineImage) mine.push(g.num);
     if (badVideo) {
       // 🔴 첨부 자산은 **원본 경로를 그대로** 가리킨다(복사하지 않는다 — attach-asset·bulk-attach).
@@ -4768,9 +4780,9 @@ async function sweepBadVisuals(project, logger = log, mediaDir = null) {
       if (del) { try { fs.rmSync(g.videoPath, { force: true }); } catch {} }
       g.videoPath = null; g.videoStatus = 'fail'; cleared.push(g.num);
     }
-    if (badImage) {
+    if (badImage || wrongRatio) {
       const del = !!(mediaDir && _inDir(g.imagePath, mediaDir));
-      logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) — ${del ? '비움' : '참조만 해제(파일은 남깁니다)'} (${path.basename(g.imagePath)})`);
+      logger(`  ⬛ G${g.num} ${wrongRatio && !badImage ? `그림 비율이 ${project.aspect || '16:9'} 가 아님(${_imageRatioWrong(g.imagePath, project.aspect)})` : '이상 이미지(검정·노이즈)'} — ${del ? '비움' : '참조만 해제(파일은 남깁니다)'} (${path.basename(g.imagePath)})`);
       try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
       g.imageCleared = true;   // 캐시로 되살아나지 않게 (⚠ 플래그는 재시작 시 사라지므로 prefill 쪽 검사가 본 방어선)
       if (del) { try { fs.rmSync(g.imagePath, { force: true }); } catch {} }
