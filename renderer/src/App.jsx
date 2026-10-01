@@ -3697,6 +3697,8 @@ export default function App() {
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
+            {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
+            {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
           {!noProduction && (
             <nav className="menus" data-testid="menus">
               {MENUS.map(([id, label]) => (

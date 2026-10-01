@@ -91,6 +91,17 @@ ${para}
     }, pagesAfter, { timeout: 60000 });
     console.log('· 장 복원 OK — 다시 체크하면 되돌아온다');
 
+    // 🌙 모니터 끄기 버튼이 출판 탭 메뉴 줄에도 있다(로이 2026-10-01) — 눌러 보진 않는다(진짜 모니터가 꺼진다). 보이고 · 실제로 눌리고 · 메뉴 줄이 한 줄.
+    {
+      const bb = await win.locator('[data-testid="monitor-off"]').boundingBox();
+      if (!bb) throw new Error('출판 탭에 🌙 모니터 끄기 버튼이 없음');
+      const hit = await win.evaluate(({ x, y }) => !!((document.elementFromPoint(x, y) || {}).closest || (() => null)).call(document.elementFromPoint(x, y), '[data-testid="monitor-off"]'), { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 });
+      if (!hit) throw new Error('🌙 모니터 끄기 버튼이 가려져 눌리지 않음');
+      const mbh = (await win.locator('.menubar').boundingBox()).height;
+      if (mbh >= 56) throw new Error('버튼을 더하자 메뉴 줄이 두 줄이 됨: ' + Math.round(mbh) + 'px');
+      console.log('· 출판 탭 🌙 모니터 끄기 버튼 OK — 보임·눌림·메뉴 줄 한 줄');
+    }
+
     // 왼쪽 메뉴 — 7개 탭 + 로그가 왼쪽 맨 아래 + 표지 안내 쪽 없음(미리보기 1쪽 = 반표제지)
     const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
     if (tabs !== 7) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 7');
