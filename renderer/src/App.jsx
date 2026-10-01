@@ -506,6 +506,9 @@ export default function App() {
   //   → 이 표시가 없으면 같은 편집이 두 번 전송된다.
   const sentDoneRef = useRef(false);
   const findTextRef = useRef('');        // 검색어 (비제어)
+  const findComposingRef = useRef(false);                 // 검색창 한글 조합 중
+  const findSkipRef = useRef(false);                      // 검색창 자신을 건너뛰는 중(한 번만)
+  const findTypingRef = useRef(false);                    // 마지막 검색이 타이핑으로 시작됐나 → 결과 뒤 입력창 포커스 복구
   const findSessionRef = useRef('');                      // 지금 열려 있는 검색 세션의 문자열(Electron findNext 판정용)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
@@ -3241,7 +3244,23 @@ export default function App() {
   }, []);
   // 화면 내 검색(Ctrl+F) — 모든 모드 공통. Electron find-in-page 로 렌더 텍스트 찾기·이동.
   useEffect(() => {
-    api.onFindResult((r) => setFindRes(r || { active: 0, total: 0 }));
+    // 🔴 검색창 자기 글자도 find-in-page 가 「찾은 글」로 잡아 입력창 글자를 통째로 선택(주황 강조)하고 포커스를 가져가
+    //   그 다음 글자가 선택된 글을 덮어써 **타이핑이 끊기고 검색이 안 됐다**(로이 2026-10-01 「대마」 1/1). 결과가 올 때마다:
+    //   ① 입력창에 선택이 잡혔으면 = 활성 일치가 검색창 자신 → 한 번 다음으로 넘긴다 ② 타이핑 중이었으면 포커스·캐럿을 끝으로 되돌린다
+    //   ③ 개수에서 검색창 자신(1)을 뺀다.
+    api.onFindResult((r0) => {
+      const r = r0 || { active: 0, total: 0 };
+      const el = document.getElementById('find-input');
+      const text = findTextRef.current;
+      const selfActive = !!(el && text && el.selectionStart != null && el.selectionStart !== el.selectionEnd);
+      if (selfActive && r.total > 1 && !findSkipRef.current) { findSkipRef.current = true; api.findInPage({ text, findNext: false, forward: true }); return; }
+      findSkipRef.current = false;
+      setFindRes({ active: Math.max(r.active - 1, 0), total: Math.max(r.total - 1, 0), none: !!text && r.total <= 1 });
+      if (el && findTypingRef.current) {
+        el.focus({ preventScroll: true });
+        try { const n = el.value.length; el.setSelectionRange(n, n); } catch {}
+      }
+    });
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
         // 검색창은 늘 떠 있으므로 **포커스만** 옮긴다(2026-09-16).
@@ -3262,6 +3281,8 @@ export default function App() {
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
     if (!text) { api.findStop(); findSessionRef.current = ''; setFindRes({ active: 0, total: 0 }); return; }
     const fire = () => {
+      if (findComposingRef.current) { findTimerRef.current = setTimeout(fire, 120); return; }   // 한글 조합 중에는 검색·포커스 이동을 미룬다(조합이 끊긴다)
+      { const el = document.getElementById('find-input'); findTypingRef.current = !!el && document.activeElement === el; }   // 타이핑 중이면 결과 뒤 포커스를 돌려준다
       const fresh = findSessionRef.current !== text;   // 세션이 잡고 있는 문자열과 다르면 새로 시작해야 한다
       findSessionRef.current = text;
       api.findInPage({ text, findNext: fresh, forward: forward !== false });
@@ -3720,10 +3741,10 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
               onChange={(e) => runFind(e.target.value, false)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
-            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : ''}</span>
+            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
             <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
             <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
             <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>

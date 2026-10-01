@@ -209,7 +209,7 @@
 - React: ⛔ `setState` 직후 그 state 를 읽지 않는다(값을 직접 넘긴다) · 한 번 만든 클로저(`onended` 등)에서 state 읽지 않는다 · ⛔ 제어 checkbox/radio 의 click 에서 `preventDefault` 금지 · 편집면(contentEditable)은 React 가 다시 그리지 않게 고정 · 한글 조합 중(`isComposing`)엔 저장·Enter 처리 안 함 · 서식 막대는 mousedown 을 막아 초점을 지킨다.
 - 비동기 재생·루프는 **번호표**(`playGenRef` 식)로 「내가 아직 현재 작업인가」를 확인한다 — 멈춘 옛 재생의 await 가 깨어나 새 재생을 닫은 사고. 대본 전환 전 밀린 자동저장을 먼저 쓴다(`syncActiveToS` → `flushAutoSave`).
 - 목록에 `<video>` 를 수백 개 두지 않는다(Chromium 플레이어 한도 ≈75 — 썸네일은 `video-frame` 한 장 이미지). 렌더 예외는 `ErrorBoundary` + `window.onerror` 가 로그창(`🐞 화면 오류`)에 남긴다.
-- Electron `findInPage(text, {findNext})` 의 findNext 는 「새 세션을 시작하는가」다(true = 새 검색). 타이핑은 디바운스.
+- Electron `findInPage(text, {findNext})` 의 findNext 는 「새 세션을 시작하는가」다(true = 새 검색). 타이핑은 디바운스. 🔴 **검색창 자기 글자도 일치로 잡혀 입력창을 선택·포커스를 가져간다** — 결과마다 자기 일치 건너뛰기 + 포커스·캐럿 복구 + 개수 −1(App.jsx `onFindResult`, `test:find`).
 - Electron: 모달 대화상자는 부모 창을 앞으로 끌어온 뒤 연다(숨으면 입력 전체가 잠긴다 — 10초 넘게 잠기면 자동 해제 + 🩹 로그) · `media://` 는 **자르기 → 디코드** 순(경로의 `#`) · 스트리밍 응답(동기 읽기 금지) · 클립보드는 main 에서 읽는다 · `app.getVersion()` 은 라이트 업데이트 전 값이라 디스크의 package.json 을 읽는다.
 - pythonw 로 띄우는 서버는 파일 로그 필수(stdout 무효 → 조용히 죽음). bat 에서 `start` 금지, bat 은 ASCII 만(cmd 는 CP949 로 읽는다). 백그라운드 상시 실행은 바로가기 대상을 pythonw 로 직접.
 - ffmpeg 필터에 경로를 넣지 않는다(드라이브 콜론·한글) — cwd 를 작업폴더로 두고 ASCII 파일명만. ffmpeg 필터 기본값은 `-h filter=<이름>` 으로 확인(alimiter auto level 사고).
