@@ -381,6 +381,78 @@ function _recordUpload(channelId, file, rec) {
   try { fs.mkdirSync(_dir(), { recursive: true }); fs.writeFileSync(uploadsFile(), JSON.stringify(all, null, 2), 'utf8'); } catch (_) {}
 }
 
+// ── 🛡 중복 업로드 방지(v0.5.105 · 로이 2026-10-01 「중복으로 올라갈 수 있는 경우를 없앨 수 있어?」) ─────────────────
+//   예전 판정은 「이 PC 의 기록 + 같은 파일(이름·크기·수정시각)」뿐이라 ① MP4 를 다시 구우면 ② 파일 이름을 바꾸면 ③ 다른 PC 에서 올렸으면
+//   ④ 스튜디오에서 직접 올렸으면 중복이 올라갔다. 그래서 **같은 채널의 같은 제목**을 세 곳에서 본다:
+//     (a) 같은 파일 기록(예전 그대로) (b) 이 PC 기록의 같은 제목(다시 굽거나 이름을 바꾼 경우) (c) **유튜브 채널의 실제 영상 목록**(다른 PC·스튜디오 직접 업로드 · 삭제한 영상은 목록에 없으니 다시 올릴 수 있다).
+//   제목 비교는 업로드 때와 같은 정리(cleanTitle) + 공백·유니코드 정규화. (c) 가 안 되면(네트워크·권한) 막지 않고 알린다(fail-open).
+function normTitle(t) { return cleanTitle(t).normalize('NFC').replace(/\s+/g, ' ').trim(); }
+/** 이 PC 기록에서 이 채널의 같은 제목 → {videoId, at, title} | null */
+function findUploadedByTitle(channelId, title) {
+  const want = normTitle(title); if (!want) return null;
+  const all = _uploads();
+  for (const [k, rec] of Object.entries(all)) {
+    if (!k.startsWith(channelId + '|') || !rec || !rec.title) continue;
+    if (normTitle(rec.title) === want) return rec;
+  }
+  return null;
+}
+const _remoteTitles = new Map();   // channelId → { at, map(title→{videoId, privacy}) } — 한 번의 큐 업로드 동안 목록을 다시 받지 않는다
+const REMOTE_TTL_MS = 90 * 1000;
+/** 채널의 업로드 목록(제목) — 비공개 포함(소유자 토큰). 실패하면 {ok:false,error}. 50편 = 1단위, 최대 40쪽(2000편). */
+async function listChannelTitles(channelId, { force = false, maxPages = 40 } = {}) {
+  const c = _remoteTitles.get(channelId);
+  if (!force && c && Date.now() - c.at < REMOTE_TTL_MS) return { ok: true, map: c.map, cached: true };
+  const t = await accessToken(channelId);
+  if (!t.ok) return { ok: false, error: t.error };
+  const H = { headers: { Authorization: `Bearer ${t.token}` } };
+  try {
+    const r0 = await fetch(`${EP.api}/channels?part=contentDetails&mine=true`, H);
+    const j0 = await _json(r0);
+    if (r0.status !== 200) return { ok: false, error: `채널 정보 조회 실패(${r0.status}) — ${(j0.error && j0.error.message) || ''}` };
+    const up = j0.items && j0.items[0] && j0.items[0].contentDetails && j0.items[0].contentDetails.relatedPlaylists && j0.items[0].contentDetails.relatedPlaylists.uploads;
+    if (!up) return { ok: false, error: '채널의 업로드 목록을 찾지 못했습니다' };
+    const map = new Map();
+    let pageToken = '';
+    for (let i = 0; i < maxPages; i++) {
+      const r = await fetch(`${EP.api}/playlistItems?part=snippet,status&maxResults=50&playlistId=${encodeURIComponent(up)}${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`, H);
+      const j = await _json(r);
+      if (r.status !== 200) return { ok: false, error: `영상 목록 조회 실패(${r.status}) — ${(j.error && j.error.message) || ''}` };
+      for (const it of (j.items || [])) {
+        const sn = it.snippet || {};
+        const id = (sn.resourceId && sn.resourceId.videoId) || '';
+        const nt = normTitle(sn.title || '');
+        if (nt && id && !map.has(nt)) map.set(nt, { videoId: id, privacy: (it.status && it.status.privacyStatus) || '' });
+      }
+      pageToken = j.nextPageToken || '';
+      if (!pageToken) break;
+    }
+    _remoteTitles.set(channelId, { at: Date.now(), map });
+    return { ok: true, map };
+  } catch (e) { return { ok: false, error: `구글에 연결하지 못했습니다: ${e.message}` }; }
+}
+/** 방금 올린 영상을 목록 캐시에 더한다(같은 큐에서 곧바로 같은 제목이 또 오면 막히게). */
+function _noteUploaded(channelId, title, videoId) {
+  const c = _remoteTitles.get(channelId);
+  if (c) c.map.set(normTitle(title), { videoId, privacy: 'private' });
+}
+/**
+ * 올리기 전 중복 판정 → {dup:true, where:'file'|'local'|'channel', videoId, url, at?, privacy?, reason} | {dup:false, warn?}
+ *   하나라도 맞으면 중복. 유튜브 확인이 실패하면 dup:false + warn(로컬 판정만으로 진행).
+ */
+async function checkDuplicate({ channelId, file, title, remote = true }) {
+  const f = file ? findUploaded(channelId, file) : null;
+  if (f) return { dup: true, where: 'file', videoId: f.videoId, url: `https://youtu.be/${f.videoId}`, at: f.at, reason: `이 파일은 ${f.at} 에 이미 올렸습니다` };
+  const l = findUploadedByTitle(channelId, title);
+  if (l) return { dup: true, where: 'local', videoId: l.videoId, url: `https://youtu.be/${l.videoId}`, at: l.at, reason: `같은 제목의 영상을 ${l.at} 에 이미 올렸습니다(파일을 다시 만들었거나 이름을 바꿨어도 같은 영상으로 봅니다)` };
+  if (!remote) return { dup: false };
+  const r = await listChannelTitles(channelId);
+  if (!r.ok) return { dup: false, warn: `유튜브 채널의 영상 목록을 확인하지 못했습니다 — 이 PC 기록만으로 진행합니다 (${r.error})` };
+  const hit = r.map.get(normTitle(title));
+  if (hit) return { dup: true, where: 'channel', videoId: hit.videoId, url: `https://youtu.be/${hit.videoId}`, privacy: hit.privacy, reason: `유튜브 채널에 같은 제목의 영상이 이미 있습니다(${hit.privacy === 'private' ? '비공개' : hit.privacy || '공개 상태 미상'} · 다른 PC·스튜디오에서 올린 것 포함)` };
+  return { dup: false };
+}
+
 // ── 재개 가능 업로드 ────────────────────────────────────────────────────────
 const CHUNK = 8 * 1024 * 1024;               // 8MB — 256KB 의 배수여야 한다(구글 규약)
 const BACKOFF = [1, 2, 4, 8, 15, 30, 30, 30]; // 초
@@ -507,6 +579,7 @@ async function uploadVideo(o = {}) {
           sec: (Date.now() - startedAt) / 1000,
         };
         _recordUpload(o.channelId, o.file, { videoId: id, at: _kst(), title });
+        _noteUploaded(o.channelId, title, id);
         tick('done', size, out);
         return out;
       }
@@ -558,6 +631,6 @@ function reorderChannels(ids) {
 
 module.exports = {
   SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels,
-  uploadVideo, findUploaded, cleanTitle, cleanDescription, cleanTags, explainApiError,
+  uploadVideo, findUploaded, findUploadedByTitle, listChannelTitles, checkDuplicate, normTitle, _clearRemoteTitles: () => _remoteTitles.clear(), cleanTitle, cleanDescription, cleanTags, explainApiError,
   authFile, uploadsFile, _setEndpoints, _setCrypto, _setDefaultClient,
 };

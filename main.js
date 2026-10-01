@@ -2757,7 +2757,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
 });
 
 const CHAPTER_TOL_SEC = 1.0;   // ⏱ 챕터 합계와 MP4 실제 길이 허용 차이
-async function runYtUpload({ file, channelId, meta }) {
+async function runYtUpload({ file, channelId, meta, force = false }) {
   const YT = require('./core/youtube-upload');
   S.ytAbort = false;
   const st = YT.status();
@@ -2778,6 +2778,16 @@ async function runYtUpload({ file, channelId, meta }) {
       log(`⚠ 챕터 합계 ${meta.chapterTotalSec.toFixed(1)}초 ≠ MP4 실제 ${real.toFixed(1)}초 — 어긋나서 설명에서 챕터를 뺍니다`);
       meta = { ...meta, description: meta.descriptionNoChapters, chapters: 0 };
     } else if (real > 0) log(`   ⏱ 챕터 확인 — 합계 ${meta.chapterTotalSec.toFixed(1)}초 · MP4 ${real.toFixed(1)}초 (차이 ${Math.abs(real - meta.chapterTotalSec).toFixed(2)}초)`);
+  }
+  // 🛡 중복 방지 — 같은 파일·같은 제목(이 PC 기록)·**유튜브 채널의 같은 제목**이면 올리지 않는다(다른 PC·스튜디오 직접 업로드·MP4 를 다시 구운 경우 포함).
+  //   사용자가 「한 번 더 올리기」를 고른 경우(force)만 통과한다. 유튜브 확인이 안 되면 막지 않고 알린다.
+  if (!force) {
+    const dup = await YT.checkDuplicate({ channelId, file, title });
+    if (dup.warn) log(`⚠ ${dup.warn}`);
+    if (dup.dup) {
+      log(`⏭ 유튜브 업로드 건너뜀 — 「${title}」: ${dup.reason} → ${dup.url}`);
+      return { ok: true, skipped: true, duplicate: dup, url: dup.url };
+    }
   }
   log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · 비공개 · 제목 「${title}」`);
   log(`   설명 ${meta.source === 'packaging' ? '패키징 파일' : '(패키징 없음)'} · 챕터 ${meta.chapters}개 · 태그 ${meta.tags.length}개 · AI 합성 표시 = 예`);
@@ -2891,15 +2901,22 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
     for (const pr of S.parsed.projects) {
       const file = ytFileFor(pr, ctx, preset, isWb);
       if (!fs.existsSync(file)) throw new Error(`${kindName} 가 없습니다 — ④ 완성을 「${isWb ? '✏ 화이트보드 MP4' : '🎬 유튜브 MP4'}」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
-      const done = YT.findUploaded(chId, file);
-      if (done) {
+      const meta1 = ytMetaFor(pr, ctx);
+      // 🛡 같은 파일·같은 제목·유튜브 채널의 같은 제목 — 하나라도 있으면 묻는다(「한 번 더」를 고르면 force 로 통과)
+      const dup = await YT.checkDuplicate({ channelId: chId, file, title: meta1.title });
+      if (dup.warn) log(`⚠ ${dup.warn}`);
+      let force = false;
+      if (dup.dup) {
         const c = await dialog.showMessageBox(win, {
           type: 'question', title: '이미 올린 영상', buttons: ['한 번 더 올리기', '취소'], defaultId: 1, cancelId: 1, noLink: true,
-          message: `이 파일은 ${done.at} 에 이미 올렸습니다.`, detail: `https://youtu.be/${done.videoId}\n\n한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다.`,
+          message: `「${meta1.title}」 — ${dup.reason}.`, detail: `${dup.url}
+
+한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다(같은 제목이 둘). 올리지 않으려면 취소하세요.`,
         });
         if (c.response !== 0) continue;
+        force = true;
       }
-      enqueueYtUpload({ file, channelId: chId, meta: ytMetaFor(pr, ctx) });
+      enqueueYtUpload({ file, channelId: chId, meta: meta1, force });
       n++;
     }
     return { queued: n };
