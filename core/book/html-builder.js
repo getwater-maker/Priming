@@ -464,8 +464,8 @@ function endnotesHtml(ctx) {
 // 폰트 키 → 스택 (전부 동봉 정적 웨이트 — 가변폰트는 PDF 에 Type3 로 구워져 배제)
 //   🔤 글자마다 앞에서부터 「그 글자를 가진 첫 글꼴」을 쓴다(Chromium). 본문 = KoPub월드 바탕 → **Noto Serif KR**(동봉 Light 부분집합 — 한자 8천여 자,
 //   본문과 같은 굵기라 폴백 글자가 굵게 튀지 않는다) → 나눔명조(한자 없음) → 바탕(Windows) → **한자 보강 명조 자리** → serif.
-//   한자 보강 자리 = 동봉 파일 `HanjaSerif-Light.ttf` 가 있으면 그것(@font-face 'Priming Hanja Serif'), 없으면 PC 에 깔린 Pan-CJK 명조 이름만 시도한다.
-//   Pan-CJK 명조를 **받아 동봉하는 것은 로이 승인 뒤**(삼국지 R12) — 지금은 자리만이다. 傕·槳 같은 글자는 이 자리가 채워져야 해결된다(누락 글리프 경고가 알려 준다).
+//   한자 보강 = 동봉 `HanjaSerif-Light.ttf`(@font-face 'Priming Hanja Serif' — Noto Serif CJK KR Light 의 한자 12,421자 부분집합 · OFL · 로이 승인 2026-10-01)
+//   → 없으면 PC 에 깔린 Pan-CJK 명조 이름만 시도한다. 傕·槳·慎 같은 KS 밖 한자가 여기서 본문과 같은 Light 명조로 나온다(확장 A·B 희귀 한자는 경고로 알린다).
 const HANJA_SLOT = `'Priming Hanja Serif', 'Noto Serif CJK KR', 'Noto Serif KR CJK', 'Source Han Serif K', 'Source Han Serif KR'`;
 const FONT_STACKS = {
   kopub: `'KoPubWorld Batang', 'Noto Serif KR', 'NanumMyeongjo', 'Batang', ${HANJA_SLOT}, serif`,
@@ -635,7 +635,8 @@ function specialKeywordsOf(meta, opts) {
  * BookModel → { html, css } (css 는 html 에 인라인 포함돼 있음 — html 만 쓰면 됨)
  */
 const numOrZero = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? n : 0; };
-function buildBookHtml(book, opts = {}) {
+// 조판 옵션 해석 한 곳 — buildBookHtml 과 제목 길이 검사(title-fit)가 같은 값(머리글 종류·판면 폭·목차 크기…)을 쓴다.
+function resolveBookOptions(book, opts = {}) {
   const meta = book.meta || {};
   const platform = getPlatform(opts.platformId || metaPlatformId(meta));
   // 판형 결정 — main.js(표지·책등 계산)와 동일한 검증식으로 통일. 미등록 판형(오타 등)이면
@@ -709,6 +710,10 @@ function buildBookHtml(book, opts = {}) {
   o.fontStack = FONT_STACKS[o.fontKey];
   o.hasSubtitle = !!(meta.subtitle && String(meta.subtitle).trim()); // 헤더 '제목 / 부제' 병기용
 
+  return { meta, platform, trimId, trim, o };
+}
+function buildBookHtml(book, opts = {}) {
+  const { meta, platform, trimId, trim, o } = resolveBookOptions(book, opts);
   const baseDir = opts.baseDir || process.cwd();
   const imageUrl = typeof opts.imageUrl === 'function' ? opts.imageUrl : (abs) => 'file:///' + abs.replace(/\\/g, '/');
   const ctx = {
@@ -840,4 +845,4 @@ function metaPlatformId(meta) {
 
 module.exports = {
   specialKeywordsOf, splitSpecialBlocks,
-  chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };
+  chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, resolveBookOptions, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

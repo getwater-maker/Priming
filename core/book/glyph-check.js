@@ -18,8 +18,8 @@ function _cmapOffsets(buf, base) {
   }
   return -1;
 }
-/** 파일 → Set<codepoint> (읽을 수 없으면 null) */
-function readCmap(file) {
+/** 파일 → Map<codepoint, glyphId> (읽을 수 없으면 null) — 글리프 유무(Set)와 글자 폭(title-fit)이 같이 쓴다 */
+function readCmapMap(file) {
   try {
     const buf = fs.readFileSync(file);
     let base = 0;
@@ -34,13 +34,13 @@ function readCmap(file) {
     }
     // 유니코드 표만(플랫폼 0 · 3/1 · 3/10) — 12(전 범위) 우선
     const pick = (f) => subs.filter((s) => (s.pid === 0 || (s.pid === 3 && (s.eid === 1 || s.eid === 10))) && buf.readUInt16BE(s.o) === f);
-    const set = new Set();
+    const set = new Map();
     for (const s of pick(12)) {
       const ng = buf.readUInt32BE(s.o + 12);
       for (let g = 0; g < ng; g++) {
         const q = s.o + 16 + g * 12;
-        const a = buf.readUInt32BE(q), b = buf.readUInt32BE(q + 4);
-        for (let c = a; c <= b && c - a < 0x20000; c++) set.add(c);
+        const a = buf.readUInt32BE(q), b = buf.readUInt32BE(q + 4), sg = buf.readUInt32BE(q + 8);
+        for (let c = a; c <= b && c - a < 0x20000; c++) set.set(c, sg + (c - a));
       }
     }
     for (const s of pick(4)) {
@@ -58,14 +58,23 @@ function readCmap(file) {
             if (gp + 2 > buf.length) continue;
             gid = buf.readUInt16BE(gp); if (gid) gid = (gid + delta) & 0xFFFF;
           }
-          if (gid) set.add(c);
+          if (gid) set.set(c, gid);
         }
       }
     }
     return set.size ? set : null;
   } catch (_) { return null; }
 }
+function readCmap(file) { const m = readCmapMap(file); return m ? new Set(m.keys()) : null; }
 const _cache = new Map();
+const _mapCache = new Map();
+/** 파일 → Map<codepoint, glyphId> (캐시) */
+function cmapMapOf(file) {
+  let st; try { st = fs.statSync(file); } catch (_) { return null; }
+  const k = file + '|' + st.size + '|' + Math.round(st.mtimeMs);
+  if (!_mapCache.has(k)) _mapCache.set(k, readCmapMap(file));
+  return _mapCache.get(k);
+}
 function cmapOf(file) {
   let st; try { st = fs.statSync(file); } catch (_) { return null; }
   const k = file + '|' + st.size + '|' + Math.round(st.mtimeMs);
@@ -77,7 +86,7 @@ function cmapOf(file) {
 const IGNORABLE = new Set([...Array.from({ length: 0x20 }, (_, i) => i), 0x7F, 0xA0, 0x200B, 0x200C, 0x200D, 0xFEFF, 0xFE0F, 0xFE0E]);
 
 /** 글꼴 사슬 — 이름 목록과 파일 후보. 파일이 없으면(예: 한자 보강 자리) 그 칸은 비어 있다. */
-function defaultChain(fontDir, win = process.platform === 'win32') {
+function defaultChain(fontDir, win = process.platform === 'win32', { hanja = true } = {}) {
   const W = win ? 'C:/Windows/Fonts/' : '';
   const chain = [
     ['KoPub월드 바탕(Light)', [path.join(fontDir, 'KoPubWorld-Batang-Light.ttf')]],
@@ -85,7 +94,7 @@ function defaultChain(fontDir, win = process.platform === 'win32') {
     ['나눔명조', [path.join(fontDir, 'NanumMyeongjo-Regular.ttf')]],
   ];
   if (win) chain.push(['바탕(Windows)', [W + 'batang.ttc']]);
-  chain.push(['한자 보강 명조', [path.join(fontDir, 'HanjaSerif-Light.ttf')]]);   // 파일이 있을 때만 — 승인 전엔 비어 있다
+  if (hanja) chain.push(['한자 보강 명조(Noto Serif CJK KR 한자 부분집합)', [path.join(fontDir, 'HanjaSerif-Light.ttf')]]);   // 파일이 있을 때만
   return chain;
 }
 
@@ -119,6 +128,6 @@ function visibleText(html) {
 function formatWarning(r) {
   if (!r.missing.length) return '';
   const list = r.missing.slice(0, 12).map((m) => `${m.ch}(U+${m.cp.toString(16).toUpperCase().padStart(4, '0')}${m.n > 1 ? ' ×' + m.n : ''})`).join(' ');
-  return `⚠ 글꼴에 없는 글자 ${r.missing.length}종: ${list}${r.missing.length > 12 ? ' …' : ''} — 시스템 대체 글꼴(고딕)로 보입니다. 한국 정자(예: 愼)로 바꾸거나 한자 보강 명조 글꼴이 필요합니다`;
+  return `⚠ 글꼴에 없는 글자 ${r.missing.length}종: ${list}${r.missing.length > 12 ? ' …' : ''} — 시스템 대체 글꼴(고딕)로 보입니다. 한국 정자(예: 愼)로 바꾸거나 한자 보강 글꼴에도 없는 희귀 한자입니다`;
 }
-module.exports = { readCmap, cmapOf, defaultChain, missingGlyphs, visibleText, formatWarning, IGNORABLE };
+module.exports = { readCmap, readCmapMap, cmapMapOf, cmapOf, defaultChain, missingGlyphs, visibleText, formatWarning, IGNORABLE };

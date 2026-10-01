@@ -84,6 +84,8 @@ const META_KEYS = {
   '특별섹션': 'specialSections', '특별 섹션': 'specialSections',
   // 머리글 — 원고마다 한 줄로 고정(조판 설정은 원고별 저장이라 새 원고마다 다시 골라야 했다). 값: title·subtitle·chapter·chapterNo·section·none 또는 책제목·제N회·회목·소제목·없음
   '머리글짝수': 'headerEven', '머리글 짝수': 'headerEven', '머리글홀수': 'headerOdd', '머리글 홀수': 'headerOdd',
+  // 회목(「제N회」 뒤 글) 최대 글자 수 — 이 기준을 넘는 제목은 조판 때·구조 탭에서 알린다(출판·번역 쪽도 같은 기준으로 쓴다)
+  '회목최대': 'titleMax', '회목 최대': 'titleMax', '제목최대': 'titleMax', '제목 최대': 'titleMax',
   // 목차 글자 크기(pt)·행간 — 비우면 본문과 같다(삼국지: 9.5pt · 1.45)
   '목차글자': 'tocSize', '목차 글자': 'tocSize', '목차행간': 'tocLine', '목차 행간': 'tocLine',
   // 책등 두께(mm) — 플랫폼 화면이 알려 준 값. 적으면 계산을 이긴다(부크크 「새종이책」 화면 값)

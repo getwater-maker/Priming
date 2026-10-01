@@ -15,6 +15,8 @@ const { parseBookText } = require('../core/parsers/book-parser');
 const { buildBookHtml } = require('../core/book/html-builder');
 const { buildInteriorPdf, prepareWorkAssets } = require('../core/book/pdf-builder');
 const G = require('../core/book/glyph-check');
+const HB = require('../core/book/html-builder');
+const FD = path.join(__dirname, '..', 'assets', 'fonts', 'book');
 
 const OUT = path.join(__dirname, '..', 'output', '_book-toc');
 fs.rmSync(OUT, { recursive: true, force: true });
@@ -38,7 +40,7 @@ const TITLES = ['복숭아밭 잔치에서 세 호걸이 의형제를 맺고, �
 // 1회는 일부러 아주 길게(80자 넘게) — 머리글 한 줄 안전망을 본다
 TITLES[0] = TITLES[0] + ' 그리고 이어서 천하의 영웅들이 하나둘 모여들어 큰 뜻을 세우게 되었다';
 const para = '조식은 붓을 들어 이렇게 적었다. 천하의 일은 합쳐지면 나뉘고 나뉘면 다시 합쳐진다는 말이 있다.';
-const chapters = TITLES.map((t, i) => `## 제${i + 1}회 ${t}\n${(para + '\n\n').repeat(i === 0 ? 30 : 6)}각주가 있는 문장[^${i + 1}]입니다.\n\n[^${i + 1}]: 오기를 보이는 각주의 槳 한 글자와 傕 그리고 龔·劭·褚·隗·慎 이다.\n`).join('\n');
+const chapters = TITLES.map((t, i) => `## 제${i + 1}회 ${t}\n${(para + '\n\n').repeat(i < 3 ? 30 : 6)}각주가 있는 문장[^${i + 1}]입니다.\n\n[^${i + 1}]: 오기를 보이는 각주의 槳 한 글자와 傕 그리고 龔·劭·褚·隗·慎 이다.\n`).join('\n');
 const mdOf = (extraMeta) => `# 삼국지연의 완역 1\n> 저자: 나관중\n> 출판사: 고전서재\n> 판형: A5\n${extraMeta || ''}\n## [목차]\n\n## 1부. 도원결의\n\n${chapters}\n`;
 
 async function build(name, md, { tweak, opts } = {}) {
@@ -95,25 +97,28 @@ function tocEntries(tp) {
 
 (async () => {
   console.log('\n[1] 글꼴 사슬 · 동봉 파일');
-  const FD = path.join(__dirname, '..', 'assets', 'fonts', 'book');
   ok(fs.existsSync(path.join(FD, 'NotoSerifKR-Light.ttf')) && fs.existsSync(path.join(FD, 'NotoSerifKR-OFL.txt')), 'Noto Serif KR Light 부분집합 + OFL 라이선스 파일 동봉');
+  ok(fs.existsSync(path.join(FD, 'HanjaSerif-Light.ttf')) && fs.existsSync(path.join(FD, 'HanjaSerif-OFL.txt')) && /OFL|Open Font License/.test(fs.readFileSync(path.join(FD, 'HanjaSerif-OFL.txt'), 'utf8')), '한자 보강 명조(Noto Serif CJK KR 한자 부분집합) + OFL 라이선스 파일 동봉(로이 승인 10-01)');
   const css = require('../core/book/pdf-builder').bundledFontCss((p) => 'x/' + path.basename(p));
   ok(/font-family: 'Noto Serif KR'[^}]*NotoSerifKR-Light\.ttf[^}]*font-weight: 300/.test(css), '@font-face Noto Serif KR = Light(300)');
-  ok(!/Priming Hanja Serif/.test(css), '한자 보강 명조 파일은 아직 없다(Pan-CJK 동봉은 로이 승인 뒤) → @font-face 도 없다');
-  const HB = require('../core/book/html-builder');
+  ok(/font-family: 'Priming Hanja Serif'[^}]*HanjaSerif-Light\.ttf[^}]*font-weight: 300/.test(css), '@font-face Priming Hanja Serif = Light(300)');
   const stack = HB.FONT_STACKS.kopub;
   ok(stack.startsWith("'KoPubWorld Batang', 'Noto Serif KR', 'NanumMyeongjo', 'Batang', 'Priming Hanja Serif'") && /serif$/.test(stack), '본문 글꼴 목록: KoPub(맨 앞 유지) → Noto Serif KR → 나눔명조 → 바탕 → 한자 보강 자리 → serif');
 
   console.log('\n[2] 누락 글리프 판정(순수) — 판별력 포함');
   const SAMPLE = '槳 傕 愼 慎 龔 劭 褚 隗 삼국지 abc';
   const full = G.missingGlyphs(SAMPLE, G.defaultChain(FD, false));   // Windows 바탕 없이 — 어느 PC 에서나 같은 결과
-  const miss = full.missing.map((m) => m.ch).join('');
-  ok(miss.includes('槳') && miss.includes('傕') && miss.includes('慎') && !/[龔劭褚隗愼]/.test(miss), `사슬(동봉 글꼴만)에서 못 찾는 글자 = 槳 傕 慎 (실제: ${miss})`);
+  ok(full.missing.length === 0, `한자 보강 명조까지 사슬에 넣으면 槳·傕·慎 도 해결 — 누락 ${full.missing.length}종`);
+  const noHanja = G.missingGlyphs(SAMPLE, G.defaultChain(FD, false, { hanja: false }));
+  const miss = noHanja.missing.map((m) => m.ch).join('');
+  ok(miss.includes('槳') && miss.includes('傕') && miss.includes('慎') && !/[龔劭褚隗愼]/.test(miss), `판별력: 한자 보강 칸이 없으면 槳 傕 慎 이 누락으로 잡힌다 (실제: ${miss})`);
   const onlyKopub = G.missingGlyphs(SAMPLE, [['KoPub', [path.join(FD, 'KoPubWorld-Batang-Light.ttf')]]]);
-  ok(onlyKopub.missing.length > full.missing.length && onlyKopub.missing.some((m) => m.ch === '龔'), '판별력: Noto Serif KR 이 없으면 龔 등이 더 누락으로 잡힌다');
-  const warn = G.formatWarning(full);
+  ok(onlyKopub.missing.length > noHanja.missing.length && onlyKopub.missing.some((m) => m.ch === '龔'), '판별력: Noto Serif KR 도 없으면 龔 등이 더 누락으로 잡힌다');
+  const warn = G.formatWarning(noHanja);
   ok(/글꼴에 없는 글자 3종/.test(warn) && /槳\(U\+69F3\)/.test(warn) && /傕\(U\+5095\)/.test(warn), '경고 문구: ' + warn.slice(0, 70) + '…');
   ok(G.missingGlyphs('삼국지 abc 123', G.defaultChain(FD, false)).missing.length === 0, '누락 없으면 빈 목록');
+  const rare = G.missingGlyphs('㐀', G.defaultChain(FD, false));   // 확장 A — 일부러 뺀 희귀 한자
+  ok(rare.missing.length === 1 && /희귀 한자/.test(G.formatWarning(rare)), '확장 A 희귀 한자는 경고로 알린다(동봉 부분집합에서 뺐다)');
   const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   ok(/warnMissingGlyphs\(html, '미리보기'\)/.test(M) && /warnMissingGlyphs\(html, '내지 PDF'\)/.test(M), 'main: 미리보기·내지 PDF 조판 때 경고');
   const py = path.join('D:/## 출판/고전완역/삼국지/작품사전/글리프검사.py');
@@ -124,7 +129,7 @@ function tocEntries(tp) {
       const r = spawnSync('python', [py, tf, '--체인', '권장'], { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
       const outTxt = r.stdout || '';
       const pyMiss = (outTxt.match(/⛔ 튀는 글자: ([^\s]+(?: [^\s—]+)*)/) || [,''])[1].replace(/\s/g, '');
-      const ours = G.missingGlyphs(SAMPLE, G.defaultChain(FD, false)).missing.map((m) => m.ch).sort().join('');
+      const ours = G.missingGlyphs(SAMPLE, G.defaultChain(FD, false, { hanja: false })).missing.map((m) => m.ch).sort().join('');   // 출판 세션 도구는 한자 보강 칸을 모른다 — 같은 사슬로 대조
       ok(pyMiss.split('').sort().join('') === ours, `출판 세션 글리프검사.py(--체인 권장)와 같은 누락 글자: 파이썬 [${pyMiss}] · 앱 [${ours}]`);
     } catch (e) { console.log('  (파이썬 대조 건너뜀: ' + e.message + ')'); }
   } else console.log('  (글리프검사.py 없음 — 대조 건너뜀)');
@@ -164,11 +169,23 @@ function tocEntries(tp) {
   ok(oddHdr.length === 1, `긴 회목(80자+)의 홀수쪽 머리글이 한 줄(말줄임) — 줄 수 ${oddHdr.length}: 「${oddHdr.map((l) => l.t).join(' / ').slice(0, 50)}」`);
   const evenHdr = hdrLines(A.pages.find((p) => p.n === chStart(1).n + 1));
   ok(evenHdr.length === 1 && /삼국지연의 완역 1/.test(evenHdr[0].t), '짝수쪽 머리글 = 책 제목 한 줄: ' + (evenHdr[0] && evenHdr[0].t));
+  // (f2) 📏 제목 길이 기준(title-fit)의 예측 = 실제 조판 — 목차 줄 수·머리글 잘림
+  const TFm = require('../core/book/title-fit');
+  const bookA = parseBookText(MDmain, 'x'); const oA = HB.resolveBookOptions(bookA, {}).o;
+  const fitA = TFm.analyze(bookA, oA, FD, { chapterExcluded: HB.chapterExcluded });
+  const lineMatch = fitA.items.filter((it) => { const e = ents.find((x) => x.no === it.num); return e && e.body.length === it.tocLines; });
+  ok(lineMatch.length >= 12, `title-fit 가 예측한 목차 줄 수 = 실제 조판 줄 수 (${lineMatch.length}/13${lineMatch.length < 13 ? ' — 어긋난 회: ' + fitA.items.filter((it) => !lineMatch.includes(it)).map((it) => `제${it.num}회 예측 ${it.tocLines} 실제 ${(ents.find((x) => x.no === it.num) || { body: [] }).body.length}`).join(', ') : ''})`);
+  ok(fitA.items[0].flags.includes('header') && /…$/.test(oddHdr[0].t.trim()), `예측대로 1회(80자+)의 머리글이 실제로 …로 잘린다: 「${oddHdr[0].t.trim().slice(-14)}」`);
+  // 1~3회는 3쪽 넘게 만들어 홀수쪽 머리글을 실제로 본다 — 예측(잘림 여부)과 실제(…)가 회마다 같다
+  const realCut = [1, 2, 3].map((n) => { const cs = chStart(n); const pg = A.pages.find((p) => p.n === cs.n + 2); const l = pg ? hdrLines(pg) : []; return l.length === 1 && /…$/.test(l[0].t.trim()); });
+  const predCut = [0, 1, 2].map((i) => fitA.items[i].flags.includes('header'));
+  ok(JSON.stringify(realCut) === JSON.stringify(predCut) && predCut.some((x) => x) && predCut.some((x) => !x), `회마다 예측(잘림 ${predCut.join('/')}) = 실제 조판(…로 잘림 ${realCut.join('/')}) — 판별력: 잘리는 회와 안 잘리는 회가 둘 다 있다`);
   // (g) 글꼴 — 각주의 龔 은 동봉 Noto Serif KR(Light)
-  const fnPage = A.pages.find((p) => p.n === chStart(2).n);
+  const fnPage = A.pages.find((p) => p.n >= chStart(2).n && /槳/.test(p.text));   // 2회의 각주가 놓인 쪽(장 끝)
   const fontOf = (pg, ch) => { for (const l of pg.lines) for (const c of l.chars) if (c.c === ch) return c.font; return ''; };
   ok(/NotoSerifKR/.test(fontOf(fnPage, '龔')) && /NotoSerifKR/.test(fontOf(fnPage, '劭')), `각주의 龔·劭 → 동봉 Noto Serif KR: ${fontOf(fnPage, '龔')}`);
   ok(/KoPub/.test(fontOf(fnPage, '각')), '본문 글자는 그대로 KoPub월드 바탕(맨 앞 순서 유지): ' + fontOf(fnPage, '각'));
+  ok(/NotoSerifCJK/.test(fontOf(fnPage, '槳')) && /NotoSerifCJK/.test(fontOf(fnPage, '傕')) && /NotoSerifCJK/.test(fontOf(fnPage, '慎')), `槳·傕·慎 → 한자 보강 명조(고딕으로 튀지 않는다): ${fontOf(fnPage, '槳')} / ${fontOf(fnPage, '傕')} / ${fontOf(fnPage, '慎')}`);
 
   console.log('\n[4] 🔎 판별력 — 옛 방식으로 되돌리면 같은 단언이 실패한다');
   const OLD = (html) => html.replace('</style>', 'nav.toc .tt { text-align: justify !important; } nav.toc a { align-items: baseline !important; } nav.toc li { break-inside: auto !important; }\n@page :right { @top-center { white-space: normal !important; text-overflow: clip !important; max-width: none !important; } }</style>');

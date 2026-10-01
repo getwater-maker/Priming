@@ -62,6 +62,10 @@ ${para}
     // ── 본문 장 출력 제외(v0.3.33) — 원고는 그대로 두고 책에서만 뺀다 ──
     //   §0 진행 현황·체크리스트처럼 원고엔 있어야 하지만 인쇄물엔 없어야 하는 장을 클릭 한 번으로.
     await win.click('[data-tab=structure]');   // 탭 선택은 localStorage(bk-tab)에 남는다 — 늘 구조 탭에서 시작
+    await win.waitForSelector('[data-testid=bk-titlefit]', { timeout: 15000 });   // 📏 제목 길이 기준(구조 탭)
+    const fitTxt = await win.locator('[data-testid=bk-titlefit]').innerText();
+    if (!/제목 길이 기준/.test(fitTxt) || !/머리글 한 줄 ≈ \d+자/.test(fitTxt) || !/목차 2줄 ≈ \d+자/.test(fitTxt)) throw new Error('제목 길이 기준 상자 내용이 이상함: ' + fitTxt);
+    console.log('· 구조 탭 제목 길이 기준 OK —', fitTxt.replace(/\s+/g, ' ').slice(0, 70));
     const chBoxes = win.locator('.bkch input[type=checkbox]');
     const chCount = await chBoxes.count();
     if (chCount !== 2) throw new Error(`장 체크박스 ${chCount}개 ≠ 2`);

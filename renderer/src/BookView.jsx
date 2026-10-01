@@ -158,6 +158,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const [outputs, setOutputs] = useState([]);
   const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
   useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
+  const [titleFit, setTitleFit] = useState(null);
   useEffect(() => { setShowCover(true); }, [dto && dto.scriptPath]);   // 원고를 열면 표지부터
   useEffect(() => { if (!cover && showCover) setShowCover(false); }, [cover]);
   // 표지 배율 — 칸 크기에 맞춘다(펼침면 가로·세로 모두 들어가게)
@@ -216,6 +217,15 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     }, 300);
     return () => { live = false; clearTimeout(t); };
   }, [loaded, contentSig, dto && dto.lastPages, dto && dto.flaps, dto && dto.coverImagePath, dto && dto.coverCheck && dto.coverCheck.ok]);
+  // 📏 제목 길이 기준 — 머리글(전체 회목 사용 시)·목차에 안 들어가는 회목을 구조 탭이 미리 알린다(조판 없이 글꼴 폭으로 계산)
+  useEffect(() => {
+    if (!loaded) { setTitleFit(null); return undefined; }
+    let live = true;
+    const t = setTimeout(async () => {
+      try { const r = await api.bookTitleFit({ layout }); if (live) setTitleFit(r && r.ok ? r : null); } catch (_) { if (live) setTitleFit(null); }
+    }, 350);
+    return () => { live = false; clearTimeout(t); };
+  }, [loaded, contentSig]);
 
   // ── vivliostyle 로드 ──
   //   ⚠ 반드시 iframe 안에 렌더 — 같은 document 에 렌더하면 앱 전역 CSS(p 마진·폰트 14px 등)가
@@ -662,6 +672,19 @@ body{overflow-y:scroll}
         <label className="chk"><input type="checkbox" checked disabled /> 속표지 <span className="meta">(자동)</span></label>
         {(dto.reserved || []).filter((r) => r.zone === 'front').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
         <div className="bkzone">본문 — 장 {chapters.length}개</div>
+        {titleFit && (() => {
+          const f = titleFit, bad = f.count.header + f.count.toc3 + f.count.max;
+          return (
+            <div className={'bkfit' + (bad ? ' warn' : '')} data-testid="bk-titlefit" title="글꼴의 실제 글자 폭으로 잰 값입니다 — 머리글은 한 줄만 쓸 수 있어 넘치면 …로 줄어듭니다">
+              📏 <b>제목 길이 기준</b>
+              <div className="meta">머리글 한 줄 ≈ <b>{f.header.charsApprox}자</b>{f.header.usesFullTitle ? ' (지금 전체 회목을 머리글에 씁니다)' : ' — 지금 머리글은 전체 회목이 아니라 회목 길이와 무관'} · 목차 2줄 ≈ <b>{f.toc.chars2Approx}자</b> · 3줄 ≈ {f.toc.chars3Approx}자{f.limitChars ? <> · 원고 기준 <b>회목최대 {f.limitChars}자</b></> : null}</div>
+              {bad > 0
+                ? <div className="bkfit-bad">⚠ {f.count.header ? `머리글에서 잘리는 제목 ${f.count.header}개 · ` : ''}{f.count.toc3 ? `목차 4줄 이상 ${f.count.toc3}개 · ` : ''}{f.count.max ? `기준 초과 ${f.count.max}개 · ` : ''}아래 ⚠ 표시 — {f.count.header ? '머리글을 「제N회」로 바꾸거나 ' : ''}회목을 줄이세요</div>
+                : <div className="bkfit-ok">✓ 모든 회목이 기준 안에 들어갑니다</div>}
+              {bad === 0 && f.count.toc2 > 0 ? <div className="meta">(목차 3줄이 되는 회목 {f.count.toc2}개 — 허용 범위)</div> : null}
+            </div>
+          );
+        })()}
         <div className="bkchapters">
           {(dto.parts || []).map((p, pi) => (
             <React.Fragment key={pi}>
@@ -672,7 +695,12 @@ body{overflow-y:scroll}
                   <label key={c.num} className="bkch chk" style={chOn ? undefined : { opacity: 0.5, textDecoration: 'line-through' }}
                     title={`문단 ${c.blocks}개 — 미리보기에서 클릭해 수정 · 체크 해제 = 책에서 제외(원고 보존)`}>
                     <input type="checkbox" checked={chOn} disabled={!c.title}
-                      onChange={(e) => toggleChapter(c.title, e.target.checked)} /> {c.title || `(제목 없음)`}
+                      onChange={(e) => toggleChapter(c.title, e.target.checked)} />
+                    {(() => {
+                      const it = titleFit && (titleFit.items || []).find((x) => x.title === c.title);
+                      const why = it && it.flags.filter((x) => x !== 'toc2').map((x) => (x === 'header' ? '머리글에서 잘림' : x === 'toc3' ? `목차 ${it.tocLines}줄` : '회목최대 초과'));
+                      return why && why.length ? <span className="bkfit-badge" title={`${it.chars}자 — ${why.join(' · ')}`}>⚠ {why[0]}</span> : null;
+                    })()} {c.title || `(제목 없음)`}
                   </label>
                 );
               })}

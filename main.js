@@ -7998,6 +7998,26 @@ function rememberBookLayout(layout) {
 }
 // 📝 글꼴에 없는 글자 경고(삼국지 R12) — 조판 HTML 의 보이는 글자 중 글꼴 사슬(KoPub → Noto Serif KR → 나눔명조 → 바탕 → 한자 보강)
 //   어디에도 없는 글자는 시스템 대체 글꼴(고딕)로 튀어 한 글자만 굵게 보인다. 같은 목록이면 다시 알리지 않는다(미리보기는 고칠 때마다 조판한다).
+// 📏 제목 길이 기준(title-fit) — 머리글(전체 회목 사용 시)·목차에 안 들어가는 회목을 조판 때 알린다. 같은 목록이면 다시 알리지 않는다.
+let _titleWarnSig = '';
+function bookTitleFit(layoutOpts) {
+  const TF = require('./core/book/title-fit');
+  const HB = require('./core/book/html-builder');
+  const { o } = HB.resolveBookOptions(S.parsed, layoutOpts);
+  return TF.analyze(S.parsed, o, path.join(__dirname, 'assets', 'fonts', 'book'), { excluded: layoutOpts.excluded || [], chapterExcluded: HB.chapterExcluded });
+}
+function warnLongTitles(layoutOpts, label) {
+  try {
+    const TF = require('./core/book/title-fit');
+    const fit = bookTitleFit(layoutOpts);
+    const ws = TF.warnings(fit);
+    const sig = ws.join('|');
+    if (sig === _titleWarnSig) return fit;
+    _titleWarnSig = sig;
+    for (const w of ws) log(w + (label ? ` (${label})` : ''));
+    return fit;
+  } catch (_) { return null; }
+}
 let _glyphWarnSig = '';
 function warnMissingGlyphs(html, label) {
   try {
@@ -8135,6 +8155,11 @@ ipcMain.handle('book-save-guide', async () => {
 // 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13 · 로이 2026-10-01 「맨 첫 페이지에서 표지·책등·뒷표지가 한눈에」) — **미리보기 전용**.
 //   표지 장은 Vivliostyle 문서에 넣지 않는다(쪽번호·목차 쪽이 실제 PDF 와 어긋나지 않게) — 화면(BookView)이 표지를 맨 앞 한 화면으로 얹는다.
 //   내용 = 표지 PDF 가 실제로 만들 모습(같은 bookCoverPlan + buildCoverHtml): 첨부 표지 이미지(+ 구조 탭에서 켜 둔 표지 문구) 또는 원고 [뒷표지]·[앞날개]·[뒷날개]·[책등] 조판.
+// 📏 제목 길이 기준 — 구조 탭이 보여 준다(조판 없이 글꼴 폭으로 계산 · 가볍다)
+ipcMain.handle('book-title-fit', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  try { return bookTitleFit(bookLayoutOpts(args)); } catch (e) { log('제목 길이 검사 오류: ' + e.message); return null; }
+});
 ipcMain.handle('book-cover-preview', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
   try {
@@ -8182,6 +8207,7 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
       sourceMap: true,
     });
     warnMissingGlyphs(html, '미리보기');
+    warnLongTitles(bookLayoutOpts(args), '미리보기');
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
     fs.mkdirSync(dir, { recursive: true });
     // 조판마다 새 파일명 — URL 쿼리(?t=) 캐시버스터는 vivliostyle target-counter(목차 쪽번호)의
@@ -8238,6 +8264,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
       imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
     });
     warnMissingGlyphs(html, '내지 PDF');
+    warnLongTitles(bookLayoutOpts(args), '내지 PDF');
     const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');
     const interiorPdf = path.join(outRoot, `${base}_내지.pdf`);
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
@@ -8438,7 +8465,7 @@ const BOOK_META_LABELS = {
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
   ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
-  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간',
+  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
