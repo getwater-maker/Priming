@@ -30,7 +30,9 @@ const EXCLUDE_REL = [
   /^tts\/omnivoice-backend\//,
   // 출판용 폰트(56MB)만 제외한다. 🎬 유튜브 MP4 자막 폰트(assets/fonts/Pretendard-Bold.ttf · 2.4MB)는
   //   **배포해야 한다** — 예전엔 assets/fonts/ 전체를 막아서 아내 PC 에 폰트가 없으면 자막이 맑은 고딕으로 나간다.
-  /^assets\/fonts\/book\//,
+  //   🔑 단 NotoSerifKR-·HanjaSerif- 로 시작하는 폴백 글꼴(합쳐 ~10MB)과 그 라이선스는 **배포한다** — 라이트 업데이트가 못 가져가면
+  //   설치본엔 글꼴 파일이 없는데 @font-face 선언만 들어와 조용히 시스템 대체(고딕)로 보인다(삼국지 R15 · 2026-10-01). KoPub·나눔은 계속 제외.
+  /^assets\/fonts\/book\/(?!(NotoSerifKR-|HanjaSerif-)|$)/,   // ⚠ `|$` — 폴더 자체(`book/`)는 제외하지 않는다(안 그러면 폴더째 건너뛰어 예외가 소용없다)
   // 프로젝트 루트에 임시로 둔 미디어(영상·음원)는 앱 파일이 아니므로 제외.
   //   ⚠ 안 막으면 mp3 하나만 놔둬도 매니페스트에 섞여 GitHub 에 올라가고 **모든 PC 가 수십MB 를 받는다.**
   //   dummy-tts.mp3(무음 더미)는 앱이 쓰므로 유지. 하위 폴더 미디어(vrew/dummy 등)는 영향 없음.

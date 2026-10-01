@@ -8019,15 +8019,30 @@ function warnLongTitles(layoutOpts, label) {
   } catch (_) { return null; }
 }
 let _glyphWarnSig = '';
+let _fontFileWarnSig = null;
+// 선언했는데 설치 폴더에 없는 동봉 글꼴 — 조용히 시스템 대체(고딕)로 넘어가지 않게(삼국지 R15). 같은 목록은 한 번만 알린다.
+function warnMissingFontFiles(label) {
+  try {
+    const miss = require('./core/book/pdf-builder').missingBundledFonts();
+    const sig = miss.join(',');
+    if (sig === _fontFileWarnSig) return miss;
+    _fontFileWarnSig = sig;
+    if (miss.length) log(`⚠ 동봉 글꼴 파일 없음: ${miss.join(', ')} — 이 앱의 설치 폴더(${path.join(__dirname, 'assets', 'fonts', 'book')})에 없어 시스템 대체 글꼴로 조판됩니다(한자가 고딕으로 튈 수 있음). 앱을 한 번 더 껐다 켜서 업데이트를 받아 보세요${label ? ` (${label})` : ''}`);
+    return miss;
+  } catch (_) { return []; }
+}
 function warnMissingGlyphs(html, label) {
   try {
     const G = require('./core/book/glyph-check');
+    // 🔑 판정 기준 = 지금 실행 중인 앱의 폴더(__dirname)에 실제로 있는 글꼴 파일. 못 읽는 글꼴이 있으면 「누락 0」이라 하지 않는다.
     const r = G.missingGlyphs(G.visibleText(html), G.defaultChain(path.join(__dirname, 'assets', 'fonts', 'book')));
-    const sig = r.missing.map((m) => m.cp).join(',');
+    const unread = (r.unreadable || []);
+    const sig = r.missing.map((m) => m.cp).join(',') + '|' + unread.join(',');
     if (sig === _glyphWarnSig) return r;
     _glyphWarnSig = sig;
     if (r.missing.length) log(G.formatWarning(r) + (label ? ` (${label})` : ''));
-    else if (sig === '' && r.checked) log(`✓ 글꼴 확인 — 원고의 비ASCII 글자 ${r.checked}종이 모두 글꼴 목록 안에서 해결됩니다`);
+    else if (unread.length) log(`ℹ 글꼴 확인 불완전 — 읽지 못한 글꼴: ${unread.join(', ')} (읽은 글꼴 안에서는 누락 글자 없음)`);
+    else if (r.checked) log(`✓ 글꼴 확인 — 원고의 비ASCII 글자 ${r.checked}종이 모두 글꼴 목록 안에서 해결됩니다`);
     return r;
   } catch (_) { return null; }
 }
@@ -8206,6 +8221,7 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
       fontCss: bundledFontCss(mediaUrl),
       sourceMap: true,
     });
+    warnMissingFontFiles('미리보기');
     warnMissingGlyphs(html, '미리보기');
     warnLongTitles(bookLayoutOpts(args), '미리보기');
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
@@ -8263,6 +8279,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
       imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
     });
+    warnMissingFontFiles('내지 PDF');
     warnMissingGlyphs(html, '내지 PDF');
     warnLongTitles(bookLayoutOpts(args), '내지 PDF');
     const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');

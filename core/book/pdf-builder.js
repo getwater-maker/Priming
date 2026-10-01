@@ -25,31 +25,37 @@ function chromiumPath() {
 // 동봉 폰트 @font-face CSS. urlFor(absPath)→URL (기본 file:///).
 //   ⚠ 정적(static) 웨이트만 사용 — 가변폰트(variable TTF)는 Chromium 이 PDF 에 Type3(패스)로
 //   구워 인쇄 RIP 호환성이 떨어짐. 나눔명조/나눔고딕(OFL)은 CIDFontType2 로 정상 임베딩.
+// 동봉 글꼴 선언 표 — @font-face 와 「파일 있나」 점검이 같은 표를 쓴다(선언은 있는데 파일이 없으면 조용히 시스템 대체로 넘어간다 — 삼국지 R15).
+//   KoPubWorld (구 Book Publishing 앱에서 이식 — 문화부 배포 무료·출판 허용)
+//     ⚠ woff2/otf(CFF)는 Chromium PDF 가 Type3(패스)로 구움 → fonttools(cu2qu)로 TrueType 변환해 동봉 = Type0(CID) 임베딩. Light(300)·Bold(700)만.
+//   🔤 Noto Serif KR(Light 부분집합 · 폴백 명조) · Priming Hanja Serif(Noto Serif CJK KR 한자 12,421자 · 로이 승인 2026-10-01) = OFL, 각각 *-OFL.txt.
+//   🔑 NotoSerifKR-·HanjaSerif- 파일은 라이트 업데이트로 배포된다(scripts/gen-manifest.js 예외 — KoPub·나눔은 설치본에만).
+const BUNDLED_FACES = [
+  ['KoPubWorld Batang', 'KoPubWorld-Batang-Light.ttf', 300],
+  ['KoPubWorld Batang', 'KoPubWorld-Batang-Bold.ttf', 700],
+  ['KoPubWorld Dotum', 'KoPubWorld-Dotum-Light.ttf', 300],
+  ['KoPubWorld Dotum', 'KoPubWorld-Dotum-Bold.ttf', 700],
+  ['Noto Serif KR', 'NotoSerifKR-Light.ttf', 300],
+  ['Priming Hanja Serif', 'HanjaSerif-Light.ttf', 300],
+  ['NanumMyeongjo', 'NanumMyeongjo-Regular.ttf', 400],
+  ['NanumMyeongjo', 'NanumMyeongjo-Bold.ttf', 700],
+  ['NanumGothic', 'NanumGothic-Regular.ttf', 400],
+  ['NanumGothic', 'NanumGothic-Bold.ttf', 700],
+];
 function bundledFontCss(urlFor) {
   const toUrl = urlFor || ((p) => 'file:///' + p.replace(/\\/g, '/'));
   const css = [];
-  const face = (family, file, weight) => {
-    const p = path.join(FONT_DIR, file);
-    if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight}; }`);
-  };
   try {
-    // KoPubWorld (구 Book Publishing 앱에서 이식 — 문화부 배포 무료·출판 허용)
-    //   ⚠ woff2/otf(CFF)는 Chromium PDF 가 Type3(패스)로 구움 → fonttools(cu2qu)로 TrueType 변환해 동봉 = Type0(CID) 임베딩.
-    //   용량 절약으로 Light(300)·Bold(700)만 동봉(Medium 제외).
-    face('KoPubWorld Batang', 'KoPubWorld-Batang-Light.ttf', 300);
-    face('KoPubWorld Batang', 'KoPubWorld-Batang-Bold.ttf', 700);
-    face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Light.ttf', 300);
-    face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Bold.ttf', 700);
-    // 🔤 폴백 명조 — 본문(KoPub 바탕 Light)에 없는 글자(한자·기호)를 같은 굵기(300)로 받는다. Noto Serif KR = OFL(NotoSerifKR-OFL.txt) · Light 정적 부분집합.
-    face('Noto Serif KR', 'NotoSerifKR-Light.ttf', 300);
-    // 한자 보강 명조 자리 — 파일이 있을 때만(Pan-CJK 명조 동봉은 로이 승인 뒤). 傕·槳 같은 KS 밖 한자용.
-    face('Priming Hanja Serif', 'HanjaSerif-Light.ttf', 300);
-    face('NanumMyeongjo', 'NanumMyeongjo-Regular.ttf', 400);
-    face('NanumMyeongjo', 'NanumMyeongjo-Bold.ttf', 700);
-    face('NanumGothic', 'NanumGothic-Regular.ttf', 400);
-    face('NanumGothic', 'NanumGothic-Bold.ttf', 700);
+    for (const [family, file, weight] of BUNDLED_FACES) {
+      const p = path.join(FONT_DIR, file);
+      if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight}; }`);
+    }
   } catch (_) {}
   return css.join('\n');
+}
+/** 선언했는데 폴더에 없는 동봉 글꼴 파일 이름들(없으면 []) — 있으면 그 글꼴은 조용히 시스템 대체로 보인다 */
+function missingBundledFonts(dir = FONT_DIR) {
+  return BUNDLED_FACES.filter(([, file]) => !fs.existsSync(path.join(dir, file))).map(([, file]) => file);
 }
 
 /**
@@ -301,4 +307,4 @@ function lastLines(s, n = 4) {
   return lines.slice(-n).join(' | ').slice(0, 400);
 }
 
-module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, prepareWorkAssets, pdfPageCount };
+module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, missingBundledFonts, BUNDLED_FACES, prepareWorkAssets, pdfPageCount };

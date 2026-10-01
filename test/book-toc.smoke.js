@@ -129,8 +129,11 @@ function tocEntries(tp) {
       const r = spawnSync('python', [py, tf, '--체인', '권장'], { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
       const outTxt = r.stdout || '';
       const pyMiss = (outTxt.match(/⛔ 튀는 글자: ([^\s]+(?: [^\s—]+)*)/) || [,''])[1].replace(/\s/g, '');
-      const ours = G.missingGlyphs(SAMPLE, G.defaultChain(FD, false, { hanja: false })).missing.map((m) => m.ch).sort().join('');   // 출판 세션 도구는 한자 보강 칸을 모른다 — 같은 사슬로 대조
-      ok(pyMiss.split('').sort().join('') === ours, `출판 세션 글리프검사.py(--체인 권장)와 같은 누락 글자: 파이썬 [${pyMiss}] · 앱 [${ours}]`);
+      // 출판 세션 도구는 한자 보강 칸을 알게 됐을 수도(R15 이후) 모를 수도 있다 — 어느 쪽 사슬과든 같으면 통과
+      const chainMiss = (o) => G.missingGlyphs(SAMPLE, G.defaultChain(FD, false, o)).missing.map((m) => m.ch).sort().join('');
+      const ours = chainMiss({ hanja: false }), oursFull = chainMiss({});
+      const pm = pyMiss.split('').sort().join('');
+      ok(pm === ours || pm === oursFull, `출판 세션 글리프검사.py(--체인 권장)와 같은 누락 글자: 파이썬 [${pyMiss}] · 앱 [${ours}|보강 ${oursFull}]`);
     } catch (e) { console.log('  (파이썬 대조 건너뜀: ' + e.message + ')'); }
   } else console.log('  (글리프검사.py 없음 — 대조 건너뜀)');
 

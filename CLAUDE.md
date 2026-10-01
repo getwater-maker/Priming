@@ -32,6 +32,7 @@
   - 🔴 **`package.json` dependencies 가 바뀌면 라이트 업데이트가 막힌다**(매니페스트 `deps` 해시) → 설치본 재배포(`npm run dist`) 필요. ⛔ **npm 의존성을 쉽게 늘리지 않는다**(아내 PC 재설치가 따라온다). 형태소 분석기 등도 같은 이유로 안 쓴다.
   - 🔴 **버전은 앞으로만** — 고치기 전에 `package.json` 을 먼저 읽는다(다른 세션이 낡은 값으로 0.3.25→0.2.99 역행시킨 사고). `gen-manifest` 가 역행을 막는다(`ALLOW_VERSION_DOWNGRADE=1` 로만 우회).
   - 매니페스트 제외: 폴더 **이름**이 `scripts`·`.venv`·`qwen-design` 등인 곳 전체, `assets/fonts/book/`, **git 무시 파일**(`git check-ignore`). 🔴 배포할 파이썬은 `scripts/` 라는 이름 폴더에 두지 말 것(조용히 빠진다). 해시는 LF 정규화 기준.
+  - 🔴 **`assets/fonts/book/` 는 매니페스트에서 제외되지만 `NotoSerifKR-`·`HanjaSerif-` 로 시작하는 글꼴은 예외로 배포한다**(안 그러면 설치본에 글꼴 파일이 없어 한자가 고딕으로 튄다 · R15). 새 동봉 글꼴은 `BUNDLED_FACES` 에 올리고 이 예외 접두사도 함께 본다(`test:book` font-ship).
   - 설치본 버전 확인: `%LOCALAPPDATA%\Programs\priming\resources\app\package.json`. 발행 직후 「안 된다」면 먼저 이걸 본다(CDN 이 옛 매니페스트를 준 적 있음 — 한 번 더 재시작).
 - 로그: `~/.shots-maker/logs/YYYY-MM-DD.log`(KST · 7일 보관 · 화면 줄은 `[화면]` 접두). 로그창 「📁 파일」. 엔진(Flow 등) 로그도 파일로 후킹돼 있다.
 
