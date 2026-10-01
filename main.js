@@ -4791,6 +4791,19 @@ function _itemRange(s = {}, parsed = null) {
   if (intro.length) return { fromNum: 1, toNum: Math.max(...intro), src: '도입부 기본' };
   return { fromNum: 1, toNum: 1, src: '도입부 없음 — 안전을 위해 G1 만' };
 }
+// ⏸ 「이번 편까지만」(로이 2026-10-01) — 큐 순차 제작(run-batch)이 **다음 대본을 시작하기 전에** 본다.
+//   ■ 중단(S.abort)은 만들던 대본도 바로 멈추지만, 이건 지금 만드는 대본은 끝까지 마치고 다음부터 시작하지 않는다.
+//   ⚠ S.abort 와 **별개 플래그**다 — 합치면 「끝까지 만든다」가 「바로 멈춘다」로 바뀐다. run-batch 의 시작·끝에서 푼다.
+let _stopAfterItem = false;
+// plan[from..] 중 아직 만들 대본 수(이미 완료·큐에 없는 항목 제외) — 「남은 N편」 표시용.
+function _batchRemaining(plan, from, items) {
+  let n = 0;
+  for (let k = from; k < plan.length; k++) {
+    const it = (items || []).find((x) => x && plan[k] && x.id === plan[k].id);
+    if (it && it.status !== 'done') n++;
+  }
+  return n;
+}
 // 🔗 영상 참조가 비었는데 출력 폴더(media-N)에 그 그룹 번호의 영상이 남아 있으면 다시 잇는다(v0.5.49 · 아내 PC 실사고).
 //   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(Grok·Comfy 크레딧 보호).
 //   ⚠ ✕ 로 지운 영상(videoCleared)은 파일이 남아 있어도 되살리지 않는다. 그림이 없는 그룹도 건드리지 않는다.
@@ -6123,10 +6136,16 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
   S.abort = false;
+  _stopAfterItem = false;                    // 지난 큐의 「이번 편까지만」 예약이 남아 새 큐가 첫 편 뒤에 멈추지 않게
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
-  let okN = 0, failN = 0, skipN = 0;
+  let okN = 0, failN = 0, skipN = 0, stoppedLeft = 0;
   for (let i = 0; i < plan.length; i++) {
     if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
+    if (_stopAfterItem) {                    // ⏸ 방금 끝낸 대본까지만 — 다음 대본은 시작하지 않는다
+      stoppedLeft = _batchRemaining(plan, i, S.modes.longform.items);
+      if (stoppedLeft > 0) log(`⏸ 「이번 편까지만」 — 여기서 멈춥니다. 남은 ${stoppedLeft}편은 그대로 보존(⚡ 만들기를 다시 누르면 이어서)`);
+      break;
+    }
     const entry = plan[i] || {};
     storeActive(); // 직전 항목 편집분 저장
     S.mode = 'longform';
@@ -6186,9 +6205,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     }
     pushDtoUpdate();
   }
-  log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
+  _stopAfterItem = false;
+  log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
-  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), stoppedEarly: stoppedLeft > 0, remaining: stoppedLeft };
 }));
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
@@ -6204,6 +6224,15 @@ ipcMain.handle('abort', () => {
   clearGeneratingStatus();
   pushDtoUpdate();
   log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
+});
+
+// ⏸ 이번 편까지만 — 큐 순차 제작이 지금 만드는 대본을 끝까지 마친 뒤 멈추게 예약/취소(on=false). ■ 중단과 달리 만들던 건 그대로 끝낸다.
+ipcMain.handle('stop-after-item', (_e, on) => {
+  _stopAfterItem = on !== false;
+  log(_stopAfterItem
+    ? '⏸ 「이번 편까지만」 예약 — 지금 만드는 대본을 끝까지 마치고 멈춥니다'
+    : '▶ 「이번 편까지만」 예약 취소 — 큐를 끝까지 이어갑니다');
+  return _stopAfterItem;
 });
 
 // 초기화 — 현재 모드의 대본만 비움 (다른 모드 대본은 유지)

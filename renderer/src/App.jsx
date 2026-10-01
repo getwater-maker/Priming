@@ -416,6 +416,12 @@ export default function App() {
   //    다음 대본을 계속 시작했다(실측 2026-08-21: 0826 중단 → 0827·0828 이 이어서 시작됨).
   //    state 가 아니라 ref 인 이유: setState 는 비동기라 실행 중인 루프에 즉시 보이지 않는다.
   const queueAbortRef = useRef(false);
+  // ⏸ 「이번 편까지만」(로이 2026-10-01) — ■ 중단과 달리 지금 만드는 대본은 끝까지 마치고 다음 대본부터 시작하지 않는다.
+  //   main 의 run-batch 는 자기 플래그(_stopAfterItem)로, 이 파일의 큐 루프(runStageQueue)는 ref 로 본다.
+  //   queueBusy = 여러 대본을 순서대로 도는 중(버튼은 이때만 보인다 — 평소엔 헤더 폭을 쓰지 않는다).
+  const queueStopAfterRef = useRef(false);
+  const [queueBusy, setQueueBusy] = useState(false);
+  const [stopAfter, setStopAfter] = useState(false);
   const [logText, setLogText] = useState('');
 
   // 모달/플레이어 상태
@@ -980,11 +986,14 @@ export default function App() {
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
     const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
     queueAbortRef.current = false;                       // 새 큐 시작 — 지난 중단 기록 초기화
+    queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(items.length > 1);   // ⏸ 지난 예약 초기화 · 대본이 둘 이상일 때만 버튼을 보인다
+    let stoppedAfter = 0;                                // ⏸ 「이번 편까지만」으로 멈추며 남긴 편수
     for (const ph of phases) {
-      if (queueAbortRef.current) break;
+      if (queueAbortRef.current || stoppedAfter) break;
       const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
       for (let k = 0; k < items.length; k++) {
         if (queueAbortRef.current) { logline(`⏹ 큐 ${plabel} 중단 — 남은 ${items.length - k}편은 건너뜁니다`); break; }
+        if (queueStopAfterRef.current) { stoppedAfter = items.length - k; logline(`⏸ 큐 ${plabel} — 이번 편까지만 만들고 멈춥니다 (남은 ${stoppedAfter}편은 건너뜁니다)`); break; }
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
         try { await api.selectQueueItem(it.id, 'longform'); } catch (_) {}   // 🌐 제작 루프는 화면이 출판으로 바뀌어도 롱폼 세계로
@@ -996,7 +1005,8 @@ export default function App() {
       }
     }
     try { const r = await api.selectQueueItem(origId, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
-    setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : `⚡ 큐 ${label} 완료`);
+    queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false);
+    setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : stoppedAfter ? `⏸ 큐 ${label} — 이번 편까지 만들고 멈춤 (남은 ${stoppedAfter}편)` : `⚡ 큐 ${label} 완료`);
   }
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
   async function runImgVid(shortsNum) {
@@ -1061,6 +1071,7 @@ export default function App() {
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
+    queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(true);   // ⏸ 버튼을 보이고, 지난 예약은 초기화(main run-batch 도 시작 때 푼다)
     try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 방금 고친 헤더(범위 등)를 지금 대본에 먼저 저장 — 디바운스 300ms 전에 눌러도 반영(v0.5.73)
     try {
       // 비디오·이미지 엔진은 헤더값(이번 실행 공통)으로 전달 — 큐 항목별 stale 값 무시(헤더 '없음'이면 전 대본 영상 없음)
@@ -1071,8 +1082,9 @@ export default function App() {
       const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
-      setStatus('⚡⚡ 큐 제작 완료');
+      setStatus(r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
     } catch (e) { logline('큐 제작 오류: ' + e.message); setStatus('큐 제작 오류'); }
+    finally { queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false); }
   }
   // 📥 Vrew 에서 음성을 입혀 저장한 .vrew → 그 음성만 대본에 물려준다(.vrew 는 읽기만 한다).
   async function runImportVrewAudio() {
@@ -2145,7 +2157,14 @@ export default function App() {
     try { const d = await api.applyScriptText({ text }); if (d) { setDto(d); setFtitle(d.fileTitle || ftitle); } setScriptEditOpen(false); setStatus('대본 수정 적용 완료'); }
     catch (e) { logline('대본 수정 오류: ' + e.message); setStatus('오류'); }
   }
-  function abort() { queueAbortRef.current = true; api.abort(); setStatus('중단 요청됨'); }
+  function abort() { queueAbortRef.current = true; queueStopAfterRef.current = false; setStopAfter(false); api.abort(); setStatus('중단 요청됨'); }
+  // ⏸ 누를 때마다 예약 ↔ 취소. main(run-batch)과 이 파일의 큐 루프(runStageQueue) 둘 다에 알린다.
+  async function toggleStopAfter() {
+    const on = !queueStopAfterRef.current;
+    queueStopAfterRef.current = on; setStopAfter(on);
+    try { await api.stopAfterItem(on); } catch (e) { logline('이번 편까지만 예약 오류: ' + e.message); }
+    setStatus(on ? '⏸ 지금 만드는 대본까지만 만들고 멈춥니다 (다시 누르면 취소)' : '▶ 예약 취소 — 큐를 끝까지 이어갑니다');
+  }
 
   // ── 채널 설정 편집 ──
   // Electron 렌더러는 window.prompt 를 지원하지 않으므로(조용히 null) 이름 입력은 별도 모달로 받는다.
@@ -3723,6 +3742,13 @@ export default function App() {
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={`${qc > 1 ? `큐 ${qc}개 대본을 순서대로` : '이 대본을'} 음성 → 이미지 → 비디오 → 「④ 완성」에서 고른 형태(.vrew / ✏ 화이트보드 MP4 / 🎬 유튜브 MP4)까지 만듭니다. 이미 만든 것은 건너뜁니다(이어받기) — 음성·이미지가 다 있으면 .vrew·MP4 만 다시 나옵니다.`} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
             </>); })()}
+            {queueBusy && (
+              <button className={'ghost stop-after' + (stopAfter ? ' armed' : '')} data-testid="stop-after-btn"
+                title={stopAfter
+                  ? '예약됨 — 지금 만드는 대본까지 끝내고 멈춥니다. 다시 누르면 예약을 취소하고 큐를 끝까지 이어갑니다.'
+                  : '지금 만드는 대본은 끝까지 마치고, 다음 대본부터는 시작하지 않고 멈춥니다. (■ 중단은 만들던 것도 바로 멈춥니다) 남은 대본은 그대로 보존돼 ⚡ 만들기를 다시 누르면 이어서 만듭니다.'}
+                onClick={toggleStopAfter}>{stopAfter ? '⏸ 예약됨 · 취소' : '⏸ 이번 편까지만'}</button>
+            )}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
           </>)}
         </div>

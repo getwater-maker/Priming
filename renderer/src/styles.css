@@ -35,6 +35,10 @@ header{background:var(--bg);border-bottom:1px solid var(--line);padding:8px 16px
 button.cta{font-size:14px;font-weight:800;padding:8px 18px}
 button.stop{background:#fff;color:#c0392b;border-color:#e3b8b1}
 button.stop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
+/* ⏸ 이번 편까지만 — ■ 중단(빨강)과 구분되는 호박색. 예약되면(.armed) 채워서 켜져 있음을 보인다 */
+button.stop-after{background:#fff;color:#b9770e;border-color:#e6c98f}
+button.stop-after:hover{background:#b9770e;border-color:#b9770e;color:#fff}
+button.stop-after.armed{background:#f5b041;border-color:#b9770e;color:#3b2a05;font-weight:700}
 h1{font-size:17px;color:var(--strong);margin:0;font-weight:700}
 .grow{flex:1}
 button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;
