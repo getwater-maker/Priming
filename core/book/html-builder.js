@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
 const JB = require('./jakkawa-biblio');
+const { headerKindOf } = require('./header-kind');
 
 const THEME_CSS_PATH = path.join(__dirname, 'book-theme.css');
 
@@ -443,7 +444,11 @@ function tocHtml(book, tocTitle, excluded = []) {
     for (const c of p.chapters) {
       if (!c.title) continue;
       if (chapterExcluded(c.title, excluded)) continue; // 출력에서 뺀 장은 목차에도 안 나온다
-      items.push(`<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
+      // 「제N회」 라벨 칸 + 회목 칸(내어쓰기 · 2~3줄) — 점선·쪽번호는 마지막 줄에 붙는다(삼국지 R14). 형식이 아닌 장은 통째(예전 그대로).
+      const mT = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
+      items.push(mT
+        ? `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="no">${esc(mT[1])}</span><span class="tt">${esc(mT[2])}</span><span class="dots"></span></a></li>`
+        : `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
     }
   }
   return `<nav class="toc"><h2>${esc(tocTitle || '목차')}</h2><ol>${items.join('\n')}</ol></nav>`;
@@ -457,10 +462,15 @@ function endnotesHtml(ctx) {
 }
 
 // 폰트 키 → 스택 (전부 동봉 정적 웨이트 — 가변폰트는 PDF 에 Type3 로 구워져 배제)
+//   🔤 글자마다 앞에서부터 「그 글자를 가진 첫 글꼴」을 쓴다(Chromium). 본문 = KoPub월드 바탕 → **Noto Serif KR**(동봉 Light 부분집합 — 한자 8천여 자,
+//   본문과 같은 굵기라 폴백 글자가 굵게 튀지 않는다) → 나눔명조(한자 없음) → 바탕(Windows) → **한자 보강 명조 자리** → serif.
+//   한자 보강 자리 = 동봉 파일 `HanjaSerif-Light.ttf` 가 있으면 그것(@font-face 'Priming Hanja Serif'), 없으면 PC 에 깔린 Pan-CJK 명조 이름만 시도한다.
+//   Pan-CJK 명조를 **받아 동봉하는 것은 로이 승인 뒤**(삼국지 R12) — 지금은 자리만이다. 傕·槳 같은 글자는 이 자리가 채워져야 해결된다(누락 글리프 경고가 알려 준다).
+const HANJA_SLOT = `'Priming Hanja Serif', 'Noto Serif CJK KR', 'Noto Serif KR CJK', 'Source Han Serif K', 'Source Han Serif KR'`;
 const FONT_STACKS = {
-  kopub: `'KoPubWorld Batang', 'NanumMyeongjo', 'Batang', serif`,
+  kopub: `'KoPubWorld Batang', 'Noto Serif KR', 'NanumMyeongjo', 'Batang', ${HANJA_SLOT}, serif`,
   'kopub-dotum': `'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif`,
-  'nanum-myeongjo': `'NanumMyeongjo', 'KoPubWorld Batang', 'Batang', serif`,
+  'nanum-myeongjo': `'NanumMyeongjo', 'KoPubWorld Batang', 'Noto Serif KR', 'Batang', ${HANJA_SLOT}, serif`,
   'nanum-gothic': `'NanumGothic', 'KoPubWorld Dotum', 'Dotum', sans-serif`,
 };
 const FONT_OPTIONS = [
@@ -499,7 +509,8 @@ function pageCss(o) {
     // 단일 @top-center 박스(판면 폭 명시) + text-align — 모든 정렬 공통.
     //   ⚠ @top-left 와 @top-center 를 함께 쓰면 두 박스가 공간을 나눠 가져 왼쪽 글이
     //   중앙으로 밀리는 충돌(실측) → 박스는 하나만 쓴다.
-    return `@top-center { content: ${content}; width: ${bodyW}mm; text-align: ${align}; vertical-align: bottom; ${rh}${line} }`;
+    //   🔒 한 줄 안전망 — 어떤 설정(긴 회목 등)에서도 두 줄로 꺾이지 않는다(nowrap + 판면 폭 안에서 말줄임 · 삼국지 R12).
+    return `@top-center { content: ${content}; width: ${bodyW}mm; max-width: ${bodyW}mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: ${align}; vertical-align: bottom; ${rh}${line} }`;
   };
   const headerEvenBox = headerBoxes(o.headerEven, o.headerEvenAlign);
   const headerOddBox = headerBoxes(o.headerOdd, o.headerOddAlign);
@@ -576,8 +587,13 @@ div.special-sec h3 { margin: 0 0 8pt !important; }
 div.special-sec p { text-indent: 0; margin-bottom: 5pt; }
 /* 목차 행 — 제목 + 점선 리더(flex 빈칸의 dotted 밑줄) + 우측 쪽번호(target-counter).
    leader()는 미리보기(코어)와 CLI 렌더가 달라 폐기 — 이 방식은 양쪽 동일(실측). */
-nav.toc a { display: flex; align-items: baseline; text-decoration: none; color: inherit; }
-nav.toc a .tt { flex: 0 1 auto; }
+/* 🔖 삼국지 R14 — 제목 칸은 왼쪽 정렬·단어 안 끊김(본문의 양쪽 정렬을 상속하면 첫 줄이 벌어졌다) · 「제N회」 라벨 칸 + 회목 칸(내어쓰기) ·
+   점선+쪽번호는 **마지막 줄**(last baseline) · 항목은 쪽 경계에서 쪼개지지 않는다. 라벨은 첫 줄(first baseline). */
+nav.toc { text-align: left; word-break: keep-all; ${o.tocSizePt ? `font-size: ${o.tocSizePt}pt;` : ''} ${o.tocLineHeight ? `line-height: ${o.tocLineHeight};` : ''} }
+nav.toc li { break-inside: avoid; }
+nav.toc a { display: flex; align-items: last baseline; text-decoration: none; color: inherit; }
+nav.toc a .no { flex: 0 0 3.7em; align-self: first baseline; font-weight: 700; white-space: nowrap; }
+nav.toc a .tt { flex: 0 1 auto; text-align: left; word-break: keep-all; overflow-wrap: break-word; }
 nav.toc a .dots { flex: 1 1 auto; min-width: 1.5em; margin: 0 0.55em; border-bottom: 1.3px dotted #aaaaaa; transform: translateY(-0.28em); }
 nav.toc a::after {
   content: target-counter(attr(href url), page);
@@ -618,6 +634,7 @@ function specialKeywordsOf(meta, opts) {
 /**
  * BookModel → { html, css } (css 는 html 에 인라인 포함돼 있음 — html 만 쓰면 됨)
  */
+const numOrZero = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? n : 0; };
 function buildBookHtml(book, opts = {}) {
   const meta = book.meta || {};
   const platform = getPlatform(opts.platformId || metaPlatformId(meta));
@@ -646,8 +663,12 @@ function buildBookHtml(book, opts = {}) {
     footnoteMode: (meta.footnoteMode === '미주' || opts.footnoteMode === 'endnote') ? 'endnote' : 'footnote',
     // ── 머리글/쪽번호 노출 선택 ──
     //   내용: 책제목/부제/장제목/소제목(절)/없음 · 정렬: 왼쪽/가운데/오른쪽 (기본=바깥쪽 정렬 관행)
-    headerEven: pick(opts.headerEven, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
-    headerOdd: pick(opts.headerOdd, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽) · chapterNo = 「제N회」만
+    //   🔑 원고 메타 `> 머리글짝수:` `> 머리글홀수:` 가 있으면 **메타가 이긴다**(조판 설정은 원고별 저장이라 새 원고마다 다시 골라야 했다 — 삼국지 R12).
+    headerEven: pick(headerKindOf(meta.headerEven) || opts.headerEven, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
+    headerOdd: pick(headerKindOf(meta.headerOdd) || opts.headerOdd, ['title', 'subtitle', 'chapter', 'chapterNo', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽) · chapterNo = 「제N회」만
+    // 목차 글자(pt)·행간 — 0/빈칸 = 본문과 같음. 원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다(삼국지: 9.5pt · 1.45).
+    tocSizePt: numOrZero(meta.tocSize) || numOrZero(opts.tocSizePt),
+    tocLineHeight: numOrZero(meta.tocLine) || numOrZero(opts.tocLineHeight),
     headerEvenAlign: pick(opts.headerEvenAlign, ['left', 'center', 'right'], 'left'),   // 짝수쪽 바깥=왼쪽
     headerOddAlign: pick(opts.headerOddAlign, ['left', 'center', 'right'], 'right'),    // 홀수쪽 바깥=오른쪽
     headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선

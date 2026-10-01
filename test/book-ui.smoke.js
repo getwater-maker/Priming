@@ -175,6 +175,14 @@ ${para}
       if (/\?\?/.test(tocTxt)) throw new Error('목차 쪽번호 미해석(??) — target-counter 회귀');
       if (!/\d/.test(tocTxt.replace(/목차/g, ''))) throw new Error('목차에 쪽번호 숫자가 없음');
       console.log('· 목차 쪽번호 해석 OK (?? 없음)');
+      // 🔖 R14 — 미리보기(뷰어)에서도 목차 행이 새 구조: 점선+쪽번호는 마지막 줄(last baseline) · 왼쪽 정렬
+      const tocCss = await win.evaluate(() => {
+        const f = document.querySelector('.bkviewport'); const d = f && f.contentDocument;
+        const a = d && d.querySelector('nav.toc a'); const t = d && d.querySelector('nav.toc');
+        return a ? { ai: getComputedStyle(a).alignItems, ta: getComputedStyle(t).textAlign } : null;
+      });
+      if (tocCss && !(/last baseline/.test(tocCss.ai) && /left|start/.test(tocCss.ta))) throw new Error('미리보기 목차 행이 새 구조가 아님: ' + JSON.stringify(tocCss));
+      console.log('· 미리보기 목차 행: last baseline · 왼쪽 정렬', JSON.stringify(tocCss));
     }
 
     // 안정성 — 조판 완료 후 재조판 루프(깜빡임)가 없어야 한다.

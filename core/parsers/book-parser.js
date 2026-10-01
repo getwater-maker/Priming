@@ -82,6 +82,10 @@ const META_KEYS = {
   '전자책isbn': 'ebookIsbn', '전자책 isbn': 'ebookIsbn',
   // 반복 코너(예: 역사 노트) — 이 소제목 구간을 노트 상자로(쉼표로 여러 개 · 조판 설정 「특별 섹션」과 합친다)
   '특별섹션': 'specialSections', '특별 섹션': 'specialSections',
+  // 머리글 — 원고마다 한 줄로 고정(조판 설정은 원고별 저장이라 새 원고마다 다시 골라야 했다). 값: title·subtitle·chapter·chapterNo·section·none 또는 책제목·제N회·회목·소제목·없음
+  '머리글짝수': 'headerEven', '머리글 짝수': 'headerEven', '머리글홀수': 'headerOdd', '머리글 홀수': 'headerOdd',
+  // 목차 글자 크기(pt)·행간 — 비우면 본문과 같다(삼국지: 9.5pt · 1.45)
+  '목차글자': 'tocSize', '목차 글자': 'tocSize', '목차행간': 'tocLine', '목차 행간': 'tocLine',
   // 책등 두께(mm) — 플랫폼 화면이 알려 준 값. 적으면 계산을 이긴다(부크크 「새종이책」 화면 값)
   '책등두께': 'spineMm', '책등 두께': 'spineMm',
   // 플랫폼 등록 화면용 정보(조판에 안 들어간다 — 작가와·부크크 입력 항목)

@@ -7996,6 +7996,21 @@ function rememberBookLayout(layout) {
   const it = activeItem();
   if (it && layout) { it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), ...layout } }; writeWorkspace(); }
 }
+// 📝 글꼴에 없는 글자 경고(삼국지 R12) — 조판 HTML 의 보이는 글자 중 글꼴 사슬(KoPub → Noto Serif KR → 나눔명조 → 바탕 → 한자 보강)
+//   어디에도 없는 글자는 시스템 대체 글꼴(고딕)로 튀어 한 글자만 굵게 보인다. 같은 목록이면 다시 알리지 않는다(미리보기는 고칠 때마다 조판한다).
+let _glyphWarnSig = '';
+function warnMissingGlyphs(html, label) {
+  try {
+    const G = require('./core/book/glyph-check');
+    const r = G.missingGlyphs(G.visibleText(html), G.defaultChain(path.join(__dirname, 'assets', 'fonts', 'book')));
+    const sig = r.missing.map((m) => m.cp).join(',');
+    if (sig === _glyphWarnSig) return r;
+    _glyphWarnSig = sig;
+    if (r.missing.length) log(G.formatWarning(r) + (label ? ` (${label})` : ''));
+    else if (sig === '' && r.checked) log(`✓ 글꼴 확인 — 원고의 비ASCII 글자 ${r.checked}종이 모두 글꼴 목록 안에서 해결됩니다`);
+    return r;
+  } catch (_) { return null; }
+}
 function bookLayoutOpts(args = {}) {
   const it = activeItem();
   const saved = (it && it.settings && it.settings.book) || {};
@@ -8023,6 +8038,8 @@ function bookLayoutOpts(args = {}) {
     scriptMode: !!l.scriptMode, scriptHideShots: !!l.scriptHideShots,
     // 작업용 파일 경로(../참고문헌/…/x.pdf) → 파일명만. 종이에선 경로가 무의미하고 줄만 잡아먹는다.
     hidePaths: !!l.hidePaths,
+    // 목차 글자(pt)·행간 — 0/빈칸 = 본문과 같음. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이긴다(html-builder)
+    tocSizePt: l.tocSizePt, tocLineHeight: l.tocLineHeight,
   };
 }
 
@@ -8111,6 +8128,7 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
       fontCss: bundledFontCss(mediaUrl),
       sourceMap: true,
     });
+    warnMissingGlyphs(html, '미리보기');
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
     fs.mkdirSync(dir, { recursive: true });
     // 조판마다 새 파일명 — URL 쿼리(?t=) 캐시버스터는 vivliostyle target-counter(목차 쪽번호)의
@@ -8166,6 +8184,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
       imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
     });
+    warnMissingGlyphs(html, '내지 PDF');
     const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');
     const interiorPdf = path.join(outRoot, `${base}_내지.pdf`);
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
@@ -8373,6 +8392,7 @@ const BOOK_META_LABELS = {
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
   ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
+  headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
 ipcMain.handle('book-set-meta', (_e, args = {}) => {

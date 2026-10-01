@@ -5,6 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from
 import api from './lib/ipc.js';
 import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
+import HK from '../../core/book/header-kind.js';
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
 const TABS = [
@@ -61,6 +62,7 @@ const LAYOUT_DEFAULTS = {
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
   colophonFields: null, colophonAlign: 'top', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  tocSizePt: 0, tocLineHeight: 0,   // 목차 글자(pt)·행간 — 0 = 본문과 같음(원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다)
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
   // 영상 대본 모드 — 제작용 블록(제작메모·엔진 프롬프트)을 **출력에서만** 제외. 대본 파일은 불변.
   //   출판 탭의 2순위 목적(영상 대본을 깔끔히 정독)을 위한 스위치. 책 원고는 기본 OFF 로 영향 없음.
@@ -479,6 +481,7 @@ body{overflow-y:scroll}
   const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
   const missSet = new Set(missing.map(([k]) => k));
   const spread = dto.spread || {};
+  const hdrEvenMeta = HK.headerKindOf(meta.headerEven), hdrOddMeta = HK.headerKindOf(meta.headerOdd);   // 원고 메타가 UI 값을 이긴다(삼국지 R12)
   const chapters = (dto.parts || []).flatMap((p) => p.chapters);
   const pf = (dto.platforms || []).find((p) => p.id === dto.platformId);
 
@@ -777,6 +780,12 @@ body{overflow-y:scroll}
               <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
                 onChange={(e) => L('specialKeyword', e.target.value)} />
             </label>
+            <div className="bkrow" title="목차 항목의 글자 크기·행간 — 비우면 본문과 같습니다. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이깁니다(삼국지: 9.5pt · 1.45)">
+              <label>목차 글자(pt){(meta.tocSize) ? ' 🔒' : ''} <input type="number" step="0.5" min="7" max="14" placeholder="본문과 같음" value={meta.tocSize ? meta.tocSize : (layout.tocSizePt || '')} disabled={!!meta.tocSize}
+                onChange={(e) => L('tocSizePt', Number(e.target.value) || 0)} /></label>
+              <label>목차 행간{(meta.tocLine) ? ' 🔒' : ''} <input type="number" step="0.05" min="1.1" max="2.5" placeholder="본문과 같음" value={meta.tocLine ? meta.tocLine : (layout.tocLineHeight || '')} disabled={!!meta.tocLine}
+                onChange={(e) => L('tocLineHeight', Number(e.target.value) || 0)} /></label>
+            </div>
           </div>
           <div className="bkform">
             <label className="chk" title="영상 제작용 블록(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커 · 🖼️ 이미지/🎬 영상 프롬프트)과 `---` 구분선을 조판에서 제외하고, 제목의 타임코드(— 0:00~0:30 · I2V 5샷)를 지웁니다. 본문 인용(성경 낭독 등)은 그대로 남습니다. 대본 파일은 수정되지 않습니다.">
@@ -813,8 +822,8 @@ body{overflow-y:scroll}
           <summary>머리글 · 쪽번호</summary>
           <div className="bkform">
             <div className="bkrow">
-              <label>짝수쪽 머리글
-                <select value={layout.headerEven} onChange={(e) => L('headerEven', e.target.value)}>
+              <label title={hdrEvenMeta ? '원고 메타 `> 머리글짝수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : ''}>짝수쪽 머리글{hdrEvenMeta ? ' 🔒' : ''}
+                <select value={hdrEvenMeta || layout.headerEven} disabled={!!hdrEvenMeta} onChange={(e) => L('headerEven', e.target.value)}>
                   <option value="title">책 제목 (관행)</option><option value="subtitle">책 부제</option>
                   <option value="chapter">장 제목</option><option value="section">소제목(절)</option>
                   <option value="none">표시 안 함</option>
@@ -827,8 +836,8 @@ body{overflow-y:scroll}
               </label>
             </div>
             <div className="bkrow">
-              <label>홀수쪽 머리글
-                <select value={layout.headerOdd} onChange={(e) => L('headerOdd', e.target.value)}>
+              <label title={hdrOddMeta ? '원고 메타 `> 머리글홀수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : ''}>홀수쪽 머리글{hdrOddMeta ? ' 🔒' : ''}
+                <select value={hdrOddMeta || layout.headerOdd} disabled={!!hdrOddMeta} onChange={(e) => L('headerOdd', e.target.value)}>
                   <option value="chapter">장 제목 (관행)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
                   <option value="title">책 제목</option><option value="subtitle">책 부제</option>
                   <option value="none">표시 안 함</option>

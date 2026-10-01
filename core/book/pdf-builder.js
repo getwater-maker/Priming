@@ -40,6 +40,10 @@ function bundledFontCss(urlFor) {
     face('KoPubWorld Batang', 'KoPubWorld-Batang-Bold.ttf', 700);
     face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Light.ttf', 300);
     face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Bold.ttf', 700);
+    // 🔤 폴백 명조 — 본문(KoPub 바탕 Light)에 없는 글자(한자·기호)를 같은 굵기(300)로 받는다. Noto Serif KR = OFL(NotoSerifKR-OFL.txt) · Light 정적 부분집합.
+    face('Noto Serif KR', 'NotoSerifKR-Light.ttf', 300);
+    // 한자 보강 명조 자리 — 파일이 있을 때만(Pan-CJK 명조 동봉은 로이 승인 뒤). 傕·槳 같은 KS 밖 한자용.
+    face('Priming Hanja Serif', 'HanjaSerif-Light.ttf', 300);
     face('NanumMyeongjo', 'NanumMyeongjo-Regular.ttf', 400);
     face('NanumMyeongjo', 'NanumMyeongjo-Bold.ttf', 700);
     face('NanumGothic', 'NanumGothic-Regular.ttf', 400);
