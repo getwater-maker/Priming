@@ -116,6 +116,24 @@ const py = (file) => {
   const zN = new AdmZip(oN);
   ok(!zN.getEntries().some((e) => /fonts\//.test(e.entryName)) && !/@font-face/.test(zN.readAsText('OEBPS/style.css')), "embedFonts:'none' → 글꼴·@font-face 없음");
   ok(fs.statSync(oN).size < fs.statSync(o2).size / 10, '판별: 글꼴 미동봉은 훨씬 작다');
+  console.log(String.fromCharCode(10) + '[3b] 각주 — 장마다 1번부터 · 「↩ 본문」 돌아가기 링크 (R21)');
+  {
+    const NL = String.fromCharCode(10);
+    const md2 = ['# 책', '> 저자: 나', '> 특별섹션: 노트', '', '## 제1회 가', '본문[^a] 그리고[^b]입니다.', '', '### 노트', '', '노트 안[^c]의 글.', '', '[^a]: 하나', '[^b]: 둘', '[^c]: 셋', '',
+      '## 제2회 나', '둘째 회[^d] 본문[^e].', '', '[^d]: 넷', '[^e]: 다섯', ''].join(NL);
+    const o4 = path.join(T, 'fn.epub');
+    await buildEpub(parseBookText(md2, 'x'), { outPath: o4, embedFonts: 'none' });
+    const z4 = new AdmZip(o4);
+    const c1 = z4.readAsText('OEBPS/ch-001.xhtml'), c2 = z4.readAsText('OEBPS/ch-002.xhtml');
+    const nums = (t) => [...t.matchAll(/class="fn" id="fn-([0-9]+)"/g)].map((m) => Number(m[1]));
+    ok(nums(c1).join() === '1,2,3', '1회 각주 번호 1,2,3 (특별 섹션 안의 각주도 이어서 — 번호가 되풀이되지 않는다)');
+    ok(nums(c2).join() === '1,2', '판별: 2회도 1번부터(책 전체 4,5 가 아니다)');
+    const ids = (t) => [...t.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+    ok(new Set(ids(c1)).size === ids(c1).length && new Set(ids(c2)).size === ids(c2).length, '문서 안 id 중복 없음(특별 섹션 포함)');
+    ok(c1.includes('<a id="fnref-1" href="#fn-1">1</a>') && c1.includes('href="#fnref-3">↩ 본문</a>'), '본문 참조에 id(fnref-N) · 각주 끝에 「↩ 본문」 링크(#fnref-N)');
+    ok([...c2.matchAll(/href="#(fnref-[0-9]+)"/g)].every((m) => c2.includes('id="' + m[1] + '"')), '돌아가기 링크마다 본문 쪽 id 가 실제로 있다');
+    ok(!c2.includes('fn-4') && !c2.includes('fn-5'), '2회에 앞 회의 번호(4·5)가 보이지 않는다');
+  }
   console.log('\n[4] EPUB 3.0 옵션은 예전 구조');
   const o3 = path.join(T, 'v3.epub');
   await buildEpub(book(), { outPath: o3, epubVersion: '3' });
