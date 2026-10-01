@@ -50,7 +50,7 @@ function preflight(x) {
   out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : '제목·저자·출판사·발행일 있음', 'info'));
   const priceMiss = [];
   if (!has(m.price)) priceMiss.push('종이책 정가'); if (!has(m.ebookPrice)) priceMiss.push('전자책 가격');
-  if (priceMiss.length) out.push(it('price', '가격', 'warn', `비어 있음: ${priceMiss.join(', ')} — 등록 화면에서 입력해야 합니다`, 'colophon'));
+  if (priceMiss.length) out.push(it('price', '가격', 'info', `비어 있음: ${priceMiss.join(', ')} — 부크크 4단계(가격정책)에서 정하거나 확인합니다(원고 메타 「> 정가:」 에 적으면 자동 입력)`, 'colophon'));
   if (!has(m.isbn) && !has(m.ebookIsbn)) out.push(it('isbn', 'ISBN', 'info', '없으면 부크크에서만 판매됩니다(외부유통 불가)', 'colophon'));
   // 7) 완성 파일이 원고보다 낡았나
   const find = (k) => (x.outputs || []).filter((o) => o.kind === k).sort((a, b) => b.mtime - a.mtime)[0];

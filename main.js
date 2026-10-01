@@ -8986,7 +8986,7 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread });
     }
     if (args.only === 'cover' && platform === 'bookk') {
-      log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4단계 이후·저장·제출은 누르지 않습니다');
+      log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');
       const rc = await RB.runBookkCoverOnly({ plan, log });
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }

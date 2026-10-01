@@ -62,6 +62,23 @@ function pickOption(want, options) {
   return '';
 }
 
+// 부크크 5단계 「최종확인」 — 로이가 실측 화면(2026-10-02)과 함께 정한 값.
+//   AI 사용여부(선택지: 본문 전체 / 표지 및 본문 일부 / 본문 일부 / 표지 이미지에만 / 사용하지 않음) = 「표지 및 본문 일부 작성에 사용」,
+//   초상/저작권 보유여부(보유중 / 보유하지 않음) = 「모든 콘텐츠 초상/저작권 보유중」(직접 만든 책이라는 로이의 판단 — 코드가 임의로 바꾸지 않는다).
+const BOOKK_AI_DEFAULT = '표지 및 본문 일부 작성에 사용';
+const BOOKK_RIGHTS = '모든 콘텐츠 초상/저작권 보유중';
+/** 원고 메타 `> AI사용:` → 부크크 AI 선택지(없거나 「있음」이면 기본). 선택지 글자는 앞 이모지를 뺀 부분 */
+function bookkAiOption(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return BOOKK_AI_DEFAULT;
+  if (/^(없음|no|false|x|off)$/i.test(t) || /사용하지\s*않/.test(t)) return '사용하지 않음';
+  if (/표지.*본문|본문.*표지/.test(t)) return BOOKK_AI_DEFAULT;
+  if (/표지/.test(t)) return '표지 이미지에만 사용';
+  if (/전체/.test(t)) return '본문 전체 작성에 사용';
+  if (/일부/.test(t)) return '본문 일부 작성에 사용';
+  return BOOKK_AI_DEFAULT;
+}
+
 /**
  * 작가와 「도서정보 입력」 계획.
  *  book = parseBookText 결과(meta·parts·back·covers) · ctx = { fileType:'EPUB'|'PDF', now? }
@@ -130,6 +147,12 @@ function bookkPlan(book, ctx) {
   //   화면 「작업규격」 = 가로 518.50mm(앞날개100+뒷표지151+책등16.505+앞표지151+앞날개100) × 세로 216mm(사방 3mm 재단 포함). 우리 표지 PDF 를 올린다(PNG 시안은 올리지 않는다).
   const sp = c.spread || null;
   const step3 = { coverPdf: c.coverPdf || '', expect: sp ? { widthMm: sp.widthMm, heightMm: sp.heightMm, spineMm: sp.spineMm } : null, tab: '직접 올리기' };
+  // 4단계 「가격정책」(실측 2026-10-02): 정가 입력(최소가격 이상 · 최대 3배 · 100원 단위) · 정가인하 「아니요」 · 외부서점 입점 「네」. 정가는 원고 `> 정가:` — 화면의 최소가격보다 낮으면 올리지 않고 알린다.
+  const price = Number(digits(m.price)) || 0;
+  const step4 = { price, cut: false, external: true };
+  // 5단계 「최종확인」: 도서소개·도서목차·저자경력 + AI 사용·저작권 선택. 🔴 「도서제출」은 누르지 않는다(로이가 직접).
+  const intro = cleanBody(sectionText(findSection(book, 'backCover'))) || cleanBody(m.tagline || '');
+  const step5 = { intro, toc: cleanBody(tocText(book)), bio: cleanBody(sectionText(findSection(book, 'authorBio'))), ai: bookkAiOption(m.aiDisclosure), rights: BOOKK_RIGHTS };
   const manual = [];
   if (!step3.coverPdf) manual.push('3단계 표지 PDF(없음 — 먼저 「종이책 PDF」로 표지 PDF 를 만드세요)');
   manual.push('3단계 로고 선택(화면 기본값 그대로 두거나 직접 — 표지에 로고를 직접 넣었다면 불필요)');
@@ -139,8 +162,11 @@ function bookkPlan(book, ctx) {
   if (!step2.pdf) manual.push('내지 PDF 업로드(파일 없음)');
   if (hasIsbn) manual.push('보유 ISBN 입력칸(2단계에서 직접)');
   if (flapsOn && trim === 'A4') manual.push('날개(원고는 날개 있음이지만 부크크 A4 는 날개 불가 — 날개 없이 진행)');
-  manual.push('4단계 가격정책 · 5단계 최종확인·제출');
-  return { step1, step2, step3, manual };
+  if (!price) manual.push('4단계 정가(원고 `> 정가:` 없음 — 화면의 최소가격 그대로 둡니다)');
+  if (!step5.intro) manual.push('5단계 도서소개(원고 뒤표지 소개·한줄소개 없음)');
+  if (!step5.bio) manual.push('5단계 저자경력·소개(원고 저자 소개 없음)');
+  manual.push('🔴 5단계 「도서제출」 — 반드시 직접 클릭(자동 제출 금지)');
+  return { step1, step2, step3, step4, step5, manual };
 }
 
-module.exports = { JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };
+module.exports = { BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };

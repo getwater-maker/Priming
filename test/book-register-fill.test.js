@@ -43,17 +43,17 @@ ok(RF.bookkPlan(parseBookText('# t\n', 'x'), { trimId: 'A5' }).step1.material ==
 ok(bp.step2.purpose === 'external' && bp.step2.isbnMode === 'bookk' && bp.step2.adult === 'all', '2단계: ISBN 출판 판매용 · 부크크 무료 ISBN · 전연령');
 ok(RF.bookkPlan(parseBookText('# t\n> ISBN: 979-11-000-0000-0\n', 'x'), {}).step2.isbnMode === 'other', 'ISBN 보유 → 이미 보유한 ISBN');
 ok(bp.step2.title === '삼국지연의 제1권' && bp.step2.author === '나관중' && bp.step2.pdf.endsWith('_내지.pdf'), '2단계: 도서명·저자·PDF');
-ok(RF.bookkPlan(book, { pages: 0 }).manual.some((s) => /쪽수/.test(s)) && bp.manual.some((s) => /3단계 표지/.test(s)), '못 하는 것(쪽수 없음·3~5단계)은 「직접」 목록');
+ok(RF.bookkPlan(book, { pages: 0 }).manual.some((s) => /쪽수/.test(s)) && bp.manual.some((s) => /3단계 표지/.test(s)) && bp.manual.some((s) => /도서제출/.test(s)), '못 하는 것(쪽수 없음·표지 PDF·도서제출)은 「직접」 목록');
 
 console.log('\n[3] 🔴 제출/저장 버튼을 누르지 않는다(소스 검사)');
 const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
 const clicks = src.split('\n').filter((l) => /\.click\(/.test(l));
 ok(clicks.length >= 5, `click 호출 ${clicks.length}곳 확인`);
-ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종|승인|Step4|Step5|삭제|결제|로그아웃/.test(l)), '금지 버튼(저장·제출·유통신청·최종·승인·Step4~5·삭제·결제·로그아웃) 클릭 없음');
+ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종(?!확인)|승인|삭제|결제|로그아웃/.test(l)), '금지 버튼(저장·도서제출·유통신청·최종 입점·승인·삭제·결제·로그아웃) 클릭 없음 — 이동 버튼 Step5 최종확인 은 허용');
 ok(!/\.(fill|type|press)\([^)]*(password|비밀번호)/i.test(src) && !/input\[type=password\]/.test(src), '비밀번호 입력 코드 없음');
 const allowed = clicks.map((l) => l.trim()).join('\n');
-ok(/Step2 원고등록/.test(allowed) && /Step3 표지디자인/.test(allowed), '허용된 진행 버튼은 Step2(초안 생성)·Step3(표지디자인 — 로이 2026-10-02) 뿐');
-ok(!/Step4|가격정책/.test(clicks.join('\n')), '4단계(가격정책) 이후는 누르지 않는다');
+ok(/Step2 원고등록/.test(allowed) && /Step3 표지디자인/.test(allowed) && /Step4 가격정책/.test(allowed) && /Step5 최종확인/.test(allowed), '허용된 이동 버튼은 Step2~Step5(로이 2026-10-02 「스텝5까지 자동화」)');
+ok(!/도서\s*제출/.test(clicks.join('\n')) && !/hasText:[^)]*도서\s*제출/.test(src), '🔴 5단계 「도서제출」은 어떤 클릭·선택자에도 없다(로이가 직접)');
 
 // ── 부크크 2단계 대표 장르 기본값(로이 2026-10-02) ──
 {
