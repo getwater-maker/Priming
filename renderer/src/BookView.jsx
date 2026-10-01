@@ -62,6 +62,7 @@ const LAYOUT_DEFAULTS = {
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
   colophonFields: null, colophonAlign: 'top', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  lineBreak: 'word',   // 줄바꿈 방식 — word(어절·기본) / char(글자) / smart(절충) · 원고 메타 `> 줄바꿈:` 이 이긴다
   tocSizePt: 0, tocLineHeight: 0,   // 목차 글자(pt)·행간 — 0 = 본문과 같음(원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다)
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
   // 영상 대본 모드 — 제작용 블록(제작메모·엔진 프롬프트)을 **출력에서만** 제외. 대본 파일은 불변.
@@ -923,6 +924,15 @@ body{overflow-y:scroll}
               특별 섹션 (예: 역사 노트)
               <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
                 onChange={(e) => L('specialKeyword', e.target.value)} />
+            </label>
+            <label title="양쪽 정렬 줄의 띄어쓰기가 크게 벌어지는 것을 줄입니다. 어절 = 지금 방식(어절 단위로만 줄바꿈) · 글자 = 어절 중간에서도 끊음(간격은 고르지만 낱말이 쪼개짐) · 절충 = 어절 단위를 지키되 많이 벌어질 줄만 다음 낱말을 글자 단위로 넘김(권장 시험). 마지막 줄에 한 글자만 남지 않게 끝 두 글자를 묶습니다. 원고 메타 `> 줄바꿈: 어절|글자|절충` 이 있으면 메타가 이깁니다">
+              줄바꿈{meta.lineBreak ? ' 🔒' : ''}
+              <select value={({ 어절: 'word', 글자: 'char', 절충: 'smart' })[String(meta.lineBreak || '').trim()] || layout.lineBreak || 'word'} disabled={!!meta.lineBreak}
+                onChange={(e) => L('lineBreak', e.target.value)}>
+                <option value="word">어절 (기본)</option>
+                <option value="smart">절충 — 벌어질 줄만 글자 단위</option>
+                <option value="char">글자 단위</option>
+              </select>
             </label>
             <div className="bkrow" title="목차 항목의 글자 크기·행간 — 비우면 본문과 같습니다. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이깁니다(삼국지: 9.5pt · 1.45)">
               <label>목차 글자(pt){(meta.tocSize) ? ' 🔒' : ''} <input type="number" step="0.5" min="7" max="14" placeholder="본문과 같음" value={meta.tocSize ? meta.tocSize : (layout.tocSizePt || '')} disabled={!!meta.tocSize}
