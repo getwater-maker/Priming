@@ -119,4 +119,32 @@ async function recordMp4({ outRoot, baseName, mp4Path }) {
   return writeRecord(outRoot, baseName, rec);
 }
 
-module.exports = { fingerprint, checkUpToDate, recordBuilt, recordMp4, recordPath, readRecord, VOLATILE_KEYS };
+/**
+ * 🔖 기록이 없는 기존 완성물을 「지금 파일 그대로 최신」으로 채택한다(일회용 — 건너뛰기 기능이 생기기 전에 만든 작업).
+ *   안전장치: .vrew 의 수정시각이 **모든 입력 파일(음성·그림·영상·삽입·BGM·로고·대본 .md)** 보다 같거나 새로울 때만.
+ *   MP4 모드면 MP4 도 있어야 하고 .vrew 이후에 만들어졌어야 한다. 하나라도 어긋나면 채택하지 않는다(= 새로 만든다).
+ *   ⚠ 파일로 남지 않는 설정(자막 서식 등)이 완성 뒤에 바뀐 것은 이 검사로 못 잡는다 — 채택은 기록이 없을 때 **한 번뿐**이고,
+ *     그 뒤로는 지문이 비교한다.
+ * @returns {Promise<boolean>} 채택했으면 true
+ */
+async function adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path = null, inputs, extraPaths = [], slackMs = 2000 }) {
+  try {
+    if (!fp || readRecord(outRoot, baseName)) return false;
+    const vrew = await fileSig(vrewPath);
+    if (!vrew) return false;
+    let mp4 = null;
+    if (mp4Path) {
+      mp4 = await fileSig(mp4Path);
+      if (!mp4 || mp4.mtimeMs + slackMs < vrew.mtimeMs) return false;
+    }
+    const paths = new Set(extraPaths.filter(Boolean));
+    collectPaths(inputs, paths);
+    for (const p of paths) {
+      let st; try { st = await fs.promises.stat(p); } catch { return false; }   // 입력 파일이 하나라도 없으면 채택 안 함
+      if (st.isFile() && st.mtimeMs > vrew.mtimeMs + slackMs) return false;
+    }
+    return writeRecord(outRoot, baseName, { fp, builtAt: Date.now(), adopted: true, vrew, mp4: mp4 ? { path: mp4Path, ...mp4 } : null });
+  } catch { return false; }
+}
+
+module.exports = { adoptIfFresh, fingerprint, checkUpToDate, recordBuilt, recordMp4, recordPath, readRecord, VOLATILE_KEYS };

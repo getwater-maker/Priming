@@ -6102,6 +6102,8 @@ async function runMakeAllCore(opts = {}) {
         const BF = require('./core/build-fingerprint');
         const fp = await BF.fingerprint({ v: appDiskVersion(), outMode, inputs: P.vrewInputsOf(pr, ep, captionMaxChars) });
         const mp4Path = mp4Go ? uploadMp4Path(baseName, preset, vrewPath) : null;
+        // 🔖 기록이 없는 기존 완성물(이 기능이 생기기 전에 만든 것)은 .vrew 가 모든 입력 파일보다 새로우면 한 번 채택한다.
+        if (await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [S.scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
         const utd = await BF.checkUpToDate({ outRoot, baseName, fp, vrewPath, mp4Path });
         let vrewReady = false;
         if (utd.vrewOk && (!mp4Go || utd.mp4Ok)) {

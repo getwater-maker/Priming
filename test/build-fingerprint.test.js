@@ -69,6 +69,36 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log('✗', m); } };
   r = await BF.checkUpToDate({ outRoot: out, baseName: '대본', fp: a, vrewPath: vrew });
   ok(!r.vrewOk, '.vrew 삭제됨 → 만든다');
 
+  // 🔖 기록 없는 기존 완성물 채택 — 입력보다 .vrew 가 새로울 때만
+  {
+    const o2 = path.join(dir, 'out2'); fs.mkdirSync(o2);
+    const v2 = path.join(o2, 'x.vrew'), m2 = path.join(o2, 'x.mp4'), scr = path.join(dir, 'x.md');
+    const inp = P.vrewInputsOf(mk(), preset, 7);
+    fs.writeFileSync(wav, Buffer.alloc(5000, 1)); fs.writeFileSync(scr, 'script');
+    const old = new Date(Date.now() - 3600e3); fs.utimesSync(wav, old, old); fs.utimesSync(img, old, old); fs.utimesSync(scr, old, old);
+    const args = { outRoot: o2, baseName: 'x', fp: a, vrewPath: v2, inputs: inp, extraPaths: [scr] };
+    ok(!await BF.adoptIfFresh(args), '.vrew 없음 → 채택 안 함');
+    fs.writeFileSync(v2, 'v');
+    ok(await BF.adoptIfFresh(args), '입력보다 새로운 .vrew → 채택');
+    r = await BF.checkUpToDate({ outRoot: o2, baseName: 'x', fp: a, vrewPath: v2 });
+    ok(r.vrewOk, '채택 뒤 건너뜀');
+    ok(!await BF.adoptIfFresh(args), '이미 기록이 있으면 다시 채택 안 함');
+    fs.rmSync(path.join(o2, '.priming-build'), { recursive: true });
+    const fut = new Date(Date.now() + 3600e3); fs.utimesSync(wav, fut, fut);
+    ok(!await BF.adoptIfFresh(args), '음성이 .vrew 보다 새로우면 채택 안 함');
+    fs.utimesSync(wav, old, old); fs.utimesSync(scr, fut, fut);
+    ok(!await BF.adoptIfFresh(args), '대본이 .vrew 보다 새로우면 채택 안 함');
+    fs.utimesSync(scr, old, old);
+    ok(!await BF.adoptIfFresh({ ...args, mp4Path: m2 }), 'MP4 모드인데 MP4 없음 → 채택 안 함');
+    fs.writeFileSync(m2, 'm');
+    ok(await BF.adoptIfFresh({ ...args, mp4Path: m2 }), 'MP4 까지 있으면 채택');
+    r = await BF.checkUpToDate({ outRoot: o2, baseName: 'x', fp: a, vrewPath: v2, mp4Path: m2 });
+    ok(r.vrewOk && r.mp4Ok, '채택 뒤 .vrew·MP4 모두 건너뜀');
+    fs.rmSync(path.join(o2, '.priming-build'), { recursive: true });
+    fs.unlinkSync(img);
+    ok(!await BF.adoptIfFresh(args), '입력 파일(그림)이 없으면 채택 안 함');
+  }
+
   // 소스 대조 — buildProjectVrew 가 preset/project 에서 읽는 필드가 vrewInputsOf 에도 있다
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'pipeline.js'), 'utf8');
   const body = src.slice(src.indexOf('async function buildProjectVrew'), src.indexOf('// ── 이미지 생성'));
@@ -79,7 +109,7 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log('✗', m); } };
   }
   // main.js 4단계가 지문 판정을 쓴다
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  ok(/P\.vrewInputsOf\(pr, ep, captionMaxChars\)/.test(main) && /BF\.checkUpToDate/.test(main), 'main 4단계 연결');
+  ok(/P\.vrewInputsOf\(pr, ep, captionMaxChars\)/.test(main) && /BF\.checkUpToDate/.test(main) && /BF\.adoptIfFresh/.test(main), 'main 4단계 연결');
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(`build-fingerprint: ${pass} 통과 / ${fail} 실패`);
