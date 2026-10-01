@@ -127,6 +127,7 @@ div.special-sec p { text-indent: 0; margin-bottom: 0.4em; }
 .titlepage .s { color: #555; margin-top: 1em; }
 .titlepage .a { margin-top: 3em; }
 .titlepage .pub { margin-top: 4em; color: #666; }
+.fnback { font-size: 0.85em; margin-left: 0.4em; text-decoration: none; }
 .fn { font-size: 0.88em; color: #333; margin: 1.5em 0 0; padding-top: 0.6em; border-top: 1px solid #ccc; }
 .colophon p { text-indent: 0; margin: 0.25em 0; font-size: 0.9em; }
 table.md-table { width: 100%; border-collapse: collapse; font-size: 0.86em; text-indent: 0; text-align: left; margin: 1.2em 0; }
@@ -207,7 +208,7 @@ function blocksXhtml(blocks0, book, ctx, specials) {
 }
 function flushNotes(ctx) {
   if (!ctx.notes.length) return '';
-  const h = ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)}</p></aside>`).join('\n');
+  const h = ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)} <a class="fnback" href="#fnref-${n.num}">↩ 본문</a></p></aside>`).join('\n');
   ctx.notes.length = 0;
   return h;
 }
@@ -220,10 +221,11 @@ function inline(text, book, ctx) {
     if (!m) { out += inlineMd(p, io); continue; }
     const def = book.footnotes[m[1]];
     if (!def) { out += inlineMd(p, io); continue; }
-    ctx.fnSeq++;
-    const id = `fn-${ctx.fnSeq}`;
-    ctx.notes.push({ id, num: ctx.fnSeq, text: def.text });
-    out += `<sup><a epub:type="noteref" href="#${id}">${ctx.fnSeq}</a></sup>`;
+    // 🔢 각주 번호는 **문서(장)마다 1번부터**(R21 · 로이 2026-10-02) — 순번은 ctx.fn 객체(참조)에 둔다: 특별 섹션 조각은 ctx 를 복사해 쓰는데 숫자를 복사하면 조각마다 번호가 되풀이돼 id 가 겹쳤다.
+    const n = ++ctx.fn.seq;
+    const id = `fn-${n}`;
+    ctx.notes.push({ id, num: n, text: def.text });
+    out += `<sup><a epub:type="noteref" id="fnref-${n}" href="#${id}">${n}</a></sup>`;
   }
   return out;
 }
@@ -273,7 +275,7 @@ async function buildEpub(book, a) {
   const excluded = Array.isArray(a.excluded) ? a.excluded : [];
   const specials = specialKeywordsOf(meta, { specialKeyword: a.specialKeyword });   // 설정 + 원고 메타 `> 특별섹션:`
   const ctx = {
-    fnSeq: 0, notes: [],
+    fn: { seq: 0 }, notes: [],
     hidePaths: !!a.hidePaths,
     scriptMode: !!a.scriptMode, scriptHideShots: !!a.scriptHideShots,
     addImage(src) {
@@ -355,6 +357,7 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
   for (const s of book.front) {
     if (s.key === 'toc') continue;
     if (excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고 보존)
+    ctx.fn.seq = 0;   // 각주 번호는 문서마다 1번부터
     addDoc(`front-${s.key}`, `front-${s.key}.xhtml`, s.title,
       `<section class="front ${s.key === 'dedication' ? 'dedication' : ''}" epub:type="frontmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`,
       { toc: s.title });
@@ -369,6 +372,7 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
         { toc: `${p.num ? `제${p.num}부 ` : ''}${p.title}` });
     }
     for (const c of shownChapters) {
+      ctx.fn.seq = 0;   // 각주 번호는 장마다 1번부터
       addDoc(`ch-${c.num}`, `ch-${String(c.num).padStart(3, '0')}.xhtml`, c.title,
         `<section epub:type="chapter"><h1 class="chapter-title">${esc(c.title)}</h1>\n${blocksXhtml(c.blocks, book, ctx, specials)}</section>`,
         { toc: c.title });
@@ -379,11 +383,13 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
   for (const s of book.back) {
     if (s.key === 'colophon') continue;
     if (excluded.includes(s.key)) continue;
+    ctx.fn.seq = 0;
     addDoc(`back-${s.key}`, `back-${s.key}.xhtml`, s.title,
       `<section class="back" epub:type="backmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`, { toc: s.title });
   }
   const col = excluded.includes('colophon') ? null : book.back.find((s) => s.key === 'colophon');
   // 📱 작가와 전자책 — 작가와 「서지정보 페이지」 공식 양식(판권 자리 · 마지막 쪽 한 곳) + [판권]의 고지문
+  ctx.fn.seq = 0;   // 판권 문서도 1번부터
   let jwBody = '';
   if (JB.isJakkawaMeta(meta)) {
     const jb = JB.biblio(meta);
