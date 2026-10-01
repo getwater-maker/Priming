@@ -2642,6 +2642,33 @@ function uploadMp4Path(baseName, preset, vrewPath) {
   const dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || (vrewPath ? path.dirname(vrewPath) : S.outRoot);
   return path.join(dir, `${baseName}.mp4`);
 }
+// 📂 저장 폴더에 같은 이름의 MP4 가 이미 있으면 묻는다(로이 2026-10-01) — 기본 = 건너뛰기, 60초 안에 안 고르면 건너뛴다(자는 동안 큐가 멈추지 않게).
+//   「이번 큐의 나머지도 같게」를 켜면 그 큐 동안 다시 묻지 않는다(_mp4DupAll · run-batch 시작·끝에서 푼다).
+//   🔑 판정 = 파일 **이름**(저장 폴더 + 대본 이름.mp4). 지문이 같아 이미 건너뛴 대본은 여기까지 오지 않는다.
+let _mp4DupAll = null;   // null | 'skip' | 'redo'
+const MP4_DUP_WAIT_MS = 60000;
+async function askMp4Exists(title, mp4Path) {
+  if (_mp4DupAll) return _mp4DupAll;
+  let mtime = '';
+  try { mtime = new Date(fs.statSync(mp4Path).mtimeMs + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' (KST)'; } catch (_) {}
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), MP4_DUP_WAIT_MS);
+  try {
+    const c = await dialog.showMessageBox(win, {
+      type: 'question', title: '이미 만든 MP4', buttons: ['건너뛰기', '다시 만들기'], defaultId: 0, cancelId: 0, noLink: true,
+      message: `「${title}」 — 같은 이름의 MP4 가 이미 있습니다. 다시 만들까요?`,
+      detail: `${mp4Path}
+${mtime ? `만든 시각: ${mtime}
+` : ''}
+건너뛰면 다음 대본으로 넘어갑니다. ${MP4_DUP_WAIT_MS / 1000}초 안에 고르지 않으면 건너뜁니다.`,
+      checkboxLabel: '이번 큐의 나머지 대본도 같게 처리', checkboxChecked: false, signal: ac.signal,
+    });
+    const ans = c.response === 1 ? 'redo' : 'skip';
+    if (c.checkboxChecked) _mp4DupAll = ans;
+    return ans;
+  } catch (_) { return 'skip'; }   // 열기 실패·시간 초과 = 건너뛰기(fail-safe: 다시 굽지 않는다)
+  finally { clearTimeout(timer); }
+}
 async function renderUploadMp4(vrewPath, baseName, preset, pr = null) {
   const VR = require('./core/vrew-render');
   const outPath = uploadMp4Path(baseName, preset, vrewPath);
@@ -6110,6 +6137,10 @@ async function runMakeAllCore(opts = {}) {
           log(`⏭ ${pr.title} — 입력이 그대로이고 ${mp4Go ? '.vrew·MP4 가' : '.vrew 가'} 이미 있어 다시 만들지 않습니다 (강제로 다시 만들려면 .priming-build 폴더의 기록을 지우세요)`);
           continue;
         }
+        if (mp4Go && fs.existsSync(mp4Path)) {   // 📂 같은 이름의 MP4 가 저장 폴더에 있으면 묻는다 — 기본 건너뛰기
+          if (await askMp4Exists(pr.title, mp4Path) === 'skip') { log(`⏭ ${pr.title} — 같은 이름의 MP4 가 이미 있어 건너뜁니다 (${mp4Path})`); continue; }
+          log(`🔁 ${pr.title} — 같은 이름의 MP4 가 있지만 다시 만듭니다`);
+        }
         if (utd.vrewOk && mp4Go) { vrewReady = true; log(`⏭ ${pr.title} — .vrew 는 최신이라 MP4 만 굽습니다`); }
         else if (utd.why && utd.why !== '이전 기록 없음') log(`🔁 ${pr.title} — .vrew 를 새로 만듭니다 (${utd.why})`);
         if (!vrewReady) {
@@ -6147,6 +6178,7 @@ async function runMakeAllCore(opts = {}) {
 
 
 ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
+  _mp4DupAll = null;   // 단건 제작은 항상 새로 묻는다
   // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
   await runMakeAllCore({ ...args, openVrew: args.openVrew !== false });
   return P.toDTO(S.parsed);
@@ -6162,6 +6194,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
   S.abort = false;
+  _mp4DupAll = null;                         // 지난 큐의 「이번 큐 나머지도 같게」 선택이 남지 않게
   _stopAfterItem = false;                    // 지난 큐의 「이번 편까지만」 예약이 남아 새 큐가 첫 편 뒤에 멈추지 않게
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
   let okN = 0, failN = 0, skipN = 0, stoppedLeft = 0;
@@ -6232,6 +6265,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     pushDtoUpdate();
   }
   _stopAfterItem = false;
+  _mp4DupAll = null;
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), stoppedEarly: stoppedLeft > 0, remaining: stoppedLeft };
