@@ -1,5 +1,5 @@
 {
-  "version": "0.5.108",
+  "version": "0.5.109",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -123,7 +123,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "27566b91118ed4501990d47df22b0511a7f368df",
+    "docs/작업노트/2026-10.md": "8d241a745857a0ae36f644aeb431f419789778ce",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/출판-원고-가이드.md": "495261881de5337d446eb0d92111f1d7f0345b0b",
     "docs/통합본-자산이어받기-계획.md": "e424670bb6040d8a8dbe551270a0f415179517b3",
@@ -137,7 +137,7 @@
     "light-updater.js": "61fa2a3211dfe5463acdf1b596107fa6d70f19c9",
     "main.js": "0b6d82767ed6cdae32d5a1681b80906fc616190e",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "89209709077a66c7926f1923940c0ce0f9f062c9",
+    "package.json": "b457fcaffad8325479a49f7129428dd707f25812",
     "preload.js": "c00f776d7fb9d66ebd754521f4b1874576fd5441",
     "renderer/dist/assets/index-F_989hx5.css": "dafdcd9b53ea8bdf0d29081870a397cb6b007137",
     "renderer/dist/assets/index-YH6lBF33.js": "64950410ebf9bae301050332d33232966928caf3",
