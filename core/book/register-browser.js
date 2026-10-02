@@ -74,6 +74,35 @@ async function _dump(page, log, tag) {
   } catch (_) {}
 }
 
+// 📸 단계마다 화면 전체 캡처(plan.shotDir 이 있을 때) — 입력이 실제로 들어갔는지 사람이 한눈에 볼 수 있게(R24). 경로를 로그에 남긴다.
+async function _shot(page, plan, log, name) {
+  try {
+    if (!plan || !plan.shotDir) return '';
+    fs.mkdirSync(plan.shotDir, { recursive: true });
+    const f = path.join(plan.shotDir, `${name}.png`);
+    await page.screenshot({ path: f, fullPage: true });
+    log(`[등록] 📸 ${name} 캡처 → ${f}`);
+    return f;
+  } catch (e) { log(`[등록] ⚠ ${name} 캡처 실패: ${String(e.message).split(String.fromCharCode(10))[0].slice(0, 80)}`); return ''; }
+}
+const _squash = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+/** 입력칸 읽어 되짚기 — 기대값과 같으면 ✓, 다르면 ⚠ + failed */
+async function _verifyInput(page, selector, want, label, log, failed) {
+  let got = null;
+  try { got = await page.locator(selector).first().inputValue(); } catch (_) {}
+  if (got == null) { log(`[등록] ❔ ${label}: 값을 읽지 못했습니다`); return; }
+  if (_squash(got) === _squash(want)) log(`[등록] ✓ ${label}: ${_squash(got).slice(0, 60)}${_squash(got).length > 60 ? ` … (${_squash(got).length}자)` : ''}`);
+  else { failed.push(label + ' 확인'); log(`[등록] ⚠ ${label} 값이 다릅니다 — 화면 「${_squash(got).slice(0, 40)}」 ≠ 기대 「${_squash(want).slice(0, 40)}」`); }
+}
+async function _verifySelect(sel, want, label, log, failed) {
+  let got = '';
+  try { got = await sel.evaluate((s) => (s.selectedOptions[0] ? s.selectedOptions[0].textContent.trim() : '')); } catch (_) {}
+  const plain = (t) => String(t).replace(/^[^가-힣A-Za-z0-9]+/, '').trim();
+  if (!got) { log(`[등록] ❔ ${label}: 선택값을 읽지 못했습니다`); return; }
+  if (!want || plain(got) === plain(want) || plain(got).includes(plain(want))) log(`[등록] ✓ ${label}: ${plain(got)}`);
+  else { failed.push(label + ' 확인'); log(`[등록] ⚠ ${label} 선택이 다릅니다 — 화면 「${plain(got)}」 ≠ 기대 「${plain(want)}」`); }
+}
+
 /** 로그인 대기 — 화면에 「로그아웃」이 보이면 로그인된 것. 최대 10분. */
 async function _waitLogin(page, site, log, isAborted) {
   const t0 = Date.now();
@@ -162,6 +191,12 @@ async function fillBookk(page, plan, log) {
       await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
     });
   }
+  // 🔍 2단계 입력 되짚기(R24) — 칸에 실제로 들어간 값을 읽어 확인하고 화면을 캡처한다
+  await _verifyInput(page, 'input[placeholder*="도서명 기재"]', s2.title, '도서명', log, failed);
+  if (s2.subtitle) await _verifyInput(page, 'input[placeholder*="부제명"]', s2.subtitle, '부제', log, failed);
+  await _verifyInput(page, 'input[placeholder*="저자명 기재"]', s2.author, '저자', log, failed);
+  await _verifySelect(sel.nth(2), s2.genre, '대표 장르', log, failed);
+  await _shot(page, plan, log, '2단계');
   // ▶ Step3 표지디자인(로이 2026-10-02 「3페이지도 자동으로」) — 이동만 한다(저장·제출 아님). 4단계 이후는 손대지 않는다.
   if (plan.step3 && plan.step3.coverPdf) {
     try {
@@ -244,6 +279,7 @@ async function fillBookkPrice(page, plan, log) {
   const after = await page.evaluate(() => document.body.innerText).catch(() => '');
   const fm = /최종\s*정가\s*([\d,]+)\s*원/.exec(after);
   if (fm) log(`[등록] 4단계 최종정가 ${fm[1]}원${s4.price && Number(fm[1].replace(/,/g, '')) !== s4.price && !failed.includes('정가') ? ' ⚠ 원고 정가와 다릅니다' : ''}`);
+  await _shot(page, plan, log, '4단계');
   return { done, failed, min };
 }
 
@@ -279,6 +315,13 @@ async function fillBookkFinal(page, plan, log) {
   });
   await choose('AI 사용여부 ' + s5.ai, 'AI 활용 여부', s5.ai);
   await choose('초상/저작권 ' + s5.rights, '초상/저작권 보유여부', s5.rights);
+  // 🔍 5단계 입력 되짚기(R24) — 도서소개·도서목차·저자경력이 칸에 그대로 들어갔는지, AI·저작권 선택값
+  if (s5.intro) await _verifyInput(page, 'textarea[placeholder*="도서의 설명"]', s5.intro, '도서소개', log, failed);
+  if (s5.toc) await _verifyInput(page, 'textarea[placeholder*="색인"]', s5.toc, '도서목차', log, failed);
+  if (s5.bio) await _verifyInput(page, 'textarea[placeholder*="저자를 소개"]', s5.bio, '저자경력·소개', log, failed);
+  await _verifySelect(page.locator('select').filter({ hasText: 'AI 활용 여부' }).first(), s5.ai, 'AI 활용 여부', log, failed);
+  await _verifySelect(page.locator('select').filter({ hasText: '초상/저작권 보유여부' }).first(), s5.rights, '초상/저작권', log, failed);
+  await _shot(page, plan, log, '5단계');
   const body = await page.evaluate(() => document.body.innerText).catch(() => '');
   const diffs = checkFinalSummary(body, plan);
   if (diffs.length) { failed.push('최종확인 요약 불일치'); log(`[등록] ⚠ 5단계 요약이 우리 값과 다릅니다: ${diffs.join(' · ')}`); }
@@ -307,6 +350,7 @@ async function continueFromStep4(page, plan, log) {
   done.push(...r5.done); failed.push(...r5.failed);
   if (r5.err) log(`[등록] ⚠ ${r5.err.message}`);
   else log('[등록] 🛑 5단계 입력까지 끝났습니다 — 화면을 확인하고 「도서제출」은 직접 누르세요(자동 제출 없음)');
+  await _shot(page, plan, log, '3단계');
   return { done, failed };
 }
 
@@ -365,4 +409,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };
+module.exports = { verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };

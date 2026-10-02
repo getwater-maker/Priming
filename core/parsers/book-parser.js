@@ -80,6 +80,8 @@ const META_KEYS = {
   '전자책': 'ebookPrice', '전자책가격': 'ebookPrice', '전자책 가격': 'ebookPrice',
   '전자책표지': 'ebookCover', '전자책 표지': 'ebookCover',
   // 인쇄 표지 파일(앞표지+책등+뒷표지 스프레드) — 원고 파일 기준 상대경로. 원고를 열면 자동 첨부(core/book/work-folder.js)
+  // 부크크 등록 입력값 파일(원고 파일 기준 상대경로) — 없으면 <작품>/기준/등록/<원고이름>.등록정보.md 를 찾는다(core/book/register-info.js)
+  '등록정보': 'registerInfo', '등록정보파일': 'registerInfo',
   '표지파일': 'coverFile', '표지 파일': 'coverFile',
   '전자책isbn': 'ebookIsbn', '전자책 isbn': 'ebookIsbn',
   // 반복 코너(예: 역사 노트) — 이 소제목 구간을 노트 상자로(쉼표로 여러 개 · 조판 설정 「특별 섹션」과 합친다)

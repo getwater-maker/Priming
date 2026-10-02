@@ -153,6 +153,25 @@ function bookkPlan(book, ctx) {
   // 5단계 「최종확인」: 도서소개·도서목차·저자경력 + AI 사용·저작권 선택. 🔴 「도서제출」은 누르지 않는다(로이가 직접).
   const intro = cleanBody(sectionText(findSection(book, 'backCover'))) || cleanBody(m.tagline || '');
   const step5 = { intro, toc: cleanBody(tocText(book)), bio: cleanBody(sectionText(findSection(book, 'authorBio'))), ai: bookkAiOption(m.aiDisclosure), rights: BOOKK_RIGHTS };
+  // 📋 등록정보 파일(`기준/등록/<권>.등록정보.md`)이 있으면 **원고 메타보다 우선**(R24 · 로이 2026-10-02 — 원고 제목 「삼국지 완역 1 : 천하대란」이 cleanTitle 로 「삼국지」·부제 「1-15」가 된 사고). 값은 파일 그대로(제목 정리 없음).
+  const ri = c.registerInfo || null;
+  if (ri) {
+    const one = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+    if (ri.title) { step2.title = one(ri.title); step2.subtitle = one(ri.subtitle); }
+    if (ri.author) step2.author = one(ri.author);
+    if (ri.genre) step2.genre = one(ri.genre);
+    if (ri.purposeText && /ISBN.*판매|출판.*판매/.test(ri.purposeText)) step2.purpose = 'external';
+    if (ri.isbnText) {
+      const digitsOnly = String(ri.isbnText).replace(/[^0-9Xx]/g, '');
+      if (/무료|부크크/.test(ri.isbnText) || digitsOnly.length < 10) { step2.isbnMode = 'bookk'; step2.isbn = ''; }
+      else { step2.isbnMode = 'other'; step2.isbn = one(ri.isbnText); }
+    }
+    if (ri.intro) step5.intro = ri.intro;
+    if (ri.toc) step5.toc = ri.toc;
+    if (ri.bio) step5.bio = ri.bio;
+    if (ri.ai) step5.ai = bookkAiOption(ri.ai);
+    if (ri.rights) step5.rights = /보유하지\s*않/.test(ri.rights) ? '초상/저작권 보유하지 않음' : BOOKK_RIGHTS;
+  }
   const manual = [];
   if (!step3.coverPdf) manual.push('3단계 표지 PDF(없음 — 먼저 「종이책 PDF」로 표지 PDF 를 만드세요)');
   manual.push('3단계 로고 선택(화면 기본값 그대로 두거나 직접 — 표지에 로고를 직접 넣었다면 불필요)');
@@ -160,13 +179,13 @@ function bookkPlan(book, ctx) {
   if (!step2.title) manual.push('도서명(필수)');
   if (!step2.author) manual.push('저자(필수)');
   if (!step2.pdf) manual.push('내지 PDF 업로드(파일 없음)');
-  if (hasIsbn) manual.push('보유 ISBN 입력칸(2단계에서 직접)');
+  if (step2.isbnMode === 'other') manual.push('보유 ISBN 입력칸(2단계에서 직접)');
   if (flapsOn && trim === 'A4') manual.push('날개(원고는 날개 있음이지만 부크크 A4 는 날개 불가 — 날개 없이 진행)');
   if (!price) manual.push('4단계 정가(원고 `> 정가:` 없음 — 화면의 최소가격 그대로 둡니다)');
   if (!step5.intro) manual.push('5단계 도서소개(원고 뒤표지 소개·한줄소개 없음)');
   if (!step5.bio) manual.push('5단계 저자경력·소개(원고 저자 소개 없음)');
   manual.push('🔴 5단계 「도서제출」 — 반드시 직접 클릭(자동 제출 금지)');
-  return { step1, step2, step3, step4, step5, manual };
+  return { step1, step2, step3, step4, step5, manual, registerInfoFile: (ri && ri.file) || '', shotDir: c.shotDir || '' };
 }
 
 module.exports = { BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };

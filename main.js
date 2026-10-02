@@ -9019,7 +9019,15 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
     } else {
       const spec = bookSpec(S.parsed.meta || {}, S.parsed._lastPages || 0);
-      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread });
+      // 📋 등록정보 파일(기준/등록/<권>.등록정보.md · 원고 메타 `> 등록정보:`) — 있으면 원고 메타보다 우선(2·5단계 입력값). 캡처는 <출력>/_등록캡처/
+      let registerInfo = null;
+      try {
+        const RI = require('./core/book/register-info');
+        registerInfo = RI.loadRegisterInfo(S.scriptPath, S.parsed.meta || {});
+        if (registerInfo) log(`📋 등록정보 파일 사용: ${registerInfo.file} — 도서명 「${registerInfo.title}」 · 부제 「${registerInfo.subtitle}」 · 장르 「${registerInfo.genre}」 · 소개 ${registerInfo.intro.length}자 · 목차 ${registerInfo.toc.split('\n').filter(Boolean).length}줄 · 저자소개 ${registerInfo.bio.length}자`);
+        else if ((S.parsed.meta || {}).registerInfo) log(`⚠ 원고 메타 「등록정보」 파일을 찾을 수 없습니다: ${S.parsed.meta.registerInfo} — 원고 메타 값으로 진행합니다`);
+      } catch (e) { log('⚠ 등록정보 파일 읽기 실패: ' + e.message); }
+      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: path.join(root, '_등록캡처') });
     }
     if (args.only === 'cover' && platform === 'bookk') {
       log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');
