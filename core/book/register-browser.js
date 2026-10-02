@@ -241,6 +241,23 @@ async function _waitUploaded(page) {
   await sleep(800);
 }
 
+/**
+ * 💡 1단계 화면 요약에서 **가격 힌트**를 찾는다(로이 2026-10-02: 「종이책 첫 화면에서 규격·재질·날개·쪽수를 입력하면 예상판매가격을 알 수 있다」).
+ *   화면 모양을 아직 본 적이 없어 확정하지 않는다 — 「예상·판매가·가격·정가·최소」 문구 근처의 `N원` 줄을 모아 로그에 남기고(연구용), 그중 「예상」/「판매」가 붙은 첫 금액을 best 로 돌려준다.
+ *   4단계에서 읽은 최소가격과 같은지 비교해 로그에 남긴다 — 같다고 확인되면 그때 보조 근거로 쓸지 정한다.
+ */
+function findPriceHints(text) {
+  const t = String(text || '');
+  const lines = []; let best = 0;
+  const re = /([^\n]{0,24}(?:예상|판매가|판매 가격|가격|정가|최소)[^\n]{0,24}?)\s*([\d][\d,]{2,})\s*원/g; let m;
+  while ((m = re.exec(t)) && lines.length < 8) {
+    const n = Number(m[2].replace(/,/g, '')); if (!(n >= 100)) continue;
+    lines.push(`${m[1].replace(/\s+/g, ' ').trim()} ${n.toLocaleString('ko-KR')}원`);
+    if (!best && /예상|판매/.test(m[1])) best = n;
+  }
+  return { lines, best };
+}
+
 /** 도서정보 칸(도서명·부제·저자·목적·ISBN·대표장르·성인) — 종이책 2단계와 전자책 1단계가 같은 칸이다. select 목록을 돌려준다 */
 async function _fillInfoForm(page, s2, log, step) {
   await step('도서명', () => page.locator('input[placeholder*="도서명 기재"]').fill(s2.title));
@@ -280,6 +297,11 @@ async function fillBookk(page, plan, log) {
   // 선택이 화면 요약에 반영됐는지 확인(판형·재질)
   const summary = await page.evaluate(() => document.body.innerText).catch(() => '');
   log(`[등록] 1단계 요약 확인: 판형 ${summary.includes(s1.trim) ? '✓' : '?'} · 쪽수 ${summary.includes(String(s1.pages)) ? '✓' : '?'}`);
+  // 💡 1단계 가격 힌트(예상판매가격) — 로그 + 화면 캡처. 4단계 최소가격과 비교해 같은지 본다
+  { const hint = findPriceHints(summary);
+    plan._est1 = hint.best || 0;
+    log(hint.lines.length ? `[등록] 💡 1단계 화면의 가격 문구: ${hint.lines.join(' · ')}${hint.best ? ` → 예상판매가격 ${hint.best.toLocaleString('ko-KR')}원으로 봄` : ''}` : '[등록] 💡 1단계 화면에서 가격 문구(예상·판매가·정가…)를 찾지 못했습니다 — 캡처로 확인하세요');
+    await _shot(page, plan, log, '1단계'); }
   // 오른쪽 요약의 「날개 <있음|없음> 두께」 가 우리가 고른 값인지 — 다르면 실패로 남긴다(화면 문구·구조가 바뀐 경우를 조용히 넘기지 않는다)
   { const wm = /날개\s*(있음|없음)\s*두께/.exec(summary); const got = wm ? wm[1] : '';
     const want = s1.wings ? '있음' : '없음';
@@ -379,6 +401,7 @@ async function fillBookkPrice(page, plan, log) {
   const body = await page.evaluate(() => document.body.innerText).catch(() => '');
   const mm = /최소가격\s*([\d,]+)\s*원/.exec(body);
   const min = mm ? Number(mm[1].replace(/,/g, '')) : 0;
+  if (plan._est1 && min) log(plan._est1 === min ? `[등록] ✓ 1단계 예상판매가격(${plan._est1.toLocaleString('ko-KR')}원) = 4단계 최소가격 — 1단계 값으로 미리 알 수 있습니다` : `[등록] ⚠ 1단계 예상판매가격 ${plan._est1.toLocaleString('ko-KR')}원 ≠ 4단계 최소가격 ${min.toLocaleString('ko-KR')}원 — 1단계 값은 근거로 쓰지 않습니다`);
   if (s4.price) {
     const bad = s4.price % 100 !== 0 ? '100원 단위가 아닙니다' : (min && s4.price < min ? `최소가격 ${min.toLocaleString('ko-KR')}원보다 낮습니다` : (min && s4.price > min * 3 ? `최소가격의 3배(${(min * 3).toLocaleString('ko-KR')}원)를 넘습니다` : ''));
     if (bad) { failed.push('정가'); log(`[등록] ⚠ 원고 정가 ${s4.price.toLocaleString('ko-KR')}원: ${bad} — 정가는 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
@@ -700,4 +723,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+module.exports = { findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

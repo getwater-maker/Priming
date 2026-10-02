@@ -205,6 +205,21 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     ok(!/\.(fill|type)\([^)]*(password|비밀번호)/i.test(srcB) && !/input\[type=password\]/.test(srcB), '아이디·비밀번호 입력 코드 없음(네이버 버튼 클릭만)');
   }
 
+  console.log('\n[7e] 💡 1단계 가격 힌트(예상판매가격) 찾기');
+  {
+    const h1 = RB.findPriceHints('1단계 요약 판형 A5 쪽수 255 두께 14.0 mm 예상판매가격 18,700 원 날개 있음');
+    ok(h1.best === 18700 && h1.lines.length >= 1, '「예상판매가격 18,700 원」 → best 18,700');
+    const h2 = RB.findPriceHints('인쇄비 2,500 원 정가 17,900 원 예상 판매가 18,700원');
+    ok(h2.lines.length >= 1 && h2.best === 18700, '여러 금액이 섞여도 「예상/판매」 금액을 best 로(' + h2.best + ')');
+    ok(RB.findPriceHints('정가 17,900 원').best === 0 && RB.findPriceHints('정가 17,900 원').lines.length === 1, '판별: 「정가」 만 있으면 줄로 모으되 예상판매가격(best)으로 보지 않는다');
+    ok(RB.findPriceHints('가격 문구 없음 판형 A5 쪽수 255').best === 0 && RB.findPriceHints('').lines.length === 0, '판별: 가격 문구가 없으면 best 0 · 줄 없음');
+    const PB = '가격정책 정가설정 18700 원/권 * 최소가격 18,700원입니다. 정가인하 아니요, 소비자가격을 인하하지 않겠습니다. 외부서점 입점 최종정가 18,700 원';
+    let lg1 = []; pg = fakePage(PB); await RB.fillBookkPrice(pg, { step4: { price: 0, external: true }, _est1: 18700 }, (m) => lg1.push(m));
+    ok(lg1.some((m) => /1단계 예상판매가격\(18,700원\) = 4단계 최소가격/.test(m)), '1단계 예상가 = 4단계 최소가격이면 확인 로그');
+    lg1 = []; pg = fakePage(PB); await RB.fillBookkPrice(pg, { step4: { price: 0, external: true }, _est1: 17000 }, (m) => lg1.push(m));
+    ok(lg1.some((m) => /≠ 4단계 최소가격/.test(m)), '판별: 다르면 「근거로 쓰지 않습니다」 경고');
+  }
+
   console.log('\n[8] 안전(소스)');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const code = src.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
