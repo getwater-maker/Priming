@@ -473,6 +473,7 @@ async function fillBookkEbookPrice(page, plan, log) {
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
   await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
   const priceSel = 'input[type=text], input[type=number], input:not([type])';
+  if (s4.from === 'paper70') log(`[등록] 💰 전자책 정가 = 종이책 ${Number(s4.paper).toLocaleString('ko-KR')}원 × 70% (10원 단위 이하 버림) = ${Number(s4.price).toLocaleString('ko-KR')}원`);
   if (s4.price) {
     if (s4.price % 100 !== 0 || s4.price <= 0) { failed.push('정가'); log(`[등록] ⚠ 전자책 정가 ${s4.price.toLocaleString('ko-KR')}원은 100원 단위가 아닙니다 — 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
     else {

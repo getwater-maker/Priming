@@ -188,6 +188,12 @@ function bookkPlan(book, ctx) {
   return { step1, step2, step3, step4, step5, manual, registerInfoFile: (ri && ri.file) || '', shotDir: c.shotDir || '' };
 }
 
+/** 종이책 정가 → 전자책 정가: 70% 에서 10원 단위 이하를 버린다(100원 단위 내림). 19,500 → 13,600 · 정수 계산(부동소수 오차 없음). 0 이하는 0 */
+function ebookPriceFromPaper(paper) {
+  const p = Math.floor(Number(paper) || 0);
+  return p > 0 ? Math.floor(p * 7 / 1000) * 100 : 0;
+}
+
 /**
  * 부크크 「새전자책」(/author/make/electronicBook) 계획 — 로이 스크린샷·화면 기록 2026-10-02 실측.
  *   단계: 1 기본정보(종이책 2단계와 같은 칸 · 쪽수·PDF 없음) → 2 원고등록(ePub 첨부 · EPUB2.0만 외부유통 · 20MB) → 3 꾸미기(직접 올리기 = JPG·PDF 10MB · 로고 파랑)
@@ -211,8 +217,12 @@ function ebookPlan(book, ctx) {
   };
   const step2 = { epub: c.epub || '', epubName: c.epub ? require('path').basename(c.epub) : '' };
   const step3 = { cover: c.cover || '', logo: 'blue' };
-  const price = Number(digits(m.ebookPrice)) || 0;
-  const step4 = { price, external: true };
+  // 전자책 정가 = 종이책 정가(`> 정가:`)의 70%, 10원 단위 이하 버림(= 100원 단위 내림) — 부크크 권고 「전자도서 = 종이도서 70%」·로이 2026-10-02. 원고에 `> 전자책:` 가격이 따로 있으면 그 값이 이긴다(판권지와 같게).
+  const paper = Number(digits(m.price)) || 0;
+  const explicit = Number(digits(m.ebookPrice)) || 0;
+  const price = explicit || ebookPriceFromPaper(paper);
+  const priceFrom = explicit ? 'ebook' : (price ? 'paper70' : '');
+  const step4 = { price, external: true, from: priceFrom, paper };
   const intro = cleanBody(sectionText(findSection(book, 'backCover'))) || cleanBody(m.tagline || '');
   const step5 = { intro, toc: cleanBody(tocText(book)), bio: cleanBody(sectionText(findSection(book, 'authorBio'))), ai: bookkAiOption(m.aiDisclosure), rights: BOOKK_RIGHTS };
   const ri = c.registerInfo || null;
@@ -234,11 +244,11 @@ function ebookPlan(book, ctx) {
   if (!step1.title) manual.push('도서명(필수)');
   if (!step1.author) manual.push('저자(필수)');
   if (step1.isbnMode === 'other') manual.push('보유 ISBN 입력칸(1단계에서 직접)');
-  if (!price) manual.push('⚠ 4단계 정가 — 원고 `> 전자책:` 가 없어 화면 기본값 1,000원(예시값) 그대로 둡니다. 직접 정하세요');
+  if (!price) manual.push('⚠ 4단계 정가 — 원고에 종이책 `> 정가:`(또는 `> 전자책:`)가 없어 계산할 수 없습니다. 화면 기본값 1,000원(예시값) 그대로 두니 직접 정하세요');
   if (!step5.intro) manual.push('5단계 도서소개');
   if (!step5.bio) manual.push('5단계 저자경력·소개');
   manual.push('🔴 5단계 「도서제출」 — 반드시 직접 클릭(자동 제출 금지)');
   return { kind: 'ebook', step1, step2, step3, step4, step5, manual, registerInfoFile: (ri && ri.file) || '', shotDir: c.shotDir || '' };
 }
 
-module.exports = { ebookPlan, BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };
+module.exports = { ebookPriceFromPaper, ebookPlan, BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };

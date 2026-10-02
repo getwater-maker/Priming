@@ -61,6 +61,13 @@ function fakePage(body, { checked = true, blueActive = true } = {}) {
   ok(plan.manual.some((s) => /도서제출/.test(s)) && !plan.manual.some((s) => /ePub\(없음|표지\(JPG/.test(s)), '직접 목록: 도서제출만');
   const none = RF.ebookPlan(parseBookText('# t\n> 저자: a\n', 'x'), {});
   ok(none.manual.some((s) => /ePub\(없음/.test(s)) && none.manual.some((s) => /3단계 표지/.test(s)) && none.manual.some((s) => /정가/.test(s)), '판별: 파일·표지·정가가 없으면 직접 목록에 이유');
+  // 💰 정가 = 종이책의 70%, 10원 단위 이하 버림
+  ok(RF.ebookPriceFromPaper(19500) === 13600 && RF.ebookPriceFromPaper(15000) === 10500 && RF.ebookPriceFromPaper(12800) === 8900 && RF.ebookPriceFromPaper(10000) === 7000, '19,500→13,600 · 15,000→10,500 · 12,800→8,900(8,960 내림) · 10,000→7,000');
+  ok(RF.ebookPriceFromPaper(0) === 0 && RF.ebookPriceFromPaper('') === 0 && RF.ebookPriceFromPaper(100) === 0, '종이책 정가 없음/너무 낮음 → 0(계산 안 함)');
+  const pp = RF.ebookPlan(parseBookText(['# t', '> 저자: a', '> 정가: 19,500원', ''].join(String.fromCharCode(10)), 'x'), {});
+  ok(pp.step4.price === 13600 && pp.step4.from === 'paper70' && pp.step4.paper === 19500, '🔑 원고 정가 19,500원 → 전자책 13,600원(종이책 70% 내림)');
+  ok(plan.step4.from === 'ebook' && plan.step4.price === 9900, '`> 전자책:` 가격을 따로 적으면 그 값이 이긴다(판권지와 같게)');
+  ok(!pp.manual.some((s) => /4단계 정가/.test(s)) && none.manual.some((s) => /종이책 `> 정가:`/.test(s)), '정가를 계산했으면 직접 목록에 안 올린다 · 종이책 정가도 없으면 이유와 함께 올린다');
   const withRi = RF.ebookPlan(book, { epub, cover, registerInfo: { title: '삼국지 완역 1 : 천하대란', subtitle: '1-15', author: '나관중', genre: '', isbnText: '979-11-999-9999-9', intro: '', toc: '', bio: '', ai: '', rights: '' } });
   ok(withRi.step1.title === '삼국지 완역 1 : 천하대란' && withRi.step1.subtitle === '1-15' && withRi.step1.isbnMode === 'bookk', '등록정보 파일이 원고 메타보다 우선(제목) · 종이책 ISBN 은 무시');
 
