@@ -91,7 +91,7 @@ function bookkChecklist(ctx) {
     item('category', '카테고리', has(m.category) ? 'ok' : 'info', has(m.category) ? m.category : '등록 화면 입력 항목(목록은 로그인 뒤 확인)', { tab: 'info' }),
     item('keywords', '키워드', has(m.keywords) ? 'ok' : 'info', has(m.keywords) ? m.keywords : '등록 화면 입력 항목', { tab: 'info' }),
     item('tagline', '한줄 소개', has(m.tagline) ? 'ok' : 'info', has(m.tagline) ? m.tagline : '등록 화면 입력 항목', { tab: 'info' }),
-    manual('cmyk', '표지 CMYK 변환 확인', '권장(RGB도 반려되진 않지만 색이 달라질 수 있음) — 짙은 단색은 탁해질 수 있으니 1권을 먼저 제출해 색 확인', c),
+    manual('cmyk', '표지 색 모드: RGB 제출(CMYK 권장 · 반려 아님) — 시험 인쇄로 색 확인', '우리 표지 PDF 는 RGB 입니다. 부크크 안내는 CMYK 권장이고 RGB 도 반려되지 않지만 인쇄하면 색이 달라질 수 있습니다(예: 짙은 붉은 책등은 탁해지고 크림 바탕은 약간 노래짐). 인쇄소 프로파일을 모르는 채 변환하면 오히려 어긋날 수 있어 1권을 시험 인쇄(1부)해 실물 색을 본 뒤 필요하면 CMYK 표지 PDF 를 만듭니다', c),
     manual('safe', '표지 글자는 재단선에서 10~15mm 안쪽', '부크크 권고 — 표지 탭의 안전여백(5mm)보다 넓습니다. 풀빼다 이미지는 사방 3mm 추가', c),
     manual('outer', '승인 뒤 「최종 입점」 → (선택) 외부유통 신청', '승인 후 표지·내지 다운로드 검토 → 최종 입점. 외부유통은 나의 서재 › 유통관리에서 클릭으로 신청', c),
   ];
