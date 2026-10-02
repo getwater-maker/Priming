@@ -384,6 +384,17 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkactions{display:flex;gap:8px;margin-top:10px}
 .bkactions button{flex:1;min-width:0;padding:8px 4px;font-size:13px;white-space:nowrap}
 .bkactions button:first-child{font-weight:700}
+.bkboth{margin-top:8px}
+.bkboth button{background:var(--accent-d,#b9824a);color:#fff;border-color:transparent;font-weight:700}
+.bkboth button:disabled{opacity:.55}
+/* 💰 종이책 정가 칸(전자책 탭) — 세로로 정돈: 제목 · 입력줄 · 안내 */
+.bkprice{margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fdfaf4}
+.bkprice-head{font-size:12.5px;font-weight:700;color:var(--strong);display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline}
+.bkprice-head .meta{font-weight:400}
+.bkprice-row{display:flex;align-items:center;gap:6px;margin:6px 0 4px}
+.bkprice-row input{width:120px;min-width:0;flex:none;padding:5px 8px;font-size:13px}
+.bkprice-row button{flex:none;padding:5px 14px;font-size:12px;white-space:nowrap}
+.bkprice-info{line-height:1.5}
 .bkstatus{margin-top:10px;font-size:13px;color:var(--base);border-top:1px solid var(--line);padding-top:8px}
 
 /* ⚙ 설정 — ComfyUI 「어디로 보낼까」 2분할 (🖥 로컬 / ☁ 클라우드). 각 칸은 주소·키만 관리하고,

@@ -208,6 +208,28 @@ async function _waitPriceScreen(page) {
   await page.waitForFunction(() => /정가\s*설정|최종\s*정가|외부\s*서점/.test(document.body ? document.body.innerText : ''), null, { timeout: 30000 });
 }
 
+/**
+ * 💰 4단계 정가 입력칸 찾기 — 「화면의 첫 text 입력」으로 잡으면 머리말 검색칸 같은 엉뚱한 칸이 걸려 fill 이 30초 시간 초과했다(로이 2026-10-02: `locator.fill: Timeout 30000ms`).
+ *   보이는·편집 가능한 입력 중 **값이 숫자(예: 1000)인 칸**을 우선, 없으면 「정가설정」 카드 안의 입력칸에 표식(data-priming-price)을 달아 그 선택자를 돌려준다. 못 찾으면 옛 선택자.
+ */
+const PRICE_SEL_FALLBACK = 'input[type=text], input[type=number], input:not([type])';
+async function _priceSel(page) {
+  const ok = await page.evaluate(() => {
+    const okInput = (i) => i.offsetParent !== null && !i.disabled && !i.readOnly && ['', 'text', 'number', 'tel'].includes(i.type || '');
+    const all = [...document.querySelectorAll('input')].filter(okInput);
+    let pick = all.find((i) => /^\d[\d,]*$/.test(String(i.value || '').trim()));
+    if (!pick) {   // 값이 비었으면 「정가설정」 제목 **바로 뒤에 오는 첫 입력칸**(문서 순서) — 머리말 검색칸은 제목 앞이라 걸리지 않는다
+      const h = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6,strong,b,span,div,p,label,header')].find((e) => e.children.length === 0 && /^\s*정가\s*설정\s*$/.test(e.textContent || ''));
+      if (h) pick = all.find((i) => (h.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+    }
+    document.querySelectorAll('[data-priming-price]').forEach((e) => e.removeAttribute('data-priming-price'));
+    if (!pick) return false;
+    pick.setAttribute('data-priming-price', '1');
+    return true;
+  }).catch(() => false);
+  return ok === true ? '[data-priming-price="1"]' : PRICE_SEL_FALLBACK;
+}
+
 /** 파일 업로드 끝 대기 — 「업로드 파일 없음」이 사라지고 **「업로드중…」도 사라질 때**까지(최대 5분). 파일 이름이 먼저 보이고 업로드는 계속되는 구간에 다음 단계를 누르면 「원고파일을 올리지 않으면 진행할 수 없습니다」 창이 뜬다(로이 2026-10-02 전자책 2단계). */
 async function _waitUploaded(page) {
   await page.waitForFunction(() => { const t = document.body.innerText; return !/업로드 파일 없음/.test(t) && !/업로드\s*중/.test(t); }, null, { timeout: 5 * 60 * 1000 });
@@ -356,7 +378,7 @@ async function fillBookkPrice(page, plan, log) {
     const bad = s4.price % 100 !== 0 ? '100원 단위가 아닙니다' : (min && s4.price < min ? `최소가격 ${min.toLocaleString('ko-KR')}원보다 낮습니다` : (min && s4.price > min * 3 ? `최소가격의 3배(${(min * 3).toLocaleString('ko-KR')}원)를 넘습니다` : ''));
     if (bad) { failed.push('정가'); log(`[등록] ⚠ 원고 정가 ${s4.price.toLocaleString('ko-KR')}원: ${bad} — 정가는 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
     else await step('정가 ' + s4.price, async () => {
-      const inp = page.locator('input[type=text], input[type=number], input:not([type])').first();
+      const inp = page.locator(await _priceSel(page)).first();   // 종이책 4단계도 같은 방식(엉뚱한 첫 칸 방지)
       await inp.fill(String(s4.price)); await inp.blur();
     });
   } else log(`[등록] ℹ 원고에 정가가 없어 화면의 최소가격${min ? ' ' + min.toLocaleString('ko-KR') + '원' : ''} 그대로 둡니다`);
@@ -542,7 +564,7 @@ async function fillBookkEbookPrice(page, plan, log) {
   const s4 = plan.step4 || {}; const done = []; const failed = [];
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
   await _waitPriceScreen(page).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
-  const priceSel = 'input[type=text], input[type=number], input:not([type])';
+  const priceSel = await _priceSel(page);
   if (s4.from === 'paper70' || s4.from === 'paper-registered') log(`[등록] 💰 전자책 정가 = 종이책(${s4.from === 'paper-registered' ? '부크크 신청 때 기록한 최종정가' : '원고 정가'}) ${Number(s4.paper).toLocaleString('ko-KR')}원 × 70% (10원 단위 이하 버림) = ${Number(s4.price).toLocaleString('ko-KR')}원`);
   if (s4.price) {
     if (s4.price % 100 !== 0 || s4.price <= 0) { failed.push('정가'); log(`[등록] ⚠ 전자책 정가 ${s4.price.toLocaleString('ko-KR')}원은 100원 단위가 아닙니다 — 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
@@ -556,7 +578,7 @@ async function fillBookkEbookPrice(page, plan, log) {
         if (on === false) throw new Error('체크가 반영되지 않았습니다');
       });
       if (!failed.includes('정가 직접 변경 체크')) {
-        await step('정가 ' + s4.price, async () => { const inp = page.locator(priceSel).first(); await inp.fill(String(s4.price)); await inp.press('Tab').catch(() => {}); await inp.blur(); });
+        await step('정가 ' + s4.price, async () => { const inp = page.locator(priceSel).first(); await inp.fill(String(s4.price), { timeout: 8000 }); await inp.press('Tab').catch(() => {}); await inp.blur(); });
         await sleep(400);
         await _verifyInput(page, priceSel, String(s4.price), '정가 입력칸', log, failed);   // 되돌려졌으면(1000) ⚠ + 실패
       }
