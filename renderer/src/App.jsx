@@ -320,6 +320,15 @@ const VD_SAMPLE_TEXT = {
 // 헤더 버전 표시 — 0.5.103 → 5.10 (앞 「0.」 생략 · 소수 둘째 자리까지 · 로이 2026-10-01). 전체 버전은 마우스를 올리면.
 const shortVer = (v) => { const m = /^0\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? m[1] + '.' + String(m[2]).slice(0, 2) : String(v || ''); };
 const PROG_AUTOCLOSE_MS = 3000;   // 🗂 진행 팝업 자동 닫기(끝난 뒤)
+const PROG_END_PHASES = ['done', 'aborted', 'error'];
+// 팝업 하나의 자동 닫기 — 그 팝업의 소식(prog)이 바뀔 때만 타이머를 다시 건다.
+function useAutoCloseProg(prog, setProg) {
+  useEffect(() => {
+    if (!prog || !PROG_END_PHASES.includes(prog.phase)) return undefined;
+    const t = setTimeout(() => setProg((cur) => (cur === prog ? null : cur)), PROG_AUTOCLOSE_MS);
+    return () => clearTimeout(t);
+  }, [prog, setProg]);
+}
 
 export default function App() {
   const [mode, setModeRaw] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
@@ -448,14 +457,12 @@ export default function App() {
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
   const [mp4Prog, setMp4Prog] = useState(null);
   // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
-  //   ✗ 실패도 닫는다(로이 2026-10-02 — 이유는 로그창에 남는다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
-  useEffect(() => {
-    const ends = ['done', 'aborted', 'error'];
-    const ts = [[makeProg, setMakeProg], [mp4Prog, setMp4Prog], [ytProg, setYtProg]]
-      .filter(([p]) => p && ends.includes(p.phase))
-      .map(([p, set]) => setTimeout(() => set((cur) => (cur === p ? null : cur)), PROG_AUTOCLOSE_MS));
-    return () => ts.forEach(clearTimeout);
-  }, [makeProg, mp4Prog, ytProg]);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
+  //   ✗ 실패도 닫는다(이유는 로그창에 남는다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
+  //   🔴 **팝업마다 따로 센다**(v0.6.49) — 셋을 한 효과에 묶었더니 만들기 팝업이 1초마다 갱신될 때마다
+  //     끝난 MP4·업로드 팝업의 타이머까지 지워져 큐가 도는 동안 영영 안 닫혔다(로이 2026-10-03). `test:progclose`.
+  useAutoCloseProg(makeProg, setMakeProg);
+  useAutoCloseProg(mp4Prog, setMp4Prog);
+  useAutoCloseProg(ytProg, setYtProg);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
   const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
