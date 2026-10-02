@@ -265,7 +265,8 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     fdoc.open();
     fdoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;padding:0;background:#aaa}   /* 뷰어 작업 영역(#aaa)과 같은 색 — 한 펼침면만 그려 아래가 남을 때 갈색 띠로 보이던 것(로이 2026-10-02) */
-body{overflow-y:scroll}
+body{overflow-y:scroll;display:flex;flex-direction:column}
+#vp{margin-top:auto;margin-bottom:auto;width:100%}   /* 펼침면이 창보다 작으면 세로 가운데(가로는 뷰어가 가운데) · 크면 맨 위부터 스크롤(auto 마진은 잘리지 않는다) */
 ::-webkit-scrollbar{width:14px}
 ::-webkit-scrollbar-track{background:#6f675e}
 ::-webkit-scrollbar-thumb{background:#c9b48a;border-radius:7px;border:3px solid #6f675e}
@@ -299,6 +300,7 @@ body{overflow-y:scroll}
     });
     // iframe 이 포커스를 받아야 키가 먹음 — 클릭 시 body 포커스
     try { fdoc.body.tabIndex = -1; fdoc.addEventListener('mousedown', () => { try { fdoc.body.focus(); } catch (_) {} }); } catch (_) {}
+    try { iframe.contentWindow.addEventListener('resize', () => syncBodyMin(fdoc, zoomRef.current)); } catch (_) {}
     const vp = fdoc.getElementById('vp');
     const viewer = new CoreViewer({ viewportElement: vp, window: iframe.contentWindow }, {
       renderAllPages: true, pageViewMode: PageViewMode.SPREAD, fitToScreen: true, autoResize: true,
@@ -312,7 +314,7 @@ body{overflow-y:scroll}
         const total = Math.max(0, (viewer.getPageSizes() || []).length);
         setPageInfo((pi) => ({ ...pi, total }));
         setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
-        try { fdoc.body.style.zoom = zoomRef.current; } catch (_) {}
+        try { fdoc.body.style.zoom = zoomRef.current; syncBodyMin(fdoc, zoomRef.current); } catch (_) {}
         alignSingleSpreads(fdoc); // 홀로 있는 페이지(첫 쪽·마지막 홀수쪽)를 펼침면과 같은 위치(오른쪽/왼쪽)에 고정
         // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
         if (total > 0 && total !== lastPagesRef.current) {
@@ -324,6 +326,10 @@ body{overflow-y:scroll}
     viewer.loadDocument(previewUrl, {}, {});
   }, [previewUrl]);
 
+  // 🎯 가운데 정렬용 — body 가 줌 배율만큼 줄어 보이므로 최소 높이를 (창 높이 ÷ 배율)로 두어 #vp 의 auto 마진이 세로 가운데를 만든다(-2px: 반올림으로 생기는 가짜 스크롤 방지)
+  function syncBodyMin(fdoc, z) {
+    try { const w = fdoc.defaultView; fdoc.body.style.minHeight = Math.max(0, w.innerHeight / (z || 1) - 2) + 'px'; } catch (_) {}
+  }
   // 홀로 놓인 페이지를 펼침면 좌/우 자리에 정렬 — recto(홀수쪽)는 오른쪽 자리, verso 는 왼쪽 자리.
   function alignSingleSpreads(fdoc) {
     try {
@@ -346,7 +352,7 @@ body{overflow-y:scroll}
     zoomRef.current = z; setZoomPct(Math.round(z * 100));
     try {
       const fdoc = viewportRef.current && viewportRef.current.contentDocument;
-      if (fdoc && fdoc.body) { fdoc.body.style.zoom = z; alignSingleSpreads(fdoc); }
+      if (fdoc && fdoc.body) { fdoc.body.style.zoom = z; syncBodyMin(fdoc, z); alignSingleSpreads(fdoc); }
     } catch (_) {}
   }
   // ⛶ 맞춤 — 펼침면 높이를 뷰포트 높이에 맞춤
@@ -740,7 +746,7 @@ body{overflow-y:scroll}
             onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
         </div>}
         {!isBookk && <div className="bkactions">
-          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume" title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요" onClick={() => runRegister('ebook', 'cover')}>📘 지금 단계부터 이어 채우기</button>
+          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume" title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요" onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>
           <button disabled={regBusy || building} data-testid="bk-register-ebook"
             title="크롬을 열어 부크크 새전자책 1~5단계(기본정보·ePub·표지·정가·소개)를 채웁니다 — 로그인·도서제출은 직접"
             onClick={() => runRegister('ebook')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>

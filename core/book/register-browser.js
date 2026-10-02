@@ -148,6 +148,12 @@ async function fillJakkawa(page, plan, log) {
   return { done, failed };
 }
 
+/** 파일 업로드 끝 대기 — 「업로드 파일 없음」이 사라지고 **「업로드중…」도 사라질 때**까지(최대 5분). 파일 이름이 먼저 보이고 업로드는 계속되는 구간에 다음 단계를 누르면 「원고파일을 올리지 않으면 진행할 수 없습니다」 창이 뜬다(로이 2026-10-02 전자책 2단계). */
+async function _waitUploaded(page) {
+  await page.waitForFunction(() => { const t = document.body.innerText; return !/업로드 파일 없음/.test(t) && !/업로드\s*중/.test(t); }, null, { timeout: 5 * 60 * 1000 });
+  await sleep(800);
+}
+
 /** 도서정보 칸(도서명·부제·저자·목적·ISBN·대표장르·성인) — 종이책 2단계와 전자책 1단계가 같은 칸이다. select 목록을 돌려준다 */
 async function _fillInfoForm(page, s2, log, step) {
   await step('도서명', () => page.locator('input[placeholder*="도서명 기재"]').fill(s2.title));
@@ -201,7 +207,7 @@ async function fillBookk(page, plan, log) {
     await step('내지 PDF 업로드', async () => {
       await page.locator('input[type=file]').first().setInputFiles(s2.pdf);
       // 업로드 끝 = 「업로드 파일 없음」 문구가 사라짐(최대 5분)
-      await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+      await _waitUploaded(page);
     });
   }
   // 🔍 2단계 입력 되짚기(R24) — 칸에 실제로 들어간 값을 읽어 확인하고 화면을 캡처한다
@@ -250,7 +256,7 @@ async function fillBookkCover(page, plan, log) {
   if (specOk && s3.coverPdf && fs.existsSync(s3.coverPdf)) {
     await step('표지 PDF 업로드', async () => {
       await page.locator('input[type=file]').first().setInputFiles(s3.coverPdf);
-      await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+      await _waitUploaded(page);
     });
   } else if (!s3.coverPdf || !fs.existsSync(s3.coverPdf)) { failed.push('표지 PDF 없음'); log('[등록] ⚠ 올릴 표지 PDF 가 없습니다 — 「종이책 PDF」로 표지 PDF 를 먼저 만드세요'); }
   if (s3.logo === 'blue') await step('로고 파랑', () => _pickBlueLogo(page));
@@ -439,7 +445,7 @@ async function fillBookkEbookManuscript(page, plan, log) {
   if (mb > 20) { failed.push('ePub 20MB 초과'); log(`[등록] ⚠ ePub ${mb.toFixed(1)}MB — 부크크 한도 20MB 를 넘어 올리지 않습니다`); return { done, failed }; }
   try {
     await page.locator('input[type=file]').first().setInputFiles(s2.epub);
-    await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+    await _waitUploaded(page);
     done.push('ePub 업로드');
   } catch (e) { failed.push('ePub 업로드'); log(`[등록] ⚠ ePub 업로드 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); }
   await _shot(page, plan, log, '전자책2단계');
@@ -459,7 +465,7 @@ async function fillBookkEbookCover(page, plan, log) {
     else await step('표지 업로드', async () => {
       await page.waitForSelector('text=표지 주의사항', { timeout: 15000 });
       await page.locator('input[type=file]').first().setInputFiles(s3.cover);
-      await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+      await _waitUploaded(page);
     });
   } else { failed.push('표지 없음'); log('[등록] ⚠ 올릴 전자책 표지(JPG·PDF)가 없습니다 — 원고 `> 전자책표지:` 를 정하거나 ePub 을 다시 만들어 앞표지 크롭본을 만드세요'); }
   if (s3.logo === 'blue') await step('로고 파랑', () => _pickBlueLogo(page));

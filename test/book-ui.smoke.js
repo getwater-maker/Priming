@@ -225,7 +225,9 @@ ${para}
       await win.locator('[data-testid=bk-next]').click();
       await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });
       const a1 = await pageNow();
-      await win.locator('[data-testid=bk-next]').click(); await win.waitForTimeout(600);
+      await win.locator('[data-testid=bk-next]').click();
+      // 고정 600ms 는 뷰어 재배치가 늦을 때 흔들렸다 — 쪽 표시가 바뀔 때까지 최대 4초 기다린다(안 바뀌면 아래 단언이 잡는다)
+      await win.waitForFunction((l) => { const t = (document.querySelector('.bkpage') || {}).textContent || ''; return t.split('/')[0].trim() !== l; }, a1.label, { timeout: 4000 }).catch(() => {});
       const a2 = await pageNow();
       if (!/^1$/.test(a1.label) || a2.label === a1.label) throw new Error(`화살표 › 로 쪽이 안 넘어감: ${a1.label} → ${a2.label}`);
       await win.locator('[data-testid=bk-prev]').click(); await win.waitForTimeout(600);
