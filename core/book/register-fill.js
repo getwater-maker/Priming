@@ -146,7 +146,7 @@ function bookkPlan(book, ctx) {
   // 3단계 「표지디자인」(로이 2026-10-02 실측 화면): 탭 무료 표지 / **직접 올리기** / 구매한 템플릿 · 파일 JPG·PDF 만(PNG 불가) · 100MB 이하 · 300dpi ·
   //   화면 「작업규격」 = 가로 518.50mm(앞날개100+뒷표지151+책등16.505+앞표지151+앞날개100) × 세로 216mm(사방 3mm 재단 포함). 우리 표지 PDF 를 올린다(PNG 시안은 올리지 않는다).
   const sp = c.spread || null;
-  const step3 = { coverPdf: c.coverPdf || '', expect: sp ? { widthMm: sp.widthMm, heightMm: sp.heightMm, spineMm: sp.spineMm } : null, tab: '직접 올리기' };
+  const step3 = { coverPdf: c.coverPdf || '', expect: sp ? { widthMm: sp.widthMm, heightMm: sp.heightMm, spineMm: sp.spineMm } : null, tab: '직접 올리기', logo: 'blue' };   // 로고 = 파란색(로이 2026-10-02 · 화면 `a[href="#blue"]`)
   // 4단계 「가격정책」(실측 2026-10-02): 정가 입력(최소가격 이상 · 최대 3배 · 100원 단위) · 정가인하 「아니요」 · 외부서점 입점 「네」. 정가는 원고 `> 정가:` — 화면의 최소가격보다 낮으면 올리지 않고 알린다.
   const price = Number(digits(m.price)) || 0;
   const step4 = { price, cut: false, external: true };
@@ -174,7 +174,7 @@ function bookkPlan(book, ctx) {
   }
   const manual = [];
   if (!step3.coverPdf) manual.push('3단계 표지 PDF(없음 — 먼저 「종이책 PDF」로 표지 PDF 를 만드세요)');
-  manual.push('3단계 로고 선택(화면 기본값 그대로 두거나 직접 — 표지에 로고를 직접 넣었다면 불필요)');
+  manual.push('3단계 로고 — 파란색을 자동 선택합니다(안 눌렸으면 직접 · 표지에 로고를 직접 넣었다면 불필요)');
   if (!step1.pages) manual.push('쪽수(내지 PDF 를 먼저 만드세요)');
   if (!step2.title) manual.push('도서명(필수)');
   if (!step2.author) manual.push('저자(필수)');
@@ -188,4 +188,57 @@ function bookkPlan(book, ctx) {
   return { step1, step2, step3, step4, step5, manual, registerInfoFile: (ri && ri.file) || '', shotDir: c.shotDir || '' };
 }
 
-module.exports = { BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };
+/**
+ * 부크크 「새전자책」(/author/make/electronicBook) 계획 — 로이 스크린샷·화면 기록 2026-10-02 실측.
+ *   단계: 1 기본정보(종이책 2단계와 같은 칸 · 쪽수·PDF 없음) → 2 원고등록(ePub 첨부 · EPUB2.0만 외부유통 · 20MB) → 3 꾸미기(직접 올리기 = JPG·PDF 10MB · 로고 파랑)
+ *   → 4 가격정책(정가 + 「직접 변경」 체크박스 · 외부서점) → 5 최종확인(종이책과 같은 칸). 🔴 「도서제출」은 누르지 않는다.
+ *  ctx = { epub, cover(JPG/PDF 경로), registerInfo, shotDir }
+ */
+function ebookPlan(book, ctx) {
+  const m = (book && book.meta) || {};
+  const c = ctx || {};
+  const hasIsbn = has(m.ebookIsbn);     // 종이책 ISBN 과 별개 — 전자책 ISBN 만 쓴다(없으면 부크크 무료 발급)
+  const step1 = {
+    title: cleanTitle(m.title || (book && book.fileTitle) || ''),
+    subtitle: cleanTitle(m.subtitle),
+    author: m.author || '',
+    purpose: 'external',
+    isbnMode: hasIsbn ? 'other' : 'bookk',
+    isbn: hasIsbn ? m.ebookIsbn : '',
+    genre: m.category || BOOKK_DEFAULT_GENRE,
+    genreFallback: BOOKK_DEFAULT_GENRE,
+    adult: 'all',
+  };
+  const step2 = { epub: c.epub || '', epubName: c.epub ? require('path').basename(c.epub) : '' };
+  const step3 = { cover: c.cover || '', logo: 'blue' };
+  const price = Number(digits(m.ebookPrice)) || 0;
+  const step4 = { price, external: true };
+  const intro = cleanBody(sectionText(findSection(book, 'backCover'))) || cleanBody(m.tagline || '');
+  const step5 = { intro, toc: cleanBody(tocText(book)), bio: cleanBody(sectionText(findSection(book, 'authorBio'))), ai: bookkAiOption(m.aiDisclosure), rights: BOOKK_RIGHTS };
+  const ri = c.registerInfo || null;
+  if (ri) {
+    const one = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+    if (ri.title) { step1.title = one(ri.title); step1.subtitle = one(ri.subtitle); }
+    if (ri.author) step1.author = one(ri.author);
+    if (ri.genre) step1.genre = one(ri.genre);
+    if (ri.intro) step5.intro = ri.intro;
+    if (ri.toc) step5.toc = ri.toc;
+    if (ri.bio) step5.bio = ri.bio;
+    if (ri.ai) step5.ai = bookkAiOption(ri.ai);
+    if (ri.rights) step5.rights = /보유하지\s*않/.test(ri.rights) ? '초상/저작권 보유하지 않음' : BOOKK_RIGHTS;
+    // ⚠ ISBN(ri.isbnText)은 종이책 값이라 쓰지 않는다
+  }
+  const manual = [];
+  if (!step2.epub) manual.push('2단계 ePub(없음 — 「📦 한 번에 만들기」로 ePub 을 먼저 만드세요)');
+  if (!step3.cover) manual.push('3단계 표지(JPG·PDF 10MB 이하 — 원고 `> 전자책표지:` 또는 인쇄 표지에서 앞표지를 크롭한 `_ebook-cover.jpg` 가 없음 · 화면 무료 표지로 직접)');
+  if (!step1.title) manual.push('도서명(필수)');
+  if (!step1.author) manual.push('저자(필수)');
+  if (step1.isbnMode === 'other') manual.push('보유 ISBN 입력칸(1단계에서 직접)');
+  if (!price) manual.push('⚠ 4단계 정가 — 원고 `> 전자책:` 가 없어 화면 기본값 1,000원(예시값) 그대로 둡니다. 직접 정하세요');
+  if (!step5.intro) manual.push('5단계 도서소개');
+  if (!step5.bio) manual.push('5단계 저자경력·소개');
+  manual.push('🔴 5단계 「도서제출」 — 반드시 직접 클릭(자동 제출 금지)');
+  return { kind: 'ebook', step1, step2, step3, step4, step5, manual, registerInfoFile: (ri && ri.file) || '', shotDir: c.shotDir || '' };
+}
+
+module.exports = { ebookPlan, BOOKK_AI_DEFAULT, BOOKK_RIGHTS, bookkAiOption, JAKKAWA_CATEGORIES, BOOKK_MATERIAL, BOOKK_DEFAULT_GENRE, cleanTitle, cleanBody, sectionText, tocText, kstDatePlus, normDate, pickOption, jakkawaPlan, bookkPlan };

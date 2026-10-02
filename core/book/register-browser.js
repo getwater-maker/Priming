@@ -15,6 +15,8 @@ const path = require('path');
 const PROFILE_DIR = path.join(os.homedir(), '.priming-maker', 'book-register-profile');
 const SITES = {
   bookk: { label: '부크크', start: 'https://bookk.co.kr/author/make/paperBook', home: 'https://bookk.co.kr/' },
+  bookkEbook: { label: '부크크 전자책', start: 'https://bookk.co.kr/author/make/electronicBook', home: 'https://bookk.co.kr/' },
+  bookkEbook: { label: '부크크 전자책', start: 'https://bookk.co.kr/author/make/electronicBook', home: 'https://bookk.co.kr/' },
   jakkawa: { label: '작가와', start: 'https://www.jakkawa.com/making-books1', home: 'https://www.jakkawa.com/' },
 };
 
@@ -143,6 +145,29 @@ async function fillJakkawa(page, plan, log) {
   return { done, failed };
 }
 
+/** 도서정보 칸(도서명·부제·저자·목적·ISBN·대표장르·성인) — 종이책 2단계와 전자책 1단계가 같은 칸이다. select 목록을 돌려준다 */
+async function _fillInfoForm(page, s2, log, step) {
+  await step('도서명', () => page.locator('input[placeholder*="도서명 기재"]').fill(s2.title));
+  if (s2.subtitle) await step('부제', () => page.locator('input[placeholder*="부제명"]').fill(s2.subtitle));
+  await step('저자', () => page.locator('input[placeholder*="저자명 기재"]').fill(s2.author));
+  const sel = page.locator('select');
+  await step('도서 제작 목적', () => sel.nth(0).selectOption(s2.purpose));
+  await step('ISBN', () => sel.nth(1).selectOption(s2.isbnMode));
+  if (s2.genre) {
+    await step('대표 장르', async () => {
+      const opts = await sel.nth(2).locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
+      const RF = require('./register-fill');
+      const texts = opts.map((o) => o.t);
+      const hit = RF.pickOption(s2.genre, texts) || RF.pickOption(s2.genreFallback || RF.BOOKK_DEFAULT_GENRE, texts);   // 원고 카테고리가 안 맞으면 기본 장르
+      if (!hit) throw new Error(`「${s2.genre}」에 맞는 장르 없음(기본 「${RF.BOOKK_DEFAULT_GENRE}」도 목록에 없음)`);
+      if (hit !== s2.genre) log(`ℹ 대표 장르: 「${hit}」 선택`);
+      await sel.nth(2).selectOption(opts.find((o) => o.t === hit).v);
+    });
+  }
+  await step('성인도서 여부', () => sel.nth(6).selectOption(s2.adult));
+  return sel;
+}
+
 /** 부크크 — 1단계 카드 선택 → Step2(초안 생성) → 2단계 폼 + PDF 업로드. 3단계 이후는 손대지 않는다. */
 async function fillBookk(page, plan, log) {
   const s1 = plan.step1; const s2 = plan.step2;
@@ -167,24 +192,7 @@ async function fillBookk(page, plan, log) {
   // ▶ Step2 — 임시서재에 초안이 만들어진다(삭제 가능). 제출이 아니다.
   await page.locator('a', { hasText: 'Step2 원고등록' }).first().click({ timeout: 8000 });
   await page.waitForSelector('input[placeholder*="도서명 기재"]', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 2단계'); throw new Error('2단계(원고등록) 화면으로 넘어가지 못했습니다 — 1단계 필수 선택을 확인하세요'); });
-  await step('도서명', () => page.locator('input[placeholder*="도서명 기재"]').fill(s2.title));
-  if (s2.subtitle) await step('부제', () => page.locator('input[placeholder*="부제명"]').fill(s2.subtitle));
-  await step('저자', () => page.locator('input[placeholder*="저자명 기재"]').fill(s2.author));
-  const sel = page.locator('select');
-  await step('도서 제작 목적', () => sel.nth(0).selectOption(s2.purpose));
-  await step('ISBN', () => sel.nth(1).selectOption(s2.isbnMode));
-  if (s2.genre) {
-    await step('대표 장르', async () => {
-      const opts = await sel.nth(2).locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
-      const RF = require('./register-fill');
-      const texts = opts.map((o) => o.t);
-      const hit = RF.pickOption(s2.genre, texts) || RF.pickOption(s2.genreFallback || RF.BOOKK_DEFAULT_GENRE, texts);   // 원고 카테고리가 안 맞으면 기본 장르
-      if (!hit) throw new Error(`「${s2.genre}」에 맞는 장르 없음(기본 「${RF.BOOKK_DEFAULT_GENRE}」도 목록에 없음)`);
-      if (hit !== s2.genre) log(`ℹ 대표 장르: 「${hit}」 선택`);
-      await sel.nth(2).selectOption(opts.find((o) => o.t === hit).v);
-    });
-  }
-  await step('성인도서 여부', () => sel.nth(6).selectOption(s2.adult));
+  const sel = await _fillInfoForm(page, s2, log, step);
   if (s2.pages) await step('페이지수', async () => { const n = page.locator('input[type=number]').first(); await n.fill(String(s2.pages)); await n.blur(); });
   if (s2.pdf && fs.existsSync(s2.pdf)) {
     await step('내지 PDF 업로드', async () => {
@@ -242,7 +250,15 @@ async function fillBookkCover(page, plan, log) {
       await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
     });
   } else if (!s3.coverPdf || !fs.existsSync(s3.coverPdf)) { failed.push('표지 PDF 없음'); log('[등록] ⚠ 올릴 표지 PDF 가 없습니다 — 「종이책 PDF」로 표지 PDF 를 먼저 만드세요'); }
+  if (s3.logo === 'blue') await step('로고 파랑', () => _pickBlueLogo(page));
   return { done, failed };
+}
+
+/** 🔵 3단계 로고선택 — 파란색(로이 2026-10-02 · 종이책·전자책 공통). 로고 칸은 `a[href="#blue"]` 이고 고르면 class 에 active 가 붙는다(화면 기록 실측). 눌린 뒤 active 를 확인한다. */
+async function _pickBlueLogo(page) {
+  await page.locator('a[href="#blue"]').first().click({ timeout: 6000 });
+  const active = await page.evaluate(() => { const a = document.querySelector('a[href="#blue"]'); return !!a && /(^|\s)active(\s|$)/.test(a.className); }).catch(() => null);
+  if (active === false) throw new Error('파란 로고 선택이 반영되지 않았습니다');
 }
 
 /** 라디오/선택 글자를 눌러 고른다 — 라벨 글자로 찾고, 고른 뒤 실제로 체크됐는지 확인한다(아니면 실패) */
@@ -288,10 +304,14 @@ async function fillBookkPrice(page, plan, log) {
 /** 5단계 화면의 카드 요약을 우리 값과 대조한다(읽기만) */
 function checkFinalSummary(body, plan) {
   const out = [];
-  const pg = /페이지수\s*([\d,]+)/.exec(body), th = /두께\s*([\d.]+)\s*mm/.exec(body), pr = /판매가\s*([\d,]+)\s*원/.exec(body);
+  const pg = /페이지수\s*([\d,]+)/.exec(body), th = /두께\s*([\d.]+)\s*mm/.exec(body), pr = /판매가(?:격)?\s*([\d,]+)\s*원/.exec(body);
   if (pg && plan.step1 && plan.step1.pages && Number(pg[1].replace(/,/g, '')) !== plan.step1.pages) out.push(`페이지수 화면 ${pg[1]} ≠ 우리 ${plan.step1.pages}`);
   if (th && plan.step3 && plan.step3.expect && Math.abs(Number(th[1]) - plan.step3.expect.spineMm) > 0.05) out.push(`두께 화면 ${th[1]}mm ≠ 우리 ${plan.step3.expect.spineMm}mm`);
   if (pr && plan.step4 && plan.step4.price && Number(pr[1].replace(/,/g, '')) !== plan.step4.price) out.push(`판매가 화면 ${pr[1]}원 ≠ 원고 ${plan.step4.price}원`);
+  if (plan.kind === 'ebook' && plan.step2 && plan.step2.epubName) {   // 전자책 카드의 「파일 [전자책] ….epub」
+    const fm = /(?:^|\n)파일\s*(.+?\.(?:epub|pdf))/i.exec(body);
+    if (fm && fm[1].trim() !== plan.step2.epubName) out.push(`파일 화면 ${fm[1].trim()} ≠ 우리 ${plan.step2.epubName}`);
+  }
   return out;
 }
 
@@ -390,8 +410,131 @@ async function runBookkCoverOnly(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [] };
 }
 
+// ───────── 📘 부크크 「새전자책」 (/author/make/electronicBook) — 로이 스크린샷·화면 기록 2026-10-02 실측. 🔴 「도서제출」은 누르지 않는다(이동 버튼 Step2~Step5 뿐).
+const EBOOK_NAV = { 1: 'Step2 원고등록', 2: 'Step3 꾸미기', 3: 'Step4 가격정책', 4: 'Step5 최종확인' };
+
+/** 1단계 기본정보 — 종이책 2단계와 같은 칸(쪽수·PDF 없음) */
+async function fillBookkEbookInfo(page, plan, log) {
+  const s1 = plan.step1; const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('input[placeholder*="도서명 기재"]', { timeout: 45000 }).catch(async () => { await _dump(page, log, '전자책 1단계'); throw new Error('전자책 1단계(기본정보) 화면을 찾지 못했습니다'); });
+  const sel = await _fillInfoForm(page, s1, log, step);
+  await _verifyInput(page, 'input[placeholder*="도서명 기재"]', s1.title, '도서명', log, failed);
+  if (s1.subtitle) await _verifyInput(page, 'input[placeholder*="부제명"]', s1.subtitle, '부제', log, failed);
+  await _verifyInput(page, 'input[placeholder*="저자명 기재"]', s1.author, '저자', log, failed);
+  await _verifySelect(sel.nth(2), s1.genre, '대표 장르', log, failed);
+  await _shot(page, plan, log, '전자책1단계');
+  return { done, failed };
+}
+
+/** 2단계 원고등록 — ePub 첨부(EPUB2.0만 외부유통 · 20MB). 업로드 끝 = 「업로드 파일 없음」 문구 사라짐 */
+async function fillBookkEbookManuscript(page, plan, log) {
+  const s2 = plan.step2 || {}; const done = []; const failed = [];
+  await page.waitForSelector('text=원고 업로드', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 2단계'); throw new Error('전자책 2단계(원고등록) 화면을 찾지 못했습니다'); });
+  if (!s2.epub || !fs.existsSync(s2.epub)) { failed.push('ePub 없음'); log('[등록] ⚠ 올릴 ePub 이 없습니다 — 「📦 한 번에 만들기」로 ePub 을 먼저 만드세요'); return { done, failed }; }
+  const mb = fs.statSync(s2.epub).size / 1048576;
+  if (mb > 20) { failed.push('ePub 20MB 초과'); log(`[등록] ⚠ ePub ${mb.toFixed(1)}MB — 부크크 한도 20MB 를 넘어 올리지 않습니다`); return { done, failed }; }
+  try {
+    await page.locator('input[type=file]').first().setInputFiles(s2.epub);
+    await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+    done.push('ePub 업로드');
+  } catch (e) { failed.push('ePub 업로드'); log(`[등록] ⚠ ePub 업로드 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); }
+  await _shot(page, plan, log, '전자책2단계');
+  return { done, failed };
+}
+
+/** 3단계 꾸미기 — 「직접 올리기」 탭 + 표지(JPG·PDF 10MB) + 파란 로고 */
+async function fillBookkEbookCover(page, plan, log) {
+  const s3 = plan.step3 || {}; const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('text=구매한', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 3단계'); throw new Error('전자책 3단계(꾸미기) 화면을 찾지 못했습니다'); });
+  await step('직접 올리기 탭', () => page.locator('a, button, li, div, span').filter({ hasText: /^\s*직접\s*올리기\s*$/ }).first().click({ timeout: 8000 }));
+  if (s3.cover && fs.existsSync(s3.cover)) {
+    const ext = path.extname(s3.cover).toLowerCase(); const mb = fs.statSync(s3.cover).size / 1048576;
+    if (!/^\.(jpe?g|pdf)$/.test(ext)) { failed.push('표지 형식'); log(`[등록] ⚠ 표지는 JPG·PDF 만 올릴 수 있습니다(${ext}) — 올리지 않습니다`); }
+    else if (mb > 10) { failed.push('표지 10MB 초과'); log(`[등록] ⚠ 표지 ${mb.toFixed(1)}MB — 한도 10MB 를 넘어 올리지 않습니다`); }
+    else await step('표지 업로드', async () => {
+      await page.waitForSelector('text=표지 주의사항', { timeout: 15000 });
+      await page.locator('input[type=file]').first().setInputFiles(s3.cover);
+      await page.waitForFunction(() => !/업로드 파일 없음/.test(document.body.innerText), null, { timeout: 5 * 60 * 1000 });
+    });
+  } else { failed.push('표지 없음'); log('[등록] ⚠ 올릴 전자책 표지(JPG·PDF)가 없습니다 — 원고 `> 전자책표지:` 를 정하거나 ePub 을 다시 만들어 앞표지 크롭본을 만드세요'); }
+  if (s3.logo === 'blue') await step('로고 파랑', () => _pickBlueLogo(page));
+  await _shot(page, plan, log, '전자책3단계');
+  return { done, failed };
+}
+
 /**
- * @param {{platform:'bookk'|'jakkawa', plan:object, log:Function, isAborted?:Function}} o
+ * 4단계 가격정책 — 정가(100원 단위 · 화면 기본 1,000원은 예시값) + 「도서 정가를 직접 변경하였습니다」 체크(안 하면 「도서 가격 체크박스를 확인해주세요!」 창) + 외부서점 입점 「네」.
+ * 종이책과 달리 정가인하 칸이 없다. 최소·최대 가격은 화면이 알려 주지 않아 100원 단위·양수만 확인한다.
+ */
+async function fillBookkEbookPrice(page, plan, log) {
+  const s4 = plan.step4 || {}; const done = []; const failed = [];
+  const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
+  await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
+  const priceSel = 'input[type=text], input[type=number], input:not([type])';
+  if (s4.price) {
+    if (s4.price % 100 !== 0 || s4.price <= 0) { failed.push('정가'); log(`[등록] ⚠ 전자책 정가 ${s4.price.toLocaleString('ko-KR')}원은 100원 단위가 아닙니다 — 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
+    else {
+      await step('정가 ' + s4.price, async () => { const inp = page.locator(priceSel).first(); await inp.fill(String(s4.price)); await inp.blur(); });
+      // 정가를 바꾸면 「직접 변경」 체크가 필수 — 눌러서 체크됐는지 읽어 확인한다
+      await step('정가 직접 변경 체크', async () => {
+        await page.locator('label', { hasText: '직접 변경하였습니다' }).first().click({ timeout: 6000 });
+        const on = await page.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].some((i) => i.checked)).catch(() => null);
+        if (on === false) throw new Error('체크가 반영되지 않았습니다');
+      });
+    }
+  } else log('[등록] ⚠ 원고에 전자책 정가가 없어 화면 기본값(1,000원 — 예시값) 그대로 둡니다. 4단계에서 직접 정하세요');
+  if (s4.external) await step('외부서점 입점', () => _pickRadio(page, /외부\s*온라인\s*서점/, '입점 원합니다'));
+  await sleep(500);
+  const after = await page.evaluate(() => document.body.innerText).catch(() => '');
+  const fm = /최종\s*정가\s*([\d,]+)\s*원/.exec(after);
+  if (fm) log(`[등록] 전자책 4단계 최종정가 ${fm[1]}원${s4.price && Number(fm[1].replace(/,/g, '')) !== s4.price && !failed.includes('정가') ? ' ⚠ 원고 정가와 다릅니다' : ''}`);
+  await _shot(page, plan, log, '전자책4단계');
+  return { done, failed };
+}
+
+/**
+ * 전자책 from 단계부터 5단계까지 이어서 채운다. 단계 사이는 「Step2 원고등록」~「Step5 최종확인」 이동 버튼만 누른다.
+ * 앞 단계가 실패하면 거기서 멈춘다(틀린 값으로 다음 화면을 채우지 않는다). 🔴 5단계의 「도서제출」은 누르지 않는다.
+ */
+async function runEbookFrom(page, plan, log, from) {
+  const done = []; const failed = [];
+  const fns = { 1: fillBookkEbookInfo, 2: fillBookkEbookManuscript, 3: fillBookkEbookCover, 4: fillBookkEbookPrice, 5: fillBookkFinal };
+  for (let n = from; n <= 5; n++) {
+    if (n > from) {
+      try { await page.locator('a, button', { hasText: EBOOK_NAV[n - 1] }).first().click({ timeout: 8000 }); }
+      catch (e) { failed.push(`${n}단계 이동`); log(`[등록] ⚠ 전자책 ${n}단계로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 직접 넘어간 뒤 「이어서 채우기」를 누르세요`); await _dump(page, log, `전자책 ${n - 1}→${n}단계`); return { done, failed }; }
+    }
+    let r;
+    try { r = await fns[n](page, plan, log); } catch (e) { failed.push(`${n}단계 화면`); log(`[등록] ⚠ ${e.message}`); return { done, failed }; }
+    done.push(...r.done); failed.push(...r.failed);
+    if (r.failed.length) { log(`[등록] ⏸ 전자책 ${n}단계에서 실패가 있어 멈춥니다(${r.failed.join(', ')}) — 고친 뒤 「이어서 채우기」`); return { done, failed }; }
+  }
+  log('[등록] 🛑 전자책 5단계 입력까지 끝났습니다 — 화면을 확인하고 「도서제출」은 직접 누르세요(자동 제출 없음)');
+  return { done, failed };
+}
+async function fillBookkEbook(page, plan, log) { return runEbookFrom(page, plan, log, 1); }
+
+/** 열려 있는 등록용 크롬의 전자책 탭에서 지금 몇 단계인지 읽어 거기서부터 이어서 채운다(로그인·1단계를 이미 한 경우). */
+async function runBookkEbookResume(o) {
+  const log = o.log || (() => {});
+  if (!_ctx) throw new Error('열려 있는 등록용 크롬 창이 없습니다 — 먼저 「🤖 자동 입력」으로 크롬을 열어 전자책 화면까지 가세요(앱을 껐다 켜면 창과 연결이 끊깁니다)');
+  let page = null, at = 0;
+  for (const p of _ctx.pages()) {
+    if (!/electronicBook/.test(p.url())) continue;
+    const t = await p.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+    const n = /서점소개정보/.test(t) ? 5 : /정가설정/.test(t) ? 4 : /구매한\s*템플릿/.test(t) ? 3 : /원고\s*업로드/.test(t) ? 2 : /도서\s*제작\s*목적/.test(t) ? 1 : 0;
+    if (n && (!page || n < at)) { page = p; at = n; }
+  }
+  if (!page) throw new Error('등록용 크롬에 전자책(새전자책) 1~5단계 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');
+  log(`[등록] 전자책 ${at}단계 화면에서 이어서 채웁니다`);
+  const r = await runEbookFrom(page, o.plan, log, at);
+  return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [] };
+}
+
+/**
+ * @param {{platform:'bookk'|'bookkEbook'|'jakkawa', plan:object, log:Function, isAborted?:Function}} o
  * @returns {Promise<{ok:boolean, done:string[], failed:string[], manual:string[], shot?:string}>}
  */
 async function runRegister(o) {
@@ -404,11 +547,11 @@ async function runRegister(o) {
   await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
   await _waitLogin(page, site, log, o.isAborted);
   await page.goto(site.start, { waitUntil: 'load', timeout: 60000 });
-  const r = o.platform === 'jakkawa' ? await fillJakkawa(page, o.plan, log) : await fillBookk(page, o.plan, log);
+  const r = o.platform === 'jakkawa' ? await fillJakkawa(page, o.plan, log) : o.platform === 'bookkEbook' ? await fillBookkEbook(page, o.plan, log) : await fillBookk(page, o.plan, log);
   let shot = '';
   try { shot = path.join(os.tmpdir(), `priming-register-${o.platform}.png`); await page.screenshot({ path: shot, fullPage: false }); } catch (_) { shot = ''; }
   log(`[등록] ✅ ${site.label} 입력 ${r.done.length}칸 완료${r.failed.length ? ' · 실패 ' + r.failed.join(', ') : ''} — 이 창에서 내용을 확인하고 저장·제출은 직접 하세요(창은 그대로 둡니다)`);
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover };
+module.exports = { verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

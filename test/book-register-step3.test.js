@@ -32,9 +32,10 @@ function fakePage(body) {
   console.log('\n[2] 흐름 (가짜 페이지)');
   let pg = fakePage(BODY); const logs = [];
   let r = await RB.fillBookkCover(pg, plan, (m) => logs.push(m));
-  ok(r.failed.length === 0 && r.done.join() === '직접 올리기 탭,표지 PDF 업로드', `직접 올리기 탭 → PDF 업로드 (${r.done.join(' → ')})`);
+  ok(r.failed.length === 0 && r.done.join() === '직접 올리기 탭,표지 PDF 업로드,로고 파랑', `직접 올리기 탭 → PDF 업로드 → 파란 로고 (${r.done.join(' → ')})`);
   ok(pg.calls.some((c) => /^click:a, button.*직접/.test(c)) && pg.calls.includes('upload:a_표지.pdf') && pg.calls.includes('waitUploaded'), '탭 클릭 · 파일 첨부 · 업로드 완료 대기');
   ok(logs.some((l) => /518\.5×216mm · 책등 16\.505mm/.test(l)), '화면 작업규격을 읽어 로그에 남긴다: ' + (logs.find((l) => /작업규격/.test(l)) || '').slice(0, 70));
+  ok(pg.calls.some((c) => c.startsWith('click:a[href="#blue"]')), '🔵 로고 = 파란색(a[href=#blue]) 클릭');
   ok(!pg.calls.some((c) => /Step4|가격정책|저장|제출/.test(c)), '4단계·저장·제출은 누르지 않는다');
   // 판별력: 책등이 다른 표지(14.3mm → 516.3mm)는 올리지 않는다
   pg = fakePage(BODY); const logs2 = [];

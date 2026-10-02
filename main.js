@@ -9015,7 +9015,7 @@ try {
 ipcMain.handle('book-register-run', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
   if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };
-  const platform = args.platform === 'jakkawa' ? 'jakkawa' : 'bookk';
+  const platform = args.platform === 'jakkawa' ? 'jakkawa' : (args.platform === 'bookk-ebook' || args.platform === 'bookkEbook') ? 'bookkEbook' : 'bookk';
   _bookRegBusy = true;
   try {
     const RF = require('./core/book/register-fill');
@@ -9036,7 +9036,21 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         if (registerInfo) log(`📋 등록정보 파일 사용: ${registerInfo.file} — 도서명 「${registerInfo.title}」 · 부제 「${registerInfo.subtitle}」 · 장르 「${registerInfo.genre}」 · 소개 ${registerInfo.intro.length}자 · 목차 ${registerInfo.toc.split('\n').filter(Boolean).length}줄 · 저자소개 ${registerInfo.bio.length}자`);
         else if ((S.parsed.meta || {}).registerInfo) log(`⚠ 원고 메타 「등록정보」 파일을 찾을 수 없습니다: ${S.parsed.meta.registerInfo} — 원고 메타 값으로 진행합니다`);
       } catch (e) { log('⚠ 등록정보 파일 읽기 실패: ' + e.message); }
+      if (platform === 'bookkEbook') {
+        // 📘 전자책: ePub(최신본) + 표지 JPG·PDF(원고 `> 전자책표지:` > ePub 만들 때 크롭해 둔 `_ebook-cover.jpg`). 값은 등록정보 파일이 원고 메타보다 우선(ISBN 은 종이책 값이라 쓰지 않는다).
+        const meta = S.parsed.meta || {};
+        const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p);
+        let cover = '';
+        if (meta.ebookCover) { const p = path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(S.scriptPath ? path.dirname(S.scriptPath) : root, meta.ebookCover); if (okCover(p)) cover = p; }
+        if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), '_ebook-cover.jpg'); if (okCover(t)) cover = t; }
+        plan = RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+      } else
       plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+    }
+    if (args.only === 'cover' && platform === 'bookkEbook') {
+      log('📤 [등록 도우미] 부크크 전자책 — 열려 있는 화면의 단계부터 5단계까지 이어서 입력(「도서제출」·저장은 누르지 않습니다)');
+      const rc = await RB.runBookkEbookResume({ plan, log });
+      return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }
     if (args.only === 'cover' && platform === 'bookk') {
       log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');

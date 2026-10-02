@@ -427,14 +427,17 @@ body{overflow-y:scroll}
   }
   // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
   async function runRegister(platform, only) {
-    const bk = platform === 'bookk';
-    const msg = only === 'cover' ? ['부크크 3단계(표지디자인)를 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에서 3단계 화면(표지 주의사항)이 떠 있어야 합니다.', '② 「직접 올리기」 탭을 고르고 표지 PDF 를 올립니다. 화면의 작업규격이 우리 표지와 다르면 올리지 않습니다.', '③ 4단계(가격정책)부터·저장·제출은 직접 하세요.', '', '진행할까요?'].join('\n') : bk
+    const eb = platform === 'ebook';   // 📘 부크크 새전자책(화면 탭 id 'ebook' → IPC 'bookk-ebook')
+    const bk = platform === 'bookk' || eb;
+    const msg = eb ? (only === 'cover'
+      ? ['부크크 「새전자책」을 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에 전자책 화면(1~5단계 중 어느 단계든)이 떠 있어야 합니다 — 지금 단계부터 5단계까지 채웁니다.', '② 4단계에서 정가를 바꾸면 「정가 직접 변경」 체크도 함께 합니다. 로고는 파란색.', '③ 5단계 「도서제출」·저장은 직접 하세요.', '', '진행할까요?'].join('\n')
+      : ['부크크 「새전자책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 기본정보 → Step2 ePub 업로드 → Step3 표지(JPG·PDF)+파란 로고 → Step4 정가·외부서점 → Step5 소개·목차·저자경력·AI·저작권까지 입력합니다.', '③ 「도서제출」·저장·최종 입점은 누르지 않습니다 — 직접 하세요.', '', '시작할까요?'].join('\n')) : only === 'cover' ? ['부크크 3단계(표지디자인)를 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에서 3단계 화면(표지 주의사항)이 떠 있어야 합니다.', '② 「직접 올리기」 탭을 고르고 표지 PDF 를 올립니다. 화면의 작업규격이 우리 표지와 다르면 올리지 않습니다.', '③ 4단계(가격정책)부터·저장·제출은 직접 하세요.', '', '진행할까요?'].join('\n') : bk
       ? ['부크크 「새종이책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 선택 → 「Step2」에서 임시서재에 초안이 만들어집니다(삭제 가능).', '③ 2단계 입력과 내지 PDF 업로드까지 하고 멈춥니다. 표지·가격·최종확인·제출은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10))
       : ['작가와 「도서정보 입력」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 입력칸만 채우고 멈춥니다. 「도서 정보 저장하기」와 이후 업로드·유통 신청은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10));
     if (!window.confirm(msg)) return;
     setRegBusy(true); setStatus('🤖 ' + (bk ? '부크크' : '작가와') + ' 자동 입력 중 — 열린 크롬 창에서 로그인해 주세요');
     try {
-      const r = await api.bookRegisterRun({ platform, only });
+      const r = await api.bookRegisterRun({ platform: eb ? 'bookk-ebook' : platform, only });
       if (!r || r.error) { setStatus('⚠ 자동 입력 실패: ' + ((r && r.error) || '알 수 없음')); }
       else {
         setStatus(r.ok ? '✅ 자동 입력 완료 — 크롬 창에서 확인하고 저장·제출은 직접 하세요' : '⚠ 일부 칸 실패: ' + (r.failed || []).join(', '));
@@ -729,12 +732,18 @@ body{overflow-y:scroll}
         )}
 
         <div className="bkzone">등록 도우미</div>
-        <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책 등록 화면은 로그인 뒤라 아직 읽지 못했습니다. 첫 전자책을 올리면서 입력 칸·표지 규격·가격 범위를 확인해 점검표와 자동 입력에 반영합니다 — 그때까지는 위 「옮겨 적을 값」을 눌러 복사해 직접 입력하세요.'}</div>
+        <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책(/author/make/electronicBook): 5단계 — 기본정보 → 원고등록(ePub · EPUB2.0만 외부유통 · 20MB) → 꾸미기(표지 JPG·PDF 10MB · 로고) → 가격정책 → 최종확인. 🤖 자동 입력이 ePub·표지·정가·소개까지 채우고, 「도서제출」은 직접 누릅니다.'}</div>
         {isBookk && <div className="bkactions">
           <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요" onClick={() => runRegister("bookk", "cover")}>🖼 3단계부터 이어 채우기</button>
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
-            title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
+            title="크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접"
             onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
+        </div>}
+        {!isBookk && <div className="bkactions">
+          <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume" title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요" onClick={() => runRegister('ebook', 'cover')}>📘 지금 단계부터 이어 채우기</button>
+          <button disabled={regBusy || building} data-testid="bk-register-ebook"
+            title="크롬을 열어 부크크 새전자책 1~5단계(기본정보·ePub·표지·정가·소개)를 채웁니다 — 로그인·도서제출은 직접"
+            onClick={() => runRegister('ebook')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
         </div>}
         <div className="bklinks">
           {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
