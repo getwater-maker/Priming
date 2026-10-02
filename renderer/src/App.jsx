@@ -448,9 +448,9 @@ export default function App() {
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
   const [mp4Prog, setMp4Prog] = useState(null);
   // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
-  //   ✗ 실패는 남긴다(이유를 읽어야 한다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
+  //   ✗ 실패도 닫는다(로이 2026-10-02 — 이유는 로그창에 남는다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
   useEffect(() => {
-    const ends = ['done', 'aborted'];
+    const ends = ['done', 'aborted', 'error'];
     const ts = [[makeProg, setMakeProg], [mp4Prog, setMp4Prog], [ytProg, setYtProg]]
       .filter(([p]) => p && ends.includes(p.phase))
       .map(([p, set]) => setTimeout(() => set((cur) => (cur === p ? null : cur)), PROG_AUTOCLOSE_MS));
