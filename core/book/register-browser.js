@@ -123,7 +123,7 @@ async function _verifyInput(page, selector, want, label, log, failed) {
 async function _verifySelect(sel, want, label, log, failed) {
   let got = '';
   try { got = await sel.evaluate((s) => (s.selectedOptions[0] ? s.selectedOptions[0].textContent.trim() : '')); } catch (_) {}
-  const plain = (t) => String(t).replace(/^[^가-힣A-Za-z0-9]+/, '').trim();
+  const plain = (t) => String(t).replace(/^[^가-힣A-Za-z0-9]+/, '').replace(/저작권리/g, '저작권').trim();
   if (!got) { log(`[등록] ❔ ${label}: 선택값을 읽지 못했습니다`); return; }
   if (!want || plain(got) === plain(want) || plain(got).includes(plain(want))) log(`[등록] ✓ ${label}: ${plain(got)}`);
   else { failed.push(label + ' 확인'); log(`[등록] ⚠ ${label} 선택이 다릅니다 — 화면 「${plain(got)}」 ≠ 기대 「${plain(want)}」`); }
@@ -422,6 +422,19 @@ async function fillBookkPrice(page, plan, log) {
   return { done, failed, min };
 }
 
+/**
+ * 🔎 5단계 선택칸(AI 사용여부·초상/저작권 보유여부)을 **선택지 내용으로** 찾아 표식을 단다 — 칸 제목·placeholder 글자로 찾으면 표기 차이에 걸린다
+ *   (종이책 5단계는 「초상/저작권**리** 보유여부」, 전자책은 「초상/저작권 보유여부」 · 로이 2026-10-02: 종이책에서 저작권 선택이 안 됐다).
+ *   key: 'ai' | 'rights'. 표식을 못 달면 null → 호출 쪽이 옛 방식(제목 글자)으로.
+ */
+async function _markSelect(page, key, reSrc) {
+  const expr = `(() => { const re = new RegExp(${JSON.stringify(reSrc)}); document.querySelectorAll('[data-priming-sel="${key}"]').forEach((e) => e.removeAttribute('data-priming-sel')); const hit = [...document.querySelectorAll('select')].find((s) => re.test([...s.options].map((o) => o.textContent).join('|'))); if (!hit) return false; hit.setAttribute('data-priming-sel', '${key}'); return true; })()`;
+  const ok = await page.evaluate(expr).catch(() => false);
+  return ok === true ? `select[data-priming-sel="${key}"]` : null;
+}
+/** 선택지 글자 비교용 — 앞 이모지·공백 제거 + 「저작권리」→「저작권」 */
+const _optNorm = (t) => String(t || '').replace(/^[^가-힣A-Za-z0-9]+/, '').replace(/저작권리/g, '저작권').replace(/\s+/g, '');
+
 /** 5단계 화면의 카드 요약을 우리 값과 대조한다(읽기만) */
 function checkFinalSummary(body, plan) {
   const out = [];
@@ -449,21 +462,27 @@ async function fillBookkFinal(page, plan, log) {
   await text('도서소개', '도서의 설명', s5.intro);
   await text('도서목차', '색인', s5.toc);
   await text('저자경력·소개', '저자를 소개', s5.bio);
-  const choose = async (label, selHas, want) => step(label, async () => {
-    const sel = page.locator('select').filter({ hasText: selHas }).first();
+  // 선택칸은 선택지 내용으로 찾는다(표식) — 못 찾으면 옛 방식(제목 글자). 선택지 비교는 이모지·「저작권리」 표기 차이를 무시
+  const selAi = await _markSelect(page, 'ai', 'AI|기여|본문');
+  const selRights = await _markSelect(page, 'rights', '저작권.*보유|보유.*저작권');
+  const locAi = () => (selAi ? page.locator(selAi).first() : page.locator('select').filter({ hasText: 'AI 활용 여부' }).first());
+  const locRights = () => (selRights ? page.locator(selRights).first() : page.locator('select').filter({ hasText: '초상/저작권 보유여부' }).first());
+  const choose = async (label, getSel, selHas, want) => step(label, async () => {
+    const sel = getSel();
     const opts = await sel.locator('option').evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent.trim() })));
-    const hit = opts.find((o) => o.t.replace(/^[^가-힣A-Za-z]+/, '') === want) || opts.find((o) => o.t.includes(want));
-    if (!hit) throw new Error(`선택지에 「${want}」 없음`);
+    const w = _optNorm(want);
+    const hit = opts.find((o) => _optNorm(o.t) === w) || opts.find((o) => _optNorm(o.t).includes(w));
+    if (!hit) throw new Error(`선택지에 「${want}」 없음 (화면 선택지: ${opts.map((o) => o.t).filter(Boolean).join(' / ').slice(0, 120)})`);
     await sel.selectOption(hit.v);
   });
-  await choose('AI 사용여부 ' + s5.ai, 'AI 활용 여부', s5.ai);
-  await choose('초상/저작권 ' + s5.rights, '초상/저작권 보유여부', s5.rights);
+  await choose('AI 사용여부 ' + s5.ai, locAi, 'AI 활용 여부', s5.ai);
+  await choose('초상/저작권 ' + s5.rights, locRights, '초상/저작권 보유여부', s5.rights);
   // 🔍 5단계 입력 되짚기(R24) — 도서소개·도서목차·저자경력이 칸에 그대로 들어갔는지, AI·저작권 선택값
   if (s5.intro) await _verifyInput(page, 'textarea[placeholder*="도서의 설명"]', s5.intro, '도서소개', log, failed);
   if (s5.toc) await _verifyInput(page, 'textarea[placeholder*="색인"]', s5.toc, '도서목차', log, failed);
   if (s5.bio) await _verifyInput(page, 'textarea[placeholder*="저자를 소개"]', s5.bio, '저자경력·소개', log, failed);
-  await _verifySelect(page.locator('select').filter({ hasText: 'AI 활용 여부' }).first(), s5.ai, 'AI 활용 여부', log, failed);
-  await _verifySelect(page.locator('select').filter({ hasText: '초상/저작권 보유여부' }).first(), s5.rights, '초상/저작권', log, failed);
+  await _verifySelect(locAi(), s5.ai, 'AI 활용 여부', log, failed);
+  await _verifySelect(locRights(), s5.rights, '초상/저작권', log, failed);
   await _shot(page, plan, log, '5단계');
   const body = await page.evaluate(() => document.body.innerText).catch(() => '');
   const diffs = checkFinalSummary(body, plan);

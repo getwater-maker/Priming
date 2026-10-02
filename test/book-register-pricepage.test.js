@@ -98,6 +98,38 @@ const HTML = (opts = {}) => `<!doctype html><html><body>
     ok(al.length === 0, '알림 없음');
   }
 
+  console.log('\n[7] 종이책 5단계 표기 「초상/저작권리 보유여부」 — 칸 제목·선택지 글자가 달라도 선택지 내용으로 찾아 고른다');
+  {
+    const RF = require('../core/book/register-fill');
+    const { parseBookText } = require('../core/parsers/book-parser');
+    const mk = (rightsLabel, optRights, optNone) => `<!doctype html><body><h2>서점소개정보</h2>
+      <textarea placeholder="도서의 설명이 필요합니다."></textarea><textarea placeholder="도서의 색인 페이지를 의미합니다."></textarea><textarea placeholder="저자를 소개하는 공간입니다."></textarea>
+      <b>Ai사용여부 및 기여정도</b>
+      <select><option value="">AI 활용 여부 및 기여정도</option><option value="a">🟡 본문 전체 작성에 사용</option><option value="b">🔵 표지 및 본문 일부 작성에 사용</option><option value="e">⚪ 사용하지 않음</option></select>
+      <b>${rightsLabel}</b>
+      <select><option value="">${rightsLabel}</option><option value="x">${optRights}</option><option value="y">${optNone}</option></select>
+      <aside>판매가 18,700 원</aside><button>도서제출</button></body>`;
+    const book = parseBookText(['# t', '> 저자: a', '> 한줄소개: 소개', ''].join(String.fromCharCode(10)), 'x');
+    const plan = RF.bookkPlan(book, { trimId: 'A5', pages: 255, interiorPdf: 'a.pdf' });
+    for (const [name, html] of [
+      ['종이책식 「저작권리」(제목·선택지 모두)', mk('초상/저작권리 보유여부', '🟢 모든 콘텐츠 초상/저작권리 보유중', '🔴 초상/저작권리 보유하지 않음')],
+      ['제목만 「저작권리」', mk('초상/저작권리 보유여부', '🟢 모든 콘텐츠 초상/저작권 보유중', '🔴 초상/저작권 보유하지 않음')],
+      ['전자책식 「저작권」', mk('초상/저작권 보유여부', '🟢 모든 콘텐츠 초상/저작권 보유중', '🔴 초상/저작권 보유하지 않음')],
+    ]) {
+      const page = await browser.newPage(); page.on('dialog', (d) => d.accept());
+      await page.setContent(html);
+      const lg = []; const r = await RB.fillBookkFinal(page, plan, (m) => lg.push(m));
+      const st = await page.evaluate(() => [...document.querySelectorAll('select')].map((x) => x.selectedOptions[0].textContent));
+      await page.close();
+      ok(/보유중/.test(st[1]) && /표지 및 본문 일부/.test(st[0]), `${name}: 저작권 = ${st[1]} · AI = ${st[0]}`);
+      ok(!r.failed.some((f) => /저작권/.test(f)) && lg.some((m) => /✓ 초상\/저작권/.test(m)), `${name}: 선택 실패·확인 불가 없음(되짚기 ✓)`);
+    }
+    // 판별: 선택지에 「보유중」이 정말 없으면 추측하지 않고 실패 + 화면 선택지를 로그로
+    const page2 = await browser.newPage(); await page2.setContent(mk('초상/저작권리 보유여부', '해당 없음', '기타'));
+    const lg2 = []; const r2 = await RB.fillBookkFinal(page2, plan, (m) => lg2.push(m)); const sel2 = await page2.evaluate(() => document.querySelectorAll('select')[1].selectedOptions[0].textContent); await page2.close();
+    ok(r2.failed.some((f) => /초상\/저작권/.test(f)) && /초상/.test(sel2) && lg2.some((m) => /화면 선택지/.test(m)), '판별: 「보유중」 선택지가 없으면 추측 선택 없이 실패 + 화면 선택지 로그');
+  }
+
   await browser.close();
   console.log(`\n${fail ? '❌' : '✅'} book-register-pricepage — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
