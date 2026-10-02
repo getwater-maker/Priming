@@ -561,7 +561,11 @@ async function fillBookkEbookPrice(page, plan, log) {
         await _verifyInput(page, priceSel, String(s4.price), '정가 입력칸', log, failed);   // 되돌려졌으면(1000) ⚠ + 실패
       }
     }
-  } else log('[등록] ⚠ 원고에 전자책 정가가 없어 화면 기본값(1,000원 — 예시값) 그대로 둡니다. 4단계에서 직접 정하세요');
+  } else {
+    // 정가를 모르면 **여기서 멈춘다** — 화면 기본값 1,000원은 예시값이고, 부크크는 5단계로 넘어갈 때 「도서 가격 체크박스를 확인해주세요!」 로 체크를 요구한다(로이 2026-10-02 실행). 1,000원을 확인 처리해 올리면 안 된다.
+    failed.push('정가 미정');
+    log('[등록] ⛔ 전자책 정가를 알 수 없어 4단계에서 멈춥니다 — 종이책을 먼저 신청(🤖 자동 입력 · 4단계 최종정가를 기록)하거나, 원고에 `> 정가:`(종이책) 또는 `> 전자책:` 를 적은 뒤 「📘 이어 채우기」를 누르세요. 직접 정하려면 화면에서 「정가 직접 변경」 체크 후 가격을 넣으세요');
+  }
   if (s4.external) await step('외부서점 입점', () => _pickRadio(page, /외부\s*온라인\s*서점/, '입점 원합니다'));
   await sleep(500);
   const after = await page.evaluate(() => document.body.innerText).catch(() => '');

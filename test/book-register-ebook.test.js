@@ -122,7 +122,7 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   pg = fakePage(BODY4); r = await RB.fillBookkEbookPrice(pg, { ...plan, step4: { ...plan.step4, price: 9950 } }, () => {});
   ok(r.failed.includes('정가') && !pg.calls.some((c) => c.startsWith('fill:')), '판별: 100원 단위가 아니면 입력하지 않는다');
   pg = fakePage(BODY4); const l4 = []; r = await RB.fillBookkEbookPrice(pg, { ...plan, step4: { ...plan.step4, price: 0 } }, (m) => l4.push(m));
-  ok(!pg.calls.some((c) => c.startsWith('fill:')) && !pg.calls.some((c) => /직접 변경/.test(c)) && l4.some((m) => /1,000원/.test(m)), '원고에 정가가 없으면 화면 기본값 그대로 + 경고(체크도 안 함)');
+  ok(r.failed.includes('정가 미정') && !pg.calls.some((c) => c.startsWith('fill:')) && !pg.calls.some((c) => /직접 변경|check:/.test(c)) && l4.some((m) => /정가를 알 수 없어/.test(m)), '🔑 정가를 모르면 가격·체크를 건드리지 않고 「정가 미정」 으로 4단계에서 멈춘다(기본 1,000원을 확인 처리해 올리지 않는다)');
 
   console.log('\n[6] 5단계 요약(전자책 카드)');
   pg = fakePage(BODY5); const l5 = [];

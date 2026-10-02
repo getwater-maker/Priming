@@ -9086,6 +9086,23 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
     return { ok: false, error: e.message };
   } finally { _bookRegBusy = false; }
 });
+// 💾 종이책 정가 기록 읽기/직접 입력 — 전자책 정가(종이책의 70% 내림)의 근거. 종이책을 앱 자동 입력 없이 이미 등록한 경우 로이가 정가를 한 번 적어 둔다.
+ipcMain.handle('book-register-paper-price', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
+  try {
+    const RP = require('./core/book/register-price'); const RF = require('./core/book/register-fill');
+    const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset); const key = bookFileBase();
+    if (args && args.set != null && args.set !== '') {
+      const v = RP.savePaperPrice(root, key, Number(args.set), (S.parsed.meta || {}).title || '');
+      if (!v) return { ok: false, error: '종이책 정가는 1원 이상의 숫자로 적어 주세요' };
+      log(`💾 종이책 정가 ${v.toLocaleString('ko-KR')}원 기록(직접 입력) — 전자책 정가 ${RF.ebookPriceFromPaper(v).toLocaleString('ko-KR')}원(70% 내림)`);
+    }
+    const rec = RP.loadPaperPrice(root, key);
+    const manuscript = Number(String((S.parsed.meta || {}).price || '').replace(/[^0-9]/g, '')) || 0;
+    const paper = rec ? rec.price : manuscript;
+    return { ok: true, price: rec ? rec.price : 0, source: rec ? 'record' : (manuscript ? 'manuscript' : ''), paper, ebook: RF.ebookPriceFromPaper(paper) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 // 파일 위치 보기(탐색기에서 선택)
 ipcMain.handle('book-reveal-file', (_e, p) => {
   const s = String(p || '');

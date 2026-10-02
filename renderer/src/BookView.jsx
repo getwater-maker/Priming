@@ -172,6 +172,9 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const coverBoxRef = useRef(null), coverCanvasRef = useRef(null);
   coverRef.current = cover; showCoverRef.current = showCover;
   const [regBusy, setRegBusy] = useState(false);
+  const [paperPrice, setPaperPrice] = useState(null);       // 💾 종이책 정가 기록 {price, source, paper, ebook}
+  const [paperPriceIn, setPaperPriceIn] = useState('');
+  useEffect(() => { if (!loaded || !api.bookRegisterPaperPrice) return; api.bookRegisterPaperPrice({}).then((r) => { if (r && r.ok) setPaperPrice(r); }).catch(() => {}); }, [loaded, dto && dto.fileTitle]);
   const [outputs, setOutputs] = useState([]);
   const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
   useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
@@ -447,6 +450,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       }
     } catch (e) { logline('자동 입력 오류: ' + e.message); setStatus('⚠ 자동 입력 오류 — 로그 확인'); }
     setRegBusy(false);
+    try { const pr = await api.bookRegisterPaperPrice({}); if (pr && pr.ok) setPaperPrice(pr); } catch (_) {}   // 종이책 4단계가 정가를 기록했을 수 있다
   }
   // ✔ ePub 규격 검증(EPUBCheck) — 결과는 점검표(전자책)에 반영. ePub 을 다시 만들면 지운다.
   const [epubChk, setEpubChk] = useState(null);
@@ -740,6 +744,12 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
             title="크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접"
             onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
+        </div>}
+        {!isBookk && <div className="bkactions" data-testid="bk-paper-price-row" style={{ alignItems: 'center' }}>
+          <span className="meta" title="전자책 정가 = 종이책 정가의 70%(10원 단위 버림). 종이책을 앱 자동 입력으로 신청했다면 4단계 최종정가가 자동 기록됩니다 — 그렇지 않은 경우 여기에 종이책 정가를 적어 두세요">💰 종이책 정가</span>
+          <input type="number" step="100" min="0" placeholder={paperPrice && paperPrice.paper ? String(paperPrice.paper) : '예) 17900'} value={paperPriceIn} onChange={(e) => setPaperPriceIn(e.target.value)} style={{ width: 110 }} data-testid="bk-paper-price-in" />
+          <button className="ghost" disabled={!paperPriceIn} data-testid="bk-paper-price-save" onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: paperPriceIn }); if (r && r.ok) { setPaperPrice(r); setPaperPriceIn(''); setStatus(`💾 종이책 정가 기록 — 전자책 정가 ${r.ebook.toLocaleString('ko-KR')}원`); } else setStatus('⚠ ' + ((r && r.error) || '저장 실패')); }}>저장</button>
+          <span className="meta" data-testid="bk-paper-price-info">{paperPrice && paperPrice.paper ? `→ 종이책 ${paperPrice.paper.toLocaleString('ko-KR')}원(${paperPrice.source === 'record' ? '기록' : '원고'}) → 전자책 ${paperPrice.ebook.toLocaleString('ko-KR')}원` : '→ 종이책 정가를 모르면 전자책 4단계에서 멈춥니다'}</span>
         </div>}
         {!isBookk && <div className="bkactions">
           <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume" title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요" onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>
