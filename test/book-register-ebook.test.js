@@ -17,14 +17,14 @@ const AI_OPTS = ['AI 활용 여부 및 기여정도', '🟡 본문 전체 작성
 const RIGHT_OPTS = ['초상/저작권 보유여부', '🟢 모든 콘텐츠 초상/저작권 보유중', '🔴 초상/저작권 보유하지 않음'];
 const GENRES = ['선택', '- 소설', '소설 - 소설 일반', '소설 - 고전 문학'];
 
-function fakePage(body, { checked = true, blueActive = true } = {}) {
+function fakePage(body, { checked = true, blueActive = true, strip = false, mangle = false } = {}) {
   const calls = []; const state = {};
   const mk = (sel, opt) => {
     const o = { sel, opt, _filter: null };
     o.filter = (f) => { o._filter = f; return o; };
     o.first = () => o; o.nth = (n) => { const x = mk(sel + '#' + n, opt); return x; };
     o.click = async () => { calls.push('click:' + sel + ':' + String((opt && (opt.hasText || '')) || '')); };
-    o.fill = async (v) => { calls.push('fill:' + sel + '=' + v); state[sel] = v; };
+    o.fill = async (v) => { calls.push('fill:' + sel + '=' + v); state[sel] = mangle ? 'xx' : strip ? String(v).replace(/[:]/g, '') : v; };
     o.blur = async () => {};
     o.inputValue = async () => state[sel] || '';
     o.setInputFiles = async (f) => { calls.push('upload:' + path.basename(f)); };
@@ -78,6 +78,13 @@ function fakePage(body, { checked = true, blueActive = true } = {}) {
   ok(pg.calls.includes('fill:input[placeholder*="도서명 기재"]=삼국지') && pg.calls.includes('fill:input[placeholder*="저자명 기재"]=나관중'), '도서명·저자 칸 값');
   ok(pg.calls.some((c) => c.startsWith('select:select#6')), '성인도서 여부는 일곱 번째 select');
   ok(!pg.calls.some((c) => /input\[type=number\]|upload/.test(c)), '전자책 1단계에는 쪽수·파일 칸이 없다');
+
+  // 🔑 부크크가 도서명의 특수문자(:)를 지워도 실패가 아니다(2026-10-02 로이 실행: 「삼국지 완역 2 : 조조…」 → 「삼국지 완역 2 조조…」 때문에 1단계에서 멈췄다)
+  const colon = { ...plan, step1: { ...plan.step1, title: '삼국지 완역 2 : 조조 천하를 노리다' } };
+  pg = fakePage(BODY4, { strip: true }); r = await RB.fillBookkEbookInfo(pg, colon, () => {});
+  ok(r.failed.length === 0, '사이트가 「:」 를 지워도 도서명 되짚기는 통과 ' + r.failed.join());
+  pg = fakePage(BODY4, { mangle: true }); r = await RB.fillBookkEbookInfo(pg, colon, () => {});
+  ok(r.failed.includes('도서명 확인'), '판별: 글자가 달라진 진짜 불일치는 여전히 실패');
 
   console.log('\n[3] 2단계 ePub');
   pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, plan, () => {});

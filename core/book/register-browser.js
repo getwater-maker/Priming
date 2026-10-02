@@ -93,6 +93,9 @@ async function _verifyInput(page, selector, want, label, log, failed) {
   let got = null;
   try { got = await page.locator(selector).first().inputValue(); } catch (_) {}
   if (got == null) { log(`[등록] ❔ ${label}: 값을 읽지 못했습니다`); return; }
+  // 부크크는 도서명 등에서 특수문자(「:」 등)를 스스로 지운다(안내문 「특수문자를 가급적 사용하지 않도록」) — 글자·숫자가 같고 기호만 다르면 실패가 아니라 알림으로
+  const core = (v) => _squash(v).replace(/[^0-9A-Za-z가-힣ぁ-ヿ一-鿿]/g, '');
+  if (_squash(got) !== _squash(want) && core(got) === core(want) && core(want)) { log(`[등록] ✓ ${label}: 「${_squash(got).slice(0, 60)}」 (사이트가 특수문자를 뺐습니다 — 입력 「${_squash(want).slice(0, 40)}」)`); return; }
   if (_squash(got) === _squash(want)) log(`[등록] ✓ ${label}: ${_squash(got).slice(0, 60)}${_squash(got).length > 60 ? ` … (${_squash(got).length}자)` : ''}`);
   else { failed.push(label + ' 확인'); log(`[등록] ⚠ ${label} 값이 다릅니다 — 화면 「${_squash(got).slice(0, 40)}」 ≠ 기대 「${_squash(want).slice(0, 40)}」`); }
 }
