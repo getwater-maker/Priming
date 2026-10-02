@@ -1,5 +1,5 @@
 {
-  "version": "0.6.30",
+  "version": "0.6.31",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -44,7 +44,7 @@
     "core/book/pdf-builder.js": "f3a1b127e6df7a4e9e2d8e9f31a0c9aa1b232bd7",
     "core/book/platform-presets.js": "1ac17745083fd22928e1bb4eae4482a669aebe04",
     "core/book/preflight.js": "be9e8f52d1f9ae4b5a6949f7683684a74916b6bd",
-    "core/book/register-browser.js": "995bdb4e3e0bd66dbea1cfa0906100ab14afdf2c",
+    "core/book/register-browser.js": "9561ac577eaf8352b018e1ad9ed7e608ef8e45d6",
     "core/book/register-fill.js": "7a30793f3f6761a7c072da3ef9adb37518c75849",
     "core/book/register-guide.js": "7c924784ba053c1c4f4553a9c6e38b06b8c013ed",
     "core/book/register-info.js": "9164efa8f4c2954626c6c2209c255ff4f51fc8cb",
@@ -134,7 +134,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "a5ac7e99e1e2ae30a1c7183104cef84538a63818",
+    "docs/작업노트/2026-10.md": "4250157acb864741a6181722ff817998e28afbf0",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/출판-원고-가이드.md": "495261881de5337d446eb0d92111f1d7f0345b0b",
     "docs/통합본-자산이어받기-계획.md": "e424670bb6040d8a8dbe551270a0f415179517b3",
@@ -148,7 +148,7 @@
     "light-updater.js": "61fa2a3211dfe5463acdf1b596107fa6d70f19c9",
     "main.js": "316d173659771d363c4408f4dc23bf62416f56b5",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "e79e6e3ed385b1494e151b57dd2c952fdf14f1b4",
+    "package.json": "6880a3e89060337646cf1a2ced35e7a81bb0e057",
     "preload.js": "23dfbb3f8fb9e0c9c6c11d9a8372f6b677e70cd0",
     "renderer/dist/assets/index-C47FTNzr.css": "2c7b114244d133530e24d3987d158901bbb10137",
     "renderer/dist/assets/index-D5HNh1-v.js": "d7a4d8fdc6592b54346f786b6040c6c3ca4aae02",

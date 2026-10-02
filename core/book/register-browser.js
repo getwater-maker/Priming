@@ -14,9 +14,9 @@ const path = require('path');
 
 const PROFILE_DIR = path.join(os.homedir(), '.priming-maker', 'book-register-profile');
 const SITES = {
-  bookk: { label: '부크크', start: 'https://bookk.co.kr/author/make/paperBook', home: 'https://bookk.co.kr/' },
-  bookkEbook: { label: '부크크 전자책', start: 'https://bookk.co.kr/author/make/electronicBook', home: 'https://bookk.co.kr/' },
-  bookkEbook: { label: '부크크 전자책', start: 'https://bookk.co.kr/author/make/electronicBook', home: 'https://bookk.co.kr/' },
+  // home = 처음 여는 화면 — 부크크는 로그인 화면(로이 2026-10-02: 로그인하면 successReturnUrl=/ 로 첫 화면으로 간다)
+  bookk: { label: '부크크', start: 'https://bookk.co.kr/author/make/paperBook', home: 'https://bookk.co.kr/login?successReturnUrl=/' },
+  bookkEbook: { label: '부크크 전자책', start: 'https://bookk.co.kr/author/make/electronicBook', home: 'https://bookk.co.kr/login?successReturnUrl=/' },
   jakkawa: { label: '작가와', start: 'https://www.jakkawa.com/making-books1', home: 'https://www.jakkawa.com/' },
 };
 
