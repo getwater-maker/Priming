@@ -738,7 +738,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         )}
 
         <div className="bkzone">등록 도우미</div>
-        <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 전자책(/author/make/electronicBook): 5단계 — 기본정보 → 원고등록(ePub · EPUB2.0만 외부유통 · 20MB) → 꾸미기(표지 JPG·PDF 10MB · 로고) → 가격정책 → 최종확인. 🤖 자동 입력이 ePub·표지·정가·소개까지 채우고, 「도서제출」은 직접 누릅니다. 💰 전자책 정가 = 종이책 최종정가의 70%(10원 단위 버림) — 종이책을 부크크에 먼저 신청(🤖 자동 입력 4단계)하면 그 정가를 기록해 쓰니, 항상 종이책 → 전자책 순서로 진행하세요.'}</div>
+        <div className="meta bknote">{isBookk ? RG.AUTO_UPLOAD.note : '부크크 새전자책 5단계(기본정보 → ePub → 표지·파란 로고 → 정가 → 소개)를 자동 입력합니다. 「도서제출」은 직접 누르세요. 항상 종이책을 먼저 신청한 뒤 전자책을 진행하세요.'}</div>
         {isBookk && <div className="bkactions">
           <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요" onClick={() => runRegister("bookk", "cover")}>🖼 3단계부터 이어 채우기</button>
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
