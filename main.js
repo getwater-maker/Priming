@@ -247,6 +247,7 @@ function bookDTO(parsed) {
   return {
     kind: 'book',
     fileTitle: parsed.fileTitle || '책',
+    queueCount: (S.modes && S.modes.book && S.modes.book.items) ? S.modes.book.items.filter((it) => it.parsed && it.parsed.kind === 'book').length : 0,   // 출판 큐에 올라 있는 권 수(2 이상이면 「큐 전체 만들기」)
     scriptPath: S.scriptPath || null,
     meta,
     front: (parsed.front || []).map(secDTO),
@@ -6433,10 +6434,10 @@ ipcMain.handle('restore-last-queue', async () => {
 ipcMain.handle('select-queue-item', (_e, args = {}) => {
   const id = args && args.id;
   const q = S.modes[S.mode];
-  if (!q.items.find((x) => x.id === id)) return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  if (!q.items.find((x) => x.id === id)) return { dto: S.parsed ? currentDTO() : null, queue: queueDTO() };
   q.activeId = id; syncActiveToS(); writeWorkspace();
   log(`↔ 대본 선택: ${(S.parsed && S.parsed.fileTitle) || ''}`);
-  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  return { dto: S.parsed ? currentDTO() : null, queue: queueDTO() };   // 출판 항목이면 출판 DTO(옛: 롱폼 DTO 로 만들어 깨졌다)
 });
 ipcMain.handle('remove-queue-item', (_e, args = {}) => {
   const id = args && args.id;
@@ -6446,7 +6447,7 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
   syncActiveToS();
   scheduleAutoSave(); writeWorkspace();
   log(`🗑 대본 제거 (남은 ${q.items.length}개)`);
-  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  return { dto: S.parsed ? currentDTO() : null, queue: queueDTO() };
 });
 // 활성 항목의 생성 설정 저장(대본별 개별). 렌더러 헤더 변경 시 디바운스로 전송.
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
@@ -8286,21 +8287,35 @@ function openBookPaths(paths, preset) {
       return path.basename(a.p).localeCompare(path.basename(b.p), 'ko', { numeric: true });
     });
     const sorted = items.map((x) => x.p);
-    const files = sorted.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
-    const parsed = BK.parseBookFiles(files, path.basename(sorted[0]).replace(/\.md$/i, ''));
+    // 📚 파일이 2개 이상이고 **전부 완결된 한 권짜리 원고**(native)면 권마다 따로 큐에 올린다(로이 2026-10-02 — 합치면 제1+제2권이 한 책으로 섞여 범례·판권이 중복되고 이름은 제1권이 된다).
+    //   필수파일+회차 파일처럼 합쳐야 하는 묶음은 예전처럼 한 권.
+    const separate = sorted.length >= 2 && items.every((x) => x.kind === 'native');
     S.mode = 'book';
     WORLD.setView('book');   // 열기 응답(r.mode)으로 화면이 출판으로 바뀐다
-    // 출력 폴더 — 책제목(메타) 우선, 없으면 첫 파일명
-    const folderKey = parsed.meta.title || path.basename(sorted[0]).replace(/\.md$/i, '');
-    const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset, sorted[0]);
-    try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-    const it = addItem(parsed, sorted[0], outRoot);
-    it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), files: sorted } };
-    attachWorkCover(parsed, sorted[0], it.settings.book.coverImage, true);
+    const openGroup = (group) => {
+      const files = group.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
+      const parsed = BK.parseBookFiles(files, path.basename(group[0]).replace(/\.md$/i, ''));
+      // 출력 폴더 — 책제목(메타) 우선, 없으면 첫 파일명
+      const folderKey = parsed.meta.title || path.basename(group[0]).replace(/\.md$/i, '');
+      const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset, group[0]);
+      try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+      const it = addItem(parsed, group[0], outRoot);
+      it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), files: group } };
+      attachWorkCover(parsed, group[0], it.settings.book.coverImage, true);
+      return { parsed, outRoot, it };
+    };
+    const groups = separate ? sorted.map((p) => [p]) : [sorted];
+    const opened = groups.map(openGroup);
+    if (separate) {
+      const q = S.modes[S.mode];
+      q.activeId = opened[0].it.id; syncActiveToS();   // 첫 권을 활성으로
+      log(`📚 완결된 원고 ${opened.length}개 — 권마다 따로 큐에 올렸습니다(${opened.map((o) => path.basename(o.it.scriptPath)).join(' · ')}) · 합쳐서 한 책으로 만들려면 필수파일 + 회차 파일로 여세요`);
+    }
     writeWorkspace();
-    const chapters = parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
-    log(`📖 출판 원고 열기: ${parsed.fileTitle} — 파일 ${sorted.length}개 · 장 ${chapters}개 · 앞부속 ${parsed.front.length} · 뒷부속 ${parsed.back.length}`);
-    return { dto: currentDTO(), scriptPath: sorted[0], outRoot, queue: queueDTO(), mode: S.mode };
+    const first = opened[0];
+    const chapters = first.parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
+    log(`📖 출판 원고 열기: ${first.parsed.fileTitle} — 파일 ${groups[0].length}개 · 장 ${chapters}개 · 앞부속 ${first.parsed.front.length} · 뒷부속 ${first.parsed.back.length}`);
+    return { dto: currentDTO(), scriptPath: sorted[0], outRoot: first.outRoot, queue: queueDTO(), mode: S.mode };
   } catch (e) { log('출판 원고 파싱 실패: ' + e.message); return null; }
 }
 
@@ -8396,16 +8411,21 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
     return { url: 'media://' + encodeURIComponent(htmlPath), htmlPath };
   } catch (e) { log('미리보기 조판 실패: ' + e.message); return null; }
 });
+// 📚 출판 핸들러를 이름으로 보관 — 큐 일괄 만들기(book-build-queue)가 같은 함수를 권마다 부른다
+const _BOOK_H = {};
+let _bookQueueBusy = false;
+function regBook(channel, fn) { _BOOK_H[channel] = fn; ipcMain.handle(channel, fn); }
 // 미리보기 페이지 수 보고 — 렌더러 vivliostyle 이 조판 완료 후 알려줌(책등 계산용).
 ipcMain.handle('book-report-pages', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
+  if (_bookQueueBusy) return currentDTO();   // 큐 일괄 만들기 중에는 화면 미리보기의 쪽수 보고를 받지 않는다(다른 권의 쪽수로 덮어쓰는 것 방지)
   const n = Number(args.pages);
   if (Number.isFinite(n) && n > 0) { S.parsed._lastPages = n; storeActive(); }
   return currentDTO();
 });
 
 // PDF 생성 — 내지.pdf (+표지 이미지 있으면 표지.pdf). 완료 후 출력폴더 열기.
-ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
+regBook('book-build-pdf', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   // 구버전 설치본 가드 — vivliostyle CLI(또는 중첩 archiver)가 없으면 크래시 덤프 대신 재설치 안내.
   //   (라이트 업데이트는 node_modules 를 못 바꾸므로, deps 포함 릴리스는 설치파일 재설치가 필요)
@@ -8735,7 +8755,7 @@ ipcMain.handle('book-apply-edit', (_e, args = {}) => {
 
 // ePub(전자책) 생성 — 같은 원고로 POD PDF 와 병행 산출.
 // ✔ ePub 규격 검증(W3C EPUBCheck) — 도구가 있는 PC(메인 PC)에서만. 가장 최근 .epub 또는 args.path.
-ipcMain.handle('book-epubcheck', async (_e, args = {}) => {
+regBook('book-epubcheck', async (_e, args = {}) => {
   try {
     const EC = require('./core/book/epubcheck');
     let target = args.path;
@@ -8754,7 +8774,7 @@ ipcMain.handle('book-epubcheck', async (_e, args = {}) => {
     return { ...r, file: path.basename(target) };
   } catch (e) { return { error: e.message }; }
 });
-ipcMain.handle('book-build-epub', async (_e, args = {}) => {
+regBook('book-build-epub', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   try {
     const { buildEpub } = require('./core/book/epub-builder');
@@ -9107,6 +9127,49 @@ ipcMain.handle('book-register-paper-price', (_e, args = {}) => {
     const others = RP.listPaperPrices(root).filter((o) => o.key !== key).slice(0, 4);   // 다른 권의 기록(권마다 따로 기록되므로 새 권은 비어 있다)
     return { ok: true, price: rec ? rec.price : 0, source: rec ? 'record' : (manuscript ? 'manuscript' : ''), paper, ebook: RF.ebookPriceFromPaper(paper), others };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+// 📦 출판 큐 전체 만들기 — 큐의 권마다 [내지·표지 PDF → ePub → 규격 검증]을 차례로(로이 2026-10-02). 한 권이 실패해도 다음 권으로 간다.
+//   같은 핸들러(_BOOK_H)를 권마다 부르므로 한 권씩 「📦 한 번에 만들기」를 누르는 것과 같다. 끝나면 처음 활성이던 권으로 돌아온다.
+ipcMain.handle('book-build-queue', async (_e, args = {}) => {
+  if (_bookQueueBusy) return { ok: false, error: '이미 큐 만들기가 진행 중입니다' };
+  const q = S.modes.book;
+  const items = (q.items || []).filter((it) => it.parsed && it.parsed.kind === 'book');
+  if (!items.length) return { ok: false, error: '출판 큐가 비어 있습니다' };
+  _bookQueueBusy = true;
+  const origId = q.activeId; const results = [];
+  try {
+    S.abort = false;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (S.abort) { log('⏹ 큐 만들기 중단'); break; }
+      q.activeId = it.id; syncActiveToS();
+      const name = path.basename(it.scriptPath || '') || it.parsed.fileTitle;
+      log(`📦 [${i + 1}/${items.length}] ${name} 만드는 중 — 내지·표지 PDF → ePub → 검증`);
+      const res = { file: name, title: it.parsed.fileTitle, pdf: false, cover: false, epub: false, check: '', pages: 0, error: '' };
+      try {
+        const r1 = await _BOOK_H['book-build-pdf'](null, { ...args, edition: 'print', noOpen: true });
+        res.pdf = !!(r1 && !r1.error); res.pages = (r1 && r1.pages) || 0; res.cover = !!(r1 && r1.coverPdf && !r1.coverError);
+        if (r1 && r1.error) res.error = '내지 PDF: ' + r1.error;
+        else {
+          const r2 = await _BOOK_H['book-build-epub'](null, { noOpen: true });
+          res.epub = !!(r2 && !r2.error); if (r2 && r2.error) res.error = 'ePub: ' + r2.error;
+          if (res.epub) {
+            const r3 = await _BOOK_H['book-epubcheck'](null, {});
+            res.check = !r3 || r3.error ? '검증 실패' : r3.missing ? '도구 없음' : (r3.ok ? '통과' : '오류 있음');
+          }
+        }
+      } catch (e) { res.error = e.message; }
+      results.push(res);
+      log(`${res.pdf && res.epub ? '✅' : '⚠'} [${i + 1}/${items.length}] ${name} — 내지 ${res.pdf ? res.pages + '쪽' : '실패'} · 표지 ${res.cover ? '✓' : '✗'} · ePub ${res.epub ? '✓' : '✗'}${res.check ? ' · 검증 ' + res.check : ''}${res.error ? ' · ' + res.error : ''}`);
+    }
+  } finally {
+    if (q.items.find((x) => x.id === origId)) { q.activeId = origId; syncActiveToS(); }
+    _bookQueueBusy = false;
+  }
+  const okN = results.filter((r) => r.pdf && r.epub).length;
+  log(`📦 큐 전체 만들기 끝 — ${okN}/${results.length}권 완료${okN < results.length ? ' (실패한 권은 위 로그 확인)' : ''}`);
+  try { if (!args.noOpen && S.outRoot) shell.openPath(S.outRoot); } catch (_) {}
+  return { ok: okN === results.length, results, dto: currentDTO(), queue: queueDTO() };
 });
 // 파일 위치 보기(탐색기에서 선택)
 ipcMain.handle('book-reveal-file', (_e, p) => {

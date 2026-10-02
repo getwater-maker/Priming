@@ -93,7 +93,7 @@ function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
   );
 }
 
-export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
+export default function BookView({ dto, setDto, setStatus, logline, logBox, queue, setQueue, onSelectQueue, onRemoveQueue }) {
   const [layout, setLayout] = useState(LAYOUT_DEFAULTS);
   // 원고 전환 시 저장된 조판 설정 복원(없으면 기본값)
   const layoutLoadedFor = useRef('');
@@ -472,6 +472,23 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
     } catch (e) { logline('ePub 오류: ' + e.message); }
+    setBuilding(false); refreshOutputs();
+  }
+  // 📚 큐 전체 만들기 — 큐의 권마다 [내지·표지 PDF → ePub → 검증]을 차례로(한 권이 실패해도 다음 권으로). 각 권의 결과는 로그에도 남는다.
+  async function buildQueue() {
+    if (building) return;
+    const n = queue && queue.items ? queue.items.length : 0;
+    setBuilding(true); setBuildMsg(`📚 큐 ${n}권 만드는 중 — 권마다 내지·표지 PDF → ePub → 검증 (시간이 걸립니다)`);
+    setStatus(`📚 큐 ${n}권 만드는 중… (진행은 로그 확인)`);
+    try {
+      const r = await api.bookBuildQueue({ layout });
+      if (r && r.queue && setQueue) setQueue(r.queue);
+      if (r && r.dto) setDto(r.dto);
+      const res = (r && r.results) || [];
+      const ok = res.filter((x) => x.pdf && x.epub).length;
+      setStatus(r && r.error ? '⚠ ' + r.error : `📚 큐 ${ok}/${res.length}권 완료${ok < res.length ? ' — 실패한 권은 로그 확인' : ''}`);
+      res.forEach((x) => logline(`${x.pdf && x.epub ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${x.cover ? '✓' : '✗'} · ePub ${x.epub ? '✓' : '✗'}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`));
+    } catch (e) { logline('큐 만들기 오류: ' + e.message); setStatus('⚠ 큐 만들기 오류 — 로그 확인'); }
     setBuilding(false); refreshOutputs();
   }
   // 📦 부크크용 한 번에 만들기 — 내지·표지 PDF → (쪽수가 정해진 뒤) ePub → 규격 검증. 순서가 중요하다: 표지 크롭과 책등은 쪽수 확정 뒤에만 맞는다.
@@ -1118,6 +1135,22 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       )}
       {/* ── 왼쪽: 메뉴 + 내용 + (맨 아래) 로그 ── */}
       <div className="bkside" data-testid="bk-side">
+        {queue && queue.items && queue.items.length >= 2 && (
+          <div className="bkqueue" data-testid="bk-queue">
+            <div className="bkqueue-head">
+              <b>📚 큐 {queue.items.length}권</b>
+              <button disabled={building || epubChkBusy} data-testid="bk-build-queue" title="큐의 모든 권을 차례로 [내지·표지 PDF → ePub → 규격 검증] 합니다 — 한 권이 실패해도 다음 권으로 넘어가고, 끝나면 지금 보던 권으로 돌아옵니다" onClick={buildQueue}>📦 큐 전체 만들기</button>
+            </div>
+            <div className="bkqueue-chips">
+              {queue.items.map((it) => (
+                <span key={it.id} className={'bkq' + (it.active ? ' on' : '')} data-testid="bk-queue-chip" title={it.file || it.title} onClick={() => { if (!it.active && !building && onSelectQueue) onSelectQueue(it.id); }}>
+                  {(it.file || it.title || '').replace(/\.md$/i, '')}
+                  <i title="큐에서 빼기(파일은 그대로)" onClick={(e) => { e.stopPropagation(); if (!building && onRemoveQueue) onRemoveQueue(it.id); }}>✕</i>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <nav className="bknav" data-testid="bk-nav">
           {TABS.map(([id, ic, name]) => (
             <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>

@@ -821,6 +821,14 @@ export default function App() {
       if (it && it.settings) applySettings(it.settings);
     } catch (e) { logline('대본 선택 오류: ' + e.message); }
   }
+  // 📚 출판 큐에서 권 선택(출판 화면 상단 큐 줄) — 활성 권을 바꾸고 그 권의 출판 DTO 를 받는다(헤더 설정은 건드리지 않는다)
+  async function selectBookItem(id) {
+    try {
+      const r = await api.selectQueueItem(id, 'book');
+      if (r && r.queue) setQueue(r.queue);
+      if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+    } catch (e) { logline('권 선택 오류: ' + e.message); }
+  }
   // 큐 전체를 파일로 저장 (다중 작업 세트)
   async function saveQueueFile() {
     try {
@@ -3980,7 +3988,7 @@ export default function App() {
           {isRx ? (
             <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
           ) : isBk ? (
-            <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} logBox={logBox} />
+            <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} logBox={logBox} queue={queue && queue.book} setQueue={setQueue} onSelectQueue={selectBookItem} onRemoveQueue={removeQueueItem} />
           ) : (<>
           {mode === 'longform' && _qEmpty && lastQ && (
             <div className="qstrip" data-testid="last-queue">
