@@ -264,7 +264,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
     const fdoc = iframe.contentDocument;
     fdoc.open();
     fdoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-html,body{margin:0;padding:0;background:#8a8177}
+html,body{margin:0;padding:0;background:#aaa}   /* 뷰어 작업 영역(#aaa)과 같은 색 — 한 펼침면만 그려 아래가 남을 때 갈색 띠로 보이던 것(로이 2026-10-02) */
 body{overflow-y:scroll}
 ::-webkit-scrollbar{width:14px}
 ::-webkit-scrollbar-track{background:#6f675e}
