@@ -131,8 +131,8 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
 
   console.log('\n[7] 전체 흐름 · 이동 · 중단');
   let bodyNow = '도서 제작 목적'; const pgF = fakePage(bodyNow);
-  const orig = pgF.locator; const stepOf = { 'Step2 원고등록': '원고 업로드', 'Step3 꾸미기': '구매한 템플릿', 'Step4 가격정책': BODY4, 'Step5 최종확인': BODY5 };
-  pgF.locator = (sel, opt) => { const o = orig(sel, opt); const c0 = o.click; o.click = async () => { await c0(); const t = String((opt && opt.hasText) || ''); if (stepOf[t]) bodyNow = stepOf[t]; }; return o; };
+  const orig = pgF.locator; const stepOf = { 2: '원고 업로드', 3: '구매한 템플릿', 4: BODY4, 5: BODY5 };
+  pgF.locator = (sel, opt) => { const o = orig(sel, opt); const c0 = o.click; o.click = async () => { await c0(); const m = /Step(\d)/.exec(String((opt && opt.hasText) || '')); if (m && stepOf[m[1]]) bodyNow = stepOf[m[1]]; }; return o; };
   const ev0 = pgF.evaluate;
   pgF.evaluate = async (fn, arg) => { const src = String(fn); if (/#blue|checkbox/.test(src) || arg !== undefined) return ev0(fn, arg); return bodyNow; };
   r = await RB.fillBookkEbook(pgF, plan, () => {});
@@ -171,12 +171,34 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     d = mk('confirm', '무료 표지 디자인을 적용하게 되면 날개를 사용할 수 없습니다. 그래도 좋습니까?'); await h(d);
     ok(d.r.dis === 1 && asked === 2, '다른 확인창은 그대로 묻는다'); }
 
+  console.log('\n[7c] 단계 이동 버튼 — 번호로 찾는다 · 확인창 때문의 시간 초과는 이동으로 본다');
+  {
+    // 부크크가 이름을 바꿔도(종이책 3단계 「표지디자인」→「표지등록」 · 로이 2026-10-02) 번호가 같으면 눌린다. Step3 이 Step30 에 걸리지 않는다
+    const seen = [];
+    const mkPg = (clickImpl) => ({ locator: (sel, opt) => ({ first() { return this; }, click: async (o) => { seen.push(String(opt.hasText)); await clickImpl(o); } }) });
+    await RB.goStep(mkPg(async () => {}), 3);
+    const re = new RegExp(seen[0].slice(1, seen[0].lastIndexOf('/')));
+    ok(re.test('Step3 표지등록') && re.test('Step3 표지디자인') && re.test('Step3 꾸미기') && !re.test('Step30') && !re.test('Step4 가격정책'), '정규식이 Step3 의 어떤 이름에도 맞고 Step4·Step30 에는 안 맞는다');
+    let threw = false; try { await RB.goStep(mkPg(async () => { throw new Error('Timeout 8000ms'); }), 3); } catch (_) { threw = true; }
+    ok(threw, '판별: 확인창이 없었는데 시간 초과면 실패로 던진다');
+    let dlg; RB.setDialogAsker(async () => true); RB.hookDialogs({ on: (ev, fn) => { dlg = fn; } }, () => {});
+    let ok2 = true; try { await RB.goStep(mkPg(async () => { await dlg({ type: () => 'confirm', message: () => '이동할까요?', accept: async () => {}, dismiss: async () => {} }); throw new Error('Timeout 8000ms'); }), 3); } catch (_) { ok2 = false; }
+    ok(ok2, '이동 버튼을 누르자 사이트 확인창이 떴다면 click 시간 초과를 실패로 보지 않는다(앱 창에서 답하는 동안 기다리다 생기는 시간 초과)');
+  }
+
   console.log('\n[8] 안전(소스)');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const code = src.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
   const clicks = code.filter((l) => /\.click\(/.test(l));
   ok(!clicks.some((l) => /제출|저장|승인|유통\s*신청|결제|삭제/.test(l)) && !code.some((l) => /hasText:[^)]*도서\s*제출/.test(l)), '제출·저장·승인·결제·삭제 클릭/선택자 없음');
-  ok(/EBOOK_NAV\s*=\s*\{[^}]*Step2 원고등록[^}]*Step3 꾸미기[^}]*Step4 가격정책[^}]*Step5 최종확인[^}]*\}/.test(src), '전자책 이동 버튼은 Step2~Step5 네 개뿐');
+  ok(/_goStep\(page, n\)/.test(src) && !/_goStep\(page, [016-9]\)/.test(src), '전자책 이동은 번호(Step2~Step5)로 찾는 _goStep 하나뿐');
+  // 📚 종이책 → 전자책 한 번에(소스 구조 검사 — 실제 크롬 실행은 로이 화면에서)
+  { const i1 = src.indexOf('async function runRegisterBoth'); const body = src.slice(i1, src.indexOf('/** 열려 있는 등록용 크롬', i1));
+    ok(i1 > 0 && body.indexOf('fillBookk(page, o.plan, log)') > 0 && body.indexOf('fillBookk(page, o.plan, log)') < body.indexOf('buildEbookPlan()') && body.indexOf('buildEbookPlan()') < body.indexOf('fillBookkEbook(epage'), '순서: 종이책 입력 → (그 뒤에) 전자책 계획 만들기(종이책 최종정가 기록 후) → 전자책 입력');
+    ok(/if \(r1\.failed\.length\)[\s\S]*?return \{ ok: false/.test(body) && body.indexOf('r1.failed.length') < body.indexOf('epage = await ctx.newPage()'), '종이책에 실패가 있으면 전자책 탭을 열지 않고 멈춘다');
+    ok(/epage = await ctx\.newPage\(\)/.test(body) && !/page\.close|epage\.goto\(SITES\.bookk\.start/.test(body), '전자책은 같은 크롬의 새 탭 — 종이책 탭은 닫거나 덮지 않는다(로이가 종이책 도서제출을 직접)'); }
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  ok(/plan\.buildEbookPlan = buildEbookPlan/.test(mainSrc) && /RB\.runRegisterBoth/.test(mainSrc) && /bookk-both/.test(mainSrc), 'main: bookk-both → 종이책 plan 에 전자책 계획 만들기를 달아 runRegisterBoth 로');
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${fail ? '❌' : '✅'} book-register-ebook — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);

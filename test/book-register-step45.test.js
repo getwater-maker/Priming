@@ -101,7 +101,7 @@ const plan = RF.bookkPlan(book, { trimId: 'A5', pages: 271, interiorPdf: 'a_내�
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const code = src.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
   const clicks = code.filter((l) => /\.click\(/.test(l));
-  ok(clicks.some((l) => /Step4 가격정책/.test(l)) && clicks.some((l) => /Step5 최종확인/.test(l)), '이동 버튼 Step4·Step5 클릭 코드가 있다');
+  ok(/_goStep\(page, 4\)/.test(src) && /_goStep\(page, 5\)/.test(src), '이동 버튼 Step4·Step5 클릭 코드가 있다(번호로 찾는 _goStep)');
   ok(!clicks.some((l) => /제출|저장|승인|유통\s*신청|결제|삭제/.test(l)) && !code.some((l) => /hasText:[^)]*도서\s*제출/.test(l)), '제출·저장·승인·결제·삭제 클릭/선택자 없음');
   console.log(`\n${fail ? '❌' : '✅'} book-register-step45 — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);

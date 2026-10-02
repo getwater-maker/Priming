@@ -9015,7 +9015,7 @@ try {
 ipcMain.handle('book-register-run', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
   if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };
-  const platform = args.platform === 'jakkawa' ? 'jakkawa' : (args.platform === 'bookk-ebook' || args.platform === 'bookkEbook') ? 'bookkEbook' : 'bookk';
+  const platform = args.platform === 'jakkawa' ? 'jakkawa' : (args.platform === 'bookk-ebook' || args.platform === 'bookkEbook') ? 'bookkEbook' : (args.platform === 'bookk-both' || args.platform === 'bookkBoth') ? 'bookkBoth' : 'bookk';
   _bookRegBusy = true;
   try {
     const RF = require('./core/book/register-fill');
@@ -9027,7 +9027,10 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
     if (platform === 'jakkawa') {
       plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
     } else {
-      const spec = bookSpec(S.parsed.meta || {}, S.parsed._lastPages || 0);
+      // 📄 등록 쪽수 = **올릴 내지 PDF 의 실제 쪽수**(부크크 검수: 등록 쪽수 ≠ PDF 쪽수면 「내지 페이지수 비정상」 — 미리보기 쪽수 293 ≠ PDF 255 였다 · 로이 2026-10-02). PDF 가 없으면 미리보기 쪽수.
+      let regPages = S.parsed._lastPages || 0;
+      try { const n = require('./core/book/pdf-builder').pdfPageCount(pick('_내지.pdf')); if (n > 0) { if (n !== regPages) log(`📄 내지 PDF ${n}쪽 — 미리보기/기록 쪽수(${regPages})와 달라 PDF 쪽수로 등록합니다`); regPages = n; } } catch (_) {}
+      const spec = bookSpec(S.parsed.meta || {}, regPages);
       // 📋 등록정보 파일(기준/등록/<권>.등록정보.md · 원고 메타 `> 등록정보:`) — 있으면 원고 메타보다 우선(2·5단계 입력값). 캡처는 <출력>/_등록캡처/
       let registerInfo = null;
       try {
@@ -9036,7 +9039,7 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         if (registerInfo) log(`📋 등록정보 파일 사용: ${registerInfo.file} — 도서명 「${registerInfo.title}」 · 부제 「${registerInfo.subtitle}」 · 장르 「${registerInfo.genre}」 · 소개 ${registerInfo.intro.length}자 · 목차 ${registerInfo.toc.split('\n').filter(Boolean).length}줄 · 저자소개 ${registerInfo.bio.length}자`);
         else if ((S.parsed.meta || {}).registerInfo) log(`⚠ 원고 메타 「등록정보」 파일을 찾을 수 없습니다: ${S.parsed.meta.registerInfo} — 원고 메타 값으로 진행합니다`);
       } catch (e) { log('⚠ 등록정보 파일 읽기 실패: ' + e.message); }
-      if (platform === 'bookkEbook') {
+      const buildEbookPlan = () => {
         // 📘 전자책: ePub(최신본) + 표지 JPG·PDF(원고 `> 전자책표지:` > ePub 만들 때 크롭해 둔 `_ebook-cover.jpg`). 값은 등록정보 파일이 원고 메타보다 우선(ISBN 은 종이책 값이라 쓰지 않는다).
         const meta = S.parsed.meta || {};
         const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p);
@@ -9048,12 +9051,16 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         const rec = RP.loadPaperPrice(root, bookFileBase());
         if (rec) log(`💾 종이책 신청 때 기록한 최종정가 ${rec.price.toLocaleString('ko-KR')}원(${rec.at.slice(0, 10)})을 전자책 정가 계산에 씁니다`);
         else log('ℹ 종이책 신청 기록이 없어 원고 정가로 계산합니다 — 종이책을 부크크에 먼저 신청하면(🤖 자동 입력) 화면의 최종정가를 기록합니다');
-        plan = RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
-      } else {
-        plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+        return RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+      };
+      if (platform === 'bookkEbook') plan = buildEbookPlan();
+      else {
+        plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: regPages, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
         // 💾 4단계에서 읽은 최종정가를 저장(전자책 정가의 근거)
         const _key = bookFileBase(); const _title = (registerInfo && registerInfo.title) || (S.parsed.meta || {}).title || '';
         plan.onPrice = (n) => { try { const v = require('./core/book/register-price').savePaperPrice(root, _key, n, _title); if (v) log(`💾 종이책 최종정가 ${v.toLocaleString('ko-KR')}원 기록 — 전자책 정가(70%)의 근거로 씁니다`); } catch (e) { log('⚠ 종이책 정가 기록 실패: ' + e.message); } };
+        // 📚 종이책 → 전자책 한 번에: 전자책 계획은 종이책 4단계가 끝나 최종정가가 기록된 **뒤에** 만든다(그래야 그 가격의 70%)
+        if (platform === 'bookkBoth') plan.buildEbookPlan = buildEbookPlan;
       }
     }
     if (args.only === 'cover' && platform === 'bookkEbook') {
@@ -9065,6 +9072,11 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');
       const rc = await RB.runBookkCoverOnly({ plan, log });
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
+    }
+    if (platform === 'bookkBoth') {
+      log('📤 [등록 도우미] 📚 부크크 종이책 → 전자책 한 번에 등록 시작 — 종이책(1~5단계)을 먼저 채우고, 같은 크롬의 새 탭에서 전자책을 이어 채웁니다. 저장·「도서제출」은 누르지 않습니다');
+      const rb = await RB.runRegisterBoth({ plan, log, isAborted: () => !!S.abort });
+      return { ok: rb.ok, done: rb.done, failed: rb.failed, manual: rb.manual };
     }
     log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
     const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });

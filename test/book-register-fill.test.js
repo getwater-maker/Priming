@@ -52,7 +52,7 @@ ok(clicks.length >= 5, `click 호출 ${clicks.length}곳 확인`);
 ok(!clicks.some((l) => /저장|제출|유통\s*신청|최종(?!확인)|승인|삭제|결제|로그아웃/.test(l)), '금지 버튼(저장·도서제출·유통신청·최종 입점·승인·삭제·결제·로그아웃) 클릭 없음 — 이동 버튼 Step5 최종확인 은 허용');
 ok(!/\.(fill|type|press)\([^)]*(password|비밀번호)/i.test(src) && !/input\[type=password\]/.test(src), '비밀번호 입력 코드 없음');
 const allowed = clicks.map((l) => l.trim()).join('\n');
-ok(/Step2 원고등록/.test(allowed) && /Step3 표지디자인/.test(allowed) && /Step4 가격정책/.test(allowed) && /Step5 최종확인/.test(allowed), '허용된 이동 버튼은 Step2~Step5(로이 2026-10-02 「스텝5까지 자동화」)');
+ok(/_goStep\(page, 2\)/.test(src) && /_goStep\(page, 3\)/.test(src) && /_goStep\(page, 4\)/.test(src) && /_goStep\(page, 5\)/.test(src) && !/_goStep\(page, [016-9]\)/.test(src), '허용된 이동 버튼은 Step2~Step5 번호뿐(_goStep — 버튼 이름이 바뀌어도 번호로 찾는다 · 로이 2026-10-02 「스텝5까지 자동화」)');
 ok(!/도서\s*제출/.test(clicks.join('\n')) && !/hasText:[^)]*도서\s*제출/.test(src), '🔴 5단계 「도서제출」은 어떤 클릭·선택자에도 없다(로이가 직접)');
 
 // ── 부크크 2단계 대표 장르 기본값(로이 2026-10-02) ──

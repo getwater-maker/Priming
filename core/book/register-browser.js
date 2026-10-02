@@ -26,12 +26,14 @@ let _ctx = null;   // 열려 있는 컨텍스트(한 번에 하나)
 //   이제 창 내용을 로그에 남기고, alert 는 확인(내용을 읽을 수 있게 앱에 알림), confirm/prompt 는 **앱 창에서 로이에게 묻는다**(askDialog — main 이 넣는다).
 let _dialogAsker = null;
 function setDialogAsker(fn) { _dialogAsker = fn; }
+let _dlgCount = 0;   // 사이트 대화상자가 뜬 횟수 — 이동 버튼을 눌렀을 때 확인창이 떠서 click 이 시간 초과한 경우를 가려낸다
 const AUTO_CONFIRM = /선택하신\s*로고\s*색상\s*\(\s*파랑\s*\)/;   // 「선택하신 로고 색상(파랑)입니다. 현재 설정으로 진행할까요?」 — 이 확인창만 자동 확인
 const _hooked = new WeakSet();
 function _hookDialogs(page, log) {
   if (_hooked.has(page)) return;
   _hooked.add(page);
   page.on('dialog', async (d) => {
+    _dlgCount++;
     const type = d.type(); const msg = String(d.message() || '');
     log(`[등록] 🔔 부크크 ${type} 창: ${msg.replace(/\s+/g, ' ').slice(0, 240)}`);
     let accept = true;
@@ -45,6 +47,16 @@ function _hookDialogs(page, log) {
   });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 단계 이동 버튼 — 「Step3 …」 처럼 **번호로** 찾는다(부크크가 버튼 이름을 바꿔도 따라간다: 종이책 3단계는 「표지디자인」→「표지등록」, 전자책은 「꾸미기」 · 로이 2026-10-02).
+ * 🔴 누르는 이동 버튼은 Step2~Step5 뿐(도서제출 아님). 누르자마자 사이트 확인창이 떠서 click 이 시간 초과하면(앱 창에서 답을 기다리는 동안) 실패로 보지 않고 이동한 것으로 이어 간다.
+ */
+async function _goStep(page, n) {
+  const before = _dlgCount;
+  try { await page.locator('a, button', { hasText: new RegExp('Step' + n + '(?!\\d)') }).first().click({ timeout: 8000 }); }
+  catch (e) { if (_dlgCount > before) { await sleep(500); return; } throw e; }
+}
 
 async function _launch(log) {
   const { chromium } = require('playwright');
@@ -73,7 +85,7 @@ async function _launch(log) {
 async function _dump(page, log, tag) {
   try {
     const d = await page.evaluate(() => [...document.querySelectorAll('input,select,textarea,button,a')]
-      .filter((e) => e.offsetParent !== null).slice(0, 60)
+      .filter((e) => e.offsetParent !== null).sort((a, b) => (/Step\d/.test(b.textContent) ? 1 : 0) - (/Step\d/.test(a.textContent) ? 1 : 0)).slice(0, 60)
       .map((e) => `${e.tagName}|${e.type || ''}|${e.name || ''}|${(e.placeholder || e.textContent || '').trim().slice(0, 24)}`));
     log(`[등록] [DUMP ${tag}] ${d.join(' ; ').slice(0, 1800)}`);
   } catch (_) {}
@@ -202,7 +214,7 @@ async function fillBookk(page, plan, log) {
     if (got && got !== want) { failed.push('날개 ' + want + '(요약이 ' + got + ')'); log(`[등록] ⚠ 날개: 요약에 「${got}」 로 보입니다(원하는 값 ${want}) — 부크크 화면에서 직접 확인하세요`); }
     else log(`[등록] 날개 ${want}: 요약 ${got ? '✓' : '? (요약 문구를 찾지 못함)'}`); }
   // ▶ Step2 — 임시서재에 초안이 만들어진다(삭제 가능). 제출이 아니다.
-  await page.locator('a', { hasText: 'Step2 원고등록' }).first().click({ timeout: 8000 });
+  await _goStep(page, 2);
   await page.waitForSelector('input[placeholder*="도서명 기재"]', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 2단계'); throw new Error('2단계(원고등록) 화면으로 넘어가지 못했습니다 — 1단계 필수 선택을 확인하세요'); });
   const sel = await _fillInfoForm(page, s2, log, step);
   if (s2.pages) await step('페이지수', async () => { const n = page.locator('input[type=number]').first(); await n.fill(String(s2.pages)); await n.blur(); });
@@ -222,7 +234,7 @@ async function fillBookk(page, plan, log) {
   // ▶ Step3 표지디자인(로이 2026-10-02 「3페이지도 자동으로」) — 이동만 한다(저장·제출 아님). 4단계 이후는 손대지 않는다.
   if (plan.step3 && plan.step3.coverPdf) {
     try {
-      await page.locator('a', { hasText: 'Step3 표지디자인' }).first().click({ timeout: 8000 });
+      await _goStep(page, 3);
       await page.waitForSelector('text=표지 주의사항', { timeout: 30000 });
       const r3 = await fillBookkCover(page, plan, log);
       done.push(...r3.done); failed.push(...r3.failed);
@@ -373,14 +385,14 @@ async function fillBookkFinal(page, plan, log) {
 async function continueFromStep4(page, plan, log) {
   const done = []; const failed = [];
   try {
-    await page.locator('a, button', { hasText: 'Step4 가격정책' }).first().click({ timeout: 8000 });
+    await _goStep(page, 4);
   } catch (e) { failed.push('4단계 이동'); log(`[등록] ⚠ 4단계(가격정책)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 직접 넘어간 뒤 「이어서 채우기」를 누르세요`); await _dump(page, log, '부크크 3→4단계'); return { done, failed }; }
   const r4 = await fillBookkPrice(page, plan, log).catch((e) => ({ done: [], failed: ['4단계 화면'], err: e }));
   done.push(...r4.done); failed.push(...r4.failed);
   if (r4.err) { log(`[등록] ⚠ ${r4.err.message}`); return { done, failed }; }
   if (r4.failed.some((f) => f !== '정가')) return { done, failed };   // 정가인하·외부서점 선택이 안 됐으면 멈춘다(정가만 못 넣은 건 알리고 계속)
   try {
-    await page.locator('a, button', { hasText: 'Step5 최종확인' }).first().click({ timeout: 8000 });
+    await _goStep(page, 5);
   } catch (e) { failed.push('5단계 이동'); log(`[등록] ⚠ 5단계(최종확인)로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)}`); await _dump(page, log, '부크크 4→5단계'); return { done, failed }; }
   const r5 = await fillBookkFinal(page, plan, log).catch((e) => ({ done: [], failed: ['5단계 화면'], err: e }));
   done.push(...r5.done); failed.push(...r5.failed);
@@ -412,7 +424,7 @@ async function runBookkCoverOnly(o) {
   else if (at === 4) {
     const r4 = await fillBookkPrice(page, o.plan, log); r.done.push(...r4.done); r.failed.push(...r4.failed);
     if (!r4.failed.some((f) => f !== '정가')) {
-      try { await page.locator('a, button', { hasText: 'Step5 최종확인' }).first().click({ timeout: 8000 });
+      try { await _goStep(page, 5);
         const r5 = await fillBookkFinal(page, o.plan, log); r.done.push(...r5.done); r.failed.push(...r5.failed);
         log('[등록] 🛑 5단계 입력까지 끝났습니다 — 「도서제출」은 직접 누르세요'); }
       catch (e) { r.failed.push('5단계 이동'); log(`[등록] ⚠ 5단계로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)}`); }
@@ -425,7 +437,6 @@ async function runBookkCoverOnly(o) {
 }
 
 // ───────── 📘 부크크 「새전자책」 (/author/make/electronicBook) — 로이 스크린샷·화면 기록 2026-10-02 실측. 🔴 「도서제출」은 누르지 않는다(이동 버튼 Step2~Step5 뿐).
-const EBOOK_NAV = { 1: 'Step2 원고등록', 2: 'Step3 꾸미기', 3: 'Step4 가격정책', 4: 'Step5 최종확인' };
 
 /** 1단계 기본정보 — 종이책 2단계와 같은 칸(쪽수·PDF 없음) */
 async function fillBookkEbookInfo(page, plan, log) {
@@ -518,7 +529,7 @@ async function runEbookFrom(page, plan, log, from) {
   const fns = { 1: fillBookkEbookInfo, 2: fillBookkEbookManuscript, 3: fillBookkEbookCover, 4: fillBookkEbookPrice, 5: fillBookkFinal };
   for (let n = from; n <= 5; n++) {
     if (n > from) {
-      try { await page.locator('a, button', { hasText: EBOOK_NAV[n - 1] }).first().click({ timeout: 8000 }); }
+      try { await _goStep(page, n); }
       catch (e) { failed.push(`${n}단계 이동`); log(`[등록] ⚠ 전자책 ${n}단계로 못 넘어갔습니다: ${String(e.message).split('\n')[0].slice(0, 90)} — 직접 넘어간 뒤 「이어서 채우기」를 누르세요`); await _dump(page, log, `전자책 ${n - 1}→${n}단계`); return { done, failed }; }
     }
     let r;
@@ -530,6 +541,42 @@ async function runEbookFrom(page, plan, log, from) {
   return { done, failed };
 }
 async function fillBookkEbook(page, plan, log) { return runEbookFrom(page, plan, log, 1); }
+
+/**
+ * 📚 종이책 → 전자책 한 번에(로이 2026-10-02 「종이책 먼저 등록하고 전자책까지 함께」).
+ *   ① 로그인 화면(사람이 로그인) ② 종이책 1~5단계 채우기 ③ 성공하면 **같은 크롬의 새 탭**에서 전자책 1~5단계 — 종이책 탭은 그대로 둔다(로이가 종이책 「도서제출」을 직접 누를 수 있게).
+ *   전자책 계획은 종이책 4단계 뒤에 만든다(plan.buildEbookPlan — 종이책 최종정가를 기록한 뒤라야 정가 = 그 70%). 종이책이 하나라도 실패하면 전자책으로 넘어가지 않는다.
+ *   🔴 저장·「도서제출」은 두 책 모두 누르지 않는다.
+ */
+async function runRegisterBoth(o) {
+  const log = o.log || (() => {});
+  const site = SITES.bookk;
+  const ctx = await _launch(log);
+  const page = ctx.pages()[0] || await ctx.newPage();
+  log(`[등록] 📚 ${site.label} 열기 — ${site.home}`);
+  await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+  await _waitLogin(page, site, log, o.isAborted);
+  await page.goto(site.start, { waitUntil: 'load', timeout: 60000 });
+  log('[등록] 📕 1/2 종이책 입력 시작');
+  const r1 = await fillBookk(page, o.plan, log);
+  const done = [...r1.done.map((x) => '종이책 ' + x)]; const failed = [...r1.failed.map((x) => '종이책 ' + x)];
+  const manual = [...(o.plan.manual || []).map((x) => '[종이책] ' + x)];
+  if (r1.failed.length) {
+    log(`[등록] ⏸ 종이책에서 실패가 있어 전자책으로 넘어가지 않습니다(${r1.failed.join(', ')}) — 종이책 탭을 고친 뒤 「🖼 3단계부터 이어 채우기」를 누르고, 끝나면 전자책을 하세요`);
+    return { ok: false, done, failed, manual };
+  }
+  if (o.isAborted && o.isAborted()) throw new Error('중단됨');
+  const eplan = o.plan.buildEbookPlan ? o.plan.buildEbookPlan() : null;
+  if (!eplan) throw new Error('전자책 계획을 만들지 못했습니다');
+  const epage = await ctx.newPage();
+  log('[등록] 📘 2/2 전자책 입력 시작 — 새 탭(종이책 탭은 그대로 둡니다)');
+  await epage.goto(SITES.bookkEbook.start, { waitUntil: 'load', timeout: 60000 });
+  const r2 = await fillBookkEbook(epage, eplan, log);
+  done.push(...r2.done.map((x) => '전자책 ' + x)); failed.push(...r2.failed.map((x) => '전자책 ' + x));
+  manual.push(...(eplan.manual || []).map((x) => '[전자책] ' + x));
+  log(`[등록] ✅ 📚 종이책 ${r1.done.length}칸 · 전자책 ${r2.done.length}칸 입력${r2.failed.length ? ' · 전자책 실패 ' + r2.failed.join(', ') : ''} — 두 탭에서 확인하고 「도서제출」은 직접 누르세요`);
+  return { ok: !failed.length, done, failed, manual };
+}
 
 /** 열려 있는 등록용 크롬의 전자책 탭에서 지금 몇 단계인지 읽어 거기서부터 이어서 채운다(로그인·1단계를 이미 한 경우). */
 async function runBookkEbookResume(o) {
@@ -569,4 +616,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+module.exports = { goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

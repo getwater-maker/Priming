@@ -434,8 +434,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
   async function runRegister(platform, only) {
     const eb = platform === 'ebook';   // 📘 부크크 새전자책(화면 탭 id 'ebook' → IPC 'bookk-ebook')
-    const bk = platform === 'bookk' || eb;
-    const msg = eb ? (only === 'cover'
+    const both = platform === 'both';   // 📚 종이책 → 전자책 한 번에(IPC 'bookk-both')
+    const bk = platform === 'bookk' || eb || both;
+    const msg = both ? ['부크크에 📕 종이책 → 📘 전자책을 이어서 등록합니다.', '', '① 크롬 창이 열리면(로그인 화면) 로그인은 직접 해 주세요.', '② 먼저 종이책 1~5단계를 채웁니다. 4단계에서 읽은 종이책 최종정가를 기록합니다.', '③ 종이책이 끝나면 같은 크롬의 새 탭에서 전자책 1~5단계를 채웁니다(정가 = 종이책 최종정가의 70%, 10원 단위 버림).', '④ 종이책에 실패가 있으면 전자책으로 넘어가지 않습니다. 두 책 모두 「도서제출」·저장은 직접 하세요.', '', '시작할까요?'].join('\n') : eb ? (only === 'cover'
       ? ['부크크 「새전자책」을 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에 전자책 화면(1~5단계 중 어느 단계든)이 떠 있어야 합니다 — 지금 단계부터 5단계까지 채웁니다.', '② 4단계에서 정가를 바꾸면 「정가 직접 변경」 체크도 함께 합니다. 로고는 파란색.', '③ 5단계 「도서제출」·저장은 직접 하세요.', '', '진행할까요?'].join('\n')
       : ['부크크 「새전자책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 기본정보 → Step2 ePub 업로드 → Step3 표지(JPG·PDF)+파란 로고 → Step4 정가·외부서점 → Step5 소개·목차·저자경력·AI·저작권까지 입력합니다.', '③ 「도서제출」·저장·최종 입점은 누르지 않습니다 — 직접 하세요.', '', '시작할까요?'].join('\n')) : only === 'cover' ? ['부크크 3단계(표지디자인)를 이어서 입력합니다.', '', '① 자동 입력으로 열린 크롬 창에서 3단계 화면(표지 주의사항)이 떠 있어야 합니다.', '② 「직접 올리기」 탭을 고르고 표지 PDF 를 올립니다. 화면의 작업규격이 우리 표지와 다르면 올리지 않습니다.', '③ 4단계(가격정책)부터·저장·제출은 직접 하세요.', '', '진행할까요?'].join('\n') : bk
       ? ['부크크 「새종이책」에 자동 입력합니다.', '', '① 크롬 창이 열리면 로그인은 직접 해 주세요.', '② 1단계 선택 → 「Step2」에서 임시서재에 초안이 만들어집니다(삭제 가능).', '③ 2단계 입력과 내지 PDF 업로드까지 하고 멈춥니다. 표지·가격·최종확인·제출은 직접 하세요.', '', '시작할까요?'].join(String.fromCharCode(10))
@@ -443,7 +444,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     if (!window.confirm(msg)) return;
     setRegBusy(true); setStatus('🤖 ' + (bk ? '부크크' : '작가와') + ' 자동 입력 중 — 열린 크롬 창에서 로그인해 주세요');
     try {
-      const r = await api.bookRegisterRun({ platform: eb ? 'bookk-ebook' : platform, only });
+      const r = await api.bookRegisterRun({ platform: eb ? 'bookk-ebook' : both ? 'bookk-both' : platform, only });
       if (!r || r.error) { setStatus('⚠ 자동 입력 실패: ' + ((r && r.error) || '알 수 없음')); }
       else {
         setStatus(r.ok ? '✅ 자동 입력 완료 — 크롬 창에서 확인하고 저장·제출은 직접 하세요' : '⚠ 일부 칸 실패: ' + (r.failed || []).join(', '));
@@ -751,6 +752,11 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             title="크롬을 열어 부크크 새전자책 1~5단계(기본정보·ePub·표지·정가·소개)를 채웁니다 — 로그인·도서제출은 직접"
             onClick={() => runRegister('ebook')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
         </div>}
+        <div className="bkactions">
+          <button disabled={regBusy || building} data-testid="bk-register-both"
+            title="크롬을 열어 종이책 1~5단계를 먼저 채우고, 끝나면 같은 크롬의 새 탭에서 전자책 1~5단계를 채웁니다 — 전자책 정가는 종이책 4단계에서 읽은 최종정가의 70%(10원 단위 버림) · 로그인·「도서제출」은 직접"
+            onClick={() => runRegister('both')}>{regBusy ? '⏳ 진행 중…' : '📚 종이책 → 전자책 한 번에 등록'}</button>
+        </div>
         <div className="bklinks">
           {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
           <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>

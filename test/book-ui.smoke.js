@@ -149,6 +149,7 @@ ${para}
       if (await win.locator(`[data-testid=${btn}]`).count() !== 1) throw new Error(`${label} 빌드 버튼 없음`);
       const autoBtn = await win.locator(`[data-testid=bk-register-${tabId}]`).count();
       if (autoBtn !== 1) throw new Error(`${label} 자동 입력 버튼 개수 ${autoBtn} (종이책·전자책 모두 1개 — 전자책은 2026-10-02 화면 실측 뒤 추가)`);
+      if (await win.locator('[data-testid=bk-register-both]').count() !== 1) throw new Error(`${label} 「종이책 → 전자책 한 번에」 버튼 개수`);
       await win.waitForSelector(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`, { timeout: 8000 }).catch(() => {});
       if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`).count() !== 1) throw new Error(`${label} 출고 전 점검 패널 없음`);
       if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-build-all]`).count() !== 1) throw new Error(`${label} 「한 번에 만들기」 버튼 없음`);
