@@ -84,10 +84,16 @@ async function _launch(log) {
 
 async function _dump(page, log, tag) {
   try {
-    const d = await page.evaluate(() => [...document.querySelectorAll('input,select,textarea,button,a')]
-      .filter((e) => e.offsetParent !== null).sort((a, b) => (/Step\d/.test(b.textContent) ? 1 : 0) - (/Step\d/.test(a.textContent) ? 1 : 0)).slice(0, 60)
-      .map((e) => `${e.tagName}|${e.type || ''}|${e.name || ''}|${(e.placeholder || e.textContent || '').trim().slice(0, 24)}`));
-    log(`[등록] [DUMP ${tag}] ${d.join(' ; ').slice(0, 1800)}`);
+    // 입력칸·선택·Step 버튼을 앞에(머리말 링크가 60개 한도를 채워 정작 입력칸이 안 보이던 것) + 화면 글자 앞부분(어느 단계 화면인지·문구가 바뀌었는지 보려고)
+    const d = await page.evaluate(() => {
+      const w = (e) => (e.matches('input,select,textarea') ? 0 : /Step\d/.test(e.textContent) ? 1 : (e.textContent || '').trim() ? 2 : 3);
+      const els = [...document.querySelectorAll('input,select,textarea,button,a')].filter((e) => e.offsetParent !== null && !(e.tagName === 'A' && !(e.textContent || '').trim()));
+      els.sort((a, b) => w(a) - w(b));
+      const main = (document.querySelector('main') || document.body).innerText.replace(/\s+/g, ' ');
+      return { els: els.slice(0, 50).map((e) => `${e.tagName}|${e.type || ''}|${e.name || ''}|${(e.placeholder || e.value || e.textContent || '').trim().slice(0, 24)}`), text: main.slice(0, 900) };
+    });
+    log(`[등록] [DUMP ${tag}] ${d.els.join(' ; ').slice(0, 1800)}`);
+    log(`[등록] [DUMP ${tag} 글자] ${d.text}`);
   } catch (_) {}
 }
 
@@ -161,6 +167,11 @@ async function fillJakkawa(page, plan, log) {
     await sleep(120);
   }
   return { done, failed };
+}
+
+/** 4단계(가격정책) 화면 대기 — 「정가설정」 한 문구에만 걸지 않는다(띄어쓰기·표현이 달라도 · 외부서점·최종정가 중 하나라도 보이면). 못 찾으면 호출 쪽이 화면을 덤프한다 */
+async function _waitPriceScreen(page) {
+  await page.waitForFunction(() => /정가\s*설정|최종\s*정가|외부\s*서점/.test(document.body ? document.body.innerText : ''), null, { timeout: 30000 });
 }
 
 /** 파일 업로드 끝 대기 — 「업로드 파일 없음」이 사라지고 **「업로드중…」도 사라질 때**까지(최대 5분). 파일 이름이 먼저 보이고 업로드는 계속되는 구간에 다음 단계를 누르면 「원고파일을 올리지 않으면 진행할 수 없습니다」 창이 뜬다(로이 2026-10-02 전자책 2단계). */
@@ -303,7 +314,7 @@ async function fillBookkPrice(page, plan, log) {
   const s4 = plan.step4 || {};
   const done = []; const failed = [];
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
-  await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 4단계'); throw new Error('4단계(가격정책) 화면을 찾지 못했습니다'); });
+  await _waitPriceScreen(page).catch(async () => { await _dump(page, log, '부크크 4단계'); throw new Error('4단계(가격정책) 화면을 찾지 못했습니다'); });
   const body = await page.evaluate(() => document.body.innerText).catch(() => '');
   const mm = /최소가격\s*([\d,]+)\s*원/.exec(body);
   const min = mm ? Number(mm[1].replace(/,/g, '')) : 0;
@@ -496,7 +507,7 @@ async function fillBookkEbookCover(page, plan, log) {
 async function fillBookkEbookPrice(page, plan, log) {
   const s4 = plan.step4 || {}; const done = []; const failed = [];
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
-  await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
+  await _waitPriceScreen(page).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
   const priceSel = 'input[type=text], input[type=number], input:not([type])';
   if (s4.from === 'paper70' || s4.from === 'paper-registered') log(`[등록] 💰 전자책 정가 = 종이책(${s4.from === 'paper-registered' ? '부크크 신청 때 기록한 최종정가' : '원고 정가'}) ${Number(s4.paper).toLocaleString('ko-KR')}원 × 70% (10원 단위 이하 버림) = ${Number(s4.price).toLocaleString('ko-KR')}원`);
   if (s4.price) {
