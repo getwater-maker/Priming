@@ -109,6 +109,8 @@ async function _waitLogin(page, site, log, isAborted) {
   let told = false;
   while (Date.now() - t0 < 10 * 60 * 1000) {
     if (isAborted && isAborted()) throw new Error('중단됨');
+    // 🪟 로그인 기다리는 동안 크롬 창을 닫으면 evaluate 가 계속 실패(→ false)해 10분을 헛기다리고 화면은 「진행 중」에 갇혔다(로이 2026-10-02). 닫혔으면 바로 끝낸다.
+    if (page.isClosed() || !_ctx) throw new Error(`${site.label} 크롬 창이 닫혔습니다 — 로그인하려면 창을 닫지 말고, 다시 「🤖 자동 입력」을 눌러 주세요`);
     const ok = await page.evaluate(() => /로그아웃/.test(document.body ? document.body.innerText : '')).catch(() => false);
     if (ok) return;
     if (!told) { log(`[등록] 🔑 ${site.label}: 열린 크롬 창에서 로그인해 주세요 (아이디·비밀번호는 직접 — 최대 10분 기다립니다)`); told = true; }

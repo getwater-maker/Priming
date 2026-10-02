@@ -176,6 +176,8 @@ function checklist(platform, ctx) { return platform === 'jakkawa' ? jakkawaCheck
 
 /** 필수 항목 중 아직 안 끝난 수(todo + manual) */
 function remaining(list) { return list.required.filter((i) => i.state !== 'ok').length; }
+/** 탭 위 숫자 = 앱이 막는(todo) 필수 항목만. 사람이 직접 체크하는 항목(manual)은 「필수」 목록 안에서 확인 — 점검이 다 통과했는데 숫자가 남아 고장으로 보였다(로이 2026-10-02) */
+function blocking(list) { return list.required.filter((i) => i.state === 'todo').length; }
 
 /** 작가와 서지정보 페이지 양식(공식 양식 원문 · jakkawa.com/book-info-guide) — 전자책 판권과 같은 함수를 쓴다 */
 function ebookBiblio(meta, opts) {
@@ -218,5 +220,5 @@ const AUTO_UPLOAD = {
 
 module.exports = {
   REVIEWED, LINKS, COVER_MATERIALS, DEFAULT_COVER_MATERIAL, AUTO_UPLOAD, MB50, MB20,
-  checklist, remaining, ebookBiblio, summary,
+  checklist, remaining, blocking, ebookBiblio, summary,
 };

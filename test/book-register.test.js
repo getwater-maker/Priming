@@ -47,6 +47,7 @@ ok(by(RG.checklist('jakkawa', { ...eb, outputs: [{ kind: 'epub', name: 'a.epub',
 ok(by(RG.checklist('jakkawa', { ...eb, outputs: [{ kind: 'ebookPdf', name: 'a.pdf', bytes: 60 * 1024 * 1024 }] }), 'size').state === 'todo', '60MB → 50MB 초과');
 ok(by(l, 'aiDisclosure').state === 'todo' && by(RG.checklist('jakkawa', { ...eb, meta: { ...eb.meta, aiDisclosure: '없음' } }), 'aiDisclosure').state === 'ok', 'AI 표기 선택 여부');
 ok(RG.remaining(l) === l.required.filter((i) => i.state !== 'ok').length && RG.remaining(l) > 0, '남은 필수 개수');
+ok(RG.blocking(l) === l.required.filter((i) => i.state === 'todo').length && RG.blocking(l) < RG.remaining(l), '탭 숫자 = 막는(todo) 항목만 — 직접 체크(manual)는 세지 않는다');
 
 console.log('\n[5] 서지정보 양식·요약');
 const bib = RG.ebookBiblio({ issueDate: '2026.10.01', author: '나관중', publisher: '고전서재', ebookPrice: '8,000원', ebookIsbn: '979-11-000-0001-0' });

@@ -615,7 +615,7 @@ body{overflow-y:scroll}
   const badge = {
     info: ['title', 'author'].filter((k) => missSet.has(k)).length,
     colophon: COLO_REQ.filter(([k]) => missSet.has(k)).length,
-    bookk: RG.remaining(lists.bookk), ebook: RG.remaining(lists.ebook),
+    bookk: RG.blocking(lists.bookk), ebook: RG.blocking(lists.ebook),
   };
 
   // ── 작은 부품(함수로 호출 — 컴포넌트로 만들면 렌더마다 새로 마운트돼 입력칸 초점을 잃는다) ──
@@ -1082,7 +1082,7 @@ body{overflow-y:scroll}
           {TABS.map(([id, ic, name]) => (
             <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
               <span className="bkti">{ic}</span><span>{name}</span>
-              {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요(체크해야 하는 항목도 포함)`}>{badge[id]}</em> : null}
+              {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요`}>{badge[id]}</em> : null}
             </button>
           ))}
         </nav>
