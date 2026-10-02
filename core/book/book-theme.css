@@ -198,6 +198,7 @@ span.footnote {
 ::footnote-marker { content: counter(footnote) ") "; }
 
 /* ── 미주(endnotes 모드) ── */
+section.endnotes { page: main; }   /* 미주 쪽도 본문 이름 — 머리글·쪽번호는 main 쪽에만 걸린다(R23) */
 section.endnotes ol { font-size: 0.9em; line-height: 1.6; padding-left: 1.5em; }
 section.endnotes li { margin: 0.4em 0; }
 sup.enref { font-size: 0.65em; }

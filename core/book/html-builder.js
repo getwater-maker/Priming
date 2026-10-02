@@ -548,12 +548,18 @@ function pageCss(o) {
 /* 짝수쪽(왼쪽): 바깥여백=왼쪽 */
 @page :left {
   margin-left: ${m.outer}mm; margin-right: ${m.inner}mm;
+}
+/* 🔴 머리글·쪽번호는 **본문(main) 쪽에만** 건다(R23 · 로이 2026-10-02 「빈 쪽에서 머리글·쪽번호 제거」). 이름 없는 쪽 — 앞부속(front) → 본문(main) 처럼 쪽 이름이 바뀔 때
+   홀수쪽 맞추기가 끼우는 백면 — 은 :blank 로 인식되지 않고 :left/:right 규칙을 그대로 받아 머리글과 쪽번호가 찍혔다(실측: 목차 다음 빈 쪽 p8). */
+@page main:left {
   ${headerEvenBox}
   ${numEven}
 }
 /* 홀수쪽(오른쪽): 바깥여백=오른쪽 */
 @page :right {
   margin-left: ${m.inner}mm; margin-right: ${m.outer}mm;
+}
+@page main:right {
   ${headerOddBox}
   ${numOdd}
 }
@@ -569,6 +575,10 @@ function pageCss(o) {
 @page front:right { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* recto 강제로 생긴 백면 */
 @page :blank { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+/* 본문 이름 쪽 중 백면(장 사이) — 이름+의사클래스가 main:left/right 보다 특이해야 이긴다 */
+@page main:blank { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page main:blank:left { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page main:blank:right { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* 러닝헤드 장제목 = 전체 원제(공백 포함) — h2 는 '제N회'를 .ch-no 로 쪼개 공백이 사라지므로
    숨김 앵커(.ch-rh)의 원문에서 문자열을 뽑는다(예: "제16회 여포의 신궁, 전위의 최후"). */
 .ch-rh { string-set: chapter-title content(); display: none; }
