@@ -21,7 +21,7 @@ function preflight(x) {
   // 2) 표지
   const cc = x.coverCheck;
   if (!x.coverImagePath) out.push(it('cover', '표지 이미지', 'warn', '완성 표지 이미지를 첨부하지 않았습니다(표지 탭) — 앱이 만든 간단한 표지가 나갑니다', 'cover'));
-  else if (/시안/.test(String(x.coverImagePath))) out.push(it('cover', '표지 파일', 'error', '파일 이름에 「시안」 — 인쇄용이 아닙니다. 쪽수가 확정된 뒤 책등 mm 로 만든 인쇄용 표지를 첨부하세요', 'cover'));
+  else if (/시안/.test(String(x.coverImagePath))) out.push(it('cover', '표지 원본 파일', 'warn', '첨부한 표지 원본의 파일 이름에 「시안」이 있습니다 — 최종 표지 파일로 바꿔 첨부하세요. (업로드는 쪽수에 맞춰 앱이 만든 표지 PDF 로 하고, 쪽수가 정해지면 책등 mm 가 맞는지 다시 확인합니다)', 'cover'));
   else if (cc && !cc.ok) out.push(it('cover', '표지 치수', 'error', cc.flapHint ? `이 표지 파일은 날개 ${cc.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요` : `치수 불일치 — 기대 ${cc.expected.widthMm}×${cc.expected.heightMm}mm, 파일 ${cc.mmW}×${cc.mmH}mm`, 'cover'));
   else if (cc && !cc.exact && x.pages > 0) out.push(it('cover', '표지 폭', 'warn', `기대 ${cc.expected.widthMm}mm · 파일 ${cc.mmW}mm (허용 ±1mm 밖) — 쪽수 ${x.pages}쪽 기준 책등 ${x.spineMm}mm 로 표지를 다시 만드세요`, 'cover'));
   else if (cc && cc.lowDpi) out.push(it('cover', '표지 해상도', 'warn', `실효 ${cc.effectiveDpi}dpi < 300 — 반려 사유 1위`, 'cover'));
@@ -48,10 +48,6 @@ function preflight(x) {
   if (!has(m.title)) miss.push('책 제목'); if (!has(m.author)) miss.push('저자'); if (!has(m.publisher)) miss.push('출판사');
   if (!has(m.issueDate)) miss.push('발행일');
   out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : '제목·저자·출판사·발행일 있음', 'info'));
-  const priceMiss = [];
-  if (!has(m.price)) priceMiss.push('종이책 정가'); if (!has(m.ebookPrice)) priceMiss.push('전자책 가격');
-  if (priceMiss.length) out.push(it('price', '가격', 'info', `비어 있음: ${priceMiss.join(', ')} — 부크크 4단계(가격정책)에서 정하거나 확인합니다(원고 메타 「> 정가:」 에 적으면 자동 입력)`, 'colophon'));
-  if (!has(m.isbn) && !has(m.ebookIsbn)) out.push(it('isbn', 'ISBN', 'info', '없으면 부크크에서만 판매됩니다(외부유통 불가)', 'colophon'));
   // 7) 완성 파일이 원고보다 낡았나
   const find = (k) => (x.outputs || []).filter((o) => o.kind === k).sort((a, b) => b.mtime - a.mtime)[0];
   for (const [kind, label] of [['interior', '내지 PDF'], ['cover', '표지 PDF'], ['epub', 'ePub']]) {

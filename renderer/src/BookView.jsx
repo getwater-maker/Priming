@@ -10,7 +10,7 @@ import HK from '../../core/book/header-kind.js';
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
 const TABS = [
   ['structure', '📚', '구조'], ['info', '📋', '책 정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지'],
-  ['layout', '📐', '조판'], ['bookk', '📕', '종이책·부크크'], ['ebook', '📱', '전자책·부크크'],
+  ['layout', '📐', '조판'], ['bookk', '📕', '종이책'], ['ebook', '📱', '전자책'],
 ];
 // 책 정보 탭 — [키, 이름, 필수?, 도움말]
 const INFO_FIELDS = [
@@ -62,7 +62,7 @@ const LAYOUT_DEFAULTS = {
   headerLine: true, pageNum: 'outer',
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 8,
-  colophonFields: null, colophonAlign: 'top', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  colophonFields: null, colophonAlign: 'bottom', coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
   lineBreak: 'word',   // 줄바꿈 방식 — word(어절·기본) / char(글자) / smart(절충) · 원고 메타 `> 줄바꿈:` 이 이긴다
   tocSizePt: 0, tocLineHeight: 0,   // 목차 글자(pt)·행간 — 0 = 본문과 같음(원고 메타 `> 목차글자:` `> 목차행간:` 이 이긴다)
   specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
@@ -394,13 +394,13 @@ body{overflow-y:scroll}
 
   // ── 액션 ──
   // 📕 종이책(POD 입고: 내지+표지 PDF) / 📱 전자책(화면 읽기용 PDF 한 파일) — 같은 원고, 판만 다르다
-  async function buildPdf(edition) {
+  async function buildPdf(edition, quiet) {
     const ebook = edition === 'ebook';
     setBuilding(true);
     setBuildMsg(ebook ? '📱 전자책 PDF 생성 중 — 표지 1쪽 + 본문' : '📕 종이책 PDF 생성 중 — 내지 조판 + 표지');
     setStatus(ebook ? '전자책 PDF 생성 중…' : 'PDF 생성 중… (내지 조판 + 표지)');
     try {
-      const r = await api.bookBuildPdf({ layout, edition: ebook ? 'ebook' : 'print' });
+      const r = await api.bookBuildPdf({ layout, edition: ebook ? 'ebook' : 'print', noOpen: !!quiet });
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error
         ? (ebook ? `전자책 PDF 완료 — ${r.pages || '?'}쪽`
@@ -439,11 +439,11 @@ body{overflow-y:scroll}
     } catch (e) { setEpubChk({ error: e.message }); }
     setEpubChkBusy(false);
   }
-  async function buildEpubFile() {
+  async function buildEpubFile(quiet) {
     setEpubChk(null);
     setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
     try {
-      const r = await api.bookBuildEpub({});
+      const r = await api.bookBuildEpub({ noOpen: quiet === true });
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
     } catch (e) { logline('ePub 오류: ' + e.message); }
@@ -453,10 +453,11 @@ body{overflow-y:scroll}
   async function buildAll() {
     if (building) return;
     setStatus('📦 한 번에 만드는 중 — 내지·표지 PDF 부터…');
-    await buildPdf('print');
-    await buildEpubFile();
+    await buildPdf('print', true);      // 폴더는 끝에 한 번만 연다(탐색창이 둘 뜨던 것 — 로이 2026-10-02)
+    await buildEpubFile(true);
     await runEpubCheckUi();
     refreshOutputs(); loadPf();
+    try { api.openFolder(); } catch (_) {}
     setStatus('📦 한 번에 만들기 끝 — 아래 「출고 전 점검」을 확인하세요');
   }
   // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
@@ -565,14 +566,14 @@ body{overflow-y:scroll}
   if (!loaded) {
     return (
       <div className="bkwrap" ref={wrapRef}>
-        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 종이책·부크크 · 전자책·부크크)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
+        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 종이책 · 전자책)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
         <div className="bkcenter"><div className="bkempty">
-          <h2>📖 출판 — MD 원고 → 종이책(부크크) · 전자책(부크크)</h2>
+          <h2>📖 출판 — MD 원고 → 종이책 · 전자책</h2>
           <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
           <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>
           <p className="meta">
             핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
-            대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 부크크 규격 내지/표지 PDF, 전자책은 부크크용 ePub(EPUB 2.0)을 만듭니다.
+            대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 규격에 맞는 내지/표지 PDF, 전자책은 ePub(EPUB 2.0)을 만듭니다.
           </p>
         </div></div>
       </div>
@@ -583,6 +584,7 @@ body{overflow-y:scroll}
   const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
   const missSet = new Set(missing.map(([k]) => k));
   const spread = dto.spread || {};
+  const cpAlignMeta = /하단|아래|bottom/i.test(String(meta.colophonAlignMeta || '')) ? 'bottom' : /상단|위|top/i.test(String(meta.colophonAlignMeta || '')) ? 'top' : '';   // 원고 메타 「판권정렬」 이 화면 값을 이긴다(안 비추면 실제와 다르게 보인다 — 로이 2026-10-02)
   const hdrEvenMeta = HK.headerKindOf(meta.headerEven), hdrOddMeta = HK.headerKindOf(meta.headerOdd);   // 원고 메타가 UI 값을 이긴다(삼국지 R12)
   const chapters = (dto.parts || []).flatMap((p) => p.chapters);
   const pf = (dto.platforms || []).find((p) => p.id === dto.platformId);
@@ -646,10 +648,10 @@ body{overflow-y:scroll}
     return (
       <div className="bkreg" data-testid={'bk-reg-' + platform}>
         <div className="bkprog">
-          <b>{isBookk ? '📕 종이책 → 부크크' : '📱 전자책 → 부크크'}</b>
+          <b>{isBookk ? '📕 종이책' : '📱 전자책'}</b>
           <span className={doneReq === list.required.length ? 'bkok' : ''}>필수 {doneReq}/{list.required.length}</span>
         </div>
-        <div className="bkzone">🔎 부크크에 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
+        <div className="bkzone">🔎 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
         {pfx ? (
           <div className="bkpf" data-testid="bk-preflight">
             <div className={'bkpf-sum ' + (pfx.ready ? 'ok' : 'bad')}>
@@ -670,7 +672,7 @@ body{overflow-y:scroll}
           </div>
         ) : <div className="meta">점검 중…</div>}
         <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-build-all" title="내지 PDF + 표지 PDF → ePub(EPUB 2.0) → 규격 검증을 순서대로 한 번에 — 쪽수가 정해진 뒤에 표지·ePub 을 만들도록 순서를 지킵니다" onClick={buildAll}>📦 부크크용 한 번에 만들기</button>
+          <button disabled={building || epubChkBusy} data-testid="bk-build-all" title="내지 PDF + 표지 PDF → ePub(EPUB 2.0) → 규격 검증을 순서대로 한 번에 — 쪽수가 정해진 뒤에 표지·ePub 을 만들도록 순서를 지킵니다" onClick={buildAll}>📦 한 번에 만들기</button>
         </div>
         <div className="bkzone">필수</div>
         {list.required.map(row)}
@@ -716,7 +718,7 @@ body{overflow-y:scroll}
           <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover" title="이미 열려 있는 등록용 크롬에서 3단계(표지디자인) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요" onClick={() => runRegister("bookk", "cover")}>🖼 3단계부터 이어 채우기</button>
           <button disabled={regBusy || building} data-testid={'bk-register-' + platform}
             title={isBookk ? '크롬을 열어 부크크 1~2단계를 채우고 내지 PDF 를 올립니다 — 로그인·표지·가격·제출은 직접' : '크롬을 열어 작가와 도서정보 입력칸을 채웁니다 — 로그인·저장·업로드·유통 신청은 직접'}
-            onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 부크크에 자동 입력'}</button>
+            onClick={() => runRegister(platform)}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
         </div>}
         <div className="bklinks">
           {RG.LINKS[platform].map(([t, u]) => <button key={u} className="ghost" title={u} onClick={() => api.bookOpenPlatform(u)}>🌐 {t}</button>)}
@@ -814,12 +816,12 @@ body{overflow-y:scroll}
             <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
           </select>
         </label>
-        <label title="판권 내용을 판면 위에서 시작할지, 아래쪽으로 내릴지 — 실물 단행본은 위쪽이 다수">판권 배치
-          <select value={layout.colophonAlign === 'bottom' ? 'bottom' : 'top'} onChange={(e) => L('colophonAlign', e.target.value)}>
-            <option value="top">위 (판면 상단)</option><option value="bottom">아래 (판면 하단)</option>
+        <label title={cpAlignMeta ? '원고 메타 `> 판권정렬:` 이 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : '판권 내용을 판면 아래쪽에 붙일지(기본), 위에서 시작할지'}>판권 배치{cpAlignMeta ? ' 🔒' : ''}
+          <select value={cpAlignMeta || (layout.colophonAlign === 'top' ? 'top' : 'bottom')} disabled={!!cpAlignMeta} onChange={(e) => L('colophonAlign', e.target.value)}>
+            <option value="bottom">아래 (판면 하단 · 기본)</option><option value="top">위 (판면 상단)</option>
           </select>
         </label>
-        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다. 전자책 점검표는 「전자책·부크크」 탭에 있습니다.</div>
+        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다(정가·ISBN 은 등록 과정에서 정해지면 판권 탭에 적으세요). 전자책 점검표는 「전자책」 탭에 있습니다.</div>
       </div>);
       case 'cover': return (<div className="bkform">
         <div className="bkzone">종이책 표지 스프레드</div>
@@ -1064,12 +1066,12 @@ body{overflow-y:scroll}
           {TABS.map(([id, ic, name]) => (
             <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
               <span className="bkti">{ic}</span><span>{name}</span>
-              {badge[id] > 0 ? <em className="bkcnt" title="아직 남은 필수 항목">{badge[id]}</em> : null}
+              {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요(체크해야 하는 항목도 포함)`}>{badge[id]}</em> : null}
             </button>
           ))}
         </nav>
         <div className="bkstatus">
-          총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {pf ? pf.label : dto.platformId} {dto.trimId}
+          총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {dto.trimId}
           {pf && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> ⚠ 최소 {pf.minPages}쪽</span> : null}
         </div>
         <div className="bkbody" key={tab}>{sideBody}</div>

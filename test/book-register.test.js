@@ -24,16 +24,16 @@ console.log('\n[3] 부크크 점검표');
 const base = { meta: { title: '삼국지', author: '나관중' }, pages: 232, trimId: 'A5', spineMm: 14.36, flaps: false, outputs: [], excluded: [], presentKeys: [] };
 let l = RG.checklist('bookk', base);
 ok(by(l, 'trim').state === 'ok' && by(l, 'pages').state === 'ok', 'A5 · 232쪽 통과');
-ok(by(l, 'price').state === 'todo' && by(l, 'cover').state === 'todo' && by(l, 'interior').state === 'todo', '정가·표지·내지 PDF 미완');
+ok(by(l, 'cover').state === 'todo' && by(l, 'interior').state === 'todo' && !by(l, 'price') && !by(l, 'isbn'), '표지·내지 PDF 미완 · 정가·ISBN 은 점검표에 없다(부크크 업로드 과정에서 정함)');
 ok(by(RG.checklist('bookk', { ...base, trimId: '신국판' }), 'trim').state === 'todo', '신국판은 부크크 4종 밖 → todo');
 ok(by(RG.checklist('bookk', { ...base, pages: 30 }), 'pages').state === 'todo', '50쪽 미만 → todo');
 ok(by(RG.checklist('bookk', { ...base, flaps: true }), 'flaps').state === 'ok' && by(RG.checklist('bookk', { ...base, flaps: true, trimId: 'A4' }), 'flaps').state === 'todo', '날개: 자체 제작 표지는 ok · A4 만 todo(R11 — 예전엔 켜면 todo)');
 l = RG.checklist('bookk', { ...base, meta: { ...base.meta, price: '15,000원' }, coverImagePath: 'a.png', coverCheck: { ok: true, lowDpi: false },
   outputs: [{ kind: 'interior', name: 'a_내지.pdf', bytes: 1e6 }] });
-ok(by(l, 'price').state === 'ok' && by(l, 'cover').state === 'ok' && by(l, 'interior').state === 'ok', '입력하면 ok');
+ok(by(l, 'cover').state === 'ok' && by(l, 'interior').state === 'ok', '입력하면 ok');
 ok(by(RG.checklist('bookk', { ...base, coverImagePath: 'a.png', coverCheck: { ok: true, lowDpi: true, effectiveDpi: 150 } }), 'cover').state === 'todo', '저해상도 표지 → todo');
 ok(by(l, 'account').state === 'manual' && by(RG.checklist('bookk', { ...base, confirmed: { account: true } }), 'account').state === 'ok', '수동 확인 항목은 체크하면 ok');
-ok(by(l, 'isbn').state === 'info', 'ISBN 은 선택(info)');
+
 
 console.log('\n[4] 작가와 점검표');
 const eb = { ...base, meta: { title: '삼국지', author: '나관중' }, presentKeys: ['toc', 'colophon'] };

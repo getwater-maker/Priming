@@ -23,7 +23,7 @@ const st = (l, id) => [...l.required, ...l.optional].find((i) => i.id === id);
   ok(st(RG.checklist('ebook', { ...base, outputs: ep, epubCheck: { ok: false, nFatal: 0, nError: 2, nWarning: 0 } }), 'valid').state === 'todo', '오류 있음 → todo');
   ok(st(RG.checklist('ebook', { ...base, outputs: ep, epubCheck: { missing: true } }), 'valid').state === 'manual', '도구 없는 PC → manual(막지 않는다)');
   ok(![...l.required, ...l.optional].some((i) => /작가와/.test(i.label + i.hint)), '전자책 점검표에 작가와 문구 없음');
-  ok(RG.summary('ebook', { meta: { title: 'T', ebookPrice: '3000' } }).some(([k, v]) => k === '판매가(전자책)' && v === '3000'), '복사값: 전자책 판매가');
+  ok(!RG.summary('ebook', { meta: { title: 'T', ebookPrice: '3000' } }).some(([k]) => /판매가|ISBN/.test(k)) && !['price', 'ebookIsbn'].some((id) => RG.checklist('ebook', base).required.concat(RG.checklist('ebook', base).optional).some((i) => i.id === id)), '가격·ISBN 은 부크크 업로드 과정에서 정하므로 점검표·복사값에 없다');
   ok(RG.LINKS.ebook.every(([, u]) => /bookk\.co\.kr/.test(u)), '링크는 부크크');
   console.log('\n[2] 각주 점검');
   const b = parseBookText('# t\n## 제1회 a\n본문[^1] 또[^2] 또[^9]\n\n[^1]: 하나\n[^1]: 둘\n[^2]: 셋\n[^7]: 안씀\n', 'x');

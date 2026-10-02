@@ -1830,6 +1830,8 @@ function computeOutRoot(scriptPath, preset, mode) {
   const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
   return path.join(outBase, folder);
 }
+// 📁 완성 파일 이름 앞에 종이책/전자책 표기(로이 2026-10-02 「완성파일의 파일명 앞에 [종이책], [전자책] 표기를 반드시」) — 뒤쪽(_내지.pdf·_표지.pdf·.epub)으로 찾는 곳(점검·등록)은 옛 이름 파일도 그대로 찾는다.
+const BOOK_PREFIX = { print: '[종이책] ', ebook: '[전자책] ' };
 // 출판 출력 루트 — <채널 outputFolder>/출판/<원고파일명>/ (내지·표지 PDF + _work 빌드폴더)
 function bookOutRoot(scriptPath, preset, realScriptPath) {
   // 📁 원고가 `<작품>\원고\` 안이면 산출물은 `<작품>\완성\`(작품 폴더 구조 · core/book/work-folder.js) — 채널 outputFolder 를 쓰지 않는다
@@ -5799,6 +5801,39 @@ async function checkExternalScriptChange() {
   }
 }
 setInterval(() => { checkExternalScriptChange().catch(() => {}); }, 1500).unref?.();
+// 📖 출판 원고(.md)가 밖에서 바뀌면 자동으로 다시 읽는다(로이 2026-10-02: 출판 세션이 제1권.md 를 13회로 늘리는 동안 앱은 옛 4회 판을 쥐고 「59쪽·책등 4.85mm」로 표시했다 —
+//   롱폼 감시(checkExternalScriptChange)는 book 을 일부러 빼 뒀고 출판용은 없었다). 파일 크기·수정 시각이 1.4초 동안 안 변하면(쓰는 중이 아니면) 다시 읽고 미리보기를 갱신한다.
+const _bookWatch = { key: '', sig: '', changedAt: 0, changedFirst: 0, running: false };
+let _bookRebuiltAt = 0;   // 앱 자신이 원고를 고치고 다시 읽은 시각(rebuildBook) — 그 변화는 감시가 또 읽지 않는다
+async function checkExternalBookChange() {
+  if (_bookWatch.running) return;
+  await WORLD.run('book', async () => {
+    if (!S.parsed || S.parsed.kind !== 'book') { _bookWatch.key = ''; return; }
+    const paths = bookFilePaths();
+    if (!paths.length) return;
+    let sig = '';
+    try { for (const p of paths) { const st = await fs.promises.stat(p); sig += `${p}:${Math.round(st.mtimeMs)}:${st.size};`; } } catch { return; }   // G: 순간 소실은 다음 틱에
+    const key = paths.join('|');
+    if (_bookWatch.key !== key) { _bookWatch.key = key; _bookWatch.sig = sig; _bookWatch.changedAt = 0; return; }
+    if (sig !== _bookWatch.sig) { _bookWatch.sig = sig; _bookWatch.changedAt = Date.now(); if (!_bookWatch.changedFirst) _bookWatch.changedFirst = Date.now(); return; }
+    if (!_bookWatch.changedAt || Date.now() - _bookWatch.changedAt < 1400) return;
+    const first = _bookWatch.changedFirst; _bookWatch.changedAt = 0; _bookWatch.changedFirst = 0;
+    if (_bookRebuiltAt >= first - 300) return;   // 앱 안에서 고친 것(그 직후 rebuildBook 이 이미 다시 읽었다)
+    if (_bookRegBusy) return;   // 등록 도우미가 도는 중엔 건드리지 않는다
+    _bookWatch.running = true;
+    try {
+      const before = S.parsed;
+      const manual = before.coverImagePath;
+      rebuildBook();
+      attachWorkCover(S.parsed, paths[0], manual);   // 메타 「표지파일」 이 바뀌었을 수 있다
+      const chapters = S.parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
+      log(`🔁 원고(.md)가 밖에서 바뀌어 다시 읽었습니다 — ${path.basename(paths[0])} · 장 ${chapters}개 · 각주 ${Object.keys(S.parsed.footnotes || {}).length}개`);
+      pushDtoUpdate();
+    } catch (e) { log('⚠ 밖에서 바뀐 원고를 다시 읽지 못했습니다 — ' + e.message); }
+    finally { _bookWatch.running = false; }
+  });
+}
+setInterval(() => { checkExternalBookChange().catch(() => {}); }, 1500).unref?.();
 
 // 수동 재실행 — 헤더 「📥 이어받기」 버튼.
 ipcMain.handle('merge-prefill', async () => {
@@ -8033,6 +8068,7 @@ function bookEssentialPath() {
 }
 // 원고 파일들 재파싱(다중=재합침) — 편집·섹션 토글 후 항상 이걸로 갱신.
 function rebuildBook() {
+  _bookRebuiltAt = Date.now();
   const BK = require('./core/parsers/book-parser');
   const paths = bookFilePaths();
   if (!paths.length) return currentDTO();
@@ -8399,7 +8435,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     warnMissingGlyphs(html, '내지 PDF');
     warnLongTitles(bookLayoutOpts(args), '내지 PDF');
     const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');
-    const interiorPdf = path.join(outRoot, `${base}_내지.pdf`);
+    const interiorPdf = path.join(outRoot, `${BOOK_PREFIX.print}${base}_내지.pdf`);
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
     if (!r.success) { log('✗ 내지 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
     S.parsed._lastPages = r.pages || S.parsed._lastPages || 0;
@@ -8432,7 +8468,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
           }
         } catch (_) {}
       }
-      const coverPdf = path.join(outRoot, `${base}_표지.pdf`);
+      const coverPdf = path.join(outRoot, `${BOOK_PREFIX.print}${base}_표지.pdf`);
       coverResult = await PB.buildCoverPdf({
         imagePath: coverHasImg ? S.parsed.coverImagePath : null,
         spread, outPdf: coverPdf, workDir, log,
@@ -8451,7 +8487,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     S.timings.make = Math.round((Date.now() - t0) / 1000);
     const coverFailed = coverResult && !coverResult.success;
     log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : (coverFailed ? ' (⚠ 표지 실패 — 로그 확인)' : '')} (${S.timings.make}초) → ${outRoot}`);
-    try { shell.openPath(outRoot); } catch {}
+    if (!args.noOpen) { try { shell.openPath(outRoot); } catch {} }   // 「한 번에 만들기」는 끝에 한 번만 연다(noOpen)
     storeActive();
     return { dto: currentDTO(), pages: S.parsed._lastPages, interiorPdf, coverPdf: coverResult && coverResult.success ? coverResult.pdfPath : null, coverError: coverFailed ? coverResult.error : null };
   } catch (e) {
@@ -8490,7 +8526,7 @@ async function buildEbookPdf(args, outRoot, t0) {
     edition: 'ebook', ebookCoverPath: coverImg,
   });
   const base = _safeFolder(meta.title || S.parsed.fileTitle || '책');
-  const outPdf = path.join(outRoot, `${base}_전자책.pdf`);
+  const outPdf = path.join(outRoot, `${BOOK_PREFIX.ebook}${base}_전자책.pdf`);
   const r = await PB.buildInteriorPdf({ html, outPdf, workDir, log });
   if (!r.success) { log('✗ 전자책 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
   S.timings.make = Math.round((Date.now() - t0) / 1000);
@@ -8727,7 +8763,7 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
     const pagesKnown = (S.parsed._lastPages || 0) > 0;
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
     const r = await buildEpub(S.parsed, {
-      outPath: path.join(outRoot, `${base}.epub`),
+      outPath: path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
       coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
       // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
@@ -8737,7 +8773,7 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
       epubVersion: args.epubVersion, embedFonts: args.embedFonts,
       spread, log,
     });
-    if (r.success) { try { shell.openPath(outRoot); } catch {} }
+    if (r.success && !args.noOpen) { try { shell.openPath(outRoot); } catch {} }
     return { dto: currentDTO(), epubPath: r.epubPath };
   } catch (e) {
     log('✗ ePub 오류: ' + e.message);

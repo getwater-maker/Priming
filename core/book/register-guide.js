@@ -79,14 +79,11 @@ function bookkChecklist(ctx) {
         : (cover && !cover.ok ? (cover.flapHint ? `이 표지 파일은 날개 ${cover.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${ctx.flaps ? '있음' : '없음'})` : '치수 불일치 — 쪽수가 바뀌면 책등도 바뀝니다. 표지 탭의 치수로 다시 만드세요')
           : (cover && cover.lowDpi ? `해상도 낮음(실효 ${cover.effectiveDpi}dpi) — 반려 사유 1위` : '')), { tab: 'cover' }),
     flapsItem(ctx),
-    item('price', '정가', has(m.price) ? 'ok' : 'todo', '판권 › 정가 — 부크크 화면의 정가·인세 계산기로 권당 실수령액을 확인하세요', { tab: 'colophon' }),
     manual('account', '부크크 회원가입·로그인(직접)', '계정 생성·로그인·최종 「제출」은 사람이 합니다', c),
     manual('nodup', '같은 책이 판매용으로 이미 등록돼 있지 않음', '판매용 도서는 중복 등록 불가 · 개정판은 초판보다 20쪽 이상 늘면 6개월 뒤, 미만이면 1년 뒤', c),
     manual('final', '편집 완성본임을 확인', '승인 뒤에는 수정 제약이 큽니다 — 완성된 파일로 제출(부크크 권고)', c),
   ];
   const optional = [
-    item('isbn', 'ISBN', has(m.isbn) ? 'ok' : 'info',
-      has(m.isbn) ? m.isbn : '없으면 부크크에서만 판매(외부유통 불가). ISBN 발급 시 국립중앙도서관 납본 2부 · 납본·ISBN 처리는 발급 출판사만 가능', { tab: 'colophon', optional: true }),
     item('coverMaterial', '표지 재질', has(m.coverMaterial) ? 'ok' : 'info',
       has(m.coverMaterial) ? m.coverMaterial : `미지정 — 기본 ${DEFAULT_COVER_MATERIAL}. 글자 있는 표지는 스노우 권장(재질 변경은 매주 금요일 무료)`, { tab: 'cover' }),
     item('printColor', '내지 색(흑백/컬러)', has(m.printColor) ? 'ok' : 'info',
@@ -122,13 +119,11 @@ function ebookChecklist(ctx) {
       !chk ? '아래 「✔ ePub 검증」을 누르세요 — W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다'
         : chk.missing ? '이 PC 에는 EPUBCheck 도구가 없어 검증을 못 했습니다(메인 PC 에서 검증됨)' : chk.error ? `검증 실패: ${chk.error}`
         : (chk.ok ? `EPUB ${chk.epubVersion} 규격 통과 — 치명 ${chk.nFatal} · 오류 ${chk.nError} · 경고 ${chk.nWarning} (EPUBCheck ${chk.version})` : `오류 ${chk.nFatal + chk.nError}개 · 경고 ${chk.nWarning}개 — 아래 목록 확인`)),
-    item('price', '전자책 판매가', has(m.ebookPrice) ? 'ok' : 'todo', '판권 › 전자책 가격 — 부크크 화면의 인세 계산기로 확인(전자책 외부유통 예: 저자 60%)', { tab: 'colophon' }),
     manual('account', '부크크 로그인(직접)', '계정·로그인·최종 제출은 사람이 합니다', c),
     manual('nodup', '같은 책이 이미 등록돼 있지 않음', '종이책과 전자책을 각각 등록(같은 표지·제목)', c),
     manual('final', '편집 완성본임을 확인', '승인 뒤에는 수정 제약이 큽니다', c),
   ];
   const optional = [
-    item('ebookIsbn', '전자책 ISBN', has(m.ebookIsbn) ? 'ok' : 'info', has(m.ebookIsbn) ? m.ebookIsbn : '종이책 ISBN 과 별개 — 부크크 등록 화면에서 발급/입력(🔒 확인 필요)', { tab: 'colophon', optional: true }),
     item('category', '카테고리', has(m.category) ? 'ok' : 'info', has(m.category) ? m.category : '등록 화면 입력 항목(목록은 로그인 뒤 확인)', { tab: 'info' }),
     item('keywords', '키워드', has(m.keywords) ? 'ok' : 'info', has(m.keywords) ? m.keywords : '등록 화면 입력 항목', { tab: 'info' }),
     item('tagline', '한줄 소개', has(m.tagline) ? 'ok' : 'info', has(m.tagline) ? m.tagline : '등록 화면 입력 항목', { tab: 'info' }),
@@ -195,7 +190,7 @@ function summary(platform, ctx) {
   const title = m.title || ctx.fileTitle || '';
   if (platform === 'ebook') {
     return [
-      ['책 제목', title], ['저자', m.author || ''], ['출판사', m.publisher || ''], ['판매가(전자책)', m.ebookPrice || ''], ['전자책 ISBN', m.ebookIsbn || ''],
+      ['책 제목', title], ['저자', m.author || ''], ['출판사', m.publisher || ''],
       ['카테고리', m.category || ''], ['키워드', m.keywords || ''], ['한줄 소개', m.tagline || ''], ['AI 사용', m.aiDisclosure || ''],
     ];
   }
@@ -211,7 +206,7 @@ function summary(platform, ctx) {
     ['책 제목', title], ['저자', m.author || ''], ['판형', ctx.trimId || ''], ['내지 색', m.printColor || '흑백'],
     ['내지 용지', ctx.paperId || ''], ['쪽수', ctx.pages ? String(ctx.pages) : ''], ['표지 재질', m.coverMaterial || DEFAULT_COVER_MATERIAL],
     ['표지 날개', ctx.flaps ? '있음' : '없음'], ['책등 두께', sp.spineMm ? sp.spineMm + ' mm' : ''], ['표지 스프레드', wide],
-    ['정가', m.price || ''], ['ISBN', m.isbn || ''], ['카테고리', m.category || ''], ['키워드', m.keywords || ''], ['한줄 소개', m.tagline || ''],
+    ['카테고리', m.category || ''], ['키워드', m.keywords || ''], ['한줄 소개', m.tagline || ''],
   ];
 }
 

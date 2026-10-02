@@ -145,7 +145,7 @@ ${para}
       await win.waitForSelector(`[data-testid=bk-reg-${tabId}]`, { timeout: 5000 });
       const nChk = await win.locator(`[data-testid=bk-reg-${tabId}] .bkchk`).count();
       if (nChk < 10) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
-      if (await win.locator(`[data-testid=bk-reg-${tabId}] .bksum-row`).count() < 8) throw new Error(`${label} 복사값 부족`);
+      if (await win.locator(`[data-testid=bk-reg-${tabId}] .bksum-row`).count() < (tabId === 'ebook' ? 6 : 8)) throw new Error(`${label} 복사값 부족`);
       if (await win.locator(`[data-testid=${btn}]`).count() !== 1) throw new Error(`${label} 빌드 버튼 없음`);
       const autoBtn = await win.locator(`[data-testid=bk-register-${tabId}]`).count();
       if (tabId === 'bookk' ? autoBtn !== 1 : autoBtn !== 0) throw new Error(`${label} 자동 입력 버튼 개수 ${autoBtn} (부크크 종이책만 있고 전자책은 첫 권 확인 뒤 추가)`);

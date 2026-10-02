@@ -273,7 +273,8 @@ ok(/section\.colophon \{ height: var\(--content-h\); display: flex; flex-directi
 ok(/@page display:left \{/.test(cpHtml) && /@page display:right \{/.test(cpHtml), '@page display 에 :left/:right 동반');
 // (11) 배선 — 조판 패널·main.js 가 판권 배치를 실제로 넘긴다
 ok(/colophonAlign: l\.colophonAlign/.test(mainSrc), 'main.js layoutOpts 에 colophonAlign');
-ok(/colophonAlign: 'top'/.test(uiSrc), '조판 기본값 = top');
+ok(/colophonAlign: 'bottom'/.test(uiSrc) && !/colophonAlign: 'top',/.test(uiSrc), '조판 기본값 = 아래(bottom — 로이 2026-10-02)');
+ok(!/margin-top: 44%/.test(HB.buildBookHtml(cpBook, { baseDir: 'D:/x' }).html) && /justify-content: flex-end/.test(HB.buildBookHtml(cpBook, { baseDir: 'D:/x' }).html), '판권 기본 = 판면 하단(flex-end)');
 ok(/L\('colophonAlign'/.test(uiSrc), '조판 패널에 판권 배치 select');
 ok(/\['editor', '편집인'[,\]]/.test(uiSrc) && /\['blog', '블로그'\]/.test(uiSrc), '책 정보 폼에 편집인·블로그');
 ok(/editor: '편집인'/.test(mainSrc) && /facebook: '페이스북'/.test(mainSrc), 'main.js 메타 라벨에 편집인·페이스북');

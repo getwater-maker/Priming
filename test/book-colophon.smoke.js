@@ -36,10 +36,11 @@ async function build(name, text) {
 }
 const isCp = (p) => /이 책의 내용 중 전부 또는 일부를/.test(p.text);
 (async () => {
-  const T = await build('top_back', md(''));
+  const T = await build('top_back', md('> 판권정렬: 상단\n'));
+  const DD = await build('default_back', md(''));
   const BB = await build('bottom_back', md('> 판권정렬: 하단\n'));
   const FB = await build('bottom_front', md('> 판권위치: 앞\n> 판권정렬: 하단\n'));
-  const FT = await build('top_front', md('> 판권위치: 앞\n'));
+  const FT = await build('top_front', md('> 판권위치: 앞\n> 판권정렬: 상단\n'));
   const cp = (P) => P.find(isCp);
   console.log('\n[1] 위치');
   ok(cp(T).n === T.length, `뒤(기본): 판권이 마지막 쪽(p${cp(T).n}/${T.length})`);
@@ -47,7 +48,8 @@ const isCp = (p) => /이 책의 내용 중 전부 또는 일부를/.test(p.text)
   ok(/삼국지연의 완역 1/.test(FB[2].text) && cp(FB).n === 4, '앞: 속표지(p3) 뒷면 p4');
   console.log('\n[2] 정렬(판면 아래끝 = 쪽 높이 210 − 아래 여백 15 = 195mm)');
   const lastY = (p) => p.lines[p.lines.length - 1].y1;
-  ok(cp(T).lines[0].y0 < 25, `상단(기본): 첫 줄이 판면 위(${cp(T).lines[0].y0.toFixed(0)}mm)`);
+  ok(cp(T).lines[0].y0 < 25, `상단: 첫 줄이 판면 위(${cp(T).lines[0].y0.toFixed(0)}mm)`);
+  ok(lastY(cp(DD)) > 188 && lastY(cp(DD)) <= 196, `기본(메타 없음) = 하단: 마지막 줄 ${lastY(cp(DD)).toFixed(0)}mm`);
   ok(lastY(cp(BB)) > 188 && lastY(cp(BB)) <= 196, `하단(뒤): 마지막 줄 ${lastY(cp(BB)).toFixed(0)}mm ≈ 판면 아래끝 195mm`);
   ok(lastY(cp(FB)) > 188 && lastY(cp(FB)) <= 196, `하단(앞): 마지막 줄 ${lastY(cp(FB)).toFixed(0)}mm ≈ 195mm`);
   ok(lastY(cp(T)) < 150, `판별: 상단 정렬의 마지막 줄은 한참 위(${lastY(cp(T)).toFixed(0)}mm)`);

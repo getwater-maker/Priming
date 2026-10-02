@@ -17,7 +17,7 @@ ok(r.ready && r.summary.error === 0 && r.summary.warn === 0, `모든 것이 갖�
 r = preflight({ ...good, pages: 0 });
 ok(by(r, 'pages').state === 'warn' && /쪽수가 확정/.test(by(r, 'pages').detail), '쪽수 미확정 → 확인 + 안내');
 ok(by(preflight({ ...good, pages: 30 }), 'pages').state === 'error', '30쪽 → 최소 50쪽 error');
-ok(by(preflight({ ...good, coverImagePath: 'x/표지_시안.png' }), 'cover').state === 'error', '「시안」 표지 → error');
+ok(by(preflight({ ...good, coverImagePath: 'x/표지_시안.png' }), 'cover').state === 'warn' && !by(preflight({ ...good, meta: { title: 'T' }, coverImagePath: 'x/표지.png' }), 'price'), '「시안」 표지 원본 → 확인(warn — 업로드는 앱이 만든 표지 PDF) · 가격·ISBN 은 점검하지 않는다');
 ok(by(preflight({ ...good, coverCheck: { ...good.coverCheck, exact: false, mmW: 514.1 } }), 'cover').state === 'warn' && /다시 만드세요/.test(by(preflight({ ...good, coverCheck: { ...good.coverCheck, exact: false, mmW: 514.1 } }), 'cover').detail), '폭 ±1mm 밖(비율로만 통과) → 책등 다시 안내');
 ok(by(preflight({ ...good, coverCheck: { ok: false, flapHint: 'file-has-flaps', expected: {}, } }), 'cover').state === 'error', '날개 힌트 → error');
 ok(by(preflight({ ...good, coverImagePath: null, coverCheck: null }), 'cover').state === 'warn', '표지 없음 → 확인');
