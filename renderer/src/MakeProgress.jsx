@@ -44,7 +44,7 @@ function Row({ icon, label, st, c, unit, sub, ended }) {
 
 const gList = (a) => (a && a.length ? a.slice(0, 8).map((n) => 'G' + n).join(', ') + (a.length > 8 ? ` 외 ${a.length - 8}` : '') : '');
 
-export default function MakeProgress({ prog, onAbort, onClose, right = 16 }) {
+export default function MakeProgress({ prog, onAbort, onClose }) {
   const [mini, setMini] = useState(false);
   if (!prog) return null;
   const live = prog.phase === 'running';
@@ -59,7 +59,7 @@ export default function MakeProgress({ prog, onAbort, onClose, right = 16 }) {
     : '⚡ 만드는 중';
 
   const box = {
-    position: 'fixed', right, bottom: 16, zIndex: 61,
+    position: 'fixed', right: 16, bottom: 16, zIndex: 61,   // 🗂 MP4(62)·업로드(63) 팝업과 한 자리에 겹친다(v0.6.46)
     background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
     boxShadow: '0 6px 24px rgba(0,0,0,.14)', fontSize: 13, color: 'var(--base)',
   };

@@ -33,7 +33,7 @@ export default function YtProgress({ prog, onAbort, onClose, openUrl }) {
 
   return (
     <div data-testid="yt-progress" style={{
-      position: 'fixed', right: 420, bottom: 16, width: 360, zIndex: 61,
+      position: 'fixed', right: 16, bottom: 16, width: 360, zIndex: 63,   // 🗂 진행 팝업 셋은 한 자리에 겹친다 — 뒤 단계(업로드)가 맨 위(v0.6.46)
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
       boxShadow: '0 6px 24px rgba(0,0,0,.14)', padding: '12px 14px', fontSize: 13, color: 'var(--base)',
     }}>

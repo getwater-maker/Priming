@@ -319,6 +319,8 @@ const VD_SAMPLE_TEXT = {
 
 // 헤더 버전 표시 — 0.5.103 → 5.10 (앞 「0.」 생략 · 소수 둘째 자리까지 · 로이 2026-10-01). 전체 버전은 마우스를 올리면.
 const shortVer = (v) => { const m = /^0\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? m[1] + '.' + String(m[2]).slice(0, 2) : String(v || ''); };
+const PROG_AUTOCLOSE_MS = 3000;   // 🗂 진행 팝업 자동 닫기(끝난 뒤)
+
 export default function App() {
   const [mode, setModeRaw] = useState('longform'); // 'longform'(주 사용) | 'book'(출판)
   // 🌐 화면이 보는 모드를 ref 로도 든다 — setMode 는 비동기라, 바로 뒤의 setDto 가 「지금 어느 모드인가」를 정확히 알아야 한다.
@@ -444,7 +446,16 @@ export default function App() {
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
-  const [mp4Prog, setMp4Prog] = useState(null);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
+  const [mp4Prog, setMp4Prog] = useState(null);
+  // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
+  //   ✗ 실패는 남긴다(이유를 읽어야 한다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
+  useEffect(() => {
+    const ends = ['done', 'aborted'];
+    const ts = [[makeProg, setMakeProg], [mp4Prog, setMp4Prog], [ytProg, setYtProg]]
+      .filter(([p]) => p && ends.includes(p.phase))
+      .map(([p, set]) => setTimeout(() => set((cur) => (cur === p ? null : cur)), PROG_AUTOCLOSE_MS));
+    return () => ts.forEach(clearTimeout);
+  }, [makeProg, mp4Prog, ytProg]);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
   const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
@@ -5086,7 +5097,6 @@ export default function App() {
       )}
       {makeProg && mode === 'longform' && (
         <MakeProgress prog={makeProg}
-          right={mp4Prog ? 16 + 390 + 12 : 16}
           onAbort={() => { abort(); }}
           onClose={() => setMakeProg(null)} />
       )}

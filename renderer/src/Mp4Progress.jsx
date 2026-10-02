@@ -63,7 +63,7 @@ export default function Mp4Progress({ prog, onAbort, onClose }) {
 
   return (
     <div data-testid="mp4-progress" style={{
-      position: 'fixed', right: 16, bottom: 16, width: 390, zIndex: 61,
+      position: 'fixed', right: 16, bottom: 16, width: 390, zIndex: 62,   // 🗂 만들기(61) 위 · 업로드(63) 아래
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
       boxShadow: '0 6px 24px rgba(0,0,0,.14)', padding: '12px 14px', fontSize: 13, color: 'var(--base)',
     }}>

@@ -128,6 +128,9 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(!!sentM && sentM[1] === sentM[2] && Number(sentM[2]) >= 3, '📊 문장 n/n 문장: ' + (mkp && mkp.sent));
     ok(!!mkp && /0\s*\/\s*3\s*장/.test(mkp.image), '📊 그림 0/3 장(무음 모드는 그림을 안 만든다): ' + (mkp && mkp.image));
     ok(!!mkp && /건너뜀/.test(mkp.video) && /비디오 없음/.test(mkp.video), '📊 영상 = 건너뜀 · 비디오 없음: ' + (mkp && mkp.video));
+    // 🗂 끝나면 저절로 닫힌다(v0.6.46 · 3초) — 판정력: 닫히지 않으면 8초 대기가 시간 초과로 실패한다.
+    const closed = await win.waitForSelector('[data-testid="make-progress"]', { state: 'detached', timeout: 8000 }).then(() => true, () => false);
+    ok(closed, '🗂 완료된 진행 팝업은 저절로 닫힌다');
 
     // ④ 로그창에 실패 흔적이 없어야 한다 (핸들러가 삼킨 예외도 잡는다)
     const logText = await win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
