@@ -334,7 +334,7 @@ async function buildEpub(book, a) {
   if (!coverSrc && a.coverImagePath && a.spread && fs.existsSync(a.coverImagePath)) {
     const tdir = a.tmpDir || path.dirname(a.outPath);
     try { fs.mkdirSync(tdir, { recursive: true }); } catch (_) {}
-    const tmp = path.join(tdir, '_ebook-cover.jpg');
+    const tmp = path.join(tdir, a.coverTmpName || '_ebook-cover.jpg');   // 권마다 다른 이름(완성 폴더에 여러 권 — 같은 이름이면 다른 권 표지가 남는다)
     coverSrc = await cropFrontCover(a.coverImagePath, a.spread, tmp);
     if (coverSrc) log('🖼 인쇄 표지에서 앞표지 자동 크롭 → 전자책 표지');
   }

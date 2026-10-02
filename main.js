@@ -8772,7 +8772,8 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
     const r = await buildEpub(S.parsed, {
       outPath: path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
-      tmpDir: WF.tmpDir(outRoot, '', 'epub'),   // 전자책 표지 조각(_ebook-cover.jpg) — 완성 폴더면 _작업/epub
+      tmpDir: WF.tmpDir(outRoot, '', 'epub'),   // 전자책 표지 조각(_ebook-cover_<권>.jpg) — 완성 폴더면 _작업/epub
+      coverTmpName: `_ebook-cover_${base}.jpg`,
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
       coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
       // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
@@ -9023,13 +9024,16 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
     const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
     const files = fs.existsSync(root) ? fs.readdirSync(root) : [];
     const pick = (suf) => { const f = files.filter((x) => x.endsWith(suf)).map((x) => path.join(root, x)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]; return f || ''; };
+    // 📚 이 권의 파일만 고른다 — 완성 폴더에는 제1~7권 파일이 함께 있어, 접미사로 「가장 최근 것」을 고르면 다른 권의 내지·ePub·표지를 올릴 수 있다(로이 2026-10-02 폴더 화면에서 발견)
+    const ownBase = bookFileBase();
+    const own = (kind, suffix) => { const names = [`${BOOK_PREFIX[kind]}${ownBase}${suffix}`, `${ownBase}${suffix}`]; const hit = names.map((n) => path.join(root, n)).find((q) => fs.existsSync(q)); return hit || ''; };
     let plan;
     if (platform === 'jakkawa') {
       plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
     } else {
       // 📄 등록 쪽수 = **올릴 내지 PDF 의 실제 쪽수**(부크크 검수: 등록 쪽수 ≠ PDF 쪽수면 「내지 페이지수 비정상」 — 미리보기 쪽수 293 ≠ PDF 255 였다 · 로이 2026-10-02). PDF 가 없으면 미리보기 쪽수.
       let regPages = S.parsed._lastPages || 0;
-      try { const n = require('./core/book/pdf-builder').pdfPageCount(pick('_내지.pdf')); if (n > 0) { if (n !== regPages) log(`📄 내지 PDF ${n}쪽 — 미리보기/기록 쪽수(${regPages})와 달라 PDF 쪽수로 등록합니다`); regPages = n; } } catch (_) {}
+      try { const n = require('./core/book/pdf-builder').pdfPageCount(own('print', '_내지.pdf')); if (n > 0) { if (n !== regPages) log(`📄 내지 PDF ${n}쪽 — 미리보기/기록 쪽수(${regPages})와 달라 PDF 쪽수로 등록합니다`); regPages = n; } } catch (_) {}
       const spec = bookSpec(S.parsed.meta || {}, regPages);
       // 📋 등록정보 파일(기준/등록/<권>.등록정보.md · 원고 메타 `> 등록정보:`) — 있으면 원고 메타보다 우선(2·5단계 입력값). 캡처는 <출력>/_등록캡처/
       let registerInfo = null;
@@ -9045,17 +9049,17 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p);
         let cover = '';
         if (meta.ebookCover) { const p = path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(S.scriptPath ? path.dirname(S.scriptPath) : root, meta.ebookCover); if (okCover(p)) cover = p; }
-        if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), '_ebook-cover.jpg'); if (okCover(t)) cover = t; }
+        if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), `_ebook-cover_${ownBase}.jpg`); if (okCover(t)) cover = t; }   // 이 권 것만(옛 공용 _ebook-cover.jpg 는 다른 권 표지일 수 있어 쓰지 않는다)
         // 💾 종이책을 부크크에 신청할 때 기록해 둔 최종정가(없으면 원고 `> 정가:`) → 전자책 정가 = 그 70% 내림
         const RP = require('./core/book/register-price');
         const rec = RP.loadPaperPrice(root, bookFileBase());
         if (rec) log(`💾 종이책 신청 때 기록한 최종정가 ${rec.price.toLocaleString('ko-KR')}원(${rec.at.slice(0, 10)})을 전자책 정가 계산에 씁니다`);
         else log('ℹ 종이책 신청 기록이 없어 원고 정가로 계산합니다 — 종이책을 부크크에 먼저 신청하면(🤖 자동 입력) 화면의 최종정가를 기록합니다');
-        return RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+        return RF.ebookPlan(S.parsed, { epub: own('ebook', '.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
       };
       if (platform === 'bookkEbook') plan = buildEbookPlan();
       else {
-        plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: regPages, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+        plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: regPages, interiorPdf: own('print', '_내지.pdf'), coverPdf: own('print', '_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
         // 💾 4단계에서 읽은 최종정가를 저장(전자책 정가의 근거)
         const _key = bookFileBase(); const _title = (registerInfo && registerInfo.title) || (S.parsed.meta || {}).title || '';
         plan.onPrice = (n) => { try { const v = require('./core/book/register-price').savePaperPrice(root, _key, n, _title); if (v) log(`💾 종이책 최종정가 ${v.toLocaleString('ko-KR')}원 기록 — 전자책 정가(70%)의 근거로 씁니다`); } catch (e) { log('⚠ 종이책 정가 기록 실패: ' + e.message); } };

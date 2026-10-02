@@ -232,6 +232,12 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     ok(/if \(r1\.failed\.length\)[\s\S]*?return \{ ok: false/.test(body) && body.indexOf('r1.failed.length') < body.indexOf('epage = await ctx.newPage()'), '종이책에 실패가 있으면 전자책 탭을 열지 않고 멈춘다');
     ok(/epage = await ctx\.newPage\(\)/.test(body) && !/page\.close|epage\.goto\(SITES\.bookk\.start/.test(body), '전자책은 같은 크롬의 새 탭 — 종이책 탭은 닫거나 덮지 않는다(로이가 종이책 도서제출을 직접)'); }
   const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  // 📚 완성 폴더에는 여러 권이 함께 있다 — 등록 파일은 「가장 최근」이 아니라 **이 권 이름**으로 고른다(2026-10-02 폴더 화면에서 발견)
+  { const i0 = mainSrc.indexOf("ipcMain.handle('book-register-run'"); const reg = mainSrc.slice(i0, mainSrc.indexOf("ipcMain.handle('book-reveal-file'", i0));
+    const bookkPart = reg.slice(reg.indexOf("platform === 'jakkawa') {") + 30);
+    ok(/const own = \(kind, suffix\)/.test(reg) && /own\('ebook', '\.epub'\)/.test(reg) && /own\('print', '_내지\.pdf'\)/.test(reg) && /own\('print', '_표지\.pdf'\)/.test(reg), '이 권 이름으로 ePub·내지·표지를 고른다(own)');
+    ok(!/pick\('\.epub'\)|pick\('_내지\.pdf'\)|pick\('_표지\.pdf'\)/.test(bookkPart.slice(bookkPart.indexOf('} else {'))), '부크크 입력 경로에 「접미사로 가장 최근 파일」 선택(pick)이 남아 있지 않다');
+    ok(/_ebook-cover_\$\{ownBase\}\.jpg/.test(reg) && /coverTmpName: `_ebook-cover_\$\{base\}\.jpg`/.test(mainSrc), 'ePub 표지 조각도 권마다 다른 이름(_ebook-cover_<권>.jpg)'); }
   ok(/plan\.buildEbookPlan = buildEbookPlan/.test(mainSrc) && /RB\.runRegisterBoth/.test(mainSrc) && /bookk-both/.test(mainSrc), 'main: bookk-both → 종이책 plan 에 전자책 계획 만들기를 달아 runRegisterBoth 로');
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${fail ? '❌' : '✅'} book-register-ebook — ${pass} 통과 / ${fail} 실패`);
