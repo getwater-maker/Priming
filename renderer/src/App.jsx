@@ -825,6 +825,18 @@ export default function App() {
     try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 이 대본의 설정을 현재 헤더값으로 캡처
     setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가`);
   }
+  // 🎬 영상 범위 「모두 적용」(v0.6.48) — 확인 후 롱폼 큐의 모든 대본에 지금 범위를 넣는다(평소엔 대본마다 따로).
+  async function applyRangeToAll() {
+    const f = parseInt(vidFrom, 10), t = parseInt(vidTo, 10);
+    if (!(f >= 1) || !(t >= 1)) { setStatus('범위를 숫자로 넣으세요'); return; }
+    const n = (queue && queue.longform && queue.longform.items.length) || 0;
+    if (!uiConfirm(`작업큐의 대본 ${n}개 모두 영상 범위를 G${Math.min(f, t)}~G${Math.max(f, t)} 로 바꿀까요?\n(대본마다 따로 정해 둔 범위는 덮어씁니다)`)) return;
+    try {
+      const r = await api.applyRangeAll(f, t);
+      if (r && r.queue) setQueue(r.queue);
+      setStatus(`🎬 영상 범위 G${r.fromNum}~G${r.toNum} — 대본 ${r.count}개 모두 적용`);
+    } catch (e) { logline('범위 모두 적용 오류: ' + e.message); }
+  }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   async function selectQueueItem(id) {
     try {
@@ -3902,6 +3914,8 @@ export default function App() {
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
                   <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
+                  <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
+                    title="이 범위를 작업큐의 모든 대본에 넣습니다 (평소엔 대본마다 자기 범위 — 누를 때만 전체에 적용)" onClick={applyRangeToAll}><span className="rb-t">모두 적용</span></button>
                   <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}

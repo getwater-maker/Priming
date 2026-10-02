@@ -6495,6 +6495,24 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
   return { dto: S.parsed ? currentDTO() : null, queue: queueDTO() };
 });
 // 활성 항목의 생성 설정 저장(대본별 개별). 렌더러 헤더 변경 시 디바운스로 전송.
+// 🎬 「모든 대본에 적용」(v0.6.48 · 로이 2026-10-02) — 헤더의 영상 범위를 **롱폼 큐의 모든 대본**에 넣는다.
+//   평소엔 범위가 대본마다 따로다(_itemRange · 헤더 범위가 전 대본을 덮어 47개 영상 비용 사고) — 그래서 **누를 때만** 한다.
+//   이미 완료(done)된 대본도 넣는다(다시 만들 때 쓰이므로) · 다른 설정(채널 등)은 건드리지 않는다.
+function applyRangeAll(items, fromNum, toNum) {
+  const f = parseInt(fromNum, 10), t = parseInt(toNum, 10);
+  if (!(f >= 1) || !(t >= 1)) throw new Error('범위는 1 이상의 숫자여야 합니다.');
+  const a = Math.min(f, t), b = Math.max(f, t);
+  let n = 0;
+  for (const it of items || []) { if (!it) continue; it.settings = { ...(it.settings || {}), vidFrom: a, vidTo: b }; n++; }
+  return { fromNum: a, toNum: b, count: n };
+}
+ipcMain.handle('apply-range-all', (_e, args = {}) => {
+  const q = S.modes.longform;
+  const r = applyRangeAll(q && q.items, args.fromNum, args.toNum);
+  scheduleAutoSave(); writeWorkspace();
+  log(`🎬 영상 범위 G${r.fromNum}~G${r.toNum} 를 롱폼 큐의 대본 ${r.count}개 모두에 넣었습니다`);
+  return { ...r, queue: queueDTO() };
+});
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
   const it = activeItem();
   if (it) {
