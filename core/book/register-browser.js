@@ -230,6 +230,11 @@ async function _priceSel(page) {
   return ok === true ? '[data-priming-price="1"]' : PRICE_SEL_FALLBACK;
 }
 
+/** 5단계(최종확인) 화면 대기 — 「서점소개정보」(종이책) 와 「서점 소개정보」(전자책 — 띄어쓰기가 다르다 · 로이 2026-10-02 실행에서 5단계를 못 찾은 원인)를 모두 받는다. 도서소개 입력칸이 보여도 된다 */
+async function _waitFinalScreen(page) {
+  await page.waitForFunction(() => { const t = document.body ? document.body.innerText : ''; return /서점\s*소개\s*정보/.test(t) || (/도서\s*소개/.test(t) && /도서\s*목차/.test(t)); }, null, { timeout: 30000 });
+}
+
 /** 파일 업로드 끝 대기 — 「업로드 파일 없음」이 사라지고 **「업로드중…」도 사라질 때**까지(최대 5분). 파일 이름이 먼저 보이고 업로드는 계속되는 구간에 다음 단계를 누르면 「원고파일을 올리지 않으면 진행할 수 없습니다」 창이 뜬다(로이 2026-10-02 전자책 2단계). */
 async function _waitUploaded(page) {
   await page.waitForFunction(() => { const t = document.body.innerText; return !/업로드 파일 없음/.test(t) && !/업로드\s*중/.test(t); }, null, { timeout: 5 * 60 * 1000 });
@@ -416,7 +421,7 @@ async function fillBookkFinal(page, plan, log) {
   const s5 = plan.step5 || {};
   const done = []; const failed = [];
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
-  await page.waitForSelector('text=서점소개정보', { timeout: 30000 }).catch(async () => { await _dump(page, log, '부크크 5단계'); throw new Error('5단계(최종확인) 화면을 찾지 못했습니다'); });
+  await _waitFinalScreen(page).catch(async () => { await _dump(page, log, '부크크 5단계'); throw new Error('5단계(최종확인) 화면을 찾지 못했습니다'); });
   const text = async (label, key, value) => { if (value) await step(label, async () => { const t = page.locator(`textarea[placeholder*="${key}"]`).first(); await t.fill(value); await t.blur(); }); };
   await text('도서소개', '도서의 설명', s5.intro);
   await text('도서목차', '색인', s5.toc);
@@ -477,7 +482,7 @@ async function runBookkCoverOnly(o) {
   let page = null, at = 0;
   for (const p of _ctx.pages()) {
     const t = await p.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
-    const n = /표지 주의사항/.test(t) ? 3 : /정가설정/.test(t) ? 4 : /서점소개정보/.test(t) ? 5 : 0;
+    const n = /표지 주의사항/.test(t) ? 3 : /정가\s*설정/.test(t) ? 4 : /서점\s*소개\s*정보/.test(t) ? 5 : 0;
     if (n && (!page || n < at)) { page = p; at = n; }
   }
   if (!page) throw new Error('등록용 크롬에 3~5단계(표지디자인·가격정책·최종확인) 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');
@@ -664,7 +669,7 @@ async function runBookkEbookResume(o) {
   for (const p of _ctx.pages()) {
     if (!/electronicBook/.test(p.url())) continue;
     const t = await p.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
-    const n = /서점소개정보/.test(t) ? 5 : /정가설정/.test(t) ? 4 : /구매한\s*템플릿/.test(t) ? 3 : /원고\s*업로드/.test(t) ? 2 : /도서\s*제작\s*목적/.test(t) ? 1 : 0;
+    const n = /서점\s*소개\s*정보/.test(t) ? 5 : /정가\s*설정/.test(t) ? 4 : /구매한\s*템플릿/.test(t) ? 3 : /원고\s*업로드/.test(t) ? 2 : /도서\s*제작\s*목적/.test(t) ? 1 : 0;
     if (n && (!page || n < at)) { page = p; at = n; }
   }
   if (!page) throw new Error('등록용 크롬에 전자책(새전자책) 1~5단계 화면이 열려 있지 않습니다 — 그 화면을 연 뒤 다시 누르세요');

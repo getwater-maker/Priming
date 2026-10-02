@@ -73,6 +73,31 @@ const HTML = (opts = {}) => `<!doctype html><html><body>
   o = await run({}, { price: 0, external: true });
   ok(o.r.failed.includes('정가 미정') && o.state.price === '1000' && o.state.checked === false && o.alerts.length === 0, '가격 1000 그대로 · 체크 안 함 · 알림 없음');
 
+  console.log('\n[6] 5단계(최종확인) — 전자책 화면은 「서점 소개정보」(띄어쓰기) · 소개·목차·저자경력·AI·저작권 입력');
+  {
+    const RF = require('../core/book/register-fill');
+    const { parseBookText } = require('../core/parsers/book-parser');
+    const H5 = `<!doctype html><body><h2>서점 소개정보</h2>
+      <h4>도서소개</h4><textarea placeholder="도서의 설명이 필요합니다. 이모지, 특수문자는 가급적으로 사용하지 않는 것이 좋습니다. (최대 3000자)"></textarea>
+      <h4>도서목차</h4><textarea placeholder="도서의 색인 페이지를 의미합니다. 이모지, 특수문자는 가급적으로 사용하지 않는 것이 좋습니다."></textarea>
+      <h4>저자경력·소개</h4><textarea placeholder="저자를 소개하는 공간입니다. 이모지, 특수문자는 가급적으로 사용하지 않는 것이 좋습니다."></textarea>
+      <select><option value="">AI 활용 여부 및 기여정도</option><option value="a">🟡 본문 전체 작성에 사용</option><option value="b">🔵 표지 및 본문 일부 작성에 사용</option><option value="c">🟣 본문 일부 작성에 사용</option><option value="d">🟤 표지 이미지에만 사용</option><option value="e">⚪ 사용하지 않음</option></select>
+      <select><option value="">초상/저작권 보유여부</option><option value="x">🟢 모든 콘텐츠 초상/저작권 보유중</option><option value="y">🔴 초상/저작권 보유하지 않음</option></select>
+      <aside>파일 [전자책] 삼국지_제2권.epub 용량 6.55 MB 외부유통 사용 판매가격 12,500 원</aside><button>도서제출</button></body>`;
+    const book = parseBookText(['# 삼국지', '> 저자: 나관중', '> 한줄소개: 소개 한 줄', '', '## [저자소개]', '나관중은 원말명초의 소설가다.', '', '## 제14회 시작', '본문', ''].join(String.fromCharCode(10)), 'x');
+    const plan5 = RF.ebookPlan(book, { epub: 'D:/x/[전자책] 삼국지_제2권.epub', paperPrice: 17900 });
+    const page = await browser.newPage(); const al = []; page.on('dialog', async (d) => { al.push(d.message()); await d.accept(); });
+    await page.setContent(H5);
+    const logs5 = []; const r5 = await RB.fillBookkFinal(page, plan5, (m) => logs5.push(m));
+    const st = await page.evaluate(() => ({ ta: [...document.querySelectorAll('textarea')].map((t) => t.value), sel: [...document.querySelectorAll('select')].map((s) => s.selectedOptions[0].textContent) }));
+    await page.close();
+    ok(r5.failed.length === 0, '실패 없음 ' + r5.failed.join());
+    ok(st.ta[0] === '소개 한 줄' && /시작/.test(st.ta[1]) && /나관중/.test(st.ta[2]), '도서소개·도서목차·저자경력 3칸에 입력: ' + JSON.stringify(st.ta).slice(0, 80));
+    ok(/표지 및 본문 일부/.test(st.sel[0]) && /보유중/.test(st.sel[1]), 'AI = 표지 및 본문 일부 작성에 사용 · 저작권 = 보유중');
+    ok(logs5.some((m) => /요약.*일치/.test(m)), '카드(파일 이름·판매가격 12,500)가 우리 값과 일치');
+    ok(al.length === 0, '알림 없음');
+  }
+
   await browser.close();
   console.log(`\n${fail ? '❌' : '✅'} book-register-pricepage — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
