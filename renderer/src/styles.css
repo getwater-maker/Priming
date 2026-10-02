@@ -855,6 +855,14 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 /* 🖼 미리보기 첫 화면 = 표지 펼침면(삼국지 R13) — 내지 뷰어(iframe) 위에 얹는 미리보기 전용 화면 */
 .bkstage{position:relative;flex:1;min-height:0;display:flex}
 .bkstage>.bkviewport{flex:1;min-height:0}
+.bkprog{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:20;width:min(560px,calc(100% - 100px));padding:9px 12px;border-radius:8px;background:rgba(32,28,24,.92);color:#f3ece2;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.bkprog.slow{background:rgba(110,60,20,.95)}
+.bkprog-top{display:flex;gap:10px;align-items:center}
+.bkprog-bar{height:6px;margin:7px 0 5px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden;position:relative}
+.bkprog-bar i{display:block;height:100%;background:#d4a574;transition:width .5s}
+.bkprog-bar.indet i{position:absolute;width:30%;animation:bkprog-slide 1.2s ease-in-out infinite}
+@keyframes bkprog-slide{0%{left:-30%}100%{left:100%}}
+.bkprog-sub{opacity:.9;min-height:14px}
 .bknavarrow{position:absolute;top:50%;transform:translateY(-50%);z-index:8;width:34px;height:84px;border:none;border-radius:8px;background:rgba(40,34,28,.28);color:#fff;font-size:34px;line-height:1;cursor:pointer;padding:0 0 4px;opacity:.55;transition:opacity .15s,background .15s}
 .bknavarrow:hover{opacity:1;background:rgba(40,34,28,.6)}
 .bknavarrow.left{left:8px}

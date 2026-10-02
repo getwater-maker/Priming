@@ -108,6 +108,21 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   const Lm = (k, v) => setLayout((s) => ({ ...s, marginsMm: { ...s.marginsMm, [k]: Number(v) || 0 } }));
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // ⏱ 미리보기 조판 진행 표시 — 단계(html 만들기 → 조판) · 경과 초 · 지금까지 배치된 쪽 수(iframe 의 vivliostyle 쪽 컨테이너를 센다)
+  const [previewPhase, setPreviewPhase] = useState('');
+  const [prog, setProg] = useState({ sec: 0, pages: 0 });
+  const busyStartRef = useRef(0);
+  useEffect(() => {
+    if (!previewBusy) { busyStartRef.current = 0; return undefined; }
+    busyStartRef.current = Date.now();
+    setProg({ sec: 0, pages: 0 });
+    const id = setInterval(() => {
+      let pages = 0;
+      try { const d = viewportRef.current && viewportRef.current.contentDocument; if (d) pages = d.querySelectorAll('[data-vivliostyle-page-container]').length; } catch (_) {}
+      setProg((p) => ({ sec: Math.floor((Date.now() - busyStartRef.current) / 1000), pages: Math.max(p.pages, pages) }));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [previewBusy]);
   const [building, setBuilding] = useState(false);
   const [pageInfo, setPageInfo] = useState({ cur: 0, total: 0 });
   const [edit, setEdit] = useState(null); // { lineStart, lineEnd, text, file }
@@ -182,9 +197,10 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox }) {
   // ── 미리보기 조판 ──
   const refreshPreview = useCallback(async () => {
     if (!loaded) return;
-    setPreviewBusy(true); setStatus('조판 중…');
+    setPreviewBusy(true); setStatus('조판 중…'); setPreviewPhase('html');
     try {
       const r = await api.bookPreview({ layout });
+      if (r && r.url) setPreviewPhase('layout');
       // 캐시 무효화 = main 이 조판마다 새 파일명(book-<ts>.html)을 반환 — URL 에 쿼리(?t=)나
       // 프래그먼트(#t=)를 붙이면 vivliostyle 의 같은문서 판정이 깨져 목차 target-counter
       // 쪽번호가 '??' 로 나온다(로드 URL 은 쿼리 포함, anchor 절대화는 쿼리 없음 → 불일치).
@@ -1105,6 +1121,27 @@ body{overflow-y:scroll}
         </div>
         <div className="bkstage">
           <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
+          {previewBusy && (() => {
+            const prev = lastPagesRef.current || pageInfo.total || 0;   // 지난 조판 쪽수 = 대략의 목표
+            const pct = prev > 0 && prog.pages > 0 ? Math.min(99, Math.round(prog.pages / prev * 100)) : 0;
+            const slow = prog.sec >= 120;
+            const label = previewPhase === 'html' ? '① 원고를 조판 문서로 만드는 중' : '② 페이지 나누는 중 (글꼴·줄바꿈·목차 계산)';
+            return (
+              <div className={'bkprog' + (slow ? ' slow' : '')} data-testid="bk-prog">
+                <div className="bkprog-top">
+                  <b>⏳ 조판 중</b>
+                  <span>{label}</span>
+                  <span className="grow" />
+                  <span>경과 {Math.floor(prog.sec / 60)}분 {String(prog.sec % 60).padStart(2, '0')}초</span>
+                </div>
+                <div className={'bkprog-bar' + (pct ? '' : ' indet')}><i style={pct ? { width: pct + '%' } : undefined} /></div>
+                <div className="bkprog-sub">
+                  {previewPhase === 'layout' && (prog.pages > 0 ? `지금까지 ${prog.pages}쪽 배치됨${prev ? ` / 지난 조판 ${prev}쪽 (${pct}%)` : ''}` : '첫 쪽을 기다리는 중…')}
+                  {slow && <> · <b>오래 걸립니다</b> — 원고가 길거나 멈췄을 수 있어요. <button className="ghost" onClick={refreshPreview}>🔄 다시 조판</button> · 계속 안 되면 로그창을 확인하세요</>}
+                </div>
+              </div>
+            );
+          })()}
           {/* 화면 양쪽 끝 넘기기 화살표(로이 2026-10-01) — 표지 화면에서도 같은 nav(표지 ↔ 1쪽) */}
           <button className="bknavarrow left" data-testid="bk-prev" title="이전 쪽 (←) — 책 밖 왼쪽을 눌러도 됩니다" onClick={() => nav(Navigation.PREVIOUS)}>‹</button>
           <button className="bknavarrow right" data-testid="bk-next" title="다음 쪽 (→) — 책 밖 오른쪽을 눌러도 됩니다" onClick={() => nav(Navigation.NEXT)}>›</button>
