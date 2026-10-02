@@ -52,7 +52,7 @@ ok(WF.finishedDirFor(path.join(W, '원고', '하위', 'x.md')) === null, '원고
 console.log('\n[4] main 배선');
 const M = R('main.js');
 ok(/function bookOutRoot\(scriptPath, preset, realScriptPath\)/.test(M) && /finishedDirFor\(realScriptPath\)/.test(M), 'bookOutRoot: 실제 원고 경로로 완성 폴더 판정');
-ok((M.match(/bookOutRoot\(folderKey \+ '\.md', [^)]*, (sorted\[0\]|paths\[0\])\)/g) || []).length === 2, '열기·작업 이력 복원 두 곳 모두 실제 경로를 넘긴다');
+ok((M.match(/bookOutRoot\(folderKey \+ '\.md', [^)]*, (sorted\[0\]|paths\[0\]|group\[0\])\)/g) || []).length === 2, '열기·작업 이력 복원 두 곳 모두 실제 경로를 넘긴다');
 ok((M.match(/attachWorkCover\(/g) || []).length >= 3, 'attachWorkCover: 정의 1 + 열기·복원 호출(+ 밖에서 바뀐 원고 다시 읽기)');
 ok(/coverCheckFor\(parsed, dim\.w/.test(M), '자동 첨부도 같은 coverCheckFor(R11 날개 판정)');
 fs.rmSync(root, { recursive: true, force: true });

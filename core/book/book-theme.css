@@ -34,10 +34,16 @@ section.halftitle .ht-title {
   margin-top: 30%;
   font-size: 1.3em;
   letter-spacing: 0.2em;
+  word-break: keep-all;
 }
+/* 제목 줄 나누기(title-lines.js) — 첫 줄 = 작품명·권, 둘째 줄부터 = 부제목(한 단계 작게) */
+section.halftitle .ht-title .ht-l1, section.halftitle .ht-title .ht-l2, section.halftitle .ht-title .ht-l3 { display: block; }
+section.halftitle .ht-title .ht-l2, section.halftitle .ht-title .ht-l3 { font-size: 0.78em; margin-top: 0.7em; }
 section.titlepage { display: flex; flex-direction: column; height: 100%; }
 section.titlepage .tp-main { margin-top: 22%; }
-section.titlepage .tp-title { font-size: 2em; font-weight: 700; line-height: 1.4; margin: 0; }
+section.titlepage .tp-title { font-size: 2em; font-weight: 700; line-height: 1.4; margin: 0; word-break: keep-all; text-wrap: balance; }
+section.titlepage .tp-title .tp-t1, section.titlepage .tp-title .tp-t2, section.titlepage .tp-title .tp-t3 { display: block; }
+section.titlepage .tp-title .tp-t2, section.titlepage .tp-title .tp-t3 { font-size: 0.72em; margin-top: 0.55em; line-height: 1.45; }
 section.titlepage .tp-subtitle { font-size: 1.05em; margin-top: 1.2em; color: #222; }
 section.titlepage .tp-author { margin-top: 3em; font-size: 1.05em; }
 section.titlepage .tp-translator { margin-top: 0.6em; font-size: 0.95em; color: #222; }

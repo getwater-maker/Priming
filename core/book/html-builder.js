@@ -237,13 +237,16 @@ function chapterBlocksHtml(blocks0, book, ctx, srcAttr, specials) {
 // ── 자동 생성 페이지 ──
 function halfTitleHtml(meta, fallbackTitle) {
   // 제목 폴백 — 메타에 책제목이 없으면 파일 제목으로(반표제지가 빈 페이지로 나오던 문제)
-  return `<section class="halftitle"><div class="ht-title">${esc(meta.title || fallbackTitle || '')}</div></section>`;
+  // 줄 나누기 규칙(title-lines.js): ` : ` 에서 두 줄 · 메타 `제목줄바꿈` 이 우선
+  const lines = require('./title-lines').titleLines(meta, fallbackTitle);
+  const inner = lines.length > 1 ? lines.map((l, i) => `<span class="ht-l${i + 1}">${esc(l)}</span>`).join(' ') : esc(lines[0] || '');
+  return `<section class="halftitle"><div class="ht-title">${inner}</div></section>`;
 }
 function titlePageHtml(meta, ctx, fallbackTitle) {
   const logo = meta.logo ? `<img class="tp-logo" src="${esc(ctx.resolveImage(meta.logo))}" alt="logo" />` : '';
   return `<section class="titlepage">
   <div class="tp-main">
-    <h1 class="tp-title">${esc(meta.title || fallbackTitle || '')}</h1>
+    <h1 class="tp-title">${(() => { const ls = require('./title-lines').titleLines(meta, fallbackTitle); return ls.length > 1 ? ls.map((l, i) => `<span class="tp-t${i + 1}">${esc(l)}</span>`).join(' ') : esc(ls[0] || ''); })()}</h1>
     ${meta.subtitle ? `<div class="tp-subtitle">${esc(meta.subtitle)}</div>` : ''}
     <div class="tp-author">${esc(meta.author || '')}${meta.author ? ' 지음' : ''}</div>
     ${meta.translator ? `<div class="tp-translator">${esc(meta.translator)} ${meta.translatorLabel === '편역이' ? '편역' : '옮김'}</div>` : ''}

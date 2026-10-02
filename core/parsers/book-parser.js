@@ -66,6 +66,7 @@ function reservedByName(name) {
 const META_KEYS = {
   '책제목': 'title', '제목': 'title',
   '부제': 'subtitle', '부제목': 'subtitle',
+  '제목줄바꿈': 'titleBreak', '제목 줄바꿈': 'titleBreak',   // 표제지 도서명 줄 나눔 직접 지정 — `A / B` (title-lines.js)
   '저자': 'author', '지은이': 'author', '글': 'author',
   '옮긴이': 'translator', '역자': 'translator',
   '편역': 'translator', '편역자': 'translator', '편역이': 'translator', // 라벨 표기는 translatorLabel 로 보존

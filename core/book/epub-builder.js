@@ -124,6 +124,7 @@ div.special-sec p { text-indent: 0; margin-bottom: 0.4em; }
 .dedication p, .epigraph p { text-indent: 0; margin-top: 30%; }
 .titlepage { text-align: center; }
 .titlepage .t { font-size: 1.7em; font-weight: bold; margin-top: 30%; }
+.titlepage .t2 { font-size: 1.25em; font-weight: bold; margin-top: 0.6em; }
 .titlepage .s { color: #555; margin-top: 1em; }
 .titlepage .a { margin-top: 3em; }
 .titlepage .pub { margin-top: 4em; color: #666; }
@@ -348,7 +349,7 @@ async function buildEpub(book, a) {
 
   // 4) 표제지
   addDoc('titlepage', 'titlepage.xhtml', '표제지', `<div class="titlepage">
-<p class="t">${esc(meta.title || book.fileTitle || '')}</p>
+${(() => { const ls = require('./title-lines').titleLines(meta, book.fileTitle); return ls.map((l, i) => (i === 0 ? `<p class="t">${esc(l)}</p>` : `<p class="t2">${esc(l)}</p>`)).join('\n'); })()}
 ${meta.subtitle ? `<p class="s">${esc(meta.subtitle)}</p>` : ''}
 <p class="a">${esc(meta.author || '')}</p>
 ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
