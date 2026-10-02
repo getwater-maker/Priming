@@ -332,7 +332,9 @@ async function buildEpub(book, a) {
   let coverSrc = meta.ebookCover && fs.existsSync(path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(a.baseDir || '.', meta.ebookCover))
     ? (path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(a.baseDir || '.', meta.ebookCover)) : null;
   if (!coverSrc && a.coverImagePath && a.spread && fs.existsSync(a.coverImagePath)) {
-    const tmp = path.join(path.dirname(a.outPath), '_ebook-cover.jpg');
+    const tdir = a.tmpDir || path.dirname(a.outPath);
+    try { fs.mkdirSync(tdir, { recursive: true }); } catch (_) {}
+    const tmp = path.join(tdir, '_ebook-cover.jpg');
     coverSrc = await cropFrontCover(a.coverImagePath, a.spread, tmp);
     if (coverSrc) log('🖼 인쇄 표지에서 앞표지 자동 크롭 → 전자책 표지');
   }

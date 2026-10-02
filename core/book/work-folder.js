@@ -48,4 +48,26 @@ function resolveCoverFile({ meta, scriptPath, manual }) {
   return { path: null, source: null };
 }
 
-module.exports = { finishedDirFor, resolveCoverFile, IMG_RE };
+/**
+ * 완성 파일 이름의 바탕 — 원고가 `<작품>\원고\<이름>.md` 이면 「<작품>_<이름>」(예: 삼국지_제1권), 아니면 null(호출자가 책 제목으로).
+ *   앞에 [종이책]/[전자책] 표기(로이 2026-10-02)와 뒤에 _내지.pdf·_표지.pdf·.epub 이 붙는다.
+ */
+function fileBaseFor(scriptPath) {
+  if (!scriptPath) return null;
+  const dir = path.dirname(path.resolve(scriptPath));
+  if (path.basename(dir) !== WORK_DIR_NAME) return null;
+  const work = path.basename(path.dirname(dir));
+  const name = path.basename(scriptPath).replace(/\.md$/i, '');
+  if (!work || !name) return null;
+  return `${work}_${name}`.replace(/[\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+/**
+ * 임시물(조판 작업 폴더·미리보기·전자책 표지 조각·등록 캡처) 위치 — 출력 폴더가 `완성` 이면 업로드 파일과 섞이지 않게 `완성\_작업\<새이름>`,
+ * 아니면 예전 위치(`<출력>\<옛이름>`)를 그대로 쓴다(기존 작업물·테스트 호환). 옛이름이 ''면 출력 폴더 자체.
+ */
+function tmpDir(outRoot, legacyName, newName) {
+  if (path.basename(path.resolve(outRoot)) === '완성') return path.join(outRoot, '_작업', newName);
+  return legacyName ? path.join(outRoot, legacyName) : outRoot;
+}
+
+module.exports = { finishedDirFor, resolveCoverFile, fileBaseFor, tmpDir, IMG_RE };

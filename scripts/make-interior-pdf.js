@@ -10,7 +10,7 @@
  *     · --out 이 이미 있으면 같은 폴더 `_이전/<이름>_<태그>.pdf` 로 먼저 옮긴다(--backup-tag 없으면 수정 시각 KST 를 태그로).
  *     · 끝에 쪽수 · 회 시작 쪽 · 판권 쪽 · 목차 쪽을 알려 준다(--json 이면 JSON 한 줄).
  *   node scripts/make-interior-pdf.js --analyze <내지.pdf>   (이미 만든 PDF 의 쪽수·회 시작 쪽·판권 쪽만 본다)
- *   작업 폴더(_work)는 출력 파일 옆 `_work_내지/` — 끝나면 지운다(--keep-work 으로 남김).
+ *   작업 폴더는 출력 폴더가 `완성` 이면 `_작업/work_내지/`, 아니면 출력 파일 옆 `_work_내지/` — 끝나면 지운다(--keep-work 으로 남김).
  * ⚠ 개발 도구라 설치본(라이트 업데이트)에는 들어가지 않는다(scripts/ 폴더) — 메인 PC 의 D:\Priming 에서 돈다.
  */
 const fs = require('fs');
@@ -75,7 +75,8 @@ async function main() {
     if (fs.existsSync(backup)) throw new Error('보관 파일이 이미 있습니다(덮어쓰지 않습니다): ' + backup);
     fs.renameSync(out, backup);
   }
-  const workDir = path.join(path.dirname(out), '_work_내지');
+  const WFx = require('../core/book/work-folder');
+  const workDir = WFx.tmpDir(path.dirname(out), '_work_내지', 'work_내지');   // 출력 폴더가 「완성」이면 _작업/work_내지(업로드 파일과 섞이지 않게)
   const assets = PB.prepareWorkAssets(workDir);
   const { html } = buildBookHtml(book, { baseDir: path.dirname(items[0].p), imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false });
   // 경고(글꼴 파일·각주·누락 글자)도 같이 알린다

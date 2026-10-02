@@ -53,8 +53,17 @@ console.log('\n[4] main 배선');
 const M = R('main.js');
 ok(/function bookOutRoot\(scriptPath, preset, realScriptPath\)/.test(M) && /finishedDirFor\(realScriptPath\)/.test(M), 'bookOutRoot: 실제 원고 경로로 완성 폴더 판정');
 ok((M.match(/bookOutRoot\(folderKey \+ '\.md', [^)]*, (sorted\[0\]|paths\[0\])\)/g) || []).length === 2, '열기·작업 이력 복원 두 곳 모두 실제 경로를 넘긴다');
-ok((M.match(/attachWorkCover\(/g) || []).length === 3, 'attachWorkCover: 정의 1 + 열기·복원 호출 2');
+ok((M.match(/attachWorkCover\(/g) || []).length >= 3, 'attachWorkCover: 정의 1 + 열기·복원 호출(+ 밖에서 바뀐 원고 다시 읽기)');
 ok(/coverCheckFor\(parsed, dim\.w/.test(M), '자동 첨부도 같은 coverCheckFor(R11 날개 판정)');
 fs.rmSync(root, { recursive: true, force: true });
+console.log(String.fromCharCode(10) + '[5] 완성 파일 이름 바탕 · 임시물 위치(R25)');
+ok(WF.fileBaseFor(ms) === '삼국지_제001회' && WF.fileBaseFor(path.join(W, '원고', '제1권.md')) === '삼국지_제1권', '원고가 <작품>/원고/제1권.md → 「삼국지_제1권」');
+ok(WF.fileBaseFor(other) === null && WF.fileBaseFor('') === null, '원고 폴더 밖이면 null(책 제목을 쓴다)');
+ok(WF.tmpDir(path.join(W, '완성'), '_work', 'work') === path.join(W, '완성', '_작업', 'work') && WF.tmpDir(path.join(W, '완성'), '', 'epub') === path.join(W, '완성', '_작업', 'epub'), '출력이 완성 폴더면 임시물은 _작업/ 아래');
+ok(WF.tmpDir(path.join(root, 'out', '책'), '_work', 'work') === path.join(root, 'out', '책', '_work') && WF.tmpDir(path.join(root, 'out', '책'), '', 'epub') === path.join(root, 'out', '책'), '그 밖의 출력 폴더는 예전 위치 그대로(호환)');
+const M2 = R('main.js');
+ok(/WF\.tmpDir\(outRoot, '_work', 'work'\)/.test(M2) && /WF\.tmpDir\(.*'_preview', 'preview'\)/.test(M2) && /WF\.tmpDir\(outRoot, '', 'epub'\)/.test(M2) && !/path\.join\(outRoot, '_work'\)/.test(M2), 'main: 작업·미리보기·전자책 조각·캡처 폴더가 한 함수(tmpDir)를 거친다');
+ok(/BOOK_PREFIX\.print\}\$\{base\}_내지\.pdf/.test(M2) && /function bookFileBase\(\)/.test(M2), 'main: 완성 파일 이름 = [종이책|전자책] + bookFileBase()');
+
 console.log(`\n${fail ? '❌' : '✅'} book-workfolder — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);
