@@ -5890,7 +5890,32 @@ ipcMain.handle('load-project', async () => {
 // ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
 // 전체 제작 코어 — 현재 활성 대본(S.parsed/S.outRoot)에 대해 TTS→이미지→영상→.vrew.
 //   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew 로 .vrew 자동열기만 제어(탐색기는 열지 않음).
+// 📊 롱폼 제작 진행 팝업(v0.6.44 · 로이 2026-10-02) — 문장·그림·영상 개수를 1초마다 'make-progress' 로 보낸다.
+//   셈은 core/make-progress 한 곳(메모리 필드만 — fs 안 건드림). 단계 표시는 runMakeAllBody 안에서 _mk.begin/end.
+//   🔑 끝(완료·중단·예외)은 runMakeAllCore 의 finally 한 곳에서 닫는다 — 예외로 빠져도 팝업이 「진행 중」에 갇히지 않게.
+let _mk = null;
+let _mkQueuePos = null;   // run-batch 가 { idx, total } 을 적는다(단건 제작이면 null)
+function _mkStart(projects, range, title, skip) {
+  const MP = require('./core/make-progress');
+  const st = MP.create({ title, queue: _mkQueuePos, skip });
+  const send = () => { try { if (win && !win.isDestroyed()) win.webContents.send('make-progress', MP.snapshot(st, projects, range)); } catch {} };
+  const timer = setInterval(send, 1000);
+  send();
+  return {
+    st,
+    begin(k) { MP.begin(st, k, (MP.count(projects, range)[k === 'tts' ? 'sent' : k] || {}).done || 0); send(); },
+    end(k) { MP.end(st, k); send(); },
+    skip(k, note) { MP.skipStage(st, k, note); send(); },
+    note(t) { st.outNote = t || ''; },
+    stop(phase, err) { clearInterval(timer); st.phase = phase; st.error = err || ''; st.endedAt = Date.now(); for (const k of MP.STAGES) if (st.stages[k].state === 'run' && phase === 'done') MP.end(st, k); send(); },
+  };
+}
 async function runMakeAllCore(opts = {}) {
+  try { return await runMakeAllBody(opts); }
+  catch (e) { if (_mk) { _mk.stop('error', e.message); _mk = null; } throw e; }
+  finally { if (_mk) { _mk.stop(S.abort ? 'aborted' : 'done'); _mk = null; } }
+}
+async function runMakeAllBody(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
@@ -5965,6 +5990,11 @@ async function runMakeAllCore(opts = {}) {
   const videoPipeline = _pipeBase && !_wbTarget && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
+  _mk = _mkStart(projects, { fromNum, toNum }, parsed.fileTitle || '', {
+    tts: skipTts ? 'Vrew 에서' : '',
+    image: skipVisual ? '음성만 출력' : '',
+    video: skipVisual ? '음성만 출력' : _wbTarget ? '화이트보드는 그림만' : videoEngine === 'none' ? '비디오 없음' : _grokCool ? 'Grok 한도' : '',
+  });
 
   const ttsStage = async () => {
     // 🔑 어느 채널·목소리로 만드는지 로그에 남긴다 — 2026-08-31 사고 때 앱 로그만으로는
@@ -5975,6 +6005,7 @@ async function runMakeAllCore(opts = {}) {
     } else {
       log('🎙 1단계 — 음성(TTS) 일괄 변환… (⚠ 채널을 찾지 못했습니다)');
     }
+    _mk && _mk.begin('tts');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
@@ -5988,6 +6019,7 @@ async function runMakeAllCore(opts = {}) {
       pushDtoUpdate();
     }
     ttsStageDone = true;
+    _mk && _mk.end('tts');
   };
   const imageStage = async () => {
     // 스타일이 실제로 적용되는지 눈으로 확인 가능하게 로그에 표기(스타일 누락 → 실사 이미지 사고 방지).
@@ -6000,6 +6032,7 @@ async function runMakeAllCore(opts = {}) {
       } catch { _styleLbl = `스타일 ${styleId}`; }
     }
     log(`🖼 2단계 — 이미지 일괄 생성… (${_styleLbl})`);
+    _mk && _mk.begin('image');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
@@ -6015,12 +6048,17 @@ async function runMakeAllCore(opts = {}) {
       pushDtoUpdate(); // 이미지 매핑(g.imagePath) UI 썸네일에 반영
     }
     imageStageDone = true;
+    _mk && _mk.end('image');
   };
 
   // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 영상 생성.
   //   Comfy 클라우드 = 그룹 단건씩 / Grok = 준비된 그룹을 모아 배치(브라우저 기동 오버헤드 절약).
   const videoStage = async () => {
     if (_grokCool) return; // Grok 쿨다운 — 영상 단계 건너뜀
+    _mk && _mk.begin('video');
+    try { await _videoPipeLoop(); } finally { _mk && _mk.end('video'); }
+  };
+  const _videoPipeLoop = async () => {
     const done = new Set();
     const vmap = new Map();
     for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
@@ -6121,6 +6159,7 @@ async function runMakeAllCore(opts = {}) {
     log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
     log(`🎬 3단계 — 비디오 일괄 생성… (영상 범위 ${fromNum != null ? `G${fromNum}~G${toNum}` : '⚠ 미지정 = 전 그룹'})`);
+    _mk && _mk.begin('video');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
@@ -6138,6 +6177,7 @@ async function runMakeAllCore(opts = {}) {
       S.timings.video += (Date.now() - t0) / 1000;
       pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
     }
+    _mk && _mk.end('video');
   }
 
   // ── 4단계: .vrew 일괄 생성. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
@@ -6149,6 +6189,7 @@ async function runMakeAllCore(opts = {}) {
     const mp4Here = (outTarget === 'mp4');
     if (mp4Here && outMode !== 'full') log('⚠ 유튜브 MP4 는 음성·화면이 모두 필요합니다 — 출력 방식이 「전체」가 아니라 .vrew 만 만듭니다');
     const mp4Go = mp4Here && outMode === 'full';
+    if (_mk) { _mk.note(wbGo ? '✏ 화이트보드 MP4' : mp4Go ? '.vrew → 🎬 유튜브 MP4' : '.vrew'); _mk.begin('out'); }
     log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (장면 렌더 → 음성 → 자막)'
       : mp4Go ? '📦 4단계 — .vrew 생성 → 🎬 유튜브 MP4 렌더…'
       : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
@@ -6235,6 +6276,7 @@ async function runMakeAllCore(opts = {}) {
         } else if (openVrew) shell.openPath(vrewPath);
       } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
     }
+    if (_mk) { _mk.end('out'); if (incomplete.length || noTts.length) _mk.note('⛔ 빠진 그림·음성이 있어 만들지 않음'); }
     warnIncompleteVisuals(incomplete);
     warnMissingTts(noTts);
   } else {
@@ -6256,6 +6298,7 @@ async function runMakeAllCore(opts = {}) {
 
 ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
   _mp4DupAll = null;   // 단건 제작은 항상 새로 묻는다
+  _mkQueuePos = null;  // 📊 단건 — 진행 팝업에 큐 순번을 달지 않는다
   // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
   await runMakeAllCore({ ...args, openVrew: args.openVrew !== false });
   return P.toDTO(S.parsed);
@@ -6296,6 +6339,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     it.status = 'running'; pushDtoUpdate();
     const label = (S.parsed.fileTitle) || (it.scriptPath || '');
     log(`▶ [${i + 1}/${plan.length}] 롱폼 · ${label}`);
+    _mkQueuePos = { idx: i + 1, total: plan.length };
     // 항목 설정은 **서버쪽 it.settings(진짜 최신)** 우선 — 렌더러 plan(entry.settings)은 디바운스 저장이
     //   DTO 로 안 돌아와 stale 일 수 있음(예: 이미지 도구를 comfy 로 바꿔도 plan 엔 옛 rotate 가 실려 순환 실행됨).
     const s = { ...(entry.settings || {}), ...(it.settings || {}) };
@@ -6343,6 +6387,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   }
   _stopAfterItem = false;
   _mp4DupAll = null;
+  _mkQueuePos = null;
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), stoppedEarly: stoppedLeft > 0, remaining: stoppedLeft };

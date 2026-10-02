@@ -114,6 +114,21 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(res === 'ok', '⚡ 만들기(무음) 예외 없이 완주: ' + res);
     ok(!/is not defined/.test(res), '🔴 ReferenceError 없음(imgEngine 계열 사고 재발 방지)');
 
+    // ③-2 📊 진행 팝업(v0.6.26) — 만들기가 끝나면 「✅ 만들기 완료」 + 문장 n/n · 그림 0/3 · 영상 건너뜀.
+    //   판정력: 문장 수는 아래 ⑦의 실제 wav 개수와 맞춰 본다(숫자를 지어내면 어긋난다).
+    await win.waitForSelector('[data-testid="make-progress"]', { timeout: 5000 }).catch(() => {});
+    const mkp = await win.evaluate(() => {
+      const el = document.querySelector('[data-testid="make-progress"]');
+      const t = (k) => ((el && el.querySelector('[data-testid="mkp-' + k + '"]')) || {}).textContent || '';
+      return el ? { all: el.textContent, sent: t('문장'), image: t('그림'), video: t('영상'), out: t('출력') } : null;
+    });
+    ok(!!mkp, '📊 진행 팝업이 떴다');
+    ok(!!mkp && /만들기 완료/.test(mkp.all), '📊 팝업 머리 = 만들기 완료: ' + (mkp && mkp.all.slice(0, 40)));
+    const sentM = mkp && mkp.sent.match(/(\d+)\s*\/\s*(\d+)\s*문장/);
+    ok(!!sentM && sentM[1] === sentM[2] && Number(sentM[2]) >= 3, '📊 문장 n/n 문장: ' + (mkp && mkp.sent));
+    ok(!!mkp && /0\s*\/\s*3\s*장/.test(mkp.image), '📊 그림 0/3 장(무음 모드는 그림을 안 만든다): ' + (mkp && mkp.image));
+    ok(!!mkp && /건너뜀/.test(mkp.video) && /비디오 없음/.test(mkp.video), '📊 영상 = 건너뜀 · 비디오 없음: ' + (mkp && mkp.video));
+
     // ④ 로그창에 실패 흔적이 없어야 한다 (핸들러가 삼킨 예외도 잡는다)
     const logText = await win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
     ok(!/is not defined/.test(logText), '로그에 "is not defined" 없음');
@@ -137,6 +152,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     const ttsDir = path.join(TMP, path.basename(SCRIPT_PATH).replace(/\.md$/, ''), 'tts-1');
     const wavs = fs.existsSync(ttsDir) ? fs.readdirSync(ttsDir).filter((f) => /\.(wav|mp3)$/i.test(f)) : [];
     ok(wavs.length >= 3, '무음 음성 파일 ' + wavs.length + '개 생성(문장 수만큼)');
+    ok(!!sentM && Number(sentM[2]) === wavs.length, '📊 팝업 문장 수 = 실제 음성 파일 수 (' + (sentM && sentM[2]) + ' / ' + wavs.length + ')');
 
     // ⑧ 📂 「완성 후 열기」(v0.5.79) — 해제하면 .vrew·MP4 를 **열지 않는다**(자는 동안 MP4 가 재생되던 문제).
     //    🎤 음성만(audio)은 이미지 게이트가 없어 .vrew 까지 간다 → shell.openPath 호출 수를 센다.

@@ -9,6 +9,7 @@ import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
+import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
@@ -442,6 +443,7 @@ export default function App() {
   const [readerOpen, setReaderOpen] = useState(false);   // 📄 대본 읽기(점검·수정 · A4 PDF)
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
+  const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
   const [mp4Prog, setMp4Prog] = useState(null);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
@@ -617,6 +619,7 @@ export default function App() {
     api.onLog((line) => logline(line, true));
     if (api.onUrldlProgress) api.onUrldlProgress((d) => { if (d) setUrlProg(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
+    if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) setMakeProg(d); });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     if (api.onScriptReloaded) api.onScriptReloaded(() => setReloadTick((t) => t + 1));   // 📄 대본 보기가 새로 그리게
@@ -5080,6 +5083,12 @@ export default function App() {
           onAbort={() => { api.ytAbort(); }}
           onClose={() => setYtProg(null)}
           openUrl={(u) => api.ytOpenUrl(u)} />
+      )}
+      {makeProg && mode === 'longform' && (
+        <MakeProgress prog={makeProg}
+          right={mp4Prog ? 16 + 390 + 12 : 16}
+          onAbort={() => { abort(); }}
+          onClose={() => setMakeProg(null)} />
       )}
       {mp4Prog && (
         <Mp4Progress prog={mp4Prog}

@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('api', {
   onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
   onUrldlProgress: (cb) => ipcRenderer.on('urldl-progress', (_e, d) => cb(d)),
   onMp4Progress: (cb) => ipcRenderer.on('mp4-progress', (_e, d) => cb(d)),
+  onMakeProgress: (cb) => ipcRenderer.on('make-progress', (_e, d) => cb(d)),   // 📊 롱폼 ⚡ 만들기 진행 팝업
   // ⬆ 유튜브 비공개 업로드 (core/youtube-upload.js)
   ytStatus: () => ipcRenderer.invoke('yt-status'),
   ytImportClient: () => ipcRenderer.invoke('yt-import-client'),
