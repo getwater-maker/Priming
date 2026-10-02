@@ -42,7 +42,7 @@ function _hookDialogs(page, log) {
     } else if (type === 'confirm' || type === 'prompt') {
       accept = false;
       try { if (_dialogAsker) accept = !!(await _dialogAsker(type, msg)); } catch (_) { accept = false; }   // 못 물으면 취소(안전한 쪽)
-    } else if (type === 'alert' && _dialogAsker) { try { await _dialogAsker('alert', msg); } catch (_) {} }
+    }   // alert 는 로그에만 남기고 자동 확인(앱 팝업 없음 — 로이 2026-10-02)
     try { if (accept) await d.accept(); else await d.dismiss(); } catch (_) {}
   });
 }
@@ -127,6 +127,40 @@ async function _verifySelect(sel, want, label, log, failed) {
   if (!got) { log(`[등록] ❔ ${label}: 선택값을 읽지 못했습니다`); return; }
   if (!want || plain(got) === plain(want) || plain(got).includes(plain(want))) log(`[등록] ✓ ${label}: ${plain(got)}`);
   else { failed.push(label + ' 확인'); log(`[등록] ⚠ ${label} 선택이 다릅니다 — 화면 「${plain(got)}」 ≠ 기대 「${plain(want)}」`); }
+}
+
+/**
+ * 🟢 부크크 로그인 화면의 「NAVER 계정 로그인」 버튼을 눌러 준다(로이 2026-10-02 「네이버 클릭하는 거 추가 — 그럼 바로 로그인이 된다」).
+ *   이 프로필에 네이버 로그인 기록이 있으면 클릭만으로 로그인된다. 아이디·비밀번호는 다루지 않는다(없으면 로이가 직접 — 이후 흐름은 기존 로그인 대기 그대로).
+ *   로그인 화면이 아니거나(이미 로그인돼 넘어감) 버튼을 못 찾으면 아무것도 하지 않고 로그만 남긴다.
+ */
+async function _clickNaverLogin(page, log) {
+  try {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 8000) {
+      if (page.isClosed()) return false;
+      const st = await page.evaluate(() => ({ url: location.pathname, out: /로그아웃/.test(document.body ? document.body.innerText : '') })).catch(() => null);
+      if (st && (st.out || !/\/login/.test(st.url))) { log('[등록] 이미 로그인된 상태 — 네이버 버튼은 누르지 않습니다'); return false; }
+      const cands = [
+        () => page.locator('a[href*="naver" i]'),
+        () => page.locator('[class*="naver" i], [id*="naver" i]'),
+        () => page.locator('a, button, [role=button]').filter({ hasText: /NAVER|네이버/i }),
+        () => page.locator('img[alt*="naver" i]'),
+        () => page.getByText(/NAVER\s*계정\s*로그인|네이버\s*(계정\s*)?로그인/i),
+      ];
+      for (const mk of cands) {
+        const loc = mk().first();
+        if (await loc.count().catch(() => 0)) {
+          await loc.click({ timeout: 5000 });
+          log('[등록] 🟢 「NAVER 계정 로그인」 버튼을 눌렀습니다 — 네이버 로그인 기록이 있으면 바로 로그인됩니다(아니면 열린 창에서 직접)');
+          return true;
+        }
+      }
+      await sleep(500);
+    }
+    log('[등록] ℹ 로그인 화면에서 네이버 버튼을 찾지 못했습니다 — 열린 창에서 직접 로그인해 주세요');
+  } catch (e) { log('[등록] ℹ 네이버 로그인 버튼 클릭 실패: ' + String(e.message).split('\n')[0].slice(0, 80) + ' — 직접 로그인해 주세요'); }
+  return false;
 }
 
 /** 로그인 대기 — 화면에 「로그아웃」이 보이면 로그인된 것. 최대 10분. */
@@ -513,13 +547,19 @@ async function fillBookkEbookPrice(page, plan, log) {
   if (s4.price) {
     if (s4.price % 100 !== 0 || s4.price <= 0) { failed.push('정가'); log(`[등록] ⚠ 전자책 정가 ${s4.price.toLocaleString('ko-KR')}원은 100원 단위가 아닙니다 — 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
     else {
-      await step('정가 ' + s4.price, async () => { const inp = page.locator(priceSel).first(); await inp.fill(String(s4.price)); await inp.blur(); });
-      // 정가를 바꾸면 「직접 변경」 체크가 필수 — 눌러서 체크됐는지 읽어 확인한다
+      // 🔑 순서: **「직접 변경」 체크 먼저 → 그다음 가격**. 가격을 먼저 바꾸면 부크크가 그 순간 「도서 가격 체크박스를 확인해주세요!」 알림을 띄우고 가격을 1000 으로 되돌린다(로이 2026-10-02 실행).
       await step('정가 직접 변경 체크', async () => {
-        await page.locator('label', { hasText: '직접 변경하였습니다' }).first().click({ timeout: 6000 });
+        const cb = page.locator('input[type=checkbox]').first();
+        try { await cb.check({ timeout: 4000, force: true }); }
+        catch (_) { await page.locator('label', { hasText: '직접 변경하였습니다' }).first().click({ timeout: 6000 }); }
         const on = await page.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].some((i) => i.checked)).catch(() => null);
         if (on === false) throw new Error('체크가 반영되지 않았습니다');
       });
+      if (!failed.includes('정가 직접 변경 체크')) {
+        await step('정가 ' + s4.price, async () => { const inp = page.locator(priceSel).first(); await inp.fill(String(s4.price)); await inp.press('Tab').catch(() => {}); await inp.blur(); });
+        await sleep(400);
+        await _verifyInput(page, priceSel, String(s4.price), '정가 입력칸', log, failed);   // 되돌려졌으면(1000) ⚠ + 실패
+      }
     }
   } else log('[등록] ⚠ 원고에 전자책 정가가 없어 화면 기본값(1,000원 — 예시값) 그대로 둡니다. 4단계에서 직접 정하세요');
   if (s4.external) await step('외부서점 입점', () => _pickRadio(page, /외부\s*온라인\s*서점/, '입점 원합니다'));
@@ -566,6 +606,7 @@ async function runRegisterBoth(o) {
   const page = ctx.pages()[0] || await ctx.newPage();
   log(`[등록] 📚 ${site.label} 열기 — ${site.home}`);
   await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+  if (/bookk\.co\.kr/.test(site.home)) await _clickNaverLogin(page, log);
   await _waitLogin(page, site, log, o.isAborted);
   await page.goto(site.start, { waitUntil: 'load', timeout: 60000 });
   log('[등록] 📕 1/2 종이책 입력 시작');
@@ -618,6 +659,7 @@ async function runRegister(o) {
   const page = ctx.pages()[0] || await ctx.newPage();
   log(`[등록] ${site.label} 열기 — ${site.start}`);
   await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+  if (/bookk\.co\.kr/.test(site.home)) await _clickNaverLogin(page, log);
   await _waitLogin(page, site, log, o.isAborted);
   await page.goto(site.start, { waitUntil: 'load', timeout: 60000 });
   const r = o.platform === 'jakkawa' ? await fillJakkawa(page, o.plan, log) : o.platform === 'bookkEbook' ? await fillBookkEbook(page, o.plan, log) : await fillBookk(page, o.plan, log);
@@ -627,4 +669,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+module.exports = { clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

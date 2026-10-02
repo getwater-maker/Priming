@@ -17,15 +17,17 @@ const AI_OPTS = ['AI 활용 여부 및 기여정도', '🟡 본문 전체 작성
 const RIGHT_OPTS = ['초상/저작권 보유여부', '🟢 모든 콘텐츠 초상/저작권 보유중', '🔴 초상/저작권 보유하지 않음'];
 const GENRES = ['선택', '- 소설', '소설 - 소설 일반', '소설 - 고전 문학'];
 
-function fakePage(body, { checked = true, blueActive = true, strip = false, mangle = false } = {}) {
+function fakePage(body, { checked = true, blueActive = true, strip = false, mangle = false, revert = false } = {}) {
   const calls = []; const state = {};
   const mk = (sel, opt) => {
     const o = { sel, opt, _filter: null };
     o.filter = (f) => { o._filter = f; return o; };
     o.first = () => o; o.nth = (n) => { const x = mk(sel + '#' + n, opt); return x; };
     o.click = async () => { calls.push('click:' + sel + ':' + String((opt && (opt.hasText || '')) || '')); };
-    o.fill = async (v) => { calls.push('fill:' + sel + '=' + v); state[sel] = mangle ? 'xx' : strip ? String(v).replace(/[:]/g, '') : v; };
+    o.fill = async (v) => { calls.push('fill:' + sel + '=' + v); state[sel] = mangle ? 'xx' : revert && sel.startsWith('input[type=text]') ? '1000' : strip ? String(v).replace(/[:]/g, '') : v; };
     o.blur = async () => {};
+    o.check = async () => { calls.push('check:' + sel); };
+    o.press = async () => {};
     o.inputValue = async () => state[sel] || '';
     o.setInputFiles = async (f) => { calls.push('upload:' + path.basename(f)); };
     o.selectOption = async (v) => { const list = sel.endsWith('#2') ? GENRES : (o._filter && String(o._filter.hasText).includes('AI')) ? AI_OPTS : (o._filter ? RIGHT_OPTS : null); if (list && typeof v === 'string') o._chosen = (list[Number(v.replace(/^v/, ''))] || ''); state['chosen:' + sel + (o._filter ? String(o._filter.hasText) : '')] = o._chosen; calls.push('select:' + (sel.startsWith('select#') ? sel : (o._filter && o._filter.hasText)) + '=' + (typeof v === 'object' ? JSON.stringify(v) : v)); };
@@ -110,11 +112,13 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   console.log('\n[5] 4단계 정가');
   pg = fakePage(BODY4); r = await RB.fillBookkEbookPrice(pg, plan, () => {});
   ok(r.failed.length === 0 && pg.calls.includes('fill:input[type=text], input[type=number], input:not([type])=9900'), '정가 9900 입력');
-  const iFill = pg.calls.findIndex((c) => c.startsWith('fill:')); const iChk = pg.calls.findIndex((c) => /직접 변경하였습니다/.test(c));
-  ok(iChk > iFill && iFill >= 0, '🔑 정가를 바꾼 뒤 「직접 변경하였습니다」 체크(안 하면 사이트가 막는다)');
+  const iFill = pg.calls.findIndex((c) => c.startsWith('fill:input[type=text]')); const iChk = pg.calls.findIndex((c) => c === 'check:input[type=checkbox]' || /직접 변경하였습니다/.test(c));
+  ok(iChk >= 0 && iFill > iChk, '🔑 「직접 변경하였습니다」 체크를 **먼저**, 그다음 가격(가격을 먼저 바꾸면 사이트가 알림을 띄우고 1000 으로 되돌린다 · 로이 2026-10-02)');
   ok(pg.calls.some((c) => /입점 원합니다/.test(c)) && !pg.calls.some((c) => /인하하지/.test(c)), '외부서점 「네」 · 정가인하 칸은 없다');
   pg = fakePage(BODY4, { checked: false }); r = await RB.fillBookkEbookPrice(pg, plan, () => {});
-  ok(r.failed.includes('정가 직접 변경 체크'), '판별: 체크가 안 되면 실패');
+  ok(r.failed.includes('정가 직접 변경 체크') && !pg.calls.some((c) => c.startsWith('fill:input[type=text]')), '판별: 체크가 안 되면 실패하고 가격도 넣지 않는다(체크 없이 가격을 바꾸지 않음)');
+  pg = fakePage(BODY4, { revert: true }); r = await RB.fillBookkEbookPrice(pg, plan, () => {});
+  ok(r.failed.includes('정가 입력칸 확인'), '판별: 가격이 1000 으로 되돌려졌으면(칸 값 ≠ 기대) 실패로 알린다');
   pg = fakePage(BODY4); r = await RB.fillBookkEbookPrice(pg, { ...plan, step4: { ...plan.step4, price: 9950 } }, () => {});
   ok(r.failed.includes('정가') && !pg.calls.some((c) => c.startsWith('fill:')), '판별: 100원 단위가 아니면 입력하지 않는다');
   pg = fakePage(BODY4); const l4 = []; r = await RB.fillBookkEbookPrice(pg, { ...plan, step4: { ...plan.step4, price: 0 } }, (m) => l4.push(m));
@@ -184,6 +188,17 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     let dlg; RB.setDialogAsker(async () => true); RB.hookDialogs({ on: (ev, fn) => { dlg = fn; } }, () => {});
     let ok2 = true; try { await RB.goStep(mkPg(async () => { await dlg({ type: () => 'confirm', message: () => '이동할까요?', accept: async () => {}, dismiss: async () => {} }); throw new Error('Timeout 8000ms'); }), 3); } catch (_) { ok2 = false; }
     ok(ok2, '이동 버튼을 누르자 사이트 확인창이 떴다면 click 시간 초과를 실패로 보지 않는다(앱 창에서 답하는 동안 기다리다 생기는 시간 초과)');
+  }
+
+  console.log('\n[7d] 🟢 로그인 화면 NAVER 버튼');
+  {
+    const mkLogin = (st) => { const clicks = []; return { clicks, isClosed: () => false, evaluate: async () => st, locator: (sel) => ({ filter: () => ({ first() { return this; }, count: async () => 0, click: async () => {} }), first() { return this; }, count: async () => (/naver/i.test(sel) && sel.startsWith('a[') ? 1 : 0), click: async () => { clicks.push(sel); } }), getByText: () => ({ first() { return this; }, count: async () => 0, click: async () => {} }) }; };
+    let lp = mkLogin({ url: '/login', out: false }); const lg = [];
+    ok(await RB.clickNaverLogin(lp, (m) => lg.push(m)) === true && lp.clicks.length === 1 && /naver/i.test(lp.clicks[0]), '로그인 화면 → 네이버 버튼을 누른다');
+    lp = mkLogin({ url: '/', out: true });
+    ok(await RB.clickNaverLogin(lp, () => {}) === false && lp.clicks.length === 0, '판별: 이미 로그인(로그아웃 보임)/로그인 화면이 아니면 누르지 않는다');
+    const srcB = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
+    ok(!/\.(fill|type)\([^)]*(password|비밀번호)/i.test(srcB) && !/input\[type=password\]/.test(srcB), '아이디·비밀번호 입력 코드 없음(네이버 버튼 클릭만)');
   }
 
   console.log('\n[8] 안전(소스)');

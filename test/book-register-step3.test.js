@@ -60,7 +60,7 @@ function fakePage(body) {
     h = await hook(async () => { throw new Error('창 없음'); }); d = mk('confirm', 'x'); await h(d);
     ok(d.r.dis === 1, '못 물으면 취소(안전한 쪽)');
     asked = []; h = await hook(async (t, m) => { asked.push(t); return true; }); d = mk('alert', '파일 형식이 맞지 않습니다'); await h(d);
-    ok(d.r.acc === 1 && asked[0] === 'alert', 'alert → 내용을 앱 창에 보여 주고 accept(읽을 새 없이 사라지지 않게)');
+    ok(d.r.acc === 1 && asked.length === 0, 'alert → 앱 팝업 없이 자동 accept(내용은 로그에만 · 로이 2026-10-02 「프라이밍 자체 팝업 제거」)');
     h = await hook(null); d = mk('confirm', 'x'); await h(d);
     ok(d.r.dis === 1, '앱이 질문 함수를 못 넣은 경우에도 멈추지 않는다(취소)');
   }
