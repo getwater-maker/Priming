@@ -218,10 +218,12 @@ function ebookPlan(book, ctx) {
   const step2 = { epub: c.epub || '', epubName: c.epub ? require('path').basename(c.epub) : '' };
   const step3 = { cover: c.cover || '', logo: 'blue' };
   // 전자책 정가 = 종이책 정가(`> 정가:`)의 70%, 10원 단위 이하 버림(= 100원 단위 내림) — 부크크 권고 「전자도서 = 종이도서 70%」·로이 2026-10-02. 원고에 `> 전자책:` 가격이 따로 있으면 그 값이 이긴다(판권지와 같게).
-  const paper = Number(digits(m.price)) || 0;
+  //   종이책 정가 = ① 종이책을 부크크에 신청할 때 4단계 화면에서 읽어 기록한 최종정가(ctx.paperPrice — 가장 정확) ② 원고 `> 정가:`.
+  const registered = Number(c.paperPrice) || 0;
+  const paper = registered || Number(digits(m.price)) || 0;
   const explicit = Number(digits(m.ebookPrice)) || 0;
   const price = explicit || ebookPriceFromPaper(paper);
-  const priceFrom = explicit ? 'ebook' : (price ? 'paper70' : '');
+  const priceFrom = explicit ? 'ebook' : (price ? (registered ? 'paper-registered' : 'paper70') : '');
   const step4 = { price, external: true, from: priceFrom, paper };
   const intro = cleanBody(sectionText(findSection(book, 'backCover'))) || cleanBody(m.tagline || '');
   const step5 = { intro, toc: cleanBody(tocText(book)), bio: cleanBody(sectionText(findSection(book, 'authorBio'))), ai: bookkAiOption(m.aiDisclosure), rights: BOOKK_RIGHTS };
@@ -245,6 +247,7 @@ function ebookPlan(book, ctx) {
   if (!step1.author) manual.push('저자(필수)');
   if (step1.isbnMode === 'other') manual.push('보유 ISBN 입력칸(1단계에서 직접)');
   if (!price) manual.push('⚠ 4단계 정가 — 원고에 종이책 `> 정가:`(또는 `> 전자책:`)가 없어 계산할 수 없습니다. 화면 기본값 1,000원(예시값) 그대로 두니 직접 정하세요');
+  if (priceFrom === 'paper70') manual.push('⚠ 전자책 정가는 원고 `> 정가:` 기준입니다 — 종이책을 부크크에 먼저 신청하면(🤖 자동 입력 4단계) 화면의 최종정가를 기록해 그 값의 70% 로 계산합니다. 종이책 정가가 원고와 다르면 먼저 종이책을 신청하세요');
   if (!step5.intro) manual.push('5단계 도서소개');
   if (!step5.bio) manual.push('5단계 저자경력·소개');
   manual.push('🔴 5단계 「도서제출」 — 반드시 직접 클릭(자동 제출 금지)');

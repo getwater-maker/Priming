@@ -144,6 +144,33 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   r = await RB.runEbookFrom(pgS, { ...plan, step2: { epub: '' } }, () => {}, 2);
   ok(!pgS.calls.some((c) => /Step3/.test(c)) && r.failed.includes('ePub 없음'), '2단계(ePub 없음) 실패 → 3단계로 넘어가지 않는다');
 
+  console.log('\n[7b] 종이책 신청 때 기록한 최종정가 → 전자책 정가');
+  const RP = require('../core/book/register-price');
+  const rootP = path.join(T, 'out'); fs.mkdirSync(rootP);
+  ok(RP.savePaperPrice(rootP, '삼국지_제2권', 17900, '삼국지 완역 2') === 17900 && RP.loadPaperPrice(rootP, '삼국지_제2권').price === 17900, '기록 저장·읽기(권 이름이 키)');
+  ok(RP.loadPaperPrice(rootP, '삼국지_제3권') === null && RP.savePaperPrice(rootP, 'k', 0) === 0 && RP.savePaperPrice(rootP, 'k', 'abc') === 0, '판별: 다른 권은 없음 · 0·숫자 아님은 기록하지 않음');
+  RP.savePaperPrice(rootP, '삼국지_제2권', 15000); ok(RP.loadPaperPrice(rootP, '삼국지_제2권').price === 15000, '같은 권은 덮어쓴다(최신 신청값)');
+  const bkPaper = parseBookText(['# t', '> 저자: a', '> 정가: 19,500원', ''].join(String.fromCharCode(10)), 'x');
+  let pr = RF.ebookPlan(bkPaper, { paperPrice: 17900 });
+  ok(pr.step4.price === 12500 && pr.step4.from === 'paper-registered' && pr.step4.paper === 17900, '🔑 기록된 종이책 17,900원이 원고 정가 19,500원보다 우선 → 12,500원(70% 내림)');
+  ok(!pr.manual.some((s) => /원고 `> 정가:` 기준/.test(s)), '기록이 있으면 「원고 기준」 경고 없음');
+  pr = RF.ebookPlan(bkPaper, {});
+  ok(pr.step4.price === 13600 && pr.step4.from === 'paper70' && pr.manual.some((s) => /종이책을 부크크에 먼저 신청/.test(s)), '기록이 없으면 원고 정가로 계산 + 「종이책을 먼저 신청」 경고');
+  // 종이책 4단계가 읽은 최종정가를 onPrice 로 내보낸다
+  const PB = '가격정책 정가설정 17900 원/권 * 최소가격 17,900원입니다. 정가인하 아니요, 소비자가격을 인하하지 않겠습니다. 외부서점 입점 최종정가 17,900 원';
+  let got = 0; pg = fakePage(PB);
+  await RB.fillBookkPrice(pg, { step4: { price: 0, external: true }, onPrice: (n) => { got = n; } }, () => {});
+  ok(got === 17900, '종이책 4단계: 화면의 최종정가 17,900원을 plan.onPrice 로 기록');
+  // 🔔 로고 색상 확인창은 자동 확인(파랑일 때만)
+  { const mk = (type, message) => { const r = { acc: 0, dis: 0 }; return { type: () => type, message: () => message, accept: async () => { r.acc++; }, dismiss: async () => { r.dis++; }, r }; };
+    let asked = 0; let h; RB.setDialogAsker(async () => { asked++; return false; }); RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {});
+    let d = mk('confirm', '선택하신 로고 색상(파랑)입니다.\n현재 설정으로 진행할까요?'); await h(d);
+    ok(d.r.acc === 1 && asked === 0, '「선택하신 로고 색상(파랑)」 확인창 → 묻지 않고 자동 확인(3→4단계에서 멈추던 것)');
+    d = mk('confirm', '선택하신 로고 색상(빨강)입니다.\n현재 설정으로 진행할까요?'); await h(d);
+    ok(d.r.dis === 1 && asked === 1, '판별: 파랑이 아닌 색은 앱 창에서 묻는다(여기선 취소)');
+    d = mk('confirm', '무료 표지 디자인을 적용하게 되면 날개를 사용할 수 없습니다. 그래도 좋습니까?'); await h(d);
+    ok(d.r.dis === 1 && asked === 2, '다른 확인창은 그대로 묻는다'); }
+
   console.log('\n[8] 안전(소스)');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');
   const code = src.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));

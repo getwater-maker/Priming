@@ -26,6 +26,7 @@ let _ctx = null;   // 열려 있는 컨텍스트(한 번에 하나)
 //   이제 창 내용을 로그에 남기고, alert 는 확인(내용을 읽을 수 있게 앱에 알림), confirm/prompt 는 **앱 창에서 로이에게 묻는다**(askDialog — main 이 넣는다).
 let _dialogAsker = null;
 function setDialogAsker(fn) { _dialogAsker = fn; }
+const AUTO_CONFIRM = /선택하신\s*로고\s*색상\s*\(\s*파랑\s*\)/;   // 「선택하신 로고 색상(파랑)입니다. 현재 설정으로 진행할까요?」 — 이 확인창만 자동 확인
 const _hooked = new WeakSet();
 function _hookDialogs(page, log) {
   if (_hooked.has(page)) return;
@@ -34,7 +35,9 @@ function _hookDialogs(page, log) {
     const type = d.type(); const msg = String(d.message() || '');
     log(`[등록] 🔔 부크크 ${type} 창: ${msg.replace(/\s+/g, ' ').slice(0, 240)}`);
     let accept = true;
-    if (type === 'confirm' || type === 'prompt') {
+    if (type === 'confirm' && AUTO_CONFIRM.test(msg)) {
+      log('[등록] ✓ 로고 색상 확인창 — 우리가 고른 파란색이라 자동으로 「확인」합니다');   // 3단계 → 4단계 이동 때 뜬다(로이 2026-10-02 「팝업에서 멈추네」). 파랑이 아닌 색이면 묻는다
+    } else if (type === 'confirm' || type === 'prompt') {
       accept = false;
       try { if (_dialogAsker) accept = !!(await _dialogAsker(type, msg)); } catch (_) { accept = false; }   // 못 물으면 취소(안전한 쪽)
     } else if (type === 'alert' && _dialogAsker) { try { await _dialogAsker('alert', msg); } catch (_) {} }
@@ -305,6 +308,8 @@ async function fillBookkPrice(page, plan, log) {
   await sleep(500);
   const after = await page.evaluate(() => document.body.innerText).catch(() => '');
   const fm = /최종\s*정가\s*([\d,]+)\s*원/.exec(after);
+  // 💾 종이책 최종정가를 기록한다 — 전자책 정가(종이책의 70%)의 근거(main 이 plan.onPrice 로 저장 · 로이 2026-10-02 「종이책을 먼저 신청하고 그 가격으로 전자책 가격을 산정」)
+  if (fm && typeof plan.onPrice === 'function') { try { plan.onPrice(Number(fm[1].replace(/,/g, ''))); } catch (_) {} }
   if (fm) log(`[등록] 4단계 최종정가 ${fm[1]}원${s4.price && Number(fm[1].replace(/,/g, '')) !== s4.price && !failed.includes('정가') ? ' ⚠ 원고 정가와 다릅니다' : ''}`);
   await _shot(page, plan, log, '4단계');
   return { done, failed, min };
@@ -482,7 +487,7 @@ async function fillBookkEbookPrice(page, plan, log) {
   const step = async (label, fn) => { try { await fn(); done.push(label); } catch (e) { failed.push(label); log(`[등록] ⚠ ${label} 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); } };
   await page.waitForSelector('text=정가설정', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 4단계'); throw new Error('전자책 4단계(가격정책) 화면을 찾지 못했습니다'); });
   const priceSel = 'input[type=text], input[type=number], input:not([type])';
-  if (s4.from === 'paper70') log(`[등록] 💰 전자책 정가 = 종이책 ${Number(s4.paper).toLocaleString('ko-KR')}원 × 70% (10원 단위 이하 버림) = ${Number(s4.price).toLocaleString('ko-KR')}원`);
+  if (s4.from === 'paper70' || s4.from === 'paper-registered') log(`[등록] 💰 전자책 정가 = 종이책(${s4.from === 'paper-registered' ? '부크크 신청 때 기록한 최종정가' : '원고 정가'}) ${Number(s4.paper).toLocaleString('ko-KR')}원 × 70% (10원 단위 이하 버림) = ${Number(s4.price).toLocaleString('ko-KR')}원`);
   if (s4.price) {
     if (s4.price % 100 !== 0 || s4.price <= 0) { failed.push('정가'); log(`[등록] ⚠ 전자책 정가 ${s4.price.toLocaleString('ko-KR')}원은 100원 단위가 아닙니다 — 화면 기본값 그대로 두었습니다. 직접 정하세요`); }
     else {

@@ -9043,9 +9043,18 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         let cover = '';
         if (meta.ebookCover) { const p = path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(S.scriptPath ? path.dirname(S.scriptPath) : root, meta.ebookCover); if (okCover(p)) cover = p; }
         if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), '_ebook-cover.jpg'); if (okCover(t)) cover = t; }
-        plan = RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
-      } else
-      plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+        // 💾 종이책을 부크크에 신청할 때 기록해 둔 최종정가(없으면 원고 `> 정가:`) → 전자책 정가 = 그 70% 내림
+        const RP = require('./core/book/register-price');
+        const rec = RP.loadPaperPrice(root, bookFileBase());
+        if (rec) log(`💾 종이책 신청 때 기록한 최종정가 ${rec.price.toLocaleString('ko-KR')}원(${rec.at.slice(0, 10)})을 전자책 정가 계산에 씁니다`);
+        else log('ℹ 종이책 신청 기록이 없어 원고 정가로 계산합니다 — 종이책을 부크크에 먼저 신청하면(🤖 자동 입력) 화면의 최종정가를 기록합니다');
+        plan = RF.ebookPlan(S.parsed, { epub: pick('.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+      } else {
+        plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: S.parsed._lastPages || 0, interiorPdf: pick('_내지.pdf'), coverPdf: pick('_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+        // 💾 4단계에서 읽은 최종정가를 저장(전자책 정가의 근거)
+        const _key = bookFileBase(); const _title = (registerInfo && registerInfo.title) || (S.parsed.meta || {}).title || '';
+        plan.onPrice = (n) => { try { const v = require('./core/book/register-price').savePaperPrice(root, _key, n, _title); if (v) log(`💾 종이책 최종정가 ${v.toLocaleString('ko-KR')}원 기록 — 전자책 정가(70%)의 근거로 씁니다`); } catch (e) { log('⚠ 종이책 정가 기록 실패: ' + e.message); } };
+      }
     }
     if (args.only === 'cover' && platform === 'bookkEbook') {
       log('📤 [등록 도우미] 부크크 전자책 — 열려 있는 화면의 단계부터 5단계까지 이어서 입력(「도서제출」·저장은 누르지 않습니다)');
