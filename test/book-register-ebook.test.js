@@ -154,6 +154,10 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   ok(RP.savePaperPrice(rootP, '삼국지_제2권', 17900, '삼국지 완역 2') === 17900 && RP.loadPaperPrice(rootP, '삼국지_제2권').price === 17900, '기록 저장·읽기(권 이름이 키)');
   ok(RP.loadPaperPrice(rootP, '삼국지_제3권') === null && RP.savePaperPrice(rootP, 'k', 0) === 0 && RP.savePaperPrice(rootP, 'k', 'abc') === 0, '판별: 다른 권은 없음 · 0·숫자 아님은 기록하지 않음');
   RP.savePaperPrice(rootP, '삼국지_제2권', 15000); ok(RP.loadPaperPrice(rootP, '삼국지_제2권').price === 15000, '같은 권은 덮어쓴다(최신 신청값)');
+  RP.savePaperPrice(rootP, '삼국지_제1권', 16500, '삼국지 완역 1', Date.parse('2026-10-01T00:00:00Z'));
+  RP.savePaperPrice(rootP, '삼국지_제2권', 17900, '삼국지 완역 2', Date.parse('2026-10-02T00:00:00Z'));
+  const lst = RP.listPaperPrices(rootP);
+  ok(lst.length >= 2 && lst[0].key === '삼국지_제2권' && lst[0].price === 17900 && lst.some((o) => o.key === '삼국지_제1권' && o.price === 16500), '다른 권 기록 목록(최근 먼저) — 새 권에서 가져다 쓰도록 보여 준다');
   const bkPaper = parseBookText(['# t', '> 저자: a', '> 정가: 19,500원', ''].join(String.fromCharCode(10)), 'x');
   let pr = RF.ebookPlan(bkPaper, { paperPrice: 17900 });
   ok(pr.step4.price === 12500 && pr.step4.from === 'paper-registered' && pr.step4.paper === 17900, '🔑 기록된 종이책 17,900원이 원고 정가 19,500원보다 우선 → 12,500원(70% 내림)');

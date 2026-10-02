@@ -753,6 +753,17 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             <button className="ghost" disabled={!paperPriceIn} data-testid="bk-paper-price-save" onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: paperPriceIn }); if (r && r.ok) { setPaperPrice(r); setPaperPriceIn(''); setStatus(`💾 종이책 정가 기록 — 전자책 정가 ${r.ebook.toLocaleString('ko-KR')}원`); } else setStatus('⚠ ' + ((r && r.error) || '저장 실패')); }}>저장</button>
           </div>
           <div className="meta bkprice-info" data-testid="bk-paper-price-info">{paperPrice && paperPrice.paper ? `종이책 ${paperPrice.paper.toLocaleString('ko-KR')}원(${paperPrice.source === 'record' ? '기록' : '원고'}) → 전자책 ${paperPrice.ebook.toLocaleString('ko-KR')}원` : '종이책 정가를 모르면 전자책 4단계에서 멈춥니다'}</div>
+          {paperPrice && !paperPrice.price && (paperPrice.others || []).length > 0 && (
+            <div className="bkprice-others" data-testid="bk-paper-price-others">
+              <span className="meta">이 권은 기록이 없습니다 · 다른 권 기록 →</span>
+              {paperPrice.others.map((o) => (
+                <button key={o.key} className="ghost" title={`${o.key} 에 기록된 종이책 정가를 이 권에도 씁니다(권마다 쪽수가 다르면 정가가 다를 수 있으니 확인하세요)`}
+                  onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: o.price }); if (r && r.ok) { setPaperPrice(r); setStatus(`💾 종이책 정가 ${o.price.toLocaleString('ko-KR')}원 기록 — 전자책 ${r.ebook.toLocaleString('ko-KR')}원`); } }}>
+                  {o.key.replace(/^.*_/, '')} {o.price.toLocaleString('ko-KR')}원 쓰기
+                </button>
+              ))}
+            </div>
+          )}
         </div>}
         {!isBookk && <div className="bkactions">
           <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume" title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요" onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>

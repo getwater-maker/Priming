@@ -9100,7 +9100,8 @@ ipcMain.handle('book-register-paper-price', (_e, args = {}) => {
     const rec = RP.loadPaperPrice(root, key);
     const manuscript = Number(String((S.parsed.meta || {}).price || '').replace(/[^0-9]/g, '')) || 0;
     const paper = rec ? rec.price : manuscript;
-    return { ok: true, price: rec ? rec.price : 0, source: rec ? 'record' : (manuscript ? 'manuscript' : ''), paper, ebook: RF.ebookPriceFromPaper(paper) };
+    const others = RP.listPaperPrices(root).filter((o) => o.key !== key).slice(0, 4);   // 다른 권의 기록(권마다 따로 기록되므로 새 권은 비어 있다)
+    return { ok: true, price: rec ? rec.price : 0, source: rec ? 'record' : (manuscript ? 'manuscript' : ''), paper, ebook: RF.ebookPriceFromPaper(paper), others };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 // 파일 위치 보기(탐색기에서 선택)

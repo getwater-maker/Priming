@@ -26,4 +26,9 @@ function loadPaperPrice(root, key) {
   const e = _read(root)[key];
   return e && Number(e.price) > 0 ? e : null;
 }
-module.exports = { savePaperPrice, loadPaperPrice, fileOf };
+/** 기록된 모든 권(최근 기록 먼저) → [{ key, price, at }] — 다른 권의 정가를 가져다 쓰도록 보여 줄 때 */
+function listPaperPrices(root) {
+  const all = _read(root);
+  return Object.keys(all).filter((k) => Number(all[k] && all[k].price) > 0).map((k) => ({ key: k, price: Number(all[k].price), at: String(all[k].at || '') })).sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+module.exports = { savePaperPrice, loadPaperPrice, listPaperPrices, fileOf };
