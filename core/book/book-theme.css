@@ -10,6 +10,8 @@ body {
   font-size: var(--font-size);
   line-height: var(--line-height);
   text-align: justify;
+  /* 양쪽정렬의 여분 간격을 어절 사이에만 몰지 않고 글자 사이로 나눈다 — 삼국지 일러두기 쪽에서 띄어쓰기만 벌어지던 것 해소(공백 0.55em 초과 줄 289→7, 쪽수 변동 0) */
+  text-justify: inter-character;
   word-break: keep-all;
   overflow-wrap: break-word;
   font-kerning: normal;
