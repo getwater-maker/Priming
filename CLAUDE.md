@@ -60,7 +60,7 @@
 - `~/.shots-maker/` 앱 상태(logs · tts-cache · electron userData · anti-detect) · `~/.priming-maker/` 설정(projects/*.smproj.json = **작업본, ⛔ 지우지 말 것** · comfy-*-config · *-accounts · image-rotation · youtube-auth · workspace.json) · `~/.flow-app/` TTS 채널·참조음성·스타일(`tts-presets.json`·`styles.json`·`channel-styles.json`).
 - 작업본(.smproj) 키 = **대본 파일명**(경로 아님). 대본을 옮겨도 이름이 같으면 이어받는다.
 - ⛔ **시작은 빈 화면**(로이 2026-06-22 — 큐 자동 복원 안 함). 지난 큐는 `workspace.last.json`(대본이 있을 때만 씀 · 빈 큐로 덮지 않음) → 큐 자리 「♻ 지난 큐 다시 열기」.
-- 🔑 **테스트는 로이 앱과 같은 userData·localStorage 를 쓴다** — 보기 설정·채널·workspace 를 바꾸는 E2E 는 적어 두고 끝날 때 되돌린다. 임시 채널·임시 출력폴더를 쓰고 지운다.
+- 🛡 **E2E(`PM_UI_SMOKE=1`)의 큐 파일(workspace·last·saves)은 `%TEMP%\priming-smoke-workspace` 로 간다**(`workspaceDir()` · v0.6.59 — 새 E2E 는 반드시 `PM_UI_SMOKE` 를 켤 것). 🔑 **테스트는 로이 앱과 같은 userData·localStorage 를 쓴다** — 보기 설정·채널·workspace 를 바꾸는 E2E 는 적어 두고 끝날 때 되돌린다. 임시 채널·임시 출력폴더를 쓰고 지운다.
 
 ## 5. 외부 서버 (메인 PC)
 

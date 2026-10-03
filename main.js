@@ -5396,7 +5396,11 @@ function flushAutoSave() {
 
 // ── 작업 큐(워크스페이스) 영속 ── 어떤 대본들이 적재됐는지(목록/설정/상태/활성)를 저장.
 //   대본 작업 내용 자체는 각 .smproj.json 에 있고, 여기엔 scriptPath·settings·status 만 기록.
-function workspaceFile() { return path.join(os.homedir(), '.priming-maker', 'workspace.json'); }
+// 🛡 E2E(PM_UI_SMOKE=1)는 로이의 큐 파일을 덮지 않는다 — 임시 폴더로 보낸다(2026-10-03 · 테스트가 가짜 큐 항목을 남긴 사고).
+//   테스트가 큐 파일을 직접 읽을 일이 있으면 SMOKE_WS_DIR 을 쓴다(test/ 는 같은 경로 계산).
+const SMOKE_WS_DIR = path.join(os.tmpdir(), 'priming-smoke-workspace');
+function workspaceDir() { return process.env.PM_UI_SMOKE ? SMOKE_WS_DIR : path.join(os.homedir(), '.priming-maker'); }
+function workspaceFile() { return path.join(workspaceDir(), 'workspace.json'); }
 // 큐 전체 직렬화 (workspace 자동저장 + '큐 저장' 공용). 대본경로·설정·상태만 저장(작업물은 .smproj).
 function serializeQueue() {
   const ser = (mode) => {
@@ -5408,7 +5412,7 @@ function serializeQueue() {
 // ♻ 마지막으로 **비어 있지 않던** 큐 — 앱은 빈 화면으로 시작하므로(로이 2026-06-22) workspace.json 은 곧 빈 큐로 덮인다.
 //   그래서 대본이 하나라도 있을 때마다 이 파일에도 써 두고, 「♻ 지난 큐」 버튼이 여기서 되살린다(로이 2026-09-27:
 //   재시작했더니 열어 둔 하이디 13편 큐가 사라졌다). 빈 큐로는 절대 덮지 않는다.
-function lastWorkspaceFile() { return path.join(os.homedir(), '.priming-maker', 'workspace.last.json'); }
+function lastWorkspaceFile() { return path.join(workspaceDir(), 'workspace.last.json'); }
 function queueItemCount(ws) { return ['longform', 'book'].reduce((n, m) => n + (((ws && ws[m] && ws[m].items) || []).length), 0); }
 function writeWorkspace() {
   try {
@@ -5854,7 +5858,7 @@ ipcMain.handle('merge-prefill', async () => {
 
 // 프로젝트 저장/불러오기 (대본 1개 기준 스냅샷)
 // 저장 전용 폴더 — 작업(.smproj.json)·큐(.pmqueue.json) 파일만 모임. 전체삭제 대상. (자동이어받기 projects/ 와 분리)
-function savesDir() { const d = path.join(os.homedir(), '.priming-maker', 'saves'); try { fs.mkdirSync(d, { recursive: true }); } catch {} return d; }
+function savesDir() { const d = path.join(workspaceDir(), 'saves'); try { fs.mkdirSync(d, { recursive: true }); } catch {} return d; }
 function _saveStamp() { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; }
 ipcMain.handle('save-project', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');

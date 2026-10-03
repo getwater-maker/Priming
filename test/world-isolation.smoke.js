@@ -79,12 +79,12 @@ const LF_OUT = path.join(TMP, path.basename(LF_PATH).replace(/\.md$/, ''));
     ok(ov.metaDoneAt && (!ov.jobDoneAt || ov.metaDoneAt < ov.jobDoneAt), '출판 조작이 제작이 끝나기 전에 처리됨(진짜 겹침): ' + JSON.stringify(ov));
     // 출판 화면이 그대로 출판인지(롱폼 DTO 에 덮이지 않았는지)
     const bkUi = await win.evaluate(() => ({ wrap: !!document.querySelector('.bkwrap'), empty: !!document.querySelector('.bkempty'), tabs: document.querySelectorAll('.bktab').length }));
-    ok(bkUi.wrap && bkUi.tabs === 7 && !bkUi.empty, '제작이 도는 동안에도 출판 화면이 정상(메뉴 7탭 · 빈 화면 아님): ' + JSON.stringify(bkUi));
+    ok(bkUi.wrap && bkUi.tabs === 6 && !bkUi.empty, '제작이 도는 동안에도 출판 화면이 정상(메뉴 6탭 · 빈 화면 아님): ' + JSON.stringify(bkUi));
     // 화면을 덮으려는 다른 세계의 DTO 가 와도(시뮬레이션) 버린다
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.send('dto-update', { fileTitle: '가짜 롱폼 DTO', projects: [], timings: {} }); });
     await sleep(400);
     const bkUi2 = await win.evaluate(() => ({ tabs: document.querySelectorAll('.bktab').length, empty: !!document.querySelector('.bkempty') }));
-    ok(bkUi2.tabs === 7 && !bkUi2.empty, '출판을 보는 중 롱폼 DTO 가 밀려와도 화면이 덮이지 않는다(렌더러 가드)');
+    ok(bkUi2.tabs === 6 && !bkUi2.empty, '출판을 보는 중 롱폼 DTO 가 밀려와도 화면이 덮이지 않는다(렌더러 가드)');
     const t1 = Date.now();
     const pushes = await win.evaluate(({ a, b }) => window.__pushes.filter((p) => p.t >= a && p.t <= b).map((p) => p.kind), { a: tPush0, b: t1 });
     ok(pushes.filter((k) => k !== 'book').length <= 1, '출판을 보는 동안 main 이 롱폼 DTO 를 밀어 보내지 않는다(예외: 위 시뮬레이션 1건): [' + pushes.join(',') + ']');
