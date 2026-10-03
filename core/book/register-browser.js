@@ -666,43 +666,6 @@ async function runEbookFrom(page, plan, log, from) {
 }
 async function fillBookkEbook(page, plan, log) { return runEbookFrom(page, plan, log, 1); }
 
-/**
- * 📚 종이책 → 전자책 한 번에(로이 2026-10-02 「종이책 먼저 등록하고 전자책까지 함께」).
- *   ① 로그인 화면(사람이 로그인) ② 종이책 1~5단계 채우기 ③ 성공하면 **같은 크롬의 새 탭**에서 전자책 1~5단계 — 종이책 탭은 그대로 둔다(로이가 종이책 「도서제출」을 직접 누를 수 있게).
- *   전자책 계획은 종이책 4단계 뒤에 만든다(plan.buildEbookPlan — 종이책 최종정가를 기록한 뒤라야 정가 = 그 70%). 종이책이 하나라도 실패하면 전자책으로 넘어가지 않는다.
- *   🔴 저장·「도서제출」은 두 책 모두 누르지 않는다.
- */
-async function runRegisterBoth(o) {
-  const log = o.log || (() => {});
-  const site = SITES.bookk;
-  const ctx = await _launch(log);
-  const page = ctx.pages()[0] || await ctx.newPage();
-  log(`[등록] 📚 ${site.label} 열기 — ${site.home}`);
-  await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
-  if (/bookk\.co\.kr/.test(site.home)) await _clickNaverLogin(page, log);
-  await _waitLogin(page, site, log, o.isAborted);
-  await page.goto(site.start, { waitUntil: 'load', timeout: 60000 });
-  log('[등록] 📕 1/2 종이책 입력 시작');
-  const r1 = await fillBookk(page, o.plan, log);
-  const done = [...r1.done.map((x) => '종이책 ' + x)]; const failed = [...r1.failed.map((x) => '종이책 ' + x)];
-  const manual = [...(o.plan.manual || []).map((x) => '[종이책] ' + x)];
-  if (r1.failed.length) {
-    log(`[등록] ⏸ 종이책에서 실패가 있어 전자책으로 넘어가지 않습니다(${r1.failed.join(', ')}) — 종이책 탭을 고친 뒤 「🖼 3단계부터 이어 채우기」를 누르고, 끝나면 전자책을 하세요`);
-    return { ok: false, done, failed, manual };
-  }
-  if (o.isAborted && o.isAborted()) throw new Error('중단됨');
-  const eplan = o.plan.buildEbookPlan ? await o.plan.buildEbookPlan() : null;
-  if (!eplan) throw new Error('전자책 계획을 만들지 못했습니다');
-  const epage = await ctx.newPage();
-  log('[등록] 📘 2/2 전자책 입력 시작 — 새 탭(종이책 탭은 그대로 둡니다)');
-  await epage.goto(SITES.bookkEbook.start, { waitUntil: 'load', timeout: 60000 });
-  const r2 = await fillBookkEbook(epage, eplan, log);
-  done.push(...r2.done.map((x) => '전자책 ' + x)); failed.push(...r2.failed.map((x) => '전자책 ' + x));
-  manual.push(...(eplan.manual || []).map((x) => '[전자책] ' + x));
-  log(`[등록] ✅ 📚 종이책 ${r1.done.length}칸 · 전자책 ${r2.done.length}칸 입력${r2.failed.length ? ' · 전자책 실패 ' + r2.failed.join(', ') : ''} — 두 탭에서 확인하고 「도서제출」은 직접 누르세요`);
-  return { ok: !failed.length, done, failed, manual };
-}
-
 /** 열려 있는 등록용 크롬의 전자책 탭에서 지금 몇 단계인지 읽어 거기서부터 이어서 채운다(로그인·1단계를 이미 한 경우). */
 async function runBookkEbookResume(o) {
   const log = o.log || (() => {});
@@ -742,4 +705,4 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runRegisterBoth, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+module.exports = { findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

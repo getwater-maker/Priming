@@ -387,6 +387,17 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkboth{margin-top:8px}
 .bkboth button{background:var(--accent-d,#b9824a);color:#fff;border-color:transparent;font-weight:700}
 .bkboth button:disabled{opacity:.55}
+/* 📤 부크크 등록(통합) — 자동 입력 줄 · 만들기 버튼 · 접이식 점검표 */
+.bkauto{display:flex;flex-direction:column;gap:6px}
+.bkauto-row{display:flex;align-items:center;gap:6px}
+.bkauto-row b{flex:none;width:74px;font-size:12.5px}
+.bkauto-row button{flex:1;min-width:0;padding:7px 4px;font-size:12.5px;white-space:nowrap}
+.bkauto-row button:first-of-type{font-weight:700}
+.bkbuild{flex-wrap:wrap;margin-top:6px}
+.bkbuild button{flex:1 1 45%;padding:6px 4px;font-size:12px}
+.bkplat{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:4px 8px;background:#fdfaf4}
+.bkplat>summary{cursor:pointer;font-size:12.5px;padding:3px 0}
+.bkplat>summary .bkok{color:var(--ok,#4d7f3c)}
 /* 💰 종이책 정가 칸(전자책 탭) — 세로로 정돈: 제목 · 입력줄 · 안내 */
 /* 📚 출판 큐 줄(여러 권을 열었을 때) */
 .bkqueue{margin:0 0 8px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fdfaf4}

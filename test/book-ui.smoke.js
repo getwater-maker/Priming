@@ -104,7 +104,7 @@ ${para}
 
     // 왼쪽 메뉴 — 7개 탭 + 로그가 왼쪽 맨 아래 + 표지 안내 쪽 없음(미리보기 1쪽 = 반표제지)
     const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
-    if (tabs !== 7) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 7');
+    if (tabs !== 6) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 6 (구조·책 정보·판권·표지·조판·부크크 등록 — 종이책·전자책 통합)');
     const geo = await win.evaluate(() => {
       const side = document.querySelector('[data-testid=bk-side]').getBoundingClientRect();
       const log = document.querySelector('#logwrap').getBoundingClientRect();
@@ -139,27 +139,32 @@ ${para}
     if (await hidePathsBox.isChecked()) throw new Error('경로 축약은 기본 OFF 여야 한다');
     console.log('· 경로 축약 옵션 OK (기본 OFF)');
 
-    // 📤 등록 도우미 — 부크크(종이책)·작가와(전자책) 탭: 점검표 · 복사값 · 빌드 버튼
-    for (const [tabId, label, btn] of [['bookk', '종이책·부크크', 'bk-pdf-print'], ['ebook', '전자책·부크크', 'bk-epub']]) {
-      await win.click(`[data-tab=${tabId}]`);
-      await win.waitForSelector(`[data-testid=bk-reg-${tabId}]`, { timeout: 5000 });
-      const nChk = await win.locator(`[data-testid=bk-reg-${tabId}] .bkchk`).count();
-      if (nChk < 10) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
-      if (await win.locator(`[data-testid=bk-reg-${tabId}] .bksum-row`).count() < (tabId === 'ebook' ? 6 : 8)) throw new Error(`${label} 복사값 부족`);
-      if (await win.locator(`[data-testid=${btn}]`).count() !== 1) throw new Error(`${label} 빌드 버튼 없음`);
-      const autoBtn = await win.locator(`[data-testid=bk-register-${tabId}]`).count();
-      if (autoBtn !== 1) throw new Error(`${label} 자동 입력 버튼 개수 ${autoBtn} (종이책·전자책 모두 1개 — 전자책은 2026-10-02 화면 실측 뒤 추가)`);
-      if (await win.locator('[data-testid=bk-paper-price-row]').count() !== (tabId === 'ebook' ? 1 : 0)) throw new Error(`${label} 「종이책 정가」 입력 줄 개수(전자책 탭에만 1개)`);
-      if (await win.locator('[data-testid=bk-register-both]').count() !== 1) throw new Error(`${label} 「종이책 → 전자책 한 번에」 버튼 개수`);
-      await win.waitForSelector(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`, { timeout: 8000 }).catch(() => {});
-      if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-preflight]`).count() !== 1) throw new Error(`${label} 출고 전 점검 패널 없음`);
-      if (await win.locator(`[data-testid=bk-reg-${tabId}] [data-testid=bk-build-all]`).count() !== 1) throw new Error(`${label} 「한 번에 만들기」 버튼 없음`);
-      if (tabId === 'ebook') {
-        if (await win.locator('[data-testid=bk-epubcheck]').count() !== 1) throw new Error('ePub 검증 버튼 없음');
-        if (await win.locator('[data-testid=bk-reg-ebook]').locator('text=작가와').count() > 0) throw new Error('전자책 탭에 작가와 문구가 남아 있음');
+    // 📤 부크크 등록(종이책·전자책 통합 탭, 2026-10-03): 자동 입력(맨 위) · 만들기 · 점검표 2개 · 복사값
+    {
+      await win.click('[data-tab=bookk]');
+      await win.waitForSelector('[data-testid=bk-reg]', { timeout: 5000 });
+      if (await win.locator('[data-tab=ebook]').count() !== 0) throw new Error('전자책 탭이 따로 남아 있다(통합됐어야 한다)');
+      if (await win.locator('[data-tab=bookk]').innerText().then((t) => !/부크크 등록/.test(t))) throw new Error('통합 탭 이름이 「부크크 등록」이 아니다');
+      for (const [pid, label, minChk, minSum] of [['bookk', '종이책', 10, 8], ['ebook', '전자책', 10, 6]]) {
+        const nChk = await win.locator(`[data-testid=bk-reg-${pid}] .bkchk`).count();
+        if (nChk < minChk) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
+        if (await win.locator(`[data-testid=bk-reg-${pid}] .bksum-row`).count() < minSum) throw new Error(`${label} 복사값 부족`);
+        console.log(`· ${label} 점검표 ${nChk}항목`);
       }
-      await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', `ui-${tabId}.png`) });
-      console.log(`· ${label} 등록 도우미 OK — 점검 ${nChk}항목`);
+      const one = async (tid, what) => { const n = await win.locator(`[data-testid=${tid}]`).count(); if (n !== 1) throw new Error(`${what} 개수 ${n}`); };
+      await one('bk-register-bookk', '종이책 자동 입력 버튼'); await one('bk-register-ebook', '전자책 자동 입력 버튼');
+      await one('bk-register-cover', '종이책 이어 채우기'); await one('bk-register-ebook-resume', '전자책 이어 채우기');
+      await one('bk-paper-price-row', '종이책 정가 줄');
+      await one('bk-build-all', '한 번에 만들기'); await one('bk-pdf-print', '종이책 PDF'); await one('bk-epub', 'ePub 만들기'); await one('bk-epubcheck', 'ePub 검증'); await one('bk-pdf-ebook', '전자책 PDF');
+      if (await win.locator('[data-testid=bk-register-both]').count() !== 0) throw new Error('「종이책 → 전자책 한 번에 등록」 버튼이 남아 있다(제거됐어야 한다)');
+      await win.waitForSelector('[data-testid=bk-reg] [data-testid=bk-preflight]', { timeout: 8000 }).catch(() => {});
+      if (await win.locator('[data-testid=bk-reg] [data-testid=bk-preflight]').count() !== 1) throw new Error('출고 전 점검 패널이 1개가 아니다');
+      // 🔑 자동 입력이 패널 맨 위 — 만들기·점검표·점검 패널보다 위에 있다
+      const ys = await win.evaluate(() => { const y = (s) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top + window.scrollY : -1; }; return { auto: y('[data-testid=bk-auto]'), build: y('[data-testid=bk-build-all]'), pf: y('[data-testid=bk-preflight]'), chk: y('[data-testid=bk-reg-bookk]') }; });
+      if (!(ys.auto >= 0 && ys.auto < ys.build && ys.auto < ys.pf && ys.auto < ys.chk)) throw new Error('자동 입력이 맨 위가 아니다 ' + JSON.stringify(ys));
+      if (await win.locator('[data-testid=bk-reg]').locator('text=작가와').count() > 0) throw new Error('부크크 등록 탭에 작가와 문구가 남아 있음');
+      await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookk.png') });
+      console.log('· 부크크 등록(통합) OK — 자동 입력 맨 위 · 점검표 2개 · 만들기 한 곳');
     }
     // 🪽 표지 날개 — 첨부한 표지 판정이 **날개 설정을 따라 그때그때** 바뀌고, 반대 설정 치수면 「날개 설정을 확인하세요」(R11)
     {

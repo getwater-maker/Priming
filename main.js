@@ -9118,7 +9118,7 @@ try {
 ipcMain.handle('book-register-run', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
   if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };
-  const platform = args.platform === 'jakkawa' ? 'jakkawa' : (args.platform === 'bookk-ebook' || args.platform === 'bookkEbook') ? 'bookkEbook' : (args.platform === 'bookk-both' || args.platform === 'bookkBoth') ? 'bookkBoth' : 'bookk';
+  const platform = args.platform === 'jakkawa' ? 'jakkawa' : (args.platform === 'bookk-ebook' || args.platform === 'bookkEbook') ? 'bookkEbook' : 'bookk';
   _bookRegBusy = true;
   try {
     const RF = require('./core/book/register-fill');
@@ -9165,8 +9165,6 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         // 💾 4단계에서 읽은 최종정가를 저장(전자책 정가의 근거)
         const _key = bookFileBase(); const _title = (registerInfo && registerInfo.title) || (S.parsed.meta || {}).title || '';
         plan.onPrice = (n) => { try { const v = require('./core/book/register-price').savePaperPrice(root, _key, n, _title); if (v) log(`💾 종이책 최종정가 ${v.toLocaleString('ko-KR')}원 기록 — 전자책 정가(70%)의 근거로 씁니다`); } catch (e) { log('⚠ 종이책 정가 기록 실패: ' + e.message); } };
-        // 📚 종이책 → 전자책 한 번에: 전자책 계획은 종이책 4단계가 끝나 최종정가가 기록된 **뒤에** 만든다(그래야 그 가격의 70%)
-        if (platform === 'bookkBoth') plan.buildEbookPlan = buildEbookPlan;
       }
     }
     if (args.only === 'cover' && platform === 'bookkEbook') {
@@ -9178,11 +9176,6 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       log('📤 [등록 도우미] 부크크 3단계(표지) 이어서 입력 — 4~5단계까지 채우고 「도서제출」·저장은 누르지 않습니다');
       const rc = await RB.runBookkCoverOnly({ plan, log });
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
-    }
-    if (platform === 'bookkBoth') {
-      log('📤 [등록 도우미] 📚 부크크 종이책 → 전자책 한 번에 등록 시작 — 종이책(1~5단계)을 먼저 채우고, 같은 크롬의 새 탭에서 전자책을 이어 채웁니다. 저장·「도서제출」은 누르지 않습니다');
-      const rb = await RB.runRegisterBoth({ plan, log, isAborted: () => !!S.abort });
-      return { ok: rb.ok, done: rb.done, failed: rb.failed, manual: rb.manual };
     }
     log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
     const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });
