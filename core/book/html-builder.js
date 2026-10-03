@@ -491,12 +491,17 @@ const FONT_STACKS = {
   'kopub-dotum': `'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif`,
   'nanum-myeongjo': `'NanumMyeongjo', 'KoPubWorld Batang', 'Noto Serif KR', 'Batang', ${HANJA_SLOT}, serif`,
   'nanum-gothic': `'NanumGothic', 'KoPubWorld Dotum', 'Dotum', sans-serif`,
+  // 부크크 글꼴(이 PC 에서 읽기 — pdf-builder.EXTERNAL_FONT_DIR). 한자 0자 → 한자는 뒤의 폴백 명조·보강 글꼴이 맡는다. 없는 PC 는 KoPub 로 폴백.
+  'bookk-myungjo': `'Bookk Myungjo', 'KoPubWorld Batang', 'Noto Serif KR', 'NanumMyeongjo', 'Batang', ${HANJA_SLOT}, serif`,
+  'bookk-gothic': `'Bookk Gothic', 'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif`,
 };
 const FONT_OPTIONS = [
   { id: 'kopub', label: 'KoPub월드 바탕 (권장)' },
   { id: 'kopub-dotum', label: 'KoPub월드 돋움' },
   { id: 'nanum-myeongjo', label: '나눔명조' },
   { id: 'nanum-gothic', label: '나눔고딕' },
+  { id: 'bookk-myungjo', label: '부크크 명조 (한자 없는 책용)', ext: 'myungjo' },
+  { id: 'bookk-gothic', label: '부크크 고딕 (한자 없는 책용)', ext: 'gothic' },
 ];
 const GOTHIC_STACK = FONT_STACKS['kopub-dotum'];
 

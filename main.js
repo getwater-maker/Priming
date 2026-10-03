@@ -260,7 +260,7 @@ function bookDTO(parsed) {
     footnoteCount: Object.keys(parsed.footnotes || {}).length,
     footnoteIssues: (() => { try { const F = require('./core/book/footnote-check'); const fx = F.footnoteIssues(parsed); return { ...fx, warnings: F.warnings(fx) }; } catch (_) { return null; } })(),
     reserved: BK.reservedSections(),
-    fontOptions: require('./core/book/html-builder').FONT_OPTIONS,
+    fontOptions: (() => { const av = require('./core/book/pdf-builder').externalFontAvailable(); return require('./core/book/html-builder').FONT_OPTIONS.map((o) => (o.ext && !av[o.ext]) ? { ...o, label: o.label + ' — 이 PC 에 없음' } : o); })(),
     colophonFieldDefs: require('./core/book/html-builder').COLOPHON_FIELDS,
     coverImagePath: parsed.coverImagePath || null,
     coverCheck: (parsed._coverCheck && parsed._coverCheck.imgW) ? coverCheckFor(parsed, parsed._coverCheck.imgW, parsed._coverCheck.imgH, pages) : (parsed._coverCheck || null),

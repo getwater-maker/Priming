@@ -42,6 +42,31 @@ const BUNDLED_FACES = [
   ['NanumGothic', 'NanumGothic-Regular.ttf', 400],
   ['NanumGothic', 'NanumGothic-Bold.ttf', 700],
 ];
+// 🔤 부크크 글꼴(BookkMyungjo·BookkGothic) — 배포물에 동봉하지 않는다(재배포 조건 미확인 · 로이 결정 2026-10-03).
+//   이 PC 의 출판 폴더에서 **읽기만** 한다. 없는 PC 는 조용히 건너뛰고(KoPub 로 폴백) 글꼴 선택지에 「이 PC 에 없음」으로 표시. 한자 0자 — 한자 병기 책엔 부적합.
+//   위치 바꾸기: 환경변수 PRIMING_BOOKK_FONT_DIR. ⛔ assets/fonts/book 에 복사하지 말 것(라이트 업데이트로 배포된다).
+const EXTERNAL_FONT_DIR = process.env.PRIMING_BOOKK_FONT_DIR || 'D:\\## 출판\\_공통\\부크크자료\\글꼴';
+const EXTERNAL_FACES = [
+  ['Bookk Myungjo', path.join('부크크명조', 'BookkMyungjo_Light.ttf'), 300],
+  ['Bookk Myungjo', path.join('부크크명조', 'BookkMyungjo_Bold.ttf'), 700],
+  ['Bookk Gothic', path.join('부크크고딕', 'BookkGothic_Light.ttf'), 300],
+  ['Bookk Gothic', path.join('부크크고딕', 'BookkGothic_Bold.ttf'), 700],
+];
+/** 이 PC 에 실제로 있는 외부 글꼴 면들 [{family, abs, weight}] */
+function externalFaces(dir = EXTERNAL_FONT_DIR) {
+  const out = [];
+  for (const [family, rel, weight] of EXTERNAL_FACES) {
+    const abs = path.join(dir, rel);
+    try { if (fs.statSync(abs).size > 1000) out.push({ family, abs, weight }); } catch (_) {}
+  }
+  return out;
+}
+/** 글꼴 선택지용 — 가족(명조·고딕)마다 Light·Bold 둘 다 있어야 「있음」 */
+function externalFontAvailable(dir = EXTERNAL_FONT_DIR) {
+  const f = externalFaces(dir);
+  const has = (fam) => f.filter((x) => x.family === fam).length === 2;
+  return { myungjo: has('Bookk Myungjo'), gothic: has('Bookk Gothic') };
+}
 function bundledFontCss(urlFor) {
   const toUrl = urlFor || ((p) => 'file:///' + p.replace(/\\/g, '/'));
   const css = [];
@@ -51,6 +76,7 @@ function bundledFontCss(urlFor) {
       if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight}; }`);
     }
   } catch (_) {}
+  for (const x of externalFaces()) css.push(`@font-face { font-family: '${x.family}'; src: url('${toUrl(x.abs)}'); font-weight: ${x.weight}; }`);
   return css.join('\n');
 }
 /** 선언했는데 폴더에 없는 동봉 글꼴 파일 이름들(없으면 []) — 있으면 그 글꼴은 조용히 시스템 대체로 보인다 */
@@ -74,6 +100,7 @@ function prepareWorkAssets(workDir) {
       if (!fs.existsSync(dst)) fs.copyFileSync(path.join(FONT_DIR, f), dst);
     }
   } catch (_) {}
+  try { for (const x of externalFaces()) { const dst = path.join(workDir, 'fonts', path.basename(x.abs)); if (!fs.existsSync(dst)) fs.copyFileSync(x.abs, dst); } } catch (_) {}
   const fontCss = bundledFontCss((abs) => 'fonts/' + path.basename(abs));
   // 이미지 복사(중복 이름 회피) + 상대 URL
   let seq = 0;
@@ -309,4 +336,4 @@ function lastLines(s, n = 4) {
   return lines.slice(-n).join(' | ').slice(0, 400);
 }
 
-module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, missingBundledFonts, BUNDLED_FACES, prepareWorkAssets, pdfPageCount };
+module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, missingBundledFonts, BUNDLED_FACES, EXTERNAL_FONT_DIR, EXTERNAL_FACES, externalFaces, externalFontAvailable, prepareWorkAssets, pdfPageCount };
