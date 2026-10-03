@@ -8,6 +8,7 @@ const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const P = require('./core/pipeline');
 const { getModeProfile } = require('./core/mode-profiles');
+const VSel = require('./core/video-select');   // 🎬 영상 대상 방식(홀수·짝수…) — 영상 대상 판정은 이 모듈 한 곳
 
 // 현재 작업 모드 — open-script 가 설정한 S.mode, 또는 파싱 결과/프로젝트에서 추론.
 function currentMode() {
@@ -4863,11 +4864,18 @@ function warnGrokLimit(info) {
 function _itemRange(s = {}, parsed = null) {
   const num = (v) => (v != null && v !== '' && !isNaN(parseInt(v, 10)) ? parseInt(v, 10) : null);
   const f = num(s.vidFrom), t = num(s.vidTo);
-  if (f != null && t != null) return { fromNum: Math.min(f, t), toNum: Math.max(f, t), src: '저장된 범위' };
+  // 🎬 방식(홀수·짝수·도입부+홀수…)이 저장돼 있으면 범위보다 먼저 — 범위는 로그 표시용으로만 남는다.
+  const sel = VSel.normSel(s.vidSel);
+  if (sel) {
+    const pr0 = parsed && parsed.projects && parsed.projects[0];
+    const nums = pr0 ? (VSel.pick(pr0.groups, sel) || []) : [];
+    return { fromNum: nums.length ? nums[0] : 1, toNum: nums.length ? nums[nums.length - 1] : 1, sel, src: `방식: ${VSel.labelOf(sel)} · ${nums.length}개` };
+  }
+  if (f != null && t != null) return { fromNum: Math.min(f, t), toNum: Math.max(f, t), sel: '', src: '저장된 범위' };
   const pr = parsed && parsed.projects && parsed.projects[0];
   const intro = pr ? pr.groups.filter((g) => g.isIntro).map((g) => g.num) : [];
-  if (intro.length) return { fromNum: 1, toNum: Math.max(...intro), src: '도입부 기본' };
-  return { fromNum: 1, toNum: 1, src: '도입부 없음 — 안전을 위해 G1 만' };
+  if (intro.length) return { fromNum: 1, toNum: Math.max(...intro), sel: '', src: '도입부 기본' };
+  return { fromNum: 1, toNum: 1, sel: '', src: '도입부 없음 — 안전을 위해 G1 만' };
 }
 // ⏸ 「이번 편까지만」(로이 2026-10-01) — 큐 순차 제작(run-batch)이 **다음 대본을 시작하기 전에** 본다.
 //   ■ 중단(S.abort)은 만들던 대본도 바로 멈추지만, 이건 지금 만드는 대본은 끝까지 마치고 다음부터 시작하지 않는다.
@@ -4898,7 +4906,9 @@ function autoRelinkVideos(pr, mediaDir) {
   return n;
 }
 function hasVideoFile(g) { return !!(g.videoPath && fs.existsSync(g.videoPath)); }
-function rangeNums(project, fromNum, toNum) {
+function rangeNums(project, fromNum, toNum, sel = null) {
+  const _vs = VSel.pick(project.groups, sel);   // 🎬 방식(홀수·짝수…) — 1번 그룹 항상 포함
+  if (_vs) return _vs;
   if (fromNum == null || toNum == null) return project.groups.map((g) => g.num);
   const a = Math.min(Number(fromNum), Number(toNum)), b = Math.max(Number(fromNum), Number(toNum));
   return project.groups.filter((g) => g.num >= a && g.num <= b).map((g) => g.num);
@@ -4909,11 +4919,12 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
   const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null, gensparkVideoModel = null } = args;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   let { fromNum = null, toNum = null } = args;
+  let vidSel = VSel.normSel(args.vidSel);
   // 큐 전체(상단 🎬) = perItem — 그 대본에 저장된 범위(없으면 도입부)를 쓴다. 헤더 값 하나로 모든 대본을 덮지 않는다(v0.5.73).
   if (args.perItem) {
     const _it = activeItem();
     const _rg = _itemRange((_it && _it.settings) || {}, S.parsed);
-    fromNum = _rg.fromNum; toNum = _rg.toNum;
+    fromNum = _rg.fromNum; toNum = _rg.toNum; vidSel = _rg.sel || '';
     if (engine !== 'none') log(`🎬 ${(S.parsed && S.parsed.fileTitle) || ''} — 영상 범위 G${fromNum}~G${toNum} (${_rg.src})`);
   }
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
@@ -4931,8 +4942,8 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     if (S.abort) { log('⏹ 중단됨'); break; }
     const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
-    const onlyNums = rangeNums(pr, fromNum, toNum); // N~N 범위 그룹 (랜덤 폐지)
-    const rangeLbl = ` · G${onlyNums[0]}~${onlyNums[onlyNums.length - 1]}`;
+    const onlyNums = rangeNums(pr, fromNum, toNum, vidSel); // N~N 범위 또는 방식 그룹 (랜덤 폐지)
+    const rangeLbl = vidSel ? ` · ${VSel.labelOf(vidSel)} ${onlyNums.length}개` : ` · G${onlyNums[0]}~${onlyNums[onlyNums.length - 1]}`;
     // 영상은 이미지가 있어야 함 — 범위 그룹 중 이미지 없는 게 있으면 먼저 생성(비어있는 것만 채움).
     const needImg = pr.groups.filter((g) => onlyNums.includes(g.num) && g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g));
     if (needImg.length && !S.abort) {
@@ -5923,7 +5934,7 @@ async function runMakeAllBody(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
@@ -5994,7 +6005,8 @@ async function runMakeAllBody(opts = {}) {
   const videoPipeline = _pipeBase && !_wbTarget && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
-  _mk = _mkStart(projects, { fromNum, toNum }, parsed.fileTitle || '', {
+  const vidSel = VSel.normSel(_vidSelArg);
+  _mk = _mkStart(projects, { fromNum, toNum, sel: vidSel }, parsed.fileTitle || '', {
     tts: skipTts ? 'Vrew 에서' : '',
     image: skipVisual ? '음성만 출력' : '',
     video: skipVisual ? '음성만 출력' : _wbTarget ? '화이트보드는 그림만' : videoEngine === 'none' ? '비디오 없음' : _grokCool ? 'Grok 한도' : '',
@@ -6065,7 +6077,7 @@ async function runMakeAllBody(opts = {}) {
   const _videoPipeLoop = async () => {
     const done = new Set();
     const vmap = new Map();
-    for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
+    for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum, vidSel)); // I2V 범위(미지정=전체)
     {
       let relinked = 0, have = 0, total = 0;
       for (const pr of projects) {
@@ -6162,12 +6174,12 @@ async function runMakeAllBody(opts = {}) {
   } else if (videoPipeline) {
     log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
-    log(`🎬 3단계 — 비디오 일괄 생성… (영상 범위 ${fromNum != null ? `G${fromNum}~G${toNum}` : '⚠ 미지정 = 전 그룹'})`);
+    log(`🎬 3단계 — 비디오 일괄 생성… (영상 범위 ${vidSel ? VSel.labelOf(vidSel) : fromNum != null ? `G${fromNum}~G${toNum}` : '⚠ 미지정 = 전 그룹'})`);
     _mk && _mk.begin('video');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      const vOnly0 = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체 — 큐 경로는 _itemRange 가 미지정을 막음)
+      const vOnly0 = rangeNums(pr, fromNum, toNum, vidSel); // I2V 범위(미지정=전체 — 큐 경로는 _itemRange 가 미지정을 막음)
       const _rl = autoRelinkVideos(pr, dirs.media);
       if (_rl) { log(`🔗 ${prLabel(pr)} 출력 폴더에 남아 있던 영상 ${_rl}개를 다시 연결했습니다`); pushDtoUpdate(); }
       const vOnly = vOnly0.filter((n) => { const g = pr.groups.find((x) => x.num === n); return !(g && hasVideoFile(g)); });
@@ -6370,7 +6382,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
         styleId: (common.styleId != null ? common.styleId : (s.styleId || null)),
         // ⚠ 영상 범위 = **대본마다 자기 범위**(_itemRange) — 헤더 범위를 모든 대본에 덮지 않는다(v0.5.73).
-        fromNum: _rg.fromNum, toNum: _rg.toNum,
+        fromNum: _rg.fromNum, toNum: _rg.toNum, vidSel: _rg.sel || '',
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         // 🎛 Genspark 비디오 모델도 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
         gensparkVideoModel: common.gensparkVideoModel || s.gensparkVideoModel || null,
@@ -6502,19 +6514,20 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
 // 🎬 「모든 대본에 적용」(v0.6.48 · 로이 2026-10-02) — 헤더의 영상 범위를 **롱폼 큐의 모든 대본**에 넣는다.
 //   평소엔 범위가 대본마다 따로다(_itemRange · 헤더 범위가 전 대본을 덮어 47개 영상 비용 사고) — 그래서 **누를 때만** 한다.
 //   이미 완료(done)된 대본도 넣는다(다시 만들 때 쓰이므로) · 다른 설정(채널 등)은 건드리지 않는다.
-function applyRangeAll(items, fromNum, toNum) {
+function applyRangeAll(items, fromNum, toNum, sel = '') {
+  const vsel = VSel.normSel(sel);   // 🎬 방식이면 범위 대신 방식을 모두에게(v0.6.60)
   const f = parseInt(fromNum, 10), t = parseInt(toNum, 10);
-  if (!(f >= 1) || !(t >= 1)) throw new Error('범위는 1 이상의 숫자여야 합니다.');
-  const a = Math.min(f, t), b = Math.max(f, t);
+  if (!vsel && (!(f >= 1) || !(t >= 1))) throw new Error('범위는 1 이상의 숫자여야 합니다.');
+  const a = vsel ? (f >= 1 ? f : 1) : Math.min(f, t), b = vsel ? (t >= 1 ? t : 1) : Math.max(f, t);
   let n = 0;
-  for (const it of items || []) { if (!it) continue; it.settings = { ...(it.settings || {}), vidFrom: a, vidTo: b }; n++; }
-  return { fromNum: a, toNum: b, count: n };
+  for (const it of items || []) { if (!it) continue; it.settings = { ...(it.settings || {}), vidFrom: a, vidTo: b, vidSel: vsel }; n++; }
+  return { fromNum: a, toNum: b, sel: vsel, count: n };
 }
 ipcMain.handle('apply-range-all', (_e, args = {}) => {
   const q = S.modes.longform;
-  const r = applyRangeAll(q && q.items, args.fromNum, args.toNum);
+  const r = applyRangeAll(q && q.items, args.fromNum, args.toNum, args.vidSel);
   scheduleAutoSave(); writeWorkspace();
-  log(`🎬 영상 범위 G${r.fromNum}~G${r.toNum} 를 롱폼 큐의 대본 ${r.count}개 모두에 넣었습니다`);
+  log(`🎬 영상 ${r.sel ? '방식 「' + VSel.labelOf(r.sel) + '」' : '범위 G' + r.fromNum + '~G' + r.toNum} 를 롱폼 큐의 대본 ${r.count}개 모두에 넣었습니다`);
   return { ...r, queue: queueDTO() };
 });
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
@@ -8091,9 +8104,9 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   // 빈 프롬프트만 채움 — 이미지 OR i2v(영상) 프롬프트가 비어있는 그룹만 (분할로 초기화된 그룹 등).
   //   이미 둘 다 있는 그룹은 건너뜀(덮어쓰지 않음).
   // 빈 프롬프트만 채움 — 이미지는 모든 그룹, i2v(영상)는 '영상 범위' 그룹만(롱폼=도입부). 범위 밖은 i2v 불요.
-  const _lo = (fromNum != null && toNum != null) ? Math.min(Number(fromNum), Number(toNum)) : null;
-  const _hi = (fromNum != null && toNum != null) ? Math.max(Number(fromNum), Number(toNum)) : null;
-  const _inRange = (g) => (_lo == null) ? true : (g.num >= _lo && g.num <= _hi);
+  const _pr0 = S.parsed.projects[0];
+  const _vm = VSel.matcher((_pr0 && _pr0.groups) || [], args.vidSel, fromNum, toNum);
+  const _inRange = (g) => _vm(g.num);
   const includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (_inRange(g) && (!g.videoPrompt || !g.videoPrompt.trim()));
   const r = await generatePromptsChunked(S.parsed.projects, { styleName, includeFn }, callAnswer, log);
   if (r.groups > 0) {

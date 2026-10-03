@@ -129,7 +129,7 @@ contextBridge.exposeInMainWorld('api', {
   listQueue: () => ipcRenderer.invoke('list-queue'),
   selectQueueItem: (id, world) => ipcRenderer.invoke('select-queue-item', { id, ...(world ? { __world: world } : {}) }),   // world = 호출이 돌 세계('longform'|'book') — 생략하면 화면이 보는 세계
   removeQueueItem: (id, world) => ipcRenderer.invoke('remove-queue-item', { id, ...(world ? { __world: world } : {}) }),
-  applyRangeAll: (fromNum, toNum) => ipcRenderer.invoke('apply-range-all', { fromNum, toNum }),   // 🎬 영상 범위를 롱폼 큐 전체에
+  applyRangeAll: (fromNum, toNum, vidSel) => ipcRenderer.invoke('apply-range-all', { fromNum, toNum, vidSel }),   // 🎬 영상 범위를 롱폼 큐 전체에
   setQueueSettings: (settings, keepChannel, world) => ipcRenderer.invoke('set-queue-settings', { settings, keepChannel: !!keepChannel, ...(world ? { __world: world } : {}) }),
   gensparkCooldown: () => ipcRenderer.invoke('genspark-cooldown'),
   grokCooldown: () => ipcRenderer.invoke('grok-cooldown'),

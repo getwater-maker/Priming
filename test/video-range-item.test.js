@@ -11,7 +11,7 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const st = MAIN.indexOf('function _itemRange(');
 const en = MAIN.indexOf('\n}\n', st);
 ok(st > 0 && en > st, '_itemRange 가 main.js 에 있다');
-const _itemRange = new Function(MAIN.slice(st, en + 2) + '\nreturn _itemRange;')();
+const _itemRange = new Function('VSel', MAIN.slice(st, en + 2) + '\nreturn _itemRange;')(require('../core/video-select'));
 const P = (introNums, n = 12) => ({ projects: [{ groups: Array.from({ length: n }, (_, i) => ({ num: i + 1, isIntro: introNums.includes(i + 1) })) }] });
 
 console.log('[1] 범위 결정');

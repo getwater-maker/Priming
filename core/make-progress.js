@@ -5,6 +5,7 @@
 //     메인 프로세스가 굳는다(CLAUDE.md §6 「동기 호출 금지」). 표시용이라 파일 실재는 4단계 게이트가 따로 확인한다.
 //   ⚠ 이 파일은 렌더러 번들에 들어가지 않지만 core/ 규칙(CJS 런타임 자기검사 금지)을 그대로 지킨다.
 
+const VS = require('./video-select');
 const STAGES = ['tts', 'image', 'video', 'out'];
 
 // 문장 하나가 음성을 가졌는가 — 합성이 끝나면 경로와 길이가 함께 채워진다.
@@ -14,20 +15,15 @@ function sentDone(s) { return !!(s && s.ttsAudioPath && s.ttsDurationSec != null
 function needsVisual(g) { return !!((g.imagePrompt && String(g.imagePrompt).trim()) || g.imageStale); }
 function visualDone(g) { return !!((g.imagePath && !g.imageStale) || g.videoPath); }
 
-function inRange(num, fromNum, toNum) {
-  if (fromNum == null || toNum == null) return true;
-  const a = Math.min(Number(fromNum), Number(toNum)), b = Math.max(Number(fromNum), Number(toNum));
-  return num >= a && num <= b;
-}
-
 function clip(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; }
 
 // 셈 — projects 는 runMakeAllCore 가 고정해 둔 이 대본의 편들(S.parsed 아님 — 큐에서 다른 대본을 봐도 섞이지 않게).
-function count(projects, { fromNum = null, toNum = null } = {}) {
+function count(projects, { fromNum = null, toNum = null, sel = '' } = {}) {
   const sent = { done: 0, total: 0, cur: null };
   const image = { done: 0, total: 0, active: [] };
   const video = { done: 0, total: 0, active: [] };
   for (const pr of projects || []) {
+    const inVid = VS.matcher(pr.groups || [], sel, fromNum, toNum);   // 🎬 범위 또는 방식
     for (const s of pr.sentences || []) {
       sent.total++;
       if (sentDone(s)) sent.done++;
@@ -39,7 +35,7 @@ function count(projects, { fromNum = null, toNum = null } = {}) {
         if (visualDone(g)) image.done++;
         else if (g.imageStatus === 'generating') image.active.push(g.num);
       }
-      if (inRange(g.num, fromNum, toNum)) {
+      if (inVid(g.num)) {
         video.total++;
         if (g.videoPath) video.done++;
         else if (g.videoStatus === 'generating' || g.videoStatus === 'upscaling') video.active.push(g.num);

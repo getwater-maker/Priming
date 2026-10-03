@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
+import { VID_MODES, normVidSel, vidSelLabel, vidMatcher } from './lib/videoSelect.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
@@ -364,6 +365,7 @@ export default function App() {
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
+  const [vidSel, setVidSel] = useState('');       // 🎬 영상 대상 방식('' = 범위 지정 · odd/even/intro_odd… — 채널에 미리 등록, 1번 그룹 항상 포함)
   // 항목 복원(applySettings) 중엔 기본값 effect 들이 항목별 저장값을 덮어쓰지 않게 하는 가드.
   //   hasStoredRangeRef: 이 항목에 저장된 영상범위가 있으면 범위 기본값 계산을 건너뜀.
   //   restoringItemRef: 항목 복원 중이면 프리셋/모드 기본값(배속·스타일·AI고지) 덮어쓰기를 건너뜀.
@@ -698,6 +700,7 @@ export default function App() {
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
         if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
+        setVidSel(normVidSel(p.vidSel));   // 🎬 채널에 등록한 영상 대상 방식(없으면 범위 지정)
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -802,7 +805,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, outMode, outTarget };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, vidSel, flowVideoModel, flowCount, aiNotice, outMode, outTarget };
   }
   function applySettings(s) {
     if (!s) return;
@@ -816,6 +819,7 @@ export default function App() {
     if (s.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
+    setVidSel(normVidSel(s.vidSel));
     hasStoredRangeRef.current = (s.vidFrom != null || s.vidTo != null); // 저장된 범위 있으면 기본값 effect 억제
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
@@ -835,13 +839,14 @@ export default function App() {
   // 🎬 영상 범위 「모두 적용」(v0.6.48) — 확인 후 롱폼 큐의 모든 대본에 지금 범위를 넣는다(평소엔 대본마다 따로).
   async function applyRangeToAll() {
     const f = parseInt(vidFrom, 10), t = parseInt(vidTo, 10);
-    if (!(f >= 1) || !(t >= 1)) { setStatus('범위를 숫자로 넣으세요'); return; }
+    if (!vidSel && (!(f >= 1) || !(t >= 1))) { setStatus('범위를 숫자로 넣으세요'); return; }
     const n = (queue && queue.longform && queue.longform.items.length) || 0;
-    if (!uiConfirm(`작업큐의 대본 ${n}개 모두 영상 범위를 G${Math.min(f, t)}~G${Math.max(f, t)} 로 바꿀까요?\n(대본마다 따로 정해 둔 범위는 덮어씁니다)`)) return;
+    const what = vidSel ? `영상 방식을 「${vidSelLabel(vidSel)}」` : `영상 범위를 G${Math.min(f, t)}~G${Math.max(f, t)}`;
+    if (!uiConfirm(`작업큐의 대본 ${n}개 모두 ${what} 로 바꿀까요?\n(대본마다 따로 정해 둔 범위·방식은 덮어씁니다)`)) return;
     try {
-      const r = await api.applyRangeAll(f, t);
+      const r = await api.applyRangeAll(f, t, vidSel);
       if (r && r.queue) setQueue(r.queue);
-      setStatus(`🎬 영상 범위 G${r.fromNum}~G${r.toNum} — 대본 ${r.count}개 모두 적용`);
+      setStatus(`🎬 ${vidSel ? '영상 방식 「' + vidSelLabel(vidSel) + '」' : '영상 범위 G' + r.fromNum + '~G' + r.toNum} — 대본 ${r.count}개 모두 적용`);
     } catch (e) { logline('범위 모두 적용 오류: ' + e.message); }
   }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
@@ -996,7 +1001,7 @@ export default function App() {
   async function runVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
     setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
@@ -1058,7 +1063,7 @@ export default function App() {
     setStatus('이미지→비디오 생성중…');
     try {
       let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d);
-      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -1067,7 +1072,7 @@ export default function App() {
     return {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
-      fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
+      fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel,
       dry: false, videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel,
       aiNotice, // 사용자 선택(작업바 토글)
       outMode: effOutMode(),  // 전체 / 음성만 / 화면만 (화이트보드는 늘 전체)
@@ -1227,7 +1232,7 @@ export default function App() {
     if (!dto) { setStatus('대본을 먼저 여세요'); return; }
     setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (GPU Ollama)');
     try {
-      const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1 });
+      const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel });
       setDto(d); setStatus('✍ 빈 프롬프트 작성 완료');
     } catch (e) {
       logline('프롬프트작성(GPU Ollama) 실패: ' + e.message);
@@ -1341,11 +1346,10 @@ export default function App() {
     const image = opts.image || 'all';
     const video = opts.video || 'range';
     const vf = parseInt(vidFrom, 10) || 1, vt = parseInt(vidTo, 10) || 1;
-    const lo = Math.min(vf, vt), hi = Math.max(vf, vt);
-    const inRange = (n) => n >= lo && n <= hi;
     const projs = dto.projects.filter((p) => shortsNum == null || p.shortsNum === shortsNum);
     const missing = [];
     for (const p of projs) {
+      const inRange = vidMatcher(p.cuts, vidSel, vf, vt);   // 🎬 범위 또는 방식(홀수·짝수…)
       for (const c of p.cuts) {
         const needImg = image === 'all' || (image === 'range' && inRange(c.num));
         const needVid = video === 'all' || (video === 'range' && inRange(c.num));
@@ -2309,6 +2313,7 @@ export default function App() {
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
       imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
+      vidSel: normVidSel(p.vidSel),            // 🎬 영상 대상 방식(채널 기본값) — ⚠ 아래 저장 patch 에도 실을 것
       outLong: p.outLong || p.outputFolder || '',
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
@@ -2569,6 +2574,7 @@ export default function App() {
       styleThumb: ch.styleThumb || '',
       imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
+      vidSel: normVidSel(ch.vidSel),            // 🎬 영상 대상 방식 — ⚠ 마찬가지
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
@@ -3618,7 +3624,7 @@ export default function App() {
     const t = setTimeout(() => { api.setQueueSettings(currentSettings(), true, mode === 'book' ? 'book' : 'longform').catch(() => {}); }, 300); // keepChannel: 채널은 열 때 값 유지(다음 대본용 채널 선택이 이 항목을 오염시키지 않게)
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice]);
+  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, vidSel, flowVideoModel, flowCount, aiNotice]);
 
   async function copyLog() {
     try { await navigator.clipboard.writeText(logText || ''); setStatus('로그 복사됨'); }
@@ -3920,7 +3926,11 @@ export default function App() {
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
-                  <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
+                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 홀수·짝수만 만들면 제작 비용이 크게 준다(1번 그룹은 항상 포함). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidSel} onChange={(e) => setVidSel(normVidSel(e.target.value))}>
+                    <option value="">범위 지정</option>
+                    {VID_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.label}</option>)}
+                  </select>
+                  {!vidSel && <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>}
                   <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
                     title="이 범위를 작업큐의 모든 대본에 넣습니다 (평소엔 대본마다 자기 범위 — 누를 때만 전체에 적용)" onClick={applyRangeToAll}><span className="rb-t">모두 적용</span></button>
                   <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
@@ -4450,6 +4460,12 @@ export default function App() {
                       </select></div>
                   </div>
                 </div>
+                <div className="crow stack"><span className="l">🎬 영상 만들 그룹 (이 채널 기본값)</span>
+                  <select data-testid="ch-vid-sel" value={normVidSel(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(e.target.value) })}>
+                    <option value="">기본 — 도입부만 (헤더에서 범위 지정)</option>
+                    {VID_MODES.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
+                  </select>
+                  <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 홀수·짝수만 만들면 절반으로 준다. <b>1번 그룹은 항상 포함</b>됩니다. 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
                 <div className="twocol">
