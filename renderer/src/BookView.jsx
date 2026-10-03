@@ -136,7 +136,8 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const viewerRef = useRef(null);   // CoreViewer 인스턴스
   const viewportRef = useRef(null); // 뷰포트 DOM
   const loadedForRef = useRef('');  // 마지막으로 로드한 url (중복 로드 방지)
-  const lastPagesRef = useRef(0);   // 마지막 보고 쪽수 (동일 값 재보고 방지)
+  const lastPagesRef = useRef(0);   // 마지막 보고 쪽수
+  const dtoPagesRef = useRef(0);    // 서버(main)가 지금 아는 쪽수 — 보고 여부는 이것과 비교한다
 
   // 🖥 화면 아래 끝까지 채운다 — 위쪽(헤더) 높이를 재서 남은 만큼(고정 130px 는 아래 빈 공간을 남겼다)
   const wrapRef = useRef(null);
@@ -248,6 +249,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
     return () => { live = false; clearTimeout(t); };
   }, [loaded, contentSig]);
   // 🔎 출고 전 점검 — 부크크 탭(종이책·전자책)을 열 때·완성 파일이 바뀔 때·쪽수가 정해질 때 다시 본다
+  dtoPagesRef.current = (dto && dto.lastPages) || 0;
   const [pfx, setPfx] = useState(null);
   const loadPf = useCallback(() => { api.bookPreflight({ layout }).then((r) => setPfx(r || null)).catch(() => setPfx(null)); }, [layout]);
   useEffect(() => {
@@ -320,8 +322,10 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
         try { fdoc.body.style.zoom = zoomRef.current; syncBodyMin(fdoc, zoomRef.current); } catch (_) {}
         alignSingleSpreads(fdoc); // 홀로 있는 페이지(첫 쪽·마지막 홀수쪽)를 펼침면과 같은 위치(오른쪽/왼쪽)에 고정
-        // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
-        if (total > 0 && total !== lastPagesRef.current) {
+        // 쪽수가 **서버가 아는 값과 다를 때만** 보고한다(책등·규격 재계산 · 같은 값이면 재렌더 회피).
+        //   예전엔 「이전에 보고한 값」과 비교해서, 🆕 초기화 뒤 같은 원고를 다시 열면(조판 쪽수가 똑같아) 보고가 건너뛰어져 서버 쪽수가 0 으로 남았다 →
+        //   「총 ?쪽 · 책등 0mm · 쪽수 미확정 · 표지 치수 불일치」 가 조판이 끝나도 사라지지 않았다(로이 2026-10-03 빨간머리앤 369쪽).
+        if (total > 0 && total !== dtoPagesRef.current) {
           lastPagesRef.current = total;
           api.bookReportPages({ pages: total }).then((d) => { if (d) setDto(d); }).catch(() => {});
         }

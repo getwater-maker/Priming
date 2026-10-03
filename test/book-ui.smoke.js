@@ -58,6 +58,17 @@ ${para}
     }, null, { timeout: 60000 });
     const pageTxt = await win.locator('.bkpage').innerText();
     console.log('· 미리보기 조판 OK —', pageTxt.trim());
+    // 🔁 같은 원고를 🆕 초기화한 뒤 **같은 화면에서** 다시 열면 — 쪽수가 같아도(조판 13쪽 = 13쪽) 쪽수·책등이 다시 확정돼야 한다.
+    //   (로이 2026-10-03: 조판이 끝났는데 「총 ?쪽 · 책등 0mm」·「쪽수 미확정」·「표지 치수 불일치」가 남았다 — 쪽수 보고가 「이전에 보고한 값과 같다」며 건너뛰어졌다)
+    {
+      await win.click('button[title="새 작업 — 현재 화면 비우기"]'); await win.waitForTimeout(600);
+      await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, SAMPLE);
+      await win.click('button:has-text("📖 원고 열기")');
+      await win.waitForFunction(() => { const el = document.querySelector('.bkpage'); return el && /\/\s*\d+쪽/.test(el.textContent); }, null, { timeout: 60000 });
+      const settled = await win.waitForFunction(() => { const s = document.querySelector('[data-testid=bk-side]'); return !!(s && /총\s*\d+쪽/.test(s.innerText) && !/총\s*\?쪽/.test(s.innerText)); }, null, { timeout: 15000 }).then(() => true).catch(() => false);
+      if (!settled) throw new Error('같은 원고를 초기화 후 같은 화면에서 다시 열면 쪽수가 「?」에 갇힌다(쪽수 보고가 건너뛰어짐)');
+      console.log('· 초기화 후 같은 원고 다시 열기 — 쪽수·책등 확정 OK');
+    }
 
     // ── 본문 장 출력 제외(v0.3.33) — 원고는 그대로 두고 책에서만 뺀다 ──
     //   §0 진행 현황·체크리스트처럼 원고엔 있어야 하지만 인쇄물엔 없어야 하는 장을 클릭 한 번으로.
