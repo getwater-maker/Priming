@@ -5744,6 +5744,9 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                       ))}
                                     </span>
                                     {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
+                                    <button className={'clip-hist' + (s.hn ? ' has' : '')} data-testid="clip-hist-btn" title={s.hn ? `이 클립 수정 이력 — ${s.hn}번 고침 · 눌러서 고치기 전으로 돌아가기` : '이 클립 수정 이력(아직 고친 기록 없음)'}
+                                        onMouseDown={(ev) => ev.preventDefault()}
+                                        onClick={(ev) => { ev.stopPropagation(); if (edit.openHist) _E.openHist(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>↶{s.hn ? <sup>{s.hn}</sup> : null}</button>
                                   </div>
                                   <div className="clip-r2">
                                     <span className="clip-ic" aria-hidden="true">🗨</span>
@@ -5760,12 +5763,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                     ) : (
                                       <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
                                     )}
-                                    <span className="clip-btns">
-                                      <button className={'clip-hist' + (s.hn ? ' has' : '')} data-testid="clip-hist-btn" title={s.hn ? `이 클립 수정 이력 — ${s.hn}번 고침 · 눌러서 고치기 전으로 돌아가기` : '이 클립 수정 이력(아직 고친 기록 없음)'}
-                                        onMouseDown={(ev) => ev.preventDefault()}
-                                        onClick={(ev) => { ev.stopPropagation(); if (edit.openHist) _E.openHist(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>↶{s.hn ? <sup>{s.hn}</sup> : null}</button>
-                                      <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
-                                    </span>
+                                    <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
                                   </div>
                                 </div>
                                 {vrewLay && (

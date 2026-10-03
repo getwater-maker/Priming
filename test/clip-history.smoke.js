@@ -46,11 +46,13 @@ const md = () => fs.readFileSync(MD, 'utf8');
     const btn = win.locator('.sent[data-ln="2"] [data-testid="clip-hist-btn"]').first();
     ok(await win.locator('.sent[data-ln="1"] [data-testid="clip-hist-btn"]').first().innerText().then((t) => !/\d/.test(t)), '안 고친 클립 1 에는 횟수 없음');
     const geo = await win.evaluate(() => {
-      const r = document.querySelector('.sent[data-ln="2"] .clip-btns');
-      const [h, f] = [...r.children].map((x) => x.getBoundingClientRect());
-      return { above: h.bottom <= f.top + 1, label: r.children[1].textContent };
+      const row = document.querySelector('.sent[data-ln="2"]');
+      const h = row.querySelector('.clip-r1 [data-testid="clip-hist-btn"]'), f = row.querySelector('.clip-r2 .clip-fmt');
+      if (!h || !f) return { above: false, label: '' };
+      const hb = h.getBoundingClientRect(), fb = f.getBoundingClientRect();
+      return { above: hb.bottom <= fb.top + 1 && Math.abs((hb.left + hb.right) / 2 - (fb.left + fb.right) / 2) < 30, label: f.textContent };
     });
-    ok(geo.above && geo.label === '가', '이력 버튼이 「가」 바로 윗줄');
+    ok(geo.above && geo.label === '가', '이력 버튼이 윗줄(1행) 오른쪽 끝 — 「가」 바로 위');
 
     console.log('\n[2] 팝업 — 원본 + 3');
     await btn.click();
