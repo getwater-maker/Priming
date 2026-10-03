@@ -5746,7 +5746,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                     {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
                                     <button className={'clip-hist' + (s.hn ? ' has' : '')} data-testid="clip-hist-btn" title={s.hn ? `이 클립 수정 이력 — ${s.hn}번 고침 · 눌러서 고치기 전으로 돌아가기` : '이 클립 수정 이력(아직 고친 기록 없음)'}
                                         onMouseDown={(ev) => ev.preventDefault()}
-                                        onClick={(ev) => { ev.stopPropagation(); if (edit.openHist) _E.openHist(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>↶{s.hn ? <sup>{s.hn}</sup> : null}</button>
+                                        onClick={(ev) => { ev.stopPropagation(); if (edit.openHist) _E.openHist(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>🕘 이력{s.hn ? <span className="clip-hist-n">{s.hn}</span> : null}</button>
                                   </div>
                                   <div className="clip-r2">
                                     <span className="clip-ic" aria-hidden="true">🗨</span>
