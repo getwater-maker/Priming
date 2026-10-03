@@ -486,8 +486,10 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       if (r && r.dto) setDto(r.dto);
       const res = (r && r.results) || [];
       const ok = res.filter((x) => x.pdf && x.epub).length;
-      setStatus(r && r.error ? '⚠ ' + r.error : `📚 큐 ${ok}/${res.length}권 완료${ok < res.length ? ' — 실패한 권은 로그 확인' : ''}`);
-      res.forEach((x) => logline(`${x.pdf && x.epub ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${x.cover ? '✓' : '✗'} · ePub ${x.epub ? '✓' : '✗'}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`));
+      const fitBad = res.filter((x) => x.coverFit && !x.coverFit.ok);
+      setStatus(r && r.error ? '⚠ ' + r.error : `📚 큐 ${ok}/${res.length}권 완료${ok < res.length ? ' — 실패한 권은 로그 확인' : ''}${fitBad.length ? ` · ⚠ 표지 치수 불일치 ${fitBad.length}권(${fitBad.map((x) => x.file.replace(/\.md$/i, '')).join(', ')})` : ''}`);
+      const coverLabel = (x) => (!x.cover ? '✗' : !x.coverFit ? '✓(이미지 없음·치수 미확인)' : x.coverFit.ok ? '✓' : `⚠치수(${x.coverFit.imgW}×${x.coverFit.imgH}px ≠ 기대 ${x.coverFit.expW}×${x.coverFit.expH}px${x.coverFit.flapHint ? ' · 날개 ' + (x.coverFit.flapHint === 'file-has-flaps' ? '포함 파일' : '없는 파일') : ''})`);
+      res.forEach((x) => logline(`${x.pdf && x.epub && !(x.coverFit && !x.coverFit.ok) ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${coverLabel(x)} · ePub ${x.epub ? '✓' : '✗'}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`));
     } catch (e) { logline('큐 만들기 오류: ' + e.message); setStatus('⚠ 큐 만들기 오류 — 로그 확인'); }
     setBuilding(false); refreshOutputs();
   }

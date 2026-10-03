@@ -35,7 +35,19 @@ ${para}
 ## [판권]
 `;
 const A = path.join(T, '제1권.md'), B = path.join(T, '제2권.md'), C = path.join(T, '제003회.md');
-fs.writeFileSync(A, book(nameA), 'utf8');
+// 표지 치수 불일치 시험용 — 작은 PNG(120×80, 순수 Node 로 생성). 책등·판형으로 계산한 표지 스프레드와 일부러 안 맞는다.
+function tinyPng(w, h) {
+  const zlib = require('zlib');
+  const crcT = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const cr = Buffer.alloc(4); cr.writeUInt32BE(crc(td)); return Buffer.concat([len, td, cr]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h, 200);
+  for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+fs.writeFileSync(path.join(T, 'cover_small.png'), tinyPng(120, 80));
+fs.writeFileSync(A, book(nameA).replace('> 판형: 46판', '> 판형: 46판\n> 표지파일: cover_small.png'), 'utf8');
 fs.writeFileSync(B, book(nameB), 'utf8');
 fs.writeFileSync(C, `# 제3회 셋째 회\n\n${para}\n`, 'utf8');   // 회차 파일(chapter 종류)
 
@@ -82,6 +94,10 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const res = (br && br.results) || [];
     ok(res.length === 2, `결과 2권 (${res.length})`);
     for (const x of res) ok(x.pdf && x.epub, `${x.file}: 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · ePub ${x.epub ? '✓' : '✗'}${x.error ? ' · ' + x.error : ''}`);
+    const ra = res.find((x) => x.file === '제1권.md'), rb = res.find((x) => x.file === '제2권.md');
+    ok(ra && ra.coverFit && ra.coverFit.ok === false && ra.coverFit.imgW === 120 && ra.coverFit.imgH === 80 && ra.coverFit.expW > 1000, `🔑 표지 치수 불일치를 결과에 담는다 — 제1권: ${ra && ra.coverFit && ra.coverFit.imgW}×${ra && ra.coverFit && ra.coverFit.imgH}px ≠ 기대 ${ra && ra.coverFit && ra.coverFit.expW}×${ra && ra.coverFit && ra.coverFit.expH}px`);
+    ok(rb && rb.coverFit === null, '판별: 표지 이미지가 없는 제2권은 coverFit null(치수 판정 없음 — 불일치로 오인하지 않는다)');
+    ok(br && br.ok === false, '표지 치수 불일치가 있으면 전체 ok 가 false');
     ok(br && br.dto && br.dto.fileTitle === nameB, `끝나면 처음 활성이던 둘째 권으로 돌아온다(${br && br.dto && br.dto.fileTitle})`);
     // 권마다 자기 이름의 파일이 만들어졌는지(권이 섞이지 않았는지)
     const outA = path.join(outParent, nameA), outB = path.join(outParent, nameB);
