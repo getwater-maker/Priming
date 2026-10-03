@@ -4862,20 +4862,14 @@ function warnGrokLimit(info) {
 //   ③ 도입부도 없으면 G1 만. ⚠ 헤더 범위를 모든 대본에 덮지 않는다 — 도입부가 짧은 대본이 본론까지 영상을 만들었다.
 //   ⚠ "미지정 = 전체" 는 절대 만들지 않는다(v0.2.76 47개 영상 사고). 반환: { fromNum, toNum, src }.
 function _itemRange(s = {}, parsed = null) {
-  const num = (v) => (v != null && v !== '' && !isNaN(parseInt(v, 10)) ? parseInt(v, 10) : null);
-  const f = num(s.vidFrom), t = num(s.vidTo);
-  // 🎬 방식(홀수·짝수·도입부+홀수…)이 저장돼 있으면 범위보다 먼저 — 범위는 로그 표시용으로만 남는다.
-  const sel = VSel.normSel(s.vidSel);
-  if (sel) {
-    const pr0 = parsed && parsed.projects && parsed.projects[0];
-    const nums = pr0 ? (VSel.pick(pr0.groups, sel) || []) : [];
-    return { fromNum: nums.length ? nums[0] : 1, toNum: nums.length ? nums[nums.length - 1] : 1, sel, src: `방식: ${VSel.labelOf(sel)} · ${nums.length}개` };
-  }
-  if (f != null && t != null) return { fromNum: Math.min(f, t), toNum: Math.max(f, t), sel: '', src: '저장된 범위' };
-  const pr = parsed && parsed.projects && parsed.projects[0];
-  const intro = pr ? pr.groups.filter((g) => g.isIntro).map((g) => g.num) : [];
-  if (intro.length) return { fromNum: 1, toNum: Math.max(...intro), sel: '', src: '도입부 기본' };
-  return { fromNum: 1, toNum: 1, sel: '', src: '도입부 없음 — 안전을 위해 G1 만' };
+  // 🎬 영상 대상 = **방식**(vidSel) 하나로 정한다(v0.6.63 · 로이: 기본 = 도입부 전체, 채널에 등록한 값이 우선).
+  //   방식이 비어 있으면(옛 항목) 도입부 전체. ⚠ 예전에 저장된 N~M(vidFrom/vidTo)은 더 이상 읽지 않는다 —
+  //   편집 UI 가 없어 조용히 낡은 범위가 이기는 것을 막는다. 「미지정 = 전체」는 만들지 않는다(v0.2.76 47개 영상 사고).
+  const sel = VSel.normSel(s.vidSel) || 'intro';
+  const pr0 = parsed && parsed.projects && parsed.projects[0];
+  const nums = pr0 ? (VSel.pick(pr0.groups, sel) || []) : [];
+  const lbl = VSel.labelOf(sel);
+  return { fromNum: nums.length ? nums[0] : 1, toNum: nums.length ? nums[nums.length - 1] : 1, sel, src: `${lbl}${pr0 ? ` · ${nums.length}개` : ''}` };
 }
 // ⏸ 「이번 편까지만」(로이 2026-10-01) — 큐 순차 제작(run-batch)이 **다음 대본을 시작하기 전에** 본다.
 //   ■ 중단(S.abort)은 만들던 대본도 바로 멈추지만, 이건 지금 만드는 대본은 끝까지 마치고 다음부터 시작하지 않는다.

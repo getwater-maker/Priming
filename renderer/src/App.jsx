@@ -365,7 +365,7 @@ export default function App() {
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
-  const [vidSel, setVidSel] = useState('');       // 🎬 영상 대상 방식('' = 범위 지정 · odd/even/intro_odd… — 채널에 미리 등록, 1번 그룹 항상 포함)
+  const [vidSel, setVidSel] = useState('intro');   // 🎬 영상 대상 방식(기본 = 도입부 전체 · odd/even/intro_odd… — 채널에 미리 등록, 1번 그룹 항상 포함)
   // 항목 복원(applySettings) 중엔 기본값 effect 들이 항목별 저장값을 덮어쓰지 않게 하는 가드.
   //   hasStoredRangeRef: 이 항목에 저장된 영상범위가 있으면 범위 기본값 계산을 건너뜀.
   //   restoringItemRef: 항목 복원 중이면 프리셋/모드 기본값(배속·스타일·AI고지) 덮어쓰기를 건너뜀.
@@ -700,7 +700,7 @@ export default function App() {
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
         if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
         if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
-        setVidSel(normVidSel(p.vidSel));   // 🎬 채널에 등록한 영상 대상 방식(없으면 범위 지정)
+        setVidSel(normVidSel(p.vidSel) || 'intro');   // 🎬 채널에 등록한 영상 대상 방식(없으면 도입부 전체)
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -819,7 +819,7 @@ export default function App() {
     if (s.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
-    setVidSel(normVidSel(s.vidSel));
+    setVidSel(normVidSel(s.vidSel) || 'intro');   // 옛 항목(방식 없음) = 도입부 전체
     hasStoredRangeRef.current = (s.vidFrom != null || s.vidTo != null); // 저장된 범위 있으면 기본값 effect 억제
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
@@ -3926,10 +3926,9 @@ export default function App() {
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
-                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 「직접 입력」은 그룹 번호를 쉼표로 적는다(예: 1,2,5,7). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidIsList(vidSel) ? 'list' : vidSel} onChange={(e) => setVidSel(e.target.value === 'list' ? VID_LIST + (vidListText(vidSel) || '1') : normVidSel(e.target.value))}>
-                    <option value="">기본 — 도입부</option>
-                    <option value="list">직접 입력 (쉼표)</option>
+                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 「직접 입력」은 그룹 번호를 쉼표로 적는다(예: 1,2,5,7). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidIsList(vidSel) ? 'list' : (vidSel || 'intro')} onChange={(e) => setVidSel(e.target.value === 'list' ? VID_LIST + (vidListText(vidSel) || '1') : (normVidSel(e.target.value) || 'intro'))}>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.label}</option>)}
+                    <option value="list">직접 입력 (쉼표)</option>
                   </select>
                   {vidIsList(vidSel) && <input data-testid="vid-list" type="text" inputMode="numeric" style={{ width: 120 }} placeholder="1,2,5,7" title="영상을 만들 그룹 번호 — 쉼표로 구분(예: 1,2,5,7). 3-5 처럼 구간도 됩니다. 이 번호의 그룹만 만든다" value={vidListText(vidSel)} onChange={(e) => setVidSel(normVidSel(VID_LIST + e.target.value))} />}
                   <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
@@ -4462,10 +4461,9 @@ export default function App() {
                   </div>
                 </div>
                 <div className="crow stack"><span className="l">🎬 영상 만들 그룹 (이 채널 기본값)</span>
-                  <select data-testid="ch-vid-sel" value={vidIsList(ch.vidSel) ? 'list' : normVidSel(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: e.target.value === 'list' ? VID_LIST + (vidListText(ch.vidSel) || '1') : normVidSel(e.target.value) })}>
-                    <option value="">기본 — 도입부 전체</option>
-                    <option value="list">직접 입력 — 그룹 번호를 쉼표로 (예: 1,2,5,7)</option>
+                  <select data-testid="ch-vid-sel" value={vidIsList(ch.vidSel) ? 'list' : (normVidSel(ch.vidSel) || 'intro')} onChange={(e) => setCh({ ...ch, vidSel: e.target.value === 'list' ? VID_LIST + (vidListText(ch.vidSel) || '1') : (normVidSel(e.target.value) || 'intro') })}>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
+                    <option value="list">직접 입력 — 그룹 번호를 쉼표로 (예: 1,2,5,7)</option>
                   </select>
                   {vidIsList(ch.vidSel) && <input data-testid="ch-vid-list" type="text" style={{ width: 200 }} placeholder="1,2,5,7" value={vidListText(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(VID_LIST + e.target.value) })} />}
                   <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>

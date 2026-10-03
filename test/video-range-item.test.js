@@ -16,12 +16,12 @@ const P = (introNums, n = 12) => ({ projects: [{ groups: Array.from({ length: n 
 
 console.log('[1] 범위 결정');
 const pick = (r) => ({ f: r.fromNum, t: r.toNum });
-ok(eq(pick(_itemRange({ vidFrom: 2, vidTo: 4 }, P([1, 2, 3, 4, 5, 6, 7]))), { f: 2, t: 4 }), '저장된 범위가 도입부보다 우선');
-ok(eq(pick(_itemRange({ vidFrom: '1', vidTo: '3' }, P([1, 2, 3, 4, 5]))), { f: 1, t: 3 }), '문자열 저장값도 읽는다');
-ok(eq(pick(_itemRange({ vidFrom: 5, vidTo: 2 }, P([]))), { f: 2, t: 5 }), '거꾸로 적은 범위는 바로잡는다');
+ok(eq(pick(_itemRange({ vidFrom: 2, vidTo: 4 }, P([1, 2, 3, 4, 5, 6, 7]))), { f: 1, t: 7 }), '옛 저장 범위(N~M)는 읽지 않는다 — 기본 = 도입부 전체(v0.6.63)');
+ok(eq(pick(_itemRange({ vidSel: 'intro_odd' }, P([1, 2, 3, 4, 5]))), { f: 1, t: 5 }), '방식 intro_odd → 1·3·5');
+ok(eq(_itemRange({ vidSel: 'list:2,9' }, P([], 12)).sel, 'list:2,9') && eq(pick(_itemRange({ vidSel: 'list:2,9' }, P([], 12))), { f: 2, t: 9 }), '직접 입력 list:2,9');
 ok(eq(pick(_itemRange({}, P([1, 2, 3]))), { f: 1, t: 3 }), '저장값 없으면 그 대본의 도입부 끝(G3)');
 ok(eq(pick(_itemRange({}, P([1, 2, 3, 4, 5, 6, 7]))), { f: 1, t: 7 }), '도입부가 긴 대본은 G7');
-ok(eq(pick(_itemRange({ vidFrom: 1 }, P([1, 2]))), { f: 1, t: 2 }), '반쪽만 저장돼 있으면 도입부 기본');
+ok(eq(pick(_itemRange({ vidFrom: 1 }, P([1, 2]))), { f: 1, t: 2 }), '반쪽 옛 값도 도입부 기본');
 ok(eq(pick(_itemRange({}, P([]))), { f: 1, t: 1 }), '도입부 없으면 G1 만 (전체 아님)');
 ok(eq(pick(_itemRange({}, null)), { f: 1, t: 1 }), '대본 없어도 G1 (안 던짐)');
 ok(/도입부/.test(_itemRange({}, P([1])).src), '출처 문구가 붙는다');
