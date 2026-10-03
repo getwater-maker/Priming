@@ -87,7 +87,9 @@ function fileBaseFor(scriptPath) {
   const work = path.basename(path.dirname(dir));
   const name = path.basename(scriptPath).replace(/\.md$/i, '');
   if (!work || !name) return null;
-  return `${work}_${name}`.replace(/[\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+  // 원고 이름에 작품 이름이 이미 들어 있으면(빨간머리앤\원고\빨간머리앤.md · 단권 책) 「빨간머리앤_빨간머리앤」 처럼 겹치지 않게 원고 이름만 쓴다(로이 2026-10-03). 삼국지\원고\제1권.md → 삼국지_제1권 은 그대로.
+  const raw = name.includes(work) ? name : `${work}_${name}`;
+  return raw.replace(/[\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 /**
  * 임시물(조판 작업 폴더·미리보기·전자책 표지 조각·등록 캡처) 위치 — 출력 폴더가 `완성` 이면 업로드 파일과 섞이지 않게 `완성\_작업\<새이름>`,

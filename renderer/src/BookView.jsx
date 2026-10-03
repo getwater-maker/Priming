@@ -168,7 +168,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const [showCover, setShowCover] = useState(true);  // 지금 표지 화면을 보고 있나
   const [coverLines, setCoverLines] = useState(true); // 책등 mm · 접힘선 · 재단선 표시
   const [coverFit, setCoverFit] = useState(0.4);     // 표지 펼침면 배율(mm → 화면 맞춤)
-  const coverRef = useRef(null), showCoverRef = useRef(true), curRef = useRef(0), navRef = useRef(null);
+  const coverRef = useRef(null), showCoverRef = useRef(true), curRef = useRef(0), navRef = useRef(null), navBusyRef = useRef(false), navPendRef = useRef(null), navTimerRef = useRef(null), navFlushRef = useRef(null);
   const coverBoxRef = useRef(null), coverCanvasRef = useRef(null);
   coverRef.current = cover; showCoverRef.current = showCover;
   const [regBusy, setRegBusy] = useState(false);
@@ -310,6 +310,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     });
     viewerRef.current = viewer;
     viewer.addListener('nav', (p) => {
+      try { navFlushRef.current && navFlushRef.current(); } catch (_) {}   // 앞 이동이 끝났다 — 기다리던 이동이 있으면 이어서
       if (p && typeof p.epage === 'number') { curRef.current = Math.round(p.epage) + 1; setPageInfo((pi) => ({ ...pi, cur: Math.round(p.epage) + 1 })); }
     });
     viewer.addListener('readystatechange', () => {
@@ -591,17 +592,32 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     } catch (e) { logline('표지 가이드 오류: ' + e.message); }
   }
   // ⏮ ◀ ▶ ⏭ — 표지 화면이 맨 앞이다: ⏮ = 표지 · 표지에서 ▶ = 1쪽 · 1쪽에서 ◀ = 표지
+  // 🧭 뷰어 이동은 **한 번에 하나씩** — 앞 이동(표지에서 ▶ = 1쪽으로 FIRST)이 끝나기 전에 NEXT 를 부르면 Vivliostyle 가 아직 위치가 없어
+  //   `moveTo … Cannot read properties of null (reading 'spineIndex')` 를 던지고 그 이동이 사라졌다(빌드 직후 첫 실행·빠른 연타에서 화살표가 안 넘어가던 원인).
+  //   'nav' 이벤트가 오면 다음 이동을 이어서 실행하고, 이벤트가 안 오는 이동(맨 끝 등)은 1.2초 뒤 풀어 준다. 대기는 마지막 요청 하나만.
+  const goNav = (dir) => {
+    const v = viewerRef.current; if (!v) return;
+    if (navBusyRef.current) { navPendRef.current = dir; return; }
+    navBusyRef.current = true;
+    clearTimeout(navTimerRef.current); navTimerRef.current = setTimeout(() => { if (navFlushRef.current) navFlushRef.current(); }, 1200);
+    try { v.navigateToPage(dir); } catch (_) { navBusyRef.current = false; }
+  };
+  navFlushRef.current = () => {
+    navBusyRef.current = false; clearTimeout(navTimerRef.current);
+    const d = navPendRef.current; navPendRef.current = null;
+    if (d != null) setTimeout(() => goNav(d), 0);
+  };
   const nav = (dir) => {
     const hasCover = !!coverRef.current;
     try {
-      if (dir === Navigation.FIRST) { if (hasCover) { setShowCover(true); return; } viewerRef.current && viewerRef.current.navigateToPage(dir); return; }
+      if (dir === Navigation.FIRST) { if (hasCover) { setShowCover(true); return; } goNav(dir); return; }
       if (showCoverRef.current) {
-        if (dir === Navigation.NEXT) { setShowCover(false); viewerRef.current && viewerRef.current.navigateToPage(Navigation.FIRST); }
-        else if (dir === Navigation.LAST) { setShowCover(false); viewerRef.current && viewerRef.current.navigateToPage(Navigation.LAST); }
+        if (dir === Navigation.NEXT) { setShowCover(false); goNav(Navigation.FIRST); }
+        else if (dir === Navigation.LAST) { setShowCover(false); goNav(Navigation.LAST); }
         return;
       }
       if (dir === Navigation.PREVIOUS && hasCover && curRef.current <= 1) { setShowCover(true); return; }
-      viewerRef.current && viewerRef.current.navigateToPage(dir);
+      goNav(dir);
     } catch {}
   };
   navRef.current = nav;

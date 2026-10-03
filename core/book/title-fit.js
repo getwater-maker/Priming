@@ -83,7 +83,7 @@ function countLines(text, fonts, sizePt, lineWidthPt, letterSpacingPt = 0) {
 
 const TOC_LABEL_EM = 3.7;              // .no 칸(html-builder 의 nav.toc a .no flex-basis)
 const TOC_RESERVE_EM = 1.5 + 1.1 + 1.8; // 점선 최소폭 + 좌우 여백(0.55em×2) + 쪽번호(0.95em 고딕 3자)
-const CH_RE = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/;
+const { CH_RE } = require('./chapter-no');   // 제N회·제N장·제N화 — 한 곳(chapter-no.js)
 
 /**
  * @param {object} book  parseBookText 결과(parts·meta)

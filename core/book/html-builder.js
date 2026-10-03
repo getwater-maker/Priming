@@ -18,6 +18,7 @@
  *   sourceMap(true)  data-src-line 속성 부여(클릭-편집용)
  */
 
+const { CH_RE } = require('./chapter-no');   // 회목 번호 인식(제N회·제N장·제N화) 한 곳
 const fs = require('fs');
 const path = require('path');
 const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
@@ -448,7 +449,7 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
 //   점선은 leader() 대신 flex 빈칸의 border-bottom(dotted) — 미리보기(코어)·CLI 양쪽 동일 렌더.
 // 머리글 「제N회 + 짧은 제목」 문구 — 짧은 제목이 없는 회는 「제N회」만(제N회 형식이 아니면 전체 제목)
 function headerShortText(c) {
-  const m = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title || '');
+  const m = CH_RE.exec(c.title || '');
   const no = m ? m[1] : (c.title || '');
   return c.shortTitle && m ? `${no} ${c.shortTitle}` : no;
 }
@@ -463,7 +464,7 @@ function tocHtml(book, tocTitle, excluded = [], useFull = false) {
       if (!c.title) continue;
       if (chapterExcluded(c.title, excluded)) continue; // 출력에서 뺀 장은 목차에도 안 나온다
       // 「제N회」 라벨 칸 + 회목 칸(내어쓰기 · 2~3줄) — 점선·쪽번호는 마지막 줄에 붙는다(삼국지 R14). 형식이 아닌 장은 통째(예전 그대로).
-      const mT = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
+      const mT = CH_RE.exec(c.title);
       items.push(mT
         ? `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="no">${esc(mT[1])}</span><span class="tt">${esc((c.shortTitle && !useFull) ? c.shortTitle : mT[2])}</span><span class="dots"></span></a></li>`
         : `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
@@ -836,7 +837,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
 ${c.title ? (() => {
         // 최종본 스타일: '제N회'와 제목을 2줄로 분리(중앙 정렬). 러닝헤드용 전체 원제는 숨김 앵커(.ch-rh)로.
-        const mCh = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
+        const mCh = CH_RE.exec(c.title);
         const inner = mCh ? `<span class="ch-no">${esc(mCh[1])}</span>${esc(mCh[2])}` : esc(c.title);
         return `<span class="ch-rh" aria-hidden="true">${esc(c.title)}</span>`
           + `<span class="ch-rh-no" aria-hidden="true">${esc(mCh ? mCh[1] : c.title)}</span>`
