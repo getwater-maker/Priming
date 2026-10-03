@@ -222,6 +222,9 @@ contextBridge.exposeInMainWorld('api', {
   setSavedCapFormats: (list) => ipcRenderer.invoke('set-saved-cap-formats', list),
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
+  // 🕘 클립 수정 이력(2026-10-03) — 한 문장의 지난 글 목록 · 그 글로 되돌리기
+  clipHistory: (args) => ipcRenderer.invoke('clip-history', args),
+  clipHistoryRestore: (args) => ipcRenderer.invoke('clip-history-restore', args),
   // 🧩 클립 도구 막대(v0.5.94)
   deleteClips: (args) => ipcRenderer.invoke('delete-clips', args),
   copyClips: (args) => ipcRenderer.invoke('copy-clips', args),

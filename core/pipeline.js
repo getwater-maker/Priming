@@ -110,6 +110,7 @@ function toDTO(parseResult) {
               spans: (s.capSpans && s.capSpans.length) ? s.capSpans : null,   // 🎨 줄별·글자별 자막 서식(문장 글자 위치)
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
+              hn: require('./clip-history').countOf(s) || 0,   // 🕘 이 문장을 고친 횟수(이력 버튼 배지)
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
               lines: splitCaptionLines(s.text || '', capChars, s.capBreaks).map((t) => ({ n: ++capN, text: t })),
             })),

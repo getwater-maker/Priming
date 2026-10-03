@@ -631,6 +631,16 @@ main.pane2{min-width:0}
 .clip-r2 .clip-cap{flex:1 1 auto;border:0;padding:0;min-height:21px;line-height:1.5}
 .clip-r2 .clip-edit{flex:1 1 auto;font:inherit;font-size:14px;line-height:1.5;color:var(--strong);border:0;outline:0;background:transparent;padding:0;margin:0;resize:none;overflow:hidden;min-height:21px;box-shadow:none}
 .sent.clip.editing .clip-r2{background:#fffbe9;box-shadow:inset 0 -2px 0 var(--accent)}
+.clip-r2 .clip-btns{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:3px}
+.clip-r2 .clip-hist{padding:0 7px;font-size:12px;font-weight:800;line-height:18px;background:#fff;border:1px solid #e2d5c0;color:#a39580;border-radius:5px;white-space:nowrap}
+.clip-r2 .clip-hist.has{background:#fff3d6;border-color:#d9b46a;color:#8a5a00}
+.clip-r2 .clip-hist sup{font-size:9px;margin-left:1px}
+.clip-hist-row{border:1px solid #e2d5c0;border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#fffdf8}
+.clip-hist-row.cur{border-color:#d9b46a;background:#fff3d6}
+.clip-hist-row .ch-top{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.clip-hist-row .ch-top button{margin-left:auto}
+.clip-hist-row .ch-now{margin-left:auto;font-size:12px;font-weight:800;color:#8a5a00}
+.clip-hist-row .ch-text{white-space:pre-wrap;word-break:keep-all;line-height:1.5}
 .clip-r2 .clip-fmt{flex:0 0 auto;padding:1px 7px;font-size:12px;font-weight:800;background:#f3ead9;border:1px solid #e2d5c0;color:#6e5a3c;border-radius:5px}
 .clip-meta{display:none}
 /* ① 칸 팝업(자막 자리에서 고치기) */

@@ -7198,6 +7198,7 @@ async function _editSentences(args = {}) {
   const gPos = g.sentenceIds.indexOf(old[0].id);
   // 🖼 이어 깐 그림의 범위 끝이 이 문장을 가리키면 새 문장으로 옮긴다(첫 → 첫 · 끝 → 끝)
   { const mp = new Map(); old.forEach((o, i) => mp.set(o.id, made[Math.min(i, made.length - 1)].id)); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
+  if (old.length === 1 && made.length === 1) { try { require('./core/clip-history').record(old[0], made[0], args.restoreIdx); } catch (e) { log('⚠ 클립 수정 이력 기록 실패: ' + e.message); } }   // 🕘 클립 수정 이력(한 문장 → 한 문장만 잇는다)
   pr.sentences.splice(from, n, ...made);
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
@@ -7225,6 +7226,28 @@ async function _editSentences(args = {}) {
   return { ok: true, dto: P.toDTO(S.parsed) };
 }
 ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));   // async
+
+require('./core/clip-history').setScopeFn(() => (S.scriptPath ? path.basename(S.scriptPath) : ''));   // 이력은 대본 파일명 안에서만 이어진다(같은 글이 다른 대본에 있어도 안 섞인다)
+// 🕘 클립 수정 이력 — 한 문장의 지난 글들을 보여 주고(clip-history) 그 글로 되돌린다(clip-history-restore · 되돌려도 이력은 남는다)
+function _histSentence(args = {}) {
+  if (!S.parsed || S.parsed.kind === 'book') return null;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  return g ? (pr.getSentencesOfGroup(g)[Number(args.sentIdx)] || null) : null;
+}
+ipcMain.handle('clip-history', (_e, args = {}) => {
+  const sen = _histSentence(args);
+  if (!sen) return { ok: false, error: '문장을 찾을 수 없습니다.' };
+  return { ok: true, ...require('./core/clip-history').listOf(sen) };
+});
+ipcMain.handle('clip-history-restore', async (_e, args = {}) => {
+  const sen = _histSentence(args);
+  if (!sen) return { ok: false, error: '문장을 찾을 수 없습니다.' };
+  const h = require('./core/clip-history').listOf(sen);
+  const to = Number(args.idx);
+  if (!(to >= 0 && to < h.versions.length) || to === h.idx) return { ok: false, error: '이미 그 글입니다.' };
+  return _editSentences({ shortsNum: args.shortsNum, groupNum: args.groupNum, sentIdx: args.sentIdx, count: 1, text: h.versions[to].text, restoreIdx: to });
+});
 
 // ✂ 자막 줄 나누기·합치기 — 한 문장 안에서 사람이 줄 나눔을 정한다(음성은 그대로 · 대본 .md 무변경).
 //   breaks = 새 줄이 시작하는 글자 위치 배열(null/[] = 자동 줄바꿈으로). text 를 함께 보내면 먼저 그 글로 고친다(편집 중 나누기).

@@ -2172,6 +2172,28 @@ export default function App() {
     setCapSel({ shortsNum: sn, mode: 'lines', items: [info], anchorN: info.n });
     pickMenu('format'); setCapPanel('fmt');
   }
+  /** 🕘 「이력」 — 이 클립(문장)의 지난 글들을 팝업으로 보고, 고른 글로 되돌린다 */
+  const [clipHist, setClipHist] = useState(null);   // { sn, groupNum, sentIdx, n, versions:[{text,at}], idx, busy, error }
+  async function openClipHist(sn, info) {
+    if (sentEdit) await commitSentEdit();   // 고치던 글이 있으면 먼저 저장해 이력에 넣는다
+    setCursor({ shortsNum: sn, n: info.n });
+    try {
+      const r = await api.clipHistory({ shortsNum: sn, groupNum: info.groupNum, sentIdx: info.sentIdx });
+      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '이력을 읽지 못했습니다')); return; }
+      setClipHist({ sn, groupNum: info.groupNum, sentIdx: info.sentIdx, n: info.n, versions: r.versions, idx: r.idx, busy: false, error: '' });
+    } catch (e) { setStatus('⚠ 이력 오류: ' + e.message); }
+  }
+  async function restoreClipHist(to) {
+    const h = clipHist; if (!h || h.busy || to === h.idx) return;
+    setClipHist({ ...h, busy: true, error: '' });
+    try {
+      const r = await api.clipHistoryRestore({ shortsNum: h.sn, groupNum: h.groupNum, sentIdx: h.sentIdx, idx: to });
+      if (!r || !r.ok) { setClipHist({ ...h, busy: false, error: (r && r.error) || '되돌리지 못했습니다' }); return; }
+      setDto(r.dto);
+      logline(`🕘 클립 ${h.n} — ${to === 0 ? '원본' : to + '번째 수정본'} 글로 되돌렸습니다 (음성은 글이 달라졌으면 🎤 로 다시)`);
+      setClipHist(null);
+    } catch (err) { setClipHist({ ...h, busy: false, error: err.message }); }
+  }
   /** Ctrl+A — 이 편의 모든 클립 선택 */
   function selectAllClips() {
     const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
@@ -4180,7 +4202,7 @@ export default function App() {
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
               splitAt: splitSentAtCursor, mergeUp: mergeSentUp, mergeNext: mergeSentNext,
-              note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, navTo: navEditTo, play: playFromEdit, stopIfPlaying, fmtClip,
+              note: setStatus, lineKey: lineEditKey, navOut: navOutOfSentence, navTo: navEditTo, play: playFromEdit, stopIfPlaying, fmtClip, openHist: openClipHist,
               across: (d) => { if (!sentEdit) return; mergeAcross(d); },
             }} /></ErrorBoundary>
           </>)}
@@ -4246,6 +4268,33 @@ export default function App() {
           </div>
         );
       })()}
+      {clipHist && (
+        <div className="modal-bg show" style={{ zIndex: 96 }} data-testid="clip-hist" onMouseDown={(ev) => { if (ev.target === ev.currentTarget && !clipHist.busy) setClipHist(null); }}>
+          <div className="modal-card" style={{ maxWidth: 560, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onKeyDown={(ev) => { if (ev.key === 'Escape') setClipHist(null); }}>
+            <h3>🕘 클립 {clipHist.n} 수정 이력</h3>
+            <div className="meta" style={{ marginBottom: 6 }}>
+              {clipHist.versions.length > 1 ? `원본 + 수정 ${clipHist.versions.length - 1}번 — 되돌리고 싶은 때를 고르세요. 되돌려도 다른 기록은 남습니다.` : '아직 고친 기록이 없습니다. 이 클립의 글을 고치면 여기에 쌓입니다.'}
+            </div>
+            <div className="clip-hist-list" style={{ overflowY: 'auto', flex: '1 1 auto' }}>
+              {clipHist.versions.map((v, i) => {
+                const cur = i === clipHist.idx;
+                return (
+                  <div key={i} className={'clip-hist-row' + (cur ? ' cur' : '')} data-testid="clip-hist-row">
+                    <div className="ch-top">
+                      <b>{i === 0 ? '원본' : `수정 ${i}`}</b>
+                      <span className="meta">{v.at ? new Date(v.at).toLocaleString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }) : '처음 글'}</span>
+                      {cur ? <span className="ch-now">지금</span> : <button disabled={clipHist.busy} onClick={() => restoreClipHist(i)}>이 때로 돌아가기</button>}
+                    </div>
+                    <div className="ch-text">{v.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {clipHist.error && <div style={{ color: '#b3261e', marginTop: 6 }}>⚠ {clipHist.error}</div>}
+            <div className="mbtns"><button className="ghost" onClick={() => setClipHist(null)} disabled={clipHist.busy}>닫기</button></div>
+          </div>
+        </div>
+      )}
       {nameAsk && (
         <div className="modal-bg show name-ask-layer">
           <div className="modal-card" style={{ maxWidth: 420 }}>
@@ -5445,7 +5494,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   }, []);
   const _E = useMemo(() => {
     const o = {};
-    for (const k of ['start', 'commit', 'cancel', 'splitAt', 'mergeUp', 'mergeNext', 'note', 'lineKey', 'navOut', 'navTo', 'play', 'stopIfPlaying', 'fmtClip', 'across']) o[k] = (...a) => { const e = _L.current.edit; return e && typeof e[k] === 'function' ? e[k](...a) : undefined; };
+    for (const k of ['start', 'commit', 'cancel', 'splitAt', 'mergeUp', 'mergeNext', 'note', 'lineKey', 'navOut', 'navTo', 'play', 'stopIfPlaying', 'fmtClip', 'openHist', 'across']) o[k] = (...a) => { const e = _L.current.edit; return e && typeof e[k] === 'function' ? e[k](...a) : undefined; };
     return o;
   }, []);
   useLayoutEffect(() => {
@@ -5711,7 +5760,12 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                     ) : (
                                       <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
                                     )}
-                                    <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
+                                    <span className="clip-btns">
+                                      <button className={'clip-hist' + (s.hn ? ' has' : '')} data-testid="clip-hist-btn" title={s.hn ? `이 클립 수정 이력 — ${s.hn}번 고침 · 눌러서 고치기 전으로 돌아가기` : '이 클립 수정 이력(아직 고친 기록 없음)'}
+                                        onMouseDown={(ev) => ev.preventDefault()}
+                                        onClick={(ev) => { ev.stopPropagation(); if (edit.openHist) _E.openHist(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>↶{s.hn ? <sup>{s.hn}</sup> : null}</button>
+                                      <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
+                                    </span>
                                   </div>
                                 </div>
                                 {vrewLay && (
