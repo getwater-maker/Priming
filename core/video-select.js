@@ -12,15 +12,41 @@ const MODES = [
 ];
 const IDS = MODES.map((m) => m.id);
 
-// 알려진 방식이면 그 id, 아니면 ''(= 범위 지정/기본). 모르는 값을 조용히 다른 방식으로 바꾸지 않는다.
-function normSel(v) { return IDS.includes(v) ? v : ''; }
-function labelOf(v) { const m = MODES.find((x) => x.id === v); return m ? m.label : '범위 지정'; }
+// 🎬 직접 입력(v0.6.62 · 로이): `list:1,2,5,7` — 쉼표로 적은 그룹 번호만 만든다(「3-5」 같은 구간도 허용).
+//   ⚠ 입력 도중(끝 쉼표)에도 값이 지워지지 않게 숫자·쉼표·하이픈만 남기고 그대로 둔다.
+const LIST = 'list:';
+function isList(v) { return typeof v === 'string' && v.startsWith(LIST); }
+function listText(v) { return isList(v) ? v.slice(LIST.length) : ''; }
+function listNums(v) {
+  const out = new Set();
+  for (const part of listText(v).split(',')) {
+    const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) continue;
+    const a = parseInt(m[1], 10), b = m[2] != null ? parseInt(m[2], 10) : a;
+    for (let k = Math.min(a, b); k <= Math.max(a, b) && k - Math.min(a, b) < 500; k++) if (k >= 1) out.add(k);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+// 알려진 방식이면 그 id, 아니면 ''(= 기본). 모르는 값을 조용히 다른 방식으로 바꾸지 않는다.
+function normSel(v) {
+  if (isList(v)) return LIST + listText(v).replace(/[^\d,\-]/g, '');
+  return IDS.includes(v) ? v : '';
+}
+function labelOf(v) {
+  if (isList(v)) { const t = listNums(v); return t.length ? `직접 입력 G${t.join(',')}` : '직접 입력(비어 있음)'; }
+  const m = MODES.find((x) => x.id === v); return m ? m.label : '기본(도입부)';
+}
 
 // groups: [{num, isIntro}] → 영상으로 만들 그룹 번호(오름차순). sel 이 없으면 null(= 호출자가 N~M 범위를 쓴다).
 function pick(groups, sel) {
   const s = normSel(sel);
   if (!s) return null;
   const gs = (groups || []).filter((g) => g && g.num != null);
+  if (isList(s)) {                                                   // 직접 입력 — 적은 번호 중 실제 있는 그룹만. 1번 강제 없음(적은 그대로)
+    const have = new Set(gs.map((g) => g.num));
+    return listNums(s).filter((n) => have.has(n));                   // 비면 [] = 영상 0개(전체로 번지지 않는다)
+  }
   const first = gs.length ? Math.min(...gs.map((g) => g.num)) : 1;   // 「1번 그룹」= 가장 앞 그룹
   const intro = (g) => !!g.isIntro;
   // 🔑 영상은 **도입부 안에서만** 고른다(로이 2026-10-03 — 본문까지 넓어지는 방식은 뺐다). 도입부가 없으면 1번만.
@@ -46,4 +72,4 @@ function matcher(groups, sel, fromNum, toNum) {
   return (n) => n >= a && n <= b;
 }
 
-module.exports = { MODES, normSel, labelOf, pick, matcher };
+module.exports = { MODES, normSel, labelOf, pick, matcher, isList, listText, listNums, LIST };

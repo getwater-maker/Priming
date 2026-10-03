@@ -1,6 +1,6 @@
 'use strict';
 // node test/range-all.smoke.js — 🎬 영상 범위 「모두 적용」(v0.6.48) E2E.
-//   대본 둘을 큐에 열고 → 헤더 범위를 G1~G2 로 → 「모두 적용」 → 두 대본 모두 vidFrom/vidTo = 1/2.
+//   대본 둘을 큐에 열고 → 헤더 범위를 G1,2 로 → 「모두 적용」 → 두 대본 모두 vidFrom/vidTo = 1/2.
 //   판정력: 누르기 전엔 먼저 연 대본이 자기 범위(헤더를 바꾸면 활성 대본만 바뀐다)라 1/2 가 아니어야 한다.
 //   안전: 임시 채널·임시 폴더 · 큐 파일(workspace*.json) 전후 백업·복원 · 비디오 엔진 원래 값으로 되돌림.
 const path = require('path');
@@ -66,12 +66,14 @@ fs.writeFileSync(B, script('범위 나'), 'utf8');
     ok(await allBtn.count() === 1, '「모두 적용」 버튼이 범위 옆에 있다');
     ok(await allBtn.isEnabled(), '대본이 2개 이상이면 눌린다');
 
-    const inputs = win.locator('span[title^="영상으로 만들 그룹 범위"] input');
-    await inputs.nth(0).fill('1'); await inputs.nth(1).fill('2');
+    // v0.6.62 — 범위(N~M) 칸은 없어지고 「직접 입력」에 쉼표로 적는다
+    await win.locator('[data-testid="vid-sel"]').selectOption('list');
+    const listIn = win.locator('[data-testid="vid-list"]');
+    await listIn.fill('1,2');
     await win.waitForTimeout(800);   // 활성 대본 자동저장(300ms 디바운스)
     const q1 = await win.evaluate(async () => (await window.api.listQueue()).queue.longform.items.map((x) => x.settings || {}));
-    const isRange = (s) => Number(s.vidFrom) === 1 && Number(s.vidTo) === 2;
-    ok(q1.filter(isRange).length === 1, '누르기 전 = 활성 대본 하나만 G1~G2 (판정력 — 헤더는 활성 대본만 바꾼다)');
+    const isRange = (s) => s.vidSel === 'list:1,2';
+    ok(q1.filter(isRange).length === 1, '누르기 전 = 활성 대본 하나만 G1,2 (판정력 — 헤더는 활성 대본만 바꾼다)');
 
     // 버튼 누르기 — 확인창은 「예」로
     await win.evaluate(() => { window.confirm = () => true; });
@@ -83,13 +85,13 @@ fs.writeFileSync(B, script('범위 나'), 'utf8');
     await allBtn.click();
     await win.waitForTimeout(500);
     const q2 = await win.evaluate(async () => (await window.api.listQueue()).queue.longform.items.map((x) => x.settings || {}));
-    ok(q2.length === 2 && q2.every(isRange), '누른 뒤 = 두 대본 모두 G1~G2: ' + JSON.stringify(q2.map((s) => [s.vidFrom, s.vidTo])));
+    ok(q2.length === 2 && q2.every(isRange), '누른 뒤 = 두 대본 모두 G1,2: ' + JSON.stringify(q2.map((s) => s.vidSel)));
     ok(q2.every((s) => s.presetName === CH), '채널 같은 다른 설정은 그대로');
     const logText = await win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
-    ok(/영상 범위 G1~G2 를 롱폼 큐의 대본 2개 모두에 넣었습니다/.test(logText), '로그에 몇 개에 넣었는지 남는다');
+    ok(/영상 방식 「직접 입력 G1,2」 를 롱폼 큐의 대본 2개 모두에 넣었습니다/.test(logText), '로그에 몇 개에 넣었는지 남는다');
 
     // 취소하면 바꾸지 않는다
-    await inputs.nth(0).fill('3'); await inputs.nth(1).fill('3'); await win.waitForTimeout(800);
+    await listIn.fill('3'); await win.waitForTimeout(800);
     await win.evaluate(() => { window.confirm = () => false; });
     await allBtn.click(); await win.waitForTimeout(400);
     const q3 = await win.evaluate(async () => (await window.api.listQueue()).queue.longform.items.map((x) => x.settings || {}));

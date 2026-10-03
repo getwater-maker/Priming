@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
-import { VID_MODES, normVidSel, vidSelLabel, vidMatcher } from './lib/videoSelect.js';
+import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vidListText } from './lib/videoSelect.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
@@ -3926,11 +3926,12 @@ export default function App() {
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
-                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 홀수·짝수만 만들면 제작 비용이 크게 준다(1번 그룹은 항상 포함). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidSel} onChange={(e) => setVidSel(normVidSel(e.target.value))}>
-                    <option value="">범위 지정</option>
+                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 「직접 입력」은 그룹 번호를 쉼표로 적는다(예: 1,2,5,7). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidIsList(vidSel) ? 'list' : vidSel} onChange={(e) => setVidSel(e.target.value === 'list' ? VID_LIST + (vidListText(vidSel) || '1') : normVidSel(e.target.value))}>
+                    <option value="">기본 — 도입부</option>
+                    <option value="list">직접 입력 (쉼표)</option>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.label}</option>)}
                   </select>
-                  {!vidSel && <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>}
+                  {vidIsList(vidSel) && <input data-testid="vid-list" type="text" inputMode="numeric" style={{ width: 120 }} placeholder="1,2,5,7" title="영상을 만들 그룹 번호 — 쉼표로 구분(예: 1,2,5,7). 3-5 처럼 구간도 됩니다. 이 번호의 그룹만 만든다" value={vidListText(vidSel)} onChange={(e) => setVidSel(normVidSel(VID_LIST + e.target.value))} />}
                   <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
                     title="이 범위를 작업큐의 모든 대본에 넣습니다 (평소엔 대본마다 자기 범위 — 누를 때만 전체에 적용)" onClick={applyRangeToAll}><span className="rb-t">모두 적용</span></button>
                   <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
@@ -4461,11 +4462,13 @@ export default function App() {
                   </div>
                 </div>
                 <div className="crow stack"><span className="l">🎬 영상 만들 그룹 (이 채널 기본값)</span>
-                  <select data-testid="ch-vid-sel" value={normVidSel(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(e.target.value) })}>
-                    <option value="">기본 — 도입부만 (헤더에서 범위 지정)</option>
+                  <select data-testid="ch-vid-sel" value={vidIsList(ch.vidSel) ? 'list' : normVidSel(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: e.target.value === 'list' ? VID_LIST + (vidListText(ch.vidSel) || '1') : normVidSel(e.target.value) })}>
+                    <option value="">기본 — 도입부 전체</option>
+                    <option value="list">직접 입력 — 그룹 번호를 쉼표로 (예: 1,2,5,7)</option>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
                   </select>
-                  <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 홀수·짝수만 만들면 절반으로 준다. <b>1번 그룹은 항상 포함</b>됩니다. 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>
+                  {vidIsList(ch.vidSel) && <input data-testid="ch-vid-list" type="text" style={{ width: 200 }} placeholder="1,2,5,7" value={vidListText(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(VID_LIST + e.target.value) })} />}
+                  <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
                 <div className="twocol">

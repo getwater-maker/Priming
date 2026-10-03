@@ -5,3 +5,6 @@ export const VID_MODES = core.MODES;
 export const normVidSel = core.normSel;
 export const vidSelLabel = core.labelOf;
 export const vidMatcher = core.matcher;
+export const vidIsList = core.isList;
+export const vidListText = core.listText;
+export const VID_LIST = core.LIST;
