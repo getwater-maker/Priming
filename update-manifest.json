@@ -1,5 +1,5 @@
 {
-  "version": "0.6.56",
+  "version": "0.6.57",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -54,7 +54,7 @@
     "core/book/spine-calc.js": "b3dc0d650e3a53cc702811d0e84d029630912c36",
     "core/book/title-fit.js": "8ddc5dbfab1fac6044559ff5788abad3f46d28b9",
     "core/book/title-lines.js": "614b9170ee1fe3509188d6bedb58611492cfc656",
-    "core/book/work-folder.js": "90141b4b1450cf65df65a4efb67a84bfa388ba64",
+    "core/book/work-folder.js": "fd0b7d61568d0cb1c7bdff0168aefe8b18012ee7",
     "core/build-fingerprint.js": "1fd5b1863908d3195b964061c520471ef6300f13",
     "core/caption-anim-data.js": "61e5da6e0cbb4bbf81e380e33fe9ce2769e4bf1c",
     "core/caption-anim.js": "1d6b3611e0f027436e56a10dc0ee1368aeb9aa87",
@@ -139,7 +139,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "4b674d172ed7eabc9a2640bda69d7ca67bce72b8",
+    "docs/작업노트/2026-10.md": "0f79151f6b82104eb1e2f69c9edceae7fe0b9175",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/출판-원고-가이드.md": "c2daa7eda2752543cb0d087331aee738c1230a75",
     "docs/통합본-자산이어받기-계획.md": "e424670bb6040d8a8dbe551270a0f415179517b3",
@@ -153,7 +153,7 @@
     "light-updater.js": "61fa2a3211dfe5463acdf1b596107fa6d70f19c9",
     "main.js": "7d90f83b2ba429a951cb2b723f3e6e23e7996c4c",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "20259fe3bca4c727607c391645f9777b9df1da7c",
+    "package.json": "a193048940c1efe9858752ac5c762b00a14878f5",
     "preload.js": "79787e87b8aa8ff2be7d50bd0e03e313f23ad169",
     "renderer/dist/assets/index-CJ-zEN4N.css": "534ced05d6d8f26f215f625769f861a473fa6e0a",
     "renderer/dist/assets/index-D9ClTaDF.js": "c5f449213de3c3393e9cf8ed3734b49a3b9e3988",
