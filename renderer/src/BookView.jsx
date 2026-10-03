@@ -475,6 +475,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       const r = await api.bookBuildEpub({ noOpen: quiet === true });
       if (r && r.dto) setDto(r.dto);
       setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
+      if (r && !r.error) { setBuilding(false); await runEpubCheckUi(); }   // 만든 직후 규격 검증까지가 한 세트(도구 없는 PC 는 건너뜀)
     } catch (e) { logline('ePub 오류: ' + e.message); }
     setBuilding(false); refreshOutputs();
   }
@@ -502,8 +503,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     if (building) return;
     setStatus('📦 한 번에 만드는 중 — 내지·표지 PDF 부터…');
     await buildPdf('print', true);      // 폴더는 끝에 한 번만 연다(탐색창이 둘 뜨던 것 — 로이 2026-10-02)
-    await buildEpubFile(true);
-    await runEpubCheckUi();
+    await buildEpubFile(true);      // 검증은 ePub 만들기 안에서 자동
     refreshOutputs(); loadPf();
     try { api.openFolder(); } catch (_) {}
     setStatus('📦 한 번에 만들기 끝 — 아래 「출고 전 점검」을 확인하세요');

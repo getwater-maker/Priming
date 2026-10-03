@@ -115,8 +115,8 @@ function ebookChecklist(ctx) {
     item('size', 'ePub 20MB 이하(부크크 한도)', !epub ? 'todo' : (epub.bytes > MB20 ? 'todo' : 'ok'),
       !epub ? '파일을 먼저 생성하세요' : (epub.bytes > MB20 ? `${epub.name} ${fmtMB(epub.bytes)} — 20MB 초과: 한자 글꼴 동봉을 끄거나 표지 이미지를 줄이세요` : `${fmtMB(epub.bytes)} / 20MB`)),
     item('valid', 'ePub 규격 검증(EPUBCheck)',
-      !chk ? (epub ? 'todo' : 'todo') : chk.missing ? 'manual' : chk.error ? 'todo' : (chk.ok ? 'ok' : 'todo'),
-      !chk ? '아래 「✔ ePub 검증」을 누르세요 — W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다'
+      !chk ? (epub ? 'info' : 'todo') : chk.missing ? 'manual' : chk.error ? 'todo' : (chk.ok ? 'ok' : 'todo'),
+      !chk ? (epub ? '아직 검증 전 — ePub 을 만들면 자동으로 검증합니다(다시 하려면 「✔ ePub 검증」)' : '아래 「📱 ePub 만들기」를 누르면 만든 뒤 W3C EPUBCheck 로 EPUB 2.0.1 규격을 자동 검증합니다')
         : chk.missing ? '이 PC 에는 EPUBCheck 도구가 없어 검증을 못 했습니다(메인 PC 에서 검증됨)' : chk.error ? `검증 실패: ${chk.error}`
         : (chk.ok ? `EPUB ${chk.epubVersion} 규격 통과 — 치명 ${chk.nFatal} · 오류 ${chk.nError} · 경고 ${chk.nWarning} (EPUBCheck ${chk.version})` : `오류 ${chk.nFatal + chk.nError}개 · 경고 ${chk.nWarning}개 — 아래 목록 확인`)),
     manual('account', '부크크 로그인(직접)', '계정·로그인·최종 제출은 사람이 합니다', c),

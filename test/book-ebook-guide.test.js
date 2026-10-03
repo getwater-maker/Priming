@@ -14,6 +14,7 @@ const st = (l, id) => [...l.required, ...l.optional].find((i) => i.id === id);
   const base = { meta: { title: 'T', author: 'A', ebookPrice: '3000' }, outputs: [], excluded: [], confirmed: {} };
   let l = RG.checklist('ebook', base);
   ok(st(l, 'file').state === 'todo' && st(l, 'size').state === 'todo' && st(l, 'valid').state === 'todo', 'ePub 이 없으면 파일·용량·검증이 todo');
+  ok(st(RG.checklist('ebook', { ...base, outputs: [{ kind: 'epub', name: 'a.epub', bytes: 1e6 }] }), 'valid').state === 'info', 'ePub 은 있고 검증 전 → info(배지에 세지 않는다)');
   l = RG.checklist('ebook', { ...base, outputs: [{ kind: 'epub', name: 'a.epub', bytes: 7 * 1048576 }] });
   ok(st(l, 'file').state === 'ok' && st(l, 'size').state === 'ok' && /7\.0MB \/ 20MB/.test(st(l, 'size').hint), '7MB ePub → 파일 ok · 20MB 한도 ok');
   l = RG.checklist('ebook', { ...base, outputs: [{ kind: 'epub', name: 'big.epub', bytes: 21 * 1048576 }] });
