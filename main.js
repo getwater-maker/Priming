@@ -8839,6 +8839,20 @@ regBook('book-epubcheck', async (_e, args = {}) => {
     return { ...r, file: path.basename(target) };
   } catch (e) { return { error: e.message }; }
 });
+// 📘 전자책 표지 파일(JPG·PDF 만 업로드 가능 — PNG 는 JPG 로 변환해 쓴다). ePub 만들기·부크크 전자책 등록이 같은 함수를 쓴다.
+//   반환: 파일 경로 또는 ''. 메타가 PNG/WebP 면 `<완성>/_작업/epub/_ebook-cover_<권>.jpg` 로 변환.
+async function resolveEbookCoverFile(outRoot, base) {
+  const WFx = require('./core/book/work-folder');
+  const ec = WFx.resolveEbookCover({ meta: S.parsed.meta || {}, scriptPath: S.scriptPath, coverImagePath: S.parsed.coverImagePath });
+  if (ec.warn) log(ec.warn);
+  if (!ec.path) return '';
+  if (!ec.needsConvert) { log(`🖼 전자책 표지: ${path.basename(ec.path)} (${ec.source === 'tool' ? '표지 도구 산출물' : '원고 메타'})`); return ec.path; }
+  const out = path.join(WFx.tmpDir(outRoot, '', 'epub'), `_ebook-cover_${base}.jpg`);
+  const j = await require('./core/book/cover-jpg').toUploadJpg(ec.path, out);
+  if (j) log(`🖼 전자책 표지: ${path.basename(ec.path)}(PNG 등) → JPG 로 변환해 사용 (${(fs.statSync(j).size / 1048576).toFixed(1)}MB · 부크크는 JPG·PDF 만 업로드 가능)`);
+  else log(`⚠ 전자책 표지 ${path.basename(ec.path)} 를 JPG 로 바꾸지 못했습니다(ffmpeg 없음·10MB 초과) — 인쇄 표지에서 앞표지를 잘라 씁니다`);
+  return j || '';
+}
 regBook('book-build-epub', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   try {
@@ -8852,6 +8866,8 @@ regBook('book-build-epub', async (_e, args = {}) => {
     const base = bookFileBase();
     // 전자책 표지 크롭용 스프레드 정보 (인쇄 표지가 첨부돼 있을 때)
     const { spread } = bookSpec(meta, S.parsed._lastPages || 0);
+    // 📘 전자책 표지 = 메타 `전자책표지` > 표지 도구가 만든 `부속/…_전자책앞표지.jpg` > (없으면 아래 인쇄 표지에서 크롭). 부크크 업로드는 JPG·PDF 뿐이라 PNG 지정은 JPG 로 바꿔 쓴다.
+    const ebookCoverPath = await resolveEbookCoverFile(outRoot, base);
     // 쪽수 미확정(책등 0mm)이면 인쇄 표지 크롭 위치가 어긋남 → 표지 크롭 생략(전자책표지 메타가 있으면 그걸 사용).
     const pagesKnown = (S.parsed._lastPages || 0) > 0;
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
@@ -8859,6 +8875,7 @@ regBook('book-build-epub', async (_e, args = {}) => {
       outPath: path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
       tmpDir: WF.tmpDir(outRoot, '', 'epub'),   // 전자책 표지 조각(_ebook-cover_<권>.jpg) — 완성 폴더면 _작업/epub
       coverTmpName: `_ebook-cover_${base}.jpg`,
+      ebookCoverPath,
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
       coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
       // 🔑 구조 패널 제외·영상 대본 모드·경로 축약을 내지와 똑같이 — 안 넘기면 종이책과 전자책이 갈린다.
@@ -9128,13 +9145,13 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         if (registerInfo) log(`📋 등록정보 파일 사용: ${registerInfo.file} — 도서명 「${registerInfo.title}」 · 부제 「${registerInfo.subtitle}」 · 장르 「${registerInfo.genre}」 · 소개 ${registerInfo.intro.length}자 · 목차 ${registerInfo.toc.split('\n').filter(Boolean).length}줄 · 저자소개 ${registerInfo.bio.length}자`);
         else if ((S.parsed.meta || {}).registerInfo) log(`⚠ 원고 메타 「등록정보」 파일을 찾을 수 없습니다: ${S.parsed.meta.registerInfo} — 원고 메타 값으로 진행합니다`);
       } catch (e) { log('⚠ 등록정보 파일 읽기 실패: ' + e.message); }
-      const buildEbookPlan = () => {
+      const buildEbookPlan = async () => {
         // 📘 전자책: ePub(최신본) + 표지 JPG·PDF(원고 `> 전자책표지:` > ePub 만들 때 크롭해 둔 `_ebook-cover.jpg`). 값은 등록정보 파일이 원고 메타보다 우선(ISBN 은 종이책 값이라 쓰지 않는다).
         const meta = S.parsed.meta || {};
-        const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p);
-        let cover = '';
-        if (meta.ebookCover) { const p = path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(S.scriptPath ? path.dirname(S.scriptPath) : root, meta.ebookCover); if (okCover(p)) cover = p; }
-        if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), `_ebook-cover_${ownBase}.jpg`); if (okCover(t)) cover = t; }   // 이 권 것만(옛 공용 _ebook-cover.jpg 는 다른 권 표지일 수 있어 쓰지 않는다)
+        const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p) && fs.statSync(p).size <= 10 * 1024 * 1024;   // 부크크 전자책 표지: JPG·PDF 10MB 이하
+        let cover = await resolveEbookCoverFile(root, bookFileBase());   // 메타 > 표지 도구 전자책앞표지.jpg (PNG 는 JPG 로 변환)
+        if (cover && !okCover(cover)) { log(`⚠ 전자책 표지 ${path.basename(cover)} 는 올릴 수 없는 형식·크기입니다(JPG·PDF 10MB 이하)`); cover = ''; }
+        if (!cover) { const t = path.join(WF.tmpDir(root, '', 'epub'), `_ebook-cover_${ownBase}.jpg`); if (okCover(t)) cover = t; }   // 이 권의 크롭 조각(옛 공용 _ebook-cover.jpg 는 다른 권 표지일 수 있어 쓰지 않는다)
         // 💾 종이책을 부크크에 신청할 때 기록해 둔 최종정가(없으면 원고 `> 정가:`) → 전자책 정가 = 그 70% 내림
         const RP = require('./core/book/register-price');
         const rec = RP.loadPaperPrice(root, bookFileBase());
@@ -9142,7 +9159,7 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         else log('ℹ 종이책 신청 기록이 없어 원고 정가로 계산합니다 — 종이책을 부크크에 먼저 신청하면(🤖 자동 입력) 화면의 최종정가를 기록합니다');
         return RF.ebookPlan(S.parsed, { epub: own('ebook', '.epub'), cover, registerInfo, paperPrice: rec ? rec.price : 0, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
       };
-      if (platform === 'bookkEbook') plan = buildEbookPlan();
+      if (platform === 'bookkEbook') plan = await buildEbookPlan();
       else {
         plan = RF.bookkPlan(S.parsed, { trimId: spec.trimId, pages: regPages, interiorPdf: own('print', '_내지.pdf'), coverPdf: own('print', '_표지.pdf'), spread: spec.spread, registerInfo, shotDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
         // 💾 4단계에서 읽은 최종정가를 저장(전자책 정가의 근거)

@@ -597,7 +597,7 @@ async function fillBookkEbookCover(page, plan, log) {
       await page.locator('input[type=file]').first().setInputFiles(s3.cover);
       await _waitUploaded(page);
     });
-  } else { failed.push('표지 없음'); log('[등록] ⚠ 올릴 전자책 표지(JPG·PDF)가 없습니다 — 원고 `> 전자책표지:` 를 정하거나 ePub 을 다시 만들어 앞표지 크롭본을 만드세요'); }
+  } else { failed.push('표지 없음'); log('[등록] ⚠ 올릴 전자책 표지(JPG·PDF)가 없습니다 — 표지 도구의 `부속\\…_전자책앞표지.jpg`·원고 `> 전자책표지:`(JPG·PDF) 가 없으면 ePub 을 다시 만들어 앞표지 크롭본을 만드세요(부크크는 PNG 를 받지 않습니다)'); }
   if (s3.logo === 'blue') await step('로고 파랑', () => _pickBlueLogo(page));
   await _shot(page, plan, log, '전자책3단계');
   return { done, failed };
@@ -691,7 +691,7 @@ async function runRegisterBoth(o) {
     return { ok: false, done, failed, manual };
   }
   if (o.isAborted && o.isAborted()) throw new Error('중단됨');
-  const eplan = o.plan.buildEbookPlan ? o.plan.buildEbookPlan() : null;
+  const eplan = o.plan.buildEbookPlan ? await o.plan.buildEbookPlan() : null;
   if (!eplan) throw new Error('전자책 계획을 만들지 못했습니다');
   const epage = await ctx.newPage();
   log('[등록] 📘 2/2 전자책 입력 시작 — 새 탭(종이책 탭은 그대로 둡니다)');

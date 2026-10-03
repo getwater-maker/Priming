@@ -49,6 +49,34 @@ function resolveCoverFile({ meta, scriptPath, manual }) {
 }
 
 /**
+ * 📘 전자책 표지 파일 찾기 — 부크크 업로드 형식은 **JPG·PDF 뿐**(PNG 불가 · 로이 2026-10-03). 순서:
+ *   1) 원고 메타 `> 전자책표지:`(원고 기준 상대·절대경로) — jpg/pdf 는 그대로, png/webp 는 `needsConvert`(호출 쪽이 JPG 로 바꾼다)
+ *   2) 표지 도구(`표지만들기.py`)가 인쇄 표지 옆에 만들어 둔 **`부속/<작품>_제N권_전자책앞표지.jpg`**(또는 같은 폴더) — 인쇄 표지 파일 이름의 `_표지(_날개)` 를 `_전자책앞표지` 로 바꾼 짝
+ *   3) 없으면 null(호출 쪽이 인쇄 표지에서 앞표지를 잘라 쓴다)
+ * @returns {{ path:string|null, source:'meta'|'tool'|null, needsConvert?:boolean, warn?:string }}
+ */
+function resolveEbookCover({ meta, scriptPath, coverImagePath }) {
+  const m = (meta && meta.ebookCover) ? String(meta.ebookCover).trim() : '';
+  const base = scriptPath ? path.dirname(path.resolve(scriptPath)) : '';
+  if (m) {
+    const p = path.isAbsolute(m) ? m : path.resolve(base || '.', m);
+    if (fs.existsSync(p) && fs.statSync(p).isFile()) return { path: p, source: 'meta', needsConvert: !/\.(jpe?g|pdf)$/i.test(p) };
+    return { path: null, source: null, warn: `⚠ 원고 메타 「전자책표지」를 찾을 수 없습니다: ${m}` };
+  }
+  if (coverImagePath) {
+    const dir = path.dirname(coverImagePath);
+    const stem = path.basename(coverImagePath).replace(/\.[^.]+$/, '').replace(/_시안$/, '').replace(/_표지(_날개)?$/, '');
+    if (stem && stem !== path.basename(coverImagePath).replace(/\.[^.]+$/, '')) {
+      for (const d of [path.join(dir, '부속'), dir]) {
+        const p = path.join(d, `${stem}_전자책앞표지.jpg`);
+        if (fs.existsSync(p)) return { path: p, source: 'tool' };
+      }
+    }
+  }
+  return { path: null, source: null };
+}
+
+/**
  * 완성 파일 이름의 바탕 — 원고가 `<작품>\원고\<이름>.md` 이면 「<작품>_<이름>」(예: 삼국지_제1권), 아니면 null(호출자가 책 제목으로).
  *   앞에 [종이책]/[전자책] 표기(로이 2026-10-02)와 뒤에 _내지.pdf·_표지.pdf·.epub 이 붙는다.
  */
@@ -70,4 +98,4 @@ function tmpDir(outRoot, legacyName, newName) {
   return legacyName ? path.join(outRoot, legacyName) : outRoot;
 }
 
-module.exports = { finishedDirFor, resolveCoverFile, fileBaseFor, tmpDir, IMG_RE };
+module.exports = { resolveEbookCover, finishedDirFor, resolveCoverFile, fileBaseFor, tmpDir, IMG_RE };

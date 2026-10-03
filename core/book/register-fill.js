@@ -242,7 +242,7 @@ function ebookPlan(book, ctx) {
   }
   const manual = [];
   if (!step2.epub) manual.push('2단계 ePub(없음 — 「📦 한 번에 만들기」로 ePub 을 먼저 만드세요)');
-  if (!step3.cover) manual.push('3단계 표지(JPG·PDF 10MB 이하 — 원고 `> 전자책표지:` 또는 인쇄 표지에서 앞표지를 크롭한 `_ebook-cover.jpg` 가 없음 · 화면 무료 표지로 직접)');
+  if (!step3.cover) manual.push('3단계 표지(JPG·PDF 10MB 이하 — 원고 `> 전자책표지:`·표지 도구의 `부속\\…_전자책앞표지.jpg`·ePub 만들 때 크롭한 이 권의 조각이 모두 없음 · PNG 는 올릴 수 없다 · 화면 무료 표지로 직접)');
   if (!step1.title) manual.push('도서명(필수)');
   if (!step1.author) manual.push('저자(필수)');
   if (step1.isbnMode === 'other') manual.push('보유 ISBN 입력칸(1단계에서 직접)');

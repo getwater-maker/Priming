@@ -72,6 +72,8 @@ async function main() {
   const r = await buildEpub(book, {
     outPath: out, baseDir: path.dirname(items[0].p), tmpDir, embedFonts: a.fonts ? undefined : 'none',
     coverImagePath: pages > 0 && cv.path ? cv.path : null, spread, log: (m) => logs.push(m),
+    // 전자책 표지 = 메타 전자책표지 > 표지 도구 산출물 `부속/…_전자책앞표지.jpg`(앱과 같은 규칙 — 업로드 형식 JPG·PDF) > 인쇄 표지 크롭
+    ebookCoverPath: (WF.resolveEbookCover({ meta, scriptPath: items[0].p, coverImagePath: cv.path }).path || ''),
   });
   if (!r.success) { if (backup) { try { fs.renameSync(backup, out); } catch (_) {} } console.error('✗ ePub 실패'); process.exit(1); }
   const res = { out, backup, bytes: fs.statSync(out).size, pages, cover: cv.path || '', coverUsed: !!(pages > 0 && cv.path), spineMm: spread.spineMm, logs };

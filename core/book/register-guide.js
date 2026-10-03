@@ -110,7 +110,7 @@ function ebookChecklist(ctx) {
     item('author', '저자명', has(m.author) ? 'ok' : 'todo', '책 정보 › 저자', { tab: 'info' }),
     item('toc', '목차 포함', (ctx.excluded || []).includes('toc') ? 'todo' : 'ok', '전자책은 목차(toc.ncx)가 길잡이 — 구조 › 목차 체크', { tab: 'structure' }),
     item('cover', '전자책 표지 이미지', (has(m.ebookCover) || ctx.coverImagePath) ? 'ok' : 'todo',
-      has(m.ebookCover) || ctx.coverImagePath ? '' : '전자책표지 메타 또는 인쇄 표지(앞면 자동 크롭 — 쪽수 확정 뒤). 부크크 전자책 표지 규격은 로그인 뒤 화면 확인 필요 🔒', { tab: 'cover' }),
+      has(m.ebookCover) || ctx.coverImagePath ? '' : '전자책표지 메타(JPG·PDF) · 표지 도구의 `부속\\…_전자책앞표지.jpg`(자동) · 인쇄 표지 앞면 크롭 순서. 부크크 업로드 형식은 JPG·PDF 뿐(PNG 불가)', { tab: 'cover' }),
     item('file', 'ePub 파일 생성(EPUB 2.0)', epub ? 'ok' : 'todo', epub ? `${epub.name} (${fmtMB(epub.bytes)})` : '아래 「📱 ePub 만들기」를 누르세요'),
     item('size', 'ePub 20MB 이하(부크크 한도)', !epub ? 'todo' : (epub.bytes > MB20 ? 'todo' : 'ok'),
       !epub ? '파일을 먼저 생성하세요' : (epub.bytes > MB20 ? `${epub.name} ${fmtMB(epub.bytes)} — 20MB 초과: 한자 글꼴 동봉을 끄거나 표지 이미지를 줄이세요` : `${fmtMB(epub.bytes)} / 20MB`)),

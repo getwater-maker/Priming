@@ -330,7 +330,8 @@ async function buildEpub(book, a) {
 
   // 3) 표지 — 전자책표지(meta.ebookCover) > 인쇄 스프레드 앞표지 크롭
   let coverAdded = false;
-  let coverSrc = meta.ebookCover && fs.existsSync(path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(a.baseDir || '.', meta.ebookCover))
+  let coverSrc = a.ebookCoverPath && /\.(jpe?g|png)$/i.test(a.ebookCoverPath) && fs.existsSync(a.ebookCoverPath) ? a.ebookCoverPath   // 표지 도구의 전자책앞표지.jpg 등(호출 쪽이 찾아 둔 것)
+    : meta.ebookCover && /\.(jpe?g|png)$/i.test(meta.ebookCover) && fs.existsSync(path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(a.baseDir || '.', meta.ebookCover))
     ? (path.isAbsolute(meta.ebookCover) ? meta.ebookCover : path.join(a.baseDir || '.', meta.ebookCover)) : null;
   if (!coverSrc && a.coverImagePath && a.spread && fs.existsSync(a.coverImagePath)) {
     const tdir = a.tmpDir || path.dirname(a.outPath);
