@@ -118,6 +118,13 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
     ok((await card.count()) === 0, 'Esc 로 닫힌다');
+    // 🔑 ⚙ 설정 → 🔑 API 키 = TTS API 4줄(v0.6.78 · 아무것도 입력하지 않는다)
+    await win.locator('button:has-text("⚙ 설정")').first().click(); await win.waitForTimeout(400);
+    await win.locator('.modal-card button:has-text("API 키")').first().click(); await win.waitForTimeout(600);
+    ok(await win.locator('[data-testid="tts-keys"]').isVisible(), '⚙ 설정 → 🔑 API 키에 「🔊 TTS API」 칸');
+    for (const id of ['gemini', 'mai', 'typecast', 'elevenlabs']) ok((await win.locator(`[data-testid="tts-key-${id}"]`).count()) === 1, `TTS 키 줄 ${id}`);
+    ok(/저장됨|없음/.test(await win.locator('[data-testid="tts-key-gemini"]').innerText()), '키 상태(저장됨…끝 4자리 / 없음)');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     ok(errs.length === 0, `화면 오류 0건 (${errs.join(' | ')})`);
   } finally {
     await app.close().catch(() => {});

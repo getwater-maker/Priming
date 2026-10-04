@@ -581,6 +581,8 @@ export default function App() {
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
   const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
+  // 🔊 TTS API 키(⚙ 설정 → 🔑 API 키 · v0.6.78 — 키는 여기 한 곳에서) — info = {엔진: {has, tail}} · 입력값은 저장 뒤 비운다(원문을 들고 있지 않는다)
+  const [ttsKeys, setTtsKeys] = useState({ info: {}, draft: {}, region: 'eastus', msg: '' });
   const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice) 설정 모달
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
@@ -1724,6 +1726,19 @@ export default function App() {
   }
   useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [presetName]);
   function openTtsEngines() { setTtsEng(true); }
+  // 🔑 TTS API 키 — ⚙ 설정 → 🔑 API 키 탭(음성 설정 팝업의 「키 넣기」도 여기로 온다)
+  async function loadTtsKeys() {
+    try { const r = await api.ttsEnginesGet(); if (r) setTtsKeys((x) => ({ ...x, info: r.keys || {}, region: r.region || 'eastus' })); } catch {}
+  }
+  async function saveTtsKey(id, patch) {
+    const r = await api.ttsEnginesSave({ keys: { [id]: patch }, channels: [], region: ttsKeys.region });
+    await loadTtsKeys();
+    if (id === 'gemini') { try { setGiKey((await api.getGeminiKey()) || ''); } catch {} }   // 위 🍌 나노바나나 칸과 같은 키
+    setTtsKeys((x) => ({ ...x, draft: { ...x.draft, [id]: '' }, msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
+  }
+  // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
+  async function openTtsKeySettings() { setTtsEng(null); await openSettings('keys'); }
+  useEffect(() => { if (settingsOpen && settingsTab === 'keys') loadTtsKeys(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
   //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
   const ttsCost = useMemo(() => {
@@ -4821,7 +4836,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {ttsEng && <TtsEngineDialog initialChannel={presetName} confirm={uiConfirm}
+      {ttsEng && <TtsEngineDialog initialChannel={presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
         onClose={() => setTtsEng(null)} onSaved={(n) => { refreshTtsEngActive(); setStatus(n ? `🔊 채널 목소리 저장 — ${n}개 채널` : '🔊 저장됨'); }} />}
       {ollamaOpen && ollama && (
@@ -5039,6 +5054,38 @@ export default function App() {
                     onChange={(e) => setXaiVal(e.target.value)} onBlur={() => api.setXaiKey((xaiVal || '').trim())} />
                 </div>
                 <div className="meta" style={{ marginTop: 4 }}>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</div>
+              </div>
+              {/* 🔊 TTS API 키(v0.6.78) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만). */}
+              <div data-testid="tts-keys" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginTop: 10 }}>
+                <div style={{ fontWeight: 700, color: 'var(--hook)', marginBottom: 6 }}>🔊 TTS API (음성 설정에서 쓰는 유료 목소리)</div>
+                {[
+                  ['gemini', 'Google Gemini TTS', 'API 키', '위 🍌 나노바나나와 같은 Gemini 키입니다(한 번만 넣으면 둘 다 씁니다)'],
+                  ['mai', 'Microsoft MAI-Voice', 'Speech 키', 'Azure 포털 → Speech(Foundry) 리소스 → 키 및 엔드포인트의 KEY 1 · 지역은 리소스를 만든 곳'],
+                  ['typecast', '타입캐스트', 'API 키', 'typecast.ai → Developers → API 키'],
+                  ['elevenlabs', 'ElevenLabs', 'API 키', '권한: Text to Speech + Voices 읽기(라이브러리 목소리 추가는 Voices 쓰기도)'],
+                ].map(([id, label, keyLabel, hint]) => {
+                  const inf = ttsKeys.info[id] || {};
+                  return (
+                    <div key={id} data-testid={'tts-key-' + id} style={{ padding: '4px 0', borderTop: id === 'gemini' ? 'none' : '1px dashed var(--line)' }}>
+                      <div className="frow" style={{ flexWrap: 'wrap', alignItems: 'center', margin: '2px 0' }}>
+                        <label style={{ width: 150, fontWeight: 600 }}>{label}</label>
+                        <span className="meta" style={{ width: 120, color: inf.has ? '#16a34a' : '#b45309', fontWeight: 600 }}>{inf.has ? `🔑 저장됨(…${inf.tail})` : '🔑 없음'}</span>
+                        <input type="password" autoComplete="off" style={{ flex: 1, minWidth: 160 }} placeholder={inf.has ? `${keyLabel} 바꿀 때만 붙여넣기` : `${keyLabel} 붙여넣기`}
+                          value={ttsKeys.draft[id] || ''} onChange={(e) => { const v = e.target.value; setTtsKeys((x) => ({ ...x, draft: { ...x.draft, [id]: v } })); }}
+                          onBlur={() => { const v = String(ttsKeys.draft[id] || '').trim(); if (v) saveTtsKey(id, { key: v }); }} />
+                        {id === 'mai' && (<select value={ttsKeys.region} title="Speech 리소스 지역(모든 채널 공통)"
+                          onChange={(e) => { const rg = e.target.value; setTtsKeys((x) => ({ ...x, region: rg })); api.ttsEnginesSave({ channels: [], region: rg }); }}>
+                          {['eastus', 'eastasia', 'southeastasia', 'japaneast', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'].map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>)}
+                        <button className="ghost" style={{ flex: '0 0 auto' }} title="키 발급 페이지" onClick={() => api.ttsEngineOpenKey(id)}>발급 ↗</button>
+                        {inf.has && <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>}
+                      </div>
+                      <div className="meta" style={{ marginLeft: 150, fontSize: 11 }}>{hint}</div>
+                    </div>
+                  );
+                })}
+                {ttsKeys.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{ttsKeys.msg}</div>}
+                <div className="meta" style={{ marginTop: 4 }}>목소리 고르기·모델·요금은 대본·음성 메뉴의 <b>「🔊 음성 설정」</b>에서 합니다. 키는 이 PC 에만 저장되고, 화면에는 끝 4자리만 보입니다.</div>
               </div>
             </div>)}
 

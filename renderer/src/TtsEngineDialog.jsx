@@ -38,7 +38,7 @@ function estUsd(engId, unit, chars, koCps) {
   return unit.kind === 'char' ? n * unit.usd : (n / (koCps || 7)) * unit.usd;
 }
 
-export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm }) {
+export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys }) {
   const [data, setData] = useState(null);          // { engines, keys, channels, region, krw, koCps }
   const [drafts, setDrafts] = useState({});        // 채널 → { id, ref, cfg:{엔진:{model,voice,style,…}} }
   const [dirty, setDirty] = useState({});          // 바뀐 채널
@@ -395,13 +395,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 10, background: isOnTab ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.05)', color: isOnTab ? BLUE : 'inherit', fontWeight: 600 }}
                   title={eng.note}>{isOnTab ? `✅ 「${chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
                 <span style={{ flex: 1 }} />
-                {eng.paid && (k.has && !keyEdit && !kd.clear
-                  ? <button className="ghost" style={{ padding: '2px 8px' }} title={`${eng.keyLabel} 저장됨(…${k.tail}) — 눌러서 바꾸기·지우기`} onClick={() => setKeyEdit(true)}>🔑 키 저장됨</button>
-                  : (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>{eng.keyLabel}
-                    <input type="password" autoComplete="off" style={{ width: 190 }} placeholder={k.has ? `저장됨(…${k.tail}) — 바꿀 때만` : 'API 키 붙여넣기'} value={kd.key || ''} onChange={(ev) => setKeys((x) => ({ ...x, [tab]: { key: ev.target.value } }))} />
-                    {k.has && <button className="ghost" title="저장된 키를 지웁니다(저장하면 반영)" onClick={() => setKeys((x) => ({ ...x, [tab]: { clear: true } }))}>{kd.clear ? '지울 예정' : '지우기'}</button>}
-                    {eng.keyUrl && <button className="ghost" title={'키 발급 페이지 — ' + eng.keyUrl} onClick={() => api.ttsEngineOpenKey(tab)}>발급 ↗</button>}
-                  </span>))}
+                {/* 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78) — 여기는 상태와 그리로 가는 버튼만 */}
+                {eng.paid && (k.has
+                  ? <span className="meta" style={{ color: '#16a34a', fontWeight: 600 }} title={`${eng.keyLabel} 저장됨(…${k.tail}) — 바꾸기·지우기는 ⚙ 설정 → 🔑 API 키`}>🔑 키 저장됨</span>
+                  : <button data-testid="tts-key-goto" className="ghost" style={{ padding: '2px 8px', color: '#b45309' }} title="⚙ 설정 → 🔑 API 키 에서 넣습니다" onClick={() => (onOpenKeys ? onOpenKeys() : null)}>🔑 키 넣기 → ⚙ 설정</button>)}
                 {eng.models && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>모델
                   <select value={model} onChange={(ev) => setCfg({ model: ev.target.value })}>{eng.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></span>)}
                 {eng.regions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>지역
@@ -468,7 +465,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 {!list.length && (
                   <div className="meta" style={{ gridColumn: '1 / -1', padding: 20, textAlign: 'center' }}>
                     {busy === 'voices' ? '⏳ 목소리 목록을 불러오는 중…'
-                      : eng.paid && !hasKey(tab) ? '🔑 API 키를 넣으면 이 계정에서 쓸 수 있는 목소리를 모두 불러옵니다.'
+                      : eng.paid && !hasKey(tab) ? '🔑 ⚙ 설정 → 🔑 API 키 에서 키를 넣으면 이 계정에서 쓸 수 있는 목소리를 모두 불러옵니다.'
                       : '목소리가 없습니다 — ⋯ → 「목록 다시 받기」를 눌러 보세요.'}
                   </div>
                 )}

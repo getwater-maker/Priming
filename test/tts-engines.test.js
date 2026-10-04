@@ -273,6 +273,11 @@ function makeWav(samples, sr = 24000) {
       ok(/badge: v.cloned_by_count/.test(fs.readFileSync(path.join(ROOT, 'tts/providers/elevenlabs-provider.js'), 'utf8')), '「복제 N회」는 설명이 아니라 badge(설명은 영어만 → 번역)');
       ok(!dlg.includes('shown.slice(0, 80)') && dlg.includes('need.length >= 120'), '보이는 카드 전부 번역(120개씩)');
       ok(/gemini: 'gemini-3\.8-flash'/.test(fs.readFileSync(path.join(ROOT, 'core/prompt-io.js'), 'utf8')), 'Gemini 글 모델 = 3.8-flash(2.5-flash 는 신규 사용자 404)'); }
+    { // 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78)
+      const APP2 = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
+      ok(/data-testid="tts-keys"/.test(APP2) && ['gemini', 'mai', 'typecast', 'elevenlabs'].every((id) => APP2.includes(`['${id}', `)), '⚙ 설정 → 🔑 API 키에 TTS API 4개(Gemini·MAI·타입캐스트·ElevenLabs)');
+      ok(!/type="password"/.test(dlg), '음성 설정 팝업에는 키 입력칸이 없다(설정으로 안내만)');
+      ok(/data-testid="tts-key-goto"/.test(dlg) && /onOpenKeys=\{openTtsKeySettings\}/.test(APP2), '키 없으면 「🔑 키 넣기 → ⚙ 설정」 버튼이 설정 키 탭을 연다'); }
     ok(MJ.includes("ipcMain.handle('tts-channel-avatars'") && MJ.includes('ytChannelId') && MJ.includes('/youtube/v3/channels?part=snippet&id='), '🏷 채널 로고 = 연결된 유튜브 채널 그림(ytChannelId · 이름 짐작 없음)');
     { const ia = MJ.indexOf("ipcMain.handle('tts-channel-avatars'"); ok(!/logoPath\s*:/.test(MJ.slice(ia, ia + 1200)), '유튜브 그림은 logoPath(영상 로고)를 건드리지 않는다'); }
     ok(MJ.includes("ipcMain.handle('el-shared-voices'") && MJ.includes("ipcMain.handle('el-add-shared'"), 'IPC — 라이브러리 찾기·추가');
