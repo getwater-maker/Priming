@@ -31,7 +31,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [krwSaved, setKrwSaved] = useState(1400);   // 환율을 못 받았을 때만 쓰는 지난 값
   const [fx, setFx] = useState(null);              // 💱 { rate, asOf, source, stale } — 시장 환율(main 이 공개 API 에서)
   const [cardFee, setCardFee] = useState(1.3);     // 💳 카드 해외결제 수수료(%)
-  const [chFaces, setChFaces] = useState({});      // 📺 채널 얼굴 { 채널: {path, v} }
+  const [chLogos, setChLogos] = useState({});      // 🏷 채널 로고 { 채널: {path, v} } — 채널편집 로고와 같은 값
   const [voices, setVoices] = useState({});
   const [faces, setFaces] = useState({});          // 엔진 → { 목소리: {path, v} }
   const [samples, setSamples] = useState({});      // 엔진 → { 'model|voice|style': {file, sec} }
@@ -51,7 +51,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     (async () => {
       const r = await api.ttsEnginesGet();
       if (!r) { setMsg('설정을 읽지 못했습니다'); return; }
-      setData(r); setRegion(r.region); setKrwSaved(r.krw); setCardFee(r.cardFee != null ? r.cardFee : 1.3); setChFaces(r.channelFaces || {});
+      setData(r); setRegion(r.region); setKrwSaved(r.krw); setCardFee(r.cardFee != null ? r.cardFee : 1.3); { const lg = {}; for (const c of r.channels) if (c.logo) lg[c.name] = c.logo; setChLogos(lg); }
       if (r.fx && r.fx.rate) setFx(r.fx);
       api.fxUsdKrw({}).then((f) => { if (f && f.ok) setFx(f); }).catch(() => {});
       const vs = {}, fs = {}, ss = {};
@@ -191,43 +191,33 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   }
   async function faceAi(v) {
     setBusy('face:' + v.id); setMsg(`🎨 「${v.name}」 얼굴 그리는 중… (🖥 로컬 ComfyUI · 무료 — 모델을 올리느라 첫 장은 1분쯤 걸릴 수 있습니다)`);
-    const r = await api.ttsFaceAi({ engine: tab, voice: v.id, name: v.name, gender: v.gender, desc: v.desc, lang: v.lang, hint: chan ? `YouTube channel "${chan}"` : '' });
+    const r = await api.ttsFaceAi({ engine: tab, voice: v.id, name: v.name, gender: v.gender, desc: v.desc, lang: v.lang, hint: '' });
     setBusy('');
     if (r && r.ok) { setFaces((f) => ({ ...f, [tab]: { ...(f[tab] || {}), [v.id]: { path: r.path, v: r.v } } })); setMsg(`🎨 「${v.name}」 얼굴을 넣었습니다`); }
     else setMsg('❌ ' + ((r && r.error) || '그리기 실패'));
   }
-  // 📺 채널 얼굴 — 채널마다 자기 캐릭터(같은 목소리를 쓰는 채널도 얼굴은 따로). 그림 = 로컬 ComfyUI
-  async function chFacePick(name) {
-    const r = await api.ttsFacePick({ engine: 'channel', voice: name });
-    if (r && r.ok) setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } }));
+  // 🏷 채널 로고 — 채널편집 🏷 로고와 같은 칸(영상에 얹기는 채널편집에서 켠다)
+  async function chLogoPick(name) {
+    const r = await api.ttsChannelLogo({ name });
+    if (r && r.ok) { setChLogos((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); setMsg(`🏷 「${name}」 채널 로고를 넣었습니다`); }
     else if (r && r.error) setMsg('❌ ' + r.error);
   }
-  async function chFaceAi(name) {
-    setBusy('chface:' + name); setMsg(`🎨 「${name}」 채널 얼굴 그리는 중… (🖥 로컬 ComfyUI · 무료)`);
-    const r = await api.ttsFaceAi({ engine: 'channel', voice: name });
-    setBusy('');
-    if (r && r.ok) { setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); setMsg(`🎨 「${name}」 채널 얼굴을 넣었습니다`); return true; }
-    setMsg('❌ ' + ((r && r.error) || '그리기 실패')); return false;
-  }
-  async function chFaceClear(name) {
-    await api.ttsFaceClear({ engine: 'channel', voice: name });
-    setChFaces((f) => { const m = { ...f }; delete m[name]; return m; });
-  }
-  async function drawAllChannelFaces() {
-    const todo = data.channels.map((c) => c.name).filter((n) => !chFaces[n]);
-    if (!todo.length) { setMsg('모든 채널에 얼굴이 있습니다(다시 그리려면 채널을 고르고 🎨)'); return; }
-    const ok = await (confirm || window.confirm)(`얼굴이 없는 채널 ${todo.length}개의 얼굴을 🖥 로컬 ComfyUI 로 그립니다(무료 · 한 장 20초 안팎).\n\n${todo.join(', ')}\n\n계속할까요?`);
+  // 🎨 보이는 목소리 얼굴 한꺼번에 그리기(얼굴 없는 것만 · 🖥 로컬 ComfyUI · 무료 · 멈춤 가능)
+  async function drawAllFaces(list) {
+    const todo = list.filter((v) => !(faces[tab] || {})[v.id]);
+    if (!todo.length) { setMsg('보이는 목소리는 얼굴이 모두 있습니다(다시 그리려면 카드의 🎨)'); return; }
+    const ok = await (confirm || window.confirm)(`보이는 목소리 ${todo.length}개의 얼굴을 🖥 로컬 ComfyUI 로 그립니다(무료).\n한 장에 20초 안팎 — 모두 약 ${Math.ceil(todo.length * 22 / 60)}분 걸립니다. 계속할까요?`);
     if (!ok) return;
     stopRef.current = false;
-    let n = 0;
-    for (const name of todo) {
+    let n = 0, fail = 0;
+    for (const v of todo) {
       if (stopRef.current) break;
-      setBusy('chbatch'); setMsg(`🎨 채널 얼굴 ${n + 1}/${todo.length} — 「${name}」 그리는 중…`);
-      const r = await api.ttsFaceAi({ engine: 'channel', voice: name });
-      if (r && r.ok) { n++; setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); }
-      else { setBusy(''); setMsg(`❌ 「${name}」 실패 — 멈춥니다: ${(r && r.error) || ''}`); return; }
+      setBusy('facebatch'); setMsg(`🎨 얼굴 ${n + fail + 1}/${todo.length} — 「${v.name}」 그리는 중… (⏹ 로 멈춤)`);
+      const r = await api.ttsFaceAi({ engine: tab, voice: v.id, name: v.name, gender: v.gender, desc: v.desc, lang: v.lang, hint: '' });
+      if (r && r.ok) { n++; setFaces((f) => ({ ...f, [tab]: { ...(f[tab] || {}), [v.id]: { path: r.path, v: r.v } } })); }
+      else { fail++; if (fail >= 3) { setBusy(''); setMsg('❌ 연속 실패 — 멈춥니다: ' + ((r && r.error) || '')); return; } }
     }
-    setBusy(''); setMsg(`🎨 채널 얼굴 ${n}개를 그렸습니다${stopRef.current ? ' (멈춤)' : ''} — 마음에 안 들면 채널을 고르고 🎨 로 다시`);
+    setBusy(''); setMsg(`🎨 얼굴 ${n}개를 그렸습니다${fail ? ` · 실패 ${fail}` : ''}${stopRef.current ? ' (멈춤)' : ''} — 마음에 안 들면 카드의 🎨 로 다시`);
   }
   async function faceClear(v) {
     await api.ttsFaceClear({ engine: tab, voice: v.id });
@@ -261,7 +251,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     const vid = id === 'omnivoice' ? d.ref : ((d.cfg || {})[id] || {}).voice;
     const vv = (voices[id] || []).find((x) => x.id === vid);
     const e = data.engines.find((x) => x.id === id);
-    return { id, vid, name: vv ? vv.name : (id === 'omnivoice' ? String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '') || '참조음성 없음' : vid || '목소리 없음'), face: chFaces[name] || (faces[id] || {})[vid], gender: vv && vv.gender, eng: e ? e.label.replace(/ TTS$/, '').replace('Microsoft ', '').replace('Google ', '') : id };
+    return { id, vid, name: vv ? vv.name : (id === 'omnivoice' ? String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '') || '참조음성 없음' : vid || '목소리 없음'), logo: chLogos[name] || null, gender: vv && vv.gender, eng: e ? e.label.replace(/ TTS$/, '').replace('Microsoft ', '').replace('Google ', '') : id };
   };
 
   return (
@@ -281,26 +271,19 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {/* ── 왼쪽: 채널 ── */}
           <div data-testid="tts-chan-list" style={{ width: 240, flex: '0 0 240px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
-            {busy === 'chbatch'
-              ? <button className="ghost" style={{ width: '100%', marginBottom: 8 }} onClick={() => { stopRef.current = true; }}>⏹ 얼굴 그리기 멈춤</button>
-              : <button data-testid="tts-chface-all" className="ghost" style={{ width: '100%', marginBottom: 8 }} disabled={!!busy}
-                  title="얼굴이 없는 채널마다 캐릭터 얼굴을 🖥 로컬 ComfyUI 로 그립니다(무료) — 채널 성격(이름) + 그 채널 목소리의 성별"
-                  onClick={drawAllChannelFaces}>🎨 채널 얼굴 모두 그리기</button>}
             {data.channels.map((ch) => {
               const cv = chanVoice(ch.name); const on = chan === ch.name;
               return (
                 <div key={ch.name} role="button" tabIndex={0} data-testid="tts-chan" data-chan={ch.name}
                   onClick={() => { setChan(ch.name); setTab((drafts[ch.name] && drafts[ch.name].id) || 'omnivoice'); setMsg(''); }}
                   style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 4, border: '1.5px solid ' + (on ? BLUE : 'transparent'), background: on ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
-                  <Face face={cv.face} name={ch.name.replace(/^\d+_/, '')} gender={cv.gender} size={on ? 52 : 40} />
+                  <Face face={cv.logo} name={ch.name.replace(/^\d+_/, '')} size={on ? 48 : 40} square />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dirty[ch.name] ? '● ' : ''}{ch.name}</div>
                     <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cv.eng} · {cv.name}</div>
                     {on && (
                       <div style={{ display: 'flex', gap: 2, marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
-                        <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="채널 얼굴 그림 넣기(파일)" onClick={() => chFacePick(ch.name)}>🖼</button>
-                        <button className="ghost" data-testid="tts-chface-ai" style={{ padding: '0 5px', fontSize: 11 }} disabled={!!busy} title="채널 얼굴 그리기(🖥 로컬 ComfyUI · 무료) — 다시 누르면 새로" onClick={() => chFaceAi(ch.name)}>{busy === 'chface:' + ch.name ? '⏳' : '🎨'}</button>
-                        {chFaces[ch.name] && <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="채널 얼굴 지우기(목소리 얼굴로 돌아감)" onClick={() => chFaceClear(ch.name)}>✕</button>}
+                        <button className="ghost" data-testid="tts-chlogo" style={{ padding: '0 6px', fontSize: 11 }} title="채널 로고 넣기(그림 파일) — 채널편집 🏷 로고와 같은 값 · 영상에 얹기는 채널편집에서" onClick={() => chLogoPick(ch.name)}>🏷 로고</button>
                       </div>
                     )}
                   </div>
@@ -367,6 +350,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 <input data-testid="tts-voice-q" placeholder="🔍 이름·특징 검색" style={{ width: 160 }} value={q} onChange={(ev) => setQ(ev.target.value)} />
                 {tab !== 'omnivoice' && (<select value={fg} onChange={(ev) => setFg(ev.target.value)}><option value="">성별 전체</option><option value="male">♂ 남성</option><option value="female">♀ 여성</option></select>)}
                 {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">{tab === 'typecast' ? '나이 전체' : '언어 전체'}</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
+                {shown.length > 0 && (busy === 'facebatch'
+                  ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 얼굴 그리기 멈춤</button>
+                  : <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로 한꺼번에 그립니다(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>)}
                 {tab !== 'omnivoice' && shown.length > 0 && (busy === 'batch'
                   ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 샘플 만들기 멈춤</button>
                   : <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에 만들어 저장합니다(요금 확인 후 진행)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>)}
@@ -411,10 +397,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 }
 
 // 얼굴 — 그림이 있으면 그것, 없으면 이름 첫 글자(성별 색)
-export function Face({ face, name, gender, size = 44 }) {
+export function Face({ face, name, gender, size = 44, square }) {
   const bg = gender === 'male' ? '#dbeafe' : gender === 'female' ? '#fce7f3' : '#e5e7eb';
   const fgc = gender === 'male' ? '#1d4ed8' : gender === 'female' ? '#be185d' : '#374151';
-  const st = { width: size, height: size, flex: `0 0 ${size}px`, borderRadius: '50%', objectFit: 'cover', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
+  const st = { width: size, height: size, flex: `0 0 ${size}px`, borderRadius: square ? 10 : '50%', objectFit: 'cover', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
   if (face && face.path) return <img data-testid="tts-face-img" src={media(face.path, face.v)} alt="" style={{ ...st, border: '1px solid var(--line)' }} />;
   // 앞 번호·기호(「02_」「#05_」)는 건너뛰고 첫 글자 — 「02_저음」 → 「저」
   const nm = String(name || '');

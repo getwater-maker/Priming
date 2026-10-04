@@ -5169,8 +5169,25 @@ function _channelsForUi() {
   const TE = require('./tts/tts-engines');
   return require('./tts/preset-store').loadAll()
     .filter((p) => p && p.name && !/^__/.test(p.name))      // __ 로 시작 = 테스트가 만든 임시 채널
-    .map((p) => ({ name: p.name, group: p.group || '', voiceEngine: TE.channelVoice(p), ref: String(p.voiceCloneRefAudio || ''), seed: p.seed }));
+    .map((p) => {
+      // 🏷 채널 로고(채널편집의 로고와 같은 값) — 채널 목록은 사람 얼굴이 아니라 로고를 보인다(로이 2026-10-05)
+      let logo = null;
+      try { if (p.logoPath && fs.existsSync(p.logoPath)) logo = { path: p.logoPath, v: String(fs.statSync(p.logoPath).mtimeMs | 0) }; } catch {}
+      return { name: p.name, group: p.group || '', voiceEngine: TE.channelVoice(p), ref: String(p.voiceCloneRefAudio || ''), seed: p.seed, logo };
+    });
 }
+// 🏷 채널 로고 고르기 — 채널편집 🏷 로고와 **같은 칸**(logoPath)에 저장한다. 영상에 얹기(logoOn)는 건드리지 않는다.
+ipcMain.handle('tts-channel-logo', async (_e, { name } = {}) => {
+  try {
+    const Store = require('./tts/preset-store');
+    const p = Store.loadAll().find((x) => x.name === name); if (!p) return { ok: false, error: '채널을 찾지 못했습니다' };
+    const r = await dialog.showOpenDialog(win, { title: `「${name}」 채널 로고 고르기`, properties: ['openFile'], filters: [{ name: '그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+    Store.update(p.id, { logoPath: r.filePaths[0] });
+    log(`🏷 「${name}」 채널 로고 — ${r.filePaths[0]}`);
+    return { ok: true, path: r.filePaths[0], v: String(Date.now()) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('tts-engines-get', () => {
   const TE = require('./tts/tts-engines');
   const VC = require('./tts/voice-catalogs');
@@ -5189,7 +5206,7 @@ ipcMain.handle('tts-engines-get', () => {
     faces: Object.fromEntries(Object.entries(_faceFiles(e.id)).map(([k, v]) => [k, v])),
     samples: _sampleIndex(e.id),
   }));
-  return { engines, keys: TE.keyInfo(require('./tts/secret-store')), channels: _channelsForUi(), channelFaces: _faceFiles('channel'), region: TE.region(cfg), krw: TE.krw(cfg), cardFee: TE.cardFee(cfg), fx: _fxCached(), koCps: TE.KO_CHARS_PER_SEC };
+  return { engines, keys: TE.keyInfo(require('./tts/secret-store')), channels: _channelsForUi(), region: TE.region(cfg), krw: TE.krw(cfg), cardFee: TE.cardFee(cfg), fx: _fxCached(), koCps: TE.KO_CHARS_PER_SEC };
 });
 // 💱 환율(1달러 → 원) — 무료 공개 API(open.er-api.com · 하루 1번 갱신 · 키 없음)의 **시장 환율**을 받아 6시간 기억한다.
 //   ⚠ 카드사·결제망(마스터카드·비자) 환율 페이지는 자동 조회를 봇 차단으로 막는다(2026-10-05 실측 Access Denied·Cloudflare) —
@@ -5416,12 +5433,22 @@ ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, la
       if (!info) return { ok: false, error: '채널을 찾지 못했습니다: ' + voice };
       gender = gender || info.gender; desc = [info.desc, desc].filter(Boolean).join(', '); persona = info.persona;
       log(`🎨 「${voice}」 채널 얼굴 — ${info.gender === 'male' ? '남성' : info.gender === 'female' ? '여성' : '성별 모름'}${info.how ? `(${info.how})` : ''} · ${persona}`);
+    } else if (engine === 'omnivoice') {
+      // 🎙 OmniVoice 목소리 — 성별 = 이름(남성/여성) → 없으면 목소리 높이 · 모습 = 이름 키워드(성경·역사·고전…)
+      //   카드 설명(desc)은 참조텍스트(그 목소리가 읽은 문장)라 그림 재료로 쓰지 않는다.
+      const nm = String(voice || '').replace(/^srv:/, '');
+      if (!gender) { if (/남성|남자|male/i.test(nm)) gender = 'male'; else if (/여성|여자|female/i.test(nm)) gender = 'female'; }
+      let how = '';
+      if (!gender) { const gg = await _estimateGender(resolveRefPath(voice)); gender = gg.gender; if (gg.f0) how = `목소리 높이 ${gg.f0}Hz`; }
+      persona = _personaOf(nm);
+      desc = /저음/.test(nm) ? 'deep low voice' : '';
+      log(`🎨 「${nm}」 목소리 얼굴 — ${gender === 'male' ? '남성' : gender === 'female' ? '여성' : '성별 모름'}${how ? `(${how})` : ''} · ${persona}`);
     }
     const nat = (engine === 'channel' || engine === 'omnivoice' || /한국어|^ko/.test(String(lang || ''))) ? 'Korean ' : '';   // 외국어 목소리는 국적을 정하지 않는다
     const g = nat + (gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person');
     // Krea2 Turbo 는 네거티브가 무효(cfg=1) → 「글자 없음」도 긍정 서술로. 끝은 마침표(CLIP 토큰 경계).
     const prompt = `Friendly illustrated character portrait avatar of a ${g}${persona ? ', ' + persona : ''}, head and shoulders, centered, facing the viewer, soft warm lighting, clean plain pastel background, high quality digital illustration, clean image with only the character.`
-      + (engine === 'channel' ? (desc ? ` Voice character: ${desc}.` : '') : ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`);
+      + ((engine === 'channel' || engine === 'omnivoice') ? (desc ? ` Voice character: ${desc}.` : '') : ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`);
     const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
     const key = _voiceFileKey(voice);
     const tmp = path.join(dir, key + '.__new.png');

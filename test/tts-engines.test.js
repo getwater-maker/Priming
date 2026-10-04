@@ -229,7 +229,9 @@ function makeWav(samples, sr = 24000) {
       eq((await est(path.join(TMP, 'nope.wav'))).gender, '', '파일 없으면 성별 모름(지어내지 않는다)'); }
     ok(/ipcMain\.handle\('fx-usd-krw'/.test(MJ) && /open\.er-api\.com/.test(MJ), '💱 환율 = 공개 API(시장 환율)');
     ok(/cardFee: args\.cardFee/.test(MJ), '💳 카드 수수료 저장');
-    ok(/data-testid="tts-chface-all"/.test(dlg) && /data-testid="tts-fx"/.test(dlg), '화면: 채널 얼굴 모두 그리기 · 환율 표시');
+    ok(/data-testid="tts-face-all"/.test(dlg) && /data-testid="tts-chlogo"/.test(dlg) && /data-testid="tts-fx"/.test(dlg) && !/tts-chface/.test(dlg), '화면: 목소리 얼굴 모두 그리기 · 채널 = 로고(사람 얼굴 아님) · 환율 표시');
+    ok(MJ.includes("ipcMain.handle('tts-channel-logo'") && MJ.includes('logoPath: r.filePaths[0]'), '채널 로고 = 채널편집 로고와 같은 칸(logoPath)');
+    ok(blk.includes("engine === 'omnivoice'") && blk.includes('_estimateGender(resolveRefPath(voice))'), 'OmniVoice 목소리 얼굴 = 이름·목소리 높이로 성별');
     ok(/cfg\.cloud = false/.test(blk) && /\['image', 'localGpu'\]/.test(blk) && /awaitForeignTtsIdle/.test(blk) && /freeMemory/.test(blk), '로컬 강제 · GPU 레인 · TTS 대기 · VRAM 반납'); }
   ok(/role="tablist"/.test(dlg) && /tts-voice-card/.test(dlg), '엔진 탭 + 목소리 카드');
   ok(!/<datalist/.test(dlg), '목소리 고르기에 선택창(datalist)을 쓰지 않는다');

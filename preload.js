@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('api', {
   ttsEngineTest: (a) => ipcRenderer.invoke('tts-engine-test', a),
   ttsEngineOpenKey: (id) => ipcRenderer.invoke('tts-engine-open-key', id),
   ttsOmniVoices: () => ipcRenderer.invoke('tts-omni-voices'),
+  ttsChannelLogo: (a) => ipcRenderer.invoke('tts-channel-logo', a),
   fxUsdKrw: (a) => ipcRenderer.invoke('fx-usd-krw', a),
   ttsFacePick: (a) => ipcRenderer.invoke('tts-face-pick', a),
   ttsFaceAi: (a) => ipcRenderer.invoke('tts-face-ai', a),
