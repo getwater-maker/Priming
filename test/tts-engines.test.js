@@ -132,7 +132,9 @@ function makeWav(samples, sr = 24000) {
   r = await tc.synthesize('x', { voice: 'tc_1', model: 'ssfm-v30', language: 'ko' });
   eq([last.url, last.init.headers['X-API-KEY'], JSON.parse(last.init.body).voice_id], ['https://api.typecast.ai/v1/text-to-speech', 'tc-secret-1234', 'tc_1'], '타입캐스트 요청');
   setFetch(() => mockRes(200, null, [{ voice_id: 'tc_9', voice_name: { kor: '딜런', eng: 'Dylan' }, gender: 'male', age: 'young_adult' }]));
-  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '딜런', gender: 'male', lang: '청년', desc: '', preview: '' }], '타입캐스트 목소리 목록(카드)');
+  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '딜런', gender: 'male', lang: '청년', desc: '', preview: '', image: '' }], '타입캐스트 목소리 목록(카드)');
+  setFetch(() => mockRes(200, null, [{ voice_id: 'tc_8', voice_name: 'A', thumbnail_url: 'https://x/t.png' }]));
+  eq((await TC.listVoices('k'))[0].image, 'https://x/t.png', '타입캐스트 — 응답에 그림 주소가 있으면 카드 얼굴로');
   { let n = 0; const urls = [];
     setFetch((url) => { urls.push(url); n++; return mockRes(200, null, n === 1
       ? { voices: [{ voice_id: 'e1', name: 'Rachel', labels: { gender: 'female' }, category: 'cloned', preview_url: 'https://x/p.mp3' }], has_more: true, next_page_token: 'T2' }
@@ -151,13 +153,13 @@ function makeWav(samples, sr = 24000) {
   { // 📚 보이스 라이브러리(한국어) — 찾기 · 추가
     const urls = [];
     setFetch((url, init) => { urls.push(url); return mockRes(200, null, urls.length === 1
-      ? { voices: [{ voice_id: 's1', public_owner_id: 'o1', name: '민준', gender: 'male', language: 'ko', accent: 'seoul', age: 'middle_aged', descriptive: 'calm', preview_url: 'https://x/s1.mp3' }, { voice_id: 's2', name: '주인 없음' }], has_more: true }
+      ? { voices: [{ voice_id: 's1', public_owner_id: 'o1', name: '민준', gender: 'male', language: 'ko', accent: 'seoul', age: 'middle_aged', descriptive: 'calm', preview_url: 'https://x/s1.mp3', image_url: 'https://x/s1.jpg' }, { voice_id: 's2', name: '주인 없음' }], has_more: true }
       : { voices: [{ voice_id: 's3', public_owner_id: 'o3', name: '서연', gender: 'female', language: 'ko' }], has_more: false }); });
     const L = await EL.listShared('k', { language: 'ko' });
     ok(urls[0].includes('/v1/shared-voices?') && urls[0].includes('language=ko') && urls[0].includes('page_size=100'), '라이브러리 요청 = shared-voices · language=ko');
     ok(urls[1].includes('page=1'), '라이브러리 다음 쪽');
     eq(L.map((v) => [v.id, v.ownerId]), [['s1', 'o1'], ['s3', 'o3']], '주인(public_owner_id) 없는 것은 뺀다(추가할 수 없다)');
-    eq([L[0].lang, L[0].preview, L[0].shared], ['ko · seoul', 'https://x/s1.mp3', true], '라이브러리 카드(언어·무료 샘플)');
+    eq([L[0].lang, L[0].preview, L[0].shared, L[0].image], ['ko · seoul', 'https://x/s1.mp3', true, 'https://x/s1.jpg'], '라이브러리 카드(언어·무료 샘플·그림 주소)');
     setFetch((url, init) => mockRes(200, null, { voice_id: 'newid' }));
     eq(await EL.addShared('k', 'o1', 's1', '민준'), 'newid', '추가 → 새 voice_id');
     ok(last.url.endsWith('/v1/voices/add/o1/s1') && last.init.method === 'POST' && JSON.parse(last.init.body).new_name === '민준', '추가 요청 = POST /v1/voices/add/{owner}/{voice}');

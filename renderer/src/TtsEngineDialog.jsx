@@ -398,7 +398,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* 목소리 카드 — 이 칸만 스크롤 */}
               <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8, alignContent: 'start', paddingRight: 4 }}>
                 {shown.map((v) => (
-                  <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id]} busy={busy}
+                  <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd}
                     users={tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v)}
                     onPick={() => (isLib ? addFromLibrary(v) : pickVoice(v))} onPlay={(force) => preview(v, force)}
@@ -434,7 +434,8 @@ export function Face({ face, name, gender, size = 44, square }) {
   const bg = gender === 'male' ? '#dbeafe' : gender === 'female' ? '#fce7f3' : '#e5e7eb';
   const fgc = gender === 'male' ? '#1d4ed8' : gender === 'female' ? '#be185d' : '#374151';
   const st = { width: size, height: size, flex: `0 0 ${size}px`, borderRadius: square ? 10 : '50%', objectFit: 'cover', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
-  if (face && face.path) return <img data-testid="tts-face-img" src={media(face.path, face.v)} alt="" style={{ ...st, border: '1px solid var(--line)' }} />;
+  // 회사가 준 그림(https 주소)은 그대로, 내 PC 파일은 media://
+  if (face && face.path) return <img data-testid="tts-face-img" src={/^https?:\/\//.test(face.path) ? face.path : media(face.path, face.v)} alt="" style={{ ...st, border: '1px solid var(--line)' }} />;
   // 앞 번호·기호(「02_」「#05_」)는 건너뛰고 첫 글자 — 「02_저음」 → 「저」
   const nm = String(name || '');
   const ch = (nm.match(/[가-힣]/) || nm.match(/[A-Za-zぁ-んァ-ン一-龥]/) || [nm.slice(0, 1) || '?'])[0];   // 한글을 먼저(「1nd_고전」 → 「고」)
