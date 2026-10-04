@@ -5293,6 +5293,27 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
     return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// 📚 ElevenLabs 보이스 라이브러리(한국어 원어민 등) — 찾기 · 내 목록에 추가(추가하면 내 목록 캐시도 새로)
+ipcMain.handle('el-shared-voices', async (_e, { language, gender } = {}) => {
+  try {
+    const k = ((require('./tts/secret-store').get('elevenlabs') || {}).key || '');
+    if (!k) return { ok: false, error: 'API 키를 먼저 넣고 저장하세요' };
+    const voices = await require('./tts/providers/elevenlabs-provider').listShared(k, { language: language || 'ko', gender: gender || '' });
+    log(`📚 ElevenLabs 보이스 라이브러리(${language || 'ko'}) — ${voices.length}개`);
+    return { ok: true, voices };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('el-add-shared', async (_e, { ownerId, voiceId, name } = {}) => {
+  try {
+    const EL = require('./tts/providers/elevenlabs-provider');
+    const k = ((require('./tts/secret-store').get('elevenlabs') || {}).key || '');
+    if (!k) return { ok: false, error: 'API 키를 먼저 넣고 저장하세요' };
+    const newId = await EL.addShared(k, ownerId, voiceId, name);
+    const mine = await EL.listVoices(k); _writeVoiceCache('elevenlabs', mine);
+    log(`📚 ElevenLabs 라이브러리 목소리 「${name}」 → 내 목록에 추가 (${newId})`);
+    return { ok: true, voiceId: newId, voices: mine };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 // 🔈 샘플 듣기 — ① 저장된 샘플이 있으면 그것(무료) ② 없으면 그 목소리로 한 문장 만들어 **저장**(다음부터 무료)
 //   args: { id, voice, model, style, emotion, channel(OmniVoice 시드용), force(다시 만들기) }
 ipcMain.handle('tts-engine-test', async (_e, args = {}) => {
@@ -5444,11 +5465,14 @@ ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, la
       desc = /저음/.test(nm) ? 'deep low voice' : '';
       log(`🎨 「${nm}」 목소리 얼굴 — ${gender === 'male' ? '남성' : gender === 'female' ? '여성' : '성별 모름'}${how ? `(${how})` : ''} · ${persona}`);
     }
-    const nat = (engine === 'channel' || engine === 'omnivoice' || /한국어|^ko/.test(String(lang || ''))) ? 'Korean ' : '';   // 외국어 목소리는 국적을 정하지 않는다
+    const nat = (engine === 'channel' || engine === 'omnivoice' || /한국어|^ko\b|korean/i.test(String(lang || ''))) ? 'Korean ' : '';   // 외국어 목소리는 국적을 정하지 않는다
+    // 그림 프롬프트는 영어 — 카드 설명의 한글(「단단한 (Firm)」의 「단단한」·「다국어」·「내 복제」)은 빼고 영어만 남긴다
+    const enOnly = (t) => String(t || '').replace(/[가-힣]+/g, ' ').replace(/[()·]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (engine !== 'channel' && engine !== 'omnivoice') { desc = [enOnly(desc), enOnly(lang)].filter(Boolean).join(', '); lang = ''; hint = ''; }
     const g = nat + (gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person');
     // Krea2 Turbo 는 네거티브가 무효(cfg=1) → 「글자 없음」도 긍정 서술로. 끝은 마침표(CLIP 토큰 경계).
     const prompt = `Friendly illustrated character portrait avatar of a ${g}${persona ? ', ' + persona : ''}, head and shoulders, centered, facing the viewer, soft warm lighting, clean plain pastel background, high quality digital illustration, clean image with only the character.`
-      + ((engine === 'channel' || engine === 'omnivoice') ? (desc ? ` Voice character: ${desc}.` : '') : ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`);
+      + (desc ? ` Voice character: ${desc}.` : '');
     const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
     const key = _voiceFileKey(voice);
     const tmp = path.join(dir, key + '.__new.png');

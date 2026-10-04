@@ -73,4 +73,45 @@ async function listVoices(key) {
   return out;
 }
 
-module.exports = { ElevenLabsProvider, buildBody, listVoices };
+/**
+ * 📚 보이스 라이브러리(남이 공유한 목소리) — GET /v1/shared-voices?language=ko (page_size 최대 100 · page 0~)
+ *   기본 목소리(내 목록)는 영어 원어민이 대부분이라 한국어 원어민 목소리는 여기서 찾는다.
+ *   카드 = { id, ownerId, name, gender, lang, desc, preview } — 쓰려면 먼저 내 목록에 추가(addShared).
+ */
+async function listShared(key, { language = 'ko', pages = 5, gender = '' } = {}) {
+  const out = [];
+  for (let page = 0; page < pages; page++) {
+    const q = new URLSearchParams({ page_size: '100', page: String(page), language });
+    if (gender) q.set('gender', gender);
+    const res = await fetchWithTimeout(`${BASE}/v1/shared-voices?${q}`, { headers: { 'xi-api-key': key } }, 30000, LABEL);
+    if (!res.ok) throw await httpError(res, LABEL + ' 보이스 라이브러리');
+    const j = await res.json();
+    for (const v of j.voices || []) {
+      if (!v.voice_id || !v.public_owner_id) continue;
+      out.push({
+        id: v.voice_id, ownerId: v.public_owner_id, name: v.name, gender: String(v.gender || '').toLowerCase(),
+        lang: [v.language, v.accent].filter(Boolean).join(' · '),
+        desc: [v.age, v.descriptive, v.use_case, v.cloned_by_count ? `복제 ${v.cloned_by_count}회` : ''].filter(Boolean).join(' · '),
+        preview: v.preview_url || '', shared: true,
+      });
+    }
+    if (!j.has_more) break;
+  }
+  return out;
+}
+/** 라이브러리 목소리를 내 목록에 추가 — POST /v1/voices/add/{public_user_id}/{voice_id} → 새 voice_id */
+async function addShared(key, ownerId, voiceId, name) {
+  const res = await fetchWithTimeout(`${BASE}/v1/voices/add/${encodeURIComponent(ownerId)}/${encodeURIComponent(voiceId)}`, {
+    method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_name: String(name || voiceId).slice(0, 80) }),
+  }, 30000, LABEL);
+  if (!res.ok) {
+    const err = await httpError(res, LABEL + ' 목소리 추가');
+    if (res.status === 401 || res.status === 403) err.message += ' — API 키 권한에 「Voices – Write(쓰기)」가 필요합니다';
+    throw err;
+  }
+  const j = await res.json();
+  return j.voice_id;
+}
+
+module.exports = { ElevenLabsProvider, buildBody, listVoices, listShared, addShared };

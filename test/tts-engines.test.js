@@ -148,6 +148,22 @@ function makeWav(samples, sr = 24000) {
     eq(L.map((v) => v.id), ['voice_a', 'voice_b'], 'Gemini 확장 라이브러리 — 쪽 넘김');
     eq([last.url.includes('page_token=P'), last.init.headers['x-goog-api-key'], L[0].gender, L[0].lang], [true, 'g', 'female', 'ko-KR'], 'Gemini 목록 요청·카드'); }
 
+  { // 📚 보이스 라이브러리(한국어) — 찾기 · 추가
+    const urls = [];
+    setFetch((url, init) => { urls.push(url); return mockRes(200, null, urls.length === 1
+      ? { voices: [{ voice_id: 's1', public_owner_id: 'o1', name: '민준', gender: 'male', language: 'ko', accent: 'seoul', age: 'middle_aged', descriptive: 'calm', preview_url: 'https://x/s1.mp3' }, { voice_id: 's2', name: '주인 없음' }], has_more: true }
+      : { voices: [{ voice_id: 's3', public_owner_id: 'o3', name: '서연', gender: 'female', language: 'ko' }], has_more: false }); });
+    const L = await EL.listShared('k', { language: 'ko' });
+    ok(urls[0].includes('/v1/shared-voices?') && urls[0].includes('language=ko') && urls[0].includes('page_size=100'), '라이브러리 요청 = shared-voices · language=ko');
+    ok(urls[1].includes('page=1'), '라이브러리 다음 쪽');
+    eq(L.map((v) => [v.id, v.ownerId]), [['s1', 'o1'], ['s3', 'o3']], '주인(public_owner_id) 없는 것은 뺀다(추가할 수 없다)');
+    eq([L[0].lang, L[0].preview, L[0].shared], ['ko · seoul', 'https://x/s1.mp3', true], '라이브러리 카드(언어·무료 샘플)');
+    setFetch((url, init) => mockRes(200, null, { voice_id: 'newid' }));
+    eq(await EL.addShared('k', 'o1', 's1', '민준'), 'newid', '추가 → 새 voice_id');
+    ok(last.url.endsWith('/v1/voices/add/o1/s1') && last.init.method === 'POST' && JSON.parse(last.init.body).new_name === '민준', '추가 요청 = POST /v1/voices/add/{owner}/{voice}');
+    setFetch(() => mockRes(403, null, { detail: 'missing permission' }));
+    try { await EL.addShared('k', 'o1', 's1', 'x'); ok(false, '403 은 던져야 함'); } catch (e) { ok(/Voices – Write/.test(e.message), '권한 없음 → 「Voices – Write」 가 필요하다고 알린다'); }
+  }
   const { GeminiProvider } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
   const gm = new GeminiProvider(); await gm.init();
   const wav = makeWav(24000);
@@ -232,6 +248,11 @@ function makeWav(samples, sr = 24000) {
     ok(/data-testid="tts-face-all"/.test(dlg) && /data-testid="tts-chlogo"/.test(dlg) && /data-testid="tts-fx"/.test(dlg) && !/tts-chface/.test(dlg), '화면: 목소리 얼굴 모두 그리기 · 채널 = 로고(사람 얼굴 아님) · 환율 표시');
     ok(MJ.includes("ipcMain.handle('tts-channel-logo'") && MJ.includes('logoPath: r.filePaths[0]'), '채널 로고 = 채널편집 로고와 같은 칸(logoPath)');
     ok(blk.includes("engine === 'omnivoice'") && blk.includes('_estimateGender(resolveRefPath(voice))'), 'OmniVoice 목소리 얼굴 = 이름·목소리 높이로 성별');
+    { const m = /const enOnly = (\(t\) => [^\n]+);/.exec(blk); const enOnly = m && new Function('return ' + m[1])();
+      eq(enOnly && enOnly('단단한 (Firm)'), 'Firm', 'Gemini 카드 설명 → 그림 프롬프트엔 영어만(「단단한」 뺌)');
+      eq(enOnly && enOnly('내 복제 · middle_aged · calm'), 'middle_aged calm', 'ElevenLabs 설명도 영어만'); }
+    ok(MJ.includes("ipcMain.handle('el-shared-voices'") && MJ.includes("ipcMain.handle('el-add-shared'"), 'IPC — 라이브러리 찾기·추가');
+    ok(/data-testid="el-lib"/.test(dlg) && /addFromLibrary/.test(dlg), '화면: 「🇰🇷 한국어 라이브러리」 → 고르면 추가');
     ok(/cfg\.cloud = false/.test(blk) && /\['image', 'localGpu'\]/.test(blk) && /awaitForeignTtsIdle/.test(blk) && /freeMemory/.test(blk), '로컬 강제 · GPU 레인 · TTS 대기 · VRAM 반납'); }
   ok(/role="tablist"/.test(dlg) && /tts-voice-card/.test(dlg), '엔진 탭 + 목소리 카드');
   ok(!/<datalist/.test(dlg), '목소리 고르기에 선택창(datalist)을 쓰지 않는다');

@@ -41,6 +41,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [omniUsed, setOmniUsed] = useState({});
+  // 📚 ElevenLabs — 'mine' = 내 목소리 · 'library' = 보이스 라이브러리(한국어 원어민 등 · 고르면 내 목록에 추가)
+  const [elSrc, setElSrc] = useState('mine');
+  const [libVoices, setLibVoices] = useState(null);
   const audioRef = useRef(null);
   const triedRef = useRef({});
   const stopRef = useRef(false);
@@ -202,6 +205,29 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     if (r && r.ok) { setChLogos((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); setMsg(`🏷 「${name}」 채널 로고를 넣었습니다`); }
     else if (r && r.error) setMsg('❌ ' + r.error);
   }
+  // 📚 보이스 라이브러리(한국어) 불러오기 · 고르면 내 목록에 추가하고 이 채널 목소리로
+  async function loadLibrary() {
+    if (!(await saveKeysIfAny())) return;
+    setBusy('voices'); setMsg('📚 한국어 목소리를 찾는 중…');
+    const r = await api.elSharedVoices({ language: 'ko' });
+    setBusy('');
+    if (r && r.ok) { setLibVoices(r.voices); setMsg(`📚 한국어 목소리 ${r.voices.length}개 — 🔈 로 들어 보고(무료) 카드를 누르면 내 목록에 추가해 이 채널 목소리로 씁니다`); }
+    else setMsg('❌ ' + ((r && r.error) || '라이브러리 실패'));
+  }
+  async function addFromLibrary(v) {
+    const mine = (voices.elevenlabs || []).find((x) => x.name === v.name);
+    if (mine) { pickVoice(mine); setMsg(`「${v.name}」 은 이미 내 목록에 있습니다 — 이 채널 목소리로 골랐습니다`); return; }
+    const ok = await (confirm || window.confirm)(`「${v.name}」(${v.lang}) 목소리를 ElevenLabs 내 목록에 추가하고 「${chan}」 채널 목소리로 고를까요?\n(요금제마다 추가할 수 있는 목소리 개수에 제한이 있습니다)`);
+    if (!ok) return;
+    setBusy('add:' + v.id); setMsg(`📚 「${v.name}」 추가하는 중…`);
+    const r = await api.elAddShared({ ownerId: v.ownerId, voiceId: v.id, name: v.name });
+    setBusy('');
+    if (!r || !r.ok) { setMsg('❌ ' + ((r && r.error) || '추가 실패')); return; }
+    setVoices((x) => ({ ...x, elevenlabs: r.voices }));
+    patchDraft((d) => ({ ...d, id: 'elevenlabs', cfg: { ...d.cfg, elevenlabs: { ...(d.cfg.elevenlabs || {}), model, voice: r.voiceId } } }));
+    setElSrc('mine');
+    setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${chan}」 채널 목소리로 골랐습니다 — 저장을 누르세요`);
+  }
   // 🎨 보이는 목소리 얼굴 한꺼번에 그리기(얼굴 없는 것만 · 🖥 로컬 ComfyUI · 무료 · 멈춤 가능)
   async function drawAllFaces(list) {
     const todo = list.filter((v) => !(faces[tab] || {})[v.id]);
@@ -224,7 +250,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     setFaces((f) => { const m = { ...(f[tab] || {}) }; delete m[v.id]; return { ...f, [tab]: m }; });
   }
 
-  const list = voices[tab] || [];
+  const isLib = tab === 'elevenlabs' && elSrc === 'library';
+  const list = isLib ? (libVoices || []) : (voices[tab] || []);
   const langs = useMemo(() => [...new Set(list.map((v) => v.lang).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')), [list]);
   const lang = fl[tab] != null ? fl[tab] : (tab === 'mai' && langs.includes('한국어') ? '한국어' : '');
   const shown = useMemo(() => {
@@ -345,19 +372,25 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* 목소리 거르기 */}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
                 <b>목소리</b>
+                {tab === 'elevenlabs' && (<span style={{ display: 'flex', gap: 2 }}>
+                  <button className={elSrc === 'mine' ? '' : 'ghost'} style={{ padding: '2px 8px' }} onClick={() => setElSrc('mine')}>내 목소리</button>
+                  <button data-testid="el-lib" className={elSrc === 'library' ? '' : 'ghost'} style={{ padding: '2px 8px' }} disabled={!hasKey('elevenlabs') || (!!busy && busy !== 'voices')}
+                    title="ElevenLabs 보이스 라이브러리에서 한국어 원어민 목소리를 찾습니다(🔈 무료 샘플 · 고르면 내 목록에 추가)"
+                    onClick={() => { setElSrc('library'); if (!libVoices) loadLibrary(); }}>🇰🇷 한국어 라이브러리</button>
+                </span>)}
                 <span className="meta">{shown.length}/{list.length}개{selVoice ? ` · 고른 것: ${selVoice.name}` : ''}</span>
                 <span style={{ flex: 1 }} />
                 <input data-testid="tts-voice-q" placeholder="🔍 이름·특징 검색" style={{ width: 160 }} value={q} onChange={(ev) => setQ(ev.target.value)} />
                 {tab !== 'omnivoice' && (<select value={fg} onChange={(ev) => setFg(ev.target.value)}><option value="">성별 전체</option><option value="male">♂ 남성</option><option value="female">♀ 여성</option></select>)}
                 {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">{tab === 'typecast' ? '나이 전체' : '언어 전체'}</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
-                {shown.length > 0 && (busy === 'facebatch'
+                {shown.length > 0 && !isLib && (busy === 'facebatch'
                   ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 얼굴 그리기 멈춤</button>
                   : <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로 한꺼번에 그립니다(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>)}
                 {tab !== 'omnivoice' && shown.length > 0 && (busy === 'batch'
                   ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 샘플 만들기 멈춤</button>
                   : <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에 만들어 저장합니다(요금 확인 후 진행)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>)}
                 {(eng.listVoices || tab === 'omnivoice') && (
-                  <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} onClick={() => loadVoices(tab)}
+                  <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} onClick={() => (isLib ? loadLibrary() : loadVoices(tab))}
                     title={tab === 'gemini' ? '확장 라이브러리(수백 개 · 3.8 모델용)를 API 로 불러옵니다' : '목록을 다시 불러옵니다'}>
                     {busy === 'voices' ? '⏳' : tab === 'gemini' ? '⬇ 확장 라이브러리' : '↻ 다시 불러오기'}</button>)}
               </div>
@@ -368,7 +401,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id]} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd}
                     users={tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v)}
-                    onPick={() => pickVoice(v)} onPlay={(force) => preview(v, force)}
+                    onPick={() => (isLib ? addFromLibrary(v) : pickVoice(v))} onPlay={(force) => preview(v, force)}
                     onFacePick={() => facePick(v)} onFaceAi={() => faceAi(v)} onFaceClear={() => faceClear(v)} />
                 ))}
                 {!list.length && (
