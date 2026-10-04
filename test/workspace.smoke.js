@@ -88,6 +88,10 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     {
       const mb2 = await win.locator('.menubar').boundingBox();
       ok(mb2 && mb2.height < 56, `대본을 연 뒤에도 1366px 메뉴 줄이 한 줄 (${mb2 && Math.round(mb2.height)}px)`);
+      // 💰 대본 TTS 예상 비용(v0.6.76) — 임시 채널 = OmniVoice → 「무료」 · 음성 없는 문장 글자 수
+      { const c = win.locator('[data-testid="tts-cost"]');
+        const t = (await c.count()) ? (await c.innerText()).replace(/\s+/g, ' ') : '';
+        ok((await c.count()) === 1 && await c.isVisible() && /예상 무료/.test(t) && /[\d,]+자/.test(t), `🎤 TTS 옆 💰 예상 비용 (${t})`); }
       await win.locator('.menus button[data-menu]', { hasText: '완성' }).first().click(); await win.waitForTimeout(250);
       ok(await win.locator('[data-testid="open-after-make"]').isVisible(), '④ 완성 메뉴에 「완성 후 열기」 체크');
       const mo = await win.locator('[data-testid="monitor-off"]').boundingBox();
