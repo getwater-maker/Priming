@@ -5353,7 +5353,12 @@ async function _translateBatch(items) {
   else {
     const key = ((require('./tts/secret-store').get('gemini') || {}).key || '');
     if (!key) throw new Error('번역할 수단이 없습니다 — Ollama 가 꺼져 있고 Gemini 키도 없습니다');
-    text = await PIO.callLlmTextApi('gemini', key, prompt); via = 'Gemini';
+    // Gemini 가 「지금 붐빔(503)·한도(429)」면 잠깐 쉬고 다시(최대 3번 — 2026-10-05 실측 503)
+    for (let att = 1; ; att++) {
+      try { text = await PIO.callLlmTextApi('gemini', key, prompt); break; }
+      catch (e) { if (att >= 3 || !/\b(503|429|500)\b/.test(String(e.message))) throw e; await new Promise((r) => setTimeout(r, 4000 * att)); }
+    }
+    via = 'Gemini';
   }
   const m = /\[[\s\S]*\]/.exec(String(text || ''));
   const arr = m ? JSON.parse(m[0]) : null;

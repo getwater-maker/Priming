@@ -68,6 +68,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [tr, setTr] = useState({});                 // 🇰🇷 번역 { 원문: 한국어 }
   const trBusyRef = useRef(false);
   const trTriedRef = useRef(new Set());
+  const trFailRef = useRef({});                    // 글 → 번역 실패 횟수
   const audioRef = useRef(null);
   const triedRef = useRef({});
   const stopRef = useRef(false);
@@ -286,7 +287,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   // 🇰🇷 카드 글 한국어로 — 이름 뒤 소개(「Victor - Engaged…」의 「Engaged…」)·설명은 번역(main 저장), 언어 줄은 낱말 사전.
   //   원문은 카드에 마우스를 올리면 보인다. 번역 전엔 원문 그대로.
   const trName = (v) => { const i = String(v.name || '').indexOf(' - '); if (i < 0) return v.name; const tg = v.name.slice(i + 3); return v.name.slice(0, i) + ' - ' + (tr[tg] || tg); };
-  const koView = (v) => ({ ...v, name: trName(v), desc: tr[v.desc] || v.desc, lang: langLabel(v.lang), orig: [v.name, v.desc, v.lang].filter(Boolean).join('\n') });
+  const koView = (v) => ({ ...v, base: String(v.name || '').split(' - ')[0], name: trName(v), desc: tr[v.desc] || v.desc, lang: langLabel(v.lang), orig: [v.name, v.desc, v.lang].filter(Boolean).join('\n') });
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return list.filter((v) => (!fg || v.gender === fg) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
@@ -308,7 +309,13 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     api.ttsTranslate({ texts: need }).then((r) => {
       trBusyRef.current = false;
       if (r && r.map) setTr((m) => ({ ...m, ...r.map }));
-      if (r && !r.ok && r.error) setMsg('🇰🇷 번역 못 함 — ' + r.error);
+      // 실패(붐빔 등)한 글은 20초 뒤 다시 묻는다(최대 3번) — 안 그러면 그 카드들이 영어로 남는다
+      if (r && !r.ok) {
+        const left = need.filter((t) => !(r.map || {})[t]);
+        const retry = left.filter((t) => (trFailRef.current[t] = (trFailRef.current[t] || 0) + 1) < 3);
+        if (retry.length) setTimeout(() => { for (const t of retry) trTriedRef.current.delete(t); setTr((m) => ({ ...m })); }, 20000);
+        if (r.error) setMsg('🇰🇷 번역 잠시 실패 — ' + (retry.length ? '20초 뒤 다시 합니다' : r.error));
+      }
     }).catch(() => { trBusyRef.current = false; });
   }, [shown, tr]);
   // 이 목소리를 쓰는 채널(지금 고친 값 기준) — 채널끼리 목소리가 겹치는지 보이게
@@ -508,7 +515,7 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick
     <div role="button" tabIndex={0} className="vc" data-testid="tts-voice-card" data-voice={v.id} onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter') onPick(); }}
       style={{ border: '1.5px solid ' + (sel ? BLUE : 'var(--line)'), background: sel ? 'rgba(37,99,235,0.08)' : 'var(--bg2, transparent)', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', gap: 8, minHeight: 92 }}>
       <div style={{ position: 'relative', flex: '0 0 auto' }}>
-        <Face face={face} name={v.name} gender={v.gender} size={48} />
+        <Face face={face} name={v.base || v.name} gender={v.gender} size={48} />   {/* 첫 글자는 이름에서(번역된 소개가 아니라) */}
         <div className="vc-tools" style={{ display: 'flex', gap: 1, justifyContent: 'center', marginTop: 3 }} onClick={(e) => e.stopPropagation()}>
           <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} title="얼굴 그림 넣기(파일)" onClick={onFacePick}>🖼</button>
           <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(🖥 로컬 ComfyUI · 무료)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
