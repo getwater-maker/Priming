@@ -47,8 +47,8 @@ const ENGINES = [
       { id: 'MAI-Voice-2.1', name: 'MAI-Voice-2.1 (최신 · 장편 낭독용)' },
       { id: 'MAI-Voice-2.1-Flash', name: 'MAI-Voice-2.1-Flash (빠름)' },
     ],
-    regions: ['eastasia', 'southeastasia', 'japaneast', 'eastus', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'],
-    defaultRegion: 'eastasia', defaultVoice: 'ko-KR-Junho',
+    regions: ['eastus', 'eastasia', 'southeastasia', 'japaneast', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'],
+    defaultRegion: 'eastus', defaultVoice: 'ko-KR-Junho',
     // 목소리 97개 = voice-catalogs.MAI(공식 표 전체 · 말투는 목소리마다 다르다)
     note: 'Azure 포털에서 Speech(Foundry) 리소스를 만들고 키·지역을 넣으세요(지역은 모든 채널 공통).',
   },
@@ -131,7 +131,7 @@ function save(cfg) {
   const prev = load();
   const c = cfg || {};
   const clean = {
-    mai: { region: String((c.mai && c.mai.region) || (prev.mai && prev.mai.region) || 'eastasia') },
+    mai: { region: String((c.mai && c.mai.region) || (prev.mai && prev.mai.region) || 'eastus') },
     krw: Number(c.krw) > 0 ? Number(c.krw) : (Number(prev.krw) || DEFAULT_KRW),
     // 💳 카드 해외결제 수수료(%) — 시장 환율에 더해 카드 청구 예상액을 낸다(브랜드 약 1~1.1% + 카드사 약 0.2% · 카드마다 다름)
     cardFee: (c.cardFee != null && c.cardFee !== '' && Number(c.cardFee) >= 0 && Number(c.cardFee) < 10) ? Number(c.cardFee) : (prev.cardFee != null ? Number(prev.cardFee) : DEFAULT_CARD_FEE),
@@ -140,7 +140,7 @@ function save(cfg) {
   fs.writeFileSync(CFG_PATH, JSON.stringify(clean, null, 2), 'utf8');
   return clean;
 }
-const region = (cfg) => String((((cfg || load()).mai) || {}).region || 'eastasia');
+const region = (cfg) => String((((cfg || load()).mai) || {}).region || 'eastus');   // 기본 = East US(로이 2026-10-05)
 const krw = (cfg) => Number((cfg || load()).krw) || DEFAULT_KRW;
 const cardFee = (cfg) => { const v = (cfg || load()).cardFee; return v != null && isFinite(Number(v)) ? Number(v) : DEFAULT_CARD_FEE; };
 

@@ -38,7 +38,7 @@ class MaiProvider {
   }
   async synthesize(text, opts = {}) {
     if (!this.ready) throw new Error('MAI-Voice — Speech 키가 없습니다 (🔊 음성 엔진에서 넣으세요)');
-    const region = String(opts.region || 'eastasia').trim();
+    const region = String(opts.region || 'eastus').trim();
     const voice = String(opts.voice || 'ko-KR-Junho').trim();
     const model = String(opts.model || 'MAI-Voice-2.1').trim();
     const res = await fetchWithTimeout(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`, {

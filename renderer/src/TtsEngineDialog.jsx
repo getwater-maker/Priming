@@ -36,7 +36,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [chan, setChan] = useState('');
   const [tab, setTab] = useState('omnivoice');
   const [keys, setKeys] = useState({});            // 엔진 → { key | clear }
-  const [region, setRegion] = useState('eastasia');
+  const [region, setRegion] = useState('eastus');
   const [krwSaved, setKrwSaved] = useState(1400);   // 환율을 못 받았을 때만 쓰는 지난 값
   const [fx, setFx] = useState(null);              // 💱 { rate, asOf, source, stale } — 시장 환율(main 이 공개 API 에서)
   const [cardFee, setCardFee] = useState(1.3);     // 💳 카드 해외결제 수수료(%)

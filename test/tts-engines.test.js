@@ -51,7 +51,7 @@ function makeWav(samples, sr = 24000) {
   eq(TE.channelVoice({ voiceEngine: { id: 'mai' } }).model, 'MAI-Voice-2.1', 'MAI 모델 기본값 = 2.1');
   eq(TE.channelVoice({ voiceEngine: { id: 'gemini' } }).model, 'gemini-3.8-flash-tts', 'Gemini 모델 기본값 = 3.8');
   eq(TE.channelVoice({ voiceEngine: { id: 'elevenlabs', model: 'eleven_bogus' } }).model, 'eleven_v4', '목록에 없는 모델 → 첫 모델(v4)');
-  eq(TE.region(), 'eastasia', 'MAI 지역 기본값(전역)');
+  eq(TE.region(), 'eastus', 'MAI 지역 기본값(전역) = East US');
   TE.save({ mai: { region: 'japaneast' }, krw: 1350 });
   eq([TE.region(), TE.krw()], ['japaneast', 1350], '전역 = 지역·환율만 저장');
   eq(TE.synthExtra('mai', chB).region, 'japaneast', 'MAI 인자에 전역 지역');
