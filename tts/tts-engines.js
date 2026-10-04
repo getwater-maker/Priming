@@ -1,20 +1,17 @@
 'use strict';
 
 /**
- * tts-engines.js — 🔊 음성 엔진 고르기 (헤더 「🔊 음성 엔진」 팝업 · v0.6.67)
+ * tts-engines.js — 🔊 음성 엔진 · 목소리 (헤더 「🔊 음성 엔진」 팝업 · v0.6.67~69)
  *
- * 무엇을 하나:
- *   - 어느 TTS 엔진으로 문장을 읽을지 **한 곳**에서 정한다(헤더 공통 — 이미지·비디오 도구와 같은 「헤더 우선」).
- *   - OmniVoice = 지금까지처럼 **채널 설정**(참조음성·시드)을 그대로 쓴다.
- *   - 유료 API(Gemini · MAI-Voice · Typecast · ElevenLabs) = 이 팝업에서 고른 모델·목소리로 읽는다.
- *     채널의 참조음성·화자 목소리는 OmniVoice 전용이라 쓰지 않는다(로그로 알린다).
+ * 🔑 v0.6.69 — **채널마다 엔진·목소리를 따로** 정한다(로이 2026-10-05: 채널마다 개성 있는 목소리).
+ *   - 채널 설정(tts-presets.json)의 `voiceEngine` = { id, model, voice, style, emotion, stability, similarity }
+ *     · id 가 없거나 'omnivoice' 면 지금까지처럼 채널의 참조음성(voiceCloneRefAudio)·시드로 읽는다.
+ *     · ⚠ 채널의 `engine` 필드는 건드리지 않는다(preset-store 가 omnivoice/gemini 밖의 값을 지운다).
+ *   - 전역(~/.priming-maker/tts-engines.json)에는 **계정 공통값만**: MAI 지역 · 환율.
+ *   - API 키 = tts/secret-store (gemini 키는 이미지·프롬프트와 **같은 키**) · 렌더러엔 끝 4자리만.
+ *   - 유료 엔진이면 채널의 참조음성·instruct·cfg·화자별 목소리는 쓰지 않는다(로그로 알린다).
  *
- * 저장:
- *   - 설정(엔진·모델·목소리)  ~/.priming-maker/tts-engines.json
- *   - API 키                  tts/secret-store (gemini 키는 이미지·프롬프트와 **같은 키**를 쓴다)
- *   🔑 렌더러로 키 원문을 돌려주지 않는다(끝 4자리만).
- *
- * 🔑 엔진 해석은 `resolveEngine` · 합성 인자는 `synthExtra` **한 곳** — 파이프라인·로그·시험 재생이 같은 값을 탄다.
+ * 🔑 엔진 해석 `resolveEngine(preset)` · 합성 인자 `synthExtra(id, preset)` · 요금 `estimateUsd` **한 곳**.
  */
 
 const fs = require('fs');
@@ -28,7 +25,7 @@ const CFG_PATH = path.join(os.homedir(), '.priming-maker', 'tts-engines.json');
 const ENGINES = [
   {
     id: 'omnivoice', label: 'OmniVoice', sub: '내 GPU 서버 · 무료', paid: false,
-    note: '기본은 채널마다 정한 참조음성(⚙ 채널편집 → 🎙)으로 읽습니다. 아래에서 서버 목소리를 고르면 모든 채널을 그 목소리로 읽습니다(시드는 채널 것). 서버 주소는 ⚙ 설정 → 🖧 TTS 서버.',
+    note: '서버 공용 목소리 하나를 고르면 이 채널의 참조음성이 됩니다(⚙ 채널편집 🎙 의 참조음성과 같은 값). 시드·화자 목소리는 채널편집에서. 서버 주소는 ⚙ 설정 → 🖧 TTS 서버.',
   },
   {
     id: 'gemini', label: 'Google Gemini TTS', sub: 'Google AI Studio API 키', paid: true,
@@ -53,7 +50,7 @@ const ENGINES = [
     regions: ['eastasia', 'southeastasia', 'japaneast', 'eastus', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'],
     defaultRegion: 'eastasia', defaultVoice: 'ko-KR-Junho',
     // 목소리 97개 = voice-catalogs.MAI(공식 표 전체 · 말투는 목소리마다 다르다)
-    note: 'Azure 포털에서 Speech(Foundry) 리소스를 만들고 키·지역을 넣으세요. 목소리 이름은 「ko-KR-Junho」처럼 씁니다.',
+    note: 'Azure 포털에서 Speech(Foundry) 리소스를 만들고 키·지역을 넣으세요(지역은 모든 채널 공통).',
   },
   {
     id: 'typecast', label: '타입캐스트 TTS', sub: 'typecast.ai API 키', paid: true,
@@ -70,7 +67,9 @@ const ENGINES = [
     id: 'elevenlabs', label: 'ElevenLabs TTS', sub: 'elevenlabs.io API 키', paid: true,
     keyId: 'elevenlabs', keyLabel: 'API 키', keyUrl: 'https://elevenlabs.io/app/settings/api-keys',
     models: [
-      { id: 'eleven_v3', name: 'Eleven v3 (최신 · 표현력)' },
+      { id: 'eleven_v4', name: 'Eleven v4 (최신 · 가장 풍부한 감정)' },
+      { id: 'eleven_v4_turbo', name: 'Eleven v4 Turbo (빠름)' },
+      { id: 'eleven_v3', name: 'Eleven v3' },
       { id: 'eleven_multilingual_v2', name: 'Multilingual v2 (안정적)' },
       { id: 'eleven_flash_v2_5', name: 'Flash v2.5 (빠르고 쌈)' },
     ],
@@ -81,78 +80,124 @@ const ENGINES = [
 const ENGINE_IDS = ENGINES.map((e) => e.id);
 const byId = (id) => ENGINES.find((e) => e.id === id) || null;
 
+// ── 💲 요금 (USD · 공식 요금표 2026-10-05 확인 — 바뀌면 여기 한 곳만) ─────────────────────────
+//   kind 'char' = 글자당 · 'sec' = 음성 1초당(Gemini: 음성 토큰 25개/초 × 1백만 토큰당 단가 · 입력 글자 값은 미미해 뺀다)
+//   근거: ai.google.dev/gemini-api/docs/pricing · MAI(1백만 글자 $22 / Flash $15 · 2026년 말까지 도입가)
+//         typecast.ai/developers/api(1글자 = 1크레딧 · Lite $0.075/1천 크레딧) · elevenlabs.io/pricing/api(1천 글자당)
+const PRICING = {
+  'gemini-3.8-flash-tts': { kind: 'sec', usd: 25 * 9 / 1e6, free: '무료 등급 있음(호출 수 제한)', note: '2026년 말까지 · 2027-01부터 2배' },
+  'gemini-3.8-flash-lite-tts': { kind: 'sec', usd: 25 * 6 / 1e6, free: '무료 등급 있음(호출 수 제한)', note: '2026년 말까지 · 2027-01부터 2배' },
+  'gemini-3.1-flash-tts-preview': { kind: 'sec', usd: 25 * 20 / 1e6, free: '무료 등급 있음(호출 수 제한)' },
+  'gemini-2.5-pro-preview-tts': { kind: 'sec', usd: 25 * 20 / 1e6, free: '무료 등급 없음' },
+  'MAI-Voice-2.1': { kind: 'char', usd: 22 / 1e6, note: '도입가(2026년 말까지)' },
+  'MAI-Voice-2.1-Flash': { kind: 'char', usd: 15 / 1e6, note: '도입가(2026년 말까지)' },
+  'ssfm-v30': { kind: 'char', usd: 0.075 / 1e3, free: '무료 월 1만5천 자(⚠ 상업 이용 불가)', note: 'Lite 요금제 기준 · 초과분 1천 자 $0.09' },
+  'ssfm-v21': { kind: 'char', usd: 0.075 / 1e3, free: '무료 월 1만5천 자(⚠ 상업 이용 불가)', note: 'Lite 요금제 기준' },
+  'eleven_v4': { kind: 'char', usd: 0.08 / 1e3, note: '종량제 · 10/12까지 할인가 1천 자 $0.022' },
+  'eleven_v4_turbo': { kind: 'char', usd: 0.04 / 1e3, note: '종량제(Turbo 단가)' },
+  'eleven_v3': { kind: 'char', usd: 0.08 / 1e3, note: '종량제' },
+  'eleven_multilingual_v2': { kind: 'char', usd: 0.08 / 1e3, note: '종량제' },
+  'eleven_flash_v2_5': { kind: 'char', usd: 0.04 / 1e3, note: '종량제' },
+};
+const KO_CHARS_PER_SEC = 7;   // 한국어 낭독 ≈ 초당 7글자(정속) — 초 단위 요금 추정용(실측 길이가 있으면 그걸 쓴다)
+const DEFAULT_KRW = 1400;     // 1달러 = 원(팝업에서 바꿀 수 있다)
+
+/** 글자 수(·초) → 예상 USD. 모르는 모델은 null. OmniVoice = 0 */
+function estimateUsd(engineId, model, chars, sec) {
+  if (engineId === 'omnivoice') return 0;
+  const p = PRICING[model]; if (!p) return null;
+  const n = Math.max(0, Number(chars) || 0);
+  if (p.kind === 'char') return n * p.usd;
+  const s = Number(sec) > 0 ? Number(sec) : n / KO_CHARS_PER_SEC;
+  return s * p.usd;
+}
+/** 요금 한 줄(사람 말) */
+function priceLine(engineId, model) {
+  if (engineId === 'omnivoice') return '무료 (내 GPU 서버 · 전기료만)';
+  const p = PRICING[model]; if (!p) return '요금 정보 없음';
+  const per = p.kind === 'char'
+    ? `1만 자당 약 $${(p.usd * 1e4).toFixed(2)}`
+    : `음성 1분당 약 $${(p.usd * 60).toFixed(3)} (한국어 1만 자 ≈ $${(p.usd * 1e4 / KO_CHARS_PER_SEC).toFixed(2)})`;
+  return [per, p.free, p.note].filter(Boolean).join(' · ');
+}
+
 function load() {
   try { const j = JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')); if (j && typeof j === 'object') return j; } catch {}
-  return { active: 'omnivoice' };
+  return {};
 }
+/** 전역 = 계정 공통값만(MAI 지역 · 환율). 채널 목소리는 preset-store 에 */
 function save(cfg) {
-  const clean = { active: ENGINE_IDS.includes(cfg && cfg.active) ? cfg.active : 'omnivoice' };
-  for (const e of ENGINES) if (cfg && cfg[e.id] && typeof cfg[e.id] === 'object') clean[e.id] = { ...cfg[e.id] };
+  const prev = load();
+  const c = cfg || {};
+  const clean = {
+    mai: { region: String((c.mai && c.mai.region) || (prev.mai && prev.mai.region) || 'eastasia') },
+    krw: Number(c.krw) > 0 ? Number(c.krw) : (Number(prev.krw) || DEFAULT_KRW),
+  };
   fs.mkdirSync(path.dirname(CFG_PATH), { recursive: true });
   fs.writeFileSync(CFG_PATH, JSON.stringify(clean, null, 2), 'utf8');
   return clean;
 }
-function active(cfg) { const a = (cfg || load()).active; return ENGINE_IDS.includes(a) ? a : 'omnivoice'; }
+const region = (cfg) => String((((cfg || load()).mai) || {}).region || 'eastasia');
+const krw = (cfg) => Number((cfg || load()).krw) || DEFAULT_KRW;
 
-/** 엔진별 설정값(빈 값은 기본값으로 채움) */
-function engineCfg(id, cfg) {
-  const e = byId(id); const c = ((cfg || load())[id]) || {};
-  if (!e) return {};
-  if (!e.paid) return { voice: String(c.voice || '') };   // OmniVoice — voice = '' (채널 그대로) | 'srv:<이름>'
-  const out = { ...c };
-  if (!out.model || !(e.models || []).some((m) => m.id === out.model)) out.model = e.models[0].id;
-  if (!out.voice && e.defaultVoice) out.voice = e.defaultVoice;
-  if (e.regions && !out.region) out.region = e.defaultRegion;
+/** 채널의 목소리 설정(빈 값은 기본값) — { id, model, voice, … } */
+function channelVoice(preset) {
+  const ve = (preset && preset.voiceEngine && typeof preset.voiceEngine === 'object') ? preset.voiceEngine : {};
+  const id = ENGINE_IDS.includes(ve.id) ? ve.id : 'omnivoice';
+  const e = byId(id);
+  const out = { ...ve, id };
+  if (e.paid) {
+    if (!out.model || !(e.models || []).some((m) => m.id === out.model)) out.model = e.models[0].id;
+    if (!out.voice && e.defaultVoice) out.voice = e.defaultVoice;
+  }
   return out;
 }
 
 /**
- * 실제로 쓸 엔진 id. 헤더에서 유료 엔진을 골랐으면 그것, OmniVoice 면 채널 엔진(옛 gemini 채널 포함) 그대로.
+ * 실제로 쓸 엔진 id — 채널(preset)의 voiceEngine 이 유료면 그것, 아니면 채널 engine(옛 gemini 채널 포함).
+ * 문자열(엔진 id)을 받으면 그대로(리모션 등 엔진을 직접 정한 곳).
  * 🔑 makeTtsManager·fillTtsList·voiceLabel 이 모두 이 함수를 탄다.
  */
-function resolveEngine(presetEngine, cfg) {
-  const a = active(cfg);
-  if (a !== 'omnivoice') return a;
-  return presetEngine || 'omnivoice';
+function resolveEngine(presetOrId) {
+  if (presetOrId == null) return 'omnivoice';
+  if (typeof presetOrId === 'string') return presetOrId || 'omnivoice';
+  const cv = channelVoice(presetOrId);
+  if (cv.id !== 'omnivoice') return cv.id;
+  return presetOrId.engine || 'omnivoice';
 }
 
 /**
- * 유료 엔진의 합성 인자 — synthesize(opts) 에 얹는다. OmniVoice 면 null(= 채널 설정 그대로).
+ * 유료 엔진의 합성 인자 — synthesize(opts) 에 얹는다. OmniVoice(·옛 gemini 채널)면 null(= 채널 설정 그대로).
  * `engineSig` 는 TTS 캐시 키에 들어간다(목소리·모델을 바꾸면 옛 음성이 되살아나지 않게).
  */
-function synthExtra(id, cfg) {
+function synthExtra(id, preset, cfg) {
   const e = byId(id);
   if (!e || !e.paid) return null;
-  const c = engineCfg(id, cfg);
-  const x = { model: c.model, voice: c.voice || '' };
-  if (id === 'gemini' && c.style) x.style = String(c.style);
+  const cv = channelVoice(preset);
+  if (cv.id !== id) return null;
+  const x = { model: cv.model, voice: cv.voice || '' };
+  if (id === 'gemini' && cv.style) x.style = String(cv.style);
   if (id === 'mai') {
-    x.region = c.region;
+    x.region = region(cfg);
     // 말투는 목소리마다 다르다 — 고른 목소리가 못 하는 말투는 보내지 않는다(400 대신 기본 말투)
-    const v = require('./voice-catalogs').MAI.find((m) => m.id === c.voice);
-    if (c.style && (!v || v.styles.includes(c.style))) x.style = c.style;
+    const v = require('./voice-catalogs').MAI.find((m) => m.id === cv.voice);
+    if (cv.style && (!v || v.styles.includes(cv.style))) x.style = cv.style;
   }
-  if (id === 'typecast') { x.emotion = c.emotion || 'normal'; }
+  if (id === 'typecast') { x.emotion = cv.emotion || 'normal'; }
   if (id === 'elevenlabs') {
-    if (c.stability != null && c.stability !== '') x.stability = Number(c.stability);
-    if (c.similarity != null && c.similarity !== '') x.similarity = Number(c.similarity);
+    if (cv.stability != null && cv.stability !== '') x.stability = Number(cv.stability);
+    if (cv.similarity != null && cv.similarity !== '') x.similarity = Number(cv.similarity);
   }
   x.engineSig = JSON.stringify({ id, ...x });
   return x;
 }
 
-/** OmniVoice 를 고르고 서버 목소리를 정했으면 'srv:<이름>', 아니면 ''(= 채널 참조음성 그대로) */
-function omniVoice(cfg) {
-  const v = String((((cfg || load()).omnivoice) || {}).voice || '');
-  return /^srv:./.test(v) ? v : '';
-}
-
 /** 로그 한 줄 — 「어느 엔진·목소리로 읽었나」 */
-function label(id, cfg) {
+function label(id, preset) {
   const e = byId(id); if (!e) return String(id || '');
-  if (!e.paid) { const ov = omniVoice(cfg); return ov ? `${e.label} · 목소리 ☁ ${ov.slice(4)}(모든 채널)` : e.label; }
-  const c = engineCfg(id, cfg);
-  return `${e.label} · ${c.model} · 목소리 ${c.voice || '⚠ 없음'}`;
+  if (!e.paid) return e.label;
+  const cv = channelVoice(preset);
+  return `${e.label} · ${cv.model} · 목소리 ${cv.voice || '⚠ 없음'}`;
 }
 
 /** 키 보유 여부(원문은 내보내지 않는다) */
@@ -167,4 +212,4 @@ function keyInfo(SecretStore) {
   return out;
 }
 
-module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, byId, load, save, active, engineCfg, resolveEngine, synthExtra, omniVoice, label, keyInfo };
+module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, PRICING, KO_CHARS_PER_SEC, DEFAULT_KRW, byId, load, save, region, krw, channelVoice, resolveEngine, synthExtra, label, keyInfo, estimateUsd, priceLine };

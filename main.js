@@ -169,12 +169,9 @@ function resolvePreset(presetName) {
 // 채널이 실제로 쓰는 목소리를 사람이 읽는 한 줄로 — 「어느 목소리로 만들었나」를 로그만 보고 알 수 있게.
 function voiceLabel(preset) {
   if (!preset) return '⚠ 채널 없음';
-  // 🔊 헤더 「음성 엔진」에서 유료 API 를 골랐으면 그 엔진·목소리가 실제로 읽는다(채널 참조음성은 안 쓴다)
-  { const id = TtsEngines.resolveEngine(preset.engine);
-    if (id !== 'omnivoice') return `채널 「${preset.name}」 · 🔊 ${TtsEngines.label(id)}`; }
-  // 🔊 OmniVoice 인데 팝업에서 서버 목소리를 정했으면 그 목소리가 채널 참조음성을 이긴다(모든 채널)
-  { const ov = TtsEngines.resolveEngine(preset.engine) === 'omnivoice' ? TtsEngines.omniVoice() : '';
-    if (ov) preset = { ...preset, voiceCloneRefAudio: ov }; }
+  // 🔊 이 채널의 음성 엔진이 유료 API 면 그 엔진·목소리가 실제로 읽는다(채널 참조음성은 안 쓴다 · v0.6.69 채널별)
+  { const id = TtsEngines.resolveEngine(preset);
+    if (id !== 'omnivoice') return `채널 「${preset.name}」 · 🔊 ${TtsEngines.label(id, preset)}`; }
   const rv = String(preset.voiceCloneRefAudio || '');
   const vn = rv.startsWith('srv:') ? ('☁ ' + rv.slice(4)) : (rv ? path.basename(rv) : '⚠ 참조음성 없음');
   // ⚠ 시드가 비면 서버가 매번 다른 시드를 쓴다 → **같은 채널인데 편마다 톤이 달라진다**. 조용히 넘기지 않는다.
@@ -2048,8 +2045,8 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
     log(`🎙 전체 TTS — ${voiceLabel(S.preset)} · 배속 ${speed}x (${S.preset.engine}) 연결 중…`);
-    const { mgr, ok } = await P.makeTtsManager(log, S.preset.engine);
-    if (!ok) throw new Error(`TTS 엔진 '${S.preset.engine}' 미가동 (백엔드 확인)`);
+    const { mgr, ok } = await P.makeTtsManager(log, S.preset);
+    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(S.preset)}' 미가동 (서버 또는 API 키 확인)`);
     S.ttsMgr = mgr;
   }
 
@@ -5128,12 +5125,52 @@ ipcMain.handle('set-gemini-key', (_e, key) => {
   try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
   catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
 });
-// 🔊 음성 엔진(헤더 팝업 · v0.6.67) — OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs 중 고르기 + API 키.
-//   설정 = tts/tts-engines(~/.priming-maker/tts-engines.json) · 키 = secret-store(원문은 화면으로 돌려주지 않는다 — 끝 4자리만).
+// 🔊 음성 엔진(헤더 팝업 · v0.6.67~69) — **채널마다** OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs 목소리 + API 키 + 얼굴 + 샘플 + 요금.
+//   채널 목소리 = preset.voiceEngine(+ OmniVoice 면 voiceCloneRefAudio) · 전역 = MAI 지역·환율(tts/tts-engines) · 키 = secret-store(화면엔 끝 4자리만).
 // 🗂 API 로 불러온 목소리 목록은 디스크에 둔다(~/.priming-maker/tts-voices/<엔진>.json) — 팝업을 열 때마다 API 를 부르지 않게.
 const TTS_VOICE_DIR = () => path.join(os.homedir(), '.priming-maker', 'tts-voices');
 function _readVoiceCache(id) { try { return JSON.parse(fs.readFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), 'utf8')); } catch { return null; } }
 function _writeVoiceCache(id, voices) { try { fs.mkdirSync(TTS_VOICE_DIR(), { recursive: true }); fs.writeFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), JSON.stringify({ at: Date.now(), voices })); } catch {} }
+// 🙂 목소리 얼굴(~/.priming-maker/voice-faces/<엔진>/<이름>.png) · 🔈 샘플(~/.priming-maker/tts-samples/<엔진>/…wav — 한 번 만든 샘플은 다시 돈 안 듦)
+const VOICE_FACE_DIR = () => path.join(os.homedir(), '.priming-maker', 'voice-faces');
+const TTS_SAMPLE_DIR = () => path.join(os.homedir(), '.priming-maker', 'tts-samples');
+const _voiceFileKey = (voice) => String(voice || '').replace(/[^A-Za-z0-9가-힣_.-]/g, '_').slice(0, 60) + '_' + require('crypto').createHash('sha1').update(String(voice || '')).digest('hex').slice(0, 8);
+// 얼굴 목록 = <엔진>/index.json { 목소리 id: 파일 이름 } — 화면은 목소리 id 로 찾는다(파일 이름은 main 이 만든다)
+const _faceIndexPath = (engine) => path.join(VOICE_FACE_DIR(), String(engine), 'index.json');
+function _faceIndex(engine) { try { return JSON.parse(fs.readFileSync(_faceIndexPath(engine), 'utf8')); } catch { return {}; } }
+function _setFace(engine, voice, file) {
+  const ix = _faceIndex(engine); if (file) ix[voice] = file; else delete ix[voice];
+  fs.mkdirSync(path.dirname(_faceIndexPath(engine)), { recursive: true }); fs.writeFileSync(_faceIndexPath(engine), JSON.stringify(ix));
+}
+function _faceFiles(engine) {
+  const out = {}; const dir = path.join(VOICE_FACE_DIR(), engine);
+  for (const [voice, f] of Object.entries(_faceIndex(engine))) { const p = path.join(dir, f); try { if (fs.existsSync(p)) out[voice] = { path: p, v: String(fs.statSync(p).mtimeMs | 0) }; } catch {} }
+  return out;
+}
+function _sampleIndexPath(engine) { return path.join(TTS_SAMPLE_DIR(), engine, 'index.json'); }
+function _sampleIndex(engine) { try { return JSON.parse(fs.readFileSync(_sampleIndexPath(engine), 'utf8')); } catch { return {}; } }
+const _sampleKey = (model, voice, style) => [model || '', voice || '', style || ''].join('|');
+// 샘플 문장 — 목소리 언어에 맞춘다(한국어 목소리에 영어 문장을 읽히면 성격을 못 듣는다)
+const SAMPLE_TEXT = {
+  ko: '안녕하세요. 오늘은 오래된 책장 속에 숨어 있던 이야기 한 편을 들려드리겠습니다.',
+  en: 'Hello. Today I would like to tell you a story that was hidden in an old bookshelf.',
+  ja: 'こんにちは。今日は古い本棚に隠れていた物語をひとつお聞かせします。',
+  vi: 'Xin chào. Hôm nay tôi xin kể cho các bạn nghe một câu chuyện ẩn trong giá sách cũ.',
+  zh: '大家好。今天我想给大家讲一个藏在旧书架里的故事。',
+  es: 'Hola. Hoy quiero contarles una historia que estaba escondida en una vieja estantería.',
+  fr: "Bonjour. Aujourd'hui, je vais vous raconter une histoire cachée dans une vieille bibliothèque.",
+  de: 'Hallo. Heute erzähle ich Ihnen eine Geschichte, die in einem alten Bücherregal versteckt war.',
+};
+function _sampleLang(engine, voice) {
+  const m = /^([a-z]{2})-[A-Z]{2}-/.exec(String(voice || ''));
+  return m ? m[1] : 'ko';
+}
+function _channelsForUi() {
+  const TE = require('./tts/tts-engines');
+  return require('./tts/preset-store').loadAll()
+    .filter((p) => p && p.name && !/^__/.test(p.name))      // __ 로 시작 = 테스트가 만든 임시 채널
+    .map((p) => ({ name: p.name, group: p.group || '', voiceEngine: TE.channelVoice(p), ref: String(p.voiceCloneRefAudio || ''), seed: p.seed }));
+}
 ipcMain.handle('tts-engines-get', () => {
   const TE = require('./tts/tts-engines');
   const VC = require('./tts/voice-catalogs');
@@ -5145,26 +5182,33 @@ ipcMain.handle('tts-engines-get', () => {
     if (id === 'mai') return { voices: VC.MAI, at: 0 };
     return { voices: (c && c.voices) || [], at: c ? c.at : 0 };
   };
-  const engines = TE.ENGINES.map((e) => ({ ...e, cfg: TE.engineCfg(e.id, cfg), ...(e.id === 'omnivoice' ? {} : voicesOf(e.id)) }));
-  return { active: TE.active(cfg), engines, keys: TE.keyInfo(require('./tts/secret-store')) };
+  const engines = TE.ENGINES.map((e) => ({
+    ...e, ...(e.id === 'omnivoice' ? {} : voicesOf(e.id)),
+    prices: e.id === 'omnivoice' ? { _: TE.priceLine('omnivoice') } : Object.fromEntries((e.models || []).map((m) => [m.id, TE.priceLine(e.id, m.id)])),
+    unit: Object.fromEntries((e.models || []).map((m) => [m.id, TE.PRICING[m.id] || null])),
+    faces: Object.fromEntries(Object.entries(_faceFiles(e.id)).map(([k, v]) => [k, v])),
+    samples: _sampleIndex(e.id),
+  }));
+  return { engines, keys: TE.keyInfo(require('./tts/secret-store')), channels: _channelsForUi(), region: TE.region(cfg), krw: TE.krw(cfg), koCps: TE.KO_CHARS_PER_SEC };
 });
-// OmniVoice 서버 공용 목소리(카드) — 실패하면 null(빈 목록과 구분) · 채널마다 어느 목소리를 쓰는지 표시용
-ipcMain.handle('tts-omni-voices', async () => {
-  let list = null;
-  try { list = await require('./tts/asr-client').listServerVoices(); } catch {}
-  const used = {};
-  try { for (const p of require('./tts/preset-store').loadAll()) { const v = String(p.voiceCloneRefAudio || ''); if (v.startsWith('srv:') && !/^__/.test(p.name)) (used[v.slice(4)] = used[v.slice(4)] || []).push(p.name); } } catch {}
-  if (!list) return { ok: false, error: 'OmniVoice 서버 목록을 받지 못했습니다(서버 주소·꺼짐 확인)', used };
-  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
-});
+// 저장 — 채널마다 목소리(여러 채널 한 번에) + 전역(지역·환율) + 키
 ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
   try {
     const TE = require('./tts/tts-engines');
     const SecretStore = require('./tts/secret-store');
-    const prev = TE.load();
-    const next = { active: args.active || prev.active };
-    for (const e of TE.ENGINES) next[e.id] = { ...(prev[e.id] || {}), ...((args.cfg && args.cfg[e.id]) || {}) };
-    TE.save(next);
+    const Store = require('./tts/preset-store');
+    TE.save({ mai: { region: args.region }, krw: args.krw });
+    const all = Store.loadAll();
+    const done = [];
+    for (const ch of args.channels || []) {
+      const p = all.find((x) => x.name === ch.name); if (!p) continue;
+      const ve = ch.voiceEngine && TE.ENGINE_IDS.includes(ch.voiceEngine.id) ? { ...ch.voiceEngine } : { id: 'omnivoice' };
+      const patch = { voiceEngine: ve };
+      // OmniVoice 카드 = 이 채널의 참조음성(채널편집 🎙 과 같은 칸) — 서버 목소리(srv:)일 때만 바꾼다(빈 값으로 지우지 않는다)
+      if (ve.id === 'omnivoice' && /^srv:./.test(String(ch.ref || ''))) patch.voiceCloneRefAudio = String(ch.ref);
+      Store.update(p.id, patch);
+      done.push(`${p.name} → ${TE.label(ve.id, { voiceEngine: ve })}${patch.voiceCloneRefAudio ? ' ☁ ' + patch.voiceCloneRefAudio.slice(4) : ''}`);
+    }
     // 키: 새 값이 들어온 칸만 바꾼다(빈 칸 = 그대로) · clear 표시면 지운다.
     //   🔑 gemini 는 이미지(나노바나나)·프롬프트와 같은 칸 — 다른 필드가 있으면 지키며 key 만 바꾼다.
     const changed = [];
@@ -5176,9 +5220,20 @@ ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
     }
     const mgr = require('./tts/tts-manager').getInstance({ logger: log });
     for (const id of changed) { try { await mgr.refreshProvider(id); } catch {} }
-    log(`🔊 음성 엔진 저장 — ${TE.label(TE.active())}${changed.length ? ` · 키 바뀜: ${changed.join(', ')}` : ''}`);
+    if (done.length) log(`🔊 채널 목소리 저장 — ${done.join(' / ')}`);
+    if (changed.length) log(`🔑 음성 엔진 키 바뀜: ${changed.join(', ')}`);
+    try { if (S.preset && S.preset.name) { const np = P.getPreset(S.preset.name); if (np) S.preset = np; } } catch {}
     return { ok: true };
   } catch (e) { log('🔊 음성 엔진 저장 실패: ' + e.message); return { ok: false, error: e.message }; }
+});
+// OmniVoice 서버 공용 목소리(카드) — 실패하면 null(빈 목록과 구분) · 채널마다 어느 목소리를 쓰는지 표시용
+ipcMain.handle('tts-omni-voices', async () => {
+  let list = null;
+  try { list = await require('./tts/asr-client').listServerVoices(); } catch {}
+  const used = {};
+  try { for (const p of require('./tts/preset-store').loadAll()) { const v = String(p.voiceCloneRefAudio || ''); if (v.startsWith('srv:') && !/^__/.test(p.name)) (used[v.slice(4)] = used[v.slice(4)] || []).push(p.name); } } catch {}
+  if (!list) return { ok: false, error: 'OmniVoice 서버 목록을 받지 못했습니다(서버 주소·꺼짐 확인)', used };
+  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
 });
 // 키 발급 페이지 — 엔진 표(tts-engines)에 적힌 공식 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다)
 ipcMain.handle('tts-engine-open-key', (_e, id) => {
@@ -5186,7 +5241,7 @@ ipcMain.handle('tts-engine-open-key', (_e, id) => {
   if (!e || !/^https:\/\//.test(String(e.keyUrl || ''))) return false;
   shell.openExternal(e.keyUrl); return true;
 });
-// 목소리 목록(타입캐스트·ElevenLabs) — 저장된 키 또는 방금 넣은 키로 API 에서 가져온다
+// 목소리 목록(Gemini 확장 · 타입캐스트 · ElevenLabs) — 저장된 키 또는 방금 넣은 키로 API 에서 가져온다
 ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
   try {
     const k = String(key || '').trim() || ((require('./tts/secret-store').get(id) || {}).key || '');
@@ -5202,31 +5257,89 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
     return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });
-// 🔈 시험 듣기 — **저장된** 설정·키로 한 문장을 만들어 임시 파일로(파이프라인과 같은 synthExtra 를 탄다)
-ipcMain.handle('tts-engine-test', async (_e, { id, text, voice } = {}) => {
+// 🔈 샘플 듣기 — ① 저장된 샘플이 있으면 그것(무료) ② 없으면 그 목소리로 한 문장 만들어 **저장**(다음부터 무료)
+//   args: { id, voice, model, style, emotion, channel(OmniVoice 시드용), force(다시 만들기) }
+ipcMain.handle('tts-engine-test', async (_e, args = {}) => {
+  const { id, voice, force } = args;
   try {
     const TE = require('./tts/tts-engines');
+    const e = TE.byId(id); if (!e) return { ok: false, error: '모르는 엔진' };
+    const model = e.paid ? (args.model || e.models[0].id) : '';
+    const style = args.style || args.emotion || '';
+    const sk = _sampleKey(model, voice, style);
+    const idx = _sampleIndex(id);
+    if (!force && idx[sk] && fs.existsSync(path.join(TTS_SAMPLE_DIR(), id, idx[sk].file))) {
+      return { ok: true, path: path.join(TTS_SAMPLE_DIR(), id, idx[sk].file), sec: idx[sk].sec, cached: true };
+    }
     const mgr = require('./tts/tts-manager').getInstance({ logger: log });
     await mgr.start();
-    if (!(await mgr.refreshProvider(id))) return { ok: false, error: id === 'omnivoice' ? 'OmniVoice 서버에 연결하지 못했습니다' : 'API 키가 없습니다 — 저장 후 다시 누르세요' };
-    // 카드의 🔈 = 그 목소리로(저장값은 그대로 두고 voice 만 바꿔 본다)
-    const cfg0 = TE.load();
-    const cfg = voice ? { ...cfg0, [id]: { ...(cfg0[id] || {}), voice: String(voice) } } : cfg0;
-    const extra = TE.synthExtra(id, cfg);
+    if (!(await mgr.refreshProvider(id))) return { ok: false, error: id === 'omnivoice' ? 'OmniVoice 서버에 연결하지 못했습니다' : 'API 키가 없습니다 — 키를 넣고 다시 누르세요' };
+    const lang = _sampleLang(id, voice);
+    const text = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
     let opts;
-    if (extra) opts = { provider: id, ...extra, language: /^[a-z]{2}-[A-Z]{2}-/.test(extra.voice || '') ? String(extra.voice).slice(0, 2) : 'ko' };
-    else {
-      const pr = S.preset || P.getPreset(null) || {};
-      const rv = TE.omniVoice(cfg) || String(pr.voiceCloneRefAudio || '');
-      opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, instruct: pr.instruct || undefined, language: pr.language || 'ko', seed: pr.seed };
+    if (e.paid) {
+      const fake = { voiceEngine: { id, model, voice, style: args.style, emotion: args.emotion, stability: args.stability, similarity: args.similarity } };
+      opts = { provider: id, ...TE.synthExtra(id, fake), language: lang };
+    } else {
+      const pr = (args.channel && P.getPreset(args.channel)) || S.preset || P.getPreset(null) || {};
+      const rv = String(voice || pr.voiceCloneRefAudio || '');
+      opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, language: pr.language || 'ko', seed: pr.seed };
     }
     const t0 = Date.now();
-    const r = await mgr.synthesize(String(text || '안녕하세요. 이 목소리로 대본을 읽어 드립니다.').slice(0, 300), opts);
-    const out = path.join(os.tmpdir(), `priming-tts-test-${id}-${Date.now()}.wav`);
-    fs.writeFileSync(out, r.mp3Buffer);
-    log(`🔈 시험 듣기 — ${TE.label(id)} · ${r.durationSec.toFixed(2)}초 · ${((Date.now() - t0) / 1000).toFixed(1)}초 걸림`);
-    return { ok: true, path: out, sec: r.durationSec };
-  } catch (e) { log('🔈 시험 듣기 실패: ' + e.message); return { ok: false, error: e.message }; }
+    const r = await mgr.synthesize(text, opts);
+    const dir = path.join(TTS_SAMPLE_DIR(), id); fs.mkdirSync(dir, { recursive: true });
+    const file = `${_voiceFileKey(voice)}_${require('crypto').createHash('sha1').update(sk).digest('hex').slice(0, 8)}.wav`;
+    fs.writeFileSync(path.join(dir, file), r.mp3Buffer);
+    const idx2 = _sampleIndex(id); idx2[sk] = { file, sec: r.durationSec, chars: text.length, at: Date.now() };
+    fs.writeFileSync(_sampleIndexPath(id), JSON.stringify(idx2));
+    const usd = TE.estimateUsd(id, model, text.length, r.durationSec);
+    log(`🔈 샘플 — ${e.label} · ${model || ''} · ${voice || '채널 목소리'} · ${r.durationSec.toFixed(1)}초${usd ? ` · 약 $${usd.toFixed(4)}` : ''} · ${((Date.now() - t0) / 1000).toFixed(1)}초 걸림(저장 — 다음부터 무료)`);
+    return { ok: true, path: path.join(dir, file), sec: r.durationSec, cached: false, usd };
+  } catch (err) { log('🔈 샘플 실패: ' + err.message); return { ok: false, error: err.message }; }
+});
+// 🙂 목소리 얼굴 — 그림 파일 고르기(복사해 둔다) / AI 로 그리기(Gemini 이미지 · 1장 요금) / 지우기
+ipcMain.handle('tts-face-pick', async (_e, { engine, voice } = {}) => {
+  try {
+    const r = await dialog.showOpenDialog(win, { title: '목소리 얼굴 그림 고르기', properties: ['openFile'], filters: [{ name: '그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+    const src = r.filePaths[0];
+    if (fs.statSync(src).size > 15 * 1024 * 1024) return { ok: false, error: '그림이 너무 큽니다(15MB 이하)' };
+    const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
+    const key = _voiceFileKey(voice);
+    for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
+    const out = path.join(dir, key + path.extname(src).toLowerCase());
+    fs.copyFileSync(src, out);
+    _setFace(engine, voice, path.basename(out));
+    return { ok: true, key, path: out, v: String(Date.now()) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, lang, hint } = {}) => {
+  try {
+    const GI = require('./core/gemini-image');
+    if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키가 필요합니다(Gemini 탭에서 넣으세요)' };
+    const g = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
+    const prompt = `Friendly illustrated character portrait avatar of a ${g}, head and shoulders, centered, facing the viewer, soft warm lighting, clean simple pastel background, high quality digital illustration, no text, no letters, no watermark.`
+      + ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`;
+    const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
+    const key = _voiceFileKey(voice);
+    const tmp = path.join(dir, key + '.__new');
+    const r = await GI.generateImageToFile({ prompt, aspect: '1:1', outPathNoExt: tmp });
+    if (!r.ok) return { ok: false, error: r.error || '그리기 실패' };
+    for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.') && !f.startsWith(key + '.__new')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
+    const out = path.join(dir, key + path.extname(r.path));
+    fs.renameSync(r.path, out);
+    _setFace(engine, voice, path.basename(out));
+    log(`🎨 목소리 얼굴 — ${engine} · ${name || voice} (Gemini 이미지 1장)`);
+    return { ok: true, key, path: out, v: String(Date.now()) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('tts-face-clear', (_e, { engine, voice } = {}) => {
+  try {
+    const dir = path.join(VOICE_FACE_DIR(), String(engine)); const key = _voiceFileKey(voice);
+    try { for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} } } catch {}
+    _setFace(engine, voice, null);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 // xAI API 키 (secret-store 'xai') — Grok Imagine 비디오 API(grok-api 엔진)용. console.x.ai 에서 발급.
 ipcMain.handle('get-xai-key', () => {
@@ -6053,8 +6166,8 @@ async function runMakeAllBody(opts = {}) {
   S.preset = preset;
   let ttsMgr = null;
   if (!dry && !skipTts && preset) {
-    const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
-    if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+    const { mgr, ok } = await P.makeTtsManager(log, preset);
+    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
     ttsMgr = mgr;
   }
   S.abort = false;
@@ -6655,8 +6768,8 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
   if (!g) return P.toDTO(S.parsed);
   const preset = resolvePreset(presetName);   // 🔑 이름이 이긴다 — 낡은 전역이 남의 채널 목소리를 끌고 오지 않게
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
-  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
-  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const { mgr, ok } = await P.makeTtsManager(log, preset);
+  if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
   const ttsDir = shortsDirs(S.outRoot, shortsNum).tts;
   const sents = pr.getSentencesOfGroup(g);
   S.abort = false;
@@ -7964,8 +8077,8 @@ ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 
   if (!sents.length) return P.toDTO(S.parsed);
   const preset = resolvePreset(args.presetName || null);
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
-  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
-  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const { mgr, ok } = await P.makeTtsManager(log, preset);
+  if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
   const roll = !!args.roll;
   const usePreset = roll ? { ...preset, seed: Math.floor(Math.random() * 1e9) } : preset;
   const sp = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
@@ -9110,8 +9223,8 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   if (!introSents.length) { log('도입부 문장이 없습니다 — 대본에 "## 도입" 헤더가 필요합니다.'); return P.toDTO(S.parsed); }
   S.abort = false;
   log(`🎬 도입부 ${introSents.length}문장 TTS 후 10초 재배치… (${voiceLabel(preset)})`);
-  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
-  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const { mgr, ok } = await P.makeTtsManager(log, preset);
+  if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
   const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
   await P.fillTtsList(introSents, preset, mgr, ttsDir, log, () => S.abort, speed, '도입부', pushDtoUpdate);
   try { await mgr.stop(); } catch {}

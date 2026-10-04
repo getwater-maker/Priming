@@ -13,7 +13,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
-import TtsEngineDialog from './TtsEngineDialog.jsx';
+import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
@@ -1702,16 +1702,23 @@ export default function App() {
     } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
   // Grok API(비디오) xAI 키
-  // ─── 🔊 음성 엔진 팝업(TtsEngineDialog.jsx · v0.6.68) — 여기는 열기·닫기·헤더 표시만 ───
+  // ─── 🔊 채널 목소리 팝업(TtsEngineDialog.jsx · v0.6.69 채널별) — 여기는 열기·닫기·헤더 표시만 ───
+  //   헤더 버튼 = 지금 채널(presetName)의 목소리 얼굴 + 엔진·목소리 이름
   async function refreshTtsEngActive() {
     try {
       const r = await api.ttsEnginesGet();
-      const e = r && (r.engines || []).find((x) => x.id === r.active);
-      if (e) setTtsEngActive({ id: e.id, label: e.id === 'omnivoice' ? 'OmniVoice' : e.label.replace(/ TTS$/, '') });
+      const ch = r && (r.channels || []).find((x) => x.name === presetName);
+      if (!ch) { setTtsEngActive({ id: 'omnivoice', label: 'OmniVoice' }); return r; }
+      const id = (ch.voiceEngine && ch.voiceEngine.id) || 'omnivoice';
+      const e = (r.engines || []).find((x) => x.id === id) || {};
+      const vid = id === 'omnivoice' ? ch.ref : ch.voiceEngine.voice;
+      const vv = (e.voices || []).find((x) => x.id === vid);
+      const vname = vv ? vv.name : String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '');
+      setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (e.faces || {})[vid] || null, gender: vv && vv.gender, vname });
       return r;
     } catch { return null; }
   }
-  useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [presetName]);
   function openTtsEngines() { setTtsEng(true); }
   async function openOllama() {
     try {
@@ -3888,8 +3895,9 @@ export default function App() {
         {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」·「🔗 다시 연결」 자리(로이 2026-10-04 — 더는 안 쓴다).
             ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio·runRelinkWork)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다. */}
         <button className="ghost" data-testid="tts-engine-btn" onClick={openTtsEngines}
-          title={'TTS 를 어느 엔진으로 만들지 고릅니다(대본 큐 전체 공통).\n· OmniVoice — 내 서버 · 채널 참조음성 그대로\n· Gemini · MAI-Voice · 타입캐스트 · ElevenLabs — API 키를 넣어 유료로 사용\n지금: ' + ttsEngActive.label}>
-          <span className="rb-ic">🔊</span> <span className="rb-t">{ttsEngActive.id === 'omnivoice' ? '음성 엔진' : ttsEngActive.label}</span></button>
+          title={'채널마다 목소리를 고릅니다(OmniVoice · Gemini · MAI-Voice · 타입캐스트 · ElevenLabs).\n얼굴·샘플 듣기·요금도 여기서.\n지금 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
+          <span className="rb-ic">{ttsEngActive.face ? <Face face={ttsEngActive.face} name={ttsEngActive.vname} gender={ttsEngActive.gender} size={22} /> : '🔊'}</span>
+          {' '}<span className="rb-t" style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>{ttsEngActive.vname || '채널 목소리'}</span></button>
               </span>
               {splitBar}
             </>)}
@@ -4781,7 +4789,9 @@ export default function App() {
           </div>
         </div>
       )}
-      {ttsEng && <TtsEngineDialog onClose={() => setTtsEng(null)} onSaved={(sel) => { refreshTtsEngActive(); setStatus(`🔊 음성 엔진: ${sel ? sel.label : ''}`); }} />}
+      {ttsEng && <TtsEngineDialog initialChannel={presetName} confirm={uiConfirm}
+        scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
+        onClose={() => setTtsEng(null)} onSaved={(n) => { refreshTtsEngActive(); setStatus(n ? `🔊 채널 목소리 저장 — ${n}개 채널` : '🔊 저장됨'); }} />}
       {ollamaOpen && ollama && (
         <div className="modal-bg show">
           <div className="modal-card">

@@ -18,7 +18,7 @@ const MediaCache = require('./media-cache');
 const { buildVrew } = require('../vrew/vrew-builder');
 const presetStore = require('../tts/preset-store');
 const { getInstance: getTTS } = require('../tts/tts-manager');
-const TtsEngines = require('../tts/tts-engines'); // 🔊 헤더 「음성 엔진」 — 유료 API 엔진 선택(v0.6.67)
+const TtsEngines = require('../tts/tts-engines'); // 🔊 채널별 음성 엔진·목소리(v0.6.69 — preset.voiceEngine)
 
 const AudioNorm = require('./audio-normalize');
 let ffmpegPath = null;
@@ -153,7 +153,7 @@ function listPresets() {
 //   한 번 실패했다고 대본 하나를 통째로 스킵하지 않도록 몇 초 간격으로 재시도한 뒤에만 미가동으로 판정한다.
 async function makeTtsManager(logger, engine, opts = {}) {
   const log = logger || (() => {});
-  // 🔊 헤더 「음성 엔진」에서 유료 API 를 골랐으면 그 엔진으로(채널 엔진보다 우선) — TtsEngines.resolveEngine 한 곳.
+  // 🔊 채널(preset)을 받으면 그 채널의 엔진(voiceEngine)으로 — TtsEngines.resolveEngine 한 곳. 문자열이면 그 엔진 그대로.
   engine = TtsEngines.resolveEngine(engine);
   const mgr = getTTS({ logger: log });
   await mgr.start();
@@ -317,9 +317,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   };
   // 🔊 유료 API 엔진(헤더 「음성 엔진」) — 채널의 참조음성·instruct·cfg 는 OmniVoice 전용이라 싣지 않는다.
   //   🔑 OmniVoice 면 engExtra=null → 아래 synthOpts 는 **옛 것과 한 글자도 같다**(캐시 키 불변).
-  const engineId = TtsEngines.resolveEngine(preset.engine);
-  const engExtra = TtsEngines.synthExtra(engineId);
-  const omniOv = (!engExtra && engineId === 'omnivoice') ? TtsEngines.omniVoice() : '';
+  const engineId = TtsEngines.resolveEngine(preset);
+  const engExtra = TtsEngines.synthExtra(engineId, preset);
   const synthOpts = engExtra ? {
     provider: engineId,
     ...engExtra,
@@ -328,8 +327,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     seed: preset.seed,
   } : {
     provider: preset.engine,
-    // 🔊 OmniVoice 목소리를 팝업에서 정했으면(srv:<이름>) 모든 채널이 그 목소리 — 참조텍스트는 서버 것(.txt)
-    ...(omniOv ? voiceOpts(omniOv, null) : voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText)),
+    ...voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText),
     instruct: preset.instruct || undefined,
     cfgValue: preset.cfgValue,
     inferenceTimesteps: preset.inferenceTimesteps,
@@ -337,8 +335,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     language: preset.language,
     seed: preset.seed,
   };
-  if (engExtra && onLine) onLine(`🔊 음성 엔진 — ${TtsEngines.label(engineId)} (채널 참조음성 대신)`);
-  if (omniOv && onLine) onLine(`🔊 OmniVoice 목소리 — ☁ ${omniOv.slice(4)} (🔊 음성 엔진에서 정함 · 채널 참조음성 대신)`);
+  if (engExtra && onLine) onLine(`🔊 음성 엔진 — ${TtsEngines.label(engineId, preset)} (이 채널의 목소리 · 참조음성 대신)`);
   // 🎭 화자별 목소리 — 채널 `preset.speakers`(이름 → 참조음성). 연결 안 된 화자는 채널 기본 목소리로 읽고 알린다.
   //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
   const spkMap = speakerVoiceMap(preset);

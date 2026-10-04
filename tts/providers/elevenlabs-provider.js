@@ -16,10 +16,10 @@ const PROVIDER_ID = 'elevenlabs';
 const LABEL = 'ElevenLabs';
 const BASE = 'https://api.elevenlabs.io';
 // language_code 를 받는 모델만(다른 모델에 보내면 400)
-const LANG_CODE_MODELS = /^(eleven_v3|eleven_flash_v2_5|eleven_turbo_v2_5)$/;
+const LANG_CODE_MODELS = /^(eleven_v4|eleven_v4_turbo|eleven_v3|eleven_flash_v2_5|eleven_turbo_v2_5)$/;
 
 function buildBody(text, opts = {}) {
-  const model = opts.model || 'eleven_v3';
+  const model = opts.model || 'eleven_v4';
   const body = { text: String(text), model_id: model };
   if (LANG_CODE_MODELS.test(model) && opts.language) body.language_code = String(opts.language).slice(0, 2);
   const sd = Number(opts.seed);
