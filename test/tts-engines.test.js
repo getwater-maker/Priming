@@ -142,7 +142,7 @@ function makeWav(samples, sr = 24000) {
     const L = await EL.listVoices('k');
     eq(L.map((v) => v.id), ['e1', 'e2'], 'ElevenLabs — 다음 쪽까지 전부 불러온다');
     ok(urls[1].includes('next_page_token=T2'), 'ElevenLabs 쪽 넘김 토큰');
-    eq([L[0].gender, L[0].desc, L[0].preview], ['female', '내 복제', 'https://x/p.mp3'], 'ElevenLabs 카드(성별·분류·샘플)'); }
+    eq([L[0].gender, L[0].badge, L[0].desc, L[0].preview], ['female', '내 복제', '', 'https://x/p.mp3'], 'ElevenLabs 카드(성별 · 분류는 badge · 설명은 영어만 · 샘플)'); }
   { let n = 0;
     setFetch(() => { n++; return mockRes(200, null, n === 1 ? { voices: [{ id: 'voice_a', display_name: '서윤', gender: 'FEMALE', language_code: 'ko-KR', persona: '내레이터' }], next_page_token: 'P' } : { voices: [{ id: 'voice_b', display_name: 'B' }] }); });
     const { listVoices: gList } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
@@ -269,7 +269,9 @@ function makeWav(samples, sr = 24000) {
       ok(/data-testid="tts-cost"/.test(APP) && /if \(!se\.audio\) \{ need\+\+; chars \+= n; \}/.test(APP), '대본 TTS 예상 비용 — 음성 없는 문장만 센다');
       ok(MJ.includes("ipcMain.handle('tts-translate'") && /koView/.test(dlg) && /원문:/.test(dlg), '카드 글 한국어 번역(원문은 마우스 올리면)');
       const ta = MJ.indexOf('const _needsTr = '); const needsTr = new Function('return ' + MJ.slice(ta + 'const _needsTr = '.length, MJ.indexOf(';\n', ta)))();
-      eq([needsTr('Warm calm narrator'), needsTr('따뜻한 목소리'), needsTr('ko'), needsTr('')], [true, false, false, false], '번역할 글 고르기(영어만 · 한글·짧은 코드 제외)');
+      eq([needsTr('Warm calm narrator'), needsTr('따뜻한 목소리'), needsTr('ko'), needsTr(''), needsTr('내 복제 · middle_aged · calm narrator')], [true, false, false, false, true], '번역할 글 고르기(영어가 한글보다 많으면 · 「내 복제」 섞인 옛 목록도)');
+      ok(/badge: v.cloned_by_count/.test(fs.readFileSync(path.join(ROOT, 'tts/providers/elevenlabs-provider.js'), 'utf8')), '「복제 N회」는 설명이 아니라 badge(설명은 영어만 → 번역)');
+      ok(!dlg.includes('shown.slice(0, 80)') && dlg.includes('need.length >= 120'), '보이는 카드 전부 번역(120개씩)');
       ok(/gemini: 'gemini-3\.8-flash'/.test(fs.readFileSync(path.join(ROOT, 'core/prompt-io.js'), 'utf8')), 'Gemini 글 모델 = 3.8-flash(2.5-flash 는 신규 사용자 404)'); }
     ok(MJ.includes("ipcMain.handle('tts-channel-avatars'") && MJ.includes('ytChannelId') && MJ.includes('/youtube/v3/channels?part=snippet&id='), '🏷 채널 로고 = 연결된 유튜브 채널 그림(ytChannelId · 이름 짐작 없음)');
     { const ia = MJ.indexOf("ipcMain.handle('tts-channel-avatars'"); ok(!/logoPath\s*:/.test(MJ.slice(ia, ia + 1200)), '유튜브 그림은 logoPath(영상 로고)를 건드리지 않는다'); }

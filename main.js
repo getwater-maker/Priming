@@ -5338,7 +5338,8 @@ const TR_PATH = () => path.join(TTS_VOICE_DIR(), 'translations.json');
 let _trCache = null;
 function _trLoad() { if (_trCache) return _trCache; try { _trCache = JSON.parse(fs.readFileSync(TR_PATH(), 'utf8')); } catch { _trCache = {}; } return _trCache; }
 function _trSave() { try { fs.mkdirSync(TTS_VOICE_DIR(), { recursive: true }); fs.writeFileSync(TR_PATH(), JSON.stringify(_trCache || {})); } catch {} }
-const _needsTr = (t) => /[A-Za-z]{3,}/.test(String(t || '')) && !/[가-힣]/.test(String(t || ''));
+// 영어 글자가 한글보다 많으면 번역 대상(「내 복제 · calm…」처럼 한글이 조금 섞여도 — 옛 저장 목록 호환)
+const _needsTr = (t) => { const s = String(t || ''); return /[A-Za-z]{3,}/.test(s) && (s.match(/[A-Za-z]/g) || []).length > (s.match(/[가-힣]/g) || []).length; };
 let _trBusy = Promise.resolve();
 async function _translateBatch(items) {
   const PIO = require('./core/prompt-io');
@@ -5362,7 +5363,7 @@ async function _translateBatch(items) {
 ipcMain.handle('tts-translate', async (_e, { texts } = {}) => {
   const want = [...new Set((texts || []).map((t) => String(t || '').trim()).filter(Boolean))];
   const C = _trLoad();
-  const need = want.filter((t) => _needsTr(t) && !(t in C)).slice(0, 200);
+  const need = want.filter((t) => _needsTr(t) && !(t in C)).slice(0, 120);
   let err = '';
   if (need.length) {
     const job = _trBusy.then(async () => {

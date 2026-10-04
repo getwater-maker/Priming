@@ -19,6 +19,8 @@ function langOf(v) {
   if (m) return LANG_KO[m[1]] || raw;
   return raw.replace(/\(.*\)$/, '');   // 「영어(미국)」 → 「영어」
 }
+// 🇰🇷 번역 대상 — 영어 글자가 한글보다 많은 글(main _needsTr 와 같은 규칙)
+const needsTr = (t) => { const s = String(t || ''); return /[A-Za-z]{3,}/.test(s) && (s.match(/[A-Za-z]/g) || []).length > (s.match(/[가-힣]/g) || []).length; };
 // 🇰🇷 언어 줄(「ko · seoul」) → 「한국어 · 서울」 — 낱말 사전(번역기 없이)
 const ACCENT_KO = { standard: '표준어', seoul: '서울', busan: '부산', gyeongsang: '경상도', jeolla: '전라도', chungcheong: '충청도', jeju: '제주', american: '미국', british: '영국', australian: '호주', indian: '인도', canadian: '캐나다', irish: '아일랜드', scottish: '스코틀랜드' };
 function langLabel(t) {
@@ -60,6 +62,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   // 📚 ElevenLabs — 'mine' = 내 목소리 · 'library' = 보이스 라이브러리(한국어 원어민 등 · 고르면 내 목록에 추가)
   const [elSrc, setElSrc] = useState('mine');
   const [libVoices, setLibVoices] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);  // ⋯ 메뉴(한꺼번에 하기)
+  const [keyEdit, setKeyEdit] = useState(false);    // 🔑 저장된 키 바꾸기 칸 열기
+  const [feeOpen, setFeeOpen] = useState(false);    // 💳 카드 수수료 칸 열기
   const [tr, setTr] = useState({});                 // 🇰🇷 번역 { 원문: 한국어 }
   const trBusyRef = useRef(false);
   const trTriedRef = useRef(new Set());
@@ -288,13 +293,14 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v)].join(' ').toLowerCase().includes(qq)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list, q, fg, lang, tr]);
-  // 보이는 카드(앞 80개)의 영어 글을 모아 번역을 부탁한다 — 한 번에 하나 · 실패한 글은 다시 묻지 않는다
+  // 보이는 카드의 영어 글을 120개씩 모아 번역을 부탁한다 — 한 번에 하나 · 돌아오면 나머지 · 실패한 글은 다시 묻지 않는다
   useEffect(() => {
     if (trBusyRef.current) return;
     const need = [];
-    for (const v of shown.slice(0, 80)) {
+    for (const v of shown) {
+      if (need.length >= 120) break;   // 한 번에 120개 — 돌아오면 이 효과가 다시 돌아 나머지를 묻는다
       const i = String(v.name || '').indexOf(' - ');
-      for (const t of [v.desc, i >= 0 ? v.name.slice(i + 3) : '']) if (t && /[A-Za-z]{3,}/.test(t) && !/[가-힣]/.test(t) && !tr[t] && !trTriedRef.current.has(t)) need.push(t);
+      for (const t of [v.desc, i >= 0 ? v.name.slice(i + 3) : '']) if (t && needsTr(t) && !tr[t] && !trTriedRef.current.has(t)) need.push(t);
     }
     if (!need.length) return;
     trBusyRef.current = true;
@@ -316,7 +322,6 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const perScript = estUsd(tab, unit, scriptChars, data.koCps);
   const per10k = estUsd(tab, unit, 10000, data.koCps);
   const sampleUsd = estUsd(tab, unit, SAMPLE_CHARS, data.koCps);
-  const won = (u) => (u == null ? '' : ` ≈ ${Math.round(u * krw).toLocaleString()}원`);
 
   // 채널 목록 한 줄 = 그 채널 목소리의 얼굴·이름
   const chanVoice = (name) => {
@@ -327,39 +332,43 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     return { id, vid, name: vv ? vv.name : (id === 'omnivoice' ? String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '') || '참조음성 없음' : vid || '목소리 없음'), logo: chLogos[name] || null, gender: vv && vv.gender, eng: e ? e.label.replace(/ TTS$/, '').replace('Microsoft ', '').replace('Google ', '') : id };
   };
 
+  const isOnTab = dr.id === tab;
+  const busyBatch = busy === 'facebatch' || busy === 'batch';
   return (
     <div className="modal-bg show" data-testid="tts-engine-dlg">
+      {/* 🧹 카드 위 얼굴 버튼은 마우스를 올렸을 때만(v0.6.77 정리) */}
+      <style>{`.vc .vc-tools{opacity:0;transition:opacity .12s}.vc:hover .vc-tools,.vc:focus-within .vc-tools{opacity:1}.tts-more button{display:block;width:100%;text-align:left;margin:2px 0}`}</style>
       {/* 🔒 크기 고정 — 채널·탭·목록과 상관없이 같은 크기(안쪽만 스크롤) */}
       <div className="modal-card" data-testid="tts-eng-card" style={{ width: 'min(1180px, 96vw)', maxWidth: 'none', height: 'min(760px, 92vh)', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h3 style={{ margin: 0, flex: 1 }}>🔊 채널 목소리 — 채널마다 개성 있는 목소리를 고르세요</h3>
-          {/* 💱 환율 = 공개 API 시장 환율 + 카드 해외결제 수수료(카드사·결제망 환율 페이지는 자동 조회를 막는다) */}
-          <span data-testid="tts-fx" className="meta" title={fx ? `출처: ${fx.source} · 기준 ${fx.asOf}${fx.stale ? ' · ⚠ 새로 받지 못해 지난 값' : ''}\n카드 청구 예상 = 시장 환율 × (1 + 해외결제 수수료). 수수료는 카드마다 다릅니다(브랜드 약 1~1.1% + 카드사 약 0.2%).` : '환율을 받지 못했습니다 — 지난 값으로 계산합니다'}>
-            💱 1달러 = {fx ? <><b>{fx.rate.toLocaleString()}</b>원(시장{fx.stale ? '·지난 값' : ''})</> : '—'} + 카드 수수료
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h3 style={{ margin: 0, flex: 1 }}>🔊 음성 설정 <span className="meta" style={{ fontWeight: 400, fontSize: 12 }}>채널마다 목소리를 고르세요</span></h3>
+          {/* 💱 환율 = 공개 API 시장 환율 + 카드 해외결제 수수료(카드사·결제망 환율 페이지는 자동 조회를 막는다) — 수수료는 눌러서 고친다 */}
+          <span data-testid="tts-fx" className="meta" style={{ cursor: 'pointer' }} onClick={() => setFeeOpen((x) => !x)}
+            title={(fx ? `시장 환율 1달러 = ${fx.rate.toLocaleString()}원 (${fx.source} · 기준 ${fx.asOf}${fx.stale ? ' · ⚠ 지난 값' : ''})\n` : '환율을 받지 못해 지난 값으로 계산합니다\n') + `+ 카드 해외결제 수수료 ${cardFee}% = 카드 청구 예상 환율\n눌러서 수수료를 고칩니다`}>
+            💱 1달러 ≈ <b>{Math.round(krw).toLocaleString()}원</b>{fx ? '' : '(지난 값)'}
           </span>
-          <input type="number" min="0" max="5" step="0.05" style={{ width: 58 }} value={cardFee} onChange={(ev) => setCardFee(ev.target.value)} title="카드 해외결제 수수료(%) — 내 카드에 맞게" />
-          <span className="meta">% → <b>{Math.round(krw).toLocaleString()}원</b></span>
-          <button className="ghost" style={{ padding: '1px 6px' }} title="환율 새로 받기" onClick={async () => { const f = await api.fxUsdKrw({ force: true }); if (f && f.ok) setFx(f); else setMsg('❌ ' + ((f && f.error) || '환율 실패')); }}>↻</button>
+          {feeOpen && (<>
+            <span className="meta">카드 수수료</span>
+            <input type="number" min="0" max="5" step="0.05" style={{ width: 56 }} value={cardFee} onChange={(ev) => setCardFee(ev.target.value)} title="카드 해외결제 수수료(%) — 내 카드에 맞게" />
+            <span className="meta">%</span>
+            <button className="ghost" style={{ padding: '1px 6px' }} title="환율 새로 받기" onClick={async () => { const f = await api.fxUsdKrw({ force: true }); if (f && f.ok) setFx(f); else setMsg('❌ ' + ((f && f.error) || '환율 실패')); }}>↻</button>
+          </>)}
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {/* ── 왼쪽: 채널 ── */}
-          <div data-testid="tts-chan-list" style={{ width: 240, flex: '0 0 240px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
+          <div data-testid="tts-chan-list" style={{ width: 230, flex: '0 0 230px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
             {data.channels.map((ch) => {
               const cv = chanVoice(ch.name); const on = chan === ch.name;
               return (
                 <div key={ch.name} role="button" tabIndex={0} data-testid="tts-chan" data-chan={ch.name}
                   onClick={() => { setChan(ch.name); setTab((drafts[ch.name] && drafts[ch.name].id) || 'omnivoice'); setMsg(''); }}
                   style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 4, border: '1.5px solid ' + (on ? BLUE : 'transparent'), background: on ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
-                  <Face face={cv.logo} name={ch.name.replace(/^\d+_/, '')} size={on ? 48 : 40} square />
+                  <Face face={cv.logo} name={ch.name.replace(/^\d+_/, '')} size={40} square />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dirty[ch.name] ? '● ' : ''}{ch.name}</div>
                     <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cv.eng} · {cv.name}</div>
-                    {on && (
-                      <div style={{ display: 'flex', gap: 2, marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
-                        <button className="ghost" data-testid="tts-chlogo" style={{ padding: '0 6px', fontSize: 11 }} title="채널 로고 넣기(그림 파일) — 채널편집 🏷 로고와 같은 값 · 영상에 얹기는 채널편집에서" onClick={() => chLogoPick(ch.name)}>🏷 로고</button>
-                      </div>
-                    )}
                   </div>
+                  {on && <button className="ghost" data-testid="tts-chlogo" style={{ padding: '0 5px', fontSize: 11, flex: '0 0 auto' }} title="채널 로고 넣기(그림 파일) — 채널편집 🏷 로고와 같은 값 · 영상에 얹기는 채널편집에서" onClick={(e) => { e.stopPropagation(); chLogoPick(ch.name); }}>🏷</button>}
                 </div>
               );
             })}
@@ -371,82 +380,84 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {data.engines.map((e) => {
                 const cur = tab === e.id; const used = dr.id === e.id;
                 return (
-                  <button key={e.id} role="tab" data-testid={'tts-tab-' + e.id} className={cur ? '' : 'ghost'} onClick={() => { setTab(e.id); setMsg(''); setQ(''); setFg(''); }}
+                  <button key={e.id} role="tab" data-testid={'tts-tab-' + e.id} className={cur ? '' : 'ghost'} onClick={() => { setTab(e.id); setMsg(''); setQ(''); setFg(''); setMoreOpen(false); setKeyEdit(false); }}
+                    title={e.paid ? (hasKey(e.id) ? 'API 키 있음' : 'API 키 없음') : '내 GPU 서버 · 무료'}
                     style={{ borderRadius: '8px 8px 0 0', padding: '7px 13px', marginBottom: -1, borderBottom: cur ? '2px solid ' + BLUE : '1px solid transparent', fontWeight: cur ? 700 : 500 }}>
-                    {used ? '✅ ' : ''}{e.label.replace(/ TTS$/, '')}{e.paid ? <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.8 }}>{hasKey(e.id) ? '🔑' : '·'}</span> : null}
+                    {used ? '✅ ' : ''}{e.label.replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}{e.paid ? <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.8 }}>{hasKey(e.id) ? '🔑' : '·'}</span> : null}
                   </button>
                 );
               })}
             </div>
 
-            <div data-testid={'tts-eng-' + tab} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 12px' }}>
-              <div className="meta" style={{ marginBottom: 6 }}>
-                <b style={{ color: 'var(--fg)' }}>「{chan}」</b> 채널 — {dr.id === tab ? <b style={{ color: BLUE }}>이 엔진으로 읽습니다</b> : '카드를 고르면 이 엔진으로 바뀝니다'} · {eng.note}
-              </div>
-
-              {/* 설정 줄 */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center', marginBottom: 6 }}>
-                {eng.paid && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>{eng.keyLabel}
-                  <input type="password" autoComplete="off" style={{ width: 200 }} placeholder={k.has ? `저장됨(…${k.tail}) — 바꿀 때만` : 'API 키 붙여넣기'} value={kd.key || ''} onChange={(ev) => setKeys((x) => ({ ...x, [tab]: { key: ev.target.value } }))} />
-                  {k.has && <button className="ghost" title="저장된 키를 지웁니다(저장하면 반영)" onClick={() => setKeys((x) => ({ ...x, [tab]: { clear: true } }))}>{kd.clear ? '지울 예정' : '지우기'}</button>}
-                  {eng.keyUrl && <button className="ghost" title={'키 발급 페이지 — ' + eng.keyUrl} onClick={() => api.ttsEngineOpenKey(tab)}>발급 ↗</button>}
-                </span>)}
-                {eng.regions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>지역
-                  <select value={region} onChange={(ev) => setRegion(ev.target.value)} title="모든 채널 공통(Speech 리소스 지역)">{eng.regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></span>)}
+            <div data-testid={'tts-eng-' + tab} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 12px', gap: 6 }}>
+              {/* ① 설정 한 줄 — 상태 · 키 · 모델 · 지역 (설명은 ⓘ 에) */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 10, background: isOnTab ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.05)', color: isOnTab ? BLUE : 'inherit', fontWeight: 600 }}
+                  title={eng.note}>{isOnTab ? `✅ 「${chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
+                <span style={{ flex: 1 }} />
+                {eng.paid && (k.has && !keyEdit && !kd.clear
+                  ? <button className="ghost" style={{ padding: '2px 8px' }} title={`${eng.keyLabel} 저장됨(…${k.tail}) — 눌러서 바꾸기·지우기`} onClick={() => setKeyEdit(true)}>🔑 키 저장됨</button>
+                  : (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>{eng.keyLabel}
+                    <input type="password" autoComplete="off" style={{ width: 190 }} placeholder={k.has ? `저장됨(…${k.tail}) — 바꿀 때만` : 'API 키 붙여넣기'} value={kd.key || ''} onChange={(ev) => setKeys((x) => ({ ...x, [tab]: { key: ev.target.value } }))} />
+                    {k.has && <button className="ghost" title="저장된 키를 지웁니다(저장하면 반영)" onClick={() => setKeys((x) => ({ ...x, [tab]: { clear: true } }))}>{kd.clear ? '지울 예정' : '지우기'}</button>}
+                    {eng.keyUrl && <button className="ghost" title={'키 발급 페이지 — ' + eng.keyUrl} onClick={() => api.ttsEngineOpenKey(tab)}>발급 ↗</button>}
+                  </span>))}
                 {eng.models && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>모델
                   <select value={model} onChange={(ev) => setCfg({ model: ev.target.value })}>{eng.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></span>)}
-                {maiStyles && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>말투
-                  <select value={maiStyles.includes(c.style || '') ? (c.style || '') : ''} onChange={(ev) => setCfg({ style: ev.target.value })}>{maiStyles.map((x) => <option key={x} value={x}>{x || '기본'}</option>)}</select>
-                  <span className="meta">({selVoice.styles.length}가지)</span></span>)}
-                {eng.hasStyle && (<span style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1, minWidth: 240 }}>말투 지시
-                  <input style={{ flex: 1 }} placeholder="예: 차분하고 따뜻한 다큐멘터리 내레이션 (3.8 모델만)" value={c.style || ''} onChange={(ev) => setCfg({ style: ev.target.value })} /></span>)}
-                {eng.emotions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>감정
-                  <select value={c.emotion || 'normal'} onChange={(ev) => setCfg({ emotion: ev.target.value })}>{eng.emotions.map((x) => <option key={x} value={x}>{x}</option>)}</select></span>)}
-                {tab === 'elevenlabs' && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>안정성
-                  <input type="number" min="0" max="1" step="0.05" style={{ width: 60 }} placeholder="0.5" value={c.stability != null ? c.stability : ''} onChange={(ev) => setCfg({ stability: ev.target.value })} />
-                  유사도 <input type="number" min="0" max="1" step="0.05" style={{ width: 60 }} placeholder="0.75" value={c.similarity != null ? c.similarity : ''} onChange={(ev) => setCfg({ similarity: ev.target.value })} /></span>)}
+                {eng.regions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>지역
+                  <select value={region} onChange={(ev) => setRegion(ev.target.value)} title="모든 채널 공통(Speech 리소스 지역)">{eng.regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></span>)}
               </div>
+              {/* ② 말투·감정(있는 엔진만) */}
+              {(maiStyles || eng.hasStyle || eng.emotions || tab === 'elevenlabs') && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
+                  {maiStyles && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>말투
+                    <select value={maiStyles.includes(c.style || '') ? (c.style || '') : ''} onChange={(ev) => setCfg({ style: ev.target.value })}>{maiStyles.map((x) => <option key={x} value={x}>{x || '기본'}</option>)}</select></span>)}
+                  {eng.hasStyle && (<span style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1, minWidth: 240 }}>말투 지시
+                    <input style={{ flex: 1 }} placeholder="예: 차분하고 따뜻한 다큐멘터리 내레이션 (3.8 모델만)" value={c.style || ''} onChange={(ev) => setCfg({ style: ev.target.value })} /></span>)}
+                  {eng.emotions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>감정
+                    <select value={c.emotion || 'normal'} onChange={(ev) => setCfg({ emotion: ev.target.value })}>{eng.emotions.map((x) => <option key={x} value={x}>{x}</option>)}</select></span>)}
+                  {tab === 'elevenlabs' && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>안정성
+                    <input type="number" min="0" max="1" step="0.05" style={{ width: 56 }} placeholder="0.5" value={c.stability != null ? c.stability : ''} onChange={(ev) => setCfg({ stability: ev.target.value })} />
+                    유사도 <input type="number" min="0" max="1" step="0.05" style={{ width: 56 }} placeholder="0.75" value={c.similarity != null ? c.similarity : ''} onChange={(ev) => setCfg({ similarity: ev.target.value })} /></span>)}
+                </div>
+              )}
 
-              {/* 💲 요금 */}
-              <div data-testid="tts-price" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, padding: '5px 8px', borderRadius: 6, background: 'rgba(22,163,74,0.08)', marginBottom: 6 }}>
+              {/* ③ 요금 한 줄(자세한 것은 마우스) */}
+              <div data-testid="tts-price" style={{ fontSize: 12 }}
+                title={tab === 'omnivoice' ? '' : [`샘플 1개 ≈ ${wonTxt(sampleUsd, krw)}`, unit && unit.kind === 'sec' ? '음성 길이로 추정(한국어 초당 약 7자)' : '글자 수 기준', unit && unit.free, unit && unit.note, `1달러 ≈ ${Math.round(krw).toLocaleString()}원`].filter(Boolean).join('\n')}>
                 {tab === 'omnivoice'
-                  ? <span>💰 <b>무료</b> (내 GPU 서버 · 전기료만)</span>
-                  : <>
-                    <span>💰 1만 자 ≈ <b>{wonTxt(per10k, krw)}</b>{unit && unit.kind === 'sec' ? ' (음성 길이로 추정)' : ''}</span>
-                    {scriptChars > 0 && <span>지금 대본 {scriptChars.toLocaleString()}자 ≈ <b>{wonTxt(perScript, krw)}</b></span>}
-                    <span className="meta">샘플 1개 ≈ {wonTxt(sampleUsd, krw)}</span>
-                    {unit && (unit.free || unit.note) && <span className="meta">{[unit.free, unit.note].filter(Boolean).join(' · ')}</span>}
-                  </>}
+                  ? <>💰 <b>무료</b> <span className="meta">(내 GPU 서버)</span></>
+                  : <>💰 1만 자 ≈ <b>{wonTxt(per10k, krw)}</b>{scriptChars > 0 && <> · 지금 대본 {scriptChars.toLocaleString()}자 ≈ <b>{wonTxt(perScript, krw)}</b></>}{unit && unit.free ? <span className="meta"> · {unit.free}</span> : null}</>}
               </div>
 
-              {/* 목소리 거르기 */}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-                <b>목소리</b>
+              {/* ④ 목소리 찾기 — 검색·성별·언어 · 자주 안 쓰는 일은 ⋯ 안에 */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', position: 'relative' }}>
                 {tab === 'elevenlabs' && (<span style={{ display: 'flex', gap: 2 }}>
                   <button className={elSrc === 'mine' ? '' : 'ghost'} style={{ padding: '2px 8px' }} onClick={() => setElSrc('mine')}>내 목소리</button>
                   <button data-testid="el-lib" className={elSrc === 'library' ? '' : 'ghost'} style={{ padding: '2px 8px' }} disabled={!hasKey('elevenlabs') || (!!busy && busy !== 'voices')}
-                    title="ElevenLabs 보이스 라이브러리에서 한국어 원어민 목소리를 찾습니다(🔈 무료 샘플 · 고르면 내 목록에 추가)"
+                    title="ElevenLabs 보이스 라이브러리의 한국어 원어민 목소리(🔈 무료 샘플 · 고르면 내 목록에 추가)"
                     onClick={() => { setElSrc('library'); if (!libVoices) loadLibrary(); }}>🇰🇷 한국어 라이브러리</button>
                 </span>)}
-                <span className="meta">{shown.length}/{list.length}개{selVoice ? ` · 고른 것: ${selVoice.name}` : ''}</span>
+                <b>목소리</b><span className="meta">{shown.length}개{selVoice ? ` · ✔ ${koView(selVoice).name}` : ''}</span>
                 <span style={{ flex: 1 }} />
-                <input data-testid="tts-voice-q" placeholder="🔍 이름·특징 검색" style={{ width: 160 }} value={q} onChange={(ev) => setQ(ev.target.value)} />
+                <input data-testid="tts-voice-q" placeholder="🔍 검색" style={{ width: 140 }} value={q} onChange={(ev) => setQ(ev.target.value)} />
                 {tab !== 'omnivoice' && (<select value={fg} onChange={(ev) => setFg(ev.target.value)}><option value="">성별 전체</option><option value="male">♂ 남성</option><option value="female">♀ 여성</option></select>)}
-                {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">{tab === 'typecast' ? '나이 전체' : '언어 전체'}</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
-                {shown.length > 0 && !isLib && (busy === 'facebatch'
-                  ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 얼굴 그리기 멈춤</button>
-                  : <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로 한꺼번에 그립니다(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>)}
-                {tab !== 'omnivoice' && shown.length > 0 && (busy === 'batch'
-                  ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 샘플 만들기 멈춤</button>
-                  : <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에 만들어 저장합니다(요금 확인 후 진행)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>)}
-                {(eng.listVoices || tab === 'omnivoice') && (
-                  <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} onClick={() => (isLib ? loadLibrary() : loadVoices(tab))}
-                    title={tab === 'gemini' ? '확장 라이브러리(수백 개 · 3.8 모델용)를 API 로 불러옵니다' : '목록을 다시 불러옵니다'}>
-                    {busy === 'voices' ? '⏳' : tab === 'gemini' ? '⬇ 확장 라이브러리' : '↻ 다시 불러오기'}</button>)}
+                {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">언어 전체</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
+                {busyBatch
+                  ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 멈춤</button>
+                  : <button className="ghost" data-testid="tts-more" title="한꺼번에 하기 · 목록 다시 받기" onClick={() => setMoreOpen((x) => !x)}>⋯</button>}
+                {moreOpen && !busyBatch && (
+                  <div className="tts-more" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 5, background: 'var(--bg, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: 6, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', minWidth: 210 }} onClick={() => setMoreOpen(false)}>
+                    {shown.length > 0 && !isLib && <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>}
+                    {tab !== 'omnivoice' && shown.length > 0 && <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에(요금 확인 후)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>}
+                    {(eng.listVoices || tab === 'omnivoice') && <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} onClick={() => (isLib ? loadLibrary() : loadVoices(tab))}
+                      title={tab === 'gemini' ? 'Google 확장 라이브러리(한국어 목소리 · 3.8 모델용)를 받습니다' : '목록을 다시 받습니다'}>{tab === 'gemini' && !isLib ? '⬇ 확장 라이브러리 받기' : '↻ 목록 다시 받기'}</button>}
+                  </div>
+                )}
               </div>
 
-              {/* 목소리 카드 — 이 칸만 스크롤 */}
-              <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8, alignContent: 'start', paddingRight: 4 }}>
+              {/* ⑤ 목소리 카드 — 이 칸만 스크롤 */}
+              <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, alignContent: 'start', paddingRight: 4 }}>
                 {shown.map((v0) => { const v = koView(v0); return (
                   <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
@@ -458,7 +469,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   <div className="meta" style={{ gridColumn: '1 / -1', padding: 20, textAlign: 'center' }}>
                     {busy === 'voices' ? '⏳ 목소리 목록을 불러오는 중…'
                       : eng.paid && !hasKey(tab) ? '🔑 API 키를 넣으면 이 계정에서 쓸 수 있는 목소리를 모두 불러옵니다.'
-                      : '목소리가 없습니다 — 「↻ 다시 불러오기」를 눌러 보세요.'}
+                      : '목소리가 없습니다 — ⋯ → 「목록 다시 받기」를 눌러 보세요.'}
                   </div>
                 )}
               </div>
@@ -468,7 +479,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
         <div style={{ borderTop: '1px solid var(--line)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="meta" data-testid="tts-eng-msg" style={{ flex: 1, fontWeight: msg ? 600 : 400 }}>
-            {msg || '💡 🔈 = 샘플 듣기(회사 샘플·저장된 샘플은 무료 · 없으면 한 문장 만들어 저장 · Shift+클릭 = 다시 만들기). 🖼 = 얼굴 그림 넣기 · 🎨 = 로컬 ComfyUI 로 얼굴 그리기(무료).'}
+            {msg || '카드를 눌러 목소리를 고르고 저장하세요 · 🔈 듣기 · 카드에 마우스를 올리면 얼굴 넣기(🖼 그림 · 🎨 그리기)'}
           </span>
           <span className="meta">{Object.keys(dirty).length ? `바뀐 채널 ${Object.keys(dirty).length}개` : ''}</span>
           <button data-testid="tts-eng-save" onClick={save}>저장</button>
@@ -486,38 +497,39 @@ export function Face({ face, name, gender, size = 44, square }) {
   const st = { width: size, height: size, flex: `0 0 ${size}px`, borderRadius: square ? 10 : '50%', objectFit: 'cover', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
   // 회사가 준 그림(https 주소)은 그대로, 내 PC 파일은 media://
   if (face && face.path) return <img data-testid="tts-face-img" src={/^https?:\/\//.test(face.path) ? face.path : media(face.path, face.v)} alt="" style={{ ...st, border: '1px solid var(--line)' }} />;
-  // 앞 번호·기호(「02_」「#05_」)는 건너뛰고 첫 글자 — 「02_저음」 → 「저」
+  // 앞 번호·기호(「02_」「#05_」)는 건너뛰고 첫 글자 — 한글을 먼저(「1nd_고전」 → 「고」)
   const nm = String(name || '');
-  const ch = (nm.match(/[가-힣]/) || nm.match(/[A-Za-zぁ-んァ-ン一-龥]/) || [nm.slice(0, 1) || '?'])[0];   // 한글을 먼저(「1nd_고전」 → 「고」)
+  const ch = (nm.match(/[가-힣]/) || nm.match(/[A-Za-zぁ-んァ-ン一-龥]/) || [nm.slice(0, 1) || '?'])[0];
   return <div style={{ ...st, background: bg, color: fgc, fontWeight: 800, fontSize: Math.round(size * 0.42) }}>{ch}</div>;
 }
 
+// 카드 — 얼굴 · 이름(성별) · 언어 · 설명 2줄 · 듣기. 얼굴 버튼(🖼 🎨 ✕)은 마우스를 올렸을 때만.
 function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
   const playing = busy === 'play:' + v.id;
+  const meta = [v.lang, v.badge].filter(Boolean).join(' · ');
   return (
-    <div role="button" tabIndex={0} data-testid="tts-voice-card" data-voice={v.id} onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter') onPick(); }}
-      style={{ border: '1.5px solid ' + (sel ? BLUE : 'var(--line)'), background: sel ? 'rgba(37,99,235,0.08)' : 'var(--bg2, transparent)', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', gap: 8, minHeight: 116 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-        <Face face={face} name={v.name} gender={v.gender} size={52} />
-        <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
-          <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} title="얼굴 그림 넣기(파일)" onClick={onFacePick}>🖼</button>
-          <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(🖥 로컬 ComfyUI · 무료)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
-          {face && <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} title="얼굴 지우기" onClick={onFaceClear}>✕</button>}
+    <div role="button" tabIndex={0} className="vc" data-testid="tts-voice-card" data-voice={v.id} onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter') onPick(); }}
+      style={{ border: '1.5px solid ' + (sel ? BLUE : 'var(--line)'), background: sel ? 'rgba(37,99,235,0.08)' : 'var(--bg2, transparent)', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', gap: 8, minHeight: 92 }}>
+      <div style={{ position: 'relative', flex: '0 0 auto' }}>
+        <Face face={face} name={v.name} gender={v.gender} size={48} />
+        <div className="vc-tools" style={{ display: 'flex', gap: 1, justifyContent: 'center', marginTop: 3 }} onClick={(e) => e.stopPropagation()}>
+          <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} title="얼굴 그림 넣기(파일)" onClick={onFacePick}>🖼</button>
+          <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(🖥 로컬 ComfyUI · 무료)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
+          {face && <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} title="얼굴 지우기" onClick={onFaceClear}>✕</button>}
         </div>
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.orig ? v.name + '\n\n원문:\n' + v.orig : v.id}>{sel ? '✔ ' : ''}{v.name}</span>
-          {G_ICON[v.gender] && <span title={v.gender}>{G_ICON[v.gender]}</span>}
+          {G_ICON[v.gender] && <span title={v.gender} style={{ opacity: 0.7 }}>{G_ICON[v.gender]}</span>}
         </div>
-        {v.lang && <div className="meta" style={{ fontSize: 11 }}>{v.lang}</div>}
+        {meta && <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
         {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
-        {users && users.length > 0 && <div style={{ fontSize: 10, color: BLUE, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={users.join(', ')}>채널: {users.join(', ')}</div>}
-        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
           <button className="ghost" data-testid="tts-voice-play" style={{ padding: '1px 8px', fontSize: 11 }}
             title={sampled ? '샘플 듣기(저장됨 · 무료) — Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${wonTxt(sampleCost, krw)} · 한 번 만들면 저장)`}
-            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'} {sampled || !sampleCost ? '듣기' : `듣기 ${wonTxt(sampleCost, krw)}`}</button>
-          {sampled && <span style={{ fontSize: 10, color: '#16a34a' }}>무료</span>}
+            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'} 듣기{sampled || !sampleCost ? '' : ` ${wonTxt(sampleCost, krw)}`}</button>
+          {users && users.length > 0 && <span style={{ fontSize: 10, color: BLUE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={'이 목소리를 쓰는 채널: ' + users.join(', ')}>📺 {users.length > 1 ? `${users[0]} 외 ${users.length - 1}` : users[0]}</span>}
         </div>
       </div>
     </div>

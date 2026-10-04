@@ -43,12 +43,15 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     // 💱 환율 · 📺 채널 얼굴 버튼(누르지 않는다 — 그리면 로이 얼굴이 바뀐다)
     await win.waitForTimeout(1500);   // 환율 받기(비동기)
     const fxTxt = await win.locator('[data-testid="tts-fx"]').innerText();
-    ok(/1달러 = [\d,.]+원\(시장/.test(fxTxt), `환율 = 시장 환율을 받아 표시 (${fxTxt.replace(/\s+/g, ' ').trim()})`);
+    ok(/1달러 ≈ [\d,]+원/.test(fxTxt) && !/지난 값/.test(fxTxt), `환율 = 시장 환율 + 카드 수수료를 원화로 (${fxTxt.replace(/\s+/g, ' ').trim()})`);
     ok((await win.locator('[data-testid="tts-chlogo"]').count()) === 1, '고른 채널 줄에 🏷 로고(사람 얼굴 아님)');
     ok((await win.locator('[data-testid="tts-chan-list"] [data-testid="tts-face-img"]').count()) === 0
       || (await win.locator('[data-testid="tts-chan-list"] img').first().getAttribute('src') || '').length > 0, '채널 목록 그림 = 채널 로고만');
     await win.locator('[data-testid="tts-tab-omnivoice"]').click(); await win.waitForTimeout(2500);   // 서버 목소리 목록
-    ok((await win.locator('[data-testid="tts-face-all"]').count()) === 1, '목소리 카드 위 「🎨 얼굴 모두 그리기」 버튼(누르지 않는다)');
+    ok((await win.locator('[data-testid="tts-face-all"]').count()) === 0, '🧹 한꺼번에 하기는 ⋯ 안에 숨어 있다');
+    await win.locator('[data-testid="tts-more"]').click(); await win.waitForTimeout(150);
+    ok((await win.locator('[data-testid="tts-face-all"]').count()) === 1, '⋯ → 「🎨 얼굴 모두 그리기」(누르지 않는다)');
+    await win.locator('[data-testid="tts-more"]').click(); await win.waitForTimeout(100);
 
     // ① 채널 목록(채널마다 목소리)
     const chans = win.locator('[data-testid="tts-chan"]');

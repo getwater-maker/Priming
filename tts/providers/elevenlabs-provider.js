@@ -65,7 +65,7 @@ async function listVoices(key) {
       if (!v.voice_id) continue;
       const L = v.labels || {};
       const cat = v.category === 'cloned' ? '내 복제' : v.category === 'generated' ? '내가 만든' : v.category === 'professional' ? '전문 복제' : '';
-      out.push({ id: v.voice_id, name: v.name, gender: String(L.gender || '').toLowerCase(), lang: [L.language, L.accent].filter(Boolean).join(' · '), desc: [cat, L.age, L.description || L.descriptive, L.use_case].filter(Boolean).join(' · '), preview: v.preview_url || '', image: (v.sharing && v.sharing.image_url) || '' });
+      out.push({ id: v.voice_id, name: v.name, gender: String(L.gender || '').toLowerCase(), lang: [L.language, L.accent].filter(Boolean).join(' · '), desc: [L.age, L.description || L.descriptive, L.use_case].filter(Boolean).join(' · '), badge: cat, preview: v.preview_url || '', image: (v.sharing && v.sharing.image_url) || '' });   // 🇰🇷 설명은 영어만(번역 대상) · 한글 표시는 badge 로
     }
     if (!j.has_more || !j.next_page_token) break;
     tok = j.next_page_token;
@@ -91,7 +91,8 @@ async function listShared(key, { language = 'ko', pages = 5, gender = '' } = {})
       out.push({
         id: v.voice_id, ownerId: v.public_owner_id, name: v.name, gender: String(v.gender || '').toLowerCase(),
         lang: [v.language, v.accent].filter(Boolean).join(' · '),
-        desc: [v.description ? String(v.description).slice(0, 80) : '', v.age, v.descriptive, v.use_case, v.cloned_by_count ? `복제 ${v.cloned_by_count}회` : ''].filter(Boolean).join(' · '),
+        desc: [v.description ? String(v.description).slice(0, 80) : '', v.age, v.descriptive, v.use_case].filter(Boolean).join(' · '),
+        badge: v.cloned_by_count ? `복제 ${v.cloned_by_count}회` : '',   // 🇰🇷 설명(영어 · 번역 대상)과 따로
         preview: v.preview_url || '', image: v.image_url || '', shared: true,
       });
     }
