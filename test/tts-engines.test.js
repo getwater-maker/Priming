@@ -118,9 +118,21 @@ function makeWav(samples, sr = 24000) {
   r = await tc.synthesize('x', { voice: 'tc_1', model: 'ssfm-v30', language: 'ko' });
   eq([last.url, last.init.headers['X-API-KEY'], JSON.parse(last.init.body).voice_id], ['https://api.typecast.ai/v1/text-to-speech', 'tc-secret-1234', 'tc_1'], '타입캐스트 요청');
   setFetch(() => mockRes(200, null, [{ voice_id: 'tc_9', voice_name: { kor: '딜런', eng: 'Dylan' }, gender: 'male', age: 'young_adult' }]));
-  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '♂ 딜런 · young_adult' }], '타입캐스트 목소리 목록');
-  setFetch(() => mockRes(200, null, { voices: [{ voice_id: 'e1', name: 'Rachel', labels: { gender: 'female' }, category: 'cloned' }] }));
-  eq(await EL.listVoices('k'), [{ id: 'e1', name: '♀ Rachel (내 복제)' }], 'ElevenLabs 목소리 목록');
+  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '딜런', gender: 'male', lang: '청년', desc: '', preview: '' }], '타입캐스트 목소리 목록(카드)');
+  { let n = 0; const urls = [];
+    setFetch((url) => { urls.push(url); n++; return mockRes(200, null, n === 1
+      ? { voices: [{ voice_id: 'e1', name: 'Rachel', labels: { gender: 'female' }, category: 'cloned', preview_url: 'https://x/p.mp3' }], has_more: true, next_page_token: 'T2' }
+      : { voices: [{ voice_id: 'e2', name: 'Adam', labels: { gender: 'male' } }], has_more: false }); });
+    const L = await EL.listVoices('k');
+    eq(L.map((v) => v.id), ['e1', 'e2'], 'ElevenLabs — 다음 쪽까지 전부 불러온다');
+    ok(urls[1].includes('next_page_token=T2'), 'ElevenLabs 쪽 넘김 토큰');
+    eq([L[0].gender, L[0].desc, L[0].preview], ['female', '내 복제', 'https://x/p.mp3'], 'ElevenLabs 카드(성별·분류·샘플)'); }
+  { let n = 0;
+    setFetch(() => { n++; return mockRes(200, null, n === 1 ? { voices: [{ id: 'voice_a', display_name: '서윤', gender: 'FEMALE', language_code: 'ko-KR', persona: '내레이터' }], next_page_token: 'P' } : { voices: [{ id: 'voice_b', display_name: 'B' }] }); });
+    const { listVoices: gList } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
+    const L = await gList('g');
+    eq(L.map((v) => v.id), ['voice_a', 'voice_b'], 'Gemini 확장 라이브러리 — 쪽 넘김');
+    eq([last.url.includes('page_token=P'), last.init.headers['x-goog-api-key'], L[0].gender, L[0].lang], [true, 'g', 'female', 'ko-KR'], 'Gemini 목록 요청·카드'); }
 
   const { GeminiProvider } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
   const gm = new GeminiProvider(); await gm.init();
@@ -135,6 +147,24 @@ function makeWav(samples, sr = 24000) {
   r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-lite-tts', voice: 'Kore' });
   ok(r.mp3Buffer.toString('ascii', 0, 4) === 'RIFF' && Math.abs(r.durationSec - 1) < 1e-6, 'Gemini 헤더 없는 PCM 도 WAV 로');
   global.fetch = realFetch;
+
+  console.log('\n[4b] 내장 목록');
+  const VC = require(path.join(ROOT, 'tts/voice-catalogs'));
+  eq(VC.GEMINI.length, 30, 'Gemini 기본 목소리 30개(공식)');
+  eq(VC.MAI.length, 97, 'MAI 목소리 97개(공식 표 전체)');
+  eq(new Set(VC.MAI.map((v) => v.id)).size, 97, 'MAI id 중복 없음');
+  eq(VC.MAI.filter((v) => v.locale === 'ko-KR').map((v) => v.id).sort(), ['ko-KR-Grant', 'ko-KR-Haena', 'ko-KR-Harper', 'ko-KR-Junho'], 'MAI 한국어 4개');
+  ok(VC.MAI.every((v) => v.styles.length >= 1 && v.styles.includes('neutral')), 'MAI 모든 목소리에 neutral 말투');
+  ok(VC.GEMINI.every((v) => /\(.+\)/.test(v.desc)), 'Gemini 카드에 공식 특징(영문) 병기');
+  TE.save({ active: 'mai', mai: { voice: 'ko-KR-Grant', style: 'whispering' } });
+  eq(TE.synthExtra('mai').style, undefined, 'MAI — 목소리가 못 하는 말투는 보내지 않는다(Grant 는 whispering 없음)');
+  TE.save({ active: 'mai', mai: { voice: 'ko-KR-Grant', style: 'narrator' } });
+  eq(TE.synthExtra('mai').style, 'narrator', 'MAI — 되는 말투는 보낸다');
+  TE.save({ active: 'omnivoice', omnivoice: { voice: 'srv:공용목소리' } });
+  eq(TE.omniVoice(), 'srv:공용목소리', 'OmniVoice 목소리 지정(srv:)');
+  ok(/공용목소리\(모든 채널\)/.test(TE.label('omnivoice')), 'OmniVoice 지정 목소리가 로그 표기에');
+  TE.save({ active: 'omnivoice', omnivoice: { voice: 'C:/x.wav' } });
+  eq(TE.omniVoice(), '', 'srv: 가 아니면 무시(채널 그대로)');
 
   console.log('\n[5] 파이프라인 — 엔진 인자');
   const P = require(path.join(ROOT, 'core/pipeline'));
@@ -157,6 +187,10 @@ function makeWav(samples, sr = 24000) {
   eq(o.calls[1].voice, 'v9', '유료 — 화자도 같은 목소리');
   ok(o.lines.some((l) => /🔊 음성 엔진 — ElevenLabs/.test(l)), '로그에 엔진·목소리를 남긴다');
   ok(o.lines.some((l) => /화자별 목소리\(참조음성\)를 쓰지 않습니다/.test(l)), '화자 목소리를 못 쓴다고 알린다');
+  TE.save({ active: 'omnivoice', omnivoice: { voice: 'srv:공용' } });
+  o = await run(preset);
+  eq([o.calls[0].provider, o.calls[0].refName, o.calls[0].refText], ['omnivoice', '공용', undefined], 'OmniVoice 목소리 지정 → 채널 대신 그 목소리(참조텍스트는 서버)');
+  eq(o.calls[1].refName, '철수', '화자 목소리는 그대로');
   TE.save({ active: 'omnivoice' });
 
   console.log('\n[6] 화면');
@@ -165,9 +199,13 @@ function makeWav(samples, sr = 24000) {
   ok(!/<span className="rb-t">다시 연결<\/span>/.test(app), '「다시 연결」 버튼 없음');
   ok(!/<option value="visual">🖼 화면만<\/option>/.test(app), '「출력」 고르기 없음');
   ok(/data-testid="tts-engine-btn"/.test(app), '🔊 음성 엔진 버튼 있음');
+  const dlg = fs.readFileSync(path.join(ROOT, 'renderer/src/TtsEngineDialog.jsx'), 'utf8');
+  ok(/height: 'min\(720px, 90vh\)'/.test(dlg) && !/maxHeight: '86vh'/.test(dlg), '팝업 크기 고정(내용에 따라 늘지 않음)');
+  ok(/role="tablist"/.test(dlg) && /tts-voice-card/.test(dlg), '엔진 탭 + 목소리 카드');
+  ok(!/<datalist/.test(dlg), '목소리 고르기에 선택창(datalist)을 쓰지 않는다');
   ok(!/setOutMode\(\['full', 'audio', 'visual'\]/.test(app), '옛 저장값으로 출력 방식을 되살리지 않는다');
   const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-  for (const ch of ['tts-engines-get', 'tts-engines-save', 'tts-engine-voices', 'tts-engine-test', 'tts-engine-open-key']) ok(main.includes(`ipcMain.handle('${ch}'`), `IPC ${ch}`);
+  for (const ch of ['tts-engines-get', 'tts-engines-save', 'tts-engine-voices', 'tts-engine-test', 'tts-engine-open-key', 'tts-omni-voices']) ok(main.includes(`ipcMain.handle('${ch}'`), `IPC ${ch}`);
   ok(/key: v \}\)/.test(main) && /\.\.\.\(SecretStore\.get\(e\.keyId\) \|\| \{\}\)/.test(main), '키 저장은 같은 칸의 다른 값을 지킨다(gemini 공용 칸)');
 
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}

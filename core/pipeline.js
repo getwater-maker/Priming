@@ -319,6 +319,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   //   🔑 OmniVoice 면 engExtra=null → 아래 synthOpts 는 **옛 것과 한 글자도 같다**(캐시 키 불변).
   const engineId = TtsEngines.resolveEngine(preset.engine);
   const engExtra = TtsEngines.synthExtra(engineId);
+  const omniOv = (!engExtra && engineId === 'omnivoice') ? TtsEngines.omniVoice() : '';
   const synthOpts = engExtra ? {
     provider: engineId,
     ...engExtra,
@@ -327,7 +328,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     seed: preset.seed,
   } : {
     provider: preset.engine,
-    ...voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText),
+    // 🔊 OmniVoice 목소리를 팝업에서 정했으면(srv:<이름>) 모든 채널이 그 목소리 — 참조텍스트는 서버 것(.txt)
+    ...(omniOv ? voiceOpts(omniOv, null) : voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText)),
     instruct: preset.instruct || undefined,
     cfgValue: preset.cfgValue,
     inferenceTimesteps: preset.inferenceTimesteps,
@@ -336,6 +338,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     seed: preset.seed,
   };
   if (engExtra && onLine) onLine(`🔊 음성 엔진 — ${TtsEngines.label(engineId)} (채널 참조음성 대신)`);
+  if (omniOv && onLine) onLine(`🔊 OmniVoice 목소리 — ☁ ${omniOv.slice(4)} (🔊 음성 엔진에서 정함 · 채널 참조음성 대신)`);
   // 🎭 화자별 목소리 — 채널 `preset.speakers`(이름 → 참조음성). 연결 안 된 화자는 채널 기본 목소리로 읽고 알린다.
   //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
   const spkMap = speakerVoiceMap(preset);

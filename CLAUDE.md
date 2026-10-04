@@ -102,7 +102,7 @@
 ## 7. 기능별 규칙
 
 ### TTS
-- 🔊 **엔진 = 헤더 「음성 엔진」 팝업(OmniVoice · Gemini · MAI-Voice · 타입캐스트 · ElevenLabs · v0.6.67)** — 해석·인자는 `tts/tts-engines.js` 한 곳(`resolveEngine`·`synthExtra` — 새 TTS 입구도 거칠 것). 유료 provider 는 **WAV 로 돌려준다**(파이프라인 전제) · 유료 정체성은 캐시 키 `es` 로만(OmniVoice 키 불변) · 키는 secret-store(화면엔 끝 4자리) · 옛 「출력/Vrew 음성/다시 연결」 버튼은 없앴다(main 코드는 남김 · 출력 = 늘 전체).
+- 🔊 **엔진 = 헤더 「음성 엔진」 팝업(OmniVoice · Gemini · MAI-Voice · 타입캐스트 · ElevenLabs · v0.6.67~68 · 화면 = `TtsEngineDialog.jsx` 고정 크기·엔진 탭·목소리 카드 · 내장 목록 = `tts/voice-catalogs.js`)** — 해석·인자는 `tts/tts-engines.js` 한 곳(`resolveEngine`·`synthExtra` — 새 TTS 입구도 거칠 것). 유료 provider 는 **WAV 로 돌려준다**(파이프라인 전제) · 유료 정체성은 캐시 키 `es` 로만(OmniVoice 키 불변) · 키는 secret-store(화면엔 끝 4자리) · 옛 「출력/Vrew 음성/다시 연결」 버튼은 없앴다(main 코드는 남김 · 출력 = 늘 전체).
 - 합성은 **언제나 정속**, 배속은 ffmpeg `atempo`(OmniVoice `speed` 는 느린 방향으로 듣지 않는다). 채널 배속 정본은 `speedLong`(옛 `speed` 필드는 방치값).
 - 필터 순서 **배속 → 증폭 → 문장 뒤 무음(`apad`, 채널 「문장무음」)**. ⛔ **리미터·압축 금지**(84Hz 저음 주기보다 짧은 어택이 파형을 찌그러뜨려 「지지지」) — 음량 정규화는 피크 여유만큼만 올린다(목표 -15dB). 음량이 부족하면 **참조음성을 크게 녹음**.
 - ⛔ 속도를 위해 `num_step` 등 품질 설정을 깎는 제안 금지(32 유지).

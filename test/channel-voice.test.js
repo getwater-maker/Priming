@@ -126,7 +126,7 @@ console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드�
 {
   const bs = String.fromCharCode(92);
   // 🔊 음성 엔진(v0.6.67) — OmniVoice 로 고정한 가짜를 넘긴다(로이 설정을 읽지 않게). 유료 엔진 표기는 ⓛ 에서.
-  const TE_STUB = { id: 'omnivoice', resolveEngine(e) { return this.id === 'omnivoice' ? (e || 'omnivoice') : this.id; }, label: (id) => `엔진 ${id}` };
+  const TE_STUB = { id: 'omnivoice', resolveEngine(e) { return this.id === 'omnivoice' ? (e || 'omnivoice') : this.id; }, label: (id) => `엔진 ${id}`, omniVoice: () => '' };
   const voiceLabel = new Function('path', 'TtsEngines', extractFn(MAIN, 'voiceLabel') + '\nreturn voiceLabel;')(path, TE_STUB);
   eq(voiceLabel({ name: '06_고전서재', voiceCloneRefAudio: 'srv:#05_득수_낭독2', seed: 40469 }),
     '채널 「06_고전서재」 · 목소리 ☁ #05_득수_낭독2 · 시드 40469', 'ⓐ 서버 목소리는 ☁ 로 표기 + 채널·시드');

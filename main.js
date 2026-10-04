@@ -172,6 +172,9 @@ function voiceLabel(preset) {
   // 🔊 헤더 「음성 엔진」에서 유료 API 를 골랐으면 그 엔진·목소리가 실제로 읽는다(채널 참조음성은 안 쓴다)
   { const id = TtsEngines.resolveEngine(preset.engine);
     if (id !== 'omnivoice') return `채널 「${preset.name}」 · 🔊 ${TtsEngines.label(id)}`; }
+  // 🔊 OmniVoice 인데 팝업에서 서버 목소리를 정했으면 그 목소리가 채널 참조음성을 이긴다(모든 채널)
+  { const ov = TtsEngines.resolveEngine(preset.engine) === 'omnivoice' ? TtsEngines.omniVoice() : '';
+    if (ov) preset = { ...preset, voiceCloneRefAudio: ov }; }
   const rv = String(preset.voiceCloneRefAudio || '');
   const vn = rv.startsWith('srv:') ? ('☁ ' + rv.slice(4)) : (rv ? path.basename(rv) : '⚠ 참조음성 없음');
   // ⚠ 시드가 비면 서버가 매번 다른 시드를 쓴다 → **같은 채널인데 편마다 톤이 달라진다**. 조용히 넘기지 않는다.
@@ -5127,12 +5130,32 @@ ipcMain.handle('set-gemini-key', (_e, key) => {
 });
 // 🔊 음성 엔진(헤더 팝업 · v0.6.67) — OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs 중 고르기 + API 키.
 //   설정 = tts/tts-engines(~/.priming-maker/tts-engines.json) · 키 = secret-store(원문은 화면으로 돌려주지 않는다 — 끝 4자리만).
+// 🗂 API 로 불러온 목소리 목록은 디스크에 둔다(~/.priming-maker/tts-voices/<엔진>.json) — 팝업을 열 때마다 API 를 부르지 않게.
+const TTS_VOICE_DIR = () => path.join(os.homedir(), '.priming-maker', 'tts-voices');
+function _readVoiceCache(id) { try { return JSON.parse(fs.readFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), 'utf8')); } catch { return null; } }
+function _writeVoiceCache(id, voices) { try { fs.mkdirSync(TTS_VOICE_DIR(), { recursive: true }); fs.writeFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), JSON.stringify({ at: Date.now(), voices })); } catch {} }
 ipcMain.handle('tts-engines-get', () => {
   const TE = require('./tts/tts-engines');
+  const VC = require('./tts/voice-catalogs');
   const cfg = TE.load();
-  const engines = TE.ENGINES.map((e) => ({ ...e, cfg: TE.engineCfg(e.id, cfg) }));
-  if (engines.find((e) => e.id === 'gemini')) engines.find((e) => e.id === 'gemini').voices = require('./tts/providers/gemini-provider').GeminiProvider.getVoices();
+  // 목소리 카드 = 내장 목록(Gemini 30 · MAI 97) + 불러온 목록(Gemini 확장 · 타입캐스트 · ElevenLabs)
+  const voicesOf = (id) => {
+    const c = _readVoiceCache(id);
+    if (id === 'gemini') return { voices: [...VC.GEMINI, ...((c && c.voices) || [])], at: c ? c.at : 0 };
+    if (id === 'mai') return { voices: VC.MAI, at: 0 };
+    return { voices: (c && c.voices) || [], at: c ? c.at : 0 };
+  };
+  const engines = TE.ENGINES.map((e) => ({ ...e, cfg: TE.engineCfg(e.id, cfg), ...(e.id === 'omnivoice' ? {} : voicesOf(e.id)) }));
   return { active: TE.active(cfg), engines, keys: TE.keyInfo(require('./tts/secret-store')) };
+});
+// OmniVoice 서버 공용 목소리(카드) — 실패하면 null(빈 목록과 구분) · 채널마다 어느 목소리를 쓰는지 표시용
+ipcMain.handle('tts-omni-voices', async () => {
+  let list = null;
+  try { list = await require('./tts/asr-client').listServerVoices(); } catch {}
+  const used = {};
+  try { for (const p of require('./tts/preset-store').loadAll()) { const v = String(p.voiceCloneRefAudio || ''); if (v.startsWith('srv:') && !/^__/.test(p.name)) (used[v.slice(4)] = used[v.slice(4)] || []).push(p.name); } } catch {}
+  if (!list) return { ok: false, error: 'OmniVoice 서버 목록을 받지 못했습니다(서버 주소·꺼짐 확인)', used };
+  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
 });
 ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
   try {
@@ -5140,7 +5163,7 @@ ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
     const SecretStore = require('./tts/secret-store');
     const prev = TE.load();
     const next = { active: args.active || prev.active };
-    for (const e of TE.ENGINES) if (e.paid) next[e.id] = { ...(prev[e.id] || {}), ...((args.cfg && args.cfg[e.id]) || {}) };
+    for (const e of TE.ENGINES) next[e.id] = { ...(prev[e.id] || {}), ...((args.cfg && args.cfg[e.id]) || {}) };
     TE.save(next);
     // 키: 새 값이 들어온 칸만 바꾼다(빈 칸 = 그대로) · clear 표시면 지운다.
     //   🔑 gemini 는 이미지(나노바나나)·프롬프트와 같은 칸 — 다른 필드가 있으면 지키며 key 만 바꾼다.
@@ -5168,24 +5191,33 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
   try {
     const k = String(key || '').trim() || ((require('./tts/secret-store').get(id) || {}).key || '');
     if (!k) return { ok: false, error: 'API 키를 먼저 넣으세요' };
-    if (id === 'typecast') return { ok: true, voices: await require('./tts/providers/typecast-provider').listVoices(k, model || 'ssfm-v30') };
-    if (id === 'elevenlabs') return { ok: true, voices: await require('./tts/providers/elevenlabs-provider').listVoices(k) };
-    return { ok: false, error: '이 엔진은 목소리 목록을 불러오지 않습니다' };
+    let voices = null;
+    if (id === 'typecast') voices = await require('./tts/providers/typecast-provider').listVoices(k, model || 'ssfm-v30');
+    else if (id === 'elevenlabs') voices = await require('./tts/providers/elevenlabs-provider').listVoices(k);
+    else if (id === 'gemini') voices = await require('./tts/providers/gemini-provider').listVoices(k);
+    else return { ok: false, error: '이 엔진은 목소리 목록을 불러오지 않습니다' };
+    _writeVoiceCache(id, voices);
+    log(`🔊 ${id} 목소리 ${voices.length}개 불러옴`);
+    if (id === 'gemini') voices = [...require('./tts/voice-catalogs').GEMINI, ...voices];
+    return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 // 🔈 시험 듣기 — **저장된** 설정·키로 한 문장을 만들어 임시 파일로(파이프라인과 같은 synthExtra 를 탄다)
-ipcMain.handle('tts-engine-test', async (_e, { id, text } = {}) => {
+ipcMain.handle('tts-engine-test', async (_e, { id, text, voice } = {}) => {
   try {
     const TE = require('./tts/tts-engines');
     const mgr = require('./tts/tts-manager').getInstance({ logger: log });
     await mgr.start();
     if (!(await mgr.refreshProvider(id))) return { ok: false, error: id === 'omnivoice' ? 'OmniVoice 서버에 연결하지 못했습니다' : 'API 키가 없습니다 — 저장 후 다시 누르세요' };
-    const extra = TE.synthExtra(id);
+    // 카드의 🔈 = 그 목소리로(저장값은 그대로 두고 voice 만 바꿔 본다)
+    const cfg0 = TE.load();
+    const cfg = voice ? { ...cfg0, [id]: { ...(cfg0[id] || {}), voice: String(voice) } } : cfg0;
+    const extra = TE.synthExtra(id, cfg);
     let opts;
-    if (extra) opts = { provider: id, ...extra, language: 'ko' };
+    if (extra) opts = { provider: id, ...extra, language: /^[a-z]{2}-[A-Z]{2}-/.test(extra.voice || '') ? String(extra.voice).slice(0, 2) : 'ko' };
     else {
       const pr = S.preset || P.getPreset(null) || {};
-      const rv = String(pr.voiceCloneRefAudio || '');
+      const rv = TE.omniVoice(cfg) || String(pr.voiceCloneRefAudio || '');
       opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, instruct: pr.instruct || undefined, language: pr.language || 'ko', seed: pr.seed };
     }
     const t0 = Date.now();

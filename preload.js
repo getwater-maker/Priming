@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('api', {
   ttsEngineVoices: (a) => ipcRenderer.invoke('tts-engine-voices', a),
   ttsEngineTest: (a) => ipcRenderer.invoke('tts-engine-test', a),
   ttsEngineOpenKey: (id) => ipcRenderer.invoke('tts-engine-open-key', id),
+  ttsOmniVoices: () => ipcRenderer.invoke('tts-omni-voices'),
   getXaiKey: () => ipcRenderer.invoke('get-xai-key'),
   setXaiKey: (key) => ipcRenderer.invoke('set-xai-key', key),
   getTtsServers: () => ipcRenderer.invoke('get-tts-servers'),

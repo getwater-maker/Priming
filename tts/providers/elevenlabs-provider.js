@@ -54,17 +54,23 @@ class ElevenLabsProvider {
   async stop() { this.ready = false; }
 }
 
-/** 목소리 목록 → [{id, name}] */
+/** 목소리 목록 → [{id, name, gender, lang, desc, preview}] — 내 라이브러리 전체(페이지 넘김) */
 async function listVoices(key) {
-  const res = await fetchWithTimeout(`${BASE}/v2/voices?page_size=100`, { headers: { 'xi-api-key': key } }, 30000, LABEL);
-  if (!res.ok) throw await httpError(res, LABEL);
-  const j = await res.json();
-  return (j.voices || []).map((v) => {
-    const L = v.labels || {};
-    const g = L.gender === 'male' ? '♂ ' : L.gender === 'female' ? '♀ ' : '';
-    const tags = [L.age, L.accent, v.category === 'cloned' ? '내 복제' : ''].filter(Boolean).join(' · ');
-    return { id: v.voice_id, name: `${g}${v.name}${tags ? ` (${tags})` : ''}` };
-  }).filter((v) => v.id);
+  const out = []; let tok = '';
+  for (let page = 0; page < 30; page++) {
+    const res = await fetchWithTimeout(`${BASE}/v2/voices?page_size=100${tok ? '&next_page_token=' + encodeURIComponent(tok) : ''}`, { headers: { 'xi-api-key': key } }, 30000, LABEL);
+    if (!res.ok) throw await httpError(res, LABEL);
+    const j = await res.json();
+    for (const v of j.voices || []) {
+      if (!v.voice_id) continue;
+      const L = v.labels || {};
+      const cat = v.category === 'cloned' ? '내 복제' : v.category === 'generated' ? '내가 만든' : v.category === 'professional' ? '전문 복제' : '';
+      out.push({ id: v.voice_id, name: v.name, gender: String(L.gender || '').toLowerCase(), lang: [L.language, L.accent].filter(Boolean).join(' · '), desc: [cat, L.age, L.description || L.descriptive, L.use_case].filter(Boolean).join(' · '), preview: v.preview_url || '' });
+    }
+    if (!j.has_more || !j.next_page_token) break;
+    tok = j.next_page_token;
+  }
+  return out;
 }
 
 module.exports = { ElevenLabsProvider, buildBody, listVoices };

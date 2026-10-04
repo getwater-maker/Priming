@@ -1,9 +1,11 @@
 'use strict';
 /**
- * tts-engine-ui.smoke.js — 🔊 음성 엔진 버튼·팝업(v0.6.67) 실제 앱 E2E
- *   헤더 「음성」 메뉴의 옛 「출력」·「Vrew 음성」·「다시 연결」 자리에 🔊 버튼이 있고, 실제로 눌리며,
- *   팝업에 엔진 5개(OmniVoice·Gemini·MAI·타입캐스트·ElevenLabs)가 뜨고, 유료 엔진의 칸(키·모델·목소리)이 열린다.
- *   🔑 저장은 누르지 않는다(로이 설정을 바꾸지 않는다) — 키 없는 유료 엔진을 골라 저장하면 막히는지만 본다.
+ * tts-engine-ui.smoke.js — 🔊 음성 엔진 버튼·팝업 실제 앱 E2E (v0.6.68 탭·카드)
+ *   ① 헤더: 옛 「출력」·「Vrew 음성」·「다시 연결」 없음 · 🔊 버튼이 실제로 눌림
+ *   ② 팝업 크기 고정 — 탭 5개를 돌아도 창의 폭·높이가 같다
+ *   ③ 탭 = 엔진: MAI 97개 카드(언어 전체) · 한국어 거르기 4개 · Gemini 30개 · 카드 누르면 선택 · 말투는 그 목소리 것만
+ *   ④ 키 없는 유료 엔진을 「이 엔진으로 만들기」 후 저장 → 막힘
+ *   🔑 저장되는 동작은 하지 않는다(로이 설정 불변 — 끝에 파일 비교).
  *   ⚠ renderer/dist 를 읽는다 — 화면을 고쳤으면 `npm run build:renderer` 뒤에 돌릴 것.
  */
 const path = require('path');
@@ -33,26 +35,58 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     const hit = await btn.evaluate((el) => { const r = el.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!t && el.contains(t); });
     ok(hit, '버튼이 실제로 눌리는 자리(elementFromPoint)');
     await btn.click();
-    const dlg = win.locator('[data-testid="tts-engine-dlg"]');
-    await dlg.waitFor({ timeout: 5000 });
-    for (const id of ['omnivoice', 'gemini', 'mai', 'typecast', 'elevenlabs']) ok((await win.locator(`[data-testid="tts-eng-${id}"]`).count()) === 1, `엔진 칸 ${id}`);
-    // MAI 를 골라 칸이 열리는지(지역·모델·목소리)
-    await win.locator('[data-testid="tts-eng-mai"] input[type="radio"]').check();
-    const mai = await win.locator('[data-testid="tts-eng-mai"]').innerText();
-    ok(/지역/.test(mai) && /모델/.test(mai) && /목소리/.test(mai), 'MAI 를 고르면 지역·모델·목소리 칸이 열린다');
-    ok(await win.locator('[data-testid="tts-eng-mai"] select option[value="MAI-Voice-2.1-Flash"]').count() === 1, 'MAI 모델에 2.1-Flash 도 있다');
-    // 키가 없는 엔진을 고르고 저장 → 막힌다(설정 파일 불변)
-    const hasMaiKey = /키 있음/.test(mai);
-    if (!hasMaiKey) {
+    const card = win.locator('[data-testid="tts-eng-card"]');
+    await card.waitFor({ timeout: 8000 });
+
+    // ② 크기 고정
+    const sizes = [];
+    for (const id of ['omnivoice', 'gemini', 'mai', 'typecast', 'elevenlabs']) {
+      const tab = win.locator(`[data-testid="tts-tab-${id}"]`);
+      ok((await tab.count()) === 1, `탭 ${id}`);
+      await tab.click(); await win.waitForTimeout(250);
+      const b = await card.boundingBox();
+      sizes.push(`${Math.round(b.width)}x${Math.round(b.height)}`);
+    }
+    ok(new Set(sizes).size === 1, `탭마다 창 크기가 같다 (${sizes.join(' · ')})`);
+
+    // ③ MAI 카드
+    await win.locator('[data-testid="tts-tab-mai"]').click(); await win.waitForTimeout(200);
+    const cards = win.locator('[data-testid="tts-voice-card"]');
+    ok((await cards.count()) === 4, `MAI 기본 = 한국어 카드 4개 (${await cards.count()})`);
+    await win.locator('[data-testid="tts-voice-lang"]').selectOption('');
+    await win.waitForTimeout(200);
+    ok((await cards.count()) === 97, `MAI 언어 전체 = 97개 (${await cards.count()})`);
+    await win.locator('[data-testid="tts-voice-q"]').fill('Grant');
+    await win.waitForTimeout(150);
+    const nGrant = await cards.count();
+    ok(nGrant > 10 && nGrant < 97, `검색 「Grant」 거르기 (${nGrant}개)`);
+    await win.locator('[data-testid="tts-voice-q"]').fill('');
+    await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"]').click();
+    await win.waitForTimeout(150);
+    const haena = await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"]').innerText();
+    ok(/✔/.test(haena), '카드를 누르면 선택 표시(✔)');
+    const styleOpts = await win.locator('[data-testid="tts-eng-mai"] select').evaluateAll((ss) => ss.map((s) => [...s.options].map((o) => o.value)));
+    ok(styleOpts.some((o) => o.includes('softvoice') && !o.includes('narrator')), '말투 = 고른 목소리(해나)가 되는 것만');
+    const gridScroll = await win.locator('[data-testid="tts-voice-grid"]').evaluate((el) => el.scrollHeight > el.clientHeight);
+    ok(gridScroll, '목록이 길면 카드 칸 안에서만 스크롤');
+
+    // Gemini 30
+    await win.locator('[data-testid="tts-tab-gemini"]').click(); await win.waitForTimeout(200);
+    ok((await cards.count()) >= 30, `Gemini 카드 30개 이상 (${await cards.count()})`);
+
+    // ④ 키 없는 유료 엔진 → 저장 막힘
+    const typecastKey = await win.locator('[data-testid="tts-tab-typecast"]').innerText();
+    await win.locator('[data-testid="tts-tab-typecast"]').click(); await win.waitForTimeout(200);
+    if (!/🔑/.test(typecastKey)) {
+      await win.locator('[data-testid="tts-use"]').click();
       await win.locator('[data-testid="tts-eng-save"]').click();
       await win.waitForTimeout(400);
-      const msg = await win.locator('[data-testid="tts-eng-msg"]').innerText().catch(() => '');
-      ok(/API 키를 넣어야/.test(msg), '키 없는 유료 엔진은 저장을 막고 알린다');
-      ok(await dlg.isVisible(), '막히면 창이 그대로');
+      ok(/API 키를 넣어야/.test(await win.locator('[data-testid="tts-eng-msg"]').innerText()), '키 없는 유료 엔진은 저장을 막고 알린다');
+      ok(await card.isVisible(), '막히면 창이 그대로');
     }
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
-    ok((await dlg.count()) === 0, 'Esc 로 닫힌다');
+    ok((await card.count()) === 0, 'Esc 로 닫힌다');
     ok(errs.length === 0, `화면 오류 0건 (${errs.join(' | ')})`);
   } finally {
     await app.close().catch(() => {});

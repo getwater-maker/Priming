@@ -27,8 +27,8 @@ const CFG_PATH = path.join(os.homedir(), '.priming-maker', 'tts-engines.json');
 //   keyId = secret-store 칸 · keyLabel = 키 입력칸 이름 · models = 고를 수 있는 모델(첫 항목 = 기본)
 const ENGINES = [
   {
-    id: 'omnivoice', label: 'OmniVoice', sub: '내 GPU 서버 · 무료 · 채널 참조음성 그대로', paid: false,
-    note: '채널 편집(🎙 음성)의 참조음성·시드로 읽습니다. 서버 주소는 ⚙ 설정 → 🖧 TTS 서버.',
+    id: 'omnivoice', label: 'OmniVoice', sub: '내 GPU 서버 · 무료', paid: false,
+    note: '기본은 채널마다 정한 참조음성(⚙ 채널편집 → 🎙)으로 읽습니다. 아래에서 서버 목소리를 고르면 모든 채널을 그 목소리로 읽습니다(시드는 채널 것). 서버 주소는 ⚙ 설정 → 🖧 TTS 서버.',
   },
   {
     id: 'gemini', label: 'Google Gemini TTS', sub: 'Google AI Studio API 키', paid: true,
@@ -40,7 +40,8 @@ const ENGINES = [
       { id: 'gemini-2.5-pro-preview-tts', name: 'Gemini 2.5 Pro TTS (구판)' },
     ],
     defaultVoice: 'Kore', hasStyle: true,
-    note: '이미지(나노바나나)·프롬프트 작성과 같은 Gemini 키를 씁니다. 「말투」는 3.8 모델에만 적용됩니다.',
+    listVoices: true,
+    note: '기본 목소리 30개 + 「확장 라이브러리 불러오기」(수백 개 · 3.8 모델용). 이미지(나노바나나)·프롬프트 작성과 같은 Gemini 키를 씁니다. 「말투 지시」는 3.8 모델에만 적용됩니다.',
   },
   {
     id: 'mai', label: 'Microsoft MAI-Voice', sub: 'Azure Speech(Foundry) 키 + 지역', paid: true,
@@ -51,16 +52,7 @@ const ENGINES = [
     ],
     regions: ['eastasia', 'southeastasia', 'japaneast', 'eastus', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'],
     defaultRegion: 'eastasia', defaultVoice: 'ko-KR-Junho',
-    // 공식 목록(learn.microsoft.com · 2026-09-30 판)에서 한국어·베트남어만 싣는다(일본어는 목록에 없음). 그 밖은 직접 입력.
-    voices: [
-      { id: 'ko-KR-Junho', name: '♂ 준호 (감정 표현)' },
-      { id: 'ko-KR-Grant', name: '♂ Grant (낭독·교육)' },
-      { id: 'ko-KR-Haena', name: '♀ 해나 (감정 표현)' },
-      { id: 'ko-KR-Harper', name: '♀ Harper (낭독·교육)' },
-      { id: 'vi-VN-Grant', name: '♂ Grant (베트남어)' },
-      { id: 'vi-VN-Harper', name: '♀ Harper (베트남어)' },
-    ],
-    styles: ['', 'narrator', 'audiobook', 'educational', 'neutral', 'softvoice', 'happy', 'sad', 'excited', 'hopeful'],
+    // 목소리 97개 = voice-catalogs.MAI(공식 표 전체 · 말투는 목소리마다 다르다)
     note: 'Azure 포털에서 Speech(Foundry) 리소스를 만들고 키·지역을 넣으세요. 목소리 이름은 「ko-KR-Junho」처럼 씁니다.',
   },
   {
@@ -72,7 +64,7 @@ const ENGINES = [
     ],
     emotions: ['normal', 'happy', 'sad', 'angry', 'whisper', 'toneup', 'tonedown'],
     listVoices: true,
-    note: '「목소리 불러오기」로 내 계정에서 쓸 수 있는 목소리(tc_…)를 가져옵니다.',
+    note: '내 계정에서 쓸 수 있는 목소리(tc_…) 전체를 API 로 불러옵니다(처음 열 때 자동 · 「↻ 다시 불러오기」).',
   },
   {
     id: 'elevenlabs', label: 'ElevenLabs TTS', sub: 'elevenlabs.io API 키', paid: true,
@@ -83,7 +75,7 @@ const ENGINES = [
       { id: 'eleven_flash_v2_5', name: 'Flash v2.5 (빠르고 쌈)' },
     ],
     listVoices: true,
-    note: '「목소리 불러오기」로 내 보이스 라이브러리를 가져옵니다(복제한 내 목소리 포함). 채널 시드를 그대로 넘깁니다.',
+    note: '내 보이스 라이브러리 전체(기본 목소리 + 복제한 내 목소리)를 API 로 불러옵니다. 채널 시드를 그대로 넘깁니다.',
   },
 ];
 const ENGINE_IDS = ENGINES.map((e) => e.id);
@@ -95,7 +87,7 @@ function load() {
 }
 function save(cfg) {
   const clean = { active: ENGINE_IDS.includes(cfg && cfg.active) ? cfg.active : 'omnivoice' };
-  for (const e of ENGINES) if (e.paid && cfg && cfg[e.id] && typeof cfg[e.id] === 'object') clean[e.id] = { ...cfg[e.id] };
+  for (const e of ENGINES) if (cfg && cfg[e.id] && typeof cfg[e.id] === 'object') clean[e.id] = { ...cfg[e.id] };
   fs.mkdirSync(path.dirname(CFG_PATH), { recursive: true });
   fs.writeFileSync(CFG_PATH, JSON.stringify(clean, null, 2), 'utf8');
   return clean;
@@ -105,7 +97,8 @@ function active(cfg) { const a = (cfg || load()).active; return ENGINE_IDS.inclu
 /** 엔진별 설정값(빈 값은 기본값으로 채움) */
 function engineCfg(id, cfg) {
   const e = byId(id); const c = ((cfg || load())[id]) || {};
-  if (!e || !e.paid) return {};
+  if (!e) return {};
+  if (!e.paid) return { voice: String(c.voice || '') };   // OmniVoice — voice = '' (채널 그대로) | 'srv:<이름>'
   const out = { ...c };
   if (!out.model || !(e.models || []).some((m) => m.id === out.model)) out.model = e.models[0].id;
   if (!out.voice && e.defaultVoice) out.voice = e.defaultVoice;
@@ -133,7 +126,12 @@ function synthExtra(id, cfg) {
   const c = engineCfg(id, cfg);
   const x = { model: c.model, voice: c.voice || '' };
   if (id === 'gemini' && c.style) x.style = String(c.style);
-  if (id === 'mai') { x.region = c.region; if (c.style) x.style = c.style; }
+  if (id === 'mai') {
+    x.region = c.region;
+    // 말투는 목소리마다 다르다 — 고른 목소리가 못 하는 말투는 보내지 않는다(400 대신 기본 말투)
+    const v = require('./voice-catalogs').MAI.find((m) => m.id === c.voice);
+    if (c.style && (!v || v.styles.includes(c.style))) x.style = c.style;
+  }
   if (id === 'typecast') { x.emotion = c.emotion || 'normal'; }
   if (id === 'elevenlabs') {
     if (c.stability != null && c.stability !== '') x.stability = Number(c.stability);
@@ -143,10 +141,16 @@ function synthExtra(id, cfg) {
   return x;
 }
 
+/** OmniVoice 를 고르고 서버 목소리를 정했으면 'srv:<이름>', 아니면 ''(= 채널 참조음성 그대로) */
+function omniVoice(cfg) {
+  const v = String((((cfg || load()).omnivoice) || {}).voice || '');
+  return /^srv:./.test(v) ? v : '';
+}
+
 /** 로그 한 줄 — 「어느 엔진·목소리로 읽었나」 */
 function label(id, cfg) {
   const e = byId(id); if (!e) return String(id || '');
-  if (!e.paid) return e.label;
+  if (!e.paid) { const ov = omniVoice(cfg); return ov ? `${e.label} · 목소리 ☁ ${ov.slice(4)}(모든 채널)` : e.label; }
   const c = engineCfg(id, cfg);
   return `${e.label} · ${c.model} · 목소리 ${c.voice || '⚠ 없음'}`;
 }
@@ -163,4 +167,4 @@ function keyInfo(SecretStore) {
   return out;
 }
 
-module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, byId, load, save, active, engineCfg, resolveEngine, synthExtra, label, keyInfo };
+module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, byId, load, save, active, engineCfg, resolveEngine, synthExtra, omniVoice, label, keyInfo };

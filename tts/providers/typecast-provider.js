@@ -57,10 +57,11 @@ async function listVoices(key, model = 'ssfm-v30') {
   if (!res.ok) throw await httpError(res, LABEL);
   const j = await res.json();
   const arr = Array.isArray(j) ? j : (j.voices || j.result || j.data || []);
-  const g = (x) => (x === 'male' ? '♂ ' : x === 'female' ? '♀ ' : '');
+  const AGE = { child: '어린이', teenager: '10대', young_adult: '청년', middle_age: '중년', elder: '노년' };
   return arr.map((v) => {
     const nm = v.voice_name && typeof v.voice_name === 'object' ? (v.voice_name.kor || v.voice_name.eng) : v.voice_name;
-    return { id: v.voice_id, name: `${g(v.gender)}${nm || v.voice_id}${v.age ? ` · ${v.age}` : ''}` };
+    const uses = Array.isArray(v.use_cases) ? v.use_cases.slice(0, 3).join(' · ') : '';
+    return { id: v.voice_id, name: nm || v.voice_id, gender: String(v.gender || '').toLowerCase(), lang: AGE[v.age] || v.age || '', desc: uses, preview: v.preview_url || '' };
   }).filter((v) => v.id);
 }
 
