@@ -1714,7 +1714,7 @@ export default function App() {
       const vid = id === 'omnivoice' ? ch.ref : ch.voiceEngine.voice;
       const vv = (e.voices || []).find((x) => x.id === vid);
       const vname = vv ? vv.name : String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '');
-      setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (e.faces || {})[vid] || null, gender: vv && vv.gender, vname });
+      setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (r.channelFaces || {})[presetName] || (e.faces || {})[vid] || null,   /* 📺 채널 얼굴 우선 */ gender: vv && vv.gender, vname });
       return r;
     } catch { return null; }
   }

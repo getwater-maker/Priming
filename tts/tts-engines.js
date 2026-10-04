@@ -100,7 +100,8 @@ const PRICING = {
   'eleven_flash_v2_5': { kind: 'char', usd: 0.04 / 1e3, note: '종량제' },
 };
 const KO_CHARS_PER_SEC = 7;   // 한국어 낭독 ≈ 초당 7글자(정속) — 초 단위 요금 추정용(실측 길이가 있으면 그걸 쓴다)
-const DEFAULT_KRW = 1400;     // 1달러 = 원(팝업에서 바꿀 수 있다)
+const DEFAULT_KRW = 1400;     // 1달러 = 원 — 환율을 못 받았을 때만 쓰는 값(평소엔 main 이 공개 환율을 받는다)
+const DEFAULT_CARD_FEE = 1.3; // 💳 카드 해외결제 수수료 기본값(%) — 대략값 · 팝업에서 카드에 맞게 고친다
 
 /** 글자 수(·초) → 예상 USD. 모르는 모델은 null. OmniVoice = 0 */
 function estimateUsd(engineId, model, chars, sec) {
@@ -132,6 +133,8 @@ function save(cfg) {
   const clean = {
     mai: { region: String((c.mai && c.mai.region) || (prev.mai && prev.mai.region) || 'eastasia') },
     krw: Number(c.krw) > 0 ? Number(c.krw) : (Number(prev.krw) || DEFAULT_KRW),
+    // 💳 카드 해외결제 수수료(%) — 시장 환율에 더해 카드 청구 예상액을 낸다(브랜드 약 1~1.1% + 카드사 약 0.2% · 카드마다 다름)
+    cardFee: (c.cardFee != null && c.cardFee !== '' && Number(c.cardFee) >= 0 && Number(c.cardFee) < 10) ? Number(c.cardFee) : (prev.cardFee != null ? Number(prev.cardFee) : DEFAULT_CARD_FEE),
   };
   fs.mkdirSync(path.dirname(CFG_PATH), { recursive: true });
   fs.writeFileSync(CFG_PATH, JSON.stringify(clean, null, 2), 'utf8');
@@ -139,6 +142,7 @@ function save(cfg) {
 }
 const region = (cfg) => String((((cfg || load()).mai) || {}).region || 'eastasia');
 const krw = (cfg) => Number((cfg || load()).krw) || DEFAULT_KRW;
+const cardFee = (cfg) => { const v = (cfg || load()).cardFee; return v != null && isFinite(Number(v)) ? Number(v) : DEFAULT_CARD_FEE; };
 
 /** 채널의 목소리 설정(빈 값은 기본값) — { id, model, voice, … } */
 function channelVoice(preset) {
@@ -212,4 +216,4 @@ function keyInfo(SecretStore) {
   return out;
 }
 
-module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, PRICING, KO_CHARS_PER_SEC, DEFAULT_KRW, byId, load, save, region, krw, channelVoice, resolveEngine, synthExtra, label, keyInfo, estimateUsd, priceLine };
+module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, PRICING, KO_CHARS_PER_SEC, DEFAULT_KRW, DEFAULT_CARD_FEE, byId, load, save, region, krw, cardFee, channelVoice, resolveEngine, synthExtra, label, keyInfo, estimateUsd, priceLine };

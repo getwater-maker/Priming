@@ -28,7 +28,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [tab, setTab] = useState('omnivoice');
   const [keys, setKeys] = useState({});            // 엔진 → { key | clear }
   const [region, setRegion] = useState('eastasia');
-  const [krw, setKrw] = useState(1400);
+  const [krwSaved, setKrwSaved] = useState(1400);   // 환율을 못 받았을 때만 쓰는 지난 값
+  const [fx, setFx] = useState(null);              // 💱 { rate, asOf, source, stale } — 시장 환율(main 이 공개 API 에서)
+  const [cardFee, setCardFee] = useState(1.3);     // 💳 카드 해외결제 수수료(%)
+  const [chFaces, setChFaces] = useState({});      // 📺 채널 얼굴 { 채널: {path, v} }
   const [voices, setVoices] = useState({});
   const [faces, setFaces] = useState({});          // 엔진 → { 목소리: {path, v} }
   const [samples, setSamples] = useState({});      // 엔진 → { 'model|voice|style': {file, sec} }
@@ -41,12 +44,16 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const audioRef = useRef(null);
   const triedRef = useRef({});
   const stopRef = useRef(false);
+  // 💳 카드 청구 예상 환율 = 시장 환율 × (1 + 수수료%) — 환율을 못 받으면 지난 값
+  const krw = fx && fx.rate ? fx.rate * (1 + (Number(cardFee) || 0) / 100) : krwSaved;
 
   useEffect(() => {
     (async () => {
       const r = await api.ttsEnginesGet();
       if (!r) { setMsg('설정을 읽지 못했습니다'); return; }
-      setData(r); setRegion(r.region); setKrw(r.krw);
+      setData(r); setRegion(r.region); setKrwSaved(r.krw); setCardFee(r.cardFee != null ? r.cardFee : 1.3); setChFaces(r.channelFaces || {});
+      if (r.fx && r.fx.rate) setFx(r.fx);
+      api.fxUsdKrw({}).then((f) => { if (f && f.ok) setFx(f); }).catch(() => {});
       const vs = {}, fs = {}, ss = {};
       for (const e of r.engines) { if (e.voices) vs[e.id] = e.voices; fs[e.id] = e.faces || {}; ss[e.id] = e.samples || {}; }
       setVoices(vs); setFaces(fs); setSamples(ss);
@@ -102,7 +109,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   // 키만 먼저 저장(샘플·AI 얼굴 전에 — 방금 넣은 키를 main 이 쓰게)
   async function saveKeysIfAny() {
     if (!Object.keys(keys).length) return true;
-    const r = await api.ttsEnginesSave({ region, krw, keys, channels: [] });
+    const r = await api.ttsEnginesSave({ region, krw, cardFee, keys, channels: [] });
     if (!r || !r.ok) { setMsg('❌ 키 저장 실패'); return false; }
     const fresh = await api.ttsEnginesGet();
     if (fresh) setData((d) => ({ ...d, keys: fresh.keys }));
@@ -124,7 +131,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       const ve = d.id === 'omnivoice' ? { id: 'omnivoice' } : { id: d.id, ...cc, model: cc.model && e.models.some((m) => m.id === cc.model) ? cc.model : e.models[0].id };
       return { name, voiceEngine: ve, ref: d.ref };
     });
-    const r = await api.ttsEnginesSave({ region, krw, keys, channels });
+    const r = await api.ttsEnginesSave({ region, krw, cardFee, keys, channels });
     if (!r || !r.ok) { setMsg('❌ 저장 실패: ' + ((r && r.error) || '')); return; }
     onSaved && onSaved(channels.length); onClose();
   }
@@ -189,6 +196,39 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     if (r && r.ok) { setFaces((f) => ({ ...f, [tab]: { ...(f[tab] || {}), [v.id]: { path: r.path, v: r.v } } })); setMsg(`🎨 「${v.name}」 얼굴을 넣었습니다`); }
     else setMsg('❌ ' + ((r && r.error) || '그리기 실패'));
   }
+  // 📺 채널 얼굴 — 채널마다 자기 캐릭터(같은 목소리를 쓰는 채널도 얼굴은 따로). 그림 = 로컬 ComfyUI
+  async function chFacePick(name) {
+    const r = await api.ttsFacePick({ engine: 'channel', voice: name });
+    if (r && r.ok) setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } }));
+    else if (r && r.error) setMsg('❌ ' + r.error);
+  }
+  async function chFaceAi(name) {
+    setBusy('chface:' + name); setMsg(`🎨 「${name}」 채널 얼굴 그리는 중… (🖥 로컬 ComfyUI · 무료)`);
+    const r = await api.ttsFaceAi({ engine: 'channel', voice: name });
+    setBusy('');
+    if (r && r.ok) { setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); setMsg(`🎨 「${name}」 채널 얼굴을 넣었습니다`); return true; }
+    setMsg('❌ ' + ((r && r.error) || '그리기 실패')); return false;
+  }
+  async function chFaceClear(name) {
+    await api.ttsFaceClear({ engine: 'channel', voice: name });
+    setChFaces((f) => { const m = { ...f }; delete m[name]; return m; });
+  }
+  async function drawAllChannelFaces() {
+    const todo = data.channels.map((c) => c.name).filter((n) => !chFaces[n]);
+    if (!todo.length) { setMsg('모든 채널에 얼굴이 있습니다(다시 그리려면 채널을 고르고 🎨)'); return; }
+    const ok = await (confirm || window.confirm)(`얼굴이 없는 채널 ${todo.length}개의 얼굴을 🖥 로컬 ComfyUI 로 그립니다(무료 · 한 장 20초 안팎).\n\n${todo.join(', ')}\n\n계속할까요?`);
+    if (!ok) return;
+    stopRef.current = false;
+    let n = 0;
+    for (const name of todo) {
+      if (stopRef.current) break;
+      setBusy('chbatch'); setMsg(`🎨 채널 얼굴 ${n + 1}/${todo.length} — 「${name}」 그리는 중…`);
+      const r = await api.ttsFaceAi({ engine: 'channel', voice: name });
+      if (r && r.ok) { n++; setChFaces((f) => ({ ...f, [name]: { path: r.path, v: r.v } })); }
+      else { setBusy(''); setMsg(`❌ 「${name}」 실패 — 멈춥니다: ${(r && r.error) || ''}`); return; }
+    }
+    setBusy(''); setMsg(`🎨 채널 얼굴 ${n}개를 그렸습니다${stopRef.current ? ' (멈춤)' : ''} — 마음에 안 들면 채널을 고르고 🎨 로 다시`);
+  }
   async function faceClear(v) {
     await api.ttsFaceClear({ engine: tab, voice: v.id });
     setFaces((f) => { const m = { ...(f[tab] || {}) }; delete m[v.id]; return { ...f, [tab]: m }; });
@@ -221,7 +261,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     const vid = id === 'omnivoice' ? d.ref : ((d.cfg || {})[id] || {}).voice;
     const vv = (voices[id] || []).find((x) => x.id === vid);
     const e = data.engines.find((x) => x.id === id);
-    return { id, vid, name: vv ? vv.name : (id === 'omnivoice' ? String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '') || '참조음성 없음' : vid || '목소리 없음'), face: (faces[id] || {})[vid], gender: vv && vv.gender, eng: e ? e.label.replace(/ TTS$/, '').replace('Microsoft ', '').replace('Google ', '') : id };
+    return { id, vid, name: vv ? vv.name : (id === 'omnivoice' ? String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]+$/i, '') || '참조음성 없음' : vid || '목소리 없음'), face: chFaces[name] || (faces[id] || {})[vid], gender: vv && vv.gender, eng: e ? e.label.replace(/ TTS$/, '').replace('Microsoft ', '').replace('Google ', '') : id };
   };
 
   return (
@@ -230,23 +270,39 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       <div className="modal-card" data-testid="tts-eng-card" style={{ width: 'min(1180px, 96vw)', maxWidth: 'none', height: 'min(760px, 92vh)', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <h3 style={{ margin: 0, flex: 1 }}>🔊 채널 목소리 — 채널마다 개성 있는 목소리를 고르세요</h3>
-          <span className="meta">1달러 =</span>
-          <input type="number" min="1" style={{ width: 70 }} value={krw} onChange={(ev) => setKrw(Number(ev.target.value) || 1400)} title="요금 표시에 쓰는 환율" />
-          <span className="meta">원</span>
+          {/* 💱 환율 = 공개 API 시장 환율 + 카드 해외결제 수수료(카드사·결제망 환율 페이지는 자동 조회를 막는다) */}
+          <span data-testid="tts-fx" className="meta" title={fx ? `출처: ${fx.source} · 기준 ${fx.asOf}${fx.stale ? ' · ⚠ 새로 받지 못해 지난 값' : ''}\n카드 청구 예상 = 시장 환율 × (1 + 해외결제 수수료). 수수료는 카드마다 다릅니다(브랜드 약 1~1.1% + 카드사 약 0.2%).` : '환율을 받지 못했습니다 — 지난 값으로 계산합니다'}>
+            💱 1달러 = {fx ? <><b>{fx.rate.toLocaleString()}</b>원(시장{fx.stale ? '·지난 값' : ''})</> : '—'} + 카드 수수료
+          </span>
+          <input type="number" min="0" max="5" step="0.05" style={{ width: 58 }} value={cardFee} onChange={(ev) => setCardFee(ev.target.value)} title="카드 해외결제 수수료(%) — 내 카드에 맞게" />
+          <span className="meta">% → <b>{Math.round(krw).toLocaleString()}원</b></span>
+          <button className="ghost" style={{ padding: '1px 6px' }} title="환율 새로 받기" onClick={async () => { const f = await api.fxUsdKrw({ force: true }); if (f && f.ok) setFx(f); else setMsg('❌ ' + ((f && f.error) || '환율 실패')); }}>↻</button>
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {/* ── 왼쪽: 채널 ── */}
-          <div data-testid="tts-chan-list" style={{ width: 230, flex: '0 0 230px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
+          <div data-testid="tts-chan-list" style={{ width: 240, flex: '0 0 240px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
+            {busy === 'chbatch'
+              ? <button className="ghost" style={{ width: '100%', marginBottom: 8 }} onClick={() => { stopRef.current = true; }}>⏹ 얼굴 그리기 멈춤</button>
+              : <button data-testid="tts-chface-all" className="ghost" style={{ width: '100%', marginBottom: 8 }} disabled={!!busy}
+                  title="얼굴이 없는 채널마다 캐릭터 얼굴을 🖥 로컬 ComfyUI 로 그립니다(무료) — 채널 성격(이름) + 그 채널 목소리의 성별"
+                  onClick={drawAllChannelFaces}>🎨 채널 얼굴 모두 그리기</button>}
             {data.channels.map((ch) => {
               const cv = chanVoice(ch.name); const on = chan === ch.name;
               return (
                 <div key={ch.name} role="button" tabIndex={0} data-testid="tts-chan" data-chan={ch.name}
                   onClick={() => { setChan(ch.name); setTab((drafts[ch.name] && drafts[ch.name].id) || 'omnivoice'); setMsg(''); }}
                   style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 4, border: '1.5px solid ' + (on ? BLUE : 'transparent'), background: on ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
-                  <Face face={cv.face} name={cv.name} gender={cv.gender} size={38} />
+                  <Face face={cv.face} name={ch.name.replace(/^\d+_/, '')} gender={cv.gender} size={on ? 52 : 40} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dirty[ch.name] ? '● ' : ''}{ch.name}</div>
                     <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cv.eng} · {cv.name}</div>
+                    {on && (
+                      <div style={{ display: 'flex', gap: 2, marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
+                        <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="채널 얼굴 그림 넣기(파일)" onClick={() => chFacePick(ch.name)}>🖼</button>
+                        <button className="ghost" data-testid="tts-chface-ai" style={{ padding: '0 5px', fontSize: 11 }} disabled={!!busy} title="채널 얼굴 그리기(🖥 로컬 ComfyUI · 무료) — 다시 누르면 새로" onClick={() => chFaceAi(ch.name)}>{busy === 'chface:' + ch.name ? '⏳' : '🎨'}</button>
+                        {chFaces[ch.name] && <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="채널 얼굴 지우기(목소리 얼굴로 돌아감)" onClick={() => chFaceClear(ch.name)}>✕</button>}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

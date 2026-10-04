@@ -40,6 +40,13 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     const card = win.locator('[data-testid="tts-eng-card"]');
     await card.waitFor({ timeout: 8000 });
 
+    // 💱 환율 · 📺 채널 얼굴 버튼(누르지 않는다 — 그리면 로이 얼굴이 바뀐다)
+    await win.waitForTimeout(1500);   // 환율 받기(비동기)
+    const fxTxt = await win.locator('[data-testid="tts-fx"]').innerText();
+    ok(/1달러 = [\d,.]+원\(시장/.test(fxTxt), `환율 = 시장 환율을 받아 표시 (${fxTxt.replace(/\s+/g, ' ').trim()})`);
+    ok((await win.locator('[data-testid="tts-chface-all"]').count()) === 1, '「🎨 채널 얼굴 모두 그리기」 버튼');
+    ok((await win.locator('[data-testid="tts-chface-ai"]').count()) === 1, '고른 채널 줄에 🎨(그 채널 얼굴)');
+
     // ① 채널 목록(채널마다 목소리)
     const chans = win.locator('[data-testid="tts-chan"]');
     ok((await chans.count()) >= 1, `채널 목록 (${await chans.count()}개)`);

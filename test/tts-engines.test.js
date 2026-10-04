@@ -212,6 +212,24 @@ function makeWav(samples, sr = 24000) {
   ok(/data-testid="tts-price"/.test(dlg), '요금 표시');
   { const MJ = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8'); const i = MJ.indexOf("ipcMain.handle('tts-face-ai'"); const blk = MJ.slice(i, MJ.indexOf("ipcMain.handle('tts-face-clear'", i));
     ok(i > 0 && /comfy-image/.test(blk) && !/gemini-image/.test(blk), '🎨 얼굴 = 로컬 ComfyUI(Gemini 아님 · v0.6.70)');
+    // 📺 채널 얼굴 · 성별 추정 · 💱 환율(v0.6.71)
+    ok(/engine === 'channel'/.test(blk) && /_channelFaceInfo/.test(blk), '채널 얼굴(engine channel) = 채널 성격 + 목소리 성별');
+    const pa = MJ.indexOf('const _CHANNEL_PERSONA'); const pb = MJ.indexOf('// 채널 얼굴(engine', pa);
+    const personaOf = new Function(MJ.slice(pa, pb) + '\nreturn _personaOf;')();
+    ok(/hanbok/.test(personaOf('08_다산의뜰')) && /Bible/.test(personaOf('05_로이의성경이야기')) && /headphones/.test(personaOf('플레이리스트')), '채널 이름 → 캐릭터 모습(다산=한복 · 성경 · 플레이리스트=헤드폰)');
+    ok(/library/.test(personaOf('06_고전서재')) && /classic/.test(personaOf('06_고전서재')), '키워드 둘(서재+고전)을 잇는다');
+    ok(/YouTube narrator/.test(personaOf('아무이름')), '모르는 채널 = 기본 내레이터');
+    { const ga = MJ.indexOf('function _estimateGender(file) {'); const gb = MJ.indexOf('\n}\n', ga) + 2;
+      const est = new Function('require', 'fs', MJ.slice(ga, gb) + '\nreturn _estimateGender;')((m) => require(m.startsWith('./') ? path.join(ROOT, m.slice(2)) : m), fs);
+      const REF = 'D:/TTS_Model/ref-audio';
+      if (fs.existsSync(REF + '/1nd_고전_남성.wav') && fs.existsSync(REF + '/1nd_고전_여성.wav')) {
+        const m = await est(REF + '/1nd_고전_남성.wav'); const f = await est(REF + '/1nd_고전_여성.wav');
+        eq([m.gender, f.gender], ['male', 'female'], `목소리 높이로 성별 추정 — 남 ${m.f0}Hz · 여 ${f.f0}Hz(판정력: 둘이 갈린다)`);
+      } else console.log('  (참조음성 폴더 없음 — 성별 추정 실물 확인 건너뜀)');
+      eq((await est(path.join(TMP, 'nope.wav'))).gender, '', '파일 없으면 성별 모름(지어내지 않는다)'); }
+    ok(/ipcMain\.handle\('fx-usd-krw'/.test(MJ) && /open\.er-api\.com/.test(MJ), '💱 환율 = 공개 API(시장 환율)');
+    ok(/cardFee: args\.cardFee/.test(MJ), '💳 카드 수수료 저장');
+    ok(/data-testid="tts-chface-all"/.test(dlg) && /data-testid="tts-fx"/.test(dlg), '화면: 채널 얼굴 모두 그리기 · 환율 표시');
     ok(/cfg\.cloud = false/.test(blk) && /\['image', 'localGpu'\]/.test(blk) && /awaitForeignTtsIdle/.test(blk) && /freeMemory/.test(blk), '로컬 강제 · GPU 레인 · TTS 대기 · VRAM 반납'); }
   ok(/role="tablist"/.test(dlg) && /tts-voice-card/.test(dlg), '엔진 탭 + 목소리 카드');
   ok(!/<datalist/.test(dlg), '목소리 고르기에 선택창(datalist)을 쓰지 않는다');

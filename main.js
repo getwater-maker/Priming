@@ -5189,7 +5189,26 @@ ipcMain.handle('tts-engines-get', () => {
     faces: Object.fromEntries(Object.entries(_faceFiles(e.id)).map(([k, v]) => [k, v])),
     samples: _sampleIndex(e.id),
   }));
-  return { engines, keys: TE.keyInfo(require('./tts/secret-store')), channels: _channelsForUi(), region: TE.region(cfg), krw: TE.krw(cfg), koCps: TE.KO_CHARS_PER_SEC };
+  return { engines, keys: TE.keyInfo(require('./tts/secret-store')), channels: _channelsForUi(), channelFaces: _faceFiles('channel'), region: TE.region(cfg), krw: TE.krw(cfg), cardFee: TE.cardFee(cfg), fx: _fxCached(), koCps: TE.KO_CHARS_PER_SEC };
+});
+// 💱 환율(1달러 → 원) — 무료 공개 API(open.er-api.com · 하루 1번 갱신 · 키 없음)의 **시장 환율**을 받아 6시간 기억한다.
+//   ⚠ 카드사·결제망(마스터카드·비자) 환율 페이지는 자동 조회를 봇 차단으로 막는다(2026-10-05 실측 Access Denied·Cloudflare) —
+//     ⛔ 우회하지 않는다. 대신 카드 청구 예상 = 시장 환율 × (1 + 해외결제 수수료%) — 수수료는 팝업에서 카드에 맞게 고친다.
+const FX_PATH = () => path.join(os.homedir(), '.priming-maker', 'fx.json');
+function _fxCached() { try { return JSON.parse(fs.readFileSync(FX_PATH(), 'utf8')); } catch { return null; } }
+ipcMain.handle('fx-usd-krw', async (_e, { force } = {}) => {
+  const c = _fxCached();
+  if (!force && c && c.rate > 0 && Date.now() - c.fetchedAt < 6 * 3600e3) return { ok: true, ...c, cached: true };
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+    let j; try { const r = await fetch('https://open.er-api.com/v6/latest/USD', { signal: ctrl.signal }); j = await r.json(); } finally { clearTimeout(t); }
+    const rate = Number(j && j.rates && j.rates.KRW);
+    if (!(j && j.result === 'success' && rate > 100 && rate < 10000)) throw new Error('환율 응답이 이상합니다');
+    const kst = (u) => new Date(u * 1000 + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' KST';
+    const v = { rate: Math.round(rate * 100) / 100, asOf: kst(j.time_last_update_unix), fetchedAt: Date.now(), source: 'open.er-api.com(시장 환율)' };
+    fs.mkdirSync(path.dirname(FX_PATH()), { recursive: true }); fs.writeFileSync(FX_PATH(), JSON.stringify(v));
+    return { ok: true, ...v };
+  } catch (e) { return c ? { ok: true, ...c, stale: true, error: e.message } : { ok: false, error: '환율을 받지 못했습니다: ' + e.message }; }
 });
 // 저장 — 채널마다 목소리(여러 채널 한 번에) + 전역(지역·환율) + 키
 ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
@@ -5197,7 +5216,7 @@ ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
     const TE = require('./tts/tts-engines');
     const SecretStore = require('./tts/secret-store');
     const Store = require('./tts/preset-store');
-    TE.save({ mai: { region: args.region }, krw: args.krw });
+    TE.save({ mai: { region: args.region }, krw: args.krw, cardFee: args.cardFee });
     const all = Store.loadAll();
     const done = [];
     for (const ch of args.channels || []) {
@@ -5313,6 +5332,74 @@ ipcMain.handle('tts-face-pick', async (_e, { engine, voice } = {}) => {
     return { ok: true, key, path: out, v: String(Date.now()) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// 🎚 참조음성 성별 추정 — 목소리 높이(F0 중앙값)로. 남 < 155Hz < 애매 < 180Hz < 여(성인 낭독 기준).
+//   ffmpeg 로 앞 10초를 16kHz 모노로 풀어 40ms 창 자기상관(70~400Hz). 🔴 메인 프로세스라 **비동기 spawn**(execFileSync 금지).
+//   못 재면 ''(그림은 성별 없이 그린다 — 지어내지 않는다).
+function _estimateGender(file) {
+  return new Promise((resolve) => {
+    try {
+      const ff = require('./core/media-utils').getFfmpegPath();
+      if (!ff || !file || !fs.existsSync(file)) return resolve({ gender: '', f0: 0 });
+      const cp = require('child_process').spawn(ff, ['-v', 'error', '-t', '10', '-i', file, '-ac', '1', '-ar', '16000', '-f', 's16le', 'pipe:1'], { windowsHide: true });
+      const chunks = []; cp.stdout.on('data', (d) => chunks.push(d)); cp.on('error', () => resolve({ gender: '', f0: 0 }));
+      cp.on('close', () => {
+        const buf = Buffer.concat(chunks); const n = Math.floor(buf.length / 2);
+        const x = new Float32Array(n); for (let i = 0; i < n; i++) x[i] = buf.readInt16LE(i * 2) / 32768;
+        const W = 640, H = 320, LMIN = 40, LMAX = 228; const f0s = [];
+        let rmsAll = 0; for (let i = 0; i < n; i++) rmsAll += x[i] * x[i]; rmsAll = Math.sqrt(rmsAll / Math.max(1, n));
+        for (let s = 0; s + W + LMAX < n; s += H) {
+          let e = 0; for (let i = 0; i < W; i++) e += x[s + i] * x[s + i];
+          if (Math.sqrt(e / W) < rmsAll * 0.6) continue;               // 조용한 구간(쉼) 건너뜀
+          let best = 0, bl = 0;
+          for (let L = LMIN; L <= LMAX; L++) {
+            let a = 0, b = 0; for (let i = 0; i < W; i++) { a += x[s + i] * x[s + i + L]; b += x[s + i + L] * x[s + i + L]; }
+            const r = a / Math.sqrt(e * b + 1e-12); if (r > best) { best = r; bl = L; }
+          }
+          if (best > 0.6 && bl) f0s.push(16000 / bl);
+        }
+        if (f0s.length < 10) return resolve({ gender: '', f0: 0 });
+        f0s.sort((a, b) => a - b); const f0 = f0s[Math.floor(f0s.length / 2)];
+        resolve({ gender: f0 < 155 ? 'male' : f0 > 180 ? 'female' : '', f0: Math.round(f0) });
+      });
+    } catch { resolve({ gender: '', f0: 0 }); }
+  });
+}
+// 채널 이름 → 캐릭터 모습(얼굴 그림 프롬프트용) — 채널마다 개성이 보이게. 키워드 최대 2개를 잇는다.
+const _CHANNEL_PERSONA = [
+  [/다산|조선|정약용/, 'a Joseon-dynasty Korean scholar wearing traditional hanbok and a black gat hat'],
+  [/성경|말씀|교회/, 'a gentle, kind Bible storyteller with a calm, faithful expression'],
+  [/역사/, 'a knowledgeable history documentary narrator with a thoughtful look'],
+  [/서재|도서/, 'a cozy reader in a warm home library surrounded by bookshelves'],
+  [/고전/, 'a warm storyteller of classic literature holding an old book'],
+  [/승리|동기|성공/, 'a calm, quietly confident life mentor'],
+  [/강의|강좌|교육/, 'a friendly lecturer and teacher'],
+  [/플레이|음악|playlist/i, 'a relaxed music DJ wearing headphones'],
+  [/출판|작가|책/, 'a thoughtful book author at a writing desk'],
+];
+function _personaOf(chName) {
+  const hits = _CHANNEL_PERSONA.filter(([re]) => re.test(String(chName || ''))).map(([, d]) => d).slice(0, 2);
+  return hits.length ? hits.join(', also ') : 'a friendly YouTube narrator';
+}
+// 채널 얼굴(engine 'channel', voice = 채널 이름) 그림 재료 — 그 채널 목소리의 성별(이름·설명 → 없으면 목소리 높이) + 채널 성격
+async function _channelFaceInfo(chName) {
+  const TE = require('./tts/tts-engines');
+  const p = require('./tts/preset-store').loadAll().find((x) => x.name === chName);
+  if (!p) return null;
+  const cv = TE.channelVoice(p);
+  let gender = '', desc = '', how = '';
+  if (cv.id === 'mai') { const v = require('./tts/voice-catalogs').MAI.find((m) => m.id === cv.voice); if (v) { gender = v.gender; desc = v.desc; } }
+  else if (cv.id === 'gemini') { const v = require('./tts/voice-catalogs').GEMINI.find((m) => m.id === cv.voice); if (v) { gender = v.gender; desc = v.desc; } }
+  else if (cv.id === 'omnivoice') {
+    const ref = String(p.voiceCloneRefAudio || '');
+    const nm = ref.replace(/^srv:/, '').replace(/^.*[\\/]/, '');
+    if (/남성|남자|male/i.test(nm)) gender = 'male'; else if (/여성|여자|female/i.test(nm)) gender = 'female';
+    if (/저음/.test(nm)) desc = 'deep low voice';
+    if (!gender) { const g = await _estimateGender(resolveRefPath(ref)); gender = g.gender; if (g.f0) how = `목소리 높이 ${g.f0}Hz`; }
+  }
+  // 타입캐스트·ElevenLabs 는 불러온 목록에 성별이 있다
+  if (!gender && (cv.id === 'typecast' || cv.id === 'elevenlabs')) { const c = _readVoiceCache(cv.id); const v = c && (c.voices || []).find((x) => x.id === cv.voice); if (v) { gender = v.gender || ''; desc = v.desc || ''; } }
+  return { gender, desc, persona: _personaOf(chName), how };
+}
 ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, lang, hint } = {}) => {
   // 🖥 **로컬 ComfyUI** 로 그린다(로이 2026-10-05 — 무료 · 내 GPU). 클라우드 설정이어도 로컬 주소로 강제한다.
   //   이미지 단계와 같은 규칙: 꺼져 있으면 켜서 기다림 · 이 GPU 에서 TTS 중이면 대기 · 'image'+'localGpu' 레인 · 끝나면 VRAM 반납.
@@ -5322,10 +5409,19 @@ ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, la
     cfg.cloud = false;
     cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
     if (!cfg.workflowPath) return { ok: false, error: 'ComfyUI 이미지 워크플로가 없습니다 — ⚙ 설정 → 🖼 ComfyUI 이미지' };
-    const g = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
+    // 📺 채널 얼굴(engine 'channel', voice = 채널 이름) — 그 채널 목소리의 성별 + 채널 성격(이름 키워드)으로 그린다
+    let persona = '';
+    if (engine === 'channel') {
+      const info = await _channelFaceInfo(voice);
+      if (!info) return { ok: false, error: '채널을 찾지 못했습니다: ' + voice };
+      gender = gender || info.gender; desc = [info.desc, desc].filter(Boolean).join(', '); persona = info.persona;
+      log(`🎨 「${voice}」 채널 얼굴 — ${info.gender === 'male' ? '남성' : info.gender === 'female' ? '여성' : '성별 모름'}${info.how ? `(${info.how})` : ''} · ${persona}`);
+    }
+    const nat = (engine === 'channel' || engine === 'omnivoice' || /한국어|^ko/.test(String(lang || ''))) ? 'Korean ' : '';   // 외국어 목소리는 국적을 정하지 않는다
+    const g = nat + (gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person');
     // Krea2 Turbo 는 네거티브가 무효(cfg=1) → 「글자 없음」도 긍정 서술로. 끝은 마침표(CLIP 토큰 경계).
-    const prompt = `Friendly illustrated character portrait avatar of a ${g}, head and shoulders, centered, facing the viewer, soft warm lighting, clean plain pastel background, high quality digital illustration, clean image with only the character.`
-      + ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`;
+    const prompt = `Friendly illustrated character portrait avatar of a ${g}${persona ? ', ' + persona : ''}, head and shoulders, centered, facing the viewer, soft warm lighting, clean plain pastel background, high quality digital illustration, clean image with only the character.`
+      + (engine === 'channel' ? (desc ? ` Voice character: ${desc}.` : '') : ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`);
     const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
     const key = _voiceFileKey(voice);
     const tmp = path.join(dir, key + '.__new.png');
