@@ -5314,22 +5314,36 @@ ipcMain.handle('tts-face-pick', async (_e, { engine, voice } = {}) => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, lang, hint } = {}) => {
+  // 🖥 **로컬 ComfyUI** 로 그린다(로이 2026-10-05 — 무료 · 내 GPU). 클라우드 설정이어도 로컬 주소로 강제한다.
+  //   이미지 단계와 같은 규칙: 꺼져 있으면 켜서 기다림 · 이 GPU 에서 TTS 중이면 대기 · 'image'+'localGpu' 레인 · 끝나면 VRAM 반납.
   try {
-    const GI = require('./core/gemini-image');
-    if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키가 필요합니다(Gemini 탭에서 넣으세요)' };
+    const CI = require('./core/comfy-image');
+    const cfg = CI.loadConfig();
+    cfg.cloud = false;
+    cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
+    if (!cfg.workflowPath) return { ok: false, error: 'ComfyUI 이미지 워크플로가 없습니다 — ⚙ 설정 → 🖼 ComfyUI 이미지' };
     const g = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
-    const prompt = `Friendly illustrated character portrait avatar of a ${g}, head and shoulders, centered, facing the viewer, soft warm lighting, clean simple pastel background, high quality digital illustration, no text, no letters, no watermark.`
+    // Krea2 Turbo 는 네거티브가 무효(cfg=1) → 「글자 없음」도 긍정 서술로. 끝은 마침표(CLIP 토큰 경계).
+    const prompt = `Friendly illustrated character portrait avatar of a ${g}, head and shoulders, centered, facing the viewer, soft warm lighting, clean plain pastel background, high quality digital illustration, clean image with only the character.`
       + ` The character's personality matches a narrator voice described as: ${[desc, lang, hint].filter(Boolean).join(', ') || name}.`;
     const dir = path.join(VOICE_FACE_DIR(), String(engine)); fs.mkdirSync(dir, { recursive: true });
     const key = _voiceFileKey(voice);
-    const tmp = path.join(dir, key + '.__new');
-    const r = await GI.generateImageToFile({ prompt, aspect: '1:1', outPathNoExt: tmp });
-    if (!r.ok) return { ok: false, error: r.error || '그리기 실패' };
+    const tmp = path.join(dir, key + '.__new.png');
+    const r = await _runOnLanes(['image', 'localGpu'], '목소리 얼굴 그리기', async () => {
+      const eng = new CI.ComfyImage(cfg, log);
+      const up = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+      if (!up.ok) return { success: false, error: up.message || '로컬 ComfyUI 에 연결할 수 없습니다' };
+      await awaitForeignTtsIdle('목소리 얼굴 그리기', log);
+      try { return await eng.textToImage({ prompt, aspect: '1:1', outputPath: tmp }); }
+      finally { try { await eng.freeMemory(); } catch {} }
+    });
+    if (!r || !r.success) return { ok: false, error: (r && r.error) || '그리기 실패' };
     for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.') && !f.startsWith(key + '.__new')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
-    const out = path.join(dir, key + path.extname(r.path));
-    fs.renameSync(r.path, out);
+    const out = path.join(dir, key + path.extname(r.imagePath));
+    fs.renameSync(r.imagePath, out);
     _setFace(engine, voice, path.basename(out));
-    log(`🎨 목소리 얼굴 — ${engine} · ${name || voice} (Gemini 이미지 1장)`);
+    const wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
+    log(`🎨 목소리 얼굴 — ${engine} · ${name || voice} (🖥 로컬 ComfyUI · ${wf ? wf.name : path.basename(cfg.workflowPath)})`);
     return { ok: true, key, path: out, v: String(Date.now()) };
   } catch (e) { return { ok: false, error: e.message }; }
 });

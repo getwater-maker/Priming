@@ -183,8 +183,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     else if (r && r.error) setMsg('❌ ' + r.error);
   }
   async function faceAi(v) {
-    if (!(await saveKeysIfAny())) return;
-    setBusy('face:' + v.id); setMsg(`🎨 「${v.name}」 얼굴 그리는 중… (Gemini 이미지 1장 요금)`);
+    setBusy('face:' + v.id); setMsg(`🎨 「${v.name}」 얼굴 그리는 중… (🖥 로컬 ComfyUI · 무료 — 모델을 올리느라 첫 장은 1분쯤 걸릴 수 있습니다)`);
     const r = await api.ttsFaceAi({ engine: tab, voice: v.id, name: v.name, gender: v.gender, desc: v.desc, lang: v.lang, hint: chan ? `YouTube channel "${chan}"` : '' });
     setBusy('');
     if (r && r.ok) { setFaces((f) => ({ ...f, [tab]: { ...(f[tab] || {}), [v.id]: { path: r.path, v: r.v } } })); setMsg(`🎨 「${v.name}」 얼굴을 넣었습니다`); }
@@ -344,7 +343,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
         <div style={{ borderTop: '1px solid var(--line)', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="meta" data-testid="tts-eng-msg" style={{ flex: 1, fontWeight: msg ? 600 : 400 }}>
-            {msg || '💡 🔈 = 샘플 듣기(회사 샘플·저장된 샘플은 무료 · 없으면 한 문장 만들어 저장 · Shift+클릭 = 다시 만들기). 🖼 = 얼굴 그림 넣기 · 🎨 = AI 로 얼굴 그리기(Gemini 이미지).'}
+            {msg || '💡 🔈 = 샘플 듣기(회사 샘플·저장된 샘플은 무료 · 없으면 한 문장 만들어 저장 · Shift+클릭 = 다시 만들기). 🖼 = 얼굴 그림 넣기 · 🎨 = 로컬 ComfyUI 로 얼굴 그리기(무료).'}
           </span>
           <span className="meta">{Object.keys(dirty).length ? `바뀐 채널 ${Object.keys(dirty).length}개` : ''}</span>
           <button data-testid="tts-eng-save" onClick={save}>저장</button>
@@ -376,7 +375,7 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, users, onPick, onP
         <Face face={face} name={v.name} gender={v.gender} size={52} />
         <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
           <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} title="얼굴 그림 넣기(파일)" onClick={onFacePick}>🖼</button>
-          <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(Gemini 이미지 1장 요금)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
+          <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(🖥 로컬 ComfyUI · 무료)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
           {face && <button className="ghost" style={{ padding: '0 4px', fontSize: 11 }} title="얼굴 지우기" onClick={onFaceClear}>✕</button>}
         </div>
       </div>

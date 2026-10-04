@@ -210,6 +210,9 @@ function makeWav(samples, sr = 24000) {
   ok(/data-testid="tts-chan-list"/.test(dlg) && /channels/.test(dlg), '채널 목록(채널마다 목소리)');
   ok(/tts-face-img/.test(dlg) && /ttsFaceAi/.test(dlg) && /ttsFacePick/.test(dlg), '목소리 얼굴(그림·AI)');
   ok(/data-testid="tts-price"/.test(dlg), '요금 표시');
+  { const MJ = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8'); const i = MJ.indexOf("ipcMain.handle('tts-face-ai'"); const blk = MJ.slice(i, MJ.indexOf("ipcMain.handle('tts-face-clear'", i));
+    ok(i > 0 && /comfy-image/.test(blk) && !/gemini-image/.test(blk), '🎨 얼굴 = 로컬 ComfyUI(Gemini 아님 · v0.6.70)');
+    ok(/cfg\.cloud = false/.test(blk) && /\['image', 'localGpu'\]/.test(blk) && /awaitForeignTtsIdle/.test(blk) && /freeMemory/.test(blk), '로컬 강제 · GPU 레인 · TTS 대기 · VRAM 반납'); }
   ok(/role="tablist"/.test(dlg) && /tts-voice-card/.test(dlg), '엔진 탭 + 목소리 카드');
   ok(!/<datalist/.test(dlg), '목소리 고르기에 선택창(datalist)을 쓰지 않는다');
   ok(!/setOutMode\(\['full', 'audio', 'visual'\]/.test(app), '옛 저장값으로 출력 방식을 되살리지 않는다');
