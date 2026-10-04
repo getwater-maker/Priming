@@ -213,11 +213,11 @@ class GeminiProvider {
  * 확장 라이브러리 목록 — GET /v1beta/voices (page_size 최대 1000 · next_page_token)
  *   근거: ai.google.dev/api/voices · 받은 id 는 speech_config 의 voice 에 그대로 넣는다(3.8 모델).
  */
-async function listVoices(key) {
+async function listVoices(key, { languageCode = 'ko-KR' } = {}) {   // 🇰🇷 기본 = 한국어 목소리만(빈 값이면 전부)
   const { fetchWithTimeout, httpError } = require('./audio-util');
   const out = []; let tok = '';
   for (let page = 0; page < 20; page++) {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/voices?page_size=1000' + (tok ? '&page_token=' + encodeURIComponent(tok) : '');
+    const url = 'https://generativelanguage.googleapis.com/v1beta/voices?page_size=1000' + (languageCode ? '&language_code=' + encodeURIComponent(languageCode) : '') + (tok ? '&page_token=' + encodeURIComponent(tok) : '');
     const res = await fetchWithTimeout(url, { headers: { 'x-goog-api-key': key } }, 30000, 'Gemini');
     if (!res.ok) throw await httpError(res, 'Gemini 목소리 목록');
     const j = await res.json();

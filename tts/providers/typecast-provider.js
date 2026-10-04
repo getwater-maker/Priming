@@ -61,7 +61,8 @@ async function listVoices(key, model = 'ssfm-v30') {
   return arr.map((v) => {
     const nm = v.voice_name && typeof v.voice_name === 'object' ? (v.voice_name.kor || v.voice_name.eng) : v.voice_name;
     const uses = Array.isArray(v.use_cases) ? v.use_cases.slice(0, 3).join(' · ') : '';
-    return { id: v.voice_id, name: nm || v.voice_id, gender: String(v.gender || '').toLowerCase(), lang: AGE[v.age] || v.age || '', desc: uses, preview: v.preview_url || '',
+    return { id: v.voice_id, name: nm || v.voice_id, gender: String(v.gender || '').toLowerCase(), lang: '', desc: [AGE[v.age] || v.age, uses].filter(Boolean).join(' · '),   // 언어 칸 아님(나이는 설명으로)
+      preview: v.preview_url || '',
       // 🙂 공식 문서엔 그림 칸이 없다 — 응답에 그림 주소 비슷한 칸이 있으면 쓴다(없으면 '')
       image: v.image_url || v.thumbnail_url || v.thumbnail || v.avatar_url || v.avatar || v.profile_image_url || v.image || '' };
   }).filter((v) => v.id);

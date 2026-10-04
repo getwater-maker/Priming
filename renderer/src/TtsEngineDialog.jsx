@@ -10,6 +10,15 @@ const media = (p, version = '') => 'media://' + encodeURIComponent(p) + (version
 const G_ICON = { male: '♂', female: '♀', neutral: '⚲' };
 const BLUE = '#2563eb';
 const SAMPLE_CHARS = 45;   // 샘플 문장 길이(요금 추정용 — main SAMPLE_TEXT 한국어와 같은 분량)
+// 🇰🇷 목소리 언어 → 한국어 이름(거르기 묶음). 'ko' · 'ko-KR' · 'ko · seoul' · '한국어' → '한국어' · 표시 없음/다국어 → '다국어'
+const LANG_KO = { ko: '한국어', en: '영어', ja: '일본어', zh: '중국어', vi: '베트남어', es: '스페인어', fr: '프랑스어', de: '독일어', it: '이탈리아어', pt: '포르투갈어', ru: '러시아어', hi: '힌디어', id: '인도네시아어', th: '태국어', tr: '튀르키예어', pl: '폴란드어', nl: '네덜란드어', ar: '아랍어' };
+function langOf(v) {
+  const raw = String((v && v.lang) || '').split(' · ')[0].trim();
+  if (!raw || raw === '다국어') return '다국어';
+  const m = /^([a-z]{2})([-_][A-Za-z]{2})?$/.exec(raw);
+  if (m) return LANG_KO[m[1]] || raw;
+  return raw.replace(/\(.*\)$/, '');   // 「영어(미국)」 → 「영어」
+}
 const usdTxt = (u) => (u == null ? '?' : u === 0 ? '무료' : u < 0.01 ? `$${u.toFixed(4)}` : `$${u.toFixed(2)}`);
 
 // 요금 추정 — main tts-engines.estimateUsd 와 같은 식(단가표는 main 이 내려준다)
@@ -56,6 +65,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       if (!r) { setMsg('설정을 읽지 못했습니다'); return; }
       setData(r); setRegion(r.region); setKrwSaved(r.krw); setCardFee(r.cardFee != null ? r.cardFee : 1.3); { const lg = {}; for (const c of r.channels) if (c.logo) lg[c.name] = c.logo; setChLogos(lg); }
       if (r.fx && r.fx.rate) setFx(r.fx);
+      api.ttsChannelAvatars({}).then((a) => {
+        if (!a || !a.avatars) return;
+        setChLogos((cur) => { const m = { ...cur }; for (const [n, v] of Object.entries(a.avatars)) if (!v.own) m[n] = v; return m; });
+      }).catch(() => {});
       api.fxUsdKrw({}).then((f) => { if (f && f.ok) setFx(f); }).catch(() => {});
       const vs = {}, fs = {}, ss = {};
       for (const e of r.engines) { if (e.voices) vs[e.id] = e.voices; fs[e.id] = e.faces || {}; ss[e.id] = e.samples || {}; }
@@ -91,6 +104,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     triedRef.current[tab] = true;
     if (tab === 'omnivoice') loadVoices('omnivoice');
     else if ((tab === 'typecast' || tab === 'elevenlabs') && hasKey(tab) && !(voices[tab] || []).length) loadVoices(tab);
+    if (tab === 'elevenlabs' && hasKey(tab) && !(voices.elevenlabs || []).some((v) => langOf(v) === '한국어')) { setElSrc('library'); if (!libVoices) loadLibrary(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, data]);
 
@@ -252,11 +266,11 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
   const isLib = tab === 'elevenlabs' && elSrc === 'library';
   const list = isLib ? (libVoices || []) : (voices[tab] || []);
-  const langs = useMemo(() => [...new Set(list.map((v) => v.lang).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')), [list]);
-  const lang = fl[tab] != null ? fl[tab] : (tab === 'mai' && langs.includes('한국어') ? '한국어' : '');
+  const langs = useMemo(() => [...new Set(list.map(langOf).filter((x) => x && x !== '다국어'))].sort((a, b) => (a === '한국어' ? -1 : b === '한국어' ? 1 : a.localeCompare(b, 'ko'))), [list]);
+  const lang = fl[tab] != null ? fl[tab] : (langs.includes('한국어') ? '한국어' : '');   // 🇰🇷 기본 = 한국어(모든 탭)
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return list.filter((v) => (!fg || v.gender === fg) && (!lang || v.lang === lang)
+    return list.filter((v) => (!fg || v.gender === fg) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
       && (!qq || [v.id, v.name, v.desc, v.lang].join(' ').toLowerCase().includes(qq)));
   }, [list, q, fg, lang]);
   // 이 목소리를 쓰는 채널(지금 고친 값 기준) — 채널끼리 목소리가 겹치는지 보이게

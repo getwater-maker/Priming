@@ -132,7 +132,7 @@ function makeWav(samples, sr = 24000) {
   r = await tc.synthesize('x', { voice: 'tc_1', model: 'ssfm-v30', language: 'ko' });
   eq([last.url, last.init.headers['X-API-KEY'], JSON.parse(last.init.body).voice_id], ['https://api.typecast.ai/v1/text-to-speech', 'tc-secret-1234', 'tc_1'], '타입캐스트 요청');
   setFetch(() => mockRes(200, null, [{ voice_id: 'tc_9', voice_name: { kor: '딜런', eng: 'Dylan' }, gender: 'male', age: 'young_adult' }]));
-  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '딜런', gender: 'male', lang: '청년', desc: '', preview: '', image: '' }], '타입캐스트 목소리 목록(카드)');
+  eq(await TC.listVoices('k'), [{ id: 'tc_9', name: '딜런', gender: 'male', lang: '', desc: '청년', preview: '', image: '' }], '타입캐스트 목소리 목록(카드)');
   setFetch(() => mockRes(200, null, [{ voice_id: 'tc_8', voice_name: 'A', thumbnail_url: 'https://x/t.png' }]));
   eq((await TC.listVoices('k'))[0].image, 'https://x/t.png', '타입캐스트 — 응답에 그림 주소가 있으면 카드 얼굴로');
   { let n = 0; const urls = [];
@@ -148,7 +148,8 @@ function makeWav(samples, sr = 24000) {
     const { listVoices: gList } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
     const L = await gList('g');
     eq(L.map((v) => v.id), ['voice_a', 'voice_b'], 'Gemini 확장 라이브러리 — 쪽 넘김');
-    eq([last.url.includes('page_token=P'), last.init.headers['x-goog-api-key'], L[0].gender, L[0].lang], [true, 'g', 'female', 'ko-KR'], 'Gemini 목록 요청·카드'); }
+    eq([last.url.includes('page_token=P'), last.init.headers['x-goog-api-key'], L[0].gender, L[0].lang], [true, 'g', 'female', 'ko-KR'], 'Gemini 목록 요청·카드');
+    ok(last.url.includes('language_code=ko-KR'), '🇰🇷 Gemini 확장 라이브러리 기본 = 한국어'); }
 
   { // 📚 보이스 라이브러리(한국어) — 찾기 · 추가
     const urls = [];
@@ -253,6 +254,15 @@ function makeWav(samples, sr = 24000) {
     { const m = /const enOnly = (\(t\) => [^\n]+);/.exec(blk); const enOnly = m && new Function('return ' + m[1])();
       eq(enOnly && enOnly('단단한 (Firm)'), 'Firm', 'Gemini 카드 설명 → 그림 프롬프트엔 영어만(「단단한」 뺌)');
       eq(enOnly && enOnly('내 복제 · middle_aged · calm'), 'middle_aged calm', 'ElevenLabs 설명도 영어만'); }
+    { // 🇰🇷 언어 묶음(화면 함수 원문 실행)
+      const la = dlg.indexOf('const LANG_KO = '); const lb = dlg.indexOf('const usdTxt', la);
+      const langOf = new Function(dlg.slice(la, lb) + '\nreturn langOf;')();
+      eq(['ko', 'ko-KR', 'ko · seoul', '한국어', '영어(미국)', 'en · american', '', '다국어'].map((x) => langOf({ lang: x })), ['한국어', '한국어', '한국어', '한국어', '영어', '영어', '다국어', '다국어'], '언어 이름 묶기(코드·억양 → 한국어 이름)');
+      ok(/langs\.includes\('한국어'\) \? '한국어'/.test(dlg), '모든 탭 언어 기본 = 한국어');
+      ok(/langOf\(v\) === '다국어'/.test(dlg), '다국어 목소리(Gemini 기본 30 등)는 한국어 거르기에도 보인다');
+      ok(/setElSrc\('library'\)/.test(dlg) && /some\(\(v\) => langOf\(v\) === '한국어'\)/.test(dlg), 'ElevenLabs — 내 목록에 한국어가 없으면 한국어 라이브러리부터'); }
+    ok(MJ.includes("ipcMain.handle('tts-channel-avatars'") && MJ.includes('ytChannelId') && MJ.includes('/youtube/v3/channels?part=snippet&id='), '🏷 채널 로고 = 연결된 유튜브 채널 그림(ytChannelId · 이름 짐작 없음)');
+    { const ia = MJ.indexOf("ipcMain.handle('tts-channel-avatars'"); ok(!/logoPath\s*:/.test(MJ.slice(ia, ia + 1200)), '유튜브 그림은 logoPath(영상 로고)를 건드리지 않는다'); }
     ok(MJ.includes("ipcMain.handle('el-shared-voices'") && MJ.includes("ipcMain.handle('el-add-shared'"), 'IPC — 라이브러리 찾기·추가');
     ok(/data-testid="el-lib"/.test(dlg) && /addFromLibrary/.test(dlg), '화면: 「🇰🇷 한국어 라이브러리」 → 고르면 추가');
     ok(/cfg\.cloud = false/.test(blk) && /\['image', 'localGpu'\]/.test(blk) && /awaitForeignTtsIdle/.test(blk) && /freeMemory/.test(blk), '로컬 강제 · GPU 레인 · TTS 대기 · VRAM 반납'); }

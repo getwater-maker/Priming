@@ -13,7 +13,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
-import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
+import TtsEngineDialog from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
@@ -3896,8 +3896,8 @@ export default function App() {
             ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio·runRelinkWork)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다. */}
         <button className="ghost" data-testid="tts-engine-btn" onClick={openTtsEngines}
           title={'채널마다 목소리를 고릅니다(OmniVoice · Gemini · MAI-Voice · 타입캐스트 · ElevenLabs).\n얼굴·샘플 듣기·요금도 여기서.\n지금 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
-          <span className="rb-ic">{ttsEngActive.face ? <Face face={ttsEngActive.face} name={ttsEngActive.vname} gender={ttsEngActive.gender} size={22} /> : '🔊'}</span>
-          {' '}<span className="rb-t" style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' }}>{ttsEngActive.vname || '채널 목소리'}</span></button>
+          {/* 🔊 음성 설정 팝업을 여는 버튼(로이 2026-10-05) — 지금 목소리는 마우스를 올리면(title) 보인다 */}
+          <span className="rb-ic">🔊</span> <span className="rb-t">음성 설정</span></button>
               </span>
               {splitBar}
             </>)}

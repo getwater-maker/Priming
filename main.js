@@ -5171,11 +5171,50 @@ function _channelsForUi() {
     .filter((p) => p && p.name && !/^__/.test(p.name))      // __ 로 시작 = 테스트가 만든 임시 채널
     .map((p) => {
       // 🏷 채널 로고(채널편집의 로고와 같은 값) — 채널 목록은 사람 얼굴이 아니라 로고를 보인다(로이 2026-10-05)
+      //   우선순위: 채널편집 로고(logoPath) → 연결된 유튜브 채널 프로필 그림(받아 둔 파일) → 없음(이름 첫 글자)
       let logo = null;
-      try { if (p.logoPath && fs.existsSync(p.logoPath)) logo = { path: p.logoPath, v: String(fs.statSync(p.logoPath).mtimeMs | 0) }; } catch {}
+      try {
+        const av = p.ytChannelId ? path.join(CH_AVATAR_DIR(), p.ytChannelId + '.jpg') : '';
+        const lp = (p.logoPath && fs.existsSync(p.logoPath)) ? p.logoPath : (av && fs.existsSync(av) ? av : '');
+        if (lp) logo = { path: lp, v: String(fs.statSync(lp).mtimeMs | 0) };
+      } catch {}
       return { name: p.name, group: p.group || '', voiceEngine: TE.channelVoice(p), ref: String(p.voiceCloneRefAudio || ''), seed: p.seed, logo };
     });
 }
+// 🏷 유튜브 채널 프로필 그림 — 채널 설정의 ytChannelId(업로드에 쓰는 정확한 연결 · ⛔ 이름으로 짐작하지 않는다)로
+//   이 PC 에 연결된 유튜브 토큰을 써서 channels.list(snippet · 1 단위) → 썸네일을 ~/.priming-maker/channel-avatars/<채널ID>.jpg 로.
+//   ⚠ logoPath(영상에 얹는 로고)는 건드리지 않는다 — 목록에 보이기만 한다.
+const CH_AVATAR_DIR = () => path.join(os.homedir(), '.priming-maker', 'channel-avatars');
+async function _ytAvatarFile(channelId, force) {
+  const f = path.join(CH_AVATAR_DIR(), channelId + '.jpg');
+  if (!force && fs.existsSync(f)) return { ok: true, path: f, cached: true };
+  const YT = require('./core/youtube-upload');
+  const t = await YT.accessToken(channelId);
+  if (!t.ok) return { ok: false, error: t.error };
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}`, { headers: { Authorization: `Bearer ${t.token}` } });
+  const j = await r.json().catch(() => ({}));
+  const th = j && j.items && j.items[0] && j.items[0].snippet && j.items[0].snippet.thumbnails;
+  const url = th && ((th.high || th.medium || th.default || {}).url);
+  if (!url) return { ok: false, error: `채널 그림을 찾지 못했습니다(${r.status})` };
+  const img = await fetch(url);
+  if (!img.ok) return { ok: false, error: `그림 받기 실패(${img.status})` };
+  fs.mkdirSync(CH_AVATAR_DIR(), { recursive: true });
+  fs.writeFileSync(f, Buffer.from(await img.arrayBuffer()));
+  return { ok: true, path: f };
+}
+ipcMain.handle('tts-channel-avatars', async (_e, { force } = {}) => {
+  const out = {}; const errs = [];
+  for (const p of require('./tts/preset-store').loadAll()) {
+    if (!p || !p.ytChannelId || /^__/.test(p.name)) continue;
+    try {
+      const r = await _ytAvatarFile(p.ytChannelId, !!force);
+      if (r.ok) out[p.name] = { path: r.path, v: String(fs.statSync(r.path).mtimeMs | 0), yt: true, own: !!(p.logoPath && fs.existsSync(p.logoPath)) };
+      else errs.push(`${p.name}: ${r.error}`);
+    } catch (e) { errs.push(`${p.name}: ${e.message}`); }
+  }
+  if (errs.length) log(`🏷 유튜브 채널 그림 — 못 받은 채널: ${errs.join(' / ')}`);
+  return { ok: true, avatars: out, errors: errs };
+});
 // 🏷 채널 로고 고르기 — 채널편집 🏷 로고와 **같은 칸**(logoPath)에 저장한다. 영상에 얹기(logoOn)는 건드리지 않는다.
 ipcMain.handle('tts-channel-logo', async (_e, { name } = {}) => {
   try {
