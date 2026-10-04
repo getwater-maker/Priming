@@ -125,7 +125,9 @@ console.log('[4] 렌더러 원문 — common 에 채널·배속·AI고지를 싣
 console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드인지 한 줄로 남는다');
 {
   const bs = String.fromCharCode(92);
-  const voiceLabel = new Function('path', extractFn(MAIN, 'voiceLabel') + '\nreturn voiceLabel;')(path);
+  // 🔊 음성 엔진(v0.6.67) — OmniVoice 로 고정한 가짜를 넘긴다(로이 설정을 읽지 않게). 유료 엔진 표기는 ⓛ 에서.
+  const TE_STUB = { id: 'omnivoice', resolveEngine(e) { return this.id === 'omnivoice' ? (e || 'omnivoice') : this.id; }, label: (id) => `엔진 ${id}` };
+  const voiceLabel = new Function('path', 'TtsEngines', extractFn(MAIN, 'voiceLabel') + '\nreturn voiceLabel;')(path, TE_STUB);
   eq(voiceLabel({ name: '06_고전서재', voiceCloneRefAudio: 'srv:#05_득수_낭독2', seed: 40469 }),
     '채널 「06_고전서재」 · 목소리 ☁ #05_득수_낭독2 · 시드 40469', 'ⓐ 서버 목소리는 ☁ 로 표기 + 채널·시드');
   eq(voiceLabel({ name: '출판', voiceCloneRefAudio: ['C:', 'x', 'ref-audio', '02_저음 2단계.wav'].join(bs), seed: 5697 }),
@@ -141,6 +143,9 @@ console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드�
   eq((MAIN.match(/voiceLabel\(/g) || []).length - 1, 7, 'ⓘ voiceLabel 을 쓰는 곳 7군데(1단계·전체TTS·그룹TTS 2 ·도입부 · 🧩 클립 목소리 수정 2 — v0.5.94)');
   ok(/🎙 1단계 — 음성\(TTS\) 일괄 변환… \(\$\{voiceLabel\(preset\)\}/.test(MAIN), 'ⓙ 1단계가 이 함수를 쓴다');
   ok(/⚠ 채널을 찾지 못했습니다/.test(MAIN), 'ⓚ 채널을 못 찾으면 그 사실이 로그에 남는다');
+  TE_STUB.id = 'typecast';
+  eq(voiceLabel({ name: 'A', voiceCloneRefAudio: 'srv:a', seed: 1 }), '채널 「A」 · 🔊 엔진 typecast', 'ⓛ 🔊 유료 엔진을 고르면 참조음성 대신 엔진·목소리를 적는다');
+  TE_STUB.id = 'omnivoice';
 }
 
 console.log('[6] resolvePreset 원문 실행 — **이름이 낡은 전역을 이긴다**');

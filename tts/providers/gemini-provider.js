@@ -34,7 +34,7 @@ class GeminiProvider {
     this.ready = false;
     this.apiKey = null;
     this.voice = opts.voice || 'Kore';
-    this.model = opts.model || 'gemini-3.1-flash-tts-preview';
+    this.model = opts.model || 'gemini-3.8-flash-tts';
   }
 
   async init() {
@@ -93,57 +93,74 @@ class GeminiProvider {
     }
 
     const voice = opts.voice || this.voice;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+    const model = opts.model || this.model;
+    // 🆕 Gemini 3.8 TTS 는 Interactions API(/v1beta/interactions)만 받는다(generateContent 예시 없음 · 2026-10 공식 문서).
+    //   구판(3.1·2.5)은 지금까지의 generateContent 그대로.
+    const pcmOrWav = /^gemini-3\.8/.test(model)
+      ? await this._synthInteractions(text, voice, model, opts.style)
+      : await this._synthGenerate(text, voice, model);
+    _gemini429Streak = 0;  // 성공했으니 streak 초기화
+    Usage.bump('tts_ok');
+    const { isWav, wavResult } = require('./audio-util');
+    const wavBuffer = isWav(pcmOrWav) ? pcmOrWav : this._pcmToWav(pcmOrWav, 24000);
+    // 🔑 빈 음성은 던진다(옛 `Math.max(0.5, …)` 바닥값이 빈 음성을 0.5초 정상 음성으로 위장시키던 것과 같은 계열 — OmniVoice 사고).
+    return wavResult(wavBuffer, 'gemini', 'Gemini');
+  }
 
+  _on429() {
+    Usage.bump('tts_429');
+    _gemini429Streak++;
+    const breakerMs = (_gemini429Streak >= 2) ? LONG_BREAKER_MS : SHORT_BREAKER_MS;
+    _gemini429Until = Date.now() + breakerMs;
+  }
+
+  async _synthGenerate(text, voice, model) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
     const body = {
-      contents: [{
-        parts: [{ text: String(text) }],
-      }],
+      contents: [{ parts: [{ text: String(text) }] }],
       generationConfig: {
         responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
       },
     };
-
     // quietPostJson — fetch 대신 Node http 사용 (DevTools 콘솔에 빨간 에러 안 찍힘)
     const response = await quietPostJson(url, body, { timeoutMs: 60000 });
-
     if (!response.ok) {
-      if (response.status === 429) {
-        Usage.bump('tts_429');
-        _gemini429Streak++;
-        const breakerMs = (_gemini429Streak >= 2) ? LONG_BREAKER_MS : SHORT_BREAKER_MS;
-        _gemini429Until = Date.now() + breakerMs;
-      }
+      if (response.status === 429) this._on429();
       const errText = await response.text().catch(() => '');
       throw new Error(`Gemini TTS 실패 (${response.status}): ${errText.substring(0, 200)}`);
     }
-
     const json = await response.json();
-    _gemini429Streak = 0;  // 성공했으니 streak 초기화
     const audioData = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) {
-      throw new Error('Gemini 응답에 오디오 데이터 없음');
-    }
+    if (!audioData) throw new Error('Gemini 응답에 오디오 데이터 없음');
+    return Buffer.from(audioData, 'base64');
+  }
 
-    Usage.bump('tts_ok');
-
-    const pcmBuffer = Buffer.from(audioData, 'base64');
-    const wavBuffer = this._pcmToWav(pcmBuffer, 24000);
-    const durationSec = Math.max(0.5, pcmBuffer.length / (24000 * 2));
-
-    // 주의: 인터페이스 일관성을 위해 mp3Buffer 키 사용. 실제 데이터는 WAV.
-    // format: 'wav' 표시로 호출자가 확장자 분기 가능.
-    return {
-      mp3Buffer: wavBuffer,
-      durationSec,
-      providerUsed: 'gemini',
-      format: 'wav',
+  async _synthInteractions(text, voice, model, style) {
+    const { fetchWithTimeout, httpError } = require('./audio-util');
+    const part = { type: 'text', text: String(text) };
+    if (style) part.annotations = [{ type: 'speech_metadata', style: String(style) }];
+    const body = {
+      model,
+      input: [{ type: 'user_input', content: [part] }],
+      response_format: { type: 'audio' },
+      generation_config: { speech_config: [{ voice }] },
     };
+    const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: { 'x-goog-api-key': this.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 90000, 'Gemini');
+    if (!res.ok) { if (res.status === 429) this._on429(); throw await httpError(res, 'Gemini TTS'); }
+    const json = await res.json();
+    // 오디오 = steps[] 중 model_output 의 content[] 중 type 'audio' 의 data(base64)
+    let data = null;
+    for (const st of (json && json.steps) || []) {
+      for (const c of (st && st.content) || []) if (c && c.type === 'audio' && c.data) { data = c.data; break; }
+      if (data) break;
+    }
+    if (!data) throw new Error('Gemini 응답에 오디오 데이터 없음');
+    return Buffer.from(data, 'base64');
   }
 
   async stop() {

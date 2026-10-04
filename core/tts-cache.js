@@ -50,6 +50,9 @@ function keyFor(text, sf, opts = {}) {
   //      무음을 안 쓰는 채널의 기존 캐시 2만여 개까지 통째로 무효화된다. 쓰는 채널만 새 키를 갖는다.
   const pd = Number(opts.padSec);
   if (isFinite(pd) && pd > 0) o.pd = pd;
+  // 🔊 유료 API 엔진의 정체성(모델·목소리·말투 — tts-engines.synthExtra 의 engineSig).
+  //   🔑 OmniVoice 는 이 필드가 없다 → 기존 캐시 키 그대로(무음 pd 와 같은 원칙).
+  if (opts.engineSig) o.es = String(opts.engineSig);
   const sig = JSON.stringify(o);
   return crypto.createHash('sha1').update(sig).digest('hex');
 }

@@ -128,21 +128,23 @@ function stage2() {
   ok(/ipcMain\.handle\('import-vrew-audio'/.test(MAIN), 'main IPC 존재');
   ok(/probeDur: \(f\) => media\.getMediaDuration\(f\)/.test(MAIN), '🔴 길이를 실측한다(파일 크기 추정은 4배까지 틀린다)');
   ok(/const \[outMode, setOutMode\] = useState\('full'\)/.test(APP), '렌더러 state 기본값 = 전체');
-  ok((APP.match(/outMode/g) || []).length >= 8, '렌더러가 outMode 를 실제로 배선한다');
+  ok((APP.match(/outMode/g) || []).length >= 5, '렌더러가 outMode 를 실제로 배선한다(v0.6.67 — 고르기 칸이 빠져 8→6, 늘 전체로 보낸다)');
   ok(/aiNotice, outMode: effOutMode\(\) \}/.test(APP), '큐(common)에 outMode 를 실어 보낸다');
   ok(!/💾 \.vrew<\/button>/.test(APP), '💾 .vrew 버튼은 없다 — ⚡ 만들기로 통일(2026-09-24)');
   ok(/outMode: effOutMode\(\),  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다(화이트보드는 늘 전체)');
   ok(/_needImg = \(om === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');
   // v0.5.43 리본 큰 버튼 — 아이콘·글자가 span 둘로 나뉘었다(onClick 으로 찾는다)
-  ok(/onClick=\{runImportVrewAudio\}><span className="rb-ic">📥<\/span> <span className="rb-t">Vrew 음성<\/span><\/button>/.test(APP), '작업바에 「📥 Vrew 음성」 버튼');
-  ok(/<option value="audio">🎤 음성만<\/option>/.test(APP) && /<option value="visual">🖼 화면만<\/option>/.test(APP), '출력 select 3항목');
-  ok((APP.match(/<option value="visual">/g) || []).length === 1, '출력 select 는 **한 곳**만(진입점 이중화 금지)');
+  // v0.6.67 — 「출력」 고르기·「📥 Vrew 음성」·「🔗 다시 연결」 버튼은 화면에서 뺐다(로이 2026-10-04 · 그 자리 = 🔊 음성 엔진).
+  //   main 의 출력 방식·가져오기 코드는 그대로 두었다(위 단언들) — 화면에서만 들어갈 길이 없다.
+  ok(!/onClick=\{runImportVrewAudio\}/.test(APP), '작업바에 「📥 Vrew 음성」 버튼이 없다(v0.6.67)');
+  ok((APP.match(/<option value="visual">/g) || []).length === 0, '출력 select 가 없다(v0.6.67 — 늘 전체)');
+  ok(/data-testid="tts-engine-btn"/.test(APP), '그 자리에 🔊 음성 엔진 버튼');
 
   // 번들 반영 — 소스만 고치고 빌드를 잊으면 화면은 옛것이다
   try {
     const dist = path.join(ROOT, 'renderer', 'dist', 'assets');
     const js = fs.readdirSync(dist).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(dist, f), 'utf8')).join('');
-    ok(/Vrew 음성/.test(js), '빌드된 번들에 새 UI 가 들어있다(vite build 를 돌렸다)');
+    ok(/tts-engine-btn/.test(js), '빌드된 번들에 새 UI 가 들어있다(vite build 를 돌렸다)');
   } catch (_) { ok(false, '번들을 읽을 수 없다'); }
 
   stage3();

@@ -117,6 +117,12 @@ contextBridge.exposeInMainWorld('api', {
   removePreset: (args) => ipcRenderer.invoke('remove-preset', args),
   getGeminiKey: () => ipcRenderer.invoke('get-gemini-key'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
+  // 🔊 음성 엔진(헤더 팝업) — OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs
+  ttsEnginesGet: () => ipcRenderer.invoke('tts-engines-get'),
+  ttsEnginesSave: (a) => ipcRenderer.invoke('tts-engines-save', a),
+  ttsEngineVoices: (a) => ipcRenderer.invoke('tts-engine-voices', a),
+  ttsEngineTest: (a) => ipcRenderer.invoke('tts-engine-test', a),
+  ttsEngineOpenKey: (id) => ipcRenderer.invoke('tts-engine-open-key', id),
   getXaiKey: () => ipcRenderer.invoke('get-xai-key'),
   setXaiKey: (key) => ipcRenderer.invoke('set-xai-key', key),
   getTtsServers: () => ipcRenderer.invoke('get-tts-servers'),

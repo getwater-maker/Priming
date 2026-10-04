@@ -567,6 +567,9 @@ export default function App() {
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
+  // 🔊 음성 엔진 팝업(v0.6.67) — null = 닫힘 · { active, engines, keys, draft:{active, cfg, keys}, voices, msg, busy, open }
+  const [ttsEng, setTtsEng] = useState(null);
+  const [ttsEngActive, setTtsEngActive] = useState({ id: 'omnivoice', label: 'OmniVoice' }); // 헤더 버튼 표시
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
@@ -824,7 +827,7 @@ export default function App() {
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
-    if (s.outMode != null) setOutMode(['full', 'audio', 'visual'].includes(s.outMode) ? s.outMode : 'full');
+    // 「출력」(전체/음성만/화면만) 고르기는 v0.6.67 에 화면에서 뺐다(로이 2026-10-04) — 옛 저장값이 「화면만」이어도 늘 전체로 만든다.
     if (s.outTarget != null) setOutTarget(normOutTargetUi(s.outTarget));
   }
   async function openScript() {
@@ -1698,6 +1701,58 @@ export default function App() {
     } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
   // Grok API(비디오) xAI 키
+  // ─── 🔊 음성 엔진 팝업 ───
+  async function refreshTtsEngActive() {
+    try {
+      const r = await api.ttsEnginesGet();
+      const e = r && (r.engines || []).find((x) => x.id === r.active);
+      if (e) setTtsEngActive({ id: e.id, label: e.id === 'omnivoice' ? 'OmniVoice' : e.label.replace(/ TTS$/, '') });
+      return r;
+    } catch { return null; }
+  }
+  useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  async function openTtsEngines() {
+    const r = await refreshTtsEngActive();
+    if (!r) { setStatus('음성 엔진 설정을 읽지 못했습니다'); return; }
+    const cfg = {}; for (const e of r.engines) cfg[e.id] = { ...(e.cfg || {}) };
+    const voices = {}; for (const e of r.engines) if (e.voices) voices[e.id] = e.voices;
+    setTtsEng({ ...r, draft: { active: r.active, cfg, keys: {} }, voices, msg: '', busy: '', open: r.active });
+  }
+  const ttsEngSet = (fn) => setTtsEng((t) => (t ? fn(t) : t));
+  const ttsEngCfg = (id, patch) => ttsEngSet((t) => ({ ...t, draft: { ...t.draft, cfg: { ...t.draft.cfg, [id]: { ...(t.draft.cfg[id] || {}), ...patch } } } }));
+  const ttsEngKey = (id, patch) => ttsEngSet((t) => ({ ...t, draft: { ...t.draft, keys: { ...t.draft.keys, [id]: patch } } }));
+  // 설정·키 저장. withActive=false 면 「고른 엔진」은 그대로 두고 값만(🔈 시험 듣기 — 고르지 않은 엔진도 들어 볼 수 있게).
+  async function saveTtsEngines(close, withActive = true) {
+    const t = ttsEng; if (!t) return false;
+    const d = t.draft;
+    const sel = t.engines.find((e) => e.id === d.active);
+    if (withActive && sel && sel.paid) {
+      const kd = d.keys[sel.id] || {};
+      const keyed = (t.keys[sel.id] && t.keys[sel.id].has && !kd.clear) || !!String(kd.key || '').trim();
+      if (!keyed) { ttsEngSet((x) => ({ ...x, msg: `⚠ ${sel.label} 의 API 키를 넣어야 이 엔진으로 만들 수 있습니다` })); return false; }
+      if (!String((d.cfg[sel.id] || {}).voice || '').trim()) { ttsEngSet((x) => ({ ...x, msg: `⚠ ${sel.label} 의 목소리를 고르세요` })); return false; }
+    }
+    const r = await api.ttsEnginesSave({ active: withActive ? d.active : t.active, cfg: d.cfg, keys: d.keys });
+    if (!r || !r.ok) { ttsEngSet((x) => ({ ...x, msg: '❌ 저장 실패: ' + ((r && r.error) || '') })); return false; }
+    const fresh = withActive ? await refreshTtsEngActive() : await api.ttsEnginesGet();
+    if (close) { setTtsEng(null); setStatus(`🔊 음성 엔진: ${sel ? sel.label : d.active}`); }
+    else if (fresh) ttsEngSet((x) => ({ ...x, keys: fresh.keys, draft: { ...x.draft, keys: {} } }));
+    return true;
+  }
+  async function loadTtsVoices(id) {
+    const d = ttsEng && ttsEng.draft;
+    ttsEngSet((t) => ({ ...t, busy: 'voices:' + id, msg: '' }));
+    const r = await api.ttsEngineVoices({ id, key: (d && d.keys[id] && d.keys[id].key) || '', model: d && d.cfg[id] && d.cfg[id].model });
+    ttsEngSet((t) => ({ ...t, busy: '', voices: r && r.ok ? { ...t.voices, [id]: r.voices } : t.voices, msg: r && r.ok ? `✅ 목소리 ${r.voices.length}개를 불러왔습니다 — 목소리 칸을 눌러 고르세요` : `❌ ${(r && r.error) || '불러오기 실패'}` }));
+  }
+  async function testTtsEngine(id) {
+    // 시험 듣기는 **저장된 값**으로 만든다 → 먼저 값만 저장(고른 엔진은 그대로 · 창은 닫지 않음)
+    ttsEngSet((t) => ({ ...t, busy: 'test:' + id, msg: '🔈 만드는 중…' }));
+    if (!(await saveTtsEngines(false, false))) { ttsEngSet((t) => ({ ...t, busy: '' })); return; }
+    const r = await api.ttsEngineTest({ id });
+    ttsEngSet((t) => ({ ...t, busy: '', msg: r && r.ok ? `🔈 ${r.sec.toFixed(1)}초 — 재생 중` : `❌ ${(r && r.error) || '실패'}` }));
+    if (r && r.ok) { try { new Audio(media(r.path, String(Date.now()))).play(); } catch {} }
+  }
   async function openOllama() {
     try {
       const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
@@ -3158,6 +3213,7 @@ export default function App() {
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
       if (ollamaOpen) { setOllamaOpen(false); return; }
+      if (ttsEng) { setTtsEng(null); return; }
       if (vdOpen) { closeVoiceDesign(); return; }
       if (dictOpen) { setDictOpen(false); return; }
       if (styleEditOpen) { setStyleEditOpen(false); return; }
@@ -3168,7 +3224,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
   function cursorInfo() {
@@ -3236,7 +3292,7 @@ export default function App() {
     });
     setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + l.n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
+  const anyModal = !!(preview || nameAsk || capDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -3869,21 +3925,11 @@ export default function App() {
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
           </span>
               <span className="hgroup rb-extra">
-        <label className="chk" title="무엇을 넣어 .vrew 를 만들지 정합니다.&#10;· 전체 — 음성 + 화면 (기본)&#10;· 🎤 음성만 — 이미지·비디오를 만들지 않습니다(그 단계를 건너뜁니다)&#10;· 🖼 화면만 — 음성을 만들지 않습니다(TTS 단계를 건너뛰고, 음성 자리는 무음). Vrew 에서 AI 목소리를 입힌 뒤 「📥 Vrew 음성」으로 되가져오세요."
-          style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          출력
-          <select style={{ width: 'auto' }} value={outMode} onChange={(e) => setOutMode(e.target.value)}>
-            <option value="full">전체</option>
-            <option value="audio">🎤 음성만</option>
-            <option value="visual">🖼 화면만</option>
-          </select>
-        </label>
-        <button className="ghost" disabled={!loaded}
-          title="Vrew 에서 AI 목소리를 입혀 저장한 .vrew 를 골라, 그 음성만 이 대본에 물려줍니다.&#10;(.vrew 는 읽기만 하고 고치지 않습니다. 자막이 대본과 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.)"
-          onClick={runImportVrewAudio}><span className="rb-ic">📥</span> <span className="rb-t">Vrew 음성</span></button>
-        <button className="ghost" disabled={!loaded} data-testid="relink-work"
-          title="출력 폴더에 파일은 남아 있는데 화면에 그림·영상·음성이 비어 있을 때 — 다시 연결합니다.&#10;(그림·영상 = 그룹 번호 · 음성 = 출력 폴더 .vrew 의 자막 글자로 맞춤 · 이미 연결된 것은 그대로)"
-          onClick={runRelinkWork}><span className="rb-ic">🔗</span> <span className="rb-t">다시 연결</span></button>
+        {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」·「🔗 다시 연결」 자리(로이 2026-10-04 — 더는 안 쓴다).
+            ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio·runRelinkWork)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다. */}
+        <button className="ghost" data-testid="tts-engine-btn" onClick={openTtsEngines}
+          title={'TTS 를 어느 엔진으로 만들지 고릅니다(대본 큐 전체 공통).\n· OmniVoice — 내 서버 · 채널 참조음성 그대로\n· Gemini · MAI-Voice · 타입캐스트 · ElevenLabs — API 키를 넣어 유료로 사용\n지금: ' + ttsEngActive.label}>
+          <span className="rb-ic">🔊</span> <span className="rb-t">{ttsEngActive.id === 'omnivoice' ? '음성 엔진' : ttsEngActive.label}</span></button>
               </span>
               {splitBar}
             </>)}
@@ -4772,6 +4818,70 @@ export default function App() {
             </>) : null}
             <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy || vdPreparing ? '⏳ ' : ''}{vdStatus}</div>
             <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
+          </div>
+        </div>
+      )}
+      {ttsEng && (
+        <div className="modal-bg show" data-testid="tts-engine-dlg">
+          <div className="modal-card wide" style={{ maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
+            <h3>🔊 음성 엔진 — TTS 를 무엇으로 만들까</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>고른 엔진이 <b>대본 큐 전체</b>의 음성을 만듭니다(헤더 공통). <b>OmniVoice</b> 는 지금처럼 채널의 참조음성·시드로, <b>유료 엔진</b>은 여기서 고른 모델·목소리로 읽습니다. 배속·음량 정규화·문장무음·발음사전은 어느 엔진이든 똑같이 적용됩니다.</div>
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+              {ttsEng.engines.map((e) => {
+                const d = ttsEng.draft; const c = d.cfg[e.id] || {}; const k = ttsEng.keys[e.id] || {}; const kd = d.keys[e.id] || {};
+                const on = d.active === e.id; const open = ttsEng.open === e.id || on;
+                const voices = ttsEng.voices[e.id] || e.voices || [];
+                const vSel = voices.find((v) => v.id === c.voice);
+                return (
+                  <div key={e.id} data-testid={'tts-eng-' + e.id} style={{ border: '1px solid ' + (on ? '#2563eb' : 'var(--line)'), borderRadius: 8, padding: '8px 10px', marginBottom: 8, background: on ? 'rgba(37,99,235,0.06)' : 'transparent' }}>
+                    <div className="frow" style={{ alignItems: 'center', gap: 8, margin: 0 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, cursor: 'pointer', fontWeight: 600 }}>
+                        <input type="radio" name="tts-engine" checked={on} onChange={() => ttsEngSet((t) => ({ ...t, open: e.id, msg: '', draft: { ...t.draft, active: e.id } }))} />
+                        {e.label}
+                        <span className="meta" style={{ fontWeight: 400 }}>{e.sub}</span>
+                        {e.paid && <span className="meta" style={{ fontWeight: 400, color: k.has && !kd.clear ? '#16a34a' : '#b45309' }}>{kd.clear ? '🔑 지울 예정' : k.has ? `🔑 키 있음(…${k.tail})` : '🔑 키 없음'}</span>}
+                      </label>
+                      {!open && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => ttsEngSet((t) => ({ ...t, open: e.id }))}>설정 ▾</button>}
+                      <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!!ttsEng.busy} onClick={() => testTtsEngine(e.id)}>{ttsEng.busy === 'test:' + e.id ? '⏳ 만드는 중' : '🔈 시험 듣기'}</button>
+                    </div>
+                    {open && (<div style={{ marginTop: 6 }}>
+                      {e.note && <div className="meta" style={{ marginBottom: 6 }}>{e.note}</div>}
+                      {e.paid && (<div className="frow"><label>{e.keyLabel}</label>
+                        <input type="password" autoComplete="off" placeholder={k.has ? `저장됨(…${k.tail}) — 바꿀 때만 입력` : 'API 키 붙여넣기'} value={kd.key || ''} onChange={(ev) => ttsEngKey(e.id, { key: ev.target.value })} />
+                        {k.has && <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 키를 지웁니다(「저장」을 누르면 반영)" onClick={() => ttsEngKey(e.id, { clear: true })}>키 지우기</button>}
+                        {e.keyUrl && <button className="ghost" style={{ flex: '0 0 auto' }} title={'키 발급 페이지 — ' + e.keyUrl} onClick={() => api.ttsEngineOpenKey(e.id)}>발급 ↗</button>}
+                      </div>)}
+                      {e.regions && (<div className="frow"><label>지역</label>
+                        <select value={c.region || e.defaultRegion} onChange={(ev) => ttsEngCfg(e.id, { region: ev.target.value })}>{e.regions.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+                        <span className="meta">Speech 리소스를 만든 지역과 같아야 합니다</span></div>)}
+                      {e.models && (<div className="frow"><label>모델</label>
+                        <select value={c.model || e.models[0].id} onChange={(ev) => ttsEngCfg(e.id, { model: ev.target.value })}>{e.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>)}
+                      {e.paid && (<div className="frow"><label>목소리</label>
+                        <input list={'tts-voices-' + e.id} placeholder={e.listVoices ? '「⬇ 목소리 불러오기」 뒤 고르기' : '목록에서 고르거나 이름 입력'} value={c.voice || ''} onChange={(ev) => ttsEngCfg(e.id, { voice: ev.target.value.trim() })} />
+                        <datalist id={'tts-voices-' + e.id}>{voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</datalist>
+                        {e.listVoices && <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!!ttsEng.busy} onClick={() => loadTtsVoices(e.id)}>{ttsEng.busy === 'voices:' + e.id ? '⏳' : '⬇ 목소리 불러오기'}</button>}
+                      </div>)}
+                      {e.paid && vSel && <div className="meta" style={{ marginBottom: 4 }}>→ {vSel.name}</div>}
+                      {e.styles && (<div className="frow"><label>말투(style)</label>
+                        <select value={c.style || ''} onChange={(ev) => ttsEngCfg(e.id, { style: ev.target.value })}>{e.styles.map((x) => <option key={x} value={x}>{x || '기본'}</option>)}</select>
+                        <span className="meta">목소리마다 되는 말투가 다릅니다</span></div>)}
+                      {e.hasStyle && (<div className="frow"><label>말투 지시</label>
+                        <input placeholder="예: 차분하고 따뜻한 다큐멘터리 내레이션 (3.8 모델만)" value={c.style || ''} onChange={(ev) => ttsEngCfg(e.id, { style: ev.target.value })} /></div>)}
+                      {e.emotions && (<div className="frow"><label>감정</label>
+                        <select value={c.emotion || 'normal'} onChange={(ev) => ttsEngCfg(e.id, { emotion: ev.target.value })}>{e.emotions.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>)}
+                      {e.id === 'elevenlabs' && (<div className="frow"><label>안정성</label>
+                        <input type="number" min="0" max="1" step="0.05" style={{ width: 70 }} placeholder="0.5" value={c.stability != null ? c.stability : ''} onChange={(ev) => ttsEngCfg(e.id, { stability: ev.target.value })} />
+                        <span className="meta">유사도</span>
+                        <input type="number" min="0" max="1" step="0.05" style={{ width: 70 }} placeholder="0.75" value={c.similarity != null ? c.similarity : ''} onChange={(ev) => ttsEngCfg(e.id, { similarity: ev.target.value })} />
+                        <span className="meta">비우면 기본값</span></div>)}
+                    </div>)}
+                  </div>
+                );
+              })}
+            </div>
+            {ttsEng.msg && <div className="meta" data-testid="tts-eng-msg" style={{ margin: '6px 0', fontWeight: 600 }}>{ttsEng.msg}</div>}
+            <div className="meta">💡 유료 엔진은 문장마다 요금이 듭니다. 음성 캐시는 엔진·모델·목소리별로 따로라 같은 문장을 다시 만들 땐 다시 내지 않습니다. 「🔈 시험 듣기」는 입력한 값을 먼저 저장합니다.</div>
+            <div className="mbtns"><button data-testid="tts-eng-save" onClick={() => saveTtsEngines(true)}>저장</button><button className="ghost" onClick={() => setTtsEng(null)}>닫기</button></div>
           </div>
         </div>
       )}

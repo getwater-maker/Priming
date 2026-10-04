@@ -18,6 +18,7 @@ const MediaCache = require('./media-cache');
 const { buildVrew } = require('../vrew/vrew-builder');
 const presetStore = require('../tts/preset-store');
 const { getInstance: getTTS } = require('../tts/tts-manager');
+const TtsEngines = require('../tts/tts-engines'); // 🔊 헤더 「음성 엔진」 — 유료 API 엔진 선택(v0.6.67)
 
 const AudioNorm = require('./audio-normalize');
 let ffmpegPath = null;
@@ -152,12 +153,15 @@ function listPresets() {
 //   한 번 실패했다고 대본 하나를 통째로 스킵하지 않도록 몇 초 간격으로 재시도한 뒤에만 미가동으로 판정한다.
 async function makeTtsManager(logger, engine, opts = {}) {
   const log = logger || (() => {});
+  // 🔊 헤더 「음성 엔진」에서 유료 API 를 골랐으면 그 엔진으로(채널 엔진보다 우선) — TtsEngines.resolveEngine 한 곳.
+  engine = TtsEngines.resolveEngine(engine);
   const mgr = getTTS({ logger: log });
   await mgr.start();
   // start()는 omnivoice 연결을 await하지 않음 → refreshProvider로 완료 대기
   let ok = await mgr.refreshProvider(engine);
   // 원격 OmniVoice 는 유휴 후 첫 요청에 모델을 재로딩(콜드스타트 15~40초)할 수 있어, 그 창을 넘기도록 넉넉히 재시도.
-  const retries = opts.retries != null ? opts.retries : 6;      // gemini(키기반)는 사실상 즉시 성공/실패
+  //   키 기반 API 엔진은 키가 있으면 즉시 성공, 없으면 기다려도 소용없다 → 재시도하지 않는다.
+  const retries = opts.retries != null ? opts.retries : (engine === 'omnivoice' ? 6 : 0);
   const delayMs = opts.retryDelayMs != null ? opts.retryDelayMs : 6000; // 6회×6초 ≈ 36초 + 타임아웃 → 모델 로딩 견딤
   for (let i = 0; !ok && i < retries; i++) {
     log(`[TTS] '${engine}' 연결 실패 — ${Math.round(delayMs / 1000)}초 후 재시도 (${i + 1}/${retries}, 서버 부하/모델 로딩 대기)`);
@@ -311,7 +315,17 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       })(),
     };
   };
-  const synthOpts = {
+  // 🔊 유료 API 엔진(헤더 「음성 엔진」) — 채널의 참조음성·instruct·cfg 는 OmniVoice 전용이라 싣지 않는다.
+  //   🔑 OmniVoice 면 engExtra=null → 아래 synthOpts 는 **옛 것과 한 글자도 같다**(캐시 키 불변).
+  const engineId = TtsEngines.resolveEngine(preset.engine);
+  const engExtra = TtsEngines.synthExtra(engineId);
+  const synthOpts = engExtra ? {
+    provider: engineId,
+    ...engExtra,
+    speed: 1.0,
+    language: preset.language,
+    seed: preset.seed,
+  } : {
     provider: preset.engine,
     ...voiceOpts(preset.voiceCloneRefAudio, preset.voiceCloneRefText),
     instruct: preset.instruct || undefined,
@@ -321,6 +335,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     language: preset.language,
     seed: preset.seed,
   };
+  if (engExtra && onLine) onLine(`🔊 음성 엔진 — ${TtsEngines.label(engineId)} (채널 참조음성 대신)`);
   // 🎭 화자별 목소리 — 채널 `preset.speakers`(이름 → 참조음성). 연결 안 된 화자는 채널 기본 목소리로 읽고 알린다.
   //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
   const spkMap = speakerVoiceMap(preset);
@@ -328,6 +343,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   const optsForVoice = (s) => {
     const name = s && s.speaker;
     if (!name) return synthOpts;
+    if (engExtra) return synthOpts;   // 🔊 유료 엔진 — 화자 목소리(참조음성)는 OmniVoice 전용 → 한 목소리로 읽는다(아래 로그)
     if (!spkOpts.has(name)) spkOpts.set(name, spkMap[name] ? { ...synthOpts, ...voiceOpts(spkMap[name], null) } : synthOpts);
     return spkOpts.get(name);
   };
@@ -351,7 +367,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       const ok = used.filter((n) => spkMap[n]).map((n) => `${n} → ${lab(spkMap[n])}`);
       const miss = used.filter((n) => !spkMap[n]);
       onLine(`🎭 화자 ${used.length}명${ok.length ? ' — ' + ok.join(' · ') : ''}`);
-      if (miss.length) onLine(`⚠ 목소리를 연결하지 않은 화자: ${miss.join(', ')} — 채널 기본 목소리로 읽습니다(⚙ 채널편집 → 🎙 음성 → 「화자별 목소리」)`);
+      if (engExtra) onLine(`⚠ 🔊 ${TtsEngines.byId(engineId).label} 는 화자별 목소리(참조음성)를 쓰지 않습니다 — 모든 화자를 「${engExtra.voice}」 하나로 읽습니다`);
+      else if (miss.length) onLine(`⚠ 목소리를 연결하지 않은 화자: ${miss.join(', ')} — 채널 기본 목소리로 읽습니다(⚙ 채널편집 → 🎙 음성 → 「화자별 목소리」)`);
     }
   }
   // 🔑 캐시 키가 "합성될 최종 문자열" 기준이므로, 루프 전에 발음사전을 서버와 한 번 맞춘다.

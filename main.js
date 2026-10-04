@@ -7,6 +7,7 @@ const os = require('os');
 const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const P = require('./core/pipeline');
+const TtsEngines = require('./tts/tts-engines'); // 🔊 헤더 「음성 엔진」(v0.6.67) — 유료 API 엔진 선택
 const { getModeProfile } = require('./core/mode-profiles');
 const VSel = require('./core/video-select');   // 🎬 영상 대상 방식(홀수·짝수…) — 영상 대상 판정은 이 모듈 한 곳
 
@@ -168,6 +169,9 @@ function resolvePreset(presetName) {
 // 채널이 실제로 쓰는 목소리를 사람이 읽는 한 줄로 — 「어느 목소리로 만들었나」를 로그만 보고 알 수 있게.
 function voiceLabel(preset) {
   if (!preset) return '⚠ 채널 없음';
+  // 🔊 헤더 「음성 엔진」에서 유료 API 를 골랐으면 그 엔진·목소리가 실제로 읽는다(채널 참조음성은 안 쓴다)
+  { const id = TtsEngines.resolveEngine(preset.engine);
+    if (id !== 'omnivoice') return `채널 「${preset.name}」 · 🔊 ${TtsEngines.label(id)}`; }
   const rv = String(preset.voiceCloneRefAudio || '');
   const vn = rv.startsWith('srv:') ? ('☁ ' + rv.slice(4)) : (rv ? path.basename(rv) : '⚠ 참조음성 없음');
   // ⚠ 시드가 비면 서버가 매번 다른 시드를 쓴다 → **같은 채널인데 편마다 톤이 달라진다**. 조용히 넘기지 않는다.
@@ -5120,6 +5124,77 @@ ipcMain.handle('get-gemini-key', () => {
 ipcMain.handle('set-gemini-key', (_e, key) => {
   try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
   catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
+});
+// 🔊 음성 엔진(헤더 팝업 · v0.6.67) — OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs 중 고르기 + API 키.
+//   설정 = tts/tts-engines(~/.priming-maker/tts-engines.json) · 키 = secret-store(원문은 화면으로 돌려주지 않는다 — 끝 4자리만).
+ipcMain.handle('tts-engines-get', () => {
+  const TE = require('./tts/tts-engines');
+  const cfg = TE.load();
+  const engines = TE.ENGINES.map((e) => ({ ...e, cfg: TE.engineCfg(e.id, cfg) }));
+  if (engines.find((e) => e.id === 'gemini')) engines.find((e) => e.id === 'gemini').voices = require('./tts/providers/gemini-provider').GeminiProvider.getVoices();
+  return { active: TE.active(cfg), engines, keys: TE.keyInfo(require('./tts/secret-store')) };
+});
+ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
+  try {
+    const TE = require('./tts/tts-engines');
+    const SecretStore = require('./tts/secret-store');
+    const prev = TE.load();
+    const next = { active: args.active || prev.active };
+    for (const e of TE.ENGINES) if (e.paid) next[e.id] = { ...(prev[e.id] || {}), ...((args.cfg && args.cfg[e.id]) || {}) };
+    TE.save(next);
+    // 키: 새 값이 들어온 칸만 바꾼다(빈 칸 = 그대로) · clear 표시면 지운다.
+    //   🔑 gemini 는 이미지(나노바나나)·프롬프트와 같은 칸 — 다른 필드가 있으면 지키며 key 만 바꾼다.
+    const changed = [];
+    for (const [id, k] of Object.entries(args.keys || {})) {
+      const e = TE.byId(id); if (!e || !e.keyId || !k) continue;
+      if (k.clear) { const old = SecretStore.get(e.keyId) || {}; delete old.key; SecretStore.set(e.keyId, old); changed.push(id); continue; }
+      const v = String(k.key || '').trim();
+      if (v) { SecretStore.set(e.keyId, { ...(SecretStore.get(e.keyId) || {}), key: v }); changed.push(id); }
+    }
+    const mgr = require('./tts/tts-manager').getInstance({ logger: log });
+    for (const id of changed) { try { await mgr.refreshProvider(id); } catch {} }
+    log(`🔊 음성 엔진 저장 — ${TE.label(TE.active())}${changed.length ? ` · 키 바뀜: ${changed.join(', ')}` : ''}`);
+    return { ok: true };
+  } catch (e) { log('🔊 음성 엔진 저장 실패: ' + e.message); return { ok: false, error: e.message }; }
+});
+// 키 발급 페이지 — 엔진 표(tts-engines)에 적힌 공식 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다)
+ipcMain.handle('tts-engine-open-key', (_e, id) => {
+  const e = require('./tts/tts-engines').byId(id);
+  if (!e || !/^https:\/\//.test(String(e.keyUrl || ''))) return false;
+  shell.openExternal(e.keyUrl); return true;
+});
+// 목소리 목록(타입캐스트·ElevenLabs) — 저장된 키 또는 방금 넣은 키로 API 에서 가져온다
+ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
+  try {
+    const k = String(key || '').trim() || ((require('./tts/secret-store').get(id) || {}).key || '');
+    if (!k) return { ok: false, error: 'API 키를 먼저 넣으세요' };
+    if (id === 'typecast') return { ok: true, voices: await require('./tts/providers/typecast-provider').listVoices(k, model || 'ssfm-v30') };
+    if (id === 'elevenlabs') return { ok: true, voices: await require('./tts/providers/elevenlabs-provider').listVoices(k) };
+    return { ok: false, error: '이 엔진은 목소리 목록을 불러오지 않습니다' };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+// 🔈 시험 듣기 — **저장된** 설정·키로 한 문장을 만들어 임시 파일로(파이프라인과 같은 synthExtra 를 탄다)
+ipcMain.handle('tts-engine-test', async (_e, { id, text } = {}) => {
+  try {
+    const TE = require('./tts/tts-engines');
+    const mgr = require('./tts/tts-manager').getInstance({ logger: log });
+    await mgr.start();
+    if (!(await mgr.refreshProvider(id))) return { ok: false, error: id === 'omnivoice' ? 'OmniVoice 서버에 연결하지 못했습니다' : 'API 키가 없습니다 — 저장 후 다시 누르세요' };
+    const extra = TE.synthExtra(id);
+    let opts;
+    if (extra) opts = { provider: id, ...extra, language: 'ko' };
+    else {
+      const pr = S.preset || P.getPreset(null) || {};
+      const rv = String(pr.voiceCloneRefAudio || '');
+      opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, instruct: pr.instruct || undefined, language: pr.language || 'ko', seed: pr.seed };
+    }
+    const t0 = Date.now();
+    const r = await mgr.synthesize(String(text || '안녕하세요. 이 목소리로 대본을 읽어 드립니다.').slice(0, 300), opts);
+    const out = path.join(os.tmpdir(), `priming-tts-test-${id}-${Date.now()}.wav`);
+    fs.writeFileSync(out, r.mp3Buffer);
+    log(`🔈 시험 듣기 — ${TE.label(id)} · ${r.durationSec.toFixed(2)}초 · ${((Date.now() - t0) / 1000).toFixed(1)}초 걸림`);
+    return { ok: true, path: out, sec: r.durationSec };
+  } catch (e) { log('🔈 시험 듣기 실패: ' + e.message); return { ok: false, error: e.message }; }
 });
 // xAI API 키 (secret-store 'xai') — Grok Imagine 비디오 API(grok-api 엔진)용. console.x.ai 에서 발급.
 ipcMain.handle('get-xai-key', () => {

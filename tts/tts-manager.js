@@ -3,7 +3,10 @@
  *
  * 지원:
  *   - omnivoice  : GPU 서버 (k2-fsa/OmniVoice, 포트 9881) — 원격 LAN/Tailscale · 근간 엔진
- *   - gemini     : Google Gemini TTS (API 키 필요) — GPU 없는 PC 폴백
+ *   - gemini     : Google Gemini TTS (API 키 필요)
+ *   - mai        : Microsoft MAI-Voice (Azure Speech 키)        ┐ 🔊 헤더 「음성 엔진」 팝업에서 고르는
+ *   - typecast   : 타입캐스트 TTS (API 키)                      │ 유료 API 엔진(v0.6.67).
+ *   - elevenlabs : ElevenLabs TTS (API 키)                       ┘ 키만 있으면 바로 쓴다(서버 없음).
  *
  * OmniVoice 는 항상 원격 모드. GPU 머신에서 작업 스케줄러로 자동 시동된 백엔드에
  * baseUrl 로만 연결한다 (spawn 없음).
@@ -13,6 +16,14 @@
  */
 
 'use strict';
+
+// 키만 있으면 쓰는 API 엔진 — id → provider 클래스(지연 require)
+const KEY_PROVIDERS = {
+  gemini: () => require('./providers/gemini-provider').GeminiProvider,
+  mai: () => require('./providers/mai-provider').MaiProvider,
+  typecast: () => require('./providers/typecast-provider').TypecastProvider,
+  elevenlabs: () => require('./providers/elevenlabs-provider').ElevenLabsProvider,
+};
 
 class TTSManager {
   constructor(opts = {}) {
@@ -39,20 +50,8 @@ class TTSManager {
     if (this._started) return;
     this._started = true;
 
-    // ─── gemini (API 키 필요) ───
-    try {
-      const { GeminiProvider } = require('./providers/gemini-provider');
-      const p = new GeminiProvider();
-      const ok = await p.init();
-      if (ok) {
-        this.providers.set('gemini', p);
-        this.logger(`[TTS] Gemini 초기화 완료 (model: ${p.model})`);
-      } else {
-        this.logger('[TTS] Gemini: API 키 없음 — 🔑 키 버튼에서 설정 필요');
-      }
-    } catch (e) {
-      this.logger(`[TTS] Gemini 초기화 실패: ${e.message}`);
-    }
+    // ─── 키 기반 API 엔진(gemini · mai · typecast · elevenlabs) ───
+    for (const id of Object.keys(KEY_PROVIDERS)) await this._initKeyProvider(id, true);
 
     // ─── omnivoice (원격 GPU) ───
     this._connectOmniVoice();
@@ -96,24 +95,27 @@ class TTSManager {
       return this.isAvailable(id);
     }
 
-    if (id === 'gemini') {
-      try {
-        const { GeminiProvider } = require('./providers/gemini-provider');
-        const p = new GeminiProvider();
-        const ok = await p.init();
-        if (ok) {
-          this.providers.set(id, p);
-          this.logger(`[TTS] ${id} 재초기화 완료`);
-          return true;
-        }
-        this.logger(`[TTS] ${id} 재초기화 — 인증 정보 부족`);
-        return false;
-      } catch (e) {
-        this.logger(`[TTS] ${id} 재초기화 실패: ${e.message}`);
-        return false;
-      }
-    }
+    if (KEY_PROVIDERS[id]) return this._initKeyProvider(id, false);
     return false;
+  }
+
+  /** 키 기반 provider 하나 초기화 — 키가 없으면 등록하지 않는다(실패가 아니다). */
+  async _initKeyProvider(id, quiet) {
+    try {
+      const P = KEY_PROVIDERS[id]();
+      const p = new P();
+      const ok = await p.init();
+      if (ok) {
+        this.providers.set(id, p);
+        if (!quiet || id === 'gemini') this.logger(`[TTS] ${p.label || id} 준비됨${p.model ? ` (model: ${p.model})` : ''}`);
+        return true;
+      }
+      if (!quiet) this.logger(`[TTS] ${id} — API 키가 없습니다 (🔊 음성 엔진에서 넣으세요)`);
+      return false;
+    } catch (e) {
+      this.logger(`[TTS] ${id} 초기화 실패: ${e.message}`);
+      return false;
+    }
   }
 
   async stop() {
@@ -220,4 +222,4 @@ function getInstance(opts) {
   return _instance;
 }
 
-module.exports = { TTSManager, getInstance };
+module.exports = { TTSManager, getInstance, KEY_PROVIDERS };
