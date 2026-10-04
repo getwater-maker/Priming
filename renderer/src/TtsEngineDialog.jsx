@@ -19,7 +19,14 @@ function langOf(v) {
   if (m) return LANG_KO[m[1]] || raw;
   return raw.replace(/\(.*\)$/, '');   // 「영어(미국)」 → 「영어」
 }
-const usdTxt = (u) => (u == null ? '?' : u === 0 ? '무료' : u < 0.01 ? `$${u.toFixed(4)}` : `$${u.toFixed(2)}`);
+// 🇰🇷 언어 줄(「ko · seoul」) → 「한국어 · 서울」 — 낱말 사전(번역기 없이)
+const ACCENT_KO = { standard: '표준어', seoul: '서울', busan: '부산', gyeongsang: '경상도', jeolla: '전라도', chungcheong: '충청도', jeju: '제주', american: '미국', british: '영국', australian: '호주', indian: '인도', canadian: '캐나다', irish: '아일랜드', scottish: '스코틀랜드' };
+function langLabel(t) {
+  const parts = String(t || '').split(' · ').filter(Boolean);
+  return parts.map((x, i) => { const k = x.trim(); if (i === 0) { const m = /^([a-z]{2})([-_][A-Za-z]{2})?$/.exec(k); if (m) return LANG_KO[m[1]] || k; } return ACCENT_KO[k.toLowerCase()] || k; }).join(' · ');
+}
+// 💰 금액은 원화로(로이 2026-10-05) — 달러 단가 × 환율(카드 청구 예상). 10원 미만은 소수 한 자리 · 0.1원 미만은 「0.1원 미만」
+const wonTxt = (usd, rate) => { if (usd == null) return '?'; if (usd === 0) return '무료'; const w = usd * (rate || 1400); return w < 0.1 ? '0.1원 미만' : w < 10 ? `${w.toFixed(1)}원` : `${Math.round(w).toLocaleString()}원`; };
 
 // 요금 추정 — main tts-engines.estimateUsd 와 같은 식(단가표는 main 이 내려준다)
 function estUsd(engId, unit, chars, koCps) {
@@ -53,6 +60,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   // 📚 ElevenLabs — 'mine' = 내 목소리 · 'library' = 보이스 라이브러리(한국어 원어민 등 · 고르면 내 목록에 추가)
   const [elSrc, setElSrc] = useState('mine');
   const [libVoices, setLibVoices] = useState(null);
+  const [tr, setTr] = useState({});                 // 🇰🇷 번역 { 원문: 한국어 }
+  const trBusyRef = useRef(false);
+  const trTriedRef = useRef(new Set());
   const audioRef = useRef(null);
   const triedRef = useRef({});
   const stopRef = useRef(false);
@@ -167,7 +177,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
         if (!r || !r.ok) { setMsg('❌ ' + ((r && r.error) || '샘플 실패')); setBusy(''); return; }
         if (!r.cached) {
           setSamples((s) => ({ ...s, [tab]: { ...(s[tab] || {}), [[model, v.id, st].join('|')]: { sec: r.sec } } }));
-          if (r.usd) setMsg(`🔈 샘플을 만들어 저장했습니다(약 ${usdTxt(r.usd)}) — 다음부터는 무료로 들립니다`);
+          if (r.usd) setMsg(`🔈 샘플을 만들어 저장했습니다(약 ${wonTxt(r.usd, krw)}) — 다음부터는 무료로 들립니다`);
         }
         src = media(r.path, String(r.sec));
       }
@@ -184,7 +194,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     const todo = list.filter((v) => !hasSample(v));
     if (!todo.length) { setMsg('보이는 목소리는 샘플이 모두 있습니다'); return; }
     const each = estUsd(tab, eng.unit && eng.unit[model], SAMPLE_CHARS, data.koCps) || 0;
-    const ok = await (confirm || window.confirm)(`보이는 목소리 ${todo.length}개의 샘플을 만듭니다.\n예상 요금: 약 ${usdTxt(each * todo.length)} (≈ ${Math.round(each * todo.length * krw).toLocaleString()}원)\n만든 샘플은 저장되어 다음부터 무료로 들립니다. 계속할까요?`);
+    const ok = await (confirm || window.confirm)(`보이는 목소리 ${todo.length}개의 샘플을 만듭니다.\n예상 요금: 약 ${wonTxt(each * todo.length, krw)}\n만든 샘플은 저장되어 다음부터 무료로 들립니다. 계속할까요?`);
     if (!ok) return;
     if (!(await saveKeysIfAny())) return;
     stopRef.current = false;
@@ -268,11 +278,33 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const list = isLib ? (libVoices || []) : (voices[tab] || []);
   const langs = useMemo(() => [...new Set(list.map(langOf).filter((x) => x && x !== '다국어'))].sort((a, b) => (a === '한국어' ? -1 : b === '한국어' ? 1 : a.localeCompare(b, 'ko'))), [list]);
   const lang = fl[tab] != null ? fl[tab] : (langs.includes('한국어') ? '한국어' : '');   // 🇰🇷 기본 = 한국어(모든 탭)
+  // 🇰🇷 카드 글 한국어로 — 이름 뒤 소개(「Victor - Engaged…」의 「Engaged…」)·설명은 번역(main 저장), 언어 줄은 낱말 사전.
+  //   원문은 카드에 마우스를 올리면 보인다. 번역 전엔 원문 그대로.
+  const trName = (v) => { const i = String(v.name || '').indexOf(' - '); if (i < 0) return v.name; const tg = v.name.slice(i + 3); return v.name.slice(0, i) + ' - ' + (tr[tg] || tg); };
+  const koView = (v) => ({ ...v, name: trName(v), desc: tr[v.desc] || v.desc, lang: langLabel(v.lang), orig: [v.name, v.desc, v.lang].filter(Boolean).join('\n') });
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return list.filter((v) => (!fg || v.gender === fg) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
-      && (!qq || [v.id, v.name, v.desc, v.lang].join(' ').toLowerCase().includes(qq)));
-  }, [list, q, fg, lang]);
+      && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v)].join(' ').toLowerCase().includes(qq)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, q, fg, lang, tr]);
+  // 보이는 카드(앞 80개)의 영어 글을 모아 번역을 부탁한다 — 한 번에 하나 · 실패한 글은 다시 묻지 않는다
+  useEffect(() => {
+    if (trBusyRef.current) return;
+    const need = [];
+    for (const v of shown.slice(0, 80)) {
+      const i = String(v.name || '').indexOf(' - ');
+      for (const t of [v.desc, i >= 0 ? v.name.slice(i + 3) : '']) if (t && /[A-Za-z]{3,}/.test(t) && !/[가-힣]/.test(t) && !tr[t] && !trTriedRef.current.has(t)) need.push(t);
+    }
+    if (!need.length) return;
+    trBusyRef.current = true;
+    for (const t of need) trTriedRef.current.add(t);
+    api.ttsTranslate({ texts: need }).then((r) => {
+      trBusyRef.current = false;
+      if (r && r.map) setTr((m) => ({ ...m, ...r.map }));
+      if (r && !r.ok && r.error) setMsg('🇰🇷 번역 못 함 — ' + r.error);
+    }).catch(() => { trBusyRef.current = false; });
+  }, [shown, tr]);
   // 이 목소리를 쓰는 채널(지금 고친 값 기준) — 채널끼리 목소리가 겹치는지 보이게
   const usersOf = (v) => Object.entries(drafts).filter(([, d]) => d.id === tab && (tab === 'omnivoice' ? d.ref === v.id : ((d.cfg[tab] || {}).voice || '') === v.id)).map(([n]) => n);
 
@@ -377,10 +409,14 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
               {/* 💲 요금 */}
               <div data-testid="tts-price" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, padding: '5px 8px', borderRadius: 6, background: 'rgba(22,163,74,0.08)', marginBottom: 6 }}>
-                <span>💲 <b>{eng.prices[model || '_']}</b></span>
-                {tab !== 'omnivoice' && <span>1만 자 ≈ <b>{usdTxt(per10k)}</b>{won(per10k)}</span>}
-                {tab !== 'omnivoice' && scriptChars > 0 && <span>지금 대본 {scriptChars.toLocaleString()}자 ≈ <b>{usdTxt(perScript)}</b>{won(perScript)}</span>}
-                {tab !== 'omnivoice' && <span className="meta">샘플 1개 ≈ {usdTxt(sampleUsd)}</span>}
+                {tab === 'omnivoice'
+                  ? <span>💰 <b>무료</b> (내 GPU 서버 · 전기료만)</span>
+                  : <>
+                    <span>💰 1만 자 ≈ <b>{wonTxt(per10k, krw)}</b>{unit && unit.kind === 'sec' ? ' (음성 길이로 추정)' : ''}</span>
+                    {scriptChars > 0 && <span>지금 대본 {scriptChars.toLocaleString()}자 ≈ <b>{wonTxt(perScript, krw)}</b></span>}
+                    <span className="meta">샘플 1개 ≈ {wonTxt(sampleUsd, krw)}</span>
+                    {unit && (unit.free || unit.note) && <span className="meta">{[unit.free, unit.note].filter(Boolean).join(' · ')}</span>}
+                  </>}
               </div>
 
               {/* 목소리 거르기 */}
@@ -411,13 +447,13 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
               {/* 목소리 카드 — 이 칸만 스크롤 */}
               <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8, alignContent: 'start', paddingRight: 4 }}>
-                {shown.map((v) => (
+                {shown.map((v0) => { const v = koView(v0); return (
                   <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
-                    sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd}
+                    sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
                     users={tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v)}
-                    onPick={() => (isLib ? addFromLibrary(v) : pickVoice(v))} onPlay={(force) => preview(v, force)}
-                    onFacePick={() => facePick(v)} onFaceAi={() => faceAi(v)} onFaceClear={() => faceClear(v)} />
-                ))}
+                    onPick={() => (isLib ? addFromLibrary(v0) : pickVoice(v0))} onPlay={(force) => preview(v0, force)}
+                    onFacePick={() => facePick(v0)} onFaceAi={() => faceAi(v0)} onFaceClear={() => faceClear(v0)} />
+                ); })}
                 {!list.length && (
                   <div className="meta" style={{ gridColumn: '1 / -1', padding: 20, textAlign: 'center' }}>
                     {busy === 'voices' ? '⏳ 목소리 목록을 불러오는 중…'
@@ -456,7 +492,7 @@ export function Face({ face, name, gender, size = 44, square }) {
   return <div style={{ ...st, background: bg, color: fgc, fontWeight: 800, fontSize: Math.round(size * 0.42) }}>{ch}</div>;
 }
 
-function VoiceCard({ v, sel, face, busy, sampled, sampleCost, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
+function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
   const playing = busy === 'play:' + v.id;
   return (
     <div role="button" tabIndex={0} data-testid="tts-voice-card" data-voice={v.id} onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter') onPick(); }}
@@ -471,16 +507,16 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, users, onPick, onP
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.id}>{sel ? '✔ ' : ''}{v.name}</span>
+          <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.orig ? v.name + '\n\n원문:\n' + v.orig : v.id}>{sel ? '✔ ' : ''}{v.name}</span>
           {G_ICON[v.gender] && <span title={v.gender}>{G_ICON[v.gender]}</span>}
         </div>
         {v.lang && <div className="meta" style={{ fontSize: 11 }}>{v.lang}</div>}
-        {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.desc}>{v.desc}</div>}
+        {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
         {users && users.length > 0 && <div style={{ fontSize: 10, color: BLUE, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={users.join(', ')}>채널: {users.join(', ')}</div>}
         <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
           <button className="ghost" data-testid="tts-voice-play" style={{ padding: '1px 8px', fontSize: 11 }}
-            title={sampled ? '샘플 듣기(저장됨 · 무료) — Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${usdTxt(sampleCost)} · 한 번 만들면 저장)`}
-            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'} {sampled || !sampleCost ? '듣기' : `듣기 ${usdTxt(sampleCost)}`}</button>
+            title={sampled ? '샘플 듣기(저장됨 · 무료) — Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${wonTxt(sampleCost, krw)} · 한 번 만들면 저장)`}
+            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'} {sampled || !sampleCost ? '듣기' : `듣기 ${wonTxt(sampleCost, krw)}`}</button>
           {sampled && <span style={{ fontSize: 10, color: '#16a34a' }}>무료</span>}
         </div>
       </div>

@@ -1714,12 +1714,37 @@ export default function App() {
       const vid = id === 'omnivoice' ? ch.ref : ch.voiceEngine.voice;
       const vv = (e.voices || []).find((x) => x.id === vid);
       const vname = vv ? vv.name : String(vid || '').replace(/^srv:/, '').replace(/^.*[\\/]/, '');
-      setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (e.faces || {})[vid] || null, gender: vv && vv.gender, vname });
+      // 💰 예상 비용용 — 이 채널 엔진·모델의 단가(main 단가표) + 환율(시장 × 카드 수수료 · 없으면 지난 값)
+      const model = id === 'omnivoice' ? '' : (ch.voiceEngine.model || ((e.models || [])[0] || {}).id);
+      const krw = r.fx && r.fx.rate ? r.fx.rate * (1 + (Number(r.cardFee) || 0) / 100) : (r.krw || 1400);
+      setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (e.faces || {})[vid] || null, gender: vv && vv.gender, vname,
+        model, unit: id === 'omnivoice' ? null : ((e.unit || {})[model] || null), krw, koCps: r.koCps || 7 });
       return r;
     } catch { return null; }
   }
   useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [presetName]);
   function openTtsEngines() { setTtsEng(true); }
+  // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
+  //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
+  const ttsCost = useMemo(() => {
+    let total = 0, need = 0, chars = 0, allChars = 0;
+    for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) {
+      const n = String(se.ttsText || se.text || '').length; total++; allChars += n;
+      if (!se.audio) { need++; chars += n; }
+    }
+    if (!total) return null;
+    const a = ttsEngActive || {};
+    const won = (c) => {
+      if (a.id === 'omnivoice' || !a.id) return 0;
+      const u = a.unit; if (!u) return null;
+      return (u.kind === 'char' ? c * u.usd : (c / (a.koCps || 7)) * u.usd) * (a.krw || 1400);
+    };
+    const fmt = (w) => (w == null ? '요금 정보 없음' : w === 0 ? '무료' : w < 10 ? `${w.toFixed(1)}원` : `${Math.round(w).toLocaleString()}원`);
+    const w = won(chars), wa = won(allChars);
+    const note = a.id === 'omnivoice' || !a.id ? 'OmniVoice = 내 GPU 서버(무료)'
+      : `${a.label} · ${a.unit && a.unit.kind === 'sec' ? '음성 길이로 추정(한국어 초당 약 7자)' : '글자 수 기준'} · 1달러 ≈ ${Math.round(a.krw || 1400).toLocaleString()}원(카드 수수료 포함) · 실제 청구와 다를 수 있음`;
+    return { total, need, chars, allChars, txt: fmt(w), allTxt: fmt(wa), note };
+  }, [dto, ttsEngActive]);
   async function openOllama() {
     try {
       const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
@@ -3888,6 +3913,13 @@ export default function App() {
                 그래서 이미지·비디오·완성의 번호가 다시 한 칸씩 당겨졌다(②③④). */}
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS</span></button>
+            {/* 💰 TTS 예상 비용 — 지금 대본 · 이 채널 목소리 엔진 기준 · 음성이 아직 없는 문장만(이미 있는 문장은 건너뛰므로) */}
+            {loaded && ttsCost && (
+              <span data-testid="tts-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, maxWidth: 130, cursor: 'pointer' }} onClick={openTtsEngines}
+                title={`TTS 예상 비용 — 채널 「${presetName || ''}」 · ${ttsEngActive.label}\n음성이 없는 문장 ${ttsCost.need}개 · ${ttsCost.chars.toLocaleString()}자 (전체 ${ttsCost.total}개 · ${ttsCost.allChars.toLocaleString()}자)\n전체를 새로 만들면 ≈ ${ttsCost.allTxt}\n${ttsCost.note}\n누르면 🔊 음성 설정`}>
+                💰 예상 <b>{ttsCost.txt}</b><br />{ttsCost.chars ? `${ttsCost.chars.toLocaleString()}자` : '남은 문장 없음'}
+              </span>
+            )}
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
           </span>

@@ -255,12 +255,22 @@ function makeWav(samples, sr = 24000) {
       eq(enOnly && enOnly('단단한 (Firm)'), 'Firm', 'Gemini 카드 설명 → 그림 프롬프트엔 영어만(「단단한」 뺌)');
       eq(enOnly && enOnly('내 복제 · middle_aged · calm'), 'middle_aged calm', 'ElevenLabs 설명도 영어만'); }
     { // 🇰🇷 언어 묶음(화면 함수 원문 실행)
-      const la = dlg.indexOf('const LANG_KO = '); const lb = dlg.indexOf('const usdTxt', la);
+      const la = dlg.indexOf('const LANG_KO = '); const lb = dlg.indexOf('// 💰 금액은 원화로', la);
       const langOf = new Function(dlg.slice(la, lb) + '\nreturn langOf;')();
       eq(['ko', 'ko-KR', 'ko · seoul', '한국어', '영어(미국)', 'en · american', '', '다국어'].map((x) => langOf({ lang: x })), ['한국어', '한국어', '한국어', '한국어', '영어', '영어', '다국어', '다국어'], '언어 이름 묶기(코드·억양 → 한국어 이름)');
       ok(/langs\.includes\('한국어'\) \? '한국어'/.test(dlg), '모든 탭 언어 기본 = 한국어');
       ok(/langOf\(v\) === '다국어'/.test(dlg), '다국어 목소리(Gemini 기본 30 등)는 한국어 거르기에도 보인다');
       ok(/setElSrc\('library'\)/.test(dlg) && /some\(\(v\) => langOf\(v\) === '한국어'\)/.test(dlg), 'ElevenLabs — 내 목록에 한국어가 없으면 한국어 라이브러리부터'); }
+    { // 💰 원화 표시 · 대본 예상 비용 · 🇰🇷 카드 번역(v0.6.76)
+      const wa = dlg.indexOf('const wonTxt = '); const wonTxt = new Function('return ' + dlg.slice(wa + 'const wonTxt = '.length, dlg.indexOf(';\n', wa)))();
+      eq([wonTxt(0.22, 1366), wonTxt(0.001, 1366), wonTxt(0, 1366), wonTxt(null, 1366), wonTxt(0.00001, 1366)], ['301원', '1.4원', '무료', '?', '0.1원 미만'], '원화 표기(반올림·소수 한 자리·무료·모름)');
+      ok(!/usdTxt/.test(dlg) && !/\$\$\{/.test(dlg), '팝업에 달러 표시가 남지 않는다');
+      const APP = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
+      ok(/data-testid="tts-cost"/.test(APP) && /if \(!se\.audio\) \{ need\+\+; chars \+= n; \}/.test(APP), '대본 TTS 예상 비용 — 음성 없는 문장만 센다');
+      ok(MJ.includes("ipcMain.handle('tts-translate'") && /koView/.test(dlg) && /원문:/.test(dlg), '카드 글 한국어 번역(원문은 마우스 올리면)');
+      const ta = MJ.indexOf('const _needsTr = '); const needsTr = new Function('return ' + MJ.slice(ta + 'const _needsTr = '.length, MJ.indexOf(';\n', ta)))();
+      eq([needsTr('Warm calm narrator'), needsTr('따뜻한 목소리'), needsTr('ko'), needsTr('')], [true, false, false, false], '번역할 글 고르기(영어만 · 한글·짧은 코드 제외)');
+      ok(/gemini: 'gemini-3\.8-flash'/.test(fs.readFileSync(path.join(ROOT, 'core/prompt-io.js'), 'utf8')), 'Gemini 글 모델 = 3.8-flash(2.5-flash 는 신규 사용자 404)'); }
     ok(MJ.includes("ipcMain.handle('tts-channel-avatars'") && MJ.includes('ytChannelId') && MJ.includes('/youtube/v3/channels?part=snippet&id='), '🏷 채널 로고 = 연결된 유튜브 채널 그림(ytChannelId · 이름 짐작 없음)');
     { const ia = MJ.indexOf("ipcMain.handle('tts-channel-avatars'"); ok(!/logoPath\s*:/.test(MJ.slice(ia, ia + 1200)), '유튜브 그림은 logoPath(영상 로고)를 건드리지 않는다'); }
     ok(MJ.includes("ipcMain.handle('el-shared-voices'") && MJ.includes("ipcMain.handle('el-add-shared'"), 'IPC — 라이브러리 찾기·추가');

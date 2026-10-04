@@ -5332,6 +5332,55 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
     return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// 🇰🇷 목소리 카드 글 번역(영어 → 한국어) — 저장(~/.priming-maker/tts-voices/translations.json · 같은 문장은 다시 안 함)
+//   번역기: Ollama(켜져 있으면 · 무료 · 로컬) → 없으면 Gemini 키(문장 몇 개라 요금 미미). 한 번에 40개씩 JSON 배열로.
+const TR_PATH = () => path.join(TTS_VOICE_DIR(), 'translations.json');
+let _trCache = null;
+function _trLoad() { if (_trCache) return _trCache; try { _trCache = JSON.parse(fs.readFileSync(TR_PATH(), 'utf8')); } catch { _trCache = {}; } return _trCache; }
+function _trSave() { try { fs.mkdirSync(TTS_VOICE_DIR(), { recursive: true }); fs.writeFileSync(TR_PATH(), JSON.stringify(_trCache || {})); } catch {} }
+const _needsTr = (t) => /[A-Za-z]{3,}/.test(String(t || '')) && !/[가-힣]/.test(String(t || ''));
+let _trBusy = Promise.resolve();
+async function _translateBatch(items) {
+  const PIO = require('./core/prompt-io');
+  const prompt = '다음은 TTS 목소리 카드의 영어 설명들이다. 각 항목을 자연스럽고 짧은 한국어로 번역하라.\n'
+    + '- 사람 이름·브랜드 이름은 그대로 둔다 · 「·」 구분은 유지 · middle_aged=중년, young=청년, old=노년, narrative_story=내레이션·이야기, informative_educational=정보·교육, conversational=대화, social_media=SNS, characters_animation=캐릭터·애니메이션, entertainment_tv=예능·TV, advertisement=광고 처럼 밑줄 낱말도 우리말로.\n'
+    + '- 설명 없이 **JSON 문자열 배열 하나만** 답하라(입력과 같은 개수·같은 순서).\n\n입력:\n' + JSON.stringify(items);
+  const oc = require('./core/ollama-config').load();
+  let text = '', via = '';
+  const tags = await ollamaTags(oc.baseUrl).catch(() => null);
+  if (tags && tags.ok) { text = await PIO.callLlmTextApi('ollama', '', prompt, { baseUrl: oc.baseUrl, model: oc.model }); via = 'Ollama ' + (oc.model || ''); }
+  else {
+    const key = ((require('./tts/secret-store').get('gemini') || {}).key || '');
+    if (!key) throw new Error('번역할 수단이 없습니다 — Ollama 가 꺼져 있고 Gemini 키도 없습니다');
+    text = await PIO.callLlmTextApi('gemini', key, prompt); via = 'Gemini';
+  }
+  const m = /\[[\s\S]*\]/.exec(String(text || ''));
+  const arr = m ? JSON.parse(m[0]) : null;
+  if (!Array.isArray(arr) || arr.length !== items.length) throw new Error(`번역 결과 개수가 맞지 않습니다(${via})`);
+  return { arr: arr.map((x) => String(x || '').trim()), via };
+}
+ipcMain.handle('tts-translate', async (_e, { texts } = {}) => {
+  const want = [...new Set((texts || []).map((t) => String(t || '').trim()).filter(Boolean))];
+  const C = _trLoad();
+  const need = want.filter((t) => _needsTr(t) && !(t in C)).slice(0, 200);
+  let err = '';
+  if (need.length) {
+    const job = _trBusy.then(async () => {
+      for (let i = 0; i < need.length; i += 40) {
+        const part = need.slice(i, i + 40).filter((t) => !(t in C));
+        if (!part.length) continue;
+        const { arr, via } = await _translateBatch(part);
+        part.forEach((t, k) => { if (arr[k]) C[t] = arr[k]; });
+        _trSave();
+        log(`🇰🇷 목소리 설명 ${part.length}개 번역(${via})`);
+      }
+    });
+    _trBusy = job.catch(() => {});
+    try { await job; } catch (e) { err = e.message; log('🇰🇷 번역 실패: ' + e.message); }
+  }
+  const map = {}; for (const t of want) if (C[t]) map[t] = C[t];
+  return { ok: !err, map, error: err };
+});
 // 📚 ElevenLabs 보이스 라이브러리(한국어 원어민 등) — 찾기 · 내 목록에 추가(추가하면 내 목록 캐시도 새로)
 ipcMain.handle('el-shared-voices', async (_e, { language, gender } = {}) => {
   try {

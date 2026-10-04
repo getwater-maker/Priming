@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('api', {
   ttsChannelAvatars: (a) => ipcRenderer.invoke('tts-channel-avatars', a),
   elSharedVoices: (a) => ipcRenderer.invoke('el-shared-voices', a),
   elAddShared: (a) => ipcRenderer.invoke('el-add-shared', a),
+  ttsTranslate: (a) => ipcRenderer.invoke('tts-translate', a),
   fxUsdKrw: (a) => ipcRenderer.invoke('fx-usd-krw', a),
   ttsFacePick: (a) => ipcRenderer.invoke('tts-face-pick', a),
   ttsFaceAi: (a) => ipcRenderer.invoke('tts-face-ai', a),

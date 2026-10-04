@@ -96,7 +96,8 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     ok(/✅/.test(await win.locator('[data-testid="tts-tab-mai"]').innerText()), '카드를 고르면 그 엔진 탭에 ✅(이 채널이 이 엔진으로)');
     ok(/MAI-Voice · 해나/.test(await win.locator('[data-testid="tts-chan"]').filter({ hasText: '●' }).first().innerText()), '왼쪽 채널 줄에 바뀐 목소리(얼굴·이름) · ● 표시');
     const price = await win.locator('[data-testid="tts-price"]').innerText();
-    ok(price.includes('1만 자당 약 $0.22') && /\d원/.test(price), `요금 표시 — MAI 2.1 = 1만 자 $0.22 · 원화 (${price.replace(/\s+/g, ' ').slice(0, 80)})`);
+    { const m = /1만 자 ≈ ([\d,]+)원/.exec(price); const w = m ? Number(m[1].replace(/,/g, '')) : 0;
+      ok(w >= 250 && w <= 400 && !/\$/.test(price), `요금 표시 = 원화 — MAI 2.1 1만 자 $0.22 × 환율 ≈ ${w}원 · 달러 표시 없음 (${price.replace(/\s+/g, ' ').slice(0, 80)})`); }
     ok((await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] button[title*="AI 로 얼굴"]').count()) === 1, '카드에 🎨 AI 얼굴 · 🖼 그림 버튼');
     ok(/듣기/.test(await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-play"]').innerText()), '카드에 🔈 샘플 듣기(요금 표시)');
 

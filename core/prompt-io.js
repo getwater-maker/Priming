@@ -172,7 +172,7 @@ function applyPromptsToProjects(projects, text) {
 }
 
 // ── LLM 텍스트 API ──────────────────────────────────────
-const LLM_TEXT_MODELS = { gemini: 'gemini-2.5-flash', claude: 'claude-sonnet-4-5', openai: 'gpt-4o', ollama: 'gemma4:latest' };
+const LLM_TEXT_MODELS = { gemini: 'gemini-3.8-flash', claude: 'claude-sonnet-4-5', openai: 'gpt-4o', ollama: 'gemma4:latest' };
 
 // http/https 둘 다 지원 (Ollama 는 로컬 http) — timeout 조절 가능
 function postJsonAny(urlStr, headers, bodyObj, timeoutMs = 120000) {
