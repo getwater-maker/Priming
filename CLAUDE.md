@@ -102,6 +102,7 @@
 ## 7. 기능별 규칙
 
 ### TTS
+- 🔑 **API 키는 ⚙ 설정 → 🔑 API 키 한 곳(「🔊 TTS API」 칸 · v0.6.78)** — 음성 설정 팝업엔 상태·안내 버튼만. 🔴 설정 창은 반드시 `openSettings(...)` 로 연다(그냥 열면 🍌·xAI 칸이 빈 채로 떠 onBlur 가 빈 키를 저장).
 - 🔊 **엔진·목소리는 채널마다**(v0.6.69 · 채널 `voiceEngine` — 유료 · OmniVoice 는 `voiceCloneRefAudio`) — 해석·인자·요금은 `tts/tts-engines.js` 한 곳(`resolveEngine(preset)`·`synthExtra(id, preset)`·`PRICING` — 새 TTS 입구도 preset 을 넘길 것 · ⛔ 채널 `engine` 필드에 유료 id 를 쓰지 말 것(preset-store 가 지운다)). 화면 = `TtsEngineDialog.jsx`(채널 목록·엔진 탭·목소리 카드·얼굴(🎨 = 로컬 ComfyUI · 채널 목록은 사람 얼굴이 아니라 **채널 로고**(logoPath))·저장되는 샘플·요금(💱 공개 API 시장 환율 + 카드 수수료% — ⛔ 카드사 환율 페이지 봇 차단 우회 금지)) · 내장 목록 `tts/voice-catalogs.js` · 유료 provider 는 **WAV** · 유료 정체성은 캐시 키 `es` 로만 · 키는 secret-store(화면엔 끝 4자리) · 옛 「출력/Vrew 음성/다시 연결」 버튼 없음(출력 = 늘 전체).
 - 합성은 **언제나 정속**, 배속은 ffmpeg `atempo`(OmniVoice `speed` 는 느린 방향으로 듣지 않는다). 채널 배속 정본은 `speedLong`(옛 `speed` 필드는 방치값).
 - 필터 순서 **배속 → 증폭 → 문장 뒤 무음(`apad`, 채널 「문장무음」)**. ⛔ **리미터·압축 금지**(84Hz 저음 주기보다 짧은 어택이 파형을 찌그러뜨려 「지지지」) — 음량 정규화는 피크 여유만큼만 올린다(목표 -15dB). 음량이 부족하면 **참조음성을 크게 녹음**.
