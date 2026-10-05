@@ -3989,7 +3989,13 @@ export default function App() {
     let pick = PL.list[0] || null;
     for (const l of PL.list) { const st = l.start != null ? l.start : (sStart.get(l.groupNum + ':' + l.sentIdx) || 0); if (st <= sec + 1e-6) pick = l; else break; }
     if (!pick) return;
-    if (playerOpen) playFromCursor({ shortsNum: sn, n: pick.n }, true); else userCursor({ shortsNum: sn, n: pick.n });
+    if (playerOpen) playFromCursor({ shortsNum: sn, n: pick.n }, true);
+    else {
+      userCursor({ shortsNum: sn, n: pick.n });
+      // ② 목록도 그 클립으로(v0.6.92 · 로이 「진행바를 고르면 작업의 해당 클립으로」) — 고른 클립 표시 + 가운데로 스크롤(⌨ 옮기기와 같은 선택)
+      setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n: pick.n, groupNum: pick.groupNum, sentIdx: pick.sentIdx, from: pick.from, to: pick.to }], anchorN: pick.n });
+    }
+    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + pick.n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
   }
   // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
   //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
