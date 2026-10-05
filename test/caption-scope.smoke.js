@@ -123,6 +123,39 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.selectOption('[data-testid=logo-queue]', 'chan'); await win.waitForTimeout(900);
     { const s = SNAPS.map((f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).projects[0].logoOver; } catch (_) { return 'x'; } });
       ok(s.every((o) => o == null), '채널 설정대로 → 덮어쓰기 지움(두 대본)'); }
+    console.log('\n[6] 🧩 ① 칸 편집칸 — 정렬을 누르면 곧바로 · 🏷 ① 칸 AI 고지(v0.6.88)');
+    {
+      await win.click('.menubar button:text-is("대본·음성")').catch(() => {});
+      await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+      await clipNo(1).click(); await win.waitForTimeout(300); await clipNo(1).click(); await win.waitForTimeout(300);   // 커서 1 · 선택 해제
+      await win.locator('#stageCap .cf-stageline').first().click(); await win.waitForSelector('[data-testid=stage-ta]', { timeout: 5000 });
+      const x0 = (await win.locator('[data-testid=stage-ta]').boundingBox()).x;
+      await win.locator('[data-testid=cf-mini] button[title="화면 왼쪽"]').click(); await win.waitForTimeout(900);
+      const xL = (await win.locator('[data-testid=stage-ta]').boundingBox()).x;
+      await win.locator('[data-testid=cf-mini] button[title="화면 오른쪽"]').click(); await win.waitForTimeout(900);
+      const xR = (await win.locator('[data-testid=stage-ta]').boundingBox()).x;
+      ok(xR - xL > 60, `🔑 편집칸이 열린 채 「화면 왼쪽 → 오른쪽」을 누르면 곧바로 옮겨 간다(다른 곳을 안 눌러도) (x ${Math.round(x0)} → ${Math.round(xL)} → ${Math.round(xR)})`);
+      await win.keyboard.press('Escape'); await win.waitForTimeout(400);
+      // 🏷 AI 고지 — 채널: 클립 2~3 · 작업바 켜기
+      await win.evaluate(async (n) => { await window.api.savePreset({ name: n, patch: { aiNotice: { enabled: true, text: '테스트 AI 고지입니다', unit: 'clip', fromClip: 2, toClip: 3 } } }); }, CH);
+      await win.reload(); await win.waitForSelector('.sent.clip', { timeout: 20000 }); await win.waitForTimeout(800);
+      for (const m of ['완성', '대본·음성', '이미지', '비디오']) {
+        if (await win.locator('label.chk:has-text("AI 고지") input').count()) break;
+        await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); await win.waitForTimeout(200);
+      }
+      const chk = win.locator('label.chk:has-text("AI 고지") input').first();
+      if (!(await chk.isChecked())) await chk.check();
+      await win.waitForTimeout(300);
+      const aiAt = async (n) => { await clipNo(n).click(); await win.waitForTimeout(350); const c = await win.locator('[data-testid=stage-ai]').count(); await clipNo(n).click(); await win.waitForTimeout(150); return c ? await win.locator('[data-testid=stage-ai]').innerText() : ''; };
+      const a1 = await aiAt(1), a2 = await aiAt(2), a3 = await aiAt(3), a4 = await aiAt(4);
+      ok(!a1 && a2 === '테스트 AI 고지입니다' && !!a3 && !a4, `🔑 ① 칸 AI 고지 = 채널 설정 클립 2~3 에만 · 채널 문구 (${JSON.stringify([a1, a2, a3, a4])})`);
+      await clipNo(2).click(); await win.waitForTimeout(350);
+      const g = await win.evaluate(() => { const a = document.querySelector('[data-testid=stage-ai]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return { x: (a.left - s.left) / s.width, y: (a.top - s.top) / s.height, fs: parseFloat(getComputedStyle(document.querySelector('[data-testid=stage-ai]')).fontSize) / s.width * 1920 }; });
+      ok(Math.abs(g.x - 0.0323) < 0.01 && Math.abs(g.y - 0.0583) < 0.02 && Math.abs(g.fs - 54) < 2, `MP4 와 같은 자리·크기(왼쪽 위 x ${g.x.toFixed(3)} · y ${g.y.toFixed(3)} · 1920 기준 ${g.fs.toFixed(1)}px = 75×0.72)`);
+      await chk.uncheck().catch(async () => { for (const m of ['완성', '대본·음성']) { await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); if (await win.locator('label.chk:has-text("AI 고지") input').count()) break; } await win.locator('label.chk:has-text("AI 고지") input').first().uncheck(); });
+      await win.waitForTimeout(300);
+      ok(await win.locator('[data-testid=stage-ai]').count() === 0, '작업바 「AI 고지」를 끄면 ① 칸에서도 사라진다');
+    }
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

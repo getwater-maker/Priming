@@ -81,4 +81,35 @@ function aiNoticeForRange(aiNotice, project, logger) {
   return { ...aiNotice, startMode: 'seconds', endMode: 'seconds', endClip: null, startSeconds: Math.round(start * 1000) / 1000, durationSeconds: Math.max(0.1, Math.round(dur * 1000) / 1000) };
 }
 
-module.exports = { FILLS, MOTIONS, normBox, normLook, isDefault, describe, aiNoticeForRange };
+// 🏷 AI 고지 기본 문구 · 채널 설정 → 시각(main .vrew/MP4 와 ① 칸 미리보기가 **같은 규칙** · v0.6.88 에 main.js 에서 옮김)
+const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
+function aiNoticeTiming(a) {
+  a = a || {};
+  const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 ? n : d; };
+  if (a.unit === 'clip') {
+    const from = Math.max(1, Math.floor(num(a.fromClip, 1)));
+    const to = Math.floor(num(a.toClip, 0));
+    return { startMode: 'clip', startClip: from, endMode: to >= from ? 'clip' : 'end', endClip: to >= from ? to : null, durationSeconds: 0 };
+  }
+  const from = num(a.fromSec, 5);
+  const to = num(a.toSec, 10);
+  return { startMode: 'seconds', startSeconds: from, endMode: 'seconds', durationSeconds: to > from ? to - from : 0 };
+}
+/**
+ * 🏷 ① 칸 미리보기 — 이 자막 줄에 AI 고지가 보이는가(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」).
+ *   timing = aiNoticeTiming(채널) · range = 대본 🏷 문장 범위(pr.aiNoticeRange — 있으면 이긴다, aiNoticeForRange 와 같다)
+ *   line = { n(자막 줄 번호 1부터 = .vrew clip), ord(문장 순번 1부터), start(초), dur(초) }
+ *   시각 단위는 줄이 [시작, 끝) 과 겹치면 보인다(MP4 는 시작 시각에 나타나 끝 시각이 든 클립까지 — 줄 단위로 근사).
+ */
+function aiNoticeOn(timing, range, line) {
+  const l = line || {};
+  if (range && range.from >= 1) { const to = range.to >= range.from ? range.to : range.from; return l.ord >= range.from && l.ord <= to; }
+  const t = timing || aiNoticeTiming({});
+  if (t.startMode === 'clip') return l.n >= t.startClip && (t.endMode !== 'clip' || l.n <= t.endClip);
+  const a = Number(t.startSeconds) || 0;
+  const b = Number(t.durationSeconds) > 0 ? a + Number(t.durationSeconds) : Infinity;
+  const s = Number(l.start) || 0, e = s + Math.max(0.001, Number(l.dur) || 0);
+  return e > a && s < b;
+}
+
+module.exports = { FILLS, MOTIONS, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

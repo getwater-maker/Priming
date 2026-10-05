@@ -959,3 +959,10 @@ body:has(.modal-bg.show) .clip-tb{display:none}
 /* ③ 칸(고급·효과)을 열면 ① 칸이 줄어든다 — ② 목록이 좁아져 버튼이 세로로 깨지던 것(v0.6.86) */
 #body.ws .pane1{flex-shrink:1}
 #body.ws main.pane2{min-width:640px}
+
+/* 🏷 ① 칸 AI 고지(v0.6.88) — MP4(core/vrew-render webOverlay)와 같은 자리·크기: x = 0.02·1920+23.6 · y = 0.047·1080+12.2 · 글자 75×0.72 · 테두리 6 · 1.5초 나타나기
+   크기는 ① 칸 폭 기준(cqw — 1920 화면을 ① 칸 폭에 맞춘 비율) */
+#stage{container-type:inline-size}
+.stage-ai{position:absolute;left:3.229%;top:5.83%;max-width:93%;z-index:4;pointer-events:none;color:#fff;font-family:'Pretendard','Pretendard Variable',sans-serif;font-weight:700;
+  font-size:calc(100cqw * 0.028125);line-height:1.25;-webkit-text-stroke:calc(100cqw * 0.00625) #000;paint-order:stroke fill;animation:stageAiIn 1.5s ease both}
+@keyframes stageAiIn{from{opacity:0}to{opacity:1}}

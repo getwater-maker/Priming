@@ -151,8 +151,11 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
     console.log('\n[4] 🏷 AI 고지 — 채널 문구 · 시간/클립 단위');
     {
       const M = read('main.js');
-      const a0 = M.indexOf("const AI_NOTICE_TEXT"), a1 = M.indexOf('\n}\n', M.indexOf('function resolveAiNotice(')) + 3;
-      const ctx = {}; vm.createContext(ctx); vm.runInContext(M.slice(a0, a1) + '\nthis.r = resolveAiNotice;', ctx);
+      // v0.6.88 — 문구·시각 규칙은 core/visual-look 로 옮겼다(① 칸 미리보기와 같은 함수) → resolveAiNotice 원문에 그걸 넣어 실행
+      const a0 = M.indexOf('function resolveAiNotice('), a1 = M.indexOf('\n}\n', a0) + 3;
+      ok(/const \{ AI_NOTICE_TEXT, aiNoticeTiming \} = require\('\.\/core\/visual-look'\)/.test(M), 'main 은 core/visual-look 의 문구·시각 규칙을 쓴다(한 곳)');
+      const VL0 = require('../core/visual-look');
+      const ctx = { AI_NOTICE_TEXT: VL0.AI_NOTICE_TEXT, aiNoticeTiming: VL0.aiNoticeTiming }; vm.createContext(ctx); vm.runInContext(M.slice(a0, a1) + '\nthis.r = resolveAiNotice;', ctx);
       const t = ctx.r({ aiNotice: { text: '  이 영상은 AI 로 만들었습니다  ', unit: 'time', fromSec: 3, toSec: 12 } }, true).aiNotice;
       ok(t.enabled && t.text === '이 영상은 AI 로 만들었습니다' && t.startMode === 'seconds' && t.startSeconds === 3 && t.durationSeconds === 9, '시간 단위: 3초에 나타나 12초에 사라짐(문구는 채널 것)');
       const e = ctx.r({ aiNotice: {} }, true).aiNotice;
@@ -161,6 +164,15 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const c = ctx.r({ aiNotice: { unit: 'clip', fromClip: 2, toClip: 3 } }, true).aiNotice;
       ok(c.startMode === 'clip' && c.startClip === 2 && c.endMode === 'clip' && c.endClip === 3, '클립 단위: 2번 클립에 나타나 3번 클립이 끝나면 사라짐');
       ok(!ctx.r({ aiNotice: { text: 'x' } }, false).aiNotice.enabled, '작업바에서 끄면 안 나온다');
+      // 🏷 ① 칸 미리보기(v0.6.88) — 같은 시각 규칙으로 「이 줄에 보이는가」
+      {
+        const on = (cfg, range, l) => VL0.aiNoticeOn(VL0.aiNoticeTiming(cfg), range, l);
+        ok(!on({}, null, { n: 1, ord: 1, start: 0, dur: 4.9 }) && on({}, null, { n: 2, ord: 2, start: 4.9, dur: 2 }) && on({}, null, { n: 3, start: 9.9, dur: 1 }) && !on({}, null, { n: 4, start: 10, dur: 1 }), '기본(5초 뒤 5초): 5~10초에 걸친 줄만');
+        ok(on({ unit: 'time', fromSec: 4, toSec: 0 }, null, { n: 99, start: 500, dur: 2 }), '끝 0 = 영상 끝까지');
+        ok(!on({ unit: 'clip', fromClip: 2, toClip: 3 }, null, { n: 1 }) && on({ unit: 'clip', fromClip: 2, toClip: 3 }, null, { n: 3 }) && !on({ unit: 'clip', fromClip: 2, toClip: 3 }, null, { n: 4 }), '클립 단위: 2~3 번 줄만');
+        ok(on({ unit: 'clip', fromClip: 2, toClip: 0 }, null, { n: 50 }), '클립 끝 0 = 끝까지');
+        ok(on({ unit: 'clip', fromClip: 9 }, { from: 2, to: 3 }, { n: 1, ord: 2 }) && !on({}, { from: 2, to: 3 }, { n: 1, ord: 4, start: 6, dur: 1 }), '🔑 대본 🏷 문장 범위가 채널 설정보다 이긴다(aiNoticeForRange 와 같다)');
+      }
 
       // 실제 .vrew — 클립 단위가 그 클립 시각에 맞는가
       const P = require('../core/pipeline');

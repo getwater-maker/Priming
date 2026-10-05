@@ -46,19 +46,8 @@ function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
 // AI 고지 결정 — 켤지는 사용자 선택(want · 작업바). **문구·나타나는 때·사라지는 때는 채널 설정**(2026-09-29 로이 · v0.5.87).
 //   채널 aiNotice = { text, unit: 'time'|'clip', fromSec, toSec, fromClip, toClip } — 끝을 비우면(0) 영상 끝까지.
 //   클립 = 화면의 자막 줄 번호(= .vrew 클립). 대본에서 문장 범위를 따로 정했으면(🏷 · pr.aiNoticeRange) 그것이 이긴다(visual-look).
-const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
-function aiNoticeTiming(a) {
-  a = a || {};
-  const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 ? n : d; };
-  if (a.unit === 'clip') {
-    const from = Math.max(1, Math.floor(num(a.fromClip, 1)));
-    const to = Math.floor(num(a.toClip, 0));
-    return { startMode: 'clip', startClip: from, endMode: to >= from ? 'clip' : 'end', endClip: to >= from ? to : null, durationSeconds: 0 };
-  }
-  const from = num(a.fromSec, 5);
-  const to = num(a.toSec, 10);
-  return { startMode: 'seconds', startSeconds: from, endMode: 'seconds', durationSeconds: to > from ? to - from : 0 };
-}
+// 🏷 AI 고지 문구·시각 규칙 = core/visual-look 한 곳(① 칸 미리보기도 같은 함수 · v0.6.88)
+const { AI_NOTICE_TEXT, aiNoticeTiming } = require('./core/visual-look');
 function resolveAiNotice(preset, want) {
   if (!preset) return preset;
   const a = preset.aiNotice || {};

@@ -682,6 +682,7 @@ export default function App() {
       if (cancelled || !p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
+      setAiCfg(p.aiNotice && typeof p.aiNotice === 'object' ? p.aiNotice : {});   // 🏷 AI 고지 문구·시각(① 칸 미리보기 · v0.6.88)
       const prof = (modeProfiles && modeProfiles[mode]) || {};
       const cap = p.capLong;
       if (cap) {
@@ -1518,6 +1519,7 @@ export default function App() {
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   // ➕ 삽입 — 그림·영상·오디오를 정한 클립(문장) 범위 동안(v0.5.54) · 🏷 채널 로고
   const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12 });
+  const [aiCfg, setAiCfg] = useState({});   // 🏷 채널 AI 고지 설정 { text, unit, fromSec, toSec, fromClip, toClip }
   const curLogoSide = () => { const pj = curProject(); return (pj && pj.logoSide) === 'left' ? 'left' : 'right'; };
   // 🏷 로고 크기(채널 값) — ➕ 삽입 메뉴에서 바꾸면 곧바로 채널(⚙ 채널편집 📁 폴더의 크기)에 저장한다(v0.5.64 · 로이)
   const logoSaveRef = useRef(null);
@@ -3448,6 +3450,15 @@ export default function App() {
     const k = applyCaptionStyle(lp);
     const box = el.parentElement ? { w: el.parentElement.clientWidth, h: el.parentElement.clientHeight } : null;
     renderStageLine(el, runs, { ...lp, anim: null }, 0, k, box);
+    // 🧩 ① 칸 편집칸이 열려 있으면 새 자리로 다시 잰다(v0.6.88 · 로이 「정렬을 눌러도 다른 곳을 눌러야 바뀐다」) — 가린 자막은 이미 새 자리에 그려졌다
+    if (sentEdit && sentEdit.where === 'stage') {
+      const ln = el.querySelector('.cf-stageline') || el; const stg = el.parentElement;
+      if (stg) {
+        const r = ln.getBoundingClientRect(), sr = stg.getBoundingClientRect();
+        const nb = { left: r.left - sr.left, top: r.top - sr.top, width: r.width, height: r.height, stageW: sr.width, stageH: sr.height };
+        setStageEditBox((b) => (b && Math.abs(b.left - nb.left) < 0.5 && Math.abs(b.top - nb.top) < 0.5 && Math.abs(b.width - nb.width) < 0.5 && Math.abs(b.stageW - nb.stageW) < 0.5 ? b : nb));
+      }
+    }
     if (playerInfoRef.current) playerInfoRef.current.textContent = `G${ci.cut.num} · 자막 ${ci.l.n} / ${ci.total}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsOn, playerOpen, cursor, linesMap, capLook, capSize, capPos, capFine, capAlign, capYAlign, capXOff, pane1W]);
@@ -3924,10 +3935,21 @@ export default function App() {
     </span>
   ) : null;
 
+  // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
+  //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
+  const stageAi = (() => {
+    if (!aiNotice || !isLf || !cursor) return null;
+    const ci = cursorInfo(); if (!ci) return null;
+    let ord = ci.l.sentIdx + 1; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
+    const start = ci.l.start != null ? ci.l.start : (ord - 1) * 2.5;   // 음성이 없으면 문장당 2.5초로 어림(목록 시각과 같은 어림)
+    const on = VLook.aiNoticeOn(VLook.aiNoticeTiming(aiCfg), ci.pr.aiNoticeRange, { n: ci.l.n, ord, start, dur: ci.l.dur || 2.5 });
+    return on ? { text: String(aiCfg.text || '').trim() || VLook.AI_NOTICE_TEXT, key: 'ai-' + (ci.pr.aiNoticeRange ? JSON.stringify(ci.pr.aiNoticeRange) : JSON.stringify(aiCfg)) } : null;
+  })();
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
     <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown}>
       <div id="stageVisual" ref={stageVisualRef} />
+      {stageAi && <div key={stageAi.key} className="stage-ai" data-testid="stage-ai" title="🏷 AI 고지 — 채널 설정 시각(또는 대본 🏷 범위) · 작업바 「AI 고지」로 켜고 끕니다">{stageAi.text}</div>}
       {stageLogo && <img className={'stage-logo' + (wsOn && isLf && !playerOpen ? ' drag' : '') + (logoDrag ? ' dragging' : '')} data-testid="stage-logo" alt="" src={media(stageLogo.path)} draggable={false}
         title={wsOn && isLf && !playerOpen ? '🏷 끌어서 로고 옮기기(이 대본) — 오른쪽 위·왼쪽 위 근처에 놓으면 제자리에 붙습니다' : undefined}
         onMouseDown={wsOn && isLf && !playerOpen ? onLogoDown : undefined}
