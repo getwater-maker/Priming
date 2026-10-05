@@ -173,6 +173,33 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       const secs = seen.filter(Boolean).map((x) => { const [m, s] = x.split(':').map(Number); return m * 60 + s; });
       ok(secs.length >= 8 && new Set(secs).size >= 3 && secs.every((v, i) => i === 0 || v >= secs[i - 1]) && secs[secs.length - 1] >= 2, `🔑 재생 중 시각이 1초마다 흐른다 — 3.6초 동안 ${JSON.stringify(seen)}`);
     }
+    console.log('\n[8] 🎚 재생 막대 — 끌어서 원하는 시각으로(v0.6.91)');
+    {
+      const seek = win.locator('[data-testid=stage-seek]');
+      ok(await seek.count() === 1, '① 칸 아래 재생 막대');
+      const atPct = async (p) => { const b = await seek.boundingBox(); await win.mouse.click(b.x + 8 + (b.width - 16) * p, b.y + b.height / 2); await win.waitForTimeout(600); };
+      const curN = () => win.evaluate(() => { const e = document.querySelector('.sent.cur'); return e ? Number(e.getAttribute('data-ln')) : null; });
+      await atPct(0.7);   // 전체 10초(4문장 × 2.5 어림) 의 7초 → 3번째 문장(5초 시작)
+      const t1 = (await win.locator('[data-testid=stage-time]').innerText()).match(/⏱ (\d+:\d\d)/)[1];
+      ok(await curN() === 3 && t1 === '0:05', `🔑 멈춘 채 70% 를 누르면 그 시각의 줄(3)로 · 시각 0:05 (줄 ${await curN()} · ${t1})`);
+      await atPct(0.05);
+      ok(await curN() === 1, `앞쪽을 누르면 첫 줄로 (줄 ${await curN()})`);
+      { // 실제 끌기 — 누른 채 옮기면 시각이 따라 보이고, 놓으면 그 줄로
+        const b = await seek.boundingBox(); const y = b.y + b.height / 2, X = (p) => b.x + 8 + (b.width - 16) * p;
+        await win.mouse.move(X(0.1), y); await win.mouse.down(); await win.mouse.move(X(0.78), y, { steps: 8 }); await win.waitForTimeout(200);
+        const mid = (await win.locator('[data-testid=stage-time]').innerText()).match(/⏱ (\d+:\d\d)/)[1];
+        const nMid = await curN();
+        await win.mouse.up(); await win.waitForTimeout(600);
+        ok(mid === '0:07' && nMid === 1 && await curN() === 4, `🔑 끄는 동안 시각이 따라 보이고(${mid} · 아직 줄 ${nMid}) 놓으면 그 줄로(줄 ${await curN()})`);
+      }
+      await win.locator('[data-testid=play-btn]').click(); await win.waitForTimeout(700);
+      await atPct(0.85);   // 8.5초 → 4번째 문장(7.5초 시작) · 재생 중이면 거기서 이어 재생
+      await win.waitForTimeout(900);
+      const n2 = await curN(); const playing = /멈춤/.test(await win.locator('[data-testid=play-btn]').innerText());
+      const t2 = (await win.locator('[data-testid=stage-time]').innerText()).match(/⏱ (\d+):(\d\d)/);
+      ok(n2 === 4 && playing && (Number(t2[1]) * 60 + Number(t2[2])) >= 7, `🔑 재생 중 85% → 4번째 줄부터 이어 재생 (줄 ${n2} · 재생 ${playing} · ${t2 && t2[0]})`);
+      await win.locator('[data-testid=play-btn]').click().catch(() => {}); await win.waitForTimeout(300);
+    }
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

@@ -971,3 +971,7 @@ body:has(.modal-bg.show) .clip-tb{display:none}
 .stage-time{color:#e8dcc8;font-size:12.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .stage-time b{color:#fff}
 .stage-time .meta{color:#bcae98}
+
+/* 🎚 ① 칸 아래 재생 막대(v0.6.91) */
+.stage-seekwrap{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:140px}
+.stage-seek{flex:1 1 auto;min-width:60px;accent-color:#d6a676;cursor:pointer;height:16px;margin:0}

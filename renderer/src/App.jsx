@@ -242,8 +242,9 @@ function fmtHMS(s) {
 }
 /** ⏱ ① 칸 아래 「지금 / 전체」(v0.6.89~90) — 재생 중엔 1초마다 흐른다: 줄이 바뀌면 그 줄 시작에 맞추고, 그 뒤엔 실제 흐른 시간만큼(그 줄 길이까지).
  *   🔑 자기 칸만 다시 그린다(App 전체를 1초마다 다시 그리지 않게). */
-function StageClock({ t, playing }) {
+function StageClock({ t, playing, onSeek }) {
   const [, setTick] = useState(0);
+  const [drag, setDrag] = useState(null);   // 🎚 끄는 중인 시각(초) — 놓으면 onSeek
   const anchorRef = useRef({ key: null, at: 0 });
   if (anchorRef.current.key !== t.key + ':' + t.cur) anchorRef.current = { key: t.key + ':' + t.cur, at: Date.now() };
   useEffect(() => {
@@ -253,12 +254,21 @@ function StageClock({ t, playing }) {
     return () => clearInterval(id);
   }, [playing]);
   const cur = playing ? t.cur + Math.min(t.dur, Math.max(0, (Date.now() - anchorRef.current.at) / 1000)) : t.cur;
-  return (
+  const shown = drag != null ? drag : cur;
+  // 🔑 누르고 있을 때만 값을 받는다 — 놓은 뒤 Chromium 이 「change」를 한 번 더 쏘는데, 그때 값은 이미 재생 시각으로 돌아가 있어 막대가 그 자리에 붙어 버렸다(E2E 가 잡음)
+  const downRef = useRef(false);
+  const commit = (e) => { if (!downRef.current) return; downRef.current = false; const v = e && e.currentTarget ? Number(e.currentTarget.value) : drag; setDrag(null); if (onSeek && v != null && isFinite(v)) onSeek(v); };
+  return (<span className="stage-seekwrap">
+    {/* 🎚 재생 막대(v0.6.91 · 로이 「끌어서 원하는 시간으로」) — 놓으면 그 시각의 자막 줄로(재생 중이면 거기서 이어 재생) */}
+    {onSeek && <input type="range" className="stage-seek" data-testid="stage-seek" min={0} max={Math.max(0.1, t.tot)} step={0.1} value={Math.min(shown, Math.max(0.1, t.tot))}
+      title="끌어서 원하는 시각으로 — 놓으면 그 자리의 자막 줄로 옮깁니다(재생 중이면 거기서 이어 재생)"
+      onPointerDown={() => { downRef.current = true; }} onKeyDown={() => { downRef.current = true; }}
+      onChange={(e) => { if (downRef.current) setDrag(Number(e.target.value)); }} onPointerUp={commit} onKeyUp={commit} onBlur={commit} />}
     <span className="stage-time" data-testid="stage-time"
       title={'⏱ 지금 시각 / 전체 재생시간(문장 음성 길이 합 — .vrew 와 같다) · 재생 중엔 1초마다 흐른다' + (t.miss ? `
 음성이 아직 없는 문장 ${t.miss}개는 문장당 2.5초로 어림했습니다` : '')}>
-      ⏱ {fmtHMS(cur)} / <b>{fmtHMS(t.tot)}</b>{t.miss ? <span className="meta"> (어림)</span> : null}</span>
-  );
+      ⏱ {fmtHMS(shown)} / <b>{fmtHMS(t.tot)}</b>{t.miss ? <span className="meta"> (어림)</span> : null}</span>
+  </span>);
 }
 // 초 → "N분 N초" (1시간 이상이면 "N시간 N분 N초"). 합계 표시용.
 function fmtMinSec(s) {
@@ -3970,6 +3980,17 @@ export default function App() {
     for (const cu of ci.pr.cuts) for (const se of (cu.sentences || [])) { ord++; const d = se.dur > 0 ? se.dur : (miss++, 2.5); if (ord < myOrd) before += d; tot += d; }
     return { cur: ci.l.start != null ? ci.l.start : before, tot, miss, dur: ci.l.dur > 0 ? ci.l.dur : 2.5, key: ci.l.n };
   })();
+  // 🎚 재생 막대로 옮기기 — 그 시각이 든 자막 줄(시작 ≤ 시각 중 마지막)로 커서 · 재생 중이면 그 줄부터 다시 재생. 음성이 없는 문장은 2.5초 어림(시계와 같다)
+  function seekToTime(sec) {
+    const ci = cursorInfo(); if (!ci) return;
+    const sn = ci.pr.shortsNum; const PL = linesMap.get(sn); if (!PL) return;
+    const sStart = new Map(); let acc = 0;
+    for (const cu of ci.pr.cuts) (cu.sentences || []).forEach((se, si) => { sStart.set(cu.num + ':' + si, acc); acc += se.dur > 0 ? se.dur : 2.5; });
+    let pick = PL.list[0] || null;
+    for (const l of PL.list) { const st = l.start != null ? l.start : (sStart.get(l.groupNum + ':' + l.sentIdx) || 0); if (st <= sec + 1e-6) pick = l; else break; }
+    if (!pick) return;
+    if (playerOpen) playFromCursor({ shortsNum: sn, n: pick.n }, true); else userCursor({ shortsNum: sn, n: pick.n });
+  }
   // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
   //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
   const stageAi = (() => {
@@ -4026,7 +4047,7 @@ export default function App() {
     <div id="playerBar">
       {wsOn && <button className={playerOpen ? 'ghost' : ''} data-testid="play-btn" title="커서 줄부터 재생 / 멈춤 (Space)" onClick={() => (playerOpen ? stopPlayer() : playFromCursor())}>{playerOpen ? '■ 멈춤' : '▶ 재생'}</button>}
       <span id="playerInfo" ref={playerInfoRef} />
-      {wsOn && stageTime && <StageClock t={stageTime} playing={!!playerOpen} />}
+      {wsOn && stageTime && <StageClock t={stageTime} playing={!!playerOpen} onSeek={seekToTime} />}
       {!wsOn && <button className="ghost" onClick={stopPlayer}>■ 닫기</button>}
     </div>
   </>);
