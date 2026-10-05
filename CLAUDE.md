@@ -88,6 +88,7 @@
 - 중단: `S.abort` 는 main, 렌더러 큐 루프는 `queueAbortRef`. 새 작업 시작 시 반드시 `S.abort = false`. 중단 시 생성 중 표시(`clearGeneratingStatus`) 정리, 폴더·.vrew 자동 열기 안 함.
 - ⏸ **「이번 편까지만」**(헤더, 큐 작업 중에만 보임 · v0.5.107): 만들던 대본은 끝까지 마치고 다음 대본부터 안 시작. main `_stopAfterItem` 은 **`S.abort` 와 별개 플래그**(합치면 「끝까지」가 「바로 멈춤」이 된다) — run-batch 시작·끝에서 풀고, 검사는 다음 대본 시작 **전**. `test:stopafter`.
 - ⏭ **4단계 .vrew 는 입력 지문이 같고 파일이 기록 그대로면 건너뛴다**(v0.5.108 · `core/build-fingerprint` · 기록 `<출력>/.priming-build/`). `buildProjectVrew` 가 읽는 입력을 늘리면 **`P.vrewInputsOf` 에도 넣을 것**(빠뜨리면 바뀐 설정이 반영 안 된 채 건너뛴다 · `test:buildfp`). 판정은 fail-closed(실패 = 새로 만든다).
+- ⬆ **⚡ 만들기가 MP4 를 다시 굽지 않고 넘어가도(「입력이 그대로」·「같은 이름 MP4 건너뛰기」) 자동 업로드 채널이면 업로드 관문으로 보낸다**(v0.6.97 · `uploadExisting` → `maybeAutoUpload` → `runYtUpload` 중복 관문 · `test:makeupload`) — 새로 「건너뛰는」 출구를 만들면 여기도 부를 것.
 - 📂 **MP4 모드에서 저장 폴더에 같은 이름 MP4 가 있으면 `askMp4Exists` 로 묻는다**(v0.6.1 · 기본 건너뛰기 · 60초 무응답 = 건너뛰기 · 지문이 같으면 묻지 않음). 새 출력 경로를 만들면 같은 관문을 거칠 것.
 - 📊 **진행 팝업**(v0.6.44): 셈은 `core/make-progress` 한 곳(메모리 필드만 — fs 금지), 끝은 `runMakeAllCore` finally 한 곳. 새 단계를 만들면 `_mk.begin/end` 를 달 것. 진행 팝업(만들기·MP4·업로드)은 **한 자리에 겹치고**(zIndex 뒤 단계가 위) 끝나면(실패 포함) 3초 뒤 닫힌다 — 🔴 타이머는 **팝업마다 따로**(`useAutoCloseProg` · 한 효과에 묶으면 1초마다 갱신되는 팝업이 남의 타이머를 지운다 · `test:progclose`).
 - 작업 중 절전 차단 `withAwake`(참조 카운트). 완료 후 탐색기를 자동으로 열지 않는다(.vrew 만 연다).

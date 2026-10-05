@@ -6830,12 +6830,16 @@ async function runMakeAllBody(opts = {}) {
         if (await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [S.scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
         const utd = await BF.checkUpToDate({ outRoot, baseName, fp, vrewPath, mp4Path });
         let vrewReady = false;
+        // ⬆ 다시 굽지 않고 넘어가도, 채널에 아직 없으면 올린다(v0.6.97 · 로이 「만들기만 누르면 MP4 확인 → 안 올라갔으면 업로드」).
+        //   멈췄다 다시 만들기 · 업로드만 중단했던 대본이 빠지던 빈틈. 중복은 runYtUpload 관문(같은 파일 · 이 PC 같은 제목 · 채널의 같은 제목)이 거른다.
+        const uploadExisting = () => { if (mp4Go && preset && preset.ytAuto && fs.existsSync(mp4Path)) { try { maybeAutoUpload(pr, mp4Path, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } } };
         if (utd.vrewOk && (!mp4Go || utd.mp4Ok)) {
           log(`⏭ ${pr.title} — 입력이 그대로이고 ${mp4Go ? '.vrew·MP4 가' : '.vrew 가'} 이미 있어 다시 만들지 않습니다 (강제로 다시 만들려면 .priming-build 폴더의 기록을 지우세요)`);
+          uploadExisting();
           continue;
         }
         if (mp4Go && fs.existsSync(mp4Path)) {   // 📂 같은 이름의 MP4 가 저장 폴더에 있으면 묻는다 — 기본 건너뛰기
-          if (await askMp4Exists(pr.title, mp4Path) === 'skip') { log(`⏭ ${pr.title} — 같은 이름의 MP4 가 이미 있어 건너뜁니다 (${mp4Path})`); continue; }
+          if (await askMp4Exists(pr.title, mp4Path) === 'skip') { log(`⏭ ${pr.title} — 같은 이름의 MP4 가 이미 있어 건너뜁니다 (${mp4Path})`); uploadExisting(); continue; }
           log(`🔁 ${pr.title} — 같은 이름의 MP4 가 있지만 다시 만듭니다`);
         }
         if (utd.vrewOk && mp4Go) { vrewReady = true; log(`⏭ ${pr.title} — .vrew 는 최신이라 MP4 만 굽습니다`); }
