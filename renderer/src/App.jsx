@@ -13,7 +13,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import ScriptReader from './ScriptReader.jsx';
-import TtsEngineDialog from './TtsEngineDialog.jsx';
+import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
@@ -1725,7 +1725,19 @@ export default function App() {
     } catch { return null; }
   }
   useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [presetName]);
-  function openTtsEngines() { setTtsEng(true); }
+  // channel 을 주면 그 채널을 고른 채로 연다(채널편집 🎙 음성 → 「🔊 음성 설정에서 바꾸기」)
+  function openTtsEngines(channel) { setTtsEng({ channel: typeof channel === 'string' ? channel : '' }); }
+  // 🎙 채널편집 음성 탭 요약 — 그 채널의 엔진·목소리(얼굴) · 탭을 열 때·음성 설정을 저장했을 때 다시 읽는다
+  const [chVoiceInfo, setChVoiceInfo] = useState(null);
+  async function loadChVoiceInfo(name) {
+    try {
+      const r = await api.ttsEnginesGet(); const c = r && (r.channels || []).find((x) => x.name === name); if (!c) { setChVoiceInfo(null); return; }
+      const id = (c.voiceEngine && c.voiceEngine.id) || 'omnivoice'; const e = (r.engines || []).find((x) => x.id === id) || {};
+      const vid = id === 'omnivoice' ? c.ref : c.voiceEngine.voice; const vv = (e.voices || []).find((x) => x.id === vid);
+      setChVoiceInfo({ name, id, engLabel: String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, ''), vname: vv ? vv.name : String(vid || '').replace(/^srv:/, ''), face: (e.faces || {})[vid] || null, gender: vv && vv.gender });
+    } catch { setChVoiceInfo(null); }
+  }
+  useEffect(() => { if (chOpen && chTab === 'voice' && ch && ch.name) loadChVoiceInfo(ch.name); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [chOpen, chTab, ch && ch.name]);
   // 🔑 TTS API 키 — ⚙ 설정 → 🔑 API 키 탭(음성 설정 팝업의 「키 넣기」도 여기로 온다)
   async function loadTtsKeys() {
     try { const r = await api.ttsEnginesGet(); if (r) setTtsKeys((x) => ({ ...x, info: r.keys || {}, region: r.region || 'eastus' })); } catch {}
@@ -4458,53 +4470,74 @@ export default function App() {
                 <div className="frow"><label></label><span className="meta">대본 화면에서 🏷 로 문장 범위를 따로 정한 대본은 그 범위가 이깁니다. Vrew 는 클립 단위로 사라지므로 「초」 끝은 그 시각이 든 클립이 끝날 때 사라집니다.</span></div>
               </div>)}
 
-              {/* 음성 = OmniVoice(참조음성 클론) 기준. Supertonic(사전정의 음성) 은 제거됨 — 2026-07-31 */}
-              {chTab === 'voice' && (<div>
-                <div className="frow"><label>목소리</label><input readOnly title="참조음성 (☁ = 서버 공용 라이브러리 — 이 PC 에 파일이 없어도 됨)" value={refLabel(ch.voiceCloneRefAudio) || ch.voice} style={{ flex: '0 0 170px' }} />
-                  <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="ja">日本語 (일본어)</option><option value="vi">Tiếng Việt (베트남어)</option><option value="en">English</option></select>
-                  <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
-                <div className="frow"><label>참조음성</label>
-                  <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                    {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
-                        (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
-                    {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
-                    {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
-                    {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-                  </select>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" onClick={() => playRef(ch.voiceCloneRefAudio)}>{pvBtn('ref:' + ch.voiceCloneRefAudio)}</button>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
-                <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
-                <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
-                  <span className="mini" title="문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.">문장무음</span><input className="nbox" type="number" step="0.1" min="0" max="5" title="0 = 사용 안 함. 권장 0.5~1.5초." value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
-
-                <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
-                <div style={{ maxHeight: 92, overflowY: 'auto' }}>
-                  {(ch.speakers || []).map((r, i) => (
-                    <div className="crow" key={i} style={{ gap: 6 }}>
-                      <input style={{ flex: '0 0 90px', width: 90 }} placeholder="이름" value={r.name}
-                        onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], name: e.target.value }; setCh({ ...ch, speakers: a }); }} />
-                      <select style={{ flex: 1, padding: 4 }} value={r.voice}
-                        onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], voice: e.target.value }; setCh({ ...ch, speakers: a }); }}>
-                        {!r.voice ? <option value="">— 목소리 선택 —</option> : null}
-                        {r.voice && chRefList.every((x) => x.path !== r.voice) ? <option value={r.voice}>{refLabel(r.voice)}</option> : null}
-                        {chRefList.map((x) => <option key={x.path} value={x.path}>{x.name}</option>)}
-                      </select>
-                      <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" disabled={!r.voice} onClick={() => playRef(r.voice)}>{pvBtn('ref:' + r.voice)}</button>
-                      <button className="ghost" style={{ flex: '0 0 auto' }} title="이 화자 지우기" onClick={() => setCh({ ...ch, speakers: ch.speakers.filter((_, j) => j !== i) })}>✕</button>
-                    </div>
-                  ))}
+              {/* 🎙 음성 탭(v0.6.80 정리) — ① 이 채널 목소리 요약(엔진·목소리 · 「🔊 음성 설정」에서 바꾼다) ② OmniVoice 참조음성(OmniVoice 일 때만)
+                  ③ 화자별 목소리(OmniVoice 전용) ④ 소리 다듬기(배속·문장무음·음량 — 모든 엔진 공통).
+                  ⚠ 필드·저장(saveChannel)은 그대로 — 배치만 바꿨다. 이미지 「사전설정」은 🎨 제작 도구 탭으로 옮겼다. */}
+              {chTab === 'voice' && (() => {
+                const vi = chVoiceInfo && chVoiceInfo.name === ch.name ? chVoiceInfo : null;
+                const engId = (vi && vi.id) || 'omnivoice';
+                const isOmni = engId === 'omnivoice';
+                return (<div>
+                <div data-testid="ch-voice-sum" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 10, background: '#fbf6ee', marginBottom: 10 }}>
+                  <Face face={vi && vi.face} name={(vi && vi.vname) || refLabel(ch.voiceCloneRefAudio) || '?'} gender={vi && vi.gender} size={44} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700 }}>{vi ? vi.engLabel : 'OmniVoice'} · {isOmni ? (refLabel(ch.voiceCloneRefAudio) || '참조음성 없음') : ((vi && vi.vname) || '목소리 없음')}</div>
+                    <div className="meta" style={{ fontSize: 11 }}>{isOmni ? '내 GPU 서버 · 무료 · 아래 참조음성으로 읽습니다' : '유료 API — 목소리·모델·말투는 「🔊 음성 설정」에서 · 아래 참조음성·Clone 강도·화자 목소리는 쓰지 않습니다'}</div>
+                  </div>
+                  <button className="ghost" data-testid="ch-voice-open" style={{ flex: '0 0 auto' }} title="엔진(OmniVoice·Gemini·MAI·타입캐스트·ElevenLabs)과 목소리를 카드로 고릅니다" onClick={() => openTtsEngines(ch.name)}>🔊 음성 설정에서 바꾸기</button>
                 </div>
-                <div className="crow"><button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button></div>
-                <div className="subhead">🔊 음성 배속</div>
-                <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
-                <div className="subhead">🔊 음량 맞추기</div>
+                <div className="frow"><label>언어</label><select style={{ flex: '0 0 160px' }} value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="ja">日本語 (일본어)</option><option value="vi">Tiếng Việt (베트남어)</option><option value="en">English</option></select>
+                  <span className="mini" title="같은 시드 = 편마다 같은 톤. OmniVoice·ElevenLabs 가 씁니다.">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
+
+                {isOmni ? (<>
+                  <div className="subhead">🎙 OmniVoice 참조음성</div>
+                  <div className="frow"><label>참조음성</label>
+                    <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
+                      {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
+                          (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
+                      {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
+                      {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
+                      {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
+                    </select>
+                    <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" onClick={() => playRef(ch.voiceCloneRefAudio)}>{pvBtn('ref:' + ch.voiceCloneRefAudio)}</button>
+                    <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
+                    <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
+                  <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /><span className="meta">참조음성을 얼마나 따라 할지(기본 2)</span></div>
+
+                  <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
+                  <div style={{ maxHeight: 92, overflowY: 'auto' }}>
+                    {(ch.speakers || []).map((r, i) => (
+                      <div className="crow" key={i} style={{ gap: 6 }}>
+                        <input style={{ flex: '0 0 90px', width: 90 }} placeholder="이름" value={r.name}
+                          onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], name: e.target.value }; setCh({ ...ch, speakers: a }); }} />
+                        <select style={{ flex: 1, padding: 4 }} value={r.voice}
+                          onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], voice: e.target.value }; setCh({ ...ch, speakers: a }); }}>
+                          {!r.voice ? <option value="">— 목소리 선택 —</option> : null}
+                          {r.voice && chRefList.every((x) => x.path !== r.voice) ? <option value={r.voice}>{refLabel(r.voice)}</option> : null}
+                          {chRefList.map((x) => <option key={x.path} value={x.path}>{x.name}</option>)}
+                        </select>
+                        <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" disabled={!r.voice} onClick={() => playRef(r.voice)}>{pvBtn('ref:' + r.voice)}</button>
+                        <button className="ghost" style={{ flex: '0 0 auto' }} title="이 화자 지우기" onClick={() => setCh({ ...ch, speakers: ch.speakers.filter((_, j) => j !== i) })}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="crow"><button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button></div>
+                </>) : (
+                  <div className="meta" style={{ margin: '8px 0', padding: '6px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.04)' }}>
+                    🎙 OmniVoice 참조음성·Clone 강도·🎭 화자별 목소리는 OmniVoice 로 읽을 때만 씁니다(저장된 값은 그대로 남아 있습니다 — OmniVoice 로 돌아가면 다시 씁니다).
+                  </div>
+                )}
+
+                <div className="subhead">🎚 소리 다듬기 <span className="meta" style={{ fontWeight: 400 }}>— 모든 엔진 공통</span></div>
+                <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} />
+                  <span className="meta" style={{ marginLeft: 12 }} title="문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.">문장무음</span>
+                  <input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.1" min="0" max="5" title="0 = 사용 안 함. 권장 0.5~1.5초." value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
                 <div className="crow">
-                  <span className="l">문장마다 같은 음량으로</span>
+                  <span className="l">음량 맞추기</span>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={ch.ttsNormalize !== false}
                       onChange={(e) => setCh({ ...ch, ttsNormalize: e.target.checked })} />
-                    <span className="meta">켜기</span>
+                    <span className="meta">문장마다 같은 음량으로</span>
                   </label>
                   <span className="meta" style={{ marginLeft: 10 }}>목표</span>
                   <input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="1" min="-30" max="-6"
@@ -4514,17 +4547,18 @@ export default function App() {
                   <span className="meta">dB</span>
                 </div>
                 <div className="meta" style={{ marginTop: 4, lineHeight: 1.5 }}>
-                  문장마다 들쭉날쭉한 음량을 한 레벨로 맞춥니다. 짧은 문장·의문문이 작게 나오는 것과,
-                  참조음성이 조용해 결과 전체가 작아지는 것을 함께 잡습니다.
-                  ⚠ 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
+                  짧은 문장·의문문이 작게 나오는 것과 참조음성이 조용해 전체가 작아지는 것을 함께 잡습니다. ⚠ 배속·문장무음·음량을 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
                 </div>
-              </div>)}
+              </div>);
+              })()}
 
               {chTab === 'caption' && (<div>
                 <div className="twocol">{capColumn('capLong', '본문 자막 (16:9)', true)}</div>
               </div>)}
 
               {chTab === 'tools' && (<div>
+                {/* 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 값·저장은 그대로 presetPrompt) */}
+                <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
                 <div className="subhead">🎨 이미지 스타일</div>
                 <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
 
@@ -4836,9 +4870,13 @@ export default function App() {
           </div>
         </div>
       )}
-      {ttsEng && <TtsEngineDialog initialChannel={presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
+      {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
-        onClose={() => setTtsEng(null)} onSaved={(n) => { refreshTtsEngActive(); setStatus(n ? `🔊 채널 목소리 저장 — ${n}개 채널` : '🔊 저장됨'); }} />}
+        onClose={() => setTtsEng(null)} onSaved={(n) => {
+          refreshTtsEngActive();
+          // 채널편집이 열려 있으면 그 채널의 참조음성·요약을 새로(음성 설정이 OmniVoice 참조음성을 바꿨을 수 있다 — 옛 값으로 다시 저장하지 않게)
+          if (chOpen && ch && ch.name) { loadChVoiceInfo(ch.name); api.getPresetDetail(ch.name).then((p) => { if (p) setCh((c) => (c ? { ...c, voiceCloneRefAudio: p.voiceCloneRefAudio || '' } : c)); }).catch(() => {}); }
+          setStatus(n ? `🔊 채널 목소리 저장 — ${n}개 채널` : '🔊 저장됨'); }} />}
       {ollamaOpen && ollama && (
         <div className="modal-bg show">
           <div className="modal-card">

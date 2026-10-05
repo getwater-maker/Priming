@@ -102,7 +102,10 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     { const m = /1만 자 ≈ ([\d,]+)원/.exec(price); const w = m ? Number(m[1].replace(/,/g, '')) : 0;
       ok(w >= 250 && w <= 400 && !/\$/.test(price), `요금 표시 = 원화 — MAI 2.1 1만 자 $0.22 × 환율 ≈ ${w}원 · 달러 표시 없음 (${price.replace(/\s+/g, ' ').slice(0, 80)})`); }
     ok((await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] button[title*="AI 로 얼굴"]').count()) === 1, '카드에 🎨 AI 얼굴 · 🖼 그림 버튼');
-    ok(/듣기/.test(await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-play"]').innerText()), '카드에 🔈 샘플 듣기(요금 표시)');
+    { const pb = win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-play"]');
+      const t = (await pb.innerText()).trim(); const bb = await pb.boundingBox();
+      ok(/🔈|⏳/.test(t) && !/듣기/.test(t) && (await pb.getAttribute('aria-label')) === '샘플 듣기', `카드 🔈 = 아이콘만(글자 없음 · 「${t}」)`);
+      ok(bb && bb.height <= 32 && bb.width >= 30, `🔈 버튼이 한 줄 · 큼직(${bb && Math.round(bb.width)}×${bb && Math.round(bb.height)})`); }
 
     // Gemini 30
     await win.locator('[data-testid="tts-tab-gemini"]').click(); await win.waitForTimeout(200);

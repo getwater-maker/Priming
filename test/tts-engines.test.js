@@ -278,6 +278,15 @@ function makeWav(samples, sr = 24000) {
       ok(/data-testid="tts-keys"/.test(APP2) && ['gemini', 'mai', 'typecast', 'elevenlabs'].every((id) => APP2.includes(`['${id}', `)), '⚙ 설정 → 🔑 API 키에 TTS API 4개(Gemini·MAI·타입캐스트·ElevenLabs)');
       ok(!/type="password"/.test(dlg), '음성 설정 팝업에는 키 입력칸이 없다(설정으로 안내만)');
       ok(/data-testid="tts-key-goto"/.test(dlg) && /onOpenKeys=\{openTtsKeySettings\}/.test(APP2), '키 없으면 「🔑 키 넣기 → ⚙ 설정」 버튼이 설정 키 탭을 연다'); }
+    { // 🎙 채널편집 음성 탭 정리 · 🔈 아이콘 버튼 · 채널 그림(v0.6.80)
+      const APP3 = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
+      ok(/data-testid="ch-voice-sum"/.test(APP3) && /openTtsEngines\(ch\.name\)/.test(APP3), '음성 탭 맨 위 = 이 채널 목소리 요약 + 「🔊 음성 설정에서 바꾸기」(그 채널로 연다)');
+      ok(/isOmni \? \(<>/.test(APP3), '참조음성·Clone강도·화자 목소리 = OmniVoice 일 때만');
+      { const vt = APP3.indexOf("{chTab === 'voice' && (() => {"); const tt = APP3.indexOf("{chTab === 'tools' && (<div>");
+        ok(vt > 0 && tt > 0 && !APP3.slice(vt, APP3.indexOf("{chTab === 'caption'", vt)).includes('presetPrompt') && APP3.slice(tt, tt + 600).includes('presetPrompt'), '이미지 「사전설정」은 🎨 제작 도구 탭으로'); }
+      ok(/api\.getPresetDetail\(ch\.name\)\.then\(\(p\) => \{ if \(p\) setCh\(\(c\) => \(c \? \{ \.\.\.c, voiceCloneRefAudio/.test(APP3), '음성 설정 저장 뒤 열린 채널편집의 참조음성을 새로(옛 값으로 덮어쓰지 않게)');
+      ok(/aria-label="샘플 듣기"/.test(dlg) && !/\{playing \? '⏳' : '🔈'\} 듣기/.test(dlg), '카드 🔈 = 아이콘만(「듣기」 글자 없음)');
+      ok(MJ.includes("'_ch_' + _voiceFileKey(p.name) + '.png'"), '유튜브 연결 없는 채널 = 이름 그림(_ch_<이름>.png)'); }
     ok(MJ.includes("ipcMain.handle('tts-channel-avatars'") && MJ.includes('ytChannelId') && MJ.includes('/youtube/v3/channels?part=snippet&id='), '🏷 채널 로고 = 연결된 유튜브 채널 그림(ytChannelId · 이름 짐작 없음)');
     { const ia = MJ.indexOf("ipcMain.handle('tts-channel-avatars'"); ok(!/logoPath\s*:/.test(MJ.slice(ia, ia + 1200)), '유튜브 그림은 logoPath(영상 로고)를 건드리지 않는다'); }
     ok(MJ.includes("ipcMain.handle('el-shared-voices'") && MJ.includes("ipcMain.handle('el-add-shared'"), 'IPC — 라이브러리 찾기·추가');

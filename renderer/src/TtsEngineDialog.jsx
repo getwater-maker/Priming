@@ -530,10 +530,13 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick
         {meta && <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
         {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
         <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          <button className="ghost" data-testid="tts-voice-play" style={{ padding: '1px 8px', fontSize: 11 }}
+          {/* 🔈 아이콘 버튼(글자 없음 — 좁은 카드에서 「듣기」가 두 줄로 깨졌다 · 로이 2026-10-05) · 요금은 옆에 작게 */}
+          <button className="ghost" data-testid="tts-voice-play" aria-label="샘플 듣기"
+            style={{ flex: '0 0 auto', width: 34, height: 28, padding: 0, fontSize: 16, lineHeight: '26px', borderRadius: 14, whiteSpace: 'nowrap' }}
             title={sampled ? '샘플 듣기(저장됨 · 무료) — Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${wonTxt(sampleCost, krw)} · 한 번 만들면 저장)`}
-            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'} 듣기{sampled || !sampleCost ? '' : ` ${wonTxt(sampleCost, krw)}`}</button>
-          {users && users.length > 0 && <span style={{ fontSize: 10, color: BLUE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={'이 목소리를 쓰는 채널: ' + users.join(', ')}>📺 {users.length > 1 ? `${users[0]} 외 ${users.length - 1}` : users[0]}</span>}
+            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'}</button>
+          {!sampled && sampleCost > 0 && <span className="meta" style={{ fontSize: 10, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{wonTxt(sampleCost, krw)}</span>}
+          {users && users.length > 0 && <span style={{ fontSize: 10, color: BLUE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '1 1 auto' }} title={'이 목소리를 쓰는 채널: ' + users.join(', ')}>📺 {users.length > 1 ? `${users[0]} 외 ${users.length - 1}` : users[0]}</span>}
         </div>
       </div>
     </div>

@@ -5174,7 +5174,8 @@ function _channelsForUi() {
       //   우선순위: 채널편집 로고(logoPath) → 연결된 유튜브 채널 프로필 그림(받아 둔 파일) → 없음(이름 첫 글자)
       let logo = null;
       try {
-        const av = p.ytChannelId ? path.join(CH_AVATAR_DIR(), p.ytChannelId + '.jpg') : '';
+        // 유튜브 연결이 없는 채널은 이름으로 된 그림(_ch_<이름>.png — 플레이리스트·출판·강의 등)을 쓴다
+        const av = p.ytChannelId ? path.join(CH_AVATAR_DIR(), p.ytChannelId + '.jpg') : path.join(CH_AVATAR_DIR(), '_ch_' + _voiceFileKey(p.name) + '.png');
         const lp = (p.logoPath && fs.existsSync(p.logoPath)) ? p.logoPath : (av && fs.existsSync(av) ? av : '');
         if (lp) logo = { path: lp, v: String(fs.statSync(lp).mtimeMs | 0) };
       } catch {}
