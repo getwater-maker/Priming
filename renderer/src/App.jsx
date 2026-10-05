@@ -5444,6 +5444,10 @@ export default function App() {
                   <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                     <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
                   </label>
+                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}
+                    title="대본의 인물 카드(🎨 일관성 앵커 「알리사 카드: …」)로 인물 시트를 한 번 만들어 <출력>/characters/ 에 두고, 그 인물이 보이는 장면마다 참조로 붙입니다. 시트를 같은 이름 그림으로 바꿔 넣으면 그 그림을 씁니다. 즉시 생성만(배치 제외) · 인물마다 시트 1장 비용이 더 듭니다.">
+                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.charRefs !== false} onChange={(e) => saveGiCfg({ charRefs: e.target.checked })} />👤 인물 일관성
+                  </label>
                 </div>}
                 <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급)</div>
               </div>

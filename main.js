@@ -878,6 +878,11 @@ ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
   }
   if (!requests.length) return { ok: false, error: '배치로 만들 이미지가 없습니다 (이미 다 있음).' };
   log(`🌙 배치 제출 중… ${requests.length}장 (나노바나나2 Lite API)`);
+  try {   // 👤 배치는 인물 참조를 싣지 않는다(요청마다 시트 그림을 넣으면 인라인 한도 20MB 를 넘는다)
+    if (GI.loadConfig().charRefs !== false && S.scriptPath && require('./core/char-refs').parseCards(fs.readFileSync(S.scriptPath, 'utf8')).length) {
+      log('  👤 배치는 인물 참조를 쓰지 않습니다 — 인물 일관성이 필요하면 즉시 생성(⚡ 만들기)으로 그리세요.');
+    }
+  } catch {}
   const r = await GI.submitBatch({ requests, displayName: (S.parsed.fileTitle || 'priming') });
   if (!r.ok) { log('배치 제출 실패: ' + r.error); return r; }
   require('./core/gemini-batch-store').add({
@@ -3523,14 +3528,52 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, fo
   try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
   const model = GI.loadConfig().model;
   logger(`🍌 Nano Banana 2 Lite (Gemini API · ${model}) — ${targets.length}장 즉시 생성`);
+  const cr = await _charRefsFor(imagesDir, logger);
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
-    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
+    let refParts = null, extra = '';
+    if (cr) ({ refParts, extra } = await cr.forGroup(project, g, stylePrompt));
+    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt) + extra;
     const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS).replace(/\.png$/, '');   // 🔒
-    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base });
+    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base, refParts });
     if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }
     else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
   }
+}
+
+// 👤 인물 일관성(나노바나나 전용 · core/char-refs) — 대본 인물 카드가 있으면 인물 시트를 <출력>/characters/ 에 만들고
+//   장면마다 보이는 인물의 시트를 참조로 붙인다. 설정 charRefs=false 면 끈다. 시트는 인물마다 한 번만(있으면 재사용 ·
+//   사람이 같은 이름 그림으로 바꿔 넣으면 그 그림). 시트 실패한 인물은 이번 작업에서 다시 만들지 않고 참조 없이 간다.
+async function _charRefsFor(imagesDir, logger) {
+  const GI = require('./core/gemini-image'); const CR = require('./core/char-refs');
+  if (GI.loadConfig().charRefs === false || !S.scriptPath) return null;
+  let cards = [];
+  try { cards = CR.parseCards(await fs.promises.readFile(S.scriptPath, 'utf8')); } catch { return null; }
+  if (!cards.length) return null;
+  const outRoot = path.dirname(imagesDir);
+  logger(`👤 인물 카드 ${cards.length}명 — ${cards.map((c) => c.name).join(', ')} (참조 시트: ${path.join(outRoot, 'characters')})`);
+  const failed = new Set();
+  async function ensure(c, stylePrompt) {
+    if (CR.findSheet(outRoot, c)) return true;
+    if (failed.has(c.name) || S.abort) return false;
+    logger(`  👤 인물 시트 만드는 중: ${c.name}`);
+    const r = await GI.generateImageToFile({ prompt: CR.sheetPrompt(stylePrompt, c), aspect: '1:1', outPathNoExt: CR.sheetBase(outRoot, c) });
+    if (r.ok) return true;
+    failed.add(c.name); logger(`  ⚠ ${c.name} 인물 시트 실패 — 이 인물은 참조 없이 그립니다: ${r.error}`);
+    return false;
+  }
+  return {
+    async forGroup(project, g, stylePrompt) {
+      const byId = new Map((project.sentences || []).map((s) => [s.id, s]));
+      const narration = (g.sentenceIds || []).map((id) => (byId.get(id) || {}).text || '').join(' ');
+      const cast = CR.castFor(narration, g.imagePrompt, cards);
+      const ready = [];
+      for (const c of cast) { if (await ensure(c, stylePrompt)) ready.push(c); }
+      if (!ready.length) return { refParts: null, extra: '' };
+      logger(`  👤 G${g.num} 인물 참조: ${ready.map((c) => c.name).join(', ')}`);
+      return { refParts: CR.refParts(ready, (c) => CR.findSheet(outRoot, c)), extra: CR.directive(ready) };
+    },
+  };
 }
 
 // ── 생성된 시각물이 '내용 없음'인지 판정 ──────────────────────────────────────────────

@@ -14,6 +14,7 @@ const CFG_PATH = path.join(os.homedir(), '.shots-maker', 'gemini-image-config.js
 const DEFAULTS = {
   model: 'gemini-3.1-flash-lite-image',    // Nano Banana 2 Lite (공식 pricing 페이지 확인, 최저가·배치지원). ⚙에서 변경 가능.
   sendAspect: true,                        // generationConfig.imageConfig.aspectRatio 전송(미지원 모델이면 끄기)
+  charRefs: true,                          // 👤 대본 인물 카드 → 인물 시트 → 장면마다 참조 첨부(core/char-refs)
 };
 function loadConfig() {
   try { const j = JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')); return { ...DEFAULTS, ...(j || {}) }; } catch { return { ...DEFAULTS }; }
@@ -28,7 +29,8 @@ function geminiKey() {
 }
 
 // 즉시 이미지 생성 1장 → { ok, buffer, ext } | { ok:false, error }
-async function generateImage({ prompt, aspect, key, model, sendAspect, timeoutMs = 120000 }) {
+//   refParts: 프롬프트 앞에 붙는 Gemini parts(👤 인물 참조 — 「이름 글 → inlineData 그림」 쌍, core/char-refs.refParts)
+async function generateImage({ prompt, aspect, key, model, sendAspect, refParts, timeoutMs = 120000 }) {
   key = key || geminiKey();
   if (!key) return { ok: false, error: 'Gemini API 키 없음 (⚙에서 설정)' };
   const cfg = loadConfig();
@@ -37,7 +39,7 @@ async function generateImage({ prompt, aspect, key, model, sendAspect, timeoutMs
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
   const genCfg = { responseModalities: ['IMAGE'] };
   if (useAspect && aspect) genCfg.imageConfig = { aspectRatio: aspect };   // 예: '16:9' | '9:16' | '1:1'
-  const body = { contents: [{ parts: [{ text: String(prompt || '') }] }], generationConfig: genCfg };
+  const body = { contents: [{ parts: [...(refParts || []), { text: String(prompt || '') }] }], generationConfig: genCfg };
   try {
     const res = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -58,8 +60,8 @@ async function generateImage({ prompt, aspect, key, model, sendAspect, timeoutMs
 }
 
 // 즉시 이미지 생성 → 파일로 저장. { ok, path } | { ok:false, error }
-async function generateImageToFile({ prompt, aspect, outPathNoExt, key, model }) {
-  const r = await generateImage({ prompt, aspect, key, model });
+async function generateImageToFile({ prompt, aspect, outPathNoExt, key, model, refParts }) {
+  const r = await generateImage({ prompt, aspect, key, model, refParts });
   if (!r.ok) return r;
   const outPath = outPathNoExt + '.' + r.ext;
   try { fs.mkdirSync(path.dirname(outPath), { recursive: true }); fs.writeFileSync(outPath, r.buffer); }
