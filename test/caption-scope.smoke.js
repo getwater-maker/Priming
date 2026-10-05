@@ -164,6 +164,14 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       const sb = await win.locator('#playerBar').boundingBox(), tb = await win.locator('[data-testid=stage-time]').boundingBox();
       ok(tb && sb && tb.y >= sb.y - 1 && tb.y + tb.height <= sb.y + sb.height + 1, '「▶ 재생 · G · 자막 N/M」 줄에 같이 있다');
       await clipNo(3).click(); await win.waitForTimeout(200);
+      // v0.6.90 — 재생 중엔 1초마다 흐른다(줄이 바뀌기 전에도)
+      await clipNo(1).click(); await win.waitForTimeout(300); await clipNo(1).click(); await win.waitForTimeout(200);
+      await win.locator('[data-testid=play-btn]').click();
+      const seen = [];
+      for (let i = 0; i < 9; i++) { await win.waitForTimeout(400); seen.push(((await win.locator('[data-testid=stage-time]').innerText()).match(/⏱ (\d+:\d\d)/) || [])[1]); }
+      await win.locator('[data-testid=play-btn]').click().catch(() => {}); await win.waitForTimeout(300);
+      const secs = seen.filter(Boolean).map((x) => { const [m, s] = x.split(':').map(Number); return m * 60 + s; });
+      ok(secs.length >= 8 && new Set(secs).size >= 3 && secs.every((v, i) => i === 0 || v >= secs[i - 1]) && secs[secs.length - 1] >= 2, `🔑 재생 중 시각이 1초마다 흐른다 — 3.6초 동안 ${JSON.stringify(seen)}`);
     }
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {

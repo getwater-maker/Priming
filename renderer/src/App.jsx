@@ -240,6 +240,26 @@ function fmtHMS(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
 }
+/** ⏱ ① 칸 아래 「지금 / 전체」(v0.6.89~90) — 재생 중엔 1초마다 흐른다: 줄이 바뀌면 그 줄 시작에 맞추고, 그 뒤엔 실제 흐른 시간만큼(그 줄 길이까지).
+ *   🔑 자기 칸만 다시 그린다(App 전체를 1초마다 다시 그리지 않게). */
+function StageClock({ t, playing }) {
+  const [, setTick] = useState(0);
+  const anchorRef = useRef({ key: null, at: 0 });
+  if (anchorRef.current.key !== t.key + ':' + t.cur) anchorRef.current = { key: t.key + ':' + t.cur, at: Date.now() };
+  useEffect(() => {
+    if (!playing) return undefined;
+    anchorRef.current = { ...anchorRef.current, at: Date.now() };   // 재생을 누른 순간부터 센다
+    const id = setInterval(() => setTick((n) => n + 1), 250);   // 1초 경계를 늦지 않게 넘기려고 0.25초마다 본다(숫자는 1초 단위로 바뀐다)
+    return () => clearInterval(id);
+  }, [playing]);
+  const cur = playing ? t.cur + Math.min(t.dur, Math.max(0, (Date.now() - anchorRef.current.at) / 1000)) : t.cur;
+  return (
+    <span className="stage-time" data-testid="stage-time"
+      title={'⏱ 지금 시각 / 전체 재생시간(문장 음성 길이 합 — .vrew 와 같다) · 재생 중엔 1초마다 흐른다' + (t.miss ? `
+음성이 아직 없는 문장 ${t.miss}개는 문장당 2.5초로 어림했습니다` : '')}>
+      ⏱ {fmtHMS(cur)} / <b>{fmtHMS(t.tot)}</b>{t.miss ? <span className="meta"> (어림)</span> : null}</span>
+  );
+}
 // 초 → "N분 N초" (1시간 이상이면 "N시간 N분 N초"). 합계 표시용.
 function fmtMinSec(s) {
   s = Math.max(0, Math.round(Number(s) || 0));
@@ -3948,7 +3968,7 @@ export default function App() {
     let tot = 0, miss = 0, before = 0, ord = 0, myOrd = ci.l.sentIdx + 1;
     for (let i = 0; i < ci.l.ci; i++) myOrd += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
     for (const cu of ci.pr.cuts) for (const se of (cu.sentences || [])) { ord++; const d = se.dur > 0 ? se.dur : (miss++, 2.5); if (ord < myOrd) before += d; tot += d; }
-    return { cur: ci.l.start != null ? ci.l.start : before, tot, miss };
+    return { cur: ci.l.start != null ? ci.l.start : before, tot, miss, dur: ci.l.dur > 0 ? ci.l.dur : 2.5, key: ci.l.n };
   })();
   // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
   //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
@@ -4006,10 +4026,7 @@ export default function App() {
     <div id="playerBar">
       {wsOn && <button className={playerOpen ? 'ghost' : ''} data-testid="play-btn" title="커서 줄부터 재생 / 멈춤 (Space)" onClick={() => (playerOpen ? stopPlayer() : playFromCursor())}>{playerOpen ? '■ 멈춤' : '▶ 재생'}</button>}
       <span id="playerInfo" ref={playerInfoRef} />
-      {wsOn && stageTime && <span className="stage-time" data-testid="stage-time"
-        title={'⏱ 지금 자막 줄의 시작 시각 / 전체 재생시간(문장 음성 길이 합 — .vrew 와 같다)' + (stageTime.miss ? `
-음성이 아직 없는 문장 ${stageTime.miss}개는 문장당 2.5초로 어림했습니다` : '')}>
-        ⏱ {fmtHMS(stageTime.cur)} / <b>{fmtHMS(stageTime.tot)}</b>{stageTime.miss ? <span className="meta"> (어림)</span> : null}</span>}
+      {wsOn && stageTime && <StageClock t={stageTime} playing={!!playerOpen} />}
       {!wsOn && <button className="ghost" onClick={stopPlayer}>■ 닫기</button>}
     </div>
   </>);
