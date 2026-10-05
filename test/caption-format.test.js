@@ -111,6 +111,29 @@ head('[4] Vrew 형식 — 샘플.vrew(로이가 Vrew 에서 직접 만든 것)�
   } else console.log('  (샘플.vrew 없음 — 이 절 건너뜀)');
 }
 
+head('[4c] 🌐 「모든 자막」 대본 서식(pr.capAll · v0.6.87) — 새로 쓴 문장에도 저절로');
+{
+  const sp = CF.withAll({ bold: true, fontColor: '#ff0000' }, [{ from: 2, to: 4, fmt: { fontColor: '#00ff00' } }], 6);
+  ok(CF.fmtAt(sp, 0).bold === true && CF.fmtAt(sp, 0).fontColor === '#ff0000', '덮어쓰기 없는 글자 = 모든 자막 서식');
+  ok(CF.fmtAt(sp, 3).fontColor === '#00ff00' && CF.fmtAt(sp, 3).bold === true, '🔑 문장 덮어쓰기(🎯·글자)가 이기고, 안 덮은 키는 모든 자막 것');
+  ok(CF.withAll(null, [{ from: 0, to: 2, fmt: { bold: true } }], 5).length === 1 && CF.withAll({}, [], 5).length === 0, '모든 자막 서식이 없으면 예전과 같다');
+  const m1 = CF.mergeAll({ bold: true, posV: 'top', posY: 0.2 }, { posV: 'bottom', posY: null });
+  ok(m1.bold === true && m1.posV === 'bottom' && !('posY' in m1), 'mergeAll — 새 값은 얹고 null 은 지운다');
+  ok(CF.mergeAll({ bold: true }, { bold: null }) === null, '다 지우면 null');
+  const M = read('main.js');
+  ok(/if \(args\.all\) \{/.test(M) && /pr\.capAll = m/.test(M) && /capAll: pr\.capAll \|\| null,\s+\/\/ 🌐/.test(M), 'main: 모든 자막 = pr.capAll 한 벌 · 작업본 저장');
+  ok((M.match(/mergeAll\(ps\.capAll, \{\}\)/g) || []).length === 2, '작업본 복원 두 경로 모두 capAll');
+  ok(/capAll: pr\.capAll \? \{ \.\.\.pr\.capAll \} : null/.test(M) && /if \(sp\.capAll\) pr\.capAll/.test(M), '되돌리기(Ctrl+Z)에도 capAll');
+  const PIPE = read('core/pipeline.js'), VBs = read('vrew/vrew-builder.js'), WSs = read('core/whiteboard-subtitle.js');
+  ok(/withAll\(pr\.capAll, s\.capSpans/.test(PIPE) && /capAll: project\.capAll \|\| null/.test(PIPE) && /opts\.capAll = project\.capAll/.test(PIPE), '화면(DTO)·빌드 지문·.vrew 옵션이 모두 capAll 을 싣는다');
+  ok(/CF\.withAll\(opts\.capAll, s\.capSpans/.test(VBs) && /CF\.withAll\(project\.capAll, s\.capSpans/.test(WSs), '.vrew 빌더·화이트보드 자막이 withAll 로 읽는다');
+  // 화이트보드: 문장에 서식이 없어도 대본 서식이 실린다
+  const WS = require('../core/whiteboard-subtitle');
+  const fakePr = { capAll: { bold: true }, groups: [{ num: 1 }], getSentencesOfGroup: () => [{ num: 1, text: '새로 쓴 문장', ttsDurationSec: 1 }] };
+  const sc = WS.scenesForSubtitle(fakePr, [{ sentenceNums: [1] }]);
+  ok(sc[0].sentences[0].spans && sc[0].sentences[0].spans[0].fmt.bold === true, '🔑 화이트보드: 서식 없는 새 문장도 모든 자막 서식');
+}
+
 head('[5] 효과 움직임 — Vrew CSS @keyframes 그대로');
 {
   const s0 = CA.sampleState('popping-in', 0), s1 = CA.sampleState('popping-in', 1);
@@ -209,9 +232,9 @@ head('[9] 배선 — 저장·복원·편집·IPC·화면');
   ok(/ipcMain\.handle\('list-caption-fonts'/.test(M) && /ipcMain\.handle\('caption-font-data'/.test(M) && /ipcMain\.handle\('add-caption-font'/.test(M) && /ipcMain\.handle\('set-saved-cap-formats'/.test(M), '글꼴·저장된 서식 IPC');
   const PL = read('preload.js');
   ok(['setCaptionFormat', 'listCaptionFonts', 'captionFontData', 'addCaptionFont', 'getSavedCapFormats', 'setSavedCapFormats'].every((k) => PL.includes(k + ':')), 'preload 에 전부 있다');
-  ok(/spans: \(s\.capSpans && s\.capSpans\.length\)/.test(read('core/pipeline.js')), '화면 DTO 에 문장 서식');
+  ok(/spans: \(\(\) => \{ const e = require\('\.\/caption-format'\)\.withAll\(pr\.capAll, s\.capSpans/.test(read('core/pipeline.js')), '화면 DTO 에 문장 서식(🌐 모든 자막 포함 · v0.6.87)');
   const VB = read('vrew/vrew-builder.js');
-  ok(/CF\.lineRuns\(s\.text, s\.capSpans, rg, (bf|baseFmt)\)/.test(VB)   /* v0.5.76 부터 변수 이름 bf(언어별 기본 서식) */ && /CF\.lineToVrewDelta\(runs, lp\.lineHeight\)/.test(VB) && /st\.assetEffectInfo = eff/.test(VB), '.vrew 빌더가 줄마다 구간·효과·배경을 쓴다');
+  ok(/CF\.lineRuns\(s\.text, (effSp|s\.capSpans), rg, (bf|baseFmt)\)/.test(VB)   /* v0.5.76 부터 변수 이름 bf(언어별 기본 서식) */ && /CF\.lineToVrewDelta\(runs, lp\.lineHeight\)/.test(VB) && /st\.assetEffectInfo = eff/.test(VB), '.vrew 빌더가 줄마다 구간·효과·배경을 쓴다');
   const VR = read('core/vrew-render.js');
   ok(/CF\.vrewDeltaToRuns\(cap\.text\)/.test(VR) && /FONTS\.prepareFontsDir\(CAS\.fontsUsed/.test(VR) && /ctx\.capEvents/.test(VR), 'MP4 렌더러가 구간·효과·글꼴을 읽는다');
   const APP = read('renderer/src/App.jsx');
@@ -339,6 +362,17 @@ const FF = require('../core/media-utils').getFfmpegPath();
     ok(b3.x0 < 120 && b3.x1 < 960 && b3.y0 > 700, `MP4: 3줄은 채널 위치(왼쪽·아래) 그대로 (x ${b3.x0}~${b3.x1} · y ${b3.y0})`);
     ok(b2.y1 < 300 && b2.x0 < 120, `🔑 MP4: 2줄 글자가 위에 (y ${b2.y0}~${b2.y1})`);
     console.log(`   위치 — 1줄 x ${b1.x0}~${b1.x1} · 2줄 y ${b2.y0}~${b2.y1} · 3줄 x ${b3.x0}~${b3.x1} y ${b3.y0}~${b3.y1}`);
+    // 🌐 v0.6.87 — 문장에 서식이 하나도 없어도 대본 「모든 자막」(capAll)이 .vrew 에 실린다(= 나중에 쓴 문장)
+    {
+      const PP = require('../core/pipeline'); const AZ = require('adm-zip');
+      const prA = PP.parseScriptText('# t\n## 장\n### 하나\n처음 문장입니다.\n### 둘\n나중에 쓴 문장입니다.\n', 'longform', {}).projects[0];
+      prA.capAll = { bold: true, fontColor: '#ff0000' }; PP.fillSilent(prA, path.join(tmp, 'tts-capall'));
+      const vA = path.join(tmp, 'capall.vrew');
+      await PP.buildProjectVrew(prA, vA, { captionStyle: { size: '100', align: 'center', yAlign: 'bottom', yOffset: -0.125 } }, () => {}, 20, 1);
+      const caps = JSON.parse(new AZ(vA).readAsText('project.json')).transcript.clips.map((cl) => CF.vrewDeltaToRuns(cl.captions[0].text).runs);
+      ok(caps.length >= 2 && caps.every((rs) => rs.every((x) => x.fmt.bold === true && x.fmt.fontColor === '#ff0000')), `🔑 .vrew: 서식 없는 문장도 모든 자막 서식(굵게·빨강) — ${caps.length}클립`);
+      ok(JSON.stringify(PP.vrewInputsOf(prA, {}, 20)).includes('#ff0000'), '빌드 지문 입력에 capAll(바꾸면 .vrew 를 다시 만든다)');
+    }
   } catch (e) { ok(false, '왕복 실패: ' + (e && e.stack || e)); }
   finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   console.log(`\n${fail ? '❌' : '✅'} caption-format ${pass}/${pass + fail}`);

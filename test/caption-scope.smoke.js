@@ -62,6 +62,19 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.locator('[data-testid=cf-bar] button[title="굵게"]').click(); await win.waitForTimeout(700);
     { const sp = spansOf(await dto()); ok(sp.length === 3 && sp.every((x) => x && x.some((r) => r.fmt && r.fmt.bold === true)), `🔑 클립 1에서 굵게 → 이 대본 모든 자막 3문장 (${JSON.stringify(sp.map((x) => !!x))})`); }
 
+    console.log('\n[1b] 🌐 새로 쓴 문장도 「모든 자막」 서식(v0.6.87)');
+    {
+      let snap0 = null;   // 자동저장은 1.5초쯤 늦다 — 기다린다
+      for (let i = 0; i < 40 && !(snap0 && snap0.capAll); i++) { try { snap0 = JSON.parse(fs.readFileSync(SNAPS[1], 'utf8')).projects[0]; } catch (_) {} if (!(snap0 && snap0.capAll)) await win.waitForTimeout(250); }
+      ok(snap0.capAll && snap0.capAll.bold === true && snap0.groups.every((g) => g.sentences.every((s) => !s.capSpans)), `작업본 = 대본 서식(capAll) 한 벌 · 문장마다 써 넣지 않는다 (${JSON.stringify(snap0.capAll)})`);
+      fs.writeFileSync(MD2, SCRIPT('나').replace('셋째 문장입니다.', '셋째 문장입니다. 새로 쓴 넷째 문장입니다.'), 'utf8');   // 밖에서 대본에 새 문장
+      await win.waitForSelector('.sent.clip:has-text("새로 쓴")', { timeout: 15000 });   // 밖에서 바뀐 대본을 다시 읽을 때까지
+      const d = await dto(); const ns = d.projects[0].cuts.flatMap((c) => c.sentences).find((s) => /새로 쓴/.test(s.text));
+      ok(ns && (ns.spans || []).some((r) => r.fmt && r.fmt.bold === true && r.from === 0 && r.to === ns.text.length), `🔑 새로 쓴 문장도 굵게(모든 자막 서식이 저절로) (${JSON.stringify(ns)})`);
+      await win.waitForSelector('.sent.clip:has-text("새로 쓴")', { timeout: 8000 });
+      ok(await win.locator('.sent.clip:has-text("새로 쓴") .clip-cap .capfmt').count() >= 1, '② 목록에도 새 문장이 그 서식으로 보인다');
+    }
+
     console.log('\n[2] 🎯 이 클립만');
     await win.locator('[data-testid=cf-bar] [data-testid=cf-scope]').click(); await win.waitForTimeout(200);
     ok(/이 클립만/.test(await win.locator('[data-testid=cf-bar] [data-testid=cf-scope]').innerText()), '누르면 「🎯 이 클립만」');

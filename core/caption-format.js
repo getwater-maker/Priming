@@ -172,6 +172,25 @@ function applySpan(spans, textLen, from, to, patch) {
   return flattenSpans([...(spans || []), { from, to, fmt: p }], textLen);
 }
 
+/**
+ * 🌐 「모든 자막」 서식(대본마다 pr.capAll · v0.6.87) 위에 문장 덮어쓰기(capSpans)를 얹은 **실제 조각** — 읽는 곳은 모두 이것으로.
+ *   capAll 은 대본에 한 벌만 있고 문장에 써 넣지 않는다 → 나중에 새로 쓴 문장·나눈 문장도 저절로 같은 서식(로이 2026-10-05).
+ *   문장 덮어쓰기(🎯 이 클립만 · 글자 드래그)가 이긴다.
+ */
+function withAll(capAll, spans, textLen) {
+  const a = normPatch(capAll || {});
+  if (!Object.keys(a).length || !(textLen > 0)) return cleanSpans(spans, textLen);
+  return flattenSpans([{ from: 0, to: textLen, fmt: a }, ...cleanSpans(spans, textLen)], textLen);
+}
+/** capAll 에 patch 를 얹는다 — 값이 null 인 키는 지운다(예: 세로 정렬만 바꾸면 posY:null). 빈 서식이면 null */
+function mergeAll(capAll, patch) {
+  const out = { ...normPatch(capAll || {}) };
+  const keep = {};
+  for (const k of Object.keys(patch || {})) { if (patch[k] == null) delete out[k]; else keep[k] = patch[k]; }   // null 을 normPatch 에 넘기면 false 가 된다(굵게) — 먼저 걸러 낸다
+  Object.assign(out, normPatch(keep));
+  return Object.keys(out).length ? out : null;
+}
+
 /** [from,to) 의 덮어쓰기를 지운다. keys 를 주면 그 키만(없으면 전부 = 채널 기본으로 되돌리기). */
 function clearSpan(spans, textLen, from, to, keys) {
   const out = [];
@@ -507,7 +526,7 @@ function linePos(chan, lp) {
 
 module.exports = {
   FMT_DEFAULT, LINE_KEYS, POS_KEYS, POS_Y_DEFAULT, linePos, normFmt, normPatch, normAnim,
-  cleanSpans, flattenSpans, applySpan, clearSpan, remapSpans, remapSpansMulti, fmtAt,
+  cleanSpans, flattenSpans, applySpan, clearSpan, withAll, mergeAll, remapSpans, remapSpansMulti, fmtAt,
   lineRanges, lineRuns, lineProps,
   fmtToVrewAttrs, vrewAttrsToFmt, boxColorValue, boxFromValue, animToVrew, animFromVrew, lineToVrewDelta, vrewDeltaToRuns,
   vrewFontName, parseVrewFont,

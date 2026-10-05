@@ -1288,8 +1288,9 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
           // 🎨 이 줄의 서식 구간(채널 기본 + 문장 덮어쓰기) · 줄 단위 속성(배경 상자·효과·줄 간격)
           const rg = vc.range || { from: 0, to: String(s.text || '').length };
           const bf = baseFmtFor(s.text);
-          const runs = CF.lineRuns(s.text, s.capSpans, rg, bf);
-          const lp = CF.lineProps(s.capSpans, rg, bf, String(s.text || '').length);
+          const effSp = CF.withAll(opts.capAll, s.capSpans, String(s.text || '').length);   // 🌐 대본 「모든 자막」 + 문장 덮어쓰기
+          const runs = CF.lineRuns(s.text, effSp, rg, bf);
+          const lp = CF.lineProps(effSp, rg, bf, String(s.text || '').length);
           const st = { ...captionStyle, customAttributes: captionStyle.customAttributes.map((a) => (
             a.attributeName === '--textbox-color' ? { ...a, value: CF.boxColorValue(lp) } : { ...a })) };
           const eff = CF.animToVrew(lp.anim);

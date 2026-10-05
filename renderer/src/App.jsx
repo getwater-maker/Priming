@@ -2009,13 +2009,8 @@ export default function App() {
   //   ⚠ 글자 일부(드래그로 고른 낱말)는 늘 그 글자만 — 「모든 자막」은 줄(클립)을 골랐을 때만
   const [capScope, setCapScopeRaw] = useState(() => (lsGet('pm.capScope', 'all') === 'clip' ? 'clip' : 'all'));
   const setCapScope = (v) => { const s = v === 'clip' ? 'clip' : 'all'; setCapScopeRaw(s); lsSet('pm.capScope', s); setStatus(s === 'clip' ? '🎯 이제 서식·위치는 고른 클립만 바뀝니다' : '🌐 이제 서식·위치는 이 대본의 모든 자막에 적용됩니다'); };
-  function capTargets(sel) {
-    if (capScope === 'all' && sel.mode === 'lines') {
-      const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sel.shortsNum) : null;
-      if (pr) { const out = []; for (const cu of pr.cuts) (cu.sentences || []).forEach((s, si) => { const L = String(s.text || '').length; if (L) out.push({ shortsNum: sel.shortsNum, groupNum: cu.num, sentIdx: si, from: 0, to: L }); }); if (out.length) return out; }
-    }
-    return sel.items.map((x) => ({ shortsNum: sel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to }));
-  }
+  // 🌐 「모든 자막」 = 문장마다 써 넣지 않고 대본 서식(main pr.capAll)으로 — 나중에 쓴 문장도 저절로 같은 서식(v0.6.87)
+  const capAllMode = (sel) => capScope === 'all' && sel && sel.mode === 'lines';
   async function applyCapFmt(patch, selArg) {
     const capSel0 = selArg || capSel;
     if (!capSel0) return;
@@ -2025,9 +2020,10 @@ export default function App() {
       patch = { ...patch, posY: chan.yAlign === patch.posV ? chan.yOffset : CF.POS_Y_DEFAULT[patch.posV] };
     }
     try {
-      const targets = capTargets(capSel0);
-      const r = await api.setCaptionFormat({ targets, patch });
-      if (r && r.ok) { if (r.dto) setDto(r.dto); if (targets.length > capSel0.items.length) setStatus(`🌐 모든 자막 ${r.count}문장에 적용 — 고른 클립만 바꾸려면 「🌐 모든 자막」을 눌러 🎯 이 클립만 (Ctrl+Z 되돌리기)`); }
+      const all = capAllMode(capSel0);
+      const r = all ? await api.setCaptionFormat({ all: true, shortsNum: capSel0.shortsNum, patch })
+        : await api.setCaptionFormat({ targets: capSel0.items.map((x) => ({ shortsNum: capSel0.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), patch });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); if (all) setStatus(`🌐 모든 자막(${r.count}문장 · 새로 쓸 문장도)에 적용 — 고른 클립만 바꾸려면 「🌐 모든 자막」을 눌러 🎯 이 클립만 (Ctrl+Z 되돌리기)`); }
       else setStatus('⚠ ' + ((r && r.error) || '서식을 바꾸지 못했습니다'));
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
   }
@@ -2115,7 +2111,10 @@ export default function App() {
   async function clearCapFmt(keys) {
     if (!capSel) return;
     try {
-      const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), clear: keys || true });
+      // 🌐 모든 자막 범위면 이 대본의 「모든 자막」 서식을 지운다(서식 지우기 = 문장 덮어쓰기까지 · 효과 초기화 = 그 키만)
+      if (capAllMode(capSel) && !uiConfirm(keys ? '이 대본 모든 자막의 효과를 지웁니다(채널 기본으로). 계속할까요?' : '이 대본 모든 자막의 서식을 지웁니다 — 채널 기본 서식으로 돌아갑니다(Ctrl+Z 로 되돌릴 수 있습니다).\n고른 클립만 지우려면 「🎯 이 클립만」으로 바꾸세요.\n\n계속할까요?')) return;
+      const r = capAllMode(capSel) ? await api.setCaptionFormat({ all: true, shortsNum: capSel.shortsNum, clear: keys || true })
+        : await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), clear: keys || true });
       if (r && r.ok && r.dto) setDto(r.dto);
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
   }

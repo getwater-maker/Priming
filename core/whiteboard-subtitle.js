@@ -146,7 +146,7 @@ function scenesForSubtitle(project, scenes) {
   return (scenes || []).map((sc) => ({
     sentences: (sc.sentenceNums || []).map((n) => {
       const s = byNum.get(n);
-      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0, spans: Array.isArray(s.capSpans) && s.capSpans.length ? s.capSpans : null, breaks: Array.isArray(s.capBreaks) && s.capBreaks.length ? s.capBreaks : null } : null;
+      return s ? { text: s.text || '', dur: Number(s.ttsDurationSec) || 0, spans: (() => { const e = CF.withAll(project.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(), breaks: Array.isArray(s.capBreaks) && s.capBreaks.length ? s.capBreaks : null } : null;
     }).filter(Boolean),
   }));
 }

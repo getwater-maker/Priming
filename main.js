@@ -5865,6 +5865,7 @@ function buildSnapshot(ctx) {
       logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
       logoPos: pr.logoPos || null,     // 🏷 끌어 옮긴 로고 자리 {x,y}
       logoOver: pr.logoOver || null,   // 🏷 이 대본 로고 넣기/빼기(큐 일괄)
+      capAll: pr.capAll || null,       // 🌐 「모든 자막」 서식(새 문장에도 저절로)
       format: pr.format || X.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -6067,6 +6068,7 @@ function projectsFromSnapshot(snap) {
     if (ps.logoSide === 'left') proj.logoSide = 'left';
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) proj.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) proj.logoOver = lo; }   // 🏷 로고 넣기/빼기
+    { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) proj.capAll = ca; }   // 🌐 모든 자막 서식
     if (readerNotes.length) proj.readerNotes = readerNotes;
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
@@ -6090,6 +6092,7 @@ function overlaySnapshot(parsed, snap) {
     if (ps.logoSide === 'left') pr.logoSide = 'left';   // 🏷 로고 자리
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) pr.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) pr.logoOver = lo; }   // 🏷 로고 넣기/빼기
+    { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) pr.capAll = ca; }   // 🌐 모든 자막 서식(문장이 바뀌어도 대본 서식은 그대로)
     if (ps.ttsVoice) pr.ttsVoice = ps.ttsVoice;         // 🎙 대본 목소리(대본이 바뀌어도 이 대본의 선택은 그대로)
     if (ps.spkVoices) pr.spkVoices = ps.spkVoices;       // 🎙 이 대본 화자 목소리(화자 이름 기준 — 문장이 바뀌어도 그대로)
     // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
@@ -7462,7 +7465,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -7506,6 +7509,7 @@ function _restoreState(st) {
     pr.logoSide = sp.logoSide || undefined;
     if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
     if (sp.logoOver) pr.logoOver = { ...sp.logoOver }; else delete pr.logoOver;
+    if (sp.capAll) pr.capAll = { ...sp.capAll }; else delete pr.capAll;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -8536,6 +8540,26 @@ ipcMain.handle('set-caption-format', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
   const CFm = require('./core/caption-format');
   const targets = Array.isArray(args.targets) ? args.targets : [];
+  // 🌐 모든 자막(v0.6.87) — 문장마다 써 넣지 않고 대본 서식(pr.capAll)에 둔다 → 새로 쓴 문장도 저절로 같은 서식.
+  //   같은 키의 문장 덮어쓰기는 지운다(「전부 같게」) · clear = 대본 서식 지우기(true = 문장 덮어쓰기까지 전부)
+  if (args.all) {
+    const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum) || S.parsed.projects[0];
+    if (!pr) return { ok: false, error: '편을 찾을 수 없습니다.' };
+    undoPush('자막 서식(모든 자막)', { coalesce: true });
+    const keys = args.clear ? (Array.isArray(args.clear) ? args.clear : null) : Object.keys(args.patch || {});
+    if (args.clear) {
+      if (keys) { const m = { ...(pr.capAll || {}) }; for (const k of keys) delete m[k]; pr.capAll = CFm.mergeAll(m, {}) || undefined; } else delete pr.capAll;
+      if (!pr.capAll) delete pr.capAll;
+    } else { const m = CFm.mergeAll(pr.capAll, args.patch || {}); if (m) pr.capAll = m; else delete pr.capAll; }
+    for (const sen of pr.sentences) {
+      if (!sen.capSpans) continue;
+      const L = String(sen.text || '').length;
+      const next = CFm.clearSpan(sen.capSpans, L, 0, L, keys && keys.length ? keys : null);
+      sen.capSpans = next.length ? next : undefined;
+    }
+    storeActive(); pushDtoUpdate();
+    return { ok: true, count: pr.sentences.length, all: true, dto: P.toDTO(S.parsed) };
+  }
   const _u = undoPush('자막 서식', { coalesce: true });
   let n = 0;
   for (const t of targets) {
@@ -8563,7 +8587,7 @@ ipcMain.handle('clear-all-caption-formats', () => {
   if (!S.parsed || S.parsed.kind === 'book') return { ok: false };
   undoPush('줄별 자막 서식 모두 지우기');
   let n = 0;
-  for (const pr of S.parsed.projects) for (const sen of pr.sentences) if (sen.capSpans) { sen.capSpans = undefined; n++; }
+  for (const pr of S.parsed.projects) { delete pr.capAll; for (const sen of pr.sentences) if (sen.capSpans) { sen.capSpans = undefined; n++; } }   // 🌐 「모든 자막」 서식도
   storeActive(); pushDtoUpdate();
   log(`🎨 줄별 자막 서식 ${n}문장을 지웠습니다 — 채널 기본 서식으로 돌아갑니다`);
   return { ok: true, count: n, dto: P.toDTO(S.parsed) };
@@ -8577,12 +8601,10 @@ ipcMain.handle('apply-caption-format-all', (_e, args = {}) => {
   if (!Object.keys(patch).length) return { ok: false, error: '고른 줄에 따로 준 서식이 없습니다 — 채널 기본 서식을 바꾸려면 ⚙ 채널편집 → 📝 자막·분할' };
   undoPush('자막 서식 전체에 적용');
   let n = 0;
-  for (const pr of S.parsed.projects) for (const sen of pr.sentences) {
-    const L = String(sen.text || '').length;
-    if (!L) continue;
-    const next = CFm.applySpan([], L, 0, L, patch);
-    sen.capSpans = next.length ? next : undefined;
-    n++;
+  // 🌐 v0.6.87 — 문장마다 써 넣지 않고 대본 서식(pr.capAll)으로 → 나중에 쓴 문장도 같은 서식. 문장 덮어쓰기는 지운다(「이 서식 하나로」)
+  for (const pr of S.parsed.projects) {
+    const m = CFm.mergeAll(pr.capAll, patch); if (m) pr.capAll = m;
+    for (const sen of pr.sentences) { sen.capSpans = undefined; if (String(sen.text || '').length) n++; }
   }
   storeActive(); pushDtoUpdate();
   log(`⤢ 자막 서식을 전체 ${n}문장에 적용했습니다 (${Object.keys(patch).join('·')})`);
