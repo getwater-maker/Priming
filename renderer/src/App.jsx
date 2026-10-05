@@ -1533,7 +1533,38 @@ export default function App() {
       catch (e) { logline('로고 크기 저장 오류: ' + e.message); }
     }, 350);
   }
-  const stageLogo = logoCfg.on && logoCfg.path ? { ...logoCfg, side: curLogoSide() } : null;
+  // 🏷 끌어 옮긴 자리(v0.6.85) — 대본마다 logoPos {x,y} · logoDrag = 끄는 중의 자리(놓으면 main 에 저장)
+  const [logoDrag, setLogoDrag] = useState(null);
+  const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
+  const stageLogo = logoCfg.on && logoCfg.path ? { ...logoCfg, side: curLogoSide(), pos: logoDrag || curLogoPos() } : null;
+  // ① 칸 로고 끌기 — 놓은 자리가 기본 자리(↗/↖) 근처면 그 자리로 붙는다(= 위치 칸 「오른쪽 위/왼쪽 위」)
+  function onLogoDown(ev) {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const pj = curProject(); if (!pj) return;
+    const st = ev.currentTarget.parentElement.getBoundingClientRect(); const im = ev.currentTarget.getBoundingClientRect();
+    const offX = ev.clientX - im.left, offY = ev.clientY - im.top, w = im.width / st.width, h = im.height / st.height;
+    const x0 = ev.clientX, y0 = ev.clientY;
+    const my = 0.025 * st.width / st.height;
+    const at = (e) => {
+      const x = Math.max(0, Math.min(1 - w, (e.clientX - offX - st.left) / st.width));
+      const y = Math.max(0, Math.min(Math.max(0, 1 - h), (e.clientY - offY - st.top) / st.height));
+      const near = (ax, ay) => Math.abs(x - ax) * st.width < 14 && Math.abs(y - ay) * st.height < 14;   // 화면 14px 안 = 붙기
+      return { x, y, snap: near(1 - w - 0.025, my) ? 'right' : near(0.025, my) ? 'left' : null };
+    };
+    const move = (e) => { const p = at(e); setLogoDrag(p.snap ? null : { x: p.x, y: p.y }); };
+    const up = async (e) => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      const p = at(e);
+      if (Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) < 3) { setLogoDrag(null); return; }   // 누르기만 = 그대로
+      try {
+        if (p.snap) { await setLogoSide(p.snap); }
+        else { const d = await api.setLogoPos({ shortsNum: pj.shortsNum, pos: { x: p.x, y: p.y } }); if (d) setDto(d); setStatus(`🏷 이 대본 로고를 옮겼습니다 — 왼쪽에서 ${Math.round(p.x * 100)}% · 위에서 ${Math.round(p.y * 100)}% (↗/↖ 를 고르면 제자리 · Ctrl+Z 되돌리기)`); }
+      } catch (er) { logline('로고 옮기기 오류: ' + er.message); }
+      setLogoDrag(null);
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
   async function setLogoSide(side) {
     const pj = curProject(); if (!pj) return;
     try { const d = await api.setLogoSide({ shortsNum: pj.shortsNum, side }); if (d) setDto(d); setStatus(`🏷 이 대본 로고 → ${side === 'left' ? '↖ 왼쪽 위' : '↗ 오른쪽 위'} (Ctrl+Z 되돌리기)`); }
@@ -3831,8 +3862,11 @@ export default function App() {
   const stageEl = (<>
     <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown}>
       <div id="stageVisual" ref={stageVisualRef} />
-      {stageLogo && <img className="stage-logo" data-testid="stage-logo" alt="" src={media(stageLogo.path)}
-        style={{ width: stageLogo.size + '%', top: (2.5 * 16 / 9).toFixed(3) + '%', [stageLogo.side]: '2.5%' }} />}
+      {stageLogo && <img className={'stage-logo' + (wsOn && isLf && !playerOpen ? ' drag' : '') + (logoDrag ? ' dragging' : '')} data-testid="stage-logo" alt="" src={media(stageLogo.path)} draggable={false}
+        title={wsOn && isLf && !playerOpen ? '🏷 끌어서 로고 옮기기(이 대본) — 오른쪽 위·왼쪽 위 근처에 놓으면 제자리에 붙습니다' : undefined}
+        onMouseDown={wsOn && isLf && !playerOpen ? onLogoDown : undefined}
+        style={stageLogo.pos ? { width: stageLogo.size + '%', left: (stageLogo.pos.x * 100).toFixed(3) + '%', top: (stageLogo.pos.y * 100).toFixed(3) + '%' }
+          : { width: stageLogo.size + '%', top: (2.5 * 16 / 9).toFixed(3) + '%', [stageLogo.side]: '2.5%' }} />}
       {wsOn && stageSel && !playerOpen && (
         <div className="ssel" data-testid="stage-sel" style={{ left: (stageSel.box.x * 100) + '%', top: (stageSel.box.y * 100) + '%', width: (stageSel.box.w * 100) + '%', height: (stageSel.box.h * 100) + '%' }}
           title="끌어서 옮기기 · 모서리를 끌어 크기(비율 유지) · 가운데에 가까우면 붙는다 · Esc 해제">
@@ -4171,8 +4205,10 @@ export default function App() {
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
                   <span className="meta">🏷 로고 위치</span>
-                  <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoSide()} onChange={(e) => setLogoSide(e.target.value)}>
-                    <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option></select>
+                  <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoPos() ? 'free' : curLogoSide()} onChange={(e) => { if (e.target.value !== 'free') setLogoSide(e.target.value); }}
+                    title="↗/↖ = 정해진 자리 · ① 칸에서 로고를 끌면 「✋ 직접 옮김」(이 대본만) — ↗/↖ 를 다시 고르면 제자리">
+                    <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option>
+                    {curLogoPos() && <option value="free">✋ 직접 옮김</option>}</select>
                   <span className="meta">크기</span>
                   <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
                     title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"

@@ -107,6 +107,20 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
       ok(/🔈|⏳/.test(t) && !/듣기/.test(t) && (await pb.getAttribute('aria-label')) === '샘플 듣기', `카드 🔈 = 아이콘만(글자 없음 · 「${t}」)`);
       ok(bb && bb.height <= 32 && bb.width >= 30, `🔈 버튼이 한 줄 · 큼직(${bb && Math.round(bb.width)}×${bb && Math.round(bb.height)})`); }
 
+    // 🃏 v0.6.85 — 설명은 첫 줄만(전체는 마우스) · 🔈 듣는 중에 다시 누르면 멈춤
+    { const d = win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-desc"]');
+      if (await d.count()) {
+        const m = await d.evaluate((el) => ({ h: el.getBoundingClientRect().height, ws: getComputedStyle(el).whiteSpace, t: el.getAttribute('title') || '', txt: el.textContent }));
+        ok(m.h <= 16 && m.ws === 'nowrap' && m.t.includes(m.txt), `설명 = 한 줄(${Math.round(m.h)}px) · 전체는 마우스(title)`);
+      } else ok(true, '(해나 카드에 설명 없음 — 건너뜀)'); }
+    { const pb = win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-play"]');
+      await pb.click();
+      const started = await win.waitForFunction((sel) => (document.querySelector(sel) || {}).textContent === '⏹', '[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"] [data-testid="tts-voice-play"]', { timeout: 15000 }).then(() => true).catch(() => false);
+      if (started) {
+        await pb.click(); await win.waitForTimeout(400);
+        ok((await pb.innerText()).trim() === '🔈', '🔑 🔈 듣는 중(⏹)에 다시 누르면 멈춘다(처음부터 다시 나오지 않는다)');
+      } else ok(false, '🔈 샘플이 15초 안에 재생되지 않음(회사 샘플 주소 · 인터넷 확인)'); }
+
     // Gemini 30
     await win.locator('[data-testid="tts-tab-gemini"]').click(); await win.waitForTimeout(200);
     ok((await cards.count()) >= 30, `Gemini 카드 30개 이상 (${await cards.count()})`);

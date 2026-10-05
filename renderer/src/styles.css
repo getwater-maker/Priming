@@ -749,6 +749,9 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 
 /* 🏷 ① 칸 채널 로고 미리보기 · 🔝 위층 목록 (v0.5.52) */
 #stageVisual + .stage-logo, .stage-logo{position:absolute;height:auto;z-index:4;pointer-events:none}
+/* 🏷 ① 칸에서 끌어 옮기기(v0.6.85) */
+#stageVisual + .stage-logo.drag, .stage-logo.drag{pointer-events:auto;cursor:move;border-radius:4px}   /* 🔑 위 #stageVisual 규칙(id)보다 세게 */
+.stage-logo.drag:hover,.stage-logo.dragging{outline:2px dashed rgba(37,99,235,.85);outline-offset:2px}
 .ovbar{display:flex;flex-wrap:wrap;gap:6px;padding:4px 8px;border-bottom:1px solid var(--line);background:#fffdf9}
 .ovchip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:2px 4px 2px 8px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--strong)}
 .ovchip.broken{border-color:var(--danger);color:var(--danger)}

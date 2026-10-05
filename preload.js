@@ -221,6 +221,7 @@ contextBridge.exposeInMainWorld('api', {
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),
   videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
+  setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),   // 🏷 끌어 옮긴 로고 자리(v0.6.85)
   bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
   relinkWork: () => ipcRenderer.invoke('relink-work'),

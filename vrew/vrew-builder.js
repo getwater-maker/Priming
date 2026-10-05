@@ -534,7 +534,7 @@ function addLogoTrack(pj, opt, mediaZip, canvas, log) {
   }
   const isz = readImageSize(opt.path);
   const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? isz.w / isz.h : 1;
-  const b = require('../core/overlay-layers').logoBox({ side: opt.side, size: opt.size, imgRatio, canvasW: canvas.w, canvasH: canvas.h });
+  const b = require('../core/overlay-layers').logoBox({ side: opt.side, size: opt.size, imgRatio, canvasW: canvas.w, canvasH: canvas.h, pos: opt.pos || null });   // 🏷 pos = 끌어 옮긴 자리(대본마다)
   const mid = uid();
   const aid = uid();
   const tid = sid();

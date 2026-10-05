@@ -66,6 +66,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [omniUsed, setOmniUsed] = useState({});
+  const [playing, setPlaying] = useState('');      // 🔈 지금 소리 나는 목소리 id(다시 누르면 멈춤)
   // 📚 ElevenLabs — 'mine' = 내 목소리 · 'library' = 보이스 라이브러리(한국어 원어민 등 · 고르면 내 목록에 추가)
   const [elSrc, setElSrc] = useState('mine');
   const [libVoices, setLibVoices] = useState(null);
@@ -204,7 +205,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
   // 🔈 샘플 — 회사 샘플(무료) → 이 PC 참조음성 파일 → 저장된 샘플 → 새로 만들어 저장(Shift = 다시 만들기)
   async function preview(v, force) {
+    // 🔈 듣는 중에 같은 카드를 또 누르면 멈춘다(v0.6.85 · 로이 「다시 처음부터 나온다」) — Shift(다시 만들기)는 예외
+    if (!force && playing === v.id && audioRef.current && !audioRef.current.paused) { try { audioRef.current.pause(); } catch {} setPlaying(''); setBusy((b) => (b === 'play:' + v.id ? '' : b)); return; }
     try { audioRef.current && audioRef.current.pause(); } catch {}
+    setPlaying('');
     setBusy('play:' + v.id); setMsg('');
     try {
       let src = force ? '' : (v.preview || '');
@@ -221,8 +225,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
         src = media(r.path, String(r.sec));
       }
       const a = new Audio(src); audioRef.current = a;
-      a.onended = () => setBusy((b) => (b === 'play:' + v.id ? '' : b));
+      a.onended = () => { setBusy((b) => (b === 'play:' + v.id ? '' : b)); setPlaying((p) => (p === v.id && audioRef.current === a ? '' : p)); };
       await a.play();
+      setPlaying(v.id); setBusy((b) => (b === 'play:' + v.id ? '' : b));   // 소리가 나기 시작하면 ⏳ → ⏹
     } catch (e) { setMsg('❌ 재생 실패: ' + e.message); setBusy(''); }
   }
   const sampleKeyOf = (v) => [model, v.id, tab === 'typecast' ? (c.emotion || '') : (c.style || '')].join('|');
@@ -500,7 +505,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* ⑤ 목소리 카드 — 이 칸만 스크롤 · 🔑 gridAutoRows max-content: 높이가 정해진 스크롤 격자에서 auto 행은 카드 최소 높이(92)까지만 커져 🔈 줄이 잘렸다(v0.6.84) */}
               <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gridAutoRows: 'max-content', gap: 8, alignContent: 'start', paddingRight: 4 }}>
                 {shown.map((v0) => { const v = koView(v0); return (
-                  <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
+                  <VoiceCard key={v.id} v={v} sel={isSel(v)} playingNow={playing === v.id} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
                     users={tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v)}
                     onPick={() => (isLib ? addFromLibrary(v0) : pickVoice(v0))} onPlay={(force) => preview(v0, force)}
@@ -592,7 +597,7 @@ export function Face({ face, name, gender, size = 44, square }) {
 }
 
 // 카드 — 얼굴 · 이름(성별) · 언어 · 설명 2줄 · 듣기. 얼굴 버튼(🖼 🎨 ✕)은 마우스를 올렸을 때만.
-function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
+function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
   const playing = busy === 'play:' + v.id;
   const meta = [v.lang, v.badge].filter(Boolean).join(' · ');
   return (
@@ -613,13 +618,14 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick
           {G_ICON[v.gender] && <span title={v.gender} style={{ opacity: 0.7 }}>{G_ICON[v.gender]}</span>}
         </div>
         {meta && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
-        {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
+        {/* 설명은 첫 줄만(v0.6.85 · 로이 「글자가 너무 많다」) — 전체는 마우스를 올리면 */}
+        {v.desc && <div className="meta" data-testid="tts-voice-desc" style={{ fontSize: 11, lineHeight: '15px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'help' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
         <div style={{ marginTop: 'auto', paddingTop: 2, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
           {/* 🔈 아이콘 버튼(글자 없음 — 좁은 카드에서 「듣기」가 두 줄로 깨졌다 · 로이 2026-10-05) · 요금은 옆에 작게 */}
           <button className="ghost" data-testid="tts-voice-play" aria-label="샘플 듣기"
             style={{ flex: '0 0 auto', width: 34, height: 28, padding: 0, fontSize: 16, lineHeight: '26px', borderRadius: 14, whiteSpace: 'nowrap' }}
-            title={sampled ? '샘플 듣기(저장됨 · 무료) — Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${wonTxt(sampleCost, krw)} · 한 번 만들면 저장)`}
-            onClick={(e) => onPlay(e.shiftKey)}>{playing ? '⏳' : '🔈'}</button>
+            title={playingNow ? '멈춤' : sampled ? '샘플 듣기(저장됨 · 무료) — 듣는 중에 다시 누르면 멈춤 · Shift+클릭 = 다시 만들기' : `샘플 만들어 듣기(약 ${wonTxt(sampleCost, krw)} · 한 번 만들면 저장)`}
+            onClick={(e) => onPlay(e.shiftKey)}>{playingNow ? '⏹' : playing ? '⏳' : '🔈'}</button>
           {!sampled && sampleCost > 0 && <span className="meta" style={{ fontSize: 10, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{wonTxt(sampleCost, krw)}</span>}
           {users && users.length > 0 && <span style={{ fontSize: 10, color: BLUE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '1 1 auto' }} title={'이 목소리를 쓰는 채널: ' + users.join(', ')}>📺 {users.length > 1 ? `${users[0]} 외 ${users.length - 1}` : users[0]}</span>}
         </div>

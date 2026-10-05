@@ -20,6 +20,11 @@ const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입�
     ok(Math.abs(r1.y * 1080 - 0.025 * 1920) < 1e-6, '위 여백 = 가로 여백과 같은 픽셀');
     const l1 = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1 });
     ok(Math.abs(l1.x - 0.025) < 1e-9, '왼쪽 위');
+    { const p1 = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1, pos: { x: 0.4, y: 0.5 } });
+      ok(Math.abs(p1.x - 0.4) < 1e-9 && Math.abs(p1.y - 0.5) < 1e-9 && Math.abs(p1.w - 0.12) < 1e-9, '🏷 끌어 옮긴 자리(pos)가 side 보다 이긴다(v0.6.85)');
+      const p2 = OL.logoBox({ size: 0.12, imgRatio: 1, pos: { x: 0.99, y: -0.3 } });
+      ok(Math.abs(p2.x - 0.88) < 1e-9 && p2.y === 0, '화면 밖으로 끌면 화면 안으로 자른다');
+      ok(OL.normLogoPos({ x: 'a', y: 1 }) === null && OL.normLogoPos(null) === null && OL.logoBox({ side: 'left', size: 0.12, pos: { x: NaN } }).x === 0.025, '틀린 pos 는 무시(정해진 자리)'); }
     ok(!OL.logoOptsOf({ logoOn: false, logoPath: 'x.png' }).enabled && !OL.logoOptsOf({ logoOn: true }).enabled, '꺼져 있거나 파일이 없으면 끔');
     const lo = OL.logoOptsOf({ logoOn: true, logoPath: 'x.png', logoSide: 'left', logoSize: 99 });
     ok(lo.enabled && lo.side === 'right' && lo.size === 0.4, '크기 상한 40% · 채널 로고 자리 기본 = 오른쪽 위(자리는 대본마다)');
@@ -109,6 +114,20 @@ const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입�
     const fr2 = (t) => execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-vf', 'scale=192:108', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
     const lL = OL.logoBox({ side: 'left', size: 0.12, imgRatio: 1 });
     ok(isG(px(fr2(s0 / 2), Math.round((lL.x + lL.w / 2) * 192), Math.round((lL.y + lL.h / 2) * 108))), 'MP4 에도 로고가 왼쪽 위');
+
+    console.log('\n[4a] 🏷 끌어 옮긴 로고 자리(pr.logoPos) — .vrew 트랙 · MP4 화소');
+    pr.logoPos = { x: 0.44, y: 0.6 }; pr.overlays = [];
+    const vrewP = path.join(tmp, 'p.vrew');
+    await P.buildProjectVrew(pr, vrewP, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 }, logo: OL.logoOptsOf({ logoOn: true, logoPath: logo, logoSize: 12 }) }, () => {}, 20, 1);
+    const lgP = Object.values(JSON.parse(new AdmZip(vrewP).readAsText('project.json')).props.tracks).find((t) => t.zIndex === 2000);
+    ok(lgP && Math.abs(lgP.xPos - 0.44) < 1e-9 && Math.abs(lgP.yPos - 0.6) < 1e-9, `.vrew 로고 트랙 = 옮긴 자리 (x ${lgP && lgP.xPos} · y ${lgP && lgP.yPos})`);
+    const mp4P = path.join(tmp, 'p.mp4');
+    ok((await R.renderVrewToMp4({ vrewPath: vrewP, outPath: mp4P, log: () => {}, par: 1 })).ok, '렌더 성공');
+    { const raw = execFileSync(FF, ['-loglevel', 'error', '-ss', String(s0 / 2), '-i', mp4P, '-frames:v', '1', '-vf', 'scale=192:108', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+      const lp = OL.logoBox({ size: 0.12, imgRatio: 1, pos: pr.logoPos }); const cx = Math.round((lp.x + lp.w / 2) * 192), cy = Math.round((lp.y + lp.h / 2) * 108);
+      const rr = OL.logoBox({ side: 'right', size: 0.12, imgRatio: 1 }); const rx = Math.round((rr.x + rr.w / 2) * 192), ry = Math.round((rr.y + rr.h / 2) * 108);
+      ok(isG(px(raw, cx, cy)) && !isG(px(raw, rx, ry)), `🔑 MP4 에서도 옮긴 자리에 로고 · 오른쪽 위엔 없다 (${JSON.stringify([px(raw, cx, cy), px(raw, rx, ry)])})`); }
+    delete pr.logoPos;
 
     console.log('\n[4b] 🎵 오디오 1회 재생(v0.5.59) — 반복하지 않는다 · 작업본에 남는다');
     pr.overlays = [{ id: 'a1', file: tone, kind: 'audio', volume: 100, once: true, ...OL.idsFromOrds(pr, 2, 3) }];

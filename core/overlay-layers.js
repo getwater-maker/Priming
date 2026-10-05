@@ -117,11 +117,22 @@ function normBox(b) {
 /**
  * 🏷 채널 로고 자리(캔버스 0..1) — 위쪽 왼쪽/오른쪽. size = 캔버스 너비 대비 로고 너비(0.04~0.4) · 가장자리 여백 = 너비의 2.5%
  *   세로 여백은 화면 비율을 보정해 가로 여백과 같은 **픽셀**이 되게 한다.
+ *   pos = { x, y }(왼쪽 위 모서리 · 캔버스 0..1) — ① 칸에서 끌어 옮긴 자리(v0.6.85 · 대본마다 pr.logoPos). 있으면 side 보다 이기고 화면 안으로 자른다.
  */
-function logoBox({ side = 'right', size = 0.12, imgRatio = 1, canvasW = 1920, canvasH = 1080 } = {}) {
+function normLogoPos(p) {
+  if (!p || typeof p !== 'object') return null;
+  const x = +p.x, y = +p.y;
+  return (isFinite(x) && isFinite(y) && x > -1 && x < 2 && y > -1 && y < 2) ? { x, y } : null;
+}
+function logoBox({ side = 'right', size = 0.12, imgRatio = 1, canvasW = 1920, canvasH = 1080, pos = null } = {}) {
   const w = Math.max(0.04, Math.min(0.4, +size || 0.12));
   const r = imgRatio > 0 ? imgRatio : 1;
   const h = (w * canvasW) / r / canvasH;
+  const p = normLogoPos(pos);
+  if (p) {
+    const cl = (v, hi) => Math.max(0, Math.min(Math.max(0, hi), v));
+    return { x: cl(p.x, 1 - w), y: cl(p.y, 1 - h), w, h };
+  }
   const mx = 0.025, my = (mx * canvasW) / canvasH;
   return { x: side === 'left' ? mx : 1 - w - mx, y: my, w, h };
 }
@@ -134,4 +145,4 @@ function logoOptsOf(preset, exists) {
   return { enabled: true, path: p.logoPath, side: 'right', size: pct / 100 };   // 자리는 대본마다(pipeline 이 project.logoSide 로 바꾼다)
 }
 
-module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, logoOptsOf, IMG_EXT, VID_EXT };
+module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, logoOptsOf, IMG_EXT, VID_EXT };

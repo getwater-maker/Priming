@@ -5836,6 +5836,7 @@ function buildSnapshot(ctx) {
       scriptStyle: pr.scriptStyle || null,       // 🎨 대본 화풍(정해진 화풍 — 한 장만 다시 뽑아도 같은 화풍)
       overlays: require('./core/overlay-layers').toSnap(pr),   // ➕ 삽입(문장 순번)
       logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
+      logoPos: pr.logoPos || null,     // 🏷 끌어 옮긴 로고 자리 {x,y}
       format: pr.format || X.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -6036,6 +6037,7 @@ function projectsFromSnapshot(snap) {
     if (ps.spkVoices) proj.spkVoices = ps.spkVoices;   // 🎙 이 대본 화자 목소리
     require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
     if (ps.logoSide === 'left') proj.logoSide = 'left';
+    { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) proj.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     if (readerNotes.length) proj.readerNotes = readerNotes;
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
@@ -6057,6 +6059,7 @@ function overlaySnapshot(parsed, snap) {
       if (ps[k] != null) pr[k] = ps[k];
     }
     if (ps.logoSide === 'left') pr.logoSide = 'left';   // 🏷 로고 자리
+    { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) pr.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     if (ps.ttsVoice) pr.ttsVoice = ps.ttsVoice;         // 🎙 대본 목소리(대본이 바뀌어도 이 대본의 선택은 그대로)
     if (ps.spkVoices) pr.spkVoices = ps.spkVoices;       // 🎙 이 대본 화자 목소리(화자 이름 기준 — 문장이 바뀌어도 그대로)
     // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
@@ -7429,7 +7432,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -7471,6 +7474,7 @@ function _restoreState(st) {
     pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
     pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
     pr.logoSide = sp.logoSide || undefined;
+    if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -7801,8 +7805,22 @@ ipcMain.handle('set-logo-side', (_e, args = {}) => {
   if (!pr) throw new Error('편을 찾을 수 없습니다.');
   undoPush('로고 위치');
   pr.logoSide = args.side === 'left' ? 'left' : undefined;
+  delete pr.logoPos;   // ↗/↖ 를 고르면 끌어 옮긴 자리는 푼다(v0.6.85)
   storeActive(); pushDtoUpdate();
   log('🏷 ' + prLabel(pr) + ' 로고 위치 → ' + (pr.logoSide === 'left' ? '왼쪽 위' : '오른쪽 위'));
+  return P.toDTO(S.parsed);
+});
+// 🏷 로고를 ① 칸에서 끌어 옮긴 자리(v0.6.85 · 로이 「지금 기능은 그대로 두고 마우스로 자유롭게」) — 대본마다 pr.logoPos {x,y}(캔버스 0..1 · 왼쪽 위 모서리).
+//   .vrew·MP4 는 logoBox(pos) 한 곳에서 같은 자리를 쓴다 · pos=null = 위 ↗/↖ 자리로 돌아감 · Ctrl+Z 되돌리기.
+ipcMain.handle('set-logo-pos', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const p = require('./core/overlay-layers').normLogoPos(args.pos);
+  undoPush('로고 옮기기');
+  if (p) pr.logoPos = { x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000 }; else delete pr.logoPos;
+  storeActive(); pushDtoUpdate();
+  log('🏷 ' + prLabel(pr) + ' 로고 ' + (p ? `옮김 → 왼쪽에서 ${Math.round(pr.logoPos.x * 100)}% · 위에서 ${Math.round(pr.logoPos.y * 100)}%` : '끌어 옮긴 자리 풀기'));
   return P.toDTO(S.parsed);
 });
 // ➕ 삽입 — 그림·영상·오디오를 정한 **클립(문장) 범위** 동안(v0.5.52 · 「삽입」 메뉴 v0.5.54). 그림·영상은 모든 그룹 그림 위층.

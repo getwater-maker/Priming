@@ -84,6 +84,7 @@ function toDTO(parseResult) {
         voice: pr.voice,
         aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지를 보일 문장 범위(없으면 채널 기본 = 5초 뒤 5초)
         logoSide: pr.logoSide === 'left' ? 'left' : 'right',   // 🏷 이 대본 로고 자리
+        logoPos: pr.logoPos || null,   // 🏷 ① 칸에서 끌어 옮긴 자리 {x,y}(있으면 위 자리보다 이긴다)
         readerNotes: (pr.readerNotes && pr.readerNotes.length) ? pr.readerNotes : null,   // 📝 대본 읽기 전용 메모(장 제목 아래)
         ttsVoice: pr.ttsVoice || null,   // 🎙 이 대본 목소리(리본 🔊 음성 설정) — 없으면 채널 목소리
         ttsVoiceText: pr.ttsVoice ? (TtsEngines.voiceText(pr.ttsVoice) || null) : null,
@@ -662,7 +663,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
-    if (preset.logo && preset.logo.enabled && preset.logo.path) inp.logo = { ...preset.logo, side: project.logoSide === 'left' ? 'left' : 'right' };
+    if (preset.logo && preset.logo.enabled && preset.logo.path) inp.logo = { ...preset.logo, side: project.logoSide === 'left' ? 'left' : 'right', pos: project.logoPos || null };
   }
   return inp;
 }
@@ -680,7 +681,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
-    if (preset.logo && preset.logo.enabled && preset.logo.path) opts.logo = { ...preset.logo, side: project.logoSide === 'left' ? 'left' : 'right' };   // 🏷 채널 로고 · 자리는 대본마다(기본 오른쪽 위)
+    if (preset.logo && preset.logo.enabled && preset.logo.path) opts.logo = { ...preset.logo, side: project.logoSide === 'left' ? 'left' : 'right', pos: project.logoPos || null };   // 🏷 채널 로고 · 자리는 대본마다(기본 오른쪽 위)
   }
   if (Array.isArray(project.overlays) && project.overlays.length) opts.overlays = project.overlays;   // 🔝 위층 그림·영상
   return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });

@@ -80,6 +80,33 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await key('Control+z');
     await win.waitForTimeout(500);
     ok((await win.locator('[data-testid=logo-side]').inputValue()) === 'right', '↶ 되돌리면 오른쪽 위');
+    // 🏷 v0.6.85 — ① 칸에서 로고를 마우스로 끌어 옮긴다(이 대본만) · 기본 자리 근처에 놓으면 붙는다 · Ctrl+Z
+    {
+      const drag = async (fx, fy) => {
+        const lb = await win.locator('[data-testid=stage-logo]').boundingBox(); const sb = await win.locator('#stage').boundingBox();
+        await win.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2); await win.mouse.down();
+        const tx = sb.x + sb.width * fx, ty = sb.y + sb.height * fy;
+        await win.mouse.move((lb.x + tx) / 2, (lb.y + ty) / 2, { steps: 4 }); await win.mouse.move(tx, ty, { steps: 4 }); await win.mouse.up();
+        await win.waitForTimeout(600);
+      };
+      ok(await win.locator('[data-testid=stage-logo]').evaluate((el) => getComputedStyle(el).pointerEvents !== 'none' && getComputedStyle(el).cursor === 'move'), '① 칸 로고 = 잡을 수 있다(커서 move)');
+      await drag(0.5, 0.5);
+      lg = await logoPos();
+      ok(lg && Math.abs(lg.x + lg.w / 2 - 0.5) < 0.03, `🔑 끌어서 가운데로 (x ${lg && lg.x.toFixed(3)})`);
+      await menu('삽입');
+      ok((await win.locator('[data-testid=logo-side]').inputValue()) === 'free', '위치 칸 = 「✋ 직접 옮김」');
+      const snapLp = await win.evaluate(async () => { const r = await window.api.listQueue(); return r && r.dto && r.dto.projects[0].logoPos; });
+      ok(snapLp && Math.abs(snapLp.x + 0.075 - 0.5) < 0.03 && snapLp.y > 0.2, `DTO logoPos 저장 (${JSON.stringify(snapLp)})`);
+      ok(await win.locator('[data-testid=stage-sel]').count() === 0, '로고를 끌어도 그룹 그림 선택(stage-sel)이 생기지 않는다');
+      await key('Control+z'); await win.waitForTimeout(500);
+      lg = await logoPos();
+      ok(lg && Math.abs(lg.x + lg.w - 0.975) < 0.01, '↶ 되돌리면 제자리(오른쪽 위)');
+      await drag(0.5, 0.5); await drag(0.895, 0.12);   // 오른쪽 위 제자리(가운데 ≈ 0.90, 0.11 — 2:1 로고) 몇 px 옆에 놓기
+      await menu('삽입');
+      lg = await logoPos();
+      const dbg = await win.evaluate(() => { const l = document.querySelector('[data-testid=stage-logo]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return { sw: Math.round(s.width), sh: Math.round(s.height), x: ((l.left - s.left) / s.width).toFixed(3), y: ((l.top - s.top) / s.height).toFixed(3), h: (l.height / s.height).toFixed(3) }; });
+      ok((await win.locator('[data-testid=logo-side]').inputValue()) === 'right' && lg && Math.abs(lg.x + lg.w - 0.975) < 0.01, `🔑 기본 자리 근처에 놓으면 붙는다(= ↗ 오른쪽 위 · ${JSON.stringify(dbg)})`);
+    }
     // 🏷 v0.5.64 — 로고 크기(채널 값) — 삽입 메뉴에서 바꾸면 곧바로 채널에 저장 · ① 칸에 반영
     await menu('삽입');
     ok((await win.locator('[data-testid=logo-size]').inputValue()) === '15', '로고 크기 칸 = 채널편집 값(15)');
