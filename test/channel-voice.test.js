@@ -141,7 +141,8 @@ console.log('[5] voiceLabel 원문 실행 — 어느 채널·목소리·시드�
   eq(voiceLabel(null), '⚠ 채널 없음', 'ⓗ 채널이 없어도 던지지 않는다');
   // 1단계·전체TTS·그룹TTS·도입부 네 경로가 **같은 함수**로 찍는다(표기가 갈리면 로그 대조가 안 된다)
   eq((MAIN.match(/voiceLabel\(/g) || []).length - 1, 7, 'ⓘ voiceLabel 을 쓰는 곳 7군데(1단계·전체TTS·그룹TTS 2 ·도입부 · 🧩 클립 목소리 수정 2 — v0.5.94)');
-  ok(/🎙 1단계 — 음성\(TTS\) 일괄 변환… \(\$\{voiceLabel\(preset\)\}/.test(MAIN), 'ⓙ 1단계가 이 함수를 쓴다');
+  // v0.6.83~ 대본 목소리(scriptVoicePreset)를 얹은 채널로 — 로그가 실제로 읽을 목소리를 말한다
+  ok(/🎙 1단계 — 음성\(TTS\) 일괄 변환… \(\$\{voiceLabel\((scriptVoicePreset\()?preset/.test(MAIN), 'ⓙ 1단계가 이 함수를 쓴다');
   ok(/⚠ 채널을 찾지 못했습니다/.test(MAIN), 'ⓚ 채널을 못 찾으면 그 사실이 로그에 남는다');
   TE_STUB.id = 'typecast';
   eq(voiceLabel({ name: 'A', voiceCloneRefAudio: 'srv:a', seed: 1 }), '채널 「A」 · 🔊 엔진 typecast', 'ⓛ 🔊 유료 엔진을 고르면 참조음성 대신 엔진·목소리를 적는다');

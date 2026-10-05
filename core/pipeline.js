@@ -87,6 +87,8 @@ function toDTO(parseResult) {
         readerNotes: (pr.readerNotes && pr.readerNotes.length) ? pr.readerNotes : null,   // 📝 대본 읽기 전용 메모(장 제목 아래)
         ttsVoice: pr.ttsVoice || null,   // 🎙 이 대본 목소리(리본 🔊 음성 설정) — 없으면 채널 목소리
         ttsVoiceText: pr.ttsVoice ? (TtsEngines.voiceText(pr.ttsVoice) || null) : null,
+        spkVoices: (pr.spkVoices && Object.keys(pr.spkVoices).length) ? pr.spkVoices : null,   // 🎙 이 대본의 화자 목소리(클립 「🗣」 — 화자 이름 → 목소리)
+        spkVoiceText: (pr.spkVoices && Object.keys(pr.spkVoices).length) ? Object.fromEntries(Object.entries(pr.spkVoices).map(([k, v]) => [k, TtsEngines.voiceText(v) || ''])) : null,
         scriptStyle: pr.scriptStyle || null,   // 🎨 대본 화풍 줄(채널 화풍보다 우선 · 화면에 출처 표시)
         overlays: (() => { const L = require('./overlay-layers').toDTO(pr); return L.map((o) => ({ ...o, version: (() => { try { const st = fs.statSync(o.file); return Math.trunc(st.mtimeMs) + '-' + st.size; } catch { return ''; } })() })); })(),   // 🔝 위층 그림·영상
         cuts: pr.groups.map((g) => {
@@ -110,8 +112,6 @@ function toDTO(parseResult) {
               dur: s.ttsDurationSec || null,
               audio: s.ttsAudioPath || null,
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
-              tv: s.ttsVoice ? (TtsEngines.voiceText(s.ttsVoice) || null) : null,   // 🎙 클립 목소리(「🗣」 배지에 이름) — 없으면 대본/채널 목소리
-              tvRaw: s.ttsVoice || null,   // 🎙 음성 설정 팝업이 지금 고른 카드를 표시하는 데 쓴다
               spans: (s.capSpans && s.capSpans.length) ? s.capSpans : null,   // 🎨 줄별·글자별 자막 서식(문장 글자 위치)
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
@@ -321,7 +321,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   };
   // 🔊 유료 API 엔진(헤더 「음성 엔진」) — 채널의 참조음성·instruct·cfg 는 OmniVoice 전용이라 싣지 않는다.
   //   🔑 OmniVoice 면 engExtra=null → 아래 synthOpts 는 **옛 것과 한 글자도 같다**(캐시 키 불변).
-  //   🎙 같은 함수가 클립 목소리(s.ttsVoice — applyVoice 로 얹은 사본)의 인자도 만든다(두 벌이면 캐시 키 규칙이 갈린다).
+  //   🎙 같은 함수가 이 대본 화자 목소리(preset._spkVoices — applyVoice 로 얹은 사본)의 인자도 만든다(두 벌이면 캐시 키 규칙이 갈린다).
   const optsOfPreset = (p) => {
     const id = TtsEngines.resolveEngine(p);
     const ex = TtsEngines.synthExtra(id, p);
@@ -352,15 +352,16 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   //   🔑 캐시 키에 refName/refAudioPath 가 들어가므로 화자마다 다른 키가 된다(목소리끼리 교차 적중 없음).
   const spkMap = speakerVoiceMap(preset);
   const spkOpts = new Map();
-  // 🎙 클립 목소리(클립의 「🗣」에서 고른 것 · s.ttsVoice) — 화자·대본·채널보다 먼저. 키 = 덮어쓴 값 그대로(캐시 키엔 실제 인자가 들어간다)
-  const clipOpts = new Map();
-  const clipPreset = (s) => { const n = s && s.ttsVoice ? TtsEngines.normVoice(s.ttsVoice) : null; return n ? TtsEngines.applyVoice(preset, n) : null; };
+  // 🎙 이 대본의 화자 목소리(클립 「🗣」 → 그 화자 클립 모두 · main scriptVoicePreset 이 preset._spkVoices 로 넘긴다)
+  //   — 채널 화자 목소리보다 먼저 · 유료 엔진이어도 그 화자만 그 목소리. 키 = 화자 이름(캐시 키엔 실제 인자가 들어간다)
+  const spkOver = (preset && preset._spkVoices && typeof preset._spkVoices === 'object') ? preset._spkVoices : null;
+  const overOpts = new Map();
+  const overPreset = (s) => { const nm = s && s.speaker; const n = (nm && spkOver) ? TtsEngines.normVoice(spkOver[nm]) : null; return n ? TtsEngines.applyVoice(preset, n) : null; };
   const optsForVoice = (s) => {
-    const cp = clipPreset(s);
+    const cp = overPreset(s);
     if (cp) {
-      const k = JSON.stringify(TtsEngines.normVoice(s.ttsVoice));
-      if (!clipOpts.has(k)) clipOpts.set(k, optsOfPreset(cp).opts);
-      return clipOpts.get(k);
+      if (!overOpts.has(s.speaker)) overOpts.set(s.speaker, optsOfPreset(cp).opts);
+      return overOpts.get(s.speaker);
     }
     const name = s && s.speaker;
     if (!name) return synthOpts;
@@ -385,27 +386,23 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     const used = [...new Set(sentences.map((x) => x && x.speaker).filter(Boolean))];
     if (used.length) {
       const lab = (v) => String(v).startsWith('srv:') ? '☁ ' + String(v).slice(4) : path.basename(String(v));
-      const ok = used.filter((n) => spkMap[n]).map((n) => `${n} → ${lab(spkMap[n])}`);
-      const miss = used.filter((n) => !spkMap[n]);
+      const ok = used.filter((n) => overPreset({ speaker: n }) || spkMap[n]).map((n) => overPreset({ speaker: n }) ? `${n} → ${TtsEngines.voiceText(spkOver[n])}(이 대본)` : `${n} → ${lab(spkMap[n])}`);
+      const miss = used.filter((n) => !overPreset({ speaker: n }) && !spkMap[n]);
       onLine(`🎭 화자 ${used.length}명${ok.length ? ' — ' + ok.join(' · ') : ''}`);
-      if (engExtra) onLine(`⚠ 🔊 ${TtsEngines.byId(engineId).label} 는 화자별 목소리(참조음성)를 쓰지 않습니다 — 모든 화자를 「${engExtra.voice}」 하나로 읽습니다`);
+      if (engExtra && used.some((n) => !overPreset({ speaker: n }) && spkMap[n])) onLine(`⚠ 🔊 ${TtsEngines.byId(engineId).label} 는 채널 화자 목소리(참조음성)를 쓰지 않습니다 — 그 화자는 「${engExtra.voice}」 로 읽습니다(클립 「🗣」에서 이 대본의 화자 목소리를 고르면 그 목소리로)`);
       else if (miss.length) onLine(`⚠ 목소리를 연결하지 않은 화자: ${miss.join(', ')} — 채널 기본 목소리로 읽습니다(⚙ 채널편집 → 🎙 음성 → 「화자별 목소리」)`);
     }
   }
-  // 🎙 클립 목소리가 채널과 다른 엔진이면 그 엔진도 연결해 둔다(매니저는 provider 를 문장마다 opts.provider 로 고른다).
+  // 🎙 이 대본 화자 목소리가 채널과 다른 엔진이면 그 엔진도 연결해 둔다(매니저는 provider 를 문장마다 opts.provider 로 고른다).
   {
-    const clipSents = sentences.filter((x) => clipPreset(x));
-    if (clipSents.length) {
-      const ids = [...new Set(clipSents.map((x) => TtsEngines.resolveEngine(clipPreset(x))))].filter((id) => id !== engineId);
+    const overSents = sentences.filter((x) => overPreset(x));
+    if (overSents.length) {
+      const ids = [...new Set(overSents.map((x) => TtsEngines.resolveEngine(overPreset(x))))].filter((id) => id !== engineId);
       for (const id of ids) {
         if (typeof ttsMgr.isAvailable === 'function' && ttsMgr.isAvailable(id)) continue;
         let ok = false;
         try { ok = typeof ttsMgr.refreshProvider === 'function' ? await ttsMgr.refreshProvider(id) : true; } catch (_) { ok = false; }
-        if (!ok && onLine) onLine(`⚠ 클립 목소리 엔진 「${id}」 에 연결하지 못했습니다 — 그 클립은 실패로 남습니다(서버·API 키 확인)`);
-      }
-      if (onLine) {
-        const kinds = [...new Set(clipSents.map((x) => TtsEngines.voiceText(x.ttsVoice)))];
-        onLine(`🎙 클립 목소리 ${clipSents.length}문장 — ${kinds.join(' · ')} (그 클립만 · 나머지는 대본/채널 목소리)`);
+        if (!ok && onLine) onLine(`⚠ 화자 목소리 엔진 「${id}」 에 연결하지 못했습니다 — 그 화자 클립은 실패로 남습니다(서버·API 키 확인)`);
       }
     }
   }

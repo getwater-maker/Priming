@@ -1710,7 +1710,9 @@ export default function App() {
     try {
       const r = await api.ttsEnginesGet();
       const ch = r && (r.channels || []).find((x) => x.name === presetName);
-      if (!ch) { setTtsEngActive({ id: 'omnivoice', label: 'OmniVoice' }); return r; }
+      // 💰 단가표는 채널을 못 찾아도 싣는다 — 안 실으면 대본·화자에 유료 목소리를 골라도 「무료」로 보였다(v0.6.84 E2E 가 잡음)
+      const prices = Object.fromEntries(((r && r.engines) || []).map((x) => [x.id, { label: String(x.label || x.id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, ''), unit: x.unit || {}, first: ((x.models || [])[0] || {}).id || '' }]));
+      if (!ch) { const k0 = r && r.fx && r.fx.rate ? r.fx.rate * (1 + (Number(r.cardFee) || 0) / 100) : ((r && r.krw) || 1400); setTtsEngActive({ id: 'omnivoice', label: 'OmniVoice', prices, krw: k0, koCps: (r && r.koCps) || 7, chVe: { id: 'omnivoice' }, chSpk: [] }); return r; }
       const id = (ch.voiceEngine && ch.voiceEngine.id) || 'omnivoice';
       const e = (r.engines || []).find((x) => x.id === id) || {};
       const vid = id === 'omnivoice' ? ch.ref : ch.voiceEngine.voice;
@@ -1720,7 +1722,10 @@ export default function App() {
       const model = id === 'omnivoice' ? '' : (ch.voiceEngine.model || ((e.models || [])[0] || {}).id);
       const krw = r.fx && r.fx.rate ? r.fx.rate * (1 + (Number(r.cardFee) || 0) / 100) : (r.krw || 1400);
       setTtsEngActive({ id, label: `${String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}${vname ? ' · ' + vname : ''}`, face: (e.faces || {})[vid] || null, gender: vv && vv.gender, vname,
-        model, unit: id === 'omnivoice' ? null : ((e.unit || {})[model] || null), krw, koCps: r.koCps || 7 });
+        model, unit: id === 'omnivoice' ? null : ((e.unit || {})[model] || null), krw, koCps: r.koCps || 7,
+        // 💰 문장마다 실제 목소리로 셈(v0.6.84) — 엔진별 단가표 · 채널 목소리 · 채널에 목소리를 연결한 화자
+        prices,
+        chVe: ch.voiceEngine || { id: 'omnivoice' }, chSpk: ch.spk || [] });
       return r;
     } catch { return null; }
   }
@@ -1756,24 +1761,35 @@ export default function App() {
       return true;
     } catch (e) { logline('대본 목소리 오류: ' + e.message); setStatus('⚠ ' + e.message); return false; }
   }
-  // 🎙 클립의 「🗣」(v0.6.83) — 그 클립(문장)만의 목소리. 적용하면 그 클립 음성만 곧바로 새로 만든다.
-  function openClipVoice(sn, groupNum, sentIdx, se) {
+  // 🎙 클립의 「🗣」(v0.6.84 · 로이 「클립 1개가 아니라 그 화자 기준」) — **지금 대본**의 그 화자 클립 모두.
+  //   🗣 내레이션 = 이 대본의 내레이션(기본) 목소리 → 1인 내레이션 대본이면 대본 전체 · 🗣 엄마 = 이 대본의 「엄마」 클립 모두.
+  async function openSpeakerVoice(sn, se) {
     if (!se) return;
-    setTtsEng({ target: { kind: 'clip', text: String(se.text || ''), channel: presetName || '', current: se.tvRaw || null, currentText: se.tv || '', sn, groupNum, sentIdx } });
+    const pr = ((dto && dto.projects) || []).find((p) => p.shortsNum === sn) || (dto && dto.projects && dto.projects[0]) || {};
+    const sp = se.speaker || null;
+    const current = sp ? ((pr.spkVoices && pr.spkVoices[sp]) || null) : (pr.ttsVoice || null);
+    const currentText = sp ? ((pr.spkVoiceText && pr.spkVoiceText[sp]) || '') : (pr.ttsVoiceText || '');
+    let clips = null;
+    try { const d = await api.setSpeakerVoice({ speaker: sp, voice: current, dry: true }); if (d && d.ok) clips = d.clips; } catch (_) {}
+    setTtsEng({ target: { kind: 'speaker', speaker: sp, script: String((dto && dto.fileTitle) || pr.title || '대본'), clips, channel: presetName || '', current, currentText } });
   }
-  async function applyClipVoice(t, voice) {
+  async function applySpeakerVoice(t, voice) {
+    const who = t.speaker ? `화자 「${t.speaker}」` : '내레이션';
     try {
-      const r = await api.setClipVoice({ shortsNum: t.sn, items: [{ groupNum: t.groupNum, sentIdx: t.sentIdx }], voice });
-      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '클립 목소리를 바꾸지 못했습니다')); return false; }
+      const dry = await api.setSpeakerVoice({ speaker: t.speaker, voice, dry: true });
+      if (!dry || !dry.ok) { setStatus('⚠ ' + ((dry && dry.error) || '목소리를 바꾸지 못했습니다')); return false; }
+      if (!dry.changed) { setStatus(`🎙 ${who} 은(는) 이미 이 목소리입니다`); return true; }
+      if (dry.audio) {
+        const yes = await uiConfirm(`이 대본의 ${who} 클립 ${dry.clips}개를 ${voice ? '「' + (voice.label || '') + '」(으)로 읽습니다' : '기본 목소리로 되돌립니다'}.\n\n이미 만든 음성 ${dry.audio}개는 옛 목소리라 지우고, 다음 🎤 TTS·⚡ 만들기 때 새 목소리로 만듭니다.\n\n계속할까요?`);
+        if (!yes) return false;
+      }
+      const r = await api.setSpeakerVoice({ speaker: t.speaker, voice });
+      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '목소리를 바꾸지 못했습니다')); return false; }
       if (r.dto) setDto(r.dto);
-      if (!r.changed) { setStatus('🎙 이 클립은 이미 이 목소리입니다'); return true; }
-      setStatus(`🎙 클립 목소리 → ${voice ? voice.label : '대본/채널 목소리'} — 이 클립 음성을 다시 만드는 중…`);
-      // 창은 바로 닫고 음성은 뒤에서(enqueueTtsJob 직렬 큐) — 끝나면 화면이 갱신된다
-      api.ttsSentences({ shortsNum: t.sn, items: [{ groupNum: t.groupNum, sentIdx: t.sentIdx }], roll: false, presetName: presetName || null, speed: ttsSpeed || null })
-        .then((d) => { if (d) setDto(d); setStatus(`🎙 클립 목소리 → ${voice ? voice.label : '대본/채널 목소리'} · 음성 완료`); })
-        .catch((e) => { logline('클립 음성 오류: ' + e.message); setStatus('⚠ ' + e.message); });
+      try { const q = await api.listQueue(); if (q && q.queue) setQueue(q.queue); } catch (_) {}
+      setStatus(`🎙 ${who} 목소리(이 대본 · 클립 ${r.clips}개) → ${voice ? voice.label : '기본'}${r.audio ? ` · 옛 음성 ${r.audio}개를 지웠습니다 — 🎤 TTS 로 새로 만드세요` : ''}`);
       return true;
-    } catch (e) { logline('클립 목소리 오류: ' + e.message); setStatus('⚠ ' + e.message); return false; }
+    } catch (e) { logline('화자 목소리 오류: ' + e.message); setStatus('⚠ ' + e.message); return false; }
   }
   // 🎙 채널편집 음성 탭 요약 — 그 채널의 엔진·목소리(얼굴) · 탭을 열 때·음성 설정을 저장했을 때 다시 읽는다
   const [chVoiceInfo, setChVoiceInfo] = useState(null);
@@ -1801,24 +1817,42 @@ export default function App() {
   useEffect(() => { if (settingsOpen && settingsTab === 'keys') loadTtsKeys(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
   //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
+  //   🎙 문장마다 **실제로 읽을 목소리**의 단가로 센다(v0.6.84) — 순서는 main/pipeline 과 같다:
+  //   이 대본 화자 목소리(pr.spkVoices) > 채널 화자 목소리(OmniVoice 일 때만 — 유료 기본이면 무시된다) > 대본 목소리(pr.ttsVoice) > 채널 목소리
   const ttsCost = useMemo(() => {
-    let total = 0, need = 0, chars = 0, allChars = 0;
+    const a = ttsEngActive || {};
+    const P = a.prices || {};
+    const effVe = (pr, se) => {
+      if (se.speaker && pr.spkVoices && pr.spkVoices[se.speaker]) return pr.spkVoices[se.speaker].voiceEngine || { id: 'omnivoice' };
+      const base = (pr.ttsVoice && pr.ttsVoice.voiceEngine) || a.chVe || { id: a.id || 'omnivoice' };
+      if (se.speaker && (a.chSpk || []).includes(se.speaker) && (base.id || 'omnivoice') === 'omnivoice') return { id: 'omnivoice' };
+      return base;
+    };
+    const usdOf = (ve, n) => {
+      const id = (ve && ve.id) || 'omnivoice'; if (id === 'omnivoice') return 0;
+      const e = P[id]; const u = e && (e.unit[ve.model] || e.unit[e.first]); if (!u) return null;
+      return u.kind === 'char' ? n * u.usd : (n / (a.koCps || 7)) * u.usd;
+    };
+    let total = 0, need = 0, chars = 0, allChars = 0, usd = 0, usdAll = 0, unknown = false;
+    const by = new Map();   // 목소리 이름 → 남은 글자 수(설명용)
     for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) {
       const n = String(se.ttsText || se.text || '').length; total++; allChars += n;
-      if (!se.audio) { need++; chars += n; }
+      const ve = effVe(pr, se); const u = usdOf(ve, n);
+      if (u == null) unknown = true; else usdAll += u;
+      if (!se.audio) {
+        need++; chars += n; if (u != null) usd += u;
+        const k = ve.id === 'omnivoice' ? 'OmniVoice' : `${(P[ve.id] || {}).label || ve.id} · ${ve.voice || ''}`;
+        by.set(k, (by.get(k) || 0) + n);
+      }
     }
     if (!total) return null;
-    const a = ttsEngActive || {};
-    const won = (c) => {
-      if (a.id === 'omnivoice' || !a.id) return 0;
-      const u = a.unit; if (!u) return null;
-      return (u.kind === 'char' ? c * u.usd : (c / (a.koCps || 7)) * u.usd) * (a.krw || 1400);
-    };
+    const krw = a.krw || 1400;
     const fmt = (w) => (w == null ? '요금 정보 없음' : w === 0 ? '무료' : w < 10 ? `${w.toFixed(1)}원` : `${Math.round(w).toLocaleString()}원`);
-    const w = won(chars), wa = won(allChars);
-    const note = a.id === 'omnivoice' || !a.id ? 'OmniVoice = 내 GPU 서버(무료)'
-      : `${a.label} · ${a.unit && a.unit.kind === 'sec' ? '음성 길이로 추정(한국어 초당 약 7자)' : '글자 수 기준'} · 1달러 ≈ ${Math.round(a.krw || 1400).toLocaleString()}원(카드 수수료 포함) · 실제 청구와 다를 수 있음`;
-    return { total, need, chars, allChars, txt: fmt(w), allTxt: fmt(wa), note };
+    const paid = [...by.keys()].some((k) => k !== 'OmniVoice');
+    const note = (by.size ? '목소리별 남은 글자: ' + [...by.entries()].map(([k, n]) => `${k} ${n.toLocaleString()}자`).join(' · ') + '\n' : '')
+      + (paid ? `유료 목소리는 ${'글자 수 또는 음성 길이(한국어 초당 약 7자)로 추정'} · 1달러 ≈ ${Math.round(krw).toLocaleString()}원(카드 수수료 포함) · 실제 청구와 다를 수 있음` : 'OmniVoice = 내 GPU 서버(무료)')
+      + (unknown ? '\n⚠ 단가를 모르는 목소리가 있어 그 문장은 빼고 셌습니다' : '');
+    return { total, need, chars, allChars, txt: fmt(usd * krw), allTxt: fmt(usdAll * krw), note };
   }, [dto, ttsEngActive]);
   async function openOllama() {
     try {
@@ -4322,7 +4356,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openClipVoice : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -4929,7 +4963,7 @@ export default function App() {
       )}
       {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
         target={ttsEng.target || null}
-        onApply={(v) => (ttsEng.target && ttsEng.target.kind === 'clip' ? applyClipVoice(ttsEng.target, v) : applyScriptVoice(ttsEng.target, v))}
+        onApply={(v) => (ttsEng.target && ttsEng.target.kind === 'speaker' ? applySpeakerVoice(ttsEng.target, v) : applyScriptVoice(ttsEng.target, v))}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
         onClose={() => setTtsEng(null)} onSaved={(n) => {
           refreshTtsEngActive();
@@ -5750,7 +5784,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           const ai = aiNotice ? ss.map((_, si) => (aiIn(pr0, gs + si) ? 'i' : '-') + (gs + si === aiFirst(pr0) ? 'F' : '')).join('') + '|' + JSON.stringify(pr0.aiNoticeRange || null) : '';   // 순번 대신 이 그룹 안 몇 번째 문장인가
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
-          return [cj, lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
+          return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
             layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0].join('#');
         };
         return (
@@ -5920,10 +5954,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{l.n}</div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); } }}>
-                                    {/* 🎙 누르면 이 클립만의 목소리(음성 설정 팝업 · v0.6.83) — 클립 목소리 > [화자] > 대본 > 채널 */}
-                                    <span className={'clip-spk' + (s.tv ? ' own' : s.speaker ? '' : ' narr') + (onClipVoice ? ' click' : '')} data-testid="clip-spk" role={onClipVoice ? 'button' : undefined}
-                                      title={(s.tv ? `이 클립만의 목소리: ${s.tv}${s.speaker ? ` (화자 「${s.speaker}」 대신)` : ''}` : s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : (pr.ttsVoiceText ? `대본 목소리: ${pr.ttsVoiceText}` : '채널 기본 목소리')) + (onClipVoice ? '\n누르면 🔊 음성 설정 — 이 클립만 다른 목소리로' : '')}
-                                      onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, c.num, si, s); } : undefined}>🗣 {s.tv || s.speaker || '내레이션'}</span>
+                                    {/* 🎙 누르면 이 대본의 그 화자(내레이션) 목소리(음성 설정 팝업 · v0.6.84) — 이 대본 화자 > 채널 화자 > 대본 > 채널 */}
+                                    {(() => { const vt = s.speaker ? ((pr.spkVoiceText && pr.spkVoiceText[s.speaker]) || '') : (pr.ttsVoiceText || ''); return (
+                                    <span className={'clip-spk' + (vt ? ' own' : s.speaker ? '' : ' narr') + (onClipVoice ? ' click' : '')} data-testid="clip-spk" role={onClipVoice ? 'button' : undefined}
+                                      title={(vt ? `이 대본의 ${s.speaker ? `화자 「${s.speaker}」` : '내레이션'} 목소리: ${vt}` : s.speaker ? `화자 「${s.speaker}」 — 채널 화자 목소리(⚙ 채널편집 → 🎙 음성) 또는 내레이션 목소리` : '채널 기본 목소리') + (onClipVoice ? `\n누르면 🔊 음성 설정 — 이 대본의 ${s.speaker ? `「${s.speaker}」 클립 모두` : '내레이션 클립 모두'}` : '')}
+                                      onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (

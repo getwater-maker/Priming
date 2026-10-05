@@ -58,7 +58,7 @@ function makeWav(samples, sr = 24000) {
   console.log('\n[1b] 💲 요금');
   ok(Math.abs(TE.estimateUsd('mai', 'MAI-Voice-2.1', 1e6) - 22) < 1e-9, 'MAI 2.1 = 1백만 자 $22');
   ok(Math.abs(TE.estimateUsd('mai', 'MAI-Voice-2.1-Flash', 1e6) - 15) < 1e-9, 'MAI Flash = $15');
-  ok(Math.abs(TE.estimateUsd('elevenlabs', 'eleven_v4', 1000) - 0.08) < 1e-9, 'ElevenLabs v4 = 1천 자 $0.08');
+  ok(Math.abs(TE.PRICING.eleven_v4.usd * 1000 - 0.08) < 1e-9 && Math.abs(TE.estimateUsd('elevenlabs', 'eleven_v4', 1000) - TE.unitFor('eleven_v4').usd * 1000) < 1e-9, 'ElevenLabs v4 = 정가 1천 자 $0.08 · 요금 추정은 지금 걸린 할인(unitFor)을 탄다(v0.6.84)');
   ok(Math.abs(TE.estimateUsd('typecast', 'ssfm-v30', 1000) - 0.075) < 1e-9, '타입캐스트 = 1천 자 $0.075');
   ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 0, 60) - 60 * 25 * 9 / 1e6) < 1e-12, 'Gemini 3.8 = 초당 음성 토큰 25 × $9/1M');
   ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 700) - 100 * 25 * 9 / 1e6) < 1e-12, 'Gemini — 길이 모르면 한국어 초당 7자로 추정');
@@ -212,7 +212,7 @@ function makeWav(samples, sr = 24000) {
   eq([o.calls[0].provider, o.calls[0].voice, o.calls[0].model, o.calls[0].refName, o.calls[0].seed], ['elevenlabs', 'v9', 'eleven_v3', undefined, 7], '유료 채널 — 그 채널의 엔진·목소리 + 채널 시드 · 참조음성 없음');
   eq(o.calls[1].voice, 'v9', '유료 — 화자도 같은 목소리');
   ok(o.lines.some((l) => /🔊 음성 엔진 — ElevenLabs/.test(l)), '로그에 엔진·목소리를 남긴다');
-  ok(o.lines.some((l) => /화자별 목소리\(참조음성\)를 쓰지 않습니다/.test(l)), '화자 목소리를 못 쓴다고 알린다');
+  ok(o.lines.some((l) => /채널 화자 목소리\(참조음성\)를 쓰지 않습니다/.test(l)), '채널 화자 목소리를 못 쓴다고 알린다(이 대본 화자 목소리는 고를 수 있다고 안내 · v0.6.84)');
   o = await run(preset);
   eq(o.calls[0].provider, 'omnivoice', '🔑 다른 채널을 유료로 바꿔도 이 채널은 OmniVoice 그대로(전역이 아니다)');
   const mm = await P.makeTtsManager(() => {}, { engine: 'omnivoice', voiceEngine: { id: 'typecast', voice: 'tc_1' } }, { retries: 0 });
@@ -266,7 +266,7 @@ function makeWav(samples, sr = 24000) {
       eq([wonTxt(0.22, 1366), wonTxt(0.001, 1366), wonTxt(0, 1366), wonTxt(null, 1366), wonTxt(0.00001, 1366)], ['301원', '1.4원', '무료', '?', '0.1원 미만'], '원화 표기(반올림·소수 한 자리·무료·모름)');
       ok(!/usdTxt/.test(dlg) && !/\$\$\{/.test(dlg), '팝업에 달러 표시가 남지 않는다');
       const APP = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
-      ok(/data-testid="tts-cost"/.test(APP) && /if \(!se\.audio\) \{ need\+\+; chars \+= n; \}/.test(APP), '대본 TTS 예상 비용 — 음성 없는 문장만 센다');
+      ok(/data-testid="tts-cost"/.test(APP) && /if \(!se\.audio\) \{\s*need\+\+; chars \+= n;/.test(APP), '대본 TTS 예상 비용 — 음성 없는 문장만 센다');
       ok(MJ.includes("ipcMain.handle('tts-translate'") && /koView/.test(dlg) && /원문:/.test(dlg), '카드 글 한국어 번역(원문은 마우스 올리면)');
       const ta = MJ.indexOf('const _needsTr = '); const needsTr = new Function('return ' + MJ.slice(ta + 'const _needsTr = '.length, MJ.indexOf(';\n', ta)))();
       eq([needsTr('Warm calm narrator'), needsTr('따뜻한 목소리'), needsTr('ko'), needsTr(''), needsTr('내 복제 · middle_aged · calm narrator')], [true, false, false, false, true], '번역할 글 고르기(영어가 한글보다 많으면 · 「내 복제」 섞인 옛 목록도)');

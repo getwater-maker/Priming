@@ -40,9 +40,11 @@ function estUsd(engId, unit, chars, koCps) {
 
 // 🎙 target(v0.6.83) — 없으면 **채널 기본 목소리**(⚙ 채널편집 → 「음성 설정에서 바꾸기」 · 대본이 없을 때의 리본 버튼).
 //   { kind: 'script', names:[대본…], channel, current } = 리본 「🔊 음성 설정」 → 열려 있는 대본 모두의 목소리
-//   { kind: 'clip', text, n, channel, current }        = 클립의 「🗣」 → 그 클립만의 목소리
+//   { kind: 'speaker', speaker|null, script, clips, channel, current } = 클립의 「🗣」 → 지금 대본의 그 화자(내레이션) 클립 모두(v0.6.84)
 //   target 이면 채널 설정은 저장하지 않고 onApply({ voiceEngine, ref, label } | null) 만 부른다(null = 덮어쓴 목소리 지우기).
 const TGT = '__target__';
+// 대상 이름(사람 말) — 「열린 대본」 · 「내레이션」 · 「화자 「엄마」」
+const tgtWho = (t) => (!t ? '' : t.kind === 'speaker' ? (t.speaker ? `화자 「${t.speaker}」` : '내레이션') : '열린 대본');
 export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply }) {
   const [data, setData] = useState(null);          // { engines, keys, channels, region, krw, koCps }
   const [drafts, setDrafts] = useState({});        // 채널 → { id, ref, cfg:{엔진:{model,voice,style,…}} }
@@ -278,7 +280,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   async function addFromLibrary(v) {
     const mine = (voices.elevenlabs || []).find((x) => x.name === v.name);
     if (mine) { pickVoice(mine); setMsg(`「${v.name}」 은 이미 내 목록에 있습니다 — 이 채널 목소리로 골랐습니다`); return; }
-    const ok = await (confirm || window.confirm)(`「${v.name}」(${v.lang}) 목소리를 ElevenLabs 내 목록에 추가하고 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan + ' 채널'}」 목소리로 고를까요?\n(요금제마다 추가할 수 있는 목소리 개수에 제한이 있습니다)`);
+    const ok = await (confirm || window.confirm)(`「${v.name}」(${v.lang}) 목소리를 ElevenLabs 내 목록에 추가하고 「${target ? tgtWho(target) : chan + ' 채널'}」 목소리로 고를까요?\n(요금제마다 추가할 수 있는 목소리 개수에 제한이 있습니다)`);
     if (!ok) return;
     setBusy('add:' + v.id); setMsg(`📚 「${v.name}」 추가하는 중…`);
     const r = await api.elAddShared({ ownerId: v.ownerId, voiceId: v.id, name: v.name });
@@ -287,7 +289,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     setVoices((x) => ({ ...x, elevenlabs: r.voices }));
     patchDraft((d) => ({ ...d, id: 'elevenlabs', cfg: { ...d.cfg, elevenlabs: { ...(d.cfg.elevenlabs || {}), model, voice: r.voiceId } } }));
     setElSrc('mine');
-    setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan + ' 채널'}」 목소리로 골랐습니다 — 저장을 누르세요`);
+    setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${target ? tgtWho(target) : chan + ' 채널'}」 목소리로 골랐습니다 — 저장을 누르세요`);
   }
   // 🎨 보이는 목소리 얼굴 한꺼번에 그리기(얼굴 없는 것만 · 🖥 로컬 ComfyUI · 무료 · 멈춤 가능)
   async function drawAllFaces(list) {
@@ -379,7 +381,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       {/* 🔒 크기 고정 — 채널·탭·목록과 상관없이 같은 크기(안쪽만 스크롤) */}
       <div className="modal-card" data-testid="tts-eng-card" style={{ width: 'min(1180px, 96vw)', maxWidth: 'none', height: 'min(760px, 92vh)', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h3 style={{ margin: 0, flex: 1 }}>🔊 음성 설정 <span className="meta" data-testid="tts-mode" style={{ fontWeight: 400, fontSize: 12 }}>{!target ? '채널 기본 목소리 — 채널마다 고르세요(대본·클립이 따로 고르지 않으면 이 목소리)' : target.kind === 'clip' ? '이 클립만의 목소리' : `열려 있는 대본 ${target.names.length}개의 목소리 — 채널 기본은 그대로`}</span></h3>
+          <h3 style={{ margin: 0, flex: 1 }}>🔊 음성 설정 <span className="meta" data-testid="tts-mode" style={{ fontWeight: 400, fontSize: 12 }}>{!target ? '채널 기본 목소리 — 채널마다 고르세요(대본·클립이 따로 고르지 않으면 이 목소리)' : target.kind === 'speaker' ? `이 대본의 ${tgtWho(target)} 목소리${target.clips != null ? ` — 클립 ${target.clips}개` : ''}` : `열려 있는 대본 ${target.names.length}개의 목소리 — 채널 기본은 그대로`}</span></h3>
           {/* 💱 환율 = 공개 API 시장 환율 + 카드 해외결제 수수료(카드사·결제망 환율 페이지는 자동 조회를 막는다) — 수수료는 눌러서 고친다 */}
           <span data-testid="tts-fx" className="meta" style={{ cursor: 'pointer' }} onClick={() => setFeeOpen((x) => !x)}
             title={(fx ? `시장 환율 1달러 = ${fx.rate.toLocaleString()}원 (${fx.source} · 기준 ${fx.asOf}${fx.stale ? ' · ⚠ 지난 값' : ''})\n` : '환율을 받지 못해 지난 값으로 계산합니다\n') + `+ 카드 해외결제 수수료 ${cardFee}% = 카드 청구 예상 환율\n눌러서 수수료를 고칩니다`}>
@@ -433,7 +435,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* ① 설정 한 줄 — 상태 · 키 · 모델 · 지역 (설명은 ⓘ 에) */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 10, background: isOnTab ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.05)', color: isOnTab ? BLUE : 'inherit', fontWeight: 600 }}
-                  title={eng.note}>{isOnTab ? `✅ 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
+                  title={eng.note}>{isOnTab ? `✅ 「${target ? tgtWho(target) : chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
                 <span style={{ flex: 1 }} />
                 {/* 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78) — 여기는 상태와 그리로 가는 버튼만 */}
                 {eng.paid && (k.has
@@ -444,6 +446,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 {eng.regions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>지역
                   <select value={region} onChange={(ev) => setRegion(ev.target.value)} title="모든 채널 공통(Speech 리소스 지역)">{eng.regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></span>)}
               </div>
+              {/* 🎉 기간 한정 할인 띠(v0.6.84 · 로이 「이벤트 기간을 눈에 잘 띄게」) — 날짜·단가는 main tts-engines.PROMOS 한 곳 */}
+              {(eng.promos || []).map((p) => <PromoBanner key={p.id} p={p} krw={krw} unit={eng.unit} />)}
               {/* ② 말투·감정(있는 엔진만) */}
               {(maiStyles || eng.hasStyle || eng.emotions || tab === 'elevenlabs') && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
@@ -493,8 +497,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 )}
               </div>
 
-              {/* ⑤ 목소리 카드 — 이 칸만 스크롤 */}
-              <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, alignContent: 'start', paddingRight: 4 }}>
+              {/* ⑤ 목소리 카드 — 이 칸만 스크롤 · 🔑 gridAutoRows max-content: 높이가 정해진 스크롤 격자에서 auto 행은 카드 최소 높이(92)까지만 커져 🔈 줄이 잘렸다(v0.6.84) */}
+              <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gridAutoRows: 'max-content', gap: 8, alignContent: 'start', paddingRight: 4 }}>
                 {shown.map((v0) => { const v = koView(v0); return (
                   <VoiceCard key={v.id} v={v} sel={isSel(v)} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
@@ -519,7 +523,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
             {msg || '카드를 눌러 목소리를 고르고 저장하세요 · 🔈 듣기 · 카드에 마우스를 올리면 얼굴 넣기(🖼 그림 · 🎨 그리기)'}
           </span>
           <span className="meta">{target ? (dirty[TGT] ? '● 바뀜 — 「적용」을 누르세요' : '') : Object.keys(dirty).length ? `바뀐 채널 ${Object.keys(dirty).length}개` : ''}</span>
-          <button data-testid="tts-eng-save" disabled={busy === 'apply'} onClick={save}>{target ? (target.kind === 'clip' ? '이 클립에 적용' : '열린 대본에 적용') : '저장'}</button>
+          <button data-testid="tts-eng-save" disabled={busy === 'apply'} onClick={save}>{target ? (target.kind === 'speaker' ? `${tgtWho(target)}에 적용` : '열린 대본에 적용') : '저장'}</button>
           <button className="ghost" onClick={onClose}>닫기</button>
         </div>
       </div>
@@ -527,14 +531,35 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   );
 }
 
+// 🎉 할인 띠 — 기간·남은 날·모델별 할인가(정가) · 지난 할인은 회색 한 줄
+function PromoBanner({ p, krw, unit }) {
+  const md = (d) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
+  const left = Math.round((Date.parse(p.until) - Date.parse(p.today)) / 86400e3);
+  const NAMES = { eleven_v4: 'v4', eleven_v4_turbo: 'v4 Turbo' };
+  if (p.ended) return <div data-testid="tts-promo" className="meta" style={{ fontSize: 12, padding: '3px 8px', borderRadius: 8, background: 'rgba(0,0,0,0.05)' }}>🎉 {p.label} — {md(p.until)}에 끝났습니다(지금은 정가로 계산)</div>;
+  return (
+    <div data-testid="tts-promo" title={[p.extra, p.caveat, '출처: ' + p.src].filter(Boolean).join('\n')}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '7px 12px', borderRadius: 10, background: 'linear-gradient(90deg, #fff1e6, #ffe4ec)', border: '1.5px solid #f97316', color: '#9a3412' }}>
+      <span style={{ fontSize: 15, fontWeight: 800 }}>🎉 {p.label}</span>
+      <span style={{ fontSize: 15, fontWeight: 800, color: '#c2410c' }}>{md(p.from)} ~ {md(p.until)}</span>
+      <span data-testid="tts-promo-dday" style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: left <= 2 ? '#dc2626' : '#f97316', borderRadius: 12, padding: '1px 9px' }}>{left > 0 ? `D-${left}` : '오늘까지'}</span>
+      <span style={{ fontSize: 12 }}>{Object.entries(p.models).map(([m, u]) => `${NAMES[m] || m} 1만 자 ${wonTxt(u * 1e4, krw)}${unit && unit[m] && unit[m].listUsd ? `(정가 ${wonTxt(unit[m].listUsd * 1e4, krw)})` : ''}`).join(' · ')}</span>
+      <span className="meta" style={{ fontSize: 11 }}>ⓘ 끝나는 시각은 공지에 없음</span>
+    </div>
+  );
+}
+
 // 🎙 대본·클립 모드의 왼쪽 칸 — 무엇에 적용하는지 · 채널 기본 목소리 · 「채널 목소리로 되돌리기」
 function TargetPane({ target, chanVoice, chosen, dirty, busy, onClear }) {
-  const isClip = target.kind === 'clip';
+  const isSpk = target.kind === 'speaker';
+  const who = tgtWho(target);
   return (
     <div data-testid="tts-target" style={{ width: 230, flex: '0 0 230px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontWeight: 700 }}>{isClip ? '🎬 이 클립에만' : `📄 열린 대본 ${target.names.length}개에`}</div>
-      {isClip
-        ? <div className="meta" style={{ fontSize: 12, lineHeight: 1.45, background: 'rgba(0,0,0,0.04)', borderRadius: 8, padding: '6px 8px', maxHeight: 120, overflow: 'hidden' }}>{target.text}</div>
+      <div style={{ fontWeight: 700 }}>{isSpk ? `🗣 ${who}` : `📄 열린 대본 ${target.names.length}개에`}</div>
+      {isSpk
+        ? <div className="meta" style={{ fontSize: 12, lineHeight: 1.45, background: 'rgba(0,0,0,0.04)', borderRadius: 8, padding: '6px 8px' }}>
+            📄 {target.script}<br />{target.speaker ? `「${target.speaker}」 줄` : '내레이션'} 클립 {target.clips != null ? <b>{target.clips}개</b> : '모두'}에 적용합니다{target.speaker ? '' : '(화자 목소리가 있는 줄은 빼고)'}.
+          </div>
         : <div style={{ fontSize: 12, lineHeight: 1.5 }}>{target.names.map((n) => <div key={n} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={n}>· {n}</div>)}</div>}
       <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
         <div className="meta" style={{ fontSize: 11 }}>고른 목소리</div>
@@ -544,13 +569,11 @@ function TargetPane({ target, chanVoice, chosen, dirty, busy, onClear }) {
         <div className="meta" style={{ fontSize: 11 }}>채널 「{target.channel}」 기본</div>
         <div style={{ fontSize: 12 }}>{chanVoice.eng} · {chanVoice.name}</div>
       </div>}
-      {target.current && <div className="meta" style={{ fontSize: 11 }}>지금 {isClip ? '이 클립' : '열린 대본'}은 따로 고른 목소리(<b>{target.currentText || target.current.label}</b>)로 읽습니다.</div>}
+      {target.current && <div className="meta" style={{ fontSize: 11 }}>지금 {isSpk ? `이 대본의 ${who}` : '열린 대본'}은 따로 고른 목소리(<b>{target.currentText || target.current.label}</b>)로 읽습니다.</div>}
       <button className="ghost" data-testid="tts-target-clear" disabled={!target.current || busy === 'apply'} style={{ marginTop: 'auto' }}
-        title={isClip ? '이 클립의 목소리를 지우고 대본(또는 채널) 목소리로 읽습니다' : '열린 대본의 목소리를 지우고 채널 기본 목소리로 읽습니다'}
-        onClick={onClear}>↺ {isClip ? '대본 목소리로 되돌리기' : '채널 목소리로 되돌리기'}</button>
-      <div className="meta" style={{ fontSize: 11, lineHeight: 1.45 }}>{isClip
-        ? '적용하면 이 클립 음성만 새 목소리로 바로 다시 만듭니다.'
-        : '적용하면 이미 만든 음성 중 이 목소리로 읽을 문장은 지우고, 다음 🎤 TTS·⚡ 만들기 때 새 목소리로 만듭니다. 채널 기본은 ⚙ 채널편집 → 🎙 음성에서.'}</div>
+        title={isSpk ? (target.speaker ? '이 대본의 이 화자 목소리를 지웁니다 — 채널 화자 목소리(없으면 내레이션 목소리)로 읽습니다' : '이 대본의 내레이션 목소리를 지우고 채널 기본 목소리로 읽습니다') : '열린 대본의 목소리를 지우고 채널 기본 목소리로 읽습니다'}
+        onClick={onClear}>↺ {isSpk && target.speaker ? '기본 목소리로 되돌리기' : '채널 목소리로 되돌리기'}</button>
+      <div className="meta" style={{ fontSize: 11, lineHeight: 1.45 }}>적용하면 이미 만든 음성 중 이 목소리로 읽을 클립은 지우고, 다음 🎤 TTS·⚡ 만들기 때 새 목소리로 만듭니다. 채널 기본은 ⚙ 채널편집 → 🎙 음성에서.</div>
     </div>
   );
 }
@@ -584,13 +607,14 @@ function VoiceCard({ v, sel, face, busy, sampled, sampleCost, krw, users, onPick
         </div>
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {/* 🔑 줄마다 flexShrink 0 — 줄이 줄어들 수 있으면 카드가 최소 높이(92)에 머물고 언어 줄이 0px 로 눌렸다(v0.6.84 · 로이 캡처) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.orig ? v.name + '\n\n원문:\n' + v.orig : v.id}>{sel ? '✔ ' : ''}{v.name}</span>
           {G_ICON[v.gender] && <span title={v.gender} style={{ opacity: 0.7 }}>{G_ICON[v.gender]}</span>}
         </div>
-        {meta && <div className="meta" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
+        {meta && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
         {v.desc && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', maxHeight: 30, flexShrink: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={v.orig ? v.desc + '\n\n원문:\n' + v.orig : v.desc}>{v.desc}</div>}
-        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ marginTop: 'auto', paddingTop: 2, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
           {/* 🔈 아이콘 버튼(글자 없음 — 좁은 카드에서 「듣기」가 두 줄로 깨졌다 · 로이 2026-10-05) · 요금은 옆에 작게 */}
           <button className="ghost" data-testid="tts-voice-play" aria-label="샘플 듣기"
             style={{ flex: '0 0 auto', width: 34, height: 28, padding: 0, fontSize: 16, lineHeight: '26px', borderRadius: 14, whiteSpace: 'nowrap' }}

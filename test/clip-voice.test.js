@@ -1,5 +1,6 @@
-// 🎙 대본·클립 목소리(v0.6.83 · 로이 2026-10-05) — 우선순위 클립 > [화자] > 대본 > 채널
-//   ① 리본 「🔊 음성 설정」 = 열린 대본 모두(pr.ttsVoice) ② 클립 「🗣」 = 그 클립만(s.ttsVoice) ③ ⚙ 채널편집 = 채널 기본(preset)
+// 🎙 대본·화자 목소리(v0.6.83~84 · 로이 2026-10-05) — 우선순위 이 대본 화자 > 채널 화자 > 대본(내레이션) > 채널
+//   ① 리본 「🔊 음성 설정」 = 열린 대본 모두(pr.ttsVoice) ② 클립 「🗣」 = **지금 대본의 그 화자 클립 모두**(🗣 내레이션 = 이 대본 pr.ttsVoice ·
+//   🗣 엄마 = pr.spkVoices.엄마) ③ ⚙ 채널편집 = 채널 기본(preset) ④ 💰 예상 비용 = 문장마다 실제 목소리 · 🎉 기간 할인
 //   node test/clip-voice.test.js
 const fs = require('fs');
 const os = require('os');
@@ -40,7 +41,7 @@ ok(TE.resolveEngine(TE.applyVoice(ch, mai)) === 'mai', '대본 목소리(MAI) = 
 ok(TE.applyVoice(ch, null) === ch && TE.applyVoice(ch, { voiceEngine: { id: 'mai' } }) === ch, '빈 값·틀린 값은 채널 그대로(조용히 다른 목소리가 되지 않게)');
 ok(/☁ 대본목소리/.test(TE.voiceText(omni)) && /MAI-Voice · 해나/.test(TE.voiceText(mai)), 'voiceText = 사람 말 한 줄');
 
-console.log('\n[2] fillTtsList — 클립 > 화자 > 대본(=넘긴 preset) > 채널');
+console.log('\n[2] fillTtsList — 이 대본 화자(preset._spkVoices) > 채널 화자 > 대본(=넘긴 preset) > 채널');
 (async () => {
   const calls = [];
   const refreshed = [];
@@ -52,19 +53,20 @@ console.log('\n[2] fillTtsList — 클립 > 화자 > 대본(=넘긴 preset) > �
   const sents = [
     { num: 1, text: '그날 밤이었습니다.' },
     { num: 2, text: '얘야, 밥 먹어라.', speaker: '엄마' },
-    { num: 3, text: '이 문장만 다른 목소리입니다.', ttsVoice: { voiceEngine: { id: 'omnivoice' }, ref: 'srv:클립목소리', label: '클립목소리' } },
-    { num: 4, text: '화자 줄인데 클립 목소리를 골랐습니다.', speaker: '엄마', ttsVoice: mai },
+    { num: 3, text: '조금만 더 놀고요!', speaker: '아이' },
+    { num: 4, text: '엄마가 또 부릅니다.', speaker: '엄마' },
   ];
   const lines = [];
   const wd = fs.mkdtempSync(path.join(os.tmpdir(), 'cv-wd-'));
-  const res = await P.fillTtsList(sents, ch, mgr, wd, (l) => lines.push(l), null, 1, '시험');
+  const pv = { ...ch, _spkVoices: { 아이: { voiceEngine: { id: 'omnivoice' }, ref: 'srv:아이목소리', label: '아이목소리' }, 엄마: mai } };
+  const res = await P.fillTtsList(sents, pv, mgr, wd, (l) => lines.push(l), null, 1, '시험');
   ok(res.failed.length === 0, '4문장 모두 생성');
   ok(calls[0].refName === '채널목소리', '내레이션 = 채널 목소리');
-  ok(calls[1].refName === '엄마목소리', '[엄마] = 화자 목소리');
-  ok(calls[2].refName === '클립목소리' && calls[2].provider === 'omnivoice' && calls[2].seed === 7, '🔑 클립 목소리(OmniVoice) = 그 문장만 · 시드는 채널 것');
-  ok(calls[3].provider === 'mai' && calls[3].voice === 'ko-KR-Haena', '🔑 클립 목소리가 화자보다 먼저(유료 엔진도 그 문장만)');
-  ok(refreshed.includes('mai'), '채널과 다른 엔진의 클립이 있으면 그 엔진을 연결해 둔다');
-  ok(lines.some((l) => /🎙 클립 목소리 2문장/.test(l)), '시작 로그에 클립 목소리 수');
+  ok(calls[2].refName === '아이목소리' && calls[2].provider === 'omnivoice' && calls[2].seed === 7, '🔑 이 대본의 [아이] 목소리(채널에 연결 안 된 화자도) · 시드는 채널 것');
+  ok(calls[1].provider === 'mai' && calls[3].provider === 'mai' && calls[3].voice === 'ko-KR-Haena', '🔑 이 대본 [엄마] 목소리가 채널 화자 목소리보다 먼저 — 「엄마」 클립 **모두**(유료 엔진도)');
+  ok(refreshed.includes('mai'), '채널과 다른 엔진의 화자가 있으면 그 엔진을 연결해 둔다');
+  ok(lines.some((l) => /엄마 → MAI-Voice · 해나\(이 대본\)/.test(l) && /아이 → ☁ 아이목소리\(이 대본\)/.test(l)), '시작 로그 화자 표에 「이 대본」 목소리');
+  ok(!lines.some((l) => /목소리를 연결하지 않은 화자/.test(l)), '이 대본 목소리가 있는 화자는 「연결 안 됨」 경고가 없다');
 
   // 대본 목소리 = main 이 applyVoice 로 얹어 넘긴 preset
   const c2 = [];
@@ -74,7 +76,7 @@ console.log('\n[2] fillTtsList — 클립 > 화자 > 대본(=넘긴 preset) > �
   ok(c2[0] === '대본목소리', '🔑 대본 목소리 = 내레이션 문장이 그 목소리(캐시가 채널 목소리를 되살리지 않는다)');
   ok(c2[1] === '엄마목소리', '대본 목소리여도 [화자] 목소리는 그대로');
 
-  // 캐시 — 클립 목소리를 지우면 채널 목소리 캐시(1번 호출에서 만든 것)를 되살린다 = 키가 목소리를 가른다
+  // 캐시 — 기본 경로(채널 목소리)의 키는 그대로 = 1번 호출에서 만든 채널 목소리 캐시를 되살린다
   const c3 = [];
   const mgr3 = { ...mgr, synthesize: async (t, o) => { c3.push(o.refName); return { mp3Buffer: wav(1), durationSec: 1, format: 'wav' }; } };
   const wd3 = fs.mkdtempSync(path.join(os.tmpdir(), 'cv-wd3-'));
@@ -91,17 +93,21 @@ console.log('\n[2] fillTtsList — 클립 > 화자 > 대본(=넘긴 preset) > �
   const fills = M.match(/P\.fillTts(List)?\([^;]*\);/g) || [];
   const bad = fills.filter((x) => !/scriptVoicePreset|rollPreset|usePreset|preset, mgr, ttsDir, log, \(\) => S\.abort, speed, '도입부'/.test(x));
   ok(bad.length === 0, `fillTts 호출마다 대본 목소리를 얹은 preset (${bad.map((x) => x.slice(0, 60)).join(' | ')})`);
-  ok(/ttsVoice: pr\.ttsVoice \|\| null/.test(M) && /tv: s\.ttsVoice \|\| null/.test(M), '작업본에 대본·클립 목소리 저장');
+  ok(/ttsVoice: pr\.ttsVoice \|\| null/.test(M) && /spkVoices: \(pr\.spkVoices && Object\.keys\(pr\.spkVoices\)\.length\) \? pr\.spkVoices : null/.test(M), '작업본에 대본·화자 목소리 저장');
   ok(/if \(ps\.ttsVoice\) proj\.ttsVoice = ps\.ttsVoice/.test(M) && /if \(ps\.ttsVoice\) pr\.ttsVoice = ps\.ttsVoice/.test(M), '작업본에서 대본 목소리 복원(두 경로)');
-  ok(/if \(ss\.tv\) s\.ttsVoice = ss\.tv/.test(M) && /if \(ss\.tv && ss\.text === s\.text\) s\.ttsVoice = ss\.tv/.test(M), '클립 목소리 복원(두 경로 · 다시 읽기는 같은 문장일 때만)');
-  ok(/ipcMain\.handle\('set-clip-voice'/.test(M) && /ipcMain\.handle\('set-script-voice'/.test(M), 'IPC set-clip-voice · set-script-voice');
-  ok(/like\.ttsVoice\) s\.ttsVoice = like\.ttsVoice/.test(M) && /sa\.ttsVoice\) ns\.ttsVoice = sa\.ttsVoice/.test(M), '나누기·합치기에도 클립 목소리가 따라간다');
+  ok(/if \(ps\.spkVoices\) proj\.spkVoices = ps\.spkVoices/.test(M) && /if \(ps\.spkVoices\) pr\.spkVoices = ps\.spkVoices/.test(M), '화자 목소리 복원(두 경로)');
+  ok(/_spkVoices: pr\.spkVoices/.test(M), 'scriptVoicePreset 이 화자 목소리를 preset._spkVoices 로 싣는다');
+  ok(/ipcMain\.handle\('set-speaker-voice'/.test(M) && /ipcMain\.handle\('set-script-voice'/.test(M) && !/set-clip-voice/.test(M), 'IPC set-speaker-voice · set-script-voice (클립 1개짜리 set-clip-voice 는 없앴다)');
+  ok(!/\bs\.ttsVoice|\bss\.tv\b/.test(M) && !/ttsVoice/.test(read('core/pipeline.js').replace(/pr\.ttsVoice|ttsVoice:|ttsVoiceText/g, '')), '문장 단위 목소리(s.ttsVoice) 흔적 없음 — 기준은 화자');
+  ok(/function _readsBaseVoice\(pr, s, chanSpk\)/.test(M), '「내레이션 목소리로 읽는 문장」 판정 한 곳(대본 목소리를 바꿀 때 지울 음성)');
   const pre = read('preload.js');
-  ok(/setClipVoice:/.test(pre) && /setScriptVoice:/.test(pre), 'preload');
+  ok(/setSpeakerVoice:/.test(pre) && /setScriptVoice:/.test(pre) && !/setClipVoice/.test(pre), 'preload');
 
   console.log('\n[4] 화면');
   const A = read('renderer/src/App.jsx');
-  ok(/data-testid="clip-spk"/.test(A) && /_S\.onClipVoice\(/.test(A), '클립 「🗣」 = 누르면 음성 설정(안정 래퍼 _S 로)');
+  ok(/data-testid="clip-spk"/.test(A) && /_S\.onClipVoice\(pr\.shortsNum, s\)/.test(A) && /onClipVoice=\{isLf \? openSpeakerVoice : null\}/.test(A), '클립 「🗣」 = 이 대본의 그 화자 목소리(안정 래퍼 _S 로)');
+  ok(/JSON\.stringify\(\[pr0\.ttsVoiceText \|\| '', pr0\.spkVoiceText \|\| null\]\)/.test(A), '🗣 배지가 대본 목소리를 따라 다시 그려진다(cutKey)');
+  ok(/const effVe = \(pr, se\) =>/.test(A) && /pr\.spkVoices && pr\.spkVoices\[se\.speaker\]/.test(A) && /pr\.ttsVoice && pr\.ttsVoice\.voiceEngine/.test(A), '💰 예상 비용 = 문장마다 실제 목소리(이 대본 화자 > 채널 화자 > 대본 > 채널)');
   ok(/'onInsMark', 'onClipVoice'\]\) o\[k\] = mk\(k\)/.test(A), 'onClipVoice 가 _S 래퍼 목록에(옛 렌더 함수를 부르지 않게)');
   ok(/data-testid="tts-engine-btn" onClick=\{openScriptVoice\}/.test(A), '리본 「🔊 음성 설정」 = 열린 대본 목소리');
   ok(/onClick=\{\(\) => openTtsEngines\(ch\.name\)\}>🔊 음성 설정에서 바꾸기/.test(A), '⚙ 채널편집 → 「음성 설정에서 바꾸기」 = 채널 기본(그대로)');
@@ -110,6 +116,20 @@ console.log('\n[2] fillTtsList — 클립 > 화자 > 대본(=넘긴 preset) > �
   ok(/if \(target\) \{\s*const d = drafts\[TGT\];/.test(D) && /onApply\(\{ voiceEngine: ve/.test(D), '대본·클립 모드는 채널을 저장하지 않고 onApply 만');
   const css = read('renderer/src/styles.css');
   ok(/body:has\(\.modal-bg\.show\) \.clip-tb\{display:none\}/.test(css), '🧩 팝업이 떠 있으면 검은 클립 막대를 숨긴다');
+
+  console.log('\n[5] 🎉 기간 할인 — ElevenLabs v4 (KST 날짜로 10/12 까지)');
+  const at = (s) => Date.parse(s);
+  ok(Math.abs(TE.unitFor('eleven_v4', at('2026-10-05T03:00:00Z')).usd * 1e3 - 0.022) < 1e-9 && Math.abs(TE.unitFor('eleven_v4_turbo', at('2026-10-05T03:00:00Z')).usd * 1e3 - 0.011) < 1e-9, '할인 중 = v4 $0.022 · Turbo $0.011 (1천 자)');
+  ok(Math.abs(TE.unitFor('eleven_v4', at('2026-10-12T14:59:00Z')).usd * 1e3 - 0.022) < 1e-9, '10/12 23:59 KST = 아직 할인');
+  ok(Math.abs(TE.unitFor('eleven_v4', at('2026-10-12T15:00:00Z')).usd * 1e3 - 0.08) < 1e-9, '🔑 10/13 00:00 KST = 정가 $0.08(예상 비용을 낮춰 잡지 않는다)');
+  ok(Math.abs(TE.unitFor('eleven_v4', at('2026-09-27T14:00:00Z')).usd * 1e3 - 0.08) < 1e-9, '출시(9/28) 전 = 정가');
+  ok(TE.unitFor('eleven_v3', at('2026-10-05T03:00:00Z')).usd === TE.PRICING.eleven_v3.usd, '다른 모델은 그대로');
+  ok(Math.abs(TE.estimateUsd('elevenlabs', 'eleven_v4', 10000, null) - (Date.now() < at('2026-10-12T15:00:00Z') ? 0.22 : 0.8)) < 1e-9, 'estimateUsd 도 unitFor 를 탄다');
+  { const ps = TE.promosOf('elevenlabs', at('2026-10-05T03:00:00Z')); ok(ps.length === 1 && ps[0].active && ps[0].from === '2026-09-28' && ps[0].until === '2026-10-12', '띠 정보 = 9/28 ~ 10/12 · 진행 중');
+    ok(TE.promosOf('elevenlabs', at('2026-10-20T03:00:00Z'))[0].ended, '지나면 ended(회색 한 줄)'); }
+  ok(/unit: Object\.fromEntries\(\(e\.models \|\| \[\]\)\.map\(\(m\) => \[m\.id, TE\.unitFor\(m\.id\)\]\)\)/.test(M) && /promos: TE\.promosOf\(e\.id\)/.test(M), '화면 단가표도 할인 반영(main → 팝업·💰)');
+  ok(/data-testid="tts-promo"/.test(D) && /<PromoBanner key=\{p\.id\} p=\{p\}/.test(D), 'ElevenLabs 탭 할인 띠');
+  ok(/gridAutoRows: 'max-content'/.test(D) && /gap: 4, flexShrink: 0 \}\}/.test(D), '🃏 목소리 카드 — 언어 줄·🔈 줄이 눌리거나 잘리지 않게');
 
   console.log(`\n${fail ? '❌' : '✅'} clip-voice ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
