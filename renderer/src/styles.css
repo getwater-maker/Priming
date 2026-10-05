@@ -554,6 +554,10 @@ header.vhead{padding:0;gap:0}
 .pane1 #stage.lf{width:100%;box-shadow:none;border-radius:8px;flex:0 0 auto}
 .pane1 #playerBar{margin-top:0;gap:10px}
 .pane1 #playerBar button{padding:5px 12px}
+.pane1 #playerBar button{white-space:nowrap;flex:0 0 auto}
+.pane1 #playerBar [data-testid=play-btn]{width:6.2em;text-align:center;padding-left:0;padding-right:0}
+#playerInfo{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.pane1 #playerInfo{width:11.5em;flex:0 0 auto;font-variant-numeric:tabular-nums}
 .pane1 #logwrap.docked{flex:1 1 auto;height:auto;min-height:110px}
 .pane-split{flex:0 0 6px;cursor:col-resize;background:var(--line)}
 .pane-split:hover{background:var(--accent)}

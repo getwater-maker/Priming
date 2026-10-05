@@ -55,6 +55,24 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const s2 = await state();
     ok(s2 && s2.n === 9 && s2.picked && s2.inView && s2.scrollTop < s1.scrollTop, `막대 10% → 클립 9 · 다시 앞쪽으로 (${JSON.stringify(s2)})`);
     ok(await win.locator('[data-testid=stage-edit]').count() === 0 && await win.locator('.sent.clip.editing').count() === 0, '편집칸은 열지 않는다(고르기만)');
+    // ▶ 재생 중에도 멈춰 있을 때 모양 그대로 + ② 목록이 읽는 클립을 가운데로(v0.7.0 · 로이 2026-10-06)
+    const bar = () => win.evaluate(() => {
+      const sk = document.querySelector('[data-testid=stage-seek]'), info = document.getElementById('playerInfo');
+      const cur = document.querySelector('.sent.cur'), pane = document.querySelector('main.pane2');
+      const r = cur && cur.getBoundingClientRect(), p = pane && pane.getBoundingClientRect();
+      return { w: sk ? Math.round(sk.getBoundingClientRect().width) : 0, info: info ? info.textContent : '', n: cur ? Number(cur.getAttribute('data-ln')) : 0,
+        off: r && p ? Math.round((r.top + r.height / 2) - (p.top + p.height / 2)) : 9999 };
+    });
+    const b0 = await bar();
+    await win.click('[data-testid=play-btn]'); await win.waitForTimeout(3500);
+    const b1 = await bar();
+    ok(/^G\d+ · 자막 \d+ \/ 80$/.test(b1.info) && b1.n > 9, `🔑 재생 중 정보줄 = 「G · 자막 n / 전체」(대본 제목 아님) (${JSON.stringify([b0.info, b1.info])})`);
+    ok(b1.w >= b0.w - 4, `🔑 재생 중에도 재생 막대 폭 그대로 (${b0.w} → ${b1.w}px)`);
+    ok(Math.abs(b1.off) < 60, `🔑 읽는 클립이 ② 목록 가운데 (가운데에서 ${b1.off}px)`);
+    await atPct(0.9); await win.waitForTimeout(2500);   // 재생 중 막대 → 그 자리부터 이어 재생 → 목록도 따라간다
+    const b2 = await bar();
+    ok(b2.n >= 73 && Math.abs(b2.off) < 60, `재생 중 뒤로 건너뛰어도 목록이 따라가 가운데 (클립 ${b2.n} · ${b2.off}px)`);
+    await win.click('[data-testid=play-btn]'); await win.waitForTimeout(400);
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

@@ -3300,6 +3300,19 @@ export default function App() {
   // 커서가 다른 그룹으로 가면 선택을 푼다(그 그림이 안 보일 수 있다)
   useEffect(() => { if (stageSel && !(stageLayersRef.current.layers || []).some((c) => c.num === stageSel.num)) setStageSel(null); });
 
+  // 📜 재생 중 ② 목록이 읽는 클립을 따라간다 — 그 클립을 목록 가운데로(v0.7.0 · 로이 「읽는 그룹을 가운데에」).
+  //   사람이 목록을 굴린 뒤 4초 동안은 따라가지 않는다(내가 보려고 내린 자리를 재생이 빼앗지 않게).
+  const userScrollAtRef = useRef(0);
+  useEffect(() => {
+    const on = (ev) => { if (ev.target && ev.target.closest && ev.target.closest('.pane2')) userScrollAtRef.current = Date.now(); };
+    window.addEventListener('wheel', on, { passive: true });
+    return () => window.removeEventListener('wheel', on);
+  }, []);
+  function followPlayLine(n) {
+    if (Date.now() - userScrollAtRef.current < 4000) return;
+    const e = document.querySelector('.sent[data-ln="' + n + '"]');
+    if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
   async function stepCaptions(clips, durMs, s, where, startLi, vis) {
     const _g = playGenRef.current;
     // 🧭 재생 중에도 ② 커서가 따라간다 — where = { shortsNum, groupNum, sentIdx }
@@ -3323,7 +3336,12 @@ export default function App() {
       }
       elapsed += d;
       if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
-      if (where && wLines[i]) setCursor({ shortsNum: where.shortsNum, n: wLines[i].n });
+      if (where && wLines[i]) {
+        setCursor({ shortsNum: where.shortsNum, n: wLines[i].n });
+        // ▶ 재생 중에도 멈춰 있을 때와 같은 모양(v0.7.0 · 로이) — 정보줄 = 「G · 자막 n / 전체」(대본 제목을 쓰면 재생 막대가 짧아졌다)
+        if (playerInfoRef.current) playerInfoRef.current.textContent = `G${where.groupNum} · 자막 ${wLines[i].n} / ${PLw.list.length}`;
+        followPlayLine(wLines[i].n);
+      }
       const el = stageCapRef.current;
       if (el) {
         if (s && cl) {

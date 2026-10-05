@@ -1,5 +1,5 @@
 // 🎙 참조음성 만들기 — core/ref-voice(앱·CLI 공용) + tools/ref-voice.js (v0.6.99 · 채널사업부 요청 · 로이 B 안)
-//   서버·GPU 없이: 공용 함수 · 예문(むかしむかし) · 자르기 규칙(합성 WAV) · 인자 · 🔒 키를 직접 다루지 않는다
+//   서버·GPU 없이: 공용 함수 · 예문(昔々 없음) · 자르기 규칙(합성 WAV) · 인자 · 🔒 키를 직접 다루지 않는다
 //   node test/ref-voice.test.js
 const fs = require('fs'), os = require('os'), path = require('path');
 const ROOT = path.join(__dirname, '..');
@@ -8,7 +8,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 const RV = require('../core/ref-voice');
 
-console.log('[1] 예문 — 앱 보이스디자인 창과 같다 · 일본어는 가나 「むかしむかし」');
+console.log('[1] 예문 — 앱 보이스디자인 창과 같다 · 일본어는 昔々·표기가 갈리는 가나 없이');
 const A = read('renderer/src/App.jsx');
 const vd = /const VD_SAMPLE_TEXT = \{([\s\S]*?)\n\};/.exec(A);
 const appSample = {};
