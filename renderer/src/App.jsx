@@ -4560,10 +4560,10 @@ export default function App() {
 
               {chTab === 'tools' && (<div>
                 <div className="subhead">🎨 이미지 스타일</div>
-                <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-
-                <div className="crow" style={{ marginTop: 4 }}><span className="l">🖼 썸네일</span>
-                  <select value={ch.styleThumb || ''} onChange={(e) => setCh({ ...ch, styleThumb: e.target.value })}>
+                {/* 스타일·썸네일은 한 줄에 나란히 — 🖼 제작 도구 탭이 다른 탭과 같은 높이에 들어가게(v0.6.82) */}
+                <div className="crow"><span className="l">스타일</span><select style={{ flex: '1 1 0', minWidth: 0 }} value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                  <span className="l" style={{ marginLeft: 10 }}>🖼 썸네일</span>
+                  <select style={{ flex: '1 1 0', minWidth: 0 }} value={ch.styleThumb || ''} onChange={(e) => setCh({ ...ch, styleThumb: e.target.value })}>
                     <option value="">— 롱폼과 같게 —</option>
                     {chStyles.map((s2) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
                   </select></div>
@@ -4604,6 +4604,8 @@ export default function App() {
                       </select></div>
                   </div>
                 </div>
+                {/* 도구 안내 — 예전엔 탭 맨 아래에 있었다(v0.6.82 에 도구 칸 바로 아래로 옮기고 줄였다) */}
+                <div className="meta">이 채널을 고르면 헤더의 이미지·비디오 도구와 <b>출력</b>(완성물 종류)이 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델을 여기서 고르고 주소·API키는 ⚙ 설정에서, <b>Flow · Veo</b>(그룹 이미지를 시작 프레임으로 i2v)의 모델·첨부방식·해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다.</div>
                 <div className="crow stack"><span className="l">🎬 영상 만들 그룹 (이 채널 기본값)</span>
                   <select data-testid="ch-vid-sel" value={vidIsList(ch.vidSel) ? 'list' : (normVidSel(ch.vidSel) || 'intro')} onChange={(e) => setCh({ ...ch, vidSel: e.target.value === 'list' ? VID_LIST + (vidListText(ch.vidSel) || '1') : (normVidSel(e.target.value) || 'intro') })}>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
@@ -4613,21 +4615,24 @@ export default function App() {
                   <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
+                {/* 다섯 칸을 한 줄에(v0.6.82 — 탭 높이를 다른 탭과 맞춘다). 값·저장 키는 그대로 wbSub.{sizePct,marginPct,pos,font,bold} */}
                 <div className="twocol">
                   <div className="col">
                     <div className="crow stack"><span className="l">글자 크기</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <input type="number" min="1" max="20" step="0.1" style={{ width: 70 }}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="1080 세로 기준 픽셀로 환산한 값이 옆에 보입니다">
+                        <input type="number" min="1" max="20" step="0.1" style={{ width: 56 }}
                           value={(ch.wbSub && ch.wbSub.sizePct) != null ? ch.wbSub.sizePct : WB_SUB_DEFAULT.sizePct}
                           onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), sizePct: e.target.value } })} />
-                        <span className="meta">% (1080 기준 {Math.round(1080 * (Number((ch.wbSub && ch.wbSub.sizePct) ?? WB_SUB_DEFAULT.sizePct) || WB_SUB_DEFAULT.sizePct) / 100)}px)</span>
+                        <span className="meta" style={{ whiteSpace: 'nowrap' }}>% · {Math.round(1080 * (Number((ch.wbSub && ch.wbSub.sizePct) ?? WB_SUB_DEFAULT.sizePct) || WB_SUB_DEFAULT.sizePct) / 100)}px</span>
                       </span></div>
+                  </div>
+                  <div className="col">
                     <div className="crow stack"><span className="l">가장자리 여백</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <input type="number" min="0" max="45" step="0.5" style={{ width: 70 }}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="위치가 가운데일 땐 무시합니다">
+                        <input type="number" min="0" max="45" step="0.5" style={{ width: 56 }}
                           value={(ch.wbSub && ch.wbSub.marginPct) != null ? ch.wbSub.marginPct : WB_SUB_DEFAULT.marginPct}
                           onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), marginPct: e.target.value } })} />
-                        <span className="meta">% (가운데일 땐 무시)</span>
+                        <span className="meta">%</span>
                       </span></div>
                   </div>
                   <div className="col">
@@ -4636,21 +4641,21 @@ export default function App() {
                         onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), pos: e.target.value } })}>
                         {WB_SUB_POS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select></div>
+                  </div>
+                  <div className="col">
                     <div className="crow stack"><span className="l">폰트</span>
                       <select value={(ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font}
                         onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), font: e.target.value } })}>
                         {WB_SUB_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
                       </select></div>
                   </div>
-                  <div className="col">
+                  <div className="col" style={{ flex: '0 0 auto' }}>
                     <div className="crow stack"><span className="l">굵게</span>
                       <input type="checkbox" style={{ width: 'auto' }} checked={!(ch.wbSub && ch.wbSub.bold === false)}
                         onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), bold: e.target.checked } })} /></div>
                   </div>
                 </div>
                 <div className="meta">글자는 <b>검정 + 흰 외곽선</b>입니다(화이트보드 종이색이 미색이라 흰 글자는 안 보입니다). 자막을 <b>구울지 말지</b>는 헤더 「④ 완성」의 <b>💬 자막</b> 체크박스가 정합니다 — 끄면 영상에 글자가 안 들어가고 <b>.srt 파일만</b> 옆에 남습니다.</div>
-
-                <div className="meta" style={{ marginTop: 6 }}>이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델(Krea2·Z-Image / LTX2.5·LTX2.3)을 여기서 바로 고르고, 주소·API키는 ⚙ 설정에서 정합니다. <b>Flow · Veo</b> 는 그룹 이미지를 시작 프레임으로 i2v 하며 모델·첨부방식·다운로드 해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다. <b>출력</b>은 완성물 종류 — .vrew 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 음성·자막 포함).</div>
               </div>)}
 
               {chTab === 'folder' && (<div>

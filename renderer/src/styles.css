@@ -262,11 +262,10 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 탭형 모달 — 세로 스크롤 대신 상단 탭으로 섹션을 나눈다 (채널편집 등). 탭을 바꿔도 창 높이가 튀지 않게 본문 최소높이 고정 */
 .modal-card.tabbed{overflow:visible}
 .modal-card.tabbed .tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px}
-/* 🔑 탭을 눌러도 창 크기가 그대로여야 한다(로이 2026-09-16) — 기준은 **가장 긴 탭**(📋 채널, 실측 389px).
-   값을 낮추면 그 탭에서만 창이 커지고, 새 항목을 넣어 이 값을 넘기면 또 들쭉날쭉해진다 →
-   탭에 줄을 늘렸으면 test/comfy-panes.smoke.js 의 「탭 높이 일관」 단언이 잡는다. */
-/* 🔑 탭을 눌러도 창 높이가 그대로여야 한다(로이 2026-09-16). 기준은 **가장 긴 탭의 실측값** —
-   지금은 「🖼 제작 도구」(스타일+도구+💬 자막)가 490px 다. 탭에 항목을 더하면 여기를 다시 재서 올릴 것. */
+/* 🔑 탭을 눌러도 창 높이가 그대로여야 한다(로이 2026-09-16). 모든 탭이 이 높이 **안에** 들어가야 한다 —
+   「🖼 제작 도구」는 v0.6.82 에 칸을 가로로 모아 이 높이에 맞췄다(넘치던 573px → 맞춤).
+   탭에 줄을 늘렸으면 test/speaker-ui.smoke.js 의 「탭을 바꿔도 창 높이가 그대로」가 잡는다 —
+   값을 올리기보다 그 탭을 가로로 정리할 것(값을 올리면 모든 탭의 창이 커진다). */
 .modal-card.tabbed .tabbody{min-height:490px}
 .modal-card.tabbed .tabbody>div>.frow:first-child{margin-top:0}
 .modal-card.tabbed .tabbody .subhead:first-child{margin-top:0;border-top:none;padding-top:0}
