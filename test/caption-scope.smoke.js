@@ -152,6 +152,25 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await clipNo(2).click(); await win.waitForTimeout(350);
       const g = await win.evaluate(() => { const a = document.querySelector('[data-testid=stage-ai]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return { x: (a.left - s.left) / s.width, y: (a.top - s.top) / s.height, fs: parseFloat(getComputedStyle(document.querySelector('[data-testid=stage-ai]')).fontSize) / s.width * 1920 }; });
       ok(Math.abs(g.x - 0.0323) < 0.01 && Math.abs(g.y - 0.0583) < 0.02 && Math.abs(g.fs - 54) < 2, `MP4 와 같은 자리·크기(왼쪽 위 x ${g.x.toFixed(3)} · y ${g.y.toFixed(3)} · 1920 기준 ${g.fs.toFixed(1)}px = 75×0.72)`);
+      // 🏷 v0.6.93 — AI 고지도 자막처럼: 누르면 글자칸 + 서식 막대 · Enter 저장 · 끌면 자리 · 채널에 저장
+      {
+        const preset = () => win.evaluate(async (n) => (await window.api.getPresetDetail(n)).aiNotice, CH);
+        await win.locator('[data-testid=stage-ai]').click(); await win.waitForSelector('[data-testid=stage-ai-edit]', { timeout: 4000 });
+        ok(await win.locator('[data-testid=stage-ai-edit] [data-testid=cf-mini]').count() === 1 && await win.locator('[data-testid=stage-ai-edit] button[title="화면 왼쪽"]').count() === 0, '누르면 글자칸 + 자막과 같은 서식 막대(자막 전용 단추는 뺐다)');
+        await win.locator('[data-testid=stage-ai-edit] button[title="굵게"]').click(); await win.waitForTimeout(200);
+        await win.locator('[data-testid=stage-ai-edit] select[title="글자 크기"]').selectOption('100'); await win.waitForTimeout(200);
+        ok(await win.locator('[data-testid=stage-ai-edit]').count() === 1, '막대의 선택칸을 써도 편집칸이 닫히지 않는다');
+        await win.locator('[data-testid=stage-ai-ta]').fill('고친 AI 고지 문구'); await win.locator('[data-testid=stage-ai-ta]').press('Enter');
+        await win.waitForTimeout(900);
+        const a1 = await preset();
+        ok(a1 && a1.text === '고친 AI 고지 문구' && a1.fmt && a1.fmt.bold === true && Number(a1.fmt.size) === 100 && a1.unit === 'clip' && a1.fromClip === 2, `🔑 채널 aiNotice 에 문구·서식 저장(시각 설정은 그대로) (${JSON.stringify(a1)})`);
+        ok(await win.locator('[data-testid=stage-ai]').innerText() === '고친 AI 고지 문구' && Number(await win.locator('[data-testid=stage-ai]').evaluate((e) => getComputedStyle(e).fontWeight)) >= 700, '① 칸 고지 = 새 문구 · 굵게');
+        const b0 = await win.locator('[data-testid=stage-ai]').boundingBox(); const sb2 = await win.locator('#stage').boundingBox();
+        await win.mouse.move(b0.x + 20, b0.y + b0.height / 2); await win.mouse.down();
+        await win.mouse.move(b0.x + 20 + sb2.width * 0.2, b0.y + b0.height / 2 + sb2.height * 0.3, { steps: 6 }); await win.mouse.up(); await win.waitForTimeout(900);
+        const a2 = await preset();
+        ok(a2 && a2.pos && Math.abs(a2.pos.x - 0.22) < 0.03 && Math.abs(a2.pos.y - (0.047 + 0.3)) < 0.03 && await win.locator('[data-testid=stage-ai-edit]').count() === 0, `🔑 끌면 자리 저장(편집칸은 안 연다) (${JSON.stringify(a2 && a2.pos)})`);
+      }
       await chk.uncheck().catch(async () => { for (const m of ['완성', '대본·음성']) { await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); if (await win.locator('label.chk:has-text("AI 고지") input').count()) break; } await win.locator('label.chk:has-text("AI 고지") input').first().uncheck(); });
       await win.waitForTimeout(300);
       ok(await win.locator('[data-testid=stage-ai]').count() === 0, '작업바 「AI 고지」를 끄면 ① 칸에서도 사라진다');

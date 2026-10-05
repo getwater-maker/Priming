@@ -1555,7 +1555,56 @@ export default function App() {
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   // ➕ 삽입 — 그림·영상·오디오를 정한 클립(문장) 범위 동안(v0.5.54) · 🏷 채널 로고
   const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12 });
-  const [aiCfg, setAiCfg] = useState({});   // 🏷 채널 AI 고지 설정 { text, unit, fromSec, toSec, fromClip, toClip }
+  const [aiCfg, setAiCfg] = useState({});   // 🏷 채널 AI 고지 설정 { text, unit, fromSec, toSec, fromClip, toClip, fmt, pos }
+  // 🏷 ① 칸에서 AI 고지 고치기(v0.6.93 · 로이 「AI 고지문도 자막처럼」) — 누르면 글자칸 + 서식 막대 · 끌면 자리 · 저장 = 채널 aiNotice(이 채널 모든 영상)
+  const [aiEdit, setAiEdit] = useState(false);
+  const [aiPanel, setAiPanel] = useState(null);
+  const [aiDrag, setAiDrag] = useState(null);
+  const aiSaveRef = useRef(null);
+  const aiTaRef = useRef(null);
+  const aiInside = (el) => !!(el && el.closest && el.closest('[data-testid=stage-ai-edit], [data-testid=cf-side-ai]'));
+  function saveAiCfg(patch, msg) {
+    if (!presetName) { setStatus('⚠ 채널을 먼저 고르세요'); return; }
+    const name = presetName;
+    setAiCfg((cur) => {
+      const next = { ...cur, ...patch };
+      if (aiSaveRef.current) clearTimeout(aiSaveRef.current);
+      aiSaveRef.current = setTimeout(async () => {
+        try { await api.savePreset({ name, patch: { aiNotice: next } }); setStatus(msg || `🏷 채널 「${name}」 AI 고지를 저장했습니다 — 이 채널의 모든 영상(.vrew·MP4)에 같은 모양`); }
+        catch (e) { logline('AI 고지 저장 오류: ' + e.message); }
+      }, 350);
+      return next;
+    });
+  }
+  useEffect(() => {
+    if (!aiEdit) return undefined;
+    const down = (e) => {
+      if (aiInside(e.target)) return;
+      const el = aiTaRef.current; const v = String((el && el.value) || '').replace(/\s+/g, ' ').trim();
+      if (v && v !== String(aiCfg.text || '').trim()) saveAiCfg({ text: v });
+      setAiEdit(false); setAiPanel(null);
+    };
+    document.addEventListener('mousedown', down, true);
+    return () => document.removeEventListener('mousedown', down, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiEdit, aiCfg]);
+  const patchAiFmt = (p) => saveAiCfg({ fmt: CF.mergeAll(aiCfg.fmt, p) || undefined });
+  function onAiDown(ev) {
+    if (!wsOn || playerOpen || ev.button !== 0 || aiEdit) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const st = ev.currentTarget.parentElement.getBoundingClientRect(), im = ev.currentTarget.getBoundingClientRect();
+    const x0 = ev.clientX, y0 = ev.clientY, base = CF.aiNoticePos(aiCfg);
+    let moved = false;
+    const at = (e) => ({ x: Math.max(0, Math.min(0.98 - im.width / st.width, base.x + (e.clientX - x0) / st.width)), y: Math.max(0, Math.min(0.98 - im.height / st.height, base.y + (e.clientY - y0) / st.height)) });
+    const move = (e) => { if (!moved && Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) < 4) return; moved = true; setAiDrag(at(e)); };
+    const up = (e) => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      if (!moved) { setAiDrag(null); setAiEdit(true); return; }   // 누르기만 = 고치기
+      const p = at(e); setAiDrag(null);
+      saveAiCfg({ pos: { x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000 } }, `🏷 AI 고지를 옮겼습니다 — 채널 「${presetName}」 모든 영상(.vrew·MP4)에 이 자리`);
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
   const curLogoSide = () => { const pj = curProject(); return (pj && pj.logoSide) === 'left' ? 'left' : 'right'; };
   // 🏷 로고 크기(채널 값) — ➕ 삽입 메뉴에서 바꾸면 곧바로 채널(⚙ 채널편집 📁 폴더의 크기)에 저장한다(v0.5.64 · 로이)
   const logoSaveRef = useRef(null);
@@ -4011,7 +4060,30 @@ export default function App() {
   const stageEl = (<>
     <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown}>
       <div id="stageVisual" ref={stageVisualRef} />
-      {stageAi && <div key={stageAi.key} className="stage-ai" data-testid="stage-ai" title="🏷 AI 고지 — 채널 설정 시각(또는 대본 🏷 범위) · 작업바 「AI 고지」로 켜고 끕니다">{stageAi.text}</div>}
+      {stageAi && !aiEdit && (() => {
+        const k = (stageBoxW() || 540) / 1920, fa = CF.aiNoticeFmt(aiCfg), pa = aiDrag || CF.aiNoticePos(aiCfg);
+        const css = fmtCss(fa, k, true);
+        return <div key={stageAi.key} className={'stage-ai' + (wsOn && !playerOpen ? ' edit' : '') + (aiDrag ? ' dragging' : '')} data-testid="stage-ai" onMouseDown={onAiDown}
+          title={'🏷 AI 고지 — 채널 설정 시각(또는 대본 🏷 범위) · 작업바 「AI 고지」로 켜고 끕니다' + (wsOn && !playerOpen ? '\n누르면 글자·서식 고치기 · 끌면 자리 옮기기(채널의 모든 영상)' : '')}
+          style={{ ...css, left: ((pa.x * 1920 + 23.6) / 19.2).toFixed(3) + '%', top: ((pa.y * 1080 + 12.2) / 10.8).toFixed(3) + '%', fontSize: fa.size * 0.72 * k,
+            ...(fa.boxOn ? { backgroundColor: CF.boxColorValue(fa).replace(/^rgba\(0, 0, 0, 0\)$/, 'transparent'), padding: `${2 * k * 4}px ${5 * k * 4}px`, borderRadius: 2 } : {}) }}>{stageAi.text}</div>;
+      })()}
+      {stageAi && aiEdit && wsOn && (() => {
+        const k = (stageBoxW() || 540) / 1920, fa = CF.aiNoticeFmt(aiCfg), pa = CF.aiNoticePos(aiCfg);
+        const done = (el) => { const v = String((el && el.value) || '').replace(/\s+/g, ' ').trim(); if (v && v !== stageAi.text) saveAiCfg({ text: v }); setAiEdit(false); setAiPanel(null); };
+        return (
+          <div className="stage-edit ai" data-testid="stage-ai-edit">
+            <div className="stage-mini" style={{ left: 4, top: `calc(${((pa.y * 1080 + 12.2) / 10.8).toFixed(3)}% + ${fa.size * 0.72 * k * 1.6 + 14}px)` }}>
+              <CaptionMiniBar fmt={fa} onPatch={patchAiFmt} onPanel={(p) => setAiPanel((cur) => (cur === p ? null : p))} panel={aiPanel} noPos noAnim />
+            </div>
+            <textarea className="stage-ta" rows={1} spellCheck={false} autoFocus data-testid="stage-ai-ta" defaultValue={stageAi.text}
+              style={{ ...fmtCss(fa, k, true), left: ((pa.x * 1920 + 23.6) / 19.2).toFixed(3) + '%', top: ((pa.y * 1080 + 12.2) / 10.8).toFixed(3) + '%', width: '62%', fontSize: fa.size * 0.72 * k }}
+              ref={(el) => { aiTaRef.current = el; if (el) fitSentBox(el); }} onInput={(ev) => fitSentBox(ev.currentTarget)}
+              onBlur={(ev) => { if (!aiInside(ev.relatedTarget)) done(ev.currentTarget); }}
+              onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') { ev.preventDefault(); setAiEdit(false); setAiPanel(null); } else if (ev.key === 'Enter' && !ev.nativeEvent.isComposing) { ev.preventDefault(); done(ev.currentTarget); } }} />
+          </div>
+        );
+      })()}
       {stageLogo && <img className={'stage-logo' + (wsOn && isLf && !playerOpen ? ' drag' : '') + (logoDrag ? ' dragging' : '')} data-testid="stage-logo" alt="" src={media(stageLogo.path)} draggable={false}
         title={wsOn && isLf && !playerOpen ? '🏷 끌어서 로고 옮기기(이 대본) — 오른쪽 위·왼쪽 위 근처에 놓으면 제자리에 붙습니다' : undefined}
         onMouseDown={wsOn && isLf && !playerOpen ? onLogoDown : undefined}
@@ -4559,7 +4631,12 @@ export default function App() {
           </>)}
         </main>
         {/* ③ 자세한 설정 — ⚙ 고급·✨ 효과를 열 때만(예전엔 화면 위에 떠 있는 창이었다) */}
-        {capSel && capPanel && !noProduction && (
+        {aiEdit && aiPanel === 'fmt' && !noProduction && (
+          <aside className="cf-side pane3" data-testid="cf-side-ai">
+            <CaptionFormatPanel value={CF.aiNoticeFmt(aiCfg)} onChange={patchAiFmt} title="🏷 AI 고지 서식(이 채널 모든 영상)" onClose={() => setAiPanel(null)} onReset={() => saveAiCfg({ fmt: undefined, pos: undefined }, '🏷 AI 고지 모양을 기본으로 되돌렸습니다')} />
+          </aside>
+        )}
+        {!aiEdit && capSel && capPanel && !noProduction && (
           <aside className="cf-side pane3" data-testid="cf-side">
             {capPanel === 'fmt'
               ? <CaptionFormatPanel value={capSelFmt()} onChange={(p) => applyCapFmt(p)} title={(capScope === 'all' && capSel.mode === 'lines' ? '모든 자막' : capSelLabel()) + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} pos={capSelPos()} scope={capScope} onScope={setCapScope} />

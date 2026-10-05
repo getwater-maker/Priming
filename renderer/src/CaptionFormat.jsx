@@ -507,7 +507,7 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
  * 🧩 ① 칸 팝업의 작은 서식 막대(Vrew 캡처 — 두 줄). 툴바와 **같은 onPatch** 로 고른 클립에 얹는다.
  *   ⚠ 누를 때 글자칸 초점을 뺏지 않게 mousedown 을 막는다(선택칸·색칸은 제외 — 그건 초점이 필요하다).
  */
-export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel, scope, onScope }) {
+export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel, scope, onScope, noPos, noAnim }) {
   const f = fmt || CF.normFmt({});
   const p = pos || { align: 'center' };
   const { fonts } = useCaptionFonts();
@@ -531,12 +531,12 @@ export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel, scope, onSco
         <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜">형광펜</Toggle>
         <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
         <span className="cf-div" />
-        <span className="cf-minil" title="자막 자리 — 화면 기준(① 칸에서 자막을 끌어 옮겨도 됩니다)">화면</span>
+        {!noPos && <><span className="cf-minil" title="자막 자리 — 화면 기준(① 칸에서 자막을 끌어 옮겨도 됩니다)">화면</span>
         {POS_HS.map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={t}>{ic}</Toggle>)}
-        <span className="cf-div" />
+        <span className="cf-div" /></>}
         <ScopeBtn scope={scope} onScope={onScope} />
         <button className={'ghost' + (panel === 'fmt' ? ' on' : '')} title="고급 — ③ 칸에서 자세히" onClick={() => onPanel && onPanel('fmt')}>⚙ 고급</button>
-        <button className={'ghost' + (panel === 'anim' ? ' on' : '')} title="효과" onClick={() => onPanel && onPanel('anim')}>✨ 효과</button>
+        {!noAnim && <button className={'ghost' + (panel === 'anim' ? ' on' : '')} title="효과" onClick={() => onPanel && onPanel('anim')}>✨ 효과</button>}
       </div>
     </div>
   );

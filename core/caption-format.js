@@ -191,6 +191,26 @@ function mergeAll(capAll, patch) {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * 🏷 AI 고지 서식·자리(v0.6.93 · 로이 「AI 고지문도 자막처럼 수정」) — 채널 aiNotice.fmt(자막과 같은 서식 키) · aiNotice.pos {x, y}(왼쪽 위 · 화면 0..1).
+ *   기본 = 지금까지의 모양(흰 글자 · 검은 테두리 6 · 크기 75 · Pretendard 700 · 왼쪽 위 0.02/0.047). .vrew 빌더 · ① 칸 미리보기가 이 두 함수만 쓴다.
+ */
+const AI_FMT_DEFAULT = { font: 'Pretendard-Vrew_700', size: 75, fontColor: '#ffffff', outlineOn: true, outlineColor: '#000000', outlineWidth: 6, boxOn: false, boxColor: '#000000', boxOpacity: 60 };
+const AI_POS_DEFAULT = { x: 0.02, y: 0.047 };
+function aiNoticeFmt(a) {
+  const p = normPatch((a && a.fmt) || {});
+  const out = normFmt({ ...AI_FMT_DEFAULT, ...p });
+  out.size = Number(p.size) > 0 ? Number(p.size) : AI_FMT_DEFAULT.size;
+  return out;
+}
+function aiNoticePos(a) {
+  const p = a && a.pos;
+  const cl = (v, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(0.98, n)) : d; };
+  return { x: cl(p && p.x, AI_POS_DEFAULT.x), y: cl(p && p.y, AI_POS_DEFAULT.y) };
+}
+/** 사람이 고쳤는가(서식·자리) — 안 고쳤으면 .vrew 를 예전과 한 글자도 다르지 않게 쓴다 */
+const aiNoticeEdited = (a) => !!(a && ((a.fmt && Object.keys(normPatch(a.fmt)).length) || (a.pos && typeof a.pos === 'object')));
+
 /** [from,to) 의 덮어쓰기를 지운다. keys 를 주면 그 키만(없으면 전부 = 채널 기본으로 되돌리기). */
 function clearSpan(spans, textLen, from, to, keys) {
   const out = [];
@@ -526,7 +546,7 @@ function linePos(chan, lp) {
 
 module.exports = {
   FMT_DEFAULT, LINE_KEYS, POS_KEYS, POS_Y_DEFAULT, linePos, normFmt, normPatch, normAnim,
-  cleanSpans, flattenSpans, applySpan, clearSpan, withAll, mergeAll, remapSpans, remapSpansMulti, fmtAt,
+  cleanSpans, flattenSpans, applySpan, clearSpan, withAll, mergeAll, AI_FMT_DEFAULT, AI_POS_DEFAULT, aiNoticeFmt, aiNoticePos, aiNoticeEdited, remapSpans, remapSpansMulti, fmtAt,
   lineRanges, lineRuns, lineProps,
   fmtToVrewAttrs, vrewAttrsToFmt, boxColorValue, boxFromValue, animToVrew, animFromVrew, lineToVrewDelta, vrewDeltaToRuns,
   vrewFontName, parseVrewFont,

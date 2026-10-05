@@ -429,7 +429,11 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
   const bgNone       = !!opt.bgNone;
   const outlineNone  = !!opt.outlineNone;
 
-  const textAttrs = {
+  // 🏷 사람이 고친 고지(서식·자리 · v0.6.93) — 자막과 같은 서식 키 → Vrew 글자 속성 · 배경 상자는 rgba(…)로(안 고친 고지는 아래 옛 코드 그대로)
+  const edited = CF.aiNoticeEdited(opt);
+  const eFmt = edited ? CF.aiNoticeFmt(opt) : null;
+  const ePos = edited ? CF.aiNoticePos(opt) : null;
+  const textAttrs = edited ? CF.fmtToVrewAttrs(eFmt, eFmt.size) : {
     size: String(opt.fontSize || '75'),
     color: fontColor,
     font: 'Pretendard-Vrew_700',
@@ -448,7 +452,9 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
   const customAttributes = [
     { attributeName: '--textbox-align', type: 'textbox-align', value: 'start' },
   ];
-  if (bgNone) {
+  if (edited) {
+    customAttributes.unshift({ attributeName: '--textbox-color', type: 'color-rgba', value: CF.boxColorValue(eFmt) });   // 상자 없음 = rgba(0,0,0,0)
+  } else if (bgNone) {
     customAttributes.unshift({ attributeName: '--textbox-color', type: 'color-hex', value: '#00000000' });
   } else {
     customAttributes.unshift({ attributeName: '--textbox-color', type: 'color-hex', value: bgRaw });
@@ -457,7 +463,7 @@ function addAiNoticeTrack(pj, opt, clipDurations, log, frameRatio) {
   pj.props.tracks[tid] = {
     trackId: tid,
     mediaId: TEXTBOX_MEDIA_ID,
-    xPos: 0.02, yPos: 0.047,
+    xPos: ePos ? ePos.x : 0.02, yPos: ePos ? ePos.y : 0.047,
     height: 0, width: 0.6,
     rotation: 0, zIndex: webZIndex,
     type: 'web',

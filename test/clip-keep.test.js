@@ -203,6 +203,34 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       ok(w3 && Math.abs(w3.durationSeconds - d[2]) < 0.01 && Math.abs(w3.assetEffectInfo.startDelay - Math.round((d[0] + d[1]) * 1000)) <= 2, '대본에서 🏷 로 정한 문장 범위가 채널 설정보다 이긴다');
       pr.aiNoticeRange = undefined;
 
+      // 🏷 v0.6.93 — AI 고지도 자막처럼 서식·자리(채널 aiNotice.fmt/pos) · 안 고친 고지는 .vrew 가 예전과 같다
+      {
+        const CFa = require('../core/caption-format');
+        const f0 = CFa.aiNoticeFmt({}); const p0 = CFa.aiNoticePos({});
+        ok(f0.size === 75 && f0.fontColor === '#ffffff' && f0.outlineWidth === 6 && f0.font === 'Pretendard-Vrew_700' && !f0.boxOn && p0.x === 0.02 && p0.y === 0.047, 'AI 고지 기본 모양 = 지금까지의 모양(75 · 흰 글자 · 테두리 6 · 왼쪽 위)');
+        ok(!CFa.aiNoticeEdited({ text: 'x' }) && CFa.aiNoticeEdited({ fmt: { bold: true } }) && CFa.aiNoticeEdited({ pos: { x: 0.5, y: 0.5 } }), '고쳤는지 = 서식·자리가 있을 때만');
+        ok(JSON.stringify(w2.deltas.textarea.ops[0].attributes) === JSON.stringify({ size: '75', color: '#FFFFFF', font: 'Pretendard-Vrew_700', 'outline-color': '#000000', 'outline-on': 'true', 'outline-width': '6' }) && w2.xPos === 0.02 && w2.yPos === 0.047
+          && w2.customAttributes.find((x) => x.attributeName === '--textbox-color').value === '#ffffff', '🔑 안 고친 고지 = .vrew 가 예전과 한 글자도 같다(글자 속성·자리·상자 값)');
+        const vE = path.join(tmp, 'ai-edit.vrew');
+        await P.buildProjectVrew(pr, vE, { aiNotice: ctx.r({ aiNotice: { text: '고친 고지', unit: 'time', fromSec: 0, toSec: 0, fmt: { fontColor: '#ffff00', size: 100, bold: true, boxOn: true, boxColor: '#0000ff', boxOpacity: 100 }, pos: { x: 0.4, y: 0.6 } } }, true).aiNotice }, () => {}, 40, 1);
+        const wE = webOf(vE); const aE = wE.deltas.textarea.ops[0].attributes;
+        ok(Math.abs(wE.xPos - 0.4) < 1e-9 && Math.abs(wE.yPos - 0.6) < 1e-9 && aE.color === '#ffff00' && aE.size === '100' && aE.bold === 'true', `.vrew: 고친 자리(0.4·0.6) · 노랑 · 크기 100 · 굵게 (${JSON.stringify(aE)})`);
+        ok(/^rgba\(0, 0, 255, 1\)$/.test(wE.customAttributes.find((x) => x.attributeName === '--textbox-color').value), '.vrew: 파란 배경 상자(rgba)');
+        // 🎬 MP4 — 옮긴 자리에 노란 글자 · 파란 상자(화소)
+        const mp4E = path.join(tmp, 'ai-edit.mp4');
+        const resE = await require('../core/vrew-render').renderVrewToMp4({ vrewPath: vE, outPath: mp4E, log: () => {}, par: 1 });
+        ok(resE && resE.ok, 'MP4 렌더 성공' + (resE && !resE.ok ? ': ' + resE.error : ''));
+        const raw = execFileSync(FF, ['-loglevel', 'error', '-ss', '2', '-i', mp4E, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
+        let yel = 0, blu = 0, yelTL = 0, x0 = 1e9, y0 = 1e9;
+        for (let i = 0, p = 0; i < raw.length; i += 3, p++) {
+          const R = raw[i], G = raw[i + 1], B = raw[i + 2], x = p % 1920, y = (p / 1920) | 0;
+          if (R > 200 && G > 200 && B < 80) { yel++; if (x < 700 && y < 300) yelTL++; if (x < x0) x0 = x; if (y < y0) y0 = y; }
+          if (B > 200 && R < 60 && G < 60) blu++;
+        }
+        ok(yel > 2000 && yelTL === 0 && x0 > 0.4 * 1920 - 10 && y0 > 0.6 * 1080 - 10, `🔑 MP4: 노란 글자가 옮긴 자리에(왼쪽 위엔 없다) — 노랑 ${yel}화소 · 시작 x ${x0} y ${y0}`);
+        ok(blu > 5000, `🔑 MP4: 파란 배경 상자 (${blu}화소)`);
+      }
+
       // 채널 편집 창 — 읽기·저장 두 곳 다(안 실으면 저장 때 지워진다 — 이 저장소 단골 사고)
       const APP = read('renderer/src/App.jsx');
       ok(/aiText: \(p\.aiNotice && p\.aiNotice\.text\) \|\| ''/.test(APP) && /aiUnit: \(p\.aiNotice && p\.aiNotice\.unit\) === 'clip'/.test(APP), '편집 창: 문구·단위·시작·끝을 **읽는다**');

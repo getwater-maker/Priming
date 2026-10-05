@@ -236,7 +236,7 @@ head('[9] 배선 — 저장·복원·편집·IPC·화면');
   const VB = read('vrew/vrew-builder.js');
   ok(/CF\.lineRuns\(s\.text, (effSp|s\.capSpans), rg, (bf|baseFmt)\)/.test(VB)   /* v0.5.76 부터 변수 이름 bf(언어별 기본 서식) */ && /CF\.lineToVrewDelta\(runs, lp\.lineHeight\)/.test(VB) && /st\.assetEffectInfo = eff/.test(VB), '.vrew 빌더가 줄마다 구간·효과·배경을 쓴다');
   const VR = read('core/vrew-render.js');
-  ok(/CF\.vrewDeltaToRuns\(cap\.text\)/.test(VR) && /FONTS\.prepareFontsDir\(CAS\.fontsUsed/.test(VR) && /ctx\.capEvents/.test(VR), 'MP4 렌더러가 구간·효과·글꼴을 읽는다');
+  ok(/CF\.vrewDeltaToRuns\(cap\.text\)/.test(VR) && /FONTS\.prepareFontsDir\((\[\.\.\.)?CAS\.fontsUsed/.test(VR)   /* v0.6.93 — 고친 AI 고지 글꼴도 함께 */ && /ctx\.capEvents/.test(VR), 'MP4 렌더러가 구간·효과·글꼴을 읽는다');
   const APP = read('renderer/src/App.jsx');
   ok(/function capLookOf\(c\) \{\n  const o = CF\.normFmt\(c\);/.test(APP), '🔑 채널 편집의 읽기·저장 통로(capLookOf)가 서식 전체를 싣는다(안 실으면 저장할 때 사라진다)');
   ok(/fmt: l \};/.test(APP), '⚡ 만들기·💾 .vrew 가 채널 서식 전체(fmt)를 보낸다');

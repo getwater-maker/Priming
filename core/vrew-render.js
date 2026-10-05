@@ -362,7 +362,17 @@ function webOverlay(tr, spanStart, spanEnd) {
   const end = spanEnd;
   if (!(end > start)) return null;
   const outlineOn = String(at['outline-on'] ?? 'true') !== 'false';
+  // 🏷 사람이 고친 AI 고지(v0.6.93) = 상자 값이 rgba(…) — 그때만 글꼴·굵게·기울임·상자를 따른다(옛 .vrew 는 예전 그대로 굽는다)
+  const ca = Array.isArray(tr.customAttributes) ? tr.customAttributes : [];
+  const boxRaw = (ca.find((x) => x.attributeName === '--textbox-color') || {}).value;
+  const fmtd = /^rgba?\(/i.test(String(boxRaw || ''));
+  const bx = fmtd ? CF.boxFromValue(boxRaw) : null;
   return {
+    fmtd,
+    font: fmtd ? (at.font || null) : null,
+    bold: fmtd ? String(at.bold) === 'true' : null,
+    italic: fmtd ? String(at.italic) === 'true' : null,
+    box: bx && bx.boxOn ? { color: bx.boxColor, alpha: bx.boxOpacity } : null,
     text,
     start, end,
     fadeMs: eff && eff.type === 'fade-in' ? Math.max(0, +eff.duration || 0) : 0,
@@ -435,6 +445,7 @@ function buildAss(cues, overlays, cs, extra = {}) {
     // 자막 층(상자 X · 형광펜 B · 글자 C) — core/caption-ass 가 정한다(화이트보드와 같은 코드)
     ...CAS.assStyles(L),
     `Style: N,${cs.font},54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,7,0,0,0,1`,
+    `Style: NB,${cs.font},54,&HFF000000,&HFF000000,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,6,0,7,0,0,0,1`,   // 🏷 고친 AI 고지의 배경 상자 층
     '', '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
@@ -457,7 +468,14 @@ function buildAss(cues, overlays, cs, extra = {}) {
         }
       }
     }
-    ev.push(`Dialogue: 6,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
+    // 🏷 고친 고지 — 글꼴(\\fn)·굵게·기울임 · 상자는 아래 층(5)에 같은 글을 BorderStyle 3 으로(글자는 투명)
+    const fx = o.fmtd ? `${o.family ? '\\fn' + o.family : ''}\\b${o.bold ? 1 : 0}\\i${o.italic ? 1 : 0}` : '';
+    if (o.box) {
+      const h = String(o.box.color || '#000000').replace('#', '');
+      const a = Math.round(255 * (1 - Math.max(0, Math.min(100, Number(o.box.alpha) || 0)) / 100)).toString(16).padStart(2, '0').toUpperCase();
+      ev.push(`Dialogue: 5,${fmtAss(o.start)},${fmtAss(o.end)},NB,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}${fx}\\1a&HFF&\\3c&H${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}&\\3a&H${a}&\\bord${Math.max(2, Math.round(o.size * 0.14))}${tagFade}}${assEsc(o.text)}`);
+    }
+    ev.push(`Dialogue: 6,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}${fx}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
   }
   return head.join('\n') + '\n' + ev.join('\n') + '\n';
 }
@@ -795,7 +813,8 @@ async function renderVrewToMp4(opts = {}) {
     fs.mkdirSync(fontsDir, { recursive: true });
     // 🎨 쓰인 글꼴 전부 — 앱·사용자 글꼴·Vrew 설치본·Vrew 캐시에서 찾아 ttf 로 바꿔 둔다(core/font-store).
     //   못 찾은 글꼴은 Pretendard 로 굽고 알린다(Vrew 에서 그 글꼴을 한 번 쓰면 이 PC 캐시에 생긴다).
-    const fr = FONTS.prepareFontsDir(CAS.fontsUsed(tl.cues), fontsDir);
+    const fr = FONTS.prepareFontsDir([...CAS.fontsUsed(tl.cues), ...(tl.overlays || []).map((o) => o.font).filter(Boolean)], fontsDir);   // 🏷 고친 AI 고지 글꼴도
+    for (const o of (tl.overlays || [])) if (o.font) o.family = (fr.map && fr.map[o.font]) || null;
     const fontName = fr.fallback;
     if (fontName === 'Malgun Gothic') log('   ⚠ Pretendard 폰트가 없어 맑은 고딕으로 굽습니다 — 앱을 최신으로 업데이트하세요');
     if (fr.missing.length) log(`   ⚠ 이 PC 에 없는 글꼴 ${fr.missing.length}개 — Pretendard 로 굽습니다: ${fr.missing.join(', ')} (Vrew 에서 그 글꼴을 한 번 쓰면 이 PC 에서도 찾습니다)`);
