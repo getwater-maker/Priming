@@ -52,5 +52,24 @@ const real = P.buildImagePrompt(
 check('빌드 결과가 마침표로 끝남', /[.!?]$/.test(real), real.slice(-25));
 check('재시도본이 원본과 다름', P.nudgePromptForRetry(real, 1) !== real);
 
+console.log('▸ 🧥 노출 방지(v0.6.96) — 인물 장면엔 옷차림 긍정 문장 · 사람 없는 장면엔 붙이지 않는다');
+{
+  const W = 'Warm painterly illustration';
+  const people = ['Prehistoric villagers gathered around a pile of shells', 'A girl handing a shell to her father', 'Joseon scholar reading by candlelight', 'Two women washing clothes by a stream', 'A tribal hunter at the shore', '마을 사람들이 모여 있다'];
+  const empty = ['A quiet mountain lake at dawn, mist over water', 'An old map on a wooden table', 'Thatched huts under a cloudy sky', 'A pile of seashells glowing in sunset light'];
+  check('인물 장면 6개 = 모두 옷차림 문장', people.every((b) => P.buildImagePrompt(W, b).includes(P.POS_MODEST)));
+  check('🔑 사람 없는 장면 4개 = 붙이지 않는다(사람을 그려 넣지 않게)', empty.every((b) => !P.buildImagePrompt(W, b).includes(P.POS_MODEST)), empty.filter((b) => P.buildImagePrompt(W, b).includes(P.POS_MODEST)).join(' | '));
+  const pm = P.buildImagePrompt(W, people[0]);
+  check('🔑 긍정 서술 — 부정문(no nudity 류)을 넣지 않는다(Krea2 는 부정문을 듣지 않고 낱말을 켤 수 있다)', !/\bno (?:nud|naked|topless|bare)/i.test(pm) && /, everyone fully clothed in modest garments that cover the chest and torso, plain unmarked/.test(pm), pm.slice(0, 160));
+  check('여전히 마침표로 끝난다', /[.!?]$/.test(pm));
+  const PIO = require('../core/prompt-io');
+  const fakePr = { shortsNum: 1, aspect: '16:9', groups: [{ num: 1 }], getSentencesOfGroup: () => [{ text: '마을 사람들이 조개를 모았습니다.' }] };
+  const req = PIO.buildPromptRequestText([fakePr]);
+  check('② ✍ 자동 작성 요청에 「옷차림 명시(필수)」 — 남녀 모두 가슴·몸통을 덮는 옷 · shirtless 금지', /🧥 옷차림 명시\(필수\)/.test(req) && /남녀 모두/.test(req) && /shirtless/.test(req));
+  const G = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', '대본-작성-가이드.md'), 'utf8');
+  check('대본 작성 가이드에도 옷차림 필수(아도나이로이가 손으로 쓰는 🖼️ 이미지 줄)', /🧥 옷차림 필수\(노출 금지\)/.test(G));
+  check('대시보드 계약(channel-styles COMBINE_RULE)에 옷차림 문장', /everyone fully clothed/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'core', 'channel-styles.js'), 'utf8')));
+}
+
 console.log(`\n${pass}/${pass + fail} 통과`);
 process.exit(fail ? 1 : 0);

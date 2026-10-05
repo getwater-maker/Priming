@@ -700,6 +700,14 @@ const NEG_UGLY = 'no ugly faces, no deformed or distorted faces, no disfigured f
 // 텍스트 억제용 **긍정** 표현 — CLIP 은 부정("no text")을 이해하지 못해 오히려 'text' 토큰을 활성화한다.
 //   반대로 이런 긍정 서술은 그대로 작동하므로, 부정문과 함께 넣어 실제 억제력을 만든다.
 const POS_CLEAN = 'plain unmarked surfaces, clean blank walls';
+// 🧥 노출 방지(v0.6.96 · 로이 2026-10-05 — 선사 마을 장면에서 상의를 벗은 여성이 그려졌다 · 유튜브 정책 = 채널 전체의 위험)
+//   🔑 **긍정 서술**로 넣는다 — Krea2(cfg=1 · 네거티브 zero-out)는 「no nudity」를 듣지 않고, CLIP 은 부정 낱말을 오히려 켤 수 있다(위 POS_CLEAN 과 같은 이유).
+//   🔑 **인물이 나오는 장면에만** — 사람 없는 풍경에 「everyone clothed」를 붙이면 모델이 사람을 그려 넣을 수 있다.
+//   남자도 상의를 입는다(사극·선사 장면의 역사성보다 채널 안전이 먼저 — 로이 2026-10-05 확정).
+const POS_MODEST = 'everyone fully clothed in modest garments that cover the chest and torso';
+const PERSON_RE = /\b(?:people|persons?|man|men|woman|women|girls?|boys?|child(?:ren)?|kids?|bab(?:y|ies)|toddlers?|teen(?:ager)?s?|villagers?|figures?|crowds?|famil(?:y|ies)|mothers?|fathers?|daughters?|sons?|wi(?:fe|ves)|husbands?|kings?|queens?|princes?|princess(?:es)?|emperors?|empress|soldiers?|warriors?|hunters?|gatherers?|farmers?|fishermen|fisherman|monks?|nuns?|priests?|shamans?|merchants?|elders?|youths?|lad(?:y|ies)|maidens?|tribes(?:men|people)?|tribal|couples?|lovers?|brides?|grooms?|servants?|maids?|nobles?|scholars?|officials?|ministers?|generals?|guards?|peasants?|workers?|dancers?|singers?|students?|teachers?|doctors?|grandmothers?|grandfathers?|grandparents?|siblings?|brothers?|sisters?|friends?|strangers?|travell?ers?|pilgrims?|citizens?|residents?|humans?|portraits?|faces?|he|she|his|her|hers|someone|everyone|anyone)\b|사람|남자|여자|남성|여성|아이|어린이|소녀|소년|아기|노인|할머니|할아버지|어머니|아버지|아낙|주민|백성|무리|가족|인물|왕|왕비|공주|병사|군사|사냥꾼|농부|스님|상인|선비|신하|궁녀|부부|형제|자매/i;
+/** 이 장면에 사람이 나오는가 — 나오면 옷차림 긍정 문장을 붙인다(대본 프롬프트·화풍 모두 본다) */
+function modestyClause(style, body) { return PERSON_RE.test(`${style || ''} ${body || ''}`) ? POS_MODEST : ''; }
 
 /**
  * 프롬프트의 부정 절(`no X` / `not X` / `without X`)을 **모두 맨 끝으로 모으고 중복을 없앤다.**
@@ -731,7 +739,8 @@ function buildImagePrompt(stylePrompt, imagePrompt) {
   const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
   const body = String(imagePrompt || '').trim().replace(/[,\s]+$/, '');
   // 긍정 서술(POS_CLEAN)은 본문 뒤 · 부정 절은 정리 후 맨 끝으로.
-  const out = normalizePromptNegations(`${style}${body}, ${POS_CLEAN}, no text, no watermark, ${NEG_UGLY}`);
+  const modest = modestyClause(stylePrompt, body);   // 🧥 인물 장면이면 옷차림(긍정 서술 · 본문 바로 뒤)
+  const out = normalizePromptNegations(`${style}${body}, ${modest ? modest + ', ' : ''}${POS_CLEAN}, no text, no watermark, ${NEG_UGLY}`);
   // 🔴 **끝에 마침표를 붙인다 — 장식이 아니라 버그 회피다.**
   //   comfy.org 의 Krea2 CLIP(qwen3vl_4b, type=krea2)은 **어떤 토큰 길이에서 조건(conditioning)이
   //   깨져 순수 노이즈 이미지를 내놓는다.** cfg=1 + ConditioningZeroOut 이라 붙잡아 줄 것이 없어
@@ -1044,6 +1053,6 @@ module.exports = { speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
-  buildImagePrompt, normalizePromptNegations,
+  buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,
 };

@@ -26,7 +26,7 @@ const STORE_DIR = path.join(os.homedir(), '.flow-app');
 const EXPORT_PATH = path.join(STORE_DIR, 'channel-styles.json');
 
 // Priming 이 이미지 프롬프트를 만드는 방식(pipeline.buildImagePrompt) — 소비자가 규칙을 추측하지 않게 함께 적는다.
-const COMBINE_RULE = '<화풍>, <장면묘사>, plain unmarked surfaces, clean blank walls, no text, no watermark, <얼굴 네거티브> + 맨 끝 마침표';
+const COMBINE_RULE = '<화풍>, <장면묘사>, <인물이 나오는 장면이면: everyone fully clothed in modest garments that cover the chest and torso>, plain unmarked surfaces, clean blank walls, no text, no watermark, <얼굴 네거티브> + 맨 끝 마침표';
 const NOTE = '이 파일은 Priming 이 자동으로 씁니다(앱 시작·채널 저장·스타일 편집 직후). 손으로 고치지 마세요 — 다음 저장에 덮어씁니다.';
 
 /** KST(UTC+9) ISO 문자열 — `2026-08-21T15:52:00+09:00` */
