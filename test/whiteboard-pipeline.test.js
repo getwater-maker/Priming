@@ -282,7 +282,7 @@ const freshCalls = () => ({ ensureEnv: 0, draft: 0, render: [], preview: [], mer
     ok(!/_runOnLanes\(\['whiteboard', 'localGpu'\]/.test(MAIN) && !/_runOnLanes\(\['localGpu', 'whiteboard'\]/.test(MAIN), '🔴 localGpu 레인은 잡지 않는다(CPU 작업 · make-all 이 그 레인을 쥔 채 부르면 교착)');
     ok(/async function runWhiteboardFor\(/.test(MAIN), 'runWhiteboardFor 헬퍼');
     ok(/function normOutTarget\(/.test(MAIN) && /const outTarget = normOutTarget\(opts\.outTarget\)/.test(MAIN), 'runMakeAllCore 가 outTarget 을 받는다');
-    ok(/if \(wbGo\) \{[\s\S]{0,500}runWhiteboardFor\(pr, outRoot, \{ preset, captionMaxChars \}\)/.test(MAIN), '🔴 4단계에서 화이트보드로 갈라진다(채널 설정·자막 글자수를 함께 넘긴다)');
+    ok(/if \(wbGo\) \{[\s\S]{0,500}runWhiteboardFor\(pr, outRoot, \{ preset, captionMaxChars, ctx: runCtx \}\)/.test(MAIN), '🔴 4단계에서 화이트보드로 갈라진다(채널 설정·자막 글자수를 함께 넘긴다)');
     // 게이트 뒤에 분기가 온다 — 게이트(음성·이미지 누락)를 .vrew 와 똑같이 지나야 한다
     const i4 = MAIN.indexOf('📦 4단계'), iGate = MAIN.indexOf('const mtts4 = gateTts(outMode)', i4), iWb = MAIN.indexOf('if (wbGo) {', i4);
     ok(i4 > 0 && iGate > 0 && iWb > iGate, '화이트보드 분기는 음성·이미지 게이트 **뒤**에 있다');
