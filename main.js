@@ -2713,7 +2713,7 @@ ${mtime ? `만든 시각: ${mtime}
   } catch (_) { return 'skip'; }   // 열기 실패·시간 초과 = 건너뛰기(fail-safe: 다시 굽지 않는다)
   finally { clearTimeout(timer); }
 }
-async function renderUploadMp4(vrewPath, baseName, preset, pr = null) {
+async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null) {   // ctx = { parsed, scriptPath } — 업로드 제목이 화면에서 고른 대본을 따라가지 않게
   const VR = require('./core/vrew-render');
   const outPath = uploadMp4Path(baseName, preset, vrewPath);
   // 화면이 꺼지면 인코딩이 흔들릴 수 있어 작업 동안 절전을 막는다(TTS·이미지와 같은 규칙).
@@ -2738,7 +2738,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null) {
   } else if (r.cancelled) log('⏹ MP4 렌더 중단됨 — .vrew 는 남아 있습니다');
   else log(`✗ 유튜브 MP4 실패 — ${r.error} (.vrew 는 남아 있으니 Vrew 에서 내보내기 할 수 있습니다)`);
   // ⬆ 채널에 「자동 업로드」가 켜져 있으면 비공개로 올린다 — **기다리지 않는다**(큐의 다음 대본이 멈추지 않게).
-  if (r.ok && pr) { try { maybeAutoUpload(pr, r.output || outPath, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
+  if (r.ok && pr) { try { maybeAutoUpload(pr, r.output || outPath, preset, ctx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
   return r;
 }
 
@@ -2906,13 +2906,13 @@ async function runYtUpload({ file, channelId, meta, force = false }) {
   return r;
 }
 /** 렌더가 끝난 뒤 — 채널에 자동 업로드가 켜져 있을 때만. 이미 올린 파일이면 건너뛴다. */
-function maybeAutoUpload(pr, file, preset) {
+function maybeAutoUpload(pr, file, preset, ctx = null) {
   if (!preset || !preset.ytAuto) return;
   if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); return; }
   const YT = require('./core/youtube-upload');
   const done = YT.findUploaded(preset.ytChannelId, file);
   if (done) { log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`); return; }
-  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr) });
+  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx) });
 }
 ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
 // ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
@@ -3049,7 +3049,7 @@ function planQueueUploads(items, o) {
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */
 /** ✏ 화이트보드 완성물 폴더 — 채널 「화이트보드」 → 윈도우 다운로드 → ''(작업 폴더에 그대로). 렌더·⬆ 업로드가 같은 값을 쓴다. */
 function wbFinalDir(preset) { return String((preset && preset.outWhiteboard) || '').trim() || defaultDownloadDir() || ''; }
-async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7 } = {}) {
+async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, captionMaxChars = 7, ctx = null } = {}) {
   const WP = require('./core/whiteboard-pipeline');
   const WCfg = require('./core/whiteboard-config');
   const cfg = WCfg.load();
@@ -3059,11 +3059,11 @@ async function runWhiteboardFor(pr, outRoot, { preset = null, force = false, cap
   const finalDir = wbFinalDir(preset);
   // 🎵 배경음악 — 채널 설정(.vrew·유튜브 MP4 와 같은 resolveBgm). 화이트보드는 음성 트랙에 섞는다.
   //   runMakeAllCore 가 이미 골라 뒀으면(preset.bgm) 그대로 쓴다 — 다시 고르면 로그가 두 번 찍힌다.
-  const _bg = (preset && preset.bgm) || resolveBgm(preset || {}, S.scriptPath, log).bgm;
+  const _bg = (preset && preset.bgm) || resolveBgm(preset || {}, ctx ? ctx.scriptPath : S.scriptPath, log).bgm;
   const bgm = (_bg && _bg.enabled) ? { file: _bg.audioPath, volume: _bg.volume, loop: _bg.loop } : null;
   try {
     return await _runOnLanes(['whiteboard'], `${prLabel(pr)} 화이트보드 렌더`, () => WP.runWhiteboard(pr, outRoot, {
-      log, isAborted: () => S.abort, baseName: vrewBaseName(pr),
+      log, isAborted: () => S.abort, baseName: vrewBaseName(pr, ctx),
       capLongEdge: cfg.capLongEdge, concurrency: conc, force, finalDir,
       // 💬 자막 — .srt 는 언제나 내고, 굽기는 ⚙ 스위치를, 모양(글자·위치·폰트)은 **채널 설정**을 따른다.
       captionMaxChars, burnSubtitle: cfg.subtitle !== false,
@@ -3112,6 +3112,8 @@ ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트�
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  // 🔴 시작 시점 고정 — 재생성·MP4 굽기 사이에 큐에서 다른 대본을 골라도 이름·폴더·업로드 제목이 따라가지 않게(2026-10-05 1007/1009 사고)
+  const parsed = S.parsed, outRoot = S.outRoot, scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
   // 🔴 앞서 누른 ⏹ 중단이 남아 있으면 아래 sweep 뒤의 **순차 재생성이 즉시 멈춰** 막다른 길이 된다 —
   //   이미지는 지워졌는데 다시 만들어지지 않고 게이트가 .vrew 를 막아 눌러도 눌러도 같은 팝업만 뜬다
   //   (로이 2026-09-07 실제로 겪음: `⏹ 중단됨` → `순환 엔진 모두 소진` → `.vrew 건너뜀` 4연속).
@@ -3124,23 +3126,23 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   // 🎬 mp4:true = .vrew 를 다시 만든 뒤 그걸로 유튜브 MP4 까지 굽는다(음성·이미지는 이미 있는 것을 쓴다).
   const mp4Go = !!args.mp4 && outMode === 'full';
   if (args.mp4 && !mp4Go) log('⚠ 유튜브 MP4 는 출력 방식이 「전체」일 때만 만듭니다 — .vrew 만 만듭니다');
-  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   let preset = resolvePreset(presetName);   // 🔑 이름이 이긴다(낡은 전역이 자막·AI고지를 뒤바꾸지 않게)
   if (preset && captionStyle) {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
   preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
-  preset = resolveBgm(preset, S.scriptPath, log);   // 🎵 채널 배경음악
+  preset = resolveBgm(preset, scriptPath, log);   // 🎵 채널 배경음악
   const outs = [];
   const incomplete = [];
   const noTts = [];   // 음성 누락으로 건너뛴 편
-  for (const pr of S.parsed.projects) {
+  for (const pr of parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     // 검정·노이즈면 비우고 **그 자리에서 순차 재생성**한다.
     //   🔴 예전엔 비우기만 하고 "🔄 로 다시 만든 뒤 저장하세요" 라고 안내했는데, 그러면 **막다른 길**이 된다 —
     //     파일은 사라졌는데 아무것도 안 만들어지고 게이트에 막혀 .vrew 도 안 나온다(로이 2026-08-19 실제로 겪음:
     //     [고전_0821] G10·G19·G33 이 지워지기만 하고 끝났다). ⚡만들기 4단계와 동작을 맞춘다.
-    const dirsB = shortsDirs(S.outRoot, pr.shortsNum);   // ⚠ sweep 은 이 폴더 안의 파일만 지운다(첨부 원본 보호)
+    const dirsB = shortsDirs(outRoot, pr.shortsNum);   // ⚠ sweep 은 이 폴더 안의 파일만 지운다(첨부 원본 보호)
     const bad = await sweepBadVisuals(pr, log, dirsB.media);
     if (bad.length) {
       log(`⬛ ${prLabel(pr)} — 이상 시각물(검정·노이즈) ${bad.length}개(G${bad.join(', G')}) 감지 → 순차 재생성`);
@@ -3163,9 +3165,9 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts.length}/${(pr.sentences || []).length}개 (컷 ${mtts.slice(0, 8).join(', ')}${mtts.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
       continue;
     }
-    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-    const baseName = vrewBaseName(pr);
-    const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+    const dirs = shortsDirs(outRoot, pr.shortsNum);
+    const baseName = vrewBaseName(pr, runCtx);
+    const vrewPath = path.join(outRoot, `${baseName}.vrew`);
     try {
       const build = () => P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
       const res = await buildForMode(outMode, pr, build);
@@ -3173,7 +3175,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
       if (mp4Go) {
-        const mr = await renderUploadMp4(vrewPath, baseName, preset, pr);
+        const mr = await renderUploadMp4(vrewPath, baseName, preset, pr, runCtx);
         if (mr.ok) { outs[outs.length - 1].mp4Path = mr.output; try { shell.openPath(mr.output); } catch (_) {} }
         else if (!mr.cancelled) shell.openPath(vrewPath); // 실패하면 Vrew 로 마무리할 수 있게
       } else shell.openPath(vrewPath); // 생성 즉시 Vrew로 열어 바로 렌더 가능
@@ -3183,7 +3185,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   }
   warnIncompleteVisuals(incomplete);
   warnMissingTts(noTts);
-  return { outRoot: S.outRoot, outs };
+  return { outRoot, outs };
 });
 
 // Flow 이미지 — FlowAutomator는 win(IPC send)이 필요해 main에서 처리.
@@ -6496,6 +6498,10 @@ async function runMakeAllBody(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
+  // 🔴 대본 경로도 고정한다 — 완성 파일 이름(vrewBaseName)·업로드 제목(ytMetaFor)·배경음악이 S.scriptPath(=지금 화면에서 고른 대본)를 읽어,
+  //   1009 를 만드는 도중 1007 을 클릭하자 1009 내용이 「[역사_1007] ….vrew/.mp4」 로 구워지고 1007 제목으로 업로드됐다(2026-10-05 실사고).
+  //   이 함수 안에서 이름·제목·대본 경로가 필요한 곳은 전부 runCtx 를 넘긴다(test:runctx 가 센다).
+  const scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
@@ -6607,7 +6613,7 @@ async function runMakeAllBody(opts = {}) {
       try {
         const _ss = require('./core/style-store');
         const _nm = ((_ss.getById && _ss.getById(styleId)) || {}).name || styleId;
-        _styleLbl = `스타일 ${_nm}${resolveScriptStyle(S.parsed && S.parsed.projects && S.parsed.projects[0], _styleArg).from === 'script' ? '(🎨 대본)' : ''}${(_ss.getPrompt(styleId) || '').trim() ? '' : ' ⚠(프롬프트 비어있음)'}`;
+        _styleLbl = `스타일 ${_nm}${resolveScriptStyle(parsed && parsed.projects && parsed.projects[0], _styleArg).from === 'script' ? '(🎨 대본)' : ''}${(_ss.getPrompt(styleId) || '').trim() ? '' : ' ⚠(프롬프트 비어있음)'}`;
       } catch { _styleLbl = `스타일 ${styleId}`; }
     }
     log(`🖼 2단계 — 이미지 일괄 생성… (${_styleLbl})`);
@@ -6803,11 +6809,11 @@ async function runMakeAllBody(opts = {}) {
       }
       if (wbGo) {
         // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 확인 팝업은 없다(누르면 바로 만든다).
-        const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars });
+        const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars, ctx: runCtx });
         if (wr.ok) {
           if (openVrew) { try { shell.openPath(wr.output); } catch (_) {} }
           // ⬆ 화이트보드 MP4 도 채널의 「업로드채널」로 비공개 업로드(v0.5.81 로이) — 🔴 음성 얹기가 실패한 **무음 영상은 올리지 않는다**.
-          if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
+          if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset, runCtx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
           else if (preset && preset.ytAuto) log(`⏭ 유튜브 업로드 건너뜀 — 화이트보드 MP4 에 음성이 없습니다(${wr.audioError || '음성 얹기 실패'})`);
         }
         else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
@@ -6816,9 +6822,9 @@ async function runMakeAllBody(opts = {}) {
       let ep = preset;
       if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
       ep = resolveAiNotice(ep, aiNotice); // 사용자 선택(작업바 체크박스)
-      ep = resolveBgm(ep, S.scriptPath, log);   // 🎵 채널 배경음악
+      ep = resolveBgm(ep, scriptPath, log);   // 🎵 채널 배경음악
       const dirs = shortsDirs(outRoot, pr.shortsNum);
-      const baseName = vrewBaseName(pr);
+      const baseName = vrewBaseName(pr, runCtx);
       const vrewPath = path.join(outRoot, `${baseName}.vrew`);
       try {
         // ⏭ 이미 최신이면 건너뛴다(로이 2026-10-01) — 지문(입력 전부 + 출력 방식 + 앱 버전)이 같고 .vrew(·MP4)가 기록 그대로일 때만.
@@ -6827,12 +6833,12 @@ async function runMakeAllBody(opts = {}) {
         const fp = await BF.fingerprint({ v: appDiskVersion(), outMode, inputs: P.vrewInputsOf(pr, ep, captionMaxChars) });
         const mp4Path = mp4Go ? uploadMp4Path(baseName, preset, vrewPath) : null;
         // 🔖 기록이 없는 기존 완성물(이 기능이 생기기 전에 만든 것)은 .vrew 가 모든 입력 파일보다 새로우면 한 번 채택한다.
-        if (await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [S.scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
+        if (await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
         const utd = await BF.checkUpToDate({ outRoot, baseName, fp, vrewPath, mp4Path });
         let vrewReady = false;
         // ⬆ 다시 굽지 않고 넘어가도, 채널에 아직 없으면 올린다(v0.6.97 · 로이 「만들기만 누르면 MP4 확인 → 안 올라갔으면 업로드」).
         //   멈췄다 다시 만들기 · 업로드만 중단했던 대본이 빠지던 빈틈. 중복은 runYtUpload 관문(같은 파일 · 이 PC 같은 제목 · 채널의 같은 제목)이 거른다.
-        const uploadExisting = () => { if (mp4Go && preset && preset.ytAuto && fs.existsSync(mp4Path)) { try { maybeAutoUpload(pr, mp4Path, preset); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } } };
+        const uploadExisting = () => { if (mp4Go && preset && preset.ytAuto && fs.existsSync(mp4Path)) { try { maybeAutoUpload(pr, mp4Path, preset, runCtx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } } };
         if (utd.vrewOk && (!mp4Go || utd.mp4Ok)) {
           log(`⏭ ${pr.title} — 입력이 그대로이고 ${mp4Go ? '.vrew·MP4 가' : '.vrew 가'} 이미 있어 다시 만들지 않습니다 (강제로 다시 만들려면 .priming-build 폴더의 기록을 지우세요)`);
           uploadExisting();
@@ -6853,7 +6859,7 @@ async function runMakeAllBody(opts = {}) {
         }
         if (mp4Go) {
           // .vrew 를 입력으로 굽는다 — Vrew 가 받는 것과 같은 입력이라 렌더 규칙이 두 벌이 되지 않는다.
-          const mr = await renderUploadMp4(vrewPath, baseName, preset, pr);
+          const mr = await renderUploadMp4(vrewPath, baseName, preset, pr, runCtx);
           if (mr.ok) { await BF.recordMp4({ outRoot, baseName, mp4Path }); if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
           else if (!mr.cancelled && openVrew) shell.openPath(vrewPath); // MP4 가 실패하면 Vrew 로 마무리할 수 있게
         } else if (openVrew) shell.openPath(vrewPath);

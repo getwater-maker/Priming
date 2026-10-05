@@ -231,7 +231,7 @@ const server = http.createServer(async (req, res) => {
 
   console.log('\n[10] 배선');
   const M = read('main.js');
-  ok((M.match(/renderUploadMp4\(vrewPath, baseName, preset, pr\)/g) || []).length === 2, '두 경로(💾 · ⚡) 모두 편(pr)을 넘긴다 → 자동 업로드');
+  ok((M.match(/renderUploadMp4\(vrewPath, baseName, preset, pr, runCtx\)/g) || []).length === 2, '두 경로(💾 · ⚡) 모두 편(pr)을 넘긴다 → 자동 업로드');
   ok(/if \(r\.ok && pr\) \{ try \{ maybeAutoUpload\(/.test(M), 'MP4 성공 뒤 자동 업로드(기다리지 않음)');
   ok(!/await maybeAutoUpload/.test(M), '🔑 자동 업로드를 await 하지 않는다(큐의 다음 대본이 멈추지 않게)');
   ok(/findUploaded\(preset\.ytChannelId, file\)/.test(M), '자동 업로드는 이미 올린 파일을 건너뛴다');
@@ -248,7 +248,7 @@ const server = http.createServer(async (req, res) => {
   ok(A.includes("api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' })"), '⬆ 업로드가 완성 종류(kind)를 넘긴다');
   ok(/isWb[\s\S]{0,160}wbFinalDir\(preset\)[\s\S]{0,60}_whiteboard\.mp4/.test(M), '수동 업로드: 화이트보드는 「화이트보드」 폴더의 _whiteboard.mp4');
   ok(M.includes('const finalDir = wbFinalDir(preset);'), '렌더와 업로드가 같은 화이트보드 폴더 함수');
-  ok(M.includes('if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset)'), '✏ 화이트보드 성공 뒤 자동 업로드 — 🔴 음성 있을 때만');
+  ok(M.includes('if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset, runCtx)'), '✏ 화이트보드 성공 뒤 자동 업로드 — 🔴 음성 있을 때만');
   ok(M.includes("ipcMain.handle('yt-reorder'") && PL.includes('ytReorder:'), 'IPC·preload yt-reorder');
   ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '▶ 유튜브 채널 줄을 끌어서 놓기');
 
