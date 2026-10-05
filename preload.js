@@ -227,6 +227,7 @@ contextBridge.exposeInMainWorld('api', {
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
   relinkWork: () => ipcRenderer.invoke('relink-work'),
   setAiNoticeRange: (args) => ipcRenderer.invoke('set-ai-notice-range', args),
+  setAiNotice: (args) => ipcRenderer.invoke('set-ai-notice', args),   // 🏷 채널 AI 고지 문구·서식·자리(되돌리기에 실린다 · v0.6.94)
   applyCaptionFormatAll: (args) => ipcRenderer.invoke('apply-caption-format-all', args),
   undo: (args) => ipcRenderer.invoke('undo', args),
   mergeSentenceAcross: (args) => ipcRenderer.invoke('merge-sentence-across', args),

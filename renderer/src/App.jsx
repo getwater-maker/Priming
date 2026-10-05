@@ -1570,7 +1570,7 @@ export default function App() {
       const next = { ...cur, ...patch };
       if (aiSaveRef.current) clearTimeout(aiSaveRef.current);
       aiSaveRef.current = setTimeout(async () => {
-        try { await api.savePreset({ name, patch: { aiNotice: next } }); setStatus(msg || `🏷 채널 「${name}」 AI 고지를 저장했습니다 — 이 채널의 모든 영상(.vrew·MP4)에 같은 모양`); }
+        try { const r = await api.setAiNotice({ presetName: name, aiNotice: next }); if (r && r.ok === false) setStatus('⚠ ' + (r.error || 'AI 고지를 저장하지 못했습니다')); else setStatus(msg || `🏷 채널 「${name}」 AI 고지를 저장했습니다 — 이 채널의 모든 영상(.vrew·MP4)에 같은 모양 (Ctrl+Z 되돌리기)`); }
         catch (e) { logline('AI 고지 저장 오류: ' + e.message); }
       }, 350);
       return next;
@@ -1599,7 +1599,7 @@ export default function App() {
     const move = (e) => { if (!moved && Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) < 4) return; moved = true; setAiDrag(at(e)); };
     const up = (e) => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-      if (!moved) { setAiDrag(null); setAiEdit(true); return; }   // 누르기만 = 고치기
+      if (!moved) { setAiDrag(null); setAiEdit({ w: im.width / st.width }); return; }   // 누르기만 = 고치기 · 보이던 고지의 폭(편집칸을 같은 폭으로 — 줄바꿈이 달라지지 않게)
       const p = at(e); setAiDrag(null);
       saveAiCfg({ pos: { x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000 } }, `🏷 AI 고지를 옮겼습니다 — 채널 「${presetName}」 모든 영상(.vrew·MP4)에 이 자리`);
     };
@@ -2133,7 +2133,10 @@ export default function App() {
     if (sentEdit) return;   // 고치는 중엔 편집칸 자체의 되돌리기
     try {
       const r = await api.undo({ redo: !!redo });
-      if (r && r.ok) { if (r.dto) setDto(r.dto); setCapSel(null); setCapPanel(null); setStatus((redo ? '↷ 다시 하기 — ' : '↶ 되돌리기 — ') + r.label); }
+      if (r && r.ok) {
+        if (r.dto) setDto(r.dto); setCapSel(null); setCapPanel(null); setStatus((redo ? '↷ 다시 하기 — ' : '↶ 되돌리기 — ') + r.label);
+        if (r.aiNotice && r.aiNotice.name === presetName) { if (aiSaveRef.current) { clearTimeout(aiSaveRef.current); aiSaveRef.current = null; } setAiCfg(r.aiNotice.value || {}); setAiEdit(false); setAiPanel(null); }   // 🏷 ① 칸 고지도 곧바로
+      }
       else setStatus((r && r.error) || '되돌릴 것이 없습니다');
     } catch (e) { logline('되돌리기 오류: ' + e.message); }
   }
@@ -4073,14 +4076,15 @@ export default function App() {
         const done = (el) => { const v = String((el && el.value) || '').replace(/\s+/g, ' ').trim(); if (v && v !== stageAi.text) saveAiCfg({ text: v }); setAiEdit(false); setAiPanel(null); };
         return (
           <div className="stage-edit ai" data-testid="stage-ai-edit">
-            <div className="stage-mini" style={{ left: 4, top: `calc(${((pa.y * 1080 + 12.2) / 10.8).toFixed(3)}% + ${fa.size * 0.72 * k * 1.6 + 14}px)` }}>
-              <CaptionMiniBar fmt={fa} onPatch={patchAiFmt} onPanel={(p) => setAiPanel((cur) => (cur === p ? null : p))} panel={aiPanel} noPos noAnim />
-            </div>
+            {/* 🧩 글자칸과 막대를 한 줄기로 쌓는다 — 막대는 늘 글자칸 바로 아래(글이 두 줄이 돼도 겹치지 않는다 · v0.6.94 로이 캡처) */}
+            <div className="stage-ai-stack" style={{ left: `calc(${((pa.x * 1920 + 23.6) / 19.2).toFixed(3)}% - 12px)`, top: `calc(${((pa.y * 1080 + 12.2) / 10.8).toFixed(3)}% - 6px)` }}>
             <textarea className="stage-ta" rows={1} spellCheck={false} autoFocus data-testid="stage-ai-ta" defaultValue={stageAi.text}
-              style={{ ...fmtCss(fa, k, true), left: ((pa.x * 1920 + 23.6) / 19.2).toFixed(3) + '%', top: ((pa.y * 1080 + 12.2) / 10.8).toFixed(3) + '%', width: '62%', fontSize: fa.size * 0.72 * k }}
+              style={{ ...fmtCss(fa, k, true), position: 'relative', left: 0, top: 0, width: `max(220px, calc(${(Math.min(0.94, (aiEdit && aiEdit.w) || 0.6) * 100).toFixed(2)}cqw + 28px))`, fontSize: fa.size * 0.72 * k }}
               ref={(el) => { aiTaRef.current = el; if (el) fitSentBox(el); }} onInput={(ev) => fitSentBox(ev.currentTarget)}
               onBlur={(ev) => { if (!aiInside(ev.relatedTarget)) done(ev.currentTarget); }}
               onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') { ev.preventDefault(); setAiEdit(false); setAiPanel(null); } else if (ev.key === 'Enter' && !ev.nativeEvent.isComposing) { ev.preventDefault(); done(ev.currentTarget); } }} />
+            <div className="stage-ai-bar"><CaptionMiniBar fmt={fa} onPatch={patchAiFmt} onPanel={(p) => setAiPanel((cur) => (cur === p ? null : p))} panel={aiPanel} noPos noAnim /></div>
+            </div>
           </div>
         );
       })()}

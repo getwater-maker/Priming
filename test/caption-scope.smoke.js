@@ -160,6 +160,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         await win.locator('[data-testid=stage-ai-edit] button[title="굵게"]').click(); await win.waitForTimeout(200);
         await win.locator('[data-testid=stage-ai-edit] select[title="글자 크기"]').selectOption('100'); await win.waitForTimeout(200);
         ok(await win.locator('[data-testid=stage-ai-edit]').count() === 1, '막대의 선택칸을 써도 편집칸이 닫히지 않는다');
+        { await win.waitForTimeout(300);   // v0.6.94 — 막대가 글자칸을 덮지 않는다(크기 100 = 두 줄이 돼도)
+          const ta = await win.locator('[data-testid=stage-ai-ta]').boundingBox(), bar = await win.locator('[data-testid=stage-ai-edit] [data-testid=cf-mini]').boundingBox();
+          ok(ta && bar && bar.y >= ta.y + ta.height - 1, `🔑 서식 막대는 글자칸 바로 아래 — 겹치지 않는다 (글자칸 ${Math.round(ta.y)}~${Math.round(ta.y + ta.height)} · 막대 ${Math.round(bar.y)})`); }
         await win.locator('[data-testid=stage-ai-ta]').fill('고친 AI 고지 문구'); await win.locator('[data-testid=stage-ai-ta]').press('Enter');
         await win.waitForTimeout(900);
         const a1 = await preset();
@@ -170,6 +173,18 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         await win.mouse.move(b0.x + 20 + sb2.width * 0.2, b0.y + b0.height / 2 + sb2.height * 0.3, { steps: 6 }); await win.mouse.up(); await win.waitForTimeout(900);
         const a2 = await preset();
         ok(a2 && a2.pos && Math.abs(a2.pos.x - 0.22) < 0.03 && Math.abs(a2.pos.y - (0.047 + 0.3)) < 0.03 && await win.locator('[data-testid=stage-ai-edit]').count() === 0, `🔑 끌면 자리 저장(편집칸은 안 연다) (${JSON.stringify(a2 && a2.pos)})`);
+        // ↶ v0.6.94 — ① 칸에서 고친 것도 Ctrl+Z 로(로이 「되돌리기가 안 되네」)
+        const undoKey = async () => { await win.locator('.clipbar').click({ position: { x: 3, y: 3 } }); await win.keyboard.press('Control+z'); await win.waitForTimeout(700); };
+        const xAt = () => win.evaluate(() => { const a = document.querySelector('[data-testid=stage-ai]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return (a.left - s.left) / s.width; });
+        const xMoved = await xAt();
+        await win.keyboard.press('Control+z'); await win.waitForTimeout(700);   // ① 칸에서 끈 바로 뒤 — 다른 곳을 누르지 않고
+        const a3 = await preset(); const xBack = await xAt();
+        ok(a3 && !a3.pos && a3.text === '고친 AI 고지 문구' && xBack < xMoved - 0.1, `🔑 Ctrl+Z → 옮긴 자리만 되돌린다(① 칸도 곧바로) (${JSON.stringify(a3 && a3.pos)} · x ${xMoved.toFixed(2)} → ${xBack.toFixed(2)})`);
+        await undoKey();
+        const a4 = await preset();
+        ok(a4 && a4.text === '테스트 AI 고지입니다' && !(a4.fmt && a4.fmt.bold) && await win.locator('[data-testid=stage-ai]').innerText() === '테스트 AI 고지입니다', `🔑 Ctrl+Z 한 번 더 → 문구·서식도 되돌린다 (${JSON.stringify(a4)})`);
+        await win.locator('.clipbar').click({ position: { x: 3, y: 3 } }); await win.keyboard.press('Control+y'); await win.waitForTimeout(700);
+        ok((await preset()).text === '고친 AI 고지 문구', 'Ctrl+Y → 다시 하기');
       }
       await chk.uncheck().catch(async () => { for (const m of ['완성', '대본·음성']) { await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); if (await win.locator('label.chk:has-text("AI 고지") input').count()) break; } await win.locator('label.chk:has-text("AI 고지") input').first().uncheck(); });
       await win.waitForTimeout(300);

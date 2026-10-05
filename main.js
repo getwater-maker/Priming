@@ -7462,6 +7462,8 @@ function _captureState(label, opts = {}) {
     }
   }
   if (opts.md && S.scriptPath) { try { st.md = fs.readFileSync(S.scriptPath, 'utf8'); } catch {} }
+  // 🏷 채널 AI 고지(① 칸에서 고친 문구·서식·자리 · v0.6.94) — 채널 설정이라 대본 상태 밖에 있다 → 그 채널 값만 함께 기억
+  if (opts.preset) { try { const p = P.getPreset(opts.preset); st.preset = { name: opts.preset, aiNotice: p && p.aiNotice ? JSON.parse(JSON.stringify(p.aiNotice)) : null }; } catch (_) {} }
   return st;
 }
 /** 파일을 신원(크기+수정시각)으로 찾아 기억한 이름으로 되돌린다. 두 단계(임시 이름 → 제 이름)라 서로 자리를 바꾼 파일도 안 덮인다. */
@@ -7488,6 +7490,9 @@ function _restoreMedia(list) {
   return moves.length;
 }
 function _restoreState(st) {
+  if (st.preset && st.preset.name) {   // 🏷 채널 AI 고지 되돌리기
+    try { const store = require('./tts/preset-store'); const p = store.loadAll().find((x) => x.name === st.preset.name); if (p) store.update(p.id, { aiNotice: st.preset.aiNotice || {} }); } catch (e) { log('⚠ AI 고지 되돌리기 실패: ' + e.message); }
+  }
   for (const sp of st.projects) {
     const pr = S.parsed.projects.find((x) => x.shortsNum === sp.shortsNum);
     if (!pr) continue;
@@ -7530,11 +7535,12 @@ ipcMain.handle('undo', (_e, args = {}) => {
   const from = redo ? UNDO.redo : UNDO.undo, to = redo ? UNDO.undo : UNDO.redo;
   const st = from.pop();
   if (!st) return { ok: false, error: redo ? '다시 할 것이 없습니다' : '되돌릴 것이 없습니다' };
-  to.push(_captureState(st.label, { md: st.md != null }));
+  to.push(_captureState(st.label, { md: st.md != null, preset: st.preset ? st.preset.name : null }));
   const moved = _restoreState(st);
   storeActive(); dtoByReply(); if (st.md != null) syncSnapshotNow();   // 💾 .md 를 되돌렸으면 작업본도 같은 순간에
   log((redo ? '↷ 다시 하기' : '↶ 되돌리기') + ' — ' + st.label + (st.md != null ? ' · 대본(.md)도 되돌렸습니다' : '') + (moved ? ' · 그림 파일 ' + moved + '개 제자리로' : ''));
-  return { ok: true, label: st.label, dto: P.toDTO(S.parsed), undoLeft: UNDO.undo.length, redoLeft: UNDO.redo.length };
+  return { ok: true, label: st.label, dto: P.toDTO(S.parsed), undoLeft: UNDO.undo.length, redoLeft: UNDO.redo.length,
+    ...(st.preset ? { aiNotice: { name: st.preset.name, value: st.preset.aiNotice || {} } } : {}) };   // 🏷 화면이 ① 칸 고지를 바로 바꾸게
 });
 app.on('before-quit', () => { try { _undoReset(); } catch {} });
 
@@ -7960,6 +7966,19 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
 // 🏷 AI 고지를 보일 문장 범위(Vrew 텍스트 적용 범위). from/to = 편 전체 문장 번호(1부터). clear = 채널 기본(5초 뒤 5초)으로
+// 🏷 채널 AI 고지 문구·서식·자리(① 칸에서 고치기 · v0.6.94 「되돌리기도」) — 되돌리기(Ctrl+Z)에 채널 값이 실린다. 빠르게 잇따른 고침(끌기·막대)은 한 번으로.
+ipcMain.handle('set-ai-notice', (_e, args = {}) => {
+  const name = String(args.presetName || '');
+  const store = require('./tts/preset-store');
+  const p = store.loadAll().find((x) => x.name === name);
+  if (!p) return { ok: false, error: '채널을 찾을 수 없습니다.' };
+  const next = args.aiNotice && typeof args.aiNotice === 'object' ? args.aiNotice : {};
+  if (JSON.stringify(p.aiNotice || {}) === JSON.stringify(next)) return { ok: true, same: true };
+  undoPush('AI 고지 고치기', { coalesce: true, preset: name });
+  store.update(p.id, { aiNotice: next });
+  log(`🏷 채널 「${name}」 AI 고지 고침 — ${[next.text ? '문구' : '', next.fmt ? '서식' : '', next.pos ? '자리' : ''].filter(Boolean).join('·') || '기본'} (Ctrl+Z 되돌리기)`);
+  return { ok: true };
+});
 ipcMain.handle('set-ai-notice-range', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
