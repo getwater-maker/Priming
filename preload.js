@@ -122,6 +122,8 @@ contextBridge.exposeInMainWorld('api', {
   ttsEnginesSave: (a) => ipcRenderer.invoke('tts-engines-save', a),
   ttsEngineVoices: (a) => ipcRenderer.invoke('tts-engine-voices', a),
   ttsEngineTest: (a) => ipcRenderer.invoke('tts-engine-test', a),
+  setClipVoice: (a) => ipcRenderer.invoke('set-clip-voice', a),       // 🎙 클립 목소리(v0.6.83)
+  setScriptVoice: (a) => ipcRenderer.invoke('set-script-voice', a),   // 🎙 대본 목소리(큐 전체)
   ttsEngineOpenKey: (id) => ipcRenderer.invoke('tts-engine-open-key', id),
   ttsOmniVoices: () => ipcRenderer.invoke('tts-omni-voices'),
   ttsChannelLogo: (a) => ipcRenderer.invoke('tts-channel-logo', a),

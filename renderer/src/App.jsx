@@ -1725,8 +1725,56 @@ export default function App() {
     } catch { return null; }
   }
   useEffect(() => { refreshTtsEngActive(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [presetName]);
-  // channel 을 주면 그 채널을 고른 채로 연다(채널편집 🎙 음성 → 「🔊 음성 설정에서 바꾸기」)
+  // channel 을 주면 그 채널을 고른 채로 연다(채널편집 🎙 음성 → 「🔊 음성 설정에서 바꾸기」) = **채널 기본 목소리**
   function openTtsEngines(channel) { setTtsEng({ channel: typeof channel === 'string' ? channel : '' }); }
+  // 🎙 리본 「🔊 음성 설정」(v0.6.83 · 로이 2026-10-05) = **열려 있는 대본의 목소리** — 큐에 대본이 여럿이면 모두에.
+  //   대본이 하나도 없으면 채널 기본 목소리 창으로 연다(고를 대본이 없다).
+  function openScriptVoice() {
+    const items = ((queue && queue.longform && queue.longform.items) || []);
+    if (mode !== 'longform' || !items.length) { openTtsEngines(); return; }
+    const act = items.find((x) => x.active) || items[0];
+    const cur = (dto && dto.projects && dto.projects[0] && dto.projects[0].ttsVoice) || act.ttsVoice || null;
+    setTtsEng({ target: { kind: 'script', names: items.map((x) => String(x.file || x.title || '대본').replace(/\.md$/i, '')), channel: presetName || '', current: cur,
+      currentText: (dto && dto.projects && dto.projects[0] && dto.projects[0].ttsVoiceText) || '', itemIds: items.map((x) => x.id) } });
+  }
+  async function applyScriptVoice(t, voice) {
+    try {
+      const dry = await api.setScriptVoice({ voice, itemIds: t.itemIds, dry: true });
+      if (!dry || !dry.ok) { setStatus('⚠ ' + ((dry && dry.error) || '대본 목소리를 바꾸지 못했습니다')); return false; }
+      const ch = (dry.rows || []).filter((r) => r.changed);
+      if (!ch.length) { setStatus('🎙 열린 대본이 이미 이 목소리입니다'); return true; }
+      const nA = ch.reduce((a, r) => a + r.audio, 0);
+      if (nA) {
+        const yes = await uiConfirm(`열린 대본 ${ch.length}개의 목소리를 ${voice ? '「' + (voice.label || '') + '」(으)로 바꿉니다' : '채널 기본으로 되돌립니다'}.\n\n이미 만든 음성 ${nA}개는 옛 목소리라 지웁니다 — 다음 🎤 TTS·⚡ 만들기 때 새 목소리로 다시 만듭니다(클립에 따로 고른 목소리·[화자] 목소리는 그대로).\n\n${ch.map((r) => '· ' + r.name + (r.audio ? ` — 음성 ${r.audio}개` : '')).join('\n')}\n\n계속할까요?`);
+        if (!yes) return false;
+      }
+      const r = await api.setScriptVoice({ voice, itemIds: t.itemIds });
+      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '대본 목소리를 바꾸지 못했습니다')); return false; }
+      if (r.dto) setDto(r.dto);
+      try { const q = await api.listQueue(); if (q && q.queue) setQueue(q.queue); } catch (_) {}
+      setStatus(`🎙 열린 대본 ${ch.length}개 목소리 → ${voice ? voice.label : '채널 기본'}${nA ? ` · 옛 음성 ${nA}개를 지웠습니다(🎤 TTS 로 새로 만드세요)` : ''}`);
+      return true;
+    } catch (e) { logline('대본 목소리 오류: ' + e.message); setStatus('⚠ ' + e.message); return false; }
+  }
+  // 🎙 클립의 「🗣」(v0.6.83) — 그 클립(문장)만의 목소리. 적용하면 그 클립 음성만 곧바로 새로 만든다.
+  function openClipVoice(sn, groupNum, sentIdx, se) {
+    if (!se) return;
+    setTtsEng({ target: { kind: 'clip', text: String(se.text || ''), channel: presetName || '', current: se.tvRaw || null, currentText: se.tv || '', sn, groupNum, sentIdx } });
+  }
+  async function applyClipVoice(t, voice) {
+    try {
+      const r = await api.setClipVoice({ shortsNum: t.sn, items: [{ groupNum: t.groupNum, sentIdx: t.sentIdx }], voice });
+      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '클립 목소리를 바꾸지 못했습니다')); return false; }
+      if (r.dto) setDto(r.dto);
+      if (!r.changed) { setStatus('🎙 이 클립은 이미 이 목소리입니다'); return true; }
+      setStatus(`🎙 클립 목소리 → ${voice ? voice.label : '대본/채널 목소리'} — 이 클립 음성을 다시 만드는 중…`);
+      // 창은 바로 닫고 음성은 뒤에서(enqueueTtsJob 직렬 큐) — 끝나면 화면이 갱신된다
+      api.ttsSentences({ shortsNum: t.sn, items: [{ groupNum: t.groupNum, sentIdx: t.sentIdx }], roll: false, presetName: presetName || null, speed: ttsSpeed || null })
+        .then((d) => { if (d) setDto(d); setStatus(`🎙 클립 목소리 → ${voice ? voice.label : '대본/채널 목소리'} · 음성 완료`); })
+        .catch((e) => { logline('클립 음성 오류: ' + e.message); setStatus('⚠ ' + e.message); });
+      return true;
+    } catch (e) { logline('클립 목소리 오류: ' + e.message); setStatus('⚠ ' + e.message); return false; }
+  }
   // 🎙 채널편집 음성 탭 요약 — 그 채널의 엔진·목소리(얼굴) · 탭을 열 때·음성 설정을 저장했을 때 다시 읽는다
   const [chVoiceInfo, setChVoiceInfo] = useState(null);
   async function loadChVoiceInfo(name) {
@@ -3953,8 +4001,12 @@ export default function App() {
               <span className="hgroup rb-extra">
         {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」·「🔗 다시 연결」 자리(로이 2026-10-04 — 더는 안 쓴다).
             ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio·runRelinkWork)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다. */}
-        <button className="ghost" data-testid="tts-engine-btn" onClick={openTtsEngines}
-          title={'채널마다 목소리를 고릅니다(OmniVoice · Gemini · MAI-Voice · 타입캐스트 · ElevenLabs).\n얼굴·샘플 듣기·요금도 여기서.\n지금 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
+        <button className="ghost" data-testid="tts-engine-btn" onClick={openScriptVoice}
+          title={(loaded && mode === 'longform'
+            ? '열려 있는 대본의 목소리를 고릅니다 — 큐에 대본이 여럿이면 모두에 적용(채널 기본은 그대로 · ⚙ 채널편집에서).\n'
+              + '지금 대본: ' + ((dto && dto.projects && dto.projects[0] && dto.projects[0].ttsVoiceText) || '채널 목소리') + '\n'
+            : '대본이 없어 채널 기본 목소리를 고릅니다.\n')
+            + '얼굴·샘플 듣기·요금도 여기서 · 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
           {/* 🔊 음성 설정 팝업을 여는 버튼(로이 2026-10-05) — 지금 목소리는 마우스를 올리면(title) 보인다 */}
           <span className="rb-ic">🔊</span> <span className="rb-t">음성 설정</span></button>
               </span>
@@ -4270,7 +4322,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openClipVoice : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -4876,6 +4928,8 @@ export default function App() {
         </div>
       )}
       {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
+        target={ttsEng.target || null}
+        onApply={(v) => (ttsEng.target && ttsEng.target.kind === 'clip' ? applyClipVoice(ttsEng.target, v) : applyScriptVoice(ttsEng.target, v))}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
         onClose={() => setTtsEng(null)} onSaved={(n) => {
           refreshTtsEngActive();
@@ -5556,7 +5610,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onInsRange }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onInsRange, onClipVoice }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -5617,11 +5671,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -5866,7 +5920,10 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{l.n}</div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); } }}>
-                                    <span className={'clip-spk' + (s.speaker ? '' : ' narr')} title={s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : '채널 기본 목소리'}>🗣 {s.speaker || '내레이션'}</span>
+                                    {/* 🎙 누르면 이 클립만의 목소리(음성 설정 팝업 · v0.6.83) — 클립 목소리 > [화자] > 대본 > 채널 */}
+                                    <span className={'clip-spk' + (s.tv ? ' own' : s.speaker ? '' : ' narr') + (onClipVoice ? ' click' : '')} data-testid="clip-spk" role={onClipVoice ? 'button' : undefined}
+                                      title={(s.tv ? `이 클립만의 목소리: ${s.tv}${s.speaker ? ` (화자 「${s.speaker}」 대신)` : ''}` : s.speaker ? `화자 「${s.speaker}」 — ⚙ 채널편집 → 🎙 음성 → 화자별 목소리` : (pr.ttsVoiceText ? `대본 목소리: ${pr.ttsVoiceText}` : '채널 기본 목소리')) + (onClipVoice ? '\n누르면 🔊 음성 설정 — 이 클립만 다른 목소리로' : '')}
+                                      onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, c.num, si, s); } : undefined}>🗣 {s.tv || s.speaker || '내레이션'}</span>
                                     {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (

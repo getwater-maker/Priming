@@ -196,6 +196,40 @@ function synthExtra(id, preset, cfg) {
   return x;
 }
 
+/**
+ * 🎙 목소리 덮어쓰기(v0.6.83 · 로이 2026-10-05) — 채널 기본 목소리 위에 **대본**(리본 🔊 음성 설정) 또는
+ * **클립**(클립의 「🗣 내레이션」)이 고른 목소리를 얹는다. 우선순위: 클립 > 화자([이름]) > 대본 > 채널.
+ *   v = { voiceEngine: { id, model, voice, style, … }, ref: 'srv:<이름>'(OmniVoice 일 때), label }
+ *   🔑 채널 설정(tts-presets.json)은 건드리지 않는다 — 돌려주는 것은 합성용 사본이다.
+ *   형식이 틀린 값은 무시하고 preset 을 그대로 돌려준다(조용히 다른 목소리가 되지 않게 normVoice 가 먼저 거른다).
+ */
+function normVoice(v) {
+  if (!v || typeof v !== 'object' || !v.voiceEngine || !ENGINE_IDS.includes(v.voiceEngine.id)) return null;
+  const ve = { ...v.voiceEngine };
+  const ref = String(v.ref || '');
+  if (ve.id === 'omnivoice') { if (!/^srv:./.test(ref)) return null; return { voiceEngine: { id: 'omnivoice' }, ref, label: String(v.label || ref.slice(4)) }; }
+  if (!String(ve.voice || '').trim()) return null;
+  return { voiceEngine: ve, label: String(v.label || ve.voice) };
+}
+function applyVoice(preset, v) {
+  const n = normVoice(v);
+  if (!preset || !n) return preset;
+  const out = { ...preset, voiceEngine: { ...n.voiceEngine } };
+  if (n.voiceEngine.id === 'omnivoice') {
+    out.engine = 'omnivoice';
+    // 참조텍스트는 채널 참조음성 것 — 다른 목소리에 섞지 않는다(서버 목소리는 서버의 .txt 를 쓴다)
+    if (n.ref !== preset.voiceCloneRefAudio) { out.voiceCloneRefAudio = n.ref; out.voiceCloneRefText = ''; }
+  }
+  return out;
+}
+/** 덮어쓴 목소리를 사람 말 한 줄로 — 「☁ 고전_ok」 · 「타입캐스트 · 지민」 */
+function voiceText(v) {
+  const n = normVoice(v); if (!n) return '';
+  if (n.voiceEngine.id === 'omnivoice') return '☁ ' + n.label;
+  const e = byId(n.voiceEngine.id);
+  return `${e.label.replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')} · ${n.label}`;
+}
+
 /** 로그 한 줄 — 「어느 엔진·목소리로 읽었나」 */
 function label(id, preset) {
   const e = byId(id); if (!e) return String(id || '');
@@ -216,4 +250,4 @@ function keyInfo(SecretStore) {
   return out;
 }
 
-module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, PRICING, KO_CHARS_PER_SEC, DEFAULT_KRW, DEFAULT_CARD_FEE, byId, load, save, region, krw, cardFee, channelVoice, resolveEngine, synthExtra, label, keyInfo, estimateUsd, priceLine };
+module.exports = { ENGINES, ENGINE_IDS, CFG_PATH, PRICING, KO_CHARS_PER_SEC, DEFAULT_KRW, DEFAULT_CARD_FEE, byId, load, save, region, krw, cardFee, channelVoice, resolveEngine, synthExtra, label, normVoice, applyVoice, voiceText, keyInfo, estimateUsd, priceLine };

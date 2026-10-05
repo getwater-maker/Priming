@@ -166,6 +166,10 @@ function resolvePreset(presetName) {
   }
   return S.preset || P.getPreset(null);
 }
+// 🎙 대본 목소리(v0.6.83) — 채널 목소리 위에 이 대본(pr.ttsVoice · 리본 🔊 음성 설정)이 고른 목소리를 얹은 **합성용 사본**.
+//   🔑 롱폼 TTS 입구(전체·만들기·그룹·클립·도입부)는 전부 이걸 거친다(test:clipvoice 가 센다) · 채널 설정 파일은 바꾸지 않는다.
+//   클립 목소리(s.ttsVoice)는 fillTtsList 가 문장마다 얹는다(클립 > 화자 > 대본 > 채널).
+function scriptVoicePreset(preset, pr) { return (preset && pr && pr.ttsVoice) ? TtsEngines.applyVoice(preset, pr.ttsVoice) : preset; }
 // 채널이 실제로 쓰는 목소리를 사람이 읽는 한 줄로 — 「어느 목소리로 만들었나」를 로그만 보고 알 수 있게.
 function voiceLabel(preset) {
   if (!preset) return '⚠ 채널 없음';
@@ -2044,9 +2048,10 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
-    log(`🎙 전체 TTS — ${voiceLabel(S.preset)} · 배속 ${speed}x (${S.preset.engine}) 연결 중…`);
-    const { mgr, ok } = await P.makeTtsManager(log, S.preset);
-    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(S.preset)}' 미가동 (서버 또는 API 키 확인)`);
+    const _pv = scriptVoicePreset(S.preset, S.parsed.projects[0]);
+    log(`🎙 전체 TTS — ${voiceLabel(_pv)} · 배속 ${speed}x (${_pv.engine}) 연결 중…`);
+    const { mgr, ok } = await P.makeTtsManager(log, _pv);
+    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(_pv)}' 미가동 (서버 또는 API 키 확인)`);
     S.ttsMgr = mgr;
   }
 
@@ -2057,7 +2062,7 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
     if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ ${prLabel(pr)} 무음 오디오`); }
-    else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); log(`✓ ${prLabel(pr)} 음성 완료`); }
+    else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, scriptVoicePreset(S.preset, pr), S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); log(`✓ ${prLabel(pr)} 음성 완료`); }
     pushDtoUpdate();
   }
   S.timings.tts = (Date.now() - _ttsT0) / 1000;
@@ -4303,6 +4308,7 @@ function queueDTO() {
           : it.parsed.parts ? it.parsed.parts.reduce((n, p) => n + p.chapters.length, 0) : 0)) || 0,
         status: it.status || 'idle',
         settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
+        ttsVoice: (it.parsed && it.parsed.projects && it.parsed.projects[0] && it.parsed.projects[0].ttsVoice) || null,   // 🎙 대본 목소리(v0.6.83)
         active: it.id === q.activeId,
       })),
     };
@@ -5804,20 +5810,23 @@ function applyIntroFromScript(parsed, scriptPath, mode) {
     }
   } catch (e) { /* 실패 시 기존 값 유지 */ }
 }
-function buildSnapshot() {
+// ctx = { parsed, scriptPath, outRoot } — 없으면 활성 대본(S.*). 🎙 대본 목소리를 큐 전체에 걸 때 활성이 아닌 대본의 작업본도 쓴다(v0.6.83).
+function buildSnapshot(ctx) {
+  const X = ctx || { parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot };
   return {
-    scriptPath: S.scriptPath, fileTitle: S.parsed.fileTitle, meta: S.parsed.meta, outRoot: S.outRoot, mode: currentMode(),
+    scriptPath: X.scriptPath, fileTitle: X.parsed.fileTitle, meta: X.parsed.meta, outRoot: X.outRoot, mode: currentMode(),
     savedAt: Date.now(),
     // 🔑 **파싱 당시** 대본 해시(buildParsedForScript 가 심은 값). 여기서 다시 계산하지 않는다.
-    srcHash: (S.parsed && S.parsed._srcHash) || '',
+    srcHash: (X.parsed && X.parsed._srcHash) || '',
     hashVer: SNAP_HASH_VER, // 이 버전이 찍힌 해시만 신뢰한다(v0.4.6 오염분 자동 재판정)
-    projects: S.parsed.projects.map((pr) => ({
+    projects: X.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, voice: pr.voice,
       aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지 문장 범위
+      ttsVoice: pr.ttsVoice || null,             // 🎙 이 대본 목소리(리본 🔊 음성 설정 · 채널 목소리 위에 얹는다)
       scriptStyle: pr.scriptStyle || null,       // 🎨 대본 화풍(정해진 화풍 — 한 장만 다시 뽑아도 같은 화풍)
       overlays: require('./core/overlay-layers').toSnap(pr),   // ➕ 삽입(문장 순번)
       logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
-      format: pr.format || S.parsed.format || null, // 대본 형식 보존
+      format: pr.format || X.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
@@ -5830,19 +5839,20 @@ function buildSnapshot() {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, tv: s.ttsVoice || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null })),
       })),
     })),
   };
 }
-function writeSnapshotSync() {
-  if (!S.parsed) return null;
-  if (S.parsed.kind === 'book') return null; // 출판은 워크스페이스+원본(.md)이 진실 — .smproj 스냅샷 불필요
+function writeSnapshotSync(ctx) {
+  const X = ctx || { parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot };
+  if (!X.parsed) return null;
+  if (X.parsed.kind === 'book') return null; // 출판은 워크스페이스+원본(.md)이 진실 — .smproj 스냅샷 불필요
   try {
-    const { projDir, file } = snapshotFile();
+    const { projDir, file } = snapshotFile(X.scriptPath);
     fs.mkdirSync(projDir, { recursive: true });
     const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(buildSnapshot(), null, 2), 'utf8');
+    fs.writeFileSync(tmp, JSON.stringify(buildSnapshot(ctx ? X : undefined), null, 2), 'utf8');
     fs.renameSync(tmp, file);
     return file;
   } catch (e) { log('자동저장 실패: ' + (e && e.message)); return null; }
@@ -6001,6 +6011,7 @@ function projectsFromSnapshot(snap) {
         s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
         if (ss.chapterMark) s.chapterMark = ss.chapterMark;   // 합친 그룹 안의 챕터 경계(core/group-merge)
         if (ss.speaker) s.speaker = ss.speaker;               // [이름] 대사 — 화자 목소리
+        if (ss.tv) s.ttsVoice = ss.tv;                        // 🎙 클립 목소리
         if (Array.isArray(ss.capSpans) && ss.capSpans.length) s.capSpans = ss.capSpans;   // 🎨 줄별·글자별 자막 서식
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length) s.capBreaks = ss.capBreaks;   // ✂ 사람이 정한 자막 줄 나눔
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath) s.backcheck = ss.bc;   // 🔎 역대조 결과(그 음성 파일에 대한 것일 때만)
@@ -6012,6 +6023,7 @@ function projectsFromSnapshot(snap) {
     const proj = new Project({ sentences, groups });
     Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect || '16:9', title: ps.title, shortsNum: ps.shortsNum, voice: ps.voice });
     if (ps.aiNoticeRange) proj.aiNoticeRange = ps.aiNoticeRange;
+    if (ps.ttsVoice) proj.ttsVoice = ps.ttsVoice;   // 🎙 대본 목소리
     require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
     if (ps.logoSide === 'left') proj.logoSide = 'left';
     if (readerNotes.length) proj.readerNotes = readerNotes;
@@ -6035,6 +6047,7 @@ function overlaySnapshot(parsed, snap) {
       if (ps[k] != null) pr[k] = ps[k];
     }
     if (ps.logoSide === 'left') pr.logoSide = 'left';   // 🏷 로고 자리
+    if (ps.ttsVoice) pr.ttsVoice = ps.ttsVoice;         // 🎙 대본 목소리(대본이 바뀌어도 이 대본의 선택은 그대로)
     // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
     if (Array.isArray(ps.overlays) && ps.overlays.length) {
       const nOld = (ps.groups || []).reduce((a, g) => a + ((g.sentences || []).length), 0);
@@ -6076,6 +6089,7 @@ function overlaySnapshot(parsed, snap) {
         if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath && ss.text === s.text) s.backcheck = ss.bc;   // 🔎 역대조 결과(같은 문장·같은 음성일 때만)
+        if (ss.tv && ss.text === s.text) s.ttsVoice = ss.tv;   // 🎙 클립 목소리(같은 문장일 때만)
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
       });
@@ -6422,8 +6436,9 @@ async function runMakeAllBody(opts = {}) {
   S.preset = preset;
   let ttsMgr = null;
   if (!dry && !skipTts && preset) {
-    const { mgr, ok } = await P.makeTtsManager(log, preset);
-    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
+    const _pv = scriptVoicePreset(preset, parsed && parsed.projects && parsed.projects[0]);
+    const { mgr, ok } = await P.makeTtsManager(log, _pv);
+    if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(_pv)}' 미가동 (서버 또는 API 키 확인)`);
     ttsMgr = mgr;
   }
   S.abort = false;
@@ -6487,7 +6502,7 @@ async function runMakeAllBody(opts = {}) {
     //   엉뚱한 목소리가 나간 것을 알 수 없어 OmniVoice 서버 로그의 seed 를 뒤져야 했다.
     if (preset) {
       const _pd = Number(preset.silenceSec) > 0 ? ` · 문장무음 ${Number(preset.silenceSec)}초` : '';
-      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (${voiceLabel(preset)} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1}${_pd})`);
+      log(`🎙 1단계 — 음성(TTS) 일괄 변환… (${voiceLabel(scriptVoicePreset(preset, parsed.projects[0]))}${parsed.projects[0] && parsed.projects[0].ttsVoice ? " · 🎙 대본 목소리" : ""} · 배속 ${(speed != null && Number(speed) > 0) ? speed : 1}${_pd})`);
     } else {
       log('🎙 1단계 — 음성(TTS) 일괄 변환… (⚠ 채널을 찾지 못했습니다)');
     }
@@ -6498,7 +6513,7 @@ async function runMakeAllBody(opts = {}) {
       const t0 = Date.now();
       try {
         if (dry) await P.fillSilentYield(pr, dirs.tts);   // 무음은 문장 몇 개마다 이벤트 루프에 양보(IPC·화면이 굳지 않게)
-        else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
+        else await P.fillTts(pr, scriptVoicePreset(preset, pr), ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
         log(`✓ ${prLabel(pr)} 음성 완료`);
       } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
       S.timings.tts += (Date.now() - t0) / 1000;
@@ -7022,7 +7037,7 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
-  const preset = resolvePreset(presetName);   // 🔑 이름이 이긴다 — 낡은 전역이 남의 채널 목소리를 끌고 오지 않게
+  const preset = scriptVoicePreset(resolvePreset(presetName), pr);   // 🔑 이름이 이긴다 — 낡은 전역이 남의 채널 목소리를 끌고 오지 않게 · 🎙 대본 목소리
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
   const { mgr, ok } = await P.makeTtsManager(log, preset);
   if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
@@ -7661,6 +7676,7 @@ async function _editSentences(args = {}) {
     // 화자는 같은 자리의 옛 문장을 따른다(나누면 조각 모두 · 합치면 첫 문장). .md 의 [이름] 접두는 그대로 남아 있다.
     const _spk = old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
     if (_spk) s.speaker = _spk;
+    { const _tv = old[Math.min(ti, old.length - 1)].ttsVoice || old[0].ttsVoice; if (_tv) s.ttsVoice = _tv; }   // 🎙 클립 목소리도 화자처럼 따라간다
     if (_spansMoved && _spansMoved[ti] && _spansMoved[ti].length) s.capSpans = _spansMoved[ti];
     // ✂ 사람이 정한 줄 나눔 — 한 문장을 고쳐 한 문장이 되면 새 글 위치로 옮긴다(나누거나 합치면 풀린다 = 자동 줄바꿈)
     if (old.length === 1 && plan.newTexts.length === 1 && old[0].capBreaks) { const nb = require('./core/caption-splitter').remapBreaks(old[0].text, t, old[0].capBreaks); if (nb) s.capBreaks = nb; }
@@ -7939,6 +7955,7 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
   ns.isIntro = !!sa.isIntro;
   if (sa.chapterMark) ns.chapterMark = sa.chapterMark;
   if (sa.speaker) ns.speaker = sa.speaker;
+  if (sa.ttsVoice) ns.ttsVoice = sa.ttsVoice;   // 🎙 클립 목소리 = 앞 문장(합치기는 앞이 이긴다)
   if ((sa.capSpans && sa.capSpans.length) || (sb.capSpans && sb.capSpans.length)) {
     const mv = require('./core/caption-format').remapSpansMulti([sa.text, sb.text], [sa.capSpans || [], sb.capSpans || []], [merged]);
     if (mv && mv[0] && mv[0].length) ns.capSpans = mv[0];
@@ -8056,7 +8073,7 @@ function _mkSent(text, like, used) {
   let id = hashId('s', text), k = 1; while (used.has(id)) id = hashId('s', text) + '_' + (++k);
   used.add(id);
   const s = new Sentence({ id, num: 0, text });
-  if (like) { s.isIntro = !!like.isIntro; if (like.speaker) s.speaker = like.speaker; }
+  if (like) { s.isIntro = !!like.isIntro; if (like.speaker) s.speaker = like.speaker; if (like.ttsVoice) s.ttsVoice = like.ttsVoice; }
   return s;
 }
 /** 줄 텍스트들 → 그 문장의 줄 시작 위치(끝 표식 포함 — 굳힘). 각 줄의 첫머리를 새 글에서 **찾아서** 잡는다(합칠 때 마침표를 빼므로 길이로 세면 어긋난다). */
@@ -8182,7 +8199,7 @@ ipcMain.handle('copy-clips', async (_e, args = {}) => {
           audio = out; dur = got.durationSec;
         } catch (e) { log('⚠ 클립 복사 — 음성 조각을 만들지 못했습니다: ' + e.message); }
       }
-      chunks.push({ text, parts: ls.map((l) => l.t), audio, dur, speaker: j.s.speaker || null, isIntro: !!j.s.isIntro });
+      chunks.push({ text, parts: ls.map((l) => l.t), audio, dur, speaker: j.s.speaker || null, ttsVoice: j.s.ttsVoice || null, isIntro: !!j.s.isIntro });
     }
     _rmTemps(pieces);
   }
@@ -8235,7 +8252,7 @@ ipcMain.handle('paste-clips', async (_e, args = {}) => {
     }
     out.push(hs);
     chunks.forEach((x, k) => {
-      const ns = _mkSent(made[1 + k], { isIntro: j.s.isIntro, speaker: j.s.speaker }, used);
+      const ns = _mkSent(made[1 + k], { isIntro: j.s.isIntro, speaker: j.s.speaker, ttsVoice: j.s.ttsVoice }, used);
       if (Array.isArray(x.parts) && x.parts.length > 1) ns.capBreaks = _fixedBreaks(ns.text, x.parts);
       if (x.audio && fs.existsSync(x.audio)) {
         const dst = P.claimPath(path.join(ttsDir, 'p' + (j.s.num) + '_' + (k + 1) + '.wav'), null, ['.wav', '.mp3']);
@@ -8323,6 +8340,61 @@ ipcMain.handle('merge-clips', async (_e, args = {}) => {
   return { ok: true, dto: P.toDTO(S.parsed) };
 });
 
+// 🎙 클립 목소리(v0.6.83 · 로이 2026-10-05 「🗣 내레이션을 눌러 음성 설정 → 그 클립만 그 목소리로」).
+//   s.ttsVoice = { voiceEngine, ref, label } · voice=null = 지우기(대본/채널 목소리로 돌아감). 목소리가 바뀐 문장은 옛 음성을 떼어 낸다
+//   (옛 목소리 음성이 남으면 「바꿨는데 그대로」가 된다) — 화면은 곧바로 tts-sentences 로 그 클립만 다시 만든다.
+ipcMain.handle('set-clip-voice', (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const v = args.voice == null ? null : TtsEngines.normVoice(args.voice);
+  if (args.voice != null && !v) return { ok: false, error: '목소리 값이 올바르지 않습니다(OmniVoice 는 서버 목소리 · 유료 엔진은 목소리 카드를 고르세요).' };
+  const seen = new Set(); let n = 0, total = 0;
+  for (const it of args.items || []) {
+    const s = _sentAt(pr, it.groupNum, it.sentIdx); if (!s || seen.has(s.id)) continue;
+    seen.add(s.id); total++;
+    if (JSON.stringify(s.ttsVoice || null) === JSON.stringify(v)) continue;
+    if (v) s.ttsVoice = v; else delete s.ttsVoice;
+    s.ttsAudioPath = null; s.ttsDurationSec = null; n++;
+  }
+  if (!total) return { ok: false, error: '클립을 찾지 못했습니다 — 대본이 그새 바뀌었을 수 있습니다.' };
+  log(v ? `🎙 클립 ${total}개 목소리 → ${TtsEngines.voiceText(v)}${n ? '' : ' (이미 이 목소리)'}` : `🎙 클립 ${total}개 목소리 지움 → 대본/채널 목소리로`);
+  storeActive(); syncSnapshotNow();
+  return { ok: true, changed: n, dto: P.toDTO(S.parsed) };
+});
+// 🎙 대본 목소리(v0.6.83 · 로이 「리본 음성 설정 = 열려 있는 대본의 음성 · 2개 이상이면 모두」) — 롱폼 큐의 **모든 대본**(itemIds 로 좁힐 수 있다).
+//   pr.ttsVoice 에 담고 작업본에 쓴다(채널 설정은 그대로 = 채널 기본은 ⚙ 채널편집에서).
+//   이미 만든 음성 중 **이 목소리로 읽을 문장**(클립 목소리·연결된 화자 제외)은 떼어 낸다 — 한 영상에 두 목소리가 섞이지 않게.
+//   dry = 세기만(화면이 「음성 N개를 다시 만듭니다」 확인창을 띄운다).
+ipcMain.handle('set-script-voice', (_e, args = {}) => {
+  const v = args.voice == null ? null : TtsEngines.normVoice(args.voice);
+  if (args.voice != null && !v) return { ok: false, error: '목소리 값이 올바르지 않습니다.' };
+  storeActive();
+  const q = S.modes.longform;
+  const items = q.items.filter((it) => it.parsed && it.parsed.kind !== 'book' && (!Array.isArray(args.itemIds) || args.itemIds.includes(it.id)));
+  const rows = [];
+  for (const it of items) {
+    const spk = P.speakerVoiceMap(P.getPreset((it.settings && it.settings.presetName) || null) || S.preset || {});
+    let changed = false, audio = 0;
+    for (const pr of it.parsed.projects) {
+      if (JSON.stringify(pr.ttsVoice || null) === JSON.stringify(v)) continue;
+      changed = true;
+      for (const s of pr.sentences) if (!s.ttsVoice && !(s.speaker && spk[s.speaker]) && s.ttsAudioPath) audio++;
+      if (args.dry) continue;
+      if (v) pr.ttsVoice = v; else delete pr.ttsVoice;
+      for (const s of pr.sentences) if (!s.ttsVoice && !(s.speaker && spk[s.speaker]) && s.ttsAudioPath) { s.ttsAudioPath = null; s.ttsDurationSec = null; }
+    }
+    rows.push({ id: it.id, name: path.basename(it.scriptPath || '').replace(/\.md$/i, ''), changed, audio });
+    if (changed && !args.dry) writeSnapshotSync({ parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot });
+  }
+  if (!args.dry) {
+    const ch = rows.filter((r) => r.changed);
+    log(`🎙 대본 목소리 ${v ? '→ ' + TtsEngines.voiceText(v) : '지움 → 채널 목소리로'} — ${ch.length ? ch.map((r) => r.name).join(', ') : '바뀐 대본 없음'}`
+      + (ch.some((r) => r.audio) ? ` · 옛 목소리 음성 ${ch.reduce((a, r) => a + r.audio, 0)}개를 떼어 냈습니다(다음 🎤/⚡ 만들기 때 새 목소리로)` : ''));
+    syncSnapshotNow();
+  }
+  return { ok: true, rows, dto: S.parsed ? P.toDTO(S.parsed) : null };
+});
+
 // 🎤 목소리 수정 — 고른 클립의 **문장** 음성만 다시(채널 시드 그대로) · roll = 🎲 다른 톤으로 새로 뽑기
 ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 변환', async () => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }
@@ -8331,7 +8403,7 @@ ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 
   const seen = new Set(); const sents = [];
   for (const it of args.items || []) { const s = _sentAt(pr, it.groupNum, it.sentIdx); if (s && !seen.has(s.id)) { seen.add(s.id); sents.push(s); } }
   if (!sents.length) return P.toDTO(S.parsed);
-  const preset = resolvePreset(args.presetName || null);
+  const preset = scriptVoicePreset(resolvePreset(args.presetName || null), pr);   // 🎙 대본 목소리(클립 목소리는 fillTtsList 가 문장마다)
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
   const { mgr, ok } = await P.makeTtsManager(log, preset);
   if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
@@ -9472,7 +9544,7 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const pr = S.parsed.projects[0];
   if (!pr) return P.toDTO(S.parsed);
-  const preset = resolvePreset(args.presetName || null);   // 🔑 이름이 이긴다(낡은 전역 금지)
+  const preset = scriptVoicePreset(resolvePreset(args.presetName || null), pr);   // 🔑 이름이 이긴다(낡은 전역 금지) · 🎙 대본 목소리
   if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
   const speed = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
   const introSents = pr.sentences.filter((s) => s.isIntro);

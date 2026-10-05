@@ -38,7 +38,12 @@ function estUsd(engId, unit, chars, koCps) {
   return unit.kind === 'char' ? n * unit.usd : (n / (koCps || 7)) * unit.usd;
 }
 
-export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys }) {
+// 🎙 target(v0.6.83) — 없으면 **채널 기본 목소리**(⚙ 채널편집 → 「음성 설정에서 바꾸기」 · 대본이 없을 때의 리본 버튼).
+//   { kind: 'script', names:[대본…], channel, current } = 리본 「🔊 음성 설정」 → 열려 있는 대본 모두의 목소리
+//   { kind: 'clip', text, n, channel, current }        = 클립의 「🗣」 → 그 클립만의 목소리
+//   target 이면 채널 설정은 저장하지 않고 onApply({ voiceEngine, ref, label } | null) 만 부른다(null = 덮어쓴 목소리 지우기).
+const TGT = '__target__';
+export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply }) {
   const [data, setData] = useState(null);          // { engines, keys, channels, region, krw, koCps }
   const [drafts, setDrafts] = useState({});        // 채널 → { id, ref, cfg:{엔진:{model,voice,style,…}} }
   const [dirty, setDirty] = useState({});          // 바뀐 채널
@@ -91,6 +96,14 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       setVoices(vs); setFaces(fs); setSamples(ss);
       const d = {};
       for (const c of r.channels) d[c.name] = { id: c.voiceEngine.id, ref: c.ref, cfg: { [c.voiceEngine.id]: { ...c.voiceEngine } } };
+      if (target) {
+        // 처음 고른 카드 = 지금 덮어쓴 목소리 → 없으면 채널 목소리(그대로 「적용」하면 바뀌는 것 없음)
+        const cur = target.current && target.current.voiceEngine ? target.current : null;
+        const base = d[target.channel] || { id: 'omnivoice', ref: '', cfg: {} };
+        d[TGT] = cur ? { id: cur.voiceEngine.id, ref: cur.ref || '', cfg: { ...base.cfg, [cur.voiceEngine.id]: { ...cur.voiceEngine } } } : { ...base, cfg: { ...base.cfg } };
+        setDrafts(d); setChan(TGT); setTab(d[TGT].id || 'omnivoice');
+        return;
+      }
       setDrafts(d);
       const first = (r.channels.find((c) => c.name === initialChannel) || r.channels[0] || {}).name || '';
       setChan(first);
@@ -151,6 +164,24 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   }
 
   async function save() {
+    if (target) {
+      const d = drafts[TGT];
+      if (!dirty[TGT]) { onClose(); return; }
+      if (d.id !== 'omnivoice' && !hasKey(d.id)) { setMsg(`⚠ ${data.engines.find((x) => x.id === d.id).label} 의 API 키를 넣어야 이 목소리로 만들 수 있습니다`); return; }
+      if (d.id !== 'omnivoice' && !String((d.cfg[d.id] || {}).voice || '').trim()) { setMsg('⚠ 목소리 카드를 하나 고르세요'); return; }
+      if (d.id === 'omnivoice' && !/^srv:./.test(String(d.ref || ''))) { setMsg('⚠ OmniVoice 서버 목소리 카드를 하나 고르세요'); return; }
+      const e = data.engines.find((x) => x.id === d.id);
+      const cc = d.cfg[d.id] || {};
+      const ve = d.id === 'omnivoice' ? { id: 'omnivoice' } : { id: d.id, ...cc, model: cc.model && e.models.some((m) => m.id === cc.model) ? cc.model : e.models[0].id };
+      const vid = d.id === 'omnivoice' ? d.ref : ve.voice;
+      const vv = (voices[d.id] || []).find((x) => x.id === vid);
+      const label = vv ? String(vv.name || '').split(' - ')[0] : String(vid || '').replace(/^srv:/, '');
+      setBusy('apply');
+      const ok = await onApply({ voiceEngine: ve, ref: d.id === 'omnivoice' ? d.ref : '', label });
+      setBusy('');
+      if (ok !== false) onClose();
+      return;
+    }
     const bad = Object.entries(drafts).find(([n, d]) => dirty[n] && d.id !== 'omnivoice' && (!hasKey(d.id) || !String((d.cfg[d.id] || {}).voice || '').trim()));
     if (bad) {
       const e = data.engines.find((x) => x.id === bad[1].id);
@@ -179,7 +210,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       if (!src) {
         if (!(await saveKeysIfAny())) { setBusy(''); return; }
         const st = tab === 'typecast' ? (c.emotion || '') : (c.style || '');
-        const r = await api.ttsEngineTest({ id: tab, voice: v.id, model, style: tab === 'typecast' ? '' : c.style, emotion: tab === 'typecast' ? c.emotion : '', stability: c.stability, similarity: c.similarity, channel: chan, force: !!force });
+        const r = await api.ttsEngineTest({ id: tab, voice: v.id, model, style: tab === 'typecast' ? '' : c.style, emotion: tab === 'typecast' ? c.emotion : '', stability: c.stability, similarity: c.similarity, channel: target ? target.channel : chan, force: !!force });
         if (!r || !r.ok) { setMsg('❌ ' + ((r && r.error) || '샘플 실패')); setBusy(''); return; }
         if (!r.cached) {
           setSamples((s) => ({ ...s, [tab]: { ...(s[tab] || {}), [[model, v.id, st].join('|')]: { sec: r.sec } } }));
@@ -208,7 +239,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     for (const v of todo) {
       if (stopRef.current) break;
       setBusy('batch'); setMsg(`📦 샘플 만드는 중 ${n + 1}/${todo.length} — ${v.name}`);
-      const r = await api.ttsEngineTest({ id: tab, voice: v.id, model, style: tab === 'typecast' ? '' : c.style, emotion: tab === 'typecast' ? c.emotion : '', channel: chan });
+      const r = await api.ttsEngineTest({ id: tab, voice: v.id, model, style: tab === 'typecast' ? '' : c.style, emotion: tab === 'typecast' ? c.emotion : '', channel: target ? target.channel : chan });
       if (r && r.ok) { n++; setSamples((s) => ({ ...s, [tab]: { ...(s[tab] || {}), [sampleKeyOf(v)]: { sec: r.sec } } })); }
       else { fail++; if (fail >= 3) { setMsg('❌ 연속 실패 — 멈춥니다: ' + ((r && r.error) || '')); break; } }
     }
@@ -247,7 +278,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   async function addFromLibrary(v) {
     const mine = (voices.elevenlabs || []).find((x) => x.name === v.name);
     if (mine) { pickVoice(mine); setMsg(`「${v.name}」 은 이미 내 목록에 있습니다 — 이 채널 목소리로 골랐습니다`); return; }
-    const ok = await (confirm || window.confirm)(`「${v.name}」(${v.lang}) 목소리를 ElevenLabs 내 목록에 추가하고 「${chan}」 채널 목소리로 고를까요?\n(요금제마다 추가할 수 있는 목소리 개수에 제한이 있습니다)`);
+    const ok = await (confirm || window.confirm)(`「${v.name}」(${v.lang}) 목소리를 ElevenLabs 내 목록에 추가하고 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan + ' 채널'}」 목소리로 고를까요?\n(요금제마다 추가할 수 있는 목소리 개수에 제한이 있습니다)`);
     if (!ok) return;
     setBusy('add:' + v.id); setMsg(`📚 「${v.name}」 추가하는 중…`);
     const r = await api.elAddShared({ ownerId: v.ownerId, voiceId: v.id, name: v.name });
@@ -256,7 +287,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     setVoices((x) => ({ ...x, elevenlabs: r.voices }));
     patchDraft((d) => ({ ...d, id: 'elevenlabs', cfg: { ...d.cfg, elevenlabs: { ...(d.cfg.elevenlabs || {}), model, voice: r.voiceId } } }));
     setElSrc('mine');
-    setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${chan}」 채널 목소리로 골랐습니다 — 저장을 누르세요`);
+    setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan + ' 채널'}」 목소리로 골랐습니다 — 저장을 누르세요`);
   }
   // 🎨 보이는 목소리 얼굴 한꺼번에 그리기(얼굴 없는 것만 · 🖥 로컬 ComfyUI · 무료 · 멈춤 가능)
   async function drawAllFaces(list) {
@@ -319,7 +350,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     }).catch(() => { trBusyRef.current = false; });
   }, [shown, tr]);
   // 이 목소리를 쓰는 채널(지금 고친 값 기준) — 채널끼리 목소리가 겹치는지 보이게
-  const usersOf = (v) => Object.entries(drafts).filter(([, d]) => d.id === tab && (tab === 'omnivoice' ? d.ref === v.id : ((d.cfg[tab] || {}).voice || '') === v.id)).map(([n]) => n);
+  const usersOf = (v) => Object.entries(drafts).filter(([n]) => n !== TGT).filter(([, d]) => d.id === tab && (tab === 'omnivoice' ? d.ref === v.id : ((d.cfg[tab] || {}).voice || '') === v.id)).map(([n]) => n);
 
   if (!data) return (<div className="modal-bg show" data-testid="tts-engine-dlg"><div className="modal-card" style={{ width: 300 }}>불러오는 중…</div></div>);
 
@@ -348,7 +379,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
       {/* 🔒 크기 고정 — 채널·탭·목록과 상관없이 같은 크기(안쪽만 스크롤) */}
       <div className="modal-card" data-testid="tts-eng-card" style={{ width: 'min(1180px, 96vw)', maxWidth: 'none', height: 'min(760px, 92vh)', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h3 style={{ margin: 0, flex: 1 }}>🔊 음성 설정 <span className="meta" style={{ fontWeight: 400, fontSize: 12 }}>채널마다 목소리를 고르세요</span></h3>
+          <h3 style={{ margin: 0, flex: 1 }}>🔊 음성 설정 <span className="meta" data-testid="tts-mode" style={{ fontWeight: 400, fontSize: 12 }}>{!target ? '채널 기본 목소리 — 채널마다 고르세요(대본·클립이 따로 고르지 않으면 이 목소리)' : target.kind === 'clip' ? '이 클립만의 목소리' : `열려 있는 대본 ${target.names.length}개의 목소리 — 채널 기본은 그대로`}</span></h3>
           {/* 💱 환율 = 공개 API 시장 환율 + 카드 해외결제 수수료(카드사·결제망 환율 페이지는 자동 조회를 막는다) — 수수료는 눌러서 고친다 */}
           <span data-testid="tts-fx" className="meta" style={{ cursor: 'pointer' }} onClick={() => setFeeOpen((x) => !x)}
             title={(fx ? `시장 환율 1달러 = ${fx.rate.toLocaleString()}원 (${fx.source} · 기준 ${fx.asOf}${fx.stale ? ' · ⚠ 지난 값' : ''})\n` : '환율을 받지 못해 지난 값으로 계산합니다\n') + `+ 카드 해외결제 수수료 ${cardFee}% = 카드 청구 예상 환율\n눌러서 수수료를 고칩니다`}>
@@ -363,6 +394,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {/* ── 왼쪽: 채널 ── */}
+          {target ? (<TargetPane target={target} chanVoice={target.channel && drafts[target.channel] ? chanVoice(target.channel) : null} chosen={chanVoice(TGT)} dirty={!!dirty[TGT]} busy={busy}
+            onClear={async () => { if (!target.current) { onClose(); return; } setBusy('apply'); const ok = await onApply(null); setBusy(''); if (ok !== false) onClose(); }} />) : (
           <div data-testid="tts-chan-list" style={{ width: 230, flex: '0 0 230px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 8 }}>
             {data.channels.map((ch) => {
               const cv = chanVoice(ch.name); const on = chan === ch.name;
@@ -379,7 +412,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 </div>
               );
             })}
-          </div>
+          </div>)}
 
           {/* ── 오른쪽: 이 채널의 엔진 탭 ── */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
@@ -400,7 +433,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* ① 설정 한 줄 — 상태 · 키 · 모델 · 지역 (설명은 ⓘ 에) */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 10, background: isOnTab ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.05)', color: isOnTab ? BLUE : 'inherit', fontWeight: 600 }}
-                  title={eng.note}>{isOnTab ? `✅ 「${chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
+                  title={eng.note}>{isOnTab ? `✅ 「${target ? (target.kind === 'clip' ? '이 클립' : '열린 대본') : chan}」이 이 엔진으로 읽습니다` : '카드를 고르면 이 엔진으로 바뀝니다'} ⓘ</span>
                 <span style={{ flex: 1 }} />
                 {/* 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78) — 여기는 상태와 그리로 가는 버튼만 */}
                 {eng.paid && (k.has
@@ -485,11 +518,39 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
           <span className="meta" data-testid="tts-eng-msg" style={{ flex: 1, fontWeight: msg ? 600 : 400 }}>
             {msg || '카드를 눌러 목소리를 고르고 저장하세요 · 🔈 듣기 · 카드에 마우스를 올리면 얼굴 넣기(🖼 그림 · 🎨 그리기)'}
           </span>
-          <span className="meta">{Object.keys(dirty).length ? `바뀐 채널 ${Object.keys(dirty).length}개` : ''}</span>
-          <button data-testid="tts-eng-save" onClick={save}>저장</button>
+          <span className="meta">{target ? (dirty[TGT] ? '● 바뀜 — 「적용」을 누르세요' : '') : Object.keys(dirty).length ? `바뀐 채널 ${Object.keys(dirty).length}개` : ''}</span>
+          <button data-testid="tts-eng-save" disabled={busy === 'apply'} onClick={save}>{target ? (target.kind === 'clip' ? '이 클립에 적용' : '열린 대본에 적용') : '저장'}</button>
           <button className="ghost" onClick={onClose}>닫기</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// 🎙 대본·클립 모드의 왼쪽 칸 — 무엇에 적용하는지 · 채널 기본 목소리 · 「채널 목소리로 되돌리기」
+function TargetPane({ target, chanVoice, chosen, dirty, busy, onClear }) {
+  const isClip = target.kind === 'clip';
+  return (
+    <div data-testid="tts-target" style={{ width: 230, flex: '0 0 230px', borderRight: '1px solid var(--line)', overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontWeight: 700 }}>{isClip ? '🎬 이 클립에만' : `📄 열린 대본 ${target.names.length}개에`}</div>
+      {isClip
+        ? <div className="meta" style={{ fontSize: 12, lineHeight: 1.45, background: 'rgba(0,0,0,0.04)', borderRadius: 8, padding: '6px 8px', maxHeight: 120, overflow: 'hidden' }}>{target.text}</div>
+        : <div style={{ fontSize: 12, lineHeight: 1.5 }}>{target.names.map((n) => <div key={n} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={n}>· {n}</div>)}</div>}
+      <div style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
+        <div className="meta" style={{ fontSize: 11 }}>고른 목소리</div>
+        <div data-testid="tts-target-chosen" style={{ fontWeight: 700, color: dirty ? BLUE : 'inherit' }}>{chosen.eng} · {chosen.name}{dirty ? ' ●' : ''}</div>
+      </div>
+      {chanVoice && <div>
+        <div className="meta" style={{ fontSize: 11 }}>채널 「{target.channel}」 기본</div>
+        <div style={{ fontSize: 12 }}>{chanVoice.eng} · {chanVoice.name}</div>
+      </div>}
+      {target.current && <div className="meta" style={{ fontSize: 11 }}>지금 {isClip ? '이 클립' : '열린 대본'}은 따로 고른 목소리(<b>{target.currentText || target.current.label}</b>)로 읽습니다.</div>}
+      <button className="ghost" data-testid="tts-target-clear" disabled={!target.current || busy === 'apply'} style={{ marginTop: 'auto' }}
+        title={isClip ? '이 클립의 목소리를 지우고 대본(또는 채널) 목소리로 읽습니다' : '열린 대본의 목소리를 지우고 채널 기본 목소리로 읽습니다'}
+        onClick={onClear}>↺ {isClip ? '대본 목소리로 되돌리기' : '채널 목소리로 되돌리기'}</button>
+      <div className="meta" style={{ fontSize: 11, lineHeight: 1.45 }}>{isClip
+        ? '적용하면 이 클립 음성만 새 목소리로 바로 다시 만듭니다.'
+        : '적용하면 이미 만든 음성 중 이 목소리로 읽을 문장은 지우고, 다음 🎤 TTS·⚡ 만들기 때 새 목소리로 만듭니다. 채널 기본은 ⚙ 채널편집 → 🎙 음성에서.'}</div>
     </div>
   );
 }
