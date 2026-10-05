@@ -156,6 +156,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.waitForTimeout(300);
       ok(await win.locator('[data-testid=stage-ai]').count() === 0, '작업바 「AI 고지」를 끄면 ① 칸에서도 사라진다');
     }
+    console.log('\n[7] ⏱ ① 칸 아래 지금 / 전체 재생시간(v0.6.89)');
+    {
+      await clipNo(3).click(); await win.waitForTimeout(400);
+      const t = (await win.locator('[data-testid=stage-time]').innerText()).replace(/\s+/g, ' ').trim();
+      ok(/^⏱ 0:05 \/ 0:10 \(어림\)$/.test(t), `음성 없는 대본 = 문장당 2.5초 어림 — 3번째 문장 0:05 / 4문장 0:10 (${t})`);
+      const sb = await win.locator('#playerBar').boundingBox(), tb = await win.locator('[data-testid=stage-time]').boundingBox();
+      ok(tb && sb && tb.y >= sb.y - 1 && tb.y + tb.height <= sb.y + sb.height + 1, '「▶ 재생 · G · 자막 N/M」 줄에 같이 있다');
+      await clipNo(3).click(); await win.waitForTimeout(200);
+    }
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

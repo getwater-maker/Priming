@@ -966,3 +966,8 @@ body:has(.modal-bg.show) .clip-tb{display:none}
 .stage-ai{position:absolute;left:3.229%;top:5.83%;max-width:93%;z-index:4;pointer-events:none;color:#fff;font-family:'Pretendard','Pretendard Variable',sans-serif;font-weight:700;
   font-size:calc(100cqw * 0.028125);line-height:1.25;-webkit-text-stroke:calc(100cqw * 0.00625) #000;paint-order:stroke fill;animation:stageAiIn 1.5s ease both}
 @keyframes stageAiIn{from{opacity:0}to{opacity:1}}
+
+/* ⏱ ① 칸 아래 재생시간(v0.6.89) */
+.stage-time{color:#e8dcc8;font-size:12.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.stage-time b{color:#fff}
+.stage-time .meta{color:#bcae98}

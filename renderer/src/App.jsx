@@ -234,6 +234,12 @@ function fmtKoTime(ts) {
   let h = d.getHours() % 12; if (h === 0) h = 12;
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${ap} ${h}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+// ⏱ 초 → 「m:ss」(1시간 넘으면 「h:mm:ss」) — ① 칸 아래 재생시간
+function fmtHMS(s) {
+  s = Math.max(0, Math.floor(Number(s) || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+}
 // 초 → "N분 N초" (1시간 이상이면 "N시간 N분 N초"). 합계 표시용.
 function fmtMinSec(s) {
   s = Math.max(0, Math.round(Number(s) || 0));
@@ -3935,6 +3941,15 @@ export default function App() {
     </span>
   ) : null;
 
+  // ⏱ ① 칸 아래 「지금 / 전체」 재생시간(v0.6.89 · 로이) — 문장 음성 길이 합(목록 시각·.vrew 와 같다) · 음성이 없는 문장은 2.5초로 어림
+  const stageTime = (() => {
+    if (!cursor || !dto || !dto.projects) return null;
+    const ci = cursorInfo(); if (!ci) return null;
+    let tot = 0, miss = 0, before = 0, ord = 0, myOrd = ci.l.sentIdx + 1;
+    for (let i = 0; i < ci.l.ci; i++) myOrd += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
+    for (const cu of ci.pr.cuts) for (const se of (cu.sentences || [])) { ord++; const d = se.dur > 0 ? se.dur : (miss++, 2.5); if (ord < myOrd) before += d; tot += d; }
+    return { cur: ci.l.start != null ? ci.l.start : before, tot, miss };
+  })();
   // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
   //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
   const stageAi = (() => {
@@ -3991,6 +4006,10 @@ export default function App() {
     <div id="playerBar">
       {wsOn && <button className={playerOpen ? 'ghost' : ''} data-testid="play-btn" title="커서 줄부터 재생 / 멈춤 (Space)" onClick={() => (playerOpen ? stopPlayer() : playFromCursor())}>{playerOpen ? '■ 멈춤' : '▶ 재생'}</button>}
       <span id="playerInfo" ref={playerInfoRef} />
+      {wsOn && stageTime && <span className="stage-time" data-testid="stage-time"
+        title={'⏱ 지금 자막 줄의 시작 시각 / 전체 재생시간(문장 음성 길이 합 — .vrew 와 같다)' + (stageTime.miss ? `
+음성이 아직 없는 문장 ${stageTime.miss}개는 문장당 2.5초로 어림했습니다` : '')}>
+        ⏱ {fmtHMS(stageTime.cur)} / <b>{fmtHMS(stageTime.tot)}</b>{stageTime.miss ? <span className="meta"> (어림)</span> : null}</span>}
       {!wsOn && <button className="ghost" onClick={stopPlayer}>■ 닫기</button>}
     </div>
   </>);
