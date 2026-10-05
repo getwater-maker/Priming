@@ -1543,18 +1543,10 @@ function _localRefFiles() {
 //   🔑 9893 은 필요할 때만 켜지는 온디맨드라 대부분 꺼져 있다(아내 PC 에서 ETIMEDOUT 발생).
 //     OmniVoice 는 상시 실행이고 REF_LIB 의 주인이므로 이쪽이 정답. 9893 폴백은 구버전 OmniVoice 서버용.
 async function uploadRefVoice({ name, text, instruct, wavBuffer }) {
-  const ASR = require('./tts/asr-client');
-  let r = await ASR.saveServerVoice({ name, text, instruct, wavBuffer }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
-  if (r && r.ok) return r;
-  const why = (r && r.error) || '';
-  if (why !== 'unsupported') return r;                       // 진짜 실패는 그대로 보고(주소·키·용량 등)
-  // 구버전 OmniVoice 서버(=/save-ref-voice 없음) → 옛 경로로 시도
-  try {
-    const QD = require('./core/qwen-design');
-    const r2 = await QD.saveVoice({ name, text, instruct, wavBuffer });
-    if (r2 && r2.ok) log('   (OmniVoice 서버가 구버전이라 보이스디자인 서버로 저장했습니다)');
-    return r2;
-  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  // core/ref-voice.saveToLibrary 한 곳(CLI 와 같다) — OmniVoice /save-ref-voice → 구버전이면 보이스디자인 /save-voice
+  const r = await require('./core/ref-voice').saveToLibrary({ name, text, instruct, wavBuffer });
+  if (r && r.ok && r.via === 'voicedesign') log('   (OmniVoice 서버가 구버전이라 보이스디자인 서버로 저장했습니다)');
+  return r;
 }
 // 이 PC 에만 있는 참조음성을 서버 공용 라이브러리로 올린다. 반환: 올린 개수.
 //   🔴 serverNames 가 null(=목록 조회 실패)이면 **아무것도 올리지 않는다**(2026-08-22).
@@ -1666,19 +1658,8 @@ ipcMain.handle('qwen-design-stop', async () => {
   S.voiceDesignActive = false;
   return await QD.stop(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
 });
-/** 두 글이 글자 기준으로 얼마나 같은가(0~1) — 문장부호·공백·대소문자 무시, 편집 거리. 받아쓰기 확인용. */
-function textMatchRatio(a, b) {
-  const n = (s) => [...String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')];
-  const x = n(a), y = n(b);
-  if (!x.length) return 0;
-  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= x.length; i++) {
-    const cur = [i];
-    for (let j = 1; j <= y.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
-    prev = cur;
-  }
-  return Math.max(0, 1 - prev[y.length] / x.length);
-}
+// 🎙 받아쓰기 일치율·자르기 규칙·라이브러리 등록 = core/ref-voice 한 곳(참조음성 만들기 CLI tools/ref-voice.js 와 같은 함수 · v0.6.99)
+const { textMatchRatio } = require('./core/ref-voice');
 ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
   const instruct = (args.instruct || '').trim();
   const text = (args.text || '').trim() || '안녕하세요. 이 목소리로 이야기를 들려드리겠습니다.';
@@ -1707,7 +1688,7 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
       const WS = require('./core/wav-slice');
       durationSec = WS.parseWav(r.buffer).durationSec;
       // 🌏 외국어는 끝을 문장 사이 쉼에서 자른다(낱말 한가운데를 베면 남은 글자가 새 문장 앞에 샌다)
-      suggest = (lang !== 'Korean' && WS.suggestPauseRange(r.buffer)) || WS.suggestRange(r.buffer);
+      suggest = require('./core/ref-voice').cutRange(r.buffer, lang);
     } catch (e) { log('⚠ 파형 분석 실패(슬라이스 기본값 없음): ' + String((e && e.message) || e)); }
     // 🌏 외국어 목소리는 받아쓰기로 확인해 알려 준다 — 로이가 베트남어·일본어를 귀로 판정하기 어렵다(2026-09-26).
     //   참조음성이 잘못 읽혔으면 그걸로 만드는 모든 문장이 흔들린다. 실패해도 생성 자체는 성공(확인만 못 한 것).
@@ -1728,11 +1709,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
   let name = String(args.filename || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\.wav$/i, '').trim();
   if (!name) return { ok: false, error: '파일명을 입력하세요' };
   try {
-    const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
-    fs.mkdirSync(dir, { recursive: true });
-    let base = name, i = 2;
-    while (fs.existsSync(path.join(dir, base + '.wav'))) { base = name + '_' + i; i++; }  // 같은 이름 있으면 _2, _3…
-    const wavPath = path.join(dir, base + '.wav');
+    const RV = require('./core/ref-voice');
     // ── 슬라이스 ── 지정 구간만 잘라 저장(무손실). 보이스디자인 음성은 **끝이 서서히 작아지므로**
     //   그 구간이 참조음성에 들어가면 합성 문장 끝이 계속 끊기는 느낌이 된다(로이 2026-08-14).
     //   ⚠ 잘라내면 실제로 들리는 말이 달라지므로 **참조텍스트도 함께 바뀌어야** 한다 → args.text 를 쓴다.
@@ -1759,8 +1736,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
         else log('   ⚠ 잘라낸 구간을 받아쓰지 못했습니다 — 입력한 참조텍스트를 그대로 씁니다(끝 낱말이 잘렸다면 고쳐 주세요)');
       } catch (e) { log('   ⚠ 받아쓰기 실패: ' + String((e && e.message) || e)); }
     }
-    fs.writeFileSync(wavPath, outBuf);
-    fs.writeFileSync(path.join(dir, base + '.txt'), refText, 'utf8');  // 같은 이름 .txt = 참조텍스트
+    const { base, wavPath } = RV.saveLocal(name, outBuf, refText);   // 같은 이름 있으면 _2, _3… · 같은 이름 .txt = 참조텍스트
     log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)${cutLog}`);
     if (!refText) log('   ⚠ 참조텍스트가 비어 있습니다 — 음성 복제 품질이 떨어질 수 있습니다.');
     // 서버(메인 PC)의 공용 목소리 라이브러리에도 등록 — 나·아내가 만든 목소리를 한 곳에 모아 서로 쓸 수 있게.

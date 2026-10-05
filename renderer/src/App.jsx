@@ -351,7 +351,7 @@ function normOutTargetUi(v) { return v === 'whiteboard' || v === 'mp4' ? v : 'vr
 // 🌏 보이스디자인 언어별 기본 문장(약 10초 — 끝 감쇠를 잘라내고도 참조음성으로 쓸 5초가 남게)
 const VD_SAMPLE_TEXT = {
   Korean: '안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',
-  Japanese: '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',
+  Japanese: 'ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',   // 「昔々」로 시작하지 않는다 — Qwen3 ja 가 자주 잘못 읽고, 가나로 쓰면 받아쓰기 표기가 갈린다(2026-10-05 · core/ref-voice SAMPLE_TEXT 와 같아야 한다)
   vi: 'Ngày xửa ngày xưa, ở một ngôi làng nhỏ bên bờ sông, có một chàng trai nghèo nhưng rất tốt bụng. Mỗi sáng, anh dậy thật sớm và lên núi nhặt củi.',
 };
 
