@@ -139,10 +139,31 @@ function logoBox({ side = 'right', size = 0.12, imgRatio = 1, canvasW = 1920, ca
 /** 채널 설정 → 빌더 옵션(파일이 없으면 끔) */
 function logoOptsOf(preset, exists) {
   const p = preset || {};
-  if (!p.logoOn || !p.logoPath) return { enabled: false };
-  if (exists && !exists(p.logoPath)) return { enabled: false, missing: p.logoPath };
   const pct = Math.max(4, Math.min(40, isFinite(+p.logoSize) ? +p.logoSize : 12));
+  // 꺼져 있어도 그림·크기는 알려 둔다 — 대본마다 「로고 넣기」(logoOver)가 채널 그림·크기를 쓴다(v0.6.86)
+  if (!p.logoOn || !p.logoPath) return { enabled: false, path: p.logoPath || '', size: pct / 100 };
+  if (exists && !exists(p.logoPath)) return { enabled: false, missing: p.logoPath, path: p.logoPath, size: pct / 100 };
   return { enabled: true, path: p.logoPath, side: 'right', size: pct / 100 };   // 자리는 대본마다(pipeline 이 project.logoSide 로 바꾼다)
 }
+/**
+ * 🏷 이 대본에 실제로 얹을 로고(v0.6.86 · 로이 「채널 전체가 아니라 롱폼 큐에 올라온 것에만 일괄로」) — **한 곳**.
+ *   base = logoOptsOf(채널) · pr.logoOver = { on: true|false, path? } (없으면 채널 설정대로)
+ *   on:true = 채널이 꺼져 있어도 넣는다(그림 = over.path → 채널 그림) · on:false = 채널이 켜져 있어도 뺀다.
+ */
+function normLogoOver(o) {
+  if (!o || typeof o !== 'object' || typeof o.on !== 'boolean') return null;
+  const out = { on: o.on };
+  if (o.on && typeof o.path === 'string' && o.path.trim()) out.path = o.path.trim();
+  return out;
+}
+function effLogo(base, pr) {
+  const b = base || { enabled: false };
+  const o = normLogoOver(pr && pr.logoOver);
+  if (!o) return b;
+  if (!o.on) return { enabled: false, path: b.path || '', size: b.size };
+  const p = o.path || b.path || '';
+  if (!p) return { enabled: false, size: b.size };
+  return { enabled: true, path: p, side: 'right', size: b.size || 0.12, over: true };
+}
 
-module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, logoOptsOf, IMG_EXT, VID_EXT };
+module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, logoOptsOf, normLogoOver, effLogo, IMG_EXT, VID_EXT };

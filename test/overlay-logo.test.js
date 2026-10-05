@@ -129,6 +129,24 @@ const pr0 = () => P.parseScriptText('# t\n## 장\n### 하나\n첫째 문장입�
       ok(isG(px(raw, cx, cy)) && !isG(px(raw, rx, ry)), `🔑 MP4 에서도 옮긴 자리에 로고 · 오른쪽 위엔 없다 (${JSON.stringify([px(raw, cx, cy), px(raw, rx, ry)])})`); }
     delete pr.logoPos;
 
+    console.log('\n[4a2] 🏷 대본 로고 넣기/빼기(logoOver · 큐 일괄 v0.6.86) — effLogo 한 곳');
+    { const off = OL.logoOptsOf({ logoOn: false, logoPath: logo, logoSize: 20 });
+      ok(!off.enabled && off.path === logo && Math.abs(off.size - 0.2) < 1e-9, '채널이 꺼져 있어도 그림·크기는 알려 둔다');
+      const e1 = OL.effLogo(off, { logoOver: { on: true } }); ok(e1.enabled && e1.path === logo && Math.abs(e1.size - 0.2) < 1e-9, '넣기 + 그림 없음 = 채널 그림·크기');
+      const e2 = OL.effLogo(OL.logoOptsOf({ logoOn: true, logoPath: logo }), { logoOver: { on: false } }); ok(!e2.enabled, '채널이 켜져 있어도 빼기 = 없음');
+      const e3 = OL.effLogo(off, { logoOver: { on: true, path: 'D:/x.png' } }); ok(e3.enabled && e3.path === 'D:/x.png', '넣기 + 그림 = 그 그림');
+      ok(OL.effLogo(off, {}) === off && OL.normLogoOver({ on: 'y' }) === null, '덮어쓰기 없음·틀린 값 = 채널 그대로'); }
+    pr.logoOver = { on: true }; pr.overlays = [];
+    const vrewQ = path.join(tmp, 'q.vrew');
+    await P.buildProjectVrew(pr, vrewQ, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 }, logo: OL.logoOptsOf({ logoOn: false, logoPath: logo, logoSize: 12 }) }, () => {}, 20, 1);
+    ok(Object.values(JSON.parse(new AdmZip(vrewQ).readAsText('project.json')).props.tracks).some((t) => t.zIndex === 2000), '🔑 채널 로고 꺼짐 + 이 대본 「넣기」 = .vrew 에 로고 트랙');
+    pr.logoOver = { on: false };
+    const vrewQ2 = path.join(tmp, 'q2.vrew');
+    await P.buildProjectVrew(pr, vrewQ2, { captionStyle: { size: '60', align: 'center', yAlign: 'bottom', yOffset: -0.125 }, logo: OL.logoOptsOf({ logoOn: true, logoPath: logo, logoSize: 12 }) }, () => {}, 20, 1);
+    ok(!Object.values(JSON.parse(new AdmZip(vrewQ2).readAsText('project.json')).props.tracks).some((t) => t.zIndex === 2000), '🔑 채널 로고 켜짐 + 이 대본 「빼기」 = 로고 트랙 없음');
+    ok(P.vrewInputsOf ? JSON.stringify(P.vrewInputsOf(pr, { logo: OL.logoOptsOf({ logoOn: true, logoPath: logo }) }) || {}).indexOf(logo) < 0 : true, '빌드 지문 입력에도 「빼기」가 반영된다(로고 없음)');
+    delete pr.logoOver;
+
     console.log('\n[4b] 🎵 오디오 1회 재생(v0.5.59) — 반복하지 않는다 · 작업본에 남는다');
     pr.overlays = [{ id: 'a1', file: tone, kind: 'audio', volume: 100, once: true, ...OL.idsFromOrds(pr, 2, 3) }];
     const snapO = OL.toSnap(pr);

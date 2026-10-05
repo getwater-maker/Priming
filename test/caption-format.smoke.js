@@ -41,6 +41,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     win.on('pageerror', (e) => errors.push(String(e)));
     await win.waitForSelector('h1', { timeout: 20000 });
+    // 🎯 v0.6.86 — 서식 기본 범위가 「모든 자막」이 됐다. 이 테스트는 고른 줄만 바뀌는지 보는 것이라 「이 클립만」으로 둔다(기본 범위는 caption-scope.smoke)
+    await win.evaluate(() => { try { localStorage.setItem('pm.capScope', 'clip'); } catch (_) {} });
     // 임시 채널 — 앞선 실행 잔재를 지우고 새로 만들어 헤더에서 고른다(채널 위치 = 아래·왼쪽·-0.125)
     await win.evaluate(async (name) => {
       const ps = (await window.api.listPresets()) || [];
@@ -148,21 +150,21 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     // [P] 📐 줄별 위치·정렬 — 01 줄만 오른쪽 · 위
     await nos.nth(0).click();
     await win.waitForSelector('[data-testid=cf-bar]:not(.idle)', { timeout: 3000 });
-    ok(await win.locator('[data-testid=cf-posh] button[title="가로 왼쪽 정렬"].on').count() === 1, '처음 위치 = 채널 위치(왼쪽 정렬)');
-    await win.click('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"]');
-    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on', { timeout: 5000 });
+    ok(await win.locator('[data-testid=cf-posh] button[title="화면 왼쪽"].on').count() === 1, '처음 위치 = 채널 위치(왼쪽 정렬)');
+    await win.click('[data-testid=cf-posh] button[title="화면 오른쪽"]');
+    await win.waitForSelector('[data-testid=cf-posh] button[title="화면 오른쪽"].on', { timeout: 5000 });
     ok(true, '가로 ⇥ 를 누르자 이 줄이 오른쪽 정렬');
-    await win.click('[data-testid=cf-posv] button[title="세로 위"]');
-    await win.waitForSelector('[data-testid=cf-posv] button[title="세로 위"].on', { timeout: 5000 });
+    await win.click('[data-testid=cf-posv] button[title="화면 위"]');
+    await win.waitForSelector('[data-testid=cf-posv] button[title="화면 위"].on', { timeout: 5000 });
     ok(await win.locator('[data-testid=cf-posv] input').inputValue() === '50', `세로 위를 누르면 위 기본 위치(0.125 = 50칸) — ${await win.locator('[data-testid=cf-posv] input').inputValue()}`);
     await win.locator('[data-testid=cf-posh] input').fill('40');
     await win.waitForTimeout(600);
     ok(await win.locator('[data-testid=cf-posh] input').inputValue() === '40', '가로 미세 40칸(0.1) 입력');
     await nos.nth(1).click();
-    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 왼쪽 정렬"].on', { timeout: 3000 });
+    await win.waitForSelector('[data-testid=cf-posh] button[title="화면 왼쪽"].on', { timeout: 3000 });
     ok(true, '🔑 다른 줄(02)은 채널 위치(왼쪽) 그대로');
     await nos.nth(0).click();
-    await win.waitForSelector('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on', { timeout: 3000 });
+    await win.waitForSelector('[data-testid=cf-posh] button[title="화면 오른쪽"].on', { timeout: 3000 });
     // [S] 💾 자막 서식 저장 → 채널 기본값
     await win.click('[data-testid=cf-savedef]');
     await win.waitForTimeout(900);
@@ -172,7 +174,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     ok(!!cap.fontColor && !!cap.font && String(cap.size) === '100', `서식도 함께 저장(글꼴 ${cap.font} · 크기 ${cap.size})`);
     await win.keyboard.press('Escape');
     await win.waitForSelector('[data-testid=cf-bar].idle', { timeout: 3000 });
-    ok(await win.locator('[data-testid=cf-posh] button[title="가로 오른쪽 정렬"].on').count() === 1, '저장 뒤 헤더(채널 위치)도 새 값 — 고른 게 없어도 오른쪽');
+    ok(await win.locator('[data-testid=cf-posh] button[title="화면 오른쪽"].on').count() === 1, '저장 뒤 헤더(채널 위치)도 새 값 — 고른 게 없어도 오른쪽');
 
     // [8] 문장을 고쳐도 서식이 남는다(오타 고치기)
     // 🧩 v0.5.44 — 상세 보기는 자막 줄(🗨 칸)을 눌러 **그 줄 글자만** 같은 모양 그대로 고친다(짧은 문장이라 줄 = 문장)

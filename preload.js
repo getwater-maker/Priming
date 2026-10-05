@@ -221,7 +221,8 @@ contextBridge.exposeInMainWorld('api', {
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),
   videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
-  setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),   // 🏷 끌어 옮긴 로고 자리(v0.6.85)
+  setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),
+  setQueueLogo: (args) => ipcRenderer.invoke('set-queue-logo', args),   // 🏷 롱폼 큐 대본 모두에 로고 넣기/빼기(v0.6.86)   // 🏷 끌어 옮긴 로고 자리(v0.6.85)
   bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
   relinkWork: () => ipcRenderer.invoke('relink-work'),

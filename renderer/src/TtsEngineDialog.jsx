@@ -292,6 +292,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     setBusy('');
     if (!r || !r.ok) { setMsg('❌ ' + ((r && r.error) || '추가 실패')); return; }
     setVoices((x) => ({ ...x, elevenlabs: r.voices }));
+    // 🙂 라이브러리 카드에 넣은 얼굴이 새 목소리로 따라온다(main 이 파일을 옮겨 준다 · v0.6.86)
+    if (r.face) setFaces((fc) => ({ ...fc, elevenlabs: { ...(fc.elevenlabs || {}), [r.voiceId]: r.face } }));
     patchDraft((d) => ({ ...d, id: 'elevenlabs', cfg: { ...d.cfg, elevenlabs: { ...(d.cfg.elevenlabs || {}), model, voice: r.voiceId } } }));
     setElSrc('mine');
     setMsg(`✅ 「${v.name}」 을 내 목록에 추가하고 「${target ? tgtWho(target) : chan + ' 채널'}」 목소리로 골랐습니다 — 저장을 누르세요`);

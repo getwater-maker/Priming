@@ -50,6 +50,9 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     win.on('pageerror', (e) => errors.push(String(e)));
     win.on('dialog', (d) => d.accept());
     await win.waitForSelector('h1', { timeout: 20000 });
+    // 🎯 v0.6.86 — 서식 기본 범위가 「모든 자막」이 됐다. 이 테스트는 한 줄을 꾸민 뒤 ⤢ 전체 적용을 보는 것이라 「이 클립만」으로 둔다
+    await win.evaluate(() => { try { localStorage.setItem('pm.capScope', 'clip'); } catch (_) {} });
+    await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });   // 범위는 켤 때 읽는다
     await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1600, 950); });
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.ribbon button:has-text("열기")');

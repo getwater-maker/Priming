@@ -5413,6 +5413,31 @@ ipcMain.handle('el-shared-voices', async (_e, { language, gender } = {}) => {
     return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// 목소리 id 가 바뀔 때(라이브러리 → 내 목록) 얼굴·샘플을 새 id 로 복사 — 새 id 에 이미 있으면 그대로 둔다(덮어쓰지 않는다)
+function _carryVoiceAssets(engine, fromId, toId) {
+  const out = { face: null, samples: 0 };
+  if (!fromId || !toId || fromId === toId) return out;
+  try {
+    const ix = _faceIndex(engine); const dir = path.join(VOICE_FACE_DIR(), String(engine));
+    if (ix[fromId] && !ix[toId] && fs.existsSync(path.join(dir, ix[fromId]))) {
+      const dst = _voiceFileKey(toId) + path.extname(ix[fromId]).toLowerCase();
+      fs.copyFileSync(path.join(dir, ix[fromId]), path.join(dir, dst));
+      _setFace(engine, toId, dst);
+      out.face = { path: path.join(dir, dst), v: String(Date.now()) };
+    }
+  } catch (e) { log('⚠ 얼굴 옮기기 실패: ' + e.message); }
+  try {
+    const idx = _sampleIndex(engine); let n = 0;
+    for (const [k, v] of Object.entries(idx)) {
+      const [m, vid, st] = k.split('|');
+      if (vid !== fromId) continue;
+      const nk = _sampleKey(m, toId, st);
+      if (!idx[nk] && v && v.file && fs.existsSync(path.join(TTS_SAMPLE_DIR(), engine, v.file))) { idx[nk] = { ...v }; n++; }   // 같은 소리 파일을 가리킨다(복사 불필요)
+    }
+    if (n) { fs.writeFileSync(_sampleIndexPath(engine), JSON.stringify(idx)); out.samples = n; }
+  } catch (e) { log('⚠ 샘플 옮기기 실패: ' + e.message); }
+  return out;
+}
 ipcMain.handle('el-add-shared', async (_e, { ownerId, voiceId, name } = {}) => {
   try {
     const EL = require('./tts/providers/elevenlabs-provider');
@@ -5421,7 +5446,9 @@ ipcMain.handle('el-add-shared', async (_e, { ownerId, voiceId, name } = {}) => {
     const newId = await EL.addShared(k, ownerId, voiceId, name);
     const mine = await EL.listVoices(k); _writeVoiceCache('elevenlabs', mine);
     log(`📚 ElevenLabs 라이브러리 목소리 「${name}」 → 내 목록에 추가 (${newId})`);
-    return { ok: true, voiceId: newId, voices: mine };
+    // 🙂 라이브러리 카드에 넣은 얼굴·만든 샘플을 새 목소리 id 로 따라오게(v0.6.86 · 로이) — 추가하면 id 가 바뀐다
+    const carried = _carryVoiceAssets('elevenlabs', voiceId, newId);
+    return { ok: true, voiceId: newId, voices: mine, face: carried.face };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 // 🔈 샘플 듣기 — ① 저장된 샘플이 있으면 그것(무료) ② 없으면 그 목소리로 한 문장 만들어 **저장**(다음부터 무료)
@@ -5837,6 +5864,7 @@ function buildSnapshot(ctx) {
       overlays: require('./core/overlay-layers').toSnap(pr),   // ➕ 삽입(문장 순번)
       logoSide: pr.logoSide || null,   // 🏷 이 대본 로고 자리
       logoPos: pr.logoPos || null,     // 🏷 끌어 옮긴 로고 자리 {x,y}
+      logoOver: pr.logoOver || null,   // 🏷 이 대본 로고 넣기/빼기(큐 일괄)
       format: pr.format || X.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -6038,6 +6066,7 @@ function projectsFromSnapshot(snap) {
     require('./core/overlay-layers').fromSnap(proj, ps.overlays);   // ➕ 삽입
     if (ps.logoSide === 'left') proj.logoSide = 'left';
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) proj.logoPos = lp; }   // 🏷 끌어 옮긴 자리
+    { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) proj.logoOver = lo; }   // 🏷 로고 넣기/빼기
     if (readerNotes.length) proj.readerNotes = readerNotes;
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
@@ -6060,6 +6089,7 @@ function overlaySnapshot(parsed, snap) {
     }
     if (ps.logoSide === 'left') pr.logoSide = 'left';   // 🏷 로고 자리
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) pr.logoPos = lp; }   // 🏷 끌어 옮긴 자리
+    { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) pr.logoOver = lo; }   // 🏷 로고 넣기/빼기
     if (ps.ttsVoice) pr.ttsVoice = ps.ttsVoice;         // 🎙 대본 목소리(대본이 바뀌어도 이 대본의 선택은 그대로)
     if (ps.spkVoices) pr.spkVoices = ps.spkVoices;       // 🎙 이 대본 화자 목소리(화자 이름 기준 — 문장이 바뀌어도 그대로)
     // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
@@ -7432,7 +7462,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -7475,6 +7505,7 @@ function _restoreState(st) {
     pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
     pr.logoSide = sp.logoSide || undefined;
     if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
+    if (sp.logoOver) pr.logoOver = { ...sp.logoOver }; else delete pr.logoOver;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -7809,6 +7840,31 @@ ipcMain.handle('set-logo-side', (_e, args = {}) => {
   storeActive(); pushDtoUpdate();
   log('🏷 ' + prLabel(pr) + ' 로고 위치 → ' + (pr.logoSide === 'left' ? '왼쪽 위' : '오른쪽 위'));
   return P.toDTO(S.parsed);
+});
+// 🏷 롱폼 큐의 대본 모두에 로고 넣기/빼기(v0.6.86 · 로이 「채널 전체가 아니라 롱폼 큐에 올라와 있는 것에서만」).
+//   mode: 'on'(넣기 · path 없으면 채널 그림) | 'off'(빼기) | 'chan'(채널 설정대로 — 덮어쓰기 지움). 채널 설정 파일은 바꾸지 않는다.
+//   대본마다 pr.logoOver → 작업본(.smproj)에 쓴다(활성 아닌 대본도). 크기·자리는 그대로(채널 크기 · 대본별 ↗/↖/끌어 옮긴 자리).
+ipcMain.handle('set-queue-logo', (_e, args = {}) => {
+  const mode = args.mode === 'on' ? 'on' : args.mode === 'off' ? 'off' : 'chan';
+  const pth = typeof args.path === 'string' ? args.path.trim() : '';
+  if (mode === 'on' && pth && !fs.existsSync(pth)) return { ok: false, error: '그림 파일을 찾지 못했습니다: ' + pth };
+  storeActive();
+  const items = S.modes.longform.items.filter((it) => it.parsed && it.parsed.kind !== 'book');
+  if (!items.length) return { ok: false, error: '롱폼 큐에 대본이 없습니다.' };
+  if (mode === 'on' && !pth) {
+    const noPic = items.filter((it) => { const p = P.getPreset((it.settings && it.settings.presetName) || null) || S.preset || {}; return !p.logoPath; });
+    if (noPic.length) return { ok: false, needPath: true, error: '채널에 로고 그림이 없는 대본이 있습니다 — 넣을 그림을 고르세요.' };
+  }
+  const over = mode === 'chan' ? null : (mode === 'on' ? (pth ? { on: true, path: pth } : { on: true }) : { on: false });
+  const names = [];
+  for (const it of items) {
+    for (const pr of it.parsed.projects) { if (over) pr.logoOver = { ...over }; else delete pr.logoOver; }
+    writeSnapshotSync({ parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot });
+    names.push(path.basename(it.scriptPath || '').replace(/\.md$/i, ''));
+  }
+  log(`🏷 롱폼 큐 ${items.length}개 대본 로고 → ${mode === 'on' ? '넣기' + (pth ? ' (' + path.basename(pth) + ')' : ' (채널 그림)') : mode === 'off' ? '빼기' : '채널 설정대로'} — ${names.join(', ')} · 채널 설정은 그대로`);
+  pushDtoUpdate(); syncSnapshotNow();
+  return { ok: true, count: items.length, dto: S.parsed ? P.toDTO(S.parsed) : null };
 });
 // 🏷 로고를 ① 칸에서 끌어 옮긴 자리(v0.6.85 · 로이 「지금 기능은 그대로 두고 마우스로 자유롭게」) — 대본마다 pr.logoPos {x,y}(캔버스 0..1 · 왼쪽 위 모서리).
 //   .vrew·MP4 는 logoBox(pos) 한 곳에서 같은 자리를 쓴다 · pos=null = 위 ↗/↖ 자리로 돌아감 · Ctrl+Z 되돌리기.

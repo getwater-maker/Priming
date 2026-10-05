@@ -559,9 +559,9 @@ header.vhead{padding:0;gap:0}
 .pane-split:hover{background:var(--accent)}
 main.pane2{min-width:0}
 .cf-side.pane3{position:static;top:auto;right:auto;bottom:auto;width:auto;flex:0 0 330px;z-index:auto;padding:10px 10px 10px 0;box-sizing:border-box;overflow:hidden}
-.clipbar{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.clipbar{display:flex;align-items:center;gap:8px;margin:0 0 8px;flex-wrap:wrap}
 .seg{display:inline-flex;border:1px solid var(--accent);border-radius:8px;overflow:hidden}
-.seg button{border:0;border-radius:0;background:#fff;color:var(--strong);padding:4px 12px;font-size:12.5px}
+.seg button{border:0;border-radius:0;background:#fff;color:var(--strong);padding:4px 12px;font-size:12.5px;white-space:nowrap}
 .seg button.on{background:var(--accent);color:#fff}
 .clipinfo{display:flex;align-items:center;gap:6px;color:#e8dcc8;font-size:12px;flex-wrap:wrap;background:#2b2620;border-radius:8px;padding:6px 9px}
 .clipinfo .meta{color:#bcae98}
@@ -653,7 +653,8 @@ main.pane2{min-width:0}
 .stage-edit > *{pointer-events:auto}
 .stage-mini{position:absolute}
 .cf-mini{background:#1b1b1b;border:1px solid #444;border-radius:10px;padding:5px 7px;display:flex;flex-direction:column;gap:4px;box-shadow:0 6px 18px rgba(0,0,0,.5)}
-.cf-mini-r{display:flex;align-items:center;gap:4px}
+.cf-mini-r{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.cf-mini-r > *{flex:0 0 auto;white-space:nowrap}   /* 좁은 ① 칸에서 「테두리」가 세로로 깨지지 않게 — 줄을 바꾼다(v0.6.86) */
 .cf-mini button{padding:3px 7px;font-size:12px}
 .cf-mini button.ghost{color:#eee;border-color:#555}
 .cf-mini select{padding:2px 4px;font-size:12px;max-width:150px}
@@ -943,3 +944,18 @@ body:has(.modal-bg.show) .clip-tb{display:none}
 .bkpf-row{display:flex;gap:6px;align-items:flex-start;padding:2px 0}
 .bkpf-row.st-error .bkchk-t{color:#b3261e}
 .bkpf-row.st-warn .bkchk-t{color:#9a6a00}
+
+/* 🎯 자막 서식 적용 범위(v0.6.86) — 🌐 모든 자막(기본) / 🎯 이 클립만 */
+.cf-scope{white-space:nowrap;font-weight:700}
+.cf-scope.on{background:#2563eb;color:#fff;border-color:#2563eb}
+.cf-mini .cf-scope{padding:2px 8px;font-size:12px}
+.cf-minil{font-size:11px;color:#bbb;margin-right:1px}
+.cf-scope-row{display:flex;align-items:center;gap:8px}
+/* ① 칸 자막 끌어 옮기기(v0.6.86) */
+#stageCap.capdrag{cursor:move}
+#stageCap.capdragging{outline:2px dashed rgba(37,99,235,.9);outline-offset:4px}
+/* ② 목록 자막 글자 = 굵게(v0.6.86 · 로이 「눈에 잘 들어오게」) */
+.clip-r2 .clip-cap{font-weight:700}
+/* ③ 칸(고급·효과)을 열면 ① 칸이 줄어든다 — ② 목록이 좁아져 버튼이 세로로 깨지던 것(v0.6.86) */
+#body.ws .pane1{flex-shrink:1}
+#body.ws main.pane2{min-width:640px}

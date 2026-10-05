@@ -1536,7 +1536,31 @@ export default function App() {
   // 🏷 끌어 옮긴 자리(v0.6.85) — 대본마다 logoPos {x,y} · logoDrag = 끄는 중의 자리(놓으면 main 에 저장)
   const [logoDrag, setLogoDrag] = useState(null);
   const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
-  const stageLogo = logoCfg.on && logoCfg.path ? { ...logoCfg, side: curLogoSide(), pos: logoDrag || curLogoPos() } : null;
+  // 🏷 이 대본 로고 넣기/빼기(logoOver · 큐 일괄 v0.6.86) — 있으면 채널 켜기보다 이긴다(main overlay-layers.effLogo 와 같은 규칙)
+  const curLogoOver = () => { const pj = curProject(); return (pj && pj.logoOver) || null; };
+  const effLogoCfg = () => {
+    const o = curLogoOver();
+    if (o) { if (!o.on) return null; const p = o.path || logoCfg.path; return p ? { ...logoCfg, on: true, path: p } : null; }
+    return logoCfg.on && logoCfg.path ? logoCfg : null;
+  };
+  const stageLogo = (() => { const b = effLogoCfg(); return b ? { ...b, side: curLogoSide(), pos: logoDrag || curLogoPos() } : null; })();
+  // 🏷 롱폼 큐의 대본 모두에 로고 넣기/빼기 — 채널 설정(⚙ 채널편집)은 그대로
+  async function setQueueLogo(mode) {
+    const n = (queue && queue.longform && queue.longform.items.length) || 0;
+    if (!n) { setStatus('⚠ 롱폼 큐에 대본이 없습니다'); return; }
+    const what = mode === 'on' ? '로고를 넣습니다' : mode === 'off' ? '로고를 뺍니다' : '채널 설정대로 되돌립니다';
+    if (!uiConfirm(`롱폼 큐에 올라온 대본 ${n}개 모두 ${what}.\n채널 설정(⚙ 채널편집의 로고)은 바뀌지 않습니다 — 이 대본들에만 적용됩니다.\n\n계속할까요?`)) return;
+    try {
+      let r = await api.setQueueLogo({ mode });
+      if (r && r.needPath) {
+        const pth = await api.pickFile({ filters: [{ name: '로고 그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+        if (!pth) { setStatus('로고 그림을 고르지 않아 취소했습니다'); return; }
+        r = await api.setQueueLogo({ mode, path: pth });
+      }
+      if (r && r.ok) { if (r.dto) setDto(r.dto); setStatus(`🏷 롱폼 큐 대본 ${r.count}개 — ${what.replace(/니다$/, '었습니다').replace('넣습었', '넣었').replace('뺍었', '뺐').replace('되돌립었', '되돌렸')} (채널 설정은 그대로)`); }
+      else setStatus('⚠ ' + ((r && r.error) || '로고를 바꾸지 못했습니다'));
+    } catch (e) { logline('큐 로고 오류: ' + e.message); }
+  }
   // ① 칸 로고 끌기 — 놓은 자리가 기본 자리(↗/↖) 근처면 그 자리로 붙는다(= 위치 칸 「오른쪽 위/왼쪽 위」)
   function onLogoDown(ev) {
     if (ev.button !== 0) return;
@@ -1981,16 +2005,29 @@ export default function App() {
       if (l) userCursor({ shortsNum, n: l.n }); pickMenu('format'); }
     setCapSel({ shortsNum, mode: 'chars', items: [{ groupNum, sentIdx, from: range.from, to: range.to, n: -1 }] });
   }
-  async function applyCapFmt(patch) {
-    if (!capSel) return;
+  // 🎯 서식·위치 적용 범위(v0.6.86 · 로이 「수정한 자막 서식이 전체 적용되는 것이 기본」) — 'all' = 이 대본의 모든 자막(기본) · 'clip' = 고른 클립만
+  //   ⚠ 글자 일부(드래그로 고른 낱말)는 늘 그 글자만 — 「모든 자막」은 줄(클립)을 골랐을 때만
+  const [capScope, setCapScopeRaw] = useState(() => (lsGet('pm.capScope', 'all') === 'clip' ? 'clip' : 'all'));
+  const setCapScope = (v) => { const s = v === 'clip' ? 'clip' : 'all'; setCapScopeRaw(s); lsSet('pm.capScope', s); setStatus(s === 'clip' ? '🎯 이제 서식·위치는 고른 클립만 바뀝니다' : '🌐 이제 서식·위치는 이 대본의 모든 자막에 적용됩니다'); };
+  function capTargets(sel) {
+    if (capScope === 'all' && sel.mode === 'lines') {
+      const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sel.shortsNum) : null;
+      if (pr) { const out = []; for (const cu of pr.cuts) (cu.sentences || []).forEach((s, si) => { const L = String(s.text || '').length; if (L) out.push({ shortsNum: sel.shortsNum, groupNum: cu.num, sentIdx: si, from: 0, to: L }); }); if (out.length) return out; }
+    }
+    return sel.items.map((x) => ({ shortsNum: sel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to }));
+  }
+  async function applyCapFmt(patch, selArg) {
+    const capSel0 = selArg || capSel;
+    if (!capSel0) return;
     // 📐 세로 정렬만 바꿨으면 그 정렬의 세로 위치도 함께 정한다(채널이 같은 정렬이면 채널 위치 · 아니면 기본값) — 옛 세로 위치가 남아 엉뚱한 곳에 서지 않게
     if (patch && patch.posV && !('posY' in patch)) {
       const chan = capChanPos();
       patch = { ...patch, posY: chan.yAlign === patch.posV ? chan.yOffset : CF.POS_Y_DEFAULT[patch.posV] };
     }
     try {
-      const r = await api.setCaptionFormat({ targets: capSel.items.map((x) => ({ shortsNum: capSel.shortsNum, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), patch });
-      if (r && r.ok) { if (r.dto) setDto(r.dto); }
+      const targets = capTargets(capSel0);
+      const r = await api.setCaptionFormat({ targets, patch });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); if (targets.length > capSel0.items.length) setStatus(`🌐 모든 자막 ${r.count}문장에 적용 — 고른 클립만 바꾸려면 「🌐 모든 자막」을 눌러 🎯 이 클립만 (Ctrl+Z 되돌리기)`); }
       else setStatus('⚠ ' + ((r && r.error) || '서식을 바꾸지 못했습니다'));
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
   }
@@ -2391,7 +2428,37 @@ export default function App() {
   }
   /** ① 칸 자막을 누르면 — 그 자리에서 글자·서식을 고치는 팝업(Vrew). */
   const [stageEditBox, setStageEditBox] = useState(null);   // { left, top, width, height } — 열 때 잰 자막 자리(스테이지 기준 px)
+  // 📐 ① 칸 자막 끌어 옮기기(v0.6.86 · 로이 「마우스로 위치를 옮길 수도」) — 놓으면 posX/posY(화면 절반 = 1)로 저장(🎯 범위 그대로)
+  const capDragRef = useRef(null);
+  function onStageCapDown(ev) {
+    if (!wsOn || playerOpen || sentEdit || ev.button !== 0) return;
+    if (!(ev.target.closest && ev.target.closest('.cf-stageline'))) return;
+    const cap = stageCapRef.current, st = cap && cap.parentElement; if (!cap || !st || !cursor) return;
+    ev.stopPropagation();
+    const sr = st.getBoundingClientRect(); const x0 = ev.clientX, y0 = ev.clientY;
+    const d = { moved: false, dx: 0, dy: 0 }; capDragRef.current = d;
+    const move = (e) => {
+      d.dx = e.clientX - x0; d.dy = e.clientY - y0;
+      if (!d.moved && Math.abs(d.dx) + Math.abs(d.dy) < 5) return;
+      d.moved = true; cap.classList.add('capdragging'); cap.style.translate = `${d.dx}px ${d.dy}px`;
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      cap.classList.remove('capdragging'); cap.style.translate = '';
+      if (!d.moved) { capDragRef.current = null; return; }
+      setTimeout(() => { capDragRef.current = null; }, 0);   // 이어 오는 click 이 편집칸을 열지 않게
+      // 고른 줄 — 줄을 골라 둔 상태면 그 줄들, 아니면 ① 칸에 보이는 줄(커서)
+      let sel = capSel && capSel.mode === 'lines' ? capSel : null;
+      if (!sel) { const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n); if (!l) return; sel = { shortsNum: cursor.shortsNum, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n }; setCapSel(sel); }
+      const it = sel.items[0]; const s = capSentence(sel.shortsNum, it.groupNum, it.sentIdx);
+      const p0 = s && s.spans ? CF.linePos(capChanPos(), CF.lineProps(s.spans, { from: it.from, to: it.to }, {}, String(s.text || '').length)) : capChanPos();
+      const cl = (v) => Math.max(-1, Math.min(1, Math.round(v * 10000) / 10000));
+      applyCapFmt({ posV: p0.yAlign, posX: cl((Number(p0.xOffset) || 0) + d.dx / (sr.width / 2)), posY: cl((Number(p0.yOffset) || 0) + d.dy / (sr.height / 2)) }, sel);
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
   function openStageEdit() {
+    if (capDragRef.current) return;   // 방금 끌어 옮겼다 — 편집칸을 열지 않는다
     if (playerOpen || sentEdit) return;
     const cap = stageCapRef.current, st = cap && cap.parentElement; if (!cap || !st) return;
     const ln = cap.querySelector('.cf-stageline') || cap;
@@ -3876,7 +3943,8 @@ export default function App() {
       )}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
-      <div id="stageCap" ref={stageCapRef} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기' : undefined}
+      <div id="stageCap" ref={stageCapRef} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
+        onMouseDown={onStageCapDown}
         onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
       {wsOn && sentEdit && sentEdit.where === 'stage' && stageEditBox && (() => {
         // 🧩 Vrew 팝업 — 위: 작은 서식 막대 · 아래: 자막 자리 그대로의 글자칸(초록 테두리). Enter/밖 누르기 = 저장 · ↑↓ 다음 클립 · Esc 취소
@@ -3887,7 +3955,7 @@ export default function App() {
         return (
           <div className="stage-edit" data-testid="stage-edit">
             <div className="stage-mini" style={{ left, bottom: stageEditBox.stageH - stageEditBox.top + 10 }}>
-              <CaptionMiniBar fmt={f} pos={capSelPos()} onPatch={applyCapFmt} onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))} panel={capPanel} />
+              <CaptionMiniBar fmt={f} pos={capSelPos()} onPatch={(p) => applyCapFmt(p)} onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))} panel={capPanel} scope={capScope} onScope={setCapScope} />
             </div>
             <textarea className="stage-ta" rows={1} spellCheck={false} autoFocus data-testid="stage-ta"
               defaultValue={String(sentEdit.text || '').slice(sentEdit.line.from, sentEdit.line.to)}
@@ -4213,13 +4281,17 @@ export default function App() {
                   <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
                     title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"
                     value={logoCfg.size} onChange={(e) => setLogoSize(e.target.value)} onBlur={() => { if (!(Number(logoCfg.size) >= 4)) setLogoSize(12); }} /><span className="meta">%</span>
-                  {!stageLogo && <span className="meta" data-testid="logo-off">(이 채널 로고 꺼짐)</span>}
+                  {!stageLogo && <span className="meta" data-testid="logo-off">{curLogoOver() && !curLogoOver().on ? '(이 대본 로고 뺌)' : '(이 채널 로고 꺼짐)'}</span>}
+                  <select data-testid="logo-queue" disabled={!loaded || !isLf} value={(() => { const o = curLogoOver(); return !o ? 'chan' : o.on ? 'on' : 'off'; })()}
+                    title="🏷 롱폼 큐에 올라온 대본 모두에 로고 넣기·빼기 — 채널 설정(⚙ 채널편집의 로고)은 그대로 · 채널에 로고 그림이 없으면 그림을 고르라고 묻습니다"
+                    onChange={(e) => setQueueLogo(e.target.value)}>
+                    <option value="chan">큐 전체: 채널대로</option><option value="on">큐 전체: 로고 넣기</option><option value="off">큐 전체: 로고 빼기</option></select>
                 </span>
               </span>
             )}
             {menu === 'format' && (
               <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
-                onPatch={applyCapFmt} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll}
+                onPatch={(p) => applyCapFmt(p)} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll} scope={capScope} onScope={setCapScope}
                 onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
                 onDone={() => { setCapSel(null); setCapPanel(null); }}
                 onSaveDefault={saveCapDefault} />
@@ -4406,7 +4478,7 @@ export default function App() {
         {capSel && capPanel && !noProduction && (
           <aside className="cf-side pane3" data-testid="cf-side">
             {capPanel === 'fmt'
-              ? <CaptionFormatPanel value={capSelFmt()} onChange={applyCapFmt} title={capSelLabel() + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} />
+              ? <CaptionFormatPanel value={capSelFmt()} onChange={(p) => applyCapFmt(p)} title={(capScope === 'all' && capSel.mode === 'lines' ? '모든 자막' : capSelLabel()) + ' 서식'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(null)} pos={capSelPos()} scope={capScope} onScope={setCapScope} />
               : <CaptionAnimPanel value={capSelFmt().anim} onChange={(a) => applyCapFmt({ anim: a })} title={capSelLabel() + ' 애니메이션'} onClose={() => setCapPanel(null)} onReset={() => clearCapFmt(['anim'])} />}
           </aside>
         )}

@@ -169,7 +169,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForSelector('[data-testid=cf-side].pane3', { timeout: 3000 });
     const p3 = await win.locator('[data-testid=cf-side]').boundingBox();
     const w2b = (await win.locator('main.pane2').boundingBox()).width;
-    ok(p3 && p3.x > p2.x && w2b < w2a - 200, `③ 칸이 오른쪽에 열리고 ② 가 그만큼 좁아진다(겹쳐 덮지 않는다) — ② ${Math.round(w2a)}→${Math.round(w2b)}px`);
+    // v0.6.86 — ③ 칸이 열리면 ① 칸이 줄고 ② 는 640px 아래로 좁아지지 않는다(좁아지면 버튼이 세로로 깨졌다 · 로이 캡처)
+    { const b2 = await win.locator('main.pane2').boundingBox(); const p1 = await win.locator('[data-testid=pane1]').boundingBox();
+      ok(p3 && p3.x >= b2.x + b2.width - 1 && w2b < w2a && w2b >= 630 && p1.width >= 319, `③ 칸이 오른쪽에 열리고 ② 는 겹치지 않고 좁아지되 640px 를 지킨다(① 이 줄어든다) — ② ${Math.round(w2a)}→${Math.round(w2b)}px · ① ${Math.round(p1.width)}px`); }
     await win.keyboard.press('Escape');
     await win.waitForSelector('[data-testid=cf-side]', { state: 'detached', timeout: 3000 });
     ok(true, 'Esc = ③ 닫힘');

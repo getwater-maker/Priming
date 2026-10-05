@@ -211,7 +211,7 @@ head('[9] 배선 — 저장·복원·편집·IPC·화면');
   ok(['setCaptionFormat', 'listCaptionFonts', 'captionFontData', 'addCaptionFont', 'getSavedCapFormats', 'setSavedCapFormats'].every((k) => PL.includes(k + ':')), 'preload 에 전부 있다');
   ok(/spans: \(s\.capSpans && s\.capSpans\.length\)/.test(read('core/pipeline.js')), '화면 DTO 에 문장 서식');
   const VB = read('vrew/vrew-builder.js');
-  ok(/CF\.lineRuns\(s\.text, s\.capSpans, rg, baseFmt\)/.test(VB) && /CF\.lineToVrewDelta\(runs, lp\.lineHeight\)/.test(VB) && /st\.assetEffectInfo = eff/.test(VB), '.vrew 빌더가 줄마다 구간·효과·배경을 쓴다');
+  ok(/CF\.lineRuns\(s\.text, s\.capSpans, rg, (bf|baseFmt)\)/.test(VB)   /* v0.5.76 부터 변수 이름 bf(언어별 기본 서식) */ && /CF\.lineToVrewDelta\(runs, lp\.lineHeight\)/.test(VB) && /st\.assetEffectInfo = eff/.test(VB), '.vrew 빌더가 줄마다 구간·효과·배경을 쓴다');
   const VR = read('core/vrew-render.js');
   ok(/CF\.vrewDeltaToRuns\(cap\.text\)/.test(VR) && /FONTS\.prepareFontsDir\(CAS\.fontsUsed/.test(VR) && /ctx\.capEvents/.test(VR), 'MP4 렌더러가 구간·효과·글꼴을 읽는다');
   const APP = read('renderer/src/App.jsx');

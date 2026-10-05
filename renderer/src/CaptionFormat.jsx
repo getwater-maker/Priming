@@ -187,6 +187,20 @@ function Toggle({ on, onChange, children, title }) {
 }
 
 const SIZES = [25, 50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
+// 📐 위치 미세조정 단위 — Vrew 슬라이더 1칸 = 0.0025(채널 편집의 「미세」와 같은 단위 · + = 아래/오른쪽)
+const POS_STEP = 0.0025;
+const posN = (v) => Math.round((Number(v) || 0) / POS_STEP);
+
+// 📐 화면 기준 위치 버튼(툴바·작은 막대·고급 패널 공통 · v0.6.86 「화면 기준 왼쪽·가운데·오른쪽」)
+const POS_HS = [['start', '⇤', '화면 왼쪽'], ['center', '↔', '화면 가운데'], ['end', '⇥', '화면 오른쪽']];
+const POS_VS = [['top', '⤒', '화면 위'], ['middle', '↕', '화면 가운데(세로)'], ['bottom', '⤓', '화면 아래']];
+/** 🎯 적용 범위 버튼 — 끔(기본) = 이 대본의 **모든 자막** · 켬 = 고른 클립만(v0.6.86 · 로이 「수정한 서식이 전체 적용되는 것이 기본」) */
+function ScopeBtn({ scope, onScope }) {
+  if (!onScope) return null;
+  const clip = scope === 'clip';
+  return <button type="button" data-testid="cf-scope" className={'ghost cf-scope' + (clip ? ' on' : '')} onMouseDown={(e) => e.preventDefault()} onClick={() => onScope(clip ? 'all' : 'clip')}
+    title={clip ? '지금은 고른 클립만 바뀝니다 — 누르면 다시 이 대본의 모든 자막에 적용' : '지금은 서식·위치가 이 대본의 모든 자막에 적용됩니다 — 누르면 고른 클립만 바뀝니다'}>{clip ? '🎯 이 클립만' : '🌐 모든 자막'}</button>;
+}
 
 // ── 고급 패널(서식 · 글꼴) ────────────────────────────────────────────────
 /**
@@ -194,7 +208,7 @@ const SIZES = [25, 50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300];
  * @param onChange  (patch) => void — 바뀐 키만
  * @param title     패널 제목(「채널 기본 서식」 · 「클립 6 서식」)
  */
-export function CaptionFormatPanel({ value, onChange, title, onClose, onReset }) {
+export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, pos, scope, onScope }) {
   const f = value || CF.normFmt({});
   const [tab, setTab] = useState('fmt');
   const { fonts, add } = useCaptionFonts();
@@ -220,6 +234,7 @@ export function CaptionFormatPanel({ value, onChange, title, onClose, onReset })
             }}>＋<br />현재 서식 저장</button>}
           </div>
         </div>
+        {onScope && <div className="cf-sec cf-scope-row"><span className="meta">적용 범위</span><ScopeBtn scope={scope} onScope={onScope} /></div>}
         <div className="cf-tabs"><button className={tab === 'fmt' ? 'on' : ''} onClick={() => setTab('fmt')}>서식</button><button className={tab === 'font' ? 'on' : ''} onClick={() => setTab('font')}>글꼴</button></div>
         {tab === 'font' ? (
           <div className="cf-sec" data-testid="cf-fontlist">
@@ -251,6 +266,15 @@ export function CaptionFormatPanel({ value, onChange, title, onClose, onReset })
                 <Toggle on={f.underline} onChange={(v) => set({ underline: v })} title="밑줄"><u>U</u></Toggle>
               </div>
             </div>
+            {pos && <div className="cf-sec" data-testid="cf-panel-pos">
+              <div className="cf-sech" title="① 칸에서 자막을 끌어 옮겨도 됩니다">📐 위치 <span className="meta">(화면 기준)</span></div>
+              <div className="cf-row"><span className="l">가로</span>
+                {POS_HS.map(([v, ic, t]) => <Toggle key={v} on={pos.align === v} onChange={() => set({ posH: v })} title={t}>{ic}</Toggle>)}
+                <span className="meta">미세</span><Num w={52} title="가로 미세 — 1칸 = 0.0025(화면 폭 절반 기준) · + = 오른쪽" value={posN(pos.xOffset)} min={-400} max={400} onChange={(v) => set({ posX: (v || 0) * POS_STEP })} /></div>
+              <div className="cf-row"><span className="l">세로</span>
+                {POS_VS.map(([v, ic, t]) => <Toggle key={v} on={pos.yAlign === v} onChange={() => set({ posV: v })} title={t}>{ic}</Toggle>)}
+                <span className="meta">미세</span><Num w={52} title="세로 위치 — 1칸 = 0.0025(화면 높이 절반 기준) · + = 아래" value={posN(pos.yOffset)} min={-400} max={400} onChange={(v) => set({ posV: pos.yAlign, posY: (v || 0) * POS_STEP })} /></div>
+            </div>}
             <div className="cf-sec">
               <div className="cf-sech">간격</div>
               <div className="cf-row"><span className="l">글자 간격</span><Slider value={Number(f.letterSpacing) || 0} min={-0.2} max={0.8} step={0.01} onChange={(v) => set({ letterSpacing: v })} lo="-0.2" hi="0.8" /></div>
@@ -413,28 +437,25 @@ export function CaptionAnimPanel({ value, onChange, onReset, onClose, title }) {
  * @param onPanel  ('fmt'|'anim') => void — 고급·효과 패널 열기
  * @param label    선택 설명(「3줄」·「글자 5자」)
  */
-// 📐 위치 미세조정 단위 — Vrew 슬라이더 1칸 = 0.0025(채널 편집의 「미세」와 같은 단위 · + = 아래/오른쪽)
-const POS_STEP = 0.0025;
-const posN = (v) => Math.round((Number(v) || 0) / POS_STEP);
 /**
  * 🎨 자막 서식 툴바 — 작업 화면에 **늘 떠 있다**(2026-09-25 v0.5.41 · 로이: 「툴바가 안 뜬다 — 항상 꺼내 둘 것」).
  * @param active  고른 줄·글자가 있는가 — 없으면 안내만 보이고 칸은 잠긴다(보이는 값 = 채널 기본)
  * @param pos     지금 위치 {align, yAlign, yOffset, xOffset} — 채널 위치 + 고른 줄의 덮어쓰기
  * @param onSaveDefault  지금 서식·위치를 **채널 기본값**으로 저장(📝 자막 탭과 같은 값)
  */
-export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPanel, onDone, onSaveDefault, label, panel, onApplyAll }) {
+export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPanel, onDone, onSaveDefault, label, panel, onApplyAll, scope, onScope }) {
   const f = fmt || CF.normFmt({});
   const p = pos || { align: 'center', yAlign: 'bottom', yOffset: -0.125, xOffset: 0 };
   const { fonts } = useCaptionFonts();
   const { list: saved } = useSavedFormats();
   const info = f.anim ? CF.ANIM_INFO[f.anim.type] : null;
-  const H = [['start', '⇤', '왼쪽 정렬'], ['center', '↔', '가운데 정렬'], ['end', '⇥', '오른쪽 정렬']];
-  const V = [['top', '⤒', '위'], ['middle', '↕', '가운데'], ['bottom', '⤓', '아래']];
+  const H = POS_HS, V = POS_VS;
   return (
     <div className={'cf-bar' + (active ? '' : ' idle')} data-testid="cf-bar" onMouseDown={(e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT') e.preventDefault(); }}>
       <span className="cf-sel" data-testid="cf-sel">{active ? `✏ ${label}` : '🎨 자막 서식'}</span>
       {!active && <span className="cf-hint" data-testid="cf-hint">자막 줄 번호(01 |)를 누르거나 글자를 드래그하세요 · 지금 보이는 값 = 채널 기본</span>}
       <fieldset className="cf-ctrls" disabled={!active}>
+        <ScopeBtn scope={scope} onScope={onScope} />
         <button className="ghost" title="서식 지우기 — 채널 기본 서식으로 되돌립니다(위치·정렬 포함)" onClick={onClear}>⌫ 서식 지우기</button>
         <select className="cf-savedsel" value="" title="저장된 서식 적용" onChange={(e) => { const s = saved.find((x) => x.id === e.target.value); if (s) onPatch(s.fmt); }}>
           <option value="">저장된 서식 ▾</option>
@@ -463,11 +484,11 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
         <span className="cf-div" />
         {/* 📐 위치·정렬 — 고른 **줄 전체**에 적용된다(글자 일부를 골라도 그 줄이 움직인다 — Vrew 와 같다) */}
         <span className="cf-grp" data-testid="cf-posh" title="가로 정렬 · 가로 미세(+ = 오른쪽)">
-          {H.map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={`가로 ${t}`}>{ic}</Toggle>)}
+          {H.map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={t}>{ic}</Toggle>)}
           <Num w={52} title="가로 미세 — 1칸 = 0.0025(화면 폭 절반 기준) · + = 오른쪽" value={posN(p.xOffset)} min={-400} max={400} onChange={(v) => onPatch({ posX: (v || 0) * POS_STEP })} />
         </span>
         <span className="cf-grp" data-testid="cf-posv" title="세로 정렬 · 세로 미세(+ = 아래)">
-          {V.map(([v, ic, t]) => <Toggle key={v} on={p.yAlign === v} onChange={() => onPatch({ posV: v, posY: null })} title={`세로 ${t}`}>{ic}</Toggle>)}
+          {V.map(([v, ic, t]) => <Toggle key={v} on={p.yAlign === v} onChange={() => onPatch({ posV: v, posY: null })} title={t}>{ic}</Toggle>)}
           <Num w={52} title="세로 위치 — 1칸 = 0.0025(화면 높이 절반 기준) · + = 아래" value={posN(p.yOffset)} min={-400} max={400} onChange={(v) => onPatch({ posV: p.yAlign, posY: (v || 0) * POS_STEP })} />
         </span>
         <span className="cf-div" />
@@ -486,7 +507,7 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
  * 🧩 ① 칸 팝업의 작은 서식 막대(Vrew 캡처 — 두 줄). 툴바와 **같은 onPatch** 로 고른 클립에 얹는다.
  *   ⚠ 누를 때 글자칸 초점을 뺏지 않게 mousedown 을 막는다(선택칸·색칸은 제외 — 그건 초점이 필요하다).
  */
-export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel }) {
+export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel, scope, onScope }) {
   const f = fmt || CF.normFmt({});
   const p = pos || { align: 'center' };
   const { fonts } = useCaptionFonts();
@@ -510,8 +531,10 @@ export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel }) {
         <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜">형광펜</Toggle>
         <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
         <span className="cf-div" />
-        {[['start', '⇤', '왼쪽'], ['center', '↔', '가운데'], ['end', '⇥', '오른쪽']].map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={`가로 ${t} 정렬`}>{ic}</Toggle>)}
+        <span className="cf-minil" title="자막 자리 — 화면 기준(① 칸에서 자막을 끌어 옮겨도 됩니다)">화면</span>
+        {POS_HS.map(([v, ic, t]) => <Toggle key={v} on={p.align === v} onChange={() => onPatch({ posH: v })} title={t}>{ic}</Toggle>)}
         <span className="cf-div" />
+        <ScopeBtn scope={scope} onScope={onScope} />
         <button className={'ghost' + (panel === 'fmt' ? ' on' : '')} title="고급 — ③ 칸에서 자세히" onClick={() => onPanel && onPanel('fmt')}>⚙ 고급</button>
         <button className={'ghost' + (panel === 'anim' ? ' on' : '')} title="효과" onClick={() => onPanel && onPanel('anim')}>✨ 효과</button>
       </div>
