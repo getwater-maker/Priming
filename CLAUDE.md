@@ -60,7 +60,7 @@
 - `~/.shots-maker/` 앱 상태(logs · tts-cache · electron userData · anti-detect) · `~/.priming-maker/` 설정(projects/*.smproj.json = **작업본, ⛔ 지우지 말 것** · comfy-*-config · *-accounts · image-rotation · youtube-auth · workspace.json) · `~/.flow-app/` TTS 채널·참조음성·스타일(`tts-presets.json`·`styles.json`·`channel-styles.json`).
 - 작업본(.smproj) 키 = **대본 파일명**(경로 아님). 대본을 옮겨도 이름이 같으면 이어받는다.
 - ⛔ **시작은 빈 화면**(로이 2026-06-22 — 큐 자동 복원 안 함). 지난 큐는 `workspace.last.json`(대본이 있을 때만 씀 · 빈 큐로 덮지 않음) → 큐 자리 「♻ 지난 큐 다시 열기」.
-- 🛡 **E2E(`PM_UI_SMOKE=1`)의 큐 파일(workspace·last·saves)은 `%TEMP%\priming-smoke-workspace` 로 간다**(`workspaceDir()` · v0.6.59 — 새 E2E 는 반드시 `PM_UI_SMOKE` 를 켤 것). 🔑 **테스트는 로이 앱과 같은 userData·localStorage 를 쓴다** — 보기 설정·채널·workspace 를 바꾸는 E2E 는 적어 두고 끝날 때 되돌린다. 임시 채널·임시 출력폴더를 쓰고 지운다.
+- 🛡 **E2E(`PM_UI_SMOKE=1`)의 큐 파일(workspace·last·saves)은 `%TEMP%\priming-smoke-workspace` 로 간다**(`workspaceDir()` · v0.6.59 — 새 E2E 는 반드시 `PM_UI_SMOKE` 를 켤 것). 🧪 **E2E 의 Electron 저장 공간(userData·localStorage)은 `%TEMP%priming-smoke-electron`**(bootstrap.js · v0.6.81) → **로이 앱을 켜 둔 채로 E2E 를 돌릴 수 있다**. ⚠ `~/.flow-app`(채널 목록 등)·`~/.priming-maker` 설정 파일은 여전히 같이 쓴다 — 임시 채널(`__…`)·임시 출력폴더를 쓰고 지운다.
 
 ## 5. 외부 서버 (메인 PC)
 
@@ -228,8 +228,8 @@
 
 - 원칙: **원문 함수를 뽑아 실행**(복사본 금지) · A/B 역검증(고치기 전 코드로 되돌리면 실패하는지) · 판정력 검증(틀린 입력이 실제로 다르게 나오는지 — 헛단언 방지) · 실측 가능한 것은 실측(ffmpeg 화소·volumedetect·ASR).
 - 필수 회귀: main.js 수정 → `test:makeall` · 화면 수정 → `test:workspace` · 자막 → `test:caption`·`test:capfmt` · TTS → `test:tts` · ComfyUI → `test:comfy` · 출력 → `test:mp4`·`test:vrewaudio`.
-- 스크립트 목록은 `package.json`(test:* 40여 개). 알려진 기존 실패: `img-rotate-resume`(27/34 — v0.3.84 부터, 원인 미확정) · `remotion-ui.smoke` 채널편집 대기 타임아웃 · `comfy-video-minimax` 의 「기본 활성」 단언(로이 PC 설정을 읽음).
-- 🔴 E2E 는 로이 앱과 같은 `~/.priming-maker/workspace.json`·`workspace.last.json`(큐 목록·지난 큐)을 덮는다 — **로이 큐가 도는 중엔 돌리지 않고**, 돌릴 땐 전후 백업·복원한다(v0.5.79 사고). 헤더에 버튼을 더하면 **대본을 연 상태**의 1366px 한 줄을 본다(`test:workspace`).
+- 스크립트 목록은 `package.json`(test:* 40여 개). 알려진 기존 실패: `speaker-ui` 「탭 높이 그대로」(🖼 제작 도구 탭만 722px — v0.6.66 이전부터) · `img-rotate-resume`(27/34 — v0.3.84 부터, 원인 미확정) · `remotion-ui.smoke` 채널편집 대기 타임아웃 · `comfy-video-minimax` 의 「기본 활성」 단언(로이 PC 설정을 읽음).
+- 🔴 E2E 는 큐 파일(PM_UI_SMOKE → TEMP)·Electron 저장 공간(→ TEMP)을 로이 앱과 나눴다. 채널 목록 파일(`~/.flow-app/tts-presets.json`)은 같이 쓰므로 전후 백업·비교를 권한다(v0.5.79 사고 계열). 헤더에 버튼을 더하면 **대본을 연 상태**의 1366px 한 줄을 본다(`test:workspace`).
 - 버튼·라벨을 고치면 그 라벨·title 로 찾는 테스트를 함께 grep 한다(완전 일치 선택자가 조용히 깨진 사고 여러 번). 화면 배치 검증은 `elementFromPoint` 로 **실제로 눌리는지**까지 본다.
 - E2E 는 Playwright `_electron` · `app.evaluate` 로 `dialog.showOpenDialog` 를 스텁해 실제 파일을 연다. E2E 는 상태를 바꾸는 블록을 뒤에 둔다.
 

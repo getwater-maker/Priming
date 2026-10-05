@@ -4468,6 +4468,8 @@ export default function App() {
                   </>)}
                 </div>
                 <div className="frow"><label></label><span className="meta">대본 화면에서 🏷 로 문장 범위를 따로 정한 대본은 그 범위가 이깁니다. Vrew 는 클립 단위로 사라지므로 「초」 끝은 그 시각이 든 클립이 끝날 때 사라집니다.</span></div>
+                {/* 🖼 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 🎨 제작 도구 탭은 높이가 넘쳐 🏠 기본으로 · 값·저장은 그대로 presetPrompt) */}
+                <div className="frow"><label>이미지 사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
               </div>)}
 
               {/* 🎙 음성 탭(v0.6.80 정리) — ① 이 채널 목소리 요약(엔진·목소리 · 「🔊 음성 설정」에서 바꾼다) ② OmniVoice 참조음성(OmniVoice 일 때만)
@@ -4557,8 +4559,6 @@ export default function App() {
               </div>)}
 
               {chTab === 'tools' && (<div>
-                {/* 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 값·저장은 그대로 presetPrompt) */}
-                <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
                 <div className="subhead">🎨 이미지 스타일</div>
                 <div className="crow"><span className="l">스타일</span><select value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
 
