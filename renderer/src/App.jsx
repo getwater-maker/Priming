@@ -6601,7 +6601,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   );
                 });
                 return (
-                  <div className={'cut' + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '') + (vrewLay && folded.has(pr.shortsNum + ':' + c.num) ? ' folded' : '')} key={c.num} data-sn={pr.shortsNum} data-g={c.num}>
+                  <div className={'cut' + (c.isIntro ? ' intro' : '') + (isLf ? ' lf' : '') + (vrewLay ? ' vrewlay' : '') + (vrewLay && folded.has(pr.shortsNum + ':' + c.num) ? ' folded' : '')} key={c.num} data-sn={pr.shortsNum} data-g={c.num}>
                     {vrewLay ? <div className="vgutter" /> : thumbEl}
                     <div>
                       {vrewLay && (() => {

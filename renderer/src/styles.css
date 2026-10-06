@@ -821,6 +821,14 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .scene-h .sc-num{font-weight:800;color:#8a7b66}
 .scene-h .sc-title{font-weight:700;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scene-h.intro .sc-num{color:var(--hook, #c0392b)}
+/* 🎬 도입부(영상이 들어가는 그룹) — 클립 배경을 노랑으로 칠해 어디까지인지 한눈에(v0.7.27 · 로이). 색은 옛 .narr.intro 와 같은 계열.
+   선택(.picked)·고치는 중(.editing)은 제 색을 그대로 둔다 — 그 상태가 도입부 색에 묻히지 않게.
+   커서(.cur)는 노랑 바탕을 유지하고(안 그러면 띠에 구멍이 난다) 주황 테두리·안쪽 광채가 표시한다. */
+.cuts-grid .cut.intro .sent.clip:not(.picked):not(.editing){background:#fff1b8}
+.cuts-grid .cut.intro .sent.clip:not(.picked):not(.cur){border-color:#e3b53f}
+.cuts-grid .cut.intro .sent.clip:not(.picked) .clip-no{background:#ffd770;color:#7a4b00;border-right-color:#e3b53f}
+.cuts-grid .cut.intro .sent.clip:not(.picked) .clip-no:hover{background:#ffc94a;color:#4a2c00}
+.cuts-grid .cut.intro .scene-h .sc-num{background:#ffd770;color:#7a4b00;border-radius:6px;padding:0 8px}
 .scene-h .sc-btns{display:inline-flex;gap:2px;margin-left:4px}
 .scene-h .sc-btns .gprev{padding:1px 6px;font-size:13px}
 .scene-h .sc-time{font-size:12px;color:#8a7b66;white-space:nowrap}
