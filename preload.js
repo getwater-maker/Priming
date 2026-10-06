@@ -4,6 +4,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  isSmoke: !!(typeof process !== 'undefined' && process.env && process.env.PM_UI_SMOKE),   // 🧪 E2E 실행 여부(TTS 없는 재생 멈춤 규칙을 기본 끄는 데 쓴다 — 켤 땐 localStorage pm.stopNoTts=1)
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   appUpdateCheck: () => ipcRenderer.invoke('app-update-check'),
   appUpdateApply: () => ipcRenderer.invoke('app-update-apply'),

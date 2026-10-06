@@ -3738,6 +3738,14 @@ export default function App() {
     for (let si = si0; si < sents.length; si++) {
       const s = sents[si];
       if (stale(_g)) return;
+      // ⏹ 아직 TTS 를 만들지 않은 클립(문장)을 만나면 재생을 멈추고 그 클립에 커서를 둔다(v0.7.29 로이)
+      if (c.sentences && c.sentences.length && String(s.text || '').trim() && !s.audio && !(api.isSmoke && lsGet('pm.stopNoTts') !== '1')) {
+        const ln = sn != null ? ((linesMap.get(sn) || { bySent: new Map() }).bySent.get(c.num + ':' + si) || [])[0] : null;
+        stopPlayer();
+        if (ln) setCursor({ shortsNum: sn, n: ln.n });
+        setStatus(`⏹ G${c.num} ${ln ? '클립 ' + ln.n : (si + 1) + '번째 문장'} — 아직 TTS 를 만들지 않아 재생을 멈췄습니다`);
+        return;
+      }
       const clips = splitLines(s.text || '', N, s.breaks, s.marks); const dur = s.dur || 2.5;
       const first = si === si0 && li0 > 0;
       const rgF = CF.lineRanges(s.text || '', clips)[first ? li0 : 0];   // 이 문장에서 처음 보일 줄
@@ -3812,6 +3820,30 @@ export default function App() {
     setPlayerOpen(false);
   }
   /** 🧭 커서 줄부터 재생(클립 보기 · Space) — 그 줄이 든 그룹부터 끝까지. */
+  // ② 클립 칸의 마우스 — (1) 재생 중 누르면 재생을 멈춘다 (2) 클립 밖(카드 사이 빈 곳)을 누르면 가장 가까운 클립을 고른다(v0.7.29 로이)
+  useEffect(() => {
+    if (!wsOn) return undefined;
+    const down = (ev) => {
+      const t = ev.target; if (!t || !t.closest || ev.button !== 0) return;
+      if (!t.closest('main.pane2') || t.closest('.clip-tb, .clipbar, .vr-menu, .modal-bg')) return;
+      if (playingRef.current && (t.closest('.sent') || t.matches('.cut, .sents, .cuts-grid, main.pane2'))) stopPlayer();   // 클립·빈 곳을 누르면 멈춘다(단추·그림 메뉴는 제 일을 한다)
+      if (t.closest('.sent, button, input, textarea, select, a, label, .rail, [contenteditable="true"]')) return;
+      if (!t.matches('.cut, .sents, .cuts-grid, main.pane2') || sentEdit) return;   // 배경을 직접 눌렀을 때만(썸네일·표지 같은 자식 요소는 제 일을 한다)
+      const cutEl = t.closest('.cut[data-sn]') || t;
+      const rows = [...document.querySelectorAll('main.pane2 .sent[data-ln]')].filter((x) => x.offsetParent !== null);
+      let best = null, bd = Infinity;
+      for (const r of rows) { const b = r.getBoundingClientRect(); const d = ev.clientY < b.top ? b.top - ev.clientY : ev.clientY > b.bottom ? ev.clientY - b.bottom : 0; if (d < bd) { bd = d; best = r; } }
+      if (!best) return;
+      const sn = Number((best.closest('.cut[data-sn]') || cutEl).getAttribute('data-sn')); const n = Number(best.getAttribute('data-ln'));
+      const PL = linesMap.get(sn); const l = PL && PL.list.find((x) => x.n === n); if (!l) return;
+      const info = (x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to });
+      ev.preventDefault();
+      pickCapLine(sn, info(l), ev, PL.list.map(info));
+    };
+    document.addEventListener('mousedown', down, true);
+    return () => document.removeEventListener('mousedown', down, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
   // 🧭 재생 중 사람이 클립을 고르면 기억한다 — 그 뒤 Space = 지금 재생을 멈추고 **고른 클립부터** 다시(v0.5.62 · 로이).
   //   재생이 자막마다 옮기는 커서(stepCaptions 의 setCursor)는 여기로 오지 않는다 → 고르지 않았으면 Space = 그냥 멈춤.
   const userPickRef = useRef(null);

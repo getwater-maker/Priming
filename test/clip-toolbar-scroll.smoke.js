@@ -87,6 +87,21 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
     ok(s2.picked.length === 0, `판별력: 고른 클립 없음 ${JSON.stringify(s2)}`);
     await win.keyboard.press('End'); await win.waitForTimeout(500);
     s2 = await state(); ok(s2.picked.length === 1 && s2.picked[0] === total && s2.edit === 0, `선택 없이 End = 마지막 클립 ${total} — ${JSON.stringify(s2)}`);
+    // ⏹ TTS 를 안 만든 클립을 만나면 재생이 멈춘다(v0.7.29) — E2E 는 기본으로 끄므로 켜고 본다
+    await win.evaluate(() => localStorage.setItem('pm.stopNoTts', '1'));
+    await win.keyboard.press('Escape'); await pick(3); await win.keyboard.press('Escape');
+    await win.evaluate(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); });
+    await win.keyboard.press(' '); await win.waitForTimeout(1200);
+    const pl = await win.evaluate(() => ({ btn: (document.querySelector('[data-testid=play-btn]') || {}).textContent || '', cur: (document.querySelector('.sent.cur') || { getAttribute: () => null }).getAttribute('data-ln'), st: document.body.innerText.includes('아직 TTS 를 만들지 않아 재생을 멈췄습니다') }));
+    ok(!pl.btn.includes('■') && pl.st, `TTS 없는 클립 → 재생이 바로 멈추고 안내가 뜬다 — ${JSON.stringify(pl)}`);
+    await win.evaluate(() => localStorage.removeItem('pm.stopNoTts'));
+    // 클립 밖(카드 사이 빈 곳)을 누르면 가장 가까운 클립이 골라진다(v0.7.29)
+    await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    const gap = await win.evaluate(() => { const rows = [...document.querySelectorAll('main.pane2 .sent[data-ln]')].filter((x) => { const r = x.getBoundingClientRect(); return x.offsetParent !== null && r.top > 200 && r.bottom < innerHeight - 20; }); for (let i = 0; i + 1 < rows.length; i++) { const a = rows[i].getBoundingClientRect(), b = rows[i + 1].getBoundingClientRect(); if (b.top - a.bottom >= 4) { const y = (a.bottom + b.top) / 2; return { x: a.left + 40, y, near: Number(rows[i].dataset.ln), a: a.bottom, b: b.top }; } } return null; });
+    if (gap) {
+      await win.mouse.click(gap.x, gap.y); await win.waitForTimeout(300);
+      const gs = await state(); ok(gs.picked.length === 1 && (gs.picked[0] === gap.near || gs.picked[0] === gap.near + 1), `카드 사이 빈 곳 클릭 → 가까운 클립(${gap.near}/${gap.near + 1}) 선택 — ${JSON.stringify(gs)}`);
+    } else ok(false, '카드 사이 빈 곳을 못 찾음');
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}

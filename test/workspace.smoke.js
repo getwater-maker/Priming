@@ -250,7 +250,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.locator('[data-testid=ov-range]').first().click();
       await win.click('[data-testid=ins-del]'); await win.waitForTimeout(500);
     }
-    // 🧭 v0.5.62 — 재생 중 클립을 고르고 Space = 멈추고 **고른 클립부터** 다시 · 안 골랐으면 Space = 멈춤
+    // 🧭 v0.5.62 — 재생 중 ② 칸을 누르면 재생이 멈춘다(v0.7.29 — 옛 「고른 클립부터 다시」는 폐기)
     {
       const btn = () => win.locator('[data-testid=play-btn]').innerText();
       if (await win.locator('textarea:focus').count()) { await win.keyboard.press('Escape'); await win.waitForTimeout(200); }
@@ -260,11 +260,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       ok((await btn()).includes('■'), '재생 시작');
       const nLast = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 마지막')); return e ? Number(e.dataset.ln) : 0; });
       await win.locator('.sent.clip[data-ln="' + nLast + '"] .clip-no').click();
-      await win.keyboard.press(' '); await win.waitForTimeout(400);
       const c1 = await stageCap();
-      ok((await btn()).includes('■') && /둘째 그룹 마지막/.test(c1), `🔑 재생 중 클립(${nLast})을 고르고 Space → 멈추지 않고 그 클립부터 「${c1}」`);
-      await win.keyboard.press(' '); await win.waitForTimeout(400);
-      ok((await btn()).includes('▶'), '🔑 고르지 않고 Space → 멈춤');
+      ok((await btn()).includes('▶') && /둘째 그룹 마지막/.test(c1), `🔑 재생 중 클립(${nLast})을 누르면 재생이 멈추고 그 클립이 골라진다(v0.7.29) 「${c1}」`);
     }
     // 🖼 v0.5.68 — 범위 선은 평소엔 안 보이고, 그림 아이콘에 마우스를 올리면 보인다 · 누르면 다음 클릭까지 보이고 메뉴는 선 오른쪽(로이)
     {
