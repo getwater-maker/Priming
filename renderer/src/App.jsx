@@ -1783,6 +1783,12 @@ export default function App() {
   const [clipBoard, setClipBoard] = useState(null);   // { chunks, n } — ⧉ 복사한 클립(글 + 음성 조각)
   const [clipTb, setClipTb] = useState(null);         // { left, top, hidden } — 막대 자리(고른 첫 클립 바로 위)
   const [clipMenu, setClipMenu] = useState(null);     // 'ins' | 'fx' | 'voice'
+  const clipFocusRef = useRef(true);   // 마지막 마우스 누름이 클립(또는 클립 막대) 안이었나 — 아니면 Home/End 는 대본 처음·끝
+  useEffect(() => {
+    const down = (ev) => { const t = ev.target; clipFocusRef.current = !!(t && t.closest && t.closest('.sent, .clip-tb')); };
+    document.addEventListener('mousedown', down, true);
+    return () => document.removeEventListener('mousedown', down, true);
+  }, []);
   function clipSelOk() { return !!(capSel && capSel.mode === 'lines' && capSel.items && capSel.items.length && !sentEdit); }
   function clipPayload(sel) {
     const PL = linesMap.get(sel.shortsNum); const by = new Map();
@@ -3917,7 +3923,7 @@ export default function App() {
     const idx = Math.max(0, PL.list.findIndex((x) => x.n === cursor.n));
     // ⌨ Home/End(v0.7.24 로이): 고른 클립이 있으면 **그 그룹**의 첫·마지막 클립, 없으면 대본 첫·마지막 클립 — 자막 칸을 열지 않고 클립을 고른다
     let gNum = null;
-    if (abs && clipSelOk() && capSel.shortsNum === cursor.shortsNum) {
+    if (abs && clipSelOk() && capSel.shortsNum === cursor.shortsNum && clipFocusRef.current) {   // 클립 밖을 누른 뒤엔 그룹이 아니라 대본 처음·끝
       const inSel = capSel.items.find((x) => x.n === cursor.n) || capSel.items[0];
       gNum = inSel.groupNum;
     }
@@ -3987,7 +3993,7 @@ export default function App() {
       const box = sc && sc !== document.body ? sc.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
       const minTop = Math.max(4, box.top + 4), maxTop = Math.min(window.innerHeight, box.bottom) - 56;
       const top = Math.round(Math.max(minTop, Math.min(maxTop, r.top - 44))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
-      const hidden = false;
+      const hidden = r.bottom < box.top || r.top > box.bottom;   // 고른 클립이 목록 칸 밖으로 스크롤되면 막대도 함께 사라진다(v0.7.25 로이 — v0.5.99 「남아 있기」를 뒤집음)
       setClipTb((cur) => (cur && cur.top === top && cur.left === left && cur.hidden === hidden ? cur : { top, left, hidden }));
     };
     place();

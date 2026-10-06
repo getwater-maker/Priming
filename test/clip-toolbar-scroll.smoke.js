@@ -54,9 +54,11 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
       return { inPane: !!(r && sr && r.top >= sr.top && r.bottom <= sr.bottom), paneTop: sr && sr.top, tbTop: r && r.top, dbg: { picked: [...document.querySelectorAll('.sent.picked')].length, rowExists: !!row, tbAny: !!document.querySelector('.clip-tb'), all5: document.querySelectorAll('.sent[data-ln="5"]').length }, rowOut: !!(rr && (rr.bottom < 0 || rr.top > innerHeight)), tb: !!t, inView: !!(r && r.top >= 0 && r.bottom <= innerHeight), clickable: !!(hit && hit.closest('[data-testid="ctb-del"]')) };
     });
     ok(far.rowOut, '판별력: 고른 5번 클립이 실제로 화면 밖으로 밀려났다');
-    ok(far.tb && far.inView, '🔑 그래도 막대가 남아 있고 화면 안에 있다');
-    ok(far.clickable, '🔑 남은 막대의 🗑 는 실제로 눌리는 자리(elementFromPoint)');
-    ok(far.inPane && far.paneTop > 20, `🔑 막대가 헤더 위로 올라가지 않고 목록 칸 안에 있다(칸 위 ${far.paneTop && Math.round(far.paneTop)} · 막대 위 ${far.tbTop && Math.round(far.tbTop)})`);
+    ok(!far.tb, '🔑 고른 클립이 목록 칸 밖으로 스크롤되면 막대도 사라진다(v0.7.25)');
+    await win.evaluate(() => { const r = [...document.querySelectorAll('.sent[data-ln="5"]')].find((x) => x.offsetParent !== null); if (r) r.scrollIntoView({ block: 'center' }); });
+    await win.waitForTimeout(500);
+    const back = await win.evaluate(() => { const t = document.querySelector('[data-testid="clip-tb"]'); const r = t && t.getBoundingClientRect(); const row = [...document.querySelectorAll('.sent[data-ln="5"]')].find((x) => x.offsetParent !== null); let sc = row && row.parentElement; while (sc && sc !== document.body) { const oy = getComputedStyle(sc).overflowY; if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight > sc.clientHeight) break; sc = sc.parentElement; } const sr = sc && sc.getBoundingClientRect(); return { tb: !!t, inPane: !!(r && sr && r.top >= sr.top && r.bottom <= sr.bottom) }; });
+    ok(back.tb && back.inPane, '다시 스크롤해 돌아오면 막대가 목록 칸 안에 다시 뜬다');
 
     // ⌨ Home/End(v0.7.24): 고른 클립이 있으면 그 그룹의 처음·끝 클립, 없으면 대본 처음·끝 — 자막 칸을 열지 않고 클립을 고른다
     const pick = async (n) => { const e = win.locator('.sent[data-ln="' + n + '"] .cf-lineno').first(); await e.scrollIntoViewIfNeeded(); await e.click(); await win.waitForTimeout(300); };
@@ -71,6 +73,13 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
       await win.keyboard.press('Home'); await win.waitForTimeout(400);
       s = await state(); ok(s.picked.length === 1 && s.picked[0] === grp[0] && s.edit === 0, `Home = 그룹 첫 클립 ${grp[0]} 고름 — ${JSON.stringify(s)}`);
     } else ok(false, '그룹 찾기 실패(.cut[data-g])');
+    // 클립 밖을 누르면 선택이 남아 있어도 Home/End = 대본 처음·끝(v0.7.25)
+    await pick(grp[1]);
+    await win.mouse.click(2, 300); await win.waitForTimeout(200);
+    await win.keyboard.press('End'); await win.waitForTimeout(500);
+    let so = await state(); ok(so.picked.length === 1 && so.picked[0] === total, `클립 밖 클릭 뒤 End = 마지막 클립 ${total} — ${JSON.stringify(so)}`);
+    await win.mouse.click(2, 300); await win.keyboard.press('Home'); await win.waitForTimeout(500);
+    so = await state(); ok(so.picked.length === 1 && so.picked[0] === 1, `클립 밖 클릭 뒤 Home = 1번 클립 — ${JSON.stringify(so)}`);
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     await win.evaluate(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); });
     let s2 = await state();
