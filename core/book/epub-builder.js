@@ -186,7 +186,7 @@ function colophonXhtml(meta0, col, book, ctx) {
   out.push(`<p class="cp-title"><strong>${esc(meta.title || '')}</strong>${meta.subtitle ? ' ' + esc(meta.subtitle) : ''}</p>`);
   for (const s of String(meta.issueDate || '').split(/\s*[;；]\s*/).map((x) => x.trim()).filter(Boolean)) {
     const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
-    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '초판 1쇄 발행')}</strong> ${esc(DK.formatKo(((m ? m[2] : s) || '').trim()))}</p>`);
+    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '발행일')}</strong> ${esc(DK.formatKo(((m ? m[2] : s) || '').trim()))}</p>`);
   }
   const row = (label, v) => (v ? `<p class="cp-row"><strong>${esc(label)}</strong> | ${esc(v)}</p>` : '');
   out.push(

@@ -259,7 +259,7 @@ const DK = require('./date-ko');
 const DEFAULT_LEGAL = '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.';
 // 판권 자동 생성 항목 정의 — UI 체크박스와 1:1 (key, 라벨, 값 추출)
 const COLOPHON_FIELDS = [
-  ['issueDate', '초판 1쇄 발행'], ['author', '지은이'], ['translator', '옮긴이'], ['issuer', '펴낸이'],
+  ['issueDate', '발행일'], ['author', '지은이'], ['translator', '옮긴이'], ['issuer', '펴낸이'],
   ['publisher', '펴낸곳'], ['regNo', '출판등록'], ['address', '주소'], ['phone', '전화'], ['fax', '팩스'],
   ['homepage', '홈페이지'], ['email', '이메일'], ['isbn', 'ISBN'], ['price', '정가'], ['ebookPrice', '전자책'],
   ['copyright', 'ⓒ 저작권 문구'], ['legal', '무단복제 금지 문구'], ['exchange', '파본 교환 안내'],
@@ -370,11 +370,11 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
     : '');
 
   // ── 발행 이력 ── 「1판 1쇄 발행   2026년 8월 24일」. 여러 쇄는 `;` 로 나눠 쓴다.
-  //   라벨/값은 **첫 연도(4자리) 앞**에서 가른다 — 라벨을 안 쓰면 「초판 1쇄 발행」.
+  //   라벨/값은 **첫 연도(4자리) 앞**에서 가른다 — 라벨을 안 쓰면 「발행일」(부크크는 주문 제작이라 「초판 1쇄」 개념이 없다 · 로이 2026-10-06).
   const dates = on('issueDate')
     ? String(meta.issueDate || '').split(/\s*[;；]\s*/).map((s) => s.trim()).filter(Boolean).map((s) => {
       const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
-      const k = (m && m[1].trim()) || '초판 1쇄 발행';
+      const k = (m && m[1].trim()) || '발행일';
       const v = DK.formatKo(((m ? m[2] : s) || '').trim());   // 부크크 판권지: 「2026년 10월 06일」
       return `<div class="cp-date"><span class="dk">${esc(k)}</span><span class="dv">${esc(v)}</span></div>`;
     }).join('') : '';

@@ -698,29 +698,23 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   //   판권 탭과 📤 부크크 등록 탭이 **같은 상자**를 쓴다(칸이 두 벌이 되지 않게). 칸을 벗어나면 원고(.md) 메타에 바로 저장 → 판권에 반영.
   //   ISBN 은 체크 숫자까지 확인한다(틀린 번호를 판권·바코드에 싣지 않게) · 발행일은 판권 라벨 그대로(예: 발행일 2026-10-06).
   const isbnBox = (idp) => {
-    const chk = (v) => { const s = String(v || '').trim(); if (!s) return null; const n = ISBNC.normalizeIsbn13(s); return n ? { ok: true, t: `✅ ISBN-13 ${/[-\s]/.test(s) ? s : n} (체크 숫자 통과)` } : { ok: false, t: '⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요' }; };
-    // 발행일 칸은 벗어날 때 「발행일 2026년 10월 06일」 모양으로 바로잡아 저장한다(2026-10-06 · 2026.10.6 으로 적어도 됨)
+    // 🔢 맨 위 세 칸(로이 2026-10-06 — 「전자책 ISBN · 종이책 ISBN · 발행일」 을 다른 칸과 같은 모양으로) — 칸을 벗어나면 원고 메타에 저장.
+    //   ISBN 은 체크 숫자가 틀릴 때만 빨간 경고 · 발행일은 「2026년 10월 06일」 모양으로 바로잡아 저장(2026-10-06 으로 적어도 됨).
+    //   전자책 발행일(`> 전자책발행일:`)은 원고 메타로만 — 부크크는 종이책·전자책 발행일을 따로 묻지 않는다.
+    const bad = (v) => { const t = String(v || '').trim(); return t && !ISBNC.normalizeIsbn13(t); };
     const one = (k, label, ph, isDate) => (
-      <label key={k} title="">
+      <label key={k}>
         <span>{label}</span>
         <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
           key={dto.scriptPath + ':' + idp + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, isDate ? DK.normalizeMeta(e.target.value) : e.target.value.trim())} />
+        {!isDate && bad(meta[k]) ? <span className="bkisbn-bad" data-testid={idp + '-' + k + '-bad'}>⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요</span> : null}
       </label>
     );
-    const pi = chk(meta.isbn), ei = chk(meta.ebookIsbn);
     return (
       <div className="bkisbn" data-testid={idp + '-box'}>
-        <div className="bkzone" style={{ marginTop: 4 }}>🔢 ISBN · 발행일</div>
-        <div className="bkisbn-grid">
-          <b>📕 종이책</b>
-          {one('issueDate', '발행일', '발행일 2026년 10월 06일', true)}
-          {one('isbn', 'ISBN', '979-11-…')}
-          <div className={'meta bkisbn-chk' + (pi && !pi.ok ? ' bad' : '')} data-testid={idp + '-isbn-chk'}>{pi ? pi.t : ''}</div>
-          <b>📱 전자책</b>
-          {one('ebookIssueDate', '발행일', '비우면 종이책 발행일', true)}
-          {one('ebookIsbn', 'ISBN', '979-11-…')}
-          <div className={'meta bkisbn-chk' + (ei && !ei.ok ? ' bad' : '')} data-testid={idp + '-ebisbn-chk'}>{ei ? ei.t : ''}</div>
-        </div>
+        {one('ebookIsbn', '전자책 ISBN', '979-11-…')}
+        {one('isbn', '종이책 ISBN', '979-11-…')}
+        {one('issueDate', '발행일', '2026년 10월 06일', true)}
       </div>
     );
   };

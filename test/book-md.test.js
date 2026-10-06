@@ -238,7 +238,7 @@ ok(/<span class="dk">1판 6쇄 발행<\/span><span class="dv">2022년 12월 29�
 ok((cpSec.match(/class="cp-date"/g) || []).length === 2, '발행 이력이 두 줄');
 // 라벨 없이 날짜만 쓰면 기본 라벨
 const dOnly = HB.buildBookHtml(BK.parseBookText('# 책\n> 발행일: 2026년 8월 24일\n\n## 1장. ㄱ\n본문.\n\n## [판권]\n\n메모.\n', 'x'), { baseDir: 'D:/x' }).html;
-ok(/<span class="dk">초판 1쇄 발행<\/span><span class="dv">2026년 8월 24일<\/span>/.test(dOnly), '라벨 없으면 「초판 1쇄 발행」');
+ok(/<span class="dk">발행일<\/span><span class="dv">2026년 08월 24일<\/span>/.test(dOnly), '라벨 없으면 「발행일」(부크크 — 쇄 개념 없음) · 날짜는 「2026년 08월 24일」');
 // (3) 라벨 행 — 라벨 굵게(.k) + 구분선(|) + 값, 레퍼런스 순서
 ok(/<span class="k">지은이<\/span><span class="sep">\|<\/span><span class="v">조윤제<\/span>/.test(cpSec), '지은이 행');
 ok(/<span class="k">편집인<\/span>/.test(cpSec), '편집인 행');

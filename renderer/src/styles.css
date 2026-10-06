@@ -1047,3 +1047,6 @@ button.upd.new{background:var(--accent);color:#fff;border-color:var(--accent);fo
 .bkmore>summary{cursor:pointer;font-size:12px;color:var(--accent-d)}
 details.bkeb-checks>summary{cursor:pointer;font-weight:700;list-style:none}
 details.bkeb-checks:not([open])>summary{color:#2e7d32}
+
+.bkisbn-bad{display:block;color:#c62828;font-weight:600;font-size:11px;margin-top:2px}
+.bkisbn{display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
