@@ -80,7 +80,7 @@ function localPackage() {
  * 변경 파일을 받아 설치폴더에 교체. main.js require 전에 await 로 호출.
  * 네트워크 실패/오프라인이면 조용히 현재 버전으로 진행.
  */
-async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } = {}) {
+async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } = {}) {
   if (!app.isPackaged) { log('dev 모드 — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'dev' }; }
   const appDir = app.getAppPath(); // asar:false → resources/app
 
@@ -129,39 +129,64 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
     return { updated: 0, failed: 0, reason: 'deps', from: localPkg.version, to: manifest.version };
   }
 
-  // 변경된 파일만 다운로드 → 임시파일 기록 후 원자적 교체
-  let updated = 0, failed = 0;
+  // 🔒 두 단계로 바꾼다(2026-10-06 사고 — 화면이 백지가 됐다):
+  //   raw.githubusercontent.com 은 **이미 있던 파일을 발행 뒤 약 5분 옛 내용으로** 보여 주고, 새로 생긴 파일(렌더러 asset 해시 이름)만 바로 새것을 준다.
+  //   예전 코드는 파일마다 받는 대로 교체했고 해시가 안 맞는 파일은 「건너뜀」으로 넘어간 뒤 **옛 asset 을 지웠다**
+  //   → 새 asset 만 있고 index.html 은 옛 것(= 지워진 asset 을 가리킴) → 백지. 지금은:
+  //   ① 바뀐 파일 **전부**를 임시 이름으로 받아 해시까지 확인한다 — 하나라도 못 받으면 **아무것도 바꾸지 않는다**(옛 버전이 그대로 온전하다 · 다음 실행에서 다시)
+  //   ② 전부 받았을 때만 교체한다 — renderer index.html → package.json 은 맨 끝(중간에 끊겨도 package.json 이 옛 버전이라 다음 실행이 이어 받는다)
+  //   ③ 옛 asset 정리는 ②가 끝난 뒤에만.
+  const changed = [];
   for (const rel of Object.keys(manifest.files)) {
     const want = manifest.files[rel];
     const dest = path.join(appDir, rel.split('/').join(path.sep));
     let have = null;
     try { have = hashLocal(dest, rel); } catch (_) {}
-    if (have === want) continue; // 동일 → 건너뜀
-    try {
-      const buf = await fetchWithTimeout(RAW_BASE + rel, fileTimeoutMs, false);
-      if (sha1(buf) !== want) { log(`해시 불일치(다운로드 손상?) ${rel} — 건너뜀`); failed++; continue; }
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      const tmp = dest + '.tmp-update';
-      fs.writeFileSync(tmp, buf);
-      fs.renameSync(tmp, dest); // 같은 볼륨 → 원자적 교체
-      updated++;
-    } catch (e) { log(`다운로드 실패 ${rel}: ${e.message}`); failed++; }
+    if (have !== want) changed.push({ rel, want, dest, tmp: dest + '.tmp-update' });
+  }
+  const dropStaged = () => { for (const c of changed) { try { fs.unlinkSync(c.tmp); } catch (_) {} } };
+  let failed = 0;
+  for (const c of changed) {
+    let ok = false;
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      try {
+        const buf = await fetchWithTimeout(RAW_BASE + c.rel + (attempt ? '?t=' + Date.now() : ''), fileTimeoutMs, false);
+        if (sha1(buf) !== c.want) { log(`해시 불일치(발행 직후 서버 캐시 또는 손상) ${c.rel}${attempt ? '' : ' — 한 번 더'}`); await new Promise((r) => setTimeout(r, 800)); continue; }
+        fs.mkdirSync(path.dirname(c.tmp), { recursive: true });
+        fs.writeFileSync(c.tmp, buf);
+        ok = true;
+      } catch (e) { log(`다운로드 실패 ${c.rel}: ${e.message}`); }
+    }
+    if (!ok) { failed++; break; }   // 하나라도 못 받으면 더 받지 않는다
+  }
+  if (failed) {
+    dropStaged();
+    log(`⚠ 업데이트 보류 — 새 파일을 전부 받지 못했습니다(발행 직후 서버가 아직 옛 파일을 보여 줄 수 있음 · 5분쯤 뒤 다시 켜면 됩니다). 지금 버전(${localPkg.version || '?'})은 그대로 온전합니다.`);
+    return { updated: 0, failed, reason: 'failed', from: localPkg.version, to: manifest.version };
+  }
+  const lastOf = (rel) => (rel === 'package.json' ? 2 : rel === 'renderer/dist/index.html' ? 1 : 0);
+  let updated = 0;
+  for (const c of changed.slice().sort((x, y) => lastOf(x.rel) - lastOf(y.rel))) {
+    try { fs.renameSync(c.tmp, c.dest); updated++; }   // 같은 볼륨 → 원자적 교체
+    catch (e) { failed++; log(`교체 실패 ${c.rel}: ${e.message}`); }
   }
 
-  // 오래된 렌더러 에셋(이전 빌드 해시 파일) 정리 — manifest 에 없는 dist/assets 파일 삭제
-  try {
-    const assetsDir = path.join(appDir, 'renderer', 'dist', 'assets');
-    if (fs.existsSync(assetsDir)) {
-      const keep = new Set(
-        Object.keys(manifest.files)
-          .filter((f) => f.startsWith('renderer/dist/assets/'))
-          .map((f) => f.split('/').pop())
-      );
-      for (const f of fs.readdirSync(assetsDir)) {
-        if (!keep.has(f)) { try { fs.unlinkSync(path.join(assetsDir, f)); } catch (_) {} }
+  // 오래된 렌더러 에셋(이전 빌드 해시 파일) 정리 — **모든 교체가 끝난 뒤에만**, manifest 에 없는 dist/assets 파일 삭제
+  if (!failed) {
+    try {
+      const assetsDir = path.join(appDir, 'renderer', 'dist', 'assets');
+      if (fs.existsSync(assetsDir)) {
+        const keep = new Set(
+          Object.keys(manifest.files)
+            .filter((f) => f.startsWith('renderer/dist/assets/'))
+            .map((f) => f.split('/').pop())
+        );
+        for (const f of fs.readdirSync(assetsDir)) {
+          if (!keep.has(f)) { try { fs.unlinkSync(path.join(assetsDir, f)); } catch (_) {} }
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   if (updated === 0 && failed === 0) { log(`최신 상태 (${localPkg.version || '?'})`); return { updated: 0, failed: 0, reason: 'same', from: localPkg.version, to: manifest.version }; }
   if (updated === 0 && failed > 0) { log(`업데이트 실패 ${failed}건 — 현재 버전 유지`); return { updated: 0, failed, reason: 'failed', from: localPkg.version, to: manifest.version }; }
