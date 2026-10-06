@@ -5189,6 +5189,24 @@ function _sampleLang(engine, voice) {
   const m = /^([a-z]{2})-[A-Z]{2}-/.exec(String(voice || ''));
   return m ? m[1] : 'ko';
 }
+/** 🔈 OmniVoice 참조음성의 언어(v0.7.1 · 로이 「아내 PC 에선 일본 목소리 미리듣기가 한국어로」)
+ *   이 PC 에 wav 가 있으면 미리듣기가 참조음성 원본을 틀어 일본어로 들렸고, wav 가 없는 아내 PC 는
+ *   한국어 샘플 문장 + 채널 언어(ko)로 합성해 한국어로 들렸다. → 참조텍스트(이 PC .txt → 서버 라이브러리)의 글자로 판별,
+ *   못 읽으면 이름 앞머리(JA_·VI_·KO_), 그래도 없으면 채널 언어. 'cjk'(한자만) = ja. */
+async function _omniVoiceLang(voice, pr) {
+  const L = require('./core/lang');
+  const pick = (t) => { const l = L.detectLang(t); return l === 'cjk' ? 'ja' : (l === 'ko' || l === 'ja' || l === 'vi') ? l : null; };
+  const rv = String(voice || '');
+  let txt = '';
+  const local = resolveRefPath(rv);
+  if (local) { try { txt = fs.readFileSync(local.replace(/\.[^.\\/]+$/, '.txt'), 'utf8'); } catch {} }
+  if (!txt && !local && rv.startsWith('srv:')) {
+    try { const list = await require('./tts/asr-client').listServerVoices(); const v = (list || []).find((x) => x && x.name === rv.slice(4)); txt = (v && v.text) || ''; } catch {}
+  }
+  const byText = pick(txt); if (byText) return byText;
+  const nm = /^(?:srv:)?(?:.*[\\/])?(JA|VI|KO)[_-]/i.exec(rv); if (nm) return nm[1].toLowerCase();
+  return (pr && pr.language) || 'ko';
+}
 function _channelsForUi() {
   const TE = require('./tts/tts-engines');
   return require('./tts/preset-store').loadAll()
@@ -5472,32 +5490,35 @@ ipcMain.handle('tts-engine-test', async (_e, args = {}) => {
     const style = args.style || args.emotion || '';
     const sk = _sampleKey(model, voice, style);
     const idx = _sampleIndex(id);
-    if (!force && idx[sk] && fs.existsSync(path.join(TTS_SAMPLE_DIR(), id, idx[sk].file))) {
+    const pr0 = e.paid ? null : ((args.channel && P.getPreset(args.channel)) || S.preset || P.getPreset(null) || {});
+    const lang = e.paid ? _sampleLang(id, voice) : await _omniVoiceLang(voice || pr0.voiceCloneRefAudio, pr0);
+    // 🔈 OmniVoice 샘플은 언어가 맞을 때만 다시 쓴다(옛 판이 일본 목소리로 만든 한국어 샘플 — lang 기록 없음 = ko — 이 되살아나지 않게)
+    const langOk = (ent) => e.paid || (ent.lang || 'ko') === lang;
+    if (!force && idx[sk] && langOk(idx[sk]) && fs.existsSync(path.join(TTS_SAMPLE_DIR(), id, idx[sk].file))) {
       return { ok: true, path: path.join(TTS_SAMPLE_DIR(), id, idx[sk].file), sec: idx[sk].sec, cached: true };
     }
     const mgr = require('./tts/tts-manager').getInstance({ logger: log });
     await mgr.start();
     if (!(await mgr.refreshProvider(id))) return { ok: false, error: id === 'omnivoice' ? 'OmniVoice 서버에 연결하지 못했습니다' : 'API 키가 없습니다 — 키를 넣고 다시 누르세요' };
-    const lang = _sampleLang(id, voice);
     const text = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
     let opts;
     if (e.paid) {
       const fake = { voiceEngine: { id, model, voice, style: args.style, emotion: args.emotion, stability: args.stability, similarity: args.similarity } };
       opts = { provider: id, ...TE.synthExtra(id, fake), language: lang };
     } else {
-      const pr = (args.channel && P.getPreset(args.channel)) || S.preset || P.getPreset(null) || {};
+      const pr = pr0;
       const rv = String(voice || pr.voiceCloneRefAudio || '');
-      opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, language: pr.language || 'ko', seed: pr.seed };
+      opts = { provider: 'omnivoice', refName: rv.startsWith('srv:') ? rv.slice(4) : undefined, refAudioPath: rv && !rv.startsWith('srv:') ? rv : undefined, refText: rv && !rv.startsWith('srv:') ? (pr.voiceCloneRefText || undefined) : undefined, language: lang, seed: pr.seed };
     }
     const t0 = Date.now();
     const r = await mgr.synthesize(text, opts);
     const dir = path.join(TTS_SAMPLE_DIR(), id); fs.mkdirSync(dir, { recursive: true });
     const file = `${_voiceFileKey(voice)}_${require('crypto').createHash('sha1').update(sk).digest('hex').slice(0, 8)}.wav`;
     fs.writeFileSync(path.join(dir, file), r.mp3Buffer);
-    const idx2 = _sampleIndex(id); idx2[sk] = { file, sec: r.durationSec, chars: text.length, at: Date.now() };
+    const idx2 = _sampleIndex(id); idx2[sk] = { file, sec: r.durationSec, chars: text.length, at: Date.now(), lang };
     fs.writeFileSync(_sampleIndexPath(id), JSON.stringify(idx2));
     const usd = TE.estimateUsd(id, model, text.length, r.durationSec);
-    log(`🔈 샘플 — ${e.label} · ${model || ''} · ${voice || '채널 목소리'} · ${r.durationSec.toFixed(1)}초${usd ? ` · 약 $${usd.toFixed(4)}` : ''} · ${((Date.now() - t0) / 1000).toFixed(1)}초 걸림(저장 — 다음부터 무료)`);
+    log(`🔈 샘플 — ${e.label} · ${model || ''} · ${voice || '채널 목소리'} · ${lang} · ${r.durationSec.toFixed(1)}초${usd ? ` · 약 $${usd.toFixed(4)}` : ''} · ${((Date.now() - t0) / 1000).toFixed(1)}초 걸림(저장 — 다음부터 무료)`);
     return { ok: true, path: path.join(dir, file), sec: r.durationSec, cached: false, usd };
   } catch (err) { log('🔈 샘플 실패: ' + err.message); return { ok: false, error: err.message }; }
 });
