@@ -60,8 +60,13 @@ function parseScriptText(text, mode = 'longform', thresholds = {}) {
 }
 
 /** Project[] → 렌더러용 직렬화 DTO */
+// 🟥·🟨 로이 표시(core/roy-marks) — main 이 「대본 .md 를 읽어 표시를 문장에 붙이는」 함수를 건다(.md 경로·캐시는 main 이 안다).
+//   DTO 를 만들 때마다 부르되 main 쪽이 (.md 수정 시각 + 문장 id) 로 캐시한다 · 실패해도 DTO 는 만든다(fail-open — 색만 빠진다).
+let _royHook = null;
+function setRoyHook(fn) { _royHook = typeof fn === 'function' ? fn : null; }
 function toDTO(parseResult) {
   const { fileTitle, meta, projects } = parseResult;
+  if (_royHook) { try { _royHook(parseResult); } catch (_) {} }
   const mode = normalizeMode(parseResult.mode || (projects[0] && projects[0].mode));
   const capChars = getModeProfile(mode).captionMaxChars;
   // 🖼 그림 범위(아래층으로 이어 깔기) — 그룹마다 실제 범위와 「앞 그림이 보이는 그룹」 표시
@@ -88,6 +93,7 @@ function toDTO(parseResult) {
         logoOver: pr.logoOver || null,
         capAll: pr.capAll || null,   // 🌐 이 대본 「모든 자막」 서식(새 문장에도 저절로 · v0.6.87)   // 🏷 이 대본 로고 넣기/빼기(큐 일괄 · 없으면 채널 설정대로)   // 🏷 ① 칸에서 끌어 옮긴 자리 {x,y}(있으면 위 자리보다 이긴다)
         readerNotes: (pr.readerNotes && pr.readerNotes.length) ? pr.readerNotes : null,   // 📝 대본 읽기 전용 메모(장 제목 아래)
+        roy: pr._roy ? require('./roy-marks').countMarks(pr._roy.marks) : null,   // 🟥·🟨 개수 {exp, expOpen, int, lost} — 대본 보기 머리
         ttsVoice: pr.ttsVoice || null,   // 🎙 이 대본 목소리(리본 🔊 음성 설정) — 없으면 채널 목소리
         ttsVoiceText: pr.ttsVoice ? (TtsEngines.voiceText(pr.ttsVoice) || null) : null,
         spkVoices: (pr.spkVoices && Object.keys(pr.spkVoices).length) ? pr.spkVoices : null,   // 🎙 이 대본의 화자 목소리(클립 「🗣」 — 화자 이름 → 목소리)
@@ -118,7 +124,8 @@ function toDTO(parseResult) {
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
-              hn: require('./clip-history').countOf(s) || 0,   // 🕘 이 문장을 고친 횟수(이력 버튼 배지)
+              hn: require('./clip-history').countOf(s) || 0,
+              roy: (pr._roy && pr._roy.bySid[s.id]) || null,   // 🟥·🟨 표시 {mid, k:'exp'|'int', st, first}   // 🕘 이 문장을 고친 횟수(이력 버튼 배지)
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
               lines: splitCaptionLines(s.text || '', capChars, s.capBreaks).map((t) => ({ n: ++capN, text: t })),
             })),
@@ -1049,7 +1056,7 @@ function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-module.exports = { speakerVoiceMap, nudgePromptForRetry,
+module.exports = { setRoyHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,

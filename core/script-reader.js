@@ -7,7 +7,8 @@
  *   ⚠ 렌더러 번들에도 들어간다 — 정적 require('./yt-chapters') 외의 CJS 런타임 참조(typeof require 등)를 두지 말 것(v0.3.40 백지 화면 사고).
  *
  * 입력 = DTO 한 편(pr.title · cuts[].h2/phase/num/sentences[].text/speaker/mark). 이미지·영상 프롬프트·메타는 넣지 않는다.
- * 블록: {t:'h1'|'h2'|'h3', text} · {t:'note', text} · {t:'p', groupNum, sents:[{i, text, speaker}]}
+ * 블록: {t:'h1'|'h2'|'h3', text} · {t:'note', text} · {t:'p', groupNum, sents:[{i, text, speaker, roy}]}
+ *   roy = 🟥 경험 · 🟨 해석 표시 {mid, k:'exp'|'int', st:'은행'|'가안'|'확인'|null, first} (v0.6.99 · 없으면 null)
  *   note = 대본의 `> 📝 …` 제작 메모(낭독 제외 · 파서 readerNotes) — 그 장(H2) 제목 바로 아래. notes:false 면 뺀다(v0.5.66).
  *   i = 그 그룹 안 문장 번호(0부터) — 화면에서 고칠 때 edit-sentences 가 쓰는 주소와 같다.
  */
@@ -85,7 +86,7 @@ function readerBlocks(pr, { headings = true, notes = true } = {}) {
         p = { t: 'p', groupNum: c.num, sents: [] };
       }
       const text = String(s.text || '').trim();
-      if (text) p.sents.push({ i, text, speaker: s.speaker || null });
+      if (text) p.sents.push({ i, text, speaker: s.speaker || null, roy: s.roy || null });   // 🟥·🟨 표시(core/roy-marks)
     });
     if (p.sents.length) out.push(p);
   }
@@ -213,6 +214,9 @@ function paragraphEdits(oldTexts, newText) {
   return out;
 }
 
+/** 🟥·🟨 표시 꼬리표 글 — 화면 칩과 PDF 가 같은 말을 쓴다 */
+const royLabel = (r) => (r.k === 'exp' ? `🟥 경험·${r.st || '가안'}` : '🟨 해석');
+
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
@@ -245,7 +249,11 @@ function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
     if (b.t === 'h2') return `<h2>${esc(b.text)}</h2>`;
     if (b.t === 'h3') return `<h3>${esc(b.text)}</h3>`;
     if (b.t === 'note') return `<div class="note">${noteInnerHtml(b)}</div>`;
-    const inner = b.sents.map((s) => (s.speaker ? `<b class="spk">${esc(s.speaker)}</b> ` : '') + esc(s.text)).join(' ');
+    const inner = b.sents.map((s) => {
+      const r = s.roy, cls = r ? (r.k === 'exp' ? (r.st === '확인' ? 'roy-ok' : 'roy-exp') : 'roy-int') : '';
+      const tag = r && r.first ? `<span class="roy-tag">${esc(royLabel(r))}</span> ` : '';
+      return tag + (s.speaker ? `<b class="spk">${esc(s.speaker)}</b> ` : '') + (cls ? `<span class="${cls}">${esc(s.text)}</span>` : esc(s.text));
+    }).join(' ');
     return `<p>${groupNums ? `<span class="gn">G${b.groupNum}</span>` : ''}${inner}</p>`;
   }).join('\n');
   const f = Math.max(7, Math.min(20, Number(fontPt) || 11));
@@ -264,6 +272,8 @@ p { margin: 0 0 ${(f * 0.75).toFixed(1)}pt; text-align: left; orphans: 2; widows
 .nt-list { display: grid; grid-template-columns: max-content 1fr; column-gap: 0.9em; row-gap: 0.2em; }
 .nt-label { font-weight: 700; color: #6a7686; white-space: nowrap; }
 .nt-para { margin: 0.15em 0; }
+.roy-exp { background: #fbd9d6; } .roy-ok { background: #fdeeed; } .roy-int { background: #fbf0c4; }
+.roy-tag { font-size: 0.72em; font-weight: 700; color: #9b2c22; white-space: nowrap; }
 .gn { display: inline-block; min-width: 2.6em; color: #a89682; font-size: 0.78em; font-weight: 700; }
 </style></head><body>
 ${body}
@@ -282,4 +292,4 @@ function nUpLayout(n) {
 }
 const PER_SHEET = [1, 2, 4, 6, 9];
 
-module.exports = { noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, charsWithSpaces, fmtChars, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };
+module.exports = { royLabel, noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, charsWithSpaces, fmtChars, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };

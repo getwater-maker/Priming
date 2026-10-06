@@ -94,6 +94,7 @@ function readerNotesOf(raw) {
     const h = line.match(/^##\s+(.+?)\s*$/);
     if (h) { h2 = h[1]; continue; }
     const m = h2 != null && line.match(/^\s*>\s*📝\s*(.+?)\s*$/u);
+    if (m && require('../roy-marks').isMarkLine(line)) continue;   // 🟥·🟨 표시 줄은 메모가 아니다 — 문장에 색으로 보인다(core/roy-marks)
     if (m) out.push({ h2, text: m[1].replace(/\*\*/g, '').trim() });
   }
   return out;

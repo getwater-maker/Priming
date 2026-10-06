@@ -33,10 +33,25 @@ const NOTE_ST = {
 // 고칠 수 없는 조각(제목·화자 이름·그룹 번호) = data-ne. 글을 읽을 때 건너뛴다. 이름 칩의 뒤 공백도 칩 안에 둔다
 //   → 읽은 글 = 문장들을 공백 하나로 이은 글(joinParagraph)과 정확히 같다.
 const NE = 'data-ne="1" contenteditable="false"';
+// 🟥 경험 · 🟨 해석 (v0.7.3 · core/roy-marks) — 표시된 문장은 바탕색, 표시의 첫 문장 앞에 칩(고칠 수 없는 조각 · 🟥 미확인이면 「사실 확인」 단추)
+const ROY_BG = { exp: '#fbd9d6', ok: '#fdeeed', int: '#fbf0c4' };
+const ROY_CHIP = 'display:inline-block;font-size:0.68em;font-weight:700;border-radius:4px;padding:0 5px;margin-right:4px;user-select:none;vertical-align:1px;line-height:1.6';
+function royChip(r) {
+  if (r.k === 'int') return `<span ${NE} data-roy-tag="int" style="${ROY_CHIP};background:#f3e3a0;color:#6b5400">${escHtml(sr.royLabel(r))} </span>`;
+  if (r.st === '확인') return `<span ${NE} data-roy-tag="ok" style="${ROY_CHIP};background:#f4d4d0;color:#7a3a33">🟥 확인됨 ✓ </span>`;
+  return `<span ${NE} data-roy-tag="exp" style="${ROY_CHIP};background:#e9a49c;color:#5c1610">${escHtml(sr.royLabel(r))} `
+    + `<button type="button" data-roy-confirm="${escHtml(r.mid)}" title="실제로 있었던 일이면 고치지 않아도 누르세요 — 「확인」이 되고 경험은행에 적힙니다(고쳐 저장해도 자동 확인)" `
+    + `style="font-size:1em;padding:0 6px;margin-left:2px;border-radius:4px;border:1px solid #9b2c22;background:#fff;color:#9b2c22;cursor:pointer">사실 확인</button> </span>`;
+}
 function paraInner(sents, groupNum, groupNums) {
   return (groupNums ? `<span ${NE} style="display:inline-block;min-width:2.6em;color:#a89682;font-size:0.75em;font-weight:700;user-select:none">G${groupNum}</span>` : '')
-    + sents.map((s, k) => (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
-      + escHtml(s.text) + (k < sents.length - 1 ? ' ' : '')).join('');
+    + sents.map((s, k) => {
+      const r = s.roy, bg = r ? ROY_BG[r.k === 'exp' ? (r.st === '확인' ? 'ok' : 'exp') : 'int'] : '';
+      return (r && r.first ? royChip(r) : '')
+        + (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
+        + (bg ? `<span data-roy="${r.k}" style="background:${bg};border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
+        + (k < sents.length - 1 ? ' ' : '');
+    }).join('');
 }
 function docModel(dto, headings, groupNums, notes) {
   const paras = [];
@@ -129,6 +144,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
 
   const projects = (dto && dto.projects) || [];
   const stats = useMemo(() => projects.reduce((a, p) => { const x = sr.readerStats(p); return { chars: a.chars + x.chars, sents: a.sents + x.sents, dur: a.dur + x.dur }; }, { chars: 0, sents: 0, dur: 0 }), [dto]);
+  const royC = useMemo(() => projects.reduce((a, p) => { const r = p.roy || {}; return { exp: a.exp + (r.exp || 0), expOpen: a.expOpen + (r.expOpen || 0), int: a.int + (r.int || 0), lost: a.lost + (r.lost || 0) }; }, { exp: 0, expOpen: 0, int: 0, lost: 0 }), [dto]);
   const anyDirty = () => [...parasRef.current.values()].some((p) => p.dirty);
   const busyNow = () => st.current.composing || st.current.saving || anyDirty();
 
@@ -196,7 +212,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     if (!dirty.length) { setSaveSt((x) => (x === 'dirty' ? '' : x)); return; }
     S.saving = true; S.pending = false; setSaveSt('saving');
     let last = null, sent = 0;
-    const errs = [];
+    const errs = [], banked = [];
     for (const p of dirty) {
       const v = p.last;
       const hunks = sr.paragraphEdits(p.base.map((s) => s.text), v);
@@ -211,6 +227,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           if (r && r.stale) { S.saving = false; for (const q of parasRef.current.values()) q.dirty = false; rebuild(); setSaveSt(''); setMsg('✗ ' + r.error); return; }
           if (!r || !r.ok) { err = (r && r.error) || '고치지 못했습니다'; break; }
           last = r.dto; sent++;
+          if (r.royBank && r.royBank.length) { banked.push(...r.royBank); S.needRebuild = true; }   // 🟥 자동 확인 → 칩을 새로 그린다
           refreshGroup(last, p.shortsNum, p.groupNum);
         }
       } catch (e) { err = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
@@ -220,7 +237,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     S.saving = false; S.lastErr = errs.length > 0;
     if (last) onDto(last);
     if (errs.length) { setSaveSt(''); setMsg('✗ ' + errs.join(' / ') + ' — 그 부분은 대본(.md)에서 직접 고치세요.'); }
-    else if (sent) { setSaveSt('saved'); setMsg(`✓ 바뀐 문장 ${sent}곳을 대본(.md)에 저장했습니다 — 고친 문장의 음성은 🎤 TTS 로 다시 만들면 됩니다.`); }
+    else if (sent) { setSaveSt('saved'); setMsg(`✓ 바뀐 문장 ${sent}곳을 대본(.md)에 저장했습니다 — 고친 문장의 음성은 🎤 TTS 로 다시 만들면 됩니다.` + royBankMsg(banked)); }
     else setSaveSt('');
     if ((S.pending || anyDirty()) && !S.composing) return flushAll();
     if (S.needRebuild && !S.composing) rebuild(last || dtoRef.current);
@@ -253,6 +270,25 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     clearTimeout(st.current.timer); setSaveSt(''); setMsg('↩ 저장 안 된 고침을 되돌렸습니다.');
   }
   async function close() { await settle(); onClose(); }
+
+  // 🟥 「사실 확인」 — 고치지 않았어도 누르면 확인(손대지 않음 ≠ 확인) · 저장 안 된 고침을 먼저 저장한다
+  function royBankMsg(list) {
+    if (!list || !list.length) return '';
+    const e = list.filter((b) => b.k === 'exp').length, i = list.length - e, pend = list.some((b) => b.pending);
+    return ` · 🏦 ${[e ? `경험은행 ${e}줄` : '', i ? `해석해설은행 ${i}줄` : ''].filter(Boolean).join(' · ')}${pend ? '(⚠ 은행 폴더가 없어 대기 파일에)' : ''}`;
+  }
+  async function confirmRoy(btn) {
+    const pEl = btn.closest('p[data-key]');
+    const par = pEl && parasRef.current.get(pEl.dataset.key);
+    if (!par) return;
+    await settle();
+    try {
+      const r = await api.royConfirm({ shortsNum: par.shortsNum, mid: btn.dataset.royConfirm });
+      if (!r || !r.ok) { setMsg('✗ ' + ((r && r.error) || '확인하지 못했습니다')); return; }
+      if (r.dto) { onDto(r.dto); rebuild(r.dto); }
+      setMsg(r.already ? 'ⓘ 이미 확인한 경험입니다.' : '✓ 사실 확인 — 이 경험은 렌더해도 됩니다' + royBankMsg(r.bank ? [r.bank] : []));
+    } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+  }
 
   // ── 🔒 잠금 — beforeinput 한 곳에서 판정 ──────────────────────────────
   useEffect(() => {
@@ -301,6 +337,12 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           <b style={{ color: 'var(--strong)', fontSize: 15 }}>📄 대본 읽기</b>
           {saveSt && <span data-testid="reader-save" className="meta" style={{ color: saveSt === 'saved' ? 'var(--ok)' : 'var(--warn)' }}>{saveSt === 'saving' ? '⏳ 저장 중…' : saveSt === 'saved' ? '✓ 저장됨' : '✏ 고치는 중 — 멈추면 저장'}</span>}
           <span className="meta">{stats.sents}문장 · {stats.chars.toLocaleString()}자(공백 제외){stats.dur ? ` · 음성 ${fmtMin(stats.dur)}` : ''}</span>
+          {(royC.exp + royC.int + royC.lost) > 0 && (
+            <span data-testid="reader-roy" className="meta" title="🟥 = 1인칭 경험(실제 로이의 일만 · 고치거나 「사실 확인」) · 🟨 = 해석(고치고 싶을 때만). 고친 글은 은행에 「Claude 원문 → 로이 수정」으로 쌓입니다"
+              style={{ fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)' }}>
+              🟥 미확인 {royC.expOpen}{royC.exp > royC.expOpen ? ` (확인 ${royC.exp - royC.expOpen})` : ''} · 🟨 {royC.int}{royC.lost ? ` · ⚠ 못 찾은 표시 ${royC.lost}` : ''}
+            </span>
+          )}
           <span style={{ flex: 1 }} />
           <span className="meta">화면 글자</span>
           <button className="ghost" style={{ padding: '3px 9px' }} onClick={() => setFontPx((f) => Math.max(12, f - 1))}>−</button>
@@ -350,6 +392,8 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
               }}
               onCut={(e) => { const s = window.getSelection(); if (s.rangeCount && !rangeOk(docRef.current, s.getRangeAt(0))) { e.preventDefault(); setMsg('ⓘ 문단을 걸친 잘라내기는 할 수 없습니다.'); } }}
               onDrop={(e) => e.preventDefault()}
+              onMouseDown={(e) => { if (e.target.closest && e.target.closest('[data-roy-confirm]')) e.preventDefault(); }}   // 단추를 눌러도 커서·초점이 튀지 않게
+              onClick={(e) => { const b = e.target.closest && e.target.closest('[data-roy-confirm]'); if (b) { e.preventDefault(); confirmRoy(b); } }}
               onBlur={() => { if (!st.current.composing) flushAll(); }} />
           </div>
           <div className="meta" style={{ textAlign: 'center', marginTop: 10 }}>대본 전체를 워드처럼 고칩니다 — 손을 멈추거나 편집면 밖을 누르면 <b>바뀐 문장만</b> 대본(.md)에 저장합니다(한글 조합 중에는 저장하지 않음) · Enter = 지금 저장 · Esc = 저장 안 된 고침 되돌리기.

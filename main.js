@@ -2025,6 +2025,7 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
   S.abort = false;
+  if (!dry && !(await royGate(S.parsed, { what: '전체 TTS' }))) return { ok: false, error: 'roy-open' };   // 🟥 미확인 경험
   if (!dry) {
     S.preset = P.getPreset(presetName);
     if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
@@ -6599,6 +6600,7 @@ async function runMakeAllBody(opts = {}) {
   //   1009 를 만드는 도중 1007 을 클릭하자 1009 내용이 「[역사_1007] ….vrew/.mp4」 로 구워지고 1007 제목으로 업로드됐다(2026-10-05 실사고).
   //   이 함수 안에서 이름·제목·대본 경로가 필요한 곳은 전부 runCtx 를 넘긴다(test:runctx 가 센다).
   const scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
+  if (!opts.dry && !(await royGate(parsed, { queue: !!opts._fromQueue, what: '만들기' }))) return;   // 🟥 미확인 경험(큐 = 던져서 그 편 실패·다음 편 계속)
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
@@ -7063,6 +7065,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
         outTarget: (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew')),
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
+        _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
       });
       it.status = 'done'; okN++;
     } catch (e) {
@@ -7832,6 +7835,7 @@ async function _editSentences(args = {}) {
     }
   }
 
+  try { ensureRoyMarks(S.parsed); } catch (_) {}   // 🟥·🟨 표시를 지금 대본 기준으로(고친 문장이 어느 표시에 드는지 아래에서 본다)
   const raw = fs.readFileSync(S.scriptPath, 'utf8');
   const texts = pr.sentences.map((s) => s.text);
   const plan = SE.planEdit({ raw, texts, from, count: n, newText: text });
@@ -7854,6 +7858,7 @@ async function _editSentences(args = {}) {
   catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
   const old = gs.slice(si, si + n);
+  const _royTouched = new Set(old.map((o) => pr._roy && pr._roy.bySid[o.id]).filter(Boolean).map((x) => x.mid));   // 🟥·🟨 고친 표시
   // 🎨 줄별·글자별 자막 서식을 새 글로 옮긴다 — 오타 하나를 고쳤다고 서식이 사라지면 안 된다(나누기·합치기도 글자 위치로 따라간다)
   const _spansMoved = old.some((o) => o.capSpans && o.capSpans.length)
     ? require('./core/caption-format').remapSpansMulti(old.map((o) => o.text), old.map((o) => o.capSpans || []), plan.newTexts)
@@ -7896,10 +7901,13 @@ async function _editSentences(args = {}) {
   //   그림을 새로 만들지는 그룹의 🔄 로 사람이 정한다. ⚠ 앱 **밖에서** .md 를 고친 경우의 보호(overlaySnapshot 의
   //   문장 비교 → imageStale)는 그대로다 — 여기서는 새 대본 해시를 심으므로 그 길을 타지 않는다.
 
+  // 🟥·🟨 표시된 문장을 고쳤다 — 🟥 는 자동 「확인」(표시 줄 고침) · 「Claude 원문 → 로이 수정」 한 줄을 은행에(core/roy-bank)
+  let royBank = [];
+  if (_royTouched.size) { try { royBank = _royAfterEdit(pr, _royTouched); } catch (e) { log('⚠ 로이은행 기록 실패: ' + e.message); } }
+
   // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
   //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
-  const nh = scriptHash(S.scriptPath);
-  try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
+  _setSrcHash();
 
   storeActive(); dtoByReply(); syncSnapshotNow();   // 💾 .md 와 작업본을 같은 순간에
   const kind = !String(text).trim() ? '삭제' : (n > 1 ? `${n}문장 병합` : (made.length > 1 ? `${made.length}문장으로 나눔` : '수정'));
@@ -7908,9 +7916,118 @@ async function _editSentences(args = {}) {
     + (_spl === 'merge' ? ' · 음성은 두 문장 것을 이어 붙였습니다' : _spl === 'split' ? ' · 음성은 쉼에서 나눠 각 문장에 붙였습니다' : _spl === 'move' ? ' · 음성은 클립 경계에서 잘라 그대로 옮겼습니다' : '')
     + (lost ? ` · 음성 ${lost}개는 다시 만들어야 합니다(🎤)` : (_spl ? '' : ' · 음성 그대로'))
     + ' · 이미지는 그대로(새로 그리려면 그 그룹의 🔄)');
-  return { ok: true, dto: P.toDTO(S.parsed) };
+  return { ok: true, dto: P.toDTO(S.parsed), royBank };
 }
 ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));   // async
+
+// ── 🟥 경험 · 🟨 해석 표시 + 로이은행 (v0.7.3 · 채널사업부 요청 2026-10-06 「화자는 실제 로이」) ─────────────────
+//   표시 문법·문장 맞추기 = core/roy-marks(순수) · 은행 쓰기·원문 기억 = core/roy-bank. 여기는 .md 를 읽고 쓰는 접착만.
+//   🔑 표시는 파싱본에 저장하지 않는다 — pr._roy(열거 안 됨 · 작업본에 안 실림)에 (.md 수정 시각 + 문장 id) 열쇠로 캐시하고
+//     DTO 를 만들 때마다(P.setRoyHook) 열쇠가 바뀌었으면 .md 를 다시 읽는다. .md 가 정본이라 밖에서 고쳐도 저절로 따라간다.
+const RoyMarks = require('./core/roy-marks');
+const RoyBank = require('./core/roy-bank');
+function _royScriptOf(parsed) {
+  if (!parsed || parsed.kind === 'book') return null;
+  if (parsed === S.parsed && S.scriptPath) return S.scriptPath;
+  for (const it of (S.modes.longform && S.modes.longform.items) || []) if (it.parsed === parsed) return it.scriptPath || null;
+  return null;
+}
+const _royBase = (sp) => path.basename(sp || '').replace(/\.md$/i, '');
+function _royChannelOf(parsed) {
+  const it = ((S.modes.longform && S.modes.longform.items) || []).find((x) => x.parsed === parsed);
+  return (it && it.settings && it.settings.presetName) || (S.preset && S.preset.name) || '';
+}
+function ensureRoyMarks(parsed, force = false) {
+  const sp = _royScriptOf(parsed); if (!sp) return;
+  let st; try { st = fs.statSync(sp); } catch { return; }   // 드라이브가 잠깐 없으면 옛 표시 그대로
+  let raw = null;
+  for (const pr of parsed.projects || []) {
+    const key = `${st.mtimeMs}|${st.size}|${(pr.sentences || []).map((x) => x.id).join(',')}`;
+    if (!force && pr._roy && pr._roy.key === key) continue;
+    if (raw == null) raw = fs.readFileSync(sp, 'utf8');
+    const r = (raw.includes('🟥') || raw.includes('🟨')) ? RoyMarks.attachMarks(raw, pr.sentences) : { marks: [], bySid: {} };
+    const lost = r.marks.filter((m) => !m.found).length;
+    if (lost && !(pr._roy && pr._roy.lost === lost)) log(`⚠ 🟥·🟨 표시 ${lost}곳이 가리키는 문단을 찾지 못했습니다 — 표시 줄 바로 아래에 본문 문단이 있는지 대본(.md)에서 확인하세요`);
+    try { Object.defineProperty(pr, '_roy', { value: { key, lost, ...r }, enumerable: false, writable: true, configurable: true }); } catch (_) { pr._roy = { key, lost, ...r }; }
+    if (r.marks.length) RoyBank.rememberOriginals(_royBase(sp), r.marks);
+  }
+}
+P.setRoyHook((parsed) => ensureRoyMarks(parsed));
+/** 미확인 🟥 개수(렌더·TTS 관문) */
+function royOpenCount(parsed) {
+  try { ensureRoyMarks(parsed); } catch (_) { return 0; }
+  return ((parsed && parsed.projects) || []).reduce((a, pr) => a + (pr._roy ? RoyMarks.countMarks(pr._roy.marks).expOpen : 0), 0);
+}
+function _setSrcHash(parsed = S.parsed, sp = S.scriptPath) {
+  const nh = scriptHash(sp);
+  try { Object.defineProperty(parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { parsed._srcHash = nh; }
+}
+function _royAppend(parsed, sp, m, how) {
+  const b = RoyBank.append({ scriptBase: _royBase(sp), channel: _royChannelOf(parsed), mark: m, how });
+  log(`🏦 ${m.k === 'exp' ? '경험은행' : '해석해설은행'}에 적었습니다 — ${b.id} (${how})${b.pending ? ` · ⚠ 은행 폴더(${RoyBank.bankDir()})가 없어 ${b.file} 에 모아 두었습니다` : ''}`);
+  return { id: b.id, k: m.k, how, pending: b.pending };
+}
+// 표시된 문장을 고친 뒤 — 원문은 「고침」 표시로 굳히고(다시 읽어도 로이 글이 원문이 되지 않게), 🟥 는 확인으로, 은행에 한 줄
+function _royAfterEdit(pr, mids) {
+  const sp = S.scriptPath, base = _royBase(sp), out = [];
+  for (const mid of mids) RoyBank.markEdited(base, mid);   // ⚠ 다시 읽기(rememberOriginals) **전에** — 순서가 바뀌면 로이 글이 원문이 된다
+  ensureRoyMarks(S.parsed, true);
+  for (const mid of mids) {
+    let m = pr._roy && pr._roy.marks.find((x) => x.mid === mid && x.found);
+    if (!m) { log(`⚠ 고친 문장의 🟥·🟨 표시(${mid})를 다시 찾지 못해 은행에 적지 않았습니다`); continue; }
+    if (m.k === 'exp' && m.st !== '확인') {
+      const nr = RoyMarks.setMarkState(fs.readFileSync(sp, 'utf8'), m.line, '확인');
+      if (nr) { fs.writeFileSync(sp, nr, 'utf8'); ensureRoyMarks(S.parsed, true); m = pr._roy.marks.find((x) => x.mid === mid) || m; log(`🟥 고쳐 저장한 경험 문단을 「확인」으로 바꿨습니다(${mid})`); }
+    }
+    out.push(_royAppend(S.parsed, sp, m, '수정'));
+  }
+  return out;
+}
+// 🟥 「사실 확인」 — 고치지 않았어도 누르면 확인(손대지 않음 ≠ 확인 · 화자 규약 §4)
+ipcMain.handle('roy-confirm', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const sp = S.scriptPath;
+  if (!sp || !fs.existsSync(sp)) throw new Error('대본 파일(.md)을 찾을 수 없습니다.');
+  ensureRoyMarks(S.parsed, true);
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum) || S.parsed.projects[0];
+  let m = pr && pr._roy && pr._roy.marks.find((x) => x.mid === args.mid);
+  if (!m || !m.found) return { ok: false, error: '표시를 찾을 수 없습니다 — 대본이 밖에서 바뀌었으면 대본 보기를 닫았다 다시 여세요.' };
+  if (m.k !== 'exp') return { ok: false, error: '🟨 해석은 확인하지 않아도 됩니다(고치고 싶을 때만 고치세요).' };
+  if (m.st === '확인') return { ok: true, already: true, dto: P.toDTO(S.parsed) };
+  const nr = RoyMarks.setMarkState(fs.readFileSync(sp, 'utf8'), m.line, '확인');
+  if (!nr) return { ok: false, error: '표시 줄을 고치지 못했습니다 — 대본(.md)의 표시 줄을 확인하세요.' };
+  const _u = undoPush('사실 확인', { md: true });
+  try { fs.writeFileSync(sp, nr, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  _setSrcHash();
+  ensureRoyMarks(S.parsed, true);
+  m = pr._roy.marks.find((x) => x.mid === args.mid) || m;
+  const rec = RoyBank.loadStore(_royBase(sp)).marks[m.mid];
+  const how = rec && RoyMarks.sig(rec.orig) !== RoyMarks.sig(m.text) ? '수정' : '그대로';
+  let bank = null;
+  try { bank = _royAppend(S.parsed, sp, m, how); } catch (e) { log('⚠ 경험은행 기록 실패: ' + e.message); }
+  log(`🟥 사실 확인 — ${_royBase(sp)} · ${m.mid}`);
+  storeActive(); dtoByReply(); syncSnapshotNow();
+  return { ok: true, dto: P.toDTO(S.parsed), bank };
+});
+// 🟥 미확인이 남은 편 — 단건은 묻고(멈춤 기본), 큐는 그 편을 건너뛴다(밤새 창이 떠서 큐가 서지 않게)
+async function royGate(parsed, { queue = false, what = '만들기' } = {}) {
+  const n = royOpenCount(parsed);
+  if (!n) return true;
+  const title = (parsed && parsed.fileTitle) || '';
+  if (queue) throw new Error(`🟥 미확인 경험 ${n}곳 — 대본 보기에서 「사실 확인」을 하세요(이 대본은 건너뜁니다)`);
+  let go = false;
+  try {
+    const c = await dialog.showMessageBox(win, {
+      type: 'warning', title: '🟥 확인 안 된 경험', buttons: ['멈춤', '그래도 진행'], defaultId: 0, cancelId: 0, noLink: true,
+      message: `「${title}」 — 🟥 미확인 경험 ${n}곳이 남아 있습니다.`,
+      detail: '대본의 「나」는 실제 로이입니다. 📄 대본 보기에서 🟥 문단을 실제 일로 고치거나 「사실 확인」을 누른 뒤 진행하세요.\n그래도 진행하면 로그에 남깁니다.',
+    });
+    go = c.response === 1;
+  } catch (_) { go = false; }
+  if (!go) { log(`⏹ ${what} 멈춤 — 🟥 미확인 경험 ${n}곳(📄 대본 보기에서 확인하세요)`); return false; }
+  log(`⚠ 🟥 미확인 경험 ${n}곳인 채로 ${what} 진행(로이 선택)`);
+  return true;
+}
 
 require('./core/clip-history').setScopeFn(() => (S.scriptPath ? path.basename(S.scriptPath) : ''));   // 이력은 대본 파일명 안에서만 이어진다(같은 글이 다른 대본에 있어도 안 섞인다)
 // 🕘 클립 수정 이력 — 한 문장의 지난 글들을 보여 주고(clip-history) 그 글로 되돌린다(clip-history-restore · 되돌려도 이력은 남는다)

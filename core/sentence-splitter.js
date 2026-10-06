@@ -363,4 +363,4 @@ const MATCH_PATTERNS = {
 const CHAR_COUNT_TAIL_RE = /\s*\/\s*[\d,]+\s*자\s*$/;
 function stripCharCountTail(s) { return String(s == null ? '' : s).replace(CHAR_COUNT_TAIL_RE, '').trim(); }
 
-module.exports = { aozoraMark, stripAozoraFrame, splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS, stripCharCountTail, CHAR_COUNT_TAIL_RE };
+module.exports = { aozoraMark, stripAozoraFrame, splitIntoSentences, splitWithSections, splitIntoSentencesWithIntro, splitHybrid, MATCH_PATTERNS, stripCharCountTail, CHAR_COUNT_TAIL_RE, SPEAKER_LINE_RE, HEADER_LINE_CAPTURE, BRACKET_SECTION_RE };
