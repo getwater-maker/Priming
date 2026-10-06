@@ -72,7 +72,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(/문서 1 \/ \d+/.test(pos), '문서 n / N 표시 — ' + pos);
     const lv = async (id) => win.locator('[data-testid=bk-eb-chk-' + id + ']').getAttribute('data-level');
     for (const id of ['cover', 'colpos', 'isbn', 'date', 'req', 'copyright', 'fn', 'ver']) ok((await lv(id)) === 'ok', `점검 ${id} ✅`);
-    ok(/표지 이미지.*c\.jpg/.test(await win.locator('[data-testid=bk-eb-chk-cover]').innerText()), '1쪽 표지 출처(파일 이름) 표시');
+    ok(/통과/.test(await win.locator('[data-testid=bk-eb-sum]').innerText()) && await win.locator('[data-testid=bk-eb-checks]').evaluate((el) => !el.open), '점검이 전부 통과면 한 줄(「✅ … 통과」)로 접혀 있다');
+    ok(/표지 이미지.*c\.jpg/.test(await win.locator('[data-testid=bk-eb-chk-cover]').textContent()), '1쪽 표지 출처(파일 이름) 표시');
     // 판권위치: 앞 → 2번째 문서가 판권
     await win.locator('[data-testid=bk-ebook] .bkbar button[title="다음 문서"]').click();
     await win.waitForFunction(() => /문서 2 \//.test(document.querySelector('[data-testid=bk-eb-pos]').textContent), null, { timeout: 15000 });
@@ -87,6 +88,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.click('[data-testid=bk-view-ebook]');
     await win.waitForFunction(() => { const e = document.querySelector('[data-testid=bk-eb-chk-isbn]'); return e && e.getAttribute('data-level') === 'err'; }, null, { timeout: 120000 }).catch(() => {});
     ok((await lv('isbn')) === 'err' && /ISBN 없음/.test(await win.locator('[data-testid=bk-eb-chk-isbn]').innerText()), '판권에 ISBN 이 없으면 ❌ 「판권에 ISBN 없음」');
+    ok(await win.locator('[data-testid=bk-eb-checks]').evaluate((el) => el.open), '문제가 있으면 점검이 저절로 펼쳐진다');
     ok((await lv('date')) === 'err', '판권에 발행일이 없으면 ❌');
     ok((await lv('req')) === 'err' && /빠짐/.test(await win.locator('[data-testid=bk-eb-chk-req]').innerText()), '필수 항목이 빠지면 ❌ + 빠진 항목 이름');
     ok((await lv('colpos')) === 'ok', '판권이 마지막 쪽이면 위치는 ✅');

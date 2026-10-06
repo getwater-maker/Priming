@@ -266,6 +266,8 @@ function bookDTO(parsed) {
     footnoteCount: Object.keys(parsed.footnotes || {}).length,
     footnoteIssues: (() => { try { const F = require('./core/book/footnote-check'); const fx = F.footnoteIssues(parsed); return { ...fx, warnings: F.warnings(fx) }; } catch (_) { return null; } })(),
     reserved: BK.reservedSections(),
+    // 📜 판권 고지문(`[판권]` 섹션의 목록 줄 — 「* 번역·기획: …」) — 판권 탭 입력칸이 이 줄들을 그대로 읽고 쓴다(v0.7.15)
+    colophonNotes: (() => { const sec = (parsed.back || []).find((s) => s.key === 'colophon'); return sec ? (sec.blocks || []).filter((b) => b && b.type === 'list').flatMap((b) => (b.items || []).map((it) => String(it.text || ''))) : []; })(),
     fontOptions: (() => { const av = require('./core/book/pdf-builder').externalFontAvailable(); return require('./core/book/html-builder').FONT_OPTIONS.map((o) => (o.ext && !av[o.ext]) ? { ...o, label: o.label + ' — 이 PC 에 없음' } : o); })(),
     colophonFieldDefs: require('./core/book/html-builder').COLOPHON_FIELDS,
     coverImagePath: parsed.coverImagePath || null,
@@ -9836,10 +9838,43 @@ const BOOK_META_LABELS = {
   copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
-  ebookIsbn: '전자책ISBN', ebookIssueDate: '전자책발행일', specialSections: '특별섹션', spineMm: '책등두께',
+  ebookIsbn: '전자책ISBN', ebookIssueDate: '전자책발행일', legalText: '재사용문구', specialSections: '특별섹션', spineMm: '책등두께',
   headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대', headerGap: '머리글간격', lineBreak: '줄바꿈',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
+// 📜 판권 고지문 저장 — `[판권]` 섹션의 목록 줄(`* …`)만 바꾼다(다른 내용 — 박스·문단 — 은 그대로). 섹션이 없으면 새로 만든다.
+//   notes = 줄마다 한 칸(빈 칸은 버린다) → 원고에 `* 줄` 로 적히고 판권에 그대로 실린다.
+ipcMain.handle('book-colophon-notes', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
+  const notes = (Array.isArray(args.notes) ? args.notes : []).map((x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const exists = (S.parsed.back || []).find((s) => s.key === 'colophon');
+  const bullets = notes.map((t) => '* ' + t);
+  if (!exists) {
+    if (!notes.length) return currentDTO();
+    const target = bookEssentialPath(); const lines = readFileLines(target);
+    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+    lines.push('', '## [판권]', '', ...bullets, '');
+    writeFileLines(target, lines);
+  } else {
+    const src = bookResolveLine(exists.lineStart);
+    const lines = readFileLines(src.path);
+    let end = lines.length;
+    for (let i = src.line + 1; i < lines.length; i++) { if (/^#{1,6}\s+/.test(lines[i].trim()) || /^===.*===$/.test(lines[i].trim())) { end = i; break; } }
+    const isBullet = (l) => /^\s*[*\-]\s+\S/.test(l);
+    let firstAt = -1;
+    const kept = [];
+    for (let i = src.line + 1; i < end; i++) {
+      if (isBullet(lines[i])) { if (firstAt < 0) firstAt = kept.length; continue; }
+      kept.push(lines[i]);
+    }
+    if (firstAt < 0) { while (kept.length && kept[kept.length - 1].trim() === '') kept.pop(); firstAt = kept.length; if (bullets.length) { kept.splice(firstAt, 0, '', ...bullets); } }
+    else kept.splice(firstAt, 0, ...bullets);
+    lines.splice(src.line + 1, end - src.line - 1, ...kept);
+    writeFileLines(src.path, lines);
+  }
+  log(`📜 판권 고지문 ${notes.length}줄 저장`);
+  return rebuildBook();
+});
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
   const key = args.key; const value = String(args.value == null ? '' : args.value).trim();

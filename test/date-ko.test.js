@@ -1,0 +1,20 @@
+'use strict';
+/** node test/date-ko.test.js — 판권 발행일 「2026년 10월 06일」 모양(core/book/date-ko) */
+const { formatKo, normalizeMeta } = require('../core/book/date-ko');
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+const eq = (a, b, m) => ok(a === b, `${m} → ${JSON.stringify(a)}${a === b ? '' : ' ≠ ' + JSON.stringify(b)}`);
+eq(formatKo('2026-10-06'), '2026년 10월 06일', '하이픈');
+eq(formatKo('2026.10.6'), '2026년 10월 06일', '점 · 한 자리 일');
+eq(formatKo('2026/10/06'), '2026년 10월 06일', '슬래시');
+eq(formatKo('2026. 10. 06.'), '2026년 10월 06일', '점 + 공백 + 끝 점');
+eq(formatKo('2026년 10월 6일'), '2026년 10월 06일', '이미 년월일이어도 두 자리로');
+eq(formatKo('2026년 10월 06일'), '2026년 10월 06일', '이미 맞는 모양은 그대로');
+eq(formatKo('2026-13-40'), '2026-13-40', '없는 날짜는 건드리지 않는다');
+eq(formatKo('abc'), 'abc', '날짜가 아니면 그대로');
+eq(normalizeMeta('발행일 2026-10-06'), '발행일 2026년 10월 06일', '라벨은 그대로, 날짜만');
+eq(normalizeMeta('초판 1쇄 발행 2026-8-24; 초판 2쇄 발행 2026.9.10'), '초판 1쇄 발행 2026년 08월 24일; 초판 2쇄 발행 2026년 09월 10일', '여러 쇄(;)도 하나씩');
+eq(normalizeMeta('2026-10-06'), '2026년 10월 06일', '라벨 없는 날짜');
+eq(normalizeMeta(''), '', '빈 값');
+console.log(`\n${fail ? '❌' : '✅'} date-ko — ${pass} 통과 / ${fail} 실패`);
+process.exit(fail ? 1 : 0);

@@ -6,6 +6,7 @@ import api from './lib/ipc.js';
 import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
 import HK from '../../core/book/header-kind.js';
+import DK from '../../core/book/date-ko.js';   // 발행일 「2026년 10월 06일」 모양
 import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
@@ -19,6 +20,7 @@ const INFO_FIELDS = [
   ['subtitle', '부제', false, ''], ['translator', '옮긴이', false, ''], ['editor', '편집인', false, ''],
 ];
 // 플랫폼 등록 화면에 입력하는 정보(조판에는 안 들어간다) — 로그인 뒤 화면의 실제 항목·한도는 등록 때 확인
+const DEFAULT_LEGAL_TEXT = '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.';
 const REG_FIELDS = [
   ['category', '카테고리', '부크크 등록 화면 항목(목록은 로그인 뒤 확인)'],
   ['keywords', '키워드(쉼표)', ''], ['tagline', '한줄 소개', ''],
@@ -111,6 +113,10 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   // 📱 미리보기 전환(R22) — 종이책(내지 조판) | 전자책(실제 ePub 의 spine 문서를 차례로 + 사전 점검)
   const [viewMode, setViewMode] = useState('paper');
   const [eb, setEb] = useState({ busy: false, error: '', docs: [], checks: [], n: 1, html: '', version: '', bytes: 0, forPath: '' });
+  // 📜 판권 고지문 입력 — 비어 있는 새 칸 개수(저장 전). ⚠ 훅이라 `if (!loaded) return` 보다 앞에 둔다(뒤에 두면 React #310 — 화면이 백지)
+  const [noteExtra, setNoteExtra] = useState(0);
+  const _cpNotesKey = ((dto && dto.colophonNotes) || []).join('\u0001');
+  useEffect(() => { setNoteExtra(0); }, [dto && dto.scriptPath, _cpNotesKey]);
   const [previewBusy, setPreviewBusy] = useState(false);
   // ⏱ 미리보기 조판 진행 표시 — 단계(html 만들기 → 조판) · 경과 초 · 지금까지 배치된 쪽 수(iframe 의 vivliostyle 쪽 컨테이너를 센다)
   const [previewPhase, setPreviewPhase] = useState('');
@@ -692,31 +698,46 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   //   판권 탭과 📤 부크크 등록 탭이 **같은 상자**를 쓴다(칸이 두 벌이 되지 않게). 칸을 벗어나면 원고(.md) 메타에 바로 저장 → 판권에 반영.
   //   ISBN 은 체크 숫자까지 확인한다(틀린 번호를 판권·바코드에 싣지 않게) · 발행일은 판권 라벨 그대로(예: 발행일 2026-10-06).
   const isbnBox = (idp) => {
-    const chk = (v) => { const s = String(v || '').trim(); if (!s) return null; const n = ISBNC.normalizeIsbn13(s); return n ? { ok: true, t: `✅ ISBN-13 ${n.slice(0, 3)}-${n.slice(3, 5)}-${n.slice(5, 9)}-${n.slice(9, 12)}-${n.slice(12)} (체크 숫자 통과)` } : { ok: false, t: '⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요(10자리·13자리 가능)' }; };
-    const one = (k, label, ph) => (
+    const chk = (v) => { const s = String(v || '').trim(); if (!s) return null; const n = ISBNC.normalizeIsbn13(s); return n ? { ok: true, t: `✅ ISBN-13 ${/[-\s]/.test(s) ? s : n} (체크 숫자 통과)` } : { ok: false, t: '⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요' }; };
+    // 발행일 칸은 벗어날 때 「발행일 2026년 10월 06일」 모양으로 바로잡아 저장한다(2026-10-06 · 2026.10.6 으로 적어도 됨)
+    const one = (k, label, ph, isDate) => (
       <label key={k} title="">
         <span>{label}</span>
         <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
-          key={dto.scriptPath + ':' + idp + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+          key={dto.scriptPath + ':' + idp + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, isDate ? DK.normalizeMeta(e.target.value) : e.target.value.trim())} />
       </label>
     );
     const pi = chk(meta.isbn), ei = chk(meta.ebookIsbn);
     return (
       <div className="bkisbn" data-testid={idp + '-box'}>
-        <div className="bkzone" style={{ marginTop: 4 }}>🔢 ISBN · 발행일 <span className="meta">(칸을 벗어나면 원고에 저장 → 판권에 반영 · 고친 뒤 📦 만들기로 내지·ePub 을 다시)</span></div>
+        <div className="bkzone" style={{ marginTop: 4 }}>🔢 ISBN · 발행일</div>
         <div className="bkisbn-grid">
           <b>📕 종이책</b>
-          {one('issueDate', '발행일', '발행일 2026-10-06')}
+          {one('issueDate', '발행일', '발행일 2026년 10월 06일', true)}
           {one('isbn', 'ISBN', '979-11-…')}
-          <div className={'meta bkisbn-chk' + (pi && !pi.ok ? ' bad' : '')} data-testid={idp + '-isbn-chk'}>{pi ? pi.t : '부크크가 알려 준 종이책 ISBN 을 적으세요'}</div>
+          <div className={'meta bkisbn-chk' + (pi && !pi.ok ? ' bad' : '')} data-testid={idp + '-isbn-chk'}>{pi ? pi.t : ''}</div>
           <b>📱 전자책</b>
-          {one('ebookIssueDate', '발행일', '비우면 종이책 발행일')}
+          {one('ebookIssueDate', '발행일', '비우면 종이책 발행일', true)}
           {one('ebookIsbn', 'ISBN', '979-11-…')}
-          <div className={'meta bkisbn-chk' + (ei && !ei.ok ? ' bad' : '')} data-testid={idp + '-ebisbn-chk'}>{ei ? ei.t : '전자책 판권에는 이 ISBN 이 실립니다(비우면 종이책 ISBN)'}</div>
+          <div className={'meta bkisbn-chk' + (ei && !ei.ok ? ' bad' : '')} data-testid={idp + '-ebisbn-chk'}>{ei ? ei.t : ''}</div>
         </div>
       </div>
     );
   };
+  // 판권 탭 입력칸 — 라벨 + 칸만(필수/선택 배지 없음). 칸을 벗어나면 원고 메타에 저장.
+  const cpField = (k, label) => (
+    <label key={k}>
+      <span>{label}</span>
+      <input type="text" data-testid={'bk-cp-' + k} defaultValue={meta[k] || ''} key={dto.scriptPath + ':cp:' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+    </label>
+  );
+  // 고지문(`[판권]` 섹션의 `* …` 줄) — 칸마다 저장(빈 칸은 줄이 사라진다) · 줄 추가/삭제
+  const cpNotes = (dto && dto.colophonNotes) || [];
+  const noteDraft = [...cpNotes, ...Array.from({ length: noteExtra }, () => '')];
+  const saveNotes = async (list) => { const d = await api.bookColophonNotes({ notes: list }); if (d) setDto(d); };
+  const saveNote = (i, v) => { const list = noteDraft.slice(); list[i] = String(v || ''); if (list.filter(Boolean).join('\u0001') !== cpNotes.join('\u0001')) saveNotes(list); };
+  const delNote = (i) => { if (i >= cpNotes.length) { setNoteExtra((n) => Math.max(0, n - 1)); return; } const list = cpNotes.slice(); list.splice(i, 1); saveNotes(list); };
+  const addNote = () => setNoteExtra((n) => n + 1);
   const field = (k, label, req, help) => (
     <label key={k} className={req && missSet.has(k) ? 'bkmiss' : ''} title={help || ''}>
       <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
@@ -955,21 +976,43 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           '등록 화면의 AI 사용 표기 항목(부크크 요구 여부는 로그인 뒤 확인). 정직한 표기가 안전합니다')}
         <div className="meta">값은 원고 상단 <code>&gt; 라벨: 값</code> 메타 줄로 저장됩니다.</div>
       </div>);
-      case 'colophon': return (<div className="bkform">
+      case 'colophon': return (<div className="bkform" data-testid="bk-colophon-form">
         {missing.length > 0 && (
           <div className="bkwarn" title="출판문화산업진흥법상 간행물 필수 기재사항">
             ⚠ 판권 필수 미입력: {missing.map(([, l]) => l).join(' · ')}
-            <div style={{ fontWeight: 400, marginTop: 3 }}>※ [판권] 섹션에 자유문을 쓴 경우 이 검사는 책 정보 폼만 봅니다 — 자유문에 ISBN·발행일·발행처 등이 실제로 들어갔는지 직접 확인하세요.</div>
           </div>
         )}
-        <div className="bkzone">판권 필수 (출판문화산업진흥법)</div>
-        {COLO_REQ.map(([k, l]) => field(k, l, true))}
+        {/* 📜 판권 페이지 = 아래 칸에 적은 그대로(2026-10-06 로이 「판권 내용을 이 칸들에 적으면 그대로 실리게」) — 비운 칸은 그 줄이 판권에 나오지 않는다.
+            책 제목 줄(제목·부제·회차)만 책 정보에서 자동. 칸 이름은 판권에 찍히는 라벨과 같다. */}
+        <div className="bkzone">📜 판권 페이지 <span className="meta">— 적은 그대로 판권에 실립니다 · 비우면 그 줄은 빠집니다</span></div>
         {isbnBox('co')}
-        <div className="meta">ISBN(종이책)·정가는 부크크 등록 과정(2단계 ISBN 발급·4단계 가격정책)에서 입력·확인하므로 필수로 두지 않았습니다 — 원고에 적어 두면 판권지에 실리고, 정가는 4단계 자동 입력에도 쓰입니다.</div>
-        <div className="bkzone">선택 — 전자책·연락처·SNS</div>
-        {COLO_OPT.map(([k, l]) => field(k, l, false))}
+        <div className="bkzone">책마다 달라지는 항목 <span className="meta">(책 정보와 같은 값)</span></div>
+        {[['author', '지은이'], ['translator', '옮긴이'], ['editor', '편집인']].map(([k, l]) => cpField(k, l))}
+        <div className="bkzone">항상 같은 항목 <span className="meta">(출판사 고정 정보)</span></div>
+        {[['issuer', '발행인'], ['publisher', '발행처'], ['regNo', '등록'], ['address', '주소'], ['phone', '전화'], ['fax', '팩스'], ['email', '대표메일'], ['homepage', '홈페이지'], ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램']].map(([k, l]) => cpField(k, l))}
+        <div className="bkzone">고지문 <span className="meta">— 줄마다 한 칸 · 판권에 한 줄씩 「* …」 로 실립니다</span></div>
+        <div data-testid="bk-cp-notes">
+          {noteDraft.map((t, i) => (
+            <div className="bknote" key={i + ':' + (dto.colophonNotes || []).length}>
+              <input type="text" data-testid={'bk-cp-note-' + i} defaultValue={t} placeholder="예: 번역·기획: 고전서재의 로이" onBlur={(e) => saveNote(i, e.target.value)} />
+              <button className="ghost" title="이 줄 지우기" data-testid={'bk-cp-note-del-' + i} onClick={() => delNote(i)}>✕</button>
+            </div>
+          ))}
+          <button className="ghost" data-testid="bk-cp-note-add" onClick={addNote}>＋ 고지문 줄 추가</button>
+        </div>
+        <div className="bkzone">저작권 · 안내문</div>
+        <label><span>저작권(ⓒ)</span>
+          <input type="text" data-testid="bk-cp-copyright" placeholder="비우면 자동 — ⓒ 이름 연도. All rights reserved." defaultValue={meta.copyright || ''}
+            key={dto.scriptPath + ':copyright:' + (meta.copyright || '')} onBlur={(e) => setMeta('copyright', e.target.value.trim())} /></label>
+        <label><span>재사용 안내문</span>
+          <input type="text" data-testid="bk-cp-legal" placeholder={DEFAULT_LEGAL_TEXT} defaultValue={meta.legalText || ''}
+            key={dto.scriptPath + ':legalText:' + (meta.legalText || '')} onBlur={(e) => setMeta('legalText', e.target.value.trim())} /></label>
+        <details className="bkmore">
+          <summary>그 밖의 항목 (정가 · 전자책 가격 · 부가기호 · QR · 로고)</summary>
+          {COLO_OPT.filter(([k]) => ['price', 'ebookPrice', 'isbnAddon', 'logo', 'qr', 'qrLabel'].includes(k)).map(([k, l]) => field(k, l, false))}
+        </details>
         <div className="bkzone">판권 페이지</div>
-        <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
+        <label title="판권 내용은 위 칸에 적은 줄로 조판됩니다">판권 위치
           <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
             <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
           </select>
@@ -979,7 +1022,6 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             <option value="bottom">아래 (판면 하단 · 기본)</option><option value="top">위 (판면 상단)</option>
           </select>
         </label>
-        <div className="meta">종이책 판권에는 정가·ISBN, 전자책 판권에는 전자책 ISBN·가격이 들어갑니다(정가·ISBN 은 등록 과정에서 정해지면 판권 탭에 적으세요). 전자책 점검표는 「전자책」 탭에 있습니다.</div>
       </div>);
       case 'cover': return (<div className="bkform">
         <div className="bkzone">종이책 표지 스프레드</div>
@@ -1274,14 +1316,17 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <button className="ghost" disabled={eb.busy} onClick={refreshEbook} title="원고를 다시 읽어 ePub 을 새로 만듭니다">🔄 전자책 갱신</button>
             </div>
             {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
-            {eb.checks.length > 0 && (
-              <div className="bkeb-checks" data-testid="bk-eb-checks">
-                <b>📋 부크크 전자책 사전 점검</b>
-                {eb.checks.map((c) => (
-                  <div key={c.id} className={'bkeb-chk ' + c.level} data-testid={'bk-eb-chk-' + c.id} data-level={c.level}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.text}</div>
-                ))}
-              </div>
-            )}
+            {eb.checks.length > 0 && (() => {
+              const bad = eb.checks.filter((c) => c.level !== 'ok');
+              return (
+                <details className="bkeb-checks" data-testid="bk-eb-checks" open={bad.length > 0} key={eb.forPath + ':' + bad.length}>
+                  <summary data-testid="bk-eb-sum">{bad.length ? `⚠ 부크크 전자책 점검 — 확인할 것 ${bad.length}개` : `✅ 부크크 전자책 점검 ${eb.checks.length}/${eb.checks.length} 통과`}</summary>
+                  {eb.checks.map((c) => (
+                    <div key={c.id} className={'bkeb-chk ' + c.level} data-testid={'bk-eb-chk-' + c.id} data-level={c.level}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.text}</div>
+                  ))}
+                </details>
+              );
+            })()}
             <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="" srcDoc={eb.html} />
           </div>
         )}

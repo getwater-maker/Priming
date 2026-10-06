@@ -1038,3 +1038,12 @@ button.upd.new{background:var(--accent);color:#fff;border-color:var(--accent);fo
 .bkisbn-grid label input{padding:3px 6px;font-size:12px}
 .bkisbn-chk{grid-column:2 / span 2;font-size:11px;min-height:15px}
 .bkisbn-chk.bad{color:#c62828;font-weight:600}
+
+/* 📜 판권 탭 입력칸 · 고지문 줄 · 접힌 점검 */
+.bknote{display:flex;gap:4px;margin:3px 0}
+.bknote input{flex:1 1 auto;min-width:0}
+.bknote button{flex:0 0 auto;padding:2px 8px}
+.bkmore{margin:8px 0}
+.bkmore>summary{cursor:pointer;font-size:12px;color:var(--accent-d)}
+details.bkeb-checks>summary{cursor:pointer;font-weight:700;list-style:none}
+details.bkeb-checks:not([open])>summary{color:#2e7d32}

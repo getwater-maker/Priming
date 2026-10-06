@@ -255,6 +255,8 @@ function titlePageHtml(meta, ctx, fallbackTitle) {
   <div class="tp-publisher">${logo}${esc(meta.publisher || '')}</div>
 </section>`;
 }
+const DK = require('./date-ko');
+const DEFAULT_LEGAL = '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.';
 // 판권 자동 생성 항목 정의 — UI 체크박스와 1:1 (key, 라벨, 값 추출)
 const COLOPHON_FIELDS = [
   ['issueDate', '초판 1쇄 발행'], ['author', '지은이'], ['translator', '옮긴이'], ['issuer', '펴낸이'],
@@ -373,7 +375,7 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
     ? String(meta.issueDate || '').split(/\s*[;；]\s*/).map((s) => s.trim()).filter(Boolean).map((s) => {
       const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
       const k = (m && m[1].trim()) || '초판 1쇄 발행';
-      const v = ((m ? m[2] : s) || '').trim();
+      const v = DK.formatKo(((m ? m[2] : s) || '').trim());   // 부크크 판권지: 「2026년 10월 06일」
       return `<div class="cp-date"><span class="dk">${esc(k)}</span><span class="dv">${esc(v)}</span></div>`;
     }).join('') : '';
   const dateBlock = dates ? `<div class="cp-dates">${dates}</div>` : '';
@@ -423,7 +425,7 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   const cpName = meta.translator || meta.author;
   const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
   const legal = owner
-    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>${jw ? esc(jw.legal) : '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.'}</p></div>`
+    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>${jw ? esc(jw.legal) : esc(meta.legalText || DEFAULT_LEGAL)}</p></div>`
     : (jw ? `<div class="cp-legal"><p>${esc(jw.legal)}</p></div>` : '');
 
   // 러닝헤드 억제 — @page display 는 vivliostyle 에서 **조각의 첫 쪽에 한 쪽 늦게** 적용된다
@@ -911,7 +913,7 @@ function metaPlatformId(meta) {
   return 'bookk';
 }
 
-module.exports = {
+module.exports = { DEFAULT_LEGAL,
   headerGapOf, pageNumSafeOf, HEADER_SAFE_MM,
   specialKeywordsOf, splitSpecialBlocks,
   chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, resolveBookOptions, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

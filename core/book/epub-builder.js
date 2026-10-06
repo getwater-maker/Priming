@@ -16,6 +16,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { esc, inlineMd, chapterExcluded, scriptFilter, specialKeywordsOf, splitSpecialBlocks, filterColophonSection } = require('./html-builder');
 const JB = require('./jakkawa-biblio');
+const DK = require('./date-ko');
 
 // ── 미니 ZIP 라이터 ──
 // adm-zip 은 writeZip 때 엔트리를 이름순 정렬해 ePub 규격(mimetype=첫 엔트리·무압축)을
@@ -185,7 +186,7 @@ function colophonXhtml(meta0, col, book, ctx) {
   out.push(`<p class="cp-title"><strong>${esc(meta.title || '')}</strong>${meta.subtitle ? ' ' + esc(meta.subtitle) : ''}</p>`);
   for (const s of String(meta.issueDate || '').split(/\s*[;；]\s*/).map((x) => x.trim()).filter(Boolean)) {
     const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
-    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '초판 1쇄 발행')}</strong> ${esc(((m ? m[2] : s) || '').trim())}</p>`);
+    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '초판 1쇄 발행')}</strong> ${esc(DK.formatKo(((m ? m[2] : s) || '').trim()))}</p>`);
   }
   const row = (label, v) => (v ? `<p class="cp-row"><strong>${esc(label)}</strong> | ${esc(v)}</p>` : '');
   out.push(
@@ -211,7 +212,7 @@ function colophonXhtml(meta0, col, book, ctx) {
   const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
   const cpName = meta.translator || meta.author;
   const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
-  if (owner) out.push(`<p class="cp-legal">${esc(owner)}</p>`, '<p class="cp-legal">이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p>');
+  if (owner) out.push(`<p class="cp-legal">${esc(owner)}</p>`, `<p class="cp-legal">${esc(meta.legalText || require('./html-builder').DEFAULT_LEGAL)}</p>`);
   return out.filter(Boolean).join('\n');
 }
 function blocksXhtml(blocks0, book, ctx, specials) {

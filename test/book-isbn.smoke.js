@@ -52,18 +52,46 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     // 원고(.md)에 저장
     const md = fs.readFileSync(MD, 'utf8');
     ok(/^> ISBN: ?979-11-12-31240-2$/m.test(md), '원고에 종이책 ISBN 저장');
-    ok(/^> 발행일: ?발행일 2026-10-06$/m.test(md) && !/2026-10-02/.test(md), '원고의 발행일이 바뀐다(옛 값 없음)');
+    ok(/^> 발행일: ?발행일 2026년 10월 06일$/m.test(md) && !/2026-10-0[26]/.test(md), '발행일을 2026-10-06 으로 적어도 「2026년 10월 06일」 모양으로 저장(부크크 판권지 형식)');
     ok(/^> 전자책ISBN: ?979-11-12-31221-1$/m.test(md), '원고에 전자책 ISBN 저장');
-    ok(/^> 전자책발행일: ?발행일 2026-10-07$/m.test(md), '원고에 전자책 발행일 저장');
+    ok(/^> 전자책발행일: ?발행일 2026년 10월 07일$/m.test(md), '전자책 발행일도 같은 모양으로 저장');
 
     // 판권 탭도 같은 값을 같은 상자로
     await win.click('[data-tab=colophon]'); await win.waitForSelector('[data-testid=co-box]', { timeout: 5000 });
-    ok(await win.locator('[data-testid=co-isbn]').inputValue() === '979-11-12-31240-2' && /2026-10-06/.test(await win.locator('[data-testid=co-issueDate]').inputValue()), '판권 탭의 상자에도 같은 값');
+    ok(await win.locator('[data-testid=co-isbn]').inputValue() === '979-11-12-31240-2' && /2026년 10월 06일/.test(await win.locator('[data-testid=co-issueDate]').inputValue()), '판권 탭의 상자에도 같은 값');
     ok(await win.locator('[data-testid=co-ebookIsbn]').inputValue() === '979-11-12-31221-1', '판권 탭 전자책 ISBN');
     // 선택 목록에 같은 칸이 또 있지 않다(두 벌 금지)
     const labels = await win.locator('[data-tab=colophon]').count();
     const dup = await win.evaluate(() => [...document.querySelectorAll('.bkform label > span')].filter((s) => /^ISBN\(종이책\)|^전자책 ISBN/.test(s.textContent.trim())).length);
     ok(dup === 0, '판권 「선택」 목록에는 ISBN 칸이 따로 없다(상자로 일원화)');
+    // 📜 판권 입력 폼 — 판권에 찍히는 줄을 칸에 적으면 그대로 실린다(고지문 줄 · 저작권 · 재사용 안내문 · 고정 항목)
+    ok(await win.locator('[data-testid=bk-colophon-form]').count() === 1, '판권 탭 = 입력 폼');
+    for (const k of ['author', 'translator', 'issuer', 'publisher', 'regNo', 'address', 'phone', 'email', 'homepage']) ok(await win.locator('[data-testid=bk-cp-' + k + ']').count() === 1, '판권 칸: ' + k);
+    await win.locator('[data-testid=bk-cp-regNo]').fill('2014.07.15.(제2014-16호)'); await win.locator('[data-testid=bk-cp-regNo]').blur(); await win.waitForTimeout(300);
+    await win.locator('[data-testid=bk-cp-note-add]').click(); await win.waitForTimeout(150);
+    await win.locator('[data-testid=bk-cp-note-0]').fill('번역·기획: 시험의 로이'); await win.locator('[data-testid=bk-cp-note-0]').blur(); await win.waitForTimeout(500);
+    await win.locator('[data-testid=bk-cp-note-add]').click(); await win.waitForTimeout(150);
+    await win.locator('[data-testid=bk-cp-note-1]').fill('저본: 시험 원문'); await win.locator('[data-testid=bk-cp-note-1]').blur(); await win.waitForTimeout(500);
+    await win.locator('[data-testid=bk-cp-copyright]').fill('ⓒ 시험 2026. All rights reserved.'); await win.locator('[data-testid=bk-cp-copyright]').blur(); await win.waitForTimeout(300);
+    await win.locator('[data-testid=bk-cp-legal]').fill('무단 전재·복제를 금합니다.'); await win.locator('[data-testid=bk-cp-legal]').blur(); await win.waitForTimeout(500);
+    let md2 = fs.readFileSync(MD, 'utf8');
+    ok(/^\* 번역·기획: 시험의 로이$/m.test(md2) && /^\* 저본: 시험 원문$/m.test(md2) && md2.indexOf('## [판권]') < md2.indexOf('* 번역·기획'), '고지문 두 줄이 원고 [판권] 섹션에 `* …` 로 저장');
+    ok(/^> 출판등록: 2014\.07\.15\.\(제2014-16호\)$/m.test(md2) && /^> 저작권: ⓒ 시험 2026\. All rights reserved\.$/m.test(md2) && /^> 재사용문구: 무단 전재·복제를 금합니다\.$/m.test(md2), '고정 항목 · 저작권 · 재사용 문구가 원고 메타에 저장');
+    ok(await win.locator('[data-testid=bk-cp-note-0]').inputValue() === '번역·기획: 시험의 로이' && await win.locator('[data-testid=bk-cp-note-1]').inputValue() === '저본: 시험 원문', '저장 뒤 칸이 같은 값으로 다시 그려진다');
+    await win.locator('[data-testid=bk-cp-note-del-0]').click(); await win.waitForTimeout(600);
+    md2 = fs.readFileSync(MD, 'utf8');
+    ok(!/번역·기획/.test(md2) && /^\* 저본: 시험 원문$/m.test(md2), '줄 지우기(✕) — 그 줄만 원고에서 빠진다');
+    await win.locator('[data-testid=bk-cp-note-0]').fill(''); await win.locator('[data-testid=bk-cp-note-0]').blur(); await win.waitForTimeout(500);
+    ok(!/저본: 시험 원문/.test(fs.readFileSync(MD, 'utf8')), '칸을 비우면 그 줄이 빠진다');
+    await win.locator('[data-testid=bk-cp-note-add]').click(); await win.locator('[data-testid=bk-cp-note-0]').fill('번역·기획: 시험의 로이'); await win.locator('[data-testid=bk-cp-note-0]').blur(); await win.waitForTimeout(500);
+    // 판권(내지 HTML)에 그대로 실린다 — 같은 원고를 앱과 같은 함수로 조판
+    {
+      const { parseBookText } = require('../core/parsers/book-parser'); const H = require('../core/book/html-builder');
+      const txt = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+      const t = txt(H.buildBookHtml(parseBookText(fs.readFileSync(MD, 'utf8'), 'x'), { edition: 'print', imageUrl: (p) => p, fontCss: '' }).html);
+      ok(/2026년 10월 06일/.test(t) && /979-11-12-31240-2/.test(t) && /번역·기획: 시험의 로이/.test(t) && /ⓒ 시험 2026\. All rights reserved\./.test(t) && /무단 전재·복제를 금합니다\./.test(t) && /2014\.07\.15\./.test(t), '판권 페이지에 발행일(년월일) · ISBN · 고지문 · 저작권 · 재사용 문구 · 등록이 적은 그대로 실린다');
+      ok(!/이 책의 내용 중 전부 또는 일부를/.test(t), '재사용 안내문을 적으면 기본 문구는 나오지 않는다');
+    }
     // 판권(내지 HTML)에 반영
     const html = await win.evaluate(async () => { const r = await window.api.bookPreview({ layout: {} }); return r && r.html ? r.html : ''; });
     if (html) ok(/979-11-12-31240-2/.test(html) && /2026-10-06/.test(html) && !/2026-10-02/.test(html.replace(/<style[\s\S]*?<\/style>/g, '')), '내지 판권에 새 ISBN·발행일이 실린다');

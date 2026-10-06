@@ -62,7 +62,7 @@ const plain = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]*>
   ok(/979-11-12-31221-1/.test(t), 'ISBN = 전자책 ISBN');
   ok(!/979-11-0000-000-0/.test(t), '종이책 ISBN 은 싣지 않는다');
   ok(!/18,700/.test(t), '종이책 정가는 싣지 않는다');
-  ok(/발행일\s+2026-10-02/.test(t), '발행일(전자책발행일 없음 → 발행일)');
+  ok(/발행일\s+2026년 10월 02일/.test(t), '발행일(전자책발행일 없음 → 발행일)');
   for (const k of ['지은이 | 나관중', '옮긴이 | 로이', '발행인 | 한건희', '발행처 | 주식회사 부크크', '등록 | 2014.07.15.', '주소 | 서울특별시', '전화 | 1670-8316', '대표메일 | info@bookk.co.kr']) ok(t.includes(k), '판권 행: ' + k);
   ok(/\* 번역·기획: 고전서재의 로이/.test(t) && /\* 저본: 나관중/.test(t) && /\* 이 책의 번역 과정에서 AI/.test(t), '별표 세 줄(노트)');
   ok(!/<ul|<li[ >]/.test(A.col), '별표 줄은 글머리표(목록)가 아니다');
@@ -72,7 +72,7 @@ const plain = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]*>
 
   const B = await build('b', '> 전자책발행일: 발행일 2026-10-06\n> 판권위치: 앞');
   const tb = plain(B.col);
-  ok(/발행일\s+2026-10-06/.test(tb) && !/2026-10-02/.test(tb), 'R21 전자책발행일 이 전자책 판권에 쓰인다');
+  ok(/발행일\s+2026년 10월 06일/.test(tb) && !/2026년 10월 02일/.test(tb), "R21 전자책발행일 이 전자책 판권에 쓰인다(년월일)");
   ok(/ⓒ 로이 2026\./.test(tb), '연도는 전자책발행일 기준');
   ok(B.spine[0] === 'cover' && B.spine[1] === 'colophon', '판권위치: 앞 → 표지 바로 다음(2쪽)');
   ok(B.spine.filter((x) => x === 'colophon').length === 1, '판권 문서는 한 번만');
@@ -82,8 +82,8 @@ const plain = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]*>
   const book = parseBookText(md('> 전자책발행일: 발행일 2026-10-06'), 'x');
   const mk = (edition) => H.buildBookHtml(book, { edition, imageUrl: (p) => p, fontCss: '' }).html;
   const paper = plain(mk('paper')), ebook = plain(mk('ebook'));
-  ok(/2026-10-02/.test(paper) && !/2026-10-06/.test(paper), '종이책 PDF 판권 = 발행일');
-  ok(/2026-10-06/.test(ebook) && !/2026-10-02/.test(ebook), '전자책 PDF 판권 = 전자책발행일');
+  ok(/2026년 10월 02일/.test(paper) && !/2026년 10월 06일/.test(paper), "종이책 PDF 판권 = 발행일(년월일)");
+  ok(/2026년 10월 06일/.test(ebook) && !/2026년 10월 02일/.test(ebook), "전자책 PDF 판권 = 전자책발행일(년월일)");
 
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${fail ? '❌' : '✅'} book-epub-colophon — ${pass} 통과 / ${fail} 실패`);
