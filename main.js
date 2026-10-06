@@ -5457,6 +5457,15 @@ ipcMain.handle('tts-engine-open-key', (_e, id) => {
   if (!e || !/^https:\/\//.test(String(e.keyUrl || ''))) return false;
   shell.openExternal(e.keyUrl); return true;
 });
+// 🔑 API 키 검증 — 읽기 전용·무료 호출만(core/api-key-check). 방금 붙여넣은 키가 있으면 그것, 없으면 저장된 키. 키 원문은 로그에 싣지 않는다.
+ipcMain.handle('api-key-verify', async (_e, { id, key, model, region } = {}) => {
+  try {
+    const k = String(key || '').trim() || ((require('./tts/secret-store').get(id) || {}).key || '');
+    const r = await require('./core/api-key-check').verify(id, k, { model, region });
+    log(`🔑 API 키 검증 — ${id}: ${r.level === 'ok' ? '✅' : r.level === 'warn' ? '⚠' : '❌'} ${r.message}`);
+    return r;
+  } catch (e) { return { ok: false, level: 'bad', message: '검증 실패: ' + e.message }; }
+});
 // 목소리 목록(Gemini 확장 · 타입캐스트 · ElevenLabs) — 저장된 키 또는 방금 넣은 키로 API 에서 가져온다
 ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
   try {

@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('api', {
   setSpeakerVoice: (a) => ipcRenderer.invoke('set-speaker-voice', a), // 🎙 이 대본 화자(🗣) 목소리(v0.6.84)
   setScriptVoice: (a) => ipcRenderer.invoke('set-script-voice', a),   // 🎙 대본 목소리(큐 전체)
   ttsEngineOpenKey: (id) => ipcRenderer.invoke('tts-engine-open-key', id),
+  apiKeyVerify: (args) => ipcRenderer.invoke('api-key-verify', args),
   ttsOmniVoices: () => ipcRenderer.invoke('tts-omni-voices'),
   ttsOmniDelete: (a) => ipcRenderer.invoke('tts-omni-delete', a),
   ttsChannelLogo: (a) => ipcRenderer.invoke('tts-channel-logo', a),

@@ -619,6 +619,23 @@ export default function App() {
   const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
   // 🔊 TTS API 키(⚙ 설정 → 🔑 API 키 · v0.6.78 — 키는 여기 한 곳에서) — info = {엔진: {has, tail}} · 입력값은 저장 뒤 비운다(원문을 들고 있지 않는다)
   const [ttsKeys, setTtsKeys] = useState({ info: {}, draft: {}, region: 'eastus', msg: '' });
+  // 🔑 API 키 검증 결과 — { [id]: { busy, level: ok|warn|bad, message } } (읽기 전용·무료 호출 · 방금 붙여넣은 키 우선, 없으면 저장된 키)
+  const [keyChk, setKeyChk] = useState({});
+  async function verifyKey(id, draft, extra) {
+    setKeyChk((x) => ({ ...x, [id]: { busy: true } }));
+    let r; try { r = await api.apiKeyVerify({ id: id === 'gemini-tts' ? 'gemini' : id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
+    setKeyChk((x) => ({ ...x, [id]: { busy: false, level: r.level, message: r.message } }));
+  }
+  // 저장됐거나 붙여넣은 키 전부를 차례로 확인
+  async function verifyAllKeys() {
+    const inf = ttsKeys.info || {};
+    if (giKey || (inf.gemini && inf.gemini.has)) await verifyKey('gemini', giKey, { model: (giCfg && giCfg.model) || '' });
+    if (xaiVal) await verifyKey('xai', xaiVal);
+    for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
+    if (inf.gemini && inf.gemini.has) await verifyKey('gemini-tts', ttsKeys.draft.gemini);
+  }
+  const keyChkMark = (id) => { const c = keyChk[id]; return c && !c.busy && c.message ? <div className="meta" data-testid={'keychk-' + id} data-level={c.level} style={{ marginTop: 3, fontWeight: 600, color: c.level === 'ok' ? '#16a34a' : c.level === 'warn' ? '#b45309' : '#c62828' }}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.message}</div> : null; };
+  const keyChkBtn = (id, draft, extra, tip) => <button className="ghost" style={{ flex: '0 0 auto' }} data-testid={'keychk-btn-' + id} disabled={!!(keyChk[id] && keyChk[id].busy)} title={tip || '이 키가 지금 통하는지 확인합니다(무료 조회 — 요금 없음)'} onClick={() => verifyKey(id, draft, extra)}>{keyChk[id] && keyChk[id].busy ? '⏳ 확인 중…' : '✔ 검증'}</button>;
   const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice) 설정 모달
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
@@ -5453,12 +5470,18 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'keys' && (<div>
+              <div className="frow" style={{ margin: '0 0 8px', alignItems: 'center' }}>
+                <button className="ghost" data-testid="keychk-all" title="저장된(또는 방금 붙여넣은) 모든 키를 차례로 확인합니다 — 무료 조회, 요금 없음" onClick={verifyAllKeys}>🔍 모든 키 검증</button>
+                <span className="meta">각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</span>
+              </div>
               <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
                 <div className="frow" style={{ flexWrap: 'wrap' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 유료 나노바나나2 (Gemini)</label>
                   <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ flex: 1, minWidth: 180 }}
                     onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
+                  {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 아래 모델명이 지금 통하는지 확인합니다(무료 조회)')}
                 </div>
+                {keyChkMark('gemini')}
                 {giCfg && <div className="frow" style={{ flexWrap: 'wrap', marginTop: 4 }}>
                   <label style={{ width: 'auto' }}>모델</label>
                   <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
@@ -5478,7 +5501,9 @@ export default function App() {
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🎬 Grok API (xAI, 비디오)</label>
                   <input type="password" placeholder="🔑 xAI API 키 (xai-...)" value={xaiVal} style={{ flex: 1, minWidth: 180 }}
                     onChange={(e) => setXaiVal(e.target.value)} onBlur={() => api.setXaiKey((xaiVal || '').trim())} />
+                  {keyChkBtn('xai', xaiVal)}
                 </div>
+                {keyChkMark('xai')}
                 <div className="meta" style={{ marginTop: 4 }}>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</div>
               </div>
               {/* 🔊 TTS API 키(v0.6.78) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만). */}
@@ -5503,10 +5528,12 @@ export default function App() {
                           onChange={(e) => { const rg = e.target.value; setTtsKeys((x) => ({ ...x, region: rg })); api.ttsEnginesSave({ channels: [], region: rg }); }}>
                           {['eastus', 'eastasia', 'southeastasia', 'japaneast', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'].map((r) => <option key={r} value={r}>{r}</option>)}
                         </select>)}
+                        {keyChkBtn(id === 'gemini' ? 'gemini-tts' : id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined)}
                         <button className="ghost" style={{ flex: '0 0 auto' }} title="키 발급 페이지" onClick={() => api.ttsEngineOpenKey(id)}>발급 ↗</button>
                         {inf.has && <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>}
                       </div>
                       <div className="meta" style={{ marginLeft: 150, fontSize: 11 }}>{hint}</div>
+                      {keyChkMark(id === 'gemini' ? 'gemini-tts' : id)}
                     </div>
                   );
                 })}
