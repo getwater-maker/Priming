@@ -85,6 +85,8 @@ const META_KEYS = {
   '등록정보': 'registerInfo', '등록정보파일': 'registerInfo',
   '표지파일': 'coverFile', '표지 파일': 'coverFile',
   '전자책isbn': 'ebookIsbn', '전자책 isbn': 'ebookIsbn',
+  // 전자책판(ePub·전자책 PDF) 판권의 발행일 — 종이책 발행일과 다를 수 있다(부크크 판권지 2026-10-06 · R21). 라벨 규칙은 발행일과 같다.
+  '전자책발행일': 'ebookIssueDate', '전자책 발행일': 'ebookIssueDate', '전자책발행': 'ebookIssueDate',
   // 반복 코너(예: 역사 노트) — 이 소제목 구간을 노트 상자로(쉼표로 여러 개 · 조판 설정 「특별 섹션」과 합친다)
   '특별섹션': 'specialSections', '특별 섹션': 'specialSections',
   // 머리글 — 원고마다 한 줄로 고정(조판 설정은 원고별 저장이라 새 원고마다 다시 골라야 했다). 값: title·subtitle·chapter·chapterNo·section·none 또는 책제목·제N회·회목·소제목·없음

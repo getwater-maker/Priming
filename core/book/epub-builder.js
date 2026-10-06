@@ -131,6 +131,10 @@ div.special-sec p { text-indent: 0; margin-bottom: 0.4em; }
 .fnback { font-size: 0.85em; margin-left: 0.4em; text-decoration: none; }
 .fn { font-size: 0.88em; color: #333; margin: 1.5em 0 0; padding-top: 0.6em; border-top: 1px solid #ccc; }
 .colophon p { text-indent: 0; margin: 0.25em 0; font-size: 0.9em; }
+.colophon .cp-title { font-size: 1.05em; margin: 0 0 0.8em; }
+.colophon .cp-row, .colophon .cp-date { margin: 0.15em 0; }
+.colophon .cp-note { margin: 0.2em 0; padding-left: 1em; text-indent: -1em; }
+.colophon .cp-legal { margin: 0.6em 0 0; }
 table.md-table { width: 100%; border-collapse: collapse; font-size: 0.86em; text-indent: 0; text-align: left; margin: 1.2em 0; }
 table.md-table th, table.md-table td { border: 1px solid #8a8a8a; padding: 0.34em 0.5em; vertical-align: top; text-indent: 0; text-align: left; }
 table.md-table th { font-weight: bold; background: #efeeeb; }
@@ -172,6 +176,44 @@ function listXhtml(b, book, ctx) {
 }
 
 // 블록 → xhtml (ePub 전용 — 각주는 noteref + 장 끝 aside)
+// 📱 전자책(ePub) 판권 — PDF 전자책판 `colophonHtml` 과 같은 내용을 XHTML 글자로(R20 · 2026-10-06).
+//   제목 · 발행 이력 · 「라벨 | 값」 행(ISBN = 전자책 ISBN · 종이책 정가 제외 · 발행일 = 전자책발행일 우선) · [판권] 노트(별표 줄은 글머리표 없이 문단) · ⓒ + 재사용 문구.
+//   ⚠ 예전엔 [판권] 섹션이 있으면 그 별표 목록만 글머리표로 나와 ISBN·ⓒ 가 빠졌다(부크크 판권지 수정 요청).
+function colophonXhtml(meta0, col, book, ctx) {
+  const meta = { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '', issueDate: meta0.ebookIssueDate || meta0.issueDate };
+  const out = [];
+  out.push(`<p class="cp-title"><strong>${esc(meta.title || '')}</strong>${meta.subtitle ? ' ' + esc(meta.subtitle) : ''}</p>`);
+  for (const s of String(meta.issueDate || '').split(/\s*[;；]\s*/).map((x) => x.trim()).filter(Boolean)) {
+    const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
+    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '초판 1쇄 발행')}</strong> ${esc(((m ? m[2] : s) || '').trim())}</p>`);
+  }
+  const row = (label, v) => (v ? `<p class="cp-row"><strong>${esc(label)}</strong> | ${esc(v)}</p>` : '');
+  out.push(
+    row('지은이', meta.author), row(meta.translatorLabel || '옮긴이', meta.translator), row('발행인', meta.issuer), row('편집인', meta.editor),
+    row('발행처', meta.publisher), row('등록', meta.regNo), row('주소', meta.address), row('전화', meta.phone), row('팩스', meta.fax),
+    row('대표메일', meta.email), row('홈페이지', meta.homepage), row('블로그', meta.blog), row('페이스북', meta.facebook), row('인스타그램', meta.instagram),
+    ...Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)),
+    meta.isbn ? `<p class="cp-row cp-isbn"><strong>ISBN</strong> | ${esc(meta.isbn)}${meta.isbnAddon ? ' ' + esc(meta.isbnAddon) : ''}</p>` : '',
+    row('전자책', meta.ebookPrice),
+  );
+  // [판권] 노트 — 표·제목·ⓒ 를 되풀이한 줄은 빼고(filterColophonSection) 고지문만. 별표 줄은 글머리표(목록) 아닌 문단.
+  const kept = col && col.blocks && col.blocks.length ? filterColophonSection(col, meta).blocks : [];
+  for (const b of kept) {
+    if (!b) continue;
+    if (b.type === 'p' && typeof b.text === 'string') {
+      for (const ln of b.text.split('\n').map((x) => x.trim()).filter(Boolean)) out.push(`<p class="cp-note">${inline(ln, book, ctx)}</p>`);
+    } else if (b.type === 'list') {
+      for (const it of (b.items || [])) out.push(`<p class="cp-note">* ${inline(it.text, book, ctx)}</p>`);
+    } else if (b.type === 'quote') {
+      out.push(`<blockquote class="cp-box">${inline(b.text, book, ctx)}</blockquote>`);
+    } else out.push(blocksXhtml([b], book, ctx));
+  }
+  const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
+  const cpName = meta.translator || meta.author;
+  const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
+  if (owner) out.push(`<p class="cp-legal">${esc(owner)}</p>`, '<p class="cp-legal">이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p>');
+  return out.filter(Boolean).join('\n');
+}
 function blocksXhtml(blocks0, book, ctx, specials) {
   if (specials && specials.length) {
     // 특별 섹션(역사 노트 등) — 종이책처럼 상자로(R5①). 각주 모으기는 아래 한 번만.
@@ -341,12 +383,16 @@ async function buildEpub(book, a) {
     if (coverSrc) log('🖼 인쇄 표지에서 앞표지 자동 크롭 → 전자책 표지');
   }
   if (coverSrc) {
+    // 🖼 어느 파일이 1쪽(표지)이 됐는지 — 부크크 「앞표지 = 1쪽」 점검(R21 · 로그에서 확인)
+    const fromMeta = !!meta.ebookCover && path.basename(String(meta.ebookCover)).toLowerCase() === path.basename(coverSrc).toLowerCase();
+    log(`🖼 전자책 표지: ${path.basename(coverSrc)} (${fromMeta ? '원고 메타' : (a.ebookCoverPath && coverSrc === a.ebookCoverPath ? '표지 도구' : '인쇄 표지 크롭')})`);
     const ext = path.extname(coverSrc).toLowerCase().replace('.', '') || 'jpg';
     zip.addFile(`OEBPS/cover.${ext}`, fs.readFileSync(coverSrc));
     manifest.push(`<item id="cover-img" href="cover.${ext}" media-type="image/${ext === 'jpg' ? 'jpeg' : ext}"${V2 ? '' : ' properties="cover-image"'}/>`);
     addDoc('cover', 'cover.xhtml', '표지', `<div style="text-align:center"><img src="cover.${ext}" alt="표지" style="max-width:100%"/></div>`);
     coverAdded = true;
   }
+  if (/앞/.test(String(meta.colophonPos || ''))) addColophon();   // 판권위치: 앞 — 표지(1쪽) 바로 다음(2쪽)
 
   // 4) 표제지
   addDoc('titlepage', 'titlepage.xhtml', '표제지', `<div class="titlepage">
@@ -391,23 +437,26 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
     addDoc(`back-${s.key}`, `back-${s.key}.xhtml`, s.title,
       `<section class="back" epub:type="backmatter"><h1>${esc(s.title)}</h1>\n${blocksXhtml(s.blocks, book, ctx)}</section>`, { toc: s.title });
   }
-  const col = excluded.includes('colophon') ? null : book.back.find((s) => s.key === 'colophon');
-  // 📱 작가와 전자책 — 작가와 「서지정보 페이지」 공식 양식(판권 자리 · 마지막 쪽 한 곳) + [판권]의 고지문
-  ctx.fn.seq = 0;   // 판권 문서도 1번부터
-  let jwBody = '';
-  if (JB.isJakkawaMeta(meta)) {
-    const jb = JB.biblio(meta);
-    const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
-    const cpName = meta.translator || meta.author;
-    const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
-    const kept = col && col.blocks && col.blocks.length ? blocksXhtml(filterColophonSection(col, meta).blocks, book, ctx) : '';
-    jwBody = jb.rows.map(([k, v]) => `<p>${esc(k)} | ${esc(v)}</p>`).join('\n')
-      + (kept ? `\n${kept}` : '') + (owner ? `\n<p>${esc(owner)}</p>` : '') + `\n<p>${esc(jb.legal)}</p>`;
+  // 판권 문서 — `> 판권위치: 앞` 이면 표지 바로 다음(2쪽), 아니면 맨 뒤. 부크크: 「앞표지 = 1쪽 · 판권지 = 2쪽 또는 마지막 쪽」.
+  function addColophon() {
+    const col = excluded.includes('colophon') ? null : book.back.find((s) => s.key === 'colophon');
+    // 📱 작가와 전자책 — 작가와 「서지정보 페이지」 공식 양식(판권 자리 · 마지막 쪽 한 곳) + [판권]의 고지문
+    ctx.fn.seq = 0;   // 판권 문서도 1번부터
+    let jwBody = '';
+    if (JB.isJakkawaMeta(meta)) {
+      const jb = JB.biblio(meta);
+      const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
+      const cpName = meta.translator || meta.author;
+      const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
+      const kept = col && col.blocks && col.blocks.length ? blocksXhtml(filterColophonSection(col, meta).blocks, book, ctx) : '';
+      jwBody = jb.rows.map(([k, v]) => `<p>${esc(k)} | ${esc(v)}</p>`).join('\n')
+        + (kept ? `\n${kept}` : '') + (owner ? `\n<p>${esc(owner)}</p>` : '') + `\n<p>${esc(jb.legal)}</p>`;
+    }
+    const colBody = jwBody ? jwBody : colophonXhtml(meta, col, book, ctx);   // 📱 PDF 전자책판과 같은 내용(R20)
+    addDoc('colophon', 'colophon.xhtml', '판권', `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">판권</h1>\n${colBody}</section>`, { toc: '판권' });
   }
-  const colBody = jwBody ? jwBody : col && col.blocks && col.blocks.length
-    ? blocksXhtml(col.blocks, book, ctx)
-    : `<p>${esc(meta.title || '')}</p><p>지은이 ${esc(meta.author || '')}</p>${meta.translator ? `<p>옮긴이 ${esc(meta.translator)}</p>` : ''}<p>펴낸곳 ${esc(meta.publisher || '')}</p>${meta.isbn ? `<p>ISBN ${esc(meta.isbn)}</p>` : ''}${meta.ebookPrice ? `<p>정가(전자책) ${esc(meta.ebookPrice)}</p>` : ''}`;
-  addDoc('colophon', 'colophon.xhtml', '판권', `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">판권</h1>\n${colBody}</section>`, { toc: '판권' });
+  const colFront = /앞/.test(String(meta.colophonPos || ''));
+  if (!colFront) addColophon();
 
   // 8) nav
   const uid = 'urn:isbn:' + (String(meta.ebookIsbn || meta.isbn || '').replace(/[^0-9Xx]/g, '') || 'priming-' + Buffer.from(meta.title || 'book').toString('hex').slice(0, 12));

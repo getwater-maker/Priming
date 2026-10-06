@@ -198,6 +198,8 @@ contextBridge.exposeInMainWorld('api', {
   bookExportBarcode: () => ipcRenderer.invoke('book-export-barcode'),
   bookSaveAsset: (args) => ipcRenderer.invoke('book-save-asset', args),
   bookBuildEpub: (args) => ipcRenderer.invoke('book-build-epub', args),
+  bookEbookPreview: (args) => ipcRenderer.invoke('book-ebook-preview', args),
+  bookEbookDoc: (args) => ipcRenderer.invoke('book-ebook-doc', args),
   bookOutputs: () => ipcRenderer.invoke('book-outputs'),
   bookOpenPlatform: (u) => ipcRenderer.invoke('book-open-platform', u),
   bookRegisterRun: (args) => ipcRenderer.invoke('book-register-run', args),

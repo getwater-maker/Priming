@@ -984,3 +984,13 @@ body:has(.modal-bg.show) .clip-tb{display:none}
 /* 🧩 ① 칸 AI 고지 편집 — 글자칸 아래에 막대(겹치지 않게 · v0.6.94) */
 .stage-ai-stack{position:absolute;display:flex;flex-direction:column;align-items:flex-start;gap:8px;max-width:calc(100% - 8px)}
 .stage-ai-stack .stage-ta{max-width:100%}
+
+/* 📱 미리보기 전환(종이책 | 전자책) — R22 */
+.bkmode{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);flex:0 0 auto}
+.bkmodebtn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:3px 12px;cursor:pointer;font-weight:600}
+.bkmodebtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.bkebook{flex:1;min-height:0;display:flex;flex-direction:column}
+.bkeb-checks{padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.6;flex:0 0 auto;max-height:40%;overflow:auto}
+.bkeb-chk.err{color:#c62828;font-weight:600}
+.bkeb-chk.warn{color:#b26a00}
+.bkeb-frame{flex:1;min-height:0;width:100%;border:0;background:#fff}

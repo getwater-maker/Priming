@@ -107,6 +107,9 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const L = (k, v) => setLayout((s) => ({ ...s, [k]: v }));
   const Lm = (k, v) => setLayout((s) => ({ ...s, marginsMm: { ...s.marginsMm, [k]: Number(v) || 0 } }));
   const [previewUrl, setPreviewUrl] = useState(null);
+  // 📱 미리보기 전환(R22) — 종이책(내지 조판) | 전자책(실제 ePub 의 spine 문서를 차례로 + 사전 점검)
+  const [viewMode, setViewMode] = useState('paper');
+  const [eb, setEb] = useState({ busy: false, error: '', docs: [], checks: [], n: 1, html: '', version: '', bytes: 0, forPath: '' });
   const [previewBusy, setPreviewBusy] = useState(false);
   // ⏱ 미리보기 조판 진행 표시 — 단계(html 만들기 → 조판) · 경과 초 · 지금까지 배치된 쪽 수(iframe 의 vivliostyle 쪽 컨테이너를 센다)
   const [previewPhase, setPreviewPhase] = useState('');
@@ -479,6 +482,24 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     } catch (e) { logline('ePub 오류: ' + e.message); }
     setBuilding(false); refreshOutputs();
   }
+  // 📱 전자책 미리보기 — 부크크에 올라가는 실제 ePub 을 임시로 만들어 문서(spine)를 차례로 보여 주고 사전 점검을 돌린다
+  async function loadEbookDoc(docs, n) {
+    const d = docs[n - 1]; if (!d) return;
+    const r = await api.bookEbookDoc({ href: d.href });
+    setEb((s) => ({ ...s, n, html: r && r.html ? r.html : '', error: r && r.error ? r.error : '' }));
+  }
+  async function refreshEbook() {
+    setEb((s) => ({ ...s, busy: true, error: '' }));
+    try {
+      const r = await api.bookEbookPreview({});
+      if (!r || r.error) { setEb((s) => ({ ...s, busy: false, error: (r && r.error) || '응답 없음' })); return; }
+      setEb({ busy: false, error: '', docs: r.docs, checks: r.checks, n: 1, html: '', version: r.version, bytes: r.bytes, forPath: (dto && dto.scriptPath) || '' });
+      await loadEbookDoc(r.docs, 1);
+    } catch (e) { setEb((s) => ({ ...s, busy: false, error: e.message })); }
+  }
+  useEffect(() => {
+    if (viewMode === 'ebook' && dto && dto.kind === 'book' && !eb.busy && eb.forPath !== dto.scriptPath) refreshEbook();
+  }, [viewMode, dto && dto.scriptPath]);
   // 📚 큐 전체 만들기 — 큐의 권마다 [내지·표지 PDF → ePub → 검증]을 차례로(한 권이 실패해도 다음 권으로). 각 권의 결과는 로그에도 남는다.
   async function buildQueue() {
     if (building) return;
@@ -1200,6 +1221,39 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
 
       {/* ── 오른쪽: 실제 페이지 미리보기 ── */}
       <div className="bkcenter">
+        <div className="bkmode" data-testid="bk-viewmode">
+          <button className={'bkmodebtn' + (viewMode === 'paper' ? ' on' : '')} data-testid="bk-view-paper" onClick={() => setViewMode('paper')} title="종이책 내지(조판) 미리보기">📕 종이책</button>
+          <button className={'bkmodebtn' + (viewMode === 'ebook' ? ' on' : '')} data-testid="bk-view-ebook" onClick={() => setViewMode('ebook')} title="부크크에 올라가는 실제 ePub 을 만들어 문서 순서대로 보여 주고 부크크 점검 항목을 확인합니다">📱 전자책</button>
+          {viewMode === 'ebook' && <span className="meta">리플로우 ePub — 쪽번호 대신 「문서 n / N」</span>}
+        </div>
+        {viewMode === 'ebook' && (
+          <div className="bkebook" data-testid="bk-ebook">
+            <div className="bkbar">
+              <button className="ghost" disabled={eb.n <= 1 || eb.busy} onClick={() => loadEbookDoc(eb.docs, 1)} title="첫 문서(표지)">⏮</button>
+              <button className="ghost" disabled={eb.n <= 1 || eb.busy} onClick={() => loadEbookDoc(eb.docs, eb.n - 1)} title="이전 문서">◀</button>
+              <span className="bkpage" data-testid="bk-eb-pos">{eb.docs.length ? `문서 ${eb.n} / ${eb.docs.length}` : '—'}</span>
+              <button className="ghost" disabled={eb.n >= eb.docs.length || eb.busy} onClick={() => loadEbookDoc(eb.docs, eb.n + 1)} title="다음 문서">▶</button>
+              <button className="ghost" disabled={eb.n >= eb.docs.length || eb.busy} onClick={() => loadEbookDoc(eb.docs, eb.docs.length)} title="마지막 문서">⏭</button>
+              <select value={eb.n} disabled={eb.busy || !eb.docs.length} onChange={(e) => loadEbookDoc(eb.docs, Number(e.target.value))} style={{ maxWidth: 260 }}>
+                {eb.docs.map((d) => <option key={d.n} value={d.n}>{d.n}. {d.title}</option>)}
+              </select>
+              <span className="grow" />
+              <span className="meta">{eb.busy ? '⏳ ePub 만드는 중…' : (eb.docs.length ? `EPUB ${eb.version} · ${(eb.bytes / 1048576).toFixed(1)}MB` : '')}</span>
+              <button className="ghost" disabled={eb.busy} onClick={refreshEbook} title="원고를 다시 읽어 ePub 을 새로 만듭니다">🔄 전자책 갱신</button>
+            </div>
+            {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
+            {eb.checks.length > 0 && (
+              <div className="bkeb-checks" data-testid="bk-eb-checks">
+                <b>📋 부크크 전자책 사전 점검</b>
+                {eb.checks.map((c) => (
+                  <div key={c.id} className={'bkeb-chk ' + c.level} data-testid={'bk-eb-chk-' + c.id} data-level={c.level}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.text}</div>
+                ))}
+              </div>
+            )}
+            <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="" srcDoc={eb.html} />
+          </div>
+        )}
+        <div style={{ display: viewMode === 'paper' ? 'contents' : 'none' }}>
         <div className="bkbar">
           <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
           <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
@@ -1291,6 +1345,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               </div>
             );
           })()}
+        </div>
         </div>
         {edit && (
           <div className="bkedit">

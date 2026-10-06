@@ -9709,7 +9709,7 @@ const BOOK_META_LABELS = {
   copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
   qr: 'QR', qrLabel: 'QR라벨',
-  ebookIsbn: '전자책ISBN', specialSections: '특별섹션', spineMm: '책등두께',
+  ebookIsbn: '전자책ISBN', ebookIssueDate: '전자책발행일', specialSections: '특별섹션', spineMm: '책등두께',
   headerEven: '머리글짝수', headerOdd: '머리글홀수', tocSize: '목차글자', tocLine: '목차행간', titleMax: '회목최대', headerGap: '머리글간격', lineBreak: '줄바꿈',
   ebookCover: '전자책표지', category: '카테고리', keywords: '키워드', tagline: '한줄소개', coverMaterial: '표지재질', printColor: '내지색', aiDisclosure: 'AI사용',
 };
@@ -9836,8 +9836,12 @@ async function resolveEbookCoverFile(outRoot, base) {
   else log(`⚠ 전자책 표지 ${path.basename(ec.path)} 를 JPG 로 바꾸지 못했습니다(ffmpeg 없음·10MB 초과) — 인쇄 표지에서 앞표지를 잘라 씁니다`);
   return j || '';
 }
-regBook('book-build-epub', async (_e, args = {}) => {
+// 📱 ePub 만들기 본체 — 「📱 ePub 만들기」와 전자책 미리보기(R22)가 같은 함수를 쓴다(미리보기가 실제 ePub 이어야 점검이 의미 있다).
+//   args.previewOut 이 있으면 그 경로(임시)에 만들고 폴더를 열지 않는다 · args.__logs 배열이 있으면 로그 줄을 거기에도 모은다.
+const _mainLog = log;   // 아래 함수 안에서 log 를 덮어쓰기 위해(로그 줄 수집)
+async function bookBuildEpubImpl(args = {}) {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
+  const log = (m) => { if (args.__logs) args.__logs.push(String(m)); _mainLog(m); };
   try {
     const { buildEpub } = require('./core/book/epub-builder');
     const lo = bookLayoutOpts(args);   // 구조 패널 제외·대본 모드·경로 축약(내지와 동일)
@@ -9855,7 +9859,7 @@ regBook('book-build-epub', async (_e, args = {}) => {
     const pagesKnown = (S.parsed._lastPages || 0) > 0;
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
     const r = await buildEpub(S.parsed, {
-      outPath: path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
+      outPath: args.previewOut || path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
       tmpDir: WF.tmpDir(outRoot, '', 'epub'),   // 전자책 표지 조각(_ebook-cover_<권>.jpg) — 완성 폴더면 _작업/epub
       coverTmpName: `_ebook-cover_${base}.jpg`,
       ebookCoverPath,
@@ -9868,12 +9872,35 @@ regBook('book-build-epub', async (_e, args = {}) => {
       epubVersion: args.epubVersion, embedFonts: args.embedFonts,
       spread, log,
     });
-    if (r.success && !args.noOpen) { try { shell.openPath(outRoot); } catch {} }
+    if (r.success && !args.noOpen && !args.previewOut) { try { shell.openPath(outRoot); } catch {} }
     return { dto: currentDTO(), epubPath: r.epubPath };
   } catch (e) {
     log('✗ ePub 오류: ' + e.message);
     return { dto: currentDTO(), error: e.message };
   }
+}
+regBook('book-build-epub', async (_e, args = {}) => bookBuildEpubImpl(args));
+
+// 📱 전자책 미리보기(R22) — 실제 ePub 을 임시 폴더에 만들어 spine 문서 목록 + 사전 점검을 돌려준다. 문서 하나는 book-ebook-doc 로.
+let _ebookPrev = { path: '' };
+regBook('book-ebook-preview', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { error: '열린 출판 원고가 없습니다.' };
+  const EP = require('./core/book/ebook-preview');
+  const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
+  const out = path.join(WF.tmpDir(outRoot, '_preview', 'preview'), 'ebook-preview.epub');   // 완성 폴더면 _작업/preview — 출력 폴더를 어지럽히지 않는다
+  try { fs.mkdirSync(path.dirname(out), { recursive: true }); } catch {}
+  const logs = [];
+  const r = await bookBuildEpubImpl({ ...args, previewOut: out, noOpen: true, __logs: logs });
+  if (r.error || !fs.existsSync(out)) return { error: r.error || 'ePub 을 만들지 못했습니다(로그 확인)' };
+  _ebookPrev = { path: out };
+  try {
+    const info = EP.inspectEpub(out, { meta: S.parsed.meta || {}, logs, footnoteCount: Object.keys(S.parsed.footnotes || {}).length });
+    return { ...info, bytes: fs.statSync(out).size };
+  } catch (e) { return { error: 'ePub 점검 실패: ' + e.message }; }
+});
+regBook('book-ebook-doc', async (_e, args = {}) => {
+  if (!_ebookPrev.path || !fs.existsSync(_ebookPrev.path)) return { error: '전자책 미리보기를 먼저 만드세요' };
+  return require('./core/book/ebook-preview').readDoc(_ebookPrev.path, String(args.href || ''));
 });
 
 // ISBN 바코드(EAN-13 + 부가기호) 생성 — SVG 를 출력폴더에 저장 + 렌더러(PNG 변환용)에 반환.

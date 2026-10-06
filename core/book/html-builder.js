@@ -359,7 +359,7 @@ function colophonNotesHtml(fsec, book, ctx, srcAttr) {
 function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   // 📱 전자책 판 — ISBN 은 전자책 ISBN(있으면) · 종이책 정가(POD)는 싣지 않는다
   const meta = (ctx && ctx.edition === 'ebook')
-    ? { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '' }
+    ? { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '', issueDate: meta0.ebookIssueDate || meta0.issueDate }
     : meta0;
   const only = (Array.isArray(fields) && fields.length) ? new Set(fields) : null;
   const on = (key) => !only || only.has(key);
