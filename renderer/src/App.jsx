@@ -535,6 +535,7 @@ export default function App() {
   const [sentEdit, setSentEdit] = useState(null);   // { shortsNum, groupNum, sentIdx, count, text }
   // 🎨 자막 서식(2026-09-25) — 채널 편집의 서식 창 · 목록에서 고른 자막 줄/글자 · 열린 옆 패널
   const [capDlg, setCapDlg] = useState(null);       // { key: 'capLong', panel: 'fmt'|'anim' }
+  const [aiFmtDlg, setAiFmtDlg] = useState(false);  // 🏷 채널 편집의 AI 고지 서식 창(글꼴·크기·색·테두리·배경 — 자막 서식 창과 같은 패널)
   const [capSel, setCapSel] = useState(null);       // { shortsNum, mode: 'lines'|'chars', items: [{ groupNum, sentIdx, from, to, n }] }
   const [capPanel, setCapPanel] = useState(null);   // 'fmt' | 'anim'
   // 🧭 Vrew 식 작업 화면(v0.5.42) — 메뉴(리본) · 보기(클립/카드) · ① 칸 폭 · 커서(자막 줄)
@@ -2678,6 +2679,8 @@ export default function App() {
       aiText: (p.aiNotice && p.aiNotice.text) || '', aiUnit: (p.aiNotice && p.aiNotice.unit) === 'clip' ? 'clip' : 'time',
       aiFromSec: p.aiNotice && p.aiNotice.fromSec != null ? p.aiNotice.fromSec : 5, aiToSec: p.aiNotice && p.aiNotice.toSec != null ? p.aiNotice.toSec : 10,
       aiFromClip: p.aiNotice && p.aiNotice.fromClip != null ? p.aiNotice.fromClip : 1, aiToClip: p.aiNotice && p.aiNotice.toClip != null ? p.aiNotice.toClip : 3,
+      aiFmt: (p.aiNotice && p.aiNotice.fmt && typeof p.aiNotice.fmt === 'object') ? p.aiNotice.fmt : null,   // 🏷 서식·자리도 이 창에서(⚠ 안 실으면 저장 때 지워진다)
+      aiPos: (p.aiNotice && p.aiNotice.pos && typeof p.aiNotice.pos === 'object') ? p.aiNotice.pos : null,
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
       // 🎭 화자별 목소리 [{name, voice}] — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
@@ -2974,7 +2977,8 @@ export default function App() {
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice,
         text: String(ch.aiText || '').trim(), unit: ch.aiUnit === 'clip' ? 'clip' : 'time',
-        fromSec: numOr(ch.aiFromSec, 5), toSec: numOr(ch.aiToSec, 0), fromClip: Math.max(1, Math.floor(numOr(ch.aiFromClip, 1))), toClip: Math.max(0, Math.floor(numOr(ch.aiToClip, 0))) },
+        fromSec: numOr(ch.aiFromSec, 5), toSec: numOr(ch.aiToSec, 0), fromClip: Math.max(1, Math.floor(numOr(ch.aiFromClip, 1))), toClip: Math.max(0, Math.floor(numOr(ch.aiToClip, 0))),
+        fmt: ch.aiFmt || undefined, pos: ch.aiPos || undefined },
     };
     // 🔑 시드는 **목소리 고정의 핵심**이다 — 비거나 숫자가 아니면 서버가 매번 다른 시드를 써서
     //   같은 채널인데 편마다 톤이 달라진다. 값이 이상하면 **저장하지 않고**(기존 시드 보존) 알린다.
@@ -3058,7 +3062,77 @@ export default function App() {
     if (f) setCh((c) => ({ ...c, dictPath: f }));
   }
   function setSplitField(k, v) { setCh((cur) => ({ ...cur, split: { ...cur.split, [k]: v } })); }
-  // 모달 본문자막 한 컬럼(모드별). withSplit=true 면 분할옵션도 포함(롱폼).
+  // (옛) 모달 본문자막 한 컬럼 — 지금은 쓰지 않는다(capTabBody 로 대체).
+  // 📝 자막·분할 탭(2026-10-06 · 로이 「AI 고지 모든 설정을 여기서 · 공간을 적극 활용해 스크롤 없이 한 화면」)
+  //   ① 본문 자막(두 칸으로 나눠 가로 공간 활용) ② 분할 한 줄 ③ 🏷 AI 고지 전부(사용·문구·시간·서식·자리). 필드·저장(saveChannel)은 그대로 — 배치만 바꿨다.
+  function capTabBody() {
+    const c = ch.capLong;
+    const set = (patch) => setCh((cur) => ({ ...cur, capLong: { ...cur.capLong, ...patch } }));
+    const lk = capLookOf(c);
+    const ap = CF.aiNoticePos({ pos: ch.aiPos });
+    const pct = (v) => Math.round(v * 1000) / 10;
+    const setPos = (k, v) => setCh((cur) => { const b = CF.aiNoticePos({ pos: cur.aiPos }); const n = Math.max(0, Math.min(98, Number(v) || 0)) / 100; return { ...cur, aiPos: { x: b.x, y: b.y, [k]: Math.round(n * 10000) / 10000 } }; });
+    const clr = { flex: '0 0 38px', height: 24, padding: 0 };
+    const chkL = { display: 'flex', alignItems: 'center', gap: 3 };
+    return (
+      <div className="cap2" data-testid="cap-tab">
+        <div className="box">
+          <h4>본문 자막 (16:9)</h4>
+          <div className="cap2g">
+            <div>
+              <div className="crow"><span className="l">크기</span><select value={c.size} onChange={(e) => set({ size: e.target.value })}>{['25', '50', '75', '90', '100', '110', '125', '150', '200', '250', '300'].map((v) => <option key={v}>{v}</option>)}</select>
+                <span className="l">정렬</span><select value={c.align} onChange={(e) => set({ align: e.target.value })}><option value="center">가운데</option><option value="start">왼쪽</option><option value="end">오른쪽</option></select>
+                <span className="l" title="가로 미세 — 1칸 = 0.0025(화면 폭 절반 기준) · + = 오른쪽">가로</span><input className="n" type="number" value={c.xFine || 0} step="10" onChange={(e) => set({ xFine: e.target.value })} /></div>
+              <div className="crow"><span className="l">세로</span><select value={c.yAlign} onChange={(e) => set({ yAlign: e.target.value })}><option value="middle">가운데</option><option value="bottom">아래</option><option value="top">위</option></select>
+                <span className="l">위치</span><select value={c.pos} onChange={(e) => set({ pos: e.target.value })}><option value="0.3">아래</option><option value="0.15">약간↓</option><option value="0">가운데</option><option value="-0.15">약간↑</option><option value="-0.3">위</option></select>
+                <span className="l">미세</span><input className="n" type="number" value={c.fine} step="10" onChange={(e) => set({ fine: e.target.value })} /></div>
+              <div className="crow" title="자막 글자색 · 굵게(기본 폰트가 이미 굵은 글꼴이라 더 두꺼워집니다)"><span className="l">글자색</span><input type="color" style={clr} value={lk.fontColor} onChange={(e) => set({ fontColor: e.target.value })} />
+                <label style={chkL}><input type="checkbox" checked={!!c.bold} onChange={(e) => set({ bold: e.target.checked })} /><span className="meta">굵게</span></label></div>
+            </div>
+            <div>
+              <div className="crow" title="글자 테두리 — 두께는 px(1080 화면 기준)"><span className="l">테두리</span><label style={chkL}><input type="checkbox" checked={c.outlineOn !== false} onChange={(e) => set({ outlineOn: e.target.checked })} /><span className="meta">켜기</span></label>
+                <input type="color" style={clr} disabled={c.outlineOn === false} value={lk.outlineColor} onChange={(e) => set({ outlineColor: e.target.value })} />
+                <span className="l">두께</span><input className="n" type="number" min="0" max="20" disabled={c.outlineOn === false} value={lk.outlineWidth} onChange={(e) => set({ outlineWidth: e.target.value })} /></div>
+              <div className="crow" title="글자 뒤 배경 상자 — 글자 폭에 맞춰 그려집니다(Vrew 자막 상자와 같은 방식)"><span className="l">배경</span><label style={chkL}><input type="checkbox" checked={!!c.boxOn} onChange={(e) => set({ boxOn: e.target.checked })} /><span className="meta">상자</span></label>
+                <input type="color" style={clr} disabled={!c.boxOn} value={lk.boxColor} onChange={(e) => set({ boxColor: e.target.value })} />
+                <span className="l">불투명</span><input className="n" type="number" min="0" max="100" step="10" disabled={!c.boxOn} value={lk.boxOpacity} onChange={(e) => set({ boxOpacity: e.target.value })} /><span className="meta">%</span></div>
+              <div className="crow" title="Vrew 자막 서식 창과 같은 항목 — 이 채널 모든 자막의 기본 서식. 줄마다 따로 바꾸려면 메인 화면에서 자막 줄 번호를 누르세요"><span className="l">서식</span>
+                <button className="ghost" data-testid="ch-capfmt" style={{ flex: '1 1 auto', padding: '3px 6px' }} onClick={() => setCapDlg({ key: 'capLong', panel: 'fmt' })}>🎨 글꼴·간격·그림자…</button>
+                <button className="ghost" data-testid="ch-capanim" style={{ flex: '0 0 auto', padding: '3px 6px' }} onClick={() => setCapDlg({ key: 'capLong', panel: 'anim' })}>✨ 효과{lk.anim ? ': ' + ((CF.ANIM_INFO[lk.anim.type] || {}).label || '') : ''}</button></div>
+            </div>
+          </div>
+        </div>
+        <div className="box">
+          <div className="crow" style={{ margin: 0 }}><span className="l" style={{ color: 'var(--hook)' }}>✂ 분할</span>
+            <select value={ch.split.mode === 'sentence' ? 'sentence' : (ch.split.mode === 'h2' ? 'h2' : 'h3')} title={ch.split.mode === 'sentence' ? '도입부/본론을 문장수로' : ch.split.mode === 'h2' ? 'H2 1개=그룹 1개 (H3 모두 묶음)' : 'H3 1개=그룹 1개'} onChange={(e) => setSplitField('mode', e.target.value)}><option value="h3">H3 섹션 단위</option><option value="h2">H2 섹션 단위</option><option value="sentence">문장 단위</option></select>
+            {ch.split.mode === 'sentence' && (<><span className="l">도입부</span><input className="n" type="number" value={ch.split.intro} onChange={(e) => setSplitField('intro', e.target.value)} />
+              <span className="l">본론</span><input className="n" type="number" value={ch.split.main} onChange={(e) => setSplitField('main', e.target.value)} /></>)}
+            <span className="l">짧은</span><input className="n" type="number" value={ch.split.short} onChange={(e) => setSplitField('short', e.target.value)} />
+            <span className="l">긴</span><input className="n" type="number" value={ch.split.long} onChange={(e) => setSplitField('long', e.target.value)} />
+            <span className="meta">대본 분할 기준</span></div>
+        </div>
+        <div className="box" data-testid="ai-box">
+          <h4>🏷 AI 고지 <span className="meta" style={{ fontWeight: 400 }}>— 실제 표시는 작업바의 「AI 고지」 토글로 결정 · 대본 🏷 문장 범위가 이 시간보다 우선</span></h4>
+          <div className="crow"><label style={chkL} title="이 채널의 기본값 — 새 작업을 열 때 AI 고지를 켠 채로 시작"><input type="checkbox" checked={!!ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /><span className="l">사용</span></label>
+            <span className="l">문구</span><input data-testid="ai-text" style={{ flex: '1 1 260px', minWidth: 0 }} placeholder="본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다." value={ch.aiText || ''} onChange={(e) => setCh({ ...ch, aiText: e.target.value })} /></div>
+          <div className="crow"><span className="l">시간</span>
+            <select data-testid="ai-unit" value={ch.aiUnit || 'time'} onChange={(e) => setCh({ ...ch, aiUnit: e.target.value })}><option value="time">시간(초)</option><option value="clip">클립(자막 줄 번호)</option></select>
+            {(ch.aiUnit || 'time') === 'time' ? (<>
+              <input data-testid="ai-from" className="n" type="number" min="0" step="0.5" value={ch.aiFromSec} onChange={(e) => setCh({ ...ch, aiFromSec: e.target.value })} /><span className="meta" style={{ whiteSpace: 'nowrap' }}>초부터</span>
+              <input data-testid="ai-to" className="n" type="number" min="0" step="0.5" value={ch.aiToSec} onChange={(e) => setCh({ ...ch, aiToSec: e.target.value })} /><span className="meta" style={{ whiteSpace: 'nowrap' }}>초까지 (0 = 끝까지)</span>
+            </>) : (<>
+              <input data-testid="ai-from" className="n" type="number" min="1" step="1" value={ch.aiFromClip} onChange={(e) => setCh({ ...ch, aiFromClip: e.target.value })} /><span className="meta" style={{ whiteSpace: 'nowrap' }}>번 클립부터</span>
+              <input data-testid="ai-to" className="n" type="number" min="0" step="1" value={ch.aiToClip} onChange={(e) => setCh({ ...ch, aiToClip: e.target.value })} /><span className="meta" style={{ whiteSpace: 'nowrap' }}>번 클립까지 (0 = 끝까지)</span>
+            </>)}</div>
+          <div className="crow" title="AI 고지 글자의 글꼴·크기·색·테두리·배경(자막 서식 창과 같은 패널) · 자리는 화면 왼쪽 위 기준 %(메인 화면 ① 칸에서 끌어 옮겨도 됩니다)"><span className="l">서식</span>
+            <button className="ghost" data-testid="ai-fmt-btn" style={{ flex: '0 0 auto', padding: '3px 8px' }} onClick={() => setAiFmtDlg(true)}>🎨 글꼴·크기·색…{ch.aiFmt ? ' ✎' : ''}</button>
+            <span className="l">자리</span><span className="meta">가로</span><input data-testid="ai-pos-x" className="n" style={{ width: 62, flex: "0 0 62px" }} type="number" min="0" max="98" step="0.5" value={pct(ap.x)} onChange={(e) => setPos('x', e.target.value)} /><span className="meta">%</span>
+            <span className="meta">세로</span><input data-testid="ai-pos-y" className="n" style={{ width: 62, flex: "0 0 62px" }} type="number" min="0" max="98" step="0.5" value={pct(ap.y)} onChange={(e) => setPos('y', e.target.value)} /><span className="meta">%</span>
+            <button className="ghost" data-testid="ai-reset" style={{ flex: '0 0 auto', padding: '3px 8px' }} title="서식과 자리를 기본(흰 글자 · 검은 테두리 · 왼쪽 위)으로" onClick={() => setCh({ ...ch, aiFmt: null, aiPos: null })}>기본으로</button></div>
+        </div>
+      </div>
+    );
+  }
   function capColumn(key, label, withSplit) {
     const c = ch[key];
     const set = (patch) => setCh((cur) => ({ ...cur, [key]: { ...cur[key], ...patch } }));
@@ -3525,6 +3599,7 @@ export default function App() {
       if (preview) { setPreview(null); return; }
       if (playerOpen) { stopPlayer(); return; }
       if (nameAsk) { nameAskCancel(); return; }        // 이름 입력(다른 모달 위에 뜸) — 가장 먼저
+      if (aiFmtDlg) { setAiFmtDlg(false); return; }     // 🏷 AI 고지 서식 창
       if (capDlg) { setCapDlg(null); return; }          // 🎨 채널 편집 위의 자막 서식 창
       if (promptView) { setPromptView(null); return; }
       if (settingsOpen) { setSettingsOpen(false); return; }
@@ -3547,7 +3622,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  }, [preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
   function cursorInfo() {
@@ -3624,7 +3699,7 @@ export default function App() {
     });
     setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + l.n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
+  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -4714,6 +4789,17 @@ export default function App() {
         <div id="player" className={playerOpen ? 'show' : ''}>{stageEl}</div>
       )}
 
+      {/* 🏷 채널 AI 고지 서식 — 채널 편집 값(ch.aiFmt)에 바로 들어가고 「저장」으로 저장 */}
+      {aiFmtDlg && ch && (
+        <div className="modal-bg show" style={{ zIndex: 95 }} data-testid="aifmtdlg">
+          <div className="modal-card cf-dlg">
+            <div className="cf-dlgh"><h3>🏷 AI 고지 서식</h3><span className="meta">이 채널의 모든 영상(.vrew·MP4)에 적용 · 「저장」을 눌러야 채널에 저장됩니다</span><button className="ghost" onClick={() => setAiFmtDlg(false)}>닫기</button></div>
+            <div className="cf-dlgb">
+              <CaptionFormatPanel value={CF.aiNoticeFmt({ fmt: ch.aiFmt })} onChange={(p) => setCh((cur) => ({ ...cur, aiFmt: CF.mergeAll(cur.aiFmt, p) || null }))} title="AI 고지 서식" />
+            </div>
+          </div>
+        </div>
+      )}
       {/* 🎨 채널 기본 자막 서식 — 채널 편집 창 위에 뜬다. 바꾸는 즉시 채널 편집 값(ch.capLong)에 들어가고, 채널 「저장」으로 저장된다 */}
       {capDlg && ch && ch[capDlg.key] && (() => {
         const key = capDlg.key;
@@ -4848,20 +4934,6 @@ export default function App() {
                     ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
                     : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</span>
                 </div>
-                <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 (언제든 변경)</span></div>
-                {/* 🏷 AI 고지 문구·나타나는 때·사라지는 때(v0.5.87 로이) — 단위는 시간(초) 또는 클립(자막 줄 번호) */}
-                <div className="frow"><label>고지 문구</label><input data-testid="ai-text" placeholder="본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다." value={ch.aiText || ''} onChange={(e) => setCh({ ...ch, aiText: e.target.value })} /></div>
-                <div className="frow"><label>고지 시간</label>
-                  <select data-testid="ai-unit" style={{ flex: '0 0 auto', width: 'auto' }} value={ch.aiUnit || 'time'} onChange={(e) => setCh({ ...ch, aiUnit: e.target.value })}><option value="time">시간(초)</option><option value="clip">클립(자막 줄 번호)</option></select>
-                  {(ch.aiUnit || 'time') === 'time' ? (<>
-                    <input data-testid="ai-from" type="number" min="0" step="0.5" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiFromSec} onChange={(e) => setCh({ ...ch, aiFromSec: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>초부터</span>
-                    <input data-testid="ai-to" type="number" min="0" step="0.5" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiToSec} onChange={(e) => setCh({ ...ch, aiToSec: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>초까지 (0 = 끝까지)</span>
-                  </>) : (<>
-                    <input data-testid="ai-from" type="number" min="1" step="1" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiFromClip} onChange={(e) => setCh({ ...ch, aiFromClip: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>번 클립부터</span>
-                    <input data-testid="ai-to" type="number" min="0" step="1" style={{ flex: '0 0 70px', width: 70 }} value={ch.aiToClip} onChange={(e) => setCh({ ...ch, aiToClip: e.target.value })} /><span className="meta" style={{ whiteSpace: "nowrap" }}>번 클립까지 (0 = 끝까지)</span>
-                  </>)}
-                </div>
-                <div className="frow"><label></label><span className="meta">대본 화면에서 🏷 로 문장 범위를 따로 정한 대본은 그 범위가 이깁니다. Vrew 는 클립 단위로 사라지므로 「초」 끝은 그 시각이 든 클립이 끝날 때 사라집니다.</span></div>
                 {/* 🖼 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 🎨 제작 도구 탭은 높이가 넘쳐 🏠 기본으로 · 값·저장은 그대로 presetPrompt) */}
                 <div className="frow"><label>이미지 사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
               </div>)}
@@ -4949,7 +5021,7 @@ export default function App() {
               })()}
 
               {chTab === 'caption' && (<div>
-                <div className="twocol">{capColumn('capLong', '본문 자막 (16:9)', true)}</div>
+                {capTabBody()}
               </div>)}
 
               {chTab === 'tools' && (<div>
