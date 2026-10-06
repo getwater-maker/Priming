@@ -253,6 +253,10 @@ contextBridge.exposeInMainWorld('api', {
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
   royConfirm: (args) => ipcRenderer.invoke('roy-confirm', args),   // 🟥 사실 확인(v0.7.3)
+  roySpell: (args) => ipcRenderer.invoke('roy-spell', args),   // 🔎 맞춤법 검사(v0.7.13 · claude -p)
+  roySpellList: () => ipcRenderer.invoke('roy-spell-list'),
+  roySpellApply: (args) => ipcRenderer.invoke('roy-spell-apply', args),
+  roySpellDismiss: (args) => ipcRenderer.invoke('roy-spell-dismiss', args),
   // 🕘 클립 수정 이력(2026-10-03) — 한 문장의 지난 글 목록 · 그 글로 되돌리기
   clipHistory: (args) => ipcRenderer.invoke('clip-history', args),
   clipHistoryRestore: (args) => ipcRenderer.invoke('clip-history-restore', args),

@@ -76,11 +76,12 @@ const epOf = (scriptBase) => { const m = String(scriptBase || '').match(/^\s*(\[
 
 /**
  * 한 줄 덧붙이기.
- * @param {{scriptBase:string, channel?:string, mark:{mid,k,text}, how:'수정'|'그대로', now?:number}} o
+ * @param {{scriptBase:string, channel?:string, mark:{mid,k,text}, how:'수정'|'그대로'|'교정', source?:string, extra?:object, now?:number}} o
+ *   source = 「출처」(기본 프라이밍 · 맞춤법 반영은 '교정') · extra = 뒤에 덧붙일 칸(교정: 「틀림→바름」 목록)
  * @returns {{ok:boolean, id:string, file:string, pending:boolean}}
  */
 function append(o) {
-  const { scriptBase, channel = '', mark, how, now = Date.now() } = o;
+  const { scriptBase, channel = '', mark, how, source = '프라이밍', extra = null, now = Date.now() } = o;
   const st = loadStore(scriptBase);
   const rec = st.marks[mark.mid] || (st.marks[mark.mid] = { k: mark.k, orig: mark.text, edited: false });
   const dir = bankDir();
@@ -88,8 +89,9 @@ function append(o) {
   const file = okDir ? path.join(dir, FILES[mark.k]) : pendingFile();
   if (!rec.bankId) rec.bankId = _newId(mark.k, okDir ? [file, pendingFile()] : [pendingFile(), path.join(dir, FILES[mark.k])], now);
   const row = {
-    id: rec.bankId, 날짜: kstDate(now), 출처: '프라이밍', 채널: channel || '', 편: epOf(scriptBase),
+    id: rec.bankId, 날짜: kstDate(now), 출처: source, 채널: channel || '', 편: epOf(scriptBase),
     구분: mark.k === 'exp' ? '경험' : '해석', 원문: rec.orig || '', 수정: mark.text || '', 확인: how, 사실: '',
+    ...(extra || {}),
   };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, JSON.stringify(row) + '\n', 'utf8');

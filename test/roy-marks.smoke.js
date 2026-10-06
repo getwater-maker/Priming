@@ -37,7 +37,7 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
 (async () => {
   fs.writeFileSync(MD, SCRIPT, 'utf8');
   const errs = [];
-  const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1', PM_ROY_BANK_DIR: BANK, PM_ROY_HOME: RHOME } });
+  const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1', PM_ROY_BANK_DIR: BANK, PM_ROY_HOME: RHOME, PM_CLAUDE_EXE: path.join(__dirname, 'fixtures', 'fake-claude.js') } });   // 🔎 가짜 claude(구독을 쓰지 않는다)
   try {
     const win = await app.firstWindow();
     win.on('pageerror', (e) => errs.push(String(e && e.message || e)));
@@ -90,7 +90,10 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
     const swap = (i, a, b) => doc.evaluate((root, [i, a, b]) => {
       const p = [...root.querySelectorAll('p[data-key]')].find((x) => x.textContent.includes(a));
       const w = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); let t; while ((t = w.nextNode())) { if (t.nodeValue.includes(a) && !t.parentElement.closest('[data-ne]')) break; }
-      t.nodeValue = t.nodeValue.replace(a, b); root.focus(); root.dispatchEvent(new Event('input', { bubbles: true }));
+      t.nodeValue = t.nodeValue.replace(a, b); root.focus();
+      const rg = document.createRange(); rg.setStart(t, t.nodeValue.indexOf(b) + b.length); rg.collapse(true);   // 사람이 친 것처럼 커서는 고친 자리에
+      const sl = window.getSelection(); sl.removeAllRanges(); sl.addRange(rg);
+      root.dispatchEvent(new Event('input', { bubbles: true }));
     }, [i, a, b]);
     await swap(2, '병원 대기실에서 한참을', '아내와 병원 대기실에서 한참을');
     await win.waitForTimeout(2800);
@@ -109,6 +112,29 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
     const I = bankRows('해석해설은행.jsonl');
     ok(I.length === 1 && I[0].원문 === '저는 이 대목에서 오래 멈춥니다.' && I[0].수정 === '저는 이 대목에서 한참 멈춰 섭니다.' && I[0].구분 === '해석' && /^I-/.test(I[0].id), '해석해설은행 한 쌍');
     ok(readMd().includes('> 📝 🟨 해석\n저는 이 대목에서 한참'), '🟨 표시 줄은 그대로(상태 없음)');
+
+    console.log('[6] 🔎 맞춤법 — 고친 표시를 벗어나면 한 번 · 제안만 · 반영하면 은행 「교정」');
+    await swap(3, '한참 멈춰 섭니다', '한참 멈춰 섰음을 느겼습니다');
+    await win.waitForTimeout(2800);
+    ok(readMd().includes('한참 멈춰 섰음을 느겼습니다'), '(준비) 오타 든 글로 고쳐 저장');
+    ok(await R.locator('[data-testid="reader-spell-row"]').count() === 0 || !/느겼습니다/.test(await R.locator('[data-testid="reader-spell"]').innerText().catch(() => '')), '고치는 문단 안에 커서가 있으면 아직 검사하지 않는다');
+    await doc.evaluate((root) => {   // 표시 밖(첫 문장)으로 커서를 옮긴다
+      const p = root.querySelector('p[data-key]'); const w = document.createTreeWalker(p, NodeFilter.SHOW_TEXT); let t;
+      while ((t = w.nextNode())) { if (!t.parentElement.closest('[data-ne]') && !t.parentElement.closest('[data-mid]')) break; }
+      root.focus(); const r = document.createRange(); r.setStart(t, 1); r.collapse(true); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await win.waitForSelector('[data-testid="reader-spell-row"]', { timeout: 15000 });
+    const sp = await R.locator('[data-testid="reader-spell"]').innerText();
+    ok(/느겼습니다/.test(sp) && /느꼈습니다/.test(sp) && !/지어낸지적/.test(sp), `표시를 벗어나자 제안 「느겼습니다 → 느꼈습니다」 (원문에 없는 지적은 버림)`);
+    ok(readMd().includes('느겼습니다'), '⛔ 자동으로 고치지 않는다(제안만)');
+    await R.locator('[data-testid="spell-apply"]').first().click();
+    await win.waitForFunction(() => /맞춤법 반영/.test((document.querySelector('[data-testid=reader-msg]') || {}).textContent || ''), null, { timeout: 10000 });
+    ok(readMd().includes('한참 멈춰 섰음을 느꼈습니다') && !readMd().includes('느겼습니다'), '「반영」 → 대본이 고쳐졌다');
+    const I2 = bankRows('해석해설은행.jsonl'), last = I2[I2.length - 1];
+    ok(last.출처 === '교정' && last.확인 === '교정' && last.수정 === '저는 이 대목에서 한참 멈춰 섰음을 느꼈습니다.' && /느겼습니다→느꼈습니다/.test(last.교정) && last.id === I2[0].id, `은행 같은 id 에 「교정」 한 줄 (${last.id})`);
+    ok(I2[I2.length - 2].수정 === '저는 이 대목에서 한참 멈춰 섰음을 느겼습니다.' && I2[I2.length - 2].확인 === '수정', '🔑 그 앞 줄 = 로이의 원래 표현(교정 전) 그대로');
+    await win.waitForTimeout(300);
+    ok(await R.locator('[data-testid="reader-spell-row"]').count() === 0, '반영한 제안은 사라진다');
 
     console.log('[5] 미확인 🟥 이 남은 편 — TTS 관문');
     await R.locator('button:has-text("닫기")').click();

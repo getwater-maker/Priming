@@ -49,7 +49,7 @@ function paraInner(sents, groupNum, groupNums) {
       const r = s.roy, bg = r ? ROY_BG[r.k === 'exp' ? (r.st === '확인' ? 'ok' : 'exp') : 'int'] : '';
       return (r && r.first ? royChip(r) : '')
         + (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
-        + (bg ? `<span data-roy="${r.k}" style="background:${bg};border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
+        + (bg ? `<span data-roy="${r.k}" data-mid="${escHtml(r.mid)}" style="background:${bg};border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
         + (k < sents.length - 1 ? ' ' : '');
     }).join('');
 }
@@ -135,6 +135,11 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const [saveSt, setSaveSt] = useState('');        // '' | 'dirty' | 'saving' | 'saved'
   const [msg, setMsg] = useState('');
   const [docHtml, setDocHtml] = useState('');
+  // 🔎 맞춤법(v0.7.13) — 고친 🟥·🟨 표시를 벗어날 때 한 번 검사(core/spell-check · claude -p) · 제안만, 반영은 로이
+  const [spell, setSpell] = useState([]);          // [{shortsNum, mid, k, head, items:[{틀림,바름}]}]
+  const [spellBusy, setSpellBusy] = useState(0);
+  const [spellNote, setSpellNote] = useState('');
+  const spellPendRef = useRef(new Map());           // 고쳐 저장했지만 아직 검사 안 한 표시: mid → shortsNum
   const docRef = useRef(null);
   const parasRef = useRef(new Map());              // key → {shortsNum, groupNum, base, last, dirty}
   const neCountRef = useRef(0);
@@ -250,7 +255,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           if (r && r.stale) { S.saving = false; for (const q of parasRef.current.values()) q.dirty = false; rebuild(); setSaveSt(''); setMsg('✗ ' + r.error); return; }
           if (!r || !r.ok) { err = (r && r.error) || '고치지 못했습니다'; break; }
           last = r.dto; sent++;
-          if (r.royBank && r.royBank.length) { banked.push(...r.royBank); S.needRebuild = true; }   // 🟥 자동 확인 → 칩을 새로 그린다
+          if (r.royBank && r.royBank.length) { banked.push(...r.royBank); S.needRebuild = true; for (const b of r.royBank) if (b.mid) spellPendRef.current.set(b.mid, p.shortsNum); }   // 🟥 자동 확인 → 칩을 새로 그린다
           refreshGroup(last, p.shortsNum, p.groupNum);
         }
       } catch (e) { err = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
@@ -264,6 +269,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     else setSaveSt('');
     if ((S.pending || anyDirty()) && !S.composing) return flushAll();
     if (S.needRebuild && !S.composing) rebuild(last || dtoRef.current);
+    setTimeout(maybeSpell, 0);   // 다시 그린 뒤 커서가 어디 있는지 보고
   }
   // 저장 뒤 그 그룹 문단들의 기준 문장을 새 대본으로 — 문단 수가 달라졌으면(합쳐짐 등) 다시 그려야 한다
   function refreshGroup(d, shortsNum, groupNum) {
@@ -292,7 +298,42 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     }
     clearTimeout(st.current.timer); setSaveSt(''); setMsg('↩ 저장 안 된 고침을 되돌렸습니다.');
   }
-  async function close() { await settle(); onClose(); }
+  async function close() {
+    await settle();
+    for (const [mid, shortsNum] of spellPendRef.current) api.roySpell({ shortsNum, mid }).catch(() => {});   // 기다리지 않는다 — 결과는 다음에 열 때
+    spellPendRef.current.clear();
+    onClose();
+  }
+
+  // ── 🔎 맞춤법 — 고친 표시를 벗어나면 그 표시만 한 번 ──────────────────
+  const caretMid = () => { const sel = window.getSelection(); const n = sel && sel.anchorNode; const el = n && (n.nodeType === 3 ? n.parentElement : n); const m = el && el.closest && el.closest('[data-mid]'); return m ? m.getAttribute('data-mid') : null; };
+  function maybeSpell() {
+    if (!spellPendRef.current.size || busyNow()) return;
+    const cur = document.activeElement === docRef.current ? caretMid() : null;
+    for (const [mid] of [...spellPendRef.current]) if (mid !== cur) runSpell(mid);
+  }
+  async function refreshSpell() { try { setSpell((await api.roySpellList()) || []); } catch (_) {} }
+  async function runSpell(mid) {
+    const shortsNum = spellPendRef.current.get(mid); spellPendRef.current.delete(mid);
+    setSpellBusy((n) => n + 1); setSpellNote('');
+    try {
+      const r = await api.roySpell({ shortsNum, mid });
+      if (!r || !r.ok) setSpellNote('🔎 맞춤법 검사 못 함 — ' + ((r && r.error) || '알 수 없는 오류'));
+      else if (!r.items.length) setSpellNote('🔎 맞춤법 — 고칠 곳 없음');
+    } catch (e) { setSpellNote('🔎 맞춤법 검사 못 함 — ' + String(e.message || e)); }
+    finally { setSpellBusy((n) => n - 1); refreshSpell(); }
+  }
+  async function applySpell(row, items) {
+    await settle();
+    try {
+      const r = await api.roySpellApply({ shortsNum: row.shortsNum, mid: row.mid, items });
+      if (!r || !r.ok) { setMsg('✗ ' + ((r && r.error) || '반영하지 못했습니다')); if (r && r.dto) { onDto(r.dto); rebuild(r.dto); } }
+      else { onDto(r.dto); rebuild(r.dto); setMsg(`✓ 맞춤법 반영 — ${r.applied.map((x) => `${x['틀림']}→${x['바름']}`).join(' · ')}${r.bank ? ' · 🏦 은행에 「교정」 한 줄' : ''}${r.skipped.length ? ` · 못 찾은 ${r.skipped.length}곳은 직접 고치세요` : ''}`); }
+    } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+    refreshSpell();
+  }
+  async function dismissSpell(row, items) { try { await api.roySpellDismiss({ mid: row.mid, items }); } catch (_) {} refreshSpell(); }
+  useEffect(() => { refreshSpell(); const h = () => maybeSpell(); document.addEventListener('selectionchange', h); return () => document.removeEventListener('selectionchange', h); }, []);
 
   // 🟥 「사실 확인」 — 고치지 않았어도 누르면 확인(손대지 않음 ≠ 확인) · 저장 안 된 고침을 먼저 저장한다
   function royBankMsg(list) {
@@ -309,6 +350,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
       const r = await api.royConfirm({ shortsNum: par.shortsNum, mid: btn.dataset.royConfirm });
       if (!r || !r.ok) { setMsg('✗ ' + ((r && r.error) || '확인하지 못했습니다')); return; }
       if (r.dto) { onDto(r.dto); rebuild(r.dto); }
+      if (spellPendRef.current.has(btn.dataset.royConfirm)) runSpell(btn.dataset.royConfirm);
       setMsg(r.already ? 'ⓘ 이미 확인한 경험입니다.' : '✓ 사실 확인 — 이 경험은 렌더해도 됩니다' + royBankMsg(r.bank ? [r.bank] : []));
     } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
   }
@@ -394,6 +436,25 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           <button className="ghost" onClick={close}>닫기</button>
         </div>
         {msg && <div className="meta" data-testid="reader-msg" style={{ padding: '6px 14px', background: msg.startsWith('✗') ? '#fbeaea' : '#f3f8ef', borderBottom: '1px solid var(--line)', color: msg.startsWith('✗') ? 'var(--danger)' : 'var(--base)' }}>{msg}</div>}
+        {(spellBusy > 0 || spellNote || spell.length > 0) && (
+          <div data-testid="reader-spell" style={{ padding: '6px 14px', borderBottom: '1px solid var(--line)', background: '#f6f3fb', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {spellBusy > 0 && <div className="meta">🔎 맞춤법 검사 중… (Claude · 몇 초)</div>}
+            {spellNote && !spellBusy && <div className="meta" data-testid="reader-spell-note">{spellNote}</div>}
+            {spell.map((row) => (
+              <div key={row.mid} data-testid="reader-spell-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <b style={{ color: row.k === 'exp' ? '#9b2c22' : '#6b5400' }}>{row.k === 'exp' ? '🟥' : '🟨'} 「{row.head}…」 맞춤법</b>
+                {row.items.map((it) => (
+                  <span key={it['틀림']} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '1px 6px' }}>
+                    <s style={{ color: 'var(--danger)' }}>{it['틀림']}</s> → <b>{it['바름']}</b>
+                    <button className="ghost" style={{ padding: '0 6px' }} data-testid="spell-apply" onClick={() => applySpell(row, [it])}>반영</button>
+                    <button className="ghost" style={{ padding: '0 6px' }} onClick={() => dismissSpell(row, [it])}>무시</button>
+                  </span>
+                ))}
+                {row.items.length > 1 && <button style={{ padding: '1px 8px' }} data-testid="spell-apply-all" onClick={() => applySpell(row, row.items)}>모두 반영</button>}
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ flex: 1, overflow: 'auto', padding: '26px 16px 60px' }}>
           <div style={{ maxWidth: 760, margin: '0 auto', background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '40px 52px', fontSize: fontPx, lineHeight: 1.85, color: '#1d1a16', wordBreak: 'keep-all', fontFamily: "'Malgun Gothic', sans-serif" }}>
             {!projects.length && <div className="meta">대본을 먼저 여세요.</div>}

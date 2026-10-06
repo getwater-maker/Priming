@@ -160,11 +160,15 @@ function setMarkState(raw, lineIdx, st) {
   return null;
 }
 
-/** 개수 — 화면 머리 「🟥 미확인 n · 🟨 n」 · 렌더 경고 */
+/**
+ * 개수 — 화면 머리 「🟥 미확인 n · 🟨 n」 · 렌더 경고.
+ * 🔴 문단을 못 찾은 🟥(표시가 떨어짐) 중 `확인` 이 아닌 것도 **미확인으로 센다**(lostOpen) — 안 세면 떨어진 가안이 렌더 관문을 그냥 지난다
+ *   (v0.7.13 · 다른 세션의 장면 나누기가 표시 줄과 문단 사이에 ### 를 끼워 야담 1007 🟨 가 떨어진 일로 찾은 구멍).
+ */
 function countMarks(marks) {
-  const c = { exp: 0, expOpen: 0, int: 0, lost: 0 };
+  const c = { exp: 0, expOpen: 0, int: 0, lost: 0, lostOpen: 0 };
   for (const m of marks || []) {
-    if (!m.found) { c.lost++; continue; }
+    if (!m.found) { c.lost++; if (m.k === 'exp' && m.st !== '확인') { c.expOpen++; c.lostOpen++; } continue; }
     if (m.k === 'exp') { c.exp++; if (m.st !== '확인') c.expOpen++; } else c.int++;
   }
   return c;

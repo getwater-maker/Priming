@@ -7949,7 +7949,7 @@ async function _editSentences(args = {}) {
 
   // 🟥·🟨 표시된 문장을 고쳤다 — 🟥 는 자동 「확인」(표시 줄 고침) · 「Claude 원문 → 로이 수정」 한 줄을 은행에(core/roy-bank)
   let royBank = [];
-  if (_royTouched.size) { try { royBank = _royAfterEdit(pr, _royTouched); } catch (e) { log('⚠ 로이은행 기록 실패: ' + e.message); } }
+  if (_royTouched.size) { try { royBank = _royAfterEdit(pr, _royTouched, { noBank: !!args.royNoBank }); } catch (e) { log('⚠ 로이은행 기록 실패: ' + e.message); } }
 
   // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
   //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
@@ -7999,22 +7999,26 @@ function ensureRoyMarks(parsed, force = false) {
   }
 }
 P.setRoyHook((parsed) => ensureRoyMarks(parsed));
-/** 미확인 🟥 개수(렌더·TTS 관문) */
-function royOpenCount(parsed) {
-  try { ensureRoyMarks(parsed); } catch (_) { return 0; }
-  return ((parsed && parsed.projects) || []).reduce((a, pr) => a + (pr._roy ? RoyMarks.countMarks(pr._roy.marks).expOpen : 0), 0);
+/** 미확인 🟥 개수(렌더·TTS 관문) — open = 미확인 전체(떨어진 표시 포함) · lostOpen = 그중 문단을 못 찾은 것 */
+function royOpenInfo(parsed) {
+  try { ensureRoyMarks(parsed); } catch (_) { return { open: 0, lostOpen: 0 }; }
+  return ((parsed && parsed.projects) || []).reduce((a, pr) => {
+    const c = pr._roy ? RoyMarks.countMarks(pr._roy.marks) : null;
+    return c ? { open: a.open + c.expOpen, lostOpen: a.lostOpen + c.lostOpen } : a;
+  }, { open: 0, lostOpen: 0 });
 }
+function royOpenCount(parsed) { return royOpenInfo(parsed).open; }
 function _setSrcHash(parsed = S.parsed, sp = S.scriptPath) {
   const nh = scriptHash(sp);
   try { Object.defineProperty(parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { parsed._srcHash = nh; }
 }
-function _royAppend(parsed, sp, m, how) {
-  const b = RoyBank.append({ scriptBase: _royBase(sp), channel: _royChannelOf(parsed), mark: m, how });
+function _royAppend(parsed, sp, m, how, o = {}) {
+  const b = RoyBank.append({ scriptBase: _royBase(sp), channel: _royChannelOf(parsed), mark: m, how, source: o.source, extra: o.extra });
   log(`🏦 ${m.k === 'exp' ? '경험은행' : '해석해설은행'}에 적었습니다 — ${b.id} (${how})${b.pending ? ` · ⚠ 은행 폴더(${RoyBank.bankDir()})가 없어 ${b.file} 에 모아 두었습니다` : ''}`);
-  return { id: b.id, k: m.k, how, pending: b.pending };
+  return { id: b.id, mid: m.mid, k: m.k, how, pending: b.pending };
 }
 // 표시된 문장을 고친 뒤 — 원문은 「고침」 표시로 굳히고(다시 읽어도 로이 글이 원문이 되지 않게), 🟥 는 확인으로, 은행에 한 줄
-function _royAfterEdit(pr, mids) {
+function _royAfterEdit(pr, mids, { noBank = false } = {}) {   // noBank = 맞춤법 반영(roy-spell-apply 가 「교정」 한 줄을 따로 적는다)
   const sp = S.scriptPath, base = _royBase(sp), out = [];
   for (const mid of mids) RoyBank.markEdited(base, mid);   // ⚠ 다시 읽기(rememberOriginals) **전에** — 순서가 바뀌면 로이 글이 원문이 된다
   ensureRoyMarks(S.parsed, true);
@@ -8025,10 +8029,86 @@ function _royAfterEdit(pr, mids) {
       const nr = RoyMarks.setMarkState(fs.readFileSync(sp, 'utf8'), m.line, '확인');
       if (nr) { fs.writeFileSync(sp, nr, 'utf8'); ensureRoyMarks(S.parsed, true); m = pr._roy.marks.find((x) => x.mid === mid) || m; log(`🟥 고쳐 저장한 경험 문단을 「확인」으로 바꿨습니다(${mid})`); }
     }
-    out.push(_royAppend(S.parsed, sp, m, '수정'));
+    if (!noBank) out.push(_royAppend(S.parsed, sp, m, '수정'));
   }
   return out;
 }
+
+// ── 🔎 맞춤법 검사 — 로이가 고친 🟥·🟨 문단만 · Claude 구독(claude -p sonnet) · 제안만(v0.7.13 · 화자 규약 §4-1) ─────────
+//   부르는 때는 화면이 정한다(고친 문단을 벗어날 때 · 대본 보기를 닫을 때 — 자동 저장마다 ⛔ · 안 고친 문단 ⛔).
+//   결과는 (대본 파일명 · 표시) 마다 기억한다 — 그 글이 바뀌면(지문이 다르면) 버린다. 실패는 한 줄 알림만(렌더를 막지 않는다).
+const SpellCheck = require('./core/spell-check');
+const _spell = new Map();   // '<대본 파일명>|<mid>' → { sig, items }
+const _spellKey = (sp, mid) => _royBase(sp) + '|' + mid;
+function _royMarkOf(args) {
+  ensureRoyMarks(S.parsed, true);
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum) || S.parsed.projects[0];
+  const m = pr && pr._roy && pr._roy.marks.find((x) => x.mid === args.mid && x.found);
+  return { pr, m };
+}
+ipcMain.handle('roy-spell', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book' || !S.scriptPath) return { ok: false, error: '대본을 먼저 여세요.' };
+  const sp = S.scriptPath;
+  const { m } = _royMarkOf(args);
+  if (!m) return { ok: false, mid: args.mid, error: '표시를 찾을 수 없습니다' };
+  const r = await SpellCheck.check(m.text);
+  if (!r.ok) { log(`🔎 맞춤법 검사 못 함 — ${r.error}`); return { ok: false, mid: m.mid, error: r.error }; }
+  _spell.set(_spellKey(sp, m.mid), { sig: RoyMarks.sig(m.text), items: r.items });
+  log(`🔎 맞춤법 검사 ${_royBase(sp)} · ${m.mid} — ${r.items.length ? r.items.map((x) => `${x['틀림']}→${x['바름']}`).join(' · ') : '고칠 곳 없음'} (${(r.ms / 1000).toFixed(1)}초)`);
+  return { ok: true, mid: m.mid, items: r.items };
+});
+// 지금 대본의 남은 제안 — 글이 바뀐 표시의 제안은 버린다
+ipcMain.handle('roy-spell-list', () => {
+  if (!S.parsed || S.parsed.kind === 'book' || !S.scriptPath) return [];
+  const sp = S.scriptPath; ensureRoyMarks(S.parsed);
+  const out = [];
+  for (const pr of S.parsed.projects) for (const m of (pr._roy && pr._roy.marks) || []) {
+    const k = _spellKey(sp, m.mid), v = _spell.get(k);
+    if (!v) continue;
+    if (!m.found || v.sig !== RoyMarks.sig(m.text)) { _spell.delete(k); continue; }
+    if (v.items.length) out.push({ shortsNum: pr.shortsNum, mid: m.mid, k: m.k, head: m.text.slice(0, 24), items: v.items });
+  }
+  return out;
+});
+ipcMain.handle('roy-spell-dismiss', (_e, args = {}) => {
+  if (!S.scriptPath) return { ok: false };
+  const k = _spellKey(S.scriptPath, args.mid), v = _spell.get(k);
+  if (v) { const drop = new Set((args.items || []).map((x) => x['틀림'])); v.items = args.items ? v.items.filter((x) => !drop.has(x['틀림'])) : []; }
+  return { ok: true };
+});
+// 반영 — 고른 짝을 문장마다 고쳐 저장(문장 고치기 길 그대로 · 은행 「수정」 줄은 빼고) → 은행 같은 id 에 「교정」 한 줄
+ipcMain.handle('roy-spell-apply', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book' || !S.scriptPath) return { ok: false, error: '대본을 먼저 여세요.' };
+  const sp = S.scriptPath;
+  const { pr, m } = _royMarkOf(args);
+  if (!m) return { ok: false, error: '표시를 찾을 수 없습니다 — 대본이 바뀌었으면 대본 보기를 다시 여세요.' };
+  const want = (args.items || []).filter((x) => x && x['틀림'] && x['바름']);
+  let left = [...want];
+  const edits = [];
+  for (const id of m.sids) {
+    const sen = pr.sentences.find((x) => x.id === id); if (!sen) continue;
+    let t = sen.text, ch = false;
+    for (const it of [...left]) { const i = t.indexOf(it['틀림']); if (i >= 0) { t = t.slice(0, i) + it['바름'] + t.slice(i + it['틀림'].length); left = left.filter((x) => x !== it); ch = true; } }
+    if (ch) edits.push({ sen, t });
+  }
+  const applied = want.filter((x) => !left.includes(x));
+  if (!applied.length) return { ok: false, error: '고칠 글자를 문장에서 찾지 못했습니다(문장 경계를 걸친 지적일 수 있습니다 — 대본 보기에서 직접 고치세요)' };
+  for (const e of edits.reverse()) {   // 뒤 문장부터 — 앞 문장 번호가 안 흔들리게
+    const g = pr.groups.find((x) => x.sentenceIds.includes(e.sen.id));
+    const idx = g ? pr.getSentencesOfGroup(g).indexOf(e.sen) : -1;
+    if (idx < 0) return { ok: false, error: '문장을 찾을 수 없습니다', dto: P.toDTO(S.parsed) };
+    const r = await _editSentences({ shortsNum: pr.shortsNum, groupNum: g.num, sentIdx: idx, count: 1, text: e.t, expect: [e.sen.text], royNoBank: true });
+    if (!r || !r.ok) return { ok: false, error: (r && r.error) || '고치지 못했습니다', dto: P.toDTO(S.parsed) };
+  }
+  ensureRoyMarks(S.parsed, true);
+  const m2 = pr._roy.marks.find((x) => x.mid === m.mid && x.found) || m;
+  let bank = null;
+  try { bank = _royAppend(S.parsed, sp, m2, '교정', { source: '교정', extra: { 교정: SpellCheck.correctionNote(applied) } }); } catch (e) { log('⚠ 은행 기록 실패: ' + e.message); }
+  const k = _spellKey(sp, m.mid), v = _spell.get(k);
+  if (v) { const done = new Set(applied.map((x) => x['틀림'])); _spell.set(k, { sig: RoyMarks.sig(m2.text), items: v.items.filter((x) => !done.has(x['틀림'])) }); }
+  log(`🔎 맞춤법 반영 ${_royBase(sp)} · ${m.mid} — ${applied.map((x) => `${x['틀림']}→${x['바름']}`).join(' · ')}${left.length ? ` (못 찾음 ${left.length})` : ''}`);
+  return { ok: true, dto: P.toDTO(S.parsed), applied, skipped: left, bank };
+});
 // 🟥 「사실 확인」 — 고치지 않았어도 누르면 확인(손대지 않음 ≠ 확인 · 화자 규약 §4)
 ipcMain.handle('roy-confirm', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
@@ -8057,15 +8137,16 @@ ipcMain.handle('roy-confirm', async (_e, args = {}) => {
 });
 // 🟥 미확인이 남은 편 — 단건은 묻고(멈춤 기본), 큐는 그 편을 건너뛴다(밤새 창이 떠서 큐가 서지 않게)
 async function royGate(parsed, { queue = false, what = '만들기' } = {}) {
-  const n = royOpenCount(parsed);
+  const { open: n, lostOpen } = royOpenInfo(parsed);
   if (!n) return true;
   const title = (parsed && parsed.fileTitle) || '';
-  if (queue) throw new Error(`🟥 미확인 경험 ${n}곳 — 대본 보기에서 「사실 확인」을 하세요(이 대본은 건너뜁니다)`);
+  const lostTxt = lostOpen ? ` (그중 ${lostOpen}곳은 표시가 문단에서 떨어짐 — 표시 줄 바로 아래에 본문 문단이 오게 대본(.md)을 고치세요)` : '';
+  if (queue) throw new Error(`🟥 미확인 경험 ${n}곳${lostTxt} — 대본 보기에서 「사실 확인」을 하세요(이 대본은 건너뜁니다)`);
   let go = false;
   try {
     const c = await dialog.showMessageBox(win, {
       type: 'warning', title: '🟥 확인 안 된 경험', buttons: ['멈춤', '그래도 진행'], defaultId: 0, cancelId: 0, noLink: true,
-      message: `「${title}」 — 🟥 미확인 경험 ${n}곳이 남아 있습니다.`,
+      message: `「${title}」 — 🟥 미확인 경험 ${n}곳이 남아 있습니다.${lostTxt}`,
       detail: '대본의 「나」는 실제 로이입니다. 📄 대본 보기에서 🟥 문단을 실제 일로 고치거나 「사실 확인」을 누른 뒤 진행하세요.\n그래도 진행하면 로그에 남깁니다.',
     });
     go = c.response === 1;
