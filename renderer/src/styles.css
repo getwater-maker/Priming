@@ -1030,3 +1030,11 @@ button.upd.new{background:var(--accent);color:#fff;border-color:var(--accent);fo
 .cf-wide .cf-body{overflow-x:hidden}
 .cf-wide .cf-savedadd{width:130px;height:34px;white-space:nowrap}
 .cf-wide .cf-savedadd br{display:none}
+
+/* 🔢 ISBN · 발행일 상자 */
+.bkisbn-grid{display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 8px;align-items:end;background:#fbf6ee;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.bkisbn-grid>b{grid-row:span 2;align-self:center;font-size:12px}
+.bkisbn-grid label{display:flex;flex-direction:column;gap:2px;font-size:11px;margin:0}
+.bkisbn-grid label input{padding:3px 6px;font-size:12px}
+.bkisbn-chk{grid-column:2 / span 2;font-size:11px;min-height:15px}
+.bkisbn-chk.bad{color:#c62828;font-weight:600}

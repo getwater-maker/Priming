@@ -6,6 +6,7 @@ import api from './lib/ipc.js';
 import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
 import HK from '../../core/book/header-kind.js';
+import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
 const TABS = [
@@ -25,8 +26,8 @@ const REG_FIELDS = [
 // 판권 탭 — 법정 필수 5필드(제목·저자는 책 정보) + 선택
 const COLO_REQ = [['issuer', '발행인'], ['publisher', '출판사'], ['issueDate', '발행일']];   // ISBN·정가는 필수 아님 — 부크크 등록 과정(2단계 ISBN 발급·4단계 가격정책)에서 입력·확인(로이 2026-10-02)
 const COLO_OPT = [
-  ['isbn', 'ISBN(종이책)'], ['price', '정가(종이책)'],
-  ['ebookIsbn', '전자책 ISBN'], ['ebookPrice', '전자책 가격'], ['isbnAddon', '부가기호(5자리)'], ['regNo', '출판등록'],
+  ['price', '정가(종이책)'],
+  ['ebookPrice', '전자책 가격'], ['isbnAddon', '부가기호(5자리)'], ['regNo', '출판등록'],
   ['copyright', '저작권(ⓒ)'], ['address', '주소'], ['phone', '대표전화'], ['fax', '팩스'], ['homepage', '홈페이지'], ['email', '대표메일'],
   ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램'],
   ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
@@ -687,6 +688,35 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   };
 
   // ── 작은 부품(함수로 호출 — 컴포넌트로 만들면 렌더마다 새로 마운트돼 입력칸 초점을 잃는다) ──
+  // 🔢 ISBN · 발행일 상자(2026-10-06 로이 — 부크크 「판권지 수정 요청: 발행일·ISBN 을 고쳐 원고를 다시 보내라」) — 종이책·전자책 따로.
+  //   판권 탭과 📤 부크크 등록 탭이 **같은 상자**를 쓴다(칸이 두 벌이 되지 않게). 칸을 벗어나면 원고(.md) 메타에 바로 저장 → 판권에 반영.
+  //   ISBN 은 체크 숫자까지 확인한다(틀린 번호를 판권·바코드에 싣지 않게) · 발행일은 판권 라벨 그대로(예: 발행일 2026-10-06).
+  const isbnBox = (idp) => {
+    const chk = (v) => { const s = String(v || '').trim(); if (!s) return null; const n = ISBNC.normalizeIsbn13(s); return n ? { ok: true, t: `✅ ISBN-13 ${n.slice(0, 3)}-${n.slice(3, 5)}-${n.slice(5, 9)}-${n.slice(9, 12)}-${n.slice(12)} (체크 숫자 통과)` } : { ok: false, t: '⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요(10자리·13자리 가능)' }; };
+    const one = (k, label, ph) => (
+      <label key={k} title="">
+        <span>{label}</span>
+        <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
+          key={dto.scriptPath + ':' + idp + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+      </label>
+    );
+    const pi = chk(meta.isbn), ei = chk(meta.ebookIsbn);
+    return (
+      <div className="bkisbn" data-testid={idp + '-box'}>
+        <div className="bkzone" style={{ marginTop: 4 }}>🔢 ISBN · 발행일 <span className="meta">(칸을 벗어나면 원고에 저장 → 판권에 반영 · 고친 뒤 📦 만들기로 내지·ePub 을 다시)</span></div>
+        <div className="bkisbn-grid">
+          <b>📕 종이책</b>
+          {one('issueDate', '발행일', '발행일 2026-10-06')}
+          {one('isbn', 'ISBN', '979-11-…')}
+          <div className={'meta bkisbn-chk' + (pi && !pi.ok ? ' bad' : '')} data-testid={idp + '-isbn-chk'}>{pi ? pi.t : '부크크가 알려 준 종이책 ISBN 을 적으세요'}</div>
+          <b>📱 전자책</b>
+          {one('ebookIssueDate', '발행일', '비우면 종이책 발행일')}
+          {one('ebookIsbn', 'ISBN', '979-11-…')}
+          <div className={'meta bkisbn-chk' + (ei && !ei.ok ? ' bad' : '')} data-testid={idp + '-ebisbn-chk'}>{ei ? ei.t : '전자책 판권에는 이 ISBN 이 실립니다(비우면 종이책 ISBN)'}</div>
+        </div>
+      </div>
+    );
+  };
   const field = (k, label, req, help) => (
     <label key={k} className={req && missSet.has(k) ? 'bkmiss' : ''} title={help || ''}>
       <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
@@ -752,6 +782,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     [...(RG.LINKS.bookk || []), ...(RG.LINKS.ebook || [])].forEach(([t, u]) => { if (!seen.has(u)) { seen.add(u); links.push([t, u]); } });
     return (
       <div className="bkreg" data-testid="bk-reg">
+        {isbnBox('rg')}
         {/* 1) 🤖 자동 입력 — 맨 위(로이 2026-10-03). 저장·「도서제출」은 직접 */}
         <div className="bkzone">🤖 자동 입력 <span className="meta">(로그인·「도서제출」은 직접)</span></div>
         <div className="bkauto" data-testid="bk-auto">
@@ -933,6 +964,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         )}
         <div className="bkzone">판권 필수 (출판문화산업진흥법)</div>
         {COLO_REQ.map(([k, l]) => field(k, l, true))}
+        {isbnBox('co')}
         <div className="meta">ISBN(종이책)·정가는 부크크 등록 과정(2단계 ISBN 발급·4단계 가격정책)에서 입력·확인하므로 필수로 두지 않았습니다 — 원고에 적어 두면 판권지에 실리고, 정가는 4단계 자동 입력에도 쓰입니다.</div>
         <div className="bkzone">선택 — 전자책·연락처·SNS</div>
         {COLO_OPT.map(([k, l]) => field(k, l, false))}
