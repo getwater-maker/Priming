@@ -315,6 +315,22 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     }
     setBusy(''); setMsg(`🎨 얼굴 ${n}개를 그렸습니다${fail ? ` · 실패 ${fail}` : ''}${stopRef.current ? ' (멈춤)' : ''} — 마음에 안 들면 카드의 🎨 로 다시`);
   }
+  // 🗑 OmniVoice 목소리 지우기(v0.7.2 · 로이) — 공용 라이브러리에서 서버 휴지통으로(두 PC 모두에서 사라진다 · 되살릴 수 있다)
+  async function omniDelete(v, users) {
+    if (users && users.length) { setMsg(`⚠ 「${v.name}」은(는) 채널이 쓰고 있어 지울 수 없습니다: ${users.join(', ')} — 그 채널의 목소리를 먼저 바꾸세요`); return; }
+    const ok = await (confirm || window.confirm)(`목소리 「${v.name}」을(를) 지울까요?
+
+공용 라이브러리에서 빠져 두 PC 모두에서 사라집니다.
+(메인 PC 서버의 휴지통 폴더로 옮겨 두므로 나중에 되살릴 수 있습니다)`);
+    if (!ok) return;
+    setBusy('del:' + v.id);
+    const r = await api.ttsOmniDelete({ name: v.name });
+    setBusy('');
+    if (!r || !r.ok) { setMsg('❌ ' + ((r && r.error) || '지우기 실패')); return; }
+    setVoices((x) => ({ ...x, omnivoice: (x.omnivoice || []).filter((y) => y.id !== v.id) }));
+    setFaces((f) => { const m = { ...(f.omnivoice || {}) }; delete m[v.id]; return { ...f, omnivoice: m }; });
+    setMsg(`🗑 「${v.name}」을(를) 지웠습니다(서버 휴지통)`);
+  }
   async function faceClear(v) {
     await api.ttsFaceClear({ engine: tab, voice: v.id });
     setFaces((f) => { const m = { ...(f[tab] || {}) }; delete m[v.id]; return { ...f, [tab]: m }; });
@@ -506,10 +522,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
 
               {/* ⑤ 목소리 카드 — 이 칸만 스크롤 · 🔑 gridAutoRows max-content: 높이가 정해진 스크롤 격자에서 auto 행은 카드 최소 높이(92)까지만 커져 🔈 줄이 잘렸다(v0.6.84) */}
               <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gridAutoRows: 'max-content', gap: 8, alignContent: 'start', paddingRight: 4 }}>
-                {shown.map((v0) => { const v = koView(v0); return (
-                  <VoiceCard key={v.id} v={v} sel={isSel(v)} playingNow={playing === v.id} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
+                {shown.map((v0) => { const v = koView(v0); const users = tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v); return (
+                  <VoiceCard key={v.id} v={v} onDelete={tab === 'omnivoice' ? () => omniDelete(v0, users) : null} sel={isSel(v)} playingNow={playing === v.id} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
-                    users={tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v)}
+                    users={users}
                     onPick={() => (isLib ? addFromLibrary(v0) : pickVoice(v0))} onPlay={(force) => preview(v0, force)}
                     onFacePick={() => facePick(v0)} onFaceAi={() => faceAi(v0)} onFaceClear={() => faceClear(v0)} />
                 ); })}
@@ -599,7 +615,7 @@ export function Face({ face, name, gender, size = 44, square }) {
 }
 
 // 카드 — 얼굴 · 이름(성별) · 언어 · 설명 2줄 · 듣기. 얼굴 버튼(🖼 🎨 ✕)은 마우스를 올렸을 때만.
-function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear }) {
+function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear, onDelete }) {
   const playing = busy === 'play:' + v.id;
   const meta = [v.lang, v.badge].filter(Boolean).join(' · ');
   return (
@@ -630,6 +646,10 @@ function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, u
             onClick={(e) => onPlay(e.shiftKey)}>{playingNow ? '⏹' : playing ? '⏳' : '🔈'}</button>
           {!sampled && sampleCost > 0 && <span className="meta" style={{ fontSize: 10, whiteSpace: 'nowrap', flex: '0 0 auto' }}>{wonTxt(sampleCost, krw)}</span>}
           {users && users.length > 0 && <span style={{ fontSize: 10, color: BLUE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '1 1 auto' }} title={'이 목소리를 쓰는 채널: ' + users.join(', ')}>📺 {users.length > 1 ? `${users[0]} 외 ${users.length - 1}` : users[0]}</span>}
+          {onDelete && <button className="ghost vc-del" data-testid="tts-voice-del" aria-label="목소리 지우기" style={{ marginLeft: 'auto', flex: '0 0 auto', padding: '0 6px', fontSize: 12, opacity: users && users.length ? 0.35 : 0.8 }}
+            disabled={busy === 'del:' + v.id}
+            title={users && users.length ? '채널이 쓰고 있어 지울 수 없습니다 — 그 채널의 목소리를 먼저 바꾸세요' : '이 목소리 지우기 — 공용 라이브러리에서 빠집니다(두 PC 모두 · 서버 휴지통에 보관)'}
+            onClick={onDelete}>{busy === 'del:' + v.id ? '⏳' : '🗑'}</button>}
         </div>
       </div>
     </div>

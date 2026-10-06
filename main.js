@@ -391,6 +391,7 @@ app.whenReady().then(() => {
       // 🎨 이미지 스타일도 같은 서버에 모인다 — 앱을 켜기만 해도 다른 PC 가 만든 스타일이 내려온다.
       //   조용히(quiet) 한다 — 서버가 꺼진 PC 에서 켤 때마다 경고가 뜨면 소음이다(🎨 편집창을 열면 알려준다).
       try { await syncStylesFromServer(true); } catch {}
+      try { await syncVoiceFaces(); } catch {}   // 🙂 목소리 얼굴도 같은 서버로 공유(v0.7.2)
       // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
       try { exportChannelStyles(); } catch {}
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
@@ -1561,6 +1562,7 @@ async function syncRefAudioToServer(serverNames) {
   try {
     const dir = REF_DIR();
     const have = new Set((serverNames || []).map((v) => String((v && v.name) || v || '')));
+    for (const d of (serverNames && serverNames.deleted) || []) have.add(String(d));   // 🗑 다른 PC(또는 여기)에서 지운 목소리는 다시 올리지 않는다(v0.7.2)
     const missing = _localRefFiles().filter((f) => /\.wav$/i.test(f) && !have.has(f.replace(/\.wav$/i, '')));
     if (!missing.length) return 0;
     let up = 0, noText = 0;
@@ -5171,6 +5173,61 @@ function _faceFiles(engine) {
   for (const [voice, f] of Object.entries(_faceIndex(engine))) { const p = path.join(dir, f); try { if (fs.existsSync(p)) out[voice] = { path: p, v: String(fs.statSync(p).mtimeMs | 0) }; } catch {} }
   return out;
 }
+// 🙂 얼굴 공유(v0.7.2 · 로이 「음성은 같이 공유하기로」) — 서버(OmniVoice) /voice-faces 가 원장, 이 PC 폴더는 사본.
+//   새것 판정 = 시각 t(밀리초 · 이 PC 는 파일 mtime — 받아 온 파일은 mtime 을 서버 t 로 맞춘다) · 지운 얼굴은 서버에 deleted 표시.
+const FACE_T_SLACK = 2000;
+function _faceLocalT(engine, voice) {
+  const f = _faceIndex(engine)[voice]; if (!f) return 0;
+  try { return fs.statSync(path.join(VOICE_FACE_DIR(), String(engine), f)).mtimeMs; } catch { return 0; }
+}
+/** 이 PC 의 얼굴 하나를 서버로(있으면 올리기 · 없으면 지움 표시) — 실패해도 로컬은 그대로(다음 동기화가 다시 맞춘다) */
+async function _pushFace(engine, voice) {
+  try {
+    const ASR = require('./tts/asr-client');
+    const f = _faceIndex(engine)[voice]; const p = f ? path.join(VOICE_FACE_DIR(), String(engine), f) : null;
+    if (p && fs.existsSync(p)) return await ASR.putServerFace({ engine: String(engine), voice, file: f, t: Math.round(fs.statSync(p).mtimeMs), buf: fs.readFileSync(p) });
+    return await ASR.putServerFace({ engine: String(engine), voice, t: Date.now(), del: true });
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+let _faceSyncBusy = null;
+/** 서버 ↔ 이 PC 얼굴 맞추기 — 서버 목록을 못 받으면 아무것도 안 한다(빈 목록으로 오해해 지우지 않게) */
+function syncVoiceFaces() {
+  if (_faceSyncBusy) return _faceSyncBusy;
+  _faceSyncBusy = (async () => {
+    const ASR = require('./tts/asr-client');
+    const srv = await ASR.getServerFaces();
+    if (!srv) return { ok: false };
+    let down = 0, up = 0, gone = 0;
+    const engines = new Set(Object.keys(srv));
+    try { for (const d of fs.readdirSync(VOICE_FACE_DIR())) if (/^[a-z0-9_-]{1,32}$/.test(d)) engines.add(d); } catch {}
+    for (const engine of engines) {
+      const SV = srv[engine] || {}; const L = _faceIndex(engine); const dir = path.join(VOICE_FACE_DIR(), engine);
+      for (const voice of new Set([...Object.keys(SV), ...Object.keys(L)])) {
+        const s = SV[voice] || null; const lt = _faceLocalT(engine, voice);
+        if (s && s.file && !s.deleted) {
+          if (lt && Math.abs(lt - s.t) <= FACE_T_SLACK) continue;
+          if (lt > s.t + FACE_T_SLACK) { const r = await _pushFace(engine, voice); if (r && r.ok) up++; continue; }
+          const buf = await ASR.getServerFace(engine, s.file); if (!buf) continue;
+          fs.mkdirSync(dir, { recursive: true });
+          const key = _voiceFileKey(voice); const fname = path.basename(s.file);
+          try { for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.') && f !== fname) { try { fs.unlinkSync(path.join(dir, f)); } catch {} } } catch {}
+          const out = path.join(dir, fname); fs.writeFileSync(out, buf);
+          try { fs.utimesSync(out, new Date(s.t), new Date(s.t)); } catch {}
+          _setFace(engine, voice, fname); down++;
+        } else if (s && s.deleted) {
+          if (!lt) continue;
+          if (lt > s.deleted + FACE_T_SLACK) { const r = await _pushFace(engine, voice); if (r && r.ok) up++; continue; }
+          const key = _voiceFileKey(voice);
+          try { for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} } } catch {}
+          _setFace(engine, voice, null); gone++;
+        } else if (lt) { const r = await _pushFace(engine, voice); if (r && r.ok) up++; }
+      }
+    }
+    if (down || up || gone) log(`🙂 목소리 얼굴 공유 — 받음 ${down} · 올림 ${up} · 지움 ${gone}`);
+    return { ok: true, down, up, gone };
+  })().catch((e) => { log('⚠ 얼굴 공유 실패: ' + e.message); return { ok: false }; }).finally(() => { _faceSyncBusy = null; });
+  return _faceSyncBusy;
+}
 function _sampleIndexPath(engine) { return path.join(TTS_SAMPLE_DIR(), engine, 'index.json'); }
 function _sampleIndex(engine) { try { return JSON.parse(fs.readFileSync(_sampleIndexPath(engine), 'utf8')); } catch { return {}; } }
 const _sampleKey = (model, voice, style) => [model || '', voice || '', style || ''].join('|');
@@ -5270,7 +5327,8 @@ ipcMain.handle('tts-channel-logo', async (_e, { name } = {}) => {
     return { ok: true, path: r.filePaths[0], v: String(Date.now()) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
-ipcMain.handle('tts-engines-get', () => {
+ipcMain.handle('tts-engines-get', async () => {
+  try { await Promise.race([syncVoiceFaces(), new Promise((r) => setTimeout(r, 20000))]); } catch {}   // 🙂 다른 PC 가 만든 얼굴도 보이게
   const TE = require('./tts/tts-engines');
   const VC = require('./tts/voice-catalogs');
   const cfg = TE.load();
@@ -5352,7 +5410,45 @@ ipcMain.handle('tts-omni-voices', async () => {
   const used = {};
   try { for (const p of require('./tts/preset-store').loadAll()) { const v = String(p.voiceCloneRefAudio || ''); if (v.startsWith('srv:') && !/^__/.test(p.name)) (used[v.slice(4)] = used[v.slice(4)] || []).push(p.name); } } catch {}
   if (!list) return { ok: false, error: 'OmniVoice 서버 목록을 받지 못했습니다(서버 주소·꺼짐 확인)', used };
-  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
+  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', lang: _voiceTextLang(v.text, v.name), channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
+});
+// 🌏 목소리 언어(카드 거르기 · v0.7.2) — 참조텍스트 글자 → 이름 앞머리(JA_·VI_·KO_) → ko
+function _voiceTextLang(text, name) {
+  const l = require('./core/lang').detectLang(text);
+  if (l === 'cjk') return 'ja';
+  if (l === 'ko' || l === 'ja' || l === 'vi') return l;
+  const m = /^(JA|VI|KO)[_-]/i.exec(String(name || '')); return m ? m[1].toLowerCase() : (String(text || '').trim() ? 'en' : 'ko');
+}
+// 🗑 공용 라이브러리 목소리 지우기(v0.7.2 · 로이 「맘에 안 드는 것은 삭제」) — 서버 휴지통으로(되살릴 수 있다) · 이 PC 사본도 _trash 로.
+//   채널(또는 채널 화자)이 쓰는 목소리는 지우지 않는다 — 채널이 이름으로 가리킨다(지우면 그 채널 합성이 400).
+function _channelsUsingVoice(name) {
+  const id = 'srv:' + name; const out = [];
+  try {
+    for (const p of require('./tts/preset-store').loadAll()) {
+      if (!p || !p.name || /^__/.test(p.name)) continue;
+      if (String(p.voiceCloneRefAudio || '') === id || (p.speakers || []).some((s) => s && String(s.voice || '') === id)) out.push(p.name);
+    }
+  } catch {}
+  return out;
+}
+ipcMain.handle('tts-omni-delete', async (_e, { name } = {}) => {
+  try {
+    const nm = String(name || '').replace(/^srv:/, '');
+    if (!nm) return { ok: false, error: '이름이 없습니다' };
+    const users = _channelsUsingVoice(nm);
+    if (users.length) return { ok: false, error: `채널이 쓰고 있어 지우지 않았습니다: ${users.join(', ')} — 그 채널의 목소리를 먼저 바꾸세요`, users };
+    const r = await require('./tts/asr-client').deleteServerVoice(nm);
+    if (!r.ok) return { ok: false, error: r.error === 'unsupported' ? '서버가 아직 지우기를 모릅니다 — 메인 PC 의 OmniVoice 서버를 다시 켜 주세요' : r.error };
+    // 이 PC 사본(~/.flow-app/ref-audio)은 지우지 않고 _trash 로 — 앱 시작 동기화가 되살리지 않게(서버 지움 표시도 막는다)
+    try {
+      const tdir = path.join(REF_DIR(), '_trash'); const tag = _kstDayStr().replace(/-/g, '') + '-' + _kstClock().replace(/:/g, '');
+      for (const ext of ['.wav', '.txt']) { const src = path.join(REF_DIR(), nm + ext); if (fs.existsSync(src)) { fs.mkdirSync(tdir, { recursive: true }); fs.renameSync(src, path.join(tdir, tag + '_' + nm + ext)); } }
+    } catch (e) { log('⚠ 이 PC 사본 옮기기 실패: ' + e.message); }
+    _srvAudioMemo.delete(nm);
+    try { _setFace('omnivoice', 'srv:' + nm, null); _pushFace('omnivoice', 'srv:' + nm); } catch {}
+    log(`🗑 목소리 「${nm}」 — 공용 라이브러리에서 서버 휴지통으로 옮겼습니다(되살리려면 ${(r.trash || [])[0] ? path.dirname(r.trash[0]) : '_trash'} 의 파일을 제자리로)`);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 // 키 발급 페이지 — 엔진 표(tts-engines)에 적힌 공식 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다)
 ipcMain.handle('tts-engine-open-key', (_e, id) => {
@@ -5451,6 +5547,7 @@ function _carryVoiceAssets(engine, fromId, toId) {
       const dst = _voiceFileKey(toId) + path.extname(ix[fromId]).toLowerCase();
       fs.copyFileSync(path.join(dir, ix[fromId]), path.join(dir, dst));
       _setFace(engine, toId, dst);
+      _pushFace(engine, toId);
       out.face = { path: path.join(dir, dst), v: String(Date.now()) };
     }
   } catch (e) { log('⚠ 얼굴 옮기기 실패: ' + e.message); }
@@ -5535,6 +5632,7 @@ ipcMain.handle('tts-face-pick', async (_e, { engine, voice } = {}) => {
     const out = path.join(dir, key + path.extname(src).toLowerCase());
     fs.copyFileSync(src, out);
     _setFace(engine, voice, path.basename(out));
+    _pushFace(engine, voice);   // 🙂 다른 PC 와 공유(기다리지 않는다)
     return { ok: true, key, path: out, v: String(Date.now()) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -5657,6 +5755,7 @@ ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, la
     const out = path.join(dir, key + path.extname(r.imagePath));
     fs.renameSync(r.imagePath, out);
     _setFace(engine, voice, path.basename(out));
+    _pushFace(engine, voice);   // 🙂 다른 PC 와 공유
     const wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
     log(`🎨 목소리 얼굴 — ${engine} · ${name || voice} (🖥 로컬 ComfyUI · ${wf ? wf.name : path.basename(cfg.workflowPath)})`);
     return { ok: true, key, path: out, v: String(Date.now()) };
@@ -5667,6 +5766,7 @@ ipcMain.handle('tts-face-clear', (_e, { engine, voice } = {}) => {
     const dir = path.join(VOICE_FACE_DIR(), String(engine)); const key = _voiceFileKey(voice);
     try { for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} } } catch {}
     _setFace(engine, voice, null);
+    _pushFace(engine, voice);   // 🙂 다른 PC 에서도 지운다(서버에 지움 표시)
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -9787,8 +9887,16 @@ ipcMain.handle('video-frame', async (_e, args = {}) => {
   } catch (_) { return null; }
 });
 
-ipcMain.handle('read-audio', (_e, p0) => {
+const _srvAudioMemo = new Map();   // 이름 → data URL (이 실행 동안)
+ipcMain.handle('read-audio', async (_e, p0) => {
   const p = resolveRefPath(p0);   // `srv:<이름>` 도 이 PC 에 실제 파일이 있으면 미리듣기 가능
+  // 🔈 이 PC 에 파일이 없는 서버 목소리(아내 PC)는 서버에서 원본을 받아 튼다 — 어느 PC 에서나 같은 소리(v0.7.2 · 로이)
+  if (!p && /^srv:./.test(String(p0 || ''))) {
+    const nm = String(p0).slice(4);
+    if (_srvAudioMemo.has(nm)) return _srvAudioMemo.get(nm);
+    try { const buf = await require('./tts/asr-client').getServerVoiceAudio(nm); if (buf) { const u = 'data:audio/wav;base64,' + buf.toString('base64'); _srvAudioMemo.set(nm, u); return u; } } catch {}
+    return null;
+  }
   if (!p) return null;
   try {
     const buf = fs.readFileSync(p);

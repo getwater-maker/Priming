@@ -61,7 +61,10 @@ async function listServerVoices() {
     finally { clearTimeout(t); }
     if (!res.ok) return null;                   // 404(구버전)·401 등 — 목록을 믿을 수 없다
     const j = await res.json();
-    return Array.isArray(j.voices) ? j.voices : null;
+    if (!Array.isArray(j.voices)) return null;
+    // 🗑 지운 목소리 이름(서버 휴지통 · v0.7.2) — 배열에 붙여 둔다(옛 호출부는 그대로 배열로 쓴다). 자동 동기화가 되살리지 않게.
+    j.voices.deleted = Array.isArray(j.deleted) ? j.deleted.map(String) : [];
+    return j.voices;
   } catch (_) { return null; }                  // 타임아웃·네트워크 — 목록을 믿을 수 없다
 }
 
@@ -315,4 +318,42 @@ async function designVoiceOmni({ text, instruct, language, seed } = {}) {
   } finally { clearTimeout(timer); }
 }
 
-module.exports = { transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
+/**
+ * 🔈🗑🙂 공용 라이브러리 원본 듣기 · 지우기 · 목소리 얼굴(v0.7.2 · 로이 「어디서나 같게 · 음성은 같이 공유」)
+ *   구버전 서버 = 404 → 'unsupported'(호출부는 이 PC 파일만 쓴다).
+ */
+async function _call(p, { method = 'GET', body, timeoutMs = 15000, raw = false } = {}) {
+  const base = _baseUrl();
+  if (!base) return { ok: false, error: 'OmniVoice 서버 주소가 없습니다' };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(base + p, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ..._authHeaders() }, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
+    } finally { clearTimeout(t); }
+    if (res.status === 404 && !raw) { const j = await res.json().catch(() => ({})); return { ok: false, error: j.error ? j.error : 'unsupported', status: 404 }; }
+    if (raw) return res.ok ? { ok: true, buf: Buffer.from(await res.arrayBuffer()) } : { ok: false, status: res.status, error: 'HTTP ' + res.status };
+    const j = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, ...j } : { ok: false, status: res.status, error: j.error || 'HTTP ' + res.status };
+  } catch (e) { return { ok: false, error: _netErr(e, base) }; }
+}
+/** 라이브러리 목소리 원본 wav → Buffer | null */
+async function getServerVoiceAudio(name) {
+  const r = await _call('/ref-voice-audio?name=' + encodeURIComponent(String(name || '')), { raw: true, timeoutMs: 20000 });
+  return r.ok && r.buf && r.buf.length > 44 ? r.buf : null;
+}
+/** 라이브러리 목소리 → 서버 휴지통 */
+async function deleteServerVoice(name) { return _call('/delete-ref-voice', { method: 'POST', body: { name: String(name || '') } }); }
+/** 얼굴 목록 { 엔진: { 목소리 id: {file, t} | {deleted: t} } } | null */
+async function getServerFaces() { const r = await _call('/voice-faces', { timeoutMs: 5000 }); return r.ok && r.faces ? r.faces : null; }
+async function getServerFace(engine, file) {
+  const r = await _call('/voice-face?engine=' + encodeURIComponent(engine) + '&file=' + encodeURIComponent(file), { raw: true });
+  return r.ok ? r.buf : null;
+}
+/** 얼굴 올리기/지우기 — t(밀리초)가 서버 것보다 오래되면 서버가 무시한다(stale) */
+async function putServerFace({ engine, voice, file = '', t, buf = null, del = false }) {
+  return _call('/save-voice-face', { method: 'POST', timeoutMs: 30000, body: { engine, voice, file, t, delete: !!del, img_b64: buf ? Buffer.from(buf).toString('base64') : '' } });
+}
+
+module.exports = { getServerVoiceAudio, deleteServerVoice, getServerFaces, getServerFace, putServerFace, transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
