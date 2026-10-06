@@ -41,7 +41,9 @@ const EXCLUDE_REL = [
   /(^|\/)(?!dummy-tts\.mp3$)[^/]+\.(mp3|mp4|wav|m4a|flac|ogg|aac|mov|mkv|webm|avi|m4v)$/i,
 ];
 // 파일명/경로 제외 (_ 로 시작하는 스크래치/노트 파일 전부 제외)
-const EXCLUDE_FILE = [/\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/];
+//   📦 설치·압축 파일도 싣지 않는다 — 작업 폴더에 받아 둔 DadoendayunAuto-Setup-2.3.30.exe(커밋 안 됨)가 섞여 서버 404
+//      → 모든 PC 의 업데이트가 「파일 1개를 받지 못했습니다」로 막혔다(2026-10-06, v0.7.19).
+const EXCLUDE_FILE = [/\.(exe|msi|zip|7z|rar|dmg|iso)$/i, /\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/];
 
 // 바이너리 확장자 (.gitattributes 의 binary 선언과 일치) — EOL 정규화 안 함, 원본 바이트로 해시.
 const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg']);

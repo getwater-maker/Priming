@@ -29,6 +29,16 @@ async function get(rel) { const r = await fetch(BASE + rel + '?t=' + Date.now(),
       const sub = rels.filter((r) => set.has(r)); rels = sub.length ? sub : rels;
     } catch (_) {}
   }
+  // 🔴 매니페스트에 있는데 커밋(HEAD)에 없는 파일 = 서버에 영영 없다(404) → 모든 PC 업데이트가 막힌다(2026-10-06 · 설치 파일 .exe 사고).
+  //   바뀐 파일만 보는 기본 모드에서도 이것은 **전부** 본다(그 .exe 는 마지막 커밋의 변경이 아니라서 놓쳤다).
+  try {
+    const tracked = new Set(execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean));
+    const orphan = Object.keys(local.files).filter((r) => !tracked.has(r));
+    if (orphan.length) {
+      console.log(`❌ 매니페스트에 있지만 저장소에 커밋되지 않은 파일 ${orphan.length}개 — 서버에 없어 모든 PC 업데이트가 막힙니다: ${orphan.slice(0, 5).join(', ')}${orphan.length > 5 ? ' …' : ''}\n   커밋하거나 gen-manifest 제외 목록에 넣고 다시 발행하세요.`);
+      process.exit(1);
+    }
+  } catch (e) { console.log('⚠ git ls-files 실패 — 저장소에 없는 파일 확인을 건너뜁니다: ' + (e && e.message)); }
   const t0 = Date.now();
   for (;;) {
     const bad = [];
