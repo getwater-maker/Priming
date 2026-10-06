@@ -145,6 +145,29 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const projects = (dto && dto.projects) || [];
   const stats = useMemo(() => projects.reduce((a, p) => { const x = sr.readerStats(p); return { chars: a.chars + x.chars, sents: a.sents + x.sents, dur: a.dur + x.dur }; }, { chars: 0, sents: 0, dur: 0 }), [dto]);
   const royC = useMemo(() => projects.reduce((a, p) => { const r = p.roy || {}; return { exp: a.exp + (r.exp || 0), expOpen: a.expOpen + (r.expOpen || 0), int: a.int + (r.int || 0), lost: a.lost + (r.lost || 0) }; }, { exp: 0, expOpen: 0, int: 0, lost: 0 }), [dto]);
+  // 🎯 헤더의 🟥/🟨 숫자를 누르면 그 표시가 있는 자리로 — 누를 때마다 다음 표시(맨 끝 다음은 처음으로). 🟥 는 「미확인」부터(없으면 확인된 것).
+  //   표시마다 머리에 칩(data-roy-tag)이 한 개 있어서 그 칩을 길잡이로 쓴다(문장마다 칠한 바탕이 아니라).
+  const royNavRef = useRef({ exp: 0, int: 0 });
+  function jumpRoy(kind) {
+    const root = docRef.current; if (!root) return;
+    let sel = kind === 'int' ? '[data-roy-tag="int"]' : '[data-roy-tag="exp"]';
+    let list = root.querySelectorAll(sel);
+    if (kind === 'exp' && !list.length) { sel = '[data-roy-tag="ok"]'; list = root.querySelectorAll(sel); }
+    if (!list.length) { setMsg(kind === 'int' ? '🟨 해석 표시가 없습니다' : '🟥 경험 표시가 없습니다'); return; }
+    const nav = royNavRef.current;
+    const k = nav[kind] % list.length;
+    nav[kind] = k + 1;
+    const el = list[k];
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // 강조 — 칩 + 그 표시에 속한 문장들(칩 뒤로 이어지는 같은 표시의 문장 바탕) · 같은 문단의 다른 문장은 건드리지 않는다
+    const hit = [el];
+    for (let n = el.nextElementSibling; n && n.hasAttribute('data-roy'); n = n.nextElementSibling) hit.push(n);
+    const col = kind === 'int' ? '#e0a800' : '#d9534f';
+    hit.forEach((n) => { n.style.outline = '3px solid ' + col; n.style.outlineOffset = '2px'; });
+    setTimeout(() => hit.forEach((n) => { n.style.outline = ''; n.style.outlineOffset = ''; }), 1600);
+    const exp = kind === 'exp' && sel.includes('"ok"');
+    setMsg(`${kind === 'int' ? '🟨 해석' : (exp ? '🟥 확인된 경험' : '🟥 미확인 경험')} ${k + 1} / ${list.length}${list.length > 1 ? ' — 한 번 더 누르면 다음' : ''}`);
+  }
   const anyDirty = () => [...parasRef.current.values()].some((p) => p.dirty);
   const busyNow = () => st.current.composing || st.current.saving || anyDirty();
 
@@ -338,9 +361,14 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           {saveSt && <span data-testid="reader-save" className="meta" style={{ color: saveSt === 'saved' ? 'var(--ok)' : 'var(--warn)' }}>{saveSt === 'saving' ? '⏳ 저장 중…' : saveSt === 'saved' ? '✓ 저장됨' : '✏ 고치는 중 — 멈추면 저장'}</span>}
           <span className="meta">{stats.sents}문장 · {stats.chars.toLocaleString()}자(공백 제외){stats.dur ? ` · 음성 ${fmtMin(stats.dur)}` : ''}</span>
           {(royC.exp + royC.int + royC.lost) > 0 && (
-            <span data-testid="reader-roy" className="meta" title="🟥 = 1인칭 경험(실제 로이의 일만 · 고치거나 「사실 확인」) · 🟨 = 해석(고치고 싶을 때만). 고친 글은 은행에 「Claude 원문 → 로이 수정」으로 쌓입니다"
-              style={{ fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)' }}>
-              🟥 미확인 {royC.expOpen}{royC.exp > royC.expOpen ? ` (확인 ${royC.exp - royC.expOpen})` : ''} · 🟨 {royC.int}{royC.lost ? ` · ⚠ 못 찾은 표시 ${royC.lost}` : ''}
+            <span data-testid="reader-roy" className="meta" title="🟥 = 1인칭 경험(실제 로이의 일만 · 고치거나 「사실 확인」) · 🟨 = 해석(고치고 싶을 때만). 고친 글은 은행에 「Claude 원문 → 로이 수정」으로 쌓입니다 · 숫자를 누르면 그 표시 자리로 이동(또 누르면 다음)"
+              style={{ fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <button type="button" className="ghost" data-testid="reader-roy-exp" disabled={royC.exp === 0} title="누르면 🟥 경험 표시로 이동 — 미확인부터, 한 번 더 누르면 다음" style={{ padding: '1px 7px', fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)' }} onClick={() => jumpRoy('exp')}>
+                🟥 미확인 {royC.expOpen}{royC.exp > royC.expOpen ? ` (확인 ${royC.exp - royC.expOpen})` : ''}</button>
+              <span>·</span>
+              <button type="button" className="ghost" data-testid="reader-roy-int" disabled={royC.int === 0} title="누르면 🟨 해석 표시로 이동 — 한 번 더 누르면 다음" style={{ padding: '1px 7px', fontWeight: 700, color: '#8a6a00' }} onClick={() => jumpRoy('int')}>
+                🟨 {royC.int}</button>
+              {royC.lost ? <span>· ⚠ 못 찾은 표시 {royC.lost}</span> : null}
             </span>
           )}
           <span style={{ flex: 1 }} />

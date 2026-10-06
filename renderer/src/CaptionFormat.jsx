@@ -208,14 +208,29 @@ function ScopeBtn({ scope, onScope }) {
  * @param onChange  (patch) => void — 바뀐 키만
  * @param title     패널 제목(「채널 기본 서식」 · 「클립 6 서식」)
  */
-export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, pos, scope, onScope }) {
+export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, pos, scope, onScope, wide }) {   // wide = 넓은 창(대화상자)용 — 두 칸 배치 · 글꼴 목록을 같은 화면에(탭 없음)
   const f = value || CF.normFmt({});
   const [tab, setTab] = useState('fmt');
   const { fonts, add } = useCaptionFonts();
   const { list: saved, save } = useSavedFormats();
   const set = (p) => onChange(p);
+  const fontPicker = () => (
+          <div className="cf-sec" data-testid="cf-fontlist">
+            <div className="cf-fonts">
+              {fonts.map((x) => (
+                <button key={x.vrewName} className={'cf-font' + (x.vrewName === f.font ? ' on' : '')} title={x.vrewName}
+                  style={{ fontFamily: fontCss(x.vrewName).family, fontWeight: x.weight }} onClick={() => set({ font: x.vrewName })}>
+                  {x.label} <span className="meta">{x.weight}</span>
+                  {x.src === 'user' && <span className="meta" title="직접 추가한 글꼴 — MP4·화이트보드에는 들어가지만, Vrew 글꼴 목록에 없는 글꼴이면 .vrew 를 Vrew 에서 열었을 때 다른 글꼴로 보일 수 있습니다"> · ⚠ Vrew 에 없을 수 있음</span>}
+                </button>
+              ))}
+            </div>
+            <div className="cf-note">Vrew 에서 한 번 쓴 글꼴은 여기 자동으로 나타납니다(이 PC 의 Vrew 캐시). 다른 글꼴은 파일로 추가하세요.</div>
+            <button className="ghost" onClick={add}>＋ 글꼴 파일 추가 (ttf·otf·woff2)</button>
+          </div>
+  );
   return (
-    <div className="cf-panel" data-testid="cf-panel">
+    <div className={'cf-panel' + (wide ? ' cf-wide' : '')} data-testid="cf-panel">
       <div className="cf-head"><b>{title || '자막 서식'}</b>{onReset && <button className="ghost cf-sm" title="이 범위의 서식을 채널 기본으로 되돌립니다" onClick={onReset}>↺ 초기화</button>}{onClose && <button className="ghost cf-x" onClick={onClose}>✕</button>}</div>
       <div className="cf-body">
         <div className="cf-sec">
@@ -235,23 +250,11 @@ export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, p
           </div>
         </div>
         {onScope && <div className="cf-sec cf-scope-row"><span className="meta">적용 범위</span><ScopeBtn scope={scope} onScope={onScope} /></div>}
-        <div className="cf-tabs"><button className={tab === 'fmt' ? 'on' : ''} onClick={() => setTab('fmt')}>서식</button><button className={tab === 'font' ? 'on' : ''} onClick={() => setTab('font')}>글꼴</button></div>
-        {tab === 'font' ? (
-          <div className="cf-sec" data-testid="cf-fontlist">
-            <div className="cf-fonts">
-              {fonts.map((x) => (
-                <button key={x.vrewName} className={'cf-font' + (x.vrewName === f.font ? ' on' : '')} title={x.vrewName}
-                  style={{ fontFamily: fontCss(x.vrewName).family, fontWeight: x.weight }} onClick={() => set({ font: x.vrewName })}>
-                  {x.label} <span className="meta">{x.weight}</span>
-                  {x.src === 'user' && <span className="meta" title="직접 추가한 글꼴 — MP4·화이트보드에는 들어가지만, Vrew 글꼴 목록에 없는 글꼴이면 .vrew 를 Vrew 에서 열었을 때 다른 글꼴로 보일 수 있습니다"> · ⚠ Vrew 에 없을 수 있음</span>}
-                </button>
-              ))}
-            </div>
-            <div className="cf-note">Vrew 에서 한 번 쓴 글꼴은 여기 자동으로 나타납니다(이 PC 의 Vrew 캐시). 다른 글꼴은 파일로 추가하세요.</div>
-            <button className="ghost" onClick={add}>＋ 글꼴 파일 추가 (ttf·otf·woff2)</button>
-          </div>
+        {!wide && <div className="cf-tabs"><button className={tab === 'fmt' ? 'on' : ''} onClick={() => setTab('fmt')}>서식</button><button className={tab === 'font' ? 'on' : ''} onClick={() => setTab('font')}>글꼴</button></div>}
+        {tab === 'font' && !wide ? (
+          fontPicker()
         ) : (
-          <>
+          <div className={wide ? 'cf-cols' : undefined}>
             <div className="cf-sec">
               <div className="cf-sech">기본 서식</div>
               <div className="cf-row"><span className="l">글자 크기</span>
@@ -303,14 +306,16 @@ export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, p
                 <div className="cf-row"><span className="l">위치</span><span className="meta">가로</span><Num value={f.shadowX} min={-30} max={30} onChange={(v) => set({ shadowX: v })} /><span className="meta">세로</span><Num value={f.shadowY} min={-30} max={30} onChange={(v) => set({ shadowY: v })} /></div>
               </>}
             </div>
-            <div className="cf-sec">
-              <div className="cf-sech">글꼴</div>
-              <div className="cf-row"><button className="ghost cf-fontcur" style={{ fontFamily: fontCss(f.font).family }} onClick={() => setTab('font')}>{fontLabel(fonts, f.font)} ▸</button></div>
-            </div>
-          </>
+            {wide
+              ? <div className="cf-sec cf-fontsec"><div className="cf-sech">글꼴 <span className="meta">{fontLabel(fonts, f.font)}</span></div>{fontPicker()}</div>
+              : <div className="cf-sec">
+                <div className="cf-sech">글꼴</div>
+                <div className="cf-row"><button className="ghost cf-fontcur" style={{ fontFamily: fontCss(f.font).family }} onClick={() => setTab('font')}>{fontLabel(fonts, f.font)} ▸</button></div>
+              </div>}
+          </div>
         )}
       </div>
-      <div className="cf-foot"><button onClick={() => { const name = `서식 ${saved.length + 1}`; if (saved.length < 18) save([...saved, { id: 'f' + Date.now(), name, fmt: savable(f) }]); }} disabled={saved.length >= 18}>＋ 현재 서식 저장</button></div>
+      {!wide && <div className="cf-foot"><button onClick={() => { const name = `서식 ${saved.length + 1}`; if (saved.length < 18) save([...saved, { id: 'f' + Date.now(), name, fmt: savable(f) }]); }} disabled={saved.length >= 18}>＋ 현재 서식 저장</button></div>}
     </div>
   );
 }

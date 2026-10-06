@@ -61,6 +61,11 @@ const CH = '__테스트채널_삭제해도됨_AI' + process.pid;
     // 서식 창
     await card.locator('[data-testid=ai-fmt-btn]').click(); await win.waitForSelector('[data-testid=aifmtdlg]', { timeout: 5000 });
     ok(true, '🎨 서식 창이 열린다');
+    // 넓은 두 칸 배치 — 스크롤 없이 한 화면 · 글꼴 목록이 같은 화면에(탭 없음)
+    const dl = await win.locator('[data-testid=aifmtdlg] .cf-body').evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight, cols: getComputedStyle(el.firstElementChild.nextElementSibling || el.firstElementChild).columnCount, font: !!el.querySelector('[data-testid=cf-fontlist]'), tabs: !!document.querySelector('[data-testid=aifmtdlg] .cf-tabs') }));
+    ok(dl.sh <= dl.ch + 1, `AI 고지 서식 창이 스크롤 없이 한 화면 (${dl.sh} ≤ ${dl.ch})`);
+    ok(dl.font && !dl.tabs, 'AI 고지 서식 창: 글꼴 목록이 같은 화면(서식/글꼴 탭 없음)');
+    ok(await win.locator('[data-testid=aifmtdlg] .cf-cols').count() === 1, 'AI 고지 서식 창: 서식 구역이 두 칸(cf-cols)');
     await win.keyboard.press('Escape'); await win.waitForTimeout(200);
     ok(await win.locator('[data-testid=aifmtdlg]').count() === 0 && await card.count() === 1, 'Esc 로 서식 창만 닫힌다(채널 편집은 그대로)');
 

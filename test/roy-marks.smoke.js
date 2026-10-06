@@ -49,7 +49,7 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
     await win.waitForSelector('[data-testid="script-reader"]', { timeout: 5000 });
     const R = win.locator('[data-testid="script-reader"]');
     const doc = R.locator('[data-testid="reader-doc"]');
-    const cnt = () => R.locator('[data-testid="reader-roy"]').innerText();
+    const cnt = () => R.locator('[data-testid="reader-roy"]').innerText().then((t) => t.replace(/\s+/g, ' ').trim());
 
     console.log('[1] 색 · 칩 · 개수');
     ok(/🟥 미확인 2 · 🟨 1/.test(await cnt()), `머리 개수 「${await cnt()}」`);
@@ -58,6 +58,23 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
     const txt = await R.innerText();
     ok(!/📝 🟥|경험·가안\n/.test(await R.locator('[data-note]').allInnerTexts().then((a) => a.join('\n'))), '표시 줄은 📝 메모 칸에 안 나온다');
     ok(/🟥 경험·가안/.test(txt) && /🟨 해석/.test(txt), '칩에 표시 이름');
+    // 🎯 헤더 숫자를 누르면 그 표시 자리로 — 누를 때마다 다음(끝 다음은 처음으로) (로이 2026-10-06 「노란 곳 클릭 1회 = 첫 번째, 한 번 더 = 다음」)
+    {
+      const msg = () => R.locator('[data-testid="reader-msg"]').innerText();
+      const flashed = () => doc.evaluate((root) => [...root.querySelectorAll('[data-roy]')].filter((n) => n.style.outline).map((n) => n.innerText.slice(0, 14)));
+      await R.locator('[data-testid="reader-roy-exp"]').click(); await win.waitForTimeout(250);
+      ok(/미확인 경험 1 \/ 2/.test(await msg()), '🟥 한 번 → 첫 번째(1 / 2) — ' + (await msg()));
+      const f1 = await flashed();
+      ok(f1.length === 2 && /손주 돌잔치/.test(f1[0]) && !f1.some((t) => /첫 문장/.test(t)), '첫 🟥 표시(문장 2개)만 강조 · 같은 문단의 앞 문장은 아님 — ' + JSON.stringify(f1));
+      await R.locator('[data-testid="reader-roy-exp"]').click(); await win.waitForTimeout(250);
+      ok(/미확인 경험 2 \/ 2/.test(await msg()), '🟥 한 번 더 → 다음(2 / 2)');
+      ok((await flashed()).some((t) => /병원 대기실/.test(t)), '둘째 🟥 표시가 강조된다(판정력 — 첫 번째와 다른 곳)');
+      await R.locator('[data-testid="reader-roy-exp"]').click(); await win.waitForTimeout(250);
+      ok(/미확인 경험 1 \/ 2/.test(await msg()), '🟥 한 번 더 → 끝 다음은 처음으로(1 / 2)');
+      await R.locator('[data-testid="reader-roy-int"]').click(); await win.waitForTimeout(250);
+      ok(/해석 1 \/ 1/.test(await msg()), '🟨 한 번 → 첫 번째(1 / 1) — ' + (await msg()));
+      ok(/저는 이 대목/.test((await flashed()).join('|')), '🟨 문단이 강조된다');
+    }
     ok(await doc.evaluate((el) => el.readerValue(0)) === '첫 문장입니다. 둘째 문장입니다. 손주 돌잔치 날 사진을 찍던 기억이 납니다. 그날은 비가 왔습니다. 병원 대기실에서 한참을 기다렸습니다. 저는 이 대목에서 오래 멈춥니다.', '🔑 칩은 글에 섞이지 않는다(문단 글 = 문장만)');
 
     console.log('[2] 사실 확인 — 고치지 않아도');

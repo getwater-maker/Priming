@@ -4823,10 +4823,10 @@ export default function App() {
       {/* 🏷 채널 AI 고지 서식 — 채널 편집 값(ch.aiFmt)에 바로 들어가고 「저장」으로 저장 */}
       {aiFmtDlg && ch && (
         <div className="modal-bg show" style={{ zIndex: 95 }} data-testid="aifmtdlg">
-          <div className="modal-card cf-dlg">
+          <div className="modal-card cf-dlg wide">
             <div className="cf-dlgh"><h3>🏷 AI 고지 서식</h3><span className="meta">이 채널의 모든 영상(.vrew·MP4)에 적용 · 「저장」을 눌러야 채널에 저장됩니다</span><button className="ghost" onClick={() => setAiFmtDlg(false)}>닫기</button></div>
             <div className="cf-dlgb">
-              <CaptionFormatPanel value={CF.aiNoticeFmt({ fmt: ch.aiFmt })} onChange={(p) => setCh((cur) => ({ ...cur, aiFmt: CF.mergeAll(cur.aiFmt, p) || null }))} title="AI 고지 서식" />
+              <CaptionFormatPanel value={CF.aiNoticeFmt({ fmt: ch.aiFmt })} onChange={(p) => setCh((cur) => ({ ...cur, aiFmt: CF.mergeAll(cur.aiFmt, p) || null }))} title="AI 고지 서식" wide />
             </div>
           </div>
         </div>
@@ -4842,10 +4842,10 @@ export default function App() {
         });
         return (
           <div className="modal-bg show" style={{ zIndex: 95 }} data-testid="capdlg">
-            <div className="modal-card cf-dlg">
+            <div className="modal-card cf-dlg wide">
               <div className="cf-dlgh"><h3>🎨 채널 기본 자막 서식</h3><span className="meta">이 채널의 모든 자막에 적용 · 줄마다 다르게 하려면 메인 화면에서 자막 줄 번호를 누르세요 · 「저장」을 눌러야 채널에 저장됩니다</span><button className="ghost" onClick={() => setCapDlg(null)}>닫기</button></div>
               <div className="cf-dlgb">
-                <CaptionFormatPanel value={val} onChange={onChange} title="서식" />
+                <CaptionFormatPanel value={val} onChange={onChange} title="서식" wide />
                 <CaptionAnimPanel value={val.anim} onChange={(a) => onChange({ anim: a })} title="애니메이션(모든 줄)" />
               </div>
             </div>
