@@ -460,6 +460,11 @@ class FlowAutomator {
     // 로그 파일 초기화 (이 시점부터 log() 호출은 파일에도 기록됨)
     this._logFilePath = path.join(outputDir, 'log.txt');
     this._failedNums = [];
+    // 🔴 i2v 시작 프레임 감시(2026-10-06 아내 PC — 2·3·4·6번 영상이 전부 1번 그림에서 시작했다).
+    //   앞 컷에 붙었던 칩 주소·파일, 이번 실행에서 이미 저장한 영상 지문(같은 영상을 두 컷에 싣지 않는다).
+    this._lastFrameSig = null;
+    this._lastFrameImage = null;
+    this._savedVideoHashes = new Set();
     // v1.13.22: 다중 프로필 폴백을 위한 run 별 추적 초기화
     this._currentProfileId = (config && config.profileId) || 'default';
     this._completedNums = [];
@@ -1916,25 +1921,175 @@ class FlowAutomator {
     //   로그만 어지럽힌다(실측: 실패한 컷에 「결과 카드를 못 찾음」이 찍혀 원인을 오해하게 했다).
     if (!buffer && !(captured && captured.length)) return false;
 
+    // 🔴 저장해도 되는 영상인가 — ① 끝까지 받은 MP4(moov 있음) ② 이번 실행에서 이미 저장한 영상이 아님.
+    //   2026-10-06 아내 PC: 1080p 다운로드가 실패한 05 는 네트워크 캡처의 **조각**(moov 없음 · 재생 불가)이 저장됐고,
+    //   재생 소스 버퍼는 앞 컷(04)과 크기까지 같았다. 둘 다 「영상 있음」으로 넘어가 .vrew 에 실린다.
+    const seen = this._savedVideoHashes || (this._savedVideoHashes = new Set());
+    const hashOf = (b) => require('crypto').createHash('sha1').update(b).digest('hex');
+    const usable = (b, what) => {
+      if (!b) return false;
+      if (!FlowAutomator._isCompleteMp4(b)) { this.log(`  [DL ${num}] ⚠ ${what} — 끝까지 받지 못한 영상 조각(재생 불가) · 쓰지 않습니다`); return false; }
+      if (seen.has(hashOf(b))) { this.log(`  [DL ${num}] ⚠ ${what} — 앞 컷에 이미 저장한 영상과 같습니다 · 쓰지 않습니다`); return false; }
+      return true;
+    };
+
     let vbuf = null;
     const want = opts.videoDownload || '1080p';
     if (want !== 'off') {
       const found = await this._newMediaCard(beforeIds, 15000);
       if (found) vbuf = await this._downloadVideoFromCard(found.card, num, want);
       else this.log(`  [DL ${num}] ⚠ 새로 생긴 결과 카드를 못 찾음 — 재생 소스로 폴백`);
+      if (vbuf && !usable(vbuf, `${want} 다운로드`)) vbuf = null;
     }
     if (!vbuf && captured && captured.length > 0) {
-      vbuf = captured.sort((a, b) => b.length - a.length)[0];
-      this.log(`  [DL ${num}] 재생 소스(720p 원본) 사용 — 로컬 GPU 업스케일이 필요할 수 있습니다`);
+      vbuf = captured.slice().sort((a, b) => b.length - a.length).find((b) => FlowAutomator._isCompleteMp4(b) && !seen.has(hashOf(b))) || null;
+      if (vbuf) this.log(`  [DL ${num}] 재생 소스(720p 원본) 사용 — 로컬 GPU 업스케일이 필요할 수 있습니다`);
+      else this.log(`  [DL ${num}] ⚠ 네트워크 캡처 ${captured.length}개 모두 조각이거나 앞 컷 영상 — 쓰지 않습니다`);
     }
-    if (!vbuf && buffer) {
+    if (!vbuf && buffer && usable(buffer, '재생 소스 버퍼')) {
       vbuf = buffer;
       this.log(`  [DL ${num}] 재생 소스 버퍼 사용 — 로컬 GPU 업스케일이 필요할 수 있습니다`);
     }
     if (!vbuf) return false;
+    seen.add(hashOf(vbuf));
     const finalPath = path.join(imgDir, `${num}_${shortText}.mp4`);
     fs.writeFileSync(finalPath, vbuf);
     this.log(`[${num}] 동영상 저장: ${path.basename(finalPath)} (${Math.round(vbuf.length / 1024)}KB)`);
+    return true;
+  }
+
+  /**
+   * 끝까지 받은 MP4 인가 — 최상위 상자(box)를 걸어 ftyp 로 시작하고, 모든 상자가 버퍼 안에서 끝나며,
+   *   moov(목차)와 mdat/moof(내용)가 다 있어야 true. 네트워크 캡처의 Range 조각은 mdat 가 중간에 잘려 false.
+   */
+  static _isCompleteMp4(buf) {
+    if (!Buffer.isBuffer(buf) || buf.length < 16) return false;
+    let off = 0, moov = false, data = false;
+    while (off + 8 <= buf.length) {
+      let size = buf.readUInt32BE(off);
+      const type = buf.toString('latin1', off + 4, off + 8);
+      if (off === 0 && type !== 'ftyp') return false;
+      if (size === 1) {
+        if (off + 16 > buf.length) return false;
+        const big = buf.readBigUInt64BE(off + 8);
+        if (big > BigInt(buf.length - off)) return false;
+        size = Number(big);
+      } else if (size === 0) size = buf.length - off;
+      if (size < 8 || off + size > buf.length) return false;
+      if (type === 'moov') moov = true;
+      if (type === 'mdat' || type === 'moof') data = true;
+      off += size;
+    }
+    return moov && data;
+  }
+
+  /** 프롬프트 바 칩(첨부)에 붙은 이미지·영상의 주소 목록. 칩 = button.*chip 안의 img/video. 못 읽으면 []. */
+  async _attachChipSrcs() {
+    try {
+      return await this.page.evaluate(() => {
+        const vis = (el) => !!(el.offsetWidth || el.offsetHeight);
+        return Array.from(document.querySelectorAll('button[class*="chip"]')).filter(vis)
+          .map((c) => c.querySelector('img, video')).filter(Boolean)
+          .map((m) => m.currentSrc || m.src || m.getAttribute('src') || '');
+      });
+    } catch (_) { return []; }
+  }
+
+  /**
+   * 앞 컷에서 붙은 첨부 칩을 뗀다 — 새 그림을 붙이기 **전에** 비워 둬야 앞 컷 그림이 그대로 쓰이지 않는다.
+   *   칩 안의 cancel/close 아이콘(없으면 칩 자체)을 누른다. 다 떼면 true, 4번 눌러도 남으면 false.
+   */
+  async _clearStaleAttachments(num, label) {
+    for (let k = 0; k < 4; k++) {
+      if (!(await this._attachChipSrcs()).length) {
+        if (k > 0) this.log(`  [${label} ${num}] 앞 컷 첨부를 비웠습니다`);
+        return true;
+      }
+      const clicked = await this.page.evaluate(() => {
+        const vis = (el) => !!(el.offsetWidth || el.offsetHeight);
+        const chip = Array.from(document.querySelectorAll('button[class*="chip"]')).filter(vis).find((c) => c.querySelector('img, video'));
+        if (!chip) return false;
+        const x = Array.from(chip.querySelectorAll('i, mat-icon, span, [aria-label]')).find((e) =>
+          /^(cancel|close)$/.test((e.textContent || '').trim()) || /삭제|제거|remove|delete|clear/i.test(e.getAttribute('aria-label') || ''));
+        (x || chip).click();
+        return true;
+      }).catch(() => false);
+      if (!clicked) break;
+      await this.page.waitForTimeout(700);
+      // 칩을 눌렀더니 선택창이 열렸다면 닫는다(그 경우 칩은 안 떨어진다 → 다음 바퀴에서 다시 본다)
+      if (await this.page.locator('.cdk-overlay-container [role="dialog"], .cdk-overlay-container [role="listbox"]').count().catch(() => 0)) {
+        await this.page.keyboard.press('Escape').catch(() => {});
+        await this.page.waitForTimeout(400);
+      }
+    }
+    this.log(`  [${label} ${num}] ⚠ 앞 컷 첨부가 프롬프트 바에 남아 떼지 못했습니다 — 이 컷은 만들지 않습니다(앞 컷 그림으로 만들어지는 것 방지)`);
+    return false;
+  }
+
+  /**
+   * 붙은 그림이 정말 **이 컷의 그림**인가 — 칩 주소가 앞 컷과 같은데 파일은 다르면 앞 컷 그림이 다시 붙은 것이다.
+   *   (2026-10-06: 업로드한 새 그림 대신 목록에 선택돼 있던 1번 그림이 매번 붙었다.) 같으면 떼고 false.
+   */
+  async _verifyFreshAttachment(imagePath, num, label) {
+    const sig = (await this._attachChipSrcs()).filter(Boolean).join('|');
+    const sameFile = this._lastFrameImage && path.resolve(String(imagePath)) === path.resolve(String(this._lastFrameImage));
+    if (sig && this._lastFrameSig && sig === this._lastFrameSig && !sameFile) {
+      this.log(`  [${label} ${num}] ⚠ 붙은 그림이 앞 컷(${path.basename(String(this._lastFrameImage))})과 같습니다 — 이 컷은 만들지 않습니다`);
+      await this._clearStaleAttachments(num, label);
+      return false;
+    }
+    if (!sig && this._lastFrameSig) this.log(`  [${label} ${num}] (붙은 그림 주소를 읽지 못해 앞 컷과 같은지는 확인하지 못했습니다)`);
+    if (sig) { this._lastFrameSig = sig; this._lastFrameImage = imagePath; }
+    return true;
+  }
+
+  /** 미디어 선택창의 자산 목록(보이는 role=option) — 정체(썸네일 주소 · 없으면 라벨)와 선택 여부. 못 읽으면 []. */
+  async _assetOptionKeys() {
+    try {
+      return await this.page.evaluate(() => {
+        const vis = (el) => !!(el.offsetWidth || el.offsetHeight);
+        return Array.from(document.querySelectorAll('[role="option"]')).filter(vis).map((o) => {
+          const m = o.querySelector('img, video');
+          const k = (m && (m.currentSrc || m.src || m.getAttribute('src'))) || o.getAttribute('aria-label') || '';
+          return { k, sel: o.getAttribute('aria-selected') === 'true' };
+        });
+      });
+    } catch (_) { return []; }
+  }
+
+  /**
+   * 업로드한 자산을 **그것 하나만** 선택한다. 옛 코드는 「선택된 것이 없을 때만」 첫 항목을 골랐다 →
+   *   앞 컷에서 고른 1번 그림이 선택된 채 남아 있으면 새 그림을 올려도 「프롬프트에 추가」가 1번을 붙였다(2026-10-06).
+   *   반환: true = 새 자산만 선택됨 · false = 새 자산을 못 찾음/선택 못 함(이 컷을 만들지 않는다) ·
+   *         null = 목록 구조를 읽을 수 없음(옛 동작 유지 — 붙은 뒤 _verifyFreshAttachment 가 거른다)
+   */
+  async _selectUploadedOption(before, num, label) {
+    const known = new Set((before || []).map((o) => o.k).filter(Boolean));
+    let now = [];
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000) {
+      now = await this._assetOptionKeys();
+      if (now.some((o) => o.k && !known.has(o.k))) break;
+      await this.page.waitForTimeout(500);
+    }
+    if (!now.length || !now.some((o) => o.k)) return null;
+    const idx = now.findIndex((o) => o.k && !known.has(o.k));
+    if (idx < 0) { this.log(`  [${label} ${num}] ⚠ 방금 올린 그림을 자산 목록에서 찾지 못했습니다(목록 ${now.length}개)`); return false; }
+    const opts = this.page.locator('[role="option"]:visible');
+    if (!now[idx].sel) { await opts.nth(idx).click({ timeout: 3000 }).catch(() => {}); await this.page.waitForTimeout(500); }
+    let cur = await this._assetOptionKeys();
+    // 앞 컷 선택이 함께 남아 있으면(여러 개 선택 목록) 끈다
+    for (let i = 0; i < cur.length; i++) {
+      if (i !== idx && cur[i].sel && cur[i].k !== now[idx].k) { await opts.nth(i).click({ timeout: 3000 }).catch(() => {}); await this.page.waitForTimeout(300); }
+    }
+    cur = await this._assetOptionKeys();
+    const mine = cur.findIndex((o) => o.k === now[idx].k);
+    const others = cur.filter((o, i) => o.sel && i !== mine).length;
+    if (mine < 0 || !cur[mine].sel || others) {
+      this.log(`  [${label} ${num}] ⚠ 방금 올린 그림만 선택하지 못했습니다(선택됨=${mine >= 0 && cur[mine].sel} · 다른 선택 ${others}개)`);
+      return false;
+    }
+    this.log(`  [${label} ${num}] 방금 올린 그림 선택 ✓`);
     return true;
   }
 
@@ -1945,6 +2100,8 @@ class FlowAutomator {
     try {
       if (!imagePath || !fs.existsSync(imagePath)) { this.log(`  [i2v ${num}] 소스 이미지 없음: ${imagePath}`); return false; }
       this.log(`  [i2v ${num}] 시작 프레임 첨부: ${path.basename(imagePath)}`);
+      // 🔴 앞 컷 첨부가 남아 있으면 먼저 뗀다(2026-10-06 — 2번부터 1번 그림으로 만들어졌다)
+      if (!(await this._clearStaleAttachments(num, 'i2v'))) return false;
 
       // 1) '시작'(시작 프레임) 클릭 → 미디어 선택창 (시작/종료 는 div — 텍스트로 매칭)
       let opened = false;
@@ -1954,7 +2111,7 @@ class FlowAutomator {
       }
       if (!opened) {
         // 새 UI: 시작 슬롯이 이미 채워져 있으면 「시작」 글자 대신 이미지 칩(cancel)이 보인다 → 붙은 것으로 본다.
-        if (await this._promptBarHasAttachment()) { this.log(`  [i2v ${num}] 시작 프레임 슬롯에 이미 이미지가 있습니다 — 그대로 씁니다`); return true; }
+        if (await this._promptBarHasAttachment()) { this.log(`  [i2v ${num}] ⚠ 시작 프레임 슬롯에 이미 이미지가 있는데 '시작' 버튼이 없습니다 — 이 컷의 그림인지 알 수 없어 만들지 않습니다`); return false; }
         this.log(`  [i2v ${num}] ⚠ '시작' 프레임 버튼 없음 — 동영상/프레임 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false;
       }
       await this.page.waitForTimeout(900);
@@ -1965,8 +2122,10 @@ class FlowAutomator {
       const hasUpload = (await this.page.locator('input[type="file"]').count()) > 0
         || (await this.page.locator('button:visible').filter({ hasText: /미디어 업로드/ }).count()) > 0;
       const okAdd = hasUpload ? await this._uploadAndAddToPrompt(imagePath, num, 'i2v') : await this._attachFrameViaLibrary(imagePath, num);
-      if (okAdd) this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
-      return okAdd;
+      if (!okAdd) return false;
+      if (!(await this._verifyFreshAttachment(imagePath, num, 'i2v'))) return false;
+      this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
+      return true;
     } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
   }
 
@@ -1992,17 +2151,20 @@ class FlowAutomator {
           if (await btn.isVisible({ timeout: 1500 })) { await btn.click({ timeout: 2500 }); opened = true; break; }
         } catch (_) {}
       }
+      if (!(await this._clearStaleAttachments(num, '애셋'))) return false;
       if (!opened) { this.log(`  [애셋 ${num}] ⚠ [+] 버튼 없음 — 동영상/애셋 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false; }
       await this.page.waitForTimeout(900);
 
       // 2)·3) 업로드 → 「프롬프트에 추가」 (프레임과 같은 다이얼로그를 쓴다)
-      return await this._uploadAndAddToPrompt(imagePath, num, '애셋');
+      if (!(await this._uploadAndAddToPrompt(imagePath, num, '애셋'))) return false;
+      return await this._verifyFreshAttachment(imagePath, num, '애셋');
     } catch (e) { this.log(`  [애셋 ${num}] 첨부 예외: ${e.message}`); return false; }
   }
 
   // 미디어 선택 다이얼로그 공통 — hidden file input 에 직접 넣고(네이티브 대화상자 회피)
   //   「프롬프트에 추가」 를 누른다. 프레임·애셋 양쪽이 같은 다이얼로그를 쓴다(2026-08-28 실측).
   async _uploadAndAddToPrompt(imagePath, num, label) {
+    const beforeOpts = await this._assetOptionKeys();   // 업로드 전 목록 — 새로 생긴 것 = 방금 올린 그림
     let set = false;
     try {
       const inputs = await this.page.$$('input[type="file"]');
@@ -2046,11 +2208,10 @@ class FlowAutomator {
       //   죽었거나, .first() 가 보이지 않는 쪽을 집은 것으로 보인다.
       //   → **매 시도마다 다시 찾고**(보이는 것만), 그래도 안 되면 DOM 클릭으로 확정한다.
       //   ⚠ 여기서 실패하면 그 컷은 통째로 버려지므로(첨부 실패 = 생성 안 함) 폴백을 둘 겹으로 둔다.
-      // 2026-09 새 UI: 업로드한 자산이 자동 선택되지 않으면 목록 첫 항목(최근순)을 고른다
-      try {
-        const selN = await this.page.locator('[role="option"][aria-selected="true"]').count();
-        if (!selN) { const opt = this.page.locator('[role="option"].asset-item').first(); if (await opt.count()) { await opt.click({ timeout: 3000 }); await this.page.waitForTimeout(500); } }
-      } catch (_) {}
+      // 🔴 업로드한 자산 **하나만** 선택한다(2026-10-06 — 앞 컷에서 고른 1번이 선택된 채 남아 「프롬프트에 추가」가 1번을 붙였다).
+      //   옛 코드: 「선택된 게 없을 때만 첫 항목」 → 앞 선택이 남아 있으면 아무것도 안 했다.
+      const pick = await this._selectUploadedOption(beforeOpts, num, label);
+      if (pick === false) { await this._dumpFrameAttachUI(); await this.page.keyboard.press('Escape').catch(() => {}); return false; }
       let clicked = false;
       for (let k = 0; k < 2 && !clicked; k++) {
         try {

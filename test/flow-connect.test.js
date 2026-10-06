@@ -149,6 +149,81 @@ async function await0() {
     assert.strictEqual(e._modelMatches('', 'Veo 3.1 - Lite'), false);
   });
 
+  console.log('\n[4] i2v 시작 프레임 — 앞 컷 그림이 다시 붙는 사고 (2026-10-06 아내 PC: 2·3·4·6번이 1번 그림에서 시작)');
+  // 가짜 page — 칩·자산 목록 상태를 들고, evaluate 는 호출된 함수의 이름 대신 원문 일부로 어느 질의인지 가린다.
+  function stPage(st) {
+    const opts = { nth: (i) => ({ async click() { st.clicks.push(i); st.onClick && st.onClick(i); } }) };
+    return {
+      keyboard: { async press() {} },
+      async waitForTimeout() {},
+      locator: (sel) => sel.includes('role="option"') ? opts : { async count() { return 0; } },
+      async evaluate(fn) {
+        const src = String(fn);
+        if (src.includes('[role="option"]')) return st.options.map((o) => ({ ...o }));
+        if (src.includes('.click()')) { if (!st.chips.length) return false; st.chipClicks++; if (st.chipsRemovable) st.chips = []; return true; }
+        if (src.includes('button[class*="chip"]')) return st.chips.slice();
+        return null;
+      },
+    };
+  }
+  const mkSt = (st) => { st.clicks = st.clicks || []; st.chipClicks = 0; const e = mk(stPage(st)); return e; };
+
+  ok('_isCompleteMp4 — 온전한 MP4 true · 잘린 조각/moov 없음/ftyp 아님 false', () => {
+    const box = (t, n) => { const b = Buffer.alloc(8 + n); b.writeUInt32BE(8 + n, 0); b.write(t, 4, 'latin1'); return b; };
+    const full = Buffer.concat([box('ftyp', 8), box('mdat', 4000), box('moov', 200)]);
+    assert.strictEqual(FlowAutomator._isCompleteMp4(full), true);
+    assert.strictEqual(FlowAutomator._isCompleteMp4(full.subarray(0, 2000)), false, 'mdat 중간에서 잘린 Range 조각(실제 05.mp4)');
+    assert.strictEqual(FlowAutomator._isCompleteMp4(Buffer.concat([box('ftyp', 8), box('mdat', 4000)])), false, 'moov 없음');
+    assert.strictEqual(FlowAutomator._isCompleteMp4(Buffer.concat([box('mdat', 4000), box('moov', 200)])), false, 'ftyp 로 시작 안 함');
+    assert.strictEqual(FlowAutomator._isCompleteMp4(null), false);
+  });
+  await okAsync('_selectUploadedOption — 앞 컷 선택(1번)이 남아 있어도 새로 올린 그림만 선택한다', async () => {
+    const st = { chips: [], options: [{ k: 'u1', sel: true }] };
+    const e = mkSt(st);
+    const before = await e._assetOptionKeys();
+    // 업로드 → 새 자산이 맨 앞에 생긴다(선택 안 됨). 옛 코드는 「선택된 게 있으니」 아무것도 안 했다.
+    st.options = [{ k: 'u2', sel: false }, { k: 'u1', sel: true }];
+    st.onClick = (i) => { st.options[i].sel = !st.options[i].sel; };
+    assert.strictEqual(await e._selectUploadedOption(before, 2, 'i2v'), true, e.logs.join(' | '));
+    assert.deepStrictEqual(st.options.map((o) => o.sel), [true, false], '새 그림만 선택돼야 한다');
+  });
+  await okAsync('_selectUploadedOption — 새 그림이 목록에 안 보이면 false(그 컷을 만들지 않는다) · 목록 구조가 없으면 null', async () => {
+    const st = { chips: [], options: [{ k: 'u1', sel: true }] };
+    const e = mkSt(st);
+    const t = Date.now; let fake = 0; Date.now = () => (fake += 5000);
+    try { assert.strictEqual(await e._selectUploadedOption([{ k: 'u1', sel: true }], 2, 'i2v'), false); } finally { Date.now = t; }
+    const e2 = mkSt({ chips: [], options: [] });
+    const t2 = Date.now; let f2 = 0; Date.now = () => (f2 += 5000);
+    try { assert.strictEqual(await e2._selectUploadedOption([], 2, 'i2v'), null); } finally { Date.now = t2; }
+  });
+  await okAsync('_verifyFreshAttachment — 칩 주소가 앞 컷과 같은데 파일이 다르면 false · 다른 그림이면 true', async () => {
+    const st = { chips: ['blob:A'], options: [], chipsRemovable: true };
+    const e = mkSt(st);
+    assert.strictEqual(await e._verifyFreshAttachment('D:/x/01.jpg', 1, 'i2v'), true);
+    st.chips = ['blob:A'];   // 2번을 붙였는데 1번 그림이 그대로
+    assert.strictEqual(await e._verifyFreshAttachment('D:/x/02.jpg', 2, 'i2v'), false, '앞 컷 그림을 통과시켰다');
+    st.chips = ['blob:B'];
+    assert.strictEqual(await e._verifyFreshAttachment('D:/x/02.jpg', 2, 'i2v'), true);
+    st.chips = ['blob:B'];   // 같은 파일 재첨부(재시도)는 통과
+    assert.strictEqual(await e._verifyFreshAttachment('D:/x/02.jpg', 2, 'i2v'), true);
+  });
+  await okAsync('_clearStaleAttachments — 칩을 떼면 true · 안 떨어지면 false(fail-closed)', async () => {
+    const a = mkSt({ chips: ['blob:A'], options: [], chipsRemovable: true });
+    assert.strictEqual(await a._clearStaleAttachments(2, 'i2v'), true);
+    const b = mkSt({ chips: ['blob:A'], options: [], chipsRemovable: false });
+    assert.strictEqual(await b._clearStaleAttachments(2, 'i2v'), false);
+    const c = mkSt({ chips: [], options: [] });
+    assert.strictEqual(await c._clearStaleAttachments(1, 'i2v'), true);
+  });
+  ok('원문 배선 — 프레임·애셋 첨부가 떼기·검증을 거치고 「이미 붙어 있으니 그대로」 경로가 없다 · 옛 「선택 없을 때만 첫 항목」 제거', () => {
+    assert.ok(!ENGINE.includes('그대로 씁니다'), '앞 컷 칩을 그대로 쓰는 경로 잔존');
+    assert.strictEqual((ENGINE.match(/await this\._clearStaleAttachments\(num, '(i2v|애셋)'\)/g) || []).length, 2);
+    assert.strictEqual((ENGINE.match(/await this\._verifyFreshAttachment\(imagePath, num, '(i2v|애셋)'\)/g) || []).length, 2);
+    assert.ok(/const pick = await this\._selectUploadedOption\(beforeOpts, num, label\)/.test(ENGINE));
+    assert.ok(!/if \(!selN\)/.test(ENGINE), '옛 선택 로직 잔존');
+    assert.ok(/_isCompleteMp4\(b\)/.test(ENGINE) && /seen\.add\(hashOf\(vbuf\)\)/.test(ENGINE), '저장 전 온전성·중복 검사');
+  });
+
   console.log(`\n${fails ? '❌' : '✅'} flow-connect: ${n - fails}/${n}`);
   process.exit(fails ? 1 : 0);
 }
