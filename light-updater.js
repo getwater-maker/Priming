@@ -61,12 +61,27 @@ async function fetchWithTimeout(url, ms, asText) {
   } finally { clearTimeout(t); }
 }
 
+/** 원격 매니페스트만 읽는다(파일은 건드리지 않음) — 「업데이트 확인」 버튼용. 실패하면 null. */
+async function fetchManifest(timeoutMs = 6000) {
+  for (const repo of REPOS) {
+    try {
+      const txt = await fetchWithTimeout(rawBase(repo) + 'update-manifest.json?t=' + Date.now(), timeoutMs, true);
+      const m = JSON.parse(txt);
+      if (m && m.files && typeof m.files === 'object') return m;
+    } catch (_) {}
+  }
+  return null;
+}
+function localPackage() {
+  try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')); } catch (_) { return {}; }
+}
+
 /**
  * 변경 파일을 받아 설치폴더에 교체. main.js require 전에 await 로 호출.
  * 네트워크 실패/오프라인이면 조용히 현재 버전으로 진행.
  */
 async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } = {}) {
-  if (!app.isPackaged) { log('dev 모드 — 업데이트 건너뜀'); return; }
+  if (!app.isPackaged) { log('dev 모드 — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'dev' }; }
   const appDir = app.getAppPath(); // asar:false → resources/app
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
@@ -80,8 +95,8 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
       break;
     } catch (e) { lastErr = e.message; }
   }
-  if (!RAW_BASE) { log(`매니페스트 조회 실패(오프라인일 수 있음) — 현재 버전으로 실행: ${lastErr}`); return; }
-  if (!manifest || !manifest.files || typeof manifest.files !== 'object') { log('매니페스트 형식 오류 — 건너뜀'); return; }
+  if (!RAW_BASE) { log(`매니페스트 조회 실패(오프라인일 수 있음) — 현재 버전으로 실행: ${lastErr}`); return { updated: 0, failed: 0, reason: 'offline' }; }
+  if (!manifest || !manifest.files || typeof manifest.files !== 'object') { log('매니페스트 형식 오류 — 건너뜀'); return { updated: 0, failed: 0, reason: 'format' }; }
 
   // 로컬 package.json (버전·deps 비교용) — 루프에서 덮어쓰기 전에 미리 읽음
   let localPkg = {};
@@ -94,7 +109,7 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
   const { compareVersions } = require('./core/version-order');
   if (localPkg.version && manifest.version && compareVersions(manifest.version, localPkg.version) < 0) {
     log(`원격 매니페스트가 더 낮아 건너뜀 (설치본 v${localPkg.version} > 원격 v${manifest.version})`);
-    return;
+    return { updated: 0, failed: 0, reason: 'older' };
   }
 
   // 의존성(node_modules) 변경은 파일 교체로 불가 → 재설치 안내 후 현재 버전 유지
@@ -111,7 +126,7 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
         });
       } catch (_) {}
     });
-    return;
+    return { updated: 0, failed: 0, reason: 'deps', from: localPkg.version, to: manifest.version };
   }
 
   // 변경된 파일만 다운로드 → 임시파일 기록 후 원자적 교체
@@ -148,9 +163,10 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 8000 } =
     }
   } catch (_) {}
 
-  if (updated === 0 && failed === 0) { log(`최신 상태 (${localPkg.version || '?'})`); return; }
-  if (updated === 0 && failed > 0) { log(`업데이트 실패 ${failed}건 — 현재 버전 유지`); return; }
+  if (updated === 0 && failed === 0) { log(`최신 상태 (${localPkg.version || '?'})`); return { updated: 0, failed: 0, reason: 'same', from: localPkg.version, to: manifest.version }; }
+  if (updated === 0 && failed > 0) { log(`업데이트 실패 ${failed}건 — 현재 버전 유지`); return { updated: 0, failed, reason: 'failed', from: localPkg.version, to: manifest.version }; }
   log(`✅ 업데이트 적용: ${updated}개 파일 (v${localPkg.version} → v${manifest.version}${failed ? `, 실패 ${failed}` : ''})`);
+  return { updated, failed, reason: 'applied', from: localPkg.version, to: manifest.version };
 }
 
-module.exports = { applyUpdates };
+module.exports = { applyUpdates, fetchManifest, localPackage };

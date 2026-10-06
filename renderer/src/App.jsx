@@ -447,6 +447,34 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
+  // 🔄 업데이트 — latest 가 있으면 새 버전 있음(헤더에 「⬆ 업데이트」). 시작 15초 뒤 · 30분마다 조용히 확인.
+  const [upd, setUpd] = useState({ latest: '', busy: false });
+  async function checkUpdate(quiet) {
+    try {
+      const r = await api.appUpdateCheck();
+      setUpd((u) => ({ ...u, latest: r && r.state === 'newer' ? r.latest : '' }));
+      if (!quiet && r) setStatus(r.state === 'newer' ? `⬆ ${r.message}` : (r.state === 'deps' ? '⚠ ' + r.message : r.message));
+      return r;
+    } catch (e) { if (!quiet) setStatus('업데이트 확인 실패: ' + e.message); return null; }
+  }
+  async function runUpdate() {
+    if (upd.busy) return;
+    setUpd((u) => ({ ...u, busy: true }));
+    try {
+      const r = await checkUpdate(false);
+      if (!r || r.state !== 'newer') return;
+      if (!uiConfirm(`새 버전 v${shortVer(r.latest)} 이(가) 있습니다 (지금 v${shortVer(r.current)}).\n\n지금 업데이트하고 앱을 다시 시작할까요?\n· 작업(만들기·음성·이미지·영상)이 진행 중이면 끝난 뒤에 눌러 주세요\n· 열어 둔 큐는 다시 켠 뒤 「♻ 지난 큐 다시 열기」로 이어집니다`)) return;
+      setStatus('🔄 업데이트 받는 중… 끝나면 앱이 다시 시작됩니다');
+      const a = await api.appUpdateApply();
+      if (!a || !a.ok) { setStatus('⚠ ' + ((a && a.message) || '업데이트하지 못했습니다')); uiAlert((a && a.message) || '업데이트하지 못했습니다'); }
+    } finally { setUpd((u) => ({ ...u, busy: false })); }
+  }
+  useEffect(() => {
+    const t1 = setTimeout(() => checkUpdate(true), 15000);
+    const t2 = setInterval(() => checkUpdate(true), 30 * 60 * 1000);
+    return () => { clearTimeout(t1); clearInterval(t2); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
   const [grokCool, setGrokCool] = useState(null); // Grok(영상) 한도 쿨다운 {until, label}
   const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
@@ -4288,7 +4316,10 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className="vhead">
         <div className="menubar">
-            <h1>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
+            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 tube.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
+            <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
+              title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
+              onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>

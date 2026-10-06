@@ -648,6 +648,33 @@ async function withAwake(label, fn) {
 function appDiskVersion() {
   try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || ''; } catch { return ''; }
 }
+// 🔄 업데이트 확인·적용 버튼(2026-10-06 로이 「끄지 않고 버튼으로 업그레이드」) — 시작 때 하는 것과 같은 라이트 업데이터를 쓴다.
+//   확인 = 매니페스트만 읽는다(파일 불변) · 적용 = 작업 중이 아닐 때만 → 파일 교체 → 앱 다시 시작(큐는 workspace.last 로 「♻ 지난 큐」).
+ipcMain.handle('app-update-check', async () => {
+  try {
+    const LU = require('./light-updater');
+    const r = require('./core/update-check').evaluate(await LU.fetchManifest(), LU.localPackage());
+    return { ...r, packaged: app.isPackaged };
+  } catch (e) { return { state: 'none', message: '확인 실패: ' + e.message, packaged: app.isPackaged }; }
+});
+ipcMain.handle('app-update-apply', async () => {
+  try {
+    if (!app.isPackaged) return { ok: false, reason: 'dev', message: '개발 실행(npm start)에서는 자동 업데이트를 하지 않습니다 — 설치본에서 쓰세요' };
+    if (_awake.n > 0) return { ok: false, reason: 'busy', message: '지금 작업(음성·이미지·영상·만들기)이 진행 중입니다 — 끝난 뒤에 업데이트하세요' };
+    const LU = require('./light-updater');
+    const chk = require('./core/update-check').evaluate(await LU.fetchManifest(), LU.localPackage());
+    if (chk.state !== 'newer') return { ok: false, reason: chk.state, message: chk.message };
+    log(`🔄 업데이트 시작 — v${chk.current} → v${chk.latest}`);
+    const r = await LU.applyUpdates();
+    if (!r || !(r.updated > 0)) return { ok: false, reason: (r && r.reason) || 'failed', message: r && r.failed ? `파일 ${r.failed}개를 받지 못했습니다 — 잠시 뒤 다시 눌러 주세요` : '적용할 파일이 없었습니다' };
+    log(`✅ 업데이트 적용 ${r.updated}개 파일 (v${r.from} → v${r.to}) — 앱을 다시 시작합니다`);
+    try { writeWorkspace(); } catch (_) {}   // 큐를 「♻ 지난 큐」로 남긴다
+    setTimeout(() => { try { app.relaunch(); } catch (_) {} app.exit(0); }, 700);
+    return { ok: true, from: r.from, to: r.to, updated: r.updated };
+  } catch (e) { return { ok: false, reason: 'error', message: '업데이트 실패: ' + e.message }; }
+});
+// 🌐 헤더의 앱 이름을 누르면 열리는 사이트 — 이 주소 하나만 연다(렌더러가 주소를 정하지 못하게)
+ipcMain.handle('open-tube-site', () => { shell.openExternal('https://tube.primingwave.com/'); return true; });
 ipcMain.handle('get-app-version', () => {
   try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || app.getVersion(); }
   catch { try { return app.getVersion(); } catch { return ''; } }
