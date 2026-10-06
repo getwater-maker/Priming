@@ -61,6 +61,10 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('.bkwrap', { timeout: 10000 });
     ok(await win.locator('[data-testid=bk-view-paper]').count() === 1 && await win.locator('[data-testid=bk-view-ebook]').count() === 1, '[종이책 | 전자책] 전환 단추');
     ok(await win.locator('[data-testid=bk-ebook]').count() === 0, '처음에는 종이책 화면(전자책 패널 없음)');
+    // 비활성 단추의 글자가 바탕과 같은 색이면 안 보인다(로이 2026-10-06 — 전환 단추 라벨이 안 보였다)
+    const lum = (c) => { const m = c.match(/\d+/g).map(Number); return 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]; };
+    const cols = await win.evaluate(() => { const b = document.querySelector('[data-testid=bk-view-ebook]'); const s = getComputedStyle(b); return { fg: s.color, bg: s.backgroundColor }; });
+    ok(Math.abs(lum(cols.fg) - lum(cols.bg)) > 100, `비활성 전환 단추 글자가 보인다(글자 ${cols.fg} / 바탕 ${cols.bg})`);
 
     await win.click('[data-testid=bk-view-ebook]');
     await win.waitForSelector('[data-testid=bk-eb-checks]', { timeout: 120000 });
