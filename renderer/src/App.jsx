@@ -617,6 +617,7 @@ export default function App() {
   // 보이스디자인(Qwen) 서버 준비 중 — 「생성 중」(vdBusy)과 따로 둔다. 베트남어는 OmniVoice 로 만들어 준비를 기다리지 않는다.
   const [vdPreparing, setVdPreparing] = useState(false);
   const [vdReady, setVdReady] = useState(false);         // 디자인 서버 준비 완료 여부 — 준비 전엔 '목소리 생성' 잠금
+  const [vdRev, setVdRev] = useState(0);                 // 보이스디자인 창을 닫을 때마다 +1 — 🔊 음성 설정이 새 참조음성을 목록에 다시 읽는다
   const [vdSrv, setVdSrv] = useState('');                // 보이스디자인 서버 주소(빈값=이 PC 로컬 실행)
   const [vdWavUrl, setVdWavUrl] = useState('');
   const [vdGenerated, setVdGenerated] = useState(false);
@@ -2948,7 +2949,7 @@ export default function App() {
     setVdBusy(false);
   }
   async function closeVoiceDesign() {
-    setVdOpen(false); setVdReady(false); // 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
+    setVdOpen(false); setVdRev((n) => n + 1); setVdReady(false); // 음성 설정 창이 OmniVoice 목록을 새로 읽게 · 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
     setVdGenerated(false); setVdWavUrl(''); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 }); // 지난 파형·구간이 남지 않게
     try { await api.qwenDesignStop(); } catch {}
   }
@@ -3639,8 +3640,8 @@ export default function App() {
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
       if (ollamaOpen) { setOllamaOpen(false); return; }
+      if (vdOpen) { closeVoiceDesign(); return; }   // 🔊 음성 설정의 🎨 탭으로 열면 그 위에 떠 있다 → 먼저 닫는다
       if (ttsEng) { setTtsEng(null); return; }
-      if (vdOpen) { closeVoiceDesign(); return; }
       if (dictOpen) { setDictOpen(false); return; }
       if (styleEditOpen) { setStyleEditOpen(false); return; }
       if (chOpen) { setChOpen(false); return; }
@@ -5292,7 +5293,8 @@ export default function App() {
         </div>
       )}
       {vdOpen && (
-        <div className="modal-bg show">
+        // z 110 — 🔊 음성 설정 창(🎨 보이스디자인 탭)에서 열면 그 창 위에 떠야 한다(같은 z 면 뒤에 그려진 음성 설정이 덮는다)
+        <div className="modal-bg show" style={{ zIndex: 110 }} data-testid="vd-dlg">
           <div className="modal-card wide">
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
             <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → <b>쓸 구간을 골라</b> 파일명을 입력해 저장하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)<br />
@@ -5372,7 +5374,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings}
+      {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings} onVoiceDesign={openVoiceDesign} vdRev={vdRev}
         target={ttsEng.target || null}
         onApply={(v) => (ttsEng.target && ttsEng.target.kind === 'speaker' ? applySpeakerVoice(ttsEng.target, v) : applyScriptVoice(ttsEng.target, v))}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}

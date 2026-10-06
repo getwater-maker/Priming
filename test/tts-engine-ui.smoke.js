@@ -75,6 +75,29 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     }
     ok(new Set(sizes).size === 1, `탭마다 창 크기가 같다 (${sizes.join(' · ')})`);
 
+    // 🎨 보이스디자인 탭(로이 2026-10-07) — ElevenLabs 뒤 · 누르면 보이스디자인 창이 음성 설정 **위에** 뜨고(실제로 눌리는 자리) · 닫으면 음성 설정이 그대로
+    {
+      // Qwen 서버를 실제로 켜지 않게 IPC 를 바꿔 끼운다(모델 로딩·GPU 사용 방지)
+      await app.evaluate(({ ipcMain }) => {
+        for (const ch of ['qwen-design-status', 'qwen-design-start', 'qwen-design-stop']) ipcMain.removeHandler(ch);
+        ipcMain.handle('qwen-design-status', () => ({ installed: true, remote: false, target: 'stub' }));
+        ipcMain.handle('qwen-design-start', () => ({ ok: true }));
+        ipcMain.handle('qwen-design-stop', () => ({ ok: true }));
+      });
+      const ids = await win.locator('[role="tablist"] button').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+      ok(ids.indexOf('tts-tab-voicedesign') === ids.indexOf('tts-tab-elevenlabs') + 1, `🎨 보이스디자인 탭이 ElevenLabs 바로 뒤 (${ids.join(', ')})`);
+      await win.locator('[data-testid="tts-tab-voicedesign"]').click(); await win.waitForTimeout(600);
+      const vd = win.locator('[data-testid="vd-dlg"]');
+      ok(await vd.isVisible(), '누르면 보이스디자인 창이 열린다');
+      const onTop = await win.evaluate(() => { const c = document.querySelector('[data-testid="vd-dlg"] .modal-card'); if (!c) return false; const r = c.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + 30); return !!(el && el.closest('[data-testid="vd-dlg"]')); });
+      ok(onTop, '보이스디자인 창이 음성 설정 창 위에 있다(elementFromPoint)');
+      await vd.locator('button', { hasText: /닫기|✕/ }).first().click(); await win.waitForTimeout(400);
+      ok((await vd.count()) === 0 && await card.isVisible(), '닫으면 음성 설정 창으로 돌아온다');
+      await win.locator('[data-testid="tts-tab-voicedesign"]').click(); await win.waitForTimeout(600);
+      await win.keyboard.press('Escape'); await win.waitForTimeout(400);
+      ok((await vd.count()) === 0 && await card.isVisible(), 'Esc 는 위의 보이스디자인 창만 닫는다(음성 설정은 그대로)');
+    }
+
     // ③ MAI 카드
     await win.locator('[data-testid="tts-tab-mai"]').click(); await win.waitForTimeout(200);
     const cards = win.locator('[data-testid="tts-voice-card"]');

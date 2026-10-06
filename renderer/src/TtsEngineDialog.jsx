@@ -46,7 +46,7 @@ function estUsd(engId, unit, chars, koCps) {
 const TGT = '__target__';
 // 대상 이름(사람 말) — 「열린 대본」 · 「내레이션」 · 「화자 「엄마」」
 const tgtWho = (t) => (!t ? '' : t.kind === 'speaker' ? (t.speaker ? `화자 「${t.speaker}」` : '내레이션') : '열린 대본');
-export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply }) {
+export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply, onVoiceDesign, vdRev }) {
   const [data, setData] = useState(null);          // { engines, keys, channels, region, krw, koCps }
   const [drafts, setDrafts] = useState({});        // 채널 → { id, ref, cfg:{엔진:{model,voice,style,…}} }
   const [dirty, setDirty] = useState({});          // 바뀐 채널
@@ -142,6 +142,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
     if (tab === 'elevenlabs' && hasKey(tab) && !(voices.elevenlabs || []).some((v) => langOf(v) === '한국어')) { setElSrc('library'); if (!libVoices) loadLibrary(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, data]);
+  // 🎨 보이스디자인 창을 닫으면 새로 저장된 참조음성이 있을 수 있다 → OmniVoice 목록을 다시 읽는다
+  useEffect(() => { if (data && vdRev) loadVoices('omnivoice'); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [vdRev]);
 
   async function loadVoices(id) {
     setBusy('voices'); setMsg('');
@@ -469,6 +471,13 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   </button>
                 );
               })}
+              {/* 🎨 보이스디자인(로이 2026-10-07 — 「참조음성 만드는 곳이 어디냐」: 채널 편집의 🎨 디자인은 OmniVoice 채널에서만 보였다).
+                  엔진이 아니라 OmniVoice 참조음성을 **만드는** 창을 여는 단추 — 탭 모양으로 ElevenLabs 뒤에 둔다. 만든 목소리는 닫을 때 OmniVoice 목록에 다시 읽힌다. */}
+              {onVoiceDesign ? (
+                <button data-testid="tts-tab-voicedesign" className="ghost" onClick={() => onVoiceDesign()}
+                  title="글로 설명해 새 목소리(OmniVoice 참조음성)를 만듭니다 — 만든 목소리는 OmniVoice 탭에 나타납니다"
+                  style={{ borderRadius: '8px 8px 0 0', padding: '7px 13px', marginBottom: -1, borderBottom: '1px solid transparent', fontWeight: 500 }}>🎨 보이스디자인</button>
+              ) : null}
             </div>
 
             <div data-testid={'tts-eng-' + tab} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 12px', gap: 6 }}>
