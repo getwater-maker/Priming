@@ -252,6 +252,24 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     await win.waitForSelector('[data-testid=ai-tag]', { timeout: 5000 });
     ok((await win.locator('[data-testid=ai-tag]').innerText()).includes('채널 설정'), '🏷 AI 고지 꼬리표(첫 문장 위 · 채널 설정대로)');
     await win.click('[data-testid=ai-tag]');
+    await win.waitForSelector('[data-testid=ai-pop]', { timeout: 3000 });   // v0.7.33 — 꼬리표는 AI 고지 팝업을 연다 · 문장 범위는 팝업의 「📍 이 대본 문장 범위…」
+    // 🏷 팝업의 9칸 자리 — 화면 기준 · 누르면 곧바로 ① 칸에 반영(v0.7.33)
+    {
+      const geo = () => win.evaluate(() => { const st = document.getElementById('stage').getBoundingClientRect(); const e = document.querySelector('[data-testid=stage-ai]'); if (!e) return null; const r = e.getBoundingClientRect(); return { l: (r.left - st.left) / st.width, r: (r.right - st.left) / st.width, t: (r.top - st.top) / st.height, b: (r.bottom - st.top) / st.height, cx: ((r.left + r.right) / 2 - st.left) / st.width, cy: ((r.top + r.bottom) / 2 - st.top) / st.height }; });
+      ok(!!(await geo()), '팝업이 열려 있으면 ① 칸에 AI 고지가 늘 보인다(토글·시각과 무관)');
+      await win.click('[data-testid=aip-tr]'); await win.waitForTimeout(500); let g = await geo();
+      ok(g && g.r > 0.9 && g.t < 0.15, `상단 오른쪽 → ① 칸 오른쪽 위 ${JSON.stringify(g && { r: +g.r.toFixed(3), t: +g.t.toFixed(3) })}`);
+      await win.click('[data-testid=aip-bc]'); await win.waitForTimeout(500); g = await geo();
+      ok(g && Math.abs(g.cx - 0.5) < 0.02 && g.b > 0.85, `하단 중앙 → 가로 가운데 · 아래 ${JSON.stringify(g && { cx: +g.cx.toFixed(3), b: +g.b.toFixed(3) })}`);
+      await win.click('[data-testid=aip-mc]'); await win.waitForTimeout(500); g = await geo();
+      ok(g && Math.abs(g.cx - 0.5) < 0.02 && Math.abs(g.cy - 0.5) < 0.03, `가운데 중앙 → 화면 정가운데 ${JSON.stringify(g && { cx: +g.cx.toFixed(3), cy: +g.cy.toFixed(3) })}`);
+      await win.click('[data-testid=aip-ml]'); await win.waitForTimeout(500); g = await geo();
+      ok(g && g.l < 0.06 && Math.abs(g.cy - 0.5) < 0.03, `가운데 왼쪽 ${JSON.stringify(g && { l: +g.l.toFixed(3), cy: +g.cy.toFixed(3) })}`);
+      ok(await win.locator('[data-testid=aip-ml].on').count() === 1, '고른 칸이 표시된다');
+      await win.click('[data-testid=aip-reset]'); await win.waitForTimeout(500); g = await geo();
+      ok(g && g.l < 0.06 && g.t < 0.15, '기본으로 → 왼쪽 위');
+    }
+    await win.click('[data-testid=aip-range]');
     await win.click('[data-testid=vr-menu] button:has-text("직접 입력")');
     await win.fill('.name-ask-layer input', '2-3');
     await win.click('.name-ask-layer button:has-text("확인")');

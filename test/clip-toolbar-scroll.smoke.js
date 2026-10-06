@@ -141,6 +141,14 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
     await chk(40).uncheck(); await win.waitForTimeout(300);
     cs = await state(); ok(cs.picked.length === 1 && cs.picked[0] === 42, `체크 해제 → 40 빠짐 — ${JSON.stringify(cs)}`);
     ok(await win.evaluate(() => { const e = document.querySelector('.sent[data-ln="42"] .clip-no-n'); return !!e && e.textContent === '42'; }), '번호 글자는 그대로(체크박스가 번호를 지우지 않는다)');
+    // 🔲 그룹의 첫 클립을 고르면 막대가 그룹 번호·제목·단추를 가리지 않는다(v0.7.33)
+    await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    const firstOf = await win.evaluate(() => { const c = [...document.querySelectorAll('.cut[data-g]')][8]; const f = c && c.querySelector('.sent[data-ln]'); return f ? { g: c.dataset.g, ln: Number(f.dataset.ln) } : null; });
+    await win.evaluate((ln) => { const e = document.querySelector('.sent[data-ln="' + ln + '"]'); if (e) e.scrollIntoView({ block: 'center' }); }, firstOf.ln);
+    await win.waitForTimeout(300);
+    await win.locator('.sent[data-ln="' + firstOf.ln + '"] .clip-no-n').click(); await win.waitForTimeout(500);
+    const ov = await win.evaluate((g) => { const tb = document.querySelector('[data-testid="clip-tb"]'); const cut = document.querySelector('.cut[data-g="' + g + '"]'); if (!tb || !cut) return null; const t = tb.getBoundingClientRect(); const heads = [...cut.querySelectorAll('button, .glabel, .gno, .gtitle')].filter((b) => !b.closest('.sents') && b.offsetParent !== null).map((b) => b.getBoundingClientRect()); const hit = heads.filter((r) => !(r.right < t.left || r.left > t.right || r.bottom < t.top || r.top > t.bottom)).length; return { hit, heads: heads.length, tbTop: Math.round(t.top) }; }, firstOf.g);
+    ok(ov && ov.heads > 0 && ov.hit === 0, `그룹 첫 클립(${firstOf.ln}) 선택 → 막대가 그룹 머리(번호·제목·단추 ${ov && ov.heads}개)를 가리지 않는다 — ${JSON.stringify(ov)}`);
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}

@@ -50,9 +50,11 @@ const md = () => fs.readFileSync(MD, 'utf8');
       const row = [...document.querySelectorAll('.sent[data-ln="3"]')].find((x) => x.offsetParent !== null).getBoundingClientRect();
       const b = document.querySelector('[data-testid="ctb-cut"]').getBoundingClientRect();
       const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-      return { dy: Math.round(row.top - tb.bottom), hit: !!(hit && hit.closest('[data-testid="ctb-cut"]')) };
+      const rowEl = [...document.querySelectorAll('.sent[data-ln="3"]')].find((x) => x.offsetParent !== null); const cut = rowEl.closest('.cut');
+      return { first: !!(cut && cut.querySelector('.sent[data-ln]') === rowEl), below: Math.round(tb.top - row.bottom), dy: Math.round(row.top - tb.bottom), hit: !!(hit && hit.closest('[data-testid="ctb-cut"]')) };
     });
-    ok(geo.dy >= -4 && geo.dy <= 14, `막대가 고른 클립 바로 위 (간격 ${geo.dy}px)`);
+    // v0.7.33 — 그룹의 첫 클립이면 그룹 머리(번호·제목·단추)를 가리지 않게 막대가 클립 **아래**에 뜬다
+    ok(geo.first ? (geo.below >= -4 && geo.below <= 14) : (geo.dy >= -4 && geo.dy <= 14), `막대가 고른 클립 ${geo.first ? '바로 아래(그룹 첫 클립)' : '바로 위'} (간격 ${geo.first ? geo.below : geo.dy}px)`);
     ok(geo.hit, '✂ 버튼이 실제로 눌리는 자리(elementFromPoint)');
     for (const id of ['ctb-cut', 'ctb-copy', 'ctb-paste', 'ctb-del', 'ctb-ins', 'ctb-fx', 'ctb-play', 'ctb-voice']) ok(await win.locator(`[data-testid="${id}"]`).count() === 1, `버튼 ${id}`);
     ok(await win.locator('[data-testid="ctb-merge"]').count() === 0, '하나만 고르면 「클립 합치기」 없음');

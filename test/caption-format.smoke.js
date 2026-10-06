@@ -208,7 +208,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     // [11] 채널 편집 → 📝 자막 → 🎨 서식 창
     await win.click('button[title^="채널(프리셋)"]');
     await win.waitForSelector('.modal-card.tabbed', { timeout: 8000 });
-    await win.click('.modal-card.tabbed button:has-text("📝 자막·분할")');
+    await win.click('.modal-card.tabbed button:has-text("📝 자막")');
     await win.waitForSelector('[data-testid=ch-capfmt]', { timeout: 3000 });
     ok(true, '📝 자막 탭에 「🎨 글꼴·간격·형광펜·그림자」 버튼');
     const chv = await win.evaluate(() => {

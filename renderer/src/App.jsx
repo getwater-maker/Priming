@@ -1622,10 +1622,13 @@ export default function App() {
   // 🏷 ① 칸에서 AI 고지 고치기(v0.6.93 · 로이 「AI 고지문도 자막처럼」) — 누르면 글자칸 + 서식 막대 · 끌면 자리 · 저장 = 채널 aiNotice(이 채널 모든 영상)
   const [aiEdit, setAiEdit] = useState(false);
   const [aiPanel, setAiPanel] = useState(null);
+  const [aiPop, setAiPop] = useState(null);   // 🏷 AI 고지 팝업(v0.7.33) — { x, y, range } · 열려 있는 동안 ① 칸에 고지를 늘 보여 바로바로 확인
+  const [aiRangeReq, setAiRangeReq] = useState(null);   // 팝업 → 목록(Cards)의 AI 고지 범위 메뉴 열기 요청
+  const [aiPopSel, setAiPopSel] = useState(null);   // 마지막으로 고른 9칸 자리 { h, v, x, y }
   const [aiDrag, setAiDrag] = useState(null);
   const aiSaveRef = useRef(null);
   const aiTaRef = useRef(null);
-  const aiInside = (el) => !!(el && el.closest && el.closest('[data-testid=stage-ai-edit], [data-testid=cf-side-ai]'));
+  const aiInside = (el) => !!(el && el.closest && el.closest('[data-testid=stage-ai-edit], [data-testid=cf-side-ai], [data-testid=ai-pop]'));
   function saveAiCfg(patch, msg) {
     if (!presetName) { setStatus('⚠ 채널을 먼저 고르세요'); return; }
     const name = presetName;
@@ -3890,6 +3893,7 @@ export default function App() {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       if (preview) { setPreview(null); return; }
+      if (aiPop && !aiEdit) { setAiPop(null); return; }
       if (playerOpen) { stopPlayer(); return; }
       if (nameAsk) { nameAskCancel(); return; }        // 이름 입력(다른 모달 위에 뜸) — 가장 먼저
       if (aiFmtDlg) { setAiFmtDlg(false); return; }     // 🏷 AI 고지 서식 창
@@ -4049,7 +4053,15 @@ export default function App() {
       while (sc && sc !== document.body) { const oy = getComputedStyle(sc).overflowY; if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight > sc.clientHeight) break; sc = sc.parentElement; }
       const box = sc && sc !== document.body ? sc.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
       const minTop = Math.max(4, box.top + 4), maxTop = Math.min(window.innerHeight, box.bottom) - 56;
-      const top = Math.round(Math.max(minTop, Math.min(maxTop, r.top - 44))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
+      // 🔲 그룹의 첫 클립을 골랐으면 막대를 위에 두면 그 그룹의 번호·제목·단추를 가린다(v0.7.33 로이 캡처) → 고른 클립들 **아래**에 둔다
+      const cutEl = el.closest('.cut'); const firstInCut = !!(cutEl && cutEl.querySelector('.sent[data-ln]') === el);
+      let ref = r.top - 44;
+      if (firstInCut) {
+        const lastN = Math.max(...capSel.items.map((x) => x.n));
+        const lastEl = [...document.querySelectorAll('.sent[data-ln="' + lastN + '"]')].find((x) => x.offsetParent !== null) || el;
+        ref = lastEl.getBoundingClientRect().bottom + 6;
+      }
+      const top = Math.round(Math.max(minTop, Math.min(maxTop, ref))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
       const hidden = r.bottom < box.top || r.top > box.bottom;   // 고른 클립이 목록 칸 밖으로 스크롤되면 막대도 함께 사라진다(v0.7.25 로이 — v0.5.99 「남아 있기」를 뒤집음)
       setClipTb((cur) => (cur && cur.top === top && cur.left === left && cur.hidden === hidden ? cur : { top, left, hidden }));
     };
@@ -4497,6 +4509,57 @@ export default function App() {
     if (!wsOn || curGroupNum == null) return;
     const e = document.querySelector('[data-testid="group-item"][data-g="' + curGroupNum + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' });
   }, [wsOn, curGroupNum]);
+  /** 🏷 AI 고지를 화면의 9칸(상·중·하 × 좌·중·우)에 놓는다 — ① 칸에 그려진 고지의 실제 크기를 재서 가장자리 여백(기본 자리와 같은 여백)을 지킨다 */
+  function placeAi(h, v) {
+    const st = document.getElementById('stage'); const el = document.querySelector('[data-testid="stage-ai"]');
+    let w = 0.5, hh = 0.09;
+    if (st && el) { const sr = st.getBoundingClientRect(), er = el.getBoundingClientRect(); if (sr.width > 0 && er.width > 0) { w = er.width / sr.width; hh = er.height / sr.height; } }
+    const mx = (0.02 * 1920 + 23.6) / 1920, my = (0.047 * 1080 + 12.2) / 1080;   // 기본 자리(왼쪽 위)의 화면 여백
+    const fx = h === 'l' ? mx : h === 'r' ? 1 - mx - w : (1 - w) / 2;
+    const fy = v === 't' ? my : v === 'b' ? 1 - my - hh : (1 - hh) / 2;
+    const cl = (n) => Math.max(0, Math.min(0.98, n));
+    const x = Math.round(cl(fx - 23.6 / 1920) * 10000) / 10000, y = Math.round(cl(fy - 12.2 / 1080) * 10000) / 10000;
+    setAiPopSel({ h, v, x, y });
+    saveAiCfg({ pos: { x, y } }, `🏷 AI 고지 자리 — ${{ t: '상단', m: '가운데', b: '하단' }[v]} ${{ l: '왼쪽', c: '중앙', r: '오른쪽' }[h]} (채널 「${presetName}」 모든 영상)`);
+  }
+  const aiPopEl = (wsOn && aiPop) ? (() => {
+    const ap = CF.aiNoticePos(aiCfg); const pct = (n) => Math.round(n * 1000) / 10;
+    const unit = aiCfg.unit === 'clip' ? 'clip' : 'time';
+    const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+    const selOn = aiPopSel && aiPopSel.x === ap.x && aiPopSel.y === ap.y ? aiPopSel : null;
+    const setPosField = (k, v) => saveAiCfg({ pos: { x: ap.x, y: ap.y, [k]: Math.round(Math.max(0, Math.min(98, num(v, 0))) * 100) / 10000 } });
+    const left = Math.max(8, Math.min(window.innerWidth - 660, aiPop.x - 320)), top = Math.max(8, Math.min(window.innerHeight - 330, aiPop.y + 10));
+    const POS_V = { t: '상단', m: '가운데', b: '하단' }, POS_H = { l: '왼쪽', c: '중앙', r: '오른쪽' };
+    return (
+      <div className="ai-pop" data-testid="ai-pop" style={{ left, top }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ai-pop-h"><b>🏷 AI 고지</b><span className="meta">채널 「{presetName}」 — 바꾸면 곧바로 ① 칸에 보이고 저장됩니다 · 실제 표시는 작업바의 「AI 고지」 토글</span><button type="button" className="ghost" data-testid="ai-pop-x" onClick={() => setAiPop(null)}>✕</button></div>
+        <div className="ai-pop-r"><label><input type="checkbox" data-testid="aip-on" checked={!!aiCfg.enabled} onChange={(e) => saveAiCfg({ enabled: e.target.checked })} /> 사용</label>
+          <span className="l">문구</span><input data-testid="aip-text" className="grow" placeholder="본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다." value={aiCfg.text || ''} onChange={(e) => saveAiCfg({ text: e.target.value })} /></div>
+        <div className="ai-pop-r"><span className="l">시간</span>
+          <select data-testid="aip-unit" value={unit} onChange={(e) => saveAiCfg({ unit: e.target.value })}><option value="time">시간(초)</option><option value="clip">클립(자막 줄 번호)</option></select>
+          {unit === 'time' ? (<>
+            <input className="n" type="number" min="0" step="0.5" value={aiCfg.fromSec != null ? aiCfg.fromSec : 5} onChange={(e) => saveAiCfg({ fromSec: num(e.target.value, 0) })} /><span className="meta">초부터</span>
+            <input className="n" type="number" min="0" step="0.5" value={aiCfg.toSec != null ? aiCfg.toSec : 10} onChange={(e) => saveAiCfg({ toSec: num(e.target.value, 0) })} /><span className="meta">초까지 (0 = 끝까지)</span>
+          </>) : (<>
+            <input className="n" type="number" min="1" step="1" value={aiCfg.fromClip != null ? aiCfg.fromClip : 1} onChange={(e) => saveAiCfg({ fromClip: Math.max(1, Math.floor(num(e.target.value, 1))) })} /><span className="meta">번 클립부터</span>
+            <input className="n" type="number" min="0" step="1" value={aiCfg.toClip != null ? aiCfg.toClip : 3} onChange={(e) => saveAiCfg({ toClip: Math.max(0, Math.floor(num(e.target.value, 0))) })} /><span className="meta">번 클립까지 (0 = 끝까지)</span>
+          </>)}</div>
+        <div className="ai-pop-r"><span className="l">서식</span>
+          <button type="button" className="ghost" data-testid="aip-fmt" onClick={() => { setAiEdit({ w: 0.6 }); setAiPanel('fmt'); }}>🎨 글꼴·크기·색…{aiCfg.fmt ? ' ✎' : ''}</button>
+          <button type="button" className="ghost" data-testid="aip-range" title="이 대본만 — 문장 번호 범위(채널 시간보다 우선)" onClick={() => { const r = aiPop.range; const at = { x: aiPop.x, y: aiPop.y }; setAiPop(null); if (r) setAiRangeReq({ ...r, ...at }); }}>📍 이 대본 문장 범위…</button></div>
+        <div className="ai-pop-r pos"><span className="l">자리</span>
+          <div className="ai-grid" data-testid="aip-grid" title="화면 기준 9칸 — 누르면 곧바로 ① 칸에 반영">
+            {['t', 'm', 'b'].map((v) => ['l', 'c', 'r'].map((h) => (
+              <button type="button" key={v + h} data-testid={'aip-' + v + h} className={selOn && selOn.h === h && selOn.v === v ? 'on' : ''} title={POS_V[v] + ' ' + POS_H[h]} onClick={() => placeAi(h, v)}>
+                <i style={{ justifySelf: { l: 'start', c: 'center', r: 'end' }[h], alignSelf: { t: 'start', m: 'center', b: 'end' }[v] }} /></button>)))}
+          </div>
+          <div className="ai-xy"><div><span className="meta">가로</span><input data-testid="aip-x" className="n" type="number" min="0" max="98" step="0.5" value={pct(ap.x)} onChange={(e) => setPosField('x', e.target.value)} /><span className="meta">%</span></div>
+            <div><span className="meta">세로</span><input data-testid="aip-y" className="n" type="number" min="0" max="98" step="0.5" value={pct(ap.y)} onChange={(e) => setPosField('y', e.target.value)} /><span className="meta">%</span></div>
+            <button type="button" className="ghost" data-testid="aip-reset" onClick={() => { setAiPopSel(null); saveAiCfg({ fmt: undefined, pos: undefined }, '🏷 AI 고지 모양·자리를 기본으로 되돌렸습니다'); }}>기본으로</button></div>
+        </div>
+      </div>
+    );
+  })() : null;
   // ⏱ ① 칸 아래 「지금 / 전체」 재생시간(v0.6.89 · 로이) — 문장 음성 길이 합(목록 시각·.vrew 와 같다) · 음성이 없는 문장은 2.5초로 어림
   const stageTime = (() => {
     if (!cursor || !dto || !dto.projects) return null;
@@ -4526,6 +4589,7 @@ export default function App() {
   // 🏷 ① 칸 AI 고지(v0.6.88 · 로이 「설정된 시간에 미리보기에서도」) — 지금 줄(커서 · 재생 중엔 재생이 옮기는 줄)이 고지 시각에 걸리면.
   //   규칙 = core/visual-look aiNoticeOn(aiNoticeTiming) — .vrew·MP4 가 쓰는 시각 규칙과 같은 함수 · 모양 = MP4 와 같은 자리·크기(왼쪽 위 · 75 · 흰 글자 검은 테두리 · 1.5초 나타나기)
   const stageAi = (() => {
+    if (aiPop && isLf && cursor) return { text: String(aiCfg.text || '').trim() || VLook.AI_NOTICE_TEXT, key: 'ai-pop' };   // 🏷 팝업이 열려 있으면 시각·토글과 무관하게 보여 준다(고치는 모습을 바로 본다)
     if (!aiNotice || !isLf || !cursor) return null;
     const ci = cursorInfo(); if (!ci) return null;
     let ord = ci.l.sentIdx + 1; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
@@ -4984,6 +5048,7 @@ export default function App() {
               ))}
             </div>
           )}
+          {aiPopEl}
           {wsOn && clipTb && !clipTb.hidden && clipSelOk() && (() => {
         const n = capSel.items.length;
         const cg = clipGroup();
@@ -5102,7 +5167,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -5236,7 +5301,7 @@ export default function App() {
             <div className="tabbar">
               {/* 🎬 리모션 채널은 음성만 만든다 — 자막·이미지·비디오가 없으므로 그 두 탭을 감춘다. */}
               {[['list', '📋 채널'], ['basic', '🏠 기본'], ['voice', '🎙 음성'],
-                ...(ch.startMode === 'remotion' ? [] : [['caption', '📝 자막·분할'], ['tools', '🖼 제작 도구']]),
+                ...(ch.startMode === 'remotion' ? [] : [['caption', '📝 자막'], ['tools', '🖼 제작 도구']]),
                 ['folder', '📁 폴더']].map(([id, lbl]) => (
                 <button key={id} className={chTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setChTab(id)}>{lbl}</button>
               ))}
@@ -6335,12 +6400,13 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onInsRange, onClipVoice }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
   const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
   const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
+  useEffect(() => { if (aiRangeReq) { setVrMenu(aiRangeReq); if (onAiRangeDone) onAiRangeDone(); } }, [aiRangeReq]);   // 🏷 AI 고지 팝업의 「문장 범위…」 → 이 칸의 범위 메뉴(v0.7.33)
   // 🎬 그룹(Vrew 의 씬) 접기 — 'sn:num'
   const [folded, setFolded] = useState(() => new Set());
   const toggleFold = (k) => setFolded((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -6582,8 +6648,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   return (
                     <React.Fragment key={si}>
                     {aiNotice && onAiRange && gs + si === aiFirst(pr) && (
-                      <button className="ai-tag" data-testid="ai-tag" title="AI 고지 문구가 보이는 범위 — 눌러서 바꾸기(Vrew 텍스트의 적용 범위)"
-                        onClick={(ev) => { ev.stopPropagation(); setVrMenu({ kind: 'ai', shortsNum: pr.shortsNum, n: _S.nSentOf(pr.shortsNum) || nSent, cur: pr.aiNoticeRange, ord: ((_S.ordRangeOf(ev.currentTarget) || { gs }).gs) + si, x: ev.clientX, y: ev.clientY }); }}>
+                      <button className="ai-tag" data-testid="ai-tag" title="AI 고지 설정 — 문구·시간·서식·자리(9칸) · 이 대본의 문장 범위"
+                        onClick={(ev) => { ev.stopPropagation(); (onAiPop || setAiPop)({ x: ev.clientX, y: ev.clientY, range: { kind: 'ai', shortsNum: pr.shortsNum, n: _S.nSentOf(pr.shortsNum) || nSent, cur: pr.aiNoticeRange, ord: ((_S.ordRangeOf(ev.currentTarget) || { gs }).gs) + si } }); }}>
                         🏷 AI 고지 {pr.aiNoticeRange ? `${pr.aiNoticeRange.from}~${pr.aiNoticeRange.to}` : '· 채널 설정대로'}
                       </button>
                     )}
