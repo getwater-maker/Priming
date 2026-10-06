@@ -259,7 +259,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press(' '); await win.waitForTimeout(400);
       ok((await btn()).includes('■'), '재생 시작');
       const nLast = await win.evaluate(() => { const e = [...document.querySelectorAll('.sent[data-ln]')].find((x) => x.innerText.includes('둘째 그룹 마지막')); return e ? Number(e.dataset.ln) : 0; });
-      await win.locator('.sent.clip[data-ln="' + nLast + '"] .clip-no').click();
+      await win.locator('.sent.clip[data-ln="' + nLast + '"] .clip-no .clip-no-n').click();
       const c1 = await stageCap();
       ok((await btn()).includes('▶') && /둘째 그룹 마지막/.test(c1), `🔑 재생 중 클립(${nLast})을 누르면 재생이 멈추고 그 클립이 골라진다(v0.7.29) 「${c1}」`);
     }
@@ -424,8 +424,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.keyboard.press('Escape');
     await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
     // 번호 칸 = 원하는 클립만 골라 선택
-    await win.locator('.sent[data-ln="2"] .clip-no').click();
-    await win.locator('.sent[data-ln="4"] .clip-no').click({ modifiers: ['Control'] });
+    await win.locator('.sent[data-ln="2"] .clip-no .clip-no-n').click();
+    await win.locator('.sent[data-ln="4"] .clip-no .clip-no-n').click({ modifiers: ['Control'] });
     await win.waitForTimeout(200);
     ok(await win.locator('.sent.clip.picked').count() === 2 && (await win.locator('.cf-bar .cf-sel').innerText()).includes('2줄'), '번호 칸 클릭 + Ctrl = 원하는 클립만(2·4)');
     await win.locator('.clipbar').click();

@@ -58,7 +58,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForSelector('.sent.clip', { timeout: 20000 });
 
     // ③ 클립을 고르면 검은 막대 → 팝업이 뜨면 숨는다
-    await win.locator('.sent[data-ln="1"] .clip-no').click(); await win.waitForTimeout(300);
+    await win.locator('.sent[data-ln="1"] .clip-no .clip-no-n').click(); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="clip-tb"]').isVisible(), '클립을 고르면 검은 클립 막대가 보인다');
 
     // ① 클립 「🗣 내레이션」 → 이 대본의 내레이션(클립 모두)

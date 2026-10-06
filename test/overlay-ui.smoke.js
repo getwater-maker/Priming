@@ -281,7 +281,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(await win.locator('[data-testid=ovchip]').count() === 1, '목록의 🗑 도 삭제');
 
     console.log('\n[5c] 🧭 클립을 누르고 Space = 그 클립부터 재생 · ➕ 막대 끝점 끌기 · 긴 파일 이름은 앞 몇 글자만');
-    await win.locator('.sent.clip[data-ln="2"] .clip-no').click();
+    await win.locator('.sent.clip[data-ln="2"] .clip-no .clip-no-n').click();
     await win.keyboard.press(' ');
     await win.waitForTimeout(350);
     const capNow = await win.locator('#stageCap').innerText().catch(() => '');

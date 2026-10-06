@@ -81,7 +81,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(noIntro === 4 && noMain === 2, `칠해진 클립 = 도입부 4개 · 본문 2개는 칠하지 않음 (${noIntro}/${noMain})`);
 
     // 선택한 도입부 클립은 제 색 — 노랑에 묻히지 않는다
-    await win.locator('.cut.intro .sent.clip .clip-no').first().click();
+    await win.locator('.cut.intro .sent.clip .clip-no .clip-no-n').first().click();
     await win.waitForTimeout(250);
     const pickedBg = await bg('.cut.intro .sent.clip.picked');
     const pickedNoBg = await win.evaluate(() => { const e = document.querySelector('.cut.intro .sent.clip.picked .clip-no'); return e ? getComputedStyle(e).backgroundColor : null; });

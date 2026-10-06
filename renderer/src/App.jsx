@@ -6432,7 +6432,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           if (r.getAttribute('data-ln') !== nn) {
             r.setAttribute('data-ln', nn);
             const no = r.querySelector('.cf-lineno');
-            if (no) no.textContent = no.classList.contains('clip-no') ? nn : nn.padStart(2, '0') + ' |';
+            if (no) { const nsp = no.classList.contains('clip-no') ? no.querySelector('.clip-no-n') : null; if (nsp) nsp.textContent = nn; else no.textContent = no.classList.contains('clip-no') ? nn : nn.padStart(2, '0') + ' |'; }
           }
         });
         const edNo = el.classList.contains('editing') ? el.querySelector(':scope > .lineno') : null;
@@ -6642,7 +6642,13 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                 {vrewLay ? null : insMarks}
                                 <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
-                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>{l.n}</div>
+                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>
+                                  <span className="clip-no-n">{l.n}</span>
+                                  {/* ☑ 번호 밑 체크박스(v0.7.32 · Vrew) — 누를 때마다 이 클립을 선택에 더하고/뺀다(Ctrl+클릭과 같다) */}
+                                  <input type="checkbox" className="clip-chk" data-testid="clip-chk" checked={!!picked} title="이 클립 체크 — 여러 개를 골라 합치기·삭제·복사"
+                                    onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
+                                    onChange={(ev) => { if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, { ctrlKey: true, shiftKey: false }, _S.projLinesOf(pr.shortsNum)); }} />
+                                </div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); } }}>
                                     {/* 🎙 누르면 이 대본의 그 화자(내레이션) 목소리(음성 설정 팝업 · v0.6.84) — 이 대본 화자 > 채널 화자 > 대본 > 채널 */}

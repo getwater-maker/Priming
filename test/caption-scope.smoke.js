@@ -54,7 +54,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     }
     const dto = () => win.evaluate(async () => (await window.api.listQueue()).dto);
     const spansOf = (d) => d.projects[0].cuts.flatMap((c) => c.sentences.map((s) => s.spans || null));
-    const clipNo = (n) => win.locator(`.sent[data-ln="${n}"] .clip-no`);
+    const clipNo = (n) => win.locator(`.sent[data-ln="${n}"] .clip-no .clip-no-n`);
 
     console.log('\n[1] 🌐 기본 = 모든 자막');
     await clipNo(1).click(); await win.waitForTimeout(400);

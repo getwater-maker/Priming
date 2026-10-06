@@ -132,6 +132,15 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
     await win.locator('[data-testid="group-all"]').check();
     ok(await win.locator('[data-testid="group-chk"]:checked').count() === afterD.g, '전체 선택 = 모든 그룹 체크');
     await win.locator('[data-testid="group-all"]').uncheck();
+    // ☑ 클립 번호 밑 체크박스(v0.7.32) — 누르면 그 클립이 선택에 더해지고, 한 번 더 누르면 빠진다
+    await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    const chk = (n) => win.locator('.sent[data-ln="' + n + '"] [data-testid="clip-chk"]').first();
+    await chk(40).scrollIntoViewIfNeeded(); await chk(40).check(); await chk(42).check(); await win.waitForTimeout(300);
+    let cs = await state(); ok(cs.picked.length === 2 && cs.picked.includes(40) && cs.picked.includes(42), `체크박스 2개 → 클립 40·42 선택 — ${JSON.stringify(cs)}`);
+    ok(await chk(40).isChecked() && !(await chk(41).isChecked()), '체크 표시는 고른 클립만');
+    await chk(40).uncheck(); await win.waitForTimeout(300);
+    cs = await state(); ok(cs.picked.length === 1 && cs.picked[0] === 42, `체크 해제 → 40 빠짐 — ${JSON.stringify(cs)}`);
+    ok(await win.evaluate(() => { const e = document.querySelector('.sent[data-ln="42"] .clip-no-n'); return !!e && e.textContent === '42'; }), '번호 글자는 그대로(체크박스가 번호를 지우지 않는다)');
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}

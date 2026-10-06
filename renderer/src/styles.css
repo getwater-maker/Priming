@@ -622,7 +622,7 @@ main.pane2{min-width:0}
 
 /* ── 🧩 v0.5.44 Vrew 클립 모양 — 왼쪽 번호 칸 | 1행 화자·시각·칩 / 2행 🗨 자막 + 가 ─────────── */
 .sent.clip{display:grid;grid-template-columns:44px 1fr;padding:0;overflow:hidden}
-.sent.clip .clip-no{display:flex;align-items:flex-start;justify-content:center;padding-top:9px;border-right:1px solid var(--line);font-size:13px;font-weight:700;color:#8a7b66;cursor:pointer;background:#faf6ef;user-select:none}
+.sent.clip .clip-no{display:flex;flex-direction:column;align-items:center;gap:8px;justify-content:flex-start;padding-top:9px;border-right:1px solid var(--line);font-size:13px;font-weight:700;color:#8a7b66;cursor:pointer;background:#faf6ef;user-select:none}
 .sent.clip .clip-no:hover{background:#f3ead9;color:var(--strong)}
 .sent.clip.picked{background:#fff}
 .sent.clip.picked .clip-no{background:var(--accent);color:#fff}
@@ -1083,3 +1083,6 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .pane-groups .pg-thumb em{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-style:normal;color:#8d857a}
 .pane-groups .pg-thumb b{position:absolute;left:3px;right:3px;bottom:3px;font-size:9px;font-weight:700;color:#fff;text-align:center;text-shadow:0 0 2px #000,0 0 2px #000,0 0 3px #000;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .pane-groups .pg-meta{font-size:11px;color:var(--muted,#8a7a5c);padding:2px 8px 6px}
+
+/* ☑ 클립 번호 밑 체크박스(v0.7.32) */
+.sent.clip .clip-chk{margin:0;width:16px;height:16px;cursor:pointer;accent-color:#19a8d6;flex:0 0 auto}
