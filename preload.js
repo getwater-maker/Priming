@@ -131,6 +131,8 @@ contextBridge.exposeInMainWorld('api', {
   apiKeyVerify: (args) => ipcRenderer.invoke('api-key-verify', args),
   ttsOmniVoices: () => ipcRenderer.invoke('tts-omni-voices'),
   ttsOmniDelete: (a) => ipcRenderer.invoke('tts-omni-delete', a),
+  ttsOmniTagSet: (a) => ipcRenderer.invoke('tts-omni-tag-set', a),
+  ttsOmniTagMany: (a) => ipcRenderer.invoke('tts-omni-tag-many', a),
   ttsChannelLogo: (a) => ipcRenderer.invoke('tts-channel-logo', a),
   ttsChannelAvatars: (a) => ipcRenderer.invoke('tts-channel-avatars', a),
   elSharedVoices: (a) => ipcRenderer.invoke('el-shared-voices', a),

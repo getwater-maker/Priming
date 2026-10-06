@@ -5438,7 +5438,17 @@ ipcMain.handle('tts-omni-voices', async () => {
   const used = {};
   try { for (const p of require('./tts/preset-store').loadAll()) { const v = String(p.voiceCloneRefAudio || ''); if (v.startsWith('srv:') && !/^__/.test(p.name)) (used[v.slice(4)] = used[v.slice(4)] || []).push(p.name); } } catch {}
   if (!list) return { ok: false, error: 'OmniVoice 서버 목록을 받지 못했습니다(서버 주소·꺼짐 확인)', used };
-  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', lang: _voiceTextLang(v.text, v.name), channels: used[v.name] || [] })).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
+  const VT = require('./tts/voice-tags'); const tagsAll = VT.load();   // 🏷 사람이 한 분류(언어·성별·연령대)가 이름 추정보다 앞선다
+  return { ok: true, used, voices: list.filter((v) => v && v.name).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).map((v) => ({ id: 'srv:' + v.name, name: v.name, desc: v.text ? String(v.text).slice(0, 60) : '', lang: _voiceTextLang(v.text, v.name), channels: used[v.name] || [] })).map((c) => VT.apply(c, tagsAll)).sort((a, b) => (b.channels.length ? 1 : 0) - (a.channels.length ? 1 : 0)) };   // 채널이 쓰는 목소리를 앞에
+});
+// 🏷 OmniVoice 참조음성 분류 저장(2026-10-06) — 한 목소리 / 여러 목소리(보이는 것 한꺼번에). 빈 값('')은 그 칸만 지운다(한 목소리) · 건드리지 않는다(여러 목소리).
+ipcMain.handle('tts-omni-tag-set', (_e, { name, tags } = {}) => {
+  try { const VT = require('./tts/voice-tags'); VT.set(name, tags); log(`🏷 분류 저장 — ${name}: ${JSON.stringify(VT.load()[name] || '지움')}`); return { ok: true, tags: VT.load()[name] || null }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('tts-omni-tag-many', (_e, { names, tags } = {}) => {
+  try { const VT = require('./tts/voice-tags'); const n = (names || []).length; VT.setMany(names, tags); log(`🏷 분류 한꺼번에 저장 — ${n}개 · ${JSON.stringify(VT.normalize(tags) || {})}`); return { ok: true, count: n, all: VT.load() }; }
+  catch (e) { return { ok: false, error: e.message }; }
 });
 // 🌏 목소리 언어(카드 거르기 · v0.7.2) — 참조텍스트 글자 → 이름 앞머리(JA_·VI_·KO_) → ko
 function _voiceTextLang(text, name) {

@@ -21,6 +21,7 @@ function genderOf(v) {
 
 function ageOf(v) {
   if (!v) return '';
+  if (AGE_LABEL[v.age]) return v.age;   // 사람이 분류해 둔 값(OmniVoice 분류 저장소)은 그대로
   const t = [v.age, v.name, v.desc].filter(Boolean).join(' ').toLowerCase().replace(/[_-]/g, ' ');
   if (/어린이|아이|유아|소년|소녀|청소년|10대|십대|\bchild(ren)?\b|\bkid\b|\bteen(ager)?s?\b|\byouth\b(?! ?ful)/.test(t)) return 'child';
   if (/중년|장년|40대|50대|사십|오십|middle ?aged?|\bmature\b|성숙/.test(t)) return 'middle';   // 「middle aged」가 「aged」로 노년이 되지 않게 노년보다 먼저
