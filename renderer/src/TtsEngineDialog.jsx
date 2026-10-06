@@ -46,12 +46,14 @@ function estUsd(engId, unit, chars, koCps) {
 const TGT = '__target__';
 // 대상 이름(사람 말) — 「열린 대본」 · 「내레이션」 · 「화자 「엄마」」
 const tgtWho = (t) => (!t ? '' : t.kind === 'speaker' ? (t.speaker ? `화자 「${t.speaker}」` : '내레이션') : '열린 대본');
-export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply, onVoiceDesign, vdRev }) {
+export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, onSaved, confirm, onOpenKeys, target, onApply, onVoiceDesign, onVoiceDesignLeave, voiceDesignPane, vdRev }) {
   const [data, setData] = useState(null);          // { engines, keys, channels, region, krw, koCps }
   const [drafts, setDrafts] = useState({});        // 채널 → { id, ref, cfg:{엔진:{model,voice,style,…}} }
   const [dirty, setDirty] = useState({});          // 바뀐 채널
   const [chan, setChan] = useState('');
   const [tab, setTab] = useState('omnivoice');
+  const [vdTab, setVdTab] = useState(false);   // 🎨 보이스디자인 탭(엔진 탭이 아니다 — 고른 엔진 tab 은 그대로 둔다 · v0.7.22)
+  const leaveVd = () => { if (vdTab) { setVdTab(false); if (onVoiceDesignLeave) onVoiceDesignLeave(); } };
   const [keys, setKeys] = useState({});            // 엔진 → { key | clear }
   const [region, setRegion] = useState('eastus');
   const [krwSaved, setKrwSaved] = useState(1400);   // 환율을 못 받았을 때만 쓰는 지난 값
@@ -445,7 +447,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               const cv = chanVoice(ch.name); const on = chan === ch.name;
               return (
                 <div key={ch.name} role="button" tabIndex={0} data-testid="tts-chan" data-chan={ch.name}
-                  onClick={() => { setChan(ch.name); setTab((drafts[ch.name] && drafts[ch.name].id) || 'omnivoice'); setMsg(''); }}
+                  onClick={() => { leaveVd(); setChan(ch.name); setTab((drafts[ch.name] && drafts[ch.name].id) || 'omnivoice'); setMsg(''); }}
                   style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 4, border: '1.5px solid ' + (on ? BLUE : 'transparent'), background: on ? 'rgba(37,99,235,0.08)' : 'transparent' }}>
                   <Face face={cv.logo} name={ch.name.replace(/^\d+_/, '')} size={40} square />
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -462,9 +464,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--line)', padding: '8px 12px 0' }}>
               {data.engines.map((e) => {
-                const cur = tab === e.id; const used = dr.id === e.id;
+                const cur = !vdTab && tab === e.id; const used = dr.id === e.id;
                 return (
-                  <button key={e.id} role="tab" data-testid={'tts-tab-' + e.id} className={cur ? '' : 'ghost'} onClick={() => { setTab(e.id); setMsg(''); setQ(''); setFg(''); setMoreOpen(false); setKeyEdit(false); }}
+                  <button key={e.id} role="tab" data-testid={'tts-tab-' + e.id} className={cur ? '' : 'ghost'} onClick={() => { leaveVd(); setTab(e.id); setMsg(''); setQ(''); setFg(''); setMoreOpen(false); setKeyEdit(false); }}
                     title={e.paid ? (hasKey(e.id) ? 'API 키 있음' : 'API 키 없음') : '내 GPU 서버 · 무료'}
                     style={{ borderRadius: '8px 8px 0 0', padding: '7px 13px', marginBottom: -1, borderBottom: cur ? '2px solid ' + BLUE : '1px solid transparent', fontWeight: cur ? 700 : 500 }}>
                     {used ? '✅ ' : ''}{e.label.replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, '')}{e.paid ? <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.8 }}>{hasKey(e.id) ? '🔑' : '·'}</span> : null}
@@ -472,14 +474,17 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 );
               })}
               {/* 🎨 보이스디자인(로이 2026-10-07 — 「참조음성 만드는 곳이 어디냐」: 채널 편집의 🎨 디자인은 OmniVoice 채널에서만 보였다).
-                  엔진이 아니라 OmniVoice 참조음성을 **만드는** 창을 여는 단추 — 탭 모양으로 ElevenLabs 뒤에 둔다. 만든 목소리는 닫을 때 OmniVoice 목록에 다시 읽힌다. */}
+                  엔진이 아니라 OmniVoice 참조음성을 **만드는** 탭 — v0.7.22 부터 팝업이 아니라 이 창 안에 그린다(본문은 App 의 vdBodyEl). 탭을 떠나면 디자인 서버를 끄고 OmniVoice 목록을 다시 읽는다. */}
               {onVoiceDesign ? (
-                <button data-testid="tts-tab-voicedesign" className="ghost" onClick={() => onVoiceDesign()}
+                <button data-testid="tts-tab-voicedesign" role="tab" className={vdTab ? '' : 'ghost'} onClick={() => { if (vdTab) return; setVdTab(true); setMsg(''); onVoiceDesign(); }}
                   title="글로 설명해 새 목소리(OmniVoice 참조음성)를 만듭니다 — 만든 목소리는 OmniVoice 탭에 나타납니다"
-                  style={{ borderRadius: '8px 8px 0 0', padding: '7px 13px', marginBottom: -1, borderBottom: '1px solid transparent', fontWeight: 500 }}>🎨 보이스디자인</button>
+                  style={{ borderRadius: '8px 8px 0 0', padding: '7px 13px', marginBottom: -1, borderBottom: vdTab ? '2px solid ' + BLUE : '1px solid transparent', fontWeight: vdTab ? 700 : 500 }}>🎨 보이스디자인</button>
               ) : null}
             </div>
 
+            {vdTab ? (
+              <div data-testid="tts-eng-voicedesign" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 16px' }}>{voiceDesignPane}</div>
+            ) : (
             <div data-testid={'tts-eng-' + tab} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 12px', gap: 6 }}>
               {/* ① 설정 한 줄 — 상태 · 키 · 모델 · 지역 (설명은 ⓘ 에) */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
@@ -574,7 +579,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   </div>
                 )}
               </div>
-            </div>
+            </div>)}
           </div>
         </div>
 

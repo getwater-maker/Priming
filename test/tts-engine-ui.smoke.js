@@ -82,20 +82,27 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
         for (const ch of ['qwen-design-status', 'qwen-design-start', 'qwen-design-stop']) ipcMain.removeHandler(ch);
         ipcMain.handle('qwen-design-status', () => ({ installed: true, remote: false, target: 'stub' }));
         ipcMain.handle('qwen-design-start', () => ({ ok: true }));
-        ipcMain.handle('qwen-design-stop', () => ({ ok: true }));
+        ipcMain.handle('qwen-design-stop', () => { global.__vdStop = (global.__vdStop || 0) + 1; return { ok: true }; });
       });
       const ids = await win.locator('[role="tablist"] button').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
       ok(ids.indexOf('tts-tab-voicedesign') === ids.indexOf('tts-tab-elevenlabs') + 1, `🎨 보이스디자인 탭이 ElevenLabs 바로 뒤 (${ids.join(', ')})`);
+      const box0 = await card.evaluate((e) => { const r = e.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); });
       await win.locator('[data-testid="tts-tab-voicedesign"]').click(); await win.waitForTimeout(600);
-      const vd = win.locator('[data-testid="vd-dlg"]');
-      ok(await vd.isVisible(), '누르면 보이스디자인 창이 열린다');
-      const onTop = await win.evaluate(() => { const c = document.querySelector('[data-testid="vd-dlg"] .modal-card'); if (!c) return false; const r = c.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + 30); return !!(el && el.closest('[data-testid="vd-dlg"]')); });
-      ok(onTop, '보이스디자인 창이 음성 설정 창 위에 있다(elementFromPoint)');
-      await vd.locator('button', { hasText: /닫기|✕/ }).first().click(); await win.waitForTimeout(400);
-      ok((await vd.count()) === 0 && await card.isVisible(), '닫으면 음성 설정 창으로 돌아온다');
-      await win.locator('[data-testid="tts-tab-voicedesign"]').click(); await win.waitForTimeout(600);
-      await win.keyboard.press('Escape'); await win.waitForTimeout(400);
-      ok((await vd.count()) === 0 && await card.isVisible(), 'Esc 는 위의 보이스디자인 창만 닫는다(음성 설정은 그대로)');
+      // v0.7.22 — 팝업이 아니라 이 창의 탭 안에 그린다(로이 「다른 탭들처럼」)
+      ok((await win.locator('[data-testid="vd-dlg"]').count()) === 0, '보이스디자인은 따로 뜨는 팝업이 아니다');
+      const pane = card.locator('[data-testid="tts-eng-voicedesign"]');
+      ok(await pane.isVisible() && await pane.locator('[data-testid="vd-generate"]').isVisible(), '음성 설정 창 안에 보이스디자인 본문(목소리 생성 단추)이 보인다');
+      ok((await card.locator('[data-testid="tts-voice-grid"]').count()) === 0, '보이스디자인 탭에선 목소리 카드 목록 대신 그 본문');
+      ok(/2px solid/.test(await win.locator('[data-testid="tts-tab-voicedesign"]').evaluate((e) => e.style.borderBottom)), '보이스디자인 탭이 고른 탭으로 표시된다');
+      const gen = await win.evaluate(() => { const b = document.querySelector('[data-testid="vd-generate"]'); const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!(el && el.closest('[data-testid="vd-generate"]')); });
+      ok(gen, '목소리 생성 단추가 실제로 눌리는 자리에 있다(elementFromPoint)');
+      ok(await card.evaluate((e) => { const r = e.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); }) === box0, '창 크기는 그대로 (' + box0 + ')');
+      await win.locator('[data-testid="tts-tab-omnivoice"]').click(); await win.waitForTimeout(500);
+      ok((await pane.count()) === 0 && await card.locator('[data-testid="tts-voice-grid"]').isVisible(), 'OmniVoice 탭을 누르면 목소리 카드로 돌아온다');
+      ok((await app.evaluate(() => global.__vdStop || 0)) === 1, '탭을 떠나면 보이스디자인 서버를 끈다(stop 1번)');
+      await win.locator('[data-testid="tts-tab-voicedesign"]').click(); await win.waitForTimeout(400);
+      await win.locator('[data-testid="tts-tab-omnivoice"]').click(); await win.waitForTimeout(400);
+      ok(await card.isVisible(), '탭을 오가도 음성 설정 창은 그대로');
     }
 
     // ③ MAI 카드

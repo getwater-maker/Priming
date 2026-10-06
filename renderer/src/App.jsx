@@ -605,6 +605,7 @@ export default function App() {
   const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
   // 🎨 보이스디자인(Qwen3-TTS) 모달
   const [vdOpen, setVdOpen] = useState(false);
+  const [vdInTab, setVdInTab] = useState(false);   // 🎨 보이스디자인이 🔊 음성 설정 창의 탭 안에 떠 있음(v0.7.22)
   const [vdInstruct, setVdInstruct] = useState('');
   // 기본 문장을 길게 둔다(약 10초) — 끝의 감쇠 구간을 잘라내고도 참조음성으로 쓸 5초가 남도록.
   const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.');
@@ -2941,15 +2942,103 @@ export default function App() {
       const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText });
       if (r && r.ok) {
         try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
-        setCh((c) => ({ ...c, voiceCloneRefAudio: r.path, voiceCloneRefText: r.text || vdRefText }));
         setVdFilename('');
-        setVdStatus(`✔ 저장됨: ${r.name} (${(r.durationSec || 0).toFixed(2)}초) — 참조음성 목록에 추가 + 이 채널에 지정했습니다. (채널편집 창에서 “저장”을 눌러야 최종 반영)`);
+        // 🔊 음성 설정의 탭에서 만들었으면 채널 편집 값(ch)을 건드리지 않는다 — 열려 있지 않은 채널 편집에 값이 박힌다(v0.7.22)
+        if (vdInTab) setVdStatus(`✔ 저장됨: ${r.name} (${(r.durationSec || 0).toFixed(2)}초) — OmniVoice 탭 목록에 추가됩니다. 그 탭에서 카드를 골라 「저장」하면 채널에 지정됩니다.`);
+        else {
+          setCh((c) => ({ ...c, voiceCloneRefAudio: r.path, voiceCloneRefText: r.text || vdRefText }));
+          setVdStatus(`✔ 저장됨: ${r.name} (${(r.durationSec || 0).toFixed(2)}초) — 참조음성 목록에 추가 + 이 채널에 지정했습니다. (채널편집 창에서 “저장”을 눌러야 최종 반영)`);
+        }
       } else setVdStatus('⚠ 저장 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
   }
+  // 🎨 보이스디자인 본문 — 채널 편집의 🎨 디자인(팝업)과 🔊 음성 설정의 🎨 보이스디자인 **탭**(v0.7.22 · 로이 「다른 탭들처럼 그 창 안에」)이 같은 본문을 쓴다
+  function vdBodyEl() {
+    return (<>
+              <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → <b>쓸 구간을 골라</b> 파일명을 입력해 저장하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)<br />
+                ✂ <b>끝은 잘라 쓰는 걸 권합니다</b> — 생성된 음성은 문장 끝이 서서히 작아지는데(모델 특성), 그대로 참조음성으로 쓰면 <b>TTS 문장 끝이 계속 끊기는 느낌</b>이 납니다. 길게 만들고 <b>또렷한 5초 남짓</b>만 남기세요.</p>
+              <div className="frow"><label title="이 목소리로 읽을 언어. 베트남어는 보이스디자인 모델이 지원하지 않아 OmniVoice 목소리 설명으로 만듭니다(참조음성으로 쓰면 새 문장 12/12 정확 — 실측)">언어</label>
+                <select data-testid="vd-lang" value={vdLang} onChange={(e) => {
+                  const nl = e.target.value;
+                  // 예문이 이전 언어의 기본 문장 그대로면 새 언어의 기본 문장으로 바꿔 준다(직접 고친 문장은 그대로)
+                  if (Object.values(VD_SAMPLE_TEXT).includes(vdText.trim())) setVdText(VD_SAMPLE_TEXT[nl] || vdText);
+                  setVdLang(nl);
+                }}>
+                  <option value="Korean">한국어</option>
+                  <option value="Japanese">日本語 (일본어)</option>
+                  <option value="vi">Tiếng Việt (베트남어 · OmniVoice)</option>
+                </select></div>
+              {vdLang === 'vi' ? (
+                <div className="frow"><label title="OmniVoice 목소리 설명은 정해진 낱말만 받습니다">목소리</label>
+                  <select data-testid="vd-gender" value={vdOmni.gender} onChange={(e) => setVdOmni({ ...vdOmni, gender: e.target.value })}>
+                    <option value="male">남성</option><option value="female">여성</option></select>
+                  <select data-testid="vd-age" value={vdOmni.age} onChange={(e) => setVdOmni({ ...vdOmni, age: e.target.value })}>
+                    <option value="child">어린이</option><option value="teenager">청소년</option><option value="young adult">청년</option>
+                    <option value="middle-aged">중년</option><option value="elderly">노년</option></select>
+                  <select data-testid="vd-pitch" value={vdOmni.pitch} onChange={(e) => setVdOmni({ ...vdOmni, pitch: e.target.value })}>
+                    <option value="very low pitch">아주 낮게</option><option value="low pitch">낮게</option><option value="moderate pitch">보통</option>
+                    <option value="high pitch">높게</option><option value="very high pitch">아주 높게</option></select>
+                  <span className="meta">같은 설정도 만들 때마다 목소리가 달라집니다 — 마음에 들 때까지 다시 만드세요</span>
+                </div>
+              ) : (
+                <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
+                  <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
+              )}
+              <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
+                <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
+              <div className="frow"><label></label>
+                {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
+                {/* 베트남어는 OmniVoice 로 만들므로 보이스디자인 서버 준비를 기다리지 않는다 */}
+                <button data-testid="vd-generate" onClick={vdGenerate} disabled={vdBusy || (vdLang !== 'vi' && (!vdReady || vdPreparing))}
+                  title={vdReady || vdLang === 'vi' ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
+                {!vdReady && !vdBusy && !vdPreparing ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
+                {vdWavUrl ? <button className="ghost" onClick={() => (prevKey === 'vd' ? stopPreviewAudio() : playPreviewUrl(vdWavUrl, 'vd'))}>{prevKey === 'vd' ? '■ 멈춤' : '▶ 다시 듣기'}</button> : null}
+                <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
+              </div>
+              {vdWavUrl ? <div className="frow"><label></label><audio ref={vdAudioRef} controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
+              {vdGenerated ? (<>
+                {/* ✂ 슬라이스 — 끝의 감쇠(페이드) 구간을 빼고 저장하면 합성 문장 끝이 끊기지 않는다 */}
+                <div className="frow" style={{ alignItems: 'flex-start' }}>
+                  <label title="드래그해서 저장할 구간을 고르세요. 손잡이(주황=시작·빨강=끝)를 잡아 미세 조정할 수 있습니다.">쓸 구간</label>
+                  <div style={{ flex: 1 }}>
+                    <canvas ref={vdCanvasRef} onMouseDown={vdMouseDown}
+                      style={{ width: '100%', height: 110, border: '1px solid var(--line)', borderRadius: 6, cursor: 'ew-resize', display: 'block' }} />
+                    <div className="frow" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+                      <span className="meta">시작</span>
+                      <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.s.toFixed(2)}
+                        onChange={(e) => setVdSel((p) => ({ ...p, s: Math.min(vdClamp(e.target.value), p.e - 0.02) }))} />
+                      <span className="meta">끝</span>
+                      <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.e.toFixed(2)}
+                        onChange={(e) => setVdSel((p) => ({ ...p, e: Math.max(vdClamp(e.target.value), p.s + 0.02) }))} />
+                      <span className="meta">초 · 길이 <b>{Math.max(0, vdSel.e - vdSel.s).toFixed(2)}초</b> / 원본 {vdDur.toFixed(2)}초</span>
+                      <button className="ghost" onClick={vdPlaySel} title="선택한 구간만 재생 / 멈춤 — 저장될 소리를 그대로 확인">{vdSelPlaying ? '■ 멈춤' : '▶ 구간 듣기'}</button>
+                      <button className="ghost" onClick={() => vdCutAbout(5)} title="시작점부터 약 5초 — 단어가 잘리지 않게 그 부근의 쉬는 지점에서 끊습니다">✂ ≈5초</button>
+                      <button className="ghost" onClick={() => setVdSel({ s: 0, e: vdDur })} title="원본 전체로 되돌리기">↺ 전체</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="frow" style={{ alignItems: 'flex-start' }}>
+                  <label title="참조음성(.wav)과 짝이 되는 .txt 입니다. 실제로 들리는 말과 다르면 음성 복제 품질이 떨어집니다.">참조텍스트</label>
+                  <textarea rows="2" value={vdRefText} onChange={(e) => setVdRefText(e.target.value)}
+                    placeholder="선택 구간에서 실제로 들리는 말만 남기세요" /></div>
+                <div className="meta" style={{ margin: '-6px 0 8px 96px' }}>⚠ 구간을 잘랐으면 <b>이 문장도 들리는 부분만</b> 남겨야 합니다 — 음성과 글이 어긋나면 복제가 흐트러집니다.</div>
+                <div className="frow"><label>파일명</label>
+                  <input placeholder="예: 고전서재_내레이터" value={vdFilename} onChange={(e) => setVdFilename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') vdSave(); }} style={{ flex: 1 }} />
+                  <button onClick={vdSave} disabled={vdBusy} title="선택한 구간만 잘라 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
+                </div>
+              </>) : null}
+              <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy || vdPreparing ? '⏳ ' : ''}{vdStatus}</div>
+    </>);
+  }
+  // 🔊 음성 설정 창의 🎨 탭 — 팝업 대신 그 창 안에 그린다. 탭을 떠나거나 창을 닫으면 closeVoiceDesign(서버 끔 · OmniVoice 목록 새로)
+  useEffect(() => { if (!ttsEng && vdInTab) closeVoiceDesign(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [ttsEng]);
+  async function openVoiceDesignTab() {
+    setVdInTab(true); setVdWavUrl(''); setVdGenerated(false); setVdFilename('');
+    await vdPrepare();
+  }
   async function closeVoiceDesign() {
-    setVdOpen(false); setVdRev((n) => n + 1); setVdReady(false); // 음성 설정 창이 OmniVoice 목록을 새로 읽게 · 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
+    setVdOpen(false); setVdInTab(false); setVdRev((n) => n + 1); setVdReady(false); // 음성 설정 창이 OmniVoice 목록을 새로 읽게 · 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
     setVdGenerated(false); setVdWavUrl(''); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 }); // 지난 파형·구간이 남지 않게
     try { await api.qwenDesignStop(); } catch {}
   }
@@ -3861,7 +3950,7 @@ export default function App() {
   // 보이스디자인 파형 그리기 — 봉우리/선택구간이 바뀔 때마다 다시 그린다.
   useEffect(() => {
     const c = vdCanvasRef.current;
-    if (!c || !vdOpen) return;
+    if (!c || (!vdOpen && !vdInTab)) return;
     const W = c.width = c.clientWidth * (window.devicePixelRatio || 1);
     const H = c.height = 110 * (window.devicePixelRatio || 1);
     const g = c.getContext('2d');
@@ -3889,7 +3978,7 @@ export default function App() {
     if (vdDur) for (const [sec, col] of [[vdSel.s, '#c18a42'], [vdSel.e, '#c0392b']]) {
       g.fillStyle = col; g.fillRect(Math.max(0, Math.min(W - 2, x(sec) - 1)), 0, 3, H);
     }
-  }, [vdPeaks, vdSel, vdDur, vdOpen]);
+  }, [vdPeaks, vdSel, vdDur, vdOpen, vdInTab]);
   // 렌더러에서 난 예외·거부를 로그창에 남긴다 — 예전엔 조용히 죽어 "아무것도 안 된다"만 남았다.
   useEffect(() => {
     window.__logline = logline;
@@ -5297,84 +5386,12 @@ export default function App() {
         <div className="modal-bg show" style={{ zIndex: 110 }} data-testid="vd-dlg">
           <div className="modal-card wide">
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
-            <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → <b>쓸 구간을 골라</b> 파일명을 입력해 저장하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)<br />
-              ✂ <b>끝은 잘라 쓰는 걸 권합니다</b> — 생성된 음성은 문장 끝이 서서히 작아지는데(모델 특성), 그대로 참조음성으로 쓰면 <b>TTS 문장 끝이 계속 끊기는 느낌</b>이 납니다. 길게 만들고 <b>또렷한 5초 남짓</b>만 남기세요.</p>
-            <div className="frow"><label title="이 목소리로 읽을 언어. 베트남어는 보이스디자인 모델이 지원하지 않아 OmniVoice 목소리 설명으로 만듭니다(참조음성으로 쓰면 새 문장 12/12 정확 — 실측)">언어</label>
-              <select data-testid="vd-lang" value={vdLang} onChange={(e) => {
-                const nl = e.target.value;
-                // 예문이 이전 언어의 기본 문장 그대로면 새 언어의 기본 문장으로 바꿔 준다(직접 고친 문장은 그대로)
-                if (Object.values(VD_SAMPLE_TEXT).includes(vdText.trim())) setVdText(VD_SAMPLE_TEXT[nl] || vdText);
-                setVdLang(nl);
-              }}>
-                <option value="Korean">한국어</option>
-                <option value="Japanese">日本語 (일본어)</option>
-                <option value="vi">Tiếng Việt (베트남어 · OmniVoice)</option>
-              </select></div>
-            {vdLang === 'vi' ? (
-              <div className="frow"><label title="OmniVoice 목소리 설명은 정해진 낱말만 받습니다">목소리</label>
-                <select data-testid="vd-gender" value={vdOmni.gender} onChange={(e) => setVdOmni({ ...vdOmni, gender: e.target.value })}>
-                  <option value="male">남성</option><option value="female">여성</option></select>
-                <select data-testid="vd-age" value={vdOmni.age} onChange={(e) => setVdOmni({ ...vdOmni, age: e.target.value })}>
-                  <option value="child">어린이</option><option value="teenager">청소년</option><option value="young adult">청년</option>
-                  <option value="middle-aged">중년</option><option value="elderly">노년</option></select>
-                <select data-testid="vd-pitch" value={vdOmni.pitch} onChange={(e) => setVdOmni({ ...vdOmni, pitch: e.target.value })}>
-                  <option value="very low pitch">아주 낮게</option><option value="low pitch">낮게</option><option value="moderate pitch">보통</option>
-                  <option value="high pitch">높게</option><option value="very high pitch">아주 높게</option></select>
-                <span className="meta">같은 설정도 만들 때마다 목소리가 달라집니다 — 마음에 들 때까지 다시 만드세요</span>
-              </div>
-            ) : (
-              <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
-                <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
-            )}
-            <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
-              <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
-            <div className="frow"><label></label>
-              {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
-              {/* 베트남어는 OmniVoice 로 만들므로 보이스디자인 서버 준비를 기다리지 않는다 */}
-              <button data-testid="vd-generate" onClick={vdGenerate} disabled={vdBusy || (vdLang !== 'vi' && (!vdReady || vdPreparing))}
-                title={vdReady || vdLang === 'vi' ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
-              {!vdReady && !vdBusy && !vdPreparing ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
-              {vdWavUrl ? <button className="ghost" onClick={() => (prevKey === 'vd' ? stopPreviewAudio() : playPreviewUrl(vdWavUrl, 'vd'))}>{prevKey === 'vd' ? '■ 멈춤' : '▶ 다시 듣기'}</button> : null}
-              <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
-            </div>
-            {vdWavUrl ? <div className="frow"><label></label><audio ref={vdAudioRef} controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
-            {vdGenerated ? (<>
-              {/* ✂ 슬라이스 — 끝의 감쇠(페이드) 구간을 빼고 저장하면 합성 문장 끝이 끊기지 않는다 */}
-              <div className="frow" style={{ alignItems: 'flex-start' }}>
-                <label title="드래그해서 저장할 구간을 고르세요. 손잡이(주황=시작·빨강=끝)를 잡아 미세 조정할 수 있습니다.">쓸 구간</label>
-                <div style={{ flex: 1 }}>
-                  <canvas ref={vdCanvasRef} onMouseDown={vdMouseDown}
-                    style={{ width: '100%', height: 110, border: '1px solid var(--line)', borderRadius: 6, cursor: 'ew-resize', display: 'block' }} />
-                  <div className="frow" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
-                    <span className="meta">시작</span>
-                    <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.s.toFixed(2)}
-                      onChange={(e) => setVdSel((p) => ({ ...p, s: Math.min(vdClamp(e.target.value), p.e - 0.02) }))} />
-                    <span className="meta">끝</span>
-                    <input type="number" step="0.05" min="0" max={vdDur || 0} style={{ width: 84 }} value={vdSel.e.toFixed(2)}
-                      onChange={(e) => setVdSel((p) => ({ ...p, e: Math.max(vdClamp(e.target.value), p.s + 0.02) }))} />
-                    <span className="meta">초 · 길이 <b>{Math.max(0, vdSel.e - vdSel.s).toFixed(2)}초</b> / 원본 {vdDur.toFixed(2)}초</span>
-                    <button className="ghost" onClick={vdPlaySel} title="선택한 구간만 재생 / 멈춤 — 저장될 소리를 그대로 확인">{vdSelPlaying ? '■ 멈춤' : '▶ 구간 듣기'}</button>
-                    <button className="ghost" onClick={() => vdCutAbout(5)} title="시작점부터 약 5초 — 단어가 잘리지 않게 그 부근의 쉬는 지점에서 끊습니다">✂ ≈5초</button>
-                    <button className="ghost" onClick={() => setVdSel({ s: 0, e: vdDur })} title="원본 전체로 되돌리기">↺ 전체</button>
-                  </div>
-                </div>
-              </div>
-              <div className="frow" style={{ alignItems: 'flex-start' }}>
-                <label title="참조음성(.wav)과 짝이 되는 .txt 입니다. 실제로 들리는 말과 다르면 음성 복제 품질이 떨어집니다.">참조텍스트</label>
-                <textarea rows="2" value={vdRefText} onChange={(e) => setVdRefText(e.target.value)}
-                  placeholder="선택 구간에서 실제로 들리는 말만 남기세요" /></div>
-              <div className="meta" style={{ margin: '-6px 0 8px 96px' }}>⚠ 구간을 잘랐으면 <b>이 문장도 들리는 부분만</b> 남겨야 합니다 — 음성과 글이 어긋나면 복제가 흐트러집니다.</div>
-              <div className="frow"><label>파일명</label>
-                <input placeholder="예: 고전서재_내레이터" value={vdFilename} onChange={(e) => setVdFilename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') vdSave(); }} style={{ flex: 1 }} />
-                <button onClick={vdSave} disabled={vdBusy} title="선택한 구간만 잘라 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
-              </div>
-            </>) : null}
-            <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy || vdPreparing ? '⏳ ' : ''}{vdStatus}</div>
+            {vdBodyEl()}
             <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
           </div>
         </div>
       )}
-      {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings} onVoiceDesign={openVoiceDesign} vdRev={vdRev}
+      {ttsEng && <TtsEngineDialog initialChannel={(ttsEng && ttsEng.channel) || presetName} confirm={uiConfirm} onOpenKeys={openTtsKeySettings} onVoiceDesign={openVoiceDesignTab} onVoiceDesignLeave={closeVoiceDesign} voiceDesignPane={vdInTab ? vdBodyEl() : null} vdRev={vdRev}
         target={ttsEng.target || null}
         onApply={(v) => (ttsEng.target && ttsEng.target.kind === 'speaker' ? applySpeakerVoice(ttsEng.target, v) : applyScriptVoice(ttsEng.target, v))}
         scriptChars={(() => { let n = 0; for (const pr of ((dto && dto.projects) || [])) for (const cu of (pr.cuts || [])) for (const se of (cu.sentences || [])) n += String(se.ttsText || se.text || '').length; return n; })()}
