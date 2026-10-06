@@ -179,6 +179,18 @@ function makeWav(samples, sr = 24000) {
   setFetch(() => mockRes(200, null, { steps: [{ type: 'model_output', content: [{ type: 'audio', data: wav.subarray(44).toString('base64') }] }] }));
   r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-lite-tts', voice: 'Kore' });
   ok(r.mp3Buffer.toString('ascii', 0, 4) === 'RIFF' && Math.abs(r.durationSec - 1) < 1e-6, 'Gemini 헤더 없는 PCM 도 WAV 로');
+  // 🔑 429 차단은 그 키에만(2026-10-07 아내 PC — 새 키로 바꿨는데 옛 키 차단이 남아 구글에 묻지도 않고 실패)
+  let calls = 0;
+  setFetch(() => { calls++; return mockRes(429, null, { error: { message: 'Rate limit exceeded' } }); });
+  try { await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' }); ok(false, '429 는 던져야 함'); } catch (_) {}
+  calls = 0;
+  try { await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' }); } catch (e) { ok(/이 키/.test(e.message), '같은 키 → 차단 메시지'); }
+  eq(calls, 0, '같은 키는 차단 중 구글에 보내지 않는다');
+  SecretStore.set('gemini', { key: 'g-key-NEW', other: 'keep' });
+  setFetch(() => { calls++; return mockRes(200, null, { steps: [{ type: 'model_output', content: [{ type: 'audio', data: wav.toString('base64') }] }] }); });
+  r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' });
+  ok(calls === 1 && last.init.headers['x-goog-api-key'] === 'g-key-NEW' && r.durationSec > 0, '설정에서 키를 바꾸면 차단 없이 새 키로 바로 보낸다(앱 재시작 없이)');
+  SecretStore.set('gemini', { key: 'g-key', other: 'keep' });
   global.fetch = realFetch;
 
   console.log('\n[4b] 내장 목록');

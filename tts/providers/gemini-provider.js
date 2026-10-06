@@ -24,6 +24,9 @@ const PROVIDER_ID = 'gemini';
 // 60초 짧은 cycle 로 자동 재시도하면 사용자 PrimingFlow 띄워둔 시간만큼 누적됨.
 let _gemini429Until = 0;
 let _gemini429Streak = 0;
+// 🔑 차단은 **그 429 를 받은 키**에만 건다(2026-10-07 아내 PC — 충전된 새 키로 바꿨는데도 옛 키의 차단(58분)이 남아
+//   구글에 묻지도 않고 「한도 초과」로 실패했다). 키가 바뀌면 차단·연속 횟수는 새로 시작한다.
+let _gemini429Key = null;
 const SHORT_BREAKER_MS = 60 * 60 * 1000;       // 1시간
 const LONG_BREAKER_MS  = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -82,14 +85,16 @@ class GeminiProvider {
    */
   async synthesize(text, opts = {}) {
     if (!this.ready) throw new Error('Gemini provider not ready — API 키 미설정');
+    // ⚙ 설정에서 키를 바꿨으면 앱을 다시 켜지 않아도 새 키를 쓴다(공급자 인스턴스는 init 때 한 번만 키를 읽는다).
+    try { const sec = SecretStore.get(PROVIDER_ID); if (sec && sec.key && sec.key !== this.apiKey) this.apiKey = sec.key; } catch (_) {}
 
     // Circuit breaker — 최근 429 받았으면 호출 자체 스킵 (네트워크 round-trip 안 함).
-    if (_gemini429Until > Date.now()) {
+    if (_gemini429Until > Date.now() && _gemini429Key === this.apiKey) {
       const remainSec = Math.ceil((_gemini429Until - Date.now()) / 1000);
       const remainHuman = remainSec >= 3600
         ? `${Math.ceil(remainSec / 3600)}시간`
         : `${Math.ceil(remainSec / 60)}분`;
-      throw new Error(`Gemini 한도 초과 — ${remainHuman} 후 자동 재시도 가능 (또는 OmniVoice 사용)`);
+      throw new Error(`Gemini 한도 초과(이 키 · 구글이 429 를 보냄) — ${remainHuman} 동안 이 키로는 보내지 않습니다 · ⚙ 설정에서 키를 바꾸면 바로 다시 시도합니다 (또는 OmniVoice 사용)`);
     }
 
     const voice = opts.voice || this.voice;
@@ -109,6 +114,7 @@ class GeminiProvider {
 
   _on429() {
     Usage.bump('tts_429');
+    if (_gemini429Key !== this.apiKey) { _gemini429Streak = 0; _gemini429Key = this.apiKey; }
     _gemini429Streak++;
     const breakerMs = (_gemini429Streak >= 2) ? LONG_BREAKER_MS : SHORT_BREAKER_MS;
     _gemini429Until = Date.now() + breakerMs;
