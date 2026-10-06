@@ -96,6 +96,41 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
       ok(/2px solid/.test(await win.locator('[data-testid="tts-tab-voicedesign"]').evaluate((e) => e.style.borderBottom)), '보이스디자인 탭이 고른 탭으로 표시된다');
       const gen = await win.evaluate(() => { const b = document.querySelector('[data-testid="vd-generate"]'); const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!(el && el.closest('[data-testid="vd-generate"]')); });
       ok(gen, '목소리 생성 단추가 실제로 눌리는 자리에 있다(elementFromPoint)');
+      // 🎨 v0.7.23 — 설명 칸 안내·기본 문장·후보 여러 개·설명 도우미·고른 후보 저장
+      ok((await pane.locator('[data-testid="vd-instruct"]').getAttribute('placeholder')) === '영어로 입력해주세요.', '목소리 설명 칸 안내 = 「영어로 입력해주세요.」');
+      ok((await pane.locator('textarea').nth(1).inputValue()) === '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.', '미리들을 문장 = 짧은 한 문장');
+      await pane.locator('[data-testid="vd-chips"] button', { hasText: '여성' }).click();
+      await pane.locator('[data-testid="vd-chips"] button', { hasText: '차분한' }).click();
+      ok((await pane.locator('[data-testid="vd-instruct"]').inputValue()) === 'female, calm', `설명 도우미가 영어 낱말을 넣는다 (${await pane.locator('[data-testid="vd-instruct"]').inputValue()})`);
+      await pane.locator('[data-testid="vd-chips"] button', { hasText: '여성' }).click();
+      ok((await pane.locator('[data-testid="vd-instruct"]').inputValue()) === 'calm', '한 번 더 누르면 뺀다');
+      const wavDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vdc-'));
+      const mkWav = (sec) => { const n = Math.round(16000 * sec), b = Buffer.alloc(44 + n * 2); b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40); for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(8000 * Math.sin(i / 8)), 44 + i * 2); return b; };
+      await app.evaluate(({ ipcMain }, dir) => {
+        const sep = dir.includes('\\') ? '\\' : '/';
+        global.__vdGen = []; global.__vdSave = null;
+        for (const ch of ['qwen-design-generate', 'qwen-design-save']) ipcMain.removeHandler(ch);
+        ipcMain.handle('qwen-design-generate', (_e, a) => { const i = global.__vdGen.length + 1; global.__vdGen.push(a); return { ok: true, tempPath: dir + sep + `c${i}.wav`, durationSec: 1 + i * 0.5, suggest: { start: 0, end: 1 }, text: a.text }; });
+        ipcMain.handle('qwen-design-save', (_e, a) => { global.__vdSave = a; return { ok: true, path: dir + sep + 'saved.wav', name: 'saved.wav', text: a.text, durationSec: 1 }; });
+      }, wavDir);
+      for (let i = 1; i <= 3; i++) fs.writeFileSync(path.join(wavDir, `c${i}.wav`), mkWav(1 + i * 0.5));
+      await pane.locator('[data-testid="vd-count"]').fill('3');
+      await pane.locator('[data-testid="vd-generate"]').click();
+      await win.waitForFunction(() => document.querySelectorAll('[data-testid="vd-cand"]').length === 3, null, { timeout: 8000 }).catch(() => {});
+      ok((await pane.locator('[data-testid="vd-cand"]').count()) === 3, `개수 3 → 후보 3개 (${await pane.locator('[data-testid="vd-cand"]').count()})`);
+      const gens = await app.evaluate(() => global.__vdGen);
+      ok(gens.length === 3 && gens[0].newBatch === true && gens[1].newBatch === false && gens.every((g) => g.instruct === 'calm'), '생성 요청 3번 · 첫 번째만 새 묶음 · 같은 설명');
+      ok(/✔ 고름/.test(await pane.locator('[data-testid="vd-cand"]').nth(0).innerText()), '첫 후보를 바로 고른다');
+      await pane.locator('[data-testid="vd-cand"]').nth(1).locator('button', { hasText: '고르기' }).click();
+      ok(/✔ 고름/.test(await pane.locator('[data-testid="vd-cand"]').nth(1).innerText()), '「고르기」로 후보 2를 고른다');
+      ok(await pane.locator('[data-testid="vd-playall"]').isVisible(), '후보가 여럿이면 「차례로 모두 듣기」');
+      await pane.locator('input[placeholder^="예: 고전서재"]').fill('테스트목소리');
+      await pane.locator('button', { hasText: '💾 저장' }).click(); await win.waitForTimeout(500);
+      const sv = await app.evaluate(() => global.__vdSave);
+      ok(sv && sv.tempPath === path.join(wavDir, 'c2.wav'), `저장 = 고른 후보 2의 파일 (${sv && sv.tempPath})`);
+      await pane.locator('[data-testid="vd-cand"]').nth(0).locator('button', { hasText: '✕' }).click();
+      ok((await pane.locator('[data-testid="vd-cand"]').count()) === 2, '✕ 로 후보 하나 버리기');
+      try { fs.rmSync(wavDir, { recursive: true, force: true }); } catch (_) {}
       ok(await card.evaluate((e) => { const r = e.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); }) === box0, '창 크기는 그대로 (' + box0 + ')');
       await win.locator('[data-testid="tts-tab-omnivoice"]').click(); await win.waitForTimeout(500);
       ok((await pane.count()) === 0 && await card.locator('[data-testid="tts-voice-grid"]').isVisible(), 'OmniVoice 탭을 누르면 목소리 카드로 돌아온다');
@@ -112,6 +147,17 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     await win.locator('[data-testid="tts-voice-lang"]').selectOption('');
     await win.waitForTimeout(200);
     ok((await cards.count()) === 97, `MAI 언어 전체 = 97개 (${await cards.count()})`);
+    // ↕ 정렬(v0.7.23) — 성별 → 연령대: ♂ 카드가 모두 ♀ 카드보다 앞 · 분류 없는 카드는 뒤
+    {
+      const gseq = () => cards.evaluateAll((els) => els.map((e) => (e.innerText.includes('♂') ? 0 : e.innerText.includes('♀') ? 1 : 2)));
+      const before = await gseq();
+      await win.locator('[data-testid="tts-voice-sort"]').selectOption('gender'); await win.waitForTimeout(200);
+      const g = await gseq();
+      ok(g.length === 97 && g.every((x, i) => i === 0 || g[i - 1] <= x), `↕ 성별 정렬 — ♂ → ♀ → 미표시 순 (${g.filter((x) => x === 0).length}·${g.filter((x) => x === 1).length}·${g.filter((x) => x === 2).length})`);
+      ok(!before.every((x, i) => i === 0 || before[i - 1] <= x), '(판정력) 기본 순서는 성별로 정렬돼 있지 않았다');
+      await win.locator('[data-testid="tts-voice-sort"]').selectOption(''); await win.waitForTimeout(150);
+      ok(JSON.stringify(await gseq()) === JSON.stringify(before), '「기본 순서」로 되돌리면 처음 순서');
+    }
     await win.locator('[data-testid="tts-voice-q"]').fill('Grant');
     await win.waitForTimeout(150);
     const nGrant = await cards.count();

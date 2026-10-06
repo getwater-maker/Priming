@@ -349,8 +349,16 @@ function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.al
 function normOutTargetUi(v) { return v === 'whiteboard' || v === 'mp4' ? v : 'vrew'; }
 
 // 🌏 보이스디자인 언어별 기본 문장(약 10초 — 끝 감쇠를 잘라내고도 참조음성으로 쓸 5초가 남게)
+const VD_MAX_COUNT = 8;   // 🎨 한 번에 만들 후보 상한 — 하나에 수 초 · GPU 하나라 차례로 만든다
+// 🎨 설명 도우미 — 한국어 이름 → 설명에 넣을 영어 낱말(보이스디자인 설명은 영어로 · 로이 2026-10-07)
+const VD_CHIPS = [
+  ['성별', [['남성', 'male'], ['여성', 'female']]],
+  ['나이', [['청년', 'in his or her 20s'], ['30~40대', 'middle-aged'], ['60대 이상', 'elderly']]],
+  ['음색', [['낮은', 'low-pitched'], ['중저음', 'mid-to-low pitched'], ['맑은', 'clear'], ['따뜻한', 'warm'], ['허스키', 'slightly husky'], ['부드러운', 'soft']]],
+  ['말투', [['차분한', 'calm'], ['느린 속도', 'speaking at a slow, steady pace'], ['또렷한 발음', 'clear articulation'], ['이야기꾼', 'storyteller'], ['다큐 내레이터', 'documentary narrator'], ['오디오북', 'audiobook narration'], ['다정한', 'gentle and kind'], ['신뢰감', 'trustworthy and authoritative']]],
+];
 const VD_SAMPLE_TEXT = {
-  Korean: '안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',
+  Korean: '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',   // 로이 2026-10-07 — 예전 두 문장은 너무 길었다
   Japanese: 'ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',   // 「昔々」로 시작하지 않는다 — Qwen3 ja 가 자주 잘못 읽고, 가나로 쓰면 받아쓰기 표기가 갈린다(2026-10-05 · core/ref-voice SAMPLE_TEXT 와 같아야 한다)
   vi: 'Ngày xửa ngày xưa, ở một ngôi làng nhỏ bên bờ sông, có một chàng trai nghèo nhưng rất tốt bụng. Mỗi sáng, anh dậy thật sớm và lên núi nhặt củi.',
 };
@@ -607,8 +615,15 @@ export default function App() {
   const [vdOpen, setVdOpen] = useState(false);
   const [vdInTab, setVdInTab] = useState(false);   // 🎨 보이스디자인이 🔊 음성 설정 창의 탭 안에 떠 있음(v0.7.22)
   const [vdInstruct, setVdInstruct] = useState('');
-  // 기본 문장을 길게 둔다(약 10초) — 끝의 감쇠 구간을 잘라내고도 참조음성으로 쓸 5초가 남도록.
-  const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.');
+  // 기본 문장 = VD_SAMPLE_TEXT.Korean(한 문장 · 약 6초 — 로이 2026-10-07 「너무 길다」). 끝 감쇠를 잘라도 참조음성 5초 남짓이 남는다.
+  const [vdText, setVdText] = useState(VD_SAMPLE_TEXT.Korean);
+  const [vdCount, setVdCount] = useState(() => { try { return localStorage.getItem('pm.vdCount') || '3'; } catch { return '3'; } });   // 🎨 한 번에 만들 후보 수
+  const [vdCands, setVdCands] = useState([]);          // 🎨 만든 후보 [{tempPath,url,dur,s,e,text,instruct,asrMatch,n}]
+  const vdCandsRef = useRef([]);                        // 생성 루프가 최신 목록을 읽게(클로저에 갇힌 state 금지)
+  const vdSeqRef = useRef(0);                           // 후보 번호(후보 1, 2, …)
+  const vdStopRef = useRef(false);                      // ⏹ 그만 — 지금 만드는 것까지만
+  const [vdCur, setVdCur] = useState('');               // 지금 고른 후보(tempPath) — 저장 대상
+  const [vdRecent, setVdRecent] = useState(() => { try { const v = JSON.parse(localStorage.getItem('pm.vdRecent') || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } });
   const [vdStatus, setVdStatus] = useState('');
   // 🌏 보이스디자인 언어(2026-09-26) — Korean·Japanese = 보이스디자인(Qwen3) · vi = OmniVoice 목소리 설명(Qwen3 은 베트남어 미지원).
   //   베트남어 목소리 설명은 정해진 낱말만 받으므로 고르기 칸 셋(성별·나이·음높이)으로 만든다.
@@ -2814,34 +2829,88 @@ export default function App() {
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdPreparing(false);
   }
+  // 🎨 후보 여러 개(v0.7.23 · 로이 「입력한 개수만큼 만들고 들어보고 맘에 드는 것을 저장」) — 같은 설명도 만들 때마다 목소리가 달라진다.
+  //   후보는 차례로 하나씩 만든다(서버 GPU 하나). 처음 나온 후보를 바로 골라 들려주고, 나머지는 목록에 쌓인다(설명을 바꿔 더 만들면 이어 붙는다).
   async function vdGenerate() {
     const isVi = vdLang === 'vi';
     const instruct = isVi ? [vdOmni.gender, vdOmni.age, vdOmni.pitch].filter(Boolean).join(', ') : vdInstruct;
     if (!String(instruct || '').trim()) { setVdStatus('목소리 설명을 먼저 입력하세요.'); return; }
-    setVdBusy(true); setVdStatus(isVi ? '베트남어 목소리 생성 중… (OmniVoice · 수 초 + 받아쓰기 확인)' : '목소리 생성 중… (수 초)');
-    try {
-      const r = await api.qwenDesignGenerate({ instruct, text: vdText || undefined, language: vdLang });
-      if (r && r.ok) {
-        const url = await api.readAudio(r.tempPath);
-        setVdWavUrl(url || ''); setVdGenerated(true);
-        // 슬라이스 초기화 — 기본 구간은 서버가 제안한 "말이 있는 구간"(앞 무음·끝 감쇠 제외)
-        const dur = Number(r.durationSec) || 0;
-        setVdDur(dur);
-        const sg = r.suggest || {};
-        setVdSel({ s: Number(sg.start) || 0, e: Number(sg.end) || dur });
-        setVdRefText(r.text || vdText || '');
-        vdBuildPeaks(url);
-        playPreviewUrl(url);
-        // 🌏 외국어는 받아쓰기로 제대로 읽혔는지 알려 준다(로이가 귀로 판정하기 어렵다)
-        const chk = r.asrMatch != null
-          ? `
-🔎 받아쓰기 확인: ${Math.round(r.asrMatch * 100)}% 일치${r.asrMatch >= 0.95 ? ' ✅' : ' ⚠ — 다시 만들어 보세요(같은 설정으로도 매번 달라집니다)'}
-   「${String(r.asrText || '').slice(0, 120)}」`
-          : '';
-        setVdStatus(`생성 완료 (${dur.toFixed(2)}초) — 들어보고, 쓸 구간을 파형에서 고른 뒤 파일명을 입력해 저장하세요.${chk}`);
-      } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
-    } catch (e) { setVdStatus('오류: ' + e.message); }
+    const n = Math.max(1, Math.min(VD_MAX_COUNT, parseInt(vdCount, 10) || 1));
+    if (!isVi) vdRemember(instruct);
+    vdStopRef.current = false;
+    setVdBusy(true);
+    let made = 0, fail = 0, lastErr = '', first = true;
+    for (let i = 0; i < n; i++) {
+      if (vdStopRef.current) break;
+      setVdStatus(`${isVi ? '베트남어 목소리' : '목소리'} 생성 중… ${i + 1} / ${n}${isVi ? ' (OmniVoice · 수 초 + 받아쓰기 확인)' : ' (하나에 수 초)'}`);
+      try {
+        const r = await api.qwenDesignGenerate({ instruct, text: vdText || undefined, language: vdLang, newBatch: vdCandsRef.current.length === 0 });
+        if (r && r.ok) {
+          const url = await api.readAudio(r.tempPath);
+          const dur = Number(r.durationSec) || 0;
+          const sg = r.suggest || {};
+          const c = { tempPath: r.tempPath, url: url || '', dur, s: Number(sg.start) || 0, e: Number(sg.end) || dur, text: r.text || vdText || '', instruct, asrMatch: r.asrMatch, asrText: r.asrText, n: ++vdSeqRef.current };
+          vdCandsRef.current = [...vdCandsRef.current, c];
+          setVdCands(vdCandsRef.current);
+          made++;
+          if (first) { first = false; vdPickCand(c, true); }   // 첫 후보는 바로 듣는다 — 나머지는 목록에서 골라 듣기
+        } else { fail++; lastErr = (r && r.error) || '알 수 없음'; if (r && /서버|로딩|연결/.test(lastErr)) break; }
+      } catch (e) { fail++; lastErr = e.message; }
+    }
     setVdBusy(false);
+    const stopped = vdStopRef.current ? ' (그만 — 여기까지)' : '';
+    if (!made) { setVdStatus('⚠ 생성 실패: ' + lastErr); return; }
+    // 🌏 외국어는 후보마다 받아쓰기로 제대로 읽혔는지 알려 준다(로이가 베트남어·일본어를 귀로 판정하기 어렵다)
+    const asr = vdCandsRef.current.slice(-made).filter((c) => c.asrMatch != null)
+      .map((c) => `\n🔎 받아쓰기 확인: ${Math.round(c.asrMatch * 100)}% 일치${c.asrMatch >= 0.95 ? ' ✅' : ' ⚠ 다시 만들어 보세요'} — 후보 ${c.n} 「${String(c.asrText || '').slice(0, 80)}」`).join('');
+    setVdStatus(`후보 ${made}개 생성${fail ? ` · 실패 ${fail}개(${lastErr})` : ''}${stopped} — 후보를 눌러 들어보고, 마음에 드는 것을 고른 뒤 쓸 구간을 정해 저장하세요.${asr}`);
+  }
+  // 후보 하나를 「지금 고른 목소리」로 — 파형·구간·참조텍스트가 그 후보 것으로 바뀐다(저장도 이 후보)
+  function vdPickCand(c, play) {
+    setVdCur(c.tempPath);
+    setVdWavUrl(c.url); setVdGenerated(true);
+    setVdDur(c.dur); setVdSel({ s: c.s, e: c.e });
+    setVdRefText(c.text);
+    vdBuildPeaks(c.url);
+    if (play) playPreviewUrl(c.url, 'vdc:' + c.tempPath);
+  }
+  function vdDropCand(c) {
+    vdCandsRef.current = vdCandsRef.current.filter((x) => x.tempPath !== c.tempPath);
+    setVdCands(vdCandsRef.current);
+    if (vdCur === c.tempPath) { setVdCur(''); setVdWavUrl(''); setVdGenerated(false); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 }); }
+    if (prevKey === 'vdc:' + c.tempPath) stopPreviewAudio();
+  }
+  function vdClearCands() {
+    stopPreviewAudio();
+    vdCandsRef.current = []; setVdCands([]); setVdCur('');
+    setVdWavUrl(''); setVdGenerated(false); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 });
+  }
+  // ▶ 후보 이어 듣기 — 앞 3초씩이 아니라 통째로 차례대로(같은 문장이라 목소리만 비교된다). 다시 누르면 멈춤.
+  function vdPlayAll() {
+    if (prevKey && prevKey.startsWith('vdall')) { stopPreviewAudio(); return; }
+    const list = vdCandsRef.current.slice();
+    const step = (i) => {
+      if (i >= list.length) { stopPreviewAudio(); return; }
+      stopPreviewAudio();
+      const a = new Audio(list[i].url);
+      previewAudioRef.current = a; setPrevKey('vdall:' + list[i].tempPath);
+      a.onended = () => { if (previewAudioRef.current === a) step(i + 1); };
+      a.play().catch(() => { if (previewAudioRef.current === a) step(i + 1); });
+    };
+    step(0);
+  }
+  // 최근 목소리 설명(이 PC · 최근 10개) — 잘 나온 설명을 다시 쓰기 쉽게
+  function vdRemember(instruct) {
+    const t = String(instruct || '').trim(); if (!t) return;
+    const next = [t, ...vdRecent.filter((x) => x !== t)].slice(0, 10);
+    setVdRecent(next);
+    try { localStorage.setItem('pm.vdRecent', JSON.stringify(next)); } catch {}
+  }
+  // 설명 도우미 — 누르면 영어 낱말을 설명에 넣고, 이미 있으면 뺀다(보이스디자인은 영어 설명을 잘 따른다)
+  function vdToggleChip(v) {
+    const parts = String(vdInstruct || '').split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
+    const has = parts.some((x) => x.toLowerCase() === v.toLowerCase());
+    setVdInstruct((has ? parts.filter((x) => x.toLowerCase() !== v.toLowerCase()) : [...parts, v]).join(', '));
   }
   // ── ✂ 슬라이스 도우미 ──
   // 파형 봉우리 계산 — Web Audio 로 디코드(추가 의존성 없음). 실패하면 파형만 안 보이고 나머지는 정상 동작.
@@ -2939,7 +3008,7 @@ export default function App() {
     if (vdDur && vdSel.e <= vdSel.s) { setVdStatus('⚠ 저장할 구간이 비어 있습니다.'); return; }
     setVdBusy(true); setVdStatus('저장 중…');
     try {
-      const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText });
+      const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText, tempPath: vdCur || undefined });   // 🎨 고른 후보
       if (r && r.ok) {
         try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
         setVdFilename('');
@@ -2983,19 +3052,61 @@ export default function App() {
                 </div>
               ) : (
                 <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
-                  <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <textarea data-testid="vd-instruct" rows="3" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="영어로 입력해주세요." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} />
+                    {/* 🧩 설명 도우미 — 눌러서 영어 낱말 넣기/빼기 (v0.7.23) */}
+                    <div data-testid="vd-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginTop: 4 }}>
+                      {VD_CHIPS.map(([grp, items]) => (
+                        <span key={grp} style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span className="meta" style={{ fontSize: 11 }}>{grp}</span>
+                          {items.map(([ko, en]) => { const on = String(vdInstruct || '').toLowerCase().split(/\s*,\s*/).includes(en.toLowerCase()); return (
+                            <button key={en} type="button" className={on ? '' : 'ghost'} title={en} onClick={() => vdToggleChip(en)}
+                              style={{ padding: '1px 7px', fontSize: 11, borderRadius: 10 }}>{ko}</button>); })}
+                        </span>))}
+                      {vdRecent.length ? (
+                        <select data-testid="vd-recent" value="" style={{ fontSize: 11, padding: '1px 4px', maxWidth: 220 }} title="최근에 쓴 목소리 설명(이 PC · 10개)" onChange={(e) => { if (e.target.value) setVdInstruct(e.target.value); }}>
+                          <option value="">🕘 최근 설명…</option>
+                          {vdRecent.map((t) => <option key={t} value={t}>{t.length > 60 ? t.slice(0, 60) + '…' : t}</option>)}
+                        </select>) : null}
+                    </div>
+                  </div></div>
               )}
               <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
                 <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
               <div className="frow"><label></label>
                 {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
                 {/* 베트남어는 OmniVoice 로 만들므로 보이스디자인 서버 준비를 기다리지 않는다 */}
+                <input data-testid="vd-count" type="number" min="1" max={VD_MAX_COUNT} className="nbox" style={{ width: 52, flex: '0 0 auto' }} value={vdCount} disabled={vdBusy}
+                  title={`한 번에 만들 후보 수(1~${VD_MAX_COUNT}) — 같은 설명도 만들 때마다 목소리가 달라집니다`}
+                  onChange={(e) => { setVdCount(e.target.value); try { localStorage.setItem('pm.vdCount', e.target.value); } catch {} }} />
+                <span className="meta" style={{ flex: '0 0 auto' }}>개</span>
                 <button data-testid="vd-generate" onClick={vdGenerate} disabled={vdBusy || (vdLang !== 'vi' && (!vdReady || vdPreparing))}
-                  title={vdReady || vdLang === 'vi' ? '이 설명으로 목소리 생성' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
+                  title={vdReady || vdLang === 'vi' ? '이 설명으로 후보를 입력한 개수만큼 만듭니다' : '서버 준비가 끝나면 활성화됩니다'}>🎨 목소리 생성</button>
+                {vdBusy ? <button data-testid="vd-stop" className="ghost" title="지금 만드는 것까지만 만들고 멈춥니다" onClick={() => { vdStopRef.current = true; setVdStatus('⏹ 지금 만드는 것까지만 만들고 멈춥니다…'); }}>⏹ 그만</button> : null}
                 {!vdReady && !vdBusy && !vdPreparing ? <button className="ghost" title="설치 확인 + 서버 준비를 다시 시도" onClick={vdPrepare}>🔄 서버 다시 준비</button> : null}
-                {vdWavUrl ? <button className="ghost" onClick={() => (prevKey === 'vd' ? stopPreviewAudio() : playPreviewUrl(vdWavUrl, 'vd'))}>{prevKey === 'vd' ? '■ 멈춤' : '▶ 다시 듣기'}</button> : null}
                 <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
               </div>
+              {/* 🎨 후보 목록 — 눌러서 듣고 고른다. 고른 후보가 아래 파형·저장의 대상(v0.7.23) */}
+              {vdCands.length ? (
+                <div className="frow" style={{ alignItems: 'flex-start' }}><label>후보</label>
+                  <div data-testid="vd-cands" style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {vdCands.map((c) => { const cur = vdCur === c.tempPath; const playing = prevKey === 'vdc:' + c.tempPath || prevKey === 'vdall:' + c.tempPath; return (
+                        <span key={c.tempPath} data-testid="vd-cand" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 6px', borderRadius: 8, border: cur ? '2px solid #c18a42' : '1px solid var(--line)', background: cur ? '#fbf1e2' : 'transparent' }}
+                          title={`설명: ${c.instruct}
+길이 ${c.dur.toFixed(1)}초${c.asrMatch != null ? `
+받아쓰기 ${Math.round(c.asrMatch * 100)}% 일치` : ''}`}>
+                          <button className="ghost" style={{ padding: '1px 7px' }} onClick={() => (playing ? stopPreviewAudio() : vdPickCand(c, true))}>{playing ? '■' : '▶'} 후보 {c.n}</button>
+                          <span className="meta" style={{ fontSize: 11 }}>{c.dur.toFixed(1)}초{c.asrMatch != null ? ` · ${Math.round(c.asrMatch * 100)}%` : ''}</span>
+                          {cur ? <b style={{ fontSize: 11, color: '#a8692a' }}>✔ 고름</b> : <button className="ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => vdPickCand(c, false)}>고르기</button>}
+                          <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="이 후보 버리기" onClick={() => vdDropCand(c)}>✕</button>
+                        </span>); })}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      {vdCands.length > 1 ? <button className="ghost" data-testid="vd-playall" onClick={vdPlayAll} title="후보를 차례대로 모두 들어 봅니다(같은 문장이라 목소리만 비교됩니다)">{prevKey && prevKey.startsWith('vdall') ? '■ 멈춤' : '▶ 차례로 모두 듣기'}</button> : null}
+                      <button className="ghost" disabled={vdBusy} onClick={vdClearCands} title="후보를 모두 지웁니다(저장한 목소리는 그대로)">🗑 후보 비우기</button>
+                    </div>
+                  </div></div>) : null}
               {vdWavUrl ? <div className="frow"><label></label><audio ref={vdAudioRef} controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
               {vdGenerated ? (<>
                 {/* ✂ 슬라이스 — 끝의 감쇠(페이드) 구간을 빼고 저장하면 합성 문장 끝이 끊기지 않는다 */}
@@ -3040,6 +3151,7 @@ export default function App() {
   async function closeVoiceDesign() {
     setVdOpen(false); setVdInTab(false); setVdRev((n) => n + 1); setVdReady(false); // 음성 설정 창이 OmniVoice 목록을 새로 읽게 · 서버를 끄므로 준비 상태도 해제(다시 열면 재준비)
     setVdGenerated(false); setVdWavUrl(''); setVdPeaks(null); setVdDur(0); setVdSel({ s: 0, e: 0 }); // 지난 파형·구간이 남지 않게
+    vdStopRef.current = true; vdCandsRef.current = []; setVdCands([]); setVdCur('');   // 후보 목록도(파일은 다음 생성이 치운다)
     try { await api.qwenDesignStop(); } catch {}
   }
   async function saveChannel() {
@@ -3609,7 +3721,7 @@ export default function App() {
     const sents = (c.sentences && c.sentences.length) ? c.sentences : [{ text: '', audio: null, dur: c.groupDurationSec || 2.5 }];
     const si0 = start && start.si > 0 && start.si < sents.length ? start.si : 0;
     // 첫 문장 안에서 건너뛸 몫(글자수 비례 — .vrew · 자막 줄 시간과 같은 규칙)
-    const clips0 = splitLines(sents[si0].text || '', N, sents[si0].breaks);
+    const clips0 = splitLines(sents[si0].text || '', N, sents[si0].breaks, sents[si0].marks);
     const li0 = start && start.li > 0 && start.li < clips0.length ? start.li : 0;
     const tot0 = clips0.reduce((a, x) => a + Math.max(1, mLen(x)), 0) || 1;
     const frac0 = li0 ? clips0.slice(0, li0).reduce((a, x) => a + Math.max(1, mLen(x)), 0) / tot0 : 0;
@@ -3620,7 +3732,7 @@ export default function App() {
     for (let si = si0; si < sents.length; si++) {
       const s = sents[si];
       if (stale(_g)) return;
-      const clips = splitLines(s.text || '', N, s.breaks); const dur = s.dur || 2.5;
+      const clips = splitLines(s.text || '', N, s.breaks, s.marks); const dur = s.dur || 2.5;
       const first = si === si0 && li0 > 0;
       const rgF = CF.lineRanges(s.text || '', clips)[first ? li0 : 0];   // 이 문장에서 처음 보일 줄
       if (_prP && lastVisRef.current !== visKeyAt(c, _prP, si, rgF)) setVisual(c, _prP, si, undefined, rgF);
@@ -6281,7 +6393,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                   let lines;
                   if (_got) { lines = _got.map((x) => ({ n: x.n, t: x.t, range: x.range, start: x.start, dur: x.dur })); capN = lines.length ? lines[lines.length - 1].n : capN; }
                   else {
-                    const _lt = splitLines(s.text, capCharsN, s.breaks);
+                    const _lt = splitLines(s.text, capCharsN, s.breaks, s.marks);
                     const _rg = CF.lineRanges(s.text || '', _lt);
                     lines = _lt.map((t, li) => ({ n: ++capN, t, range: _rg[li] }));
                   }

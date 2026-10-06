@@ -20,7 +20,7 @@ const { execFile, spawn } = require('child_process');
 const SYSTEM = '너는 한국어 교정자다. 받은 문단에서 표준국어대사전·한글 맞춤법 기준의 확실한 오류(없는 낱말·맞춤법·명백한 띄어쓰기)만 찾는다. 복수 표준어와 허용 규정(보조용언 붙여 쓰기·띄어 쓰기)은 오류가 아니다. 말투·표현·내용은 고치지 않는다. 확실하지 않으면 넣지 않는다. JSON 배열로만 답한다: [{"틀림":"...","바름":"..."}] 없으면 []';
 const MODEL = 'sonnet';
 const TIMEOUT_MS = 30000;
-const argsFor = () => ['-p', '--model', MODEL, '--system-prompt', SYSTEM, '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--setting-sources', 'local', '--output-format', 'json'];
+const argsFor = (system = SYSTEM) => ['-p', '--model', MODEL, '--system-prompt', system, '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--setting-sources', 'local', '--output-format', 'json'];
 
 let _exe;   // undefined = 아직 안 찾음 · null = 없음
 const exists = (p) => { try { return !!p && fs.statSync(p).isFile(); } catch { return false; } };
@@ -77,16 +77,59 @@ function parseItems(resultText, text) {
 }
 
 /** claude 의 JSON 출력 한 덩어리 → {ok, items} | {ok:false, error} */
-function readOutput(stdout, text) {
-  let j; try { j = JSON.parse(String(stdout || '').trim()); } catch { return { ok: false, error: '맞춤법 검사 답을 읽지 못했습니다' }; }
+/** claude -p --output-format json 출력 → {ok, result(모델 답 글), costUsd} | {ok:false, error} — 맞춤법·끊어 읽기 공용 */
+function readClaudeJson(stdout) {
+  let j; try { j = JSON.parse(String(stdout || '').trim()); } catch { return { ok: false, error: 'claude 답을 읽지 못했습니다' }; }
   if (j.is_error || j.subtype !== 'success') {
     const msg = String(j.result || j.subtype || '');
     if (/log ?in|auth|401|403|credential|oauth|token/i.test(msg)) return { ok: false, error: 'claude 로그인이 필요합니다(터미널에서 claude 를 한 번 실행해 로그인)' };
     return { ok: false, error: 'claude 오류 — ' + msg.slice(0, 80) };
   }
-  const items = parseItems(j.result, text);
+  return { ok: true, result: String(j.result == null ? '' : j.result), costUsd: Number(j.total_cost_usd) || 0, usage: j.usage || null };
+}
+function readOutput(stdout, text) {
+  const r = readClaudeJson(stdout);
+  if (!r.ok) return r.error === 'claude 답을 읽지 못했습니다' ? { ok: false, error: '맞춤법 검사 답을 읽지 못했습니다' } : r;
+  const items = parseItems(r.result, text);
   if (!items) return { ok: false, error: '맞춤법 검사 답이 목록 형식이 아닙니다' };
-  return { ok: true, items, costUsd: Number(j.total_cost_usd) || 0 };
+  return { ok: true, items, costUsd: r.costUsd };
+}
+
+/**
+ * claude 한 번 부르기(맞춤법·끊어 읽기 공용 · v0.7.23 에 check 에서 꺼냄) — input 은 stdin 으로, 빈 임시 폴더에서.
+ * @param {string} input
+ * @param {{system?:string, exe?:string, preArgs?:string[], timeoutMs?:number, read?:(stdout)=>object}} o  exe·preArgs 는 테스트용(가짜 claude)
+ * @returns {Promise<{ok:true, ms, …read 결과} | {ok:false, error, ms}>}
+ */
+async function runClaude(input, o = {}) {
+  const t0 = Date.now();
+  let exe = o.exe || await findClaude();
+  let pre = o.preArgs || [], env = process.env;
+  // 🧪 PM_CLAUDE_EXE 가 .js 면 가짜 claude(테스트) — node 로 돌린다(Electron 안이면 ELECTRON_RUN_AS_NODE)
+  if (exe && /\.js$/i.test(exe)) { pre = [exe, ...pre]; exe = process.execPath; env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }; }
+  if (!exe) return { ok: false, error: '이 PC 에 claude 가 없습니다(Claude Code 가 설치·로그인된 PC 에서만)', ms: 0 };
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), o.tmpPrefix || 'priming-claude-'));   // 빈 폴더 — 프로젝트 CLAUDE.md 가 안 실리게
+  const timeoutMs = o.timeoutMs || TIMEOUT_MS;
+  const read = o.read || readClaudeJson;
+  try {
+    return await new Promise((res) => {
+      let out = '', err = '', done = false, tm = null;
+      const fin = (r) => { if (done) return; done = true; clearTimeout(tm); res({ ...r, ms: Date.now() - t0 }); };
+      let ch;
+      try { ch = spawn(exe, [...pre, ...argsFor(o.system || SYSTEM)], { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); }
+      catch (e) { return fin({ ok: false, error: 'claude 를 실행하지 못했습니다 — ' + e.message }); }
+      tm = setTimeout(() => { try { ch.kill(); } catch (_) {} fin({ ok: false, error: `${Math.round(timeoutMs / 1000)}초 안에 답이 없습니다` }); }, timeoutMs);
+      ch.stdout.on('data', (d) => { out += d; });
+      ch.stderr.on('data', (d) => { err += d; });
+      ch.on('error', (e) => fin({ ok: false, error: e.code === 'ENOENT' ? '이 PC 에 claude 가 없습니다' : 'claude 를 실행하지 못했습니다 — ' + e.message }));
+      ch.on('close', (code) => {
+        if (!out.trim()) return fin({ ok: false, error: /log ?in|auth/i.test(err) ? 'claude 로그인이 필요합니다(터미널에서 claude 를 한 번 실행해 로그인)' : `claude 가 답 없이 끝났습니다(코드 ${code}) ${err.slice(0, 80)}`.trim() });
+        fin(read(out));
+      });
+      ch.stdin.on('error', () => {});
+      ch.stdin.end(String(input), 'utf8');
+    });
+  } finally { try { fs.rmSync(cwd, { recursive: true, force: true }); } catch (_) {} }
 }
 
 /**
@@ -96,35 +139,11 @@ function readOutput(stdout, text) {
  * @returns {Promise<{ok:true, items, ms, costUsd} | {ok:false, error, ms}>}
  */
 async function check(text, o = {}) {
-  const t0 = Date.now();
   const body = String(text || '').trim();
   if (!body) return { ok: true, items: [], ms: 0, costUsd: 0 };
-  let exe = o.exe || await findClaude();
-  let pre = o.preArgs || [], env = process.env;
-  // 🧪 PM_CLAUDE_EXE 가 .js 면 가짜 claude(테스트) — node 로 돌린다(Electron 안이면 ELECTRON_RUN_AS_NODE)
-  if (exe && /\.js$/i.test(exe)) { pre = [exe, ...pre]; exe = process.execPath; env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }; }
-  if (!exe) return { ok: false, error: '이 PC 에 claude 가 없습니다(맞춤법 검사는 Claude Code 가 설치·로그인된 PC 에서만)', ms: 0 };
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-spell-'));   // 빈 폴더 — 프로젝트 CLAUDE.md 가 안 실리게
-  const timeoutMs = o.timeoutMs || TIMEOUT_MS;
-  try {
-    return await new Promise((res) => {
-      let out = '', err = '', done = false, tm = null;
-      const fin = (r) => { if (done) return; done = true; clearTimeout(tm); res({ ...r, ms: Date.now() - t0 }); };
-      let ch;
-      try { ch = spawn(exe, [...pre, ...argsFor()], { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); }
-      catch (e) { return fin({ ok: false, error: 'claude 를 실행하지 못했습니다 — ' + e.message }); }
-      tm = setTimeout(() => { try { ch.kill(); } catch (_) {} fin({ ok: false, error: `${Math.round(timeoutMs / 1000)}초 안에 답이 없습니다` }); }, timeoutMs);
-      ch.stdout.on('data', (d) => { out += d; });
-      ch.stderr.on('data', (d) => { err += d; });
-      ch.on('error', (e) => fin({ ok: false, error: e.code === 'ENOENT' ? '이 PC 에 claude 가 없습니다' : 'claude 를 실행하지 못했습니다 — ' + e.message }));
-      ch.on('close', (code) => {
-        if (!out.trim()) return fin({ ok: false, error: /log ?in|auth/i.test(err) ? 'claude 로그인이 필요합니다(터미널에서 claude 를 한 번 실행해 로그인)' : `claude 가 답 없이 끝났습니다(코드 ${code}) ${err.slice(0, 80)}`.trim() });
-        fin(readOutput(out, body));
-      });
-      ch.stdin.on('error', () => {});
-      ch.stdin.end(body, 'utf8');
-    });
-  } finally { try { fs.rmSync(cwd, { recursive: true, force: true }); } catch (_) {} }
+  const r = await runClaude(body, { tmpPrefix: 'priming-spell-', ...o, read: (out) => readOutput(out, body) });
+  if (!r.ok && /^이 PC 에 claude 가 없습니다\(/.test(r.error)) return { ...r, error: '이 PC 에 claude 가 없습니다(맞춤법 검사는 Claude Code 가 설치·로그인된 PC 에서만)' };
+  return r;
 }
 
 /** 고친 글 — 고른 짝마다 **첫 자리 하나만** 바꾼다(없는 짝은 건너뛰고 skipped 로 알린다) */
@@ -142,4 +161,4 @@ function applyItems(text, items) {
 /** 은행 「교정」 칸 글 — 손으로 넣은 1007 줄과 같은 꼴 */
 const correctionNote = (items) => `맞춤법만 — ${(items || []).map((x) => `${x['틀림']}→${x['바름']}`).join(' · ')} (claude -p ${MODEL} 검사 · 로이 「반영」)`;
 
-module.exports = { check, findClaude, parseItems, readOutput, applyItems, correctionNote, exeFromCmd, SYSTEM, MODEL, argsFor, _resetExe: () => { _exe = undefined; } };
+module.exports = { check, runClaude, readClaudeJson, findClaude, parseItems, readOutput, applyItems, correctionNote, exeFromCmd, SYSTEM, MODEL, argsFor, _resetExe: () => { _exe = undefined; } };

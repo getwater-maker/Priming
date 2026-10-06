@@ -38,7 +38,7 @@ export function buildProjLines(pr, capChars) {
   (pr && pr.cuts ? pr.cuts : []).forEach((c, ci) => {
     (c.sentences || []).forEach((s, si) => {
       const ord = ++so;
-      const lt = splitLines(s.text, capChars, s.breaks);
+      const lt = splitLines(s.text, capChars, s.breaks, s.marks);
       const rg = CF.lineRanges(s.text || '', lt);
       const dur = Number(s.dur) > 0 ? Number(s.dur) : 0;
       const tot = lt.reduce((a, t) => a + Math.max(1, mLen(t)), 0) || 1;

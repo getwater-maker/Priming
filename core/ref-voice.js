@@ -20,7 +20,7 @@ const CODE_OF = { Korean: 'ko', Japanese: 'ja', vi: 'vi' };
 //   ⚠ 일본어는 「昔々」로 시작하지 않는다 — Qwen3 ja 가 昔々 를 자주 잘못 읽었고(85~95% · 채널사업부 2026-10-05), 가나 「むかしむかし」로 쓰면
 //     받아쓰기(Whisper)가 「昔々」로 적어 맞게 읽어도 점수가 깎인다(표기 차이 · CLI 첫 실측). 표기가 갈리는 낱말은 예문·검증문에 넣지 않는다.
 const SAMPLE_TEXT = {
-  Korean: '안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다. 오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',
+  Korean: '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',
   Japanese: 'ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',
   vi: 'Ngày xửa ngày xưa, ở một ngôi làng nhỏ bên bờ sông, có một chàng trai nghèo nhưng rất tốt bụng. Mỗi sáng, anh dậy thật sớm và lên núi nhặt củi.',
 };

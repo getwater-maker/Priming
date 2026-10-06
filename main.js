@@ -1708,9 +1708,17 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
   try {
     const tmpDir = path.join(os.homedir(), '.shots-maker', 'voicedesign-temp');
     fs.mkdirSync(tmpDir, { recursive: true });
-    const tmpPath = path.join(tmpDir, 'preview.wav');
+    // 🎨 후보 여러 개(v0.7.23 · 로이 「입력한 개수만큼 만들고 들어보고 고르게」) — 후보마다 따로 파일을 둔다.
+    //   새 묶음(newBatch)을 시작할 때 지난 후보 파일을 치운다(임시 폴더라 지워도 된다 · 저장한 목소리는 ref-audio 에 있다).
+    if (args.newBatch) {
+      for (const f of fs.readdirSync(tmpDir)) if (/^cand-.*\.wav$/i.test(f)) { try { fs.unlinkSync(path.join(tmpDir, f)); } catch (_) {} }
+      S.vdCands = {};
+    }
+    const tmpPath = path.join(tmpDir, `cand-${Date.now()}-${Math.floor(Math.random() * 1e6)}.wav`);
     fs.writeFileSync(tmpPath, r.buffer);
-    S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용
+    S.vdCands = S.vdCands || {};
+    S.vdCands[tmpPath] = { text, lang, instruct };   // 저장 때 고른 후보의 문장(=참조텍스트)·언어·설명
+    S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용(후보를 안 넘기면)
     S.vdLastLang = lang;
     S.vdLastInstruct = instruct;                   // 어떤 설명으로 만든 목소리인지 — 서버 라이브러리에 함께 남긴다
     // 길이 + 자동 구간 제안(앞 무음·끝 감쇠 제거) — 슬라이스 UI 의 초기값. 실패해도 생성 자체는 성공.
@@ -1736,7 +1744,13 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
 });
 // 저장: 방금 생성한 미리듣기 wav 를 사용자가 지정한 파일명으로 ref-audio 에 정식 등록(+.txt 참조텍스트).
 ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
-  if (!S.vdLastTemp || !fs.existsSync(S.vdLastTemp)) return { ok: false, error: '먼저 목소리를 생성하세요' };
+  // 🎨 고른 후보(tempPath) — 이 실행에서 만든 후보 목록(S.vdCands)에 있는 것만 받는다(렌더러가 넘긴 임의 경로를 읽지 않게)
+  const cand = args.tempPath && S.vdCands && S.vdCands[args.tempPath] ? { path: args.tempPath, ...S.vdCands[args.tempPath] } : null;
+  const srcPath = cand ? cand.path : S.vdLastTemp;
+  const srcText = cand ? cand.text : S.vdLastText;
+  const srcLang = cand ? cand.lang : S.vdLastLang;
+  const srcInstruct = cand ? cand.instruct : S.vdLastInstruct;
+  if (!srcPath || !fs.existsSync(srcPath)) return { ok: false, error: '먼저 목소리를 생성하세요' };
   let name = String(args.filename || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\.wav$/i, '').trim();
   if (!name) return { ok: false, error: '파일명을 입력하세요' };
   try {
@@ -1744,7 +1758,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     // ── 슬라이스 ── 지정 구간만 잘라 저장(무손실). 보이스디자인 음성은 **끝이 서서히 작아지므로**
     //   그 구간이 참조음성에 들어가면 합성 문장 끝이 계속 끊기는 느낌이 된다(로이 2026-08-14).
     //   ⚠ 잘라내면 실제로 들리는 말이 달라지므로 **참조텍스트도 함께 바뀌어야** 한다 → args.text 를 쓴다.
-    const src = fs.readFileSync(S.vdLastTemp);
+    const src = fs.readFileSync(srcPath);
     let outBuf = src, cutLog = '';
     const s0 = Number(args.startSec), e0 = Number(args.endSec);
     if (isFinite(s0) && isFinite(e0) && e0 > s0) {
@@ -1755,14 +1769,14 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
         if (outBuf !== src) cutLog = ` · ✂ ${s0.toFixed(2)}~${e0.toFixed(2)}초 (원본 ${full.toFixed(2)}초)`;
       } catch (e) { return { ok: false, error: '구간 자르기 실패: ' + String((e && e.message) || e) }; }
     }
-    let refText = (args.text != null ? String(args.text) : (S.vdLastText || '')).trim();
+    let refText = (args.text != null ? String(args.text) : (srcText || '')).trim();
     // 🌏 외국어(일본어·베트남어)는 잘라낸 구간을 **받아쓰기한 글을 참조텍스트로** 쓴다(2026-09-26 실측).
     //   끝 감쇠를 자르면 마지막 낱말이 일부 잘리는데 참조텍스트가 원문 그대로면, 모델이 남은 글자를 새 문장 앞에
     //   읽어 버렸다(일본어 20문장 중 20문장 · 평균 17%). 사람이 그 차이를 귀로 못 잡으므로 앱이 맞춘다.
-    const vdLang = S.vdLastLang === 'vi' ? 'vi' : (S.vdLastLang === 'Japanese' ? 'ja' : null);
+    const vdLang = srcLang === 'vi' ? 'vi' : (srcLang === 'Japanese' ? 'ja' : null);
     if (vdLang && outBuf !== src) {
       try {
-        const c = await require('./core/tts-backcheck').checkAudio(outBuf, refText, vdLang, path.dirname(S.vdLastTemp));
+        const c = await require('./core/tts-backcheck').checkAudio(outBuf, refText, vdLang, path.dirname(srcPath));
         if (c && !c.unknown && c.heard) { const nt = require('./core/tts-backcheck').refTextForCut(refText, c.heard, vdLang); log(`   🔎 잘라낸 구간 받아쓰기 → 참조텍스트: ${nt}`); refText = nt; }
         else log('   ⚠ 잘라낸 구간을 받아쓰지 못했습니다 — 입력한 참조텍스트를 그대로 씁니다(끝 낱말이 잘렸다면 고쳐 주세요)');
       } catch (e) { log('   ⚠ 받아쓰기 실패: ' + String((e && e.message) || e)); }
@@ -1774,7 +1788,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     //   ⚠ 로컬 저장은 이미 끝났으므로 여기서 실패해도 **경고만** 하고 성공으로 반환한다(작업을 막지 않는다).
     try {
       // ⚠ 잘라낸 wav(wavPath)와 **그에 맞게 수정된 참조텍스트(refText)** 를 함께 올린다 — 둘이 어긋나면 복제 품질이 무너진다.
-      const r = await uploadRefVoice({ name: base, text: refText, instruct: S.vdLastInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
+      const r = await uploadRefVoice({ name: base, text: refText, instruct: srcInstruct || '', wavBuffer: fs.readFileSync(wavPath) });
       if (r.ok) log(`   ☁ 공용 라이브러리에도 등록: ${r.name}.wav (${r.path})`);
       else if (r.error === 'unsupported') log('   ⚠ 서버가 공용 라이브러리를 지원하지 않습니다(구버전) — 이 PC 에만 저장됨');
       else log(`   ⚠ 공용 라이브러리 등록 실패 — 이 PC 에만 저장됨 (${r.error})`);
@@ -3141,6 +3155,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   }
   preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
   preset = resolveBgm(preset, scriptPath, log);   // 🎵 채널 배경음악
+  await capMarksEnsure(parsed);   // ✂🤖 자막 끊어 읽기(⚡ 만들기 4단계와 같게)
   const outs = [];
   const incomplete = [];
   const noTts = [];   // 음성 누락으로 건너뛴 편
@@ -6089,6 +6104,7 @@ function syncSnapshotNow() { try { flushAutoSave(); } catch (_) {} }
 function dtoByReply() { scheduleAutoSave(); }
 function scheduleAutoSave() {
   if (!S.parsed) return;
+  capMarksKick();   // ✂🤖 데이터가 바뀌면(대본 열기·문장 고치기) 끊어 읽기도 — 디바운스 · 기억에 있으면 붙이기만
   const now = Date.now();
   const A = _asW(), wk = WORLD.key();
   if (!A.since) A.since = now;
@@ -6925,6 +6941,7 @@ async function runMakeAllBody(opts = {}) {
     log(wbGo ? '📦 4단계 — ✏ 화이트보드 MP4 렌더… (장면 렌더 → 음성 → 자막)'
       : mp4Go ? '📦 4단계 — .vrew 생성 → 🎬 유튜브 MP4 렌더…'
       : `📦 4단계 — .vrew 일괄 생성…${outMode !== 'full' ? ` (${outModeLabel(outMode)})` : ''}`);
+    await capMarksEnsure(parsed);   // ✂🤖 자막 끊어 읽기 — 이 대본 것을 마저 받고 붙인다(못 받으면 규칙대로)
     // 🔎 마지막 방어선 — 실제 파일을 다시 훑어 검정·노이즈면 비우고 **그 그룹만 순차로 다시 만든다**.
     //   (생성 시점 검사를 빠져나온 이상 이미지가 .vrew 에 실려 영상으로 나가는 것을 막는다 — 로이 2026-08-14/19)
     for (const pr of projects) {
@@ -8034,6 +8051,64 @@ function _royAfterEdit(pr, mids, { noBank = false } = {}) {   // noBank = 맞춤
     if (!noBank) out.push(_royAppend(S.parsed, sp, m, '수정'));
   }
   return out;
+}
+
+// ── ✂🤖 자막 끊어 읽기(Claude) — 대본을 열거나 문장이 바뀌면 백그라운드로(v0.7.23 · 로이 「불러오면 바로」 · core/cap-marks) ──
+//   결과는 문장 글 해시로 기억(다시 열기 = 0 토큰) → s.capMarks 에 붙이고 caption-splitter 가 그 자리에서만 끊는다.
+//   ⚡ 만들기 4단계 · 💾 .vrew 직전에는 capMarksEnsure 로 기다린다(이 PC 에 claude 가 없으면 규칙대로 — fail-open).
+//   ⛔ E2E(PM_UI_SMOKE)는 PM_CLAUDE_EXE(가짜) 없이는 부르지 않는다 — 로이의 구독 사용량.
+const CapMarks = require('./core/cap-marks');
+let _cmTimer = null, _cmRun = null, _cmOff = '', _cmFailAt = 0;
+const _cmSents = (parsed) => ((parsed && parsed.kind !== 'book' && Array.isArray(parsed.projects)) ? parsed.projects : []).flatMap((pr) => pr.sentences || []);
+const _cmMin = (parsed) => { const p = parsed && parsed.projects && parsed.projects[0]; const n = Number(p && p.thresholds && p.thresholds.longLen); return n >= 6 ? n : 20; };
+const _cmAllowed = () => !(process.env.PM_UI_SMOKE && !process.env.PM_CLAUDE_EXE) && !process.env.PM_CAPMARKS_OFF;
+// 붙어 있는 표시가 바뀌었는가(바뀐 문장 수) — 바뀌었을 때만 화면을 다시 보낸다(끝없이 서로 부르지 않게)
+function _cmAttach(parsed) {
+  const ss = _cmSents(parsed);
+  const before = ss.map((s) => (s.capMarks ? s.capMarks.t + '|' + s.capMarks.w.join(',') : ''));
+  CapMarks.attach(ss);
+  let ch = 0; ss.forEach((s, i) => { if ((s.capMarks ? s.capMarks.t + '|' + s.capMarks.w.join(',') : '') !== before[i]) ch++; });
+  return ch;
+}
+function capMarksKick() {
+  if (S.mode !== 'longform' || !S.parsed || S.parsed.kind === 'book') return;
+  if (_cmTimer) clearTimeout(_cmTimer);
+  _cmTimer = setTimeout(() => { _cmTimer = null; capMarksTick().catch((e) => log('⚠ 끊어 읽기 오류: ' + e.message)); }, 2500);
+}
+async function capMarksTick() {
+  const parsed = S.parsed;
+  if (!parsed || parsed.kind === 'book') return;
+  if (_cmAttach(parsed)) pushDtoUpdate();
+  if (!_cmAllowed() || _cmOff || _cmRun) return;
+  if (_cmFailAt && Date.now() - _cmFailAt < 10 * 60000) return;   // 방금 실패했으면 10분 쉼
+  const need = CapMarks.needs(_cmSents(parsed), _cmMin(parsed));
+  if (!need.length) return;
+  await _cmRunFor(need, '');
+  capMarksKick();   // 도는 사이 바뀐 문장이 있으면 다시
+}
+async function _cmRunFor(need, why) {
+  if (_cmRun) { await _cmRun.catch(() => {}); return; }
+  log(`✂🤖 끊어 읽기(Claude) — ${need.length}문장${why} · 같은 문장은 한 번만 묻습니다`);
+  _cmRun = CapMarks.run(need, {
+    onBatch: ({ done, failed, total }) => { log(`   ✂🤖 ${done + failed} / ${total}`); if (_cmAttach(S.parsed)) pushDtoUpdate(); },
+  });
+  try {
+    const r = await _cmRun;
+    if (r.error && /claude 가 없습니다|로그인/.test(r.error)) { _cmOff = r.error; log(`ℹ 끊어 읽기는 규칙대로 합니다 — ${r.error}`); }
+    else if (r.error && !r.done) { _cmFailAt = Date.now(); log(`⚠ 끊어 읽기(Claude) 실패 — ${r.error} (10분 뒤 다시 · 그동안 규칙대로)`); }
+    else log(`✂🤖 끊어 읽기 완료 — ${r.done}문장${r.failed ? ` · ${r.failed}문장은 규칙대로` : ''} (${Math.round(r.ms / 1000)}초)`);
+  } finally { _cmRun = null; }
+  if (_cmAttach(S.parsed)) pushDtoUpdate();
+}
+// ⚡ 만들기 4단계 · 💾 .vrew 직전 — 이 대본의 끊어 읽기를 마저 받고 붙인다(못 받으면 규칙대로 · 막지 않는다)
+async function capMarksEnsure(parsed) {
+  if (!parsed || parsed.kind === 'book') return;
+  if (_cmRun) { log('⏳ 끊어 읽기(Claude) 끝나기를 기다립니다…'); await _cmRun.catch(() => {}); }
+  if (_cmAllowed() && !_cmOff) {
+    const need = CapMarks.needs(_cmSents(parsed), _cmMin(parsed));
+    if (need.length) await _cmRunFor(need, ' (출력 전에 마저)');
+  }
+  _cmAttach(parsed);
 }
 
 // ── 🔎 맞춤법 검사 — 로이가 고친 🟥·🟨 문단만 · Claude 구독(claude -p sonnet) · 제안만(v0.7.13 · 화자 규약 §4-1) ─────────

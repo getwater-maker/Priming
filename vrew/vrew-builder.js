@@ -1196,7 +1196,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     if (opts && opts.disableLongSplit) {
       subClips = [{ text: s.text, weight: 1.0 }];
     } else {
-      const lines = splitCaptionLines(s.text, maxCap, s.capBreaks);   // ✂ 사람이 정한 줄 나눔이 있으면 그대로
+      const lines = splitCaptionLines(s.text, maxCap, s.capBreaks, s.capMarks);   // ✂ 사람이 정한 줄 나눔이 있으면 그대로
       const ranges = CF.lineRanges(s.text, lines);
       subClips = (lines.length > 0)
         ? lines.map((t, li) => ({ text: t, weight: Math.max(1, meaningfulLen(t)), range: ranges[li] }))

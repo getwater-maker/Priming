@@ -268,7 +268,9 @@ function boundaryAt(words, i) {
 }
 
 // 어절 배열 → 줄 배열. 어절은 쪼개지 않고, 위 경계 판정을 비용에 넣어 DP 로 최적 분할.
-function wrapWords(words, maxChars) {
+//   allowed(Set · 선택) = 🤖 끊어 읽기 자리(그 어절 **뒤**에서 끊어도 되는 어절 번호). 있으면 그 밖의 자리는 금지와 같은 값을 문다
+//   — 덩어리 하나가 한 줄보다 길 때만 그 안에서 (규칙대로 가장 덜 나쁜 곳을) 자른다(v0.7.23 · core/cap-marks).
+function wrapWords(words, maxChars, allowed) {
   const n = words.length;
   if (!n) return [];
   const w = words.map(meaningfulLen);
@@ -291,6 +293,7 @@ function wrapWords(words, maxChars) {
       if (!isLast) {
         const b = bnd[j];
         if (b.banned) cost += W.VIOL;
+        else if (allowed && !allowed.has(j)) cost += W.VIOL;   // 🤖 끊어 읽기 자리가 아니다
         cost -= W.GOOD * b.score;
         cost += W.BAL * slack * slack;
       } else {
@@ -310,7 +313,12 @@ function wrapWords(words, maxChars) {
  * @param breaks  ✂ 사람이 정한 줄 나눔(문장 글자 위치 — 새 줄이 시작하는 곳). 있으면 **그대로** 자른다(자동 줄바꿈 안 함).
  *                Vrew 처럼 「이 줄은 여기서 끊는다」를 문장마다 고정할 때(자막 줄 나누기·합치기 — 2026-09-25). 음성은 그대로다.
  */
-function splitCaptionLines(text, maxChars = 7, breaks) {
+/**
+ * @param marks   🤖 끊어 읽기 자리(Claude · core/cap-marks) — { t: 문장 글, w: [새 덩어리가 시작하는 어절 번호…] }.
+ *                t 가 지금 글과 같을 때만 쓴다(문장을 고치면 저절로 무효). 덩어리 경계에서만 끊고, 줄 길이(maxChars)는 여기서 맞춘다.
+ *                breaks(사람이 정한 줄)가 있으면 그것이 이긴다.
+ */
+function splitCaptionLines(text, maxChars = 7, breaks, marks) {
   const raw = String(text == null ? '' : text);
   const bk = normBreaks(raw, breaks);
   if (bk) {
@@ -327,8 +335,17 @@ function splitCaptionLines(text, maxChars = 7, breaks) {
   if (isCjkLang(detectLang(t))) { const cj = wrapCjk(t, maxChars); return cj.length ? cj : [t]; }
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return [t];
-  const out = wrapWords(words, maxChars);
+  const out = wrapWords(words, maxChars, marksAllowed(t, words.length, marks));
   return out.length ? out : [t];
+}
+
+// 🤖 끊어 읽기 자리 → wrapWords 가 받는 「끊어도 되는 자리」(그 어절 뒤 번호) — 글이 다르거나 모양이 틀리면 null(규칙만)
+function marksAllowed(t, n, marks) {
+  if (!marks || typeof marks !== 'object' || !Array.isArray(marks.w)) return null;
+  if (String(marks.t == null ? '' : marks.t).trim() !== t) return null;
+  const s = new Set();
+  for (const k of marks.w) { const i = Number(k); if (Number.isInteger(i) && i >= 1 && i < n) s.add(i - 1); }
+  return s;
 }
 
 /**
@@ -388,7 +405,7 @@ function remapBreaks(oldText, newText, breaks) {
   return normBreaks(b, fixed ? [...moved, b.length] : moved);
 }
 
-module.exports = { normBreaks, remapBreaks, splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
+module.exports = { marksAllowed, normBreaks, remapBreaks, splitCaptionLines, meaningfulLen, auditCaptionLines, boundaryAt, CONNECTIVES, fmtSrtTime };
 
 
 // ⚠ 「스크립트로 직접 실행했을 때만 도는 자기검사」 블록을 여기 두지 않는다.

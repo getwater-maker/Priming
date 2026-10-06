@@ -123,11 +123,12 @@ function toDTO(parseResult) {
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
-              breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
+              breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,
+              marks: s.capMarks || null,   // ✂🤖 Claude 끊어 읽기 자리(core/cap-marks) — 화면 줄 나누기도 같은 자리   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
               hn: require('./clip-history').countOf(s) || 0,
               roy: (pr._roy && pr._roy.bySid[s.id]) || null,   // 🟥·🟨 표시 {mid, k:'exp'|'int', st, first}   // 🕘 이 문장을 고친 횟수(이력 버튼 배지)
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
-              lines: splitCaptionLines(s.text || '', capChars, s.capBreaks).map((t) => ({ n: ++capN, text: t })),
+              lines: splitCaptionLines(s.text || '', capChars, s.capBreaks, s.capMarks).map((t) => ({ n: ++capN, text: t })),
             })),
             groupDurationSec: sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0) || null,
             groupGenSec: sents.reduce((a, s) => a + (s.ttsGenSec || 0), 0) || null,
@@ -1035,7 +1036,7 @@ function writeSrt(project, srtPath, maxChars = 7) {
   for (const g of project.groups) {
     for (const s of project.getSentencesOfGroup(g)) {
       const dur = s.ttsDurationSec || 2.5;
-      const clips = splitCaptionLines(s.text, maxChars, s.capBreaks);
+      const clips = splitCaptionLines(s.text, maxChars, s.capBreaks, s.capMarks);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
       let acc = t;
       clips.forEach((c, i) => {

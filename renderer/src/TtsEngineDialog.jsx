@@ -65,7 +65,9 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [samples, setSamples] = useState({});      // 엔진 → { 'model|voice|style': {file, sec} }
   const [q, setQ] = useState('');
   const [fg, setFg] = useState('');
-  const [fa, setFa] = useState('');   // 연령대 거르기(''|child|young|middle|old|none)
+  const [fa, setFa] = useState('');
+  // ↕ 정렬(v0.7.23 · 로이 「성별·연령대 기준으로 정렬」) — '' 기본(받은 순서) | gender(성별→연령대) | age(연령대→성별) | name(이름) · 이 PC 에 기억
+  const [sortBy, setSortBy] = useState(() => { try { return localStorage.getItem('pm.ttsSort') || ''; } catch { return ''; } });   // 연령대 거르기(''|child|young|middle|old|none)
   const [tagEdit, setTagEdit] = useState(null);   // 🏷 OmniVoice 분류 편집 { names:[...], title, gender, age, lang, many }
   const [fl, setFl] = useState({});
   const [msg, setMsg] = useState('');
@@ -365,10 +367,18 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const koView = (v) => ({ ...v, base: String(v.name || '').split(' - ')[0], name: trName(v), desc: tr[v.desc] || v.desc, lang: langLabel(v.lang), orig: [v.name, v.desc, v.lang].filter(Boolean).join('\n') });
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return list.filter((v) => VF.matchFacets(v, fg, fa) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
+    const out = list.filter((v) => VF.matchFacets(v, fg, fa) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
       && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v)].join(' ').toLowerCase().includes(qq)));
+    if (!sortBy) return out;
+    // 분류가 없는(미표시) 목소리는 뒤로 — 분류는 ⋯ → 🏷 에서 고친다(이름·참조텍스트 추정보다 앞선다)
+    const gR = (v) => ({ male: 0, female: 1 }[VF.genderOf(v)] ?? 2);
+    const aR = (v) => { const i = VF.AGE_ORDER.indexOf(VF.ageOf(v)); return i < 0 ? 9 : i; };
+    const nm = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko', { numeric: true });
+    const cmp = sortBy === 'gender' ? (a, b) => gR(a) - gR(b) || aR(a) - aR(b) || nm(a, b)
+      : sortBy === 'age' ? (a, b) => aR(a) - aR(b) || gR(a) - gR(b) || nm(a, b) : nm;
+    return out.slice().sort(cmp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, q, fg, fa, lang, tr]);
+  }, [list, q, fg, fa, lang, tr, sortBy]);
   // 성별·연령대 선택지의 「(n)」 — 고른 언어 안에서 센다(다른 거르기는 반영하지 않아 어느 쪽이 얼마나 있는지 한눈에)
   const fcount = useMemo(() => VF.facetCounts(list.filter((v) => !lang || langOf(v) === lang || langOf(v) === '다국어')), [list, lang]);
   // 보이는 카드의 영어 글을 120개씩 모아 번역을 부탁한다 — 한 번에 하나 · 돌아오면 나머지 · 실패한 글은 다시 묻지 않는다
@@ -546,6 +556,10 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   <option value="">연령대 전체</option>
                   {VF.AGE_ORDER.map((k) => <option key={k} value={k}>{VF.AGE_LABEL[k]} ({fcount.age[k]})</option>)}
                   {fcount.age.none > 0 && <option value="none">미표시 ({fcount.age.none})</option>}
+                </select>
+                <select data-testid="tts-voice-sort" value={sortBy} title="카드 정렬 — 분류(성별·연령대)가 없는 목소리는 뒤로 · 분류는 ⋯ → 🏷"
+                  onChange={(ev) => { setSortBy(ev.target.value); try { localStorage.setItem('pm.ttsSort', ev.target.value); } catch {} }}>
+                  <option value="">↕ 기본 순서</option><option value="gender">↕ 성별 → 연령대</option><option value="age">↕ 연령대 → 성별</option><option value="name">↕ 이름</option>
                 </select>
                 {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">언어 전체</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
                 {busyBatch

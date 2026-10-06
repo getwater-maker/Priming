@@ -10,6 +10,22 @@ process.stdin.on('end', () => {
   const mode = process.env.FAKE_CLAUDE_MODE || 'ok';
   if (mode === 'hang') { setInterval(() => {}, 1000); return; }
   if (mode === 'login') { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Invalid API key · Please run /login' })); return; }
+  // ✂🤖 끊어 읽기(core/cap-marks) 지시문이면 — 「번호<탭>글」 줄마다 쉼표 뒤·네 어절마다 " / " 를 넣어 답한다
+  //   FAKE_CLAUDE_CAPMARKS_BAD=1 이면 2번 문장의 글자를 바꿔 답한다(앱이 그 문장을 버려야 한다)
+  const sys = process.argv[process.argv.indexOf('--system-prompt') + 1] || '';
+  if (/끊어 읽기/.test(sys)) {
+    if (process.env.FAKE_CLAUDE_CAPMARKS_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_CAPMARKS_LOG, input.split('\n').filter(Boolean).length + '\n');
+    const out = input.split('\n').filter(Boolean).map((line) => {
+      const [n, t] = line.split('\t');
+      const ws = t.split(' '); const parts = []; let cur = [];
+      ws.forEach((w, i) => { cur.push(w); if (/,$/.test(w) || cur.length === 4 || i === ws.length - 1) { parts.push(cur.join(' ')); cur = []; } });
+      let body = parts.join(' / ');
+      if (process.env.FAKE_CLAUDE_CAPMARKS_BAD && n === '2') body = body.replace(/./, 'X');
+      return n + '\t' + body;
+    }).join('\n');
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.01, result: out }));
+    return;
+  }
   if (mode === 'junk') { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '고칠 곳을 찾지 못했습니다.' })); return; }
   const table = [['느겼습니다', '느꼈습니다'], ['부인 할수록', '부인할수록'], ['없는낱말', '없는 낱말']];
   const items = table.filter(([w]) => input.includes(w)).map(([w, c]) => ({ 틀림: w, 바름: c }));
