@@ -25,6 +25,10 @@ const { detectLang } = require('./lang');
 
 const PROMPT_VER = 'b1';   // 지시문을 바꾸면 올린다 — 옛 기억을 쓰지 않게(해시에 들어간다)
 const SYSTEM = '너는 한국어 낭독 편집자다. 각 문장을 소리 내어 읽을 때 숨을 쉬어도 되는 끊어 읽기 자리마다 " / " 를 넣는다. 의미 덩어리(꾸밈말+꾸밈받는 말, 목적어·부사어+동사, 관형절+명사, 보조용언)는 가르지 않는다. 길이는 신경 쓰지 않는다. 글자·띄어쓰기·문장부호는 바꾸지 않는다. 입력과 같은 번호로 한 줄에 한 문장씩만 답한다.';
+// 🧩 2차 — 1차 덩어리가 한 줄(max)보다 길면 그 덩어리만 다시 묻는다(v0.7.25 · 로이 「여전히 등에 | 진」).
+//   1차는 길이를 모르니 「등에 진 빈 지게가 기둥에 부딪혀 덜컹 소리를 내는데도」(22자)를 한 덩어리로 둔다 → 그 안을 규칙이 갈랐다.
+//   2차만 길이를 준다(덩어리 하나 · 짧아 글자 세기 부담이 작다). 실측(1007): 458문장 중 28문장.
+const INNER_SYSTEM = (max) => `너는 한국어 자막 편집자다. 각 구절은 끊어 읽기 덩어리인데 자막 한 줄에 들어가지 않는다. 각 구절을 줄마다 공백을 뺀 글자가 ${max}자 이하가 되도록, 의미 덩어리(꾸밈말+꾸밈받는 말, 목적어·부사어+동사, 관형절+명사, 보조용언)를 가르지 않는 가장 자연스러운 자리에 " / " 를 넣어 나눈다. 글자·띄어쓰기·문장부호는 바꾸지 않는다. 입력과 같은 번호로 한 줄에 하나씩만 답한다.`;
 const BATCH = 80;            // 한 번에 보낼 문장 수 — 100문장 ≈ 66초 실측 · 실패해도 잃는 양이 적게
 const CONCURRENCY = 2;       // 동시에 띄울 claude 수(구독 사용량·PC 부하)
 const TIMEOUT_MS = 300000;   // 묶음 하나 5분
@@ -47,17 +51,32 @@ function save() {
 const norm = (text) => String(text == null ? '' : text).trim().split(/\s+/).filter(Boolean).join(' ');
 const keyOf = (text) => crypto.createHash('sha1').update(PROMPT_VER + '\n' + norm(text)).digest('hex').slice(0, 24);
 
-/** 기억된 끊어 읽기 자리 — { t, w } | null */
-function lookup(text) {
-  const w = load()[keyOf(text)];
-  return Array.isArray(w) ? { t: String(text).trim(), w: w.slice() } : null;
+const innerKey = (chunk, max) => keyOf('inner' + Number(max) + '\n' + norm(chunk));
+const mlen = (t) => meaningfulLen(String(t).replace(/\s/g, ''));
+/** 1차 덩어리 중 한 줄(max)보다 긴 것 — [{ start: 첫 어절 번호, chunk }] (어절 하나짜리는 더 못 나눈다) */
+function longChunks(text, w, max) {
+  const ws = norm(text).split(' '); const cuts = [0, ...w, ws.length]; const out = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const c = ws.slice(cuts[i], cuts[i + 1]).join(' ');
+    if (cuts[i + 1] - cuts[i] > 1 && mlen(c) > max) out.push({ start: cuts[i], chunk: c });
+  }
+  return out;
 }
-/** 문장들에 기억된 자리를 붙인다(없으면 낡은 것을 뗀다) — 붙인 수 */
-function attach(sentences) {
+
+/** 기억된 끊어 읽기 자리 — { t, w } | null · max 를 주면 긴 덩어리 안의 2차 자리도 합친다 */
+function lookup(text, max) {
+  const c = load(); const w = c[keyOf(text)];
+  if (!Array.isArray(w)) return null;
+  const all = new Set(w);
+  if (Number(max) > 0) for (const lc of longChunks(text, w, max)) { const iw = c[innerKey(lc.chunk, max)]; if (Array.isArray(iw)) for (const k of iw) all.add(lc.start + k); }
+  return { t: String(text).trim(), w: [...all].sort((a, b) => a - b) };
+}
+/** 문장들에 기억된 자리를 붙인다(없으면 낡은 것을 뗀다) — 붙인 수 · max = 자막 한 줄 글자 수(2차 자리용) */
+function attach(sentences, max) {
   let n = 0;
   for (const s of sentences || []) {
     if (!s || typeof s.text !== 'string') continue;
-    const m = lookup(s.text);
+    const m = lookup(s.text, max);
     if (m) { s.capMarks = m; n++; }
     else if (s.capMarks) delete s.capMarks;
   }
@@ -76,6 +95,21 @@ function needs(sentences, minChars = 20) {
     if (detectLang(t) !== 'ko') continue;
     if (Array.isArray(c[keyOf(t)])) continue;
     seen.add(t); out.push(t);
+  }
+  return out;
+}
+
+/** 2차로 물어야 할 긴 덩어리(중복 없이) — 1차가 기억에 있고, 그 덩어리의 2차 기억이 없는 것 */
+function needsInner(sentences, max) {
+  const out = [], seen = new Set(); const c = load();
+  for (const s of sentences || []) {
+    if (!s || typeof s.text !== 'string') continue;
+    if (Array.isArray(s.capBreaks) && s.capBreaks.length) continue;
+    const w = c[keyOf(s.text)]; if (!Array.isArray(w)) continue;
+    for (const lc of longChunks(s.text, w, max)) {
+      if (seen.has(lc.chunk) || Array.isArray(c[innerKey(lc.chunk, max)])) continue;
+      seen.add(lc.chunk); out.push(lc.chunk);
+    }
   }
   return out;
 }
@@ -116,7 +150,7 @@ async function run(texts, o = {}) {
       if (o.isAborted && o.isAborted()) { stop = true; break; }
       const batch = batches[next++];
       const input = batch.map((t, i) => `${i + 1}\t${t}`).join('\n');
-      const r = await SC.runClaude(input, { system: SYSTEM, timeoutMs: TIMEOUT_MS, tmpPrefix: 'priming-capmarks-', exe: o.exe });
+      const r = await SC.runClaude(input, { system: o.system || SYSTEM, timeoutMs: TIMEOUT_MS, tmpPrefix: 'priming-capmarks-', exe: o.exe });
       if (!r.ok) {
         failed += batch.length; error = r.error;
         if (/claude 가 없습니다|로그인/.test(r.error || '')) stop = true;   // 이 PC 에서 더 해도 소용없다
@@ -124,7 +158,7 @@ async function run(texts, o = {}) {
       }
       const got = parseReply(r.result, batch);
       const c = load();
-      for (const [i, w] of got) c[keyOf(batch[i])] = w;
+      for (const [i, w] of got) c[(o.keyFn || keyOf)(batch[i])] = w;
       save();
       done += got.size; failed += batch.length - got.size;
       try { if (o.onBatch) o.onBatch({ done, failed, total: texts.length }); } catch (_) {}
@@ -136,4 +170,7 @@ async function run(texts, o = {}) {
   return { done, failed, error, ms };
 }
 
-module.exports = { lookup, attach, needs, run, parseReply, keyOf, norm, SYSTEM, PROMPT_VER, BATCH, CONCURRENCY, _reset: () => { _cache = null; } };
+/** 2차 — 긴 덩어리를 한 줄(max) 안으로 */
+const runInner = (chunks, max, o = {}) => run(chunks, { ...o, system: INNER_SYSTEM(max), keyFn: (c) => innerKey(c, max) });
+
+module.exports = { lookup, attach, needs, needsInner, run, runInner, longChunks, innerKey, INNER_SYSTEM, parseReply, keyOf, norm, SYSTEM, PROMPT_VER, BATCH, CONCURRENCY, _reset: () => { _cache = null; } };

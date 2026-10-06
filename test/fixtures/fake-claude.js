@@ -18,7 +18,8 @@ process.stdin.on('end', () => {
     const out = input.split('\n').filter(Boolean).map((line) => {
       const [n, t] = line.split('\t');
       const ws = t.split(' '); const parts = []; let cur = [];
-      ws.forEach((w, i) => { cur.push(w); if (/,$/.test(w) || cur.length === 4 || i === ws.length - 1) { parts.push(cur.join(' ')); cur = []; } });
+      const per = /한 줄에 들어가지 않는다/.test(sys) ? 2 : 4;   // 2차(긴 덩어리) 요청은 두 어절마다
+      ws.forEach((w, i) => { cur.push(w); if (/,$/.test(w) || cur.length === per || i === ws.length - 1) { parts.push(cur.join(' ')); cur = []; } });
       let body = parts.join(' / ');
       if (process.env.FAKE_CLAUDE_CAPMARKS_BAD && n === '2') body = body.replace(/./, 'X');
       return n + '\t' + body;

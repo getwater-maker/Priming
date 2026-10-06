@@ -8066,7 +8066,7 @@ const _cmAllowed = () => !(process.env.PM_UI_SMOKE && !process.env.PM_CLAUDE_EXE
 function _cmAttach(parsed) {
   const ss = _cmSents(parsed);
   const before = ss.map((s) => (s.capMarks ? s.capMarks.t + '|' + s.capMarks.w.join(',') : ''));
-  CapMarks.attach(ss);
+  CapMarks.attach(ss, _cmMin(parsed));   // 🧩 max = 2차(긴 덩어리 안) 자리도 합친다
   let ch = 0; ss.forEach((s, i) => { if ((s.capMarks ? s.capMarks.t + '|' + s.capMarks.w.join(',') : '') !== before[i]) ch++; });
   return ch;
 }
@@ -8081,17 +8081,26 @@ async function capMarksTick() {
   if (_cmAttach(parsed)) pushDtoUpdate();
   if (!_cmAllowed() || _cmOff || _cmRun) return;
   if (_cmFailAt && Date.now() - _cmFailAt < 10 * 60000) return;   // 방금 실패했으면 10분 쉼
-  const need = CapMarks.needs(_cmSents(parsed), _cmMin(parsed));
-  if (!need.length) return;
-  await _cmRunFor(need, '');
+  if (!(await _cmBoth(parsed, ''))) return;
   capMarksKick();   // 도는 사이 바뀐 문장이 있으면 다시
 }
-async function _cmRunFor(need, why) {
+// 1차(문장 전체 · 길이 모름) → 2차(1차 덩어리가 한 줄보다 길 때 그 덩어리만 · 길이 줌) — 물은 게 있으면 true
+async function _cmBoth(parsed, why) {
+  const max = _cmMin(parsed);
+  let asked = false;
+  const need = CapMarks.needs(_cmSents(parsed), max);
+  if (need.length) { await _cmRunFor(need, why); asked = true; }
+  if (_cmOff) return asked;
+  const inner = CapMarks.needsInner(_cmSents(parsed), max);
+  if (inner.length) { await _cmRunFor(inner, why, max); asked = true; }
+  return asked;
+}
+async function _cmRunFor(need, why, innerMax = 0) {
   if (_cmRun) { await _cmRun.catch(() => {}); return; }
-  log(`✂🤖 끊어 읽기(Claude) — ${need.length}문장${why} · 같은 문장은 한 번만 묻습니다`);
-  _cmRun = CapMarks.run(need, {
-    onBatch: ({ done, failed, total }) => { log(`   ✂🤖 ${done + failed} / ${total}`); if (_cmAttach(S.parsed)) pushDtoUpdate(); },
-  });
+  log(innerMax ? `✂🤖 끊어 읽기 2차 — 한 줄(${innerMax}자)보다 긴 덩어리 ${need.length}개${why}`
+    : `✂🤖 끊어 읽기(Claude) — ${need.length}문장${why} · 같은 문장은 한 번만 묻습니다`);
+  const onBatch = ({ done, failed, total }) => { log(`   ✂🤖 ${done + failed} / ${total}`); if (_cmAttach(S.parsed)) pushDtoUpdate(); };
+  _cmRun = innerMax ? CapMarks.runInner(need, innerMax, { onBatch }) : CapMarks.run(need, { onBatch });
   try {
     const r = await _cmRun;
     if (r.error && /claude 가 없습니다|로그인/.test(r.error)) { _cmOff = r.error; log(`ℹ 끊어 읽기는 규칙대로 합니다 — ${r.error}`); }
@@ -8104,10 +8113,7 @@ async function _cmRunFor(need, why) {
 async function capMarksEnsure(parsed) {
   if (!parsed || parsed.kind === 'book') return;
   if (_cmRun) { log('⏳ 끊어 읽기(Claude) 끝나기를 기다립니다…'); await _cmRun.catch(() => {}); }
-  if (_cmAllowed() && !_cmOff) {
-    const need = CapMarks.needs(_cmSents(parsed), _cmMin(parsed));
-    if (need.length) await _cmRunFor(need, ' (출력 전에 마저)');
-  }
+  if (_cmAllowed() && !_cmOff) await _cmBoth(parsed, ' (출력 전에 마저)');
   _cmAttach(parsed);
 }
 

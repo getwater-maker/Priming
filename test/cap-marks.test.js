@@ -61,6 +61,27 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
   CM.attach(S);
   ok(!S[0].capMarks, '문장을 고치면 낡은 표시를 뗀다');
 
+  // [4b] 🧩 2차 — 1차 덩어리가 한 줄보다 길면 그 덩어리만 다시 묻고, 그 안 자리를 합친다(v0.7.25 · 「등에 | 진」 재발)
+  {
+    const L = '가나다라마 바사아자차 카타파하가 나다라마바 사아자차카 타파하가나 다라마바사 아자차카타';   // 어절 8 · 1차(가짜) = 4어절씩 = 20자 덩어리 둘
+    const SS = [{ text: L }];
+    await CM.run(CM.needs(SS, 12), { exe: FAKE });
+    const base = CM.lookup(L);
+    ok(base && base.w.join() === '4' && CM.longChunks(L, base.w, 12).length === 2, `1차 덩어리 2개가 모두 한 줄(12자)보다 길다 (${base && base.w})`);
+    const inner = CM.needsInner(SS, 12);
+    ok(inner.length === 2, `2차로 물을 덩어리 2개 (${inner.length})`);
+    const r4 = await CM.runInner(inner, 12, { exe: FAKE });
+    ok(r4.done === 2, `2차 받음 (${JSON.stringify(r4)})`);
+    ok(CM.needsInner(SS, 12).length === 0, '2차도 기억 — 다시 묻지 않는다');
+    const m = CM.lookup(L, 12);
+    ok(m.w.join() === '2,4,6', `1차 + 2차 자리를 합친다 (${m.w})`);
+    ok(CM.lookup(L).w.join() === '4' && CM.lookup(L, 20).w.join() === '4', '2차 자리는 그 글자 수(12) 기준일 때만 — 다른 기준이면 1차만');
+    const lines = CS.splitCaptionLines(L, 12, null, m);
+    ok(lines.length === 4 && lines.every((x) => x.split(' ').length === 2), `줄 = 2차 자리대로 (${lines.join(' / ')})`);
+    const ruleOnly = CS.splitCaptionLines(L, 12, null, base);
+    ok(ruleOnly.join('|') !== '' && CM.attach(SS, 12) === 1 && SS[0].capMarks.w.join() === '2,4,6', '붙이기도 2차까지(max 를 넘기면)');
+  }
+
   // [5] 글자를 바꾼 답은 버린다(규칙대로)
   process.env.FAKE_CLAUDE_CAPMARKS_BAD = '1';
   const r2 = await CM.run(['첫째 문장은 아주 길어서 줄을 나눠야 하는 문장입니다 정말로.', '둘째 문장도 아주 길어서 줄을 나눠야 하는 문장입니다 정말로.'], { exe: FAKE });
