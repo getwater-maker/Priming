@@ -109,6 +109,29 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
     await win.locator('[data-testid="group-item"][data-g="' + target.g + '"]').click(); await win.waitForTimeout(500);
     const gs2 = await state(); ok(gs2.picked.length === 1 && gs2.picked[0] === target.ln && gs2.edit === 0, `그룹 G${target.g} 클릭 → 그 그룹 첫 클립 ${target.ln} 선택 — ${JSON.stringify(gs2)}`);
     ok(await win.evaluate((g) => !!document.querySelector('[data-testid="group-item"].cur[data-g="' + g + '"]'), target.g), '눌린 그룹이 표시된다(.cur)');
+    // 🎞 그룹 칸 합치기·삭제(v0.7.31) — 체크 → ⤒ 합치기 / 🗑 삭제(확인창)
+    const cnt = () => win.evaluate(() => ({ g: document.querySelectorAll('[data-testid="group-item"]').length, c: document.querySelectorAll('main.pane2 .sent[data-ln]').length }));
+    const before = await cnt();
+    ok(await win.locator('[data-testid="group-merge"]').isDisabled() && await win.locator('[data-testid="group-del"]').isDisabled(), '체크 전엔 합치기·삭제가 꺼져 있다');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(200);   // 앞서 고른 클립을 푼다(체크는 지금 선택에 더해진다)
+    await win.locator('[data-testid="group-chk"][data-g="10"]').check(); await win.locator('[data-testid="group-chk"][data-g="11"]').check();
+    { const pk = await win.evaluate(() => ({ picked: [...document.querySelectorAll('main.pane2 .sent.picked')].length, g10: document.querySelectorAll('.cut[data-g="10"] .sent[data-ln]').length + document.querySelectorAll('.cut[data-g="11"] .sent[data-ln]').length, tb: !!document.querySelector('[data-testid="clip-tb"]') }));
+      ok(pk.picked === pk.g10 && pk.g10 > 0, `그룹 체크 = 그 그룹 클립이 모두 골라진다(${pk.picked}/${pk.g10}개)`); }
+    await win.locator('[data-testid="group-merge"]').click();
+    await win.waitForFunction((n) => document.querySelectorAll('[data-testid="group-item"]').length === n - 1, before.g, { timeout: 8000 }).catch(() => {});
+    const afterM = await cnt();
+    ok(afterM.g === before.g - 1 && afterM.c === before.c, `G10·G11 체크 → 합치기: 그룹 ${before.g}→${afterM.g} · 클립 ${before.c}→${afterM.c}(그대로)`);
+    ok(await win.locator('[data-testid="group-chk"]:checked').count() === 0, '합친 뒤 체크가 풀린다');
+    await win.locator('[data-testid="group-chk"][data-g="20"]').check();
+    const nG20 = await win.evaluate(() => document.querySelectorAll('.cut[data-g="20"] .sent[data-ln]').length);
+    win.once('dialog', (d) => d.accept());
+    await win.locator('[data-testid="group-del"]').click();
+    await win.waitForFunction((n) => document.querySelectorAll('[data-testid="group-item"]').length === n - 1, afterM.g, { timeout: 8000 }).catch(() => {});
+    const afterD = await cnt();
+    ok(afterD.g === afterM.g - 1 && afterD.c === afterM.c - nG20, `G20 체크 → 삭제: 그룹 ${afterM.g}→${afterD.g} · 클립 ${afterM.c}→${afterD.c}(−${nG20})`);
+    await win.locator('[data-testid="group-all"]').check();
+    ok(await win.locator('[data-testid="group-chk"]:checked').count() === afterD.g, '전체 선택 = 모든 그룹 체크');
+    await win.locator('[data-testid="group-all"]').uncheck();
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}

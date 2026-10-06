@@ -100,7 +100,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(geo && Math.abs(geo.top) <= 2 && Math.abs(geo.bot) <= 2, `🔑 막대 = 클립 2 윗변 ~ 클립 ${c1 + 1} 아랫변 ${JSON.stringify(geo)}`);
 
     console.log('\n[5] 끝점 끌기 — 문장2 둘째 줄까지(클립 단위로 멈춘다)');
-    await win.evaluate(() => { const p = document.querySelector('main.pane2'); if (p) p.scrollTop = 0; });
+    await win.evaluate((n) => { const p = document.querySelector('main.pane2'); if (p) p.scrollTop = 0; const e = document.querySelector(`.sent.clip[data-ln="${n}"]`); if (e) e.scrollIntoView({ block: 'center' }); }, c1 + 1);   // v0.7.30 그룹 칸이 ② 를 좁혀 클립이 길어졌다 — 끝점·목표가 모두 화면 안에 오게 가운데로
     await win.waitForTimeout(300);
     const capE = await win.locator('[data-testid=ins-lane]').first().locator('[data-testid=lane-cap-e]').boundingBox();
     const tgt = await win.locator(`.sent.clip[data-ln="${c2}"]`).boundingBox();

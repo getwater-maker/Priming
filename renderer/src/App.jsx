@@ -1789,6 +1789,31 @@ export default function App() {
     document.addEventListener('mousedown', down, true);
     return () => document.removeEventListener('mousedown', down, true);
   }, []);
+  // 🎞 그룹 칸 체크 = ② 목록의 클립 선택(capSel)과 한 몸(v0.7.31 · Vrew 처럼) — 그룹의 클립이 모두 골라져 있으면 체크, 체크하면 그 클립들이 골라진다
+  async function grpMerge(sn, nums) {
+    // 체크한 그룹들을 큰 번호부터 앞 그룹에 합친다 — 이어진 여러 개는 맨 앞 그룹 하나로, 하나만 체크하면 앞(안 고른) 그룹에(⤒ 와 같다)
+    const set = new Set(nums); const desc = [...set].sort((a, b) => b - a); let done = 0;
+    for (const g of desc) {
+      const lowestOfRun = !set.has(g - 1) && [...set].some((x) => x === g + 1);   // 이어진 묶음의 맨 앞 = 앵커 (자기는 합쳐지지 않는다)
+      if (lowestOfRun) continue;
+      try { const d = await api.mergeGroup({ shortsNum: sn, groupNum: g }); if (d) setDto(d); done++; }
+      catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('⤒ 그룹 합치기: ' + m); setStatus('⚠ ' + m + (done ? ` (${done}개는 합쳤습니다)` : '')); setCapSel(null); return; }
+    }
+    setCapSel(null);
+    setStatus(`⤒ 그룹 ${done}개를 앞 그룹에 합쳤습니다 (Ctrl+Z 되돌리기)`);
+  }
+  async function grpDelete(sn, nums) {
+    const PL = linesMap.get(sn); if (!PL) return;
+    const items = PL.list.filter((l) => nums.includes(l.groupNum)).map((l) => ({ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }));
+    if (!items.length) return;
+    if (!window.confirm(`그룹 ${nums.map((g) => 'G' + g).join(', ')} 의 클립 ${items.length}개를 삭제합니다.
+(대본 파일의 그 문장도 지워집니다 · Ctrl+Z 로 되돌릴 수 있습니다)`)) return;
+    try {
+      const r = await api.deleteClips(clipPayload({ shortsNum: sn, items }));
+      if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`🗑 그룹 ${nums.length}개(클립 ${r.deleted}개) 삭제 (Ctrl+Z 되돌리기)`); }
+      else clipErr(r, '그룹 삭제');
+    } catch (e) { logline('그룹 삭제 오류: ' + e.message); clipErr(null, '그룹 삭제'); }
+  }
   function clipSelOk() { return !!(capSel && capSel.mode === 'lines' && capSel.items && capSel.items.length && !sentEdit); }
   function clipPayload(sel) {
     const PL = linesMap.get(sel.shortsNum); const by = new Map();
@@ -4416,6 +4441,7 @@ export default function App() {
   // 🎞 가운데 「그룹」 칸(v0.7.30 · Vrew 의 씬 칸 — 로이) — 그룹마다 번호·첫 문장·클립 수·시작 시각 · 누르면 그 그룹의 첫 클립으로(재생 중이면 멈춤) · 지금 커서의 그룹을 표시
   const groupCol = (() => {
     if (!wsOn || !dto || !dto.projects || !dto.projects.length) return null;
+    if ((aiEdit && aiPanel === 'fmt') || (!aiEdit && capSel && capPanel)) return null;   // ③ 칸이 열리면 1366px 창에 다 들어가도록 이 칸은 접는다
     const pr = dto.projects.find((p) => cursor && p.shortsNum === cursor.shortsNum) || dto.projects[0];
     const PL = linesMap.get(pr.shortsNum); if (!PL) return null;
     const curL = cursor && cursor.shortsNum === pr.shortsNum ? PL.list.find((x) => x.n === cursor.n) : null;
@@ -4423,7 +4449,7 @@ export default function App() {
     for (const c of pr.cuts) {
       const sents = c.sentences || []; const t0 = acc; for (const se of sents) acc += se.dur > 0 ? se.dur : 2.5;
       const lines = PL.list.filter((x) => x.groupNum === c.num);
-      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, first: lines[0] || null, t0, dur: acc - t0, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
+      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
     }
     const go = (r) => {
       if (!r.first) return;
@@ -4434,13 +4460,28 @@ export default function App() {
       clipFocusRef.current = true;   // 그룹을 눌렀으니 Home/End 는 이 그룹 안
       setTimeout(() => { const e = [...document.querySelectorAll('main.pane2 .sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
     };
+    const selNs = new Set(clipSelOk() && capSel.shortsNum === pr.shortsNum ? capSel.items.map((x) => x.n) : []);
+    const isOn = (r) => r.lines.length > 0 && r.lines.every((l) => selNs.has(l.n));
+    const sel = rows.filter(isOn).map((x) => x.num);
+    const setGroups = (rs, on) => {
+      const drop = new Set(rs.flatMap((r) => r.lines.map((l) => l.n)));
+      const keep = (clipSelOk() && capSel.shortsNum === pr.shortsNum ? capSel.items : []).filter((x) => !drop.has(x.n));
+      const add = on ? rs.flatMap((r) => r.lines.map((l) => ({ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }))) : [];
+      const items = [...keep, ...add].sort((a, b) => a.n - b.n);
+      setCapSel(items.length ? { shortsNum: pr.shortsNum, mode: 'lines', items, anchorN: items[0].n } : null);
+    };
     const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
     return (
       <aside className="pane-groups" data-testid="group-col" title="그룹 — 누르면 그 그룹의 첫 클립으로">
         <div className="pg-head">그룹 ({rows.length})</div>
+        <div className="pg-tools">
+          <button type="button" className="pg-act del" data-testid="group-del" disabled={!sel.length} title="체크한 그룹의 클립을 모두 지웁니다(Ctrl+Z 되돌리기)" onClick={() => grpDelete(pr.shortsNum, sel)}>🗑 삭제</button>
+          <button type="button" className="pg-act" data-testid="group-merge" disabled={!sel.length} title="체크한 그룹을 앞 그룹에 합칩니다 — 이어진 여러 그룹은 맨 앞 그룹 하나로 · 하나만 체크하면 바로 앞 그룹에" onClick={() => grpMerge(pr.shortsNum, sel)}>⤒ 합치기</button>
+        </div>
+        <label className="pg-all"><input type="checkbox" data-testid="group-all" checked={rows.length > 0 && sel.length === rows.length} onChange={(e) => setGroups(rows, e.target.checked)} /> 전체 선택</label>
         {rows.map((r) => (
           <div key={r.num} className="pg-row">
-            <span className="pg-no">{r.num}</span>
+            <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
             <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)}>
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
               <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>그림 없음</em>}<b>{r.text}</b></span>
