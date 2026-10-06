@@ -1058,3 +1058,20 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 
 .bkisbn-bad{display:block;color:#c62828;font-weight:600;font-size:11px;margin-top:2px}
 .bkisbn{display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+
+/* 🎞 가운데 그룹 칸(v0.7.30) — Vrew 씬 칸 모양: 번호 · 제목줄 · 그림(자막 얹음) · 시각 + 길이 */
+.pane-groups{flex:0 0 190px;width:190px;overflow-y:auto;border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--bg,#faf6f0);padding:8px 8px 28px;display:flex;flex-direction:column;gap:10px}
+.pane-groups .pg-head{font-size:13px;font-weight:700;color:var(--strong,#3a342e);padding:2px 2px 0}
+.pane-groups .pg-row{display:flex;gap:6px;align-items:flex-start}
+.pane-groups .pg-no{flex:0 0 16px;font-size:12px;font-weight:700;color:var(--muted,#8a7a5c);padding-top:3px;text-align:right}
+.pane-groups .pg-item{flex:1;min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:0;text-align:left;background:var(--card,#fffdf9);border:1px solid var(--line);border-radius:8px;padding:0;overflow:hidden;min-height:0;line-height:1.25;color:inherit;cursor:pointer}
+.pane-groups .pg-item:hover{border-color:var(--accent)}
+.pane-groups .pg-item.cur{border-color:#19a8d6;box-shadow:0 0 0 1px #19a8d6}
+.pane-groups .pg-item.cur .pg-title{background:#19a8d6;color:#fff}
+.pane-groups .pg-title{font-size:12px;font-weight:700;padding:4px 8px;background:#f1e9db;color:var(--strong,#3a342e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pane-groups .pg-title.none{font-weight:500;color:var(--muted,#8a7a5c)}
+.pane-groups .pg-thumb{position:relative;display:block;margin:6px 6px 2px;aspect-ratio:16/9;background:#1c1a17;border-radius:4px;overflow:hidden}
+.pane-groups .pg-thumb img{width:100%;height:100%;object-fit:contain;display:block}
+.pane-groups .pg-thumb em{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-style:normal;color:#8d857a}
+.pane-groups .pg-thumb b{position:absolute;left:3px;right:3px;bottom:3px;font-size:9px;font-weight:700;color:#fff;text-align:center;text-shadow:0 0 2px #000,0 0 2px #000,0 0 3px #000;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.pane-groups .pg-meta{font-size:11px;color:var(--muted,#8a7a5c);padding:2px 8px 6px}

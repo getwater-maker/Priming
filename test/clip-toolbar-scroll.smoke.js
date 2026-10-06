@@ -102,6 +102,13 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
       await win.mouse.click(gap.x, gap.y); await win.waitForTimeout(300);
       const gs = await state(); ok(gs.picked.length === 1 && (gs.picked[0] === gap.near || gs.picked[0] === gap.near + 1), `카드 사이 빈 곳 클릭 → 가까운 클립(${gap.near}/${gap.near + 1}) 선택 — ${JSON.stringify(gs)}`);
     } else ok(false, '카드 사이 빈 곳을 못 찾음');
+    // 🎞 가운데 그룹 칸(v0.7.30): 그룹이 나열되고, 누르면 그 그룹의 첫 클립이 골라진다
+    const gc = await win.evaluate(() => ({ n: document.querySelectorAll('[data-testid="group-item"]').length, cur: (document.querySelector('[data-testid="group-item"].cur') || {}).dataset && document.querySelector('[data-testid="group-item"].cur').dataset.g }));
+    ok(gc.n >= 3, `그룹 칸에 그룹이 나열된다(${gc.n}개 · 지금 G${gc.cur})`);
+    const target = await win.evaluate(() => { const its = [...document.querySelectorAll('[data-testid="group-item"]')]; const it = its[Math.min(5, its.length - 1)]; const g = it.dataset.g; const first = [...document.querySelectorAll('.cut[data-g="' + g + '"] .sent[data-ln]')][0]; return { g, ln: first ? Number(first.dataset.ln) : null }; });
+    await win.locator('[data-testid="group-item"][data-g="' + target.g + '"]').click(); await win.waitForTimeout(500);
+    const gs2 = await state(); ok(gs2.picked.length === 1 && gs2.picked[0] === target.ln && gs2.edit === 0, `그룹 G${target.g} 클릭 → 그 그룹 첫 클립 ${target.ln} 선택 — ${JSON.stringify(gs2)}`);
+    ok(await win.evaluate((g) => !!document.querySelector('[data-testid="group-item"].cur[data-g="' + g + '"]'), target.g), '눌린 그룹이 표시된다(.cur)');
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}

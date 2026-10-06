@@ -4413,6 +4413,49 @@ export default function App() {
     </span>
   ) : null;
 
+  // 🎞 가운데 「그룹」 칸(v0.7.30 · Vrew 의 씬 칸 — 로이) — 그룹마다 번호·첫 문장·클립 수·시작 시각 · 누르면 그 그룹의 첫 클립으로(재생 중이면 멈춤) · 지금 커서의 그룹을 표시
+  const groupCol = (() => {
+    if (!wsOn || !dto || !dto.projects || !dto.projects.length) return null;
+    const pr = dto.projects.find((p) => cursor && p.shortsNum === cursor.shortsNum) || dto.projects[0];
+    const PL = linesMap.get(pr.shortsNum); if (!PL) return null;
+    const curL = cursor && cursor.shortsNum === pr.shortsNum ? PL.list.find((x) => x.n === cursor.n) : null;
+    let acc = 0; const rows = [];
+    for (const c of pr.cuts) {
+      const sents = c.sentences || []; const t0 = acc; for (const se of sents) acc += se.dur > 0 ? se.dur : 2.5;
+      const lines = PL.list.filter((x) => x.groupNum === c.num);
+      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, first: lines[0] || null, t0, dur: acc - t0, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
+    }
+    const go = (r) => {
+      if (!r.first) return;
+      if (playingRef.current) stopPlayer();
+      const l = r.first; const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
+      setCursor({ shortsNum: pr.shortsNum, n: l.n });
+      setCapSel({ shortsNum: pr.shortsNum, mode: 'lines', items: [info], anchorN: l.n });
+      clipFocusRef.current = true;   // 그룹을 눌렀으니 Home/End 는 이 그룹 안
+      setTimeout(() => { const e = [...document.querySelectorAll('main.pane2 .sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
+    };
+    const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    return (
+      <aside className="pane-groups" data-testid="group-col" title="그룹 — 누르면 그 그룹의 첫 클립으로">
+        <div className="pg-head">그룹 ({rows.length})</div>
+        {rows.map((r) => (
+          <div key={r.num} className="pg-row">
+            <span className="pg-no">{r.num}</span>
+            <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)}>
+              <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
+              <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>그림 없음</em>}<b>{r.text}</b></span>
+              <span className="pg-meta">{mmss(r.t0)} + {Math.round(r.dur)}초 · 클립 {r.n}</span>
+            </button>
+          </div>
+        ))}
+      </aside>
+    );
+  })();
+  const curGroupNum = (() => { if (!cursor) return null; const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n); return l ? l.groupNum : null; })();
+  useEffect(() => {   // 지금 그룹이 칸 안에 보이게(재생·이동을 따라간다)
+    if (!wsOn || curGroupNum == null) return;
+    const e = document.querySelector('[data-testid="group-item"][data-g="' + curGroupNum + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' });
+  }, [wsOn, curGroupNum]);
   // ⏱ ① 칸 아래 「지금 / 전체」 재생시간(v0.6.89 · 로이) — 문장 음성 길이 합(목록 시각·.vrew 와 같다) · 음성이 없는 문장은 2.5초로 어림
   const stageTime = (() => {
     if (!cursor || !dto || !dto.projects) return null;
@@ -4870,6 +4913,7 @@ export default function App() {
             {logBox}
           </section>
           <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절" onMouseDown={startPaneDrag} />
+          {groupCol}
         </>)}
         <main className={wsOn ? 'pane2' : ''}>
           {isRx ? (
