@@ -330,8 +330,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.mouse.move(he.x + he.width / 2, tb.y + Math.min(18, tb.height / 2), { steps: 10 }); await win.mouse.up();
       await win.waitForFunction(() => { const r = document.querySelector('[data-testid=rail][data-g="1"]'); return r && r.querySelector('[data-testid=rail-ext]'); }, null, { timeout: 6000 }).catch(() => {});
       await win.waitForTimeout(600);
-      await win.locator('.clipbar').click(); await win.keyboard.press('Home');
-      for (let i = 1; i < n3; i++) await win.keyboard.press('ArrowDown');
+      for (let i = 0; i < 3 && (await win.locator('.sent.picked').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }   // v0.7.24 고른 클립이 있으면 Home = 그 그룹 처음
+      await win.locator('.clipbar').click(); await win.keyboard.press('Home'); await win.waitForTimeout(200);
+      for (let i = 1; i < n3; i++) { await win.keyboard.press('ArrowDown'); await win.waitForTimeout(150); }   // v0.7.24 Home 은 클립만 고른다 → 첫 ↓ 가 칸을 연다(열리기 전 키는 무시)
       await win.waitForTimeout(500);
       const top = await win.evaluate(() => { const L = [...document.querySelectorAll('#stageVisual .vlayer')]; return L.map((x) => x.dataset.num); });
       ok(top.length === 2 && top[top.length - 1] === '1', `🔑 G2 첫 클립(${n3}) — ① 칸 맨 위 = 늘려 끌어온 G1 (아래→위 ${top.join(' → ')})`);

@@ -3915,11 +3915,18 @@ export default function App() {
   function moveCursor(delta, extend, abs) {
     const PL = cursor && linesMap.get(cursor.shortsNum); if (!PL || !PL.list.length) return;
     const idx = Math.max(0, PL.list.findIndex((x) => x.n === cursor.n));
-    const ni = abs === 'home' ? 0 : abs === 'end' ? PL.list.length - 1 : Math.max(0, Math.min(PL.list.length - 1, idx + delta));
+    // ⌨ Home/End(v0.7.24 로이): 고른 클립이 있으면 **그 그룹**의 첫·마지막 클립, 없으면 대본 첫·마지막 클립 — 자막 칸을 열지 않고 클립을 고른다
+    let gNum = null;
+    if (abs && clipSelOk() && capSel.shortsNum === cursor.shortsNum) {
+      const inSel = capSel.items.find((x) => x.n === cursor.n) || capSel.items[0];
+      gNum = inSel.groupNum;
+    }
+    const inG = gNum == null ? PL.list : PL.list.filter((x) => x.groupNum === gNum);
+    const ni = abs ? PL.list.indexOf(abs === 'home' ? inG[0] : inG[inG.length - 1]) : Math.max(0, Math.min(PL.list.length - 1, idx + delta));
     const l = PL.list[ni];
     const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
     userCursor({ shortsNum: cursor.shortsNum, n: l.n });
-    if (!extend && !playerOpen) { openEditAt(cursor.shortsNum, l.n, null, abs === 'home' ? 'start' : (delta < 0 || abs === 'end') ? 'end' : 'start'); return; }   // ⌨ 키보드로 옮기면 늘 자막 칸에 커서(v0.5.95 로이)
+    if (!extend && !playerOpen && !abs) { openEditAt(cursor.shortsNum, l.n, null, delta < 0 ? 'end' : 'start'); return; }   // ⌨ 키보드로 옮기면 늘 자막 칸에 커서(v0.5.95 로이)
     setCapSel((cur) => {
       if (extend && cur && cur.mode === 'lines' && cur.shortsNum === cursor.shortsNum && cur.anchorN != null) {
         const a = Math.min(cur.anchorN, l.n), b = Math.max(cur.anchorN, l.n);
@@ -3927,7 +3934,7 @@ export default function App() {
       }
       return { shortsNum: cursor.shortsNum, mode: 'lines', items: [info], anchorN: extend ? cursor.n : l.n };
     });
-    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + l.n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' }); }, 0);
+    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: abs ? 'center' : 'nearest' }); }, 0);
   }
   const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
   useEffect(() => {
@@ -3974,7 +3981,12 @@ export default function App() {
       const r = el.getBoundingClientRect();
       // 고른 클립이 화면 밖으로 스크롤돼도 막대는 사라지지 않고 화면 위/아래 가장자리에 붙어 따라온다(로이 2026-09-30 「또 사라졌네」 —
       //   예전엔 숨겨서 스크롤·재생 중 막대가 없어진 것처럼 보였다). 그 클립 위에 있을 땐 전과 같다.
-      const top = Math.round(Math.min(window.innerHeight - 56, Math.max(4, r.top - 44))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
+      //   🔲 가장자리 = 창이 아니라 **목록 칸(스크롤 칸)** 의 위·아래(v0.7.24 로이 「화면 높은 곳으로 올라가 버린다」 — 헤더 위에 떴다)
+      let sc = el.parentElement;
+      while (sc && sc !== document.body) { const oy = getComputedStyle(sc).overflowY; if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight > sc.clientHeight) break; sc = sc.parentElement; }
+      const box = sc && sc !== document.body ? sc.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const minTop = Math.max(4, box.top + 4), maxTop = Math.min(window.innerHeight, box.bottom) - 56;
+      const top = Math.round(Math.max(minTop, Math.min(maxTop, r.top - 44))), left = Math.round(Math.max(4, Math.min(window.innerWidth - 600, r.left + 24)));
       const hidden = false;
       setClipTb((cur) => (cur && cur.top === top && cur.left === left && cur.hidden === hidden ? cur : { top, left, hidden }));
     };

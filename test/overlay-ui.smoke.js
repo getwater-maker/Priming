@@ -135,6 +135,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const ovOnStage = () => win.evaluate(() => !!document.querySelector('#stageVisual .vlayer[data-num^="O"]'));
     await key('Home'); await win.waitForTimeout(300);
     ok(await ovOnStage(), '클립 1: ① 칸 맨 위에 그림');
+    // v0.7.24 — 클립을 고른 채 End 는 그 그룹의 마지막 클립 → 대본 마지막 클립으로 가려면 선택을 먼저 푼다
+    for (let i = 0; i < 3 && (await win.locator('.sent.picked').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
     await key('End'); await win.waitForTimeout(300);
     ok(!(await ovOnStage()), '클립 3: 없다');
     // 현재 클립부터 끝까지

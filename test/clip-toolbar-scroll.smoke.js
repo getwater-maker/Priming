@@ -48,11 +48,36 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
       const t = document.querySelector('[data-testid="clip-tb"]'); const r = t && t.getBoundingClientRect();
       const b = document.querySelector('[data-testid="ctb-del"]'); const br = b && b.getBoundingClientRect();
       const hit = br && document.elementFromPoint(br.left + br.width / 2, br.top + br.height / 2);
-      return { dbg: { picked: [...document.querySelectorAll('.sent.picked')].length, rowExists: !!row, tbAny: !!document.querySelector('.clip-tb'), all5: document.querySelectorAll('.sent[data-ln="5"]').length }, rowOut: !!(rr && (rr.bottom < 0 || rr.top > innerHeight)), tb: !!t, inView: !!(r && r.top >= 0 && r.bottom <= innerHeight), clickable: !!(hit && hit.closest('[data-testid="ctb-del"]')) };
+      let sc = row && row.parentElement;
+      while (sc && sc !== document.body) { const oy = getComputedStyle(sc).overflowY; if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight > sc.clientHeight) break; sc = sc.parentElement; }
+      const sr = sc && sc !== document.body ? sc.getBoundingClientRect() : null;
+      return { inPane: !!(r && sr && r.top >= sr.top && r.bottom <= sr.bottom), paneTop: sr && sr.top, tbTop: r && r.top, dbg: { picked: [...document.querySelectorAll('.sent.picked')].length, rowExists: !!row, tbAny: !!document.querySelector('.clip-tb'), all5: document.querySelectorAll('.sent[data-ln="5"]').length }, rowOut: !!(rr && (rr.bottom < 0 || rr.top > innerHeight)), tb: !!t, inView: !!(r && r.top >= 0 && r.bottom <= innerHeight), clickable: !!(hit && hit.closest('[data-testid="ctb-del"]')) };
     });
     ok(far.rowOut, '판별력: 고른 5번 클립이 실제로 화면 밖으로 밀려났다');
     ok(far.tb && far.inView, '🔑 그래도 막대가 남아 있고 화면 안에 있다');
     ok(far.clickable, '🔑 남은 막대의 🗑 는 실제로 눌리는 자리(elementFromPoint)');
+    ok(far.inPane && far.paneTop > 20, `🔑 막대가 헤더 위로 올라가지 않고 목록 칸 안에 있다(칸 위 ${far.paneTop && Math.round(far.paneTop)} · 막대 위 ${far.tbTop && Math.round(far.tbTop)})`);
+
+    // ⌨ Home/End(v0.7.24): 고른 클립이 있으면 그 그룹의 처음·끝 클립, 없으면 대본 처음·끝 — 자막 칸을 열지 않고 클립을 고른다
+    const pick = async (n) => { const e = win.locator('.sent[data-ln="' + n + '"] .cf-lineno').first(); await e.scrollIntoViewIfNeeded(); await e.click(); await win.waitForTimeout(300); };
+    const state = () => win.evaluate(() => ({ picked: [...document.querySelectorAll('.sent.picked')].map((x) => +x.getAttribute('data-ln')), edit: document.querySelectorAll('textarea:focus').length }));
+    const grp = await win.evaluate(() => { const rows = [...document.querySelectorAll('.sent[data-ln]')].filter((x) => x.offsetParent !== null);
+      const g = (e) => e.closest('.cut[data-g]') ? e.closest('.cut[data-g]').getAttribute('data-g') : null;
+      const by = {}; rows.forEach((e) => { const k = g(e); (by[k] = by[k] || []).push(+e.getAttribute('data-ln')); });
+      const k = Object.keys(by).find((x) => by[x].length >= 3 && by[x][0] > 1); return k ? by[k] : null; });
+    if (grp) {
+      await pick(grp[1]); await win.keyboard.press('End'); await win.waitForTimeout(400);
+      let s = await state(); ok(s.picked.length === 1 && s.picked[0] === grp[grp.length - 1] && s.edit === 0, `End = 그룹 마지막 클립 ${grp[grp.length - 1]} 고름(칸 안 열림) — ${JSON.stringify(s)}`);
+      await win.keyboard.press('Home'); await win.waitForTimeout(400);
+      s = await state(); ok(s.picked.length === 1 && s.picked[0] === grp[0] && s.edit === 0, `Home = 그룹 첫 클립 ${grp[0]} 고름 — ${JSON.stringify(s)}`);
+    } else ok(false, '그룹 찾기 실패(.cut[data-g])');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(300);
+    await win.evaluate(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); });
+    let s2 = await state();
+    if (s2.picked.length) { await win.keyboard.press('Escape'); await win.waitForTimeout(300); s2 = await state(); }
+    ok(s2.picked.length === 0, `판별력: 고른 클립 없음 ${JSON.stringify(s2)}`);
+    await win.keyboard.press('End'); await win.waitForTimeout(500);
+    s2 = await state(); ok(s2.picked.length === 1 && s2.picked[0] === total && s2.edit === 0, `선택 없이 End = 마지막 클립 ${total} — ${JSON.stringify(s2)}`);
     ok(errs.length === 0, `화면 오류 0건 ${errs.slice(0, 2).join(' | ')}`);
   } finally {
     try { await win.evaluate(async (n) => { await window.api.removePreset({ name: n }); }, chan); } catch (_) {}
