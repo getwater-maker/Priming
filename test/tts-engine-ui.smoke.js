@@ -87,6 +87,24 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     const nGrant = await cards.count();
     ok(nGrant > 10 && nGrant < 97, `검색 「Grant」 거르기 (${nGrant}개)`);
     await win.locator('[data-testid="tts-voice-q"]').fill('');
+    // 🔎 성별·연령대 거르기(로이 2026-10-06 「언어·성별·연령대로 구분해서」) — 선택지에 개수 · 고르면 그 수만큼만 보인다
+    {
+      const gl = await win.locator('[data-testid="tts-voice-gender"] option').allInnerTexts();
+      const num = (k) => Number(((gl.find((t) => t.includes(k)) || '').match(/\((\d+)\)/) || [])[1] || 0);
+      const nM = num('남성'), nF = num('여성'), nN = num('미표시');
+      ok(nM > 0 && nF > 0 && nM + nF + nN === 97, `성별 선택지에 개수(남 ${nM} · 여 ${nF} · 미표시 ${nN} = 97)`);
+      await win.locator('[data-testid="tts-voice-gender"]').selectOption('male'); await win.waitForTimeout(200);
+      ok((await cards.count()) === nM, `성별 ♂ 남성만 = ${nM}개 (${await cards.count()})`);
+      await win.locator('[data-testid="tts-voice-gender"]').selectOption('female'); await win.waitForTimeout(200);
+      ok((await cards.count()) === nF, `성별 ♀ 여성만 = ${nF}개 (${await cards.count()})`);
+      await win.locator('[data-testid="tts-voice-gender"]').selectOption(''); await win.waitForTimeout(100);
+      ok((await win.locator('[data-testid="tts-voice-age"] option').count()) >= 5, '연령대 선택지(전체 · 어린이·청소년 · 청년 · 중년 · 노년 …)');
+      await win.locator('[data-testid="tts-voice-age"]').selectOption('young'); await win.waitForTimeout(200);
+      const nY = await cards.count();
+      ok(nY < 97, `연령대 청년만 → 거른다(MAI 는 연령 정보가 거의 없어 ${nY}개)`);
+      await win.locator('[data-testid="tts-voice-age"]').selectOption(''); await win.waitForTimeout(150);
+      ok((await cards.count()) === 97, '연령대 전체로 되돌리면 97개');
+    }
     await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"]').click();
     await win.waitForTimeout(150);
     const haena = await win.locator('[data-testid="tts-voice-card"][data-voice="ko-KR-Haena"]').innerText();

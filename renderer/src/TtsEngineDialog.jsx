@@ -5,6 +5,7 @@
 //   🔑 저장은 main(tts-engines-save) 한 곳 — 채널 = preset.voiceEngine(+OmniVoice 면 참조음성) · 키 원문은 받지 않는다.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from './lib/ipc.js';
+import VF from '../../core/voice-facets.js';   // 성별·연령대 판별(거르기)
 
 const media = (p, version = '') => 'media://' + encodeURIComponent(p) + (version ? `?v=${encodeURIComponent(version)}` : '');
 const G_ICON = { male: '♂', female: '♀', neutral: '⚲' };
@@ -62,6 +63,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const [samples, setSamples] = useState({});      // 엔진 → { 'model|voice|style': {file, sec} }
   const [q, setQ] = useState('');
   const [fg, setFg] = useState('');
+  const [fa, setFa] = useState('');   // 연령대 거르기(''|child|young|middle|old|none)
   const [fl, setFl] = useState({});
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
@@ -346,10 +348,12 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const koView = (v) => ({ ...v, base: String(v.name || '').split(' - ')[0], name: trName(v), desc: tr[v.desc] || v.desc, lang: langLabel(v.lang), orig: [v.name, v.desc, v.lang].filter(Boolean).join('\n') });
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return list.filter((v) => (!fg || v.gender === fg) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
+    return list.filter((v) => VF.matchFacets(v, fg, fa) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
       && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v)].join(' ').toLowerCase().includes(qq)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, q, fg, lang, tr]);
+  }, [list, q, fg, fa, lang, tr]);
+  // 성별·연령대 선택지의 「(n)」 — 고른 언어 안에서 센다(다른 거르기는 반영하지 않아 어느 쪽이 얼마나 있는지 한눈에)
+  const fcount = useMemo(() => VF.facetCounts(list.filter((v) => !lang || langOf(v) === lang || langOf(v) === '다국어')), [list, lang]);
   // 보이는 카드의 영어 글을 120개씩 모아 번역을 부탁한다 — 한 번에 하나 · 돌아오면 나머지 · 실패한 글은 다시 묻지 않는다
   useEffect(() => {
     if (trBusyRef.current) return;
@@ -505,7 +509,17 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 <b>목소리</b><span className="meta">{shown.length}개{selVoice ? ` · ✔ ${koView(selVoice).name}` : ''}</span>
                 <span style={{ flex: 1 }} />
                 <input data-testid="tts-voice-q" placeholder="🔍 검색" style={{ width: 140 }} value={q} onChange={(ev) => setQ(ev.target.value)} />
-                {tab !== 'omnivoice' && (<select value={fg} onChange={(ev) => setFg(ev.target.value)}><option value="">성별 전체</option><option value="male">♂ 남성</option><option value="female">♀ 여성</option></select>)}
+                {/* 언어 · 성별 · 연령대 — 엔진마다 정보가 달라 core/voice-facets 가 같은 말로 맞춘다(표시 없는 목소리는 「미표시」로 따로) */}
+                <select data-testid="tts-voice-gender" value={fg} onChange={(ev) => setFg(ev.target.value)} title="성별로 거르기">
+                  <option value="">성별 전체</option>
+                  <option value="male">♂ 남성 ({fcount.gender.male})</option><option value="female">♀ 여성 ({fcount.gender.female})</option>
+                  {fcount.gender.none > 0 && <option value="none">⚲ 미표시 ({fcount.gender.none})</option>}
+                </select>
+                <select data-testid="tts-voice-age" value={fa} onChange={(ev) => setFa(ev.target.value)} title="연령대로 거르기(엔진이 알려 주거나 이름·설명에 있는 것만)">
+                  <option value="">연령대 전체</option>
+                  {VF.AGE_ORDER.map((k) => <option key={k} value={k}>{VF.AGE_LABEL[k]} ({fcount.age[k]})</option>)}
+                  {fcount.age.none > 0 && <option value="none">미표시 ({fcount.age.none})</option>}
+                </select>
                 {langs.length > 1 && (<select data-testid="tts-voice-lang" value={lang} onChange={(ev) => setFl((x) => ({ ...x, [tab]: ev.target.value }))}><option value="">언어 전체</option>{langs.map((l) => <option key={l} value={l}>{l}</option>)}</select>)}
                 {busyBatch
                   ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 멈춤</button>
@@ -617,12 +631,13 @@ export function Face({ face, name, gender, size = 44, square }) {
 // 카드 — 얼굴 · 이름(성별) · 언어 · 설명 2줄 · 듣기. 얼굴 버튼(🖼 🎨 ✕)은 마우스를 올렸을 때만.
 function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, users, onPick, onPlay, onFacePick, onFaceAi, onFaceClear, onDelete }) {
   const playing = busy === 'play:' + v.id;
-  const meta = [v.lang, v.badge].filter(Boolean).join(' · ');
+  const gKey = VF.genderOf(v), aKey = VF.ageOf(v);
+  const meta = [v.lang, aKey ? VF.AGE_LABEL[aKey] : '', v.badge].filter(Boolean).join(' · ');
   return (
     <div role="button" tabIndex={0} className="vc" data-testid="tts-voice-card" data-voice={v.id} onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter') onPick(); }}
       style={{ border: '1.5px solid ' + (sel ? BLUE : 'var(--line)'), background: sel ? 'rgba(37,99,235,0.08)' : 'var(--bg2, transparent)', borderRadius: 10, padding: 8, cursor: 'pointer', display: 'flex', gap: 8, minHeight: 92 }}>
       <div style={{ position: 'relative', flex: '0 0 auto' }}>
-        <Face face={face} name={v.base || v.name} gender={v.gender} size={48} />   {/* 첫 글자는 이름에서(번역된 소개가 아니라) */}
+        <Face face={face} name={v.base || v.name} gender={gKey} size={48} />   {/* 첫 글자는 이름에서(번역된 소개가 아니라) */}
         <div className="vc-tools" style={{ display: 'flex', gap: 1, justifyContent: 'center', marginTop: 3 }} onClick={(e) => e.stopPropagation()}>
           <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} title="얼굴 그림 넣기(파일)" onClick={onFacePick}>🖼</button>
           <button className="ghost" style={{ padding: '0 3px', fontSize: 10 }} disabled={!!busy && busy !== 'play:' + v.id} title="AI 로 얼굴 그리기(🖥 로컬 ComfyUI · 무료)" onClick={onFaceAi}>{busy === 'face:' + v.id ? '⏳' : '🎨'}</button>
@@ -633,7 +648,7 @@ function VoiceCard({ v, sel, playingNow, face, busy, sampled, sampleCost, krw, u
         {/* 🔑 줄마다 flexShrink 0 — 줄이 줄어들 수 있으면 카드가 최소 높이(92)에 머물고 언어 줄이 0px 로 눌렸다(v0.6.84 · 로이 캡처) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           <span style={{ fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.orig ? v.name + '\n\n원문:\n' + v.orig : v.id}>{sel ? '✔ ' : ''}{v.name}</span>
-          {G_ICON[v.gender] && <span title={v.gender} style={{ opacity: 0.7 }}>{G_ICON[v.gender]}</span>}
+          {G_ICON[gKey] && <span title={gKey === 'male' ? '남성' : '여성'} style={{ opacity: 0.7 }}>{G_ICON[gKey]}</span>}
         </div>
         {meta && <div className="meta" style={{ fontSize: 11, lineHeight: '15px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta}</div>}
         {/* 설명은 첫 줄만(v0.6.85 · 로이 「글자가 너무 많다」) — 전체는 마우스를 올리면 */}
