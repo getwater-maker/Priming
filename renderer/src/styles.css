@@ -1058,6 +1058,11 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 
 .bkisbn-bad{display:block;color:#c62828;font-weight:600;font-size:11px;margin-top:2px}
 .bkisbn{display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+/* 🔢 한 줄 = 라벨(고정 폭) + 칸(남는 폭 전부) — 판권 탭·부크크 등록 탭에서 같은 모양. 칸이 라벨 길이에 따라 들쭉날쭉하던 것을 맞춘다(2026-10-07) */
+.bkisbn label{display:grid;grid-template-columns:84px minmax(0,1fr);align-items:center;gap:2px 8px;font-size:12.5px;color:var(--base);margin:0}
+.bkisbn label>span:first-child{white-space:nowrap;font-weight:600}
+.bkisbn label input[type=text]{width:100%;box-sizing:border-box;min-width:0;padding:5px 8px;font-size:13px;font-variant-numeric:tabular-nums}
+.bkisbn label .bkisbn-bad{grid-column:2;margin-top:0}
 
 /* 🎞 가운데 그룹 칸(v0.7.30) — Vrew 씬 칸 모양: 번호 · 제목줄 · 그림(자막 얹음) · 시각 + 길이 */
 .pane-groups{flex:0 0 190px;width:190px;overflow-y:auto;border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--bg,#faf6f0);padding:8px 8px 28px;display:flex;flex-direction:column;gap:10px}

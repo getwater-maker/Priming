@@ -39,7 +39,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 맨 위에 세 칸');
     for (const k of ['ebookIsbn', 'isbn', 'issueDate']) ok(await win.locator('[data-testid=rg-' + k + ']').count() === 1, '칸: ' + k);
     ok(await win.locator('[data-testid=rg-ebookIssueDate]').count() === 0 && await win.locator('[data-testid=rg-box] .bkisbn-grid').count() === 0, '종이책/전자책 상자(격자)는 없다 — 세 칸만');
-    { const ys = await win.evaluate(() => ['ebookIsbn', 'isbn', 'issueDate'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2], '순서: 전자책 ISBN → 종이책 ISBN → 발행일'); }
+    { const ys = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIsbn'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2], '순서: 발행일 → 종이책 ISBN → 전자책 ISBN (2026-10-07 로이)'); }
     ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '기존 발행일이 칸에 보인다');
 
     // 틀린 번호 → ⚠ (판정력) · 맞는 번호 → ✅
@@ -64,7 +64,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     // 선택 목록에 같은 칸이 또 있지 않다(두 벌 금지)
     const labels = await win.locator('[data-tab=colophon]').count();
     const dup = await win.evaluate(() => [...document.querySelectorAll('.bkform label > span')].map((x) => x.textContent.trim()).filter((t) => /ISBN/.test(t)));
-    ok(JSON.stringify(dup) === JSON.stringify(['전자책 ISBN', '종이책 ISBN']), '판권 탭의 ISBN 칸은 맨 위 두 칸뿐(같은 칸이 또 있지 않다) — ' + JSON.stringify(dup));
+    ok(JSON.stringify(dup) === JSON.stringify(['종이책 ISBN', '전자책 ISBN']), '판권 탭의 ISBN 칸은 맨 위 두 칸뿐(같은 칸이 또 있지 않다) — ' + JSON.stringify(dup));
     // 📜 판권 입력 폼 — 판권에 찍히는 줄을 칸에 적으면 그대로 실린다(고지문 줄 · 저작권 · 재사용 안내문 · 고정 항목)
     ok(await win.locator('[data-testid=bk-colophon-form]').count() === 1, '판권 탭 = 입력 폼');
     for (const k of ['author', 'translator', 'issuer', 'publisher', 'regNo', 'address', 'phone', 'email', 'homepage']) ok(await win.locator('[data-testid=bk-cp-' + k + ']').count() === 1, '판권 칸: ' + k);

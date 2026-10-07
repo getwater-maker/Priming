@@ -3612,6 +3612,25 @@ export default function App() {
       }
     }
     for (const im of v.querySelectorAll('img.kb')) { im.style.animation = 'none'; void im.offsetWidth; im.style.animation = ''; }
+    // 🎞 켄번스 = 그림이 보이는 **그룹 길이 전체**에 걸쳐 일정 속도로(2026-10-07 로이 — CSS 기본 7초·ease-out 이라 초반에만 움직이고 멈춘 듯 보였다).
+    //   MP4(core/vrew-render kenBurnsFilter)와 같은 규칙. 재생 중 중간에서 다시 깔면 흐른 시간만큼 건너뛴 데서 잇는다.
+    if (pr) for (const L of layers) {
+      if (L.ovId || L.videoPath) continue;
+      const im = v.querySelector('.vlayer[data-num="' + L.num + '"] img.kb'); if (!im) continue;
+      const tot = kbTotalSec(pr, L);
+      im.style.animationDuration = tot.toFixed(2) + 's'; im.style.animationTimingFunction = 'linear';
+      if (playingRef.current) {
+        const so = L.span ? L.span.from : ordOf(pr, L, 0);
+        const t = secBetween(pr, so, ordOf(pr, c, sentIdx || 0)) + (Number(extraSec) || 0);
+        if (t > 0.05) im.style.animationDelay = (-Math.min(t, tot)).toFixed(2) + 's';
+      }
+    }
+  }
+  // 그림 하나가 화면에 머무는 전체 시간(초) — 그림 범위(span)가 있으면 그 문장들, 없으면 그 그룹 문장 전부
+  function kbTotalSec(pr, L) {
+    const so = L.span ? L.span.from : ordOf(pr, L, 0);
+    const n = L.span ? (L.span.to - L.span.from + 1) : ((L.sentences || []).length || 1);
+    return Math.max(2, secBetween(pr, so, so + n));
   }
   // ⏸ ① 칸 평소 화면 = 커서 클립의 **정지 장면**(v0.5.62 · 로이) — 재생할 때만 움직인다.
   //   영상은 멈춘 채 「그 클립이 보일 때 흐른 시간」으로 옮기고, 켄번스 그림은 같은 시점에서 멈춘다(재생과 같은 규칙).
@@ -3631,7 +3650,11 @@ export default function App() {
         if (vv.readyState >= 1) seek(); else vv.addEventListener('loadedmetadata', seek, { once: true });
       }
       const im = el.querySelector('img.kb');
-      if (im) { im.style.animationPlayState = 'paused'; im.style.animationDelay = (-Math.min(t, 7)).toFixed(2) + 's'; }
+      if (im) {
+        const tot = (!L.ovId && !L.videoPath) ? kbTotalSec(pr, L) : 7;   // 그룹 길이 전체(setVisual 과 같은 규칙)
+        im.style.animationDuration = tot.toFixed(2) + 's'; im.style.animationTimingFunction = 'linear';
+        im.style.animationPlayState = 'paused'; im.style.animationDelay = (-Math.min(t, tot)).toFixed(2) + 's';
+      }
     }
   }
   const visKeyAt = (c, pr, sentIdx, rg) => (pr ? visLayersAt(pr, c, sentIdx, rg) : [c]).map(visKey).join('/') || ('none|' + (c ? c.num : ''));

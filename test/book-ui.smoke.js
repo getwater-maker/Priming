@@ -167,7 +167,8 @@ ${para}
       await one('bk-register-cover', '종이책 이어 채우기'); await one('bk-register-ebook-resume', '전자책 이어 채우기');
       await one('bk-paper-price-row', '종이책 정가 줄');
       await one('bk-pdf-print', '종이책 만들기'); await one('bk-epub', '전자책 만들기'); await one('bk-epubcheck', 'ePub 검증'); await one('bk-pdf-ebook', '전자책 PDF');
-      if (await win.locator('[data-testid=bk-build-all]').count() !== 0) throw new Error('「한 번에 만들기」 버튼이 남아 있다(종이책·전자책은 ISBN 이 달라 따로 만든다 — 제거됐어야 한다)');
+      await one('bk-build-both', '종이책 + 전자책 한 번에 만들기 (v0.7.43 — 로이 2026-10-07 재요청)');
+      if (await win.locator('[data-testid=bk-build-all]').count() !== 0) throw new Error('옛 「한 번에 만들기」(bk-build-all) 버튼이 남아 있다 — 새 버튼은 bk-build-both');
       if (await win.locator('[data-testid=bk-register-both]').count() !== 0) throw new Error('「종이책 → 전자책 한 번에 등록」 버튼이 남아 있다(제거됐어야 한다)');
       await win.waitForSelector('[data-testid=bk-reg] [data-testid=bk-preflight]', { timeout: 8000 }).catch(() => {});
       if (await win.locator('[data-testid=bk-reg] [data-testid=bk-preflight]').count() !== 1) throw new Error('출고 전 점검 패널이 1개가 아니다');

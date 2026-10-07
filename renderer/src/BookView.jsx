@@ -494,6 +494,14 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     } catch (e) { logline('ePub 오류: ' + e.message); }
     setBuilding(false); refreshOutputs();
   }
+  // 📦 종이책 → 전자책 차례로 한 번에(로이 2026-10-07 — 「한 번에 만들기」 다시 요청). 두 판은 ISBN·판권·정가가 달라 **따로 만들어진다**(합치지 않고 이어서 실행만).
+  //   종이책이 실패해도 전자책은 계속 만든다. 끝나면 폴더를 열지 않는다(quiet).
+  async function buildBoth() {
+    if (building || epubChkBusy) return;
+    await buildPdf('print', true);
+    await buildEpubFile(true);
+    setStatus('📦 종이책 → 전자책 만들기 끝 — 각각 완성 파일에서 확인하세요');
+  }
   // 📱 전자책 미리보기 — 부크크에 올라가는 실제 ePub 을 임시로 만들어 문서(spine)를 차례로 보여 주고 사전 점검을 돌린다
   async function loadEbookDoc(docs, n) {
     const d = docs[n - 1]; if (!d) return;
@@ -733,9 +741,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     );
     return (
       <div className="bkisbn" data-testid={idp + '-box'}>
-        {one('ebookIsbn', '전자책 ISBN')}
-        {one('isbn', '종이책 ISBN')}
         {one('issueDate', '발행일', '', true)}
+        {one('isbn', '종이책 ISBN')}
+        {one('ebookIsbn', '전자책 ISBN')}
       </div>
     );
   };
@@ -863,8 +871,11 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           )}
         </div>
 
-        {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 따로 만든다(로이 2026-10-07: 「한 번에 만들기」 폐기) */}
+        {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 각각 만들어진다. 「한 번에」 = 종이책 → 전자책을 이어서 실행(로이 2026-10-07 재요청) */}
         <div className="bkzone">📦 만들기</div>
+        <div className="bkactions">
+          <button disabled={building || epubChkBusy} data-testid="bk-build-both" title="종이책(내지·표지 PDF) → 전자책(ePub + 검증)을 차례로 만듭니다 — 판권은 각각 종이책 ISBN·전자책 ISBN 으로" onClick={buildBoth}>{building ? '⏳ 생성 중…' : '📦 종이책 + 전자책 한 번에'}</button>
+        </div>
         <div className="bkactions">
           <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 ISBN·정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
           <button disabled={building || epubChkBusy} data-testid="bk-epub" title="부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 + 규격 검증 — 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·인쇄 표지 앞면 순" onClick={() => buildEpubFile()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
