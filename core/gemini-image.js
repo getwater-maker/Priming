@@ -4,6 +4,7 @@
 //   즉시 모드: generateContent(responseModalities:['IMAGE']) → 인라인 base64 이미지.
 //   배치 모드: (예정) Gemini Batch API — 50% 저렴, 비동기 제출→회수.
 // 모델명은 설정 가능(gemini-image-config). 기본 'gemini-3.1-flash-lite-image'(2026-06 출시).
+// 나노바나나 2.1(2026-10-06 GA)은 모델 칸에 `gemini-nano-banana-2.1` 을 넣으면 같은 경로로 쓴다(generateContent·배치 동일).
 // 키는 secret-store 'gemini'(음성 Gemini·프롬프트 API 와 공용).
 // ─────────────────────────────────────────────────────────────────────────────
 const fs = require('fs');

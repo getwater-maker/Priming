@@ -6061,8 +6061,15 @@ export default function App() {
                   {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 오른쪽 모델명이 지금 통하는지 확인합니다(무료 조회)')}
                   {giCfg && (<>
                     <span className="kp-lab">모델</span>
-                    <input className="kp-model" value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
+                    <input className="kp-model" list="gi-models" value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
                       onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
+                    <datalist id="gi-models">
+                      <option value="gemini-nano-banana-2.1">나노바나나 2.1 (2026-10 새 버전)</option>
+                      <option value="gemini-3.1-flash-lite-image">나노바나나 2 Lite (저렴·배치)</option>
+                      <option value="gemini-3.1-flash-image-preview">나노바나나 2</option>
+                    </datalist>
+                    <button className="ghost" title="모델을 나노바나나 2.1(gemini-nano-banana-2.1)로 바꿉니다. 칸을 눌러 목록에서 2 Lite·2 로 되돌릴 수도 있습니다."
+                      onClick={() => saveGiCfg({ model: 'gemini-nano-banana-2.1' })}>2.1 로</button>
                   </>)}
                 </div>
                 {keyChkMark('gemini')}
