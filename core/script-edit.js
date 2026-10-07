@@ -187,7 +187,38 @@ function sameSequence(a, b) {
   return true;
 }
 
+/**
+ * 🎭 편집칸에 `[이름] 대사` 로 쓴 글에서 화자를 뗀다 — { name, body } | null.
+ *   화자는 대본에서 **줄 맨 앞의 `[이름] `** 로만 정해진다(core/sentence-splitter SPEAKER_LINE_RE) — 편집칸 글을 그대로 문단 속에 넣으면
+ *   `[이름]` 이 자막 글자로만 남고 화자는 안 바뀐다.
+ */
+function splitSpeakerPrefix(text) {
+  const m = String(text == null ? '' : text).replace(/[\r\n]+/g, ' ').match(require('./sentence-splitter').SPEAKER_LINE_RE);
+  return m ? { name: m[1].trim(), body: m[2].trim() } : null;
+}
+
+/**
+ * 🎭 span(문장 자리)의 문장을 `[이름] 본문` **자기 줄**로 만든다 — 앞뒤에 같은 줄의 다른 문장이 있으면 따로 줄을 나눠 남긴다
+ *   (원래 그 줄이 화자 줄이면 앞뒤 조각은 원래 화자를 그대로 유지). 줄 밖은 건드리지 않는다.
+ */
+function withSpeakerLine(raw, span, body, name) {
+  raw = String(raw);
+  const ls = raw.lastIndexOf('\n', span.start - 1) + 1;
+  let le = raw.indexOf('\n', span.end); if (le < 0) le = raw.length;
+  let before = raw.slice(ls, span.start), after = raw.slice(span.end, le);
+  const cr = after.endsWith('\r') ? '\r' : ''; if (cr) after = after.slice(0, -1);
+  const pm = before.match(/^\s*(\[[^\]\n]{1,12}\]\s+)/);
+  const prefix = pm ? pm[1].trim() + ' ' : '';
+  if (pm) before = before.slice(pm[0].length);
+  const lines = [];
+  if (before.trim()) lines.push(prefix + before.trim());
+  lines.push('[' + name + '] ' + body);
+  if (after.trim()) lines.push(prefix + after.trim());
+  return raw.slice(0, ls) + lines.join(cr + '\n') + cr + raw.slice(le);
+}
+
 module.exports = {
   sigOf, isIgnorable, buildMask, buildIndex, locateSentences,
   normalizeEditText, planEdit, expectedTexts, sameSequence,
+  splitSpeakerPrefix, withSpeakerLine,
 };

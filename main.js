@@ -7903,8 +7903,16 @@ async function _editSentences(args = {}) {
   try { ensureRoyMarks(S.parsed); } catch (_) {}   // 🟥·🟨 표시를 지금 대본 기준으로(고친 문장이 어느 표시에 드는지 아래에서 본다)
   const raw = fs.readFileSync(S.scriptPath, 'utf8');
   const texts = pr.sentences.map((s) => s.text);
-  const plan = SE.planEdit({ raw, texts, from, count: n, newText: text });
+  // 🎭 편집칸에 `[이름] 대사` 로 썼으면 화자를 바꾼다 — 화자는 대본 줄 맨 앞 `[이름] ` 으로만 정해지므로 그 문장을 자기 줄로 만든다
+  //   (안 하면 `[이름]` 이 자막 글자로만 남는다). 지금 화자와 같으면 접두만 뗀다. 한 문장 고치기에서만.
+  let spkNew = null, editText = text;
+  if (n === 1) {
+    const sp = SE.splitSpeakerPrefix(text);
+    if (sp) { editText = sp.body; if (sp.name !== (gs[si].speaker || null)) spkNew = sp.name; }
+  }
+  const plan = SE.planEdit({ raw, texts, from, count: n, newText: editText });
   if (!plan.ok) return { ok: false, error: plan.error };
+  if (spkNew) plan.raw = SE.withSpeakerLine(raw, plan.span, SE.normalizeEditText(editText), spkNew);
 
   // 🔑 검증 재파싱 — 고친 .md 가 **정말 우리가 의도한 문장들**을 만들어 내는지 확인한다.
   //   이게 없으면 매칭이 한 글자만 어긋나도 .md 와 화면이 갈린 채 조용히 진행된다.
@@ -7915,6 +7923,13 @@ async function _editSentences(args = {}) {
   }
   if (!after || !SE.sameSequence(expect, after.sentences.map((s) => s.text))) {
     return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.\n(따옴표·특수기호·줄바꿈을 빼고 다시 시도해 보세요.)' };
+  }
+  if (spkNew) {   // 🎭 화자 검증 — 고친 자리는 새 화자, 나머지 문장의 화자는 그대로여야 한다
+    const want = pr.sentences.map((s) => s.speaker || null);
+    want.splice(from, n, ...plan.newTexts.map(() => spkNew));
+    if (want.length !== after.sentences.length || want.some((w, i) => w !== (after.sentences[i].speaker || null))) {
+      return { ok: false, error: '화자를 바꾸면 이 줄의 다른 문장 화자가 달라집니다 — 안전을 위해 취소했습니다.\n대본(.md)에서 직접 [이름] 을 붙이세요.' };
+    }
   }
 
   // ── 여기서부터 실제 반영 ── (.md 먼저, 그다음 파싱본 — .md 쓰기가 실패하면 화면도 안 바꾼다)
@@ -7938,14 +7953,14 @@ async function _editSentences(args = {}) {
     // 합친 그룹의 챕터 표식은 그 자리의 첫 문장을 따라간다(나누거나 고쳐도 챕터가 안 사라지게)
     if (ti === 0 && old[0].chapterMark) s.chapterMark = old[0].chapterMark;
     // 화자는 같은 자리의 옛 문장을 따른다(나누면 조각 모두 · 합치면 첫 문장). .md 의 [이름] 접두는 그대로 남아 있다.
-    const _spk = old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
+    const _spk = spkNew || old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
     if (_spk) s.speaker = _spk;
     if (_spansMoved && _spansMoved[ti] && _spansMoved[ti].length) s.capSpans = _spansMoved[ti];
     // ✂ 사람이 정한 줄 나눔 — 한 문장을 고쳐 한 문장이 되면 새 글 위치로 옮긴다(나누거나 합치면 풀린다 = 자동 줄바꿈)
     if (old.length === 1 && plan.newTexts.length === 1 && old[0].capBreaks) { const nb = require('./core/caption-splitter').remapBreaks(old[0].text, t, old[0].capBreaks); if (nb) s.capBreaks = nb; }
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
-    if (keep && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {
+    if (keep && !spkNew && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {   // 화자가 바뀌면 옛 목소리 음성은 쓰지 않는다
       s.ttsAudioPath = keep.ttsAudioPath; s.ttsDurationSec = keep.ttsDurationSec; s.ttsStatus = 'done';
     }
     return s;
