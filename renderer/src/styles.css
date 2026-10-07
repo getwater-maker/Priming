@@ -1105,3 +1105,40 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .ai-grid button.on i{background:#fff}
 .ai-xy{display:flex;flex-direction:column;gap:6px;justify-content:center}
 .ai-xy>div{display:flex;align-items:center;gap:6px}
+
+/* ⚙ 설정 팝업 — 다시 정리(v0.7.39 · 로이 「전체 디자인을 깔끔하게 · 설명글은 마우스를 올릴 때만」)
+   · 머리(제목 + ✕) · 한 줄 탭 · 안에서 스크롤되는 본문 · 아래 고정 줄(결과·닫기) — 탭을 바꿔도 창 크기가 그대로
+   · 본문 안 칸은 한 벌의 모양(라벨 열 고정 · 둥근 입력칸 · 포커스 링) */
+.modal-card.settings-card{width:900px;max-width:96vw;height:min(82vh,740px);max-height:none;display:flex;flex-direction:column;overflow:hidden;padding:0;border-radius:16px}
+.settings-card .st-head{display:flex;align-items:center;justify-content:space-between;padding:16px 22px 10px}
+.settings-card .st-head h3{margin:0;font-size:17px}
+.settings-card .st-x{border:none;background:transparent;color:#9a8e80;font-size:15px;padding:4px 9px;border-radius:8px}
+.settings-card .st-x:hover{background:#f3ece0;color:var(--strong)}
+.settings-card .st-tabs{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--line);overflow-x:auto;flex:0 0 auto;scrollbar-width:none}
+.settings-card .st-tabs::-webkit-scrollbar{display:none}
+.settings-card .st-tabs button{background:transparent;border:none;border-bottom:2.5px solid transparent;border-radius:0;color:#8a7f72;font-size:13px;font-weight:600;padding:9px 12px 8px;white-space:nowrap;margin-bottom:-1px}
+.settings-card .st-tabs button:hover{background:transparent;color:var(--strong);border-bottom-color:#e6d6bd}
+.settings-card .st-tabs button.on{color:var(--accent-d);border-bottom-color:var(--accent);font-weight:800}
+.settings-card .st-body{flex:1 1 auto;overflow-y:auto;padding:16px 22px 12px}
+.settings-card .st-foot{margin:0;padding:10px 22px 14px;border-top:1px solid var(--line);flex:0 0 auto}
+.settings-card .st-body .frow{gap:10px;margin:9px 0}
+.settings-card .st-body .frow>label:first-child{width:118px;color:var(--base);font-size:13px;font-weight:600}
+.settings-card .st-body input:not([type=checkbox]):not([type=radio]):not([type=range]),
+.settings-card .st-body select,
+.settings-card .st-body textarea{border:1px solid #e4d9c8;border-radius:8px;padding:7px 10px;font-size:13px;background:#fff;color:var(--strong);font-family:inherit;min-height:34px}
+.settings-card .st-body input:focus,.settings-card .st-body select:focus,.settings-card .st-body textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(212,165,116,.22)}
+.settings-card .st-body input[readonly]{background:#f6f0e6;color:#8a7f72}
+.settings-card .st-body input[type=checkbox]{accent-color:var(--accent-d)}
+.settings-card .st-body button{padding:6px 12px;font-size:12.5px;border-radius:8px}
+.settings-card .st-body .subhead{margin:16px 0 6px;font-size:12px;letter-spacing:.3px;color:#8a6f45;border-top:none;padding-top:0}
+.settings-card .st-body [style*="background: rgb(251, 246, 238)"]{border-radius:12px !important;padding:12px 14px !important}
+.settings-card .st-body hr{border:none;border-top:1px solid var(--line);margin:12px 0}
+/* 설명글 → 「ⓘ 설명」 — 올리면(또는 키보드 포커스) 말풍선으로 */
+.hint{position:relative;display:block;width:fit-content;margin:2px 0 4px;outline:none}
+.hint-i{display:inline-block;font-size:13px;line-height:1;color:#a3978a;cursor:help;padding:3px 6px;border-radius:10px;border:1px solid transparent;user-select:none}
+.hint:hover .hint-i,.hint:focus .hint-i{color:var(--accent-d);background:#f6ecdc;border-color:#ead9bd}
+.hint-pop{display:none;position:absolute;left:0;top:calc(100% + 4px);z-index:30;width:min(520px,72vw);padding:10px 12px;background:#fff;color:#5b5247;font-size:12px;line-height:1.55;border:1px solid #e4d9c8;border-radius:10px;box-shadow:0 8px 24px rgba(60,40,10,.18)}
+.hint:hover .hint-pop,.hint:focus .hint-pop{display:block}
+.hint-pop b{color:var(--strong)}
+.settings-card .frow>.hint{margin:0 auto 0 0;flex:0 0 auto}
+.settings-card .frow>.hint .hint-pop{left:auto;right:auto}

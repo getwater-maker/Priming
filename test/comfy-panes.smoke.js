@@ -184,13 +184,24 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     await win.waitForTimeout(250);
     const free = await win.evaluate(() => {
       const c = document.querySelector('.modal-card');
-      return { text: c.innerText, opts: [...c.querySelectorAll('select option')].map((o) => o.value) };
+      return { text: c.textContent, opts: [...c.querySelectorAll('select option')].map((o) => o.value) };
     });
     ok(free.text.includes('LoRA 학습용 이미지 수집'), 'LoRA 수집 섹션이 설정 탭으로 옮겨졌다');
     ok(free.text.includes('트리거'), 'LoRA 트리거 입력이 있다');
     ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
     ok(free.text.includes('이어받지 않습니다'), 'Flow·Genspark 는 서로 이어받지 않는다는 안내가 있다');
     ok(free.text.includes('구독') && !free.text.includes('무료'), '탭 안내가 「구독 요금제」로 정정됐다(무료 아님)');
+    // 💡 설명글은 평소엔 안 보이고 ⓘ 에 마우스를 올릴 때만 말풍선으로 뜬다(v0.7.39)
+    {
+      const hint = win.locator('.settings-card .hint').first();
+      ok(await win.locator('.settings-card .hint').count() >= 1, '설정 탭에 ⓘ 설명이 있다');
+      ok(!(await hint.locator('.hint-pop').isVisible()), '설명글은 평소에 보이지 않는다');
+      await hint.locator('.hint-i').hover();
+      await win.waitForTimeout(200);
+      ok(await hint.locator('.hint-pop').isVisible(), 'ⓘ 에 마우스를 올리면 설명이 뜬다');
+      await win.mouse.move(5, 5);
+      ok(!(await win.locator('.settings-card .hint-pop').first().isVisible()), '마우스를 치우면 사라진다');
+    }
     ok(!free.text.includes('되돌아가'), '옛 「원래 엔진으로 되돌아간다」 안내는 없다');
     await win.click('.modal-card button:has-text("닫기")');
 

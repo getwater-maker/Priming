@@ -133,7 +133,7 @@ function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
   return (<>
     <div className="nowuse">
       <span>지금 보내는 곳 <b>{cloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}</b>{wfName ? <> · 모델 <b>{wfName}</b></> : <> · <span className="meta">워크플로 없음</span></>}</span>
-      <span className="meta">— 바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</span>
+      <Hint>— 바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</Hint>
     </div>
     {localAllowed
       ? <div className="split2">{pane("local")}{pane("cloud")}</div>
@@ -342,6 +342,11 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} placeholder="영문 스타일 프롬프트" />
     </div>
   );
+}
+
+// 💡 설명글은 화면에 늘어놓지 않고 ⓘ 에 마우스를 올릴 때만 보인다(⚙ 설정 팝업 · v0.7.39 · 로이 「설명글은 표시하지 말고 마우스 올리면 간단하게」)
+function Hint({ children, label = '' }) {
+  return (<span className="hint" tabIndex={0}><span className="hint-i">ⓘ{label ? ' ' + label : ''}</span><span className="hint-pop">{children}</span></span>);
 }
 
 // 🔒 네이티브 alert/confirm 은 **창을 잠근다**(EnableWindow(false)) — 다른 창(Vrew·크롬) 뒤에 숨으면
@@ -5833,16 +5838,17 @@ export default function App() {
       {/* 모달은 바깥 클릭으로 닫지 않음(ESC·닫기 버튼만) — 실수 클릭에 입력 유실 방지 */}
       {settingsOpen && (
         <div className="modal-bg show">
-          <div className="modal-card wide">
-            <h3>⚙ 설정</h3>
-            <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
+          <div className="modal-card wide settings-card">
+            <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
+            <div className="st-tabs">
               {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지·비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['yt', '▶ 유튜브'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'yt') ytLoad(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'yt') ytLoad(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
+            <div className="st-body">
 
             {settingsTab === 'img' && comfyCfg && (<div>
-              <div className="meta" style={{ marginBottom: 8 }}>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</div>
+              <Hint>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</Hint>
               <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image"
                 probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
               <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} />
@@ -5858,11 +5864,11 @@ export default function App() {
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
                 </label></div>
-              <div className="meta" style={{ marginTop: 4 }}>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</div>
+              <Hint>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</Hint>
             </div>)}
 
             {settingsTab === 'vid' && cvidCfg && (<div>
-              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</div>
+              <Hint>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</Hint>
               <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
                 probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
               <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} />
@@ -5896,18 +5902,17 @@ export default function App() {
                   <option value="off">끔 (원본 해상도 그대로)</option>
                 </select>
               </div>
-              <div className="meta" style={{ marginTop: 4 }}>⬆ <b>이미 1920x1080 이상인 영상은 어느 방식이든 건너뜁니다</b>(☁ LTX2.5 는 1920x1088 로 나옵니다). Grok(720p)처럼 낮을 때만 동작합니다. <b>AI(Real-ESRGAN)는 프레임을 한 장씩 확대</b>해서 15초 영상이 361프레임 — <b>GPU 가 없는 PC 에서는 수십 분</b>이 걸립니다. 「자동」은 한 영상이 5분을 넘으면 남은 영상을 빠른 방식으로 낮춥니다.</div>
-              <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</div>
+              <Hint>⬆ <b>이미 1920x1080 이상인 영상은 어느 방식이든 건너뜁니다</b>(☁ LTX2.5 는 1920x1088 로 나옵니다). Grok(720p)처럼 낮을 때만 동작합니다. <b>AI(Real-ESRGAN)는 프레임을 한 장씩 확대</b>해서 15초 영상이 361프레임 — <b>GPU 가 없는 PC 에서는 수십 분</b>이 걸립니다. 「자동」은 한 영상이 5분을 넘으면 남은 영상을 빠른 방식으로 낮춥니다.<br /><br />클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</Hint>
             </div>)}
 
             {/* 🌐 브라우저 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
                 2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
                 분리됐고(2026-10-02부터 이어받기도 없다) 순서/체크는 필요 없다 — 고른 쪽만 돈다. */}
             {settingsTab === 'free' && (<div>
-              <div className="meta" style={{ marginBottom: 10 }}>
+              <Hint>
                 브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
                 <b>Flow 와 Genspark 는 서로 이어받지 않습니다</b> — 고른 쪽이 한도에 걸리면 남은 이미지는 만들어지지 않은 채로 멈추고(.vrew 도 막힙니다), 한도가 풀린 뒤 다시 누르면 이어서 만듭니다. 다른 쪽으로 만들고 싶으면 헤더 드롭다운을 직접 바꾸세요.
-              </div>
+              </Hint>
               <div className="frow" style={{ alignItems: 'center' }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>
                 <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowImageModel) || 'Nano Banana 2'}
@@ -5976,16 +5981,14 @@ export default function App() {
                   <option value="Ultra">Ultra — 더 강함(크레딧 더 씀)</option>
                 </select>
               </div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Genspark 비디오</b>는 헤더 「③ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).</div>
-              <div className="meta" style={{ marginTop: 6 }}>🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.</div>
-              <div className="meta" style={{ marginTop: 6 }}>⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
+              <Hint>🎬 <b>Genspark 비디오</b>는 헤더 「③ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).<br /><br />🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.<br /><br />⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</Hint>
               {lora && (
                 <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>
                   <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
                     <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
                     📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
                   </label>
-                  <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 학습 오염을 막으려고 수집하지 않습니다.</div>
+                  <Hint>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 학습 오염을 막으려고 수집하지 않습니다.</Hint>
                   <div className="frow" style={{ marginTop: 6, alignItems: 'center' }}>
                     <label style={{ flex: '0 0 auto' }}>트리거</label>
                     <input style={{ flex: '0 0 auto', width: 130 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
@@ -6002,7 +6005,7 @@ export default function App() {
             {settingsTab === 'keys' && (<div>
               <div className="frow" style={{ margin: '0 0 8px', alignItems: 'center' }}>
                 <button className="ghost" data-testid="keychk-all" title="저장된(또는 방금 붙여넣은) 모든 키를 차례로 확인합니다 — 무료 조회, 요금 없음" onClick={verifyAllKeys}>🔍 모든 키 검증</button>
-                <span className="meta">각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</span>
+                <Hint>각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</Hint>
               </div>
               <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
                 <div className="frow" style={{ flexWrap: 'wrap' }}>
@@ -6024,7 +6027,7 @@ export default function App() {
                     <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.charRefs !== false} onChange={(e) => saveGiCfg({ charRefs: e.target.checked })} />👤 인물 일관성
                   </label>
                 </div>}
-                <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급)</div>
+                <Hint>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급)</Hint>
               </div>
               <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
                 <div className="frow" style={{ flexWrap: 'wrap' }}>
@@ -6034,7 +6037,7 @@ export default function App() {
                   {keyChkBtn('xai', xaiVal)}
                 </div>
                 {keyChkMark('xai')}
-                <div className="meta" style={{ marginTop: 4 }}>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</div>
+                <Hint>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</Hint>
               </div>
               {/* 🔊 TTS API 키(v0.6.78) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만). */}
               <div data-testid="tts-keys" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginTop: 10 }}>
@@ -6062,13 +6065,13 @@ export default function App() {
                         <button className="ghost" style={{ flex: '0 0 auto' }} title="키 발급 페이지" onClick={() => api.ttsEngineOpenKey(id)}>발급 ↗</button>
                         {inf.has && <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>}
                       </div>
-                      <div className="meta" style={{ marginLeft: 150, fontSize: 11 }}>{hint}</div>
+                      <Hint>{hint}</Hint>
                       {keyChkMark(id === 'gemini' ? 'gemini-tts' : id)}
                     </div>
                   );
                 })}
                 {ttsKeys.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{ttsKeys.msg}</div>}
-                <div className="meta" style={{ marginTop: 4 }}>목소리 고르기·모델·요금은 대본·음성 메뉴의 <b>「🔊 음성 설정」</b>에서 합니다. 키는 이 PC 에만 저장되고, 화면에는 끝 4자리만 보입니다.</div>
+                <Hint>목소리 고르기·모델·요금은 대본·음성 메뉴의 <b>「🔊 음성 설정」</b>에서 합니다. 키는 이 PC 에만 저장되고, 화면에는 끝 4자리만 보입니다.</Hint>
               </div>
             </div>)}
 
@@ -6078,22 +6081,21 @@ export default function App() {
                      revision 불일치 — 2026-08-26 아내 PC 실측: 앱은 chromium-1223 인데 1234 가 설치됨).
                      이 버튼은 앱 안의 playwright CLI 로 돌려 버전이 맞는다. */}
               <div className="frow" style={{ alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
-                <span className="meta" style={{ flex: 1 }}>브라우저 자동화(Genspark·Flow·Grok)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 아래 버튼을 누르세요.</span>
+                <Hint>브라우저 자동화(Genspark·Flow·Grok)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 아래 버튼을 누르세요.</Hint>
                 <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
                   title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
                   {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
               </div>
-              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.55 }}>
+              <Hint>
                 브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
                 그 프로필에 쿠키가 남아 <b>한동안 다시 로그인하지 않아도</b> 됩니다(X 는 보통 몇 달).
                 아이디·비밀번호를 저장해 두면 로그인 창에서 <b>자동 입력</b>됩니다.
-              </div>
-              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.55, color: '#8a6d3b' }}>
+              <br /><br />
                 ⚠ 완전 자동 로그인은 <b>구조적으로 불가능</b>합니다 — 구글은 자동화 브라우저의 비밀번호 로그인을
                 차단하고(“이 브라우저 또는 앱은 안전하지 않을 수 있습니다”), X 는 CAPTCHA·2단계 인증을 요구합니다.
                 그 화면이 나오면 앱이 <b>거기서 멈추고 창을 열어 둡니다</b> — 직접 마무리한 뒤 [로그인 완료]를 누르세요.
                 반복 실패는 계정 잠금으로 이어질 수 있어 <b>재시도하지 않습니다</b>.
-              </div>
+              </Hint>
               {!credsOk && (
                 <div className="meta" style={{ marginBottom: 8, color: '#b03a3a' }}>
                   ⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 <b>비밀번호를 저장하지 않습니다</b>
@@ -6107,7 +6109,7 @@ export default function App() {
                   <div key={s.id} style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                     <div className="frow" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                       <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>{s.icon} {s.name}</label>
-                      <span className="meta" style={{ flex: 1 }}>{s.note}</span>
+                      <Hint>{s.note}</Hint>
                       <label style={{ width: 'auto' }}>일일 한도</label>
                       <input className="n" type="number" min="0" style={{ width: 64 }} value={d.dailyCap != null ? d.dailyCap : 0}
                         onChange={(e) => acctDo(s.id, 'cap', e.target.value)} />
@@ -6150,19 +6152,19 @@ export default function App() {
                     })}
                     <div className="frow" style={{ marginTop: 6 }}>
                       <button onClick={() => acctAdd(s.id)}>+ 계정 추가</button>
-                      <span className="meta" style={{ flex: 1 }}>계정을 추가하면 <b>별도 브라우저 프로필</b>이 생깁니다 — 그 창에서 로그인한 계정이 곧 그 프로필의 계정입니다.</span>
+                      <Hint>계정을 추가하면 <b>별도 브라우저 프로필</b>이 생깁니다 — 그 창에서 로그인한 계정이 곧 그 프로필의 계정입니다.</Hint>
                     </div>
                   </div>
                 );
               })}
-              <div className="meta">⚠ 여러 계정으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로 쓰세요.</div>
+              <Hint>⚠ 여러 계정으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로 쓰세요.</Hint>
             </div>)}
             {settingsTab === 'yt' && (<div>
-              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.6 }}>
+              <Hint>
                 🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
                 <b>공개·예약·썸네일·재생목록</b>은 Studio 에서 직접 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
-              </div>
-              {ytSt && !ytSt.available && <div className="meta" style={{ color: '#b03a3a', marginBottom: 8 }}>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</div>}
+              </Hint>
+              {ytSt && !ytSt.available && <Hint>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</Hint>}
               <div data-testid="yt-client" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 앱 연결</label>
@@ -6179,7 +6181,7 @@ export default function App() {
               <div data-testid="yt-channels" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널 연결</label>
-                  <span className="meta" style={{ flex: 1 }}>채널마다 한 번. 브라우저에서 로그인 → <b>올릴 채널 선택</b> → 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</span>
+                  <Hint>채널마다 한 번. 브라우저에서 로그인 → <b>올릴 채널 선택</b> → 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</Hint>
                   <button style={{ flex: '0 0 auto' }} disabled={!ytSt || !ytSt.hasClient} onClick={ytConnect}>🔗 채널 연결</button>
                 </div>
                 {(!ytSt || !ytSt.channels || !ytSt.channels.length) && <div className="meta" style={{ marginTop: 6 }}>연결된 채널이 없습니다.</div>}
@@ -6199,13 +6201,13 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <div className="meta" style={{ lineHeight: 1.6 }}>③ ⚙ 채널편집 → 📁 폴더 → <b>업로드채널</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</div>
+              <Hint>③ ⚙ 채널편집 → 📁 폴더 → <b>업로드채널</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</Hint>
             </div>)}
             {settingsTab === 'tts' && (<div>
-              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+              <Hint>
                 OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
                 <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
-              </div>
+              </Hint>
               <div className="frow"><label>OmniVoice</label>
                 <input style={{ flex: 1 }} placeholder="http://192.168.219.157:9881" value={ttsSrv.omnivoice.baseUrl}
                   onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
@@ -6215,10 +6217,11 @@ export default function App() {
                 <input style={{ flex: 1 }} placeholder="비우면 이 PC 에서 실행 · 다른 PC 면 http://100.112.7.63:9893"
                   value={vdSrv} onChange={(e) => setVdSrv(e.target.value)} onBlur={saveVdSrv} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={testVdSrv}>연결테스트</button></div>
-              <div className="meta">보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.
-                {' '}메인 PC 에서는 <b>비워 두면</b> 창을 열 때 자동으로 서버가 켜집니다.</div>
-              <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
+              <Hint>보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.
+                {' '}메인 PC 에서는 <b>비워 두면</b> 창을 열 때 자동으로 서버가 켜집니다.<br /><br />입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</Hint>
             </div>)}
+
+            </div>{/* /st-body */}
 
             {/* 연결테스트 결과를 팝업 안에서 바로 보여준다(로그창을 안 봐도 알 수 있게) */}
             {settingsMsg && (
@@ -6228,7 +6231,7 @@ export default function App() {
                 border: '1px solid ' + (/^✅/.test(settingsMsg) ? '#bcd9bc' : /^❌/.test(settingsMsg) ? '#e6bcbc' : 'var(--line)'),
               }}>{settingsMsg}</div>
             )}
-            <div className="mbtns" style={{ marginTop: 10 }}>
+            <div className="mbtns st-foot">
               <span style={{ flex: 1 }} />
               <button className="ghost" onClick={() => setSettingsOpen(false)}>닫기</button>
             </div>
