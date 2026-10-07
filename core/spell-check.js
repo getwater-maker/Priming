@@ -39,6 +39,21 @@ function _where() {
     execFile('where', ['claude'], { windowsHide: true }, (e, out) => res(e ? [] : String(out).split(/\r?\n/).map((s) => s.trim()).filter(Boolean)));
   });
 }
+/** Claude 데스크톱 앱이 따로 두는 claude.exe — `%APPDATA%\Claude\claude-code\<버전>\<해시>\claude.exe`(가장 높은 버전) */
+function desktopExe(appdata) {
+  try {
+    const root = path.join(appdata, 'Claude', 'claude-code');
+    const ver = (s) => s.split('.').map((n) => parseInt(n, 10) || 0);
+    const cmp = (a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < 4; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0); } return 0; };
+    for (const v of fs.readdirSync(root).sort(cmp)) {
+      for (const h of fs.readdirSync(path.join(root, v))) {
+        const p = path.join(root, v, h, process.platform === 'win32' ? 'claude.exe' : 'claude');
+        if (exists(p)) return p;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
 /** claude 실행 파일 — PM_CLAUDE_EXE > 기본 설치 자리 > PATH(where) · 없으면 null */
 async function findClaude(force = false) {
   if (_exe !== undefined && !force) return _exe;
@@ -50,6 +65,7 @@ async function findClaude(force = false) {
     path.join(appdata, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
   ];
   for (const c of cands) if (exists(c)) return (_exe = c);
+  const d = desktopExe(appdata); if (d) return (_exe = d);
   for (const w of await _where()) {
     if (/\.exe$/i.test(w) && exists(w)) return (_exe = w);
     if (/\.cmd$/i.test(w)) { const e = exeFromCmd(w); if (e) return (_exe = e); }
