@@ -38,12 +38,12 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card .split2', { timeout: 10000 });
 
-    for (const [tab, kind, cfg] of [['🖼 ComfyUI 이미지', 'img', before.img], ['🎬 ComfyUI 비디오', 'vid', before.vid]]) {
+    for (const [tab, kind, cfg] of [['🎛 ComfyUI', 'img', before.img], ['🎛 ComfyUI', 'vid', before.vid]]) {   // v0.7.40 — 이미지·비디오·TTS 서버가 한 탭(구역은 data-sec)
       console.log(NL + '── ' + tab);
       await win.click(`.modal-card button:has-text("${tab}")`);
       await win.waitForTimeout(300);
-      const r = await win.evaluate(() => {
-        const card = document.querySelector('.modal-card');
+      const r = await win.evaluate((k) => {
+        const card = document.querySelector('.modal-card [data-sec="' + k + '"]');
         const panes = [...card.querySelectorAll('.tpane')].map((p) => ({
           head: (p.querySelector('.thead') || {}).textContent || '',
           on: p.classList.contains('on'),
@@ -57,7 +57,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
           checkboxes: [...card.querySelectorAll('input[type=checkbox]')].length,
           text: card.innerText,
         };
-      });
+      }, kind);
       // 이미지·비디오 **둘 다 2칸**(2026-08-20 오후 — 로이 요청으로 비디오 로컬 칸 복구).
       //   ⚠ "비디오는 클라우드 전용" 문구가 남아 있으면 안 된다(로컬을 고를 수 있게 됐으므로 거짓이 된다).
       const want = 2;
@@ -79,18 +79,18 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       ok(!/동시[ ]*생성[sS]{0,40}input/.test(r.text), '「동시 생성」 입력칸 없음');
 
       // 램프 — 열 때 자동 실측한 결과가 채워질 때까지 기다린다
-      await win.waitForFunction((k) => {
-        const l = [...document.querySelectorAll('.modal-card .lamp')];
+      await win.waitForFunction(({ k, kd }) => {
+        const l = [...document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')];
         return l.length === k && l.every((x) => !x.className.includes('ing'));
-      }, want, { timeout: 20000 }).catch(() => {});
-      const lamps = await win.evaluate(() => [...document.querySelectorAll('.modal-card .lamp')].map((x) => x.className.replace('lamp ', '') + ':' + x.textContent));
+      }, { k: want, kd: kind }, { timeout: 20000 }).catch(() => {});
+      const lamps = await win.evaluate((kd) => [...document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')].map((x) => x.className.replace('lamp ', '') + ':' + x.textContent), kind);
       console.log('  램프 → ' + lamps.join(' | '));
       ok(lamps.length === want && lamps.every((x) => !x.startsWith('idle')), '모든 칸이 자동 실측됨(미확인 아님)');
 
       // 🔌 테스트 버튼도 실제로 동작하는지(지금 쓰는 쪽)
-      await win.click(`.modal-card .tpane:nth-child(${onIdx + 1}) button:has-text("테스트")`);
+      await win.click(`.modal-card [data-sec="${kind}"] .tpane:nth-child(${onIdx + 1}) button:has-text("테스트")`);
       await win.waitForTimeout(1200);
-      const one = await win.evaluate((k) => (document.querySelectorAll('.modal-card .lamp')[k] || {}).className || '', onIdx);
+      const one = await win.evaluate(({ k, kd }) => (document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')[k] || {}).className || '', { k: onIdx, kd: kind });
       ok(/ok|no/.test(one), '🔌 테스트 클릭 → 결과 갱신 (' + one + ')');
     }
 
@@ -179,8 +179,8 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card', { timeout: 10000 });
-    ok(await win.locator('.modal-card button:has-text("🌐 브라우저 이미지")').count() === 1, '설정에 「🌐 브라우저 이미지」 탭이 있다');
-    await win.click('.modal-card button:has-text("🌐 브라우저 이미지")');
+    ok(await win.locator('.modal-card button:has-text("🌐 Flow")').count() === 1, '설정에 「🌐 Flow」 탭이 있다(옛 「브라우저 이미지·비디오」)');
+    await win.click('.modal-card button:has-text("🌐 Flow")');
     await win.waitForTimeout(250);
     const free = await win.evaluate(() => {
       const c = document.querySelector('.modal-card');
@@ -191,6 +191,22 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
     ok(free.text.includes('이어받지 않습니다'), 'Flow·Genspark 는 서로 이어받지 않는다는 안내가 있다');
     ok(free.text.includes('구독') && !free.text.includes('무료'), '탭 안내가 「구독 요금제」로 정정됐다(무료 아님)');
+    // ⚙ 설정 탭 구조(v0.7.40 · 로이): ComfyUI(이미지+비디오+TTS 서버) · Flow · API 키 · 유튜브 — 계정 탭 없음 · 브라우저 설치는 Flow 탭 · Flow 이미지 모델 = 2.1
+    {
+      const tabsTxt = await win.locator('.settings-card .st-tabs button').allInnerTexts();
+      ok(tabsTxt.length === 4 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /유튜브/.test(tabsTxt[3]), '탭 4개: ' + tabsTxt.join(' / '));
+      ok(!tabsTxt.some((x) => /계정|TTS 서버|브라우저 이미지/.test(x)), '옛 「계정」·「TTS 서버」·「브라우저 이미지」 탭은 없다');
+      ok(await win.locator('.settings-card button:has-text("브라우저 설치")').count() === 1, '「⬇ 브라우저 설치」 가 Flow 탭에 있다');
+      ok((await win.locator('.settings-card select option[value="Nano Banana 2.1"]').count()) === 1, 'Flow 이미지 모델에 Nano Banana 2.1 이 있다');
+      const w = await win.evaluate(() => Math.round(document.querySelector('.settings-card').getBoundingClientRect().width));
+      ok(w <= 800, '팝업 폭이 줄었다(' + w + 'px)');
+      await win.click('.settings-card button:has-text("🎛 ComfyUI")');
+      await win.waitForTimeout(400);
+      const ctext = await win.evaluate(() => document.querySelector('.settings-card .st-body').textContent);
+      ok(/이미지/.test(ctext) && /비디오/.test(ctext) && /TTS 서버/.test(ctext), 'ComfyUI 탭 안에 이미지·비디오·TTS 서버가 함께 있다');
+      await win.click('.settings-card button:has-text("🌐 Flow")');
+      await win.waitForTimeout(300);
+    }
     // 💡 설명글은 평소엔 안 보이고 ⓘ 에 마우스를 올릴 때만 말풍선으로 뜬다(v0.7.39)
     {
       const hint = win.locator('.settings-card .hint').first();
@@ -229,9 +245,9 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       ok(base(after1.workflowPath) === base(cur.split('::').slice(2).join('::')), `${kind} 모델(워크플로) 유지 — ${base(after1.workflowPath)}`);
       // 팝업 배지가 따라오는지
       await win.click('button:has-text("⚙ 설정")');
-      await win.click(`.modal-card button:has-text("${kind === 'image' ? '🖼 ComfyUI 이미지' : '🎬 ComfyUI 비디오'}")`);
+      await win.click('.modal-card button:has-text("🎛 ComfyUI")');
       await win.waitForTimeout(400);
-      const onIdx2 = await win.evaluate(() => [...document.querySelectorAll('.modal-card .tpane')].findIndex((p) => p.classList.contains('on')));
+      const onIdx2 = await win.evaluate((kd) => [...document.querySelectorAll('.modal-card [data-sec="' + (kd === 'image' ? 'img' : 'vid') + '"] .tpane')].findIndex((p) => p.classList.contains('on')), kind);
       ok(onIdx2 === (after1.cloud ? 1 : 0), `${kind} 「지금 사용」 배지가 전환을 따라옴`);
       await win.click('.modal-card button:has-text("닫기")');
       // 원래대로 되돌린다(사용자 설정 보존)

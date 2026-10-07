@@ -518,7 +518,8 @@ export default function App() {
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v LTX) 설정
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
-  const [settingsTab, setSettingsTab] = useState('img');   // 'img' | 'vid' | 'keys' | 'tts'
+  const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt'  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
+  const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
   // 👤 계정 탭 — {genspark|flow|grok: {dailyCap, accounts:[{id,label,used,creds,login}]}}
   const [acct, setAcct] = useState(null);
   const [acctEdit, setAcctEdit] = useState({});   // 입력 중인 아이디/비번 (비번은 저장 후 즉시 비움)
@@ -704,7 +705,6 @@ export default function App() {
   async function verifyAllKeys() {
     const inf = ttsKeys.info || {};
     if (giKey || (inf.gemini && inf.gemini.has)) await verifyKey('gemini', giKey, { model: (giCfg && giCfg.model) || '' });
-    if (xaiVal) await verifyKey('xai', xaiVal);
     for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
     if (inf.gemini && inf.gemini.has) await verifyKey('gemini-tts', ttsKeys.draft.gemini);
   }
@@ -1981,7 +1981,7 @@ export default function App() {
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
   function nameAskCancel() { if (nameAsk) { const r = nameAsk.resolve; setNameAsk(null); r(null); } }
   // TTS 서버 주소(OmniVoice) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
-  async function openTtsSrv() { return openSettings('tts'); }
+  async function openTtsSrv() { return openSettings('comfy'); }
   async function saveTtsSrv(id) {
     try { await api.setTtsServer({ id, baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(`TTS 서버(${id}) 저장됨`); } catch (e) { logline('TTS 서버 저장 오류: ' + e.message); }
   }
@@ -4399,13 +4399,15 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
-    if (isComfyEngine(imgEngine)) return 'img';
-    if (isComfyEngine(videoEngine)) return 'vid';
+    if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
     if (imgEngine === 'gemini') return 'keys';
-    return 'free';
+    return 'flow';
   }
   async function openSettings(tab) {
-    setSettingsTab(tab || 'img');
+    // 옛 탭 이름(img·vid·tts·free·acct)으로 부르는 곳이 많아 여기서 한 번에 새 탭으로 옮긴다
+    const tabId = ({ img: 'comfy', vid: 'comfy', tts: 'comfy', free: 'flow', acct: 'flow' })[tab] || tab || 'comfy';
+    setSettingsTab(tabId);
+    if (tab === 'acct') setAcctOpen(true);
     // 🌐 브라우저 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
     try { setImgRot(await api.getImageRotation()); } catch (_) {}
     try { setLora(await api.getLoraCollect()); } catch (_) {}
@@ -4428,13 +4430,11 @@ export default function App() {
     try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
     // ⚙ 를 열면 로컬·클라우드 양쪽을 바로 찔러 본다 — "로컬이 꺼져 있는데 로컬로 보내고 있었다"를 미리 안다.
     setComfyProbe({}); setCvidProbe({});
-    const _t = tab || 'img';
-    if (_t === 'img') probeBoth('image');
-    if (_t === 'vid') probeBoth('video');
-    if ((tab || 'img') === 'acct') { await loadAcct(); }
+    if (tabId === 'comfy') { probeBoth('image'); probeBoth('video'); }
+    if (tab === 'acct') { await loadAcct(); }
     setSettingsOpen(true);
   }
-  async function openComfy() { return openSettings('img'); }
+  async function openComfy() { return openSettings('comfy'); }
   async function saveComfyCfg(patch) {
     try { const c = await api.setComfyImageConfig(patch); setComfyCfg(c); } catch (e) { logline('ComfyUI 설정 저장 오류: ' + e.message); }
   }
@@ -4459,7 +4459,7 @@ export default function App() {
     await saveCfg(patch);
   }
   // ── ComfyUI 비디오(i2v LTX) ──
-  async function openCvid() { return openSettings('vid'); }
+  async function openCvid() { return openSettings('comfy'); }
   async function saveCvidCfg(patch) {
     try { const c = await api.setComfyVideoConfig(patch); setCvidCfg(c); } catch (e) { logline('ComfyUI 비디오 설정 저장 오류: ' + e.message); }
   }
@@ -5841,13 +5841,14 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['free', '🌐 브라우저 이미지·비디오'], ['keys', '🔑 API 키'], ['acct', '👤 계정'], ['yt', '▶ 유튜브'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'acct') loadAcct(); if (id === 'yt') ytLoad(); if (id === 'img') { setComfyProbe({}); probeBoth('image'); } if (id === 'vid') { setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브']].map(([id, lbl]) => (
+                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
             <div className="st-body">
 
-            {settingsTab === 'img' && comfyCfg && (<div>
+            {settingsTab === 'comfy' && comfyCfg && (<div data-sec="img">
+              <div className="subhead">🖼 이미지</div>
               <Hint>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</Hint>
               <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image"
                 probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
@@ -5867,7 +5868,8 @@ export default function App() {
               <Hint>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</Hint>
             </div>)}
 
-            {settingsTab === 'vid' && cvidCfg && (<div>
+            {settingsTab === 'comfy' && cvidCfg && (<div data-sec="vid">
+              <div className="subhead">🎬 비디오</div>
               <Hint>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</Hint>
               <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
                 probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
@@ -5908,20 +5910,29 @@ export default function App() {
             {/* 🌐 브라우저 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
                 2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
                 분리됐고(2026-10-02부터 이어받기도 없다) 순서/체크는 필요 없다 — 고른 쪽만 돈다. */}
-            {settingsTab === 'free' && (<div>
+            {settingsTab === 'flow' && (<div>
+              {/* ⬇ 폴백 브라우저 — Chrome 실행이 실패했을 때 앱이 쓰는 대체 브라우저(옛 계정 탭에서 옮김 · v0.7.40).
+                  🔴 터미널에서 npx playwright install 을 돌리면 엉뚱한 버전이 깔린다 — 이 버튼은 앱 안의 playwright CLI 로 돌려 버전이 맞는다. */}
+              <div className="frow" style={{ alignItems: 'center', marginBottom: 6 }}>
+                <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
+                  title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
+                  {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
+                <Hint>브라우저 자동화(Genspark·Flow)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 이 버튼을 누르세요.</Hint>
+              </div>
               <Hint>
                 브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
                 <b>Flow 와 Genspark 는 서로 이어받지 않습니다</b> — 고른 쪽이 한도에 걸리면 남은 이미지는 만들어지지 않은 채로 멈추고(.vrew 도 막힙니다), 한도가 풀린 뒤 다시 누르면 이어서 만듭니다. 다른 쪽으로 만들고 싶으면 헤더 드롭다운을 직접 바꾸세요.
               </Hint>
               <div className="frow" style={{ alignItems: 'center' }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowImageModel) || 'Nano Banana 2'}
-                  title="Flow 이미지 생성 모델 — Lite 는 더 빠르고 저렴한 경량 모델. Flow 화면에 그 옵션이 없으면 조용히 기본 모델을 유지합니다(오류 없음)."
+                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowImageModel) || 'Nano Banana 2.1'}
+                  title="Flow 이미지 생성 모델 — 2.1 이 새 버전(2026-10). Lite 는 더 빠르고 저렴한 경량 모델. Flow 화면에 그 옵션이 없으면 현재 모델로 진행하고 로그에 알립니다."
                   onChange={(e) => saveImgRot({ ...(imgRot || {}), flowImageModel: e.target.value })}>
+                  <option value="Nano Banana 2.1">Nano Banana 2.1 (새 버전)</option>
                   <option value="Nano Banana 2">Nano Banana 2</option>
                   <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
                 </select>
-                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Flow 계정 추가·로그인·일일한도" onClick={() => { setSettingsTab('acct'); setSettingsMsg(''); loadAcct(); }}>👤 계정 관리</button>
+                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Flow 계정 추가·로그인·일일한도" onClick={() => { setSettingsMsg(''); if (!acctOpen) loadAcct(); setAcctOpen((o) => !o); }}>👤 계정 관리 {acctOpen ? '▴' : '▾'}</button>
               </div>
               <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 비디오 모델</label>
@@ -6003,69 +6014,64 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'keys' && (<div>
-              <div className="frow" style={{ margin: '0 0 8px', alignItems: 'center' }}>
+              <div className="frow" style={{ margin: '0 0 10px', alignItems: 'center' }}>
                 <button className="ghost" data-testid="keychk-all" title="저장된(또는 방금 붙여넣은) 모든 키를 차례로 확인합니다 — 무료 조회, 요금 없음" onClick={verifyAllKeys}>🔍 모든 키 검증</button>
                 <Hint>각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</Hint>
               </div>
-              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
-                <div className="frow" style={{ flexWrap: 'wrap' }}>
-                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 유료 나노바나나2 (Gemini)</label>
-                  <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ flex: 1, minWidth: 180 }}
+              {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
+              <div className="kp-card">
+                <div className="kp-line">
+                  <b className="kp-name">🍌 유료 나노바나나2 (Gemini)</b>
+                  {giCfg && (<>
+                    <label className="chk kp-chk"><input type="checkbox" checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송</label>
+                    <label className="chk kp-chk"
+                      title="대본의 인물 카드(🎨 일관성 앵커 「알리사 카드: …」)로 인물 시트를 한 번 만들어 <출력>/characters/ 에 두고, 그 인물이 보이는 장면마다 참조로 붙입니다.">
+                      <input type="checkbox" checked={giCfg.charRefs !== false} onChange={(e) => saveGiCfg({ charRefs: e.target.checked })} />👤 인물 일관성</label>
+                  </>)}
+                  <Hint>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 모델 칸을 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급) · 인물 일관성은 나노바나나 즉시 생성에서만 씁니다.</Hint>
+                </div>
+                <div className="kp-line">
+                  <input type="password" className="kp-in" placeholder="🔑 Gemini API 키" value={giKey}
                     onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
-                  {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 아래 모델명이 지금 통하는지 확인합니다(무료 조회)')}
+                  {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 오른쪽 모델명이 지금 통하는지 확인합니다(무료 조회)')}
+                  {giCfg && (<>
+                    <span className="kp-lab">모델</span>
+                    <input className="kp-model" value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
+                      onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
+                  </>)}
                 </div>
                 {keyChkMark('gemini')}
-                {giCfg && <div className="frow" style={{ flexWrap: 'wrap', marginTop: 4 }}>
-                  <label style={{ width: 'auto' }}>모델</label>
-                  <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
-                    onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
-                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
-                  </label>
-                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}
-                    title="대본의 인물 카드(🎨 일관성 앵커 「알리사 카드: …」)로 인물 시트를 한 번 만들어 <출력>/characters/ 에 두고, 그 인물이 보이는 장면마다 참조로 붙입니다. 시트를 같은 이름 그림으로 바꿔 넣으면 그 그림을 씁니다. 즉시 생성만(배치 제외) · 인물마다 시트 1장 비용이 더 듭니다.">
-                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.charRefs !== false} onChange={(e) => saveGiCfg({ charRefs: e.target.checked })} />👤 인물 일관성
-                  </label>
-                </div>}
-                <Hint>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급)</Hint>
               </div>
-              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
-                <div className="frow" style={{ flexWrap: 'wrap' }}>
-                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🎬 Grok API (xAI, 비디오)</label>
-                  <input type="password" placeholder="🔑 xAI API 키 (xai-...)" value={xaiVal} style={{ flex: 1, minWidth: 180 }}
-                    onChange={(e) => setXaiVal(e.target.value)} onBlur={() => api.setXaiKey((xaiVal || '').trim())} />
-                  {keyChkBtn('xai', xaiVal)}
-                </div>
-                {keyChkMark('xai')}
-                <Hint>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</Hint>
-              </div>
-              {/* 🔊 TTS API 키(v0.6.78) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만). */}
-              <div data-testid="tts-keys" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginTop: 10 }}>
-                <div style={{ fontWeight: 700, color: 'var(--hook)', marginBottom: 6 }}>🔊 TTS API (음성 설정에서 쓰는 유료 목소리)</div>
+              {/* 🔊 TTS API (유료) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만).
+                  한 줄: 이름 · ⓘ · 저장됨 · 발급 / 다음 줄: 입력 · (MAI 는 지역) · 검증 · 지우기 */}
+              <div data-testid="tts-keys" className="kp-card">
+                <div className="kp-title">🔊 TTS API (유료)</div>
                 {[
                   ['gemini', 'Google Gemini TTS', 'API 키', '위 🍌 나노바나나와 같은 Gemini 키입니다(한 번만 넣으면 둘 다 씁니다)'],
                   ['mai', 'Microsoft MAI-Voice', 'Speech 키', 'Azure 포털 → Speech(Foundry) 리소스 → 키 및 엔드포인트의 KEY 1 · 지역은 리소스를 만든 곳'],
                   ['typecast', '타입캐스트', 'API 키', 'typecast.ai → Developers → API 키'],
                   ['elevenlabs', 'ElevenLabs', 'API 키', '권한: Text to Speech + Voices 읽기(라이브러리 목소리 추가는 Voices 쓰기도)'],
-                ].map(([id, label, keyLabel, hint]) => {
+                ].map(([id, label, keyLabel, hint], n) => {
                   const inf = ttsKeys.info[id] || {};
                   return (
-                    <div key={id} data-testid={'tts-key-' + id} style={{ padding: '4px 0', borderTop: id === 'gemini' ? 'none' : '1px dashed var(--line)' }}>
-                      <div className="frow" style={{ flexWrap: 'wrap', alignItems: 'center', margin: '2px 0' }}>
-                        <label style={{ width: 150, fontWeight: 600 }}>{label}</label>
-                        <span className="meta" style={{ width: 120, color: inf.has ? '#16a34a' : '#b45309', fontWeight: 600 }}>{inf.has ? `🔑 저장됨(…${inf.tail})` : '🔑 없음'}</span>
-                        <input type="password" autoComplete="off" style={{ flex: 1, minWidth: 160 }} placeholder={inf.has ? `${keyLabel} 바꿀 때만 붙여넣기` : `${keyLabel} 붙여넣기`}
+                    <div key={id} data-testid={'tts-key-' + id} className={'kp-row' + (n ? ' sep' : '')}>
+                      <div className="kp-line">
+                        <b className="kp-name">{label}</b>
+                        <Hint>{hint}</Hint>
+                        <span className="kp-state" style={{ color: inf.has ? '#16a34a' : '#b45309' }}>{inf.has ? `🔑 저장됨(…${inf.tail})` : '🔑 없음'}</span>
+                        <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.ttsEngineOpenKey(id)}>발급 ↗</button>
+                      </div>
+                      <div className="kp-line">
+                        <input type="password" autoComplete="off" className="kp-in" placeholder={inf.has ? `${keyLabel} 바꿀 때만 붙여넣기` : `${keyLabel} 붙여넣기`}
                           value={ttsKeys.draft[id] || ''} onChange={(e) => { const v = e.target.value; setTtsKeys((x) => ({ ...x, draft: { ...x.draft, [id]: v } })); }}
                           onBlur={() => { const v = String(ttsKeys.draft[id] || '').trim(); if (v) saveTtsKey(id, { key: v }); }} />
-                        {id === 'mai' && (<select value={ttsKeys.region} title="Speech 리소스 지역(모든 채널 공통)"
+                        {id === 'mai' && (<select value={ttsKeys.region} className="kp-region" title="Speech 리소스 지역(모든 채널 공통)"
                           onChange={(e) => { const rg = e.target.value; setTtsKeys((x) => ({ ...x, region: rg })); api.ttsEnginesSave({ channels: [], region: rg }); }}>
                           {['eastus', 'eastasia', 'southeastasia', 'japaneast', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'].map((r) => <option key={r} value={r}>{r}</option>)}
                         </select>)}
                         {keyChkBtn(id === 'gemini' ? 'gemini-tts' : id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined)}
-                        <button className="ghost" style={{ flex: '0 0 auto' }} title="키 발급 페이지" onClick={() => api.ttsEngineOpenKey(id)}>발급 ↗</button>
-                        {inf.has && <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>}
+                        <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!inf.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>
                       </div>
-                      <Hint>{hint}</Hint>
                       {keyChkMark(id === 'gemini' ? 'gemini-tts' : id)}
                     </div>
                   );
@@ -6075,17 +6081,9 @@ export default function App() {
               </div>
             </div>)}
 
-            {settingsTab === 'acct' && (<div>
-              {/* ⬇ 폴백 브라우저 — Chrome 실행이 실패했을 때 앱이 쓰는 대체 브라우저.
-                  🔴 터미널에서 npx playwright install 을 돌리면 **엉뚱한 버전**이 깔린다(앱 playwright 와
-                     revision 불일치 — 2026-08-26 아내 PC 실측: 앱은 chromium-1223 인데 1234 가 설치됨).
-                     이 버튼은 앱 안의 playwright CLI 로 돌려 버전이 맞는다. */}
-              <div className="frow" style={{ alignItems: 'center', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--line)' }}>
-                <Hint>브라우저 자동화(Genspark·Flow·Grok)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 아래 버튼을 누르세요.</Hint>
-                <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
-                  title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
-                  {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
-              </div>
+            {settingsTab === 'flow' && acctOpen && (<div className="st-sec">
+              <div className="subhead">👤 계정 (Genspark · Flow)</div>
+              
               <Hint>
                 브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
                 그 프로필에 쿠키가 남아 <b>한동안 다시 로그인하지 않아도</b> 됩니다(X 는 보통 몇 달).
@@ -6201,9 +6199,9 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <Hint>③ ⚙ 채널편집 → 📁 폴더 → <b>업로드채널</b>에서 Priming 채널마다 올릴 유튜브 채널을 고르세요. 이미 올린 파일은 다시 올리지 않습니다.</Hint>
             </div>)}
-            {settingsTab === 'tts' && (<div>
+            {settingsTab === 'comfy' && (<div>
+              <div className="subhead">🖧 TTS 서버</div>
               <Hint>
                 OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
                 <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)

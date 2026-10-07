@@ -1142,3 +1142,23 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .hint-pop b{color:var(--strong)}
 .settings-card .frow>.hint{margin:0 auto 0 0;flex:0 0 auto}
 .settings-card .frow>.hint .hint-pop{left:auto;right:auto}
+
+/* v0.7.40 — API 키 탭 줄 배치 + 탭 통합에 맞춘 폭 */
+.modal-card.settings-card{width:780px}
+.settings-card .kp-card{background:#fbf6ee;border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 10px}
+.settings-card .kp-title{font-weight:800;color:var(--hook);margin:0 0 4px;font-size:13px}
+.settings-card .kp-line{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:nowrap}
+.settings-card .kp-line .hint{margin:0}
+.settings-card .kp-name{color:var(--hook);font-size:13px;white-space:nowrap}
+.settings-card .kp-row.sep{border-top:1px dashed var(--line);margin-top:6px;padding-top:2px}
+.settings-card .kp-row .kp-name{color:var(--strong);min-width:140px}
+.settings-card .kp-state{font-size:12px;font-weight:600;white-space:nowrap}
+.settings-card .kp-chk{display:inline-flex;gap:4px;align-items:center;font-size:12.5px;white-space:nowrap}
+.settings-card .kp-in{flex:1 1 auto;min-width:0}
+.settings-card .kp-lab{font-size:12.5px;color:var(--base);white-space:nowrap}
+.settings-card .kp-model{flex:0 1 220px;min-width:140px}
+.settings-card .kp-region{flex:0 0 118px}
+.settings-card .kp-line button{white-space:nowrap}
+.settings-card .st-sec{border-top:1px solid var(--line);margin-top:14px;padding-top:2px}
+
+.settings-card .st-body .frow>label[style*="min-width"]{width:auto}

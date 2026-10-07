@@ -622,7 +622,7 @@ function img(dir, num) {
     for (const k of Object.keys(require.cache)) if (/image-rotation/.test(k)) delete require.cache[k];
     const R2 = require(path.join(ROOT, 'core', 'image-rotation.js'));
     eq(R2.load().flowVideoModel, 'Veo 3.1 - Quality', '저장한 값이 다시 로드된다');
-    eq(R2.load().flowImageModel, 'Nano Banana 2', '이미지 모델 설정은 그대로다 (회귀)');
+    eq(R2.load().flowImageModel, 'Nano Banana 2.1', '이미지 모델 기본값은 새 버전 2.1 이다 (2026-10-07 · 저장하지 않은 값은 기본값)');
     process.env.USERPROFILE = saveHome; process.env.HOME = saveH2;
     for (const k of Object.keys(require.cache)) if (/image-rotation/.test(k)) delete require.cache[k];
     fs.rmSync(home, { recursive: true, force: true });

@@ -23,7 +23,8 @@ const DEFAULTS = {
   //   'Nano Banana 2 Lite'(2026-06-30 출시, gemini-3.1-flash-lite-image) 추가 — 더 빠르고 저렴한 경량 모델.
   //   ⚠ Flow 웹 UI 드롭다운에 이 라벨이 실제로 존재하는지 실측 필요 — 없으면 _selectModel 이 조용히
   //   무시하고 기존 기본 모델로 진행(안전, 에러 없음).
-  flowImageModel: 'Nano Banana 2',
+  //   2026-10-07 로이: 새 버전 'Nano Banana 2.1' 이 나왔다 — 기본값을 2.1 로(라벨은 Flow 드롭다운 실제 글자와 같아야 한다 · 없으면 _selectModel 이 현재 모델로 진행하고 로그에 남긴다).
+  flowImageModel: 'Nano Banana 2.1',
   // Flow 비디오(i2v) 모델 — 'Veo 3.1 - Lite'(기본·가장 쌈) / 'Veo 3.1 - Fast' / 'Veo 3.1 - Quality'.
   //   2026-08-28 Flow UI 실측 라벨 그대로다(글자가 다르면 _selectModel 이 못 찾아 기본 모델로 진행).
   //   ⚠ Veo 는 생성당 크레딧을 쓴다(Lite x1 = 10크레딧) — 화질을 올리면 크레딧도 오른다.
