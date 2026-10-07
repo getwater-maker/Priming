@@ -115,6 +115,11 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const [eb, setEb] = useState({ busy: false, error: '', docs: [], checks: [], n: 1, html: '', version: '', bytes: 0, forPath: '' });
   // 📜 판권 고지문 입력 — 비어 있는 새 칸 개수(저장 전). ⚠ 훅이라 `if (!loaded) return` 보다 앞에 둔다(뒤에 두면 React #310 — 화면이 백지)
   const [noteExtra, setNoteExtra] = useState(0);
+  // ⚡ 입력하는 대로 저장(로이 2026-10-07) — 글자를 칠 때마다(0.4초 쉬면) 원고 메타에 저장한다. 입력칸 key 에 값이 들어 있으면
+  //   저장 직후 칸이 새로 만들어져 초점을 잃으므로, key 는 `fieldRev`(칸을 벗어날 때만 올림 — 다듬어진 값을 다시 보이게)만 쓴다.
+  const [fieldRev, setFieldRev] = useState(0);
+  const [noteRev, setNoteRev] = useState(0);   // 고지문 줄을 지우거나 더할 때만 올림(칸 다시 만들기)
+  const liveTimers = useRef({});
   const _cpNotesKey = ((dto && dto.colophonNotes) || []).join('\u0001');
   useEffect(() => { setNoteExtra(0); }, [dto && dto.scriptPath, _cpNotesKey]);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -558,6 +563,28 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     const d = await api.bookSetMeta({ key, value });
     if (d) setDto(d);
   }
+  // 입력칸용 처리기 — 치는 중엔 0.4초 쉴 때 저장, 칸을 벗어나면 바로 저장(+ 다듬은 값 다시 표시). fix = 저장 전 값 다듬기(기본 trim)
+  //   타이머 안의 setMeta 는 옛 렌더의 meta 를 보므로 「이미 저장한 값」은 따로 기억한다(liveSaved).
+  const liveSaved = useRef({});
+  const liveSave = async (k, v) => {
+    const prev = k in liveSaved.current ? liveSaved.current[k] : (meta[k] || '');
+    if (prev === v) return;
+    liveSaved.current[k] = v;
+    const d = await api.bookSetMeta({ key: k, value: v });
+    if (d) setDto(d);
+  };
+  const liveMeta = (k, fix, fixOnBlur) => ({
+    onChange: (e) => {
+      const v = e.target.value; clearTimeout(liveTimers.current[k]);
+      liveTimers.current[k] = setTimeout(() => liveSave(k, fix ? fix(v) : v.trim()), 400);
+    },
+    onBlur: async (e) => {
+      const v = e.target.value; clearTimeout(liveTimers.current[k]);
+      await liveSave(k, (fixOnBlur || fix) ? (fixOnBlur || fix)(v) : v.trim());
+      delete liveSaved.current[k];
+      setFieldRev((r) => r + 1);
+    },
+  });
   async function attachCover() { const d = await api.bookAttachCover(); if (d) setDto(d); }
   async function clearCover() { const d = await api.bookClearCover(); if (d) setDto(d); }
 
@@ -700,7 +727,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       <label key={k}>
         <span>{label}</span>
         <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
-          key={dto.scriptPath + ':' + idp + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, isDate ? DK.normalizeMeta(e.target.value) : e.target.value.trim())} />
+          key={dto.scriptPath + ':' + idp + ':' + k + ':' + fieldRev} {...(isDate ? liveMeta(k, null, (v) => DK.normalizeMeta(v)) : liveMeta(k))} />
         {!isDate && bad(meta[k]) ? <span className="bkisbn-bad" data-testid={idp + '-' + k + '-bad'}>⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요</span> : null}
       </label>
     );
@@ -716,7 +743,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   const cpField = (k, label) => (
     <label key={k}>
       <span>{label}</span>
-      <input type="text" data-testid={'bk-cp-' + k} defaultValue={meta[k] || ''} key={dto.scriptPath + ':cp:' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+      <input type="text" data-testid={'bk-cp-' + k} defaultValue={meta[k] || ''} key={dto.scriptPath + ':cp:' + k + ':' + fieldRev} {...liveMeta(k)} />
     </label>
   );
   // 고지문(`[판권]` 섹션의 `* …` 줄) — 칸마다 저장(빈 칸은 줄이 사라진다) · 줄 추가/삭제
@@ -724,13 +751,13 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   const noteDraft = [...cpNotes, ...Array.from({ length: noteExtra }, () => '')];
   const saveNotes = async (list) => { const d = await api.bookColophonNotes({ notes: list }); if (d) setDto(d); };
   const saveNote = (i, v) => { const list = noteDraft.slice(); list[i] = String(v || ''); if (list.filter(Boolean).join('\u0001') !== cpNotes.join('\u0001')) saveNotes(list); };
-  const delNote = (i) => { if (i >= cpNotes.length) { setNoteExtra((n) => Math.max(0, n - 1)); return; } const list = cpNotes.slice(); list.splice(i, 1); saveNotes(list); };
+  const delNote = (i) => { setNoteRev((r) => r + 1); if (i >= cpNotes.length) { setNoteExtra((n) => Math.max(0, n - 1)); return; } const list = cpNotes.slice(); list.splice(i, 1); saveNotes(list); };
   const addNote = () => setNoteExtra((n) => n + 1);
   const field = (k, label, req, help) => (
     <label key={k} className={req && missSet.has(k) ? 'bkmiss' : ''} title={help || ''}>
       <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
       <input type="text" defaultValue={k === 'title' ? (meta.title || dto.fileTitle || '') : (meta[k] || '')}
-        key={dto.scriptPath + ':' + k + ':' + (meta[k] || '')} onBlur={(e) => setMeta(k, e.target.value.trim())} />
+        key={dto.scriptPath + ':' + k + ':' + fieldRev} {...liveMeta(k)} />
       {help ? <span className="meta">{help}</span> : null}
     </label>
   );
@@ -839,8 +866,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 따로 만든다(로이 2026-10-07: 「한 번에 만들기」 폐기) */}
         <div className="bkzone">📦 만들기</div>
         <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 ISBN·정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'} <span className="meta">(내지 + 표지 PDF)</span></button>
-          <button disabled={building || epubChkBusy} data-testid="bk-epub" title="부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 + 규격 검증 — 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·인쇄 표지 앞면 순" onClick={() => buildEpubFile()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'} <span className="meta">(ePub + 검증)</span></button>
+          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 ISBN·정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
+          <button disabled={building || epubChkBusy} data-testid="bk-epub" title="부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 + 규격 검증 — 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·인쇄 표지 앞면 순" onClick={() => buildEpubFile()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
         </div>
         <div className="bkactions bkbuild">
           <button className="ghost" disabled={building || epubChkBusy} data-testid="bk-epubcheck" title="W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다 — 도구가 있는 PC 에서만" onClick={runEpubCheckUi}>{epubChkBusy ? '⏳ 검증 중…' : '✔ ePub 검증'}</button>
@@ -980,8 +1007,10 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         <div className="bkzone">고지문 <span className="meta">— 줄마다 한 칸 · 판권에 한 줄씩 「* …」 로 실립니다</span></div>
         <div data-testid="bk-cp-notes">
           {noteDraft.map((t, i) => (
-            <div className="bknote" key={i + ':' + (dto.colophonNotes || []).length}>
-              <input type="text" data-testid={'bk-cp-note-' + i} defaultValue={t} placeholder="예: 번역·기획: 고전서재의 로이" onBlur={(e) => saveNote(i, e.target.value)} />
+            <div className="bknote" key={i + ':' + fieldRev + ':' + noteRev}>
+              <input type="text" data-testid={'bk-cp-note-' + i} defaultValue={t} placeholder="예: 번역·기획: 고전서재의 로이"
+                onChange={(e) => { const v = e.target.value; clearTimeout(liveTimers.current['note' + i]); liveTimers.current['note' + i] = setTimeout(() => saveNote(i, v), 400); }}
+                onBlur={(e) => { clearTimeout(liveTimers.current['note' + i]); saveNote(i, e.target.value); setFieldRev((r) => r + 1); }} />
               <button className="ghost" title="이 줄 지우기" data-testid={'bk-cp-note-del-' + i} onClick={() => delNote(i)}>✕</button>
             </div>
           ))}
@@ -990,10 +1019,10 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         <div className="bkzone">저작권 · 안내문</div>
         <label><span>저작권(ⓒ)</span>
           <input type="text" data-testid="bk-cp-copyright" placeholder="비우면 자동 — ⓒ 이름 연도. All rights reserved." defaultValue={meta.copyright || ''}
-            key={dto.scriptPath + ':copyright:' + (meta.copyright || '')} onBlur={(e) => setMeta('copyright', e.target.value.trim())} /></label>
+            key={dto.scriptPath + ':copyright:' + fieldRev} {...liveMeta('copyright')} /></label>
         <label><span>재사용 안내문</span>
           <input type="text" data-testid="bk-cp-legal" placeholder={DEFAULT_LEGAL_TEXT} defaultValue={meta.legalText || ''}
-            key={dto.scriptPath + ':legalText:' + (meta.legalText || '')} onBlur={(e) => setMeta('legalText', e.target.value.trim())} /></label>
+            key={dto.scriptPath + ':legalText:' + fieldRev} {...liveMeta('legalText')} /></label>
         <details className="bkmore">
           <summary>그 밖의 항목 (정가 · 전자책 가격 · 부가기호 · QR · 로고)</summary>
           {COLO_OPT.filter(([k]) => ['price', 'ebookPrice', 'isbnAddon', 'logo', 'qr', 'qrLabel'].includes(k)).map(([k, l]) => field(k, l, false))}
@@ -1070,9 +1099,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               </select>
             </label>
             <label title="부크크 「새종이책」 화면이 알려 주는 책등 두께(mm)를 적으면 계산보다 이 값을 씁니다. 비우면 자동 계산(부크크: 1.6 + 0.055×쪽수, 400쪽부터 0.045)">책등 두께(mm)
-              <input type="text" data-testid="bk-spine" defaultValue={dto.spineManual || ''} key={'sp:' + (dto.spineManual || '') + ':' + dto.paperId}
+              <input type="text" data-testid="bk-spine" defaultValue={dto.spineManual || ''} key={'sp:' + fieldRev + ':' + dto.paperId}
                 placeholder={`자동 ${dto.spread && dto.spread.spineMm}`}
-                onBlur={(e) => setMeta('spineMm', e.target.value.trim())} />
+                {...liveMeta('spineMm')} />
             </label>
           </div>
         </details>
