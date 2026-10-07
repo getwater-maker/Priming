@@ -5549,7 +5549,9 @@ export default function App() {
               {chTab === 'tools' && (<div>
                 <div className="subhead">🎨 이미지 스타일</div>
                 {/* 스타일·썸네일은 한 줄에 나란히 — 🖼 제작 도구 탭이 다른 탭과 같은 높이에 들어가게(v0.6.82) */}
-                <div className="crow"><span className="l">스타일</span><select style={{ flex: '1 1 0', minWidth: 0 }} value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                <div className="crow"><span className="l">스타일</span><select style={{ flex: '1 1 0', minWidth: 0 }} value={ch.styleLong} onChange={(e) => setCh({ ...ch, styleLong: e.target.value })}>
+                  <option value={SCRIPT_STYLE_ID} title="이 채널을 고르면 헤더 스타일이 「대본스타일」이 됩니다 — 대본의 「> 🎨 화풍:」 줄로 그립니다(줄이 없으면 만들 때 스타일을 묻습니다)">📜 대본스타일</option>
+                  {chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
                   <span className="l" style={{ marginLeft: 10 }}>🖼 썸네일</span>
                   <select style={{ flex: '1 1 0', minWidth: 0 }} value={ch.styleThumb || ''} onChange={(e) => setCh({ ...ch, styleThumb: e.target.value })}>
                     <option value="">— 롱폼과 같게 —</option>

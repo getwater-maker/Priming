@@ -42,6 +42,8 @@ function kstNow(now) {
 function _resolve(styleId, from, SS) {
   const id = String(styleId || '').trim();
   if (!id) return null;
+  // 📜 「대본스타일」(`__script__`) = 화풍이 대본마다 다르다 — 고정 프롬프트가 없다(missing 이 아니다 · v0.7.41)
+  if (id === '__script__') return { styleId: id, styleName: '대본스타일', prompt: '', from, script: true };
   const s = SS.getById(id);
   if (!s) return { styleId: id, styleName: '', prompt: '', from, missing: true };
   return { styleId: id, styleName: s.name, prompt: SS.getPrompt(id) || '', from, isBuiltIn: !!s.isBuiltIn };

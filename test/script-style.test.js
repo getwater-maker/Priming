@@ -60,6 +60,22 @@ console.log('\n[2] 화풍 결정 — 대본 > 채널(헤더) > 기본 · 모르�
   ok(ctx.eff(SC, null, pr({ id: 'nope', name: '다산의뜰 수채화', raw: 'nope (다산의뜰 수채화)' })) === 'u3', 'id 가 틀려도 이름과 같은 스타일이 **하나뿐**이면 그것');
   ok(ctx.eff(SC, null, pr({ id: 'nope2', name: '따듯한 회화풍 일러스트', raw: 'nope2 (따듯한 회화풍 일러스트)' })) === 'cinematic', '🔴 같은 이름이 둘(따듯한 회화풍 일러스트 u1·u2)이면 이름으로 고르지 않는다 → 채널');
   ok(ctx.eff(SC, null, pr({ id: 'u2', name: '따듯한 회화풍 일러스트', raw: 'u2' })) === 'u2', '🔑 id 로 정확히 — u2');
+  // 채널 기본 스타일이 「대본스타일」(`__script__`) 이면 폴백으로 쓰지 않는다(없는 스타일 id 로 그림을 시도하지 않게 · v0.7.41)
+  ctx.S.preset = { styleLong: SC };
+  ok(ctx.eff(SC, null, pr(null)) === null, '채널 기본이 대본스타일이고 대본에 🎨 줄이 없으면 폴백 = 없음(스타일 id 로 __script__ 를 넘기지 않는다)');
+  ok(ctx.eff(SC, null, pr({ id: 'watercolor', name: '수채화', raw: 'watercolor' })) === 'watercolor', '채널 기본이 대본스타일이어도 대본 🎨 줄이 있으면 그 화풍');
+  {
+    const CS = require('../core/channel-styles');
+    const doc = CS.build({ styleStore: { getById: () => null, loadAll: () => [], getPrompt: () => '' }, presetStore: { loadAll: () => [{ name: 'X', styleLong: SC }] } });
+    const L = doc.channels[0].long;
+    ok(L && L.script === true && !L.missing && L.styleName === '대본스타일' && L.prompt === '', '채널 화풍 내보내기: 대본스타일은 missing 이 아니라 script:true(고정 프롬프트 없음)');
+  }
+}
+
+{
+  // 채널 편집 「제작 도구」의 이미지 스타일 목록에도 「📜 대본스타일」이 있다(v0.7.41 · 로이 — 헤더에만 있고 채널 편집엔 없었다)
+  const APP = read('renderer/src/App.jsx');
+  ok(/styleLong: e\.target\.value \}\)\}>\s*<option value=\{SCRIPT_STYLE_ID\}[\s\S]{0,220}?>📜 대본스타일<\/option>/.test(APP), '채널 편집 스타일 목록에 「📜 대본스타일」');
 }
 
 console.log('\n[3] 모든 이미지 입구가 대본 화풍을 거친다(소스 전수)');

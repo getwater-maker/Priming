@@ -1970,7 +1970,8 @@ const _styleWarned = new Set();
 const SCRIPT_STYLE_ID = '__script__';
 function resolveScriptStyle(pr, requested) {
   if (requested !== SCRIPT_STYLE_ID) return { id: requested || null, from: 'channel' };
-  const chFallback = (S.preset && (S.preset.styleLong || S.preset.styleId)) || null;
+  let chFallback = (S.preset && (S.preset.styleLong || S.preset.styleId)) || null;
+  if (chFallback === SCRIPT_STYLE_ID) chFallback = null;   // 채널 기본이 「대본스타일」이면 폴백할 고정 스타일이 없다(렌더러가 만들기 전에 묻는다)
   const ss = pr && pr.scriptStyle;
   if (!ss || !ss.id) return { id: chFallback, from: 'channel', missing: true };
   const SS = require('./core/style-store');
