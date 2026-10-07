@@ -110,7 +110,9 @@ async function checkBatch({ batchName, key, timeoutMs = 180000 }) {
     const state = (j.metadata && j.metadata.state) || j.state || (j.done ? 'JOB_STATE_SUCCEEDED' : 'JOB_STATE_RUNNING');
     const done = /SUCCEEDED|FAILED|CANCELLED|EXPIRED/i.test(state);
     const results = [];
-    const inlined = (j.response && (j.response.inlinedResponses || j.response.inlineResponses)) || [];
+    // 실측(2.1 배치, 2026-10-07): 결과는 response.inlinedResponses.inlinedResponses[] (한 겹 더 감싼 객체) — metadata.output 에도 같은 사본이 있다.
+    let inlined = (j.response && (j.response.inlinedResponses || j.response.inlineResponses)) || (j.metadata && j.metadata.output && j.metadata.output.inlinedResponses) || [];
+    if (!Array.isArray(inlined)) inlined = inlined.inlinedResponses || inlined.inlineResponses || [];
     for (let i = 0; i < inlined.length; i++) {
       const item = inlined[i] || {};
       const k = (item.metadata && item.metadata.key) || item.key || String(i);

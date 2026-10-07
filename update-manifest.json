@@ -1,5 +1,5 @@
 {
-  "version": "0.7.46",
+  "version": "0.7.47",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -78,7 +78,7 @@
     "core/flow-accounts.js": "93dcb0f93629c47cbe2f0f32f2ecb9986c7a52ac",
     "core/font-store.js": "ae06a39c43ae3e8c6d2f9f86775562c0b04c1316",
     "core/gemini-batch-store.js": "8f3551af04313e9212780a718f569e082a2c9c36",
-    "core/gemini-image.js": "bcbcbf91a054966927e4bdda2df49c75fded997b",
+    "core/gemini-image.js": "99e4a6b4dc44300b0c1e69d2f77fb27747bce4a1",
     "core/genspark-accounts.js": "3e523c32e118a152aa5249477097d4cfe095a6df",
     "core/gpu-temp.js": "edf47c16003ac8b7e72bfba6d196e94342182bb8",
     "core/grok-accounts.js": "b83a68d14765d3261d8332e73fdd20cd536cd7a2",
@@ -152,7 +152,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "8f420557ba7cf2756deb0c6c7d467300bb75a666",
+    "docs/작업노트/2026-10.md": "97d1fdb3a43f503123bae3f10ea9c1d3bbef2f15",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/참조음성만들기-CLI.md": "8d755802a069d271fc48d6584d357274e0c64329",
     "docs/출판-원고-가이드.md": "8c082043b42d2412323ceab87b0dc884f55dde83",
@@ -167,7 +167,7 @@
     "light-updater.js": "e57035d6614fe2ca3596efd411ae4f80428baa5e",
     "main.js": "d2db7e8397caa590793b3ec0c6812fb063e421e1",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "26ec74b0e026e1f8bcfac060aa93a018a2df51da",
+    "package.json": "e43ebe35e4a932eb4bc3e0ced4d38dceea3e39f4",
     "preload.js": "1cf468fc7f1cdf49744eed8fb74f4420098dbb2f",
     "renderer/dist/assets/index-BIZlwYDj.js": "5c5df3b93745ebb66a85649343901168853f2a62",
     "renderer/dist/assets/index-BpuQwwNX.css": "baf9b522c06c6364829f7bec21ff591d50411b6e",
