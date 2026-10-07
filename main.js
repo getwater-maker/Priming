@@ -897,24 +897,28 @@ ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
   if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키 없음 — ⚙ 채널편집에서 Gemini 키를 넣으세요.' };
   const styleId = effStyleId(args.styleId || null);   // 🎨 대본 화풍 우선
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const requests = []; const items = [];
+  const BSt = require('./core/gemini-batch-store');
+  const inFlight = new Set(); BSt.pendingAllForScript(S.scriptPath).forEach((j) => (j.items || []).forEach((it) => inFlight.add(it.key)));   // 이미 다른 배치(Lite·2.1)에 실린 그룹은 또 싣지 않는다(이중 과금 방지)
+  const requests = []; const items = []; let skippedInFlight = 0;
   for (const pr of S.parsed.projects) {
     for (const g of pr.groups) {
       if (g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g)) {
         const key = `s${pr.shortsNum}g${g.num}`;
+        if (inFlight.has(key)) { skippedInFlight++; continue; }
         requests.push({ key, prompt: (stylePrompt ? stylePrompt + ', ' : '') + g.imagePrompt, aspect: _aspectFor(pr) });
         items.push({ key, shortsNum: pr.shortsNum, groupNum: g.num });
       }
     }
   }
-  if (!requests.length) return { ok: false, error: '배치로 만들 이미지가 없습니다 (이미 다 있음).' };
-  log(`🌙 배치 제출 중… ${requests.length}장 (나노바나나2 Lite API)`);
+  if (!requests.length) return { ok: false, error: skippedInFlight ? `배치로 만들 이미지가 없습니다 (${skippedInFlight}장은 이미 제출한 배치에 있음 — 📥 회수).` : '배치로 만들 이미지가 없습니다 (이미 다 있음).' };
+  const bModel = args.model || GI.loadConfig().model;
+  log(`🌙 배치 제출 중… ${requests.length}장 (${bModel})${skippedInFlight ? ` · 이미 제출된 ${skippedInFlight}장 제외` : ''}`);
   try {   // 👤 배치는 인물 참조를 싣지 않는다(요청마다 시트 그림을 넣으면 인라인 한도 20MB 를 넘는다)
     if (GI.loadConfig().charRefs !== false && S.scriptPath && require('./core/char-refs').parseCards(fs.readFileSync(S.scriptPath, 'utf8')).length) {
       log('  👤 배치는 인물 참조를 쓰지 않습니다 — 인물 일관성이 필요하면 즉시 생성(⚡ 만들기)으로 그리세요.');
     }
   } catch {}
-  const r = await GI.submitBatch({ requests, displayName: (S.parsed.fileTitle || 'priming') });
+  const r = await GI.submitBatch({ requests, model: bModel, displayName: (S.parsed.fileTitle || 'priming') });
   if (!r.ok) { log('배치 제출 실패: ' + r.error); return r; }
   require('./core/gemini-batch-store').add({
     batchName: r.batchName, model: r.model, scriptPath: S.scriptPath, outRoot: S.outRoot,
@@ -934,14 +938,16 @@ ipcMain.handle('gemini-batch-status', () => {
 ipcMain.handle('gemini-batch-retrieve', async () => {
   if (!S.parsed || !S.scriptPath) return { ok: false, error: '대본을 먼저 여세요.' };
   const BS = require('./core/gemini-batch-store'); const GI = require('./core/gemini-image');
-  const job = BS.pendingForScript(S.scriptPath);
-  if (!job) return { ok: false, error: '이 대본으로 제출한 배치가 없습니다.' };
+  const jobs = BS.pendingAllForScript(S.scriptPath);
+  if (!jobs.length) return { ok: false, error: '이 대본으로 제출한 배치가 없습니다.' };
+  let total = 0, allDone = true, lastState = '';
+  for (const job of jobs) {   // Lite·2.1 등 여러 배치를 한 번에 회수
   log(`📥 배치 상태 확인… (${job.title || job.batchName})`);
   const c = await GI.checkBatch({ batchName: job.batchName });
-  if (!c.ok) { log('배치 상태 확인 실패: ' + c.error); return { ok: false, error: c.error }; }
+  if (!c.ok) { log('배치 상태 확인 실패: ' + c.error); allDone = false; lastState = c.error; continue; }
   BS.update(job.batchName, { state: c.state });
-  if (!c.done) { log(`⏳ 배치 진행 중: ${c.state} — 잠시 뒤 다시 회수해 주세요.`); return { ok: true, done: false, state: c.state }; }
-  if (!/SUCCEEDED/i.test(c.state)) { log(`⚠ 배치 종료 상태: ${c.state} (실패/취소/만료)`); BS.update(job.batchName, { collected: true }); return { ok: true, done: true, state: c.state, saved: 0 }; }
+  if (!c.done) { log(`⏳ 배치 진행 중: ${c.state} — 잠시 뒤 다시 회수해 주세요.`); allDone = false; lastState = c.state; continue; }
+  if (!/SUCCEEDED/i.test(c.state)) { log(`⚠ 배치 종료 상태: ${c.state} (실패/취소/만료)`); BS.update(job.batchName, { collected: true }); lastState = c.state; continue; }
   const byKey = {}; job.items.forEach((it) => { byKey[it.key] = it; });
   let saved = 0;
   for (const r of c.results) {
@@ -958,9 +964,11 @@ ipcMain.handle('gemini-batch-retrieve', async () => {
     } catch (e) { log(`  저장 실패 ${r.key}: ${e.message}`); }
   }
   BS.update(job.batchName, { state: c.state, collected: true, collectedAt: Date.now(), saved });
-  log(`📥 배치 회수 완료 — ${saved}/${job.count}장 저장·매핑`);
+  log(`📥 배치 회수 완료 — ${saved}/${job.count}장 저장·매핑 (${job.model || ''})`);
+  total += saved; lastState = c.state;
+  }
   storeActive(); pushDtoUpdate();
-  return { ok: true, done: true, state: c.state, saved, dto: P.toDTO(S.parsed) };
+  return { ok: true, done: allDone, state: lastState, saved: total, dto: P.toDTO(S.parsed) };
 });
 
 // LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립

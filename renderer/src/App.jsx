@@ -4515,11 +4515,11 @@ export default function App() {
   }
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
   async function onPickVideoEngine(val) { return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid'); }
-  async function submitBatch() {
+  async function submitBatch(model) {
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus('🌙 배치 제출 중…');
     try {
-      const r = await api.geminiBatchSubmit({ styleId: sid });
+      const r = await api.geminiBatchSubmit({ styleId: sid, model: model || undefined });
       if (r && r.ok) { setStatus(`🌙 배치 제출 완료 — ${r.count}장 (몇 시간 뒤 📥 회수)`); refreshBatch(); }
       else setStatus('배치 제출 실패: ' + ((r && r.error) || ''));
     } catch (e) { logline('배치 제출 오류: ' + e.message); }
@@ -4997,7 +4997,8 @@ export default function App() {
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             {imgEngine === 'gemini' && (<>
-              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
+              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={() => submitBatch()}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
+              <button className="ghost" disabled={!loaded} title="나노바나나 2.1 배치 제출 — 모델 gemini-nano-banana-2.1 로 이미지 생성을 예약합니다(Batch API · 표준가의 50% 할인 대상). 위 「배치제출」(모델 칸의 모델)과 별개이며, 이미 다른 배치에 실린 그림은 또 싣지 않습니다. 결과는 「📥 배치회수」로 가져옵니다." onClick={() => submitBatch('gemini-nano-banana-2.1')}><span className="rb-ic">🌙</span> <span className="rb-t">2.1 배치</span></button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
             </>)}
           </span>

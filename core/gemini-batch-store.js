@@ -19,4 +19,8 @@ function remove(batchName) { const d = load(); d.jobs = d.jobs.filter((j) => j.b
 function pendingForScript(scriptPath) {
   return load().jobs.filter((j) => j.scriptPath === scriptPath && !j.collected).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0))[0] || null;
 }
-module.exports = { list, add, update, remove, pendingForScript, FILE };
+// 특정 대본의 '아직 회수 안 된' job 전부(최신순) — Lite·2.1 배치가 동시에 있을 수 있다
+function pendingAllForScript(scriptPath) {
+  return load().jobs.filter((j) => j.scriptPath === scriptPath && !j.collected).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+}
+module.exports = { list, add, update, remove, pendingForScript, pendingAllForScript, FILE };
