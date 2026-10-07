@@ -285,6 +285,10 @@ function phaseBadge(p) {
 
 // 🎬 Genspark 비디오 모델 — genspark-engine.js 의 GENSPARK_VIDEO_MODELS 와 **같아야 한다**
 //   (렌더러는 require 를 못 쓴다. 테스트가 두 목록의 이름을 대조해 어긋남을 막는다.)
+// 🎬 Grok(구독·API) 비디오 항목은 헤더·채널 목록에서 뺐다(2026-10-07 로이). 예전에 저장된 값(grok·grok10·grok-api·wan)은 「없음(이미지만)」으로 읽는다 —
+//   조용히 다른 유료 엔진(Flow·Veo)으로 넘어가 크레딧을 쓰지 않게.
+const normVideoEngine = (v) => (['grok', 'grok10', 'grok-api', 'wan'].includes(v) ? 'none' : v);
+const SCRIPT_STYLE_ID = '__script__';   // 📜 이미지 스타일 목록의 「대본스타일」 — main.js 의 SCRIPT_STYLE_ID 와 같은 값
 const GS_VIDEO_MODELS = [
   { name: '모델 자동 선택', note: 'Genspark 이 고름 — 참조 이미지를 쓸지 알 수 없음', imgRef: null },
   { name: 'Seedance 2.5', note: '4~30초 · 1080p · 이미지 30장', imgRef: true },
@@ -424,7 +428,7 @@ export default function App() {
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
   const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
-  const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
+  const [videoEngine, setVideoEngine] = useState('none'); // 비디오 제작 도구 — 기본 「없음(이미지만)」
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
   const [vidSel, setVidSel] = useState('intro');   // 🎬 영상 대상 방식(기본 = 도입부 전체 · odd/even/intro_odd… — 채널에 미리 등록, 1번 그룹 항상 포함)
@@ -625,6 +629,7 @@ export default function App() {
   const findSessionRef = useRef('');                      // 지금 열려 있는 검색 세션의 문자열(Electron findNext 판정용)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
+  const [stylePick, setStylePick] = useState(null);          // 📜 대본스타일인데 대본에 🎨 줄이 없을 때 만들기 전에 묻는 팝업 {resolve}
   const [styleSync, setStyleSync] = useState('');            // ☁ 공용 스타일 동기화 상태/경고
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
   const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
@@ -822,7 +827,7 @@ export default function App() {
         //   옛 'rotate'(순환) → 'genspark'. 드롭다운이 Flow·Genspark 로 분리됐고(2026-08-26), 고른 쪽을
         //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
         if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
-        if (p.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
+        if (p.videoEngine != null) setVideoEngine(normVideoEngine(p.videoEngine));
         if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
         setVidSel(normVidSel(p.vidSel) || 'intro');   // 🎬 채널에 등록한 영상 대상 방식(없으면 도입부 전체)
       }
@@ -940,7 +945,7 @@ export default function App() {
     // comfy(z-image/Krea2)·gemini·genspark·flow 는 유효 — 보존. 옛 'rotate' 만 genspark 로 이관.
     if (s.imgEngine != null) setImgEngine(s.imgEngine === 'rotate' ? 'genspark' : s.imgEngine);
     // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
-    if (s.videoEngine != null) setVideoEngine(['wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
+    if (s.videoEngine != null) setVideoEngine(normVideoEngine(s.videoEngine));
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
     setVidSel(normVidSel(s.vidSel) || 'intro');   // 옛 항목(방식 없음) = 도입부 전체
@@ -1116,16 +1121,31 @@ export default function App() {
     try { const d = await api.deleteTts(); if (d) setDto(d); setStatus('TTS 삭제 완료'); }
     catch (e) { logline('TTS 삭제 오류: ' + e.message); setStatus('TTS 삭제 실패'); }
   }
+  // 🎨 「📜 대본스타일」(SCRIPT_STYLE_ID) — 대본에 🎨 화풍 줄이 있으면 그대로 main 에 넘기고(대본 화풍으로 그림),
+  //   없으면 만들기 전에 스타일을 고르게 한다(2026-10-07 로이). 반환: 쓸 styleId(문자열|null) · **undefined = 취소**.
+  //   다른 스타일을 직접 고른 경우엔 대본 🎨 줄이 있어도 그 스타일이 이긴다(옛 「대본 우선」 폐기).
+  function scriptStyleHit() {
+    const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
+    if (!ssp) return null;
+    return styles.find((x) => x.id === ssp.id) || (ssp.name && styles.filter((x) => x.name === ssp.name).length === 1 ? styles.find((x) => x.name === ssp.name) : null) || null;
+  }
+  async function runStyleId() {
+    if (styleId !== SCRIPT_STYLE_ID) return styleId || null;
+    if (scriptStyleHit()) return SCRIPT_STYLE_ID;
+    return await new Promise((resolve) => setStylePick({ resolve }));
+  }
   async function runImg(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return; // 이미지 버튼=이미지 프롬프트만
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`이미지 생성중(${imgEngine})…`);
-    try { const d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); setDto(d); setStatus('이미지 완료'); }
+    try { const d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: sid }); setDto(d); setStatus('이미지 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
@@ -1158,7 +1178,9 @@ export default function App() {
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
     const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
-    queueAbortRef.current = false;                       // 새 큐 시작 — 지난 중단 기록 초기화
+    let qStyle = styleId || null;   // 📜 대본스타일 + 이 대본에 🎨 줄 없음 → 시작 전에 한 번 묻는다(큐의 다른 대본은 main 이 채널 화풍으로 폴백)
+    if (stage !== 'tts') { qStyle = await runStyleId(); if (qStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
+    queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(items.length > 1);   // ⏸ 지난 예약 초기화 · 대본이 둘 이상일 때만 버튼을 보인다
     let stoppedAfter = 0;                                // ⏸ 「이번 편까지만」으로 멈추며 남긴 편수
     for (const ph of phases) {
@@ -1172,8 +1194,8 @@ export default function App() {
         try { await api.selectQueueItem(it.id, 'longform'); } catch (_) {}   // 🌐 제작 루프는 화면이 출판으로 바뀌어도 롱폼 세계로
         try {
           if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
-          if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: qStyle }); if (d) setDto(d); }
+          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle }); if (d) setDto(d); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
     }
@@ -1184,10 +1206,11 @@ export default function App() {
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
   async function runImgVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return;
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus('이미지→비디오 생성중…');
     try {
-      let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d);
-      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+      let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: sid }); if (d) setDto(d);
+      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); if (d) setDto(d); }
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -1216,6 +1239,7 @@ export default function App() {
     const _needImg = (om === 'audio') ? 'none' : 'all';
     const _needVid = (om === 'audio') ? 'none' : needVideoPrompts();
     if (!ensurePromptsFilled(shortsNum, { image: _needImg, video: _needVid })) return; // 만들기=전체 이미지 + 범위 i2v
+    if (om !== 'audio') { const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } args.styleId = sid; }
     const tgt = outTarget === 'whiteboard' ? '✏ 화이트보드 MP4' : outTarget === 'mp4' ? '.vrew → 🎬 유튜브 MP4' : '.vrew';
     setStatus(om === 'audio' ? '⚡ 음성만 제작중… (TTS→.vrew)'
       : om === 'visual' ? '⚡ 화면만 제작중… (이미지→.vrew · 음성은 Vrew 에서)'
@@ -1243,6 +1267,10 @@ export default function App() {
     }
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
+    let batchStyle = styleId || null;   // 📜 대본스타일 — 지금 대본에 🎨 줄이 없으면 시작 전에 묻는다(다른 대본은 각자 🎨 줄 · 없으면 채널 화풍)
+    if (effOutMode() !== 'audio') {
+      if (styleId === SCRIPT_STYLE_ID && !scriptStyleHit()) { batchStyle = await runStyleId(); if (batchStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
+    }
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(true);   // ⏸ 버튼을 보이고, 지난 예약은 초기화(main run-batch 도 시작 때 푼다)
     try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 방금 고친 헤더(범위 등)를 지금 대본에 먼저 저장 — 디바운스 300ms 전에 눌러도 반영(v0.5.73)
@@ -1252,7 +1280,7 @@ export default function App() {
       //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위는 공통으로 보내지 않는다 — main 이 대본마다 자기 범위(저장값 → 도입부)를 쓴다(v0.5.73).
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: styleId || null, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus(r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
@@ -1302,8 +1330,9 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); }
   }
   async function runRegen(shortsNum, groupNum) {
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 이미지 재생성…`);
-    try { const d = await api.regenGroup({ shortsNum, groupNum, styleId: styleId || null, engine: imgEngine }); setDto(d); setStatus('재생성 완료'); }
+    try { const d = await api.regenGroup({ shortsNum, groupNum, styleId: sid, engine: imgEngine }); setDto(d); setStatus('재생성 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 그룹 단위 버튼 (PrimingFlow)
@@ -1315,8 +1344,9 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runGroupVid(shortsNum, groupNum) {
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 비디오…`);
-    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
+    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   function playFrom(shortsNum, groupNum, start, tag, force) {
@@ -1572,7 +1602,7 @@ export default function App() {
   function delDictRow(i) { setDictRows((rs) => rs.filter((_, j) => j !== i)); }
   function showPrompt(shortsNum, c, label) {
     // 편집 대상 = 대본 이미지/비디오 프롬프트(raw). 스타일은 생성 시 앞에 자동으로 붙는다(stylePfx 는 안내용).
-    const st = styles.find((x) => x.id === styleId);
+    const st = styleId === SCRIPT_STYLE_ID ? scriptStyleHit() : styles.find((x) => x.id === styleId);
     const stylePfx = st && st.prompt ? st.prompt + ', ' : '';
     setPromptView({
       label, shortsNum, groupNum: c.num,
@@ -2793,7 +2823,7 @@ export default function App() {
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
-      imgEngine: p.imgEngine || 'genspark', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
+      imgEngine: p.imgEngine || 'genspark', videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
       vidSel: normVidSel(p.vidSel),            // 🎬 영상 대상 방식(채널 기본값) — ⚠ 아래 저장 patch 에도 실을 것
       outLong: p.outLong || p.outputFolder || '',
@@ -3278,7 +3308,7 @@ export default function App() {
       ttsTargetDb: numOr(ch.ttsTargetDb, -15),
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
-      imgEngine: ch.imgEngine || 'genspark', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
+      imgEngine: ch.imgEngine || 'genspark', videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       vidSel: normVidSel(ch.vidSel),            // 🎬 영상 대상 방식 — ⚠ 마찬가지
       outLong: (ch.outLong || '').trim(),
@@ -4458,9 +4488,10 @@ export default function App() {
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
   async function onPickVideoEngine(val) { return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid'); }
   async function submitBatch() {
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus('🌙 배치 제출 중…');
     try {
-      const r = await api.geminiBatchSubmit({ styleId: styleId || null });
+      const r = await api.geminiBatchSubmit({ styleId: sid });
       if (r && r.ok) { setStatus(`🌙 배치 제출 완료 — ${r.count}장 (몇 시간 뒤 📥 회수)`); refreshBatch(); }
       else setStatus('배치 제출 실패: ' + ((r && r.error) || ''));
     } catch (e) { logline('배치 제출 오류: ' + e.message); }
@@ -4913,17 +4944,17 @@ export default function App() {
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" onClick={openOllama}>⚙</button>
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
               <option value="">스타일 없음</option>
+              <option value={SCRIPT_STYLE_ID} title="대본의 「> 🎨 화풍:」 줄로 그립니다. 줄이 없으면 만들 때 스타일을 고르는 팝업이 뜹니다">📜 대본스타일</option>
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
-            {(() => {   // 🎨 이번 대본 화풍의 출처(v0.5.89) — 대본 `> 🎨 화풍:` 줄이 있으면 그것이 이긴다
+            {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
+              if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
               const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
-              if (!loaded) return null;
-              const nm = (id) => ((styles.find((x) => x.id === id) || {}).name) || id || '없음';
-              if (!ssp) return <span className="meta" data-testid="style-src" title="이 대본에는 🎨 화풍 줄이 없어 채널(헤더) 화풍을 씁니다">채널: {nm(styleId)}</span>;
-              const hit = styles.find((x) => x.id === ssp.id) || (ssp.name ? (styles.filter((x) => x.name === ssp.name).length === 1 ? styles.find((x) => x.name === ssp.name) : null) : null);
-              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 id 가 없어 채널 화풍으로 그립니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 채널: {nm(styleId)}</span>;
-              return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄이 채널·헤더 화풍보다 우선합니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
+              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 대본에 🎨 없음 → 만들 때 선택</span>;
+              const hit = scriptStyleHit();
+              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 만들 때 선택</span>;
+              return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
             <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나2(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
@@ -4947,15 +4978,11 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
-              <option value="grok">Grok (브라우저)</option>
               <option value="flow">Flow · Veo (구독)</option>
                 <option value="genspark">Genspark (구독)</option>
-              <option value="grok-api">Grok API (유료)</option>
               <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
               <option value="none">없음 (이미지만)</option>
             </select>
-            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={() => openSettings('acct')}><span className="rb-ic">⚙</span> <span className="rb-t">계정</span></button>}
-            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}><span className="rb-ic">⚙</span> <span className="rb-t">키</span></button>}
             {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}><span className="rb-ic">⚙</span> <span className="rb-t">Veo</span></button>}
             {videoEngine === 'genspark' && (
               <select style={{ maxWidth: 190 }} value={gsVideoModel}
@@ -5540,13 +5567,11 @@ export default function App() {
                   </div>
                   <div className="col">
                     <div className="crow stack"><span className="l">비디오</span>
-                      <select value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)}
+                      <select value={comfySelectValue(normVideoEngine(ch.videoEngine || 'none'), cvidCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(ch.videoEngine || 'grok', cvidCfg)} />
-                        <option value="grok">Grok (브라우저)</option>
+                        <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(normVideoEngine(ch.videoEngine || 'none'), cvidCfg)} />
                         <option value="flow">Flow · Veo (구독)</option>
                 <option value="genspark">Genspark (구독)</option>
-                        <option value="grok-api">Grok API (유료)</option>
                         <option value="none">없음(이미지 고정)</option>
                       </select></div>
                   </div>
@@ -5690,6 +5715,20 @@ export default function App() {
 
             </div>
             <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: '#c0392b' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {stylePick && (
+        <div className="modal-bg show" data-testid="style-pick">
+          <div className="modal-card" style={{ maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}>
+            <h3>🎨 이 대본에는 스타일이 없습니다</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>「📜 대본스타일」이 선택돼 있는데 대본에 <b>🎨 화풍</b> 줄이 없습니다. 이번 생성에 쓸 스타일을 고르세요. (헤더 선택은 바뀌지 않습니다)</div>
+            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button className="ghost" style={{ textAlign: 'left' }} onClick={() => { const r = stylePick.resolve; setStylePick(null); r(null); }}>스타일 없음</button>
+              {styles.map((s) => <button key={s.id} className="ghost" style={{ textAlign: 'left' }} onClick={() => { const r = stylePick.resolve; setStylePick(null); r(s.id); }}>{s.name}</button>)}
+            </div>
+            <div className="modal-actions"><button className="ghost" onClick={() => { const r = stylePick.resolve; setStylePick(null); r(undefined); }}>취소</button></div>
           </div>
         </div>
       )}

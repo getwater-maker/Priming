@@ -57,11 +57,11 @@ fs.writeFileSync(B, script('범위 나'), 'utf8');
     const q0 = await win.evaluate(async () => (await window.api.listQueue()).queue.longform.items.map((x) => ({ t: x.title, s: x.settings })));
     ok(q0.length === 2, '큐에 대본 2개: ' + q0.map((x) => x.t).join(' · '));
 
-    // ③ 비디오 메뉴 — 엔진이 「없음」이면 범위 칸이 안 보이므로 Grok 으로(끝나면 되돌린다)
+    // ③ 비디오 메뉴 — 엔진이 「없음」이면 범위 칸이 안 보이므로 Flow 로(끝나면 되돌린다)
     await menu(win, 'video');
     const veSel = win.locator('select[title^="i2v 비디오 엔진"]');
     veBefore = await veSel.inputValue();
-    if (veBefore === 'none') { await veSel.selectOption('grok'); await win.waitForTimeout(300); }
+    if (veBefore === 'none') { await veSel.selectOption('flow'); await win.waitForTimeout(300); }
     const allBtn = win.locator('[data-testid="range-all"]');
     ok(await allBtn.count() === 1, '「모두 적용」 버튼이 범위 옆에 있다');
     ok(await allBtn.isEnabled(), '대본이 2개 이상이면 눌린다');

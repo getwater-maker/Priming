@@ -1963,14 +1963,20 @@ function _flowUnstage(workDir, imgDir, re, moved, logger) {
 //   모든 이미지 입구(⚡ 만들기 · 이미지 · 영상 선행 이미지 · 🔄 한 장 · 배치 · 캐시 지우기 · 프롬프트 보기)가 여기를 거친다 —
 //   캐시 키에도 이 값이 들어가므로 채널 화풍으로 만든 옛 그림이 캐시에서 되살아나지 않는다.
 //   모르는 id 면 멈추지 않고 경고 + 받은 값(채널 화풍)으로. 이름과 정확히 같은 스타일이 하나뿐이면 그것으로.
+//   🔄 2026-10-07 로이: **대본 우선 규칙 폐기** — 이제 헤더 스타일 목록의 「📜 대본스타일」(`SCRIPT_STYLE_ID`)을 고른 때만 대본의 🎨 줄을 쓴다.
+//   다른 스타일을 고르면 대본에 🎨 줄이 있어도 그 스타일이 이긴다. 대본스타일인데 줄이 없으면 렌더러가 만들기 전에 스타일을 묻는다(그 답이 id 로 온다).
+//   큐의 다른 대본처럼 못 물어본 경우의 마지막 안전망만 채널 화풍(`styleLong`)으로.
 const _styleWarned = new Set();
+const SCRIPT_STYLE_ID = '__script__';
 function resolveScriptStyle(pr, requested) {
+  if (requested !== SCRIPT_STYLE_ID) return { id: requested || null, from: 'channel' };
+  const chFallback = (S.preset && (S.preset.styleLong || S.preset.styleId)) || null;
   const ss = pr && pr.scriptStyle;
-  if (!ss || !ss.id) return { id: requested || null, from: 'channel' };
+  if (!ss || !ss.id) return { id: chFallback, from: 'channel', missing: true };
   const SS = require('./core/style-store');
   let st = SS.getById(ss.id);
   if (!st && ss.name) { const same = SS.loadAll().filter((x) => x.name === ss.name); if (same.length === 1) st = same[0]; }
-  if (!st) return { id: requested || null, from: 'channel', unknown: ss };
+  if (!st) return { id: chFallback, from: 'channel', unknown: ss };
   return { id: st.id, from: 'script', name: st.name };
 }
 function effStyleId(requested, logf, pr) {
@@ -1979,8 +1985,9 @@ function effStyleId(requested, logf, pr) {
   const lg = logf || log;
   const key = (S.scriptPath || '') + '|' + (p && p.scriptStyle ? p.scriptStyle.raw : '') + '|' + (requested || '');
   if (!_styleWarned.has(key)) {
-    if (r.unknown) { _styleWarned.add(key); lg(`⚠ 대본의 🎨 화풍 「${r.unknown.raw}」 — 이런 스타일 id 가 없습니다. 채널 화풍(${requested || '없음'})으로 그립니다(이미지 ✎ 스타일 목록의 id 를 확인하세요)`); }
-    else if (r.from === 'script' && r.id !== requested) { _styleWarned.add(key); lg(`🎨 화풍 = 대본 「${r.name}」(${r.id}) — 채널·헤더 화풍(${requested || '없음'}) 대신 씁니다`); }
+    if (r.unknown) { _styleWarned.add(key); lg(`⚠ 대본의 🎨 화풍 「${r.unknown.raw}」 — 이런 스타일 id 가 없습니다. 채널 화풍(${r.id || '없음'})으로 그립니다(이미지 ✎ 스타일 목록의 id 를 확인하세요)`); }
+    else if (r.missing) { _styleWarned.add(key); lg(`⚠ 「📜 대본스타일」인데 이 대본에 🎨 화풍 줄이 없습니다 — 채널 화풍(${r.id || '없음'})으로 그립니다`); }
+    else if (r.from === 'script') { _styleWarned.add(key); lg(`🎨 화풍 = 대본 「${r.name}」(${r.id})`); }
   }
   return r.id;
 }
@@ -7138,7 +7145,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       //   제거된 영상엔진(wan/grok10)은 grok 으로 보정. (comfy::path·grok-api·flow 는 그대로)
       //   ⚠ 'flow' 를 여기 넣지 말 것 — 2026-08-28 에 Flow·Veo 비디오가 부활했다. 넣으면 헤더에서 골라도 조용히 Grok 으로 만든다(v0.3.50 과 같은 계열의 사고).
       const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
-      const ve = (['wan', 'grok10'].includes(rawVe)) ? 'grok' : rawVe;
+      const ve = (['wan', 'grok', 'grok10', 'grok-api'].includes(rawVe)) ? 'none' : rawVe;   // 🎬 Grok 항목은 UI 에서 뺐다(2026-10-07) — 옛 저장값은 「없음(이미지만)」
       const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
       // 🔴 채널(목소리)은 **항목값 우선 → 헤더 폴백**. 둘 다 없으면 getPreset(null)=기본 채널이 되어
       //   **엉뚱한 목소리로 조용히 합성**된다(2026-08-31 실사고). 배속·AI고지도 같은 구멍이라 함께 폴백한다.
