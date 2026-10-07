@@ -50,4 +50,20 @@ function speakersOf(raw) { return SS.splitIntoParagraphItems ? null : null; }
   ok(spk[from] === '할머니', '그 문장만 화자: ' + JSON.stringify(spk));
   ok(spk.filter(Boolean).length === 1, '다른 문장 화자 없음');
 }
+// 화자 떼기 — `[내레이션] 대사` 또는 name=null
+ok(SE.splitSpeakerPrefix('[내레이션] 허허.').clear === true && SE.splitSpeakerPrefix('[내레이션] 허허.').name === null, '[내레이션] = 화자 떼기');
+{
+  const raw = '[노인] 하나다. 둘이다. 셋이다.\n';
+  const a = raw.indexOf('둘'), b = raw.indexOf('둘이다.') + 4;
+  const out = SE.withSpeakerLine(raw, { start: a, end: b }, '둘이다.', null);
+  ok(out === '[노인] 하나다.\n둘이다.\n[노인] 셋이다.\n', '화자 줄 가운데 문장 떼기: ' + JSON.stringify(out));
+  const P = require('../core/pipeline');
+  const af = P.parseScriptText(out, 'longform', {}).projects[0];
+  ok(JSON.stringify(af.sentences.map((x) => x.speaker || null)) === JSON.stringify(['노인', null, '노인']), '파서가 그 문장만 화자 없음으로 읽는다');
+}
+{
+  const raw = '[노인] 혼자다.\n';
+  const out = SE.withSpeakerLine(raw, { start: 5, end: 9 }, '혼자다.', null);
+  ok(out === '혼자다.\n', '화자 줄의 유일한 문장 떼기: ' + JSON.stringify(out));
+}
 console.log('script-edit-speaker: ' + n + ' passed');

@@ -1565,7 +1565,7 @@ ipcMain.handle('extract-mp3', async () => {
 //   ⚠ 그냥 로컬을 숨기면 "아직 서버에 안 올라간 목소리"가 목록에서 사라진다 →
 //     **먼저 올리고(동기화) 나서** 서버 목록만 반환한다. 이러면 아내 PC 에서 만든 목소리도
 //     그 PC 에서 목록을 한 번 여는 것만으로 서버에 모여 메인 PC 에도 보인다.
-const REF_DIR = () => path.join(os.homedir(), '.flow-app', 'ref-audio');
+const REF_DIR = () => require('./core/ref-voice').REF_DIR();   // 메인 PC = 서버 라이브러리 폴더 · 아내 PC = ~/.flow-app/ref-audio
 function _localRefFiles() {
   try { return fs.readdirSync(REF_DIR()).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)); } catch { return []; }
 }
@@ -1655,7 +1655,7 @@ function resolveRefPath(p) {
 //   (같은 이름의 .txt 파일이 참조텍스트로 자동 사용되므로, 사용자가 wav+txt 를 이 폴더에서 관리)
 ipcMain.handle('open-ref-folder', (_e, p0) => {
   const p = resolveRefPath(p0);
-  let dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
+  let dir = REF_DIR();
   try { if (p && fs.existsSync(p)) dir = path.dirname(p); } catch {}
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   try { shell.openPath(dir); } catch {}
@@ -1722,13 +1722,23 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
     S.vdLastLang = lang;
     S.vdLastInstruct = instruct;                   // 어떤 설명으로 만든 목소리인지 — 서버 라이브러리에 함께 남긴다
     // 길이 + 자동 구간 제안(앞 무음·끝 감쇠 제거) — 슬라이스 UI 의 초기값. 실패해도 생성 자체는 성공.
-    let durationSec = 0, suggest = null;
+    let durationSec = 0, suggest = null, suggestText = null;
     try {
       const WS = require('./core/wav-slice');
       durationSec = WS.parseWav(r.buffer).durationSec;
       // 🌏 외국어는 끝을 문장 사이 쉼에서 자른다(낱말 한가운데를 베면 남은 글자가 새 문장 앞에 샌다)
       suggest = require('./core/ref-voice').cutRange(r.buffer, lang);
     } catch (e) { log('⚠ 파형 분석 실패(슬라이스 기본값 없음): ' + String((e && e.message) || e)); }
+    // ✂ 쉼에서 끊은 구간이면 **그 구간에 맞는 참조텍스트**를 함께 돌려준다(2026-10-07 — 「…습니다」 꼬리 「니다」가 새 문장 앞에 붙는 사고 처방:
+    //   소리가 문장 중간에서 끝나면 모델이 그 이어짐을 새 문장 앞에 한 번 더 낸다 → 쉼에서 끊고 글도 거기까지만)
+    if (suggest && suggest.pauseAt != null && suggest.end < durationSec - 0.3) {
+      try {
+        const WS2 = require('./core/wav-slice'), BC = require('./core/tts-backcheck');
+        const code = lang === 'Japanese' ? 'ja' : (lang === 'vi' ? 'vi' : 'ko');
+        const c = await BC.checkAudio(WS2.sliceWav(r.buffer, suggest.start, suggest.end), text, code, tmpDir);
+        if (c && !c.unknown && c.heard) suggestText = BC.refTextForCut(text, c.heard, code);
+      } catch (e) { log('⚠ 끊은 구간 받아쓰기 실패(참조텍스트는 전체 문장 그대로): ' + String((e && e.message) || e)); }
+    }
     // 🌏 외국어 목소리는 받아쓰기로 확인해 알려 준다 — 로이가 베트남어·일본어를 귀로 판정하기 어렵다(2026-09-26).
     //   참조음성이 잘못 읽혔으면 그걸로 만드는 모든 문장이 흔들린다. 실패해도 생성 자체는 성공(확인만 못 한 것).
     let asrText = null, asrMatch = null;
@@ -1739,7 +1749,7 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
         asrMatch = textMatchRatio(text, asrText);
       } catch (e) { log('⚠ 받아쓰기 확인 실패: ' + String((e && e.message) || e)); }
     }
-    return { ok: true, tempPath: tmpPath, text, durationSec, suggest, asrText, asrMatch };
+    return { ok: true, tempPath: tmpPath, text, durationSec, suggest, suggestText, asrText, asrMatch };
   } catch (e) { return { ok: false, error: '임시 저장 실패: ' + String((e && e.message) || e) }; }
 });
 // 저장: 방금 생성한 미리듣기 wav 를 사용자가 지정한 파일명으로 ref-audio 에 정식 등록(+.txt 참조텍스트).
@@ -1773,7 +1783,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     // 🌏 외국어(일본어·베트남어)는 잘라낸 구간을 **받아쓰기한 글을 참조텍스트로** 쓴다(2026-09-26 실측).
     //   끝 감쇠를 자르면 마지막 낱말이 일부 잘리는데 참조텍스트가 원문 그대로면, 모델이 남은 글자를 새 문장 앞에
     //   읽어 버렸다(일본어 20문장 중 20문장 · 평균 17%). 사람이 그 차이를 귀로 못 잡으므로 앱이 맞춘다.
-    const vdLang = srcLang === 'vi' ? 'vi' : (srcLang === 'Japanese' ? 'ja' : null);
+    const vdLang = srcLang === 'vi' ? 'vi' : (srcLang === 'Japanese' ? 'ja' : 'ko');   // 🇰🇷 한국어도 잘라낸 구간에 참조텍스트를 맞춘다(v0.7.35)
     if (vdLang && outBuf !== src) {
       try {
         const c = await require('./core/tts-backcheck').checkAudio(outBuf, refText, vdLang, path.dirname(srcPath));
@@ -1782,6 +1792,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
       } catch (e) { log('   ⚠ 받아쓰기 실패: ' + String((e && e.message) || e)); }
     }
     const { base, wavPath } = RV.saveLocal(name, outBuf, refText);   // 같은 이름 있으면 _2, _3… · 같은 이름 .txt = 참조텍스트
+    if (RV.isServerHost() && srcInstruct) { try { fs.writeFileSync(path.join(path.dirname(wavPath), base + '.instruct.txt'), String(srcInstruct).trim(), 'utf8'); } catch (_) {} }   // 서버 폴더에 바로 저장했으니 업로드는 「중복」으로 무시된다 — 설명(.instruct.txt)은 여기서
     log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)${cutLog}`);
     if (!refText) log('   ⚠ 참조텍스트가 비어 있습니다 — 음성 복제 품질이 떨어질 수 있습니다.');
     // 서버(메인 PC)의 공용 목소리 라이브러리에도 등록 — 나·아내가 만든 목소리를 한 곳에 모아 서로 쓸 수 있게.
@@ -1793,6 +1804,10 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
       else if (r.error === 'unsupported') log('   ⚠ 서버가 공용 라이브러리를 지원하지 않습니다(구버전) — 이 PC 에만 저장됨');
       else log(`   ⚠ 공용 라이브러리 등록 실패 — 이 PC 에만 저장됨 (${r.error})`);
     } catch (e) { log('   ⚠ 공용 라이브러리 등록 오류: ' + String((e && e.message) || e)); }
+    // 🏷 저장할 때 정한 태그(성별·연령대·언어·키워드) — 음성 설정(OmniVoice 탭)의 거르기·검색이 쓴다. 실패해도 저장은 성공.
+    if (args.tags && typeof args.tags === 'object') {
+      try { const VT = require('./tts/voice-tags'); VT.set(base, args.tags); log(`   🏷 태그: ${JSON.stringify(VT.load()[base] || '없음')}`); } catch (e) { log('   ⚠ 태그 저장 실패: ' + String((e && e.message) || e)); }
+    }
     let savedSec = 0; try { savedSec = require('./core/wav-slice').parseWav(outBuf).durationSec; } catch {}
     return { ok: true, path: wavPath, name: base + '.wav', text: refText, durationSec: savedSec };
   } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
@@ -7905,14 +7920,18 @@ async function _editSentences(args = {}) {
   const texts = pr.sentences.map((s) => s.text);
   // 🎭 편집칸에 `[이름] 대사` 로 썼으면 화자를 바꾼다 — 화자는 대본 줄 맨 앞 `[이름] ` 으로만 정해지므로 그 문장을 자기 줄로 만든다
   //   (안 하면 `[이름]` 이 자막 글자로만 남는다). 지금 화자와 같으면 접두만 뗀다. 한 문장 고치기에서만.
-  let spkNew = null, editText = text;
+  //   화자 떼기 = `[내레이션] 대사` 로 쓰거나(args.clearSpeaker — 대본 보기 화자 칩의 ✕) → 그 문장을 화자 없는 줄로.
+  let spkNew = null, spkChange = false, editText = text;
   if (n === 1) {
     const sp = SE.splitSpeakerPrefix(text);
-    if (sp) { editText = sp.body; if (sp.name !== (gs[si].speaker || null)) spkNew = sp.name; }
+    const cur = gs[si].speaker || null;
+    if (sp) editText = sp.body;
+    const want = args.clearSpeaker ? null : (sp ? sp.name : cur);
+    if (want !== cur) { spkChange = true; spkNew = want; }
   }
   const plan = SE.planEdit({ raw, texts, from, count: n, newText: editText });
   if (!plan.ok) return { ok: false, error: plan.error };
-  if (spkNew) plan.raw = SE.withSpeakerLine(raw, plan.span, SE.normalizeEditText(editText), spkNew);
+  if (spkChange) plan.raw = SE.withSpeakerLine(raw, plan.span, SE.normalizeEditText(editText), spkNew);
 
   // 🔑 검증 재파싱 — 고친 .md 가 **정말 우리가 의도한 문장들**을 만들어 내는지 확인한다.
   //   이게 없으면 매칭이 한 글자만 어긋나도 .md 와 화면이 갈린 채 조용히 진행된다.
@@ -7924,9 +7943,9 @@ async function _editSentences(args = {}) {
   if (!after || !SE.sameSequence(expect, after.sentences.map((s) => s.text))) {
     return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.\n(따옴표·특수기호·줄바꿈을 빼고 다시 시도해 보세요.)' };
   }
-  if (spkNew) {   // 🎭 화자 검증 — 고친 자리는 새 화자, 나머지 문장의 화자는 그대로여야 한다
+  if (spkChange) {   // 🎭 화자 검증 — 고친 자리는 새 화자, 나머지 문장의 화자는 그대로여야 한다
     const want = pr.sentences.map((s) => s.speaker || null);
-    want.splice(from, n, ...plan.newTexts.map(() => spkNew));
+    want.splice(from, n, ...plan.newTexts.map(() => spkNew));   // spkNew=null 이면 화자 없음
     if (want.length !== after.sentences.length || want.some((w, i) => w !== (after.sentences[i].speaker || null))) {
       return { ok: false, error: '화자를 바꾸면 이 줄의 다른 문장 화자가 달라집니다 — 안전을 위해 취소했습니다.\n대본(.md)에서 직접 [이름] 을 붙이세요.' };
     }
@@ -7953,14 +7972,14 @@ async function _editSentences(args = {}) {
     // 합친 그룹의 챕터 표식은 그 자리의 첫 문장을 따라간다(나누거나 고쳐도 챕터가 안 사라지게)
     if (ti === 0 && old[0].chapterMark) s.chapterMark = old[0].chapterMark;
     // 화자는 같은 자리의 옛 문장을 따른다(나누면 조각 모두 · 합치면 첫 문장). .md 의 [이름] 접두는 그대로 남아 있다.
-    const _spk = spkNew || old[Math.min(ti, old.length - 1)].speaker || old[0].speaker;
+    const _spk = spkChange ? spkNew : (old[Math.min(ti, old.length - 1)].speaker || old[0].speaker);
     if (_spk) s.speaker = _spk;
     if (_spansMoved && _spansMoved[ti] && _spansMoved[ti].length) s.capSpans = _spansMoved[ti];
     // ✂ 사람이 정한 줄 나눔 — 한 문장을 고쳐 한 문장이 되면 새 글 위치로 옮긴다(나누거나 합치면 풀린다 = 자동 줄바꿈)
     if (old.length === 1 && plan.newTexts.length === 1 && old[0].capBreaks) { const nb = require('./core/caption-splitter').remapBreaks(old[0].text, t, old[0].capBreaks); if (nb) s.capBreaks = nb; }
     // 텍스트가 그대로인 조각은 음성을 물려받는다(분할해도 안 바뀐 쪽은 다시 만들 필요가 없다).
     const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));
-    if (keep && !spkNew && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {   // 화자가 바뀌면 옛 목소리 음성은 쓰지 않는다
+    if (keep && !spkChange && keep.ttsAudioPath && fs.existsSync(keep.ttsAudioPath)) {   // 화자가 바뀌면 옛 목소리 음성은 쓰지 않는다
       s.ttsAudioPath = keep.ttsAudioPath; s.ttsDurationSec = keep.ttsDurationSec; s.ttsStatus = 'done';
     }
     return s;

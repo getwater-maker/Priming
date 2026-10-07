@@ -45,13 +45,18 @@ function textMatchRatio(a, b) {
   return Math.max(0, 1 - prev[y.length] / x.length);
 }
 
-/** 자를 구간 {start, end, pauseAt?}(초) — 외국어는 문장 사이 쉼에서(낱말 한가운데를 베면 남은 글자가 새 문장 앞에 샌다) · 한국어는 앞 무음·끝 감쇠만 */
+/** 자를 구간 {start, end, pauseAt?}(초) — **모든 언어가 말 사이 쉼에서**(낱말 한가운데를 베면 남은 글자가 새 문장 앞에 샌다 — 한국어도 「…습니다」 꼬리 「니다」가 새 문장 앞에 붙은 사고, 2026-10-07) · 쉼이 없으면 앞 무음·끝 감쇠만 */
 function cutRange(buf, lang) {
   const WS = require('./wav-slice');
-  return (LANG_OF[lang] !== 'Korean' && WS.suggestPauseRange(buf)) || WS.suggestRange(buf);
+  return WS.suggestPauseRange(buf) || WS.suggestRange(buf);
 }
 
-const REF_DIR = () => path.join(os.homedir(), '.flow-app', 'ref-audio');
+// 🗂 참조음성 폴더 — **OmniVoice 서버가 있는 PC(메인 PC)는 서버 라이브러리 폴더 하나**(2026-10-07 로이 「폴더가 둘이라 아내가 만든 것·내가 만든 것을 한눈에 볼 수 없다」).
+//   그 밖의 PC(아내 PC)는 예전처럼 ~/.flow-app/ref-audio(→ 서버로 올림). 서버 판별 = 서버 폴더 + 서버 실행 파일(api.py)이 이 PC 에 있는가.
+//   PRIMING_REF_DIR 은 시험용(실제 라이브러리를 건드리지 않게).
+const SERVER_REF_DIR = 'D:/TTS_Model/ref-audio';
+function isServerHost() { try { return fs.existsSync(SERVER_REF_DIR) && fs.existsSync(path.join('D:/TTS_Model', 'omnivoice', 'api.py')); } catch { return false; } }
+const REF_DIR = () => process.env.PRIMING_REF_DIR || (isServerHost() ? SERVER_REF_DIR : path.join(os.homedir(), '.flow-app', 'ref-audio'));
 /** 이 PC 참조음성 폴더에 저장(같은 이름이 있으면 _2·_3 …) → { base, wavPath } */
 function saveLocal(name, wavBuffer, refText) {
   const dir = REF_DIR();
@@ -75,4 +80,4 @@ async function saveToLibrary({ name, text, instruct, wavBuffer }) {
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 }
 
-module.exports = { LANG_OF, CODE_OF, SAMPLE_TEXT, VERIFY_TEXTS, textMatchRatio, cutRange, REF_DIR, saveLocal, saveToLibrary };
+module.exports = { LANG_OF, CODE_OF, SAMPLE_TEXT, VERIFY_TEXTS, textMatchRatio, cutRange, REF_DIR, SERVER_REF_DIR, isServerHost, saveLocal, saveToLibrary };

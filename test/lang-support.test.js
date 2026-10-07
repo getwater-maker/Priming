@@ -168,7 +168,7 @@ console.log('\n[6d] 보이스디자인 저장 — 외국어는 잘라낸 구간�
   ok(body.includes("tts-backcheck').checkAudio(outBuf") && body.includes('refTextForCut(refText, c.heard'), '잘라낸 음성(outBuf)의 받아쓰기로 참조텍스트를 맞춘다');
   // v0.6.99 — 저장·자르기 규칙은 core/ref-voice 한 곳(참조음성 만들기 CLI 와 공용)
   ok(body.indexOf('refText = nt') > 0 && body.indexOf('refText = nt') < body.indexOf('RV.saveLocal(name, outBuf, refText)'), '바꾼 뒤에 .txt·서버 등록을 한다');
-  ok(m.includes("require('./core/ref-voice').cutRange(r.buffer, lang)") && /LANG_OF\[lang\] !== 'Korean' && WS\.suggestPauseRange\(buf\)/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'ref-voice.js'), 'utf8')), '외국어는 끝을 문장 사이 쉼에서 자르도록 제안한다(한국어는 예전 그대로)');
+  ok(m.includes("require('./core/ref-voice').cutRange(r.buffer, lang)") && /WS\.suggestPauseRange\(buf\) \|\| WS\.suggestRange\(buf\)/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'ref-voice.js'), 'utf8')), '모든 언어가 말 사이 쉼에서 자르도록 제안한다(한국어도 — 2026-10-07 「니다」 앞붙음 처방)');
   const BCm = require('../core/tts-backcheck');
   const O = '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。';
   ok(BCm.refTextForCut(O, '昔向かいある村に貧しいけれど心の優しい若者が住んでいました', 'ja') === '昔々、ある村に、貧しいけれど心の優しい若者が住んでいました。', '받아쓰기 오인식이 있어도 첫 문장이면 원문 표기를 쓴다');

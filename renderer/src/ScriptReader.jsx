@@ -48,7 +48,7 @@ function paraInner(sents, groupNum, groupNums) {
     + sents.map((s, k) => {
       const r = s.roy, bg = r ? ROY_BG[r.k === 'exp' ? (r.st === '확인' ? 'ok' : 'exp') : 'int'] : '';
       return (r && r.first ? royChip(r) : '')
-        + (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)} </b>` : '')
+        + (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)}<button type="button" data-spk-clear="${s.i}" title="이 문장의 화자 「${escHtml(s.speaker)}」 떼기 — 내레이션으로 읽습니다(대본에서 문장 앞 [이름] 이 빠집니다). 화자를 바꾸려면 문장 앞에 [새이름] 을 쓰세요" style="font-size:0.7em;padding:0 4px;margin:0 3px 0 2px;border-radius:4px;border:1px solid #c9a98a;background:#fff;color:#8a4b1f;cursor:pointer;vertical-align:1px">✕</button> </b>` : '')
         + (bg ? `<span data-roy="${r.k}" data-mid="${escHtml(r.mid)}" style="background:${bg};border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
         + (k < sents.length - 1 ? ' ' : '');
     }).join('');
@@ -341,6 +341,22 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     const e = list.filter((b) => b.k === 'exp').length, i = list.length - e, pend = list.some((b) => b.pending);
     return ` · 🏦 ${[e ? `경험은행 ${e}줄` : '', i ? `해석해설은행 ${i}줄` : ''].filter(Boolean).join(' · ')}${pend ? '(⚠ 은행 폴더가 없어 대기 파일에)' : ''}`;
   }
+  // 🎭 화자 떼기 — 칩의 ✕ (문장 앞 [이름] 을 대본에서 뗀다 · 새 화자는 문장 앞에 [이름] 을 쓰면 된다)
+  async function clearSpeaker(btn) {
+    const pEl = btn.closest('p[data-key]');
+    const par = pEl && parasRef.current.get(pEl.dataset.key);
+    if (!par) return;
+    await settle();
+    const idx = Number(btn.dataset.spkClear);
+    const sen = par.base.find((x) => x.i === idx);
+    if (!sen) return;
+    try {
+      const r = await api.editSentences({ shortsNum: par.shortsNum, groupNum: par.groupNum, sentIdx: idx, count: 1, text: sen.text, expect: [sen.text], clearSpeaker: true });
+      if (!r || !r.ok) { setMsg('✗ ' + ((r && r.error) || '화자를 떼지 못했습니다')); return; }
+      if (r.dto) { onDto(r.dto); rebuild(r.dto); }
+      setMsg(`✓ 화자 「${sen.speaker}」 를 뗐습니다 — 이 문장은 내레이션 목소리로 읽습니다. 🎤 TTS 로 다시 만들면 됩니다.`);
+    } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+  }
   async function confirmRoy(btn) {
     const pEl = btn.closest('p[data-key]');
     const par = pEl && parasRef.current.get(pEl.dataset.key);
@@ -481,8 +497,8 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
               }}
               onCut={(e) => { const s = window.getSelection(); if (s.rangeCount && !rangeOk(docRef.current, s.getRangeAt(0))) { e.preventDefault(); setMsg('ⓘ 문단을 걸친 잘라내기는 할 수 없습니다.'); } }}
               onDrop={(e) => e.preventDefault()}
-              onMouseDown={(e) => { if (e.target.closest && e.target.closest('[data-roy-confirm]')) e.preventDefault(); }}   // 단추를 눌러도 커서·초점이 튀지 않게
-              onClick={(e) => { const b = e.target.closest && e.target.closest('[data-roy-confirm]'); if (b) { e.preventDefault(); confirmRoy(b); } }}
+              onMouseDown={(e) => { if (e.target.closest && e.target.closest('[data-roy-confirm],[data-spk-clear]')) e.preventDefault(); }}   // 단추를 눌러도 커서·초점이 튀지 않게
+              onClick={(e) => { const b = e.target.closest && e.target.closest('[data-roy-confirm]'); if (b) { e.preventDefault(); confirmRoy(b); return; } const c = e.target.closest && e.target.closest('[data-spk-clear]'); if (c) { e.preventDefault(); clearSpeaker(c); } }}
               onBlur={() => { if (!st.current.composing) flushAll(); }} />
           </div>
           <div className="meta" style={{ textAlign: 'center', marginTop: 10 }}>대본 전체를 워드처럼 고칩니다 — 손을 멈추거나 편집면 밖을 누르면 <b>바뀐 문장만</b> 대본(.md)에 저장합니다(한글 조합 중에는 저장하지 않음) · Enter = 지금 저장 · Esc = 저장 안 된 고침 되돌리기.

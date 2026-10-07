@@ -137,6 +137,7 @@ function suggestPauseRange(buf, { minSec = 3, pauseSec = 0.18, quiet = 0.06 } = 
   const { rms, hop, peak } = envelope(buf);
   if (!rms.length || peak <= 0) return null;
   const th = peak * quiet, need = Math.ceil(pauseSec / hop);
+  minSec = Math.min(minSec, Math.max(1.2, (sg.end - sg.start) * 0.4));   // 짧은 문장(4~6초)도 쉼표 자리에서 끊을 수 있게 — 길이의 40% 뒤부터
   let best = null;
   for (let i = 0; i < rms.length; i++) {
     if (rms[i] >= th) continue;

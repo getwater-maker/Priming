@@ -355,8 +355,25 @@ const VD_CHIPS = [
   ['성별', [['남성', 'male'], ['여성', 'female']]],
   ['나이', [['청년', 'in his or her 20s'], ['30~40대', 'middle-aged'], ['60대 이상', 'elderly']]],
   ['음색', [['낮은', 'low-pitched'], ['중저음', 'mid-to-low pitched'], ['맑은', 'clear'], ['따뜻한', 'warm'], ['허스키', 'slightly husky'], ['부드러운', 'soft']]],
+  ['감정', [['기쁜', 'cheerful and joyful'], ['웃음 섞인', 'with a gentle laugh in the voice'], ['화난', 'angry and stern'], ['슬픈', 'sad and sorrowful'], ['속삭이는', 'whispering softly'], ['놀란', 'surprised and excited'], ['떨리는', 'fearful, with a trembling voice']]],
   ['말투', [['차분한', 'calm'], ['느린 속도', 'speaking at a slow, steady pace'], ['또렷한 발음', 'clear articulation'], ['이야기꾼', 'storyteller'], ['다큐 내레이터', 'documentary narrator'], ['오디오북', 'audiobook narration'], ['다정한', 'gentle and kind'], ['신뢰감', 'trustworthy and authoritative']]],
 ];
+// 🎨 한국어 미리듣기 문장 길이 3단 — 모두 쉼표(쉼)가 있다: 참조음성을 **쉼에서 끊어** 저장하려면 그 자리가 필요하다(「…습니다」 꼬리가 새 문장 앞에 붙는 사고 처방 · 2026-10-07)
+const VD_SAMPLE_LEN = [
+  ['짧게', '옛날 어느 마을에, 마음씨 고운 할머니가 살고 있었습니다.'],
+  ['보통', '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.'],
+  ['길게', '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다. 때로는 웃음을, 때로는 눈물을 머금고, 먼 길을 걸어온 사람들의 마음을 따라가 보겠습니다.'],
+];
+// 🏷 저장할 때 붙이는 태그의 자동값 — 설명 칩(성별·나이)·언어·고른 칩의 한국어 이름에서(사람이 바꾸면 그 칸은 사람 값)
+function vdTagAuto(instruct, lang, omni) {
+  const low = String(instruct || '').toLowerCase(), parts = low.split(/\s*,\s*/);
+  const isVi = lang === 'vi';
+  const gender = isVi ? (omni.gender === 'female' ? 'female' : 'male') : (/\bfemale\b/.test(low) ? 'female' : (/\bmale\b/.test(low) ? 'male' : ''));
+  const age = isVi ? ({ child: 'child', teenager: 'young', 'young adult': 'young', 'middle-aged': 'middle', elderly: 'old' }[omni.age] || '')
+    : (/elderly/.test(low) ? 'old' : /middle-aged/.test(low) ? 'middle' : /20s/.test(low) ? 'young' : '');
+  const kw = isVi ? [] : VD_CHIPS.filter(([g]) => g !== '성별' && g !== '나이').flatMap(([, items]) => items.filter(([, en]) => parts.includes(en.toLowerCase())).map(([ko]) => ko));
+  return { gender, age, lang: lang === 'Japanese' ? 'ja' : (lang === 'vi' ? 'vi' : 'ko'), kw: kw.join(', ') };
+}
 const VD_SAMPLE_TEXT = {
   Korean: '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.',   // 로이 2026-10-07 — 예전 두 문장은 너무 길었다
   Japanese: 'ある村に、貧しいけれど心の優しい若者が住んでいました。彼は毎朝早く起きて、山へ薪を拾いに行きました。',   // 「昔々」로 시작하지 않는다 — Qwen3 ja 가 자주 잘못 읽고, 가나로 쓰면 받아쓰기 표기가 갈린다(2026-10-05 · core/ref-voice SAMPLE_TEXT 와 같아야 한다)
@@ -638,6 +655,7 @@ export default function App() {
   const [vdWavUrl, setVdWavUrl] = useState('');
   const [vdGenerated, setVdGenerated] = useState(false);
   const [vdFilename, setVdFilename] = useState('');
+  const [vdTags, setVdTags] = useState({});   // 🏷 저장할 때 붙일 태그 — 빈 칸(undefined) = 자동값(vdTagAuto)
   // ✂ 슬라이스 — 보이스디자인 음성은 **끝이 서서히 작아진다**(모델 특성). 그 구간이 참조음성에 들어가면
   //   합성한 문장 끝이 계속 끊기는 느낌이 난다 → 길게 만들고 쓸 구간만 잘라 저장한다(로이 2026-08-14).
   const [vdDur, setVdDur] = useState(0);              // 생성된 원본 길이(초)
@@ -2883,7 +2901,7 @@ export default function App() {
           const url = await api.readAudio(r.tempPath);
           const dur = Number(r.durationSec) || 0;
           const sg = r.suggest || {};
-          const c = { tempPath: r.tempPath, url: url || '', dur, s: Number(sg.start) || 0, e: Number(sg.end) || dur, text: r.text || vdText || '', instruct, asrMatch: r.asrMatch, asrText: r.asrText, n: ++vdSeqRef.current };
+          const c = { tempPath: r.tempPath, url: url || '', dur, s: Number(sg.start) || 0, e: Number(sg.end) || dur, text: r.text || vdText || '', cutText: r.suggestText || '', instruct, asrMatch: r.asrMatch, asrText: r.asrText, n: ++vdSeqRef.current };
           vdCandsRef.current = [...vdCandsRef.current, c];
           setVdCands(vdCandsRef.current);
           made++;
@@ -2904,7 +2922,7 @@ export default function App() {
     setVdCur(c.tempPath);
     setVdWavUrl(c.url); setVdGenerated(true);
     setVdDur(c.dur); setVdSel({ s: c.s, e: c.e });
-    setVdRefText(c.text);
+    setVdRefText(c.cutText || c.text);   // ✂ 쉼에서 끊은 구간이면 그 구간에 맞춘 참조텍스트
     vdBuildPeaks(c.url);
     if (play) playPreviewUrl(c.url, 'vdc:' + c.tempPath);
   }
@@ -3042,10 +3060,12 @@ export default function App() {
     if (vdDur && vdSel.e <= vdSel.s) { setVdStatus('⚠ 저장할 구간이 비어 있습니다.'); return; }
     setVdBusy(true); setVdStatus('저장 중…');
     try {
-      const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText, tempPath: vdCur || undefined });   // 🎨 고른 후보
+      const _ta = vdTagAuto(vdLang === 'vi' ? '' : vdInstruct, vdLang, vdOmni);
+      const tags = { gender: vdTags.gender ?? _ta.gender, age: vdTags.age ?? _ta.age, lang: vdTags.lang ?? _ta.lang, kw: vdTags.kw ?? _ta.kw };   // 🏷 검색용 태그(OmniVoice 분류 + 키워드)
+      const r = await api.qwenDesignSave({ filename: fn, startSec: vdSel.s, endSec: vdSel.e, text: vdRefText, tempPath: vdCur || undefined, tags });   // 🎨 고른 후보
       if (r && r.ok) {
         try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
-        setVdFilename('');
+        setVdFilename(''); setVdTags({});
         // 🔊 음성 설정의 탭에서 만들었으면 채널 편집 값(ch)을 건드리지 않는다 — 열려 있지 않은 채널 편집에 값이 박힌다(v0.7.22)
         if (vdInTab) setVdStatus(`✔ 저장됨: ${r.name} (${(r.durationSec || 0).toFixed(2)}초) — OmniVoice 탭 목록에 추가됩니다. 그 탭에서 카드를 골라 「저장」하면 채널에 지정됩니다.`);
         else {
@@ -3065,7 +3085,7 @@ export default function App() {
                 <select data-testid="vd-lang" value={vdLang} onChange={(e) => {
                   const nl = e.target.value;
                   // 예문이 이전 언어의 기본 문장 그대로면 새 언어의 기본 문장으로 바꿔 준다(직접 고친 문장은 그대로)
-                  if (Object.values(VD_SAMPLE_TEXT).includes(vdText.trim())) setVdText(VD_SAMPLE_TEXT[nl] || vdText);
+                  if (Object.values(VD_SAMPLE_TEXT).includes(vdText.trim()) || VD_SAMPLE_LEN.some(([, t]) => t === vdText.trim())) setVdText(VD_SAMPLE_TEXT[nl] || vdText);
                   setVdLang(nl);
                 }}>
                   <option value="Korean">한국어</option>
@@ -3106,7 +3126,16 @@ export default function App() {
                   </div></div>
               )}
               <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
-                <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <textarea rows="2" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} />
+                  <div className="meta" data-testid="vd-len" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 3, fontSize: 11 }}>
+                    {vdLang === 'Korean' ? (<>길이
+                      {VD_SAMPLE_LEN.map(([nm, t]) => (
+                        <button key={nm} type="button" className={vdText.trim() === t ? '' : 'ghost'} style={{ padding: '1px 8px', fontSize: 11, borderRadius: 10 }}
+                          title={t} onClick={() => setVdText(t)}>{nm}</button>))}</>) : null}
+                    <span>{vdText.trim().length}자 · 약 {Math.max(1, Math.round(vdText.trim().length / 7))}초 — 쉼표(,)나 문장 사이 쉼이 <b>3초 안팎</b>에 있어야 저장할 때 그 쉼에서 끊습니다(끝이 말 도중에 끊기면 새 문장 앞에 「니다」 같은 꼬리가 붙습니다)</span>
+                  </div>
+                </div></div>
               <div className="frow"><label></label>
                 {/* 준비(vdReady) 전엔 잠금 — 안 잠그면 '서버 미기동' 오류가 뜨면서 진짜 원인(설치 안 됨·준비 실패)이 덮인다 */}
                 {/* 베트남어는 OmniVoice 로 만들므로 보이스디자인 서버 준비를 기다리지 않는다 */}
@@ -3159,6 +3188,8 @@ export default function App() {
                       <span className="meta">초 · 길이 <b>{Math.max(0, vdSel.e - vdSel.s).toFixed(2)}초</b> / 원본 {vdDur.toFixed(2)}초</span>
                       <button className="ghost" onClick={vdPlaySel} title="선택한 구간만 재생 / 멈춤 — 저장될 소리를 그대로 확인">{vdSelPlaying ? '■ 멈춤' : '▶ 구간 듣기'}</button>
                       <button className="ghost" onClick={() => vdCutAbout(5)} title="시작점부터 약 5초 — 단어가 잘리지 않게 그 부근의 쉬는 지점에서 끊습니다">✂ ≈5초</button>
+                      <button className="ghost" data-testid="vd-auto-cut" onClick={() => { const c = vdCandsRef.current.find((x) => x.tempPath === vdCur); if (c) { setVdSel({ s: c.s, e: c.e }); setVdRefText(c.cutText || c.text); setVdStatus(c.cutText ? '✂ 말 사이 쉼에서 끊고, 참조텍스트도 그 구간에 맞췄습니다.' : '✂ 자동 구간으로 되돌렸습니다.'); } }}
+                        title="말 사이 쉼에서 자동으로 끊고 참조텍스트를 그 구간에 맞춥니다 — 소리가 말 도중에 끝나면 새 문장 앞에 꼬리(「니다」)가 붙습니다">✂ 쉼에서 끊기(자동)</button>
                       <button className="ghost" onClick={() => setVdSel({ s: 0, e: vdDur })} title="원본 전체로 되돌리기">↺ 전체</button>
                     </div>
                   </div>
@@ -3168,6 +3199,19 @@ export default function App() {
                   <textarea rows="2" value={vdRefText} onChange={(e) => setVdRefText(e.target.value)}
                     placeholder="선택 구간에서 실제로 들리는 말만 남기세요" /></div>
                 <div className="meta" style={{ margin: '-6px 0 8px 96px' }}>⚠ 구간을 잘랐으면 <b>이 문장도 들리는 부분만</b> 남겨야 합니다 — 음성과 글이 어긋나면 복제가 흐트러집니다.</div>
+                {(() => { const ta = vdTagAuto(vdLang === 'vi' ? '' : vdInstruct, vdLang, vdOmni); const tv = (k) => (vdTags[k] ?? ta[k]); const setT = (k, v) => setVdTags((p) => ({ ...p, [k]: v })); return (
+                <div className="frow" data-testid="vd-tags" style={{ alignItems: 'flex-start' }}>
+                  <label title="저장하면 음성 설정(OmniVoice 탭)의 거르기·검색에 쓰입니다. 비워 두면 위 설명에서 자동으로 채웁니다.">🏷 태그</label>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <select data-testid="vd-tag-gender" value={tv('gender')} onChange={(e) => setT('gender', e.target.value)}>
+                      <option value="">성별 —</option><option value="male">♂ 남성</option><option value="female">♀ 여성</option></select>
+                    <select data-testid="vd-tag-age" value={tv('age')} onChange={(e) => setT('age', e.target.value)}>
+                      <option value="">연령대 —</option><option value="child">어린이</option><option value="young">청년</option><option value="middle">중년</option><option value="old">노년</option></select>
+                    <select data-testid="vd-tag-lang" value={tv('lang')} onChange={(e) => setT('lang', e.target.value)}>
+                      <option value="ko">한국어</option><option value="ja">일본어</option><option value="vi">베트남어</option><option value="en">영어</option></select>
+                    <input data-testid="vd-tag-kw" style={{ flex: 1, minWidth: 180 }} placeholder="키워드(쉼표로) 예: 다정한, 웃음, 할머니, 동화" value={tv('kw')} onChange={(e) => setT('kw', e.target.value)} />
+                  </div>
+                </div>); })()}
                 <div className="frow"><label>파일명</label>
                   <input placeholder="예: 고전서재_내레이터" value={vdFilename} onChange={(e) => setVdFilename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') vdSave(); }} style={{ flex: 1 }} />
                   <button onClick={vdSave} disabled={vdBusy} title="선택한 구간만 잘라 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>

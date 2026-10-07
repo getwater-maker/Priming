@@ -127,6 +127,17 @@ function writeReport(file, rows, meta = {}) {
 function refTextForCut(orig, heard, lang) {
   const o = String(orig || '').trim(), h = String(heard || '').trim();
   if (!h) return o;
+  if (lang === 'ko' || lang === 'Korean') {   // 🇰🇷 어절 단위 앞부분 중 받아쓰기와 가장 맞는 것(원문 표기·쉼표 그대로) — 받아쓰기의 오인식(밭→밧)이 참조텍스트에 들어가지 않게
+    const words = o.split(/\s+/).filter(Boolean), hu = cjkChars(h);
+    let bestK = 0, bestSc = 0;
+    for (let k = 1; k <= words.length; k++) {
+      const tu = cjkChars(words.slice(0, k).join(' '));
+      if (Math.abs(tu.length - hu.length) > 3) continue;
+      const sc = 1 - align(tu, hu).dist / Math.max(tu.length, hu.length, 1);
+      if (sc > bestSc) { bestSc = sc; bestK = k; }
+    }
+    return bestSc >= 0.85 ? words.slice(0, bestK).join(' ') : h;
+  }
   const parts = o.match(/[^。．！？!?.]+[。．！？!?.]*/g) || [o];
   // 🔑 길이도 맞아야 한다 — 소리에 「彼は前」 같은 조각이 더 있는데 첫 문장만 적으면 그 조각이 또 샌다.
   const units = (s) => (lang === 'vi' ? viWords(s) : cjkChars(s));

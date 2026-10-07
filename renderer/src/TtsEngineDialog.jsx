@@ -328,7 +328,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   // 🏷 OmniVoice 분류(언어·성별·연령대) 저장 — 한 목소리(칸을 비우면 그 칸 지움) 또는 보이는 목소리 한꺼번에(빈 칸은 건드리지 않음)
   async function saveTags() {
     const t = tagEdit; if (!t) return;
-    const tags = { gender: t.gender, age: t.age, lang: t.lang };
+    const tags = { gender: t.gender, age: t.age, lang: t.lang, kw: t.kw };
     setBusy('tag');
     const r = t.many ? await api.ttsOmniTagMany({ names: t.names, tags }) : await api.ttsOmniTagSet({ name: t.names[0], tags });
     setBusy('');
@@ -368,7 +368,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
   const shown = useMemo(() => {
     const qq = q.trim().toLowerCase();
     const out = list.filter((v) => VF.matchFacets(v, fg, fa) && (!lang || langOf(v) === lang || langOf(v) === '다국어')
-      && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v)].join(' ').toLowerCase().includes(qq)));
+      && (!qq || [v.id, v.name, v.desc, v.lang, tr[v.desc] || '', trName(v), ...((v.tags && v.tags.kw) || [])].join(' ').toLowerCase().includes(qq)));
     if (!sortBy) return out;
     // 분류가 없는(미표시) 목소리는 뒤로 — 분류는 ⋯ → 🏷 에서 고친다(이름·참조텍스트 추정보다 앞선다)
     const gR = (v) => ({ male: 0, female: 1 }[VF.genderOf(v)] ?? 2);
@@ -567,7 +567,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   : <button className="ghost" data-testid="tts-more" title="한꺼번에 하기 · 목록 다시 받기" onClick={() => setMoreOpen((x) => !x)}>⋯</button>}
                 {moreOpen && !busyBatch && (
                   <div className="tts-more" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 5, background: 'var(--bg, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: 6, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', minWidth: 210 }} onClick={() => setMoreOpen(false)}>
-                    {tab === 'omnivoice' && shown.length > 0 && <button className="ghost" data-testid="tts-tag-many" disabled={!!busy} title="지금 보이는 목소리 전부에 같은 언어·성별·연령대를 한 번에 지정합니다(예: 「미표시」로 거른 뒤 전부 여성·청년) — 비워 둔 칸은 건드리지 않습니다" onClick={() => { setMoreOpen(false); setTagEdit({ names: shown.map((x) => x.name), title: `보이는 ${shown.length}개`, gender: '', age: '', lang: '', many: true }); }}>🏷 보이는 {shown.length}개 한꺼번에 분류</button>}
+                    {tab === 'omnivoice' && shown.length > 0 && <button className="ghost" data-testid="tts-tag-many" disabled={!!busy} title="지금 보이는 목소리 전부에 같은 언어·성별·연령대를 한 번에 지정합니다(예: 「미표시」로 거른 뒤 전부 여성·청년) — 비워 둔 칸은 건드리지 않습니다" onClick={() => { setMoreOpen(false); setTagEdit({ names: shown.map((x) => x.name), title: `보이는 ${shown.length}개`, gender: '', age: '', lang: '', kw: '', many: true }); }}>🏷 보이는 {shown.length}개 한꺼번에 분류</button>}
                     {shown.length > 0 && !isLib && <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>}
                     {tab !== 'omnivoice' && shown.length > 0 && <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에(요금 확인 후)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>}
                     {(eng.listVoices || tab === 'omnivoice') && <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} onClick={() => (isLib ? loadLibrary() : loadVoices(tab))}
@@ -579,7 +579,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
               {/* ⑤ 목소리 카드 — 이 칸만 스크롤 · 🔑 gridAutoRows max-content: 높이가 정해진 스크롤 격자에서 auto 행은 카드 최소 높이(92)까지만 커져 🔈 줄이 잘렸다(v0.6.84) */}
               <div data-testid="tts-voice-grid" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gridAutoRows: 'max-content', gap: 8, alignContent: 'start', paddingRight: 4 }}>
                 {shown.map((v0) => { const v = koView(v0); const users = tab === 'omnivoice' ? [...new Set([...usersOf(v), ...(omniUsed[v.name] || []).filter((n) => !drafts[n] || drafts[n].ref === v.id)])] : usersOf(v); return (
-                  <VoiceCard key={v.id} v={v} onDelete={tab === 'omnivoice' ? () => omniDelete(v0, users) : null} onTag={tab === 'omnivoice' ? () => setTagEdit({ names: [v0.name], title: v0.name, gender: v0.tags && v0.tags.gender || '', age: v0.tags && v0.tags.age || '', lang: v0.tags && v0.tags.lang || '', many: false }) : null} sel={isSel(v)} playingNow={playing === v.id} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
+                  <VoiceCard key={v.id} v={v} onDelete={tab === 'omnivoice' ? () => omniDelete(v0, users) : null} onTag={tab === 'omnivoice' ? () => setTagEdit({ names: [v0.name], title: v0.name, gender: v0.tags && v0.tags.gender || '', age: v0.tags && v0.tags.age || '', lang: v0.tags && v0.tags.lang || '', kw: ((v0.tags && v0.tags.kw) || []).join(', '), many: false }) : null} sel={isSel(v)} playingNow={playing === v.id} face={(faces[tab] || {})[v.id] || (v.image ? { path: v.image } : null)} busy={busy}
                     sampled={hasSample(v)} sampleCost={tab === 'omnivoice' ? 0 : sampleUsd} krw={krw}
                     users={users}
                     onPick={() => (isLib ? addFromLibrary(v0) : pickVoice(v0))} onPlay={(force) => preview(v0, force)}
@@ -621,9 +621,13 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   {opts.map(([val, name]) => <option key={val} value={val}>{name}</option>)}
                 </select>
               </div>))}
+            <div className="frow" style={{ alignItems: 'center', margin: '6px 0' }}>
+              <label style={{ width: 64 }} title="검색칸이 이 낱말도 찾습니다(감정·말투·용도 등)">키워드</label>
+              <input data-testid="tts-tag-kw" style={{ flex: 1 }} placeholder={tagEdit.many ? '더할 키워드(쉼표로) — 있던 키워드는 그대로' : '쉼표로 구분 예: 다정한, 웃음, 할머니'} value={tagEdit.kw || ''} onChange={(ev) => { const v = ev.target.value; setTagEdit((t) => ({ ...t, kw: v })); }} />
+            </div>
             <div className="mbtns">
               {!tagEdit.many && <button className="ghost" data-testid="tts-tag-clear" disabled={busy === 'tag'} title="이 목소리의 분류를 모두 지웁니다(이름으로 추정)" onClick={async () => { setBusy('tag'); const r = await api.ttsOmniTagSet({ name: tagEdit.names[0], tags: null }); setBusy(''); if (r && r.ok) { setTagEdit(null); await loadVoices('omnivoice'); setMsg(`🏷 「${tagEdit.names[0]}」 분류를 지웠습니다`); } }}>분류 지우기</button>}
-              <button data-testid="tts-tag-save" disabled={busy === 'tag' || (tagEdit.many && !tagEdit.gender && !tagEdit.age && !tagEdit.lang)} onClick={saveTags}>저장</button>
+              <button data-testid="tts-tag-save" disabled={busy === 'tag' || (tagEdit.many && !tagEdit.gender && !tagEdit.age && !tagEdit.lang && !String(tagEdit.kw || '').trim())} onClick={saveTags}>저장</button>
               <button className="ghost" onClick={() => setTagEdit(null)}>취소</button>
             </div>
           </div>

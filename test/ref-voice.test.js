@@ -35,16 +35,26 @@ function wav(segs) {   // segs: [[sec, amp]] — 24kHz 16bit mono
 const buf = wav([[0.3, 0], [4.0, 0.6], [0.5, 0], [3.0, 0.6], [0.8, 0]]);   // 말 4초 · 쉼 0.5 · 말 3초 · 끝 무음
 const ja = RV.cutRange(buf, 'ja'), ko = RV.cutRange(buf, 'ko');
 ok(ja && ja.end > 4.2 && ja.end < 4.9, `외국어 = 첫 문장 끝 쉼에서 자른다 (끝 ${ja && ja.end.toFixed(2)}초)`);
-ok(ko && ko.end > 7.5, `한국어 = 둘째 말까지 둔다(끝 감쇠만) (끝 ${ko && ko.end.toFixed(2)}초)`);
-{ const WS = require('../core/wav-slice'); ok(RV.cutRange(buf, 'Japanese').end === ja.end && JSON.stringify(RV.cutRange(buf, 'Korean')) === JSON.stringify(WS.suggestRange(buf)), '앱 언어 값(Japanese/Korean)과 짧은 코드가 같은 규칙'); }
+ok(ko && ko.end === ja.end, `한국어도 말 사이 쉼에서 자른다(「…습니다」 꼬리가 새 문장 앞에 붙는 사고 처방 · v0.7.35) (끝 ${ko && ko.end.toFixed(2)}초)`);
+{ const WS = require('../core/wav-slice'); const one = wav([[0.3, 0], [6.0, 0.6], [0.5, 0]]); ok(JSON.stringify(RV.cutRange(one, 'ko')) === JSON.stringify(WS.suggestRange(one)), '쉼이 없으면(한 호흡) 예전처럼 앞 무음·끝 감쇠만'); }
+{ const WS = require('../core/wav-slice'); ok(RV.cutRange(buf, 'Japanese').end === ja.end && JSON.stringify(RV.cutRange(buf, 'Korean')) === JSON.stringify(ko), '앱 언어 값(Japanese/Korean)과 짧은 코드가 같은 규칙'); }
 
+console.log('[3b] 한국어 참조텍스트 = 잘라낸 구간 앞부분(원문 표기)');
+{
+  const BC = require('../core/tts-backcheck');
+  const full = '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.';
+  ok(BC.refTextForCut(full, '오래전 이 땅에 살았던 사람들의 이야기를', 'ko') === '오래전 이 땅에 살았던 사람들의 이야기를,', '쉼표까지의 앞부분(원문 표기·쉼표 유지)');
+  ok(BC.refTextForCut('다른 머슴들은 밭두렁에 서 있었으니, 주인이 봤다.', '다른 머슴들은 밧두렁에 서 있었으니', 'ko') === '다른 머슴들은 밭두렁에 서 있었으니,', '받아쓰기 오인식(밭→밧)이 참조텍스트에 들어가지 않는다');
+  ok(BC.refTextForCut('가나다 라마바.', '전혀 다른 소리 입니다 아주', 'ko') === '전혀 다른 소리 입니다 아주', '안 맞으면 받아쓰기 그대로');
+}
 console.log('[4] 이 PC 저장 — 같은 이름이면 _2');
 {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-home-')); const saved = os.homedir; os.homedir = () => home;
+  process.env.PRIMING_REF_DIR = path.join(home, '.flow-app', 'ref-audio');   // 🔒 메인 PC 는 REF_DIR 이 서버 라이브러리 폴더 — 진짜 라이브러리에 시험 파일을 쓰지 않게
   try {
     const a = RV.saveLocal('JA_테스트', buf, 'ref1'), b = RV.saveLocal('JA_테스트', buf, 'ref2');
     ok(a.base === 'JA_테스트' && b.base === 'JA_테스트_2' && fs.readFileSync(path.join(home, '.flow-app', 'ref-audio', 'JA_테스트_2.txt'), 'utf8') === 'ref2', '같은 이름은 덮지 않고 _2 · 참조텍스트 .txt');
-  } finally { os.homedir = saved; try { fs.rmSync(home, { recursive: true, force: true }); } catch (_) {} }
+  } finally { delete process.env.PRIMING_REF_DIR; os.homedir = saved; try { fs.rmSync(home, { recursive: true, force: true }); } catch (_) {} }
 }
 
 console.log('[5] CLI — 인자 · 🔒 키를 직접 다루지 않는다');

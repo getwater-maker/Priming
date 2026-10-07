@@ -174,7 +174,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     // 🎭 화자 이름 — 칩으로 보이고, Backspace 로 안 지워지고, 대사를 고쳐도 .md 의 [엄마] 는 그대로
     const pi = await doc.evaluate((root) => [...root.querySelectorAll('p[data-key]')].findIndex((p) => p.textContent.includes('엄마의 대사')));
     const sp = doc.locator('p[data-key]').nth(pi);
-    ok(await sp.locator('[data-spk]').count() === 1 && (await sp.locator('[data-spk]').innerText()).trim() === '엄마', '🔑 편집면에 화자 이름(엄마)이 보인다');
+    ok(await sp.locator('[data-spk]').count() === 1 && (await sp.locator('[data-spk]').innerText()).replace('✕', '').trim() === '엄마', '🔑 편집면에 화자 이름(엄마)이 보인다');
     ok((await val(pi)) === '엄마의 대사입니다. 내레이션 문장입니다.', '이름은 글에 섞이지 않는다(비교·저장은 문장 글만)');
     await caret(pi, 0);
     await win.keyboard.press('Backspace');
@@ -185,6 +185,13 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     md = readMd();
     ok(/^\[엄마\] 엄마의 말입니다\.\r?\n내레이션 문장입니다\.$/m.test(md), '편집면 밖을 누르면 저장 — .md 의 [엄마] 접두 · 다음 줄 그대로');
     ok(md.includes('SHOULD_NOT_APPEAR'), '지침 줄은 그대로 남는다');
+
+    // 🎭 화자 칩의 ✕ — 그 문장의 화자를 뗀다(.md 에서 [엄마] 접두가 빠지고 칩이 사라진다 · 다음 줄은 그대로)
+    await sp.locator('[data-spk-clear]').click();
+    await win.waitForTimeout(1500);
+    md = readMd();
+    ok(!/\[엄마\]/.test(md) && /^엄마의 말입니다\.\r?$/m.test(md) && md.includes('내레이션 문장입니다.'), '✕ 를 누르면 .md 에서 [엄마] 가 빠진다');
+    ok(await doc.locator('[data-spk]').count() === 0, '✕ 를 누르면 화자 칩이 사라진다');
 
     // Esc = 저장 안 된 고침 되돌리기(창은 그대로)
     await caret(0, 0);

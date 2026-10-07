@@ -46,5 +46,15 @@ ok(merged[0].lang === 'ja' && merged[0].tags.lang === 'ja', '분류의 언어가
 ok(VF.matchFacets(merged[0], 'female', 'young') && !VF.matchFacets(merged[2], 'female', ''), '성별·연령대 거르기가 분류를 쓴다');
 ok(VF.ageOf({ age: 'middle' }) === 'middle' && VF.ageOf({ age: 'old' }) === 'old', '분류값(child|young|middle|old)은 그대로 읽는다');
 fs.rmSync(T, { recursive: true, force: true });
+// 🏷 키워드(kw) — 검색용 자유 태그
+VT.set('kwA', { gender: 'male', kw: '다정한, 웃음 , 다정한' });
+ok(js(VT.load()['kwA'].kw) === js(['다정한', '웃음']), '키워드: 쉼표 구분 · 공백 정리 · 중복 제거');
+VT.setMany(['kwA', 'kwB'], { kw: ['화남'] });
+ok(js(VT.load()['kwA'].kw) === js(['다정한', '웃음', '화남']) && js(VT.load()['kwB'].kw) === js(['화남']), '한꺼번에: 키워드는 덮지 않고 더한다');
+VT.set('kwA', { kw: '' });
+ok(!('kw' in VT.load()['kwA']) && VT.load()['kwA'].gender === 'male', '빈 키워드 = 키워드만 지움');
+ok(VT.kwList(new Array(30).fill(0).map((_, k) => 'k' + k)).length === 12, '키워드는 최대 12개');
+ok(VT.apply({ name: 'kwB' }, VT.load()).tags.kw[0] === '화남', '카드에 얹힌다(검색이 읽는 자리 = tags.kw)');
+
 console.log(`\n${fail ? '❌' : '✅'} omni-tags — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

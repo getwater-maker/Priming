@@ -192,13 +192,16 @@ function sameSequence(a, b) {
  *   화자는 대본에서 **줄 맨 앞의 `[이름] `** 로만 정해진다(core/sentence-splitter SPEAKER_LINE_RE) — 편집칸 글을 그대로 문단 속에 넣으면
  *   `[이름]` 이 자막 글자로만 남고 화자는 안 바뀐다.
  */
+const NARRATOR = '내레이션';
 function splitSpeakerPrefix(text) {
   const m = String(text == null ? '' : text).replace(/[\r\n]+/g, ' ').match(require('./sentence-splitter').SPEAKER_LINE_RE);
-  return m ? { name: m[1].trim(), body: m[2].trim() } : null;
+  if (!m) return null;
+  const name = m[1].trim();
+  return name === NARRATOR ? { name: null, clear: true, body: m[2].trim() } : { name, body: m[2].trim() };   // `[내레이션] 대사` = 화자 떼기(화면의 「🗣 내레이션」과 같은 말)
 }
 
 /**
- * 🎭 span(문장 자리)의 문장을 `[이름] 본문` **자기 줄**로 만든다 — 앞뒤에 같은 줄의 다른 문장이 있으면 따로 줄을 나눠 남긴다
+ * 🎭 span(문장 자리)의 문장을 `[이름] 본문` **자기 줄**로 만든다(name=null 이면 화자 없는 줄 = 화자 떼기) — 앞뒤에 같은 줄의 다른 문장이 있으면 따로 줄을 나눠 남긴다
  *   (원래 그 줄이 화자 줄이면 앞뒤 조각은 원래 화자를 그대로 유지). 줄 밖은 건드리지 않는다.
  */
 function withSpeakerLine(raw, span, body, name) {
@@ -212,7 +215,7 @@ function withSpeakerLine(raw, span, body, name) {
   if (pm) before = before.slice(pm[0].length);
   const lines = [];
   if (before.trim()) lines.push(prefix + before.trim());
-  lines.push('[' + name + '] ' + body);
+  lines.push((name ? '[' + name + '] ' : '') + body);
   if (after.trim()) lines.push(prefix + after.trim());
   return raw.slice(0, ls) + lines.join(cr + '\n') + cr + raw.slice(le);
 }
@@ -220,5 +223,5 @@ function withSpeakerLine(raw, span, body, name) {
 module.exports = {
   sigOf, isIgnorable, buildMask, buildIndex, locateSentences,
   normalizeEditText, planEdit, expectedTexts, sameSequence,
-  splitSpeakerPrefix, withSpeakerLine,
+  splitSpeakerPrefix, withSpeakerLine, NARRATOR,
 };

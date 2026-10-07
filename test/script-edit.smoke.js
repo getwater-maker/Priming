@@ -227,6 +227,26 @@ const cleanup = () => {
       try { fs.rmSync(path.join(os.homedir(), '.priming-maker', 'projects', `${TAG}.smproj.json`), { force: true }); } catch (_) {}
     }
 
+    // [10b] 🎭 화자 — 편집칸에 `[이름] 대사` → 그 문장만 화자가 바뀐다(.md 에서 자기 줄) · `[내레이션] 대사`/clearSpeaker → 떼기
+    {
+      const spk = (r) => (r && r.ok ? r.dto.projects[0].cuts[0].sentences.map((s) => s.speaker || null) : null);
+      const r1 = await win.evaluate(() => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '[할머니] 화자를 붙여 고친 문장입니다.' }));
+      const s1 = spk(r1);
+      ok(s1 && s1[0] === '할머니' && s1.slice(1).every((x) => !x), '🎭 [할머니] 를 써서 고치면 그 문장만 화자가 된다' + (s1 ? '' : ' — ' + (r1 && r1.error)));
+      const t1 = r1 && r1.ok ? r1.dto.projects[0].cuts[0].sentences[0].text : '';
+      ok(t1 === '화자를 붙여 고친 문장입니다.', '자막 글자에 [할머니] 가 남지 않는다: ' + t1);
+      const md1 = fs.readFileSync(MD, 'utf8');
+      ok(/^\[할머니\] 화자를 붙여 고친 문장입니다\.\r?$/m.test(md1), '.md 에서 그 문장이 자기 줄 [할머니] 대사 가 된다');
+      const r2 = await win.evaluate(() => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '화자를 붙여 고친 문장입니다.', clearSpeaker: true }));
+      const s2 = spk(r2);
+      ok(s2 && s2.every((x) => !x), '🎭 clearSpeaker 로 화자를 뗀다' + (s2 ? '' : ' — ' + (r2 && r2.error)));
+      ok(!/^\[할머니\]/m.test(fs.readFileSync(MD, 'utf8')), '.md 에서 [할머니] 가 빠진다');
+      await win.evaluate(() => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '[할머니] 다시 붙인 문장입니다.' }));
+      const r3 = await win.evaluate(() => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '[내레이션] 내레이션으로 돌린 문장입니다.' }));
+      const s3 = spk(r3);
+      ok(s3 && s3.every((x) => !x), '🎭 [내레이션] 대사 로 쓰면 화자가 떼어진다' + (s3 ? '' : ' — ' + (r3 && r3.error)));
+    }
+
     // [11] 화면 오류 0 — 미정의 식별자·렌더 예외가 없었는가
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);
   } finally {
