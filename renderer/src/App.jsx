@@ -4984,12 +4984,12 @@ export default function App() {
               if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 만들 때 선택</span>;
               return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
-            <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나2(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
+            <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나 2.1(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
               <option value="flow">Flow (구독)</option>
               <option value="genspark">Genspark (구독)</option>
-              <option value="gemini">유료(나노바나나2)</option>
+              <option value="gemini">유료(나노바나나 2.1)</option>
               <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
@@ -4997,7 +4997,7 @@ export default function App() {
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             {imgEngine === 'gemini' && (<>
-              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={() => submitBatch()}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
+              <button className="ghost" disabled={!loaded} title="배치 제출(모델 칸의 모델 · 기본 나노바나나 2.1) — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={() => submitBatch()}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
               <button className="ghost" disabled={!loaded} title="나노바나나 2.1 배치 제출 — 모델 gemini-nano-banana-2.1 로 이미지 생성을 예약합니다(Batch API · 표준가의 50% 할인 대상). 위 「배치제출」(모델 칸의 모델)과 별개이며, 이미 다른 배치에 실린 그림은 또 싣지 않습니다. 결과는 「📥 배치회수」로 가져옵니다." onClick={() => submitBatch('gemini-nano-banana-2.1')}><span className="rb-ic">🌙</span> <span className="rb-t">2.1 배치</span></button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
             </>)}
@@ -5592,7 +5592,7 @@ export default function App() {
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
                         <option value="flow">Flow (구독)</option>
                         <option value="genspark">Genspark (구독)</option>
-                        <option value="gemini">유료(나노바나나2)</option>
+                        <option value="gemini">유료(나노바나나 2.1)</option>
                         <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)} />
                       </select></div>
                   </div>
@@ -6047,7 +6047,7 @@ export default function App() {
               {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
               <div className="kp-card">
                 <div className="kp-line">
-                  <b className="kp-name">🍌 유료 나노바나나2 (Gemini)</b>
+                  <b className="kp-name">🍌 유료 나노바나나 2.1 (Gemini)</b>
                   {giCfg && (<>
                     <label className="chk kp-chk"><input type="checkbox" checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송</label>
                     <label className="chk kp-chk"
@@ -6062,14 +6062,14 @@ export default function App() {
                   {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 오른쪽 모델명이 지금 통하는지 확인합니다(무료 조회)')}
                   {giCfg && (<>
                     <span className="kp-lab">모델</span>
-                    <input className="kp-model" list="gi-models" value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
+                    <input className="kp-model" list="gi-models" value={giCfg.model || ''} placeholder="gemini-nano-banana-2.1"
                       onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
                     <datalist id="gi-models">
-                      <option value="gemini-nano-banana-2.1">나노바나나 2.1 (2026-10 새 버전)</option>
+                      <option value="gemini-nano-banana-2.1">나노바나나 2.1 (기본)</option>
                       <option value="gemini-3.1-flash-lite-image">나노바나나 2 Lite (저렴·배치)</option>
                       <option value="gemini-3.1-flash-image-preview">나노바나나 2</option>
                     </datalist>
-                    <button className="ghost" title="모델을 나노바나나 2.1(gemini-nano-banana-2.1)로 바꿉니다. 칸을 눌러 목록에서 2 Lite·2 로 되돌릴 수도 있습니다."
+                    <button className="ghost" title="모델을 나노바나나 2.1(gemini-nano-banana-2.1 · 기본값)로 되돌립니다. 칸을 눌러 목록에서 2 Lite·2 를 고를 수도 있습니다."
                       onClick={() => saveGiCfg({ model: 'gemini-nano-banana-2.1' })}>2.1 로</button>
                   </>)}
                 </div>

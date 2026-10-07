@@ -889,7 +889,7 @@ ipcMain.handle('test-comfy-video', async (_e, args = {}) => {
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
 
-// ── 나노바나나2 Lite 배치(Batch API) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
+// ── 나노바나나 2.1 배치(Batch API · 모델은 gemini-image-config) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
 function _aspectFor(pr) { return pr.aspect === '9:16' ? '9:16' : (pr.aspect === '1:1' ? '1:1' : '16:9'); }
 ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
   if (!S.parsed || !S.parsed.projects) return { ok: false, error: '대본을 먼저 여세요.' };

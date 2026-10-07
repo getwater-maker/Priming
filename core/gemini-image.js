@@ -3,7 +3,7 @@
 // Nano Banana 2 Lite (Gemini 이미지 API)로 이미지 생성 — 브라우저 없이 API 로.
 //   즉시 모드: generateContent(responseModalities:['IMAGE']) → 인라인 base64 이미지.
 //   배치 모드: (예정) Gemini Batch API — 50% 저렴, 비동기 제출→회수.
-// 모델명은 설정 가능(gemini-image-config). 기본 'gemini-3.1-flash-lite-image'(2026-06 출시).
+// 모델명은 설정 가능(gemini-image-config). 기본 'gemini-nano-banana-2.1'(2026-10-06 GA · 1K 단가 2 Lite 와 같고 품질↑ · 로이 확정 2026-10-07).
 // 나노바나나 2.1(2026-10-06 GA)은 모델 칸에 `gemini-nano-banana-2.1` 을 넣으면 같은 경로로 쓴다(generateContent·배치 동일).
 // 키는 secret-store 'gemini'(음성 Gemini·프롬프트 API 와 공용).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13,7 +13,7 @@ const os = require('os');
 
 const CFG_PATH = path.join(os.homedir(), '.shots-maker', 'gemini-image-config.json');
 const DEFAULTS = {
-  model: 'gemini-3.1-flash-lite-image',    // Nano Banana 2 Lite (공식 pricing 페이지 확인, 최저가·배치지원). ⚙에서 변경 가능.
+  model: 'gemini-nano-banana-2.1',         // Nano Banana 2.1 (1K $0.0336 · 배치 $0.0168 — 2 Lite 와 같은 값). ⚙에서 변경 가능.
   sendAspect: true,                        // generationConfig.imageConfig.aspectRatio 전송(미지원 모델이면 끄기)
   charRefs: true,                          // 👤 대본 인물 카드 → 인물 시트 → 장면마다 참조 첨부(core/char-refs)
 };
