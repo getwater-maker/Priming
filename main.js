@@ -394,6 +394,7 @@ app.whenReady().then(() => {
       //   조용히(quiet) 한다 — 서버가 꺼진 PC 에서 켤 때마다 경고가 뜨면 소음이다(🎨 편집창을 열면 알려준다).
       try { await syncStylesFromServer(true); } catch {}
       try { await syncVoiceFaces(); } catch {}   // 🙂 목소리 얼굴도 같은 서버로 공유(v0.7.2)
+      try { await syncVoiceTags(); } catch {}    // 🏷 목소리 태그도(v0.7.36)
       // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
       try { exportChannelStyles(); } catch {}
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
@@ -1806,7 +1807,7 @@ ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
     } catch (e) { log('   ⚠ 공용 라이브러리 등록 오류: ' + String((e && e.message) || e)); }
     // 🏷 저장할 때 정한 태그(성별·연령대·언어·키워드) — 음성 설정(OmniVoice 탭)의 거르기·검색이 쓴다. 실패해도 저장은 성공.
     if (args.tags && typeof args.tags === 'object') {
-      try { const VT = require('./tts/voice-tags'); VT.set(base, args.tags); log(`   🏷 태그: ${JSON.stringify(VT.load()[base] || '없음')}`); } catch (e) { log('   ⚠ 태그 저장 실패: ' + String((e && e.message) || e)); }
+      try { const VT = require('./tts/voice-tags'); VT.set(base, args.tags); log(`   🏷 태그: ${JSON.stringify(VT.load()[base] || '없음')}`); syncVoiceTags(); } catch (e) { log('   ⚠ 태그 저장 실패: ' + String((e && e.message) || e)); }
     }
     let savedSec = 0; try { savedSec = require('./core/wav-slice').parseWav(outBuf).durationSec; } catch {}
     return { ok: true, path: wavPath, name: base + '.wav', text: refText, durationSec: savedSec };
@@ -5463,8 +5464,27 @@ ipcMain.handle('tts-engines-save', async (_e, args = {}) => {
     return { ok: true };
   } catch (e) { log('🔊 음성 엔진 저장 실패: ' + e.message); return { ok: false, error: e.message }; }
 });
+// 🏷 목소리 태그 ↔ 서버 — 이 PC 항목을 보내고 서버 전체를 받아 이름마다 더 새것을 반영한다(v0.7.36 · `voice-tags` 시각 · 서버 `/save-voice-tags`).
+//   서버가 아직 모르면(구버전 · 재시작 전) 조용히 로컬만 — 한 번만 알린다. single-flight.
+let _tagSyncBusy = false, _tagSyncWarned = false;
+async function syncVoiceTags() {
+  if (_tagSyncBusy) return 0;
+  _tagSyncBusy = true;
+  try {
+    const VT = require('./tts/voice-tags');
+    const r = await require('./tts/asr-client').syncServerTags(VT.exportItems());
+    if (!r.ok) {
+      if (r.error === 'unsupported' && !_tagSyncWarned) { _tagSyncWarned = true; log('ⓘ 🏷 목소리 태그 공유 — 서버가 아직 모릅니다(메인 PC 의 OmniVoice 서버를 다시 켜면 공유됩니다). 그동안은 이 PC 에만 저장됩니다.'); }
+      return 0;
+    }
+    const n = VT.mergeRemote(r.tags);
+    if (n) log(`🏷 목소리 태그 ${n}개를 서버와 맞췄습니다`);
+    return n;
+  } catch (e) { return 0; } finally { _tagSyncBusy = false; }
+}
 // OmniVoice 서버 공용 목소리(카드) — 실패하면 null(빈 목록과 구분) · 채널마다 어느 목소리를 쓰는지 표시용
 ipcMain.handle('tts-omni-voices', async () => {
+  try { await Promise.race([syncVoiceTags(), new Promise((r) => setTimeout(r, 8000))]); } catch {}   // 🏷 다른 PC 가 단 태그가 보이게
   let list = null;
   try { list = await require('./tts/asr-client').listServerVoices(); } catch {}
   const used = {};
@@ -5475,11 +5495,11 @@ ipcMain.handle('tts-omni-voices', async () => {
 });
 // 🏷 OmniVoice 참조음성 분류 저장(2026-10-06) — 한 목소리 / 여러 목소리(보이는 것 한꺼번에). 빈 값('')은 그 칸만 지운다(한 목소리) · 건드리지 않는다(여러 목소리).
 ipcMain.handle('tts-omni-tag-set', (_e, { name, tags } = {}) => {
-  try { const VT = require('./tts/voice-tags'); VT.set(name, tags); log(`🏷 분류 저장 — ${name}: ${JSON.stringify(VT.load()[name] || '지움')}`); return { ok: true, tags: VT.load()[name] || null }; }
+  try { const VT = require('./tts/voice-tags'); VT.set(name, tags); log(`🏷 분류 저장 — ${name}: ${JSON.stringify(VT.load()[name] || '지움')}`); syncVoiceTags(); return { ok: true, tags: VT.load()[name] || null }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('tts-omni-tag-many', (_e, { names, tags } = {}) => {
-  try { const VT = require('./tts/voice-tags'); const n = (names || []).length; VT.setMany(names, tags); log(`🏷 분류 한꺼번에 저장 — ${n}개 · ${JSON.stringify(VT.normalize(tags) || {})}`); return { ok: true, count: n, all: VT.load() }; }
+  try { const VT = require('./tts/voice-tags'); const n = (names || []).length; VT.setMany(names, tags); log(`🏷 분류 한꺼번에 저장 — ${n}개 · ${JSON.stringify(VT.normalize(tags) || {})}`); syncVoiceTags(); return { ok: true, count: n, all: VT.load() }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 // 🌏 목소리 언어(카드 거르기 · v0.7.2) — 참조텍스트 글자 → 이름 앞머리(JA_·VI_·KO_) → ko
@@ -7992,7 +8012,8 @@ async function _editSentences(args = {}) {
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정
-  const _spl = await _spliceSentenceAudio(old, made, log);   // 🔗 합치기 = 음성 이어 붙이기 · 나누기 = 쉼에서 자르기
+  //   🎭 화자가 바뀐 문장은 건너뛴다 — 글자가 그대로라 「옮겨 붙이기(move)」로 옛 목소리 음성이 그대로 붙던 사고(v0.7.35 → 36)
+  const _spl = spkChange ? null : await _spliceSentenceAudio(old, made, log);   // 🔗 합치기 = 음성 이어 붙이기 · 나누기 = 쉼에서 자르기
   _applyBreaks(made, args.breaks);                          // 🧩 클립 끌어올리기 — 나머지 줄 나눔 그대로
 
   // 🖼 **그룹 이미지·영상·프롬프트는 그대로 둔다**(로이 2026-09-25, v0.5.37).

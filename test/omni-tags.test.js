@@ -56,5 +56,16 @@ ok(!('kw' in VT.load()['kwA']) && VT.load()['kwA'].gender === 'male', '빈 키�
 ok(VT.kwList(new Array(30).fill(0).map((_, k) => 'k' + k)).length === 12, '키워드는 최대 12개');
 ok(VT.apply({ name: 'kwB' }, VT.load()).tags.kw[0] === '화남', '카드에 얹힌다(검색이 읽는 자리 = tags.kw)');
 
+// 🌐 서버 공유 — 이름마다 시각이 새것이 이긴다(지움 포함) · 서버 쪽 항목이 없으면 이 PC 것이 올라간다
+VT.set('syncA', { gender: 'male', kw: '다정한' });
+const itA = VT.exportItems().syncA;
+ok(itA && itA.tags.gender === 'male' && itA.t > 1, '보낼 항목 = 태그 + 마지막 고친 시각');
+ok(VT.mergeRemote({ syncA: { tags: { gender: 'female' }, t: itA.t + 5 }, syncB: { tags: { lang: 'ja', kw: ['화남'] }, t: 7 } }) === 2 && VT.load().syncA.gender === 'female' && VT.load().syncB.lang === 'ja', '서버 것이 더 새로우면 반영 · 새 이름도 받는다');
+ok(VT.mergeRemote({ syncA: { tags: { gender: 'male' }, t: itA.t } }) === 0 && VT.load().syncA.gender === 'female', '서버 것이 더 오래됐으면 무시');
+ok(VT.mergeRemote({ syncB: { tags: null, t: Date.now() + 1000 } }) === 1 && !('syncB' in VT.load()), '서버의 더 새 지움이 이 PC 에도 반영');
+VT.set('syncC', { lang: 'vi' }); VT.set('syncC', null);
+ok(VT.exportItems().syncC.tags === null && VT.exportItems().syncC.t > 1, '지운 것도 시각과 함께 보낸다(다른 PC 에서 되살아나지 않게)');
+ok(VT.mergeRemote(null) === 0 && VT.mergeRemote({ x: 'bad' }) === 0, '잘못된 서버 응답은 무시');
+
 console.log(`\n${fail ? '❌' : '✅'} omni-tags — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

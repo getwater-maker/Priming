@@ -208,7 +208,7 @@ const cleanup = () => {
         const after = await win.evaluate(async () => {
           const r = await window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 1, count: 1, text: '음성 보존 확인용으로 고친 문장입니다.' });
           if (!r || !r.ok) return { err: (r && r.error) || 'fail' };
-          return { map: r.dto.projects[0].cuts.map((c) => (c.sentences || []).map((s) => (s.audio ? 1 : 0))) };
+          return { map: r.dto.projects[0].cuts.map((c) => (c.sentences || []).map((s) => (s.audio ? 1 : 0))), texts0: (r.dto.projects[0].cuts[0].sentences || []).map((x) => x.text) };
         });
         ok(!after.err, '문장 수정 성공' + (after.err ? ' — ' + after.err : ''));
         if (!after.err) {
@@ -219,6 +219,15 @@ const cleanup = () => {
           eqNum(after.map[0][0], 1, '같은 그룹의 앞 문장 음성은 그대로');
           if (after.map[0].length > 2) eqNum(after.map[0][2], 1, '같은 그룹의 뒤 문장 음성도 그대로');
           if (after.map[1]) eqNum(after.map[1][0], 1, '다른 그룹의 문장 음성도 그대로');
+          // 🎭 🔑 글자는 그대로 두고 화자만 바꾸면 옛 목소리 음성을 쓰면 안 된다(글자가 같아 「옮겨 붙이기」 경로가 옛 음성을 되살리던 사고 · v0.7.36)
+          if (after.map[0][0] === 1 && after.texts0 && after.texts0[0]) {   // 고치지 않은 첫 문장(음성 있음)
+            const rA = await win.evaluate((t) => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '[할머니] ' + t }), after.texts0[0]);
+            const sA = rA && rA.ok ? rA.dto.projects[0].cuts[0].sentences[0] : null;
+            ok(sA && sA.speaker === '할머니' && !sA.audio, '🔑 글자 그대로 화자만 바꾸면 옛 음성을 쓰지 않는다(음성 비움 → 🎤 다시)' + (sA ? '' : ' — ' + (rA && rA.error)));
+            const rB = await win.evaluate((t) => window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: t, clearSpeaker: true }), after.texts0[0]);
+            const sB = rB && rB.ok ? rB.dto.projects[0].cuts[0].sentences[0] : null;
+            ok(sB && !sB.speaker && !sB.audio, '화자를 뗄 때도 옛 음성을 쓰지 않는다');
+          } else ok(false, '🔑 시험 전제: 그룹 첫 문장에 음성이 있어야 한다');
         }
       }
     } finally {

@@ -356,4 +356,10 @@ async function putServerFace({ engine, voice, file = '', t, buf = null, del = fa
   return _call('/save-voice-face', { method: 'POST', timeoutMs: 30000, body: { engine, voice, file, t, delete: !!del, img_b64: buf ? Buffer.from(buf).toString('base64') : '' } });
 }
 
-module.exports = { getServerVoiceAudio, deleteServerVoice, getServerFaces, getServerFace, putServerFace, transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
+/** 🏷 목소리 태그 공유 — items 를 보내고(비어도 됨) 합쳐진 전체 { 이름: {tags|null, t} } 를 받는다. 서버가 아직 모르면 error='unsupported' */
+async function syncServerTags(items = {}) {
+  const r = await _call('/save-voice-tags', { method: 'POST', timeoutMs: 10000, body: { items } });
+  return r.ok && r.tags && typeof r.tags === 'object' ? { ok: true, tags: r.tags } : { ok: false, error: r.error || 'fail' };
+}
+
+module.exports = { syncServerTags, getServerVoiceAudio, deleteServerVoice, getServerFaces, getServerFace, putServerFace, transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
