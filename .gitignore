@@ -25,3 +25,6 @@ whiteboard/py/__pycache__/
 
 # 작업용 영상·음원은 저장소에 넣지 않는다(매니페스트에도 제외 — gen-manifest.js)
 video/
+
+# LoRA 학습 데이터 정리본(하드링크 · 커밋하지 않는다)
+lora-dataset-clean/
