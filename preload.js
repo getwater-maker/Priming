@@ -221,6 +221,7 @@ contextBridge.exposeInMainWorld('api', {
   stopAfterItem: (on) => ipcRenderer.invoke('stop-after-item', on),   // ⏸ 이번 편까지만 만들고 멈춤 예약(false=취소) — ■ 중단과 달리 만들던 대본은 끝까지
   dlAbort: () => ipcRenderer.invoke('dl-abort'),   // 받기·전사만 멈춘다(제작은 그대로)
   resetProject: () => ipcRenderer.invoke('reset-project'),
+  clearLongformQueue: () => ipcRenderer.invoke('clear-longform-queue'),   // 🔀 채널 변경 때 롱폼 큐 비우기(작업 중이면 안 비움)
   regenGroup: (args) => ipcRenderer.invoke('regen-group', args),
   ttsGroup: (args) => ipcRenderer.invoke('tts-group', args),
   videoGroup: (args) => ipcRenderer.invoke('video-group', args),

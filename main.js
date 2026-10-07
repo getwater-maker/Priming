@@ -7216,6 +7216,24 @@ ipcMain.handle('reset-project', () => {
   return { dto: null, queue: queueDTO() };
 });
 
+// 🔀 채널을 바꾸면 롱폼 큐를 비운다(v0.7.26 · 로이 「채널변경하면 대본롱폼큐가 초기화」) — 헤더 채널 select 만 부른다.
+//   · 롱폼 큐만(출판 큐는 건드리지 않는다 · 세계 = 롱폼 기본) · 작업(제작·TTS 등 절전 차단 중)이 도는 동안은 **비우지 않는다**(돌던 대본이 사라지지 않게).
+//   · 비우기 전에 밀린 자동저장을 쓰고, 지난 큐 파일(workspace.last.json)을 지금 큐로 갱신한다 → 「♻ 지난 큐 다시 열기」로 되살릴 수 있다. 작업본(.smproj)은 그대로.
+ipcMain.handle('clear-longform-queue', () => {
+  const q = S.modes.longform;
+  const n = (q && q.items && q.items.length) || 0;
+  if (!n) return { ok: true, count: 0 };
+  if (_awake.n > 0) { log(`🔀 채널 변경 — 작업이 도는 중이라 큐(${n}개)는 그대로 둡니다`); return { ok: false, busy: true, count: n }; }
+  syncActiveToS();      // 밀린 자동저장을 옛 대본으로 먼저 쓴다
+  writeWorkspace();     // 지난 큐 파일(last)을 지금 큐로 — 비운 뒤 되살릴 수 있게
+  q.items = []; q.activeId = null;
+  S.abort = false;
+  syncActiveToS();      // S.parsed = null
+  scheduleAutoSave(); writeWorkspace();
+  log(`🔀 채널 변경 — 롱폼 큐 ${n}개 대본을 비웠습니다(작업본은 그대로 · 「♻ 지난 큐 다시 열기」로 되살릴 수 있음)`);
+  return { ok: true, count: n, dto: null, queue: queueDTO() };
+});
+
 // ── 작업 큐 ── 현재 모드의 적재 대본 목록 조회/선택/제거. (mount 복원용 dto/mode 포함)
 ipcMain.handle('list-queue', () => ({ queue: queueDTO(), dto: S.parsed ? P.toDTO(S.parsed) : null, mode: S.mode }));
 

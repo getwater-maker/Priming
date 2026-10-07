@@ -2815,6 +2815,18 @@ export default function App() {
   // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
   async function switchModeForChannel(name) {
     restoringItemRef.current = false; // 사용자가 채널을 직접 골랐으니 그 채널 기본값(배속·스타일·AI고지)을 적용
+    // 🔀 채널을 **바꾸면** 롱폼 큐를 비운다(v0.7.26 · 로이) — 같은 채널을 다시 고른 것은 제외 · 작업 중이면 main 이 비우지 않는다
+    //   queueBusy = 큐 순차 제작 중이면 호출하지 않는다(돌던 큐가 사라지지 않게).
+    let clearedN = 0;
+    if (name !== presetName && !queueBusy) {
+      try {
+        const r = await api.clearLongformQueue();
+        if (r && r.ok && r.count) {
+          clearedN = r.count;
+          if (mode === 'longform') { if (r.queue) setQueue(r.queue); setDto(null); setFtitle(''); }
+        } else if (r && r.busy) setStatus('작업이 도는 중이라 대본 큐는 그대로 둡니다');
+      } catch (e) { logline('채널 변경 — 큐 비우기 오류: ' + e.message); }
+    }
     setPresetName(name);
     setMenu('script');   // 채널을 바꾸면 늘 「대본·음성」부터(로이 2026-09-26)
     try {
@@ -2824,6 +2836,7 @@ export default function App() {
       const sm = (_sm0 === 'book' || _sm0 === 'remotion') ? _sm0 : 'longform';
       await switchMode(sm, { keepChannel: true });   // 🌐 main 의 「보는 세계」도 함께 바꾼다(UI 만 바뀌면 출판 호출이 롱폼 세계로 간다)
     } catch {}
+    if (clearedN) setStatus(`🔀 채널 변경 — 대본 큐 ${clearedN}개를 비웠습니다 (「♻ 지난 큐 다시 열기」로 되살릴 수 있어요)`);
   }
   // 모달 내 참조음성 미리듣기
   // 참조음성 표시 이름 — `srv:<이름>`(서버 공용 라이브러리)은 ☁ 를 붙여 구분한다.
