@@ -10552,14 +10552,17 @@ function bookCoverLabel(r) {
   if (f.ok) return '✓';
   return `⚠치수(${f.imgW}×${f.imgH}px ≠ 기대 ${f.expW}×${f.expH}px${f.flapHint ? ' · 날개 ' + (f.flapHint === 'file-has-flaps' ? '포함 파일' : '없는 파일') : ''})`;
 }
-// 📦 출판 큐 전체 만들기 — 큐의 권마다 [내지·표지 PDF → ePub → 규격 검증]을 차례로(로이 2026-10-02). 한 권이 실패해도 다음 권으로 간다.
-//   같은 핸들러(_BOOK_H)를 권마다 부르므로 한 권씩 「📦 한 번에 만들기」를 누르는 것과 같다. 끝나면 처음 활성이던 권으로 돌아온다.
+// 📦 출판 큐 전체 만들기 — 큐의 권마다 종이책(내지·표지 PDF) 또는 전자책(ePub → 규격 검증) 중 `args.edition` 으로 고른 한 판만 차례로(로이 2026-10-07 — ISBN 이 달라 따로). 한 권이 실패해도 다음 권으로 간다. edition 이 없으면 옛 동작(둘 다).
+//   같은 핸들러(_BOOK_H)를 권마다 부르므로 한 권씩 「📕 종이책 만들기」·「📱 전자책 만들기」를 누르는 것과 같다. 끝나면 처음 활성이던 권으로 돌아온다.
 ipcMain.handle('book-build-queue', async (_e, args = {}) => {
   if (_bookQueueBusy) return { ok: false, error: '이미 큐 만들기가 진행 중입니다' };
   const q = S.modes.book;
   const items = (q.items || []).filter((it) => it.parsed && it.parsed.kind === 'book');
   if (!items.length) return { ok: false, error: '출판 큐가 비어 있습니다' };
   _bookQueueBusy = true;
+  const ed = args.edition === 'print' || args.edition === 'ebook' ? args.edition : 'both';
+  const doPrint = ed !== 'ebook', doEbook = ed !== 'print';
+  const edLabel = ed === 'print' ? '종이책(내지·표지 PDF)' : ed === 'ebook' ? '전자책(ePub → 검증)' : '내지·표지 PDF → ePub → 검증';
   const origId = q.activeId; const results = [];
   try {
     S.abort = false;
@@ -10568,13 +10571,16 @@ ipcMain.handle('book-build-queue', async (_e, args = {}) => {
       if (S.abort) { log('⏹ 큐 만들기 중단'); break; }
       q.activeId = it.id; syncActiveToS();
       const name = path.basename(it.scriptPath || '') || it.parsed.fileTitle;
-      log(`📦 [${i + 1}/${items.length}] ${name} 만드는 중 — 내지·표지 PDF → ePub → 검증`);
+      log(`📦 [${i + 1}/${items.length}] ${name} 만드는 중 — ${edLabel}`);
       const res = { file: name, title: it.parsed.fileTitle, pdf: false, cover: false, coverFit: null, epub: false, check: '', pages: 0, error: '' };
       try {
-        const r1 = await _BOOK_H['book-build-pdf'](null, { ...args, edition: 'print', noOpen: true });
-        res.pdf = !!(r1 && !r1.error); res.pages = (r1 && r1.pages) || 0; res.cover = !!(r1 && r1.coverPdf && !r1.coverError); res.coverFit = (r1 && r1.coverFit) || null;
-        if (r1 && r1.error) res.error = '내지 PDF: ' + r1.error;
-        else {
+        let printOk = true;
+        if (doPrint) {
+          const r1 = await _BOOK_H['book-build-pdf'](null, { ...args, edition: 'print', noOpen: true });
+          res.pdf = !!(r1 && !r1.error); res.pages = (r1 && r1.pages) || 0; res.cover = !!(r1 && r1.coverPdf && !r1.coverError); res.coverFit = (r1 && r1.coverFit) || null;
+          if (r1 && r1.error) { res.error = '내지 PDF: ' + r1.error; printOk = false; }
+        }
+        if (doEbook && printOk) {
           const r2 = await _BOOK_H['book-build-epub'](null, { noOpen: true });
           res.epub = !!(r2 && !r2.error); if (r2 && r2.error) res.error = 'ePub: ' + r2.error;
           if (res.epub) {
@@ -10585,15 +10591,15 @@ ipcMain.handle('book-build-queue', async (_e, args = {}) => {
       } catch (e) { res.error = e.message; }
       results.push(res);
       const fitBad = !!(res.coverFit && !res.coverFit.ok);
-      log(`${res.pdf && res.epub && !fitBad ? '✅' : '⚠'} [${i + 1}/${items.length}] ${name} — 내지 ${res.pdf ? res.pages + '쪽' : '실패'} · 표지 ${bookCoverLabel(res)} · ePub ${res.epub ? '✓' : '✗'}${res.check ? ' · 검증 ' + res.check : ''}${res.error ? ' · ' + res.error : ''}`);
+      log(`${(doPrint ? res.pdf : true) && (doEbook ? res.epub : true) && !fitBad ? '✅' : '⚠'} [${i + 1}/${items.length}] ${name}${doPrint ? ` — 내지 ${res.pdf ? res.pages + '쪽' : '실패'} · 표지 ${bookCoverLabel(res)}` : ''}${doEbook ? ` — ePub ${res.epub ? '✓' : '✗'}` : ''}${res.check ? ' · 검증 ' + res.check : ''}${res.error ? ' · ' + res.error : ''}`);
     }
   } finally {
     if (q.items.find((x) => x.id === origId)) { q.activeId = origId; syncActiveToS(); }
     _bookQueueBusy = false;
   }
-  const okN = results.filter((r) => r.pdf && r.epub).length;
+  const okN = results.filter((r) => (doPrint ? r.pdf : true) && (doEbook ? r.epub : true)).length;
   const fitN = results.filter((r) => r.coverFit && !r.coverFit.ok).length;
-  log(`📦 큐 전체 만들기 끝 — ${okN}/${results.length}권 완료${okN < results.length ? ' (실패한 권은 위 로그 확인)' : ''}${fitN ? ` · ⚠ 표지 치수 불일치 ${fitN}권 — 표지를 새 쪽수의 책등으로 다시 만들어야 합니다` : ''}`);
+  log(`📦 큐 ${edLabel} 만들기 끝 — ${okN}/${results.length}권 완료${okN < results.length ? ' (실패한 권은 위 로그 확인)' : ''}${fitN ? ` · ⚠ 표지 치수 불일치 ${fitN}권 — 표지를 새 쪽수의 책등으로 다시 만들어야 합니다` : ''}`);
   try { if (!args.noOpen && S.outRoot) shell.openPath(S.outRoot); } catch (_) {}
   return { ok: okN === results.length && !fitN, results, dto: currentDTO(), queue: queueDTO() };
 });

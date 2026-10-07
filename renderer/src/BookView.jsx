@@ -507,34 +507,27 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   useEffect(() => {
     if (viewMode === 'ebook' && dto && dto.kind === 'book' && !eb.busy && eb.forPath !== dto.scriptPath) refreshEbook();
   }, [viewMode, dto && dto.scriptPath]);
-  // 📚 큐 전체 만들기 — 큐의 권마다 [내지·표지 PDF → ePub → 검증]을 차례로(한 권이 실패해도 다음 권으로). 각 권의 결과는 로그에도 남는다.
-  async function buildQueue() {
+  // 📚 큐 전체 만들기 — 큐의 권마다 종이책(내지·표지 PDF) 또는 전자책(ePub → 검증) 중 고른 한 판만 차례로(한 권이 실패해도 다음 권으로). 각 권의 결과는 로그에도 남는다.
+  async function buildQueue(edition) {   // 'print' = 종이책만 · 'ebook' = 전자책만 (ISBN 이 달라 따로)
     if (building) return;
     const n = queue && queue.items ? queue.items.length : 0;
-    setBuilding(true); setBuildMsg(`📚 큐 ${n}권 만드는 중 — 권마다 내지·표지 PDF → ePub → 검증 (시간이 걸립니다)`);
-    setStatus(`📚 큐 ${n}권 만드는 중… (진행은 로그 확인)`);
+    const what = edition === 'ebook' ? '전자책(ePub → 검증)' : '종이책(내지·표지 PDF)';
+    setBuilding(true); setBuildMsg(`📚 큐 ${n}권 ${what} 만드는 중 (시간이 걸립니다)`);
+    setStatus(`📚 큐 ${n}권 ${what} 만드는 중… (진행은 로그 확인)`);
     try {
-      const r = await api.bookBuildQueue({ layout });
+      const r = await api.bookBuildQueue({ layout, edition });
       if (r && r.queue && setQueue) setQueue(r.queue);
       if (r && r.dto) setDto(r.dto);
       const res = (r && r.results) || [];
-      const ok = res.filter((x) => x.pdf && x.epub).length;
+      const ok = res.filter((x) => (edition === 'ebook' ? x.epub : x.pdf)).length;
       const fitBad = res.filter((x) => x.coverFit && !x.coverFit.ok);
       setStatus(r && r.error ? '⚠ ' + r.error : `📚 큐 ${ok}/${res.length}권 완료${ok < res.length ? ' — 실패한 권은 로그 확인' : ''}${fitBad.length ? ` · ⚠ 표지 치수 불일치 ${fitBad.length}권(${fitBad.map((x) => x.file.replace(/\.md$/i, '')).join(', ')})` : ''}`);
       const coverLabel = (x) => (!x.cover ? '✗' : !x.coverFit ? '✓(이미지 없음·치수 미확인)' : x.coverFit.ok ? '✓' : `⚠치수(${x.coverFit.imgW}×${x.coverFit.imgH}px ≠ 기대 ${x.coverFit.expW}×${x.coverFit.expH}px${x.coverFit.flapHint ? ' · 날개 ' + (x.coverFit.flapHint === 'file-has-flaps' ? '포함 파일' : '없는 파일') : ''})`);
-      res.forEach((x) => logline(`${x.pdf && x.epub && !(x.coverFit && !x.coverFit.ok) ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${coverLabel(x)} · ePub ${x.epub ? '✓' : '✗'}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`));
+      res.forEach((x) => logline(edition === 'ebook'
+        ? `${x.epub ? '✅' : '⚠'} ${x.file} — ePub ${x.epub ? '✓' : '✗'}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`
+        : `${x.pdf && !(x.coverFit && !x.coverFit.ok) ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${coverLabel(x)}${x.error ? ' · ' + x.error : ''}`));
     } catch (e) { logline('큐 만들기 오류: ' + e.message); setStatus('⚠ 큐 만들기 오류 — 로그 확인'); }
     setBuilding(false); refreshOutputs();
-  }
-  // 📦 부크크용 한 번에 만들기 — 내지·표지 PDF → (쪽수가 정해진 뒤) ePub → 규격 검증. 순서가 중요하다: 표지 크롭과 책등은 쪽수 확정 뒤에만 맞는다.
-  async function buildAll() {
-    if (building) return;
-    setStatus('📦 한 번에 만드는 중 — 내지·표지 PDF 부터…');
-    await buildPdf('print', true);      // 폴더는 끝에 한 번만 연다(탐색창이 둘 뜨던 것 — 로이 2026-10-02)
-    await buildEpubFile(true);      // 검증은 ePub 만들기 안에서 자동
-    refreshOutputs(); loadPf();
-    try { api.openFolder(); } catch (_) {}
-    setStatus('📦 한 번에 만들기 끝 — 아래 「출고 전 점검」을 확인하세요');
   }
   // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
   //   원고에 없는 섹션을 체크하면 템플릿을 원고에 삽입.
@@ -843,14 +836,13 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           )}
         </div>
 
-        {/* 2) 📦 만들기 — 한 번에 만들기 = 종이책(내지·표지 PDF) + 전자책(ePub) + ePub 규격 검증(EPUBCheck) */}
+        {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 따로 만든다(로이 2026-10-07: 「한 번에 만들기」 폐기) */}
         <div className="bkzone">📦 만들기</div>
         <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-build-all" title="종이책(내지 PDF + 표지 PDF) → 전자책(ePub, EPUB 2.0) → ePub 규격 검증(EPUBCheck)을 순서대로 한 번에 — 쪽수가 정해진 뒤에 표지·ePub 을 만들도록 순서를 지킵니다" onClick={buildAll}>📦 한 번에 만들기 <span className="meta">(종이책 + 전자책 + 검증)</span></button>
+          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 ISBN·정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'} <span className="meta">(내지 + 표지 PDF)</span></button>
+          <button disabled={building || epubChkBusy} data-testid="bk-epub" title="부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 + 규격 검증 — 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·인쇄 표지 앞면 순" onClick={() => buildEpubFile()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'} <span className="meta">(ePub + 검증)</span></button>
         </div>
         <div className="bkactions bkbuild">
-          <button className="ghost" disabled={building} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 내지.pdf + 표지.pdf (책등·재단여백 포함, 판권은 종이책 정가)" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 PDF'}</button>
-          <button className="ghost" disabled={building} data-testid="bk-epub" title="같은 원고로 부크크 전자책용 ePub(EPUB 2.0 · 한자 글꼴 동봉) 생성 — 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·인쇄 표지 앞면 순" onClick={() => buildEpubFile()}>{building ? '⏳ 생성 중…' : '📱 ePub 만들기'}</button>
           <button className="ghost" disabled={building || epubChkBusy} data-testid="bk-epubcheck" title="W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다 — 도구가 있는 PC 에서만" onClick={runEpubCheckUi}>{epubChkBusy ? '⏳ 검증 중…' : '✔ ePub 검증'}</button>
           <button className="ghost" disabled={building} data-testid="bk-pdf-ebook" title="참고용 — 전자책 PDF 한 파일(1쪽 앞표지 + 본문). 부크크 전자책은 ePub 을 올립니다" onClick={() => buildPdf('ebook')}>📄 전자책 PDF</button>
         </div>
@@ -1260,7 +1252,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <div className="bkqueue" data-testid="bk-queue">
             <div className="bkqueue-head">
               <b>📚 큐 {queue.items.length}권</b>
-              <button disabled={building || epubChkBusy} data-testid="bk-build-queue" title="큐의 모든 권을 차례로 [내지·표지 PDF → ePub → 규격 검증] 합니다 — 한 권이 실패해도 다음 권으로 넘어가고, 끝나면 지금 보던 권으로 돌아옵니다" onClick={buildQueue}>📦 큐 전체 만들기</button>
+              <button disabled={building || epubChkBusy} data-testid="bk-build-queue-print" title="큐의 모든 권을 차례로 종이책(내지·표지 PDF)만 만듭니다 — 한 권이 실패해도 다음 권으로 넘어가고, 끝나면 지금 보던 권으로 돌아옵니다" onClick={() => buildQueue('print')}>📕 큐 종이책 만들기</button>
+              <button disabled={building || epubChkBusy} data-testid="bk-build-queue-ebook" title="큐의 모든 권을 차례로 전자책(ePub → 규격 검증)만 만듭니다 — 한 권이 실패해도 다음 권으로 넘어가고, 끝나면 지금 보던 권으로 돌아옵니다" onClick={() => buildQueue('ebook')}>📱 큐 전자책 만들기</button>
             </div>
             <div className="bkqueue-chips">
               {queue.items.map((it) => (

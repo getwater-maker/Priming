@@ -166,12 +166,13 @@ ${para}
       await one('bk-register-bookk', '종이책 자동 입력 버튼'); await one('bk-register-ebook', '전자책 자동 입력 버튼');
       await one('bk-register-cover', '종이책 이어 채우기'); await one('bk-register-ebook-resume', '전자책 이어 채우기');
       await one('bk-paper-price-row', '종이책 정가 줄');
-      await one('bk-build-all', '한 번에 만들기'); await one('bk-pdf-print', '종이책 PDF'); await one('bk-epub', 'ePub 만들기'); await one('bk-epubcheck', 'ePub 검증'); await one('bk-pdf-ebook', '전자책 PDF');
+      await one('bk-pdf-print', '종이책 만들기'); await one('bk-epub', '전자책 만들기'); await one('bk-epubcheck', 'ePub 검증'); await one('bk-pdf-ebook', '전자책 PDF');
+      if (await win.locator('[data-testid=bk-build-all]').count() !== 0) throw new Error('「한 번에 만들기」 버튼이 남아 있다(종이책·전자책은 ISBN 이 달라 따로 만든다 — 제거됐어야 한다)');
       if (await win.locator('[data-testid=bk-register-both]').count() !== 0) throw new Error('「종이책 → 전자책 한 번에 등록」 버튼이 남아 있다(제거됐어야 한다)');
       await win.waitForSelector('[data-testid=bk-reg] [data-testid=bk-preflight]', { timeout: 8000 }).catch(() => {});
       if (await win.locator('[data-testid=bk-reg] [data-testid=bk-preflight]').count() !== 1) throw new Error('출고 전 점검 패널이 1개가 아니다');
       // 🔑 자동 입력이 패널 맨 위 — 만들기·점검표·점검 패널보다 위에 있다
-      const ys = await win.evaluate(() => { const y = (s) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top + window.scrollY : -1; }; return { auto: y('[data-testid=bk-auto]'), build: y('[data-testid=bk-build-all]'), pf: y('[data-testid=bk-preflight]'), chk: y('[data-testid=bk-reg-bookk]') }; });
+      const ys = await win.evaluate(() => { const y = (s) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top + window.scrollY : -1; }; return { auto: y('[data-testid=bk-auto]'), build: y('[data-testid=bk-pdf-print]'), pf: y('[data-testid=bk-preflight]'), chk: y('[data-testid=bk-reg-bookk]') }; });
       if (!(ys.auto >= 0 && ys.auto < ys.build && ys.auto < ys.pf && ys.auto < ys.chk)) throw new Error('자동 입력이 맨 위가 아니다 ' + JSON.stringify(ys));
       if (await win.locator('[data-testid=bk-reg]').locator('text=작가와').count() > 0) throw new Error('부크크 등록 탭에 작가와 문구가 남아 있음');
       await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookk.png') });

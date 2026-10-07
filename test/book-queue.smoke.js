@@ -103,6 +103,13 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const outA = path.join(outParent, nameA), outB = path.join(outParent, nameB);
     const ls = (d) => { try { return fs.readdirSync(d); } catch (_) { return []; } };
     ok(ls(outA).some((f) => /\.epub$/.test(f)) && ls(outB).some((f) => /\.epub$/.test(f)), `권마다 자기 폴더에 ePub: ${ls(outA).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')} | ${ls(outB).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')}`);
+
+    // [5] 🔑 종이책·전자책은 ISBN 이 달라 따로 만든다(2026-10-07) — edition 으로 한 판만
+    console.log('\n[5] 큐 만들기 — edition 별(종이책만 / 전자책만)');
+    const bp = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, edition: 'print' }));
+    ok((bp.results || []).length === 2 && bp.results.every((x) => x.pdf && !x.epub && !x.check), `종이책만: PDF 만들고 ePub·검증은 안 한다 (${(bp.results || []).map((x) => `pdf=${x.pdf} epub=${x.epub}`).join(' | ')})`);
+    const be = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, edition: 'ebook' }));
+    ok((be.results || []).length === 2 && be.results.every((x) => !x.pdf && x.epub), `전자책만: ePub 만들고 PDF 는 안 한다 (${(be.results || []).map((x) => `pdf=${x.pdf} epub=${x.epub}`).join(' | ')})`);
   } finally {
     await app.close();
     // 정리 — 우리가 만든 「큐시험…」 폴더만 지운다
