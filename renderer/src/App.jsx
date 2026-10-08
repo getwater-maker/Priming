@@ -4122,10 +4122,17 @@ export default function App() {
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
-      if (anyModal || sentEdit || e.altKey) return;
+      if (anyModal || e.altKey) return;
+      if (sentEdit && !((e.ctrlKey || e.metaKey) && e.code === 'KeyA')) return;
       const t = e.target; const tag = t && t.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAllClips(); return; }   // 🧩 Ctrl+A = 모든 클립
+      const isA = (e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key === 'a' || e.key === 'A');   // 🔑 한글 입력 상태에선 key 가 'ㅁ' 이라 키 자리(code)로 본다(Ctrl+A 가 작업창 전체 선택으로 새던 원인)
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (t && t.isContentEditable) {
+        // 고치는 중인 자막칸: 첫 Ctrl+A 는 그 칸 글자 전체(기본) — 이미 칸 전체가 골라져 있으면 한 번 더 눌러 모든 클립
+        if (isA) { const sel = window.getSelection && window.getSelection(); if (sel && String(sel).length && String(sel).length >= String(t.innerText || '').replace(/\n$/, '').length) { e.preventDefault(); selectAllClips(); } }
+        return;
+      }
+      if (isA) { e.preventDefault(); selectAllClips(); return; }   // 🧩 Ctrl+A = 모든 클립
       // 🧩 클립 도구 — 고른 클립이 있을 때만(글자를 드래그로 고른 중이면 평소 복사)
       if (clipSelOk() && (e.ctrlKey || e.metaKey) && !String((window.getSelection && window.getSelection()) || '').trim()) {
         if (e.code === 'KeyC') { e.preventDefault(); clipCopy(false); return; }
@@ -4219,14 +4226,16 @@ export default function App() {
       const selfActive = !!(el && text && el.selectionStart != null && el.selectionStart !== el.selectionEnd);
       if (selfActive && r.total > 1 && !findSkipRef.current) { findSkipRef.current = true; api.findInPage({ text, findNext: false, forward: true }); return; }
       findSkipRef.current = false;
-      setFindRes({ active: Math.max(r.active - 1, 0), total: Math.max(r.total - 1, 0), none: !!text && r.total <= 1 });
+      const hr = findHitRef.current;
+      if (hr && hr.total > 0 && hr.idx >= 0) setFindRes({ active: hr.idx + 1, total: hr.total });   // 🔎 클립 단위 번호(▲▼ 가 클립을 옮긴다)
+      else setFindRes({ active: Math.max(r.active - 1, 0), total: Math.max(r.total - 1, 0), none: !!text && r.total <= 1 });
       if (el && findTypingRef.current) {
         el.focus({ preventScroll: true });
         try { const n = el.value.length; el.setSelectionRange(n, n); } catch {}
       }
     });
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyF' || e.key === 'f' || e.key === 'F')) {   // 🔑 한글 입력 상태에선 key 가 'ㄹ' — 키 자리(code)로도 본다
         // 검색창은 늘 떠 있으므로 **포커스만** 옮긴다(2026-09-16).
         e.preventDefault();
         const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); }
@@ -4240,6 +4249,26 @@ export default function App() {
   // 🔴 **Electron 의 findNext 는 「다음으로 이동」이 아니라 「새 세션을 시작하는가」다**(2026-09-16 실측).
   //   옛 코드는 반대로 써서 **타이핑만으로는 검색이 아예 안 됐다**(found-in-page 이벤트 0건 — 실측 확인).
   //   그래서 문자열이 바뀌면 새 세션(true), 같은 문자열에서 이동이면 follow-up(false) 으로 보낸다.
+  // 🔎 검색어가 든 **클립**으로 이동 — 새 검색어면 지금 클립 이후 첫 일치, 같은 검색어의 ▲▼/Enter 면 이전·다음 일치(끝에서 돌아온다).
+  //   화면 글자 강조·개수는 find-in-page 가 그대로 맡고, 클립 커서·스크롤만 여기서 옮긴다(findHitRef = 개수 표시의 근거).
+  const findHitRef = useRef({ total: 0, idx: -1 });
+  function gotoFindClip(text, fresh, forward) {
+    const hr = findHitRef.current; hr.total = 0;
+    const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
+    const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length || !text) return;
+    const q = text.toLowerCase();
+    const hits = PL.list.filter((x) => { const s = capSentence(sn, x.groupNum, x.sentIdx); return s && String(s.text || '').slice(x.from, x.to).toLowerCase().includes(q); });
+    hr.total = hits.length; if (!hits.length) { hr.idx = -1; return; }
+    let i;
+    if (fresh || hr.idx < 0) { const cn = cursor && cursor.n != null ? cursor.n : 0; i = hits.findIndex((x) => x.n >= cn); if (i < 0) i = 0; }
+    else i = (hr.idx + (forward ? 1 : -1) + hits.length) % hits.length;
+    hr.idx = i;
+    const l = hits[i];
+    userCursor({ shortsNum: sn, n: l.n });
+    setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n });
+    setFindRes({ active: i + 1, total: hits.length });
+    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
+  }
   function runFind(text, move, forward) {
     findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
@@ -4250,6 +4279,7 @@ export default function App() {
       const fresh = findSessionRef.current !== text;   // 세션이 잡고 있는 문자열과 다르면 새로 시작해야 한다
       findSessionRef.current = text;
       api.findInPage({ text, findNext: fresh, forward: forward !== false });
+      gotoFindClip(text, fresh, forward !== false);
     };
     if (move) fire(); else findTimerRef.current = setTimeout(fire, 280);
   }

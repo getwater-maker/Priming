@@ -88,7 +88,7 @@ export function fmtCss(f, k = 0.2, full = true) {
     const w = Math.max(1, (Number(f.outlineWidth) + Number(f.outline2Width)) * k);
     for (const [x, y] of [[w, 0], [-w, 0], [0, w], [0, -w], [w, w], [-w, -w], [w, -w], [-w, w]]) sh.push(`${x}px ${y}px 0 ${f.outline2Color}`);
   }
-  if (f.shadowOn) sh.push(`${(Number(f.shadowX) || 0) * k}px ${(Number(f.shadowY) || 0) * k}px ${(Number(f.shadowBlur) || 0) * k}px ${rgba(f.shadowColor, (Number(f.shadowOpacity) || 0) / 100)}`);
+  if (full && f.shadowOn) sh.push(`${(Number(f.shadowX) || 0) * k}px ${(Number(f.shadowY) || 0) * k}px ${(Number(f.shadowBlur) || 0) * k}px ${rgba(f.shadowColor, (Number(f.shadowOpacity) || 0) / 100)}`);
   if (sh.length) st.textShadow = sh.join(', ');
   if (f.hlOn) { st.backgroundColor = rgba(f.hlColor, (Number(f.hlOpacity != null ? f.hlOpacity : 100)) / 100); st.borderRadius = 3; st.padding = '0 2px'; }
   return st;
@@ -122,7 +122,7 @@ export function LineRuns({ text, spans, range, base }) {
     if (!('underline' in ov) && !('strike' in ov)) delete css.textDecoration;
     if (!('letterSpacing' in ov)) delete css.letterSpacing;
     // 밝은 글자색은 밝은 목록 바탕에서 안 보이므로 얇은 테두리를 붙인다
-    if (ov.fontColor && /^#(f|e|d)[0-9a-f](f|e|d)[0-9a-f](f|e|d)[0-9a-f]$/i.test(ov.fontColor)) { css.WebkitTextStroke = '0.6px #333'; css.paintOrder = 'stroke fill'; }
+    if (ov.fontColor && /^#(f|e|d)[0-9a-f](f|e|d)[0-9a-f](f|e|d)[0-9a-f]$/i.test(ov.fontColor)) { css.WebkitTextStroke = '1.2px #333'; css.paintOrder = 'stroke fill'; }
     if (ov.size && base && base.size) css.fontSize = `${Math.max(60, Math.min(180, Math.round(ov.size / base.size * 100)))}%`;
     out.push(<span key={a} data-off={a} className="capfmt" style={css}>{t}</span>);
   }
