@@ -1211,3 +1211,6 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 /* ☑ 모두 가 있을 땐 검색 줄을 조금 넓혀 ✕ 가 옆 단추를 덮지 않게 */
 .menubar .findbar:has(.find-selall){flex:0 0 176px;min-width:176px}
 .menubar .findbar .fcnt{min-width:30px}
+/* 고정된 카드 제목 줄 위로 스크롤하는 이전 클립이 보이던 틈 = 목록 칸 위쪽 여백(14px) — 여백을 스크롤되는 빈 칸으로 바꿔 제목 줄이 맨 위에 붙게 한다 */
+main.pane2{padding-top:0}
+main.pane2::before{content:'';display:block;height:14px}

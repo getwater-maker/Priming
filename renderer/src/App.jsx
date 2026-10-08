@@ -4337,6 +4337,20 @@ export default function App() {
     } catch (_) {}
   }
   // ☑ 검색된 클립을 한꺼번에 선택(음성 다시 만들기·삭제·서식 등 클립 도구가 그대로 먹는다)
+  // 🔑 검색 중에 입력칸이 **사람이 떠난 게 아닌데** 포커스를 잃으면(find-in-page 시작·정지·결과 처리가 가져간다) 곧바로 되돌린다 —
+  //   글을 지우고 다시 쓰려는데 마우스로 칸을 또 눌러야 하던 문제. 사람이 떠난 것(마우스 누름·Tab·Esc)이나 창 자체가 비활성이면 건드리지 않는다.
+  const findUserLeftRef = useRef(0);
+  useEffect(() => {
+    const mark = () => { findUserLeftRef.current = Date.now(); };
+    const key = (e) => { if (e.key === 'Tab' || e.key === 'Escape') mark(); };
+    window.addEventListener('mousedown', mark, true); window.addEventListener('keydown', key, true);
+    return () => { window.removeEventListener('mousedown', mark, true); window.removeEventListener('keydown', key, true); };
+  }, []);
+  function keepFindFocus(ev) {
+    const el = ev.currentTarget;
+    if (Date.now() - findUserLeftRef.current < 600) return;   // 사람이 다른 곳을 누르고 떠난 것
+    setTimeout(() => { try { if (document.hasFocus() && document.activeElement !== el && (!document.activeElement || document.activeElement === document.body)) el.focus({ preventScroll: true }); } catch (_) {} }, 0);
+  }
   function selectFindHits() {
     const hr = findHitRef.current; const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
     if (!hr.hits || !hr.hits.length || sn == null) return;
@@ -5002,7 +5016,7 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
+            <input id="find-input" defaultValue={findTextRef.current} onBlur={keepFindFocus} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
               onChange={(e) => runFind(e.target.value, false)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'ArrowUp') { e.preventDefault(); runFind(findTextRef.current, true, false); } else if (e.key === 'ArrowDown') { e.preventDefault(); runFind(findTextRef.current, true, true); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
             <span className="fcnt" title="검색된 클립 수(한 클립에 같은 말이 두 번 나와도 1개로 셉니다)">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>

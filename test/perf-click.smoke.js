@@ -82,6 +82,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     }
     console.log('  실제 클릭 → 검은 도구 막대 (ms):', barMs.join(' / '));
     ok(Math.max(...barMs.slice(1)) < 400 && barMs[0] < 900, `도구 막대가 뜨기까지 ${barMs.join('/')}ms (처음 < 900 · 이후 < 400)`);
+    if (process.env.PERF_SHOT) { await win.evaluate(() => { document.querySelector('main.pane2').scrollTop = 6000; }); await win.waitForTimeout(500); const b = await win.evaluate(() => { const r = document.querySelector('.card h2').getBoundingClientRect(); const pt = document.querySelector('main.pane2').getBoundingClientRect().top; return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), gap: Math.round(r.y - pt) }; }); console.log('  h2 틈', b.gap); await win.screenshot({ path: process.env.PERF_SHOT, clip: { x: b.x, y: Math.max(0, b.y - 40), width: Math.min(b.w, 900), height: 120 } }); }
     const rs = [];
     for (const n of [5, 400, 900, 1500, 1900, 40]) { const r = await measure(n); rs.push(r); console.log('  클립', n, JSON.stringify(r)); await win.waitForTimeout(400); }
     const worst = Math.max(...rs.filter(Boolean).map((r) => r.cur));
