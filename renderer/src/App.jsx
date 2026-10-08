@@ -2279,8 +2279,9 @@ export default function App() {
     } catch (e) { logline('자막 서식 오류: ' + e.message); }
   }
   // ↶ 되돌리기 / ↷ 다시 하기 — main 이 바꾸기 직전 상태를 기억한다(문장·서식·그림 범위·그룹 합치기/분할)
-  async function runUndo(redo) {
-    if (sentEdit) return;   // 고치는 중엔 편집칸 자체의 되돌리기
+  async function runUndo(redo, force) {
+    // 고치는 중엔 편집칸 자체의 되돌리기 — 단, ↶ 단추·글자를 안 고친 편집칸의 Ctrl+Z 는 편집을 접고 대본 되돌리기(서식 바꾼 직후 ↶ 가 조용히 먹통이던 원인)
+    if (sentEdit) { if (!force) return; cancelSentEdit(); }
     try {
       const r = await api.undo({ redo: !!redo });
       if (r && r.ok) {
@@ -2298,10 +2299,12 @@ export default function App() {
       if (k !== 'z' && k !== 'y') return;
       const t = ev.target;
       // 글자칸·대본 보기 편집면 안에서는 그 칸의 되돌리기(타이핑 취소)를 쓴다
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      let untouched = false;   // 글자를 한 자도 안 고친 편집칸 = 칸 되돌리기가 할 일이 없다 → 대본 되돌리기
+      if (t && (t.tagName === 'TEXTAREA' || t.isContentEditable) && sentEdit) { try { untouched = t.tagName === 'TEXTAREA' ? t.value === t.defaultValue : false; } catch (_) {} }
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) && !untouched) return;
       if (isBk || isRx) return;
       ev.preventDefault();
-      runUndo(k === 'y' || (k === 'z' && ev.shiftKey));
+      runUndo(k === 'y' || (k === 'z' && ev.shiftKey), untouched);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -4803,8 +4806,8 @@ export default function App() {
             <textarea className="stage-ta" rows={1} spellCheck={false} autoFocus data-testid="stage-ta"
               defaultValue={String(sentEdit.text || '').slice(sentEdit.line.from, sentEdit.line.to)}
               style={{ ...css, left, top: stageEditBox.top - 6, width: w, fontSize: (Number(f.size) || 100) * 0.72 * k, textAlign: capSelPos().align === 'end' ? 'right' : capSelPos().align === 'center' ? 'center' : 'left' }}
-              ref={(el) => { sentEditRef.current = el; fitSentBox(el); }}
-              onInput={(ev) => fitSentBox(ev.currentTarget)}
+              ref={(el) => { sentEditRef.current = el; fitStageTa(el, left, stageEditBox.stageW); }}
+              onInput={(ev) => fitStageTa(ev.currentTarget, left, stageEditBox.stageW)}
               onKeyDown={(ev) => lineEditKey(ev, null)} />
           </div>
         );
@@ -5272,8 +5275,8 @@ export default function App() {
             {workTimes}
             <span className="grow" />
             <span className="seg" title="되돌리기 Ctrl+Z · 다시 하기 Ctrl+Y — 문장 고치기·클립 합치기·자막 서식·그림 적용 범위·그룹 합치기/분할">
-              <button data-testid="undo-btn" disabled={!loaded} onClick={() => runUndo(false)}>↶</button>
-              <button data-testid="redo-btn" disabled={!loaded} onClick={() => runUndo(true)}>↷</button>
+              <button data-testid="undo-btn" disabled={!loaded} onClick={() => runUndo(false, true)}>↶</button>
+              <button data-testid="redo-btn" disabled={!loaded} onClick={() => runUndo(true, true)}>↷</button>
             </span>
             {view === 'clips' && (
               <span className="seg" title="개요 = 줄만 촘촘히 · 상세 = 클립마다 화자·시각 + 어절 칩(누르면 그 단어만 서식)">
@@ -6550,6 +6553,16 @@ function applyCaretSide(el) {
   el.addEventListener('mousedown', mark, { once: true });
   put();
   requestAnimationFrame(() => { el.removeEventListener('keydown', mark); el.removeEventListener('mousedown', mark); if (!touched) put(); });
+}
+/** ① 칸 자막 고치기 상자 — 한 줄 자막은 **한 줄로** 보이게 글자 폭에 맞춘다(서식을 바꿔 글자가 커져도 「나가 / 면,」처럼 낱말 중간에서 꺾이지 않게). 화면 밖으로 넘칠 때만 줄바꿈. */
+function fitStageTa(el, left, stageW) {
+  if (!el) return;
+  const maxW = Math.max(120, stageW - left - 4);
+  el.style.whiteSpace = 'pre'; el.style.width = '0px';
+  const need = el.scrollWidth + 8;
+  if (need <= maxW) el.style.width = Math.max(120, need) + 'px';
+  else { el.style.whiteSpace = 'pre-wrap'; el.style.width = maxW + 'px'; }
+  el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px';
 }
 function fitSentBox(el) {
   if (!el) return;
