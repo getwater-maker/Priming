@@ -889,87 +889,7 @@ ipcMain.handle('test-comfy-video', async (_e, args = {}) => {
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
 
-// ── 나노바나나 2.1 배치(Batch API · 모델은 gemini-image-config) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
-function _aspectFor(pr) { return pr.aspect === '9:16' ? '9:16' : (pr.aspect === '1:1' ? '1:1' : '16:9'); }
-ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
-  if (!S.parsed || !S.parsed.projects) return { ok: false, error: '대본을 먼저 여세요.' };
-  const GI = require('./core/gemini-image');
-  if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키 없음 — ⚙ 채널편집에서 Gemini 키를 넣으세요.' };
-  const styleId = effStyleId(args.styleId || null);   // 🎨 대본 화풍 우선
-  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const BSt = require('./core/gemini-batch-store');
-  const inFlight = new Set(); BSt.pendingAllForScript(S.scriptPath).forEach((j) => (j.items || []).forEach((it) => inFlight.add(it.key)));   // 이미 다른 배치(Lite·2.1)에 실린 그룹은 또 싣지 않는다(이중 과금 방지)
-  const requests = []; const items = []; let skippedInFlight = 0;
-  for (const pr of S.parsed.projects) {
-    for (const g of pr.groups) {
-      if (g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g)) {
-        const key = `s${pr.shortsNum}g${g.num}`;
-        if (inFlight.has(key)) { skippedInFlight++; continue; }
-        requests.push({ key, prompt: (stylePrompt ? stylePrompt + ', ' : '') + g.imagePrompt, aspect: _aspectFor(pr) });
-        items.push({ key, shortsNum: pr.shortsNum, groupNum: g.num });
-      }
-    }
-  }
-  if (!requests.length) return { ok: false, error: skippedInFlight ? `배치로 만들 이미지가 없습니다 (${skippedInFlight}장은 이미 제출한 배치에 있음 — 📥 회수).` : '배치로 만들 이미지가 없습니다 (이미 다 있음).' };
-  const bModel = args.model || GI.loadConfig().model;
-  log(`🌙 배치 제출 중… ${requests.length}장 (${bModel})${skippedInFlight ? ` · 이미 제출된 ${skippedInFlight}장 제외` : ''}`);
-  try {   // 👤 배치는 인물 참조를 싣지 않는다(요청마다 시트 그림을 넣으면 인라인 한도 20MB 를 넘는다)
-    if (GI.loadConfig().charRefs !== false && S.scriptPath && require('./core/char-refs').parseCards(fs.readFileSync(S.scriptPath, 'utf8')).length) {
-      log('  👤 배치는 인물 참조를 쓰지 않습니다 — 인물 일관성이 필요하면 즉시 생성(⚡ 만들기)으로 그리세요.');
-    }
-  } catch {}
-  const r = await GI.submitBatch({ requests, model: bModel, displayName: (S.parsed.fileTitle || 'priming') });
-  if (!r.ok) { log('배치 제출 실패: ' + r.error); return r; }
-  require('./core/gemini-batch-store').add({
-    batchName: r.batchName, model: r.model, scriptPath: S.scriptPath, outRoot: S.outRoot,
-    title: S.parsed.fileTitle || '', items, styleId, count: r.count, state: 'JOB_STATE_PENDING',
-    submittedAt: Date.now(), collected: false,
-  });
-  log(`🌙 배치 제출 완료 — ${r.count}장 (${r.batchName}). 몇 시간 뒤 「📥 배치 회수」로 가져오세요. (앱 껐다 켜도 유지)`);
-  return { ok: true, batchName: r.batchName, count: r.count };
-});
-ipcMain.handle('gemini-batch-status', () => {
-  try {
-    const BS = require('./core/gemini-batch-store');
-    const job = S.scriptPath ? BS.pendingForScript(S.scriptPath) : null;
-    return { hasJob: !!job, job: job ? { count: job.count, state: job.state, submittedAt: job.submittedAt } : null };
-  } catch { return { hasJob: false }; }
-});
-ipcMain.handle('gemini-batch-retrieve', async () => {
-  if (!S.parsed || !S.scriptPath) return { ok: false, error: '대본을 먼저 여세요.' };
-  const BS = require('./core/gemini-batch-store'); const GI = require('./core/gemini-image');
-  const jobs = BS.pendingAllForScript(S.scriptPath);
-  if (!jobs.length) return { ok: false, error: '이 대본으로 제출한 배치가 없습니다.' };
-  let total = 0, allDone = true, lastState = '';
-  for (const job of jobs) {   // Lite·2.1 등 여러 배치를 한 번에 회수
-  log(`📥 배치 상태 확인… (${job.title || job.batchName})`);
-  const c = await GI.checkBatch({ batchName: job.batchName });
-  if (!c.ok) { log('배치 상태 확인 실패: ' + c.error); allDone = false; lastState = c.error; continue; }
-  BS.update(job.batchName, { state: c.state });
-  if (!c.done) { log(`⏳ 배치 진행 중: ${c.state} — 잠시 뒤 다시 회수해 주세요.`); allDone = false; lastState = c.state; continue; }
-  if (!/SUCCEEDED/i.test(c.state)) { log(`⚠ 배치 종료 상태: ${c.state} (실패/취소/만료)`); BS.update(job.batchName, { collected: true }); lastState = c.state; continue; }
-  const byKey = {}; job.items.forEach((it) => { byKey[it.key] = it; });
-  let saved = 0;
-  for (const r of c.results) {
-    const it = byKey[r.key]; if (!it) continue;
-    if (!r.ok) { log(`  ✗ ${r.key}: ${r.error}`); continue; }
-    try {
-      const dir = shortsDirs(job.outRoot, it.shortsNum).media;
-      fs.mkdirSync(dir, { recursive: true });
-      const pr = S.parsed.projects.find((p) => p.shortsNum === it.shortsNum);
-      const g = pr && pr.groups.find((x) => x.num === it.groupNum);
-      const out = P.claimPath(path.join(dir, `${String(it.groupNum).padStart(2, '0')}.${r.ext}`), g && g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
-      fs.writeFileSync(out, r.buffer); saved++;
-      if (g) { g.imagePath = out; g.imageStatus = 'done'; }
-    } catch (e) { log(`  저장 실패 ${r.key}: ${e.message}`); }
-  }
-  BS.update(job.batchName, { state: c.state, collected: true, collectedAt: Date.now(), saved });
-  log(`📥 배치 회수 완료 — ${saved}/${job.count}장 저장·매핑 (${job.model || ''})`);
-  total += saved; lastState = c.state;
-  }
-  storeActive(); pushDtoUpdate();
-  return { ok: true, done: allDone, state: lastState, saved: total, dto: P.toDTO(S.parsed) };
-});
+// 🌙 나노바나나 2.1 배치는 이미지 도구 항목(imgEngine 'gemini-batch')이다 — 제출·대기·회수는 runGeminiBatchImages 한 곳(옛 배치 단추·IPC 는 2026-10-08 에 없앴다).
 
 // LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립
 ipcMain.handle('get-lora-collect', () => { const L = require('./core/lora-collect'); return { ...L.load(), count: L.count() }; });
@@ -3598,6 +3518,99 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, fo
   }
 }
 
+// 🌙 나노바나나 2.1 배치 — 이미지 도구 항목 「나노바나나 2.1 배치」(imgEngine==='gemini-batch' · 로이 2026-10-08).
+//   한 이미지 단계 안에서 ① 이 대본의 미회수 배치가 있으면 먼저 회수(앱을 닫았다 켠 경우) ② 남은 그룹을 배치로 제출
+//   ③ 끝날 때까지 기다림(15초 간격 · 최대 30분 · TTS 와는 병렬) ④ 회수해 media-N 에 저장하고 그룹에 연결.
+//   🔑 앱을 닫아도 job 은 ~/.shots-maker/gemini-batches.json 에 남는다 → 다음 「이미지 / ⚡ 만들기」 첫머리가 이어서 회수한다.
+//   ⛔ 배치는 인물 참조(👤)를 싣지 못한다(요청마다 시트를 넣으면 인라인 20MB 초과) — 인물 일관성은 「즉시」 항목.
+//   ⛔ 이미 다른 배치에 실린 그룹은 또 싣지 않는다(이중 과금 방지).
+const GEMINI_BATCH_POLL_MS = 15000;
+const GEMINI_BATCH_MAX_WAIT_MS = 30 * 60 * 1000;
+const _sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+// 회수한 결과 이미지를 그룹에 저장·연결한다. 저장한 장수를 돌려준다.
+function _geminiBatchApply(job, results, logger) {
+  const byKey = {}; (job.items || []).forEach((it) => { byKey[it.key] = it; });
+  let saved = 0;
+  for (const r of results) {
+    const it = byKey[r.key]; if (!it) continue;
+    if (!r.ok) { logger(`  ✗ ${r.key}: ${r.error}`); continue; }
+    try {
+      const dir = shortsDirs(job.outRoot, it.shortsNum).media;
+      fs.mkdirSync(dir, { recursive: true });
+      const pr = S.parsed && S.parsed.projects.find((p) => p.shortsNum === it.shortsNum);
+      const g = pr && pr.groups.find((x) => x.num === it.groupNum);
+      const out = P.claimPath(path.join(dir, `${String(it.groupNum).padStart(2, '0')}.${r.ext}`), g && g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
+      fs.writeFileSync(out, r.buffer); saved++;
+      if (g) { g.imagePath = out; g.imageStatus = 'done'; }
+    } catch (e) { logger(`  저장 실패 ${r.key}: ${e.message}`); }
+  }
+  return saved;
+}
+// 이 대본의 미회수 배치를 끝날 때까지 기다렸다가 회수한다. 끝까지 못 기다리면(시간 초과·중단) job 은 남겨 둔다.
+async function _geminiBatchCollect(scriptPath, logger) {
+  const BS = require('./core/gemini-batch-store'); const GI = require('./core/gemini-image');
+  if (!scriptPath) return;
+  for (const job of BS.pendingAllForScript(scriptPath)) {
+    const t0 = Date.now(); let fails = 0, lastNote = 0;
+    for (;;) {
+      if (S.abort) { logger('⏹ 중단됨 — 배치는 구글에서 계속 처리됩니다(다음에 「이미지 / ⚡ 만들기」를 누르면 이어서 회수)'); return; }
+      const c = await GI.checkBatch({ batchName: job.batchName });
+      if (!c.ok) {
+        if (++fails >= 4) { logger('⚠ 배치 상태 확인 실패(' + c.error + ') — 다음에 다시 시도합니다'); break; }
+      } else {
+        fails = 0; BS.update(job.batchName, { state: c.state });
+        if (c.done) {
+          if (!/SUCCEEDED/i.test(c.state)) { logger(`⚠ 배치 종료 상태: ${c.state} (실패/취소/만료) — 이 그룹들은 다시 만들 수 있습니다`); BS.update(job.batchName, { collected: true }); break; }
+          const saved = _geminiBatchApply(job, c.results, logger);
+          BS.update(job.batchName, { state: c.state, collected: true, collectedAt: Date.now(), saved });
+          logger(`📥 배치 회수 완료 — ${saved}/${job.count}장 저장·연결 (${job.model || ''})`);
+          break;
+        }
+      }
+      const waited = Date.now() - t0;
+      if (waited >= GEMINI_BATCH_MAX_WAIT_MS) { logger(`⏳ 배치가 ${Math.round(waited / 60000)}분이 지나도 안 끝났습니다 — 기다림을 멈춥니다. 나중에 「이미지 / ⚡ 만들기」를 다시 누르면 이어서 회수합니다(앱을 닫아도 유지)`); return; }
+      if (waited - lastNote >= 60000) { lastNote = waited; logger(`  ⏳ 배치 처리 중 (${Math.round(waited / 60000)}분 경과 · ${(c && c.state) || ''})`); }
+      await _sleepMs(GEMINI_BATCH_POLL_MS);
+    }
+  }
+}
+async function runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNums, force = false) {
+  require('./core/visual-span').markCovered(project, hasVisual);
+  const GI = require('./core/gemini-image'); const BS = require('./core/gemini-batch-store');
+  if (!GI.hasKey()) { logger('⚠ Gemini API 키 없음 — ⚙ 설정의 API 키를 넣으세요.'); return; }
+  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!need().length) { logger(noTargetMsg(onlyNums)); return; }
+  const sp = S.scriptPath;
+  await _geminiBatchCollect(sp, logger);   // ① 앱을 닫았다 켠 경우: 이전에 제출한 배치 먼저 회수
+  if (S.abort) return;
+  const inFlight = new Set();   // 시간 초과로 남은 배치에 실린 그룹은 또 싣지 않는다
+  if (sp) BS.pendingAllForScript(sp).forEach((j) => (j.items || []).forEach((it) => inFlight.add(it.key)));
+  const keyOf = (g) => `s${project.shortsNum}g${g.num}`;
+  const targets = need().filter((g) => !inFlight.has(keyOf(g)));
+  if (!targets.length) { pushDtoUpdate(); logger(inFlight.size ? '⏳ 남은 그림은 이미 제출한 배치에 들어 있습니다 — 나중에 다시 누르면 회수합니다' : noTargetMsg(onlyNums)); return; }
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const model = GI.loadConfig().model;
+  try {   // 👤 배치는 인물 참조를 싣지 않는다 — 카드가 있으면 알려 둔다
+    if (GI.loadConfig().charRefs !== false && sp && require('./core/char-refs').parseCards(fs.readFileSync(sp, 'utf8')).length) {
+      logger('  👤 배치는 인물 참조를 쓰지 않습니다 — 인물 일관성이 필요하면 「나노바나나 2.1 즉시」로 그리세요.');
+    }
+  } catch {}
+  logger(`🌙 나노바나나 배치 (${model}) — ${targets.length}장 제출 (즉시 생성가의 50%)`);
+  const r = await GI.submitBatch({
+    requests: targets.map((g) => ({ key: keyOf(g), prompt: P.buildImagePrompt(stylePrompt, g.imagePrompt), aspect: project.aspect || '16:9' })),
+    model, displayName: (S.parsed && S.parsed.fileTitle) || 'priming',
+  });
+  if (!r.ok) { logger('✗ 배치 제출 실패: ' + r.error); return; }
+  BS.add({
+    batchName: r.batchName, model: r.model, scriptPath: sp, outRoot: path.dirname(imagesDir),
+    title: (S.parsed && S.parsed.fileTitle) || '', items: targets.map((g) => ({ key: keyOf(g), shortsNum: project.shortsNum, groupNum: g.num })),
+    styleId, count: r.count, state: 'JOB_STATE_PENDING', submittedAt: Date.now(), collected: false,
+  });
+  logger(`🌙 배치 제출 완료 — ${r.count}장 (${r.batchName}) · 끝날 때까지 이 단계에서 기다립니다(보통 3~5분 · 앱을 닫아도 유지)`);
+  await _geminiBatchCollect(sp, logger);   // ②③ 기다렸다가 회수
+  pushDtoUpdate();
+}
+
 // 👤 인물 일관성(나노바나나 전용 · core/char-refs) — 대본 인물 카드가 있으면 인물 시트를 <출력>/characters/ 에 만들고
 //   장면마다 보이는 인물의 시트를 참조로 붙인다. 설정 charRefs=false 면 끈다. 시트는 인물마다 한 번만(있으면 재사용 ·
 //   사람이 같은 이름 그림으로 바꿔 넣으면 그 그림). 시트 실패한 인물은 이번 작업에서 다시 만들지 않고 참조 없이 간다.
@@ -4260,6 +4273,11 @@ function imgEngineReady(engineId) {
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
   { const nC = require('./core/visual-span').markCovered(project, hasVisual); if (nC && !onlyNums) (logger || log)(`🖼 앞 그룹 그림이 아래층으로 이어지는 그룹 ${nC}개는 따로 그림을 만들지 않습니다`); }
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
+  // 🌙 배치 항목 — 그룹 하나만 다시 만들 때(onlyNums)는 몇 분을 기다리게 하지 않고 즉시 생성으로 대신한다.
+  if (startEngine === 'gemini-batch') {
+    if (onlyNums && onlyNums.length) { logger('🌙 그룹을 골라 다시 만들 때는 배치 대신 즉시 생성합니다'); return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force); }
+    return runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNums, force);
+  }
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
   const Rot = require('./core/image-rotation');
