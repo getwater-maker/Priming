@@ -5211,6 +5211,7 @@ export default function App() {
             <button className={'lbl' + (clipMenu === 'ins' ? ' on' : '')} data-testid="ctb-ins" onClick={() => setClipMenu(clipMenu === 'ins' ? null : 'ins')}>⊞ 삽입 {clipMenu === 'ins' ? '▴' : '▾'}</button>
             <button className={'lbl' + (clipMenu === 'fx' ? ' on' : '')} data-testid="ctb-fx" onClick={() => setClipMenu(clipMenu === 'fx' ? null : 'fx')}>🎛 효과 {clipMenu === 'fx' ? '▴' : '▾'}</button>
             <span className="sep" />
+            <button className={'lbl' + (capPanel === 'fmt' ? ' on' : '')} data-testid="ctb-capfmt" title="고른 클립 자막의 고급 설정 — 글꼴·색·테두리·형광펜·그림자 등을 ③ 칸에서 자세히" onClick={() => { setClipMenu(null); setCapPanel((cur) => (cur === 'fmt' ? null : 'fmt')); }}>⚙ 자막 고급</button>
             <button title="고른 클립부터 재생" data-testid="ctb-play" onClick={clipPlay}>⏩</button>
             <span className="sep" />
             <button className={'lbl' + (clipMenu === 'voice' ? ' on' : '')} data-testid="ctb-voice" onClick={() => setClipMenu(clipMenu === 'voice' ? null : 'voice')}>☰ 목소리 수정</button>

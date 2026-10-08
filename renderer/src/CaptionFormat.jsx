@@ -296,7 +296,7 @@ export function CaptionFormatPanel({ value, onChange, title, onClose, onReset, p
             </div>
             <div className="cf-sec">
               <div className="cf-sech"><label className="cf-chk"><input type="checkbox" checked={!!f.hlOn} onChange={(e) => set({ hlOn: e.target.checked })} />형광펜 <span className="meta">(글자 뒤 칠)</span></label></div>
-              <div className="cf-row"><span className="l">색</span><Color value={f.hlColor} disabled={!f.hlOn} onChange={(v) => set({ hlColor: v })} /><span className="l">불투명</span><Num value={f.hlOpacity} min={0} max={100} step={10} onChange={(v) => set({ hlOpacity: v })} /><span className="meta">%</span></div>
+              <div className="cf-row"><span className="l">색</span><Color value={f.hlColor} onChange={(v) => set({ hlColor: v, hlOn: true })} /><span className="l">불투명</span><Num value={f.hlOpacity} min={0} max={100} step={10} onChange={(v) => set({ hlOpacity: v })} /><span className="meta">%</span></div>
             </div>
             <div className="cf-sec">
               <div className="cf-sech"><label className="cf-chk"><input type="checkbox" checked={!!f.shadowOn} onChange={(e) => set({ shadowOn: e.target.checked })} />그림자</label></div>
@@ -532,8 +532,10 @@ export function CaptionMiniBar({ fmt, pos, onPatch, onPanel, panel, scope, onSco
       <div className="cf-mini-r">
         <label className="cf-cbtn" title="글자색"><span style={{ color: f.fontColor, WebkitTextStroke: '0.5px #555' }}>A</span><Color value={f.fontColor} onChange={(v) => onPatch({ fontColor: v })} /></label>
         <Toggle on={f.outlineOn !== false} onChange={(v) => onPatch({ outlineOn: v })} title="테두리">테두리</Toggle>
+        <Color value={f.outlineColor} onChange={(v) => onPatch({ outlineColor: v, outlineOn: true })} />
         <Toggle on={!!f.boxOn} onChange={(v) => onPatch({ boxOn: v })} title="배경 상자">배경</Toggle>
         <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜">형광펜</Toggle>
+        <Color value={f.hlColor} onChange={(v) => onPatch({ hlColor: v, hlOn: true })} />
         <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
         <span className="cf-div" />
         {!noPos && <><span className="cf-minil" title="자막 자리 — 화면 기준(① 칸에서 자막을 끌어 옮겨도 됩니다)">화면</span>
