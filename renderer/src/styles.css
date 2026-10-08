@@ -1167,3 +1167,7 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .settings-card .st-sec{border-top:1px solid var(--line);margin-top:14px;padding-top:2px}
 
 .settings-card .st-body .frow>label[style*="min-width"]{width:auto}
+
+/* 🔎 검색 강조 — ② 클립 목록 글자만(① 미리보기에는 안 칠한다) */
+::highlight(pm-find){background-color:#ffe94d;color:#000}
+::highlight(pm-find-cur){background-color:#ff9f1a;color:#000}

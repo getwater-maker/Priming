@@ -511,7 +511,6 @@ export default function App() {
   }, []);
   const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
   const [grokCool, setGrokCool] = useState(null); // Grok(영상) 한도 쿨다운 {until, label}
-  const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
   const [cvidOpen, setCvidOpen] = useState(false);
@@ -4255,13 +4254,14 @@ export default function App() {
   // 🔎 검색어가 든 **클립**으로 이동 — 새 검색어면 지금 클립 이후 첫 일치, 같은 검색어의 ▲▼/Enter 면 이전·다음 일치(끝에서 돌아온다).
   //   화면 글자 강조·개수는 find-in-page 가 그대로 맡고, 클립 커서·스크롤만 여기서 옮긴다(findHitRef = 개수 표시의 근거).
   const findHitRef = useRef({ total: 0, idx: -1 });
+  const findElectronRef = useRef(false);
   function gotoFindClip(text, fresh, forward) {
     const hr = findHitRef.current; hr.total = 0;
     const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
     const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length || !text) return;
     const q = text.toLowerCase();
     const hits = PL.list.filter((x) => { const s = capSentence(sn, x.groupNum, x.sentIdx); return s && String(s.text || '').slice(x.from, x.to).toLowerCase().includes(q); });
-    hr.total = hits.length; if (!hits.length) { hr.idx = -1; return; }
+    hr.total = hits.length; if (!hits.length) { hr.idx = -1; paintFind(''); return; }
     let i;
     if (fresh || hr.idx < 0) { const cn = cursor && cursor.n != null ? cursor.n : 0; i = hits.findIndex((x) => x.n >= cn); if (i < 0) i = 0; }
     else i = (hr.idx + (forward ? 1 : -1) + hits.length) % hits.length;
@@ -4270,19 +4270,60 @@ export default function App() {
     userCursor({ shortsNum: sn, n: l.n });
     setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n });
     setFindRes({ active: i + 1, total: hits.length });
-    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
+    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); paintFind(text, l.n); }, 0);
+  }
+  // 🔎 작업 화면(② 클립 목록)에서는 find-in-page 를 쓰지 않고 **목록의 글자만** 칠한다(CSS Custom Highlight) — ① 미리보기 화면 자막에는 표시가 안 생기고,
+  //   검색창 글자를 지울 때 find-in-page 가 포커스를 가져가던 일도 없다. 현재 클립의 일치는 주황, 나머지는 노랑.
+  function paintFind(text, curN) {
+    try {
+      if (!window.CSS || !CSS.highlights || typeof Highlight === 'undefined') return;
+      CSS.highlights.delete('pm-find'); CSS.highlights.delete('pm-find-cur');
+      const q = String(text || '').toLowerCase(); if (!q) return;
+      const all = [], cur = [];
+      document.querySelectorAll('main.pane2 .sent').forEach((el) => {
+        const isCur = String(curN) === el.getAttribute('data-ln');
+        el.querySelectorAll('.clip-cap, .clip-chips').forEach((root) => {
+          const nodes = []; let full = '';
+          const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let nd = w.nextNode(); nd; nd = w.nextNode()) { nodes.push({ nd, at: full.length }); full += nd.nodeValue; }
+          const low = full.toLowerCase();
+          const locate = (pos) => { for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i].at <= pos) return { nd: nodes[i].nd, off: pos - nodes[i].at }; return null; };
+          for (let i = low.indexOf(q); i >= 0; i = low.indexOf(q, i + q.length)) {
+            const a = locate(i), b = locate(i + q.length - 1); if (!a || !b) continue;
+            const r = document.createRange(); r.setStart(a.nd, a.off); r.setEnd(b.nd, b.off + 1);
+            (isCur ? cur : all).push(r);
+          }
+        });
+      });
+      if (all.length) CSS.highlights.set('pm-find', new Highlight(...all));
+      if (cur.length) CSS.highlights.set('pm-find-cur', new Highlight(...cur));
+    } catch (_) {}
   }
   function runFind(text, move, forward) {
     findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
-    if (!text) { api.findStop(); findSessionRef.current = ''; setFindRes({ active: 0, total: 0 }); return; }
+    if (!text) {
+      paintFind(''); findHitRef.current = { total: 0, idx: -1 };
+      const el = document.getElementById('find-input'); const had = !!el && document.activeElement === el;
+      if (findElectronRef.current || !wsOn) { findElectronRef.current = false; api.findStop(); }
+      findSessionRef.current = ''; setFindRes({ active: 0, total: 0 });
+      // 🔑 전부 지웠을 때 포커스를 잃어 마우스로 다시 눌러야 하던 문제 — 검색 정지가 입력칸 포커스를 가져간다
+      if (had) { el.focus({ preventScroll: true }); setTimeout(() => { if (document.activeElement !== el) el.focus({ preventScroll: true }); }, 40); }
+      return;
+    }
     const fire = () => {
       if (findComposingRef.current) { findTimerRef.current = setTimeout(fire, 120); return; }   // 한글 조합 중에는 검색·포커스 이동을 미룬다(조합이 끊긴다)
       { const el = document.getElementById('find-input'); findTypingRef.current = !!el && document.activeElement === el; }   // 타이핑 중이면 결과 뒤 포커스를 돌려준다
       const fresh = findSessionRef.current !== text;   // 세션이 잡고 있는 문자열과 다르면 새로 시작해야 한다
       findSessionRef.current = text;
-      api.findInPage({ text, findNext: fresh, forward: forward !== false });
-      gotoFindClip(text, fresh, forward !== false);
+      // 작업 화면 = 클립 목록 안에서 찾고 목록 글자만 칠한다. 클립에 없는 말(헤더 단추 등)만 예전처럼 find-in-page
+      if (wsOn) gotoFindClip(text, fresh, forward !== false);
+      const clipHits = wsOn ? findHitRef.current.total : 0;
+      if (!clipHits) { findElectronRef.current = true; api.findInPage({ text, findNext: fresh, forward: forward !== false }); }
+      else if (findElectronRef.current) {
+        findElectronRef.current = false; api.findStop();
+        const el = document.getElementById('find-input'); if (el && findTypingRef.current) setTimeout(() => el.focus({ preventScroll: true }), 40);
+      }
     };
     if (move) fire(); else findTimerRef.current = setTimeout(fire, 280);
   }
@@ -4292,6 +4333,7 @@ export default function App() {
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
     findTextRef.current = ''; findSessionRef.current = '';
     const el = document.getElementById('find-input'); if (el) el.value = '';
+    paintFind(''); findHitRef.current = { total: 0, idx: -1 };
     api.findStop(); setFindRes({ active: 0, total: 0 });
   }
   // 보이스디자인 파형 그리기 — 봉우리/선택구간이 바뀔 때마다 다시 그린다.
@@ -4362,9 +4404,6 @@ export default function App() {
       setCvidCfg(c);
     }).catch(() => {});
   }, []);
-  // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
-  const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
-  useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
   // ── 통합 설정 팝업 — ComfyUI 이미지·비디오 · API키(제미나이/나노바나나·xAI) · TTS서버를 한 곳에서(탭). ──
   // ── 👤 계정 통합 관리 (⚙ 설정 → 계정 탭) — 2026-08-19 ───────────────────────
   // Genspark · Flow · Grok 계정이 서로 다른 모달 3개에 흩어져 있던 것을 한 화면으로 모았다.
@@ -4456,7 +4495,7 @@ export default function App() {
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
     if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
-    if (imgEngine === 'gemini') return 'keys';
+    if (imgEngine === 'gemini' || imgEngine === 'gemini-batch') return 'keys';
     return 'flow';
   }
   async function openSettings(tab) {
@@ -4548,25 +4587,6 @@ export default function App() {
   }
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
   async function onPickVideoEngine(val) { return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid'); }
-  async function submitBatch(model) {
-    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
-    setStatus('🌙 배치 제출 중…');
-    try {
-      const r = await api.geminiBatchSubmit({ styleId: sid, model: model || undefined });
-      if (r && r.ok) { setStatus(`🌙 배치 제출 완료 — ${r.count}장 (몇 시간 뒤 📥 회수)`); refreshBatch(); }
-      else setStatus('배치 제출 실패: ' + ((r && r.error) || ''));
-    } catch (e) { logline('배치 제출 오류: ' + e.message); }
-  }
-  async function retrieveBatch() {
-    setStatus('📥 배치 회수 확인 중…');
-    try {
-      const r = await api.geminiBatchRetrieve();
-      if (!r || !r.ok) { setStatus('배치 회수: ' + ((r && r.error) || '실패')); return; }
-      if (!r.done) { setStatus(`⏳ 배치 진행 중 (${r.state}) — 잠시 뒤 다시 회수`); return; }
-      if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
-      setStatus(`📥 배치 회수 완료 — ${r.saved || 0}장 저장`); refreshBatch();
-    } catch (e) { logline('배치 회수 오류: ' + e.message); }
-  }
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
@@ -4922,9 +4942,9 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter 다음 · Shift+Enter 이전"
+            <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
               onChange={(e) => runFind(e.target.value, false)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'ArrowUp') { e.preventDefault(); runFind(findTextRef.current, true, false); } else if (e.key === 'ArrowDown') { e.preventDefault(); runFind(findTextRef.current, true, true); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
             <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
             <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
             <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
@@ -5023,18 +5043,15 @@ export default function App() {
               onChange={(e) => onPickImgEngine(e.target.value)}>
               <option value="flow">Flow (구독)</option>
               <option value="genspark">Genspark (구독)</option>
-              <option value="gemini">유료(나노바나나 2.1)</option>
+              <option value="gemini">유료(나노바나나 2.1 즉시)</option>
+              <option value="gemini-batch">유료(나노바나나 2.1 배치)</option>
               <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            {imgEngine === 'gemini' && (<>
-              <button className="ghost" disabled={!loaded} title="배치 제출(모델 칸의 모델 · 기본 나노바나나 2.1) — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={() => submitBatch()}><span className="rb-ic">🌙</span> <span className="rb-t">배치제출</span></button>
-              <button className="ghost" disabled={!loaded} title="나노바나나 2.1 배치 제출 — 모델 gemini-nano-banana-2.1 로 이미지 생성을 예약합니다(Batch API · 표준가의 50% 할인 대상). 위 「배치제출」(모델 칸의 모델)과 별개이며, 이미 다른 배치에 실린 그림은 또 싣지 않습니다. 결과는 「📥 배치회수」로 가져옵니다." onClick={() => submitBatch('gemini-nano-banana-2.1')}><span className="rb-ic">🌙</span> <span className="rb-t">2.1 배치</span></button>
-              <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
-            </>)}
+
           </span>
             </>)}
             {menu === 'video' && (<>
@@ -5627,7 +5644,8 @@ export default function App() {
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
                         <option value="flow">Flow (구독)</option>
                         <option value="genspark">Genspark (구독)</option>
-                        <option value="gemini">유료(나노바나나 2.1)</option>
+                        <option value="gemini">유료(나노바나나 2.1 즉시)</option>
+              <option value="gemini-batch">유료(나노바나나 2.1 배치)</option>
                         <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)} />
                       </select></div>
                   </div>
