@@ -5307,6 +5307,8 @@ export default function App() {
           {wsOn && clipTb && !clipTb.hidden && clipSelOk() && (() => {
         const n = capSel.items.length;
         const cg = clipGroup();
+        // 막대가 창 아래쪽에 있으면 하위 메뉴가 화면 밖으로 잘린다 → 자리가 모자라면 막대 **위로** 펼친다
+        const tbFlip = clipTb.top + 300 > window.innerHeight ? { top: 'auto', bottom: 44 } : {};
         const soon = (icon, t) => <button className="soon" onClick={() => clipSoon(t)}>{icon} {t} <i>준비 중</i></button>;
         return (<>
           {clipMenu && <div className="vr-menu-bg" onMouseDown={() => setClipMenu(null)} />}
@@ -5324,7 +5326,7 @@ export default function App() {
             <button title="고른 클립부터 재생" data-testid="ctb-play" onClick={clipPlay}>⏩</button>
             <span className="sep" />
             <button className={'lbl' + (clipMenu === 'voice' ? ' on' : '')} data-testid="ctb-voice" onClick={() => setClipMenu(clipMenu === 'voice' ? null : 'voice')}>☰ 목소리 수정</button>
-            {clipMenu === 'ins' && <div className="vr-menu clip-tb-menu" data-testid="ctb-ins-menu" style={{ left: n >= 2 ? 250 : 150 }}>
+            {clipMenu === 'ins' && <div className="vr-menu clip-tb-menu" data-testid="ctb-ins-menu" style={{ left: n >= 2 ? 250 : 150, ...tbFlip }}>
               <button data-testid="ctb-ins-pc" title="그림·영상·오디오 파일을 고른 클립 구간에 위층으로 넣습니다(➕ 삽입과 같은 기능)" onClick={clipInsertFile}>🖥 PC에서 불러오기</button>
               {soon('📱', '모바일에서 불러오기')}
               {soon('🗂', '내 이미지 · 비디오')}
@@ -5334,7 +5336,7 @@ export default function App() {
               {soon('T', '기본 텍스트')}
               {soon('𝕋', '디자인 텍스트')}
             </div>}
-            {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230 }}>
+            {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230, ...tbFlip }}>
               {soon('✳', '필터')}
               {soon('⤢', '확대 및 회전')}
               <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
@@ -5344,7 +5346,7 @@ export default function App() {
               {soon('⏩', '배속 효과')}
               {soon('🎨', '클립 배경색')}
             </div>}
-            {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0 }}>
+            {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0, ...tbFlip }}>
               <button data-testid="ctb-voice-redo" title="고른 클립의 문장 음성을 채널 목소리·시드 그대로 다시 만듭니다(글을 고친 뒤)" onClick={() => clipTts(false)}>🎤 다시 만들기</button>
               <button data-testid="ctb-voice-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 문장들만 톤이 달라집니다)" onClick={() => clipTts(true)}>🎲 다른 톤으로 새로 뽑기</button>
             </div>}

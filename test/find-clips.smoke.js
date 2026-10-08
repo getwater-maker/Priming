@@ -71,6 +71,17 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) === 'find-input', '포커스를 잃어도(프로그램이 가져감) 검색창이 되찾는다');
     await win.mouse.click(5, 400); await win.waitForTimeout(200);
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) !== 'find-input', '사람이 다른 곳을 누르면 검색창을 떠난다');
+    // 창이 낮아 도구 막대가 아래쪽에 있어도 하위 메뉴(삽입·효과·목소리 수정)가 화면 안에 펼쳐진다
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 460); }); await win.waitForTimeout(600);
+    for (const id of ['ctb-voice', 'ctb-ins', 'ctb-fx']) {
+      const btn = win.locator('[data-testid=' + id + ']');
+      if (!(await btn.count())) { ok(false, id + ' 단추가 없다'); continue; }
+      await btn.click(); await win.waitForTimeout(250);
+      const r = await win.evaluate((i) => { const m = document.querySelector('[data-testid=' + i + '-menu]'); if (!m) return null; const b = m.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), vh: innerHeight }; }, id);
+      ok(r && r.top >= 0 && r.bottom <= r.vh + 1, `${id} 메뉴가 화면 안 (${JSON.stringify(r)})`);
+      await btn.click(); await win.waitForTimeout(150);
+    }
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 820); }); await win.waitForTimeout(400);
     // 전부 지워도 포커스 유지 → 바로 다시 입력
     await inp.click(); await win.keyboard.press('End'); await win.waitForTimeout(300);
     for (let i = 0; i < 6; i++) { await win.keyboard.press('Backspace'); await win.waitForTimeout(80); }
