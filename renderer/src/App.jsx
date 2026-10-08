@@ -4694,6 +4694,7 @@ export default function App() {
             <input className="n" type="number" min="0" step="1" value={aiCfg.toClip != null ? aiCfg.toClip : 3} onChange={(e) => saveAiCfg({ toClip: Math.max(0, Math.floor(num(e.target.value, 0))) })} /><span className="meta">번 클립까지 (0 = 끝까지)</span>
           </>)}</div>
         <div className="ai-pop-r"><span className="l">서식</span>
+          <span className="meta">크기</span><input className="n" data-testid="aip-size" type="number" min="20" max="400" step="5" title="AI 고지 글자 크기 — 바꾸면 곧바로 ① 칸에 반영(기본 75)" value={CF.aiNoticeFmt(aiCfg).size} onChange={(e) => { const v = Math.round(num(e.target.value, 75)); if (v >= 20 && v <= 400) patchAiFmt({ size: v }); }} />
           <button type="button" className="ghost" data-testid="aip-fmt" onClick={() => { setAiEdit({ w: 0.6 }); setAiPanel('fmt'); }}>🎨 글꼴·크기·색…{aiCfg.fmt ? ' ✎' : ''}</button>
           <button type="button" className="ghost" data-testid="aip-range" title="이 대본만 — 문장 번호 범위(채널 시간보다 우선)" onClick={() => { const r = aiPop.range; const at = { x: aiPop.x, y: aiPop.y }; setAiPop(null); if (r) setAiRangeReq({ ...r, ...at }); }}>📍 이 대본 문장 범위…</button></div>
         <div className="ai-pop-r pos"><span className="l">자리</span>
