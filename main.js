@@ -1110,9 +1110,12 @@ async function transcribeToTxt(file, opts = {}) {
   const outTxt = opts.outTxt || path.join(path.dirname(file), path.basename(file, path.extname(file)) + '.txt');
   let audioPath = file;
   let tmpAudio = null;
+  const stage = (o) => { if (opts.onStage) { try { opts.onStage(o); } catch {} } };   // 📊 진행 패널(stt-progress)이 단계를 안다
+  let beat = null;
   try {
     // 서버(soundfile)가 직접 읽는 포맷이 아니면 무엇이든 mp3 로 바꿔서 올린다.
     if (asr.needsAudioConvert(file)) {
+      stage({ stage: 'convert' });
       tmpAudio = path.join(os.tmpdir(), `pf-stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
       log(STT_VIDEO_EXT.has(ext)
         ? '  ↳ 동영상에서 오디오 추출 중…'
@@ -1122,17 +1125,29 @@ async function transcribeToTxt(file, opts = {}) {
     }
     // 🎮 전사는 이 PC 의 GPU(Whisper, TTS 와 같은 서버)를 쓴다 — 제작(음성 변환)이 도는 중이면 그 단계가 끝난 뒤 차례로(레인 localGpu).
     //   겹치면 TTS 문장이 서버 대기 때문에 시간초과로 빠질 수 있다. 받기(다운로드)는 그대로 계속되고 전사만 줄을 선다.
+    stage({ stage: 'queue' });
     const text = await _runOnLanes(['localGpu'], 'STT 전사', () => asr.transcribeLong(audioPath, {
       abortSignal: () => _dlAbort,
       onProgress: (p) => {
         if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`);
+        if (p) {
+          stage({ stage: 'transcribe', chunk: p.done, chunks: p.total, durationSec: p.durationSec || 0 });
+          // 💓 서버는 한 덩어리(최대 15분 분량)를 끝낼 때까지 응답이 없다 — 살아 있다는 표시로 30초마다 로그
+          if (beat) clearInterval(beat);
+          const t0 = Date.now();
+          beat = setInterval(() => log(`  … 전사 진행 중 — 이 구간 ${Math.round((Date.now() - t0) / 1000)}초째 (${p.done + 1}/${p.total} 청크 · 서버가 처리 중이라 중간 % 는 없습니다)`), 30000);
+          if (beat.unref) beat.unref();
+        }
         if (opts.onChunk && p) { try { opts.onChunk(p); } catch {} }
       },
     }));
+    if (beat) { clearInterval(beat); beat = null; }
+    stage({ stage: 'save' });
     fs.writeFileSync(outTxt, txtWithHead(text, opts.head), 'utf8');
     log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
     return { ok: true, txt: outTxt, chars: String(text || '').length };
   } finally {
+    if (beat) clearInterval(beat);
     if (tmpAudio) { try { fs.rmSync(tmpAudio, { force: true }); } catch {} }
   }
 }
@@ -1144,7 +1159,8 @@ async function warnAsrIfDown() {
     const st = await asr.checkAsrStatus();
     if (!st.reachable) log('⚠ OmniVoice(STT) 백엔드 연결 안 됨 — Whisper 서버가 켜져 있는지 확인하세요. 그래도 시도합니다.');
     else if (!st.loaded) log('ℹ Whisper 모델 미로드 — 첫 파일은 모델 로딩으로 5분+ 걸릴 수 있습니다.');
-  } catch {}
+    return { reachable: !!st.reachable, loaded: !!st.loaded };
+  } catch { return null; }
 }
 
 ipcMain.handle('stt-transcribe', async () => {
@@ -1159,22 +1175,45 @@ ipcMain.handle('stt-transcribe', async () => {
   if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
 
   _dlAbort = false;
-  await warnAsrIfDown();
+  const asrSt = await warnAsrIfDown();
+
+  // 📊 진행 패널('stt-progress' · v0.7.64 · 로이 「전사 진행과정을 눈으로」) — 파일 n/N · 단계(mp3 변환 → GPU 대기 → 전사 청크 → 저장) · 경과 시간.
+  //   서버는 한 덩어리(최대 15분 분량)가 끝나야 응답하므로 덩어리 안의 % 는 알 수 없다 — 청크 수·경과·평균으로 어림만 한다.
+  const prog = { phase: 'running', startedAt: Date.now(), total: r.filePaths.length, done: 0, fail: 0, modelLoaded: asrSt ? asrSt.loaded : null,
+    cur: null, fails: [], names: r.filePaths.map((f) => path.basename(f)) };
+  let _pt = 0, _ptm = null;
+  const sendProg = (now) => {
+    const fire = () => { _ptm = null; _pt = Date.now(); try { if (win && !win.isDestroyed()) win.webContents.send('stt-progress', JSON.parse(JSON.stringify(prog))); } catch {} };
+    if (now) { if (_ptm) { clearTimeout(_ptm); _ptm = null; } fire(); return; }
+    if (!_ptm) _ptm = setTimeout(fire, Math.max(0, 250 - (Date.now() - _pt)));
+  };
+  sendProg(true);
 
   const results = [];
-  for (const file of r.filePaths) {
+  for (let i = 0; i < r.filePaths.length; i++) {
+    const file = r.filePaths[i];
     if (_dlAbort) { log('⏹ STT 중단됨'); break; }
     log(`🎧 STT 시작: ${path.basename(file)}`);
+    prog.cur = { idx: i + 1, name: path.basename(file), stage: 'prepare', startedAt: Date.now(), stageAt: Date.now(), chunk: 0, chunks: 0, durationSec: 0, chunkAt: Date.now() };
+    sendProg(true);
     try {
-      const t = await transcribeToTxt(file);
-      results.push({ file, txt: t.txt, ok: true });
+      const t = await transcribeToTxt(file, { onStage: (o) => {
+        const c = prog.cur; if (!c) return;
+        if (o.stage !== c.stage) c.stageAt = Date.now();
+        if (o.stage === 'transcribe' && o.chunk !== c.chunk) c.chunkAt = Date.now();
+        Object.assign(c, o); sendProg(o.stage !== 'transcribe');
+      } });
+      results.push({ file, txt: t.txt, ok: true }); prog.done++;
     } catch (e) {
       log(`✗ STT 실패 (${path.basename(file)}): ${e.message}`);
-      results.push({ file, ok: false, error: e.message });
+      results.push({ file, ok: false, error: e.message }); prog.fail++;
+      prog.fails.push({ name: path.basename(file), error: String(e.message || '').slice(0, 160) });
     }
+    sendProg(true);
   }
   const okN = results.filter((x) => x.ok).length;
   log(`🎧 STT 완료: 성공 ${okN}/${results.length}`);
+  prog.cur = null; prog.phase = _dlAbort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
   return { ok: true, results };
 });
 

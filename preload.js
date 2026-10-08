@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('api', {
   exportRemotion: (args) => ipcRenderer.invoke('export-remotion', args),
   onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
   onUrldlProgress: (cb) => ipcRenderer.on('urldl-progress', (_e, d) => cb(d)),
+  onSttProgress: (cb) => ipcRenderer.on('stt-progress', (_e, d) => cb(d)),   // 📊 🎧 STT(파일 전사) 진행 패널
   onMp4Progress: (cb) => ipcRenderer.on('mp4-progress', (_e, d) => cb(d)),
   onMakeProgress: (cb) => ipcRenderer.on('make-progress', (_e, d) => cb(d)),   // 📊 롱폼 ⚡ 만들기 진행 팝업
   // ⬆ 유튜브 비공개 업로드 (core/youtube-upload.js)

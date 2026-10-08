@@ -1214,3 +1214,14 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 /* 고정된 카드 제목 줄 위로 스크롤하는 이전 클립이 보이던 틈 = 목록 칸 위쪽 여백(14px) — 여백을 스크롤되는 빈 칸으로 바꿔 제목 줄이 맨 위에 붙게 한다 */
 main.pane2{padding-top:0}
 main.pane2::before{content:'';display:block;height:14px}
+
+/* 📊 STT 진행 패널 */
+.stt-bar{position:relative;height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:3px}
+.stt-bar.big{height:10px;margin-top:6px}
+.stt-bar>i{position:absolute;left:0;top:0;bottom:0;background:var(--ok,#4aa36b);transition:width .3s}
+.stt-bar .stt-run{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(110deg,#e9c9a0 0 10px,#f6e7d0 10px 20px);background-size:28px 100%;animation:stt-slide 1s linear infinite;opacity:.9}
+@keyframes stt-slide{from{background-position:0 0}to{background-position:28px 0}}
+.stt-steps{display:flex;gap:4px;margin:5px 0 3px}
+.stt-steps span{flex:1;text-align:center;font-size:11px;padding:2px 0;border-radius:5px;background:var(--line);color:#999}
+.stt-steps span.done{background:#e5f1e6;color:#3d7a48}
+.stt-steps span.cur{background:var(--accent,#d4a574);color:#fff;font-weight:700}

@@ -10,6 +10,7 @@ import ClipJoin from '../../core/clip-join.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
+import SttProgress from './SttProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
@@ -553,6 +554,7 @@ export default function App() {
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlProg, setUrlProg] = useState(null);
+  const [sttProg, setSttProg] = useState(null);   // 📊 🎧 STT(파일 전사) 진행 패널(main 의 stt-progress)
   const [readerOpen, setReaderOpen] = useState(false);   // 📄 대본 읽기(점검·수정 · A4 PDF)
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
@@ -564,6 +566,7 @@ export default function App() {
   //     끝난 MP4·업로드 팝업의 타이머까지 지워져 큐가 도는 동안 영영 안 닫혔다(로이 2026-10-03). `test:progclose`.
   useAutoCloseProg(makeProg, setMakeProg);
   useAutoCloseProg(mp4Prog, setMp4Prog);
+  useAutoCloseProg(sttProg, setSttProg);
   useAutoCloseProg(ytProg, setYtProg);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
@@ -772,6 +775,7 @@ export default function App() {
   useEffect(() => {
     api.onLog((line) => logline(line, true));
     if (api.onUrldlProgress) api.onUrldlProgress((d) => { if (d) setUrlProg(d); });
+    if (api.onSttProgress) api.onSttProgress((d) => { if (d) setSttProg(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
     if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) setMakeProg(d); });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
@@ -6457,6 +6461,11 @@ export default function App() {
         <Mp4Progress prog={mp4Prog}
           onAbort={() => { abort(); }}
           onClose={() => setMp4Prog(null)} />
+      )}
+      {sttProg && (
+        <SttProgress prog={sttProg}
+          onAbort={() => { api.dlAbort(); setSttProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
+          onClose={() => setSttProg(null)} />
       )}
       {urlProg && (
         <UrlProgress prog={urlProg}
