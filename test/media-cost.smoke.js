@@ -86,6 +86,27 @@ for (let g = 5; g <= 6; g++) lines.push(`### 〔장면 ${g}〕`, `> 🖼️ 이�
     await win.locator('[data-testid="vid-sel"]').selectOption('intro_odd'); await win.waitForTimeout(300);
     const v2 = (await win.locator('[data-testid="vid-cost"]').innerText()).trim();
     ok(/1개/.test(v2), '도입부 홀수 = 영상 1개(1번): ' + v2);
+    // ④ 작업큐 합계 — 대본이 하나면 합계를 보이지 않고, 둘이 되면 「큐 2편」 합계가 나온다
+    ok((await win.locator('[data-testid="vid-cost-q"]').count()) === 0, '대본 1개 → 큐 합계는 안 보인다');
+    const MD2 = path.join(TMP, `${TAG}_둘째.md`); fs.writeFileSync(MD2, lines.join('\n').replace('# 비용표시', '# 비용표시 둘째'), 'utf8');
+    await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD2);
+    await win.click('button[data-menu="script"]'); await win.waitForTimeout(200);
+    await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
+    await win.waitForTimeout(1500);
+    await win.click('button[data-menu="image"]'); await win.waitForTimeout(1200);
+    const imgSel2 = win.locator('select:has(option[value="gemini-batch"])').first();
+    await imgSel2.selectOption('gemini'); await win.waitForTimeout(1200);
+    const q1 = (await win.locator('[data-testid="img-cost"]').innerText()).trim();
+    ok(/큐 2편/.test(q1) && /8장/.test(q1), '대본 2개 → 큐 2편 · 8장 합계: ' + q1);
+    const one = Number(((q1.match(/💰\s*([\d,.]+)원 · 4장/) || [])[1] || '0').replace(/,/g, ''));
+    const all = Number(((q1.match(/큐 2편\s*([\d,.]+)원/) || [])[1] || '0').replace(/,/g, ''));
+    ok(one > 0 && Math.abs(all - one * 2) <= 1, `큐 합계 = 한 편의 2배 (${one}원 → ${all}원)`);
+    await imgSel2.selectOption('gemini-batch'); await win.waitForTimeout(1200);
+    const q2 = (await win.locator('[data-testid="img-cost"]').innerText()).trim();
+    ok(q2 !== q1 && /큐 2편/.test(q2), '엔진을 바꾸면 큐 합계도 바뀐다(판정력): ' + q2);
+    await win.click('button[data-menu="video"]'); await win.waitForTimeout(1200);
+    const vq = (await win.locator('[data-testid="vid-cost-q"]').innerText()).trim();
+    ok(/큐 2편/.test(vq), '영상도 큐 합계: ' + vq);
     ok(errors.length === 0, '화면 오류 0건' + (errors[0] ? ': ' + errors[0] : ''));
   } catch (e) { fail++; console.log('  ✗ 예외: ' + (e.stack || e.message)); }
   finally {

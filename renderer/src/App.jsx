@@ -2148,14 +2148,23 @@ export default function App() {
   }, [dto, ttsEngActive]);
   // 💰 이미지·비디오 예상 비용 — 지금 대본에서 **아직 안 만든 것만**(이미 있는 그림·영상은 건너뛰므로) · 단가표 = core/media-cost
   //   이미지 대상 = 이미지 프롬프트가 있고 그림·영상이 아직 없는 그룹(앞 그림이 이어지는 그룹 제외) · 영상 대상 = 고른 범위/방식 안에서 영상이 아직 없는 그룹
+  // 작업큐 전체의 남은 이미지·영상 수(main) — 대본이 2개 이상일 때만 합계를 보인다
+  const [qMedia, setQMedia] = useState(null);
+  useEffect(() => {
+    if (!api.queueMediaCost) return undefined;
+    const tm = setTimeout(() => { api.queueMediaCost({ videoEngine }).then((r) => setQMedia(r || null)).catch(() => {}); }, 600);
+    return () => clearTimeout(tm);
+  }, [queue, dto, videoEngine]);
+  const qSum = (k) => { const its = (qMedia && qMedia.items) || []; if (its.length < 2) return null; return { n: its.length, sum: its.reduce((x, it) => x + (it[k] || 0), 0), unk: its.filter((it) => it[k] == null).length }; };
   const imgCost = useMemo(() => {
     const ps = (dto && dto.projects) || []; if (!ps.length) return null;
     let need = 0;
     for (const pr of ps) for (const cu of (pr.cuts || [])) if (cu.imagePrompt && !cu.imagePath && !cu.videoPath && !cu.covered) need++;
     const u = mcImageUnit(imgEngine, !!(comfyCfg && comfyCfg.cloud));
     const krw = (ttsEngActive && ttsEngActive.krw) || 1400;
-    return { need, unit: u, txt: mcCostText(u, need, krw), krw };
-  }, [dto, imgEngine, comfyCfg, ttsEngActive]);
+    const qs = qSum('img');
+    return { need, unit: u, txt: mcCostText(u, need, krw), krw, q: qs ? { n: qs.n, unk: qs.unk, txt: mcCostText(u, qs.sum, krw), sum: qs.sum } : null };
+  }, [dto, imgEngine, comfyCfg, ttsEngActive, qMedia]);
   const vidCost = useMemo(() => {
     const ps = (dto && dto.projects) || []; if (!ps.length) return null;
     const u = mcVideoUnit(videoEngine, !!(cvidCfg && cvidCfg.cloud)); if (!u) return null;
@@ -2166,8 +2175,9 @@ export default function App() {
       for (const cu of (pr.cuts || [])) if (hit(cu.num) && !cu.videoPath) need++;
     }
     const krw = (ttsEngActive && ttsEngActive.krw) || 1400;
-    return { need, unit: u, txt: mcCostText(u, need, krw), krw };
-  }, [dto, videoEngine, vidSel, vidFrom, vidTo, cvidCfg, ttsEngActive]);
+    const qs = qSum('vid');
+    return { need, unit: u, txt: mcCostText(u, need, krw), krw, q: qs ? { n: qs.n, unk: qs.unk, txt: mcCostText(u, qs.sum, krw), sum: qs.sum } : null };
+  }, [dto, videoEngine, vidSel, vidFrom, vidTo, cvidCfg, ttsEngActive, qMedia]);
   async function openOllama() {
     try {
       const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
@@ -4909,7 +4919,7 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className="vhead">
         <div className="menubar">
-            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 tube.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
+            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
             <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
               title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
               onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>
@@ -5072,8 +5082,8 @@ export default function App() {
             </select>
             {loaded && imgCost && (
               <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
-                title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다) · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
-                💰 <b>{imgCost.txt.replace('개', '장')}</b>
+                title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다)${imgCost.q ? `\n작업큐 전체 ${imgCost.q.n}편 · 남은 그림 ${imgCost.q.sum}장 합계 ${imgCost.q.txt}(고른 이미지 도구 기준 · 헤더 설정이 모든 대본에 적용됩니다)${imgCost.q.unk ? ` · ${imgCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{imgCost.txt.replace('개', '장')}</b>{imgCost.q && <> · <span data-testid="img-cost-q">큐 {imgCost.q.n}편 <b>{imgCost.q.txt.replace('개', '장')}</b></span></>}
               </span>
             )}
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
@@ -5094,8 +5104,8 @@ export default function App() {
             </select>
             {loaded && vidCost && (
               <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
-                title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준 · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
-                💰 <b>{vidCost.txt}</b>
+                title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준${vidCost.q ? `\n작업큐 전체 ${vidCost.q.n}편 · 남은 영상 ${vidCost.q.sum}개 합계 ${vidCost.q.txt}(대본마다 자기 범위/방식 기준)${vidCost.q.unk ? ` · ${vidCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{vidCost.txt}</b>{vidCost.q && <> · <span data-testid="vid-cost-q">큐 {vidCost.q.n}편 <b>{vidCost.q.txt}</b></span></>}
               </span>
             )}
             {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}><span className="rb-ic">⚙</span> <span className="rb-t">Veo</span></button>}

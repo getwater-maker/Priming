@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   appUpdateCheck: () => ipcRenderer.invoke('app-update-check'),
   appUpdateApply: () => ipcRenderer.invoke('app-update-apply'),
   openTubeSite: () => ipcRenderer.invoke('open-tube-site'),
+  queueMediaCost: (args) => ipcRenderer.invoke('queue-media-cost', args),
   listPresets: () => ipcRenderer.invoke('list-presets'),
   getModeProfiles: () => ipcRenderer.invoke('get-mode-profiles'),
   listStyles: () => ipcRenderer.invoke('list-styles'),

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * node test/update-ui.smoke.js — 헤더 앱 이름 클릭 → tube.primingwave.com / 🔄 업데이트 단추(E2E)
+ * node test/update-ui.smoke.js — 헤더 앱 이름 클릭 → www.primingwave.com / 🔄 업데이트 단추(E2E)
  *   · 앱 이름을 누르면 외부 브라우저로 그 주소(스텁으로 가로채 확인 — 실제로 열지 않는다)
  *   · ⟳ 단추를 누르면 서버 버전을 확인해 상태줄에 결과(최신/새 버전/오프라인 중 하나)
  *   · 개발 실행에서는 「적용」이 막힌다(앱이 꺼지거나 파일이 바뀌지 않는다)
@@ -19,7 +19,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.click('[data-testid=app-title]');
     await win.waitForTimeout(300);
     const opened = await app.evaluate(() => globalThis.__opened);
-    ok(opened.length === 1 && opened[0] === 'https://tube.primingwave.com/', '앱 이름 클릭 → https://tube.primingwave.com/ — ' + JSON.stringify(opened));
+    ok(opened.length === 1 && opened[0] === 'https://www.primingwave.com/', '앱 이름 클릭 → https://www.primingwave.com/ — ' + JSON.stringify(opened));
     ok(await win.locator('[data-testid=app-update]').count() === 1, '헤더에 업데이트 단추');
     const vis = await win.locator('[data-testid=app-update]').evaluate((el) => { const r = el.getBoundingClientRect(); return r.width > 10 && r.height > 10 && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el; });
     ok(vis, '단추가 실제로 눌린다(elementFromPoint)');

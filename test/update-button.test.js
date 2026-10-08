@@ -1,6 +1,6 @@
 'use strict';
 /**
- * node test/update-button.test.js — 🔄 헤더 「업데이트」 단추 + 🌐 앱 이름 → tube.primingwave.com (2026-10-06 로이)
+ * node test/update-button.test.js — 🔄 헤더 「업데이트」 단추 + 🌐 앱 이름 → www.primingwave.com (2026-10-06 로이)
  *   · core/update-check.evaluate — 새 버전/같음/서버가 낮음/구성요소 변경/읽기 실패
  *   · 시작 때 자동 업데이트(bootstrap → applyUpdates)는 그대로 · 단추는 같은 applyUpdates 를 쓴다
  *   · 작업 중(절전 차단 카운트 > 0)에는 적용하지 않는다 · 개발 실행에서는 적용하지 않는다 · 적용 뒤에만 다시 시작한다
@@ -40,7 +40,7 @@ ok(/writeWorkspace\(\)/.test(blk), '다시 시작 전에 큐를 저장한다(♻
 ok(/return \{ updated, failed, reason: 'applied'/.test(LU) && /module\.exports = \{ applyUpdates, fetchManifest, localPackage \}/.test(LU), 'applyUpdates 가 결과를 돌려준다(시작 호출은 값을 안 써서 영향 없음)');
 const chk = M.slice(M.indexOf("ipcMain.handle('app-update-check'"), M.indexOf("ipcMain.handle('app-update-apply'"));
 ok(!/applyUpdates/.test(chk), '확인은 매니페스트만 읽는다(파일을 바꾸지 않는다)');
-ok(/shell\.openExternal\('https:\/\/tube\.primingwave\.com\/'\)/.test(M) && /ipcMain\.handle\('open-tube-site', \(\) =>/.test(M), '앱 이름 클릭 = 고정 주소만 연다(인자를 받지 않는다)');
+ok(/shell\.openExternal\('https:\/\/www\.primingwave\.com\/'\)/.test(M) && /ipcMain\.handle\('open-tube-site', \(\) =>/.test(M), '앱 이름 클릭 = 고정 주소만 연다(인자를 받지 않는다)');
 ok(/data-testid="app-title"[^>]*onClick=\{\(\) => api\.openTubeSite\(\)\}/.test(APP), '헤더 앱 이름 클릭 → openTubeSite');
 ok(/data-testid="app-update"/.test(APP) && /appUpdateApply/.test(APP) && /appUpdateCheck/.test(P) && /openTubeSite/.test(P), '헤더 업데이트 단추 · preload 연결');
 console.log(`\n${fail ? '❌' : '✅'} update-button — ${pass} 통과 / ${fail} 실패`);

@@ -677,7 +677,7 @@ ipcMain.handle('app-update-apply', async () => {
   } catch (e) { return { ok: false, reason: 'error', message: '업데이트 실패: ' + e.message }; }
 });
 // 🌐 헤더의 앱 이름을 누르면 열리는 사이트 — 이 주소 하나만 연다(렌더러가 주소를 정하지 못하게)
-ipcMain.handle('open-tube-site', () => { shell.openExternal('https://tube.primingwave.com/'); return true; });
+ipcMain.handle('open-tube-site', () => { shell.openExternal('https://www.primingwave.com/'); return true; });
 ipcMain.handle('get-app-version', () => {
   try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || app.getVersion(); }
   catch { try { return app.getVersion(); } catch { return ''; } }
@@ -7354,6 +7354,27 @@ ipcMain.handle('apply-range-all', (_e, args = {}) => {
   scheduleAutoSave(); writeWorkspace();
   log(`🎬 영상 ${r.sel ? '방식 「' + VSel.labelOf(r.sel) + '」' : '범위 G' + r.fromNum + '~G' + r.toNum} 를 롱폼 큐의 대본 ${r.count}개 모두에 넣었습니다`);
   return { ...r, queue: queueDTO() };
+});
+// 💰 작업큐(롱폼) 전체의 **남은** 이미지·영상 수 — 항목마다 메모리에 읽혀 있는 대본(it.parsed)으로 센다. 단가·원화 계산은 화면(core/media-cost).
+//   이미지 = 프롬프트 있고 그림·영상이 아직 없는 그룹(앞 그림이 이어지는 그룹 제외) · 영상 = 그 대본의 방식(vidSel · 기본 도입부 전체) 안에서 영상 없는 그룹.
+ipcMain.handle('queue-media-cost', (_e, args = {}) => {
+  const q = S.modes.longform; const wantVid = !!args.videoEngine && args.videoEngine !== 'none';
+  const items = [];
+  for (const it of ((q && q.items) || [])) {
+    const name = path.basename(it.scriptPath || '').replace(/\.md$/i, '');
+    if (!it.parsed || !it.parsed.projects) { items.push({ id: it.id, name, img: null, vid: null }); continue; }
+    let img = 0, vid = 0;
+    for (const pr of it.parsed.projects) {
+      try { require('./core/visual-span').markCovered(pr, hasVisual); } catch {}
+      for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && !g._covered) img++;
+      if (wantVid) {
+        const hit = VSel.matcher(pr.groups, VSel.normSel((it.settings || {}).vidSel) || 'intro', null, null);
+        for (const g of pr.groups) if (hit(g.num) && !(g.videoPath && fs.existsSync(g.videoPath))) vid++;
+      }
+    }
+    items.push({ id: it.id, name, img, vid });
+  }
+  return { items };
 });
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
   const it = activeItem();
