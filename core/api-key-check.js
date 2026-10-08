@@ -7,6 +7,7 @@
  *     mai        GET https://<지역>.tts.speech.microsoft.com/cognitiveservices/voices/list   — Azure Speech 키 + **지역**
  *     typecast   GET /v2/voices?model=ssfm-v30
  *     elevenlabs GET /v2/voices?page_size=1                            — Voices 읽기 권한이 없으면 「키는 맞지만 권한 부족」
+ *     pexels     GET /v1/search?per_page=1 · pixabay GET /api/?per_page=3 — 🔎 무료 스톡(검색 1건 · 무료)
  *   결과 = { ok, level: 'ok'|'warn'|'bad', message } — 사람 말. ⛔ 키 원문을 메시지·로그에 싣지 않는다.
  *   level: ok = 통과 · warn = 키는 유효하지만 확인할 것이 있음(모델명·권한·한도) · bad = 거부됨/연결 실패.
  *   ⚠ 메인 프로세스 전용(전역 fetch) — 렌더러 번들에 넣지 말 것.
@@ -81,6 +82,17 @@ async function verify(id, key, o = {}, fetchImpl) {
       if (r.status === 401 && /missing_permissions|permission/i.test(r.text)) return warn('ElevenLabs 키는 맞지만 Voices 읽기 권한이 없습니다 — 키 권한에 「Voices: Read」를 켜세요');
       return generic(r, 'ElevenLabs');
     }
+    if (id === 'pexels') {   // 🔎 무료 스톡 — 검색 1건(무료 · 한도 1회 차감)
+      const r = await http('https://api.pexels.com/v1/search?query=nature&per_page=1', { Authorization: k }, fetchImpl);
+      if (r.status === 200) return good('Pexels 키 통과');
+      return generic(r, 'Pexels');
+    }
+    if (id === 'pixabay') {
+      const r = await http('https://pixabay.com/api/?per_page=3&q=nature&key=' + encodeURIComponent(k), {}, fetchImpl);
+      if (r.status === 200) return good('Pixabay 키 통과');
+      if (r.status === 400 && /api key/i.test(r.text)) return bad('Pixabay 키가 틀렸습니다(Invalid API key)');
+      return generic(r, 'Pixabay');
+    }
     return bad('알 수 없는 키 종류: ' + id);
   } catch (e) {
     const m = String((e && e.message) || e);
@@ -88,4 +100,4 @@ async function verify(id, key, o = {}, fetchImpl) {
   }
 }
 
-module.exports = { verify, ids: ['gemini', 'xai', 'mai', 'typecast', 'elevenlabs'] };
+module.exports = { verify, ids: ['gemini', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay'] };

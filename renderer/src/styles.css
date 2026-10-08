@@ -1225,3 +1225,23 @@ main.pane2::before{content:'';display:block;height:14px}
 .stt-steps span{flex:1;text-align:center;font-size:11px;padding:2px 0;border-radius:5px;background:var(--line);color:#999}
 .stt-steps span.done{background:#e5f1e6;color:#3d7a48}
 .stt-steps span.cur{background:var(--accent,#d4a574);color:#fff;font-weight:700}
+/* 🔎 무료 스톡 대화상자(v0.7.67) */
+.stock-card{width:min(980px,94vw);max-width:none;height:88vh;max-height:88vh;display:flex;flex-direction:column;box-sizing:border-box}
+.stock-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.stock-bar input[data-testid="stock-q"]{flex:1 1 260px;min-width:0;padding:6px 8px}
+.stock-seg{display:inline-flex;border:1px solid var(--line,#d8cfc2);border-radius:6px;overflow:hidden}
+.stock-seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
+.stock-seg button.on{background:var(--accent,#d97706);color:#fff}
+.stock-prompt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
+.stock-grid{flex:1 1 auto;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px;min-height:180px;align-content:start}
+.stock-it{position:relative;padding:0;border:2px solid transparent;border-radius:6px;overflow:hidden;background:#222;aspect-ratio:16/9;cursor:pointer}
+.stock-it img{width:100%;height:100%;object-fit:cover;display:block}
+.stock-it.on{border-color:var(--accent,#d97706);box-shadow:0 0 0 2px rgba(217,119,6,.35)}
+.stock-badge{position:absolute;left:4px;top:4px;font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;color:#fff;background:rgba(0,0,0,.6)}
+.stock-badge.pexels{background:#05a081}
+.stock-badge.pixabay{background:#2ec66e}
+.stock-dur{position:absolute;right:4px;bottom:4px;font-size:11px;color:#fff;background:rgba(0,0,0,.65);padding:1px 5px;border-radius:4px}
+.stock-sel{display:flex;gap:10px;align-items:center;border-top:1px solid var(--line,#d8cfc2);padding-top:8px;margin-top:4px}
+.stock-sel img,.stock-sel video{width:200px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#000;flex:0 0 auto}
+.stock-sel-info{flex:1 1 auto;min-width:0}
+.stock-nokey{padding:16px;text-align:center}

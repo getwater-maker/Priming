@@ -14,6 +14,7 @@ import SttProgress from './SttProgress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
+import StockDialog from './StockDialog.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
@@ -700,6 +701,14 @@ export default function App() {
   const [ttsKeys, setTtsKeys] = useState({ info: {}, draft: {}, region: 'eastus', msg: '' });
   // 🔑 API 키 검증 결과 — { [id]: { busy, level: ok|warn|bad, message } } (읽기 전용·무료 호출 · 방금 붙여넣은 키 우선, 없으면 저장된 키)
   const [keyChk, setKeyChk] = useState({});
+  // 🔎 무료 스톡(v0.7.67) — 대화상자 대상 { shortsNum, groupNum, intro } · ⚙ 설정의 키 상태 { info: {pexels:{has,tail}}, draft: {} }
+  const [stockDlg, setStockDlg] = useState(null);
+  const [stockKeys, setStockKeys] = useState({ info: {}, draft: {}, msg: '' });
+  async function loadStockKeys() { try { const r = await api.stockKeysGet(); if (r) setStockKeys((x) => ({ ...x, info: r })); } catch {} }
+  async function saveStockKey(id, patch) {
+    const r = await api.stockKeySave({ id, ...patch }); await loadStockKeys();
+    setStockKeys((x) => ({ ...x, draft: { ...x.draft, [id]: '' }, msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
+  }
   async function verifyKey(id, draft, extra) {
     setKeyChk((x) => ({ ...x, [id]: { busy: true } }));
     let r; try { r = await api.apiKeyVerify({ id: id === 'gemini-tts' ? 'gemini' : id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
@@ -710,6 +719,7 @@ export default function App() {
     const inf = ttsKeys.info || {};
     if (giKey || (inf.gemini && inf.gemini.has)) await verifyKey('gemini', giKey, { model: (giCfg && giCfg.model) || '' });
     for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
+    for (const id of ['pexels', 'pixabay']) if ((stockKeys.info[id] && stockKeys.info[id].has) || (stockKeys.draft[id] || '').trim()) await verifyKey(id, stockKeys.draft[id]);
     if (inf.gemini && inf.gemini.has) await verifyKey('gemini-tts', ttsKeys.draft.gemini);
   }
   const keyChkMark = (id) => { const c = keyChk[id]; return c && !c.busy && c.message ? <div className="meta" data-testid={'keychk-' + id} data-level={c.level} style={{ marginTop: 3, fontWeight: 600, color: c.level === 'ok' ? '#16a34a' : c.level === 'warn' ? '#b45309' : '#c62828' }}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.message}</div> : null; };
@@ -2115,7 +2125,7 @@ export default function App() {
   }
   // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
   async function openTtsKeySettings() { setTtsEng(null); await openSettings('keys'); }
-  useEffect(() => { if (settingsOpen && settingsTab === 'keys') loadTtsKeys(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
+  useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
   //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
   //   🎙 문장마다 **실제로 읽을 목소리**의 단가로 센다(v0.6.84) — 순서는 main/pipeline 과 같다:
@@ -4162,7 +4172,7 @@ export default function App() {
     });
     setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: abs ? 'center' : 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen);
+  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -4733,6 +4743,7 @@ export default function App() {
         <div className="pg-head sticky" data-testid="group-head">그룹 ({rows.length})<span className="pg-introcnt" data-testid="group-intro-cnt" title="도입부 = 영상(비디오)이 들어가는 그룹 — ② 클립 칸에서 노랑으로 보이는 그룹">🎬 도입부 {rows.filter((r) => r.intro).length}개</span></div>
         <div className="pg-tools">
           <button type="button" className="pg-act del" data-testid="group-del" disabled={!sel.length} title="체크한 그룹의 클립을 모두 지웁니다(Ctrl+Z 되돌리기)" onClick={() => grpDelete(pr.shortsNum, sel)}>🗑 삭제</button>
+          <button type="button" className="pg-act" data-testid="group-stock" disabled={!curL} title="지금 그룹에 무료 스톡(Pexels · Pixabay) 사진·영상 넣기" onClick={() => { const r = rows.find((x) => curL && x.num === curL.groupNum); if (r) setStockDlg({ shortsNum: pr.shortsNum, groupNum: r.num, intro: r.intro }); }}>🔎 스톡</button>
           <button type="button" className="pg-act" data-testid="group-merge" disabled={!sel.length} title="체크한 그룹을 앞 그룹에 합칩니다 — 이어진 여러 그룹은 맨 앞 그룹 하나로 · 하나만 체크하면 바로 앞 그룹에" onClick={() => grpMerge(pr.shortsNum, sel)}>⤒ 합치기</button>
         </div>
         <label className="pg-all"><input type="checkbox" data-testid="group-all" checked={rows.length > 0 && sel.length === rows.length} onChange={(e) => setGroups(rows, e.target.checked)} /> 전체 선택</label>
@@ -4944,6 +4955,7 @@ export default function App() {
         <span className="meta clipfile" title={c.videoPath || c.imagePath || ''}>{c.videoPath ? '🎬 ' + base(c.videoPath) : c.imagePath ? '🖼 ' + base(c.imagePath) : '그림 없음'}</span>
         <span className="grow" />
         <button className="gprev" title="이 그룹 그림/영상 첨부" onClick={() => attachAsset(ci.pr.shortsNum, c.num)}>📎</button>
+        <button className="gprev" data-testid="stock-open" title="무료 스톡(Pexels · Pixabay)에서 사진·영상을 찾아 이 그룹에 넣기" onClick={() => setStockDlg({ shortsNum: ci.pr.shortsNum, groupNum: c.num, intro: !!c.isIntro })}>🔎</button>
         {(c.imagePath || c.videoPath) && <button className="gprev" title="첨부 지우기" onClick={() => clearAsset(ci.pr.shortsNum, c.num)}>✕</button>}
         <button className="gprev" title="이미지 재생성" onClick={() => runRegen(ci.pr.shortsNum, c.num)}>🔄</button>
         <button className="gprev" title="이 그룹 미리듣기" onClick={() => playGroup(ci.pr.shortsNum, c.num)}>{playerOpen && playKey === 'group:' + ci.pr.shortsNum + ':' + c.num ? '■' : '▶'}</button>
@@ -5552,6 +5564,8 @@ export default function App() {
           </div>
         </div>
       )}
+      {stockDlg && <StockDialog target={stockDlg} onClose={() => setStockDlg(null)} onOpenKeys={() => { setStockDlg(null); openSettings('keys'); }}
+        onAttached={(d, it) => { if (d) setDto(d); setStatus(`🔎 G${stockDlg.groupNum} 에 ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'}을 넣었습니다`); }} />}
       {nameAsk && (
         <div className="modal-bg show name-ask-layer">
           <div className="modal-card" style={{ maxWidth: 420 }}>
@@ -6246,6 +6260,32 @@ export default function App() {
                   </>)}
                 </div>
                 {keyChkMark('gemini')}
+              </div>
+              {/* 🔎 무료 스톡(v0.7.67) — Pexels · Pixabay 검색 키(둘 다 무료) · 원문은 다시 보이지 않는다(끝 4자리만) */}
+              <div data-testid="stock-keys" className="kp-card">
+                <div className="kp-title">🔎 무료 스톡 (무료 키)</div>
+                {[['pexels', 'Pexels', 'pexels.com/api → 무료 가입 → API 키(시간당 200회 검색)'], ['pixabay', 'Pixabay', 'pixabay.com/api/docs → 로그인하면 문서 안 「key」에 보입니다(분당 100회)']].map(([id, label, hint], n) => {
+                  const inf = stockKeys.info[id] || {};
+                  return (
+                    <div key={id} data-testid={'stock-key-' + id} className={'kp-row' + (n ? ' sep' : '')}>
+                      <div className="kp-line">
+                        <b className="kp-name">{label}</b>
+                        <Hint>{hint} · 그룹의 🔎(① 칸 · 그룹 칸 「🔎 스톡」)에서 사진·영상을 찾아 넣습니다. 상업적 이용 가능 · 출처 표기 권장.</Hint>
+                        <span className="kp-state" style={{ color: inf.has ? '#16a34a' : '#b45309' }}>{inf.has ? `🔑 저장됨(…${inf.tail})` : '🔑 없음'}</span>
+                        <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.stockOpenKey(id)}>발급 ↗</button>
+                      </div>
+                      <div className="kp-line">
+                        <input type="password" autoComplete="off" className="kp-in" data-testid={'stock-key-in-' + id} placeholder={inf.has ? 'API 키 바꿀 때만 붙여넣기' : 'API 키 붙여넣기'}
+                          value={stockKeys.draft[id] || ''} onChange={(e) => { const v = e.target.value; setStockKeys((x) => ({ ...x, draft: { ...x.draft, [id]: v } })); }}
+                          onBlur={() => { const v = String(stockKeys.draft[id] || '').trim(); if (v) saveStockKey(id, { key: v }); }} />
+                        {keyChkBtn(id, stockKeys.draft[id])}
+                        <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!inf.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveStockKey(id, { clear: true }); }}>지우기</button>
+                      </div>
+                      {keyChkMark(id)}
+                    </div>
+                  );
+                })}
+                {stockKeys.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{stockKeys.msg}</div>}
               </div>
               {/* 🔊 TTS API (유료) — 음성 설정 팝업의 유료 엔진이 쓰는 키. 원문은 화면에 다시 보이지 않는다(끝 4자리만).
                   한 줄: 이름 · ⓘ · 저장됨 · 발급 / 다음 줄: 입력 · (MAI 는 지역) · 검증 · 지우기 */}

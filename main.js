@@ -5182,6 +5182,94 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
+// 🔎 무료 스톡(Pexels · Pixabay · v0.7.67) — 키는 secret-store 'pexels'·'pixabay'(⚙ 설정 → API 키) · 검색·받기는 core/free-stock
+const STOCK_IDS = ['pexels', 'pixabay'];
+const STOCK_KEY_URL = { pexels: 'https://www.pexels.com/api/new/', pixabay: 'https://pixabay.com/api/docs/' };
+function _stockKeys() { if (process.env.PM_UI_SMOKE && global.__stockKeysTest) return global.__stockKeysTest;   // 🧪 E2E 는 진짜 키 저장소를 안 건드린다
+  const SS = require('./tts/secret-store'); const o = {}; for (const id of STOCK_IDS) o[id] = ((SS.get(id) || {}).key || '').trim(); return o; }
+ipcMain.handle('stock-keys-get', () => {
+  const k = _stockKeys(); const o = {};
+  for (const id of STOCK_IDS) o[id] = { has: !!k[id], tail: k[id] ? k[id].slice(-4) : '' };   // 원문은 돌려주지 않는다
+  return o;
+});
+ipcMain.handle('stock-key-save', (_e, { id, key, clear } = {}) => {
+  if (!STOCK_IDS.includes(id)) return { ok: false };
+  const SS = require('./tts/secret-store'); const old = SS.get(id) || {};
+  if (clear) { delete old.key; SS.set(id, old); log(`🔑 ${id} 키 지움`); return { ok: true }; }
+  const v = String(key || '').trim(); if (!v) return { ok: false };
+  SS.set(id, { ...old, key: v }); log(`🔑 ${id} 키 저장(…${v.slice(-4)})`); return { ok: true };
+});
+ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) shell.openExternal(STOCK_KEY_URL[id]); return true; });
+ipcMain.handle('stock-open-url', (_e, u) => {   // 작가·원본 페이지 — 두 사이트 주소만 연다
+  try { const x = new URL(String(u || '')); if (x.protocol === 'https:' && /(^|\.)(pexels\.com|pixabay\.com)$/.test(x.hostname)) { shell.openExternal(x.href); return true; } } catch {}
+  return false;
+});
+ipcMain.handle('stock-search', async (_e, args = {}) => {
+  const FS = require('./core/free-stock');
+  const r = await FS.search(args, _stockKeys());
+  log(`🔎 스톡 검색 「${String(args.q || '').slice(0, 40)}」 ${args.kind === 'video' ? '영상' : '사진'} p${args.page || 1} — ${r.items.length}개${r.errors.length ? ' · ⚠ ' + r.errors.join(' / ') : ''}`);
+  return r;
+});
+// 그룹 기본 질의(이미지 프롬프트 첫 마디) — 화면이 대화상자를 열 때
+ipcMain.handle('stock-default-query', (_e, { shortsNum, groupNum } = {}) => {
+  const pr = S.parsed && S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  return g ? { q: require('./core/free-stock').defaultQuery(g.imagePrompt, g.phase), prompt: g.imagePrompt || '' } : { q: '', prompt: '' };
+});
+// 고른 스톡을 받아 그룹 그림/영상으로 — 파일은 <출력>/_stock/ (media-N 밖 · 번호 이름 아님 → 그룹 파일과 섞이지 않는다)
+//   사진은 프로젝트 비율로 가운데 잘라 1920 폭 JPG 로(레터박스 방지) · 「사람이 고른 자산」 표시 · 출처는 <출력>/스톡_출처.txt
+async function _downloadTo(url, dest) {
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 180000);
+  try {
+    const res = await fetch(url, { signal: ac.signal });
+    if (!res.ok) throw new Error('받기 실패 ' + res.status);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 1024) throw new Error('받은 파일이 비어 있습니다');
+    const tmp = dest + '.part';
+    await fs.promises.writeFile(tmp, buf); await fs.promises.rename(tmp, dest);
+  } finally { clearTimeout(t); }
+}
+ipcMain.handle('stock-attach', async (_e, { shortsNum, groupNum, item } = {}) => {
+  if (!S.parsed || !S.outRoot) throw new Error('대본을 먼저 여세요.');
+  const it = item || {};
+  if (!/^https:\/\//.test(String(it.dl || '')) || !STOCK_IDS.includes(it.src)) throw new Error('받을 주소가 이상합니다');
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) throw new Error('그룹을 찾지 못했습니다');
+  const FS = require('./core/free-stock');
+  const dir = path.join(S.outRoot, '_stock');
+  await P.retryFs(() => fs.mkdirSync(dir, { recursive: true }), '스톡 폴더');
+  const raw = path.join(dir, FS.fileNameFor(it));
+  if (!fs.existsSync(raw) || fs.statSync(raw).size < 1024) { log(`🔎 스톡 받는 중… ${it.src} ${it.kind} ${it.id}`); await _downloadTo(it.dl, raw); }
+  let fp = raw;
+  if (it.kind === 'photo') {   // 비율 맞춤(가운데 자르기) — ffmpeg 필터에 경로를 넣지 않는다(-i/출력 인자만)
+    const a = pr.aspect === '9:16' ? [1080, 1920] : pr.aspect === '1:1' ? [1080, 1080] : [1920, 1080];
+    const out = raw.replace(/\.(jpg|png)$/i, `_${a[0]}x${a[1]}.jpg`);
+    if (!fs.existsSync(out)) {
+      const r = await new Promise((resolve) => {
+        const ff = require('./core/media-utils').getFfmpegPath() || 'ffmpeg';
+        const ch = require('child_process').spawn(ff, ['-y', '-i', raw, '-vf', `scale=${a[0]}:${a[1]}:force_original_aspect_ratio=increase,crop=${a[0]}:${a[1]}`, '-q:v', '2', out], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+        let err = ''; ch.stderr.on('data', (c) => { err = (err + c).slice(-2000); });
+        ch.on('error', (e) => resolve(e.message)); ch.on('close', (code) => resolve(code === 0 ? null : err.split('\n').slice(-3).join(' ')));
+      });
+      if (r) log(`⚠ 스톡 사진 비율 맞춤 실패 — 원본을 씁니다: ${r}`);
+    }
+    if (fs.existsSync(out)) fp = out;
+  }
+  undoPush('스톡 첨부');
+  _softenCoverOf(pr, g);
+  if (it.kind === 'video') { g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp); }
+  else { g.imagePath = fp; g.imageStatus = 'done'; g.imageCleared = false; g._userImage = _visKey(fp); }
+  try {   // 출처 기록(같은 줄은 한 번만)
+    const cf = path.join(S.outRoot, '스톡_출처.txt'); const line = FS.creditLine(it, `G${groupNum}`);
+    const cur = fs.existsSync(cf) ? fs.readFileSync(cf, 'utf8') : '';
+    if (!cur.includes(line)) fs.appendFileSync(cf, (cur ? '' : '무료 스톡 출처 — 상업적 이용 가능 · 출처 표기 권장(설명란에 옮겨 적기)\n') + line + '\n', 'utf8');
+  } catch (e) { log('⚠ 스톡 출처 기록 실패: ' + e.message); }
+  log(`🔎 스톡 첨부 ${pr.title} G${groupNum}: ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'} · ${it.author || ''} → ${path.basename(fp)}`);
+  try { syncSnapshotNow(); } catch {}
+  return P.toDTO(S.parsed);
+});
+
 // 그룹 첨부 자산 삭제 (이미지/비디오 비우기)
 ipcMain.handle('clear-asset', (_e, args = {}) => {
   if (!S.parsed) return null;
