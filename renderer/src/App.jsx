@@ -1848,6 +1848,7 @@ export default function App() {
   const [clipTb, setClipTb] = useState(null);         // { left, top, hidden } — 막대 자리(고른 첫 클립 바로 위)
   const [clipMenu, setClipMenu] = useState(null);     // 'ins' | 'fx' | 'voice'
   const clipFocusRef = useRef(true);   // 마지막 마우스 누름이 클립(또는 클립 막대) 안이었나 — 아니면 Home/End 는 대본 처음·끝
+  const groupNavRef = useRef(null);    // 🎞 그룹 칸 방향키 이동용 — 그룹 칸이 그릴 때마다 { step } 을 넣어 둔다
   useEffect(() => {
     const down = (ev) => { const t = ev.target; clipFocusRef.current = !!(t && t.closest && t.closest('.sent, .clip-tb')); };
     document.addEventListener('mousedown', down, true);
@@ -4169,6 +4170,11 @@ export default function App() {
       if (sentEdit && !((e.ctrlKey || e.metaKey) && e.code === 'KeyA')) return;
       const t = e.target; const tag = t && t.tagName;
       const isA = (e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key === 'a' || e.key === 'A');   // 🔑 한글 입력 상태에선 key 가 'ㅁ' 이라 키 자리(code)로 본다(Ctrl+A 가 작업창 전체 선택으로 새던 원인)
+      // 🎞 그룹 칸에 초점이 있으면 방향키는 그룹 단위 — ↑·← 앞 그룹 / ↓·→ 다음 그룹(로이 v0.7.66)
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && t && t.closest && t.closest('.pane-groups') && groupNavRef.current) {
+        const d = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0;
+        if (d) { e.preventDefault(); groupNavRef.current.step(d); return; }
+      }
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (t && t.isContentEditable) {
         // 고치는 중인 자막칸: 첫 Ctrl+A 는 그 칸 글자 전체(기본) — 이미 칸 전체가 골라져 있으면 한 번 더 눌러 모든 클립
@@ -4704,6 +4710,13 @@ export default function App() {
       clipFocusRef.current = true;   // 그룹을 눌렀으니 Home/End 는 이 그룹 안
       setTimeout(() => { const e = [...document.querySelectorAll('main.pane2 .sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
     };
+    groupNavRef.current = { step: (d) => {
+      const live = rows.filter((r) => r.first); if (!live.length) return;
+      const ci = curL ? live.findIndex((r) => r.num === curL.groupNum) : -1;
+      const r = live[ci < 0 ? (d > 0 ? 0 : live.length - 1) : Math.max(0, Math.min(live.length - 1, ci + d))];
+      go(r);
+      setTimeout(() => { const b = document.querySelector('[data-testid="group-item"][data-g="' + r.num + '"]'); if (b && b.focus) b.focus({ preventScroll: true }); }, 0);   // 초점을 새 그룹으로 — 계속 눌러 이어 간다
+    } };
     const selNs = new Set(clipSelOk() && capSel.shortsNum === pr.shortsNum ? capSel.items.map((x) => x.n) : []);
     const isOn = (r) => r.lines.length > 0 && r.lines.every((l) => selNs.has(l.n));
     const sel = rows.filter(isOn).map((x) => x.num);

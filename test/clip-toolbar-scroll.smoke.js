@@ -109,6 +109,19 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 장', ...groups].join('\n'), 'utf8
     await win.locator('[data-testid="group-item"][data-g="' + target.g + '"]').click(); await win.waitForTimeout(500);
     const gs2 = await state(); ok(gs2.picked.length === 1 && gs2.picked[0] === target.ln && gs2.edit === 0, `그룹 G${target.g} 클릭 → 그 그룹 첫 클립 ${target.ln} 선택 — ${JSON.stringify(gs2)}`);
     ok(await win.evaluate((g) => !!document.querySelector('[data-testid="group-item"].cur[data-g="' + g + '"]'), target.g), '눌린 그룹이 표시된다(.cur)');
+    // ⌨ 그룹 칸 방향키(v0.7.66): ↓·→ 다음 그룹 / ↑·← 앞 그룹 — 초점이 그룹 칸에 남아 이어 누를 수 있다
+    { const order = await win.evaluate(() => [...document.querySelectorAll('[data-testid="group-item"]')].map((x) => x.dataset.g));
+      const i0 = order.indexOf(String(target.g));
+      const curG = () => win.evaluate(() => { const c = document.querySelector('[data-testid="group-item"].cur'); return c ? c.dataset.g : null; });
+      const firstLn = (g) => win.evaluate((gg) => { const f = document.querySelector('.cut[data-g="' + gg + '"] .sent[data-ln]'); return f ? Number(f.dataset.ln) : null; }, g);
+      await win.keyboard.press('ArrowDown'); await win.waitForTimeout(300);
+      const s1 = await state(); ok(await curG() === order[i0 + 1] && s1.picked[0] === await firstLn(order[i0 + 1]) && s1.edit === 0, `↓ → 다음 그룹 G${order[i0 + 1]} 첫 클립 — ${JSON.stringify(s1)}`);
+      await win.keyboard.press('ArrowRight'); await win.waitForTimeout(300);
+      ok(await curG() === order[i0 + 2], `→ → 그다음 그룹 G${order[i0 + 2]}(지금 G${await curG()})`);
+      await win.keyboard.press('ArrowUp'); await win.waitForTimeout(300);
+      await win.keyboard.press('ArrowLeft'); await win.waitForTimeout(300);
+      ok(await curG() === order[i0], `↑·← → 처음 그룹 G${order[i0]} 로 돌아온다(지금 G${await curG()})`);
+      ok(await win.evaluate(() => !!(document.activeElement && document.activeElement.closest('.pane-groups'))), '초점이 그룹 칸에 남는다'); }
     // 🎞 그룹 칸 합치기·삭제(v0.7.31) — 체크 → ⤒ 합치기 / 🗑 삭제(확인창)
     const cnt = () => win.evaluate(() => ({ g: document.querySelectorAll('[data-testid="group-item"]').length, c: document.querySelectorAll('main.pane2 .sent[data-ln]').length }));
     const before = await cnt();
