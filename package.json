@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.7.57",
+  "version": "0.7.58",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -13,6 +13,7 @@
     "test:visual": "node test/visual-defect.test.js && node test/video-range-item.test.js && node test/video-select.test.js && node test/video-skip.test.js && node test/log-file.test.js && node test/prompt-guard.test.js && node test/cache-guard.test.js && node test/img-regen.test.js && node test/img-rotate-resume.test.js && node test/img-engine-separate.test.js && node test/sweep-guard.test.js && node test/image-freshness.test.js && node test/light-updater-version.test.js",
     "test:gbatch": "node test/gemini-batch-parse.test.js",
     "test:mediacost": "node test/media-cost.smoke.js",
+    "test:g429": "node test/gemini-429.smoke.js",
     "test:keys": "node test/api-key-check.test.js && node test/api-key-ui.smoke.js",
     "test:facets": "node test/voice-facets.test.js && node test/omni-tags.test.js && node test/omni-tags-ui.smoke.js",
     "test:update": "node test/update-button.test.js && node test/update-ui.smoke.js",

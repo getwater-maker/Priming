@@ -3512,8 +3512,26 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, fo
     if (cr) ({ refParts, extra } = await cr.forGroup(project, g, stylePrompt));
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt) + extra;
     const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS).replace(/\.png$/, '');   // 🔒
-    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base, refParts });
+    let r, tries = 0;
+    for (;;) {   // 429: 분당 한도는 기다렸다가 같은 그룹을 다시(최대 3번) · 그 밖(하루·무료·충전)은 재시도하지 않는다
+      r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '16:9', outPathNoExt: base, refParts });
+      const q = r && r.quota;
+      if (r.ok || !q || S.abort) break;
+      if ((q.kind === 'minute' || q.kind === 'unknown') && ++tries <= (q.kind === 'minute' ? 3 : 2)) {
+        const w = Math.min(Math.max(q.retryAfterSec || 20, 5), 90);
+        logger(`  ⏳ G${g.num} 요청 한도(${q.kind === 'minute' ? '분당' : '429'}) — ${w}초 기다렸다가 다시 시도합니다(${tries}회)`);
+        await _sleepMs(w * 1000); continue;
+      }
+      break;
+    }
     if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }
+    else if (r.quota) {   // 한도 — 남은 그룹마다 같은 오류를 받지 않도록 여기서 멈춘다
+      logger(`  ✗ G${g.num} 실패: ${r.error.slice(0, 120)}`);
+      GI.explain429(r.quota, Date.now()).forEach((l) => logger(l));
+      const left = targets.filter((x) => !x.imagePath || !fs.existsSync(x.imagePath)).length;
+      logger(`⏹ 남은 ${left}장은 만들지 않고 멈춥니다 — 이미 만든 그림은 그대로이니 한도가 풀린 뒤 「이미지」를 다시 누르면 이어서 만듭니다.`);
+      break;
+    }
     else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
   }
 }
@@ -3600,7 +3618,7 @@ async function runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNum
     requests: targets.map((g) => ({ key: keyOf(g), prompt: P.buildImagePrompt(stylePrompt, g.imagePrompt), aspect: project.aspect || '16:9' })),
     model, displayName: (S.parsed && S.parsed.fileTitle) || 'priming',
   });
-  if (!r.ok) { logger('✗ 배치 제출 실패: ' + r.error); return; }
+  if (!r.ok) { logger('✗ 배치 제출 실패: ' + r.error.slice(0, 160)); if (r.quota) GI.explain429(r.quota, Date.now()).forEach((l) => logger(l)); return; }
   BS.add({
     batchName: r.batchName, model: r.model, scriptPath: sp, outRoot: path.dirname(imagesDir),
     title: (S.parsed && S.parsed.fileTitle) || '', items: targets.map((g) => ({ key: keyOf(g), shortsNum: project.shortsNum, groupNum: g.num })),
