@@ -98,6 +98,25 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(gc.rows > 0 && gc.cnt && gc.cnt.includes(`${gc.rows}개`), `그룹 칸 「${gc.cnt}」 = 노랑 그룹 ${gc.rows}개`);
     ok(gc.title === 'rgb(255, 215, 112)' && gc.sticky === 'sticky', `그룹 칸 도입부 제목 노랑 · 머리줄 고정 (${gc.title} · ${gc.sticky})`);
 
+    // 🎞 그룹 칸에서 도입부(둘째) 그룹을 누르면 ② 칸이 그 그룹의 노랑 클립으로 이동한다
+    await win.locator('[data-testid=group-item][data-g="2"]').click(); await win.waitForTimeout(700);
+    const mv = await win.evaluate(() => {
+      const cur = document.querySelector('main.pane2 .sent.clip.cur'); const pane = document.querySelector('main.pane2');
+      if (!cur || !pane) return null;
+      const cut = cur.closest('.cut'); const r = cur.getBoundingClientRect(), pr = pane.getBoundingClientRect();
+      return { g: cut ? cut.getAttribute('data-g') : null, intro: !!(cut && cut.classList.contains('intro')), inView: r.top >= pr.top - 1 && r.bottom <= pr.bottom + 1, notPlaying: !document.querySelector('.sent.clip.reading') };
+    });
+    ok(mv && mv.g === '2' && mv.intro && mv.inView && mv.notPlaying, `그룹 칸 2번(도입부) 클릭 → ② 칸 커서가 노랑 그룹 G2 클립으로 · 화면 안 (${JSON.stringify(mv)})`);
+    const otherYellow = await win.evaluate(() => { const e = document.querySelector('main.pane2 .cut.intro[data-g="1"] .sent.clip:not(.picked):not(.cur)'); return e ? getComputedStyle(e).backgroundColor : null; });
+    ok(otherYellow === 'rgb(255, 241, 184)', `다른 도입부 클립은 노랑 그대로 (${otherYellow})`);
+    // ▶ 재생 중 읽는 클립은 하늘색(.reading)
+    await win.locator('[data-testid=group-item][data-g="1"]').click(); await win.waitForTimeout(400);
+    await win.locator('[data-testid=play-btn]').click(); await win.waitForTimeout(1500);
+    const rd = await win.evaluate(() => { const e = document.querySelector('.sent.clip.reading'); return e ? { bg: getComputedStyle(e).backgroundColor, no: getComputedStyle(e.querySelector('.clip-no')).backgroundColor, n: document.querySelectorAll('.sent.clip.reading').length } : null; });
+    ok(rd && rd.n === 1 && rd.bg === 'rgb(217, 241, 251)' && rd.no === 'rgb(25, 168, 214)', `재생 중 읽는 클립만 하늘색 (${JSON.stringify(rd)})`);
+    await win.locator('[data-testid=play-btn]').click().catch(() => {}); await win.waitForTimeout(700);
+    ok((await win.locator('.sent.clip.reading').count()) === 0, '멈추면 하늘색이 사라진다');
+
     if (process.env.INTRO_TINT_SHOT) {   // 경계(도입부 → 본문)가 보이게 본문 첫 그룹을 화면 가운데로
       await win.locator('.cut:not(.intro) .scene-h').first().scrollIntoViewIfNeeded();
       await win.evaluate(() => { const e = document.querySelector('.cut:not(.intro)'); if (e) e.scrollIntoView({ block: 'center' }); });

@@ -6771,7 +6771,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           const lines = PL ? ss.map((_, si) => (PL.bySent.get(c.num + ':' + si) || []).map((x) => { lineNs.push(x.n); return x.from + ',' + x.to + ',' + fmtClipTime(x.start, x.dur); }).join(';')).join('|') : '';   // 시각은 **보이는 정밀도로만**(mp3 를 풀면 몇십 ms 길어져 뒤 그룹 전체가 다시 그려졌다)
           const rel = (n) => lineNs.indexOf(n);   // 그룹 안 몇 번째 줄인가(번호가 당겨져도 같다)
           const sel = capSel && capSel.shortsNum === sn ? capSel.mode + ':' + capSel.items.filter((x) => x.groupNum === c.num).map((x) => rel(x.n) + '/' + x.sentIdx + '/' + x.from + '-' + x.to).join(',') : '';
-          const cur = cursor && cursor.shortsNum === sn && lineNs.includes(cursor.n) ? 'c' + rel(cursor.n) : '';
+          const cur = cursor && cursor.shortsNum === sn && lineNs.includes(cursor.n) ? 'c' + rel(cursor.n) + (playing && playing.key ? 'P' : '') : '';   // P = 재생 중(읽는 클립 표시 · 재생 시작·끝에 다시 그린다)
           const ec = edit && edit.cur;
           const ed = ec && ec.shortsNum === sn && ec.groupNum === c.num ? JSON.stringify(ec) + (edit.busy ? 'B' : '') : '';
           const vr = vrDrag && vrDrag.shortsNum === sn ? (vrDrag.groupNum === c.num ? 'own' : '') + ':' + (() => { const r = vrRangeOf(vrDrag); return Math.max(gs, r.from) + '-' + Math.min(ge, r.to); })() : '';
@@ -6942,7 +6942,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             const tm = fmtClipTime(l.start, l.dur);
                             const lineEd = ed && ed.line && ed.where !== 'stage' && edHere && ed.sentIdx === si && ed.line.n === l.n;
                             return (
-                              <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
+                              <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (isCur && playing && playing.key ? ' reading' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
                                 {vrewLay ? null : insMarks}
                                 <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}

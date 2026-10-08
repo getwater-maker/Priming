@@ -1179,3 +1179,8 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .pane-groups .pg-row.intro .pg-item:not(.cur) .pg-title{background:#ffd770;color:#7a4b00}
 .pane-groups .pg-row.intro .pg-item:not(.cur) .pg-meta{color:#7a4b00}
 .pane-groups .pg-row.intro .pg-no{color:#7a4b00;background:#ffd770;border-radius:5px;padding:0 4px}
+
+/* ▶ 재생 중 지금 읽는 클립 — 도입부 노랑·선택·커서와 겹치지 않는 하늘색 + 번호 칸 ▶ */
+.cuts-grid .sent.clip.reading,.cuts-grid .cut.intro .sent.clip.reading{background:#d9f1fb !important;border-color:#19a8d6 !important;box-shadow:0 0 0 2px #19a8d6 inset !important}
+.cuts-grid .sent.clip.reading .clip-no,.cuts-grid .cut.intro .sent.clip.reading .clip-no{background:#19a8d6 !important;color:#fff !important;border-right-color:#19a8d6 !important}
+.cuts-grid .sent.clip.reading .clip-no-n::before{content:'▶ ';font-size:10px}
