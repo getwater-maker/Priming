@@ -64,6 +64,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.locator('[data-testid=find-selall]').click(); await win.waitForTimeout(400);
     const picked = await win.locator('main.pane2 .sent.clip.picked').count();
     ok(picked === 8, `☑ 모두 → 검색된 8개 클립이 체크된다 (${picked})`);
+    if (process.env.FIND_SHOT) { await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 700); }); await win.waitForTimeout(500); await win.screenshot({ path: process.env.FIND_SHOT, clip: { x: 766, y: 0, width: 600, height: 80 } }); await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 820); }); await win.waitForTimeout(300); }
+    { const bb = await win.locator('[data-testid=find-selall]').boundingBox(); ok(bb && bb.width < 50 && bb.height < 40, `☑ 단추가 한 칸에 들어간다 (${bb && Math.round(bb.width)}x${bb && Math.round(bb.height)})`); }
     // 전부 지워도 포커스 유지 → 바로 다시 입력
     await inp.click(); await win.keyboard.press('End'); await win.waitForTimeout(300);
     for (let i = 0; i < 6; i++) { await win.keyboard.press('Backspace'); await win.waitForTimeout(80); }

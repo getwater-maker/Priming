@@ -5008,7 +5008,7 @@ export default function App() {
             <span className="fcnt" title="검색된 클립 수(한 클립에 같은 말이 두 번 나와도 1개로 셉니다)">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
             <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
             <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
-            {wsOn && findRes.total > 0 && findHitRef.current.total > 0 && <button className="ghost" data-testid="find-selall" title={`검색된 클립 ${findHitRef.current.total}개(클립 단위 — 한 클립에 두 번 나와도 1개)를 모두 체크 — 음성 다시 만들기·삭제 등을 한 번에`} onClick={selectFindHits}>☑ 모두</button>}
+            {wsOn && findRes.total > 0 && findHitRef.current.total > 0 && <button className="ghost find-selall" data-testid="find-selall" title={`검색된 클립 ${findHitRef.current.total}개(클립 단위 — 한 클립에 두 번 나와도 1개)를 모두 체크 — 음성 다시 만들기·삭제 등을 한 번에`} onClick={selectFindHits}>☑</button>}
             <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
           </div>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
