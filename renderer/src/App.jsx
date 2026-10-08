@@ -4663,7 +4663,7 @@ export default function App() {
     for (const c of pr.cuts) {
       const sents = c.sentences || []; const t0 = acc; for (const se of sents) acc += se.dur > 0 ? se.dur : 2.5;
       const lines = PL.list.filter((x) => x.groupNum === c.num);
-      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
+      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, intro: !!c.isIntro, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
     }
     const go = (r) => {
       if (!r.first) return;
@@ -4687,14 +4687,14 @@ export default function App() {
     const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
     return (
       <aside className="pane-groups" data-testid="group-col" title="그룹 — 누르면 그 그룹의 첫 클립으로">
-        <div className="pg-head">그룹 ({rows.length})</div>
+        <div className="pg-head sticky" data-testid="group-head">그룹 ({rows.length})<span className="pg-introcnt" data-testid="group-intro-cnt" title="도입부 = 영상(비디오)이 들어가는 그룹 — ② 클립 칸에서 노랑으로 보이는 그룹">🎬 도입부 {rows.filter((r) => r.intro).length}개</span></div>
         <div className="pg-tools">
           <button type="button" className="pg-act del" data-testid="group-del" disabled={!sel.length} title="체크한 그룹의 클립을 모두 지웁니다(Ctrl+Z 되돌리기)" onClick={() => grpDelete(pr.shortsNum, sel)}>🗑 삭제</button>
           <button type="button" className="pg-act" data-testid="group-merge" disabled={!sel.length} title="체크한 그룹을 앞 그룹에 합칩니다 — 이어진 여러 그룹은 맨 앞 그룹 하나로 · 하나만 체크하면 바로 앞 그룹에" onClick={() => grpMerge(pr.shortsNum, sel)}>⤒ 합치기</button>
         </div>
         <label className="pg-all"><input type="checkbox" data-testid="group-all" checked={rows.length > 0 && sel.length === rows.length} onChange={(e) => setGroups(rows, e.target.checked)} /> 전체 선택</label>
         {rows.map((r) => (
-          <div key={r.num} className="pg-row">
+          <div key={r.num} className={'pg-row' + (r.intro ? ' intro' : '')}>
             <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
             <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)}>
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>

@@ -1171,3 +1171,11 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 /* 🔎 검색 강조 — ② 클립 목록 글자만(① 미리보기에는 안 칠한다) */
 ::highlight(pm-find){background-color:#ffe94d;color:#000}
 ::highlight(pm-find-cur){background-color:#ff9f1a;color:#000}
+
+/* 🎬 그룹 칸 — 도입부는 ② 클립 칸과 같은 노랑 · 맨 위 「도입부 N개」 줄은 스크롤해도 고정 */
+.pane-groups .pg-head.sticky{position:sticky;top:-8px;z-index:3;margin:-8px -8px 0;padding:8px 10px 6px;background:var(--bg,#faf6f0);border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.pane-groups .pg-introcnt{font-size:12px;font-weight:700;color:#7a4b00;background:#ffd770;border-radius:6px;padding:1px 8px;white-space:nowrap}
+.pane-groups .pg-row.intro .pg-item:not(.cur){background:#fff1b8;border-color:#e3b53f}
+.pane-groups .pg-row.intro .pg-item:not(.cur) .pg-title{background:#ffd770;color:#7a4b00}
+.pane-groups .pg-row.intro .pg-item:not(.cur) .pg-meta{color:#7a4b00}
+.pane-groups .pg-row.intro .pg-no{color:#7a4b00;background:#ffd770;border-radius:5px;padding:0 4px}

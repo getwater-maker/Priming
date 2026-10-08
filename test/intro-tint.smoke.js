@@ -88,6 +88,16 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(pickedBg === 'rgb(255, 255, 255)', `선택한 도입부 클립 = 제 색(흰 바탕) (${pickedBg})`);
     ok(pickedNoBg && pickedNoBg !== 'rgb(255, 215, 112)', `선택한 클립의 번호 칸은 도입부 노랑이 아니다 (${pickedNoBg})`);
 
+    // 🎞 그룹 칸 — 도입부 그룹은 같은 노랑 · 맨 위 「도입부 N개」 줄(고정)
+    const gc = await win.evaluate(() => {
+      const head = document.querySelector('[data-testid=group-intro-cnt]'); const rows = document.querySelectorAll('.pane-groups .pg-row.intro');
+      const t = document.querySelector('.pane-groups .pg-row.intro .pg-item:not(.cur) .pg-title');
+      const h = document.querySelector('.pane-groups .pg-head.sticky');
+      return { cnt: head ? head.textContent : null, rows: rows.length, title: t ? getComputedStyle(t).backgroundColor : null, sticky: h ? getComputedStyle(h).position : null };
+    });
+    ok(gc.rows > 0 && gc.cnt && gc.cnt.includes(`${gc.rows}개`), `그룹 칸 「${gc.cnt}」 = 노랑 그룹 ${gc.rows}개`);
+    ok(gc.title === 'rgb(255, 215, 112)' && gc.sticky === 'sticky', `그룹 칸 도입부 제목 노랑 · 머리줄 고정 (${gc.title} · ${gc.sticky})`);
+
     if (process.env.INTRO_TINT_SHOT) {   // 경계(도입부 → 본문)가 보이게 본문 첫 그룹을 화면 가운데로
       await win.locator('.cut:not(.intro) .scene-h').first().scrollIntoViewIfNeeded();
       await win.evaluate(() => { const e = document.querySelector('.cut:not(.intro)'); if (e) e.scrollIntoView({ block: 'center' }); });
