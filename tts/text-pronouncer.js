@@ -43,7 +43,9 @@ function applyOmniVoiceDict(text, globalDict) {
   entries.sort((a, b) => b.source.length - a.source.length);
   let out = String(text || '');
   for (const { source, pron } of entries) {
-    out = out.split(source).join(pron);
+    // 🔤 영문이 든 항목은 대소문자 구분 없이(AI·ai·Ai 모두) — 한글만인 항목은 예전 그대로(글자 그대로 치환)
+    if (/[A-Za-z]/.test(source)) out = out.replace(new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), () => pron);
+    else out = out.split(source).join(pron);
   }
   return out;
 }

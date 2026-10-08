@@ -60,10 +60,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       return { n: rs.length, inStage: rs.filter((r) => r.startContainer.parentElement && r.startContainer.parentElement.closest('#stageCap')).length, inList: rs.filter((r) => r.startContainer.parentElement && r.startContainer.parentElement.closest('main.pane2')).length, cur: c ? [...c].length : 0 };
     });
     ok(hl.n >= 8 && hl.inStage === 0 && hl.inList === hl.n && hl.cur >= 1, `목록만 칠한다 (${JSON.stringify(hl)})`);
+    // ☑ 검색된 클립 모두 선택
+    await win.locator('[data-testid=find-selall]').click(); await win.waitForTimeout(400);
+    const picked = await win.locator('main.pane2 .sent.clip.picked').count();
+    ok(picked === 8, `☑ 모두 → 검색된 8개 클립이 체크된다 (${picked})`);
     // 전부 지워도 포커스 유지 → 바로 다시 입력
+    await inp.click(); await win.keyboard.press('End'); await win.waitForTimeout(300);
     for (let i = 0; i < 6; i++) { await win.keyboard.press('Backspace'); await win.waitForTimeout(80); }
     await win.waitForTimeout(500);
-    ok(await inp.inputValue() === '', '전부 지웠다');
+    ok(await inp.inputValue() === '', '전부 지웠다 (「' + await inp.inputValue() + '」 포커스 ' + await win.evaluate(() => (document.activeElement && (document.activeElement.id || document.activeElement.tagName)))+ ')');
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) === 'find-input', '다 지운 뒤에도 포커스가 검색창에');
     await win.keyboard.type('3장'); await win.waitForTimeout(800);
     ok(await inp.inputValue() === '3장' && /^\d+\/10$/.test(await cnt()), `바로 다시 입력된다 (「${await inp.inputValue()}」 ${await cnt()})`);

@@ -4298,7 +4298,7 @@ export default function App() {
     const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length || !text) return;
     const q = text.toLowerCase();
     const hits = PL.list.filter((x) => { const s = capSentence(sn, x.groupNum, x.sentIdx); return s && String(s.text || '').slice(x.from, x.to).toLowerCase().includes(q); });
-    hr.total = hits.length; if (!hits.length) { hr.idx = -1; paintFind(''); return; }
+    hr.hits = hits; hr.total = hits.length; if (!hits.length) { hr.idx = -1; paintFind(''); return; }
     let i;
     if (fresh || hr.idx < 0) { const cn = cursor && cursor.n != null ? cursor.n : 0; i = hits.findIndex((x) => x.n >= cn); if (i < 0) i = 0; }
     else i = (hr.idx + (forward ? 1 : -1) + hits.length) % hits.length;
@@ -4335,6 +4335,14 @@ export default function App() {
       if (all.length) CSS.highlights.set('pm-find', new Highlight(...all));
       if (cur.length) CSS.highlights.set('pm-find-cur', new Highlight(...cur));
     } catch (_) {}
+  }
+  // ☑ 검색된 클립을 한꺼번에 선택(음성 다시 만들기·삭제·서식 등 클립 도구가 그대로 먹는다)
+  function selectFindHits() {
+    const hr = findHitRef.current; const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
+    if (!hr.hits || !hr.hits.length || sn == null) return;
+    const items = hr.hits.map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to }));
+    setCapSel({ shortsNum: sn, mode: 'lines', items, anchorN: items[0].n });
+    setStatus(`🔎 검색된 클립 ${items.length}개를 모두 골랐습니다 — 클립 도구 막대(🎤 목소리 수정 → 다시 만들기 · 🗑 삭제 등)를 쓰세요 (Esc 해제)`);
   }
   function runFind(text, move, forward) {
     findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
@@ -4710,6 +4718,21 @@ export default function App() {
       </aside>
     );
   })();
+  // 🎯 그룹 칸 — 지금 위치(파란 그룹)가 바뀌면 그 그룹이 칸의 **가운데**에 오게 스크롤(재생 중 따라가기 · 검색·클립 이동 포함)
+  const pgCurGroup = (() => {
+    if (!wsOn || !cursor) return null;
+    const PL = linesMap.get(cursor.shortsNum); if (!PL) return null;
+    const l = PL.list[cursor.n - 1] && PL.list[cursor.n - 1].n === cursor.n ? PL.list[cursor.n - 1] : PL.list.find((x) => x.n === cursor.n);
+    return l ? l.groupNum : null;
+  })();
+  useEffect(() => {
+    if (pgCurGroup == null || !groupCol) return;
+    const pane = document.querySelector('.pane-groups'); const el = pane && pane.querySelector('.pg-item.cur'); if (!pane || !el) return;
+    const head = pane.querySelector('.pg-head.sticky'); const hh = head ? head.getBoundingClientRect().height : 0;
+    const pr = pane.getBoundingClientRect(), er = el.getBoundingClientRect();
+    const target = pane.scrollTop + (er.top - pr.top) - ((pane.clientHeight + hh) / 2 - er.height / 2);
+    pane.scrollTop = Math.max(0, target);
+  }, [pgCurGroup, !!groupCol]);
   const curGroupNum = (() => { if (!cursor) return null; const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n); return l ? l.groupNum : null; })();
   useEffect(() => {   // 지금 그룹이 칸 안에 보이게(재생·이동을 따라간다)
     if (!wsOn || curGroupNum == null) return;
@@ -4982,9 +5005,10 @@ export default function App() {
             <input id="find-input" defaultValue={findTextRef.current} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
               onChange={(e) => runFind(e.target.value, false)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'ArrowUp') { e.preventDefault(); runFind(findTextRef.current, true, false); } else if (e.key === 'ArrowDown') { e.preventDefault(); runFind(findTextRef.current, true, true); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
-            <span className="fcnt">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
+            <span className="fcnt" title="검색된 클립 수(한 클립에 같은 말이 두 번 나와도 1개로 셉니다)">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
             <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
             <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
+            {wsOn && findRes.total > 0 && findHitRef.current.total > 0 && <button className="ghost" data-testid="find-selall" title={`검색된 클립 ${findHitRef.current.total}개(클립 단위 — 한 클립에 두 번 나와도 1개)를 모두 체크 — 음성 다시 만들기·삭제 등을 한 번에`} onClick={selectFindHits}>☑ 모두</button>}
             <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
           </div>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
@@ -7377,8 +7401,9 @@ function LaneLayer({ pr, lines, onInsMark, onInsRange }) {
 // 🖼 그룹 그림 범위 선(Vrew 그림의 파란 선 · v0.5.61) — 시작 클립 윗변 ~ 끝 클립 아랫변을 화면에서 재서 **그룹을 넘어 한 줄로**.
 //   자기 그룹 안 = 실선 · 밖(다음 그룹 밑으로 이어 깔린 곳 = 아래층) = 조금 왼쪽의 점선(다음 그룹 선에 가려지지 않게).
 //   양 끝 손잡이 = 시작점·끝점 — 끌면 Cards 의 vrDrag 가 범위를 바꾸고, 선은 끄는 동안 · 놓은 직후(pending)에도 따라온다.
-function blockRect(grid, sn, ord, end) {
-  const b = grid.querySelector(`.sblk[data-sn="${sn}"][data-ord="${ord}"]`);
+function blockRect(grid, sn, ord, end, blkMap) {
+  // ⚡ 대본이 길면(수천 클립) 그룹마다 속성 선택자로 찾는 것이 클릭마다 2초씩 걸렸다 — measure 가 한 번 만든 순번 표(blkMap)를 쓴다
+  const b = blkMap ? blkMap.get(String(ord)) : grid.querySelector(`.sblk[data-sn="${sn}"][data-ord="${ord}"]`);
   if (!b) return null;
   if (b.offsetParent) {
     const cl = b.querySelectorAll('.sent.clip');
@@ -7404,15 +7429,17 @@ function RailLayer({ pr, drag, pending, onGrab }) {
     const layer = ref.current; if (!layer) return;
     const grid = layer.parentElement; if (!grid) return;
     const G = grid.getBoundingClientRect(); const sn = pr.shortsNum;
+    const blk = new Map(); grid.querySelectorAll(`.sblk[data-sn="${sn}"]`).forEach((e) => blk.set(e.getAttribute('data-ord'), e));
+    const sentsOf = new Map(); grid.querySelectorAll(`.cut[data-sn="${sn}"]`).forEach((e) => sentsOf.set(e.getAttribute('data-g'), e.querySelector('.sents')));
     const out = []; let o = 0;
     for (const c of pr.cuts) {
       const n = (c.sentences || []).length; const gs = o + 1, ge = o + n; o = ge;
       if (!n) continue;
       const d = drag && drag.groupNum === c.num ? vrRangeOf(drag) : (pending && pending.groupNum === c.num ? pending : null);
       const r = d || c.span || { from: gs, to: ge };
-      const a = blockRect(grid, sn, r.from, false), b = blockRect(grid, sn, r.to, true);
-      const a2 = blockRect(grid, sn, gs, false), b2 = blockRect(grid, sn, ge, true);
-      const cut = grid.querySelector(`.cut[data-sn="${sn}"][data-g="${c.num}"] .sents`);
+      const a = blockRect(grid, sn, r.from, false, blk), b = blockRect(grid, sn, r.to, true, blk);
+      const a2 = blockRect(grid, sn, gs, false, blk), b2 = blockRect(grid, sn, ge, true, blk);
+      const cut = sentsOf.get(String(c.num));
       if (!a || !b || !a2 || !b2 || !cut) continue;
       out.push({ num: c.num, from: r.from, to: r.to, gs, ge, has: !!(c.imagePath || c.videoPath), live: !!d,
         top: Math.round(a.top - G.top), bot: Math.round(b.bottom - G.top), ownTop: Math.round(a2.top - G.top), ownBot: Math.round(b2.bottom - G.top), x: Math.round(cut.getBoundingClientRect().left - G.left) });
