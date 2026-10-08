@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMe
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vidListText } from './lib/videoSelect.js';
+import { mcImageUnit, mcVideoUnit, mcCostText } from './lib/mediaCost.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
@@ -2145,6 +2146,28 @@ export default function App() {
       + (unknown ? '\n⚠ 단가를 모르는 목소리가 있어 그 문장은 빼고 셌습니다' : '');
     return { total, need, chars, allChars, txt: fmt(usd * krw), allTxt: fmt(usdAll * krw), note };
   }, [dto, ttsEngActive]);
+  // 💰 이미지·비디오 예상 비용 — 지금 대본에서 **아직 안 만든 것만**(이미 있는 그림·영상은 건너뛰므로) · 단가표 = core/media-cost
+  //   이미지 대상 = 이미지 프롬프트가 있고 그림·영상이 아직 없는 그룹(앞 그림이 이어지는 그룹 제외) · 영상 대상 = 고른 범위/방식 안에서 영상이 아직 없는 그룹
+  const imgCost = useMemo(() => {
+    const ps = (dto && dto.projects) || []; if (!ps.length) return null;
+    let need = 0;
+    for (const pr of ps) for (const cu of (pr.cuts || [])) if (cu.imagePrompt && !cu.imagePath && !cu.videoPath && !cu.covered) need++;
+    const u = mcImageUnit(imgEngine, !!(comfyCfg && comfyCfg.cloud));
+    const krw = (ttsEngActive && ttsEngActive.krw) || 1400;
+    return { need, unit: u, txt: mcCostText(u, need, krw), krw };
+  }, [dto, imgEngine, comfyCfg, ttsEngActive]);
+  const vidCost = useMemo(() => {
+    const ps = (dto && dto.projects) || []; if (!ps.length) return null;
+    const u = mcVideoUnit(videoEngine, !!(cvidCfg && cvidCfg.cloud)); if (!u) return null;
+    let need = 0;
+    for (const pr of ps) {
+      const gs = (pr.cuts || []).map((c) => ({ num: c.num, isIntro: !!c.isIntro }));
+      const hit = vidMatcher(gs, vidSel, parseInt(vidFrom, 10) || 1, parseInt(vidTo, 10) || 1);
+      for (const cu of (pr.cuts || [])) if (hit(cu.num) && !cu.videoPath) need++;
+    }
+    const krw = (ttsEngActive && ttsEngActive.krw) || 1400;
+    return { need, unit: u, txt: mcCostText(u, need, krw), krw };
+  }, [dto, videoEngine, vidSel, vidFrom, vidTo, cvidCfg, ttsEngActive]);
   async function openOllama() {
     try {
       const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
@@ -5047,6 +5070,12 @@ export default function App() {
               <option value="gemini-batch">유료(나노바나나 2.1 배치)</option>
               <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
+            {loaded && imgCost && (
+              <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
+                title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다) · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{imgCost.txt.replace('개', '장')}</b>
+              </span>
+            )}
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
@@ -5063,6 +5092,12 @@ export default function App() {
               <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
               <option value="none">없음 (이미지만)</option>
             </select>
+            {loaded && vidCost && (
+              <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
+                title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준 · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{vidCost.txt}</b>
+              </span>
+            )}
             {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}><span className="rb-ic">⚙</span> <span className="rb-t">Veo</span></button>}
             {videoEngine === 'genspark' && (
               <select style={{ maxWidth: 190 }} value={gsVideoModel}
