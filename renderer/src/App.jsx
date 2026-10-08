@@ -4091,6 +4091,13 @@ export default function App() {
   }, [preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
+  // 🔎 리본(이미지·비디오 탭)에서 무료 스톡 열기 — 지금 커서의 그룹 · 탭에 맞춰 사진/영상(v0.7.68)
+  function openStockFor(kind) {
+    const ci = cursorInfo();
+    const pr = ci ? ci.pr : (dto && dto.projects && dto.projects[0]); const c = ci ? ci.cut : (pr && pr.cuts && pr.cuts[0]);
+    if (!pr || !c) { setStatus('대본을 먼저 여세요'); return; }
+    setStockDlg({ shortsNum: pr.shortsNum, groupNum: c.num, intro: !!c.isIntro, kind });
+  }
   function cursorInfo() {
     if (!cursor || !dto || !dto.projects) return null;
     const pr = dto.projects.find((p) => p.shortsNum === cursor.shortsNum); const PL = linesMap.get(cursor.shortsNum);
@@ -5161,6 +5168,7 @@ export default function App() {
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
 
           </span>
             </>)}
@@ -5201,6 +5209,7 @@ export default function App() {
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" data-testid="rb-stock-video" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 영상을 찾아 지금 그룹에 넣습니다" onClick={() => openStockFor('video')}><span className="rb-ic">🔎</span> <span className="rb-t">무료비디오</span></button>
           </span>
             </>)}
             {menu === 'finish' && (<>

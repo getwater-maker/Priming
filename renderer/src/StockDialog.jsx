@@ -5,13 +5,13 @@ import api from './lib/ipc.js';
  * 🔎 무료 스톡 대화상자(v0.7.67 · 로이 2026-10-08) — Pexels · Pixabay 를 한 번에 검색해 고른 사진/영상을 이 그룹에 붙인다.
  *   검색·받기는 main(core/free-stock) · 키는 ⚙ 설정 → API 키(이 창엔 상태와 「설정 열기」만).
  *   ⛔ 결과마다 <video> 를 두지 않는다(Chromium 플레이어 한도) — 썸네일 그림만, 고른 영상 하나만 미리보기.
- *   props: target {shortsNum, groupNum, intro} · onClose() · onAttached(dto) · onOpenKeys()
+ *   props: target {shortsNum, groupNum, intro, kind?} — kind 가 있으면 그것(리본 무료이미지/무료비디오), 없으면 도입부=영상 · onClose() · onAttached(dto) · onOpenKeys()
  */
 export default function StockDialog({ target, onClose, onAttached, onOpenKeys }) {
   const [keys, setKeys] = useState(null);
   const [q, setQ] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [kind, setKind] = useState(target && target.intro ? 'video' : 'photo');
+  const [kind, setKind] = useState(target && target.kind ? target.kind : (target && target.intro ? 'video' : 'photo'));
   const [srcs, setSrcs] = useState({ pexels: true, pixabay: true });
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
