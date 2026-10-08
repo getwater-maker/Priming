@@ -676,6 +676,7 @@ export default function App() {
   const vdCanvasRef = useRef(null);
   const vdAudioRef = useRef(null);
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
+  const [dictFilter, setDictFilter] = useState('');
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
@@ -1596,13 +1597,16 @@ export default function App() {
   }
   async function openStyleEditor() { setStyleEditOpen(true); await syncStyles(false); }
   // ── 발음사전(TTS 교정) ─────────────────────────────
-  async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictOpen(true); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
+  async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictFilter(''); setDictOpen(true); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
   async function saveDict() {
     const clean = dictRows.map((r) => ({ source: (r.source || '').trim(), pron: (r.pron || '').trim(), enabled: r.enabled !== false })).filter((r) => r.source && r.pron);
     const r = await api.dictSave(clean);
     if (r) { setDictRows(r); setDictOpen(false); setStatus('발음사전 저장됨 — 다음 TTS 변환부터 적용'); } else setStatus('발음사전 저장 실패');
   }
-  function addDictRow() { setDictRows((rs) => [...rs, { source: '', pron: '', enabled: true }]); }
+  function addDictRow() {   // 맨 위에 새 줄 + 바로 입력(검색은 풀어 새 줄이 보이게)
+    setDictFilter(''); setDictRows((rs) => [{ source: '', pron: '', enabled: true }, ...rs]);
+    setTimeout(() => { const e = document.querySelector('.dict-grid .dict-src'); if (e) { e.focus(); const g = document.querySelector('.dict-grid'); if (g) g.scrollTop = 0; } }, 30);
+  }
   function setDictRow(i, patch) { setDictRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); }
   function delDictRow(i) { setDictRows((rs) => rs.filter((_, j) => j !== i)); }
   function showPrompt(shortsNum, c, label) {
@@ -5889,35 +5893,48 @@ export default function App() {
           </div>
         </div>
       )}
-      {dictOpen && (
+      {dictOpen && (() => {
+        // 📖 발음사전 — 2열 격자(한 화면에 두 배) · 검색 · 새 줄은 맨 위에서 바로 입력 · 중복·빈 칸 표시 · Enter 로 다음 줄
+        const q = dictFilter.trim().toLowerCase();
+        const shown = dictRows.map((r, i) => ({ r, i })).filter(({ r }) => !q || String(r.source || '').toLowerCase().includes(q) || String(r.pron || '').toLowerCase().includes(q));
+        const seen = new Map(); for (const r of dictRows) { const k = String(r.source || '').trim(); if (k) seen.set(k, (seen.get(k) || 0) + 1); }
+        const half = (r) => !!(String(r.source || '').trim() ? !String(r.pron || '').trim() : String(r.pron || '').trim());
+        const nBad = dictRows.filter(half).length, nDup = [...seen.values()].filter((v) => v > 1).length, nOff = dictRows.filter((r) => r.enabled === false).length;
+        return (
         <div className="modal-bg show">
-          <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
-            <h3>📖 발음사전 (TTS 교정)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>TTS가 잘못 읽는 단어를 <b>발음대로</b> 교정합니다. <b>자막·대본은 그대로</b>이고 <b>음성 합성에만</b> 적용됩니다.
-              예) 대본표기 <b>정약용</b> → 발음표기 <b>정냐굥</b> 으로 등록하면, 자막엔 "정약용"이 뜨고 음성만 "정냐굥"으로 읽습니다.</div>
-            <div style={{ display: 'flex', gap: 6, fontSize: 12, fontWeight: 600, padding: '0 4px 4px' }}>
-              <span style={{ flex: '0 0 30px' }}>사용</span><span style={{ flex: 1 }}>대본 표기 (자막에 나오는 말)</span><span style={{ flex: 1 }}>발음 표기 (TTS가 읽을 말)</span><span style={{ flex: '0 0 30px' }} />
+          <div className="modal-card wide dict-card" data-testid="dict-dlg">
+            <div className="dict-top">
+              <h3>📖 발음사전 (TTS 교정)<Hint>TTS가 잘못 읽는 단어를 <b>발음대로</b> 교정합니다. <b>자막·대본은 그대로</b>이고 <b>음성 합성에만</b> 적용됩니다.<br />예) 대본표기 <b>정약용</b> → 발음표기 <b>정냐굥</b> 으로 등록하면 자막엔 「정약용」이 뜨고 음성만 「정냐굥」으로 읽습니다.</Hint></h3>
+              <input className="dict-find" data-testid="dict-find" placeholder="🔍 검색 (대본·발음 표기)" value={dictFilter} onChange={(e) => setDictFilter(e.target.value)} />
+              <button className="dict-add" data-testid="dict-add" onClick={addDictRow} title="맨 위에 새 줄을 만들고 바로 입력합니다">＋ 추가</button>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
-              {dictRows.length === 0 && <div className="meta" style={{ padding: 8 }}>등록된 단어가 없습니다. 아래 「＋ 추가」로 시작하세요.</div>}
-              {dictRows.map((r, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                  <input type="checkbox" style={{ flex: '0 0 30px', width: 'auto' }} checked={r.enabled !== false} onChange={(e) => setDictRow(i, { enabled: e.target.checked })} title="이 교정 사용/해제" />
-                  <input style={{ flex: 1 }} placeholder="예: 정약용" value={r.source || ''} onChange={(e) => setDictRow(i, { source: e.target.value })} />
-                  <span>→</span>
-                  <input style={{ flex: 1 }} placeholder="예: 정냐굥" value={r.pron || ''} onChange={(e) => setDictRow(i, { pron: e.target.value })} />
-                  <button className="ghost" title="삭제" style={{ flex: '0 0 auto' }} onClick={() => delDictRow(i)}>🗑</button>
-                </div>
-              ))}
+            <div className="dict-sub meta">
+              전체 {dictRows.length}개{q ? ` · 검색 ${shown.length}개` : ''}{nOff ? ` · 꺼짐 ${nOff}` : ''}
+              {nDup > 0 && <span className="dict-warn"> · ⚠ 같은 표기 중복 {nDup}</span>}
+              {nBad > 0 && <span className="dict-warn"> · ⚠ 한쪽만 적은 줄 {nBad}(저장 때 빠집니다)</span>}
             </div>
-            <div style={{ borderTop: '1px solid var(--border,#ddd)', paddingTop: 8, marginTop: 4 }}>
-              <button className="ghost" onClick={addDictRow}>＋ 추가</button>
-              <span className="meta" style={{ marginLeft: 8 }}>저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다.</span>
+            <div className="dict-grid" data-testid="dict-grid">
+              {dictRows.length === 0 && <div className="meta" style={{ padding: 8, gridColumn: '1 / -1' }}>등록된 단어가 없습니다. 위 「＋ 추가」로 시작하세요.</div>}
+              {dictRows.length > 0 && !shown.length && <div className="meta" style={{ padding: 8, gridColumn: '1 / -1' }}>「{dictFilter}」 와 맞는 줄이 없습니다.</div>}
+              {shown.map(({ r, i }) => {
+                const dup = (seen.get(String(r.source || '').trim()) || 0) > 1;
+                return (
+                <div key={i} className={'dict-row' + (r.enabled === false ? ' off' : '') + (half(r) ? ' bad' : '') + (dup ? ' dup' : '')}>
+                  <input type="checkbox" checked={r.enabled !== false} onChange={(e) => setDictRow(i, { enabled: e.target.checked })} title="이 교정 사용/해제" />
+                  <input className="dict-src" placeholder="대본 표기 (예: 정약용)" title={dup ? '같은 대본 표기가 두 번 있습니다 — 위의 것이 먼저 적용됩니다' : ''} value={r.source || ''} onChange={(e) => setDictRow(i, { source: e.target.value })} />
+                  <span className="dict-arrow">→</span>
+                  <input className="dict-pron" placeholder="발음 표기 (예: 정냐굥)" value={r.pron || ''} onChange={(e) => setDictRow(i, { pron: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addDictRow(); } }} />
+                  <button className="dict-del" title="이 줄 삭제" onClick={() => delDictRow(i)}>🗑</button>
+                </div>); })}
             </div>
-            <div className="mbtns"><button onClick={saveDict}>저장</button><button className="ghost" onClick={() => setDictOpen(false)}>취소</button></div>
+            <div className="dict-foot">
+              <span className="meta">저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다 · 발음 칸에서 Enter = 새 줄</span>
+              <span className="grow" />
+              <button onClick={saveDict} data-testid="dict-save">저장</button><button className="ghost" onClick={() => setDictOpen(false)}>취소</button>
+            </div>
           </div>
-        </div>
-      )}
+        </div>); })()}
       {vdOpen && (
         // z 110 — 🔊 음성 설정 창(🎨 보이스디자인 탭)에서 열면 그 창 위에 떠야 한다(같은 z 면 뒤에 그려진 음성 설정이 덮는다)
         <div className="modal-bg show" style={{ zIndex: 110 }} data-testid="vd-dlg">

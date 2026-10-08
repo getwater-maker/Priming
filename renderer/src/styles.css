@@ -1184,3 +1184,24 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .cuts-grid .sent.clip.reading,.cuts-grid .cut.intro .sent.clip.reading{background:#d9f1fb !important;border-color:#19a8d6 !important;box-shadow:0 0 0 2px #19a8d6 inset !important}
 .cuts-grid .sent.clip.reading .clip-no,.cuts-grid .cut.intro .sent.clip.reading .clip-no{background:#19a8d6 !important;color:#fff !important;border-right-color:#19a8d6 !important}
 .cuts-grid .sent.clip.reading .clip-no-n::before{content:'▶ ';font-size:10px}
+
+/* 📖 발음사전 — 2열 격자 · 상단 검색/추가 · 하단 저장줄 고정 */
+.modal-card.dict-card{width:min(1080px,94vw);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;padding:16px 20px}
+.dict-top{display:flex;align-items:center;gap:10px}
+.dict-top h3{margin:0;flex:0 0 auto;white-space:nowrap}
+.dict-find{flex:1;min-width:120px;max-width:340px;margin-left:auto}
+.dict-add{flex:0 0 auto;font-weight:700}
+.dict-sub{padding:4px 2px 6px}
+.dict-warn{color:#c0661e;font-weight:700}
+.dict-grid{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 14px;align-content:start;padding:2px 6px 2px 0}
+.dict-row{display:flex;align-items:center;gap:5px;min-width:0}
+.dict-row input[type=checkbox]{flex:0 0 auto;width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.dict-row .dict-src,.dict-row .dict-pron{flex:1 1 0;min-width:0;padding:5px 7px}
+.dict-row .dict-arrow{flex:0 0 auto;color:var(--muted,#8a7a5c)}
+.dict-row .dict-del{flex:0 0 auto;padding:3px 7px;min-height:0;background:transparent;border:1px solid transparent;color:#a08a6a;cursor:pointer;border-radius:6px;opacity:.55}
+.dict-row:hover .dict-del,.dict-row .dict-del:focus{opacity:1;border-color:var(--line);color:#c0392b}
+.dict-row.off .dict-src,.dict-row.off .dict-pron{opacity:.45;text-decoration:line-through}
+.dict-row.bad .dict-src,.dict-row.bad .dict-pron{border-color:#e0954a;background:#fff4e6}
+.dict-row.dup .dict-src{border-color:#e0954a}
+.dict-foot{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+.dict-foot .grow{flex:1}
