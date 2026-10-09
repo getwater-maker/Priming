@@ -42,21 +42,23 @@
 
 ## 3. 모듈 지도
 
-| 영역 | 파일 |
-|---|---|
-| IPC·오케스트레이션·큐·게이트·레인 | `main.js`(권위 상태 `S`) · `preload.js` |
-| 파싱 | `core/parsers/longform-parser.js` · `core/sentence-splitter.js`(🔑 문장 규칙 정본, `MATCH_PATTERNS`) · `core/group-builder.js` · `core/project-model.js` |
-| 공용 파이프라인 | `core/pipeline.js`(parseScript·toDTO·fillTts·buildProjectVrew·retryFs·buildImagePrompt) |
-| 대본 편집·보기 | `core/script-edit.js`(문장 범위 치환) · `core/script-reader.js`(대본 보기·A4 PDF) · `core/group-merge.js` · `core/visual-span.js`(그림 범위·레이어) · `core/visual-look.js` · `core/overlay-layers.js`(삽입·로고) |
-| 자막 | `core/caption-splitter.js`(🔑 줄 나누기 **유일한 구현** — 렌더러 `renderer/src/lib/captions.js` 는 re-export) · `core/caption-format.js`(서식 모델) · `core/caption-ass.js` · `core/caption-anim*.js` · `core/font-store.js` |
-| TTS | `tts/tts-manager.js`(싱글톤) · `tts/providers/omnivoice-provider.js` · `tts/text-pronouncer.js`(🔑 `processForTTS` = TTS 텍스트 가공 유일한 문) · `tts/preset-store.js`(채널) · `core/tts-cache.js` · `core/audio-normalize.js` · `tts/asr-client.js`(STT) |
-| 이미지 | `core/comfy-image.js` · `core/comfy-models.js`(모델 자동 대체) · `core/comfy-perf.js` · `genspark-engine.js` · `flow-engine.js`(⚠ CRLF 파일) · `core/image-rotation.js` · `core/style-store.js` · `core/media-cache.js` |
-| 비디오 | `core/comfy-video.js` · `grok-engine.js` · `core/grok-api.js` · `flow-engine.js`(Veo) · `genspark-engine.js`(비디오) · `core/video-fit.js` · `core/upscaler.js` |
-| 출력 | `vrew/vrew-builder.js`(.vrew) · `core/vrew-render.js`(.vrew → MP4) · `core/whiteboard-*.js` + `whiteboard/`(벤더링) · `core/premiere-xml.js` · `core/youtube-upload.js`·`yt-packaging.js`·`yt-chapters.js` |
-| 리모션 | `core/tsv-tts.js` · `core/tsv-images.js` · `core/audio-trim.js` · `renderer/src/RemotionView.jsx` |
-| 출판 | `core/book/*`(parser·html-builder·pdf-builder·epub-builder·spine-calc·isbn-barcode) · `renderer/src/BookView.jsx` |
-| 받기·STT | `core/media-download.js`(yt-dlp) · `core/merge-assets.js`(통합본 이어받기) · `core/vrew-audio.js`(Vrew 음성 가져오기) |
-| 화면 | `renderer/src/App.jsx`(헤더·리본·모달) · `Workspace.jsx`(① 영상 ② 클립 ③ 설정 3칸 · 🔑 `buildProjLines` = 줄 번호 정본) · `CaptionFormat.jsx` · `ScriptReader.jsx` |
+| 영역 | 파일 | 먼저 읽을 규칙 |
+|---|---|---|
+| IPC·오케스트레이션·큐·게이트·레인 | `main.js`(권위 상태 `S`) · `preload.js` | 고치는 함수의 기능으로 ↓ 아래 줄 |
+| 파싱 | `core/parsers/longform-parser.js` · `core/sentence-splitter.js`(🔑 문장 규칙 정본, `MATCH_PATTERNS`) · `core/group-builder.js` · `core/project-model.js` | [대본편집](docs/규칙/대본편집.md) · ja/vi 는 [다국어](docs/규칙/다국어.md) |
+| 공용 파이프라인 | `core/pipeline.js`(parseScript·toDTO·fillTts·buildProjectVrew·retryFs·buildImagePrompt) | fillTts → [TTS](docs/규칙/TTS.md) · 그 밖 → [대본편집](docs/규칙/대본편집.md) |
+| 대본 편집·보기 | `core/script-edit.js`(문장 범위 치환) · `core/script-reader.js`(대본 보기·A4 PDF) · `core/group-merge.js` · `core/visual-span.js`(그림 범위·레이어) · `core/visual-look.js` · `core/overlay-layers.js`(삽입·로고) | [대본편집](docs/규칙/대본편집.md) |
+| 자막 | `core/caption-splitter.js`(🔑 줄 나누기 **유일한 구현** — 렌더러 `renderer/src/lib/captions.js` 는 re-export) · `core/caption-format.js`(서식 모델) · `core/caption-ass.js` · `core/caption-anim*.js` · `core/font-store.js` | [자막](docs/규칙/자막.md) |
+| TTS | `tts/tts-manager.js`(싱글톤) · `tts/providers/omnivoice-provider.js` · `tts/text-pronouncer.js`(🔑 `processForTTS` = TTS 텍스트 가공 유일한 문) · `tts/preset-store.js`(채널) · `core/tts-cache.js` · `core/audio-normalize.js` · `tts/asr-client.js`(STT) | [TTS](docs/규칙/TTS.md) · 채널·목소리 분류 → [채널설정](docs/규칙/채널설정.md) · ja/vi → [다국어](docs/규칙/다국어.md) |
+| 이미지 | `core/comfy-image.js` · `core/comfy-models.js`(모델 자동 대체) · `core/comfy-perf.js` · `genspark-engine.js` · `flow-engine.js`(⚠ CRLF 파일) · `core/image-rotation.js` · `core/style-store.js` · `core/media-cache.js` | Gemini → [나노바나나](docs/규칙/나노바나나.md) · 스타일 → [채널설정](docs/규칙/채널설정.md) |
+| 비디오 | `core/comfy-video.js` · `grok-engine.js` · `core/grok-api.js` · `flow-engine.js`(Veo) · `genspark-engine.js`(비디오) · `core/video-fit.js` · `core/upscaler.js` | [비디오엔진](docs/규칙/비디오엔진.md) |
+| 출력 | `vrew/vrew-builder.js`(.vrew) · `core/vrew-render.js`(.vrew → MP4) · `core/whiteboard-*.js` + `whiteboard/`(벤더링) · `core/premiere-xml.js` · `core/youtube-upload.js`·`yt-packaging.js`·`yt-chapters.js` | youtube-*·yt-* → [유튜브업로드](docs/규칙/유튜브업로드.md) |
+| 리모션 | `core/tsv-tts.js` · `core/tsv-images.js` · `core/audio-trim.js` · `renderer/src/RemotionView.jsx` | [출판](docs/규칙/출판.md) |
+| 출판 | `core/book/*`(parser·html-builder·pdf-builder·epub-builder·spine-calc·isbn-barcode) · `renderer/src/BookView.jsx` | [출판](docs/규칙/출판.md) |
+| 받기·STT | `core/media-download.js`(yt-dlp) · `core/merge-assets.js`(통합본 이어받기) · `core/vrew-audio.js`(Vrew 음성 가져오기) | — |
+| 화면 | `renderer/src/App.jsx`(헤더·리본·모달) · `Workspace.jsx`(① 영상 ② 클립 ③ 설정 3칸 · 🔑 `buildProjLines` = 줄 번호 정본) · `CaptionFormat.jsx` · `ScriptReader.jsx` | ② 클립·그룹 칸·막대 → [클립화면](docs/규칙/클립화면.md) · ⚙ 설정·채널 편집 → [채널설정](docs/규칙/채널설정.md) · CaptionFormat → [자막](docs/규칙/자막.md) |
+
+> 🔎 **`main.js`·`App.jsx` 는 기능이 섞여 있다 — 고치는 함수·IPC 이름으로 규칙 문서를 고른다**: `runYtUpload`·`enqueueYtUpload` → 유튜브업로드 · `runGeminiBatchImages`·`gemini*` → 나노바나나 · `book-*`·`remotion-*` → 출판 · `_editSentences`·`merge-*`·`split*`·`delete/copy/paste-clips`·`undo*`·`roy*` → 대본편집 · `tts*`·`voice*`·`*-ref-*`·`qwen-design*` → TTS · `cap*` → 자막 · `get/save-preset*`·`api-key-*`·`*-style*` → 채널설정 · `video-build`·`flow*`·`grok*` → 비디오엔진. 어느 것에도 안 맞으면 이 문서의 해당 절만으로 판단한다.
 
 ## 4. 폴더 · 설정 위치
 
