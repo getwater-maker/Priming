@@ -493,6 +493,16 @@ const DLG = { n: 0 };
 function _bringFront(w) {
   try { if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } } catch {}
 }
+// 🩹 입력 잠김(v0.7.72 · 로이 「입력했다가 다시 입력하려면 안 된다 — 모든 입력칸에서, 그러다 다시 되기도」): Electron(Windows)은 네이티브 대화상자(alert·confirm·파일 고르기·메시지 상자)가
+//   닫힌 뒤 창이 키보드 초점을 잃은 채 남아 입력칸이 글자를 못 받는 일이 있다(창을 한 번 눌러 바꿨다 오면 풀린다). 대화상자가 닫히면 창 초점을 한 번 다시 준다.
+function _refocus(w) {
+  try {
+    const t = w || win;
+    if (!t || t.isDestroyed() || t.isMinimized()) return;
+    global.__refocusN = (global.__refocusN || 0) + 1;
+    t.blur(); t.focus(); t.webContents.focus();
+  } catch {}
+}
 for (const _k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox']) {
   const _orig = dialog[_k].bind(dialog);
   dialog[_k] = (...a) => {
@@ -501,9 +511,10 @@ for (const _k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox']) {
     DLG.n++;
     let p;
     try { p = _orig(...a); } catch (e) { DLG.n--; throw e; }
-    return Promise.resolve(p).finally(() => { DLG.n--; });
+    return Promise.resolve(p).finally(() => { DLG.n--; setTimeout(() => _refocus(parent || win), 40); });
   };
 }
+ipcMain.handle('refocus-window', () => { _refocus(win); return true; });   // 렌더러 alert/confirm 이 닫힌 뒤 · 입력칸을 눌렀는데 창에 초점이 없을 때
 // 렌더러의 alert/confirm 도 같은 통로 — 띄우기 직전에 창을 앞으로 (renderer 가 IPC 를 먼저 보낸다).
 ipcMain.handle('focus-window', () => { _bringFront(win); return true; });
 let _lockedSince = 0;
@@ -7989,6 +8000,7 @@ function _restoreState(st) {
 }
 /** 바꾸기 직전에 부른다. 같은 종류가 0.8초 안에 이어지면(색 고르기를 끌 때 등) 한 번으로 친다. */
 function undoPush(label, opts = {}) {
+  if (UNDO.batch) return null;   // 🧩 묶음 안(add-media-clip) — 맨 앞에서 한 번만 기억한다(Ctrl+Z 한 번에 통째로)
   if (!S.parsed || S.parsed.kind === 'book') return null;
   _undoCheck();
   const last = UNDO.undo[UNDO.undo.length - 1];
@@ -8851,6 +8863,13 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
 //   화면은 문장마다 그 문장의 **모든 줄**(지금 보이는 모양)과 고른 줄 표시를 보낸다: sents = [{ groupNum, sentIdx, lines:[{from, to, sel}] }].
 //   대본(.md)은 문장 단위로만 바꾸고 **검증 재파싱 뒤에만** 쓴다 · 되돌리기(Ctrl+Z) 한 번에 통째로 · 남은 줄 모양은 굳힌다(끝 표식).
 const _END_P = /[.!?。]+\s*$/;
+/** ⏱ 느린 편집 명령의 어디가 느린지 로그에 남긴다(v0.7.72 · 로이 「클립 추가·그룹 나누기가 딜레이」) — 250ms 넘을 때만 한 줄 */
+function _stopwatch(tag) {
+  const t0 = Date.now(); let last = t0; const parts = [];
+  const f = (l) => { const n = Date.now(); parts.push(l + ' ' + (n - last)); last = n; };
+  f.done = () => { const tot = Date.now() - t0; if (tot > ((typeof process !== 'undefined' && process.env && Number(process.env.PM_SW_MS) >= 0) ? Number(process.env.PM_SW_MS) : 250)) log(`⏱ ${tag} ${tot}ms — ${parts.join(' · ')}`); };
+  return f;
+}
 function _clipCtx(shortsNum) {
   if (!S.parsed || S.parsed.kind === 'book') return { error: '대본을 먼저 여세요.' };
   if (!S.scriptPath || !fs.existsSync(S.scriptPath)) return { error: '대본 파일(.md)을 찾을 수 없습니다.' };
@@ -8937,6 +8956,7 @@ function _fixedBreaks(text, parts) {
 function _endMark(t) { return _END_P.test(t) ? t : t + '.'; }
 /** 공통 마무리 — 빈 그룹 치우기(그림은 휴지통 · ↶ 로 되살린다) · 번호 · 범위 끝 정리 · 해시 · 저장 */
 function _afterClipOp(pr, idMap) {
+  const _sw = _stopwatch('편집 마무리');
   const { finalizeGroupIds } = require('./core/project-model');
   if (idMap && idMap.size) { require('./core/visual-span').remapSpanIds(pr, idMap); require('./core/overlay-layers').remapIds(pr, idMap); }
   const gone = pr.groups.filter((g) => !(g.sentenceIds || []).length);
@@ -8955,10 +8975,14 @@ function _afterClipOp(pr, idMap) {
     if (sp.endId && !ids.has(sp.endId)) sp.endId = null;
     if (!sp.startId && !sp.endId) g.visSpan = undefined;
   }
+  _sw('정리');
   if (gone.length) { try { renumberMediaFiles(pr, mediaDir); } catch {} }
+  _sw('그림 번호');
   const nh = scriptHash(S.scriptPath);
   try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
-  storeActive(); dtoByReply(); syncSnapshotNow();
+  _sw('해시');
+  storeActive(); dtoByReply(); _sw('보관'); syncSnapshotNow(); _sw('작업본 저장');
+  _sw.done();
   return gone.length;
 }
 const _rmTemps = (list) => { for (const p of list || []) if (p && p.temp && p.file) { try { fs.rmSync(p.file, { force: true }); } catch {} } };
@@ -9056,7 +9080,8 @@ ipcMain.handle('copy-clips', async (_e, args = {}) => {
 });
 
 // 📋 붙여넣기 — 고른 클립 **뒤**에. 줄 가운데면 그 문장을 줄 경계에서 둘로 나눠(음성도 쉼에서) 사이에 넣는다. 음성은 복사한 조각을 그대로.
-ipcMain.handle('paste-clips', async (_e, args = {}) => {
+async function _pasteClips(args = {}) {
+  const _sw = _stopwatch('클립 붙여넣기');
   const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
   const pr = c.pr;
   const list = _clipSents(pr, [args.at]);
@@ -9072,8 +9097,10 @@ ipcMain.handle('paste-clips', async (_e, args = {}) => {
   const tail = tailParts.join(' ').trim();
   const texts = [head, ...chunks.map((x) => _endMark(String(x.text).trim())), ...(tail ? [tail] : [])];
   const plan = _planMdEdits(pr, [{ idx: j.idx, text: texts.join(' '), n: texts.length }]);
+  _sw('대본 다시 읽기');
   if (!plan.ok) return plan;
   const _u = undoPush('클립 붙여넣기', { md: true });
+  _sw('되돌리기 기억');
   try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const made = plan.outs.get(j.idx);
   const used = new Set(pr.sentences.map((x) => x.id));
@@ -9111,12 +9138,16 @@ ipcMain.handle('paste-clips', async (_e, args = {}) => {
   const si = pr.sentences.indexOf(j.s), gi = g.sentenceIds.indexOf(j.s.id);
   pr.sentences.splice(si, 1, ...out);
   g.sentenceIds.splice(gi, 1, ...out.map((x) => x.id));
+  _sw('음성');
   _afterClipOp(pr, idMap);
+  _sw('마무리');
   const firstNew = pr.sentences.indexOf(out[1]);
   log(`📋 ${prLabel(pr)} 클립 ${chunks.reduce((a, x) => a + ((x.parts && x.parts.length) || 1), 0)}개 붙여넣기 — G${g.num} · 대본(.md) 갱신`
     + (lost ? ` · 음성 ${lost}문장은 다시 만들어야 합니다(🎤)` : ' · 음성도 함께') + ' (Ctrl+Z 되돌리기)');
-  return { ok: true, dto: P.toDTO(S.parsed), groupNum: g.num, firstSentence: firstNew };
-});
+  const _dto = P.toDTO(S.parsed); _sw('DTO'); _sw.done();
+  return { ok: true, dto: _dto, groupNum: g.num, firstSentence: firstNew };
+}
+ipcMain.handle('paste-clips', (_e, args = {}) => _pasteClips(args));
 
 // ↕ 클립 옮기기(v0.7.69 · 로이 2026-10-09) — ② 칸에서 클립 번호 칸을 끌어 다른 클립 앞/뒤에 놓는다(체크한 클립 모두 · 하나면 체크 없이 그 클립).
 //   잘라내기 + 붙여넣기를 **대본(.md) 한 번 고치기 · 되돌리기 한 번**으로(중간에 실패하면 아무것도 안 바뀐다).
@@ -9614,7 +9645,7 @@ function _splitGroupCore(pr, idx, best, opts = {}) {
   ng.isI2V = false; ng.mode = g.mode || 'motion';
   const _had = !!((g.imagePath && fs.existsSync(g.imagePath)) || (g.videoPath && fs.existsSync(g.videoPath)));
   g.sentenceIds = firstS.map((s) => s.id);   // 앞 조각 = 원래 그룹 그대로(그림·영상·프롬프트·보기 설정 유지)
-  if (_had) {
+  if (_had && !opts.noExtend) {
     const lastId = secondS[secondS.length - 1].id;
     const ordNow = new Map(); pr.sentences.forEach((s, i) => ordNow.set(s.id, i));
     const cur = g.visSpan && g.visSpan.endId;
@@ -9631,6 +9662,7 @@ function _splitGroupCore(pr, idx, best, opts = {}) {
 //   문장 한가운데(줄 경계)면 그 문장을 줄에서 둘로 나눈 뒤(대본 .md 도 함께 · 음성은 쉼에서 자른다 — 붙여넣기와 같은 길) 그 경계에서 나눈다.
 //   그림·영상 = 앞 그룹이 그대로 이어받고 뒤 그룹 끝까지 이어 깐다(split-group 과 같다). 되돌리기 한 번.
 ipcMain.handle('split-group-at', async (_e, args = {}) => {
+  const _sw = _stopwatch('그룹 나누기');
   const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
   const pr = c.pr;
   const list = _clipSents(pr, [args.at]);
@@ -9676,11 +9708,88 @@ ipcMain.handle('split-group-at', async (_e, args = {}) => {
   const gIdx = pr.groups.indexOf(g0);
   const best = g0.sentenceIds.indexOf(isLast ? j.s.id : hs.id) + 1;
   const num0 = g0.num;
+  _sw('문장·음성');
   const r = _splitGroupCore(pr, gIdx, best, { blankTitle: true });
+  _sw('그룹 나누기');
   _afterClipOp(pr, null);
+  _sw('마무리');
   log(`✂ ${prLabel(pr)} G${num0} → G${num0}·G${num0 + 1} 그룹 나누기 (${r.firstS.length}+${r.secondS.length}문장${isLast ? '' : ' · 문장 한가운데를 줄에서 나눔 · 대본(.md) 갱신'} · 새 그룹 이름은 빈칸)`
     + (r.had ? ` · 그림·영상은 G${num0 + 1} 끝까지 그대로 이어 씁니다(G${num0 + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음') + ' (Ctrl+Z 되돌리기)');
-  return { ok: true, dto: P.toDTO(S.parsed), groupNum: num0 + 1, firstSentence: pr.sentences.findIndex((x) => x.id === r.secondS[0].id) };
+  const _dto = P.toDTO(S.parsed); _sw('DTO'); _sw.done();
+  return { ok: true, dto: _dto, groupNum: num0 + 1, firstSentence: pr.sentences.findIndex((x) => x.id === r.secondS[0].id) };
+});
+
+// 🖼🎬 이미지 클립 · 비디오 클립(v0.7.72 · 로이 「브루처럼 — 파일을 고르면 그것을 넣은 그룹이 생긴다」) — 고른 클립 **바로 뒤**에 새 클립(문장 「새 클립입니다.」 — 바로 고친다) **한 개짜리 새 그룹**을 만들고
+//   고른 그림·영상 파일을 그 그룹에 넣는다. 클립이 그룹 한가운데면 그룹이 앞(A) · 새 그룹(N) · 뒤(B) 셋이 된다 — **뒤 그룹(B)은 A 의 그림·영상을 복사해 가진다**(빈 공간이 없게 · 로이 2026-09-29).
+//   파일은 복사하지 않고 원본을 가리킨다(그림 첨부와 같다 — 지우지 않는다). 대본(.md)·그룹·음성 모두 되돌리기 한 번(UNDO.batch).
+const NEW_CLIP_TEXT = '새 클립입니다.';
+ipcMain.handle('add-media-clip', async (_e, args = {}) => {
+  const kind = args.kind === 'video' ? 'video' : 'image';
+  const c0 = _clipCtx(args.shortsNum); if (c0.error) return { ok: false, error: c0.error };
+  const j0 = _clipSents(c0.pr, [args.at]);
+  if (!j0 || !j0.length) return { ok: false, error: '클립을 찾을 수 없습니다 — 다시 골라 주세요.' };
+  let fp = typeof args.file === 'string' && args.file ? args.file : null;
+  if (!fp) {
+    let defaultPath; try { const d = shortsDirs(S.outRoot, args.shortsNum); if (d && d.media) { fs.mkdirSync(d.media, { recursive: true }); defaultPath = d.media; } } catch {}
+    const r = await dialog.showOpenDialog(win, {
+      defaultPath, properties: ['openFile'],
+      filters: kind === 'video' ? [{ name: '비디오', extensions: ['mp4', 'mov', 'webm', 'm4v'] }] : [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return { ok: true, canceled: true };
+    fp = r.filePaths[0];
+  }
+  if (!fs.existsSync(fp)) return { ok: false, error: '파일을 찾지 못했습니다: ' + fp };
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };   // 대화상자가 떠 있는 동안 대본이 바뀌었을 수 있다
+  const pr = c.pr;
+  const j = _clipSents(pr, [args.at]);
+  if (!j || !j.length) return { ok: false, error: '클립을 찾을 수 없습니다(대본이 그새 바뀌었습니다) — 다시 골라 주세요.' };
+  const _u = undoPush('클립 추가(그림·영상)', { md: true });
+  UNDO.batch = true;
+  try {
+    const T = NEW_CLIP_TEXT;
+    const rr = await _pasteClips({ shortsNum: args.shortsNum, at: args.at, chunks: [{ text: T, parts: [T], audio: null, dur: null, speaker: j[0].s.speaker || null, isIntro: !!j[0].s.isIntro }] });
+    if (!rr || !rr.ok) { UNDO.batch = false; undoDrop(_u); return rr || { ok: false, error: '클립을 만들지 못했습니다.' }; }
+    const ns = pr.sentences[rr.firstSentence];
+    const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+    const A = pr.groups.find((x) => x.sentenceIds.includes(ns.id));
+    const gIdx = pr.groups.indexOf(A);
+    const k = A.sentenceIds.indexOf(ns.id), len0 = A.sentenceIds.length;
+    if (k < len0 - 1) _splitGroupCore(pr, gIdx, k + 1, { blankTitle: true, noExtend: true });   // A(…ns) | B
+    let N = A;
+    if (k > 0) { _splitGroupCore(pr, gIdx, k, { blankTitle: true, noExtend: true }); N = pr.groups[gIdx + 1]; }   // A | N(ns) | B
+    const B = k < len0 - 1 ? pr.groups[gIdx + (k > 0 ? 2 : 1)] : null;
+    // 새 그룹은 이름도 프롬프트도 비어 있다 — 파일이 그림이다
+    N.imagePrompt = null; N.videoPrompt = null; N.motionNote = null; N.imagePath = null; N.videoPath = null; N.imageStatus = null; N.videoStatus = null;
+    if (k === 0) { N.phase = A.phase; N.title = A.title; }   // (맨 앞이면 N 이 곧 A — 이름 유지)
+    if (B) {   // 뒤 그룹이 앞 그림·영상을 이어 갖게(복사 — 번호 바꾸기가 파일을 옮기므로 한 파일을 두 그룹이 쓰지 않게)
+      for (const key of ['imagePath', 'videoPath']) {
+        const src = A[key];
+        if (!src || !fs.existsSync(src)) continue;
+        try {
+          fs.mkdirSync(mediaDir, { recursive: true });
+          const ext = path.extname(src);
+          const dst = P.claimPath(path.join(mediaDir, '_dup' + Date.now().toString(36) + ext), null, [ext]);
+          fs.copyFileSync(src, dst);
+          B[key] = dst;
+          if (key === 'imagePath') { B.imageStatus = 'done'; if (A._userImage) B._userImage = _visKey(dst); } else { B.videoStatus = 'done'; B.videoCleared = false; if (A._userVideo) B._userVideo = _visKey(dst); }
+        } catch (e) { log('⚠ 클립 추가 — 뒤 그룹에 앞 그림을 복사하지 못했습니다: ' + e.message); }
+      }
+    }
+    // 고른 파일 = 새 그룹의 그림/영상 (원본을 가리킨다)
+    _softenCoverOf(pr, N);
+    if (kind === 'video') { N.videoPath = fp; N.videoStatus = 'done'; N.videoCleared = false; N._userVideo = _visKey(fp); }
+    else { N.imagePath = fp; N.imageStatus = 'done'; N.imageCleared = false; N._userImage = _visKey(fp); }
+    try { renumberMediaFiles(pr, mediaDir); } catch {}
+    UNDO.batch = false;
+    _afterClipOp(pr, null);
+    const gn = pr.groups.indexOf(N) + 1;
+    log(`${kind === 'video' ? '🎬' : '🖼'} ${prLabel(pr)} 클립 ${args.at.after != null ? '' : ''}뒤에 ${kind === 'video' ? '비디오' : '이미지'} 클립 — 새 그룹 G${gn}(${path.basename(fp)}) · 문장 「${T}」는 바로 고치세요${B ? ` · 뒤 그룹 G${gn + 1} 은 앞 그림·영상을 복사해 이어 갖습니다` : ''} (Ctrl+Z 되돌리기)`);
+    return { ok: true, dto: P.toDTO(S.parsed), groupNum: gn, firstSentence: pr.sentences.indexOf(ns) };
+  } catch (e) {
+    UNDO.batch = false;
+    log('⚠ 클립 추가(그림·영상) 오류: ' + ((e && e.message) || e) + ' — 중간까지 바뀌었을 수 있습니다(Ctrl+Z 로 되돌리세요)');
+    return { ok: false, error: String((e && e.message) || e) };
+  } finally { UNDO.batch = false; }
 });
 
 // ➕ 그룹 추가(v0.7.71 · 로이 「브루 씬 추가 — 클릭한 그룹 아래 새 그룹」) — 고른 그룹 **바로 아래**에 문장 하나짜리 새 그룹. 문장은 자리표시 글(대본 .md 에도 들어간다)이라 바로 고치게 한다.

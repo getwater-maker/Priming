@@ -102,7 +102,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const noAudio = { ...s6, ttsAudioPath: path.join(td, 'none.wav') };
       ok((await ctx.fn([s5, noAudio], m4, () => {})) === null && !m4[0].ttsAudioPath, '한쪽 음성이 없으면 반쪽만 붙이지 않는다(엉뚱한 길이 방지)');
       // 연결: 편집 두 경로 모두 부른다
-      ok(/const _spl = await _spliceSentenceAudio\(old, made, log\)/.test(M) && /const _spl = await _spliceSentenceAudio\(\[sa, sb\], nr \? \[ns, nr\] : \[ns\], log\)/.test(M), '문장 편집(Backspace/Del/Ctrl+Enter)·그룹 경계 클립 합치기 두 경로 모두 음성을 잇고 나눈다');
+      ok(/const _spl = (spkChange \? null : )?await _spliceSentenceAudio\(old, made, log\)/.test(M) && /const _spl = await _spliceSentenceAudio\(\[sa, sb\], nr \? \[ns, nr\] : \[ns\], log\)/.test(M), '문장 편집(Backspace/Del/Ctrl+Enter)·그룹 경계 클립 합치기 두 경로 모두 음성을 잇고 나눈다');
       ok(/async function _editSentences/.test(M) && /const r = await _editSentences\(/.test(M), '편집은 비동기(ffmpeg 를 기다린다 · main 이 멈추지 않게)');
     }
 
@@ -123,7 +123,8 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const ctx = { fs, path, console, S: { parsed, outRoot: tmp }, ipcMain: { handle: (n, f) => { handlers[n] = f; } },
         require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), undoPush: () => {}, renumberMediaFiles: () => {},
         shortsDirs: () => ({ media }), storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]', P: { toDTO: () => null } };
-      vm.createContext(ctx); vm.runInContext(M.slice(h0, h1), ctx);
+      const c0 = M.indexOf('function _splitGroupCore'), c1 = M.indexOf('\n}\n', c0) + 3;   // split-group 은 핵심을 _splitGroupCore 로 뽑았다(v0.7.71)
+      vm.createContext(ctx); vm.runInContext(M.slice(h0, h1) + '\n' + M.slice(c0, c1), ctx);
       await handlers['split-group'](null, { shortsNum: pr.shortsNum, groupNum: 1 });
       const [A, B] = pr.groups;
       ok(pr.groups.length === 3 && A.sentenceIds.length === 2 && B.sentenceIds.length === 2, '4문장 그룹이 2+2 로 나뉘었다(다음 그룹은 그대로)');
@@ -343,7 +344,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       ok(ctx.f(old, old.groups[1]) === 1 && old.groups[0].visSpan.soft === true, '옛 작업본: B 를 통째로 덮던 A 범위가 B 에 그림을 넣는 순간 soft 로');
       const part = mk(); part.groups[0].visSpan = { endId: part.groups[1].sentenceIds[0] };
       ok(ctx.f(part, part.groups[1]) === 0 && !part.groups[0].visSpan.soft, '(판정력) 일부만 걸친 범위(손으로 늘린 겹침)는 그대로');
-      ok((M.match(/_softenCoverOf\(pr, g\);/g) || []).length === 3, '파일 교체 · 🔄 이미지 재생성 · 🎬 그룹 영상 세 곳에서 부른다');
+      ok((M.match(/_softenCoverOf\(pr, g\);/g) || []).length === 4, '파일 교체 · 🔄 이미지 재생성 · 🎬 그룹 영상 · 🔎 스톡 넣기 네 곳에서 부른다(v0.7.67 에 스톡이 늘었다)');
       // ✂ 은 늘 보인다
       const APP = read('renderer/src/App.jsx');
       ok(!/groupDurationSec > 10 && \(c\.sentences && c\.sentences\.length >= 2\) &&/.test(APP) && (APP.match(/disabled=\{!\(c\.sentences && c\.sentences\.length >= 2\)\}/g) || []).length === 3, '🔑 ✂ 분할은 세 곳(그룹 줄 두 모양 · 그룹 메뉴) 모두 늘 보인다(문장 1개면 흐리게 + 이유)');

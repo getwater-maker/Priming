@@ -355,8 +355,23 @@ function Hint({ children, label = '' }) {
 // 🔒 네이티브 alert/confirm 은 **창을 잠근다**(EnableWindow(false)) — 다른 창(Vrew·크롬) 뒤에 숨으면
 //   앱이 클릭·키·ESC 를 전부 거부하는 "입력 잠김"이 된다(로이 2026-08-14 증상).
 //   → 띄우기 직전에 창을 앞으로 끌어와 숨지 못하게 한다. main 은 별도 프로세스라 이 요청을 즉시 처리한다.
-function uiConfirm(msg) { try { api.focusWindow(); } catch (_) {} return window.confirm(msg); }
-function uiAlert(msg) { try { api.focusWindow(); } catch (_) {} return window.alert(msg); }
+// 🩹 네이티브 alert·confirm 이 닫힌 뒤 창 초점을 다시 준다(v0.7.72 · 입력칸이 글자를 못 받던 Electron 버그) — 어느 곳에서 부르든(RemotionView 포함) 같이 걸리게 window 것을 감싼다
+if (typeof window !== 'undefined' && !window.__dlgPatched) {
+  window.__dlgPatched = true;
+  for (const k of ['confirm', 'alert']) {
+    const o = window[k].bind(window);
+    window[k] = (...a) => { try { api.focusWindow(); } catch (_) {} const r = o(...a); setTimeout(() => { try { api.refocusWindow(); } catch (_) {} }, 0); return r; };
+  }
+  // 입력칸을 눌렀는데 창에 초점이 없으면(원인이 무엇이든) 한 번 되살린다 — 「안 되다가 다시 되기도」 하던 증상의 자가 복구
+  document.addEventListener('mousedown', (ev) => {
+    const t = ev.target; if (!t || !t.closest) return;
+    const f = t.closest('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=range]), textarea, [contenteditable="true"]');
+    if (!f || f.disabled || f.readOnly) return;
+    setTimeout(() => { try { if (!document.hasFocus()) api.refocusWindow(); if (document.activeElement !== f && document.contains(f)) f.focus(); } catch (_) {} }, 0);
+  }, true);
+}
+function uiConfirm(msg) { return window.confirm(msg); }
+function uiAlert(msg) { return window.alert(msg); }
 
 function normOutTargetUi(v) { return v === 'whiteboard' || v === 'mp4' ? v : 'vrew'; }
 
@@ -1519,6 +1534,7 @@ export default function App() {
     const ls = PL.bySent.get(info.groupNum + ':' + info.sentIdx) || [];
     const after = ls.findIndex((l) => l.n === info.n);
     if (after < 0) return;
+    setStatus('✂ 그룹 나누는 중…');
     try {
       const r = await api.splitGroupAt({ shortsNum: sn, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after } });
       if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`✂ G${info.groupNum} 를 클립 ${info.n} 뒤에서 나눴습니다 → G${info.groupNum}·G${r.groupNum} (그림·영상은 앞 그룹 것을 뒤 그룹 끝까지 이어 씁니다 · 새 그림이 필요하면 G${r.groupNum} 의 🔄 · Ctrl+Z 되돌리기)`); }
@@ -1529,7 +1545,7 @@ export default function App() {
   //   문장 한가운데면 문장이 줄에서 나뉘고 음성도 쉼에서 잘려 앞·뒤에 남는다 · 새 클립은 목소리가 비어 있다(글을 고치고 🎤). 나머지 셋은 준비 중.
   const [clipAddMenu, setClipAddMenu] = useState(null);   // { sn, info, x, y }
   function openClipAdd(sn, info, at) { setClipAddMenu({ sn, info, x: at.x, y: at.y }); }
-  async function addVoiceClip() {
+  async function addVoiceClip(kind) {
     const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
     const { sn, info } = m;
     const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null;
@@ -1543,11 +1559,32 @@ export default function App() {
       const r = await api.pasteClips({ shortsNum: sn, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after }, chunks: [{ text: T, parts: [T], audio: null, dur: null, speaker: sent.speaker || null, isIntro: !!cut.isIntro }] });
       if (r && r.ok) {
         setDto(r.dto); setCapSel(null);
-        setStatus(`＋ 클립 ${info.n} 뒤에 새 클립을 만들었습니다 — 글을 고친 뒤 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
-        setTimeout(() => {
-          const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (r.firstSentence + 1) + '"] .sblk-lines');
-          if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} el.click(); }
-        }, 350);
+        setStatus(`＋ 클립 ${info.n} 뒤에 새 클립을 만들었습니다 — 글을 쓴 뒤 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
+        openNewClipEditor(sn, r.firstSentence);
+      } else clipErr(r, '클립 추가');
+    } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); }
+  }
+  // 새로 만든 클립의 글 편집칸을 열고 자리표시 글을 통째로 골라 둔다(바로 쓰면 바뀐다)
+  function openNewClipEditor(sn, sentIdx) {
+    setTimeout(() => {
+      const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (sentIdx + 1) + '"] .sblk-lines');
+      if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} window.__pmSelAll = true; el.click(); }
+    }, 350);
+  }
+  // 🖼🎬 이미지 클립·비디오 클립 — 파일을 고르면 그 클립 뒤에 그 파일을 넣은 새 그룹(main add-media-clip)
+  async function addMediaClip(kind) {
+    const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
+    const { sn, info } = m;
+    const PL = linesMap.get(sn); const ls = (PL && PL.bySent.get(info.groupNum + ':' + info.sentIdx)) || [];
+    const after = ls.findIndex((l) => l.n === info.n);
+    if (after < 0) return;
+    try {
+      const r = await api.addMediaClip({ shortsNum: sn, kind, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after } });
+      if (r && r.ok && r.canceled) { setStatus(`${kind === 'video' ? '비디오' : '이미지'} 클립 — 파일을 고르지 않아 취소했습니다`); return; }
+      if (r && r.ok) {
+        setDto(r.dto); setCapSel(null);
+        setStatus(`${kind === 'video' ? '🎬' : '🖼'} 클립 ${info.n} 뒤에 ${kind === 'video' ? '비디오' : '이미지'} 클립 — 새 그룹 G${r.groupNum} 에 그 파일이 들어갔습니다 · 글을 고치고 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
+        openNewClipEditor(sn, r.firstSentence);
       } else clipErr(r, '클립 추가');
     } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); }
   }
@@ -1558,10 +1595,7 @@ export default function App() {
       if (r && r.ok) {
         setDto(r.dto); setCapSel(null);
         setStatus(`➕ G${groupNum} 아래에 새 그룹 G${r.groupNum} 을 만들었습니다 — 문장을 고치고 이미지 프롬프트를 쓰거나 그림을 넣으세요 (Ctrl+Z 되돌리기)`);
-        setTimeout(() => {
-          const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (r.firstSentence + 1) + '"] .sblk-lines');
-          if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} el.click(); }
-        }, 350);
+        openNewClipEditor(sn, r.firstSentence);
       } else clipErr(r, '그룹 추가');
     } catch (e) { logline('그룹 추가 오류: ' + e.message); clipErr(null, '그룹 추가'); }
   }
@@ -5711,10 +5745,10 @@ export default function App() {
       {clipAddMenu && (<>
         <div className="vr-menu-bg" onMouseDown={() => setClipAddMenu(null)} />
         <div className="clip-add-pop" data-testid="clip-add-pop" style={{ left: Math.max(8, Math.min(clipAddMenu.x, window.innerWidth - 560)), top: Math.min(clipAddMenu.y, window.innerHeight - 130) }}>
-          <button type="button" data-testid="clip-add-voice" title="이 클립 뒤에 새 클립(글)을 만듭니다 — 글을 고친 뒤 🎤 로 음성을 만드세요" onClick={addVoiceClip}><span className="ca-ic">🔊</span><span>AI 목소리 클립</span></button>
-          <button type="button" className="soon" data-testid="clip-add-empty" title="준비 중 — 소리 없는 빈 클립" onClick={() => setStatus('빈 클립은 준비 중입니다')}><span className="ca-ic">▭</span><span>빈 클립</span></button>
-          <button type="button" className="soon" data-testid="clip-add-image" title="준비 중 — 지금은 ➕ 삽입 메뉴의 그림으로 클립 범위에 넣으세요" onClick={() => setStatus('이미지 클립은 준비 중입니다 — ➕ 삽입 메뉴의 「그림」으로 클립 범위에 넣을 수 있습니다')}><span className="ca-ic">🖼</span><span>이미지 클립</span></button>
-          <button type="button" className="soon" data-testid="clip-add-video" title="준비 중 — 지금은 ➕ 삽입 메뉴의 영상으로 클립 범위에 넣으세요" onClick={() => setStatus('비디오 클립은 준비 중입니다 — ➕ 삽입 메뉴의 「영상」으로 클립 범위에 넣을 수 있습니다')}><span className="ca-ic">🎬</span><span>비디오 클립</span></button>
+          <button type="button" data-testid="clip-add-voice" title="이 클립 뒤에 새 클립(글)을 만듭니다 — 글을 쓴 뒤 🎤 로 음성을 만드세요" onClick={() => addVoiceClip('voice')}><span className="ca-ic">🔊</span><span>AI 목소리 클립</span></button>
+          <button type="button" data-testid="clip-add-empty" title="이 클립 뒤에 빈 클립 — 자리표시 글이 통째로 골라진 채 열리니 바로 쓰면 바뀝니다(소리 없는 클립은 아직 없습니다 — 글이 있어야 음성·자막이 생깁니다)" onClick={() => addVoiceClip('empty')}><span className="ca-ic">▭</span><span>빈 클립</span></button>
+          <button type="button" data-testid="clip-add-image" title="이미지 파일을 고르면 이 클립 뒤에 그 그림을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('image')}><span className="ca-ic">🖼</span><span>이미지 클립</span></button>
+          <button type="button" data-testid="clip-add-video" title="비디오 파일을 고르면 이 클립 뒤에 그 영상을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('video')}><span className="ca-ic">🎬</span><span>비디오 클립</span></button>
         </div></>)}
       {stockDlg && <StockDialog target={stockDlg} onClose={() => setStockDlg(null)} onOpenKeys={() => { setStockDlg(null); openSettings('keys'); }}
         onAttached={(d, it) => { if (d) setDto(d); setStatus(`🔎 G${stockDlg.groupNum} 에 ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'}을 넣었습니다`); }} />}
@@ -6894,6 +6928,11 @@ function caretSideFromClick(ev, box) {
   } catch (_) { return 'start'; }
 }
 function applyCaretSide(el) {
+  if (el && window.__pmSelAll && !el.dataset.selSet) {   // 새로 만든 클립(클립 추가·그룹추가) — 자리표시 글을 통째로 골라 바로 쓰면 바뀌게
+    el.dataset.selSet = '1'; window.__pmSelAll = false;
+    const all = () => { try { el.focus(); el.select(); } catch (_) {} };
+    all(); setTimeout(all, 30); requestAnimationFrame(all);
+  }
   if (!el || !_caretSide || el.dataset.caretSet) return;
   el.dataset.caretSet = '1';
   const side = _caretSide; _caretSide = null;

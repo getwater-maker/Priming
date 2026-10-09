@@ -236,6 +236,8 @@ contextBridge.exposeInMainWorld('api', {
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
   splitGroupAt: (args) => ipcRenderer.invoke('split-group-at', args),   // ✂ 클립 뒤에서 그룹 나누기(브루 씬 나누기)
   addGroup: (args) => ipcRenderer.invoke('add-group', args),           // ➕ 고른 그룹 아래 새 그룹
+  addMediaClip: (args) => ipcRenderer.invoke('add-media-clip', args),  // 🖼🎬 클립 뒤에 이미지·비디오 클립(새 그룹)
+  refocusWindow: () => ipcRenderer.invoke('refocus-window'),            // 🩹 대화상자 뒤 입력 잠김 풀기
   setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
   setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),

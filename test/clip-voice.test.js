@@ -108,7 +108,7 @@ console.log('\n[2] fillTtsList — 이 대본 화자(preset._spkVoices) > 채널
   ok(/data-testid="clip-spk"/.test(A) && /_S\.onClipVoice\(pr\.shortsNum, s\)/.test(A) && /onClipVoice=\{isLf \? openSpeakerVoice : null\}/.test(A), '클립 「🗣」 = 이 대본의 그 화자 목소리(안정 래퍼 _S 로)');
   ok(/JSON\.stringify\(\[pr0\.ttsVoiceText \|\| '', pr0\.spkVoiceText \|\| null\]\)/.test(A), '🗣 배지가 대본 목소리를 따라 다시 그려진다(cutKey)');
   ok(/const effVe = \(pr, se\) =>/.test(A) && /pr\.spkVoices && pr\.spkVoices\[se\.speaker\]/.test(A) && /pr\.ttsVoice && pr\.ttsVoice\.voiceEngine/.test(A), '💰 예상 비용 = 문장마다 실제 목소리(이 대본 화자 > 채널 화자 > 대본 > 채널)');
-  ok(/'onInsMark', 'onClipVoice'\]\) o\[k\] = mk\(k\)/.test(A), 'onClipVoice 가 _S 래퍼 목록에(옛 렌더 함수를 부르지 않게)');
+  ok(/'onInsMark', 'onClipVoice'(, '\w+')*\]\) o\[k\] = mk\(k\)/.test(A), 'onClipVoice 가 _S 래퍼 목록에(옛 렌더 함수를 부르지 않게)');
   ok(/data-testid="tts-engine-btn" onClick=\{openScriptVoice\}/.test(A), '리본 「🔊 음성 설정」 = 열린 대본 목소리');
   ok(/onClick=\{\(\) => openTtsEngines\(ch\.name\)\}>🔊 음성 설정에서 바꾸기/.test(A), '⚙ 채널편집 → 「음성 설정에서 바꾸기」 = 채널 기본(그대로)');
   const D = read('renderer/src/TtsEngineDialog.jsx');
