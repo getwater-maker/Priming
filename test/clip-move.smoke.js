@@ -103,6 +103,26 @@ const body = () => md().split('\n').filter((l) => /문장입니다/.test(l));   
     b = body();
     ok(b[0] === '첫째 문장입니다. 둘째 문장입니다.' && b[1] === '다섯째 문장입니다. 셋째 문장입니다. 넷째 문장입니다.', '그룹 안에서 순서만 바뀐다 ' + JSON.stringify(b));
 
+    console.log('\n[6] 체크박스로 고르고 키보드 Ctrl+X → Ctrl+V(고른 클립 아래) · Ctrl+C → Ctrl+V');
+    await win.keyboard.press('Control+z'); await win.waitForTimeout(1000);   // [5] 되돌림 — 원래 순서
+    const chk = async (n, on = true) => { const c = win.locator(`.sent.clip[data-ln="${n}"] .clip-chk`).first(); if (on) await c.check(); else await c.uncheck(); await win.waitForTimeout(200); };
+    await chk(1);
+    ok(await win.evaluate(() => document.activeElement && document.activeElement.classList.contains('clip-chk')), '초점이 체크박스에 있다(예전엔 이때 키가 먹지 않았다)');
+    await win.keyboard.press('Control+x'); await win.waitForTimeout(1300);
+    b = body();
+    ok(b[0] === '둘째 문장입니다.', '🔑 Ctrl+X: 체크한 클립(첫째)이 잘렸다 ' + JSON.stringify(b));
+    await chk(3);   // 지금 3번 = 넷째(첫째가 빠져 번호가 당겨짐)
+    await win.keyboard.press('Control+v'); await win.waitForTimeout(1200);
+    b = body();
+    ok(b[1] === '셋째 문장입니다. 넷째 문장입니다. 첫째 문장입니다. 다섯째 문장입니다.', '🔑 Ctrl+V: 고른 클립(넷째) 바로 아래에 붙었다 ' + JSON.stringify(b));
+    await chk(1);   // 둘째
+    await win.keyboard.press('Control+c'); await win.waitForTimeout(900);
+    ok(body()[0] === '둘째 문장입니다.', 'Ctrl+C: 복사만 — 대본 그대로');
+    await chk(1, false); await chk(5);   // 다섯째(맨 끝)
+    await win.keyboard.press('Control+v'); await win.waitForTimeout(1200);
+    b = body();
+    ok(/다섯째 문장입니다\. 둘째 문장입니다\.$/.test(b[1] || '') && b[0] === '둘째 문장입니다.', '🔑 Ctrl+C → Ctrl+V: 복사본이 고른 클립 아래에(원본도 남음) ' + JSON.stringify(b));
+
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);
   } finally {
     try { await win.evaluate(async (name) => { try { await window.api.removePreset({ name }); } catch (_) {} }, chan); } catch (_) {}

@@ -8904,7 +8904,7 @@ function _planMdEdits(pr, edits) {
     { let a = 0; while (a < raw.length && a < nr.length && raw[a] === nr[a]) a++;
       let b = 0; while (b < raw.length - a && b < nr.length - a && raw[raw.length - 1 - b] === nr[nr.length - 1 - b]) b++;
       const s0 = Math.max(0, a - 2), s1 = Math.min(nr.length, nr.length - b + 2);
-      nr = nr.slice(0, s0) + nr.slice(s0, s1).replace(/ {2,}/g, ' ').replace(/ +(?=\r?\n)/g, '') + nr.slice(s1); }   // 문단 끝 문장을 빼면 남는 꼬리 칸도
+      nr = nr.slice(0, s0) + nr.slice(s0, s1).replace(/ {2,}/g, ' ').replace(/ +(?=\r?\n)/g, '').replace(/(\n) +(?=\S)/g, '$1') + nr.slice(s1); }   // 문단 끝·첫 문장을 빼면 남는 꼬리·머리 칸도
     raw = nr; outs.set(e.idx, p.newTexts);
   }
   let after = null;

@@ -4255,7 +4255,10 @@ export default function App() {
         const d = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0;
         if (d) { e.preventDefault(); groupNavRef.current.step(d); return; }
       }
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // ☑ 체크박스를 누른 뒤엔 초점이 체크박스에 있다 — 클립 잘라내기·복사·붙여넣기·삭제 키는 그래도 받는다(v0.7.70 · 로이 「체크하고 Ctrl+X」)
+      const onChk = tag === 'INPUT' && t.type === 'checkbox' && t.classList.contains('clip-chk');
+      const clipKey = onChk && (((e.ctrlKey || e.metaKey) && ['KeyC', 'KeyX', 'KeyV'].includes(e.code)) || (!e.ctrlKey && !e.metaKey && e.key === 'Delete'));
+      if (!clipKey && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')) return;
       if (t && t.isContentEditable) {
         // 고치는 중인 자막칸: 첫 Ctrl+A 는 그 칸 글자 전체(기본) — 이미 칸 전체가 골라져 있으면 한 번 더 눌러 모든 클립
         if (isA) { const sel = window.getSelection && window.getSelection(); if (sel && String(sel).length && String(sel).length >= String(t.innerText || '').replace(/\n$/, '').length) { e.preventDefault(); selectAllClips(); } }
