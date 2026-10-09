@@ -2739,6 +2739,17 @@ ${mtime ? `만든 시각: ${mtime}
   } catch (_) { return 'skip'; }   // 열기 실패·시간 초과 = 건너뛰기(fail-safe: 다시 굽지 않는다)
   finally { clearTimeout(timer); }
 }
+// 🌫 오버레이 모션 구간표(삼국지 R1) — 채널 fx + 그룹 look.fx → 영상 전체 시각 구간별 값. 채널이 전부 꺼져 있으면 null(= 예전과 같다). 대본(pr)이 없으면 채널 값을 영상 전체에.
+function fxOptsFor(pr, preset) {
+  try {
+    const FXO = require('./core/fx-overlay');
+    const ch = FXO.normFx(preset && preset.fx);
+    if (FXO.fxIsOff(ch)) return null;
+    if (!pr || !Array.isArray(pr.groups)) return { ranges: [{ t0: 0, t1: 1e9, fx: ch }] };
+    const ranges = FXO.planOf(pr, ch);
+    return ranges.length ? { ranges } : null;
+  } catch (e) { log('⚠ 오버레이 모션 구간표를 만들지 못했습니다(없이 굽습니다): ' + ((e && e.message) || e)); return null; }
+}
 async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null) {   // ctx = { parsed, scriptPath } — 업로드 제목이 화면에서 고른 대본을 따라가지 않게
   const VR = require('./core/vrew-render');
   const outPath = uploadMp4Path(baseName, preset, vrewPath);
@@ -2751,7 +2762,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec) }));   // 🌫 채널 디졸브(0 = 컷)
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표)
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };

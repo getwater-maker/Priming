@@ -37,6 +37,14 @@ function normKbSegGroup(v) { const k = String(v == null ? 0 : v); return (k !== 
 // 🌫 디졸브(삼국지 R3 · v0.7.76) — 그림이 바뀌는 자리를 몇 초에 걸쳐 섞을지(채널 설정). 0 = 컷(지금까지의 동작). 🎬 MP4 만(.vrew 에는 전환이 없다).
 const DISSOLVES = [{ id: 0, label: '없음(컷)' }, { id: 1, label: '1초' }, { id: 2, label: '2초' }, { id: 3, label: '3초' }, { id: 4, label: '4초' }, { id: 5, label: '5초' }, { id: 6, label: '6초' }];
 function normDissolve(v) { const n = Number(v); return Number.isFinite(n) && n >= 0.5 && n <= 10 ? Math.round(n * 10) / 10 : 0; }
+// 🌫 오버레이 모션(삼국지 R1 · v0.7.77) — 정지 그림 위에 코드로 만든 안개·먼지·반딧불·불빛 깜박임(core/fx-overlay). 🎬 MP4 만.
+//   채널 fx = { fog, dust, firefly, flicker } 각 0(끔)~3 · 그룹 look.fx = 없음(채널 설정대로) | 'off'(이 그룹은 끔) | 1~3(채널에서 켠 종류를 이 강도로). ⚠ 렌더러 번들용이라 fx-overlay(zlib)를 못 불러 같은 규칙을 여기에도 둔다(테스트가 대조).
+const FX_KINDS = [{ id: 'fog', label: '🌫 안개' }, { id: 'dust', label: '✨ 먼지' }, { id: 'firefly', label: '🟡 반딧불' }, { id: 'flicker', label: '🕯 불빛 깜박임' }];
+const FX_LEVELS = [{ id: 0, label: '끔' }, { id: 1, label: '1(약)' }, { id: 2, label: '2' }, { id: 3, label: '3(강)' }];
+const FX_GROUP = [{ id: 0, label: '채널 설정대로' }, { id: 'off', label: '이 그룹은 끔' }, { id: 1, label: '1단계(약하게)' }, { id: 2, label: '2단계' }, { id: 3, label: '3단계(강하게)' }];
+function normFxChan(v) { const o = {}; for (const k of FX_KINDS) { const n = Math.round(Number(v && v[k.id])); o[k.id] = n >= 1 && n <= 3 ? n : 0; } return o; }
+const fxChanOn = (v) => FX_KINDS.some((k) => normFxChan(v)[k.id] > 0);
+function normFxGroup(v) { if (v === 'off') return 'off'; const n = Math.round(Number(v)); return n >= 1 && n <= 3 ? n : 0; }
 const FILL_IDS = new Set(FILLS.map((x) => x.id));
 const MOTION_IDS = new Set(MOTIONS.map((x) => x.id));
 
@@ -57,20 +65,22 @@ function normLook(l) {
   };
   const bx = normBox(o.box);
   if (bx) out.box = bx;
+  const fxg = normFxGroup(o.fx);
+  if (fxg) out.fx = fxg;   // 없음(채널 설정대로)이면 필드를 두지 않는다
   const ks = normKbSegGroup(o.kbSeg);
   if (ks) out.kbSeg = ks;   // 없음(채널 설정대로)이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로)
   return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx;
 }
 function describe(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
   const m = MOTIONS.find((x) => x.id === n.motion).label;
   const fl = [n.flipH ? '좌우 반전' : '', n.flipV ? '상하 반전' : ''].filter(Boolean).join('·') || '반전 없음';
-  return `채우기 ${f} · ${fl} · 움직임 ${m}` + (n.kbSeg ? ` · 켄번스 ${n.kbSeg === 'auto' ? '자동 구간' : n.kbSeg === 'off' ? '한 번에' : n.kbSeg + '구간'}` : '') + (n.box ? ` · 자리 직접(${Math.round(n.box.w * 100)}% 크기)` : '');
+  return `채우기 ${f} · ${fl} · 움직임 ${m}` + (n.fx ? ` · 오버레이 ${n.fx === 'off' ? '끔' : n.fx + '단계'}` : '') + (n.kbSeg ? ` · 켄번스 ${n.kbSeg === 'auto' ? '자동 구간' : n.kbSeg === 'off' ? '한 번에' : n.kbSeg + '구간'}` : '') + (n.box ? ` · 자리 직접(${Math.round(n.box.w * 100)}% 크기)` : '');
 }
 
 /**
@@ -129,4 +139,4 @@ function aiNoticeOn(timing, range, line) {
   return e > a && s < b;
 }
 
-module.exports = { FILLS, MOTIONS, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+module.exports = { FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

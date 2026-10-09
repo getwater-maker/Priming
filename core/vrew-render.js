@@ -30,6 +30,7 @@ const { execFile } = require('child_process');
 const CF = require('./caption-format');
 const CAS = require('./caption-ass');
 const FONTS = require('./font-store');
+const FXO = require('./fx-overlay');   // 🌫 오버레이 모션(안개·먼지·반딧불·불빛 깜박임 · 삼국지 R1)
 
 const FPS = 30;
 const W = 1920;
@@ -671,19 +672,35 @@ async function renderChunk(ch, i, ctx) {
   const common = [...encArgs(enc, bitrate), '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an', out];
   const pre = ctx.filterThreads > 0 ? ['-filter_threads', String(ctx.filterThreads)] : [];
   const L = (ch.layers || []).filter((l) => l.file);
+  // 🌫 이 조각에 얹을 오버레이 모션(구간표에서 이 시각의 값 — 꺼져 있으면 null → 아래 분기는 예전 그대로) · 영상(🎬)·검은 조각엔 얹지 않는다
+  const fxOn = (t, idx0, lp) => {
+    if (!ctx.fxRanges || !ctx.fxTex) return null;
+    const fx = FXO.fxAt(ctx.fxRanges, t); if (!fx) return null;
+    const g = FXO.fxGraph({ base: `[${lp}in]`, idx0, t0: ch.f0 / FPS, dur, fx, tex: ctx.fxTex, fps: FPS, id: id, lp });
+    if (g) for (const f of g.files) fs.writeFileSync(path.join(tmpDir, f.name), f.content);
+    return g;
+  };
+  const tMid = (ch.f0 + (ch.f1 - ch.f0) / 2) / FPS;
   if (ch.type === 'dissolve') {
     // 🌫 앞 그림 → 뒤 그림 섞기(smoothstep) — 둘 다 켄번스 진행을 구간 밖에선 끝·처음 크롭에 고정한다. 자막은 섞은 결과 위에 한 번만.
     const a = ch.a, b = ch.b, A = a.track || {}, B = b.track || {};
     const covA = await coverImage(a.file, ctx, A), covB = await coverImage(b.file, ctx, B);
     const offA = (a.kbOff || 0) + (ch.f0 - a.f0), offB = (b.kbOff || 0) + (ch.f0 - b.f0);   // 창 첫 프레임의 진행 프레임(뒤 그림은 음수 = 아직 시작 전)
     const totA = a.kbTotal > 0 ? a.kbTotal : (a.kbOff || 0) + (a.f1 - a.f0), totB = b.kbTotal > 0 ? b.kbTotal : (b.kbOff || 0) + (b.f1 - b.f0);   // 🔴 합계는 각 구간의 원래 길이 그대로 — 창이 끝 너머로 나가도 늘리지 않는다(늘리면 켄번스 속도가 어긋나 창 시작에서 화면이 튄다 · 실측 7.2) · 구간 밖은 clamp 가 고정
-    const x = `min(1,N/${Math.max(1, frames - 1)})`, st = `(3*pow(${x},2)-2*pow(${x},3))`;   // 프레임 번호 N 으로 — 첫 프레임에서 T(시각)가 비어 있어 한 프레임이 틀어졌다(실측 7.2 → 0.3)
+    // 🔴 섞는 비율은 blend 의 all_expr(화소마다 식 계산)이 아니라 **불투명도를 프레임마다 sendcmd 로** 바꾼다 — all_expr 은 프레임당 수백 ms 라 4초 창 하나가 렌더의 끝을 40초 붙잡았다(실측 +80%).
+    //   normal 모드는 SIMD 라 빠르다. 위(첫 입력) = 뒤 그림 B, 아래 = 앞 그림 A → 불투명도 st 가 B 의 비율(smoothstep).
+    const dzName = `dz_${id}.txt`;
+    { const n1 = Math.max(1, frames - 1), cmd = []; for (let k = 0; k < frames; k++) { const u = Math.min(1, k / n1); cmd.push(`${(k / FPS).toFixed(4)} blend@dz all_opacity ${(3 * u * u - 2 * u * u * u).toFixed(5)};`); } fs.writeFileSync(path.join(tmpDir, dzName), cmd.join('\n') + '\n'); }
+    const tA = (a.f0 + (a.f1 - a.f0) / 2) / FPS, tB = (b.f0 + (b.f1 - b.f0) / 2) / FPS;   // 앞·뒤 그림이 속한 그룹의 fx(경계에서 갑자기 켜지거나 꺼지지 않게 각자 입고 섞는다)
+    const fa = fxOn(tA, 2, 'xa'), fb = fxOn(tB, 2 + (fa ? fa.ins.filter((q) => q === '-i').length : 0), 'xb');
     const g = [
-      `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}[da]`,
-      `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}[db]`,
-      `[da][db]blend=all_expr='A*(1-${st})+B*${st}':shortest=1,${assFilter}[vout]`,
+      `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}[${fa ? 'xain' : 'da'}]`,
+      `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}[${fb ? 'xbin' : 'db'}]`,
+      ...(fa ? [...fa.parts, `${fa.out}null[da]`] : []), ...(fb ? [...fb.parts, `${fb.out}null[db]`] : []),
+      `[da]sendcmd=f=${dzName}[dax]`,
+      `[db][dax]blend@dz=all_mode=normal:all_opacity=0:shortest=1,${assFilter}[vout]`,
     ].join(';');
-    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', covA, '-i', covB, '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', covA, '-i', covB, ...(fa ? fa.ins : []), ...(fb ? fb.ins : []), '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
   } else if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
     // 🖼 겹친 그림(아래층으로 이어진 그림 위에 다음 그룹 그림) · 사람이 옮기고 줄인 그림 — 검은 바탕 위에 아래 → 위로 얹는다
     const ins = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`];
@@ -708,7 +725,12 @@ async function renderChunk(ch, i, ctx) {
       parts.push(`${prev}[l${k}]overlay=x=${bx}:y=${by}:eof_action=repeat${k === L.length - 1 ? '' : `[b${k}]`}`);
       prev = `[b${k}]`;
     }
-    parts[parts.length - 1] += ',' + assFilter + '[vout]';
+    const fxs = fxOn(tMid, 1 + L.length, 'xs');
+    if (fxs) {   // 🌫 겹친 그림 위에 한 번에
+      parts[parts.length - 1] += '[xsin]';
+      parts.push(...fxs.parts, `${fxs.out}${assFilter}[vout]`);
+      ins.push(...fxs.ins);
+    } else parts[parts.length - 1] += ',' + assFilter + '[vout]';
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', ...ins, '-filter_complex', parts.join(';'), '-map', '[vout]', '-frames:v', String(frames), ...common];
   } else if (ch.type === 'image' && ch.file) {
     const tr = ch.track || {};
@@ -716,10 +738,17 @@ async function renderChunk(ch, i, ctx) {
     // 🔑 그림을 **한 번만 디코딩**해 메모리에서 반복하고(loop 필터), YUV 로 켄번스를 돌린다.
     //   `-loop 1 -i x.png` 는 **매 프레임 PNG 를 다시 디코딩**하고 perspective 가 RGB 전체 해상도에서 돈다
     //   (실측 600프레임: 9.2초 → 5.3초 · 옛 zoompan 7.0초보다도 빠르다).
-    const vf = [`format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB`,
-      kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal), assFilter].join(',');
-    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov,
-      '-frames:v', String(frames), '-vf', vf, ...common];
+    const fx1 = fxOn(tMid, 1, 'xi');
+    if (fx1) {   // 🌫 오버레이 모션을 얹는다(켄번스 → 안개·먼지·반딧불·깜박임 → 자막)
+      const g = [`[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal)}[xiin]`,
+        ...fx1.parts, `${fx1.out}${assFilter}[vout]`].join(';');
+      args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov, ...fx1.ins, '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
+    } else {
+      const vf = [`format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB`,
+        kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal), assFilter].join(',');
+      args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov,
+        '-frames:v', String(frames), '-vf', vf, ...common];
+    }
   } else if (ch.type === 'video' && ch.file) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
     const vf = [placeFilters(ch.track), `fps=${FPS}`,
@@ -917,6 +946,15 @@ async function renderVrewToMp4(opts = {}) {
     // 조각 병렬 렌더
     t = Date.now();
     Object.assign(ctx, { tmpDir, cs, capEvents, layout, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
+    // 🌫 오버레이 모션 — 구간표가 있고 어느 구간이든 켜져 있으면 질감을 한 번만 만든다(JS 로 수백 ms)
+    if (opts.fx && Array.isArray(opts.fx.ranges) && opts.fx.ranges.length) {
+      const used = {}; for (const r of opts.fx.ranges) for (const k of FXO.KINDS) if (r.fx && r.fx[k]) used[k] = 1;
+      if (Object.keys(used).length) {
+        ctx.fxRanges = opts.fx.ranges; ctx.fxTex = await FXO.prepareTextures(null, tmpDir, used);
+        const names = FXO.KINDS.filter((k) => used[k]).map((k) => FXO.KIND_LABEL[k]).join('·');
+        log(`   🌫 오버레이 모션 — ${names} · 구간 ${opts.fx.ranges.length}개(그림 구간에만 · 영상·검은 구간은 그대로)`);
+      }
+    }
     const files = new Array(chunks.length);
     const queue = chunks.map((c, i) => i);
     let done = 0, nextPct = 10, firstErr = null;

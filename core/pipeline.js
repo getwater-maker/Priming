@@ -674,7 +674,8 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
     { const ks = require('./visual-look').normKbSeg(preset.kbSeg); if (ks !== 1) inp.kbSeg = ks; }   // 🎞 채널 기본 켄번스 구간(대본 그룹의 look.kbSeg 가 이긴다)
-    { const ds = require('./visual-look').normDissolve(preset.dissolveSec); if (ds > 0) inp.dissolveSec = ds; }   // 🌫 채널 디졸브 — .vrew 는 그대로지만 MP4 가 달라진다 → 지문에 넣어 바꾸면 다시 만들게
+    { const ds = require('./visual-look').normDissolve(preset.dissolveSec); if (ds > 0) inp.dissolveSec = ds; }
+    { const FXO = require('./fx-overlay'); const fx = FXO.normFx(preset.fx); if (!FXO.fxIsOff(fx)) inp.fx = fx; }   // 🌫 채널 오버레이 모션 — MP4 가 달라지므로 지문에   // 🌫 채널 디졸브 — .vrew 는 그대로지만 MP4 가 달라진다 → 지문에 넣어 바꾸면 다시 만들게
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 대본 덮어쓰기(logoOver) 포함 · 자리 = 대본 끌어 옮김 > ↖ > 채널 기본 자리
   }
