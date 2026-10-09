@@ -1931,6 +1931,69 @@ export default function App() {
       else clipErr(r, '붙여넣기');
     } catch (e) { logline('붙여넣기 오류: ' + e.message); clipErr(null, '붙여넣기'); }
   }
+  // ↕ 클립 끌어 옮기기(v0.7.69 · 로이) — 번호 칸을 잡고 끌어 다른 클립의 위·아래 절반에 놓는다.
+  //   끈 클립이 체크(선택)돼 있으면 고른 클립 모두, 아니면 그 클립 하나만. 다른 그룹에 놓으면 그 그룹의 그림·영상을 쓴다(main move-clips).
+  //   ⚡ 끄는 동안은 다시 그리지 않는다 — 표시는 DOM 클래스(drop-before/after · drag-src)로만(MemoCut 열쇠를 건드리지 않게).
+  const clipDragRef = useRef(null);   // { sn, ns:Set, items, target:{n, before}, el, y, stop }
+  function clipDragClear() {
+    const d = clipDragRef.current; clipDragRef.current = null;
+    if (d && d.stop) d.stop();
+    document.body.classList.remove('clip-dragging');
+    document.querySelectorAll('.sent.clip.drop-before, .sent.clip.drop-after, .sent.clip.drag-src').forEach((el) => el.classList.remove('drop-before', 'drop-after', 'drag-src'));
+  }
+  function clipMove(op, sn, n, ev) {
+    if (op === 'start') {
+      clipDragClear();
+      const PL = linesMap.get(sn); const l = PL && PL.list.find((x) => x.n === n);
+      if (!l || sentEdit) return false;
+      const inSel = capSel && capSel.mode === 'lines' && capSel.shortsNum === sn && capSel.items.some((x) => x.n === n);
+      const items = inSel ? capSel.items : [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }];
+      const d = { sn, items, ns: new Set(items.map((x) => x.n)), target: null, el: null, y: null };
+      d.stop = dragAutoScroll(() => d.y);
+      clipDragRef.current = d;
+      document.body.classList.add('clip-dragging');
+      // 끄는 클립 흐리게 — 처리기가 끝난 뒤(드래그 그림이 흐려지지 않게)
+      setTimeout(() => { if (clipDragRef.current !== d) return; document.querySelectorAll('.card[data-pr="' + sn + '"] .sent.clip[data-ln]').forEach((el) => { if (d.ns.has(Number(el.getAttribute('data-ln')))) el.classList.add('drag-src'); }); }, 0);
+      return true;
+    }
+    const d = clipDragRef.current;
+    if (op === 'end') { clipDragClear(); return; }
+    if (!d || sn !== d.sn) return;
+    if (op === 'over') {
+      d.y = ev.clientY;
+      const el = ev.currentTarget;
+      if (n == null || d.ns.has(n)) { if (d.el) d.el.classList.remove('drop-before', 'drop-after'); d.el = null; d.target = null; return; }
+      ev.preventDefault();
+      try { ev.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      const r = el.getBoundingClientRect(); const before = ev.clientY < r.top + r.height / 2;
+      if (d.el && d.el !== el) d.el.classList.remove('drop-before', 'drop-after');
+      el.classList.toggle('drop-before', before); el.classList.toggle('drop-after', !before);
+      d.el = el; d.target = { n, before };
+      return;
+    }
+    if (op === 'drop') {
+      ev.preventDefault();
+      const t = d.target, items = d.items;
+      clipDragClear();
+      if (t) clipMoveTo(sn, items, t.n, t.before);
+    }
+  }
+  async function clipMoveTo(sn, items, n, before) {
+    const PL = linesMap.get(sn); const tl = PL && PL.list.find((x) => x.n === n);
+    if (!tl) return;
+    // 제자리(고른 클립이 이어져 있고 바로 앞·뒤에 놓음)면 아무것도 안 한다
+    const ns = items.map((x) => x.n).sort((a, b) => a - b);
+    if (ns[ns.length - 1] - ns[0] + 1 === ns.length && ((before && n === ns[ns.length - 1] + 1) || (!before && n === ns[0] - 1))) { setStatus('↕ 같은 자리입니다 — 옮기지 않았습니다'); return; }
+    const ls = PL.bySent.get(tl.groupNum + ':' + tl.sentIdx) || [];
+    const line = ls.findIndex((l) => l.n === n);
+    try {
+      const r = await api.moveClips({ ...clipPayload({ shortsNum: sn, items }), to: { groupNum: tl.groupNum, sentIdx: tl.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), line, before: !!before } });
+      if (r && r.ok) {
+        setDto(r.dto); setCapSel(null);
+        setStatus(`↕ 클립 ${r.moved}개를 옮겼습니다${r.groupNum ? ` → G${r.groupNum} (그림·영상은 G${r.groupNum} 것)` : ''}${r.goneGroups ? ` · 클립이 모두 빠진 그룹 ${r.goneGroups}개 사라짐` : ''} (Ctrl+Z 되돌리기)`);
+      } else clipErr(r, '옮기기');
+    } catch (e) { logline('클립 옮기기 오류: ' + e.message); clipErr(null, '옮기기'); }
+  }
   async function clipMerge() {
     if (!clipSelOk() || capSel.items.length < 2) return; const sel = capSel; setClipMenu(null);
     try {
@@ -5459,7 +5522,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -6766,7 +6829,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -6828,11 +6891,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -7070,9 +7133,15 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                             const tm = fmtClipTime(l.start, l.dur);
                             const lineEd = ed && ed.line && ed.where !== 'stage' && edHere && ed.sentIdx === si && ed.line.n === l.n;
                             return (
-                              <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (isCur && playing && playing.key ? ' reading' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}>
+                              <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (isCur && playing && playing.key ? ' reading' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}
+                                onDragOver={onClipMove ? (ev) => _S.onClipMove('over', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}
+                                onDrop={onClipMove ? (ev) => _S.onClipMove('drop', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}>
                                 {vrewLay ? null : insMarks}
-                                <div className="clip-no cf-lineno" title="이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체"
+                                {/* ↕ 번호 칸을 잡고 끌면 클립 옮기기(체크한 클립 모두 · 체크 안 했으면 이 클립 하나) — 다른 클립의 위·아래 절반에 놓는다 */}
+                                <div className="clip-no cf-lineno" title={'이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체' + (onClipMove ? '\n↕ 끌어서 옮기기 — 체크한 클립 모두(체크 안 했으면 이 클립) · 다른 그룹에 놓으면 그 그룹 그림·영상' : '')}
+                                  draggable={!!onClipMove && !lineEd}
+                                  onDragStart={onClipMove ? (ev) => { ev.stopPropagation(); if (!_S.onClipMove('start', pr.shortsNum, _S.nAt(ev.currentTarget) || l.n, ev)) { ev.preventDefault(); return; } try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/x-pm-clip', String(l.n)); const row = ev.currentTarget.closest('.sent.clip'); if (row) ev.dataTransfer.setDragImage(row, 20, 16); } catch (_) {} } : undefined}
+                                  onDragEnd={onClipMove ? () => _S.onClipMove('end') : undefined}
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>
                                   <span className="clip-no-n">{l.n}</span>

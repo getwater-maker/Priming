@@ -1245,3 +1245,10 @@ main.pane2::before{content:'';display:block;height:14px}
 .stock-sel img,.stock-sel video{width:200px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#000;flex:0 0 auto}
 .stock-sel-info{flex:1 1 auto;min-width:0}
 .stock-nokey{padding:16px;text-align:center}
+
+/* ↕ 클립 끌어 옮기기(v0.7.69) — 번호 칸을 잡는다 · 놓을 자리 = 파란 선(클립 위/아래) · 끄는 클립은 흐리게 */
+.sent.clip .clip-no[draggable="true"]{cursor:grab}
+body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
+.sent.clip.drag-src{opacity:.45}
+.cuts-grid .sent.clip.drop-before{box-shadow:0 -4px 0 0 #1a8fe0 !important}
+.cuts-grid .sent.clip.drop-after{box-shadow:0 4px 0 0 #1a8fe0 !important}

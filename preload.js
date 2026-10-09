@@ -273,6 +273,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteClips: (args) => ipcRenderer.invoke('delete-clips', args),
   copyClips: (args) => ipcRenderer.invoke('copy-clips', args),
   pasteClips: (args) => ipcRenderer.invoke('paste-clips', args),
+  moveClips: (args) => ipcRenderer.invoke('move-clips', args),   // ↕ 클립 끌어 옮기기
   mergeClips: (args) => ipcRenderer.invoke('merge-clips', args),
   ttsSentences: (args) => ipcRenderer.invoke('tts-sentences', args),
   resplit: (args) => ipcRenderer.invoke('resplit', args),
