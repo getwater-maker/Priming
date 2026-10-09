@@ -9590,8 +9590,21 @@ ipcMain.handle('split-group', (_e, args = {}) => {
     const diff = Math.abs(acc - total / 2);
     if (diff < bestDiff) { bestDiff = diff; best = i; }
   }
-  const firstS = sents.slice(0, best), secondS = sents.slice(best);
   undoPush('그룹 분할');
+  const { firstS, secondS, had: _had } = _splitGroupCore(pr, idx, best);
+  storeActive(); dtoByReply();
+  const t1 = firstS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  const t2 = secondS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장)`
+    + (_had ? ` · 그림·영상은 G${groupNum + 1} 끝까지 그대로 이어 씁니다(G${groupNum + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음'));
+  return P.toDTO(S.parsed);
+});
+// ✂ 그룹을 문장 경계 best(앞 조각 문장 수)에서 둘로 — split-group · split-group-at 공용(되돌리기·저장·DTO 는 호출자). 그림·영상 규칙은 위 split-group 설명 그대로.
+function _splitGroupCore(pr, idx, best) {
+  const { Group, finalizeGroupIds } = require('./core/project-model');
+  const g = pr.groups[idx];
+  const sents = pr.getSentencesOfGroup(g);
+  const firstS = sents.slice(0, best), secondS = sents.slice(best);
   const ng = new Group({ num: 0, sentenceIds: secondS.map((s) => s.id) });
   ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;
   ng.imagePrompt = g.imagePrompt || null; ng.videoPrompt = g.videoPrompt || null; ng.motionNote = g.motionNote || null;   // 🔄 로 새로 그릴 때 쓸 것
@@ -9609,12 +9622,96 @@ ipcMain.handle('split-group', (_e, args = {}) => {
   pr.groups.forEach((gg, i) => { gg.num = i + 1; });  // 재번호
   finalizeGroupIds(pr.groups, pr.sentences);          // sentence.groupId 재지정
   try { renumberMediaFiles(pr, shortsDirs(S.outRoot, pr.shortsNum).media); } catch {}
-  storeActive(); dtoByReply();
-  const t1 = firstS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-  const t2 = secondS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-  log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장)`
-    + (_had ? ` · 그림·영상은 G${groupNum + 1} 끝까지 그대로 이어 씁니다(G${groupNum + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음'));
-  return P.toDTO(S.parsed);
+  return { firstS, secondS, had: _had };
+}
+
+// ✂ 그룹 나누기(v0.7.71 · 로이 「브루처럼 클립 사이에서 씬 나누기」) — 고른 클립 **바로 뒤**에서 그룹을 둘로. 문장 경계면 그대로 나누고,
+//   문장 한가운데(줄 경계)면 그 문장을 줄에서 둘로 나눈 뒤(대본 .md 도 함께 · 음성은 쉼에서 자른다 — 붙여넣기와 같은 길) 그 경계에서 나눈다.
+//   그림·영상 = 앞 그룹이 그대로 이어받고 뒤 그룹 끝까지 이어 깐다(split-group 과 같다). 되돌리기 한 번.
+ipcMain.handle('split-group-at', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const list = _clipSents(pr, [args.at]);
+  if (!list || !list.length) return { ok: false, error: '클립을 찾을 수 없습니다 — 다시 골라 주세요.' };
+  const j = list[0];
+  const li = Math.floor(Number(args.at.after));
+  if (!(li >= 0 && li < j.lines.length)) return { ok: false, error: '나눌 자리를 찾을 수 없습니다.' };
+  const isLast = li >= j.lines.length - 1;
+  const g0 = pr.groups.find((x) => x.sentenceIds.includes(j.s.id));
+  const gi0 = g0.sentenceIds.indexOf(j.s.id);
+  if (isLast && gi0 >= g0.sentenceIds.length - 1) return { ok: false, error: '그룹의 마지막 클립 뒤에서는 나눌 수 없습니다 — 나눌 자리 바로 앞의 클립을 고르세요.' };
+  let hs = null;
+  if (!isLast) {
+    const headParts = j.lines.slice(0, li + 1).map((l) => l.t), tailParts = j.lines.slice(li + 1).map((l) => l.t);
+    const texts = [_endMark(headParts.join(' ').trim()), tailParts.join(' ').trim()];
+    const plan = _planMdEdits(pr, [{ idx: j.idx, text: texts.join(' '), n: 2 }]);
+    if (!plan.ok) return plan;
+    const _u = undoPush('그룹 나누기', { md: true });
+    try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+    const made = plan.outs.get(j.idx);
+    const used = new Set(pr.sentences.map((x) => x.id));
+    const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+    let pieces = null, lost = 0;
+    try {
+      pieces = await _linePieces(j.s, j.lines, path.join(ttsDir, '.clip-tmp')).catch(() => null);
+      hs = _mkSent(made[0], j.s, used); if (j.s.chapterMark) hs.chapterMark = j.s.chapterMark;
+      hs.capBreaks = _fixedBreaks(hs.text, headParts);
+      const gh = pieces ? await _joinPieces(pieces.slice(0, li + 1), ttsDir, String(j.s.num)) : null;
+      if (gh) Object.assign(hs, { ttsAudioPath: gh.file, ttsDurationSec: gh.dur, ttsStatus: 'done' }); else lost++;
+      const ts = _mkSent(made[1], j.s, used);
+      ts.capBreaks = _fixedBreaks(ts.text, tailParts);
+      const gt = pieces ? await _joinPieces(pieces.slice(li + 1), ttsDir, String(j.s.num)) : null;
+      if (gt) Object.assign(ts, { ttsAudioPath: gt.file, ttsDurationSec: gt.dur, ttsStatus: 'done' }); else lost++;
+      pr.sentences.splice(pr.sentences.indexOf(j.s), 1, hs, ts);
+      g0.sentenceIds.splice(gi0, 1, hs.id, ts.id);
+    } finally { _rmTemps(pieces); try { fs.rmSync(path.join(ttsDir, '.clip-tmp'), { recursive: true, force: true }); } catch {} }
+    pr.sentences.forEach((x, i) => { x.num = i + 1; });
+    require('./core/project-model').finalizeGroupIds(pr.groups, pr.sentences);
+    require('./core/visual-span').remapSpanIds(pr, new Map([[j.s.id, hs.id]]));
+    require('./core/overlay-layers').remapIds(pr, new Map([[j.s.id, hs.id]]));
+    if (lost) log(`⚠ 그룹 나누기 — 음성 ${lost}문장은 다시 만들어야 합니다(🎤)`);
+  } else undoPush('그룹 나누기');
+  const gIdx = pr.groups.indexOf(g0);
+  const best = g0.sentenceIds.indexOf(isLast ? j.s.id : hs.id) + 1;
+  const num0 = g0.num;
+  const r = _splitGroupCore(pr, gIdx, best);
+  _afterClipOp(pr, null);
+  log(`✂ ${prLabel(pr)} G${num0} → G${num0}·G${num0 + 1} 그룹 나누기 (${r.firstS.length}+${r.secondS.length}문장${isLast ? '' : ' · 문장 한가운데를 줄에서 나눔 · 대본(.md) 갱신'})`
+    + (r.had ? ` · 그림·영상은 G${num0 + 1} 끝까지 그대로 이어 씁니다(G${num0 + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음') + ' (Ctrl+Z 되돌리기)');
+  return { ok: true, dto: P.toDTO(S.parsed), groupNum: num0 + 1, firstSentence: pr.sentences.findIndex((x) => x.id === r.secondS[0].id) };
+});
+
+// ➕ 그룹 추가(v0.7.71 · 로이 「브루 씬 추가 — 클릭한 그룹 아래 새 그룹」) — 고른 그룹 **바로 아래**에 문장 하나짜리 새 그룹. 문장은 자리표시 글(대본 .md 에도 들어간다)이라 바로 고치게 한다.
+//   그림·영상·프롬프트는 비어 있다(새 그룹이 이어받지 않는다) — 이미지 프롬프트를 쓰거나 첨부하면 된다 · 음성은 🎤 · 되돌리기 한 번.
+const NEW_GROUP_TEXT = '새 그룹의 문장입니다.';
+ipcMain.handle('add-group', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  const g = pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) return { ok: false, error: '그룹을 찾을 수 없습니다.' };
+  const last = pr.sentences.find((x) => x.id === g.sentenceIds[g.sentenceIds.length - 1]);
+  if (!last) return { ok: false, error: '그룹의 마지막 문장을 찾을 수 없습니다.' };
+  const head = String(last.text).trim();
+  if (!_END_P.test(head)) return { ok: false, error: '그룹의 마지막 문장 끝에 문장 부호(. ? !)가 없어 새 그룹을 붙일 수 없습니다 — 문장 끝에 마침표를 찍어 주세요.' };
+  const idx = pr.sentences.indexOf(last);
+  const plan = _planMdEdits(pr, [{ idx, text: head + ' ' + NEW_GROUP_TEXT, n: 2 }]);
+  if (!plan.ok) return plan;
+  const _u = undoPush('그룹 추가', { md: true });
+  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  const made = plan.outs.get(idx);
+  const used = new Set(pr.sentences.map((x) => x.id));
+  const ns = _mkSent(made[1], { isIntro: g.isIntro }, used);
+  const { Group } = require('./core/project-model');
+  const ng = new Group({ num: 0, sentenceIds: [ns.id] });
+  ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro; ng.mode = g.mode || 'motion';
+  ng.imagePrompt = null; ng.videoPrompt = null; ng.motionNote = null;
+  ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null; ng.isI2V = false;
+  pr.sentences.splice(idx + 1, 0, ns);
+  pr.groups.splice(pr.groups.indexOf(g) + 1, 0, ng);
+  _afterClipOp(pr, null);
+  const nn = pr.groups.indexOf(ng) + 1;
+  log(`➕ ${prLabel(pr)} G${g.num} 아래에 새 그룹 G${nn} — 문장 「${NEW_GROUP_TEXT}」(대본 .md 에도 들어갔습니다 · 바로 고치세요) · 그림·프롬프트·음성은 비어 있습니다 (Ctrl+Z 되돌리기)`);
+  return { ok: true, dto: P.toDTO(S.parsed), groupNum: nn, firstSentence: pr.sentences.indexOf(ns) };
 });
 
 ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {

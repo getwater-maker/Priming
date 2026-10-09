@@ -823,7 +823,7 @@ export default function App() {
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
-      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
+      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       setAiCfg(p.aiNotice && typeof p.aiNotice === 'object' ? p.aiNotice : {});   // 🏷 AI 고지 문구·시각(① 칸 미리보기 · v0.6.88)
       const prof = (modeProfiles && modeProfiles[mode]) || {};
       const cap = p.capLong;
@@ -864,7 +864,7 @@ export default function App() {
     api.getPresetDetail(presetName).then((p) => {
       if (!p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });
-      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)) });
+      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetRev]);
@@ -1512,6 +1512,32 @@ export default function App() {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 그림·영상은 두 그룹 모두 그대로(뒤 그룹에 새 그림이 필요하면 그 그룹의 🔄)'); }
     catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
   }
+  // ✂ 클립 뒤에서 그룹 나누기(v0.7.71 · 브루 「씬 나누기」) — info = 그 클립 { n, groupNum, sentIdx } · 문장 가운데면 줄에서 문장도 나뉜다(main split-group-at)
+  async function splitGroupAt(sn, info) {
+    const PL = linesMap.get(sn); if (!PL || !info) return;
+    const ls = PL.bySent.get(info.groupNum + ':' + info.sentIdx) || [];
+    const after = ls.findIndex((l) => l.n === info.n);
+    if (after < 0) return;
+    try {
+      const r = await api.splitGroupAt({ shortsNum: sn, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after } });
+      if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`✂ G${info.groupNum} 를 클립 ${info.n} 뒤에서 나눴습니다 → G${info.groupNum}·G${r.groupNum} (그림·영상은 앞 그룹 것을 뒤 그룹 끝까지 이어 씁니다 · 새 그림이 필요하면 G${r.groupNum} 의 🔄 · Ctrl+Z 되돌리기)`); }
+      else clipErr(r, '그룹 나누기');
+    } catch (e) { logline('그룹 나누기 오류: ' + e.message); clipErr(null, '그룹 나누기'); }
+  }
+  // ➕ 고른 그룹 바로 아래에 새 그룹(v0.7.71 · 브루 「씬 추가」) — 만든 뒤 새 문장을 바로 고치게 연다
+  async function addGroupBelow(sn, groupNum) {
+    try {
+      const r = await api.addGroup({ shortsNum: sn, groupNum });
+      if (r && r.ok) {
+        setDto(r.dto); setCapSel(null);
+        setStatus(`➕ G${groupNum} 아래에 새 그룹 G${r.groupNum} 을 만들었습니다 — 문장을 고치고 이미지 프롬프트를 쓰거나 그림을 넣으세요 (Ctrl+Z 되돌리기)`);
+        setTimeout(() => {
+          const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (r.firstSentence + 1) + '"] .sblk-lines');
+          if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} el.click(); }
+        }, 350);
+      } else clipErr(r, '그룹 추가');
+    } catch (e) { logline('그룹 추가 오류: ' + e.message); clipErr(null, '그룹 추가'); }
+  }
   // 제작 전 검사 — 빈 프롬프트 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
   //   opts.image/video = 'all'|'range'|'none' — 어느 그룹에 그 프롬프트가 필요한지.
   //   i2v 는 '영상 범위(vidFrom~vidTo)' 그룹만 필요(롱폼=도입부만). 범위 밖은 영상 안 만드니 i2v 불요.
@@ -1688,7 +1714,7 @@ export default function App() {
   }
   // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
   // ➕ 삽입 — 그림·영상·오디오를 정한 클립(문장) 범위 동안(v0.5.54) · 🏷 채널 로고
-  const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12 });
+  const [logoCfg, setLogoCfg] = useState({ on: false, path: '', size: 12, pos: null });   // pos = 채널 기본 자리 {x,y}(0..1) — ⚙ 채널편집 logoX·logoY
   const [aiCfg, setAiCfg] = useState({});   // 🏷 채널 AI 고지 설정 { text, unit, fromSec, toSec, fromClip, toClip, fmt, pos }
   // 🏷 ① 칸에서 AI 고지 고치기(v0.6.93 · 로이 「AI 고지문도 자막처럼」) — 누르면 글자칸 + 서식 막대 · 끌면 자리 · 저장 = 채널 aiNotice(이 채널 모든 영상)
   const [aiEdit, setAiEdit] = useState(false);
@@ -1757,6 +1783,16 @@ export default function App() {
       catch (e) { logline('로고 크기 저장 오류: ' + e.message); }
     }, 350);
   }
+  // 📌 채널 기본 로고 자리 저장/해제(v0.7.71 · 로이) — 끌어 옮긴 자리를 채널(logoX·logoY %)에 남긴다 · pos=null → 해제
+  async function saveChanLogoPos(pos) {
+    if (!presetName) return;
+    const px = pos ? Math.round(pos.x * 10000) / 100 : '', py = pos ? Math.round(pos.y * 10000) / 100 : '';
+    try {
+      await api.savePreset({ name: presetName, patch: { logoX: px, logoY: py } });
+      setLogoCfg((c) => ({ ...c, pos: pos ? { x: Math.round(pos.x * 10000) / 10000, y: Math.round(pos.y * 10000) / 10000 } : null }));
+      setStatus(pos ? `📌 채널 「${presetName}」 로고 기본 자리 — 왼쪽에서 ${Math.round(pos.x * 100)}% · 위에서 ${Math.round(pos.y * 100)}% (이 채널 모든 영상 · ⚙ 채널편집 📁 폴더에도 같은 값)` : `📌 채널 「${presetName}」 로고 기본 자리를 풀었습니다 — 기본(오른쪽 위)`);
+    } catch (e) { logline('로고 기본 자리 저장 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
   // 🏷 끌어 옮긴 자리(v0.6.85) — 대본마다 logoPos {x,y} · logoDrag = 끄는 중의 자리(놓으면 main 에 저장)
   const [logoDrag, setLogoDrag] = useState(null);
   const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
@@ -1767,7 +1803,7 @@ export default function App() {
     if (o) { if (!o.on) return null; const p = o.path || logoCfg.path; return p ? { ...logoCfg, on: true, path: p } : null; }
     return logoCfg.on && logoCfg.path ? logoCfg : null;
   };
-  const stageLogo = (() => { const b = effLogoCfg(); return b ? { ...b, side: curLogoSide(), pos: logoDrag || curLogoPos() } : null; })();
+  const stageLogo = (() => { const b = effLogoCfg(); return b ? { ...b, side: curLogoSide(), pos: logoDrag || curLogoPos() || (curLogoSide() === 'left' ? null : (b.pos || null)) } : null; })();   // 자리 = 끌기 중 > 대본 끌어 옮김 > ↖ > 채널 기본 자리(overlay-layers.posOfLogo 와 같은 규칙)
   // 🏷 롱폼 큐의 대본 모두에 로고 넣기/빼기 — 채널 설정(⚙ 채널편집)은 그대로
   async function setQueueLogo(mode) {
     const n = (queue && queue.longform && queue.longform.items.length) || 0;
@@ -2941,7 +2977,7 @@ export default function App() {
       ttsNormalize: p.ttsNormalize !== false,
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
-      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12,   // 🏷 채널 로고
+      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '',   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
@@ -3418,6 +3454,7 @@ export default function App() {
       silenceSec: numOr(ch.silenceSec, 0),
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
+      ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
       cfgValue: numOr(ch.cfgValue, 2),
@@ -4815,9 +4852,9 @@ export default function App() {
       <aside className="pane-groups" data-testid="group-col" title="그룹 — 누르면 그 그룹의 첫 클립으로">
         <div className="pg-head sticky" data-testid="group-head">그룹 ({rows.length})<span className="pg-introcnt" data-testid="group-intro-cnt" title="도입부 = 영상(비디오)이 들어가는 그룹 — ② 클립 칸에서 노랑으로 보이는 그룹">🎬 도입부 {rows.filter((r) => r.intro).length}개</span></div>
         <div className="pg-tools">
-          <button type="button" className="pg-act del" data-testid="group-del" disabled={!sel.length} title="체크한 그룹의 클립을 모두 지웁니다(Ctrl+Z 되돌리기)" onClick={() => grpDelete(pr.shortsNum, sel)}>🗑 삭제</button>
-          <button type="button" className="pg-act" data-testid="group-stock" disabled={!curL} title="지금 그룹에 무료 스톡(Pexels · Pixabay) 사진·영상 넣기" onClick={() => { const r = rows.find((x) => curL && x.num === curL.groupNum); if (r) setStockDlg({ shortsNum: pr.shortsNum, groupNum: r.num, intro: r.intro }); }}>🔎 스톡</button>
-          <button type="button" className="pg-act" data-testid="group-merge" disabled={!sel.length} title="체크한 그룹을 앞 그룹에 합칩니다 — 이어진 여러 그룹은 맨 앞 그룹 하나로 · 하나만 체크하면 바로 앞 그룹에" onClick={() => grpMerge(pr.shortsNum, sel)}>⤒ 합치기</button>
+          <button type="button" className="pg-act del" data-testid="group-del" disabled={!sel.length} title="체크한 그룹의 클립을 모두 지웁니다(Ctrl+Z 되돌리기)" onClick={() => grpDelete(pr.shortsNum, sel)}><span className="pg-ic">🗑</span><span className="pg-tx">삭제</span></button>
+          <button type="button" className="pg-act" data-testid="group-add" disabled={!curL} title="지금(누른) 그룹 바로 아래에 새 그룹을 만듭니다 — 문장 하나짜리 · 그림·프롬프트·음성은 비어 있고 문장은 바로 고칩니다(Ctrl+Z 되돌리기)" onClick={() => { if (curL) addGroupBelow(pr.shortsNum, curL.groupNum); }}><span className="pg-ic">➕</span><span className="pg-tx">그룹추가</span></button>
+          <button type="button" className="pg-act" data-testid="group-merge" disabled={!sel.length} title="체크한 그룹을 앞 그룹에 합칩니다 — 이어진 여러 그룹은 맨 앞 그룹 하나로 · 하나만 체크하면 바로 앞 그룹에" onClick={() => grpMerge(pr.shortsNum, sel)}><span className="pg-ic">⤒</span><span className="pg-tx">합치기</span></button>
         </div>
         <label className="pg-all"><input type="checkbox" data-testid="group-all" checked={rows.length > 0 && sel.length === rows.length} onChange={(e) => setGroups(rows, e.target.checked)} /> 전체 선택</label>
         {rows.map((r) => (
@@ -5333,6 +5370,9 @@ export default function App() {
                     title="↗/↖ = 정해진 자리 · ① 칸에서 로고를 끌면 「✋ 직접 옮김」(이 대본만) — ↗/↖ 를 다시 고르면 제자리">
                     <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option>
                     {curLogoPos() && <option value="free">✋ 직접 옮김</option>}</select>
+                  <button className="ghost" data-testid="logo-pos-chan" disabled={!presetName || !isLf || !(curLogoPos() || logoCfg.pos)}
+                    title={curLogoPos() ? '📌 채널 기본으로 — 이 대본에서 끌어 옮긴 로고 자리를 채널 기본 자리로 저장 — 이 채널의 모든 영상(.vrew·MP4)에 늘 그 자리' : (logoCfg.pos ? `📌✕ 채널 기본 자리 해제(지금 왼쪽에서 ${Math.round(logoCfg.pos.x * 100)}% · 위에서 ${Math.round(logoCfg.pos.y * 100)}%) — 기본(오른쪽 위)으로` : '① 칸에서 로고를 끌어 옮기면 켜집니다')}
+                    onClick={() => saveChanLogoPos(curLogoPos() ? curLogoPos() : null)}>{curLogoPos() ? '📌' : '📌✕'}</button>
                   <span className="meta">크기</span>
                   <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
                     title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"
@@ -5525,7 +5565,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -5965,6 +6005,17 @@ export default function App() {
                       onClick={() => setCh((c) => ({ ...c, logoPath: '', logoOn: false }))}>✕</button> : null}
                     <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 48, flex: '0 0 auto' }} title="크기 — 화면 너비 대비 % (기본 12)" disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span></div>
                 )}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" data-testid="logo-pos-row" title="이 채널 로고의 기본 자리 — 로고 왼쪽 위 모서리가 화면 왼쪽에서 X%, 위에서 Y% 에 놓입니다. 비우면 기본(오른쪽 위). 대본에서 로고를 끌어 옮기거나 ↖ 를 고른 대본은 그 자리가 이깁니다."><label>📍 로고 자리</label>
+                    <span className="meta">왼쪽에서</span>
+                    <input className="nbox" data-testid="logo-x" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="X" disabled={!ch.logoOn} value={ch.logoX == null ? '' : ch.logoX} onChange={(e) => setCh({ ...ch, logoX: e.target.value })} /><span className="meta">%</span>
+                    <span className="meta">위에서</span>
+                    <input className="nbox" data-testid="logo-y" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="Y" disabled={!ch.logoOn} value={ch.logoY == null ? '' : ch.logoY} onChange={(e) => setCh({ ...ch, logoY: e.target.value })} /><span className="meta">%</span>
+                    <button className="ghost" data-testid="logo-pos-grab" style={{ flex: '0 0 auto' }} disabled={!ch.logoOn}
+                      title="지금 열려 있는 대본에서 ① 칸으로 끌어 옮긴 로고 자리를 가져옵니다(「저장」을 누르면 이 채널의 기본 자리가 됩니다)"
+                      onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥 현재 대본 자리 가져오기</button>
+                    {(ch.logoX !== '' && ch.logoX != null) || (ch.logoY !== '' && ch.logoY != null) ? <button className="ghost" data-testid="logo-pos-clear" style={{ flex: '0 0 auto' }} title="기본 자리로(오른쪽 위)" onClick={() => setCh((c) => ({ ...c, logoX: '', logoY: '' }))}>✕</button> : null}</div>
+                )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드</label>
                   <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
@@ -6345,7 +6396,7 @@ export default function App() {
                     <div key={id} data-testid={'stock-key-' + id} className={'kp-row' + (n ? ' sep' : '')}>
                       <div className="kp-line">
                         <b className="kp-name">{label}</b>
-                        <Hint>{hint} · 그룹의 🔎(① 칸 · 그룹 칸 「🔎 스톡」)에서 사진·영상을 찾아 넣습니다. 상업적 이용 가능 · 출처 표기 권장.</Hint>
+                        <Hint>{hint} · 그룹의 🔎(① 칸 · 리본 이미지·비디오 탭의 「무료이미지」「무료비디오」)에서 사진·영상을 찾아 넣습니다. 상업적 이용 가능 · 출처 표기 권장.</Hint>
                         <span className="kp-state" style={{ color: inf.has ? '#16a34a' : '#b45309' }}>{inf.has ? `🔑 저장됨(…${inf.tail})` : '🔑 없음'}</span>
                         <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.stockOpenKey(id)}>발급 ↗</button>
                       </div>
@@ -6786,6 +6837,12 @@ export default function App() {
 
 // ✏ 편집칸을 글 높이에 딱 맞춘다 — 그 줄 자리에서 고치는 느낌이 나도록(빈 줄·스크롤 없음).
 // 🖱 자막을 눌러 고치기 시작할 때 커서 자리 — 글자 위 = 맨 앞 · 글자 뒤 빈 곳 = 맨 끝(로이 2026-09-25)
+// 🏷 채널 기본 로고 자리 — 채널 설정 logoX·logoY(%) → {x,y}(0..1) 또는 null(core/overlay-layers.chanLogoPos 와 같은 규칙)
+function chanLogoPosOf(p) {
+  const f = (v) => (v === '' || v == null ? NaN : Number(v));
+  const x = f(p && p.logoX), y = f(p && p.logoY);
+  return isFinite(x) && isFinite(y) && x >= 0 && x <= 100 && y >= 0 && y <= 100 ? { x: Math.round(x * 100) / 10000, y: Math.round(y * 100) / 10000 } : null;
+}
 let _caretSide = null;
 function caretSideFromClick(ev, box) {
   try {
@@ -6832,7 +6889,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -6894,11 +6951,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -6974,7 +7031,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
           return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
-            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0].join('#');
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0].join('#');
         };
         return (
           <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
@@ -7211,6 +7268,13 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                       );
                                     })()}
                                     {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                  </div>
+                                )}
+                                {/* ✂ 그룹 나누기(v0.7.71 · 브루 「씬 나누기」) — 커서가 있는 클립 아래 점선 + 버튼 · 그룹의 마지막 클립 아래에는 없다 */}
+                                {isCur && !lineEd && onSplitAt && !(si === sents.length - 1 && li === lines.length - 1) && (
+                                  <div className="clip-split-bar" data-testid="clip-split-bar" onClick={(ev) => ev.stopPropagation()} onMouseDown={(ev) => ev.stopPropagation()}>
+                                    <button type="button" data-testid="clip-split" title={`이 클립(${l.n}) 바로 뒤에서 그룹 G${c.num} 를 둘로 나눕니다 — 아래 클립부터 새 그룹(문장 한가운데면 문장도 줄에서 나뉩니다) · 그림·영상은 앞 그룹 것을 뒤까지 이어 씁니다 · Ctrl+Z 되돌리기`}
+                                      onClick={() => _S.onSplitAt(pr.shortsNum, { n: l.n, groupNum: c.num, sentIdx: si })}>✂ 그룹 나누기</button>
                                   </div>
                                 )}
                               </div>

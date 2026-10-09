@@ -136,14 +136,29 @@ function logoBox({ side = 'right', size = 0.12, imgRatio = 1, canvasW = 1920, ca
   const mx = 0.025, my = (mx * canvasW) / canvasH;
   return { x: side === 'left' ? mx : 1 - w - mx, y: my, w, h };
 }
+/** 🏷 채널 기본 로고 자리(v0.7.71 · 로이) — 채널 설정 logoX·logoY(% · 왼쪽 위 모서리) → { x, y }(0..1) · 비었거나 범위 밖이면 null(= 오른쪽 위 기본) */
+function chanLogoPos(p) {
+  const f = (v) => (v === '' || v == null ? NaN : +v);
+  const x = f(p && p.logoX), y = f(p && p.logoY);
+  if (!isFinite(x) || !isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) return null;
+  return { x: Math.round(x * 100) / 10000, y: Math.round(y * 100) / 10000 };
+}
 /** 채널 설정 → 빌더 옵션(파일이 없으면 끔) */
 function logoOptsOf(preset, exists) {
   const p = preset || {};
   const pct = Math.max(4, Math.min(40, isFinite(+p.logoSize) ? +p.logoSize : 12));
+  const pos = chanLogoPos(p);
   // 꺼져 있어도 그림·크기는 알려 둔다 — 대본마다 「로고 넣기」(logoOver)가 채널 그림·크기를 쓴다(v0.6.86)
-  if (!p.logoOn || !p.logoPath) return { enabled: false, path: p.logoPath || '', size: pct / 100 };
-  if (exists && !exists(p.logoPath)) return { enabled: false, missing: p.logoPath, path: p.logoPath, size: pct / 100 };
-  return { enabled: true, path: p.logoPath, side: 'right', size: pct / 100 };   // 자리는 대본마다(pipeline 이 project.logoSide 로 바꾼다)
+  if (!p.logoOn || !p.logoPath) return { enabled: false, path: p.logoPath || '', size: pct / 100, pos };
+  if (exists && !exists(p.logoPath)) return { enabled: false, missing: p.logoPath, path: p.logoPath, size: pct / 100, pos };
+  return { enabled: true, path: p.logoPath, side: 'right', size: pct / 100, pos };   // 자리는 대본마다(pipeline 이 project.logoSide·logoPos 로 바꾼다 · pos = 채널 기본 자리)
+}
+/** 이 대본에서 실제로 쓸 로고 자리 — 끌어 옮긴 자리(대본) > ↖ 를 고른 대본 > 채널 기본 자리 > 오른쪽 위(null). .vrew·MP4·① 칸이 같은 규칙 */
+function posOfLogo(lg, pr) {
+  const own = normLogoPos(pr && pr.logoPos);
+  if (own) return own;
+  if (pr && pr.logoSide === 'left') return null;
+  return normLogoPos(lg && lg.pos);
 }
 /**
  * 🏷 이 대본에 실제로 얹을 로고(v0.6.86 · 로이 「채널 전체가 아니라 롱폼 큐에 올라온 것에만 일괄로」) — **한 곳**.
@@ -160,10 +175,10 @@ function effLogo(base, pr) {
   const b = base || { enabled: false };
   const o = normLogoOver(pr && pr.logoOver);
   if (!o) return b;
-  if (!o.on) return { enabled: false, path: b.path || '', size: b.size };
+  if (!o.on) return { enabled: false, path: b.path || '', size: b.size, pos: b.pos || null };
   const p = o.path || b.path || '';
   if (!p) return { enabled: false, size: b.size };
-  return { enabled: true, path: p, side: 'right', size: b.size || 0.12, over: true };
+  return { enabled: true, path: p, side: 'right', size: b.size || 0.12, over: true, pos: b.pos || null };
 }
 
-module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, logoOptsOf, normLogoOver, effLogo, IMG_EXT, VID_EXT };
+module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, chanLogoPos, posOfLogo, logoOptsOf, normLogoOver, effLogo, IMG_EXT, VID_EXT };

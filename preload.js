@@ -234,6 +234,8 @@ contextBridge.exposeInMainWorld('api', {
   setGroupPrompt: (args) => ipcRenderer.invoke('set-group-prompt', args),
   finalPromptPreview: (args) => ipcRenderer.invoke('final-prompt-preview', args),
   splitGroup: (args) => ipcRenderer.invoke('split-group', args),
+  splitGroupAt: (args) => ipcRenderer.invoke('split-group-at', args),   // ✂ 클립 뒤에서 그룹 나누기(브루 씬 나누기)
+  addGroup: (args) => ipcRenderer.invoke('add-group', args),           // ➕ 고른 그룹 아래 새 그룹
   setVisualRange: (args) => ipcRenderer.invoke('set-visual-range', args),
   setGroupLook: (args) => ipcRenderer.invoke('set-group-look', args),
   overlayOp: (args) => ipcRenderer.invoke('overlay-op', args),

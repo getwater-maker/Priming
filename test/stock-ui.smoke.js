@@ -59,14 +59,15 @@ const files = (d) => { const o = []; const walk = (p) => { for (const n of fs.re
     }, { jpg: fs.readFileSync(JPG).toString('base64'), mp4: fs.readFileSync(MP4).toString('base64') });
 
     await win.locator('[data-testid="group-item"][data-g="2"]').click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="group-stock"]').click();
+    await win.locator('.menubar button:text-is("이미지")').first().click(); await win.waitForTimeout(200);   // 스톡 단추는 리본 이미지·비디오 탭에 있다(v0.7.71 — 그룹 칸 단추는 없앴다)
+    await win.locator('[data-testid="rb-stock-image"]').click();
     await win.waitForSelector('[data-testid="stock-dlg"]', { timeout: 5000 });
     ok(await win.locator('[data-testid="stock-nokey"]').isVisible(), '키 없음 → 「⚙ 설정 → API 키」 안내');
     await win.keyboard.press('Escape'); await win.waitForTimeout(200);
     ok(!(await win.locator('[data-testid="stock-dlg"]').count()), 'Esc 로 닫힌다');
 
     await app.evaluate(() => { global.__stockKeysTest = { pexels: 'FAKEKEY1', pixabay: 'FAKEKEY2' }; });
-    await win.locator('[data-testid="group-stock"]').click();
+    await win.locator('[data-testid="rb-stock-image"]').click();
     await win.waitForSelector('[data-testid="stock-item"]', { timeout: 8000 });
     ok(await win.locator('[data-testid="stock-q"]').inputValue() === 'An old woman stacking stones 2', '기본 검색어 = 그룹 이미지 프롬프트 첫 마디');
     const srcs = await win.evaluate(() => [...document.querySelectorAll('[data-testid="stock-item"]')].map((x) => x.dataset.src).join(','));

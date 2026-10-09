@@ -674,7 +674,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
-    { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: project.logoPos || null }; }   // 🏷 대본 덮어쓰기(logoOver) 포함
+    { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 대본 덮어쓰기(logoOver) 포함 · 자리 = 대본 끌어 옮김 > ↖ > 채널 기본 자리
   }
   return inp;
 }
@@ -692,7 +692,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
-    { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) opts.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: project.logoPos || null }; }   // 🏷 채널 로고(또는 이 대본 덮어쓰기 logoOver) · 자리는 대본마다
+    { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) opts.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 채널 로고(또는 이 대본 덮어쓰기 logoOver) · 자리는 대본마다
   }
   if (Array.isArray(project.overlays) && project.overlays.length) opts.overlays = project.overlays;   // 🔝 위층 그림·영상
   if (project.capAll) opts.capAll = project.capAll;   // 🌐 대본 「모든 자막」 서식(문장 덮어쓰기 아래층)
