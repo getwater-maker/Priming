@@ -499,11 +499,12 @@ function buildAss(cues, overlays, cs, extra = {}) {
  * ⚠ 트랙 박스(width 1.008 등)는 반영하지 않는다 — 반영하면 오히려 오차가 커졌다(실측).
  * ⚠ 보간은 선형(실측 확인). 긴 구간을 조각으로 나누면 진행률은 **구간 전체** 기준이어야 이어진다.
  */
-function kenBurnsFilter(kb, frames, off = 0, total = 0) {
+function kenBurnsFilter(kb, frames, off = 0, total = 0, clamp = false) {
   if (!kb || !kb.from) return 'null';
   const f = kb.from, to = kb.to || kb.from;
   const n = Math.max(1, (total > 0 ? total : frames) - 1);
-  const prog = off > 0 ? `(on+${off})/${n}` : `on/${n}`;
+  let prog = off !== 0 ? `(on+${off})/${n}` : `on/${n}`;
+  if (clamp) prog = `min(1,max(0,${prog}))`;   // 🌫 디졸브 창 — 자기 구간 밖(앞 그림의 끝 너머 · 뒤 그림의 시작 앞)은 끝·처음 크롭에 고정
   const num = (v, d) => (v == null || !isFinite(+v) ? d : +v);
   const lerp = (a, b) => `(${a}+(${b}-${a})*${prog})`;
   const sc = lerp(Math.min(1, num(f.scale, 1)), Math.min(1, num(to.scale, num(f.scale, 1))));
@@ -582,10 +583,13 @@ function limitTimeline(tl, sec) {
  * 구간 → 렌더 조각. 🔑 프레임은 **끝 시각 기준 누적 반올림**(오차가 쌓이지 않는다).
  * 긴 이미지 구간은 chunkSec 단위로 나눈다(한 구간이 75초씩 되면 병렬이 그 하나를 기다린다).
  */
-function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC) {
+function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC, opts = {}) {
   const CH = Math.max(120, Math.round(chunkSec * FPS));
   const out = [];
+  const minTail = opts.minTailFrames > 0 ? opts.minTailFrames : 0;   // 🌫 디졸브가 켜졌으면 구간 끝 조각이 너무 짧지 않게(창이 한 조각 안에 들어가야 한다)
+  let segIdx = -1;
   for (const s of segments) {
+    segIdx++;
     const f0 = Math.round(s.start * FPS), f1 = Math.round(s.end * FPS);
     const n = f1 - f0;
     if (n <= 0) continue;
@@ -596,13 +600,54 @@ function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC) {
     const base = top && top.t0 < s.start - 1e-6 ? Math.round((s.start - top.t0) * FPS) : 0;
     const totAll = top && top.tAll > 0 && base > 0 ? Math.max(base + n, Math.round(top.tAll * FPS)) : tot;
     const splittable = L ? L.every((l) => l.type === 'image') : s.type === 'image';
-    if (!splittable || n <= CH) { out.push({ ...s, f0, f1, kbOff: base, kbTotal: totAll }); continue; }
-    for (let o = 0; o < n; o += CH) {
-      const len = Math.min(CH, n - o);
-      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: base + o, kbTotal: totAll });
+    if (!splittable || n <= CH) { out.push({ ...s, f0, f1, kbOff: base, kbTotal: totAll, segIdx }); continue; }
+    for (let o = 0; o < n;) {
+      let len = Math.min(CH, n - o);
+      if (minTail && n - o - len > 0 && n - o - len < minTail) len = n - o;   // 남은 꼬리가 짧으면 이 조각에 합친다
+      out.push({ ...s, f0: f0 + o, f1: f0 + o + len, kbOff: base + o, kbTotal: totAll, segIdx });
+      o += len;
     }
   }
   return out;
+}
+
+// ── 🌫 디졸브(삼국지 R3 · v0.7.76) ───────────────────────────────────────────────────────────────
+/**
+ * 그림이 바뀌는 자리(구간 경계)에 길이 D 초의 **디졸브**를 넣는다 — **타임라인은 그대로**(음성·자막·길이 불변), 화면만 경계 앞뒤 D/2 씩 겹쳐 섞는다.
+ *   · 대상: 앞뒤 조각이 모두 **단일 이미지 · 표준 박스**이고 그림 파일이 **다를 때**만(켄번스 구간 경계는 같은 파일 → 컷 그대로 · 영상·겹친 그림·아래층으로 이어진 그림은 컷).
+ *   · 경계 조각을 잘라 그 자리에 `type:'dissolve'` 조각을 끼운다. 앞 그림은 자기 끝 크롭에 고정(진행 ≤ 1), 뒤 그림은 시작 크롭에 고정(진행 ≥ 0) 한 채 섞이고, 창이 끝나면 뒤 그림이 **이어서** 움직인다(kbOff 보정).
+ *   · 창 길이는 두 구간 길이의 45% 를 넘지 않는다(짧은 구간이 통째로 섞이지 않게). 8프레임보다 짧아지면 컷.
+ */
+function planDissolves(chunks, dissolveSec) {
+  const D = Math.max(0, Math.min(10, +dissolveSec || 0));
+  if (!(D > 0) || chunks.length < 2) return chunks;
+  const half = Math.round((D * FPS) / 2);
+  const single = (c) => c.type === 'image' && c.file && isStandardBox(c.track) && (c.layers || []).filter((l) => l.file).length <= 1;
+  const out = chunks.map((c) => ({ ...c }));
+  const res = [];
+  const segLen = new Map();   // 구간별 전체 프레임(창 상한 계산용)
+  for (const c of chunks) segLen.set(c.segIdx, (segLen.get(c.segIdx) || 0) + (c.f1 - c.f0));
+  let made = 0;
+  for (let i = 0; i < out.length; i++) {
+    const p = res.length ? res[res.length - 1] : null, q = out[i];
+    if (p && p.type !== 'dissolve' && p.segIdx !== q.segIdx && p.f1 === q.f0 && single(p) && single(q) && p.file !== q.file) {
+      const cap = (c) => Math.floor((c.f1 - c.f0) * 0.45);
+      const h = Math.min(half, cap(p), cap(q), Math.floor(0.45 * Math.min(segLen.get(p.segIdx) || 0, segLen.get(q.segIdx) || 0)));
+      if (h >= 4) {   // 양쪽 h 프레임(합 8프레임 이상)
+        const w0 = p.f1 - h, w1 = q.f0 + h;
+        const a = { ...p }, b = { ...q };   // 자르기 전 값(진행 계산용)
+        p.f1 = w0;
+        q.f0 = w1; q.kbOff = (q.kbOff || 0) + h;
+        res.push({ type: 'dissolve', f0: w0, f1: w1, segIdx: q.segIdx, a, b, layers: [], dissolve: true });
+        made++;
+      }
+    }
+    res.push(q);
+  }
+  // 한 조각이 통째로 사라졌으면 뺀다(길이 0)
+  const kept = res.filter((c) => c.f1 > c.f0);
+  kept.dissolves = made;
+  return kept;
 }
 
 // ── 조각 렌더 ──────────────────────────────────────────────────────────────
@@ -626,7 +671,20 @@ async function renderChunk(ch, i, ctx) {
   const common = [...encArgs(enc, bitrate), '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an', out];
   const pre = ctx.filterThreads > 0 ? ['-filter_threads', String(ctx.filterThreads)] : [];
   const L = (ch.layers || []).filter((l) => l.file);
-  if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
+  if (ch.type === 'dissolve') {
+    // 🌫 앞 그림 → 뒤 그림 섞기(smoothstep) — 둘 다 켄번스 진행을 구간 밖에선 끝·처음 크롭에 고정한다. 자막은 섞은 결과 위에 한 번만.
+    const a = ch.a, b = ch.b, A = a.track || {}, B = b.track || {};
+    const covA = await coverImage(a.file, ctx, A), covB = await coverImage(b.file, ctx, B);
+    const offA = (a.kbOff || 0) + (ch.f0 - a.f0), offB = (b.kbOff || 0) + (ch.f0 - b.f0);   // 창 첫 프레임의 진행 프레임(뒤 그림은 음수 = 아직 시작 전)
+    const totA = a.kbTotal > 0 ? a.kbTotal : (a.kbOff || 0) + (a.f1 - a.f0), totB = b.kbTotal > 0 ? b.kbTotal : (b.kbOff || 0) + (b.f1 - b.f0);   // 🔴 합계는 각 구간의 원래 길이 그대로 — 창이 끝 너머로 나가도 늘리지 않는다(늘리면 켄번스 속도가 어긋나 창 시작에서 화면이 튄다 · 실측 7.2) · 구간 밖은 clamp 가 고정
+    const x = `min(1,N/${Math.max(1, frames - 1)})`, st = `(3*pow(${x},2)-2*pow(${x},3))`;   // 프레임 번호 N 으로 — 첫 프레임에서 T(시각)가 비어 있어 한 프레임이 틀어졌다(실측 7.2 → 0.3)
+    const g = [
+      `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}[da]`,
+      `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}[db]`,
+      `[da][db]blend=all_expr='A*(1-${st})+B*${st}':shortest=1,${assFilter}[vout]`,
+    ].join(';');
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', covA, '-i', covB, '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
+  } else if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
     // 🖼 겹친 그림(아래층으로 이어진 그림 위에 다음 그룹 그림) · 사람이 옮기고 줄인 그림 — 검은 바탕 위에 아래 → 위로 얹는다
     const ins = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`];
     const parts = [];
@@ -830,7 +888,9 @@ async function renderVrewToMp4(opts = {}) {
     const missAudio = tl.audio.filter((a) => !a.file).length;
     if (missAudio) log(`   ⚠ 음성 파일이 없는 문장 ${missAudio}개 — 그 자리는 무음으로 채웁니다`);
 
-    const chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC);
+    const dSec = Math.max(0, Math.min(10, +opts.dissolveSec || 0));
+    let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, dSec > 0 ? { minTailFrames: Math.round(dSec * FPS) } : {});
+    if (dSec > 0) { chunks = planDissolves(chunks, dSec); log(`   🌫 디졸브 ${dSec}초 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤 ${dSec / 2}초씩 섞음 · 길이·음성·자막은 그대로)`); }
     const totalFrames = chunks.length ? chunks[chunks.length - 1].f1 : 0;
     const enc = await pickEncoder(tmpDir, log);
     Object.assign(st.video, { total: chunks.length, framesTotal: totalFrames, startedAt: Date.now() });
@@ -929,6 +989,6 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs,
   FONT_FILE, FPS, W, H,
 };

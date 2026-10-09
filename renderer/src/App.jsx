@@ -3048,7 +3048,7 @@ export default function App() {
       ttsNormalize: p.ttsNormalize !== false,
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
-      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '', kbSeg: VLook.normKbSeg(p.kbSeg),   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
+      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '', kbSeg: VLook.normKbSeg(p.kbSeg), dissolveSec: VLook.normDissolve(p.dissolveSec),   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
@@ -3526,6 +3526,7 @@ export default function App() {
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
       kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
+      dissolveSec: VLook.normDissolve(ch.dissolveSec),   // 🌫 채널 디졸브 — ⚠ 안 실으면 저장할 때 지워진다
       ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
@@ -6105,6 +6106,13 @@ export default function App() {
                       {VLook.KB_SEGS.map((x) => <option key={String(x.id)} value={String(x.id)}>{x.label}</option>)}
                     </select>
                     <span className="meta">이 채널 그림의 기본 — 길게 보이는 그림만 나눕니다(구간당 8초 이상)</span></div>
+                )}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" data-testid="dissolve-row" title="그림이 바뀌는 자리를 몇 초에 걸쳐 서서히 섞습니다(디졸브) — 경계 앞뒤 절반씩 겹쳐 섞고 영상 길이·음성·자막은 그대로입니다. 🎬 유튜브 MP4 만(.vrew 에는 전환이 없습니다) · 영상(🎬)이 낀 자리나 겹친 그림 자리는 컷 그대로. 켄번스 구간 사이(같은 그림)는 섞지 않습니다."><label>🌫 디졸브</label>
+                    <select data-testid="ch-dissolve" style={{ flex: '0 0 auto' }} value={String(VLook.normDissolve(ch.dissolveSec))} onChange={(e) => setCh({ ...ch, dissolveSec: VLook.normDissolve(e.target.value) })}>
+                      {VLook.DISSOLVES.map((x) => <option key={x.id} value={String(x.id)}>{x.label}</option>)}
+                    </select>
+                    <span className="meta">그림이 바뀔 때 서서히 섞는 시간 — 🎬 MP4 만 · 수면 영상은 3~6초 추천</span></div>
                 )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드</label>

@@ -34,6 +34,9 @@ function normKbSeg(v) { const k = String(v == null ? 1 : v); return KBSEG_IDS.ha
 const KB_SEGS_GROUP = [{ id: 0, label: '채널 설정대로' }, { id: 'off', label: '한 번에(나누지 않음)' }, ...KB_SEGS.filter((x) => x.id !== 1)];
 const KBSEG_GROUP_IDS = new Set(KB_SEGS_GROUP.map((x) => String(x.id)));
 function normKbSegGroup(v) { const k = String(v == null ? 0 : v); return (k !== '0' && KBSEG_GROUP_IDS.has(k)) ? (k === 'auto' || k === 'off' ? k : Number(k)) : 0; }
+// 🌫 디졸브(삼국지 R3 · v0.7.76) — 그림이 바뀌는 자리를 몇 초에 걸쳐 섞을지(채널 설정). 0 = 컷(지금까지의 동작). 🎬 MP4 만(.vrew 에는 전환이 없다).
+const DISSOLVES = [{ id: 0, label: '없음(컷)' }, { id: 1, label: '1초' }, { id: 2, label: '2초' }, { id: 3, label: '3초' }, { id: 4, label: '4초' }, { id: 5, label: '5초' }, { id: 6, label: '6초' }];
+function normDissolve(v) { const n = Number(v); return Number.isFinite(n) && n >= 0.5 && n <= 10 ? Math.round(n * 10) / 10 : 0; }
 const FILL_IDS = new Set(FILLS.map((x) => x.id));
 const MOTION_IDS = new Set(MOTIONS.map((x) => x.id));
 
@@ -126,4 +129,4 @@ function aiNoticeOn(timing, range, line) {
   return e > a && s < b;
 }
 
-module.exports = { FILLS, MOTIONS, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+module.exports = { FILLS, MOTIONS, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
