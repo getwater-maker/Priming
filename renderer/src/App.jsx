@@ -1528,6 +1528,16 @@ export default function App() {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 그림·영상은 두 그룹 모두 그대로(뒤 그룹에 새 그림이 필요하면 그 그룹의 🔄)'); }
     catch (e) { logline('분할 오류: ' + e.message); uiAlert('분할 실패:\n' + e.message); }
   }
+  // ✏ 그룹 이름(v0.7.74) — 그룹 머리의 이름을 누르거나 그룹 칸의 그룹을 더블클릭 → 이름 입력. 빈칸으로 되돌리려면 Ctrl+Z.
+  async function renameGroup(sn, groupNum) {
+    const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null;
+    const cut = pj && pj.cuts.find((x) => x.num === groupNum);
+    if (!cut) return;
+    const v = await askName(`G${groupNum} 그룹 이름 (유튜브 챕터 이름의 바탕 — 비워 둘 수는 없습니다 · 되돌리기 Ctrl+Z)`, cut.phase || '');
+    if (v == null || v === (cut.phase || '')) return;
+    try { const d = await api.setGroupTitle({ shortsNum: sn, groupNum, title: v }); if (d) setDto(d); setStatus(`✏ G${groupNum} 이름 → 「${v}」 (Ctrl+Z 되돌리기)`); }
+    catch (e) { logline('그룹 이름 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
   // ✂ 클립 뒤에서 그룹 나누기(v0.7.71 · 브루 「씬 나누기」) — info = 그 클립 { n, groupNum, sentIdx } · 문장 가운데면 줄에서 문장도 나뉜다(main split-group-at)
   async function splitGroupAt(sn, info) {
     const PL = linesMap.get(sn); if (!PL || !info) return;
@@ -4922,7 +4932,7 @@ export default function App() {
         {rows.map((r) => (
           <div key={r.num} className={'pg-row' + (r.intro ? ' intro' : '')}>
             <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
-            <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)}>
+            <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)} onDoubleClick={() => renameGroup(pr.shortsNum, r.num)} title="누르면 그 그룹으로 · 더블클릭 = 그룹 이름 바꾸기">
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
               <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>{r.vid ? '🎬 영상만 있음' : '그림 없음'}</em>}<b>{r.text}</b></span>
               <span className="pg-meta">{mmss(r.t0)} + {Math.round(r.dur)}초 · 클립 {r.n}</span>
@@ -5628,7 +5638,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -6965,7 +6975,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -7027,11 +7037,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, onClipAdd, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt', 'onClipAdd']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt', 'onClipAdd', 'onRename']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -7107,7 +7117,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
           return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
-            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0].join('#');
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0].join('#');
         };
         return (
           <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
@@ -7392,7 +7402,8 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                           <div className={'scene-h' + (c.isIntro ? ' intro' : '')} data-testid="scene-h">
                             <button className="sc-fold" data-testid="scene-fold" title={fo ? '이 그룹 펼치기' : '이 그룹 접기'} onClick={() => toggleFold(fk)}>{fo ? '▸' : '▾'}</button>
                             <span className="sc-num">G{c.num}</span>
-                            <span className="sc-title" title={c.phase || ''}>{c.phase || ''}</span>
+                            <span className={'sc-title' + (c.phase ? '' : ' empty') + (onRename ? ' editable' : '')} data-testid="sc-title" title={onRename ? `${c.phase ? c.phase + ' — ' : ''}눌러서 그룹 이름 바꾸기(유튜브 챕터 이름의 바탕)` : (c.phase || '')}
+                              onClick={onRename ? () => _S.onRename(pr.shortsNum, c.num) : undefined}>{c.phase || (onRename ? '그룹 이름 입력' : '')}</span>
                             <span className="sc-btns">
                               {/* ✂ 분할은 늘 보인다(v0.5.90 로이 — 「어느 때는 나오고 어느 때는 안 나온다」 · 예전엔 10초 넘는 그룹만) · 문장 1개면 흐리게 */}
                               <button className="gprev split" disabled={!(c.sentences && c.sentences.length >= 2)} title={((c.sentences && c.sentences.length >= 2) ? `2개 그룹으로 분할${c.groupDurationSec ? ' (' + c.groupDurationSec.toFixed(1) + '초)' : ''} — 그림·영상·음성은 그대로 이어 씁니다` : '문장이 1개라 나눌 수 없습니다(대본에서 문장을 더 나누거나 Ctrl+Enter)')} onClick={() => _S.onSplit(pr.shortsNum, c.num)}>✂</button>

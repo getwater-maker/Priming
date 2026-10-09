@@ -9632,6 +9632,21 @@ ipcMain.handle('split-group', (_e, args = {}) => {
     + (_had ? ` · 그림·영상은 G${groupNum + 1} 끝까지 그대로 이어 씁니다(G${groupNum + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음'));
   return P.toDTO(S.parsed);
 });
+// ✏ 그룹 이름 바꾸기(v0.7.74 · 로이 「그룹 나누기로 생긴 그룹의 이름을 정할 수 있어야」) — 그룹 머리의 이름(= 유튜브 챕터 이름의 바탕)을 고친다.
+//   이름은 작업본(.smproj)에만 저장된다 — 대본(.md)의 `###` 제목은 안 바꾼다(그룹 나누기가 .md 에 제목을 안 쓰는 것과 같다). 되돌리기 한 번.
+ipcMain.handle('set-group-title', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) throw new Error('그룹을 찾을 수 없습니다.');
+  const t = String(args.title == null ? '' : args.title).replace(/\s+/g, ' ').trim().slice(0, 80);
+  if ((g.phase || '') === t) return P.toDTO(S.parsed);
+  undoPush('그룹 이름');
+  g.phase = t; g.title = t;
+  storeActive(); dtoByReply();
+  log(`✏ ${prLabel(pr)} G${g.num} 이름 → ${t ? '「' + t + '」' : '(빈칸)'} (유튜브 챕터 이름의 바탕 · Ctrl+Z 되돌리기)`);
+  return P.toDTO(S.parsed);
+});
 // ✂ 그룹을 문장 경계 best(앞 조각 문장 수)에서 둘로 — split-group · split-group-at 공용(되돌리기·저장·DTO 는 호출자). 그림·영상 규칙은 위 split-group 설명 그대로.
 function _splitGroupCore(pr, idx, best, opts = {}) {
   const { Group, finalizeGroupIds } = require('./core/project-model');

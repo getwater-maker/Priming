@@ -1275,3 +1275,8 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .pane-groups .pg-tools .pg-act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 2px;line-height:1.15;white-space:nowrap;min-width:0}
 .pane-groups .pg-act .pg-ic{font-size:15px;line-height:1.1}
 .pane-groups .pg-act .pg-tx{font-size:11px;font-weight:700}
+
+/* ✏ 그룹 이름(v0.7.74) — 눌러서 바꾼다 · 비어 있으면 흐린 안내 */
+.scene-h .sc-title.editable{cursor:text;border-radius:5px;padding:0 4px}
+.scene-h .sc-title.editable:hover{background:rgba(25,168,214,.14)}
+.scene-h .sc-title.empty{opacity:.45;font-style:italic;font-weight:500}
