@@ -322,6 +322,34 @@ function _clampKbFrame(f) {
   const clamp = (v, d) => Math.min(1 - m, Math.max(m, (v == null ? d : Number(v))));
   return { scale: s, centerX: clamp(f.centerX, 0.5), centerY: clamp(f.centerY, 0.5) };
 }
+// 🎞 켄번스 구간(v0.7.75 · 삼국지 R2 — 한 장이 몇 분이어도 한 번의 팬으로 끝나지 않게).
+//   한 그룹 그림이 보이는 시간(자기 문장 + 이어 깐 범위)을 문장 경계에서 N 구간으로 나누고, 구간마다 **자기 자산(트랙)**을 둔다 — 같은 그림 파일을 가리키는 트랙 N 개, 각자 kenburnsAnimationInfo.
+//   → Vrew 가 읽는 구조 그대로(필드를 더하지 않는다)이고 🎬 MP4 렌더러도 손대지 않는다(자산마다 자기 구간 안에서 0→1 로 진행).
+//   웨이포인트: 양 끝은 옛 패턴(from/to)과 같고, 사이는 구간마다 방향이 달라지게 살짝 흔든다. 구간 k 의 끝 프레임 = 구간 k+1 의 시작 프레임 → 이음새에서 튀지 않는다.
+const KB_SEG_AUTO_SEC = 60;   // 'auto' = 구간당 약 60초
+const KB_SEG_MIN_SEC = 8;     // 구간이 이보다 짧아지게 나누지 않는다
+const KB_SEG_MAX = 8;
+function kbWaypoints(from, to, n, seed) {
+  const f = _clampKbFrame(from), t = _clampKbFrame(to);
+  const out = [f];
+  const sg0 = ((Number(seed) || 0) % 2) ? 1 : -1;
+  for (let k = 1; k < n; k++) {
+    const u = k / n, sg = (k % 2 ? 1 : -1) * sg0;
+    const sc = Math.min(0.95, Math.max(0.80, f.scale + (t.scale - f.scale) * u + sg * 0.022));
+    out.push(_clampKbFrame({ scale: sc, centerX: f.centerX + (t.centerX - f.centerX) * u + sg * 0.035, centerY: f.centerY + (t.centerY - f.centerY) * u - sg * 0.025 }));
+  }
+  out.push(t);
+  return out;
+}
+/** 켄번스 구간 수 — want = 'auto' | 2..8 | 없음(1). dur = 그림이 보이는 전체 초. 짧으면 1(나누지 않음). */
+function kbSegCount(want, dur, nSent) {
+  const d = Number(dur) || 0;
+  let n = 1;
+  if (want === 'auto') n = Math.round(d / KB_SEG_AUTO_SEC);
+  else if (Number(want) >= 2) n = Math.floor(Number(want));
+  n = Math.min(n, Math.floor(d / KB_SEG_MIN_SEC), KB_SEG_MAX, Math.max(1, nSent | 0));
+  return Math.max(1, n);
+}
 // 🖼 그룹 「움직임」(core/visual-look MOTIONS) → 켄번스. auto = 그룹 번호로 돌아가며 · none = 멈춘 그림(필드를 안 쓴다)
 function _kenBurnsForLook(g) {
   const m = (g && g.look && g.look.motion) || 'auto';
@@ -1116,6 +1144,41 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   { const _rk = _VS.groupRanks(_vsProj, (x) => groupImageAsset.has(x.id));
     groups.forEach((g, gi) => { const ga = groupImageAsset.get(g.id); const as = ga && pj.props.assets[ga.aid]; if (!as) return;
       for (const tid of as.trackIds || []) { const t = pj.props.tracks[tid]; if (t && (t.type === 'image' || t.type === 'video')) t.zIndex = _rk[gi]; } }); }
+  // 🎞 켄번스 구간 — 그룹별 look.kbSeg(없으면 채널 기본 opts.kbSeg). 이미지 그룹만(영상은 제 길이로 돈다) · 켄번스가 없는 그룹(움직임 없음)은 그대로
+  { let nSegGroups = 0, nSegAssets = 0;
+    groups.forEach((g, gi) => {
+      const ga = groupImageAsset.get(g.id); if (!ga || ga.isVideo) return;
+      const as0 = pj.props.assets[ga.aid]; const tr0 = as0 && pj.props.tracks[(as0.trackIds || [])[0]];
+      if (!tr0 || tr0.type !== 'image' || !tr0.kenburnsAnimationInfo || !tr0.kenburnsAnimationInfo.from) return;
+      const gv = g.look && g.look.kbSeg;   // 그룹 값이 채널 기본을 이긴다 — 'off' = 이 그룹만 나누지 않음
+      const want = gv === 'off' ? 1 : (gv || (opts && opts.kbSeg) || 1);
+      if (want === 1 || want === '1') return;
+      const vis = [];   // 이 그림이 보이는 문장(순서대로) + 길이
+      for (const id of _vsCtx.order) { if ((_layers.get(id) || []).includes(gi)) { const s = _sById.get(id); vis.push({ id, d: (s && s.ttsAudioPath && s.ttsDurationSec) ? s.ttsDurationSec : 0 }); } }
+      const total = vis.reduce((a, x) => a + x.d, 0);
+      const n = kbSegCount(want, total, vis.length);
+      if (n < 2) return;
+      // 문장 가운데 시각으로 구간을 정한다 — 구간이 빈 채로 남으면(아주 긴 문장) 그만큼 구간 수를 줄인다
+      const idx = []; let acc = 0;
+      for (const x of vis) { idx.push(Math.min(n - 1, Math.floor(((acc + x.d / 2) / total) * n))); acc += x.d; }
+      const used = [...new Set(idx)].sort((a, b) => a - b);
+      const m = used.length; if (m < 2) return;
+      const remap = new Map(used.map((u, k) => [u, k]));
+      const wp = kbWaypoints(tr0.kenburnsAnimationInfo.from, tr0.kenburnsAnimationInfo.to || tr0.kenburnsAnimationInfo.from, m, g.num);
+      const aids = [];
+      for (let k = 0; k < m; k++) {
+        if (k === 0) { aids.push(ga.aid); continue; }
+        const tid2 = sid(), aid2 = uid();
+        pj.props.tracks[tid2] = { ...JSON.parse(JSON.stringify(tr0)), trackId: tid2 };
+        pj.props.assets[aid2] = { trackIds: [tid2], role: 'sub' };
+        aids.push(aid2); nSegAssets++;
+      }
+      aids.forEach((aid, k) => { const t = pj.props.tracks[(pj.props.assets[aid].trackIds || [])[0]]; t.kenburnsAnimationInfo = { type: 'custom', from: { ...wp[k] }, to: { ...wp[k + 1] } }; });
+      ga.segAid = new Map(vis.map((x, i) => [x.id, aids[remap.get(idx[i])]]));
+      nSegGroups++;
+      log(`[Vrew] 그룹${g.num} 켄번스 ${m}구간(보이는 ${Math.round(total)}초 → 구간당 약 ${Math.round(total / m)}초)`);
+    });
+    if (nSegGroups) log(`[Vrew] 🎞 켄번스 구간 — 그룹 ${nSegGroups}개 · 자산 ${nSegAssets}개 추가`); }
   // 🔝 위층 그림·영상 — 문장 → [오버레이 순번](아래 → 위)
   const _ovProj = { groups, sentences, overlays: opts.overlays || [] };
   const _ovAid = await addOverlayTracks(pj, _ovProj.overlays, mediaZip, { w: _canvasW, h: _canvasH }, log);
@@ -1205,7 +1268,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     const totalWeight = subClips.reduce((sum, c) => sum + (c.weight || 1), 0) || 1;
 
     // 🖼 이 문장을 덮는 그림 전부(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 이어진 그림(샘플.vrew: 한 자산이 여러 클립 · zIndex 로 쌓임)
-    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => x.aid);
+    const clipAssetIds = (_layers.get(s.id) || []).map((gi) => groupImageAsset.get(groups[gi].id)).filter(Boolean).map((x) => (x.segAid && x.segAid.get(s.id)) || x.aid);   // 🎞 켄번스 구간이면 이 문장이 속한 구간의 자산
     const _ovHere = _ovBy.get(s.id) || [];
     const _sOrd = _ovCtx ? _ovCtx.pos.get(s.id) : -1;
     const _sLen = String(s.text || '').length;
@@ -1461,4 +1524,4 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 }
 
 module.exports = {
-  _kenBurnsForLook, _editInfoForLook, _fillBox, buildVrew, readImageSize };
+  _kenBurnsForLook, _editInfoForLook, _fillBox, kbWaypoints, kbSegCount, buildVrew, readImageSize };

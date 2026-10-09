@@ -22,6 +22,18 @@ const MOTIONS = [
   { id: 'bt', label: '아래 → 위' },
   { id: 'tb', label: '위 → 아래' },
 ];
+// 🎞 켄번스 구간(v0.7.75) — 한 그림이 길게 보일 때 몇 구간으로 나눠 움직일지. 1 = 한 번에(지금까지의 동작) · auto = 구간당 약 60초
+const KB_SEGS = [
+  { id: 1, label: '한 번에(지금까지)' },
+  { id: 'auto', label: '자동(약 60초마다)' },
+  { id: 2, label: '2구간' }, { id: 3, label: '3구간' }, { id: 4, label: '4구간' }, { id: 6, label: '6구간' },
+];
+const KBSEG_IDS = new Set(KB_SEGS.map((x) => String(x.id)));
+function normKbSeg(v) { const k = String(v == null ? 1 : v); return KBSEG_IDS.has(k) ? (k === 'auto' ? 'auto' : Number(k)) : 1; }   // 채널 기본 값 — 1 = 한 번에
+// 그룹 값은 채널 기본보다 이긴다: 없음(0 · 채널 설정대로) | 'off'(이 그룹은 나누지 않음) | 'auto' | 2..6
+const KB_SEGS_GROUP = [{ id: 0, label: '채널 설정대로' }, { id: 'off', label: '한 번에(나누지 않음)' }, ...KB_SEGS.filter((x) => x.id !== 1)];
+const KBSEG_GROUP_IDS = new Set(KB_SEGS_GROUP.map((x) => String(x.id)));
+function normKbSegGroup(v) { const k = String(v == null ? 0 : v); return (k !== '0' && KBSEG_GROUP_IDS.has(k)) ? (k === 'auto' || k === 'off' ? k : Number(k)) : 0; }
 const FILL_IDS = new Set(FILLS.map((x) => x.id));
 const MOTION_IDS = new Set(MOTIONS.map((x) => x.id));
 
@@ -42,18 +54,20 @@ function normLook(l) {
   };
   const bx = normBox(o.box);
   if (bx) out.box = bx;
+  const ks = normKbSegGroup(o.kbSeg);
+  if (ks) out.kbSeg = ks;   // 없음(채널 설정대로)이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로)
   return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg;
 }
 function describe(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
   const m = MOTIONS.find((x) => x.id === n.motion).label;
   const fl = [n.flipH ? '좌우 반전' : '', n.flipV ? '상하 반전' : ''].filter(Boolean).join('·') || '반전 없음';
-  return `채우기 ${f} · ${fl} · 움직임 ${m}` + (n.box ? ` · 자리 직접(${Math.round(n.box.w * 100)}% 크기)` : '');
+  return `채우기 ${f} · ${fl} · 움직임 ${m}` + (n.kbSeg ? ` · 켄번스 ${n.kbSeg === 'auto' ? '자동 구간' : n.kbSeg === 'off' ? '한 번에' : n.kbSeg + '구간'}` : '') + (n.box ? ` · 자리 직접(${Math.round(n.box.w * 100)}% 크기)` : '');
 }
 
 /**
@@ -112,4 +126,4 @@ function aiNoticeOn(timing, range, line) {
   return e > a && s < b;
 }
 
-module.exports = { FILLS, MOTIONS, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+module.exports = { FILLS, MOTIONS, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

@@ -3048,7 +3048,7 @@ export default function App() {
       ttsNormalize: p.ttsNormalize !== false,
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
-      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '',   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
+      logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '', kbSeg: VLook.normKbSeg(p.kbSeg),   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
@@ -3525,6 +3525,7 @@ export default function App() {
       silenceSec: numOr(ch.silenceSec, 0),
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
+      kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
       ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
@@ -6097,6 +6098,14 @@ export default function App() {
                       onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥 현재 대본 자리 가져오기</button>
                     {(ch.logoX !== '' && ch.logoX != null) || (ch.logoY !== '' && ch.logoY != null) ? <button className="ghost" data-testid="logo-pos-clear" style={{ flex: '0 0 auto' }} title="기본 자리로(오른쪽 위)" onClick={() => setCh((c) => ({ ...c, logoX: '', logoY: '' }))}>✕</button> : null}</div>
                 )}
+                {/* 🎞 화면 연출(v0.7.75~) — 켄번스 구간 · (디졸브 · 오버레이 모션은 뒤이어) */}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" data-testid="kbseg-row" title="한 그림이 길게 보일 때(수 분) 문장 경계에서 구간을 나눠 구간마다 다른 방향으로 천천히 움직입니다 — 한 번의 팬으로 끝나지 않게. 대본 그룹의 ① 칸 그림 메뉴 ▸ 움직임에서 그룹마다 따로 정할 수도 있습니다(그쪽이 이깁니다). .vrew·MP4 공통."><label>🎞 켄번스 구간</label>
+                    <select data-testid="ch-kbseg" style={{ flex: '0 0 auto' }} value={String(VLook.normKbSeg(ch.kbSeg))} onChange={(e) => setCh({ ...ch, kbSeg: VLook.normKbSeg(e.target.value) })}>
+                      {VLook.KB_SEGS.map((x) => <option key={String(x.id)} value={String(x.id)}>{x.label}</option>)}
+                    </select>
+                    <span className="meta">이 채널 그림의 기본 — 길게 보이는 그림만 나눕니다(구간당 8초 이상)</span></div>
+                )}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
                 <div className="frow"><label>다운로드</label>
                   <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
@@ -7908,6 +7917,9 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       <div className="vr-menu" style={style} data-testid="vr-menu">
         {back}
         {VLook.MOTIONS.map((x) => <button key={x.id} onClick={look({ motion: x.id })}>{chk(lk.motion === x.id)}{x.label}</button>)}
+        <div className="vr-sep" />
+        <div className="vr-cur" title="한 그림이 길게 보일 때(몇 분) 한 번의 팬으로 끝나지 않게 — 문장 경계에서 구간을 나눠 구간마다 다른 방향으로 천천히 움직입니다. 구간 사이는 끊김 없이 이어집니다(.vrew·MP4 공통). 짧은 그림은 나누지 않습니다.">🎞 켄번스 구간 (긴 그림을 나눠 움직임)</div>
+        {VLook.KB_SEGS_GROUP.map((x) => <button key={String(x.id)} data-testid={'kbseg-' + x.id} onClick={look({ kbSeg: x.id })}>{chk((lk.kbSeg || 0) === x.id)}{x.label}</button>)}
       </div>
     );
   }
@@ -7933,7 +7945,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
         <button onClick={() => setSub('fill')}>⛶ 채우기 <span className="vr-val">{VLook.FILLS.find((f) => f.id === lk.fill).label}</span> ›</button>
         <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
         {lk.box && <button onClick={look({ box: null })}>📐 자리·크기 원래대로</button>}
-        {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}</span> ›</button>}
+        {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}{lk.kbSeg ? ` · ${lk.kbSeg === 'auto' ? '자동 구간' : lk.kbSeg === 'off' ? '한 번에' : lk.kbSeg + '구간'}` : ''}</span> ›</button>}
         <div className="vr-sep" />
       </>}
       <button onClick={go(() => onAttach(sn, c.num))}>🔁 {has ? '교체' : '첨부'} (파일)</button>

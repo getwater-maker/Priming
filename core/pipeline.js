@@ -673,6 +673,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
+    { const ks = require('./visual-look').normKbSeg(preset.kbSeg); if (ks !== 1) inp.kbSeg = ks; }   // 🎞 채널 기본 켄번스 구간(대본 그룹의 look.kbSeg 가 이긴다)
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 대본 덮어쓰기(logoOver) 포함 · 자리 = 대본 끌어 옮김 > ↖ > 채널 기본 자리
   }
@@ -691,6 +692,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
+    { const ks = require('./visual-look').normKbSeg(preset.kbSeg); if (ks !== 1) opts.kbSeg = ks; }   // 🎞 채널 기본 켄번스 구간
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) opts.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 채널 로고(또는 이 대본 덮어쓰기 logoOver) · 자리는 대본마다
   }
