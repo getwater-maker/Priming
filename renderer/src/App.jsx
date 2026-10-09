@@ -1171,9 +1171,10 @@ export default function App() {
   // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
   //   ⚠ 일괄첨부로 넣은 **출력 폴더 밖 원본 파일은 지우지 않고 참조만 해제**한다(main.js 에서 판정).
   async function deleteImagesAll() {
-    if (!uiConfirm('이 대본의 이미지 파일과 재활용 캐시를 모두 삭제합니다.\n(비디오는 그대로 남습니다. 다음에 이미지 버튼을 누르면 전부 새로 만듭니다.)\n\n진행할까요?')) return;
+    const nVid = ((curProject() || {}).cuts || []).filter((c) => c.videoPath).length;   // 영상이 있는 그룹 — 이미지를 지워도 영상 첫 화면이 그림처럼 계속 보인다
+    if (!uiConfirm('이 대본의 이미지 파일과 재활용 캐시를 모두 삭제합니다.\n(비디오는 그대로 남습니다. 다음에 이미지 버튼을 누르면 전부 새로 만듭니다.)' + (nVid ? `\n\n⚠ 영상이 있는 그룹 ${nVid}개는 영상의 첫 화면이 ① 칸·② 클립 칸에 그림처럼 계속 보입니다 — 영상까지 지우려면 비디오 메뉴의 🗑 를 누르세요.` : '') + '\n\n진행할까요?')) return;
     setStatus('이미지 삭제 중…');
-    try { const d = await api.deleteImages({ styleId: styleId || null, imgEngine }); if (d) setDto(d); setStatus('이미지 삭제 완료'); }
+    try { const d = await api.deleteImages({ styleId: styleId || null, imgEngine }); if (d) setDto(d); setStatus('이미지 삭제 완료' + (nVid ? ` — 영상이 있는 그룹 ${nVid}개는 영상 화면이 남아 있습니다(비디오 메뉴 🗑 로 지움)` : '')); }
     catch (e) { logline('이미지 삭제 오류: ' + e.message); setStatus('이미지 삭제 실패'); }
   }
   async function deleteVideosAll() {
@@ -1193,11 +1194,11 @@ export default function App() {
     try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 헤더값을 활성 항목에 반영
     const items = (queue && queue[mode] && queue[mode].items) || [];
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
-    const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오' }[stage] || stage;
+    const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오', ttsimg: 'TTS→이미지' }[stage] || stage;
     const origId = (queue && queue[mode] && queue[mode].activeId) || (items[0] && items[0].id);
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
-    const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
+    const phases = stage === 'imgvid' ? ['image', 'video'] : stage === 'ttsimg' ? ['tts', 'image'] : [stage];   // ttsimg = 전 편 TTS → 전 편 이미지(GPU 를 번갈아 쓰지 않게 · v0.7.72)
     let qStyle = styleId || null;   // 📜 대본스타일 + 이 대본에 🎨 줄 없음 → 시작 전에 한 번 묻는다(큐의 다른 대본은 main 이 채널 화풍으로 폴백)
     if (stage !== 'tts') { qStyle = await runStyleId(); if (qStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
     queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
@@ -1523,6 +1524,32 @@ export default function App() {
       if (r && r.ok) { setDto(r.dto); setCapSel(null); setStatus(`✂ G${info.groupNum} 를 클립 ${info.n} 뒤에서 나눴습니다 → G${info.groupNum}·G${r.groupNum} (그림·영상은 앞 그룹 것을 뒤 그룹 끝까지 이어 씁니다 · 새 그림이 필요하면 G${r.groupNum} 의 🔄 · Ctrl+Z 되돌리기)`); }
       else clipErr(r, '그룹 나누기');
     } catch (e) { logline('그룹 나누기 오류: ' + e.message); clipErr(null, '그룹 나누기'); }
+  }
+  // ＋ 클립 추가(v0.7.72 · 브루) — 클립 사이 막대의 「클립 추가」 → 4가지 팝업. AI 목소리 클립 = 그 클립 **뒤**에 새 문장(자리표시 글) 하나 — 붙여넣기(paste-clips)와 같은 길이라
+  //   문장 한가운데면 문장이 줄에서 나뉘고 음성도 쉼에서 잘려 앞·뒤에 남는다 · 새 클립은 목소리가 비어 있다(글을 고치고 🎤). 나머지 셋은 준비 중.
+  const [clipAddMenu, setClipAddMenu] = useState(null);   // { sn, info, x, y }
+  function openClipAdd(sn, info, at) { setClipAddMenu({ sn, info, x: at.x, y: at.y }); }
+  async function addVoiceClip() {
+    const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
+    const { sn, info } = m;
+    const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null;
+    const cut = pj && pj.cuts.find((x) => x.num === info.groupNum);
+    const sent = cut && (cut.sentences || [])[info.sentIdx];
+    const PL = linesMap.get(sn); const ls = (PL && PL.bySent.get(info.groupNum + ':' + info.sentIdx)) || [];
+    const after = ls.findIndex((l) => l.n === info.n);
+    if (!sent || after < 0) return;
+    const T = '새 클립입니다.';
+    try {
+      const r = await api.pasteClips({ shortsNum: sn, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after }, chunks: [{ text: T, parts: [T], audio: null, dur: null, speaker: sent.speaker || null, isIntro: !!cut.isIntro }] });
+      if (r && r.ok) {
+        setDto(r.dto); setCapSel(null);
+        setStatus(`＋ 클립 ${info.n} 뒤에 새 클립을 만들었습니다 — 글을 고친 뒤 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
+        setTimeout(() => {
+          const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (r.firstSentence + 1) + '"] .sblk-lines');
+          if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} el.click(); }
+        }, 350);
+      } else clipErr(r, '클립 추가');
+    } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); }
   }
   // ➕ 고른 그룹 바로 아래에 새 그룹(v0.7.71 · 브루 「씬 추가」) — 만든 뒤 새 문장을 바로 고치게 연다
   async function addGroupBelow(sn, groupNum) {
@@ -4124,8 +4151,9 @@ export default function App() {
       const t = ev.target; if (!t || !t.closest || ev.button !== 0) return;
       if (!t.closest('main.pane2') || t.closest('.clip-tb, .clipbar, .vr-menu, .modal-bg')) return;
       if (playingRef.current && (t.closest('.sent') || t.matches('.cut, .sents, .cuts-grid, main.pane2'))) stopPlayer();   // 클립·빈 곳을 누르면 멈춘다(단추·그림 메뉴는 제 일을 한다)
-      if (t.closest('.sent, button, input, textarea, select, a, label, .rail, [contenteditable="true"]')) return;
-      if (!t.matches('.cut, .sents, .cuts-grid, main.pane2') || sentEdit) return;   // 배경을 직접 눌렀을 때만(썸네일·표지 같은 자식 요소는 제 일을 한다)
+      const inGap = !!t.closest('.clip-gap') && !t.closest('.cg-bar');   // 클립 사이 호버 막대의 빈 자리(v0.7.72)는 카드 사이 빈 곳과 같다
+      if (!inGap && t.closest('.sent, button, input, textarea, select, a, label, .rail, [contenteditable="true"]')) return;
+      if ((!inGap && !t.matches('.cut, .sents, .cuts-grid, main.pane2')) || sentEdit) return;   // 배경을 직접 눌렀을 때만(썸네일·표지 같은 자식 요소는 제 일을 한다)
       const cutEl = t.closest('.cut[data-sn]') || t;
       const rows = [...document.querySelectorAll('main.pane2 .sent[data-ln]')].filter((x) => x.offsetParent !== null);
       let best = null, bd = Infinity;
@@ -4819,7 +4847,7 @@ export default function App() {
     for (const c of pr.cuts) {
       const sents = c.sentences || []; const t0 = acc; for (const se of sents) acc += se.dur > 0 ? se.dur : 2.5;
       const lines = PL.list.filter((x) => x.groupNum === c.num);
-      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, intro: !!c.isIntro, title: c.phase || '', img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
+      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, intro: !!c.isIntro, title: c.phase || '', vid: !!c.videoPath, img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
     }
     const go = (r) => {
       if (!r.first) return;
@@ -4862,7 +4890,7 @@ export default function App() {
             <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
             <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)}>
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
-              <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>그림 없음</em>}<b>{r.text}</b></span>
+              <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>{r.vid ? '🎬 영상만 있음' : '그림 없음'}</em>}<b>{r.text}</b></span>
               <span className="pg-meta">{mmss(r.t0)} + {Math.round(r.dur)}초 · 클립 {r.n}</span>
             </button>
           </div>
@@ -5270,6 +5298,7 @@ export default function App() {
             {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
                 대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
+            <button disabled={!loaded} data-testid="rb-tts-image" title="작업큐의 모든 대본을 TTS(음성) 먼저 만들고 이어서 이미지까지 만듭니다 — 이미 있는 음성·그림은 건너뜁니다 (비디오는 안 만듭니다)" onClick={() => runStageQueue('ttsimg')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS+이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             <button className="ghost" data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
 
@@ -5565,7 +5594,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -5679,6 +5708,14 @@ export default function App() {
           </div>
         </div>
       )}
+      {clipAddMenu && (<>
+        <div className="vr-menu-bg" onMouseDown={() => setClipAddMenu(null)} />
+        <div className="clip-add-pop" data-testid="clip-add-pop" style={{ left: Math.max(8, Math.min(clipAddMenu.x, window.innerWidth - 560)), top: Math.min(clipAddMenu.y, window.innerHeight - 130) }}>
+          <button type="button" data-testid="clip-add-voice" title="이 클립 뒤에 새 클립(글)을 만듭니다 — 글을 고친 뒤 🎤 로 음성을 만드세요" onClick={addVoiceClip}><span className="ca-ic">🔊</span><span>AI 목소리 클립</span></button>
+          <button type="button" className="soon" data-testid="clip-add-empty" title="준비 중 — 소리 없는 빈 클립" onClick={() => setStatus('빈 클립은 준비 중입니다')}><span className="ca-ic">▭</span><span>빈 클립</span></button>
+          <button type="button" className="soon" data-testid="clip-add-image" title="준비 중 — 지금은 ➕ 삽입 메뉴의 그림으로 클립 범위에 넣으세요" onClick={() => setStatus('이미지 클립은 준비 중입니다 — ➕ 삽입 메뉴의 「그림」으로 클립 범위에 넣을 수 있습니다')}><span className="ca-ic">🖼</span><span>이미지 클립</span></button>
+          <button type="button" className="soon" data-testid="clip-add-video" title="준비 중 — 지금은 ➕ 삽입 메뉴의 영상으로 클립 범위에 넣으세요" onClick={() => setStatus('비디오 클립은 준비 중입니다 — ➕ 삽입 메뉴의 「영상」으로 클립 범위에 넣을 수 있습니다')}><span className="ca-ic">🎬</span><span>비디오 클립</span></button>
+        </div></>)}
       {stockDlg && <StockDialog target={stockDlg} onClose={() => setStockDlg(null)} onOpenKeys={() => { setStockDlg(null); openSettings('keys'); }}
         onAttached={(d, it) => { if (d) setDto(d); setStatus(`🔎 G${stockDlg.groupNum} 에 ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'}을 넣었습니다`); }} />}
       {nameAsk && (
@@ -6889,7 +6926,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt }) {
+function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -6951,11 +6988,11 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, onClipAdd, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt', 'onClipAdd']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -7031,7 +7068,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
           return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
-            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0].join('#');
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0].join('#');
         };
         return (
           <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
@@ -7270,11 +7307,17 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                     {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
                                   </div>
                                 )}
-                                {/* ✂ 그룹 나누기(v0.7.71 · 브루 「씬 나누기」) — 커서가 있는 클립 아래 점선 + 버튼 · 그룹의 마지막 클립 아래에는 없다 */}
-                                {isCur && !lineEd && onSplitAt && !(si === sents.length - 1 && li === lines.length - 1) && (
-                                  <div className="clip-split-bar" data-testid="clip-split-bar" onClick={(ev) => ev.stopPropagation()} onMouseDown={(ev) => ev.stopPropagation()}>
-                                    <button type="button" data-testid="clip-split" title={`이 클립(${l.n}) 바로 뒤에서 그룹 G${c.num} 를 둘로 나눕니다 — 아래 클립부터 새 그룹(문장 한가운데면 문장도 줄에서 나뉩니다) · 그림·영상은 앞 그룹 것을 뒤까지 이어 씁니다 · Ctrl+Z 되돌리기`}
-                                      onClick={() => _S.onSplitAt(pr.shortsNum, { n: l.n, groupNum: c.num, sentIdx: si })}>✂ 그룹 나누기</button>
+                                {/* ✂ 클립 사이 호버 막대(v0.7.72 · 브루 — 클립 사이에 마우스를 가져가면 「＋ 클립 추가」 와 화살표 단추 · 화살표에 마우스를 올리면 「그룹 나누기」 로 펼쳐진다) */}
+                                {onSplitAt && !lineEd && (
+                                  <div className="clip-gap" data-testid="clip-gap" onClick={(ev) => ev.stopPropagation()}>
+                                    <div className="cg-bar" onClick={(ev) => ev.stopPropagation()} onMouseDown={(ev) => ev.stopPropagation()}>
+                                      <button type="button" className="cg-add" data-testid="clip-add" title={`이 클립(${l.n}) 바로 뒤에 클립 추가`}
+                                        onClick={(ev) => { const r = ev.currentTarget.getBoundingClientRect(); _S.onClipAdd(pr.shortsNum, { n: l.n, groupNum: c.num, sentIdx: si }, { x: r.left, y: r.bottom + 6 }); }}>＋ 클립 추가</button>
+                                      {!(si === sents.length - 1 && li === lines.length - 1) && (
+                                        <button type="button" className="cg-split" data-testid="clip-split" title={`이 클립(${l.n}) 바로 뒤에서 그룹 G${c.num} 를 둘로 나눕니다 — 아래 클립부터 새 그룹(이름은 빈칸 · 문장 한가운데면 문장도 줄에서 나뉩니다) · 그림·영상은 앞 그룹 것을 뒤까지 이어 씁니다 · Ctrl+Z 되돌리기`}
+                                          onClick={() => _S.onSplitAt(pr.shortsNum, { n: l.n, groupNum: c.num, sentIdx: si })}><span className="cg-ic">↕</span><span className="cg-tx">그룹 나누기</span></button>
+                                      )}
+                                    </div>
                                   </div>
                                 )}
                               </div>

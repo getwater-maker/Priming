@@ -2021,7 +2021,9 @@ ipcMain.handle('delete-images', async (_e, args = {}) => {
     }
     if (mediaDir) files += _wipeByExt(mediaDir, /\.(png|jpe?g|webp|bmp|gif)$/i); // 참조가 끊긴 고아 파일까지
   }
-  log(`🗑 이미지 삭제 완료 — 파일 ${files}개 + 재활용캐시 ${cached}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. (다음 생성은 전부 새로 만듭니다)`);
+  const vidLeft = S.parsed.projects.reduce((a, pr) => a + pr.groups.filter((g) => g.videoPath).length, 0);
+  log(`🗑 이미지 삭제 완료 — 파일 ${files}개 + 재활용캐시 ${cached}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. (다음 생성은 전부 새로 만듭니다)`
+    + (vidLeft ? ` · ℹ 영상이 있는 그룹 ${vidLeft}개는 영상이 그대로라 그 첫 화면이 그림처럼 보입니다 — 영상은 비디오 메뉴의 🗑 로 지웁니다` : ''));
   pushDtoUpdate();
   return currentDTO();
 });
@@ -9600,13 +9602,13 @@ ipcMain.handle('split-group', (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 // ✂ 그룹을 문장 경계 best(앞 조각 문장 수)에서 둘로 — split-group · split-group-at 공용(되돌리기·저장·DTO 는 호출자). 그림·영상 규칙은 위 split-group 설명 그대로.
-function _splitGroupCore(pr, idx, best) {
+function _splitGroupCore(pr, idx, best, opts = {}) {
   const { Group, finalizeGroupIds } = require('./core/project-model');
   const g = pr.groups[idx];
   const sents = pr.getSentencesOfGroup(g);
   const firstS = sents.slice(0, best), secondS = sents.slice(best);
   const ng = new Group({ num: 0, sentenceIds: secondS.map((s) => s.id) });
-  ng.phase = g.phase; ng.title = g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;
+  ng.phase = opts.blankTitle ? '' : g.phase; ng.title = opts.blankTitle ? '' : g.phase; ng.h2Title = g.h2Title || null; ng.isIntro = g.isIntro;   // 🏷 blankTitle = 그룹 나누기로 생긴 새 그룹의 이름은 빈칸(브루 「씬 나누기」 · v0.7.72 — 유튜브 챕터는 앞 챕터에 붙는다)
   ng.imagePrompt = g.imagePrompt || null; ng.videoPrompt = g.videoPrompt || null; ng.motionNote = g.motionNote || null;   // 🔄 로 새로 그릴 때 쓸 것
   ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
   ng.isI2V = false; ng.mode = g.mode || 'motion';
@@ -9674,9 +9676,9 @@ ipcMain.handle('split-group-at', async (_e, args = {}) => {
   const gIdx = pr.groups.indexOf(g0);
   const best = g0.sentenceIds.indexOf(isLast ? j.s.id : hs.id) + 1;
   const num0 = g0.num;
-  const r = _splitGroupCore(pr, gIdx, best);
+  const r = _splitGroupCore(pr, gIdx, best, { blankTitle: true });
   _afterClipOp(pr, null);
-  log(`✂ ${prLabel(pr)} G${num0} → G${num0}·G${num0 + 1} 그룹 나누기 (${r.firstS.length}+${r.secondS.length}문장${isLast ? '' : ' · 문장 한가운데를 줄에서 나눔 · 대본(.md) 갱신'})`
+  log(`✂ ${prLabel(pr)} G${num0} → G${num0}·G${num0 + 1} 그룹 나누기 (${r.firstS.length}+${r.secondS.length}문장${isLast ? '' : ' · 문장 한가운데를 줄에서 나눔 · 대본(.md) 갱신'} · 새 그룹 이름은 빈칸)`
     + (r.had ? ` · 그림·영상은 G${num0 + 1} 끝까지 그대로 이어 씁니다(G${num0 + 1} 에 새 그림이 필요하면 그 그룹의 🔄)` : ' · 두 그룹 모두 아직 그림 없음') + ' (Ctrl+Z 되돌리기)');
   return { ok: true, dto: P.toDTO(S.parsed), groupNum: num0 + 1, firstSentence: pr.sentences.findIndex((x) => x.id === r.secondS[0].id) };
 });
