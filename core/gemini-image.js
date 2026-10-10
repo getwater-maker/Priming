@@ -165,33 +165,69 @@ async function submitBatch({ requests, model, key, sendAspect, displayName, time
 }
 
 // 배치 상태 조회 + (완료 시) 결과 이미지 추출. { ok, state, done, results:[{key, ok, buffer, ext}|{key, ok:false, error}] }
-async function checkBatch({ batchName, key, timeoutMs = 180000 }) {
+//   🔴 2026-10-10 아내 PC 사고 — 79장 배치가 5분 만에 끝났는데 앱은 그림을 못 받았다. **완료된 배치 객체는 569MB**
+//   (그림 79장이 `response` 와 `metadata.output` 에 **두 벌**) — 상태 확인마다 그걸 통째로 받다 3분 제한(180초)에 걸려
+//   4번 연속 실패 → 「다음에 다시 시도합니다」 → 그 뒤 「이미지 완료」로 찍혔다(실측: 이 PC 에서도 전체 GET 220초).
+//   그래서 두 단계로 나눈다(Google 응답 필드 마스크 `fields` — 실측):
+//     ① 상태 = `?fields=name,done,error`(77바이트 · 9초) — 진행 중엔 이것만 반복한다
+//     ② 끝났으면 결과만 = `?fields=response`(한 벌 285MB · 이 PC 33초) — 시간 제한 20분 · 3번 재시도
+//   ⚠ `metadata.state` 같은 **중첩 필드는 마스크로 못 고른다**(400) → 상태 글자는 done/error 로 만든다.
+//   ⚠ V8 문자열 한도(약 512MB) — 한 배치가 이보다 크면 JSON.parse 가 실패한다 → main 이 배치를 BATCH_CHUNK 장씩 나눠 제출한다.
+const BATCH_STATUS_TIMEOUT_MS = 60000;
+const BATCH_RESULT_TIMEOUT_MS = 20 * 60000;
+const _tuning = { retryMs: 5000 };   // 결과 받기 재시도 간격(시험이 줄여 쓴다)
+async function _getBatchJson(batchName, key, fields, timeoutMs) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/${batchName}?fields=${encodeURIComponent(fields)}&key=${encodeURIComponent(key)}`;
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+  const txt = await res.text(); let j = {}; try { j = JSON.parse(txt); } catch {}
+  if (!res.ok) return { ok: false, error: `Gemini batch status ${res.status}: ${(j.error && j.error.message) || txt.slice(0, 200)}` };
+  return { ok: true, json: j };
+}
+function _parseBatchResults(j) {
+  const results = [];
+  // 실측(2.1 배치, 2026-10-07): 결과는 response.inlinedResponses.inlinedResponses[] (한 겹 더 감싼 객체) — metadata.output 에도 같은 사본이 있다.
+  let inlined = (j.response && (j.response.inlinedResponses || j.response.inlineResponses)) || (j.metadata && j.metadata.output && j.metadata.output.inlinedResponses) || [];
+  if (!Array.isArray(inlined)) inlined = inlined.inlinedResponses || inlined.inlineResponses || [];
+  for (let i = 0; i < inlined.length; i++) {
+    const item = inlined[i] || {};
+    const k = (item.metadata && item.metadata.key) || item.key || String(i);
+    if (item.error) { results.push({ key: k, ok: false, error: item.error.message || 'error' }); continue; }
+    const parts = ((((item.response || {}).candidates || [])[0] || {}).content || {}).parts || [];
+    const img = parts.find((p) => p.inlineData && p.inlineData.data);
+    if (!img) { results.push({ key: k, ok: false, error: '이미지 응답 없음' }); continue; }
+    const mime = img.inlineData.mimeType || 'image/png';
+    const ext = /jpe?g/i.test(mime) ? 'jpg' : (/webp/i.test(mime) ? 'webp' : 'png');
+    results.push({ key: k, ok: true, buffer: Buffer.from(img.inlineData.data, 'base64'), ext });
+  }
+  return results;
+}
+async function checkBatch({ batchName, key, timeoutMs = BATCH_STATUS_TIMEOUT_MS, resultTimeoutMs = BATCH_RESULT_TIMEOUT_MS }) {
   key = key || geminiKey();
   if (!key) return { ok: false, error: 'Gemini API 키 없음' };
-  const url = `https://generativelanguage.googleapis.com/v1beta/${batchName}?key=${encodeURIComponent(key)}`;
   try {
-    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
-    const txt = await res.text(); let j = {}; try { j = JSON.parse(txt); } catch {}
-    if (!res.ok) return { ok: false, error: `Gemini batch status ${res.status}: ${(j.error && j.error.message) || txt.slice(0, 200)}` };
-    const state = (j.metadata && j.metadata.state) || j.state || (j.done ? 'JOB_STATE_SUCCEEDED' : 'JOB_STATE_RUNNING');
+    const st = await _getBatchJson(batchName, key, 'name,done,error', timeoutMs);   // ① 아주 작은 상태 확인
+    if (!st.ok) return st;
+    const j0 = st.json;
+    const metaState = j0.metadata && j0.metadata.state;   // (목 응답·옛 서버가 통째로 주는 경우)
+    const state = metaState || (j0.error ? 'JOB_STATE_FAILED' : (j0.done ? 'JOB_STATE_SUCCEEDED' : 'JOB_STATE_RUNNING'));
     const done = /SUCCEEDED|FAILED|CANCELLED|EXPIRED/i.test(state);
-    const results = [];
-    // 실측(2.1 배치, 2026-10-07): 결과는 response.inlinedResponses.inlinedResponses[] (한 겹 더 감싼 객체) — metadata.output 에도 같은 사본이 있다.
-    let inlined = (j.response && (j.response.inlinedResponses || j.response.inlineResponses)) || (j.metadata && j.metadata.output && j.metadata.output.inlinedResponses) || [];
-    if (!Array.isArray(inlined)) inlined = inlined.inlinedResponses || inlined.inlineResponses || [];
-    for (let i = 0; i < inlined.length; i++) {
-      const item = inlined[i] || {};
-      const k = (item.metadata && item.metadata.key) || item.key || String(i);
-      if (item.error) { results.push({ key: k, ok: false, error: item.error.message || 'error' }); continue; }
-      const parts = ((((item.response || {}).candidates || [])[0] || {}).content || {}).parts || [];
-      const img = parts.find((p) => p.inlineData && p.inlineData.data);
-      if (!img) { results.push({ key: k, ok: false, error: '이미지 응답 없음' }); continue; }
-      const mime = img.inlineData.mimeType || 'image/png';
-      const ext = /jpe?g/i.test(mime) ? 'jpg' : (/webp/i.test(mime) ? 'webp' : 'png');
-      results.push({ key: k, ok: true, buffer: Buffer.from(img.inlineData.data, 'base64'), ext });
+    if (!done) return { ok: true, state, done: false, results: [] };
+    if (!/SUCCEEDED/i.test(state)) return { ok: true, state, done: true, results: [], error: (j0.error && j0.error.message) || undefined };
+    let full = j0;
+    if (!j0.response && !(j0.metadata && j0.metadata.output)) {   // ② 끝났으면 결과만(한 벌) — 큰 응답이라 시간 제한을 넉넉히 · 재시도
+      let last = null;
+      for (let att = 1; att <= 3; att++) {
+        try {
+          const rr = await _getBatchJson(batchName, key, 'response', resultTimeoutMs);
+          if (rr.ok) { full = rr.json; last = null; break; }
+          last = rr.error;
+        } catch (e) { last = String((e && e.message) || e); }
+        await new Promise((r) => setTimeout(r, att * _tuning.retryMs));
+      }
+      if (last) return { ok: false, error: '결과 받기 실패(3번 시도): ' + last };
     }
-    return { ok: true, state, done, results };
+    return { ok: true, state, done: true, results: _parseBatchResults(full) };
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 }
 
-module.exports = { classify429, explain429, dailyResetKst, generateImage, generateImageToFile, submitBatch, checkBatch, loadConfig, saveConfig, hasKey, CFG_PATH, DEFAULTS };
+module.exports = { classify429, explain429, dailyResetKst, generateImage, generateImageToFile, submitBatch, checkBatch, _tuning, loadConfig, saveConfig, hasKey, CFG_PATH, DEFAULTS };

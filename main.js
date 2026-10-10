@@ -3695,6 +3695,7 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, fo
 //   ⛔ 배치는 인물 참조(👤)를 싣지 못한다(요청마다 시트를 넣으면 인라인 20MB 초과) — 인물 일관성은 「즉시」 항목.
 //   ⛔ 이미 다른 배치에 실린 그룹은 또 싣지 않는다(이중 과금 방지).
 const GEMINI_BATCH_POLL_MS = 15000;
+const GEMINI_BATCH_CHUNK = 40;   // 한 배치에 싣는 장수 — 완료된 응답은 장당 약 3.6MB(79장=285MB·구글이 두 벌 보관). 너무 크면 받다 시간 초과·V8 문자열 한도(약 512MB)에 걸린다(아내 PC 2026-10-10)
 const GEMINI_BATCH_MAX_WAIT_MS = 30 * 60 * 1000;
 const _sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 // 회수한 결과 이미지를 그룹에 저장·연결한다. 저장한 장수를 돌려준다.
@@ -3726,7 +3727,7 @@ async function _geminiBatchCollect(scriptPath, logger) {
       if (S.abort) { logger('⏹ 중단됨 — 배치는 구글에서 계속 처리됩니다(다음에 「이미지 / ⚡ 만들기」를 누르면 이어서 회수)'); return; }
       const c = await GI.checkBatch({ batchName: job.batchName });
       if (!c.ok) {
-        if (++fails >= 4) { logger('⚠ 배치 상태 확인 실패(' + c.error + ') — 다음에 다시 시도합니다'); break; }
+        if (++fails >= 4) { logger('⚠ 배치 확인·받기 실패(' + c.error + ') — 그림은 구글에 있을 수 있습니다. 「이미지」를 다시 누르면 이어서 가져옵니다'); break; }
       } else {
         fails = 0; BS.update(job.batchName, { state: c.state });
         if (c.done) {
@@ -3766,18 +3767,31 @@ async function runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNum
     }
   } catch {}
   logger(`🌙 나노바나나 배치 (${model}) — ${targets.length}장 제출 (즉시 생성가의 50%)`);
-  const r = await GI.submitBatch({
-    requests: targets.map((g) => ({ key: keyOf(g), prompt: P.buildImagePrompt(stylePrompt, g.imagePrompt), aspect: project.aspect || '16:9' })),
-    model, displayName: (S.parsed && S.parsed.fileTitle) || 'priming',
-  });
-  if (!r.ok) { logger('✗ 배치 제출 실패: ' + r.error.slice(0, 160)); if (r.quota) GI.explain429(r.quota, Date.now()).forEach((l) => logger(l)); return; }
-  BS.add({
-    batchName: r.batchName, model: r.model, scriptPath: sp, outRoot: path.dirname(imagesDir),
-    title: (S.parsed && S.parsed.fileTitle) || '', items: targets.map((g) => ({ key: keyOf(g), shortsNum: project.shortsNum, groupNum: g.num })),
-    styleId, count: r.count, state: 'JOB_STATE_PENDING', submittedAt: Date.now(), collected: false,
-  });
-  logger(`🌙 배치 제출 완료 — ${r.count}장 (${r.batchName}) · 끝날 때까지 이 단계에서 기다립니다(보통 3~5분 · 앱을 닫아도 유지)`);
-  await _geminiBatchCollect(sp, logger);   // ②③ 기다렸다가 회수
+  // 🔴 한 번에 다 싣지 않고 GEMINI_BATCH_CHUNK 장씩 나눠 제출한다(큰 배치는 완료 응답이 수백 MB — 받다가 시간 초과).
+  const chunks = [];
+  for (let i = 0; i < targets.length; i += GEMINI_BATCH_CHUNK) chunks.push(targets.slice(i, i + GEMINI_BATCH_CHUNK));
+  let submitted = 0;
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const part = chunks[ci];
+    const r = await GI.submitBatch({
+      requests: part.map((g) => ({ key: keyOf(g), prompt: P.buildImagePrompt(stylePrompt, g.imagePrompt), aspect: project.aspect || '16:9' })),
+      model, displayName: ((S.parsed && S.parsed.fileTitle) || 'priming') + (chunks.length > 1 ? ` (${ci + 1}/${chunks.length})` : ''),
+    });
+    if (!r.ok) { logger('✗ 배치 제출 실패: ' + r.error.slice(0, 160)); if (r.quota) GI.explain429(r.quota, Date.now()).forEach((l) => logger(l)); break; }
+    BS.add({
+      batchName: r.batchName, model: r.model, scriptPath: sp, outRoot: path.dirname(imagesDir),
+      title: (S.parsed && S.parsed.fileTitle) || '', items: part.map((g) => ({ key: keyOf(g), shortsNum: project.shortsNum, groupNum: g.num })),
+      styleId, count: r.count, state: 'JOB_STATE_PENDING', submittedAt: Date.now(), collected: false,
+    });
+    submitted += r.count;
+    logger(`🌙 배치 제출 완료${chunks.length > 1 ? ` (${ci + 1}/${chunks.length})` : ''} — ${r.count}장 (${r.batchName}) · 끝날 때까지 이 단계에서 기다립니다(보통 3~5분 · 앱을 닫아도 유지)`);
+  }
+  if (submitted) await _geminiBatchCollect(sp, logger);   // ②③ 기다렸다가 회수(배치마다 차례로)
+  // 🔴 못 받은 배치가 남았으면 「완료」처럼 보이지 않게 분명히 알린다(아내 PC: 「이미지 완료」인데 그림이 없었다)
+  try {
+    const left = sp ? BS.pendingAllForScript(sp) : [];
+    if (left.length) logger(`⚠ 그림 ${left.reduce((a, j) => a + (j.count || 0), 0)}장을 아직 못 받았습니다(배치 ${left.length}개) — 구글에서는 만들어 두었을 수 있습니다. 「이미지」를 다시 누르면 이어서 가져옵니다(⛔ 🔄 재생성은 누르지 마세요 — 새로 제출해 요금이 또 나갑니다)`);
+  } catch {}
   pushDtoUpdate();
 }
 
@@ -4972,7 +4986,8 @@ ipcMain.handle('image-build', (_e, args = {}) => {
         await runRotatingImages(pr, mediaDir, log, styleId, engine); // Flow+Genspark 순환(한도 시 자동 이어감)
       }
       cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
-      log(`✓ ${prLabel(pr)} 이미지 완료`);
+      let _bLeft = 0; try { if (engine === 'gemini-batch' && S.scriptPath) _bLeft = require('./core/gemini-batch-store').pendingAllForScript(S.scriptPath).length; } catch {}
+      log(_bLeft ? `⏳ ${prLabel(pr)} 이미지 단계 끝 — 못 받은 배치 ${_bLeft}개가 남았습니다(「이미지」를 다시 누르면 가져옵니다)` : `✓ ${prLabel(pr)} 이미지 완료`);
     } catch (e) {
       log(`✗ ${prLabel(pr)} 이미지 실패: ${e.message}`);
     }
