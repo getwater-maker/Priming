@@ -97,6 +97,21 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(/face/.test(path.basename(CR.faceSheetBase(tmp, al))) && CR.findFaceSheet(tmp, al) === null, '얼굴 시트는 <이름>.face.* (나노바나나 시트와 이름이 다르다)');
   ok(!/full-length|standing figure/.test(CR.faceSheetPrompt('Warm,', al)) && /head-and-shoulders/.test(CR.faceSheetPrompt('Warm,', al)), '얼굴 시트 = 얼굴만(전신 없음 — 흰 배경 초상이 장면에 붙던 사고)');
   ok(/Reference image 1 is 알리사\. Reference image 2 is 제롬\./.test(CR.qwenDirective([al, je])), 'Qwen 지시문은 참조 순서로 이름을 밝힌다');
+  // 🔴 카드 묘사가 바뀌면 옛 얼굴 시트를 재사용하지 않는다(유비 「긴 귓불」→평범하게 · 2026-10-10) — 사람이 넣은 시트는 존중
+  {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'face-'));
+    const yb = { name: '유비', desc: 'a Han Chinese man of twenty-eight with unusually long earlobes', gender: 'm' };
+    fs.mkdirSync(CR.sheetDir(out), { recursive: true });
+    fs.writeFileSync(CR.faceSheetBase(out, yb) + '.png', Buffer.alloc(10, 1));
+    ok(CR.findFaceSheet(out, yb) !== null, '지문 파일이 없는 시트 = 사람이 넣은 그림 → 그대로 쓴다');
+    CR.markFaceSheet(out, yb);
+    ok(CR.findFaceSheet(out, yb) !== null, '앱이 만든 시트(지문 일치) = 재사용');
+    const yb2 = { ...yb, desc: 'a Han Chinese man of twenty-eight, of average height and ordinary build, with normal ears' };
+    ok(CR.findFaceSheet(out, yb2) === null, '카드 묘사가 바뀌면 옛 시트를 쓰지 않는다(다시 만든다)');
+    ok(CR.faceSheetKey({ desc: 'a  b\n c' }) === CR.faceSheetKey({ desc: 'a b c' }), '공백 차이로는 지문이 바뀌지 않는다');
+    fs.rmSync(out, { recursive: true, force: true });
+    ok(/CR\.markFaceSheet\(outRoot, c\)/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')), '시트를 만들 때 지문을 기록한다');
+  }
   // 채널사업부 제보(2026-10-10 · 삼국지 1부 G26·G41·G58) — 그림에 없는 인물 · 두 사람 나이 짝짓기
   const cc = { name: '조조', core: '조조', desc: 'a short Han Chinese man of about thirty with narrow eyes and a long beard, a sharp watchful expression', gender: 'm' };
   const dz = { name: '동탁', core: '동탁', desc: 'a huge heavy-set Han Chinese man of about fifty with a thick neck, a broad fleshy face and a coarse black beard', gender: 'm' };

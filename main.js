@@ -3849,7 +3849,7 @@ async function _qwenRefsFor(imagesDir, eng, cfg, logger) {
     try { await fs.promises.mkdir(CR.sheetDir(outRoot), { recursive: true }); } catch {}
     const r = await eng.textToImage({ prompt: CR.faceSheetPrompt(stylePrompt, c), aspect: '1:1', dims: { w: 1024, h: 1024 },
       outputPath: CR.faceSheetBase(outRoot, c) + '.png', abortSignal: () => S.abort });
-    if (r.success && !(await looksBadImage(r.imagePath))) return r.imagePath;
+    if (r.success && !(await looksBadImage(r.imagePath))) { CR.markFaceSheet(outRoot, c); return r.imagePath; }   // 어느 카드 묘사로 만들었는지 기록(묘사가 바뀌면 다시 만든다)
     if (r.success) { try { fs.rmSync(r.imagePath, { force: true }); } catch {} }
     failed.add(c.name);
     logger(`  ⚠ ${c.name} 얼굴 시트 실패 — 이 인물은 참조 없이 그립니다${r.error ? ': ' + r.error : ' (이상 이미지)'}`);

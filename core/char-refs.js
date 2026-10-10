@@ -274,11 +274,25 @@ function refGate(prompt, cast) {
   return { ok: true, reason: shot };
 }
 function faceSheetBase(outRoot, card) { return path.join(sheetDir(outRoot), _safe(card.name) + '.face'); }
-/** 얼굴 시트(사람이 바꿔 넣은 jpg/webp 포함) 또는 null */
+/** 카드 묘사의 짧은 지문 — 앱이 만든 시트가 **어느 묘사로** 그려졌는지 기억해 묘사가 바뀌면 옛 시트를 쓰지 않는다 */
+function faceSheetKey(card) { return require('crypto').createHash('sha1').update(String((card && card.desc) || '').trim().replace(/\s+/g, ' ')).digest('hex').slice(0, 12); }
+/**
+ * 얼굴 시트(사람이 바꿔 넣은 jpg/webp 포함) 또는 null.
+ *   🔴 앱이 만든 시트 옆에 `<이름>.face.json`({key})을 둔다 — 카드 묘사가 바뀌었는데(유비 「긴 귓불」→평범하게 · 2026-10-10)
+ *   이름만 보고 옛 시트를 재사용하면 **옛 얼굴이 새 대본에 박힌다.** 지문이 다르면 null(→ 다시 만든다).
+ *   지문 파일이 없는 시트 = 사람이 직접 넣은 그림 → 그대로 쓴다(묘사가 바뀌어도 사람의 선택을 존중).
+ */
 function findFaceSheet(outRoot, card) {
   const base = faceSheetBase(outRoot, card);
+  let key = null;
+  try { key = JSON.parse(fs.readFileSync(base + '.json', 'utf8')).key || null; } catch (_) {}
+  if (key && key !== faceSheetKey(card)) return null;
   for (const ext of ['.png', '.jpg', '.jpeg', '.webp']) { if (fs.existsSync(base + ext)) return base + ext; }
   return null;
+}
+/** 앱이 시트를 만든 직후 — 어느 묘사로 만들었는지 기록 */
+function markFaceSheet(outRoot, card) {
+  try { fs.mkdirSync(sheetDir(outRoot), { recursive: true }); fs.writeFileSync(faceSheetBase(outRoot, card) + '.json', JSON.stringify({ key: faceSheetKey(card), name: card.name })); } catch (_) {}
 }
 // 얼굴만 — 옷·배경이 장면으로 새지 않게(P0: 전신 시트는 흰 배경 초상이 장면에 붙었다)
 function faceSheetPrompt(stylePrompt, card) {
@@ -298,4 +312,4 @@ function qwenDirective(cast) {
 }
 
 module.exports = { parseCards, castFor, sheetDir, findSheet, sheetBase, sheetPrompt, directive, refParts, MAX_REFS,
-  QWEN_MAX_REFS, agesIn, cardAge, sceneAgeOf, qwenCast, shotOf, refGate, faceSheetBase, findFaceSheet, faceSheetPrompt, qwenDirective };
+  QWEN_MAX_REFS, agesIn, cardAge, sceneAgeOf, qwenCast, shotOf, refGate, faceSheetBase, findFaceSheet, markFaceSheet, faceSheetKey, faceSheetPrompt, qwenDirective };
