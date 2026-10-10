@@ -18,7 +18,11 @@ function fmtLeft(sec) {
  * 목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 헤더의 ⚙ 에서 바꾼다.
  * ⚠ 목소리·배속·시드·발음사전을 바꾸면 **전량 다시 만들어진다**(그 값들이 캐시 키다).
  */
-export default function RemotionView({ presetName, presetRev, setStatus, logline }) {
+// 🧰 리모션 제작 도구 기억(이 PC 화면 편의 — 실패해도 기본값으로 돈다)
+const _lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const _lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+export default function RemotionView({ presetName, presetRev, setStatus, logline, imgToolOptions, vidToolOptions, defaultImgTool }) {
   // 🎬 **강 여러 개**를 큐로 다룬다 — 음성 TSV 하나 = 강 하나, 같은 번호의 그림목록이 자동으로 붙는다.
   //   { items:[{id,num,ttsName,imgName,ttsCount,imgCount,…}], activeId, active:{name,rows,errors,img} }
   const [queue, setQueue] = useState(null);
@@ -48,6 +52,14 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const [imgResult, setImgResult] = useState(null);
   const [tab, setTab] = useState('tts');        // 표에 무엇을 보일지 — 'tts' | 'img'
   const [allBusy, setAllBusy] = useState(false);
+  // 🧰 그림·영상 도구 — 롱폼 헤더와 따로(v0.7.86). 값 = 'gemini' | 'comfy::<local|cloud>::<워크플로>' | 영상 'none'
+  //   그림 기본값 = 지금 설정의 활성 ComfyUI 워크플로(예전 동작과 같다).
+  const [imgTool, setImgToolS] = useState(() => _lsGet('pm.remotion.imgTool'));
+  const [vidTool, setVidToolS] = useState(() => _lsGet('pm.remotion.vidTool') || 'none');
+  const setImgTool = (v) => { setImgToolS(v); _lsSet('pm.remotion.imgTool', v); };
+  const setVidTool = (v) => { setVidToolS(v); _lsSet('pm.remotion.vidTool', v); };
+  const imgToolVal = imgTool || defaultImgTool || '';
+  const [vidBusy, setVidBusy] = useState(false);
   const queueRef = useRef([]);      // 이어 듣기 대기열
 
   useEffect(() => {
@@ -180,9 +192,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       + '사전 없이 진행할까요?')) return;
     setAllBusy(true); setResult(null); setImgResult(null); stopPlay();
     try {
-      const r = await api.remotionRunAll({ presetName });
+      const r = await api.remotionRunAll({ presetName, imgTool: imgToolVal, vidTool });
       if (r && r.dto) setQueue(r.dto);
-      setStatus && setStatus(`▶ 전체 만들기 — 🎤 ${r.tts} · 🖼 ${r.img}` + (r.fail.length ? ` · ✗ ${r.fail.length}` : ''));
+      setStatus && setStatus(`▶ 전체 만들기 — 🎤 ${r.tts} · 🖼 ${r.img}` + (r.vid ? ` · 🎬 ${r.vid}` : '') + (r.fail.length ? ` · ✗ ${r.fail.length}` : ''));
     } catch (e) {
       setStatus && setStatus('전체 만들기 실패: ' + e.message);
     } finally { setAllBusy(false); setProg(null); }
@@ -209,13 +221,25 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
     if (!imgTsv || !imgTsv.rows.length) return;
     setImgBusy(true); setProg({ i: 0, n: imgTsv.rows.length, images: true }); setImgResult(null);
     try {
-      const r = await api.remotionRunImages({ presetName });
+      const r = await api.remotionRunImages({ presetName, imgTool: imgToolVal });
       setImgResult(r);
       setStatus && setStatus(`🖼 그림 — 만듦 ${r.made} · 건너뜀 ${r.skipped} · 실패 ${r.failed.length}`);
     } catch (e) {
       setStatus && setStatus('그림 실패: ' + e.message);
       setImgResult({ error: e.message });
     } finally { setImgBusy(false); setProg(null); }
+  }
+
+  // 🎬 영상 — 그림 TSV 6번 칸(영상 지시문)이 있는 장면만, 그 그림으로 영상(i2v). 그림이 먼저 있어야 한다.
+  async function runVideos() {
+    if (!vidRows.length || vidTool === 'none') return;
+    setVidBusy(true); setProg({ i: 0, n: vidRows.length, videos: true });
+    try {
+      const r = await api.remotionRunVideos({ presetName, vidTool });
+      setStatus && setStatus(`🎬 영상 — 만듦 ${r.made || 0} · 건너뜀 ${r.skipped || 0}` + (r.noImage ? ` · 그림 없음 ${r.noImage}` : '') + ` · 실패 ${(r.failed || []).length}`);
+    } catch (e) {
+      setStatus && setStatus('영상 실패: ' + e.message);
+    } finally { setVidBusy(false); setProg(null); }
   }
 
   async function openImagesOut() {
@@ -261,6 +285,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const pvNames = rows.map((r) => r.name).filter((nm) => previews[nm]);
   const imgRows = (imgTsv && imgTsv.rows) || [];
   const imgErrs = (imgTsv && imgTsv.errors) || [];
+  const vidRows = imgRows.filter((r) => r.video);
   // 하나만 열려 있으면 탭과 상관없이 그것을 보여 준다(빈 화면을 만들지 않는다).
   const showTab = (rows.length && imgRows.length) ? tab : (imgRows.length ? 'img' : 'tts');
 
@@ -269,7 +294,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button onClick={openTsv} disabled={busy || pvBusy || imgBusy || allBusy}>📄 대본 TSV 열기</button>
         <button onClick={runAll} disabled={busy || pvBusy || imgBusy || allBusy || !items.length}
-          title="열어 둔 모든 강을 순서대로 만듭니다 — 전 강 음성 → 전 강 그림">
+          title="열어 둔 모든 강을 순서대로 만듭니다 — 전 강 음성 → 전 강 그림 → (영상 도구를 골랐으면) 전 강 영상">
           {allBusy ? '전체 만드는 중…' : `▶ 전체 만들기${items.length > 1 ? ' (' + items.length + '강)' : ''}`}
         </button>
         <button onClick={run} disabled={busy || pvBusy || allBusy || !rows.length || errs.length > 0}
@@ -291,11 +316,30 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다.
 여러 개 고를 수 있고, 대본 없이 이것만 열어 그림만 만들 수도 있습니다.">🖼 그림 TSV 열기</button>
         <button onClick={runImages} disabled={busy || imgBusy || allBusy || !imgRows.length || imgErrs.length > 0}
-          title="로컬 ComfyUI 로 그림을 만듭니다. 이미 있는 파일은 건너뜁니다.">
+          title="고른 「그림 도구」로 그림을 만듭니다. 이미 있는 파일은 건너뜁니다.">
           {imgBusy ? '만드는 중…' : `🖼 그림 만들기${imgRows.length ? ' (' + imgRows.length + ')' : ''}`}
         </button>
         <button className="ghost" onClick={openImagesOut} disabled={imgBusy}
           title="그림이 저장된 폴더를 엽니다">📁 그림 폴더</button>
+        <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          title="리모션 그림을 만들 도구 — 롱폼 헤더와 따로 기억합니다(헤더를 바꿔도 강의 그림체가 따라 바뀌지 않습니다)">
+          그림 도구
+          <select data-testid="rm-img-tool" value={imgToolVal} disabled={imgBusy || allBusy} onChange={(e) => setImgTool(e.target.value)}>
+            {imgToolOptions}
+          </select>
+        </label>
+        <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          title="그림 TSV 6번 칸(영상 지시문)이 있는 장면만 그 그림을 움직이는 영상(같은 이름 .mp4)으로 만듭니다. 「없음」이면 영상을 만들지 않습니다.">
+          영상 도구
+          <select data-testid="rm-vid-tool" value={vidTool} disabled={vidBusy || allBusy} onChange={(e) => setVidTool(e.target.value)}>
+            <option value="none">없음</option>
+            {vidToolOptions}
+          </select>
+        </label>
+        <button data-testid="rm-run-videos" onClick={runVideos} disabled={busy || imgBusy || vidBusy || allBusy || !vidRows.length || vidTool === 'none'}
+          title={vidRows.length ? '영상 지시문이 있는 장면을 영상으로 만듭니다(그림이 먼저 있어야 합니다 · 이미 있는 영상은 건너뜁니다)' : '그림 TSV 6번 칸(영상 지시문)이 있는 장면이 없습니다'}>
+          {vidBusy ? '만드는 중…' : `🎬 영상 만들기${vidRows.length ? ' (' + vidRows.length + ')' : ''}`}
+        </button>
         <label className="meta" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input type="checkbox" checked={trim} disabled={busy || pvBusy} onChange={(e) => setTrim(e.target.checked)} />
           앞뒤 무음 제거
@@ -485,6 +529,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 70 }}>장면</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 300 }}>저장 경로</th>
               <th style={{ textAlign: 'left', padding: '6px 8px' }}>화면 글(참고)</th>
+              <th style={{ textAlign: 'center', padding: '6px 4px', width: 40 }} title="영상 지시문(6번 칸)이 있는 장면">🎬</th>
             </tr></thead>
             <tbody>
               {imgRows.map((r, i) => (
@@ -493,6 +538,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.scene}</td>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12 }} title={r.positive}>{r.rel}</td>
                   <td style={{ padding: '4px 8px' }} title={r.positive}>{r.caption}</td>
+                  <td style={{ padding: '4px 4px', textAlign: 'center' }} title={r.video || ''}>{r.video ? '🎬' : ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -504,6 +550,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           🖼 {imgTsv.name} · {imgRows.length}장 · 1024x1024 · <b>이미 있는 파일은 건너뜁니다</b>
           (다시 만들려면 그 그림을 지우고 누르세요). 저장 위치는 <b>채널의 「이미지 출력」 + 표의 저장 경로</b>입니다.
           <br />⚠ 프롬프트는 <b>그대로</b> 씁니다 — 앱이 화풍을 덧붙이지 않습니다(그림체는 대본 쪽에서 관리).
+          <br />🎬 TSV <b>6번 칸(영상 지시문)</b>을 채운 장면만 「영상 도구」로 그 그림을 움직이는 영상(<b>같은 이름 .mp4</b>, 5초)으로 만듭니다 — 비어 있으면 그림 그대로입니다.
         </div>
       )}
 

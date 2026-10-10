@@ -81,6 +81,8 @@ function parseImageTsv(text) {
       caption: String(c[2] || '').trim(),
       positive,
       negative: String(c[4] || '').trim(),
+      // 🎬 6번 칸(선택) = 영상 지시문 — 채워진 장면만 그 그림을 영상(i2v)으로 만든다(로이 2026-10-10). 비면 그림 그대로.
+      video: String(c[5] || '').trim(),
       line,
     });
   }
@@ -191,4 +193,56 @@ async function runImageBatch(o) {
   };
 }
 
-module.exports = { parseImageTsv, normalizeRelPath, runImageBatch, IMG_EXT };
+/** 그림 경로(rel)의 영상 짝 — 같은 폴더·같은 이름 .mp4 (R-02a.png → R-02a.mp4) */
+function videoRelOf(rel) { return String(rel).replace(IMG_EXT, '.mp4'); }
+const MIN_VID_BYTES = 20 * 1024;
+
+/**
+ * 🎬 영상 일괄 생성 — 6번 칸(영상 지시문)이 있는 장면만, 그 장면 그림으로 i2v.
+ *   그림이 아직 없으면 건너뛴다(그림을 먼저 만든다) · 이미 영상이 있으면 건너뛴다(이어받기 — 다시 만들려면 지운다).
+ * @param o.rows · o.outRoot · o.engine(ComfyVideo — imageToVideo) · o.durationSec · o.force · o.onLine · o.onProgress · o.abortSignal
+ */
+async function runVideoBatch(o) {
+  const onLine = o.onLine || (() => {});
+  const abort = o.abortSignal || (() => false);
+  const rows = (o.rows || []).filter((r) => r.video);
+  const made = [], skipped = [], failed = [], noImage = [];
+  let consecFail = 0, sumMs = 0;
+  const t0 = Date.now();
+  for (let i = 0; i < rows.length; i++) {
+    if (abort()) { onLine('중단되었습니다 — ' + i + '/' + rows.length + ' 까지 처리했습니다.'); break; }
+    const row = rows[i];
+    const imgPath = path.join(o.outRoot, row.rel.split('/').join(path.sep));
+    const vidPath = path.join(o.outRoot, videoRelOf(row.rel).split('/').join(path.sep));
+    const tag = '[' + (i + 1) + '/' + rows.length + '] ' + videoRelOf(row.rel);
+    let isz = 0; try { isz = fs.statSync(imgPath).size; } catch {}
+    if (isz < MIN_IMG_BYTES) { noImage.push(row.rel); onLine(tag + '  ⏭ 그림이 아직 없습니다 — 그림을 먼저 만드세요'); if (o.onProgress) o.onProgress(i + 1, rows.length); continue; }
+    if (!o.force) {
+      let vsz = 0; try { vsz = fs.statSync(vidPath).size; } catch {}
+      if (vsz >= MIN_VID_BYTES) { skipped.push(row.rel); if (o.onProgress) o.onProgress(i + 1, rows.length); continue; }
+    }
+    const g0 = Date.now();
+    let r = null;
+    try {
+      r = await o.engine.imageToVideo({ imagePath: imgPath, prompt: row.video, aspect: '1:1', durationSec: o.durationSec || 5, outputPath: vidPath, abortSignal: abort });
+    } catch (e) { r = { success: false, error: e.message }; }
+    if (!r || !r.success) {
+      failed.push({ rel: row.rel, scene: row.scene, reason: (r && r.error) || '알 수 없는 오류' });
+      onLine(tag + '  ✗ 실패: ' + ((r && r.error) || '알 수 없는 오류'));
+      if (++consecFail >= MAX_CONSEC_FAIL) { onLine('연속 ' + consecFail + '개 실패 — 서버 문제로 보고 멈춥니다.'); break; }
+      if (o.onProgress) o.onProgress(i + 1, rows.length);
+      continue;
+    }
+    // 엔진이 확장자를 바꿔 저장했으면(.webm 등) 그 이름 그대로 둔다 — 알린다
+    if (r.videoPath && path.resolve(r.videoPath) !== path.resolve(vidPath)) onLine(tag + '  ⚠ 저장 이름: ' + path.basename(r.videoPath));
+    consecFail = 0;
+    const ms = Date.now() - g0; sumMs += ms;
+    made.push(row.rel);
+    onLine(tag + '  ✓ ' + (ms / 1000).toFixed(1) + '초');
+    if (o.onProgress) o.onProgress(i + 1, rows.length);
+  }
+  return { total: rows.length, made: made.length, skipped: skipped.length, noImage: noImage.length, failed,
+    perVideoSec: made.length ? sumMs / 1000 / made.length : null, elapsedSec: (Date.now() - t0) / 1000 };
+}
+
+module.exports = { parseImageTsv, normalizeRelPath, runImageBatch, runVideoBatch, videoRelOf, IMG_EXT };

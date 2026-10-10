@@ -231,6 +231,50 @@ const rows3 = T.parseImageTsv([HEADER,
     eq(M._pairImageTsv('/a/003_강.tsv', path.join(d, '없음')), null, '없는 폴더에도 안 던진다');
     try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
   }
+  console.log('[8] 🧰 리모션 제작 도구 · 🎬 영상(v0.7.86)');
+  {
+    const TI = require('../core/tsv-images');
+    const H = '파일\t장면\t글\t그림\t빼는것\t영상\n';
+    const pr = TI.parseImageTsv(H + 'a/R-01.png\tR-01\t글\tpos one\tneg\tslow zoom in\na/R-02.png\tR-02\t글\tpos two\tneg\n');
+    eq(pr.rows.length, 2, '6칸·5칸 행 모두 읽는다');
+    eq(pr.rows[0].video, 'slow zoom in', '6번 칸 = 영상 지시문');
+    eq(pr.rows[1].video, '', '6번 칸이 없으면 영상 없음');
+    eq(TI.videoRelOf('a/R-01.png'), 'a/R-01.mp4', '영상 이름 = 같은 폴더·같은 이름 .mp4');
+    // runVideoBatch — 가짜 엔진으로: 지시문 없는 장면 제외 · 그림 없으면 건너뜀 · 있는 영상 건너뜀 · force
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rmvid-'));
+    fs.mkdirSync(path.join(d, 'a'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'a', 'R-01.png'), Buffer.alloc(5000, 1));
+    const calls = [];
+    const eng = { async imageToVideo(o) { calls.push(o); fs.writeFileSync(o.outputPath, Buffer.alloc(30000, 1)); return { success: true, videoPath: o.outputPath }; } };
+    const rows3 = pr.rows.concat([{ rel: 'a/R-03.png', scene: 'R-03', video: 'pan left' }]);   // R-03 은 그림 없음
+    let r = await TI.runVideoBatch({ rows: rows3, outRoot: d, engine: eng, durationSec: 5 });
+    eq(r.total, 2, '지시문 있는 장면만 대상(R-02 제외)');
+    eq(r.made, 1, 'R-01 영상 1개 만듦');
+    eq(r.noImage, 1, 'R-03 은 그림이 없어 건너뜀');
+    eq(calls[0] && calls[0].prompt, 'slow zoom in', 'i2v 프롬프트 = 6번 칸 그대로');
+    eq(calls[0] && path.basename(calls[0].imagePath), 'R-01.png', 'i2v 입력 = 그 장면 그림');
+    eq(calls[0] && calls[0].aspect, '1:1', '정사각(리모션 그림 1024x1024)');
+    r = await TI.runVideoBatch({ rows: rows3, outRoot: d, engine: eng });
+    eq(r.skipped, 1, '이미 있는 영상은 건너뛴다(이어받기)');
+    r = await TI.runVideoBatch({ rows: rows3, outRoot: d, engine: eng, force: true });
+    eq(r.made, 1, 'force 면 다시 만든다');
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    // main.js — 고른 도구는 그 실행에만(설정 파일·헤더 불변) · 레인은 고른 도구로
+    const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const fsrc = MAIN.slice(MAIN.indexOf('function _comfyCfgFor('), MAIN.indexOf('function _remotionImgTool('));
+    ok(fsrc.length > 100 && !/saveConfig/.test(fsrc), '_comfyCfgFor 는 설정을 저장하지 않는다');
+    const _comfyCfgFor = new Function('return ' + fsrc.trim())();
+    const fake = { loadConfig: () => ({ cloud: false, workflowPath: '/old.json', baseUrl: 'http://127.0.0.1:8188', localBaseUrl: 'http://127.0.0.1:8188', cloudBaseUrl: 'https://cloud.comfy.org' }) };
+    let c = _comfyCfgFor(fake, 'comfy::cloud::/new.json');
+    ok(c.cloud === true && c.workflowPath === '/new.json' && /cloud\.comfy\.org/.test(c.baseUrl), '클라우드 워크플로 선택 = 그 실행만 클라우드');
+    c = _comfyCfgFor(fake, '');
+    ok(c.cloud === false && c.workflowPath === '/old.json', '빈 값 = 예전처럼 설정의 활성 워크플로');
+    ok(/'remotion-run-images', \(_e, args = \{\}\) =>\s*_runOnLanes\(_remotionLanes\(_remotionImgTool\(args\.imgTool\)/.test(MAIN), '그림 = 고른 도구로 레인 판정');
+    ok(!/enqueueImageJob\('리모션/.test(MAIN), '리모션이 헤더 설정 기반 enqueueImageJob 을 더는 쓰지 않는다');
+    ok(/ipcMain\.handle\('remotion-run-videos'/.test(MAIN) && /for \(const it of withVid\)/.test(MAIN), '영상 IPC + 전체 만들기 세 번째 패스');
+    const RV = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'RemotionView.jsx'), 'utf8');
+    ok(/rm-img-tool/.test(RV) && /rm-vid-tool/.test(RV) && /remotionRunImages\(\{ presetName, imgTool: imgToolVal \}\)/.test(RV), '화면: 그림·영상 도구 선택이 실행에 실린다');
+  }
   console.log('[7] 소스 위생');
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'core', 'tsv-images.js'), 'utf8');
   ok(SRC.indexOf(String.fromCharCode(0)) < 0, 'NUL 바이트 없음');

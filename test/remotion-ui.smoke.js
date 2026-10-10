@@ -114,8 +114,9 @@ async function checkServerIdle() {
     //   (내 가드 `if (!Array.isArray(S.tsvList)) S.tsvList = [];` 는 줄 앞에 if 가 있어 안 걸린다)
     ok(!/^\s*S\.tsvList = \[\];$/m.test(body), '그림 TSV 열기는 이미 열린 강들을 지우지 않는다(대본 열기와 다르다)');
   }
-  ok(MAIN.includes("enqueueImageJob('리모션 그림 생성'"), '그림도 이미지 큐를 탄다(로컬이면 TTS 와 같은 GPU 레인)');
-  ok(MAIN.includes("_runRemotionImagesCore(args), 'comfy')"), "엔진 'comfy' 를 넘긴다 — 안 넘기면 레인을 안 잡아 TTS 와 겹친다");
+  // v0.7.86 — 레인은 헤더 설정이 아니라 리모션에서 **고른 도구**로 판정한다(_remotionLanes: 로컬이면 + localGpu)
+  ok(MAIN.includes("_runOnLanes(_remotionLanes(_remotionImgTool(args.imgTool), ['image']), '리모션 그림 생성'"), '그림도 이미지 큐를 탄다(고른 도구 기준)');
+  ok(MAIN.includes("const _remotionLanes = (tool, base) => (tool && tool.local ? [...base, 'localGpu'] : base);"), '로컬 도구면 localGpu 레인도 잡는다 — 안 잡으면 TTS 와 겹친다');
   // ── 🎬 강 여러 개 + 짝 자동 연결(2026-08-27) ──
   ok(MAIN.includes("ipcMain.handle('remotion-select-tsv'"), 'remotion-select-tsv IPC 존재');
   ok(MAIN.includes("ipcMain.handle('remotion-run-all'"), 'remotion-run-all IPC 존재');
@@ -130,8 +131,10 @@ async function checkServerIdle() {
     const i1 = MAIN.indexOf("// 📁 출력 폴더 열기", i0);
     const body = MAIN.slice(i0, i1 > 0 ? i1 : i0 + 4000);
     ok(/enqueueTtsJob\('리모션 TTS', \(\) => _runRemotionTtsCore/.test(body), '음성 단계가 TTS 큐를 탄다');
-    ok(/enqueueImageJob\('리모션 그림 생성', \(\) => _runRemotionImagesCore/.test(body), '그림 단계가 이미지 큐를 탄다');
-    ok(!/_runOnLanes/.test(body), 'run-all 자신은 레인을 잡지 않는다(교착 방지)');
+    ok(body.includes("_runOnLanes(imgLanes, '리모션 그림 생성', () => _runRemotionImagesCore"), '그림 단계가 이미지 큐를 탄다');
+    ok(body.includes("'리모션 영상 생성', () => _runRemotionVideosCore"), '영상 단계도 큐를 탄다');
+    // 교착 방지 = 핸들러 **자신**은 레인 안에서 돌지 않는다(단계마다 잡았다 놓는다)
+    ok(body.startsWith("ipcMain.handle('remotion-run-all', async (_e, args = {}) => {"), 'run-all 자신은 레인을 잡지 않는다(교착 방지)');
     // 🔑 전 강 음성 → 전 강 그림 2패스(강마다 번갈면 GPU 모델이 그만큼 스왑된다).
     ok(body.indexOf('for (const it of withTts)') < body.indexOf('for (const it of withImg)'),
       '음성을 전부 끝낸 뒤 그림으로 넘어간다(2패스)');

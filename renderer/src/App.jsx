@@ -5627,7 +5627,10 @@ export default function App() {
         </>)}
         <main className={wsOn ? 'pane2' : ''}>
           {isRx ? (
-            <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline} />
+            <RemotionView presetName={presetName} presetRev={presetRev} setStatus={setStatus} logline={logline}
+              defaultImgTool={comfyCfg && comfyCfg.workflowPath ? mkComfyVal(!!comfyCfg.cloud, comfyCfg.workflowPath) : ''}
+              imgToolOptions={<><ComfyEngineOptions cfg={comfyCfg} kind="image" /><option value="gemini">🍌 나노바나나 2.1 (유료 · 장당 약 $0.03)</option></>}
+              vidToolOptions={<ComfyEngineOptions cfg={cvidCfg} kind="video" />} />
           ) : isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} logBox={logBox} queue={queue && queue.book} setQueue={setQueue} onSelectQueue={selectBookItem} onRemoveQueue={removeQueueItem} />
           ) : (<>

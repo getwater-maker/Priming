@@ -2374,8 +2374,52 @@ ipcMain.handle('remotion-open-image-tsv', async (_e, args = {}) => {
   return _remotionDto();
 });
 
-// ⚠ 로컬 ComfyUI 는 TTS·롱폼 이미지와 **같은 3060** 을 쓴다 → `enqueueImageJob` 이 레인을 잡아
-//   동시에 돌지 않게 한다(엔진 'comfy' 를 넘겨야 로컬일 때 localGpu 레인을 잡는다).
+// 🧰 리모션 제작 도구(v0.7.86 · 로이 2026-10-10) — 리모션 화면의 「그림 도구」·「영상 도구」 값을 **그 실행에만** 쓴다.
+//   🔑 롱폼 헤더·ComfyUI 설정 파일은 바꾸지 않는다(예전엔 헤더에서 고른 활성 워크플로를 그대로 따라가 강의 그림체가
+//   롱폼 선택에 끌려갔다). 값 = 'gemini' | `comfy::<local|cloud>::<워크플로>` | '' (= 예전처럼 설정의 활성 워크플로).
+function _comfyCfgFor(mod, sel) {
+  const cfg = mod.loadConfig();
+  const m = /^comfy::(?:(local|cloud)::)?([\s\S]*)$/.exec(String(sel || ''));
+  if (m) {
+    if (m[2]) cfg.workflowPath = m[2];
+    if (m[1]) { cfg.cloud = m[1] === 'cloud'; cfg.baseUrl = cfg.cloud ? (cfg.cloudBaseUrl || 'https://cloud.comfy.org') : (cfg.localBaseUrl || 'http://127.0.0.1:8188'); }
+  }
+  return cfg;
+}
+function _remotionImgTool(sel) {
+  if (sel === 'gemini') {
+    const GI = require('./core/gemini-image');
+    return { kind: 'gemini', local: false, label: `🍌 나노바나나(${GI.loadConfig().model})`,
+      // runImageBatch 가 부르는 모양(textToImage)에 맞춘 어댑터 — 이름(확장자)은 TSV 1번 칸 그대로 지킨다
+      eng: { async textToImage({ prompt, outputPath }) {
+        const want = path.extname(outputPath).toLowerCase();
+        const r = await GI.generateImageToFile({ prompt, aspect: '1:1', outPathNoExt: outputPath.replace(/\.[^.\\/]+$/, '') });
+        if (!r.ok) return { success: false, error: r.error };
+        if (path.extname(r.path).toLowerCase() !== want) {   // jpg 로 왔는데 TSV 는 .png → 바꿔 저장(리모션이 그 이름으로 찾는다)
+          const ff = require('./core/media-utils').getFfmpegPath();
+          await new Promise((res, rej) => require('child_process').execFile(ff, ['-y', '-loglevel', 'error', '-i', r.path, outputPath], (e) => (e ? rej(e) : res())));
+          try { fs.rmSync(r.path, { force: true }); } catch {}
+        }
+        return { success: true, imagePath: outputPath, negApplied: false };
+      } } };
+  }
+  const CI = require('./core/comfy-image');
+  const cfg = _comfyCfgFor(CI, sel);
+  const wfName = path.basename(cfg.workflowPath || '').replace(/\.json$/i, '') || '(워크플로 미지정)';
+  return { kind: 'comfy', local: !cfg.cloud, cfg, label: `${cfg.cloud ? '☁ 클라우드' : '🖥 로컬'}(${wfName})`, eng: new CI.ComfyImage(cfg, log) };
+}
+function _remotionVidTool(sel) {
+  if (!sel || sel === 'none') return null;
+  const CV = require('./core/comfy-video');
+  const cfg = _comfyCfgFor(CV, sel);
+  if (!cfg.workflowPath || !fs.existsSync(cfg.workflowPath)) return null;
+  const wfName = path.basename(cfg.workflowPath).replace(/\.json$/i, '');
+  return { kind: 'comfy', local: !cfg.cloud, cfg, label: `${cfg.cloud ? '☁ 클라우드' : '🖥 로컬'}(${wfName})`, eng: new CV.ComfyVideo(cfg, log) };
+}
+const _remotionLanes = (tool, base) => (tool && tool.local ? [...base, 'localGpu'] : base);
+
+// ⚠ 로컬 ComfyUI 는 TTS·롱폼 이미지와 **같은 3060** 을 쓴다 → 고른 도구가 로컬이면 localGpu 레인을 잡아
+//   동시에 돌지 않게 한다(_remotionLanes — 헤더 설정이 아니라 **고른 도구**로 판정).
 async function _runRemotionImagesCore(args = {}) {
   if (!S.imgTsv || !S.imgTsv.rows.length) throw new Error('먼저 그림목록 TSV 를 여세요.');
   const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
@@ -2383,13 +2427,12 @@ async function _runRemotionImagesCore(args = {}) {
   const outRoot = preset.outImages;
   if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「이미지 출력」 폴더를 정하세요.');
 
-  const CI = require('./core/comfy-image');
-  const cfg = CI.loadConfig();
-  const wfName = path.basename(cfg.workflowPath || '').replace(/\.json$/i, '') || '(워크플로 미지정)';
-  const eng = new CI.ComfyImage(cfg, log);
+  const tool = _remotionImgTool(args.imgTool);
+  const cfg = tool.cfg || { cloud: true };
+  const eng = tool.eng;
 
   // 🖥 로컬이면 꺼져 있어도 켜서 기다린다(롱폼 이미지와 같은 방어선).
-  if (!cfg.cloud) {
+  if (tool.kind === 'comfy' && !cfg.cloud) {
     const lc = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
     if (!lc.ok) throw new Error(lc.message || '로컬 ComfyUI 에 연결할 수 없습니다');
     // 🔎 느려질 조건을 미리 알린다(중복 서버·RAM 부족) — 막지 않고 경고만 한다.
@@ -2404,7 +2447,7 @@ async function _runRemotionImagesCore(args = {}) {
     : S.imgTsv.rows;
   S.abort = false;
   log(`🖼 리모션 그림 — ${rows.length}장 · ${REMOTION_IMAGE_DIMS.w}x${REMOTION_IMAGE_DIMS.h}`
-    + ` · 시드 ${REMOTION_IMAGE_SEED} · ${cfg.cloud ? '☁ 클라우드' : '🖥 로컬'}(${wfName})`);
+    + ` · 시드 ${REMOTION_IMAGE_SEED} · ${tool.label}`);
   log(`   출력 ${outRoot}`);
   try {
     const r = await withAwake('리모션 그림 생성', async () => TSVIMG.runImageBatch({
@@ -2425,7 +2468,41 @@ async function _runRemotionImagesCore(args = {}) {
   }
 }
 ipcMain.handle('remotion-run-images', (_e, args = {}) =>
-  enqueueImageJob('리모션 그림 생성', () => _runRemotionImagesCore(args), 'comfy'));
+  _runOnLanes(_remotionLanes(_remotionImgTool(args.imgTool), ['image']), '리모션 그림 생성', () => _runRemotionImagesCore(args)));
+
+// 🎬 리모션 영상 — 그림 TSV 6번 칸(영상 지시문)이 있는 장면만, 그 그림으로 i2v → 같은 이름 .mp4(로이 2026-10-10).
+const REMOTION_VIDEO_SEC = 5;
+async function _runRemotionVideosCore(args = {}) {
+  if (!S.imgTsv || !S.imgTsv.rows.length) throw new Error('먼저 그림목록 TSV 를 여세요.');
+  const preset = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  if (!preset || !preset.outImages) throw new Error('채널 편집 → 📁 폴더 에서 「이미지 출력」 폴더를 정하세요.');
+  const tool = _remotionVidTool(args.vidTool);
+  if (!tool) throw new Error('영상 도구를 고르세요(리모션 화면 「영상 도구」 · ComfyUI 비디오 워크플로가 등록돼 있어야 합니다).');
+  const rows = (Array.isArray(args.only) && args.only.length ? S.imgTsv.rows.filter((r) => args.only.includes(r.rel)) : S.imgTsv.rows).filter((r) => r.video);
+  if (!rows.length) { log('🎬 리모션 영상 — 영상 지시문(그림 TSV 6번 칸)이 있는 장면이 없습니다'); return { ok: true, total: 0, made: 0 }; }
+  if (tool.local) {
+    const lc = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: tool.eng.baseUrl, log });
+    if (!lc.ok) throw new Error(lc.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    await awaitForeignTtsIdle('리모션 영상 생성', log);
+    await tool.eng.freeMemory();
+  }
+  S.abort = false;
+  log(`🎬 리모션 영상 — ${rows.length}개 · ${REMOTION_VIDEO_SEC}초 · ${tool.label}`);
+  try {
+    const r = await withAwake('리모션 영상 생성', async () => TSVIMG.runVideoBatch({
+      rows, outRoot: preset.outImages, engine: tool.eng, durationSec: REMOTION_VIDEO_SEC, force: !!args.force,
+      onLine: (m) => log('   ' + m),
+      onProgress: (i, nn) => { try { win.webContents.send('remotion-progress', { i, n: nn, videos: true }); } catch {} },
+      abortSignal: () => S.abort,
+    }));
+    log(`✅ 리모션 영상 — 만듦 ${r.made} · 건너뜀 ${r.skipped}` + (r.noImage ? ` · 그림 없음 ${r.noImage}` : '') + ` · 실패 ${r.failed.length} / 전체 ${r.total}`
+      + (r.perVideoSec ? ` · 개당 ${r.perVideoSec.toFixed(1)}초` : '') + ` · 전체 ${_dur(r.elapsedSec)}`);
+    if (r.failed.length) r.failed.slice(0, 10).forEach((f) => log(`   ✗ ${f.rel} — ${f.reason}`));
+    return { ok: true, ...r };
+  } finally { if (tool.local) { try { await tool.eng.freeMemory(); } catch {} } }
+}
+ipcMain.handle('remotion-run-videos', (_e, args = {}) =>
+  _runOnLanes(_remotionLanes(_remotionVidTool(args.vidTool), ['image']), '리모션 영상 생성', () => _runRemotionVideosCore(args)));
 
 // ▶ **전체 만들기** — 열어 둔 모든 강을 순서대로. 「전 강 음성 → 전 강 그림」 2패스다.
 //   🔑 강마다 음성·그림을 번갈면 **GPU 에서 모델이 그만큼 스왑**된다(OmniVoice ↔ ComfyUI).
@@ -2438,8 +2515,12 @@ ipcMain.handle('remotion-run-all', async (_e, args = {}) => {
   S.abort = false;
   const withTts = S.tsvList.filter((x) => x.ttsRows.length);
   const withImg = S.tsvList.filter((x) => x.imgRows.length);
-  log(`▶ 전체 만들기 — ${S.tsvList.length}강 · 🎤 ${withTts.length}개 · 🖼 ${withImg.length}개`);
-  const done = { tts: 0, img: 0, fail: [] };
+  // 🎬 영상은 「영상 도구」를 골랐고 6번 칸(영상 지시문)이 있는 강만 — 그림이 끝난 뒤 세 번째 패스
+  const vidTool = _remotionVidTool(args.vidTool);
+  const withVid = vidTool ? S.tsvList.filter((x) => x.imgRows.some((r) => r.video)) : [];
+  log(`▶ 전체 만들기 — ${S.tsvList.length}강 · 🎤 ${withTts.length}개 · 🖼 ${withImg.length}개` + (vidTool ? ` · 🎬 ${withVid.length}개` : ''));
+  const imgLanes = _remotionLanes(_remotionImgTool(args.imgTool), ['image']);
+  const done = { tts: 0, img: 0, vid: 0, fail: [] };
   try {
     for (const it of withTts) {
       if (S.abort) { log('⏹ 중단 — 남은 음성은 건너뜁니다'); break; }
@@ -2454,13 +2535,21 @@ ipcMain.handle('remotion-run-all', async (_e, args = {}) => {
       _remotionActivate(it.id);
       try { win.webContents.send('remotion-active', _remotionDto()); } catch {}
       log(`🖼 [${done.img + 1}/${withImg.length}] ${it.imgName}`);
-      try { await enqueueImageJob('리모션 그림 생성', () => _runRemotionImagesCore(args), 'comfy'); done.img++; }
+      try { await _runOnLanes(imgLanes, '리모션 그림 생성', () => _runRemotionImagesCore(args)); done.img++; }
       catch (e) { done.fail.push(it.imgName + ' (그림) — ' + e.message); }
+    }
+    for (const it of withVid) {
+      if (S.abort) { log('⏹ 중단 — 남은 영상은 건너뜁니다'); break; }
+      _remotionActivate(it.id);
+      try { win.webContents.send('remotion-active', _remotionDto()); } catch {}
+      log(`🎬 [${done.vid + 1}/${withVid.length}] ${it.imgName}`);
+      try { await _runOnLanes(_remotionLanes(vidTool, ['image']), '리모션 영상 생성', () => _runRemotionVideosCore(args)); done.vid++; }
+      catch (e) { done.fail.push(it.imgName + ' (영상) — ' + e.message); }
     }
   } finally {
     if (keep) _remotionActivate(keep);
   }
-  log(`✅ 전체 만들기 끝 — 🎤 ${done.tts}/${withTts.length} · 🖼 ${done.img}/${withImg.length}`
+  log(`✅ 전체 만들기 끝 — 🎤 ${done.tts}/${withTts.length} · 🖼 ${done.img}/${withImg.length}` + (vidTool ? ` · 🎬 ${done.vid}/${withVid.length}` : '')
     + (done.fail.length ? ` · ✗ 실패 ${done.fail.length}` : ''));
   for (const f of done.fail) log(`   ✗ ${f}`);
   return { ok: true, ...done, dto: _remotionDto() };
