@@ -1280,3 +1280,13 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .scene-h .sc-title.editable{cursor:text;border-radius:5px;padding:0 4px}
 .scene-h .sc-title.editable:hover{background:rgba(25,168,214,.14)}
 .scene-h .sc-title.empty{opacity:.45;font-style:italic;font-weight:500}
+
+/* 📖 발음사전 — 새 단어 추가 영역(늘 보이는 입력칸 + 추가 단추)과 등록된 단어 목록을 구분한다 */
+.dict-newbox{display:flex;align-items:center;gap:8px;margin:10px 0 12px;padding:10px 12px;background:#fff6e2;border:1.5px solid #e3c892;border-radius:10px}
+.dict-newbox .dict-newlabel{flex:0 0 auto;font-weight:700;color:#7a5b22;white-space:nowrap}
+.dict-newbox input{flex:1 1 0;min-width:0;padding:7px 9px}
+.dict-newbox .dict-arrow{flex:0 0 auto;color:var(--muted,#8a7a5c)}
+.dict-newbox .dict-add{flex:0 0 auto;padding:7px 16px}
+.dict-listhead{display:flex;align-items:center;gap:10px;padding:2px 2px 6px;border-top:1px solid var(--line);padding-top:10px}
+.dict-listhead .dict-sub{padding:0;flex:1 1 auto}
+.dict-listhead .dict-find{flex:0 1 300px;min-width:160px;margin-left:auto}

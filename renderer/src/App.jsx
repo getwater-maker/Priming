@@ -696,6 +696,7 @@ export default function App() {
   const vdAudioRef = useRef(null);
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [dictFilter, setDictFilter] = useState('');
+  const [dictNew, setDictNew] = useState({ source: '', pron: '' });   // 📖 「새 단어 추가」 칸(늘 보이는 입력 영역) — ＋ 추가를 누르면 등록된 목록 맨 위로
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
@@ -1708,15 +1709,20 @@ export default function App() {
   }
   async function openStyleEditor() { setStyleEditOpen(true); await syncStyles(false); }
   // ── 발음사전(TTS 교정) ─────────────────────────────
-  async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictFilter(''); setDictOpen(true); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
+  async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictFilter(''); setDictNew({ source: '', pron: '' }); setDictOpen(true); setTimeout(() => { const e = document.querySelector('[data-testid="dict-new-src"]'); if (e) e.focus(); }, 60); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
   async function saveDict() {
-    const clean = dictRows.map((r) => ({ source: (r.source || '').trim(), pron: (r.pron || '').trim(), enabled: r.enabled !== false })).filter((r) => r.source && r.pron);
+    // 「새 단어 추가」 칸에 둘 다 적어 두고 ＋ 추가를 안 눌렀어도 잃지 않게 함께 저장한다
+    const pend = { source: (dictNew.source || '').trim(), pron: (dictNew.pron || '').trim(), enabled: true };
+    const rows = pend.source && pend.pron ? [pend, ...dictRows] : dictRows;
+    const clean = rows.map((r) => ({ source: (r.source || '').trim(), pron: (r.pron || '').trim(), enabled: r.enabled !== false })).filter((r) => r.source && r.pron);
     const r = await api.dictSave(clean);
     if (r) { setDictRows(r); setDictOpen(false); setStatus('발음사전 저장됨 — 다음 TTS 변환부터 적용'); } else setStatus('발음사전 저장 실패');
   }
-  function addDictRow() {   // 맨 위에 새 줄 + 바로 입력(검색은 풀어 새 줄이 보이게)
-    setDictFilter(''); setDictRows((rs) => [{ source: '', pron: '', enabled: true }, ...rs]);
-    setTimeout(() => { const e = document.querySelector('.dict-grid .dict-src'); if (e) { e.focus(); const g = document.querySelector('.dict-grid'); if (g) g.scrollTop = 0; } }, 30);
+  function addDictRow() {   // 「새 단어 추가」 칸의 두 칸을 등록된 목록 맨 위에 넣고 칸을 비운 뒤 다시 입력 대기(둘 다 적어야 한다 · 같은 표기는 막지 않고 중복 표시만)
+    const source = (dictNew.source || '').trim(), pron = (dictNew.pron || '').trim();
+    if (!source || !pron) { setStatus(`📖 ${!source ? '대본 표기' : '발음 표기'}를 적어 주세요`); const e = document.querySelector(`[data-testid="${!source ? 'dict-new-src' : 'dict-new-pron'}"]`); if (e) e.focus(); return; }
+    setDictFilter(''); setDictRows((rs) => [{ source, pron, enabled: true }, ...rs]); setDictNew({ source: '', pron: '' });
+    setTimeout(() => { const g = document.querySelector('.dict-grid'); if (g) g.scrollTop = 0; const e = document.querySelector('[data-testid="dict-new-src"]'); if (e) e.focus(); }, 30);
   }
   function setDictRow(i, patch) { setDictRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); }
   function delDictRow(i) { setDictRows((rs) => rs.filter((_, j) => j !== i)); }
@@ -6213,16 +6219,28 @@ export default function App() {
           <div className="modal-card wide dict-card" data-testid="dict-dlg">
             <div className="dict-top">
               <h3>📖 발음사전 (TTS 교정)<Hint>TTS가 잘못 읽는 단어를 <b>발음대로</b> 교정합니다. <b>자막·대본은 그대로</b>이고 <b>음성 합성에만</b> 적용됩니다.<br />예) 대본표기 <b>정약용</b> → 발음표기 <b>정냐굥</b> 으로 등록하면 자막엔 「정약용」이 뜨고 음성만 「정냐굥」으로 읽습니다.</Hint></h3>
-              <input className="dict-find" data-testid="dict-find" placeholder="🔍 검색 (대본·발음 표기)" value={dictFilter} onChange={(e) => setDictFilter(e.target.value)} />
-              <button className="dict-add" data-testid="dict-add" onClick={addDictRow} title="맨 위에 새 줄을 만들고 바로 입력합니다">＋ 추가</button>
             </div>
-            <div className="dict-sub meta">
-              전체 {dictRows.length}개{q ? ` · 검색 ${shown.length}개` : ''}{nOff ? ` · 꺼짐 ${nOff}` : ''}
-              {nDup > 0 && <span className="dict-warn"> · ⚠ 같은 표기 중복 {nDup}</span>}
-              {nBad > 0 && <span className="dict-warn"> · ⚠ 한쪽만 적은 줄 {nBad}(저장 때 빠집니다)</span>}
+            {/* ➕ 새 단어 추가 영역 — 늘 보이는 입력칸 + 추가 단추(눌러야 칸이 생기던 것을 바꿨다 · 등록된 목록과 따로) */}
+            <div className="dict-newbox" data-testid="dict-newbox">
+              <span className="dict-newlabel">➕ 새 단어 추가</span>
+              <input className="dict-new-src" data-testid="dict-new-src" placeholder="대본 표기 (예: 정약용)" value={dictNew.source} onChange={(e) => setDictNew({ ...dictNew, source: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); const p = document.querySelector('[data-testid="dict-new-pron"]'); if (p) p.focus(); } }} />
+              <span className="dict-arrow">→</span>
+              <input className="dict-new-pron" data-testid="dict-new-pron" placeholder="발음 표기 (예: 정냐굥)" value={dictNew.pron} onChange={(e) => setDictNew({ ...dictNew, pron: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addDictRow(); } }} />
+              <button className="dict-add" data-testid="dict-add" onClick={addDictRow} title="두 칸을 적고 누르거나 발음 칸에서 Enter — 아래 등록된 단어 맨 위에 들어갑니다">＋ 추가</button>
+            </div>
+            <div className="dict-listhead">
+              <b>등록된 단어</b>
+              <span className="dict-sub meta">
+                전체 {dictRows.length}개{q ? ` · 검색 ${shown.length}개` : ''}{nOff ? ` · 꺼짐 ${nOff}` : ''}
+                {nDup > 0 && <span className="dict-warn"> · ⚠ 같은 표기 중복 {nDup}</span>}
+                {nBad > 0 && <span className="dict-warn"> · ⚠ 한쪽만 적은 줄 {nBad}(저장 때 빠집니다)</span>}
+              </span>
+              <input className="dict-find" data-testid="dict-find" placeholder="🔍 등록된 단어 검색 (대본·발음 표기)" value={dictFilter} onChange={(e) => setDictFilter(e.target.value)} />
             </div>
             <div className="dict-grid" data-testid="dict-grid">
-              {dictRows.length === 0 && <div className="meta" style={{ padding: 8, gridColumn: '1 / -1' }}>등록된 단어가 없습니다. 위 「＋ 추가」로 시작하세요.</div>}
+              {dictRows.length === 0 && <div className="meta" style={{ padding: 8, gridColumn: '1 / -1' }}>등록된 단어가 없습니다. 위 「➕ 새 단어 추가」에 적고 「＋ 추가」를 누르세요.</div>}
               {dictRows.length > 0 && !shown.length && <div className="meta" style={{ padding: 8, gridColumn: '1 / -1' }}>「{dictFilter}」 와 맞는 줄이 없습니다.</div>}
               {shown.map(({ r, i }) => {
                 const dup = (seen.get(String(r.source || '').trim()) || 0) > 1;
@@ -6232,12 +6250,12 @@ export default function App() {
                   <input className="dict-src" placeholder="대본 표기 (예: 정약용)" title={dup ? '같은 대본 표기가 두 번 있습니다 — 위의 것이 먼저 적용됩니다' : ''} value={r.source || ''} onChange={(e) => setDictRow(i, { source: e.target.value })} />
                   <span className="dict-arrow">→</span>
                   <input className="dict-pron" placeholder="발음 표기 (예: 정냐굥)" value={r.pron || ''} onChange={(e) => setDictRow(i, { pron: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addDictRow(); } }} />
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); const n = document.querySelector('[data-testid="dict-new-src"]'); if (n) n.focus(); } }} />
                   <button className="dict-del" title="이 줄 삭제" onClick={() => delDictRow(i)}>🗑</button>
                 </div>); })}
             </div>
             <div className="dict-foot">
-              <span className="meta">저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다 · 발음 칸에서 Enter = 새 줄</span>
+              <span className="meta">저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다 · 새 단어 칸에서 Enter = 추가</span>
               <span className="grow" />
               <button onClick={saveDict} data-testid="dict-save">저장</button><button className="ghost" onClick={() => setDictOpen(false)}>취소</button>
             </div>

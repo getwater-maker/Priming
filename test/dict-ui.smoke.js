@@ -15,21 +15,35 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('h1', { timeout: 20000 });
     await win.locator('button[title^="발음사전"]').first().click();
     await win.waitForSelector('[data-testid=dict-dlg]', { timeout: 8000 });
-    // 사전 내용을 시험용으로 채운다(화면 상태만 — 저장 안 함)
-    for (let i = 0; i < 6; i++) { await win.locator('[data-testid=dict-add]').click(); await win.waitForTimeout(60); }
-    const f = await win.evaluate(() => document.activeElement && document.activeElement.className);
-    ok(/dict-src/.test(f), `＋ 추가 → 새 줄 대본 칸에 바로 커서 (${f})`);
-    await win.keyboard.type('가나'); await win.keyboard.press('Tab'); await win.keyboard.press('Tab');
+    // 🔑 입력칸과 추가 단추가 처음부터 보인다(눌러야 칸이 생기던 것을 바꿨다) · 등록된 단어 영역과 구분
+    ok(await win.locator('[data-testid=dict-new-src]').isVisible() && await win.locator('[data-testid=dict-new-pron]').isVisible() && await win.locator('[data-testid=dict-add]').isVisible(), '「새 단어 추가」 영역: 입력칸 둘 + ＋ 추가 단추가 처음부터 보인다');
+    const sep = await win.evaluate(() => { const nb = document.querySelector('.dict-newbox').getBoundingClientRect(), g = document.querySelector('.dict-grid').getBoundingClientRect(); return { nbBottom: nb.bottom, gridTop: g.top, hasHead: !!document.querySelector('.dict-listhead') }; });
+    ok(sep.hasHead && sep.gridTop > sep.nbBottom, `추가 영역과 등록된 단어 영역이 위아래로 나뉜다(${JSON.stringify(sep)})`);
+    await win.waitForTimeout(200);
+    ok(await win.evaluate(() => document.activeElement && document.activeElement.dataset.testid) === 'dict-new-src', '창을 열면 대본 표기 칸에 커서');
+    const n0 = await win.locator('.dict-row').count();
+    await win.locator('[data-testid=dict-add]').click(); await win.waitForTimeout(100);
+    ok((await win.locator('.dict-row').count()) === n0, '빈 칸으로 ＋ 추가를 누르면 아무것도 안 만든다');
+    await win.keyboard.type('가나'); await win.keyboard.press('Enter');   // 대본 칸 Enter → 발음 칸
+    ok(await win.evaluate(() => document.activeElement && document.activeElement.dataset.testid) === 'dict-new-pron', '대본 칸 Enter → 발음 칸으로');
     await win.keyboard.type('다라'); await win.keyboard.press('Enter'); await win.waitForTimeout(150);
-    const f2 = await win.evaluate(() => document.activeElement && document.activeElement.className);
+    const f2 = await win.evaluate(() => document.activeElement && document.activeElement.dataset.testid);
     const n = await win.locator('.dict-row').count();
-    ok(/dict-src/.test(f2) && n >= 7, `발음 칸 Enter → 맨 위 새 줄 (줄 ${n})`);
+    ok(n === n0 + 1 && f2 === 'dict-new-src', `발음 칸 Enter → 등록된 단어에 한 줄 추가(${n0} → ${n}) · 칸이 비고 다시 대본 칸에 커서`);
+    ok((await win.locator('[data-testid=dict-new-src]').inputValue()) === '' && (await win.locator('[data-testid=dict-new-pron]').inputValue()) === '', '추가 뒤 입력칸이 비워진다');
+    ok(/가나/.test(await win.locator('.dict-row').first().locator('.dict-src').inputValue()) && /다라/.test(await win.locator('.dict-row').first().locator('.dict-pron').inputValue()), '새 단어가 등록된 목록 맨 위에 들어간다');
+    await win.locator('[data-testid=dict-new-src]').fill('둘째'); await win.locator('[data-testid=dict-new-pron]').fill('둘쨰'); await win.locator('[data-testid=dict-add]').click(); await win.waitForTimeout(100);
+    ok((await win.locator('.dict-row').count()) === n0 + 2, '＋ 추가 단추로도 추가된다');
+    await win.locator('[data-testid=dict-new-src]').fill('한쪽'); await win.locator('[data-testid=dict-add]').click(); await win.waitForTimeout(100);
+    ok((await win.locator('.dict-row').count()) === n0 + 2 && /발음 표기를 적어 주세요/.test(await win.locator('body').innerText()), '한쪽만 적고 누르면 추가하지 않고 알려 준다');
+    await win.locator('[data-testid=dict-new-src]').fill('');
+    for (let i = 0; i < 4; i++) { await win.locator('[data-testid=dict-new-src]').fill('칸' + i); await win.locator('[data-testid=dict-new-pron]').fill('발' + i); await win.locator('[data-testid=dict-add]').click(); await win.waitForTimeout(60); }
     const cols = await win.evaluate(() => { const rows = [...document.querySelectorAll('.dict-row')].slice(0, 4).map((e) => Math.round(e.getBoundingClientRect().left)); return rows; });
     ok(cols[0] === cols[2] && cols[1] > cols[0] + 200, `2열 격자 (왼쪽 ${cols[0]} · 오른쪽 ${cols[1]})`);
     const card = await win.evaluate(() => { const c = document.querySelector('.dict-card').getBoundingClientRect(); const g = document.querySelector('.dict-grid'); return { w: Math.round(c.width), h: Math.round(c.height), vh: innerHeight, foot: Math.round(document.querySelector('.dict-foot').getBoundingClientRect().bottom), scroll: g.scrollHeight > g.clientHeight || true }; });
     ok(card.w > 900 && card.foot <= card.vh, `창이 넓고 저장 줄이 화면 안 (${JSON.stringify(card)})`);
     ok(/한쪽만|빈|⚠/.test(await win.locator('.dict-sub').innerText()) || true, '요약줄이 있다');
-    await win.locator('.dict-row').first().locator('.dict-src').fill('하나만'); await win.waitForTimeout(100);
+    await win.locator('.dict-row').first().locator('.dict-pron').fill(''); await win.locator('.dict-row').first().locator('.dict-src').fill('하나만'); await win.waitForTimeout(100);
     const bad = await win.locator('.dict-row.bad').count();
     ok(bad === 1 && /한쪽만 적은 줄 1/.test(await win.locator('.dict-sub').innerText()), `한쪽만 적은 줄이 표시된다 (${bad})`);
     await win.locator('[data-testid=dict-find]').fill('가나'); await win.waitForTimeout(200);
