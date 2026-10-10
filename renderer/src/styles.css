@@ -902,6 +902,8 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 /* 🧩 팝업(.modal-bg.show)이 떠 있으면 클립 막대를 숨긴다(v0.6.83 · 로이: 채널편집 위로 검은 막대가 튀어나옴).
    z-index 를 내리면 안 된다 — 막대는 자기 메뉴 바깥 클릭 막(.vr-menu-bg 69)보다 위여야 눌린다. */
 body:has(.modal-bg.show) .clip-tb{display:none}
+/* 🧩 다른 메뉴(그룹 그림 메뉴·삽입 메뉴·＋ 클립 추가 …)·🔍 미리보기 창이 떠 있으면 막대를 숨긴다 — 막대(72)가 그 위를 가리던 것(로이 2026-10-10 · 막대 자기 하위 메뉴 .clip-tb-menu 는 제외) */
+body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,body:has(#preview.show) .clip-tb{display:none}
 .clip-tb>button{background:transparent;color:#eee;border:0;border-radius:6px;padding:5px 8px;font-size:14px;min-height:0;line-height:1.1}
 .clip-tb>button.lbl{font-size:12.5px}
 .clip-tb>button:hover:not(:disabled),.clip-tb>button.on{background:#3a3a3a}

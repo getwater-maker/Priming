@@ -5646,7 +5646,7 @@ export default function App() {
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
-            onPreview={(kind, src) => setPreview({ kind, src })}
+            onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
@@ -5684,18 +5684,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {preview && (
-        <div id="preview" className="show" onClick={(e) => { if (e.target.classList.contains('close')) setPreview(null); }}>
-          <div id="previewBody">
-            <button className="close" title="닫기">✕</button>
-            {preview.kind === 'vid'
-              ? <video src={preview.src} controls autoPlay loop />
-              : preview.kind === 'audio'
-                ? <audio src={preview.src} controls autoPlay style={{ width: 480 }} />
-                : <img src={preview.src} alt="" />}
-          </div>
-        </div>
-      )}
+      {preview && <PreviewModal preview={preview} onClose={() => setPreview(null)} setStatus={setStatus} />}
 
       {/* 카드 보기·출판·리모션 — 미리보기 재생은 예전처럼 화면을 덮는 창(스테이지 DOM 은 하나 — 클립 보기에선 ① 칸 안에 있다) */}
       {!wsOn && (
@@ -7982,7 +7971,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
         <div className="vr-sep" />
       </>}
       {c.videoPath ? <button onClick={go(() => onPreview('vid', media(c.videoPath, c.videoVersion)))}>🔍 크게 보기</button>
-        : c.imagePath ? <button onClick={go(() => onPreview('img', media(c.imagePath, c.imageVersion)))}>🔍 크게 보기</button> : null}
+        : c.imagePath ? <button onClick={go(() => onPreview('img', media(c.imagePath, c.imageVersion), groupCaption(c)))}>🔍 크게 보기</button> : null}
       {has && onLook && <>
         <button onClick={() => setSub('fill')}>⛶ 채우기 <span className="vr-val">{VLook.FILLS.find((f) => f.id === lk.fill).label}</span> ›</button>
         <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
@@ -8000,10 +7989,78 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
   );
 }
 
+// 🔍 크게 보기용 — 그룹 자막 글(문장을 이어 붙임)
+const groupCaption = (c) => ((c && c.sentences) || []).map((s) => (s && s.text) || '').filter(Boolean).join(' ');
+
+// 🔍 미리보기 창 — Ctrl+C = 그림 복사 · 우클릭 = 「그림 복사 / 그림+자막 복사」
+async function copyPreviewImage(src, caption) {
+  let bmp;
+  try { bmp = await createImageBitmap(await (await fetch(src)).blob()); }
+  catch (_) {
+    const im = new Image(); im.src = src; await im.decode(); bmp = im;   // 폴백(캔버스가 오염되면 아래 toBlob 이 실패 → 호출자가 알린다)
+  }
+  const w = bmp.width, h = bmp.height;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
+  if (caption) {
+    const fs = Math.max(16, Math.round(h * 0.055));
+    ctx.font = `700 ${fs}px "Malgun Gothic", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    const maxW = w * 0.9, lines = []; let cur = '';
+    for (const ch of caption) { if (ctx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch.trim() ? ch : ''; } else cur += ch; }
+    if (cur) lines.push(cur);
+    ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, fs * 0.16); ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    let y = h - fs * 0.6 - (lines.length - 1) * fs * 1.25;
+    for (const ln of lines) { ctx.strokeText(ln, w / 2, y); ctx.fillText(ln, w / 2, y); y += fs * 1.25; }
+  }
+  const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('그림 변환 실패');
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
+function PreviewModal({ preview, onClose, setStatus }) {
+  const [menu, setMenu] = useState(null);   // { x, y }
+  const isImg = preview.kind === 'img';
+  const copy = async (withCap) => {
+    setMenu(null);
+    try { await copyPreviewImage(preview.src, withCap ? preview.caption : ''); setStatus && setStatus(withCap && preview.caption ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); }
+    catch (e) { setStatus && setStatus('그림 복사 실패: ' + e.message); }
+  };
+  useEffect(() => {
+    if (!isImg) return undefined;
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        const sel = window.getSelection && String(window.getSelection());
+        if (sel) return;   // 글자를 골라 둔 경우는 기본 복사
+        e.preventDefault(); copy(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+  return (
+    <div id="preview" className="show" data-testid="preview"
+      onClick={(e) => { if (e.target.classList.contains('close')) onClose(); else setMenu(null); }}
+      onContextMenu={(e) => { if (!isImg) return; e.preventDefault(); setMenu({ x: Math.min(e.clientX, window.innerWidth - 190), y: Math.min(e.clientY, window.innerHeight - 100) }); }}>
+      <div id="previewBody">
+        <button className="close" title="닫기">✕</button>
+        {preview.kind === 'vid'
+          ? <video src={preview.src} controls autoPlay loop />
+          : preview.kind === 'audio'
+            ? <audio src={preview.src} controls autoPlay style={{ width: 480 }} />
+            : <img src={preview.src} alt="" />}
+      </div>
+      {menu && <div className="vr-menu" style={{ left: menu.x, top: menu.y, zIndex: 90, minWidth: 180 }} data-testid="pv-menu" onClick={(e) => e.stopPropagation()}>
+        <button data-testid="pv-copy-img" onClick={() => copy(false)}>🖼 그림 복사 <i style={{ fontStyle: 'normal', opacity: .6 }}>Ctrl+C</i></button>
+        <button data-testid="pv-copy-cap" disabled={!preview.caption} title={preview.caption ? '' : '이 그림에 연결된 자막이 없습니다'} onClick={() => copy(true)}>🖼+💬 그림 + 자막 복사</button>
+      </div>}
+    </div>
+  );
+}
+
 function Thumb({ c, isLf, onAttach, onClear, onPreview, onMenu }) {
   const cls = isLf ? ' lf' : '';
   // 🖼 메뉴가 있으면 썸네일을 누르면 메뉴(Vrew 방식) — 크게 보기·교체는 메뉴 안에
-  const onImgClick = onMenu || (() => onPreview('img', media(c.imagePath, c.imageVersion)));
+  const onImgClick = onMenu || (() => onPreview('img', media(c.imagePath, c.imageVersion), groupCaption(c)));
   const onEmpty = onMenu || onAttach;
   const clearBtn = <button className="thumbx" title="첨부 삭제" onClick={(e) => { e.stopPropagation(); onClear(); }}>✕</button>;
   const genOv = (txt) => <div className="genoverlay"><div className="spin" /><div>{txt}</div></div>;
