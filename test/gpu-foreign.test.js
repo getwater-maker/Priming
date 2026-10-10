@@ -221,7 +221,9 @@ eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에�
 
   // 배선 — 로컬(비클라우드)일 때만, 이미지·비디오 두 경로 모두
   ok(MAIN.indexOf("if (!cfg.cloud) await awaitForeignTtsIdle(") >= 0, "[2단계] !cfg.cloud 일 때만 부른다(클라우드는 무관)");
-  eq((MAIN.split("await awaitForeignTtsIdle(").length - 1), 2, "[2단계] 이미지·비디오 두 경로에 배선돼 있다");
+  // 이미지·비디오 두 경로는 반드시 있어야 한다(다른 GPU 작업 — 예: 목소리 얼굴 그리기 — 이 더 불러도 된다)
+  ok(MAIN.indexOf("if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성'") >= 0, "[2단계] 이미지 경로에 배선돼 있다");
+  ok(MAIN.indexOf("if (!cfg.cloud) await awaitForeignTtsIdle('로컬 비디오 생성'") >= 0, "[2단계] 비디오 경로에 배선돼 있다");
   // 🔴 미정의 식별자 재발 방지 — 호출부에 label 변수는 없다(두 함수 어디에도 정의돼 있지 않다).
   eq(MAIN.includes('await awaitForeignTtsIdle(label'), false, '[2단계] 호출부가 없는 변수(label)를 쓰지 않는다');
   ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 이미지 생성', logger)") >= 0, "[2단계] 이미지 경로는 리터럴 라벨 + logger");

@@ -20,7 +20,7 @@ ok(/const _imgLocalGpu = isComfyVal\(engine\)/.test(SRC), '이미지 로컬 GPU 
 //   런타임 ReferenceError 로 큐 전체가 죽는다 — 2026-08-20 실사고: 대본 7개가 전부
 //   "imgEngine is not defined" 로 실패. 빌드도 E2E 도 못 잡았으므로 **스코프를 대조해 고정**한다.
 {
-  const i = SRC.indexOf('async function runMakeAllCore(');
+  const i = SRC.indexOf('async function runMakeAllBody(');   // 본문은 runMakeAllBody(runMakeAllCore 는 껍데기)
   // ⚠ 인자 기본값에 `opts = {}` 가 있어 그냥 첫 `{` 부터 세면 **시그니처만** 잘린다 → `) {` 뒤부터 센다.
   const start = SRC.indexOf(') {', i) + 2;
   let d = 0, started = false, j = start;
@@ -51,7 +51,7 @@ ok(/function _vidUsesLocalGpu\(engine\)/.test(SRC), '비디오 로컬 GPU 판정
 ok(/function genGroupVideosManual\(/.test(SRC), '수동 경로용 래퍼(genGroupVideosManual) 존재');
 ok(/_runOnLanes\(\['localGpu'\]/.test(SRC), '그 래퍼가 localGpu 레인을 잡는다');
 {
-  const i = SRC.indexOf('async function runMakeAllCore(');
+  const i = SRC.indexOf('async function runMakeAllBody(');   // 본문은 runMakeAllBody(runMakeAllCore 는 껍데기)
   const start = SRC.indexOf(') {', i) + 2;
   let d = 0, started = false, j = start;
   for (; j < SRC.length; j++) {
