@@ -16,5 +16,8 @@ eq(normalizeMeta('발행일 2026-10-06'), '발행일 2026년 10월 06일', '라�
 eq(normalizeMeta('초판 1쇄 발행 2026-8-24; 초판 2쇄 발행 2026.9.10'), '초판 1쇄 발행 2026년 08월 24일; 초판 2쇄 발행 2026년 09월 10일', '여러 쇄(;)도 하나씩');
 eq(normalizeMeta('2026-10-06'), '2026년 10월 06일', '라벨 없는 날짜');
 eq(normalizeMeta(''), '', '빈 값');
+const { todayKo } = require('../core/book/date-ko');
+eq(todayKo(Date.UTC(2026, 9, 10, 3, 0)), '2026년 10월 10일', '오늘(KST) 낮');
+eq(todayKo(Date.UTC(2026, 9, 10, 16, 0)), '2026년 10월 11일', 'UTC 16시 = KST 다음 날 01시 (UTC 날짜를 쓰지 않는다)');
 console.log(`\n${fail ? '❌' : '✅'} date-ko — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

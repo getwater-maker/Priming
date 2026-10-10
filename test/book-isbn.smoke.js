@@ -47,6 +47,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(/체크 숫자가 맞지 않/.test(await win.locator('[data-testid=rg-isbn-bad]').innerText()), '틀린 ISBN → ⚠ 체크 숫자 경고');
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-isbn-bad]').count() === 0, '부크크가 보낸 979-11-12-31240-2 → 경고 없음(체크 숫자 통과)');
+    // 📅 발행일 = ISBN 받은 날 — 이미 적힌 발행일은 ISBN 을 넣어도 그대로, 비어 있으면 ISBN 을 넣는 순간 오늘(KST)
+    ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
+    await win.locator('[data-testid=rg-issueDate]').fill(''); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(500);
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '발행일 비움');
+    await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '틀린 ISBN 으로는 발행일을 채우지 않는다');
+    await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(700);
+    { const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).split('-'); const want = `${kst[0]}년 ${kst[1]}월 ${kst[2]}일`;
+      ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want); }
     await win.locator('[data-testid=rg-issueDate]').fill('2026-10-06'); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(400);
     await win.locator('[data-testid=rg-ebookIsbn]').fill('979-11-12-31221-1'); await win.locator('[data-testid=rg-ebookIsbn]').blur(); await win.waitForTimeout(400);
 

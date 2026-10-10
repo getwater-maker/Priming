@@ -46,8 +46,10 @@ function preflight(x) {
   // 6) 필수 정보
   const miss = [];
   if (!has(m.title)) miss.push('책 제목'); if (!has(m.author)) miss.push('저자'); if (!has(m.publisher)) miss.push('출판사');
-  if (!has(m.issueDate)) miss.push('발행일');
-  out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : '제목·저자·출판사·발행일 있음', 'info'));
+  // 발행일 = ISBN 받은 날(부크크) — ISBN 을 받기 전(신청 단계)엔 비어 있어도 오류가 아니다(ISBN 을 넣으면 오늘로 채워진다)
+  const waitIsbn = !has(m.issueDate) && !has(m.isbn) && !has(m.ebookIsbn);
+  if (!has(m.issueDate) && !waitIsbn) miss.push('발행일');
+  out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : waitIsbn ? '제목·저자·출판사 있음 — 발행일은 ISBN 을 받은 뒤 입력(ISBN 을 넣으면 오늘로 채워집니다)' : '제목·저자·출판사·발행일 있음', 'info'));
   // 7) 완성 파일이 원고보다 낡았나
   const find = (k) => (x.outputs || []).filter((o) => o.kind === k).sort((a, b) => b.mtime - a.mtime)[0];
   for (const [kind, label] of [['interior', '내지 PDF'], ['cover', '표지 PDF'], ['epub', 'ePub']]) {

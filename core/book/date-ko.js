@@ -25,4 +25,9 @@ function normalizeMeta(v) {
     return label ? `${label} ${val}` : val;
   }).join('; ');
 }
-module.exports = { formatKo, normalizeMeta };
+// 오늘(KST) → 「2026년 10월 10일」 — ISBN 을 받은 날 = 발행일 기준(부크크)에 쓴다. now = 시험용 주입(ms).
+function todayKo(now) {
+  const d = new Date((now == null ? Date.now() : now) + 9 * 3600 * 1000);
+  return formatKo(d.toISOString().slice(0, 10));
+}
+module.exports = { formatKo, normalizeMeta, todayKo };

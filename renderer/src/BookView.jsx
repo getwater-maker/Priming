@@ -731,11 +731,20 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     //   ISBN 은 체크 숫자가 틀릴 때만 빨간 경고 · 발행일은 「2026년 10월 06일」 모양으로 바로잡아 저장(2026-10-06 으로 적어도 됨).
     //   전자책 발행일(`> 전자책발행일:`)은 원고 메타로만 — 부크크는 종이책·전자책 발행일을 따로 묻지 않는다.
     const bad = (v) => { const t = String(v || '').trim(); return t && !ISBNC.normalizeIsbn13(t); };
+    // 📅 발행일 = ISBN 받은 날(부크크 안내) — ISBN 을 처음 넣을 때 발행일이 비어 있으면 오늘(KST)로 채운다(이미 있으면 그대로 · 2026-10-10 로이)
+    const isbnProps = (k) => {
+      const p = liveMeta(k);
+      return { ...p, onBlur: async (e) => {
+        const v = e.target.value.trim();
+        await p.onBlur(e);
+        if (v && ISBNC.normalizeIsbn13(v) && !String(meta.issueDate || '').trim()) await setMeta('issueDate', DK.todayKo());
+      } };
+    };
     const one = (k, label, ph, isDate) => (
       <label key={k}>
         <span>{label}</span>
         <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
-          key={dto.scriptPath + ':' + idp + ':' + k + ':' + fieldRev} {...(isDate ? liveMeta(k, null, (v) => DK.normalizeMeta(v)) : liveMeta(k))} />
+          key={dto.scriptPath + ':' + idp + ':' + k + ':' + fieldRev} {...(isDate ? liveMeta(k, null, (v) => DK.normalizeMeta(v)) : isbnProps(k))} />
         {!isDate && bad(meta[k]) ? <span className="bkisbn-bad" data-testid={idp + '-' + k + '-bad'}>⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요</span> : null}
       </label>
     );
