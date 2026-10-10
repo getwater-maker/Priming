@@ -3725,7 +3725,8 @@ async function _geminiBatchCollect(scriptPath, logger) {
     const t0 = Date.now(); let fails = 0, lastNote = 0;
     for (;;) {
       if (S.abort) { logger('⏹ 중단됨 — 배치는 구글에서 계속 처리됩니다(다음에 「이미지 / ⚡ 만들기」를 누르면 이어서 회수)'); return; }
-      const c = await GI.checkBatch({ batchName: job.batchName });
+      let _told = false;
+      const c = await GI.checkBatch({ batchName: job.batchName, onResultStart: () => { if (!_told) { _told = true; logger(`📥 배치가 끝났습니다(${job.count || '?'}장) — 그림을 받는 중입니다. 장수에 따라 약 ${Math.max(1, Math.round((job.count || 40) * 3.6 / 60))}~${Math.max(3, Math.round((job.count || 40) * 3.6 / 15))}분 걸릴 수 있습니다 · 앱을 끄지 마세요`); } } });
       if (!c.ok) {
         if (++fails >= 4) { logger('⚠ 배치 확인·받기 실패(' + c.error + ') — 그림은 구글에 있을 수 있습니다. 「이미지」를 다시 누르면 이어서 가져옵니다'); break; }
       } else {

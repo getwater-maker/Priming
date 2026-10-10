@@ -46,6 +46,16 @@ async function run(json) {
   const mainSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
   ok(/GEMINI_BATCH_CHUNK = 40/.test(mainSrc) && /chunks\.push\(targets\.slice\(i, i \+ GEMINI_BATCH_CHUNK\)\)/.test(mainSrc), '큰 배치는 40장씩 나눠 제출한다(응답 크기 · V8 문자열 한도)');
   ok(/못 받았습니다\(배치/.test(mainSrc) && /못 받은 배치 \$\{_bLeft\}개가 남았습니다/.test(mainSrc), '못 받은 배치가 남으면 「완료」가 아니라 다시 누르라고 알린다');
+  // 받는 동안 조용하면 멈춘 줄 안다(아내 PC) — 결과 받기 직전에만 알림 콜백이 불린다
+  let told = 0;
+  const real2 = global.fetch;
+  global.fetch = async (u) => (isStatus(String(u)) ? jr({ done: true }) : jr({ response: { inlinedResponses: { inlinedResponses: [item('t', 'image/png')] } } }));
+  await GI.checkBatch({ batchName: 'batches/x', key: 'k', onResultStart: () => { told++; } });
+  global.fetch = async () => jr({ name: 'b' });
+  await GI.checkBatch({ batchName: 'batches/x', key: 'k', onResultStart: () => { told += 10; } });
+  global.fetch = real2;
+  ok(told === 1, '결과를 받기 직전에만 안내 콜백이 불린다(진행 중 상태 확인에는 안 불림)');
+  ok(/onResultStart: \(\) => \{ if \(!_told\)/.test(mainSrc) && /그림을 받는 중입니다/.test(mainSrc), 'main 이 받는 중 안내 줄을 남긴다');
   console.log(`\n${fail ? '❌' : '✅'} gemini-batch-parse — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();

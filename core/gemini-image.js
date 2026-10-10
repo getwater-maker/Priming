@@ -201,7 +201,7 @@ function _parseBatchResults(j) {
   }
   return results;
 }
-async function checkBatch({ batchName, key, timeoutMs = BATCH_STATUS_TIMEOUT_MS, resultTimeoutMs = BATCH_RESULT_TIMEOUT_MS }) {
+async function checkBatch({ batchName, key, timeoutMs = BATCH_STATUS_TIMEOUT_MS, resultTimeoutMs = BATCH_RESULT_TIMEOUT_MS, onResultStart }) {
   key = key || geminiKey();
   if (!key) return { ok: false, error: 'Gemini API 키 없음' };
   try {
@@ -216,6 +216,7 @@ async function checkBatch({ batchName, key, timeoutMs = BATCH_STATUS_TIMEOUT_MS,
     let full = j0;
     if (!j0.response && !(j0.metadata && j0.metadata.output)) {   // ② 끝났으면 결과만(한 벌) — 큰 응답이라 시간 제한을 넉넉히 · 재시도
       let last = null;
+      if (typeof onResultStart === 'function') { try { onResultStart(); } catch (_) {} }   // 받는 동안 조용하면 멈춘 줄 안다 — 호출부가 안내 줄을 남긴다
       for (let att = 1; att <= 3; att++) {
         try {
           const rr = await _getBatchJson(batchName, key, 'response', resultTimeoutMs);
