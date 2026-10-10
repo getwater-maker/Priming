@@ -3989,6 +3989,44 @@ export default function App() {
     stageDragRef.current = { sn: pr.shortsNum, num: pick.num, start: box, px, py, corner: handle ? handle.dataset.c : null, moved: false, R, el };
     setStageSel({ sn: pr.shortsNum, num: pick.num, box, guides: {} });
   }
+  // 🖱 ① 칸 그림 오른쪽 클릭 메뉴(v0.7.81 · Vrew) — 잘라내기·그림 복사·그림+자막 복사·삭제 · 비디오 생성 ▸ · 채우기 ▸ · 순서 ▸(준비 중)
+  //   누른 점을 덮는 맨 위 그림을 고르고(왼쪽 클릭과 같은 선택) 메뉴를 연다. 자막·AI 고지·로고 위에서는 기본 동작을 둔다.
+  const [stageCtx, setStageCtx] = useState(null);   // { x, y, sub, subY, num, cap, only }
+  const stageCapText = () => { const cs = stageCapRef.current; return cs ? String(cs.innerText || '').replace(/\s+/g, ' ').trim() : ''; };
+  function onStageCtx(ev) {
+    if (!wsOn || playerOpen || (sentEdit && sentEdit.where === 'stage')) return;
+    if (ev.target.closest && ev.target.closest('.cf-stageline, .stage-edit, .stage-ai, .stage-logo, .stage-vtb')) return;
+    const st = stageVisualRef.current; if (!st) return;
+    const R = st.getBoundingClientRect();
+    const px = (ev.clientX - R.left) / R.width, py = (ev.clientY - R.top) / R.height;
+    const { pr, layers } = stageLayersRef.current || {};
+    if (!pr || !layers || !layers.length) return;
+    let pick = null;
+    for (let i = layers.length - 1; i >= 0 && !pick; i--) {
+      const el = st.querySelector('.vlayer[data-num="' + layers[i].num + '"]');
+      const b = stageSel && stageSel.num === layers[i].num ? stageSel.box : defaultBoxOf(layers[i], el);
+      if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) pick = layers[i];
+    }
+    if (!pick) return;
+    ev.preventDefault();
+    if (!(stageSel && stageSel.num === pick.num)) { const el = st.querySelector('.vlayer[data-num="' + pick.num + '"]'); setStageSel({ sn: pr.shortsNum, num: pick.num, box: defaultBoxOf(pick, el), guides: {} }); }
+    setStageCtx({ x: ev.clientX, y: ev.clientY, sub: null, subY: 0, num: pick.num, cap: stageCapText() });
+  }
+  /** ① 칸 그림을 클립보드로 — withCap 이면 지금 보이는 자막을 그림 아래에 얹는다. 영상이면 지금 장면 한 장. */
+  async function stageCopyImage(num, withCap, cap) {
+    const st = stageVisualRef.current; const lay = st && st.querySelector('.vlayer[data-num="' + num + '"]');
+    const m = lay && lay.querySelector('img, video');
+    if (!m) { setStatus('복사할 그림이 없습니다'); return false; }
+    const text = withCap ? (cap != null ? cap : stageCapText()) : '';
+    try { await copyPreviewImage(m.tagName === 'IMG' ? m.src : null, text, m.tagName === 'VIDEO' ? m : null); setStatus(withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
+    catch (e) { setStatus('그림 복사 실패: ' + e.message); return false; }
+  }
+  /** ① 칸 그림 지우기(✕ 와 같다 — 삽입 그림은 목록의 ➕ 마크에서) */
+  async function stageDeleteImage(num, confirmFirst = true) {
+    const { pr } = stageLayersRef.current || {}; if (!pr || typeof num !== 'number') return;
+    if (confirmFirst && !uiConfirm(`G${num} 의 그림·영상을 지웁니다.\n(다시 만들거나 새로 붙이면 됩니다)\n\n계속할까요?`)) return;
+    await clearAsset(pr.shortsNum, num); setStageSel(null);
+  }
   useEffect(() => {
     const move = (ev) => {
       const d = stageDragRef.current; if (!d) return;
@@ -4294,6 +4332,7 @@ export default function App() {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       if (clipCtx) { setClipCtx(null); return; }   // 🖱 클립 오른쪽 클릭 메뉴가 가장 위
+      if (stageCtx) { setStageCtx(null); return; }   // 🖱 ① 칸 그림 오른쪽 클릭 메뉴
       if (preview) { setPreview(null); return; }
       if (aiPop && !aiEdit) { setAiPop(null); return; }
       if (playerOpen) { stopPlayer(); return; }
@@ -4321,7 +4360,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  }, [clipCtx, stageCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
   // 🔎 리본(이미지·비디오 탭)에서 무료 스톡 열기 — 지금 커서의 그룹 · 탭에 맞춰 사진/영상(v0.7.68)
@@ -4435,6 +4474,13 @@ export default function App() {
         return;
       }
       if (isA) { e.preventDefault(); selectAllClips(); return; }   // 🧩 Ctrl+A = 모든 클립
+      // 🖼 ① 칸 그림을 골라 둔 채(마지막으로 누른 곳이 그림) Ctrl+C = 그림 복사 · Ctrl+X = 복사 + 지우기(v0.7.81) — 클립 키보다 먼저
+      if (stageSel && !clipFocusRef.current && (e.ctrlKey || e.metaKey) && (e.code === 'KeyC' || e.code === 'KeyX') && !String((window.getSelection && window.getSelection()) || '').trim()) {
+        e.preventDefault();
+        const num = stageSel.num;
+        stageCopyImage(num, false).then((ok2) => { if (ok2 && e.code === 'KeyX') stageDeleteImage(num); });
+        return;
+      }
       // 🧩 클립 도구 — 고른 클립이 있을 때만(글자를 드래그로 고른 중이면 평소 복사)
       if (clipSelOk() && (e.ctrlKey || e.metaKey) && !String((window.getSelection && window.getSelection()) || '').trim()) {
         if (e.code === 'KeyC') { e.preventDefault(); clipCopy(false); return; }
@@ -5115,7 +5161,7 @@ export default function App() {
   })();
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
-    <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown}>
+    <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown} onContextMenu={onStageCtx}>
       <div id="stageVisual" ref={stageVisualRef} />
       {stageAi && !aiEdit && (() => {
         const k = (stageBoxW() || 540) / 1920, fa = CF.aiNoticeFmt(aiCfg), pa = aiDrag || CF.aiNoticePos(aiCfg);
@@ -5154,6 +5200,28 @@ export default function App() {
           <span className="ssel-tag">{String(stageSel.num)[0] === 'O' ? '➕ 삽입' : 'G' + stageSel.num}</span>
         </div>
       )}
+      {wsOn && stageSel && !playerOpen && !(sentEdit && sentEdit.where === 'stage') && (() => {
+        // 🧰 그림을 누르면 오른쪽 가장자리에 세로 도구 막대(Vrew) — 채우기 · 순서 · 투명도 · 자르기 · 좌우 반전 · 교체. 없는 기능은 「준비 중」
+        const grpNum = typeof stageSel.num === 'number' ? stageSel.num : null;
+        const lay = ((stageLayersRef.current || {}).layers || []).find((c) => c.num === stageSel.num);
+        const lk = lay ? VLook.normLook(lay.look) : null;
+        const sn = stageSel.sn;
+        const stop = (e) => { e.stopPropagation(); };
+        const tb = (icon, title, fn, extra = {}) => (
+          <button key={title} className={'vtb-b' + (extra.soon || (!extra.any && grpNum == null) ? ' soon' : '') + (extra.on ? ' on' : '')} title={title} data-testid={extra.tid}
+            onClick={(e) => { e.stopPropagation(); if (extra.soon) { setStatus(`「${title}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); return; } if (!extra.any && grpNum == null) { setStatus('삽입 그림·영상은 이 막대로 바꿀 수 없습니다 — 목록의 ➕ 마크에서'); return; } fn(e); }}>{icon}</button>
+        );
+        return (
+          <div className="stage-vtb" data-testid="stage-vtb" onMouseDown={stop} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+            {tb('⛶', '채우기 — 맞추기·꽉 채우기', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx({ x: Math.max(4, r.left - 196), y: r.top, sub: 'fill', subY: r.top, num: stageSel.num, cap: '', only: true }); }, { tid: 'vtb-fill' })}
+            {tb('☰', '순서 — 앞으로·뒤로', null, { soon: true })}
+            {tb('◐', '투명도', null, { soon: true })}
+            {tb('⌗', '자르기', null, { soon: true })}
+            {tb('⇋', '좌우 반전', () => setGroupLook(sn, grpNum, { flipH: !(lk && lk.flipH) }), { tid: 'vtb-flip', on: !!(lk && lk.flipH) })}
+            {tb('⟳', '그림 교체 — 파일을 골라 바꾸기', () => attachAsset(sn, grpNum), { tid: 'vtb-replace' })}
+          </div>
+        );
+      })()}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
       <div id="stageCap" ref={stageCapRef} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
@@ -5626,6 +5694,59 @@ export default function App() {
               <button data-testid="ctb-voice-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 문장들만 톤이 달라집니다)" onClick={() => clipTts(true)}>🎲 다른 톤으로 새로 뽑기</button>
             </div>}
           </div>
+        </>);
+      })()}
+          {wsOn && stageCtx && (() => {
+        // 🖱 ① 칸 그림 오른쪽 클릭 메뉴(Vrew 모양) — 복사는 「그림만 / 그림+자막」 둘 중 고른다
+        const { pr, layers } = stageLayersRef.current || {};
+        const lay = (layers || []).find((c) => c.num === stageCtx.num);
+        const grp = typeof stageCtx.num === 'number';
+        const lk = lay ? VLook.normLook(lay.look) : null;
+        const W = 232, SW = 210;
+        const left = Math.max(4, Math.min(stageCtx.x, window.innerWidth - W - 8));
+        const top = Math.max(4, Math.min(stageCtx.y, window.innerHeight - 330));
+        const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
+        const run = (fn) => () => { setStageCtx(null); fn(); };
+        const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
+        const soonT = (t) => { setStageCtx(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); };
+        const Row = ({ icon, label, onClick, soon, sub, kbd, dis, tid, red }) => (
+          <button className={'cx-row' + (soon || dis ? ' soon' : '') + (red ? ' red' : '') + (sub && stageCtx.sub === sub ? ' open' : '')} data-testid={tid} onMouseEnter={hov(sub || null)}
+            onClick={sub ? hov(sub) : (soon ? () => soonT(label) : dis ? undefined : onClick)} disabled={!!dis && !soon}>
+            <span className="cx-ic">{icon}</span><span className="cx-t">{label}</span>
+            {kbd ? <span className="cx-k">{kbd}</span> : sub ? <span className="cx-k">▸</span> : soon ? <span className="cx-k">준비 중</span> : null}
+          </button>
+        );
+        const subTop = Math.max(4, Math.min(stageCtx.subY - 6, window.innerHeight - 220));
+        const num = stageCtx.num;
+        const fillSub = <>
+          {VLook.FILLS.map((f) => <Row key={f.id} icon={lk && lk.fill === f.id ? '✓' : ''} label={f.label} tid={'sx-fill-' + f.id} dis={!grp} onClick={run(() => setGroupLook(pr.shortsNum, num, { fill: f.id }))} />)}
+        </>;
+        return (<>
+          <div className="vr-menu-bg" data-testid="sx-bg" onMouseDown={() => setStageCtx(null)} onContextMenu={(e) => { e.preventDefault(); setStageCtx(null); }} />
+          {!stageCtx.only && <div className="vr-menu clip-ctx" data-testid="stage-ctx" style={{ left, top, width: W }} onMouseDown={(e) => e.preventDefault()}>
+            <Row icon="✂" label="잘라내기" kbd="Ctrl + X" dis={!grp} tid="sx-cut" onClick={run(async () => { if (await stageCopyImage(num, false)) stageDeleteImage(num); })} />
+            <Row icon="🖼" label="그림 복사" kbd="Ctrl + C" tid="sx-copy-img" onClick={run(() => stageCopyImage(num, false))} />
+            <Row icon="💬" label="그림 + 자막 복사" dis={!stageCtx.cap} tid="sx-copy-cap" onClick={run(() => stageCopyImage(num, true, stageCtx.cap))} />
+            <Row icon="📋" label="붙여넣기" kbd="Ctrl + V" soon />
+            <Row icon="🗑" label="삭제" red dis={!grp} tid="sx-del" onClick={run(() => stageDeleteImage(num))} />
+            <div className="vr-sep" />
+            <Row icon="🎬" label="비디오 생성" sub="vid" dis={!grp} tid="sx-vid" />
+            <Row icon="⛶" label="채우기" sub="fill" dis={!grp} tid="sx-fill" />
+            <Row icon="☰" label="순서" sub="ord" tid="sx-ord" />
+          </div>}
+          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 160)) : subTop, width: SW }} onMouseDown={(e) => e.preventDefault()}>
+            {stageCtx.sub === 'fill' && fillSub}
+            {stageCtx.sub === 'vid' && <>
+              <Row icon="🎬" label={'AI 비디오 G' + num} tid="sx-vid-ai" onClick={run(() => runGroupVid(pr.shortsNum, num))} />
+              <Row icon="🖥" label="PC 에서 불러오기" tid="sx-vid-pc" onClick={run(() => attachAsset(pr.shortsNum, num))} />
+            </>}
+            {stageCtx.sub === 'ord' && <>
+              <Row icon="⇧" label="맨 앞으로" soon />
+              <Row icon="↑" label="앞으로" soon />
+              <Row icon="↓" label="뒤로" soon />
+              <Row icon="⇩" label="맨 뒤로" soon />
+            </>}
+          </div>}
         </>);
       })()}
           {wsOn && clipCtx && clipSelOk() && (() => {
@@ -8139,13 +8260,17 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
 const groupCaption = (c) => ((c && c.sentences) || []).map((s) => (s && s.text) || '').filter(Boolean).join(' ');
 
 // 🔍 미리보기 창 — Ctrl+C = 그림 복사 · 우클릭 = 「그림 복사 / 그림+자막 복사」
-async function copyPreviewImage(src, caption) {
+//   el(영상 요소)을 주면 그 지금 장면 한 장을 그린다(① 칸 그림이 영상일 때)
+async function copyPreviewImage(src, caption, el) {
   let bmp;
-  try { bmp = await createImageBitmap(await (await fetch(src)).blob()); }
-  catch (_) {
-    const im = new Image(); im.src = src; await im.decode(); bmp = im;   // 폴백(캔버스가 오염되면 아래 toBlob 이 실패 → 호출자가 알린다)
+  if (el && el.tagName === 'VIDEO' && el.videoWidth > 0) bmp = el;
+  else {
+    try { bmp = await createImageBitmap(await (await fetch(src)).blob()); }
+    catch (_) {
+      const im = new Image(); im.src = src; await im.decode(); bmp = im;   // 폴백(캔버스가 오염되면 아래 toBlob 이 실패 → 호출자가 알린다)
+    }
   }
-  const w = bmp.width, h = bmp.height;
+  const w = bmp.videoWidth || bmp.width, h = bmp.videoHeight || bmp.height;
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
   if (caption) {

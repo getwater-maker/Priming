@@ -918,6 +918,14 @@ body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,
 .clip-ctx button.cx-row.soon{opacity:.45}
 .clip-ctx .cx-ic{width:18px;flex:none;text-align:center;color:#cfcfcf}
 .clip-ctx .cx-t{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clip-ctx button.cx-row.red,.clip-ctx button.cx-row.red .cx-ic{color:#ff6b5e}
+.clip-ctx button.cx-row:disabled{opacity:.35;cursor:default}
+/* 🧰 ① 칸 그림 세로 도구 막대(Vrew · v0.7.81) — 그림을 누르면 오른쪽 가장자리에 */
+#stage .stage-vtb{position:absolute;right:8px;top:12%;z-index:6;display:flex;flex-direction:column;gap:2px;background:#161616;border:1px solid #333;border-radius:10px;padding:4px;box-shadow:0 6px 18px rgba(0,0,0,.45);container-type:normal}
+#stage .stage-vtb .vtb-b{width:30px;height:30px;padding:0;background:transparent;color:#eee;border:0;border-radius:6px;font-size:16px;line-height:1;min-height:0;display:flex;align-items:center;justify-content:center}
+#stage .stage-vtb .vtb-b:hover{background:#2c2c2c}
+#stage .stage-vtb .vtb-b.on{background:#1d6f8a;color:#fff}
+#stage .stage-vtb .vtb-b.soon{opacity:.45}
 .clip-ctx .cx-k{flex:none;font-size:11.5px;font-weight:400;color:#9a9a9a}
 .clip-tb>button{background:transparent;color:#eee;border:0;border-radius:6px;padding:5px 8px;font-size:14px;min-height:0;line-height:1.1}
 .clip-tb>button.lbl{font-size:12.5px}
