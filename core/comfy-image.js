@@ -57,6 +57,11 @@ const BUNDLED = [
   //   ⚠ 프롬프트는 CLIPTextEncode 가 아니라 `TextEncodeQwenImage21.prompt` 에 들어간다(_buildWorkflow 가 인식).
   //   ⚠ 서버에 ComfyUI ≥0.39(그 노드)와 모델 3개(turbo_int8_convrot · qwen3vl_8b_int8_convrot · qwen_image_2.1_vae_bf16)가 있어야 한다. 클라우드 보유는 미확인 → 「(로컬)」.
   { name: 'Qwen-Image 2.1 Turbo (로컬)', file: 'image_qwen21_turbo.json' },
+  // Qwen-Image **2512**(20B · 🔴 **Apache 2.0** — 2.1 은 연구용이라 상업 채널엔 별도 라이선스 필요 · 이쪽은 그런 제약이 없다) + Lightning 4스텝 LoRA.
+  //   RTX 3060 실측(2026-10-10 · 삼국지 컬러 4장면): 장당 26초(8스텝 판은 44초 — 개선이 눈에 띄지 않아 4스텝만 둔다) · 첫 장 34초.
+  //   디테일·색이 2.1 Turbo/Krea2 보다 풍부하나 화풍 문장(납작한 목판풍)에서는 조금 멀다. 2.1 전용 기능(👤 인물 참조 · ✏ 그림 고치기)은 못 쓴다.
+  //   ⚠ 서버에 모델 3개(qwen_image_2512_fp8_e4m3fn · Qwen-Image-2512-Lightning-4steps LoRA · qwen_2.5_vl_7b_fp8_scaled)가 있어야 한다. fp8 이라 3060 에서는 에뮬레이션(int8 보다 느림).
+  { name: 'Qwen-Image 2512 Lightning (로컬)', file: 'image_qwen_image_2512_lightning.json' },
 ];
 const DEFAULT_ACTIVE_FILE = 'image_z_image_turbo.json'; // 활성값이 비었거나 실재하지 않을 때 기본
 function _ensureBundled(cfg) {

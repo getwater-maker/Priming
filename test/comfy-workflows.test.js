@@ -118,5 +118,28 @@ ok(names.includes('image_qwen21_turbo.json'), 'loadConfig() 결과의 워크플�
   ok(!Object.values(q).some((x) => /CLIPTextEncode/i.test(x.class_type)), 'Qwen 워크플로엔 CLIPTextEncode 가 없다(→ 새 분기가 실제로 쓰인다)');
 }
 
+// ── ⑦ Qwen-Image 2512 Lightning (v0.7.91 · 🔴 Apache 2.0 — 2.1 의 연구용 라이선스 문제를 피하는 상업 안전 선택지) ──
+{
+  const F = 'comfy/image_qwen_image_2512_lightning.json';
+  ok(fs.existsSync(path.join(ROOT, F)), '번들 워크플로가 실재한다: ' + F);
+  const w = JSON.parse(R(F));
+  ok(!w.nodes && Object.values(w).every((v) => v && typeof v.class_type === 'string'), '2512 워크플로는 API 포맷이다');
+  ok(IMG_SRC.includes("name: 'Qwen-Image 2512 Lightning (로컬)'") && IMG_SRC.includes('Apache 2.0'), '이름에 「로컬」 + 라이선스 근거(Apache 2.0)를 주석으로 남겼다');
+  ok(names.includes('image_qwen_image_2512_lightning.json'), 'loadConfig() 목록에 2512 가 등록된다');
+  ok(!Object.values(w).some((x) => x.class_type === 'TextEncodeQwenImage21'), '2.1 전용 노드를 쓰지 않는다(그래서 2.1 연구용 라이선스 대상이 아니다 — 2512 는 일반 CLIPTextEncode)');
+  const unet = Object.values(w).find((x) => x.class_type === 'UNETLoader').inputs.unet_name;
+  ok(/2512/.test(unet) && !/2\.1/.test(unet), 'UNET 은 2512(2.1 이 아니다): ' + unet);
+  const lora = Object.values(w).find((x) => x.class_type === 'LoraLoaderModelOnly').inputs.lora_name;
+  ok(/2512-Lightning-4steps/.test(lora), 'Lightning 4스텝 LoRA(8스텝은 1.7배 느리고 개선이 눈에 띄지 않았다)');
+  ok(Object.values(w).find((x) => x.class_type === 'KSampler').inputs.steps === 4 && Object.values(w).find((x) => x.class_type === 'KSampler').inputs.cfg === 1, '4스텝 · cfg 1');
+  const { ComfyImage } = require('../core/comfy-image');
+  const e2 = new ComfyImage({ baseUrl: 'http://127.0.0.1:8188', workflowPath: path.join(ROOT, F) });
+  const g2 = e2._buildWorkflow('HELLO.', '16:9', { seed: 99 });
+  ok(g2['5'].inputs.text === 'HELLO.' && g2['6'].inputs.text === '', '프롬프트는 긍정 칸(5)에만 · 부정 칸(6)은 비어 있다(키 순서로 5 가 먼저 잡힌다)');
+  ok(g2['7'].inputs.width + 'x' + g2['7'].inputs.height === '1344x768' && g2['8'].inputs.seed === 99, '해상도·시드 주입');
+  const CIM = require('../core/comfy-image');
+  ok(!CIM.supportsRefs(w), '2512 는 인물 참조·그림 고치기(2.1 전용)를 쓰지 않는다 — supportsRefs 거짓');
+}
+
 console.log(bad ? '\n❌ ' + bad + '/' + n + ' 실패' : '\n✅ 번들 워크플로 ' + n + '/' + n + ' 통과');
 process.exit(bad ? 1 : 0);
