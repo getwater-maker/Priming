@@ -184,4 +184,89 @@ function refParts(cast, sheetOf) {
   return parts;
 }
 
-module.exports = { parseCards, castFor, sheetDir, findSheet, sheetBase, sheetPrompt, directive, refParts, MAX_REFS };
+// ─────────────────────────────────────────────────────────────────────────────
+// 👤 Qwen-Image 2.1 참조(ComfyUI 로컬) — 2026-10-10 P0 시험(`docs/인물일관성-Qwen-설계.md` §8) 결과로 정한 규칙.
+//   · 시트 = **얼굴만**(`<이름>.face.png`) — 얼굴+전신 시트는 흰 배경 초상이 장면에 그대로 붙었다(10장 중 4장).
+//   · 🔴 **게이트가 핵심**: 참조는 얼굴이 보이는 샷(close-up·medium)에만 · 어린 인물(18세 미만)·카드 나이와 10살 이상
+//     차이·3명 이상·군중이면 붙이지 않는다. 지시문으로는 이 사고(구도 쏠림·나이 무시·인원 늘어남)가 안 막혔다.
+//   · **샷 크기 낱말이 없으면 붙이지 않는다(fail-closed)** — 옛 대본은 지금과 똑같이 글 카드만으로 그린다.
+// ─────────────────────────────────────────────────────────────────────────────
+const QWEN_MAX_REFS = 2;
+const _NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+function _ageWord(w) {
+  const s = String(w || '').trim().toLowerCase();
+  if (/^\d{1,2}$/.test(s)) return Number(s);
+  let tot = 0;
+  for (const t of s.split(/[\s-]+/)) { if (!(t in _NUM)) return tot || null; tot += _NUM[t]; }
+  return tot || null;
+}
+// 「woman of sixty three」·「girl of about sixteen」·「man of 41」 — 사람 낱말 바로 뒤의 나이
+const _AGE_RE = new RegExp('(' + FEMALE.source + '|' + MALE.source + ')\\s+of\\s+(?:about\\s+|around\\s+|roughly\\s+)?(\\d{1,2}|[a-z]+(?:[\\s-][a-z]+)?)', 'gi');
+/** 글에서 [{gender:'f'|'m', age}] (나이를 못 읽은 사람은 빠진다) */
+function agesIn(text) {
+  const out = [];
+  _AGE_RE.lastIndex = 0; let m;
+  while ((m = _AGE_RE.exec(String(text || '')))) {
+    const age = _ageWord(m[m.length - 1]);   // FEMALE/MALE 안에도 묶음이 있어 나이는 마지막 묶음이다
+    if (age && age < 120) out.push({ gender: FEMALE.test(m[1]) ? 'f' : 'm', age });
+  }
+  return out;
+}
+function cardAge(card) { const a = agesIn(card && card.desc)[0]; return a ? a.age : null; }
+/** 그림 프롬프트의 샷 크기 — 'close' | 'medium' | 'wide' | null(낱말 없음) */
+function shotOf(prompt) {
+  const p = String(prompt || '').toLowerCase();
+  if (/\b(wide shot|long shot|extreme wide|establishing shot|aerial|bird'?s[- ]eye|panoramic)\b/.test(p)) return 'wide';
+  if (/\b(close[- ]up|portrait shot|head[- ]and[- ]shoulders)\b/.test(p)) return 'close';
+  if (/\b(medium shot|medium close|mid shot|half[- ]length|waist[- ]up|medium[- ]wide)\b/.test(p)) return /medium[- ]wide/.test(p) ? 'wide' : 'medium';
+  return null;
+}
+const CROWD = /\b(crowd|crowds|rows of|townspeople|villagers|soldiers|officials|courtiers|army|audience|onlookers|people)\b/i;
+/**
+ * 이 장면에 참조를 붙일지.  @returns {{ok:boolean, reason:string}}
+ *   reason: 'no-shot'(샷 크기 낱말 없음) · 'wide' · 'crowd' · 'many'(3명 이상) · 'child' · 'age-gap'
+ */
+function refGate(prompt, cast) {
+  const shot = shotOf(prompt);
+  if (!shot) return { ok: false, reason: 'no-shot' };
+  if (shot === 'wide') return { ok: false, reason: 'wide' };
+  if (CROWD.test(prompt)) return { ok: false, reason: 'crowd' };
+  if (_count(FEMALE, prompt) + _count(MALE, prompt) >= 3) return { ok: false, reason: 'many' };
+  const ages = agesIn(prompt);
+  for (const c of cast || []) {
+    const sa = ages.find((a) => !c.gender || a.gender === c.gender);
+    if (!sa) continue;                                  // 장면에 나이가 없으면 카드 나이대로 본다
+    if (sa.age < 18) return { ok: false, reason: 'child' };
+    const ca = cardAge(c);
+    if (ca && Math.abs(ca - sa.age) >= 10) return { ok: false, reason: 'age-gap' };
+  }
+  return { ok: true, reason: shot };
+}
+function faceSheetBase(outRoot, card) { return path.join(sheetDir(outRoot), _safe(card.name) + '.face'); }
+/** 얼굴 시트(사람이 바꿔 넣은 jpg/webp 포함) 또는 null */
+function findFaceSheet(outRoot, card) {
+  const base = faceSheetBase(outRoot, card);
+  for (const ext of ['.png', '.jpg', '.jpeg', '.webp']) { if (fs.existsSync(base + ext)) return base + ext; }
+  return null;
+}
+// 얼굴만 — 옷·배경이 장면으로 새지 않게(P0: 전신 시트는 흰 배경 초상이 장면에 붙었다)
+function faceSheetPrompt(stylePrompt, card) {
+  const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
+  return `${style}character reference portrait of ${card.desc}. A large head-and-shoulders portrait facing the viewer `
+    + 'on a plain neutral light background, neutral calm expression, even soft light, a bare simple collar only. '
+    + 'One person only, no other figures, no text, no letters, no watermark.';
+}
+/** Qwen 장면 프롬프트 끝 지시 — 참조 그림은 순서로만 구별된다(이름-그림 쌍을 못 붙인다) */
+function qwenDirective(cast) {
+  if (!cast || !cast.length) return '';
+  return ' ' + cast.map((c, i) => `Reference image ${i + 1} is ${c.name}.`).join(' ') + ' '
+    + cast.map((c) => `${c.name} is ${c.desc}.`).join(' ') + ' '
+    + 'Keep each referenced person\'s face, eyebrows, eye shape, hair colour and body build the same as in their reference image so they are clearly the same person. '
+    + 'Draw them at the age stated in this scene, and follow this scene for clothing, hairstyle, pose, gaze and expression - do not copy the clothing, pose or plain background of the reference. '
+    + 'Use the art style described above. Do not redesign their faces.';
+}
+
+module.exports = { parseCards, castFor, sheetDir, findSheet, sheetBase, sheetPrompt, directive, refParts, MAX_REFS,
+  QWEN_MAX_REFS, agesIn, cardAge, shotOf, refGate, faceSheetBase, findFaceSheet, faceSheetPrompt, qwenDirective };

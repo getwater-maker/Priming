@@ -6594,6 +6594,10 @@ export default function App() {
                   onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
+                </label>
+                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}
+                  title="Qwen-Image 2.1 Turbo(로컬) 전용 — 대본 인물 카드로 얼굴 시트를 한 번 만들어 <출력>/characters/<이름>.face.png 에 두고, 샷 크기(close-up·medium shot)가 적힌 인물 장면에만 참조로 붙입니다. 원경·군중·어린 인물·카드와 나이가 크게 다른 장면은 붙이지 않습니다.">
+                  <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.charRefs !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, charRefs: v }); saveComfyCfg({ charRefs: v }); }} /> 👤 인물 일관성(Qwen)
                 </label></div>
               <Hint>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</Hint>
             </div>)}

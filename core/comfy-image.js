@@ -39,6 +39,7 @@ const DEFAULTS = {
   concurrency: 2,
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
+  charRefs: true,          // 👤 Qwen-Image 2.1 인물 참조(core/char-refs 게이트 통과 장면만 · 로컬 전용)
 };
 
 // ── 번들 워크플로 자동 등록 (설치폴더 기준, PC 무관 정합) — 비디오(comfy-video.js)와 동일 정책 ──
@@ -159,6 +160,31 @@ function pruneToImageOutputs(graph) {
   const head = labels.slice(0, 4).join(', ');
   const summary = labels.length > 4 ? head + ' 외 ' + (labels.length - 4) + '개' : head;
   return { removed, summary, kept: keep.size };
+}
+
+// 👤 참조 그림을 받을 수 있는 워크플로인가 — Qwen-Image 2.1 전용 인코더가 있으면(core/char-refs 의 Qwen 경로).
+function supportsRefs(graph) {
+  return Object.values(graph || {}).some((n) => n && n.class_type === 'TextEncodeQwenImage21');
+}
+/**
+ * 참조 그림(서버에 올린 파일 이름들)을 그래프에 잇는다 — LoadImage 노드를 덧붙여 `images.image_N` 에 연결하고
+ * 인코더에 VAE 를 이어 참조 잠재(reference_latents)도 들어가게 한다. 참조가 없으면 그래프를 건드리지 않는다.
+ *   res = 참조를 줄일 크기(P0 시험: 384 가 1024 와 결과가 같고 빠르다 · 1024 는 장당 35초).
+ */
+function applyRefs(graph, names, res = 384) {
+  if (!names || !names.length) return 0;
+  const encId = Object.keys(graph).find((id) => graph[id].class_type === 'TextEncodeQwenImage21');
+  const vaeId = Object.keys(graph).find((id) => graph[id].class_type === 'VAELoader');
+  if (!encId || !vaeId) return 0;
+  const inp = graph[encId].inputs;
+  names.forEach((name, i) => {
+    const nid = 'pm_ref' + (i + 1);
+    graph[nid] = { class_type: 'LoadImage', inputs: { image: name } };
+    inp['images.image_' + (i + 1)] = [nid, 0];
+  });
+  inp.vae = [vaeId, 0];
+  inp.resolution = res;
+  return names.length;
 }
 
 class ComfyImage {
@@ -439,8 +465,25 @@ class ComfyImage {
       this.log(`[Comfy] ⚡ ${gpu} 는 fp8 을 하드웨어로 못 돌립니다 — 같은 모델의 빠른 판으로: ${c.from} → ${c.to}`);
     }
   }
-  // 텍스트 → 이미지 1장. { success:true, imagePath } | { success:false, error }
-  async textToImage({ prompt, negative, seed, dims, aspect, outputPath, abortSignal }) {
+  // 참조 그림 1장을 로컬 서버 input 폴더에 올린다 → 서버 쪽 파일 이름. (클라우드는 쓰지 않는다)
+  async _uploadRef(filePath) {
+    const buf = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : (ext === '.webp' ? 'image/webp' : 'image/png');
+    // 이름에 내용 지문을 넣어 덮어쓰기 경합이 없게(같은 그림이면 같은 이름)
+    const h = require('crypto').createHash('sha1').update(buf).digest('hex').slice(0, 12);
+    const fd = new FormData();
+    fd.append('image', new Blob([buf], { type: mime }), `pm_ref_${h}${ext || '.png'}`);
+    fd.append('overwrite', 'true');
+    const r = await fetch(this._url('/upload/image'), { method: 'POST', headers: this._headers(), body: fd });
+    if (!r.ok) throw new Error(`참조 그림 업로드 실패 (${r.status})`);
+    const j = await r.json();
+    return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+  }
+  // 텍스트 → 이미지 1장. { success:true, imagePath, refsApplied } | { success:false, error }
+  //   refs = 참조 그림 경로들(👤 Qwen 인물 참조) — 로컬 + 참조 받는 워크플로일 때만 쓴다. 올리기에 실패하면
+  //   참조 없이 그린다(fail-open — 제작을 막지 않는다).
+  async textToImage({ prompt, negative, seed, dims, aspect, outputPath, abortSignal, refs }) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 에서 지정하세요.' };
     // ⚠ 일시적 네트워크 장애로 한 장이 통째로 실패하던 것을 막는다(2026-08-19 로그: `✗ G10 실패: fetch failed`
     //   — 같은 시각 서버는 정상이었다). 제출 전에 끊긴 경우가 대부분이라 재시도해도 크레딧이 이중으로 나가지 않는다.
@@ -451,11 +494,19 @@ class ComfyImage {
       try {
         if (!(await this.health())) throw new Error(`ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}`);
         const graph = this._buildWorkflow(prompt, aspect, { negative, seed, dims });
+        let refsApplied = 0;
+        if (refs && refs.length && !this.cloud && supportsRefs(graph)) {
+          try {
+            const names = [];
+            for (const p of refs) names.push(await this._uploadRef(p));
+            refsApplied = applyRefs(graph, names);
+          } catch (e) { this.log(`  ⚠ 인물 참조를 못 올렸습니다 — 참조 없이 그립니다: ${_netMsg(e)}`); }
+        }
         await this._preferFastQuant(graph);
         const promptId = await this._queueFixing(graph);
         const img = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
         const out = await this._download(img, outputPath);
-        return { success: true, imagePath: out, negApplied: this._lastNegApplied };
+        return { success: true, imagePath: out, negApplied: this._lastNegApplied, refsApplied };
       } catch (e) {
         lastErr = _netMsg(e);
         if (att >= 2 || !_isNetErr(e)) break;
@@ -467,4 +518,4 @@ class ComfyImage {
   }
 }
 
-module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg, pruneToImageOutputs };
+module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg, pruneToImageOutputs, supportsRefs, applyRefs };

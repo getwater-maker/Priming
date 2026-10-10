@@ -3695,12 +3695,22 @@ async function runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNum
 // 👤 인물 일관성(나노바나나 전용 · core/char-refs) — 대본 인물 카드가 있으면 인물 시트를 <출력>/characters/ 에 만들고
 //   장면마다 보이는 인물의 시트를 참조로 붙인다. 설정 charRefs=false 면 끈다. 시트는 인물마다 한 번만(있으면 재사용 ·
 //   사람이 같은 이름 그림으로 바꿔 넣으면 그 그림). 시트 실패한 인물은 이번 작업에서 다시 만들지 않고 참조 없이 간다.
+// 대본 인물 카드(없거나 못 읽으면 null) — 나노바나나·Qwen 두 경로가 함께 쓴다
+async function _loadCards() {
+  if (!S.scriptPath) return null;
+  try { const cards = require('./core/char-refs').parseCards(await fs.promises.readFile(S.scriptPath, 'utf8')); return cards.length ? cards : null; }
+  catch { return null; }
+}
+// 그룹 낭독 글(배역 판정용 — 낭독에 카드 이름이 나와야 그 인물로 본다)
+function _narrationOf(project, g) {
+  const byId = new Map((project.sentences || []).map((s) => [s.id, s]));
+  return (g.sentenceIds || []).map((id) => (byId.get(id) || {}).text || '').join(' ');
+}
 async function _charRefsFor(imagesDir, logger) {
   const GI = require('./core/gemini-image'); const CR = require('./core/char-refs');
   if (GI.loadConfig().charRefs === false || !S.scriptPath) return null;
-  let cards = [];
-  try { cards = CR.parseCards(await fs.promises.readFile(S.scriptPath, 'utf8')); } catch { return null; }
-  if (!cards.length) return null;
+  const cards = await _loadCards();
+  if (!cards) return null;
   const outRoot = path.dirname(imagesDir);
   logger(`👤 인물 카드 ${cards.length}명 — ${cards.map((c) => c.name).join(', ')} (참조 시트: ${path.join(outRoot, 'characters')})`);
   const failed = new Set();
@@ -3715,14 +3725,64 @@ async function _charRefsFor(imagesDir, logger) {
   }
   return {
     async forGroup(project, g, stylePrompt) {
-      const byId = new Map((project.sentences || []).map((s) => [s.id, s]));
-      const narration = (g.sentenceIds || []).map((id) => (byId.get(id) || {}).text || '').join(' ');
-      const cast = CR.castFor(narration, g.imagePrompt, cards);
+      const cast = CR.castFor(_narrationOf(project, g), g.imagePrompt, cards);
       const ready = [];
       for (const c of cast) { if (await ensure(c, stylePrompt)) ready.push(c); }
       if (!ready.length) return { refParts: null, extra: '' };
       logger(`  👤 G${g.num} 인물 참조: ${ready.map((c) => c.name).join(', ')}`);
       return { refParts: CR.refParts(ready, (c) => CR.findSheet(outRoot, c)), extra: CR.directive(ready) };
+    },
+  };
+}
+
+// 👤 인물 일관성(Qwen-Image 2.1 · ComfyUI 로컬 · core/char-refs Qwen 규칙) — 설계 docs/인물일관성-Qwen-설계.md.
+//   얼굴 시트(<출력>/characters/<이름>.face.png)를 같은 서버로 한 번 만들고, **게이트(refGate)를 통과한 장면에만**
+//   참조로 붙인다. 샷 크기 낱말이 없는 옛 대본은 한 장도 안 붙는다(지금과 같다). 설정 comfy charRefs=false 면 끈다.
+//   시트·업로드가 실패하면 그 인물은 참조 없이 그린다(fail-open).
+async function _qwenRefsFor(imagesDir, eng, cfg, logger) {
+  const CR = require('./core/char-refs'); const CI = require('./core/comfy-image');
+  if (cfg.cloud || cfg.charRefs === false || !S.scriptPath) return null;
+  let wf = null;
+  try { wf = JSON.parse(await fs.promises.readFile(cfg.workflowPath, 'utf8')); } catch { return null; }
+  if (!CI.supportsRefs(wf)) return null;
+  const cards = await _loadCards();
+  if (!cards) return null;
+  const outRoot = path.dirname(imagesDir);
+  logger(`👤 인물 카드 ${cards.length}명 — ${cards.map((c) => c.name).join(', ')} (Qwen 참조 · 얼굴 시트: ${CR.sheetDir(outRoot)} · 샷 크기가 close-up·medium 인 장면에만)`);
+  const failed = new Set();
+  const skipped = {};
+  let used = 0;
+  async function ensure(c, stylePrompt) {
+    const have = CR.findFaceSheet(outRoot, c);
+    if (have) return have;
+    if (failed.has(c.name) || S.abort) return null;
+    logger(`  👤 얼굴 시트 만드는 중: ${c.name}`);
+    try { await fs.promises.mkdir(CR.sheetDir(outRoot), { recursive: true }); } catch {}
+    const r = await eng.textToImage({ prompt: CR.faceSheetPrompt(stylePrompt, c), aspect: '1:1', dims: { w: 1024, h: 1024 },
+      outputPath: CR.faceSheetBase(outRoot, c) + '.png', abortSignal: () => S.abort });
+    if (r.success && !(await looksBadImage(r.imagePath))) return r.imagePath;
+    if (r.success) { try { fs.rmSync(r.imagePath, { force: true }); } catch {} }
+    failed.add(c.name);
+    logger(`  ⚠ ${c.name} 얼굴 시트 실패 — 이 인물은 참조 없이 그립니다${r.error ? ': ' + r.error : ' (이상 이미지)'}`);
+    return null;
+  }
+  return {
+    async forGroup(project, g, stylePrompt) {
+      const cast = CR.castFor(_narrationOf(project, g), g.imagePrompt, cards).slice(0, CR.QWEN_MAX_REFS);
+      if (!cast.length) return null;
+      const gate = CR.refGate(g.imagePrompt, cast);
+      if (!gate.ok) { skipped[gate.reason] = (skipped[gate.reason] || 0) + 1; return null; }
+      const ready = [], refs = [];
+      for (const c of cast) { const p = await ensure(c, stylePrompt); if (p) { ready.push(c); refs.push(p); } }
+      if (!ready.length) return null;
+      used++;
+      logger(`  👤 G${g.num} 인물 참조: ${ready.map((c) => c.name).join(', ')} (${gate.reason})`);
+      return { refs, extra: CR.qwenDirective(ready) };
+    },
+    summary() {
+      const KO = { 'no-shot': '샷 크기 낱말 없음', wide: '원경', crowd: '군중', many: '3명 이상', child: '어린 인물', 'age-gap': '카드와 나이 차이' };
+      const parts = Object.keys(skipped).map((k) => `${KO[k] || k} ${skipped[k]}`);
+      logger(`  👤 인물 참조 ${used}장` + (parts.length ? ` · 참조 없이 그린 인물 장면: ${parts.join(' · ')}` : ''));
     },
   };
 }
@@ -3912,6 +3972,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
   const imgTimes = [];  // 장당 생성 시간(초) — 끝에 평균·합계를 로그로 남긴다
   const _stageT0 = Date.now();
   const blanks = [];    // 검정·노이즈 이미지가 나온 그룹 — 동시 패스가 끝난 뒤 '순차'로 재생성(동시 실행이 원인이므로)
+  const qr = await _qwenRefsFor(imagesDir, eng, cfg, logger);   // 👤 Qwen 인물 참조(해당 없으면 null — 지금과 같다)
   const genOne = async (g, retryLevel = baseRetryLevel) => {
     let prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     // 🔑 재시도 때는 **프롬프트 자체를 바꾼다.** 씨앗만 새로 뽑아 같은 글자를 보내면 소용없다 —
@@ -3924,8 +3985,10 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     }
     const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
     g.imageStatus = 'generating'; pushDtoUpdate(); // 지금 만드는 그룹 카드에 스피너(동시 생성 시 그만큼 켜짐)
+    const qx = qr ? await qr.forGroup(project, g, stylePrompt) : null;
+    if (qx) prompt += qx.extra;
     const _t0 = Date.now();
-    const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort });
+    const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort, refs: qx ? qx.refs : null });
     const _el = (Date.now() - _t0) / 1000;
     if (r.success) {
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
@@ -3984,6 +4047,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     const fast = Math.min(...imgTimes), slow = Math.max(...imgTimes);
     logger(`  ⏱ 이미지 ${imgTimes.length}장 — 장당 평균 ${_dur(sum / imgTimes.length)} (최소 ${_dur(fast)} · 최대 ${_dur(slow)}) · 전체 ${_dur(wall)}` + (conc > 1 ? ` · 동시 ${conc}장` : ''));
   }
+  if (qr) qr.summary();
   // 🧹 **끝난 뒤에도 반납한다** — 로컬 ComfyUI 는 생성이 끝나도 모델을 붙들고 있다.
   //   실측(2026-08-22, RTX 3060 12GB): 큐가 비어 있는데 **6.6GB** 점유 → /free 후 GPU 10,110MB → 3,480MB.
   //   그 상태로 두면 같은 GPU 를 쓰는 OmniVoice TTS 가 좁아진다(켜 두는 것 자체는 무해하게 만드는 장치).
