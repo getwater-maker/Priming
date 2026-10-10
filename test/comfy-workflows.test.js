@@ -93,5 +93,30 @@ const names = (cfg.workflows || []).map((w) => path.basename(String(w.path)).toL
 ok(names.includes('image_krea2_int4_turbo.json'), 'loadConfig() 결과의 워크플로 목록에 실제로 등록된다');
 ok(names.includes('image_krea2_turbo_t2i (2).json'), '기존 Krea2 도 그대로 남아 있다');
 
+// ── ⑥ Qwen-Image 2.1 Turbo (v0.7.80) ──
+const QWEN = 'comfy/image_qwen21_turbo.json';
+ok(fs.existsSync(path.join(ROOT, QWEN)), '번들 워크플로가 실재한다: ' + QWEN);
+const q = JSON.parse(R(QWEN));
+ok(!q.nodes && Object.values(q).every((v) => v && typeof v.class_type === 'string'), 'Qwen 워크플로는 API 포맷이다');
+ok(IMG_SRC.includes("name: 'Qwen-Image 2.1 Turbo (로컬)'"), 'Qwen 드롭다운 이름에 「로컬」 표시가 있다(클라우드 보유 미확인 → 반대쪽 그룹에서 감춘다)');
+ok(names.includes('image_qwen21_turbo.json'), 'loadConfig() 결과의 워크플로 목록에 Qwen Turbo 가 등록된다');
+{
+  const { ComfyImage } = require('../core/comfy-image');
+  const eng = new ComfyImage({ baseUrl: 'http://127.0.0.1:8188', workflowPath: path.join(ROOT, QWEN) });
+  const g = eng._buildWorkflow('A TEST PROMPT.', '16:9', { seed: 4242 });
+  const enc = Object.values(g).find((x) => x.class_type === 'TextEncodeQwenImage21');
+  eq(enc && enc.inputs.prompt, 'A TEST PROMPT.', '프롬프트가 TextEncodeQwenImage21.prompt 에 들어간다(CLIPTextEncode 가 아니어도)');
+  const lat = Object.values(g).find((x) => 'width' in x.inputs);
+  eq(lat && lat.inputs.width + 'x' + lat.inputs.height, '1344x768', '16:9 는 1344x768(앱 기본 크기)로 주입된다');
+  const ks = Object.values(g).find((x) => x.class_type === 'KSampler');
+  eq(ks && ks.inputs.seed, 4242, '고정 시드가 KSampler 에 들어간다');
+  eq(ks && ks.inputs.steps + '/' + ks.inputs.cfg, '8/1', 'Turbo 설정 8스텝 · cfg 1');
+  eq(Object.keys(g).length, Object.keys(q).length, '이미지 출력에 쓰이는 노드는 걷어내지 않는다');
+  const g2 = eng._buildWorkflow('', '16:9', {});
+  eq(Object.values(g2).find((x) => x.class_type === 'TextEncodeQwenImage21').inputs.prompt, '', '프롬프트가 비면 건드리지 않는다');
+  // 판정력: 옛 코드(CLIPTextEncode·text 만 찾음)였다면 prompt 가 그대로 비어 있었을 것이다
+  ok(!Object.values(q).some((x) => /CLIPTextEncode/i.test(x.class_type)), 'Qwen 워크플로엔 CLIPTextEncode 가 없다(→ 새 분기가 실제로 쓰인다)');
+}
+
 console.log(bad ? '\n❌ ' + bad + '/' + n + ' 실패' : '\n✅ 번들 워크플로 ' + n + '/' + n + ' 통과');
 process.exit(bad ? 1 : 0);

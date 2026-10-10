@@ -51,6 +51,11 @@ const BUNDLED = [
   //   ⚠ 그 서버에 krea2Int4Convrot_v10Turbo.safetensors 가 있어야 한다(없으면 사람 말 오류로 알려준다).
   //   ⚠ 클라우드(comfy.org)엔 이 파일이 없다(실측: krea 계열 9개 중 int4 판 없음) → 이름에 「로컬」 표시.
   { name: 'Krea2 int4 Turbo (로컬)', file: 'image_krea2_int4_turbo.json' },
+  // Qwen-Image 2.1 Turbo(7B · 8스텝 · int8 convrot) — 로이 2026-10-10 시험 후 추가(작업노트 2026-10).
+  //   RTX 3060 실측: 1664x928 장당 24초 · 실제 대본 6장면 비교에서 질감·빛이 Krea2 보다 정교(인물 묘사 충실도는 Krea2 가 한 수 위).
+  //   ⚠ 프롬프트는 CLIPTextEncode 가 아니라 `TextEncodeQwenImage21.prompt` 에 들어간다(_buildWorkflow 가 인식).
+  //   ⚠ 서버에 ComfyUI ≥0.39(그 노드)와 모델 3개(turbo_int8_convrot · qwen3vl_8b_int8_convrot · qwen_image_2.1_vae_bf16)가 있어야 한다. 클라우드 보유는 미확인 → 「(로컬)」.
+  { name: 'Qwen-Image 2.1 Turbo (로컬)', file: 'image_qwen21_turbo.json' },
 ];
 const DEFAULT_ACTIVE_FILE = 'image_z_image_turbo.json'; // 활성값이 비었거나 실재하지 않을 때 기본
 function _ensureBundled(cfg) {
@@ -237,6 +242,11 @@ class ComfyImage {
         || Object.keys(graph).find((id) => /CLIPTextEncode/i.test(graph[id].class_type || '') && 'text' in (graph[id].inputs || {}))
         || Object.keys(graph).find((id) => typeof (graph[id].inputs || {}).text === 'string');
       if (pId && graph[pId] && graph[pId].inputs) { graph[pId].inputs.text = String(positive); promptFixed = true; }
+      else {
+        // Qwen-Image 2.1 은 전용 인코더 노드(`prompt` 칸)를 쓴다 — text 칸이 없다.
+        const qId = Object.keys(graph).find((id) => graph[id].class_type === 'TextEncodeQwenImage21' && 'prompt' in (graph[id].inputs || {}));
+        if (qId) { graph[qId].inputs.prompt = String(positive); promptFixed = true; }
+      }
     }
     // 🔴 **부정 프롬프트는 워크플로가 받아 줄 때만 들어간다.** KSampler 의 negative 가 CLIPTextEncode 로
     //   이어져 있어야 자리가 있다. Krea2 Turbo 계열은 negative 가 `ConditioningZeroOut` 이고 cfg=1 이라
