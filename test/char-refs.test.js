@@ -89,7 +89,7 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(gate('1880s Normandy, a long beech avenue, a slender French young man of about twenty six standing at a small door', [je]) === 'no-shot', '샷 낱말 없는 옛 대본 = 안 붙인다(fail-closed)');
   ok(gate('wide shot, 1880s Normandy, a long beech avenue, a young man of about twenty six', [je]) === 'wide', '원경 = 안 붙인다');
   ok(gate('medium shot, a French girl of about sixteen running, a French boy of about fourteen close behind', [al, je]) === 'child', '어린 인물(3·8번) = 안 붙인다');
-  ok(gate('medium shot, a French young man of about fifty', [je]) === 'age-gap', '카드와 나이 10살 이상 차이 = 안 붙인다');
+  ok(gate('medium shot, a slender French man of about fifty with dark hair', [je]) === 'age-gap', '카드와 나이 10살 이상 차이 = 안 붙인다');
   ok(gate('medium shot, rows of officials kneeling, a man', [je]) === 'crowd', '군중 = 안 붙인다');
   ok(gate('medium shot, a woman, a man, and an old man', [al, je]) === 'many', '3명 이상 = 안 붙인다');
   ok(gate('medium shot, a slender French young woman of about twenty five with dark hair arranging flowers, a young man in the doorway', [al, je]) === 'medium', '얼굴 보이는 2인 장면 = 붙인다');
@@ -97,6 +97,20 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(/face/.test(path.basename(CR.faceSheetBase(tmp, al))) && CR.findFaceSheet(tmp, al) === null, '얼굴 시트는 <이름>.face.* (나노바나나 시트와 이름이 다르다)');
   ok(!/full-length|standing figure/.test(CR.faceSheetPrompt('Warm,', al)) && /head-and-shoulders/.test(CR.faceSheetPrompt('Warm,', al)), '얼굴 시트 = 얼굴만(전신 없음 — 흰 배경 초상이 장면에 붙던 사고)');
   ok(/Reference image 1 is 알리사\. Reference image 2 is 제롬\./.test(CR.qwenDirective([al, je])), 'Qwen 지시문은 참조 순서로 이름을 밝힌다');
+  // 채널사업부 제보(2026-10-10 · 삼국지 1부 G26·G41·G58) — 그림에 없는 인물 · 두 사람 나이 짝짓기
+  const cc = { name: '조조', core: '조조', desc: 'a short Han Chinese man of about thirty with narrow eyes and a long beard, a sharp watchful expression', gender: 'm' };
+  const dz = { name: '동탁', core: '동탁', desc: 'a huge heavy-set Han Chinese man of about fifty with a thick neck, a broad fleshy face and a coarse black beard', gender: 'm' };
+  const G41 = 'medium shot, a chamber, a huge heavy-set Han Chinese man of about fifty with a thick neck, a broad fleshy face and a coarse black beard lying on the couch, '
+    + 'a short Han Chinese man of about thirty with narrow eyes and a long beard, a sharp watchful expression standing behind the couch';
+  const G26 = 'medium shot, a lamp-lit hall, a huge heavy-set Han Chinese man of about fifty with a thick neck, a broad fleshy face and a coarse black beard, seated, an advisor stands before him';
+  ok(CR.sceneAgeOf(G41, cc) === 30 && CR.sceneAgeOf(G41, dz) === 50, '두 사람 장면 — 나이를 카드 묘사로 짝짓는다(조조 30 · 동탁 50)');
+  ok(CR.refGate(G41, [cc, dz]).ok, 'G41 = 나이 차이 오판 없이 통과');
+  ok(CR.qwenCast('조조와 동탁의 표문', G26, [cc, dz]).map((c) => c.name).join() === '동탁', 'G26 = 낭독에만 나온 조조는 배역에서 뺀다(그림에 없음)');
+  const G58 = 'medium shot, a moonlit river bank, a short Han Chinese man of about thirty with narrow eyes and a long beard, a sharp watchful expression, sits on the bank while a sturdy soldier stands beside him';
+  ok(CR.castFor('조홍이 조조를 업고 동탁을 피해', G58, [cc, dz]).length === 2, '(판정력) castFor 만 쓰면 병사 자리에 동탁까지 들어간다');
+  ok(CR.qwenCast('조홍이 조조를 업고 동탁을 피해', G58, [cc, dz]).map((c) => c.name).join() === '조조', 'G58 = qwenCast 는 그림에 있는 조조만');
+  ok(gate('medium shot, a man of about thirty and a girl of about ten', [je]) === 'child', '그림에 어린 사람이 있으면 배역이 아니어도 안 붙인다');
+
   // ComfyUI 그래프 — 참조 없으면 그대로, 있으면 LoadImage + images.image_N + vae + resolution
   const CI = require('../core/comfy-image');
   const wf = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'comfy', 'image_qwen21_turbo.json'), 'utf8'));
@@ -111,6 +125,7 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(CI.DEFAULTS.charRefs === true, 'ComfyUI 설정 기본값 charRefs = 켬(게이트가 fail-closed 라 옛 대본은 그대로)');
   // main.js 연결(소스 검사) — 게이트·로컬 전용·fail-open
   ok(/const qr = await _qwenRefsFor\(imagesDir, eng, cfg, logger\)/.test(main) && /refs: qx \? qx\.refs : null/.test(main), 'runComfyImages 가 Qwen 참조를 넘긴다');
+  ok(/CR\.qwenCast\(_narrationOf\(project, g\)/.test(main), 'Qwen 배역은 qwenCast(그림에 있는 인물만)');
   ok(/CR\.refGate\(g\.imagePrompt, cast\)/.test(main) && /if \(cfg\.cloud \|\| cfg\.charRefs === false/.test(main), '게이트 · 클라우드 제외 · 끄기 설정');
   ok(/참조 없이 그립니다/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-image.js'), 'utf8')), '업로드 실패 = 참조 없이(fail-open)');
   fs.rmSync(tmp, { recursive: true, force: true });

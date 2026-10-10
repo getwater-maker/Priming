@@ -215,6 +215,36 @@ function agesIn(text) {
   return out;
 }
 function cardAge(card) { const a = agesIn(card && card.desc)[0]; return a ? a.age : null; }
+/**
+ * 장면에서 **이 카드 인물의** 나이 — 나이 낱말 주변 구간(앞 80·뒤 200자) 중 카드 묘사와 가장 많이 겹치는 곳.
+ *   🔴 성별만 보고 첫 나이를 집으면 「동탁(50) + 조조(30)」 장면에서 조조를 50 으로 읽는다(채널사업부 제보 2026-10-10 · 삼국지 1부 G41).
+ *   겹침이 약하거나(0.35 미만) 두 구간이 비기면 모른다(null — 나이로 막지 않는다).
+ */
+function sceneAgeOf(prompt, card) {
+  const text = String(prompt || '');
+  const cands = [];
+  _AGE_RE.lastIndex = 0; let m;
+  while ((m = _AGE_RE.exec(text))) {
+    const g = FEMALE.test(m[1]) ? 'f' : 'm';
+    if (card.gender && g !== card.gender) continue;
+    const age = _ageWord(m[m.length - 1]);
+    if (!age) continue;
+    const win = text.slice(Math.max(0, m.index - 80), m.index + 200);
+    cands.push({ age, score: _overlap(card.desc, win) });
+  }
+  cands.sort((a, b) => b.score - a.score);
+  if (!cands.length || cands[0].score < 0.35) return null;
+  if (cands[1] && cands[1].score === cands[0].score && cands[1].age !== cands[0].age) return null;
+  return cands[0].age;
+}
+/**
+ * Qwen 참조 배역 = castFor 중 **그림 프롬프트에 카드 묘사가 실제로 들어 있는** 인물만(겹침 0.6 이상) · 최대 2명.
+ *   🔴 castFor 는 낭독에 이름이 나오고 그림에 그 성별이 있으면 넣는다 — 낭독에만 나오는 인물(조조)이 그림 속 다른 남자(동탁)
+ *   자리에 참조로 붙어 얼굴을 바꾸거나 사람을 늘린다(채널사업부 제보 · 삼국지 1부 G26·G58). 대본은 카드 묘사를 컷마다 되풀이한다(§1-5).
+ */
+function qwenCast(narration, imagePrompt, cards) {
+  return castFor(narration, imagePrompt, cards).filter((c) => _overlap(c.desc, imagePrompt) >= 0.6).slice(0, QWEN_MAX_REFS);
+}
 /** 그림 프롬프트의 샷 크기 — 'close' | 'medium' | 'wide' | null(낱말 없음) */
 function shotOf(prompt) {
   const p = String(prompt || '').toLowerCase();
@@ -234,13 +264,12 @@ function refGate(prompt, cast) {
   if (shot === 'wide') return { ok: false, reason: 'wide' };
   if (CROWD.test(prompt)) return { ok: false, reason: 'crowd' };
   if (_count(FEMALE, prompt) + _count(MALE, prompt) >= 3) return { ok: false, reason: 'many' };
-  const ages = agesIn(prompt);
+  // 어린 사람이 그림에 하나라도 있으면 붙이지 않는다(P0: 참조가 아이 얼굴을 성인 쪽으로 끌었다 · 누구의 나이든)
+  if (agesIn(prompt).some((a) => a.age < 18)) return { ok: false, reason: 'child' };
   for (const c of cast || []) {
-    const sa = ages.find((a) => !c.gender || a.gender === c.gender);
-    if (!sa) continue;                                  // 장면에 나이가 없으면 카드 나이대로 본다
-    if (sa.age < 18) return { ok: false, reason: 'child' };
+    const sa = sceneAgeOf(prompt, c);                   // 이 인물의 장면 나이(모르면 카드 나이대로 본다)
     const ca = cardAge(c);
-    if (ca && Math.abs(ca - sa.age) >= 10) return { ok: false, reason: 'age-gap' };
+    if (sa && ca && Math.abs(ca - sa) >= 10) return { ok: false, reason: 'age-gap' };
   }
   return { ok: true, reason: shot };
 }
@@ -269,4 +298,4 @@ function qwenDirective(cast) {
 }
 
 module.exports = { parseCards, castFor, sheetDir, findSheet, sheetBase, sheetPrompt, directive, refParts, MAX_REFS,
-  QWEN_MAX_REFS, agesIn, cardAge, shotOf, refGate, faceSheetBase, findFaceSheet, faceSheetPrompt, qwenDirective };
+  QWEN_MAX_REFS, agesIn, cardAge, sceneAgeOf, qwenCast, shotOf, refGate, faceSheetBase, findFaceSheet, faceSheetPrompt, qwenDirective };

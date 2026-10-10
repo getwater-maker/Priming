@@ -3768,7 +3768,7 @@ async function _qwenRefsFor(imagesDir, eng, cfg, logger) {
   }
   return {
     async forGroup(project, g, stylePrompt) {
-      const cast = CR.castFor(_narrationOf(project, g), g.imagePrompt, cards).slice(0, CR.QWEN_MAX_REFS);
+      const cast = CR.qwenCast(_narrationOf(project, g), g.imagePrompt, cards);   // 그림에 실제로 있는 인물만
       if (!cast.length) return null;
       const gate = CR.refGate(g.imagePrompt, cast);
       if (!gate.ok) { skipped[gate.reason] = (skipped[gate.reason] || 0) + 1; return null; }
