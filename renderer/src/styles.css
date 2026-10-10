@@ -903,7 +903,22 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
    z-index 를 내리면 안 된다 — 막대는 자기 메뉴 바깥 클릭 막(.vr-menu-bg 69)보다 위여야 눌린다. */
 body:has(.modal-bg.show) .clip-tb{display:none}
 /* 🧩 다른 메뉴(그룹 그림 메뉴·삽입 메뉴·＋ 클립 추가 …)·🔍 미리보기 창이 떠 있으면 막대를 숨긴다 — 막대(72)가 그 위를 가리던 것(로이 2026-10-10 · 막대 자기 하위 메뉴 .clip-tb-menu 는 제외) */
-body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,body:has(#preview.show) .clip-tb{display:none}
+body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,body:has(#preview.show) .clip-tb,body:has(.rail-peek) .clip-tb{display:none}
+/* 🖱 마지막으로 뜬 팝업만 보인다(v0.7.80 로이) — 작은 그림에 마우스를 올려 큰 그림(.rail-peek)이 뜨는 동안은 막대를 숨기고, 벗어나면 돌아온다 */
+/* 🖱 클립 오른쪽 클릭 메뉴(Vrew 모양 · v0.7.80) — 어두운 바탕 · 하위 메뉴는 따로 떠 있는 카드(.clip-ctx-sub) */
+.vr-menu.clip-ctx{background:#161616;border:1px solid #333;border-radius:12px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);overflow-y:auto;z-index:73;gap:0}
+.vr-menu.clip-ctx-sub{z-index:74;overflow:visible}
+.clip-ctx .vr-sep{background:#2e2e2e;margin:5px 2px}
+.clip-ctx .cx-top{display:flex;gap:4px;padding:2px 4px}
+.clip-ctx .cx-top button{background:transparent;color:#ddd;border:0;border-radius:6px;padding:5px 9px;font-size:15px}
+.clip-ctx .cx-top button:hover:not(:disabled){background:#2c2c2c}
+.clip-ctx .cx-top button:disabled{opacity:.35}
+.clip-ctx button.cx-row{display:flex;align-items:center;gap:9px;width:100%;box-sizing:border-box;color:#f1f1f1;background:transparent;padding:7px 10px;border-radius:8px;font-size:13px;font-weight:600;text-align:left;border:0}
+.clip-ctx button.cx-row:hover,.clip-ctx button.cx-row.open{background:#2a2a2a;color:#fff}
+.clip-ctx button.cx-row.soon{opacity:.45}
+.clip-ctx .cx-ic{width:18px;flex:none;text-align:center;color:#cfcfcf}
+.clip-ctx .cx-t{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clip-ctx .cx-k{flex:none;font-size:11.5px;font-weight:400;color:#9a9a9a}
 .clip-tb>button{background:transparent;color:#eee;border:0;border-radius:6px;padding:5px 8px;font-size:14px;min-height:0;line-height:1.1}
 .clip-tb>button.lbl{font-size:12.5px}
 .clip-tb>button:hover:not(:disabled),.clip-tb>button.on{background:#3a3a3a}

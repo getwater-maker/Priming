@@ -71,6 +71,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) === 'find-input', '포커스를 잃어도(프로그램이 가져감) 검색창이 되찾는다');
     await win.mouse.click(5, 400); await win.waitForTimeout(200);
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) !== 'find-input', '사람이 다른 곳을 누르면 검색창을 떠난다');
+    // v0.7.80 — 바깥(배경)을 누르면 선택이 번호 클릭과 같은 것으로 바뀌어 막대가 꺼진다 → 막대는 체크박스로 다시 켠다
+    await win.locator('main.pane2 .sent.clip .clip-chk').first().click(); await win.waitForTimeout(300);
     // 창이 낮아 도구 막대가 아래쪽에 있어도 하위 메뉴(삽입·효과·목소리 수정)가 화면 안에 펼쳐진다
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 460); }); await win.waitForTimeout(600);
     for (const id of ['ctb-voice', 'ctb-ins', 'ctb-fx']) {

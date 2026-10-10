@@ -40,7 +40,11 @@ const md = () => fs.readFileSync(MD, 'utf8');
     const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
     ok(made === 'ok', '무음 만들기로 음성 채우기 ' + made);
     await win.waitForTimeout(600);
-    const pick = async (n, mod) => { await win.locator(`.sent[data-ln="${n}"] .cf-lineno`).first().click(mod ? { modifiers: [mod] } : undefined); await win.waitForTimeout(250); };
+    // v0.7.80 — 막대는 체크박스로 골랐을 때만 뜬다: 하나 고르기 = 선택을 풀고(Esc) 그 클립 체크 · mod 가 있으면 체크만 더한다
+    const pick = async (n, mod) => {
+      if (!mod) { await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(120); }
+      await win.locator(`.sent[data-ln="${n}"] .clip-chk`).first().click(); await win.waitForTimeout(250);
+    };
 
     console.log('\n[1] 하나 고르면 막대가 그 클립 위에');
     await pick(3);
@@ -114,6 +118,31 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await pick(4);
     await win.keyboard.press('Control+v'); await win.waitForTimeout(900);
     ok(/둘째 문장입니다/.test(md()), 'Ctrl+V: 잘라낸 클립을 다른 자리에 붙였다');
+
+    console.log('\n[6] v0.7.80 — 막대는 체크박스로만 · 오른쪽 클릭 메뉴');
+    await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(150);
+    await win.locator('.sent[data-ln="2"] .clip-no .clip-no-n').first().click(); await win.waitForTimeout(300);
+    ok(await win.locator('.sent[data-ln="2"].picked').count() >= 1 && await win.locator('[data-testid="clip-tb"]').count() === 0, '🔑 번호를 눌러 고르기만 하면 막대는 안 뜬다');
+    await win.locator('.sent[data-ln="3"] .clip-chk').first().click(); await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="clip-tb"]').count() === 1, '🔑 체크박스를 체크하면 막대가 뜬다');
+    await win.locator('.sent[data-ln="3"] .clip-chk').first().click(); await win.locator('.sent[data-ln="2"] .clip-chk').first().click(); await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="clip-tb"]').count() === 0, '체크를 모두 풀면 막대가 사라진다');
+    await win.keyboard.press('Escape'); await win.keyboard.press('Escape');
+    await win.locator('.sent[data-ln="4"] .clip-r1').first().click({ button: 'right', position: { x: 4, y: 4 } }); await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="clip-ctx"]').count() === 1, '🖱 클립에서 오른쪽 클릭 → 메뉴');
+    ok(await win.locator('[data-testid="clip-tb"]').isVisible().catch(() => false) === false, '메뉴가 떠 있는 동안 막대는 숨는다(마지막 팝업만)');
+    ok(await win.locator('.sent[data-ln="4"].picked').count() >= 1, '안 고른 클립이면 그 클립이 골라진다');
+    for (const id of ['cx-sel', 'cx-merge', 'cx-img', 'cx-vid', 'cx-fx']) ok(await win.locator(`[data-testid="${id}"]`).count() === 1, `메뉴 항목 ${id}`);
+    ok(await win.locator('[data-testid="cx-merge"].soon').count() === 1, '하나만 골랐으면 「클립 합치기」는 흐림');
+    await win.locator('[data-testid="cx-sel"]').hover(); await win.waitForTimeout(150);
+    ok(await win.locator('[data-testid="cx-sub-sel"]').count() === 1, '클립 선택 ▸ 하위 메뉴');
+    await win.locator('[data-testid="cx-sel-odd"]').click(); await win.waitForTimeout(300);
+    const odd = await win.evaluate(() => [...document.querySelectorAll('.sent.clip.picked')].filter((x) => x.offsetParent).map((x) => Number(x.dataset.ln)));
+    ok(odd.length >= 2 && odd.every((n) => n % 2 === 1), `홀수 클립 선택 [${odd.join(',')}]`);
+    ok(await win.locator('[data-testid="clip-ctx"]').count() === 0, '고르면 메뉴가 닫힌다');
+    await win.locator('.sent[data-ln="1"] .clip-r1').first().click({ button: 'right', position: { x: 4, y: 4 } }); await win.waitForTimeout(250);
+    await win.keyboard.press('Escape'); await win.waitForTimeout(150);
+    ok(await win.locator('[data-testid="clip-ctx"]').count() === 0, 'Esc 로 메뉴가 닫힌다');
 
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);
   } finally {

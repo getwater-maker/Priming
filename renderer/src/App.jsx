@@ -1970,6 +1970,11 @@ export default function App() {
   const [clipBoard, setClipBoard] = useState(null);   // { chunks, n } — ⧉ 복사한 클립(글 + 음성 조각)
   const [clipTb, setClipTb] = useState(null);         // { left, top, hidden } — 막대 자리(고른 첫 클립 바로 위)
   const [clipMenu, setClipMenu] = useState(null);     // 'ins' | 'fx' | 'voice'
+  // ☑ 막대는 **체크박스로 고른 클립**에만 뜬다(v0.7.80 로이 — 클립을 눌러 고르기만 해서는 안 뜬다) · 선택이 풀리면 같이 풀린다
+  const [chkSel, setChkSel] = useState(false);
+  // 🖱 클립 오른쪽 클릭 메뉴(Vrew 모양) — { x, y, sub: null|'sel'|'img'|'vid'|'fx', subY }
+  const [clipCtx, setClipCtx] = useState(null);
+  useEffect(() => { if (!capSel && chkSel) setChkSel(false); }, [capSel, chkSel]);
   const clipFocusRef = useRef(true);   // 마지막 마우스 누름이 클립(또는 클립 막대) 안이었나 — 아니면 Home/End 는 대본 처음·끝
   const groupNavRef = useRef(null);    // 🎞 그룹 칸 방향키 이동용 — 그룹 칸이 그릴 때마다 { step } 을 넣어 둔다
   useEffect(() => {
@@ -2003,6 +2008,7 @@ export default function App() {
     } catch (e) { logline('그룹 삭제 오류: ' + e.message); clipErr(null, '그룹 삭제'); }
   }
   function clipSelOk() { return !!(capSel && capSel.mode === 'lines' && capSel.items && capSel.items.length && !sentEdit); }
+  function clipTbOk() { return chkSel && clipSelOk(); }   // 도구 막대를 보일 조건 — 체크박스로 골랐을 때
   function clipPayload(sel) {
     const PL = linesMap.get(sel.shortsNum); const by = new Map();
     for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!by.has(k)) by.set(k, new Set()); by.get(k).add(it.n); }
@@ -2134,7 +2140,48 @@ export default function App() {
     if (r && r.ok && r.id) await insRange(sel.shortsNum, r.id, a, b);
   }
   function clipGroup() { if (!clipSelOk()) return null; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; return { sn: capSel.shortsNum, g: first.groupNum }; }
-  function clipSoon(t) { setClipMenu(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); }
+  function clipSoon(t) { setClipMenu(null); setClipCtx(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); }
+  // 🖱 클립 오른쪽 클릭 메뉴(v0.7.80 · Vrew) — 클립 어디서나. 안 고른 클립이면 그 클립 하나를 고른다(막대는 안 띄움 — 체크박스만).
+  //   고치는 중인 글칸·입력칸에서는 기본 메뉴(복사·붙여넣기)를 그대로 둔다.
+  const clipCtxOpenRef = useRef(null);
+  clipCtxOpenRef.current = (ev) => {
+    if (!wsOn || ev.defaultPrevented) return;
+    const t = ev.target; if (!t || !t.closest) return;
+    const row = t.closest('main.pane2 .sent.clip[data-ln]'); if (!row) return;
+    if (t.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) return;
+    const card = row.closest('.card[data-pr]'); const sn = card ? Number(card.getAttribute('data-pr')) : (cursor && cursor.shortsNum);
+    const PL = sn != null ? linesMap.get(sn) : null; if (!PL) return;
+    const n = Number(row.getAttribute('data-ln')); const l = PL.list.find((x) => x.n === n); if (!l) return;
+    ev.preventDefault();
+    if (!sentEdit) {
+      const inSel = capSel && capSel.mode === 'lines' && capSel.shortsNum === sn && capSel.items.some((x) => x.n === n);
+      if (!inSel) { setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n }); setChkSel(false); userCursor({ shortsNum: sn, n }); }
+    }
+    clipFocusRef.current = true; setClipMenu(null);
+    setClipCtx({ x: ev.clientX, y: ev.clientY, sub: null, subY: 0 });
+  };
+  useEffect(() => {
+    const h = (ev) => { if (clipCtxOpenRef.current) clipCtxOpenRef.current(ev); };
+    document.addEventListener('contextmenu', h);
+    return () => document.removeEventListener('contextmenu', h);
+  }, []);
+  /** 클립 선택 하위 메뉴 — 현재 클립 · 전체 · 홀수 · 짝수 · 선택 반전 */
+  function ctxSelect(kind) {
+    setClipCtx(null);
+    const sn = capSel && capSel.shortsNum; const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length) return;
+    const mk = (x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to });
+    const cur = new Set(clipSelOk() ? capSel.items.map((x) => x.n) : []);
+    const first = [...cur].sort((a, b) => a - b)[0];
+    let list;
+    if (kind === 'cur') list = PL.list.filter((x) => x.n === first);
+    else if (kind === 'all') list = PL.list;
+    else if (kind === 'odd') list = PL.list.filter((x) => x.n % 2 === 1);
+    else if (kind === 'even') list = PL.list.filter((x) => x.n % 2 === 0);
+    else list = PL.list.filter((x) => !cur.has(x.n));   // 반전
+    if (!list.length) { setCapSel(null); setStatus('고른 클립이 없습니다'); return; }
+    setCapSel({ shortsNum: sn, mode: 'lines', items: list.map(mk), anchorN: list[0].n }); setChkSel(true);
+    setStatus(`클립 ${list.length}개를 골랐습니다`);
+  }
   async function insertMedia(kind, ev) {
     const pj = curProject(); if (!pj) return;
     const rect = ev && ev.currentTarget ? ev.currentTarget.getBoundingClientRect() : null;
@@ -2447,6 +2494,8 @@ export default function App() {
   function pickCapLine(shortsNum, info, ev, allLines) {
     if (sentEdit) return;
     userCursor({ shortsNum, n: info.n }); pickMenu('format');   // 🧭 커서 + 서식 메뉴
+    // 막대는 체크박스(ev.chk)로 골랐을 때만 — 체크로 시작한 선택에 Shift·Ctrl 로 더하는 건 이어서 켠다
+    setChkSel((p) => !!(ev && ev.chk) || (p && !!ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)));
     setCapSel((cur) => {
       const same = cur && cur.shortsNum === shortsNum && cur.mode === 'lines';
       if (ev && ev.shiftKey && same && cur.anchorN != null) {
@@ -2528,7 +2577,9 @@ export default function App() {
       // 글자칸·대본 보기 편집면 안에서는 그 칸의 되돌리기(타이핑 취소)를 쓴다
       let untouched = false;   // 글자를 한 자도 안 고친 편집칸 = 칸 되돌리기가 할 일이 없다 → 대본 되돌리기
       if (t && (t.tagName === 'TEXTAREA' || t.isContentEditable) && sentEdit) { try { untouched = t.tagName === 'TEXTAREA' ? t.value === t.defaultValue : false; } catch (_) {} }
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) && !untouched) return;
+      // ☑ 클립 체크박스에 초점이 있어도(체크 뒤 막대로 합치기·삭제를 했을 때) Ctrl+Z 는 대본 되돌리기다 — 체크박스엔 되돌릴 글자가 없다
+      const onClipChk = !!(t && t.tagName === 'INPUT' && t.type === 'checkbox' && t.classList && t.classList.contains('clip-chk'));
+      if (t && !onClipChk && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) && !untouched) return;
       if (isBk || isRx) return;
       ev.preventDefault();
       runUndo(k === 'y' || (k === 'z' && ev.shiftKey), untouched);
@@ -2891,7 +2942,7 @@ export default function App() {
   function selectAllClips() {
     const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
     const PL = sn != null ? linesMap.get(sn) : null; if (!PL || !PL.list.length) return;
-    setCapSel({ shortsNum: sn, mode: 'lines', items: PL.list.map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), anchorN: PL.list[0].n });
+    setCapSel({ shortsNum: sn, mode: 'lines', items: PL.list.map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to })), anchorN: PL.list[0].n }); setChkSel(true);   // 모든 체크박스가 체크된다 — 막대도
     pickMenu('format');
     setStatus(`클립 ${PL.list.length}개를 모두 골랐습니다 — 서식을 바꾸면 전부에 적용됩니다 (Esc 해제)`);
   }
@@ -4242,6 +4293,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      if (clipCtx) { setClipCtx(null); return; }   // 🖱 클립 오른쪽 클릭 메뉴가 가장 위
       if (preview) { setPreview(null); return; }
       if (aiPop && !aiEdit) { setAiPop(null); return; }
       if (playerOpen) { stopPlayer(); return; }
@@ -4269,7 +4321,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  }, [clipCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
   // 🔎 리본(이미지·비디오 탭)에서 무료 스톡 열기 — 지금 커서의 그룹 · 탭에 맞춰 사진/영상(v0.7.68)
@@ -4412,7 +4464,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
   useLayoutEffect(() => {
-    if (!wsOn || !clipSelOk()) { setClipTb(null); setClipMenu(null); return undefined; }
+    if (!wsOn || !clipTbOk()) { setClipTb(null); setClipMenu(null); return undefined; }
     const firstN = Math.min(...capSel.items.map((x) => x.n));
     const place = () => {
       const el = [...document.querySelectorAll('.sent[data-ln="' + firstN + '"]')].find((x) => x.offsetParent !== null);
@@ -4441,7 +4493,7 @@ export default function App() {
     window.addEventListener('scroll', place, true); window.addEventListener('resize', place);
     return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsOn, capSel, sentEdit, dto, linesMap]);
+  }, [wsOn, capSel, chkSel, sentEdit, dto, linesMap]);
   /** ① ↔ ② 경계 끌기 — 폭을 기억한다. */
   function startPaneDrag(e) {
     e.preventDefault();
@@ -4566,7 +4618,7 @@ export default function App() {
     const hr = findHitRef.current; const sn = (cursor && cursor.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum);
     if (!hr.hits || !hr.hits.length || sn == null) return;
     const items = hr.hits.map((x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to }));
-    setCapSel({ shortsNum: sn, mode: 'lines', items, anchorN: items[0].n });
+    setCapSel({ shortsNum: sn, mode: 'lines', items, anchorN: items[0].n }); setChkSel(true);   // 검색 「☑ 모두」 = 체크 — 막대를 켠다
     setStatus(`🔎 검색된 클립 ${items.length}개를 모두 골랐습니다 — 클립 도구 막대(🎤 목소리 수정 → 다시 만들기 · 🗑 삭제 등)를 쓰세요 (Esc 해제)`);
   }
   function runFind(text, move, forward) {
@@ -4907,7 +4959,7 @@ export default function App() {
       if (playingRef.current) stopPlayer();
       const l = r.first; const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
       setCursor({ shortsNum: pr.shortsNum, n: l.n });
-      setCapSel({ shortsNum: pr.shortsNum, mode: 'lines', items: [info], anchorN: l.n });
+      setCapSel({ shortsNum: pr.shortsNum, mode: 'lines', items: [info], anchorN: l.n }); setChkSel(false);
       clipFocusRef.current = true;   // 그룹을 눌렀으니 Home/End 는 이 그룹 안
       setTimeout(() => { const e = [...document.querySelectorAll('main.pane2 .sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
     };
@@ -4927,6 +4979,7 @@ export default function App() {
       const add = on ? rs.flatMap((r) => r.lines.map((l) => ({ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }))) : [];
       const items = [...keep, ...add].sort((a, b) => a.n - b.n);
       setCapSel(items.length ? { shortsNum: pr.shortsNum, mode: 'lines', items, anchorN: items[0].n } : null);
+      setChkSel(items.length > 0);   // 그룹 칸 체크도 체크박스 — 막대를 켠다
     };
     const mmss = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
     return (
@@ -5526,7 +5579,7 @@ export default function App() {
             </div>
           )}
           {aiPopEl}
-          {wsOn && clipTb && !clipTb.hidden && clipSelOk() && (() => {
+          {wsOn && clipTb && !clipTb.hidden && clipTbOk() && (() => {
         const n = capSel.items.length;
         const cg = clipGroup();
         // 막대가 창 아래쪽에 있으면 하위 메뉴가 화면 밖으로 잘린다 → 자리가 모자라면 막대 **위로** 펼친다
@@ -5573,6 +5626,99 @@ export default function App() {
               <button data-testid="ctb-voice-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 문장들만 톤이 달라집니다)" onClick={() => clipTts(true)}>🎲 다른 톤으로 새로 뽑기</button>
             </div>}
           </div>
+        </>);
+      })()}
+          {wsOn && clipCtx && clipSelOk() && (() => {
+        // 🖱 클립 오른쪽 클릭 메뉴(Vrew 모양) — 없는 기능은 「준비 중」으로 흐리게(막대와 같은 약속)
+        const n = capSel.items.length; const cg = clipGroup();
+        const W = 244, SW = 230;
+        const left = Math.max(4, Math.min(clipCtx.x, window.innerWidth - W - 8));
+        const mh = Math.min(window.innerHeight - 8, 640);
+        const top = Math.max(4, Math.min(clipCtx.y, window.innerHeight - mh - 4));
+        const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
+        const run = (fn) => () => { setClipCtx(null); fn(); };
+        const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setClipCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
+        const Row = ({ icon, label, onClick, soon, sub, kbd, dis, tid }) => (
+          <button className={'cx-row' + (soon || dis ? ' soon' : '') + (sub && clipCtx.sub === sub ? ' open' : '')} data-testid={tid} onMouseEnter={hov(sub || null)}
+            onClick={sub ? hov(sub) : (dis || soon ? () => clipSoon(label) : onClick)}>
+            <span className="cx-ic">{icon}</span><span className="cx-t">{label}</span>
+            {kbd ? <span className="cx-k">{kbd}</span> : sub ? <span className="cx-k">▸</span> : soon ? <span className="cx-k">준비 중</span> : null}
+          </button>
+        );
+        const subTop = Math.max(4, Math.min(clipCtx.subY - 6, window.innerHeight - 330));
+        const g = cg ? cg.g : '';
+        return (<>
+          <div className="vr-menu-bg" data-testid="cx-bg" onMouseDown={() => setClipCtx(null)} onContextMenu={(e) => { e.preventDefault(); setClipCtx(null); }} />
+          <div className="vr-menu clip-ctx" data-testid="clip-ctx" style={{ left, top, width: W, maxHeight: mh }} onMouseDown={(e) => e.preventDefault()}>
+            <div className="cx-top" onMouseEnter={hov(null)}>
+              <button data-testid="cx-cut" title="잘라내기 (Ctrl+X)" onClick={run(() => clipCopy(true))}>✂</button>
+              <button data-testid="cx-copy" title="복사 (Ctrl+C)" onClick={run(() => clipCopy(false))}>⧉</button>
+              <button data-testid="cx-paste" title={clipBoard ? '붙여넣기 (Ctrl+V)' : '붙여넣기 — 먼저 복사하거나 잘라내세요'} disabled={!clipBoard} onClick={run(clipPaste)}>📋</button>
+            </div>
+            <div className="vr-sep" />
+            <Row icon="☑" label="클립 선택" sub="sel" tid="cx-sel" />
+            <Row icon="⊟" label="클립 합치기" dis={n < 2} onClick={run(clipMerge)} tid="cx-merge" />
+            <Row icon="✂" label="클립 나누기" soon />
+            <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" soon />
+            <Row icon="🎙" label="음성 덮어쓰기" soon />
+            <div className="vr-sep" />
+            <Row icon="⚑" label="마커" soon />
+            <Row icon="▤" label="전체 자막 복사하기" soon />
+            <Row icon="▥" label="전체 자막 지우기" soon />
+            <div className="vr-sep" />
+            <Row icon="🌐" label="번역하기" soon />
+            <Row icon="⇥" label="무음 구간 줄이기" soon />
+            <div className="vr-sep" />
+            <Row icon="✨" label="AI 이미지 자동삽입" soon />
+            <Row icon="🖼" label="이미지 삽입" sub="img" tid="cx-img" />
+            <Row icon="🎞" label="비디오 삽입" sub="vid" tid="cx-vid" />
+            <Row icon="T" label="텍스트 삽입" soon />
+            <Row icon="☺" label="캐릭터 삽입" soon />
+            <div className="vr-sep" />
+            <Row icon="▭" label="빈 클립 삽입" soon />
+            <Row icon="⋯" label="빈 워드 삽입" soon />
+            <Row icon="❄" label="정지 워드 삽입" soon />
+            <div className="vr-sep" />
+            <Row icon="🎛" label="효과" sub="fx" tid="cx-fx" />
+            <div className="vr-sep" />
+            <Row icon="ⓘ" label="작업 파일 정보" soon />
+          </div>
+          {clipCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'cx-sub-' + clipCtx.sub} style={{ left: subLeft, top: subTop, width: SW }} onMouseDown={(e) => e.preventDefault()}>
+            {clipCtx.sub === 'sel' && <>
+              <Row icon="▢" label="현재 클립" onClick={() => ctxSelect('cur')} tid="cx-sel-cur" />
+              <Row icon="▣" label="전체" kbd="Ctrl+A" onClick={() => ctxSelect('all')} tid="cx-sel-all" />
+              <Row icon="#" label="클립 번호로 선택" soon />
+              <Row icon="#" label="씬 번호로 선택" soon />
+              <Row icon="1" label="홀수 클립" onClick={() => ctxSelect('odd')} tid="cx-sel-odd" />
+              <Row icon="2" label="짝수 클립" onClick={() => ctxSelect('even')} tid="cx-sel-even" />
+              <Row icon="⇄" label="선택 반전" onClick={() => ctxSelect('inv')} tid="cx-sel-inv" />
+              <Row icon="🎙" label="AI 목소리 클립" soon />
+            </>}
+            {clipCtx.sub === 'img' && <>
+              <Row icon="🖥" label="PC에서 불러오기" onClick={run(clipInsertFile)} tid="cx-img-pc" />
+              <Row icon="📱" label="모바일에서 불러오기" soon />
+              <Row icon="🗂" label="내 이미지" soon />
+              <Row icon="🖼" label="무료 이미지" soon />
+              <Row icon="✨" label={'AI 이미지 G' + g} onClick={run(() => { if (cg) runRegen(cg.sn, cg.g); })} tid="cx-img-ai" />
+            </>}
+            {clipCtx.sub === 'vid' && <>
+              <Row icon="🖥" label="PC에서 불러오기" onClick={run(clipInsertFile)} tid="cx-vid-pc" />
+              <Row icon="📱" label="모바일에서 불러오기" soon />
+              <Row icon="🗂" label="내 비디오" soon />
+              <Row icon="🎞" label="무료 비디오" soon />
+              <Row icon="🎬" label={'AI 비디오 G' + g} onClick={run(() => { if (cg) runGroupVid(cg.sn, cg.g); })} tid="cx-vid-ai" />
+            </>}
+            {clipCtx.sub === 'fx' && <>
+              <Row icon="✳" label="필터" soon />
+              <Row icon="⤢" label="확대 및 회전" soon />
+              <Row icon="◐" label="화면 전환" soon />
+              <Row icon="🔉" label="볼륨 조절" soon />
+              <Row icon="⏩" label="배속 효과" soon />
+              <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />
+              <Row icon="■" label={'채움 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); })} tid="cx-fx-cover" />
+              <Row icon="🎨" label="클립 배경색" soon />
+            </>}
+          </div>}
         </>);
       })()}
           {insMenu && (() => {
@@ -7331,7 +7477,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                   {/* ☑ 번호 밑 체크박스(v0.7.32 · Vrew) — 누를 때마다 이 클립을 선택에 더하고/뺀다(Ctrl+클릭과 같다) */}
                                   <input type="checkbox" className="clip-chk" data-testid="clip-chk" checked={!!picked} title="이 클립 체크 — 여러 개를 골라 합치기·삭제·복사"
                                     onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
-                                    onChange={(ev) => { if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, { ctrlKey: true, shiftKey: false }, _S.projLinesOf(pr.shortsNum)); }} />
+                                    onChange={(ev) => { if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, { ctrlKey: true, shiftKey: false, chk: true }, _S.projLinesOf(pr.shortsNum)); }} />
                                 </div>
                                 <div className="clip-body">
                                   <div className="clip-r1" onClick={(ev) => { if (ev.target === ev.currentTarget) { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); } }}>
