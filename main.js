@@ -8029,6 +8029,61 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
   }, engine);   // 로컬 ComfyUI 면 TTS 와 같은 레인(내 PC GPU)에 줄 세운다
 });
 
+// ✏ 그림 고치기(Qwen-Image 2.1 Turbo · 로컬) — 그룹의 지금 그림 + 로이가 적은 지시문 → 고친 그림으로 교체(v0.7.87 · 로이 2026-10-10).
+//   🔑 원본은 **지우지 않는다**: 고친 그림은 새 파일(`NN_edit.png`·`NN_edit_2.png`…)로 만들고 그룹이 그쪽을 가리킨다 —
+//     옛 그림 파일은 media-N 에 그대로 남아 Ctrl+Z(undoPush)가 되돌린다. 시험 근거·참조 해상도·원크기 복원 = core/comfy-image `buildEditGraph`.
+//   ⛔ 이 그림에서 만든 영상(videoPath)은 그대로 둔다 — 영상이 옛 그림 기준이라는 것만 알린다(자동으로 지우지 않는다).
+//   ⛔ 헤더에서 고른 이미지 도구와 무관하게 **번들 Qwen 워크플로**(image_qwen21_turbo.json)를 쓴다(고치기는 Qwen 전용) — 설정 파일은 바꾸지 않는다.
+ipcMain.handle('edit-group-image', (_e, args = {}) => {
+  const { shortsNum, groupNum } = args;
+  const instruction = String(args.instruction || '').trim();
+  return enqueueImageJob(`G${groupNum} 그림 고치기`, async () => {
+    if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+    if (!instruction) throw new Error('고칠 내용을 적어 주세요.');
+    const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+    const g = pr && pr.groups.find((x) => x.num === groupNum);
+    if (!g) return P.toDTO(S.parsed);
+    if (!g.imagePath || !fs.existsSync(g.imagePath)) throw new Error('이 그룹에는 고칠 그림이 없습니다.');
+    const CI = require('./core/comfy-image');
+    const cfg = CI.loadConfig();
+    cfg.cloud = false; cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';   // 로컬 전용(이 실행에만)
+    const wfPath = path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+    if (!fs.existsSync(wfPath)) throw new Error('Qwen-Image 2.1 Turbo 워크플로 파일이 없습니다.');
+    cfg.workflowPath = wfPath;
+    const eng = new CI.ComfyImage(cfg, log);
+    const lc = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+    if (!lc.ok) throw new Error(lc.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    await awaitForeignTtsIdle('그림 고치기', log);
+    const dim = require('./vrew/vrew-builder').readImageSize(g.imagePath);
+    if (!dim || !dim.w || !dim.h) throw new Error('그림 크기를 읽지 못했습니다.');
+    S.abort = false;
+    const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
+    const want = path.join(mediaDir, String(g.num).padStart(2, '0') + '_edit.png');
+    const out = P.claimPath(want, null, P.IMG_EXTS);
+    log(`✏ ${prLabel(pr)} G${groupNum} 그림 고치기 — 「${instruction.slice(0, 60)}${instruction.length > 60 ? '…' : ''}」 (${dim.w}x${dim.h})`);
+    const prevStatus = g.imageStatus;
+    g.imageStatus = 'generating'; pushDtoUpdate();
+    const t0 = Date.now();
+    const r = await eng.editImage({ imagePath: g.imagePath, instruction: instruction + ' Keep everything else in the image exactly the same.', width: dim.w, height: dim.h, outputPath: out, abortSignal: () => S.abort });
+    try { await eng.freeMemory(); } catch {}
+    if (!r.success || !r.imagePath) {
+      g.imageStatus = prevStatus || 'done'; pushDtoUpdate();
+      throw new Error('그림 고치기 실패: ' + (r.error || '알 수 없는 오류'));
+    }
+    if (await looksBadImage(r.imagePath)) {   // 검정·노이즈·색깨짐이면 버린다 — 원본을 그대로 둔다
+      try { fs.rmSync(r.imagePath, { force: true }); } catch {}
+      g.imageStatus = prevStatus || 'done'; pushDtoUpdate();
+      throw new Error('고친 그림이 이상해서(검정·노이즈) 버렸습니다 — 원본 그대로입니다. 지시문을 바꿔 다시 시도해 보세요.');
+    }
+    undoPush('그림 고치기');
+    g.imagePath = r.imagePath; g.imageStatus = 'done'; g.imageCleared = false; g.imageStale = false;
+    g._userImage = _visKey(r.imagePath);   // 「사람이 정한 그림」 — 기계 판정(검정·노이즈 정리)이 지우지 않게(_userAttached)
+    log(`✓ G${groupNum} 그림 고침 → ${path.basename(r.imagePath)} (${((Date.now() - t0) / 1000).toFixed(1)}초)` + (g.videoPath ? ' · ⚠ 이 그룹의 영상은 옛 그림으로 만든 것입니다(다시 만들려면 🎬)' : ''));
+    pushDtoUpdate();
+    return P.toDTO(S.parsed);
+  }, 'comfy');
+});
+
 // ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────
 const PromptIO = require('./core/prompt-io');
 

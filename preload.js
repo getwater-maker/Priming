@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('api', {
   remotionOpenImageTsv: (args) => ipcRenderer.invoke('remotion-open-image-tsv', args),
   remotionRunImages: (args) => ipcRenderer.invoke('remotion-run-images', args),
   remotionRunVideos: (args) => ipcRenderer.invoke('remotion-run-videos', args),
+  editGroupImage: (args) => ipcRenderer.invoke('edit-group-image', args),
   remotionSelectTsv: (args) => ipcRenderer.invoke('remotion-select-tsv', args),
   remotionRunAll: (args) => ipcRenderer.invoke('remotion-run-all', args),
   onRemotionActive: (cb) => ipcRenderer.on('remotion-active', (_e, d) => cb(d)),

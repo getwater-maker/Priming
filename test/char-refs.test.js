@@ -123,6 +123,28 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(enc['images.image_1'][0] === 'pm_ref1' && enc['images.image_2'][0] === 'pm_ref2' && g1.pm_ref1.inputs.image === 'a.png', 'images.image_N ← LoadImage');
   ok(enc.vae[0] === '3' && enc.resolution === 384, 'VAE 연결 · 참조 해상도 384(P0: 1024 는 장당 35초)');
   ok(CI.DEFAULTS.charRefs === true, 'ComfyUI 설정 기본값 charRefs = 켬(게이트가 fail-closed 라 옛 대본은 그대로)');
+  // ✏ 그림 고치기(v0.7.87) — 편집 그래프: 참조 1장 · 인코더가 만든 latent · 원크기 복원 · 빈 latent 노드 제거
+  {
+    const eg = CI.buildEditGraph(wf, { instruction: 'make it green', imageName: 'src.png', width: 1344, height: 768, seed: 5 });
+    const e5 = eg['5'].inputs;
+    ok(e5.prompt === 'make it green' && e5['images.image_1'][0] === 'pm_ref1' && eg.pm_ref1.inputs.image === 'src.png', '편집: 지시문 + 참조 그림 1장');
+    ok(e5.resolution === CI.EDIT_RES && CI.EDIT_RES === 896, '참조 해상도 896(≈0.8MP — 1MP 이상이면 붓질 그림이 깨진다 · 시험)');
+    ok(eg['8'].inputs.latent_image[0] === '5' && eg['8'].inputs.latent_image[1] === 2, 'latent = 인코더가 참조 크기로 만든 것(강제로 다른 크기를 주면 어긋난다)');
+    ok(!Object.values(eg).some((x) => x.class_type === 'EmptySD3LatentImage'), '빈 latent 노드는 걷어냈다');
+    ok(eg.pm_scale.class_type === 'ImageScale' && eg.pm_scale.inputs.width === 1344 && eg.pm_scale.inputs.height === 768 && eg['10'].inputs.images[0] === 'pm_scale', '결과를 원본 크기로 되돌려 저장한다');
+    ok(eg['8'].inputs.seed === 5 && eg['8'].inputs.steps === 8, '고정 시드 · Turbo 8스텝');
+    let thrown = ''; try { CI.buildEditGraph({ 1: { class_type: 'CLIPTextEncode', inputs: {} } }, { instruction: 'x', imageName: 'a', width: 1, height: 1 }); } catch (e) { thrown = e.message; }
+    ok(/고칠 수 없습니다/.test(thrown), 'Qwen 워크플로가 아니면 사람 말로 거절한다');
+    const wf2 = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'comfy', 'image_qwen21_turbo.json'), 'utf8'));
+    ok(!wf2.pm_ref1 && !wf2.pm_scale && wf2['7'], '원본 워크플로 파일 구조는 그대로(복사본만 고친다)');
+    const MAINSRC = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/ipcMain\.handle\('edit-group-image'/.test(MAINSRC) && /undoPush\('그림 고치기'\)/.test(MAINSRC), 'IPC + 되돌리기 기록');
+    ok(/_edit\.png/.test(MAINSRC) && /claimPath\(want, null, P\.IMG_EXTS\)/.test(MAINSRC), '고친 그림은 새 파일 — 원본은 media-N 에 그대로 남는다');
+    ok(/g\._userImage = _visKey\(r\.imagePath\)/.test(MAINSRC), '고친 그림은 「사람이 정한 그림」으로 표시(기계 판정이 지우지 않게)');
+    ok(/cfg\.cloud = false; cfg\.baseUrl = cfg\.localBaseUrl/.test(MAINSRC) && /image_qwen21_turbo\.json/.test(MAINSRC.slice(MAINSRC.indexOf("handle('edit-group-image'"), MAINSRC.indexOf("handle('edit-group-image'") + 2500)), '헤더 도구와 무관하게 로컬 Qwen 워크플로(설정 파일 불변)');
+    const APPSRC = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
+    ok(/mn-edit-img/.test(APPSRC) && /onEditImg=\{runEditImg\}/.test(APPSRC) && /api\.editGroupImage\(/.test(APPSRC), '화면: 그룹 그림 메뉴 「✏ 그림 고치기」 → IPC');
+  }
   // main.js 연결(소스 검사) — 게이트·로컬 전용·fail-open
   ok(/const qr = await _qwenRefsFor\(imagesDir, eng, cfg, logger\)/.test(main) && /refs: qx \? qx\.refs : null/.test(main), 'runComfyImages 가 Qwen 참조를 넘긴다');
   ok(/CR\.qwenCast\(_narrationOf\(project, g\)/.test(main), 'Qwen 배역은 qwenCast(그림에 있는 인물만)');

@@ -1366,6 +1366,14 @@ export default function App() {
     try { const d = await api.clearAsset({ shortsNum, groupNum }); setDto(d); setStatus('자산 삭제'); }
     catch (e) { logline('오류: ' + e.message); }
   }
+  // ✏ 그림 고치기(Qwen · 로컬) — 지시문을 받아 그 그룹의 그림을 고친다. 원본은 지우지 않으므로 Ctrl+Z 로 되돌린다.
+  async function runEditImg(shortsNum, groupNum) {
+    const ins = await askName('✏ G' + groupNum + ' 그림 고치기 — 어떻게 고칠까요? (예: 여자의 검은 드레스를 짙은 초록색으로 바꿔 줘 · 나머지는 그대로 둡니다)', '');
+    if (!ins || !String(ins).trim()) return;
+    setStatus('G' + groupNum + ' 그림 고치는 중…');
+    try { const d = await api.editGroupImage({ shortsNum, groupNum, instruction: String(ins).trim() }); setDto(d); setStatus('✏ 그림 고침 — 마음에 안 들면 Ctrl+Z'); }
+    catch (e) { logline('오류: ' + e.message); setStatus('그림 고치기 실패'); }
+  }
   async function runRegen(shortsNum, groupNum) {
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 이미지 재생성…`);
@@ -5921,7 +5929,7 @@ export default function App() {
             cursor={cursor} onCursor={(sn, n) => userCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSelV} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
-            onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
+            onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} playing={playerOpen ? { key: playKey } : null}
@@ -7293,7 +7301,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename }) {
+function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -7780,7 +7788,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
         );
       })}
       {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu((cur) => (cur ? { ...cur, sub: v } : cur))}
-        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onEditImg={onEditImg} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay}
         grp={vrewLay ? { onPlayGroup, onPlayFrom, onGroupTts, onShowPrompt, onMerge, onSplit, playing } : null} />}
       {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
@@ -8159,7 +8167,7 @@ function ovAsLayer(o) {
     imageVersion: o.version, videoVersion: o.version, look: o.box ? { motion: 'none', box: o.box } : { motion: 'none', fill: 'contain' } };   // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다)
 }
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
-function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {
   const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
   const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
@@ -8262,6 +8270,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onGro
       </>}
       <button onClick={go(() => onAttach(sn, c.num))}>🔁 {has ? '교체' : '첨부'} (파일)</button>
       <button onClick={go(() => onRegen(sn, c.num))}>🖼 AI로 이미지 생성</button>
+      {c.imagePath && onEditImg && <button data-testid="mn-edit-img" title="지금 그림을 지시문대로 고칩니다(Qwen-Image 2.1 Turbo · 로컬 · 약 20초) — 원본은 지우지 않으니 Ctrl+Z 로 되돌릴 수 있습니다" onClick={go(() => onEditImg(sn, c.num))}>✏ 그림 고치기 (Qwen)</button>}
       <button onClick={go(() => onGroupVid(sn, c.num))}>🎬 AI로 비디오 생성</button>
       <div className="vr-sep" />
       <button onClick={() => setSub('range')}>↕ 적용 범위 변경 ›</button>

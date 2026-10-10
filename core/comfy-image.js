@@ -187,6 +187,30 @@ function applyRefs(graph, names, res = 384) {
   return names.length;
 }
 
+// ✏ 그림 고치기(Qwen-Image 2.1 · 로컬) — 그림 1장 + 지시문 → 고친 그림. 시험(2026-10-10 `_실험/qwen-edit`)으로 정한 값:
+//   · 참조 해상도 896(≈0.8MP) — 작업 크기가 **약 1MP 이상이면 붓질 많은 그림이 모자이크처럼 깨진다**(1344x768 그대로 · 강제 latent 모두 실측)
+//   · latent 는 인코더가 참조 크기로 만든 것(['<인코더>', 2])을 그대로 — 다른 크기로 그리면 편집이 어긋난다(노드 설명)
+//   · 고친 뒤 **원래 크기로 되돌린다**(ImageScale lanczos) — 영상 파이프라인은 그림 크기를 바꾸지 않는다.
+const EDIT_RES = 896;
+function buildEditGraph(wf, { instruction, imageName, width, height, seed }) {
+  const g = JSON.parse(JSON.stringify(wf));
+  const encId = Object.keys(g).find((id) => g[id].class_type === 'TextEncodeQwenImage21');
+  const vaeId = Object.keys(g).find((id) => g[id].class_type === 'VAELoader');
+  const ksId = Object.keys(g).find((id) => g[id].class_type === 'KSampler');
+  const decId = Object.keys(g).find((id) => g[id].class_type === 'VAEDecode');
+  const saveId = Object.keys(g).find((id) => /^SaveImage/.test(g[id].class_type));
+  if (!encId || !vaeId || !ksId || !decId || !saveId) throw new Error('이 워크플로로는 그림을 고칠 수 없습니다(Qwen-Image 2.1 워크플로가 필요합니다).');
+  g[encId].inputs.prompt = String(instruction);
+  applyRefs(g, [imageName], EDIT_RES);
+  g[ksId].inputs.latent_image = [encId, 2];                 // 참조 크기의 빈 latent
+  for (const id of Object.keys(g)) if (g[id].class_type === 'EmptySD3LatentImage') delete g[id];
+  const rnd = (seed != null && Number.isFinite(Number(seed))) ? Math.floor(Number(seed)) : Math.floor(Math.random() * 1e15);
+  g[ksId].inputs.seed = rnd;
+  g.pm_scale = { class_type: 'ImageScale', inputs: { image: [decId, 0], upscale_method: 'lanczos', width, height, crop: 'disabled' } };
+  g[saveId].inputs.images = ['pm_scale', 0];
+  return g;
+}
+
 class ComfyImage {
   constructor(cfg = {}, logger = () => {}) {
     this.cloud = !!cfg.cloud;
@@ -480,6 +504,25 @@ class ComfyImage {
     const j = await r.json();
     return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   }
+  // ✏ 그림 고치기 — { success:true, imagePath } | { success:false, error }. 로컬 전용(참조 그림을 서버로 올린다).
+  //   width/height = 원본 그림 크기(결과를 이 크기로 되돌린다).
+  async editImage({ imagePath, instruction, width, height, outputPath, abortSignal, seed }) {
+    if (this.cloud) return { success: false, error: '그림 고치기는 로컬 ComfyUI 에서만 됩니다(Qwen-Image 2.1 Turbo 로컬).' };
+    if (!this.workflowPath || !fs.existsSync(this.workflowPath)) return { success: false, error: '워크플로가 지정되지 않았습니다.' };
+    if (!String(instruction || '').trim()) return { success: false, error: '고칠 내용을 적어 주세요.' };
+    try {
+      if (!(await this.health())) throw new Error(`ComfyUI 연결 실패 (${this.baseUrl})`);
+      const wf = JSON.parse(fs.readFileSync(this.workflowPath, 'utf8'));
+      if (!supportsRefs(wf)) throw new Error('이 워크플로로는 그림을 고칠 수 없습니다 — 「Qwen-Image 2.1 Turbo」 워크플로가 필요합니다.');
+      const name = await this._uploadRef(imagePath);
+      const graph = buildEditGraph(wf, { instruction, imageName: name, width, height, seed });
+      await this._preferFastQuant(graph);
+      const promptId = await this._queueFixing(graph);
+      const img = await this._waitLocal(promptId, abortSignal);
+      const out = await this._download(img, outputPath);
+      return { success: true, imagePath: out };
+    } catch (e) { return { success: false, error: _netMsg(e) }; }
+  }
   // 텍스트 → 이미지 1장. { success:true, imagePath, refsApplied } | { success:false, error }
   //   refs = 참조 그림 경로들(👤 Qwen 인물 참조) — 로컬 + 참조 받는 워크플로일 때만 쓴다. 올리기에 실패하면
   //   참조 없이 그린다(fail-open — 제작을 막지 않는다).
@@ -518,4 +561,4 @@ class ComfyImage {
   }
 }
 
-module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg, pruneToImageOutputs, supportsRefs, applyRefs };
+module.exports = { ComfyImage, loadConfig, saveConfig, CFG_PATH, DEFAULTS, netMsg: _netMsg, pruneToImageOutputs, supportsRefs, applyRefs, buildEditGraph, EDIT_RES };
