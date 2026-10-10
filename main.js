@@ -5393,6 +5393,19 @@ ipcMain.handle('stock-key-save', (_e, { id, key, clear } = {}) => {
   SS.set(id, { ...old, key: v }); log(`🔑 ${id} 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
 ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) shell.openExternal(STOCK_KEY_URL[id]); return true; });
+// 🤖 Claude API 키(v0.7.93) — secret-store 'claude'(generate-prompts-api·prompt-io 가 이미 읽는 자리) · 원문은 돌려주지 않는다(끝 4자리만)
+ipcMain.handle('claude-key-get', () => {
+  const k = (((require('./tts/secret-store').get('claude')) || {}).key || '').trim();
+  return { has: !!k, tail: k ? k.slice(-4) : '' };
+});
+ipcMain.handle('claude-key-save', (_e, { key, clear } = {}) => {
+  if (process.env.PM_UI_SMOKE) return { ok: false };   // 🧪 E2E 는 진짜 키 저장소를 안 건드린다
+  const SS = require('./tts/secret-store'); const old = SS.get('claude') || {};
+  if (clear) { delete old.key; SS.set('claude', old); log('🔑 claude 키 지움'); return { ok: true }; }
+  const v = String(key || '').trim(); if (!v) return { ok: false };
+  SS.set('claude', { ...old, key: v }); log(`🔑 claude 키 저장(…${v.slice(-4)})`); return { ok: true };
+});
+ipcMain.handle('claude-open-key', () => { shell.openExternal('https://platform.claude.com/settings/keys'); return true; });
 ipcMain.handle('stock-open-url', (_e, u) => {   // 작가·원본 페이지 — 두 사이트 주소만 연다
   try { const x = new URL(String(u || '')); if (x.protocol === 'https:' && /(^|\.)(pexels\.com|pixabay\.com)$/.test(x.hostname)) { shell.openExternal(x.href); return true; } } catch {}
   return false;

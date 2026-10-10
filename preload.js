@@ -118,6 +118,9 @@ contextBridge.exposeInMainWorld('api', {
   stockKeysGet: () => ipcRenderer.invoke('stock-keys-get'),
   stockKeySave: (args) => ipcRenderer.invoke('stock-key-save', args),
   stockOpenKey: (id) => ipcRenderer.invoke('stock-open-key', id),
+  claudeKeyGet: () => ipcRenderer.invoke('claude-key-get'),          // 🤖 Claude API 키(v0.7.93)
+  claudeKeySave: (args) => ipcRenderer.invoke('claude-key-save', args),
+  claudeOpenKey: () => ipcRenderer.invoke('claude-open-key'),
   stockOpenUrl: (u) => ipcRenderer.invoke('stock-open-url', u),
   stockSearch: (args) => ipcRenderer.invoke('stock-search', args),
   stockDefaultQuery: (args) => ipcRenderer.invoke('stock-default-query', args),

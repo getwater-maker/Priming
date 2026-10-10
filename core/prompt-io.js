@@ -174,7 +174,7 @@ function applyPromptsToProjects(projects, text) {
 }
 
 // ── LLM 텍스트 API ──────────────────────────────────────
-const LLM_TEXT_MODELS = { gemini: 'gemini-3.8-flash', claude: 'claude-sonnet-4-5', openai: 'gpt-4o', ollama: 'gemma4:latest' };
+const LLM_TEXT_MODELS = { gemini: 'gemini-3.8-flash', claude: 'claude-opus-5-5', openai: 'gpt-4o', ollama: 'gemma4:latest' };
 
 // http/https 둘 다 지원 (Ollama 는 로컬 http) — timeout 조절 가능
 function postJsonAny(urlStr, headers, bodyObj, timeoutMs = 120000) {
@@ -252,10 +252,12 @@ async function callLlmTextApi(provider, key, promptText, opts = {}) {
   }
   if (provider === 'claude') {
     const url = 'https://api.anthropic.com/v1/messages';
-    const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
-    const r = await httpsPostJson(url, headers, { model, max_tokens: 8192, messages: [{ role: 'user', content: promptText }] });
+    // v0.7.93 — 응답에 thinking 블록이 섞이므로 text 블록만 · 안전 거절이면 기본 대체 모델로 넘김(server-side fallback)
+    const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' };
+    const r = await postJsonAny(url, headers, { model, max_tokens: 16000, fallbacks: 'default', messages: [{ role: 'user', content: promptText }] }, 600000);
     if (r.status !== 200) throw new Error(`Claude API ${r.status}: ${(r.json && r.json.error && r.json.error.message) || (r.raw || '').slice(0, 300)}`);
-    const text = ((r.json && r.json.content) || []).map((b) => b.text || '').join('') || '';
+    if (r.json && r.json.stop_reason === 'refusal') throw new Error('Claude 가 이 요청을 거절했습니다' + (r.json.stop_details && r.json.stop_details.category ? `(${r.json.stop_details.category})` : ''));
+    const text = ((r.json && r.json.content) || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('') || '';
     if (!text) throw new Error('Claude 응답에 텍스트가 없습니다');
     return text;
   }

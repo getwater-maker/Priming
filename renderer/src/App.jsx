@@ -725,6 +725,13 @@ export default function App() {
     const r = await api.stockKeySave({ id, ...patch }); await loadStockKeys();
     setStockKeys((x) => ({ ...x, draft: { ...x.draft, [id]: '' }, msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
   }
+  // 🤖 Claude API 키(v0.7.93) — { info: {has, tail}, draft, msg } · 원문은 다시 보이지 않는다
+  const [claudeKey, setClaudeKey] = useState({ info: {}, draft: '', msg: '' });
+  async function loadClaudeKey() { try { const r = await api.claudeKeyGet(); if (r) setClaudeKey((x) => ({ ...x, info: r })); } catch {} }
+  async function saveClaudeKey(patch) {
+    const r = await api.claudeKeySave(patch); await loadClaudeKey();
+    setClaudeKey((x) => ({ ...x, draft: '', msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
+  }
   async function verifyKey(id, draft, extra) {
     setKeyChk((x) => ({ ...x, [id]: { busy: true } }));
     let r; try { r = await api.apiKeyVerify({ id: id === 'gemini-tts' ? 'gemini' : id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
@@ -736,6 +743,7 @@ export default function App() {
     if (giKey || (inf.gemini && inf.gemini.has)) await verifyKey('gemini', giKey, { model: (giCfg && giCfg.model) || '' });
     for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
     for (const id of ['pexels', 'pixabay']) if ((stockKeys.info[id] && stockKeys.info[id].has) || (stockKeys.draft[id] || '').trim()) await verifyKey(id, stockKeys.draft[id]);
+    if (claudeKey.info.has || claudeKey.draft.trim()) await verifyKey('claude', claudeKey.draft);
     if (inf.gemini && inf.gemini.has) await verifyKey('gemini-tts', ttsKeys.draft.gemini);
   }
   const keyChkMark = (id) => { const c = keyChk[id]; return c && !c.busy && c.message ? <div className="meta" data-testid={'keychk-' + id} data-level={c.level} style={{ marginTop: 3, fontWeight: 600, color: c.level === 'ok' ? '#16a34a' : c.level === 'warn' ? '#b45309' : '#c62828' }}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.message}</div> : null; };
@@ -2358,7 +2366,7 @@ export default function App() {
   }
   // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
   async function openTtsKeySettings() { setTtsEng(null); await openSettings('keys'); }
-  useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
+  useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); loadClaudeKey(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
   //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
   //   🎙 문장마다 **실제로 읽을 목소리**의 단가로 센다(v0.6.84) — 순서는 main/pipeline 과 같다:
@@ -6793,6 +6801,24 @@ export default function App() {
                   </>)}
                 </div>
                 {keyChkMark('gemini')}
+              </div>
+              {/* 🤖 Claude API(유료 · v0.7.93) — secret-store 'claude' · 원문은 다시 보이지 않는다(끝 4자리만) */}
+              <div data-testid="claude-key" className="kp-card">
+                <div className="kp-line">
+                  <b className="kp-name">🤖 Claude API (유료)</b>
+                  <Hint>platform.claude.com → Settings → API Keys 에서 만든 키(sk-ant-…)입니다. 충전된 크레딧에서 쓴 만큼 빠집니다. 「✔ 검증」은 모델 목록만 조회해 요금이 들지 않습니다.</Hint>
+                  <span className="kp-state" style={{ color: claudeKey.info.has ? '#16a34a' : '#b45309' }}>{claudeKey.info.has ? `🔑 저장됨(…${claudeKey.info.tail})` : '🔑 없음'}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.claudeOpenKey()}>발급 ↗</button>
+                </div>
+                <div className="kp-line">
+                  <input type="password" autoComplete="off" className="kp-in" data-testid="claude-key-in" placeholder={claudeKey.info.has ? 'API 키 바꿀 때만 붙여넣기' : '🔑 Claude API 키 붙여넣기 (sk-ant-…)'}
+                    value={claudeKey.draft} onChange={(e) => { const v = e.target.value; setClaudeKey((x) => ({ ...x, draft: v })); }}
+                    onBlur={() => { const v = claudeKey.draft.trim(); if (v) saveClaudeKey({ key: v }); }} />
+                  {keyChkBtn('claude', claudeKey.draft)}
+                  <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!claudeKey.info.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm('Claude API 키를 지울까요?')) saveClaudeKey({ clear: true }); }}>지우기</button>
+                </div>
+                {keyChkMark('claude')}
+                {claudeKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{claudeKey.msg}</div>}
               </div>
               {/* 🔎 무료 스톡(v0.7.67) — Pexels · Pixabay 검색 키(둘 다 무료) · 원문은 다시 보이지 않는다(끝 4자리만) */}
               <div data-testid="stock-keys" className="kp-card">
