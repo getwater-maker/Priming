@@ -45,7 +45,7 @@ const cleanup = () => { for (const f of [MD, PNG, SNAP]) { try { if (fs.existsSy
     await win.evaluate(() => {
       window.__cb = []; window.__fill = [];
       try { Object.defineProperty(navigator, 'clipboard', { value: { write: async (items) => { window.__cb.push(items.map((i) => i.types.join(','))); }, writeText: async () => {} }, configurable: true }); } catch (_) {}
-      const f = CanvasRenderingContext2D.prototype.fillText; CanvasRenderingContext2D.prototype.fillText = function (t, ...a) { window.__fill.push(String(t)); return f.call(this, t, ...a); };
+      const f = CanvasRenderingContext2D.prototype.fillText; CanvasRenderingContext2D.prototype.fillText = function (t, x, y, ...a) { window.__fill.push({ t: String(t), x, y, font: this.font, cw: this.canvas.width }); return f.call(this, t, x, y, ...a); };
     });
     // 임시 그림을 G1 에 첨부
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, PNG);
@@ -84,15 +84,26 @@ const cleanup = () => { for (const f of [MD, PNG, SNAP]) { try { if (fs.existsSy
     await win.click('[data-testid=sx-copy-img]'); await win.waitForTimeout(500);
     let st = await win.evaluate(() => ({ cb: window.__cb.slice(), fill: window.__fill.slice() }));
     ok(st.cb.length === 1 && st.cb[0][0] === 'image/png', `📋 그림 복사 → 클립보드에 image/png (${JSON.stringify(st.cb)})`);
-    ok(st.fill.length === 0, '🔑 그림만 복사는 자막을 그리지 않는다');
+    ok(st.fill.length === 0, '🔑 그림만 복사는 자막을 그리지 않는다');   // (fill 은 fillText 기록 배열)
     ok(await win.locator('[data-testid=stage-ctx]').count() === 0, '고르면 메뉴가 닫힌다');
     await win.mouse.click(cx, cy, { button: 'right' }); await win.waitForTimeout(300);
     const capOn = !(await win.locator('[data-testid=sx-copy-cap]').isDisabled());
     ok(capOn, '지금 보이는 자막이 있으면 「그림 + 자막 복사」가 켜진다');
     if (capOn) {
+      // 복사 직전 화면의 자막 첫 글자 자리·글자 크기(스테이지 폭 대비) — 복사본의 자막이 같은 자리·크기여야 한다(v0.7.82)
+      const want = await win.evaluate(() => {
+        const R = document.querySelector('#stageVisual').getBoundingClientRect(), w = document.querySelector('#stageCap .cf-stageline');
+        const n = document.createTreeWalker(w, NodeFilter.SHOW_TEXT).nextNode(); const rg = document.createRange(); rg.setStart(n, 0); rg.setEnd(n, 1);
+        const r = rg.getClientRects()[0]; const cs = getComputedStyle(n.parentElement);
+        return { x: (r.left - R.left) / R.width, size: parseFloat(cs.fontSize) / R.width, weight: cs.fontWeight, text: w.textContent };
+      });
       await win.click('[data-testid=sx-copy-cap]'); await win.waitForTimeout(500);
-      st = await win.evaluate(() => ({ cb: window.__cb.slice(), fill: window.__fill.join('') }));
-      ok(st.cb.length === 2 && st.cb[1][0] === 'image/png' && /첫째|문장/.test(st.fill), `🔑 그림 + 자막 복사 → 자막 글자를 얹어 복사 (${st.fill.slice(0, 20)})`);
+      st = await win.evaluate(() => ({ cb: window.__cb.slice(), fill: window.__fill.slice() }));
+      const txt = st.fill.map((o) => o.t).filter((t, i, a) => i === 0 || t !== a[i - 1]).join('');   // 글자마다 그림자·테두리로 여러 번 그린다 → 이어진 같은 글자는 하나로
+      ok(st.cb.length === 2 && st.cb[1][0] === 'image/png' && txt.includes(want.text.replace(/\s+/g, '').slice(0, 4)), `🔑 그림 + 자막 복사 → 자막 글자를 얹어 복사 (${txt.slice(0, 20)})`);
+      const f0 = st.fill[0]; const px = parseFloat((f0.font.match(/([\d.]+)px/) || [])[1]);
+      ok(f0 && Math.abs(f0.x / f0.cw - want.x) < 0.01, `🔑 복사본 자막 자리 = 화면 자막 자리(왼쪽에서 ${(f0.x / f0.cw * 100).toFixed(1)}% ≈ ${(want.x * 100).toFixed(1)}%)`);
+      ok(f0 && Math.abs(px / f0.cw - want.size) < 0.002 && f0.font.includes(want.weight), `🔑 복사본 자막 크기·굵기 = 화면과 같다(${(px / f0.cw * 100).toFixed(2)}% ≈ ${(want.size * 100).toFixed(2)}% · ${want.weight})`);
     } else await win.keyboard.press('Escape');
     // Ctrl+C = 그림 복사
     await win.mouse.click(cx, cy); await win.waitForTimeout(200);

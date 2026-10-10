@@ -119,13 +119,23 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await win.keyboard.press('Control+v'); await win.waitForTimeout(900);
     ok(/둘째 문장입니다/.test(md()), 'Ctrl+V: 잘라낸 클립을 다른 자리에 붙였다');
 
+    console.log('\n[5b] v0.7.82 — 그림 없는 클립의 칸도 그림이 들어갔을 때와 같은 16:9');
+    const th = await win.evaluate(() => { const e = document.querySelector('.cthumb.empty'); if (!e) return null; const b = e.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height) }; });
+    ok(th && th.w === 100 && th.h === 56, `🔑 「그림 없음」 칸 = 100×56(16:9) — 세로로 늘지 않는다 ${JSON.stringify(th)}`);
+
     console.log('\n[6] v0.7.80 — 막대는 체크박스로만 · 오른쪽 클릭 메뉴');
     await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(150);
     await win.locator('.sent[data-ln="2"] .clip-no .clip-no-n').first().click(); await win.waitForTimeout(300);
     ok(await win.locator('.sent[data-ln="2"].picked').count() >= 1 && await win.locator('[data-testid="clip-tb"]').count() === 0, '🔑 번호를 눌러 고르기만 하면 막대는 안 뜬다');
+    ok(!(await win.locator('.sent[data-ln="2"] .clip-chk').first().isChecked()), '🔑 번호를 눌러 고른 클립의 체크박스는 체크되지 않는다(체크박스를 눌렀을 때만 체크)');
+    await win.locator('.sent[data-ln="3"] .clip-body .clip-r1').first().click({ position: { x: 4, y: 4 } }); await win.waitForTimeout(250);
+    ok(!(await win.locator('.sent[data-ln="3"] .clip-chk').first().isChecked()), '클립 빈 자리를 눌러도 체크되지 않는다');
+    await win.locator('.sent[data-ln="2"] .clip-chk').first().click(); await win.waitForTimeout(250);
+    ok(await win.locator('.sent[data-ln="2"] .clip-chk').first().isChecked() && await win.locator('[data-testid="clip-tb"]').count() === 1, '🔑 체크박스를 누르면 체크되고 막대가 뜬다(앞서 번호로 고른 것을 그대로 두지 않고 새로 시작)');
+    await win.locator('.sent[data-ln="2"] .clip-chk').first().click(); await win.waitForTimeout(250);
     await win.locator('.sent[data-ln="3"] .clip-chk').first().click(); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="clip-tb"]').count() === 1, '🔑 체크박스를 체크하면 막대가 뜬다');
-    await win.locator('.sent[data-ln="3"] .clip-chk').first().click(); await win.locator('.sent[data-ln="2"] .clip-chk').first().click(); await win.waitForTimeout(300);
+    await win.locator('.sent[data-ln="3"] .clip-chk').first().click(); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="clip-tb"]').count() === 0, '체크를 모두 풀면 막대가 사라진다');
     await win.keyboard.press('Escape'); await win.keyboard.press('Escape');
     await win.locator('.sent[data-ln="4"] .clip-r1').first().click({ button: 'right', position: { x: 4, y: 4 } }); await win.waitForTimeout(300);

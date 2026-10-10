@@ -849,7 +849,7 @@ body.vr-dragging,body.vr-dragging *{cursor:ns-resize !important;user-select:none
 .cthumb .cl-layer{position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden}
 .cthumb .cl-layer img{width:100%;height:100%;object-fit:cover;display:block}
 .cthumb .frame-wait{display:block;width:100%;height:100%;background:#3a332c}
-.cthumb.empty{background:#f1ebe1;display:flex;align-items:center;justify-content:center}
+.cthumb.empty{background:#f1ebe1;display:flex;align-items:center;justify-content:center;padding:0}   /* 🔑 범용 .empty(위아래 60px)가 같이 걸려 칸이 세로로 120px 까지 늘었다 — 그림이 들어갔을 때와 같은 16:9(100×56)로 비워 둔다(v0.7.82 로이) */
 .cthumb .cthumb-none{font-size:10px;color:#a89a84}
 /* ── 🖼 v0.5.61 — 그룹 그림 범위 선(RailLayer) · 그룹을 넘어 한 줄 · 밖은 점선(아래층) ── */
 .cuts-grid.vrew .sents.vr{border-left-color:transparent}

@@ -1975,6 +1975,8 @@ export default function App() {
   // 🖱 클립 오른쪽 클릭 메뉴(Vrew 모양) — { x, y, sub: null|'sel'|'img'|'vid'|'fx', subY }
   const [clipCtx, setClipCtx] = useState(null);
   useEffect(() => { if (!capSel && chkSel) setChkSel(false); }, [capSel, chkSel]);
+  // ② 칸에는 「체크박스로 골랐는가」(chk)를 얹어 준다 — 체크 표시는 체크박스로 고른 클립에만(번호·본문을 눌러 고른 클립은 선택 색만 · v0.7.82)
+  const capSelV = useMemo(() => (capSel ? { ...capSel, chk: chkSel } : null), [capSel, chkSel]);
   const clipFocusRef = useRef(true);   // 마지막 마우스 누름이 클립(또는 클립 막대) 안이었나 — 아니면 Home/End 는 대본 처음·끝
   const groupNavRef = useRef(null);    // 🎞 그룹 칸 방향키 이동용 — 그룹 칸이 그릴 때마다 { step } 을 넣어 둔다
   useEffect(() => {
@@ -2498,6 +2500,8 @@ export default function App() {
     setChkSel((p) => !!(ev && ev.chk) || (p && !!ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)));
     setCapSel((cur) => {
       const same = cur && cur.shortsNum === shortsNum && cur.mode === 'lines';
+      // ☑ 체크박스를 처음 누르면(앞서 번호·본문으로 고른 것은 체크가 아니었다) 그 선택은 버리고 이 클립 하나로 새로 시작
+      if (ev && ev.chk && !chkSel) return { shortsNum, mode: 'lines', items: [info], anchorN: info.n };
       if (ev && ev.shiftKey && same && cur.anchorN != null) {
         const a = Math.min(cur.anchorN, info.n), b = Math.max(cur.anchorN, info.n);
         return { ...cur, items: allLines.filter((l) => l.n >= a && l.n <= b) };
@@ -4018,7 +4022,10 @@ export default function App() {
     const m = lay && lay.querySelector('img, video');
     if (!m) { setStatus('복사할 그림이 없습니다'); return false; }
     const text = withCap ? (cap != null ? cap : stageCapText()) : '';
-    try { await copyPreviewImage(m.tagName === 'IMG' ? m.src : null, text, m.tagName === 'VIDEO' ? m : null); setStatus(withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
+    try {
+      if (text) await copyStageImage(m, stageCapRef.current, st);   // 화면에 보이는 자막 모양 그대로
+      else await copyPreviewImage(m.tagName === 'IMG' ? m.src : null, '', m.tagName === 'VIDEO' ? m : null);
+      setStatus(withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
     catch (e) { setStatus('그림 복사 실패: ' + e.message); return false; }
   }
   /** ① 칸 그림 지우기(✕ 와 같다 — 삽입 그림은 목록의 ➕ 마크에서) */
@@ -5016,12 +5023,12 @@ export default function App() {
       go(r);
       setTimeout(() => { const b = document.querySelector('[data-testid="group-item"][data-g="' + r.num + '"]'); if (b && b.focus) b.focus({ preventScroll: true }); }, 0);   // 초점을 새 그룹으로 — 계속 눌러 이어 간다
     } };
-    const selNs = new Set(clipSelOk() && capSel.shortsNum === pr.shortsNum ? capSel.items.map((x) => x.n) : []);
+    const selNs = new Set(clipSelOk() && chkSel && capSel.shortsNum === pr.shortsNum ? capSel.items.map((x) => x.n) : []);   // 체크 표시는 체크로 고른 것만
     const isOn = (r) => r.lines.length > 0 && r.lines.every((l) => selNs.has(l.n));
     const sel = rows.filter(isOn).map((x) => x.num);
     const setGroups = (rs, on) => {
       const drop = new Set(rs.flatMap((r) => r.lines.map((l) => l.n)));
-      const keep = (clipSelOk() && capSel.shortsNum === pr.shortsNum ? capSel.items : []).filter((x) => !drop.has(x.n));
+      const keep = (clipSelOk() && chkSel && capSel.shortsNum === pr.shortsNum ? capSel.items : []).filter((x) => !drop.has(x.n));
       const add = on ? rs.flatMap((r) => r.lines.map((l) => ({ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }))) : [];
       const items = [...keep, ...add].sort((a, b) => a.n - b.n);
       setCapSel(items.length ? { shortsNum: pr.shortsNum, mode: 'lines', items, anchorN: items[0].n } : null);
@@ -5909,7 +5916,7 @@ export default function App() {
           )}
           <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} detail={view === 'clips' && clipDetail} linesMap={linesMap}
             cursor={cursor} onCursor={(sn, n) => userCursor({ shortsNum: sn, n })}
-            capBase={capBase} capSel={capSel} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
+            capBase={capBase} capSel={capSelV} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
@@ -7411,7 +7418,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
           const lineNs = [];
           const lines = PL ? ss.map((_, si) => (PL.bySent.get(c.num + ':' + si) || []).map((x) => { lineNs.push(x.n); return x.from + ',' + x.to + ',' + fmtClipTime(x.start, x.dur); }).join(';')).join('|') : '';   // 시각은 **보이는 정밀도로만**(mp3 를 풀면 몇십 ms 길어져 뒤 그룹 전체가 다시 그려졌다)
           const rel = (n) => lineNs.indexOf(n);   // 그룹 안 몇 번째 줄인가(번호가 당겨져도 같다)
-          const sel = capSel && capSel.shortsNum === sn ? capSel.mode + ':' + capSel.items.filter((x) => x.groupNum === c.num).map((x) => rel(x.n) + '/' + x.sentIdx + '/' + x.from + '-' + x.to).join(',') : '';
+          const sel = capSel && capSel.shortsNum === sn ? (capSel.chk ? '☑' : '') + capSel.mode + ':' + capSel.items.filter((x) => x.groupNum === c.num).map((x) => rel(x.n) + '/' + x.sentIdx + '/' + x.from + '-' + x.to).join(',') : '';
           const cur = cursor && cursor.shortsNum === sn && lineNs.includes(cursor.n) ? 'c' + rel(cursor.n) + (playing && playing.key ? 'P' : '') : '';   // P = 재생 중(읽는 클립 표시 · 재생 시작·끝에 다시 그린다)
           const ec = edit && edit.cur;
           const ed = ec && ec.shortsNum === sn && ec.groupNum === c.num ? JSON.stringify(ec) + (edit.busy ? 'B' : '') : '';
@@ -7596,7 +7603,7 @@ function Cards({ dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCurso
                                   onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>
                                   <span className="clip-no-n">{l.n}</span>
                                   {/* ☑ 번호 밑 체크박스(v0.7.32 · Vrew) — 누를 때마다 이 클립을 선택에 더하고/뺀다(Ctrl+클릭과 같다) */}
-                                  <input type="checkbox" className="clip-chk" data-testid="clip-chk" checked={!!picked} title="이 클립 체크 — 여러 개를 골라 합치기·삭제·복사"
+                                  <input type="checkbox" className="clip-chk" data-testid="clip-chk" checked={!!picked && !!capSel.chk} title="이 클립 체크 — 여러 개를 골라 합치기·삭제·복사"
                                     onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
                                     onChange={(ev) => { if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, { ctrlKey: true, shiftKey: false, chk: true }, _S.projLinesOf(pr.shortsNum)); }} />
                                 </div>
@@ -8282,6 +8289,75 @@ async function copyPreviewImage(src, caption, el) {
     ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, fs * 0.16); ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
     let y = h - fs * 0.6 - (lines.length - 1) * fs * 1.25;
     for (const ln of lines) { ctx.strokeText(ln, w / 2, y); ctx.fillText(ln, w / 2, y); y += fs * 1.25; }
+  }
+  const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('그림 변환 실패');
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
+// 📋 ① 칸 그림 + 자막 — 화면에 **보이는 자막을 그 모양 그대로**(자리·글꼴·크기·테두리·그림자·상자) 그림 위에 다시 그린다(v0.7.82 로이:
+//   「복사본은 자막이 가운데·얇은데 화면은 왼쪽·굵다」). 글자마다 실제 배치(Range 사각형)와 계산된 글자 모양을 읽어 그대로 옮긴다.
+function parseTextShadows(s) {
+  if (!s || s === 'none') return [];
+  const parts = []; let depth = 0, cur = '';
+  for (const c of s) { if (c === '(') depth++; if (c === ')') depth--; if (c === ',' && !depth) { parts.push(cur); cur = ''; } else cur += c; }
+  parts.push(cur);
+  return parts.map((p) => {
+    const m = p.match(/(rgba?\([^)]*\))/); const color = m ? m[1] : '#000';
+    const nums = (m ? p.replace(m[1], '') : p).match(/-?[\d.]+px/g) || []; const [x, y, b] = nums.map(parseFloat);
+    return { color, x: x || 0, y: y || 0, blur: b || 0 };
+  });
+}
+function stageCaptionDraws(capEl, R) {
+  const out = { bgs: [], chars: [] };
+  const wrap = capEl && capEl.querySelector('.cf-stageline'); if (!wrap) return out;
+  const rel = (r) => ({ x: r.left - R.left, y: r.top - R.top, w: r.width, h: r.height });
+  const clear = (c) => !c || c === 'transparent' || /^rgba\(\s*0,\s*0,\s*0,\s*0\s*\)$/.test(c);
+  const wbg = getComputedStyle(wrap).backgroundColor;
+  if (!clear(wbg)) for (const r of wrap.getClientRects()) out.bgs.push({ ...rel(r), color: wbg });
+  const walker = document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const el = n.parentElement; const cs = getComputedStyle(el);
+    const base = { style: cs.fontStyle, weight: cs.fontWeight, size: parseFloat(cs.fontSize) || 16, family: cs.fontFamily, color: cs.color,
+      stroke: parseFloat(cs.webkitTextStrokeWidth) || 0, strokeColor: cs.webkitTextStrokeColor, shadows: parseTextShadows(cs.textShadow),
+      bg: el !== wrap && !clear(cs.backgroundColor) ? cs.backgroundColor : null };
+    let off = 0;
+    for (const ch of n.textContent) {
+      const len = ch.length;
+      if (!/\s/.test(ch)) {
+        const rg = document.createRange(); rg.setStart(n, off); rg.setEnd(n, off + len);
+        const rs = rg.getClientRects(); if (rs.length) out.chars.push({ ch, ...rel(rs[0]), ...base });
+      }
+      off += len;
+    }
+  }
+  return out;
+}
+/** m = 스테이지의 img/video 요소 · capEl = #stageCap · visEl = #stageVisual(그림이 놓인 16:9 칸) */
+async function copyStageImage(m, capEl, visEl) {
+  let bmp;
+  if (m.tagName === 'VIDEO' && m.videoWidth > 0) bmp = m;
+  else { try { bmp = await createImageBitmap(await (await fetch(m.src)).blob()); } catch (_) { const im = new Image(); im.src = m.src; await im.decode(); bmp = im; } }
+  const iw = bmp.videoWidth || bmp.width, ih = bmp.videoHeight || bmp.height;
+  const R = visEl.getBoundingClientRect(); const sar = R.width / R.height;
+  // 그림 비율이 화면과 같으면 그림 원본 크기 그대로 · 다르면 화면 비율(1920 폭)에 맞추기로 놓는다
+  let cw = iw, ch = ih, dx = 0, dy = 0, dw = iw, dh = ih;
+  if (Math.abs(iw / ih - sar) > 0.02) { cw = 1920; ch = Math.round(1920 / sar); const sc = Math.min(cw / iw, ch / ih); dw = iw * sc; dh = ih * sc; dx = (cw - dw) / 2; dy = (ch - dh) / 2; }
+  const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+  const ctx = cv.getContext('2d'); if (cw !== iw || ch !== ih) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cw, ch); }
+  ctx.drawImage(bmp, dx, dy, dw, dh);
+  const k = cw / R.width; const d = stageCaptionDraws(capEl, R);
+  for (const b of d.bgs) { ctx.fillStyle = b.color; ctx.fillRect(b.x * k, b.y * k, b.w * k, b.h * k); }
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.lineJoin = 'round';
+  for (const c of d.chars) {
+    ctx.font = `${c.style} ${c.weight} ${c.size * k}px ${c.family}`;
+    const asc = ctx.measureText(c.ch).fontBoundingBoxAscent || c.size * k * 0.8;
+    const x = c.x * k, y = c.y * k + asc;
+    if (c.bg) { ctx.fillStyle = c.bg; ctx.fillRect(c.x * k, c.y * k, c.w * k, c.h * k); }
+    for (const s of [...c.shadows].reverse()) { ctx.save(); ctx.shadowColor = s.color; ctx.shadowOffsetX = s.x * k; ctx.shadowOffsetY = s.y * k; ctx.shadowBlur = s.blur * k; ctx.fillStyle = c.color; ctx.fillText(c.ch, x, y); ctx.restore(); }
+    if (c.stroke > 0) { ctx.lineWidth = c.stroke * k; ctx.strokeStyle = c.strokeColor; ctx.strokeText(c.ch, x, y); }
+    ctx.fillStyle = c.color; ctx.fillText(c.ch, x, y);
   }
   const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
   if (!blob) throw new Error('그림 변환 실패');
