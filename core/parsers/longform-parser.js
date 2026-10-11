@@ -80,6 +80,8 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.readerNotes = readerNotesOf(raw);
   // 🎨 `> 🎨 화풍: <id> (<이름>)` — 이 편의 본문 이미지 화풍(채널 화풍보다 우선 · 채널사업부 요청 2026-09-29 · v0.5.89)
   proj.scriptStyle = scriptStyleOf(raw);
+  // 📜 `> 📜 화면카드: …` 줄(R4 · v0.7.98) — 문장·그룹은 그대로, MP4 렌더가 마커로 카드를 얹는다(없으면 필드도 없다 = 예전과 같다)
+  { const mk = require('../screen-cards').markersOf(raw); if (mk.length) proj.screenCards = mk; }
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
 }

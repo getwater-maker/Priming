@@ -669,6 +669,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     overlays: (Array.isArray(project.overlays) && project.overlays.length) ? project.overlays : null,
     capAll: project.capAll || null,   // 🌐 「모든 자막」 서식 — 바꾸면 .vrew 를 다시 만든다
   };
+  if (Array.isArray(project.screenCards) && project.screenCards.length) inp.cards = require('./screen-cards').signatureOf(project.screenCards);   // 📜 화면 카드 마커 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
   if (preset) {
     if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);

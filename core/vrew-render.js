@@ -478,7 +478,57 @@ function buildAss(cues, overlays, cs, extra = {}) {
     }
     ev.push(`Dialogue: 6,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}${fx}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
   }
+  if (extra.cardLines && extra.cardLines.length) ev.push(...extra.cardLines);   // 📜 화면 카드(R4) — 어두운 판은 자막 아래 층 · 글자는 맨 위 층
   return head.join('\n') + '\n' + ev.join('\n') + '\n';
+}
+
+// ── 📜 화면 카드(R4 · v0.7.98) ───────────────────────────────────────────────
+//   카드 = core/screen-cards.plan 이 준 { kind:'pair'|'interlude', t0, t1, orig[], trans[] }(영상 전체 시각). 이 조각 창 [w0, w1] 에 걸친 것만 ASS 이벤트로.
+//   · 어두운 판(그림 위 · 자막 아래 층 0) + 글자(맨 위 층 8~9) — 둘 다 같은 곡선으로 서서히 나타나고 사라진다(밝기 변화가 느리다 — 수면용).
+//   · 조각 경계에서 번쩍이지 않게 곡선을 **절대 시각**으로 계산해 이 창 안의 구간만 \1a + \t 로 옮긴다(오버레이 페이드와 같은 방식).
+//   · 한자 = 동봉 HanjaSerif(Noto Serif CJK KR 한자 부분집합) · 한글 = Noto Serif KR — 둘 다 assets/fonts/book(라이트 업데이트로 배포되는 예외 접두사).
+const CARD_FONT = { han: 'Noto Serif CJK KR Light Hanja', ko: 'Noto Serif KR Light' };
+const CARD_FONT_FILES = ['HanjaSerif-Light.ttf', 'NotoSerifKR-Light.ttf'];
+const CARD_BG_MAX = 0.84;   // 어두운 판의 최대 불투명도 — 그림이 아주 희미하게 비친다(완전 검정 X)
+const cardAlpha = (op, max) => Math.max(0, Math.min(255, Math.round(255 * (1 - Math.max(0, Math.min(1, op)) * max)))).toString(16).padStart(2, '0').toUpperCase();
+/** 이 창에 걸친 카드 → Dialogue 줄 [문자열] (창 시각 w0~w1 초 · 이벤트 시각은 창 기준) */
+function cardEvents(cards, w0, w1) {
+  const out = [];
+  for (const c of (cards || [])) {
+    const a = Math.max(c.t0, w0), b = Math.min(c.t1, w1);
+    if (!(b - a > 0.005)) continue;
+    const SC = require('./screen-cards');
+    const f = SC.fadeOf(c);
+    // 곡선의 꺾임 시각(이 창 안) — 사이는 직선
+    const knots = [a, ...[c.t0 + f, c.t1 - f].filter((x) => x > a + 1e-6 && x < b - 1e-6), b];
+    const rel = (t) => Math.round((t - a) * 1000);
+    const ramp = (max, inv = true) => {   // 첫 알파 + 구간마다 \t
+      let tag = `\\1a&H${cardAlpha(SC.opacityAt(c, a + 0.001), max)}&`;
+      for (let k = 0; k + 1 < knots.length; k++) {
+        const o0 = k === 0 ? SC.opacityAt(c, knots[0] + 0.001) : SC.opacityAt(c, knots[k]), o1 = k + 2 === knots.length ? SC.opacityAt(c, knots[k + 1] - 0.001) : SC.opacityAt(c, knots[k + 1]);
+        if (Math.abs(o1 - o0) > 1e-4) tag += `\\t(${rel(knots[k])},${rel(knots[k + 1])},\\1a&H${cardAlpha(o1, max)}&)`;
+      }
+      return tag;
+    };
+    const st = fmtAss(a - w0), en = fmtAss(b - w0);
+    // ① 어두운 판 — 화면 전체(벡터 사각형) · 층 0(자막 층 1~4 보다 아래)
+    out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H0E0B0B&${ramp(CARD_BG_MAX)}\\p1}m 0 0 l ${W} 0 ${W} ${H} 0 ${H}{\\p0}`);
+    const txt = (lines, o) => {   // 글자 한 덩어리(가운데 정렬 · 줄바꿈 \N)
+      const body = lines.map((x) => assEsc(String(x).replace(/\s+/g, ' ').trim())).join('\\N');
+      out.push(`Dialogue: 8,${st},${en},N,,${o.ml || 240},${o.ml || 240},0,,{\\an5\\pos(${W / 2},${o.y})\\fn${o.font}\\fs${o.fs}\\b0\\i0\\bord0\\shad0\\\fsp${o.sp || 0}\\1c&H${o.color}&${ramp(1)}}${body}`);
+    };
+    const rule = (y) => out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an7\\pos(${W / 2 - 70},${y})\\bord0\\shad0\\1c&H8C8C8C&${ramp(0.55)}\\p1}m 0 0 l 140 0 140 2 0 2{\\p0}`);
+    if (c.kind === 'interlude') {
+      txt(c.trans, { y: H / 2 - 20, font: CARD_FONT.ko, fs: 76, color: 'D8E2EA', sp: 4 });
+      rule(H / 2 + 70);
+    } else {
+      const hasOrig = c.orig && c.orig.length;
+      if (hasOrig) txt(c.orig, { y: 360, font: CARD_FONT.han, fs: 66, color: 'D0E0EA', sp: 6 });
+      if (hasOrig) rule(500);
+      txt(c.trans || [], { y: hasOrig ? 660 : 540, font: CARD_FONT.ko, fs: 46, color: 'C4C0BC', sp: 1 });
+    }
+  }
+  return out;
 }
 
 // ── 켄번스 ─────────────────────────────────────────────────────────────────
@@ -665,7 +715,7 @@ async function renderChunk(ch, i, ctx) {
   const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
-  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout }), 'utf8');
+  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout, cardLines: (ctx.cards && ctx.cards.length) ? cardEvents(ctx.cards, t0, t0 + dur) : null }), 'utf8');
   const assFilter = `ass=${assName}:fontsdir=${fontsDirName}`;
 
   let args;
@@ -946,6 +996,13 @@ async function renderVrewToMp4(opts = {}) {
     // 조각 병렬 렌더
     t = Date.now();
     Object.assign(ctx, { tmpDir, cs, capEvents, layout, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
+    // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
+    if (Array.isArray(opts.cards) && opts.cards.length) {
+      ctx.cards = opts.cards;
+      const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
+      for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
+      log(`   📜 화면 카드 ${opts.cards.length}장 — ${opts.cards.map((c) => (c.kind === 'interlude' ? '막간' : '병기') + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
+    }
     // 🌫 오버레이 모션 — 구간표가 있고 어느 구간이든 켜져 있으면 질감을 한 번만 만든다(JS 로 수백 ms)
     if (opts.fx && Array.isArray(opts.fx.ranges) && opts.fx.ranges.length) {
       const used = {}; for (const r of opts.fx.ranges) for (const k of FXO.KINDS) if (r.fx && r.fx[k]) used[k] = 1;
@@ -1027,6 +1084,6 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents,
   FONT_FILE, FPS, W, H,
 };

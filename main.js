@@ -2802,6 +2802,16 @@ ${mtime ? `만든 시각: ${mtime}
   finally { clearTimeout(timer); }
 }
 // 🌫 오버레이 모션 구간표(삼국지 R1) — 채널 fx + 그룹 look.fx → 영상 전체 시각 구간별 값. 채널이 전부 꺼져 있으면 null(= 예전과 같다). 대본(pr)이 없으면 채널 값을 영상 전체에.
+// 📜 화면 카드(R4 · v0.7.98) — 대본 마커 + 문장 시각 → [{kind,t0,t1,orig,trans}] · 경고는 로그에(조용히 줄이지 않는다) · 마커가 없으면 null(= 예전 MP4 와 같다)
+function cardsOptsFor(pr) {
+  try {
+    if (!pr || !Array.isArray(pr.screenCards) || !pr.screenCards.length) return null;
+    const r = require('./core/screen-cards').plan(pr, pr.screenCards);
+    for (const w of r.warnings) log('⚠ ' + w);
+    if (r.cards.length) log(`📜 화면 카드 ${r.cards.length}장(병기 ${r.cards.filter((c) => c.kind === 'pair').length} · 막간 ${r.cards.filter((c) => c.kind === 'interlude').length}) · 마커 ${pr.screenCards.length}줄${r.warnings.length ? ' · 건너뜀 ' + r.warnings.length : ''}`);
+    return r.cards.length ? r.cards : null;
+  } catch (e) { log('⚠ 화면 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
+}
 function fxOptsFor(pr, preset) {
   try {
     const FXO = require('./core/fx-overlay');
@@ -2824,7 +2834,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표)
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
@@ -6791,8 +6801,8 @@ function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
-  let readerNotes = [], scriptStyle = null;
-  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); } } catch (_) {}
+  let readerNotes = [], scriptStyle = null, screenCards = null;
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } } } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -6826,6 +6836,7 @@ function projectsFromSnapshot(snap) {
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) proj.logoOver = lo; }   // 🏷 로고 넣기/빼기
     { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) proj.capAll = ca; }   // 🌐 모든 자막 서식
     if (readerNotes.length) proj.readerNotes = readerNotes;
+    if (screenCards) proj.screenCards = screenCards;   // 📜 화면 카드 마커(R4) — .md 가 정본
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
