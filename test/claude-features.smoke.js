@@ -36,7 +36,8 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
         else if (Array.isArray(c) && c.some((x) => x.type === 'image')) out = /감나무/.test(txt) ? '{"ok":false,"issues":["그림 안에 글자가 있음"]}' : '{"ok":true}';
         else if (/## \[1-\d+\]/.test(txt)) {
           const only = /영상 모션 프롬프트를 새로/.test(txt) ? 'video' : /이미지 생성 프롬프트를 새로/.test(txt) ? 'image' : '';
-          out = [...txt.matchAll(/## \[1-(\d+)\]/g)].map((m) => `## [1-${m[1]}]\n` + (only !== 'video' ? `이미지: ${only ? 'rewritten' : 'filled'} image ${m[1]}\n` : '') + (only !== 'image' ? `영상: ${only ? 'rewritten' : 'filled'} motion ${m[1]}\n` : '')).join('');
+          const word = /이번 요청 안내/.test(txt) ? 'regen' : only ? 'rewritten' : 'filled';
+          out = [...txt.matchAll(/## \[1-(\d+)\]/g)].map((m) => `## [1-${m[1]}]\n` + (only !== 'video' ? `이미지: ${word} image ${m[1]}\n` : '') + (only !== 'image' ? `영상: ${word} motion ${m[1]}\n` : '')).join('');
         } else out = 'male, sixties, low warm pitch, slow storytelling pace';
         return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ model: 'claude-opus-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: out }], usage: { input_tokens: 10, output_tokens: 10 } }) };
       } };
@@ -99,6 +100,30 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
       const sentImage = await app.evaluate(() => global.__claudeApiCalls.some((b) => Array.isArray(b.messages[0].content) && b.messages[0].content.some((x) => x.type === 'image' && x.source.media_type === 'image/jpeg')));
       ok(sentImage, '검수 요청에 그림(JPEG 로 줄여)이 실렸다');
     }
+
+    // ④-2 🤖 한 그룹 프롬프트 재생성(📝 프롬프트 수정 창) — 칸만 채우고 그룹은 안 바꾼다 · 근거 = 저장 전 글 + 요청 + 앞뒤 장면
+    const before = await groupsOf();
+    await win.evaluate(async () => { const el = [...document.querySelectorAll('button')].find((b) => /프롬프트 보기/.test(b.title || '')); if (el) el.click(); });
+    await win.waitForSelector('[data-testid=regen-hint]', { timeout: 8000 });
+    ok(await win.locator('[data-testid=regen-image-prompt]').count() === 1 && await win.locator('[data-testid=regen-video-prompt]').count() === 1, '📝 창에 🤖 프롬프트 재생성 단추 둘(이미지·영상)');
+    await win.fill('[data-testid=regen-hint]', '밤 장면으로');
+    await win.locator('textarea').first().fill('my unsaved edit');
+    await win.click('[data-testid=regen-image-prompt]');
+    await win.waitForFunction(() => /^regen image/.test((document.querySelector('.modal-card textarea') || {}).value || ''), null, { timeout: 15000 }).catch(() => {});
+    const boxI = await win.locator('.modal-card textarea').first().inputValue();
+    ok(/^regen image \d+$/.test(boxI), '🤖 이미지 칸이 새 글로 채워짐: ' + boxI);
+    await win.click('[data-testid=regen-video-prompt]');
+    await win.waitForFunction(() => [...document.querySelectorAll('.modal-card textarea:not([readonly])')].some((t) => /^regen motion/.test(t.value)), null, { timeout: 15000 }).catch(() => {});
+    const boxV = await win.evaluate(() => [...document.querySelectorAll('.modal-card textarea:not([readonly])')].map((t) => t.value)[1] || '');
+    ok(/^regen motion \d+$/.test(boxV), '🤖 영상 칸이 새 글로 채워짐: ' + boxV);
+    const after = await groupsOf();
+    ok(JSON.stringify(before) === JSON.stringify(after), '그룹의 저장된 프롬프트는 그대로(「저장·생성」을 눌러야 바뀜)');
+    const reqs = await app.evaluate(() => global.__claudeApiCalls.filter((b) => /이번 요청 안내/.test(JSON.stringify(b.messages[0].content))).map((b) => b.messages[0].content));
+    ok(reqs.length === 2 && /로이의 요청\*\*: 밤 장면으로/.test(reqs[0]) && /지금 프롬프트: my unsaved edit/.test(reqs[0]), '요청에 로이의 요청 + 저장 전에 고친 글이 실렸다');
+    ok(/\(뒤\) 대본/.test(reqs[0]) || /\(앞\) 대본/.test(reqs[0]), '요청에 앞·뒤 장면(일관성 참고)이 실렸다');
+    ok(/이미지 프롬프트: regen image \d+/.test(reqs[1]) && !/^이미지:/m.test(reqs[1]), '영상 재생성은 칸의 (방금 새로 쓴) 이미지 프롬프트를 근거로');
+    if (process.env.PM_SHOT) { try { await win.locator('.modal-card').first().screenshot({ path: process.env.PM_SHOT }); } catch (_) {} }
+    await win.click('.modal-card button:has-text("닫기")').catch(() => {});
 
     // ⑤ 🎨 보이스디자인 설명 만들기
     const vi = await win.evaluate(async () => window.api.claudeVoiceInstruct({ wish: '60대 남자, 낮고 따뜻하게', lang: 'Korean' }));

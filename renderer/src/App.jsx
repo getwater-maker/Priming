@@ -1799,6 +1799,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptView && promptView.image, promptView && promptView.video, promptView && promptView.motion, styleId, promptView ? 1 : 0]);
 
+  // 🤖 이 그룹의 프롬프트를 Claude API 로 다시 쓴다(v0.7.95) — 칸만 채운다(저장·생성은 로이가 누를 때) · 요청 칸의 글(선택)을 반영
+  async function regenPromptView(kind) {
+    if (!promptView || promptView.busy) return;
+    const { shortsNum, groupNum, image, video, hint } = promptView;
+    setPromptView((v) => (v ? { ...v, busy: kind } : v));
+    setStatus(`🤖 G${groupNum} ${kind === 'video' ? '영상' : '이미지'} 프롬프트 다시 쓰는 중… (Claude)`);
+    try {
+      const r = await api.claudeRegenPrompt({ shortsNum, groupNum, kind, hint, image, video, styleName: styleName() });
+      if (r && r.ok) {
+        setPromptView((v) => (v && v.shortsNum === shortsNum && v.groupNum === groupNum ? { ...v, busy: '', [kind === 'video' ? 'video' : 'image']: r.text, fresh: kind } : v));
+        setStatus(`🤖 새 ${kind === 'video' ? '영상' : '이미지'} 프롬프트를 칸에 넣었습니다 — 마음에 들면 「생성」 또는 「저장만」을 누르세요`);
+      } else {
+        setPromptView((v) => (v ? { ...v, busy: '' } : v));
+        const m = (r && r.error) || '프롬프트를 만들지 못했습니다'; logline('🤖 프롬프트 재생성: ' + m); setStatus(m); uiAlert('🤖 프롬프트 재생성 실패:\n' + m);
+      }
+    } catch (e) {
+      setPromptView((v) => (v ? { ...v, busy: '' } : v));
+      const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('🤖 프롬프트 재생성: ' + m); setStatus(m);
+    }
+  }
   // 수정한 프롬프트 저장(+선택적으로 이미지/비디오 재생성). regen: 'image' | 'video' | null(저장만)
   async function savePromptView(regen) {
     if (!promptView) return;
@@ -7194,11 +7214,18 @@ export default function App() {
           <div className="modal-card" style={{ maxWidth: 620 }}>
             <h3>📝 {promptView.label} — 프롬프트 수정</h3>
             <div className="meta" style={{ marginBottom: 6 }}>대본 프롬프트를 직접 고쳐 이미지·비디오를 다시 만들 수 있습니다. 수정 후 아래 <b>생성</b> 버튼을 누르면 이 그룹만 새로 생성됩니다.</div>
+            {/* 🤖 Claude API — 요청(선택)을 적고 아래 🤖 버튼을 누르면 이 그룹 프롬프트만 새로 씁니다(v0.7.95) */}
+            <div className="frow" style={{ margin: '0 0 8px' }}>
+              <label title="비워 두면 지금 프롬프트와 다른 구도로 새로 씁니다. 예: 밤 장면으로 · 인물 얼굴이 보이게 · 더 넓은 풍경으로">🤖 요청</label>
+              <input data-testid="regen-hint" style={{ flex: 1, minWidth: 0 }} value={promptView.hint || ''} onChange={(e) => setPromptView({ ...promptView, hint: e.target.value })}
+                placeholder="(선택) 어떻게 바꿀까? 예: 밤 장면으로 · 얼굴이 보이게 · 더 넓은 풍경" />
+            </div>
             {/* 🖼 이미지 프롬프트 (편집) */}
             <div className="meta" style={{ marginBottom: 4 }}>🖼️ 이미지 프롬프트 <span style={{ fontWeight: 400 }}>— 생성 시 앞에 <b>스타일 「{promptView.styleName}」</b> 이 자동으로 붙습니다</span></div>
             <textarea rows="6" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.image} onChange={(e) => setPromptView({ ...promptView, image: e.target.value })} placeholder="영문 이미지 프롬프트" />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 이미지를 새로 생성" onClick={() => savePromptView('image')}>🖼 이미지 생성</button>
+              <button className="ghost" data-testid="regen-image-prompt" disabled={!loaded || !!promptView.busy} title="Claude API 가 이 그룹 대본(과 앞뒤 장면)에 맞춰 이미지 프롬프트를 새로 씁니다 — 칸만 채우고, 저장·생성은 따로 누릅니다(프롬프트가 비었을 때도 됩니다)" onClick={() => regenPromptView('image')}>{promptView.busy === 'image' ? '⏳ 쓰는 중…' : '🤖 프롬프트 재생성'}</button>
+              <button disabled={!loaded || !!promptView.busy} title="이 프롬프트를 저장하고 이 그룹 이미지를 새로 생성" onClick={() => savePromptView('image')}>🖼 이미지 생성</button>
             </div>
             {/* ▼ 실제 전송되는 최종 프롬프트(읽기전용) — main 이 생성 코드와 같은 함수로 계산 */}
             <div className="meta" style={{ margin: '8px 0 3px' }}>
@@ -7215,7 +7242,8 @@ export default function App() {
             <div className="meta" style={{ margin: '10px 0 4px' }}>🎬 영상(I2V) 프롬프트 <span style={{ fontWeight: 400 }}>— 모션만 (스타일은 원본 이미지가 이미 가짐)</span></div>
             <textarea rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.video} onChange={(e) => setPromptView({ ...promptView, video: e.target.value })} placeholder="영문 모션 프롬프트 (비우면 기본 모션)" />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 비디오를 새로 생성 (이미지 있어야 함)" onClick={() => savePromptView('video')}>🎬 비디오 생성</button>
+              <button className="ghost" data-testid="regen-video-prompt" disabled={!loaded || !!promptView.busy} title="Claude API 가 위 이미지 프롬프트와 대본에 맞는 영상(모션) 프롬프트를 새로 씁니다 — 칸만 채우고, 저장·생성은 따로 누릅니다(영상 프롬프트가 비었을 때도 됩니다)" onClick={() => regenPromptView('video')}>{promptView.busy === 'video' ? '⏳ 쓰는 중…' : '🤖 프롬프트 재생성'}</button>
+              <button disabled={!loaded || !!promptView.busy} title="이 프롬프트를 저장하고 이 그룹 비디오를 새로 생성 (이미지 있어야 함)" onClick={() => savePromptView('video')}>🎬 비디오 생성</button>
             </div>
             {/* ▼ 실제 전송되는 최종 영상 프롬프트(읽기전용) — 비어있으면 모션노트/기본모션이 대신 전송됨 */}
             <div className="meta" style={{ margin: '8px 0 3px' }}>

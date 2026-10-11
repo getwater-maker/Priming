@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('api', {
   claudeKeyGet: () => ipcRenderer.invoke('claude-key-get'),          // 🤖 Claude API 키(v0.7.93)
   claudeKeySave: (args) => ipcRenderer.invoke('claude-key-save', args),
   claudeOpenKey: () => ipcRenderer.invoke('claude-open-key'),
+  claudeRegenPrompt: (args) => ipcRenderer.invoke('claude-regen-prompt', args),   // 🤖 한 그룹 프롬프트 재생성(v0.7.95)
   claudeVisionCheck: (args) => ipcRenderer.invoke('claude-vision-check', args),   // 🔍 그림 검수(v0.7.94)
   claudeVisionMark: (args) => ipcRenderer.invoke('claude-vision-mark', args),
   claudeVoiceInstruct: (args) => ipcRenderer.invoke('claude-voice-instruct', args), // 🎨 보이스디자인 설명 만들기

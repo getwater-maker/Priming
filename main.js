@@ -5420,6 +5420,47 @@ ipcMain.handle('claude-vision-check', async (_e, args = {}) => {
   log(`🔍 그림 검수 끝 — ${checked}장 확인 · 문제 ${flagged.length}장${failed ? ` · 실패 ${failed}장` : ''}${S.abort ? ' (중단됨)' : ''} (이번 실행 Claude 누적 ≈ $${CA.spent().toFixed(3)})`);
   return { dto: P.toDTO(S.parsed), checked, failed, flagged };
 });
+// ── 🤖 한 그룹의 프롬프트 재생성(v0.7.95 · 프롬프트 수정 창의 「🤖 프롬프트 재생성」) ─────────────────────
+//   클립을 나눠 프롬프트가 비었거나, 같은 장면을 다른 구도·다른 영상으로 다시 만들고 싶을 때. **그룹을 바꾸지 않고 글만 돌려준다**
+//   (창의 칸에 채워지고, 로이가 「이미지 생성/비디오 생성/저장만」을 눌러야 저장 — 되돌리기 필요 없음).
+//   근거 = 그 그룹 대본 + 앞 2·뒤 1 그룹(인물·시대 일관성) + 지금 칸의 글(저장 전 고친 것 포함) + 로이의 요청(선택).
+ipcMain.handle('claude-regen-prompt', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const CA = require('./core/claude-api');
+  if (!CA.available()) return { ok: false, error: 'Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요.' };
+  const kind = args.kind === 'video' ? 'video' : 'image';
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) return { ok: false, error: '그룹을 찾지 못했습니다' };
+  const hint = String(args.hint || '').trim().slice(0, 300);
+  const curImage = String(args.image != null ? args.image : (g.imagePrompt || '')).trim();
+  const curVideo = String(args.video != null ? args.video : (g.videoPrompt || '')).trim();
+  const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const sentOf = (gg) => flat(pr.getSentencesOfGroup(gg).map((x) => x.text).join(' ')).slice(0, 400);
+  const at = pr.groups.indexOf(g);
+  const near = [];
+  for (const gg of [pr.groups[at - 2], pr.groups[at - 1], pr.groups[at + 1]]) {
+    if (!gg) continue;
+    near.push(`- G${gg.num} ${gg.num < g.num ? '(앞)' : '(뒤)'} 대본: ${sentOf(gg)}${gg.imagePrompt ? `\n  그 그림 프롬프트: ${flat(gg.imagePrompt).slice(0, 500)}` : ''}`);
+  }
+  const extra = ['## 이번 요청 안내(이 줄들은 `## [편-그룹]` 머리가 아니다)'];
+  if (near.length) extra.push('인물·시대·화면 톤을 맞추기 위한 **주변 장면**(그대로 베끼지 말고 일관성만 참고):', ...near);
+  if (hint) extra.push(`**로이의 요청**: ${hint}`);
+  else if (kind === 'image' && curImage) extra.push('**지금 프롬프트와 다른 구도·시점·장면 연출**로 새로 쓰세요(같은 인물·시대·옷차림은 유지).');
+  else if (kind === 'video' && curVideo) extra.push('**지금 영상 프롬프트와 다른 카메라워크·움직임**으로 새로 쓰세요.');
+  const PromptIO = require('./core/prompt-io');
+  const keys = new Set([`${pr.shortsNum}-${g.num}`]);
+  // 근거 글은 창의 칸(저장 전 고친 것 포함) — 실제 그룹은 건드리지 않는다
+  const view = { shortsNum: pr.shortsNum, aspect: pr.aspect, groups: [{ ...g, imagePrompt: curImage, videoPrompt: curVideo }], getSentencesOfGroup: () => pr.getSentencesOfGroup(g) };
+  const req = PromptIO.buildPromptRequestText([view], { styleName: String(args.styleName || ''), only: kind, onlyKeys: keys, extra });
+  const r = await CA.ask({ text: req, maxTokens: 4000, timeoutMs: 180000, log, label: `G${g.num} ${kind === 'video' ? '영상' : '이미지'} 프롬프트 재생성` });
+  if (!r.ok) return { ok: false, error: r.error };
+  const tmp = { num: g.num };   // 파서가 쓸 빈 그룹 — 진짜 그룹은 그대로(안전 치환까지 파서가 한다)
+  PromptIO.applyPromptsToProjects([{ shortsNum: pr.shortsNum, groups: [tmp] }], r.text, { only: kind });
+  const text = kind === 'video' ? tmp.videoPrompt : tmp.imagePrompt;
+  if (!text) return { ok: false, error: 'Claude 답에서 프롬프트를 찾지 못했습니다' };
+  return { ok: true, text, kind };
+});
 // 검수에서 고른 그룹 → 다음 이미지 생성 때 새로 그린다(imageStale · 그림 파일은 지우지 않는다 · 첨부 그림은 건너뜀)
 ipcMain.handle('claude-vision-mark', (_e, args = {}) => {
   if (!S.parsed) return null;

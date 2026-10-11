@@ -111,6 +111,7 @@ function buildPromptRequestText(projects, opts = {}) {
   if (only !== 'video') L.push('    이미지: <영어 이미지 프롬프트>');
   if (only !== 'image') L.push(only === 'video' ? '    영상: <영어 영상 모션 프롬프트>' : '    영상: <영어 영상 모션 프롬프트 — (영상) 그룹만>');
   L.push('');
+  if (Array.isArray(opts.extra) && opts.extra.length) { L.push(''); for (const x of opts.extra) L.push(x); }   // 🔁 한 그룹 다시 쓰기(v0.7.95) — 주변 장면·요청 · `## [` 머리는 쓰지 않는다(답 파서와 안 섞이게)
   L.push('---');
   L.push('');
   for (const project of list) {
@@ -128,7 +129,7 @@ function buildPromptRequestText(projects, opts = {}) {
         .map((s) => String(s.text || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean).join(' ');
       L.push(`- 대본: ${full}`);
-      const curImg = String(g.imagePrompt || '').replace(/\s+/g, ' ').trim();
+      const curImg = String(opts.imageOverride != null ? opts.imageOverride : (g.imagePrompt || '')).replace(/\s+/g, ' ').trim();   // 화면에서 고치는 중인(저장 전) 글이 있으면 그것을 근거로
       if (only === 'image' && curImg) L.push(`- 지금 프롬프트: ${curImg}`);
       if (only === 'video' && curImg) L.push(`- 이미지 프롬프트: ${curImg}`);
       L.push('');
