@@ -5846,6 +5846,9 @@ export default function App() {
         return (<>
           <div className="vr-menu-bg" data-testid="cx-bg" onMouseDown={() => setClipCtx(null)} onContextMenu={(e) => { e.preventDefault(); setClipCtx(null); }} />
           <div className="vr-menu clip-ctx" data-testid="clip-ctx" style={{ left, top, width: W, maxHeight: mh }} onMouseDown={(e) => e.preventDefault()}>
+            {/* 🎤 v0.7.96 — 맨 위: 고른 클립(문장)의 음성을 채널 목소리·시드 그대로 다시 만든다(막대의 「🎤 다시 만들기」와 같은 함수 clipTts) */}
+            <Row icon="🎤" label="목소리 다시 만들기" onClick={run(() => clipTts(false))} tid="cx-voice-redo" />
+            <div className="vr-sep" />
             <div className="cx-top" onMouseEnter={hov(null)}>
               <button data-testid="cx-cut" title="잘라내기 (Ctrl+X)" onClick={run(() => clipCopy(true))}>✂</button>
               <button data-testid="cx-copy" title="복사 (Ctrl+C)" onClick={run(() => clipCopy(false))}>⧉</button>

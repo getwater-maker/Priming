@@ -94,6 +94,24 @@ console.log('\n[3] 질감 — 결정적 · 올바른 PNG · 이음새 없음');
     const s4 = seqOf(fx, 3.88), s0 = seqOf(fx, 1.9), b4 = seqOf(base, 3.88);   // 4초 경계 앞뒤 vs 조각 안쪽 vs 효과 없는 같은 경계
     console.log('   경계(4초)', s4.map((x) => x.toFixed(2)).join(' '), '| 안쪽', s0.map((x) => x.toFixed(2)).join(' '), '| 효과 없는 경계', b4.map((x) => x.toFixed(2)).join(' '));
     ok(Math.max(...s4) < Math.max(2.0, Math.max(...b4) + 1.5), `조각 이음새(4초)에서 안개·점이 튀지 않는다(경계 최대 ${Math.max(...s4).toFixed(2)} — 효과 없는 같은 경계 ${Math.max(...b4).toFixed(2)}에 더해 +1.5 이내 · 위치가 어긋나면 수 배)`);
+    // 🔴 색(채도) — v0.7.96: 효과를 켜면 MP4 가 통째로 흑백이 된 사고(blend 의 c1/c2 불투명도 0 = 색 판을 회색 질감에서 가져옴 · 삼국지 1부 2026-10-11).
+    //   위 시험 그림은 회색이라 못 잡았다 → 색이 있는 그림으로 따로 굽고 U·V 평균과 채도를 잰다. 판정력: 옛 필터(c1_opacity=0)로 되돌리면 채도가 0 이 된다.
+    {
+      const colImg = path.join(tmp, 'col.png');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080', '-frames:v', '1', colImg]);
+      const rc = P.parseScriptText('# t\n## 장\n### ① 첫\n첫째 문장입니다. 둘째 문장입니다.\n### ② 둘\n셋째 문장입니다. 넷째 문장입니다.\n', 'longform', {});
+      const prc = rc.projects[0]; prc.groups[0].imagePath = colImg; prc.groups[1].imagePath = colImg;
+      prc.sentences.forEach((s, i) => { s.ttsAudioPath = path.join(tmp, `s${i}.mp3`); s.ttsDurationSec = 5; });
+      const vrewC = path.join(tmp, 'c.vrew'); await P.buildProjectVrew(prc, vrewC, {}, () => {}, 20, 1);
+      const bakeC = async (name, o) => { const mp4 = path.join(tmp, name + '.mp4'); const res = await R.renderVrewToMp4({ vrewPath: vrewC, outPath: mp4, log: () => {}, par: 2, chunkSec: 4, ...o }); if (!res || !res.ok) throw new Error('색 렌더 실패 ' + name); return mp4; };
+      const rangesC = FXO.planOf(prc, { fog: 3, dust: 3, firefly: 3, flicker: 3 });
+      const cBase = await bakeC('cbase', {}), cFx = await bakeC('cfx', { fx: { ranges: rangesC } }), cBoth = await bakeC('cboth', { fx: { ranges: rangesC }, dissolveSec: 4 });
+      const sat = (f, t) => { const r = require('child_process').spawnSync(FF, ['-v', 'error', '-ss', String(t), '-i', f, '-frames:v', '1', '-vf', 'signalstats,metadata=print:file=-', '-f', 'null', '-'], { encoding: 'utf8' }); const m = (k) => +((r.stdout.match(new RegExp('lavfi.signalstats.' + k + '=([0-9.]+)')) || [])[1]); return { sat: m('SATAVG'), u: m('UAVG'), v: m('VAVG') }; };
+      const b3 = sat(cBase, 3), f3 = sat(cFx, 3), f9 = sat(cFx, 9), d9 = sat(cBoth, 9);
+      ok(b3.sat > 20, `시험 그림에 색이 있다(채도 ${b3.sat.toFixed(1)} — 이 값이 낮으면 판정력이 없다)`);
+      ok(f3.sat > b3.sat * 0.9 && Math.abs(f3.u - b3.u) < 2 && Math.abs(f3.v - b3.v) < 2, `🔴 효과(안개·먼지·반딧불·깜박임)를 켜도 색이 그대로(채도 ${b3.sat.toFixed(1)} → ${f3.sat.toFixed(1)} · U ${b3.u.toFixed(1)}→${f3.u.toFixed(1)} · V ${b3.v.toFixed(1)}→${f3.v.toFixed(1)})`);
+      ok(f9.sat > b3.sat * 0.9 && d9.sat > b3.sat * 0.9, `깜박임·반딧불이 숨 쉬는 구간(9초)과 디졸브를 함께 켜도 색이 그대로(채도 ${f9.sat.toFixed(1)} · 디졸브 함께 ${d9.sat.toFixed(1)})`);
+    }
     // 디졸브와 함께
     const both = await bake('both', { fx: { ranges: FXO.planOf(Object.assign({}, pr, { groups: pr.groups.map((g) => ({ ...g, look: undefined })) }), { fog: 2, dust: 1 }) }, dissolveSec: 4 });
     ok(Math.abs(dur(both) - 20) < 0.1, `디졸브 + 오버레이를 함께 켜도 렌더되고 길이가 같다(${dur(both).toFixed(2)}초)`);

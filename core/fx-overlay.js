@@ -132,9 +132,12 @@ function fxGraph({ base, idx0, t0, dur, fx, tex, fps = 30, id = 'x', lp = 'x' })
   let cur = base, i = idx0, n = 0;
   const T = (e) => e.replace(/\bTT\b/g, `(t+${(+t0).toFixed(3)})`);
   const still = (file) => { ins.push('-i', file); return `[${i++}:v]`; };   // 🔴 `-loop 1` 은 매 프레임 PNG 를 다시 디코딩한다(3840x2160 이면 프레임당 수십 ms · 메모리도 쌓인다 — 실측 렌더 3.8배 · +5GB). 한 장만 읽고 loop 필터가 되풀이한다
-  const scr = (lbl, op, out, name) => { parts.push(`${cur}${lbl}blend${name ? '@' + name : ''}=c0_mode=screen:c0_opacity=${op}:c1_opacity=0:c2_opacity=0:shortest=1[${out}]`); cur = `[${out}]`; };
+  // 🔴 v0.7.96 — blend 의 불투명도는 **첫 입력(그림)의 비율**이다: normal 모드에서 `c1_opacity=0` 은 「색 판을 두 번째 입력(회색 질감 · U=V=128)에서 가져온다」 = **영상이 통째로 흑백**이 된다(삼국지 1부 MP4 실사고 2026-10-11 · SATAVG 13.7 → 0).
+  //   색(U·V) 판은 `normal · 불투명도 1` = 그림 그대로, 밝기(Y) 판만 screen/addition 으로 섞는다.
+  const CHROMA_KEEP = 'c1_mode=normal:c1_opacity=1:c2_mode=normal:c2_opacity=1';
+  const scr = (lbl, op, out, name) => { parts.push(`${cur}${lbl}blend${name ? '@' + name : ''}=c0_mode=screen:c0_opacity=${op}:${CHROMA_KEEP}:shortest=1[${out}]`); cur = `[${out}]`; };
   // 시간에 따라 변하는 불투명도 — 조각 안 0.1초마다 값을 보낸다(blend 불투명도는 실수라 눈금이 없다 · eq 밝기는 3단계씩 뛰었다)
-  const animate = (name, fn) => { const steps = Math.ceil(dur * 10); for (let k = 0; k <= steps; k++) { const tl = k / 10; cmds.push(`${tl.toFixed(2)} blend@${name} all_opacity ${Math.max(0, fn(t0 + tl)).toFixed(5)};`); } };
+  const animate = (name, fn) => { const steps = Math.ceil(dur * 10); for (let k = 0; k <= steps; k++) { const tl = k / 10; cmds.push(`${tl.toFixed(2)} blend@${name} c0_opacity ${Math.max(0, fn(t0 + tl)).toFixed(5)};`); } };
   // 🌫 안개 — 흐린 구름 질감 한 겹이 천천히 흘러 밝기에 screen 으로 아주 약하게(두 겹이면 프레임당 +1.2ms — 3~4시간 영상에서 렌더가 눈에 띄게 늘어 한 겹으로 줄였다).
   if (fx.fog && tex.fog) {
     const k = clampLv(fx.fog), sp = P.fog.speed[k], op = P.fog.opacity[k];
@@ -168,7 +171,7 @@ function fxGraph({ base, idx0, t0, dur, fx, tex, fps = 30, id = 'x', lp = 'x' })
     const a = P.flicker.amp[clampLv(fx.flicker)];   // 0~1 기준 평균 밝기 상승(= 진폭) — 불투명도는 0 ~ 2a
     ins.push('-f', 'lavfi', '-i', `color=c=white:s=${W}x${H}:r=${fps}`); const w = `[${i++}:v]`;
     parts.push(`${w}format=yuv420p[${lp}fw${n}]`);
-    parts.push(`${cur}[${lp}fw${n}]blend@${lp}fl=all_mode=addition:all_opacity=${a}:c1_opacity=0:c2_opacity=0:shortest=1[${lp}fl${n}]`);
+    parts.push(`${cur}[${lp}fw${n}]blend@${lp}fl=c0_mode=addition:c0_opacity=${a}:${CHROMA_KEEP}:shortest=1[${lp}fl${n}]`);
     cur = `[${lp}fl${n}]`;
     animate(`${lp}fl`, (tt) => a * (1 + 0.55 * Math.sin((2 * Math.PI * tt) / 3.1) + 0.3 * Math.sin((2 * Math.PI * tt) / 5.3 + 1.7) + 0.15 * Math.sin((2 * Math.PI * tt) / 10.9 + 0.6)));
     n++;
