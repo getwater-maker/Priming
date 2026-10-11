@@ -98,8 +98,9 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.waitForSelector('[data-testid=cf-side] [data-testid=cf-panel]', { timeout: 3000 });
     ok(true, '⚙ 고급 = 옆 패널(Vrew 고급 창)');
     await win.locator('[data-testid=cf-panel] .cf-sech:has-text("그림자") input[type=checkbox]').check();
-    await win.waitForFunction(() => [...document.querySelectorAll('.cut .capfmt')].some((e) => getComputedStyle(e).textShadow !== 'none'), null, { timeout: 5000 });
-    ok(true, '그림자를 켜자 고른 줄에 그림자가 생겼다');
+    await win.waitForFunction(async () => { const d = (await window.api.listQueue()).dto; const r = d.projects[0].cuts.flatMap((c) => c.sentences).flatMap((x) => x.spans || []); return r.some((x) => x.fmt && x.fmt.shadowOn); }, null, { timeout: 5000 });
+    ok(true, '그림자를 켜자 고른 줄의 서식 구간에 그림자가 생겼다(값)');
+    ok(await win.evaluate(() => [...document.querySelectorAll('.clip-cap .capfmt')].every((e) => getComputedStyle(e).textShadow === 'none' && getComputedStyle(e).webkitTextStrokeWidth === '0px')), '🅱 ② 목록 글자에는 그림자·테두리를 입히지 않는다(굵게만 — 효과는 미리보기 창에서 · v0.7.96)');
     ok(await win.locator('[data-testid=cf-panel] .cf-sech:has-text("저장된 서식")').count() === 1 && await win.locator('[data-testid=cf-panel] .cf-sech:has-text("간격")').count() === 1, '저장된 서식 · 간격 · 테두리 · 배경 · 형광펜 · 그림자 칸');
     await win.click('[data-testid=cf-panel] .cf-tabs button:has-text("글꼴")');
     await win.waitForSelector('[data-testid=cf-fontlist] .cf-font', { timeout: 8000 });
@@ -139,11 +140,12 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     ok((await win.locator('.cf-bar .cf-sel').innerText()).includes('글자 2자'), '🔑 글자를 드래그하면 그 글자만 고른다(「글자 2자」) · 편집칸은 열리지 않는다');
     ok(await win.locator('.sblk.editing').count() === 0, '글자 선택 때 문장 편집칸이 열리지 않는다');
     await win.click('.cf-bar button[title^="형광펜"]');
-    await win.waitForFunction(() => [...document.querySelectorAll('.cut .sblk')[2].querySelectorAll('.capfmt')].some((e) => getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)'), null, { timeout: 5000 });
-    sp = await win.evaluate(() => [...document.querySelectorAll('.cut .sblk')[2].querySelectorAll('.capfmt')].map((e) => e.textContent));
-    ok(sp.length === 1 && sp[0].length === 2, `형광펜이 고른 두 글자에만 (${JSON.stringify(sp)})`);
+    await win.waitForFunction(async () => { const d = (await window.api.listQueue()).dto; const r = d.projects[0].cuts.flatMap((c) => c.sentences).flatMap((x) => x.spans || []); return r.some((x) => x.fmt && x.fmt.hlOn); }, null, { timeout: 5000 });
+    sp = await win.evaluate(async () => { const d = (await window.api.listQueue()).dto; const r = d.projects[0].cuts.flatMap((c) => c.sentences).flatMap((x) => x.spans || []); return r.filter((x) => x.fmt && x.fmt.hlOn).map((x) => x.to - x.from); });
+    ok(sp.length === 1 && sp[0] === 2, `형광펜이 고른 두 글자에만(구간 값 ${JSON.stringify(sp)})`);
+    ok(await win.evaluate(() => [...document.querySelectorAll('.clip-cap .capfmt')].every((e) => getComputedStyle(e).backgroundColor === 'rgba(0, 0, 0, 0)')), '🅱 ② 목록에는 형광펜 바탕도 입히지 않는다');
     await win.click('.cf-bar button:has-text("서식 지우기")');
-    await win.waitForFunction(() => ![...document.querySelectorAll('.cut .sblk')[2].querySelectorAll('.capfmt')].some((e) => getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)'), null, { timeout: 5000 });
+    await win.waitForFunction(async () => { const d = (await window.api.listQueue()).dto; const r = d.projects[0].cuts.flatMap((c) => c.sentences).flatMap((x) => x.spans || []); return !r.some((x) => x.fmt && x.fmt.hlOn); }, null, { timeout: 5000 });
     ok(true, '서식 지우기 = 채널 기본으로');
     await win.keyboard.press('Escape');
 
@@ -187,7 +189,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     await win.locator(ED).blur();
     await win.waitForSelector(ED, { state: 'detached', timeout: 10000 });
     await win.waitForFunction(() => /둘째 문장이에요/.test(document.body.innerText), null, { timeout: 10000 });
-    ok(await win.locator('.cut .sblk').nth(1).locator('.capfmt').count() >= 1, '🔑 문장을 고쳐도 그 문장의 서식이 남는다');
+    // v0.7.96 — ② 목록은 굵게만 보이므로 서식이 남았는지는 서식 구간 값으로 본다(둘째 문장 = 줄 2)
+    ok(await win.evaluate(async () => { const d = (await window.api.listQueue()).dto; const c = d.projects[0].cuts.flatMap((x) => x.sentences).find((x) => /둘째 문장이에요/.test(x.text)); return !!c && (c.spans || []).some((r) => r.fmt && Object.keys(r.fmt).length > 0); }), '🔑 문장을 고쳐도 그 문장의 서식이 남는다(구간 값)');
 
     // [9] 작업본에 저장됐는지(서식은 대본이 아니라 작업본)
     await win.waitForTimeout(2500);

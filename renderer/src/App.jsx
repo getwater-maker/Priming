@@ -7734,7 +7734,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                         onClick={(ev) => ev.stopPropagation()}
                                         onKeyDown={(ev) => _E.lineKey(ev, { si, sents, s, l })} />
                                     ) : (
-                                      <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} /></div>
+                                      <div className="clip-cap"><LineRuns text={s.text || ''} spans={s.spans} range={l.range} base={capBase} boldOnly /></div>
                                     )}
                                     <button className="clip-fmt" title="이 클립 서식(⚙ 고급)" onClick={(ev) => { ev.stopPropagation(); if (edit.fmtClip) _E.fmtClip(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info); }}>가</button>
                                   </div>

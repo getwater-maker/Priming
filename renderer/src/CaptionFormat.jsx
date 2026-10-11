@@ -99,7 +99,7 @@ export function fmtCss(f, k = 0.2, full = true) {
  * 줄 글자를 서식 구간으로 그린다. **덮어쓴 구간만** 서식을 보인다(채널 기본 모양을 모든 줄에 입히면 목록이 통째로 바뀐다).
  * 각 구간에 data-off(문장 글자 위치)를 달아 마우스로 고른 글자 범위를 되짚는다.
  */
-export function LineRuns({ text, spans, range, base }) {
+export function LineRuns({ text, spans, range, base, boldOnly }) {
   if (!spans || !spans.length) return <span data-off={range.from}>{String(text || '').slice(range.from, range.to)}</span>;
   const sp = CF.cleanSpans(spans, String(text || '').length);
   const cuts = new Set([range.from, range.to]);
@@ -112,6 +112,12 @@ export function LineRuns({ text, spans, range, base }) {
     const t = String(text).slice(a, b);
     const keys = Object.keys(ov).filter((kk) => !CF.LINE_KEYS.includes(kk));
     if (!keys.length) { out.push(<span key={a} data-off={a}>{t}</span>); continue; }
+    // 🅱 boldOnly(② 클립 목록 · v0.7.96 로이 「자막 효과는 미리보기로 보니 여기선 일반 자막에 굵게만」) — 색·크기·테두리·그림자·형광펜은 안 입히고 굵기만 보인다
+    if (boldOnly) {
+      if (!('bold' in ov)) { out.push(<span key={a} data-off={a}>{t}</span>); continue; }
+      out.push(<span key={a} data-off={a} className="capfmt" style={{ fontWeight: ov.bold ? 900 : 400 }}>{t}</span>);
+      continue;
+    }
     const f = { ...CF.normFmt(base), ...ov };
     const css = fmtCss(f, 0.12, false);
     // 🔑 목록(밝은 바탕)에는 **덮어쓴 속성만** 보인다 — 채널 기본(흰 글자·Pretendard 700 …)까지 입히면 글자가 안 보이고 모든 구간이 굵어진다
