@@ -711,7 +711,10 @@ async function renderChunk(ch, i, ctx) {
 
   // 🔑 자막 이벤트는 **전체 시각으로 한 번** 만들어 둔 것을 자른다 — 조각 기준으로 다시 만들면 효과가 조각 경계에서 처음부터 다시 돈다.
   const segEv = [];
-  for (const e of (ctx.capEvents || [])) { if (e.end > t0 && e.start < t0 + dur) segEv.push(e); }
+  // 🙈 카드가 `자막=숨김` 이면 그 카드 시간 동안의 자막 이벤트는 뺀다(이벤트 가운데 시각이 창 안이면 — 절대 시각이라 조각 경계에서도 같은 판정)
+  const hideW = ctx.hideCaptionWins || null;
+  const hid = (e) => !!hideW && hideW.some(([a, b]) => { const m = (e.start + e.end) / 2; return m >= a - 1e-6 && m < b - 1e-6; });
+  for (const e of (ctx.capEvents || [])) { if (e.end > t0 && e.start < t0 + dur && !hid(e)) segEv.push(e); }
   const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
@@ -999,9 +1002,10 @@ async function renderVrewToMp4(opts = {}) {
     // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
     if (Array.isArray(opts.cards) && opts.cards.length) {
       ctx.cards = opts.cards;
+      { const hw = opts.cards.filter((c) => c.hideCaptions).map((c) => [c.t0, c.t1]); if (hw.length) ctx.hideCaptionWins = hw; }   // 🙈 자막=숨김 카드의 시간 창
       const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
-      log(`   📜 화면 카드 ${opts.cards.length}장 — ${opts.cards.map((c) => (c.kind === 'interlude' ? '막간' : '병기') + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
+      log(`   📜 화면 카드 ${opts.cards.length}장${opts.cards.some((c) => c.hideCaptions) ? '(자막 숨김 ' + opts.cards.filter((c) => c.hideCaptions).length + ')' : ''} — ${opts.cards.map((c) => (c.kind === 'interlude' ? '막간' : '병기') + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
     }
     // 🌫 오버레이 모션 — 구간표가 있고 어느 구간이든 켜져 있으면 질감을 한 번만 만든다(JS 로 수백 ms)
     if (opts.fx && Array.isArray(opts.fx.ranges) && opts.fx.ranges.length) {

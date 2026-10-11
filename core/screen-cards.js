@@ -15,6 +15,7 @@
  *     > 📜 화면카드: 병기 | 때=<낭독 문장 앞부분> +N | 원문=<한문 글자 그대로> | 번역=<한국어 글자 그대로>
  *     > 📜 화면카드: 막간 | 때=<낭독 문장 앞부분> | 제목=<장 제목 글자 그대로>
  *     `때=` 의 +N = 그 문장부터 N 문장 뒤 끝까지 뜬다 · `번역=`(막간은 `제목=`)을 빼면 때 문장들의 자막 글을 쓴다(일치 보장) · 글 안의 ` // ` 는 줄바꿈 · 글자가 낭독과 맞는지는 **적는 쪽 책임**(앱은 검사하지 않는다).
+ *   · 🙈 줄 끝에 `| 자막=숨김` 을 쓰면 그 카드가 뜨는 동안 아래 자막을 가린다(카드마다 · 기본 안 가림).
  *   · 조용히 줄이지 않는다 — 문장을 못 찾음 · 둘 이상 맞음 · 앞부분이 짧음 · 종류 모름 · 음성 없음 → 경고 줄을 돌려주고 **그 카드만** 건너뛴다.
  * 마커가 하나도 없으면 아무것도 안 한다(기본값 = 예전 출력과 한 글자도 다르지 않다).
  *
@@ -103,6 +104,9 @@ function plan(project, markers) {
     const tag = `📜 화면카드 ${m.line}줄`;
     const bad = (why) => warnings.push(`${tag} — ${why} → 이 카드만 건너뜁니다`);
     if (!m.kind) { bad(`종류 「${m.kindName}」 를 모릅니다(병기 · 막간)`); continue; }
+    // 🙈 `자막=숨김` — 이 카드가 뜨는 동안만 아래 자막(낭독 글)을 가린다(카드 글과 겹쳐 보이지 않게 · 기본 = 안 가림). 다른 값은 경고하고 자막은 그대로 둔다.
+    let hide = false;
+    if (m.f['자막']) { if (/^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) hide = true; else warnings.push(`${tag} — 자막= 값은 「숨김」만 쓸 수 있습니다(「${m.f['자막'].raw}」) → 자막은 그대로 보입니다`); }
     // 🅱 `때=` 꼴 — 글자는 적은 그대로 · 낭독 문장은 시간만
     if (m.f['때']) {
       const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
@@ -123,6 +127,7 @@ function plan(project, markers) {
         if (m.f['제목'] && !title.length) { bad('제목= 칸이 비어 있습니다'); continue; }
         card = { kind: 'interlude', t0, t1, orig: [], trans: title, line: m.line, literal: true };
       }
+      if (hide) card.hideCaptions = true;
       if (card.orig.length > 3 || card.trans.length > 3) warnings.push(`${tag} — 카드 글이 3줄을 넘습니다(화면에 넘칠 수 있음)`);
       const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
       if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
@@ -148,6 +153,7 @@ function plan(project, markers) {
     const card = m.kind === 'pair'
       ? { kind: 'pair', t0, t1, orig: groupsOf['원문'].map((x) => x.text), trans: groupsOf['번역'].map((x) => x.text), line: m.line }
       : { kind: 'interlude', t0, t1, orig: [], trans: groupsOf['문장'].map((x) => x.text), line: m.line };
+    if (hide) card.hideCaptions = true;
     const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
     if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
     cards.push(card);

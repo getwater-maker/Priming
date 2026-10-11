@@ -107,6 +107,18 @@ const SCRIPT = [
     ok(SC.plan(pj, SC.markersOf('> 📜 화면카드: 막간 | 문장=제1회 도원결의')).cards[0].literal === undefined, '옛 꼴(원문=/문장=)은 그대로 동작한다');
   }
 
+  console.log('\n[2c] 🙈 자막=숨김 — 카드마다 고른다(기본 안 가림 · v0.8.0)');
+  {
+    const pj = mkProj(['이 번역은 서술에서 인물을 부릅니다.', '유비 관우 장비 조조처럼 부릅니다.', '제1회, 도원결의.'], [{ phase: 'a', n: [0, 1, 2] }], [6, 5, 4]);
+    let r = SC.plan(pj, SC.markersOf('> 📜 화면카드: 병기 | 때=이 번역은 서술에서 | 원문=玄德 | 번역=현덕 | 자막=숨김\n> 📜 화면카드: 막간 | 때=제1회 도원결의 | 제목=제1회'));
+    ok(r.cards.length === 2 && r.cards[0].hideCaptions === true && r.cards[1].hideCaptions === undefined && r.warnings.length === 0, '자막=숨김 이 있는 카드만 hideCaptions · 없으면 필드도 없다(기본 안 가림)');
+    r = SC.plan(pj, SC.markersOf('> 📜 화면카드: 막간 | 문장=제1회 도원결의 | 자막=숨김'));
+    ok(r.cards[0].hideCaptions === true, '옛 꼴(문장=)에서도 된다');
+    r = SC.plan(pj, SC.markersOf('> 📜 화면카드: 막간 | 때=제1회 도원결의 | 제목=가 | 자막=가끔'));
+    ok(r.cards.length === 1 && r.cards[0].hideCaptions === undefined && /자막= 값은/.test(r.warnings.join('')), '모르는 값은 경고하고 자막은 그대로(카드는 만든다)');
+    ok(JSON.stringify(SC.signatureOf(SC.markersOf('> 📜 화면카드: 막간 | 문장=제1회 도원결의'))) !== JSON.stringify(SC.signatureOf(SC.markersOf('> 📜 화면카드: 막간 | 문장=제1회 도원결의 | 자막=숨김'))), '자막=숨김 을 바꾸면 지문이 달라진다(MP4 를 다시 굽는다)');
+  }
+
   console.log('\n[3] 곡선 · ASS — 창 경계에서 번쩍이지 않는다');
   {
     const c = { kind: 'pair', t0: 10, t1: 22, orig: ['天下大勢'], trans: ['천하의 큰 흐름'], line: 1 };   // fade 1.5
@@ -158,6 +170,13 @@ const SCRIPT = [
     ok(mo < mo2 && Math.abs(mean(raw(withC.mp4, 14)) - mean(raw(base.mp4, 14))) < 1.5, `끝나면 서서히 그림으로 돌아오고(${mo.toFixed(0)} → ${mo2.toFixed(0)}) 카드 뒤(14초)는 예전과 같다`);
     ok(dif(raw(withC.mp4, 14), raw(base.mp4, 14)) < 1.0 && dif(raw(withC.mp4, 27), raw(base.mp4, 27)) < 1.0, `카드가 없는 구간은 화소가 예전과 같다(14초 ${dif(raw(withC.mp4, 14), raw(base.mp4, 14)).toFixed(2)} · 27초 ${dif(raw(withC.mp4, 27), raw(base.mp4, 27)).toFixed(2)})`);
     ok(mean(raw(withC.mp4, 21)) < mB * 0.35, `막간 카드(18~24초)도 어둡다(21초 ${mean(raw(withC.mp4, 21)).toFixed(0)})`);
+    // 🙈 자막=숨김 — 첫 카드(0~12초)만 숨김: 그 동안 하얀 자막이 사라지고, 둘째 카드(18~24초)·카드 밖은 그대로
+    const hid = await bake('hide', { cards: plan.cards.map((c, i) => (i === 0 ? { ...c, hideCaptions: true } : c)) });
+    const whites = (f, t) => bright(raw(f, t, 'scale=960:540'), 240);
+    const wC = whites(withC.mp4, 5), wH = whites(hid.mp4, 5), wC2 = whites(withC.mp4, 21), wH2 = whites(hid.mp4, 21);
+    ok(wC > 150 && wH < wC * 0.1, `🙈 자막=숨김 카드에서는 하얀 자막이 사라진다(5초 하얀 화소 ${wC} → ${wH})`);
+    ok(Math.abs(wH2 - wC2) <= 5, `숨김이 없는 둘째 카드(21초)는 자막이 그대로다(${wC2} · ${wH2})`);
+    ok(dif(raw(hid.mp4, 14), raw(withC.mp4, 14)) < 0.05 && dif(raw(hid.mp4, 27), raw(withC.mp4, 27)) < 0.05, '카드 밖(14·27초)은 숨김 여부와 상관없이 같다');
     // 조각 이음새(4초 · 8초 조각 경계) — 이웃 프레임 차이가 카드 없는 같은 경계와 비슷하다(판이 번쩍이지 않는다)
     const seq = (f, t0) => { const o = []; let prev = raw(f, t0); for (let k = 1; k <= 6; k++) { const c = raw(f, t0 + k * 0.04); o.push(dif(prev, c)); prev = c; } return o; };
     const s4 = seq(withC.mp4, 3.88), b4 = seq(base.mp4, 3.88), s8 = seq(withC.mp4, 7.88);
