@@ -11,6 +11,10 @@
  *   · 앞부분 = 낭독 문장의 **첫 4글자 이상**(공백·문장부호 무시 · 그 그룹 안에서 한 문장만 맞아야 한다) · `+N` = 그 문장 뒤로 이어지는 N 문장도 포함(생략 = 그 문장 하나).
  *   · 🔑 **카드 글자는 그 문장들의 현재 자막 글 그대로**(표기에 적은 글은 문장을 가리키는 열쇠일 뿐 — 카드 글자와 낭독 글이 어긋날 수 없다).
  *   · 카드는 가리킨 문장들이 **읽히는 시간에만** 뜬다(첫 문장 시작 ~ 끝 문장 끝). 낭독 문단 사이에는 안 뜬다.
+ * 🅱 **글자를 직접 적는 꼴**(v0.7.99 · 고전서재 요청 — 한문 원문은 낭독 문장이 아니라 열쇠로 못 가리킨다): `때=` 가 있으면 그 줄의 원문·번역·제목은 **적은 글 그대로** 카드 글자가 되고, 낭독 문장은 **언제 뜨는지**(시간 앵커)만 정한다:
+ *     > 📜 화면카드: 병기 | 때=<낭독 문장 앞부분> +N | 원문=<한문 글자 그대로> | 번역=<한국어 글자 그대로>
+ *     > 📜 화면카드: 막간 | 때=<낭독 문장 앞부분> | 제목=<장 제목 글자 그대로>
+ *     `때=` 의 +N = 그 문장부터 N 문장 뒤 끝까지 뜬다 · `번역=`(막간은 `제목=`)을 빼면 때 문장들의 자막 글을 쓴다(일치 보장) · 글 안의 ` // ` 는 줄바꿈 · 글자가 낭독과 맞는지는 **적는 쪽 책임**(앱은 검사하지 않는다).
  *   · 조용히 줄이지 않는다 — 문장을 못 찾음 · 둘 이상 맞음 · 앞부분이 짧음 · 종류 모름 · 음성 없음 → 경고 줄을 돌려주고 **그 카드만** 건너뛴다.
  * 마커가 하나도 없으면 아무것도 안 한다(기본값 = 예전 출력과 한 글자도 다르지 않다).
  *
@@ -29,7 +33,7 @@ function norm(t) { return String(t == null ? '' : t).normalize('NFC').replace(/[
 /** `앞부분 +N` → { key, extra } (key 는 원문 그대로 — 정규화는 맞출 때) */
 function anchorOf(v) {
   const m = /^(.*?)\s*[+＋]\s*(\d+)\s*$/u.exec(String(v || '').trim());
-  return m ? { text: m[1].trim(), extra: Math.min(20, Number(m[2])) } : { text: String(v || '').trim(), extra: 0 };
+  return m ? { text: m[1].trim(), extra: Math.min(20, Number(m[2])), raw: String(v || '').trim() } : { text: String(v || '').trim(), extra: 0, raw: String(v || '').trim() };
 }
 
 /**
@@ -99,6 +103,33 @@ function plan(project, markers) {
     const tag = `📜 화면카드 ${m.line}줄`;
     const bad = (why) => warnings.push(`${tag} — ${why} → 이 카드만 건너뜁니다`);
     if (!m.kind) { bad(`종류 「${m.kindName}」 를 모릅니다(병기 · 막간)`); continue; }
+    // 🅱 `때=` 꼴 — 글자는 적은 그대로 · 낭독 문장은 시간만
+    if (m.f['때']) {
+      const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
+      const r = find(m, m.f['때'], '때'); if (r.err) { bad(r.err); continue; }
+      const tk = take(r.i, m.f['때'].extra, '때'); if (tk.err) { bad(tk.err); continue; }
+      if (tk.rows.some((x) => !x.sound)) { bad('때 로 가리킨 문장 중 음성이 없는 문장이 있습니다(TTS 를 먼저)'); continue; }
+      const t0 = tk.rows[0].t0, t1 = tk.rows[tk.rows.length - 1].t1;
+      if (!(t1 - t0 >= MIN_SPAN)) { bad(`카드가 뜨는 시간이 너무 짧습니다(${(t1 - t0).toFixed(1)}초)`); continue; }
+      const own = tk.rows.map((x) => x.text);
+      let card;
+      if (m.kind === 'pair') {
+        const orig = m.f['원문'] ? lines(m.f['원문']) : [], trans = m.f['번역'] ? lines(m.f['번역']) : own;
+        if (m.f['원문'] && !orig.length) { bad('원문= 칸이 비어 있습니다'); continue; }
+        if (m.f['번역'] && !trans.length) { bad('번역= 칸이 비어 있습니다'); continue; }
+        card = { kind: 'pair', t0, t1, orig, trans, line: m.line, literal: true };
+      } else {
+        const title = m.f['제목'] ? lines(m.f['제목']) : own;
+        if (m.f['제목'] && !title.length) { bad('제목= 칸이 비어 있습니다'); continue; }
+        card = { kind: 'interlude', t0, t1, orig: [], trans: title, line: m.line, literal: true };
+      }
+      if (card.orig.length > 3 || card.trans.length > 3) warnings.push(`${tag} — 카드 글이 3줄을 넘습니다(화면에 넘칠 수 있음)`);
+      const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
+      if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
+      cards.push(card);
+      continue;
+    }
+    if (m.f['제목'] && !m.f['문장']) { bad('제목= 은 때= 와 함께 써야 합니다(때=<낭독 문장 앞부분>)'); continue; }
     const need = m.kind === 'pair' ? ['원문', '번역'] : ['문장'];
     const miss = need.filter((k) => !m.f[k]);
     if (miss.length) { bad(`${miss.join('·')}= 칸이 없습니다`); continue; }
