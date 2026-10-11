@@ -175,6 +175,10 @@
 - 새 설정 칸은 ⚙ 설정 탭(ComfyUI · Flow · API 키 · 유튜브)에, 설명글은 `<Hint>` 로 · 채널 편집 「자막·분할」 탭은 스크롤 없이 한 화면 · ⛔ 채널 이름 유사도 자동 매칭 금지 · 채널 목록은 파일 순서 그대로(`srv:` 참조음성은 정규화에서 지우지 않는다) · 목소리 분류는 `tts/voice-tags.js` 한 곳(서버 공유).
 - 🔄 **앱 안 업데이트 단추(헤더 ⟳) = 시작 때와 같은 `light-updater.applyUpdates` 한 곳**(v0.7.9) — 작업 중(`_awake.n`)·개발 실행·새 버전 아님이면 적용하지 않고, 파일을 바꾼 뒤에만 다시 시작한다. 업데이트 방식을 바꾸면 시작 경로와 단추 경로를 함께 본다(`test:update`). 앱 이름 클릭은 고정 주소(`open-tube-site`) 하나만 연다.
 
+### 🤖 Claude API
+- **LLM 글·그림 판단은 `core/claude-api` 한 곳**(v0.7.94 · 키·모델 = secret-store `claude` · ⚙ 설정 → 🔑 API 키) — ⛔ **Ollama·Gemini 글 생성은 뺐다**(로이 2026-10-11 · Gemini 키는 나노바나나·Gemini TTS 용으로 그대로) · 쓰는 곳: ✍ 빈 프롬프트 채우기 · 🔁 이미지/영상 프롬프트 다시 쓰기(`generate-prompts-api` mode) · 🔍 그림 검수(보고만 — 다시 그리기는 로이가 고름 · 첨부 그림 제외) · 끊어 읽기·맞춤법(키 없으면 CLI) · 목소리 설명 번역 · 🎨 보이스디자인 설명 · 📖 책 소개·교정(원고 불변 · 보고서만).
+- ⛔ **E2E 는 `global.__claudeApiTest = {cfg, fetch}` 가짜 없이 부르지 않는다**(`PM_UI_SMOKE` 면 가짜가 없을 때 키 없음으로 본다 — 로이 충전금 · `test:claude`) · ⛔ 모델 목록에 haiku 를 넣지 않는다(끊어 읽기가 관형절을 가른다) · 새 LLM 입구는 `CA.ask` 를 거칠 것(비용 로그 💳 가 한 곳에서 나온다) · ⛔ npm SDK 를 들이지 않는다(전역 fetch — 라이트 업데이트).
+
 ### 브라우저 자동화 공통
 - 크롬 실행 실패 = 프로필 정리(`core/chrome-profile.cleanProfile` — 락 + `exit_type`) 후 1회 재시도 → 번들 Chromium → 사람 말 오류. 번들 설치는 ⚙ 계정 「⬇ 브라우저 설치」(⛔ `npx playwright install` 은 버전이 달라 소용없다).
 - 접속 대기는 `load` + 준비 신호 폴링(⛔ `networkidle` 금지 — SPA 는 닿지 않는다). 셀렉터를 못 찾으면 화면 상태를 덤프(`[DUMP …]`)해 로그로 — 다음 수정의 근거.

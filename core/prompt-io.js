@@ -3,15 +3,12 @@
  *
  *  - buildPromptRequestText(project, {styleName}) : 그룹별 대본 요청서(웹 LLM 붙여넣기용) 생성
  *  - applyPromptsToProject(project, text)         : LLM 답변 파싱 → g.imagePrompt/videoPrompt 매핑(+안전 치환)
- *  - callLlmTextApi(provider, key, promptText)    : Gemini/Claude/OpenAI 텍스트 API 직접 호출
+ *  - callLlmTextApi(provider, key, promptText)    : Claude API 호출(core/claude-api · v0.7.94)
  *
  * Shots-maker 는 main 프로세스가 권위 데이터(Project)를 보유하므로 이 모듈은 main 에서 호출.
  */
 'use strict';
 
-const https = require('https');
-const http = require('http');
-const { URL } = require('url');
 
 // ── 🛡 안전 치환 규칙 (콘텐츠 필터 + 유튜브 수익화 안전) ──────────────
 const PROMPT_SAFE_RULES = [
@@ -93,7 +90,11 @@ function buildPromptRequestText(projects, opts = {}) {
   const L = [];
   L.push(`# 이미지 프롬프트 요청 — Priming (${kind} ${aspect})`);
   L.push('');
-  L.push('아래 각 그룹(= 이미지 1장)에 대해 **영어 이미지 생성 프롬프트**를 작성해 주세요. **(영상)** 표시 그룹은 **영어 영상 모션 프롬프트**도 함께 작성합니다.');
+  // 🔁 v0.7.94 — only: 'image'(이미지 프롬프트만 새로) · 'video'(영상 모션 프롬프트만 새로) · 없으면 예전(빈 칸 채우기)
+  const only = opts.only === 'image' || opts.only === 'video' ? opts.only : '';
+  if (only === 'image') L.push('아래 각 그룹(= 이미지 1장)의 **영어 이미지 생성 프롬프트를 새로** 작성해 주세요. `지금 프롬프트`가 있으면 참고만 하고 장면에 더 잘 맞게 다시 씁니다. 영상 줄은 쓰지 않습니다.');
+  else if (only === 'video') L.push('아래 각 그룹은 이미지를 영상으로 바꿉니다. 각 그룹의 **영어 영상 모션 프롬프트를 새로** 작성해 주세요. `이미지 프롬프트`(그 그림의 내용)에 맞는 움직임이어야 합니다. 이미지 줄은 쓰지 않습니다.');
+  else L.push('아래 각 그룹(= 이미지 1장)에 대해 **영어 이미지 생성 프롬프트**를 작성해 주세요. **(영상)** 표시 그룹은 **영어 영상 모션 프롬프트**도 함께 작성합니다.');
   L.push('');
   L.push('규칙:');
   L.push('- 결과물은 가로 **16:9 롱폼(가로형)**입니다 — 인물·배경을 가로로 넓게 배치한 **와이드(landscape) 구도**로, 좌우 여백과 배경을 살려 묘사하세요.');
@@ -107,8 +108,8 @@ function buildPromptRequestText(projects, opts = {}) {
   L.push(`- 화풍(스타일)은 앱이 자동으로 입힙니다${styleName ? ` (현재 스타일: "${styleName}")` : ''} — 화풍 키워드는 생략해도 됩니다.`);
   L.push('- **(영상)** 표시 그룹은 이미지를 영상으로 변환합니다. `영상:` 줄에 **영어 영상 모션 프롬프트**를 쓰되 반드시 역동적으로 움직이도록: ① 카메라워크(slow push-in, dolly, orbit, tilt) ② 인물·사물 동작 ③ 환경 생동감(바람·먼지·불씨·눈). 속도/강도(slow/gentle vs fast/intense)도 명시. 표시 없는 그룹의 `영상:` 줄은 생략 가능.');
   L.push('- **출력 형식**: 아래 `## [편-그룹] 라벨` 헤더를 그대로 두고(예: `## [1-2]`), 각 헤더 아래에 다음 두 줄로 적어 주세요. 다른 설명/번호는 넣지 마세요.');
-  L.push('    이미지: <영어 이미지 프롬프트>');
-  L.push('    영상: <영어 영상 모션 프롬프트 — (영상) 그룹만>');
+  if (only !== 'video') L.push('    이미지: <영어 이미지 프롬프트>');
+  if (only !== 'image') L.push(only === 'video' ? '    영상: <영어 영상 모션 프롬프트>' : '    영상: <영어 영상 모션 프롬프트 — (영상) 그룹만>');
   L.push('');
   L.push('---');
   L.push('');
@@ -120,15 +121,18 @@ function buildPromptRequestText(projects, opts = {}) {
       // 청크 생성 — onlyKeys(Set<"sn-num">) 지정 시 그 그룹만 요청서에 포함 (긴 대본 분할용).
       if (opts.onlyKeys && !opts.onlyKeys.has(`${sn}-${g.num}`)) continue;
       const gnum2 = String(g.num).padStart(2, '0');
-      const isVid = !!g.isI2V;
+      const isVid = only === 'video' || (only !== 'image' && !!g.isI2V);
       const label = `그룹 ${gnum2}` + (isVid ? ' (영상)' : '') + (g.phase ? ` — ${g.phase}` : '');
       L.push(`## [${sn}-${g.num}] ${label}`);
       const full = project.getSentencesOfGroup(g)
         .map((s) => String(s.text || '').replace(/\s+/g, ' ').trim())
         .filter(Boolean).join(' ');
       L.push(`- 대본: ${full}`);
+      const curImg = String(g.imagePrompt || '').replace(/\s+/g, ' ').trim();
+      if (only === 'image' && curImg) L.push(`- 지금 프롬프트: ${curImg}`);
+      if (only === 'video' && curImg) L.push(`- 이미지 프롬프트: ${curImg}`);
       L.push('');
-      L.push('이미지: (여기에 영어 이미지 프롬프트)');
+      if (only !== 'video') L.push('이미지: (여기에 영어 이미지 프롬프트)');
       if (isVid) L.push('영상: (여기에 영어 영상 모션 프롬프트 — 역동적 카메라워크 + 인물 동작 + 환경 움직임)');
       L.push('');
     }
@@ -137,7 +141,8 @@ function buildPromptRequestText(projects, opts = {}) {
 }
 
 // ── LLM 답변 파싱 → 그룹 매핑 (편-그룹 복합 라벨 `## [편-그룹]`) ──────
-function applyPromptsToProjects(projects, text) {
+function applyPromptsToProjects(projects, text, opts = {}) {
+  const only = opts.only === 'image' || opts.only === 'video' ? opts.only : '';   // 🔁 한쪽만 다시 쓸 땐 다른 쪽 줄은 무시
   const list = Array.isArray(projects) ? projects : [projects];
   const strip = (s) => String(s || '').replace(/^["'`*\s]+|["'`*\s]+$/g, '').trim();
   // 플레이스홀더/빈값/모델이 흔히 쓰는 "없음" 표기(N/A·none·없음·- 등) → 프롬프트로 취급 안 함.
@@ -155,7 +160,9 @@ function applyPromptsToProjects(projects, text) {
       if ((mm = l.match(/^[-*]?\s*(?:이미지|image)\s*[:：]\s*(.+)$/i))) imgP = strip(mm[1]);
       else if ((mm = l.match(/^[-*]?\s*(?:영상|비디오|video|motion)\s*[:：]\s*(.+)$/i))) vidP = strip(mm[1]);
     }
-    if (!imgP && !vidP) {
+    if (only === 'image') vidP = '';
+    if (only === 'video') imgP = '';
+    if (!imgP && !vidP && only !== 'video') {
       const cleaned = lines.filter((l) => l && !/^[-*]?\s*대본\s*[:：]/.test(l) && !/여기에.*프롬프트/.test(l)
         && l !== '---' && !/^```/.test(l) && !/^##/.test(l));
       imgP = strip(cleaned.join(' '));
@@ -174,102 +181,13 @@ function applyPromptsToProjects(projects, text) {
 }
 
 // ── LLM 텍스트 API ──────────────────────────────────────
-const LLM_TEXT_MODELS = { gemini: 'gemini-3.8-flash', claude: 'claude-opus-5-5', openai: 'gpt-4o', ollama: 'gemma4:latest' };
-
-// http/https 둘 다 지원 (Ollama 는 로컬 http) — timeout 조절 가능
-function postJsonAny(urlStr, headers, bodyObj, timeoutMs = 120000) {
-  return new Promise((resolve, reject) => {
-    let u;
-    try { u = new URL(urlStr); } catch (e) { reject(new Error('잘못된 URL: ' + urlStr)); return; }
-    const mod = u.protocol === 'https:' ? https : http;
-    const payload = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
-    const opts = {
-      method: 'POST', hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
-      path: u.pathname + u.search,
-      headers: Object.assign({ 'Content-Type': 'application/json', 'Content-Length': payload.length }, headers || {}),
-      timeout: timeoutMs,
-    };
-    const req = mod.request(opts, (res) => {
-      let data = '';
-      res.setEncoding('utf-8');
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => { let json = null; try { json = JSON.parse(data); } catch (_) {} resolve({ status: res.statusCode, json, raw: data }); });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(new Error(`요청 시간 초과(${Math.round(timeoutMs / 1000)}초)`)); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-function httpsPostJson(urlStr, headers, bodyObj) {
-  return new Promise((resolve, reject) => {
-    let u;
-    try { u = new URL(urlStr); } catch (e) { reject(new Error('잘못된 URL: ' + urlStr)); return; }
-    const payload = Buffer.from(JSON.stringify(bodyObj), 'utf-8');
-    const opts = {
-      method: 'POST', hostname: u.hostname, path: u.pathname + u.search,
-      headers: Object.assign({ 'Content-Type': 'application/json', 'Content-Length': payload.length }, headers || {}),
-      timeout: 120000,
-    };
-    const req = https.request(opts, (res) => {
-      let data = '';
-      res.setEncoding('utf-8');
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => { let json = null; try { json = JSON.parse(data); } catch (_) {} resolve({ status: res.statusCode, json, raw: data }); });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(new Error('요청 시간 초과(120초)')); });
-    req.write(payload);
-    req.end();
-  });
-}
-
+// v0.7.94 — Claude API 하나(core/claude-api · 로이 「Ollama·Gemini 글 생성은 쓸 필요가 없다」). provider·key 인자는 옛 호출 모양 호환용.
+const LLM_TEXT_MODELS = { claude: 'claude-opus-5-5' };
 async function callLlmTextApi(provider, key, promptText, opts = {}) {
-  const model = opts.model || LLM_TEXT_MODELS[provider];
-  if (provider === 'ollama') {
-    // 로컬/원격(Tailscale) Ollama — GPU 서버(이 PC)에서 실행. API 키 불필요.
-    const base = String(opts.baseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-    const url = `${base}/api/chat`;
-    const r = await postJsonAny(url, {}, {
-      model: model || 'gemma4:latest', stream: false,
-      // num_ctx: 청크 입력 + 출력이 기본 컨텍스트(2~4K)를 넘어 잘리는 문제 방지(12K). num_predict: 출력 충분히.
-      options: { temperature: 0.7, num_ctx: 12288, num_predict: 4096 },
-      messages: [{ role: 'user', content: promptText }],
-    }, 600000); // LLM 생성 — 3060 오프로딩 대비 넉넉히(10분)
-    if (r.status !== 200) throw new Error(`Ollama ${r.status}: ${(r.json && r.json.error) || (r.raw || '').slice(0, 300)}`);
-    const text = (r.json && r.json.message && r.json.message.content) || '';
-    if (!text) throw new Error('Ollama 응답에 텍스트가 없습니다 (모델명/서버주소 확인)');
-    return text;
-  }
-  if (provider === 'gemini') {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const r = await httpsPostJson(url, {}, { contents: [{ parts: [{ text: promptText }] }] });
-    if (r.status !== 200) throw new Error(`Gemini API ${r.status}: ${(r.json && r.json.error && r.json.error.message) || (r.raw || '').slice(0, 300)}`);
-    const text = (r.json && r.json.candidates && r.json.candidates[0] && r.json.candidates[0].content && r.json.candidates[0].content.parts || []).map((p) => p.text || '').join('') || '';
-    if (!text) throw new Error('Gemini 응답에 텍스트가 없습니다 (안전필터 차단 가능)');
-    return text;
-  }
-  if (provider === 'claude') {
-    const url = 'https://api.anthropic.com/v1/messages';
-    // v0.7.93 — 응답에 thinking 블록이 섞이므로 text 블록만 · 안전 거절이면 기본 대체 모델로 넘김(server-side fallback)
-    const headers = { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' };
-    const r = await postJsonAny(url, headers, { model, max_tokens: 16000, fallbacks: 'default', messages: [{ role: 'user', content: promptText }] }, 600000);
-    if (r.status !== 200) throw new Error(`Claude API ${r.status}: ${(r.json && r.json.error && r.json.error.message) || (r.raw || '').slice(0, 300)}`);
-    if (r.json && r.json.stop_reason === 'refusal') throw new Error('Claude 가 이 요청을 거절했습니다' + (r.json.stop_details && r.json.stop_details.category ? `(${r.json.stop_details.category})` : ''));
-    const text = ((r.json && r.json.content) || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('') || '';
-    if (!text) throw new Error('Claude 응답에 텍스트가 없습니다');
-    return text;
-  }
-  if (provider === 'openai') {
-    const url = 'https://api.openai.com/v1/chat/completions';
-    const r = await httpsPostJson(url, { Authorization: `Bearer ${key}` }, { model, messages: [{ role: 'user', content: promptText }] });
-    if (r.status !== 200) throw new Error(`OpenAI API ${r.status}: ${(r.json && r.json.error && r.json.error.message) || (r.raw || '').slice(0, 300)}`);
-    const text = (r.json && r.json.choices && r.json.choices[0] && r.json.choices[0].message && r.json.choices[0].message.content) || '';
-    if (!text) throw new Error('OpenAI 응답에 텍스트가 없습니다');
-    return text;
-  }
-  throw new Error('알 수 없는 provider: ' + provider);
+  const CA = require('./claude-api');
+  const r = await CA.ask({ text: promptText, model: opts.model, maxTokens: opts.maxTokens || 16000, log: opts.log, label: opts.label });
+  if (!r.ok) throw new Error(r.error);
+  return r.text;
 }
 
 module.exports = { buildPromptRequestText, applyPromptsToProjects, sanitizeImagePrompt, callLlmTextApi, LLM_TEXT_MODELS };

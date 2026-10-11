@@ -174,8 +174,9 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     ok(!row.some((b) => b.startsWith('이미지 설정')), '「② 이미지」 줄에 옛 ⚙(이미지 설정)이 없다 — 첫 줄 ⚙ 설정으로 통합');
     ok(!row.some((b) => b.includes('이미지 순환')), '옛 「⚙ 이미지 순환」 버튼 없음');
     ok(!row.some((b) => (b.split('~')[1] || '') === '⚙ ComfyUI'), '옛 「⚙ ComfyUI」 버튼 없음');
-    // Ollama 프롬프트 작성 설정 ⚙ 는 그대로 남아 있어야 한다(✍ 프롬프트 옆 — 설정 팝업과 다른 기능이다).
-    ok(row.some((b) => /Ollama/.test(b) && (b.split('~')[1] || '') === '⚙'), '✍ 프롬프트 옆 Ollama ⚙ 는 남아 있다');
+    // v0.7.94 — Ollama ⚙ 는 뺐다(프롬프트 작성 = Claude API). 그 자리에 🔁 이미지 프롬프트 · 🔍 검수 · 📥 붙여넣기
+    ok(!row.some((b) => /Ollama/.test(b)), '옛 Ollama ⚙ 없음(v0.7.94 Claude API)');
+    ok(row.some((b) => (b.split('~')[1] || '') === '🔁 이미지 프롬프트') && row.some((b) => (b.split('~')[1] || '') === '🔍 검수') && row.some((b) => (b.split('~')[1] || '') === '📥'), '② 이미지 줄: 🔁 이미지 프롬프트 · 🔍 검수 · 📥');
 
     await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card', { timeout: 10000 });

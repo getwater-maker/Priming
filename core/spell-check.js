@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
+const CA = require('./claude-api');
 
 const SYSTEM = '너는 한국어 교정자다. 받은 문단에서 표준국어대사전·한글 맞춤법 기준의 확실한 오류(없는 낱말·맞춤법·명백한 띄어쓰기)만 찾는다. 복수 표준어와 허용 규정(보조용언 붙여 쓰기·띄어 쓰기)은 오류가 아니다. 말투·표현·내용은 고치지 않는다. 확실하지 않으면 넣지 않는다. JSON 배열로만 답한다: [{"틀림":"...","바름":"..."}] 없으면 []';
 const MODEL = 'sonnet';
@@ -124,6 +125,21 @@ function readOutput(stdout, text) {
  * @returns {Promise<{ok:true, ms, …read 결과} | {ok:false, error, ms}>}
  */
 async function runClaude(input, o = {}) {
+  // 🤖 v0.7.94 — Claude API 키가 있으면 API 먼저(아내 PC 처럼 Claude Code 가 없는 PC 도 된다) · 실패하면 claude CLI(구독)로 한 번 더
+  //   테스트가 가짜 claude(exe·PM_CLAUDE_EXE)를 주면 API 를 건너뛴다.
+  if (!o.exe && !process.env.PM_CLAUDE_EXE && CA.available()) {
+    const a = await CA.ask({ system: o.system || SYSTEM, text: String(input), timeoutMs: Math.max(o.timeoutMs || TIMEOUT_MS, 120000) });   // API 는 생각할 시간이 더 든다
+    if (a.ok) {
+      // CLI 와 같은 JSON 모양으로 감싸 같은 읽기 함수를 탄다(맞춤법·끊어 읽기 파서 한 벌)
+      const read = o.read || readClaudeJson;
+      return { ...read(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: a.text, total_cost_usd: a.costUsd, usage: a.usage })), ms: a.ms, via: 'api' };
+    }
+    const c = await runCli(input, o);
+    return c.ok ? c : { ...c, error: a.error + (/claude 가 없습니다/.test(c.error || '') ? '' : ' · CLI 도 실패 — ' + c.error) };
+  }
+  return runCli(input, o);
+}
+async function runCli(input, o = {}) {
   const t0 = Date.now();
   let exe = o.exe || await findClaude();
   let pre = o.preArgs || [], env = process.env;

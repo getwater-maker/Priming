@@ -789,33 +789,6 @@ ipcMain.handle('dict-save', (_e, entries = []) => {
     return clean;
   } catch (e) { return null; }
 });
-// Ollama(LLM 프롬프트 자동작성) 설정 get/set + 연결 테스트 + 모델 목록
-ipcMain.handle('get-ollama-config', () => require('./core/ollama-config').load());
-ipcMain.handle('set-ollama-config', (_e, patch = {}) => require('./core/ollama-config').save(patch || {}));
-async function ollamaTags(baseUrl) {
-  const base = String(baseUrl || '').replace(/\/+$/, '');
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 3000);
-  try {
-    const res = await fetch(`${base}/api/tags`, { signal: ctrl.signal });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [] };
-    const data = await res.json();
-    return { ok: true, models: (data.models || []).map((m) => m.name) };
-  } catch (e) { return { ok: false, error: e.message, models: [] }; }
-  finally { clearTimeout(t); }
-}
-ipcMain.handle('test-ollama', async () => {
-  const cfg = require('./core/ollama-config').load();
-  const r = await ollamaTags(cfg.baseUrl);
-  if (!r.ok) { log(`✗ Ollama 연결 실패 (${cfg.baseUrl}) — ${r.error}`); return { ok: false, error: r.error, baseUrl: cfg.baseUrl, models: [] }; }
-  const hasModel = r.models.includes(cfg.model);
-  log(`✓ Ollama 연결 OK (${cfg.baseUrl}) — 모델 ${r.models.length}개${hasModel ? `, '${cfg.model}' 설치됨` : `, ⚠ '${cfg.model}' 미설치`}`);
-  return { ok: true, baseUrl: cfg.baseUrl, models: r.models, hasModel };
-});
-ipcMain.handle('list-ollama-models', async () => {
-  const cfg = require('./core/ollama-config').load();
-  return (await ollamaTags(cfg.baseUrl)).models;
-});
 // 이미지 순환 설정 — 풀에 넣을 엔진/순서 (Genspark↔Flow 등)
 ipcMain.handle('get-image-rotation', () => require('./core/image-rotation').load());
 ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotation').save(patch || {}));
@@ -4900,7 +4873,7 @@ function chunkGroupKeys(projects, maxReqChars = 4500, includeFn = null) {
 // 청크별로 LLM 호출 → 매핑 누적. callAnswer(reqText) → Promise<string>(LLM 답변).
 async function generatePromptsChunked(projects, opts, callAnswer, logger) {
   const PromptIO = require('./core/prompt-io');
-  const chunks = chunkGroupKeys(projects, 4500, opts && opts.includeFn);
+  const chunks = chunkGroupKeys(projects, (opts && opts.maxReqChars) || 12000, opts && opts.includeFn);   // Claude 는 긴 요청을 받는다(옛 4500 = Ollama 4K 문맥) — 크게 묶어야 인물·시대가 고르다
   if (!chunks.length) { logger('대상 그룹 없음 (이미 프롬프트 보유)'); return { groups: 0, img: 0, vid: 0, sanitized: [] }; }
   let groups = 0, img = 0, vid = 0; const sanitized = [];
   for (let i = 0; i < chunks.length; i++) {
@@ -4908,7 +4881,7 @@ async function generatePromptsChunked(projects, opts, callAnswer, logger) {
     const reqText = PromptIO.buildPromptRequestText(projects, { ...(opts || {}), onlyKeys: chunks[i] });
     if (chunks.length > 1) logger(`🧩 프롬프트 생성 ${i + 1}/${chunks.length} (${chunks[i].size}그룹)…`);
     const answer = await callAnswer(reqText);
-    const r = PromptIO.applyPromptsToProjects(projects, answer);
+    const r = PromptIO.applyPromptsToProjects(projects, answer, { only: opts && opts.only });
     groups += r.groups; img += r.img; vid += r.vid;
     if (r.sanitized) sanitized.push(...r.sanitized);
     pushDtoUpdate();
@@ -4917,7 +4890,7 @@ async function generatePromptsChunked(projects, opts, callAnswer, logger) {
 }
 
 // 프롬프트 없는 그룹(prose/롱폼 대본 등) → 이미지 생성 전에 LLM 으로 내용 맞는 영어 프롬프트 자동 생성.
-// Ollama 1순위 → Gemini 키 → 나레이션 폴백. 이미 프롬프트 있으면 아무것도 안 함.
+// Claude API → (키 없음·실패) 나레이션 폴백. 이미 프롬프트 있으면 아무것도 안 함(v0.7.94 — 옛 Ollama·Gemini 순서는 뺐다).
 // ★ 이미 이미지/영상이 붙은 그룹(일괄첨부·삼국지처럼 사전 렌더된 이미지)은 제외 — 어차피 이미지 생성을
 //   건너뛰므로(hasVisual) 프롬프트가 쓸모없다. 예전엔 imagePrompt 텍스트 유무만 봐서, 이미지 다 붙어도
 //   대본에 `> 🖼️ 이미지:` 줄이 없으면 Ollama 가 전 그룹 프롬프트를 헛생성해 실행이 크게 지연됐다.
@@ -4936,29 +4909,14 @@ async function autoFillPrompts(projects, logger) {
   const need = projects.some((pr) => pr.groups.some(needsPrompt));
   if (!need) return;
   const PromptIO = require('./core/prompt-io');
-  // 1순위: 로컬/원격 Ollama (무료) — 도달 가능하면 사용
-  const oc = require('./core/ollama-config').load();
-  const tags = await ollamaTags(oc.baseUrl);
-  if (tags.ok) {
-    try {
-      logger(`🤖 프롬프트 없는 그룹 — Ollama(${oc.model})로 내용 맞는 프롬프트 자동 생성 중…`);
-      const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }), logger);
-      for (const pr of projects) for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim()) g.imagePromptStale = false;
-      narrationFallback(); // LLM 응답에서 빠진 그룹도 옛 프롬프트를 쓰지 않는다
-      logger(`📥 프롬프트 자동 생성 완료(Ollama) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
-      return;
-    } catch (e) { logger('Ollama 프롬프트 생성 실패: ' + e.message + ' — Gemini/나레이션으로 폴백'); }
-  }
-  // 2순위: Gemini 키
-  let key = '';
-  try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
-  if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹 — Ollama 미도달 & Gemini 키 없음(⚙에서 설정 권장). 지금은 나레이션으로 진행됩니다.'); narrationFallback(); return; }
+  // 🤖 v0.7.94 — Claude API 하나(Ollama·Gemini 글 생성은 뺐다 · 로이) · 키가 없으면 나레이션으로
+  if (!require('./core/claude-api').available()) { logger('⚠ 프롬프트 없는 그룹 — Claude API 키가 없어(⚙ 설정 → 🔑 API 키) 나레이션으로 진행합니다.'); narrationFallback(); return; }
   try {
-    logger('🤖 프롬프트 없는 그룹 — Gemini API로 내용 맞는 프롬프트 자동 생성 중…');
-    const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('gemini', key, req), logger);
+    logger('🤖 프롬프트 없는 그룹 — Claude API 로 내용 맞는 프롬프트 자동 생성 중…');
+    const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('claude', '', req, { log: logger, label: '프롬프트' }), logger);
     for (const pr of projects) for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim()) g.imagePromptStale = false;
-    narrationFallback();
-    logger(`📥 프롬프트 자동 생성 완료(Gemini) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
+    narrationFallback(); // LLM 응답에서 빠진 그룹도 옛 프롬프트를 쓰지 않는다
+    logger(`📥 프롬프트 자동 생성 완료(Claude) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
   } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); narrationFallback(); }
 }
 
@@ -5393,19 +5351,171 @@ ipcMain.handle('stock-key-save', (_e, { id, key, clear } = {}) => {
   SS.set(id, { ...old, key: v }); log(`🔑 ${id} 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
 ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) shell.openExternal(STOCK_KEY_URL[id]); return true; });
-// 🤖 Claude API 키(v0.7.93) — secret-store 'claude'(generate-prompts-api·prompt-io 가 이미 읽는 자리) · 원문은 돌려주지 않는다(끝 4자리만)
+// 🤖 Claude API 키·모델(v0.7.93 · 모델 v0.7.94) — secret-store 'claude' {key, model} · 원문은 돌려주지 않는다(끝 4자리만) · 부르는 곳은 core/claude-api 한 곳
 ipcMain.handle('claude-key-get', () => {
-  const k = (((require('./tts/secret-store').get('claude')) || {}).key || '').trim();
-  return { has: !!k, tail: k ? k.slice(-4) : '' };
+  const CA = require('./core/claude-api'); const c = CA.cfg();
+  return { has: !!c.key, tail: c.key ? c.key.slice(-4) : '', model: c.model, models: Object.entries(CA.MODELS).map(([id, m]) => ({ id, label: m.label })), spent: CA.spent() };
 });
-ipcMain.handle('claude-key-save', (_e, { key, clear } = {}) => {
+ipcMain.handle('claude-key-save', (_e, { key, clear, model } = {}) => {
   if (process.env.PM_UI_SMOKE) return { ok: false };   // 🧪 E2E 는 진짜 키 저장소를 안 건드린다
   const SS = require('./tts/secret-store'); const old = SS.get('claude') || {};
+  if (model != null) { if (!require('./core/claude-api').MODELS[model]) return { ok: false }; SS.set('claude', { ...old, model }); log(`🤖 Claude 모델 → ${model}`); return { ok: true }; }
   if (clear) { delete old.key; SS.set('claude', old); log('🔑 claude 키 지움'); return { ok: true }; }
   const v = String(key || '').trim(); if (!v) return { ok: false };
   SS.set('claude', { ...old, key: v }); log(`🔑 claude 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
 ipcMain.handle('claude-open-key', () => { shell.openExternal('https://platform.claude.com/settings/keys'); return true; });
+
+// ── 🔍 그림 검수(Claude 가 그림을 직접 본다 · v0.7.94) ─────────────────────────────────
+//   기계 판정(검정·노이즈·색깨짐 — sweepBadVisuals)이 못 보는 것: 글자·워터마크 · 손가락·얼굴 뭉개짐 · 노출 · 시대·옷차림 불일치 · 장면 무관.
+//   🔒 보고만 한다 — 다시 그릴지는 로이가 고른다(claude-vision-mark = imageStale 표시 → 다음 이미지 생성에서 새로) · 사람이 첨부한 그림은 표시하지 않는다.
+const VISION_SYSTEM = '너는 유튜브 영상에 들어갈 AI 생성 그림의 검수자다. 그림을 보고 **확실한 문제만** 찾는다: '
+  + '① 그림 안의 글자·워터마크·뜻 없는 문자 ② 신체 이상(손가락·팔다리 개수, 뭉개진 얼굴, 합쳐진 몸) ③ 노출·선정성(가슴·몸통 노출 포함) '
+  + '④ 시대·장소·옷차림이 대본·프롬프트와 분명히 다름 ⑤ 그림이 대본 장면과 전혀 무관. 화풍·구도 취향은 문제가 아니다. '
+  + 'JSON 하나로만 답한다: {"ok":true} 또는 {"ok":false,"issues":["짧은 한국어 설명", …]}';
+async function _visionJpeg(src) {   // 1280px JPEG 로 줄여 보낸다(토큰·5MB 한도) — 비동기(메인 프로세스 동기 자식 프로세스 금지)
+  const out = path.join(os.tmpdir(), `priming-vision-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`);
+  const FF = require('./core/media-utils').getFfmpegPath();
+  await new Promise((res, rej) => require('child_process').execFile(FF, ['-y', '-v', 'error', '-i', src, '-vf', "scale='min(1280,iw)':-2", '-frames:v', '1', '-q:v', '4', out], { windowsHide: true, timeout: 60000 }, (e) => (e ? rej(e) : res())));
+  return out;
+}
+ipcMain.handle('claude-vision-check', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const CA = require('./core/claude-api');
+  if (!CA.available()) throw new Error('Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요.');
+  const pick = Array.isArray(args.groups) && args.groups.length ? new Set(args.groups.map(Number)) : null;
+  const items = [];
+  for (const pr of S.parsed.projects) for (const g of pr.groups) {
+    if (pick && !pick.has(g.num)) continue;
+    if (!g.imagePath || !fs.existsSync(g.imagePath)) continue;
+    items.push({ pr, g });
+  }
+  if (!items.length) { log('🔍 그림 검수 — 검사할 그림이 없습니다'); return { dto: P.toDTO(S.parsed), checked: 0, failed: 0, flagged: [] }; }
+  S.abort = false;
+  log(`🔍 그림 검수(Claude) — ${items.length}장${pick ? '(고른 그룹)' : ''} · 한 장 ≈ $0.01 안팎(추정)`);
+  const flagged = []; let checked = 0, failed = 0, next = 0;
+  const worker = async () => {
+    while (next < items.length && !S.abort) {
+      const { pr, g } = items[next++];
+      let jpg = null;
+      try {
+        jpg = await _visionJpeg(g.imagePath);
+        const scene = pr.getSentencesOfGroup(g).map((x) => String(x.text || '').trim()).filter(Boolean).join(' ').slice(0, 1500);
+        const r = await CA.ask({ system: VISION_SYSTEM, maxTokens: 4000, timeoutMs: 180000,
+          content: [CA.imageBlock(jpg), { type: 'text', text: `대본(이 그림이 보여 줄 장면): ${scene}\n이미지 프롬프트: ${String(g.imagePrompt || '').slice(0, 1500)}` }] });
+        if (!r.ok) { failed++; log(`   ⚠ G${g.num} 검수 실패 — ${r.error}`); if (/키가|충전금/.test(r.error)) S.abort = true; continue; }
+        const j = CA.parseJson(r.text) || {};
+        checked++;
+        if (j.ok === false && Array.isArray(j.issues) && j.issues.length) {
+          const att = _userAttached(g, 'image');
+          flagged.push({ num: g.num, issues: j.issues.map(String).slice(0, 5), attached: att });
+          log(`   ❗ G${g.num}${att ? '(첨부 그림)' : ''} — ${j.issues.join(' · ')}`);
+        }
+      } catch (e) { failed++; log(`   ⚠ G${g.num} 검수 실패 — ${e.message}`); }
+      finally { if (jpg) fs.promises.unlink(jpg).catch(() => {}); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
+  flagged.sort((a, b) => a.num - b.num);
+  log(`🔍 그림 검수 끝 — ${checked}장 확인 · 문제 ${flagged.length}장${failed ? ` · 실패 ${failed}장` : ''}${S.abort ? ' (중단됨)' : ''} (이번 실행 Claude 누적 ≈ $${CA.spent().toFixed(3)})`);
+  return { dto: P.toDTO(S.parsed), checked, failed, flagged };
+});
+// 검수에서 고른 그룹 → 다음 이미지 생성 때 새로 그린다(imageStale · 그림 파일은 지우지 않는다 · 첨부 그림은 건너뜀)
+ipcMain.handle('claude-vision-mark', (_e, args = {}) => {
+  if (!S.parsed) return null;
+  const want = new Set((args.groups || []).map(Number)); let n = 0;
+  undoPush('🔍 검수 — 다시 그리기 표시');
+  for (const pr of S.parsed.projects) for (const g of pr.groups) {
+    if (!want.has(g.num) || _userAttached(g, 'image')) continue;
+    g.imageStale = true; n++;
+  }
+  log(`🔍 ${n}개 그룹을 「다시 그리기」로 표시 — 🖼 이미지 생성(또는 ⚡ 만들기) 때 새로 그립니다 (Ctrl+Z 되돌리기)`);
+  scheduleAutoSave(); pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+// ── 🎨 보이스디자인 설명 만들기(v0.7.94) — 한국어로 적은 바람 → Qwen3 보이스디자인이 잘 따르는 영어 설명 한 줄 ──
+ipcMain.handle('claude-voice-instruct', async (_e, args = {}) => {
+  const wish = String(args.wish || '').trim();
+  if (!wish) return { ok: false, error: '원하는 목소리를 한국어로 적어 주세요' };
+  const lang = args.lang === 'Japanese' ? '일본어' : '한국어';
+  const r = await require('./core/claude-api').ask({ label: '보이스디자인 설명', log, maxTokens: 4000, timeoutMs: 120000,
+    system: '너는 Qwen3-TTS VoiceDesign 의 목소리 설명(instruct)을 쓰는 사람이다. 사용자의 한국어 바람을 **영어 설명 한 줄**로 바꾼다. '
+      + '성별, 나이대, 음높이, 음색(따뜻함·허스키 등), 말 속도, 감정·분위기, 말투·용도(내레이션·이야기 등)를 쉼표로 이어 40단어 이내로 쓴다. '
+      + '사람 이름·실존 인물 흉내는 넣지 않는다. 설명 한 줄만 답한다(따옴표·머리말 없이).',
+    text: `이 목소리는 ${lang}로 읽는다.\n바람: ${wish}${args.current ? `\n지금 설명(참고): ${String(args.current).slice(0, 400)}` : ''}` });
+  if (!r.ok) return { ok: false, error: r.error };
+  const instruct = (r.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] || '').replace(/^["'`]+|["'`]+$/g, '').trim();
+  return instruct ? { ok: true, instruct } : { ok: false, error: 'Claude 답이 비었습니다' };
+});
+
+// ── 📖 출판 — 키워드·한줄 소개·책 소개 초안 / 교정 제안 보고서(v0.7.94 · 원고는 고치지 않는다) ──
+function _bookTexts() { return bookFilePaths().map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') })); }
+ipcMain.handle('book-claude-blurb', async () => {
+  if (!S.parsed || S.parsed.kind !== 'book') throw new Error('출판 원고를 먼저 여세요.');
+  const CA = require('./core/claude-api');
+  const all = _bookTexts().map((f) => f.text).join('\n\n');
+  const heads = all.split(/\r?\n/).filter((l) => /^#{1,3}\s/.test(l)).slice(0, 200).join('\n');
+  const r = await CA.ask({ label: '책 소개', log, maxTokens: 8000, timeoutMs: 300000,
+    system: '너는 한국 출판사의 편집자다. 원고를 읽고 부크크 등록에 쓸 글을 쓴다. 과장·원고에 없는 사실 금지. JSON 하나로만 답한다: '
+      + '{"keywords":["검색 키워드 5~8개"],"tagline":"한줄 소개(40자 안팎)","intro":"책 소개(600~900자, 문단 2~4개)"}',
+    text: `[목차·제목줄]\n${heads}\n\n[원고 앞부분]\n${all.slice(0, 40000)}` });
+  if (!r.ok) return { ok: false, error: r.error };
+  const j = CA.parseJson(r.text);
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return { ok: false, error: 'Claude 답을 읽지 못했습니다' };
+  return { ok: true, keywords: (Array.isArray(j.keywords) ? j.keywords : []).map(String).join(', '), tagline: String(j.tagline || ''), intro: String(j.intro || '') };
+});
+const PROOF_CHUNK = 6000;
+ipcMain.handle('book-claude-proofread', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') throw new Error('출판 원고를 먼저 여세요.');
+  const CA = require('./core/claude-api'); const SC = require('./core/spell-check');
+  // 문단 경계(빈 줄)로 PROOF_CHUNK 자 안팎씩 — 줄 번호를 기억해 보고서에 「몇째 줄」을 적는다
+  const chunks = [];
+  for (const f of _bookTexts()) {
+    const lines = f.text.replace(/\r\n/g, '\n').split('\n'); let buf = [], start = 0, len = 0;
+    const flush = () => { if (buf.join('').trim()) chunks.push({ file: f.path, start, lines: buf }); buf = []; len = 0; };
+    lines.forEach((l, i) => { if (!buf.length) start = i; buf.push(l); len += l.length + 1; if (len >= PROOF_CHUNK && !l.trim()) flush(); });
+    flush();
+  }
+  const chars = chunks.reduce((k, c) => k + c.lines.join('\n').length, 0);
+  const m = CA.MODELS[CA.cfg().model] || CA.MODELS[CA.DEFAULT_MODEL];
+  const est = (chars * 1.2 * m.in + chars * 0.5 * m.out) / 1e6;   // 거친 추정(생각 토큰 포함) — 확인창용
+  if (args.dry) return { ok: true, chars, chunks: chunks.length, estUsd: est, model: CA.cfg().model };
+  if (!CA.available()) return { ok: false, error: 'Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요.' };
+  S.abort = false;
+  log(`📖 교정 제안(Claude) — ${chunks.length}묶음 · ${chars.toLocaleString()}자 · 추정 ≈ $${est.toFixed(2)}`);
+  const found = []; let next = 0, failed = 0, done = 0;
+  const worker = async () => {
+    while (next < chunks.length && !S.abort) {
+      const c = chunks[next++]; const body = c.lines.join('\n');
+      const r = await CA.ask({ system: SC.SYSTEM, text: body, maxTokens: 8000, timeoutMs: 300000 });
+      done++;
+      if (!r.ok) { failed++; log(`   ⚠ 교정 ${done}/${chunks.length} 실패 — ${r.error}`); if (/키가|충전금/.test(r.error)) S.abort = true; continue; }
+      for (const it of SC.parseItems(r.text, body) || []) {
+        const li = c.lines.findIndex((l) => l.includes(it['틀림']));
+        found.push({ file: c.file, line: c.start + (li < 0 ? 0 : li) + 1, ctx: li < 0 ? '' : c.lines[li].trim().slice(0, 120), ...it });
+      }
+      if (done % 5 === 0) log(`   … 교정 ${done}/${chunks.length} · 제안 ${found.length}건`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, chunks.length) }, worker));
+  found.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
+  const name = path.basename(S.scriptPath || 'book.md').replace(/\.md$/i, '');
+  const out = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset, S.scriptPath), `${name}_교정제안.md`);
+  const kst = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
+  const L = [`# 교정 제안 — ${name}`, '', `> Claude(${CA.cfg().model}) · ${kst} KST · 제안만입니다 — 원고는 고치지 않았습니다.`,
+    `> ${chunks.length}묶음 중 ${done - failed}묶음 확인${failed ? ` · 실패 ${failed}` : ''}${S.abort ? ' · 중단됨' : ''} · 제안 ${found.length}건`, ''];
+  let cur = null;
+  for (const f of found) {
+    if (f.file !== cur) { cur = f.file; L.push('', `## ${path.basename(f.file)}`, ''); }
+    L.push(`- ${f.line}줄: **${f['틀림']}** → **${f['바름']}**${f.ctx ? ` — 「${f.ctx}」` : ''}`);
+  }
+  if (!found.length) L.push('확실한 맞춤법 오류를 찾지 못했습니다.');
+  await P.retryFs(() => fs.mkdirSync(path.dirname(out), { recursive: true }), '교정 보고서 폴더', log);
+  await P.retryFs(() => fs.writeFileSync(out, L.join('\n') + '\n', 'utf8'), '교정 보고서 쓰기', log);
+  log(`📖 교정 제안 ${found.length}건 → ${out}`);
+  return { ok: true, count: found.length, path: out, failed };
+});
 ipcMain.handle('stock-open-url', (_e, u) => {   // 작가·원본 페이지 — 두 사이트 주소만 연다
   try { const x = new URL(String(u || '')); if (x.protocol === 'https:' && /(^|\.)(pexels\.com|pixabay\.com)$/.test(x.hostname)) { shell.openExternal(x.href); return true; } } catch {}
   return false;
@@ -5957,7 +6067,7 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 // 🇰🇷 목소리 카드 글 번역(영어 → 한국어) — 저장(~/.priming-maker/tts-voices/translations.json · 같은 문장은 다시 안 함)
-//   번역기: Ollama(켜져 있으면 · 무료 · 로컬) → 없으면 Gemini 키(문장 몇 개라 요금 미미). 한 번에 40개씩 JSON 배열로.
+//   번역기: Claude API(v0.7.94 — 옛 Ollama·Gemini 는 뺐다 · 문장 몇 개라 요금 미미). 한 번에 40개씩 JSON 배열로.
 const TR_PATH = () => path.join(TTS_VOICE_DIR(), 'translations.json');
 let _trCache = null;
 function _trLoad() { if (_trCache) return _trCache; try { _trCache = JSON.parse(fs.readFileSync(TR_PATH(), 'utf8')); } catch { _trCache = {}; } return _trCache; }
@@ -5970,20 +6080,9 @@ async function _translateBatch(items) {
   const prompt = '다음은 TTS 목소리 카드의 영어 설명들이다. 각 항목을 자연스럽고 짧은 한국어로 번역하라.\n'
     + '- 사람 이름·브랜드 이름은 그대로 둔다 · 「·」 구분은 유지 · middle_aged=중년, young=청년, old=노년, narrative_story=내레이션·이야기, informative_educational=정보·교육, conversational=대화, social_media=SNS, characters_animation=캐릭터·애니메이션, entertainment_tv=예능·TV, advertisement=광고 처럼 밑줄 낱말도 우리말로.\n'
     + '- 설명 없이 **JSON 문자열 배열 하나만** 답하라(입력과 같은 개수·같은 순서).\n\n입력:\n' + JSON.stringify(items);
-  const oc = require('./core/ollama-config').load();
-  let text = '', via = '';
-  const tags = await ollamaTags(oc.baseUrl).catch(() => null);
-  if (tags && tags.ok) { text = await PIO.callLlmTextApi('ollama', '', prompt, { baseUrl: oc.baseUrl, model: oc.model }); via = 'Ollama ' + (oc.model || ''); }
-  else {
-    const key = ((require('./tts/secret-store').get('gemini') || {}).key || '');
-    if (!key) throw new Error('번역할 수단이 없습니다 — Ollama 가 꺼져 있고 Gemini 키도 없습니다');
-    // Gemini 가 「지금 붐빔(503)·한도(429)」면 잠깐 쉬고 다시(최대 3번 — 2026-10-05 실측 503)
-    for (let att = 1; ; att++) {
-      try { text = await PIO.callLlmTextApi('gemini', key, prompt); break; }
-      catch (e) { if (att >= 3 || !/\b(503|429|500)\b/.test(String(e.message))) throw e; await new Promise((r) => setTimeout(r, 4000 * att)); }
-    }
-    via = 'Gemini';
-  }
+  // 🤖 v0.7.94 — Claude API 하나(옛 Ollama → Gemini 순서는 뺐다)
+  const text = await PIO.callLlmTextApi('claude', '', prompt, { log, label: '목소리 설명 번역' });
+  const via = 'Claude';
   const m = /\[[\s\S]*\]/.exec(String(text || ''));
   const arr = m ? JSON.parse(m[0]) : null;
   if (!Array.isArray(arr) || arr.length !== items.length) throw new Error(`번역 결과 개수가 맞지 않습니다(${via})`);
@@ -10088,44 +10187,38 @@ ipcMain.handle('add-group', async (_e, args = {}) => {
   return { ok: true, dto: P.toDTO(S.parsed), groupNum: nn, firstSentence: pr.sentences.indexOf(ns) };
 });
 
+// ✍ 프롬프트 자동 작성 — Claude API 하나(v0.7.94 · 옛 provider: ollama/gemini 는 무시)
+//   mode: 'fill'(기본 — 빈 칸만 채움) · 'image'(🔁 이미지 프롬프트 다시 쓰기) · 'video'(🔁 영상 프롬프트 다시 쓰기)
+//   groups: 그룹 번호 목록(체크박스로 고른 그룹) — 없으면 image = 전체 그룹 · video = 영상 범위/방식 그룹
 ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { provider = 'gemini', styleName = '', fromNum = null, toNum = null } = args;
+  const { styleName = '', fromNum = null, toNum = null } = args;
+  const mode = args.mode === 'image' || args.mode === 'video' ? args.mode : 'fill';
+  if (!require('./core/claude-api').available()) throw new Error('Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요.');
   S.abort = false;
-  let callAnswer, label = provider;
-  if (provider === 'ollama') {
-    const oc = require('./core/ollama-config').load();
-    const tags = await ollamaTags(oc.baseUrl);
-    if (tags.ok) {
-      log(`🤖 [ollama] ${oc.model} (${oc.baseUrl}) 프롬프트 자동 작성 시작…`);
-      callAnswer = (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model });
-    } else {
-      // Ollama 미도달 → Gemini 키 있으면 폴백
-      let key = ''; try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
-      if (!key.trim()) throw new Error(`Ollama 서버에 연결할 수 없습니다 (${oc.baseUrl}). ⚙ Ollama 설정에서 주소를 확인하거나, ⚙ 채널편집에서 Gemini 키를 등록하세요.`);
-      log(`⚠ Ollama 미도달(${oc.baseUrl}) → Gemini 폴백`);
-      label = 'gemini'; callAnswer = (req) => PromptIO.callLlmTextApi('gemini', key, req);
-    }
-  } else {
-    let key = '';
-    try { const s = require('./tts/secret-store').get(provider); key = (s && s.key) || ''; } catch {}
-    if (!key.trim()) throw new Error(`${provider.toUpperCase()} API 키가 없습니다 — ⚙ 채널편집에서 키를 등록하세요(현재 Gemini 키 입력 지원).`);
-    log(`🤖 [${provider}] API 프롬프트 자동 작성 시작 (${PromptIO.LLM_TEXT_MODELS[provider]})…`);
-    callAnswer = (req) => PromptIO.callLlmTextApi(provider, key, req);
-  }
-  // 빈 프롬프트만 채움 — 이미지 OR i2v(영상) 프롬프트가 비어있는 그룹만 (분할로 초기화된 그룹 등).
-  //   이미 둘 다 있는 그룹은 건너뜀(덮어쓰지 않음).
-  // 빈 프롬프트만 채움 — 이미지는 모든 그룹, i2v(영상)는 '영상 범위' 그룹만(롱폼=도입부). 범위 밖은 i2v 불요.
+  const callAnswer = (req) => PromptIO.callLlmTextApi('claude', '', req, { log, label: '프롬프트' });
   const _pr0 = S.parsed.projects[0];
   const _vm = VSel.matcher((_pr0 && _pr0.groups) || [], args.vidSel, fromNum, toNum);
   const _inRange = (g) => _vm(g.num);
-  const includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (_inRange(g) && (!g.videoPrompt || !g.videoPrompt.trim()));
-  const r = await generatePromptsChunked(S.parsed.projects, { styleName, includeFn }, callAnswer, log);
+  const pick = Array.isArray(args.groups) && args.groups.length ? new Set(args.groups.map(Number)) : null;
+  let includeFn;
+  if (mode === 'image') includeFn = (g) => (pick ? pick.has(g.num) : true);
+  else if (mode === 'video') includeFn = (g) => (pick ? pick.has(g.num) : _inRange(g));
+  // 빈 프롬프트만 채움 — 이미지는 모든 그룹, i2v(영상)는 '영상 범위' 그룹만(롱폼=도입부). 이미 있는 것은 덮어쓰지 않는다.
+  else includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (_inRange(g) && (!g.videoPrompt || !g.videoPrompt.trim()));
+  const n = S.parsed.projects.reduce((k, pr) => k + pr.groups.filter(includeFn).length, 0);
+  const what = mode === 'image' ? '🔁 이미지 프롬프트 다시 쓰기' : mode === 'video' ? '🔁 영상 프롬프트 다시 쓰기' : '✍ 빈 프롬프트 채우기';
+  if (!n) { log(`${what} — 대상 그룹이 없습니다`); return P.toDTO(S.parsed); }
+  log(`🤖 [Claude] ${what} — ${n}개 그룹${pick ? '(고른 그룹)' : ''} (${require('./core/claude-api').cfg().model})`);
+  if (mode !== 'fill') undoPush(what);   // 덮어쓰기 — Ctrl+Z 로 옛 프롬프트로
+  const r = await generatePromptsChunked(S.parsed.projects, { styleName, includeFn, only: mode === 'fill' ? '' : mode }, callAnswer, log);
+  if (mode === 'image') for (const pr of S.parsed.projects) for (const g of pr.groups) if (includeFn(g) && g.imagePrompt) g.imagePromptStale = false;
   if (r.groups > 0) {
-    log(`📥 [${label}] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})`);
+    log(`📥 [Claude] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})${mode === 'image' ? ' · 그림은 그대로입니다 — 새 프롬프트로 그리려면 그룹의 🔄' : ''}`);
     if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건`); }
+    scheduleAutoSave();
   } else {
-    log(`⚠ [${label}] 응답에서 프롬프트를 인식하지 못했습니다`);
+    log('⚠ [Claude] 응답에서 프롬프트를 인식하지 못했습니다');
   }
   return P.toDTO(S.parsed);
 });

@@ -593,6 +593,30 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       setFieldRev((r) => r + 1);
     },
   });
+  // 🤖 Claude API(v0.7.94) — 키워드·한줄 소개·책 소개 초안 / 교정 제안 보고서(원고는 고치지 않는다 · 적용은 로이가 누를 때만)
+  const [aiBook, setAiBook] = useState({ busy: '', keywords: '', tagline: '', intro: '', proof: null, error: '' });
+  async function runBlurb() {
+    setAiBook((x) => ({ ...x, busy: 'blurb', error: '' })); setStatus('🤖 Claude 가 원고를 읽고 소개글을 쓰는 중…');
+    try {
+      const r = await api.bookClaudeBlurb();
+      if (r && r.ok) { setAiBook((x) => ({ ...x, keywords: r.keywords, tagline: r.tagline, intro: r.intro })); setStatus('🤖 소개글 초안 — 아래에서 확인하고 「적용」·「복사」'); }
+      else setAiBook((x) => ({ ...x, error: (r && r.error) || '실패' }));
+    } catch (e) { setAiBook((x) => ({ ...x, error: e.message })); }
+    finally { setAiBook((x) => ({ ...x, busy: '' })); }
+  }
+  async function applyAi(k, v) { await setMeta(k, String(v || '').trim()); setFieldRev((r) => r + 1); setStatus(`🤖 ${k === 'keywords' ? '키워드' : '한줄 소개'}를 넣었습니다`); }
+  async function runProofread() {
+    try {
+      const d = await api.bookClaudeProofread({ dry: true });
+      if (!d || !d.ok) { setAiBook((x) => ({ ...x, error: (d && d.error) || '실패' })); return; }
+      if (!window.confirm(`🔎 원고 ${d.chars.toLocaleString()}자를 ${d.chunks}묶음으로 나눠 Claude(${d.model})에게 맞춤법 교정 제안을 받습니다.\n예상 요금 ≈ $${d.estUsd.toFixed(2)} (거친 추정 · Claude 충전금)\n\n원고는 고치지 않고, 제안을 「…_교정제안.md」 보고서로 저장합니다. 진행할까요?`)) return;
+      setAiBook((x) => ({ ...x, busy: 'proof', error: '', proof: null })); setStatus('🔎 교정 제안 받는 중… (Claude · 로그에 진행)');
+      const r = await api.bookClaudeProofread({});
+      if (r && r.ok) { setAiBook((x) => ({ ...x, proof: r })); setStatus(`🔎 교정 제안 ${r.count}건 — 보고서 저장`); }
+      else setAiBook((x) => ({ ...x, error: (r && r.error) || '실패' }));
+    } catch (e) { setAiBook((x) => ({ ...x, error: e.message })); }
+    finally { setAiBook((x) => ({ ...x, busy: '' })); }
+  }
   async function attachCover() { const d = await api.bookAttachCover(); if (d) setDto(d); }
   async function clearCover() { const d = await api.bookClearCover(); if (d) setDto(d); }
 
@@ -1004,6 +1028,23 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         {INFO_FIELDS.map(([k, l, req, help]) => field(k, l, req, help))}
         <div className="bkzone">플랫폼 등록 정보 <span className="meta">(책에는 인쇄되지 않음)</span></div>
         {REG_FIELDS.map(([k, l, help]) => field(k, l, false, help))}
+        {/* 🤖 Claude API(v0.7.94) — 초안만 만들고, 넣는 것은 「적용」을 누를 때만 */}
+        <div className="bkzone">🤖 Claude 도우미 <span className="meta">(Claude API · 충전금에서 요금)</span></div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+          <button className="ghost" data-testid="bk-ai-blurb" disabled={!!aiBook.busy} title="원고를 읽고 키워드·한줄 소개·책 소개(부크크 5단계) 초안을 만듭니다 — 넣는 것은 「적용」을 누를 때만" onClick={runBlurb}>{aiBook.busy === 'blurb' ? '⏳ 쓰는 중…' : '✍ 소개글·키워드 초안'}</button>
+          <button className="ghost" data-testid="bk-ai-proof" disabled={!!aiBook.busy} title="원고 전체의 맞춤법 교정 제안을 받아 보고서(.md)로 저장합니다 — 원고는 고치지 않습니다 · 시작 전에 예상 요금을 보여 줍니다" onClick={runProofread}>{aiBook.busy === 'proof' ? '⏳ 교정 중…' : '🔎 교정 제안'}</button>
+        </div>
+        {aiBook.error && <div className="meta" style={{ color: '#c62828', fontWeight: 600 }}>⚠ {aiBook.error}</div>}
+        {(aiBook.keywords || aiBook.tagline) && (<div className="meta" style={{ display: 'grid', gap: 4, marginBottom: 6 }}>
+          {aiBook.keywords && <div>키워드: <b>{aiBook.keywords}</b> <button className="ghost" onClick={() => applyAi('keywords', aiBook.keywords)}>적용</button></div>}
+          {aiBook.tagline && <div>한줄 소개: <b>{aiBook.tagline}</b> <button className="ghost" onClick={() => applyAi('tagline', aiBook.tagline)}>적용</button></div>}
+        </div>)}
+        {aiBook.intro && (<div style={{ marginBottom: 6 }}>
+          <div className="meta">책 소개 초안(부크크 5단계 「책 소개」 · 등록정보 파일에 직접 옮겨 적으세요):</div>
+          <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box' }} value={aiBook.intro} />
+          <button className="ghost" onClick={() => copy(aiBook.intro, '책 소개')}>📋 복사</button>
+        </div>)}
+        {aiBook.proof && <div className="meta">🔎 교정 제안 {aiBook.proof.count}건{aiBook.proof.failed ? ` · 실패 ${aiBook.proof.failed}묶음` : ''} — <button className="ghost" onClick={() => api.bookRevealFile(aiBook.proof.path)}>보고서 위치</button></div>}
         {select('printColor', '내지 색(종이책)', [['', '흑백 (기본)'], ['컬러', '컬러']], false, '부크크 인세: 사이트 흑백 35% · 컬러 15% / 외부유통 흑백 15% · 컬러 10%')}
         {select('aiDisclosure', 'AI 사용 표기(전자책)',
           [['', '— 선택 안 됨 —'], ['없음', '없음(직접 집필·번역)'], ['있음', '있음(AI 활용 — 저자명에 「AI」 표기)']], true,

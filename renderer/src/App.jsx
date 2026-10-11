@@ -593,7 +593,6 @@ export default function App() {
   const tsRef = useRef(null);                    // 편집 가능한 textarea (복사는 여기서 읽는다)
   const [impOpen, setImpOpen] = useState(false);
   const [impText, setImpText] = useState('');
-  const [impProvider, setImpProvider] = useState('ollama');
   const [impBusy, setImpBusy] = useState(false);
   const [preview, setPreview] = useState(null); // { kind, src }
   // ⏳ 그림·영상 불러오기 진행 — 작업했던 대본을 열면 썸네일이 한동안 검게 비어 있다(구글드라이브에서 받아 오는 중).
@@ -697,9 +696,6 @@ export default function App() {
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [dictFilter, setDictFilter] = useState('');
   const [dictNew, setDictNew] = useState({ source: '', pron: '' });   // 📖 「새 단어 추가」 칸(늘 보이는 입력 영역) — ＋ 추가를 누르면 등록된 목록 맨 위로
-  const [ollamaOpen, setOllamaOpen] = useState(false);
-  const [ollama, setOllama] = useState(null);           // { baseUrl, model }
-  const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
   // 🔊 음성 엔진 팝업 — null = 닫힘 · true = 열림(내용·상태는 TtsEngineDialog 가 갖는다)
   const [ttsEng, setTtsEng] = useState(null);
   const [ttsEngActive, setTtsEngActive] = useState({ id: 'omnivoice', label: 'OmniVoice' }); // 헤더 버튼 표시
@@ -1432,18 +1428,56 @@ export default function App() {
       setStatus(ok ? '📤 요청서 클립보드 복사 완료 — 웹 LLM에 붙여넣으세요' : '복사 실패');
     } catch (e) { logline('내보내기 오류: ' + e.message); }
   }
-  // ✍ 프롬프트작성 — 빈 그룹의 이미지+i2v 프롬프트를 GPU(Ollama)로 채움.
+  // ✍ 프롬프트작성 — 빈 그룹의 이미지+i2v 프롬프트를 Claude API 로 채움(v0.7.94 — 옛 GPU Ollama).
   //   GPU 미연결(다른 PC·출장 등)이면 → 요청서를 클립보드에 복사하고 '붙여넣기' 창을 열어
   //   아무 LLM(챗GPT/클로드/제미나이…)에 붙여넣어 답을 받아 등록하는 수동 흐름으로 자동 전환.
+  // ☑ 체크박스로 고른 그룹 번호(없으면 null = 전체) — 🔁 다시 쓰기·🔍 검수가 쓴다
+  const pickedGroupNums = () => (chkSel && capSel && Array.isArray(capSel.items) && capSel.items.length ? [...new Set(capSel.items.map((x) => x.groupNum))].sort((a, b) => a - b) : null);
+  // 🔁 이미지/영상 프롬프트 다시 쓰기(Claude API · v0.7.94) — 고른 그룹이 있으면 그 그룹만, 없으면 이미지 = 전체 · 영상 = 영상 범위/방식
+  async function runRewritePrompts(kind) {
+    if (!dto) { setStatus('대본을 먼저 여세요'); return; }
+    const picked = pickedGroupNums();
+    const what = kind === 'video' ? '영상(모션) 프롬프트' : '이미지 프롬프트';
+    const scope = picked ? `고른 그룹 ${picked.length}개(G${picked.slice(0, 8).join('·G')}${picked.length > 8 ? '…' : ''})` : (kind === 'video' ? '영상 범위/방식의 그룹 전부' : '모든 그룹');
+    if (!uiConfirm(`🔁 ${what}를 Claude API 로 새로 씁니다.\n대상: ${scope}\n\n지금 프롬프트는 덮어씁니다(Ctrl+Z 로 되돌리기). 그림·영상 파일은 그대로입니다.\n(Claude 충전금에서 요금이 빠집니다)`)) return;
+    setImpBusy(true); setStatus(`🔁 ${what} 다시 쓰는 중… (Claude)`);
+    try {
+      const d = await api.generatePromptsApi({ mode: kind === 'video' ? 'video' : 'image', groups: picked || undefined, styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel });
+      setDto(d); setStatus(`🔁 ${what} 다시 쓰기 완료`);
+    } catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('🔁 다시 쓰기 실패: ' + m); setStatus(m); uiAlert('🔁 다시 쓰기 실패:\n' + m); }
+    finally { setImpBusy(false); }
+  }
+  // 🔍 그림 검수(Claude 가 그림을 봄 · v0.7.94) — 문제 그림을 보여 주고, 고르면 「다시 그리기」 표시
+  const [visionBusy, setVisionBusy] = useState(false);
+  async function runVisionCheck() {
+    if (!dto) { setStatus('대본을 먼저 여세요'); return; }
+    const picked = pickedGroupNums();
+    if (!uiConfirm(`🔍 그림을 Claude 가 직접 보고 글자·손가락·노출·시대 불일치 같은 문제를 찾습니다.\n대상: ${picked ? `고른 그룹 ${picked.length}개` : '그림이 있는 모든 그룹'}\n한 장 ≈ $0.01 안팎(추정 · Claude 충전금).\n\n보고만 하고, 다시 그릴지는 끝에 고릅니다.`)) return;
+    setVisionBusy(true); setStatus('🔍 그림 검수 중… (Claude)');
+    try {
+      const r = await api.claudeVisionCheck({ groups: picked || undefined });
+      if (r && r.dto) setDto(r.dto);
+      const fl = (r && r.flagged) || [];
+      if (!fl.length) { setStatus(`🔍 검수 끝 — ${r.checked}장 모두 문제 없음${r.failed ? ` · 실패 ${r.failed}장(로그)` : ''}`); return; }
+      const redo = fl.filter((x) => !x.attached);
+      const list = fl.map((x) => `G${x.num}${x.attached ? ' (첨부 그림 — 표시 안 함)' : ''}: ${x.issues.join(' · ')}`).join('\n');
+      setStatus(`🔍 검수 끝 — ${r.checked}장 중 문제 ${fl.length}장`);
+      if (redo.length && uiConfirm(`🔍 문제가 보인 그림 ${fl.length}장\n\n${list}\n\n${redo.length}개 그룹을 「다시 그리기」로 표시할까요?\n(그림 파일은 지우지 않습니다 · 🖼 이미지 생성/⚡ 만들기 때 새로 그립니다 · Ctrl+Z 되돌리기)`)) {
+        const d = await api.claudeVisionMark({ groups: redo.map((x) => x.num) }); if (d) setDto(d);
+        setStatus(`🔍 ${redo.length}개 그룹을 다시 그리기로 표시했습니다`);
+      } else if (!redo.length) uiAlert(`🔍 문제가 보인 그림 ${fl.length}장(모두 첨부 그림)\n\n${list}`);
+    } catch (e) { const m = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); logline('🔍 검수 실패: ' + m); setStatus(m); uiAlert('🔍 검수 실패:\n' + m); }
+    finally { setVisionBusy(false); }
+  }
   async function runMakePrompts() {
     if (!dto) { setStatus('대본을 먼저 여세요'); return; }
-    setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (GPU Ollama)');
+    setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (Claude)');
     try {
-      const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel });
+      const d = await api.generatePromptsApi({ mode: 'fill', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel });
       setDto(d); setStatus('✍ 빈 프롬프트 작성 완료');
     } catch (e) {
-      logline('프롬프트작성(GPU Ollama) 실패: ' + e.message);
-      // GPU 미연결 → 복사·붙여넣기 방식으로 자동 전환 (요청서를 클립보드에 복사 + 붙여넣기 창 열기)
+      logline('프롬프트작성(Claude) 실패: ' + e.message);
+      // Claude 키 없음·실패 → 복사·붙여넣기 방식으로 자동 전환 (요청서를 클립보드에 복사 + 붙여넣기 창 열기)
       let copied = false;
       try {
         const text = await api.exportPrompts({ styleName: styleName() });
@@ -1451,9 +1485,9 @@ export default function App() {
       } catch (_) {}
       setImpText('');
       setImpOpen(true);
-      setStatus('GPU(Ollama) 미연결 — 복사·붙여넣기 방식으로 전환');
+      setStatus('Claude API 로 못 만들었습니다 — 복사·붙여넣기 방식으로 전환');
       uiAlert(
-        'GPU(Ollama)에 연결할 수 없습니다.\n'
+        'Claude API 로 프롬프트를 만들지 못했습니다(키가 없거나 오류 — 로그 참고).\n'
         + (copied ? '요청서를 클립보드에 복사해 두었습니다.\n' : '※ 자동 복사 실패 — 붙여넣기 창의 [📤 요청서 복사] 버튼을 누르세요.\n')
         + '\n[복사·붙여넣기로 프롬프트 만들기]\n'
         + '① 챗GPT·클로드·제미나이 등 아무 LLM에 붙여넣어 답을 받으세요.\n'
@@ -1664,12 +1698,6 @@ export default function App() {
     setStatus('가져오기 적용 중…');
     try { const d = await api.importPrompts({ text }); setDto(d); setImpOpen(false); setStatus('가져오기 완료'); }
     catch (e) { logline('가져오기 오류: ' + e.message); setStatus('가져오기 실패'); }
-  }
-  async function importViaApi() {
-    setStatus(`🤖 ${impProvider} API로 프롬프트 작성 중…`); setImpBusy(true);
-    try { const d = await api.generatePromptsApi({ provider: impProvider, styleName: styleName() }); setDto(d); setImpOpen(false); setStatus('API 자동작성 완료'); }
-    catch (e) { logline('API 오류: ' + e.message); setStatus('API 실패'); uiAlert('API 호출 실패:\n' + e.message); }
-    finally { setImpBusy(false); }
   }
   async function resetProject() {
     const r = await api.resetProject();
@@ -2438,26 +2466,6 @@ export default function App() {
     const qs = qSum('vid');
     return { need, unit: u, txt: mcCostText(u, need, krw), krw, q: qs ? { n: qs.n, unk: qs.unk, txt: mcCostText(u, qs.sum, krw), sum: qs.sum } : null };
   }, [dto, videoEngine, vidSel, vidFrom, vidTo, cvidCfg, ttsEngActive, qMedia]);
-  async function openOllama() {
-    try {
-      const c = await api.getOllamaConfig(); setOllama(c || {}); setOllamaOpen(true);
-      api.listOllamaModels().then((m) => setOllamaModels(m || [])).catch(() => {});
-    } catch (e) { logline('Ollama 설정 읽기 오류: ' + e.message); }
-  }
-  async function saveOllama() {
-    try { await api.setOllamaConfig(ollama); setOllamaOpen(false); setStatus('Ollama 설정 저장됨'); }
-    catch (e) { logline('저장 오류: ' + e.message); }
-  }
-  async function testOllamaConn() {
-    setStatus('Ollama 연결 테스트…');
-    try {
-      await api.setOllamaConfig(ollama); // 입력값으로 테스트
-      const r = await api.testOllama();
-      setOllamaModels(r.models || []);
-      if (!r.ok) { setStatus(`✗ 연결 실패 (${r.baseUrl}) — ${r.error || ''}`); return; }
-      setStatus(r.hasModel ? `✓ 연결 OK — '${ollama.model}' 설치됨 (모델 ${r.models.length}개)` : `✓ 연결 OK — ⚠ '${ollama.model}' 미설치 (모델 ${r.models.length}개)`);
-    } catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
-  }
   async function openScriptEdit() {
     if (!loaded) { setStatus('대본을 먼저 여세요'); return; }
     try { const t = await api.getScriptText(); setScriptText(t || ''); setScriptEditOpen(true); }
@@ -3301,6 +3309,19 @@ export default function App() {
     step(0);
   }
   // 최근 목소리 설명(이 PC · 최근 10개) — 잘 나온 설명을 다시 쓰기 쉽게
+  // 🤖 보이스디자인 설명 만들기(v0.7.94 · Claude API)
+  const [vdWish, setVdWish] = useState('');
+  const [vdWishBusy, setVdWishBusy] = useState(false);
+  async function vdMakeInstruct() {
+    const wish = vdWish.trim(); if (!wish || vdWishBusy) return;
+    setVdWishBusy(true); setVdStatus('🤖 Claude 가 목소리 설명을 쓰는 중…');
+    try {
+      const r = await api.claudeVoiceInstruct({ wish, lang: vdLang, current: vdInstruct });
+      if (r && r.ok) { setVdInstruct(r.instruct); setVdStatus('🤖 설명을 넣었습니다 — 고쳐 쓰거나 바로 「생성」을 누르세요'); }
+      else setVdStatus('⚠ ' + ((r && r.error) || '설명을 만들지 못했습니다'));
+    } catch (e) { setVdStatus('⚠ ' + e.message); }
+    finally { setVdWishBusy(false); }
+  }
   function vdRemember(instruct) {
     const t = String(instruct || '').trim(); if (!t) return;
     const next = [t, ...vdRecent.filter((x) => x !== t)].slice(0, 10);
@@ -3456,7 +3477,13 @@ export default function App() {
               ) : (
                 <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <textarea data-testid="vd-instruct" rows="3" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="영어로 입력해주세요." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} />
+                    <textarea data-testid="vd-instruct" rows="3" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="영어로 입력해주세요. (아래 🤖 칸에 한국어로 적으면 Claude 가 영어 설명을 써 줍니다)" value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} />
+                    {/* 🤖 v0.7.94 — 한국어로 원하는 목소리 → Claude API 가 보이스디자인용 영어 설명 한 줄 */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                      <input data-testid="vd-wish" style={{ flex: 1, minWidth: 0 }} placeholder="🤖 한국어로 원하는 목소리 (예: 60대 남자, 낮고 따뜻하게, 옛이야기 들려주듯 천천히)" value={vdWish}
+                        onChange={(e) => setVdWish(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) vdMakeInstruct(); }} />
+                      <button type="button" className="ghost" data-testid="vd-wish-btn" disabled={vdWishBusy || !vdWish.trim()} title="Claude API 로 영어 목소리 설명을 만들어 위 칸에 넣습니다(요금 아주 적음)" onClick={vdMakeInstruct}>{vdWishBusy ? '⏳ 만드는 중…' : '🤖 설명 만들기'}</button>
+                    </div>
                     {/* 🧩 설명 도우미 — 눌러서 영어 낱말 넣기/빼기 (v0.7.23) */}
                     <div data-testid="vd-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginTop: 4 }}>
                       {VD_CHIPS.map(([grp, items]) => (
@@ -4371,7 +4398,6 @@ export default function App() {
       if (tsOpen) { setTsOpen(false); return; }
       if (impOpen) { setImpOpen(false); return; }
       if (scriptEditOpen) { setScriptEditOpen(false); return; }
-      if (ollamaOpen) { setOllamaOpen(false); return; }
       if (vdOpen) { closeVoiceDesign(); return; }   // 🔊 음성 설정의 🎨 탭으로 열면 그 위에 떠 있다 → 먼저 닫는다
       if (ttsEng) { setTtsEng(null); return; }
       if (dictOpen) { setDictOpen(false); return; }
@@ -4383,7 +4409,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipCtx, stageCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ollamaOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
+  }, [clipCtx, stageCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
   // 🔎 리본(이미지·비디오 탭)에서 무료 스톡 열기 — 지금 커서의 그룹 · 탭에 맞춰 사진/영상(v0.7.68)
@@ -4474,7 +4500,7 @@ export default function App() {
     });
     setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: abs ? 'center' : 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ollamaOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg);
+  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -5461,8 +5487,10 @@ export default function App() {
             {menu === 'image' && (<>
           <span className="hgroup">
             <span className="glabel">② 이미지</span>
-            <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
-            <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" onClick={openOllama}>⚙</button>
+            <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
+            <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}>🔁 이미지 프롬프트</button>
+            <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}>{visionBusy ? '⏳ 검수중…' : '🔍 검수'}</button>
+            <button className="ghost" disabled={!loaded} title="웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 프롬프트 적용(고급)" onClick={() => { setImpText(''); setImpOpen(true); }}>📥</button>
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
               <option value="">스타일 없음</option>
               <option value={SCRIPT_STYLE_ID} title="대본의 「> 🎨 화풍:」 줄로 그립니다. 줄이 없으면 만들 때 스타일을 고르는 팝업이 뜹니다">📜 대본스타일</option>
@@ -5510,6 +5538,7 @@ export default function App() {
               <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
               <option value="none">없음 (이미지만)</option>
             </select>
+            <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}>{impBusy ? '⏳' : '🔁 영상 프롬프트'}</button>
             {loaded && vidCost && (
               <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
                 title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준${vidCost.q ? `\n작업큐 전체 ${vidCost.q.n}편 · 남은 영상 ${vidCost.q.sum}개 합계 ${vidCost.q.txt}(대본마다 자기 범위/방식 기준)${vidCost.q.unk ? ` · ${vidCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
@@ -6562,28 +6591,6 @@ export default function App() {
           // 채널편집이 열려 있으면 그 채널의 참조음성·요약을 새로(음성 설정이 OmniVoice 참조음성을 바꿨을 수 있다 — 옛 값으로 다시 저장하지 않게)
           if (chOpen && ch && ch.name) { loadChVoiceInfo(ch.name); api.getPresetDetail(ch.name).then((p) => { if (p) setCh((c) => (c ? { ...c, voiceCloneRefAudio: p.voiceCloneRefAudio || '' } : c)); }).catch(() => {}); }
           setStatus(n ? `🔊 채널 목소리 저장 — ${n}개 채널` : '🔊 저장됨'); }} />}
-      {ollamaOpen && ollama && (
-        <div className="modal-bg show">
-          <div className="modal-card">
-            <h3>⚙ Ollama LLM 설정 (프롬프트 자동작성)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>GPU PC 의 Ollama 로 그룹 내용에 맞는 이미지 프롬프트를 <b>무료·자동</b> 생성합니다. 다른 PC/외부에선 <b>서버 주소</b>만 GPU PC 의 LAN/Tailscale IP 로 바꾸세요.</div>
-            <div className="frow"><label>서버 주소</label><input placeholder="http://127.0.0.1:11434" value={ollama.baseUrl || ''} onChange={(e) => setOllama({ ...ollama, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testOllamaConn}>연결테스트</button></div>
-            <div className="frow"><label>모델</label>
-              <input placeholder="gemma4:latest" value={ollama.model || ''} onChange={(e) => setOllama({ ...ollama, model: e.target.value })} list="ollama-models" />
-              <datalist id="ollama-models">{ollamaModels.map((m) => <option key={m} value={m} />)}</datalist>
-            </div>
-            {ollamaModels.length > 0 && <div className="meta">설치된 모델: {ollamaModels.join(', ')}</div>}
-            <div className="meta">💡 RTX3060(12GB): <b>gemma4:latest</b>(e4b ≈9.6GB) 권장 — VRAM에 다 올라가 빠름. <b>gemma4:26b</b>(17GB)는 오프로딩되어 느립니다.</div>
-            <div className="frow" style={{ borderTop: '1px solid var(--line)', paddingTop: 8, marginTop: 8 }}>
-              <span className="meta" style={{ flex: 1 }}>고급: Ollama 대신 웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 적용</span>
-              <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!loaded} onClick={() => { setOllamaOpen(false); setImpText(''); setImpOpen(true); }}>📥 직접 붙여넣기</button>
-            </div>
-            <div className="mbtns"><button onClick={saveOllama}>저장</button><button className="ghost" onClick={() => setOllamaOpen(false)}>취소</button></div>
-          </div>
-        </div>
-      )}
-
-
       {/* 모달은 바깥 클릭으로 닫지 않음(ESC·닫기 버튼만) — 실수 클릭에 입력 유실 방지 */}
       {settingsOpen && (
         <div className="modal-bg show">
@@ -6818,6 +6825,14 @@ export default function App() {
                   <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!claudeKey.info.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm('Claude API 키를 지울까요?')) saveClaudeKey({ clear: true }); }}>지우기</button>
                 </div>
                 {keyChkMark('claude')}
+                <div className="kp-line">
+                  <span className="kp-lab">모델</span>
+                  <select data-testid="claude-model" value={claudeKey.info.model || 'claude-opus-5-5'} onChange={async (e) => { const m = e.target.value; await api.claudeKeySave({ model: m }); await loadClaudeKey(); }}>
+                    {(claudeKey.info.models || [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }]).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                  <Hint>쓰는 곳: ✍ 프롬프트 채우기 · 🔁 이미지/영상 프롬프트 다시 쓰기 · 🔍 그림 검수 · 자막 끊어 읽기 · 맞춤법 검사 · 목소리 설명 번역 · 🎨 보이스디자인 설명 · 📖 책 소개·교정. 키가 없으면 끊어 읽기·맞춤법은 예전처럼 Claude Code(구독)로 합니다.</Hint>
+                  {claudeKey.info.spent > 0 && <span className="meta" data-testid="claude-spent">이번 실행 ≈ ${Number(claudeKey.info.spent).toFixed(3)}</span>}
+                </div>
                 {claudeKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{claudeKey.msg}</div>}
               </div>
               {/* 🔎 무료 스톡(v0.7.67) — Pexels · Pixabay 검색 키(둘 다 무료) · 원문은 다시 보이지 않는다(끝 4자리만) */}
@@ -7165,7 +7180,7 @@ export default function App() {
         <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 680 }}>
             <h3>📥 복사·붙여넣기로 프롬프트 만들기</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>GPU(Ollama)에 연결되면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>GPU가 꺼져 있거나 출장(원격)·다른 PC라 연결이 안 될 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
+            <div className="meta" style={{ marginBottom: 8 }}>Claude API 키가 있으면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>키가 없거나 API 가 실패할 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
             <div style={{ marginBottom: 6 }}><button className="ghost" disabled={!loaded} title="이 대본의 프롬프트 요청서를 클립보드에 복사" onClick={exportPrompts}>📤 요청서 복사</button></div>
             {/* 대본수정과 같은 이유로 비제어 — 긴 텍스트를 제어 state 로 두면 타이핑마다 전 화면이 재렌더된다 */}
             <textarea ref={impRef} rows="12" defaultValue={impText} spellCheck={false} placeholder="여기에 웹 LLM 답변(## [1-1] … 이미지: …)을 붙여넣으세요" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} />

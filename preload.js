@@ -30,10 +30,6 @@ contextBridge.exposeInMainWorld('api', {
   qwenDesignStop: () => ipcRenderer.invoke('qwen-design-stop'),
   qwenDesignGenerate: (args) => ipcRenderer.invoke('qwen-design-generate', args),
   qwenDesignSave: (args) => ipcRenderer.invoke('qwen-design-save', args),
-  getOllamaConfig: () => ipcRenderer.invoke('get-ollama-config'),
-  setOllamaConfig: (patch) => ipcRenderer.invoke('set-ollama-config', patch),
-  testOllama: () => ipcRenderer.invoke('test-ollama'),
-  listOllamaModels: () => ipcRenderer.invoke('list-ollama-models'),
   getImageRotation: () => ipcRenderer.invoke('get-image-rotation'),
   setImageRotation: (patch) => ipcRenderer.invoke('set-image-rotation', patch),
   getGeminiImageConfig: () => ipcRenderer.invoke('get-gemini-image-config'),
@@ -121,6 +117,11 @@ contextBridge.exposeInMainWorld('api', {
   claudeKeyGet: () => ipcRenderer.invoke('claude-key-get'),          // 🤖 Claude API 키(v0.7.93)
   claudeKeySave: (args) => ipcRenderer.invoke('claude-key-save', args),
   claudeOpenKey: () => ipcRenderer.invoke('claude-open-key'),
+  claudeVisionCheck: (args) => ipcRenderer.invoke('claude-vision-check', args),   // 🔍 그림 검수(v0.7.94)
+  claudeVisionMark: (args) => ipcRenderer.invoke('claude-vision-mark', args),
+  claudeVoiceInstruct: (args) => ipcRenderer.invoke('claude-voice-instruct', args), // 🎨 보이스디자인 설명 만들기
+  bookClaudeBlurb: (args) => ipcRenderer.invoke('book-claude-blurb', args),        // 📖 키워드·한줄 소개·책 소개 초안
+  bookClaudeProofread: (args) => ipcRenderer.invoke('book-claude-proofread', args),// 📖 교정 제안 보고서
   stockOpenUrl: (u) => ipcRenderer.invoke('stock-open-url', u),
   stockSearch: (args) => ipcRenderer.invoke('stock-search', args),
   stockDefaultQuery: (args) => ipcRenderer.invoke('stock-default-query', args),
