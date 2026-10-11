@@ -172,7 +172,7 @@ const SCRIPT = [
     ok(mean(raw(withC.mp4, 21)) < mB * 0.35, `막간 카드(18~24초)도 어둡다(21초 ${mean(raw(withC.mp4, 21)).toFixed(0)})`);
     // 🙈 자막=숨김 — 첫 카드(0~12초)만 숨김: 그 동안 하얀 자막이 사라지고, 둘째 카드(18~24초)·카드 밖은 그대로
     const hid = await bake('hide', { cards: plan.cards.map((c, i) => (i === 0 ? { ...c, hideCaptions: true } : c)) });
-    const whites = (f, t) => bright(raw(f, t, 'scale=960:540'), 240);
+    const whites = (f, t) => bright(raw(f, t, 'scale=960:540'), 250);   // 자막 = 순백(255) · 카드 글자 = 크림(≈225)
     const wC = whites(withC.mp4, 5), wH = whites(hid.mp4, 5), wC2 = whites(withC.mp4, 21), wH2 = whites(hid.mp4, 21);
     ok(wC > 150 && wH < wC * 0.1, `🙈 자막=숨김 카드에서는 하얀 자막이 사라진다(5초 하얀 화소 ${wC} → ${wH})`);
     ok(Math.abs(wH2 - wC2) <= 5, `숨김이 없는 둘째 카드(21초)는 자막이 그대로다(${wC2} · ${wH2})`);

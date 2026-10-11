@@ -1,5 +1,5 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -136,7 +136,7 @@
     "core/visual-span.js": "6a7b52aa9f117f3f919cd58ec1e878e4011afe69",
     "core/voice-facets.js": "3175edbd52ae0a652e1b36ee4e78fe04cc5e1abb",
     "core/vrew-audio.js": "7f6f2aadd36d6fd8287cb66e932c80edc49a49dd",
-    "core/vrew-render.js": "3bcd15e218c8fae07a62708264320ad484e30387",
+    "core/vrew-render.js": "409c95abb7e2b0eabf66e9d273107682545ff00a",
     "core/wav-slice.js": "7ed1e0cd07744a5846f62365772abb27c74f05b6",
     "core/whiteboard-annotation.js": "b9d22a1ba829d4c1780811da207dd2af3af3d5ef",
     "core/whiteboard-audio.js": "5bad87d720d134260d3c979d6df7d3851ab69224",
@@ -172,7 +172,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "be2efb4ed1e1f6266708af5f81023b6afeeafc15",
+    "docs/작업노트/2026-10.md": "95d300d753da01e8aa35e2029ff771acd3526177",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/참조음성만들기-CLI.md": "8d755802a069d271fc48d6584d357274e0c64329",
     "docs/출판-원고-가이드.md": "8c082043b42d2412323ceab87b0dc884f55dde83",
@@ -187,7 +187,7 @@
     "light-updater.js": "e57035d6614fe2ca3596efd411ae4f80428baa5e",
     "main.js": "84b41efeda3264b6b1542b2b9fcfe263cf1b6fa5",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "14e642868770f706202043d327069de76a6800cc",
+    "package.json": "cd5d751bb9f1169c76998dcdcd35fc5165af7f90",
     "preload.js": "9bf1e990a0f8862226fec70d92a65968fed6a2e2",
     "renderer/dist/assets/index-D9CmKe4E.css": "8436b5fd48c9fab56181cc67b8b28d595ffa60cb",
     "renderer/dist/assets/index-Hsznb2qs.js": "5e66d6ba72cac34bfe7c532083067fd151f14124",
