@@ -22,6 +22,28 @@ const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replac
 const alphaHex = (op, max) => Math.max(0, Math.min(255, Math.round(255 * (1 - Math.max(0, Math.min(1, op)) * max)))).toString(16).padStart(2, '0').toUpperCase();
 const mw = (t, fs, spacing = 0) => FM.measure(FONT_FILE, t, fs, { bold: true, spacing });
 
+/** 제목 줄바꿈 — 한 줄에 들어가면 그대로 · 아니면 두 줄: 쉼표·물음표 뒤(의미 경계)를 먼저, 그다음 두 줄 길이 균형. 낱말 중간에서 끊지 않는다. 두 줄로도 안 되면 font-metrics 줄바꿈. */
+function balancedWrap(t, fs, maxW, opts = {}) {
+  const text = String(t || '').trim();
+  if (!text) return [''];
+  if (mw(text, fs, opts.spacing || 0) <= maxW) return [text];
+  const cands = [];
+  for (let i = 1; i < text.length; i++) {
+    if (text[i] !== ' ') continue;
+    const a = text.slice(0, i).trim(), b = text.slice(i + 1).trim();
+    if (!a || !b) continue;
+    const wa = mw(a, fs, opts.spacing || 0), wb = mw(b, fs, opts.spacing || 0);
+    if (Math.max(wa, wb) > maxW) continue;
+    cands.push({ a, b, bal: Math.abs(wa - wb), punct: /[,，、?？!！:：]$/.test(a) });
+  }
+  if (cands.length) {
+    const pool = cands.some((c) => c.punct) ? cands.filter((c) => c.punct) : cands;
+    pool.sort((x, y) => x.bal - y.bal);
+    return [pool[0].a, pool[0].b];
+  }
+  return FM.wrap(FONT_FILE, text, fs, maxW, { bold: true, spacing: opts.spacing || 0 });
+}
+
 /** 둥근 사각형 ASS 벡터(원점 = 왼쪽 위) */
 function rrPath(w, h, r) {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -82,7 +104,7 @@ function layoutCover(p) {
     out.push(text(W / 2, 470, 5, [p.title || '마무리'], 150, C.accent, 1, { sp: 4 }));
   } else {
     out.push(text(W / 2, 360, 5, [`${p.n} / ${p.m}`], 150, C.accent, 1, { sp: 6 }));
-    const lines = require('./font-metrics').wrap(FONT_FILE, p.title, 84, 1500, { bold: true }).slice(0, 2);
+    const lines = balancedWrap(p.title, 84, 1500).slice(0, 2);
     out.push(text(W / 2, 580 + (lines.length - 1) * 0, 5, lines, 84, C.text, 1, {}));
   }
   out.push(rect(barX, barY, barW, barH, C.line, 0.22, 8, 9));
@@ -107,8 +129,13 @@ function layoutTable(p, warn) {
     const sumMin = minW.reduce((a, b) => a + b, 0);
     if (sumMin > availW && fs > 54) continue;   // 더 작은 글자로 다시
     const need = nat.map((n, c) => Math.max(0, n - minW[c])), sumNeed = need.reduce((a, b) => a + b, 0), remain = Math.max(0, availW - sumMin);
-    let widths = minW.map((m, c) => m + (sumNeed <= remain ? need[c] + (remain - sumNeed) / ncol : (need[c] * remain) / (sumNeed || 1)));
-    void sum;
+    // 짧은 칸(구분 등)은 내용 폭 그대로(한 줄) — 모자란 폭은 긴 칸끼리 나눠 진다(물 채우기). 남으면 칸마다 똑같이 나눠 준다.
+    const extra = need.map(() => 0);
+    { let left = remain; const order = need.map((n, c) => c).sort((x, y) => need[x] - need[y]);
+      order.forEach((c, i) => { const share = left / (order.length - i); const give = Math.min(need[c], share); extra[c] = give; left -= give; });
+      if (left > 1e-6) for (let c = 0; c < ncol; c++) extra[c] += left / ncol; }
+    let widths = minW.map((m, c) => m + extra[c]);
+    void sum; void sumNeed;
     const sc = availW / widths.reduce((a, b) => a + b, 0); widths = widths.map((w) => w * sc);
     const wrapped = rows.map((r) => r.map((cell, c) => require('./font-metrics').wrap(FONT_FILE, cell, fs, widths[c] - padX * 2, { bold: true })));
     const heights = wrapped.map((r) => Math.max(...r.map((l) => l.length)) * lh + padY * 2);
@@ -119,10 +146,11 @@ function layoutTable(p, warn) {
   if (best.total > availH) warn(`📊 표 「${(p.title || '').slice(0, 16)}」 가 한 화면에 안 들어가 글자를 ${best.fs}px 까지 줄였습니다(행 ${rows.length} · 열 ${ncol} — 줄이거나 나눠 주세요)`);
   if (best.fs < 66) warn(`📊 표 「${(p.title || '').slice(0, 16)}」 글자 ${best.fs}px — 시니어 가독성 기준(66px)보다 작습니다(행·열을 줄이면 커집니다)`);
   const out = [rect(0, 0, W, H, C.bg, 0.97, 0, 0)];
-  const tl = require('./font-metrics').wrap(FONT_FILE, p.title || '', 72, availW, { bold: true }).slice(0, 2);
+  const tl = balancedWrap(p.title || '', 72, availW).slice(0, 2);
   out.push(text(marginX, titleY, 4, tl, 72, C.accent, 1, {}));
-  let y = tableTop;
-  out.push(rect(marginX - 12, tableTop - 8, availW + 24, best.total + 16, 'FFFFFF', 0.06, 5, 16));   // 층: 자막 층(1~4)과 겹치지 않게 5 이상
+  const topY = tableTop + Math.max(0, Math.round((availH - best.total) / 2));   // 표를 제목·출처 사이 세로 가운데로
+  let y = topY;
+  out.push(rect(marginX - 12, topY - 8, availW + 24, best.total + 16, 'FFFFFF', 0.06, 5, 16));   // 층: 자막 층(1~4)과 겹치지 않게 5 이상
   rows.forEach((r, ri) => {
     const rh = best.heights[ri];
     if (ri === 0) out.push(rect(marginX, y, availW, rh, C.accent, 0.2, 5, 10));
@@ -194,4 +222,11 @@ function events(panels, w0, w1, family, warn = () => {}) {
   return out;
 }
 
-module.exports = { W, H, FONT_FILE, C, events, layoutOf, opacityAt, fadeOf, rrPath };
+/** 오른쪽 판(낱말·확인표)의 왼쪽 가장자리 x — 자막이 이 안쪽에서 끝나게 하려고. 판이 아니면 null */
+function panelLeft(p, warn) {
+  if (!p || (p.type !== 'words' && p.type !== 'check')) return null;
+  const r = layoutOf(p, warn).find((q) => q.k === 'rect');
+  return r ? r.x : null;
+}
+
+module.exports = { W, H, FONT_FILE, C, events, layoutOf, opacityAt, fadeOf, rrPath, balancedWrap, panelLeft };

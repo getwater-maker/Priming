@@ -424,6 +424,28 @@ function cueLayouts(cs, base, fontMap, fallbackFamily) {
   };
 }
 
+/**
+ * 📇 낱말 카드·확인표가 떠 있는 동안 자막이 오른쪽 판 밑으로 들어가지 않게 — 겹치는 자막 줄의 폭을 판 왼쪽 가장자리 안쪽으로 줄인다(ASS 가 줄바꿈).
+ *   자막 줄의 박스(왼쪽 = (1-폭)/2·W + xOffset·W/2 · 폭 = 폭·W)를 유지한 채 오른쪽 끝만 판 앞(여백 40px)까지로 자른다. style 이 없는 큐는 건드리지 않는다.
+ *   @returns 새 큐 배열(바뀐 큐만 복사) · 판이 없으면 같은 배열
+ */
+function narrowCuesForPanels(cues, info, panelLeft, gap = 40) {
+  const wins = (info || []).map((q) => ({ t0: q.t0, t1: q.t1, x: panelLeft(q) })).filter((w) => w.x != null);
+  if (!wins.length) return cues;
+  return cues.map((c) => {
+    const st = c && c.style; if (!st || !Object.keys(st).length) return c;
+    let R = Infinity;
+    for (const w of wins) if (c.end > w.t0 + 0.05 && c.start < w.t1 - 0.05) R = Math.min(R, w.x - gap);
+    if (!isFinite(R)) return c;
+    const width = isFinite(+st.width) && +st.width > 0 ? +st.width : 0.96;
+    const xOff = isFinite(+st.xOffset) ? +st.xOffset : 0;
+    const left = (1 - width) / 2 * W + xOff * (W / 2);
+    if (left + width * W <= R) return c;
+    const nw = Math.max(0.3, (R - left) / W);
+    return { ...c, style: { ...st, width: nw, xOffset: (2 * left - (1 - nw) * W) / W } };
+  });
+}
+
 /** 구간이 없는 옛 큐({text}) → 채널 기본 서식 한 구간. */
 function normCue(c, cs) {
   if (c.runs && c.runs.length) return c;
@@ -1006,6 +1028,12 @@ async function renderVrewToMp4(opts = {}) {
       const cnt = {}; for (const q of opts.info) cnt[q.type] = (cnt[q.type] || 0) + 1;
       log(`   📇 정보 카드 ${opts.info.length}판 — 낱말 ${cnt.words || 0} · 구간 표지 ${cnt.cover || 0} · 표 ${cnt.table || 0} · 확인표 ${cnt.check || 0}`);
       try { const IA = require('./info-ass'); for (const q of opts.info) IA.layoutOf(q, ctx.infoWarn); } catch (e) { log('   ⚠ 정보 카드 배치 실패: ' + e.message); }
+      // 낱말 카드·확인표가 뜨는 동안은 자막 폭을 판 왼쪽 안으로 줄인다(자막이 판 밑으로 들어가 가려지지 않게)
+      try {
+        const IA = require('./info-ass');
+        const nc = narrowCuesForPanels(tl.cues, opts.info, (q) => IA.panelLeft(q, ctx.infoWarn));
+        if (nc !== tl.cues) { ctx.capEvents = nc.flatMap((c) => CAS.cueEvents(normCue(c, cs), layOf(c))).sort((a, b) => a.start - b.start); }
+      } catch (e) { log('   ⚠ 자막 폭 줄이기 실패: ' + e.message); }
     }
     // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
     if (Array.isArray(opts.cards) && opts.cards.length) {
@@ -1096,6 +1124,6 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, narrowCuesForPanels,
   FONT_FILE, FPS, W, H,
 };

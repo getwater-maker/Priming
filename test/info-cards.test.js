@@ -183,7 +183,7 @@ const SCRIPT = [
     // 낱말 카드 — 오른쪽에만 달라지고 왼쪽 화면은 그대로
     const tW = (wd.t0 + wd.t1) / 2;
     const L = (f) => raw(f, tW, 'crop=iw/2:ih:0:0,scale=192:216'), Rr = (f) => raw(f, tW, 'crop=iw/2:ih:iw/2:0,scale=192:216');
-    ok(dif(L(base), L(withI)) < 1.0 && dif(Rr(base), Rr(withI)) > 2.0, `낱말 카드: 오른쪽 절반만 달라진다(왼쪽 차 ${dif(L(base), L(withI)).toFixed(2)} · 오른쪽 차 ${dif(Rr(base), Rr(withI)).toFixed(2)})`);
+    ok(dif(L(base), L(withI)) < 8 && dif(Rr(base), Rr(withI)) > 4 * dif(L(base), L(withI)), `낱말 카드: 오른쪽 절반이 훨씬 크게 달라진다(왼쪽은 좁아진 자막만)(왼쪽 차 ${dif(L(base), L(withI)).toFixed(2)} · 오른쪽 차 ${dif(Rr(base), Rr(withI)).toFixed(2)})`);
     // 판이 없는 구간은 예전과 같다
     const free = Math.max(0.5, pl.panels.reduce((m, p) => Math.min(m, p.t0), 1e9) / 2);   // 첫 판이 뜨기 전(판 없음 · 자막 가림 없음)
     ok(dif(raw(withI, free), raw(base, free)) < 1.0, `판이 뜨기 전(${free.toFixed(1)}초) 화면은 예전과 같다`);
@@ -205,6 +205,34 @@ const SCRIPT = [
     ok(/info: infoOptsFor\(pr, preset, ctx && ctx\.scriptPath\)/.test(M) && /function infoOptsFor/.test(M) && /infoMarks = _sg/.test(M), 'main: MP4 렌더에 정보 카드를 넘기고 · 작업본 이어받기에서도 표시 줄을 .md 에서 다시 읽는다');
     ok(/infoCards: !!ch\.infoCards/.test(A) && /infoCards: !!p\.infoCards/.test(A) && /data-testid="ch-infocards"/.test(A), '채널 편집: 「📇 정보 카드」 칸 · 읽기·저장 두 곳 다');
     const q = IC.signatureOf(IC.fromRaw(SCRIPT)); ok(q.length === 4 && /^표:/.test(q[1]), '서명 = 표시 줄 글 + 문장 위치');
+  }
+  console.log('\n[7] v0.8.3 — 자막 폭 · 구간 표지 줄바꿈 · 표 칸 너비/세로 가운데');
+  {
+    // 구간 표지 줄바꿈 — 쉼표 뒤에서, 낱말 가운데는 안 끊는다
+    const t1 = '지역가입자 · 임의계속가입 · 피부양자, 내 자리는 어디일까?';
+    const w1 = IA.balancedWrap(t1, 84, 1500);
+    ok(w1.length === 2 && w1[0] === '지역가입자 · 임의계속가입 · 피부양자,' && w1[1] === '내 자리는 어디일까?', '구간 표지: 쉼표 뒤에서 끊는다(' + w1.join(' / ') + ')');
+    ok(IA.balancedWrap('짧은 제목', 84, 1500).length === 1, '구간 표지: 한 줄에 들어가면 그대로');
+    const w3 = IA.balancedWrap('가나다라 마바사아 자차카타 파하거너 더러머버 서어저처 커터퍼허 고노도로 모보소오 조초코토', 84, 1500);
+    ok(w3.length >= 2 && w3.every((l) => !/^\s|\s$/.test(l)), '구간 표지: 길면 두 줄 이상(공백 가장자리 없음)');
+    // 표 — 첫 열·짧은 칸은 한 줄 · 세로 가운데
+    const tp = { type: 'table', title: '내 보험료', rows: [['구분', '보험료 기준', '내는 사람'], ['지역가입자', '소득 + 재산', '본인'], ['피부양자', '없음', '면제']], t0: 0, t1: 9 };
+    const prim = IA.layoutOf(tp, () => {}), tx = prim.filter((q) => q.k === 'text');
+    ok(tx.filter((q) => q.fs >= 66 || q.layer === 8).every((q) => q.lines.length === 1 || q.fs === 72), '표: 짧은 칸(구분·보험료 기준·소득 + 재산)이 한 줄');
+    const ys = tx.slice(1).map((q) => q.y), mid = (Math.min(...ys) + Math.max(...ys)) / 2;
+    ok(Math.abs(mid - 540) < 140 && ys.every((y) => y > 250), '표: 세로 가운데 쪽에 놓인다(가운데 y ' + Math.round(mid) + ')');
+    ok(tx.slice(1).every((q) => q.fs === 66), '표: 글자 66px 유지');
+    // 자막 폭 — 낱말 카드·확인표가 뜨는 동안 판 왼쪽 안으로
+    const wp = { type: 'words', words: ['임의계속가입'], t0: 5, t1: 12 }, cp = { type: 'check', list: ['첫째 확인'], t0: 20, t1: 25 };
+    const left = (q) => IA.panelLeft(q), L = IA.panelLeft(wp);
+    ok(L > 900 && L < 1700 && IA.panelLeft({ type: 'table', rows: [['a']] }) === null, '판 왼쪽 가장자리: 낱말 ' + L + ' · 표는 없음');
+    const cues = [{ start: 4, end: 9, text: 'a', style: { width: 0.96, xOffset: 0 } }, { start: 14, end: 18, text: 'b', style: { width: 0.96, xOffset: 0 } }, { start: 6, end: 8, text: 'c' }];
+    const nc = R.narrowCuesForPanels(cues, [wp, cp], left);
+    const right = (c) => ((1 - c.style.width) / 2 * 1920 + (c.style.xOffset || 0) * 960) + c.style.width * 1920;
+    ok(right(nc[0]) <= L - 40 + 1 && nc[0].style.width < 0.96, '자막이 낱말 판과 겹치면 폭이 판 앞까지로 줄어든다(오른쪽 끝 ' + Math.round(right(nc[0])) + ')');
+    ok(nc[1] === cues[1] && nc[2] === cues[2], '판이 없는 시각·style 없는 큐는 그대로');
+    ok(R.narrowCuesForPanels(cues, [], left) === cues && R.narrowCuesForPanels(cues, [{ type: 'table', t0: 0, t1: 30 }], left) === cues, '판이 없거나 표뿐이면 같은 배열');
+    const left0 = (1 - 0.96) / 2 * 1920; ok(Math.abs(((1 - nc[0].style.width) / 2 * 1920 + nc[0].style.xOffset * 960) - left0) < 1, '자막 줄의 왼쪽 가장자리는 그대로');
   }
   console.log(`\n${fail ? '❌' : '✅'} info-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
