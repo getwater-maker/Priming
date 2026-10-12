@@ -21,6 +21,7 @@
 //   『 』 「 」  일본·한국 인용
 //   ‹ › « »  유럽
 const { detectLang, isForeignLang } = require('./lang');
+const InfoCards = require('./info-cards');   // 📇 정보 카드 표시 줄(순수 함수)
 const QUOTE_CHARS = /["'""''‘’“”『』「」‹›«»]/g;
 
 // 마크다운 헤더: 줄 시작 # ~ ###### + 공백 + 본문
@@ -282,7 +283,20 @@ function splitHybrid(text) {
     if (cur.lines.length > 0 || cur.mode === 'bracket') blocks.push(cur);
   };
 
+  let openTable = null;   // 📇 정보 카드 — 지금 열려 있는 표(`> 📊 표:` 다음의 `> |` 줄들이 그 표의 행)
   for (const line of lines) {
+    // 📇 정보 카드 표시 줄(🔤 📊 ✅ · 표 줄) — **프롬프트 판정보다 먼저** 가로챈다(줄 안에 「이미지:」「영상:」 낱말이 있어도 그림·영상 프롬프트로 안 읽히게).
+    //   낭독·자막·그룹에는 절대 안 들어간다. 낭독 사이에 표식(`{mark}`)으로 끼워 두었다가 다음 낭독 문장에 붙인다.
+    {
+      const ik = InfoCards.lineKind(line, openTable);
+      if (ik) {
+        if (ik.mark) { cur.lines.push({ mark: ik.mark }); openTable = ik.opensTable ? ik.mark : null; }
+        else if (ik.sourceText != null) { if (openTable) openTable.source = ik.sourceText; openTable = null; }
+        else if (ik.rowText !== undefined) { if (ik.rowText) openTable.rows.push(ik.rowText); }
+        continue;
+      }
+      if (openTable && !BLOCKQUOTE_TEST.test(line) && line.trim() !== '') openTable = null;   // 표는 `>` 줄이 끊기면(본문이 시작되면) 닫힌다
+    }
     // 대본 내 이미지/영상 프롬프트 추출 ('> 🖼️ 이미지: …' / '> 🎬 비디오(I2V): …') → 현재 섹션에 부착.
     const imgM = line.match(PROMPT_IMG_RE);
     if (imgM) { cur.imagePrompt = imgM[1].trim(); continue; }
@@ -313,21 +327,37 @@ function splitHybrid(text) {
   const items = [];
   let hasBrackets = false;
   let hasMdIntro = false;
+  const pendMarks = [];   // 📇 다음 낭독 문장을 기다리는 표식
+  let paraSeq = 0;        // 📇 문단 번호(대본 전체에서 증가)
   for (const blk of blocks) {
     // 화자 줄은 앞뒤 문단과 섞지 않고 따로 문장화한다(같은 문단으로 이어 붙이면 내레이션과 한 문장이 된다).
-    const sents = [];   // [{ t, speaker }]
+    const sents = [];   // [{ t, speaker, marks, para }]
     let buf = [];
-    const flushBuf = () => { for (const t of _paragraphsToSentences(buf.join('\n'))) sents.push({ t, speaker: null }); buf = []; };
+    // 📇 정보 카드 — 표식은 **다음 낭독 문장**에 붙고(블록을 넘어도 이어진다), 문장마다 문단 번호를 단다(문장 글·개수는 예전과 같다)
+    const addS = (t, speaker, para) => { sents.push({ t, speaker, para, marks: pendMarks.length ? pendMarks.splice(0) : null }); };
+    const flushBuf = () => {
+      const whole = _paragraphsToSentences(buf.join('\n'));
+      if (whole.length) {
+        const per = buf.join('\n').split(/\r?\n\s*\r?\n+/).map((p) => _paragraphsToSentences(p).length);
+        const sameTotal = per.reduce((a, b) => a + b, 0) === whole.length;   // 합이 안 맞으면(주석이 문단을 가로지름) 한 문단으로 본다
+        if (sameTotal) { let k = 0; for (const n of per) { if (!n) continue; const pid = paraSeq++; for (let j = 0; j < n; j++) addS(whole[k++], null, pid); } }
+        else { const pid = paraSeq++; for (const t of whole) addS(t, null, pid); }
+      }
+      buf = [];
+    };
     for (const ln of blk.lines) {
-      if (ln && typeof ln === 'object') { flushBuf(); for (const t of _paragraphsToSentences(ln.text)) sents.push({ t, speaker: ln.speaker }); }
+      if (ln && ln.mark) { flushBuf(); pendMarks.push(ln.mark); }
+      else if (ln && typeof ln === 'object') { flushBuf(); const pid = paraSeq++; for (const t of _paragraphsToSentences(ln.text)) addS(t, ln.speaker, pid); }
       else buf.push(ln);
     }
     flushBuf();
     if (sents.length === 0) continue;   // 본문 없는 블록(헤더/프롬프트만)은 그룹 생성 X
-    sents.forEach(({ t, speaker }, i) => {
+    sents.forEach(({ t, speaker, para, marks }, i) => {
       items.push({
         text: t,
         speaker,
+        para,
+        marks,
         mode: blk.mode,
         isIntro: blk.isIntro,
         sectionTitle: blk.sectionTitle,
@@ -341,7 +371,7 @@ function splitHybrid(text) {
     if (blk.mode === 'bracket' && sents.length > 0) hasBrackets = true;
     if (blk.mode === 'md' && blk.isIntro && sents.length > 0) hasMdIntro = true;
   }
-  return { items, hasBrackets, hasMdIntro };
+  return { items, hasBrackets, hasMdIntro, orphanMarks: pendMarks };
 }
 
 // 🔑 인라인 대본 편집(core/script-edit.js)이 **원문에서 문장 위치를 찾을 때** 쓰는 규칙들.

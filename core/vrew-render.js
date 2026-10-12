@@ -718,7 +718,7 @@ async function renderChunk(ch, i, ctx) {
   const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
-  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout, cardLines: (ctx.cards && ctx.cards.length) ? cardEvents(ctx.cards, t0, t0 + dur) : null }), 'utf8');
+  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout, cardLines: ((ctx.cards && ctx.cards.length) || (ctx.info && ctx.info.length)) ? [...((ctx.cards && ctx.cards.length) ? cardEvents(ctx.cards, t0, t0 + dur) : []), ...((ctx.info && ctx.info.length) ? require('./info-ass').events(ctx.info, t0, t0 + dur, ctx.infoFont, ctx.infoWarn) : [])] : null }), 'utf8');   // 📜 화면 카드 + 📇 정보 카드 판
   const assFilter = `ass=${assName}:fontsdir=${fontsDirName}`;
 
   let args;
@@ -999,10 +999,18 @@ async function renderVrewToMp4(opts = {}) {
     // 조각 병렬 렌더
     t = Date.now();
     Object.assign(ctx, { tmpDir, cs, capEvents, layout, overlays: tl.overlays, enc, bitrate, fontsDirName: 'fonts', filterThreads: opts.filterThreads != null ? +opts.filterThreads : 0 });
+    // 📇 정보 카드(v0.8.2) — 낱말 카드·구간 표지·표·확인표(core/info-cards.plan 의 판) — 같은 ASS 층 · 표가 뜨는 동안은 자막을 가린다
+    if (Array.isArray(opts.info) && opts.info.length) {
+      ctx.info = opts.info; ctx.infoFont = fontName; ctx.infoWarn = (m) => log('   ⚠ ' + m);
+      const hw = opts.info.filter((q) => q.hideCaptions).map((q) => [q.t0, q.t1]); if (hw.length) ctx.hideCaptionWins = [...(ctx.hideCaptionWins || []), ...hw];
+      const cnt = {}; for (const q of opts.info) cnt[q.type] = (cnt[q.type] || 0) + 1;
+      log(`   📇 정보 카드 ${opts.info.length}판 — 낱말 ${cnt.words || 0} · 구간 표지 ${cnt.cover || 0} · 표 ${cnt.table || 0} · 확인표 ${cnt.check || 0}`);
+      try { const IA = require('./info-ass'); for (const q of opts.info) IA.layoutOf(q, ctx.infoWarn); } catch (e) { log('   ⚠ 정보 카드 배치 실패: ' + e.message); }
+    }
     // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
     if (Array.isArray(opts.cards) && opts.cards.length) {
       ctx.cards = opts.cards;
-      { const hw = opts.cards.filter((c) => c.hideCaptions).map((c) => [c.t0, c.t1]); if (hw.length) ctx.hideCaptionWins = hw; }   // 🙈 자막=숨김 카드의 시간 창
+      { const hw = opts.cards.filter((c) => c.hideCaptions).map((c) => [c.t0, c.t1]); if (hw.length) ctx.hideCaptionWins = [...(ctx.hideCaptionWins || []), ...hw]; }   // 🙈 자막=숨김 카드의 시간 창(정보 카드의 표 창과 합친다)
       const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
       log(`   📜 화면 카드 ${opts.cards.length}장${opts.cards.some((c) => c.hideCaptions) ? '(자막 숨김 ' + opts.cards.filter((c) => c.hideCaptions).length + ')' : ''} — ${opts.cards.map((c) => (c.kind === 'interlude' ? '막간' : '병기') + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);

@@ -3153,6 +3153,7 @@ export default function App() {
       ttsNormalize: p.ttsNormalize !== false,
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
+      infoCards: !!p.infoCards,   // 📇 정보 카드(낱말·구간 표지·표·확인표)
       logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '', kbSeg: VLook.normKbSeg(p.kbSeg), dissolveSec: VLook.normDissolve(p.dissolveSec), fx: VLook.normFxChan(p.fx),   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
@@ -3651,6 +3652,7 @@ export default function App() {
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
       kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
       dissolveSec: VLook.normDissolve(ch.dissolveSec),   // 🌫 채널 디졸브 — ⚠ 안 실으면 저장할 때 지워진다
+      infoCards: !!ch.infoCards,   // 📇 정보 카드 — ⚠ 안 실으면 저장할 때 지워진다
       fx: VLook.normFxChan(ch.fx),   // 🌫 채널 오버레이 모션 — ⚠ 안 실으면 저장할 때 지워진다
       ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
@@ -6454,6 +6456,11 @@ export default function App() {
                       {VLook.DISSOLVES.map((x) => <option key={x.id} value={String(x.id)}>{x.label}</option>)}
                     </select>
                     <span className="meta">그림이 바뀔 때 서서히 섞는 시간 — 🎬 MP4 만 · 수면 영상은 3~6초 추천</span></div>
+                )}
+                {ch.startMode !== 'remotion' && (
+                  <div className="frow" data-testid="infocards-row" title="대본의 🔤 카드 · 📊 표 · ✅ 확인 줄을 화면에 얹고, ## 구간마다 표지(N / M · 진행 막대)를 자동으로 넣습니다. 글자는 그림 위에 얹으며(그림 안에 넣지 않음) 🎬 유튜브 MP4 에만 나옵니다. 꺼 두면 표시 줄이 있어도 무시합니다.">
+                    <label className="chk"><input type="checkbox" data-testid="ch-infocards" checked={!!ch.infoCards} onChange={(e) => setCh({ ...ch, infoCards: e.target.checked })} />📇 정보 카드</label>
+                    <span className="meta">🔤 낱말 · 📊 표 · ✅ 확인표 · 구간 표지 — 🎬 MP4 만(정보튜브용 · 꺼 두면 표시 줄을 무시)</span></div>
                 )}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="fx-row" style={{ flexWrap: 'wrap' }} title="정지 그림 위에 코드로 만든 효과를 아주 약하게 얹습니다(외부 영상 없음 · 느리고 약하게). 🎬 유튜브 MP4 만. 켠 종류만 · 1(약)~3(강). 대본 그룹의 ① 칸 그림 메뉴에서 그룹마다 끄거나 강도를 바꿀 수 있습니다. 영상(🎬) 그룹에는 얹지 않습니다. 3~4시간 영상에서 렌더 시간이 늘 수 있습니다(전부 켜면 프레임당 약 10ms)."><label>🌫 오버레이 모션</label>

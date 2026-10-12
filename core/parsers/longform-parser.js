@@ -53,7 +53,8 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   const meta = { raw: '', voice: null, aspect: '16:9' };
 
   // 문장화 + 그룹화 (헤더/대괄호/도입 하이브리드)
-  const { items } = splitHybrid(raw);
+  const _split = splitHybrid(raw);
+  const { items } = _split;
   const { sentences, groups } = buildGroupsHybrid(items, _thresholds(thresholds));
 
   // 그룹 phase 라벨 — 섹션명(## 헤더/대괄호)을 그대로 배지에. 도입부는 isIntro 로 색 강조.
@@ -82,6 +83,8 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.scriptStyle = scriptStyleOf(raw);
   // 📜 `> 📜 화면카드: …` 줄(R4 · v0.7.98) — 문장·그룹은 그대로, MP4 렌더가 마커로 카드를 얹는다(없으면 필드도 없다 = 예전과 같다)
   { const mk = require('../screen-cards').markersOf(raw); if (mk.length) proj.screenCards = mk; }
+  // 📇 정보 카드 표시 줄(🔤 📊 ✅) 서명(v0.8.2) — 빌드 지문용(마커가 없으면 필드도 없다). 위치·글자는 렌더 때 .md 에서 다시 읽는다
+  { const IC = require('../info-cards'); const sig = IC.signatureOf(IC.fromItems(_split)); if (sig.length) proj.infoMarks = sig; }
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
 }

@@ -1,0 +1,189 @@
+'use strict';
+/**
+ * info-cards.js — 📇 정보 카드(정보튜브 · 시니어 생활정보 — 2026-10-12 v0.8.2) — 대본 표시 줄 읽기 + 판 계획(순수 함수)
+ *
+ * 화면 4종(글자는 AI 그림 안에 넣지 않고 **위에 얹는다** · 그림을 글자 화면으로 바꾸지 않는다):
+ *   ① 낱말 카드  `> 🔤 카드: A | B | C`        — 오른쪽 판에 낱말 1~3개 · 다음 낭독 문단 첫 문장부터 다음 🔤·`###`·`##` 전까지 · 끄기 `> 🔤 카드: -`
+ *   ② 구간 표지  `##` 제목(자동 · 채널 옵션)    — 3.5초 · 「N / M」 · 이름 · 진행 막대 · 도입부 없음 · 「마무리」는 번호 없이 이름만(막대 꽉 참)
+ *   ③ 표         `> 📊 표: 제목` + `> | … |` 줄들(첫 줄 = 머리) + `> 📊 출처: …` — 다음 문단 하나 동안(최소 6초) 전체 화면
+ *   ④ 확인표     `> ✅ 확인: 문구`              — 오른쪽 판 · 다음 문단 하나 동안 · **영상 전체에서 쌓인다**(최근 5줄 · 방금 것만 진하게)
+ * 겹침 순서: 표 > 구간 표지 > 확인표 > 낱말 카드(위가 이기면 아래는 그동안 숨었다 끝나면 돌아온다).
+ *
+ * 🔑 이 줄들은 **낭독·자막·그림·영상 프롬프트로 읽히지 않는다** — sentence-splitter 가 프롬프트 판정(「이미지:」「영상:」 낱말)보다 먼저 가로챈다.
+ *    위치 = 「바로 다음 낭독 문단」 → 문장 순번으로 붙이고, 작업본 문장과 안 맞으면 ⚠ 로그 후 그 판만 건너뛴다(조용히 줄이지 않는다).
+ * 순수 함수 — fs·require.main 없음(core/*.js 는 렌더러 번들에 들어갈 수 있다). 파일 읽기는 호출하는 쪽(main).
+ */
+const MAX_WORDS = 3, MAX_CHECK_LINES = 5, CHECK_WARN_CHARS = 14, COVER_SEC = 3.5, TABLE_MIN_SEC = 6, MIN_SEG = 0.8, FADE_SEC = 0.5;
+
+// ── 줄 읽기 ──────────────────────────────────────────────────────────────────
+const RE_WORDS = /^[ \t]*>[ \t]*🔤[ \t]*카드[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const RE_TABLE = /^[ \t]*>[ \t]*📊[ \t]*표[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const RE_SOURCE = /^[ \t]*>[ \t]*📊[ \t]*출처[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const RE_CHECK = /^[ \t]*>[ \t]*✅[ \t]*확인[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const RE_ROW = /^[ \t]*>[ \t]*\|(.*?)\|?[ \t]*$/u;
+
+/**
+ * 한 줄이 정보 표시 줄인가. openTable = 지금 열려 있는 표(있으면 `> |` 줄이 그 표의 행).
+ * @returns {null | {mark?: object, rowOf?: object, consumed: true}} mark = 낭독 사이에 끼울 표식 · rowOf = 이미 열린 표에 붙었음
+ */
+function lineKind(line, openTable) {
+  let m;
+  if ((m = RE_WORDS.exec(line))) {
+    const raw = m[1].trim();
+    if (raw === '' || raw === '-' || raw === '끄기') return { mark: { kind: 'words', words: [], clear: true, line: raw } };
+    const words = raw.split('|').map((x) => x.trim()).filter(Boolean);
+    return { mark: { kind: 'words', words, clear: false, line: raw } };
+  }
+  if ((m = RE_TABLE.exec(line))) return { mark: { kind: 'table', title: m[1].trim(), rows: [], source: '', line: m[1].trim() }, opensTable: true };
+  if ((m = RE_SOURCE.exec(line))) return { sourceText: m[1].trim() };
+  if ((m = RE_CHECK.exec(line))) return { mark: { kind: 'check', text: m[1].trim(), line: m[1].trim() } };
+  if (openTable && (m = RE_ROW.exec(line))) {
+    const cells = m[1].split('|').map((x) => x.trim());
+    // 구분선(`---`)은 건너뛴다
+    if (cells.every((c) => /^:?-{2,}:?$/.test(c) || c === '')) return { rowText: null };
+    return { rowText: cells };
+  }
+  return null;
+}
+const isInfoLine = (line) => !!(RE_WORDS.test(line) || RE_TABLE.test(line) || RE_SOURCE.test(line) || RE_CHECK.test(line));
+
+// ── 대본 → 표식·문단·구간 ────────────────────────────────────────────────────
+/**
+ * splitHybrid 의 items(표식 · 문단 번호 포함)에서 정보 카드 재료를 모은다.
+ *   marks  = [{ sent(문장 순번 0~), kind, … }]
+ *   para   = 문장 순번 → 문단 번호
+ *   block  = 문장 순번 → 블록 번호(`###`·`##` 마다 바뀜 — 낱말 카드가 거기서 끝난다)
+ *   sections = [{ key, title, first(첫 문장 순번), intro }] — `##` 구간(도입부 포함)
+ */
+function collect(items, orphan) {
+  const marks = [], para = [], block = [], texts = [], secKey = [];
+  const sections = []; const seen = new Set(); let blk = -1, lastTitle = Symbol('x'), lastKey = null;
+  (items || []).forEach((it, i) => {
+    texts.push(String(it.text || ''));
+    para.push(it.para == null ? -1 : it.para);
+    const t = it.sectionTitle || '', k = it.h2Key;
+    if (t !== lastTitle || k !== lastKey) { blk++; lastTitle = t; lastKey = k; }
+    block.push(blk); secKey.push(k);
+    if (!seen.has(k)) { seen.add(k); sections.push({ key: k, title: String(it.h2Title || '').trim(), first: i, intro: !!it.isIntro }); }
+    for (const m of (it.marks || [])) marks.push({ sent: i, ...m });
+  });
+  return { marks, para, block, texts, secKey, sections, orphan: (orphan || []).length };
+}
+
+/** 대본 글 → 재료. splitHybrid 를 부르는 쪽이 items 를 넘긴다 */
+function fromItems(split) { return collect(split && split.items, split && split.orphanMarks); }
+
+/** 대본 글(.md) → 재료 — 파서가 쓰는 것과 같은 splitHybrid 로(문장 순번이 같다). 책 전용 섹션은 파서와 같이 뺀다 */
+function fromRaw(raw) {
+  let r = String(raw == null ? '' : raw);
+  try { r = require('./parsers/book-parser').stripBookSections(r); } catch (_) {}
+  return fromItems(require('./sentence-splitter').splitHybrid(r));
+}
+
+/** 지문·작업본용 — 표시 줄 글(바뀌면 MP4 를 다시 굽는다) */
+function signatureOf(parsed) {
+  return (parsed && parsed.marks || []).map((m) => (m.kind === 'table' ? `표:${m.title}|${m.rows.map((r) => r.join('¦')).join('¶')}|${m.source}` : `${m.kind}:${m.kind === 'words' ? (m.clear ? '-' : m.words.join('|')) : m.text}`) + '@' + m.sent);
+}
+
+// ── 판 계획 ──────────────────────────────────────────────────────────────────
+const normText = (t) => String(t == null ? '' : t).normalize('NFC').replace(/[\s\p{P}\p{S}]/gu, '');
+const stripNum = (t) => String(t || '').replace(/^\s*\d+\s*(?:장|회|부|강|편)?\s*[—–\-:·.]\s*/, '').trim();
+const CLOSING_RE = /마무리|맺음|맺는/;
+
+/**
+ * 판 계획 — 재료 + 프로젝트(문장 시각) → { panels, warnings }.
+ *   panel = { type:'cover'|'words'|'table'|'check', t0, t1, hideCaptions?, ... 종류별 자료 }
+ * @param {object} project 문장(id·text·ttsAudioPath·ttsDurationSec)·그룹(sentenceIds)
+ * @param {object} parsed fromItems 결과
+ * @param {{sections?: boolean}} opts sections = 구간 표지 자동
+ */
+function plan(project, parsed, opts = {}) {
+  const warnings = [], panels = [];
+  if (!project || !parsed) return { panels, warnings };
+  const sents = project.sentences || [];
+  const wantSections = !!opts.sections;
+  if (!parsed.marks.length && !wantSections) return { panels, warnings };
+  // 문장 시각(.vrew 타임라인과 같은 규칙: 그룹 순서 · 음성이 있는 문장을 이어 붙임)
+  const byId = new Map(sents.map((s, i) => [s.id, i]));
+  const T = new Array(sents.length).fill(null); let t = 0;
+  for (const g of (project.groups || [])) for (const id of (g.sentenceIds || [])) {
+    const i = byId.get(id); if (i == null) continue;
+    const s = sents[i], d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : 0;
+    T[i] = d > 0 ? [t, t + d] : null; t += d;
+  }
+  const total = t;
+  // 대본(.md)과 작업본의 문장이 같은 순서·같은 글인가 — 아니면 위치를 믿을 수 없다(조용히 틀리지 않는다)
+  if (parsed.texts.length !== sents.length) {
+    warnings.push(`📇 정보 카드 — 대본 문장 ${parsed.texts.length}개 ≠ 작업본 문장 ${sents.length}개(대본을 다시 읽거나 문장을 고친 뒤 파일 저장이 안 된 듯) → 정보 카드를 모두 건너뜁니다`);
+    return { panels, warnings };
+  }
+  const ok = parsed.texts.map((x, i) => normText(x) === normText(sents[i].text));
+  const bad = ok.filter((x) => !x).length;
+  if (bad) warnings.push(`📇 정보 카드 — 대본과 작업본 문장 글이 다른 곳 ${bad}개(그 자리의 표시는 건너뜁니다)`);
+  const timeOf = (i) => (i >= 0 && i < sents.length && ok[i] ? T[i] : null);
+  const paraEnd = (i) => { const p = parsed.para[i]; let e = i; while (e + 1 < parsed.para.length && parsed.para[e + 1] === p && p >= 0) e++; return e; };
+  const blockEnd = (i) => { const b = parsed.block[i]; let e = i; while (e + 1 < parsed.block.length && parsed.block[e + 1] === b) e++; return e; };
+
+  // ② 구간 표지
+  if (wantSections) {
+    const secs = parsed.sections.filter((s) => !s.intro);
+    const numbered = secs.filter((s) => !CLOSING_RE.test(s.title));
+    secs.forEach((s) => {
+      const tm = timeOf(s.first); if (!tm) return;
+      let endIdx = s.first; while (endIdx + 1 < parsed.texts.length && parsed.secKey[endIdx + 1] === s.key) endIdx++;
+      const endT = (T[endIdx] || tm)[1];
+      const isClose = CLOSING_RE.test(s.title);
+      const n = isClose ? 0 : numbered.indexOf(s) + 1;
+      panels.push({ type: 'cover', t0: tm[0], t1: Math.min(tm[0] + COVER_SEC, Math.max(tm[0] + 1.5, endT)), n, m: numbered.length, title: stripNum(s.title) || s.title, closing: isClose, hideCaptions: true });   // 표지가 뜬 3.5초 동안은 아래 자막을 가린다(큰 글자와 겹치지 않게)
+    });
+  }
+  // ①③④ 표시 줄
+  const wordMarks = parsed.marks.filter((m) => m.kind === 'words');
+  const checkTexts = [];   // 지금까지 나온 ✅ (영상 전체에서 쌓임)
+  for (const m of parsed.marks) {
+    const tm = timeOf(m.sent);
+    if (!tm) { warnings.push(`📇 정보 카드 — 「${(m.line || m.kind).slice(0, 30)}」 표시를 붙일 문장을 못 찾았습니다 → 건너뜁니다`); if (m.kind === 'check') checkTexts.push(m.text); continue; }
+    if (m.kind === 'words') {
+      if (m.clear) continue;   // 끄기 — 아래 끝 계산에서 쓴다
+      let words = m.words;
+      if (!words.length) { warnings.push('📇 정보 카드 — 🔤 카드 낱말이 비었습니다 → 건너뜁니다'); continue; }
+      if (words.length > MAX_WORDS) { warnings.push(`📇 정보 카드 — 🔤 카드 낱말 ${words.length}개(최대 ${MAX_WORDS}) → 앞 ${MAX_WORDS}개만: ${m.line.slice(0, 40)}`); words = words.slice(0, MAX_WORDS); }
+      const next = wordMarks.find((x) => x.sent > m.sent);
+      const bEnd = blockEnd(m.sent);
+      const endIdx = Math.min(bEnd, next ? next.sent - 1 : bEnd);
+      const endTm = (T[endIdx] || tm);
+      panels.push({ type: 'words', t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
+    } else if (m.kind === 'table') {
+      const hasHead = m.rows.length >= 1;
+      if (!hasHead) { warnings.push(`📇 정보 카드 — 📊 표 「${m.title.slice(0, 20)}」 에 표 줄(> | … |)이 없습니다 → 건너뜁니다`); continue; }
+      const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
+      panels.push({ type: 'table', t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
+    } else if (m.kind === 'check') {
+      if (m.text.length > CHECK_WARN_CHARS) warnings.push(`📇 정보 카드 — ✅ 문구가 ${m.text.length}자(권장 ${CHECK_WARN_CHARS}자 이하): 「${m.text}」 — 판 폭을 넘으면 그대로 그립니다`);
+      checkTexts.push(m.text);
+      const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
+      panels.push({ type: 'check', t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+    }
+  }
+  // 겹침 순서 — 표 > 구간 표지 > 확인표 > 낱말 카드 (아래 것은 위 것이 뜬 동안 숨는다)
+  const RANK = { table: 4, cover: 3, check: 2, words: 1 };
+  const out = [];
+  for (const p of panels) {
+    let segs = [[p.t0, p.t1]];
+    for (const q of panels) {
+      if (q === p || RANK[q.type] <= RANK[p.type]) continue;
+      const nx = [];
+      for (const [a, b] of segs) {
+        if (q.t1 <= a || q.t0 >= b) { nx.push([a, b]); continue; }
+        if (q.t0 > a) nx.push([a, q.t0]);
+        if (q.t1 < b) nx.push([q.t1, b]);
+      }
+      segs = nx;
+    }
+    for (const [a, b] of segs) if (b - a >= MIN_SEG) out.push({ ...p, t0: a, t1: b });
+  }
+  out.sort((a, b) => a.t0 - b.t0 || RANK[b.type] - RANK[a.type]);
+  return { panels: out, warnings };
+}
+
+module.exports = { fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };

@@ -2812,6 +2812,21 @@ function cardsOptsFor(pr) {
     return r.cards.length ? r.cards : null;
   } catch (e) { log('⚠ 화면 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
 }
+// 📇 정보 카드(v0.8.2 · 정보튜브) — 채널 옵션 「정보 카드」가 켜져 있을 때만. 대본(.md)을 다시 읽어 표시 위치(다음 낭독 문단)와 구간 표지를 계획한다.
+//   작업본 문장과 안 맞으면 ⚠ 로그 후 그 판만(전부면 전부) 건너뛴다 — 조용히 줄이지 않는다 · 꺼져 있으면 null(= 예전 MP4 와 같다)
+function infoOptsFor(pr, preset, scriptPath) {
+  try {
+    if (!pr || !preset || !preset.infoCards) return null;
+    if (!scriptPath || !fs.existsSync(scriptPath)) { log('⚠ 정보 카드 — 대본(.md)을 읽을 수 없어 건너뜁니다: ' + (scriptPath || '(경로 없음)')); return null; }
+    const IC = require('./core/info-cards');
+    const parsed = IC.fromRaw(fs.readFileSync(scriptPath, 'utf8'));
+    const r = IC.plan(pr, parsed, { sections: true });
+    for (const w of r.warnings) log('⚠ ' + w);
+    if (parsed.orphan) log(`⚠ 정보 카드 — 뒤따르는 낭독 문장이 없는 표시 줄 ${parsed.orphan}개(대본 끝) → 건너뜁니다`);
+    if (r.panels.length) { const c = {}; for (const q of r.panels) c[q.type] = (c[q.type] || 0) + 1; log(`📇 정보 카드 ${r.panels.length}판(낱말 ${c.words || 0} · 구간 표지 ${c.cover || 0} · 표 ${c.table || 0} · 확인표 ${c.check || 0}) · 표시 줄 ${parsed.marks.length}개`); }
+    return r.panels.length ? r.panels : null;
+  } catch (e) { log('⚠ 정보 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
+}
 function fxOptsFor(pr, preset) {
   try {
     const FXO = require('./core/fx-overlay');
@@ -2834,7 +2849,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
@@ -6801,8 +6816,8 @@ function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
-  let readerNotes = [], scriptStyle = null, screenCards = null;
-  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } } } catch (_) {}
+  let readerNotes = [], scriptStyle = null, screenCards = null, infoMarks = null;
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } { const _IC = require('./core/info-cards'); const _sg = _IC.signatureOf(_IC.fromRaw(_raw)); if (_sg.length) infoMarks = _sg; } } } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -6837,6 +6852,7 @@ function projectsFromSnapshot(snap) {
     { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) proj.capAll = ca; }   // 🌐 모든 자막 서식
     if (readerNotes.length) proj.readerNotes = readerNotes;
     if (screenCards) proj.screenCards = screenCards;   // 📜 화면 카드 마커(R4) — .md 가 정본
+    if (infoMarks) proj.infoMarks = infoMarks;   // 📇 정보 카드 표시 줄 서명(v0.8.2) — .md 가 정본
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
     (ps.groups || []).forEach((gs, gi) => { if (gs.visSpan && proj.groups[gi]) require('./core/visual-span').spanFromOrd(proj, proj.groups[gi], gs.visSpan); });
