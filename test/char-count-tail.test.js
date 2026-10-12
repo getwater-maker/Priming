@@ -68,13 +68,14 @@ const h1 = sr.readerBlocks(dto.projects[0])[0];
 ok(h1.t === 'h1' && h1.chars === 40, `h1.chars = ${h1.chars} (문장 글자 + 문장 사이 공백 하나씩 · 기대 40)`);
 ok(sr.readerBlocks(P.toDTO(rb).projects[0])[0].chars === 40, '제목 줄에 꼬리가 적혀 있어도 같은 값(꼬리는 세지 않는다)');
 const html = sr.readerHtml(sr.readerBlocks(dto.projects[0]));
-ok(/<h1>수원 화성 쌓은 장인들 <span class="cc">\/ 40 자<\/span><\/h1>/.test(html), 'A4 PDF 머리에 「제목 / 40 자」');
-ok(sr.fmtChars(15668) === '/ 15,668 자', '천 단위 쉼표 「/ 15,668 자」');
+ok(/<h1>수원 화성 쌓은 장인들 <span class="cc">\/ 40 자 \(공백 포함\)<\/span><\/h1>/.test(html), 'A4 PDF 머리에 「제목 / 40 자 (공백 포함)」');
+ok(sr.fmtChars(15668) === '/ 15,668 자 (공백 포함)', '천 단위 쉼표 + 「공백 포함」 표기 (v0.8.9)');
+ok(sr.fmtChars(120, true) === '/ 도입부 120 자 (공백 포함)', '도입부만 볼 때는 「도입부」를 붙인다');
 const quoted = parseLongform('# 따옴표\n## 도입부\n### a\n「그렇소」 하고 말했다. ★좋다.\n', 'x');
 const qn = sr.readerBlocks(P.toDTO(quoted).projects[0])[0].chars;
 ok(qn === '그렇소 하고 말했다.'.length + 1 + '좋다.'.length, `파서가 지우는 따옴표·기호는 세지 않는다 (${qn})`);
 const jsx = require('fs').readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'ScriptReader.jsx'), 'utf8');
-ok(/b\.t === 'h1' && b\.chars[\s\S]{0,200}sr\.fmtChars\(b\.chars\)/.test(jsx), '화면(대본 보기)도 제목 옆에 표시한다 · 편집 불가 칸(data-ne) 안');
+ok(/b\.t === 'h1' && b\.chars[\s\S]{0,200}sr\.fmtChars\(b\.chars, b\.introOnly\)/.test(jsx), '화면(대본 보기)도 제목 옆에 표시한다 · 편집 불가 칸(data-ne) 안');
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
 process.exit(fail ? 1 : 0);

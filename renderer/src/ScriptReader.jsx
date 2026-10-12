@@ -53,18 +53,29 @@ function paraInner(sents, groupNum, groupNums) {
         + (k < sents.length - 1 ? ' ' : '');
     }).join('');
 }
-function docModel(dto, headings, groupNums, notes) {
+// 📄 문단 = 대본(.md)의 빈 줄 문단(v0.8.9) — 고치기 주소는 그룹이라 <p data-key> 는 여전히 그룹 조각 하나씩이고,
+//   같은 대본 문단의 조각들(cont)은 <div class="rd-pg"> 로 묶어 **줄을 바꾸지 않고 이어 쓴다**(조각 <p> 는 inline).
+//   조각 사이 공백은 고칠 수 없는 칸(data-ne) — 읽은 글(readValue)에 섞이지 않고, 그 자리에 쓰는 입력은 잠금이 막는다.
+const PARA_MARGIN = 'margin:0 0 0.8em;text-align:left';
+function docModel(dto, headings, groupNums, notes, introOnly = false) {
   const paras = [];
   let html = '';
   for (const pr of ((dto && dto.projects) || [])) {
-    for (const b of sr.readerBlocks(pr, { headings, notes })) {
-      if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">${sr.noteInnerHtml(b, NOTE_ST)}</div>`; continue; }
-      // 📏 제목 옆 「/ 15,686 자」 — 볼 때마다 센다(대본 파일에는 적지 않는다 · 2026-09-26 로이)
-      if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}${b.t === 'h1' && b.chars ? ` <span data-cc="1" style="font-size:0.6em;font-weight:400;color:#777;white-space:nowrap">${sr.fmtChars(b.chars)}</span>` : ''}</${b.t}>`; continue; }
+    const blocks = sr.readerBlocks(pr, { headings, notes, introOnly });
+    blocks.forEach((b, k) => {
+      if (b.t === 'note') { html += `<div ${NE} data-note="1" style="${H_STYLE.note}">${sr.noteInnerHtml(b, NOTE_ST)}</div>`; return; }
+      // 📏 제목 옆 「/ 15,686 자 (공백 포함)」 — 볼 때마다 센다(대본 파일에는 적지 않는다 · 2026-09-26 로이)
+      if (b.t !== 'p') { html += `<${b.t} ${NE} style="${H_STYLE[b.t]}">${escHtml(b.text)}${b.t === 'h1' && b.chars ? ` <span data-cc="1" style="font-size:0.6em;font-weight:400;color:#777;white-space:nowrap">${sr.fmtChars(b.chars, b.introOnly)}</span>` : ''}</${b.t}>`; return; }
       const key = 'p' + paras.length;
       paras.push({ key, shortsNum: pr.shortsNum, groupNum: b.groupNum, base: b.sents, last: sr.joinParagraph(b.sents.map((s) => s.text)), dirty: false });
-      html += `<p class="rd-para" data-key="${key}" data-g="${b.groupNum}" style="margin:0 0 0.8em;text-align:left">${paraInner(b.sents, b.groupNum, groupNums)}</p>`;
-    }
+      const next = blocks[k + 1];
+      const more = !!(next && next.t === 'p' && next.cont);   // 다음 조각이 같은 문단에 이어진다
+      const run = b.cont || more;                            // 여러 조각으로 된 문단
+      if (run && !b.cont) html += `<div class="rd-pg" style="${PARA_MARGIN}">`;
+      html += `<p class="rd-para" data-key="${key}" data-g="${b.groupNum}" style="${run ? 'display:inline;margin:0' : PARA_MARGIN}">${paraInner(b.sents, b.groupNum, groupNums)}</p>`;
+      if (more) html += `<span ${NE} data-gap="1"> </span>`;
+      if (run && !more) html += '</div>';
+    });
   }
   return { html, paras };
 }
@@ -128,6 +139,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const [fontPx, setFontPx] = useState(17);
   const [headings, setHeadings] = useState(false);   // 섹션 제목(###) — 기본 끔. ## 장 제목은 언제나 보인다
   const [groupNums, setGroupNums] = useState(false);
+  const [introOnly, setIntroOnly] = useState(false);   // 🎬 도입부만 보기·인쇄(v0.8.9)
   const [notes, setNotes] = useState(true);   // 📝 제작 메모(`> 📝 …` · 낭독 제외) — 기본 켬(로이 2026-09-26 「대본읽기에서 설명을 보고 싶다」)
   const [perSheet, setPerSheet] = useState(1);
   const [fontPt, setFontPt] = useState(11);
@@ -144,11 +156,11 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   const parasRef = useRef(new Map());              // key → {shortsNum, groupNum, base, last, dirty}
   const neCountRef = useRef(0);
   const dtoRef = useRef(dto); dtoRef.current = dto;
-  const optRef = useRef({ headings, groupNums, notes }); optRef.current = { headings, groupNums, notes };
+  const optRef = useRef({ headings, groupNums, notes, introOnly }); optRef.current = { headings, groupNums, notes, introOnly };
   const st = useRef({ composing: false, saving: false, pending: false, timer: null, needRebuild: false, caret: null, lastErr: false, extReload: false });
 
   const projects = (dto && dto.projects) || [];
-  const stats = useMemo(() => projects.reduce((a, p) => { const x = sr.readerStats(p); return { chars: a.chars + x.chars, sents: a.sents + x.sents, dur: a.dur + x.dur }; }, { chars: 0, sents: 0, dur: 0 }), [dto]);
+  const stats = useMemo(() => projects.map((p) => (introOnly ? { ...p, cuts: (p.cuts || []).filter((c) => c.isIntro) } : p)).reduce((a, p) => { const x = sr.readerStats(p); return { chars: a.chars + x.chars, sents: a.sents + x.sents, dur: a.dur + x.dur }; }, { chars: 0, sents: 0, dur: 0 }), [dto, introOnly]);
   const royC = useMemo(() => projects.reduce((a, p) => { const r = p.roy || {}; return { exp: a.exp + (r.exp || 0), expOpen: a.expOpen + (r.expOpen || 0), int: a.int + (r.int || 0), lost: a.lost + (r.lost || 0) }; }, { exp: 0, expOpen: 0, int: 0, lost: 0 }), [dto]);
   // 🎯 헤더의 🟥/🟨 숫자를 누르면 그 표시가 있는 자리로 — 누를 때마다 다음 표시(맨 끝 다음은 처음으로). 🟥 는 「미확인」부터(없으면 확인된 것).
   //   표시마다 머리에 칩(data-roy-tag)이 한 개 있어서 그 칩을 길잡이로 쓴다(문장마다 칠한 바탕이 아니라).
@@ -180,7 +192,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   function rebuild(d = dtoRef.current) {
     const root = docRef.current;
     st.current.caret = root && document.activeElement === root ? caretOf(root) : null;
-    const m = docModel(d, optRef.current.headings, optRef.current.groupNums, optRef.current.notes);
+    const m = docModel(d, optRef.current.headings, optRef.current.groupNums, optRef.current.notes, optRef.current.introOnly);
     parasRef.current = new Map(m.paras.map((p) => [p.key, p]));
     st.current.needRebuild = false;
     setDocHtml(m.html);
@@ -193,7 +205,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     if (c && c.idx >= 0) { const p = root.querySelectorAll('p[data-key]')[c.idx]; if (p) { root.focus(); placeCaret(p, c.off); } }
   }, [docHtml]);
   // 처음 · 섹션 제목/그룹 번호 토글 → 저장을 끝낸 뒤 다시 그린다
-  useEffect(() => { (async () => { await settle(); rebuild(); })(); }, [headings, groupNums, notes]);
+  useEffect(() => { (async () => { await settle(); rebuild(); })(); }, [headings, groupNums, notes, introOnly]);
   // 바깥에서 대본이 바뀌면(음성 생성 등) 편집 중이 아닐 때만 새로 그린다
   useEffect(() => { if (docHtml && !busyNow() && document.activeElement !== docRef.current) rebuild(); }, [dto]);
 
@@ -274,7 +286,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
   // 저장 뒤 그 그룹 문단들의 기준 문장을 새 대본으로 — 문단 수가 달라졌으면(합쳐짐 등) 다시 그려야 한다
   function refreshGroup(d, shortsNum, groupNum) {
     const pr = ((d && d.projects) || []).find((x) => x.shortsNum === shortsNum);
-    const blocks = pr ? sr.readerBlocks(pr, { headings: false }).filter((b) => b.t === 'p' && b.groupNum === groupNum) : [];
+    const blocks = pr ? sr.readerBlocks(pr, { headings: false, introOnly: optRef.current.introOnly }).filter((b) => b.t === 'p' && b.groupNum === groupNum) : [];
     const mine = [...parasRef.current.values()].filter((p) => p.shortsNum === shortsNum && p.groupNum === groupNum);
     if (blocks.length !== mine.length) { st.current.needRebuild = true; return; }
     mine.forEach((p, k) => { p.base = blocks[k].sents; });
@@ -405,8 +417,18 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
     await settle();
     setBusy(true); setMsg('⏳ A4 PDF 만드는 중…');
     try {
-      const r = await api.scriptReaderPdf({ perSheet, fontPt, headings, groupNums, notes, presetName: presetName || null });
+      const r = await api.scriptReaderPdf({ perSheet, fontPt, headings, groupNums, notes, introOnly, presetName: presetName || null });
       setMsg(`✓ A4 ${r.pages}쪽${r.perSheet > 1 ? ` → 한 장에 ${r.perSheet}쪽 · ${r.sheets}장` : ''} — 열린 PDF 에서 인쇄하세요 (${r.path})`);
+    } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+    finally { setBusy(false); }
+  }
+  // 🖨 바로 인쇄 — PDF 를 만들지 않고 윈도우 인쇄 창으로(같은 A4 모양 · 한 장에 N 쪽도 그대로 · v0.8.9)
+  async function printNow() {
+    await settle();
+    setBusy(true); setMsg('⏳ 인쇄 창을 여는 중… (프린터를 고르고 「인쇄」를 누르세요)');
+    try {
+      const r = await api.scriptReaderPrint({ perSheet, fontPt, headings, groupNums, notes, introOnly });
+      setMsg(r.ok ? `✓ 프린터로 보냈습니다${introOnly ? ' (도입부만)' : ''}${r.perSheet > 1 ? ` — 한 장에 ${r.perSheet}쪽` : ''}` : r.cancelled ? 'ⓘ 인쇄를 취소했습니다.' : '✗ 인쇄하지 못했습니다 — ' + (r.error || '알 수 없는 오류') + ' (🖨 A4 PDF 로 저장해 인쇄할 수 있습니다)');
     } catch (e) { setMsg('✗ ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
     finally { setBusy(false); }
   }
@@ -417,7 +439,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
         <div className="frow" style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', background: 'var(--card)', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <b style={{ color: 'var(--strong)', fontSize: 15 }}>📄 대본 읽기</b>
           {saveSt && <span data-testid="reader-save" className="meta" style={{ color: saveSt === 'saved' ? 'var(--ok)' : 'var(--warn)' }}>{saveSt === 'saving' ? '⏳ 저장 중…' : saveSt === 'saved' ? '✓ 저장됨' : '✏ 고치는 중 — 멈추면 저장'}</span>}
-          <span className="meta">{stats.sents}문장 · {stats.chars.toLocaleString()}자(공백 제외){stats.dur ? ` · 음성 ${fmtMin(stats.dur)}` : ''}</span>
+          <span className="meta">{stats.sents}문장 · {introOnly ? '도입부 ' : ''}{stats.chars.toLocaleString()}자(공백 제외){stats.dur ? ` · 음성 ${fmtMin(stats.dur)}` : ''}</span>
           {(royC.exp + royC.int + royC.lost) > 0 && (
             <span data-testid="reader-roy" className="meta" title="🟥 = 1인칭 경험(실제 로이의 일만 · 고치거나 「사실 확인」) · 🟨 = 해석(고치고 싶을 때만). 고친 글은 은행에 「Claude 원문 → 로이 수정」으로 쌓입니다 · 숫자를 누르면 그 표시 자리로 이동(또 누르면 다음)"
               style={{ fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -436,6 +458,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           <button className="ghost" style={{ padding: '3px 9px' }} onClick={() => setFontPx((f) => Math.min(28, f + 1))}>＋</button>
           <label className="chk" data-testid="reader-headings" title="섹션 제목(### 소제목)을 보입니다 — ## 장 제목은 언제나 보입니다. A4 PDF 에도 같이 적용됩니다" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={headings} onChange={(e) => setHeadings(e.target.checked)} />섹션 제목</label>
           <label className="chk" title="문단 앞에 그룹 번호(G3)를 작게 표시 — 앱 화면과 대조할 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={groupNums} onChange={(e) => setGroupNums(e.target.checked)} />그룹 번호</label>
+          <label className="chk" data-testid="reader-intro" title="🎬 도입부(「도입」이 들어간 ## 제목 아래)만 봅니다 — 🖨 인쇄·A4 PDF 도 도입부만 나갑니다" style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: introOnly ? 700 : 400 }}><input type="checkbox" style={{ width: 'auto' }} checked={introOnly} onChange={(e) => setIntroOnly(e.target.checked)} />도입부만</label>
           <label className="chk" data-testid="reader-notes" title="대본의 📝 제작 메모(강의안 근거 등 · 낭독 제외)를 장 제목 아래에 보입니다 — 고칠 수 없는 칸입니다" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={notes} onChange={(e) => setNotes(e.target.checked)} />📝 메모</label>
           <span className="hdiv" />
           <span className="meta">A4 · 한 장에</span>
@@ -448,7 +471,8 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
             style={{ flex: '0 0 58px', width: 58, minWidth: 0, padding: '3px 6px' }}
             title="인쇄 글자 크기(pt) — 쪽 기준. 한 장에 여러 쪽이면 그만큼 작아집니다" onChange={(e) => setFontPt(Number(e.target.value) || 11)} />
           <span className="meta">pt</span>
-          <button disabled={busy} onClick={makePdf} title="A4 PDF 를 채널의 「대본 PDF」 폴더(기본 = 윈도우 다운로드 · ⚙ 채널편집 → 📁 폴더)에 저장하고 엽니다 — 열린 PDF 에서 인쇄하세요">🖨 A4 PDF</button>
+          <button disabled={busy} data-testid="reader-print" onClick={printNow} title="PDF 를 만들지 않고 바로 인쇄합니다 — 윈도우 인쇄 창에서 프린터를 고르세요(위의 「한 장에 N쪽」·글자 크기 그대로)">🖨 바로 인쇄</button>
+          <button className="ghost" disabled={busy} onClick={makePdf} title="A4 PDF 를 채널의 「대본 PDF」 폴더(기본 = 윈도우 다운로드 · ⚙ 채널편집 → 📁 폴더)에 저장하고 엽니다 — 열린 PDF 에서 인쇄하세요">📄 A4 PDF</button>
           <button className="ghost" onClick={close}>닫기</button>
         </div>
         {msg && <div className="meta" data-testid="reader-msg" style={{ padding: '6px 14px', background: msg.startsWith('✗') ? '#fbeaea' : '#f3f8ef', borderBottom: '1px solid var(--line)', color: msg.startsWith('✗') ? 'var(--danger)' : 'var(--base)' }}>{msg}</div>}

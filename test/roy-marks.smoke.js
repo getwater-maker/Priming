@@ -75,7 +75,7 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
       ok(/해석 1 \/ 1/.test(await msg()), '🟨 한 번 → 첫 번째(1 / 1) — ' + (await msg()));
       ok(/저는 이 대목/.test((await flashed()).join('|')), '🟨 문단이 강조된다');
     }
-    ok(await doc.evaluate((el) => el.readerValue(0)) === '첫 문장입니다. 둘째 문장입니다. 손주 돌잔치 날 사진을 찍던 기억이 납니다. 그날은 비가 왔습니다. 병원 대기실에서 한참을 기다렸습니다. 저는 이 대목에서 오래 멈춥니다.', '🔑 칩은 글에 섞이지 않는다(문단 글 = 문장만)');
+    ok(await doc.evaluate((el) => [0, 1, 2, 3].map((i) => el.readerValue(i)).join(' / ')) === '첫 문장입니다. 둘째 문장입니다. / 손주 돌잔치 날 사진을 찍던 기억이 납니다. 그날은 비가 왔습니다. / 병원 대기실에서 한참을 기다렸습니다. / 저는 이 대목에서 오래 멈춥니다.', '🔑 칩은 글에 섞이지 않는다(문단 글 = 문장만) · 표시 문단은 대본처럼 따로 한 문단(v0.8.9)');
 
     console.log('[2] 사실 확인 — 고치지 않아도');
     await doc.locator('[data-roy-confirm]').first().click();

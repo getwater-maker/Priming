@@ -64,10 +64,10 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     for (const m of ['script', 'image', 'video', 'finish', 'insert', 'format']) { await menu(win, m); seen.push(await btn.count()); }
     ok(seen.every((n) => n === 1), `「📄 대본 보기」가 모든 메뉴에서 보인다 (${seen.join('/')})`);
     ok(await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")').count() === 0, '④ 완성에는 없다');
-    const geo = await win.evaluate(() => { const r = document.querySelector('[data-testid=ribbon]').getBoundingClientRect(), b = document.querySelector('[data-testid=reader-open]').getBoundingClientRect();
+    const geo = await win.evaluate(() => { const r = document.querySelector('[data-testid=ribbon]').getBoundingClientRect(), b = document.querySelector('[data-testid=reader-open]').getBoundingClientRect(), g = document.querySelector('[data-testid=guide-open-btn]').getBoundingClientRect();
       const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = document.elementFromPoint(x, y);
-      return { gap: Math.round(r.right - b.right), hit: !!(hit && hit.closest('[data-testid=reader-open]')) }; });
-    ok(geo.gap <= 24 && geo.hit, `리본 오른쪽 끝(여백 ${geo.gap}px) · 눌린다`);
+      return { gap: Math.round(r.right - g.right), next: Math.round(g.left - b.right), hit: !!(hit && hit.closest('[data-testid=reader-open]')) }; });
+    ok(geo.gap <= 24 && geo.next >= 0 && geo.next <= 12 && geo.hit, `리본 오른쪽 끝 = 📄 대본 보기 · 📘 작성 기준(여백 ${geo.gap}px · 사이 ${geo.next}px) · 눌린다`);
     await menu(win, 'finish');
     await btn.click();
     await win.waitForSelector('[data-testid="script-reader"]', { timeout: 5000 });
@@ -175,7 +175,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     const pi = await doc.evaluate((root) => [...root.querySelectorAll('p[data-key]')].findIndex((p) => p.textContent.includes('엄마의 대사')));
     const sp = doc.locator('p[data-key]').nth(pi);
     ok(await sp.locator('[data-spk]').count() === 1 && (await sp.locator('[data-spk]').innerText()).replace('✕', '').trim() === '엄마', '🔑 편집면에 화자 이름(엄마)이 보인다');
-    ok((await val(pi)) === '엄마의 대사입니다. 내레이션 문장입니다.', '이름은 글에 섞이지 않는다(비교·저장은 문장 글만)');
+    ok((await val(pi)) === '엄마의 대사입니다.' && (await val(pi + 1)) === '내레이션 문장입니다.', '이름은 글에 섞이지 않는다(비교·저장은 문장 글만) · 화자 줄은 대본처럼 따로 한 문단(v0.8.9)');
     await caret(pi, 0);
     await win.keyboard.press('Backspace');
     ok(await sp.locator('[data-spk]').count() === 1, 'Backspace 로 이름이 지워지지 않는다');

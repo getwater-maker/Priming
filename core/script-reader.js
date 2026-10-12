@@ -51,12 +51,39 @@ function noteRows(lines) {
   return rows;
 }
 
-/** 한 편(DTO) → 읽기 블록 */
-function readerBlocks(pr, { headings = true, notes = true } = {}) {
+/**
+ * 📄 문장 → 대본(.md) 문단 번호 (v0.8.9) — 파서가 준 [[글, 문단]] 을 **문장 순서대로** 맞춘다.
+ *   작업본 이어받기·문장 고치기 뒤에도 쓰이므로 글이 다른 문장(고친 문장)은 앞으로 몇 칸 찾아보고, 없으면 건너뛴다(null).
+ * @returns {Map<string, number|null>} 문장 id → 문단 번호
+ */
+const _paraSig = (t) => String(t || '').replace(/\s+/g, '');
+function alignParas(sentences, paras) {
+  const out = new Map();
+  const ps = Array.isArray(paras) ? paras : [];
+  let j = 0;
+  for (const s of (sentences || [])) {
+    const sig = _paraSig(s.text);
+    let hit = -1;
+    for (let k = j; k < Math.min(ps.length, j + 12); k++) if (_paraSig(ps[k][0]) === sig) { hit = k; break; }
+    if (hit >= 0) { out.set(s.id, ps[hit][1] == null ? null : ps[hit][1]); j = hit + 1; }
+    else out.set(s.id, null);
+  }
+  return out;
+}
+
+/**
+ * 한 편(DTO) → 읽기 블록
+ *   📄 문단(v0.8.9) = **대본(.md)의 빈 줄 문단** — 그룹(그림 한 장)이 아니다. 고치기 주소가 그룹 단위라 블록은 여전히
+ *   그룹 안에서만 묶이고, 앞 블록과 같은 문단이면 `cont: true`(화면·A4 가 줄을 바꾸지 않고 이어 쓴다).
+ *   문단 번호가 없는 문장(null)은 앞 문장과 같은 문단으로 본다(예전 대본·작업본도 그룹 경계에서만 줄이 바뀐다 = 예전과 같다).
+ *   introOnly = 도입부 그룹만(제목 옆 글자 수도 도입부만 센다).
+ */
+function readerBlocks(pr, { headings = true, notes = true, introOnly = false } = {}) {
   const out = [];
   if (!pr) return out;
-  // 📏 제목 옆 글자 수 「/ 15,686 자」(2026-09-26 아도나이로이 로이 — 대본 파일에 적지 않고 여기서 볼 때마다 센다)
-  if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim(), chars: charsWithSpaces(pr) });
+  const cuts = (pr.cuts || []).filter((c) => !introOnly || c.isIntro);
+  // 📏 제목 옆 글자 수 「/ 15,686 자(공백 포함)」(2026-09-26 아도나이로이 로이 — 대본 파일에 적지 않고 여기서 볼 때마다 센다)
+  if (pr.title) out.push({ t: 'h1', text: String(pr.title).trim(), chars: charsWithSpaces({ cuts }), introOnly: !!introOnly });
   let lastH2 = '', lastH3 = '';
   const noteMap = new Map();   // 장 제목(정리한 것) → 메모들 · 한 장의 메모는 한 번만 싣는다
   if (notes) for (const n of (pr.readerNotes || [])) {
@@ -74,21 +101,35 @@ function readerBlocks(pr, { headings = true, notes = true } = {}) {
     }
     if (headings && h3 && h3 !== lastH3 && h3 !== lastH2) { out.push({ t: 'h3', text: h3 }); lastH3 = h3; }
   };
-  for (const c of (pr.cuts || [])) {
+  // 블록을 낼 때 — 바로 앞이 같은 문단의 글 블록이면 이어 쓴다(제목·메모가 끼면 새 문단)
+  const emit = (p) => {
+    if (!p.sents.length) return;
+    const prev = out[out.length - 1];
+    if (prev && prev.t === 'p' && p.para != null && prev.paraEnd === p.para) p.cont = true;
+    out.push(p);
+  };
+  for (const c of cuts) {
     const ss = c.sentences || [];
     head(c.h2, c.phase);
-    let p = { t: 'p', groupNum: c.num, sents: [] };
+    let p = { t: 'p', groupNum: c.num, sents: [], para: null, paraEnd: null };
     ss.forEach((s, i) => {
+      const para = s.para == null ? null : s.para;
       // 합친 그룹(⤒ · 「이미지: 이어서」) 안의 챕터 경계 — 거기서 제목을 다시 단다
       if (s.mark && i > 0) {
-        if (p.sents.length) out.push(p);
+        emit(p);
         head(s.mark.h2, s.mark.phase);
-        p = { t: 'p', groupNum: c.num, sents: [] };
+        p = { t: 'p', groupNum: c.num, sents: [], para: null, paraEnd: null };
+      } else if (p.sents.length && para != null && p.paraEnd != null && para !== p.paraEnd) {
+        // 📄 그룹 안에서 대본 문단이 바뀐다 — 새 문단
+        emit(p);
+        p = { t: 'p', groupNum: c.num, sents: [], para: null, paraEnd: null };
       }
       const text = String(s.text || '').trim();
-      if (text) p.sents.push({ i, text, speaker: s.speaker || null, roy: s.roy || null });   // 🟥·🟨 표시(core/roy-marks)
+      if (!text) return;
+      p.sents.push({ i, text, speaker: s.speaker || null, roy: s.roy || null });   // 🟥·🟨 표시(core/roy-marks)
+      if (para != null) { if (p.para == null) p.para = para; p.paraEnd = para; }
     });
-    if (p.sents.length) out.push(p);
+    emit(p);
   }
   return out;
 }
@@ -107,7 +148,8 @@ function charsWithSpaces(pr) {
   }
   return n + Math.max(0, k - 1);
 }
-const fmtChars = (n) => `/ ${Number(n || 0).toLocaleString('en-US')} 자`;
+// 「공백 포함」을 함께 적는다(v0.8.9 · 로이 — 머리의 「n자(공백 제외)」 와 헷갈리지 않게)
+const fmtChars = (n, introOnly = false) => `/ ${introOnly ? '도입부 ' : ''}${Number(n || 0).toLocaleString('en-US')} 자 (공백 포함)`;
 
 /** 통계 — 글자 수(공백 제외) · 문장 수 · 음성 길이 합 */
 function readerStats(pr) {
@@ -244,18 +286,24 @@ function noteInnerHtml(b, st = null) {
  * @param {{fontPt?:number, groupNums?:boolean}} o
  */
 function readerHtml(blocks, { fontPt = 11, groupNums = false } = {}) {
-  const body = blocks.map((b) => {
-    if (b.t === 'h1') return `<h1>${esc(b.text)}${b.chars ? ` <span class="cc">${fmtChars(b.chars)}</span>` : ''}</h1>`;
-    if (b.t === 'h2') return `<h2>${esc(b.text)}</h2>`;
-    if (b.t === 'h3') return `<h3>${esc(b.text)}</h3>`;
-    if (b.t === 'note') return `<div class="note">${noteInnerHtml(b)}</div>`;
+  const parts = [];
+  blocks.forEach((b, k) => {
+    if (b.t === 'h1') { parts.push(`<h1>${esc(b.text)}${b.chars ? ` <span class="cc">${fmtChars(b.chars, b.introOnly)}</span>` : ''}</h1>`); return; }
+    if (b.t === 'h2') { parts.push(`<h2>${esc(b.text)}</h2>`); return; }
+    if (b.t === 'h3') { parts.push(`<h3>${esc(b.text)}</h3>`); return; }
+    if (b.t === 'note') { parts.push(`<div class="note">${noteInnerHtml(b)}</div>`); return; }
     const inner = b.sents.map((s) => {
       const r = s.roy, cls = r ? (r.k === 'exp' ? (r.st === '확인' ? 'roy-ok' : 'roy-exp') : 'roy-int') : '';
       const tag = r && r.first ? `<span class="roy-tag">${esc(royLabel(r))}</span> ` : '';
       return tag + (s.speaker ? `<b class="spk">${esc(s.speaker)}</b> ` : '') + (cls ? `<span class="${cls}">${esc(s.text)}</span>` : esc(s.text));
     }).join(' ');
-    return `<p>${groupNums ? `<span class="gn">G${b.groupNum}</span>` : ''}${inner}</p>`;
-  }).join('\n');
+    // 📄 같은 대본 문단이면(cont) 앞 블록에 이어 쓴다 — 문단은 대본의 빈 줄 기준(v0.8.9)
+    const seg = `${groupNums ? `<span class="gn">G${b.groupNum}</span>` : ''}${inner}`;
+    const next = blocks[k + 1];
+    const open = !b.cont, close = !(next && next.t === 'p' && next.cont);
+    parts.push(`${open ? '<p>' : ' '}${seg}${close ? '</p>' : ''}`);
+  });
+  const body = parts.join('\n').replace(/\n /g, ' ');
   const f = Math.max(7, Math.min(20, Number(fontPt) || 11));
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>대본</title><style>
 @page { size: A4; margin: 18mm 17mm 20mm 17mm; }
@@ -292,4 +340,4 @@ function nUpLayout(n) {
 }
 const PER_SHEET = [1, 2, 4, 6, 9];
 
-module.exports = { royLabel, noteRows, noteInnerHtml, readerBlocks, readerStats, readerHtml, charsWithSpaces, fmtChars, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };
+module.exports = { royLabel, noteRows, noteInnerHtml, alignParas, readerBlocks, readerStats, readerHtml, charsWithSpaces, fmtChars, nUpLayout, PER_SHEET, cleanHead, paragraphEdits, joinParagraph, sigOf };

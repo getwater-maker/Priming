@@ -17,6 +17,7 @@ import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
 import ScriptReader from './ScriptReader.jsx';
+import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
@@ -576,7 +577,8 @@ export default function App() {
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlProg, setUrlProg] = useState(null);
   const [sttProg, setSttProg] = useState(null);   // 📊 🎧 STT(파일 전사) 진행 패널(main 의 stt-progress)
-  const [readerOpen, setReaderOpen] = useState(false);   // 📄 대본 읽기(점검·수정 · A4 PDF)
+  const [readerOpen, setReaderOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);   // 📘 대본 작성 기준(docs/대본-작성-가이드.md · v0.8.9)   // 📄 대본 읽기(점검·수정 · A4 PDF)
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
@@ -5756,6 +5758,8 @@ export default function App() {
               {/* 📥 대본다운 — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞 · 이름·그림 변경). 대본이 없어도 쓴다(받는 중만 막힘). */}
               <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 영상 대본을 받습니다 — 자막이 있으면 자막을 그대로 쓰고(GPU 0), 없으면 음성을 받아 STT 로 전사합니다" onClick={openUrlDl}><span className="rb-ic">📥</span> <span className="rb-t">대본다운</span></button>
               <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
+              {/* 📘 대본 작성 기준 — 대본 보기 바로 옆(로이 2026-10-12) · 대본이 없어도 본다 */}
+              <button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>
             </span>
           </div>
         )}
@@ -7214,6 +7218,7 @@ export default function App() {
         <ScriptReader api={api} dto={dto} onDto={setDto} uiConfirm={uiConfirm} log={logline} presetName={presetName} reloadTick={reloadTick}
           onClose={() => setReaderOpen(false)} />
       )}
+      {guideOpen && <ScriptGuide api={api} onClose={() => setGuideOpen(false)} />}
       {ytProg && (
         <YtProgress prog={ytProg}
           onAbort={() => { api.ytAbort(); }}

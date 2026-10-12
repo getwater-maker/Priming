@@ -85,8 +85,21 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   { const mk = require('../screen-cards').markersOf(raw); if (mk.length) proj.screenCards = mk; }
   // 📇 정보 카드 표시 줄(🔤 📊 ✅) 서명(v0.8.2) — 빌드 지문용(마커가 없으면 필드도 없다). 위치·글자는 렌더 때 .md 에서 다시 읽는다
   { const IC = require('../info-cards'); const sig = IC.signatureOf(IC.fromItems(_split)); if (sig.length) proj.infoMarks = sig; }
+  // 📄 대본 읽기 문단 — 대본(.md)의 빈 줄로 나뉜 문단 번호(문장 순서대로 [글, 문단]) · 읽기 화면·A4 가 그룹이 아니라 이 문단으로 줄을 바꾼다(v0.8.9)
+  proj.readerParas = parasOfItems(items);
 
   return { fileTitle, meta, projects: [proj], format: 'longform' };
+}
+
+/** splitHybrid 항목 → [[문장 글, 문단 번호]] (문단 번호 = 대본 전체에서 빈 줄로 나뉜 문단 순번) */
+function parasOfItems(items) {
+  return (items || []).map((it) => [String(it.text || ''), it.para == null ? null : it.para]);
+}
+/** 대본 원문 → 읽기 문단(작업본 이어받기처럼 재파싱 없이 열 때 — parseLongform 과 같은 전처리) */
+function readerParasOf(text) {
+  let raw = String(text == null ? '' : text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  try { raw = require('./book-parser').stripBookSections(raw); } catch (_) {}
+  return parasOfItems(splitHybrid(raw).items);
 }
 
 /** `## 장` 아래의 `> 📝 …` 줄 → [{h2, text}] (H2 앞 머리말 메모는 넣지 않는다 — 대본 전체 주석이라 읽기엔 소음) */
@@ -134,4 +147,4 @@ function parseLongformFile(filePath, thresholds = {}) {
   return parseLongform(fs.readFileSync(filePath, 'utf8'), fallback, thresholds);
 }
 
-module.exports = { parseLongform, parseLongformFile, readerNotesOf, scriptStyleOf };
+module.exports = { parseLongform, parseLongformFile, readerNotesOf, scriptStyleOf, readerParasOf };

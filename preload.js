@@ -108,6 +108,8 @@ contextBridge.exposeInMainWorld('api', {
   onYtProgress: (cb) => ipcRenderer.on('yt-progress', (_e, d) => cb(d)),
   // 📄 대본 읽기 → A4 PDF(한 장에 N 쪽)
   scriptReaderPdf: (args) => ipcRenderer.invoke('script-reader-pdf', args),
+  scriptReaderPrint: (args) => ipcRenderer.invoke('script-reader-print', args),   // 🖨 바로 인쇄(윈도우 인쇄 창)
+  scriptGuide: (args) => ipcRenderer.invoke('script-guide', args),   // 📘 대본 작성 기준(docs/대본-작성-가이드.md) — 내용·경로·열기
   appendLog: (line) => ipcRenderer.invoke('append-log', line),
   openLogs: () => ipcRenderer.invoke('open-logs'),
   attachAsset: (args) => ipcRenderer.invoke('attach-asset', args),

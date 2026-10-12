@@ -126,5 +126,53 @@ console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제�
   ok(!projectsFromSnapshot({ ...snap, scriptPath: tmpMd })[0].readerNotes, '대본 파일이 없으면 메모 없이 그대로 복원(오류 없음)');
 }
 
+// ── 📄 v0.8.9 — 문단 = 대본(.md)의 빈 줄 문단(그룹이 아니다) · 도입부만 · 바로 인쇄 · 📘 작성 기준 ──
+{
+  const { parseLongform } = require('../core/parsers/longform-parser');
+  const P = require('../core/pipeline');
+  console.log('[문단] 대본 빈 줄 기준 줄바꿈');
+  const mdP = ['# 제목', '', '## 도입부', '> 🖼️ 이미지: a', '첫 번째 문장이 여기 있습니다.', '두 번째 문장도 꽤 깁니다요.', '세 번째 문장도 길게 씁니다요.', '', '넷째 문장입니다.', '다섯째 문장입니다.', '',
+    '## 1. 본문', '> 🖼️ 이미지: b', '본문 하나입니다. 본문 둘입니다.', '', '본문 셋입니다.', '[엄마] 밥 먹어라.', ''].join('\n');
+  const dP = P.toDTO(parseLongform(mdP, 'x', { splitMode: 'sentence', introSentenceSize: 1 })).projects[0];
+  const bp = R.readerBlocks(dP).filter((x) => x.t === 'p');
+  const txt = (b) => b.sents.map((s) => s.text).join('|');
+  ok(bp[0].groupNum !== bp[1].groupNum && bp[1].cont === true && /^세 번째/.test(txt(bp[1])), '그룹이 달라도 같은 대본 문단이면 이어 쓴다(cont)');
+  ok(!bp[2].cont && /^넷째/.test(txt(bp[2])), '빈 줄 뒤는 새 문단');
+  const body = bp.filter((b) => /본문|밥/.test(txt(b)));
+  ok(body.length === 3 && body.every((b) => b.groupNum === body[0].groupNum) && body.every((b) => !b.cont), '한 그룹 안에서도 빈 줄·화자 줄마다 문단이 나뉜다');
+  const html = R.readerHtml(R.readerBlocks(dP));
+  ok(/<p>첫 번째 문장이 여기 있습니다\. 두 번째 문장도 꽤 깁니다요\. 세 번째 문장도 길게 씁니다요\.<\/p>/.test(html), 'A4 HTML 도 같은 문단을 한 <p> 로');
+  ok(/<p>본문 하나입니다\. 본문 둘입니다\.<\/p>\n<p>본문 셋입니다\.<\/p>/.test(html), 'A4 HTML 본문도 빈 줄에서 문단이 바뀐다');
+  const legacy = { ...dP, cuts: dP.cuts.map((c) => ({ ...c, sentences: c.sentences.map((s) => ({ ...s, para: null })) })) };
+  const bl = R.readerBlocks(legacy).filter((x) => x.t === 'p');
+  ok(bl.every((b) => !b.cont) && bl.length === dP.cuts.length, '문단 번호가 없으면 예전과 같다(그룹 = 문단)');
+  const al = R.alignParas([{ id: 'a', text: '가.' }, { id: 'b', text: '고친 문장.' }, { id: 'c', text: '다.' }], [['가.', 0], ['나.', 0], ['다.', 1]]);
+  ok(al.get('a') === 0 && al.get('b') === null && al.get('c') === 1, 'alignParas — 고친 문장은 null, 뒤 문장은 다시 맞춘다');
+  ok(/readerParas = _LP\.readerParasOf\(_raw\)/.test(main) && /proj\.readerParas = readerParas/.test(main), '작업본 이어받기도 대본 문단을 싣는다');
+  ok(/if \(after\.readerParas\) pr\.readerParas = after\.readerParas/.test(main), '문장을 고치면 고친 대본의 문단으로 바꾼다');
+
+  console.log('[도입부만]');
+  const bi = R.readerBlocks(dP, { introOnly: true });
+  ok(bi.filter((x) => x.t === 'p').every((b) => dP.cuts.find((c) => c.num === b.groupNum).isIntro) && !bi.some((x) => x.t === 'h2' && /본문/.test(x.text)), '도입부 그룹만 나온다');
+  ok(bi[0].t === 'h1' && bi[0].introOnly && bi[0].chars === R.charsWithSpaces({ cuts: dP.cuts.filter((c) => c.isIntro) }) && bi[0].chars < R.readerBlocks(dP)[0].chars, '제목 옆 글자 수도 도입부만 센다');
+  ok(/\/ 도입부 [\d,]+ 자 \(공백 포함\)/.test(R.readerHtml(bi)), 'A4 머리에 「도입부 n 자 (공백 포함)」');
+
+  console.log('[바로 인쇄]');
+  ok(/ipcMain\.handle\('script-reader-print'/.test(main) && /webContents\.print\(opts/.test(main) && /pagesPerSheet = per/.test(main), '🖨 바로 인쇄 = 같은 A4 HTML 을 윈도우 인쇄 창으로(한 장에 N쪽 = pagesPerSheet)');
+  ok(/function readerPrintHtml[\s\S]{0,600}introOnly: !!args\.introOnly/.test(main), 'PDF·인쇄 모두 도입부만 옵션을 받는다');
+  const jsxR = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'ScriptReader.jsx'), 'utf8');
+  ok(/data-testid="reader-print"/.test(jsxR) && /data-testid="reader-intro"/.test(jsxR), '대본 보기에 🖨 바로 인쇄 · 도입부만');
+
+  console.log('[작성 기준]');
+  const guide = fs.readFileSync(path.join(__dirname, '..', 'docs', '대본-작성-가이드.md'), 'utf8');
+  ok(/ipcMain\.handle\('script-guide'/.test(main) && /path\.join\(__dirname, 'docs', '대본-작성-가이드\.md'\)/.test(main), '📘 작성 기준 = 앱 폴더 docs/대본-작성-가이드.md');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
+  ok(/data-testid="reader-open"[\s\S]{0,400}data-testid="guide-open-btn"/.test(app), '📘 버튼은 📄 대본 보기 바로 옆');
+  const ex = [...guide.matchAll(/```markdown\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const last = parseLongform(ex[ex.length - 1], 'x').projects[0];
+  ok(last.groups.length === 4 && last.groups.every((g) => g.imagePrompt && !/^\.\.\./.test(g.imagePrompt)) && last.groups[0].isIntro && last.groups[0].videoPrompt && !last.groups.slice(1).some((g) => g.videoPrompt), '가이드 부록 예시 = 장면 4개 · 장면마다 그림 · 도입부만 영상');
+  ok(last.sentences.some((s) => s.speaker === '순라군'), '부록 예시의 화자 줄');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} 대본 보기 문단 편집 ${pass}/${pass + fail}\n`);
 process.exit(fail ? 1 : 0);

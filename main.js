@@ -2985,13 +2985,54 @@ async function nUpPdf(buf, per) {
 function readerPdfDir(preset) {
   return String((preset && preset.outReader) || '').trim() || defaultDownloadDir() || S.outRoot;
 }
-ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
+// 화면과 같은 블록 → A4 HTML (PDF·바로 인쇄 공용 · 🎬 도입부만 = introOnly)
+function readerPrintHtml(args = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const R = require('./core/script-reader');
-  const per = R.PER_SHEET.includes(Number(args.perSheet)) ? Number(args.perSheet) : 1;
   const dto = P.toDTO(S.parsed);
-  const blocks = [].concat(...(dto.projects || []).map((p) => R.readerBlocks(p, { headings: args.headings !== false, notes: args.notes !== false })));
-  const html = R.readerHtml(blocks, { fontPt: args.fontPt, groupNums: !!args.groupNums });
+  const blocks = [].concat(...(dto.projects || []).map((p) => R.readerBlocks(p, { headings: args.headings !== false, notes: args.notes !== false, introOnly: !!args.introOnly })));
+  if (args.introOnly && !blocks.some((b) => b.t === 'p')) throw new Error('이 대본에는 도입부가 없습니다 — 「도입」이 들어간 ## 제목 아래가 도입부입니다.');
+  return R.readerHtml(blocks, { fontPt: args.fontPt, groupNums: !!args.groupNums });
+}
+async function withReaderWindow(html, fn, winOpts = {}) {
+  const tmp = path.join(os.tmpdir(), `priming-reader-${process.pid}-${Date.now()}.html`);
+  fs.writeFileSync(tmp, html, 'utf8');
+  const bw = new BrowserWindow({ show: false, ...winOpts, webPreferences: { javascript: false, sandbox: true } });
+  try { await bw.loadFile(tmp); return await fn(bw); }
+  finally { try { bw.destroy(); } catch (_) {} try { fs.rmSync(tmp, { force: true }); } catch (_) {} }
+}
+// 🖨 바로 인쇄(v0.8.9 · 로이 「꼭 PDF 를 거쳐야 하나」) — 같은 A4 HTML 을 윈도우 인쇄 창으로. 한 장에 N 쪽 = 인쇄 옵션 pagesPerSheet.
+ipcMain.handle('script-reader-print', async (_e, args = {}) => {
+  const R = require('./core/script-reader');
+  const per = R.PER_SHEET.includes(Number(args.perSheet)) ? Number(args.perSheet) : 1;
+  const html = readerPrintHtml(args);
+  const L = R.nUpLayout(per);
+  const res = await withReaderWindow(html, (bw) => new Promise((resolve) => {
+    const opts = { silent: false, printBackground: true, pageSize: 'A4', landscape: per > 1 && L.landscape };
+    if (per > 1) opts.pagesPerSheet = per;
+    if (global.__readerPrintTest) return resolve(global.__readerPrintTest(opts, bw));   // E2E — 진짜 프린터·인쇄 창 없이
+    bw.webContents.print(opts, (ok, why) => resolve({ ok, why: why || '' }));
+  }), { parent: win || undefined });
+  if (res.ok) log(`🖨 대본 인쇄 보냄${args.introOnly ? ' (도입부만)' : ''}${per > 1 ? ` — 한 장에 ${per}쪽` : ''}`);
+  else if (!/cancel/i.test(res.why)) log(`⚠ 대본 인쇄 실패 — ${res.why || '알 수 없는 오류'}`);
+  return { ok: !!res.ok, cancelled: !res.ok && /cancel/i.test(res.why), error: res.ok ? '' : res.why, perSheet: per };
+});
+// 📘 대본 작성 기준(v0.8.9 · 로이 「누구나 이 파일을 보고 쓰면 프라이밍 기능을 100% 쓰게」) — 정본은 앱 폴더의 docs/대본-작성-가이드.md
+//   (라이트 업데이트로 같이 배포된다 · 어느 PC 든 같은 경로 규칙). action: 'read'(기본 — 내용·경로) · 'open'(편집기) · 'reveal'(탐색기) · 'copy'(경로 복사)
+const SCRIPT_GUIDE_PATH = path.join(__dirname, 'docs', '대본-작성-가이드.md');
+ipcMain.handle('script-guide', async (_e, args = {}) => {
+  const p = SCRIPT_GUIDE_PATH;
+  const act = (args && args.action) || 'read';
+  if (!fs.existsSync(p)) return { ok: false, path: p, error: '작성 기준 파일이 없습니다 — 앱을 다시 켜서 업데이트를 받으세요.' };
+  if (act === 'open') { const e = await shell.openPath(p); return { ok: !e, path: p, error: e || '' }; }
+  if (act === 'reveal') { shell.showItemInFolder(p); return { ok: true, path: p }; }
+  if (act === 'copy') { require('electron').clipboard.writeText(p); return { ok: true, path: p }; }
+  return { ok: true, path: p, text: fs.readFileSync(p, 'utf8') };
+});
+ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
+  const R = require('./core/script-reader');
+  const per = R.PER_SHEET.includes(Number(args.perSheet)) ? Number(args.perSheet) : 1;
+  const html = readerPrintHtml(args);
   const tmp = path.join(os.tmpdir(), `priming-reader-${process.pid}-${Date.now()}.html`);
   fs.writeFileSync(tmp, html, 'utf8');
   const bw = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true } });
@@ -3009,7 +3050,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
   else { try { const { PDFDocument } = require('pdf-lib'); const n = (await PDFDocument.load(pdf)).getPageCount(); out.pages = out.sheets = n; } catch (_) {} }
   const base = vrewBaseName(S.parsed.projects[0]);
   const dir = readerPdfDir(resolvePreset(args.presetName));
-  const dest = path.join(dir, `${base}_대본${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
+  const dest = path.join(dir, `${base}_대본${args.introOnly ? '_도입부' : ''}${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   try { fs.writeFileSync(dest, out.buf); }
   catch (e) { throw new Error(`PDF 를 저장하지 못했습니다(${e.code || e.message}) — 같은 PDF 가 열려 있으면 닫고 다시 누르세요.`); }
@@ -6867,8 +6908,8 @@ function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
-  let readerNotes = [], scriptStyle = null, screenCards = null, infoMarks = null;
-  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } { const _IC = require('./core/info-cards'); const _sg = _IC.signatureOf(_IC.fromRaw(_raw)); if (_sg.length) infoMarks = _sg; } } } catch (_) {}
+  let readerNotes = [], scriptStyle = null, screenCards = null, infoMarks = null, readerParas = null;
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); try { readerParas = _LP.readerParasOf(_raw); } catch (_) {} scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } { const _IC = require('./core/info-cards'); const _sg = _IC.signatureOf(_IC.fromRaw(_raw)); if (_sg.length) infoMarks = _sg; } } } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -6902,6 +6943,7 @@ function projectsFromSnapshot(snap) {
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) proj.logoOver = lo; }   // 🏷 로고 넣기/빼기
     { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) proj.capAll = ca; }   // 🌐 모든 자막 서식
     if (readerNotes.length) proj.readerNotes = readerNotes;
+    if (readerParas) proj.readerParas = readerParas;   // 📄 대본 읽기 문단(빈 줄 기준 · v0.8.9)
     if (screenCards) proj.screenCards = screenCards;   // 📜 화면 카드 마커(R4) — .md 가 정본
     if (infoMarks) proj.infoMarks = infoMarks;   // 📇 정보 카드 표시 줄 서명(v0.8.2) — .md 가 정본
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
@@ -8710,6 +8752,7 @@ async function _editSentences(args = {}) {
   { const mp = new Map(); old.forEach((o, i) => mp.set(o.id, made[Math.min(i, made.length - 1)].id)); require('./core/visual-span').remapSpanIds(pr, mp); require('./core/overlay-layers').remapIds(pr, mp); }
   if (old.length === 1 && made.length === 1) { try { require('./core/clip-history').record(old[0], made[0], args.restoreIdx); } catch (e) { log('⚠ 클립 수정 이력 기록 실패: ' + e.message); } }   // 🕘 클립 수정 이력(한 문장 → 한 문장만 잇는다)
   pr.sentences.splice(from, n, ...made);
+  if (after.readerParas) pr.readerParas = after.readerParas;   // 📄 고친 대본의 문단(대본 읽기 줄바꿈)
   g.sentenceIds.splice(gPos, n, ...made.map((s) => s.id));
   pr.sentences.forEach((s, i) => { s.num = i + 1; });   // 표시 번호 재부여 (음성은 경로로 물고 있어 안전)
   finalizeGroupIds(pr.groups, pr.sentences);            // sentence.groupId 재지정

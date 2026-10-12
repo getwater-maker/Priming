@@ -81,6 +81,8 @@ function toDTO(parseResult) {
     mergeSources: parseResult.mergeSources || 0,
     projects: projects.map((pr) => {
       let capN = 0; // 자막 줄 넘버링 — 그룹을 넘어 편 전체에서 이어짐
+      // 📄 대본(.md) 문단 번호 — 문장 순서로 맞춰 붙인다(고친 문장은 못 맞추면 null = 앞 문장과 같은 문단 · v0.8.9)
+      const _para = pr.readerParas ? require('./script-reader').alignParas(pr.sentences || [], pr.readerParas) : null;
       return {
         shortsNum: pr.shortsNum,   // 편 주소 키(롱폼=1 고정) — 스냅샷·IPC 호환을 위해 이름 유지
         title: pr.title,
@@ -121,6 +123,7 @@ function toDTO(parseResult) {
               dur: s.ttsDurationSec || null,
               audio: s.ttsAudioPath || null,
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
+              para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,
