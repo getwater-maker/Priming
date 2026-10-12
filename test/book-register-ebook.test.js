@@ -12,7 +12,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
 const BODY4 = '가격정책 정가설정 1000 원/권 도서 정가를 직접 변경하였습니다. 외부서점 입점 최종 정가 1000 원';
-const BODY5 = '서점소개정보 도서소개 도서목차 저자경력·소개 Ai사용여부 및 기여정도\n도서명 2435\n종류 전자도서\n파일 [전자책] 삼국지_제1권.epub\n용량 6.55 MB\n외부유통 사용\n판매가격 9,900 원 도서제출';
+const BODY5 = '서점소개정보 도서소개 도서목차 저자경력·소개 Ai사용여부 및 기여정도\n도서명 2435\n종류 전자도서\n파일 [전자책] 삼국지_제1권_표지+본문.pdf\n용량 6.55 MB\n외부유통 사용\n판매가격 9,900 원 도서제출';
 const AI_OPTS = ['AI 활용 여부 및 기여정도', '🟡 본문 전체 작성에 사용', '🔵 표지 및 본문 일부 작성에 사용', '🟣 본문 일부 작성에 사용', '🟤 표지 이미지에만 사용', '⚪ 사용하지 않음'];
 const RIGHT_OPTS = ['초상/저작권 보유여부', '🟢 모든 콘텐츠 초상/저작권 보유중', '🔴 초상/저작권 보유하지 않음'];
 const GENRES = ['선택', '- 소설', '소설 - 소설 일반', '소설 - 고전 문학'];
@@ -48,21 +48,22 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
 
 (async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'ebk-'));
-  const epub = path.join(T, '[전자책] 삼국지_제1권.epub'); fs.writeFileSync(epub, 'PK');
+  const pdf = path.join(T, '[전자책] 삼국지_제1권_표지+본문.pdf'); fs.writeFileSync(pdf, '%PDF');
   const cover = path.join(T, '_ebook-cover.jpg'); fs.writeFileSync(cover, 'jpg');
   const book = parseBookText('# 삼국지\n> 저자: 나관중\n> 전자책: 9,900원\n> 한줄소개: 소개 한 줄\n> ISBN: 979-11-000-0000-0\n\n## [저자소개]\n나관중은 원말명초의 소설가다.\n\n## 제1회 시작\n본문\n', 'x');
-  const plan = RF.ebookPlan(book, { epub, cover });
+  const plan = RF.ebookPlan(book, { pdf, cover });
 
   console.log('\n[1] 계획');
-  ok(plan.kind === 'ebook' && plan.step2.epub === epub && plan.step2.epubName === '[전자책] 삼국지_제1권.epub' && plan.step3.cover === cover, 'ePub·표지 경로');
+  ok(plan.kind === 'ebook' && plan.step2.file === pdf && plan.step2.fileName === '[전자책] 삼국지_제1권_표지+본문.pdf' && plan.step3.cover === cover, '📄 2단계 = 전자책 표지+본문 PDF · 표지 경로');
+  ok(!('epub' in plan.step2) && !('epub' in RF.ebookPlan(book, { epub: 'x.epub' }).step2), '🔑 ePub 은 올리지 않는다(로이 2026-10-12)');
   ok(plan.step3.logo === 'blue', '로고 = 파란색');
   ok(plan.step4.price === 9900 && plan.step4.external === true, '4단계: 전자책 정가 9,900 · 외부서점 입점');
   ok(plan.step1.isbnMode === 'bookk' && plan.step1.isbn === '', '🔑 종이책 ISBN(원고 `ISBN`)은 전자책에 쓰지 않는다(전자책 ISBN 없으면 부크크 무료 발급)');
   ok(RF.ebookPlan(parseBookText('# t\n> 저자: a\n> 전자책 ISBN: 979-11-111-1111-1\n', 'x'), {}).step1.isbnMode === 'other', '전자책 ISBN 이 있으면 「이미 보유한 ISBN」');
   ok(plan.step5.ai === '표지 및 본문 일부 작성에 사용' && /나관중/.test(plan.step5.bio) && plan.step5.intro === '소개 한 줄', '5단계 값(AI·저자경력·소개)');
-  ok(plan.manual.some((s) => /도서제출/.test(s)) && !plan.manual.some((s) => /ePub\(없음|표지\(JPG/.test(s)), '직접 목록: 도서제출만');
+  ok(plan.manual.some((s) => /도서제출/.test(s)) && !plan.manual.some((s) => /PDF\(없음|표지\(JPG/.test(s)), '직접 목록: 도서제출만');
   const none = RF.ebookPlan(parseBookText('# t\n> 저자: a\n', 'x'), {});
-  ok(none.manual.some((s) => /ePub\(없음/.test(s)) && none.manual.some((s) => /3단계 표지/.test(s)) && none.manual.some((s) => /정가/.test(s)), '판별: 파일·표지·정가가 없으면 직접 목록에 이유');
+  ok(none.manual.some((s) => /2단계 전자책 PDF\(없음/.test(s)) && none.manual.some((s) => /3단계 표지/.test(s)) && none.manual.some((s) => /정가/.test(s)), '판별: 파일·표지·정가가 없으면 직접 목록에 이유');
   // 💰 정가 = 종이책의 70%, 10원 단위 이하 버림
   ok(RF.ebookPriceFromPaper(19500) === 13600 && RF.ebookPriceFromPaper(15000) === 10500 && RF.ebookPriceFromPaper(12800) === 8900 && RF.ebookPriceFromPaper(10000) === 7000, '19,500→13,600 · 15,000→10,500 · 12,800→8,900(8,960 내림) · 10,000→7,000');
   ok(RF.ebookPriceFromPaper(0) === 0 && RF.ebookPriceFromPaper('') === 0 && RF.ebookPriceFromPaper(100) === 0, '종이책 정가 없음/너무 낮음 → 0(계산 안 함)');
@@ -70,7 +71,7 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   ok(pp.step4.price === 13600 && pp.step4.from === 'paper70' && pp.step4.paper === 19500, '🔑 원고 정가 19,500원 → 전자책 13,600원(종이책 70% 내림)');
   ok(plan.step4.from === 'ebook' && plan.step4.price === 9900, '`> 전자책:` 가격을 따로 적으면 그 값이 이긴다(판권지와 같게)');
   ok(!pp.manual.some((s) => /4단계 정가/.test(s)) && none.manual.some((s) => /종이책 `> 정가:`/.test(s)), '정가를 계산했으면 직접 목록에 안 올린다 · 종이책 정가도 없으면 이유와 함께 올린다');
-  const withRi = RF.ebookPlan(book, { epub, cover, registerInfo: { title: '삼국지 완역 1 : 천하대란', subtitle: '1-15', author: '나관중', genre: '', isbnText: '979-11-999-9999-9', intro: '', toc: '', bio: '', ai: '', rights: '' } });
+  const withRi = RF.ebookPlan(book, { pdf, cover, registerInfo: { title: '삼국지 완역 1 : 천하대란', subtitle: '1-15', author: '나관중', genre: '', isbnText: '979-11-999-9999-9', intro: '', toc: '', bio: '', ai: '', rights: '' } });
   ok(withRi.step1.title === '삼국지 완역 1 : 천하대란' && withRi.step1.subtitle === '1-15' && withRi.step1.isbnMode === 'bookk', '등록정보 파일이 원고 메타보다 우선(제목) · 종이책 ISBN 은 무시');
 
   console.log('\n[2] 1단계 기본정보');
@@ -88,14 +89,14 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   pg = fakePage(BODY4, { mangle: true }); r = await RB.fillBookkEbookInfo(pg, colon, () => {});
   ok(r.failed.includes('도서명 확인'), '판별: 글자가 달라진 진짜 불일치는 여전히 실패');
 
-  console.log('\n[3] 2단계 ePub');
+  console.log('\n[3] 2단계 전자책 PDF');
   pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, plan, () => {});
-  ok(r.failed.length === 0 && pg.calls.includes('upload:[전자책] 삼국지_제1권.epub') && pg.calls.includes('waitUploaded'), 'ePub 첨부 · 업로드 완료 대기');
-  pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, { ...plan, step2: { epub: path.join(T, 'none.epub') } }, () => {});
-  ok(r.failed.includes('ePub 없음') && !pg.calls.some((c) => c.startsWith('upload')), '판별: ePub 파일이 없으면 올리지 않고 알린다');
-  const big = path.join(T, 'big.epub'); fs.closeSync(fs.openSync(big, 'w')); fs.truncateSync(big, 21 * 1048576);
-  pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, { ...plan, step2: { epub: big } }, () => {});
-  ok(r.failed.includes('ePub 20MB 초과') && !pg.calls.some((c) => c.startsWith('upload')), '판별: 20MB 초과는 올리지 않는다');
+  ok(r.failed.length === 0 && pg.calls.includes('upload:[전자책] 삼국지_제1권_표지+본문.pdf') && pg.calls.includes('waitUploaded'), '전자책 PDF 첨부 · 업로드 완료 대기');
+  pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, { ...plan, step2: { file: path.join(T, 'none.pdf') } }, () => {});
+  ok(r.failed.includes('전자책 PDF 없음') && !pg.calls.some((c) => c.startsWith('upload')), '판별: 전자책 PDF 가 없으면 올리지 않고 알린다');
+  const big = path.join(T, 'big.pdf'); fs.closeSync(fs.openSync(big, 'w')); fs.truncateSync(big, 21 * 1048576);
+  pg = fakePage(BODY4); r = await RB.fillBookkEbookManuscript(pg, { ...plan, step2: { file: big } }, () => {});
+  ok(r.failed.includes('전자책 PDF 20MB 초과') && !pg.calls.some((c) => c.startsWith('upload')), '판별: 20MB 초과는 올리지 않는다');
 
   console.log('\n[4] 3단계 표지 + 파란 로고');
   pg = fakePage(BODY4); r = await RB.fillBookkEbookCover(pg, plan, () => {});
@@ -130,7 +131,7 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   ok(r.failed.length === 0 && l5.some((m) => /요약.*일치/.test(m)), '판매가격·파일이 우리 값과 일치 ' + r.failed.join());
   pg = fakePage(BODY5.replace('9,900', '1,000')); r = await RB.fillBookkFinal(pg, plan, () => {});
   ok(r.failed.includes('최종확인 요약 불일치'), '판별: 판매가격이 다르면(기본 1,000원이 남은 경우) 불일치');
-  pg = fakePage(BODY5.replace('삼국지_제1권.epub', '다른책.epub')); r = await RB.fillBookkFinal(pg, plan, () => {});
+  pg = fakePage(BODY5.replace('삼국지_제1권_표지+본문.pdf', '다른책.pdf')); r = await RB.fillBookkFinal(pg, plan, () => {});
   ok(r.failed.includes('최종확인 요약 불일치'), '판별: 올라간 파일 이름이 다르면 불일치');
 
   console.log('\n[7] 전체 흐름 · 이동 · 중단');
@@ -145,8 +146,8 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   ok(!pgF.calls.some((c) => /제출|저장/.test(c)), '🔴 도서제출·저장 클릭 없음');
   // 앞 단계 실패 → 멈춘다
   const pgS = fakePage('도서 제작 목적');
-  r = await RB.runEbookFrom(pgS, { ...plan, step2: { epub: '' } }, () => {}, 2);
-  ok(!pgS.calls.some((c) => /Step3/.test(c)) && r.failed.includes('ePub 없음'), '2단계(ePub 없음) 실패 → 3단계로 넘어가지 않는다');
+  r = await RB.runEbookFrom(pgS, { ...plan, step2: { file: '' } }, () => {}, 2);
+  ok(!pgS.calls.some((c) => /Step3/.test(c)) && r.failed.includes('전자책 PDF 없음'), '2단계(전자책 PDF 없음) 실패 → 3단계로 넘어가지 않는다');
 
   console.log('\n[7b] 종이책 신청 때 기록한 최종정가 → 전자책 정가');
   const RP = require('../core/book/register-price');
@@ -230,9 +231,11 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   // 📚 완성 폴더에는 여러 권이 함께 있다 — 등록 파일은 「가장 최근」이 아니라 **이 권 이름**으로 고른다(2026-10-02 폴더 화면에서 발견)
   { const i0 = mainSrc.indexOf("ipcMain.handle('book-register-run'"); const reg = mainSrc.slice(i0, mainSrc.indexOf("ipcMain.handle('book-reveal-file'", i0));
     const bookkPart = reg.slice(reg.indexOf("platform === 'jakkawa') {") + 30);
-    ok(/const own = \(kind, suffix\)/.test(reg) && /own\('ebook', '\.epub'\)/.test(reg) && /own\('print', '_내지\.pdf'\)/.test(reg) && /own\('print', '_표지\.pdf'\)/.test(reg), '이 권 이름으로 ePub·내지·표지를 고른다(own)');
+    ok(/const own = \(kind, suffix\)/.test(reg) && /own\('print', '_내지\.pdf'\)/.test(reg) && /own\('print', '_표지\.pdf'\)/.test(reg), '이 권 이름으로 내지·표지를 고른다(own)');
     ok(!/pick\('\.epub'\)|pick\('_내지\.pdf'\)|pick\('_표지\.pdf'\)/.test(bookkPart.slice(bookkPart.indexOf('} else {'))), '부크크 입력 경로에 「접미사로 가장 최근 파일」 선택(pick)이 남아 있지 않다');
-    ok(/_ebook-cover_\$\{ownBase\}\.jpg/.test(reg) && /coverTmpName: `_ebook-cover_\$\{base\}\.jpg`/.test(mainSrc), 'ePub 표지 조각도 권마다 다른 이름(_ebook-cover_<권>.jpg)'); }
+    // 📄 전자책 = PDF 업로드(로이 2026-10-12) — [전자책] 이름만 찾는다(접두 없는 `<권>_표지.pdf` 는 종이책 펼침면)
+    ok(/const ebOwn = \(suffix\) => \{ const q = path\.join\(root, `\$\{BOOK_PREFIX\.ebook\}\$\{ownBase\}\$\{suffix\}`\)/.test(reg) && /ebOwn\('_표지\+본문\.pdf'\)/.test(reg) && /let cover = ebOwn\('_표지\.pdf'\)/.test(reg), '전자책 등록 = 이 권의 [전자책] 표지+본문 PDF · 표지 PDF');
+    ok(!/own\('ebook'/.test(reg) && !/\.epub'\)/.test(reg.slice(reg.indexOf('const buildEbookPlan'))), '🔑 전자책 등록 경로는 ePub 을 고르지 않는다'); }
   ok(!/bookk-both|bookkBoth|runRegisterBoth/.test(mainSrc) && !/runRegisterBoth/.test(src), '종이책 → 전자책 「한 번에 등록」 코드는 제거됐다(로이 2026-10-03 — 현실적으로 불가)');
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${fail ? '❌' : '✅'} book-register-ebook — ${pass} 통과 / ${fail} 실패`);

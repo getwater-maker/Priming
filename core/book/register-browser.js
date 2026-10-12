@@ -442,9 +442,9 @@ function checkFinalSummary(body, plan) {
   if (pg && plan.step1 && plan.step1.pages && Number(pg[1].replace(/,/g, '')) !== plan.step1.pages) out.push(`페이지수 화면 ${pg[1]} ≠ 우리 ${plan.step1.pages}`);
   if (th && plan.step3 && plan.step3.expect && Math.abs(Number(th[1]) - plan.step3.expect.spineMm) > 0.05) out.push(`두께 화면 ${th[1]}mm ≠ 우리 ${plan.step3.expect.spineMm}mm`);
   if (pr && plan.step4 && plan.step4.price && Number(pr[1].replace(/,/g, '')) !== plan.step4.price) out.push(`판매가 화면 ${pr[1]}원 ≠ 원고 ${plan.step4.price}원`);
-  if (plan.kind === 'ebook' && plan.step2 && plan.step2.epubName) {   // 전자책 카드의 「파일 [전자책] ….epub」
+  if (plan.kind === 'ebook' && plan.step2 && plan.step2.fileName) {   // 전자책 카드의 「파일 [전자책] …_표지+본문.pdf」
     const fm = /(?:^|\n)파일\s*(.+?\.(?:epub|pdf))/i.exec(body);
-    if (fm && fm[1].trim() !== plan.step2.epubName) out.push(`파일 화면 ${fm[1].trim()} ≠ 우리 ${plan.step2.epubName}`);
+    if (fm && fm[1].trim() !== plan.step2.fileName) out.push(`파일 화면 ${fm[1].trim()} ≠ 우리 ${plan.step2.fileName}`);
   }
   return out;
 }
@@ -566,18 +566,26 @@ async function fillBookkEbookInfo(page, plan, log) {
   return { done, failed };
 }
 
-/** 2단계 원고등록 — ePub 첨부(EPUB2.0만 외부유통 · 20MB). 업로드 끝 = 「업로드 파일 없음」 문구 사라짐 */
+/**
+ * 2단계 원고등록 — **전자책 PDF**(`[전자책] <권>_표지+본문.pdf`) 첨부(로이 2026-10-12 「ePub 대신 PDF 업로드」 · 20MB — ePub 때의 한도를 그대로 지킨다).
+ *   업로드 끝 = 「업로드 파일 없음」 문구 사라짐. ⚠ PDF 를 올리는 화면은 아직 실측 전 — 「PDF」 고르기 칸이 있으면 먼저 누르고(없으면 넘어감), 못 올리면 화면을 덤프한다.
+ */
 async function fillBookkEbookManuscript(page, plan, log) {
   const s2 = plan.step2 || {}; const done = []; const failed = [];
   await page.waitForSelector('text=원고 업로드', { timeout: 30000 }).catch(async () => { await _dump(page, log, '전자책 2단계'); throw new Error('전자책 2단계(원고등록) 화면을 찾지 못했습니다'); });
-  if (!s2.epub || !fs.existsSync(s2.epub)) { failed.push('ePub 없음'); log('[등록] ⚠ 올릴 ePub 이 없습니다 — 「📦 한 번에 만들기」로 ePub 을 먼저 만드세요'); return { done, failed }; }
-  const mb = fs.statSync(s2.epub).size / 1048576;
-  if (mb > 20) { failed.push('ePub 20MB 초과'); log(`[등록] ⚠ ePub ${mb.toFixed(1)}MB — 부크크 한도 20MB 를 넘어 올리지 않습니다`); return { done, failed }; }
+  if (!s2.file || !fs.existsSync(s2.file)) { failed.push('전자책 PDF 없음'); log('[등록] ⚠ 올릴 전자책 PDF(`[전자책] …_표지+본문.pdf`)가 없습니다 — 「📱 전자책 만들기」를 먼저 누르세요'); return { done, failed }; }
+  const mb = fs.statSync(s2.file).size / 1048576;
+  if (mb > 20) { failed.push('전자책 PDF 20MB 초과'); log(`[등록] ⚠ 전자책 PDF ${mb.toFixed(1)}MB — 부크크 한도 20MB 를 넘어 올리지 않습니다`); return { done, failed }; }
+  // 파일 종류 고르기(있을 때만 · 실패해도 계속) — 라디오·탭 이름이 정확히 「PDF」 인 것
   try {
-    await page.locator('input[type=file]').first().setInputFiles(s2.epub);
+    const pick = page.locator('label, a, button, li, span').filter({ hasText: /^\s*PDF\s*$/ }).first();
+    if (await pick.count()) { await pick.click({ timeout: 3000 }); log('[등록] 📄 원고 종류 「PDF」 선택'); }
+  } catch (_) {}
+  try {
+    await page.locator('input[type=file]').first().setInputFiles(s2.file);
     await _waitUploaded(page);
-    done.push('ePub 업로드');
-  } catch (e) { failed.push('ePub 업로드'); log(`[등록] ⚠ ePub 업로드 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); }
+    done.push('전자책 PDF 업로드');
+  } catch (e) { failed.push('전자책 PDF 업로드'); log(`[등록] ⚠ 전자책 PDF 업로드 실패: ${String(e.message).split('\n')[0].slice(0, 90)}`); await _dump(page, log, '전자책 2단계 PDF'); }
   await _shot(page, plan, log, '전자책2단계');
   return { done, failed };
 }

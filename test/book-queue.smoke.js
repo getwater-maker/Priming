@@ -83,33 +83,37 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const merged = r3 && r3.queue && r3.queue.book.items.find((x) => x.active);
     ok(merged && r3.dto.parts.reduce((n, p) => n + p.chapters.length, 0) >= 3, `제1권+회차 파일 = 한 권으로 합침(장 ${r3 && r3.dto.parts.reduce((n, p) => n + p.chapters.length, 0)}개)`);
 
-    console.log('\n[4] 큐 전체 만들기 (내지·표지 PDF → ePub → 검증) — 두 권 모두');
+    console.log('\n[4] 큐 전체 만들기 (종이책 PDF → 전자책 PDF + ePub(켬) → 검증) — 두 권 모두');
     // 합쳐 연 제1권(같은 파일 경로라 그 항목을 대체했다)을 되돌리려고 두 권을 다시 연다 — 같은 경로는 항목을 새로 만들지 않고 다시 읽는다
     await win.evaluate((ps) => window.api.openBookPath({ scriptPaths: ps }), [A, B]);
     const qq = (await win.evaluate(() => window.api.selectQueueItem(null, 'book'))).queue.book;
     const only2 = qq.items.filter((x) => /^제[12]권\.md$/.test(x.file));
     ok(only2.length === 2, `큐에 제1·제2권 (${qq.items.map((x) => x.file).join(',')})`);
     await win.evaluate((id) => window.api.selectQueueItem(id, 'book'), only2[1].id);   // 활성 = 둘째 → 끝나면 둘째로 돌아와야
-    const br = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true }));
+    const br = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, withEpub: true }));
     const res = (br && br.results) || [];
     ok(res.length === 2, `결과 2권 (${res.length})`);
-    for (const x of res) ok(x.pdf && x.epub, `${x.file}: 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · ePub ${x.epub ? '✓' : '✗'}${x.error ? ' · ' + x.error : ''}`);
+    for (const x of res) ok(x.pdf && x.epub && x.check, `${x.file}: 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · ePub ${x.epub ? '✓' : '✗'}${x.error ? ' · ' + x.error : ''}`);
     const ra = res.find((x) => x.file === '제1권.md'), rb = res.find((x) => x.file === '제2권.md');
     ok(ra && ra.coverFit && ra.coverFit.ok === false && ra.coverFit.imgW === 120 && ra.coverFit.imgH === 80 && ra.coverFit.expW > 1000, `🔑 표지 치수 불일치를 결과에 담는다 — 제1권: ${ra && ra.coverFit && ra.coverFit.imgW}×${ra && ra.coverFit && ra.coverFit.imgH}px ≠ 기대 ${ra && ra.coverFit && ra.coverFit.expW}×${ra && ra.coverFit && ra.coverFit.expH}px`);
     ok(rb && rb.coverFit === null, '판별: 표지 이미지가 없는 제2권은 coverFit null(치수 판정 없음 — 불일치로 오인하지 않는다)');
+    // 📄 전자책 PDF(2026-10-12): 표지가 있는 제1권은 표지+본문까지 · 표지가 전혀 없는 제2권은 「표지 없음」(부크크에 올릴 파일이 없다고 알린다)
+    ok(ra && ra.ebook && ra.ebookCover && rb && !rb.ebook && /전자책 표지 없음/.test(rb.error), `전자책 PDF: 제1권 ✓ · 제2권(표지 없음) ✗ — ${rb && rb.error}`);
     ok(br && br.ok === false, '표지 치수 불일치가 있으면 전체 ok 가 false');
     ok(br && br.dto && br.dto.fileTitle === nameB, `끝나면 처음 활성이던 둘째 권으로 돌아온다(${br && br.dto && br.dto.fileTitle})`);
     // 권마다 자기 이름의 파일이 만들어졌는지(권이 섞이지 않았는지)
     const outA = path.join(outParent, nameA), outB = path.join(outParent, nameB);
     const ls = (d) => { try { return fs.readdirSync(d); } catch (_) { return []; } };
-    ok(ls(outA).some((f) => /\.epub$/.test(f)) && ls(outB).some((f) => /\.epub$/.test(f)), `권마다 자기 폴더에 ePub: ${ls(outA).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')} | ${ls(outB).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')}`);
+    ok(ls(outA).some((f) => /\.epub$/.test(f)) && ls(outB).some((f) => /\.epub$/.test(f)) && ls(outA).includes(`[전자책] ${nameA}_표지+본문.pdf`) && ls(outA).includes(`[종이책] ${nameA}_표지+내지.pdf`) && ls(outB).includes(`[전자책] ${nameB}_본문.pdf`), `권마다 자기 폴더에 ePub·PDF: ${ls(outA).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')} | ${ls(outB).filter((f) => /\.(epub|pdf)$/.test(f)).join(' ')}`);
 
     // [5] 🔑 종이책·전자책은 ISBN 이 달라 따로 만든다(2026-10-07) — edition 으로 한 판만
     console.log('\n[5] 큐 만들기 — edition 별(종이책만 / 전자책만)');
     const bp = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, edition: 'print' }));
-    ok((bp.results || []).length === 2 && bp.results.every((x) => x.pdf && !x.epub && !x.check), `종이책만: PDF 만들고 ePub·검증은 안 한다 (${(bp.results || []).map((x) => `pdf=${x.pdf} epub=${x.epub}`).join(' | ')})`);
+    ok((bp.results || []).length === 2 && bp.results.every((x) => x.pdf && !x.ebook && !x.epub && !x.check), `종이책만: PDF 만들고 전자책·ePub·검증은 안 한다 (${(bp.results || []).map((x) => `pdf=${x.pdf} epub=${x.epub}`).join(' | ')})`);
     const be = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, edition: 'ebook' }));
-    ok((be.results || []).length === 2 && be.results.every((x) => !x.pdf && x.epub), `전자책만: ePub 만들고 PDF 는 안 한다 (${(be.results || []).map((x) => `pdf=${x.pdf} epub=${x.epub}`).join(' | ')})`);
+    ok((be.results || []).length === 2 && be.results.every((x) => !x.pdf && !x.epub && !x.check) && be.results.find((x) => x.file === '제1권.md').ebook, `전자책만(ePub 끔 = 기본): 전자책 PDF 만, 종이책 PDF·ePub 은 안 한다 (${(be.results || []).map((x) => `pdf=${x.pdf} ebook=${x.ebook} epub=${x.epub}`).join(' | ')})`);
+    const bw = await win.evaluate(() => window.api.bookBuildQueue({ layout: {}, noOpen: true, edition: 'ebook', withEpub: true }));
+    ok((bw.results || []).length === 2 && bw.results.every((x) => !x.pdf && x.epub), `전자책 + ePub 켬: ePub 도 만든다 (${(bw.results || []).map((x) => `ebook=${x.ebook} epub=${x.epub}`).join(' | ')})`);
   } finally {
     await app.close();
     // 정리 — 우리가 만든 「큐시험…」 폴더만 지운다

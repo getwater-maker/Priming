@@ -166,7 +166,14 @@ ${para}
       await one('bk-register-bookk', '종이책 자동 입력 버튼'); await one('bk-register-ebook', '전자책 자동 입력 버튼');
       await one('bk-register-cover', '종이책 이어 채우기'); await one('bk-register-ebook-resume', '전자책 이어 채우기');
       await one('bk-paper-price-row', '종이책 정가 줄');
-      await one('bk-pdf-print', '종이책 만들기'); await one('bk-epub', '전자책 만들기'); await one('bk-epubcheck', 'ePub 검증'); await one('bk-pdf-ebook', '전자책 PDF');
+      await one('bk-pdf-print', '종이책 만들기'); await one('bk-ebook', '전자책 만들기(PDF 셋)'); await one('bk-epub-opt', 'ePub 선택 체크');
+      // 📱 ePub 은 선택(로이 2026-10-12) — 꺼져 있으면 ePub 검증 단추가 없고, 켜면 생긴다 · 옛 「참고용 전자책 PDF」·「ePub 만들기」 단추는 없다
+      if (await win.locator('[data-testid=bk-pdf-ebook]').count() !== 0 || await win.locator('[data-testid=bk-epub]').count() !== 0) throw new Error('옛 전자책 단추(bk-pdf-ebook·bk-epub)가 남아 있다');
+      { const cb = win.locator('[data-testid=bk-epub-opt] input'); const was = await cb.isChecked();
+        if (was) await cb.uncheck();
+        if (await win.locator('[data-testid=bk-epubcheck]').count() !== 0) throw new Error('ePub 을 끄면 ePub 검증 단추가 없어야 한다');
+        await cb.check(); await one('bk-epubcheck', 'ePub 검증(ePub 켬)');
+        if (!was) await cb.uncheck(); }
       await one('bk-build-both', '종이책 + 전자책 한 번에 만들기 (v0.7.43 — 로이 2026-10-07 재요청)');
       if (await win.locator('[data-testid=bk-build-all]').count() !== 0) throw new Error('옛 「한 번에 만들기」(bk-build-all) 버튼이 남아 있다 — 새 버튼은 bk-build-both');
       if (await win.locator('[data-testid=bk-register-both]').count() !== 0) throw new Error('「종이책 → 전자책 한 번에 등록」 버튼이 남아 있다(제거됐어야 한다)');

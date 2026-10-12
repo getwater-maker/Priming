@@ -196,9 +196,9 @@ function ebookPriceFromPaper(paper) {
 
 /**
  * 부크크 「새전자책」(/author/make/electronicBook) 계획 — 로이 스크린샷·화면 기록 2026-10-02 실측.
- *   단계: 1 기본정보(종이책 2단계와 같은 칸 · 쪽수·PDF 없음) → 2 원고등록(ePub 첨부 · EPUB2.0만 외부유통 · 20MB) → 3 꾸미기(직접 올리기 = JPG·PDF 10MB · 로고 파랑)
+ *   단계: 1 기본정보(종이책 2단계와 같은 칸 · 쪽수·PDF 없음) → 2 원고등록(**PDF 첨부** — 로이 2026-10-12 「ePub 대신 PDF」 · `[전자책] <권>_표지+본문.pdf` · 20MB) → 3 꾸미기(직접 올리기 = JPG·PDF 10MB · 로고 파랑 · `[전자책] <권>_표지.pdf`)
  *   → 4 가격정책(정가 + 「직접 변경」 체크박스 · 외부서점) → 5 최종확인(종이책과 같은 칸). 🔴 「도서제출」은 누르지 않는다.
- *  ctx = { epub, cover(JPG/PDF 경로), registerInfo, shotDir }
+ *  ctx = { pdf(표지+본문 PDF), cover(JPG/PDF 경로), registerInfo, shotDir }
  */
 function ebookPlan(book, ctx) {
   const m = (book && book.meta) || {};
@@ -215,7 +215,7 @@ function ebookPlan(book, ctx) {
     genreFallback: BOOKK_DEFAULT_GENRE,
     adult: 'all',
   };
-  const step2 = { epub: c.epub || '', epubName: c.epub ? require('path').basename(c.epub) : '' };
+  const step2 = { file: c.pdf || '', fileName: c.pdf ? require('path').basename(c.pdf) : '' };   // 📄 원고 파일 = 전자책 표지+본문 PDF(ePub 은 선택 산출물 — 올리지 않는다)
   const step3 = { cover: c.cover || '', logo: 'blue' };
   // 전자책 정가 = 종이책 정가(`> 정가:`)의 70%, 10원 단위 이하 버림(= 100원 단위 내림) — 부크크 권고 「전자도서 = 종이도서 70%」·로이 2026-10-02. 원고에 `> 전자책:` 가격이 따로 있으면 그 값이 이긴다(판권지와 같게).
   //   종이책 정가 = ① 종이책을 부크크에 신청할 때 4단계 화면에서 읽어 기록한 최종정가(ctx.paperPrice — 가장 정확) ② 원고 `> 정가:`.
@@ -241,8 +241,8 @@ function ebookPlan(book, ctx) {
     // ⚠ ISBN(ri.isbnText)은 종이책 값이라 쓰지 않는다
   }
   const manual = [];
-  if (!step2.epub) manual.push('2단계 ePub(없음 — 「📦 한 번에 만들기」로 ePub 을 먼저 만드세요)');
-  if (!step3.cover) manual.push('3단계 표지(JPG·PDF 10MB 이하 — 원고 `> 전자책표지:`·표지 도구의 `부속\\…_전자책앞표지.jpg`·ePub 만들 때 크롭한 이 권의 조각이 모두 없음 · PNG 는 올릴 수 없다 · 화면 무료 표지로 직접)');
+  if (!step2.file) manual.push('2단계 전자책 PDF(없음 — 「📱 전자책 만들기」로 `[전자책] …_표지+본문.pdf` 를 먼저 만드세요)');
+  if (!step3.cover) manual.push('3단계 표지(JPG·PDF 10MB 이하 — `[전자책] …_표지.pdf`(「📱 전자책 만들기」)·원고 `> 전자책표지:`·표지 도구의 `부속\\…_전자책앞표지.jpg` 가 모두 없음 · PNG 는 올릴 수 없다 · 화면 무료 표지로 직접)');
   if (!step1.title) manual.push('도서명(필수)');
   if (!step1.author) manual.push('저자(필수)');
   if (step1.isbnMode === 'other') manual.push('보유 ISBN 입력칸(1단계에서 직접)');

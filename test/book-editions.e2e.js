@@ -17,7 +17,10 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
 const para = '조식은 붓을 들어 이렇게 적었다. 천하의 일은 합쳐지면 나뉘고 나뉘면 다시 합쳐진다는 말이 있다. '.repeat(8);
+// 🖼 표지 펼침면 그림 — 왼쪽 절반(뒤표지) 파랑 · 오른쪽 절반(앞표지) 빨강. 앞표지 PDF 가 「오른쪽」을 잘랐는지 색으로 본다(2026-10-12)
+require('child_process').execFileSync(require('ffmpeg-static'), ['-y', '-f', 'lavfi', '-i', 'color=c=0x2040c0:s=1800x2551', '-f', 'lavfi', '-i', 'color=c=0xd02020:s=1800x2551', '-filter_complex', 'hstack', '-frames:v', '1', path.join(OUTDIR, 'cover.png')], { stdio: 'ignore' });
 fs.writeFileSync(MD, `# ${TAG}
+> 표지파일: cover.png
 > 저자: 나관중
 > 출판사: 고전서재
 > 발행일: 2026-10-01
@@ -71,8 +74,31 @@ ${(para + '\n\n').repeat(5)}
 
     console.log('\n[2] 📱 전자책 PDF');
     const re = await win.evaluate(async () => window.api.bookBuildPdf({ layout: { headerOdd: 'chapterNo' }, edition: 'ebook' }));
-    ok(re && !re.error && re.ebookPdf && fs.existsSync(re.ebookPdf), `전자책 PDF 생성 (${re && re.pages}쪽) — ${re && re.error || ''}`);
-    ok(re && /_전자책\.pdf$/.test(re.ebookPdf || ''), '파일명 _전자책.pdf');
+    // 📄 2026-10-12 — 전자책 = 표지 · 본문 · 표지+본문 PDF 셋(표지+본문 = 본문 맨 앞에 앞표지 1쪽)
+    ok(re && !re.error && re.ebookBodyPdf && fs.existsSync(re.ebookBodyPdf) && /\[전자책\] .*_본문\.pdf$/.test(re.ebookBodyPdf), `전자책 본문 PDF 생성 (${re && re.pages}쪽) — ${re && re.error || ''}`);
+    ok(re && re.ebookCoverPdf && /\[전자책\] .*_표지\.pdf$/.test(re.ebookCoverPdf) && fs.existsSync(re.ebookCoverPdf), '전자책 앞표지 PDF([전자책] …_표지.pdf)');
+    ok(re && re.ebookPdf && /\[전자책\] .*_표지\+본문\.pdf$/.test(re.ebookPdf) && fs.existsSync(re.ebookPdf), '전자책 표지+본문 PDF([전자책] …_표지+본문.pdf)');
+    if (re && re.ebookPdf && re.ebookCoverPdf) {
+      const { PDFDocument } = require('pdf-lib');
+      const nOf = async (p) => (await PDFDocument.load(fs.readFileSync(p))).getPageCount();
+      ok(await nOf(re.ebookCoverPdf) === 1 && await nOf(re.ebookPdf) === re.pages + 1, `앞표지 1쪽 · 표지+본문 = 본문 ${re.pages} + 1쪽`);
+      const { pathToFileURL } = require('url');
+      const mupdf = await import(pathToFileURL(path.join(__dirname, '..', 'node_modules', 'mupdf', 'dist', 'mupdf.js')).href);
+      const open = (p) => mupdf.Document.openDocument(fs.readFileSync(p), 'application/pdf');
+      // 앞표지 = 펼침면의 오른쪽(빨강) · 판형 폭(A5 148mm)
+      const cd = open(re.ebookCoverPdf); const pg = cd.loadPage(0); const b = pg.getBounds();
+      const wMm = (b[2] - b[0]) * 25.4 / 72;
+      const px = pg.toPixmap(mupdf.Matrix.scale(0.3, 0.3), mupdf.ColorSpace.DeviceRGB, false, true);
+      const W = px.getWidth(), H = px.getHeight(), s = px.getPixels(), st = px.getStride(); const at = (x, y) => { const i = y * st + x * 3; return [s[i], s[i + 1], s[i + 2]]; };
+      const c = at(W >> 1, H >> 1), e = at(W - 3, H >> 1);
+      ok(Math.abs(wMm - 148) < 0.6 && c[0] > 150 && c[2] < 90 && e[0] > 150, `앞표지 PDF = 오른쪽(빨강) · 폭 ${wMm.toFixed(1)}mm (가운데 rgb ${c} · 오른쪽 끝 ${e})`);
+      // 🔑 표지+본문에도 본문 PDF 의 책갈피(목차)가 그대로 살아 있다 — 쪽은 1쪽씩 밀린다
+      const ob = open(re.ebookBodyPdf).loadOutline() || [], of = open(re.ebookPdf).loadOutline() || [];
+      ok(of.length === ob.length && of.every((o, i) => o.title === ob[i].title), `책갈피 ${ob.length}개 → 표지+본문 ${of.length}개(본문에 있는 만큼 그대로)`);
+      const pOf = (o) => (o && o.page != null ? o.page : (o && o.uri ? Number((/#page=(\d+)/.exec(o.uri) || [])[1]) - 1 : NaN));
+      if (ob.length) ok(pOf(of[0]) === pOf(ob[0]) + 1, `책갈피 쪽 = 본문 쪽 + 1 (${pOf(ob[0])} → ${pOf(of[0])})`);
+    }
+    ok(rp && rp.fullPdf && /\[종이책\] .*_표지\+내지\.pdf$/.test(rp.fullPdf) && fs.existsSync(rp.fullPdf), '종이책 표지+내지 PDF([종이책] …_표지+내지.pdf)');
     ok(re && re.coverPdf == null && re.interiorPdf == null, '전자책은 표지 PDF·내지 PDF 를 따로 만들지 않는다');
     ok(re && re.dto && re.dto.lastPages === pagesP, `🔑 전자책을 구워도 종이책 쪽수(책등 근거)는 그대로 ${pagesP} (앱 ${re && re.dto && re.dto.lastPages})`);
     ok(re && re.pages < pagesP, `전자책 ${re && re.pages}쪽 < 종이책 ${pagesP}쪽(백면 없음)`);

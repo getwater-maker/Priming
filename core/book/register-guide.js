@@ -99,31 +99,41 @@ function bookkChecklist(ctx) {
 }
 
 
-/** 전자책 → 부크크 점검표 (2026-10-01 로이 결정: 종이책·전자책 모두 부크크 · 작가와 제외) — EPUB 업로드 20MB 이하.
- *  🔒 부크크 전자책 등록 화면(가격 범위·표지 규격·소개글 한도 등)은 로그인 뒤라 아직 못 읽었다 — 첫 권을 올리며 확인해 채운다. */
+/** 전자책 → 부크크 점검표 (2026-10-01 로이 결정: 종이책·전자책 모두 부크크 · 작가와 제외).
+ *  📄 2026-10-12 로이: 부크크 전자책은 **PDF 업로드**(`[전자책] <권>_표지+본문.pdf` · 표지 = `_표지.pdf` 앞표지 한 쪽) — ePub 은 선택 산출물(만들었을 때만 용량·규격을 본다).
+ *  한도 20MB 는 EPUB 때 부크크 고객센터 회신 값을 PDF 에도 그대로 지킨다(PDF 한도는 화면 실측 전). */
 function ebookChecklist(ctx) {
   const m = ctx.meta || {}; const c = ctx.confirmed || {};
+  const pdf = outputOf(ctx, 'ebookPdf');
+  const cov = outputOf(ctx, 'ebookCover');
   const epub = outputOf(ctx, 'epub');
   const chk = ctx.epubCheck;   // { missing } | { ok, nError, nWarning, nFatal, version } | { error } | undefined(안 돌림)
   const required = [
     item('title', '책 제목', has(m.title || ctx.fileTitle) ? 'ok' : 'todo', '책 정보 › 책 제목', { tab: 'info' }),
     item('author', '저자명', has(m.author) ? 'ok' : 'todo', '책 정보 › 저자', { tab: 'info' }),
-    item('toc', '목차 포함', (ctx.excluded || []).includes('toc') ? 'todo' : 'ok', '전자책은 목차(toc.ncx)가 길잡이 — 구조 › 목차 체크', { tab: 'structure' }),
-    item('cover', '전자책 표지 이미지', (has(m.ebookCover) || ctx.coverImagePath) ? 'ok' : 'todo',
-      has(m.ebookCover) || ctx.coverImagePath ? '' : '전자책표지 메타(JPG·PDF) · 표지 도구의 `부속\\…_전자책앞표지.jpg`(자동) · 인쇄 표지 앞면 크롭 순서. 부크크 업로드 형식은 JPG·PDF 뿐(PNG 불가)', { tab: 'cover' }),
-    item('file', 'ePub 파일 생성(EPUB 2.0)', epub ? 'ok' : 'todo', epub ? `${epub.name} (${fmtMB(epub.bytes)})` : '아래 「📱 ePub 만들기」를 누르세요'),
-    item('size', 'ePub 20MB 이하(부크크 한도)', !epub ? 'todo' : (epub.bytes > MB20 ? 'todo' : 'ok'),
-      !epub ? '파일을 먼저 생성하세요' : (epub.bytes > MB20 ? `${epub.name} ${fmtMB(epub.bytes)} — 20MB 초과: 한자 글꼴 동봉을 끄거나 표지 이미지를 줄이세요` : `${fmtMB(epub.bytes)} / 20MB`)),
-    item('valid', 'ePub 규격 검증(EPUBCheck)',
-      !chk ? (epub ? 'info' : 'todo') : chk.missing ? 'manual' : chk.error ? 'todo' : (chk.ok ? 'ok' : 'todo'),
-      !chk ? (epub ? '아직 검증 전 — ePub 을 만들면 자동으로 검증합니다(다시 하려면 「✔ ePub 검증」)' : '아래 「📱 ePub 만들기」를 누르면 만든 뒤 W3C EPUBCheck 로 EPUB 2.0.1 규격을 자동 검증합니다')
-        : chk.missing ? '이 PC 에는 EPUBCheck 도구가 없어 검증을 못 했습니다(메인 PC 에서 검증됨)' : chk.error ? `검증 실패: ${chk.error}`
-        : (chk.ok ? `EPUB ${chk.epubVersion} 규격 통과 — 치명 ${chk.nFatal} · 오류 ${chk.nError} · 경고 ${chk.nWarning} (EPUBCheck ${chk.version})` : `오류 ${chk.nFatal + chk.nError}개 · 경고 ${chk.nWarning}개 — 아래 목록 확인`)),
+    item('toc', '목차 포함', (ctx.excluded || []).includes('toc') ? 'todo' : 'ok', '전자책은 목차가 길잡이 — 구조 › 목차 체크', { tab: 'structure' }),
+    item('cover', '전자책 표지(앞표지 PDF)', cov ? 'ok' : ((has(m.ebookCover) || ctx.coverImagePath) ? 'info' : 'todo'),
+      cov ? `${cov.name} (${fmtMB(cov.bytes)})` : has(m.ebookCover) || ctx.coverImagePath ? '「📱 전자책 만들기」가 앞표지 한 쪽 PDF 를 만듭니다' : '전자책표지 메타(JPG·PDF) · 표지 도구의 `부속\\…_전자책앞표지.jpg`(자동) · 종이책 표지 PDF 앞면 순서. 부크크 업로드 형식은 JPG·PDF 뿐(PNG 불가)', { tab: 'cover' }),
+    item('file', '전자책 PDF(표지+본문)', pdf ? 'ok' : 'todo', pdf ? `${pdf.name} (${fmtMB(pdf.bytes)})` : '아래 「📱 전자책 만들기」를 누르세요 — 표지·본문·표지+본문 PDF 세 개를 만듭니다'),
+    item('size', '전자책 PDF 20MB 이하', !pdf ? 'todo' : (pdf.bytes > MB20 ? 'todo' : 'ok'),
+      !pdf ? '파일을 먼저 생성하세요' : (pdf.bytes > MB20 ? `${pdf.name} ${fmtMB(pdf.bytes)} — 20MB 초과: 표지·삽화 이미지를 줄이세요` : `${fmtMB(pdf.bytes)} / 20MB`)),
     manual('account', '부크크 로그인(직접)', '계정·로그인·최종 제출은 사람이 합니다', c),
     manual('nodup', '같은 책이 이미 등록돼 있지 않음', '종이책과 전자책을 각각 등록(같은 표지·제목)', c),
     manual('final', '편집 완성본임을 확인', '승인 뒤에는 수정 제약이 큽니다', c),
   ];
+  const epubItems = [
+    item('epubFile', 'ePub(선택)', epub ? 'ok' : 'info', epub ? `${epub.name} (${fmtMB(epub.bytes)})` : '「ePub 도 만들기」를 켜면 함께 만듭니다 — 부크크에는 PDF 를 올립니다'),
+    ...(epub ? [
+      item('epubSize', 'ePub 20MB 이하', epub.bytes > MB20 ? 'todo' : 'ok', epub.bytes > MB20 ? `${epub.name} ${fmtMB(epub.bytes)} — 20MB 초과: 한자 글꼴 동봉을 끄거나 표지 이미지를 줄이세요` : `${fmtMB(epub.bytes)} / 20MB`),
+      item('valid', 'ePub 규격 검증(EPUBCheck)',
+        !chk ? 'info' : chk.missing ? 'manual' : chk.error ? 'todo' : (chk.ok ? 'ok' : 'todo'),
+        !chk ? '아직 검증 전 — ePub 을 만들면 자동으로 검증합니다(다시 하려면 「✔ ePub 검증」)'
+          : chk.missing ? '이 PC 에는 EPUBCheck 도구가 없어 검증을 못 했습니다(메인 PC 에서 검증됨)' : chk.error ? `검증 실패: ${chk.error}`
+          : (chk.ok ? `EPUB ${chk.epubVersion} 규격 통과 — 치명 ${chk.nFatal} · 오류 ${chk.nError} · 경고 ${chk.nWarning} (EPUBCheck ${chk.version})` : `오류 ${chk.nFatal + chk.nError}개 · 경고 ${chk.nWarning}개 — 아래 목록 확인`)),
+    ] : []),
+  ];
   const optional = [
+    ...epubItems,
     item('category', '카테고리', has(m.category) ? 'ok' : 'info', has(m.category) ? m.category : '등록 화면 입력 항목(목록은 로그인 뒤 확인)', { tab: 'info' }),
     item('keywords', '키워드', has(m.keywords) ? 'ok' : 'info', has(m.keywords) ? m.keywords : '등록 화면 입력 항목', { tab: 'info' }),
     item('tagline', '한줄 소개', has(m.tagline) ? 'ok' : 'info', has(m.tagline) ? m.tagline : '등록 화면 입력 항목', { tab: 'info' }),

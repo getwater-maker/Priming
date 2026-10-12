@@ -83,9 +83,9 @@ const HTML = (opts = {}) => `<!doctype html><html><body>
       <h4>저자경력·소개</h4><textarea placeholder="저자를 소개하는 공간입니다. 이모지, 특수문자는 가급적으로 사용하지 않는 것이 좋습니다."></textarea>
       <select><option value="">AI 활용 여부 및 기여정도</option><option value="a">🟡 본문 전체 작성에 사용</option><option value="b">🔵 표지 및 본문 일부 작성에 사용</option><option value="c">🟣 본문 일부 작성에 사용</option><option value="d">🟤 표지 이미지에만 사용</option><option value="e">⚪ 사용하지 않음</option></select>
       <select><option value="">초상/저작권 보유여부</option><option value="x">🟢 모든 콘텐츠 초상/저작권 보유중</option><option value="y">🔴 초상/저작권 보유하지 않음</option></select>
-      <aside>파일 [전자책] 삼국지_제2권.epub 용량 6.55 MB 외부유통 사용 판매가격 12,500 원</aside><button>도서제출</button></body>`;
+      <aside>파일 [전자책] 삼국지_제2권_표지+본문.pdf 용량 6.55 MB 외부유통 사용 판매가격 12,500 원</aside><button>도서제출</button></body>`;
     const book = parseBookText(['# 삼국지', '> 저자: 나관중', '> 한줄소개: 소개 한 줄', '', '## [저자소개]', '나관중은 원말명초의 소설가다.', '', '## 제14회 시작', '본문', ''].join(String.fromCharCode(10)), 'x');
-    const plan5 = RF.ebookPlan(book, { epub: 'D:/x/[전자책] 삼국지_제2권.epub', paperPrice: 17900 });
+    const plan5 = RF.ebookPlan(book, { pdf: 'D:/x/[전자책] 삼국지_제2권_표지+본문.pdf', paperPrice: 17900 });
     const page = await browser.newPage(); const al = []; page.on('dialog', async (d) => { al.push(d.message()); await d.accept(); });
     await page.setContent(H5);
     const logs5 = []; const r5 = await RB.fillBookkFinal(page, plan5, (m) => logs5.push(m));

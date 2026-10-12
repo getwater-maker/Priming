@@ -52,12 +52,15 @@ function preflight(x) {
   out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : waitIsbn ? '제목·저자·출판사 있음 — 발행일은 ISBN 을 받은 뒤 입력(ISBN 을 넣으면 오늘로 채워집니다)' : '제목·저자·출판사·발행일 있음', 'info'));
   // 7) 완성 파일이 원고보다 낡았나
   const find = (k) => (x.outputs || []).filter((o) => o.kind === k).sort((a, b) => b.mtime - a.mtime)[0];
-  for (const [kind, label] of [['interior', '내지 PDF'], ['cover', '표지 PDF'], ['epub', 'ePub']]) {
+  // 📄 전자책은 PDF(표지+본문)를 올린다(2026-10-12) — ePub 은 선택 산출물이라 만들었을 때만 본다
+  for (const [kind, label] of [['interior', '내지 PDF'], ['cover', '표지 PDF'], ['ebookPdf', '전자책 PDF(표지+본문)'], ['epub', 'ePub(선택)']]) {
     const o = find(kind);
-    if (!o) { out.push(it('out-' + kind, label, 'info', '아직 만들지 않았습니다')); continue; }
+    if (!o) { if (kind !== 'epub') out.push(it('out-' + kind, label, 'info', '아직 만들지 않았습니다')); continue; }
     const stale = x.sourceMtime && o.mtime + 1000 < x.sourceMtime;
     out.push(it('out-' + kind, label, stale ? 'warn' : 'ok', stale ? `원고가 ${o.name} 보다 새롭습니다 — 다시 만드세요` : `${o.name} (${(o.bytes / 1048576).toFixed(1)}MB)`));
   }
+  const ebp = find('ebookPdf');
+  if (ebp && ebp.bytes > 20 * 1048576) out.push(it('ebookpdf-size', '전자책 PDF 용량', 'error', `${(ebp.bytes / 1048576).toFixed(1)}MB — 부크크 20MB 한도 초과`));
   const ep = find('epub');
   if (ep && ep.bytes > 20 * 1048576) out.push(it('epub-size', 'ePub 용량', 'error', `${(ep.bytes / 1048576).toFixed(1)}MB — 부크크 20MB 한도 초과`));
   const summary = { error: out.filter((i) => i.state === 'error').length, warn: out.filter((i) => i.state === 'warn').length };
