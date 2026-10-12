@@ -26,17 +26,26 @@ const RE_ROW = /^[ \t]*>[ \t]*\|(.*?)\|?[ \t]*$/u;
  * 한 줄이 정보 표시 줄인가. openTable = 지금 열려 있는 표(있으면 `> |` 줄이 그 표의 행).
  * @returns {null | {mark?: object, rowOf?: object, consumed: true}} mark = 낭독 사이에 끼울 표식 · rowOf = 이미 열린 표에 붙었음
  */
+const POS_TAGS = { '오른쪽가운데': 'rc', '왼쪽가운데': 'lc', '오른쪽위': 'rt', '왼쪽위': 'lt' };
+const POS_NAMES = { rc: '오른쪽가운데', lc: '왼쪽가운데', rt: '오른쪽위', lt: '왼쪽위' };
+/** 줄 끝 꼬리표 `@왼쪽위` 떼기 — 카드 문구에 안 나오는 기호라 문구와 섞이지 않는다(로이 2026-10-12 · 채널사업부 규약). 모르는 값은 bad 로 돌려 ⚠ */
+function splitPosTag(raw) {
+  const m = /^(.*?)[ 	]*@([^\s@|]+)[ 	]*$/u.exec(raw);
+  if (!m) return { text: raw, pos: null, bad: null };
+  const key = m[2].replace(/\s+/g, '');
+  return POS_TAGS[key] ? { text: m[1].trim(), pos: POS_TAGS[key], bad: null } : { text: m[1].trim(), pos: null, bad: m[2] };
+}
 function lineKind(line, openTable) {
   let m;
   if ((m = RE_WORDS.exec(line))) {
-    const raw = m[1].trim();
+    const t = splitPosTag(m[1].trim()), raw = t.text;
     if (raw === '' || raw === '-' || raw === '끄기') return { mark: { kind: 'words', words: [], clear: true, line: raw } };
     const words = raw.split('|').map((x) => x.trim()).filter(Boolean);
-    return { mark: { kind: 'words', words, clear: false, line: raw } };
+    return { mark: { kind: 'words', words, clear: false, line: raw, ...(t.pos ? { pos: t.pos } : {}), ...(t.bad ? { badPos: t.bad } : {}) } };
   }
   if ((m = RE_TABLE.exec(line))) return { mark: { kind: 'table', title: m[1].trim(), rows: [], source: '', line: m[1].trim() }, opensTable: true };
   if ((m = RE_SOURCE.exec(line))) return { sourceText: m[1].trim() };
-  if ((m = RE_CHECK.exec(line))) return { mark: { kind: 'check', text: m[1].trim(), line: m[1].trim() } };
+  if ((m = RE_CHECK.exec(line))) { const t = splitPosTag(m[1].trim()); return { mark: { kind: 'check', text: t.text, line: t.text, ...(t.pos ? { pos: t.pos } : {}), ...(t.bad ? { badPos: t.bad } : {}) } }; }
   if (openTable && (m = RE_ROW.exec(line))) {
     const cells = m[1].split('|').map((x) => x.trim());
     // 구분선(`---`)은 건너뛴다
@@ -82,7 +91,7 @@ function fromRaw(raw) {
 
 /** 지문·작업본용 — 표시 줄 글(바뀌면 MP4 를 다시 굽는다) */
 function signatureOf(parsed) {
-  return (parsed && parsed.marks || []).map((m) => (m.kind === 'table' ? `표:${m.title}|${m.rows.map((r) => r.join('¦')).join('¶')}|${m.source}` : `${m.kind}:${m.kind === 'words' ? (m.clear ? '-' : m.words.join('|')) : m.text}`) + '@' + m.sent);
+  return (parsed && parsed.marks || []).map((m) => (m.kind === 'table' ? `표:${m.title}|${m.rows.map((r) => r.join('¦')).join('¶')}|${m.source}` : `${m.kind}:${m.kind === 'words' ? (m.clear ? '-' : m.words.join('|')) : m.text}${m.pos ? '@' + m.pos : ''}`) + '@' + m.sent);
 }
 
 // ── 판 계획 ──────────────────────────────────────────────────────────────────
@@ -152,7 +161,7 @@ function plan(project, parsed, opts = {}) {
       const bEnd = blockEnd(m.sent);
       const endIdx = Math.min(bEnd, next ? next.sent - 1 : bEnd);
       const endTm = (T[endIdx] || tm);
-      panels.push({ type: 'words', scene: GI[m.sent], t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
+      panels.push({ type: 'words', scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
     } else if (m.kind === 'table') {
       const hasHead = m.rows.length >= 1;
       if (!hasHead) { warnings.push(`📇 정보 카드 — 📊 표 「${m.title.slice(0, 20)}」 에 표 줄(> | … |)이 없습니다 → 건너뜁니다`); continue; }
@@ -162,7 +171,21 @@ function plan(project, parsed, opts = {}) {
       if (m.text.length > CHECK_WARN_CHARS) warnings.push(`📇 정보 카드 — ✅ 문구가 ${m.text.length}자(권장 ${CHECK_WARN_CHARS}자 이하): 「${m.text}」 — 판 폭을 넘으면 그대로 그립니다`);
       checkTexts.push(m.text);
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'check', scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+      panels.push({ type: 'check', scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+    }
+  }
+  // 📍 자리 꼬리표(`@왼쪽위`) — 「그 줄이 시작한 장면」 단위 · 한 장면에 서로 다른 꼬리표가 있으면 첫 것만 쓰고 ⚠(한 장면 안에서 판이 뛰지 않는다)
+  for (const m of parsed.marks) if (m.badPos) warnings.push(`📇 정보 카드 — 자리 꼬리표 「@${m.badPos}」 를 모릅니다(오른쪽가운데·왼쪽가운데·오른쪽위·왼쪽위) → 자동 자리로 둡니다`);
+  {
+    const sceneTag = new Map();
+    for (const m of parsed.marks) { if ((m.kind !== 'words' && m.kind !== 'check') || !m.pos) continue; const sc = GI[m.sent]; if (sc == null) continue;
+      if (!sceneTag.has(sc)) sceneTag.set(sc, m.pos);
+      else if (sceneTag.get(sc) !== m.pos) warnings.push(`📇 정보 카드 — 한 장면(G${sc + 1}) 안에 자리 꼬리표가 둘(@${POS_NAMES[sceneTag.get(sc)]} · @${POS_NAMES[m.pos]}) → 첫 것만 씁니다`); }
+    for (const p of panels) if ((p.type === 'words' || p.type === 'check') && p.scene != null && sceneTag.has(p.scene)) p.posTag = sceneTag.get(p.scene);
+    // 💡 그 장면 🖼️ 프롬프트의 「인물 left/right of centre」 → 판은 반대쪽(자동 자리의 1순위 힌트)
+    for (const p of panels) if ((p.type === 'words' || p.type === 'check') && p.scene != null) {
+      const g = (project.groups || [])[p.scene], mm = g && /(left|right)\s+of\s+cent(?:re|er)/i.exec(String(g.imagePrompt || ''));
+      if (mm) p.hint = /left/i.test(mm[1]) ? 'right' : 'left';
     }
   }
   // 겹침 순서 — 표 > 구간 표지 > 확인표 > 낱말 카드 (아래 것은 위 것이 뜬 동안 숨는다)
@@ -186,4 +209,4 @@ function plan(project, parsed, opts = {}) {
   return { panels: out, warnings };
 }
 
-module.exports = { fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };
+module.exports = { POS_TAGS, POS_NAMES, splitPosTag, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };

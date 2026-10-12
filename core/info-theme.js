@@ -88,20 +88,32 @@ function dominantHues(frames) {
   const h2 = i2 >= 0 && best >= sm[i1] * 0.35 ? i2 * 10 + 5 : h1 + 28;
   return { h1, h2, sat: sSum / wSum };
 }
-/** 빈 자리 점수(작을수록 비어 있음) — 가장자리(그림 기울기) + 밝기 흩어짐 + 살색 비율 */
+/** 살색(얼굴·손) 화소인가 — 색조 5~30° · 채도 0.34~0.7 · 밝기 85~205. 🔴 색만으로는 얼굴을 못 가린다(베이지 벽·흙·지붕도 비슷하다) — 그래서 채도를 높게 잡고 아래에서 덩어리로 본다 */
+function isSkin(r, g, b) {
+  const [h, sat] = rgb2hsv(r, g, b), y = 0.299 * r + 0.587 * g + 0.114 * b;
+  return h >= 5 && h <= 30 && sat >= 0.34 && sat <= 0.7 && y >= 85 && y <= 205;
+}
+/** 구역 안 「살색 덩어리」 칸 수 — 살색 칸 중 가로·세로로 이웃한 살색 칸이 모두 있는 칸(문틀 같은 세로선·흩어진 점은 뺀다) */
+function regionSkin(f, x0, y0, w, h) {
+  const gx0 = Math.max(0, Math.floor(x0 / 30)), gy0 = Math.max(0, Math.floor(y0 / 30)), gx1 = Math.min(GW - 1, Math.ceil((x0 + w) / 30)), gy1 = Math.min(GH - 1, Math.ceil((y0 + h) / 30));
+  const sk = (x, y) => { if (x < 0 || y < 0 || x >= GW || y >= GH) return false; const i = (y * GW + x) * 3; return isSkin(f[i], f[i + 1], f[i + 2]); };
+  let n = 0, blob = 0;
+  for (let y = gy0; y <= gy1; y++) for (let x = gx0; x <= gx1; x++) { n++; if (sk(x, y) && (sk(x - 1, y) || sk(x + 1, y)) && (sk(x, y - 1) || sk(x, y + 1))) blob++; }
+  return { cells: blob, frac: n ? blob / n : 0 };
+}
+const FACE_VETO = (r) => r.cells >= 4;   // 판이 덮는 곳에 살색 덩어리 칸이 4개 이상이면 그 자리는 점수 비교 전에 탈락(썸네일 규약 「얼굴 가림」)
+/** 빈 자리 점수(작을수록 비어 있음) — 가장자리(그림 기울기) + 밝기 흩어짐 + 살색 비율(작은 가중) */
 function regionScore(f, x0, y0, w, h) {
   const gx0 = Math.max(0, Math.floor(x0 / 30)), gy0 = Math.max(0, Math.floor(y0 / 30)), gx1 = Math.min(GW - 1, Math.ceil((x0 + w) / 30)), gy1 = Math.min(GH - 1, Math.ceil((y0 + h) / 30));
   const Y = (x, y) => { const i = (y * GW + x) * 3; return 0.299 * f[i] + 0.587 * f[i + 1] + 0.114 * f[i + 2]; };
-  let n = 0, grad = 0, sum = 0, sum2 = 0, skin = 0;
+  let n = 0, grad = 0, sum = 0, sum2 = 0;
   for (let y = gy0; y <= gy1; y++) for (let x = gx0; x <= gx1; x++) {
     const l = Y(x, y); n++; sum += l; sum2 += l * l;
     if (x < GW - 1) grad += Math.abs(Y(x + 1, y) - l); if (y < GH - 1) grad += Math.abs(Y(x, y + 1) - l);
-    const i = (y * GW + x) * 3, r = f[i], g = f[i + 1], b = f[i + 2];
-    if (r > 95 && g > 40 && b > 20 && r > g && r > b && Math.abs(r - g) > 15 && r - Math.min(g, b) > 15 && r < 250) skin++;
   }
   if (!n) return 9;
   const mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
-  return (grad / n / 255) * 4 + sd / 128 + (skin / n) * 2;
+  return (grad / n / 255) * 4 + sd / 128 + regionSkin(f, x0, y0, w, h).frac * 2;
 }
 
 /**
@@ -135,14 +147,27 @@ async function assign(panels, opts = {}) {
   const sideOk = (pos, size) => !(pos === 'lc' || pos === 'lt') || (capBottom && placeBottom(pos, size) <= 800);
   const placeBottom = (pos, size) => { const b = IA.placeBox(pos, size.w, size.h); return b.y0 + size.h; };
   const items = panels.filter((q) => q.type === 'words' || q.type === 'check').sort((a, b) => a.t0 - b.t0);
+  const warnScenes = [];
   for (const q of items) {
     const key = q.scene != null ? q.scene : 'p' + Math.round(q.t0);
     if (scenePos.has(key)) continue;
+    if (q.posTag) { scenePos.set(key, q.posTag); prev = q.posTag; sceneLog.push(`${key}:${q.posTag}(대본)`); continue; }   // 대본 꼬리표(@왼쪽위)가 이긴다
     const size = IA.sizeOf(q, shape); let pos = 'rc';
     try {
       const f = size ? await frameAt(q.t0 + 0.3) : null;
       if (f && size) {
-        const cands = order.filter((p) => sideOk(p, size)).map((p, i) => { const b = IA.placeBox(p, size.w, size.h); return { p, s: regionScore(f, b.x0 - 20, b.y0 - 20, size.w + 40, size.h + 40) + i * 0.002 }; });
+        const all = order.filter((p) => sideOk(p, size)).map((p, i) => {
+          const b = IA.placeBox(p, size.w, size.h), sk = regionSkin(f, b.x0, b.y0, size.w, size.h);
+          return { p, i, skin: sk, veto: FACE_VETO(sk), s: regionScore(f, b.x0 - 20, b.y0 - 20, size.w + 40, size.h + 40) + i * 0.002 };
+        });
+        let cands = all.filter((c) => !c.veto);   // 🔴 얼굴 가림 = 거부권(점수 비교 전에 탈락)
+        if (!cands.length) {
+          cands = [...all].sort((a, b) => a.skin.frac - b.skin.frac).slice(0, 1);
+          warnScenes.push(`G${typeof key === 'number' ? key + 1 : key}`);
+          log(`   ⚠ 정보 카드 — 장면 G${typeof key === 'number' ? key + 1 : key}: 네 자리 모두 사람 얼굴·손을 덮을 수 있어 가장 덜 덮는 자리(${cands[0].p})로 둡니다(대본에 @왼쪽위 같은 꼬리표로 직접 정할 수 있습니다)`);
+        }
+        // 💡 대본 🖼️ 프롬프트의 「인물 left/right of centre」 → 반대쪽 판을 1순위 후보로
+        if (q.hint) { const side = cands.filter((c) => (q.hint === 'left' ? /^l/ : /^r/).test(c.p)); if (side.length) cands = side; }
         cands.sort((a, b) => a.s - b.s);
         const keep = prev && cands.find((c) => c.p === prev);
         pos = keep && !(cands[0].s < keep.s * 0.75) ? prev : cands[0].p;
@@ -163,4 +188,4 @@ async function assign(panels, opts = {}) {
   return { shape, colors, scenePos: Object.fromEntries(scenePos), summary };
 }
 
-module.exports = { assign, makePalette, dominantHues, regionScore, hash32, ratio, under, hslToHex, SHAPES, TEXT_HEX };
+module.exports = { assign, makePalette, dominantHues, regionScore, regionSkin, isSkin, FACE_VETO, hash32, ratio, under, hslToHex, SHAPES, TEXT_HEX };

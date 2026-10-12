@@ -284,6 +284,41 @@ const SCRIPT = [
     ok(Pb.every((q) => q.theme && !q.theme.colors), '그림을 못 읽으면 예전 모양으로(오류 없이)');
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   }
+  console.log('\n[9] v0.8.6 — 얼굴 가림 거부권 · 인물 반대쪽 힌트 · 대본 자리 꼬리표 @왼쪽위');
+  {
+    const IT = require('../core/info-theme');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ithf-'));
+    const mkImg = (name, leftHex, rightHex) => { const f = path.join(tmp, name + '.png'); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=' + leftHex + ':s=960x1080', '-f', 'lavfi', '-i', 'color=c=' + rightHex + ':s=960x1080', '-filter_complex', 'hstack', '-frames:v', '1', f]); return f; };
+    const skinL = mkImg('skinL', '0xc08a6a', '0x3a5a8a'), skinAll = mkImg('skinAll', '0xc08a6a', '0xc08a6a'), clean = mkImg('clean', '0x3a5a8a', '0x3a5a8a');
+    const one = () => [{ type: 'words', scene: 1, t0: 5, t1: 12, words: ['지역가입자', '임의계속가입'] }];
+    const run = async (file, extra = {}, panels = one()) => { const logs = []; await IT.assign(panels, { seed: '[정보_1015]', segAt: () => ({ file, rel: 0 }), total: 40, capBottom: true, ffmpeg: FF, log: (m) => logs.push(m) }); return { pos: panels[0].theme.pos, logs, panels }; };
+    ok(IT.isSkin(0xc0, 0x8a, 0x6a) && !IT.isSkin(0x3a, 0x5a, 0x8a) && !IT.isSkin(250, 235, 215), '살색 판정: 살색 O · 파랑 X · 아주 밝은 벽 X');
+    // 얼굴 가림 = 거부권 — 왼쪽 전체가 살색이면 왼쪽 자리는 점수 비교 전에 탈락
+    const r1 = await run(skinL); ok(/^r/.test(r1.pos), '왼쪽이 살색이면 왼쪽 자리 탈락 → 오른쪽(' + r1.pos + ')');
+    // 모두 탈락 — 가장 덜 덮는 자리 + ⚠ 로그(장면 번호)
+    const r2 = await run(skinAll); ok(!!r2.pos && r2.logs.some((l) => /⚠.*G2/.test(l)), '네 자리 모두 탈락이면 ⚠ 로그(장면 G2)와 함께 한 자리를 고른다(' + r2.pos + ')');
+    // 인물 반대쪽 힌트
+    const h1 = await run(clean, {}, [{ ...one()[0], hint: 'left' }]), h2 = await run(clean, {}, [{ ...one()[0], hint: 'right' }]);
+    ok(/^l/.test(h1.pos) && /^r/.test(h2.pos), '프롬프트 힌트: 인물이 오른쪽이면 판은 왼쪽 · 왼쪽이면 오른쪽(' + h1.pos + ' · ' + h2.pos + ')');
+    const h3 = await run(skinL, {}, [{ ...one()[0], hint: 'left' }]); ok(/^r/.test(h3.pos), '힌트보다 얼굴 가림 거부권이 먼저(' + h3.pos + ')');
+    // 대본 꼬리표가 이긴다
+    const t1 = await run(skinL, {}, [{ ...one()[0], posTag: 'lt' }]); ok(t1.pos === 'lt', '대본 꼬리표 @왼쪽위 가 자동 판단보다 이긴다');
+    // 꼬리표 읽기
+    const L1 = IC.lineKind('> 🔤 카드: 지역가입자 | 임의계속가입 @왼쪽위'), L2 = IC.lineKind('> ✅ 확인: 내 자리 확인 @오른쪽가운데'), L3 = IC.lineKind('> ✅ 확인: 문구 @위쪽');
+    ok(L1.mark.pos === 'lt' && L1.mark.words.join('|') === '지역가입자|임의계속가입' && L2.mark.pos === 'rc' && L2.mark.text === '내 자리 확인', '꼬리표: 🔤·✅ 줄 끝 @자리 를 떼어 읽는다(문구에 안 섞임)');
+    ok(L3.mark.badPos === '위쪽' && L3.mark.text === '문구' && !L3.mark.pos, '꼬리표: 모르는 값은 badPos(⚠)');
+    ok(!('pos' in IC.lineKind('> 🔤 카드: 가 | 나').mark), '꼬리표 없으면 예전과 같다(자동)');
+    // 계획 — 장면 단위 · 충돌은 첫 것만 + ⚠ · 서명에 자리가 들어간다
+    const S2 = SCRIPT.replace('> 🔤 카드: 지역가입자 | 임의계속가입 | 피부양자', '> 🔤 카드: 지역가입자 | 임의계속가입 | 피부양자 @왼쪽위').replace('> ✅ 확인: 내 자리 확인', '> ✅ 확인: 내 자리 확인 @오른쪽위');
+    const pj = P.parseScriptText(S2, 'longform', {}).projects[0];
+    pj.sentences.forEach((x) => { x.ttsAudioPath = 'x.mp3'; x.ttsDurationSec = 5; });
+    const pl2 = IC.plan(pj, IC.fromRaw(S2), { sections: false });
+    const wp = pl2.panels.find((q) => q.type === 'words'), cp = pl2.panels.find((q) => q.type === 'check');
+    ok(wp && wp.pos === 'lt' && wp.posTag === 'lt', '계획: 🔤 판에 자리(lt)가 달린다');
+    ok(cp && cp.posTag && (cp.scene !== wp.scene || cp.posTag === 'lt'), '계획: 같은 장면이면 첫 꼬리표(lt)를 쓴다 · 다른 장면이면 자기 것');
+    ok(IC.signatureOf(IC.fromRaw(S2)) .some((x) => /@lt/.test(x)) && IC.signatureOf(IC.fromRaw(S2)).join() !== IC.signatureOf(IC.fromRaw(SCRIPT)).join(), '서명에 자리가 들어간다(옮기면 MP4 를 다시 굽는다)');
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
   console.log(`\n${fail ? '❌' : '✅'} info-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });
