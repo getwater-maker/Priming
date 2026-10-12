@@ -158,7 +158,7 @@ console.log('[7] 🔑 한국어 무변경 — 기존 대본 전체를 옛 모듈
         && old.C.splitCaptionLines(t, 20).join('|') === C.splitCaptionLines(t, 20).join('|')
         && old.C.splitCaptionLines(t, 7).join('|') === C.splitCaptionLines(t, 7).join('|')
         && old.C.meaningfulLen(t) === C.meaningfulLen(t)
-        && old.TP.processForTTS(t, []) === TP.processForTTS(t, []);
+        && TP.readPhoneNumbers(old.TP.processForTTS(t, [])) === TP.processForTTS(t, []);   // 📞 전화번호 한 자리씩(2026-10-12 의도된 변경)
       if (!same) { diff++; if (ex.length < 3) ex.push(path.basename(f) + ' : ' + t.slice(0, 40)); }
     }
   }

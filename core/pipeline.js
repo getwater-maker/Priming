@@ -293,6 +293,20 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     throw new Error(`출력 폴더를 만들 수 없습니다 — ${workDir} (${e.code || e.message}). `
       + '구글 드라이브(G:)가 연결돼 있는지, 그 경로가 아직 있는지 확인하세요.');
   }
+  // 📞 전화번호처럼 보이지만 연도 범위일 수 있어 **그대로 읽는** 것 — 번호마다 한 번 알린다(바꾸는 규칙은 text-pronouncer 한 곳)
+  if (onLine) {
+    try {
+      const { phoneLikeWarnings } = require('../tts/text-pronouncer');
+      const seen = new Set();
+      for (const s of (sentences || [])) {
+        for (const w of phoneLikeWarnings(s && (s.ttsText || s.text))) {
+          if (seen.has(w)) continue;
+          seen.add(w);
+          onLine(`⚠ 📞 「${w}」 — 연도 범위로 보고 숫자 그대로 읽습니다. 전화번호라면 📖 발음사전에 읽는 법을 넣으세요(예: 일오구이에 일오구팔)`);
+        }
+      }
+    } catch (_) { /* 경고일 뿐 — 음성 생성을 막지 않는다 */ }
+  }
   const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
   if (sf !== 1 && (!ffmpegPath || !fs.existsSync(ffmpegPath))) {
     if (onLine) onLine(`⚠ ffmpeg 사용 불가 — 배속(${sf}x) 미적용, 정속 WAV 로 진행 (경로: ${ffmpegPath || '없음'})`);

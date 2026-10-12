@@ -23,7 +23,10 @@
  *     「세 번」처럼 고유어로 읽혀야 하는 예외만 대본에 한글로 쓴다. → docs/대본-작성-가이드.md
  *   ⚠ 다시 넣고 싶으면 **먼저 실측할 것**(위 방법 그대로). 목소리·서버가 바뀌면 결론도 바뀐다.
  *
- * 🟠 남긴 정규화는 딱 하나 — 물결표. 실측: "50~60명" 그대로는 「50, 60명」으로 끊어 읽어
+ * 📞 예외(2026-10-12 로이 청취): **전화번호**는 모델이 엉뚱하게 읽었다(「1577-1000」) → 한 자리씩(`readPhoneNumbers`).
+ *    번호는 「수」가 아니라 「글자 줄」이라 위 실측(수를 문맥으로 읽는다)과 부딪히지 않는다. 연도 범위처럼 보이는 것은 건드리지 않는다.
+ *
+ * 🟠 남긴 정규화(전화번호 말고) — 물결표. 실측: "50~60명" 그대로는 「50, 60명」으로 끊어 읽어
  *   오독이고, "50에서 60명" 은 정확했다. 이건 모델이 못 하므로 앱이 해 준다.
  */
 
@@ -63,6 +66,52 @@ function normalizeForTTS(text) {
   if (Lang.isCjkLang(lang)) return out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1から$2');
   if (lang === 'vi') return out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1 đến $2');
   out = out.replace(/(\d+)\s*[~〜～]\s*(\d+)/g, '$1에서 $2');
+  out = readPhoneNumbers(out);
+  return out;
+}
+
+/**
+ * 📞 전화번호 → 한 자리씩 읽기(2026-10-12 로이 — 「1577-1000」을 엉뚱하게 읽었다 · 읽는 법은 로이 지정).
+ *   「1577-1000」 → 「일오칠칠에 일공공공」 · 「010-1234-5678」 → 「공일공 일이삼사에 오육칠팔」 (0 = 공 · 마지막 묶음 앞 = 「에」)
+ *   자막은 그대로(이 함수는 TTS 문자열만 바꾼다).
+ *   🔴 확실한 것만 바꾼다:
+ *     · 0 으로 시작하는 2·3 묶음(지역번호·휴대폰) — `02-123-4567` · `010-1234-5678` · `031-123-4567`
+ *     · 대표번호 15xx·16xx·18xx-xxxx — 단 **연도 범위처럼 보이면 그대로**(`1592-1598` · `1600-1700`: 두 수가 모두 1000~2199 이고 뒤가 더 큼).
+ *       그런 것은 `phoneLikeWarnings` 가 로그로 알린다(전화번호면 📖 발음사전으로).
+ *   앞뒤에 숫자·하이픈·마침표가 붙어 있으면(더 긴 번호의 일부 · 소수) 건드리지 않는다.
+ */
+const _DIGIT_KO = ['공', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+const _PHONE_RE = /(?<![\d\-.])(?:0\d{1,2}-\d{3,4}-\d{4}|1[568]\d{2}-\d{4})(?![\d\-]|\.\d)/g;
+function _yearRangeLike(s) {
+  const m = /^(\d{4})-(\d{4})$/.exec(s);
+  if (!m) return false;
+  const a = +m[1], b = +m[2];
+  return a >= 1000 && a <= 2199 && b >= 1000 && b <= 2199 && b > a;
+}
+function _speakDigits(s) {
+  const parts = s.split('-').map((p) => p.split('').map((d) => _DIGIT_KO[+d]).join(''));
+  const last = parts.pop();
+  return parts.join(' ') + '에 ' + last;
+}
+//   연도 범위처럼 보이는 번호(1588-1600 등)는 **문장에 전화 낱말이 있고 뒤에 「년」이 없을 때만** 번호로 본다.
+//   실측(2026-10-12 이 PC .md 전체): 연도 범위처럼 보인 21곳은 전부 생몰년·자료 연도였다(경고를 무조건 내면 전부 헛경보).
+const _PHONE_CTX = /전화|번호|상담|고객센터|콜센터|문의|연락|☎|📞/;
+const _YEAR_AFTER = /^\s*년/;
+function _phoneDecision(m, s, at) {
+  if (!_yearRangeLike(m)) return 'phone';
+  if (!_PHONE_CTX.test(s)) return 'keep';
+  return _YEAR_AFTER.test(s.slice(at + m.length)) ? 'warn' : 'phone';
+}
+function readPhoneNumbers(text) {
+  const s = String(text || '');
+  return s.replace(_PHONE_RE, (m, at) => (_phoneDecision(m, s, at) === 'phone' ? _speakDigits(m) : m));
+}
+/** 전화 낱말이 있는 문장에서 연도 범위처럼 보여 **그대로 읽는** 번호 — 만들기 전에 로그로 알린다 */
+function phoneLikeWarnings(text) {
+  const s = String(text || '');
+  if (Lang.isForeignLang(Lang.detectLang(s))) return [];
+  const out = [];
+  for (const m of s.matchAll(_PHONE_RE)) if (_phoneDecision(m[0], s, m.index) === 'warn') out.push(m[0]);
   return out;
 }
 
@@ -105,4 +154,4 @@ function numToHangulSino(n) {
   return result;
 }
 
-module.exports = { applyOmniVoiceDict, normalizeForTTS, processForTTS, numToHangulSino };
+module.exports = { applyOmniVoiceDict, normalizeForTTS, processForTTS, numToHangulSino, readPhoneNumbers, phoneLikeWarnings };
