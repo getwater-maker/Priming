@@ -19,4 +19,12 @@ function sameGroupContent(currentSentences, savedSentences) {
   return a.every((text, i) => text === b[i]);
 }
 
-module.exports = { normalizeText, sentenceTexts, sameGroupContent };
+// 🔢 문장 경계만 달라지고 글은 그대로인가(v0.8.10 — 소수점 3.5 를 더 이상 가르지 않게 되어 옛 작업본의 「3.」/「5배…」가
+//   새 파싱에서 「3.5배…」 한 문장이 된다). 공백을 빼고 이어 붙인 글이 같으면 그룹의 그림·프롬프트는 그대로 쓴다.
+function sameGroupText(currentSentences, savedSentences) {
+  const j = (arr) => sentenceTexts(arr).join('').replace(/\s+/g, '');
+  const a = j(currentSentences);
+  return !!a && a === j(savedSentences);
+}
+
+module.exports = { normalizeText, sentenceTexts, sameGroupContent, sameGroupText };

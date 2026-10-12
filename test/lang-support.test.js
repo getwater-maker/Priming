@@ -142,7 +142,14 @@ console.log('[7] 🔑 한국어 무변경 — 기존 대본 전체를 옛 모듈
   let nS = 0, diff = 0; const ex = [];
   for (const f of files) {
     const text = fs.readFileSync(f, 'utf8');
-    const a = old.S.splitHybrid(text).items, b = S.splitHybrid(text).items;
+    // 🔢 v0.8.10 의도된 변경 — 소수점(3.5)은 더 이상 문장을 가르지 않는다. 옛 결과의 「…3.」+「5…」(대본에 붙어 있던 것)를 이어 붙여 대조한다.
+    const a = [];
+    for (const it of old.S.splitHybrid(text).items) {
+      const p = a[a.length - 1];
+      if (p && /\d\.$/.test(p.text) && /^\d/.test(it.text) && text.includes(p.text + it.text)) a[a.length - 1] = { ...p, text: p.text + it.text };
+      else a.push(it);
+    }
+    const b = S.splitHybrid(text).items;
     if (a.length !== b.length) { diff++; if (ex.length < 3) ex.push(path.basename(f) + ' 문장 수 ' + a.length + '→' + b.length); continue; }
     for (let i = 0; i < a.length; i++) {
       nS++;

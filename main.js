@@ -6604,7 +6604,10 @@ function scriptHash(scriptPath) {
 //   「바뀐 대본의 해시 + 옛 파싱 결과」를 기록했다(= 영구 고착). 그때 만들어진 srcHash 는 믿을 수 없으므로
 //   **hashVer 가 이 값 이상일 때만** 해시를 신뢰한다. v3 는 문장뿐 아니라 대본에 직접 적힌 이미지
 //   프롬프트도 대조한다(0.5.15가 새 해시+옛 프롬프트를 저장한 오염 작업본 복구, 2026-09-19).
-const SNAP_HASH_VER = 3;
+//   v4(v0.8.10): 문장 분할 규칙이 바뀌었다(소수점 3.5 를 가르지 않는다). 해시가 같아도 옛 작업본은 「3.」/「5배…」로 갈린
+//   문장을 들고 있어, 그대로 이어받으면 화면 편집의 검증 재파싱(script-edit)이 문장 수가 달라 모든 편집을 거부한다
+//   → 한 번은 문장 시퀀스로 다시 가린다(대부분 같다고 나와 그대로 이어받고, 소수점이 든 대본만 새로 파싱 + overlay).
+const SNAP_HASH_VER = 4;
 // 스냅샷의 문장들이 지금 대본과 같은가 — 해시를 믿을 수 없을 때 쓰는 **정확한** 판정.
 //   🔑 ✂분할·병합·도입부 재배치는 **그룹 경계만** 바꾸고 문장 자체는 그대로다 → 문장 시퀀스는
 //      대본과 1:1 로 대응한다. 그래서 이 비교는 사용자의 편집을 잃지 않고 수정 여부만 가려낸다.
@@ -6678,11 +6681,12 @@ function buildParsedForScript(scriptPath, mode, preset, opts = {}) {
       for (const k of ci.skipped || []) log(`⚠ G${k.num} 「이미지: 이어서」를 적용하지 못했습니다 — ${k.reason === 'no-prev' ? '첫 그룹이라 이을 그림이 없습니다' : k.reason === 'cross-intro' ? '도입부와 본론 사이는 잇지 않습니다' : k.reason} (이 그룹은 새 이미지 대상)`);
     }
     if (sameMode) {
-      const { restored, invalidated } = overlaySnapshot(parsed, snap);
+      const { restored, invalidated, resplit } = overlaySnapshot(parsed, snap);
       const why = opts.force ? '대본 다시 읽기' : '대본 수정 감지';
       note = `♻ ${why} — 새로 파싱했습니다`
         + (restored ? ` · 내용이 같은 기존 자산 ${restored}개 복원` : '')
-        + (invalidated ? ` · 내용이 바뀐 그룹 ${invalidated}개는 새 이미지 대상` : '');
+        + (invalidated ? ` · 내용이 바뀐 그룹 ${invalidated}개는 새 이미지 대상` : '')
+        + (resplit ? ` · 문장 나눔만 바뀐 그룹 ${resplit}개(소수점 등)는 그림 유지 · 합쳐진 문장만 음성 새로` : '');
     }
   }
   // 🔑 **파싱(또는 「같다」고 확인)한 그 순간의 해시를 심는다.** 저장할 때 다시 계산하면(buildSnapshot)
@@ -6956,8 +6960,8 @@ function projectsFromSnapshot(snap) {
 //   🔑 그룹번호뿐 아니라 **그룹의 모든 문장 내용이 같을 때만** 프롬프트·자산을 복원한다.
 //   번호만 맞추면 앞쪽 문장 삽입/수정 뒤 전혀 다른 장면의 옛 이미지가 붙는다.
 function overlaySnapshot(parsed, snap) {
-  const { sameGroupContent } = require('./core/group-freshness');
-  let restored = 0, invalidated = 0;
+  const { sameGroupContent, sameGroupText, normalizeText } = require('./core/group-freshness');
+  let restored = 0, invalidated = 0, resplit = 0;
   const byShorts = new Map();
   (snap.projects || []).forEach((ps) => byShorts.set(ps.shortsNum, ps));
   for (const pr of parsed.projects) {
@@ -6981,7 +6985,10 @@ function overlaySnapshot(parsed, snap) {
     for (const g of pr.groups) {
       const gs = gmap.get(g.num); if (!gs) continue;
       const sents = pr.getSentencesOfGroup(g);
-      if (!sameGroupContent(sents, gs.sentences || [])) {
+      // 🔢 글은 그대로이고 문장 경계만 달라졌으면(v0.8.10 소수점 — 옛 「3.」/「5배…」 → 「3.5배…」) 그림·프롬프트는 이어받는다.
+      const reSplit = !sameGroupContent(sents, gs.sentences || []) && sameGroupText(sents, gs.sentences || []);
+      if (reSplit) resplit++;
+      if (!reSplit && !sameGroupContent(sents, gs.sentences || [])) {
         // 새 파싱본의 대본 내 프롬프트는 보존한다. 프롬프트가 없다면 autoFillPrompts 가 현재 문장으로 새로 만든다.
         g.imageStale = true;
         g.imagePromptStale = !g.imagePrompt || !g.imagePrompt.trim(); // .md 에 새 프롬프트가 있으면 그것이 최신
@@ -7006,8 +7013,17 @@ function overlaySnapshot(parsed, snap) {
         if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; restored++; }
         if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
       }
-      (gs.sentences || []).forEach((ss, i) => {
-        const s = sents[i]; if (!s) return;
+      // 문장 짝 — 보통은 순번 그대로. 경계만 달라진 그룹은 같은 글끼리 앞으로만 짝짓는다(합쳐진 문장은 짝이 없어 음성을 새로 만든다).
+      let pairs = (gs.sentences || []).map((ss, i) => [ss, sents[i]]);
+      if (reSplit) {
+        pairs = []; let k = 0;
+        for (const s of sents) {
+          const at = (gs.sentences || []).findIndex((ss, i) => i >= k && normalizeText(ss.text) === normalizeText(s.text));
+          if (at >= 0) { pairs.push([gs.sentences[at], s]); k = at + 1; }
+        }
+      }
+      pairs.forEach(([ss, s]) => {
+        if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
         if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
@@ -7017,7 +7033,7 @@ function overlaySnapshot(parsed, snap) {
       });
     }
   }
-  return { restored, invalidated };
+  return { restored, invalidated, resplit };
 }
 
 // ── 📥 자산 이어받기 (통합본) ─────────────────────────────────────────

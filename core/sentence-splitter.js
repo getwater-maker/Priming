@@ -87,6 +87,18 @@ function _stripNonTts(text) {
   return (typeof text === 'string') ? text.replace(HTML_COMMENT, '').replace(BLOCKQUOTE_LINE, '') : text;
 }
 
+// 🔢 문장 = 끝 부호([.!?。])까지. 단 **숫자 사이의 마침표 하나(3.5 · 1.25% · 0.8)는 소수점**이라 문장을 끝내지 않는다(v0.8.10).
+//   예전 식 `[^.!?。]+[.!?。]+` 은 「보험료가 3.5배였습니다.」를 「3.」/「5배였습니다.」로 갈랐다.
+//   숫자로 끝나는 문장(「1592년.」·「…3. 다음」)은 마침표 뒤가 숫자가 아니므로 예전처럼 끝난다. 「3...5」(말줄임)도 예전처럼 끝난다.
+//   ⚠ 끝 부호 쪽에도 「소수점이 아님」을 건다 — 안 걸면 되짚기(backtracking)로 「합계가 3.5」(문단 끝)가 「3.」/「5」로 갈린다.
+const _DEC = '(?<=\\d)\\.(?=\\d)';
+const _SENT_BODY = '(?:[^.!?。]|' + _DEC + ')+';
+const _SENT_END = '(?:(?!' + _DEC + ')[.!?。])+';
+const SENT_RE = new RegExp(_SENT_BODY + _SENT_END + '|' + _SENT_BODY + '$', 'g');
+const _SENT_BODY_F = '(?:[^.!?。！？]|' + _DEC + ')+';
+const _SENT_END_F = '(?:(?!' + _DEC + ')[.!?。！？])+';
+const SENT_RE_FOREIGN = new RegExp(_SENT_BODY_F + _SENT_END_F + '|' + _SENT_BODY_F + '$', 'g');
+
 /**
  * 단락 텍스트 → 문장 배열 (내부 헬퍼)
  */
@@ -113,11 +125,11 @@ function _paragraphsToSentences(text) {
       const lf = detectLang(flat);
       const src = (lf === 'ja' || lf === 'cjk') ? aozoraMark(flat).replace(/\s+/g, ' ').trim() : flat;
       if (!src) continue;
-      const fm = src.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g) || [src];
+      const fm = src.match(SENT_RE_FOREIGN) || [src];
       for (const m of fm) { const t = m.trim(); if (t && /[\p{L}\p{N}]/u.test(t)) sentences.push(t); }
       continue;
     }
-    const matches = flat.match(/[^.!?。]+[.!?。]+|[^.!?。]+$/g);
+    const matches = flat.match(SENT_RE);
     if (matches && matches.length > 0) {
       for (const m of matches) {
         const trimmed = m.trim();
