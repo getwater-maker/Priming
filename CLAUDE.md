@@ -138,7 +138,7 @@
 - 대상 = 영상 범위 안에서 **이미지 있고 영상 없는** 그룹(이어받기). 직전에 `autoRelinkVideos`(폴더에 남은 `NN_1080.mp4`/`NN.mp4` 다시 잇기, `videoCleared` 는 제외).
 - 업스케일은 해상도를 재서 목표 이상이면 생략, **못 재면 건너뛴다(fail-closed)**, `upscale` 전용 레인, auto 모드는 한 영상 5분 넘으면 ffmpeg 로 강등.
 - 영상이 TTS 보다 짧으면 `video-fit`(≤1.3배 느리게 / 넘으면 반복+크로스페이드, 결과는 캐시 폴더 · 원본 불변). 🔴 **맞출 길이가 90초 넘으면 파일을 늘리지 않고 Vrew 반복 재생**(`endBehavior:'loop'`) — 18분짜리를 구워 Vrew 가 응답없음이 된 사고.
-- 엔진별 노드·셀렉터·판정(LTX·MiniMax · Flow·Veo · Grok · Genspark)은 [`docs/규칙/비디오엔진.md`](docs/규칙/비디오엔진.md) — **엔진 코드를 고치기 전에 읽는다**. ⛔ Flow 동시 생성 안 함 · 첨부 실패면 그 컷을 만들지 않는다(크레딧 낭비 금지) · 🔴 Grok 본편 판정 = post UUID(사이드바의 남의 영상 금지) · ⛔ MiniMax 용 `<Picture 1>` 태그를 대본에 쓰게 하지 않는다.
+- 엔진별 노드·셀렉터·판정(LTX·MiniMax · Flow·Veo · Grok · Genspark)은 [`docs/규칙/비디오엔진.md`](docs/규칙/비디오엔진.md) — **엔진 코드를 고치기 전에 읽는다**. ⛔ Flow 동시 생성 안 함 · 첨부 실패면 그 컷을 만들지 않는다(크레딧 낭비 금지) · 🔴 Grok 본편 판정 = post UUID(사이드바의 남의 영상 금지) · 🎬 **MiniMax H3 = 두 꼴**(v0.8.12 · 로이 2026-10-12 「R2V · 공식 가이드」): 🎬 가 `subject_definitions:` 로 시작하면 **공식 R2V 꼴**(대본이 여섯 절·라벨을 쓴다 · 접두사 없음 · `<Subject N> [카드]` → 인물 시트 `<Picture k+1>` · 부정 절 정리 안 함 · `core/mm-r2v` 한 곳) — 그 밖은 옛 꼴(엔진이 `<Picture 1>` 접두사 · 대본에 태그 금지 그대로 · 렌더 전 재고 보호).
 
 ### .vrew · MP4
 - 🔴 캔버스 비율은 **web/shape 오버레이 트랙의 x좌표계**로 인식된다(미디어·자막은 스케일 안 함). 제목 web 트랙에 `assetEffectInfo` 금지(내보내기 실패).

@@ -4358,19 +4358,36 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const vidTimes = [];  // 개당 생성 시간(초)
   const _stageT0 = Date.now();
   const blanks = [];    // 검정·노이즈 영상이 나온 그룹 — 동시 패스 후 '순차'로 재생성(이미지와 동일 방어)
+  // 🎬 R2V(v0.8.12) — 인물 카드·시트 자리(그림 단계가 만든 <출력>/characters/)는 편마다 한 번만 읽는다
+  const R2V = require('./core/mm-r2v'), CR = require('./core/char-refs');
+  const mmRef = eng.isMiniMaxRef();
+  const r2vRoot = path.dirname(mediaDir);
+  const r2vCards = (mmRef && targets.some((g) => R2V.isR2V(g.videoPrompt))) ? ((await _loadCards()) || []) : [];
   const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
     const durationSec = totalSec > 0 ? Math.ceil(totalSec) : 5;
     // 부정 절(`NO text, no letters…`)이 프롬프트 **앞**에 있으면 오히려 그 대상이 강조된다(CLIP 은 부정 미이해,
     //   앞쪽 토큰 가중치 큼) → 이미지와 동일하게 끝으로 모으고 중복 제거. 실제 대본에 앞쪽 부정문 사례가 있었음.
-    const prompt = P.normalizePromptNegations(
-      (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic');
+    const raw = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
+    // 🆕 공식 R2V 꼴(🎬 가 `subject_definitions:` 로 시작 · v0.8.12) — 부정 절 정리를 하지 않는다(쉼표 절을 끝으로 옮기면 여섯 절 구조가 깨진다).
+    //   MiniMax H3 레퍼런스 워크플로면 `<Subject N> [카드이름]` → 인물 시트를 <Picture 2>… 로 붙이고 절을 공식 꼴로 편다(core/mm-r2v).
+    let prompt, refImages = [];
+    if (R2V.isR2V(raw)) {
+      if (mmRef) {
+        const b = R2V.buildR2V(raw, { cards: r2vCards, findSheet: (c) => CR.findSheet(r2vRoot, c) || CR.findFaceSheet(r2vRoot, c) });
+        prompt = b.prompt; refImages = b.refImages;
+        log(`  🎬 G${g.num} R2V — 장면 그림 + 인물 시트 ${b.attached.length}장${b.attached.length ? ` (${b.attached.map((a) => `${a.name}=<Picture ${a.picture}>`).join(' · ')})` : ''}${b.missing.length ? ` · ⚠ 시트 없음: ${b.missing.join(', ')} (장면 그림만으로 · [keyframe completion])` : ''}${b.sectionsMissing.length ? ` · ⚠ 빠진 절: ${b.sectionsMissing.join(', ')}` : ''}`);
+      } else {
+        prompt = R2V.stripNames(raw);
+        log(`  ⚠ G${g.num} 🎬 가 MiniMax H3 R2V 꼴인데 지금 워크플로(${wfName})는 MiniMax 가 아닙니다 — 글을 그대로 넣습니다(라벨이 뜻을 잃음)`);
+      }
+    } else prompt = P.normalizePromptNegations(raw);
     const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
     g.videoStatus = 'generating'; pushDtoUpdate();
     log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
     const _t0 = Date.now();
-    const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
+    const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort, refImages });
     const _el = (Date.now() - _t0) / 1000;
     if (r.success) {
       // ⚠ 이상 영상 검증 — 이미지에서 확인된 동시 생성 부작용이 i2v 에도 있을 수 있어 프레임을 실제로 확인.

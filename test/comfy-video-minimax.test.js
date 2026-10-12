@@ -205,7 +205,7 @@ if (clEntry) {
 // 소스 위생 — 이미지 주입과 접두사 판정을 **분리**해야 한다
 ok(/const mmLoaderId\s*=/.test(SRC), '이미지 주입용 mmLoaderId(Deno 전용) 가 따로 있다');
 ok(/const mmRef\s*=\s*!!mmLoaderId \|\| ids\.some/.test(SRC), '접두사 판정 mmRef 는 로컬·클라우드 둘 다 본다');
-ok(/if \(mmRef\) prompt = MM_REF_PREFIX/.test(SRC), '접두사는 레퍼런스 워크플로일 때만 붙인다');
+ok(/if \(mmRef && !require\('\.\/mm-r2v'\)\.isR2V\(prompt\)\) prompt = MM_REF_PREFIX/.test(SRC), '접두사는 레퍼런스 워크플로 + 옛 꼴일 때만 붙인다(공식 R2V 꼴은 대본이 라벨을 정의 · v0.8.12 · test:mmr2v)');
 // ⚠ 이미지 주입까지 mmRef 로 하면 클라우드 판에 없는 image_paths 를 만들려다 LoadImage 를 놓친다
 ok(/if \(mmLoaderId\) \{/.test(SRC), '이미지 주입 분기는 mmLoaderId 로만 탄다');
 ok(/_mmDims\(aspect\) : this\._videoDims\(aspect\)/.test(SRC), '해상도 격자는 레퍼런스 워크플로일 때만 적용된다');

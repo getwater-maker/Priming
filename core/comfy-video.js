@@ -215,7 +215,13 @@ class ComfyVideo {
     return { w: 768, h: 1344 }; // 9:16
   }
   _snap4(frames) { return Math.max(5, 4 * Math.round((frames - 1) / 4) + 1); } // Wan length = 4n+1
-  _buildGraph(uploadName, prompt, aspect, durSec) {
+  /** 지금 워크플로가 MiniMax H3 레퍼런스 계열인가(로컬 Deno · 클라우드 네이티브) — main 이 새 R2V 꼴을 엮을지 정한다 */
+  isMiniMaxRef() {
+    try { const wf = JSON.parse(fs.readFileSync(this.workflowPath, 'utf8')); return Object.values(wf).some((n) => /MiniMaxH3Reference(ToVideo|ImageLoader)/i.test((n && n.class_type) || '')); }
+    catch { return false; }
+  }
+  // refNames = 장면 그림 뒤에 붙일 레퍼런스(인물 시트 · <Picture 2>…) 업로드명. MiniMax H3 레퍼런스 계열만 쓴다(v0.8.12 · R2V).
+  _buildGraph(uploadName, prompt, aspect, durSec, refNames = []) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) throw new Error('워크플로(API 포맷 JSON)가 지정되지 않았습니다 — ⚙ ComfyUI 비디오에서 지정하세요.');
     let wf = JSON.parse(fs.readFileSync(this.workflowPath, 'utf8'));
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. ComfyUI 에서 "저장(API 포맷)"으로 저장하세요.');
@@ -233,10 +239,27 @@ class ComfyVideo {
     const mmLoaderId = ids.find((id) => /MiniMaxH3ReferenceImageLoader/i.test(graph[id].class_type || ''));
     const mmRef = !!mmLoaderId || ids.some((id) => /MiniMaxH3ReferenceToVideo/i.test(graph[id].class_type || ''));
     // ── 이미지 주입 (LoadImage) ──
+    const refs = (mmRef && Array.isArray(refNames)) ? refNames.filter(Boolean).slice(0, 8) : [];   // 노드 한도 ref_image_0~8
     if (mmLoaderId) {
       graph[mmLoaderId].inputs = graph[mmLoaderId].inputs || {};
-      graph[mmLoaderId].inputs.image_paths = uploadName;   // 업로드된 이름 = input 폴더 상대경로
-      this.log('[ComfyVid] MiniMax H3 레퍼런스 이미지 주입 → image_paths=' + uploadName);
+      graph[mmLoaderId].inputs.image_paths = [uploadName, ...refs].join('\n');   // 업로드된 이름 = input 폴더 상대경로(줄바꿈 목록 · 순서 = <Picture n>)
+      this.log('[ComfyVid] MiniMax H3 레퍼런스 이미지 주입 → image_paths=' + [uploadName, ...refs].join(' | '));
+    } else if (mmRef && refs.length) {
+      // ☁ 네이티브 MiniMaxH3ReferenceToVideo — ref_images.ref_image_0 = 장면 그림(<Picture 1>), _k = 시트(<Picture k+1>).
+      //   ⚠ 예전처럼 모든 LoadImage 에 같은 그림을 덮으면 시트 자리에도 장면 그림이 들어간다 → 슬롯마다 따로 잇는다.
+      const mmId = ids.find((id) => /MiniMaxH3ReferenceToVideo/i.test(graph[id].class_type || ''));
+      const inp = graph[mmId].inputs = graph[mmId].inputs || {};
+      const link0 = inp['ref_images.ref_image_0'];
+      let id0 = Array.isArray(link0) ? String(link0[0]) : null;
+      let next = Math.max(0, ...ids.map(Number).filter((n) => !isNaN(n))) + 1;
+      if (!id0 || !graph[id0]) { id0 = String(next++); graph[id0] = { inputs: { image: uploadName, upload: 'image' }, class_type: 'LoadImage', _meta: { title: 'LoadImage(scene)' } }; inp['ref_images.ref_image_0'] = [id0, 0]; }
+      graph[id0].inputs.image = uploadName;
+      refs.forEach((nm, k) => {
+        const nid = String(next++);
+        graph[nid] = { inputs: { image: nm, upload: 'image' }, class_type: 'LoadImage', _meta: { title: 'LoadImage(ref ' + (k + 2) + ')' } };
+        inp['ref_images.ref_image_' + (k + 1)] = [nid, 0];
+      });
+      this.log('[ComfyVid] MiniMax H3 R2V 레퍼런스 ' + (refs.length + 1) + '장 → <Picture 1>=' + uploadName + refs.map((r, k) => ' · <Picture ' + (k + 2) + '>=' + r).join(''));
     } else if (this.imageNodeId && graph[this.imageNodeId]) {
       graph[this.imageNodeId].inputs = graph[this.imageNodeId].inputs || {}; graph[this.imageNodeId].inputs.image = uploadName;
     } else {
@@ -260,7 +283,8 @@ class ComfyVideo {
       //   MiniMax H3: 대본은 그대로 두고 엔진이 <Picture 1> 접두사만 붙인다.
       //   ⚠ 이게 없으면 레퍼런스가 "참고"에 그쳐 구도·인물·화풍이 통째로 바뀐다(실측: 왕+신하 5명 → 얼굴 클로즈업).
       //   ⛔ 대본에 이 태그를 쓰게 하지 말 것 — 엔진을 LTX 로 되돌리면 대본 468편이 그 문법에 묶인다.
-      if (mmRef) prompt = MM_REF_PREFIX + String(prompt);
+      //   🆕 공식 R2V 꼴(🎬 가 `subject_definitions:` 로 시작 · v0.8.12)은 대본이 라벨을 이미 정의했다 → 접두사를 붙이지 않는다.
+      if (mmRef && !require('./mm-r2v').isR2V(prompt)) prompt = MM_REF_PREFIX + String(prompt);
       const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
       const isNeg = (id) => /negative|부정|worst|nsfw|bad ?quality/.test(titleOf(id)) || /negative/.test((graph[id].class_type || '').toLowerCase());
       const setLit = (n, keys) => { if (!n || !n.inputs) return false; for (const k of keys) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
@@ -433,11 +457,14 @@ class ComfyVideo {
     return tmp;
   }
   // 이미지 → 비디오 1개. { success, videoPath } | { success:false, error }
-  async imageToVideo({ imagePath, prompt, aspect, durationSec, outputPath, abortSignal }) {
+  // refImages = 장면 그림 뒤에 붙일 레퍼런스 그림(인물 시트) — MiniMax H3 레퍼런스 워크플로만 쓴다(그 밖은 무시)
+  async imageToVideo({ imagePath, prompt, aspect, durationSec, outputPath, abortSignal, refImages = [] }) {
     try {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}` };
       const uploadName = await this._uploadImage(imagePath);
-      const graph = this._buildGraph(uploadName, prompt, aspect, durationSec);
+      const refNames = [];
+      for (const rp of (refImages || [])) refNames.push(await this._uploadImage(rp));
+      const graph = this._buildGraph(uploadName, prompt, aspect, durationSec, refNames);
       // ⏱ MiniMax H3(로컬)는 3060 실측 0.98MP **563초** — 기본 600초와 너무 가까워 실제로 타임아웃 났다(E2E).
       //   그 워크플로일 때만 하한을 올린다. 타임아웃은 상한일 뿐이라 LTX(1~2분)에는 영향이 없다.
       const _mmSlow = Object.values(graph).some((x) => /MiniMaxH3Reference/i.test(x.class_type || ''));
