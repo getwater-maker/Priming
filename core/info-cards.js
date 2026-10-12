@@ -105,12 +105,12 @@ function plan(project, parsed, opts = {}) {
   if (!parsed.marks.length && !wantSections) return { panels, warnings };
   // 문장 시각(.vrew 타임라인과 같은 규칙: 그룹 순서 · 음성이 있는 문장을 이어 붙임)
   const byId = new Map(sents.map((s, i) => [s.id, i]));
-  const T = new Array(sents.length).fill(null); let t = 0;
-  for (const g of (project.groups || [])) for (const id of (g.sentenceIds || [])) {
-    const i = byId.get(id); if (i == null) continue;
+  const T = new Array(sents.length).fill(null), GI = new Array(sents.length).fill(null); let t = 0, gi = -1;   // GI = 문장이 든 그룹(### 장면) 번호 — 판의 자리를 장면 안에서 고정하는 열쇠
+  for (const g of (project.groups || [])) { gi++; for (const id of (g.sentenceIds || [])) {
+    const i = byId.get(id); if (i == null) continue; GI[i] = gi;
     const s = sents[i], d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : 0;
     T[i] = d > 0 ? [t, t + d] : null; t += d;
-  }
+  } }
   const total = t;
   // 대본(.md)과 작업본의 문장이 같은 순서·같은 글인가 — 아니면 위치를 믿을 수 없다(조용히 틀리지 않는다)
   if (parsed.texts.length !== sents.length) {
@@ -134,7 +134,7 @@ function plan(project, parsed, opts = {}) {
       const endT = (T[endIdx] || tm)[1];
       const isClose = CLOSING_RE.test(s.title);
       const n = isClose ? 0 : numbered.indexOf(s) + 1;
-      panels.push({ type: 'cover', t0: tm[0], t1: Math.min(tm[0] + COVER_SEC, Math.max(tm[0] + 1.5, endT)), n, m: numbered.length, title: stripNum(s.title) || s.title, closing: isClose, hideCaptions: true });   // 표지가 뜬 3.5초 동안은 아래 자막을 가린다(큰 글자와 겹치지 않게)
+      panels.push({ type: 'cover', scene: GI[s.first], t0: tm[0], t1: Math.min(tm[0] + COVER_SEC, Math.max(tm[0] + 1.5, endT)), n, m: numbered.length, title: stripNum(s.title) || s.title, closing: isClose, hideCaptions: true });   // 표지가 뜬 3.5초 동안은 아래 자막을 가린다(큰 글자와 겹치지 않게)
     });
   }
   // ①③④ 표시 줄
@@ -152,17 +152,17 @@ function plan(project, parsed, opts = {}) {
       const bEnd = blockEnd(m.sent);
       const endIdx = Math.min(bEnd, next ? next.sent - 1 : bEnd);
       const endTm = (T[endIdx] || tm);
-      panels.push({ type: 'words', t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
+      panels.push({ type: 'words', scene: GI[m.sent], t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
     } else if (m.kind === 'table') {
       const hasHead = m.rows.length >= 1;
       if (!hasHead) { warnings.push(`📇 정보 카드 — 📊 표 「${m.title.slice(0, 20)}」 에 표 줄(> | … |)이 없습니다 → 건너뜁니다`); continue; }
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'table', t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
+      panels.push({ type: 'table', scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
     } else if (m.kind === 'check') {
       if (m.text.length > CHECK_WARN_CHARS) warnings.push(`📇 정보 카드 — ✅ 문구가 ${m.text.length}자(권장 ${CHECK_WARN_CHARS}자 이하): 「${m.text}」 — 판 폭을 넘으면 그대로 그립니다`);
       checkTexts.push(m.text);
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'check', t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+      panels.push({ type: 'check', scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
     }
   }
   // 겹침 순서 — 표 > 구간 표지 > 확인표 > 낱말 카드 (아래 것은 위 것이 뜬 동안 숨는다)

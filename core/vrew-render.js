@@ -1027,6 +1027,13 @@ async function renderVrewToMp4(opts = {}) {
       const hw = opts.info.filter((q) => q.hideCaptions).map((q) => [q.t0, q.t1]); if (hw.length) ctx.hideCaptionWins = [...(ctx.hideCaptionWins || []), ...hw];
       const cnt = {}; for (const q of opts.info) cnt[q.type] = (cnt[q.type] || 0) + 1;
       log(`   📇 정보 카드 ${opts.info.length}판 — 낱말 ${cnt.words || 0} · 구간 표지 ${cnt.cover || 0} · 표 ${cnt.table || 0} · 확인표 ${cnt.check || 0}`);
+      // 🎨 편마다 달라지는 색·모양과 장면마다 달라지는 자리(그림에서 뽑는다 · 실패하면 예전 모양) — 배치(layoutOf)보다 먼저
+      if (opts.infoTheme !== false) {
+        try {
+          const segAt = (tt) => { const sg = tl.segments.find((x) => tt >= x.start && tt < x.end) || null; if (!sg || !sg.file || (sg.type !== 'image' && sg.type !== 'video')) return null; const top = (sg.layers || [])[sg.layers.length - 1]; return { file: sg.file, rel: sg.type === 'video' ? Math.max(0, tt - ((top && top.t0) != null ? top.t0 : sg.start)) : 0 }; };
+          await require('./info-theme').assign(opts.info, { seed: opts.infoSeed || '', segAt, total: tl.totalSec, capBottom: cs.yAlign === 'bottom', ffmpeg: getFfmpeg(), log });
+        } catch (e) { log('   ⚠ 정보 카드 색·자리 변주 실패(고정 모양으로 굽습니다): ' + e.message); }
+      }
       try { const IA = require('./info-ass'); for (const q of opts.info) IA.layoutOf(q, ctx.infoWarn); } catch (e) { log('   ⚠ 정보 카드 배치 실패: ' + e.message); }
       // 낱말 카드·확인표가 뜨는 동안은 자막 폭을 판 왼쪽 안으로 줄인다(자막이 판 밑으로 들어가 가려지지 않게)
       try {

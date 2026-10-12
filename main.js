@@ -2849,7 +2849,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };

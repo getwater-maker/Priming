@@ -57,64 +57,100 @@ const rect = (x, y, w, h, color, op, layer, r = 0) => ({ k: 'rect', x: Math.roun
 const text = (x, y, an, lines, fs, color, op, extra = {}) => ({ k: 'text', x: Math.round(x), y: Math.round(y), an, lines, fs, color, op, layer: 8, ...extra });
 const check = (x, y, size, color, op) => ({ k: 'check', x: Math.round(x), y: Math.round(y), size, color, op, layer: 8 });
 
-/** 오른쪽 낱말 카드 */
+// 🎨 편마다 달라지는 색·모양·자리(core/info-theme 가 p.theme 로 준다) — 없으면 예전 그대로(오른쪽 가운데 · 막대형 · 고정 색)
+const colorsOf = (p) => ({ ...C, ...((p && p.theme && p.theme.colors) || {}) });
+const shapeOf = (p) => ((p && p.theme && p.theme.shape) || 'bar');
+const POS = ['rc', 'lc', 'rt', 'lt'];
+/** 판 크기 (w,h) 와 자리 → 왼쪽 위 좌표 */
+function placeBox(pos, w, h) {
+  const left = pos === 'lc' || pos === 'lt', top = pos === 'rt' || pos === 'lt';
+  return { x0: left ? 40 : W - 40 - w, y0: top ? 110 : Math.round(H / 2 - h / 2) };
+}
+/** 판 장식(바탕 + 강조) — 모양 4가지. 글자가 들어가는 안쪽 여백(inL·inT·extraH)도 돌려준다 */
+function decor(shape, x0, y0, w, h, c, op) {
+  const out = [rect(x0, y0, w, h, c.panel, op, 5, 18)];
+  if (shape === 'tag') { out.push(rect(x0, y0, w, 12, c.accent, 1, 6, 6)); return { out, inL: 0, inT: 12, extraH: 12 }; }
+  if (shape === 'underline') { out.push(rect(x0 + 34, y0 + h - 16, w - 68, 7, c.accent, 1, 6, 3)); return { out, inL: 0, inT: 0, extraH: 14 }; }
+  if (shape === 'frame') {
+    out.push(rect(x0, y0, w, 5, c.accent, 1, 6, 0), rect(x0, y0 + h - 5, w, 5, c.accent, 1, 6, 0), rect(x0, y0, 5, h, c.accent, 1, 6, 0), rect(x0 + w - 5, y0, 5, h, c.accent, 1, 6, 0));
+    return { out, inL: 5, inT: 5, extraH: 10 };
+  }
+  out.push(rect(x0, y0, 12, h, c.accent, 1, 6, 6));
+  return { out, inL: 12, inT: 0, extraH: 0 };
+}
+/** 낱말·확인표 판의 크기 — 자리를 고를 때(info-theme) 미리 잰다 */
+function sizeOf(p, shape = 'bar') {
+  const pr = layoutOf({ ...p, _prims: null, theme: { ...(p.theme || {}), shape, pos: 'rc' } }, () => {});
+  const r = pr.find((q) => q.k === 'rect');
+  return r ? { w: r.w, h: r.h } : null;
+}
+
+/** 낱말 카드 */
 function layoutWords(p, warn) {
-  const fs = FS, lh = Math.round(fs * 1.3), padX = 40, padY = 34, innerMax = 700, gap = 18, accentW = 12;
+  const c = colorsOf(p), shape = shapeOf(p);
+  const fs = FS, lh = Math.round(fs * 1.3), padX = 40, padY = 34, innerMax = 700, gap = 18;
   const blocks = p.words.map((w) => balancedWrap(w, fs, innerMax).slice(0, 2));
   const maxLine = Math.max(...blocks.flat().map((l) => mw(l, fs)));
-  const panelW = Math.max(560, Math.min(900, maxLine + padX * 2 + accentW));
   const nLines = blocks.reduce((a, b) => a + b.length, 0);
-  const panelH = padY * 2 + nLines * lh + (blocks.length - 1) * gap;
-  const x1 = W - 40, x0 = x1 - panelW, y0 = Math.round(H / 2 - panelH / 2);
-  const out = [rect(x0, y0, panelW, panelH, C.panel, 0.84, 5, 18), rect(x0, y0, accentW, panelH, C.accent, 1, 6, 6)];
-  let y = y0 + padY;
-  blocks.forEach((b) => { b.forEach((l) => { out.push(text(x0 + accentW + padX, y + lh / 2, 4, [l], fs, C.text, 1, {})); y += lh; }); y += gap; });
+  const d0 = decor(shape, 0, 0, 10, 10, c, 1);   // 안쪽 여백만 본다
+  const panelW = Math.max(560, Math.min(900, maxLine + padX * 2 + d0.inL));
+  const panelH = padY * 2 + nLines * lh + (blocks.length - 1) * gap + d0.extraH;
+  const { x0, y0 } = placeBox((p.theme && p.theme.pos) || 'rc', panelW, panelH);
+  const d = decor(shape, x0, y0, panelW, panelH, c, 0.84);
+  const out = [...d.out];
+  let y = y0 + d.inT + padY;
+  blocks.forEach((b) => { b.forEach((l) => { out.push(text(x0 + d.inL + padX, y + lh / 2, 4, [l], fs, c.text, 1, {})); y += lh; }); y += gap; });
   void warn;
   return out;
 }
 
-/** 오른쪽 확인표 — 영상 전체에서 쌓이는 목록(최근 5줄 · 방금 것만 진하게) */
+/** 확인표 — 영상 전체에서 쌓이는 목록(최근 5줄 · 방금 것만 진하게) */
 function layoutCheck(p, warn) {
-  const fs = FS, lh = Math.round(fs * 1.5), padX = 38, padY = 30, boxS = 44, gapBox = 24, accentW = 12;
+  const c = colorsOf(p), shape = shapeOf(p);
+  const fs = FS, lh = Math.round(fs * 1.5), padX = 38, padY = 30, boxS = 44, gapBox = 24;
   const list = p.list;
+  const d0 = decor(shape, 0, 0, 10, 10, c, 1);
   const widest = Math.max(...list.map((t) => mw(t, fs)));
   const innerW = boxS + gapBox + widest;
-  const panelW = Math.max(620, Math.min(1000, innerW + padX * 2 + accentW));
-  if (innerW + padX * 2 + accentW > 1000) list.forEach((t) => { if (mw(t, fs) + boxS + gapBox + padX * 2 + accentW > 1000) warn(`✅ 「${t}」 는 판 폭을 넘어 오른쪽이 잘릴 수 있습니다(${t.length}자 · 문구를 줄여 주세요)`); });
-  const panelH = padY * 2 + list.length * lh;
-  const x1 = W - 40, x0 = x1 - panelW, y0 = Math.round(H / 2 - panelH / 2);
-  const out = [rect(x0, y0, panelW, panelH, C.panel, 0.86, 5, 18), rect(x0, y0, accentW, panelH, C.accent, 1, 6, 6)];
+  const panelW = Math.max(620, Math.min(1000, innerW + padX * 2 + d0.inL));
+  if (innerW + padX * 2 + d0.inL > 1000) list.forEach((t) => { if (mw(t, fs) + boxS + gapBox + padX * 2 + d0.inL > 1000) warn(`✅ 「${t}」 는 판 폭을 넘어 오른쪽이 잘릴 수 있습니다(${t.length}자 · 문구를 줄여 주세요)`); });
+  const panelH = padY * 2 + list.length * lh + d0.extraH;
+  const { x0, y0 } = placeBox((p.theme && p.theme.pos) || 'rc', panelW, panelH);
+  const d = decor(shape, x0, y0, panelW, panelH, c, 0.86);
+  const out = [...d.out];
   list.forEach((t, i) => {
     const cur = i === list.length - 1;
-    const yc = y0 + padY + i * lh + lh / 2;
-    if (cur) out.push(rect(x0 + accentW + 10, yc - lh / 2 + 4, panelW - accentW - 20, lh - 8, C.accent, 0.16, 7, 10));
-    const bx = x0 + accentW + padX, by = yc - boxS / 2;
-    out.push(rect(bx, by, boxS, boxS, cur ? C.accent : C.dim, cur ? 1 : 0.55, 7, 9));
-    out.push(check(bx, by, boxS, C.bg, 1));
-    out.push(text(bx + boxS + gapBox, yc, 4, [t], fs, cur ? C.text : C.dim, cur ? 1 : 0.85, {}));
+    const yc = y0 + d.inT + padY + i * lh + lh / 2;
+    if (cur) out.push(rect(x0 + d.inL + 10, yc - lh / 2 + 4, panelW - d.inL * 2 - 20, lh - 8, c.accent, 0.16, 7, 10));
+    const bx = x0 + d.inL + padX, by = yc - boxS / 2;
+    out.push(rect(bx, by, boxS, boxS, cur ? c.accent : c.dim, cur ? 1 : 0.55, 7, 9));
+    out.push(check(bx, by, boxS, c.bg, 1));
+    out.push(text(bx + boxS + gapBox, yc, 4, [t], fs, cur ? c.text : c.dim, cur ? 1 : 0.85, {}));
   });
   return out;
 }
 
 /** 구간 표지 — 전체 화면 어두운 판 · 「N / M」 · 이름 · 진행 막대 */
 function layoutCover(p) {
-  const out = [rect(0, 0, W, H, C.bg, 0.92, 0, 0)];
+  const th = colorsOf(p);
+  const out = [rect(0, 0, W, H, th.bg, 0.92, 0, 0)];
   const barW = 960, barX = (W - barW) / 2, barY = 790, barH = 18;
   const k = p.closing ? 1 : Math.max(0, Math.min(1, p.m ? p.n / p.m : 1));
   if (p.closing) {
-    out.push(text(W / 2, 470, 5, [p.title || '마무리'], 150, C.accent, 1, { sp: 4 }));
+    out.push(text(W / 2, 470, 5, [p.title || '마무리'], 150, th.accent, 1, { sp: 4 }));
   } else {
-    out.push(text(W / 2, 360, 5, [`${p.n} / ${p.m}`], 150, C.accent, 1, { sp: 6 }));
+    out.push(text(W / 2, 360, 5, [`${p.n} / ${p.m}`], 150, th.accent, 1, { sp: 6 }));
     const lines = balancedWrap(p.title, 84, 1500).slice(0, 2);
     out.push(text(W / 2, 580 + (lines.length - 1) * 0, 5, lines, 84, C.text, 1, {}));
   }
   out.push(rect(barX, barY, barW, barH, C.line, 0.22, 8, 9));
-  out.push(rect(barX, barY, Math.max(barH, barW * k), barH, C.accent, 1, 9, 9));
+  out.push(rect(barX, barY, Math.max(barH, barW * k), barH, th.accent, 1, 9, 9));
   return out;
 }
 
 /** 표 — 전체 화면 · 제목 · 칸 너비/줄바꿈을 글자 폭으로 계산 · 아래 출처 한 줄 */
 function layoutTable(p, warn) {
+  const th = colorsOf(p);
   const marginX = 110, availW = W - marginX * 2, padX = 28, padY = 16;
   const rows = p.rows.map((r) => r.slice());
   const ncol = Math.max(...rows.map((r) => r.length), 1);
@@ -146,25 +182,25 @@ function layoutTable(p, warn) {
   }
   if (best.total > availH) warn(`📊 표 「${(p.title || '').slice(0, 16)}」 가 한 화면에 안 들어가 글자를 ${best.fs}px 까지 줄였습니다(행 ${rows.length} · 열 ${ncol} — 줄이거나 나눠 주세요)`);
   if (best.fs < 66) warn(`📊 표 「${(p.title || '').slice(0, 16)}」 글자 ${best.fs}px — 시니어 가독성 기준(66px)보다 작습니다(행·열을 줄이면 커집니다)`);
-  const out = [rect(0, 0, W, H, C.bg, 0.97, 0, 0)];
+  const out = [rect(0, 0, W, H, th.bg, 0.97, 0, 0)];
   const tl = balancedWrap(p.title || '', 72, availW).slice(0, 2);
-  out.push(text(marginX, titleY, 4, tl, 72, C.accent, 1, {}));
+  out.push(text(marginX, titleY, 4, tl, 72, th.accent, 1, {}));
   const topY = tableTop + Math.max(0, Math.round((availH - best.total) / 2));   // 표를 제목·출처 사이 세로 가운데로
   let y = topY;
   out.push(rect(marginX - 12, topY - 8, availW + 24, best.total + 16, 'FFFFFF', 0.06, 5, 16));   // 층: 자막 층(1~4)과 겹치지 않게 5 이상
   rows.forEach((r, ri) => {
     const rh = best.heights[ri];
-    if (ri === 0) out.push(rect(marginX, y, availW, rh, C.accent, 0.2, 5, 10));
+    if (ri === 0) out.push(rect(marginX, y, availW, rh, th.accent, 0.2, 5, 10));
     let x = marginX;
     r.forEach((cell, c) => {
       const lines = best.wrapped[ri][c];
-      out.push(text(x + padX, y + rh / 2, 4, lines, best.fs, ri === 0 ? C.accent : C.text, 1, {}));
+      out.push(text(x + padX, y + rh / 2, 4, lines, best.fs, ri === 0 ? th.accent : C.text, 1, {}));
       x += best.widths[c];
     });
     if (ri < rows.length - 1) out.push(rect(marginX, y + rh - 1, availW, 2, C.line, 0.2, 5, 0));
     y += rh;
   });
-  if (p.source) out.push(text(marginX, H - 80, 4, [`출처: ${p.source}`], 50, C.dim, 1, {}));
+  if (p.source) out.push(text(marginX, H - 80, 4, [`출처: ${p.source}`], 50, th.dim, 1, {}));
   return out;
 }
 
@@ -227,7 +263,8 @@ function events(panels, w0, w1, family, warn = () => {}) {
 function panelLeft(p, warn) {
   if (!p || (p.type !== 'words' && p.type !== 'check')) return null;
   const r = layoutOf(p, warn).find((q) => q.k === 'rect');
-  return r ? r.x : null;
+  if (!r) return null;
+  return r.x + r.w / 2 > W / 2 ? r.x : null;   // 왼쪽 판은 자막(왼쪽 아래)과 세로로 겹치지 않는 자리에만 둔다(info-theme) — 폭을 줄일 일이 없다
 }
 
-module.exports = { W, H, FONT_FILE, C, events, layoutOf, opacityAt, fadeOf, rrPath, balancedWrap, panelLeft };
+module.exports = { W, H, FONT_FILE, C, POS, events, layoutOf, opacityAt, fadeOf, rrPath, balancedWrap, panelLeft, sizeOf, placeBox };

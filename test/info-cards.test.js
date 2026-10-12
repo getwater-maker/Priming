@@ -241,6 +241,49 @@ const SCRIPT = [
     ok(R.narrowCuesForPanels(cues, [], left) === cues && R.narrowCuesForPanels(cues, [{ type: 'table', t0: 0, t1: 30 }], left) === cues, '판이 없거나 표뿐이면 같은 배열');
     const left0 = (1 - 0.96) / 2 * 1920; ok(Math.abs(((1 - nc[0].style.width) / 2 * 1920 + nc[0].style.xOffset * 960) - left0) < 1, '자막 줄의 왼쪽 가장자리는 그대로');
   }
+  console.log('\n[8] v0.8.5 — 편마다 달라지는 색·모양 · 장면마다 달라지는 자리(core/info-theme)');
+  {
+    const IT = require('../core/info-theme');
+    // 색 — 어떤 색조에서도 글자 대비 4.5:1 이상(최악 = 흰 그림 위)
+    let worst = 99;
+    for (let h = 0; h < 360; h += 15) for (const sat of [0.1, 0.5, 0.9]) {
+      const pal = IT.makePalette(h, h + 40, sat), tx = [0xF4, 0xF1, 0xEA];
+      worst = Math.min(worst, IT.ratio(tx, IT.under(pal.panel, 0.84)), IT.ratio(tx, IT.under(pal.bg, 0.92)), IT.ratio(IT.under(pal.accent, 1), IT.under(pal.bg, 0.92)), IT.ratio(IT.under(pal.dim, 1), IT.under(pal.panel, 0.84)));
+    }
+    ok(worst >= 4.5, '팔레트: 모든 색조에서 글자·강조·흐린 글자 대비 4.5:1 이상(최저 ' + worst.toFixed(2) + ')');
+    // 씨앗 — 같으면 같고 이름이 달라지면 모양이 갈린다
+    const names = []; for (let m = 1; m <= 12; m++) for (let d = 1; d <= 28; d += 3) names.push('[정보_' + String(m).padStart(2, '0') + String(d).padStart(2, '0') + ']');
+    const shapes = new Set(names.map((n) => IT.SHAPES[IT.hash32(n) % IT.SHAPES.length]));
+    ok(IT.hash32('[정보_1015]') === IT.hash32('[정보_1015]') && shapes.size === 4, '씨앗: 같은 이름은 같은 값 · 여러 편에서 모양 4가지가 다 나온다');
+    // 색조·빈 자리 읽기 — 합성 그림(왼쪽 = 단색 갈색 · 오른쪽 = 무늬)
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ithm-'));
+    const img = path.join(tmp, 'a.png');
+    execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x3a5a8a:s=960x1080', '-f', 'lavfi', '-i', 'testsrc2=s=960x1080', '-filter_complex', 'hstack', '-frames:v', '1', img]);
+    const gray = path.join(tmp, 'g.png'); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x808080:s=1920x1080', '-frames:v', '1', gray]);
+    const segAt = (t) => ({ file: img, rel: 0 });
+    const mk = (type, scene, t0, t1) => (type === 'words' ? { type, scene, t0, t1, words: ['지역가입자', '임의계속가입'] } : { type, scene, t0, t1, list: ['첫째', '둘째'] });
+    const build = () => [mk('words', 1, 5, 12), mk('check', 1, 12, 16), mk('words', 2, 30, 36), { type: 'cover', scene: 3, t0: 50, t1: 54, n: 1, m: 3, title: 't' }, { type: 'table', scene: 3, t0: 60, t1: 70, title: 'x', rows: [['a', 'b']] }];
+    const P1 = build(), r1 = await IT.assign(P1, { seed: '[정보_1015]', segAt, total: 80, capBottom: true, ffmpeg: FF, log: () => {} });
+    const P2 = build(); await IT.assign(P2, { seed: '[정보_1015]', segAt, total: 80, capBottom: true, ffmpeg: FF, log: () => {} });
+    ok(JSON.stringify(P1.map((q) => q.theme)) === JSON.stringify(P2.map((q) => q.theme)), '같은 편·같은 그림이면 다시 돌려도 같은 결과(결정적)');
+    ok(P1[0].theme.pos === P1[1].theme.pos, '같은 장면(###) 안에서는 낱말 카드와 확인표가 같은 자리');
+    ok(P1.every((q) => q.theme && q.theme.colors && /^[0-9A-F]{6}$/.test(q.theme.colors.panel)) && r1.colors && r1.shape === P1[0].theme.shape, '모든 판에 팔레트·모양이 달린다(표·구간 표지 포함)');
+    ok(['lc', 'lt'].includes(P1[0].theme.pos), '빈 자리 = 왼쪽(단색 쪽)을 고른다(' + P1[0].theme.pos + ')');
+    const P3 = build(); await IT.assign(P3, { seed: '[정보_1015]', segAt, total: 80, capBottom: false, ffmpeg: FF, log: () => {} });
+    ok(P3.filter((q) => q.type === 'words' || q.type === 'check').every((q) => q.theme.pos === 'rc' || q.theme.pos === 'rt'), '자막이 아래쪽이 아니면 왼쪽 자리는 쓰지 않는다');
+    // 배치 — 자리에 따라 판이 옮겨 가고 · 왼쪽 판은 자막 폭을 줄이지 않는다
+    const lw = { ...mk('words', 1, 0, 5), theme: { shape: 'frame', pos: 'lt' } }, rw = { ...mk('words', 1, 0, 5), theme: { shape: 'tag', pos: 'rc' } };
+    const lr = IA.layoutOf(lw, () => {}).find((q) => q.k === 'rect'), rr = IA.layoutOf(rw, () => {}).find((q) => q.k === 'rect');
+    ok(lr.x === 40 && lr.y === 110 && rr.x + rr.w === 1880 && IA.panelLeft(lw) === null && IA.panelLeft(rw) === rr.x, '배치: 왼쪽 위 = (40,110) · 오른쪽 가운데 = 오른쪽 끝 · 왼쪽 판은 자막 폭 제한 없음');
+    for (const sh of IT.SHAPES) { const t = IA.layoutOf({ ...mk('check', 1, 0, 5), theme: { shape: sh, pos: 'rc', colors: { accent: 'AABBCC' } } }, () => {}); ok(t.length >= 6 && t.filter((q) => q.k === 'text').every((q) => q.fs >= 66), '모양 ' + sh + ': 글자 66px 이상'); }
+    // 색이 거의 없는 그림은 고정 색 · 모양·자리는 그대로
+    const Pg = build(), rg = await IT.assign(Pg, { seed: 'x', segAt: () => ({ file: gray, rel: 0 }), total: 80, capBottom: true, ffmpeg: FF, log: () => {} });
+    ok(rg.colors === null && Pg[0].theme.shape && !Pg[0].theme.colors, '색이 없는 그림 → 고정 색(예전 팔레트) · 모양·자리는 정해진다');
+    // 그림을 못 읽어도 던지지 않는다
+    const Pb = build(); await IT.assign(Pb, { seed: 'x', segAt: () => ({ file: path.join(tmp, '없음.png'), rel: 0 }), total: 80, capBottom: true, ffmpeg: FF, log: () => {} });
+    ok(Pb.every((q) => q.theme && !q.theme.colors), '그림을 못 읽으면 예전 모양으로(오류 없이)');
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
   console.log(`\n${fail ? '❌' : '✅'} info-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });
