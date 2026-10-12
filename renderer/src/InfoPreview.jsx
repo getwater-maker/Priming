@@ -12,13 +12,18 @@ const rgba = (c, op) => {
 const CHECK_POLY = [[0.20, 0.54], [0.31, 0.43], [0.44, 0.56], [0.71, 0.25], [0.82, 0.36], [0.44, 0.78]];
 const px = (v) => (v / (W / 100)).toFixed(4) + 'cqw';   // 1920 기준 픽셀 → 스테이지 폭의 퍼센트
 
-export default function InfoPreview({ panels, testid = 'stage-info', onPanelDown, selKey }) {
+export default function InfoPreview({ panels, testid = 'stage-info', onPanelDown, onPanelDbl, drag }) {
   if (!panels || !panels.length) return null;
   return (
     <div className="stage-info" data-testid={testid} style={{ position: 'absolute', inset: 0, containerType: 'inline-size', overflow: 'hidden', pointerEvents: 'none' }}>
       {panels.map((p, pi) => (
-        <div key={(p.mi != null ? 'm' + p.mi : p.type + pi)} className={'stage-info-panel' + (selKey != null && selKey === p.mi ? ' sel' : '')} data-type={p.type} data-testid={'info-panel-' + p.type}
-          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div key={(p.mi != null ? 'm' + p.mi : p.type + pi)} className={'stage-info-panel' + (drag && drag.mi === p.mi ? ' dragging' : '')} data-type={p.type} data-testid={'info-panel-' + p.type}
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none', ...(drag && drag.mi === p.mi && p.mi != null ? { transform: `translate(${(drag.dx * 100).toFixed(3)}%, ${(drag.dy * 100).toFixed(3)}%)` } : {}) }}>
+          {onPanelDown && p.box && p.mi != null && (
+            <div data-testid="info-hit" title={'📇 끌어서 자리 옮기기(대본에 @자리 꼬리표로 저장) · 두 번 누르면 글자 고치기'}
+              onMouseDown={(ev) => onPanelDown(ev, p)} onDoubleClick={(ev) => onPanelDbl && onPanelDbl(ev, p)}
+              style={{ position: 'absolute', left: (p.box.x / (W / 100)) + '%', top: (p.box.y / (H / 100)) + '%', width: (p.box.w / (W / 100)) + '%', height: (p.box.h / (H / 100)) + '%', pointerEvents: 'auto', cursor: drag && drag.mi === p.mi ? 'grabbing' : 'grab', zIndex: 40 }} />
+          )}
           {(p.prims || []).map((q, i) => {
             if (q.k === 'rect') {
               return <div key={i} style={{ position: 'absolute', left: (q.x / (W / 100)) + '%', top: (q.y / (H / 100)) + '%', width: (q.w / (W / 100)) + '%', height: (q.h / (H / 100)) + '%', background: rgba(q.color, q.op), borderRadius: q.r ? px(q.r) : 0, zIndex: q.layer }} />;

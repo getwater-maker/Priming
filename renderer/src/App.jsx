@@ -1942,6 +1942,7 @@ export default function App() {
   }
   // 🏷 끌어 옮긴 자리(v0.6.85) — 대본마다 logoPos {x,y} · logoDrag = 끄는 중의 자리(놓으면 main 에 저장)
   // 📇 정보 카드 ① 미리보기 — main(info-preview)이 렌더와 같은 계산으로 준 판 · 채널 옵션 「📇 정보 카드」가 켜진 채널만(꺼져 있으면 빈 목록)
+  const [infoRev, setInfoRev] = useState(0);            // 고친 뒤 미리보기를 바로 다시 받는다
   const [infoPv, setInfoPv] = useState(null);
   useEffect(() => {
     if (!isLf || !dto || !presetName || !api.infoPreview) { setInfoPv(null); return undefined; }
@@ -1951,7 +1952,54 @@ export default function App() {
       try { const r = await api.infoPreview({ shortsNum: pj.shortsNum, presetName }); if (!dead) setInfoPv(r && r.ok && r.panels && r.panels.length ? r : null); } catch (_) { if (!dead) setInfoPv(null); }
     }, 500);
     return () => { dead = true; clearTimeout(tm); };
-  }, [dto, presetName, isLf, cursor && cursor.shortsNum]);
+  }, [dto, presetName, isLf, cursor && cursor.shortsNum, infoRev]);
+  // 📇 정보 카드 끌어 옮기기·글자 고치기(v0.8.8) — 둘 다 대본(.md)의 그 표시 줄만 바꾼다(자리 = 줄 끝 `@왼쪽위` · 글자 = 줄 안) → 렌더(MP4)도 같은 결과
+  const [infoDrag, setInfoDrag] = useState(null);       // { mi, dx, dy } — 끄는 중(스테이지 폭·높이 비율)
+  const [infoEdit, setInfoEdit] = useState(null);       // { mi, kind, ... } — 글자 고치기 창
+  function onInfoDown(ev, p) {
+    if (ev.button !== 0 || p.mi == null || !p.box) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const st = ev.currentTarget.closest('.stage-info').getBoundingClientRect();
+    const x0 = ev.clientX, y0 = ev.clientY; let moved = false;
+    const at = (e) => ({ dx: (e.clientX - x0) / st.width, dy: (e.clientY - y0) / st.height });
+    const move = (e) => { const d = at(e); if (Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) >= 3) moved = true; if (moved) setInfoDrag({ mi: p.mi, ...d }); };
+    const up = async (e) => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      setInfoDrag(null);
+      if (!moved) return;
+      const d = at(e);
+      const cx = (p.box.x + p.box.w / 2) / 1920 + d.dx, cy = (p.box.y + p.box.h / 2) / 1080 + d.dy;
+      const pos = (cx < 0.5 ? 'l' : 'r') + (cy < 0.36 ? 't' : 'c');   // 네 자리 중 가까운 곳(오른쪽·왼쪽 x 위·가운데)
+      try {
+        const r = await api.infoEdit({ op: 'pos', mi: p.mi, pos });
+        if (r && r.ok) { setStatus(r.same ? '📇 같은 자리입니다' : `📇 정보 카드를 ${{ rc: '오른쪽 가운데', lc: '왼쪽 가운데', rt: '오른쪽 위', lt: '왼쪽 위' }[pos]}로 옮겼습니다 — 대본(.md)의 그 줄 끝에 @자리 꼬리표를 적었습니다(같은 장면의 판이 함께 옮겨집니다)`); setInfoRev((v) => v + 1); }
+        else setStatus('⚠ ' + ((r && r.error) || '자리를 옮기지 못했습니다'));
+      } catch (er) { logline('정보 카드 옮기기 오류: ' + er.message); }
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
+  async function onInfoDbl(ev, p) {
+    ev.preventDefault(); ev.stopPropagation();
+    if (p.mi == null) return;
+    try {
+      const r = await api.infoEdit({ op: 'read', mi: p.mi });
+      if (!r || !r.ok) { setStatus('⚠ ' + ((r && r.error) || '표시 줄을 읽지 못했습니다')); return; }
+      setInfoEdit({ mi: p.mi, kind: r.kind, wordsText: (r.words || []).join(' | '), text: r.text || '', title: r.title || '', rowsText: (r.rows || []).map((x) => x.join(' | ')).join('\n'), source: r.source || '', err: '' });
+    } catch (er) { logline('정보 카드 읽기 오류: ' + er.message); }
+  }
+  async function saveInfoEdit() {
+    const e = infoEdit; if (!e) return;
+    const payload = e.kind === 'words' ? { words: e.wordsText.split('|') } : e.kind === 'check' ? { text: e.text } : { title: e.title, rows: e.rowsText.split('\n').map((l) => l.split('|')).filter((r) => r.some((c) => c.trim())), source: e.source };
+    try {
+      const r = await api.infoEdit({ op: 'text', mi: e.mi, payload });
+      if (!r || !r.ok) { setInfoEdit({ ...e, err: (r && r.error) || '저장하지 못했습니다' }); return; }
+      setInfoEdit(null); setInfoRev((v) => v + 1);
+      if (r.numChanged) {
+        setStatus('⚠ 숫자 변경 — 팩트시트 대조 필요');
+        uiAlert('⚠ 카드의 숫자가 바뀌었습니다 — 팩트시트 대조 필요\n\n이전: ' + String(r.before || '').split('\n').join(' / ') + '\n이후: ' + String(r.after || '').split('\n').join(' / ') + '\n\n(발행 게이트를 다시 돌려 확인하세요.)');
+      } else setStatus(r.same ? '📇 바뀐 글이 없습니다' : '📇 정보 카드 글을 고쳤습니다 — 대본(.md)의 그 표시 줄만 바꿨습니다');
+    } catch (er) { setInfoEdit({ ...e, err: er.message }); }
+  }
   const [logoDrag, setLogoDrag] = useState(null);
   const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
   // 🏷 이 대본 로고 넣기/빼기(logoOver · 큐 일괄 v0.6.86) — 있으면 채널 켜기보다 이긴다(main overlay-layers.effLogo 와 같은 규칙)
@@ -5320,7 +5368,7 @@ export default function App() {
       })()}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
-      {stageInfo && <InfoPreview panels={stageInfo} />}
+      {stageInfo && <InfoPreview panels={stageInfo} drag={infoDrag} onPanelDown={wsOn && !playerOpen ? onInfoDown : undefined} onPanelDbl={wsOn && !playerOpen ? onInfoDbl : undefined} />}
       <div id="stageCap" ref={stageCapRef} style={stageInfo && stageInfo.some((q) => q.hide) ? { visibility: 'hidden' } : undefined} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
         onMouseDown={onStageCapDown}
         onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
@@ -6070,6 +6118,35 @@ export default function App() {
         <div id="player" className={playerOpen ? 'show' : ''}>{stageEl}</div>
       )}
 
+      {infoEdit && (
+        <div className="modal-bg show" style={{ zIndex: 96 }} data-testid="info-edit-dlg" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setInfoEdit(null); }}>
+          <div className="modal-card" style={{ width: 'min(560px, 92vw)' }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>📇 정보 카드 글 고치기 — {infoEdit.kind === 'words' ? '🔤 낱말 카드' : infoEdit.kind === 'check' ? '✅ 확인표' : '📊 표'}</div>
+            {infoEdit.kind === 'words' && (<>
+              <div className="meta">낱말은 「 | 」 로 나눕니다(최대 3개 권장).</div>
+              <input data-testid="info-edit-words" autoFocus style={{ width: '100%', marginTop: 6 }} value={infoEdit.wordsText} onChange={(ev) => setInfoEdit({ ...infoEdit, wordsText: ev.target.value, err: '' })} />
+            </>)}
+            {infoEdit.kind === 'check' && (<>
+              <div className="meta">한 줄 문구(14자 안쪽 권장).</div>
+              <input data-testid="info-edit-text" autoFocus style={{ width: '100%', marginTop: 6 }} value={infoEdit.text} onChange={(ev) => setInfoEdit({ ...infoEdit, text: ev.target.value, err: '' })} />
+            </>)}
+            {infoEdit.kind === 'table' && (<>
+              <div className="meta">제목</div>
+              <input data-testid="info-edit-title" autoFocus style={{ width: '100%', marginTop: 4 }} value={infoEdit.title} onChange={(ev) => setInfoEdit({ ...infoEdit, title: ev.target.value, err: '' })} />
+              <div className="meta" style={{ marginTop: 8 }}>표 — 한 줄이 한 행 · 칸은 「 | 」 로 나눕니다(첫 줄 = 머리)</div>
+              <textarea data-testid="info-edit-rows" rows={6} style={{ width: '100%', marginTop: 4, fontFamily: 'inherit' }} value={infoEdit.rowsText} onChange={(ev) => setInfoEdit({ ...infoEdit, rowsText: ev.target.value, err: '' })} />
+              <div className="meta" style={{ marginTop: 8 }}>출처(없으면 비움)</div>
+              <input data-testid="info-edit-source" style={{ width: '100%', marginTop: 4 }} value={infoEdit.source} onChange={(ev) => setInfoEdit({ ...infoEdit, source: ev.target.value, err: '' })} />
+            </>)}
+            <div className="meta" style={{ marginTop: 8 }}>⚠ 숫자를 고치면 「팩트시트 대조 필요」 경고가 뜹니다. 대본(.md)의 그 표시 줄만 바뀌고 낭독·🖼️·🎬 줄은 그대로입니다.</div>
+            {infoEdit.err && <div style={{ color: '#b00020', marginTop: 6 }} data-testid="info-edit-err">⚠ {infoEdit.err}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button className="ghost" onClick={() => setInfoEdit(null)}>취소</button>
+              <button data-testid="info-edit-save" onClick={saveInfoEdit}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 🏷 채널 AI 고지 서식 — 채널 편집 값(ch.aiFmt)에 바로 들어가고 「저장」으로 저장 */}
       {aiFmtDlg && ch && (
         <div className="modal-bg show" style={{ zIndex: 95 }} data-testid="aifmtdlg">

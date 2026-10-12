@@ -88,6 +88,59 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const p5 = await settle((p) => p.includes('table'));
     ok(p5.includes('table'), `표가 ⑤번째 문장에서 보인다(${p5.join(',')})`);
     ok(await capHidden(), '표가 뜨는 동안 ① 자막은 가려진다');
+    // [v0.8.8] 끌어 옮기기 → 대본(.md) 줄 끝에 @자리 · 글자 고치기 → 그 줄만 바뀐다 · 숫자가 바뀌면 경고
+    win.on('dialog', (d) => { global.__dlgMsg = d.message(); d.accept().catch(() => {}); });
+    await goto(4); await settle((p) => p.includes('words'));
+    const before = fs.readFileSync(MD, 'utf8');
+    {
+      const hit = win.locator('[data-testid="info-hit"]').first();
+      const hb = await hit.boundingBox();
+      const st = await win.locator('#stage').boundingBox();
+      ok(!!hb && hb.width > 20, '판 위에 끌 수 있는 자리(info-hit)가 있다');
+      await win.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await win.mouse.down();
+      await win.mouse.move(st.x + st.width * 0.75, st.y + st.height * 0.55, { steps: 8 });
+      const dragging = await win.evaluate(() => !!document.querySelector('.stage-info-panel.dragging'));
+      await win.mouse.up();
+      ok(dragging, '끄는 동안 판이 마우스를 따라 움직인다');
+      await win.waitForTimeout(900);
+      const after = fs.readFileSync(MD, 'utf8');
+      const bl = before.split('\n'), al = after.split('\n');
+      const diff = bl.map((l, i) => (l === al[i] ? -1 : i)).filter((i) => i >= 0);
+      ok(bl.length === al.length && diff.length === 1 && /@오른쪽가운데$/.test(al[diff[0]]) && /🔤 카드: 지역가입자 \| 임의계속가입/.test(al[diff[0]]), '놓으면 대본(.md)의 🔤 줄 끝에 @오른쪽가운데 만 적힌다(다른 줄은 한 글자도 그대로)');
+      const nb = await win.evaluate(() => { const st = document.getElementById('stage').getBoundingClientRect(); const r = document.querySelector('[data-type="words"] [data-testid="info-hit"]'); if (!r) return null; const b = r.getBoundingClientRect(); return (b.left + b.width / 2 - st.left) / st.width; });
+      ok(nb != null && nb > 0.6, `미리보기 판이 오른쪽으로 옮겨 그려진다(가운데 x ${nb && nb.toFixed(2)})`);
+    }
+    {
+      await win.locator('[data-testid="info-hit"]').first().dblclick();
+      await win.waitForSelector('[data-testid="info-edit-dlg"]', { timeout: 4000 });
+      ok((await win.inputValue('[data-testid="info-edit-words"]')) === '지역가입자 | 임의계속가입', '두 번 누르면 글자 고치기 창 — 현재 낱말이 들어 있다');
+      await win.fill('[data-testid="info-edit-words"]', '가입자 | 피부양자');
+      await win.click('[data-testid="info-edit-save"]');
+      await win.waitForSelector('[data-testid="info-edit-dlg"]', { state: 'detached', timeout: 4000 });
+      await win.waitForTimeout(700);
+      const t = fs.readFileSync(MD, 'utf8');
+      ok(/> 🔤 카드: 가입자 \| 피부양자 @오른쪽가운데/.test(t) && !/지역가입자 \| 임의계속가입/.test(t) && t.includes('셋째 문장입니다. 넷째 문장입니다.') && t.includes('> 📊 표: 표 제목'), '저장하면 그 표시 줄의 글만 바뀐다(꼬리표 유지 · 낭독·표 줄 그대로)');
+      const txt2 = await settle((p) => p.includes('words')); void txt2;
+      const shown = await win.evaluate(() => (document.querySelector('[data-type="words"]') || {}).innerText || '');
+      ok(/가입자/.test(shown) && /피부양자/.test(shown) && !/임의계속가입/.test(shown), '미리보기 글도 바로 바뀐다');
+      // 숫자 변경 경고
+      global.__dlgMsg = '';
+      await win.locator('[data-testid="info-hit"]').first().dblclick();
+      await win.waitForSelector('[data-testid="info-edit-dlg"]', { timeout: 4000 });
+      await win.fill('[data-testid="info-edit-words"]', '가입자 | 3개월');
+      await win.click('[data-testid="info-edit-save"]');
+      await win.waitForSelector('[data-testid="info-edit-dlg"]', { state: 'detached', timeout: 4000 });
+      await win.waitForTimeout(500);
+      ok(/팩트시트 대조 필요/.test(global.__dlgMsg || ''), '숫자가 바뀌면 「팩트시트 대조 필요」 경고가 뜬다');
+      // 잘못된 글은 거절(@)
+      await win.locator('[data-testid="info-hit"]').first().dblclick();
+      await win.waitForSelector('[data-testid="info-edit-dlg"]', { timeout: 4000 });
+      await win.fill('[data-testid="info-edit-words"]', '가@나');
+      await win.click('[data-testid="info-edit-save"]');
+      await win.waitForSelector('[data-testid="info-edit-err"]', { timeout: 3000 });
+      ok(/@/.test(await win.locator('[data-testid="info-edit-err"]').innerText()), '「@」 가 든 글은 저장하지 않고 이유를 보여 준다');
+      await win.click('.modal-card button:has-text("취소")');
+    }
     // 채널 옵션을 끄면 판이 없다
     await win.evaluate(async (name) => { await window.api.savePreset({ name, patch: { infoCards: false } }); }, CH);
     await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });

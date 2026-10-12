@@ -2844,11 +2844,34 @@ async function infoPreviewFor(pr, presetName, scriptPath) {
   const segAt = (t) => { const sp = spans.find((x) => t >= x.t0 && t < x.t1); return sp && sp.file && fs.existsSync(sp.file) ? { file: sp.file, rel: 0 } : null; };
   const capY = (preset.capLong && preset.capLong.yAlign) || (preset.captionStyle && preset.captionStyle.yAlign) || 'bottom';
   try { await IT.assign(r.panels, { seed: path.basename(scriptPath).replace(/\.[^.]+$/, ''), segAt, total: r.total || 0, capBottom: capY === 'bottom', ffmpeg: require('./core/media-utils').getFfmpegPath(), log: () => {} }); } catch (_) {}
-  const panels = r.panels.map((q) => ({ type: q.type, mi: q.mi == null ? null : q.mi, s0: q.s0, s1: q.s1, hide: !!q.hideCaptions, pos: q.theme && q.theme.pos, prims: IA.layoutOf(q, () => {}) }));
+  const panels = r.panels.map((q) => { const prims = IA.layoutOf(q, () => {}); const bg = (q.type === 'words' || q.type === 'check') ? prims.find((x) => x.k === 'rect') : null;
+    return { type: q.type, mi: q.mi == null ? null : q.mi, s0: q.s0, s1: q.s1, hide: !!q.hideCaptions, pos: q.theme && q.theme.pos, box: bg ? { x: bg.x, y: bg.y, w: bg.w, h: bg.h } : null, prims }; });
   const out = { ok: true, panels, warnings: r.warnings };
   _infoPvCache.set(sig, out); if (_infoPvCache.size > 8) _infoPvCache.delete(_infoPvCache.keys().next().value);
   return out;
 }
+// 📇 정보 카드 표시 줄 고치기(① 미리보기 · v0.8.8) — 대본(.md) 의 **표시 줄 그 줄만** 바꾼다(core/info-edit · 검증 재파싱 뒤에만 쓴다 · 낭독·🖼️·🎬 줄 불변).
+//   op: 'read'(현재 글) · 'pos'(자리 꼬리표 @왼쪽위) · 'text'(글 고치기). 숫자가 바뀌면 numChanged → 화면이 「팩트시트 대조 필요」 경고.
+ipcMain.handle('info-edit', async (_e, args = {}) => {
+  try {
+    const sp = S.scriptPath;
+    if (!sp || !fs.existsSync(sp)) return { ok: false, error: '대본(.md)을 읽을 수 없습니다' };
+    const IE = require('./core/info-edit');
+    const raw = fs.readFileSync(sp, 'utf8'); const mi = +args.mi;
+    if (!(mi >= 0)) return { ok: false, error: '표시 번호가 없습니다' };
+    if (args.op === 'read') return IE.readMark(raw, mi);
+    if (_jobsBusy()) return { ok: false, error: '작업 중에는 표시 줄을 고칠 수 없습니다 — 끝나면 다시 해 주세요' };
+    const r = args.op === 'pos' ? IE.setPos(raw, mi, args.pos || null) : args.op === 'text' ? IE.setText(raw, mi, args.payload || {}) : { ok: false, error: '모르는 명령입니다' };
+    if (!r.ok) { log(`⚠ 정보 카드 고치기 실패 — ${r.error}`); return r; }
+    if (r.same) return { ok: true, same: true, numChanged: false };
+    const tmp = sp + '.priming-tmp';
+    await P.retryFs(() => { fs.writeFileSync(tmp, r.raw, 'utf8'); fs.renameSync(tmp, sp); }, '대본 표시 줄 쓰기', log);
+    _infoPvCache.clear();
+    log(`📇 정보 카드 ${args.op === 'pos' ? `자리 → ${args.pos ? require('./core/info-cards').POS_NAMES[args.pos] : '자동'}` : '글 고침'} — 대본(.md)의 표시 줄 ${mi + 1}번째만 바꿨습니다 (${path.basename(sp)})`);
+    if (r.numChanged) log('⚠ 정보 카드 숫자가 바뀌었습니다 — 팩트시트 대조 필요: 「' + String(r.before || '').split('\n').join(' / ') + '」 → 「' + String(r.after || '').split('\n').join(' / ') + '」');
+    return { ok: true, numChanged: !!r.numChanged, before: r.before, after: r.after };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+});
 ipcMain.handle('info-preview', async (_e, args = {}) => {
   try {
     const pr = S.parsed && S.parsed.projects && S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
