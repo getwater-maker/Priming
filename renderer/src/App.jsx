@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import InfoPreview from './InfoPreview.jsx';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vidListText } from './lib/videoSelect.js';
@@ -491,6 +492,10 @@ export default function App() {
   //   단건 ⚡ 만들기와 큐 순차 제작이 **같은 체크 하나**를 쓴다. PC 별로 기억한다(pm.openAfterMake).
   const [openEachVrew, setOpenEachVrew] = useState(() => lsGet('pm.openAfterMake', '1') !== '0');
   const pickOpenAfterMake = (on) => { setOpenEachVrew(on); lsSet('pm.openAfterMake', on ? '1' : '0'); };
+  // ⬆ 완성 후 업로드(v0.8.7) — 'auto' = 채널 설정(⚙ 채널편집 → 폴더 → 자동 업로드)대로 · 'on'/'off' = 이 PC 에서 고른 값이 채널 설정보다 이긴다(올릴 채널은 늘 채널의 업로드채널)
+  const [uploadAfter, setUploadAfter] = useState(() => { const v = lsGet('pm.uploadAfterMake', ''); return v === '1' ? 'on' : v === '0' ? 'off' : 'auto'; });
+  const pickUploadAfter = (on) => { setUploadAfter(on ? 'on' : 'off'); lsSet('pm.uploadAfterMake', on ? '1' : '0'); };
+  const uploadArg = uploadAfter === 'auto' ? null : uploadAfter;
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
   const [splitOpts, setSplitOpts] = useState({ intro: 3, main: 10, short: 10, long: 20, mode: 'h3' });
@@ -1266,6 +1271,7 @@ export default function App() {
       outMode: effOutMode(),  // 전체 / 음성만 / 화면만 (화이트보드는 늘 전체)
       outTarget, // .vrew / ✏ 화이트보드 MP4
       openVrew: openEachVrew, // 📂 완성 후 열기(체크 해제 = 다 만들어도 열지 않는다)
+      uploadAfter: uploadArg, // ⬆ 완성 후 업로드(null = 채널 설정대로)
     };
   }
   // ✏ 화이트보드는 음성·그림이 **둘 다** 있어야 만들어진다 → 출력 방식을 늘 「전체」로 본다
@@ -1321,7 +1327,7 @@ export default function App() {
       //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위는 공통으로 보내지 않는다 — main 이 대본마다 자기 범위(저장값 → 도입부)를 쓴다(v0.5.73).
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode() }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus(r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
@@ -1935,6 +1941,17 @@ export default function App() {
     } catch (e) { logline('로고 기본 자리 저장 오류: ' + e.message); setStatus('⚠ ' + e.message); }
   }
   // 🏷 끌어 옮긴 자리(v0.6.85) — 대본마다 logoPos {x,y} · logoDrag = 끄는 중의 자리(놓으면 main 에 저장)
+  // 📇 정보 카드 ① 미리보기 — main(info-preview)이 렌더와 같은 계산으로 준 판 · 채널 옵션 「📇 정보 카드」가 켜진 채널만(꺼져 있으면 빈 목록)
+  const [infoPv, setInfoPv] = useState(null);
+  useEffect(() => {
+    if (!isLf || !dto || !presetName || !api.infoPreview) { setInfoPv(null); return undefined; }
+    const pj = curProject(); if (!pj) return undefined;
+    let dead = false;
+    const tm = setTimeout(async () => {
+      try { const r = await api.infoPreview({ shortsNum: pj.shortsNum, presetName }); if (!dead) setInfoPv(r && r.ok && r.panels && r.panels.length ? r : null); } catch (_) { if (!dead) setInfoPv(null); }
+    }, 500);
+    return () => { dead = true; clearTimeout(tm); };
+  }, [dto, presetName, isLf, cursor && cursor.shortsNum]);
   const [logoDrag, setLogoDrag] = useState(null);
   const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
   // 🏷 이 대본 로고 넣기/빼기(logoOver · 큐 일괄 v0.6.86) — 있으면 채널 켜기보다 이긴다(main overlay-layers.effLogo 와 같은 규칙)
@@ -5230,6 +5247,14 @@ export default function App() {
     const on = VLook.aiNoticeOn(VLook.aiNoticeTiming(aiCfg), ci.pr.aiNoticeRange, { n: ci.l.n, ord, start, dur: ci.l.dur || 2.5 });
     return on ? { text: String(aiCfg.text || '').trim() || VLook.AI_NOTICE_TEXT, key: 'ai-' + (ci.pr.aiNoticeRange ? JSON.stringify(ci.pr.aiNoticeRange) : JSON.stringify(aiCfg)) } : null;
   })();
+  // 📇 지금 문장에서 보이는 정보 카드(문장 범위 s0~s1 — 그룹 순서 번호 = ② 목록의 순번)
+  const stageInfo = (() => {
+    if (!infoPv || !isLf || !cursor) return null;
+    const ci = cursorInfo(); if (!ci) return null;
+    let ord = ci.l.sentIdx; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
+    const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1);
+    return act.length ? act : null;
+  })();
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
     <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown} onContextMenu={onStageCtx}>
@@ -5295,7 +5320,8 @@ export default function App() {
       })()}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
-      <div id="stageCap" ref={stageCapRef} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
+      {stageInfo && <InfoPreview panels={stageInfo} />}
+      <div id="stageCap" ref={stageCapRef} style={stageInfo && stageInfo.some((q) => q.hide) ? { visibility: 'hidden' } : undefined} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
         onMouseDown={onStageCapDown}
         onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
       {wsOn && sentEdit && sentEdit.where === 'stage' && stageEditBox && (() => {
@@ -5602,6 +5628,12 @@ export default function App() {
             </select>
             {/* 📂 완성 후 열기(v0.5.79) — 헤더(⚡ 만들기 옆)에 두면 1366px 에서 ■ 중단이 둘째 줄로 밀린다(v0.5.81 실측) → 완성 종류 옆으로 */}
             <label className="chk" data-testid="open-after-make" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>
+            {(outTarget === 'mp4' || outTarget === 'whiteboard') && (() => {
+              const chp = (presets || []).find((q) => q.name === presetName) || null;
+              const eff = uploadAfter === 'on' || (uploadAfter === 'auto' && !!(chp && chp.ytAuto && chp.ytChannelId));
+              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 처음엔 채널 설정(⚙ 채널편집 → 폴더 → 자동 업로드)을 따르고, 한 번 고르면 이 PC 에서 그 선택이 이깁니다.' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={eff} onChange={(e) => { pickUploadAfter(e.target.checked); if (e.target.checked && chp && !chp.ytChannelId) setStatus('⚠ 이 채널은 업로드채널이 정해지지 않아 올리지 못합니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); }} />완성 후 업로드</label>;
+            })()}
             {outTarget === 'whiteboard' && (<>
               <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
                 <option value="1920">1920 (최종)</option>
@@ -5617,7 +5649,7 @@ export default function App() {
             {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
             {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
-            <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
+            <button className="ghost" disabled={!loaded} data-testid="open-out-folder" title={outTarget === 'mp4' ? '🎬 유튜브 MP4 가 저장되는 폴더(채널 「저장 폴더」)를 엽니다' : outTarget === 'whiteboard' ? '✏ 화이트보드 MP4 폴더를 엽니다' : '.vrew 가 저장되는 대본 폴더를 엽니다'} onClick={() => api.openFolder({ target: outTarget, presetName: presetName || null })}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
           </span>
               <span className="hgroup rb-extra" id="capbar">
         <button className="ghost" disabled={!loaded || prog.ttsD === 0}

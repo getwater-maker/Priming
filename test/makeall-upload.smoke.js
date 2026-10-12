@@ -55,10 +55,10 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     for (const g of [1, 2]) await win.evaluate(async (gn) => window.api.attachAsset({ shortsNum: 1, groupNum: gn }), g);
     const logText = () => win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
     const gateHits = async () => ((await logText()).match(/✗ 유튜브 업로드 — 이 채널이 이 PC 에서 연결되지 않았습니다/g) || []).length;
-    const make = () => win.evaluate(async (name) => {
-      try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outTarget: 'mp4', outMode: 'full', openVrew: false }); return 'ok'; }
+    const make = (extra = {}) => win.evaluate(async ({ name, extra }) => {
+      try { await window.api.makeAll({ ...extra, presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outTarget: 'mp4', outMode: 'full', openVrew: false }); return 'ok'; }
       catch (e) { return 'ERR: ' + e.message; }
-    }, CH);
+    }, { name: CH, extra });
     const findMp4 = () => { const all = []; const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (/\.mp4$/i.test(f)) all.push(p); } }; walk(TMP); return all; };
 
     console.log('\n[1] 첫 만들기 — MP4 를 굽고 업로드 관문으로');
@@ -82,6 +82,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     { const M = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
       const a = M.indexOf('이미 있어 다시 만들지 않습니다'), b = M.indexOf('같은 이름의 MP4 가 이미 있어 건너뜁니다');
       ok(a > 0 && /uploadExisting\(\);\s*continue;/.test(M.slice(a, a + 300)) && b > 0 && /uploadExisting\(\); continue;/.test(M.slice(b, b + 200)), '두 출구(「입력이 그대로」 · 「같은 이름 MP4 건너뛰기」) 모두 uploadExisting() — 업로드 관문(중복 검사)으로'); }
+    console.log('\n[3] ⬆ 헤더 「완성 후 업로드」 해제(uploadAfter:off) — 채널에 자동 업로드가 켜져 있어도 올리지 않는다');
+    const r3 = await make({ uploadAfter: 'off' });
+    await win.waitForTimeout(2500);
+    const h3 = await gateHits();
+    ok(r3 === 'ok' && h3 === h2, `해제하면 업로드 관문에 가지 않는다 (관문 ${h2} → ${h3})`);
+    const r4 = await make({ uploadAfter: 'on' });
+    await win.waitForTimeout(2500);
+    const h4 = await gateHits();
+    ok(r4 === 'ok' && h4 === h3 + 1, `체크하면(uploadAfter:on) 다시 업로드 관문으로 (관문 ${h3} → ${h4})`);
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

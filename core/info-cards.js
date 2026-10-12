@@ -117,10 +117,11 @@ function plan(project, parsed, opts = {}) {
   const T = new Array(sents.length).fill(null), GI = new Array(sents.length).fill(null); let t = 0, gi = -1;   // GI = 문장이 든 그룹(### 장면) 번호 — 판의 자리를 장면 안에서 고정하는 열쇠
   for (const g of (project.groups || [])) { gi++; for (const id of (g.sentenceIds || [])) {
     const i = byId.get(id); if (i == null) continue; GI[i] = gi;
-    const s = sents[i], d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : 0;
+    const s = sents[i], d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : (opts.estimate ? 2.5 : 0);   // estimate = ① 미리보기 — 음성이 없으면 문장당 2.5초로 어림(목록 시각과 같은 어림)
     T[i] = d > 0 ? [t, t + d] : null; t += d;
   } }
   const total = t;
+  const spans = []; { let gi2 = -1; for (const g of (project.groups || [])) { gi2++; let a = null, b = null; for (const id of (g.sentenceIds || [])) { const i = byId.get(id); if (i == null || !T[i]) continue; if (a == null) a = T[i][0]; b = T[i][1]; } if (a != null) spans.push({ gi: gi2, t0: a, t1: b }); } }
   // 대본(.md)과 작업본의 문장이 같은 순서·같은 글인가 — 아니면 위치를 믿을 수 없다(조용히 틀리지 않는다)
   if (parsed.texts.length !== sents.length) {
     warnings.push(`📇 정보 카드 — 대본 문장 ${parsed.texts.length}개 ≠ 작업본 문장 ${sents.length}개(대본을 다시 읽거나 문장을 고친 뒤 파일 저장이 안 된 듯) → 정보 카드를 모두 건너뜁니다`);
@@ -149,7 +150,7 @@ function plan(project, parsed, opts = {}) {
   // ①③④ 표시 줄
   const wordMarks = parsed.marks.filter((m) => m.kind === 'words');
   const checkTexts = [];   // 지금까지 나온 ✅ (영상 전체에서 쌓임)
-  for (const m of parsed.marks) {
+  for (const [mi, m] of parsed.marks.entries()) {
     const tm = timeOf(m.sent);
     if (!tm) { warnings.push(`📇 정보 카드 — 「${(m.line || m.kind).slice(0, 30)}」 표시를 붙일 문장을 못 찾았습니다 → 건너뜁니다`); if (m.kind === 'check') checkTexts.push(m.text); continue; }
     if (m.kind === 'words') {
@@ -161,17 +162,17 @@ function plan(project, parsed, opts = {}) {
       const bEnd = blockEnd(m.sent);
       const endIdx = Math.min(bEnd, next ? next.sent - 1 : bEnd);
       const endTm = (T[endIdx] || tm);
-      panels.push({ type: 'words', scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
+      panels.push({ type: 'words', mi, scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.max(endTm[1], tm[0] + 2), words });
     } else if (m.kind === 'table') {
       const hasHead = m.rows.length >= 1;
       if (!hasHead) { warnings.push(`📇 정보 카드 — 📊 표 「${m.title.slice(0, 20)}」 에 표 줄(> | … |)이 없습니다 → 건너뜁니다`); continue; }
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'table', scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
+      panels.push({ type: 'table', mi, scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
     } else if (m.kind === 'check') {
       if (m.text.length > CHECK_WARN_CHARS) warnings.push(`📇 정보 카드 — ✅ 문구가 ${m.text.length}자(권장 ${CHECK_WARN_CHARS}자 이하): 「${m.text}」 — 판 폭을 넘으면 그대로 그립니다`);
       checkTexts.push(m.text);
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'check', scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+      panels.push({ type: 'check', mi, scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
     }
   }
   // 📍 자리 꼬리표(`@왼쪽위`) — 「그 줄이 시작한 장면」 단위 · 한 장면에 서로 다른 꼬리표가 있으면 첫 것만 쓰고 ⚠(한 장면 안에서 판이 뛰지 않는다)
@@ -206,7 +207,20 @@ function plan(project, parsed, opts = {}) {
     for (const [a, b] of segs) if (b - a >= MIN_SEG) out.push({ ...p, t0: a, t1: b });
   }
   out.sort((a, b) => a.t0 - b.t0 || RANK[b.type] - RANK[a.type]);
-  return { panels: out, warnings };
+  // 문장 범위(s0~s1 · 그룹 순서 번호 = ① 칸 목록의 순번과 같다) — 미리보기가 「이 문장에서 보이는 판」을 찾는 열쇠
+  for (const p of out) {
+    // 문장을 절반 넘게 덮는 문장만 센다(구간 표지가 다음 문장 첫 1초에 걸쳤다고 그 문장 전체에 보이게 하지 않는다) — 하나도 없으면 가장 많이 겹치는 문장
+    let s0 = -1, s1 = -1, best = -1, bi = -1;
+    for (let i = 0; i < T.length; i++) {
+      if (!T[i]) continue;
+      const ov = Math.min(T[i][1], p.t1) - Math.max(T[i][0], p.t0), len = T[i][1] - T[i][0];
+      if (ov > best) { best = ov; bi = i; }
+      if (ov > 0 && ov >= len * 0.5 - 1e-6) { if (s0 < 0) s0 = i; s1 = i; }
+    }
+    if (s0 < 0) { s0 = s1 = bi; }
+    p.s0 = s0; p.s1 = s1;
+  }
+  return { panels: out, warnings, spans, total };
 }
 
 module.exports = { POS_TAGS, POS_NAMES, splitPosTag, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };

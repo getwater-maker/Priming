@@ -252,6 +252,7 @@ contextBridge.exposeInMainWorld('api', {
   videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
   setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),
+  infoPreview: (args) => ipcRenderer.invoke('info-preview', args),
   setQueueLogo: (args) => ipcRenderer.invoke('set-queue-logo', args),   // 🏷 롱폼 큐 대본 모두에 로고 넣기/빼기(v0.6.86)   // 🏷 끌어 옮긴 로고 자리(v0.6.85)
   bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),
@@ -296,7 +297,7 @@ contextBridge.exposeInMainWorld('api', {
   exportPrompts: (args) => ipcRenderer.invoke('export-prompts', args),
   importPrompts: (args) => ipcRenderer.invoke('import-prompts', args),
   generatePromptsApi: (args) => ipcRenderer.invoke('generate-prompts-api', args),
-  openFolder: () => ipcRenderer.invoke('open-folder'),
+  openFolder: (args) => ipcRenderer.invoke('open-folder', args),
   // alert/confirm 직전에 창을 앞으로 — 네이티브 모달이 다른 창 뒤에 숨으면 앱 전체가 입력을 거부한다.
   focusWindow: () => ipcRenderer.invoke('focus-window'),
   monitorOff: () => ipcRenderer.invoke('monitor-off'),

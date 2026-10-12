@@ -94,6 +94,24 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         ok((await c.count()) === 1 && await c.isVisible() && /예상 무료/.test(t) && /[\d,]+자/.test(t), `🎤 TTS 옆 💰 예상 비용 (${t})`); }
       await win.locator('.menus button[data-menu]', { hasText: '완성' }).first().click(); await win.waitForTimeout(250);
       ok(await win.locator('[data-testid="open-after-make"]').isVisible(), '④ 완성 메뉴에 「완성 후 열기」 체크');
+      // ⬆ v0.8.7 — 「완성 후 업로드」 체크(MP4·화이트보드일 때만) · 📁 출력폴더는 고른 완성물 종류의 폴더
+      {
+        const sel = 'select[title^="완성물 종류"]';
+        const before = await win.locator(sel).inputValue();
+        await win.selectOption(sel, 'vrew'); await win.waitForTimeout(150);
+        ok(await win.locator('[data-testid="upload-after-make"]').count() === 0 && /\.vrew/.test((await win.locator('[data-testid="open-out-folder"]').getAttribute('title')) || ''), '.vrew 일 때는 「완성 후 업로드」가 없고 📁 출력폴더 = .vrew 폴더');
+        await win.selectOption(sel, 'mp4'); await win.waitForTimeout(250);
+        const up = win.locator('[data-testid="upload-after-make"]');
+        ok(await up.isVisible() && /MP4/.test((await win.locator('[data-testid="open-out-folder"]').getAttribute('title')) || ''), '🎬 유튜브 MP4 일 때 「완성 후 업로드」 체크가 「완성 후 열기」 옆에 생기고 📁 출력폴더 = MP4 폴더');
+        const ob = await win.locator('[data-testid="open-after-make"]').boundingBox(), ub = await up.boundingBox();
+        ok(ob && ub && ub.x > ob.x && Math.abs(ub.y - ob.y) < 12, '「완성 후 업로드」 는 「완성 후 열기」 바로 다음(같은 줄)');
+        await up.locator('input').check(); await win.waitForTimeout(100);
+        ok(await win.evaluate(() => localStorage.getItem('pm.uploadAfterMake')) === '1', '체크하면 이 PC 에 기억된다(pm.uploadAfterMake=1)');
+        await up.locator('input').uncheck(); await win.waitForTimeout(100);
+        ok(await win.evaluate(() => localStorage.getItem('pm.uploadAfterMake')) === '0', '해제하면 0(올리지 않음 — 채널 설정보다 이긴다)');
+        await win.evaluate(() => localStorage.removeItem('pm.uploadAfterMake'));
+        await win.selectOption(sel, before || 'vrew'); await win.waitForTimeout(150);
+      }
       const mo = await win.locator('[data-testid="monitor-off"]').boundingBox();
       ok(!!mo && await win.evaluate(({ x, y }) => !!(document.elementFromPoint(x, y) || {}).closest?.('[data-testid="monitor-off"]'), { x: mo.x + mo.width / 2, y: mo.y + mo.height / 2 }), '🌙 모니터 끄기 버튼이 보이고 눌리는 자리(누르지는 않는다)');
       await win.locator('.menus button[data-menu]', { hasText: '대본·음성' }).first().click(); await win.waitForTimeout(250);

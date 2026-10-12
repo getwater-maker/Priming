@@ -2827,6 +2827,34 @@ function infoOptsFor(pr, preset, scriptPath) {
     return r.panels.length ? r.panels : null;
   } catch (e) { log('⚠ 정보 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
 }
+// 📇 ① 미리보기용 정보 카드 — 렌더와 **같은 계획·같은 배치**(core/info-cards.plan · info-theme · info-ass)를 그대로 쓰고, 그린 프리미티브(사각형·글자·체크)만 화면으로 보낸다.
+//   🔑 배치 계산을 화면에서 다시 하지 않는다(두 벌이 되면 MP4 와 어긋난다). 음성이 없으면 문장당 2.5초로 어림(estimate). 같은 입력이면 결과를 기억한다.
+const _infoPvCache = new Map();
+async function infoPreviewFor(pr, presetName, scriptPath) {
+  const preset = resolvePreset(presetName);
+  if (!pr || !preset || !preset.infoCards) return { ok: true, off: true, panels: [] };
+  if (!scriptPath || !fs.existsSync(scriptPath)) return { ok: true, panels: [], error: '대본(.md)을 읽을 수 없습니다' };
+  let mt = 0; try { mt = fs.statSync(scriptPath).mtimeMs; } catch (_) {}
+  const sig = JSON.stringify([scriptPath, mt, presetName, (pr.sentences || []).length, Math.round((pr.sentences || []).reduce((a, x) => a + (+x.ttsDurationSec || 0), 0) * 10), (pr.groups || []).map((g) => g.imagePath || '').join('|')]);
+  if (_infoPvCache.has(sig)) return _infoPvCache.get(sig);
+  const IC = require('./core/info-cards'), IA = require('./core/info-ass'), IT = require('./core/info-theme');
+  const parsed = IC.fromRaw(fs.readFileSync(scriptPath, 'utf8'));
+  const r = IC.plan(pr, parsed, { sections: true, estimate: true });
+  const spans = (r.spans || []).map((sp) => ({ ...sp, file: ((pr.groups || [])[sp.gi] || {}).imagePath || null }));
+  const segAt = (t) => { const sp = spans.find((x) => t >= x.t0 && t < x.t1); return sp && sp.file && fs.existsSync(sp.file) ? { file: sp.file, rel: 0 } : null; };
+  const capY = (preset.capLong && preset.capLong.yAlign) || (preset.captionStyle && preset.captionStyle.yAlign) || 'bottom';
+  try { await IT.assign(r.panels, { seed: path.basename(scriptPath).replace(/\.[^.]+$/, ''), segAt, total: r.total || 0, capBottom: capY === 'bottom', ffmpeg: require('./core/media-utils').getFfmpegPath(), log: () => {} }); } catch (_) {}
+  const panels = r.panels.map((q) => ({ type: q.type, mi: q.mi == null ? null : q.mi, s0: q.s0, s1: q.s1, hide: !!q.hideCaptions, pos: q.theme && q.theme.pos, prims: IA.layoutOf(q, () => {}) }));
+  const out = { ok: true, panels, warnings: r.warnings };
+  _infoPvCache.set(sig, out); if (_infoPvCache.size > 8) _infoPvCache.delete(_infoPvCache.keys().next().value);
+  return out;
+}
+ipcMain.handle('info-preview', async (_e, args = {}) => {
+  try {
+    const pr = S.parsed && S.parsed.projects && S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+    return await infoPreviewFor(pr, String(args.presetName || ''), S.scriptPath);
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e), panels: [] }; }
+});
 function fxOptsFor(pr, preset) {
   try {
     const FXO = require('./core/fx-overlay');
@@ -7252,7 +7280,7 @@ async function runMakeAllBody(opts = {}) {
   //   이 함수 안에서 이름·제목·대본 경로가 필요한 곳은 전부 runCtx 를 넘긴다(test:runctx 가 센다).
   const scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
   if (!opts.dry && !(await royGate(parsed, { queue: !!opts._fromQueue, what: '만들기' }))) return;   // 🟥 미확인 경험(큐 = 던져서 그 편 실패·다음 편 계속)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null, uploadAfter = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
@@ -7266,6 +7294,8 @@ async function runMakeAllBody(opts = {}) {
   if (outMode !== 'full') log(`⚙ 출력 방식: ${outModeLabel(outMode)}`);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
+  // ⬆ 헤더 「완성 후 업로드」(v0.8.7) — 'on'/'off' 면 채널의 자동 업로드 설정보다 이긴다(null = 채널 설정대로) · 업로드 대상 채널은 늘 채널의 업로드채널
+  if (preset && uploadAfter === 'on') preset = { ...preset, ytAuto: true }; else if (preset && uploadAfter === 'off') preset = { ...preset, ytAuto: false };
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
   S.preset = preset;
   let ttsMgr = null;
@@ -7717,6 +7747,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
         outTarget: (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew')),
         dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
+        uploadAfter: (common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null,   // ⬆ 헤더 「완성 후 업로드」
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
       });
       it.status = 'done'; okN++;
@@ -11527,8 +11558,14 @@ ipcMain.handle('book-reveal-file', (_e, p) => {
   if (!root || !path.resolve(s).startsWith(path.resolve(root))) return false;
   shell.showItemInFolder(s); return true;
 });
-ipcMain.handle('open-folder', async () => {
-  if (!S.outRoot) return;
-  fs.mkdirSync(S.outRoot, { recursive: true });
-  shell.openPath(S.outRoot);
+ipcMain.handle('open-folder', async (_e, args = {}) => {
+  // 📁 ④ 완성의 「출력폴더」 = 고른 완성물 종류의 폴더(v0.8.7 · 로이) — .vrew = 대본 출력 폴더 · 🎬 유튜브 MP4 = 채널 「저장 폴더」(없으면 다운로드) · ✏ 화이트보드 = 화이트보드 폴더
+  const t = args && args.target;
+  const preset = (t === 'mp4' || t === 'whiteboard') ? resolvePreset((args && args.presetName) || null) : null;
+  let dir = S.outRoot;
+  if (t === 'mp4') dir = String((preset && preset.outUpload) || '').trim() || defaultDownloadDir() || S.outRoot;
+  else if (t === 'whiteboard') dir = wbFinalDir(preset) || S.outRoot;
+  if (!dir) return;
+  fs.mkdirSync(dir, { recursive: true });
+  shell.openPath(dir);
 });
