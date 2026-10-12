@@ -222,6 +222,13 @@ const SCRIPT = [
     const ys = tx.slice(1).map((q) => q.y), mid = (Math.min(...ys) + Math.max(...ys)) / 2;
     ok(Math.abs(mid - 540) < 140 && ys.every((y) => y > 250), '표: 세로 가운데 쪽에 놓인다(가운데 y ' + Math.round(mid) + ')');
     ok(tx.slice(1).every((q) => q.fs === 66), '표: 글자 66px 유지');
+    // v0.8.4 — 이음 기호(+ → ~ ×)는 줄 끝에 홀로 두지 않는다 · 낱말 카드도 균형 줄바꿈
+    const bw = IA.balancedWrap('첫 고지서 납부기한 + 2개월', 66, 700);
+    ok(bw.length === 2 && !/[+→~×]$/.test(bw[0]) && bw.join(' ') === '첫 고지서 납부기한 + 2개월', '줄바꿈: 「+」 가 줄 끝에 홀로 남지 않는다(' + bw.join(' / ') + ')');
+    const bw2 = IA.balancedWrap('가 → 나 → 다라마바사아자차카', 66, 700);
+    ok(bw2.every((l) => !/(^|\s)[+→~×]$/.test(l)), '줄바꿈: 「→」 도 줄 끝에 두지 않는다(' + bw2.join(' / ') + ')');
+    const wl = IA.layoutOf({ type: 'words', words: ['첫 고지서 납부기한 + 2개월'], t0: 0, t1: 5 }, () => {}).filter((q) => q.k === 'text');
+    ok(wl.length === 2 && wl.every((q) => !/[+→~×]$/.test(q.lines[0])), '낱말 카드: 균형 줄바꿈(' + wl.map((q) => q.lines[0]).join(' / ') + ')');
     // 자막 폭 — 낱말 카드·확인표가 뜨는 동안 판 왼쪽 안으로
     const wp = { type: 'words', words: ['임의계속가입'], t0: 5, t1: 12 }, cp = { type: 'check', list: ['첫째 확인'], t0: 20, t1: 25 };
     const left = (q) => IA.panelLeft(q), L = IA.panelLeft(wp);

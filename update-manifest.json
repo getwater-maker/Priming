@@ -1,5 +1,5 @@
 {
-  "version": "0.8.3",
+  "version": "0.8.4",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -94,7 +94,7 @@
     "core/group-freshness.js": "32f265dacf26ab2066bf5537a30d50079757cd45",
     "core/group-merge.js": "ab1ee3d83374244334031a9e87839ff082e08667",
     "core/image-rotation.js": "1354715634d28d06abb4318a64608b10ba88f5ae",
-    "core/info-ass.js": "adb4b1a81a7d6523707ba90804e866020f5667c5",
+    "core/info-ass.js": "cd27f7f07334994b31b15deb58f28161414ecf30",
     "core/info-cards.js": "5cdb2724d8f21e8577641ad2e893ae63264bfda4",
     "core/lang.js": "12136f870ce8be04adeee1feb93fdece6309099f",
     "core/login-autofill.js": "20abae7c019798da8a7af69e2a23032d64412a82",
@@ -175,7 +175,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "cec4e26f149f212093de0306cc1f081ac655d4ec",
+    "docs/작업노트/2026-10.md": "642b44c522826126c59422098c72fe5be2381ee7",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/참조음성만들기-CLI.md": "8d755802a069d271fc48d6584d357274e0c64329",
     "docs/출판-원고-가이드.md": "8c082043b42d2412323ceab87b0dc884f55dde83",
@@ -190,7 +190,7 @@
     "light-updater.js": "e57035d6614fe2ca3596efd411ae4f80428baa5e",
     "main.js": "7fd53e2a4f3b57cc3168d049f594fa4459abdb3b",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "0e599998bf76e31e1f19df1192007707f88df5e6",
+    "package.json": "47efaea1a656ccc6d6f80a23102048f5c27d114a",
     "preload.js": "9bf1e990a0f8862226fec70d92a65968fed6a2e2",
     "renderer/dist/assets/index-BnYtxe0R.js": "20d7aab6c619dc9086039eaad05b6a84cd378c84",
     "renderer/dist/assets/index-D9CmKe4E.css": "8436b5fd48c9fab56181cc67b8b28d595ffa60cb",

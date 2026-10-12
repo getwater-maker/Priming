@@ -22,7 +22,7 @@ const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replac
 const alphaHex = (op, max) => Math.max(0, Math.min(255, Math.round(255 * (1 - Math.max(0, Math.min(1, op)) * max)))).toString(16).padStart(2, '0').toUpperCase();
 const mw = (t, fs, spacing = 0) => FM.measure(FONT_FILE, t, fs, { bold: true, spacing });
 
-/** 제목 줄바꿈 — 한 줄에 들어가면 그대로 · 아니면 두 줄: 쉼표·물음표 뒤(의미 경계)를 먼저, 그다음 두 줄 길이 균형. 낱말 중간에서 끊지 않는다. 두 줄로도 안 되면 font-metrics 줄바꿈. */
+/** 제목·낱말 카드·표 칸 줄바꿈 — 한 줄에 들어가면 그대로 · 아니면 두 줄: 쉼표·물음표 뒤(의미 경계)를 먼저, 그다음 두 줄 길이 균형. 낱말 중간에서 끊지 않는다. 두 줄로도 안 되면 font-metrics 줄바꿈. */
 function balancedWrap(t, fs, maxW, opts = {}) {
   const text = String(t || '').trim();
   if (!text) return [''];
@@ -34,6 +34,7 @@ function balancedWrap(t, fs, maxW, opts = {}) {
     if (!a || !b) continue;
     const wa = mw(a, fs, opts.spacing || 0), wb = mw(b, fs, opts.spacing || 0);
     if (Math.max(wa, wb) > maxW) continue;
+    if (/(^|\s)[+＋·→~～×÷=＝\-–—/]$/.test(a)) continue;   // 이음 기호(+ · → ~ ×)는 줄 끝에 홀로 두지 않는다 — 다음 줄 머리로
     cands.push({ a, b, bal: Math.abs(wa - wb), punct: /[,，、?？!！:：]$/.test(a) });
   }
   if (cands.length) {
@@ -59,7 +60,7 @@ const check = (x, y, size, color, op) => ({ k: 'check', x: Math.round(x), y: Mat
 /** 오른쪽 낱말 카드 */
 function layoutWords(p, warn) {
   const fs = FS, lh = Math.round(fs * 1.3), padX = 40, padY = 34, innerMax = 700, gap = 18, accentW = 12;
-  const blocks = p.words.map((w) => FM && require('./font-metrics').wrap(FONT_FILE, w, fs, innerMax, { bold: true }).slice(0, 2));
+  const blocks = p.words.map((w) => balancedWrap(w, fs, innerMax).slice(0, 2));
   const maxLine = Math.max(...blocks.flat().map((l) => mw(l, fs)));
   const panelW = Math.max(560, Math.min(900, maxLine + padX * 2 + accentW));
   const nLines = blocks.reduce((a, b) => a + b.length, 0);
@@ -137,7 +138,7 @@ function layoutTable(p, warn) {
     let widths = minW.map((m, c) => m + extra[c]);
     void sum; void sumNeed;
     const sc = availW / widths.reduce((a, b) => a + b, 0); widths = widths.map((w) => w * sc);
-    const wrapped = rows.map((r) => r.map((cell, c) => require('./font-metrics').wrap(FONT_FILE, cell, fs, widths[c] - padX * 2, { bold: true })));
+    const wrapped = rows.map((r) => r.map((cell, c) => balancedWrap(cell, fs, widths[c] - padX * 2)));
     const heights = wrapped.map((r) => Math.max(...r.map((l) => l.length)) * lh + padY * 2);
     const total = heights.reduce((a, b) => a + b, 0);
     best = { fs, lh, widths, wrapped, heights, total };
