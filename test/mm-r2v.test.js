@@ -70,6 +70,16 @@ const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 ok(/if \(R2V\.isR2V\(raw\)\)[\s\S]{0,1200}\} else prompt = P\.normalizePromptNegations\(raw\);/.test(main), '새 꼴은 부정 절 정리를 하지 않는다(옛 꼴만)');
 ok(/eng\.imageToVideo\(\{[^}]*refImages \}\)/.test(main), 'imageToVideo 에 시트(refImages)를 넘긴다');
 ok(/findSheet: \(c\) => CR\.findSheet\(r2vRoot, c\) \|\| CR\.findFaceSheet\(r2vRoot, c\)/.test(main), '시트 = 그림 단계가 만든 <출력>/characters (전신 → 얼굴)');
+console.log('[5] 이름 · 미리 알림(v0.8.14)');
+const names = cfg.workflows.map((w) => w.name);
+ok(names.includes('MiniMax H3 레퍼런스 (R2V) (클라우드)') && names.includes('MiniMax H3 turbo4 (R2V) (로컬)'), '드롭다운 이름에 (R2V) — 끝의 (클라우드)/(로컬) 은 그대로(그룹 가르는 표시)');
+const app = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8');
+ok(/const suffix = kind === 'video' \? ' 비디오'/.test(app), '그룹 이름 「ComfyUI 클라우드 비디오」(i2v 아님)');
+ok(/const r2vBad = r2vN > 0 && !isMmVideoVal\(/.test(app) && /data-r2v-bad=\{r2vBad/.test(app), '③ 비디오 드롭다운 — R2V 대본 + MiniMax 아님 = 노란 테두리');
+ok(/function _warnR2vEngine[\s\S]{0,900}isMiniMaxRef\(\)/.test(main) && /async function _genGroupVideosCore\([^)]*\) \{\n  _warnR2vEngine\(/.test(main), '만들기 시작 때(모든 엔진 공통 입구) 로그 ⚠');
+// 판정이 같다 — 화면 정규식과 core isR2V
+const RE = /^\s*subject_definitions\s*[:：]/i;
+ok(['subject_definitions: a', '  subject_definitions：b', 'slow push-in', 'x subject_definitions: c'].every((t) => RE.test(t) === R.isR2V(t)), '화면 판정(R2V_HEAD_RE) = core isR2V');
 // 부정 절 정리가 실제로 새 꼴을 망가뜨린다(판정력) — 그래서 건너뛴다
 const P = require('../core/pipeline');
 ok(!P.normalizePromptNegations(P_NEW).endsWith('non_diegetic_music: N/A'), '(판정력) 옛 정리를 새 꼴에 쓰면 절 구조가 깨진다');

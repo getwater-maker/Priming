@@ -50,13 +50,13 @@ const BUNDLED = [
   { name: 'LTX2.5',    file: 'video_ltx2_5_i2v.json' },
   // 🖥 로컬 전용 — RTX 3060 실측 5초/9.4분(1312x736). 크레딧 0 · 오디오 동시 생성.
   //   ⚠ 이 파일은 Deno 커스텀 노드를 쓰므로 **클라우드에서는 실패한다**(이름에 (로컬) 명시).
-  { name: 'MiniMax H3 turbo4 (로컬)', file: 'video_minimax_h3_turbo4_i2v.json' },
+  { name: 'MiniMax H3 turbo4 (R2V) (로컬)', file: 'video_minimax_h3_turbo4_i2v.json' },
   // ☁ 클라우드 전용 — 같은 MiniMax H3 레퍼런스 방식을 comfy.org 에서. 2026-08-29 실측으로 모델이
   //   올라와 있음을 확인했다(unet minimax_h3_ref2va_pruned_int8_convrot · clip qwen3vl_32b_minimax_h3 ·
   //   vae video/audio · lora minimax_h3_turbo_v4_step600). 로컬 Deno 노드 대신 **ComfyUI 네이티브**
   //   MiniMaxH3ReferenceToVideo 를 쓴다(공식 템플릿 video_minimax_h3_r2v 를 API 포맷으로 변환).
   //   ⚠ 이 파일은 로컬 ComfyUI 에 그 모델들이 없으면 실패한다(이름에 (클라우드) 명시).
-  { name: 'MiniMax H3 레퍼런스 (클라우드)', file: 'video_minimax_h3_ref2v_cloud.json' },
+  { name: 'MiniMax H3 레퍼런스 (R2V) (클라우드)', file: 'video_minimax_h3_ref2v_cloud.json' },
 ];
 // MiniMax H3 레퍼런스 프롬프트 접두사 — 대본은 그대로 두고 엔진이 붙인다(아래 _buildGraph 주석 참조).
 const MM_REF_PREFIX = '<Picture 1> is the exact scene: keep its composition, characters, clothing, colors and art style unchanged. ';

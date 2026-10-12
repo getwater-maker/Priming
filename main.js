@@ -4591,7 +4591,20 @@ function genGroupVideosManual(pr, mediaDir, onlyNums, videoEngine, label) {
   if (!_vidUsesLocalGpu(videoEngine)) return genGroupVideos(pr, mediaDir, onlyNums, videoEngine);
   return _runOnLanes(['localGpu'], label, () => genGroupVideos(pr, mediaDir, onlyNums, videoEngine));
 }
+// 🎬 R2V 꼴 대본(🎬 가 `subject_definitions:` 로 시작)인데 엔진이 MiniMax H3 레퍼런스가 아니면 — 시작 전에 한 번 알린다(v0.8.14 · 로이)
+//   막지 않는다(영상은 나온다 — 🎬 글만 들어가고 인물 시트는 안 붙는다). 화면 쪽은 ③ 비디오 드롭다운 노란 테두리가 같은 판정.
+function _warnR2vEngine(pr, onlyNums, videoEngine) {
+  try {
+    const R2V = require('./core/mm-r2v');
+    const gs = (pr.groups || []).filter((g) => (!onlyNums || onlyNums.includes(g.num)) && R2V.isR2V(g.videoPrompt));
+    if (!gs.length) return;
+    let mm = false;
+    if (isComfyVal(videoEngine)) { const CV = require('./core/comfy-video'); const cfg = CV.loadConfig(); mm = new CV.ComfyVideo({ ...cfg, workflowPath: comfyWfOf(videoEngine) || cfg.workflowPath }).isMiniMaxRef(); }
+    if (!mm) log(`⚠ 🎬 R2V 꼴 장면 ${gs.length}개(${gs.slice(0, 8).map((g) => 'G' + g.num).join('·')}${gs.length > 8 ? '…' : ''}) — 지금 비디오 엔진은 MiniMax H3 레퍼런스가 아니라 인물 시트 없이 🎬 글만 넣습니다 · ③ 비디오에서 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요`);
+  } catch (_) {}
+}
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
+  _warnR2vEngine(pr, onlyNums, videoEngine);
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
   // Genspark 비디오 — 브라우저. **이미지 순환과 같은 크롬 프로필**을 쓰므로 전용 레인으로 직렬화한다.

@@ -64,6 +64,9 @@ const comfySelectValue = (engine, cfg) => (isComfyEngine(engine)
   ? mkComfyVal(!!(cfg && cfg.cloud), comfyWfPath(engine) || ((cfg && cfg.workflowPath) || ''))
   : engine);
 
+// 🎬 R2V 꼴 🎬(core/mm-r2v isR2V 와 같은 판정 — `subject_definitions:` 로 시작) · 고른 비디오 엔진이 MiniMax H3 레퍼런스(R2V)인가(v0.8.14)
+const R2V_HEAD_RE = /^\s*subject_definitions\s*[:：]/i;
+const isMmVideoVal = (v) => { const p = parseComfyVal(v); return !!(p && /minimax/i.test(String(p.path || ''))); };
 // ⚙ 설정 팝업의 「워크플로」 행 — **선택이 아니라 관리(추가·삭제)** 전용.
 //   모델 선택은 헤더 드롭다운이 하므로(2026-08-14), 여기 select 를 두면 "어느 쪽이 진짜인지" 헷갈린다.
 function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
@@ -184,7 +187,7 @@ const WF_SIDE_RE = /\s*\((로컬|local|클라우드|cloud)\)\s*$/i;
 const wfSide = (w) => { const m = WF_SIDE_RE.exec((w && w.name) || ''); return m ? (/로컬|local/i.test(m[1]) ? 'local' : 'cloud') : null; };
 const wfLabel = (w) => String((w && w.name) || '').replace(WF_SIDE_RE, '').trim() || '워크플로';
 function ComfyEngineOptions({ cfg, kind = 'image', value = '' }) {
-  const suffix = kind === 'video' ? ' i2v' : '';
+  const suffix = kind === 'video' ? ' 비디오' : '';   // 「i2v」 라 쓰면 MiniMax H3 레퍼런스(R2V)까지 i2v 로 보인다(v0.8.14 · 로이)
   const wfs = comfyWorkflows(cfg);
   if (!wfs.length) return <option value={mkComfyVal(true, '')}>ComfyUI{suffix} — 워크플로 없음(⚙ 에서 추가)</option>;
   return (<>
@@ -5097,7 +5100,13 @@ export default function App() {
     if (!c.path) openSettings(tab);                                     // 워크플로가 하나도 없을 때만 설정 안내
   }
   // 비디오 드롭다운 — ComfyUI 항목은 로컬/클라우드 × 모델(LTX2.5·LTX2.3)을 직접 고른다.
-  async function onPickVideoEngine(val) { return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid'); }
+  // 🎬 열린 대본의 R2V 꼴 장면 수 — 엔진이 MiniMax 가 아니면 ③ 비디오 드롭다운에 노란 테두리 · 고를 때 안내(main 도 만들기 시작 때 로그 ⚠)
+  const r2vN = ((dto && dto.projects) || []).reduce((a, pj) => a + ((pj.cuts || []).filter((c) => R2V_HEAD_RE.test(c.videoPrompt || '')).length), 0);
+  const r2vBad = r2vN > 0 && !isMmVideoVal(comfySelectValue(videoEngine, cvidCfg));
+  async function onPickVideoEngine(val) {
+    if (r2vN > 0 && !isMmVideoVal(val)) setStatus(`⚠ 이 대본에 R2V 꼴 🎬 장면이 ${r2vN}개 있습니다 — 이 엔진은 인물 시트를 쓰지 않고 🎬 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요`);
+    return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid');
+  }
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
@@ -5636,7 +5645,9 @@ export default function App() {
             {menu === 'video' && (<>
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
-            <select title="i2v 비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3)" value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
+            <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
+              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3 = 그림 한 장에서 i2v · MiniMax H3 = 그림 + 인물 시트 레퍼런스 R2V)'}
+              value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <option value="flow">Flow · Veo (구독)</option>
                 <option value="genspark">Genspark (구독)</option>
               <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />

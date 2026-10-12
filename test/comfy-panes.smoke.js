@@ -98,7 +98,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     await win.click('.modal-card button:has-text("닫기")');
     // 비디오 드롭다운에 🖥 로컬 항목이 **있어야** 한다(2026-08-20 오후 로이: "비디오에서 로컬 LTX2.5도 추가해줘")
     await menu(win, 'video');
-    const vidOpts = await win.locator('.hgroup select[title^="i2v 비디오 엔진"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
+    const vidOpts = await win.locator('.hgroup select[data-testid="video-engine"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
     ok(vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 있음');
     ok(vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 있음');
     ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목도 있다');
@@ -145,7 +145,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
          + ' (☁ ' + cloudNames.join('/') + ' · 🖥 ' + localNames.join('/') + ')');
     } else console.log('  · (로컬 전용 워크플로가 없거나 클라우드 모드 — 이 검사는 건너뜀)');
     // 반대 방향도 대칭으로 — 「(클라우드)」 이름은 🖥 로컬 그룹에서 감춘다(로컬엔 그 노드가 없다, v0.3.85).
-    const vcfg = read('comfy-video-config.json');
+    const vcfg = require('../core/comfy-video').loadConfig();   // 앱과 같은 읽기(번들 이름은 loadConfig 가 늘 새로 매긴다 · 저장 파일엔 옛 이름이 남을 수 있다 · v0.8.14)
     const vComfy = vidOpts.filter((o) => o.indexOf('comfy::') === 0);
     const vSide = (k) => vComfy.filter((o) => o.includes('::' + k + '::')).map(labelOf);
     const vCloud = vSide('cloud'), vLocal = vSide('local');
@@ -231,7 +231,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     for (const [kind, file, cfg0] of [['image', 'comfy-image-config.json', before.img], ['video', 'comfy-video-config.json', before.vid]]) {
       await menu(win, kind);
-      const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[title^="i2v 비디오 엔진"]';
+      const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[data-testid="video-engine"]';
       const cur = await win.locator(sel).inputValue();
       const opts = await win.locator(sel + ' option').evaluateAll((os) => os.map((o) => o.value));
       if (cur.indexOf('comfy::') !== 0) { console.log('  (건너뜀 — 지금 ComfyUI 가 아님: ' + kind + ')'); continue; }

@@ -59,7 +59,7 @@ fs.writeFileSync(B, script('범위 나'), 'utf8');
 
     // ③ 비디오 메뉴 — 엔진이 「없음」이면 범위 칸이 안 보이므로 Flow 로(끝나면 되돌린다)
     await menu(win, 'video');
-    const veSel = win.locator('select[title^="i2v 비디오 엔진"]');
+    const veSel = win.locator('select[data-testid="video-engine"]');
     veBefore = await veSel.inputValue();
     if (veBefore === 'none') { await veSel.selectOption('flow'); await win.waitForTimeout(300); }
     const allBtn = win.locator('[data-testid="range-all"]');
@@ -101,7 +101,7 @@ fs.writeFileSync(B, script('범위 나'), 'utf8');
     ok(false, '예외: ' + e.message);
   } finally {
     try {
-      if (veBefore === 'none') { await menu(win, 'video'); await win.locator('select[title^="i2v 비디오 엔진"]').selectOption('none'); await win.waitForTimeout(300); }
+      if (veBefore === 'none') { await menu(win, 'video'); await win.locator('select[data-testid="video-engine"]').selectOption('none'); await win.waitForTimeout(300); }
       if (chMade) await win.evaluate(async (name) => { try { await window.api.removePreset({ name }); } catch (_) {} }, CH);
     } catch (_) {}
     await app.close();
