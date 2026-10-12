@@ -33,8 +33,21 @@ function splitPosTag(raw) {
   const m = /^(.*?)[ 	]*@([^\s@|]+)[ 	]*$/u.exec(raw);
   if (!m) return { text: raw, pos: null, bad: null };
   const key = m[2].replace(/\s+/g, '');
-  return POS_TAGS[key] ? { text: m[1].trim(), pos: POS_TAGS[key], bad: null } : { text: m[1].trim(), pos: null, bad: m[2] };
+  const free = freePos(key);
+  return POS_TAGS[key] ? { text: m[1].trim(), pos: POS_TAGS[key], bad: null } : free ? { text: m[1].trim(), pos: free, bad: null } : { text: m[1].trim(), pos: null, bad: m[2] };
 }
+/**
+ * 🖱 자유 자리(v0.8.13 · 로이 「끌어 놓은 자리에 그대로」) — `@62,8` = 판 왼쪽 위 모서리가 화면 왼쪽에서 62% · 위에서 8%.
+ *   네 자리 이름(@왼쪽위 …)과 함께 쓴다. 정수 0~100 · 쉼표는 `,`·`，`. 아니면 null. 정규형 = "62,8".
+ */
+function freePos(v) {
+  const m = /^(\d{1,3})[,，](\d{1,3})$/.exec(String(v == null ? '' : v).trim());
+  if (!m) return null;
+  const x = Math.min(100, +m[1]), y = Math.min(100, +m[2]);
+  return `${x},${y}`;
+}
+/** 자리 값 → 사람·대본 이름(네 자리 = 한글 이름 · 자유 자리 = "62,8") */
+const posName = (pos) => POS_NAMES[pos] || freePos(pos) || String(pos || '');
 function lineKind(line, openTable) {
   let m;
   if ((m = RE_WORDS.exec(line))) {
@@ -181,7 +194,7 @@ function plan(project, parsed, opts = {}) {
     const sceneTag = new Map();
     for (const m of parsed.marks) { if ((m.kind !== 'words' && m.kind !== 'check') || !m.pos) continue; const sc = GI[m.sent]; if (sc == null) continue;
       if (!sceneTag.has(sc)) sceneTag.set(sc, m.pos);
-      else if (sceneTag.get(sc) !== m.pos) warnings.push(`📇 정보 카드 — 한 장면(G${sc + 1}) 안에 자리 꼬리표가 둘(@${POS_NAMES[sceneTag.get(sc)]} · @${POS_NAMES[m.pos]}) → 첫 것만 씁니다`); }
+      else if (sceneTag.get(sc) !== m.pos) warnings.push(`📇 정보 카드 — 한 장면(G${sc + 1}) 안에 자리 꼬리표가 둘(@${posName(sceneTag.get(sc))} · @${posName(m.pos)}) → 첫 것만 씁니다`); }
     for (const p of panels) if ((p.type === 'words' || p.type === 'check') && p.scene != null && sceneTag.has(p.scene)) p.posTag = sceneTag.get(p.scene);
     // 💡 그 장면 🖼️ 프롬프트의 「인물 left/right of centre」 → 판은 반대쪽(자동 자리의 1순위 힌트)
     for (const p of panels) if ((p.type === 'words' || p.type === 'check') && p.scene != null) {
@@ -223,4 +236,4 @@ function plan(project, parsed, opts = {}) {
   return { panels: out, warnings, spans, total };
 }
 
-module.exports = { POS_TAGS, POS_NAMES, splitPosTag, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };
+module.exports = { POS_TAGS, POS_NAMES, splitPosTag, freePos, posName, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };

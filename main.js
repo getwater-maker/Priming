@@ -2867,10 +2867,15 @@ ipcMain.handle('info-edit', async (_e, args = {}) => {
     const tmp = sp + '.priming-tmp';
     await P.retryFs(() => { fs.writeFileSync(tmp, r.raw, 'utf8'); fs.renameSync(tmp, sp); }, '대본 표시 줄 쓰기', log);
     _infoPvCache.clear();
-    log(`📇 정보 카드 ${args.op === 'pos' ? `자리 → ${args.pos ? require('./core/info-cards').POS_NAMES[args.pos] : '자동'}` : '글 고침'} — 대본(.md)의 표시 줄 ${mi + 1}번째만 바꿨습니다 (${path.basename(sp)})`);
+    log(`📇 정보 카드 ${args.op === 'pos' ? `자리 → ${args.pos ? require('./core/info-cards').posName(args.pos) : '자동'}` : '글 고침'} — 대본(.md)의 표시 줄 ${mi + 1}번째만 바꿨습니다 (${path.basename(sp)})`);
     if (r.numChanged) log('⚠ 정보 카드 숫자가 바뀌었습니다 — 팩트시트 대조 필요: 「' + String(r.before || '').split('\n').join(' / ') + '」 → 「' + String(r.after || '').split('\n').join(' / ') + '」');
     return { ok: true, numChanged: !!r.numChanged, before: r.before, after: r.after };
   } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+});
+// 📇 ① 미리보기 글꼴 = 판 크기를 잰 글꼴(core/info-ass FONT_FILE) — 다른 글꼴로 그리면 글자가 판 밖으로 나간다(v0.8.13 · 로이 화면)
+ipcMain.handle('info-font', async () => {
+  try { return { ok: true, data: (await fs.promises.readFile(require('./core/info-ass').FONT_FILE)).toString('base64') }; }
+  catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('info-preview', async (_e, args = {}) => {
   try {

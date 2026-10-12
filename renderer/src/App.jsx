@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
-import InfoPreview from './InfoPreview.jsx';
+import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vidListText } from './lib/videoSelect.js';
@@ -1946,17 +1946,17 @@ export default function App() {
   // 📇 정보 카드 ① 미리보기 — main(info-preview)이 렌더와 같은 계산으로 준 판 · 채널 옵션 「📇 정보 카드」가 켜진 채널만(꺼져 있으면 빈 목록)
   const [infoRev, setInfoRev] = useState(0);            // 고친 뒤 미리보기를 바로 다시 받는다
   const [infoPv, setInfoPv] = useState(null);
+  const [infoDrag, setInfoDrag] = useState(null);       // { mi, dx, dy } — 끄는 중(스테이지 폭·높이 비율) · 놓은 뒤 새 미리보기가 올 때까지 유지
   useEffect(() => {
     if (!isLf || !dto || !presetName || !api.infoPreview) { setInfoPv(null); return undefined; }
     const pj = curProject(); if (!pj) return undefined;
     let dead = false;
     const tm = setTimeout(async () => {
-      try { const r = await api.infoPreview({ shortsNum: pj.shortsNum, presetName }); if (!dead) setInfoPv(r && r.ok && r.panels && r.panels.length ? r : null); } catch (_) { if (!dead) setInfoPv(null); }
+      try { const r = await api.infoPreview({ shortsNum: pj.shortsNum, presetName }); if (!dead) { setInfoPv(r && r.ok && r.panels && r.panels.length ? r : null); setInfoDrag(null); } } catch (_) { if (!dead) { setInfoPv(null); setInfoDrag(null); } }
     }, 500);
     return () => { dead = true; clearTimeout(tm); };
   }, [dto, presetName, isLf, cursor && cursor.shortsNum, infoRev]);
   // 📇 정보 카드 끌어 옮기기·글자 고치기(v0.8.8) — 둘 다 대본(.md)의 그 표시 줄만 바꾼다(자리 = 줄 끝 `@왼쪽위` · 글자 = 줄 안) → 렌더(MP4)도 같은 결과
-  const [infoDrag, setInfoDrag] = useState(null);       // { mi, dx, dy } — 끄는 중(스테이지 폭·높이 비율)
   const [infoEdit, setInfoEdit] = useState(null);       // { mi, kind, ... } — 글자 고치기 창
   function onInfoDown(ev, p) {
     if (ev.button !== 0 || p.mi == null || !p.box) return;
@@ -1967,16 +1967,20 @@ export default function App() {
     const move = (e) => { const d = at(e); if (Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) >= 3) moved = true; if (moved) setInfoDrag({ mi: p.mi, ...d }); };
     const up = async (e) => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-      setInfoDrag(null);
-      if (!moved) return;
+      if (!moved) { setInfoDrag(null); return; }
       const d = at(e);
-      const cx = (p.box.x + p.box.w / 2) / 1920 + d.dx, cy = (p.box.y + p.box.h / 2) / 1080 + d.dy;
-      const pos = (cx < 0.5 ? 'l' : 'r') + (cy < 0.36 ? 't' : 'c');   // 네 자리 중 가까운 곳(오른쪽·왼쪽 x 위·가운데)
+      // 🖱 놓은 자리 그대로(v0.8.13 · 로이 「위치 이동이 안 된다」 — 예전엔 네 자리로만 붙어 놓은 곳에 안 갔다)
+      //   판 왼쪽 위 모서리를 화면 %(정수)로 → 대본 줄 끝 `@62,8`. 판 전체가 화면 안에 들게 자른다(렌더 placeBox 도 같은 규칙).
+      const bw = p.box.w / 1920 * 100, bh = p.box.h / 1080 * 100;
+      const x = Math.round(Math.max(0, Math.min(100 - bw, (p.box.x / 1920 + d.dx) * 100)));
+      const y = Math.round(Math.max(0, Math.min(100 - bh, (p.box.y / 1080 + d.dy) * 100)));
+      const pos = `${x},${y}`;
       try {
         const r = await api.infoEdit({ op: 'pos', mi: p.mi, pos });
-        if (r && r.ok) { setStatus(r.same ? '📇 같은 자리입니다' : `📇 정보 카드를 ${{ rc: '오른쪽 가운데', lc: '왼쪽 가운데', rt: '오른쪽 위', lt: '왼쪽 위' }[pos]}로 옮겼습니다 — 대본(.md)의 그 줄 끝에 @자리 꼬리표를 적었습니다(같은 장면의 판이 함께 옮겨집니다)`); setInfoRev((v) => v + 1); }
-        else setStatus('⚠ ' + ((r && r.error) || '자리를 옮기지 못했습니다'));
-      } catch (er) { logline('정보 카드 옮기기 오류: ' + er.message); }
+        if (r && r.ok) { setStatus(r.same ? '📇 같은 자리입니다' : `📇 정보 카드를 옮겼습니다 — 왼쪽에서 ${x}% · 위에서 ${y}% (대본(.md)의 그 줄 끝에 @${pos} · 같은 장면의 판이 함께 옮겨집니다)`); setInfoRev((v) => v + 1); }
+        else { setInfoDrag(null); setStatus('⚠ ' + ((r && r.error) || '자리를 옮기지 못했습니다')); }
+        if (r && r.same) setInfoDrag(null);
+      } catch (er) { setInfoDrag(null); logline('정보 카드 옮기기 오류: ' + er.message); }
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   }
@@ -4127,7 +4131,8 @@ export default function App() {
   }
   // 🖱 ① 칸 그림 오른쪽 클릭 메뉴(v0.7.81 · Vrew) — 잘라내기·그림 복사·그림+자막 복사·삭제 · 비디오 생성 ▸ · 채우기 ▸ · 순서 ▸(준비 중)
   //   누른 점을 덮는 맨 위 그림을 고르고(왼쪽 클릭과 같은 선택) 메뉴를 연다. 자막·AI 고지·로고 위에서는 기본 동작을 둔다.
-  const [stageCtx, setStageCtx] = useState(null);   // { x, y, sub, subY, num, cap, only }
+  const [stageCtx, setStageCtx] = useState(null);   // { x, y, sub, subY, num, cap, info, only }
+  const stageInfoRef = useRef(null);                  // 📇 지금 ① 칸에 보이는 정보 카드 판(복사 메뉴용 · 아래 stageInfo 가 채운다)
   const stageCapText = () => { const cs = stageCapRef.current; return cs ? String(cs.innerText || '').replace(/\s+/g, ' ').trim() : ''; };
   function onStageCtx(ev) {
     if (!wsOn || playerOpen || (sentEdit && sentEdit.where === 'stage')) return;
@@ -4146,18 +4151,18 @@ export default function App() {
     if (!pick) return;
     ev.preventDefault();
     if (!(stageSel && stageSel.num === pick.num)) { const el = st.querySelector('.vlayer[data-num="' + pick.num + '"]'); setStageSel({ sn: pr.shortsNum, num: pick.num, box: defaultBoxOf(pick, el), guides: {} }); }
-    setStageCtx({ x: ev.clientX, y: ev.clientY, sub: null, subY: 0, num: pick.num, cap: stageCapText() });
+    setStageCtx({ x: ev.clientX, y: ev.clientY, sub: null, subY: 0, num: pick.num, cap: stageCapText(), info: stageInfoRef.current });
   }
-  /** ① 칸 그림을 클립보드로 — withCap 이면 지금 보이는 자막을 그림 아래에 얹는다. 영상이면 지금 장면 한 장. */
-  async function stageCopyImage(num, withCap, cap) {
+  /** ① 칸 그림을 클립보드로 — withCap 이면 지금 보이는 자막을 그림 아래에 얹는다 · info 면 정보 카드 판도(v0.8.13). 영상이면 지금 장면 한 장. */
+  async function stageCopyImage(num, withCap, cap, info = null) {
     const st = stageVisualRef.current; const lay = st && st.querySelector('.vlayer[data-num="' + num + '"]');
     const m = lay && lay.querySelector('img, video');
     if (!m) { setStatus('복사할 그림이 없습니다'); return false; }
     const text = withCap ? (cap != null ? cap : stageCapText()) : '';
     try {
-      if (text) await copyStageImage(m, stageCapRef.current, st);   // 화면에 보이는 자막 모양 그대로
+      if (text || info) await copyStageImage(m, text ? stageCapRef.current : null, st, info);   // 화면에 보이는 자막·정보 카드 모양 그대로
       else await copyPreviewImage(m.tagName === 'IMG' ? m.src : null, '', m.tagName === 'VIDEO' ? m : null);
-      setStatus(withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
+      setStatus(info ? (text ? '📋 그림 + 자막 + 정보 카드 복사됨' : '📋 그림 + 정보 카드 복사됨') : withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
     catch (e) { setStatus('그림 복사 실패: ' + e.message); return false; }
   }
   /** ① 칸 그림 지우기(✕ 와 같다 — 삽입 그림은 목록의 ➕ 마크에서) */
@@ -5305,6 +5310,7 @@ export default function App() {
     const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1);
     return act.length ? act : null;
   })();
+  stageInfoRef.current = stageInfo;   // 📇 오른쪽 클릭 복사 메뉴가 「지금 보이는 판」을 집는다
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
     <div id="stage" className={'lf' + (sentEdit && sentEdit.where === 'stage' ? ' capediting' : '')} data-testid="stage" onMouseDown={onStageDown} onContextMenu={onStageCtx}>
@@ -5863,9 +5869,9 @@ export default function App() {
         const lay = (layers || []).find((c) => c.num === stageCtx.num);
         const grp = typeof stageCtx.num === 'number';
         const lk = lay ? VLook.normLook(lay.look) : null;
-        const W = 232, SW = 210;
+        const W = 268, SW = 210;   // 268 = 「그림 + 자막 + 정보 카드 복사」가 한 줄(v0.8.13)
         const left = Math.max(4, Math.min(stageCtx.x, window.innerWidth - W - 8));
-        const top = Math.max(4, Math.min(stageCtx.y, window.innerHeight - 330));
+        const top = Math.max(4, Math.min(stageCtx.y, window.innerHeight - 360));
         const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
         const run = (fn) => () => { setStageCtx(null); fn(); };
         const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
@@ -5888,6 +5894,8 @@ export default function App() {
             <Row icon="✂" label="잘라내기" kbd="Ctrl + X" dis={!grp} tid="sx-cut" onClick={run(async () => { if (await stageCopyImage(num, false)) stageDeleteImage(num); })} />
             <Row icon="🖼" label="그림 복사" kbd="Ctrl + C" tid="sx-copy-img" onClick={run(() => stageCopyImage(num, false))} />
             <Row icon="💬" label="그림 + 자막 복사" dis={!stageCtx.cap} tid="sx-copy-cap" onClick={run(() => stageCopyImage(num, true, stageCtx.cap))} />
+            {/* 📇 그림 + 자막 + 정보 카드(v0.8.13) — 지금 ① 칸에 보이는 그대로(판이 자막을 가리는 표·구간 표지면 자막 없이) */}
+            <Row icon="📇" label="그림 + 자막 + 정보 카드 복사" dis={!(stageCtx.info && stageCtx.info.length)} tid="sx-copy-info" onClick={run(() => stageCopyImage(num, true, stageCtx.cap, stageCtx.info))} />
             <Row icon="📋" label="붙여넣기" kbd="Ctrl + V" soon />
             <Row icon="🗑" label="삭제" red dis={!grp} tid="sx-del" onClick={run(() => stageDeleteImage(num))} />
             <div className="vr-sep" />
@@ -8543,8 +8551,37 @@ function stageCaptionDraws(capEl, R) {
   }
   return out;
 }
-/** m = 스테이지의 img/video 요소 · capEl = #stageCap · visEl = #stageVisual(그림이 놓인 16:9 칸) */
-async function copyStageImage(m, capEl, visEl) {
+/**
+ * 📇 정보 카드 판(main info-preview 프리미티브 · 1920x1080 기준)을 캔버스에 그린다 — ① 칸 InfoPreview 와 같은 규칙(층·글꼴·줄 높이 1.22).
+ *   which = 'under'(층 0 — 표·구간 표지의 전체 화면 바탕 · 자막 아래) | 'over'(그 위 전부).
+ */
+const _CHECK_POLY = [[0.20, 0.54], [0.31, 0.43], [0.44, 0.56], [0.71, 0.25], [0.82, 0.36], [0.44, 0.78]];
+function drawInfoPanels(ctx, panels, cw, ch, which) {
+  const kx = cw / 1920, ky = ch / 1080;
+  const col = (c, op) => { const s = String(c || 'FFFFFF'); return `rgba(${parseInt(s.slice(0, 2), 16)},${parseInt(s.slice(2, 4), 16)},${parseInt(s.slice(4, 6), 16)},${Math.max(0, Math.min(1, op))})`; };
+  const fam = infoFontFamily() || 'Pretendard, "Malgun Gothic", sans-serif';
+  const prims = [];
+  for (const p of (panels || [])) for (const q of (p.prims || [])) if ((which === 'under') === ((q.layer || 0) < 1)) prims.push(q);
+  prims.sort((a, b) => (a.layer || 0) - (b.layer || 0));
+  for (const q of prims) {
+    if (q.k === 'rect') {
+      ctx.fillStyle = col(q.color, q.op);
+      ctx.beginPath(); if (ctx.roundRect && q.r) ctx.roundRect(q.x * kx, q.y * ky, q.w * kx, q.h * ky, q.r * kx); else ctx.rect(q.x * kx, q.y * ky, q.w * kx, q.h * ky); ctx.fill();
+    } else if (q.k === 'check') {
+      ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, q.op)); ctx.fillStyle = '#' + String(q.color || 'FFFFFF');
+      ctx.beginPath(); _CHECK_POLY.forEach(([x, y], i) => { const X = (q.x + x * q.size) * kx, Y = (q.y + y * q.size) * ky; if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); }); ctx.closePath(); ctx.fill(); ctx.restore();
+    } else {
+      const lines = q.lines || [], fs = q.fs * kx, lh = q.fs * 1.22 * ky;
+      ctx.save(); ctx.font = `700 ${fs}px ${fam}`; ctx.fillStyle = col(q.color, q.op);
+      if ('letterSpacing' in ctx) ctx.letterSpacing = q.sp ? `${q.sp * kx}px` : '0px';
+      ctx.textBaseline = 'middle'; ctx.textAlign = q.an === 5 ? 'center' : 'left';
+      lines.forEach((l, i) => ctx.fillText(l, q.x * kx, q.y * ky + (i - (lines.length - 1) / 2) * lh));
+      ctx.restore();
+    }
+  }
+}
+/** m = 스테이지의 img/video 요소 · capEl = #stageCap(null = 자막 없이) · visEl = #stageVisual(그림이 놓인 16:9 칸) · info = 지금 보이는 정보 카드 판(없으면 null) */
+async function copyStageImage(m, capEl, visEl, info = null) {
   let bmp;
   if (m.tagName === 'VIDEO' && m.videoWidth > 0) bmp = m;
   else { try { bmp = await createImageBitmap(await (await fetch(m.src)).blob()); } catch (_) { const im = new Image(); im.src = m.src; await im.decode(); bmp = im; } }
@@ -8556,7 +8593,10 @@ async function copyStageImage(m, capEl, visEl) {
   const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
   const ctx = cv.getContext('2d'); if (cw !== iw || ch !== ih) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cw, ch); }
   ctx.drawImage(bmp, dx, dy, dw, dh);
-  const k = cw / R.width; const d = stageCaptionDraws(capEl, R);
+  if (info) { await loadInfoFont(); drawInfoPanels(ctx, info, cw, ch, 'under'); }
+  // 표·구간 표지가 뜨는 동안은 자막이 가려진다(① 칸·MP4 와 같다) — 그때는 자막을 그리지 않는다
+  const capOn = capEl && !(info && info.some((q) => q.hide));
+  const k = cw / R.width; const d = stageCaptionDraws(capOn ? capEl : null, R);
   for (const b of d.bgs) { ctx.fillStyle = b.color; ctx.fillRect(b.x * k, b.y * k, b.w * k, b.h * k); }
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.lineJoin = 'round';
   for (const c of d.chars) {
@@ -8568,6 +8608,7 @@ async function copyStageImage(m, capEl, visEl) {
     if (c.stroke > 0) { ctx.lineWidth = c.stroke * k; ctx.strokeStyle = c.strokeColor; ctx.strokeText(c.ch, x, y); }
     ctx.fillStyle = c.color; ctx.fillText(c.ch, x, y);
   }
+  if (info) drawInfoPanels(ctx, info, cw, ch, 'over');   // 낱말 카드·확인표·표 글자 = 자막 위 층
   const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
   if (!blob) throw new Error('그림 변환 실패');
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);

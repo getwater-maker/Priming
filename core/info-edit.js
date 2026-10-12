@@ -28,7 +28,7 @@ function scan(raw) {
 }
 
 const numSig = (s) => (String(s || '').match(/\d+(?:[.,]\d+)*/g) || []).join('|');
-const tagStr = (pos) => (pos ? ' @' + IC.POS_NAMES[pos] : '');
+const tagStr = (pos) => (pos ? ' @' + IC.posName(pos) : '');
 const indentOf = (line) => (/^[ \t]*/.exec(line) || [''])[0];
 
 /** 표시(mi번째)가 가진 글(숫자 비교용) */
@@ -64,7 +64,7 @@ function pick(raw, mi, kinds) {
 
 /** 자리 꼬리표 쓰기/지우기 — 🔤·✅ 줄 끝 `@왼쪽위` (pos = 'rc'|'lc'|'rt'|'lt'|null) */
 function setPos(raw, mi, pos) {
-  if (pos != null && !IC.POS_NAMES[pos]) return { ok: false, error: '모르는 자리입니다' };
+  if (pos != null && !IC.POS_NAMES[pos]) { const f = IC.freePos(pos); if (!f) return { ok: false, error: '모르는 자리입니다' }; pos = f; }   // 🖱 자유 자리 "62,8"(v0.8.13)
   const f = pick(raw, mi, ['words', 'check']); if (f.error) return { ok: false, error: f.error };
   const { sc, m } = f;
   const line = sc.lines[m.line];

@@ -256,6 +256,7 @@ contextBridge.exposeInMainWorld('api', {
   setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),
   infoPreview: (args) => ipcRenderer.invoke('info-preview', args),
   infoEdit: (args) => ipcRenderer.invoke('info-edit', args),
+  infoFont: () => ipcRenderer.invoke('info-font'),   // 📇 정보 카드 글꼴(렌더와 같은 Pretendard Bold · base64) — ① 미리보기가 같은 폭으로 그리게
   setQueueLogo: (args) => ipcRenderer.invoke('set-queue-logo', args),   // 🏷 롱폼 큐 대본 모두에 로고 넣기/빼기(v0.6.86)   // 🏷 끌어 옮긴 로고 자리(v0.6.85)
   bgmPreviewFile: (args) => ipcRenderer.invoke('bgm-preview-file', args),
   setCaptionBreaks: (args) => ipcRenderer.invoke('set-caption-breaks', args),

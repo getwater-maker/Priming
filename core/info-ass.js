@@ -63,6 +63,9 @@ const shapeOf = (p) => ((p && p.theme && p.theme.shape) || 'bar');
 const POS = ['rc', 'lc', 'rt', 'lt'];
 /** 판 크기 (w,h) 와 자리 → 왼쪽 위 좌표 */
 function placeBox(pos, w, h) {
+  // 🖱 자유 자리 "62,8"(대본 @62,8 · v0.8.13) — 판 왼쪽 위 모서리 = 화면 %. 판 전체가 화면 안(가장자리 20px)에 들도록 붙인다
+  const fm = /^(\d{1,3}),(\d{1,3})$/.exec(String(pos || ''));
+  if (fm) return { x0: Math.round(Math.max(20, Math.min(W - 20 - w, (+fm[1] / 100) * W))), y0: Math.round(Math.max(20, Math.min(H - 20 - h, (+fm[2] / 100) * H))) };
   const left = pos === 'lc' || pos === 'lt', top = pos === 'rt' || pos === 'lt';
   return { x0: left ? 40 : W - 40 - w, y0: top ? 110 : Math.round(H / 2 - h / 2) };
 }

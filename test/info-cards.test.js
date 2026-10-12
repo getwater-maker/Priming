@@ -15,6 +15,28 @@ const R = require('../core/vrew-render');
 const IA = require('../core/info-ass');
 const FF = require('../core/media-utils').getFfmpegPath();
 
+// ── 🖱 자유 자리 `@62,8`(v0.8.13 · 로이 「위치 이동이 안 된다」 — 끌어 놓은 자리 그대로) ──
+{
+  console.log('[자유 자리]');
+  const t = IC.splitPosTag('질문 둘 | 바뀐 세대만 달라진다 @62,8');
+  ok(t.pos === '62,8' && t.text === '질문 둘 | 바뀐 세대만 달라진다' && !t.bad, '꼬리표 @62,8 = 자유 자리(글에 안 섞인다)');
+  ok(IC.freePos('62，8') === '62,8' && IC.freePos('150,3') === '100,3' && IC.freePos('62.5,8') === null && IC.freePos('왼쪽위') === null, 'freePos — 정수 0~100 · 전각 쉼표 · 소수·이름은 아님');
+  ok(IC.splitPosTag('a @왼쪽위').pos === 'lt' && IC.splitPosTag('a @엉뚱').bad === '엉뚱', '네 자리 이름은 그대로 · 모르는 값은 ⚠');
+  ok(IC.posName('62,8') === '62,8' && IC.posName('lt') === '왼쪽위', 'posName — 대본에 적는 이름');
+  const b = IA.placeBox('62,8', 700, 300);
+  ok(b.x0 === Math.round(0.62 * 1920) && b.y0 === Math.round(0.08 * 1080), `렌더 자리 = 판 왼쪽 위 % (${b.x0},${b.y0})`);
+  const e = IA.placeBox('100,100', 700, 300);
+  ok(e.x0 === 1920 - 20 - 700 && e.y0 === 1080 - 20 - 300, '화면 밖으로 넘치면 판 전체가 화면 안(가장자리 20px)에 들게 붙인다');
+  const words = IA.layoutOf({ type: 'words', words: ['질문 둘', '바뀐 세대만 달라진다'], t0: 0, t1: 3, theme: { pos: '30,40', shape: 'bar' } });
+  const r = words.find((q) => q.k === 'rect');
+  ok(r.x === Math.round(0.30 * 1920) && r.y === Math.round(0.40 * 1080), `낱말 카드 판이 그 자리에 그려진다(MP4 ASS 와 ① 미리보기가 같은 프리미티브 · ${r.x},${r.y})`);
+  const IE = require('../core/info-edit');
+  const raw = '# t\n\n## 1장 — a\n### s\n> 🔤 카드: 질문 둘 | 바뀐 세대만 달라진다 @오른쪽위\n문장입니다.\n';
+  const w = IE.setPos(raw, 0, '62,8');
+  ok(w.ok && w.raw.split('\n')[4] === '> 🔤 카드: 질문 둘 | 바뀐 세대만 달라진다 @62,8' && w.raw.split('\n').length === raw.split('\n').length, '자리 저장 = 그 줄 끝 꼬리표만 @62,8 로');
+  ok(IE.setPos(raw, 0, 'x,y').ok === false, '모르는 자리는 거절');
+}
+
 const SCRIPT = [
   '# 정보 시험', '',
   '## 도입부', '',
