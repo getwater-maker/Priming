@@ -202,6 +202,29 @@ if (clEntry) {
   }
 }
 
+// ── ☁ MiniMax H3 Turbo (i2v) — 그림 한 장 첫 프레임(2026-10-13) ──
+{
+  const IP = path.join(ROOT, 'comfy', 'video_minimax_h3_turbo_i2v_cloud.json');
+  let iw = null; try { iw = JSON.parse(fs.readFileSync(IP, 'utf8')); } catch (_) {}
+  ok(!!iw && !iw.nodes, 'Turbo i2v 클라우드 워크플로가 실재하는 API 포맷이다');
+  if (iw) {
+    ok(!!byClass(iw, /^MiniMaxH3ImageToVideo$/) && !byClass(iw, /^MiniMaxH3ReferenceToVideo$/), '네이티브 ImageToVideo(first_frame) — R2V 노드는 아니다');
+    ok(!Object.values(iw).some((x) => /^Deno/.test(x.class_type || '')), 'Deno 노드 없음');
+    eq(byClass(iw, /^UNETLoader$/).inputs.unet_name, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'unet = fl2va (클라우드 실측 이름)');
+    eq(byClass(iw, /^LoraLoaderModelOnly$/).inputs.lora_name, 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'Turbo 8step LoRA (클라우드 실측 이름)');
+    eq(byClass(iw, /^BasicScheduler$/).inputs.steps, 8, 'steps = 8');
+    const CV2 = require(path.join(ROOT, 'core', 'comfy-video'));
+    const e2 = new CV2.ComfyVideo({ cloud: true, workflowPath: IP, sendDims: true, logger: () => {} });
+    ok(!e2.isMiniMaxRef(), 'R2V 가 아니다(인물 시트·<Picture 1> 접두사를 쓰지 않는다)');
+    const g3 = e2._buildGraph('up.png', '왕이 걷는다', '16:9', 5, ['sheet.png']);
+    eq(byClass(g3, /^LoadImage$/).inputs.image, 'up.png', '장면 그림이 first_frame 쪽 LoadImage 로 들어간다');
+    eq(byClass(g3, /^PrimitiveStringMultiline$/).inputs.value, '왕이 걷는다', '프롬프트는 접두사 없이 그대로');
+    const i3 = byClass(g3, /^MiniMaxH3ImageToVideo$/).inputs;
+    eq(i3.width + 'x' + i3.height, '1344x768', '768p 격자(0.98MP) — 1920x1088 로 새지 않는다');
+  }
+  ok(/video_minimax_h3_turbo_i2v_cloud\.json/.test(SRC), '번들 목록에 등록돼 있다');
+}
+
 // 소스 위생 — 이미지 주입과 접두사 판정을 **분리**해야 한다
 ok(/const mmLoaderId\s*=/.test(SRC), '이미지 주입용 mmLoaderId(Deno 전용) 가 따로 있다');
 ok(/const mmRef\s*=\s*!!mmLoaderId \|\| ids\.some/.test(SRC), '접두사 판정 mmRef 는 로컬·클라우드 둘 다 본다');

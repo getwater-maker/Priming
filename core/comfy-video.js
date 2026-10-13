@@ -57,6 +57,9 @@ const BUNDLED = [
   //   MiniMaxH3ReferenceToVideo 를 쓴다(공식 템플릿 video_minimax_h3_r2v 를 API 포맷으로 변환).
   //   ⚠ 이 파일은 로컬 ComfyUI 에 그 모델들이 없으면 실패한다(이름에 (클라우드) 명시).
   { name: 'MiniMax H3 레퍼런스 (R2V) (클라우드)', file: 'video_minimax_h3_ref2v_cloud.json' },
+  // ☁ 그림 한 장 → 영상(첫 프레임 고정 · 공식 템플릿 video_minimax_h3_i2v 의 Lightning 경로) — 인물 시트 없이 장면 그림만.
+  //   네이티브 MiniMaxH3ImageToVideo + unet fl2va + LoRA fl2v_turbo_8step(8스텝). 2026-10-13 /api/object_info 로 모델 실재 확인.
+  { name: 'MiniMax H3 Turbo (i2v) (클라우드)', file: 'video_minimax_h3_turbo_i2v_cloud.json' },
 ];
 // MiniMax H3 레퍼런스 프롬프트 접두사 — 대본은 그대로 두고 엔진이 붙인다(아래 _buildGraph 주석 참조).
 const MM_REF_PREFIX = '<Picture 1> is the exact scene: keep its composition, characters, clothing, colors and art style unchanged. ';
@@ -330,7 +333,8 @@ class ComfyVideo {
     const _titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
     const _isPrimNum = (id) => /Primitive(Int|Float)?/i.test(graph[id].class_type || '') && typeof (graph[id].inputs || {}).value === 'number';
     if (this.sendDims && aspect) {
-      const d = mmRef ? this._mmDims(aspect) : this._videoDims(aspect);
+      const mmI2v = ids.some((id) => /MiniMaxH3ImageToVideo/i.test(graph[id].class_type || ''));   // i2v 도 같은 768p 격자(1920x1088 은 3.6배 느림)
+      const d = (mmRef || mmI2v) ? this._mmDims(aspect) : this._videoDims(aspect);
       let set = false;
       // ① 같은 노드에 width+height 리터럴 (Wan 등)
       for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.width === 'number' && typeof inp.height === 'number') { inp.width = d.w; inp.height = d.h; set = true; break; } }
@@ -467,7 +471,7 @@ class ComfyVideo {
       const graph = this._buildGraph(uploadName, prompt, aspect, durationSec, refNames);
       // ⏱ MiniMax H3(로컬)는 3060 실측 0.98MP **563초** — 기본 600초와 너무 가까워 실제로 타임아웃 났다(E2E).
       //   그 워크플로일 때만 하한을 올린다. 타임아웃은 상한일 뿐이라 LTX(1~2분)에는 영향이 없다.
-      const _mmSlow = Object.values(graph).some((x) => /MiniMaxH3Reference/i.test(x.class_type || ''));
+      const _mmSlow = Object.values(graph).some((x) => /MiniMaxH3(Reference|ImageToVideo)/i.test(x.class_type || ''));
       const _savedTimeout = this.timeoutSec;
       if (_mmSlow && this.timeoutSec < MM_MIN_TIMEOUT_SEC) {
         this.timeoutSec = MM_MIN_TIMEOUT_SEC;

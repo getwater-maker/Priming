@@ -66,7 +66,7 @@ const comfySelectValue = (engine, cfg) => (isComfyEngine(engine)
 
 // 🎬 R2V 꼴 🎬(core/mm-r2v isR2V 와 같은 판정 — `subject_definitions:` 로 시작) · 고른 비디오 엔진이 MiniMax H3 레퍼런스(R2V)인가(v0.8.14)
 const R2V_HEAD_RE = /^\s*subject_definitions\s*[:：]/i;
-const isMmVideoVal = (v) => { const p = parseComfyVal(v); return !!(p && /minimax/i.test(String(p.path || ''))); };
+const isMmVideoVal = (v) => { const p = parseComfyVal(v); return !!(p && /minimax/i.test(String(p.path || '')) && !/turbo_i2v/i.test(String(p.path || ''))); };   // ☁ Turbo i2v 는 인물 시트를 안 쓴다 → R2V 아님
 // ⚙ 설정 팝업의 「워크플로」 행 — **선택이 아니라 관리(추가·삭제)** 전용.
 //   모델 선택은 헤더 드롭다운이 하므로(2026-08-14), 여기 select 를 두면 "어느 쪽이 진짜인지" 헷갈린다.
 function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
