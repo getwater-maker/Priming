@@ -254,6 +254,7 @@ contextBridge.exposeInMainWorld('api', {
   videoFrame: (args) => ipcRenderer.invoke('video-frame', args),
   setLogoSide: (args) => ipcRenderer.invoke('set-logo-side', args),
   setLogoPos: (args) => ipcRenderer.invoke('set-logo-pos', args),
+  bookOverseasRegister: (args) => ipcRenderer.invoke('book-overseas-register', args),
   infoPreview: (args) => ipcRenderer.invoke('info-preview', args),
   infoEdit: (args) => ipcRenderer.invoke('info-edit', args),
   infoFont: () => ipcRenderer.invoke('info-font'),   // 📇 정보 카드 글꼴(렌더와 같은 Pretendard Bold · base64) — ① 미리보기가 같은 폭으로 그리게

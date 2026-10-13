@@ -11541,6 +11541,23 @@ async function overseasInteriorFacts(args, pfId, dto) {
   if (iv && iv.bytes < 400 * 1024 * 1024) { try { pdf = IC.scanPdf(fs.readFileSync(iv.path)); } catch (_) {} }
   return { platformId: pfId, pages: dto.lastPages, paper: meta && meta.paper, marginsMm: o.marginsMm, fontSizePt: o.fontSizePt, hasBleed: false, pdf, images: imgs.map(({ src, pxW, pxH, missing, color }) => ({ src, pxW, pxH, missing, color })), textWidthMm: trim.width - o.marginsMm.inner - o.marginsMm.outer };
 }
+// 🇺🇸 KDP·D2D 등록 복사 도우미(R27) — 등록정보 파일(`기준\등록\<작품>.KDP등록정보.md`)·원고 메타로 항목·체크리스트를 만든다. 자동 입력·제출은 없다.
+ipcMain.handle('book-overseas-register', async () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { error: '열린 출판 원고가 없습니다.' };
+  try {
+    const OR = require('./core/book/overseas-register');
+    const meta = S.parsed.meta || {};
+    const pid = require('./core/book/html-builder').metaPlatformId(meta);
+    if (pid !== 'kdp' && pid !== 'd2d') return { error: '원고 메타 `> 플랫폼:` 이 KDP 또는 D2D 일 때 쓰는 도우미입니다(출판 화면 「책 정보」에서 플랫폼 선택).' };
+    const info = OR.loadOverseasInfo(S.scriptPath, pid);
+    // 삽화 수 — 본문·부속 블록의 이미지(퍼블릭 도메인 차별판 10점 이상 검사)
+    let ill = 0; const take = (arr) => { for (const sec of (arr || [])) for (const b of (sec.blocks || [])) if (b && b.type === 'image') ill++; };
+    take(S.parsed.front); take(S.parsed.back); for (const part of (S.parsed.parts || [])) take(part.chapters);
+    const outs = listBookOutputs();
+    const facts = { illustrations: ill, hasInterior: outs.some((o) => o.kind === 'interior'), hasCoverPdf: outs.some((o) => o.kind === 'cover'), hasEpub: outs.some((o) => o.kind === 'epub'), pages: S.parsed._lastPages || 0 };
+    return OR.buildPlan({ platformId: pid, meta, info, facts });
+  } catch (e) { return { error: (e && e.message) || String(e) }; }
+});
 ipcMain.handle('book-preflight', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
   try {
@@ -11585,10 +11602,10 @@ ipcMain.handle('book-outputs', () => {
   if (!S.parsed || S.parsed.kind !== 'book') return [];
   return listBookOutputs();
 });
-// 📤 등록 도우미 — 두 플랫폼 공식 주소만 외부 브라우저로 연다(로그인·최종 제출은 사람이 한다).
+// 📤 등록 도우미 — 공식 주소(부크크·작가와·KDP·D2D)만 외부 브라우저로 연다(로그인·최종 제출은 사람이 한다).
 ipcMain.handle('book-open-platform', (_e, u) => {
   const s = String(u || '');
-  if (!/^https:\/\/([a-z0-9-]+\.)?(bookk\.co\.kr|jakkawa\.com)(\/|$)/.test(s)) return false;
+  if (!/^https:\/\/([a-z0-9-]+\.)?(bookk\.co\.kr|jakkawa\.com|kdp\.amazon\.com|draft2digital\.com)(\/|$)/.test(s)) return false;
   shell.openExternal(s); return true;
 });
 // 🤖 등록 도우미 자동 입력 — 로그인·저장·제출은 사람이 한다(core/book/register-browser.js 머리말).

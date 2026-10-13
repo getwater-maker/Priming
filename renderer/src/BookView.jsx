@@ -7,6 +7,7 @@ import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
 import HK from '../../core/book/header-kind.js';
 import DK from '../../core/book/date-ko.js';   // 발행일 「2026년 10월 06일」 모양
+import OverseasRegister from './OverseasRegister.jsx';   // 🇺🇸 KDP·D2D 등록 복사 도우미(R27)
 import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
@@ -1334,6 +1335,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         </details>
       </>);
       case 'bookk': return registerPanel();
+      case 'overseas': return (dto.platformId === 'kdp' || dto.platformId === 'd2d') ? <OverseasRegister dto={dto} setStatus={setStatus} /> : null;
       default: return null;
     }
   })();
@@ -1370,7 +1372,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           </div>
         )}
         <nav className="bknav" data-testid="bk-nav">
-          {TABS.map(([id, ic, name]) => (
+          {[...TABS, ...((dto.platformId === 'kdp' || dto.platformId === 'd2d') ? [['overseas', '🇺🇸', '해외 등록']] : [])].map(([id, ic, name]) => (
             <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
               <span className="bkti">{ic}</span><span>{name}</span>
               {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요`}>{badge[id]}</em> : null}
