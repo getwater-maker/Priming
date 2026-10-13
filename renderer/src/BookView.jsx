@@ -520,7 +520,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     try {
       const r = await api.bookEbookPreview({});
       if (!r || r.error) { setEb((s) => ({ ...s, busy: false, error: (r && r.error) || '응답 없음' })); return; }
-      setEb({ busy: false, error: '', docs: r.docs, checks: r.checks, n: 1, html: '', version: r.version, bytes: r.bytes, forPath: (dto && dto.scriptPath) || '' });
+      setEb({ busy: false, error: '', docs: r.docs, checks: r.checks, n: 1, html: '', version: r.version, bytes: r.bytes, forPath: (dto && dto.scriptPath) || '', platformLabel: r.platformLabel || '부크크' });
       await loadEbookDoc(r.docs, 1);
     } catch (e) { setEb((s) => ({ ...s, busy: false, error: e.message })); }
   }
@@ -1409,12 +1409,17 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             </div>
             {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
             {eb.checks.length > 0 && (() => {
-              const bad = eb.checks.filter((c) => c.level !== 'ok');
+              // 사람이 눈으로 확인하는 항목(표지에 제목 등)은 체크하면 통과로 센다 — 원고마다 이 PC 에 기억(localStorage)
+              const confKey = (c) => 'pm.ebConfirm.' + ((dto && dto.scriptPath) || '') + '.' + c.id;
+              const confirmed = (c) => { try { return localStorage.getItem(confKey(c)) === '1'; } catch (_) { return false; } };
+              const lvl = (c) => (c.confirm && confirmed(c) ? 'ok' : c.level);
+              const bad = eb.checks.filter((c) => lvl(c) !== 'ok');
               return (
                 <details className="bkeb-checks" data-testid="bk-eb-checks" open={bad.length > 0} key={eb.forPath + ':' + bad.length}>
-                  <summary data-testid="bk-eb-sum">{bad.length ? `⚠ 부크크 전자책 점검 — 확인할 것 ${bad.length}개` : `✅ 부크크 전자책 점검 ${eb.checks.length}/${eb.checks.length} 통과`}</summary>
+                  <summary data-testid="bk-eb-sum">{bad.length ? `⚠ ${eb.platformLabel || '부크크'} 전자책 점검 — 확인할 것 ${bad.length}개` : `✅ ${eb.platformLabel || '부크크'} 전자책 점검 ${eb.checks.length}/${eb.checks.length} 통과`}</summary>
                   {eb.checks.map((c) => (
-                    <div key={c.id} className={'bkeb-chk ' + c.level} data-testid={'bk-eb-chk-' + c.id} data-level={c.level}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.text}</div>
+                    <div key={c.id} className={'bkeb-chk ' + lvl(c)} data-testid={'bk-eb-chk-' + c.id} data-level={lvl(c)}>{lvl(c) === 'ok' ? '✅' : lvl(c) === 'warn' ? '⚠' : '❌'} {c.text}
+                      {c.confirm && <label style={{ marginLeft: 8 }}><input type="checkbox" data-testid={'bk-eb-confirm-' + c.id} checked={confirmed(c)} onChange={(e) => { try { localStorage.setItem(confKey(c), e.target.checked ? '1' : '0'); } catch (_) {} setEb((s) => ({ ...s })); }} /> 확인했습니다</label>}</div>
                   ))}
                 </details>
               );

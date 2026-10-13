@@ -11,7 +11,7 @@ const BL = require('../core/book/book-lang');
 const PP = require('../core/book/platform-presets');
 const PF = require('../core/book/preflight');
 const { parseBookText } = require('../core/parsers/book-parser');
-const { buildBookHtml, metaPlatformId } = require('../core/book/html-builder');
+const { buildBookHtml, metaPlatformId, resolveBookOptions } = require('../core/book/html-builder');
 const { buildEpub } = require('../core/book/epub-builder');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
@@ -96,6 +96,20 @@ ok(/October 6, 2026/.test(H) && /Published/.test(H) && /©\s*2026 Roy Han\. All 
 ok(/Author/.test(H) && /Translator/.test(H) && !/지은이|옮긴이/.test(H.replace(/<style>[\s\S]*?<\/style>/, '')), '판권 라벨: Author · Translator');
 ok(he.options.lang === 'en' && he.options.lineBreak === 'word', '옵션: lang en · 줄바꿈 어절(한국어 전용 설정 끔)');
 ok(he.platform && he.trimId === '6x9' && Math.abs(he.trim.width - 152.4) < 0.01, '판형 6x9 · 플랫폼 KDP 로 조판');
+
+console.log('\n[4b] 영어 기본 타이포(Crimson Text · 고전 세리프)');
+{
+  const o = resolveBookOptions(bk, {}).o, oUi = resolveBookOptions(bk, { fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.8, fontWeight: 300, letterSpacingPt: -0.4, paragraphSpacingPt: 5, h2Gothic: true }).o;
+  ok(o.fontKey === 'crimson' && oUi.fontKey === 'crimson' && o.fontSizePt === 11.5 && oUi.fontSizePt === 11.5 && o.lineHeight === 1.4 && oUi.lineHeight === 1.4 && o.letterSpacingPt === 0 && oUi.letterSpacingPt === 0 && o.paragraphSpacingPt === 0 && oUi.paragraphSpacingPt === 0 && o.h2Gothic === false, '영어: Crimson Text 11.5pt · 행간 1.4 · 자간 0 · 문단 간격 0(UI 가 한국 기본값을 보내도 영어 기본)');
+  const custom = resolveBookOptions(bk, { fontKey: 'nanum-myeongjo', fontSizePt: 12, lineHeight: 1.5, paragraphSpacingPt: 3 }).o;
+  ok(custom.fontKey === 'nanum-myeongjo' && custom.fontSizePt === 12 && custom.lineHeight === 1.5 && custom.paragraphSpacingPt === 3, '사람이 고른 글꼴·크기·행간·문단 간격은 그대로 이긴다');
+  const ko = resolveBookOptions(parseBookText(KO, 'k2'), {}).o;
+  ok(ko.fontKey === 'kopub' && ko.fontSizePt === 10 && ko.lineHeight === 1.8 && ko.letterSpacingPt === -0.4 && ko.paragraphSpacingPt === 5 && ko.h2Gothic === true, '한국어는 예전 기본 그대로(KoPub 10pt · 1.8 · -0.4 · 5pt)');
+  const css = he.css;
+  ok(/'Crimson Text'/.test(css) && /section\.colophon \{ font-family: 'Crimson Text'/.test(css), '영어 CSS: 본문·머리글·판권이 Crimson Text 스택(고딕 아님)');
+  const ff = require('../core/book/pdf-builder').bundledFontCss();
+  ok(/font-family: 'Crimson Text'; src: url\('[^']*CrimsonText-Italic\.ttf'\); font-weight: 400; font-style: italic;/.test(ff) && /CrimsonText-BoldItalic\.ttf/.test(ff), '@font-face: Crimson Text 정체·기울임·굵게·굵은 기울임');
+}
 
 console.log('\n[5] ePub');
 async function epub(md, name) {

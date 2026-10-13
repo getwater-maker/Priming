@@ -494,6 +494,8 @@ const HANJA_SLOT = `'Priming Hanja Serif', 'Noto Serif CJK KR', 'Noto Serif KR C
 const FONT_STACKS = {
   kopub: `'KoPubWorld Batang', 'Noto Serif KR', 'NanumMyeongjo', 'Batang', ${HANJA_SLOT}, serif`,
   'kopub-dotum': `'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif`,
+  // 🇺🇸 영어 책 본문 — Crimson Text(동봉 · OFL). 한글·한자가 섞이면 뒤의 KoPub·Noto 가 받는다
+  crimson: `'Crimson Text', 'KoPubWorld Batang', 'Noto Serif KR', 'Times New Roman', ${HANJA_SLOT}, serif`,
   'nanum-myeongjo': `'NanumMyeongjo', 'KoPubWorld Batang', 'Noto Serif KR', 'Batang', ${HANJA_SLOT}, serif`,
   'nanum-gothic': `'NanumGothic', 'KoPubWorld Dotum', 'Dotum', sans-serif`,
   // 부크크 글꼴(이 PC 에서 읽기 — pdf-builder.EXTERNAL_FONT_DIR). 한자 0자 → 한자는 뒤의 폴백 명조·보강 글꼴이 맡는다. 없는 PC 는 KoPub 로 폴백.
@@ -502,6 +504,7 @@ const FONT_STACKS = {
 };
 const FONT_OPTIONS = [
   { id: 'kopub', label: 'KoPub월드 바탕 (권장)' },
+  { id: 'crimson', label: 'Crimson Text (영어 책 · 고전 세리프 · 영어 원고 기본)' },
   { id: 'kopub-dotum', label: 'KoPub월드 돋움' },
   { id: 'nanum-myeongjo', label: '나눔명조' },
   { id: 'nanum-gothic', label: '나눔고딕' },
@@ -512,12 +515,13 @@ const GOTHIC_STACK = FONT_STACKS['kopub-dotum'];
 
 // ── 동적 CSS(@page) ──
 function pageCss(o) {
+  const GS = o.lang === 'en' ? FONT_STACKS.crimson : GOTHIC_STACK;   // 머리글·쪽번호·목차 글꼴 — 영어 책은 Crimson Text(한국어 고딕 대신)
   const m = o.marginsMm;
   // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959)
   // 📏 R17 — 본문과 한눈에 구분: 본문보다 작은 고딕 8.5pt · 회색 #595959(검정 65% — 흑백 인쇄에서도 안 옅다) · 본문과 간격 `headerGapMm`
-  const rh = `font-family: ${GOTHIC_STACK}; font-size: ${HEADER_PT}pt; color: #595959;`;
+  const rh = `font-family: ${GS}; font-size: ${HEADER_PT}pt; color: #595959;`;
   // 쪽번호 — 재단선 아래끝에서 `o.pageNumSafeMm`(기본 8.5mm, 원고 `> 쪽번호안전:`) 위로 올린다: 아래 여백 상자의 바닥에 붙이고(vertical-align: bottom) 그만큼 띄운다(R22 · 부크크 권장 여백 6.0mm 안에 걸리지 않게).
-  const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000; vertical-align: bottom; padding-bottom: ${(o.pageNumSafeMm + 0.5).toFixed(1)}mm;`;   // +0.5: mupdf 글줄 상자 바닥이 상자보다 0.5mm 낮다(실측) — 값 = 상자 기준 거리
+  const fo = `font-family: ${GS}; font-size: 9pt; font-weight: 700; color: #000; vertical-align: bottom; padding-bottom: ${(o.pageNumSafeMm + 0.5).toFixed(1)}mm;`;   // +0.5: mupdf 글줄 상자 바닥이 상자보다 0.5mm 낮다(실측) — 값 = 상자 기준 거리
   // 머리글 내용 — 책제목/부제/장제목(first-except: 장 시작 페이지 생략)/소제목(절)
   // 최종본 스타일: 책제목 헤더는 부제가 있으면 '제목 / 부제' 병기.
   const rhContent = (kind) => kind === 'title' ? (o.hasSubtitle ? 'string(book-title) " / " string(book-subtitle)' : 'string(book-title)')
@@ -615,7 +619,7 @@ ${o.lineBreak === 'char' ? 'section.chapter p, section.front-section p, section.
 strong { font-weight: ${Math.min(900, o.fontWeight + 400)}; }
 /* 소제목(원고 ## = 절) */
 section.chapter h3 {
-  font-family: ${o.h2Gothic ? GOTHIC_STACK : o.fontStack};
+  font-family: ${o.h2Gothic ? GS : o.fontStack};
   font-size: ${o.h2SizePt}pt;
   font-weight: ${o.h2Weight};
   text-align: ${o.h2Align};
@@ -645,7 +649,7 @@ nav.toc a .tt { flex: 0 1 auto; text-align: left; word-break: keep-all; overflow
 nav.toc a .dots { flex: 1 1 auto; min-width: 1.5em; margin: 0 0.55em; border-bottom: 1.3px dotted #aaaaaa; transform: translateY(-0.28em); }
 nav.toc a::after {
   content: target-counter(attr(href url), page);
-  font-weight: 400; font-family: ${GOTHIC_STACK}; font-size: 0.95em;
+  font-weight: 400; font-family: ${GS}; font-size: 0.95em;
 }
 /* 판권 배치 — 위(실물 단행본 다수·기본) / 아래(구 앱 최종본 스타일).
    flex 하단정렬은 vivliostyle 조각화에서 height:100% 미해석 → 고정 마진(판면 폭 기준 %)으로. */
@@ -711,20 +715,21 @@ function resolveBookOptions(book, opts = {}) {
   const trimId = (meta.trim && TRIM_SIZES[meta.trim]) ? meta.trim
     : ((opts.trimId && TRIM_SIZES[opts.trimId]) ? opts.trimId : platform.defaultTrim);
   const trim = getTrim(trimId);
+  const en = BL.langOf(meta) === 'en';   // 영어 원고 — 영어 기본 타이포(글꼴·크기·행간·자간·문단 간격)
 
   const o = {
     trimW: trim.width, trimH: trim.height,
     // ── 본문 타이포 — 기본값은 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로 ──
-    fontKey: FONT_STACKS[opts.fontKey] ? opts.fontKey : 'kopub',
-    fontSizePt: num(opts.fontSizePt, 10),
+    fontKey: en && (!opts.fontKey || opts.fontKey === 'kopub') ? 'crimson' : (FONT_STACKS[opts.fontKey] ? opts.fontKey : 'kopub'),   // 🇺🇸 영어 원고는 한국어 기본 글꼴이면 Crimson Text
+    fontSizePt: num(opts.fontSizePt != null && !(en && Number(opts.fontSizePt) === 10) ? opts.fontSizePt : (en ? 11.5 : opts.fontSizePt), 10),
     // 행간 — 한국 단행본 관행 = 글자 크기의 1.7~2.0배(10pt 본문 → 17~20pt 행간, 대표 1.8).
     //   구 앱 값(1.65)은 관행 하한보다 좁아 기본을 1.8 로.
-    lineHeight: num(opts.lineHeight, 1.8),
-    fontWeight: num(opts.fontWeight, 300),
-    letterSpacingPt: numAllowNeg(opts.letterSpacingPt, -0.4),
+    lineHeight: num(en && (opts.lineHeight == null || Number(opts.lineHeight) === 1.8) ? 1.4 : opts.lineHeight, 1.8),   // 🇺🇸 영어 기본 행간 1.4(한국어 1.8 은 영어에 너무 성김)
+    fontWeight: num(en ? 400 : opts.fontWeight, 300),
+    letterSpacingPt: numAllowNeg(en && (opts.letterSpacingPt == null || Number(opts.letterSpacingPt) === -0.4) ? 0 : opts.letterSpacingPt, -0.4),   // 영어는 자간을 좁히지 않는다
     indentPt: numAllowZero(opts.indentPt, 15),
     // 문단 간격 — 한국 단행본 관행 = 들여쓰기만 하고 문단 간격 0 (간격은 장면 전환 등 의도적 구분에만).
-    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 5), // 최종본 실측 — 문단 사이 뚜렷한 간격
+    paragraphSpacingPt: numAllowZero(en && (opts.paragraphSpacingPt == null || Number(opts.paragraphSpacingPt) === 5) ? 0 : opts.paragraphSpacingPt, 5), // 최종본 실측 — 문단 사이 뚜렷한 간격 · 🇺🇸 영어는 들여쓰기만(문단 간격 0)
     // ── 여백(mm) — 구 앱: 위20 / 아래15 / 안쪽20 / 바깥17 ──
     marginsMm: overseasMargins(platform, opts) || Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
@@ -745,7 +750,7 @@ function resolveBookOptions(book, opts = {}) {
     pageNum: pick(opts.pageNum, ['outer', 'center', 'none'], 'outer'),
     // ── 소제목(원고의 ## = 절) 스타일 — 구 앱: 고딕 800, ❖ 접두, 위25pt/아래10pt ──
     h2SizePt: num(opts.h2SizePt, 10.5),
-    h2Gothic: opts.h2Gothic !== false,
+    h2Gothic: en ? false : opts.h2Gothic !== false,   // 🇺🇸 영어 소제목은 본문과 같은 세리프 굵게
     h2Weight: num(opts.h2Weight, 700),
     h2Align: pick(opts.h2Align, ['left', 'center', 'right'], 'left'),
     h2Prefix: opts.h2Prefix != null ? String(opts.h2Prefix) : '❖',
@@ -789,6 +794,7 @@ function englishCss() {
   return `/* 🇺🇸 영어 원고(해외 플랫폼) — 어절 단위(keep-all)는 한국어 전용 · 영어는 하이픈으로 줄을 맞춘다 */
 html[lang="en"] body, html[lang="en"] p, html[lang="en"] li, html[lang="en"] td, html[lang="en"] blockquote { word-break: normal; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; hyphenate-limit-chars: 6 3 3; }
 html[lang="en"] nav.toc, html[lang="en"] nav.toc a .tt, html[lang="en"] section.titlepage .tp-title, html[lang="en"] section.halftitle .ht-title, html[lang="en"] h1, html[lang="en"] h2, html[lang="en"] h3 { word-break: normal; hyphens: manual; -webkit-hyphens: manual; }
+html[lang="en"] section.colophon { font-family: ${FONT_STACKS.crimson}; font-size: 0.85em; }
 html[lang="en"] body { quotes: "\\201C" "\\201D" "\\2018" "\\2019"; }`;
 }
 /** 🇺🇸 KDP·D2D 기본 여백 — 조판 설정이 한국 기본값(20/15/20/17) 그대로면 해외 기본(위·아래 0.75″ · 바깥 0.5″ · 안쪽 = KDP 쪽수 구간표)을 쓰고, 한 칸이라도 사람이 바꿨으면 그 값이 이긴다. 한국 플랫폼은 null(예전 그대로) */

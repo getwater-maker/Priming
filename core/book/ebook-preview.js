@@ -66,6 +66,27 @@ function inspectEpub(epubPath, o = {}) {
   });
   const N = docs.length;
   const checks = [];
+  // 🇺🇸 해외 플랫폼(KDP·D2D) — 부크크 판권 규칙(발행인·출판등록 등) 대신 플랫폼별 점검(core/book/ebook-overseas)
+  if (o.platformId === 'kdp' || o.platformId === 'd2d') {
+    const OV = require('./ebook-overseas');
+    const m = o.meta || {};
+    const coverHref = manifest['cover-img'] || Object.values(manifest).find((h) => /^cover\.(jpe?g|png|gif|webp)$/i.test(h)) || '';
+    let cover = null;
+    if (coverHref) { const e = z.getEntry('OEBPS/' + coverHref); if (e) { const buf = e.getData(); const sz = OV.imgSizeFromBuffer(buf); if (sz) cover = { ...sz, bytes: buf.length }; } }
+    const ci2 = docs.findIndex((d) => d.id === 'colophon');
+    const firstCover = docs[0] && docs[0].id === 'cover';
+    const list = [];
+    list.push(firstCover ? { id: 'cover', level: 'ok', text: '1쪽 = 표지 이미지' } : { id: 'cover', level: 'err', text: '1쪽이 표지 이미지가 아닙니다' });
+    list.push(...OV.overseasEbookChecks({
+      platformId: o.platformId, lang: o.lang || 'ko', dcLanguage: (opf.match(/<dc:language>([^<]+)<\/dc:language>/) || [])[1], version, bytes: o.bytes,
+      cover, hasNav: !!z.getEntry('OEBPS/nav.xhtml'), hasNcx: !!z.getEntry('OEBPS/toc.ncx'), epubcheck: o.epubcheck || null,
+      colophonText: ci2 >= 0 ? plain(txt('OEBPS/' + docs[ci2].href)) : null,
+    }));
+    let refs2 = 0, notes2 = 0;
+    for (const d of docs) { const x = txt('OEBPS/' + d.href); refs2 += (x.match(/href="#fn-\d+"/g) || []).length; notes2 += (x.match(/\bid="fn-\d+"/g) || []).length; }
+    list.push(refs2 === notes2 ? { id: 'fn', level: 'ok', text: `각주 ${refs2}개 연결` } : { id: 'fn', level: 'warn', text: `각주 번호 ${refs2}개 · 각주 본문 ${notes2}개 — 짝이 맞지 않습니다` });
+    return { version, docs, checks: list, coverLabel: '', platformId: o.platformId, platformLabel: o.platformId === 'kdp' ? 'Amazon KDP' : 'Draft2Digital' };
+  }
 
   // 1) 1쪽 = 표지 이미지
   const cover = docs[0];

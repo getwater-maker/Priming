@@ -11322,7 +11322,13 @@ regBook('book-ebook-preview', async (_e, args = {}) => {
   if (r.error || !fs.existsSync(out)) return { error: r.error || 'ePub 을 만들지 못했습니다(로그 확인)' };
   _ebookPrev = { path: out };
   try {
-    const info = EP.inspectEpub(out, { meta: S.parsed.meta || {}, logs, footnoteCount: Object.keys(S.parsed.footnotes || {}).length });
+    const meta0 = S.parsed.meta || {};
+    const pfId = require('./core/book/html-builder').metaPlatformId(meta0);
+    const overseas = pfId === 'kdp' || pfId === 'd2d';
+    // 🇺🇸 D2D 는 EPUBCheck 통과가 필수 — 도구가 있으면 돌린다(KDP 는 Kindle Previewer 권장이라 참고용 · 도구가 있을 때만)
+    let epubcheck = null;
+    if (overseas) { try { epubcheck = await require('./core/book/epubcheck').runEpubCheck(out); } catch (e) { epubcheck = { error: e.message }; } }
+    const info = EP.inspectEpub(out, { meta: meta0, logs, footnoteCount: Object.keys(S.parsed.footnotes || {}).length, platformId: overseas ? pfId : null, lang: require('./core/book/book-lang').langOf(meta0), bytes: fs.statSync(out).size, epubcheck });
     return { ...info, bytes: fs.statSync(out).size };
   } catch (e) { return { error: 'ePub 점검 실패: ' + e.message }; }
 });

@@ -102,6 +102,7 @@ console.log('\n[4] 플랫폼 프리셋(D2D 공식 확인값)');
     if (r.success) {
       const s = IC.scanPdf(fs.readFileSync(r.pdfPath));
       ok(s.fonts.total > 0 && s.fonts.notEmbedded.length === 0, `PDF 글꼴 ${s.fonts.total}종 전부 임베드(${s.fonts.names.slice(0, 3).join(', ')}${s.fonts.type3 ? ' · Type3 ' + s.fonts.type3 : ''})`);
+      ok(s.fonts.names.some((n) => /Crimson/i.test(n)), '영어 책 본문 글꼴 = Crimson Text 가 PDF 에 임베드됐다(' + s.fonts.names.join(', ') + ')');
       ok(s.uriLinks === 0 && !s.outlines && !s.encrypted, `바깥 주소 링크 ${s.uriLinks} · 북마크 ${s.outlines} · 암호화 ${s.encrypted} (내부 이동 링크 ${s.links}개 = 목차 쪽번호)`);
       const pi = IC.interiorItems({ platformId: 'kdp', pages: r.pages, pdf: s }).find((q) => q.id === 'pdf-annots');
       ok(pi && pi.state === (s.links ? 'info' : 'ok'), '내부 이동 링크만 있으면 info(경고 아님) — 점검 항목 ' + (pi && pi.state));

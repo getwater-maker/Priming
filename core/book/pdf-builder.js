@@ -41,6 +41,11 @@ const BUNDLED_FACES = [
   ['NanumMyeongjo', 'NanumMyeongjo-Bold.ttf', 700],
   ['NanumGothic', 'NanumGothic-Regular.ttf', 400],
   ['NanumGothic', 'NanumGothic-Bold.ttf', 700],
+  // 🇺🇸 영어 책 본문 = Crimson Text(OFL · 로이 승인 2026-10-13 — 「고전에 맞는 일반적인 글꼴」: 올드스타일 북 세리프, 가라몽 계열) · 정적 TTF 4면
+  ['Crimson Text', 'CrimsonText-Regular.ttf', 400],
+  ['Crimson Text', 'CrimsonText-Italic.ttf', 400, 'italic'],
+  ['Crimson Text', 'CrimsonText-Bold.ttf', 700],
+  ['Crimson Text', 'CrimsonText-BoldItalic.ttf', 700, 'italic'],
 ];
 // 🔤 부크크 글꼴(BookkMyungjo·BookkGothic) — 배포물에 동봉하지 않는다(재배포 조건 미확인 · 로이 결정 2026-10-03).
 //   이 PC 의 출판 폴더에서 **읽기만** 한다. 없는 PC 는 조용히 건너뛰고(KoPub 로 폴백) 글꼴 선택지에 「이 PC 에 없음」으로 표시. 한자 0자 — 한자 병기 책엔 부적합.
@@ -71,9 +76,9 @@ function bundledFontCss(urlFor) {
   const toUrl = urlFor || ((p) => 'file:///' + p.replace(/\\/g, '/'));
   const css = [];
   try {
-    for (const [family, file, weight] of BUNDLED_FACES) {
+    for (const [family, file, weight, style] of BUNDLED_FACES) {
       const p = path.join(FONT_DIR, file);
-      if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight}; }`);
+      if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight};${style ? ' font-style: ' + style + ';' : ''} }`);
     }
   } catch (_) {}
   for (const x of externalFaces()) css.push(`@font-face { font-family: '${x.family}'; src: url('${toUrl(x.abs)}'); font-weight: ${x.weight}; }`);
@@ -81,7 +86,7 @@ function bundledFontCss(urlFor) {
 }
 /** 선언했는데 폴더에 없는 동봉 글꼴 파일 이름들(없으면 []) — 있으면 그 글꼴은 조용히 시스템 대체로 보인다 */
 function missingBundledFonts(dir = FONT_DIR) {
-  return BUNDLED_FACES.filter(([, file]) => !fs.existsSync(path.join(dir, file))).map(([, file]) => file);
+  return [...new Set(BUNDLED_FACES.filter(([, file]) => !fs.existsSync(path.join(dir, file))).map(([, file]) => file))];
 }
 
 /**

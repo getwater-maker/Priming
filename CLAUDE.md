@@ -33,7 +33,7 @@
   - 🔴 **`package.json` dependencies 가 바뀌면 라이트 업데이트가 막힌다**(매니페스트 `deps` 해시) → 설치본 재배포(`npm run dist`) 필요. ⛔ **npm 의존성을 쉽게 늘리지 않는다**(아내 PC 재설치가 따라온다). 형태소 분석기 등도 같은 이유로 안 쓴다.
   - 🔴 **버전은 앞으로만** — 고치기 전에 `package.json` 을 먼저 읽는다(다른 세션이 낡은 값으로 0.3.25→0.2.99 역행시킨 사고). `gen-manifest` 가 역행을 막는다(`ALLOW_VERSION_DOWNGRADE=1` 로만 우회).
   - 매니페스트 제외: 폴더 **이름**이 `scripts`·`.venv`·`qwen-design` 등인 곳 전체, `assets/fonts/book/`, **git 무시 파일**(`git check-ignore`). 🔴 배포할 파이썬은 `scripts/` 라는 이름 폴더에 두지 말 것(조용히 빠진다). 해시는 LF 정규화 기준.
-  - 🔴 **`assets/fonts/book/` 는 매니페스트에서 제외되지만 `NotoSerifKR-`·`HanjaSerif-` 로 시작하는 글꼴은 예외로 배포한다**(안 그러면 설치본에 글꼴 파일이 없어 한자가 고딕으로 튄다 · R15). 새 동봉 글꼴은 `BUNDLED_FACES` 에 올리고 이 예외 접두사도 함께 본다(`test:book` font-ship).
+  - 🔴 **`assets/fonts/book/` 는 매니페스트에서 제외되지만 `NotoSerifKR-`·`HanjaSerif-`·`CrimsonText-`(영어 책 본문 · 로이 승인 2026-10-13) 로 시작하는 글꼴은 예외로 배포한다**(안 그러면 설치본에 글꼴 파일이 없어 한자가 고딕으로 튄다 · R15). 새 동봉 글꼴은 `BUNDLED_FACES` 에 올리고 이 예외 접두사도 함께 본다(`test:book` font-ship).
   - 설치본 버전 확인: `%LOCALAPPDATA%\Programs\priming\resources\app\package.json`. 발행 직후 「안 된다」면 먼저 이걸 본다(CDN 이 옛 매니페스트를 준 적 있음 — 한 번 더 재시작).
 - 로그: `~/.shots-maker/logs/YYYY-MM-DD.log`(KST · 7일 보관 · 화면 줄은 `[화면]` 접두). 로그창 「📁 파일」. 엔진(Flow 등) 로그도 파일로 후킹돼 있다.
 
@@ -202,7 +202,7 @@
 - ⛔ 부크크 글꼴은 이 PC 의 `_공통\부크크자료\글꼴` 에서 읽기만(`assets/fonts/book` 복사·동봉 금지) · 그 밖의 글꼴도 로이 승인 없이 동봉하지 않는다.
 - 🧰 **리모션 그림·영상 도구는 리모션 화면에서 따로 고른다**(v0.7.86 · `_remotionImgTool`/`_remotionVidTool` — ⛔ 헤더·ComfyUI 설정 파일을 바꾸지 않는다 · 레인은 고른 도구로) · 그림 TSV 6번 칸 = 영상 지시문(채운 장면만 같은 이름 .mp4).
 - 📄 **완성 PDF = 판마다 표지 · 본문(내지) · 표지+본문 셋 · 부크크 전자책은 `[전자책] …_표지+본문.pdf` 업로드(3단계 = `_표지.pdf`) · ePub 은 선택**(v0.8.14 · 로이 2026-10-12 · 묶기는 `core/book/pdf-pack` · 종류 판정은 `bookOutputKind` 한 곳 — 접두로 가른다).
-- 🇺🇸 **영어책(KDP·D2D 해외 플랫폼 · v0.9.0)**: 메타 `> 언어: en` → 조판·ePub 영어(`core/book/book-lang` 한 곳) · ⛔ 한국어 경로 불변(`test:book`) · KDP + 한국어 = 점검 오류 · 규격 값은 `platform-presets` 한 곳 · [`docs/규칙/출판.md`](docs/규칙/출판.md).
+- 🇺🇸 **영어책(KDP·D2D 해외 플랫폼 · v0.9.0)**: 메타 `> 언어: en` → 조판·ePub 영어(`core/book/book-lang` 한 곳 · 본문 글꼴 Crimson Text) · ⛔ 한국어 경로 불변(`test:book`) · KDP + 한국어 = 점검 오류 · 규격 값은 `platform-presets` 한 곳(내지 `interior-check` · 전자책 `ebook-overseas`) · [`docs/규칙/출판.md`](docs/규칙/출판.md).
 - 규격(용지·책등·날개)은 main `bookSpec()` 한 곳 · 출력 폴더는 `bookOutRoot` 한 곳 · 원고 메타 문법(`날개`·`[앞날개]` 등)을 바꾸면 출판 세션에 알린다 · 리모션은 전용 TTS 캐시(⛔ 공용 캐시 — 롱폼 타이밍이 깨진다).
 
 ## 8. 코딩 함정 (이 환경에서 실제로 밟은 것)
