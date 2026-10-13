@@ -6341,7 +6341,7 @@ export default function App() {
                   <Face face={vi && vi.face} name={(vi && vi.vname) || refLabel(ch.voiceCloneRefAudio) || '?'} gender={vi && vi.gender} size={44} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700 }}>{vi ? vi.engLabel : 'OmniVoice'} · {isOmni ? (refLabel(ch.voiceCloneRefAudio) || '참조음성 없음') : ((vi && vi.vname) || '목소리 없음')}</div>
-                    <div className="meta" style={{ fontSize: 11 }}>{isOmni ? '내 GPU 서버 · 무료 · 아래 참조음성으로 읽습니다' : '유료 API — 목소리·모델·말투는 「🔊 음성 설정」에서 · 아래 참조음성·Clone 강도·화자 목소리는 쓰지 않습니다'}</div>
+                    <div className="meta" style={{ fontSize: 11 }}>{isOmni ? '내 GPU 서버 · 무료 · 이 참조음성(목소리)으로 읽습니다' : '유료 API — 목소리·모델·말투는 「🔊 음성 설정」에서 · 아래 참조음성·Clone 강도·화자 목소리는 쓰지 않습니다'}</div>
                   </div>
                   <button className="ghost" data-testid="ch-voice-open" style={{ flex: '0 0 auto' }} title="엔진(OmniVoice·Gemini·MAI·타입캐스트·ElevenLabs)과 목소리를 카드로 고릅니다" onClick={() => openTtsEngines(ch.name)}>🔊 음성 설정에서 바꾸기</button>
                 </div>
@@ -6349,19 +6349,11 @@ export default function App() {
                   <span className="mini" title="같은 시드 = 편마다 같은 톤. OmniVoice·ElevenLabs 가 씁니다.">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
 
                 {isOmni ? (<>
-                  <div className="subhead">🎙 OmniVoice 참조음성</div>
-                  <div className="frow"><label>참조음성</label>
-                    <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                      {/* 값이 비면 select 는 **첫 항목을 조용히 가리킨다** — 그 상태로 저장하면 엉뚱한 목소리가 박힌다.
-                          (2026-08-14 사고) 명시적 placeholder 를 두어 "선택 안 됨"이 눈에 보이게 한다. */}
-                      {!ch.voiceCloneRefAudio ? <option value="">— 선택 안 됨 (목소리를 고르세요) —</option> : null}
-                      {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{refLabel(ch.voiceCloneRefAudio)}</option> : null}
-                      {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-                    </select>
-                    <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" onClick={() => playRef(ch.voiceCloneRefAudio)}>{pvBtn('ref:' + ch.voiceCloneRefAudio)}</button>
-                    <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
-                    <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
+                  {/* 🎙 참조음성 고르기·미리듣기·🎨 보이스디자인은 「🔊 음성 설정」 창 한 곳에서(로이 2026-10-14 — 같은 기능이 두 곳이라 정리).
+                      여기엔 그 창에 없는 Clone 강도만 남긴다. 저장 값(voiceCloneRefAudio·cfgValue)·저장 코드는 그대로. */}
+                  <div className="subhead" data-testid="ch-omni-settings">🎙 OmniVoice 설정</div>
                   <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /><span className="meta">참조음성을 얼마나 따라 할지(기본 2)</span></div>
+                  <div className="meta" data-testid="ch-ref-moved" style={{ margin: '2px 0 6px' }}>목소리(참조음성)는 위 「🔊 음성 설정에서 바꾸기」에서 고릅니다 — 미리듣기·🎨 보이스디자인도 그 창에 있습니다.</div>
 
                   <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
                   <div style={{ maxHeight: 92, overflowY: 'auto' }}>

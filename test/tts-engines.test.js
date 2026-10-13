@@ -294,6 +294,10 @@ function makeWav(samples, sr = 24000) {
       const APP3 = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
       ok(/data-testid="ch-voice-sum"/.test(APP3) && /openTtsEngines\(ch\.name\)/.test(APP3), '음성 탭 맨 위 = 이 채널 목소리 요약 + 「🔊 음성 설정에서 바꾸기」(그 채널로 연다)');
       ok(/isOmni \? \(<>/.test(APP3), '참조음성·Clone강도·화자 목소리 = OmniVoice 일 때만');
+      { const v0 = APP3.indexOf("{chTab === 'voice' && (() => {"), v1 = APP3.indexOf("{chTab === 'caption'", v0), V = APP3.slice(v0, v1);
+        ok(!/value=\{ch\.voiceCloneRefAudio\}/.test(V) && !/openRefFolder/.test(V) && !/onClick=\{openVoiceDesign\}/.test(V) && /data-testid="ch-omni-settings"/.test(V) && /<label>Clone강도<\/label>/.test(V) && /data-testid="ch-ref-moved"/.test(V),
+          '🎙 음성 탭: 참조음성 고르기·찾기·🎨 디자인 줄은 없고(「🔊 음성 설정」 한 곳) Clone 강도만 남는다(v0.9.6)');
+        ok(/ch\.speakers/.test(V) && /chRefList\.map/.test(V), '화자별 목소리(대본 [이름])는 그대로'); }
       { const vt = APP3.indexOf("{chTab === 'voice' && (() => {"); const tt = APP3.indexOf("{chTab === 'tools' && (<div>");
         const bt = APP3.indexOf("{chTab === 'basic' && (<div>");
         ok(vt > 0 && tt > 0 && bt > 0 && !APP3.slice(vt, APP3.indexOf("{chTab === 'caption'", vt)).includes('presetPrompt') && APP3.slice(bt, vt).includes('<label>이미지 사전설정</label>') && !APP3.slice(tt, tt + 600).includes('presetPrompt'), '이미지 사전설정은 🏠 기본 탭으로(🎨 제작 도구는 높이가 넘친다)'); }
