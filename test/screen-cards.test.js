@@ -220,7 +220,8 @@ const SCRIPT = [
     ok(r.cards.every((c) => c.lang === 'ja'), '일본어 낭독 문장에 걸린 카드 = lang ja');
     ok(!/카드/.test(r.warnings.join('')), '모르는 칸(카드=A1)은 조용히 무시한다(경고 없음 · 카드는 그린다)');
     const ev = R.cardEvents(r.cards, 0, 20).join('\n');
-    ok(/\\fnNoto Sans JP\\/.test(ev) && !/Noto Serif KR|Hanja/.test(ev), '일본어 카드 글자 = Noto Sans JP(한국 명조·한자 부분집합 아님)');
+    ok(/\\fnNoto Serif JP Medium\\/.test(ev) && !/Noto Serif KR|Hanja/.test(ev) && /\\b0\\i0/.test(ev), '일본어 카드 글자 = 명조 Noto Serif JP Medium(v0.9.8 · 한국 명조·한자 부분집합 아님 · 가짜 굵게 없음)');
+    ok(fs.existsSync(path.join(__dirname, '..', 'assets', 'fonts', 'NotoSerifJP-Medium.otf')) && fs.existsSync(path.join(__dirname, '..', 'assets', 'fonts', 'NotoSerifJP-OFL.txt')), '명조 글꼴 파일 + OFL 라이선스 동봉(assets/fonts — 매니페스트로 배포)');
     const ko = SC.plan(P.parseScriptText(SCRIPT, 'longform', {}).projects[0], []);
     ok(ko.cards.length === 0, '(마커 없음 = 카드 없음)');
     const kp = P.parseScriptText(SCRIPT, 'longform', {}).projects[0]; kp.sentences.forEach((s) => { s.ttsAudioPath = 'x'; s.ttsDurationSec = 6; });

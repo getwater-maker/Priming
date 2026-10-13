@@ -511,9 +511,12 @@ function buildAss(cues, overlays, cs, extra = {}) {
 //   · 한자 = 동봉 HanjaSerif(Noto Serif CJK KR 한자 부분집합) · 한글 = Noto Serif KR — 둘 다 assets/fonts/book(라이트 업데이트로 배포되는 예외 접두사).
 const CARD_FONT = { han: 'Noto Serif CJK KR Light Hanja', ko: 'Noto Serif KR Light' };
 const CARD_FONT_FILES = ['HanjaSerif-Light.ttf', 'NotoSerifKR-Light.ttf'];
-// 🇯🇵 일본어 카드(screen-cards 가 c.lang='ja' 로 표시 · v0.9.7) — 동봉 Noto Sans JP(자막과 같은 파일 · assets/fonts). 위 두 글꼴엔 가나·県·沢 이 없다(실측).
-const CARD_FONT_JA = 'Noto Sans JP';
-const CARD_FONT_JA_FILE = 'NotoSansJP-Bold.otf';
+// 🇯🇵 일본어 카드(screen-cards 가 c.lang='ja' 로 표시 · v0.9.7) — 위 두 글꼴엔 가나·県·沢 이 없다(실측).
+//   v0.9.8: 명조 Noto Serif JP Medium(로이 승인 2026-10-14 · OFL · assets/fonts) · 파일이 없으면 자막과 같은 고딕 Noto Sans JP 로 폴백.
+const _JA_SERIF = { name: 'Noto Serif JP Medium', file: 'NotoSerifJP-Medium.otf' }, _JA_SANS = { name: 'Noto Sans JP', file: 'NotoSansJP-Bold.otf' };
+const _JA_PICK = (() => { try { return fs.existsSync(path.join(__dirname, '..', 'assets', 'fonts', _JA_SERIF.file)) ? _JA_SERIF : _JA_SANS; } catch (_) { return _JA_SANS; } })();
+const CARD_FONT_JA = _JA_PICK.name;
+const CARD_FONT_JA_FILE = _JA_PICK.file;
 const CARD_BG_MAX = 0.84;   // 어두운 판의 최대 불투명도 — 그림이 아주 희미하게 비친다(완전 검정 X)
 const cardAlpha = (op, max) => Math.max(0, Math.min(255, Math.round(255 * (1 - Math.max(0, Math.min(1, op)) * max)))).toString(16).padStart(2, '0').toUpperCase();
 /** 이 창에 걸친 카드 → Dialogue 줄 [문자열] (창 시각 w0~w1 초 · 이벤트 시각은 창 기준) */
@@ -545,13 +548,13 @@ function cardEvents(cards, w0, w1) {
     const rule = (y) => out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an7\\pos(${W / 2 - 70},${y})\\bord0\\shad0\\1c&H8C8C8C&${ramp(0.55)}\\p1}m 0 0 l 140 0 140 2 0 2{\\p0}`);
     const ja = c.lang === 'ja';
     if (c.kind === 'interlude') {
-      txt(c.trans, { y: H / 2 - 20, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 84, color: 'D0E0EA', sp: 4, b: 1 });
+      txt(c.trans, { y: H / 2 - 20, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 84, color: 'D0E0EA', sp: 4, b: ja ? 0 : 1 });
       rule(H / 2 + 70);
     } else {
       const hasOrig = c.orig && c.orig.length;
       if (hasOrig) txt(c.orig, { y: 360, font: ja ? CARD_FONT_JA : CARD_FONT.han, fs: 66, color: 'D0E0EA', sp: 4 });
       if (hasOrig) rule(500);
-      txt(c.trans || [], { y: hasOrig ? 660 : 540, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 62, color: 'D0E0EA', sp: 1, b: 1 });   // 🔎 시니어 시청층(고전서재 요청 v0.8.1): 번역 글을 한문 줄과 비슷한 크기·같은 밝은 색·굵게(옛 46 · 회색)
+      txt(c.trans || [], { y: hasOrig ? 660 : 540, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 62, color: 'D0E0EA', sp: 1, b: ja ? 0 : 1 });   // 🔎 시니어 시청층(고전서재 요청 v0.8.1): 번역 글을 한문 줄과 비슷한 크기·같은 밝은 색·굵게(옛 46 · 회색)
     }
   }
   return out;
