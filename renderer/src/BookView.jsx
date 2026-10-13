@@ -1157,7 +1157,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <summary>규격 (플랫폼·판형·용지)</summary>
           <div className="bkform">
             <label>플랫폼
-              <select value={dto.platformId} onChange={(e) => setMeta('platform', e.target.value === 'kyobo' ? '교보' : e.target.value === 'jakkawa' ? '작가와' : '부크크')}>
+              <select value={dto.platformId} onChange={(e) => setMeta('platform', e.target.value === 'kyobo' ? '교보' : e.target.value === 'jakkawa' ? '작가와' : e.target.value === 'kdp' ? 'KDP' : e.target.value === 'd2d' ? 'D2D' : '부크크')}>
                 {(dto.platforms || []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
             </label>
@@ -1263,6 +1263,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <label>바깥 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.outer} onChange={(e) => Lm('outer', e.target.value)} /></label>
             </div>
             <div className="meta">기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다. 부크크 권고: 중요한 내용은 끝선에서 10~15mm 안쪽.</div>
+            {(dto.platformId === 'kdp' || dto.platformId === 'd2d') && <div className="meta" data-testid="overseas-margin-hint">🇺🇸 {dto.platformId === 'kdp' ? 'KDP' : 'D2D'}: 위 값이 기본(20/15/20/17) 그대로면 <b>자동 여백</b>이 쓰입니다 — 위·아래 0.75″ · 바깥 0.5″ · 안쪽 = KDP 쪽수 구간표(≤150쪽 0.375″ · ≤300쪽 0.5″ · ≤500쪽 0.625″ · ≤700쪽 0.75″). 한 칸이라도 고치면 그 값이 이깁니다(점검 패널이 안쪽 여백 부족을 알려 줍니다).</div>}
           </div>
         </details>
         <details>

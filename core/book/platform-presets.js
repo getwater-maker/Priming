@@ -128,7 +128,7 @@ PLATFORMS.kdp = {
 PLATFORMS.d2d = {
   label: 'Draft2Digital (영어책)',
   unit: 'in',
-  trims: ['5x8', '5.5x8.5', '6x9', '7x10', '8x10', '8.5x11'],   // ❓ 「5″×8″ ~ 8.5″×11″ 6종」 — 정확한 목록은 R24 에서 D2D 도움말로 확정
+  trims: ['5x8', '5.25x8', '5.5x8.5', '6x9', '7.5x9.25', '8.5x11'],   // ✅ D2D FAQ(2026-10-13 확인) — 옛 블로그는 5.25×8.5 ⚠️
   defaultTrim: '6x9',
   coverBleedMm: 0.125 * IN,
   coverFlapMm: 0,
@@ -136,15 +136,16 @@ PLATFORMS.d2d = {
   noFlaps: true,
   evenPages: true,
   interiorBleedMm: 0.125 * IN,   // ✅ 블리드 0.125″(상·하·바깥) — 제본쪽 제외
-  minPages: 24,               // ❓ R24 에서 확정
+  minPages: 32,               // ✅ FAQ: 최소 32 · 최대 1,050쪽(옛 블로그는 64~740 ⚠️ — 등록 화면에서 확인)
+  maxPages: 1050,
   dpi: 300,
   toleranceMm: 1,
-  defaultPaper: 'KDP 백색지',    // ❓ D2D 책등은 D2D 템플릿이 정한다
+  defaultPaper: 'KDP 백색지',    // ❓ D2D 책등은 D2D 가 주는 표지 템플릿이 정한다(공식 식 없음) — 쪽당 계수는 KDP 값을 참고용으로
   papers: ['KDP 백색지', 'KDP 미색지'],
   spineFormula: 'perPage',
   langs: null,                // ❓ 한국어 허용 여부 미확인(막지 않고 경고)
   grayscaleInterior: true,    // 흑백(그레이스케일) 내지만 ✅
-  note: 'D2D Print = 무선제본 흑백(그레이스케일) 내지만 · PDF · 블리드 0.125″(제본쪽 제외) · 전자책은 EPUB(EPUBCheck 통과 필수) · 쪽수·여백표는 R24 에서 확정',
+  note: 'D2D Print = 무선제본 흑백(그레이스케일) 내지만 · PDF · 판형 6종 · 32~1,050쪽 · 블리드 0.125″(제본쪽 제외) · 표지는 D2D 템플릿(책등 식 비공개) · 전자책은 EPUB(EPUBCheck 통과 필수·90MB) · 여백·글꼴 규정은 문서에 없음(KDP 표를 보수적 기준으로)',
 };
 
 function getPlatform(id) { return PLATFORMS[id] || PLATFORMS.bookk; }

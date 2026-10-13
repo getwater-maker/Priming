@@ -10621,6 +10621,7 @@ function bookLayoutOpts(args = {}) {
     colophonFields: l.colophonFields, colophonAlign: l.colophonAlign,
     coverOverlay: l.coverOverlay, coverBarcode: l.coverBarcode,
     coverTextColor: l.coverTextColor,
+    pagesHint: S.parsed && S.parsed._lastPages ? S.parsed._lastPages : 0,   // 🇺🇸 KDP·D2D 안쪽 여백 구간표(쪽수 → 여백) — 직전 조판의 쪽수
     // 특별 섹션(반복 코너) 키워드 + 출력 제외 섹션(구조 패널 체크 해제 — 원고 보존)
     specialKeyword: l.specialKeyword, excluded: Array.isArray(l.excluded) ? l.excluded : [],
     // 영상 대본 모드 — 제작용 블록을 조판에서만 제외(대본 파일 불변). 미리보기·PDF·ePub 공통.
@@ -11495,7 +11496,46 @@ ipcMain.handle('open-logs', async () => {
 });
 // 📤 등록 도우미 — 완성 파일 목록(크기 포함). 작가와 50MB 제한 등 사전 점검용.
 // 🔎 부크크에 올리기 전 점검 — 흩어진 경고를 한 곳에(core/book/preflight.js). 사실만 모아 순수 함수에 넘긴다.
-ipcMain.handle('book-preflight', (_e, args = {}) => {
+// 🇺🇸 KDP·D2D 내지 점검에 쓸 사실 — 여백·글자·쪽수 · 직전에 만든 내지 PDF 검사(글꼴 임베드·투명·주석·북마크) · 이미지 크기(·D2D 컬러 여부)
+async function overseasInteriorFacts(args, pfId, dto) {
+  const HB = require('./core/book/html-builder'), IC = require('./core/book/interior-check');
+  const lo = bookLayoutOpts(args);
+  const { o, trim, meta } = HB.resolveBookOptions(S.parsed, lo);
+  // 이미지 — 본문·부속 블록의 ![](경로)
+  const baseDir = S.scriptPath ? path.dirname(S.scriptPath) : process.cwd();
+  const blocks = [];
+  const take = (arr) => { for (const sec of (arr || [])) for (const b of (sec.blocks || [])) blocks.push(b); };
+  take(S.parsed.front); take(S.parsed.back);
+  for (const part of (S.parsed.parts || [])) take(part.chapters);
+  const imgs = []; const seen = new Set();
+  let rs = null; try { rs = require('./vrew/vrew-builder').readImageSize; } catch (_) {}
+  for (const b of blocks) {
+    if (!b || b.type !== 'image' || !b.src || /^(https?|data):/i.test(b.src) || seen.has(b.src)) continue;
+    seen.add(b.src);
+    const abs = path.isAbsolute(b.src) ? b.src : path.join(baseDir, b.src);
+    if (!fs.existsSync(abs)) { imgs.push({ src: b.src, missing: true }); continue; }
+    let sz = null; try { sz = rs && rs(abs); } catch (_) {}
+    imgs.push({ src: b.src, abs, pxW: sz && sz.w || 0, pxH: sz && sz.h || 0 });
+  }
+  if (pfId === 'd2d') {   // D2D 는 그레이스케일 내지만 — 채도가 있는 이미지를 센다(ffmpeg signalstats)
+    const { spawn } = require('child_process'); const ff = require('./core/media-utils').getFfmpegPath();
+    for (const im of imgs.slice(0, 30)) {
+      if (im.missing) continue;
+      im.color = await new Promise((resolve) => {
+        let out = ''; let ps; try { ps = spawn(ff, ['-v', 'error', '-i', im.abs, '-frames:v', '1', '-vf', 'scale=64:64,signalstats,metadata=print:file=-', '-f', 'null', '-'], { windowsHide: true }); } catch (_) { return resolve(false); }
+        const to = setTimeout(() => { try { ps.kill(); } catch (_) {} resolve(false); }, 10000);
+        ps.stdout.on('data', (d) => { out += d; }); ps.on('error', () => { clearTimeout(to); resolve(false); });
+        ps.on('close', () => { clearTimeout(to); const m = out.match(/SATAVG=([\d.]+)/); resolve(!!(m && Number(m[1]) > 6)); });
+      });
+    }
+  }
+  // 직전 내지 PDF
+  let pdf = null;
+  const iv = listBookOutputs().filter((k) => k.kind === 'interior').sort((a, b) => b.mtime - a.mtime)[0];
+  if (iv && iv.bytes < 400 * 1024 * 1024) { try { pdf = IC.scanPdf(fs.readFileSync(iv.path)); } catch (_) {} }
+  return { platformId: pfId, pages: dto.lastPages, paper: meta && meta.paper, marginsMm: o.marginsMm, fontSizePt: o.fontSizePt, hasBleed: false, pdf, images: imgs.map(({ src, pxW, pxH, missing, color }) => ({ src, pxW, pxH, missing, color })), textWidthMm: trim.width - o.marginsMm.inner - o.marginsMm.outer };
+}
+ipcMain.handle('book-preflight', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
   try {
     const PF = require('./core/book/preflight');
@@ -11507,6 +11547,7 @@ ipcMain.handle('book-preflight', (_e, args = {}) => {
     const pfId = require('./core/book/html-builder').metaPlatformId(S.parsed.meta || {}), pfDef = require('./core/book/platform-presets').getPlatform(pfId);
     return PF.preflight({
       platformId: pfId, platformLabel: pfDef.label, minPages: pfDef.minPages,
+      interior: (pfId === 'kdp' || pfId === 'd2d') ? await overseasInteriorFacts(args, pfId, dto).catch((e) => { log('내지 점검 사실 모으기 오류: ' + e.message); return null; }) : null,
       spread: dto.spread, kdpTemplate: { widthIn: S.parsed.meta && S.parsed.meta.kdpCoverW, heightIn: S.parsed.meta && S.parsed.meta.kdpCoverH, spineIn: S.parsed.meta && S.parsed.meta.kdpSpine },
       meta: S.parsed.meta || {}, pages: dto.lastPages, spineMm: dto.spread && dto.spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
       titleFit, footnotes: F.footnoteIssues(S.parsed), glyph: _lastGlyph, missingFonts, sourceMtime, outputs: listBookOutputs(),

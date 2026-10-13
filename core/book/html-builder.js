@@ -726,7 +726,7 @@ function resolveBookOptions(book, opts = {}) {
     // 문단 간격 — 한국 단행본 관행 = 들여쓰기만 하고 문단 간격 0 (간격은 장면 전환 등 의도적 구분에만).
     paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 5), // 최종본 실측 — 문단 사이 뚜렷한 간격
     // ── 여백(mm) — 구 앱: 위20 / 아래15 / 안쪽20 / 바깥17 ──
-    marginsMm: Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
+    marginsMm: overseasMargins(platform, opts) || Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
     footnoteMode: (meta.footnoteMode === '미주' || opts.footnoteMode === 'endnote') ? 'endnote' : 'footnote',
     // ── 머리글/쪽번호 노출 선택 ──
@@ -790,6 +790,14 @@ function englishCss() {
 html[lang="en"] body, html[lang="en"] p, html[lang="en"] li, html[lang="en"] td, html[lang="en"] blockquote { word-break: normal; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; hyphenate-limit-chars: 6 3 3; }
 html[lang="en"] nav.toc, html[lang="en"] nav.toc a .tt, html[lang="en"] section.titlepage .tp-title, html[lang="en"] section.halftitle .ht-title, html[lang="en"] h1, html[lang="en"] h2, html[lang="en"] h3 { word-break: normal; hyphens: manual; -webkit-hyphens: manual; }
 html[lang="en"] body { quotes: "\\201C" "\\201D" "\\2018" "\\2019"; }`;
+}
+/** 🇺🇸 KDP·D2D 기본 여백 — 조판 설정이 한국 기본값(20/15/20/17) 그대로면 해외 기본(위·아래 0.75″ · 바깥 0.5″ · 안쪽 = KDP 쪽수 구간표)을 쓰고, 한 칸이라도 사람이 바꿨으면 그 값이 이긴다. 한국 플랫폼은 null(예전 그대로) */
+function overseasMargins(platform, opts) {
+  if (!platform || !(platform.unit === 'in' && platform.evenPages)) return null;
+  const om = opts.marginsMm || null, KO = { top: 20, bottom: 15, inner: 20, outer: 17 };
+  const untouched = !om || ['top', 'bottom', 'inner', 'outer'].every((k) => om[k] == null || Number(om[k]) === KO[k]);
+  const base = require('./interior-check').overseasMarginsMm(Number(opts.pagesHint) || 0);
+  return untouched ? base : Object.assign({}, base, om);
 }
 function buildBookHtml(book, opts = {}) {
   const { meta, platform, trimId, trim, o } = resolveBookOptions(book, opts);

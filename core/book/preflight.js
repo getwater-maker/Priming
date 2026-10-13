@@ -6,6 +6,7 @@
  */
 const BL = require('./book-lang');
 const SC = require('./spine-calc');
+const ICK = require('./interior-check');
 const has = (v) => v != null && String(v).trim() !== '';
 const it = (id, label, state, detail, tab) => ({ id, label, state, detail: detail || '', ...(tab ? { tab } : {}) });
 
@@ -37,6 +38,8 @@ function preflight(x) {
     if (td.given) out.push(it('kdp-template', 'KDP 표지 계산기 대조', td.ok ? 'ok' : 'warn', td.ok ? 'KDP 공식 표지 계산기 값과 앱 계산이 같습니다(±0.01″)' : `KDP 계산기와 어긋남 — ${td.diffs.map((d) => `${d.name} 앱 ${d.appIn}″ · KDP ${d.kdpIn}″`).join(' / ')} (쪽수·용지·판형을 확인하세요)`, 'cover'));
     else out.push(it('kdp-template', 'KDP 표지 계산기 대조', 'info', 'kdp.amazon.com/cover-calculator 의 폭·높이·책등(인치)을 원고 메타 `> KDP표지폭:` `> KDP표지높이:` `> KDP책등:` 로 적으면 앱 계산과 대조합니다'));
   }
+  // 1c) 🇺🇸 KDP·D2D 내지 — 쪽수·여백·글자 크기·PDF(글꼴 임베드·투명·주석·북마크)·이미지 해상도
+  if (x.interior) out.push(...ICK.interiorItems(x.interior));
   // 2) 표지
   const cc = x.coverCheck;
   if (!x.coverImagePath) out.push(it('cover', '표지 이미지', 'warn', '완성 표지 이미지를 첨부하지 않았습니다(표지 탭) — 앱이 만든 간단한 표지가 나갑니다', 'cover'));
