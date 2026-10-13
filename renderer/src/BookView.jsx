@@ -758,17 +758,20 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   //   ISBN 은 체크 숫자까지 확인한다(틀린 번호를 판권·바코드에 싣지 않게) · 발행일은 판권 라벨 그대로(예: 발행일 2026-10-06).
   const isbnBox = (idp) => {
     // 🔢 ISBN·발행일 칸은 회색 자리표시를 두지 않는다 — 값이 들어 있는 것으로 착각한다(로이 2026-10-06)
-    // 🔢 맨 위 세 칸(로이 2026-10-06 — 「전자책 ISBN · 종이책 ISBN · 발행일」 을 다른 칸과 같은 모양으로) — 칸을 벗어나면 원고 메타에 저장.
+    // 🔢 맨 위 네 칸(종이책 발행일·ISBN → 전자책 발행일·ISBN · 다른 칸과 같은 모양) — 칸을 벗어나면 원고 메타에 저장.
     //   ISBN 은 체크 숫자가 틀릴 때만 빨간 경고 · 발행일은 「2026년 10월 06일」 모양으로 바로잡아 저장(2026-10-06 으로 적어도 됨).
-    //   전자책 발행일(`> 전자책발행일:`)은 원고 메타로만 — 부크크는 종이책·전자책 발행일을 따로 묻지 않는다.
+    //   📅 종이책·전자책 발행일·ISBN 을 따로 적는다(v0.8.17 · 로이 2026-10-13) — 종이책 = `> 발행일:`·`> ISBN:` · 전자책 = `> 전자책발행일:`·`> 전자책ISBN:`
+    //   (전자책 칸이 비면 판권은 종이책 값을 쓴다 — html-builder·epub-builder 의 폴백 그대로).
     const bad = (v) => { const t = String(v || '').trim(); return t && !ISBNC.normalizeIsbn13(t); };
-    // 📅 발행일 = ISBN 받은 날(부크크 안내) — ISBN 을 처음 넣을 때 발행일이 비어 있으면 오늘(KST)로 채운다(이미 있으면 그대로 · 2026-10-10 로이)
+    // 📅 발행일 = ISBN 받은 날(부크크 안내) — ISBN 을 처음 넣을 때 **그 판의** 발행일이 비어 있으면 오늘(KST)로 채운다(이미 있으면 그대로 · 2026-10-10 로이)
+    const DATE_OF = { isbn: 'issueDate', ebookIsbn: 'ebookIssueDate' };
     const isbnProps = (k) => {
       const p = liveMeta(k);
       return { ...p, onBlur: async (e) => {
         const v = e.target.value.trim();
         await p.onBlur(e);
-        if (v && ISBNC.normalizeIsbn13(v) && !String(meta.issueDate || '').trim()) await setMeta('issueDate', DK.todayKo());
+        const dk = DATE_OF[k];
+        if (dk && v && ISBNC.normalizeIsbn13(v) && !String(meta[dk] || '').trim()) await setMeta(dk, DK.todayKo());
       } };
     };
     const one = (k, label, ph, isDate) => (
@@ -781,9 +784,12 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     );
     return (
       <div className="bkisbn" data-testid={idp + '-box'}>
-        {one('issueDate', '발행일', '', true)}
+        {one('issueDate', '종이책 발행일', '', true)}
         {one('isbn', '종이책 ISBN')}
+        {one('ebookIssueDate', '전자책 발행일', '', true)}
         {one('ebookIsbn', '전자책 ISBN')}
+        {!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim()
+          ? <div className="meta" data-testid={idp + '-ebook-fallback'}>전자책 칸이 비어 있으면 전자책 판권에는 종이책 발행일·ISBN 이 실립니다.</div> : null}
       </div>
     );
   };

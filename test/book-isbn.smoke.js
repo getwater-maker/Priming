@@ -36,10 +36,11 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 
     await win.click('[data-tab=bookk]');
     await win.waitForSelector('[data-testid=rg-box]', { timeout: 10000 });
-    ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 맨 위에 세 칸');
-    for (const k of ['ebookIsbn', 'isbn', 'issueDate']) ok(await win.locator('[data-testid=rg-' + k + ']').count() === 1, '칸: ' + k);
-    ok(await win.locator('[data-testid=rg-ebookIssueDate]').count() === 0 && await win.locator('[data-testid=rg-box] .bkisbn-grid').count() === 0, '종이책/전자책 상자(격자)는 없다 — 세 칸만');
-    { const ys = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIsbn'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2], '순서: 발행일 → 종이책 ISBN → 전자책 ISBN (2026-10-07 로이)'); }
+    ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 맨 위에 네 칸');
+    for (const k of ['ebookIsbn', 'isbn', 'issueDate', 'ebookIssueDate']) ok(await win.locator('[data-testid=rg-' + k + ']').count() === 1, '칸: ' + k);
+    ok(await win.locator('[data-testid=rg-box] .bkisbn-grid').count() === 0, '옛 격자 상자는 없다');
+    { const ys = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3], '순서: 종이책 발행일 → 종이책 ISBN → 전자책 발행일 → 전자책 ISBN (2026-10-13 로이)'); }
+    ok(await win.locator('[data-testid=rg-ebook-fallback]').count() === 1, '전자책 칸이 비면 「종이책 값이 실린다」 안내');
     ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '기존 발행일이 칸에 보인다');
 
     // 틀린 번호 → ⚠ (판정력) · 맞는 번호 → ✅
@@ -57,14 +58,29 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     { const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).split('-'); const want = `${kst[0]}년 ${kst[1]}월 ${kst[2]}일`;
       ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want); }
     await win.locator('[data-testid=rg-issueDate]').fill('2026-10-06'); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(400);
-    await win.locator('[data-testid=rg-ebookIsbn]').fill('979-11-12-31221-1'); await win.locator('[data-testid=rg-ebookIsbn]').blur(); await win.waitForTimeout(400);
-
+    // 📅 전자책 ISBN 을 넣으면 **전자책** 발행일만 오늘(KST)로 채운다 — 종이책 발행일은 그대로
+    await win.locator('[data-testid=rg-ebookIsbn]').fill('979-11-12-31221-1'); await win.locator('[data-testid=rg-ebookIsbn]').blur(); await win.waitForTimeout(700);
+    { const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).split('-'); const want = `${kst[0]}년 ${kst[1]}월 ${kst[2]}일`;
+      ok(await win.locator('[data-testid=rg-ebookIssueDate]').inputValue() === want, '전자책 ISBN → 비어 있던 전자책 발행일이 오늘(KST)');
+      ok(/2026년 10월 06일/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '종이책 발행일은 전자책 ISBN 에 흔들리지 않는다'); }
+    await win.locator('[data-testid=rg-ebookIssueDate]').fill('2026-10-20'); await win.locator('[data-testid=rg-ebookIssueDate]').blur(); await win.waitForTimeout(500);
+    ok(await win.locator('[data-testid=rg-ebook-fallback]').count() === 0, '전자책 두 칸이 다 차면 안내가 사라진다');
 
     // 원고(.md)에 저장
     const md = fs.readFileSync(MD, 'utf8');
     ok(/^> ISBN: ?979-11-12-31240-2$/m.test(md), '원고에 종이책 ISBN 저장');
     ok(/^> 발행일: ?2026년 10월 06일$/m.test(md) && !/2026-10-0[26]/.test(md), '발행일을 2026-10-06 으로 적어도 「2026년 10월 06일」 모양으로 저장(부크크 판권지 형식)');
     ok(/^> 전자책ISBN: ?979-11-12-31221-1$/m.test(md), '원고에 전자책 ISBN 저장');
+    ok(/^> 전자책발행일: ?2026년 10월 20일$/m.test(md), '원고에 전자책 발행일 저장(「년월일」 모양)');
+    {
+      const { parseBookText } = require('../core/parsers/book-parser'); const H = require('../core/book/html-builder');
+      const txt = (h) => h.replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+      const bk = parseBookText(md, 'x');
+      const pr = txt(H.buildBookHtml(bk, { edition: 'print', imageUrl: (p) => p, fontCss: '' }).html);
+      const eb = txt(H.buildBookHtml(bk, { edition: 'ebook', imageUrl: (p) => p, fontCss: '' }).html);
+      ok(/2026년 10월 06일/.test(pr) && !/2026년 10월 20일/.test(pr) && /979-11-12-31240-2/.test(pr), '종이책 판권 = 종이책 발행일·ISBN');
+      ok(/2026년 10월 20일/.test(eb) && !/2026년 10월 06일/.test(eb) && /979-11-12-31221-1/.test(eb), '전자책 판권 = 전자책 발행일·ISBN');
+    }
 
     // 판권 탭도 같은 값을 같은 상자로
     await win.click('[data-tab=colophon]'); await win.waitForSelector('[data-testid=co-box]', { timeout: 5000 });
