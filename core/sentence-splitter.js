@@ -99,13 +99,31 @@ const _SENT_BODY_F = '(?:[^.!?。！？]|' + _DEC + ')+';
 const _SENT_END_F = '(?:(?!' + _DEC + ')[.!?。！？])+';
 const SENT_RE_FOREIGN = new RegExp(_SENT_BODY_F + _SENT_END_F + '|' + _SENT_BODY_F + '$', 'g');
 
+// 🇯🇵 일본어 인용 뒤 이어지는 문장(「ではカムパネルラさん。」と名指しました。) — 따옴표를 지우기 **전에** 인용 안의 끝 부호를
+//   표식으로 바꿔 「と名指しました。」가 따로 떨어지지 않게 한다(v0.9.7 · 2026-10-14 銀河鉄道の夜 실측: 조각 문장이 1초 클립·역대조 미달).
+//   🔑 가나가 있고 한글이 없는 줄에서만 · 」 바로 뒤가 이어지는 글(と·って·、 등)일 때만 · 인용이 길면(> JA_QUOTE_KEEP_MAX) 마지막 부호만.
+//   문장을 다 나눈 뒤 `_unprotect` 로 원래 부호로 되돌린다 — 한국어 대본은 표식이 생기지 않으므로 한 글자도 안 바뀐다.
+const JA_QUOTE_KEEP_MAX = 60;
+const _PROT = { '。': '\uE010', '！': '\uE011', '？': '\uE012' };   // ⚠ \uE000~\uE002 는 루비 표식(aozoraMark)이 쓴다 — 겹치지 않게
+const _UNPROT = { '\uE010': '。', '\uE011': '！', '\uE012': '？' };
+function _protectJaQuotes(text) {
+  if (!/[。！？][」』]/.test(text)) return text;
+  const prot = (s) => s.replace(/[。！？]/g, (c) => _PROT[c]);
+  return text.split('\n').map((line) => {
+    if (!/[぀-ヿ]/.test(line) || /[가-힣]/.test(line)) return line;
+    return line.replace(/([「『])([^「」『』\n]*)([」』])(?=[^\s「『」』。！？])/g, (m, o, inner, c) =>
+      o + (inner.length <= JA_QUOTE_KEEP_MAX ? prot(inner) : inner.replace(/[。！？]+$/, prot)) + c);
+  }).join('\n');
+}
+const _unprotect = (s) => (/[\uE010-\uE012]/.test(s) ? s.replace(/[\uE010-\uE012]/g, (c) => _UNPROT[c]) : s);
+
 /**
  * 단락 텍스트 → 문장 배열 (내부 헬퍼)
  */
 function _paragraphsToSentences(text) {
-  let cleaned = text
+  let cleaned = _protectJaQuotes(text
     .replace(HTML_COMMENT, '')        // <!-- 메모 --> = TTS 제외
-    .replace(MARKDOWN_HEADER_LINE, '')
+    .replace(MARKDOWN_HEADER_LINE, ''))
     .replace(QUOTE_CHARS, '')
     .replace(SPECIAL_NONTEXT, '');   // 이모지·기호 제거 (TTS 발음 자연스럽게)
   const paragraphs = cleaned
@@ -126,17 +144,17 @@ function _paragraphsToSentences(text) {
       const src = (lf === 'ja' || lf === 'cjk') ? aozoraMark(flat).replace(/\s+/g, ' ').trim() : flat;
       if (!src) continue;
       const fm = src.match(SENT_RE_FOREIGN) || [src];
-      for (const m of fm) { const t = m.trim(); if (t && /[\p{L}\p{N}]/u.test(t)) sentences.push(t); }
+      for (const m of fm) { const t = _unprotect(m.trim()); if (t && /[\p{L}\p{N}]/u.test(t)) sentences.push(t); }
       continue;
     }
     const matches = flat.match(SENT_RE);
     if (matches && matches.length > 0) {
       for (const m of matches) {
-        const trimmed = m.trim();
+        const trimmed = _unprotect(m.trim());
         if (trimmed && /[가-힣A-Za-z0-9]/.test(trimmed)) sentences.push(trimmed);
       }
     } else {
-      sentences.push(flat);
+      sentences.push(_unprotect(flat));
     }
   }
   return sentences;

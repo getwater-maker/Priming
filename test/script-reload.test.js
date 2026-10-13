@@ -155,7 +155,7 @@ console.log('\n[4] 저장 규약 — 고착을 만들지 않는가');
   ok(/hashVer: SNAP_HASH_VER/.test(body), 'buildSnapshot 이 hashVer 를 찍는다(오염분 자동 재판정)');
   ok(!/scriptHash\(/.test(body),
     '⛔ buildSnapshot 안에서 scriptHash() 를 다시 부르지 않는다 — 부르면 「바뀐 대본의 해시 + 옛 파싱」이 저장된다');
-  ok(SNAP_VER === 4, 'SNAP_HASH_VER 상수 정의(v0.8.10 소수점 분할 변경 → 4)');
+  ok(SNAP_VER === 5, 'SNAP_HASH_VER 상수 정의(v0.8.10 소수점 → 4 · v0.9.7 일본어 인용 뒤 이어지는 글 → 5)');
   ok(/_srcHash', \{ value: mdHash/.test(MAIN), 'buildParsedForScript 가 파싱 직후 _srcHash 를 심는다');
   // ⚠ 주석에는 그 문구가 「무엇이 틀렸었나」의 기록으로 남아 있다 → **코드 줄만** 본다.
   const codeOnly = MAIN.split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');

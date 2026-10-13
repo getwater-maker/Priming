@@ -65,7 +65,7 @@ console.log('\n[3] 옛 작업본 — 글은 같고 경계만 다른 그룹');
 ok(GF.sameGroupText([{ text: '보험료가 3.5배였습니다.' }], [{ text: '보험료가 3.' }, { text: '5배였습니다.' }]), '경계만 다르면 같은 글');
 ok(!GF.sameGroupText([{ text: '보험료가 3.6배였습니다.' }], [{ text: '보험료가 3.' }, { text: '5배였습니다.' }]), '글이 바뀌면 다른 글');
 ok(!GF.sameGroupText([], []), '빈 그룹은 같다고 보지 않는다');
-ok(/const SNAP_HASH_VER = 4;/.test(MAIN), 'SNAP_HASH_VER = 4 (해시가 같아도 옛 작업본을 한 번 다시 가린다)');
+ok(Number((MAIN.match(/const SNAP_HASH_VER = (\d+);/) || [])[1]) >= 4, 'SNAP_HASH_VER ≥ 4 (해시가 같아도 옛 작업본을 한 번 다시 가린다)');
 {
   const m = MAIN.match(/function overlaySnapshot\(parsed, snap\) \{[\s\S]*?\n\}/);
   ok(!!m, 'overlaySnapshot 원문 추출');

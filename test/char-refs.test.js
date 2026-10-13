@@ -166,6 +166,13 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
   ok(/CR\.refGate\(g\.imagePrompt, cast\)/.test(main) && /if \(cfg\.cloud \|\| cfg\.charRefs === false/.test(main), '게이트 · 클라우드 제외 · 끄기 설정');
   ok(/참조 없이 그립니다/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-image.js'), 'utf8')), '업로드 실패 = 참조 없이(fail-open)');
   fs.rmSync(tmp, { recursive: true, force: true });
+  // 🇯🇵 일본어 이름 카드(v0.9.7 — 일본 채널 요청 5: 「ジョバンニ 카드:」가 조용히 0장이 됐다)
+  {
+    const jc = CR.parseCards('> 🎨 인물 · ジョバンニ 카드: Japanese boy, about 12 years old, thin, short black hair\n> 🎨 인물 · ブルカニロ・博士 카드: Japanese man, about 50, grey beard\n> 🎨 인물 · 宮沢賢治 카드: Japanese man, about 35, round glasses\n');
+    ok(jc.map((c) => c.name).join('|') === 'ジョバンニ|ブルカニロ・博士|宮沢賢治', '일본어 이름(가나·한자·・) 카드 3장 = ' + jc.map((c) => c.name).join('|'));
+    ok(CR.castFor('ジョバンニは勢よく立ちあがりました。', 'a Japanese boy stands up in a classroom', jc).map((c) => c.name).join() === 'ジョバンニ', '일본어 낭독에서 이름을 찾아 붙인다');
+    ok(CR.castFor('博士が静かに言いました。', 'an old man with a grey beard', jc).map((c) => c.name).join() === 'ブルカニロ・博士', '・ 로 나뉜 이름의 한 토막(博士)으로도 찾는다');
+  }
   console.log(`char-refs: ${pass} 통과 · ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();

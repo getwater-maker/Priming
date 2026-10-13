@@ -21,7 +21,11 @@
  *
  * main·렌더 전용이 아니다 — 순수 함수라 테스트가 그대로 부른다(core/*.js 는 렌더러 번들에 들어갈 수 있으니 fs·require.main 을 쓰지 않는다).
  */
-const KINDS = { '병기': 'pair', '막간': 'interlude' };
+// 🇯🇵 해설·낱말(v0.9.7 · 일본 채널 요청 7) = 그리는 모양은 막간·병기와 같고 이름만 다르다 — 채널 게이트가 종류를 이름으로 가른다.
+const KINDS = { '병기': 'pair', '막간': 'interlude', '해설': 'interlude', '낱말': 'pair' };
+// 🇯🇵 카드가 가리킨 낭독 문장에 가나가 있으면 일본어 카드 — 렌더가 일본어 글꼴(Noto Sans JP)로 그린다(한국 명조·한자 부분집합엔 県·沢·가나가 없다).
+const JA_RE = /[぀-ヿ]/;
+const langOf = (rows) => (rows.some((x) => JA_RE.test(x.text)) ? 'ja' : undefined);
 const MARK_RE = /^[ \t]*>[ \t]*📜[ \t]*화면카드[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
 const HEAD_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const MIN_KEY = 4;           // 앞부분 최소 글자(공백·문장부호 뺀 글자 수)
@@ -103,7 +107,7 @@ function plan(project, markers) {
   for (const m of list) {
     const tag = `📜 화면카드 ${m.line}줄`;
     const bad = (why) => warnings.push(`${tag} — ${why} → 이 카드만 건너뜁니다`);
-    if (!m.kind) { bad(`종류 「${m.kindName}」 를 모릅니다(병기 · 막간)`); continue; }
+    if (!m.kind) { bad(`종류 「${m.kindName}」 를 모릅니다(${Object.keys(KINDS).join(' · ')})`); continue; }
     // 🙈 `자막=숨김` — 이 카드가 뜨는 동안만 아래 자막(낭독 글)을 가린다(카드 글과 겹쳐 보이지 않게 · 기본 = 안 가림). 다른 값은 경고하고 자막은 그대로 둔다.
     let hide = false;
     if (m.f['자막']) { if (/^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) hide = true; else warnings.push(`${tag} — 자막= 값은 「숨김」만 쓸 수 있습니다(「${m.f['자막'].raw}」) → 자막은 그대로 보입니다`); }
@@ -128,6 +132,7 @@ function plan(project, markers) {
         card = { kind: 'interlude', t0, t1, orig: [], trans: title, line: m.line, literal: true };
       }
       if (hide) card.hideCaptions = true;
+      card.label = m.kindName; { const L = langOf(tk.rows); if (L) card.lang = L; }
       if (card.orig.length > 3 || card.trans.length > 3) warnings.push(`${tag} — 카드 글이 3줄을 넘습니다(화면에 넘칠 수 있음)`);
       const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
       if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
@@ -154,6 +159,7 @@ function plan(project, markers) {
       ? { kind: 'pair', t0, t1, orig: groupsOf['원문'].map((x) => x.text), trans: groupsOf['번역'].map((x) => x.text), line: m.line }
       : { kind: 'interlude', t0, t1, orig: [], trans: groupsOf['문장'].map((x) => x.text), line: m.line };
     if (hide) card.hideCaptions = true;
+    card.label = m.kindName; { const L = langOf(all); if (L) card.lang = L; }
     const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
     if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
     cards.push(card);

@@ -203,6 +203,49 @@ const SCRIPT = [
     const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
     ok(/cards: cardsOptsFor\(pr\)/.test(M) && /function cardsOptsFor/.test(M) && /screenCards = _mk|proj\.screenCards = screenCards/.test(M), 'main: MP4 렌더에 카드를 넘기고 · 작업본 이어받기에서도 마커를 .md 에서 다시 읽는다');
   }
+  console.log('\n[6] 🇯🇵 일본어 카드 — 해설·낱말 · 화자 줄 때= · 모르는 칸 무시 · 일본어 글꼴 (v0.9.7)');
+  {
+    const JA = ['# [일본_TEST] 銀河鉄道の夜', '', '## 本編', '',
+      '### 1', '', '> 📜 화면카드: 막간 | 때=ここで少し | 제목=一、午后の授業 | 카드=A1', '> 📜 화면카드: 해설 | 때=今夜お届けする | 제목=宮沢賢治 1896–1933 ・ 岩手県花巻 | 카드=B5',
+      '> 📜 화면카드: 낱말 | 때=活版所というのは | 원문=活版所 | 번역=活字を組んで印刷する所',
+      '[室主] 今夜お届けするのは、宮沢賢治の物語です。', '[朗読] 「ではみなさんは。」と先生が云《い》いました。', '[室主] ここで少し、物語の手を止めましょう。', '[室主] 活版所というのは、活字を組んで印刷する所のことです。', ''].join('\n');
+    const pj = P.parseScriptText(JA, 'longform', {}).projects[0];
+    pj.sentences.forEach((s, i) => { s.ttsAudioPath = 'x.mp3'; s.ttsDurationSec = 4; });
+    const r = SC.plan(pj, pj.screenCards);
+    ok(r.warnings.length === 0 && r.cards.length === 3, `카드 3장 · 경고 0 (${r.warnings.join(' | ')})`);
+    const by = (l) => r.cards.find((c) => c.label === l) || {};
+    ok(by('해설').kind === 'interlude' && by('해설').trans[0] === '宮沢賢治 1896–1933 ・ 岩手県花巻' && by('해설').t0 === 0 && by('해설').t1 === 4, '해설 = 막간 모양 · 제목= 글 그대로 · [室主] 문장에 걸린다(0~4초)');
+    ok(by('낱말').kind === 'pair' && by('낱말').orig[0] === '活版所' && by('낱말').trans[0] === '活字を組んで印刷する所' && by('낱말').t0 === 12, '낱말 = 병기 모양 · 원문/번역 두 칸');
+    ok(by('막간').t0 === 8 && by('막간').t1 === 12 && by('막간').trans[0] === '一、午后の授業', '막간 = 제목 글 그대로 · [室主] 문장 시간(8~12초)');
+    ok(r.cards.every((c) => c.lang === 'ja'), '일본어 낭독 문장에 걸린 카드 = lang ja');
+    ok(!/카드/.test(r.warnings.join('')), '모르는 칸(카드=A1)은 조용히 무시한다(경고 없음 · 카드는 그린다)');
+    const ev = R.cardEvents(r.cards, 0, 20).join('\n');
+    ok(/\\fnNoto Sans JP\\/.test(ev) && !/Noto Serif KR|Hanja/.test(ev), '일본어 카드 글자 = Noto Sans JP(한국 명조·한자 부분집합 아님)');
+    const ko = SC.plan(P.parseScriptText(SCRIPT, 'longform', {}).projects[0], []);
+    ok(ko.cards.length === 0, '(마커 없음 = 카드 없음)');
+    const kp = P.parseScriptText(SCRIPT, 'longform', {}).projects[0]; kp.sentences.forEach((s) => { s.ttsAudioPath = 'x'; s.ttsDurationSec = 6; });
+    const kr = SC.plan(kp, kp.screenCards);
+    ok(kr.cards.every((c) => c.lang === undefined) && /Noto Serif KR Light/.test(R.cardEvents(kr.cards, 0, 30).join('\n')), '한국어 카드는 예전 글꼴 그대로(lang 없음)');
+    // 실제 MP4 — 일본어 카드 글꼴이 렌더 폴더에 들어가고(⚠ 글꼴 없음 0) 판·글자가 그려진다
+    const tmpj = fs.mkdtempSync(path.join(os.tmpdir(), 'cardsja-'));
+    try {
+      const img = path.join(tmpj, 'g.png');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080', '-frames:v', '1', img]);
+      const pj2 = P.parseScriptText(JA, 'longform', {}).projects[0];
+      pj2.groups.forEach((g) => { g.imagePath = img; });
+      pj2.sentences.forEach((s, i) => { const mp3 = path.join(tmpj, `s${i}.mp3`); execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '4', '-c:a', 'libmp3lame', mp3]); s.ttsAudioPath = mp3; s.ttsDurationSec = 4; });
+      const vrew = path.join(tmpj, 'a.vrew'); await P.buildProjectVrew(pj2, vrew, {}, () => {}, 20, 1);
+      const plan = SC.plan(pj2, pj2.screenCards);
+      const logs = []; const mp4 = path.join(tmpj, 'ja.mp4');
+      const res = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: (l) => logs.push(String(l)), par: 2, chunkSec: 4, cards: plan.cards });
+      const cl = logs.find((l) => /📜 화면 카드/.test(l)) || '';
+      ok(res && res.ok && /해설|낱말|막간/.test(cl) && !/글꼴 없음/.test(cl), `렌더 성공 · 카드 로그에 종류 이름 · 글꼴 빠짐 없음 (${cl.trim()})`);
+      const rawj = (t) => execFileSync(FF, ['-loglevel', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', '-vf', 'scale=480:270,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 26 });
+      let n = 0; for (const v of rawj(2)) if (v > 150) n++;
+      ok(n > 150, `해설 카드(2초) 밝은 글자 화소 ${n}`);
+      if (process.env.PM_SHOT_DIR) { fs.mkdirSync(process.env.PM_SHOT_DIR, { recursive: true }); for (const [t, nm] of [[2, 'ja_kaisetsu'], [10, 'ja_makuai'], [14, 'ja_kotoba']]) spawnSync(FF, ['-y', '-v', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', path.join(process.env.PM_SHOT_DIR, nm + '.png')]); }
+    } finally { try { fs.rmSync(tmpj, { recursive: true, force: true }); } catch {} }
+  }
   console.log(`\n${fail ? '❌' : '✅'} screen-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });

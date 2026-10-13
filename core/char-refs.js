@@ -30,7 +30,7 @@ function _genderOf(desc) {
 }
 // 카드 이름 속 꾸밈말 — 「젊은 파스칼」「멜빌 만년」「러시아 장군」에서 사람을 가리키지 않는 낱말(낭독에서 이것만으로 찾지 않는다)
 const NAME_STOP = new Set('젊은 어린 늙은 만년 말년 말년의 만년의 청년 청년기 소년 소년기 소녀기 노년 노년기 장년 장년기 중년 젊은날 어린시절 러시아 프랑스 영국 독일 중국 일본 조선 미국 이탈리아 스페인 그리스 로마 사람 남자 여자 이야기 노인 여인 청년 아이 시절 무렵 당시'.split(' '));
-function _nameTokens(name) { return String(name).split(/[ ·]+/).filter((t) => t.length >= 2 && !NAME_STOP.has(t)); }
+function _nameTokens(name) { return String(name).split(/[ ·・]+/).filter((t) => t.length >= 2 && !NAME_STOP.has(t)); }
 function _coreOf(name) { return _nameTokens(name)[0] || String(name).trim(); }
 function _words(s) {
   return String(s || '').toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3 && !STOP.has(w));
@@ -45,6 +45,8 @@ function _overlap(desc, prompt) {
  * 대본 원문에서 인물 카드를 뽑는다.
  * @returns {{name:string, core:string, desc:string, gender:'f'|'m'|''}[]}
  */
+// 🇯🇵 카드 이름 글자 — 한글·영문·숫자 + 일본어(가나·한자·々·ー·・ · v0.9.7 — 「ジョバンニ 카드:」가 조용히 0장이 됐다)
+const NAME_OK = /^[가-힣A-Za-z0-9 \u3040-\u30FF\u3400-\u9FFF々]+$/;
 function parseCards(mdText) {
   const out = [];
   const seen = new Set();
@@ -71,7 +73,7 @@ function parseCards(mdText) {
       const re4 = /([^()·/=;]{1,20}?)\s*\(\s*`?([^()]+?)`?\s*\)/g; let m4;
       while ((m4 = re4.exec(eq[1]))) {
         const name = m4[1].replace(/[`*]/g, '').trim(), desc = m4[2].replace(/\s+/g, ' ').trim();
-        if (!name || !/^[가-힣A-Za-z0-9 ]+$/.test(name) || !desc || seen.has(name)) continue;
+        if (!name || !NAME_OK.test(name) || !desc || seen.has(name)) continue;
         seen.add(name);
         out.push({ name, core: _coreOf(name), desc, gender: _genderOf(desc) });
       }
@@ -97,7 +99,7 @@ function parseCards(mdText) {
       const before = line.slice(0, h.at);
       const cut = Math.max(before.lastIndexOf('. '), before.lastIndexOf(': '), before.lastIndexOf('〕'), before.lastIndexOf('·'));
       const name = before.slice(cut + 1).replace(/^[\s.:〕·]+/, '').trim();
-      if (!name || name.length > 15 || !/^[가-힣A-Za-z0-9 ]+$/.test(name)) return;
+      if (!name || name.length > 15 || !NAME_OK.test(name)) return;
       let desc = line.slice(h.end, i + 1 < hits.length ? hits[i + 1].at : undefined);
       const ko = desc.search(/[가-힣]/);                       // 영어 묘사는 다음 한국어 문장 앞에서 끝난다
       if (ko >= 0) desc = desc.slice(0, ko);
