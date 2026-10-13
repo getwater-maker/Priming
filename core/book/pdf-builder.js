@@ -257,14 +257,16 @@ function buildCoverHtml({ spread, bgTag, compose, fontCss }) {
     x += part.mm;
   }
   const H = spread.heightMm;
+  const bleedMm = (spread.parts && spread.parts[0] && spread.parts[0].mm) || 3;   // 표지 재단여백(부크크 3mm · KDP 0.125″)
+  const keep = spread.barcodeKeepout || null;                                    // KDP — 뒤표지 바코드 자리(글·그림을 두지 않는다)
   const secText = (key) => {
     const s = covers.find((v) => v.key === key);
     if (!s || !s.blocks || !s.blocks.length) return '';
     return s.blocks.map((b) => b.type === 'p' || b.type === 'quote' ? `<p>${inlineMd(b.text)}</p>`
       : b.type === 'h3' || b.type === 'h4' ? `<p class="b">${inlineMd(b.text)}</p>` : '').join('\n');
   };
-  const box = (r, cls, inner, padTopMm = 0) => r && inner
-    ? `<div class="area ${cls}" style="left:${r.x + safe}mm; width:${r.w - safe * 2}mm; top:${3 + safe + padTopMm}mm; height:${H - 6 - safe * 2 - padTopMm}mm;">${inner}</div>` : '';
+  const box = (r, cls, inner, padTopMm = 0, bottomMm = null) => r && inner
+    ? `<div class="area ${cls}" style="left:${r.x + safe}mm; width:${r.w - safe * 2}mm; top:${bleedMm + safe + padTopMm}mm; height:${(bottomMm != null ? bottomMm : H - bleedMm * 2 - safe * 2) - padTopMm}mm;">${inner}</div>` : '';
 
   const areas = [];
   // 뒷표지 — [뒷표지] 글 + (하단) 바코드·정가
@@ -275,23 +277,25 @@ function buildCoverHtml({ spread, bgTag, compose, fontCss }) {
     backBottom = `<div class="bc"><div class="bcimg">${c.barcode.svg}</div>${meta.price ? `<div class="price">값 ${esc(meta.price).replace(/원?$/, '원')}</div>` : ''}</div>`;
   }
   if (back && (backIntro || backBottom)) {
-    areas.push(box(back, 'back', `${backIntro}${backBottom}`, Math.round(H * 0.1))); // 소개글은 위 10% 아래부터(관행)
+    // KDP: 바코드 자리 위까지만(그 아래는 비운다) — 소개글 상자의 아래 끝 = 바코드 자리 위 2mm
+    const bot = keep ? Math.max(10, keep.y - 2 - (bleedMm + safe)) : null;
+    areas.push(box(back, 'back', `${backIntro}${backBottom}`, Math.round(H * 0.1), bot)); // 소개글은 위 10% 아래부터(관행)
   }
   // 책등 — [책등] 문구 또는 제목·저자·출판사 (세로쓰기)
   const spineR = region['책등'];
-  if (spineR && spineR.w >= 3) {
+  if (spineR && spineR.w >= 3 && spread.spineTextOk !== false) {   // KDP: 79쪽 이하는 책등 글자를 넣지 않는다
     const spineSec = covers.find((v) => v.key === 'spine');
     // 🔴 완성 표지 이미지가 있으면 책등 글씨는 이미지에 이미 구워져 있다 — 메타(제목·저자·출판사)로 자동 생성한 책등 글씨를 또 얹으면
     //   글씨가 두 겹으로 겹친다(삼국지 R20 · 로이 2026-10-01). 이미지가 있을 땐 **원고에 [책등] 섹션을 직접 쓴 경우에만** 얹는다.
     const spineTxt = spineSec && spineSec.blocks.length
       ? spineSec.blocks.map((b) => esc(b.text || '')).join(' ')
       : (bgTag ? '' : [meta.title, meta.author, meta.publisher].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;'));
-    if (spineTxt) areas.push(`<div class="spine" style="left:${spineR.x}mm; width:${spineR.w}mm; top:${3 + safe}mm; height:${H - 6 - safe * 2}mm;"><span>${spineTxt}</span></div>`);
+    if (spineTxt) areas.push(`<div class="spine" style="left:${spineR.x}mm; width:${spineR.w}mm; top:${bleedMm + safe}mm; height:${H - bleedMm * 2 - safe * 2}mm;"><span>${spineTxt}</span></div>`);
   }
   // 앞표지 — 제목/부제/저자/출판사 얹기(옵션 — 완성 이미지에 이미 있으면 끔)
   const front = region['앞표지'];
   if (front && c.overlay) {
-    areas.push(`<div class="area front" style="left:${front.x + safe}mm; width:${front.w - safe * 2}mm; top:${3 + safe}mm; height:${H - 6 - safe * 2}mm;">
+    areas.push(`<div class="area front" style="left:${front.x + safe}mm; width:${front.w - safe * 2}mm; top:${bleedMm + safe}mm; height:${H - bleedMm * 2 - safe * 2}mm;">
 <div class="ft" style="top:34%">${esc(meta.title || '')}</div>
 ${meta.subtitle ? `<div class="fs" style="top:46%">${esc(meta.subtitle)}</div>` : ''}
 <div class="fa" style="top:56%">${esc(meta.author || '')}${meta.translator ? ' · ' + esc(meta.translator) : ''}</div>
@@ -328,7 +332,20 @@ img.bg { position:absolute; left:0; top:0; width:${spread.widthMm}mm; height:${s
 .flap p { font-size: 8.5pt; }
 </style></head><body>${bgTag}
 ${areas.filter(Boolean).join('\n')}
+${c.guides ? guidesHtml(spread, bleedMm, safe, keep) : ''}
 </body></html>`;
+}
+
+/** 미리보기 전용 안내선 — 재단선(실선) · 안전선(점선) · KDP 바코드 자리(「ISBN 바코드 자리」). 실제 PDF 에는 넣지 않는다 */
+function guidesHtml(spread, bleedMm, safe, keep) {
+  const W = spread.widthMm, H = spread.heightMm;
+  const line = (l, t, w, h, st) => `<div data-guide="1" style="position:absolute;left:${l}mm;top:${t}mm;width:${w}mm;height:${h}mm;pointer-events:none;${st}"></div>`;
+  const out = [line(bleedMm, bleedMm, W - bleedMm * 2, H - bleedMm * 2, 'border:0.2mm solid rgba(220,0,0,.75);box-sizing:border-box;')];   // 재단선
+  out.push(line(bleedMm + safe, bleedMm + safe, W - (bleedMm + safe) * 2, H - (bleedMm + safe) * 2, 'border:0.2mm dashed rgba(0,120,255,.7);box-sizing:border-box;'));   // 안전선
+  // 접힘선(책등 양쪽)
+  let x = 0; for (const part of spread.parts) { if (part.name === '책등') { out.push(line(x, 0, 0, H, 'border-left:0.2mm dashed rgba(220,0,0,.6);'), line(x + part.mm, 0, 0, H, 'border-left:0.2mm dashed rgba(220,0,0,.6);')); } x += part.mm; }
+  if (keep) out.push(`<div data-guide="1" style="position:absolute;left:${keep.x}mm;top:${keep.y}mm;width:${keep.w}mm;height:${keep.h}mm;pointer-events:none;background:rgba(255,255,255,.88);border:0.3mm dashed #c00;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font:8pt/1.3 sans-serif;color:#c00;text-align:center;">KDP 가 ISBN 바코드를 넣는 자리<br/>(${(keep.w / 25.4).toFixed(1)}″×${(keep.h / 25.4).toFixed(1)}″ · 비워 두세요)</div>`);
+  return out.join('\n');
 }
 
 function lastLines(s, n = 4) {

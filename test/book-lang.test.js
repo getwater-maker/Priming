@@ -74,7 +74,7 @@ ok(metaPlatformId({ platform: 'KDP' }) === 'kdp' && metaPlatformId({ platform: '
 const t69 = PP.TRIM_SIZES['6x9'];
 ok(t69 && Math.abs(t69.width - 152.4) < 0.01 && Math.abs(t69.height - 228.6) < 0.01 && t69.unit === 'in', '6x9 = 152.4×228.6mm (KDP 표준 판형 ✅)');
 const kdp = PP.getPlatform('kdp');
-ok(kdp.minPages === 24 && Math.abs(kdp.coverBleedMm - 3.175) < 1e-6 && Math.abs(kdp.coverSafeMm - 6.35) < 1e-6 && kdp.langs.join() === 'en' && kdp.trims.includes('5x8') && kdp.trims.includes('A5'), 'KDP 프리셋: 24쪽 · 블리드 0.125″ · 안전 0.25″ · 영어');
+ok(kdp.minPages === 24 && Math.abs(kdp.coverBleedMm - 3.175) < 1e-6 && Math.abs(kdp.coverSafeMm - 3.175) < 1e-6 && kdp.langs.join() === 'en' && kdp.trims.includes('5x8') && kdp.trims.includes('A5'), 'KDP 프리셋: 24쪽 · 블리드 0.125″ · 글자 안전 0.125″(공식) · 영어');
 ok(Math.abs(PP.PAPERS['KDP 백색지'].perPageIn - 0.002252) < 1e-9 && Math.abs(PP.PAPERS['KDP 미색지'].perPageIn - 0.0025) < 1e-9, '책등 계수: 백색 0.002252″ · 미색 0.0025″ ✅');
 ok(PP.getPlatform('bookk').minPages === 50 && PP.getPlatform('bookk').langs == null, '부크크 프리셋은 그대로');
 

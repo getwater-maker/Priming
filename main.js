@@ -226,7 +226,7 @@ function bookSpec(meta, pages) {
   const pf = PP.getPlatform(platformId);
   const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
   const paperId = PP.effectivePaper(platformId, meta.paper, pages);
-  const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
+  const flaps = !pf.noFlaps && !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));   // KDP·D2D 는 날개 없음
   const spineOverrideMm = Number(String(meta.spineMm || '').replace(/[^0-9.]/g, '')) || 0;
   const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: pages || 0, flaps, spineOverrideMm });
   return { platformId, pf, trimId, paperId, flaps, spread };
@@ -10587,7 +10587,9 @@ function bookCoverPlan(layoutOpts, meta, log) {
   const covers = (S.parsed.covers || []).filter((s) => !(layoutOpts.excluded || []).includes(s.key));
   const hasText = covers.some((s) => (s.blocks || []).length) || !!layoutOpts.coverOverlay;
   let barcode = null;
-  if (layoutOpts.coverBarcode !== false && meta.isbn) {
+  const _pf = require('./core/book/platform-presets').getPlatform(require('./core/book/html-builder').metaPlatformId(meta));
+  // 🇺🇸 KDP·D2D — 바코드는 플랫폼이 넣는다(앱이 한국 ISBN 바코드를 그려 넣지 않는다 · 자리만 비운다: spread.barcodeKeepout)
+  if (layoutOpts.coverBarcode !== false && meta.isbn && !_pf.barcodeKeepout && !_pf.noFlaps) {
     // 바 높이 200px(≈17.6mm@80%배율) — 표준 스캔 높이 확보. quiet 11모듈 = GS1 좌측 최소.
     try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '', { height: 200, quiet: 11 }); } catch (_) {}
     if (!barcode && log) log(`⚠ ISBN 체크섬/형식 오류 — 표지에 바코드가 포함되지 않습니다: ${meta.isbn}`);
@@ -10759,7 +10761,7 @@ ipcMain.handle('book-cover-preview', (_e, args = {}) => {
     if (!plan.has) return { kind: null };
     const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
     const bgTag = plan.hasImg ? `<img class="bg" src="${mediaUrl(plan.imagePath).replace(/"/g, '&quot;')}" />` : '';
-    const html = PB.buildCoverHtml({ spread, bgTag, compose: plan.compose, fontCss: PB.bundledFontCss(mediaUrl) });
+    const html = PB.buildCoverHtml({ spread, bgTag, compose: { ...plan.compose, guides: true }, fontCss: PB.bundledFontCss(mediaUrl) });   // 미리보기 전용 안내선(재단·안전·KDP 바코드 자리)
     const warnings = [];
     const fileName = plan.hasImg ? path.basename(plan.imagePath) : '';
     if (plan.hasImg && /시안/.test(fileName)) warnings.push(`파일 이름에 「시안」 — 인쇄용이 아닙니다(접힘선·자리 표시가 들어 있을 수 있습니다): ${fileName}`);
@@ -11505,6 +11507,7 @@ ipcMain.handle('book-preflight', (_e, args = {}) => {
     const pfId = require('./core/book/html-builder').metaPlatformId(S.parsed.meta || {}), pfDef = require('./core/book/platform-presets').getPlatform(pfId);
     return PF.preflight({
       platformId: pfId, platformLabel: pfDef.label, minPages: pfDef.minPages,
+      spread: dto.spread, kdpTemplate: { widthIn: S.parsed.meta && S.parsed.meta.kdpCoverW, heightIn: S.parsed.meta && S.parsed.meta.kdpCoverH, spineIn: S.parsed.meta && S.parsed.meta.kdpSpine },
       meta: S.parsed.meta || {}, pages: dto.lastPages, spineMm: dto.spread && dto.spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
       titleFit, footnotes: F.footnoteIssues(S.parsed), glyph: _lastGlyph, missingFonts, sourceMtime, outputs: listBookOutputs(),
     });

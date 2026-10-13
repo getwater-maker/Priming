@@ -108,7 +108,13 @@ PLATFORMS.kdp = {
   defaultTrim: '6x9',
   coverBleedMm: 0.125 * IN,   // 표지 블리드 0.125″ ✅
   coverFlapMm: 0,             // 날개 없음
-  coverSafeMm: 0.25 * IN,     // 잘리면 안 되는 내용은 바깥에서 0.25″ 안쪽 ✅
+  coverSafeMm: 0.125 * IN,    // 앞·뒤표지 글자는 재단선에서 최소 0.125″ 안쪽 ✅(공식 G201953020 · 2026-10-13 확인). 테두리·선은 0.25″ 이상 안쪽 권장(coverBorderSafeMm)
+  coverBorderSafeMm: 0.25 * IN,
+  spineTextMinPages: 79,      // 책등 글자는 「79쪽 초과」 책부터 ✅(공식: more than 79 pages — Cover Creator 는 80) · 글자와 책등 가장자리 사이 0.0625″
+  spineSafeMm: 0.0625 * IN,
+  noFlaps: true,              // 날개 없음(종이책 표지 = 뒤표지+책등+앞표지)
+  evenPages: true,            // 홀수 쪽수는 짝수로 올림 ✅
+  barcodeKeepout: { widthIn: 2, heightIn: 1.2, marginIn: 0.25 },   // 뒤표지 오른쪽 아래 2″×1.2″ 흰 상자 자리 — KDP 가 ISBN 바코드를 넣는다(공식 Barcodes G5HDYGP4BXLX4RUW: 권장 크기 2″×1.2″ · 재단·책등에서 0.25″). 왼쪽 아래는 우→좌 책 전용
   interiorBleedMm: 0,         // 블리드 내지는 선택(폭 +0.125″ · 높이 +0.25″) — R24
   minPages: 24,               // ✅
   dpi: 300,
@@ -126,7 +132,9 @@ PLATFORMS.d2d = {
   defaultTrim: '6x9',
   coverBleedMm: 0.125 * IN,
   coverFlapMm: 0,
-  coverSafeMm: 0.25 * IN,     // ❓ D2D 템플릿 확인 전 KDP 와 같게
+  coverSafeMm: 0.125 * IN,    // ❓ D2D 템플릿 확인 전 KDP 와 같게
+  noFlaps: true,
+  evenPages: true,
   interiorBleedMm: 0.125 * IN,   // ✅ 블리드 0.125″(상·하·바깥) — 제본쪽 제외
   minPages: 24,               // ❓ R24 에서 확정
   dpi: 300,
@@ -154,7 +162,16 @@ function bookkSpineMm(pages) {
 function effectivePaper(platformId, paperId, pages) {
   const pf = getPlatform(platformId);
   if (pf.spineFormula === 'bookk') return bookkPaper(pages);
+  if (pf.spineFormula === 'perPage') return kdpPaper(paperId) || pf.defaultPaper;   // KDP·D2D — 「백색」「미색」「White」「Cream」 별칭
   return paperId && PAPERS[paperId] ? paperId : pf.defaultPaper;
 }
+// KDP 용지 별칭 → PAPERS 키 (모르면 null — 플랫폼 기본 백색지)
+function kdpPaper(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (PAPERS[t] && PAPERS[t].perPageIn) return t;
+  if (/미색|크림|cream/i.test(t)) return 'KDP 미색지';
+  if (/백색|흰|white/i.test(t)) return 'KDP 백색지';
+  return null;
+}
 
-module.exports = { PLATFORMS, TRIM_SIZES, PAPERS, getPlatform, getTrim, getPaper, bookkPaper, bookkSpineMm, effectivePaper };
+module.exports = { PLATFORMS, TRIM_SIZES, PAPERS, getPlatform, getTrim, getPaper, bookkPaper, bookkSpineMm, effectivePaper, kdpPaper, IN };

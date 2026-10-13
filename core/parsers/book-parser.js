@@ -126,6 +126,8 @@ const META_KEYS = {
   '블로그': 'blog', '페이스북': 'facebook', '인스타그램': 'instagram', '인스타': 'instagram',
   '저작권': 'copyright', 'copyright': 'copyright', 'ⓒ': 'copyright',
   '판형': 'trim', '플랫폼': 'platform', '용지': 'paper', '날개': 'flaps',
+  // KDP 공식 표지 계산기(kdp.amazon.com/cover-calculator)가 알려 준 값(인치) — 앱 계산과 대조해 어긋나면 점검 패널이 경고(해외 플랫폼 R25)
+  'kdp표지폭': 'kdpCoverW', 'kdp표지높이': 'kdpCoverH', 'kdp책등': 'kdpSpine',
   // 책 언어(ko 기본 · en = 영어 조판 — 해외 플랫폼 KDP·D2D 는 영어책) — core/book/book-lang
   '언어': 'lang', '책언어': 'lang', '책 언어': 'lang', 'language': 'lang', 'lang': 'lang',
   '판권위치': 'colophonPos',

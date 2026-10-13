@@ -5,6 +5,7 @@
  * 입력은 main 이 모은 사실만 — 파일·네트워크 없음(test/book-preflight.test.js).
  */
 const BL = require('./book-lang');
+const SC = require('./spine-calc');
 const has = (v) => v != null && String(v).trim() !== '';
 const it = (id, label, state, detail, tab) => ({ id, label, state, detail: detail || '', ...(tab ? { tab } : {}) });
 
@@ -25,6 +26,17 @@ function preflight(x) {
   if (!(x.pages > 0)) out.push(it('pages', '쪽수 확정', 'warn', '미리보기 조판이 끝나면 쪽수가 정해지고, 쪽수로 책등 두께가 정해집니다 — 표지는 쪽수가 확정된 뒤에 만드세요', 'layout'));
   else if (x.pages < (x.minPages || 50)) out.push(it('pages', '쪽수', 'error', `${x.pages}쪽 — ${x.platformLabel || '부크크'} 종이책은 최소 ${x.minPages || 50}쪽입니다`, 'layout'));
   else out.push(it('pages', '쪽수', 'ok', `${x.pages}쪽 → 책등 ${x.spineMm}mm`));
+  // 1b) 🇺🇸 KDP·D2D 표지 — 책등 글자(79쪽 초과만) · 바코드 자리 · 공식 표지 계산기 값 대조
+  if ((x.platformId === 'kdp' || x.platformId === 'd2d') && x.spread) {
+    const sp = x.spread;
+    if (x.pages > 0) {
+      out.push(it('spine-text', '책등 글자', 'info', sp.spineTextOk ? `${sp.pagesUsed}쪽 — 책등 글자를 넣을 수 있습니다(글자와 책등 가장자리 사이 0.0625″ 이상)` : `${sp.pagesUsed}쪽 — 79쪽 이하는 책등에 글자를 넣지 않습니다(KDP 가 인쇄하지 않는 두께)`));
+    }
+    if (sp.barcodeKeepout) out.push(it('barcode-keepout', '바코드 자리', 'info', `뒤표지 오른쪽 아래 ${(sp.barcodeKeepout.w / 25.4).toFixed(1)}″×${(sp.barcodeKeepout.h / 25.4).toFixed(1)}″ 는 비워 두세요 — KDP 가 ISBN 바코드를 넣습니다(그 자리의 글·그림은 가려집니다)`));
+    const td = SC.kdpTemplateDiff(sp, x.kdpTemplate);
+    if (td.given) out.push(it('kdp-template', 'KDP 표지 계산기 대조', td.ok ? 'ok' : 'warn', td.ok ? 'KDP 공식 표지 계산기 값과 앱 계산이 같습니다(±0.01″)' : `KDP 계산기와 어긋남 — ${td.diffs.map((d) => `${d.name} 앱 ${d.appIn}″ · KDP ${d.kdpIn}″`).join(' / ')} (쪽수·용지·판형을 확인하세요)`, 'cover'));
+    else out.push(it('kdp-template', 'KDP 표지 계산기 대조', 'info', 'kdp.amazon.com/cover-calculator 의 폭·높이·책등(인치)을 원고 메타 `> KDP표지폭:` `> KDP표지높이:` `> KDP책등:` 로 적으면 앱 계산과 대조합니다'));
+  }
   // 2) 표지
   const cc = x.coverCheck;
   if (!x.coverImagePath) out.push(it('cover', '표지 이미지', 'warn', '완성 표지 이미지를 첨부하지 않았습니다(표지 탭) — 앱이 만든 간단한 표지가 나갑니다', 'cover'));
