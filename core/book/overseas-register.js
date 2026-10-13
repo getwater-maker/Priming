@@ -196,7 +196,7 @@ function buildPlan(x) {
     add('dup', '아마존 중복 유통', 'manual', '🔴 같은 판본을 KDP 로 이미 올렸다면 D2D 의 아마존 유통과 겹칩니다 — 한 판본은 한 경로로만');
   }
   add('submit', '제출', 'manual', '🔏 로이 — 계정 · 세금 · ISBN · 가격 · 제출은 앱이 대신하지 않습니다');
-  return { platformId: pid, file: info ? info.file || '' : '', fields, checklist: cl };
+  return { platformId: pid, file: info ? info.file || '' : '', fields, checklist: cl, publicDomain: !!pd };
 }
 
 module.exports = { parseOverseasInfo, findOverseasInfoFile, loadOverseasInfo, buildPlan, SITE, PLATFORM_FILE, ALIAS };

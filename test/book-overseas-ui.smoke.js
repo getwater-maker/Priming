@@ -55,6 +55,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(st0 === 'manual' && st1 === 'ok', '로이가 할 일(세금 인터뷰)은 체크해야 통과로 센다(' + st0 + ' → ' + st1 + ')');
     ok(await win.locator('[data-testid="ovr-chk-title-tag"]').getAttribute('data-state') === 'ok', '퍼블릭 도메인 점검: 제목 (Annotated) 표기 통과');
     ok(await win.locator('[data-testid="ovr-open"]').count() === 1, '사이트 열기 버튼(공식 주소만)');
+    // 💲 가격 계산기(R28)
+    await win.waitForSelector('[data-testid="price-calc"]', { timeout: 5000 });
+    await win.fill('[data-testid="pc-list"]', '15'); await win.fill('[data-testid="pc-pages"]', '300');
+    const cost = await win.locator('[data-testid="pc-cost"]').innerText(), roy = await win.locator('[data-testid="pc-royalty"]').innerText(), mn = await win.locator('[data-testid="pc-min"]').innerText();
+    ok(cost === '$4.60' && roy === '$4.40' && mn === '$9.20', '가격 계산기: 6×9″ 300쪽 · $15 → 인쇄비 $4.60 · 인세 $4.40 · 최소 정가 $9.20 (' + [cost, roy, mn].join(' · ') + ')');
+    await win.fill('[data-testid="pc-official"]', '4.30');
+    ok(/≠/.test(await win.locator('[data-testid="pc-compare"]').innerText()), '공식 계산기 값이 다르면 경고');
+    await win.fill('[data-testid="pc-eblist"]', '2.99'); await win.fill('[data-testid="pc-eblist"]', '2.99');
+    ok(/퍼블릭 도메인은 불가/.test(await win.locator('[data-testid="pc-kdp-ebook"]').innerText()), '퍼블릭 도메인 책은 전자책 70% 옵션 불가 표시');
     // 자동 입력·제출 버튼은 없다
     const txt = await win.locator('[data-testid="ovr-panel"]').innerText();
     ok(!/자동 입력|제출하기|Submit|Publish/.test(txt.replace(/제출은 직접|제출은 앱이|제출 —|제출$/g, '')) || !/🤖/.test(txt), '자동 입력(🤖)·제출 버튼이 없다');

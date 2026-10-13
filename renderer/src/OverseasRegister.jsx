@@ -1,6 +1,7 @@
 // 🇺🇸 KDP·D2D 등록 복사 도우미(R27) — 항목별 값 + 복사 버튼 + 사이트 칸 이름 + 체크리스트. 자동 입력·제출은 없다(계정·세금·ISBN·가격·제출은 로이).
 import React, { useCallback, useEffect, useState } from 'react';
 import api from './lib/ipc.js';
+import PriceCalc from './PriceCalc.jsx';
 
 const SITE_URL = { kdp: 'https://kdp.amazon.com/', d2d: 'https://draft2digital.com/' };
 const ICON = { ok: '✅', warn: '⚠', error: '❌', info: 'ℹ', manual: '🔏' };
@@ -48,6 +49,7 @@ export default function OverseasRegister({ dto, setStatus }) {
           );
         })}
       </details>
+      <PriceCalc plan={plan} />
       <div style={{ marginTop: 8 }}>
         <b>항목별 값</b> <span className="meta">(사이트 화면 순서)</span>
         {plan.fields.map((f) => (

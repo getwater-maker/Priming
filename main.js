@@ -11555,7 +11555,13 @@ ipcMain.handle('book-overseas-register', async () => {
     take(S.parsed.front); take(S.parsed.back); for (const part of (S.parsed.parts || [])) take(part.chapters);
     const outs = listBookOutputs();
     const facts = { illustrations: ill, hasInterior: outs.some((o) => o.kind === 'interior'), hasCoverPdf: outs.some((o) => o.kind === 'cover'), hasEpub: outs.some((o) => o.kind === 'epub'), pages: S.parsed._lastPages || 0 };
-    return OR.buildPlan({ platformId: pid, meta, info, facts });
+    const plan = OR.buildPlan({ platformId: pid, meta, info, facts });
+    // 💲 가격 계산기 기본값 — 쪽수·판형(인치)·전자책 파일 크기(직전 ePub)
+    const PPx = require('./core/book/platform-presets');
+    const spec = bookSpec(meta, S.parsed._lastPages || 0), trimMm = PPx.TRIM_SIZES[spec.trimId] || PPx.TRIM_SIZES['6x9'];
+    const epub = outs.filter((o) => o.kind === 'epub').sort((a, b) => b.mtime - a.mtime)[0];
+    plan.calc = { pages: S.parsed._lastPages || 0, trimWIn: Math.round(trimMm.width / 25.4 * 1000) / 1000, trimHIn: Math.round(trimMm.height / 25.4 * 1000) / 1000, fileMB: epub ? Math.round(epub.bytes / 1048576 * 100) / 100 : 0, trimLabel: trimMm.label };
+    return plan;
   } catch (e) { return { error: (e && e.message) || String(e) }; }
 });
 ipcMain.handle('book-preflight', async (_e, args = {}) => {

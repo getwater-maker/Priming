@@ -81,6 +81,20 @@ console.log('\n[3] 체크리스트');
   ok(by(dd, 'dup').state === 'manual' && by(dd, 'epub').state === 'warn' && by(dd, 'bisac'), 'D2D: 아마존 중복 유통 경고 · ePub · BISAC');
 }
 
+console.log('\n[3b] 양식 파일(docs/양식 — 출판 세션이 이 꼴로 작품별 파일을 쓴다)');
+{
+  const dir = path.join(__dirname, '..', 'docs', '양식');
+  const meta = { lang: 'en', translator: 'Roy Han' };
+  for (const [pid, file] of [['kdp', 'KDP등록정보_양식.md'], ['d2d', 'D2D등록정보_양식.md']]) {
+    const info = OR.parseOverseasInfo(fs.readFileSync(path.join(dir, file), 'utf8')); info.file = file;
+    const plan = OR.buildPlan({ platformId: pid, meta, info, facts: {} });
+    const c = plan.checklist, f = (k) => plan.fields.find((x) => x.key === k);
+    ok(/\(Annotated\)$/.test(f('title').value) && f('title').from === 'file' && f('author').value === 'L. M. Montgomery' && f('contributors').list.length === 2, `${pid} 양식: 제목·저자·기여자 2명(번역가·삽화가)`);
+    ok(by(c, 'title-tag').state === 'ok' && by(c, 'desc-first').state === 'ok' && by(c, 'illustrations').state === 'ok' && /12\/10/.test(by(c, 'illustrations').detail), `${pid} 양식: 퍼블릭 도메인 점검 통과(제목 표기 · 설명 첫 줄 · 삽화수 12/10 — 파일의 「삽화수」)`);
+    ok(by(c, 'keywords').state === 'ok' && by(c, 'ai').state === 'ok' && by(c, 'price').state === 'ok' && by(c, pid === 'kdp' ? 'categories' : 'bisac').state === 'ok' && f('isbn').value, `${pid} 양식: 키워드·AI 신고·가격·${pid === 'kdp' ? '카테고리' : 'BISAC'}·ISBN 방식`);
+  }
+}
+
 console.log('\n[4] 하지 않는 것(소스 검사)');
 {
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'overseas-register.js'), 'utf8');
