@@ -249,13 +249,14 @@ function titlePageHtml(meta, ctx, fallbackTitle) {
   <div class="tp-main">
     <h1 class="tp-title">${(() => { const ls = require('./title-lines').titleLines(meta, fallbackTitle); return ls.length > 1 ? ls.map((l, i) => `<span class="tp-t${i + 1}">${esc(l)}</span>`).join(' ') : esc(ls[0] || ''); })()}</h1>
     ${meta.subtitle ? `<div class="tp-subtitle">${esc(meta.subtitle)}</div>` : ''}
-    <div class="tp-author">${esc(meta.author || '')}${meta.author ? ' 지음' : ''}</div>
-    ${meta.translator ? `<div class="tp-translator">${esc(meta.translator)} ${meta.translatorLabel === '편역이' ? '편역' : '옮김'}</div>` : ''}
+    <div class="tp-author">${esc(BL.byLine(ctx && ctx.lang, meta.author) || '')}</div>
+    ${meta.translator ? `<div class="tp-translator">${esc(BL.translatorLine(ctx && ctx.lang, meta.translator, meta.translatorLabel))}</div>` : ''}
   </div>
   <div class="tp-publisher">${logo}${esc(meta.publisher || '')}</div>
 </section>`;
 }
 const DK = require('./date-ko');
+const BL = require('./book-lang');   // 책 언어(ko·en) — 영어 조판 문구·날짜·플랫폼×언어(해외 플랫폼 R23)
 const DEFAULT_LEGAL = '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.';
 // 판권 자동 생성 항목 정의 — UI 체크박스와 1:1 (key, 라벨, 값 추출)
 const COLOPHON_FIELDS = [
@@ -365,8 +366,9 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
     : meta0;
   const only = (Array.isArray(fields) && fields.length) ? new Set(fields) : null;
   const on = (key) => !only || only.has(key);
+  const cpLang = (ctx && ctx.lang) || 'ko';
   const row = (key, label, v, cls) => (v && on(key)
-    ? `<div class="cp-row${cls ? ' ' + cls : ''}">${cpLabel(label)}<span class="sep">|</span><span class="v">${esc(v)}</span></div>`
+    ? `<div class="cp-row${cls ? ' ' + cls : ''}">${cpLabel(BL.colLabel(cpLang, label))}<span class="sep">|</span><span class="v">${esc(v)}</span></div>`
     : '');
 
   // ── 발행 이력 ── 「1판 1쇄 발행   2026년 8월 24일」. 여러 쇄는 `;` 로 나눠 쓴다.
@@ -374,8 +376,8 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   const dates = on('issueDate')
     ? String(meta.issueDate || '').split(/\s*[;；]\s*/).map((s) => s.trim()).filter(Boolean).map((s) => {
       const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
-      const k = (m && m[1].trim()) || '발행일';
-      const v = DK.formatKo(((m ? m[2] : s) || '').trim());   // 부크크 판권지: 「2026년 10월 06일」
+      const k = (m && m[1].trim()) || BL.colLabel(cpLang, '발행일');
+      const v = BL.formatDate(cpLang, ((m ? m[2] : s) || '').trim(), DK.formatKo);   // 부크크 판권지: 「2026년 10월 06일」 · 영어판: 「October 6, 2026」
       return `<div class="cp-date"><span class="dk">${esc(k)}</span><span class="dv">${esc(v)}</span></div>`;
     }).join('') : '';
   const dateBlock = dates ? `<div class="cp-dates">${dates}</div>` : '';
@@ -399,7 +401,7 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
     ...Object.entries(meta.extra || {}).map(([k, v]) => row('extra', k, v)),
     // ISBN — 실물은 구분선 없이 「ISBN  979-…  03190」(부가기호를 값 뒤에 띄워 붙인다)
     (meta.isbn && on('isbn'))
-      ? `<div class="cp-row cp-isbn">${cpLabel('ISBN')}<span class="sep">|</span><span class="v">${esc(meta.isbn)}${meta.isbnAddon ? `<span class="addon">${esc(meta.isbnAddon)}</span>` : ''}</span></div>`
+      ? `<div class="cp-row cp-isbn">${cpLabel(BL.colLabel(cpLang, 'ISBN'))}<span class="sep">|</span><span class="v">${esc(meta.isbn)}${meta.isbnAddon ? `<span class="addon">${esc(meta.isbnAddon)}</span>` : ''}</span></div>`
       : '',
     row('price', '정가', meta.price),
     row('ebookPrice', '전자책', meta.ebookPrice),
@@ -423,9 +425,9 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
   // 편역서는 편집 저작권자 = 편역자(목표 최종본: ⓒ 로이(한득수)) — translator 우선
   const cpName = meta.translator || meta.author;
-  const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
+  const owner = meta.copyright || (cpName ? (cpLang === 'en' ? `© ${year} ${cpName}. All rights reserved.` : `ⓒ ${cpName} ${year}. All rights reserved.`) : '');
   const legal = owner
-    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>${jw ? esc(jw.legal) : esc(meta.legalText || DEFAULT_LEGAL)}</p></div>`
+    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>${jw ? esc(jw.legal) : esc(meta.legalText || (cpLang === 'en' ? BL.str('en', 'legal') : DEFAULT_LEGAL))}</p></div>`
     : (jw ? `<div class="cp-legal"><p>${esc(jw.legal)}</p></div>` : '');
 
   // 러닝헤드 억제 — @page display 는 vivliostyle 에서 **조각의 첫 쪽에 한 쪽 늦게** 적용된다
@@ -459,6 +461,7 @@ function headerShortText(c) {
 const tocUsesFull = (book) => /전체|full/i.test(String((book.meta || {}).tocTitleMode || ''));
 function tocHtml(book, tocTitle, excluded = [], useFull = false) {
   const items = [];
+  const tocLang = BL.langOf(book && book.meta);
   for (const p of book.parts) {
     const shown = (p.chapters || []).filter((c) => c.title && !chapterExcluded(c.title, excluded));
     if (p.title && shown.length) items.push(`<li class="toc-part"><span class="tt">${esc(p.title)}</span></li>`);
@@ -472,14 +475,14 @@ function tocHtml(book, tocTitle, excluded = [], useFull = false) {
         : `<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
     }
   }
-  return `<nav class="toc"><h2>${esc(tocTitle || '목차')}</h2><ol>${items.join('\n')}</ol></nav>`;
+  return `<nav class="toc"><h2>${esc(tocTitle || BL.str(tocLang, 'contents'))}</h2><ol>${items.join('\n')}</ol></nav>`;
 }
 
 function endnotesHtml(ctx) {
   if (!ctx.endnotes.length) return '';
   const lis = ctx.endnotes.map((e, i) =>
     `<li id="en-${i + 1}"><a href="#enref-${i + 1}">${i + 1}</a>. ${inlineMd(e.text)}</li>`).join('\n');
-  return `<section class="back-section endnotes" id="sec-endnotes"><h2>미주</h2><ol style="list-style:none">${lis}</ol></section>`;
+  return `<section class="back-section endnotes" id="sec-endnotes"><h2>${esc(BL.str(ctx.lang, 'endnotes'))}</h2><ol style="list-style:none">${lis}</ol></section>`;
 }
 
 // 폰트 키 → 스택 (전부 동봉 정적 웨이트 — 가변폰트는 PDF 에 Type3 로 구워져 배제)
@@ -768,7 +771,8 @@ function resolveBookOptions(book, opts = {}) {
     // ── 📕 종이책(print) / 📱 전자책(ebook) — 전자책은 앞표지가 1쪽 · 백면 없이 이어서 · 좌우 같은 여백 · 링크 살림 ──
     edition: opts.edition === 'ebook' ? 'ebook' : 'print',
     // 📐 R18 줄바꿈 — 어절(기본 · keep-all) / 글자(normal) / 절충(어절 + 벌어질 줄만 글자 단위). 원고 메타 `> 줄바꿈:` 이 이긴다
-    lineBreak: LB.modeOf(meta.lineBreak) || LB.modeOf(opts.lineBreak) || 'word',
+    lang: BL.langOf(meta),   // 책 언어 — 영어 원고는 한국어 전용 설정(어절 줄바꿈·keep-all·한자 보강)이 꺼진다
+    lineBreak: BL.langOf(meta) === 'en' ? 'word' : (LB.modeOf(meta.lineBreak) || LB.modeOf(opts.lineBreak) || 'word'),
   };
   if (o.edition === 'ebook') {
     const m = o.marginsMm; const side = Math.round(((Number(m.inner) || 0) + (Number(m.outer) || 0)) / 2 * 10) / 10;
@@ -780,6 +784,13 @@ function resolveBookOptions(book, opts = {}) {
 
   return { meta, platform, trimId, trim, o };
 }
+/** 영어 원고 조판 보정 — 한국어 기본 CSS(keep-all)를 되돌리고 하이픈을 켠다(`<html lang="en">` 가 있어야 하이픈 사전이 쓰인다) */
+function englishCss() {
+  return `/* 🇺🇸 영어 원고(해외 플랫폼) — 어절 단위(keep-all)는 한국어 전용 · 영어는 하이픈으로 줄을 맞춘다 */
+html[lang="en"] body, html[lang="en"] p, html[lang="en"] li, html[lang="en"] td, html[lang="en"] blockquote { word-break: normal; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; hyphenate-limit-chars: 6 3 3; }
+html[lang="en"] nav.toc, html[lang="en"] nav.toc a .tt, html[lang="en"] section.titlepage .tp-title, html[lang="en"] section.halftitle .ht-title, html[lang="en"] h1, html[lang="en"] h2, html[lang="en"] h3 { word-break: normal; hyphens: manual; -webkit-hyphens: manual; }
+html[lang="en"] body { quotes: "\\201C" "\\201D" "\\2018" "\\2019"; }`;
+}
 function buildBookHtml(book, opts = {}) {
   const { meta, platform, trimId, trim, o } = resolveBookOptions(book, opts);
   const baseDir = opts.baseDir || process.cwd();
@@ -790,6 +801,7 @@ function buildBookHtml(book, opts = {}) {
     scriptHideShots: o.scriptHideShots,
     hidePaths: o.hidePaths,   // 작업용 파일 경로 → 파일명만
     edition: o.edition,
+    lang: o.lang,   // 책 언어(ko·en) — 영어 원고는 영어 문구·하이픈·`lang=en`
     lb: LB.contextFor(o, BOOK_FONT_DIR),   // 줄바꿈 계산 문맥(어절이면 null)
     keepLinks: o.edition === 'ebook',
     endnotes: [],
@@ -808,7 +820,7 @@ function buildBookHtml(book, opts = {}) {
 
   // 📱 전자책 PDF 1쪽 = 앞표지(opts.ebookCoverPath — 전자책표지 메타 또는 인쇄 표지에서 자른 앞면)
   if (o.edition === 'ebook' && opts.ebookCoverPath) {
-    bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.ebookCoverPath))}" alt="표지" /></section>`);
+    bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.ebookCoverPath))}" alt="${esc(BL.str(o.lang, 'coverAlt'))}" /></section>`);
   }
 
   // 앞부속 — 반표제지(기본 on) → 속표지 → (앞판권) → 예약섹션들(목차는 자동 생성)
@@ -830,7 +842,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
   // 목차 자동 생성 — 원고에 [목차] 섹션이 없으면 프로그램이 만들어 제공(원고에 있으면 그 위치가 우선).
   //   구조 패널에서 '목차' 체크 해제(excluded)하면 자동 생성도 생략.
   if (!book.front.some((s) => s.key === 'toc') && !o.excluded.includes('toc')) {
-    bodyParts.push(tocHtml(book, '목차', o.excluded, tocUsesFull(book)));
+    bodyParts.push(tocHtml(book, BL.str(o.lang, 'contents'), o.excluded, tocUsesFull(book)));
   }
 
   // 본문 — 부 표제지 + 장
@@ -838,7 +850,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     const shownChapters = (p.chapters || []).filter((c) => !chapterExcluded(c.title, o.excluded));
     if (p.title && shownChapters.length) {
       bodyParts.push(`<section class="part-title" id="part-${p.num || p.lineStart}">
-<div class="pt-num">${p.num ? `제${p.num}부` : ''}</div><h2>${esc(p.title)}</h2></section>`);
+<div class="pt-num">${p.num ? BL.str(o.lang, 'part')(p.num).trim() : ''}</div><h2>${esc(p.title)}</h2></section>`);
     }
     for (const c of shownChapters) {
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
@@ -881,9 +893,9 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     .replace(/var\(--line-height\)/g, String(o.lineHeight))
     .replace(/var\(--chapter-break\)/g, o.chapterStart === 'page' ? 'page' : 'recto');
   // 순서: 폰트 → 테마(기본) → pageCss(옵션 오버라이드가 마지막에 이기도록)
-  const css = (opts.fontCss || '') + '\n' + theme + '\n' + pageCss(o);
+  const css = (opts.fontCss || '') + '\n' + theme + '\n' + pageCss(o) + (o.lang === 'en' ? '\n' + englishCss() : '');
   const html = `<!DOCTYPE html>
-<html lang="ko">
+<html lang="${o.lang}">
 <head>
 <meta charset="utf-8" />
 <title>${esc(meta.title || book.fileTitle || '책')}</title>
@@ -910,6 +922,8 @@ function metaPlatformId(meta) {
   const p = String(meta.platform || '').toLowerCase();
   if (/교보|kyobo/.test(p)) return 'kyobo';
   if (/작가와|jakkawa/.test(p)) return 'jakkawa';
+  if (/kdp|amazon|아마존/.test(p)) return 'kdp';
+  if (/d2d|draft ?2 ?digital/.test(p)) return 'd2d';
   return 'bookk';
 }
 

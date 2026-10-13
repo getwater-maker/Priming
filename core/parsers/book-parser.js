@@ -29,23 +29,23 @@
 
 // 예약 섹션 이름 → { key, zone(front|back), label } (별칭 포함)
 const RESERVED = [
-  { key: 'dedication', zone: 'front', label: '헌사', names: ['헌사', '헌정'] },
-  { key: 'epigraph', zone: 'front', label: '제사', names: ['제사', '인용구'] },
-  { key: 'recommendation', zone: 'front', label: '추천사', names: ['추천사', '추천의 글', '추천의글'] },
-  { key: 'transPreface', zone: 'front', label: '역자 서문', names: ['역자서문', '역자 서문', '옮긴이의 말', '옮긴이의말', '역자의 말'] },
-  { key: 'preface', zone: 'front', label: '서문', names: ['서문', '머리말', '들어가며', '저자서문', '프리페이스'] },
-  { key: 'notes', zone: 'front', label: '일러두기', names: ['일러두기'] },
-  { key: 'toc', zone: 'front', label: '목차', names: ['목차', '차례'] },
-  { key: 'prologue', zone: 'front', label: '프롤로그', names: ['프롤로그'] },
-  { key: 'epilogue', zone: 'back', label: '에필로그', names: ['에필로그'] },
-  { key: 'afterword', zone: 'back', label: '후기', names: ['후기', '맺음말', '나가며', '작가의 말', '작가의말'] },
-  { key: 'thanks', zone: 'back', label: '감사의 글', names: ['감사의글', '감사의 글'] },
-  { key: 'appendix', zone: 'back', label: '부록', names: ['부록'] },
-  { key: 'references', zone: 'back', label: '참고문헌', names: ['참고문헌', '참고 문헌'] },
-  { key: 'authorBio', zone: 'back', label: '저자소개', names: ['저자소개', '저자 소개', '작가소개', '작가 소개'] },
-  { key: 'colophon', zone: 'back', label: '판권', names: ['판권', '판권지', '간기'] },
+  { key: 'dedication', zone: 'front', label: '헌사', names: ['헌사', '헌정', 'Dedication'] },
+  { key: 'epigraph', zone: 'front', label: '제사', names: ['제사', '인용구', 'Epigraph'] },
+  { key: 'recommendation', zone: 'front', label: '추천사', names: ['추천사', '추천의 글', '추천의글', 'Praise', 'Endorsements'] },
+  { key: 'transPreface', zone: 'front', label: '역자 서문', names: ['역자서문', '역자 서문', '옮긴이의 말', '옮긴이의말', '역자의 말', "Translator's Preface", "Translator's Note", 'Translators Preface', 'Translators Note'] },
+  { key: 'preface', zone: 'front', label: '서문', names: ['서문', '머리말', '들어가며', '저자서문', '프리페이스', 'Preface', 'Foreword', "Author's Note", 'Authors Note'] },
+  { key: 'notes', zone: 'front', label: '일러두기', names: ['일러두기', 'Note on the Text', 'A Note on the Text', "Editor's Note", 'Editors Note'] },
+  { key: 'toc', zone: 'front', label: '목차', names: ['목차', '차례', 'Contents', 'Table of Contents'] },
+  { key: 'prologue', zone: 'front', label: '프롤로그', names: ['프롤로그', 'Prologue'] },
+  { key: 'epilogue', zone: 'back', label: '에필로그', names: ['에필로그', 'Epilogue'] },
+  { key: 'afterword', zone: 'back', label: '후기', names: ['후기', '맺음말', '나가며', '작가의 말', '작가의말', 'Afterword'] },
+  { key: 'thanks', zone: 'back', label: '감사의 글', names: ['감사의글', '감사의 글', 'Acknowledgments', 'Acknowledgements'] },
+  { key: 'appendix', zone: 'back', label: '부록', names: ['부록', 'Appendix', 'Appendices'] },
+  { key: 'references', zone: 'back', label: '참고문헌', names: ['참고문헌', '참고 문헌', 'Bibliography', 'References', 'Works Cited'] },
+  { key: 'authorBio', zone: 'back', label: '저자소개', names: ['저자소개', '저자 소개', '작가소개', '작가 소개', 'About the Author'] },
+  { key: 'colophon', zone: 'back', label: '판권', names: ['판권', '판권지', '간기', 'Copyright', 'Copyright Page', 'Colophon'] },
   // 표지 스프레드 구성 요소 — 내지에는 안 들어가고 표지 PDF 조판에 사용
-  { key: 'backCover', zone: 'cover', label: '뒷표지 글', names: ['뒷표지', '뒷표지글', '책소개'] },
+  { key: 'backCover', zone: 'cover', label: '뒷표지 글', names: ['뒷표지', '뒷표지글', '책소개', 'Back Cover'] },
   { key: 'frontFlap', zone: 'cover', label: '앞날개 글', names: ['앞날개'] },
   { key: 'backFlap', zone: 'cover', label: '뒷날개 글', names: ['뒷날개'] },
   { key: 'spine', zone: 'cover', label: '책등 문구', names: ['책등'] },
@@ -56,9 +56,15 @@ const RESERVED = [
 const FRONT_ORDER = ['dedication', 'epigraph', 'recommendation', 'transPreface', 'preface', 'notes', 'toc', 'prologue'];
 const BACK_ORDER = ['epilogue', 'afterword', 'thanks', 'appendix', 'endnotes', 'references', 'authorBio', 'colophon'];
 
+function romanToInt(r) {
+  const v = { I: 1, V: 5, X: 10, L: 50, C: 100 }; let n = 0; const u = String(r).toUpperCase();
+  for (let i = 0; i < u.length; i++) { const a = v[u[i]] || 0, b = v[u[i + 1]] || 0; n += a < b ? -a : a; }
+  return n;
+}
 function reservedByName(name) {
   const n = String(name || '').trim().replace(/\s+/g, ' ');
-  for (const r of RESERVED) if (r.names.some((x) => x === n || x.replace(/\s+/g, '') === n.replace(/\s+/g, ''))) return r;
+  const lc = n.toLowerCase().replace(/[’‘]/g, "'");   // 영어 이름은 대소문자·따옴표 모양을 가리지 않는다
+  for (const r of RESERVED) if (r.names.some((x) => x === n || x.replace(/\s+/g, '') === n.replace(/\s+/g, '') || x.toLowerCase() === lc)) return r;
   return null;
 }
 
@@ -120,6 +126,8 @@ const META_KEYS = {
   '블로그': 'blog', '페이스북': 'facebook', '인스타그램': 'instagram', '인스타': 'instagram',
   '저작권': 'copyright', 'copyright': 'copyright', 'ⓒ': 'copyright',
   '판형': 'trim', '플랫폼': 'platform', '용지': 'paper', '날개': 'flaps',
+  // 책 언어(ko 기본 · en = 영어 조판 — 해외 플랫폼 KDP·D2D 는 영어책) — core/book/book-lang
+  '언어': 'lang', '책언어': 'lang', '책 언어': 'lang', 'language': 'lang', 'lang': 'lang',
   '판권위치': 'colophonPos',
   // 판권 쪽 안의 세로 위치 — 하단(쪽 아래에 붙임) / 상단(기본). 원고 메타가 조판 설정을 이긴다
   '판권정렬': 'colophonAlignMeta', '판권 정렬': 'colophonAlignMeta',
@@ -211,6 +219,8 @@ function parseBookText(text, fallbackTitle) {
         const val = m[2].trim();
         if (stdKey) meta[stdKey] = val;
         else meta.extra[m[1].trim()] = val;
+        // 인치 판형(KDP·D2D) — 「6×9」「6 x 9」「6"x9"」 → 「6x9」(platform-presets 의 판형 키). 한국 판형 이름(A5 등)은 그대로
+        if (stdKey === 'trim') { const ik = require('../book/book-lang').normInchTrim(val); if (ik) meta[stdKey] = ik; }
         // 편역서 판권 라벨(편역이) 보존 — 목표 최종본은 '옮긴이' 아닌 '편역이'로 표기
         if (stdKey === 'translator' && /편역|엮/.test(m[1])) meta.translatorLabel = '편역이';
       }
@@ -245,6 +255,14 @@ function parseBookText(text, fallbackTitle) {
       }
       seenHeading = true;
       const pm = title.match(/^(?:제\s*)?(\d+)\s*부[.·]?\s*(.*)$/);
+      const pe = !pm && title.match(/^Part\s+(\d+|[IVXLC]+)\b[.:·\-—–\s]*(.*)$/i);   // 영어 부 표제 — `Part 2: Title` · `Part II. Title`
+      if (pe) {
+        const rn = /^\d+$/.test(pe[1]) ? Number(pe[1]) : romanToInt(pe[1]);
+        curPart = { title: pe[2].trim() || `Part ${pe[1]}`, num: rn, lineStart: i, chapters: [] };
+        parts.push(curPart);
+        cur = null;
+        continue;
+      }
       if (pm) { // 부(部) 표제
         curPart = { title: pm[2].trim() || `${pm[1]}부`, num: Number(pm[1]), lineStart: i, chapters: [] };
         parts.push(curPart);

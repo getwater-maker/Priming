@@ -87,6 +87,58 @@ const PLATFORMS = {
   },
 };
 
+// ── 해외 플랫폼(Amazon KDP · Draft2Digital) — 인치 판형 · 영어책 전용(2026-10-13 · 해외 플랫폼 R23) ──────────
+//   규격 정본 = `D:\## 출판\_공통\해외플랫폼_가이드_KDP_D2D.md`(✅ 공식 확인 · ⚠️ 블로그 · ❓ 미확인). ⚠️·❓ 값은 R24 에서 공식 문서로 확정한다.
+//   인치 판형 키 = 「6x9」「5.5x8.5」(원고 메타 `> 판형: 6×9` 는 book-lang.normInchTrim 이 이 키로 바꾼다). 1인치 = 25.4mm.
+const IN = 25.4;
+const INCH_TRIMS = [[5, 8], [5.25, 8], [5.5, 8.5], [6, 9], [6.14, 9.21], [6.69, 9.61], [7, 10], [7.5, 9.25], [8, 10], [8.5, 8.5], [8.5, 11]];   // ⚠️ KDP 표준 판형 목록 — R24 에서 공식 페이지(G201834180)로 대조
+for (const [w, h] of INCH_TRIMS) {
+  const key = `${w}x${h}`;
+  TRIM_SIZES[key] = { width: Math.round(w * IN * 100) / 100, height: Math.round(h * IN * 100) / 100, label: `${w}″×${h}″ (${(w * IN).toFixed(1)}×${(h * IN).toFixed(1)}mm)`, unit: 'in', inchW: w, inchH: h };
+}
+// 용지 — 책등 = 쪽수 × 쪽당 계수 ✅(KDP 공식: 백색지 0.002252″ · 미색지 0.0025″) → 낱장(2쪽) 두께 mm
+Object.assign(PAPERS, {
+  'KDP 백색지': { sheetMm: Math.round(0.002252 * IN * 2 * 1e6) / 1e6, label: 'KDP 백색지 (책등 0.002252″/쪽)', perPageIn: 0.002252 },
+  'KDP 미색지': { sheetMm: Math.round(0.0025 * IN * 2 * 1e6) / 1e6, label: 'KDP 미색지 (책등 0.0025″/쪽)', perPageIn: 0.0025 },
+});
+PLATFORMS.kdp = {
+  label: 'Amazon KDP (영어책)',
+  unit: 'in',
+  trims: INCH_TRIMS.map(([w, h]) => `${w}x${h}`).concat(['A5']),   // A5(148×210)는 KDP 정식 목록에 없고 「사용자 지정」(폭 4~8.5″ · 높이 6~11.69″)으로 처리 ❓
+  defaultTrim: '6x9',
+  coverBleedMm: 0.125 * IN,   // 표지 블리드 0.125″ ✅
+  coverFlapMm: 0,             // 날개 없음
+  coverSafeMm: 0.25 * IN,     // 잘리면 안 되는 내용은 바깥에서 0.25″ 안쪽 ✅
+  interiorBleedMm: 0,         // 블리드 내지는 선택(폭 +0.125″ · 높이 +0.25″) — R24
+  minPages: 24,               // ✅
+  dpi: 300,
+  toleranceMm: 1,
+  defaultPaper: 'KDP 백색지',
+  papers: ['KDP 백색지', 'KDP 미색지'],
+  spineFormula: 'perPage',
+  langs: ['en'],              // 한국어 불가 ✅ (book-lang.PLATFORM_LANGS)
+  note: 'PDF 내지(낱쪽) · 글꼴 임베드 · 이미지 300dpi 이상 · 24쪽 이상(홀수는 짝수로 올림) · 표지 = PDF 한 장 스프레드(블리드 0.125″) · 바코드 자리 비움(KDP 가 ISBN 바코드를 넣는다) · 한국어 불가',
+};
+PLATFORMS.d2d = {
+  label: 'Draft2Digital (영어책)',
+  unit: 'in',
+  trims: ['5x8', '5.5x8.5', '6x9', '7x10', '8x10', '8.5x11'],   // ❓ 「5″×8″ ~ 8.5″×11″ 6종」 — 정확한 목록은 R24 에서 D2D 도움말로 확정
+  defaultTrim: '6x9',
+  coverBleedMm: 0.125 * IN,
+  coverFlapMm: 0,
+  coverSafeMm: 0.25 * IN,     // ❓ D2D 템플릿 확인 전 KDP 와 같게
+  interiorBleedMm: 0.125 * IN,   // ✅ 블리드 0.125″(상·하·바깥) — 제본쪽 제외
+  minPages: 24,               // ❓ R24 에서 확정
+  dpi: 300,
+  toleranceMm: 1,
+  defaultPaper: 'KDP 백색지',    // ❓ D2D 책등은 D2D 템플릿이 정한다
+  papers: ['KDP 백색지', 'KDP 미색지'],
+  spineFormula: 'perPage',
+  langs: null,                // ❓ 한국어 허용 여부 미확인(막지 않고 경고)
+  grayscaleInterior: true,    // 흑백(그레이스케일) 내지만 ✅
+  note: 'D2D Print = 무선제본 흑백(그레이스케일) 내지만 · PDF · 블리드 0.125″(제본쪽 제외) · 전자책은 EPUB(EPUBCheck 통과 필수) · 쪽수·여백표는 R24 에서 확정',
+};
+
 function getPlatform(id) { return PLATFORMS[id] || PLATFORMS.bookk; }
 function getTrim(id) { return TRIM_SIZES[id] || TRIM_SIZES['A5']; }
 function getPaper(id) { return PAPERS[id] || PAPERS['백색모조 100g']; }

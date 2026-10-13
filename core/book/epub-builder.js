@@ -17,6 +17,7 @@ const zlib = require('zlib');
 const { esc, inlineMd, chapterExcluded, scriptFilter, specialKeywordsOf, splitSpecialBlocks, filterColophonSection } = require('./html-builder');
 const JB = require('./jakkawa-biblio');
 const DK = require('./date-ko');
+const BL = require('./book-lang');   // 책 언어(ko·en) — 영어 ePub 문구·언어 메타(해외 플랫폼 R23)
 
 // ── 미니 ZIP 라이터 ──
 // adm-zip 은 writeZip 때 엔트리를 이름순 정렬해 ePub 규격(mimetype=첫 엔트리·무압축)을
@@ -80,11 +81,11 @@ function toXhtml11(html) {
     .replace(/<figcaption[^>]*>/g, '<p class="figcaption">').replace(/<\/figcaption>/g, '</p>')
     .replace(/<blockquote>([\s\S]*?)<\/blockquote>/g, '<blockquote><p>$1</p></blockquote>');
 }
-function wrapXhtml(title, body, cssHref = 'style.css', v2 = false) {
+function wrapXhtml(title, body, cssHref = 'style.css', v2 = false, lang = 'ko') {
   if (v2) {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${lang}">
 <head><meta http-equiv="Content-Type" content="application/xhtml+xml; charset=utf-8"/><title>${esc(title)}</title><link rel="stylesheet" type="text/css" href="${cssHref}"/></head>
 <body>
 ${toXhtml11(body)}
@@ -93,7 +94,7 @@ ${toXhtml11(body)}
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ko" lang="ko">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${lang}" lang="${lang}">
 <head><meta charset="utf-8"/><title>${esc(title)}</title><link rel="stylesheet" type="text/css" href="${cssHref}"/></head>
 <body>
 ${body}
@@ -182,19 +183,20 @@ function listXhtml(b, book, ctx) {
 //   ⚠ 예전엔 [판권] 섹션이 있으면 그 별표 목록만 글머리표로 나와 ISBN·ⓒ 가 빠졌다(부크크 판권지 수정 요청).
 function colophonXhtml(meta0, col, book, ctx) {
   const meta = { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '', issueDate: meta0.ebookIssueDate || meta0.issueDate };
+  const lang = BL.langOf(meta0), L = (ko) => BL.colLabel(lang, ko);
   const out = [];
   out.push(`<p class="cp-title"><strong>${esc(meta.title || '')}</strong>${meta.subtitle ? ' ' + esc(meta.subtitle) : ''}</p>`);
   for (const s of String(meta.issueDate || '').split(/\s*[;；]\s*/).map((x) => x.trim()).filter(Boolean)) {
     const m = s.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
-    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || '발행일')}</strong> ${esc(DK.formatKo(((m ? m[2] : s) || '').trim()))}</p>`);
+    out.push(`<p class="cp-date"><strong>${esc((m && m[1].trim()) || L('발행일'))}</strong> ${esc(BL.formatDate(lang, ((m ? m[2] : s) || '').trim(), DK.formatKo))}</p>`);
   }
-  const row = (label, v) => (v ? `<p class="cp-row"><strong>${esc(label)}</strong> | ${esc(v)}</p>` : '');
+  const row = (label, v) => (v ? `<p class="cp-row"><strong>${esc(L(label))}</strong> | ${esc(v)}</p>` : '');
   out.push(
     row('지은이', meta.author), row(meta.translatorLabel || '옮긴이', meta.translator), row('발행인', meta.issuer), row('편집인', meta.editor),
     row('발행처', meta.publisher), row('등록', meta.regNo), row('주소', meta.address), row('전화', meta.phone), row('팩스', meta.fax),
     row('대표메일', meta.email), row('홈페이지', meta.homepage), row('블로그', meta.blog), row('페이스북', meta.facebook), row('인스타그램', meta.instagram),
     ...Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)),
-    meta.isbn ? `<p class="cp-row cp-isbn"><strong>ISBN</strong> | ${esc(meta.isbn)}${meta.isbnAddon ? ' ' + esc(meta.isbnAddon) : ''}</p>` : '',
+    meta.isbn ? `<p class="cp-row cp-isbn"><strong>${esc(L('ISBN'))}</strong> | ${esc(meta.isbn)}${meta.isbnAddon ? ' ' + esc(meta.isbnAddon) : ''}</p>` : '',
     row('전자책', meta.ebookPrice),
   );
   // [판권] 노트 — 표·제목·ⓒ 를 되풀이한 줄은 빼고(filterColophonSection) 고지문만. 별표 줄은 글머리표(목록) 아닌 문단.
@@ -211,8 +213,8 @@ function colophonXhtml(meta0, col, book, ctx) {
   }
   const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
   const cpName = meta.translator || meta.author;
-  const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
-  if (owner) out.push(`<p class="cp-legal">${esc(owner)}</p>`, `<p class="cp-legal">${esc(meta.legalText || require('./html-builder').DEFAULT_LEGAL)}</p>`);
+  const owner = meta.copyright || (cpName ? (lang === 'en' ? `© ${year} ${cpName}. All rights reserved.` : `ⓒ ${cpName} ${year}. All rights reserved.`) : '');
+  if (owner) out.push(`<p class="cp-legal">${esc(owner)}</p>`, `<p class="cp-legal">${esc(meta.legalText || (lang === 'en' ? BL.str('en', 'legal') : require('./html-builder').DEFAULT_LEGAL))}</p>`);
   return out.filter(Boolean).join('\n');
 }
 function blocksXhtml(blocks0, book, ctx, specials) {
@@ -252,7 +254,7 @@ function blocksXhtml(blocks0, book, ctx, specials) {
 }
 function flushNotes(ctx) {
   if (!ctx.notes.length) return '';
-  const h = ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)} <a class="fnback" href="#fnref-${n.num}">↩ 본문</a></p></aside>`).join('\n');
+  const h = ctx.notes.map((n) => `<aside epub:type="footnote" class="fn" id="${n.id}"><p>${n.num}) ${inlineMd(n.text)} <a class="fnback" href="#fnref-${n.num}">${BL.str(ctx.lang, 'backToText')}</a></p></aside>`).join('\n');
   ctx.notes.length = 0;
   return h;
 }
@@ -318,7 +320,9 @@ async function buildEpub(book, a) {
 
   const excluded = Array.isArray(a.excluded) ? a.excluded : [];
   const specials = specialKeywordsOf(meta, { specialKeyword: a.specialKeyword });   // 설정 + 원고 메타 `> 특별섹션:`
+  const lang = BL.langOf(meta);   // 책 언어 — 영어 원고는 영어 문구·`dc:language=en`
   const ctx = {
+    lang,
     fn: { seq: 0 }, notes: [],
     hidePaths: !!a.hidePaths,
     scriptMode: !!a.scriptMode, scriptHideShots: !!a.scriptHideShots,
@@ -365,7 +369,7 @@ async function buildEpub(book, a) {
   manifest.push('<item id="css" href="style.css" media-type="text/css"/>');
 
   const addDoc = (id, name, title, bodyHtml, opts = {}) => {
-    zip.addFile(`OEBPS/${name}`, Buffer.from(wrapXhtml(title, bodyHtml, 'style.css', V2)));
+    zip.addFile(`OEBPS/${name}`, Buffer.from(wrapXhtml(title, bodyHtml, 'style.css', V2, lang)));
     manifest.push(`<item id="${id}" href="${name}" media-type="application/xhtml+xml"${opts.nav ? ' properties="nav"' : ''}/>`);
     if (!opts.skipSpine) spine.push(`<itemref idref="${id}"${opts.linear === false ? ' linear="no"' : ''}/>`);
     if (opts.toc) navItems.push({ href: name, title: opts.toc });
@@ -390,17 +394,17 @@ async function buildEpub(book, a) {
     const ext = path.extname(coverSrc).toLowerCase().replace('.', '') || 'jpg';
     zip.addFile(`OEBPS/cover.${ext}`, fs.readFileSync(coverSrc));
     manifest.push(`<item id="cover-img" href="cover.${ext}" media-type="image/${ext === 'jpg' ? 'jpeg' : ext}"${V2 ? '' : ' properties="cover-image"'}/>`);
-    addDoc('cover', 'cover.xhtml', '표지', `<div style="text-align:center"><img src="cover.${ext}" alt="표지" style="max-width:100%"/></div>`);
+    addDoc('cover', 'cover.xhtml', BL.str(lang, 'cover'), `<div style="text-align:center"><img src="cover.${ext}" alt="${esc(BL.str(lang, 'coverAlt'))}" style="max-width:100%"/></div>`);
     coverAdded = true;
   }
   if (/앞/.test(String(meta.colophonPos || ''))) addColophon();   // 판권위치: 앞 — 표지(1쪽) 바로 다음(2쪽)
 
   // 4) 표제지
-  addDoc('titlepage', 'titlepage.xhtml', '표제지', `<div class="titlepage">
+  addDoc('titlepage', 'titlepage.xhtml', BL.str(lang, 'titlePage'), `<div class="titlepage">
 ${(() => { const ls = require('./title-lines').titleLines(meta, book.fileTitle); return ls.map((l, i) => (i === 0 ? `<p class="t">${esc(l)}</p>` : `<p class="t2">${esc(l)}</p>`)).join('\n'); })()}
 ${meta.subtitle ? `<p class="s">${esc(meta.subtitle)}</p>` : ''}
-<p class="a">${esc(meta.author || '')}</p>
-${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
+<p class="a">${esc(lang === 'en' ? BL.byLine(lang, meta.author) : (meta.author || ''))}</p>
+${meta.translator ? `<p class="s">${esc(lang === 'en' ? BL.translatorLine(lang, meta.translator, meta.translatorLabel) : meta.translator)}</p>` : ''}
 <p class="pub">${esc(meta.publisher || '')}</p>
 </div>`);
 
@@ -419,8 +423,8 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
     const shownChapters = (p.chapters || []).filter((c) => !chapterExcluded(c.title, excluded));
     if (p.title && shownChapters.length) {
       addDoc(`part-${p.num || 'x'}`, `part-${p.num || 'x'}.xhtml`, p.title,
-        `<section epub:type="part" style="text-align:center"><h1 style="margin-top:35%">${p.num ? `제${p.num}부 ` : ''}${esc(p.title)}</h1></section>`,
-        { toc: `${p.num ? `제${p.num}부 ` : ''}${p.title}` });
+        `<section epub:type="part" style="text-align:center"><h1 style="margin-top:35%">${p.num ? BL.str(lang, 'part')(p.num) : ''}${esc(p.title)}</h1></section>`,
+        { toc: `${p.num ? BL.str(lang, 'part')(p.num) : ''}${p.title}` });
     }
     for (const c of shownChapters) {
       ctx.fn.seq = 0;   // 각주 번호는 장마다 1번부터
@@ -454,7 +458,7 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
         + (kept ? `\n${kept}` : '') + (owner ? `\n<p>${esc(owner)}</p>` : '') + `\n<p>${esc(jb.legal)}</p>`;
     }
     const colBody = jwBody ? jwBody : colophonXhtml(meta, col, book, ctx);   // 📱 PDF 전자책판과 같은 내용(R20)
-    addDoc('colophon', 'colophon.xhtml', '판권', `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">판권</h1>\n${colBody}</section>`, { toc: '판권' });
+    addDoc('colophon', 'colophon.xhtml', BL.str(lang, 'colophon'), `<section class="colophon" epub:type="colophon"><h1 style="font-size:1.1em">${esc(BL.str(lang, 'colophon'))}</h1>\n${colBody}</section>`, { toc: BL.str(lang, 'colophon') });
   }
   const colFront = /앞/.test(String(meta.colophonPos || ''));
   if (!colFront) addColophon();
@@ -465,14 +469,14 @@ ${meta.translator ? `<p class="s">${esc(meta.translator)}</p>` : ''}
     // 📘 EPUB 2.0 — 목차는 toc.ncx (nav.xhtml 없음). 모든 navPoint 는 spine 문서를 가리킨다.
     const pts = navItems.map((n, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}"><navLabel><text>${esc(n.title)}</text></navLabel><content src="${n.href}"/></navPoint>`).join('\n');
     zip.addFile('OEBPS/toc.ncx', Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
-<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="ko">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="${lang}">
   <head>
     <meta name="dtb:uid" content="${esc(uid)}"/>
     <meta name="dtb:depth" content="1"/>
     <meta name="dtb:totalPageCount" content="0"/>
     <meta name="dtb:maxPageNumber" content="0"/>
   </head>
-  <docTitle><text>${esc(meta.title || book.fileTitle || '책')}</text></docTitle>
+  <docTitle><text>${esc(meta.title || book.fileTitle || (lang === 'en' ? 'Untitled' : '책'))}</text></docTitle>
   <navMap>
 ${pts}
   </navMap>
@@ -480,7 +484,7 @@ ${pts}
     manifest.push('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>');
   } else {
     const navLis = navItems.map((n) => `<li><a href="${n.href}">${esc(n.title)}</a></li>`).join('\n');
-    addDoc('nav', 'nav.xhtml', '목차', `<nav epub:type="toc" id="toc"><h1>목차</h1><ol>
+    addDoc('nav', 'nav.xhtml', BL.str(lang, 'contents'), `<nav epub:type="toc" id="toc"><h1>${esc(BL.str(lang, 'contents'))}</h1><ol>
 ${navLis}
 </ol></nav>`, { nav: true, skipSpine: true });
   }
@@ -488,15 +492,15 @@ ${navLis}
   // 9) opf
   const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   zip.addFile('OEBPS/content.opf', Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="${V2 ? '2.0' : '3.0'}" unique-identifier="uid"${V2 ? '' : ' xml:lang="ko"'}>
+<package xmlns="http://www.idpf.org/2007/opf" version="${V2 ? '2.0' : '3.0'}" unique-identifier="uid"${V2 ? '' : ` xml:lang="${lang}"`}>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"${V2 ? ' xmlns:opf="http://www.idpf.org/2007/opf"' : ''}>
     <dc:identifier id="uid">${esc(uid)}</dc:identifier>
-    <dc:title>${esc(meta.title || book.fileTitle || '책')}</dc:title>
+    <dc:title>${esc(meta.title || book.fileTitle || (lang === 'en' ? 'Untitled' : '책'))}</dc:title>
     ${meta.subtitle ? `<dc:description>${esc(meta.subtitle)}</dc:description>` : ''}
     <dc:creator>${esc(meta.author || '')}</dc:creator>
     ${meta.translator ? `<dc:contributor>${esc(meta.translator)}</dc:contributor>` : ''}
     ${meta.publisher ? `<dc:publisher>${esc(meta.publisher)}</dc:publisher>` : ''}
-    <dc:language>ko</dc:language>
+    <dc:language>${lang}</dc:language>
     ${V2 ? '' : `<meta property="dcterms:modified">${modified}</meta>`}
     ${coverAdded ? '<meta name="cover" content="cover-img"/>' : ''}
   </metadata>
@@ -505,7 +509,7 @@ ${manifest.join('\n')}
   </manifest>
   <spine${V2 ? ' toc="ncx"' : ''}>
 ${spine.join('\n')}
-  </spine>${V2 && coverAdded ? '\n  <guide><reference type="cover" title="표지" href="cover.xhtml"/></guide>' : ''}
+  </spine>${V2 && coverAdded ? `\n  <guide><reference type="cover" title="${esc(BL.str(lang, 'cover'))}" href="cover.xhtml"/></guide>` : ''}
 </package>`));
 
   fs.mkdirSync(path.dirname(a.outPath), { recursive: true });

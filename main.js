@@ -11502,7 +11502,9 @@ ipcMain.handle('book-preflight', (_e, args = {}) => {
     let titleFit = null; try { titleFit = bookTitleFit(bookLayoutOpts(args)); } catch (_) {}
     let missingFonts = []; try { missingFonts = require('./core/book/pdf-builder').missingBundledFonts(); } catch (_) {}
     let sourceMtime = 0; for (const p of bookFilePaths()) { try { sourceMtime = Math.max(sourceMtime, fs.statSync(p).mtimeMs); } catch (_) {} }
+    const pfId = require('./core/book/html-builder').metaPlatformId(S.parsed.meta || {}), pfDef = require('./core/book/platform-presets').getPlatform(pfId);
     return PF.preflight({
+      platformId: pfId, platformLabel: pfDef.label, minPages: pfDef.minPages,
       meta: S.parsed.meta || {}, pages: dto.lastPages, spineMm: dto.spread && dto.spread.spineMm, coverImagePath: dto.coverImagePath, coverCheck: dto.coverCheck,
       titleFit, footnotes: F.footnoteIssues(S.parsed), glyph: _lastGlyph, missingFonts, sourceMtime, outputs: listBookOutputs(),
     });

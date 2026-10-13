@@ -4,6 +4,7 @@
  * 한 곳에 모은다. 상태: ok · warn(올려도 되지만 확인) · error(올리면 반려/깨질 가능성) · info.
  * 입력은 main 이 모은 사실만 — 파일·네트워크 없음(test/book-preflight.test.js).
  */
+const BL = require('./book-lang');
 const has = (v) => v != null && String(v).trim() !== '';
 const it = (id, label, state, detail, tab) => ({ id, label, state, detail: detail || '', ...(tab ? { tab } : {}) });
 
@@ -14,9 +15,15 @@ const it = (id, label, state, detail, tab) => ({ id, label, state, detail: detai
 function preflight(x) {
   const m = x.meta || {};
   const out = [];
+  // 0) 책 언어 × 플랫폼 — KDP 는 한국어 불가(영어책으로) · D2D 는 한국어 허용 미확인(해외 플랫폼 R23-0)
+  {
+    const lang = BL.langOf(m);
+    for (const iss of BL.platformLangIssues(x.platformId, lang)) out.push(it('lang', '책 언어 × 플랫폼', iss.state, iss.text));
+    if (x.platformId === 'kdp' || x.platformId === 'd2d') { if (!BL.platformLangIssues(x.platformId, lang).length) out.push(it('lang', '책 언어', 'ok', lang === 'en' ? 'English — 영어 조판(lang=en · 하이픈 · 영어 판권)' : lang)); }
+  }
   // 1) 쪽수·책등
   if (!(x.pages > 0)) out.push(it('pages', '쪽수 확정', 'warn', '미리보기 조판이 끝나면 쪽수가 정해지고, 쪽수로 책등 두께가 정해집니다 — 표지는 쪽수가 확정된 뒤에 만드세요', 'layout'));
-  else if (x.pages < 50) out.push(it('pages', '쪽수', 'error', `${x.pages}쪽 — 부크크 종이책은 최소 50쪽입니다`, 'layout'));
+  else if (x.pages < (x.minPages || 50)) out.push(it('pages', '쪽수', 'error', `${x.pages}쪽 — ${x.platformLabel || '부크크'} 종이책은 최소 ${x.minPages || 50}쪽입니다`, 'layout'));
   else out.push(it('pages', '쪽수', 'ok', `${x.pages}쪽 → 책등 ${x.spineMm}mm`));
   // 2) 표지
   const cc = x.coverCheck;
