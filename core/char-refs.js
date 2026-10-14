@@ -14,9 +14,11 @@ const path = require('path');
 
 const MAX_REFS = 3;
 // 그림 프롬프트에서 「그 성별의 사람이 있나·몇 명인가」를 보는 낱말
-const FEMALE = /\b(woman|women|girl|lady|wife|mother|queen|princess|empress|nun|widow|daughter|sister|maid|bride|grandmother|laundress)\b/i;
-const MALE = /\b(man|men|boy|king|husband|father|nobleman|prince|emperor|monk|priest|pastor|son|brother|gentleman|lord|grandfather|soldier|writer|officer|official|merchant|farmer|peasant|scholar|poet|painter|doctor|judge|general|duke|count|baron|clerk|knight|sailor|fisherman|assassin)\b/i;
-const PERSON = new RegExp(FEMALE.source + '|' + MALE.source + '|\\b(person|people|figure|child|children)\\b', 'i');
+//   🔴 v0.9.19 — 성경 대본 낱말(prophet·patriarch·shepherd·apostle·disciple · prophetess·maiden·handmaid)을 더했다.
+//   성경 21편이 「an elderly Hebrew patriarch」처럼 man 없이 써서 카드가 한 장도 안 붙었다(채널사업부 실측 2026-10-14).
+const FEMALE = /\b(woman|women|girl|lady|wife|mother|queen|princess|empress|nun|widow|daughter|sister|maid|bride|grandmother|laundress|prophetess|matriarch|maiden|handmaid|handmaiden|maidservant)\b/i;
+const MALE = /\b(man|men|boy|king|husband|father|nobleman|prince|emperor|monk|priest|pastor|son|brother|gentleman|lord|grandfather|soldier|writer|officer|official|merchant|farmer|peasant|scholar|poet|painter|doctor|judge|general|duke|count|baron|clerk|knight|sailor|fisherman|assassin|prophet|patriarch|shepherd|herdsman|apostle|disciple|levite|pharaoh|pharisee|scribe|centurion|warrior|chieftain|hermit)\b/i;
+const PERSON = new RegExp(FEMALE.source + '|' + MALE.source + '|\\b(person|people|figure|child|children|servant|pilgrim)\\b', 'i');
 // 카드 묘사의 성별 단서(옷·수염 · 한국어 묘사 카드도 있다)
 const F_CUE = /\b(dress|gown|skirt|bonnet)\b|여자|여인|여성|소녀|아내|어머니|부인|왕비|공주|딸|누이|할머니/i;
 const M_CUE = /\b(beard|bearded|moustache|mustache|whiskers)\b|남자|사내|남성|소년|아버지|아들|국왕|임금|선비|할아버지/i;

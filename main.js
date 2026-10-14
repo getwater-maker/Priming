@@ -3987,6 +3987,55 @@ async function _qwenRefsFor(imagesDir, eng, cfg, logger) {
   };
 }
 
+// 🎬 R2V 가 부를 인물 시트가 없으면 **영상 단계에서** 만든다(v0.9.19 · 로이 2026-10-14).
+//   예전엔 그림 단계(나노바나나·Qwen 인물 참조)만 시트를 만들어서, 그림을 캐시에서 다시 쓰거나 Krea2·Flow 로 그린 편은
+//   R2V 가 늘 「시트 0장」이었다(10-12 시험 로그 · 조조·동탁). 🎬 의 `<Subject N> [이름]` 가운데 카드가 있고 시트가 없는 인물만.
+//   만드는 곳: 나노바나나(키 있고 charRefs 켜짐) → 없으면 ComfyUI 이미지 **클라우드**. ⛔ 로컬 GPU 는 쓰지 않는다(클라우드 영상은
+//   localGpu 레인을 잡지 않아 TTS 와 겹칠 수 있다). 실패하면 그 인물은 시트 없이 간다(fail-open · 예전과 같다).
+async function _ensureR2vSheets(targets, cards, outRoot, pr) {
+  const R2V = require('./core/mm-r2v'), CR = require('./core/char-refs');
+  if (!cards || !cards.length) return;
+  const byName = new Map(cards.map((c) => [String(c.name).trim(), c]));
+  const need = [];
+  for (const g of targets) {
+    for (const n of R2V.subjectNames(g.videoPrompt)) {
+      const c = byName.get(n);
+      if (c && !need.includes(c) && !CR.findSheet(outRoot, c) && !CR.findFaceSheet(outRoot, c)) need.push(c);
+    }
+  }
+  if (!need.length) return;
+  const styleId = effStyleId((S.preset && (S.preset.styleLong || S.preset.styleId)) || null, log, pr);
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const GI = require('./core/gemini-image');
+  const useGemini = GI.hasKey() && GI.loadConfig().charRefs !== false;
+  let ci = null;
+  if (!useGemini) {
+    const CI = require('./core/comfy-image'); const icfg = CI.loadConfig();
+    if (icfg.cloud && icfg.workflowPath && icfg.charRefs !== false) ci = new CI.ComfyImage(icfg, log);
+  }
+  if (!useGemini && !ci) {
+    log(`  ⚠ 🎬 R2V 인물 시트 없음: ${need.map((c) => c.name).join(', ')} — 만들 곳이 없습니다(나노바나나 Gemini 키 또는 ComfyUI 이미지 클라우드 필요) · 장면 그림만으로 갑니다`);
+    return;
+  }
+  try { await fs.promises.mkdir(CR.sheetDir(outRoot), { recursive: true }); } catch {}
+  for (const c of need) {
+    if (S.abort) return;
+    log(`  👤 🎬 R2V 인물 시트 만드는 중: ${c.name} (${useGemini ? '나노바나나' : 'ComfyUI 클라우드'})`);
+    let file = null, err = '';
+    if (useGemini) {
+      const r = await GI.generateImageToFile({ prompt: CR.sheetPrompt(stylePrompt, c), aspect: '1:1', outPathNoExt: CR.sheetBase(outRoot, c) });
+      if (r.ok) file = r.path; else err = r.error || '';
+    } else {
+      const r = await ci.textToImage({ prompt: CR.sheetPrompt(stylePrompt, c), aspect: '1:1', dims: { w: 1024, h: 1024 },
+        outputPath: CR.sheetBase(outRoot, c) + '.png', abortSignal: () => S.abort });
+      if (r.success) file = r.imagePath; else err = r.error || '';
+    }
+    if (file && (await looksBadImage(file))) { try { fs.rmSync(file, { force: true }); } catch {} file = null; err = '이상 이미지(검정·노이즈)'; }
+    if (file) log(`  ✓ ${c.name} 인물 시트 → ${path.basename(file)}`);
+    else log(`  ⚠ ${c.name} 인물 시트 실패 — 이 인물은 시트 없이 갑니다${err ? ': ' + String(err).slice(0, 120) : ''}`);
+  }
+}
+
 // ── 생성된 시각물이 '내용 없음'인지 판정 ──────────────────────────────────────────────
 // 클라우드가 completed 로 보고하면서도 쓸 수 없는 결과를 내보내는 일이 있다(동시 생성 시 발생).
 // 실측된 모습이 **두 가지**다:
@@ -4369,6 +4418,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const mmRef = eng.isMiniMaxRef();
   const r2vRoot = path.dirname(mediaDir);
   const r2vCards = (mmRef && targets.some((g) => R2V.isR2V(g.videoPrompt))) ? ((await _loadCards()) || []) : [];
+  if (r2vCards.length) await _ensureR2vSheets(targets.filter((g) => R2V.isR2V(g.videoPrompt)), r2vCards, r2vRoot, pr);   // 👤 없는 시트를 먼저(v0.9.19)
   const genOne = async (g) => {
     const sents = pr.getSentencesOfGroup(g);
     const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);

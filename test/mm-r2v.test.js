@@ -84,5 +84,9 @@ ok(['subject_definitions: a', '  subject_definitions：b', 'slow push-in', 'x su
 const P = require('../core/pipeline');
 ok(!P.normalizePromptNegations(P_NEW).endsWith('non_diegetic_music: N/A'), '(판정력) 옛 정리를 새 꼴에 쓰면 절 구조가 깨진다');
 
+// subjectNames(v0.9.19) — 영상 단계 시트 미리 만들기의 입력
+ok(R.subjectNames('subject_definitions: <Subject 1> [아브라함] an old man. <Subject 2> [사라] a woman. summary: <Subject 1> [아브라함] walks').join('|') === '아브라함|사라', 'subjectNames = 처음 나온 순서 · 중복 없음');
+ok(R.subjectNames('slow push-in, <Subject 1> [아브라함]').length === 0, '(판정력) 옛 꼴 🎬 는 이름을 내지 않는다');
+
 console.log(`\n${bad ? '❌' : '✅'} mm-r2v ${n - bad}/${n}\n`);
 process.exit(bad ? 1 : 0);

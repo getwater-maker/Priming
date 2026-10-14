@@ -93,7 +93,15 @@ function appendToSubjectDef(s, n, sentence) {
   return s.slice(0, at) + ' ' + sentence + s.slice(at);
 }
 
+/** 🎬 가 부르는 인물 이름들(`<Subject N> [이름]` · 처음 나온 순서 · 중복 없음) — 영상 단계가 시트를 미리 만들 때 쓴다(v0.9.19) */
+function subjectNames(prompt) {
+  const out = [];
+  if (!isR2V(prompt)) return out;
+  for (const m of String(prompt).matchAll(/<Subject\s*(\d+)>\s*\[([^\]\n]{1,30})\]/g)) { const n = m[2].trim(); if (n && !out.includes(n)) out.push(n); }
+  return out;
+}
+
 /** 옛 엔진(LTX 등 비 MiniMax)에 새 꼴이 들어갈 때 — `[이름]` 토막만 지운다(라벨 뜻은 흐려지지만 돈다) */
 function stripNames(prompt) { return String(prompt || '').replace(/<Subject\s*(\d+)>\s*\[([^\]\n]{1,30})\]/g, (_, n) => `<Subject ${n}>`); }
 
-module.exports = { SECTIONS, MAX_IMAGES, isR2V, expandSections, buildR2V, appendToSubjectDef, stripNames };
+module.exports = { SECTIONS, MAX_IMAGES, isR2V, expandSections, buildR2V, appendToSubjectDef, stripNames, subjectNames };

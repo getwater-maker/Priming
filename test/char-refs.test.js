@@ -173,6 +173,25 @@ ok(/no text/.test(CR.sheetPrompt('Warm painterly,', ca[0])) && CR.sheetPrompt('W
     ok(CR.castFor('ジョバンニは勢よく立ちあがりました。', 'a Japanese boy stands up in a classroom', jc).map((c) => c.name).join() === 'ジョバンニ', '일본어 낭독에서 이름을 찾아 붙인다');
     ok(CR.castFor('博士が静かに言いました。', 'an old man with a grey beard', jc).map((c) => c.name).join() === 'ブルカニロ・博士', '・ 로 나뉜 이름의 한 토막(博士)으로도 찾는다');
   }
+  // 📖 성경 대본 낱말(v0.9.19 — 성경 21편이 man 없이 써서 카드 0장)
+  {
+    const bc = CR.parseCards('> 🎨 인물 · 아브라함 카드: an elderly Hebrew patriarch with a long white beard, weathered face, simple wool robe\n> 🎨 인물 · 사라 카드: an elderly Hebrew matriarch with grey hair under a linen head covering\n> 🎨 인물 · 아모스 카드: a lean Judean shepherd in his forties with a short dark beard\n');
+    ok(bc.map((c) => c.gender).join() === 'm,f,m', '성경 카드 성별 = patriarch m · matriarch f · shepherd m (' + bc.map((c) => c.gender).join() + ')');
+    ok(CR.castFor('아브라함이 장막 앞에 앉아 있었습니다.', 'medium shot, an elderly Hebrew patriarch with a long white beard sits at a tent entrance', bc).map((c) => c.name).join() === '아브라함', 'patriarch 만 있는 장면에 아브라함 카드가 붙는다');
+    ok(CR.castFor('아모스는 드고아의 목자였습니다.', 'a lean Judean shepherd leads sheep on a rocky hill', bc).map((c) => c.name).join() === '아모스', 'shepherd 장면에 아모스 카드');
+    ok(CR.castFor('사라가 웃었습니다.', 'close-up, an elderly Hebrew matriarch laughs behind a tent flap', bc).map((c) => c.name).join() === '사라', 'matriarch 장면에 사라 카드');
+    ok(CR.castFor('선지자 아모스가 성소에 섰습니다.', 'a stone sanctuary at dawn, empty courtyard, no figures', bc).length === 0, '(판정력) 사람 낱말이 없는 그림에는 이름이 낭독에 있어도 붙이지 않는다');
+    ok(CR.castFor('사라가 웃었습니다.', 'an elderly Hebrew patriarch sits alone', bc).length === 0, '(판정력) 여자 카드는 남자만 있는 그림에 붙지 않는다');
+    ok(!/\bprophet\b/i.test('a prophetess speaks') && CR.castFor('드보라가 말했습니다.', 'a prophetess speaks under a palm tree', CR.parseCards('> 🎨 인물 · 드보라 카드: a Hebrew prophetess in her fifties, dark braided hair\n')).length === 1, 'prophetess 는 여자로(남자 prophet 과 섞이지 않음)');
+  }
+  // 🎬 R2V 시트를 영상 단계에서 만든다(v0.9.19 · 소스 검사)
+  {
+    const s = main.slice(main.indexOf('async function _ensureR2vSheets'), main.indexOf('async function _ensureR2vSheets') + 3600);
+    ok(/R2V\.subjectNames\(g\.videoPrompt\)/.test(s) && /!CR\.findSheet\(outRoot, c\) && !CR\.findFaceSheet\(outRoot, c\)/.test(s), 'R2V 가 부르는 인물 중 시트 없는 인물만 만든다');
+    ok(/GI\.hasKey\(\) && GI\.loadConfig\(\)\.charRefs !== false/.test(s) && /icfg\.cloud && icfg\.workflowPath/.test(s), '나노바나나 → ComfyUI 클라우드 순 · ⛔ 로컬 GPU 안 씀');
+    ok(/looksBadImage\(file\)/.test(s) && /시트 없이 갑니다/.test(s), '이상 시트는 지우고 · 실패는 fail-open');
+    ok(/if \(r2vCards\.length\) await _ensureR2vSheets\(/.test(main) && main.indexOf('await _ensureR2vSheets(') < main.indexOf('const genOne = async (g) => {\n    const sents = pr.getSentencesOfGroup(g);'), 'runComfyVideos 가 영상 만들기 전에 부른다');
+  }
   console.log(`char-refs: ${pass} 통과 · ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();
