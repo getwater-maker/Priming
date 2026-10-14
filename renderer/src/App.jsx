@@ -5697,8 +5697,8 @@ export default function App() {
             <label className="chk" data-testid="open-after-make" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>
             {(outTarget === 'mp4' || outTarget === 'whiteboard') && (() => {
               const chp = (presets || []).find((q) => q.name === presetName) || null;
-              const eff = uploadAfter === 'on' || (uploadAfter === 'auto' && !!(chp && chp.ytAuto && chp.ytChannelId));
-              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 처음엔 채널 설정(⚙ 채널편집 → 폴더 → 자동 업로드)을 따르고, 한 번 고르면 이 PC 에서 그 선택이 이깁니다.' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              const eff = uploadAfter === 'on';   // 업로드 여부는 이 체크박스 하나만 정한다(채널 설정 무관)
+              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 업로드 여부는 이 체크박스 하나만 정합니다(이 PC 에 기억 · 채널 설정에는 올릴 채널만 고릅니다).' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={eff} onChange={(e) => { pickUploadAfter(e.target.checked); if (e.target.checked && chp && !chp.ytChannelId) setStatus('⚠ 이 채널은 업로드채널이 정해지지 않아 올리지 못합니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); }} />완성 후 업로드</label>;
             })()}
             {outTarget === 'whiteboard' && (<>
@@ -6536,8 +6536,7 @@ export default function App() {
                 {/* ⬆ 유튜브 자동 업로드 — MP4 를 구운 뒤 이 채널에 **비공개**로 올린다(제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" title="🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 비공개로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>업로드채널</label>
-                    <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" disabled={!ch.ytChannelId} checked={!!ch.ytAuto && !!ch.ytChannelId} onChange={(e) => setCh({ ...ch, ytAuto: e.target.checked })} />
-                    <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value, ytAuto: !!e.target.value && (ch.ytChannelId ? !!ch.ytAuto : true) })}>
+                    <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value })}>
                       <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 유튜브 채널 —' : '— 연결된 채널 없음 (⚙ 설정 → ▶ 유튜브) —'}</option>
                       {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken ? ' (⚠ 다시 연결 필요)' : ''}</option>)}
                       {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}

@@ -56,7 +56,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const logText = () => win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
     const gateHits = async () => ((await logText()).match(/✗ 유튜브 업로드 — 이 채널이 이 PC 에서 연결되지 않았습니다/g) || []).length;
     const make = (extra = {}) => win.evaluate(async ({ name, extra }) => {
-      try { await window.api.makeAll({ ...extra, presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outTarget: 'mp4', outMode: 'full', openVrew: false }); return 'ok'; }
+      try { await window.api.makeAll({ uploadAfter: 'on', ...extra,presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outTarget: 'mp4', outMode: 'full', openVrew: false }); return 'ok'; }
       catch (e) { return 'ERR: ' + e.message; }
     }, { name: CH, extra });
     const findMp4 = () => { const all = []; const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (/\.mp4$/i.test(f)) all.push(p); } }; walk(TMP); return all; };
@@ -91,6 +91,10 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(2500);
     const h4 = await gateHits();
     ok(r4 === 'ok' && h4 === h3 + 1, `체크하면(uploadAfter:on) 다시 업로드 관문으로 (관문 ${h3} → ${h4})`);
+    const r5 = await make({ uploadAfter: null });
+    await win.waitForTimeout(2500);
+    const h5 = await gateHits();
+    ok(r5 === 'ok' && h5 === h4, `🔑 헤더 값이 없으면(null) 채널에 자동 업로드가 켜져 있어도 올리지 않는다 — 업로드 여부는 헤더 체크박스뿐 (관문 ${h4} → ${h5})`);
     ok(errors.length === 0, `화면 오류 0건 (${errors.join(' | ')})`);
   } catch (e) { fail++; console.log('  ✗ 예외: ' + String((e && e.message) || e).split('\n')[0]); } finally {
     if (chMade) { try { await (await app.firstWindow()).evaluate(async (n) => { try { await window.api.removePreset({ name: n }); } catch (_) {} }, CH); } catch (_) {} }

@@ -3353,6 +3353,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
   preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
+  if (preset) preset = { ...preset, ytAuto: args.uploadAfter === 'on' };   // 업로드 여부는 헤더 체크박스만(채널 값 무시)
   preset = resolveBgm(preset, scriptPath, log);   // 🎵 채널 배경음악
   await capMarksEnsure(parsed);   // ✂🤖 자막 끊어 읽기(⚡ 만들기 4단계와 같게)
   const outs = [];
@@ -7412,7 +7413,8 @@ async function runMakeAllBody(opts = {}) {
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // ⬆ 헤더 「완성 후 업로드」(v0.8.7) — 'on'/'off' 면 채널의 자동 업로드 설정보다 이긴다(null = 채널 설정대로) · 업로드 대상 채널은 늘 채널의 업로드채널
-  if (preset && uploadAfter === 'on') preset = { ...preset, ytAuto: true }; else if (preset && uploadAfter === 'off') preset = { ...preset, ytAuto: false };
+  // 🔴 업로드 여부는 헤더 체크박스 하나만 정한다(2026-10-14 로이) — 채널의 ytAuto 는 읽지 않는다(체크 안 했거나 값이 없으면 올리지 않음)
+  if (preset) preset = { ...preset, ytAuto: uploadAfter === 'on' };
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
   S.preset = preset;
   let ttsMgr = null;
