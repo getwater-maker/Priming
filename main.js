@@ -10889,7 +10889,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
     const layoutOpts = bookLayoutOpts(args);
     const cvPlan = bookCoverPlan(layoutOpts, meta, log);   // 미리보기 첫 화면(표지 펼침면)과 같은 계획
     const coverHasImg = cvPlan.hasImg, coverSecsAll = cvPlan.covers, coverHasText = cvPlan.hasText;
-    let fullPdf = null;    // 📄 표지+내지 PDF(앞표지 1쪽 + 내지)
+    let fullPdf = null;    // 📄 완성본 PDF(표지 펼침면 전체 1쪽 + 내지)
     let coverFit = null;   // 표지 이미지 치수 판정(최종 쪽수 기준) — 큐 결과 요약이 「⚠ 치수」 로 보여 준다. 이미지가 없거나 못 재면 null
     if (cvPlan.has) {
       // 🔍 표지 이미지 재검증 — 첨부 시점이 아니라 "최종 쪽수로 계산된 스프레드" 기준으로 다시 확인.
