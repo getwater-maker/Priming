@@ -65,12 +65,13 @@ ok(/root\.querySelectorAll\('\[data-ne\]'\)\.length !== neCountRef\.current/.tes
 ok(/hunks\.slice\(\)\.reverse\(\)/.test(jsx), '뒤 hunk 부터 보낸다(앞 문장 번호가 안 흔들리게)');
 ok(/presetName: presetName \|\| null/.test(jsx), 'A4 PDF 에 채널 이름을 싣는다(저장 폴더)');
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-ok(/function readerPdfDir\(preset\)[\s\S]{0,200}outReader[\s\S]{0,80}defaultDownloadDir\(\)/.test(main), 'PDF 폴더 = 채널 outReader → 다운로드 폴더');
-ok(/readerPdfDir\(resolvePreset\(args\.presetName\)\)/.test(main), 'script-reader-pdf 가 그 폴더를 쓴다');
-ok(/outReader: p\.outReader \|\| defaultDownloadDir\(\)/.test(main), '채널편집에 기본값(다운로드)을 채워 보낸다');
+// 📁 대본 PDF 폴더 = 모든 채널 공통(⚙ 설정 → 📁 폴더 · 2026-10-14) — 채널 outReader 는 읽지 않는다
+ok(/function readerPdfDir\(\)[\s\S]{0,80}appFolder\('reader'\)/.test(main), 'PDF 폴더 = 공통 폴더(⚙ 설정 → 📁 폴더)');
+ok(/function appFolder\(kind\)[\s\S]{0,120}defaultDownloadDir\(\)/.test(main), '비우면 윈도우 다운로드 폴더');
+ok(/const dir = readerPdfDir\(\);/.test(main) && !/preset\.outReader/.test(main), 'script-reader-pdf 가 그 폴더를 쓴다(채널 outReader 안 읽음)');
 const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
-ok(/outReader: p\.outReader \|\| ''/.test(app) && /outReader: \(ch\.outReader \|\| ''\)\.trim\(\)/.test(app), '🔑 채널편집이 outReader 를 싣고 저장한다(안 실으면 덮인다)');
-ok(/<label>대본 PDF<\/label>/.test(app) && /pickOutReader/.test(app), '📁 폴더 탭에 「대본 PDF」 칸 + 찾기');
+ok(!/outReader/.test(app), '채널편집에 옛 「대본 PDF」 칸이 남아 있지 않다');
+ok(/\['reader', '대본 PDF'/.test(app) && /pickAppFolder\(k\)/.test(app), '⚙ 설정 → 📁 폴더에 「대본 PDF」 칸 + 찾기');
 
 console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제목 아래에만(v0.5.66)');
 {

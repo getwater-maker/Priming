@@ -1240,13 +1240,9 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const doStt = args.stt !== false;
   const channelMode = !!args.channel;
 
-  // 저장 폴더 — 채널의 「다운로드 폴더」가 정본, 없으면 **윈도우 「다운로드」 폴더**(2026-09-16),
-  //   그마저 못 찾을 때만 그 자리에서 고르게 한다.
-  let outDir = args.outDir || '';
-  if (!outDir) {
-    const pr = resolvePreset(args.presetName);
-    outDir = (pr && pr.downloadFolder) || defaultDownloadDir();
-  }
+  // 저장 폴더 — ⚙ 설정 → 📁 폴더 「URL 받기」(모든 채널 공통 · 2026-10-14), 없으면 **윈도우 「다운로드」 폴더**,
+  //   그마저 못 찾을 때만 그 자리에서 고르게 한다. (옛 채널별 downloadFolder 는 읽지 않는다)
+  let outDir = args.outDir || appFolder('download');
   if (!outDir) {
     const pick = await dialog.showOpenDialog(win, {
       title: '받은 파일을 저장할 폴더 선택 (채널편집 → 📁 폴더 에 지정해 두면 다음부터 안 묻습니다)',
@@ -2987,9 +2983,10 @@ async function nUpPdf(buf, per) {
   });
   return { buf: Buffer.from(await doc.save()), pages: pages.length, sheets: doc.getPageCount() };
 }
-// 저장 폴더 = 채널편집 📁 폴더 → 「대본 PDF」(비우면 윈도우 다운로드 폴더 · 그것도 없으면 출력 폴더) — 로이 2026-09-24
-function readerPdfDir(preset) {
-  return String((preset && preset.outReader) || '').trim() || defaultDownloadDir() || S.outRoot;
+// 저장 폴더 = ⚙ 설정 → 📁 폴더 「대본 PDF」(모든 채널 공통 · 2026-10-14 — 옛 채널별 outReader 는 읽지 않는다)
+//   비우면 윈도우 다운로드 폴더 · 그것도 없으면 출력 폴더.
+function readerPdfDir() {
+  return appFolder('reader') || S.outRoot;
 }
 // 화면과 같은 블록 → A4 HTML (PDF·바로 인쇄 공용 · 🎬 도입부만 = introOnly)
 function readerPrintHtml(args = {}) {
@@ -3055,7 +3052,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
   if (per > 1) out = await nUpPdf(pdf, per);
   else { try { const { PDFDocument } = require('pdf-lib'); const n = (await PDFDocument.load(pdf)).getPageCount(); out.pages = out.sheets = n; } catch (_) {} }
   const base = vrewBaseName(S.parsed.projects[0]);
-  const dir = readerPdfDir(resolvePreset(args.presetName));
+  const dir = readerPdfDir();
   const dest = path.join(dir, `${base}_대본${args.introOnly ? '_도입부' : ''}${per > 1 ? `_한장에${per}쪽` : ''}.pdf`);
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   try { fs.writeFileSync(dest, out.buf); }
@@ -5811,13 +5808,30 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
 function defaultDownloadDir() {
   try { const d = app.getPath('downloads'); return d && fs.existsSync(d) ? d : ''; } catch (_) { return ''; }
 }
+// 📁 모든 채널 공통 폴더(로이 2026-10-14 — 채널편집 「대본 PDF」·「URL 받기」를 ⚙ 설정 → 📁 폴더로 옮김).
+//   채널 값(outReader·downloadFolder)은 더 이상 읽지 않는다(파일에는 남아 있다). 비우면 윈도우 「다운로드」 폴더.
+const APP_FOLDERS_FILE = () => path.join(os.homedir(), '.priming-maker', 'app-folders.json');
+function loadAppFolders() {
+  try { const j = JSON.parse(fs.readFileSync(APP_FOLDERS_FILE(), 'utf8')); return { reader: String(j.reader || ''), download: String(j.download || '') }; }
+  catch (_) { return { reader: '', download: '' }; }
+}
+function appFolder(kind) { return String(loadAppFolders()[kind] || '').trim() || defaultDownloadDir(); }
+ipcMain.handle('get-app-folders', () => ({ ...loadAppFolders(), def: defaultDownloadDir() }));
+ipcMain.handle('save-app-folders', (_e, patch = {}) => {
+  const cur = loadAppFolders();
+  for (const k of ['reader', 'download']) if (typeof patch[k] === 'string') cur[k] = patch[k].trim();
+  fs.mkdirSync(path.dirname(APP_FOLDERS_FILE()), { recursive: true });
+  fs.writeFileSync(APP_FOLDERS_FILE(), JSON.stringify(cur, null, 2), 'utf8');
+  log(`📁 공통 폴더 저장 — 대본 PDF: ${cur.reader || '(다운로드)'} · URL 받기: ${cur.download || '(다운로드)'}`);
+  return { ...cur, def: defaultDownloadDir() };
+});
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
   const p = all.find((x) => x.name === name) || null;
   // 다운로드 폴더를 한 번도 안 정한 채널이면 **윈도우 다운로드 폴더를 기본값으로 보여준다**
   // (채널편집에서 그대로 저장되거나, 사용자가 다른 폴더로 바꾸면 그 값이 저장된다).
   // ✏ 화이트보드 출력도 같은 규칙 — 비어 있으면 다운로드 폴더가 기본값이다(로이 2026-09-16).
-  return p ? { ...p, downloadFolder: p.downloadFolder || defaultDownloadDir(), outWhiteboard: p.outWhiteboard || defaultDownloadDir(), outUpload: p.outUpload || defaultDownloadDir(), outReader: p.outReader || defaultDownloadDir() } : null;
+  return p ? { ...p, outWhiteboard: p.outWhiteboard || defaultDownloadDir(), outUpload: p.outUpload || defaultDownloadDir() } : null;
 });
 ipcMain.handle('save-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');

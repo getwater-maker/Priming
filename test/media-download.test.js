@@ -277,8 +277,12 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/유튜브 채널의 일반 영상 전체/.test(app), '채널 전체 옵션을 화면에 분명히 표시한다');
   ok(/if \(urlOpen\) \{ setUrlOpen\(false\); return; \}/.test(app), 'ESC 로 닫힌다');
   ok(/urlOpen, tsOpen/.test(app), 'ESC deps 배열에 들어 있다');
-  ok(/downloadFolder: p\.downloadFolder/.test(app), '🔴 채널 편집이 다운로드 폴더를 싣는다(안 실으면 저장 시 빈 값으로 덮인다)');
-  ok(/downloadFolder: \(ch\.downloadFolder/.test(app), '저장 patch 에도 들어 있다');
+  // 📁 받기 폴더 = 모든 채널 공통(⚙ 설정 → 📁 폴더 · 2026-10-14) — 채널편집에서는 뺐다
+  ok(!/downloadFolder/.test(app), '채널편집에 옛 받기 폴더 칸이 남아 있지 않다');
+  ok(/\['download', 'URL 받기'/.test(app), '⚙ 설정 → 📁 폴더에 「URL 받기」 칸');
+  { const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/let outDir = args\.outDir \|\| appFolder\('download'\)/.test(mainSrc), 'stt-from-url 은 공통 받기 폴더를 쓴다');
+    ok(!/pr && pr\.downloadFolder/.test(mainSrc), '채널 downloadFolder 를 더 이상 읽지 않는다'); }
 
   const bundle = (() => {
     try {

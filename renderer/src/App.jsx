@@ -544,7 +544,8 @@ export default function App() {
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v LTX) 설정
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
-  const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt'  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
+  const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
+  const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt' | 'folders'(📁 공통 폴더 · v0.9.16)  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
   const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
   // 👤 계정 탭 — {genspark|flow|grok: {dailyCap, accounts:[{id,label,used,creds,login}]}}
   const [acct, setAcct] = useState(null);
@@ -3207,7 +3208,6 @@ export default function App() {
       dictPath: p.dictPath || '',   // 🎬 리모션 발음사전 — 안 실으면 저장할 때 빈 값으로 덮인다
       outImages: p.outImages || '', // 🖼 리모션 그림 출력 뿌리 — 위와 같은 이유로 반드시 싣는다
       imgTsvFolder: p.imgTsvFolder || '', // 🖼 그림목록(TSV) 폴더 — 음성 TSV 의 짝을 여기서 찾는다
-      downloadFolder: p.downloadFolder || '', // 🔗 URL 로 받은 영상·음성·전사본을 떨어뜨릴 폴더
 
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       // 🏷 AI 고지 문구·시간(v0.5.87) — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
@@ -3239,7 +3239,6 @@ export default function App() {
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
       outUpload: p.outUpload || '',
-      outReader: p.outReader || '',   // 📄 대본 보기 → 🖨 A4 PDF 가 떨어질 폴더(비어 있으면 main 이 다운로드 폴더를 채워 보낸다)
       // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
@@ -3714,7 +3713,6 @@ export default function App() {
       dictPath: (ch.dictPath || '').trim(),               // 🎬 리모션 발음사전(.md) — 비우면 사전 없이 합성
       outImages: (ch.outImages || '').trim(),             // 🖼 리모션 그림 출력 뿌리(TSV 1번 칸이 그 아래 경로)
       imgTsvFolder: (ch.imgTsvFolder || '').trim(),       // 🖼 그림목록 TSV 폴더(같은 번호끼리 자동 연결)
-      downloadFolder: (ch.downloadFolder || '').trim(),   // 🔗 URL 다운로드 폴더(비우면 받을 때 물어본다)
       voice: ch.voice || '',                              // 음성 식별자(레거시 값 보존 — 표시용)
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
@@ -3747,7 +3745,6 @@ export default function App() {
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
-      outReader: (ch.outReader || '').trim(),            // 📄 대본 A4 PDF 폴더 — ⚠ 마찬가지(안 실으면 덮인다)
       ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
@@ -3790,9 +3787,14 @@ export default function App() {
   // 🖼 그림 출력 뿌리 — 하위 폴더·파일명은 그림목록 TSV 의 1번 칸이 정한다.
   async function pickOutImages() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outImages: d })); }
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
-  async function pickDownloadFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, downloadFolder: d })); }
   async function pickOutUpload() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outUpload: d })); }
-  async function pickOutReader() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outReader: d })); }
+  // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더 · 2026-10-14 — 옛 채널편집 「대본 PDF」·「URL 받기」)
+  async function loadAppFolders() { try { setAppFolders(await api.getAppFolders()); } catch (_) {} }
+  async function saveAppFolders(patch) {
+    try { setAppFolders(await api.saveAppFolders(patch)); setSettingsMsg('✅ 폴더 저장됨 — 모든 채널에 적용됩니다'); }
+    catch (e) { setSettingsMsg('❌ 폴더 저장 실패 — ' + (e && e.message || e)); }
+  }
+  async function pickAppFolder(kind) { const d = await api.pickDir(); if (d) saveAppFolders({ [kind]: d }); }
   // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
   async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
   // ↕ 연결된 채널 순서 — 끌어서 놓으면 바로 저장(이 PC). 채널편집 「업로드채널」 목록도 이 순서를 따른다.
@@ -6527,13 +6529,7 @@ export default function App() {
                       onChange={(e) => setCh({ ...ch, outUpload: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
-                {/* 📄 대본 보기 → 🖨 A4 PDF 저장 폴더 — 비우면 윈도우 「다운로드」 폴더 */}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow"><label>대본 PDF</label>
-                    <input placeholder="📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.outReader || ''}
-                      onChange={(e) => setCh({ ...ch, outReader: e.target.value })} />
-                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutReader}>찾기</button></div>
-                )}
+                {/* 📄 대본 PDF·📥 URL 받기 폴더는 모든 채널 공통 → ⚙ 설정 → 📁 폴더(2026-10-14) */}
                 {/* ⬆ 유튜브 업로드 채널 — 올릴지 말지는 헤더 「완성 후 업로드」가 정하고, 여기선 올릴 채널만 고른다(비공개 · 제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
                 {ch.startMode !== 'remotion' && (<div className="fsec">⬆ 업로드</div>)}
                 {ch.startMode !== 'remotion' && (
@@ -6606,12 +6602,6 @@ export default function App() {
                   </div>
                 )}
                 {ch.startMode !== 'remotion' && (<div className="fnote">🎬 MP4 만 · 켠 종류를 정지 그림 위에 얹습니다.</div>)}
-                {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
-                <div className="fsec">📥 URL 받기</div>
-                <div className="frow"><label>받기 폴더</label>
-                  <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
-                    onChange={(e) => setCh({ ...ch, downloadFolder: e.target.value })} />
-                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDownloadFolder}>찾기</button></div>
                 {ch.startMode === 'remotion' && (<>
                   <div className="frow"><label>발음사전</label>
                     <input placeholder="발음사전(.md) — 비우면 사전 없이 합성합니다" value={ch.dictPath || ''}
@@ -6760,8 +6750,8 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브'], ['folders', '📁 폴더']].map(([id, lbl]) => (
+                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
             <div className="st-body">
@@ -7182,6 +7172,16 @@ export default function App() {
                 ))}
               </div>
             </div>)}
+            {settingsTab === 'folders' && (<div data-testid="app-folders">
+              <div className="meta" style={{ marginBottom: 8 }}>여기 폴더는 <b>모든 채널 공통</b>입니다(채널마다 다른 대본·Vrew·MP4 폴더는 ⚙ 채널편집 → 📁 폴더). 비워 두면 윈도우 「다운로드」 폴더{appFolders.def ? <> (<b>{appFolders.def}</b>)</> : null}에 저장합니다.</div>
+              {[['reader', '대본 PDF', '📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더'], ['download', 'URL 받기', '📥 대본다운으로 받은 mp3·영상·전사본(.txt)을 저장할 폴더']].map(([k, lbl, ph]) => (
+                <div className="frow" key={k}><label>{lbl}</label>
+                  <input style={{ flex: 1 }} data-testid={'app-folder-' + k} placeholder={ph + ' — 비우면 다운로드 폴더'} value={appFolders[k] || ''}
+                    onChange={(e) => setAppFolders((f) => ({ ...f, [k]: e.target.value }))} onBlur={(e) => saveAppFolders({ [k]: e.target.value })} />
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder(k)}>찾기</button></div>
+              ))}
+              <Hint>입력 후 칸 밖을 클릭하거나 「찾기」로 고르면 바로 저장됩니다.</Hint>
+            </div>)}
             {settingsTab === 'comfy' && (<div>
               <div className="subhead">🖧 TTS 서버</div>
               <Hint>
@@ -7271,7 +7271,7 @@ export default function App() {
             <h3>📥 대본다운</h3>
             <div className="meta" style={{ marginBottom: 8 }}>
               유튜브·비메오·틱톡·인스타 등의 <b>주소를 한 줄에 하나씩</b> 붙여넣으세요(여러 개 가능).
-              <br />저장 위치 = 채널의 <b>다운로드 폴더</b>(⚙ 채널편집 → 📁 폴더). 비어 있으면 받을 때 물어봅니다.
+              <br />저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).
             </div>
             <textarea ref={urlTextRef} rows={5} spellCheck={false} autoFocus
               placeholder={urlChannelAll ? 'https://www.youtube.com/@채널주소' : 'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}

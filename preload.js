@@ -168,6 +168,8 @@ contextBridge.exposeInMainWorld('api', {
   testTtsServer: (args) => ipcRenderer.invoke('test-tts-server', args),
   pickFile: (args) => ipcRenderer.invoke('pick-file', args),
   pickDir: () => ipcRenderer.invoke('pick-dir'),
+  getAppFolders: () => ipcRenderer.invoke('get-app-folders'),
+  saveAppFolders: (patch) => ipcRenderer.invoke('save-app-folders', patch),
   saveProject: () => ipcRenderer.invoke('save-project'),
   loadProject: () => ipcRenderer.invoke('load-project'),
   listQueue: () => ipcRenderer.invoke('list-queue'),
