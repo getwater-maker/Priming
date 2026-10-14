@@ -1315,3 +1315,13 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .dict-listhead{display:flex;align-items:center;gap:10px;padding:2px 2px 6px;border-top:1px solid var(--line);padding-top:10px}
 .dict-listhead .dict-sub{padding:0;flex:1 1 auto}
 .dict-listhead .dict-find{flex:0 1 300px;min-width:160px;margin-left:auto}
+
+/* 채널 편집 📁 폴더 탭 — 구역 제목 · 고정 라벨 폭(줄바꿈 없음) · 설명은 입력줄 아래 한 줄 */
+.foldertab .fsec{margin:18px 0 6px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;font-weight:700;color:var(--hook);letter-spacing:.02em}
+.foldertab .fsec:first-child{margin-top:0;padding-top:0;border-top:0}
+.foldertab .frow>label{width:118px;white-space:nowrap}
+.foldertab .frow>label.chk{display:flex;align-items:center;gap:6px}
+.foldertab .frow>label.chk input{flex:0 0 auto;width:auto;margin:0}
+.foldertab .frow{margin:6px 0}
+.foldertab .fnote{margin:-2px 0 6px 128px;font-size:12px;line-height:1.45;color:#8a7f72}
+.foldertab .frow .meta{white-space:nowrap}

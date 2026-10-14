@@ -6508,7 +6508,8 @@ export default function App() {
                 <div className="meta">글자는 <b>검정 + 흰 외곽선</b>입니다(화이트보드 종이색이 미색이라 흰 글자는 안 보입니다). 자막을 <b>구울지 말지</b>는 헤더 「④ 완성」의 <b>💬 자막</b> 체크박스가 정합니다 — 끄면 영상에 글자가 안 들어가고 <b>.srt 파일만</b> 옆에 남습니다.</div>
               </div>)}
 
-              {chTab === 'folder' && (<div>
+              {chTab === 'folder' && (<div className="foldertab">
+                <div className="fsec">📂 저장 폴더</div>
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'TSV 폴더' : '대본'}</label><input placeholder={ch.startMode === 'remotion' ? 'TSV(.tsv) 폴더' : '대본(.md) 폴더'} value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
                 {/* 🎬 리모션은 .vrew 를 만들지 않는다 — 나가는 것이 mp3 뿐이라 라벨을 바꿔 오해를 줄인다. */}
                 <div className="frow"><label>{ch.startMode === 'remotion' ? 'MP3 출력' : 'Vrew출력'}</label><input placeholder={ch.startMode === 'remotion' ? 'mp3 를 떨어뜨릴 폴더' : '롱폼 .vrew 출력 폴더'} value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
@@ -6533,7 +6534,8 @@ export default function App() {
                       onChange={(e) => setCh({ ...ch, outReader: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutReader}>찾기</button></div>
                 )}
-                {/* ⬆ 유튜브 자동 업로드 — MP4 를 구운 뒤 이 채널에 **비공개**로 올린다(제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
+                {/* ⬆ 유튜브 업로드 채널 — 올릴지 말지는 헤더 「완성 후 업로드」가 정하고, 여기선 올릴 채널만 고른다(비공개 · 제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
+                {ch.startMode !== 'remotion' && (<div className="fsec">⬆ 업로드</div>)}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" title="🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 비공개로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>업로드채널</label>
                     <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value })}>
@@ -6543,7 +6545,9 @@ export default function App() {
                     </select>
                     <span className="meta" style={{ flex: '0 0 auto' }}>비공개</span></div>
                 )}
+                {ch.startMode !== 'remotion' && (<div className="fnote">올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」 체크가 정합니다. 여기서는 올릴 채널만 고릅니다.</div>)}
                 {/* 🎵 배경음악은 ➕ 삽입 메뉴로 옮겼다(v0.5.55) — 값(bgmOn·bgmPath·bgmVolume)은 채널에 그대로 저장되고 이 창도 불러와 되돌려 쓴다 */}
+                {ch.startMode !== 'remotion' && (<div className="fsec">🏷 로고</div>)}
                 {/* 🏷 채널 로고 — 켠 채널만 · 영상 전체 · .vrew·유튜브 MP4 공통. 투명 PNG 권장. 자리(↗ 오른쪽 위 기본 / ↖ 왼쪽 위)는 대본마다 ➕ 삽입 메뉴에서. */}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="logo-row" title="이 채널의 모든 영상에 로고를 올립니다(맨 위층 · 기본 오른쪽 위 — 자리는 ➕ 삽입 메뉴에서 대본마다 바꿉니다). 배경이 투명한 PNG 가 좋습니다. 크기 = 화면 너비 대비 %."><label>🏷 채널 로고</label>
@@ -6555,36 +6559,40 @@ export default function App() {
                     <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 48, flex: '0 0 auto' }} title="크기 — 화면 너비 대비 % (기본 12)" disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span></div>
                 )}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="logo-pos-row" title="이 채널 로고의 기본 자리 — 로고 왼쪽 위 모서리가 화면 왼쪽에서 X%, 위에서 Y% 에 놓입니다. 비우면 기본(오른쪽 위). 대본에서 로고를 끌어 옮기거나 ↖ 를 고른 대본은 그 자리가 이깁니다."><label>📍 로고 자리</label>
+                  <div className="frow" data-testid="logo-pos-row" style={{ flexWrap: 'wrap' }} title="이 채널 로고의 기본 자리 — 로고 왼쪽 위 모서리가 화면 왼쪽에서 X%, 위에서 Y% 에 놓입니다. 비우면 기본(오른쪽 위). 대본에서 로고를 끌어 옮기거나 ↖ 를 고른 대본은 그 자리가 이깁니다."><label>📍 로고 자리</label>
                     <span className="meta">왼쪽에서</span>
                     <input className="nbox" data-testid="logo-x" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="X" disabled={!ch.logoOn} value={ch.logoX == null ? '' : ch.logoX} onChange={(e) => setCh({ ...ch, logoX: e.target.value })} /><span className="meta">%</span>
                     <span className="meta">위에서</span>
                     <input className="nbox" data-testid="logo-y" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="Y" disabled={!ch.logoOn} value={ch.logoY == null ? '' : ch.logoY} onChange={(e) => setCh({ ...ch, logoY: e.target.value })} /><span className="meta">%</span>
                     <button className="ghost" data-testid="logo-pos-grab" style={{ flex: '0 0 auto' }} disabled={!ch.logoOn}
                       title="지금 열려 있는 대본에서 ① 칸으로 끌어 옮긴 로고 자리를 가져옵니다(「저장」을 누르면 이 채널의 기본 자리가 됩니다)"
-                      onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥 현재 대본 자리 가져오기</button>
+                      onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥 현재 대본 자리</button>
                     {(ch.logoX !== '' && ch.logoX != null) || (ch.logoY !== '' && ch.logoY != null) ? <button className="ghost" data-testid="logo-pos-clear" style={{ flex: '0 0 auto' }} title="기본 자리로(오른쪽 위)" onClick={() => setCh((c) => ({ ...c, logoX: '', logoY: '' }))}>✕</button> : null}</div>
                 )}
                 {/* 🎞 화면 연출(v0.7.75~) — 켄번스 구간 · (디졸브 · 오버레이 모션은 뒤이어) */}
+                {ch.startMode !== 'remotion' && (<div className="fsec">🎞 화면 연출 <span className="meta">(🎬 MP4 기준)</span></div>)}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="kbseg-row" title="한 그림이 길게 보일 때(수 분) 문장 경계에서 구간을 나눠 구간마다 다른 방향으로 천천히 움직입니다 — 한 번의 팬으로 끝나지 않게. 대본 그룹의 ① 칸 그림 메뉴 ▸ 움직임에서 그룹마다 따로 정할 수도 있습니다(그쪽이 이깁니다). .vrew·MP4 공통."><label>🎞 켄번스 구간</label>
                     <select data-testid="ch-kbseg" style={{ flex: '0 0 auto' }} value={String(VLook.normKbSeg(ch.kbSeg))} onChange={(e) => setCh({ ...ch, kbSeg: VLook.normKbSeg(e.target.value) })}>
                       {VLook.KB_SEGS.map((x) => <option key={String(x.id)} value={String(x.id)}>{x.label}</option>)}
                     </select>
-                    <span className="meta">이 채널 그림의 기본 — 길게 보이는 그림만 나눕니다(구간당 8초 이상)</span></div>
+                  </div>
                 )}
+                {ch.startMode !== 'remotion' && (<div className="fnote">이 채널 그림의 기본 — 길게 보이는 그림만 나눕니다(구간당 8초 이상).</div>)}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="dissolve-row" title="그림이 바뀌는 자리를 몇 초에 걸쳐 서서히 섞습니다(디졸브) — 경계 앞뒤 절반씩 겹쳐 섞고 영상 길이·음성·자막은 그대로입니다. 🎬 유튜브 MP4 만(.vrew 에는 전환이 없습니다) · 영상(🎬)이 낀 자리나 겹친 그림 자리는 컷 그대로. 켄번스 구간 사이(같은 그림)는 섞지 않습니다."><label>🌫 디졸브</label>
                     <select data-testid="ch-dissolve" style={{ flex: '0 0 auto' }} value={String(VLook.normDissolve(ch.dissolveSec))} onChange={(e) => setCh({ ...ch, dissolveSec: VLook.normDissolve(e.target.value) })}>
                       {VLook.DISSOLVES.map((x) => <option key={x.id} value={String(x.id)}>{x.label}</option>)}
                     </select>
-                    <span className="meta">그림이 바뀔 때 서서히 섞는 시간 — 🎬 MP4 만 · 수면 영상은 3~6초 추천</span></div>
+                  </div>
                 )}
+                {ch.startMode !== 'remotion' && (<div className="fnote">그림이 바뀔 때 서서히 섞는 시간 — 🎬 MP4 만 · 수면 영상은 3~6초 추천.</div>)}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="infocards-row" title="대본의 🔤 카드 · 📊 표 · ✅ 확인 줄을 화면에 얹고, ## 구간마다 표지(N / M · 진행 막대)를 자동으로 넣습니다. 글자는 그림 위에 얹으며(그림 안에 넣지 않음) 🎬 유튜브 MP4 에만 나옵니다. 꺼 두면 표시 줄이 있어도 무시합니다.">
                     <label className="chk"><input type="checkbox" data-testid="ch-infocards" checked={!!ch.infoCards} onChange={(e) => setCh({ ...ch, infoCards: e.target.checked })} />📇 정보 카드</label>
-                    <span className="meta">🔤 낱말 · 📊 표 · ✅ 확인표 · 구간 표지 — 🎬 MP4 만(정보튜브용 · 꺼 두면 표시 줄을 무시)</span></div>
+                  </div>
                 )}
+                {ch.startMode !== 'remotion' && (<div className="fnote">🔤 낱말 · 📊 표 · ✅ 확인표 · 구간 표지 — 🎬 MP4 만(정보튜브용 · 꺼 두면 표시 줄을 무시).</div>)}
                 {ch.startMode !== 'remotion' && (
                   <div className="frow" data-testid="fx-row" style={{ flexWrap: 'wrap' }} title="정지 그림 위에 코드로 만든 효과를 아주 약하게 얹습니다(외부 영상 없음 · 느리고 약하게). 🎬 유튜브 MP4 만. 켠 종류만 · 1(약)~3(강). 대본 그룹의 ① 칸 그림 메뉴에서 그룹마다 끄거나 강도를 바꿀 수 있습니다. 영상(🎬) 그룹에는 얹지 않습니다. 3~4시간 영상에서 렌더 시간이 늘 수 있습니다(전부 켜면 프레임당 약 10ms)."><label>🌫 오버레이 모션</label>
                     {VLook.FX_KINDS.map((k) => (
@@ -6595,10 +6603,12 @@ export default function App() {
                         </select>
                       </span>
                     ))}
-                    <span className="meta">🎬 MP4 만 · 켠 종류를 정지 그림 위에 얹습니다</span></div>
+                  </div>
                 )}
+                {ch.startMode !== 'remotion' && (<div className="fnote">🎬 MP4 만 · 켠 종류를 정지 그림 위에 얹습니다.</div>)}
                 {/* 🔗 URL 다운로드 폴더 — 모드와 무관하다(롱폼에서도 참고 영상을 받아 전사한다). */}
-                <div className="frow"><label>다운로드</label>
+                <div className="fsec">📥 URL 받기</div>
+                <div className="frow"><label>받기 폴더</label>
                   <input placeholder="🔗 URL 로 받은 mp3·영상·전사본(.txt)을 떨어뜨릴 폴더 — 기본값은 윈도우 「다운로드」 폴더입니다" value={ch.downloadFolder || ''}
                     onChange={(e) => setCh({ ...ch, downloadFolder: e.target.value })} />
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickDownloadFolder}>찾기</button></div>
