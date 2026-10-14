@@ -496,7 +496,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     setBuilding(false); refreshOutputs();
   }
   // 📱 ePub 은 선택(로이 2026-10-12 — 기본은 PDF 셋 · 부크크에도 PDF 를 올린다). 켜 두면 전자책을 만들 때 ePub → 규격 검증까지 함께. 이 PC 의 화면 설정으로만 기억한다.
-  const [withEpub, setWithEpub] = useState(() => { try { return localStorage.getItem('bk-with-epub') === '1'; } catch (_) { return false; } });
+  const [withEpub, setWithEpub] = useState(() => { try { return localStorage.getItem('bk-with-epub') !== '0'; } catch (_) { return true; } });
   const toggleEpub = (on) => { setWithEpub(on); try { localStorage.setItem('bk-with-epub', on ? '1' : '0'); } catch (_) {} };
   async function buildEbook(quiet) {
     await buildPdf('ebook', quiet);
@@ -928,8 +928,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <button disabled={building || epubChkBusy} data-testid="bk-ebook" title="부크크 전자책용 — 표지.pdf(앞표지 한 쪽) + 본문.pdf + 표지+본문.pdf(부크크에 올리는 파일). 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·종이책 표지 앞면 순" onClick={() => buildEbook()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
         </div>
         <div className="bkactions bkbuild">
-          <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 부크크에는 PDF 를 올리므로 기본은 꺼짐"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
-          {withEpub && <button className="ghost" disabled={building || epubChkBusy} data-testid="bk-epubcheck" title="W3C EPUBCheck 로 EPUB 2.0.1 규격 오류를 찾습니다 — 도구가 있는 PC 에서만" onClick={runEpubCheckUi}>{epubChkBusy ? '⏳ 검증 중…' : '✔ ePub 검증'}</button>}
+          <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 기본 켜짐 — 아마존 KDP·D2D 등록용. 만든 직후 규격 검증(EPUBCheck)이 자동으로 이어집니다"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
         </div>
         {epubChk && epubChk.messages && epubChk.messages.length > 0 && (
           <div className="bkfit warn" data-testid="bk-epubcheck-msgs">

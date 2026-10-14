@@ -80,7 +80,8 @@ function isbnBarcodeSvg(isbn, addon, o = {}) {
   const addGap = d5 ? 10 : 0; // EAN-13 ↔ 부가기호 간격(모듈)
   const totalModules = quiet + main.length + addGap + add.length + quiet;
   const W = totalModules * scale;
-  const H = barH + guardExtra + fontH + Math.round(fontH * 0.6) + (d5 ? fontH : 0);
+  // 높이 = 막대 + 숫자 줄 + 하이픈 ISBN 줄(두 번째 글줄의 기준선 ≈ 2.05 글자높이 + 아래로 처지는 획) — 모자라면 「ISBN 979-…」 줄 아래가 잘린다(2026-10-14)
+  const H = barH + guardExtra + Math.round(fontH * 2.4) + (d5 ? fontH : 0);
 
   const rects = [];
   const bar = (mx, mw, h) => rects.push(`<rect x="${mx * scale}" y="${d5 ? fontH : 0}" width="${mw * scale}" height="${h}"/>`);
