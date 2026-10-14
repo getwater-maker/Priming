@@ -597,6 +597,10 @@ export default function App() {
   useAutoCloseProg(ytProg, setYtProg);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
+  const [urlStt, setUrlStt] = useState(true);            // 📥 링크로 받은 뒤 STT 전사(끄면 받기만 · v0.9.17)
+  const [dlTab, setDlTab] = useState('link');            // 📥 다운로드 · STT 창 탭: 'link' | 'file'(옛 리본 🎧 STT·🎵 mp3)
+  const [fileMp3, setFileMp3] = useState(false);         // 📂 내 파일 → mp3 추출
+  const [fileStt, setFileStt] = useState(true);          // 📂 내 파일 → STT 전사
   const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
   const [ytInfo, setYtInfo] = useState(null);            // yt-dlp 유무·버전
   const urlTextRef = useRef(null);                       // 비제어 — 글자마다 재렌더하지 않는다(v0.3.9)
@@ -1095,19 +1099,35 @@ export default function App() {
     catch (e) { logline('대본 제거 오류: ' + e.message); }
   }
   // 작업 소요시간은 백엔드에서 단계별로 측정해 dto-update(d.timings)로 전송 → setTimings 로 표시.
-  async function runStt() {
-    setStatus('STT 변환 중… (음성·영상 → txt)');
+  // 📂 내 파일 → mp3 추출 · STT 전사(📥 다운로드 · STT 창 · v0.9.17 — 옛 리본 🎧 STT · 🎵 mp3)
+  //   파일은 한 번만 고르고 두 작업에 같은 목록을 넘긴다. 둘 다 켜면 mp3(빠름) → STT 순.
+  async function runFileJob() {
+    if (!fileMp3 && !fileStt) return;
+    let files = [];
+    try { files = (await api.pickMediaFiles()) || []; } catch (e) { logline('오류: ' + e.message); return; }
+    if (!files.length) return;
+    setUrlOpen(false);
+    const done = [];
     try {
-      const r = await api.sttTranscribe();
-      if (!r || r.canceled) { setStatus('STT 취소'); return; }
-      const tot = (r.results || []).length;
-      const okN = (r.results || []).filter((x) => x.ok).length;
-      setStatus(`STT 완료 (${okN}/${tot}) — 원본 폴더에 .txt 생성`);
+      if (fileMp3) {
+        setStatus('mp3 추출 중… (영상 → mp3)');
+        const r = await api.extractMp3({ files });
+        const rs = (r && r.results) || [];
+        done.push(`mp3 ${rs.filter((x) => x.ok).length}/${rs.length}`);
+      }
+      if (fileStt) {
+        setStatus('STT 변환 중… (음성·영상 → txt)');
+        const r = await api.sttTranscribe({ files });
+        const rs = (r && r.results) || [];
+        done.push(`STT ${rs.filter((x) => x.ok).length}/${rs.length}`);
+      }
+      setStatus(`📂 완료 (${done.join(' · ')}) — 원본 폴더에 생성`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 🔗 URL(유튜브·비메오·틱톡·인스타 …) → 받아서 바로 STT
   //   🔑 **자막이 있으면 STT 를 건너뛴다** — 유튜브 자동자막을 그대로 쓰면 GPU 를 0초 쓰고 수 초에 끝난다.
-  async function openUrlDl() {
+  async function openUrlDl(tab) {
+    setDlTab(tab === 'file' ? 'file' : 'link');
     setUrlOpen(true);
     try { setYtInfo(await api.ytdlpStatus()); } catch { setYtInfo(null); }
   }
@@ -1119,7 +1139,7 @@ export default function App() {
     setUrlBusy(true);
     setStatus(urlChannelAll ? '📺 채널 영상 목록 확인 중…' : `🔗 ${urls.length}개 받는 중…`);
     try {
-      const r = await api.sttFromUrl({ urls, mode: urlMode, forceStt: urlForceStt, channel: urlChannelAll, presetName: presetName || null });
+      const r = await api.sttFromUrl({ urls, mode: urlMode, stt: urlStt, forceStt: urlStt && urlForceStt, channel: urlChannelAll, presetName: presetName || null });
       if (!r || r.canceled) { setStatus('취소'); return; }
       if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
       const okN = (r.results || []).filter((x) => x.ok).length;
@@ -1147,17 +1167,6 @@ export default function App() {
       setYtInfo(await api.ytdlpStatus());
     } catch (e) { logline('오류: ' + e.message); }
     finally { setUrlBusy(false); }
-  }
-  // 🎵 영상 → mp3 추출 (STT 와 별개 · Whisper 서버 불필요)
-  async function runExtractMp3() {
-    setStatus('mp3 추출 중… (영상 → mp3)');
-    try {
-      const r = await api.extractMp3();
-      if (!r || r.canceled) { setStatus('mp3 추출 취소'); return; }
-      const tot = (r.results || []).length;
-      const okN = (r.results || []).filter((x) => x.ok).length;
-      setStatus(`mp3 추출 완료 (${okN}/${tot}) — 원본 폴더에 .mp3 생성`);
-    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runTts(shortsNum) {
     setStatus('TTS 생성중…');
@@ -5562,8 +5571,7 @@ export default function App() {
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
-            <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}><span className="rb-ic">🎧</span> <span className="rb-t">STT</span></button>
-            <button className="ghost" title="영상에서 오디오만 뽑아 mp3 저장 → 원본과 같은 폴더에 같은 이름 .mp3 (192kbps · Whisper 서버 불필요)" onClick={runExtractMp3}><span className="rb-ic">🎵</span> <span className="rb-t">mp3</span></button>
+            {/* 🎧 STT · 🎵 mp3 버튼은 「📥 다운로드 · STT」 창의 「📂 내 파일」 탭으로 합쳤다(v0.9.17 · 로이 2026-10-14). */}
             {/* 🔗 URL 버튼은 리본 오른쪽 끝 「📄 대본 보기」 바로 앞으로 옮기고 이름을 「📥 대본다운」으로 바꿨다(로이 2026-09-26). */}
             <span className="hdiv" />
             {/* 「저장·불러오기」 버튼들(작업저장·작업열기·큐저장·큐열기·전체삭제)은 화면에서만 뺐다 (2026-09-16).
@@ -5774,8 +5782,8 @@ export default function App() {
             <span className="hgroup rb-reader">
               {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}
               <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
-              {/* 📥 대본다운 — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞 · 이름·그림 변경). 대본이 없어도 쓴다(받는 중만 막힘). */}
-              <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="유튜브·비메오·틱톡·인스타 주소에서 영상 대본을 받습니다 — 자막이 있으면 자막을 그대로 쓰고(GPU 0), 없으면 음성을 받아 STT 로 전사합니다" onClick={openUrlDl}><span className="rb-ic">📥</span> <span className="rb-t">대본다운</span></button>
+              {/* 📥 다운로드(v0.9.17 · 옛 「📥 대본다운」 + 🎧 STT + 🎵 mp3 통합) — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞). 대본이 없어도 쓴다(받는 중만 막힘). */}
+              <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>
               <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
               {/* 📘 대본 작성 기준 — 대본 보기 바로 옆(로이 2026-10-12) · 대본이 없어도 본다 */}
               <button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>
@@ -7174,7 +7182,7 @@ export default function App() {
             </div>)}
             {settingsTab === 'folders' && (<div data-testid="app-folders">
               <div className="meta" style={{ marginBottom: 8 }}>여기 폴더는 <b>모든 채널 공통</b>입니다(채널마다 다른 대본·Vrew·MP4 폴더는 ⚙ 채널편집 → 📁 폴더). 비워 두면 윈도우 「다운로드」 폴더{appFolders.def ? <> (<b>{appFolders.def}</b>)</> : null}에 저장합니다.</div>
-              {[['reader', '대본 PDF', '📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더'], ['download', 'URL 받기', '📥 대본다운으로 받은 mp3·영상·전사본(.txt)을 저장할 폴더']].map(([k, lbl, ph]) => (
+              {[['reader', '대본 PDF', '📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더'], ['download', 'URL 받기', '📥 다운로드로 받은 mp3·영상·전사본(.txt)을 저장할 폴더']].map(([k, lbl, ph]) => (
                 <div className="frow" key={k}><label>{lbl}</label>
                   <input style={{ flex: 1 }} data-testid={'app-folder-' + k} placeholder={ph + ' — 비우면 다운로드 폴더'} value={appFolders[k] || ''}
                     onChange={(e) => setAppFolders((f) => ({ ...f, [k]: e.target.value }))} onBlur={(e) => saveAppFolders({ [k]: e.target.value })} />
@@ -7267,51 +7275,86 @@ export default function App() {
       )}
       {urlOpen && (
         <div className="modal-bg show">
-          <div className="modal-card" style={{ maxWidth: 640 }}>
-            <h3>📥 대본다운</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>
-              유튜브·비메오·틱톡·인스타 등의 <b>주소를 한 줄에 하나씩</b> 붙여넣으세요(여러 개 가능).
-              <br />저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).
+          {/* 📥 다운로드 · STT (v0.9.17 · 로이 2026-10-14) — 옛 「📥 대본다운」 + 리본 「🎧 STT」 + 「🎵 mp3」 를 한 창으로.
+              🔗 링크 = 받기(+선택 STT) · 📂 내 파일 = mp3 추출·STT. 화질 칸은 없다 — 영상은 늘 최고 화질(같은 해상도면 H.264). */}
+          <div className="modal-card" data-testid="dl-modal" style={{ maxWidth: 660 }}>
+            <h3>📥 다운로드 · STT</h3>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--line)' }}>
+              {[['link', '🔗 링크'], ['file', '📂 내 파일']].map(([id, lbl]) => (
+                <button key={id} data-testid={'dl-tab-' + id} data-on={dlTab === id ? '1' : '0'} className={dlTab === id ? '' : 'ghost'} onClick={() => setDlTab(id)}>{lbl}</button>
+              ))}
             </div>
-            <textarea ref={urlTextRef} rows={5} spellCheck={false} autoFocus
-              placeholder={urlChannelAll ? 'https://www.youtube.com/@채널주소' : 'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
-              style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
-            <label className="chk" style={{ marginTop: 8, display: 'block' }}>
-              <input type="checkbox" checked={urlChannelAll} onChange={(e) => setUrlChannelAll(e.target.checked)} />
-              {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(영상 주소를 넣어도 그 영상의 채널 전체 · 받기 전에 편수를 묻습니다 · 채널별 폴더 · 이미 완료한 영상은 건너뜀)
-            </label>
-            <div className="frow" style={{ marginTop: 10 }}>
-              <label>받을 것</label>
-              <select value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
-                <option value="audio">🎵 MP3 (음성만 · 빠르고 작습니다)</option>
-                <option value="video">🎬 영상 (mp4)</option>
-                <option value="both">🎵+🎬 둘 다</option>
-              </select>
-            </div>
-            <label className="chk" style={{ marginTop: 8, display: 'block' }}>
-              <input type="checkbox" checked={urlForceStt} onChange={(e) => setUrlForceStt(e.target.checked)} />
-              {' '}자막이 있어도 <b>Whisper 로 전사</b>(자막보다 정확하지만 GPU 를 오래 씁니다)
-            </label>
-            <div className="meta" style={{ marginTop: 8 }}>
-              기본 동작: <b>자막이 있으면 그대로 .txt</b> 로 만들고 STT 를 건너뜁니다(수 초 · GPU 0). 자막이 없는 영상만 Whisper 로 전사합니다.
-              {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 그렇다고 통째로 숨기면 조회에 실패했을 때
-                  화면에 아무 단서도 안 남는다(「⬇ 업데이트」 버튼도 사라진다). 항상 그리고 내용만 바꾼다. */}
-              <div style={{ marginTop: 6 }}>
-                {!ytInfo
-                  ? <>yt-dlp 확인 중…</>
-                  : ytInfo.found
-                    ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale
-                        ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다</span>
-                        : ` · ${ytInfo.ageDays}일 전 판`}</>
-                    : <>이 PC 에 yt-dlp 가 없습니다 — 처음 받을 때 <b>자동으로 내려받습니다</b>(약 17MB · 한 번만).</>}
-                {' '}<button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px', marginLeft: 4 }} onClick={updateYtdlp}>⬇ 업데이트</button>
+            {dlTab === 'link' && (<>
+              {/* 한 줄 = 링크 붙여넣기 · 다운로드 종류 · STT (4K Video Downloader 식) */}
+              <div className="frow" data-testid="dl-linkbar" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button disabled={urlBusy} style={{ flex: '0 0 auto', padding: '8px 18px', fontWeight: 700 }}
+                  title="복사해 둔 주소를 붙여넣고 바로 받습니다 — 오른쪽 설정을 그대로 따릅니다" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
+                <span className="meta" style={{ flex: '0 0 auto' }}>다운로드</span>
+                <select data-testid="dl-mode" style={{ flex: '0 0 auto', width: 'auto' }} value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
+                  <option value="audio">🎵 오디오 (mp3)</option>
+                  <option value="video">🎬 영상 (mp4 · 소리 포함)</option>
+                </select>
+                <label className="chk" style={{ flex: '0 0 auto', width: 'auto' }}>
+                  <input type="checkbox" data-testid="dl-stt" checked={urlStt} onChange={(e) => setUrlStt(e.target.checked)} />{' '}<b>STT 전사</b>
+                </label>
               </div>
-            </div>
-            <div className="mbtns">
-              <button className="ghost" disabled={urlBusy} title="복사해 둔 주소를 붙여넣고 바로 받습니다 — 위 체크(채널 전체)·받을 것 설정을 그대로 따릅니다" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
-              <button disabled={urlBusy} onClick={runUrlDl}>{urlChannelAll ? '채널 전체 받아서 전사' : '받아서 전사'}</button>
-              <button className="ghost" onClick={() => setUrlOpen(false)}>취소</button>
-            </div>
+              <div className="meta" style={{ margin: '8px 0 6px' }}>
+                유튜브·사운드클라우드·페이스북·비메오·틱톡·트위치·빌리빌리 등 — 주소를 복사하고 「📋 링크 붙여넣기」를 누르면 바로 받습니다.
+                여러 개는 아래 칸에 <b>한 줄에 하나씩</b> 넣고 「받기」. 영상은 <b>늘 최고 화질</b>(같은 해상도면 호환이 좋은 H.264).
+                <br />저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).
+              </div>
+              <textarea ref={urlTextRef} rows={4} spellCheck={false} autoFocus
+                placeholder={urlChannelAll ? 'https://www.youtube.com/@채널주소' : 'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
+                style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
+              <label className="chk" style={{ marginTop: 8, display: 'block' }}>
+                <input type="checkbox" checked={urlChannelAll} onChange={(e) => setUrlChannelAll(e.target.checked)} />
+                {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(영상 주소를 넣어도 그 영상의 채널 전체 · 받기 전에 편수를 묻습니다 · 채널별 폴더 · 이미 완료한 영상은 건너뜀)
+              </label>
+              {urlStt && (
+                <label className="chk" style={{ marginTop: 6, display: 'block' }}>
+                  <input type="checkbox" checked={urlForceStt} onChange={(e) => setUrlForceStt(e.target.checked)} />
+                  {' '}자막이 있어도 <b>Whisper 로 전사</b>(자막보다 정확하지만 GPU 를 오래 씁니다)
+                </label>
+              )}
+              <div className="meta" style={{ marginTop: 8 }}>
+                {urlStt
+                  ? <>STT 전사: <b>자막이 있으면 그대로 .txt</b> 로 만들고 Whisper 를 건너뜁니다(수 초 · GPU 0). 자막이 없는 영상만 Whisper 로 전사합니다.</>
+                  : <>STT 전사를 끄면 <b>파일만 받습니다</b>(자막·.txt 를 만들지 않습니다).</>}
+                {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 그렇다고 통째로 숨기면 조회에 실패했을 때
+                    화면에 아무 단서도 안 남는다(「⬇ 업데이트」 버튼도 사라진다). 항상 그리고 내용만 바꾼다. */}
+                <div style={{ marginTop: 6 }}>
+                  {!ytInfo
+                    ? <>yt-dlp 확인 중…</>
+                    : ytInfo.found
+                      ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale
+                          ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다</span>
+                          : ` · ${ytInfo.ageDays}일 전 판`}</>
+                      : <>이 PC 에 yt-dlp 가 없습니다 — 처음 받을 때 <b>자동으로 내려받습니다</b>(약 17MB · 한 번만).</>}
+                  {' '}<button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px', marginLeft: 4 }} onClick={updateYtdlp}>⬇ 업데이트</button>
+                </div>
+              </div>
+              <div className="mbtns">
+                <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : '') + (urlStt ? '받아서 전사' : '받기')}</button>
+                <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
+              </div>
+            </>)}
+            {dlTab === 'file' && (<>
+              <div className="meta" style={{ marginBottom: 8 }}>
+                이 PC 의 <b>음성·영상 파일</b>(여러 개 가능)을 고릅니다. 결과는 <b>원본과 같은 폴더에 같은 이름</b>으로 생깁니다(.mp3 · .txt).
+              </div>
+              <label className="chk" style={{ display: 'block' }}>
+                <input type="checkbox" data-testid="dl-file-mp3" checked={fileMp3} onChange={(e) => setFileMp3(e.target.checked)} />
+                {' '}🎵 <b>mp3 추출</b> — 영상에서 소리만 뽑습니다(192kbps · Whisper 서버 불필요 · 같은 이름이 있으면 「(2)」를 붙여 덮지 않습니다)
+              </label>
+              <label className="chk" style={{ display: 'block', marginTop: 6 }}>
+                <input type="checkbox" data-testid="dl-file-stt" checked={fileStt} onChange={(e) => setFileStt(e.target.checked)} />
+                {' '}🎧 <b>STT 전사</b> — 말소리를 글(.txt)로 옮깁니다(OmniVoice Whisper)
+              </label>
+              <div className="mbtns">
+                <button data-testid="dl-file-run" disabled={!fileMp3 && !fileStt} onClick={runFileJob}>📂 파일 고르기</button>
+                <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
+              </div>
+            </>)}
           </div>
         </div>
       )}

@@ -447,7 +447,10 @@ async function download(url, o = {}) {
   const wantVideo = o.mode === 'video' || o.mode === 'both';
 
   if (wantVideo) {
-    args.push('-f', 'bestvideo*+bestaudio/best', '--merge-output-format', 'mp4');
+    // 🎞 화질 = 늘 최고(해상도·fps 먼저) · **같은 해상도면 H.264 + AAC 우선**(v0.9.17 · 로이 승인 2026-10-14)
+    //   정렬 없이 고르면 유튜브는 AV1 + Opus 를 준다(실측: 4K·1080·240p 모두) — Vrew·윈도우 기본 플레이어가 못 열 수 있다.
+    //   `vcodec:h264` = 「h264 이하 코덱 중 가장 좋은 것」 우선. 4K·AI 업스케일처럼 H.264 판이 없으면 VP9/AV1 이 그대로 온다.
+    args.push('-f', 'bestvideo*+bestaudio/best', '-S', 'res,fps,vcodec:h264,acodec:m4a', '--merge-output-format', 'mp4');
     if (wantAudio) args.push('--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0', '-k');
   } else {
     args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best',

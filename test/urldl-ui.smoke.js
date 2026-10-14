@@ -24,91 +24,103 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('h1', { timeout: 20000 });
     console.log('· 부팅 OK');
 
-    // [1] 버튼은 리본 오른쪽 끝(상시) 「📄 대본 보기」 바로 앞에 있다(2026-09-26 · 구 ① 「🔗 URL」)
+    // [1] 📥 다운로드 버튼(v0.9.17 · 옛 대본다운 + 🎧 STT + 🎵 mp3) — 리본 오른쪽 끝(상시) 「📄 대본 보기」 바로 앞
     ok(await win.locator('button:has-text("🔗 URL")').count() === 0, '옛 🔗 URL 버튼이 없다');
     const btn = win.locator('[data-testid="urldl-open"]');
-    ok(await btn.count() === 1 && /대본다운/.test(await btn.innerText()), '📥 대본다운 버튼이 하나 있다');
+    ok(await btn.count() === 1 && /다운로드/.test(await btn.innerText()), '📥 다운로드 버튼이 하나 있다');
     const order = await win.locator('.rb-reader button').evaluateAll((bs) => bs.map((b) => b.dataset.testid || ''));
-    ok(order.join(',') === 'urldl-open,reader-open', `대본다운이 대본 보기 바로 앞 (${order.join(', ')})`);
+    ok(order.indexOf('urldl-open') >= 0 && order.indexOf('urldl-open') + 1 === order.indexOf('reader-open'), `다운로드가 대본 보기 바로 앞 (${order.join(', ')})`);
     for (const m of ['image', 'finish']) {
       await menu(win, m);
       ok(await btn.isVisible(), `${m} 메뉴에서도 보인다(상시)`);
     }
+    await menu(win, 'script');
+    ok(await win.locator('.ribbon .rb-t', { hasText: /^STT$/ }).count() === 0 && await win.locator('.ribbon .rb-t', { hasText: /^mp3$/ }).count() === 0,
+      '리본에 옛 🎧 STT · 🎵 mp3 버튼이 없다(📂 내 파일 탭으로 합침)');
 
     // [2] 눌러서 창이 뜬다 — 여기서 미정의 식별자가 있으면 터진다
     await btn.click();
-    await win.waitForSelector('.modal-card:has-text("대본다운")', { timeout: 8000 });
-    ok(true, '창이 열린다(핸들러가 살아 있다)');
+    await win.waitForSelector('[data-testid="dl-modal"]', { timeout: 8000 });
+    const card = win.locator('[data-testid="dl-modal"]');
+    ok(/다운로드 · STT/.test(await card.locator('h3').innerText()), '창이 열린다 — 제목 「📥 다운로드 · STT」');
+    ok(await card.locator('[data-testid="dl-tab-link"]').count() === 1 && await card.locator('[data-testid="dl-tab-file"]').count() === 1, '탭 두 개(🔗 링크 · 📂 내 파일)');
 
-    // [3] 기본값 = MP3 (로이 확정)
-    const sel = win.locator('.modal-card:has-text("대본다운") select');
-    ok(await sel.inputValue() === 'audio', '「받을 것」 기본값이 MP3');
+    // [3] 링크 줄 = 📋 링크 붙여넣기 · 다운로드(오디오/영상) · STT 전사 — 화질 칸 없음
+    const bar = card.locator('[data-testid="dl-linkbar"]');
+    ok(await bar.locator('button:has-text("📋 링크 붙여넣기")').count() === 1, '링크 줄에 「📋 링크 붙여넣기」');
+    const sel = card.locator('[data-testid="dl-mode"]');
+    ok(await sel.inputValue() === 'audio', '「다운로드」 기본값 = 오디오(로이 확정)');
     const opts = await sel.locator('option').allTextContents();
-    ok(opts.length === 3 && /MP3/.test(opts[0]) && /영상/.test(opts[1]) && /둘 다/.test(opts[2]),
-      `MP3·영상·둘 다 세 가지를 고를 수 있다 (${opts.length}개)`);
-
-    // [4] 영상으로 바꿔도 창이 안 깨진다
+    ok(opts.length === 2 && /오디오/.test(opts[0]) && /영상/.test(opts[1]), `오디오·영상 두 가지 (${opts.join(' | ')})`);
+    ok(await bar.locator('select').count() === 1 && !/화질/.test(await bar.innerText()), '화질 칸이 없다(늘 최고)');
+    const sttChk = card.locator('[data-testid="dl-stt"]');
+    ok(await sttChk.isChecked(), '「STT 전사」 기본 켜짐(옛 대본다운과 같은 동작)');
     await sel.selectOption('video');
     ok(await sel.inputValue() === 'video', '영상으로 전환된다');
     await sel.selectOption('audio');
+    const runBtn = card.locator('[data-testid="dl-run"]');
+    ok(/받아서 전사/.test(await runBtn.innerText()), 'STT 켜짐 → 「받아서 전사」');
+    await sttChk.uncheck();
+    ok(/^받기$/.test((await runBtn.innerText()).trim()), 'STT 끔 → 「받기」');
+    ok(await card.locator('label:has-text("Whisper 로 전사")').count() === 0, 'STT 를 끄면 「자막이 있어도 Whisper」 칸도 숨는다');
+    ok(/파일만 받습니다/.test(await card.innerText()), 'STT 끔 = 파일만 받는다고 알려 준다');
+    await sttChk.check();
 
     // [5] 채널 전체·자막 무시 체크박스 — 둘 다 명시적으로 켜야 한다
-    const card = win.locator('.modal-card:has-text("대본다운")');
     const channelChk = card.locator('label:has-text("유튜브 채널의 일반 영상 전체") input[type=checkbox]');
     const forceChk = card.locator('label:has-text("Whisper 로 전사") input[type=checkbox]');
     ok(await channelChk.count() === 1 && !(await channelChk.isChecked()), '「채널 전체」는 기본 꺼짐(단일 URL 안전 유지)');
     ok(await forceChk.count() === 1 && !(await forceChk.isChecked()), '「자막이 있어도 STT」는 기본 꺼짐');
     await channelChk.check();
-    ok((await card.locator('button:has-text("채널 전체 받아서 전사")').count()) === 1,
-      '채널 모드에서는 실행 버튼 문구가 분명히 바뀐다');
+    ok(/채널 전체 받아서 전사/.test(await runBtn.innerText()), '채널 모드에서는 실행 버튼 문구가 분명히 바뀐다');
     await channelChk.uncheck();
 
     // [6] yt-dlp 상태가 창에 보인다(조회가 비동기라 값이 올 때까지 기다린다)
     await win.waitForFunction(() => {
-      const el = [...document.querySelectorAll('.modal-card')].find((x) => x.textContent.includes('대본다운'));
+      const el = document.querySelector('[data-testid="dl-modal"]');
       return el && !el.textContent.includes('yt-dlp 확인 중');
     }, null, { timeout: 30000 }).catch(() => {});
-    const body = await win.locator('.modal-card:has-text("대본다운")').innerText();
+    const body = await card.innerText();
     ok(/yt-dlp|자동으로 내려받습니다/.test(body), 'yt-dlp 상태를 알려준다');
     ok(/⬇ 업데이트/.test(body), '「⬇ 업데이트」 버튼이 있다(유튜브가 바뀌면 여기서 갱신)');
+    ok(/늘 최고 화질/.test(body), '영상은 늘 최고 화질이라고 알려 준다');
 
     // [7] 주소가 없으면 받지 않는다(빈 입력 방어)
-    await win.click('.modal-card:has-text("대본다운") button:has-text("받아서 전사")');
+    await runBtn.click();
     await win.waitForTimeout(400);
-    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 1,
-      '주소가 비면 창이 닫히지 않는다(실수로 실행되지 않는다)');
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 1, '주소가 비면 창이 닫히지 않는다(실수로 실행되지 않는다)');
 
     // [7-b] 📋 링크 붙여넣기 — 클립보드에 주소가 없으면 받지 않고 창을 그대로 둔다(네트워크 안 씀)
     await app.evaluate(({ clipboard }) => clipboard.writeText('주소가 아닌 그냥 글'));
-    const pasteBtn = win.locator('.modal-card:has-text("대본다운") button:has-text("📋 링크 붙여넣기")');
-    ok(await pasteBtn.count() === 1, '「📋 링크 붙여넣기」 버튼이 있다');
-    const mb = await win.locator('.modal-card:has-text("대본다운") .mbtns button').allTextContents();
-    ok(mb[0].includes('링크 붙여넣기') && mb[1].includes('받아서 전사'), `「받아서 전사」 앞에 있다 (${mb.join(' | ')})`);
-    await pasteBtn.click();
+    await bar.locator('button:has-text("📋 링크 붙여넣기")').click();
     await win.waitForTimeout(400);
-    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 1, '클립보드에 주소가 없으면 받지 않는다(창 유지)');
-    ok((await win.locator('.modal-card:has-text("대본다운") textarea').inputValue()) === '', '엉뚱한 글을 칸에 넣지 않는다');
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 1, '클립보드에 주소가 없으면 받지 않는다(창 유지)');
+    ok((await card.locator('textarea').inputValue()) === '', '엉뚱한 글을 칸에 넣지 않는다');
+    try { await card.screenshot({ path: process.env.PM_SHOT_LINK || require('path').join(require('os').tmpdir(), 'dl-link.png') }); } catch {}
+
+    // [7-c] 📂 내 파일 탭 — mp3 추출 · STT 전사 체크 + 파일 고르기(둘 다 끄면 못 누른다)
+    await card.locator('[data-testid="dl-tab-file"]').click();
+    const mp3Chk = card.locator('[data-testid="dl-file-mp3"]'), fSttChk = card.locator('[data-testid="dl-file-stt"]');
+    ok(await mp3Chk.count() === 1 && !(await mp3Chk.isChecked()), '📂 mp3 추출 칸(기본 꺼짐)');
+    ok(await fSttChk.count() === 1 && await fSttChk.isChecked(), '📂 STT 전사 칸(기본 켜짐)');
+    const fileRun = card.locator('[data-testid="dl-file-run"]');
+    ok(await fileRun.isEnabled(), '「📂 파일 고르기」 누를 수 있다');
+    await fSttChk.uncheck();
+    ok(await fileRun.isDisabled(), '둘 다 끄면 「파일 고르기」를 못 누른다');
+    await mp3Chk.check();
+    ok(await fileRun.isEnabled(), 'mp3 만 켜도 누를 수 있다');
+    // 파일 고르기 → 취소(빈 목록)면 아무 일도 하지 않고 창도 그대로
+    await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
+    await fileRun.click();
+    await win.waitForTimeout(400);
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 1, '파일을 안 고르면 창이 그대로다');
+    try { await card.screenshot({ path: process.env.PM_SHOT_FILE || require('path').join(require('os').tmpdir(), 'dl-file.png') }); } catch {}
+    await card.locator('[data-testid="dl-tab-link"]').click();
 
     // [8] ESC 로 닫힌다
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);
-    ok(await win.locator('.modal-card:has-text("대본다운")').count() === 0, 'ESC 로 닫힌다');
-
-    // [9] 채널편집 → 📁 폴더 에 다운로드 폴더 칸
-    // ⚠ 「⚙」 로 뭉뚱그려 찾으면 첫 줄 「⚙ 설정」(통합 설정)이 먼저 잡힌다(2026-09-16 ⚙ 설정이 앞으로 옮겨짐).
-    //   채널편집은 title 로 정확히 집는다.
-    await win.click('button[title^="채널(프리셋)"]');
-    await win.waitForTimeout(600);
-    const chCard = win.locator('.modal-card').filter({ hasText: '폴더' });
-    if (await chCard.count()) {
-      const tab = chCard.locator('button:has-text("📁")');
-      if (await tab.count()) { await tab.first().click(); await win.waitForTimeout(300); }
-      const t = await chCard.first().innerText();
-      ok(await chCard.first().locator('.frow label', { hasText: /^다운로드$/ }).count() === 1 && /다운로드/.test(t), '채널편집 📁 폴더 탭에 「다운로드」 칸이 있다(v0.5.81 라벨)');
-      await win.keyboard.press('Escape');
-    } else {
-      console.log('  ⓘ 채널편집 창을 못 열어 이 항목은 건너뜀');
-    }
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 0, 'ESC 로 닫힌다');
 
     // [10] 📊 진행 패널 — main 이 보내는 urldl-progress 를 그대로 그린다(실제 다운로드 없이 이벤트만 흉내)
     const sendProg = (p) => app.evaluate(({ BrowserWindow }, p) => {

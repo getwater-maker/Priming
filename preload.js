@@ -311,8 +311,9 @@ contextBridge.exposeInMainWorld('api', {
   // alert/confirm 직전에 창을 앞으로 — 네이티브 모달이 다른 창 뒤에 숨으면 앱 전체가 입력을 거부한다.
   focusWindow: () => ipcRenderer.invoke('focus-window'),
   monitorOff: () => ipcRenderer.invoke('monitor-off'),
-  sttTranscribe: () => ipcRenderer.invoke('stt-transcribe'),
-  extractMp3: () => ipcRenderer.invoke('extract-mp3'),
+  sttTranscribe: (a) => ipcRenderer.invoke('stt-transcribe', a),
+  extractMp3: (a) => ipcRenderer.invoke('extract-mp3', a),
+  pickMediaFiles: () => ipcRenderer.invoke('pick-media-files'),
   sttFromUrl: (a) => ipcRenderer.invoke('stt-from-url', a),
   readClipboardText: () => ipcRenderer.invoke('clipboard-read-text'),   // 📋 대본다운 「링크 붙여넣기」
   ytdlpStatus: () => ipcRenderer.invoke('ytdlp-status'),

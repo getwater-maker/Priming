@@ -1147,8 +1147,19 @@ async function warnAsrIfDown() {
   } catch { return null; }
 }
 
-ipcMain.handle('stt-transcribe', async () => {
+// 📥 다운로드 · STT 창 「📂 내 파일」(v0.9.17) — 파일을 한 번만 고르고 mp3 추출·STT 에 같은 목록을 넘긴다(args.files).
+//   목록이 없으면 예전처럼 그 자리에서 고른다.
+const MEDIA_EXTS = ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma', 'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'ts', 'mpg', 'mpeg', 'wmv'];
+ipcMain.handle('pick-media-files', async () => {
   const r = await dialog.showOpenDialog(win, {
+    title: '음성·영상 파일 선택 (여러 개 가능)',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: '음성·영상', extensions: MEDIA_EXTS }, { name: '모든 파일', extensions: ['*'] }],
+  });
+  return (r.canceled || !r.filePaths) ? [] : r.filePaths;
+});
+ipcMain.handle('stt-transcribe', async (_e, args = {}) => {
+  const r = Array.isArray(args.files) && args.files.length ? { canceled: false, filePaths: args.files } : await dialog.showOpenDialog(win, {
     title: 'STT 할 음성·영상 파일 선택 (여러 개 가능)',
     properties: ['openFile', 'multiSelections'],
     filters: [
@@ -1235,7 +1246,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const urls = (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
   if (!urls.length) return { ok: false, error: '주소가 없습니다' };
 
-  const mode = ['audio', 'video', 'both'].includes(args.mode) ? args.mode : 'audio';
+  const mode = ['audio', 'video', 'both'].includes(args.mode) ? args.mode : 'audio';   // 화면은 audio·video 둘만 보낸다(v0.9.17 — both 는 옛 호출 호환)
   const forceStt = !!args.forceStt;
   const doStt = args.stt !== false;
   const channelMode = !!args.channel;
@@ -1320,7 +1331,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const ans = await dialog.showMessageBox(win, {
           type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
           title: '채널 전체 받기',
-          message: `「${names}」 일반 영상 ${jobs.length}편을 받아 전사합니다.`,
+          message: `「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'}.`,
           detail: '이미 전사한 영상은 건너뜁니다. 한 편만 받으려면 취소하고 「채널 전체」 체크를 끄세요.',
         });
         if (ans.response !== 0) {
@@ -1395,7 +1406,8 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
 
         // .txt 머리말에는 **사용자가 붙여넣은 원래 주소**를 쓴다(나중에 다시 열어볼 주소는 그쪽이다).
         const head = { url, title: info.title };
-        const wantSubs = !forceStt;
+        // 🔑 STT 를 끄면 받기만 한다 — 자막도 받지 않고 .txt 도 만들지 않는다(v0.9.17)
+        const wantSubs = doStt && !forceStt;
         const r = await MD.download(dlUrl, {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
           filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
@@ -1416,7 +1428,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           txtFrom = 'existing';
           prog.skip++;
         }
-        if (!txtFrom && r.sub && !forceStt) {
+        if (!txtFrom && doStt && r.sub && !forceStt) {
           // 자막이 있다 → 그대로 텍스트로. GPU 를 쓰지 않는다.
           const text = MD.subtitleFileToText(r.sub);
           if (text.length >= 20) {          // 너무 짧으면 자막이 사실상 비어 있는 것 → STT 로 넘긴다
@@ -1465,8 +1477,8 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
 
 // 🎵 mp3 추출 — 영상(또는 다른 오디오)에서 mp3 를 뽑아 **원본과 같은 폴더에 같은 이름 .mp3** 로 저장.
 //   STT 와 별개(Whisper 서버 불필요, ffmpeg 만 사용). 같은 이름 파일이 있으면 덮지 않고 " (2)" 를 붙임.
-ipcMain.handle('extract-mp3', async () => {
-  const r = await dialog.showOpenDialog(win, {
+ipcMain.handle('extract-mp3', async (_e, args = {}) => {
+  const r = Array.isArray(args.files) && args.files.length ? { canceled: false, filePaths: args.files } : await dialog.showOpenDialog(win, {
     title: 'mp3 로 추출할 영상·음성 파일 선택 (여러 개 가능)',
     properties: ['openFile', 'multiSelections'],
     filters: [

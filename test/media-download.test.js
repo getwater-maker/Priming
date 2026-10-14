@@ -266,12 +266,22 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/PYTHONIOENCODING/.test(dl), '한글 제목이 CP949 로 깨지지 않게 UTF-8 을 지정한다');
 
   // 화면
-  ok(/rb-t">대본다운</.test(app), '④ 완성에 📥 대본다운 버튼(구 🔗 URL · 2026-09-26)');
+  ok(/rb-t">다운로드</.test(app) && !/rb-t">대본다운</.test(app), '📥 다운로드 버튼(옛 대본다운 · v0.9.17)');
+  ok(!/rb-t">STT</.test(app) && !/rb-t">mp3</.test(app) && !/runExtractMp3|function runStt\(/.test(app), '리본 🎧 STT · 🎵 mp3 버튼은 없다(📂 내 파일 탭으로 합침)');
+  ok(/function runFileJob\(\)[\s\S]{0,400}api\.pickMediaFiles\(\)[\s\S]{0,500}api\.extractMp3\(\{ files \}\)[\s\S]{0,400}api\.sttTranscribe\(\{ files \}\)/.test(app), '📂 내 파일: 한 번 고른 목록으로 mp3 → STT');
+  ok(/stt: urlStt, forceStt: urlStt && urlForceStt/.test(app), '🔗 링크: STT 체크값을 IPC 로 넘긴다');
+  ok(!/value="both"/.test(app), '화면의 받을 것 = 오디오·영상 둘(both 없음)');
+  { const bar = (app.match(/data-testid="dl-linkbar"[\s\S]*?<\/div>/) || [''])[0];
+    ok(bar && (bar.match(/<select/g) || []).length === 1 && !/>화질</.test(bar), '화질 칸이 없다 — 링크 줄의 고르기는 「다운로드」 하나(늘 최고 화질 · 로이 2026-10-14)'); }
+  { const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/const wantSubs = doStt && !forceStt;/.test(mainSrc) && /if \(!txtFrom && doStt && r\.sub && !forceStt\)/.test(mainSrc), '🔑 STT 를 끄면 자막도 .txt 도 만들지 않는다');
+    ok(/ipcMain\.handle\('pick-media-files'/.test(mainSrc) && /ipcMain\.handle\('stt-transcribe', async \(_e, args = \{\}\)[\s\S]{0,120}args\.files/.test(mainSrc) && /ipcMain\.handle\('extract-mp3', async \(_e, args = \{\}\)[\s\S]{0,120}args\.files/.test(mainSrc), 'STT·mp3 가 고른 파일 목록(args.files)을 받는다'); }
+  ok(/'-S', 'res,fps,vcodec:h264,acodec:m4a'/.test(dl), '🎞 영상 = 최고 해상도 · 같은 해상도면 H.264+AAC(정렬 없으면 AV1+Opus)');
   ok(!/rb-t">URL</.test(app), '옛 「URL」 버튼 라벨이 남지 않았다');
   ok(/pasteAndRunUrlDl/.test(app) && /📋 링크 붙여넣기/.test(app), '「📋 링크 붙여넣기」 버튼이 있다');
   ok(/clipboard-read-text/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')), '클립보드는 main 에서 읽는다');
   ok(/urlMode, setUrlMode\] = useState\('audio'\)/.test(app), '받을 것 기본값은 MP3(로이 확정)');
-  ok(/value="audio"[\s\S]{0,80}value="video"[\s\S]{0,80}value="both"/.test(app), 'MP3·영상·둘 다 를 고를 수 있다');
+  ok(/value="audio"[\s\S]{0,80}value="video"/.test(app), '오디오(mp3)·영상(mp4)을 고를 수 있다');
   ok(/urlChannelAll, setUrlChannelAll/.test(app) && /channel: urlChannelAll/.test(app),
     '채널 전체 체크값을 IPC에 전달한다');
   ok(/유튜브 채널의 일반 영상 전체/.test(app), '채널 전체 옵션을 화면에 분명히 표시한다');
@@ -291,7 +301,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
       return fs.readFileSync(path.join(d, f), 'utf8');
     } catch { return ''; }
   })();
-  ok(bundle ? bundle.includes('대본다운') : true, '번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
+  ok(bundle ? bundle.includes('다운로드 · STT') : true, '번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
 }
 
 console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
