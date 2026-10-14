@@ -134,6 +134,68 @@ function buildFilter(tempo, gainDb, padSec) {
   return parts.length ? parts.join(',') : null;
 }
 
+/**
+ * 😮‍💨 문장 맨 앞 들숨 지우기 (2026-10-15 로이: 「희동으로 만들었더니 문장 첫 시작에서 숨소리가 들어간다」).
+ *
+ * 실측 — 참조음성(희동.wav) 앞부분은 -65dB 로 깨끗한데, 결과 음성 4개 중 2개가 **말 시작 0.2~0.4초 앞에
+ *   말보다 약 30dB 낮은 소리(-43~-48dB · 고역비 0.5~0.8 = 숨)** 를 0.25~0.3초 달고 나왔다. 그 뒤 짧은 정적
+ *   (-58~-69dB, 0.06~0.1초)이 있고 나서 첫 낱말이 시작한다. 모델이 문장 앞 여백 안에 들숨을 지어 넣는 것.
+ *
+ * 방식 — **첫 낱말 바로 앞의 정적**을 찾고, 그 정적보다 앞에 있는 소리만 0 으로 눕힌다.
+ *   ① 첫 낱말 = 말 대표음량 −18dB 를 넘는 첫 프레임 ② 거기서 뒤로 걸어가며 자음 진입부(ㅅ·ㅎ 등)를 지나
+ *   정적(말 −40dB 이하)이 **GAP_MIN_MS 이상 이어지는 곳**에서 멈춘다 ③ 그 앞에 소리가 있으면 지운다.
+ *   🔑 **길이를 바꾸지 않는다**(잘라내지 않고 눕힌다) — 문장 간격·타임라인·자막 싱크가 예전과 같다.
+ *   🔑 첫 낱말과 그 진입부는 한 샘플도 건드리지 않는다(정적 안에서 10ms 경사로 들어온다).
+ *   ⚠ 정적 판정이 짧으면 「스크린」의 ㅋ 막힘(수십 ms)을 정적으로 보고 「스」를 지운다 → GAP_MIN_MS.
+ * @returns {{buf:Buffer, mutedSec:number, levelDb:number}|null}  지울 것이 없거나 판단할 수 없으면 null(원본 그대로)
+ */
+const LB_FRAME_MS = 10;
+const LB_ONSET_DROP = 18;    // 첫 낱말 = 말 대표음량 − 18dB 이상
+const LB_GAP_DROP = 40;      // 정적 = 말 대표음량 − 40dB 이하
+const LB_GAP_MIN_MS = 30;    // 정적이 이만큼 이어져야 「숨과 말 사이」로 본다(실측: 숨 뒤 정적 40ms~ · ㅅ·ㅎ 진입부는 첫 낱말에 붙어 있다)
+const LB_MIN_SOUND_MS = 30;  // 지울 소리가 이보다 짧으면 손대지 않는다
+const LB_MAX_LEAD_SEC = 1.5; // 첫 낱말이 이보다 늦으면 판단하지 않는다(문장 앞 여백이 아니다)
+function muteLeadBreath(buf) {
+  const d = _findData(buf);
+  if (!d || d.bits !== 16 || d.channels !== 1) return null;
+  const m = measureSpeech(buf);
+  if (!m || !isFinite(m.speechDb)) return null;
+  const n = Math.floor((d.end - d.offset) / 2);
+  const N = Math.max(1, Math.round(d.sampleRate * LB_FRAME_MS / 1000));
+  const nf = Math.floor(n / N);
+  const db = new Array(nf);
+  for (let f = 0; f < nf; f++) {
+    let acc = 0;
+    for (let k = 0; k < N; k++) { const v = buf.readInt16LE(d.offset + (f * N + k) * 2) / 32768; acc += v * v; }
+    db[f] = 20 * Math.log10(Math.sqrt(acc / N) + 1e-12);
+  }
+  const onTh = m.speechDb - LB_ONSET_DROP, gapTh = m.speechDb - LB_GAP_DROP;
+  let on = 0;
+  while (on < nf && db[on] < onTh) on++;
+  if (on >= nf || on * LB_FRAME_MS / 1000 > LB_MAX_LEAD_SEC) return null;
+  // 뒤로 걸어가며 진입부를 지나 정적을 찾는다 — 정적이 GAP_MIN 프레임 이어져야 인정
+  const gapMin = Math.ceil(LB_GAP_MIN_MS / LB_FRAME_MS);
+  let j = on - 1;
+  while (j >= 0 && db[j] > gapTh) j--;                 // 진입부(자음)
+  if (j < 0) return null;
+  const gapEnd = j;                                    // 정적의 마지막(말 쪽) 프레임
+  while (j >= 0 && db[j] <= gapTh) j--;
+  if (gapEnd - j < gapMin) return null;                // 정적이 짧다 = 낱말 안의 막힘일 수 있다
+  if (j < 0) return null;                              // 정적 앞에 소리가 없다 = 지울 것 없음
+  let sound = 0, peak = -Infinity;
+  for (let f = 0; f <= j; f++) if (db[f] > gapTh) { sound++; if (db[f] > peak) peak = db[f]; }
+  if (sound * LB_FRAME_MS < LB_MIN_SOUND_MS) return null;
+  // 정적 안에서 끝낸다: 정적 첫 프레임까지 0, 그다음 프레임에서 10ms 경사로 원래 소리(= 정적)로 돌아온다
+  const zeroEnd = (j + 2) * N, fadeEnd = Math.min(zeroEnd + N, (gapEnd + 1) * N);
+  const out = Buffer.from(buf);
+  for (let i = 0; i < zeroEnd; i++) out.writeInt16LE(0, d.offset + i * 2);
+  for (let i = zeroEnd; i < fadeEnd; i++) {
+    const g = (i - zeroEnd) / Math.max(1, fadeEnd - zeroEnd);
+    out.writeInt16LE(Math.round(buf.readInt16LE(d.offset + i * 2) * g), d.offset + i * 2);
+  }
+  return { buf: out, mutedSec: zeroEnd / d.sampleRate, levelDb: Math.round((peak - m.speechDb) * 10) / 10 };
+}
+
 /** 채널(프리셋) 설정 → 정규화 목표. 꺼져 있으면 null. */
 function targetFromPreset(preset) {
   if (!preset) return null;
@@ -144,6 +206,6 @@ function targetFromPreset(preset) {
 }
 
 module.exports = {
-  measureSpeech, isSilentWav, gainForTarget, buildFilter, targetFromPreset,
+  measureSpeech, isSilentWav, gainForTarget, buildFilter, targetFromPreset, muteLeadBreath,
   TARGET_DB_DEFAULT, MAX_GAIN_DB, MIN_GAIN_DB, PEAK_CEIL_DB,
 };

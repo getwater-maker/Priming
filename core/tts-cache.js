@@ -53,6 +53,9 @@ function keyFor(text, sf, opts = {}) {
   // 🔊 유료 API 엔진의 정체성(모델·목소리·말투 — tts-engines.synthExtra 의 engineSig).
   //   🔑 OmniVoice 는 이 필드가 없다 → 기존 캐시 키 그대로(무음 pd 와 같은 원칙).
   if (opts.engineSig) o.es = String(opts.engineSig);
+  // 😮‍💨 OmniVoice 결과는 문장 앞 들숨을 지운 것(omnivoice-provider · v0.9.20) — 지우기 전 캐시(숨 있음)가 되살아나지 않게
+  //   OmniVoice 키만 새로 갈린다(유료 엔진 캐시는 그대로 — 다시 사면 돈이 든다). 판정 방식을 바꾸면 값을 올린다.
+  else if ((opts.provider || 'omnivoice') === 'omnivoice') o.lb = 1;
   const sig = JSON.stringify(o);
   return crypto.createHash('sha1').update(sig).digest('hex');
 }

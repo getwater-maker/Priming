@@ -117,6 +117,7 @@
 - 📞 **전화번호는 음성만 한 자리씩**(「1577-1000」→「일오칠칠에 일공공공」 · 로이 지정 · v0.8.11 · `readPhoneNumbers` · `test:phone`) — 연도 범위처럼 보이는 것은 문장에 전화 낱말이 있고 뒤에 「년」이 없을 때만 번호로 본다(생몰년 헛변환 금지).
 - 🔑 TTS 텍스트 가공은 `processForTTS` 한 곳(⛔ 다른 곳에 가공 추가 금지) · 캐시 키 = 실제 합성 문자열 + 목소리·시드·배속·정규화·무음 — 설정을 더하면 캐시 키에 넣을지 판단 · 엔진 해석·요금은 `tts/tts-engines.js` 한 곳(새 TTS 입구는 preset 을 넘기고 `scriptVoicePreset` 을 거칠 것) · 채널은 `resolvePreset`(낡은 `S.preset` 금지).
 - 🔴 TTS 는 직렬 큐 `enqueueTtsJob` · 빈 음성(헤더만)·무음 음성은 시드를 갈아 다시 만들고 게이트가 막는다 · 문장 사이 쉼은 음성 파일의 `apad`(⛔ vrew 에 빈 클립 금지) · 테스트의 정상 음성 픽스처는 소리가 든 WAV.
+- 😮‍💨 **문장 앞 들숨 = OmniVoice provider 의 `muteLeadBreath` 한 곳**(v0.9.20 · 길이 불변 · 정적 30ms 기준 · 캐시 키 `lb` 와 짝) — 상세 [TTS](docs/규칙/TTS.md).
 
 ### 이미지
 - 🆕 **Qwen-Image 2.1 Turbo (로컬)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.

@@ -601,7 +601,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     s.ttsGenSec = (Date.now() - _genT0) / 1000; // 이 문장 생성에 걸린 실시간(초)
     // 캐시에 저장(다음 동일 작업 시 재활용)
     try { TtsCache.put(cacheKey, s.ttsAudioPath, s.ttsDurationSec, path.extname(s.ttsAudioPath).slice(1).toLowerCase() || 'wav'); } catch {}
-    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''}${s.backcheck ? (s.backcheck.unknown ? ' · 🔎 확인 불가' : ` · 🔎 ${Math.round(s.backcheck.score * 100)}%`) : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
+    if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''}${res.leadBreathSec ? ' · 😮‍💨 앞 숨 지움' : ''}${s.backcheck ? (s.backcheck.unknown ? ' · 🔎 확인 불가' : ` · 🔎 ${Math.round(s.backcheck.score * 100)}%`) : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
     // 문장 한 개 변환 완료 → 화면 갱신(시간 표시). 1초에 한 번까지(TTS_PROGRESS_GAP_MS) — 나머지는 다음 갱신·끝에 같이 나간다.
     progress(true);
   }

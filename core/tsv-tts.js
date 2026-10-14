@@ -184,6 +184,7 @@ function cacheKey(finalText, cfg) {
     // 🔑 출력 포맷도 키다 — mp3 로 만든 것과 wav 로 만든 것은 다른 파일이다.
     fmt: (cfg.ext || '.mp3').toLowerCase(),
     rate: OUT_RATE, ch: OUT_CHANNELS, br: OUT_BITRATE,
+    lb: 1,   // 😮‍💨 OmniVoice 가 문장 앞 들숨을 지운 결과(v0.9.20) — 지우기 전 캐시가 되살아나지 않게
   });
   return crypto.createHash('sha1').update(sig).digest('hex');
 }

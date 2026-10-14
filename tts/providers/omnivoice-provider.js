@@ -175,7 +175,7 @@ class OmniVoiceProvider {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const wavBuffer = Buffer.from(arrayBuffer);
+    let wavBuffer = Buffer.from(arrayBuffer);
 
     // OmniVoice는 24kHz 16-bit mono WAV 반환.
     // 🔴 **빈 WAV 를 정상으로 넘기지 않는다** — 서버가 HTTP 200 으로 헤더만(샘플 0개) 돌려주는 일이
@@ -190,9 +190,18 @@ class OmniVoiceProvider {
       throw err;
     }
 
+    // 😮‍💨 문장 맨 앞 들숨 지우기(2026-10-15 · 희동) — 첫 낱말 앞 정적보다 앞에 있는 소리만 0 으로 눕힌다(길이 불변).
+    //   🔑 캐시 키 `lb`(tts-cache.keyFor · tsv-tts.cacheKey)와 짝이다 — 숨 있는 옛 캐시가 되살아나지 않게.
+    let leadBreathSec = 0;
+    try {
+      const lb = require('../../core/audio-normalize').muteLeadBreath(wavBuffer);
+      if (lb) { wavBuffer = lb.buf; leadBreathSec = lb.mutedSec; }
+    } catch (_) { /* 판단 실패면 원본 그대로 — 음성 생성을 막지 않는다 */ }
+
     return {
       mp3Buffer: wavBuffer,
       durationSec,
+      leadBreathSec,
       providerUsed: PROVIDER_ID,
       format: 'wav',
     };
