@@ -1325,3 +1325,4 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .foldertab .frow{margin:6px 0}
 .foldertab .fnote{margin:-2px 0 6px 128px;font-size:12px;line-height:1.45;color:#8a7f72}
 .foldertab .frow .meta{white-space:nowrap}
+.foldertab{max-height:490px;overflow-y:auto;padding-right:8px}
