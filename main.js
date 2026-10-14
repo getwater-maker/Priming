@@ -1833,6 +1833,7 @@ function computeOutRoot(scriptPath, preset, mode) {
 // 📁 완성 파일 이름 앞에 종이책/전자책 표기(로이 2026-10-02 「완성파일의 파일명 앞에 [종이책], [전자책] 표기를 반드시」) — 뒤쪽(_내지.pdf·_표지.pdf·.epub)으로 찾는 곳(점검·등록)은 옛 이름 파일도 그대로 찾는다.
 const BOOK_PREFIX = { print: '[종이책] ', ebook: '[전자책] ' };
 const WF = require('./core/book/work-folder');
+const OL = require('./core/book/out-layout');   // 📁 완성/{종이책,전자책}/{01_완성본,02_표지,03_내지,04_epub} (로이 2026-10-14)
 // 완성 파일 이름 바탕 — 원고가 `<작품>\원고\<이름>.md` 면 「<작품>_<이름>」, 아니면 책 제목(R25)
 function bookFileBase() {
   const fb = WF.fileBaseFor(S.scriptPath);
@@ -10870,7 +10871,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
     warnMissingGlyphs(html, '내지 PDF');
     warnLongTitles(bookLayoutOpts(args), '내지 PDF');
     const base = bookFileBase();   // 작품 폴더면 「삼국지_제1권」
-    const interiorPdf = path.join(outRoot, `${BOOK_PREFIX.print}${base}_내지.pdf`);
+    const interiorPdf = OL.outPath(outRoot, 'print', 'interior', base);
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
     if (!r.success) { log('✗ 내지 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
     S.parsed._lastPages = r.pages || S.parsed._lastPages || 0;
@@ -10906,7 +10907,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
           }
         } catch (_) {}
       }
-      const coverPdf = path.join(outRoot, `${BOOK_PREFIX.print}${base}_표지.pdf`);
+      const coverPdf = OL.outPath(outRoot, 'print', 'cover', base);
       coverResult = await PB.buildCoverPdf({
         imagePath: coverHasImg ? S.parsed.coverImagePath : null,
         spread, outPdf: coverPdf, workDir, log,
@@ -10919,7 +10920,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
           const PK = require('./core/book/pdf-pack');
           const frontTmp = path.join(workDir, '_front-cover.pdf');
           if (await PK.frontCoverFromSpreadPdf(coverPdf, spread, frontTmp)) {
-            fullPdf = path.join(outRoot, `${BOOK_PREFIX.print}${base}_표지+내지.pdf`);
+            fullPdf = OL.outPath(outRoot, 'print', 'full', base);
             const n = await PK.prependCover(frontTmp, interiorPdf, fullPdf);
             log(`📄 표지+내지 PDF — ${n}쪽(앞표지 1 + 내지 ${n - 1})`);
           }
@@ -10935,6 +10936,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
       if (!hasColophon) log('⚠ 판권지 없음 — 내지에 판권지가 포함되지 않습니다. 원고에 `## [판권]` 을 추가하세요(내용 비우면 메타로 자동 생성).');
     } catch (_) {}
     S.timings.make = Math.round((Date.now() - t0) / 1000);
+    try { const g = OL.removeLegacy(outRoot, 'print', base, ['interior', 'cover', 'full']); if (g.length) log(`🧹 옛 위치의 종이책 파일 ${g.length}개 정리(새 폴더 구조로 이동)`); } catch (_) {}
     const coverFailed = coverResult && !coverResult.success;
     log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : (coverFailed ? ' (⚠ 표지 실패 — 로그 확인)' : '')} (${S.timings.make}초) → ${outRoot}`);
     if (!args.noOpen) { try { shell.openPath(outRoot); } catch {} }   // 「한 번에 만들기」는 끝에 한 번만 연다(noOpen)
@@ -10964,18 +10966,19 @@ async function buildEbookPdf(args, outRoot, t0) {
     imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
     edition: 'ebook', ebookCoverPath: null,   // 표지는 조판에 넣지 않고 따로 만든 앞표지 PDF 를 끼운다(_표지+본문.pdf)
   });
-  const bodyPdf = path.join(outRoot, `${BOOK_PREFIX.ebook}${base}_본문.pdf`);
+  const bodyPdf = OL.outPath(outRoot, 'ebook', 'body', base);
   const r = await PB.buildInteriorPdf({ html, outPdf: bodyPdf, workDir, log });
   if (!r.success) { log('✗ 전자책 본문 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
   const coverPdf = await buildEbookFrontCoverPdf(outRoot, base, workDir, args);
   let fullPdf = null, fullPages = 0;
   if (coverPdf) {
     try {
-      fullPdf = path.join(outRoot, `${BOOK_PREFIX.ebook}${base}_표지+본문.pdf`);
+      fullPdf = OL.outPath(outRoot, 'ebook', 'full', base);
       fullPages = await PK.prependCover(coverPdf, bodyPdf, fullPdf);
     } catch (e) { fullPdf = null; log('✗ 전자책 표지+본문 PDF 실패: ' + e.message); }
   } else log('ℹ 전자책 표지 없음 — 본문 PDF 만 만들었습니다(`> 전자책표지:` 메타 또는 인쇄 표지를 첨부하세요). 부크크에 올릴 표지+본문 PDF 가 없습니다.');
   S.timings.make = Math.round((Date.now() - t0) / 1000);
+  try { const g = OL.removeLegacy(outRoot, 'ebook', base, ['body', 'cover', 'full']); if (g.length) log(`🧹 옛 위치의 전자책 파일 ${g.length}개 정리(새 폴더 구조로 이동)`); } catch (_) {}
   log(`📱 전자책 PDF 완료 — 본문 ${r.pages || '?'}쪽${coverPdf ? ' · 표지 1쪽' : ''}${fullPdf ? ` · 표지+본문 ${fullPages}쪽` : ''} (${S.timings.make}초) → ${outRoot}`);
   if (!args.noOpen) { try { shell.openPath(outRoot); } catch {} }
   storeActive();
@@ -10986,7 +10989,7 @@ async function buildEbookPdf(args, outRoot, t0) {
 async function buildEbookFrontCoverPdf(outRoot, base, workDir, args = {}) {
   const PK = require('./core/book/pdf-pack');
   const meta = S.parsed.meta || {};
-  const out = path.join(outRoot, `${BOOK_PREFIX.ebook}${base}_표지.pdf`);
+  const out = OL.outPath(outRoot, 'ebook', 'cover', base);
   const { spread } = bookSpec(meta, S.parsed._lastPages || 0);
   const trimW = (PK.frontPanelOf(spread) || {}).widthMm || 0;   // 앞표지 폭 = 판형 폭
   try {
@@ -10994,7 +10997,7 @@ async function buildEbookFrontCoverPdf(outRoot, base, workDir, args = {}) {
     const f = await resolveEbookCoverFile(outRoot, base);
     if (f && await PK.coverFileToPdf(f, out, trimW)) { log(`🖼 전자책 표지 PDF ← ${path.basename(f)}`); return out; }
     // ② 종이책 표지 PDF(펼침면)의 앞면 — 벡터 그대로(표지 문구·글자 포함)
-    const printCover = [`${BOOK_PREFIX.print}${base}_표지.pdf`, `${base}_표지.pdf`].map((n) => path.join(outRoot, n)).find((q) => fs.existsSync(q));
+    const printCover = OL.findOwn(outRoot, 'print', 'cover', base);
     if (printCover && await PK.frontCoverFromSpreadPdf(printCover, spread, out)) { log(`🖼 전자책 표지 PDF ← 종이책 표지 PDF 의 앞표지(${path.basename(printCover)})`); return out; }
     // ③ 종이책 표지 PDF 가 아직 없으면 표지 이미지·문구로 펼침면을 임시로 만들어 앞면만
     const cvPlan = bookCoverPlan(bookLayoutOpts(args), meta, log);
@@ -11240,7 +11243,7 @@ regBook('book-epubcheck', async (_e, args = {}) => {
     let target = args.path;
     if (!target) {
       const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
-      const files = fs.existsSync(root) ? fs.readdirSync(root).filter((f) => /\.epub$/i.test(f)).map((f) => path.join(root, f)) : [];
+      const files = OL.listAll(root).filter((f) => /\.epub$/i.test(f));
       target = files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
     }
     if (!target || !fs.existsSync(target)) return { error: 'ePub 파일이 없습니다 — 먼저 「ePub 만들기」를 누르세요' };
@@ -11290,7 +11293,7 @@ async function bookBuildEpubImpl(args = {}) {
     const pagesKnown = (S.parsed._lastPages || 0) > 0;
     if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
     const r = await buildEpub(S.parsed, {
-      outPath: args.previewOut || path.join(outRoot, `${BOOK_PREFIX.ebook}${base}.epub`),
+      outPath: args.previewOut || OL.outPath(outRoot, 'ebook', 'epub', base),
       tmpDir: WF.tmpDir(outRoot, '', 'epub'),   // 전자책 표지 조각(_ebook-cover_<권>.jpg) — 완성 폴더면 _작업/epub
       coverTmpName: `_ebook-cover_${base}.jpg`,
       ebookCoverPath,
@@ -11303,6 +11306,7 @@ async function bookBuildEpubImpl(args = {}) {
       epubVersion: args.epubVersion, embedFonts: args.embedFonts,
       spread, log,
     });
+    if (r.success && !args.previewOut) { try { OL.removeLegacy(outRoot, 'ebook', base, ['epub']); } catch (_) {} }
     if (r.success && !args.noOpen && !args.previewOut) { try { shell.openPath(outRoot); } catch {} }
     return { dto: currentDTO(), epubPath: r.epubPath };
   } catch (e) {
@@ -11591,17 +11595,18 @@ function bookOutputKind(f) {
   if (/\.epub$/i.test(f)) return 'epub';
   if (!/\.pdf$/i.test(f)) return null;
   if (f.endsWith('_전자책.pdf')) return 'ebookPdf';
-  if (f.startsWith(BOOK_PREFIX.ebook)) return f.endsWith('_표지+본문.pdf') ? 'ebookPdf' : f.endsWith('_본문.pdf') ? 'ebookBody' : f.endsWith('_표지.pdf') ? 'ebookCover' : null;
-  return f.endsWith('_표지+내지.pdf') ? 'full' : f.endsWith('_내지.pdf') ? 'interior' : f.endsWith('_표지.pdf') ? 'cover' : null;
+  if (f.startsWith(BOOK_PREFIX.ebook)) return (f.endsWith('_완성.pdf') || f.endsWith('_표지+본문.pdf')) ? 'ebookPdf' : f.endsWith('_본문.pdf') ? 'ebookBody' : f.endsWith('_표지.pdf') ? 'ebookCover' : null;
+  return (f.endsWith('_완성.pdf') || f.endsWith('_표지+내지.pdf')) ? 'full' : f.endsWith('_내지.pdf') ? 'interior' : f.endsWith('_표지.pdf') ? 'cover' : null;
 }
 function listBookOutputs() {
   const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
   const out = [];
   try {
-    for (const f of fs.readdirSync(root)) {
+    for (const full of OL.listAll(root)) {
+      const f = path.basename(full);
       const kind = bookOutputKind(f);
       if (!kind) continue;
-      const full = path.join(root, f); const st = fs.statSync(full);
+      const st = fs.statSync(full);
       out.push({ kind, name: f, path: full, bytes: st.size, mtime: st.mtimeMs });
     }
   } catch (_) {}
@@ -11641,11 +11646,11 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
     const RF = require('./core/book/register-fill');
     const RB = require('./core/book/register-browser');
     const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
-    const files = fs.existsSync(root) ? fs.readdirSync(root) : [];
-    const pick = (suf) => { const f = files.filter((x) => x.endsWith(suf)).map((x) => path.join(root, x)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]; return f || ''; };
+    const files = OL.listAll(root);
+    const pick = (suf) => { const f = files.filter((x) => x.endsWith(suf)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]; return f || ''; };
     // 📚 이 권의 파일만 고른다 — 완성 폴더에는 제1~7권 파일이 함께 있어, 접미사로 「가장 최근 것」을 고르면 다른 권의 내지·ePub·표지를 올릴 수 있다(로이 2026-10-02 폴더 화면에서 발견)
     const ownBase = bookFileBase();
-    const own = (kind, suffix) => { const names = [`${BOOK_PREFIX[kind]}${ownBase}${suffix}`, `${ownBase}${suffix}`]; const hit = names.map((n) => path.join(root, n)).find((q) => fs.existsSync(q)); return hit || ''; };
+    const own = (kind, suffix) => OL.findOwn(root, kind, { '_내지.pdf': 'interior', '_표지.pdf': 'cover' }[suffix], ownBase);
     let plan;
     if (platform === 'jakkawa') {
       plan = RF.jakkawaPlan(S.parsed, { fileType: pick('.epub') || !pick('_전자책.pdf') ? 'EPUB' : 'PDF' });
@@ -11667,7 +11672,7 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
         //   표지 PDF 가 없으면 옛 순서(원고 `> 전자책표지:` > 표지 도구 전자책앞표지.jpg). 값은 등록정보 파일이 원고 메타보다 우선(ISBN 은 종이책 값이라 쓰지 않는다).
         //   ⚠ 전자책 파일은 [전자책] 이름만 찾는다 — 접두 없는 옛 `<권>_표지.pdf` 는 종이책 펼침면이다.
         const okCover = (p) => /\.(jpe?g|pdf)$/i.test(p) && fs.existsSync(p) && fs.statSync(p).size <= 10 * 1024 * 1024;   // 부크크 전자책 표지: JPG·PDF 10MB 이하
-        const ebOwn = (suffix) => { const q = path.join(root, `${BOOK_PREFIX.ebook}${ownBase}${suffix}`); return fs.existsSync(q) ? q : ''; };
+        const ebOwn = (suffix) => OL.findOwn(root, 'ebook', { '_표지.pdf': 'cover', '_표지+본문.pdf': 'full', '_본문.pdf': 'body' }[suffix], ownBase);
         let cover = ebOwn('_표지.pdf');
         if (cover && !okCover(cover)) { log(`⚠ 전자책 표지 ${path.basename(cover)} 는 10MB 를 넘어 올릴 수 없습니다`); cover = ''; }
         if (!cover) {

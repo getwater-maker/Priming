@@ -234,7 +234,7 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     ok(/const own = \(kind, suffix\)/.test(reg) && /own\('print', '_내지\.pdf'\)/.test(reg) && /own\('print', '_표지\.pdf'\)/.test(reg), '이 권 이름으로 내지·표지를 고른다(own)');
     ok(!/pick\('\.epub'\)|pick\('_내지\.pdf'\)|pick\('_표지\.pdf'\)/.test(bookkPart.slice(bookkPart.indexOf('} else {'))), '부크크 입력 경로에 「접미사로 가장 최근 파일」 선택(pick)이 남아 있지 않다');
     // 📄 전자책 = PDF 업로드(로이 2026-10-12) — [전자책] 이름만 찾는다(접두 없는 `<권>_표지.pdf` 는 종이책 펼침면)
-    ok(/const ebOwn = \(suffix\) => \{ const q = path\.join\(root, `\$\{BOOK_PREFIX\.ebook\}\$\{ownBase\}\$\{suffix\}`\)/.test(reg) && /ebOwn\('_표지\+본문\.pdf'\)/.test(reg) && /let cover = ebOwn\('_표지\.pdf'\)/.test(reg), '전자책 등록 = 이 권의 [전자책] 표지+본문 PDF · 표지 PDF');
+    ok(/const ebOwn = \(suffix\) => OL\.findOwn\(root, 'ebook', /.test(reg) && /ebOwn\('_표지\+본문\.pdf'\)/.test(reg) && /let cover = ebOwn\('_표지\.pdf'\)/.test(reg), '전자책 등록 = 이 권의 [전자책] 표지+본문 PDF · 표지 PDF');
     ok(!/own\('ebook'/.test(reg) && !/\.epub'\)/.test(reg.slice(reg.indexOf('const buildEbookPlan'))), '🔑 전자책 등록 경로는 ePub 을 고르지 않는다'); }
   ok(!/bookk-both|bookkBoth|runRegisterBoth/.test(mainSrc) && !/runRegisterBoth/.test(src), '종이책 → 전자책 「한 번에 등록」 코드는 제거됐다(로이 2026-10-03 — 현실적으로 불가)');
   fs.rmSync(T, { recursive: true, force: true });

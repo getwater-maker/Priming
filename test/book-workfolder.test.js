@@ -63,7 +63,7 @@ ok(WF.tmpDir(path.join(W, '완성'), '_work', 'work') === path.join(W, '완성',
 ok(WF.tmpDir(path.join(root, 'out', '책'), '_work', 'work') === path.join(root, 'out', '책', '_work') && WF.tmpDir(path.join(root, 'out', '책'), '', 'epub') === path.join(root, 'out', '책'), '그 밖의 출력 폴더는 예전 위치 그대로(호환)');
 const M2 = R('main.js');
 ok(/WF\.tmpDir\(outRoot, '_work', 'work'\)/.test(M2) && /WF\.tmpDir\(.*'_preview', 'preview'\)/.test(M2) && /WF\.tmpDir\(outRoot, '', 'epub'\)/.test(M2) && !/path\.join\(outRoot, '_work'\)/.test(M2), 'main: 작업·미리보기·전자책 조각·캡처 폴더가 한 함수(tmpDir)를 거친다');
-ok(/BOOK_PREFIX\.print\}\$\{base\}_내지\.pdf/.test(M2) && /function bookFileBase\(\)/.test(M2), 'main: 완성 파일 이름 = [종이책|전자책] + bookFileBase()');
+ok(/OL\.outPath\(outRoot, 'print', 'interior', base\)/.test(M2) && /function bookFileBase\(\)/.test(M2) && /PREFIX = \{ print: '\[종이책\] '/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'core', 'book', 'out-layout.js'), 'utf8')), 'main: 완성 파일 이름 = out-layout([종이책|전자책] 접두) + bookFileBase()');
 
 console.log(`\n${fail ? '❌' : '✅'} book-workfolder — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);
