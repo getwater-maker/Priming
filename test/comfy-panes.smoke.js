@@ -195,7 +195,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     // ⚙ 설정 탭 구조(v0.7.40 · 로이): ComfyUI(이미지+비디오+TTS 서버) · Flow · API 키 · 유튜브 — 계정 탭 없음 · 브라우저 설치는 Flow 탭 · Flow 이미지 모델 = 2.1
     {
       const tabsTxt = await win.locator('.settings-card .st-tabs button').allInnerTexts();
-      ok(tabsTxt.length === 4 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /유튜브/.test(tabsTxt[3]), '탭 4개: ' + tabsTxt.join(' / '));
+      ok(tabsTxt.length === 5 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /유튜브/.test(tabsTxt[3]) && /폴더/.test(tabsTxt[4]), '탭 5개(v0.9.16 📁 폴더): ' + tabsTxt.join(' / '));
       ok(!tabsTxt.some((x) => /계정|TTS 서버|브라우저 이미지/.test(x)), '옛 「계정」·「TTS 서버」·「브라우저 이미지」 탭은 없다');
       ok(await win.locator('.settings-card button:has-text("브라우저 설치")').count() === 1, '「⬇ 브라우저 설치」 가 Flow 탭에 있다');
       ok((await win.locator('.settings-card select option[value="Nano Banana 2.1"]').count()) === 1, 'Flow 이미지 모델에 Nano Banana 2.1 이 있다');
@@ -208,16 +208,22 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       await win.click('.settings-card button:has-text("🌐 Flow")');
       await win.waitForTimeout(300);
     }
-    // 💡 설명글은 평소엔 안 보이고 ⓘ 에 마우스를 올릴 때만 말풍선으로 뜬다(v0.7.39)
+    // 💡 설명글은 평소엔 안 보이고, 설명이 달린 칸에 마우스를 올릴 때만 팝업으로 뜬다(v0.7.39 · v0.9.18 ⓘ 없음 · 줄 차지 없음)
     {
-      const hint = win.locator('.settings-card .hint').first();
-      ok(await win.locator('.settings-card .hint').count() >= 1, '설정 탭에 ⓘ 설명이 있다');
-      ok(!(await hint.locator('.hint-pop').isVisible()), '설명글은 평소에 보이지 않는다');
-      await hint.locator('.hint-i').hover();
-      await win.waitForTimeout(200);
-      ok(await hint.locator('.hint-pop').isVisible(), 'ⓘ 에 마우스를 올리면 설명이 뜬다');
+      ok(await win.locator('.settings-card .hint-src').count() >= 1, '설정 탭에 설명(숨김)이 있다');
+      ok(await win.locator('.settings-card .hint-i').count() === 0, 'ⓘ 아이콘이 없다(v0.9.18)');
+      ok(await win.locator('.settings-card .hint-src').first().isHidden(), '설명글은 평소에 보이지 않는다(줄도 차지하지 않는다)');
+      const tgt = win.locator('.settings-card [data-has-hint]').first();
+      ok(await tgt.count() === 1, '설명이 달린 칸 표시(data-has-hint)');
+      await tgt.hover();
+      await win.waitForTimeout(450);
+      ok(await win.locator('#hint-float').isVisible(), '그 칸에 마우스를 올리면 설명 팝업이 뜬다');
+      const srcs = (await win.locator('.settings-card .hint-src').allTextContents()).map((t) => t.trim().slice(0, 10)).filter(Boolean);
+      const shown = await win.locator('#hint-float').textContent();
+      ok(srcs.some((w) => shown.includes(w)), '팝업 내용 = 숨겨 둔 설명 중 하나');
       await win.mouse.move(5, 5);
-      ok(!(await win.locator('.settings-card .hint-pop').first().isVisible()), '마우스를 치우면 사라진다');
+      await win.waitForTimeout(100);
+      ok(!(await win.locator('#hint-float').isVisible()), '마우스를 치우면 사라진다');
     }
     ok(!free.text.includes('되돌아가'), '옛 「원래 엔진으로 되돌아간다」 안내는 없다');
     await win.click('.modal-card button:has-text("닫기")');

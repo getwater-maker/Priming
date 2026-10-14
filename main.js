@@ -2892,16 +2892,6 @@ ipcMain.handle('info-preview', async (_e, args = {}) => {
     return await infoPreviewFor(pr, String(args.presetName || ''), S.scriptPath);
   } catch (e) { return { ok: false, error: (e && e.message) || String(e), panels: [] }; }
 });
-function fxOptsFor(pr, preset) {
-  try {
-    const FXO = require('./core/fx-overlay');
-    const ch = FXO.normFx(preset && preset.fx);
-    if (FXO.fxIsOff(ch)) return null;
-    if (!pr || !Array.isArray(pr.groups)) return { ranges: [{ t0: 0, t1: 1e9, fx: ch }] };
-    const ranges = FXO.planOf(pr, ch);
-    return ranges.length ? { ranges } : null;
-  } catch (e) { log('⚠ 오버레이 모션 구간표를 만들지 못했습니다(없이 굽습니다): ' + ((e && e.message) || e)); return null; }
-}
 async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null) {   // ctx = { parsed, scriptPath } — 업로드 제목이 화면에서 고른 대본을 따라가지 않게
   const VR = require('./core/vrew-render');
   const outPath = uploadMp4Path(baseName, preset, vrewPath);
@@ -2914,7 +2904,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: require('./core/visual-look').normDissolve(preset && preset.dissolveSec), fx: fxOptsFor(pr, preset), cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };

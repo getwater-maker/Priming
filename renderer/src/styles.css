@@ -1164,21 +1164,16 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .settings-card .st-body [style*="background: rgb(251, 246, 238)"]{border-radius:12px !important;padding:12px 14px !important}
 .settings-card .st-body hr{border:none;border-top:1px solid var(--line);margin:12px 0}
 /* 설명글 → 「ⓘ 설명」 — 올리면(또는 키보드 포커스) 말풍선으로 */
-.hint{position:relative;display:block;width:fit-content;margin:2px 0 4px;outline:none}
-.hint-i{display:inline-block;font-size:13px;line-height:1;color:#a3978a;cursor:help;padding:3px 6px;border-radius:10px;border:1px solid transparent;user-select:none}
-.hint:hover .hint-i,.hint:focus .hint-i{color:var(--accent-d);background:#f6ecdc;border-color:#ead9bd}
-.hint-pop{display:none;position:absolute;left:0;top:calc(100% + 4px);z-index:30;width:min(520px,72vw);padding:10px 12px;background:#fff;color:#5b5247;font-size:12px;line-height:1.55;border:1px solid #e4d9c8;border-radius:10px;box-shadow:0 8px 24px rgba(60,40,10,.18)}
-.hint:hover .hint-pop,.hint:focus .hint-pop{display:block}
+/* 💡 설명 팝업 — <Hint> 가 앞 칸에 마우스를 올릴 때 띄우는 한 장짜리(#hint-float · v0.9.18 · ⓘ 없음) */
+.hint-pop{display:none;position:fixed;z-index:10000;max-width:min(520px,72vw);padding:10px 12px;background:#fff;color:#5b5247;font-size:12px;line-height:1.55;border:1px solid #e4d9c8;border-radius:10px;box-shadow:0 8px 24px rgba(60,40,10,.18);pointer-events:none;white-space:normal}
+label[data-has-hint],.subhead[data-has-hint],.fsec[data-has-hint],.l[data-has-hint],span[data-has-hint]{cursor:help}
 .hint-pop b{color:var(--strong)}
-.settings-card .frow>.hint{margin:0 auto 0 0;flex:0 0 auto}
-.settings-card .frow>.hint .hint-pop{left:auto;right:auto}
 
 /* v0.7.40 — API 키 탭 줄 배치 + 탭 통합에 맞춘 폭 */
 .modal-card.settings-card{width:780px}
 .settings-card .kp-card{background:#fbf6ee;border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 10px}
 .settings-card .kp-title{font-weight:800;color:var(--hook);margin:0 0 4px;font-size:13px}
 .settings-card .kp-line{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:nowrap}
-.settings-card .kp-line .hint{margin:0}
 .settings-card .kp-name{color:var(--hook);font-size:13px;white-space:nowrap}
 .settings-card .kp-row.sep{border-top:1px dashed var(--line);margin-top:6px;padding-top:2px}
 .settings-card .kp-row .kp-name{color:var(--strong);min-width:140px}
@@ -1334,3 +1329,33 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .bkdist-item{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}
 .bkdist-item.done{border-color:#7bb77b}.bkdist-item.rejected{border-color:#d9776a;background:#fff8f6}.bkdist-item.progress{border-color:#d7b56a}
 .bkdist-st{font-weight:700;white-space:nowrap}
+
+/* 📥 다운로드 · STT 창(v0.9.18) — 두 탭 같은 크기 · 켜고 끄는 버튼 · 사이트 로고 */
+.dl-card{width:640px;max-width:94vw;min-height:440px;display:flex;flex-direction:column}
+.dl-tabs{display:flex;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.dl-body{flex:1;display:flex;flex-direction:column;gap:10px}
+.dl-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dl-bar .dl-paste{padding:9px 18px;font-weight:700}
+.dl-bar select{width:auto;flex:0 0 auto}
+.dl-tg{background:#fff;color:var(--muted);border:1px solid var(--line);font-weight:600}
+.dl-tg.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dl-sites{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;padding:6px 0}
+.dl-site{display:inline-flex;width:40px;height:40px;align-items:center;justify-content:center;border-radius:50%;transition:background .15s}
+.dl-site:hover{background:#efe6d6}
+.dl-opts{display:flex;gap:8px;flex-wrap:wrap}
+.dl-foot{display:flex;align-items:center;gap:8px;margin-top:auto}
+.dl-tiles{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:center}
+.dl-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:190px;background:#fff;color:var(--muted);border:2px solid var(--line);border-radius:14px}
+.dl-tile .ic{font-size:54px;line-height:1;filter:grayscale(.7);opacity:.7}
+.dl-tile .t{font-size:16px;font-weight:700}
+.dl-tile .ck{font-size:12px}
+.dl-tile.on{background:#fbf3e6;color:var(--strong);border-color:var(--accent)}
+.dl-tile.on .ic{filter:none;opacity:1}
+.dl-tile.on .ck{color:var(--accent-d);font-weight:700}
+.dl-tg:hover:not(:disabled){background:#fdf6ea;color:var(--strong);border-color:var(--accent)}
+.dl-tile:hover:not(:disabled){background:#fffaf3;color:var(--muted);border-color:#e6d4b6}
+.dl-tg.on:hover:not(:disabled){background:var(--accent-d);color:#fff;border-color:var(--accent-d)}
+.dl-tile.on:hover:not(:disabled){background:#f8ead3;color:var(--strong)}
+.chcards{margin-top:14px}
+.chcards .col{min-width:0}
+.chcards .dl-tg{padding:4px 10px}

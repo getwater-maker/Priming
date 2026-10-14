@@ -95,7 +95,7 @@ console.log('\n[4] .vrew — 구간마다 자산·트랙 · 문장→구간 · �
     const vs = await build(prShort, 'short', { kbSeg: 6 });
     ok(imgTracks(read(vs)).length === 2, '짧은 그림(16초)에 6구간을 줘도 8초 미만으로는 안 나눈다(2구간)');
     const vch = await build(pr6, 'chan', null, { kbSeg: 2 });
-    ok(imgTracks(read(vch)).length === 2, '채널 기본 2구간이 그룹 값 없는 그룹에 적용된다');
+    ok(imgTracks(read(vch)).length === 1, '🎞 채널 켄번스 구간은 읽지 않는다(v0.9.18 · 채널 화면 연출 제거) — 그룹 값 없는 그룹은 한 번에');
     const voff = await build(pr6, 'off', { kbSeg: 'off' }, { kbSeg: 2 });
     ok(imgTracks(read(voff)).length === 1, "그룹 값 'off' 는 채널 기본을 이긴다(나누지 않음)");
     const vgr = await build(pr6, 'grp', { kbSeg: 3 }, { kbSeg: 2 });
@@ -108,7 +108,7 @@ console.log('\n[4] .vrew — 구간마다 자산·트랙 · 문장→구간 · �
     // 지문(건너뛰기)이 채널 기본 구간을 본다
     pr6.groups[0].look = undefined;
     const fp1 = JSON.stringify(P.vrewInputsOf(pr6, { kbSeg: 3 }, 20)), fp0 = JSON.stringify(P.vrewInputsOf(pr6, {}, 20));
-    ok(fp1 !== fp0 && /"kbSeg":3/.test(fp1) && !/"kbSeg"/.test(fp0), '빌드 지문에 채널 켄번스 구간이 실린다(바꾸면 다시 만든다)');
+    ok(fp1 === fp0 && !/"kbSeg"/.test(fp1), '빌드 지문에 채널 켄번스 구간이 실리지 않는다(v0.9.18 — 채널 값을 읽지 않는다)');
 
     console.log('\n[5] MP4 — 이음새에서 화면이 튀지 않는다');
     // 구간 3 = 60초 단위. 앞 8초만 굽는 대신 경계 전후 두 프레임을 비교한다: 경계 직전 프레임과 직후 프레임의 차이는 평소 이웃 프레임 차이와 같은 수준이어야 한다.

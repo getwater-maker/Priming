@@ -50,7 +50,10 @@ console.log('\n[2] 설정 값');
 {
   ok(VL.normDissolve(undefined) === 0 && VL.normDissolve('4') === 4 && VL.normDissolve(99) === 0 && VL.normDissolve(-1) === 0 && VL.normDissolve(0.2) === 0, 'normDissolve: 0 · 0.5~10 만(기본 0 = 컷)');
   const g = P.parseScriptText('# t\n## 장\n### 장면\n가나다라마바사입니다.\n', 'longform', {});
-  ok(/"dissolveSec":4/.test(JSON.stringify(P.vrewInputsOf(g.projects[0], { dissolveSec: 4 }, 20))) && !/dissolveSec/.test(JSON.stringify(P.vrewInputsOf(g.projects[0], {}, 20))), '빌드 지문에 채널 디졸브가 실린다(바꾸면 다시 굽는다)');
+  { const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/renderVrewToMp4\(\{[^\n]*dissolveSec: 0, fx: null/.test(M) && !/function fxOptsFor/.test(M) && !/preset\.dissolveSec|preset && preset\.fx/.test(M),
+      '🎬 유튜브 MP4 는 채널 디졸브·오버레이 모션을 읽지 않는다(v0.9.18 · 채널 화면 연출 제거)'); }
+  ok(!/dissolveSec/.test(JSON.stringify(P.vrewInputsOf(g.projects[0], { dissolveSec: 4 }, 20))),'빌드 지문에 채널 디졸브가 실리지 않는다(v0.9.18 — 채널 화면 연출 제거 · 채널 값을 읽지 않는다)');
 }
 
 console.log('\n[3] 실제 MP4 — 빨강 10초 → 파랑 10초');

@@ -125,7 +125,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const row = win.locator('[data-testid=logo-row]');
     ok(await row.locator('[data-testid=logo-clear]').count() === 1, '로고 칸에 ✕');
     await row.locator('[data-testid=logo-clear]').click();
-    ok((await row.locator('input[readonly]').inputValue()) === '' && !(await row.locator('input[type=checkbox]').isChecked()), '✕ → 경로 비움 · 끔');
+    ok((await row.locator('[data-testid=logo-file]').innerText()).trim() === '파일' && (await row.locator('[data-testid=logo-on]').getAttribute('aria-pressed')) === 'false', '✕ → 경로 비움 · 끔(v0.9.18 카드 — 파일 단추가 「파일」로 · 켬 단추 꺼짐)');
     ok(await row.locator('[data-testid=logo-clear]').count() === 0, '비우면 ✕ 사라짐');
     await win.locator('.modal-card.tabbed button:text-is("저장")').first().click();
     await win.waitForTimeout(900);

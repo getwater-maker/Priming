@@ -24,7 +24,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('[data-testid=app-folders] button:has-text("찾기")').count() === 2, '찾기 단추 두 개');
     const r = await win.evaluate(() => window.api.getAppFolders());
     ok(r && typeof r.reader === 'string' && typeof r.download === 'string' && typeof r.def === 'string', 'get-app-folders 응답 모양 — ' + JSON.stringify(r));
-    const hint = await win.locator('[data-testid=app-folders]').innerText();
+    const hint = (await win.locator('[data-testid=app-folders] .hint-src').allTextContents()).join(' ');   // 설명은 마우스 팝업(v0.9.18)
     ok(/모든 채널 공통/.test(hint), '「모든 채널 공통」 안내');
     try { await win.locator('.settings-card').screenshot({ path: process.env.PM_SHOT || path.join(os.tmpdir(), 'app-folders.png') }); } catch {}
   } finally { await app.close(); }

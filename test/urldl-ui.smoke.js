@@ -53,27 +53,31 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const opts = await sel.locator('option').allTextContents();
     ok(opts.length === 2 && /오디오/.test(opts[0]) && /영상/.test(opts[1]), `오디오·영상 두 가지 (${opts.join(' | ')})`);
     ok(await bar.locator('select').count() === 1 && !/화질/.test(await bar.innerText()), '화질 칸이 없다(늘 최고)');
+    const on = async (l) => (await l.getAttribute('aria-pressed')) === 'true';   // ✓ 켜고 끄는 버튼(v0.9.18 — 체크박스 아님)
+    const hints = async () => (await card.locator('.hint-src').allTextContents()).join(' ');   // 설명은 숨김 → 마우스 팝업
     const sttChk = card.locator('[data-testid="dl-stt"]');
-    ok(await sttChk.isChecked(), '「STT 전사」 기본 켜짐(옛 대본다운과 같은 동작)');
+    ok(await on(sttChk), '「STT 전사」 기본 켜짐(옛 대본다운과 같은 동작)');
     await sel.selectOption('video');
     ok(await sel.inputValue() === 'video', '영상으로 전환된다');
     await sel.selectOption('audio');
     const runBtn = card.locator('[data-testid="dl-run"]');
     ok(/받아서 전사/.test(await runBtn.innerText()), 'STT 켜짐 → 「받아서 전사」');
-    await sttChk.uncheck();
+    await sttChk.click();
     ok(/^받기$/.test((await runBtn.innerText()).trim()), 'STT 끔 → 「받기」');
-    ok(await card.locator('label:has-text("Whisper 로 전사")').count() === 0, 'STT 를 끄면 「자막이 있어도 Whisper」 칸도 숨는다');
-    ok(/파일만 받습니다/.test(await card.innerText()), 'STT 끔 = 파일만 받는다고 알려 준다');
-    await sttChk.check();
+    ok(await card.locator('[data-testid="dl-force"]').count() === 0, 'STT 를 끄면 「자막이 있어도 Whisper」 칸도 숨는다');
+    ok(/파일만 받습니다/.test(await hints()), 'STT 끔 = 파일만 받는다고 알려 준다(마우스 팝업)');
+    ok(await card.locator('.hint-i').count() === 0 && !/파일만 받습니다/.test(await card.innerText()), '설명글은 화면에 늘어놓지 않는다(ⓘ 도 없음)');
+    ok(await card.locator('[data-testid="dl-sites"] .dl-site').count() >= 8, '주소 칸 위에 사이트 로고가 늘어서 있다');
+    await sttChk.click();
 
     // [5] 채널 전체·자막 무시 체크박스 — 둘 다 명시적으로 켜야 한다
-    const channelChk = card.locator('label:has-text("유튜브 채널의 일반 영상 전체") input[type=checkbox]');
-    const forceChk = card.locator('label:has-text("Whisper 로 전사") input[type=checkbox]');
-    ok(await channelChk.count() === 1 && !(await channelChk.isChecked()), '「채널 전체」는 기본 꺼짐(단일 URL 안전 유지)');
-    ok(await forceChk.count() === 1 && !(await forceChk.isChecked()), '「자막이 있어도 STT」는 기본 꺼짐');
-    await channelChk.check();
+    const channelChk = card.locator('[data-testid="dl-channel"]');
+    const forceChk = card.locator('[data-testid="dl-force"]');
+    ok(await channelChk.count() === 1 && !(await on(channelChk)), '「채널 전체」는 기본 꺼짐(단일 URL 안전 유지)');
+    ok(await forceChk.count() === 1 && !(await on(forceChk)), '「자막이 있어도 STT」는 기본 꺼짐');
+    await channelChk.click();
     ok(/채널 전체 받아서 전사/.test(await runBtn.innerText()), '채널 모드에서는 실행 버튼 문구가 분명히 바뀐다');
-    await channelChk.uncheck();
+    await channelChk.click();
 
     // [6] yt-dlp 상태가 창에 보인다(조회가 비동기라 값이 올 때까지 기다린다)
     await win.waitForFunction(() => {
@@ -83,7 +87,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const body = await card.innerText();
     ok(/yt-dlp|자동으로 내려받습니다/.test(body), 'yt-dlp 상태를 알려준다');
     ok(/⬇ 업데이트/.test(body), '「⬇ 업데이트」 버튼이 있다(유튜브가 바뀌면 여기서 갱신)');
-    ok(/늘 최고 화질/.test(body), '영상은 늘 최고 화질이라고 알려 준다');
+    ok(/늘 최고 화질/.test(await hints()), '영상은 늘 최고 화질이라고 알려 준다');
 
     // [7] 주소가 없으면 받지 않는다(빈 입력 방어)
     await runBtn.click();
@@ -99,15 +103,17 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     try { await card.screenshot({ path: process.env.PM_SHOT_LINK || require('path').join(require('os').tmpdir(), 'dl-link.png') }); } catch {}
 
     // [7-c] 📂 내 파일 탭 — mp3 추출 · STT 전사 체크 + 파일 고르기(둘 다 끄면 못 누른다)
+    const linkBox = await card.boundingBox();
     await card.locator('[data-testid="dl-tab-file"]').click();
+    { const fb = await card.boundingBox(); ok(Math.abs(fb.width - linkBox.width) < 2 && Math.abs(fb.height - linkBox.height) < 2, `두 탭 창 크기가 같다 (${Math.round(linkBox.width)}×${Math.round(linkBox.height)} / ${Math.round(fb.width)}×${Math.round(fb.height)})`); }
     const mp3Chk = card.locator('[data-testid="dl-file-mp3"]'), fSttChk = card.locator('[data-testid="dl-file-stt"]');
-    ok(await mp3Chk.count() === 1 && !(await mp3Chk.isChecked()), '📂 mp3 추출 칸(기본 꺼짐)');
-    ok(await fSttChk.count() === 1 && await fSttChk.isChecked(), '📂 STT 전사 칸(기본 켜짐)');
+    ok(await mp3Chk.count() === 1 && !(await on(mp3Chk)), '📂 mp3 추출 칸(기본 꺼짐)');
+    ok(await fSttChk.count() === 1 && await on(fSttChk), '📂 STT 전사 칸(기본 켜짐)');
     const fileRun = card.locator('[data-testid="dl-file-run"]');
     ok(await fileRun.isEnabled(), '「📂 파일 고르기」 누를 수 있다');
-    await fSttChk.uncheck();
+    await fSttChk.click();
     ok(await fileRun.isDisabled(), '둘 다 끄면 「파일 고르기」를 못 누른다');
-    await mp3Chk.check();
+    await mp3Chk.click();
     ok(await fileRun.isEnabled(), 'mp3 만 켜도 누를 수 있다');
     // 파일 고르기 → 취소(빈 목록)면 아무 일도 하지 않고 창도 그대로
     await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });

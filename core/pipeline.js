@@ -691,10 +691,9 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
-    { const ks = require('./visual-look').normKbSeg(preset.kbSeg); if (ks !== 1) inp.kbSeg = ks; }   // 🎞 채널 기본 켄번스 구간(대본 그룹의 look.kbSeg 가 이긴다)
-    { const ds = require('./visual-look').normDissolve(preset.dissolveSec); if (ds > 0) inp.dissolveSec = ds; }
+    // 🎞 채널 화면 연출(켄번스 구간 · 디졸브 · 오버레이 모션)은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값(kbSeg·dissolveSec·fx)을 읽지 않는다.
+    //   ⛔ 다시 읽게 하지 말 것(채널편집에 칸이 없어 숨은 채로 적용된다 · 06_고전서재에 디졸브 4초가 남아 있다). 그룹별 look.kbSeg 는 그대로.
     if (preset.infoCards) { inp.infoCards = true; if (Array.isArray(project.infoMarks) && project.infoMarks.length) inp.info = project.infoMarks; }   // 📇 정보 카드 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
-    { const FXO = require('./fx-overlay'); const fx = FXO.normFx(preset.fx); if (!FXO.fxIsOff(fx)) inp.fx = fx; }   // 🌫 채널 오버레이 모션 — MP4 가 달라지므로 지문에   // 🌫 채널 디졸브 — .vrew 는 그대로지만 MP4 가 달라진다 → 지문에 넣어 바꾸면 다시 만들게
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 대본 덮어쓰기(logoOver) 포함 · 자리 = 대본 끌어 옮김 > ↖ > 채널 기본 자리
   }
@@ -713,7 +712,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
-    { const ks = require('./visual-look').normKbSeg(preset.kbSeg); if (ks !== 1) opts.kbSeg = ks; }   // 🎞 채널 기본 켄번스 구간
+    // 🎞 채널 켄번스 구간은 읽지 않는다(v0.9.18 — 위 vrewInputsOf 와 같은 규칙)
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) opts.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 채널 로고(또는 이 대본 덮어쓰기 logoOver) · 자리는 대본마다
   }

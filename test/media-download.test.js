@@ -284,7 +284,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/value="audio"[\s\S]{0,80}value="video"/.test(app), '오디오(mp3)·영상(mp4)을 고를 수 있다');
   ok(/urlChannelAll, setUrlChannelAll/.test(app) && /channel: urlChannelAll/.test(app),
     '채널 전체 체크값을 IPC에 전달한다');
-  ok(/유튜브 채널의 일반 영상 전체/.test(app), '채널 전체 옵션을 화면에 분명히 표시한다');
+  ok(/📺 유튜브 채널 전체/.test(app) && /data-testid="dl-channel"/.test(app), '채널 전체 옵션을 화면에 분명히 표시한다(켜고 끄는 버튼 · v0.9.18)');
   ok(/if \(urlOpen\) \{ setUrlOpen\(false\); return; \}/.test(app), 'ESC 로 닫힌다');
   ok(/urlOpen, tsOpen/.test(app), 'ESC deps 배열에 들어 있다');
   // 📁 받기 폴더 = 모든 채널 공통(⚙ 설정 → 📁 폴더 · 2026-10-14) — 채널편집에서는 뺐다

@@ -352,9 +352,62 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
   );
 }
 
-// 💡 설명글은 화면에 늘어놓지 않고 ⓘ 에 마우스를 올릴 때만 보인다(⚙ 설정 팝업 · v0.7.39 · 로이 「설명글은 표시하지 말고 마우스 올리면 간단하게」)
-function Hint({ children, label = '' }) {
-  return (<span className="hint" tabIndex={0}><span className="hint-i">ⓘ{label ? ' ' + label : ''}</span><span className="hint-pop">{children}</span></span>);
+// 💡 설명글은 화면에 늘어놓지 않고 마우스를 올릴 때만 팝업으로 보인다(v0.7.39 · v0.9.18 로이 「ⓘ 도 안 보이게 · 다음 줄에 홀로 남지 않게」).
+//   <Hint> 자체는 아무것도 그리지 않는다 — 바로 **앞 칸**(없으면 뒤 칸, 그것도 없으면 감싼 칸)에 마우스를 올리면
+//   화면 맨 위 한 장짜리 팝업(#hint-float)에 내용을 띄운다. 그래서 줄을 차지하지 않고 ⓘ 도 없다.
+let _hintTimer = null;
+function hintFloat() {
+  let el = document.getElementById('hint-float');
+  if (!el) { el = document.createElement('div'); el.id = 'hint-float'; el.className = 'hint-pop'; document.body.appendChild(el); }
+  return el;
+}
+function hintShow(tgt, html) {
+  clearTimeout(_hintTimer);
+  _hintTimer = setTimeout(() => {
+    if (!tgt.isConnected || !html) return;
+    const el = hintFloat();
+    el.innerHTML = html;
+    el.style.display = 'block'; el.style.left = '0px'; el.style.top = '0px';
+    const r = tgt.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.max(8, Math.min(r.left, vw - w - 8));
+    const top = r.bottom + 6 + h <= vh - 8 ? r.bottom + 6 : Math.max(8, r.top - h - 6);
+    el.style.left = left + 'px'; el.style.top = top + 'px';
+  }, 250);
+}
+function hintHide() { clearTimeout(_hintTimer); const el = document.getElementById('hint-float'); if (el) el.style.display = 'none'; }
+function hintTarget(me) {
+  const sib = (el, k) => { let x = el[k]; while (x && x.classList && x.classList.contains('hint-src')) x = x[k]; return x; };
+  return sib(me, 'previousElementSibling') || sib(me, 'nextElementSibling') || me.parentElement;
+}
+// 📥 다운로드 창 — 받을 수 있는 대표 사이트 로고(v0.9.18). 브랜드 색·모양을 SVG 로 직접 그린 배지(외부 그림 파일·의존성 없음).
+const SITE_LOGOS = [
+  ['YouTube', <><rect x="2" y="7" width="28" height="19" rx="5" fill="#FF0000" /><path d="M13 11.5v10l8.5-5z" fill="#fff" /></>],
+  ['SoundCloud', <><rect x="3" y="15" width="2" height="7" rx="1" fill="#FF5500" /><rect x="7" y="13" width="2" height="9" rx="1" fill="#FF5500" /><rect x="11" y="11" width="2" height="11" rx="1" fill="#FF5500" /><path d="M15 10.5c1.2-.6 2.5-.9 3.8-.9 4 0 7.3 3 7.7 6.9 2.3.3 3.5 1.9 3.5 3.3 0 1.8-1.3 3.2-3.2 3.2H15z" fill="#FF5500" /></>],
+  ['Facebook', <><circle cx="16" cy="16" r="14" fill="#1877F2" /><path d="M17.6 29.8V20h3.3l.5-3.9h-3.8v-2.4c0-1.1.3-1.9 1.9-1.9h2V8.3c-.4 0-1.6-.2-3-.2-3 0-5 1.8-5 5.1v2.9H10.2V20h3.3v9.8z" fill="#fff" /></>],
+  ['Vimeo', <><rect x="2" y="2" width="28" height="28" rx="6" fill="#1AB7EA" /><path d="M24.5 11.6c-.1 1.9-1.4 4.5-4 7.9-2.7 3.5-4.9 5.2-6.8 5.2-1.2 0-2.1-1.1-2.9-3.2l-1.6-5.8c-.6-2.1-1.2-3.2-1.9-3.2-.1 0-.6.3-1.5.9l-.9-1.2 2.8-2.5c1.3-1.1 2.2-1.7 2.9-1.7 1.5-.1 2.5.9 2.8 3.1.4 2.4.6 3.9.8 4.5.4 1.9.9 2.9 1.4 2.9.4 0 1.1-.7 1.9-2 .9-1.4 1.3-2.4 1.4-3.1.1-1.2-.4-1.8-1.4-1.8-.5 0-1 .1-1.5.3 1-3.3 2.9-4.9 5.7-4.8 2.1.1 3.1 1.4 2.8 4.1z" fill="#fff" /></>],
+  ['TikTok', <><rect x="2" y="2" width="28" height="28" rx="7" fill="#111" /><path d="M18.6 7.5h-3.3v12.6a2.8 2.8 0 1 1-2-2.7v-3.4a6.1 6.1 0 1 0 5.3 6.1v-6.4a7.6 7.6 0 0 0 4.4 1.4v-3.3a4.4 4.4 0 0 1-4.4-4.3z" fill="#25F4EE" transform="translate(-.8 -.6)" /><path d="M18.6 7.5h-3.3v12.6a2.8 2.8 0 1 1-2-2.7v-3.4a6.1 6.1 0 1 0 5.3 6.1v-6.4a7.6 7.6 0 0 0 4.4 1.4v-3.3a4.4 4.4 0 0 1-4.4-4.3z" fill="#FE2C55" transform="translate(.8 .6)" /><path d="M18.6 7.5h-3.3v12.6a2.8 2.8 0 1 1-2-2.7v-3.4a6.1 6.1 0 1 0 5.3 6.1v-6.4a7.6 7.6 0 0 0 4.4 1.4v-3.3a4.4 4.4 0 0 1-4.4-4.3z" fill="#fff" /></>],
+  ['Rumble', <><path d="M9 6.5c0-1.6 1.7-2.6 3.1-1.8l13.6 8.6c1.4.9 1.4 3 0 3.8L12.1 26c-1.4.9-3.1-.2-3.1-1.8z" fill="#85C742" /><path d="M13.5 12.5v7l6-3.5z" fill="#fff" /></>],
+  ['Twitch', <><path d="M6 3 3.5 8.5v18H10V30h3.5l3.5-3.5h5.2L29 19.7V3z" fill="#9146FF" /><path d="M7.5 5.5h19v13.2L22.6 22.5h-6.3L13 25.8v-3.3H7.5z" fill="#fff" /><path d="M14 10h2.5v6.5H14zM20.3 10h2.5v6.5h-2.5z" fill="#9146FF" /></>],
+  ['Dailymotion', <><rect x="2" y="2" width="28" height="28" rx="7" fill="#0A0A0A" /><path d="M19.2 7h3.4v18h-3.2v-1.3a5.4 5.4 0 0 1-3.8 1.6c-3.4 0-6-2.8-6-6.4s2.6-6.4 6-6.4c1.5 0 2.7.5 3.6 1.4zm-3.1 9a3.1 3.1 0 1 0 0 6.2 3.1 3.1 0 0 0 0-6.2z" fill="#fff" /></>],
+  ['bilibili', <><rect x="3" y="8" width="26" height="19" rx="5" fill="#00A1D6" /><path d="M10 4.5 13 8M22 4.5 19 8" stroke="#00A1D6" strokeWidth="2.2" strokeLinecap="round" /><rect x="6.5" y="11.5" width="19" height="12" rx="3" fill="#fff" /><path d="M10.5 15.5l3 1.2M21.5 15.5l-3 1.2" stroke="#00A1D6" strokeWidth="2" strokeLinecap="round" /></>],
+  ['Instagram', <><defs><linearGradient id="igg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor="#FEDA75" /><stop offset=".35" stopColor="#FA7E1E" /><stop offset=".6" stopColor="#D62976" /><stop offset="1" stopColor="#4F5BD5" /></linearGradient></defs><rect x="2" y="2" width="28" height="28" rx="8" fill="url(#igg)" /><rect x="8" y="8" width="16" height="16" rx="5" fill="none" stroke="#fff" strokeWidth="2.2" /><circle cx="16" cy="16" r="3.8" fill="none" stroke="#fff" strokeWidth="2.2" /><circle cx="21.2" cy="10.8" r="1.2" fill="#fff" /></>],
+];
+function SiteLogos() {
+  return SITE_LOGOS.map(([name, g]) => (
+    <span key={name} className="dl-site" title={name} data-site={name}><svg viewBox="0 0 32 32" width="30" height="30" aria-label={name}>{g}</svg></span>
+  ));
+}
+function Hint({ children }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const me = ref.current; if (!me) return undefined;
+    const tgt = hintTarget(me); if (!tgt) return undefined;
+    const on = () => hintShow(tgt, me.innerHTML);
+    tgt.addEventListener('mouseenter', on); tgt.addEventListener('mouseleave', hintHide);
+    tgt.setAttribute('data-has-hint', '1');
+    return () => { tgt.removeEventListener('mouseenter', on); tgt.removeEventListener('mouseleave', hintHide); tgt.removeAttribute('data-has-hint'); hintHide(); };
+  }, []);
+  return <span ref={ref} className="hint-src" hidden>{children}</span>;
 }
 
 // 🔒 네이티브 alert/confirm 은 **창을 잠근다**(EnableWindow(false)) — 다른 창(Vrew·크롬) 뒤에 숨으면
@@ -6277,12 +6330,12 @@ export default function App() {
             <div className="tabbody">
 
               {chTab === 'list' && (<div>
-                <div className="meta" style={{ marginBottom: 8 }}>
+                <Hint>
                   <b>✎ = 지금 편집 중</b> · <b>★ = 헤더에서 고른 작업 채널</b>.
                   <b>▲▼</b> 로 순서를 바꾸면 <b>바로 저장</b>됩니다(헤더 드롭다운에 이 순서로 보입니다).
                   이름을 누르면 그 채널로 <b>편집 대상이 바뀝니다</b> —
                   <b style={{ color: 'var(--danger)' }}>저장하지 않은 변경은 사라집니다.</b>
-                </div>
+                </Hint>
                 <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
                   {(presets || []).map((p, i) => {
                     const editing = p.name === ((ch._raw && ch._raw.name) || ch.name);
@@ -6306,7 +6359,7 @@ export default function App() {
                   })}
                 </div>
                 <div className="subhead" style={{ marginTop: 12 }}>＋ 새 채널</div>
-                <div className="meta" style={{ marginBottom: 6 }}>지금 편집 중인 <b>「{(ch._raw && ch._raw.name) || ch.name || '-'}」</b>의 설정을 복사해 만듭니다.</div>
+                <Hint>지금 편집 중인 <b>「{(ch._raw && ch._raw.name) || ch.name || '-'}」</b>의 설정을 복사해 만듭니다.</Hint>
                 <div className="frow" style={{ gap: 6 }}>
                   <input style={{ flex: 1, padding: '6px 9px' }} placeholder="새 채널 이름"
                     value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
@@ -6331,9 +6384,9 @@ export default function App() {
                     <option value="remotion">🎬 리모션 (음성만)</option>
                     <option value="book">📖 출판</option>
                   </select>
-                  <span className="meta">{ch.startMode === 'remotion'
+                  <Hint>{ch.startMode === 'remotion'
                     ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
-                    : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</span>
+                    : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</Hint>
                 </div>
                 {/* 🖼 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 🎨 제작 도구 탭은 높이가 넘쳐 🏠 기본으로 · 값·저장은 그대로 presetPrompt) */}
                 <div className="frow"><label>이미지 사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
@@ -6362,8 +6415,7 @@ export default function App() {
                   {/* 🎙 참조음성 고르기·미리듣기·🎨 보이스디자인은 「🔊 음성 설정」 창 한 곳에서(로이 2026-10-14 — 같은 기능이 두 곳이라 정리).
                       여기엔 그 창에 없는 Clone 강도만 남긴다. 저장 값(voiceCloneRefAudio·cfgValue)·저장 코드는 그대로. */}
                   <div className="subhead" data-testid="ch-omni-settings">🎙 OmniVoice 설정</div>
-                  <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /><span className="meta">참조음성을 얼마나 따라 할지(기본 2)</span></div>
-                  <div className="meta" data-testid="ch-ref-moved" style={{ margin: '2px 0 6px' }}>목소리(참조음성)는 위 「🔊 음성 설정에서 바꾸기」에서 고릅니다 — 미리듣기·🎨 보이스디자인도 그 창에 있습니다.</div>
+                  <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /><Hint>참조음성을 얼마나 따라 할지(기본 2). 목소리(참조음성)는 위 「🔊 음성 설정에서 바꾸기」에서 고릅니다 — 미리듣기·🎨 보이스디자인도 그 창에 있습니다.</Hint></div>
 
                   <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
                   <div style={{ maxHeight: 92, overflowY: 'auto' }}>
@@ -6384,9 +6436,7 @@ export default function App() {
                   </div>
                   <div className="crow"><button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button></div>
                 </>) : (
-                  <div className="meta" style={{ margin: '8px 0', padding: '6px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.04)' }}>
-                    🎙 OmniVoice 참조음성·Clone 강도·🎭 화자별 목소리는 OmniVoice 로 읽을 때만 씁니다(저장된 값은 그대로 남아 있습니다 — OmniVoice 로 돌아가면 다시 씁니다).
-                  </div>
+                  <Hint>🎙 OmniVoice 참조음성·Clone 강도·🎭 화자별 목소리는 OmniVoice 로 읽을 때만 씁니다(저장된 값은 그대로 남아 있습니다 — OmniVoice 로 돌아가면 다시 씁니다).</Hint>
                 )}
 
                 <div className="subhead">🎚 소리 다듬기 <span className="meta" style={{ fontWeight: 400 }}>— 모든 엔진 공통</span></div>
@@ -6407,9 +6457,9 @@ export default function App() {
                     onChange={(e) => setCh({ ...ch, ttsTargetDb: e.target.value })} />
                   <span className="meta">dB</span>
                 </div>
-                <div className="meta" style={{ marginTop: 4, lineHeight: 1.5 }}>
-                  짧은 문장·의문문이 작게 나오는 것과 참조음성이 조용해 전체가 작아지는 것을 함께 잡습니다. ⚠ 배속·문장무음·음량을 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
-                </div>
+                <Hint>
+                  음량 맞추기 = 짧은 문장·의문문이 작게 나오는 것과 참조음성이 조용해 전체가 작아지는 것을 함께 잡습니다. ⚠ 배속·문장무음·음량을 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
+                </Hint>
               </div>);
               })()}
 
@@ -6428,7 +6478,7 @@ export default function App() {
                     <option value="">— 롱폼과 같게 —</option>
                     {chStyles.map((s2) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
                   </select></div>
-                <div className="meta">☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</div>
+                <Hint>☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</Hint>
 
                 <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
                 <div className="twocol">
@@ -6465,14 +6515,14 @@ export default function App() {
                   </div>
                 </div>
                 {/* 도구 안내 — 예전엔 탭 맨 아래에 있었다(v0.6.82 에 도구 칸 바로 아래로 옮기고 줄였다) */}
-                <div className="meta">이 채널을 고르면 헤더의 이미지·비디오 도구와 <b>출력</b>(완성물 종류)이 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델을 여기서 고르고 주소·API키는 ⚙ 설정에서, <b>Flow · Veo</b>(그룹 이미지를 시작 프레임으로 i2v)의 모델·첨부방식·해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다.</div>
+                <Hint>이 채널을 고르면 헤더의 이미지·비디오 도구와 <b>출력</b>(완성물 종류)이 이 값으로 세팅됩니다. ComfyUI 는 <b>☁ 클라우드 / 🖥 로컬</b> × 모델을 여기서 고르고 주소·API키는 ⚙ 설정에서, <b>Flow · Veo</b>(그룹 이미지를 시작 프레임으로 i2v)의 모델·첨부방식·해상도는 ⚙ 설정 → 🌐 브라우저 이미지·비디오 에서 정합니다.</Hint>
                 <div className="crow stack"><span className="l">🎬 영상 만들 그룹 (이 채널 기본값)</span>
                   <select data-testid="ch-vid-sel" value={vidIsList(ch.vidSel) ? 'list' : (normVidSel(ch.vidSel) || 'intro')} onChange={(e) => setCh({ ...ch, vidSel: e.target.value === 'list' ? VID_LIST + (vidListText(ch.vidSel) || '1') : (normVidSel(e.target.value) || 'intro') })}>
                     {VID_MODES.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.hint}</option>)}
                     <option value="list">직접 입력 — 그룹 번호를 쉼표로 (예: 1,2,5,7)</option>
                   </select>
                   {vidIsList(ch.vidSel) && <input data-testid="ch-vid-list" type="text" style={{ width: 200 }} placeholder="1,2,5,7" value={vidListText(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(VID_LIST + e.target.value) })} />}
-                  <div className="meta">비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</div></div>
+                  <Hint>비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</Hint></div>
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
                 {/* 다섯 칸을 한 줄에(v0.6.82 — 탭 높이를 다른 탭과 맞춘다). 값·저장 키는 그대로 wbSub.{sizePct,marginPct,pos,font,bold} */}
@@ -6515,7 +6565,7 @@ export default function App() {
                         onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), bold: e.target.checked } })} /></div>
                   </div>
                 </div>
-                <div className="meta">글자는 <b>검정 + 흰 외곽선</b>입니다(화이트보드 종이색이 미색이라 흰 글자는 안 보입니다). 자막을 <b>구울지 말지</b>는 헤더 「④ 완성」의 <b>💬 자막</b> 체크박스가 정합니다 — 끄면 영상에 글자가 안 들어가고 <b>.srt 파일만</b> 옆에 남습니다.</div>
+                <Hint>글자는 <b>검정 + 흰 외곽선</b>입니다(화이트보드 종이색이 미색이라 흰 글자는 안 보입니다). 자막을 <b>구울지 말지</b>는 헤더 「④ 완성」의 <b>💬 자막</b> 체크박스가 정합니다 — 끄면 영상에 글자가 안 들어가고 <b>.srt 파일만</b> 옆에 남습니다.</Hint>
               </div>)}
 
               {chTab === 'folder' && (<div className="foldertab">
@@ -6538,78 +6588,54 @@ export default function App() {
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutUpload}>찾기</button></div>
                 )}
                 {/* 📄 대본 PDF·📥 URL 받기 폴더는 모든 채널 공통 → ⚙ 설정 → 📁 폴더(2026-10-14) */}
-                {/* ⬆ 유튜브 업로드 채널 — 올릴지 말지는 헤더 「완성 후 업로드」가 정하고, 여기선 올릴 채널만 고른다(비공개 · 제목·설명·AI 표시까지). 공개·예약은 Studio 에서. */}
-                {ch.startMode !== 'remotion' && (<div className="fsec">⬆ 업로드</div>)}
+                {/* ⬆ 업로드 · 📇 정보 카드 · 🏷 채널 로고 · 📍 로고 자리 — 가로 카드 한 줄(v0.9.18 · 로이 「세로 배열을 1줄 가로로」).
+                    🎞 화면 연출(켄번스 구간 · 디졸브 · 오버레이 모션 · 불빛 깜박임)은 채널 설정에서 뺐다(로이 2026-10-14 — 정보 카드로 「슬라이드쇼」 인상을 피한다).
+                    채널 파일의 옛 값(kbSeg·dissolveSec·fx)은 남아 있지만 제작이 읽지 않는다(core/pipeline · main renderUploadMp4). */}
                 {ch.startMode !== 'remotion' && (
-                  <div className="frow" title="🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 비공개로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 공개·예약·썸네일은 Studio 에서 직접 하세요."><label>업로드채널</label>
-                    <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value })}>
-                      <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 유튜브 채널 —' : '— 연결된 채널 없음 (⚙ 설정 → ▶ 유튜브) —'}</option>
-                      {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken ? ' (⚠ 다시 연결 필요)' : ''}</option>)}
-                      {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
-                    </select>
-                    <span className="meta" style={{ flex: '0 0 auto' }}>비공개</span></div>
-                )}
-                {ch.startMode !== 'remotion' && (<div className="fnote">올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」 체크가 정합니다. 여기서는 올릴 채널만 고릅니다.</div>)}
-                {/* 🎵 배경음악은 ➕ 삽입 메뉴로 옮겼다(v0.5.55) — 값(bgmOn·bgmPath·bgmVolume)은 채널에 그대로 저장되고 이 창도 불러와 되돌려 쓴다 */}
-                {ch.startMode !== 'remotion' && (<div className="fsec">🏷 로고</div>)}
-                {/* 🏷 채널 로고 — 켠 채널만 · 영상 전체 · .vrew·유튜브 MP4 공통. 투명 PNG 권장. 자리(↗ 오른쪽 위 기본 / ↖ 왼쪽 위)는 대본마다 ➕ 삽입 메뉴에서. */}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="logo-row" title="이 채널의 모든 영상에 로고를 올립니다(맨 위층 · 기본 오른쪽 위 — 자리는 ➕ 삽입 메뉴에서 대본마다 바꿉니다). 배경이 투명한 PNG 가 좋습니다. 크기 = 화면 너비 대비 %."><label>🏷 채널 로고</label>
-                    <input type="checkbox" style={{ flex: '0 0 auto' }} title="켜기" checked={!!ch.logoOn} onChange={(e) => setCh({ ...ch, logoOn: e.target.checked })} />
-                    <input readOnly placeholder="로고 그림(png·jpg·webp) — 비우면 로고 없음" title={ch.logoPath || ''} value={ch.logoPath || ''} />
-                    <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { const f = await api.pickFile({ filters: [{ name: '그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (f) setCh((c) => ({ ...c, logoPath: f, logoOn: true })); }}>파일</button>
-                    {ch.logoPath ? <button className="ghost" data-testid="logo-clear" style={{ flex: '0 0 auto' }} title="로고 지우기 — 경로를 비우고 끕니다(「저장」을 누르면 반영 · 그림 파일은 지우지 않습니다)"
-                      onClick={() => setCh((c) => ({ ...c, logoPath: '', logoOn: false }))}>✕</button> : null}
-                    <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 48, flex: '0 0 auto' }} title="크기 — 화면 너비 대비 % (기본 12)" disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span></div>
-                )}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="logo-pos-row" style={{ flexWrap: 'wrap' }} title="이 채널 로고의 기본 자리 — 로고 왼쪽 위 모서리가 화면 왼쪽에서 X%, 위에서 Y% 에 놓입니다. 비우면 기본(오른쪽 위). 대본에서 로고를 끌어 옮기거나 ↖ 를 고른 대본은 그 자리가 이깁니다."><label>📍 로고 자리</label>
-                    <span className="meta">왼쪽에서</span>
-                    <input className="nbox" data-testid="logo-x" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="X" disabled={!ch.logoOn} value={ch.logoX == null ? '' : ch.logoX} onChange={(e) => setCh({ ...ch, logoX: e.target.value })} /><span className="meta">%</span>
-                    <span className="meta">위에서</span>
-                    <input className="nbox" data-testid="logo-y" type="number" min="0" max="100" step="0.5" style={{ width: 62, flex: '0 0 auto' }} placeholder="Y" disabled={!ch.logoOn} value={ch.logoY == null ? '' : ch.logoY} onChange={(e) => setCh({ ...ch, logoY: e.target.value })} /><span className="meta">%</span>
-                    <button className="ghost" data-testid="logo-pos-grab" style={{ flex: '0 0 auto' }} disabled={!ch.logoOn}
-                      title="지금 열려 있는 대본에서 ① 칸으로 끌어 옮긴 로고 자리를 가져옵니다(「저장」을 누르면 이 채널의 기본 자리가 됩니다)"
-                      onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥 현재 대본 자리</button>
-                    {(ch.logoX !== '' && ch.logoX != null) || (ch.logoY !== '' && ch.logoY != null) ? <button className="ghost" data-testid="logo-pos-clear" style={{ flex: '0 0 auto' }} title="기본 자리로(오른쪽 위)" onClick={() => setCh((c) => ({ ...c, logoX: '', logoY: '' }))}>✕</button> : null}</div>
-                )}
-                {/* 🎞 화면 연출(v0.7.75~) — 켄번스 구간 · (디졸브 · 오버레이 모션은 뒤이어) */}
-                {ch.startMode !== 'remotion' && (<div className="fsec">🎞 화면 연출 <span className="meta">(🎬 MP4 기준)</span></div>)}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="kbseg-row" title="한 그림이 길게 보일 때(수 분) 문장 경계에서 구간을 나눠 구간마다 다른 방향으로 천천히 움직입니다 — 한 번의 팬으로 끝나지 않게. 대본 그룹의 ① 칸 그림 메뉴 ▸ 움직임에서 그룹마다 따로 정할 수도 있습니다(그쪽이 이깁니다). .vrew·MP4 공통."><label>🎞 켄번스 구간</label>
-                    <select data-testid="ch-kbseg" style={{ flex: '0 0 auto' }} value={String(VLook.normKbSeg(ch.kbSeg))} onChange={(e) => setCh({ ...ch, kbSeg: VLook.normKbSeg(e.target.value) })}>
-                      {VLook.KB_SEGS.map((x) => <option key={String(x.id)} value={String(x.id)}>{x.label}</option>)}
-                    </select>
-                  </div>
-                )}
-                {ch.startMode !== 'remotion' && (<div className="fnote">이 채널 그림의 기본 — 길게 보이는 그림만 나눕니다(구간당 8초 이상).</div>)}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="dissolve-row" title="그림이 바뀌는 자리를 몇 초에 걸쳐 서서히 섞습니다(디졸브) — 경계 앞뒤 절반씩 겹쳐 섞고 영상 길이·음성·자막은 그대로입니다. 🎬 유튜브 MP4 만(.vrew 에는 전환이 없습니다) · 영상(🎬)이 낀 자리나 겹친 그림 자리는 컷 그대로. 켄번스 구간 사이(같은 그림)는 섞지 않습니다."><label>🌫 디졸브</label>
-                    <select data-testid="ch-dissolve" style={{ flex: '0 0 auto' }} value={String(VLook.normDissolve(ch.dissolveSec))} onChange={(e) => setCh({ ...ch, dissolveSec: VLook.normDissolve(e.target.value) })}>
-                      {VLook.DISSOLVES.map((x) => <option key={x.id} value={String(x.id)}>{x.label}</option>)}
-                    </select>
-                  </div>
-                )}
-                {ch.startMode !== 'remotion' && (<div className="fnote">그림이 바뀔 때 서서히 섞는 시간 — 🎬 MP4 만 · 수면 영상은 3~6초 추천.</div>)}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="infocards-row" title="대본의 🔤 카드 · 📊 표 · ✅ 확인 줄을 화면에 얹고, ## 구간마다 표지(N / M · 진행 막대)를 자동으로 넣습니다. 글자는 그림 위에 얹으며(그림 안에 넣지 않음) 🎬 유튜브 MP4 에만 나옵니다. 꺼 두면 표시 줄이 있어도 무시합니다.">
-                    <label className="chk"><input type="checkbox" data-testid="ch-infocards" checked={!!ch.infoCards} onChange={(e) => setCh({ ...ch, infoCards: e.target.checked })} />📇 정보 카드</label>
-                  </div>
-                )}
-                {ch.startMode !== 'remotion' && (<div className="fnote">🔤 낱말 · 📊 표 · ✅ 확인표 · 구간 표지 — 🎬 MP4 만(정보튜브용 · 꺼 두면 표시 줄을 무시).</div>)}
-                {ch.startMode !== 'remotion' && (
-                  <div className="frow" data-testid="fx-row" style={{ flexWrap: 'wrap' }} title="정지 그림 위에 코드로 만든 효과를 아주 약하게 얹습니다(외부 영상 없음 · 느리고 약하게). 🎬 유튜브 MP4 만. 켠 종류만 · 1(약)~3(강). 대본 그룹의 ① 칸 그림 메뉴에서 그룹마다 끄거나 강도를 바꿀 수 있습니다. 영상(🎬) 그룹에는 얹지 않습니다. 3~4시간 영상에서 렌더 시간이 늘 수 있습니다(전부 켜면 프레임당 약 10ms)."><label>🌫 오버레이 모션</label>
-                    {VLook.FX_KINDS.map((k) => (
-                      <span key={k.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginRight: 8 }}>
-                        <span className="meta">{k.label}</span>
-                        <select data-testid={'fx-' + k.id} value={String((VLook.normFxChan(ch.fx))[k.id])} onChange={(e) => setCh({ ...ch, fx: { ...VLook.normFxChan(ch.fx), [k.id]: Number(e.target.value) } })}>
-                          {VLook.FX_LEVELS.map((l) => <option key={l.id} value={String(l.id)}>{l.label}</option>)}
+                  <div className="twocol chcards" data-testid="ch-cards">
+                    <div className="col" data-testid="yt-card">
+                      <div className="crow stack"><span className="l">⬆ 업로드</span>
+                        <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value })}>
+                          <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 채널 —' : '— 연결 없음 —'}</option>
+                          {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken ? ' (⚠ 다시 연결)' : ''}</option>)}
+                          {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
-                      </span>
-                    ))}
+                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → ▶ 유튜브.</Hint>
+                      </div>
+                    </div>
+                    <div className="col" data-testid="infocards-row">
+                      <div className="crow stack"><span className="l">📇 정보 카드</span>
+                        <button data-testid="ch-infocards" aria-pressed={!!ch.infoCards} className={'dl-tg' + (ch.infoCards ? ' on' : '')} onClick={() => setCh({ ...ch, infoCards: !ch.infoCards })}>{ch.infoCards ? '✓ 켬' : '끔'}</button>
+                        <Hint>대본의 🔤 낱말 · 📊 표 · ✅ 확인 줄을 화면에 얹고, ## 구간마다 표지(N / M · 진행 막대)를 자동으로 넣습니다. 🎬 유튜브 MP4 에만 나옵니다. 꺼 두면 표시 줄이 있어도 무시합니다.</Hint>
+                      </div>
+                    </div>
+                    <div className="col" data-testid="logo-row">
+                      <div className="crow stack"><span className="l">🏷 채널 로고</span>
+                        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <button data-testid="logo-on" aria-pressed={!!ch.logoOn} className={'dl-tg' + (ch.logoOn ? ' on' : '')} style={{ flex: '0 0 auto', padding: '4px 8px' }} onClick={() => setCh({ ...ch, logoOn: !ch.logoOn })}>{ch.logoOn ? '✓ 켬' : '끔'}</button>
+                          <button className="ghost" data-testid="logo-file" style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '4px 8px' }}
+                            onClick={async () => { const f = await api.pickFile({ filters: [{ name: '그림', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); if (f) setCh((c) => ({ ...c, logoPath: f, logoOn: true })); }}>{ch.logoPath ? String(ch.logoPath).split(/[\\/]/).pop() : '파일'}</button>
+                          {ch.logoPath ? <button className="ghost" data-testid="logo-clear" style={{ flex: '0 0 auto', padding: '4px 6px' }}
+                            onClick={() => setCh((c) => ({ ...c, logoPath: '', logoOn: false }))}>✕</button> : null}
+                          <input className="nbox" type="number" min="4" max="40" step="1" style={{ width: 42, flex: '0 0 auto' }} disabled={!ch.logoOn} value={ch.logoSize} onChange={(e) => setCh({ ...ch, logoSize: e.target.value })} /><span className="meta">%</span>
+                        </span>
+                        <Hint>이 채널의 모든 영상에 로고를 올립니다(맨 위층 · 기본 오른쪽 위). 배경이 투명한 PNG 가 좋습니다. 숫자 = 화면 너비 대비 크기 %(기본 12). ✕ 는 경로만 비웁니다(그림 파일은 지우지 않습니다). {ch.logoPath ? <>지금 파일: <b>{ch.logoPath}</b></> : null}</Hint>
+                      </div>
+                    </div>
+                    <div className="col" data-testid="logo-pos-row">
+                      <div className="crow stack"><span className="l">📍 로고 자리</span>
+                        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input className="nbox" data-testid="logo-x" type="number" min="0" max="100" step="0.5" style={{ width: 50, flex: '0 0 auto' }} placeholder="X%" disabled={!ch.logoOn} value={ch.logoX == null ? '' : ch.logoX} onChange={(e) => setCh({ ...ch, logoX: e.target.value })} />
+                          <input className="nbox" data-testid="logo-y" type="number" min="0" max="100" step="0.5" style={{ width: 50, flex: '0 0 auto' }} placeholder="Y%" disabled={!ch.logoOn} value={ch.logoY == null ? '' : ch.logoY} onChange={(e) => setCh({ ...ch, logoY: e.target.value })} />
+                          <button className="ghost" data-testid="logo-pos-grab" style={{ flex: '0 0 auto', padding: '4px 6px' }} disabled={!ch.logoOn}
+                            onClick={() => { const lp = curLogoPos(); if (!lp) { setStatus('⚠ 지금 대본에는 끌어 옮긴 로고 자리가 없습니다 — ① 칸에서 로고를 끌어 옮긴 뒤 눌러 주세요'); return; } setCh((c) => ({ ...c, logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 })); setStatus(`📍 현재 대본의 로고 자리를 가져왔습니다 — 왼쪽에서 ${Math.round(lp.x * 100)}% · 위에서 ${Math.round(lp.y * 100)}% (「저장」을 눌러야 채널에 남습니다)`); }}>📥</button>
+                          {(ch.logoX !== '' && ch.logoX != null) || (ch.logoY !== '' && ch.logoY != null) ? <button className="ghost" data-testid="logo-pos-clear" style={{ flex: '0 0 auto', padding: '4px 6px' }} onClick={() => setCh((c) => ({ ...c, logoX: '', logoY: '' }))}>✕</button> : null}
+                        </span>
+                        <Hint>로고 왼쪽 위 모서리가 화면 <b>왼쪽에서 X%</b>, <b>위에서 Y%</b> 에 놓입니다. 비우면 기본(오른쪽 위). 📥 = 지금 대본에서 ① 칸으로 끌어 옮긴 로고 자리를 가져옵니다(「저장」을 눌러야 남습니다). ✕ = 기본 자리로. 대본에서 끌어 옮기거나 ↖ 를 고른 대본은 그 자리가 이깁니다.</Hint>
+                      </div>
+                    </div>
                   </div>
                 )}
-                {ch.startMode !== 'remotion' && (<div className="fnote">🎬 MP4 만 · 켠 종류를 정지 그림 위에 얹습니다.</div>)}
                 {ch.startMode === 'remotion' && (<>
                   <div className="frow"><label>발음사전</label>
                     <input placeholder="발음사전(.md) — 비우면 사전 없이 합성합니다" value={ch.dictPath || ''}
@@ -6625,10 +6651,10 @@ export default function App() {
                     <input placeholder="그림을 떨어뜨릴 뿌리 폴더 — 비우면 그림 생성을 쓰지 않습니다" value={ch.outImages || ''}
                       onChange={(e) => setCh({ ...ch, outImages: e.target.value })} />
                     <button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutImages}>찾기</button></div>
-                  <div className="meta" style={{ marginTop: 6 }}>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.
+                  <Hint>TSV 한 파일이 폴더 하나가 됩니다 — <b>MP3 출력/&lt;TSV 이름&gt;/</b> 에 파일명 그대로 mp3 가 들어갑니다.
                     <br />🖼 그림은 다릅니다 — <b>이미지 출력 + 그림목록 TSV 의 1번 칸</b>(하위 폴더 포함)에 그대로 만듭니다.
                     <br />🔗 음성 TSV 를 열면 <b>그림목록 폴더</b>에서 <b>같은 번호</b>의 파일을 찾아 자동으로 붙입니다(<code>003_….tsv</code> ↔ <code>003_그림목록.tsv</code>).
-                    <br />⚠ <b>발음사전을 나중에 물리면 그 강 전체가 다시 합성됩니다</b>(사전이 캐시 키에 들어갑니다). 처음에 정해 두세요.</div>
+                    <br />⚠ <b>발음사전을 나중에 물리면 그 강 전체가 다시 합성됩니다</b>(사전이 캐시 키에 들어갑니다). 처음에 정해 두세요.</Hint>
                 </>)}
               </div>)}
 
@@ -7181,7 +7207,7 @@ export default function App() {
               </div>
             </div>)}
             {settingsTab === 'folders' && (<div data-testid="app-folders">
-              <div className="meta" style={{ marginBottom: 8 }}>여기 폴더는 <b>모든 채널 공통</b>입니다(채널마다 다른 대본·Vrew·MP4 폴더는 ⚙ 채널편집 → 📁 폴더). 비워 두면 윈도우 「다운로드」 폴더{appFolders.def ? <> (<b>{appFolders.def}</b>)</> : null}에 저장합니다.</div>
+              <Hint>여기 폴더는 <b>모든 채널 공통</b>입니다(채널마다 다른 대본·Vrew·MP4 폴더는 ⚙ 채널편집 → 📁 폴더). 비워 두면 윈도우 「다운로드」 폴더{appFolders.def ? <> (<b>{appFolders.def}</b>)</> : null}에 저장합니다.</Hint>
               {[['reader', '대본 PDF', '📄 대본 보기 → 🖨 A4 PDF 를 저장할 폴더'], ['download', 'URL 받기', '📥 다운로드로 받은 mp3·영상·전사본(.txt)을 저장할 폴더']].map(([k, lbl, ph]) => (
                 <div className="frow" key={k}><label>{lbl}</label>
                   <input style={{ flex: 1 }} data-testid={'app-folder-' + k} placeholder={ph + ' — 비우면 다운로드 폴더'} value={appFolders[k] || ''}
@@ -7275,86 +7301,74 @@ export default function App() {
       )}
       {urlOpen && (
         <div className="modal-bg show">
-          {/* 📥 다운로드 · STT (v0.9.17 · 로이 2026-10-14) — 옛 「📥 대본다운」 + 리본 「🎧 STT」 + 「🎵 mp3」 를 한 창으로.
+          {/* 📥 다운로드 · STT (v0.9.17 · v0.9.18 로이 「설명은 마우스 팝업 · 체크박스는 버튼 · 주소 칸 위에 사이트 로고 · 두 탭 같은 크기」)
               🔗 링크 = 받기(+선택 STT) · 📂 내 파일 = mp3 추출·STT. 화질 칸은 없다 — 영상은 늘 최고 화질(같은 해상도면 H.264). */}
-          <div className="modal-card" data-testid="dl-modal" style={{ maxWidth: 660 }}>
+          <div className="modal-card dl-card" data-testid="dl-modal">
             <h3>📥 다운로드 · STT</h3>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--line)' }}>
+            <div className="dl-tabs">
               {[['link', '🔗 링크'], ['file', '📂 내 파일']].map(([id, lbl]) => (
                 <button key={id} data-testid={'dl-tab-' + id} data-on={dlTab === id ? '1' : '0'} className={dlTab === id ? '' : 'ghost'} onClick={() => setDlTab(id)}>{lbl}</button>
               ))}
             </div>
-            {dlTab === 'link' && (<>
+            {dlTab === 'link' && (<div className="dl-body">
               {/* 한 줄 = 링크 붙여넣기 · 다운로드 종류 · STT (4K Video Downloader 식) */}
-              <div className="frow" data-testid="dl-linkbar" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button disabled={urlBusy} style={{ flex: '0 0 auto', padding: '8px 18px', fontWeight: 700 }}
-                  title="복사해 둔 주소를 붙여넣고 바로 받습니다 — 오른쪽 설정을 그대로 따릅니다" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
-                <span className="meta" style={{ flex: '0 0 auto' }}>다운로드</span>
-                <select data-testid="dl-mode" style={{ flex: '0 0 auto', width: 'auto' }} value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
+              <div className="dl-bar" data-testid="dl-linkbar">
+                <button disabled={urlBusy} className="dl-paste" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
+                <Hint>복사해 둔 주소를 붙여넣고 <b>바로 받습니다</b> — 오른쪽 설정을 그대로 따릅니다.</Hint>
+                <span className="meta">다운로드</span>
+                <select data-testid="dl-mode" value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
                   <option value="audio">🎵 오디오 (mp3)</option>
                   <option value="video">🎬 영상 (mp4 · 소리 포함)</option>
                 </select>
-                <label className="chk" style={{ flex: '0 0 auto', width: 'auto' }}>
-                  <input type="checkbox" data-testid="dl-stt" checked={urlStt} onChange={(e) => setUrlStt(e.target.checked)} />{' '}<b>STT 전사</b>
-                </label>
+                <Hint>영상은 <b>늘 최고 화질</b>로 받습니다(같은 해상도면 호환이 좋은 H.264 · 4K 처럼 H.264 판이 없으면 VP9).</Hint>
+                <button data-testid="dl-stt" aria-pressed={urlStt} className={'dl-tg' + (urlStt ? ' on' : '')} onClick={() => setUrlStt(!urlStt)}>{urlStt ? '✓ ' : ''}🎧 STT 전사</button>
+                <Hint>{urlStt
+                  ? <>받은 뒤 글(.txt)로 옮깁니다 — <b>자막이 있으면 그대로 .txt</b>(수 초 · GPU 0), 자막이 없는 영상만 Whisper 로 전사합니다.</>
+                  : <>지금은 <b>파일만 받습니다</b>(자막·.txt 를 만들지 않습니다). 누르면 전사도 합니다.</>}</Hint>
               </div>
-              <div className="meta" style={{ margin: '8px 0 6px' }}>
-                유튜브·사운드클라우드·페이스북·비메오·틱톡·트위치·빌리빌리 등 — 주소를 복사하고 「📋 링크 붙여넣기」를 누르면 바로 받습니다.
-                여러 개는 아래 칸에 <b>한 줄에 하나씩</b> 넣고 「받기」. 영상은 <b>늘 최고 화질</b>(같은 해상도면 호환이 좋은 H.264).
-                <br />저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).
-              </div>
+              <div className="dl-sites" data-testid="dl-sites"><SiteLogos /></div>
+              <Hint>yt-dlp 가 받는 사이트는 이 밖에도 1,800곳이 넘습니다(인스타그램 · X · 네이버TV 등).</Hint>
               <textarea ref={urlTextRef} rows={4} spellCheck={false} autoFocus
                 placeholder={urlChannelAll ? 'https://www.youtube.com/@채널주소' : 'https://www.youtube.com/watch?v=...\nhttps://youtu.be/...'}
                 style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
-              <label className="chk" style={{ marginTop: 8, display: 'block' }}>
-                <input type="checkbox" checked={urlChannelAll} onChange={(e) => setUrlChannelAll(e.target.checked)} />
-                {' '}<b>유튜브 채널의 일반 영상 전체</b> 받기(영상 주소를 넣어도 그 영상의 채널 전체 · 받기 전에 편수를 묻습니다 · 채널별 폴더 · 이미 완료한 영상은 건너뜀)
-              </label>
-              {urlStt && (
-                <label className="chk" style={{ marginTop: 6, display: 'block' }}>
-                  <input type="checkbox" checked={urlForceStt} onChange={(e) => setUrlForceStt(e.target.checked)} />
-                  {' '}자막이 있어도 <b>Whisper 로 전사</b>(자막보다 정확하지만 GPU 를 오래 씁니다)
-                </label>
-              )}
-              <div className="meta" style={{ marginTop: 8 }}>
-                {urlStt
-                  ? <>STT 전사: <b>자막이 있으면 그대로 .txt</b> 로 만들고 Whisper 를 건너뜁니다(수 초 · GPU 0). 자막이 없는 영상만 Whisper 로 전사합니다.</>
-                  : <>STT 전사를 끄면 <b>파일만 받습니다</b>(자막·.txt 를 만들지 않습니다).</>}
-                {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 그렇다고 통째로 숨기면 조회에 실패했을 때
-                    화면에 아무 단서도 안 남는다(「⬇ 업데이트」 버튼도 사라진다). 항상 그리고 내용만 바꾼다. */}
-                <div style={{ marginTop: 6 }}>
-                  {!ytInfo
-                    ? <>yt-dlp 확인 중…</>
-                    : ytInfo.found
-                      ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale
-                          ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다</span>
-                          : ` · ${ytInfo.ageDays}일 전 판`}</>
-                      : <>이 PC 에 yt-dlp 가 없습니다 — 처음 받을 때 <b>자동으로 내려받습니다</b>(약 17MB · 한 번만).</>}
-                  {' '}<button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px', marginLeft: 4 }} onClick={updateYtdlp}>⬇ 업데이트</button>
-                </div>
+              <Hint>주소 여러 개는 <b>한 줄에 하나씩</b> 넣고 「받기」. 저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).</Hint>
+              <div className="dl-opts">
+                <button data-testid="dl-channel" aria-pressed={urlChannelAll} className={'dl-tg' + (urlChannelAll ? ' on' : '')} onClick={() => setUrlChannelAll(!urlChannelAll)}>{urlChannelAll ? '✓ ' : ''}📺 유튜브 채널 전체</button>
+                <Hint>영상 주소를 넣어도 <b>그 영상의 채널 일반 영상 전체</b>를 받습니다 — 받기 전에 편수를 묻고, 채널별 폴더에, 이미 완료한 영상은 건너뜁니다.</Hint>
+                {urlStt && <button data-testid="dl-force" aria-pressed={urlForceStt} className={'dl-tg' + (urlForceStt ? ' on' : '')} onClick={() => setUrlForceStt(!urlForceStt)}>{urlForceStt ? '✓ ' : ''}🎙 자막 있어도 Whisper</button>}
+                {urlStt && <Hint>자막이 있어도 Whisper 로 전사합니다 — 자막보다 정확하지만 GPU 를 오래 씁니다.</Hint>}
               </div>
-              <div className="mbtns">
+              <div className="dl-foot">
+                <span className="meta" data-testid="dl-ytdlp">
+                  {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 통째로 숨기면 조회 실패 때 단서가 없다(「⬇ 업데이트」도 사라진다). 항상 그린다. */}
+                  {!ytInfo ? <>yt-dlp 확인 중…</>
+                    : ytInfo.found
+                      ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판</span> : ` · ${ytInfo.ageDays}일 전 판`}</>
+                      : <>yt-dlp 없음 — 처음 받을 때 자동 설치</>}
+                </span>
+                <Hint>{ytInfo && ytInfo.found && ytInfo.stale ? <>오래된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다.</> : <>유튜브가 바뀌어 받기가 안 되면 「⬇ 업데이트」를 누르세요. 처음 한 번은 자동으로 내려받습니다(약 17MB).</>}</Hint>
+                <button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px' }} onClick={updateYtdlp}>⬇ 업데이트</button>
+                <span style={{ flex: 1 }} />
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : '') + (urlStt ? '받아서 전사' : '받기')}</button>
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
-            </>)}
-            {dlTab === 'file' && (<>
-              <div className="meta" style={{ marginBottom: 8 }}>
-                이 PC 의 <b>음성·영상 파일</b>(여러 개 가능)을 고릅니다. 결과는 <b>원본과 같은 폴더에 같은 이름</b>으로 생깁니다(.mp3 · .txt).
+            </div>)}
+            {dlTab === 'file' && (<div className="dl-body">
+              <div className="dl-tiles">
+                <button data-testid="dl-file-mp3" aria-pressed={fileMp3} className={'dl-tile' + (fileMp3 ? ' on' : '')} onClick={() => setFileMp3(!fileMp3)}>
+                  <span className="ic">🎵</span><span className="t">mp3 추출</span><span className="ck">{fileMp3 ? '✓ 켬' : '끔'}</span></button>
+                <Hint>영상에서 <b>소리만</b> 뽑아 같은 폴더에 같은 이름 .mp3 로 저장합니다(192kbps · Whisper 서버 불필요 · 같은 이름이 있으면 「(2)」를 붙여 덮지 않습니다).</Hint>
+                <button data-testid="dl-file-stt" aria-pressed={fileStt} className={'dl-tile' + (fileStt ? ' on' : '')} onClick={() => setFileStt(!fileStt)}>
+                  <span className="ic">🎧</span><span className="t">STT 전사</span><span className="ck">{fileStt ? '✓ 켬' : '끔'}</span></button>
+                <Hint>말소리를 <b>글(.txt)</b>로 옮겨 같은 폴더에 같은 이름으로 저장합니다(OmniVoice Whisper). 둘 다 켜면 mp3 → 전사 순서입니다.</Hint>
               </div>
-              <label className="chk" style={{ display: 'block' }}>
-                <input type="checkbox" data-testid="dl-file-mp3" checked={fileMp3} onChange={(e) => setFileMp3(e.target.checked)} />
-                {' '}🎵 <b>mp3 추출</b> — 영상에서 소리만 뽑습니다(192kbps · Whisper 서버 불필요 · 같은 이름이 있으면 「(2)」를 붙여 덮지 않습니다)
-              </label>
-              <label className="chk" style={{ display: 'block', marginTop: 6 }}>
-                <input type="checkbox" data-testid="dl-file-stt" checked={fileStt} onChange={(e) => setFileStt(e.target.checked)} />
-                {' '}🎧 <b>STT 전사</b> — 말소리를 글(.txt)로 옮깁니다(OmniVoice Whisper)
-              </label>
-              <div className="mbtns">
+              <div className="dl-foot">
+                <span style={{ flex: 1 }} />
                 <button data-testid="dl-file-run" disabled={!fileMp3 && !fileStt} onClick={runFileJob}>📂 파일 고르기</button>
+                <Hint>이 PC 의 음성·영상 파일을 고릅니다(여러 개 가능).</Hint>
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
-            </>)}
+            </div>)}
           </div>
         </div>
       )}
@@ -8493,9 +8507,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEdi
         <div className="vr-sep" />
         <div className="vr-cur" title="한 그림이 길게 보일 때(몇 분) 한 번의 팬으로 끝나지 않게 — 문장 경계에서 구간을 나눠 구간마다 다른 방향으로 천천히 움직입니다. 구간 사이는 끊김 없이 이어집니다(.vrew·MP4 공통). 짧은 그림은 나누지 않습니다.">🎞 켄번스 구간 (긴 그림을 나눠 움직임)</div>
         {VLook.KB_SEGS_GROUP.map((x) => <button key={String(x.id)} data-testid={'kbseg-' + x.id} onClick={look({ kbSeg: x.id })}>{chk((lk.kbSeg || 0) === x.id)}{x.label}</button>)}
-        <div className="vr-sep" />
-        <div className="vr-cur" title="⚙ 채널편집 📁 폴더 「🌫 오버레이 모션」 에서 켠 효과(안개·먼지·반딧불·불빛 깜박임)를 이 그룹에서 끄거나 강도를 바꿉니다. 🎬 MP4 만 · 채널에서 켠 종류에만 적용됩니다.">🌫 오버레이 모션 (이 그룹)</div>
-        {VLook.FX_GROUP.map((x) => <button key={String(x.id)} data-testid={'fxg-' + x.id} onClick={look({ fx: x.id })}>{chk((lk.fx || 0) === x.id)}{x.label}</button>)}
+        {/* 🌫 그룹별 오버레이 모션 칸은 뺐다(v0.9.18 — 채널 오버레이 모션을 없애 이 칸이 할 일이 없다) */}
       </div>
     );
   }
