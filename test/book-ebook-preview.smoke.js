@@ -59,6 +59,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await open(F1);
     await win.click('.modetoggle button:has-text("📖 출판")');
     await win.waitForSelector('.bkwrap', { timeout: 10000 });
+    await win.click('[data-tab=structure]');   // 탭 선택은 localStorage 에 남는다(앞 시험이 등록·유통 탭을 남기면 「전자책 만들기」 단추가 bk-ebook 으로 잡힌다)
     ok(await win.locator('[data-testid=bk-view-paper]').count() === 1 && await win.locator('[data-testid=bk-view-ebook]').count() === 1, '[종이책 | 전자책] 전환 단추');
     ok(await win.locator('[data-testid=bk-ebook]').count() === 0, '처음에는 종이책 화면(전자책 패널 없음)');
     // 비활성 단추의 글자가 바탕과 같은 색이면 안 보인다(로이 2026-10-06 — 전환 단추 라벨이 안 보였다)

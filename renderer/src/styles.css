@@ -321,7 +321,7 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto}
 /* 왼쪽 = 메뉴(위) → 내용(가운데, 스크롤) → 로그(맨 아래 고정). 로그는 App 의 logBox 를 그대로 받는다. */
 .bkside{flex:0 0 330px;display:flex;flex-direction:column;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.bknav{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;border-bottom:1px solid var(--line);background:#faf6ee}
+.bknav{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid var(--line);background:#faf6ee}
 .bktab{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 2px;font-size:11.5px;line-height:1.25;background:transparent;color:var(--base);border:1px solid transparent;border-radius:8px;cursor:pointer}
 .bktab:hover{background:#f1e8d8}
 .bktab.on{background:#fff;border-color:var(--accent);color:var(--strong);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -1326,3 +1326,11 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .foldertab .fnote{margin:-2px 0 6px 128px;font-size:12px;line-height:1.45;color:#8a7f72}
 .foldertab .frow .meta{white-space:nowrap}
 .foldertab{max-height:490px;overflow-y:auto;padding-right:8px}
+
+/* 📊 유통 현황 */
+.bkdist-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px}
+.bkdist-row input,.bkdist-row select{font-size:12px;padding:3px 5px;min-width:0}
+.bkdist-row input.grow{flex:1 1 140px}
+.bkdist-item{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}
+.bkdist-item.done{border-color:#7bb77b}.bkdist-item.rejected{border-color:#d9776a;background:#fff8f6}.bkdist-item.progress{border-color:#d7b56a}
+.bkdist-st{font-weight:700;white-space:nowrap}

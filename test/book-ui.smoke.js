@@ -115,7 +115,7 @@ ${para}
 
     // 왼쪽 메뉴 — 7개 탭 + 로그가 왼쪽 맨 아래 + 표지 안내 쪽 없음(미리보기 1쪽 = 반표제지)
     const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
-    if (tabs !== 6) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 6 (구조·책 정보·판권·표지·조판·부크크 등록 — 종이책·전자책 통합)');
+    if (tabs !== 4) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 4 (구조·정보 · 판권 · 표지·조판 · 등록·유통 — 2026-10-14)');
     const geo = await win.evaluate(() => {
       const side = document.querySelector('[data-testid=bk-side]').getBoundingClientRect();
       const log = document.querySelector('#logwrap').getBoundingClientRect();
@@ -143,7 +143,7 @@ ${para}
     console.log('· 하단 빈 공간 0 · 로그 간격 OK · 원고 열기 위치 OK · 채널 =', fill.chan);
     const firstPage = await win.evaluate(() => { const f = document.querySelector('.bkviewport'); return f && f.contentDocument ? f.contentDocument.body.innerText : ''; });
     if (/표지 스프레드 안내/.test(firstPage)) throw new Error('표지 스프레드 안내 쪽이 아직 있음');
-    await win.click('[data-tab=layout]');
+    await win.click('[data-tab=cover]');
     // 「📁 작업용 파일 경로 → 파일명만」 옵션이 조판 패널에 있는지
     const hidePathsBox = win.locator('label:has-text("작업용 파일 경로") input[type=checkbox]');
     if (await hidePathsBox.count() !== 1) throw new Error('경로 축약 체크박스 없음');
@@ -155,7 +155,23 @@ ${para}
       await win.click('[data-tab=bookk]');
       await win.waitForSelector('[data-testid=bk-reg]', { timeout: 5000 });
       if (await win.locator('[data-tab=ebook]').count() !== 0) throw new Error('전자책 탭이 따로 남아 있다(통합됐어야 한다)');
-      if (await win.locator('[data-tab=bookk]').innerText().then((t) => !/부크크 등록/.test(t))) throw new Error('통합 탭 이름이 「부크크 등록」이 아니다');
+      if (await win.locator('[data-tab=bookk]').innerText().then((t) => !/등록·유통/.test(t))) throw new Error('통합 탭 이름이 「등록·유통」이 아니다');
+      // 📊 유통 현황(2026-10-14) — 가짜 읽기(global.__readRetailTest)·임시 저장 파일로만(진짜 크롬·로이의 유통 기록을 건드리지 않는다)
+      await app.evaluate(() => {
+        process.env.PRIMING_DIST_FILE = (process.env.TEMP || process.env.TMPDIR || '/tmp') + '/priming-smoke-dist.json';
+        global.__readRetailTest = async () => ({ items: [
+          { no: '1', status: '처리완료', kind: 'done', retailer: '스콘', title: '__UI스모크__', type: '전자도서', category: '', author: '', applied: '2026.10.13', final: '2026.10.14', message: '완료 안내', links: [] },
+          { no: '2', status: '반려', kind: 'rejected', retailer: '교보문고', title: '다른 책', type: '종이책', category: '', author: '', applied: '2026.10.01', final: '2026.10.02', message: '', links: [] },
+        ], cardCount: 2 });
+      });
+      await win.waitForSelector('[data-testid=dist-panel]', { timeout: 5000 });
+      await win.click('[data-testid=dist-refresh]');
+      await win.waitForSelector('[data-testid=dist-when]:has-text("마지막으로 읽음")', { timeout: 8000 });
+      if (await win.locator('[data-testid=dist-state-kdp]').count() !== 1 || await win.locator('[data-testid=dist-state-d2d]').count() !== 1) throw new Error('아마존 KDP·D2D 수동 상태 칸이 없다');
+      await win.selectOption('[data-testid=dist-state-kdp]', 'failed');
+      await win.waitForTimeout(300);
+      if (await win.locator('[data-testid=dist-state-kdp]').inputValue() !== 'failed') throw new Error('KDP 상태 저장이 화면에 반영되지 않았다');
+      console.log('· 유통 현황 패널 OK — 읽어오기(가짜) · 아마존/D2D 수동 상태');
       for (const [pid, label, minChk, minSum] of [['bookk', '종이책', 10, 8], ['ebook', '전자책', 10, 6]]) {
         const nChk = await win.locator(`[data-testid=bk-reg-${pid}] .bkchk`).count();
         if (nChk < minChk) throw new Error(`${label} 점검표 항목 ${nChk}개 — 너무 적다`);
@@ -285,10 +301,10 @@ ${para}
       fs.rmSync(png, { force: true });
       console.log('· 표지 펼침면 OK — 표지 화면(쪽번호 불변) · 시안 경고 · 책등 mm 표시 · ▶/◀/⏮ 이동 · 날개 경고 · 제거하면 사라짐');
     }
-    await win.click('[data-tab=info]');
+    await win.click('[data-tab=structure]');
     if (await win.locator('.bkbadge.req').count() < 3 || await win.locator('.bkbadge.opt').count() < 3) throw new Error('필수/선택 배지 없음');
     await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-info.png') });
-    await win.click('[data-tab=layout]');
+    await win.click('[data-tab=cover]');
 
     // 목차 쪽번호 — target-counter 가 해석돼 숫자가 나와야 한다('??' = anchor 불일치 회귀).
     //   (미리보기 URL 에 쿼리 캐시버스터를 붙이면 vivliostyle 같은문서 판정이 깨져 '??' 가 남)

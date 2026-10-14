@@ -11714,6 +11714,42 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
     return { ok: false, error: e.message };
   } finally { _bookRegBusy = false; }
 });
+// 📊 유통 현황(로이 2026-10-14) — 부크크 외부유통(bookRetail) 화면을 크롬으로 **읽어** 어디에 등록됐고 어디가 못 됐는지 보여 준다 + 아마존 KDP·D2D 수동 기록·내 책 링크. 읽기만(core/book/retail-status).
+function _distTitles() {
+  const t = [];
+  try { const m = (S.parsed && S.parsed.meta) || {}; if (m.title) t.push(m.title); const RI = require('./core/book/register-info').loadRegisterInfo(S.scriptPath, m); if (RI && RI.title) t.push(RI.title); } catch (_) {}
+  return t;
+}
+function _distView() {
+  const RS = require('./core/book/retail-status'); const db = RS.load(); const titles = _distTitles(); const key = bookFileBase();
+  return { ok: true, fetchedAt: db.fetchedAt, key, titles, summary: RS.summarize(db.items.filter((i) => RS.isMine(i, titles))),
+    items: db.items.map((i) => ({ ...i, mine: RS.isMine(i, titles) })), manual: db.manual[key] || {}, url: RS.RETAIL_URL, states: RS.MANUAL_STATES };
+}
+ipcMain.handle('book-distribution', () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
+  try { return _distView(); } catch (e) { return { ok: false, error: e.message }; }
+});
+let _distBusy = false;
+ipcMain.handle('book-distribution-refresh', async () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
+  if (_bookRegBusy || _distBusy) return { ok: false, error: '크롬 등록 도우미가 이미 열려 있습니다 — 끝낸 뒤 다시 누르세요' };
+  _distBusy = true; _bookRegBusy = true;
+  try {
+    const RB = require('./core/book/register-browser'); const RS = require('./core/book/retail-status');
+    const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+    log('📊 [유통현황] 부크크 외부유통 화면 읽기 시작 — 읽기만 합니다(아무것도 누르지 않음)');
+    const r = await (global.__readRetailTest || RB.readBookkRetail)({ log, isAborted: () => !!S.abort, rawDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+    RS.saveItems(r.items);
+    log(`📊 [유통현황] ${r.items.length}건 읽음`);
+    return { ..._distView(), read: r.items.length };
+  } catch (e) { log('✗ [유통현황] ' + e.message); return { ok: false, error: e.message }; }
+  finally { _distBusy = false; _bookRegBusy = false; }
+});
+ipcMain.handle('book-distribution-manual', (_e, a = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
+  try { require('./core/book/retail-status').setManual(bookFileBase(), String(a.channel || ''), { state: a.state, link: a.link, note: a.note }); return _distView(); }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 // 💾 종이책 정가 기록 읽기/직접 입력 — 전자책 정가(종이책의 70% 내림)의 근거. 종이책을 앱 자동 입력 없이 이미 등록한 경우 로이가 정가를 한 번 적어 둔다.
 ipcMain.handle('book-register-paper-price', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };

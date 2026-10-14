@@ -29,13 +29,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     let r = await win.evaluate((p) => window.api.openBookPath({ scriptPath: p }), MD_KO);
     if (!r || !r.dto || r.dto.kind !== 'book') throw new Error('한국어 원고 열기 실패');
     await win.click('.modetoggle button:has-text("📖 출판")'); await win.waitForSelector('.bkwrap', { timeout: 10000 });
-    ok(await win.locator('.bktab[data-tab="overseas"]').count() === 0, '부크크 원고에는 「해외 등록」 탭이 없다');
+    ok(await win.locator('.bktab[data-tab="overseas"]').count() === 0, '해외 등록은 따로 탭이 아니다(2026-10-14 — 등록·유통 탭 안)');
+    await win.click('.bktab[data-tab="bookk"]');
+    ok(await win.locator('[data-testid="ovr-panel"]').count() === 0, '부크크 원고에는 해외 등록 도우미 패널이 없다');
     // KDP 원고
     r = await win.evaluate((p) => window.api.openBookPath({ scriptPath: p }), MD_KDP);
     ok(r && r.dto && r.dto.platformId === 'kdp', 'KDP 원고 — 플랫폼 인식(' + (r && r.dto && r.dto.platformId) + ')');
-    await win.waitForSelector('.bktab[data-tab="overseas"]', { timeout: 10000 });
-    ok(true, '「🇺🇸 해외 등록」 탭이 생긴다');
-    await win.click('.bktab[data-tab="overseas"]');
+    await win.waitForSelector('.bktab[data-tab="bookk"]', { timeout: 10000 });
+    await win.click('.bktab[data-tab="bookk"]');
+    ok(true, '「등록·유통」 탭 안에 해외 등록 도우미가 보인다');
     await win.waitForSelector('[data-testid="ovr-panel"]', { timeout: 10000 });
     await win.waitForSelector('[data-testid="ovr-field-title"]', { timeout: 10000 });
     const title = await win.locator('[data-testid="ovr-field-title"]').innerText();

@@ -713,4 +713,44 @@ async function runRegister(o) {
   return { ok: !r.failed.length, done: r.done, failed: r.failed, manual: o.plan.manual || [], shot };
 }
 
-module.exports = { findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+// ───────── 📊 부크크 「외부유통 판매시작」(/author/reviews/bookRetail) 읽기 — 로이 2026-10-14. 🔴 읽기만: 열고·스크롤하고·글자를 읽을 뿐 아무것도 누르지 않는다(제출취소·재신청 등 금지 · 테스트가 소스로 검사).
+//   카드 = 「도서번호」 글자가 정확히 한 번 든 가장 작은 상자. 글자(+안의 링크)를 모아 core/book/retail-status.parseCards 로 항목화한다.
+async function readBookkRetail(o) {
+  const log = o.log || (() => {});
+  const RS = require('./retail-status');
+  const site = SITES.bookk;
+  const ctx = await _launch(log);
+  const page = ctx.pages()[0] || await ctx.newPage();
+  log('[유통현황] 부크크 열기 — 로그인이 필요하면 열린 크롬 창에서 직접 로그인하세요');
+  await page.goto(RS.RETAIL_URL, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+  let loggedIn = await page.evaluate(() => /로그아웃/.test(document.body ? document.body.innerText : '')).catch(() => false);
+  if (!loggedIn) {
+    await page.goto(site.home, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+    await _clickNaverLogin(page, log);
+    await _waitLogin(page, site, log, o.isAborted);
+    await page.goto(RS.RETAIL_URL, { waitUntil: 'load', timeout: 60000 });
+  }
+  for (let i = 0; i < 20; i++) { const has = await page.evaluate(() => /도서번호/.test(document.body ? document.body.innerText : '')).catch(() => false); if (has) break; await sleep(1000); }
+  // 늦게 그려지는 카드(스크롤 로딩)를 위해 끝까지 내려 본다 — 클릭 없음
+  for (let i = 0; i < 12; i++) {
+    const h = await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); return document.body.scrollHeight; }).catch(() => 0);
+    await sleep(500);
+    const h2 = await page.evaluate(() => document.body.scrollHeight).catch(() => 0);
+    if (h2 === h) break;
+  }
+  const cards = await page.evaluate(() => {
+    const has = (e) => (e.innerText || '').split('도서번호').length - 1;
+    const all = [...document.querySelectorAll('body *')].filter((e) => has(e) === 1);
+    // 도서번호가 한 번인 요소 중 가장 바깥(= 카드 전체) — 부모가 두 번 이상이면 e 가 카드다
+    const tops = all.filter((e) => !e.parentElement || has(e.parentElement) !== 1);
+    return tops.map((e) => ({ text: e.innerText || '', links: [...e.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: (a.textContent || '').trim().slice(0, 40) })) }));
+  }).catch(() => []);
+  const pageText = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+  let rawFile = '';
+  try { if (o.rawDir) { fs.mkdirSync(o.rawDir, { recursive: true }); rawFile = path.join(o.rawDir, '유통현황_' + new Date(Date.now() + 9 * 3600e3).toISOString().replace(/[-:T]/g, '').slice(0, 12) + '.txt'); fs.writeFileSync(rawFile, pageText, 'utf8'); } } catch (_) {}
+  const items = RS.parseCards(cards);
+  log(`[유통현황] 카드 ${cards.length}개 → 항목 ${items.length}개${rawFile ? ' · 화면 원문 ' + path.basename(rawFile) : ''}${cards.length && !items.length ? ' ⚠ 읽은 글자를 해석하지 못했습니다 — 원문 파일을 알려 주세요' : ''}`);
+  return { items, cardCount: cards.length, rawFile, loggedIn: true };
+}
+
+module.exports = { readBookkRetail, findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

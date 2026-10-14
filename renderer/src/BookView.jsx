@@ -7,14 +7,16 @@ import { CoreViewer, Navigation, PageViewMode } from '@vivliostyle/core';
 import RG from '../../core/book/register-guide.js';
 import HK from '../../core/book/header-kind.js';
 import DK from '../../core/book/date-ko.js';   // 발행일 「2026년 10월 06일」 모양
+import BookDistribution from './BookDistribution.jsx';   // 📊 유통 현황(로이 2026-10-14)
 import OverseasRegister from './OverseasRegister.jsx';   // 🇺🇸 KDP·D2D 등록 복사 도우미(R27)
 import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
+//   2026-10-14 로이 — 6탭 → 4탭: 구조·정보 / 판권 / 표지·조판 / 등록·유통(부크크 등록 + 유통 현황 + 아마존·D2D). 옛 탭 id 는 TAB_ALIAS 로 옮긴다.
 const TABS = [
-  ['structure', '📚', '구조'], ['info', '📋', '책 정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지'],
-  ['layout', '📐', '조판'], ['bookk', '📤', '부크크 등록'],
+  ['structure', '📚', '구조·정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지·조판'], ['bookk', '📤', '등록·유통'],
 ];
+const TAB_ALIAS = { info: 'structure', layout: 'cover', overseas: 'bookk', ebook: 'bookk', jakkawa: 'bookk' };
 // 책 정보 탭 — [키, 이름, 필수?, 도움말]
 const INFO_FIELDS = [
   ['title', '책 제목', true, ''], ['author', '저자(필명)', true, 'AI가 집필에 개입했다면 저자명에 「AI」 표기(부크크 권고)'],
@@ -168,8 +170,8 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const loaded = !!(dto && dto.kind === 'book');
 
   // ── 왼쪽 메뉴 · 등록 점검(개인 편의값은 이 PC 브라우저에만 — 실패해도 화면은 정상) ──
-  const [tab, setTabRaw] = useState(() => { try { const t = localStorage.getItem('bk-tab') || 'structure'; return (t === 'jakkawa' || t === 'ebook') ? 'bookk' : t; } catch (_) { return 'structure'; } });   // 옛 「전자책·작가와」 탭 → 부크크 전자책
-  const setTab = (t) => { setTabRaw(t); try { localStorage.setItem('bk-tab', t); } catch (_) {} };
+  const [tab, setTabRaw] = useState(() => { try { const t = localStorage.getItem('bk-tab') || 'structure'; return TAB_ALIAS[t] || t; } catch (_) { return 'structure'; } });   // 옛 「전자책·작가와」 탭 → 부크크 전자책
+  const setTab = (t0) => { const t = TAB_ALIAS[t0] || t0; setTabRaw(t); try { localStorage.setItem('bk-tab', t); } catch (_) {} };
   const confirmKey = 'bk-confirm:' + ((dto && dto.scriptPath) || '');
   const [confirmed, setConfirmed] = useState({});
   useEffect(() => {
@@ -748,7 +750,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   };
   const lists = { bookk: RG.checklist('bookk', rgCtx), ebook: RG.checklist('ebook', rgCtx) };
   const badge = {
-    info: ['title', 'author'].filter((k) => missSet.has(k)).length,
+    structure: ['title', 'author'].filter((k) => missSet.has(k)).length,   // 책 정보 필수 항목(구조·정보 탭)
     colophon: COLO_REQ.filter(([k]) => missSet.has(k)).length,
     bookk: RG.blocking(lists.bookk) + RG.blocking(lists.ebook),   // 종이책 + 전자책 막히는 필수 항목 합
   };
@@ -984,8 +986,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   };
 
   // ── 왼쪽 탭 내용 ──
-  const sideBody = (() => {
-    switch (tab) {
+  const bodyOf = (tabId) => {
+    switch (tabId) {
       case 'structure': return (<>
         <div className="bkzone">앞부속</div>
         <label className="chk"><input type="checkbox" checked={!/^(off|no|없음|아니오|false|0|x)$/i.test(String(meta.halfTitle || 'on'))}
@@ -1337,6 +1339,15 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       case 'overseas': return (dto.platformId === 'kdp' || dto.platformId === 'd2d') ? <OverseasRegister dto={dto} setStatus={setStatus} /> : null;
       default: return null;
     }
+  };
+  // 4탭 = 옛 탭 본문을 구역 제목으로 이어 붙인다(입력칸은 그대로 — 새로 마운트되지 않게 함수 호출)
+  const sideBody = (() => {
+    switch (tab) {
+      case 'structure': return (<>{bodyOf('structure')}<div className="bkzone" data-testid="bk-zone-info">📋 책 정보</div>{bodyOf('info')}</>);
+      case 'cover': return (<>{bodyOf('cover')}<div className="bkzone" data-testid="bk-zone-layout">📐 조판</div>{bodyOf('layout')}</>);
+      case 'bookk': return (<>{bodyOf('bookk')}<BookDistribution dto={dto} setStatus={setStatus} busy={building} />{bodyOf('overseas')}</>);
+      default: return bodyOf(tab);
+    }
   })();
 
   return (
@@ -1371,7 +1382,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           </div>
         )}
         <nav className="bknav" data-testid="bk-nav">
-          {[...TABS, ...((dto.platformId === 'kdp' || dto.platformId === 'd2d') ? [['overseas', '🇺🇸', '해외 등록']] : [])].map(([id, ic, name]) => (
+          {TABS.map(([id, ic, name]) => (
             <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
               <span className="bkti">{ic}</span><span>{name}</span>
               {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요`}>{badge[id]}</em> : null}
