@@ -96,7 +96,7 @@ const server = http.createServer(async (req, res) => {
     const q = new URL(u).searchParams;
     ok(q.get('code_challenge_method') === 'S256' && q.get('code_challenge'), 'PKCE S256');
     ok(q.get('access_type') === 'offline' && /consent/.test(q.get('prompt')) && /select_account/.test(q.get('prompt')), 'offline + 채널 선택 + consent');
-    ok(q.get('scope').includes('youtube.upload') && q.get('scope').includes('youtube.readonly') && q.get('scope').split(' ').length === 2, '권한은 두 가지뿐');
+    ok(q.get('scope').includes('youtube.upload') && q.get('scope').includes('youtube.readonly') && q.get('scope').includes('youtube.force-ssl') && q.get('scope').split(' ').length === 3, '권한은 세 가지뿐(업로드 · 읽기 · 재생목록 담기 — v0.9.33)');
     const back = new URL(q.get('redirect_uri'));
     ok(back.hostname === '127.0.0.1', '루프백 127.0.0.1');
     const p = new URLSearchParams({ state: extra.state || q.get('state'), ...(extra.error ? { error: extra.error } : { code }) });
@@ -282,8 +282,9 @@ const server = http.createServer(async (req, res) => {
       fileFor: () => 'U:\\A.mp4', exists: () => true, findUploaded: () => null });
     ok(flip.jobs[0].channelId === 'UCgo', '판정력: 채널 해석이 바뀌면 결과도 바뀐다(헛단언 아님)');
     ok(/if \(qItems\.length > 1\) \{[\s\S]{0,200}buttons: \[`큐 전체 \$\{qItems\.length\}편`, '이 대본만', '취소'\]/.test(M), '큐에 대본이 여럿이면 ⬆ 업로드가 「큐 전체 / 이 대본만」을 묻는다');
-    ok(/for \(const j of jobs\) enqueueYtUpload\(\{ file: j\.file, channelId: j\.channelId, meta: ytMetaFor\(j\.pr, j\.ctx\) \}\)/.test(M), '큐 전체는 항목 ctx 로 메타(제목·챕터)를 만든다');
-    ok(/function vrewBaseName\(pr, ctx = null\)/.test(M) && /function ytMetaFor\(pr, ctx = null\)/.test(M), 'vrewBaseName·ytMetaFor 가 ctx 를 받는다(없으면 활성 대본 — 기존 호출 그대로)');
+    ok(/for \(const j of jobs\) enqueueYtUpload\(\{ file: j\.file, channelId: j\.channelId, meta: ytMetaFor\(j\.pr, j\.ctx[,)]/.test(M), '큐 전체는 항목 ctx 로 메타(제목·챕터)를 만든다');
+    ok(r.finishes.length === 1 && r.finishes[0].videoId === 'vid1' && r.finishes[0].ctx.scriptPath === 'D:\\대본\\B.md', '🧷 이미 올린 B 는 다시 올리지 않고 마무리만(그 항목의 대본으로)');
+    ok(/function vrewBaseName\(pr, ctx = null\)/.test(M) && /function ytMetaFor\(pr, ctx = null[,)]/.test(M), 'vrewBaseName·ytMetaFor 가 ctx 를 받는다(없으면 활성 대본 — 기존 호출 그대로)');
   }
 
   console.log('\n[10c] ♻ 지난 큐 — 빈 큐로 덮이지 않는 사본');

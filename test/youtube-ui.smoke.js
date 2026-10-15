@@ -66,11 +66,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
       await win.waitForTimeout(250);
       heights[t] = await card.evaluate((el) => Math.round(el.getBoundingClientRect().height));
     }
-    const row = card.locator('.frow:has(label:text-is("업로드채널"))');
-    ok(await row.count() === 1, '📁 폴더 탭에 「업로드채널」 줄');
+    const row = card.locator('[data-testid="yt-card"]');   // v0.9.18 가로 카드 한 줄(옛 「업로드채널」 줄)
+    ok(await row.count() === 1, '📁 폴더 탭에 ⬆ 업로드 카드');
+    ok(await row.locator('[data-testid="ch-yt-playlist"]').count() === 1, '🧷 업로드 카드에 재생목록 이름 칸(v0.9.33)');
     const sel = row.locator('select');
     const firstOpt = await sel.locator('option').first().textContent();
-    ok(st.channels.length ? /올릴 유튜브 채널/.test(firstOpt) : /연결된 채널 없음/.test(firstOpt), `채널 목록 첫 줄: 「${firstOpt}」`);
+    ok(st.channels.length ? /올릴 채널/.test(firstOpt) : /연결 없음/.test(firstOpt), `채널 목록 첫 줄: 「${firstOpt}」`);
     ok(await sel.locator('option').count() >= 1 + st.channels.length, '연결된 채널이 목록에 나온다');
     const vals = Object.values(heights);
     console.log('   탭 높이', JSON.stringify(heights));

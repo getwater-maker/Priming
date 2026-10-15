@@ -90,12 +90,14 @@ const server = http.createServer((req, res) => {
   ok(!bad.dup && /연결/.test(bad.warn || ''), '연결 안 된 채널 → 경고(로컬 판정만)');
 
   console.log('\n[7] main.js 배선 — 모든 업로드 경로가 하나의 관문을 지난다');
-  ok(/async function runYtUpload\(\{ file, channelId, meta, force = false \}\)/.test(M), 'runYtUpload 에 force');
+  ok(/async function runYtUpload\(\{ file, channelId, meta, force = false, finish = null \}\)/.test(M), 'runYtUpload 에 force · 🧷 finish');
   const run = M.slice(M.indexOf('async function runYtUpload'), M.indexOf('/** 렌더가 끝난 뒤'));
   ok(/if \(!force\) \{\s*const dup = await YT\.checkDuplicate\(\{ channelId, file, title \}\)/.test(run) && /skipped: true/.test(run), '관문: force 가 아니면 checkDuplicate → 중복이면 건너뜀(자동 업로드·큐 전체·이 대본 모두 여기를 지난다)');
   ok(run.indexOf('checkDuplicate') < run.indexOf('YT.uploadVideo('), '관문은 실제 업로드 호출보다 앞');
-  const cur = M.slice(M.indexOf("ipcMain.handle('yt-upload-current'"), M.indexOf('const { jobs, skipped } = planQueueUploads'));
-  ok(/checkDuplicate\(\{ channelId: chId, file, title: meta1\.title \}\)/.test(cur) && /force = true/.test(cur) && /enqueueYtUpload\(\{ file, channelId: chId, meta: meta1, force \}\)/.test(cur), '이 대본만: 같은 파일·같은 제목·유튜브 목록 중 하나라도 있으면 묻고, 「한 번 더」를 골라야 force 로 올린다');
+  const cur = M.slice(M.indexOf("ipcMain.handle('yt-upload-current'"), M.indexOf('const { jobs, skipped, finishes } = planQueueUploads'));
+  ok(/checkDuplicate\(\{ channelId: chId, file, title: meta1\.title \}\)/.test(cur) && /force = true/.test(cur) && /enqueueYtUpload\(\{ file, channelId: chId, meta: meta1, force, finish: ytFinishJob\(ctx, preset\) \}\)/.test(cur), '이 대본만: 같은 파일·같은 제목·유튜브 목록 중 하나라도 있으면 묻고, 「한 번 더」를 골라야 force 로 올린다');
+  ok(/buttons: \['🧷 마무리만 \(썸네일·재생목록\)', '한 번 더 올리기', '취소'\], defaultId: 0/.test(cur) && /finishOnly: true, channelId: chId, videoId: dup\.videoId/.test(cur), '🧷 이미 올린 영상 = 기본 「마무리만」(다시 올리지 않는다)');
+  ok(/job\.finishOnly \? runYtFinish\(job\) : runYtUpload\(job\)/.test(M), '마무리만 작업도 업로드 줄(ytChain)에서 하나씩');
   ok(/function enqueueYtUpload\(job\)/.test(M) && /runYtUpload\(job\)/.test(M), 'enqueue → run(job) 로 force 가 그대로 전달된다');
 
   console.log(`\n${fail ? '❌' : '✅'} youtube-dup — ${pass} 통과 / ${fail} 실패`);

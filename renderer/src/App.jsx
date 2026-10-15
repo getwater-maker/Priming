@@ -3387,6 +3387,7 @@ export default function App() {
       outUpload: p.outUpload || '',
       // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
+      ytPlaylist: p.ytPlaylist || '',   // 🧷 업로드 마무리 — 이 채널 영상을 담을 재생목록 이름(패키징에 없을 때) · ⚠ 저장 patch 에도
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
       wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
@@ -3893,6 +3894,7 @@ export default function App() {
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
       ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
+      ytPlaylist: String(ch.ytPlaylist || '').trim(),   // 🧷 업로드 마무리 재생목록 이름 — ⚠ 마찬가지
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
         font: (ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font,
@@ -6717,10 +6719,12 @@ export default function App() {
                       <div className="crow stack"><span className="l">⬆ 업로드</span>
                         <select value={ch.ytChannelId || ''} onChange={(e) => setCh({ ...ch, ytChannelId: e.target.value })}>
                           <option value="">{ytSt && ytSt.channels && ytSt.channels.length ? '— 올릴 채널 —' : '— 연결 없음 —'}</option>
-                          {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken ? ' (⚠ 다시 연결)' : ''}</option>)}
+                          {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken || c.needsReconnect ? ' (⚠ 다시 연결)' : ''}</option>)}
                           {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
                         <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → ▶ 유튜브.</Hint>
+                        <input data-testid="ch-yt-playlist" placeholder="재생목록 이름" value={ch.ytPlaylist || ''} onChange={(e) => setCh({ ...ch, ytPlaylist: e.target.value })} />
+                        <Hint>🧷 업로드가 끝나면 썸네일 A 와 이 <b>재생목록</b>을 앱이 넣고 다시 읽어 확인합니다. 이름은 유튜브의 재생목록 제목과 <b>똑같이</b> 적으세요. 패키징 「## 재생목록」이나 고정댓글의 재생목록 링크가 있으면 그것이 먼저입니다. 고정댓글·썸네일 A/B·종료화면·예약은 Studio 에서 합니다.</Hint>
                       </div>
                     </div>
                     <div className="col" data-testid="infocards-row">
@@ -7330,7 +7334,7 @@ export default function App() {
                     style={{ alignItems: 'center', borderTop: ytDragOver === i ? '2px solid var(--hook)' : '1px dashed var(--line)', paddingTop: 5, marginTop: 5, cursor: 'grab' }}>
                     <span className="meta" style={{ flex: '0 0 auto', cursor: 'grab', userSelect: 'none' }}>⠿</span>
                     <b style={{ flex: '0 0 auto' }}>▶ {c.title}</b>
-                    <span className="meta" style={{ flex: 1 }}>{c.handle ? `${c.handle} · ` : ''}{c.connectedAt ? `${c.connectedAt} 연결` : ''}{c.broken ? ' · ⚠ 연결이 끊겼습니다 — 다시 연결하세요' : ''}</span>
+                    <span className="meta" style={{ flex: 1 }}>{c.handle ? `${c.handle} · ` : ''}{c.connectedAt ? `${c.connectedAt} 연결` : ''}{c.broken ? ' · ⚠ 연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? ' · ⚠ 재생목록 권한 없음 — 「🔗 채널 연결」로 이 채널을 한 번 다시 연결하세요' : ''}</span>
                     <button className="ghost" style={{ flex: '0 0 auto' }} title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
                   </div>
                 ))}

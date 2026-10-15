@@ -3029,7 +3029,7 @@ function ytLangOf(pr) {
 function enqueueYtUpload(job) {
   ytPending++;
   if (ytPending > 1) log(`⏳ 유튜브 업로드 대기 — 앞에 ${ytPending - 1}건 (${job.meta.title})`);
-  const run = ytChain.then(() => runYtUpload(job)).catch((e) => ({ ok: false, error: e.message })).finally(() => { ytPending--; });
+  const run = ytChain.then(() => (job.finishOnly ? runYtFinish(job) : runYtUpload(job))).catch((e) => ({ ok: false, error: e.message })).finally(() => { ytPending--; });
   ytChain = run;
   return run;
 }
@@ -3140,7 +3140,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
 });
 
 const CHAPTER_TOL_SEC = 1.0;   // ⏱ 챕터 합계와 MP4 실제 길이 허용 차이
-async function runYtUpload({ file, channelId, meta, force = false }) {
+async function runYtUpload({ file, channelId, meta, force = false, finish = null }) {
   const YT = require('./core/youtube-upload');
   S.ytAbort = false;
   const st = YT.status();
@@ -3169,6 +3169,7 @@ async function runYtUpload({ file, channelId, meta, force = false }) {
     if (dup.warn) log(`⚠ ${dup.warn}`);
     if (dup.dup) {
       log(`⏭ 유튜브 업로드 건너뜀 — 「${title}」: ${dup.reason} → ${dup.url}`);
+      if (finish && dup.videoId) await runYtFinish({ channelId, videoId: dup.videoId, title, finish });   // 🧷 이미 올린 영상도 마무리(빠진 것만)
       return { ok: true, skipped: true, duplicate: dup, url: dup.url };
     }
   }
@@ -3192,7 +3193,8 @@ async function runYtUpload({ file, channelId, meta, force = false }) {
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (r.ok) {
     log(`✅ 유튜브 업로드 완료 — 비공개 · ${r.url} (${_dur(r.sec)})`);
-    log(`   공개·예약·썸네일·재생목록은 Studio 에서: ${r.studioUrl}`);
+    if (finish) r.finish = await runYtFinish({ channelId, videoId: r.videoId, title, finish });
+    log(`   고정댓글·A/B·종료화면·예약은 Studio 에서: ${r.studioUrl}`);
   } else if (r.cancelled) {
     ytSend({ ...(_pLast || base), phase: 'aborted', endedAt: Date.now() });
   } else {
@@ -3201,14 +3203,44 @@ async function runYtUpload({ file, channelId, meta, force = false }) {
   }
   return r;
 }
+// 🧷 업로드 마무리(v0.9.33 · core/yt-finish) — 썸네일 A · 재생목록을 API 로 넣고 다시 읽어 확인표를 로그에 남긴다.
+//   finish = { scriptPath, preset } — 업로드를 줄 세운 순간의 대본·채널(제작 중 화면이 다른 대본으로 바뀌어도 섞이지 않게 · runCtx 와 같은 이유).
+//   업로드 줄(ytChain)에서 돈다 · 어떤 경우에도 던지지 않는다(업로드 성공을 뒤집지 않는다).
+function ytFinishJob(ctx, preset) { return { scriptPath: ctx && ctx.scriptPath, preset: preset || null }; }
+async function runYtFinish({ channelId, videoId, title, finish }) {
+  const YT = require('./core/youtube-upload');
+  const YF = require('./core/yt-finish');
+  const PK = require('./core/yt-packaging');
+  const TF = require('./core/thumb-find');
+  try {
+    const pf = PK.findPackagingFile(finish.scriptPath);
+    let pack = {};
+    if (pf) { try { pack = PK.parsePackaging(await fs.promises.readFile(pf, 'utf8')); } catch (_) {} }
+    const root = thumbRoot();
+    const key = TF.thumbKey(finish.scriptPath);
+    const thumbs = root && key ? await TF.findThumbs(root, key, 6) : [];
+    const plan = YF.planFinish({ pack, packagingPath: pf, preset: finish.preset, thumbs });
+    const token = async (force) => { const t = await YT.accessToken(channelId, { force }); if (!t.ok) throw new Error(t.error); return t.token; };
+    const res = await YF.finishVideo({ channelId, videoId, plan, token, log });
+    for (const l of YF.reportLines(title, res)) log(l);
+    return res;
+  } catch (e) {
+    log(`⚠ 업로드 마무리 못 함 — 「${title}」: ${e.message} (Studio 에서 직접 하세요: https://studio.youtube.com/video/${videoId}/edit)`);
+    return { items: [], done: 0, failed: 1, manual: 0, error: e.message };
+  }
+}
 /** 렌더가 끝난 뒤 — 채널에 자동 업로드가 켜져 있을 때만. 이미 올린 파일이면 건너뛴다. */
 function maybeAutoUpload(pr, file, preset, ctx = null, isVrewMp4 = false) {   // isVrewMp4 = .vrew 로 구운 유튜브 MP4(⏸ 막간 쉼이 들어 있다 — 챕터를 민다)
   if (!preset || !preset.ytAuto) return;
   if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); return; }
   const YT = require('./core/youtube-upload');
   const done = YT.findUploaded(preset.ytChannelId, file);
-  if (done) { log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`); return; }
-  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null) });
+  if (done) {
+    log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`);
+    enqueueYtUpload({ finishOnly: true, channelId: preset.ytChannelId, videoId: done.videoId, title: done.title || vrewBaseName(pr, ctx), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset) });
+    return;
+  }
+  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset) });
 }
 ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
 // ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
@@ -3291,26 +3323,33 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
       let force = false;
       if (dup.dup) {
         const c = await dialog.showMessageBox(win, {
-          type: 'question', title: '이미 올린 영상', buttons: ['한 번 더 올리기', '취소'], defaultId: 1, cancelId: 1, noLink: true,
+          type: 'question', title: '이미 올린 영상', buttons: ['🧷 마무리만 (썸네일·재생목록)', '한 번 더 올리기', '취소'], defaultId: 0, cancelId: 2, noLink: true,
           message: `「${meta1.title}」 — ${dup.reason}.`, detail: `${dup.url}
 
-한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다(같은 제목이 둘). 올리지 않으려면 취소하세요.`,
+마무리만 = 다시 올리지 않고 그 영상에 썸네일 A 와 재생목록만 넣습니다(이미 들어간 것은 건너뜀).
+한 번 더 올리면 채널에 비공개 영상이 하나 더 생깁니다(같은 제목이 둘).`,
         });
-        if (c.response !== 0) continue;
+        if (c.response === 2) continue;
+        if (c.response === 0) {
+          if (dup.videoId) { enqueueYtUpload({ finishOnly: true, channelId: chId, videoId: dup.videoId, title: meta1.title, finish: ytFinishJob(ctx, preset) }); n++; }
+          continue;
+        }
         force = true;
       }
-      enqueueYtUpload({ file, channelId: chId, meta: meta1, force });
+      enqueueYtUpload({ file, channelId: chId, meta: meta1, force, finish: ytFinishJob(ctx, preset) });
       n++;
     }
     return { queued: n };
   }
 
-  const { jobs, skipped } = planQueueUploads(qItems, {
+  const { jobs, skipped, finishes } = planQueueUploads(qItems, {
     headerPresetName: args.presetName, resolvePreset, kindName,
     fileFor: (pr, ctx, preset) => ytFileFor(pr, ctx, preset, isWb),
     exists: (f) => fs.existsSync(f), findUploaded: (ch, f) => YT.findUploaded(ch, f),
   });
-  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx, isWb ? null : j.preset) });
+  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx, isWb ? null : j.preset), finish: ytFinishJob(j.ctx, j.preset) });
+  // 🧷 이미 올린 편은 다시 올리지 않고 마무리(썸네일 A · 재생목록)만 — 빠진 것만 채운다
+  for (const f of finishes) enqueueYtUpload({ finishOnly: true, channelId: f.channelId, videoId: f.videoId, title: f.title, finish: ytFinishJob(f.ctx, f.preset) });
   log(`⬆ 큐 전체 업로드 — ${jobs.length}편 줄 세움${skipped.length ? ` · 건너뜀 ${skipped.length}편` : ''}`);
   for (const s of skipped) log(`   ⏭ ${s}`);
   return { queued: jobs.length, skipped: skipped.length };
@@ -3321,7 +3360,7 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
  *   이미 올린 파일은 묻지 않고 건너뛴다(한 편씩 「한 번 더」를 물으면 일괄의 뜻이 없다 — 다시 올리려면 그 대본만).
  */
 function planQueueUploads(items, o) {
-  const jobs = [], skipped = [];
+  const jobs = [], skipped = [], finishes = [];
   for (const it of items || []) {
     const name = it.scriptPath ? String(it.scriptPath).split(/[\\/]/).pop().replace(/\.md$/i, '') : '대본';
     const pn = (it.settings && it.settings.presetName) || o.headerPresetName;
@@ -3335,11 +3374,11 @@ function planQueueUploads(items, o) {
       if (!o.exists(file)) { skipped.push(`${name} — ${o.kindName} 없음 (${file})`); continue; }
       if (jobs.some((j) => j.channelId === chId && j.file === file)) continue;   // 같은 대본이 큐에 두 번
       const done = o.findUploaded(chId, file);
-      if (done) { skipped.push(`${name} — ${done.at} 에 이미 올림 (https://youtu.be/${done.videoId})`); continue; }
+      if (done) { skipped.push(`${name} — ${done.at} 에 이미 올림 (https://youtu.be/${done.videoId}) → 마무리만`); finishes.push({ ctx, channelId: chId, preset, videoId: done.videoId, title: done.title || name }); continue; }
       jobs.push({ pr, ctx, file, channelId: chId, preset });
     }
   }
-  return { jobs, skipped };
+  return { jobs, skipped, finishes };
 }
 
 /** 한 편을 화이트보드 MP4 로. 게이트(음성·이미지 누락)는 호출부가 본다. 어떤 경우에도 던지지 않는다. */

@@ -82,7 +82,10 @@ function parsePackaging(text) {
   const title = (fence(t).split('\n').find((l) => l.trim()) || '').replace(/^\*\*|\*\*$/g, '').trim();
   const description = fence(sec[key('설명글')]);
   const tags = fence(sec[key('태그')]).split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-  return { title, description, tags };
+  // 🧷 업로드 마무리(core/yt-finish)가 읽는 두 칸 — 고정댓글 원문 · 재생목록(이름 또는 주소/ID · 첫 줄)
+  const pinned = fence(sec[key('고정댓글')]);
+  const playlist = (fence(sec[key('재생목록')]).split('\n').find((l) => l.trim()) || '').replace(/^\*\*|\*\*$/g, '').trim();
+  return { title, description, tags, pinned, playlist };
 }
 
 /** 설명글에 챕터를 끼운다 — 맨 끝 해시태그 줄은 그대로 맨 끝에 둔다. */

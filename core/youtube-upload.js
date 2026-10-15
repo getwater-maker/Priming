@@ -26,7 +26,10 @@ const crypto = require('crypto');
 
 const SCOPE_UPLOAD = 'https://www.googleapis.com/auth/youtube.upload';
 const SCOPE_READ = 'https://www.googleapis.com/auth/youtube.readonly';
-const SCOPES = [SCOPE_UPLOAD, SCOPE_READ];
+// 🧷 재생목록에 담기(playlistItems.insert)는 upload·readonly 로 안 된다 — v0.9.33 업로드 마무리(core/yt-finish)부터 함께 받는다.
+//   이 권한 없이 연결된 옛 채널은 status().channels[].needsReconnect 로 「다시 연결」을 안내한다(업로드 자체는 그대로 된다).
+const SCOPE_MANAGE = 'https://www.googleapis.com/auth/youtube.force-ssl';
+const SCOPES = [SCOPE_UPLOAD, SCOPE_READ, SCOPE_MANAGE];
 
 // 테스트가 가짜 서버로 갈아끼운다(_setEndpoints).
 const EP = {
@@ -169,7 +172,7 @@ function status() {
   const cs = _capState(d);
   const channels = Object.keys(d.channels).map((id) => {
     const x = d.channels[id] || {};
-    return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken };
+    return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken, needsReconnect: !String(x.scopes || '').includes(SCOPE_MANAGE) };
   });
   return { available: available(), hasClient: !!c, projectId: c ? c.projectId : '', clientSource: cs.source, dailyCap: cs.cap, uploadsToday: cs.today, channels };
 }
@@ -254,6 +257,7 @@ async function connectChannel(o = {}) {
     // 🔑 구글은 권한마다 체크박스를 준다 — 업로드를 끄고 허용하면 연결은 되는데 올릴 때 403 이 난다. 여기서 막는다.
     const granted = String(tk.json.scope || '');
     if (!granted.includes(SCOPE_UPLOAD)) return { ok: false, error: '「YouTube 동영상 관리」 권한 체크를 해제하셨습니다 — 다시 연결하면서 모두 허용해 주세요.' };
+    if (!granted.includes(SCOPE_MANAGE)) log('⚠ 「YouTube 계정 관리」 권한을 빼고 허용하셨습니다 — 업로드는 되지만 재생목록 담기(업로드 마무리)는 안 됩니다. 다시 연결하면서 모두 허용하세요.');
     if (!tk.json.refresh_token) return { ok: false, error: '구글이 장기 연결 토큰을 주지 않았습니다 — https://myaccount.google.com/permissions 에서 Priming 을 지운 뒤 다시 연결하세요.' };
 
     const me = await fetch(`${EP.api}/channels?part=snippet&mine=true`, { headers: { Authorization: `Bearer ${tk.json.access_token}` } });
@@ -267,6 +271,7 @@ async function connectChannel(o = {}) {
       handle: (ch.snippet && ch.snippet.customUrl) || '',
       refresh: ci.enc(tk.json.refresh_token),
       connectedAt: _kst(),
+      scopes: granted,   // 🧷 받은 권한 — 재생목록 권한(force-ssl)이 없으면 「다시 연결」 안내
     };
     if (!_save(d2)) return { ok: false, error: '연결 정보 저장 실패' };
     _tok.set(ch.id, { token: tk.json.access_token, exp: Date.now() + (Number(tk.json.expires_in) || 3600) * 1000 });
