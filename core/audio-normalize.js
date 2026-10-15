@@ -154,6 +154,7 @@ const LB_ONSET_DROP = 18;    // 첫 낱말 = 말 대표음량 − 18dB 이상
 const LB_GAP_DROP = 40;      // 정적 = 말 대표음량 − 40dB 이하
 const LB_GAP_MIN_MS = 30;    // 정적이 이만큼 이어져야 「숨과 말 사이」로 본다(실측: 숨 뒤 정적 40ms~ · ㅅ·ㅎ 진입부는 첫 낱말에 붙어 있다)
 const LB_MIN_SOUND_MS = 30;  // 지울 소리가 이보다 짧으면 손대지 않는다
+const LB_MIN_ONSET_MS = 40;  // 첫 낱말로 인정할 큰 소리의 최소 길이(정적 전까지) — 숨 꼬리 10~20ms 튐을 거른다
 const LB_MAX_LEAD_SEC = 1.5; // 첫 낱말이 이보다 늦으면 판단하지 않는다(문장 앞 여백이 아니다)
 function muteLeadBreath(buf) {
   const d = _findData(buf);
@@ -170,11 +171,22 @@ function muteLeadBreath(buf) {
     db[f] = 20 * Math.log10(Math.sqrt(acc / N) + 1e-12);
   }
   const onTh = m.speechDb - LB_ONSET_DROP, gapTh = m.speechDb - LB_GAP_DROP;
-  let on = 0;
-  while (on < nf && db[on] < onTh) on++;
-  if (on >= nf || on * LB_FRAME_MS / 1000 > LB_MAX_LEAD_SEC) return null;
-  // 뒤로 걸어가며 진입부를 지나 정적을 찾는다 — 정적이 GAP_MIN 프레임 이어져야 인정
   const gapMin = Math.ceil(LB_GAP_MIN_MS / LB_FRAME_MS);
+  const onMin = Math.ceil(LB_MIN_ONSET_MS / LB_FRAME_MS);
+  // 첫 낱말 = 큰 소리가 다음 정적(GAP_MIN)까지 ONSET_MIN 이상 있는 덩어리. 그보다 짧게 튄 것은 숨 꼬리(「허~」 끝의 목소리)다
+  //   (v0.9.21 · 아내 PC 「그역사」 컷4: 숨 끝 0.37초 한 프레임 -31dB 를 첫 낱말로 봐서 숨이 통째로 남았다).
+  let on = 0;
+  for (;;) {
+    while (on < nf && db[on] < onTh) on++;
+    if (on >= nf || on * LB_FRAME_MS / 1000 > LB_MAX_LEAD_SEC) return null;
+    let k = on, loud = 0, quiet = 0;
+    for (; k < nf && quiet < gapMin; k++) {
+      if (db[k] <= gapTh) quiet++; else { quiet = 0; if (db[k] >= onTh) loud++; }
+    }
+    if (loud >= onMin || quiet < gapMin) break;         // 이어지는 소리 = 첫 낱말 (끝까지 정적이 안 오면 그대로 인정)
+    on = k;                                             // 짧게 튄 것 — 정적 뒤에서 다시 찾는다
+  }
+  // 뒤로 걸어가며 진입부를 지나 정적을 찾는다 — 정적이 GAP_MIN 프레임 이어져야 인정
   let j = on - 1;
   while (j >= 0 && db[j] > gapTh) j--;                 // 진입부(자음)
   if (j < 0) return null;

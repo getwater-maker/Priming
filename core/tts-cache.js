@@ -55,7 +55,7 @@ function keyFor(text, sf, opts = {}) {
   if (opts.engineSig) o.es = String(opts.engineSig);
   // 😮‍💨 OmniVoice 결과는 문장 앞 들숨을 지운 것(omnivoice-provider · v0.9.20) — 지우기 전 캐시(숨 있음)가 되살아나지 않게
   //   OmniVoice 키만 새로 갈린다(유료 엔진 캐시는 그대로 — 다시 사면 돈이 든다). 판정 방식을 바꾸면 값을 올린다.
-  else if ((opts.provider || 'omnivoice') === 'omnivoice') o.lb = 1;
+  else if ((opts.provider || 'omnivoice') === 'omnivoice') o.lb = 2;   // 2 = v0.9.21 숨 꼬리 튐 거르기
   const sig = JSON.stringify(o);
   return crypto.createHash('sha1').update(sig).digest('hex');
 }

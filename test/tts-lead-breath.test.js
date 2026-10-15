@@ -65,6 +65,15 @@ ok(AN.muteLeadBreath(makeWav([...sil(0.19), ...noise(0.03, -36), ...speech(1.5),
   const r = AN.muteLeadBreath(src);
   ok(r && regionMax(r.buf, 0.48, 0.51) === regionMax(src, 0.48, 0.51) && regionMax(src, 0.48, 0.51) > 0, '③-ⓑ 숨은 지우고 ㅅ 진입부는 그대로');
 }
+// ③-ⓒ 숨 끝에 목소리가 10ms 튀어도(「허~」 꼬리 · v0.9.21 아내 PC 컷4) 숨으로 본다
+{
+  const src = makeWav([...sil(0.10), ...noise(0.26, -44), ...noise(0.01, -16), ...noise(0.03, -46), ...sil(0.06), ...speech(1.5)]);
+  const r = AN.muteLeadBreath(src);
+  ok(r && regionMax(r.buf, 0, 0.40) === 0, '③-ⓒ 튄 꼬리까지 숨으로 지운다');
+  ok(r && dataOf(r.buf).slice(Math.round(0.47 * SR) * 2).equals(dataOf(src).slice(Math.round(0.47 * SR) * 2)), '③-ⓒ 말은 그대로');
+}
+// ③-ⓓ 짧은 첫 음절이라도 정적 없이 이어지면 첫 낱말이다(앞 숨 없음 → 그대로)
+ok(AN.muteLeadBreath(makeWav([...sil(0.2), ...speech(0.05), ...sil(0.02), ...speech(1.4)])) === null, '③-ⓓ 짧은 첫 음절 + 짧은 막힘은 그대로');
 // ④ 정적 20ms(낱말 안 막힘일 수 있다)
 ok(AN.muteLeadBreath(makeWav([...sil(0.2), ...noise(0.10, -38), ...sil(0.02), ...speech(1.5)])) === null, '④ 20ms 막힘 앞은 건드리지 않는다');
 // ⑤ 판정력 — 숨 크기
@@ -80,11 +89,11 @@ ok(AN.muteLeadBreath(makeWav(sil(1))) === null, '무음 = null');
 // ⑥ 배선
 const prov = fs.readFileSync(path.join(__dirname, '../tts/providers/omnivoice-provider.js'), 'utf8');
 ok(/muteLeadBreath\(wavBuffer\)/.test(prov), '⑥ OmniVoice provider 가 지운다');
-const hasLb = (() => { const src = fs.readFileSync(path.join(__dirname, '../core/tts-cache.js'), 'utf8'); return /o\.lb = 1/.test(src); })();
+const hasLb = (() => { const src = fs.readFileSync(path.join(__dirname, '../core/tts-cache.js'), 'utf8'); return /o\.lb = [1-9]/.test(src); })();
 ok(hasLb, '⑥ 롱폼 캐시 키에 lb');
 ok(TtsCache.keyFor('가', 1, { provider: 'elevenlabs', engineSig: 'x' }) !== TtsCache.keyFor('가', 1, { provider: 'elevenlabs', engineSig: 'y' }), '⑥ 유료 키 정체성 유지');
 const tsv = fs.readFileSync(path.join(__dirname, '../core/tsv-tts.js'), 'utf8');
-ok(/lb: 1/.test(tsv), '⑥ 리모션 캐시 키에 lb');
+ok(/lb: [1-9]/.test(tsv), '⑥ 리모션 캐시 키에 lb');
 
 console.log(bad ? `✗ ${bad}/${n} 실패` : `✓ 문장 앞 숨 지우기 ${n}/${n}`);
 process.exit(bad ? 1 : 0);
