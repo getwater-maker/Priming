@@ -1399,3 +1399,25 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .licrow{display:flex;gap:8px}
 .licrow button{flex:1}
 .licfoot{margin:6px 0 0;font-size:11.5px;color:var(--muted,#7a6c58);line-height:1.55}
+
+/* 🎨 스타일 고르개 · 샘플 그림(v0.9.30) */
+.stpick{position:relative;display:inline-flex}
+.stpick-btn{display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 3px;max-width:230px}
+.stpick-th{width:44px;height:25px;object-fit:cover;border-radius:4px;flex:0 0 auto;background:#ece4d6}
+.stpick-th.none,.stpick-ith.none{display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#9a8b74;background:#f1ebe1;border:1px dashed #d8cbb5}
+.stpick-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.stpick-caret{font-size:10px;color:var(--muted,#7a6c58)}
+.stpick-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:300;background:#fffdf9;border:1px solid #e2d5c0;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.14);padding:6px;width:300px;max-height:min(70vh,560px);overflow-y:auto}
+.stpick-item{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:7px;cursor:pointer}
+.stpick-item:hover{background:#f4ede2}
+.stpick-item.on{background:#efe3cf;font-weight:600}
+.stpick-ith{width:80px;height:45px;object-fit:cover;border-radius:5px;flex:0 0 auto;background:#ece4d6}
+.stpick-iname{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stpick-peek{position:absolute;z-index:310;pointer-events:none;left:308px;top:calc(100% + 4px);width:440px;background:#fffdf9;border:1px solid #e2d5c0;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:6px;display:flex;flex-direction:column;gap:4px}
+.stpick-peek img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px}
+.stpick-peek span{font-size:12px;color:#5d5140;padding:0 2px}
+.st-sample{flex:0 0 150px;display:flex;flex-direction:column;gap:4px}
+.st-sample img,.st-sample .none{width:150px;height:84px;object-fit:cover;border-radius:6px;background:#ece4d6}
+.st-sample .none{display:flex;align-items:center;justify-content:center;font-size:11px;color:#9a8b74;border:1px dashed #d8cbb5}
+.st-sample-btns{display:flex;gap:3px}
+.st-sample-btns button{padding:1px 7px;font-size:12px}

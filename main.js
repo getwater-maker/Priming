@@ -6066,7 +6066,8 @@ const TTS_VOICE_DIR = () => path.join(os.homedir(), '.priming-maker', 'tts-voice
 function _readVoiceCache(id) { try { return JSON.parse(fs.readFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), 'utf8')); } catch { return null; } }
 function _writeVoiceCache(id, voices) { try { fs.mkdirSync(TTS_VOICE_DIR(), { recursive: true }); fs.writeFileSync(path.join(TTS_VOICE_DIR(), id + '.json'), JSON.stringify({ at: Date.now(), voices })); } catch {} }
 // 🙂 목소리 얼굴(~/.priming-maker/voice-faces/<엔진>/<이름>.png) · 🔈 샘플(~/.priming-maker/tts-samples/<엔진>/…wav — 한 번 만든 샘플은 다시 돈 안 듦)
-const VOICE_FACE_DIR = () => path.join(os.homedir(), '.priming-maker', 'voice-faces');
+// 🧪 E2E 는 PM_FACE_DIR(임시 폴더)로 — 진짜 얼굴·스타일 샘플 폴더와 서버 공유를 건드리지 않는다(v0.9.30)
+const VOICE_FACE_DIR = () => process.env.PM_FACE_DIR || path.join(os.homedir(), '.priming-maker', 'voice-faces');
 const TTS_SAMPLE_DIR = () => path.join(os.homedir(), '.priming-maker', 'tts-samples');
 const _voiceFileKey = (voice) => String(voice || '').replace(/[^A-Za-z0-9가-힣_.-]/g, '_').slice(0, 60) + '_' + require('crypto').createHash('sha1').update(String(voice || '')).digest('hex').slice(0, 8);
 // 얼굴 목록 = <엔진>/index.json { 목소리 id: 파일 이름 } — 화면은 목소리 id 로 찾는다(파일 이름은 main 이 만든다)
@@ -6090,6 +6091,7 @@ function _faceLocalT(engine, voice) {
 }
 /** 이 PC 의 얼굴 하나를 서버로(있으면 올리기 · 없으면 지움 표시) — 실패해도 로컬은 그대로(다음 동기화가 다시 맞춘다) */
 async function _pushFace(engine, voice) {
+  if (process.env.PM_FACE_DIR) return { ok: false, test: true };   // 🧪 시험 폴더는 서버로 올리지 않는다
   try {
     const ASR = require('./tts/asr-client');
     const f = _faceIndex(engine)[voice]; const p = f ? path.join(VOICE_FACE_DIR(), String(engine), f) : null;
@@ -6695,6 +6697,63 @@ ipcMain.handle('tts-face-ai', async (_e, { engine, voice, name, gender, desc, la
     log(`🎨 목소리 얼굴 — ${engine} · ${name || voice} (🖥 로컬 ComfyUI · ${wf ? wf.name : path.basename(cfg.workflowPath)})`);
     return { ok: true, key, path: out, v: String(Date.now()) };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+// ── 🎨 스타일 미리보기 그림(v0.9.30 · 로이 2026-10-15 「선택된 스타일이 어떤 이미지인지 미리 보게」 · 「qwen-image 로만」) ──
+//   저장·공유는 목소리 얼굴과 같은 곳 — 종류 이름 'style' · 열쇠 = 스타일 id(voice-faces/style/ · 서버 /voice-faces 로 두 PC 공유).
+//   직접 지정·지우기는 tts-face-pick/clear 를 engine 'style' 로 쓴다. 그리기는 **🖥 로컬 ComfyUI + Qwen-Image 2.1 터보만**(무료 · 모든 스타일 같은 장면).
+const STYLE_SAMPLE_ENGINE = 'style';
+const STYLE_SAMPLE_SCENE = 'A young woman and an elderly man talking at a wooden table by a window in a quiet old house, a cat sleeping on the floor, cups of tea, warm afternoon light';
+ipcMain.handle('style-samples', () => {
+  const out = {};
+  for (const [id, v] of Object.entries(_faceFiles(STYLE_SAMPLE_ENGINE))) out[id] = { path: v.path, v: v.v };
+  return out;
+});
+let _styleSampleBusy = false;
+ipcMain.handle('style-sample-make', async (_e, { ids = null, force = false } = {}) => {
+  if (_styleSampleBusy) return { ok: false, error: '이미 그리는 중입니다' };
+  const SS = require('./core/style-store'), CI = require('./core/comfy-image');
+  const all = SS.loadAll();
+  const want = (Array.isArray(ids) && ids.length ? all.filter((s) => ids.includes(s.id)) : all)
+    .filter((s) => force || !_faceFiles(STYLE_SAMPLE_ENGINE)[s.id]);
+  if (!want.length) return { ok: true, made: 0, failed: 0, note: '그릴 스타일이 없습니다(이미 샘플이 있음)' };
+  const cfg = CI.loadConfig();
+  cfg.cloud = false;
+  cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
+  const wf = (cfg.workflows || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
+  cfg.workflowPath = wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+  if (!fs.existsSync(cfg.workflowPath)) return { ok: false, error: 'Qwen-Image 2.1 워크플로를 찾지 못했습니다' };
+  _styleSampleBusy = true; S.abort = false;
+  let made = 0, failed = 0; const errs = [];
+  try {
+    log(`🎨 스타일 샘플 그리기 — ${want.length}개 (🖥 로컬 ComfyUI · Qwen-Image 2.1 터보 · 같은 장면)`);
+    const dir = path.join(VOICE_FACE_DIR(), STYLE_SAMPLE_ENGINE); fs.mkdirSync(dir, { recursive: true });
+    await _runOnLanes(['image', 'localGpu'], '스타일 샘플 그리기', async () => {
+      const eng = new CI.ComfyImage(cfg, log);
+      const up = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+      if (!up.ok) { errs.push(up.message || '로컬 ComfyUI 에 연결할 수 없습니다'); failed = want.length; return; }
+      await awaitForeignTtsIdle('스타일 샘플 그리기', log);
+      try {
+        for (const s of want) {
+          if (S.abort) { log('⏹ 스타일 샘플 중단'); break; }
+          const key = _voiceFileKey(s.id); const tmp = path.join(dir, key + '.__new.png');
+          const prompt = P.buildImagePrompt(SS.getPrompt ? SS.getPrompt(s.id) : s.prompt, STYLE_SAMPLE_SCENE);   // 실제 이미지와 같은 조립(스타일 + 장면 + 옷차림 · 마침표)
+          let r;
+          try { r = await eng.textToImage({ prompt, aspect: '16:9', outputPath: tmp }); } catch (e) { r = { success: false, error: e.message }; }
+          if (!r || !r.success) { failed++; errs.push(`${s.name}: ${(r && r.error) || '실패'}`); log(`⚠ 스타일 샘플 — ${s.name}: ${(r && r.error) || '실패'}`); continue; }
+          for (const f of fs.readdirSync(dir)) if (f.startsWith(key + '.') && !f.startsWith(key + '.__new')) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
+          const out = path.join(dir, key + path.extname(r.imagePath));
+          fs.renameSync(r.imagePath, out);
+          _setFace(STYLE_SAMPLE_ENGINE, s.id, path.basename(out));
+          _pushFace(STYLE_SAMPLE_ENGINE, s.id);   // 다른 PC 와 공유(기다리지 않는다)
+          made++;
+          log(`🎨 스타일 샘플 ${made}/${want.length} — ${s.name}`);
+          try { if (win && !win.isDestroyed()) win.webContents.send('style-sample-done', { id: s.id }); } catch {}
+        }
+      } finally { try { await eng.freeMemory(); } catch {} }
+    });
+  } finally { _styleSampleBusy = false; }
+  log(`🎨 스타일 샘플 끝 — 그림 ${made}개${failed ? ` · 못 그림 ${failed}개` : ''}`);
+  return { ok: made > 0 || !failed, made, failed, errors: errs.slice(0, 5) };
 });
 ipcMain.handle('tts-face-clear', (_e, { engine, voice } = {}) => {
   try {

@@ -161,6 +161,10 @@ contextBridge.exposeInMainWorld('api', {
   ttsFacePick: (a) => ipcRenderer.invoke('tts-face-pick', a),
   ttsFaceAi: (a) => ipcRenderer.invoke('tts-face-ai', a),
   ttsFaceClear: (a) => ipcRenderer.invoke('tts-face-clear', a),
+  // 🎨 스타일 미리보기 그림(v0.9.30) — 직접 지정·지우기는 ttsFacePick/Clear({engine:'style', voice:<스타일 id>})
+  styleSamples: () => ipcRenderer.invoke('style-samples'),
+  styleSampleMake: (a) => ipcRenderer.invoke('style-sample-make', a || {}),
+  onStyleSampleDone: (cb) => { const h = (_e, d) => cb(d); ipcRenderer.on('style-sample-done', h); return () => ipcRenderer.removeListener('style-sample-done', h); },
   getXaiKey: () => ipcRenderer.invoke('get-xai-key'),
   setXaiKey: (key) => ipcRenderer.invoke('set-xai-key', key),
   getTtsServers: () => ipcRenderer.invoke('get-tts-servers'),

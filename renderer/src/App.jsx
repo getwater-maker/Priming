@@ -330,13 +330,63 @@ const WB_SUB_POS = [['bottom', '아래'], ['middle', '가운데'], ['top', '위'
 // 스타일 편집 모달의 한 행 — **모든 스타일이 같다**(이름·프롬프트 수정 · 삭제 · 순서변경).
 //   🔑 옛 「기본 · 읽기전용」 구분은 폐기했다(로이 2026-09-16) — 기본이라고 고칠 수 없을 이유가 없고,
 //     두 종류가 섞여 있으면 「왜 이건 안 고쳐지지」를 매번 다시 배워야 한다.
-function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
+// 🎨 스타일 고르개(v0.9.30 · 로이 「선택된 스타일이 어떤 이미지인지 미리 보게」) — 헤더 ② 이미지의 <select> 자리.
+//   펼치면 스타일마다 샘플 그림(Qwen-Image 2.1 · 같은 장면) · 마우스를 올리면 크게 · 샘플이 없으면 「샘플 없음」(✎ 편집창에서 그린다).
+function StylePicker({ value, onChange, styles, samples, scriptId }) {
+  const [open, setOpen] = useState(false);
+  const [peek, setPeek] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', down); document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+  }, [open]);
+  const sm = (id) => (samples && samples[id]) || null;
+  const items = [{ id: '', name: '스타일 없음' }, { id: scriptId, name: '📜 대본스타일', tip: '대본의 「> 🎨 화풍:」 줄로 그립니다. 줄이 없으면 만들 때 스타일을 고르는 팝업이 뜹니다' }, ...styles.map((s) => ({ id: s.id, name: s.name }))];
+  const cur = items.find((x) => x.id === value) || { id: value, name: value ? '(알 수 없는 스타일)' : '스타일 없음' };
+  const thumb = (id, cls) => { const x = sm(id); return x ? <img className={cls} src={media(x.path, x.v)} alt="" /> : <span className={cls + ' none'}>{id === scriptId ? '📜' : id ? '샘플 없음' : '—'}</span>; };
+  return (
+    <span className="stpick" ref={ref} data-testid="style-picker">
+      <button className="ghost stpick-btn" title="이미지 스타일" data-testid="style-picker-btn" onClick={() => setOpen((o) => !o)}>
+        {thumb(cur.id, 'stpick-th')}<span className="stpick-name">{cur.name}</span><span className="stpick-caret">▾</span>
+      </button>
+      {open && (<>
+        <div className="stpick-pop" data-testid="style-picker-pop" onMouseLeave={() => setPeek(null)}>
+          {items.map((it) => (
+            <div key={it.id || '_none'} className={'stpick-item' + (it.id === value ? ' on' : '')} data-testid="style-picker-item" data-id={it.id} title={it.tip || it.name}
+              onMouseEnter={() => setPeek(sm(it.id) ? it.id : null)}
+              onClick={() => { onChange(it.id); setOpen(false); setPeek(null); }}>
+              {thumb(it.id, 'stpick-ith')}<span className="stpick-iname">{it.name}</span>
+            </div>
+          ))}
+        </div>
+        {peek && sm(peek) && (
+          <div className="stpick-peek" data-testid="style-picker-peek"><img src={media(sm(peek).path, sm(peek).v)} alt="" /><span>{(items.find((x) => x.id === peek) || {}).name}</span></div>
+        )}
+      </>)}
+    </span>
+  );
+}
+
+function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove, sample, onSampleMake, onSamplePick, onSampleClear, sampleBusy }) {
   const [name, setName] = useState(s.name);
   const [prompt, setPrompt] = useState(s.prompt);
   useEffect(() => { setName(s.name); setPrompt(s.prompt); }, [s.id]);
   const dirty = name !== s.name || prompt !== s.prompt;
   return (
-    <div style={{ border: '1px solid var(--border,#ddd)', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+    <div style={{ border: '1px solid var(--border,#ddd)', borderRadius: 8, padding: 8, marginBottom: 8, display: 'flex', gap: 8 }}>
+      {/* 🎨 샘플 그림(v0.9.30) — 그리기 = 🖥 로컬 Qwen-Image 2.1(무료) · 📎 = 직접 지정 */}
+      <div className="st-sample" data-testid="style-sample" data-id={s.id}>
+        {sample ? <img src={media(sample.path, sample.v)} alt="" /> : <span className="none">샘플 없음</span>}
+        <span className="st-sample-btns">
+          <button className="ghost" disabled={sampleBusy} title={dirty ? '먼저 저장하세요 — 저장된 프롬프트로 그립니다' : '이 스타일로 같은 장면을 그립니다(🖥 로컬 Qwen-Image 2.1 · 무료)'} onClick={() => onSampleMake(s.id)}>{sampleBusy ? '…' : '🖼'}</button>
+          <button className="ghost" title="샘플 그림을 직접 고르기" onClick={() => onSamplePick(s.id)}>📎</button>
+          {sample && <button className="ghost" title="샘플 지우기" onClick={() => onSampleClear(s.id)}>✕</button>}
+        </span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
         <span style={{ display: 'flex', flexDirection: 'column' }}>
           <button className="ghost" title="위로" style={{ padding: '0 5px', lineHeight: 1.1 }} disabled={index === 0} onClick={() => onMove(s.id, 'up')}>▲</button>
@@ -348,6 +398,7 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
         <button className="ghost" title="삭제" onClick={() => onDelete(s.id, s.name)}>🗑</button>
       </div>
       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} placeholder="영문 스타일 프롬프트" />
+      </div>
     </div>
   );
 }
@@ -1841,7 +1892,22 @@ export default function App() {
       else setStyleSync(showOk ? '☁ 공용 스타일과 맞췄습니다 — 이 목록은 다른 PC 와 함께 씁니다.' : '');
     } catch (e) { setStyleSync('⚠ 동기화 오류: ' + e.message); }
   }
-  async function openStyleEditor() { setStyleEditOpen(true); await syncStyles(false); }
+  async function openStyleEditor() { setStyleEditOpen(true); await syncStyles(false); loadStyleSamples(); }
+  // 🎨 스타일 미리보기 그림(v0.9.30) — 저장·공유는 목소리 얼굴 저장소(종류 'style') · 그리기는 main 이 🖥 로컬 Qwen-Image 2.1 로만
+  const [styleSamples, setStyleSamples] = useState({});
+  const [sampleBusy, setSampleBusy] = useState(false);
+  async function loadStyleSamples() { try { setStyleSamples((await api.styleSamples()) || {}); } catch (_) {} }
+  useEffect(() => { loadStyleSamples(); const off = api.onStyleSampleDone ? api.onStyleSampleDone(() => loadStyleSamples()) : null; return () => { try { off && off(); } catch (_) {} }; /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  async function makeStyleSamples(ids, force) {
+    setSampleBusy(true); setStyleSync('🖼 샘플 그리는 중… (🖥 로컬 Qwen-Image 2.1 · 스타일당 약 20초)');
+    try {
+      const r = await api.styleSampleMake({ ids, force });
+      setStyleSync(r && r.ok ? `🖼 샘플 ${r.made}개 그림${r.failed ? ` · 못 그림 ${r.failed}개` : ''}${r.note ? ' — ' + r.note : ''}` : '⚠ 샘플을 못 그렸습니다 — ' + ((r && (r.error || (r.errors || [])[0])) || '로그를 보세요'));
+    } catch (e) { setStyleSync('⚠ 샘플 그리기 오류: ' + e.message); }
+    finally { setSampleBusy(false); loadStyleSamples(); }
+  }
+  async function pickStyleSample(id) { const r = await api.ttsFacePick({ engine: 'style', voice: id }); if (r && r.ok) loadStyleSamples(); else if (r && r.error) setStyleSync('⚠ ' + r.error); }
+  async function clearStyleSample(id) { await api.ttsFaceClear({ engine: 'style', voice: id }); loadStyleSamples(); }
   // ── 발음사전(TTS 교정) ─────────────────────────────
   async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictFilter(''); setDictNew({ source: '', pron: '' }); setDictOpen(true); setTimeout(() => { const e = document.querySelector('[data-testid="dict-new-src"]'); if (e) e.focus(); }, 60); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
   async function saveDict() {
@@ -5723,11 +5789,8 @@ export default function App() {
             <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}>🔁 이미지 프롬프트</button>
             <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}>{visionBusy ? '⏳ 검수중…' : '🔍 검수'}</button>
             <button className="ghost" disabled={!loaded} title="웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 프롬프트 적용(고급)" onClick={() => { setImpText(''); setImpOpen(true); }}>📥</button>
-            <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
-              <option value="">스타일 없음</option>
-              <option value={SCRIPT_STYLE_ID} title="대본의 「> 🎨 화풍:」 줄로 그립니다. 줄이 없으면 만들 때 스타일을 고르는 팝업이 뜹니다">📜 대본스타일</option>
-              {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            {/* 🎨 그림 목록 고르개(v0.9.30) — 옛 <select> 자리 · 샘플 그림은 ✎ 편집창에서 그린다 */}
+            <StylePicker value={styleId} onChange={setStyleId} styles={styles} samples={styleSamples} scriptId={SCRIPT_STYLE_ID} />
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
             {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
               if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
@@ -6749,12 +6812,14 @@ export default function App() {
             <div className="meta" style={{ marginBottom: 8 }}><b>모든 스타일을 똑같이</b> 고치고 지울 수 있습니다(이름·프롬프트·순서). 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.<br />☁ 목록과 순서는 <b>여러 PC 공용</b>입니다(TTS 서버에 보관) — 여기서 고치면 다른 PC 에도 반영됩니다. ⚠ 지운 스타일은 되살아나지 않습니다(그 스타일을 쓰던 채널은 다시 골라 주세요).</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
               <button className="ghost" style={{ flex: '0 0 auto' }} title="다른 PC 가 바꾼 스타일 받아오기 + 이 PC 것 올리기" onClick={() => syncStyles(true)}>☁ 동기화</button>
+              <button className="ghost" style={{ flex: '0 0 auto' }} data-testid="style-sample-all" disabled={sampleBusy} title="샘플 그림이 없는 스타일을 모두 같은 장면으로 그립니다(🖥 로컬 ComfyUI · Qwen-Image 2.1 · 무료 · 스타일당 약 20초) — 그린 그림은 다른 PC 와 공유됩니다" onClick={() => makeStyleSamples(null, false)}>🖼 샘플 없는 것 모두 그리기</button>
               <span className="meta" style={{ flex: 1, color: /^⚠/.test(styleSync) ? '#c0392b' : undefined }}>{styleSync}</span>
             </div>
             <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
               {styles.map((s, i) => (
                 <StyleRow key={s.id} s={s} index={i} total={styles.length}
-                  onCopy={copyStylePrompt} onSave={saveStyle} onDelete={deleteStyle} onMove={moveStyle} />
+                  onCopy={copyStylePrompt} onSave={saveStyle} onDelete={deleteStyle} onMove={moveStyle}
+                  sample={styleSamples[s.id]} sampleBusy={sampleBusy} onSampleMake={(id) => makeStyleSamples([id], true)} onSamplePick={pickStyleSample} onSampleClear={clearStyleSample} />
               ))}
             </div>
             <div style={{ borderTop: '1px solid var(--border,#ddd)', paddingTop: 8, marginTop: 4 }}>
