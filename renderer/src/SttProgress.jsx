@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useDlDock, DL_Z } from './lib/progDock.js';
 
 // 📊 🎧 STT(파일 전사) 진행 패널 (v0.7.64 · 로이 「전사 진행과정을 눈으로 볼 수 있게」)
 //   main 의 'stt-progress' 상태를 그대로 그린다(계산은 main · 여기선 표시와 1초 시계만).
@@ -24,6 +25,7 @@ export default function SttProgress({ prog, onAbort, onClose }) {
     const t = setInterval(() => tick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [live]);
+  const dockBottom = useDlDock(1);   // 📊 제작 팝업이 있으면 그 위로(v0.9.31)
   if (!prog) return null;
   const c = prog.cur;
   const elapsed = (prog.endedAt || Date.now()) - prog.startedAt;
@@ -38,8 +40,8 @@ export default function SttProgress({ prog, onAbort, onClose }) {
   const firstWait = c && c.stage === 'transcribe' && c.chunk === 0 && prog.modelLoaded === false;
 
   return (
-    <div data-testid="stt-progress" style={{
-      position: 'fixed', right: 16, bottom: 16, width: 380, zIndex: 61,
+    <div data-testid="stt-progress" data-dl-dock="1" style={{
+      position: 'fixed', right: 16, bottom: dockBottom, width: 380, zIndex: DL_Z, transition: 'bottom .2s',
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
       boxShadow: '0 6px 24px rgba(0,0,0,.14)', padding: '12px 14px', fontSize: 13, color: 'var(--base)',
     }}>

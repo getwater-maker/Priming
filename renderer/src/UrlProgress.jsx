@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useDlDock, DL_Z } from './lib/progDock.js';
 
 // 📊 🔗 URL 받아 전사 — 진행 상황 패널 (2026-09-23)
 //   받기와 전사가 겹쳐 돌면 로그만으로는 「지금 몇 번째를 받고, 몇 번째를 전사하는지」 알 수 없다.
@@ -38,6 +39,7 @@ export default function UrlProgress({ prog, onAbort, onClose }) {
     const t = setInterval(() => tick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [live]);
+  const dockBottom = useDlDock(0);   // 📊 제작 팝업이 있으면 그 위로(v0.9.31)
   if (!prog) return null;
 
   const { total, dl, stt } = prog;
@@ -51,8 +53,8 @@ export default function UrlProgress({ prog, onAbort, onClose }) {
   const chunkPct = stt.cur && stt.cur.chunks ? (stt.cur.chunk / stt.cur.chunks) * 100 : 0;
 
   return (
-    <div data-testid="urldl-progress" style={{
-      position: 'fixed', right: 16, bottom: 16, width: 380, zIndex: 60,
+    <div data-testid="urldl-progress" data-dl-dock="0" style={{
+      position: 'fixed', right: 16, bottom: dockBottom, width: 380, zIndex: DL_Z, transition: 'bottom .2s',
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
       boxShadow: '0 6px 24px rgba(0,0,0,.14)', padding: '12px 14px', fontSize: 13, color: 'var(--base)',
     }}>

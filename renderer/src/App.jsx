@@ -12,6 +12,7 @@ import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
 import SttProgress from './SttProgress.jsx';
+import Mp3Progress from './Mp3Progress.jsx';
 import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
@@ -688,6 +689,7 @@ export default function App() {
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlProg, setUrlProg] = useState(null);
+  const [mp3Prog, setMp3Prog] = useState(null);   // 📊 🎵 mp3 추출 진행(v0.9.31)
   const [sttProg, setSttProg] = useState(null);   // 📊 🎧 STT(파일 전사) 진행 패널(main 의 stt-progress)
   const [readerOpen, setReaderOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);   // 📘 대본 작성 기준(docs/대본-작성-가이드.md · v0.8.9)   // 📄 대본 읽기(점검·수정 · A4 PDF)
@@ -929,6 +931,7 @@ export default function App() {
     api.onLog((line) => logline(line, true));
     if (api.onUrldlProgress) api.onUrldlProgress((d) => { if (d) setUrlProg(d); });
     if (api.onSttProgress) api.onSttProgress((d) => { if (d) setSttProg(d); });
+    if (api.onMp3Progress) api.onMp3Progress((d) => { if (d) setMp3Prog(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
     if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) setMakeProg(d); });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
@@ -7447,6 +7450,11 @@ export default function App() {
           onAbort={() => { api.dlAbort(); setSttProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setSttProg(null)} />
       )}
+      {mp3Prog && (
+        <Mp3Progress prog={mp3Prog}
+          onAbort={() => { api.dlAbort(); setMp3Prog((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
+          onClose={() => setMp3Prog(null)} />
+      )}
       {urlProg && (
         <UrlProgress prog={urlProg}
           onAbort={() => { api.dlAbort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
@@ -7458,6 +7466,11 @@ export default function App() {
               🔗 링크 = 받기(+선택 STT) · 📂 내 파일 = mp3 추출·STT. 화질 칸은 없다 — 영상은 늘 최고 화질(같은 해상도면 H.264). */}
           <div className="modal-card dl-card" data-testid="dl-modal">
             <h3>📥 다운로드 · STT</h3>
+            {(() => {   // 📊 이미 도는 받기·전사·mp3 가 있으면 창 맨 위에 알린다(v0.9.31) — 진행은 오른쪽 아래 패널
+              const on = (p) => p && !['done', 'aborted'].includes(p.phase);
+              const what = [on(urlProg) && '🔗 받기', on(sttProg) && '🎧 전사', on(mp3Prog) && '🎵 mp3 추출'].filter(Boolean);
+              return what.length ? <div className="dl-busy" data-testid="dl-busy">⏳ {what.join(' · ')} 진행 중 — 진행 상황은 오른쪽 아래 패널에 보입니다</div> : null;
+            })()}
             <div className="dl-tabs">
               {[['link', '🔗 링크'], ['file', '📂 내 파일']].map(([id, lbl]) => (
                 <button key={id} data-testid={'dl-tab-' + id} data-on={dlTab === id ? '1' : '0'} className={dlTab === id ? '' : 'ghost'} onClick={() => setDlTab(id)}>{lbl}</button>

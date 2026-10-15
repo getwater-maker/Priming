@@ -1546,12 +1546,17 @@ ipcMain.handle('extract-mp3', async (_e, args = {}) => {
   _dlAbort = false;
   const results = [];
   let lastDir = '';
+  // 📊 진행 패널('mp3-progress' · v0.9.31 · 로이 「다운로드 창 작업 진행을 볼 수 있게」) — 파일 n/N · 지금 파일 · 성공/실패 · 경과
+  const mp = { phase: 'running', total: r.filePaths.length, done: 0, ok: 0, fail: 0, skip: 0, idx: 0, file: '', startedAt: Date.now(), endedAt: 0 };
+  const mpSend = () => { try { if (win && !win.isDestroyed()) win.webContents.send('mp3-progress', { ...mp }); } catch {} };
+  mpSend();
   for (const file of r.filePaths) {
-    if (_dlAbort) { log('⏹ mp3 추출 중단됨'); break; }
+    if (_dlAbort) { log('⏹ mp3 추출 중단됨'); mp.phase = 'aborted'; break; }
+    mp.idx = results.length + 1; mp.file = path.basename(file); mpSend();
     const dir = path.dirname(file);
     const base = path.basename(file, path.extname(file));
     const ext = path.extname(file).toLowerCase();
-    if (ext === '.mp3') { log(`⏭ 이미 mp3 — 건너뜀: ${path.basename(file)}`); results.push({ file, ok: false, skipped: true }); continue; }
+    if (ext === '.mp3') { log(`⏭ 이미 mp3 — 건너뜀: ${path.basename(file)}`); results.push({ file, ok: false, skipped: true }); mp.skip++; mp.done++; mpSend(); continue; }
     // 기존 파일 보호 — 같은 이름이 있으면 " (2)", " (3)" … 로 피함(덮어쓰기 안 함)
     let out = path.join(dir, base + '.mp3');
     for (let i = 2; fs.existsSync(out); i++) out = path.join(dir, `${base} (${i}).mp3`);
@@ -1561,12 +1566,15 @@ ipcMain.handle('extract-mp3', async (_e, args = {}) => {
       const mb = (fs.statSync(out).size / 1048576).toFixed(1);
       log(`  ✓ 저장 완료 (${mb} MB)`);
       results.push({ file, mp3: out, ok: true });
-      lastDir = dir;
+      lastDir = dir; mp.ok++;
     } catch (e) {
       log(`  ✗ 실패: ${e.message}`);
-      results.push({ file, ok: false, error: e.message });
+      results.push({ file, ok: false, error: e.message }); mp.fail++;
     }
+    mp.done++; mpSend();
   }
+  if (mp.phase === 'running') mp.phase = 'done';
+  mp.endedAt = Date.now(); mp.file = ''; mpSend();
   const okN = results.filter((x) => x.ok).length;
   log(`🎵 mp3 추출 완료: 성공 ${okN}/${results.length}`);
   if (okN && lastDir) { try { shell.openPath(lastDir); } catch {} } // 결과 폴더 열기
