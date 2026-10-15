@@ -133,6 +133,7 @@
 - `✕` 로 지운 그림은 `imageCleared`(스냅샷 저장) → 캐시에서 되살리지 않는다. 🔄 재생성은 영상이 있어도 이미지만 본다(`imgDone(g, force)`). 대상 0개면 그렇게 로그.
 - 🔎 **무료 스톡(Pexels·Pixabay) = 검색은 `core/free-stock` 한 곳 · 넣기는 main `stock-attach` 한 곳**(v0.7.67) — 받은 파일은 `<출력>/_stock/`(media-N 밖 · 번호 이름 금지) · 사람이 고른 자산 표시 · 출처는 `스톡_출처.txt` · 키는 ⚙ API 키(secret-store `pexels`·`pixabay`) · ⛔ E2E 는 `global.__stockKeysTest` + 가짜 fetch 로(진짜 키·API 금지 · `test:stock`).
 - 👤 **인물 일관성 = 나노바나나 즉시 생성 전용**(v0.6.94 · `core/char-refs` 한 곳): 대본 앵커 줄 인물 카드 → `<출력>/characters/<이름>.png` 시트 → 장면마다 이름-그림 쌍 참조 + 「나이·옷은 장면대로」 지시. ⛔ Krea2·Flow 에 붙이지 않는다(로이 실험 2026-10-05 — klein 참조·얼굴 보정 모두 기각, Krea2 + 카드 글 반복 유지). 카드 형식을 늘리면 `parseCards` 와 `test:charrefs` 에.
+- 🔑 **Gemini 키는 둘로 나뉜다 — 🍌 나노바나나(이미지) = secret-store `gemini-image`(`SecretStore.IMAGE_ID`) · 🔊 Gemini TTS(음성) = `gemini`**(v0.9.32 · 로이 지정) — ⛔ 이미지 코드가 `gemini` 를, TTS 코드가 `gemini-image` 를 읽지 않는다(`test:keys`).
 - 🌙 **나노바나나 2.1 = `gemini`(즉시 · 인물 참조) · `gemini-batch`(배치 · 반값 · 참조 불가)** — 배치 흐름·job 이어받기·429 분류 상세는 [`docs/규칙/나노바나나.md`](docs/규칙/나노바나나.md)(고치기 전에 읽는다) · 엔진 값을 더하면 `runRotatingImages`·헤더/채널 드롭다운 두 곳·`settingsTabForEngine` 함께 · 🛑 하루·무료·충전 한도면 재시도 없이 멈춘다(새 Gemini 입구도 `classify429` 규칙을 탈 것 · `test:g429`).
 - Genspark 한도 메시지의 재설정 시각을 파싱해 계정 쿨다운(침묵 정체 3연속 = 추정 30분). 배지 = 리본 capbar 맨 앞.
 

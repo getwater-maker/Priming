@@ -18,18 +18,18 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.click('button[title^="통합 설정"]');
     await win.click('button:has-text("🔑 API 키")');
     await win.waitForSelector('[data-testid=keychk-all]', { timeout: 10000 });
-    for (const id of ['gemini', 'gemini-tts', 'mai', 'typecast', 'elevenlabs']) ok(await win.locator('[data-testid=keychk-btn-' + id + ']').count() === 1, `「✔ 검증」 단추: ${id}`);
+    for (const id of ['gemini-image', 'gemini', 'mai', 'typecast', 'elevenlabs']) ok(await win.locator('[data-testid=keychk-btn-' + id + ']').count() === 1, `「✔ 검증」 단추: ${id}`);
     ok(await win.locator('[data-testid=keychk-btn-xai]').count() === 0, '🎬 Grok API 키 칸은 없다(v0.7.40 제거)');
     ok(await win.locator('[data-testid=claude-key-in]').count() === 1 && await win.locator('[data-testid=keychk-btn-claude]').count() === 1, '🤖 Claude API 키 칸 · 「✔ 검증」 단추(v0.7.93)');
     try { await win.locator('[data-testid=claude-key]').screenshot({ path: process.env.PM_SHOT || require('path').join(require('os').tmpdir(), 'claude-key-card.png') }); } catch {}
     // 엉터리 키 → 거부 (저장은 blur 에서만 — 입력 뒤 바로 검증 단추를 눌러 blur 가 저장하지 않게 mousedown 대신 evaluate 클릭)
-    const box = win.locator('input[placeholder="🔑 Gemini API 키"]');
+    const box = win.locator('input[placeholder="🔑 Gemini API 키 (이미지 전용)"]');
     const had = await box.inputValue();
     await box.fill('bogus-key-for-test-0000');
-    await win.evaluate(() => document.querySelector('[data-testid=keychk-btn-gemini]').click());
-    await win.waitForSelector('[data-testid=keychk-gemini]', { timeout: 30000 });
-    const lv = await win.locator('[data-testid=keychk-gemini]').getAttribute('data-level');
-    ok(lv === 'bad', '엉터리 키 → ❌ 거부로 표시 — ' + (await win.locator('[data-testid=keychk-gemini]').innerText()));
+    await win.evaluate(() => document.querySelector('[data-testid=keychk-btn-gemini-image]').click());
+    await win.waitForSelector('[data-testid=keychk-gemini-image]', { timeout: 30000 });
+    const lv = await win.locator('[data-testid=keychk-gemini-image]').getAttribute('data-level');
+    ok(lv === 'bad', '엉터리 키 → ❌ 거부로 표시 — ' + (await win.locator('[data-testid=keychk-gemini-image]').innerText()));
     await box.fill(had);   // 되돌림(저장 안 됨)
   } finally { await app.close(); }
   console.log(`\n${fail ? '❌' : '✅'} api-key-ui — ${pass} 통과 / ${fail} 실패`);

@@ -832,7 +832,7 @@ export default function App() {
   const gsVideoModel = (imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max';
   const [upCfg, setUpCfg] = useState(null);              // 영상 업스케일 방식 { mode, slowLimitSec }
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
-  const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
+  const [giKey, setGiKey] = useState('');                // 🍌 나노바나나(이미지) 전용 Gemini 키 — secret-store 'gemini-image'(TTS 'gemini' 와 따로 · v0.9.32)
   const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
   // 🔊 TTS API 키(⚙ 설정 → 🔑 API 키 · v0.6.78 — 키는 여기 한 곳에서) — info = {엔진: {has, tail}} · 입력값은 저장 뒤 비운다(원문을 들고 있지 않는다)
   const [ttsKeys, setTtsKeys] = useState({ info: {}, draft: {}, region: 'eastus', msg: '' });
@@ -855,17 +855,16 @@ export default function App() {
   }
   async function verifyKey(id, draft, extra) {
     setKeyChk((x) => ({ ...x, [id]: { busy: true } }));
-    let r; try { r = await api.apiKeyVerify({ id: id === 'gemini-tts' ? 'gemini' : id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
+    let r; try { r = await api.apiKeyVerify({ id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
     setKeyChk((x) => ({ ...x, [id]: { busy: false, level: r.level, message: r.message } }));
   }
   // 저장됐거나 붙여넣은 키 전부를 차례로 확인
   async function verifyAllKeys() {
     const inf = ttsKeys.info || {};
-    if (giKey || (inf.gemini && inf.gemini.has)) await verifyKey('gemini', giKey, { model: (giCfg && giCfg.model) || '' });
-    for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
+    if (giKey.trim()) await verifyKey('gemini-image', giKey, { model: (giCfg && giCfg.model) || '' });
+    for (const id of ['gemini', 'mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
     for (const id of ['pexels', 'pixabay']) if ((stockKeys.info[id] && stockKeys.info[id].has) || (stockKeys.draft[id] || '').trim()) await verifyKey(id, stockKeys.draft[id]);
     if (claudeKey.info.has || claudeKey.draft.trim()) await verifyKey('claude', claudeKey.draft);
-    if (inf.gemini && inf.gemini.has) await verifyKey('gemini-tts', ttsKeys.draft.gemini);
   }
   const keyChkMark = (id) => { const c = keyChk[id]; return c && !c.busy && c.message ? <div className="meta" data-testid={'keychk-' + id} data-level={c.level} style={{ marginTop: 3, fontWeight: 600, color: c.level === 'ok' ? '#16a34a' : c.level === 'warn' ? '#b45309' : '#c62828' }}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.message}</div> : null; };
   const keyChkBtn = (id, draft, extra, tip) => <button className="ghost" style={{ flex: '0 0 auto' }} data-testid={'keychk-btn-' + id} disabled={!!(keyChk[id] && keyChk[id].busy)} title={tip || '이 키가 지금 통하는지 확인합니다(무료 조회 — 요금 없음)'} onClick={() => verifyKey(id, draft, extra)}>{keyChk[id] && keyChk[id].busy ? '⏳ 확인 중…' : '✔ 검증'}</button>;
@@ -2000,7 +1999,7 @@ export default function App() {
   }
   async function saveUpCfg(patch) { try { setUpCfg(await api.setUpscaleConfig(patch)); } catch (e) { logline('업스케일 설정 오류: ' + e.message); } }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
-  async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('Gemini API 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
+  async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('🍌 나노바나나(이미지) Gemini 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
   async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
   async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
   async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
@@ -2631,7 +2630,6 @@ export default function App() {
   async function saveTtsKey(id, patch) {
     const r = await api.ttsEnginesSave({ keys: { [id]: patch }, channels: [], region: ttsKeys.region });
     await loadTtsKeys();
-    if (id === 'gemini') { try { setGiKey((await api.getGeminiKey()) || ''); } catch {} }   // 위 🍌 나노바나나 칸과 같은 키
     setTtsKeys((x) => ({ ...x, draft: { ...x.draft, [id]: '' }, msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
   }
   // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
@@ -7107,12 +7105,12 @@ export default function App() {
                       title="대본의 인물 카드(🎨 일관성 앵커 「알리사 카드: …」)로 인물 시트를 한 번 만들어 <출력>/characters/ 에 두고, 그 인물이 보이는 장면마다 참조로 붙입니다.">
                       <input type="checkbox" checked={giCfg.charRefs !== false} onChange={(e) => saveGiCfg({ charRefs: e.target.checked })} />👤 인물 일관성</label>
                   </>)}
-                  <Hint>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 모델 칸을 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급) · 인물 일관성은 나노바나나 즉시 생성에서만 씁니다.</Hint>
+                  <Hint>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). <b>이 키는 이미지 생성에만 씁니다</b> — Gemini 음성(TTS)은 아래 🔊 TTS API 칸의 키를 따로 씁니다. 모델명이 안 맞으면(404) 모델 칸을 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급) · 인물 일관성은 나노바나나 즉시 생성에서만 씁니다.</Hint>
                 </div>
                 <div className="kp-line">
-                  <input type="password" className="kp-in" placeholder="🔑 Gemini API 키" value={giKey}
+                  <input type="password" className="kp-in" placeholder="🔑 Gemini API 키 (이미지 전용)" value={giKey}
                     onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
-                  {keyChkBtn('gemini', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 오른쪽 모델명이 지금 통하는지 확인합니다(무료 조회)')}
+                  {keyChkBtn('gemini-image', giKey, { model: (giCfg && giCfg.model) || '' }, '키와 오른쪽 모델명이 지금 통하는지 확인합니다(무료 조회)')}
                   {giCfg && (<>
                     <span className="kp-lab">모델</span>
                     <input className="kp-model" list="gi-models" value={giCfg.model || ''} placeholder="gemini-nano-banana-2.1"
@@ -7126,7 +7124,7 @@ export default function App() {
                       onClick={() => saveGiCfg({ model: 'gemini-nano-banana-2.1' })}>2.1 로</button>
                   </>)}
                 </div>
-                {keyChkMark('gemini')}
+                {keyChkMark('gemini-image')}
               </div>
               {/* 🤖 Claude API(유료 · v0.7.93) — secret-store 'claude' · 원문은 다시 보이지 않는다(끝 4자리만) */}
               <div data-testid="claude-key" className="kp-card">
@@ -7185,7 +7183,7 @@ export default function App() {
               <div data-testid="tts-keys" className="kp-card">
                 <div className="kp-title">🔊 TTS API (유료)</div>
                 {[
-                  ['gemini', 'Google Gemini TTS', 'API 키', '위 🍌 나노바나나와 같은 Gemini 키입니다(한 번만 넣으면 둘 다 씁니다)'],
+                  ['gemini', 'Google Gemini TTS', 'API 키', 'Gemini 음성 생성(TTS)에만 쓰는 키입니다 — 🍌 나노바나나 이미지 키와 따로입니다(같은 키를 넣어도 되지만 쓰임은 나뉩니다)'],
                   ['mai', 'Microsoft MAI-Voice', 'Speech 키', 'Azure 포털 → Speech(Foundry) 리소스 → 키 및 엔드포인트의 KEY 1 · 지역은 리소스를 만든 곳'],
                   ['typecast', '타입캐스트', 'API 키', 'typecast.ai → Developers → API 키'],
                   ['elevenlabs', 'ElevenLabs', 'API 키', '권한: Text to Speech + Voices 읽기(라이브러리 목소리 추가는 Voices 쓰기도)'],
@@ -7207,10 +7205,10 @@ export default function App() {
                           onChange={(e) => { const rg = e.target.value; setTtsKeys((x) => ({ ...x, region: rg })); api.ttsEnginesSave({ channels: [], region: rg }); }}>
                           {['eastus', 'eastasia', 'southeastasia', 'japaneast', 'eastus2', 'westus', 'westus2', 'westus3', 'canadacentral', 'francecentral', 'westeurope', 'northeurope', 'swedencentral', 'centralindia'].map((r) => <option key={r} value={r}>{r}</option>)}
                         </select>)}
-                        {keyChkBtn(id === 'gemini' ? 'gemini-tts' : id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined)}
+                        {keyChkBtn(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined)}
                         <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!inf.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm(`${label} 키를 지울까요?`)) saveTtsKey(id, { clear: true }); }}>지우기</button>
                       </div>
-                      {keyChkMark(id === 'gemini' ? 'gemini-tts' : id)}
+                      {keyChkMark(id)}
                     </div>
                   );
                 })}

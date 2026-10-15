@@ -6059,12 +6059,12 @@ ipcMain.handle('remove-preset', (_e, args = {}) => {
   exportChannelStyles();
   return P.listPresets();
 });
-// Gemini API 키 (secret-store, gemini 엔진 공용) — GPU 없는 PC에서 음성 생성용
+// 🍌 나노바나나(이미지) 전용 Gemini 키 — secret-store 'gemini-image'(v0.9.32 · Gemini TTS 키 'gemini' 와 분리 · ⚙ 설정 → 🔑 API 키 「🍌 유료 나노바나나」 칸)
 ipcMain.handle('get-gemini-key', () => {
-  try { const s = require('./tts/secret-store').get('gemini'); return (s && s.key) || ''; } catch { return ''; }
+  try { const SS = require('./tts/secret-store'); const s = SS.get(SS.IMAGE_ID); return (s && s.key) || ''; } catch { return ''; }
 });
 ipcMain.handle('set-gemini-key', (_e, key) => {
-  try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
+  try { const SS = require('./tts/secret-store'); SS.set(SS.IMAGE_ID, { key: String(key || '').trim() }); log('🍌 나노바나나(이미지) Gemini 키 저장됨'); return true; }
   catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
 });
 // 🔊 음성 엔진(헤더 팝업 · v0.6.67~69) — **채널마다** OmniVoice / Gemini / MAI-Voice / 타입캐스트 / ElevenLabs 목소리 + API 키 + 얼굴 + 샘플 + 요금.

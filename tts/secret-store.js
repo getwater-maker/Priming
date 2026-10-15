@@ -8,7 +8,7 @@
  * 사용:
  *   SecretStore.set('azure', { key: 'xxx', region: 'eastasia' });
  *   const s = SecretStore.get('azure');
- *   SecretStore.has('gemini');
+ *   SecretStore.has('gemini');          // Gemini TTS(음성) 전용 — 나노바나나 이미지는 'gemini-image'
  */
 
 const fs = require('fs');
@@ -18,10 +18,23 @@ const os = require('os');
 const SECRET_DIR = path.join(os.homedir(), '.flow-app');
 const SECRET_PATH = path.join(SECRET_DIR, 'tts-secrets.json');
 
+// 🔑 Gemini 키 분리(v0.9.32 · 로이 2026-10-16) — 'gemini' = Gemini TTS(음성) 전용 · 'gemini-image' = 나노바나나(이미지) 전용.
+//   예전엔 한 칸('gemini')을 둘이 같이 썼다 → 이미지 칸이 아직 없으면 그때의 키를 한 번만 옮겨 적는다(그 뒤로는 서로 따로).
+const IMAGE_ID = 'gemini-image';
+function splitGeminiOnce(all) {
+  if (!all || typeof all !== 'object' || Object.prototype.hasOwnProperty.call(all, IMAGE_ID)) return false;
+  const k = all.gemini && String(all.gemini.key || '').trim();
+  if (!k) return false;
+  all[IMAGE_ID] = { key: k, from: 'gemini' };
+  return true;
+}
+
 function loadAll() {
   try {
     if (fs.existsSync(SECRET_PATH)) {
-      return JSON.parse(fs.readFileSync(SECRET_PATH, 'utf-8'));
+      const all = JSON.parse(fs.readFileSync(SECRET_PATH, 'utf-8'));
+      if (splitGeminiOnce(all)) saveAll(all);
+      return all;
     }
   } catch (e) {
     console.error('[secret-store] 로드 실패:', e.message);
@@ -62,4 +75,4 @@ function has(providerId) {
   return !!(s && Object.keys(s).length > 0);
 }
 
-module.exports = { get, set, remove, has, SECRET_PATH };
+module.exports = { get, set, remove, has, SECRET_PATH, IMAGE_ID, splitGeminiOnce };

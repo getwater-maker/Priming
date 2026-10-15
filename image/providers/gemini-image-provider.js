@@ -9,7 +9,7 @@
  * 모델 고정: gemini-3.1-flash-image  (UI 표시명 "Nano Banana 2")
  *   - 혹시 구글 API 식별자가 -preview 접미사를 요구하면 아래 MODEL 상수만 교체.
  *
- * API 키: SecretStore.get('gemini').key  (TTS Gemini 키 공유)
+ * API 키: SecretStore.get('gemini-image').key  (이미지 전용 · v0.9.32 — Gemini TTS 키 'gemini' 와 분리)
  *
  * 입력 prompt 는 메인 파이프라인에서 이미 영어로 번역된 상태로 들어온다.
  * 여기서는 16:9 비율 강제 + 안전필터 순화/재시도만 책임진다.
@@ -93,7 +93,7 @@ class GeminiImageProvider {
    */
   async init() {
     this.ready = true;
-    const hasKey = SecretStore.has && SecretStore.has('gemini');
+    const hasKey = SecretStore.has && SecretStore.has(SecretStore.IMAGE_ID);
     this.hasKey = !!hasKey;
     if (!hasKey) console.warn('[gemini-image] Gemini API 키 미등록 — 키 등록 후 사용 가능');
     return true;
@@ -162,9 +162,9 @@ class GeminiImageProvider {
 
     const progress = (p) => { try { onProgress && onProgress(p); } catch {} };
 
-    const secret = SecretStore.get('gemini');
+    const secret = SecretStore.get(SecretStore.IMAGE_ID);
     if (!secret || !secret.key) {
-      throw new Error('Gemini API 키가 없습니다 — 🔑 설정 → Google Gemini 에서 키를 등록하세요.');
+      throw new Error('Gemini API 키가 없습니다 — ⚙ 설정 → 🔑 API 키 → 🍌 유료 나노바나나 칸에 키를 넣으세요.');
     }
     const apiKey = secret.key;
 

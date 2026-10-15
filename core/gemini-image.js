@@ -5,7 +5,7 @@
 //   배치 모드: (예정) Gemini Batch API — 50% 저렴, 비동기 제출→회수.
 // 모델명은 설정 가능(gemini-image-config). 기본 'gemini-nano-banana-2.1'(2026-10-06 GA · 1K 단가 2 Lite 와 같고 품질↑ · 로이 확정 2026-10-07).
 // 나노바나나 2.1(2026-10-06 GA)은 모델 칸에 `gemini-nano-banana-2.1` 을 넣으면 같은 경로로 쓴다(generateContent·배치 동일).
-// 키는 secret-store 'gemini'(음성 Gemini·프롬프트 API 와 공용).
+// 키는 secret-store 'gemini-image' — 이미지 전용(v0.9.32 · Gemini TTS 키 'gemini' 와 분리 · ⛔ 'gemini' 를 읽지 않는다).
 // ─────────────────────────────────────────────────────────────────────────────
 const fs = require('fs');
 const path = require('path');
@@ -26,7 +26,7 @@ function saveConfig(patch) {
   return next;
 }
 function geminiKey() {
-  try { return (require('../tts/secret-store').get('gemini') || {}).key || ''; } catch { return ''; }
+  try { const SS = require('../tts/secret-store'); return (SS.get(SS.IMAGE_ID) || {}).key || ''; } catch { return ''; }
 }
 
 // ── 429(한도) 분류와 사람 말 안내 ───────────────────────────────────────────────

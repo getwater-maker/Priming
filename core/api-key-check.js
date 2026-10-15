@@ -2,7 +2,7 @@
 /**
  * api-key-check.js — 🔑 API 키 검증(⚙ 설정 → 🔑 API 키 · 2026-10-06 로이)
  *   저장하거나 쓰기 전에 「이 키가 지금 통하는가」를 확인한다. **읽기 전용 · 무료** 호출만 쓴다(요금이 드는 생성·합성 호출 없음):
- *     gemini     GET /v1beta/models/<모델>  (모델을 모르면 목록 1개)   — 나노바나나 · Gemini TTS 공용 키
+ *     gemini-image / gemini   GET /v1beta/models/<모델>  (모델을 모르면 목록 1개)   — 🍌 나노바나나(이미지) 키 / Gemini TTS(음성) 키 — v0.9.32 부터 따로
  *     xai        GET /v1/api-key                                       — Grok API(비디오)
  *     mai        GET https://<지역>.tts.speech.microsoft.com/cognitiveservices/voices/list   — Azure Speech 키 + **지역**
  *     typecast   GET /v2/voices?model=ssfm-v30
@@ -45,14 +45,15 @@ async function verify(id, key, o = {}, fetchImpl) {
   const k = String(key || '').trim();
   if (!k) return bad('키가 없습니다 — 먼저 붙여넣으세요');
   try {
-    if (id === 'gemini') {
+    if (id === 'gemini' || id === 'gemini-image') {
+      const L = id === 'gemini-image' ? '나노바나나 Gemini' : 'Gemini TTS';
       const model = String(o.model || '').trim();
       const url = model ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}` : 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1';
       const r = await http(url, { 'x-goog-api-key': k }, fetchImpl);
-      if (r.status === 200) return good(model ? `Gemini 키 통과 · 모델 ${model} 확인` : 'Gemini 키 통과');
-      if (r.status === 400 && /API[ _]key not valid|API_KEY_INVALID/i.test(r.text)) return bad('Gemini 키가 틀렸습니다(API key not valid)');
-      if (r.status === 404 && model) return warn(`Gemini 키는 맞지만 모델 「${model}」 을 찾지 못했습니다(404) — 모델명을 확인하세요`);
-      return generic(r, 'Gemini');
+      if (r.status === 200) return good(model ? `${L} 키 통과 · 모델 ${model} 확인` : `${L} 키 통과`);
+      if (r.status === 400 && /API[ _]key not valid|API_KEY_INVALID/i.test(r.text)) return bad(`${L} 키가 틀렸습니다(API key not valid)`);
+      if (r.status === 404 && model) return warn(`${L} 키는 맞지만 모델 「${model}」 을 찾지 못했습니다(404) — 모델명을 확인하세요`);
+      return generic(r, L);
     }
     if (id === 'xai') {
       const r = await http('https://api.x.ai/v1/api-key', { Authorization: 'Bearer ' + k }, fetchImpl);
@@ -108,4 +109,4 @@ async function verify(id, key, o = {}, fetchImpl) {
   }
 }
 
-module.exports = { verify, ids: ['gemini', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude'] };
+module.exports = { verify, ids: ['gemini', 'gemini-image', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude'] };

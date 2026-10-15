@@ -8,7 +8,7 @@
  *     · id 가 없거나 'omnivoice' 면 지금까지처럼 채널의 참조음성(voiceCloneRefAudio)·시드로 읽는다.
  *     · ⚠ 채널의 `engine` 필드는 건드리지 않는다(preset-store 가 omnivoice/gemini 밖의 값을 지운다).
  *   - 전역(~/.priming-maker/tts-engines.json)에는 **계정 공통값만**: MAI 지역 · 환율.
- *   - API 키 = tts/secret-store (gemini 키는 이미지·프롬프트와 **같은 키**) · 렌더러엔 끝 4자리만.
+ *   - API 키 = tts/secret-store (gemini 키 = Gemini TTS 전용 · 🍌 나노바나나 이미지는 'gemini-image' 로 따로 — v0.9.32) · 렌더러엔 끝 4자리만.
  *   - 유료 엔진이면 채널의 참조음성·instruct·cfg·화자별 목소리는 쓰지 않는다(로그로 알린다).
  *
  * 🔑 엔진 해석 `resolveEngine(preset)` · 합성 인자 `synthExtra(id, preset)` · 요금 `estimateUsd` **한 곳**.
@@ -38,7 +38,7 @@ const ENGINES = [
     ],
     defaultVoice: 'Kore', hasStyle: true,
     listVoices: true,
-    note: '기본 목소리 30개 + 「확장 라이브러리 불러오기」(수백 개 · 3.8 모델용). 이미지(나노바나나)·프롬프트 작성과 같은 Gemini 키를 씁니다. 「말투 지시」는 3.8 모델에만 적용됩니다.',
+    note: '기본 목소리 30개 + 「확장 라이브러리 불러오기」(수백 개 · 3.8 모델용). ⚙ 설정 → 🔑 API 키 → 🔊 TTS API 의 Gemini 키(음성 전용 — 🍌 나노바나나 이미지 키와 따로)를 씁니다. 「말투 지시」는 3.8 모델에만 적용됩니다.',
   },
   {
     id: 'mai', label: 'Microsoft MAI-Voice', sub: 'Azure Speech(Foundry) 키 + 지역', paid: true,
