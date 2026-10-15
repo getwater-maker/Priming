@@ -11080,16 +11080,14 @@ regBook('book-build-pdf', async (_e, args = {}) => {
       });
       if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
       else {
-        // 📄 표지+내지(로이 2026-10-12) — 펼침면 표지의 앞표지 한 쪽 + 내지 전체. 부크크에 올리는 파일은 아니다(종이책은 내지·표지 PDF 를 따로 올린다) — 한 권을 통째로 보거나 건네는 용도
+        // 📄 완성본(로이 2026-10-14 · v0.9.28) — 표지 펼침면 전체(뒷표지·책등·날개) 1쪽 + 내지 전체. ⛔ 앞표지만 잘라 붙이지 않는다(그건 전자책).
+        //   부크크에 올리는 파일은 아니다(종이책은 내지·표지 PDF 를 따로 올린다) — 한 권을 통째로 보거나 건네는 용도
         try {
           const PK = require('./core/book/pdf-pack');
-          const frontTmp = path.join(workDir, '_front-cover.pdf');
-          if (await PK.frontCoverFromSpreadPdf(coverPdf, spread, frontTmp)) {
-            fullPdf = OL.outPath(outRoot, 'print', 'full', base);
-            const n = await PK.prependCover(frontTmp, interiorPdf, fullPdf);
-            log(`📄 표지+내지 PDF — ${n}쪽(앞표지 1 + 내지 ${n - 1})`);
-          }
-        } catch (e) { fullPdf = null; log('⚠ 표지+내지 PDF 실패: ' + e.message); }
+          fullPdf = OL.outPath(outRoot, 'print', 'full', base);
+          const n = await PK.printFullPdf(coverPdf, interiorPdf, fullPdf);
+          log(`📄 완성본 PDF — ${n}쪽(표지 펼침면 1 + 내지 ${n - 1})`);
+        } catch (e) { fullPdf = null; log('⚠ 완성본 PDF 실패: ' + e.message); }
       }
     } else {
       log('ℹ 표지 이미지·문구 없음 — 내지만 생성. 우측 패널에서 이미지 첨부 또는 [뒷표지]·[책등] 섹션을 추가하세요.');

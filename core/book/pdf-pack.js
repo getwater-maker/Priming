@@ -90,9 +90,17 @@ async function prependCover(coverPdf, bodyPdf, outPdf) {
   return body.getPageCount();
 }
 
+/**
+ * 📕 종이책 완성본 = 표지 펼침면 PDF 첫 쪽 **전체**(뒷표지·책등·앞표지·날개) + 내지 전체(로이 2026-10-14).
+ *   ⛔ 앞표지만 잘라 붙이지 않는다 — 그건 전자책 완성본(`coverFileToPdf` → `prependCover`). 쪽 크기가 달라도 된다.
+ */
+async function printFullPdf(spreadCoverPdf, interiorPdf, outPdf) {
+  return prependCover(spreadCoverPdf, interiorPdf, outPdf);
+}
+
 async function pageCount(file) {
   const { PDFDocument } = lib();
   return (await PDFDocument.load(fs.readFileSync(file))).getPageCount();
 }
 
-module.exports = { PT_PER_MM, frontPanelOf, frontCoverFromSpreadPdf, coverFileToPdf, prependCover, pageCount };
+module.exports = { PT_PER_MM, frontPanelOf, frontCoverFromSpreadPdf, coverFileToPdf, prependCover, printFullPdf, pageCount };
