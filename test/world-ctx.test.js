@@ -82,6 +82,39 @@ console.log('\n[2] 🔴 롱폼 제작이 도는 중 화면이 출판으로 바�
     ok(got === 'longform', '롱폼 세계에서 만든 타이머는 화면이 바뀐 뒤에도 롱폼 세계로 돈다(자동저장 등)');
     ok(W.isViewed() === false || W.run('book', () => W.isViewed()) === true, 'isViewed: 보는 세계의 흐름만 true');
   }
+  console.log('\n[5] 🎬 제작 칸 — 같은 롱폼 안에서 만드는 대본(A)과 보는 대본(B)이 갈린다(v0.9.23)');
+  {
+    const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, mode: 'longform' };
+    const W = createWorlds(S, { norm: (w) => (w === 'book' ? 'book' : 'longform'), modeOf: (w) => (w === 'make' ? 'longform' : w) });
+    S.parsed = 'B'; S.scriptPath = 'b.md';   // 화면 = B
+    const handlers = {};
+    const items = { qa: { parsed: 'A', scriptPath: 'a.md' } };
+    W.wrapHandle({ handle: (ch, fn) => { handlers[ch] = fn; } }, () => 'longform',
+      (id) => (items[id] ? { w: 'make', slot: { parsed: items[id].parsed, scriptPath: items[id].scriptPath, outRoot: '/a', preset: 'pa' }, extra: { item: id } } : null));
+    const seen = [];
+    handlers.build = async (_e, a) => { for (let i = 0; i < 3; i++) { await sleep(10); seen.push([S.parsed, S.scriptPath, S.mode, W.key(), (W.store() || {}).item, a && a.__item]); } return S.parsed; };
+    handlers['edit'] = async () => { S.parsed = 'B2'; return [S.parsed, S.mode, W.store()]; };
+    // wrapHandle 은 handle 호출 때 감싼다 — 감싼 것으로 다시 등록
+    const ipc = { handle: (ch, fn) => { handlers[ch] = fn; } };
+    W.wrapHandle(ipc, () => 'longform', (id) => (items[id] ? { w: 'make', slot: { parsed: items[id].parsed, scriptPath: items[id].scriptPath, outRoot: '/a', preset: 'pa' }, extra: { item: id } } : null));
+    ipc.handle('build', handlers.build); ipc.handle('edit', handlers.edit);
+    const job = handlers.build(null, { __item: 'qa', x: 1 });
+    await sleep(5);
+    const e = await handlers.edit(null, {});   // 제작 중 사람이 B 를 고침
+    const r = await job;
+    ok(r === 'A' && seen.every((s) => s[0] === 'A' && s[1] === 'a.md'), '__item 제작은 끝까지 A 를 본다: ' + seen.map((s) => s[0]).join(''));
+    ok(seen.every((s) => s[2] === 'longform' && s[3] === 'make' && s[4] === 'qa'), '제작 칸: S.mode = longform · key = make · store().item = 항목');
+    ok(seen.every((s) => s[5] === undefined), '__item 은 핸들러 인자에서 빠진다');
+    ok(e[0] === 'B2' && e[2] === null && W.run('longform', () => S.parsed) === 'B2', '보는 칸(B)의 편집은 제작 칸을 건드리지 않는다');
+    const u = await handlers.build(null, { __item: 'nope' });
+    ok(u === 'B2', '없는 항목 id 는 보통 롱폼 세계로');
+    // S.mode 대입은 제작 칸에서 화면을 바꾸지 않는다
+    W.setView('book');
+    await W.runPrivate('make', { parsed: 'A' }, { item: 'qa' }, async () => { S.mode = 'longform'; await sleep(2); S.mode = 'book'; });
+    ok(W.getView() === 'book', '제작 칸의 S.mode 대입은 화면(view)을 바꾸지 않는다');
+    const t = await new Promise((res) => W.runPrivate('make', { parsed: 'A3' }, { item: 'qa' }, () => { setTimeout(W.bindNow(() => res(S.parsed)), 5); }));
+    ok(t === 'A3', 'bindNow 타이머는 제작 칸을 이어받는다(자동저장)');
+  }
   console.log(`\n${fail ? '❌' : '✅'} world-ctx — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();

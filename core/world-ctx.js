@@ -9,6 +9,9 @@
  *   - 흐름이 세계를 갖고 있지 않으면(시작 코드·타이머) 「보고 있는 세계(view)」를 쓴다 = 지금까지와 같다.
  *   - 롱폼 제작(make-all 등)은 롱폼 세계에서 시작했으므로 await 를 몇 번 거쳐도, 그 사이 화면이 출판으로 바뀌어도 롱폼 세계를 본다.
  *   - 출판 IPC 는 출판 세계에서 돈다 → 롱폼 작업의 S.* 를 건드리지 않는다.
+ * 🎬 제작 칸(v0.9.23 · 로이 2026-10-15 「렌더링 중에 다른 대본을 보고 고치고 싶다」): runPrivate(w, slot, extra, fn) 은
+ *   그 흐름에만 보이는 **자기 칸**으로 fn 을 돌린다. 같은 롱폼 안에서도 「만드는 대본」과 「보는 대본」이 갈린다.
+ *   S.mode 는 modeOf(세계)(제작 → longform)라 큐·모드 코드는 그대로 롱폼 큐를 본다. extra 는 store() 로 꺼낸다(item 등).
  * 테스트: test/world-ctx.test.js (순수 — 일렉트론 없이 실행)
  */
 const { AsyncLocalStorage } = require('async_hooks');
@@ -20,40 +23,60 @@ function createWorlds(S, opts = {}) {
   const als = new AsyncLocalStorage();
   const slots = {};
   for (const n of names) slots[n] = Object.fromEntries(keys.map((k) => [k, null]));
+  const modeOf = opts.modeOf || ((w) => w);
   let view = names[0];
 
-  const key = () => als.getStore() || view;
+  // 흐름의 저장값 = 세계 이름(문자열) 또는 자기 칸을 가진 객체 { w, slot, ...extra }(runPrivate)
+  const priv = () => { const s = als.getStore(); return (s && typeof s === 'object') ? s : null; };
+  const key = () => { const s = als.getStore(); return s ? (typeof s === 'object' ? s.w : s) : view; };
+  const slotNow = () => { const p = priv(); return p ? p.slot : slots[key()]; };
   for (const k of keys) {
     try { delete S[k]; } catch (_) {}
-    Object.defineProperty(S, k, { get: () => slots[key()][k], set: (v) => { slots[key()][k] = v; }, enumerable: true, configurable: true });
+    Object.defineProperty(S, k, { get: () => slotNow()[k], set: (v) => { slotNow()[k] = v; }, enumerable: true, configurable: true });
   }
   // S.mode = 지금 흐름의 세계. 대입하면 「세계를 바꾼다」 — 같은 세계로의 대입(run-batch 의 S.mode='longform')은 아무 일도 없다.
   //   흐름이 이미 세계를 갖고 있을 때만 그 흐름을 새 세계로 옮긴다(enterWith). 시작 코드에서 enterWith 하면 이후 모든 비동기가 물든다.
+  //   🎬 자기 칸 흐름(제작)은 세계를 옮기지 않는다 — 화면도 건드리지 않는다.
   const switchTo = (w) => {
     w = norm(w);
-    if (w === key()) return;
+    if (w === modeOf(key())) return;
+    if (priv()) return;
     view = w;
     if (als.getStore()) als.enterWith(w);
   };
   try { delete S.mode; } catch (_) {}
-  Object.defineProperty(S, 'mode', { get: key, set: switchTo, enumerable: true, configurable: true });
+  Object.defineProperty(S, 'mode', { get: () => modeOf(key()), set: switchTo, enumerable: true, configurable: true });
 
   const api = {
     names, slots,
-    key,                                  // 지금 흐름의 세계
+    key,                                  // 지금 흐름의 세계(제작 칸이면 그 이름 — 예 'make')
+    store: priv,                          // 자기 칸 흐름이면 { w, slot, ...extra } · 아니면 null
     getView: () => view,                  // 화면이 보여 주는 세계
     setView: (w) => { view = norm(w); },  // 화면이 바뀜(set-mode · 원고 열기 응답)
     run: (w, fn) => als.run(norm(w), fn), // 그 세계로 fn 실행(비동기 포함)
+    /** 🎬 자기 칸으로 fn 실행 — 이 흐름(이어지는 await·타이머 포함)만 slot 을 S.parsed 등으로 본다 */
+    runPrivate: (w, slot, extra, fn) => als.run({ ...(extra || {}), w, slot }, fn),
+    /** 지금 흐름(세계 또는 자기 칸)을 그대로 이어 fn 을 실행하는 함수 — 타이머가 흐름을 잃지 않게 */
+    bindNow: (fn) => { const s = als.getStore(); return (...a) => (s ? als.run(s, () => fn(...a)) : fn(...a)); },
     /** 화면이 보는 세계와 같은 세계의 흐름인가 — 화면으로 DTO 를 밀어 보낼지 판단 */
     isViewed: () => key() === view,
     /**
      * ipcMain.handle 을 감싼다 — 호출마다 worldFor(채널, 인자) 의 세계에서 실행.
      * 첫 인자 객체에 __world 가 있으면 그 세계를 쓰고 핸들러에는 넘기지 않는다(명시 > 채널 기본).
+     * 🎬 __item 이 있고 privateFor(id) 가 { w, slot, extra } 를 주면 그 자기 칸에서 실행한다(큐 단계 루프 — 화면을 바꾸지 않는다).
      */
-    wrapHandle(ipcMain, worldFor) {
+    wrapHandle(ipcMain, worldFor, privateFor) {
       const orig = ipcMain.handle.bind(ipcMain);
       ipcMain.handle = (ch, fn) => orig(ch, (e, ...args) => {
         let w;
+        if (privateFor && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) && args[0].__item != null) {
+          const { __item, __world, ...rest } = args[0];
+          args[0] = rest;
+          const p = privateFor(__item);
+          if (p) return als.run({ ...(p.extra || {}), w: p.w, slot: p.slot }, () => fn(e, ...args));
+          w = norm(__world || worldFor(ch, args, view));
+          return als.run(w, () => fn(e, ...args));
+        }
         if (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) && typeof args[0].__world === 'string') {
           w = norm(args[0].__world);
           const { __world, ...rest } = args[0];

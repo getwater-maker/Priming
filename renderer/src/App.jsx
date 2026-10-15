@@ -1288,7 +1288,6 @@ export default function App() {
     const items = (queue && queue[mode] && queue[mode].items) || [];
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
     const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오', ttsimg: 'TTS→이미지' }[stage] || stage;
-    const origId = (queue && queue[mode] && queue[mode].activeId) || (items[0] && items[0].id);
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
     const phases = stage === 'imgvid' ? ['image', 'video'] : stage === 'ttsimg' ? ['tts', 'image'] : [stage];   // ttsimg = 전 편 TTS → 전 편 이미지(GPU 를 번갈아 쓰지 않게 · v0.7.72)
@@ -1305,15 +1304,15 @@ export default function App() {
         if (queueStopAfterRef.current) { stoppedAfter = items.length - k; logline(`⏸ 큐 ${plabel} — 이번 편까지만 만들고 멈춥니다 (남은 ${stoppedAfter}편은 건너뜁니다)`); break; }
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
-        try { await api.selectQueueItem(it.id, 'longform'); } catch (_) {}   // 🌐 제작 루프는 화면이 출판으로 바뀌어도 롱폼 세계로
+        // 🎬 화면(보는 대본)은 바꾸지 않는다 — __item 으로 그 대본의 제작 칸에서 돈다(v0.9.23). 응답 DTO 는 그 대본 것이라 화면에 넣지 않는다(보고 있으면 main 이 밀어 준다).
         try {
-          if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); }
-          if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: qStyle }); if (d) setDto(d); }
-          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle }); if (d) setDto(d); }
+          if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); }
+          if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle }); }
+          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle }); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
     }
-    try { const r = await api.selectQueueItem(origId, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
+    try { const r = await api.selectQueueItem(null, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 🎬 지금 보는 대본을 새로 받는다(화면을 옮기지 않는다 — 없는 id = 그대로)
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false);
     setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : stoppedAfter ? `⏸ 큐 ${label} — 이번 편까지 만들고 멈춤 (남은 ${stoppedAfter}편)` : `⚡ 큐 ${label} 완료`);
   }

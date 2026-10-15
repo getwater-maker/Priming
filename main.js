@@ -116,14 +116,39 @@ const S = { ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, 
 //   S.parsed·scriptPath·outRoot·preset·mode 는 「지금 실행 중인 흐름의 세계」 칸을 읽고 쓴다. IPC 호출은 아래 규칙으로 세계가 정해진다:
 //   ① 첫 인자 객체의 __world(명시) > ② 출판 채널(book-*·open-book-*) = 출판 > ③ 화면을 따르는 채널(큐·모드·폴더) = 보고 있는 세계 > ④ 그 밖(제작·편집 전부) = 롱폼.
 //   🔑 ④ 가 핵심이다 — 화면이 출판으로 바뀐 뒤에 오는 제작 호출(예: 이미지→비디오 두 번째 호출)도 롱폼 세계로 간다.
-const WORLD = require('./core/world-ctx').createWorlds(S, { worlds: ['longform', 'book'], norm: (w) => (w === 'book' ? 'book' : 'longform') });
+//   🎬 제작 칸(v0.9.23): 만들기·큐 제작은 그 대본만의 칸('make' · S.mode 는 longform)에서 돈다 — 화면은 다른 대본을 보고 고쳐도 된다(makeRun).
+const WORLD = require('./core/world-ctx').createWorlds(S, { worlds: ['longform', 'book'], norm: (w) => (w === 'book' ? 'book' : 'longform'), modeOf: (w) => (w === 'make' ? 'longform' : w) });
 const VIEW_FOLLOW_CHANNELS = new Set(['set-mode', 'reset-project', 'list-queue', 'save-queue', 'load-queue', 'last-queue-info', 'restore-last-queue',
   'select-queue-item', 'remove-queue-item', 'set-queue-settings', 'get-script-text', 'apply-script-text', 'open-folder', 'clear-saves']);
-WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ? 'book' : VIEW_FOLLOW_CHANNELS.has(ch) ? view : 'longform'));
+WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ? 'book' : VIEW_FOLLOW_CHANNELS.has(ch) ? view : 'longform'),
+  (id) => { const it = S.modes.longform.items.find((x) => x.id === id); return it && it.parsed ? makeStoreFor(it) : null; });   // 🎬 __item = 그 대본의 제작 칸(큐 단계 루프)
+
+// ── 🎬 제작 칸 — 「만드는 대본」과 「보는 대본」을 가른다(v0.9.23 · 로이 2026-10-15) ──
+//   예전엔 큐 제작이 대본마다 activeId 를 바꿔 화면을 빼앗았고, 제작 중 다른 대본을 클릭하면 제작 쪽 도우미(화풍·인물 카드 등)가
+//   보는 대본의 S.* 를 읽었다. 이제 제작은 그 큐 항목만의 칸에서 돈다: S.parsed·scriptPath·outRoot·preset = 그 항목 · activeItem() = 그 항목.
+//   화면으로 DTO 를 보내는 것은 그 항목을 보고 있을 때만(_makeViewed) · 자동저장은 항목 기준(flushAutoSave).
+function makeStoreFor(it) {
+  const slot = { parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot, preset: S.preset };
+  const pn = it.settings && it.settings.presetName;
+  if (pn) { try { const p = P.getPreset(pn); if (p) slot.preset = p; } catch {} }
+  return { w: 'make', slot, extra: { item: it, as: { t: null, since: 0 } } };
+}
+async function makeRun(it, fn) {
+  if (!it || !it.parsed) return fn();
+  const m = makeStoreFor(it);
+  return WORLD.runPrivate(m.w, m.slot, m.extra, async () => {
+    const st = WORLD.store();
+    try { return await fn(); }
+    finally { try { if (st.as.t) flushAutoSave(); } catch (_) {} }   // 밀린 자동저장을 이 항목으로 마저 쓴다
+  });
+}
+// 이 제작 칸의 대본을 화면이 보고 있는가(롱폼 화면 + 그 항목이 활성)
+function _makeViewed(st) { return !!(st && st.item && WORLD.getView() === 'longform' && S.modes.longform.activeId === st.item.id); }
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
 function activeItem() {
+  { const st = WORLD.store(); if (st && st.item) return st.item; }   // 🎬 제작 칸 = 그 항목
   const q = S.modes[S.mode]; if (!q) return null;
   return q.items.find((x) => x.id === q.activeId) || null;
 }
@@ -3327,8 +3352,8 @@ ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
 //     공용 TTS 매니저가 깨진다(v0.2.57 사고).
 ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트보드 렌더', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  await runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: args.openVrew !== false });
-  return P.toDTO(S.parsed);
+  await makeRun(activeItem(), () => runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: args.openVrew !== false }));   // 🎬 제작 칸
+  return S.parsed ? P.toDTO(S.parsed) : null;
 }));
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
@@ -4857,7 +4882,10 @@ function queueDTO() {
 }
 function pushDtoUpdate() {
   // 🌐 화면이 보고 있지 않은 세계(예: 출판 탭을 보는 중에 도는 롱폼 제작)의 DTO 는 화면으로 밀어 보내지 않는다 — 출판 화면이 롱폼 DTO 로 덮이던 것을 막는다(저장은 그대로).
-  try { if (win && !win.isDestroyed() && S.parsed && WORLD.isViewed()) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
+  //   🎬 제작 칸은 그 대본을 보고 있을 때만 — 보는 칸의 DTO 로 보낸다(다른 대본을 보는 화면을 덮지 않게 · v0.9.23).
+  const _mst = WORLD.store();
+  const _vw = _mst ? _makeViewed(_mst) : WORLD.isViewed();
+  try { if (win && !win.isDestroyed() && S.parsed && _vw) { const d = _mst ? WORLD.run('longform', currentDTO) : currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
 // 중단·종료 시 '생성 중' 스피너 고착 해제 — 어느 엔진 경로든(comfy 순차·genspark 배치·flow) 실제로 만들다 만 그룹의
@@ -6879,7 +6907,7 @@ function writeSnapshotSync(ctx) {
 }
 // 자동저장 타이머는 세계마다 따로 — 한 벌이면 롱폼 제작이 1초마다 예약하는 동안 출판 쪽 예약이 계속 밀리거나 엉뚱한 세계 것을 저장한다.
 const _asWorlds = { longform: { t: null, since: 0 }, book: { t: null, since: 0 } };
-function _asW() { return _asWorlds[WORLD.key()]; }
+function _asW() { const st = WORLD.store(); if (st && st.as) return st.as; return _asWorlds[WORLD.key()]; }   // 🎬 제작 칸은 자기 타이머
 // 💾 대본(.md)을 고친 **바로 그 순간** 작업본도 함께 쓴다(2026-09-30 로이 「자막 수정하면 이미지·비디오가 사라진다」).
 //   .md 는 즉시 바뀌는데 작업본 저장은 1.5~8초 늦다 — 그 사이에 대본이 다시 읽히면(큐에서 다른 대본을 골랐다 돌아옴 · 앱을 바로 끔 · 다시 열기)
 //   작업본의 옛 문장과 .md 의 새 문장이 달라 「내용이 바뀐 그룹」으로 보고 **그림·영상을 되살리지 않았다**. 앱 안 수정은 늘 즉시 맞춘다.
@@ -6895,13 +6923,18 @@ function scheduleAutoSave() {
   if (!A.since) A.since = now;
   if (A.t) clearTimeout(A.t);
   const wait = (now - A.since > 8000) ? 0 : 1500; // 최대 8초 안에는 무조건 기록(연속변경 기아 방지)
-  A.t = setTimeout(() => WORLD.run(wk, flushAutoSave), wait);   // 예약한 세계에서 저장(타이머가 세계를 잃지 않게 명시)
+  A.t = setTimeout(WORLD.store() ? WORLD.bindNow(flushAutoSave) : () => WORLD.run(wk, flushAutoSave), wait);   // 예약한 세계(제작 칸 포함)에서 저장(타이머가 세계를 잃지 않게 명시)
 }
 function flushAutoSave() {
   const A = _asW();
   if (A.t) { clearTimeout(A.t); A.t = null; }
   A.since = 0;
-  const f = writeSnapshotSync();
+  // 🎬 제작 칸: 그 대본을 화면이 보고 있으면 보는 칸이 정본(사람이 고친 것이 이긴다) — 보는 칸으로 저장. 아니면 그 항목으로 저장.
+  const mst = WORLD.store();
+  if (mst && mst.item) { if (_makeViewed(mst)) return WORLD.run('longform', flushAutoSave); }
+  const f = mst && mst.item
+    ? writeSnapshotSync({ parsed: mst.item.parsed, scriptPath: mst.item.scriptPath, outRoot: mst.item.outRoot })
+    : writeSnapshotSync();
   writeWorkspace(); // 큐 구성(목록/설정/상태)도 함께 저장
   if (f && win && !win.isDestroyed()) { try { win.webContents.send('autosaved', { file: f, at: Date.now() }); } catch {} }
 }
@@ -7856,8 +7889,9 @@ ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', 
   _mp4DupAll = null;   // 단건 제작은 항상 새로 묻는다
   _mkQueuePos = null;  // 📊 단건 — 진행 팝업에 큐 순번을 달지 않는다
   // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
-  await runMakeAllCore({ ...args, openVrew: args.openVrew !== false });
-  return P.toDTO(S.parsed);
+  // 🎬 제작 칸에서 — 만드는 동안 다른 대본을 열어 고쳐도 이 제작은 이 대본만 본다(v0.9.23)
+  await makeRun(activeItem(), () => runMakeAllCore({ ...args, openVrew: args.openVrew !== false }));
+  return S.parsed ? P.toDTO(S.parsed) : null;   // 응답 = 지금 화면이 보는 대본(제작 대본이 아닐 수 있다)
 }));
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
@@ -7890,10 +7924,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     // 이미 완료(done)된 항목은 건너뜀 — 다시 만들지 않고 .vrew 도 다시 열지 않음(필요하면 vrew 버튼으로 열기).
     //   활성 전환(무거운 대본 재렌더)·vrew 재열기를 안 하므로 만들기 눌렀을 때 멈춤도 크게 줄어듦.
     if (it.status === 'done') { skipN++; log(`⏭ [${i + 1}/${plan.length}] 이미 완료 — 건너뜀: ${path.basename(it.scriptPath || '') || it.id}`); continue; }
-    q.activeId = it.id; syncActiveToS();
-    if (!S.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
+    // 🎬 화면(activeId)은 바꾸지 않는다 — 이 대본은 제작 칸(makeRun)에서 만들고, 사람은 다른 대본을 보고 고칠 수 있다(v0.9.23 · 로이 2026-10-15)
+    if (!it.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
     it.status = 'running'; pushDtoUpdate();
-    const label = (S.parsed.fileTitle) || (it.scriptPath || '');
+    const label = (it.parsed.fileTitle) || (it.scriptPath || '');
     log(`▶ [${i + 1}/${plan.length}] 롱폼 · ${label}`);
     _mkQueuePos = { idx: i + 1, total: plan.length };
     // 항목 설정은 **서버쪽 it.settings(진짜 최신)** 우선 — 렌더러 plan(entry.settings)은 디바운스 저장이
@@ -7913,9 +7947,9 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       const _pn = s.presetName || common.presetName || null;
       if (!s.presetName && common.presetName) log(`  ⓘ 이 대본에 채널이 저장돼 있지 않아 헤더 채널 「${common.presetName}」 을 씁니다`);
       if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
-      const _rg = _itemRange(s, S.parsed);
+      const _rg = _itemRange(s, it.parsed);
       if (ve !== 'none') log(`  🎬 영상 범위 G${_rg.fromNum}~G${_rg.toNum} (${_rg.src})`);
-      await runMakeAllCore({
+      await makeRun(it, () => runMakeAllCore({   // 🎬 제작 칸 — 화면은 사람이 고른 대본에 그대로 둔다
         engine: ie, presetName: _pn,
         speed: (s.ttsSpeed != null ? s.ttsSpeed : (common.ttsSpeed != null ? common.ttsSpeed : null)),
         // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
@@ -7932,10 +7966,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         outMode: (common.outMode != null ? common.outMode : (s.outMode || 'full')),
         // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
         outTarget: (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew')),
-        dry: false, openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음
+        dry: !!(process.env.PM_UI_SMOKE && common.dry), openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음 · dry(무음)는 E2E 전용(test:makeview)
         uploadAfter: (common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null,   // ⬆ 헤더 「완성 후 업로드」
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
-      });
+      }));
       it.status = 'done'; okN++;
     } catch (e) {
       it.status = 'failed'; failN++;

@@ -30,7 +30,7 @@ const RB = MAIN.slice(rb0, rb1 > rb0 ? rb1 : rb0 + 12000);
 const iAbort = RB.indexOf('if (S.abort) {');
 const iStop = RB.indexOf('if (_stopAfterItem)');
 const iStore = RB.indexOf('storeActive();');
-const iRun = RB.indexOf('await runMakeAllCore(');
+const iRun = RB.indexOf('runMakeAllCore(');   // 🎬 v0.9.23: await makeRun(it, () => runMakeAllCore(…))
 ok(iAbort > 0 && iStop > iAbort, '■ 중단 검사 다음에 이번 편까지만 검사');
 ok(iStore > iStop && iRun > iStop, '다음 대본을 시작(storeActive·runMakeAllCore)하기 **전에** 검사한다 — 만들던 대본은 끝까지');
 ok(/_stopAfterItem = false;\s*\/\/[^\n]*\n\s*log\(`⚡⚡ 큐 순차 제작 시작/.test(RB), '큐 시작 때 지난 예약을 푼다');
@@ -62,7 +62,7 @@ const rbAll = APP.slice(APP.indexOf('async function runBatchAll'), APP.indexOf('
 ok(/setQueueBusy\(true\)/.test(rbAll) && /finally \{[^}]*setQueueBusy\(false\)/.test(rbAll), 'runBatchAll: 시작에 busy, finally 에서 해제(오류여도 버튼이 남지 않음)');
 ok(/r\.stoppedEarly/.test(rbAll) && /r\.remaining/.test(rbAll), 'runBatchAll: 멈춘 경우 남은 편수를 상태줄에 보인다');
 const sq = APP.slice(APP.indexOf('async function runStageQueue'), APP.indexOf('// 대본 위 통합 버튼'));
-const jq = sq.indexOf('if (queueAbortRef.current) { logline'), jt = sq.indexOf('if (queueStopAfterRef.current)'), jr = sq.indexOf('await api.selectQueueItem(it.id');
+const jq = sq.indexOf('if (queueAbortRef.current) { logline'), jt = sq.indexOf('if (queueStopAfterRef.current)'), jr = sq.indexOf('await api.ttsBuild({ __item: it.id');   // 🎬 v0.9.23: 화면을 옮기지 않고 __item 으로
 ok(jq > 0 && jt > jq && jr > jt, 'runStageQueue: 항목을 시작하기 전에 예약을 본다(■ 검사 다음)');
 ok(/stoppedAfter \|\| queueAbortRef|queueAbortRef\.current \|\| stoppedAfter/.test(sq), 'runStageQueue: 두 단계(이미지→비디오)도 한 번에 빠져나간다');
 ok(/setQueueBusy\(false\)/.test(sq), 'runStageQueue: 끝나면 busy 해제');

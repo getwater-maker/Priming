@@ -28,9 +28,9 @@ ok(/도입부/.test(_itemRange({}, P([1])).src), '출처 문구가 붙는다');
 
 console.log('[2] 배선');
 ok(!/_batchRange/.test(MAIN), '헤더 우선 _batchRange 가 사라졌다');
-ok(/const _rg = _itemRange\(s, S\.parsed\)/.test(MAIN) && /fromNum: _rg\.fromNum, toNum: _rg\.toNum/.test(MAIN), '⚡ 만들기(run-batch)가 대본마다 _itemRange');
+ok(/const _rg = _itemRange\(s, it\.parsed\)/.test(MAIN) && /fromNum: _rg\.fromNum, toNum: _rg\.toNum/.test(MAIN), '⚡ 만들기(run-batch)가 대본마다 _itemRange');
 ok(/if \(args\.perItem\) \{[\s\S]{0,200}_itemRange\(\(_it && _it\.settings\) \|\| \{\}, S\.parsed\)/.test(MAIN), 'video-build perItem = 활성 대본 설정으로');
-ok(/videoBuild\(\{ shortsNum: null, perItem: true/.test(APP), '상단 🎬(큐 전체)가 perItem 으로 부른다');
+ok(/videoBuild\(\{ __item: it\.id, shortsNum: null, perItem: true/.test(APP), '상단 🎬(큐 전체)가 perItem 으로 부른다');
 ok(!/common: \{[^}]*vidFrom/.test(APP), 'runBatch common 에 헤더 범위를 싣지 않는다');
 const rb = APP.slice(APP.indexOf('async function runBatchAll'), APP.indexOf('api.runBatch('));
 ok(/setQueueSettings\(currentSettings\(\), true\)/.test(rb), '만들기 전에 지금 대본의 헤더 범위를 먼저 저장');
