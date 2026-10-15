@@ -62,6 +62,11 @@ console.log('▸ 🧥 노출 방지(v0.6.96) — 인물 장면엔 옷차림 긍�
   const pm = P.buildImagePrompt(W, people[0]);
   check('🔑 긍정 서술 — 부정문(no nudity 류)을 넣지 않는다(Krea2 는 부정문을 듣지 않고 낱말을 켤 수 있다)', !/\bno (?:nud|naked|topless|bare)/i.test(pm) && /, everyone fully clothed in modest garments that cover the chest and torso, plain unmarked/.test(pm), pm.slice(0, 160));
   check('여전히 마침표로 끝난다', /[.!?]$/.test(pm));
+  // 🚫 v0.9.22 — 「no people」의 people 을 인물로 읽어 옷차림 문장이 붙었고 Qwen 이 사람을 그려 넣었다(1016 G1)
+  const neg = ['an old book on a low wooden desk, an oil lamp, calm and warm, no people', 'an empty road without any people', 'a quiet lake, no human figures', 'nobody around, a desk by the window', '사람 없는 빈 방'];
+  check('🔑 「사람 없음」 표현 5개 = 붙이지 않는다', neg.every((b) => !P.buildImagePrompt(W, b).includes(P.POS_MODEST)), neg.filter((b) => P.buildImagePrompt(W, b).includes(P.POS_MODEST)).join(' | '));
+  const mixed = ['a man reading by the lamp, no people in the background', 'no text, a girl smiling'];
+  check('🔑 부정 토막 말고 다른 인물이 있으면 그대로 붙인다', mixed.every((b) => P.buildImagePrompt(W, b).includes(P.POS_MODEST)));
   const PIO = require('../core/prompt-io');
   const fakePr = { shortsNum: 1, aspect: '16:9', groups: [{ num: 1 }], getSentencesOfGroup: () => [{ text: '마을 사람들이 조개를 모았습니다.' }] };
   const req = PIO.buildPromptRequestText([fakePr]);

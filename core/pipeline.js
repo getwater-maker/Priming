@@ -736,8 +736,15 @@ const POS_CLEAN = 'plain unmarked surfaces, clean blank walls';
 //   남자도 상의를 입는다(사극·선사 장면의 역사성보다 채널 안전이 먼저 — 로이 2026-10-05 확정).
 const POS_MODEST = 'everyone fully clothed in modest garments that cover the chest and torso';
 const PERSON_RE = /\b(?:people|persons?|man|men|woman|women|girls?|boys?|child(?:ren)?|kids?|bab(?:y|ies)|toddlers?|teen(?:ager)?s?|villagers?|figures?|crowds?|famil(?:y|ies)|mothers?|fathers?|daughters?|sons?|wi(?:fe|ves)|husbands?|kings?|queens?|princes?|princess(?:es)?|emperors?|empress|soldiers?|warriors?|hunters?|gatherers?|farmers?|fishermen|fisherman|monks?|nuns?|priests?|shamans?|merchants?|elders?|youths?|lad(?:y|ies)|maidens?|tribes(?:men|people)?|tribal|couples?|lovers?|brides?|grooms?|servants?|maids?|nobles?|scholars?|officials?|ministers?|generals?|guards?|peasants?|workers?|dancers?|singers?|students?|teachers?|doctors?|grandmothers?|grandfathers?|grandparents?|siblings?|brothers?|sisters?|friends?|strangers?|travell?ers?|pilgrims?|citizens?|residents?|humans?|portraits?|faces?|he|she|his|her|hers|someone|everyone|anyone)\b|사람|남자|여자|남성|여성|아이|어린이|소녀|소년|아기|노인|할머니|할아버지|어머니|아버지|아낙|주민|백성|무리|가족|인물|왕|왕비|공주|병사|군사|사냥꾼|농부|스님|상인|선비|신하|궁녀|부부|형제|자매/i;
+// 🚫 「사람이 없다」는 표현(no people · without figures · 사람 없는)은 인물 장면이 아니다(v0.9.22 · 1016 G1 — 「…, no people」에 옷차림 문장이
+//   붙어 Qwen 이 기모노 여인을 그려 넣었고, 사람 없는 🎬 영상과 그림이 어긋났다). 판정 전에 이 토막만 지운다 — 다른 인물 낱말은 그대로 본다.
+const PERSON_NEG_RE = new RegExp(
+  '\\b(?:no|without|free of|devoid of|empty of|absence of|not a single|not any|zero)\\s+(?:(?:any|other|visible|human|living|single)\\s+)*'
+  + '(?:' + PERSON_RE.source.split('|사람')[0].replace(/^\\b\(\?:/, '').replace(/\)\\b$/, '') + ')\\b'
+  + '|\\b(?:nobody|no one|unpeopled|people-free|deserted of people)\\b'
+  + '|(?:사람|인물|사람들|인적)(?:은|이|도)?\\s*(?:하나\\s*)?(?:없|안\\s*보)', 'gi');
 /** 이 장면에 사람이 나오는가 — 나오면 옷차림 긍정 문장을 붙인다(대본 프롬프트·화풍 모두 본다) */
-function modestyClause(style, body) { return PERSON_RE.test(`${style || ''} ${body || ''}`) ? POS_MODEST : ''; }
+function modestyClause(style, body) { return PERSON_RE.test(`${style || ''} ${body || ''}`.replace(PERSON_NEG_RE, ' ')) ? POS_MODEST : ''; }
 
 /**
  * 프롬프트의 부정 절(`no X` / `not X` / `without X`)을 **모두 맨 끝으로 모으고 중복을 없앤다.**

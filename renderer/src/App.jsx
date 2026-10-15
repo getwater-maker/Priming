@@ -5211,10 +5211,11 @@ export default function App() {
     const PL = linesMap.get(pr.shortsNum); if (!PL) return null;
     const curL = cursor && cursor.shortsNum === pr.shortsNum ? PL.list.find((x) => x.n === cursor.n) : null;
     let acc = 0; const rows = [];
+    // 🎬 썸네일은 ① 칸·② 클립 칸과 같은 기준 — 영상이 있으면 영상의 한 장면(v0.9.22 · 로이 — 그룹 칸만 그림을 보여 어긋났다)
     for (const c of pr.cuts) {
       const sents = c.sentences || []; const t0 = acc; for (const se of sents) acc += se.dur > 0 ? se.dur : 2.5;
       const lines = PL.list.filter((x) => x.groupNum === c.num);
-      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, intro: !!c.isIntro, title: c.phase || '', vid: !!c.videoPath, img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
+      rows.push({ num: c.num, text: String((sents[0] && sents[0].text) || '').trim(), n: lines.length, lines, first: lines[0] || null, t0, dur: acc - t0, intro: !!c.isIntro, title: c.phase || '', vid: !!c.videoPath, vidFile: c.videoPath || null, vidVer: c.videoVersion, img: c.imagePath ? media(c.imagePath, c.imageVersion) : null });
     }
     const go = (r) => {
       if (!r.first) return;
@@ -5258,7 +5259,7 @@ export default function App() {
             <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
             <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)} onDoubleClick={() => renameGroup(pr.shortsNum, r.num)} title="누르면 그 그룹으로 · 더블클릭 = 그룹 이름 바꾸기">
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
-              <span className="pg-thumb">{r.img ? <img src={r.img} alt="" draggable={false} /> : <em>{r.vid ? '🎬 영상만 있음' : '그림 없음'}</em>}<b>{r.text}</b></span>
+              <span className="pg-thumb">{r.vidFile ? <FrameImg file={r.vidFile} version={r.vidVer} t={0.5} fit="contain" /> : r.img ? <img src={r.img} alt="" draggable={false} /> : <em>{r.vid ? '🎬 영상만 있음' : '그림 없음'}</em>}<b>{r.text}</b></span>
               <span className="pg-meta">{mmss(r.t0)} + {Math.round(r.dur)}초 · 클립 {r.n}</span>
             </button>
           </div>
