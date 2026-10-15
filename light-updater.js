@@ -141,7 +141,7 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
           type: 'info', buttons: ['확인'], defaultId: 0,
           title: '업데이트 — 재설치 필요',
           message: `새 버전(${manifest.version})은 구성요소가 변경되어 설치파일 재설치가 필요합니다.`,
-          detail: 'GitHub Releases 에서 최신 설치파일을 받아 설치해 주세요.\n(이번 실행은 현재 버전으로 계속됩니다.)',
+          detail: 'primingwave.com 에서 최신 설치파일을 받아 설치해 주세요.\n(이번 실행은 현재 버전으로 계속됩니다.)',   // 🔐 저장소 비공개 뒤엔 회원이 GitHub 에 갈 수 없다(v0.9.27)
         });
       } catch (_) {}
     });

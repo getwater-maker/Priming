@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
       SRV.licenseCalls++;
       if (who === 'nomember@test') return send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'full@test') return send(200, { ok: false, member: true, reason: 'device_limit', device_limit: 2, devices: [{ device_id: 'aaaaaaaa1', name: '집PC' }, { device_id: 'bbbbbbbb2', name: '회사PC' }] });
+      if (who === 'admin@test') return send(200, { ok: true, member: true, admin: true, expires_at: null, device_limit: null, devices: [] });
       if (who === 'good@test') return send(200, { ok: true, member: true, admin: false, expires_at: '2099-12-31T00:00:00Z', device_limit: 2, devices: [{ device_id: j.p_device_id, name: j.p_device_name, last_seen: '2026-10-15T00:00:00Z' }] });
       return send(401, { msg: 'jwt' });
     }
@@ -83,6 +84,12 @@ async function launch() {
     ok(!sess.toString('latin1').includes('A:good@test') && !sess.toString('latin1').includes('R:good@test'), '🔐 토큰은 암호화 저장(파일에 평문 없음)');
     const st = await A.win.evaluate(() => window.api.licenseState());
     ok(st.email === 'good@test' && !('access' in st) && !JSON.stringify(st).includes('A:good'), '화면으로 오는 상태에 토큰이 없다');
+    // 👑 로이 전용(v0.9.27) — 일반 회원은 owner=false · 관리자는 true · GPU 온도 기록·팝업은 isOwner() 뒤에서만
+    ok(st.owner === false, '👑 일반 회원 = owner false(로이 전용 기능·안내 숨김)');
+    { const M = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+      ok(/_awake\.n === 1 && isOwner\(\)\) \{ try \{ require\('\.\/core\/gpu-temp'\)\.startSampling/.test(M) && /if \(!isOwner\(\)\) throw 0;[^\n]*\n\s*const GT = require\('\.\/core\/gpu-temp'\)/.test(M), '👑 GPU 온도 기록·요약 팝업은 로이 PC 에서만(소스)');
+      const APP = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8');
+      ok(!/100\.112\.\d+\.\d+|192\.168\.219\.\d+/.test(APP) && /\{owner && <Hint>☁ 이 채널의 화풍은/.test(APP), '👑 화면에 로이 PC 주소가 없고 아도나이로이 안내는 owner 일 때만(소스)'); }
 
     // ⑦ 오류 자동 전송 — 지운 뒤 보낸다
     await A.win.evaluate(() => window.api.appendLog('✗ 시험 오류 — 키 sk-ant-AbCdEfGhIjKlMnOpQrSt 메일 roy@example.com 폴더 C:\\Users\\홍길동\\x'));
@@ -123,6 +130,13 @@ async function launch() {
     await A.win.reload();
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
     ok(!fs.existsSync(path.join(LDIR, 'session.bin')), '⑧ 로그아웃 → 관문 · 세션 파일 삭제');
+    // 👑 관리자 계정 = owner true
+    await A.win.fill('[data-testid="license-email"]', 'admin@test');
+    await A.win.fill('[data-testid="license-password"]', 'pw-test-1');
+    await A.win.click('[data-testid="license-login"]');
+    await A.win.waitForSelector('[data-testid="app-title"]', { timeout: 15000 });
+    const ad = await A.win.evaluate(() => window.api.licenseState());
+    ok(ad.owner === true && ad.admin === true, '👑 관리자 = owner true');
     ok(errs.length === 0, '화면 오류 0건' + (errs.length ? ': ' + errs[0] : ''));
   } finally {
     try { if (A) await A.app.close(); } catch (_) {}

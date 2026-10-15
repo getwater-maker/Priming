@@ -598,6 +598,9 @@ export default function App() {
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v LTX) 설정
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
+  // 👑 로이(관리자) PC 인가(v0.9.27) — 로이 전용 안내(아도나이로이 대시보드 등)는 회원 화면에 보이지 않게 · 개발 실행·E2E 는 로이 PC
+  const [owner, setOwner] = useState(true);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
   const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt' | 'folders'(📁 공통 폴더 · v0.9.16)  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
   const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
@@ -3393,7 +3396,7 @@ export default function App() {
     try {
       const st = await api.qwenDesignStatus();
       if (!st || !st.installed) {
-        setVdStatus('⚠ 이 PC 에는 보이스디자인이 설치돼 있지 않습니다.\n⚙ 설정 → 🖧 TTS 서버 의 「보이스디자인」 칸에 메인 PC 주소(예: http://100.112.7.63:9893)를 넣으면 원격으로 쓸 수 있습니다.');
+        setVdStatus('⚠ 이 PC 에는 보이스디자인이 설치돼 있지 않습니다.\n⚙ 설정 → 🖧 TTS 서버 의 「보이스디자인」 칸에 메인 PC 주소(예: http://서버PC주소:9893)를 넣으면 원격으로 쓸 수 있습니다.');
         setVdPreparing(false); return;
       }
       setVdStatus(st.remote
@@ -6529,7 +6532,7 @@ export default function App() {
                     <option value="">— 롱폼과 같게 —</option>
                     {chStyles.map((s2) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
                   </select></div>
-                <Hint>☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</Hint>
+                {owner && <Hint>☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</Hint>}
 
                 <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
                 <div className="twocol">
@@ -7306,12 +7309,12 @@ export default function App() {
                 <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
               </Hint>
               <div className="frow"><label>OmniVoice</label>
-                <input style={{ flex: 1 }} placeholder="http://192.168.219.157:9881" value={ttsSrv.omnivoice.baseUrl}
+                <input style={{ flex: 1 }} placeholder="http://서버PC주소:9881 (이 PC 면 비워 둠 = 127.0.0.1)" value={ttsSrv.omnivoice.baseUrl}
                   onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
               {/* 보이스디자인(Qwen3-TTS) — 비우면 이 PC 에서 직접 실행, 주소를 넣으면 그 PC(메인 GPU)의 서버를 사용 */}
               <div className="frow"><label>보이스디자인</label>
-                <input style={{ flex: 1 }} placeholder="비우면 이 PC 에서 실행 · 다른 PC 면 http://100.112.7.63:9893"
+                <input style={{ flex: 1 }} placeholder="비우면 이 PC 에서 실행 · 다른 PC 면 http://서버PC주소:9893"
                   value={vdSrv} onChange={(e) => setVdSrv(e.target.value)} onBlur={saveVdSrv} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={testVdSrv}>연결테스트</button></div>
               <Hint>보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.

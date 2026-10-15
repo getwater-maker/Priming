@@ -140,6 +140,8 @@ const LIC = {
 const LIC_OPEN = new Set(['license-state', 'license-login', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
 function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
+// 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
+function isOwner() { return !LIC.enforce || !!(LIC.state && LIC.state.ok && LIC.state.admin); }
 {
   const orig = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (ch, fn) => orig(ch, (e, ...a) => {
@@ -450,6 +452,7 @@ app.whenReady().then(() => {
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
       //   로이가 잊어도 앱이 먼저 말한다(2026-08-22 요청: "몇 주 데이터가 쌓이면 나에게도 알려줘").
       try {
+        if (!isOwner()) throw 0;   // 👑 로이 전용(회원 PC 에선 기록·팝업 없음)
         const GT = require('./core/gpu-temp');
         GT.cleanupOld();
         await GT.maybeReport({
@@ -597,7 +600,7 @@ function awakeAcquire(label = '') {
     catch (e) { _awake.id = null; }
   }
   // 🌡 작업이 도는 동안만 GPU 온도를 기록(60초 간격, 비동기 nvidia-smi) — 장시간 큐의 열 데이터 축적(2026-08-22).
-  if (_awake.n === 1) { try { require('./core/gpu-temp').startSampling(log); } catch {} }
+  if (_awake.n === 1 && isOwner()) { try { require('./core/gpu-temp').startSampling(log); } catch {} }   // 👑 로이 전용
 }
 function awakeRelease() {
   _awake.n = Math.max(0, _awake.n - 1);
@@ -11672,7 +11675,7 @@ function licPublic(s) {
   return { enforced: LIC.enforce, ok: licOk(), member: !!s.ok, admin: !!s.admin, email: s.email || '', expiresAt: s.expiresAt || null,
     reason: s.reason || null, offline: !!s.offline, graceUntil: s.graceUntil || null, deviceLimit: s.deviceLimit == null ? null : s.deviceLimit,
     devices: (s.devices || []).map((d) => ({ name: d.name || '', lastSeen: d.last_seen || null, me: d.device_id === (LIC.L ? LIC.L.deviceId() : '') })),
-    autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, site: require('./core/license').SITE_DEVICES };
+    autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, owner: isOwner(), site: require('./core/license').SITE_DEVICES };
 }
 async function licCheck(why) {
   const s = await licApi().check();
