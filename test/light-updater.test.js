@@ -1,4 +1,5 @@
 'use strict';
+process.env.PM_UPDATER_LOG = '0';   // 업데이터 줄이 로이 PC 의 진짜 로그 파일에 쓰이지 않게
 /**
  * node test/light-updater.test.js — 라이트 업데이터 두 단계(전부 받아 검증 → 그 뒤에만 교체) — 가짜 서버로
  *   2026-10-06 사고 재현: 발행 직후 서버가 **이미 있던 파일은 옛 내용**, 새 파일(렌더러 asset)만 새 내용을 준다.

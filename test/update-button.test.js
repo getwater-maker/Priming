@@ -1,4 +1,5 @@
 'use strict';
+process.env.PM_UPDATER_LOG = '0';   // 업데이터 줄이 로이 PC 의 진짜 로그 파일에 쓰이지 않게
 /**
  * node test/update-button.test.js — 🔄 헤더 「업데이트」 단추 + 🌐 앱 이름 → www.primingwave.com (2026-10-06 로이)
  *   · core/update-check.evaluate — 새 버전/같음/서버가 낮음/구성요소 변경/읽기 실패

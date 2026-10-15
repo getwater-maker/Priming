@@ -82,6 +82,9 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .cuts-grid.lf{grid-template-columns:1fr 1fr;gap:4px 18px}
 /* 컷 = 썸네일 + 문장 (롱폼 16:9 큰 썸네일 320×180) */
 .cut{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 0;border-top:1px dashed var(--line);align-items:start}
+/* ⚡ 화면 밖 그룹은 배치·그리기를 건너뛴다(v0.9.28 · 1,800문장 대본 큐 전환 2.8초 → 0.9초) — auto = 한 번 그린 높이를 기억해 스크롤이 튀지 않는다.
+   🔴 화면 밖 그룹 안의 위치를 재면(getBoundingClientRect) 이 효과가 사라진다 — 레일처럼 「화면 근처만」 잴 것. */
+.cut{content-visibility:auto;contain-intrinsic-size:auto 420px}
 .cut.lf{grid-template-columns:320px 1fr}
 .thumb{width:150px;height:264px;border-radius:9px;object-fit:contain;background:#1a1714;border:1px solid var(--line);
   cursor:pointer;display:block}

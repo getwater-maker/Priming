@@ -34,7 +34,19 @@ const REPOS = ['Priming'];
 const BRANCH = 'main';
 const rawBase = (repo) => `https://raw.githubusercontent.com/${OWNER}/${repo}/${BRANCH}/`;
 
-function log(m) { try { process.stdout.write(`[updater] ${m}\n`); } catch (_) {} }
+// 📝 업데이터 줄도 그날 앱 로그 파일(~/.shots-maker/logs/YYYY-MM-DD.log · KST)에 남긴다(v0.9.29) — main 보다 먼저 돌아
+//   콘솔에만 찍혀서 「회원 경로로 받았는지」를 로그 창 📁 파일로 확인할 수 없었다. 시험은 PM_UPDATER_LOG=0 으로 끈다.
+function log(m) {
+  try { process.stdout.write(`[updater] ${m}\n`); } catch (_) {}
+  if (process.env.PM_UPDATER_LOG === '0') return;
+  try {
+    const os = require('os');
+    const k = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
+    const dir = path.join(os.homedir(), '.shots-maker', 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, k.slice(0, 10) + '.log'), `[${k.slice(11, 19)}] ⟳ 업데이트 — ${m}\n`);
+  } catch (_) {}
+}
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
 
 // 텍스트는 CRLF→LF 정규화 후 해시 (gen-manifest 와 동일 규칙) — 설치파일이 CRLF 로 패키징돼도

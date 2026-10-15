@@ -1,4 +1,5 @@
 'use strict';
+process.env.PM_UPDATER_LOG = '0';   // 업데이터 줄이 로이 PC 의 진짜 로그 파일에 쓰이지 않게
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');

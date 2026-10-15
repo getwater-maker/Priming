@@ -1103,6 +1103,8 @@ export default function App() {
   }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   async function selectQueueItem(id) {
+    // 👆 누른 칩을 먼저 「선택됨」으로(v0.9.28) — 큰 대본은 화면을 다시 그리는 데 1초 안팎 걸려, 그동안 눌렸는지 모르고 또 누르게 된다
+    setQueue((q) => (q && q[mode] ? { ...q, [mode]: { ...q[mode], activeId: id, items: q[mode].items.map((x) => ({ ...x, active: x.id === id })) } } : q));
     try {
       const r = await api.selectQueueItem(id);
       if (r.queue) setQueue(r.queue);
@@ -8442,11 +8444,16 @@ function RailLayer({ pr, drag, pending, onGrab }) {
     const grid = layer.parentElement; if (!grid) return;
     const G = grid.getBoundingClientRect(); const sn = pr.shortsNum;
     const blk = new Map(); grid.querySelectorAll(`.sblk[data-sn="${sn}"]`).forEach((e) => blk.set(e.getAttribute('data-ord'), e));
-    const sentsOf = new Map(); grid.querySelectorAll(`.cut[data-sn="${sn}"]`).forEach((e) => sentsOf.set(e.getAttribute('data-g'), e.querySelector('.sents')));
+    const sentsOf = new Map(); const cutEl = new Map();
+    grid.querySelectorAll(`.cut[data-sn="${sn}"]`).forEach((e) => { sentsOf.set(e.getAttribute('data-g'), e.querySelector('.sents')); cutEl.set(e.getAttribute('data-g'), e); });
+    // ⚡ 화면 근처(위아래 1.5화면) 그룹만 잰다(v0.9.28) — 화면 밖 그룹은 CSS content-visibility 로 배치를 건너뛰는데,
+    //   그 안의 클립 위치를 재면 브라우저가 그 그룹을 억지로 배치한다(1,800문장 대본에서 큐 전환 2.8초 → 0.9초 · 화면 밖 선은 안 보이므로 그리지 않는다).
+    const vh = window.innerHeight || 900, near = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.bottom > -1.5 * vh && r.top < 2.5 * vh; };
     const out = []; let o = 0;
     for (const c of pr.cuts) {
       const n = (c.sentences || []).length; const gs = o + 1, ge = o + n; o = ge;
       if (!n) continue;
+      if (!near(cutEl.get(String(c.num)))) continue;
       const d = drag && drag.groupNum === c.num ? vrRangeOf(drag) : (pending && pending.groupNum === c.num ? pending : null);
       const r = d || c.span || { from: gs, to: ge };
       const a = blockRect(grid, sn, r.from, false, blk), b = blockRect(grid, sn, r.to, true, blk);
@@ -8459,11 +8466,15 @@ function RailLayer({ pr, drag, pending, onGrab }) {
     setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
   };
   useLayoutEffect(measure);
+  const measureRef = useRef(measure); measureRef.current = measure;   // 스크롤·크기 변경은 늘 지금 그린 것(대본·끌기 상태)으로 잰다
   useEffect(() => {
     const grid = ref.current && ref.current.parentElement;
     if (!grid || typeof ResizeObserver === 'undefined') return undefined;
-    const ro = new ResizeObserver(() => measure()); ro.observe(grid);
-    return () => ro.disconnect();
+    const ro = new ResizeObserver(() => measureRef.current()); ro.observe(grid);
+    // 스크롤하면 새로 화면에 들어온 그룹의 선을 잰다(한 프레임에 한 번)
+    let raf = 0; const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; measureRef.current(); }); };
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => { ro.disconnect(); window.removeEventListener('scroll', onScroll, { capture: true }); if (raf) cancelAnimationFrame(raf); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
