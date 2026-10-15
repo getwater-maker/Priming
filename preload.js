@@ -171,6 +171,14 @@ contextBridge.exposeInMainWorld('api', {
   getAppFolders: () => ipcRenderer.invoke('get-app-folders'),
   saveAppFolders: (patch) => ipcRenderer.invoke('save-app-folders', patch),
   listThumbs: () => ipcRenderer.invoke('list-thumbs'),   // 🖼 로그 상자 썸네일 탭(v0.9.24)
+  // 🔐 회원(v0.9.25) — 토큰은 main 에만(화면엔 이메일·상태만)
+  licenseState: () => ipcRenderer.invoke('license-state'),
+  licenseRecheck: () => ipcRenderer.invoke('license-recheck'),
+  licenseLogin: (email, password) => ipcRenderer.invoke('license-login', { email, password }),
+  licenseLogout: () => ipcRenderer.invoke('license-logout'),
+  licenseSetAutoLog: (on) => ipcRenderer.invoke('license-set-autolog', on),
+  licenseReport: (text) => ipcRenderer.invoke('license-report', { text }),
+  licenseOpenSite: () => ipcRenderer.invoke('license-open-site'),
   saveProject: () => ipcRenderer.invoke('save-project'),
   loadProject: () => ipcRenderer.invoke('load-project'),
   listQueue: () => ipcRenderer.invoke('list-queue'),

@@ -1383,3 +1383,16 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .sent.clip .card-slot .card-mark{display:flex;flex-direction:column;align-items:center;min-width:30px;padding:2px 3px;border:1px solid #d9a441;border-radius:7px;background:#fff6e0;color:#7a4b00;font-size:10px;line-height:1.25;white-space:nowrap;cursor:help;box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .sent.clip .card-slot .card-mark.cont{border-style:dashed;box-shadow:none;background:#fffbf1}
 .card-mark.cont .cm-ic{opacity:.5}
+
+/* 🔐 회원 로그인 관문(v0.9.25 · LicenseGate.jsx) */
+.licgate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg,#f6f1e8);z-index:1000}
+.liccard{width:380px;max-width:calc(100vw - 32px);background:#fffdf9;border:1px solid #e2d5c0;border-radius:14px;padding:26px 26px 18px;box-shadow:0 10px 30px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:10px}
+.liccard h2{margin:0 0 2px;font-size:19px}
+.liccard input{padding:9px 11px;font-size:14px;border:1px solid #d9cbb3;border-radius:8px}
+.liccard button{padding:9px 12px;font-size:14px}
+.licsub,.licmsg{margin:0;color:var(--muted,#7a6c58);font-size:13px;line-height:1.5}
+.licerr{margin:0;color:#b4412b;font-size:13px;line-height:1.5;background:#fbece7;border-radius:8px;padding:8px 10px}
+.licdev{margin:0;padding-left:4px;list-style:none;font-size:12.5px;color:#5d5140;line-height:1.7}
+.licrow{display:flex;gap:8px}
+.licrow button{flex:1}
+.licfoot{margin:6px 0 0;font-size:11.5px;color:var(--muted,#7a6c58);line-height:1.55}

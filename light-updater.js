@@ -14,6 +14,7 @@
  *
  * 발행: 코드 변경 후 `npm run update:publish` (vite build + 매니페스트 생성) → git commit + push.
  *   (raw.githubusercontent.com 은 public repo 라 토큰 불필요. CDN 캐시 ~5분.)
+ *   🔐 v0.9.26: 로그인한 회원은 updates.primingwave.com(Worker — 회원 확인 뒤 같은 raw 파일을 전달)에서 받는다(workerSource).
  *
  * dev(`npm start`, app.isPackaged=false)에선 동작 안 함.
  */
@@ -51,18 +52,32 @@ function hashLocal(absPath, rel) {
   return sha1(BINARY_EXT.has(ext) ? buf : normalizeLF(buf));
 }
 
-async function fetchWithTimeout(url, ms, asText) {
+async function fetchWithTimeout(url, ms, asText, headers) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+    const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store', ...(headers ? { headers } : {}) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return asText ? await r.text() : Buffer.from(await r.arrayBuffer());
   } finally { clearTimeout(t); }
 }
 
+// 🔐 회원 업데이트 경로(v0.9.26 · docs/회원제-설계.md §4) — 로그인돼 있으면 회원 확인 Worker(updates.primingwave.com)에서 받는다.
+//   로그인 전·Worker 실패면 옛 경로(raw GitHub — 저장소가 공개인 동안만 된다 · 비공개 뒤엔 로그인한 회원만 업데이트).
+//   safeStorage 는 app ready 뒤에만 쓸 수 있다 — bootstrap 이 이 await 를 기다리는 동안 어차피 ready 가 된다(main.js 는 whenReady 로 받는다).
+async function workerSource() {
+  if (process.env.PM_NO_WORKER_UPDATE) return null;
+  try { await app.whenReady(); return await require('./core/license').forApp().updateSource(); }
+  catch (e) { log('회원 업데이트 경로 준비 실패 — 옛 경로로: ' + (e && e.message)); return null; }
+}
+
 /** 원격 매니페스트만 읽는다(파일은 건드리지 않음) — 「업데이트 확인」 버튼용. 실패하면 null. */
 async function fetchManifest(timeoutMs = 6000) {
+  const W = await workerSource();
+  if (W) {
+    try { const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers)); if (m && m.files && typeof m.files === 'object') return m; }
+    catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); }
+  }
   for (const repo of REPOS) {
     try {
       const txt = await fetchWithTimeout(rawBase(repo) + 'update-manifest.json?t=' + Date.now(), timeoutMs, true);
@@ -85,8 +100,12 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   const appDir = app.getAppPath(); // asar:false → resources/app
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
-  let manifest, RAW_BASE = null, lastErr = '';
-  for (const repo of REPOS) {
+  let manifest, RAW_BASE = null, lastErr = '', W = await workerSource();
+  if (W) {
+    try { manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), manifestTimeoutMs, true, W.headers)); RAW_BASE = 'worker'; log('회원 경로로 업데이트 확인'); }
+    catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); W = null; manifest = undefined; }
+  }
+  for (const repo of (RAW_BASE ? [] : REPOS)) {
     try {
       const base = rawBase(repo);
       const txt = await fetchWithTimeout(base + 'update-manifest.json?t=' + Date.now(), manifestTimeoutMs, true);
@@ -150,7 +169,9 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
     let ok = false;
     for (let attempt = 0; attempt < 2 && !ok; attempt++) {
       try {
-        const buf = await fetchWithTimeout(RAW_BASE + c.rel + (attempt ? '?t=' + Date.now() : ''), fileTimeoutMs, false);
+        const buf = W
+          ? await fetchWithTimeout(W.fileUrl(c.rel, attempt ? Date.now() : 0), fileTimeoutMs, false, W.headers)
+          : await fetchWithTimeout(RAW_BASE + c.rel + (attempt ? '?t=' + Date.now() : ''), fileTimeoutMs, false);
         if (sha1(buf) !== c.want) { log(`해시 불일치(발행 직후 서버 캐시 또는 손상) ${c.rel}${attempt ? '' : ' — 한 번 더'}`); await new Promise((r) => setTimeout(r, 800)); continue; }
         fs.mkdirSync(path.dirname(c.tmp), { recursive: true });
         fs.writeFileSync(c.tmp, buf);

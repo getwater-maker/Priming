@@ -130,6 +130,24 @@ WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ?
   });
 const PIN_ON_CLICK = new Set(['tts-build', 'image-build', 'video-build']);
 
+// ── 🔐 회원 확인(v0.9.26 · 로이 2026-10-15 「결제 회원만 사용」 · docs/회원제-설계.md) ──
+//   설치본에서만 막는다(개발 실행·E2E 는 열림 — PM_LICENSE_FORCE=1 이면 E2E 도 막는다). 화면은 LicenseGate 가 막고,
+//   main 은 로그인 전 IPC 를 LIC_OPEN 밖이면 거부한다(화면을 우회해도 제작이 돌지 않게). 로그인·토큰·확인은 core/license 한 곳.
+const LIC = {
+  enforce: process.env.PM_LICENSE_FORCE === '1' || (app.isPackaged && !process.env.PM_UI_SMOKE),
+  state: null, ready: null, L: null,
+};
+const LIC_OPEN = new Set(['license-state', 'license-login', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
+function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
+function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
+{
+  const orig = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (ch, fn) => orig(ch, (e, ...a) => {
+    if (!LIC_OPEN.has(ch) && !licOk()) throw new Error('로그인이 필요합니다 — Priming 회원으로 로그인하세요.');
+    return fn(e, ...a);
+  });
+}
+
 // ── 🎬 제작 칸 — 「만드는 대본」과 「보는 대본」을 가른다(v0.9.23 · 로이 2026-10-15) ──
 //   예전엔 큐 제작이 대본마다 activeId 를 바꿔 화면을 빼앗았고, 제작 중 다른 대본을 클릭하면 제작 쪽 도우미(화풍·인물 카드 등)가
 //   보는 대본의 S.* 를 읽었다. 이제 제작은 그 큐 항목만의 칸에서 돈다: S.parsed·scriptPath·outRoot·preset = 그 항목 · activeItem() = 그 항목.
@@ -502,9 +520,11 @@ function logToFile(line) {
   try { const s = _logStream(); if (s) s.write(`[${_kstClock()}] ${line}\n`); } catch {}
 }
 
+let _errRep = null;   // 🐞 오류 자동 전송(core/error-report · 회원 로그인 뒤에만 켜진다 — licStartReporter)
 const log = (line) => {
   const t = String(line);
   logToFile(t);
+  if (_errRep) { try { _errRep.onLine(t); } catch (_) {} }
   if (win && !win.isDestroyed()) win.webContents.send('log', t);
 };
 
@@ -11643,7 +11663,60 @@ ipcMain.handle('bgm-preview-file', (_e, args = {}) => {
 });
 // 렌더러(화면)에서 난 줄도 파일에 남긴다 — 🐞 화면 오류처럼 main 을 거치지 않는 것들.
 //   ⚠ main 이 보낸 줄은 이미 파일에 있으므로 렌더러가 되보내지 않는다(중복 방지 — App.jsx onLog 참조).
-ipcMain.handle('append-log', (_e, line) => { logToFile(`[화면] ${String(line)}`); return true; });
+ipcMain.handle('append-log', (_e, line) => { logToFile(`[화면] ${String(line)}`); if (_errRep) { try { _errRep.onLine(`[화면] ${String(line)}`); } catch (_) {} } return true; });
+
+// ── 🔐 회원 확인 IPC · 오류 자동 전송(v0.9.26 · LIC 는 파일 위쪽 · 로그인·토큰은 core/license) ──
+//   ⛔ 토큰을 렌더러로 돌려주지 않는다 — 화면에는 이메일·회원 상태·만료일·기기 목록만.
+function licPublic(s) {
+  s = s || {};
+  return { enforced: LIC.enforce, ok: licOk(), member: !!s.ok, admin: !!s.admin, email: s.email || '', expiresAt: s.expiresAt || null,
+    reason: s.reason || null, offline: !!s.offline, graceUntil: s.graceUntil || null, deviceLimit: s.deviceLimit == null ? null : s.deviceLimit,
+    devices: (s.devices || []).map((d) => ({ name: d.name || '', lastSeen: d.last_seen || null, me: d.device_id === (LIC.L ? LIC.L.deviceId() : '') })),
+    autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, site: require('./core/license').SITE_DEVICES };
+}
+async function licCheck(why) {
+  const s = await licApi().check();
+  LIC.state = s;
+  log(s.ok ? `🔐 회원 확인 ✓${s.admin ? ' (관리자)' : ''}${s.offline ? ' — 인터넷 연결 없음 · 여유 기간' : ''}${s.expiresAt ? ' · 만료 ' + String(s.expiresAt).slice(0, 10) : ''}`
+    : `🔐 회원 확인 — ${({ logged_out: '로그인 필요', bad_login: '이메일·비밀번호가 맞지 않음', not_member: '회원 기간 없음', expired: '회원 기간 만료', device_limit: 'PC 대수 초과', offline: '인터넷 연결 없음(여유 기간 지남)' })[s.reason] || s.reason}${why ? ' · ' + why : ''}`);
+  licStartReporter();
+  return s;
+}
+// 오류 자동 전송 — 회원으로 확인된 설치본에서만(개발 실행·E2E 는 끔 · PM_LICENSE_FORCE 면 켬) · ⚙ 계정에서 끌 수 있다
+function licStartReporter() {
+  if (_errRep || !LIC.enforce) return;
+  const { createReporter } = require('./core/error-report');
+  _errRep = createReporter({
+    delayMs: Number(process.env.PM_ERRREP_DELAY_MS) || 60000,   // 시험만 짧게
+    isOn: () => !!(LIC.state && LIC.state.ok && !LIC.state.offline) && licApi().readState().autoLog !== false,
+    day: () => _kstDayStr(),
+    readTail: async (n) => { const f = path.join(LOG_DIR, `${_kstDayStr()}.log`); const t = await fs.promises.readFile(f, 'utf8'); return t.split(/\r?\n/).slice(-n).join('\n'); },
+    send: async (p) => { const r = await licApi().sendLog({ ...p, appVersion: _diskVersion() }); logToFile(`📮 오류 로그 자동 전송 ${r && r.ok ? '— 보냄' : '— 못 보냄(' + ((r && r.reason) || '?') + ')'}`); return r; },
+  });
+}
+function _diskVersion() { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || ''; } catch (_) { return ''; } }
+app.whenReady().then(() => { if (LIC.enforce) LIC.ready = licCheck('앱 시작').catch((e) => { LIC.state = { ok: false, reason: 'error' }; log('🔐 회원 확인 중 문제: ' + e.message); }); });
+ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licPublic(LIC.state); });
+ipcMain.handle('license-recheck', async () => { if (LIC.enforce) await licCheck('다시 확인'); return licPublic(LIC.state); });
+ipcMain.handle('license-login', async (_e, a = {}) => {
+  if (!LIC.enforce && !process.env.PM_LICENSE_API) return licPublic(LIC.state);
+  const s = await licApi().login(a.email, a.password);
+  LIC.state = s;
+  log(s.ok ? `🔐 로그인 ✓ ${s.email || ''}` : `🔐 로그인 — ${s.reason}`);
+  licStartReporter();
+  return licPublic(s);
+});
+ipcMain.handle('license-logout', async () => { licApi().logout(); LIC.state = { ok: false, reason: 'logged_out' }; log('🔐 로그아웃'); return licPublic(LIC.state); });
+ipcMain.handle('license-set-autolog', async (_e, on) => { licApi().writeState({ autoLog: on !== false }); log(`📮 오류 로그 자동 전송 ${on !== false ? '켬' : '끔'}`); return licPublic(LIC.state); });
+ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고(수동) — 그날 로그 전체(끝 64KB) + 회원이 쓴 설명
+  const { scrub } = require('./core/log-scrub');
+  let tail = ''; try { tail = await fs.promises.readFile(path.join(LOG_DIR, `${_kstDayStr()}.log`), 'utf8'); } catch (_) {}
+  const body = scrub(tail).slice(-21000);
+  const r = await licApi().sendLog({ kind: 'report', summary: scrub(String(a.text || '문제 보고')).slice(0, 300), body, appVersion: _diskVersion() });
+  log(r && r.ok ? '📮 문제 보고를 보냈습니다' : `📮 문제 보고를 못 보냈습니다(${(r && r.reason) || '?'})`);
+  return { ok: !!(r && r.ok), reason: r && r.reason };
+});
+ipcMain.handle('license-open-site', () => { try { shell.openExternal(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
 ipcMain.handle('open-logs', async () => {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
   shell.openPath(LOG_DIR);

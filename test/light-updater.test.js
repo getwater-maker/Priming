@@ -13,7 +13,7 @@ const T = fs.mkdtempSync(path.join(os.tmpdir(), 'lu-'));
 // electron 가짜
 const fakeApp = { isPackaged: true, getAppPath: () => T, whenReady: () => Promise.resolve() };
 const origLoad = Module._load;
-Module._load = function (req, ...a) { if (req === 'electron') return { app: fakeApp, dialog: { showMessageBox() {} } }; return origLoad.call(this, req, ...a); };
+Module._load = function (req, ...a) { if (req === 'electron') return { app: fakeApp, dialog: { showMessageBox() {} } }; if (global.__fakeLic && /core[\/]license$/.test(req)) return global.__fakeLic; return origLoad.call(this, req, ...a); };
 const LU = require('../light-updater');
 
 const OLD = { 'package.json': JSON.stringify({ version: '0.7.5', dependencies: {} }), 'main.js': 'old main', 'renderer/dist/index.html': '<script src="assets/old.js">', 'renderer/dist/assets/old.js': 'old js' };
@@ -73,6 +73,32 @@ const leftovers = () => { const out = []; (function w(d) { for (const e of fs.re
   // E) 이미 최신이면 아무것도 안 한다
   r = await LU.applyUpdates();
   ok(r.reason === 'same', 'E: 이미 최신 → same');
+
+  // F) 🔐 로그인한 회원 = 회원 확인 Worker 에서 받는다(v0.9.25) — 토큰 헤더가 실리고 raw GitHub 은 부르지 않는다
+  const seen = [];
+  global.__fakeLic = { forApp: () => ({ updateSource: async () => ({ headers: { Authorization: 'Bearer TOK' }, manifestUrl: (t) => 'https://w.test/manifest?t=' + t, fileUrl: (rel, t) => 'https://w.test/file/' + rel.split('/').map(encodeURIComponent).join('/') + (t ? '?t=' + t : '') }) }) };
+  const workerServe = (status) => { global.fetch = async (url, init = {}) => {
+    const u = String(url); seen.push({ u, auth: init.headers && init.headers.Authorization });
+    if (u.startsWith('https://w.test/')) {
+      if (status !== 200) return { ok: false, status };
+      if (u.startsWith('https://w.test/manifest')) return { ok: true, status: 200, text: async () => JSON.stringify(manifest) };
+      const rel = decodeURIComponent(u.slice('https://w.test/file/'.length).replace(/\?.*$/, ''));
+      const b = Buffer.from(NEW[rel]); return { ok: true, status: 200, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) };
+    }
+    const rel = u.replace(/\?.*$/, '').replace(/^.*\/main\//, '');
+    if (rel === 'update-manifest.json') return { ok: true, status: 200, text: async () => JSON.stringify(manifest) };
+    const b = Buffer.from(NEW[rel]); return { ok: true, status: 200, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) };
+  }; };
+  reset(); workerServe(200);
+  r = await LU.applyUpdates();
+  ok(r.reason === 'applied' && read('main.js') === 'new main', 'F: 회원 경로로 업데이트 적용 — ' + JSON.stringify(r));
+  ok(seen.length > 0 && seen.every((x) => x.u.startsWith('https://w.test/') && x.auth === 'Bearer TOK'), 'F: 모든 요청이 Worker + Bearer 토큰(raw GitHub 0번) — ' + seen.length + '건');
+  // G) Worker 가 거부(403 회원 아님)하면 옛 경로로 — 저장소가 공개인 동안 업데이트가 끊기지 않는다
+  seen.length = 0; reset(); workerServe(403);
+  r = await LU.applyUpdates();
+  ok(r.reason === 'applied' && seen.some((x) => x.u.includes('raw.githubusercontent.com')) && !seen.some((x) => x.u.startsWith('https://w.test/file/')), 'G: Worker 거부 → 옛 경로로 적용');
+  const m = await LU.fetchManifest(); ok(m && m.version === '0.7.6', 'G: 「업데이트 확인」 매니페스트도 같은 순서');
+  global.__fakeLic = null;
 
   fs.rmSync(T, { recursive: true, force: true });
   console.log(`\n${fail ? '❌' : '✅'} light-updater — ${pass} 통과 / ${fail} 실패`);

@@ -3864,6 +3864,16 @@ export default function App() {
   async function pickImgTsvFolder() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, imgTsvFolder: d })); }
   async function pickOutUpload() { const d = await api.pickDir(); if (d) setCh((c) => ({ ...c, outUpload: d })); }
   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더 · 2026-10-14 — 옛 채널편집 「대본 PDF」·「URL 받기」)
+  // 👤 계정(v0.9.25) — 회원 상태 · 기기 · 오류 자동 전송 · 문제 보고 · 로그아웃(토큰은 main 에만)
+  const [lic, setLic] = useState(null);
+  const [licReport, setLicReport] = useState('');
+  useEffect(() => { if (settingsOpen && settingsTab === 'account') { (async () => { try { setLic(await api.licenseState()); } catch (_) {} })(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
+  async function sendLicReport() {
+    if (!licReport.trim()) { setSettingsMsg('무슨 문제가 있었는지 한 줄 적어 주세요'); return; }
+    const r = await api.licenseReport(licReport.trim());
+    setSettingsMsg(r && r.ok ? '✅ 문제 보고를 보냈습니다 — 오늘 로그가 함께 갔습니다(키·이메일·사용자 폴더는 지운 뒤)' : '❌ 보내지 못했습니다' + (r && r.reason ? ' (' + r.reason + ')' : ''));
+    if (r && r.ok) setLicReport('');
+  }
   async function loadAppFolders() { try { setAppFolders(await api.getAppFolders()); } catch (_) {} }
   async function saveAppFolders(patch) {
     try { setAppFolders(await api.saveAppFolders(patch)); setSettingsMsg('✅ 폴더 저장됨 — 모든 채널에 적용됩니다'); if (patch && patch.thumbs != null) loadThumbs(); }
@@ -6833,7 +6843,7 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브'], ['folders', '📁 폴더']].map(([id, lbl]) => (
+              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -7254,6 +7264,25 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            </div>)}
+            {settingsTab === 'account' && (<div data-testid="account-tab">
+              {!lic ? <div className="meta">불러오는 중…</div> : !lic.enforced ? (
+                <Hint>개발 실행(또는 시험) 중이라 회원 확인을 하지 않습니다. 설치본에서는 primingwave.com 회원 로그인이 필요합니다.</Hint>
+              ) : (<>
+                <div className="frow"><label>계정</label><span style={{ flex: 1 }}><b>{lic.email || '(로그인 안 됨)'}</b>{lic.admin ? ' · 관리자' : ''}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => { if (!uiConfirm('로그아웃하면 다시 로그인할 때까지 앱을 쓸 수 없습니다. 로그아웃할까요?')) return; await api.licenseLogout(); location.reload(); }}>로그아웃</button></div>
+                <div className="frow"><label>이용 기간</label><span style={{ flex: 1 }}>{lic.admin ? '제한 없음(관리자)' : lic.expiresAt ? String(lic.expiresAt).slice(0, 10) + ' 까지' : '기한 없음'}{lic.offline ? ' · ⚠ 인터넷 연결 없음 — 여유 기간 ' + (lic.graceUntil ? new Date(lic.graceUntil + 9 * 3600e3).toISOString().slice(0, 10) + ' 까지' : '') : ''}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={async () => setLic(await api.licenseRecheck())}>다시 확인</button></div>
+                <div className="frow"><label>이 계정의 PC</label><span style={{ flex: 1 }}>{(lic.devices || []).map((d, i) => <span key={i} style={{ marginRight: 12 }}>🖥 {d.name || '(이름 없음)'}{d.me ? ' (이 PC)' : ''}</span>)}{lic.deviceLimit ? <span className="meta"> · 최대 {lic.deviceLimit}대</span> : null}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => api.licenseOpenSite()}>내 기기 관리</button></div>
+                <Hint>PC 를 바꿨다면 primingwave.com 「🖥 내 기기」에서 쓰지 않는 PC 를 해제하세요.</Hint>
+                <div className="frow"><label>오류 로그</label>
+                  <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" data-testid="autolog" checked={lic.autoLog !== false} onChange={async (e) => setLic(await api.licenseSetAutoLog(e.target.checked))} /> 오류가 나면 로그를 자동으로 보냅니다</label></div>
+                <Hint>오류가 난 앞뒤 로그(최근 200줄)를 보내 문제를 고치는 데 씁니다. API 키·이메일·전화번호·사용자 폴더 이름은 <b>지운 뒤</b> 보내고, 30일 뒤 지웁니다.</Hint>
+                <div className="frow"><label>🐞 문제 보고</label>
+                  <input style={{ flex: 1 }} data-testid="lic-report" placeholder="무슨 문제가 있었나요? (오늘 로그가 함께 갑니다)" value={licReport} onChange={(e) => setLicReport(e.target.value)} />
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={sendLicReport}>보내기</button></div>
+              </>)}
             </div>)}
             {settingsTab === 'folders' && (<div data-testid="app-folders">
               <Hint>여기 폴더는 <b>모든 채널 공통</b>입니다(채널마다 다른 대본·Vrew·MP4 폴더는 ⚙ 채널편집 → 📁 폴더). 비워 두면 윈도우 「다운로드」 폴더{appFolders.def ? <> (<b>{appFolders.def}</b>)</> : null}에 저장합니다.</Hint>
