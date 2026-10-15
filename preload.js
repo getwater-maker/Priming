@@ -170,6 +170,7 @@ contextBridge.exposeInMainWorld('api', {
   pickDir: () => ipcRenderer.invoke('pick-dir'),
   getAppFolders: () => ipcRenderer.invoke('get-app-folders'),
   saveAppFolders: (patch) => ipcRenderer.invoke('save-app-folders', patch),
+  listThumbs: () => ipcRenderer.invoke('list-thumbs'),   // 🖼 로그 상자 썸네일 탭(v0.9.24)
   saveProject: () => ipcRenderer.invoke('save-project'),
   loadProject: () => ipcRenderer.invoke('load-project'),
   listQueue: () => ipcRenderer.invoke('list-queue'),

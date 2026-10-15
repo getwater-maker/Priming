@@ -1015,7 +1015,16 @@ export default function App() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (logTabRef.current === 'thumb' && logText) setLogUnseen(true);   // 🖼 탭을 보는 동안 새 로그 → 📜 탭에 점
   }, [logText]);
+  // 🖼 로그 상자 탭(v0.9.24 · 로이 2026-10-15) — 기본 = 썸네일(패키징 썸네일 3안 · 2×2) · 📜 로그. #log 는 숨겨도 늘 그린다(E2E 가 글을 읽는다).
+  const [logTab, setLogTab] = useState('thumb');
+  const logTabRef = useRef('thumb'); logTabRef.current = logTab;
+  const [logUnseen, setLogUnseen] = useState(false);
+  const [thumbs, setThumbs] = useState({ ok: false, msg: '', files: [] });
+  async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
+  useEffect(() => { if (logTab === 'thumb') loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
+  function pickLogTab(t) { setLogTab(t); if (t === 'log') { setLogUnseen(false); setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 0); } }
 
 
   // 처음에 고를 채널 = **드롭다운 맨 위에 보이는 채널** (로이 2026-09-16).
@@ -3852,7 +3861,7 @@ export default function App() {
   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더 · 2026-10-14 — 옛 채널편집 「대본 PDF」·「URL 받기」)
   async function loadAppFolders() { try { setAppFolders(await api.getAppFolders()); } catch (_) {} }
   async function saveAppFolders(patch) {
-    try { setAppFolders(await api.saveAppFolders(patch)); setSettingsMsg('✅ 폴더 저장됨 — 모든 채널에 적용됩니다'); }
+    try { setAppFolders(await api.saveAppFolders(patch)); setSettingsMsg('✅ 폴더 저장됨 — 모든 채널에 적용됩니다'); if (patch && patch.thumbs != null) loadThumbs(); }
     catch (e) { setSettingsMsg('❌ 폴더 저장 실패 — ' + (e && e.message || e)); }
   }
   async function pickAppFolder(kind) { const d = await api.pickDir(); if (d) saveAppFolders({ [kind]: d }); }
@@ -5502,15 +5511,42 @@ export default function App() {
   })();
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
   const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
+  const lt = isBk ? 'log' : logTab;   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그만
   const logBox = (
         <aside id="logwrap" className={logDocked ? 'docked' : ''}>
             <div id="logbar">
-              <b>로그</b> <span id="status">{status ? '· ' + status : ''}</span>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
-              <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+              {isBk ? <b>로그</b> : <span className="logtabs">
+                <button data-testid="logtab-thumb" className={logTab === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
+                <button data-testid="logtab-log" className={logTab === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
+              </span>}
+              <span id="status">{status ? '· ' + status : ''}</span>
+              {lt === 'log' ? (<>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+              </>) : (
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="썸네일 폴더를 다시 읽기" onClick={loadThumbs}>🔄</button>
+              )}
             </div>
-            <div id="log" ref={logRef}>{logText}</div>
+            {lt === 'thumb' && (
+              <div className="thumbgrid" data-testid="thumbgrid" title={thumbs.root || ''}>
+                {!(thumbs.files && thumbs.files.length)
+                  ? <div className="thumbcell empty" data-testid="thumbmsg" style={{ gridColumn: '1 / -1', gridRow: '1 / -1' }}>{thumbs.msg || '썸네일을 찾는 중…'}</div>
+                  : [0, 1, 2, 3].map((i) => {
+                  const f = thumbs.files[i];
+                  if (!f) return <div key={i} className="thumbcell empty" />;
+                  const src = media(f.path, String(Math.round(f.mtimeMs || 0)));
+                  const lbl = f.name.replace(/\.[^.]+$/, '').replace(thumbs.key || '', '').trim();
+                  return (
+                    <div key={i} className="thumbcell" data-testid="thumbcell" title={f.name + ' — 클릭: 크게 보기'} onClick={() => setPreview({ kind: 'img', src, caption: f.name })}>
+                      <img src={src} alt="" />
+                      <span className="thumblbl">{lbl || f.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div id="log" ref={logRef} style={lt === 'log' ? undefined : { display: 'none' }}>{logText}</div>
         </aside>
   );
   const workTimes = (
@@ -7214,6 +7250,11 @@ export default function App() {
                     onChange={(e) => setAppFolders((f) => ({ ...f, [k]: e.target.value }))} onBlur={(e) => saveAppFolders({ [k]: e.target.value })} />
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder(k)}>찾기</button></div>
               ))}
+              <div className="frow"><label>썸네일</label>
+                <input style={{ flex: 1 }} data-testid="app-folder-thumbs" placeholder={appFolders.thumbsDef ? '비우면 ' + appFolders.thumbsDef : '패키징 썸네일 폴더 — <폴더>\\<채널>\\[약칭_MMDD] 썸네일_A.png'} value={appFolders.thumbs || ''}
+                  onChange={(e) => setAppFolders((f) => ({ ...f, thumbs: e.target.value }))} onBlur={(e) => saveAppFolders({ thumbs: e.target.value })} />
+                <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder('thumbs')}>찾기</button></div>
+              <Hint>🖼 로그 상자의 「썸네일」 탭이 이 폴더에서 지금 대본의 <b>[약칭_MMDD]</b> 로 시작하는 그림을 찾아 4칸에 보여 줍니다(채널 폴더 한 단계 아래까지).</Hint>
               <Hint>입력 후 칸 밖을 클릭하거나 「찾기」로 고르면 바로 저장됩니다.</Hint>
             </div>)}
             {settingsTab === 'comfy' && (<div>

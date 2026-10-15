@@ -21,12 +21,15 @@ const A_NAME = `[테스트_mv${process.pid}A] 만드는 대본`;
 const B_NAME = `[테스트_mv${process.pid}B] 보는 대본`;
 const A_MD = ['# 만드는 대본', '', '## 첫째 마당', '', ...Array.from({ length: 60 }, (_, i) => sec(i + 1, '에이'))].join('\n');
 const B_MD = ['# 보는 대본', '', '## 첫째 마당', '', ...Array.from({ length: 4 }, (_, i) => sec(i + 1, '비이'))].join('\n');
-const A_PATH = path.join(TMP, A_NAME + '.md'), B_PATH = path.join(TMP, B_NAME + '.md');
+const C_NAME = `[테스트_mv${process.pid}C] 앞에 선 대본`;   // 작업 줄을 먼저 차지하는 대본(⚡ 가 줄을 서게)
+const C_MD = ['# 앞에 선 대본', '', '## 첫째 마당', '', ...Array.from({ length: 30 }, (_, i) => sec(i + 1, '시이'))].join('\n');
+const A_PATH = path.join(TMP, A_NAME + '.md'), B_PATH = path.join(TMP, B_NAME + '.md'), C_PATH = path.join(TMP, C_NAME + '.md');
+fs.writeFileSync(C_PATH, C_MD, 'utf8');
 fs.writeFileSync(A_PATH, A_MD, 'utf8'); fs.writeFileSync(B_PATH, B_MD, 'utf8');
 const A_OUT = path.join(TMP, A_NAME), B_OUT = path.join(TMP, B_NAME);
 const PROJ = path.join(os.homedir(), '.priming-maker', 'projects');
 const snapOf = (name) => path.join(PROJ, name.replace(/[\\/:*?"<>|]/g, '_') + '.smproj.json');
-const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME]) { try { fs.rmSync(snapOf(nm), { force: true }); } catch (_) {} } };
+const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs.rmSync(snapOf(nm), { force: true }); } catch (_) {} } };
 
 (async () => {
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
@@ -48,11 +51,14 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME]) { try { fs.rmSync(
     };
     const oa = await openOne(A_PATH);
     const ob = await openOne(B_PATH);
+    await openOne(C_PATH);
     const q = await win.evaluate(async () => (await window.api.selectQueueItem('__없음__', 'longform')).queue.longform);
     const idA = q.items.find((x) => /만드는 대본/.test(x.title || x.name || x.label || JSON.stringify(x)));
     const idB = q.items.find((x) => /보는 대본/.test(x.title || x.name || x.label || JSON.stringify(x)));
-    ok(!!oa && !!ob && q.items.length === 2 && idA && idB, '두 대본을 큐에 열었다: ' + q.items.length + '개');
+    ok(!!oa && !!ob && q.items.length === 3 && idA && idB, '세 대본을 큐에 열었다: ' + q.items.length + '개');
 
+    // 🔴 작업 줄을 C 의 TTS 로 먼저 채운다 → A 의 ⚡ 는 줄을 선다. 줄을 서는 사이 B 를 골라도 A 가 만들어져야 한다(누른 순간의 대본)
+    await win.evaluate((name) => { window.__blk = window.api.ttsBuild({ shortsNum: null, dry: true, presetName: name }).then(() => 'ok', (e) => 'ERR ' + e.message); }, CH);
     // A 를 골라 ⚡ 만들기(무음 · 음성만) 시작 — 기다리지 않는다
     await win.evaluate((id) => window.api.selectQueueItem(id, 'longform'), idA.id);
     await win.evaluate(() => { window.__pushes = []; window.api.onDtoUpdate((d) => window.__pushes.push({ t: Date.now(), title: (d && d.fileTitle) || '' })); });
@@ -60,11 +66,12 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME]) { try { fs.rmSync(
       window.__job = window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 7, aiNotice: false, outMode: 'audio', openVrew: false })
         .then(() => { window.__jobDoneAt = Date.now(); return 'ok'; }, (e) => { window.__jobDoneAt = Date.now(); return 'ERR: ' + e.message; });
     }, CH);
-    await sleep(1500);   // 제작이 문장 합성에 들어간 뒤
 
     // 제작 도중 B 를 고른다(큐 클릭과 같은 IPC) → B 의 문장을 고친다
     const sel = await win.evaluate(async (id) => { const r = await window.api.selectQueueItem(id, 'longform'); return r && r.dto ? r.dto.fileTitle : null; }, idB.id);
-    ok(/보는 대본/.test(sel || ''), '제작 도중 B 로 전환: ' + sel);
+    ok(/보는 대본/.test(sel || ''), '⚡ 를 누르자마자(줄 서는 중) B 로 전환: ' + sel);
+    ok((await win.evaluate(() => window.__blk)) === 'ok', '앞선 C 작업 완료');
+    await sleep(1500);   // A 제작이 문장 합성에 들어간 뒤
     const tView = Date.now();
     const ed = await win.evaluate(async () => { try { const r = await window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '제작 중에 고친 비이 문장이다.' }); window.__editAt = Date.now(); return r && !r.error ? 'ok' : JSON.stringify(r && r.error); } catch (e) { return 'ERR ' + e.message; } });
     ok(ed === 'ok', '제작 도중 B 문장 고치기: ' + ed);

@@ -64,18 +64,24 @@ function createWorlds(S, opts = {}) {
      * ipcMain.handle 을 감싼다 — 호출마다 worldFor(채널, 인자) 의 세계에서 실행.
      * 첫 인자 객체에 __world 가 있으면 그 세계를 쓰고 핸들러에는 넘기지 않는다(명시 > 채널 기본).
      * 🎬 __item 이 있고 privateFor(id) 가 { w, slot, extra } 를 주면 그 자기 칸에서 실행한다(큐 단계 루프 — 화면을 바꾸지 않는다).
+     *   hooks.pinFor(ch, args, view) 가 id 를 주면 __item 없이도 그 항목에 묶는다(누른 순간의 대본 — 작업 줄에서 기다리는 사이 화면이 바뀌어도).
+     *   hooks.after(ch, 결과, store) 로 자기 칸 호출의 응답을 바꿀 수 있다(보지 않는 대본의 DTO 를 화면에 돌려주지 않게).
      */
-    wrapHandle(ipcMain, worldFor, privateFor) {
+    wrapHandle(ipcMain, worldFor, privateFor, hooks = {}) {
       const orig = ipcMain.handle.bind(ipcMain);
       ipcMain.handle = (ch, fn) => orig(ch, (e, ...args) => {
         let w;
-        if (privateFor && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) && args[0].__item != null) {
-          const { __item, __world, ...rest } = args[0];
-          args[0] = rest;
-          const p = privateFor(__item);
-          if (p) return als.run({ ...(p.extra || {}), w: p.w, slot: p.slot }, () => fn(e, ...args));
-          w = norm(__world || worldFor(ch, args, view));
-          return als.run(w, () => fn(e, ...args));
+        const a0 = (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) ? args[0] : null;
+        let id = null;
+        if (privateFor && a0 && a0.__item != null) { const { __item, __world, ...rest } = a0; args[0] = rest; id = __item; }
+        else if (privateFor && hooks.pinFor && !(a0 && typeof a0.__world === 'string')) id = hooks.pinFor(ch, args, view);
+        if (id != null) {
+          const p = privateFor(id);
+          if (p) {
+            const st = { ...(p.extra || {}), w: p.w, slot: p.slot };
+            return als.run(st, async () => { const r = await fn(e, ...args); return hooks.after ? hooks.after(ch, r, st) : r; });
+          }
+          if (a0 && a0.__item != null) { w = norm(a0.__world || worldFor(ch, args, view)); return als.run(w, () => fn(e, ...args)); }
         }
         if (args[0] && typeof args[0] === 'object' && !Array.isArray(args[0]) && typeof args[0].__world === 'string') {
           w = norm(args[0].__world);

@@ -121,7 +121,14 @@ const WORLD = require('./core/world-ctx').createWorlds(S, { worlds: ['longform',
 const VIEW_FOLLOW_CHANNELS = new Set(['set-mode', 'reset-project', 'list-queue', 'save-queue', 'load-queue', 'last-queue-info', 'restore-last-queue',
   'select-queue-item', 'remove-queue-item', 'set-queue-settings', 'get-script-text', 'apply-script-text', 'open-folder', 'clear-saves']);
 WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ? 'book' : VIEW_FOLLOW_CHANNELS.has(ch) ? view : 'longform'),
-  (id) => { const it = S.modes.longform.items.find((x) => x.id === id); return it && it.parsed ? makeStoreFor(it) : null; });   // 🎬 __item = 그 대본의 제작 칸(큐 단계 루프)
+  (id) => { const it = S.modes.longform.items.find((x) => x.id === id); return it && it.parsed ? makeStoreFor(it) : null; },   // 🎬 __item = 그 대본의 제작 칸(큐 단계 루프)
+  {
+    // 🎬 단건 「전체 TTS·이미지·비디오」 는 **누른 순간의 대본**에 묶는다(v0.9.24) — 작업 줄에서 기다리는 사이 다른 대본을 고르면 그 대본에 작업하던 구멍(test:makeview)
+    pinFor: (ch, _a, view) => (PIN_ON_CLICK.has(ch) && view === 'longform' ? S.modes.longform.activeId : null),
+    // 응답 DTO 는 그 대본을 보고 있을 때만 그대로 — 아니면 지금 보는 대본의 DTO(화면이 남의 대본으로 덮이지 않게)
+    after: (_ch, r, st) => ((r && r.projects && !_makeViewed(st)) ? WORLD.run('longform', () => (S.parsed ? currentDTO() : null)) : r),
+  });
+const PIN_ON_CLICK = new Set(['tts-build', 'image-build', 'video-build']);
 
 // ── 🎬 제작 칸 — 「만드는 대본」과 「보는 대본」을 가른다(v0.9.23 · 로이 2026-10-15) ──
 //   예전엔 큐 제작이 대본마다 activeId 를 바꿔 화면을 빼앗았고, 제작 중 다른 대본을 클릭하면 제작 쪽 도우미(화풍·인물 카드 등)가
@@ -3350,11 +3357,11 @@ ipcMain.handle('whiteboard-plan', async (_e, args = {}) => {
 //     여기서는 **출력만 화이트보드로 고정**한다.
 //   ⚠ TTS 를 돌리므로 `enqueueTtsJob`(직렬 큐)을 반드시 거친다 — 안 그러면 다른 TTS 작업과 겹쳐
 //     공용 TTS 매니저가 깨진다(v0.2.57 사고).
-ipcMain.handle('whiteboard-build', (_e, args = {}) => enqueueTtsJob('화이트보드 렌더', async () => {
-  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  await makeRun(activeItem(), () => runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: args.openVrew !== false }));   // 🎬 제작 칸
+ipcMain.handle('whiteboard-build', (_e, args = {}) => { const _it = activeItem(); return enqueueTtsJob('화이트보드 렌더', async () => {   // 🎬 누른 순간의 대본(줄을 서는 사이 다른 대본을 골라도)
+  if (!S.parsed && !_it) throw new Error('대본을 먼저 여세요.');
+  await makeRun(_it, () => runMakeAllCore({ ...args, outTarget: 'whiteboard', outMode: 'full', openVrew: args.openVrew !== false }));   // 🎬 제작 칸
   return S.parsed ? P.toDTO(S.parsed) : null;
-}));
+}); });
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -5892,18 +5899,39 @@ function defaultDownloadDir() {
 //   채널 값(outReader·downloadFolder)은 더 이상 읽지 않는다(파일에는 남아 있다). 비우면 윈도우 「다운로드」 폴더.
 const APP_FOLDERS_FILE = () => path.join(os.homedir(), '.priming-maker', 'app-folders.json');
 function loadAppFolders() {
-  try { const j = JSON.parse(fs.readFileSync(APP_FOLDERS_FILE(), 'utf8')); return { reader: String(j.reader || ''), download: String(j.download || '') }; }
-  catch (_) { return { reader: '', download: '' }; }
+  try { const j = JSON.parse(fs.readFileSync(APP_FOLDERS_FILE(), 'utf8')); return { reader: String(j.reader || ''), download: String(j.download || ''), thumbs: String(j.thumbs || '') }; }
+  catch (_) { return { reader: '', download: '', thumbs: '' }; }
 }
 function appFolder(kind) { return String(loadAppFolders()[kind] || '').trim() || defaultDownloadDir(); }
-ipcMain.handle('get-app-folders', () => ({ ...loadAppFolders(), def: defaultDownloadDir() }));
+// 🖼 썸네일 폴더(v0.9.24 · 로이 2026-10-15) — 패키징이 만든 썸네일 3안(`<폴더>\<채널>\[약칭_MMDD] 썸네일_A.png`)을 로그 상자 🖼 탭에 보인다.
+//   비우면 이 PC 에 채널사업부 폴더(D:\## 아도나이로이\99_썸네일)가 있을 때만 그것 · 없으면 빈 값(다른 PC·회원은 ⚙ 에서 고른다).
+//   defOnly = 기본값만(설정 화면의 안내용).
+const THUMB_DEFAULT = path.join('D:\\', '## 아도나이로이', '99_썸네일');
+function thumbRoot(defOnly = false) {
+  const v = defOnly ? '' : String(loadAppFolders().thumbs || '').trim();
+  if (v) return v;
+  try { return fs.existsSync(THUMB_DEFAULT) ? THUMB_DEFAULT : ''; } catch (_) { return ''; }
+}
+ipcMain.handle('get-app-folders', () => ({ ...loadAppFolders(), def: defaultDownloadDir(), thumbsDef: thumbRoot(true) }));
 ipcMain.handle('save-app-folders', (_e, patch = {}) => {
   const cur = loadAppFolders();
-  for (const k of ['reader', 'download']) if (typeof patch[k] === 'string') cur[k] = patch[k].trim();
+  for (const k of ['reader', 'download', 'thumbs']) if (typeof patch[k] === 'string') cur[k] = patch[k].trim();
   fs.mkdirSync(path.dirname(APP_FOLDERS_FILE()), { recursive: true });
   fs.writeFileSync(APP_FOLDERS_FILE(), JSON.stringify(cur, null, 2), 'utf8');
-  log(`📁 공통 폴더 저장 — 대본 PDF: ${cur.reader || '(다운로드)'} · URL 받기: ${cur.download || '(다운로드)'}`);
-  return { ...cur, def: defaultDownloadDir() };
+  log(`📁 공통 폴더 저장 — 대본 PDF: ${cur.reader || '(다운로드)'} · URL 받기: ${cur.download || '(다운로드)'} · 썸네일: ${cur.thumbs || thumbRoot(true) || '(없음)'}`);
+  return { ...cur, def: defaultDownloadDir(), thumbsDef: thumbRoot(true) };
+});
+// 🖼 로그 상자 🖼 탭 — 지금 보는 대본의 썸네일(최대 4장 · 읽기만)
+ipcMain.handle('list-thumbs', async () => {
+  const TF = require('./core/thumb-find');
+  const sp = S.scriptPath;
+  if (!sp) return { ok: false, msg: '대본을 열면 그 대본의 썸네일이 여기에 보입니다' };
+  const key = TF.thumbKey(sp);
+  if (!key) return { ok: false, msg: '대본 파일 이름 앞에 [약칭_MMDD] 가 없어 썸네일을 찾을 수 없습니다' };
+  const root = thumbRoot();
+  if (!root || !fs.existsSync(root)) return { ok: false, key, msg: '썸네일 폴더가 없습니다 — ⚙ 설정 → 📁 폴더에서 고르세요' };
+  const files = await TF.findThumbs(root, key, 4);
+  return { ok: true, key, root, files, msg: files.length ? '' : `${key} 썸네일이 아직 없습니다 (패키징 뒤에 생깁니다)` };
 });
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
@@ -7885,14 +7913,16 @@ async function runMakeAllBody(opts = {}) {
 }
 
 
-ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
+// 🎬 만들 대본 = ⚡ 를 **누른 순간**의 활성 대본(v0.9.24) — 작업 줄(enqueueTtsJob)에서 기다리는 사이 다른 대본을 고르면, 시작할 때 읽던 옛 방식은
+//   고른 대본을 만들었다(test:makeview 가 잡음).
+ipcMain.handle('make-all', (_e, args = {}) => { const _it = activeItem(); return enqueueTtsJob('전체 만들기', async () => {
   _mp4DupAll = null;   // 단건 제작은 항상 새로 묻는다
   _mkQueuePos = null;  // 📊 단건 — 진행 팝업에 큐 순번을 달지 않는다
   // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
   // 🎬 제작 칸에서 — 만드는 동안 다른 대본을 열어 고쳐도 이 제작은 이 대본만 본다(v0.9.23)
-  await makeRun(activeItem(), () => runMakeAllCore({ ...args, openVrew: args.openVrew !== false }));
+  await makeRun(_it, () => runMakeAllCore({ ...args, openVrew: args.openVrew !== false }));
   return S.parsed ? P.toDTO(S.parsed) : null;   // 응답 = 지금 화면이 보는 대본(제작 대본이 아닐 수 있다)
-}));
+}); });
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
 //   실패해도 해당 항목만 '실패' 표시 후 다음 진행.
