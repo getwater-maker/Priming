@@ -743,7 +743,12 @@ async function renderChunk(ch, i, ctx) {
   // 🙈 카드가 `자막=숨김` 이면 그 카드 시간 동안의 자막 이벤트는 뺀다(이벤트 가운데 시각이 창 안이면 — 절대 시각이라 조각 경계에서도 같은 판정)
   const hideW = ctx.hideCaptionWins || null;
   const hid = (e) => !!hideW && hideW.some(([a, b]) => { const m = (e.start + e.end) / 2; return m >= a - 1e-6 && m < b - 1e-6; });
-  for (const e of (ctx.capEvents || [])) { if (e.end > t0 && e.start < t0 + dur && !hid(e)) segEv.push(e); }
+  // ⏸ 막간 쉼(v0.9.25) — 쉼 구간에 걸친 자막은 쉼 시작에서 끊는다(통째로 빼면 제목을 읽는 동안의 자막까지 사라진다 · 쉼 안에서 시작한 것만 뺀다)
+  const cutW = ctx.pauseCaptionWins || null;
+  for (let e of (ctx.capEvents || [])) {
+    if (cutW) { const w = cutW.find(([a, b]) => e.start < b - 1e-6 && e.end > a + 1e-6); if (w) { if (e.start >= w[0] - 1e-6) continue; e = { ...e, end: w[0] }; } }
+    if (e.end > t0 && e.start < t0 + dur && !hid(e)) segEv.push(e);
+  }
   const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
@@ -1053,6 +1058,7 @@ async function renderVrewToMp4(opts = {}) {
     if (Array.isArray(opts.cards) && opts.cards.length) {
       ctx.cards = opts.cards;
       { const hw = opts.cards.filter((c) => c.hideCaptions).map((c) => [c.t0, c.t1]); if (hw.length) ctx.hideCaptionWins = [...(ctx.hideCaptionWins || []), ...hw]; }   // 🙈 자막=숨김 카드의 시간 창(정보 카드의 표 창과 합친다)
+      { const pw = opts.cards.filter((c) => !c.hideCaptions && c.pauseSec > 0).map((c) => [c.t1 - c.pauseSec, c.t1]); if (pw.length) ctx.pauseCaptionWins = pw; }   // ⏸ 막간 쉼(v0.9.25) — 무음 동안은 카드만(끝 문장 자막이 늘어져 남지 않게)
       const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
       if (opts.cards.some((c) => c.lang === 'ja')) { try { fs.copyFileSync(path.join(fdir, '..', CARD_FONT_JA_FILE), path.join(fontsDir, CARD_FONT_JA_FILE)); } catch (_) { miss.push(CARD_FONT_JA_FILE); } }

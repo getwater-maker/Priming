@@ -1370,3 +1370,16 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .chcards{margin-top:14px}
 .chcards .col{min-width:0}
 .chcards .dl-tg{padding:4px 10px}
+
+/* 📜 화면 카드 자리(v0.9.25) — ② 클립 칸 왼쪽 열(삽입 그림 아래) · 시작 = 종류 · 이어짐 = 옅게 · ⏸ = 끝 문장 뒤 쉼 */
+.sent .ins-marks .card-mark{display:flex;flex-direction:column;align-items:center;min-width:30px;padding:2px 3px;border:1px solid #d9a441;border-radius:7px;background:#fff6e0;color:#7a4b00;font-size:10px;line-height:1.25;white-space:nowrap;cursor:help;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.sent .ins-marks .card-mark.cont{border-style:dashed;box-shadow:none;background:#fffbf1}
+.card-mark .cm-ic{font-size:13px}
+.card-mark .cm-k{font-weight:600}
+.card-mark .cm-p{margin-top:1px;padding:0 2px;border-radius:4px;background:#2b4a6f;color:#fff;font-weight:600}
+.card-bad{margin-left:8px;padding:1px 6px;border-radius:6px;background:#fff1ee;border:1px solid #e0826f;color:#a33b26;font-size:12px;font-weight:600;cursor:help}
+.sent.clip .card-slot{position:absolute;right:calc(100% + 20px);top:12px;z-index:5;display:flex;flex-direction:column}
+.sent.clip .card-slot.below{top:40px}
+.sent.clip .card-slot .card-mark{display:flex;flex-direction:column;align-items:center;min-width:30px;padding:2px 3px;border:1px solid #d9a441;border-radius:7px;background:#fff6e0;color:#7a4b00;font-size:10px;line-height:1.25;white-space:nowrap;cursor:help;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.sent.clip .card-slot .card-mark.cont{border-style:dashed;box-shadow:none;background:#fffbf1}
+.card-mark.cont .cm-ic{opacity:.5}

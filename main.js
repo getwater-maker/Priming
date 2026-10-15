@@ -2844,12 +2844,12 @@ ${mtime ? `만든 시각: ${mtime}
 }
 // 🌫 오버레이 모션 구간표(삼국지 R1) — 채널 fx + 그룹 look.fx → 영상 전체 시각 구간별 값. 채널이 전부 꺼져 있으면 null(= 예전과 같다). 대본(pr)이 없으면 채널 값을 영상 전체에.
 // 📜 화면 카드(R4 · v0.7.98) — 대본 마커 + 문장 시각 → [{kind,t0,t1,orig,trans}] · 경고는 로그에(조용히 줄이지 않는다) · 마커가 없으면 null(= 예전 MP4 와 같다)
-function cardsOptsFor(pr) {
+function cardsOptsFor(pr, preset) {
   try {
     if (!pr || !Array.isArray(pr.screenCards) || !pr.screenCards.length) return null;
-    const r = require('./core/screen-cards').plan(pr, pr.screenCards);
+    const r = require('./core/screen-cards').plan(pr, pr.screenCards, { pauseSec: preset && preset.interludePauseSec });   // ⏸ 막간 쉼 — .vrew 빌드(P.pausePlanOf)와 같은 계획
     for (const w of r.warnings) log('⚠ ' + w);
-    if (r.cards.length) log(`📜 화면 카드 ${r.cards.length}장(병기 ${r.cards.filter((c) => c.kind === 'pair').length} · 막간 ${r.cards.filter((c) => c.kind === 'interlude').length}) · 마커 ${pr.screenCards.length}줄${r.warnings.length ? ' · 건너뜀 ' + r.warnings.length : ''}`);
+    if (r.cards.length) log(`📜 화면 카드 ${r.cards.length}장(병기 ${r.cards.filter((c) => c.kind === 'pair').length} · 막간 ${r.cards.filter((c) => c.kind === 'interlude').length}) · 마커 ${pr.screenCards.length}줄${r.warnings.length ? ' · 건너뜀 ' + r.warnings.length : ''}${r.pauses.list.length ? ` · ⏸ 막간 쉼 ${r.pauses.list.length}곳 · ${Math.round(r.pauses.total * 10) / 10}초` : ''}`);
     return r.cards.length ? r.cards : null;
   } catch (e) { log('⚠ 화면 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
 }
@@ -2861,7 +2861,7 @@ function infoOptsFor(pr, preset, scriptPath) {
     if (!scriptPath || !fs.existsSync(scriptPath)) { log('⚠ 정보 카드 — 대본(.md)을 읽을 수 없어 건너뜁니다: ' + (scriptPath || '(경로 없음)')); return null; }
     const IC = require('./core/info-cards');
     const parsed = IC.fromRaw(fs.readFileSync(scriptPath, 'utf8'));
-    const r = IC.plan(pr, parsed, { sections: true });
+    const r = IC.plan(require('./core/screen-cards').withPauses(pr, P.pausePlanOf(pr, preset).map), parsed, { sections: true });   // ⏸ 막간 쉼만큼 뒤 시각이 밀린다(.vrew 와 같은 시각)
     for (const w of r.warnings) log('⚠ ' + w);
     if (parsed.orphan) log(`⚠ 정보 카드 — 뒤따르는 낭독 문장이 없는 표시 줄 ${parsed.orphan}개(대본 끝) → 건너뜁니다`);
     if (r.panels.length) { const c = {}; for (const q of r.panels) c[q.type] = (c[q.type] || 0) + 1; log(`📇 정보 카드 ${r.panels.length}판(낱말 ${c.words || 0} · 구간 표지 ${c.cover || 0} · 표 ${c.table || 0} · 확인표 ${c.check || 0}) · 표시 줄 ${parsed.marks.length}개`); }
@@ -2936,7 +2936,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsOptsFor(pr), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsOptsFor(pr, preset), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
@@ -2949,7 +2949,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
   } else if (r.cancelled) log('⏹ MP4 렌더 중단됨 — .vrew 는 남아 있습니다');
   else log(`✗ 유튜브 MP4 실패 — ${r.error} (.vrew 는 남아 있으니 Vrew 에서 내보내기 할 수 있습니다)`);
   // ⬆ 채널에 「자동 업로드」가 켜져 있으면 비공개로 올린다 — **기다리지 않는다**(큐의 다음 대본이 멈추지 않게).
-  if (r.ok && pr) { try { maybeAutoUpload(pr, r.output || outPath, preset, ctx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
+  if (r.ok && pr) { try { maybeAutoUpload(pr, r.output || outPath, preset, ctx, true); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
   return r;
 }
 
@@ -2963,15 +2963,27 @@ let ytPending = 0;
 S.ytAbort = false;
 function ytSend(p) { try { win.webContents.send('yt-progress', p); } catch (_) {} }
 /** 한 편 → 업로드 메타(제목·설명·태그). 음성 길이로 챕터를 계산하므로 DTO 를 그 자리에서 만든다. */
-function ytMetaFor(pr, ctx = null) {
+function ytMetaFor(pr, ctx = null, pausePreset = null) {   // pausePreset = 유튜브 MP4(.vrew 로 구운 것)일 때만 그 채널 — ⏸ 막간 쉼만큼 챕터 시각을 민다(화이트보드는 쉼이 없다)
   const parsed = ctx ? ctx.parsed : S.parsed;
   const scriptPath = ctx ? ctx.scriptPath : S.scriptPath;
   const dto = P.toDTO(parsed);
   const dp = ((dto && dto.projects) || []).find((x) => x.shortsNum === pr.shortsNum) || null;
+  if (dp && pausePreset) addPausesToDtoProject(dp, pr, P.pausePlanOf(pr, pausePreset).map);
   const meta = require('./core/yt-packaging').buildUploadMeta({ scriptPath, dtoProject: dp, fallbackTitle: vrewBaseName(pr, ctx) });
   // 🌏 영상 언어 = 문장 다수결(일본어·베트남어). 한국어·판별 불가는 ko — 예전 그대로.
   meta.language = ytLangOf(pr);
   return meta;
+}
+// ⏸ 막간 쉼 — DTO 편(cuts[].sentences[].dur · groupDurationSec)에 쉼을 더한다(챕터 = .vrew 와 같은 시각). 그룹·문장 순서는 toDTO 와 같다.
+function addPausesToDtoProject(dp, pr, map) {
+  if (!map || !map.size || !dp || !Array.isArray(dp.cuts)) return;
+  pr.groups.forEach((g, gi) => {
+    const c = dp.cuts[gi]; if (!c || !Array.isArray(c.sentences)) return;
+    pr.getSentencesOfGroup(g).forEach((s, si) => {
+      const add = map.get(s.id), st = c.sentences[si];
+      if (add > 0 && st && Number(st.dur) > 0) { st.dur += add; c.groupDurationSec = (Number(c.groupDurationSec) || 0) + add; }
+    });
+  });
 }
 function ytLangOf(pr) {
   const Lang = require('./core/lang');
@@ -3159,13 +3171,13 @@ async function runYtUpload({ file, channelId, meta, force = false }) {
   return r;
 }
 /** 렌더가 끝난 뒤 — 채널에 자동 업로드가 켜져 있을 때만. 이미 올린 파일이면 건너뛴다. */
-function maybeAutoUpload(pr, file, preset, ctx = null) {
+function maybeAutoUpload(pr, file, preset, ctx = null, isVrewMp4 = false) {   // isVrewMp4 = .vrew 로 구운 유튜브 MP4(⏸ 막간 쉼이 들어 있다 — 챕터를 민다)
   if (!preset || !preset.ytAuto) return;
   if (!preset.ytChannelId) { log('⚠ 자동 업로드가 켜져 있지만 올릴 채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); return; }
   const YT = require('./core/youtube-upload');
   const done = YT.findUploaded(preset.ytChannelId, file);
   if (done) { log(`⏭ 유튜브 업로드 건너뜀 — 이 파일은 ${done.at} 에 이미 올렸습니다 (https://youtu.be/${done.videoId})`); return; }
-  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx) });
+  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null) });
 }
 ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
 // ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
@@ -3241,7 +3253,7 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
     for (const pr of S.parsed.projects) {
       const file = ytFileFor(pr, ctx, preset, isWb);
       if (!fs.existsSync(file)) throw new Error(`${kindName} 가 없습니다 — ④ 완성을 「${isWb ? '✏ 화이트보드 MP4' : '🎬 유튜브 MP4'}」로 두고 ⚡ 만들기를 먼저 하세요.\n(찾은 위치: ${file})`);
-      const meta1 = ytMetaFor(pr, ctx);
+      const meta1 = ytMetaFor(pr, ctx, isWb ? null : preset);
       // 🛡 같은 파일·같은 제목·유튜브 채널의 같은 제목 — 하나라도 있으면 묻는다(「한 번 더」를 고르면 force 로 통과)
       const dup = await YT.checkDuplicate({ channelId: chId, file, title: meta1.title });
       if (dup.warn) log(`⚠ ${dup.warn}`);
@@ -3267,7 +3279,7 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
     fileFor: (pr, ctx, preset) => ytFileFor(pr, ctx, preset, isWb),
     exists: (f) => fs.existsSync(f), findUploaded: (ch, f) => YT.findUploaded(ch, f),
   });
-  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx) });
+  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx, isWb ? null : j.preset) });
   log(`⬆ 큐 전체 업로드 — ${jobs.length}편 줄 세움${skipped.length ? ` · 건너뜀 ${skipped.length}편` : ''}`);
   for (const s of skipped) log(`   ⏭ ${s}`);
   return { queued: jobs.length, skipped: skipped.length };
@@ -3293,7 +3305,7 @@ function planQueueUploads(items, o) {
       if (jobs.some((j) => j.channelId === chId && j.file === file)) continue;   // 같은 대본이 큐에 두 번
       const done = o.findUploaded(chId, file);
       if (done) { skipped.push(`${name} — ${done.at} 에 이미 올림 (https://youtu.be/${done.videoId})`); continue; }
-      jobs.push({ pr, ctx, file, channelId: chId });
+      jobs.push({ pr, ctx, file, channelId: chId, preset });
     }
   }
   return { jobs, skipped };
@@ -7866,7 +7878,7 @@ async function runMakeAllBody(opts = {}) {
         let vrewReady = false;
         // ⬆ 다시 굽지 않고 넘어가도, 채널에 아직 없으면 올린다(v0.6.97 · 로이 「만들기만 누르면 MP4 확인 → 안 올라갔으면 업로드」).
         //   멈췄다 다시 만들기 · 업로드만 중단했던 대본이 빠지던 빈틈. 중복은 runYtUpload 관문(같은 파일 · 이 PC 같은 제목 · 채널의 같은 제목)이 거른다.
-        const uploadExisting = () => { if (mp4Go && preset && preset.ytAuto && fs.existsSync(mp4Path)) { try { maybeAutoUpload(pr, mp4Path, preset, runCtx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } } };
+        const uploadExisting = () => { if (mp4Go && preset && preset.ytAuto && fs.existsSync(mp4Path)) { try { maybeAutoUpload(pr, mp4Path, preset, runCtx, true); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } } };
         if (utd.vrewOk && (!mp4Go || utd.mp4Ok)) {
           log(`⏭ ${pr.title} — 입력이 그대로이고 ${mp4Go ? '.vrew·MP4 가' : '.vrew 가'} 이미 있어 다시 만들지 않습니다 (강제로 다시 만들려면 .priming-build 폴더의 기록을 지우세요)`);
           uploadExisting();

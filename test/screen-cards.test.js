@@ -201,7 +201,7 @@ const SCRIPT = [
     const pj2 = P.parseScriptText(SCRIPT.replace('+0', '+1'), 'longform', {}).projects[0];
     ok(JSON.stringify(P.vrewInputsOf(pj2, null, 20).cards) !== JSON.stringify(a.cards), '마커를 바꾸면 지문이 달라진다(MP4 를 다시 굽는다)');
     const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    ok(/cards: cardsOptsFor\(pr\)/.test(M) && /function cardsOptsFor/.test(M) && /screenCards = _mk|proj\.screenCards = screenCards/.test(M), 'main: MP4 렌더에 카드를 넘기고 · 작업본 이어받기에서도 마커를 .md 에서 다시 읽는다');
+    ok(/cards: cardsOptsFor\(pr(, preset)?\)/.test(M) && /function cardsOptsFor/.test(M) && /screenCards = _mk|proj\.screenCards = screenCards/.test(M), 'main: MP4 렌더에 카드를 넘기고 · 작업본 이어받기에서도 마커를 .md 에서 다시 읽는다');
   }
   console.log('\n[6] 🇯🇵 일본어 카드 — 해설·낱말 · 화자 줄 때= · 모르는 칸 무시 · 일본어 글꼴 (v0.9.7)');
   {

@@ -533,6 +533,7 @@ export default function App() {
   const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top)
   const [capXOff, setCapXOff] = useState(0);            // 📐 가로 미세(Vrew xOffset — 1 = 화면 폭 절반, + = 오른쪽) · 채널 capLong.xOffset
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
+  const [cardPause, setCardPause] = useState(0);   // ⏸ 채널 「막간 쉼(초)」 — ② 클립 칸 📜 카드 표시에 ⏸ N초
   const [aiNotice, setAiNotice] = useState(false); // AI 고지 — 작업바 체크박스(기본 ON, 마운트 시 세팅)
   // 🔴 .vrew 출력 방식 — 'full'(전체) / 'audio'(음성만, 이미지 없이) / 'visual'(화면만, TTS 없이).
   //   'visual' 은 음성을 **Vrew 에서** 만들 때 쓴다 → 완성 후 「📥 Vrew 음성」으로 되가져온다.
@@ -913,6 +914,7 @@ export default function App() {
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       setAiCfg(p.aiNotice && typeof p.aiNotice === 'object' ? p.aiNotice : {});   // 🏷 AI 고지 문구·시각(① 칸 미리보기 · v0.6.88)
+      setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼
       const prof = (modeProfiles && modeProfiles[mode]) || {};
       const cap = p.capLong;
       if (cap) {
@@ -953,6 +955,7 @@ export default function App() {
       if (!p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });
+      setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼(채널편집에서 바꾼 값)
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetRev]);
@@ -3298,6 +3301,7 @@ export default function App() {
       // 🎵 배경음악 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다
       bgmOn: !!p.bgmOn, bgmPath: p.bgmPath || '', bgmVolume: p.bgmVolume != null ? p.bgmVolume : 15,
       infoCards: !!p.infoCards,   // 📇 정보 카드(낱말·구간 표지·표·확인표)
+      interludePauseSec: Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0,   // ⏸ 막간 쉼(초) — ⚠ 안 실으면 저장할 때 지워진다
       logoOn: !!p.logoOn, logoPath: p.logoPath || '', logoSize: p.logoSize != null ? p.logoSize : 12, logoX: p.logoX != null ? p.logoX : '', logoY: p.logoY != null ? p.logoY : '', kbSeg: VLook.normKbSeg(p.kbSeg), dissolveSec: VLook.normDissolve(p.dissolveSec), fx: VLook.normFxChan(p.fx),   // 🏷 채널 로고(+ 기본 자리 % — 비면 오른쪽 위)
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
@@ -3795,6 +3799,7 @@ export default function App() {
       kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
       dissolveSec: VLook.normDissolve(ch.dissolveSec),   // 🌫 채널 디졸브 — ⚠ 안 실으면 저장할 때 지워진다
       infoCards: !!ch.infoCards,   // 📇 정보 카드 — ⚠ 안 실으면 저장할 때 지워진다
+      interludePauseSec: Math.max(0, Math.min(15, numOr(ch.interludePauseSec, 0))),   // ⏸ 막간 쉼(초 · 0 = 끔) — ⚠ 안 실으면 저장할 때 지워진다
       fx: VLook.normFxChan(ch.fx),   // 🌫 채널 오버레이 모션 — ⚠ 안 실으면 저장할 때 지워진다
       ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
@@ -6196,7 +6201,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
             onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -6643,6 +6648,14 @@ export default function App() {
                       <div className="crow stack"><span className="l">📇 정보 카드</span>
                         <button data-testid="ch-infocards" aria-pressed={!!ch.infoCards} className={'dl-tg' + (ch.infoCards ? ' on' : '')} onClick={() => setCh({ ...ch, infoCards: !ch.infoCards })}>{ch.infoCards ? '✓ 켬' : '끔'}</button>
                         <Hint>대본의 🔤 낱말 · 📊 표 · ✅ 확인 줄을 화면에 얹고, ## 구간마다 표지(N / M · 진행 막대)를 자동으로 넣습니다. 🎬 유튜브 MP4 에만 나옵니다. 꺼 두면 표시 줄이 있어도 무시합니다.</Hint>
+                      </div>
+                    </div>
+                    <div className="col" data-testid="pause-row">
+                      <div className="crow stack"><span className="l">⏸ 막간 쉼</span>
+                        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input className="n" data-testid="ch-interlude-pause" style={{ flex: '0 0 62px', width: 62 }} type="number" step="1" min="0" max="15" value={ch.interludePauseSec ?? 0} onChange={(e) => setCh({ ...ch, interludePauseSec: e.target.value })} /><span className="meta">초 (0 = 끔)</span>
+                        </span>
+                        <Hint>대본의 「📜 화면카드: 막간」 줄마다, 장 제목 문장(때= · +N 이면 마지막 문장)을 읽고 난 뒤 이만큼 소리 없이 쉽니다. 쉬는 동안 막간 카드는 그대로 떠 있고 자막은 비웁니다. 해설·낱말·병기 카드에는 붙지 않습니다. 대본은 바꾸지 않으며, 카드 줄에 「| 쉼=3」을 쓰면 그 카드만 3초(0 = 쉬지 않음). 🎬 .vrew·유튜브 MP4 를 만들 때 들어갑니다(음성 다시 만들기 필요 없음).</Hint>
                       </div>
                     </div>
                     <div className="col" data-testid="logo-row">
@@ -7612,7 +7625,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename }) {
+function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -7754,13 +7767,14 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
           return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
-            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0].join('#');
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0, cardPause || 0].join('#');   // ⏸ 채널 막간 쉼(📜 카드 표시의 ⏸ N초)
         };
         return (
           <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
             <h2>🎞 {dto.mode === 'longform'
               ? (dto.fileTitle || pr.title)
               : <>{dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title}</>} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
+              {pr.cardBad && <span className="card-bad" data-testid="card-bad" title={pr.cardBad.join('\n') + '\n→ 이 카드들은 🎬 유튜브 MP4 에서 건너뜁니다(대본의 카드 줄을 고치세요)'}>⚠ 📜 카드 {pr.cardBad.length}줄 문장 못 찾음</span>}
               {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
               <span className="cardbtns">
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
@@ -7897,7 +7911,17 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                           const ord = gs + si;
                           // ➕ (개요 보기) 이 줄(클립)이 삽입의 시작이면 표시 — 🎵 오디오 · 그림 썸네일 · 🎬 영상
                           const insHere = !vrewLay && onInsMark ? insMarksAt(pr, _pl && _pl.list, l.n) : [];
-                          const insMarks = insHere.length ? (
+                          // 📜 이 문장에서 뜨는 화면 카드(v0.9.25 · 문장 첫 줄에만) — 시작 = 종류 · +N 이어짐 = 옅은 📜… · ⏸ = 끝 문장 뒤 쉼(칸 쉼= > 채널 막간 쉼)
+                          const cm = li === 0 && s.card ? s.card : null;
+                          const cmPause = cm && cm.last ? (cm.pause != null ? cm.pause : (cm.interlude ? (cardPause || 0) : 0)) : 0;
+                          const cardMark = cm ? (
+                            <span className={'card-mark' + (cm.role === 'cont' ? ' cont' : '')} data-testid="card-mark" data-role={cm.role}
+                              title={cm.tip + (cm.role === 'cont' ? '\n(앞 문장에서 이어지는 카드 — 이 문장 동안에도 떠 있음)' : '') + (cmPause > 0 ? `\n⏸ 이 문장 소리가 끝난 뒤 ${cmPause}초 쉼 — 그동안 카드만 보이고 자막은 없음` : '') + '\n🎬 유튜브 MP4 에만 나옵니다'}>
+                              <span className="cm-ic">{cm.role === 'cont' ? '📜…' : '📜'}</span>{cm.role === 'start' ? <span className="cm-k">{cm.label}</span> : null}
+                              {cmPause > 0 ? <span className="cm-p" data-testid="card-pause">⏸{cmPause}초</span> : null}
+                            </span>
+                          ) : null;
+                          const insMarks = (insHere.length || cardMark) ? (
                             <span className="ins-marks" data-testid="ins-marks">
                               {insHere.map((o) => (
                                 <button key={o.id} className={'ins-mark ' + o.kind} data-testid="ins-mark" data-kind={o.kind}
@@ -7907,6 +7931,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                   {o.kind === 'image' ? <img src={media(o.file, o.version)} alt="" /> : (o.kind === 'video' ? '🎬' : '🎵')}
                                 </button>
                               ))}
+                              {cardMark}
                             </span>
                           ) : null;
                           if (detail) {
@@ -7920,6 +7945,8 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                 onDragOver={onClipMove ? (ev) => _S.onClipMove('over', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}
                                 onDrop={onClipMove ? (ev) => _S.onClipMove('drop', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}>
                                 {vrewLay ? null : insMarks}
+                                {/* 📜 Vrew 모양 — 왼쪽 레인 열(삽입 그림 썸네일 아래)에 카드 자리 · 이 줄에서 시작하는 삽입 그림이 있으면 그 아래로 */}
+                                {vrewLay && cardMark ? <span className={'card-slot' + (onInsMark && insMarksAt(pr, _pl && _pl.list, l.n).length ? ' below' : '')}>{cardMark}</span> : null}
                                 {/* ↕ 번호 칸을 잡고 끌면 클립 옮기기(체크한 클립 모두 · 체크 안 했으면 이 클립 하나) — 다른 클립의 위·아래 절반에 놓는다 */}
                                 <div className="clip-no cf-lineno" title={'이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체' + (onClipMove ? '\n↕ 끌어서 옮기기 — 체크한 클립 모두(체크 안 했으면 이 클립) · 다른 그룹에 놓으면 그 그룹 그림·영상' : '')}
                                   draggable={!!onClipMove && !lineEd}

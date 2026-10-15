@@ -83,6 +83,8 @@ function toDTO(parseResult) {
       let capN = 0; // 자막 줄 넘버링 — 그룹을 넘어 편 전체에서 이어짐
       // 📄 대본(.md) 문단 번호 — 문장 순서로 맞춰 붙인다(고친 문장은 못 맞추면 null = 앞 문장과 같은 문단 · v0.8.9)
       const _para = pr.readerParas ? require('./script-reader').alignParas(pr.sentences || [], pr.readerParas) : null;
+      // 📜 화면 카드 자리(v0.9.25 · ② 클립 칸 왼쪽 표시) — 대본 카드 줄이 가리킨 문장 · 못 찾은 줄은 cardBad
+      const _cm = (Array.isArray(pr.screenCards) && pr.screenCards.length) ? (() => { try { return require('./screen-cards').marksBySentence(pr, pr.screenCards); } catch (_) { return null; } })() : null;
       return {
         shortsNum: pr.shortsNum,   // 편 주소 키(롱폼=1 고정) — 스냅샷·IPC 호환을 위해 이름 유지
         title: pr.title,
@@ -94,6 +96,7 @@ function toDTO(parseResult) {
         logoPos: pr.logoPos || null,
         logoOver: pr.logoOver || null,
         capAll: pr.capAll || null,   // 🌐 이 대본 「모든 자막」 서식(새 문장에도 저절로 · v0.6.87)   // 🏷 이 대본 로고 넣기/빼기(큐 일괄 · 없으면 채널 설정대로)   // 🏷 ① 칸에서 끌어 옮긴 자리 {x,y}(있으면 위 자리보다 이긴다)
+        cardBad: (_cm && _cm.bad.length) ? _cm.bad : null,   // 📜 문장을 못 찾아 MP4 에서 건너뛸 카드 줄(경고 글)
         readerNotes: (pr.readerNotes && pr.readerNotes.length) ? pr.readerNotes : null,   // 📝 대본 읽기 전용 메모(장 제목 아래)
         roy: pr._roy ? require('./roy-marks').countMarks(pr._roy.marks) : null,   // 🟥·🟨 개수 {exp, expOpen, int, lost} — 대본 보기 머리
         ttsVoice: pr.ttsVoice || null,   // 🎙 이 대본 목소리(리본 🔊 음성 설정) — 없으면 채널 목소리
@@ -125,6 +128,7 @@ function toDTO(parseResult) {
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
+              card: (_cm && _cm.bySid.get(s.id)) || null,   // 📜 이 문장에서 뜨는 화면 카드 {label, role:start|cont, last, tip, pause, interlude}
               mark: s.chapterMark || null,   // 합친 그룹 안의 챕터 경계 {h2, phase} — 유튜브 타임스탬프가 여기서 가른다
               breaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null,
               marks: s.capMarks || null,   // ✂🤖 Claude 끊어 읽기 자리(core/cap-marks) — 화면 줄 나누기도 같은 자리   // ✂ 사람이 정한 자막 줄 나눔(문장 글자 위치)
@@ -674,6 +678,23 @@ async function fillSilentYield(project, workDir) {
   }
 }
 
+// ⏸ 막간 쉼 계획 — 채널 「막간 쉼(초)」(preset.interludePauseSec) + 대본 카드 줄의 `쉼=`. 카드 줄이 없으면 빈 계획(= 예전과 같다).
+//   시각을 쓰는 곳(.vrew 빌드 · 화면 카드 · 정보 카드 · 유튜브 챕터)이 모두 이것 하나를 본다 — 하나라도 빠지면 막간마다 N초씩 밀린다.
+function pausePlanOf(project, preset) {
+  if (!project || !Array.isArray(project.screenCards) || !project.screenCards.length) return { map: new Map(), list: [], total: 0, warnings: [] };
+  return require('./screen-cards').pausesOf(project, project.screenCards, preset && preset.interludePauseSec);
+}
+// 음성 파일 → 끝에 무음을 붙여 정확히 durSec 인 wav(24kHz mono) · 비동기(main 을 멈추지 않는다)
+function padAudioTo(src, out, durSec) {
+  return new Promise((resolve) => {
+    if (!ffmpegPath || !fs.existsSync(src)) return resolve(false);
+    const d = (Math.round(durSec * 1000) / 1000).toFixed(3);
+    const p = require('child_process').spawn(ffmpegPath, ['-y', '-i', src, '-af', `apad=whole_dur=${d}`, '-t', d, '-ar', '24000', '-ac', '1', '-codec:a', 'pcm_s16le', out], { stdio: 'ignore', windowsHide: true });
+    p.on('error', () => resolve(false));
+    p.on('close', (code) => resolve(code === 0 && fs.existsSync(out)));
+  });
+}
+
 // ── .vrew 내보내기 (편별) ───────────────────────────────
 // 🔑 .vrew 를 결정하는 입력 전부 — buildProjectVrew 가 읽는 것과 **같은 조건**으로 모은다(건너뛰기 지문의 재료).
 //   ⚠ buildProjectVrew 에 새 입력을 넣으면 여기도 같이 넣을 것(빠뜨리면 바뀐 설정이 반영되지 않은 채 건너뛴다) — test:buildfp 가 소스로 대조한다.
@@ -687,6 +708,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     capAll: project.capAll || null,   // 🌐 「모든 자막」 서식 — 바꾸면 .vrew 를 다시 만든다
   };
   if (Array.isArray(project.screenCards) && project.screenCards.length) inp.cards = require('./screen-cards').signatureOf(project.screenCards);   // 📜 화면 카드 마커 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
+  { const pz = pausePlanOf(project, preset); if (pz.list.length) inp.pauses = pz.list.map((x) => x.id + ':' + x.sec); }   // ⏸ 막간 쉼 — .vrew 음성 길이가 달라진다
   if (preset) {
     if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
@@ -718,9 +740,23 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
   }
   if (Array.isArray(project.overlays) && project.overlays.length) opts.overlays = project.overlays;   // 🔝 위층 그림·영상
   if (project.capAll) opts.capAll = project.capAll;   // 🌐 대본 「모든 자막」 서식(문장 덮어쓰기 아래층)
-  return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
+  // ⏸ 막간 쉼(v0.9.25) — 막간 카드 끝 문장의 음성 뒤에 무음을 덧댄 **임시 사본**으로 빌드한다(문장 객체·tts-N 원본은 그대로 · 빌드가 끝나면 임시 파일을 지운다)
+  const pz = pausePlanOf(project, preset);
+  if (!pz.list.length) return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pm-pause-'));
+  try {
+    const padded = new Map();
+    for (const s of project.sentences) {
+      const sec = pz.map.get(s.id); if (!sec || !s.ttsAudioPath || !(s.ttsDurationSec > 0)) continue;
+      const out = path.join(tmp, `p${padded.size}.wav`);
+      if (!(await padAudioTo(s.ttsAudioPath, out, s.ttsDurationSec + sec))) throw new Error(`막간 쉼 — 문장 ${s.num} 음성에 무음을 덧대지 못했습니다(ffmpeg)`);
+      padded.set(s.id, { ttsAudioPath: out, ttsDurationSec: s.ttsDurationSec + sec });
+    }
+    if (logger) logger(`⏸ 막간 쉼 ${padded.size}곳 · ${Math.round(pz.total * 10) / 10}초 (${pz.list.map((x) => '대본 ' + x.line + '줄 ' + x.sec + '초').slice(0, 4).join(' · ')}${pz.list.length > 4 ? ' …' : ''}) — 그 문장 소리가 끝난 뒤 무음 · 카드는 무음 동안 그대로`);
+    const sentences = project.sentences.map((s) => (padded.has(s.id) ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, padded.get(s.id)) : s));
+    return await buildVrew({ sentences, groups: project.groups, vrewPath, opts });
+  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 }
-
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
 // 모든 이미지 엔진(Genspark/Flow/…) 공통 최종 프롬프트 빌더 — 엔진이 달라도 동일 프롬프트 보장.
@@ -1088,7 +1124,7 @@ function sanitize(name) {
 
 module.exports = { setRoyHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
-  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, sanitize,
+  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,

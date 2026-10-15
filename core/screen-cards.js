@@ -68,59 +68,136 @@ function markersOf(rawText) {
 /** 지문·작업본용 — 마커 줄 글만(바뀌면 MP4 를 다시 굽는다) */
 const signatureOf = (markers) => (markers || []).map((m) => m.raw);
 
-/**
- * 카드 계획 — 마커 + 프로젝트(문장·그룹·음성 길이) → 카드 목록 + 경고.
- *   시간은 .vrew 타임라인과 같은 규칙(fx-overlay.planOf): 그룹 순서대로, 각 그룹의 문장 중 음성(ttsDurationSec)이 있는 것을 이어 붙인다.
- * @returns {{cards: Array<{kind, t0, t1, orig: string[], trans: string[], line:number}>, warnings: string[]}}
- */
-function plan(project, markers) {
-  const warnings = [], cards = [];
-  const list = (markers || []);
-  if (!list.length || !project) return { cards, warnings };
+// ⏸ 막간 쉼(v0.9.25 · 채널사업부 요청 2026-10-15 — 「장이 시작할 때 잠깐 쉬는 틈」):
+//   채널 「막간 쉼(초)」(preset.interludePauseSec · 기본 0 = 꺼짐) → **막간** 카드의 끝 문장(`때=`·`문장=` 의 +N 마지막) 소리가 끝난 뒤 N초 무음.
+//   카드는 무음 동안에도 떠 있고(t1 이 무음 끝) 그동안 아래 자막은 가린다(MP4). 해설·낱말·병기에는 채널 값을 붙이지 않는다(진행자 말이 이어지는 자리).
+//   카드 줄 칸 `쉼=<초>` = 그 카드만 덮어쓰기(어느 종류든 · 0 = 끄기). 대본은 바꾸지 않는다 — 무음은 .vrew 를 만들 때 그 문장 음성 뒤에 덧댄다(pipeline.buildProjectVrew).
+//   🔑 시각을 쓰는 곳(화면 카드 · 정보 카드 · 유튜브 챕터)은 모두 withPauses 로 같은 무음을 넣은 시각을 본다 — 빠뜨리면 막간마다 N초씩 밀린다.
+const PAUSE_MAX = 15;        // 쉼 상한(초)
+const PAUSE_KIND = '막간';    // 채널 값이 붙는 종류(이름)
+
+/** 대본 순서 문장 목록(시각 없이) — 열쇠 맞추기용 */
+function sentsOf(project) {
   const byId = new Map((project.sentences || []).map((s) => [s.id, s]));
-  // 문장 목록(대본 순서) + 그룹 이름 + 시각
-  const sents = []; let t = 0;
+  const out = [];
   for (const g of (project.groups || [])) {
     for (const id of (g.sentenceIds || [])) {
       const s = byId.get(id); if (!s) continue;
       const d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : 0;
-      sents.push({ s, text: String(s.text || ''), key: norm(s.text), phase: norm(g.phase || g.title || ''), t0: t, t1: t + d, sound: d > 0 });
-      t += d;
+      out.push({ s, text: String(s.text || ''), key: norm(s.text), phase: norm(g.phase || g.title || ''), d, sound: d > 0 });
     }
   }
-  const find = (m, a, label) => {
-    const k = norm(a.text);
-    if (k.length < MIN_KEY) return { err: `${label} 앞부분이 너무 짧습니다(공백·문장부호 빼고 ${MIN_KEY}글자 이상) — 「${a.text}」` };
-    const hd = norm(m.heading);
-    const all = sents.map((x, i) => (x.key.startsWith(k) ? i : -1)).filter((i) => i >= 0);
-    const scoped = hd ? all.filter((i) => sents[i].phase === hd) : [];
-    const use = scoped.length ? scoped : all;   // 그룹 이름이 안 맞으면(분할 방식에 따라 다름) 대본 전체에서 찾는다
-    if (!use.length) return { err: `${label} 문장을 찾지 못했습니다 — 「${a.text}」 로 시작하는 낭독 문장이 없습니다` };
-    if (use.length > 1) return { err: `${label} 문장이 ${use.length}개 맞습니다 — 앞부분을 더 길게 써 주세요(「${a.text}」)` };
-    return { i: use[0] };
-  };
-  const take = (i, extra, label) => {
-    const out = [];
-    for (let k = i; k <= i + extra; k++) { if (!sents[k]) return { err: `${label} 뒤로 ${extra}문장을 이을 수 없습니다(대본이 끝남)` }; out.push(sents[k]); }
-    return { rows: out };
-  };
+  return out;
+}
+function findIn(sents, m, a, label) {
+  const k = norm(a.text);
+  if (k.length < MIN_KEY) return { err: `${label} 앞부분이 너무 짧습니다(공백·문장부호 빼고 ${MIN_KEY}글자 이상) — 「${a.text}」` };
+  const hd = norm(m.heading);
+  const all = sents.map((x, i) => (x.key.startsWith(k) ? i : -1)).filter((i) => i >= 0);
+  const scoped = hd ? all.filter((i) => sents[i].phase === hd) : [];
+  const use = scoped.length ? scoped : all;   // 그룹 이름이 안 맞으면(분할 방식에 따라 다름) 대본 전체에서 찾는다
+  if (!use.length) return { err: `${label} 문장을 찾지 못했습니다 — 「${a.text}」 로 시작하는 낭독 문장이 없습니다` };
+  if (use.length > 1) return { err: `${label} 문장이 ${use.length}개 맞습니다 — 앞부분을 더 길게 써 주세요(「${a.text}」)` };
+  return { i: use[0] };
+}
+function takeIn(sents, i, extra, label) {
+  const out = [];
+  for (let k = i; k <= i + extra; k++) { if (!sents[k]) return { err: `${label} 뒤로 ${extra}문장을 이을 수 없습니다(대본이 끝남)` }; out.push(k); }
+  return { idx: out };
+}
+/** 마커 하나 → 가리킨 문장 번호(sents 의 index) · 칸별 묶음. 소리 검사는 하지 않는다(대본 보기도 쓴다). */
+function resolveMarker(sents, m) {
+  if (!m.kind) return { err: `종류 「${m.kindName}」 를 모릅니다(${Object.keys(KINDS).join(' · ')})` };
+  if (m.f['때']) {
+    const r = findIn(sents, m, m.f['때'], '때'); if (r.err) return r;
+    const tk = takeIn(sents, r.i, m.f['때'].extra, '때'); if (tk.err) return tk;
+    return { idx: tk.idx, by: { '때': tk.idx }, literal: true };
+  }
+  if (m.f['제목'] && !m.f['문장']) return { err: '제목= 은 때= 와 함께 써야 합니다(때=<낭독 문장 앞부분>)' };
+  const need = m.kind === 'pair' ? ['원문', '번역'] : ['문장'];
+  const miss = need.filter((k) => !m.f[k]);
+  if (miss.length) return { err: `${miss.join('·')}= 칸이 없습니다` };
+  const by = {};
+  for (const k of need) {
+    const r = findIn(sents, m, m.f[k], k); if (r.err) return r;
+    const tk = takeIn(sents, r.i, m.f[k].extra, k); if (tk.err) return tk;
+    by[k] = tk.idx;
+  }
+  return { idx: need.flatMap((k) => by[k]), by, need };
+}
+/** 카드 끝 문장(시간상 마지막) — 쉼이 붙는 자리 */
+const lastOf = (idx) => Math.max(...idx);
+/** 그 카드의 쉼(초) — 칸 `쉼=` 이 이기고, 없으면 막간만 채널 값. → { sec, err? } */
+function pauseFor(m, defSec) {
+  if (m.f['쉼']) {
+    const raw = String(m.f['쉼'].raw).replace(/\s*초$/, '');
+    const v = Number(raw);
+    if (!(raw !== '' && isFinite(v) && v >= 0)) return { sec: 0, err: `쉼= 값은 0 이상 숫자(초)만 쓸 수 있습니다(「${m.f['쉼'].raw}」) → 쉬지 않습니다` };
+    return { sec: Math.min(PAUSE_MAX, v), explicit: true };
+  }
+  const d = Number(defSec);
+  return { sec: (m.kindName === PAUSE_KIND && isFinite(d) && d > 0) ? Math.min(PAUSE_MAX, d) : 0 };
+}
+
+/**
+ * ⏸ 막간 쉼 — 어느 문장 뒤에 몇 초를 넣나. 카드가 그려지는 조건(문장을 찾음 · 음성 있음)과 같은 조건에서만 넣는다.
+ * @returns {{ map: Map<string, number>, list: Array<{id, sec, line}>, total: number, warnings: string[] }}
+ */
+function pausesOf(project, markers, defSec) {
+  const map = new Map(), list = [], warnings = [];
+  if (!project || !(markers || []).length) return { map, list, total: 0, warnings };
+  const sents = sentsOf(project);
+  for (const m of markers) {
+    const p = pauseFor(m, defSec);
+    if (p.err) warnings.push(`📜 화면카드 ${m.line}줄 — ${p.err}`);
+    if (!(p.sec > 0)) continue;
+    const r = resolveMarker(sents, m); if (r.err) continue;            // 카드가 안 그려지면 쉼도 없다(경고는 plan 이 낸다)
+    if (r.idx.some((i) => !sents[i].sound)) continue;
+    const id = sents[lastOf(r.idx)].s.id;
+    if (map.has(id)) { if (p.sec > map.get(id)) { map.set(id, p.sec); list.find((x) => x.id === id).sec = p.sec; } continue; }   // 같은 문장에 두 카드 — 긴 쪽 하나
+    map.set(id, p.sec); list.push({ id, sec: p.sec, line: m.line });
+  }
+  return { map, list, total: list.reduce((a, x) => a + x.sec, 0), warnings };
+}
+/** 쉼을 넣은 시각으로 본 프로젝트 사본(문장 객체만 새로 · 원본 불변) — 시각을 계산하는 곳(정보 카드·챕터)에 넘긴다 */
+function withPauses(project, map) {
+  if (!project || !map || !map.size) return project;
+  const sentences = (project.sentences || []).map((s) => (map.has(s.id) && s.ttsAudioPath && s.ttsDurationSec > 0 ? { ...s, ttsDurationSec: s.ttsDurationSec + map.get(s.id) } : s));
+  return { ...project, sentences };
+}
+
+/**
+ * 카드 계획 — 마커 + 프로젝트(문장·그룹·음성 길이) → 카드 목록 + 경고.
+ *   시간은 .vrew 타임라인과 같은 규칙(fx-overlay.planOf): 그룹 순서대로, 각 그룹의 문장 중 음성(ttsDurationSec)이 있는 것을 이어 붙인다.
+ *   opts.pauseSec = 채널 「막간 쉼(초)」 — 쉼이 붙은 카드는 무음 끝까지 뜨고(t1) pauseSec 를 단다(렌더가 그 구간 자막을 가린다).
+ * @returns {{cards: Array<{kind, t0, t1, orig: string[], trans: string[], line:number, pauseSec?:number}>, warnings: string[], pauses: object}}
+ */
+function plan(project, markers, opts = {}) {
+  const warnings = [], cards = [];
+  const list = (markers || []);
+  if (!list.length || !project) return { cards, warnings, pauses: { map: new Map(), list: [], total: 0, warnings: [] } };
+  const pz = pausesOf(project, list, opts.pauseSec);
+  warnings.push(...pz.warnings);
+  // 문장 목록(대본 순서) + 그룹 이름 + 시각(쉼 포함)
+  const sents = sentsOf(project); let t = 0;
+  for (const x of sents) { const p = x.sound ? (pz.map.get(x.s.id) || 0) : 0; x.t0 = t; x.t1 = t + x.d + p; x.pause = p; t = x.t1; }
   for (const m of list) {
     const tag = `📜 화면카드 ${m.line}줄`;
     const bad = (why) => warnings.push(`${tag} — ${why} → 이 카드만 건너뜁니다`);
-    if (!m.kind) { bad(`종류 「${m.kindName}」 를 모릅니다(${Object.keys(KINDS).join(' · ')})`); continue; }
     // 🙈 `자막=숨김` — 이 카드가 뜨는 동안만 아래 자막(낭독 글)을 가린다(카드 글과 겹쳐 보이지 않게 · 기본 = 안 가림). 다른 값은 경고하고 자막은 그대로 둔다.
     let hide = false;
-    if (m.f['자막']) { if (/^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) hide = true; else warnings.push(`${tag} — 자막= 값은 「숨김」만 쓸 수 있습니다(「${m.f['자막'].raw}」) → 자막은 그대로 보입니다`); }
+    if (m.kind && m.f['자막']) { if (/^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) hide = true; else warnings.push(`${tag} — 자막= 값은 「숨김」만 쓸 수 있습니다(「${m.f['자막'].raw}」) → 자막은 그대로 보입니다`); }
+    const r = resolveMarker(sents, m);
+    if (r.err) { bad(r.err); continue; }
+    const rows = r.idx.map((i) => sents[i]);
+    let card;
     // 🅱 `때=` 꼴 — 글자는 적은 그대로 · 낭독 문장은 시간만
-    if (m.f['때']) {
+    if (r.literal) {
       const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
-      const r = find(m, m.f['때'], '때'); if (r.err) { bad(r.err); continue; }
-      const tk = take(r.i, m.f['때'].extra, '때'); if (tk.err) { bad(tk.err); continue; }
-      if (tk.rows.some((x) => !x.sound)) { bad('때 로 가리킨 문장 중 음성이 없는 문장이 있습니다(TTS 를 먼저)'); continue; }
-      const t0 = tk.rows[0].t0, t1 = tk.rows[tk.rows.length - 1].t1;
+      if (rows.some((x) => !x.sound)) { bad('때 로 가리킨 문장 중 음성이 없는 문장이 있습니다(TTS 를 먼저)'); continue; }
+      const t0 = rows[0].t0, t1 = rows[rows.length - 1].t1;
       if (!(t1 - t0 >= MIN_SPAN)) { bad(`카드가 뜨는 시간이 너무 짧습니다(${(t1 - t0).toFixed(1)}초)`); continue; }
-      const own = tk.rows.map((x) => x.text);
-      let card;
+      const own = rows.map((x) => x.text);
       if (m.kind === 'pair') {
         const orig = m.f['원문'] ? lines(m.f['원문']) : [], trans = m.f['번역'] ? lines(m.f['번역']) : own;
         if (m.f['원문'] && !orig.length) { bad('원문= 칸이 비어 있습니다'); continue; }
@@ -131,41 +208,51 @@ function plan(project, markers) {
         if (m.f['제목'] && !title.length) { bad('제목= 칸이 비어 있습니다'); continue; }
         card = { kind: 'interlude', t0, t1, orig: [], trans: title, line: m.line, literal: true };
       }
-      if (hide) card.hideCaptions = true;
-      card.label = m.kindName; { const L = langOf(tk.rows); if (L) card.lang = L; }
       if (card.orig.length > 3 || card.trans.length > 3) warnings.push(`${tag} — 카드 글이 3줄을 넘습니다(화면에 넘칠 수 있음)`);
-      const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
-      if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
-      cards.push(card);
-      continue;
+    } else {
+      if (rows.some((x) => !x.sound)) { bad('가리킨 문장 중 음성이 없는 문장이 있습니다(TTS 를 먼저)'); continue; }
+      const t0 = Math.min(...rows.map((x) => x.t0)), t1 = Math.max(...rows.map((x) => x.t1));
+      if (!(t1 - t0 >= MIN_SPAN)) { bad(`카드가 뜨는 시간이 너무 짧습니다(${(t1 - t0).toFixed(1)}초)`); continue; }
+      card = m.kind === 'pair'
+        ? { kind: 'pair', t0, t1, orig: r.by['원문'].map((i) => sents[i].text), trans: r.by['번역'].map((i) => sents[i].text), line: m.line }
+        : { kind: 'interlude', t0, t1, orig: [], trans: r.by['문장'].map((i) => sents[i].text), line: m.line };
     }
-    if (m.f['제목'] && !m.f['문장']) { bad('제목= 은 때= 와 함께 써야 합니다(때=<낭독 문장 앞부분>)'); continue; }
-    const need = m.kind === 'pair' ? ['원문', '번역'] : ['문장'];
-    const miss = need.filter((k) => !m.f[k]);
-    if (miss.length) { bad(`${miss.join('·')}= 칸이 없습니다`); continue; }
-    const groupsOf = {};
-    let failed = false;
-    for (const k of need) {
-      const r = find(m, m.f[k], k); if (r.err) { bad(r.err); failed = true; break; }
-      const tk = take(r.i, m.f[k].extra, k); if (tk.err) { bad(tk.err); failed = true; break; }
-      groupsOf[k] = tk.rows;
-    }
-    if (failed) continue;
-    const all = need.flatMap((k) => groupsOf[k]);
-    if (all.some((x) => !x.sound)) { bad('가리킨 문장 중 음성이 없는 문장이 있습니다(TTS 를 먼저)'); continue; }
-    const t0 = Math.min(...all.map((x) => x.t0)), t1 = Math.max(...all.map((x) => x.t1));
-    if (!(t1 - t0 >= MIN_SPAN)) { bad(`카드가 뜨는 시간이 너무 짧습니다(${(t1 - t0).toFixed(1)}초)`); continue; }
-    const card = m.kind === 'pair'
-      ? { kind: 'pair', t0, t1, orig: groupsOf['원문'].map((x) => x.text), trans: groupsOf['번역'].map((x) => x.text), line: m.line }
-      : { kind: 'interlude', t0, t1, orig: [], trans: groupsOf['문장'].map((x) => x.text), line: m.line };
+    { const endRow = sents[lastOf(r.idx)]; if (endRow.pause > 0 && Math.abs(endRow.t1 - card.t1) < 1e-6) card.pauseSec = endRow.pause; }   // ⏸ 카드 끝에 쉼이 붙었다 — 렌더가 [t1-쉼, t1] 자막을 가린다
     if (hide) card.hideCaptions = true;
-    card.label = m.kindName; { const L = langOf(all); if (L) card.lang = L; }
+    card.label = m.kindName; { const L = langOf(rows); if (L) card.lang = L; }
     const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
     if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
     cards.push(card);
   }
   cards.sort((a, b) => a.t0 - b.t0);
-  return { cards, warnings };
+  return { cards, warnings, pauses: pz };
+}
+
+/**
+ * 🗂 대본 보기(② 클립 칸)용 — 문장마다 카드 자리. 소리 없이도 맞춘다(TTS 전에도 보인다).
+ * @returns {{ bySid: Map<string, {label, role:'start'|'cont', last:boolean, line:number, tip:string, pause:number|null, interlude:boolean}>, bad: string[] }}
+ *   pause = 칸 `쉼=` 값(없으면 null — 화면이 채널 「막간 쉼」을 막간에만 더한다)
+ */
+function marksBySentence(project, markers) {
+  const bySid = new Map(), bad = [];
+  if (!project || !(markers || []).length) return { bySid, bad };
+  const sents = sentsOf(project);
+  for (const m of markers) {
+    const r = resolveMarker(sents, m);
+    if (r.err) { bad.push(`📜 화면카드 ${m.line}줄 — ${r.err}`); continue; }
+    const p = m.f['쉼'] ? pauseFor(m, 0) : null;
+    const tipLines = [`📜 ${m.kindName} · 대본 ${m.line}줄`];
+    for (const k of ['제목', '원문', '번역']) if (m.f[k]) tipLines.push(`${k}: ${String(m.f[k].raw).split(/\s+\/\/\s+/).join(' / ')}`);
+    if (!r.literal || !(m.f['제목'] || m.f['번역'])) tipLines.push('글: 가리킨 문장 그대로');
+    if (m.f['자막'] && /^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) tipLines.push('🙈 뜨는 동안 자막 숨김');
+    const order = [...new Set(r.idx)].sort((a, b) => a - b), last = lastOf(r.idx);
+    order.forEach((i, k) => {
+      const id = sents[i].s.id; if (bySid.has(id) && bySid.get(id).role === 'start') return;   // 먼저 시작한 카드 표시를 지킨다
+      bySid.set(id, { label: m.kindName, role: k === 0 ? 'start' : 'cont', last: i === last, line: m.line, tip: tipLines.join('\n'),
+        pause: p ? (p.err ? 0 : p.sec) : null, interlude: m.kindName === PAUSE_KIND });
+    });
+  }
+  return { bySid, bad };
 }
 
 /** 카드의 보임 정도 0~1 (시각 t · 초) — 서서히 나타남 · 유지 · 서서히 사라짐 */
@@ -178,4 +265,4 @@ function opacityAt(c, t) {
   return 1;
 }
 
-module.exports = { KINDS, MIN_KEY, norm, anchorOf, markersOf, signatureOf, plan, fadeOf, opacityAt };
+module.exports = { KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
