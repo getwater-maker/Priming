@@ -50,10 +50,23 @@ const assert = require('assert');
       const m = document.querySelector('main.pane2').getBoundingClientRect();
       return (m.left - b.left) / b.width;
     });
-    assert(Math.abs(ratio - 0.4) < 0.02, 'left combined ratio: ' + ratio);
+    assert(ratio > 0.2 && ratio < 0.65, 'responsive left ratio: ' + ratio);
+    await win.click('button:has-text("서식")');
+    const rows = await win.evaluate(() => ({shadow:document.querySelector('.ribbon [title="그림자"]').getBoundingClientRect().top, position:document.querySelector('.ribbon [data-testid="cf-posh"]').getBoundingClientRect().top}));
+    assert(rows.position > rows.shadow + 10, 'format controls break after shadow');
+    await win.click('button:has-text("이미지") >> nth=0');
+    assert.equal(await win.locator('[data-testid="style-picker-btn"] img').count(),0);
     // Cache offscreen group geometry, then resize: headers and clips must still align.
     await win.evaluate(() => { const m = document.querySelector('main.pane2'); m.scrollTop = m.scrollHeight; });
     await win.waitForTimeout(150);
+    const sticky = await win.evaluate(() => {
+      const m=document.querySelector('main.pane2').getBoundingClientRect();
+      const t=document.querySelector('.work-top').getBoundingClientRect();
+      const h=document.querySelector('main.pane2 .card h2').getBoundingClientRect();
+      return {main:m.top,top:t.top,bottom:t.bottom,header:h.top};
+    });
+    assert(Math.abs(sticky.main-sticky.top)<2,'queue stays at top: '+JSON.stringify(sticky));
+    assert(sticky.header>=sticky.bottom-2,'project header below pinned controls');
     for (const width of [1920, 1366, 1200, 1920]) {
       await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 1000), width);
       await win.evaluate(() => { document.querySelector('main.pane2').scrollTop = 0; });
@@ -81,7 +94,7 @@ const assert = require('assert');
     await win.waitForFunction(() => document.querySelectorAll('[data-testid="thumbcell"]').length === 3);
     assert.equal((await win.evaluate(() => window.api.getAppFolders())).thumbs, dir);
     await win.screenshot({ path: path.join(os.tmpdir(), 'priming-preview-layout.png') });
-    console.log('PASS: single click/Space, double click, Enter, arrow, four cells, 4:6, plain thumbnail folder');
+    console.log('PASS: playback/editing, responsive layout, sticky controls, format rows, style picker, thumbnail folder');
   } finally {
     if (win) {
       if (folders) await win.evaluate((f) => window.api.saveAppFolders({thumbs: f.thumbs || ''}), folders).catch(() => {});

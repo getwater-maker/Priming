@@ -1262,7 +1262,7 @@ label[data-has-hint],.subhead[data-has-hint],.fsec[data-has-hint],.l[data-has-hi
 .findbar .find-selall{flex:0 0 auto;white-space:nowrap;padding:2px 6px;line-height:1.2;word-break:keep-all}
 .findbar .fcnt{flex:0 0 auto}
 /* ☑ 모두 가 있을 땐 검색 줄을 조금 넓혀 ✕ 가 옆 단추를 덮지 않게 */
-.menubar .findbar:has(.find-selall){flex:0 0 176px;min-width:176px}
+.menubar .findbar:has(.find-selall){flex:0 0 352px;min-width:300px}
 .menubar .findbar .fcnt{min-width:30px}
 /* 고정된 카드 제목 줄 위로 스크롤하는 이전 클립이 보이던 틈 = 목록 칸 위쪽 여백(14px) — 여백을 스크롤되는 빈 칸으로 바꿔 제목 줄이 맨 위에 붙게 한다 */
 main.pane2{padding-top:0}
@@ -1531,3 +1531,13 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 /* 📍 제작 화면 따라가기 — 지금 음성을 만드는 문장(v0.9.43) */
 main.pane2 .sent.tts-now{box-shadow:0 0 0 2px #5a9 inset;position:relative}
 main.pane2 .sent.tts-now::after{content:'🎤 지금';position:absolute;right:6px;top:4px;font-size:11px;font-weight:700;color:#1f6b4c;background:#dff3e8;border-radius:8px;padding:0 6px;pointer-events:none}
+/* Workspace controls stay above the scrolling clips. */
+.work-top{position:sticky;top:0;z-index:35;background:var(--bg);padding-top:8px;padding-bottom:1px}
+main .card h2{top:var(--work-top-height,0px)}
+.work-top .qlist{max-height:22vh;overflow:auto}
+.menubar .findbar{flex:0 1 300px;min-width:240px}
+.ribbon .cf-linebreak{flex-basis:100%;height:0}
+.pane1.auto-size{overflow-y:auto}
+.pane1.auto-size .thumbgrid{flex:0 0 auto;aspect-ratio:16/9;width:100%;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+.pane1.auto-size #logwrap.docked{flex:0 0 auto;min-height:0}
+.pane1.auto-size #log{min-height:140px;max-height:35vh}

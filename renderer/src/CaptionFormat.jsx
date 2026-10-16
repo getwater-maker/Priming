@@ -492,6 +492,7 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
         <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜(글자 뒤 칠)">형광펜</Toggle>
         <Color value={f.hlColor} onChange={(v) => onPatch({ hlColor: v, hlOn: true })} />
         <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
+        <span className="cf-linebreak" aria-hidden="true" />
         <span className="cf-div" />
         {/* 📐 위치·정렬 — 고른 **줄 전체**에 적용된다(글자 일부를 골라도 그 줄이 움직인다 — Vrew 와 같다) */}
         <span className="cf-grp" data-testid="cf-posh" title="가로 정렬 · 가로 미세(+ = 오른쪽)">

@@ -38,6 +38,16 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     // Esc — 지움
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     ok((await inp.inputValue()) === '', 'Esc 로 검색어 지움');
+    await win.keyboard.type('설정'); await win.waitForTimeout(600);
+    ok((await inp.inputValue()) === '설정', 'Esc 후 클릭 없이 다시 입력');
+    await win.keyboard.press('Control+A'); await win.keyboard.press('Backspace');
+    await win.waitForTimeout(600);
+    await win.keyboard.type('이미지'); await win.waitForTimeout(600);
+    ok((await inp.inputValue()) === '이미지', '모두 지운 뒤 클릭 없이 다시 입력');
+    await win.locator('.findbar button[title="검색어 지우기 (Esc)"]').click();
+    await win.waitForTimeout(600);
+    await win.keyboard.type('완성'); await win.waitForTimeout(600);
+    ok((await inp.inputValue()) === '완성', '지우기 버튼 뒤 클릭 없이 다시 입력');
   } finally { await app.close(); }
   console.log(`\n${bad ? '❌' : '✅'} find-typing — ${n - bad}/${n} 통과`);
   process.exit(bad ? 1 : 0);

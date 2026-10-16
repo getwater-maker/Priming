@@ -361,7 +361,7 @@ function StylePicker({ value, onChange, styles, samples, scriptId }) {
   return (
     <span className="stpick" ref={ref} data-testid="style-picker">
       <button className="ghost stpick-btn" title="이미지 스타일" data-testid="style-picker-btn" onClick={() => setOpen((o) => !o)}>
-        {thumb(cur.id, 'stpick-th')}<span className="stpick-name">{cur.name}</span><span className="stpick-caret">▾</span>
+        <span className="stpick-name">{cur.name}</span><span className="stpick-caret">▾</span>
       </button>
       {open && (<>
         <div className="stpick-pop" data-testid="style-picker-pop" onMouseLeave={() => setPeek(null)}>
@@ -778,6 +778,8 @@ export default function App() {
   const pickClipDetail = (on) => { setClipDetail(on); lsSet('pm.clipDetail', on ? '1' : '0'); };
   // ① 칸 폭 = **비율**(기본 40% — Vrew 와 비슷). 🔴 px 로 두면 창이 처음 뜰 때의 너비로 계산돼, 창을 줄인 뒤 ① 이 화면을 다 먹었다(실측).
   const [pane1W, setPane1W] = useState(() => { const r = Number(lsGet('pm.pane1R.v2', 0.4)); return r >= 0.2 && r <= 0.7 ? r : 0.4; });
+  const [paneAuto, setPaneAuto] = useState(true);
+
   const [cursor, setCursor] = useState(null);       // { shortsNum, n } — ② 에서 지금 가리키는 자막 줄
   const lastVisRef = useRef(null);                   // ① 에 지금 깔린 그림/영상(같으면 다시 깔지 않는다 — 영상이 처음부터 다시 돈다)
   const stopLineRef = useRef(null);                 // 미리보기 재생 — 지금 도는 자막 효과 멈춤
@@ -4777,6 +4779,26 @@ export default function App() {
   }, [clipCtx, stageCtx, preview, playerOpen, nameAsk, aiFmtDlg, promptView, settingsOpen, ttsSrvOpen, comfyOpen, cvidOpen, urlOpen, tsOpen, impOpen, scriptEditOpen, ttsEng, vdOpen, dictOpen, styleEditOpen, chOpen, capDlg, capPanel, capSel, sentEdit]);
   // 🧭 ① 칸 = 커서 줄의 그림/영상 + **그 줄 자막**(효과 없이 최종 모양). 재생 중엔 재생이 그린다.
   const wsOn = !noProduction && view === 'clips';
+  useEffect(() => {
+    const body = document.getElementById('body');
+    const pane = body?.querySelector('.pane1');
+    const top = body?.querySelector('.work-top');
+    if (!body) return;
+    const measure = () => {
+      if (top) top.closest('main').style.setProperty('--work-top-height', top.offsetHeight + 'px');
+      if (!paneAuto || !pane) return;
+      const children = [...pane.children];
+      const fixed = children.filter(e => e.id !== 'stage' && e.id !== 'logwrap').reduce((n,e) => n + e.offsetHeight, 0)
+        + 20 + Math.max(0, children.length - 1) * 8 + (pane.querySelector('#logbar')?.offsetHeight || 0) + 14;
+      const width = Math.max(320, Math.min((body.clientHeight - fixed) * 8 / 9 + 20, body.clientWidth - 836));
+      setPane1W((width + 196) / body.clientWidth);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    if (top) observer.observe(top);
+    measure();
+    return () => observer.disconnect();
+  }, [wsOn, paneAuto, menu, loaded]);
   // 🔎 리본(이미지·비디오 탭)에서 무료 스톡 열기 — 지금 커서의 그룹 · 탭에 맞춰 사진/영상(v0.7.68)
   function openStockFor(kind) {
     const ci = cursorInfo();
@@ -5086,9 +5108,9 @@ export default function App() {
     findTextRef.current = text;              // state 로 두면 타이핑마다 전 화면 재렌더 → 입력이 멈춘다
     if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
     if (!text) {
-      paintFind(''); findHitRef.current = { total: 0, idx: -1 };
       const el = document.getElementById('find-input'); const had = !!el && document.activeElement === el;
-      if (findElectronRef.current || !wsOn) { findElectronRef.current = false; api.findStop(); }
+      paintFind(''); findHitRef.current = { total: 0, idx: -1 };
+      if (findElectronRef.current || !wsOn) { findElectronRef.current = false; Promise.resolve(api.findStop()).then(() => { if (had && document.hasFocus()) document.getElementById('find-input')?.focus({ preventScroll: true }); }); }
       findSessionRef.current = ''; setFindRes({ active: 0, total: 0 });
       // 🔑 전부 지웠을 때 포커스를 잃어 마우스로 다시 눌러야 하던 문제 — 검색 정지가 입력칸 포커스를 가져간다
       if (had) { el.focus({ preventScroll: true }); setTimeout(() => { if (document.activeElement !== el) el.focus({ preventScroll: true }); }, 40); }
@@ -5117,7 +5139,8 @@ export default function App() {
     findTextRef.current = ''; findSessionRef.current = '';
     const el = document.getElementById('find-input'); if (el) el.value = '';
     paintFind(''); findHitRef.current = { total: 0, idx: -1 };
-    api.findStop(); setFindRes({ active: 0, total: 0 });
+    Promise.resolve(api.findStop()).then(() => document.getElementById('find-input')?.focus({ preventScroll: true })); setFindRes({ active: 0, total: 0 });
+    el?.focus({ preventScroll: true });
   }
   // 보이스디자인 파형 그리기 — 봉우리/선택구간이 바뀔 때마다 다시 그린다.
   useEffect(() => {
@@ -6091,12 +6114,12 @@ export default function App() {
       {/* 🧭 가로 3칸(Vrew) — ① 영상·이미지(커서 줄 자막) ② 자막 클립 목록 ③ 자세한 설정(열릴 때만) */}
       <div id="body" className={wsOn ? 'ws' : ''}>
         {wsOn && (<>
-          <section className="pane1" data-testid="pane1" style={{ width: `calc(${(pane1W * 100).toFixed(1)}% - 196px)` }}>
+          <section className={'pane1' + (paneAuto ? ' auto-size' : '')} data-testid="pane1" style={{ width: `calc(${(pane1W * 100).toFixed(1)}% - 196px)` }}>
             {stageEl}
             {clipInfo}
             {logBox}
           </section>
-          <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절 · 더블클릭: 왼쪽 영역/작업 영역 4:6" onDoubleClick={() => { setPane1W(0.4); lsSet('pm.pane1R.v2', '0.4'); }} onMouseDown={startPaneDrag} />
+          <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절 · 더블클릭: 화면에 맞춰 자동 크기" onDoubleClick={() => setPaneAuto(true)} onMouseDown={(e) => { setPaneAuto(false); startPaneDrag(e); }} />
           {groupCol}
         </>)}
         <main className={wsOn ? 'pane2' : ''}>
@@ -6114,9 +6137,6 @@ export default function App() {
               <button className="ghost" title={'마지막으로 열어 둔 대본 목록을 그대로 다시 엽니다(작업본도 이어받습니다)\n첫 대본: ' + (lastQ.first || '')}
                 onClick={restoreLastQueue}>♻ 지난 큐 다시 열기 ({lastQ.count}개)</button>
             </div>
-          )}
-          {queue && queue[mode] && queue[mode].items.length > 0 && (
-            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={pickQueueItem} onRemove={removeQueueItem} />
           )}
           {aiPopEl}
           {wsOn && clipTb && !clipTb.hidden && clipTbOk() && (() => {
@@ -6349,6 +6369,10 @@ export default function App() {
         </>);
       })()}
       {/* ② 위 얇은 막대 — 진행 통계 + 보기 전환(Vrew 「개요/상세」 자리) */}
+          <div className="work-top" data-testid="work-top">
+          {queue && queue[mode] && queue[mode].items.length > 0 && (
+            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={pickQueueItem} onRemove={removeQueueItem} />
+          )}
           <div className="clipbar" data-testid="clipbar">
             {workTimes}
             <span className="grow" />
@@ -6366,6 +6390,7 @@ export default function App() {
               <button className={view === 'clips' ? 'on' : ''} data-view="clips" onClick={() => { if (playerOpen) stopPlayer(); pickView('clips'); }}>클립</button>
               <button className={view === 'cards' ? 'on' : ''} data-view="cards" onClick={() => { if (playerOpen) stopPlayer(); pickView('cards'); }}>카드</button>
             </span>
+          </div>
           </div>
           {isLf && dto && dto.projects && dto.projects.some((pj) => (pj.overlays || []).length) && (
             <div className="ovbar" data-testid="ovbar">
