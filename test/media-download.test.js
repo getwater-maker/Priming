@@ -146,8 +146,9 @@ console.log('\n[4-c] 비메오 주소 — 🔴 로그인 요구를 플레이어 
 
 console.log('\n[5] 실패 문구 — 무엇을 해야 하는지 알려준다');
 {
-  ok(/업데이트/.test(MD._explain('ERROR: unable to download video data: HTTP Error 403: Forbidden')),
-    '403 은 「낡은 yt-dlp」로 안내한다(실사고 그대로)');
+  { const m = MD._explain('ERROR: unable to download video data: HTTP Error 403: Forbidden');
+    ok(/403/.test(m) && /잠시|몇 분 뒤/.test(m) && !/낡았을 때 나는 증상/.test(m), '403 은 「일시 차단 — 몇 분 뒤」로 안내한다(최신판에서도 났다 · 2026-10-16)'); }
+  ok(/429/.test(MD._explain('ERROR: unable to download video data: HTTP Error 429: Too Many Requests')), '429 는 「요청이 많아 잠시 막음」');
   ok(/비공개|연령|멤버십/.test(MD._explain('ERROR: Private video. Sign in if you have been granted access')), '비공개 영상');
   ok(/찾을 수 없/.test(MD._explain('ERROR: Video unavailable')), '삭제·지역제한');
   ok(/지원하지 않는/.test(MD._explain('ERROR: Unsupported URL: https://example.com/x')), '지원 안 하는 주소');
@@ -344,6 +345,31 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   let threw = '';
   try { await MD.download('https://youtu.be/y', { tool, outDir: path.join(T, 'b'), mode: 'video', subs: true, language: 'en' }); } catch (e) { threw = e.message; }
   ok(threw && fs.readFileSync(callLog, 'utf8').trim().split('\n').length === 1, '판정력: 영상 자체 실패는 다시 하지 않고 그대로 실패');
+  // ⏳ 영상 받기 403/429 = 일시 차단 → 기다렸다 두 번까지 다시(2026-10-16 실측: 5초 만에 403 → 몇 분 뒤 같은 영상 정상)
+  console.log('\n[일시 차단] 403 이 나면 기다렸다 다시 — 두 번까지');
+  const cnt = path.join(T, 'n.txt');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "fs.appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');",
+    "const n = Number(fs.existsSync(process.env.FAKE_CNT) ? fs.readFileSync(process.env.FAKE_CNT, 'utf8') : 0) + 1; fs.writeFileSync(process.env.FAKE_CNT, String(n));",
+    "if (n <= Number(process.env.FAKE_FAILS)) { process.stderr.write('ERROR: unable to download video data: HTTP Error 403: Forbidden\\n'); process.exit(1); }",
+    "const o = a[a.indexOf('-o') + 1].replace('%(title)s', 'T').replace('%(ext)s', 'mp4'); fs.writeFileSync(o, 'video'); process.exit(0);",
+  ].join('\n'));
+  process.env.FAKE_CNT = cnt; process.env.FAKE_MODE = '';
+  for (const [fails, want] of [[2, true], [3, false]]) {
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = String(fails);
+    const lg = [];
+    let res = null, err = '';
+    try { res = await MD.download('https://youtu.be/z', { tool, outDir: path.join(T, 'blk' + fails), mode: 'video', subs: false, _waitScale: 0, onLog: (l) => lg.push(l) }); } catch (e) { err = e.message; }
+    const n = fs.readFileSync(callLog, 'utf8').trim().split('\n').length;
+    if (want) ok(res && res.video && n === 3 && lg.filter((l) => /잠시 막았습니다\(403\)/.test(l)).length === 2, '403 두 번 → 기다렸다 다시 → 세 번째에 받음');
+    else ok(!res && /403/.test(err) && n === 3, '세 번 다 403 이면 그만두고 「잠시 막음」으로 알린다(무한 반복 안 함)');
+  }
+  // 🧩 JS 실행기 — 버전을 모르거나 옛 yt-dlp 면 붙이지 않는다(--js-runtimes 를 모르는 판이 깨지지 않게)
+  const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
+  ok(!fs.readFileSync(callLog, 'utf8').includes('--js-runtimes'), '버전 없는 도구(가짜)에는 --js-runtimes 를 붙이지 않는다');
+  ok(/JS_RT_MIN_YTDLP = '2025\.11\.01'/.test(js) && /Number\(m\[1\]\) >= 22/.test(js), 'node 22 이상 · yt-dlp 2025.11 이후만');
   try { fs.rmSync(T, { recursive: true, force: true }); } catch (_) {}
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
   process.exit(fail ? 1 : 0);

@@ -174,8 +174,30 @@ function subtitleFileToText(file) {
   return lines.join(' ').trim();
 }
 
+// ── 🧩 유튜브 JS 실행기(v0.9.41) ───────────────────────
+//   yt-dlp 2025.11+ 는 유튜브 주소를 풀 때 JS 실행기(deno·node)를 쓴다. 없으면 「JavaScript runtime 없음 — 일부 형식이 빠질 수 있다」
+//   경고를 내고 예비 방식으로 받는다(2026-10-16 실측: 경고 그대로 · 403 이 간헐적으로 섞였다).
+//   PC 에 **node 22 이상**이 있으면 `--js-runtimes node` 를 붙인다(이 PC node 24 → 「JS runtimes: node-24」 · 경고 사라짐).
+//   ⚠ Electron 내장 node(20)는 yt-dlp 가 「unsupported」로 거부한다(실측) · 없으면 예전 그대로(아무것도 안 붙인다).
+const JS_RT_MIN_YTDLP = '2025.11.01';   // 이보다 옛 yt-dlp 는 --js-runtimes 를 모른다
+let _jsRt = null;
+async function jsRuntimeArgs(tool) {
+  if (!tool || !tool.version || !(parseVersionDate(tool.version) >= parseVersionDate(JS_RT_MIN_YTDLP))) return [];
+  if (!_jsRt) {
+    _jsRt = _run('node', ['--version'], { timeout: 5000 }).then((r) => {
+      const m = !r.err && /^v(\d+)\./.exec(String(r.stdout || '').trim());
+      return m && Number(m[1]) >= 22 ? ['--js-runtimes', 'node'] : [];
+    }).catch(() => []);
+  }
+  return _jsRt;
+}
+
 // ── 실행 ────────────────────────────────────────────────
-function _spawnYt(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 1000 } = {}) {
+async function _spawnYt(tool, args, opts = {}) {
+  const extra = await jsRuntimeArgs(tool);
+  return _spawnYtRaw(tool, [...extra, ...args], opts);
+}
+function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(tool.cmd, [...tool.args, ...args], {
       windowsHide: true,
@@ -359,6 +381,9 @@ function subLangPref(language, url = '') {
   return [...set('ko'), ...set('en')];
 }
 
+// 일시 차단(영상 받기 단계) — 기다렸다 다시(download) · 대기 초
+const BLOCK_RE = /HTTP Error (?:403|429)|Too Many Requests|Forbidden/i;
+const BLOCK_WAITS = [15, 45];
 // 자막 단계 실패 판정 · 자막 인자(download 의 「자막 없이 다시」가 뺀다)
 const SUB_FAIL_RE = /download (?:video )?subtitles|subtitles? for '|Unable to download .*subtitle/i;
 const SUB_ARGS = new Set(['--write-subs', '--write-auto-subs', '--sub-format', '--sub-langs']);
@@ -408,8 +433,11 @@ function altUrl(url, stderr) {
 
 function _explain(stderr) {
   const s = String(stderr || '');
+  // ⚠ 「낡은 yt-dlp」로 단정하지 않는다(2026-10-16 — 최신판에서도 유튜브의 일시 차단으로 403 이 났다 · 낡았는지는 버전 줄 「N일 전 판」이 따로 알린다)
+  if (/HTTP Error 429|Too Many Requests/i.test(s))
+    return '유튜브가 요청이 많다며 잠시 막았습니다(429) — 기다렸다 다시 해도 막혀 건너뜁니다. 몇 분 뒤 다시 받아 보세요.';
   if (/HTTP Error 403|Forbidden/i.test(s))
-    return '유튜브가 다운로드를 거부했습니다(403) — yt-dlp 가 낡았을 때 나는 증상입니다. 「⬇ 업데이트」를 눌러 주세요.';
+    return '유튜브가 다운로드를 거부했습니다(403) — 기다렸다 다시 해도 막혀 건너뜁니다. 보통 잠시 뒤 풀립니다(몇 분 뒤 다시) · 계속되면 yt-dlp 「⬇ 업데이트」.';
   if (/DRM protected/i.test(s))
     return 'DRM 으로 보호된 영상이라 소리를 받을 수 없습니다(비메오 일부 영상 · 자막만 가능). 저작권 보호라 우회하지 않습니다.';
   if (needsVimeoPlayer(s))
@@ -496,6 +524,14 @@ async function download(url, o = {}) {
     },
   });
   let r = await run(args);
+  // ⏳ 유튜브의 일시 차단(403·429)은 잠깐 기다리면 풀린다(2026-10-16 실측: 앱에서 5초 만에 403 → 몇 분 뒤 같은 영상 정상) — 두 번까지 다시
+  for (const wait of BLOCK_WAITS) {
+    if (r.code === 0 || !BLOCK_RE.test(r.stderr || '') || SUB_FAIL_RE.test(r.stderr || '') || (o.abortSignal && o.abortSignal())) break;
+    if (o.onLog) o.onLog(`  ⏳ 유튜브가 잠시 막았습니다(${/429|Too Many/i.test(r.stderr) ? '429' : '403'}) — ${wait}초 뒤 다시 받습니다`);
+    await new Promise((res) => setTimeout(res, (o._waitScale != null ? o._waitScale : 1000) * wait));
+    if (o.abortSignal && o.abortSignal()) break;
+    r = await run(args);
+  }
   // 🔁 자막만 실패(429 등)하면 영상까지 버리지 않는다 — 자막 없이 한 번 더(이미 받은 영상은 --no-overwrites 로 그대로 · 음성은 STT 가 맡는다 · v0.9.38)
   if (r.code !== 0 && o.subs && SUB_FAIL_RE.test(r.stderr || '') && !(o.abortSignal && o.abortSignal())) {
     if (o.onLog) o.onLog(`  ⚠ 자막을 못 받았습니다(${(_explain(r.stderr) || '').slice(0, 120)}) — 자막 없이 다시 받습니다(음성은 STT 로)`);
@@ -539,5 +575,5 @@ module.exports = {
   probe, probeSmart, download, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
-  _explain,
+  _explain, jsRuntimeArgs,
 };
