@@ -3242,7 +3242,17 @@ function maybeAutoUpload(pr, file, preset, ctx = null, isVrewMp4 = false) {   //
   }
   enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset) });
 }
-ipcMain.handle('yt-status', () => require('./core/youtube-upload').status());
+// 🏷 ⚙ 유튜브 채널 카드 — 채널 프로필 그림(받아 둔 파일 · 없으면 그 자리에서 받는다 · 채널당 한 번 · 최대 6초 기다림)을 붙인다(v0.9.34).
+ipcMain.handle('yt-status', async () => {
+  const st = require('./core/youtube-upload').status();
+  const miss = st.channels.filter((c) => !c.broken && !fs.existsSync(path.join(CH_AVATAR_DIR(), c.id + '.jpg')));
+  if (miss.length) await Promise.race([Promise.all(miss.map((c) => _ytAvatarFile(c.id, false).catch(() => null))), new Promise((r) => setTimeout(r, 6000))]);
+  for (const c of st.channels) {
+    const f = path.join(CH_AVATAR_DIR(), c.id + '.jpg');
+    try { if (fs.existsSync(f)) c.avatar = { path: f, v: String(fs.statSync(f).mtimeMs | 0) }; } catch (_) {}
+  }
+  return st;
+});
 // ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
 ipcMain.handle('yt-use-default-client', () => {
   const out = require('./core/youtube-upload').useDefaultClient();
@@ -3263,6 +3273,7 @@ ipcMain.handle('yt-import-client', async () => {
 });
 ipcMain.handle('yt-connect', async () => {
   const r = await require('./core/youtube-upload').connectChannel({ openUrl: (u) => shell.openExternal(u), log });
+  if (r.ok && r.channel) { try { await _ytAvatarFile(r.channel.id, true); } catch (_) {} }   // 🏷 다시 연결하면 채널 그림도 새로
   if (!r.ok) log(`✗ 유튜브 채널 연결 — ${r.error}`);
   try { if (win.isMinimized()) win.restore(); win.focus(); } catch (_) {}
   return r;

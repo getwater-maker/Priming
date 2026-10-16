@@ -46,6 +46,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (u.pathname === '/revoke') { G.revoked.push(new URLSearchParams(b.toString()).get('token')); return J(200, {}); }
   if (u.pathname === '/api/channels') return J(200, { items: G.channel ? [G.channel] : [] });
+  if (u.pathname === '/userinfo') return J(200, { email: 'roy.classic@gmail.com', sub: '1' });
   if (u.pathname === '/upload' && req.method === 'POST') {
     G.meta = JSON.parse(b.toString() || '{}'); G.total = Number(req.headers['x-upload-content-length']);
     if (G.beginStatus !== 200) return J(G.beginStatus, G.beginBody || {});
@@ -71,7 +72,7 @@ const server = http.createServer(async (req, res) => {
 (async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  YT._setEndpoints({ auth: base + '/auth', token: base + '/token', revoke: base + '/revoke', api: base + '/api', upload: base + '/upload' });
+  YT._setEndpoints({ auth: base + '/auth', token: base + '/token', revoke: base + '/revoke', api: base + '/api', upload: base + '/upload', userinfo: base + '/userinfo' });
 
   console.log('\n[1] 연결 파일 판정');
   ok(!YT.parseClientJson('not json').ok, 'JSON 아님 → 거부');
@@ -96,7 +97,7 @@ const server = http.createServer(async (req, res) => {
     const q = new URL(u).searchParams;
     ok(q.get('code_challenge_method') === 'S256' && q.get('code_challenge'), 'PKCE S256');
     ok(q.get('access_type') === 'offline' && /consent/.test(q.get('prompt')) && /select_account/.test(q.get('prompt')), 'offline + 채널 선택 + consent');
-    ok(q.get('scope').includes('youtube.upload') && q.get('scope').includes('youtube.readonly') && q.get('scope').includes('youtube.force-ssl') && q.get('scope').split(' ').length === 3, '권한은 세 가지뿐(업로드 · 읽기 · 재생목록 담기 — v0.9.33)');
+    ok(q.get('scope').includes('youtube.upload') && q.get('scope').includes('youtube.readonly') && q.get('scope').includes('youtube.force-ssl') && q.get('scope').includes('userinfo.email') && q.get('scope').split(' ').length === 4, '권한은 네 가지뿐(업로드 · 읽기 · 재생목록 담기 v0.9.33 · 계정 이메일 v0.9.34)');
     const back = new URL(q.get('redirect_uri'));
     ok(back.hostname === '127.0.0.1', '루프백 127.0.0.1');
     const p = new URLSearchParams({ state: extra.state || q.get('state'), ...(extra.error ? { error: extra.error } : { code }) });
@@ -108,6 +109,13 @@ const server = http.createServer(async (req, res) => {
   ok(!raw2.includes('RT-SECRET-XYZ'), '갱신 토큰이 평문으로 저장되지 않음');
   st = YT.status();
   ok(st.channels.length === 1 && st.channels[0].handle === '@roy' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(st.channels[0].connectedAt), '채널 목록 · 연결 시각(KST 표기)');
+  ok(st.channels[0].email === '' && st.channels[0].needsReconnect, '👤 이메일·재생목록 권한을 안 받은 연결 → 계정 빈칸 · 다시 연결 안내');
+  G.scope = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/userinfo.email';
+  G.channel.snippet.thumbnails = { default: { url: 'https://yt3/d.jpg' }, high: { url: 'https://yt3/h.jpg' } };
+  c = await YT.connectChannel({ openUrl: (u) => browse(u) });
+  st = YT.status();
+  ok(c.ok && st.channels[0].email === 'roy.classic@gmail.com' && st.channels[0].avatarUrl === 'https://yt3/h.jpg' && !st.channels[0].needsReconnect, '👤 다시 연결 → 구글 계정 이메일 · 채널 그림 주소(high) 저장 · 권한 안내 사라짐');
+  delete G.channel.snippet.thumbnails;
   G.scope = 'https://www.googleapis.com/auth/youtube.readonly';
   c = await YT.connectChannel({ openUrl: (u) => browse(u) });
   ok(!c.ok && /동영상 관리/.test(c.error), '업로드 권한 체크를 풀고 허용 → 연결 거부 + 이유');

@@ -7323,21 +7323,33 @@ export default function App() {
                   <button style={{ flex: '0 0 auto' }} disabled={!ytSt || !ytSt.hasClient} onClick={ytConnect}>🔗 채널 연결</button>
                 </div>
                 {(!ytSt || !ytSt.channels || !ytSt.channels.length) && <div className="meta" style={{ marginTop: 6 }}>연결된 채널이 없습니다.</div>}
-                {((ytSt && ytSt.channels) || []).map((c, i) => (
-                  <div key={c.id} className="frow" data-testid="yt-ch-row" draggable
+                {/* 🃏 채널 카드(v0.9.34 · 로이 「카드 형식 · 채널 로고 · 구글 계정」) — 끌어서 순서 바꾸기는 그대로 */}
+                <div className="ytcards" data-testid="yt-cards">
+                {((ytSt && ytSt.channels) || []).map((c, i) => {
+                  const warn = c.broken ? '연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? '재생목록 권한 없음 — 「🔗 채널 연결」로 한 번 다시 연결' : '';
+                  return (
+                  <div key={c.id} className={'ytcard' + (warn ? ' warn' : '') + (ytDragOver === i ? ' over' : '')} data-testid="yt-ch-row" draggable
                     title="끌어서 순서를 바꿉니다(채널편집 「업로드채널」 목록도 이 순서)"
                     onDragStart={(e) => { ytDragRef.current = i; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id); } catch (_) {} }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (ytDragOver !== i) setYtDragOver(i); }}
                     onDragLeave={() => { if (ytDragOver === i) setYtDragOver(null); }}
                     onDrop={(e) => { e.preventDefault(); ytDrop(i); }}
-                    onDragEnd={() => { ytDragRef.current = null; setYtDragOver(null); }}
-                    style={{ alignItems: 'center', borderTop: ytDragOver === i ? '2px solid var(--hook)' : '1px dashed var(--line)', paddingTop: 5, marginTop: 5, cursor: 'grab' }}>
-                    <span className="meta" style={{ flex: '0 0 auto', cursor: 'grab', userSelect: 'none' }}>⠿</span>
-                    <b style={{ flex: '0 0 auto' }}>▶ {c.title}</b>
-                    <span className="meta" style={{ flex: 1 }}>{c.handle ? `${c.handle} · ` : ''}{c.connectedAt ? `${c.connectedAt} 연결` : ''}{c.broken ? ' · ⚠ 연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? ' · ⚠ 재생목록 권한 없음 — 「🔗 채널 연결」로 이 채널을 한 번 다시 연결하세요' : ''}</span>
-                    <button className="ghost" style={{ flex: '0 0 auto' }} title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
-                  </div>
-                ))}
+                    onDragEnd={() => { ytDragRef.current = null; setYtDragOver(null); }}>
+                    <div className="ytcard-top">
+                      {c.avatar ? <img className="ytav" src={media(c.avatar.path, c.avatar.v)} alt="" draggable={false} />
+                        : <span className="ytav ytav-txt">{Array.from(c.title || '?')[0]}</span>}
+                      <div className="ytcard-name">
+                        <b title={c.title}>{c.title}</b>
+                        <span className="meta">{c.handle || ' '}</span>
+                      </div>
+                      <button className="ghost ytx" title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
+                    </div>
+                    <div className="ytcard-acct" data-testid="yt-ch-email">👤 {c.email ? <span title={c.email}>{c.email}</span> : <span className="meta">구글 계정 — 다시 연결하면 보입니다</span>}</div>
+                    <div className="meta ytcard-date">{c.connectedAt ? `${c.connectedAt} 연결` : ''}</div>
+                    {warn && <div className="ytcard-warn">⚠ {warn}</div>}
+                  </div>);
+                })}
+                </div>
               </div>
             </div>)}
             {settingsTab === 'account' && (<div data-testid="account-tab">

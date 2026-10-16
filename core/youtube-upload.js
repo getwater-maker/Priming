@@ -29,7 +29,9 @@ const SCOPE_READ = 'https://www.googleapis.com/auth/youtube.readonly';
 // 🧷 재생목록에 담기(playlistItems.insert)는 upload·readonly 로 안 된다 — v0.9.33 업로드 마무리(core/yt-finish)부터 함께 받는다.
 //   이 권한 없이 연결된 옛 채널은 status().channels[].needsReconnect 로 「다시 연결」을 안내한다(업로드 자체는 그대로 된다).
 const SCOPE_MANAGE = 'https://www.googleapis.com/auth/youtube.force-ssl';
-const SCOPES = [SCOPE_UPLOAD, SCOPE_READ, SCOPE_MANAGE];
+// 👤 어느 구글 계정으로 연결했는지 ⚙ 유튜브 카드에 보이려고(v0.9.34 · 로이 「채널마다 구글 계정이 다르다」) — 이메일만(비민감 권한).
+const SCOPE_EMAIL = 'https://www.googleapis.com/auth/userinfo.email';
+const SCOPES = [SCOPE_UPLOAD, SCOPE_READ, SCOPE_MANAGE, SCOPE_EMAIL];
 
 // 테스트가 가짜 서버로 갈아끼운다(_setEndpoints).
 const EP = {
@@ -37,6 +39,7 @@ const EP = {
   token: 'https://oauth2.googleapis.com/token',
   revoke: 'https://oauth2.googleapis.com/revoke',
   api: 'https://www.googleapis.com/youtube/v3',
+  userinfo: 'https://openidconnect.googleapis.com/v1/userinfo',
   upload: 'https://www.googleapis.com/upload/youtube/v3/videos',
 };
 function _setEndpoints(p) { Object.assign(EP, p || {}); }
@@ -172,7 +175,8 @@ function status() {
   const cs = _capState(d);
   const channels = Object.keys(d.channels).map((id) => {
     const x = d.channels[id] || {};
-    return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken, needsReconnect: !String(x.scopes || '').includes(SCOPE_MANAGE) };
+    return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken, needsReconnect: !String(x.scopes || '').includes(SCOPE_MANAGE),
+      email: x.email || '', avatarUrl: x.avatarUrl || '' };
   });
   return { available: available(), hasClient: !!c, projectId: c ? c.projectId : '', clientSource: cs.source, dailyCap: cs.cap, uploadsToday: cs.today, channels };
 }
@@ -265,6 +269,12 @@ async function connectChannel(o = {}) {
     const ch = mj.items && mj.items[0];
     if (!ch) return { ok: false, error: '이 계정에는 유튜브 채널이 없습니다 — 로그인 뒤 「채널 선택」 화면에서 올릴 채널을 고르세요.' };
 
+    // 👤 연결한 구글 계정(이메일) — 실패해도 연결은 된다(보이기만 하는 값)
+    let email = '';
+    if (granted.includes(SCOPE_EMAIL)) {
+      try { const ur = await fetch(EP.userinfo, { headers: { Authorization: `Bearer ${tk.json.access_token}` } }); const uj = await _json(ur); email = String(uj.email || ''); } catch (_) {}
+    }
+    const th = (ch.snippet && ch.snippet.thumbnails) || {};
     const d2 = _load();
     d2.channels[ch.id] = {
       title: (ch.snippet && ch.snippet.title) || ch.id,
@@ -272,6 +282,8 @@ async function connectChannel(o = {}) {
       refresh: ci.enc(tk.json.refresh_token),
       connectedAt: _kst(),
       scopes: granted,   // 🧷 받은 권한 — 재생목록 권한(force-ssl)이 없으면 「다시 연결」 안내
+      email,             // 👤 연결한 구글 계정 — ⚙ 유튜브 카드에 보이기만 한다
+      avatarUrl: (th.high || th.medium || th.default || {}).url || '',   // 🏷 채널 프로필 그림 주소(파일은 main 이 받아 둔다)
     };
     if (!_save(d2)) return { ok: false, error: '연결 정보 저장 실패' };
     _tok.set(ch.id, { token: tk.json.access_token, exp: Date.now() + (Number(tk.json.expires_in) || 3600) * 1000 });

@@ -1426,3 +1426,19 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .dl-indet{height:4px;margin-top:4px;border-radius:2px;background:linear-gradient(90deg,transparent 0,var(--accent,#c9844a) 40%,transparent 80%) 0 0/50% 100% repeat-x,var(--line,#e7dccb);animation:dlIndet 1.2s linear infinite}
 @keyframes dlIndet{from{background-position:-50% 0,0 0}to{background-position:150% 0,0 0}}
 .dl-busy{margin:-4px 0 8px;padding:6px 10px;border-radius:8px;background:#fdf3e1;color:#8a5a12;font-size:12.5px}
+
+/* 🃏 ⚙ 유튜브 채널 카드(v0.9.34) — 로고 · 채널 이름 · 핸들 · 구글 계정 · 연결 날짜 · 경고 */
+.ytcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}
+.ytcard{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:grab;display:flex;flex-direction:column;gap:5px;min-width:0;transition:box-shadow .15s,border-color .15s}
+.ytcard:hover{box-shadow:0 2px 8px rgba(120,80,30,.12)}
+.ytcard.over{border-color:var(--hook);box-shadow:0 0 0 2px var(--hook)}
+.ytcard.warn{border-color:#e6b25c;background:#fffaf0}
+.ytcard-top{display:flex;align-items:center;gap:10px;min-width:0}
+.ytav{flex:0 0 44px;width:44px;height:44px;border-radius:50%;object-fit:cover;border:1px solid var(--line);background:#f3ebdf}
+.ytav-txt{display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:var(--hook)}
+.ytcard-name{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.ytcard-name b,.ytcard-acct span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ytcard .ytx{flex:0 0 auto;padding:2px 8px}
+.ytcard-acct{font-size:12.5px;display:flex;gap:4px;min-width:0}
+.ytcard-date{font-size:11.5px}
+.ytcard-warn{font-size:12px;color:#8a5a12;background:#fdf3e1;border-radius:6px;padding:4px 7px}

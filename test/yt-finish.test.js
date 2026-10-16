@@ -150,7 +150,8 @@ const PLID = 'PLabcdefghijklmnopqrstuvwxyz012345';
   ok(enq.length >= 3 && enq.every((l) => /finish: ytFinishJob\(/.test(l)), `업로드를 줄 세우는 곳 ${enq.length}곳 모두 finish 를 싣는다`);
   ok((M.match(/finishOnly: true/g) || []).length === 3, '이미 올린 영상의 마무리만 = 자동 업로드 · 이 대본만 · 큐 전체 세 곳');
   ok(/ytPlaylist: p\.ytPlaylist \|\| ''/.test(A) && /ytPlaylist: String\(ch\.ytPlaylist \|\| ''\)\.trim\(\)/.test(A) && /data-testid="ch-yt-playlist"/.test(A), '채널편집 재생목록 이름 — 읽기·저장·칸 셋 다');
-  ok(/c\.needsReconnect \? ' · ⚠ 재생목록 권한 없음/.test(A), '⚙ 유튜브 — 옛 연결 채널에 「다시 연결」 안내');
+  ok(/c\.needsReconnect \? '재생목록 권한 없음/.test(A), '⚙ 유튜브 — 옛 연결 채널에 「다시 연결」 안내');
+  ok(/data-testid="yt-cards"/.test(A) && /media\(c\.avatar\.path, c\.avatar\.v\)/.test(A) && /data-testid="yt-ch-email"/.test(A), '🃏 채널 카드 — 채널 그림 · 구글 계정 줄(v0.9.34)');
 
   console.log(`\n${fail ? '❌' : '✅'} yt-finish — ${pass} 통과 / ${fail} 실패`);
   server.close();
