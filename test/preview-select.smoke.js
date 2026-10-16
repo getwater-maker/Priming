@@ -8,7 +8,7 @@ const assert = require('assert');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-select-'));
   const name = '__preview_select_' + process.pid;
   const md = path.join(dir, name + '.md');
-  fs.writeFileSync(md, '# 화면 점검\n\n## 도입부\n### 〔첫 장면〕\n> 🖼️ 이미지: quiet room\n첫 번째 문장입니다. 두 번째 문장입니다.\n');
+  fs.writeFileSync(md, '# 화면 점검\n\n## 도입부\n### 〔첫 장면〕\n> 🖼️ 이미지: quiet room\n첫 번째 문장입니다. 두 번째 문장입니다.\n\n## 본론\n' + Array.from({length:30}, (_,i) => `\n### 〔장면 ${i+2}〕\n> 🖼️ 이미지: room\n次の場面で物語が続きます。\n`).join(''));
   const app = await electron.launch({ args: [path.join(__dirname, '..')], env: { ...process.env, PM_UI_SMOKE: '1' } });
   let win, folders;
   try {
@@ -51,6 +51,28 @@ const assert = require('assert');
       return (m.left - b.left) / b.width;
     });
     assert(Math.abs(ratio - 0.4) < 0.02, 'left combined ratio: ' + ratio);
+    // Cache offscreen group geometry, then resize: headers and clips must still align.
+    await win.evaluate(() => { const m = document.querySelector('main.pane2'); m.scrollTop = m.scrollHeight; });
+    await win.waitForTimeout(150);
+    for (const width of [1920, 1366, 1200, 1920]) {
+      await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 1000), width);
+      await win.evaluate(() => { document.querySelector('main.pane2').scrollTop = 0; });
+      await win.waitForTimeout(150);
+      const bounds = await win.evaluate(() => {
+        document.querySelector('.clip-chips .chip').textContent = 'LongCaption'.repeat(50);
+        document.querySelector('.clip-cap').textContent = 'LongCaption'.repeat(50);
+        const main = document.querySelector('main.pane2');
+        const card = main.querySelector('.card').getBoundingClientRect();
+        return { client: main.clientWidth, scroll: main.scrollWidth, cardRight: card.right,
+          clipRight: main.querySelector('.sent.clip').getBoundingClientRect().right,
+          capRight: main.querySelector('.clip-cap').getBoundingClientRect().right,
+          capWidth: main.querySelector('.clip-cap').clientWidth, capScroll: main.querySelector('.clip-cap').scrollWidth };
+      });
+      assert(bounds.scroll <= bounds.client + 1, `horizontal overflow at ${width}: ${JSON.stringify(bounds)}`);
+      assert(bounds.clipRight <= bounds.cardRight, `clip outside card at ${width}`);
+      assert(bounds.capRight <= bounds.cardRight, `caption outside card at ${width}: ${JSON.stringify(bounds)}`);
+      assert(bounds.capScroll <= bounds.capWidth + 1, `caption overflow at ${width}: ${JSON.stringify(bounds)}`);
+    }
     // User-selected plain folder, without bracketed script filename.
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
     for (const n of ['A', 'B', 'C']) fs.writeFileSync(path.join(dir, n + '.png'), png);
