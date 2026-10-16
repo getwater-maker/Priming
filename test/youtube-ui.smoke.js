@@ -1,7 +1,7 @@
 'use strict';
 /**
  * node test/youtube-ui.smoke.js — ⬆ 유튜브 업로드 화면 E2E (2026-09-24)
- *   ⚙ 설정 → ▶ 유튜브 탭 · 채널편집 📁 폴더 → ⬆ 자동 업로드 줄을 실제로 연다.
+ *   ⚙ 설정 → 📺 채널 연결 탭 · 채널편집 📁 폴더 → ⬆ 자동 업로드 줄을 실제로 연다.
  *   ⚠ 아무것도 저장·연결하지 않는다(ESC 로 닫는다) — 사용자 설정 무변경. 구글에 닿지 않는다.
  */
 const path = require('path');
@@ -24,16 +24,18 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(st.available === true, 'Electron 안에서 OS 암호화(safeStorage) 사용 가능');
     ok(!JSON.stringify(st).match(/secret|refresh/i), '상태에 비밀값 없음');
 
-    // ⚙ 설정 → ▶ 유튜브
+    // ⚙ 설정 → 📺 채널 연결
     await win.locator('button:has-text("⚙ 설정")').first().click();
     await win.waitForTimeout(500);
-    await win.locator('.modal-card.wide button:has-text("▶ 유튜브")').first().click();
+    await win.locator('.modal-card.wide button:has-text("📺 채널 연결")').first().click();
     await win.waitForTimeout(500);
     ok(await win.locator('[data-testid="yt-client"] [data-testid="yt-source"]').count() === 1 && /Priming 기본 연결|내 구글 프로젝트/.test(await win.locator('[data-testid="yt-source"]').innerText()), '① 「앱 연결」 — Priming 기본 연결이 들어 있어 파일을 가져올 필요가 없다(v0.5.91)');
     ok(await win.locator('[data-testid="yt-client"] [data-testid="yt-import"], [data-testid="yt-client"] [data-testid="yt-use-default"]').count() === 1, '고급: 내 프로젝트 파일… / ↩ 기본으로 버튼 한 개');
-    const conn = win.locator('[data-testid="yt-channels"] button:has-text("🔗 채널 연결")');
-    ok(await conn.count() === 1, '② 「🔗 채널 연결」 버튼');
-    ok((await conn.isDisabled()) === !st.hasClient, '연결 파일이 없으면 채널 연결 버튼이 잠긴다');
+    const conn = win.locator('[data-testid="yt-channels"] [data-testid="yt-add-channel"]');
+    ok(await conn.count() === 1 && /새 채널 추가/.test(await conn.innerText()), '② 카드 맨 끝 「＋ 새 채널 추가」(v0.9.36 — 위쪽 「🔗 채널 연결」 버튼 대신)');
+    ok((await conn.isDisabled()) === !st.hasClient, '연결 파일이 없으면 채널 추가가 잠긴다');
+    ok(await win.locator('[data-testid="yt-ch-reconnect"]').count() === st.channels.length, `카드마다 「🔄 다시 연결」(${st.channels.length}개)`);
+    ok(await win.locator('[data-testid="yt-channels"] button:has-text("🔗 채널 연결")').count() === 0, '위쪽 공용 「🔗 채널 연결」 버튼은 없다');
     ok(await win.locator('text=비공개').count() > 0 && await win.locator('text=AI 합성 콘텐츠 표시').count() === 1, '안내: 비공개 · AI 합성 표시');
     // ↕ 끌어서 순서 바꾸기(v0.5.81) — 채널이 2개 이상일 때만. 🔴 로이 PC 의 실제 순서를 바꾸므로 **끝나면 원래 순서로 되돌린다**.
     if (st.channels.length >= 2) {
@@ -41,7 +43,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
       const rows = win.locator('[data-testid="yt-ch-row"]');
       ok(await rows.count() === orig.length, `채널 줄 ${orig.length}개 · 끌 수 있음(draggable)`);
       try {
-        await rows.nth(0).dragTo(rows.nth(1));
+        await rows.nth(0).dragTo(rows.nth(1), { sourcePosition: { x: 70, y: 14 }, targetPosition: { x: 70, y: 14 } });   // 카드 윗부분(이름 줄)을 잡는다 — 가운데는 메모 칸
         await win.waitForTimeout(600);
         const now = (await win.evaluate(() => window.api.ytStatus())).channels.map((c) => c.id);
         ok(now[0] === orig[1] && now[1] === orig[0] && now.length === orig.length, '1번 줄을 2번 자리에 놓으면 저장 순서가 바뀐다');

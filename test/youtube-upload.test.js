@@ -127,6 +127,17 @@ const server = http.createServer(async (req, res) => {
   ok(c.ok && st.channels[0].brand && st.channels[0].email === G.email, '🏢 pages.plusgoogle.com 주소 = 브랜드 계정으로 판정');
   ok(st.channels[0].memo === 'roy.main@gmail.com', '📝 다시 연결해도 메모가 남는다');
   G.email = '';
+  // 🔄 카드별 다시 연결(v0.9.36) — 다른 채널을 고르면 저장하지 않는다 · 메모 메일 = login_hint
+  {
+    const before = JSON.stringify(YT.status().channels);
+    let seen = '';
+    c = await YT.connectChannel({ openUrl: (u) => { seen = u; return browse(u); }, expectId: 'UC_OTHER', expectTitle: '다산의 뜰', loginHint: 'a8282up@gmail.com' });
+    ok(!c.ok && c.mismatch && c.picked.id === 'UC_TEST_1' && /「로이의 고전이야기」을\(를\) 고르셨습니다 — 이 카드는 「다산의 뜰」/.test(c.error), '카드와 다른 채널을 고르면 거부 + 무엇을 골랐는지 알림');
+    ok(JSON.stringify(YT.status().channels) === before && G.revoked.length === 0, '거부 때 저장 무변경 · 토큰 철회 안 함(같은 계정의 다른 카드가 끊기지 않게)');
+    ok(new URL(seen).searchParams.get('login_hint') === 'a8282up@gmail.com', '메모의 메일 → login_hint');
+    c = await YT.connectChannel({ openUrl: (u) => { seen = u; return browse(u); }, expectId: 'UC_TEST_1', loginHint: '고전 채널 계정' });
+    ok(c.ok && !new URL(seen).searchParams.has('login_hint'), '같은 채널이면 저장 · 메일이 아닌 메모는 힌트로 보내지 않는다');
+  }
   delete G.channel.snippet.thumbnails;
   G.scope = 'https://www.googleapis.com/auth/youtube.readonly';
   c = await YT.connectChannel({ openUrl: (u) => browse(u) });
@@ -262,7 +273,7 @@ const server = http.createServer(async (req, res) => {
   const A = read('renderer/src/App.jsx');
   ok(/ytAuto: !!p\.ytAuto, ytChannelId: p\.ytChannelId/.test(A), '채널편집이 ytAuto·ytChannelId 를 싣는다');
   ok(/ytAuto: !!ch\.ytAuto && !!ch\.ytChannelId, ytChannelId: ch\.ytChannelId/.test(A), '저장 patch 에 ytAuto·ytChannelId(안 실으면 덮인다)');
-  ok(A.includes("['yt', '▶ 유튜브']") && A.includes("if (id === 'yt') ytLoad();"), '⚙ 설정 ▶ 유튜브 탭');
+  ok(A.includes("['yt', '📺 채널 연결']") && A.includes("if (id === 'yt') ytLoad();"), '⚙ 설정 📺 채널 연결 탭');
   ok(A.includes("import ytChapters from '../../core/yt-chapters.js'") && !/\nfunction tsChaptersOf\(/.test(A), '🔑 챕터 계산은 core 하나(App.jsx 에 복사본 없음)');
   ok(/\(outTarget === 'mp4' \|\| outTarget === 'whiteboard'\) && <button[^>]*onClick=\{runYtUpload\}/.test(A), '헤더 ⬆ 업로드(유튜브 MP4 · 화이트보드 MP4 일 때)');
   ok(A.includes("api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' })"), '⬆ 업로드가 완성 종류(kind)를 넘긴다');
@@ -270,7 +281,7 @@ const server = http.createServer(async (req, res) => {
   ok(M.includes('const finalDir = wbFinalDir(preset);'), '렌더와 업로드가 같은 화이트보드 폴더 함수');
   ok(M.includes('if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset, runCtx)'), '✏ 화이트보드 성공 뒤 자동 업로드 — 🔴 음성 있을 때만');
   ok(M.includes("ipcMain.handle('yt-reorder'") && PL.includes('ytReorder:'), 'IPC·preload yt-reorder');
-  ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '▶ 유튜브 채널 줄을 끌어서 놓기');
+  ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '📺 채널 연결 채널 줄을 끌어서 놓기');
 
   console.log('\n[10b] ⬆ 큐 전체 업로드 — planQueueUploads 원문 실행');
   {

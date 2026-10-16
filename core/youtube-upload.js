@@ -32,6 +32,7 @@ const SCOPE_MANAGE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 // 👤 어느 구글 계정으로 연결했는지 ⚙ 유튜브 카드에 보이려고(v0.9.34 · 로이 「채널마다 구글 계정이 다르다」) — 이메일만(비민감 권한).
 const SCOPE_EMAIL = 'https://www.googleapis.com/auth/userinfo.email';
 const SCOPES = [SCOPE_UPLOAD, SCOPE_READ, SCOPE_MANAGE, SCOPE_EMAIL];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;   // 카드 메모가 메일 주소일 때만 구글 로그인 힌트로 쓴다
 
 // 테스트가 가짜 서버로 갈아끼운다(_setEndpoints).
 const EP = {
@@ -203,13 +204,16 @@ function _page(title, msg) {
 
 /**
  * 🔗 채널 연결 — 브라우저에서 구글 로그인 → 채널 선택 → 허용.
- * @param {{openUrl:(url:string)=>void, log?:Function, timeoutMs?:number}} o
+ * @param {{openUrl:(url:string)=>void, log?:Function, timeoutMs?:number, expectId?:string, expectTitle?:string, loginHint?:string}} o
+ *   expectId = 카드의 「🔄 다시 연결」(v0.9.36) — 구글 화면에서 다른 채널을 고르면 **저장하지 않는다**(mismatch).
+ *     ⛔ 그때 받은 토큰을 철회(revoke)하지 않는다 — 같은 계정의 다른 카드 연결까지 끊긴다.
+ *   loginHint = 카드 메모의 메일 주소 → 구글 계정 고르기에서 그 계정을 먼저 잡는다(구글이 무시할 수도 있다).
  */
 async function connectChannel(o = {}) {
   const log = o.log || (() => {});
   const d = _load();
   const client = _getClient(d);
-  if (!client) return { ok: false, error: '유튜브 연결 파일을 먼저 가져오세요(⚙ 설정 → ▶ 유튜브 → 📥 파일 가져오기).' };
+  if (!client) return { ok: false, error: '유튜브 연결 파일을 먼저 가져오세요(⚙ 설정 → 📺 채널 연결 → 📥 파일 가져오기).' };
   const ci = _cipher();
   if (!ci) return { ok: false, error: '이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 연결 정보를 저장할 수 없습니다.' };
 
@@ -225,7 +229,7 @@ async function connectChannel(o = {}) {
       if (u.pathname !== '/') { res.writeHead(404); res.end(); return; }   // favicon 등
       const q = u.searchParams;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      if (q.get('state') !== state) { res.end(_page('연결 실패', '요청이 맞지 않습니다. 앱에서 다시 「🔗 채널 연결」을 누르세요.')); resolve({ error: 'state 불일치' }); return; }
+      if (q.get('state') !== state) { res.end(_page('연결 실패', '요청이 맞지 않습니다. 앱에서 다시 「🔄 다시 연결」(새 채널은 「＋ 새 채널 추가」)을 누르세요.')); resolve({ error: 'state 불일치' }); return; }
       if (q.get('error')) {
         res.end(_page('연결하지 않았습니다', '허용하지 않으셨습니다. 이 창을 닫고 앱으로 돌아가세요.'));
         resolve({ error: q.get('error') === 'access_denied' ? '허용하지 않았습니다(연결 취소).' : `구글 오류: ${q.get('error')}` });
@@ -244,11 +248,12 @@ async function connectChannel(o = {}) {
     // select_account = 채널(브랜드 계정) 고르는 화면을 매번 띄운다 · consent = 갱신 토큰을 반드시 받는다
     prompt: 'select_account consent',
     state, code_challenge: challenge, code_challenge_method: 'S256',
+    ...(EMAIL_RE.test(String(o.loginHint || '').trim()) ? { login_hint: String(o.loginHint).trim() } : {}),
   }).toString();
 
   const timeoutMs = o.timeoutMs || 5 * 60 * 1000;
   let timer;
-  const timeoutP = new Promise((r) => { timer = setTimeout(() => r({ error: '5분 안에 연결을 마치지 않아 취소했습니다. 다시 「🔗 채널 연결」을 누르세요.' }), timeoutMs); });
+  const timeoutP = new Promise((r) => { timer = setTimeout(() => r({ error: '5분 안에 연결을 마치지 않아 취소했습니다. 다시 「🔄 다시 연결」(새 채널은 「＋ 새 채널 추가」)을 누르세요.' }), timeoutMs); });
   try {
     log('🔗 유튜브 채널 연결 — 브라우저에서 구글 로그인 → 채널 선택 → 허용을 눌러 주세요');
     try { await o.openUrl(url); } catch (e) { return { ok: false, error: `브라우저를 열지 못했습니다: ${e.message}` }; }
@@ -270,6 +275,10 @@ async function connectChannel(o = {}) {
     const mj = await _json(me);
     const ch = mj.items && mj.items[0];
     if (!ch) return { ok: false, error: '이 계정에는 유튜브 채널이 없습니다 — 로그인 뒤 「채널 선택」 화면에서 올릴 채널을 고르세요.' };
+    if (o.expectId && ch.id !== o.expectId) {
+      const picked = (ch.snippet && ch.snippet.title) || ch.id;
+      return { ok: false, mismatch: true, picked: { id: ch.id, title: picked }, error: `「${picked}」을(를) 고르셨습니다 — 이 카드는 「${o.expectTitle || o.expectId}」입니다. 저장하지 않았습니다(다시 눌러 「${o.expectTitle || '그 채널'}」을 고르세요).` };
+    }
 
     // 👤 연결한 구글 계정(이메일) — 실패해도 연결은 된다(보이기만 하는 값)
     let email = '';
@@ -320,7 +329,7 @@ async function accessToken(channelId, { force = false } = {}) {
   if (!force && c && c.exp - Date.now() > 60 * 1000) return { ok: true, token: c.token };
   const d = _load();
   const x = d.channels[channelId];
-  if (!x) return { ok: false, error: '이 채널은 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → ▶ 유튜브에서 「🔗 채널 연결」을 하세요.' };
+  if (!x) return { ok: false, error: '이 채널은 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → 📺 채널 연결에서 「＋ 새 채널 추가」를 누르세요.' };
   const client = _getClient(d);
   const ci = _cipher();
   const rt = ci ? ci.dec(x.refresh) : '';
@@ -331,7 +340,7 @@ async function accessToken(channelId, { force = false } = {}) {
   if (r.status !== 200 || !r.json.access_token) {
     if (r.json.error === 'invalid_grant') {
       const d2 = _load(); if (d2.channels[channelId]) { d2.channels[channelId].broken = true; _save(d2); }
-      return { ok: false, error: `「${x.title}」 연결이 끊겼습니다(구글에서 권한 해제·비밀번호 변경 등) — ⚙ 설정 → ▶ 유튜브에서 다시 연결하세요.` };
+      return { ok: false, error: `「${x.title}」 연결이 끊겼습니다(구글에서 권한 해제·비밀번호 변경 등) — ⚙ 설정 → 📺 채널 연결에서 그 채널 카드의 「🔄 다시 연결」로 다시 연결하세요.` };
     }
     return { ok: false, error: `토큰 갱신 실패(${r.status}): ${r.json.error_description || r.json.error || ''}` };
   }
@@ -506,7 +515,7 @@ async function uploadVideo(o = {}) {
   let size;
   try { size = fs.statSync(o.file).size; } catch (e) { return { ok: false, error: `영상 파일이 없습니다: ${o.file}` }; }
   if (!size) return { ok: false, error: '영상 파일이 비어 있습니다.' };
-  { const cs = _capState(); if (cs.full) return { ok: false, capReached: true, error: `이 PC 의 오늘 업로드 상한(${cs.cap}편)에 도달했습니다 — 공용 유튜브 연결의 하루 한도를 모두가 나눠 쓰기 때문입니다. 내일 다시 올리거나, ⚙ 설정 → ▶ 유튜브 → 고급에서 내 구글 프로젝트 파일을 쓰면 제한이 없습니다.` }; }
+  { const cs = _capState(); if (cs.full) return { ok: false, capReached: true, error: `이 PC 의 오늘 업로드 상한(${cs.cap}편)에 도달했습니다 — 공용 유튜브 연결의 하루 한도를 모두가 나눠 쓰기 때문입니다. 내일 다시 올리거나, ⚙ 설정 → 📺 채널 연결 → 고급에서 내 구글 프로젝트 파일을 쓰면 제한이 없습니다.` }; }
   const title = cleanTitle(o.title);
   if (!title) return { ok: false, error: '제목이 비어 있습니다.' };
   const meta = {
@@ -636,7 +645,7 @@ async function uploadVideo(o = {}) {
 }
 
 /**
- * ↕ 연결된 채널 순서 바꾸기(⚙ 설정 → ▶ 유튜브에서 끌어서 · v0.5.81) — 저장 파일의 channels 순서가 곧 표시 순서다
+ * ↕ 연결된 채널 순서 바꾸기(⚙ 설정 → 📺 채널 연결에서 끌어서 · v0.5.81) — 저장 파일의 channels 순서가 곧 표시 순서다
  *   (설정 목록 · 채널편집 「업로드채널」 목록 둘 다 status() 순서). 모르는 ID 는 무시, 빠진 채널은 뒤에 원래 순서로 붙인다(잃지 않는다).
  *   채널 ID 는 「UC…」 라 숫자 키 정렬 규칙에 걸리지 않는다. 다시 연결해도 자리는 그대로(기존 키에 덮어쓰기).
  */

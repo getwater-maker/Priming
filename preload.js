@@ -100,7 +100,7 @@ contextBridge.exposeInMainWorld('api', {
   ytStatus: () => ipcRenderer.invoke('yt-status'),
   ytImportClient: () => ipcRenderer.invoke('yt-import-client'),
   ytUseDefaultClient: () => ipcRenderer.invoke('yt-use-default-client'),
-  ytConnect: () => ipcRenderer.invoke('yt-connect'),
+  ytConnect: (id) => ipcRenderer.invoke('yt-connect', id ? { id } : {}),
   ytDisconnect: (id) => ipcRenderer.invoke('yt-disconnect', id),
   ytReorder: (ids) => ipcRenderer.invoke('yt-reorder', ids),
   ytSetMemo: (id, memo) => ipcRenderer.invoke('yt-set-memo', { id, memo }),

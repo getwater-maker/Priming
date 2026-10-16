@@ -3148,7 +3148,7 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
   const title = meta.title;
   const base = { title, channel: ch ? ch.title : channelId, file };
   if (!ch) {
-    const err = '이 채널이 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → ▶ 유튜브에서 「🔗 채널 연결」을 하세요.';
+    const err = '이 채널이 이 PC 에서 연결되지 않았습니다 — ⚙ 설정 → 📺 채널 연결에서 「＋ 새 채널 추가」를 누르세요.';
     log(`✗ 유튜브 업로드 — ${err}`); ytSend({ ...base, phase: 'error', error: err, startedAt: Date.now(), endedAt: Date.now() });
     return { ok: false, error: err };
   }
@@ -3271,10 +3271,13 @@ ipcMain.handle('yt-import-client', async () => {
   else log(`✗ 유튜브 연결 파일 — ${out.error}`);
   return out;
 });
-ipcMain.handle('yt-connect', async () => {
-  const r = await require('./core/youtube-upload').connectChannel({ openUrl: (u) => shell.openExternal(u), log });
+// 🔗 채널 연결 — 인자 없음 = ＋ 새 채널 추가 · { id } = 그 카드의 🔄 다시 연결(다른 채널을 고르면 저장하지 않음 · 카드 메모의 메일 = 로그인 힌트 · v0.9.36)
+ipcMain.handle('yt-connect', async (_e, args = {}) => {
+  const YT = require('./core/youtube-upload');
+  const cur = args && args.id ? YT.status().channels.find((c) => c.id === args.id) : null;
+  const r = await YT.connectChannel({ openUrl: (u) => shell.openExternal(u), log, ...(cur ? { expectId: cur.id, expectTitle: cur.title, loginHint: cur.memo } : {}) });
   if (r.ok && r.channel) { try { await _ytAvatarFile(r.channel.id, true); } catch (_) {} }   // 🏷 다시 연결하면 채널 그림도 새로
-  if (!r.ok) log(`✗ 유튜브 채널 연결 — ${r.error}`);
+  if (!r.ok) log(`${r.mismatch ? '⚠' : '✗'} 유튜브 채널 연결 — ${r.error}`);
   try { if (win.isMinimized()) win.restore(); win.focus(); } catch (_) {}
   return r;
 });

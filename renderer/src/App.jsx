@@ -3989,11 +3989,18 @@ export default function App() {
     setSettingsMsg(r && r.ok ? `↩ Priming 기본 연결로 돌아왔습니다${r.cleared ? ` — 기존 채널 연결 ${r.cleared}개는 다시 연결하세요.` : '.'}` : `❌ ${(r && r.error) || '실패'}`);
     ytLoad();
   }
-  async function ytConnect() {
-    setSettingsMsg('⏳ 브라우저에서 구글 로그인 → 올릴 채널 선택 → 「확인되지 않은 앱」이면 고급 → Priming(으)로 이동 → 허용을 눌러 주세요 (5분 안에)');
-    const r = await api.ytConnect();
-    setSettingsMsg(r && r.ok ? `✅ 「${r.channel.title}」 연결됨 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 이 채널을 고르세요.` : `❌ ${(r && r.error) || '연결 실패'}`);
-    ytLoad();
+  // 🔗 c 없음 = ＋ 새 채널 추가 · c = 그 카드의 🔄 다시 연결(다른 채널을 고르면 main 이 저장하지 않는다 · v0.9.36)
+  const [ytBusy, setYtBusy] = useState('');
+  async function ytConnect(c = null) {
+    if (ytBusy) return;
+    setYtBusy(c ? c.id : 'new');
+    setSettingsMsg(c ? `⏳ 「${c.title}」 다시 연결 — 브라우저에서 ${c.memo ? `${c.memo} 계정으로 ` : ''}로그인 → 「${c.title}」 채널을 고르고 → 허용 (5분 안에)`
+      : '⏳ 새 채널 추가 — 브라우저에서 구글 로그인 → 올릴 채널 선택 → 「확인되지 않은 앱」이면 고급 → Priming(으)로 이동 → 허용 (5분 안에)');
+    try {
+      const r = await api.ytConnect(c ? c.id : undefined);
+      setSettingsMsg(r && r.ok ? (c ? `✅ 「${r.channel.title}」 다시 연결됨` : `✅ 「${r.channel.title}」 연결됨 — ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 이 채널을 고르세요.`)
+        : `${r && r.mismatch ? '⚠' : '❌'} ${(r && r.error) || '연결 실패'}`);
+    } finally { setYtBusy(''); ytLoad(); }
   }
   async function ytDisconnect(c) {
     if (!uiConfirm(`「${c.title}」 연결을 해제할까요?\n이 PC 에서 이 채널로 자동 업로드가 멈춥니다(다시 연결하면 됩니다).`)) return;
@@ -6730,7 +6737,7 @@ export default function App() {
                           {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken || c.needsReconnect ? ' (⚠ 다시 연결)' : ''}</option>)}
                           {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
-                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → ▶ 유튜브.</Hint>
+                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
                         <input data-testid="ch-yt-playlist" placeholder="재생목록 이름" value={ch.ytPlaylist || ''} onChange={(e) => setCh({ ...ch, ytPlaylist: e.target.value })} />
                         <Hint>🧷 업로드가 끝나면 썸네일 A 와 이 <b>재생목록</b>을 앱이 넣고 다시 읽어 확인합니다. 이름은 유튜브의 재생목록 제목과 <b>똑같이</b> 적으세요. 패키징 「## 재생목록」이나 고정댓글의 재생목록 링크가 있으면 그것이 먼저입니다. 고정댓글·썸네일 A/B·종료화면·예약은 Studio 에서 합니다.</Hint>
                       </div>
@@ -6926,7 +6933,7 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '▶ 유튜브'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
+              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '📺 채널 연결'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -7326,15 +7333,13 @@ export default function App() {
               </div>
               <div data-testid="yt-channels" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
-                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널 연결</label>
-                  <Hint>채널마다 한 번. 브라우저에서 로그인 → <b>올릴 채널 선택</b> → 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</Hint>
-                  <button style={{ flex: '0 0 auto' }} disabled={!ytSt || !ytSt.hasClient} onClick={ytConnect}>🔗 채널 연결</button>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널</label>
+                  <Hint>카드의 <b>🔄 다시 연결</b> = 그 채널만(구글 화면에서 다른 채널을 고르면 저장하지 않습니다 · 메모에 적은 메일 계정을 먼저 잡습니다). <b>＋ 새 채널 추가</b> = 아직 없는 채널. 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</Hint>
                 </div>
-                {(!ytSt || !ytSt.channels || !ytSt.channels.length) && <div className="meta" style={{ marginTop: 6 }}>연결된 채널이 없습니다.</div>}
                 {/* 🃏 채널 카드(v0.9.34 · 로이 「카드 형식 · 채널 로고 · 구글 계정」) — 끌어서 순서 바꾸기는 그대로 */}
                 <div className="ytcards" data-testid="yt-cards">
                 {((ytSt && ytSt.channels) || []).map((c, i) => {
-                  const warn = c.broken ? '연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? '재생목록 권한 없음 — 「🔗 채널 연결」로 한 번 다시 연결' : '';
+                  const warn = c.broken ? '연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? '재생목록 권한 없음 — 아래 「🔄 다시 연결」을 한 번 눌러 주세요' : '';
                   return (
                   <div key={c.id} className={'ytcard' + (warn ? ' warn' : '') + (ytDragOver === i ? ' over' : '')} data-testid="yt-ch-row" draggable={ytMemoFocus !== c.id}
                     title="끌어서 순서를 바꿉니다(채널편집 「업로드채널」 목록도 이 순서)"
@@ -7362,8 +7367,12 @@ export default function App() {
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur(); if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.value = c.memo || ''; e.currentTarget.blur(); } }} />
                     <div className="meta ytcard-date">{c.connectedAt ? `${c.connectedAt} 연결` : ''}</div>
                     {warn && <div className="ytcard-warn">⚠ {warn}</div>}
+                    <button className={'ytre' + (warn ? ' hot' : '')} data-testid="yt-ch-reconnect" disabled={!ytSt.hasClient || !!ytBusy} onClick={() => ytConnect(c)}>
+                      {ytBusy === c.id ? '⏳ 브라우저에서 진행 중…' : '🔄 다시 연결'}</button>
                   </div>);
                 })}
+                <button className="ytcard ytadd" data-testid="yt-add-channel" disabled={!ytSt || !ytSt.hasClient || !!ytBusy} onClick={() => ytConnect(null)}>
+                  {ytBusy === 'new' ? '⏳ 브라우저에서 진행 중…' : <><b>＋ 새 채널 추가</b><span className="meta">아직 연결하지 않은 채널</span></>}</button>
                 </div>
               </div>
             </div>)}

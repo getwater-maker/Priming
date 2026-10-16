@@ -74,7 +74,7 @@ async function _json(res) { try { return await res.json(); } catch (_) { return 
 function _reason(j) { const e = (j && j.error) || {}; return (e.errors && e.errors[0] && e.errors[0].reason) || e.status || ''; }
 function _apiMsg(st, j) {
   const r = _reason(j), m = (j && j.error && j.error.message) || '';
-  if (st === 403 && /insufficient|SCOPE/i.test(r + m)) return '권한이 없습니다 — ⚙ 설정 → ▶ 유튜브에서 이 채널을 「다시 연결」하세요(재생목록 권한이 새로 생겼습니다)';
+  if (st === 403 && /insufficient|SCOPE/i.test(r + m)) return '권한이 없습니다 — ⚙ 설정 → 📺 채널 연결에서 이 채널을 「다시 연결」하세요(재생목록 권한이 새로 생겼습니다)';
   if (r === 'quotaExceeded') return '오늘 구글 API 할당량을 다 썼습니다 — 한국 시간 오후 4~5시에 초기화됩니다';
   return `유튜브 오류 ${st}${r ? ` (${r})` : ''}${m ? ` — ${m}` : ''}`;
 }

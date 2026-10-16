@@ -1444,3 +1444,9 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .ytcard-warn{font-size:12px;color:#8a5a12;background:#fdf3e1;border-radius:6px;padding:4px 7px}
 .ytmemo{width:100%;box-sizing:border-box;font-size:12.5px;padding:4px 7px;border:1px dashed var(--line);border-radius:6px;background:#fdfaf5;cursor:text}
 .ytmemo:focus{border-style:solid;border-color:var(--hook);background:#fff;outline:none}
+.ytre{align-self:stretch;margin-top:2px;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:#fbf6ee;color:#7a5a3a;cursor:pointer}
+.ytre.hot{background:var(--hook);border-color:var(--hook);color:#fff;font-weight:700}
+.ytre:disabled{opacity:.55;cursor:default}
+.ytcard.ytadd{border:2px dashed var(--line);background:transparent;align-items:center;justify-content:center;min-height:120px;cursor:pointer;font-size:14px;color:var(--hook)}
+.ytcard.ytadd:hover:not(:disabled){border-color:var(--hook);background:#fffaf2}
+.ytcard.ytadd:disabled{opacity:.55;cursor:default}
