@@ -53,7 +53,7 @@
 | TTS | `tts/tts-manager.js`(싱글톤) · `tts/providers/omnivoice-provider.js` · `tts/text-pronouncer.js`(🔑 `processForTTS` = TTS 텍스트 가공 유일한 문) · `tts/preset-store.js`(채널) · `core/tts-cache.js` · `core/audio-normalize.js` · `tts/asr-client.js`(STT) | [TTS](docs/규칙/TTS.md) · 채널·목소리 분류 → [채널설정](docs/규칙/채널설정.md) · ja/vi → [다국어](docs/규칙/다국어.md) |
 | 이미지 | `core/comfy-image.js` · `core/comfy-models.js`(모델 자동 대체) · `core/comfy-perf.js` · `genspark-engine.js` · `flow-engine.js`(⚠ CRLF 파일) · `core/image-rotation.js` · `core/style-store.js` · `core/media-cache.js` | Gemini → [나노바나나](docs/규칙/나노바나나.md) · 스타일 → [채널설정](docs/규칙/채널설정.md) |
 | 비디오 | `core/comfy-video.js` · `grok-engine.js` · `core/grok-api.js` · `flow-engine.js`(Veo) · `genspark-engine.js`(비디오) · `core/video-fit.js` · `core/upscaler.js` | [비디오엔진](docs/규칙/비디오엔진.md) |
-| 출력 | `vrew/vrew-builder.js`(.vrew) · `core/vrew-render.js`(.vrew → MP4) · `core/whiteboard-*.js` + `whiteboard/`(벤더링) · `core/premiere-xml.js` · `core/youtube-upload.js`·`yt-packaging.js`·`yt-chapters.js` | youtube-*·yt-* → [유튜브업로드](docs/규칙/유튜브업로드.md) |
+| 출력 | `vrew/vrew-builder.js`(.vrew) · `core/vrew-render.js`(.vrew → MP4) · `core/whiteboard-*.js` + `whiteboard/`(벤더링) · `core/youtube-upload.js`·`yt-packaging.js`·`yt-chapters.js` | youtube-*·yt-* → [유튜브업로드](docs/규칙/유튜브업로드.md) |
 | 리모션 | `core/tsv-tts.js` · `core/tsv-images.js` · `core/audio-trim.js` · `renderer/src/RemotionView.jsx` | [출판](docs/규칙/출판.md) |
 | 출판 | `core/book/*`(parser·html-builder·pdf-builder·epub-builder·spine-calc·isbn-barcode) · `renderer/src/BookView.jsx` | [출판](docs/규칙/출판.md) |
 | 받기·STT | `core/media-download.js`(yt-dlp) · `core/merge-assets.js`(통합본 이어받기) · `core/vrew-audio.js`(Vrew 음성 가져오기) | — |

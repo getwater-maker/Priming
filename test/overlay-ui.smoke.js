@@ -212,13 +212,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(400);
     const au2 = await win.evaluate(() => (window.__pmInsAudio ? window.__pmInsAudio() : []));
     ok(au2.length === 0, '■ 멈춤 → 삽입 오디오도 멈춘다');
-    const ps = win.locator('[data-testid=play-shorts]').first();
-    await ps.click();
-    await win.waitForFunction(() => (document.querySelector('[data-testid=play-shorts]') || {}).innerText.includes('멈춤'), null, { timeout: 4000 }).catch(() => {});
-    ok((await ps.innerText()).includes('■ 멈춤'), '▶ 미리보기 → ■ 멈춤');
-    await ps.click();
-    await win.waitForFunction(() => (document.querySelector('[data-testid=play-shorts]') || {}).innerText.includes('미리보기'), null, { timeout: 4000 }).catch(() => {});
-    ok((await ps.innerText()).includes('▶ 미리보기'), '■ 멈춤 → ▶ 미리보기');
+    ok(await win.locator('[data-testid=play-shorts]').count() === 0, '대본 머리 ▶ 미리보기는 뺐다(v0.9.39 · 로이) — 재생은 그룹 메뉴 ▶');
     // 🔑 두 번째 그룹부터 재생 — 음악이 처음(0초)이 아니라 흐른 시간만큼 뒤에서 이어진다
     await openG(1); await win.click('[data-testid=mn-play-from]'); await win.waitForTimeout(1200);
     const au3 = await win.evaluate(() => (window.__pmInsAudio ? window.__pmInsAudio() : []));

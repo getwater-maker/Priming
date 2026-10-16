@@ -32,6 +32,9 @@ function shortName(n, max = 14) {
   return [...body].length > max ? [...body].slice(0, max).join('') + '…' + ext : s;
 }
 const media = (p, version = '') => 'media://' + encodeURIComponent(p) + (version ? `?v=${encodeURIComponent(version)}` : '');
+// 🎛 묶음 버튼 아이콘(v0.9.39 · 로이 「글자 없이 간단하게」) — 단계 아이콘을 작은 + 로 잇는다. 대본 머리(그 대본)·④ 완성(작업 순서 전체)이 같은 모양.
+const COMBO_TI = ['🎤', '🖼'], COMBO_IV = ['🖼', '🎬'], COMBO_TIV = ['🎤', '🖼', '🎬'];
+function ComboIc({ ics }) { return <span className="combo">{ics.map((ic, i) => <React.Fragment key={i}>{i ? <b className="cplus">+</b> : null}<span className="cic">{ic}</span></React.Fragment>)}</span>; }
 // 👥 구독자 수 → 「1.2만명」·「3,456명」(유튜브는 3자리 유효숫자로 반올림해 준다 · v0.9.37)
 const fmtSubs = (n) => { n = Number(n) || 0; if (n >= 1e4) { const v = n / 1e4; return `${v >= 100 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, '')}만명`; } return `${n.toLocaleString('ko-KR')}명`; };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1364,10 +1367,10 @@ export default function App() {
     try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 헤더값을 활성 항목에 반영
     const items = (queue && queue[mode] && queue[mode].items) || [];
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
-    const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오', ttsimg: 'TTS→이미지' }[stage] || stage;
+    const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오', ttsimg: 'TTS→이미지', ttsimgvid: 'TTS→이미지→비디오' }[stage] || stage;
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
-    const phases = stage === 'imgvid' ? ['image', 'video'] : stage === 'ttsimg' ? ['tts', 'image'] : [stage];   // ttsimg = 전 편 TTS → 전 편 이미지(GPU 를 번갈아 쓰지 않게 · v0.7.72)
+    const phases = stage === 'imgvid' ? ['image', 'video'] : stage === 'ttsimg' ? ['tts', 'image'] : stage === 'ttsimgvid' ? ['tts', 'image', 'video'] : [stage];   // ttsimgvid = 전 편 TTS → 전 편 이미지 → 전 편 비디오(v0.9.39)   // ttsimg = 전 편 TTS → 전 편 이미지(GPU 를 번갈아 쓰지 않게 · v0.7.72)
     let qStyle = styleId || null;   // 📜 대본스타일 + 이 대본에 🎨 줄 없음 → 시작 전에 한 번 묻는다(큐의 다른 대본은 main 이 채널 화풍으로 폴백)
     if (stage !== 'tts') { qStyle = await runStyleId(); if (qStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
     queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
@@ -1404,6 +1407,20 @@ export default function App() {
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // 🎤+🖼 · 🎤+🖼+🎬 — 이 대본만(v0.9.39 · 로이). TTS 를 먼저 끝낸 뒤 이미지(→ 비디오) — 단계마다 이미 있는 것은 건너뛴다.
+  async function runTtsImg(shortsNum, withVid = false) {
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: withVid && videoEngine !== 'none' ? 'range' : 'none' })) return;
+    const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
+    const lbl = withVid ? 'TTS→이미지→비디오' : 'TTS→이미지';
+    setStatus(`${lbl} 생성중…`);
+    try {
+      let d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d);
+      d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: sid }); if (d) setDto(d);
+      if (withVid && videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); if (d) setDto(d); }
+      setStatus(`${lbl} 완료`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
+  function runTtsImgVid(shortsNum) { return runTtsImg(shortsNum, true); }
   // ⚡ 만들기·✏ 렌더가 **같은 인자**를 쓴다 — 두 벌로 두면 한쪽만 고쳐져 조용히 갈라진다.
   function makeArgs(shortsNum) {
     return {
@@ -1505,12 +1522,6 @@ export default function App() {
   // 💾 .vrew · 🎬 MP4 굽기 · ✏ 렌더 버튼은 **⚡ 만들기 하나로 통일**했다(로이 2026-09-24).
   //   ⚡ 만들기가 이미 만든 음성·이미지·영상은 건너뛰고(이어받기) ④ 완성의 선택(.vrew / ✏ 화이트보드 / 🎬 유튜브 MP4)대로
   //   끝을 낸다 → 세 버튼은 결과가 사실상 같았다. IPC(export-vrew · whiteboard-build)는 테스트·CLI 용으로 남긴다.
-  // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
-  async function runPremiere(shortsNum) {
-    setStatus('프리미어 XML 내보내는 중…');
-    try { const r = await api.exportPremiere({ shortsNum, captionMaxChars: effCap }); setStatus(r && r.outs && r.outs.length ? `프리미어 XML ${r.outs.length}개 — Premiere 에서 파일>가져오기 (자막=.srt)` : '프리미어 XML 실패 — 로그 확인'); }
-    catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
-  }
   async function attachAsset(shortsNum, groupNum) {
     setStatus('이미지/영상 첨부…');
     try { const d = await api.attachAsset({ shortsNum, groupNum }); setDto(d); setStatus('첨부 완료'); }
@@ -5906,6 +5917,11 @@ export default function App() {
               </label>
               <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}><span className="rb-ic">📋</span> <span className="rb-t">장면 계획</span></button>
             </>)}
+            {/* 🎛 작업 순서(롱폼 큐) **전체**에 묶음 단계(v0.9.39 · 로이) — 대본 머리의 같은 아이콘은 그 대본만 */}
+            <span className="hdiv" />
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-ti" title="작업 순서의 모든 대본 — 🎤 TTS 를 전부 만든 뒤 🖼 이미지 (이미 있는 것은 건너뜀)" onClick={() => runStageQueue('ttsimg')}><ComboIc ics={COMBO_TI} /></button>
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-iv" title="작업 순서의 모든 대본 — 🖼 이미지를 전부 만든 뒤 🎬 비디오 (모델 스왑 1번 · 이미 있는 것은 건너뜀)" onClick={() => runStageQueue('imgvid')}><ComboIc ics={COMBO_IV} /></button>
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-tiv" title="작업 순서의 모든 대본 — 🎤 TTS → 🖼 이미지 → 🎬 비디오를 단계마다 전부 (이미 있는 것은 건너뜀 · 완성 파일은 만들지 않음 — 완성은 ⚡ 만들기)" onClick={() => runStageQueue('ttsimgvid')}><ComboIc ics={COMBO_TIV} /></button>
             <span className="hdiv" />
             {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
@@ -6005,7 +6021,7 @@ export default function App() {
           )}
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
-              <span className="qlabel">롱폼 큐 ({queue[mode].items.length})</span>
+              <span className="qlabel">작업 순서 ({queue[mode].items.length})</span>
               {queue[mode].items.map((it) => (
                 <div key={it.id}
                   className={'qchip' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
@@ -6287,9 +6303,9 @@ export default function App() {
           <ErrorBoundary><Cards dto={dto} isLf={isLf} capCharsN={effCap} layout={view} detail={view === 'clips' && clipDetail} linesMap={linesMap}
             cursor={cursor} onCursor={(sn, n) => userCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSelV} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
-            onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
-            onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
-            onMake={runMake} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
+            onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onTtsImg={runTtsImg} onTtsImgVid={runTtsImgVid} onBulk={runBulk}
+            onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
+            onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
             edit={{
@@ -7779,7 +7795,7 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
-function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onPremiere, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause }) {
+function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -7931,14 +7947,15 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
               {pr.cardBad && <span className="card-bad" data-testid="card-bad" title={pr.cardBad.join('\n') + '\n→ 이 카드들은 🎬 유튜브 MP4 에서 건너뜁니다(대본의 카드 줄을 고치세요)'}>⚠ 📜 카드 {pr.cardBad.length}줄 문장 못 찾음</span>}
               {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
               <span className="cardbtns">
+                {/* 🎛 대본 머리 버튼(v0.9.39 · 로이) — 이 대본에만 · 순서 TTS → 일괄첨부 → 이미지 → 비디오 → 묶음(글자 없는 아이콘) · ▶ 미리보기·⚡ 만들기·🎞 프리미어는 뺐다 */}
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
-                <button className="ghost" onClick={() => onImg(pr.shortsNum)}>🖼 이미지</button>
                 <button className="ghost" title="폴더 선택 → 파일명 숫자로 그룹 자동첨부" onClick={() => onBulk(pr.shortsNum)}>📎 일괄첨부</button>
+                <button className="ghost" onClick={() => onImg(pr.shortsNum)}>🖼 이미지</button>
                 <button className="ghost" onClick={() => onVid(pr.shortsNum)}>🎬 비디오</button>
-                <button className="ghost" title="이 대본만 — 이미지 전부 만든 뒤 비디오까지 (한 번에)" onClick={() => onImgVid(pr.shortsNum)}>🖼→🎬</button>
-                <button className="ghost" data-testid="play-shorts" onClick={() => onPlayShorts(pr.shortsNum)}>{playing && playing.key === 'shorts:' + pr.shortsNum ? '■ 멈춤' : '▶ 미리보기'}</button>
-                <button className="ghost" onClick={() => onMake(pr.shortsNum)}>⚡ 만들기</button>
-                <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
+                <span className="combo-sep" />
+                <button className="ghost combo-btn" data-testid="card-combo-ti" title="이 대본만 — 🎤 TTS 를 만든 뒤 🖼 이미지까지 (이미 있는 것은 건너뜀)" onClick={() => onTtsImg(pr.shortsNum)}><ComboIc ics={COMBO_TI} /></button>
+                <button className="ghost combo-btn" data-testid="card-combo-iv" title="이 대본만 — 🖼 이미지를 전부 만든 뒤 🎬 비디오까지 (이미 있는 것은 건너뜀)" onClick={() => onImgVid(pr.shortsNum)}><ComboIc ics={COMBO_IV} /></button>
+                <button className="ghost combo-btn" data-testid="card-combo-tiv" title="이 대본만 — 🎤 TTS → 🖼 이미지 → 🎬 비디오를 차례로 (이미 있는 것은 건너뜀 · 완성 파일은 만들지 않음)" onClick={() => onTtsImgVid(pr.shortsNum)}><ComboIc ics={COMBO_TIV} /></button>
               </span>
             </h2>
             <div className={'cuts-grid' + (isLf ? ' lf' : '') + (layout === 'clips' ? ' clips' : '') + (detail ? ' detail' : '') + (vrewLay ? ' vrew' : '')}

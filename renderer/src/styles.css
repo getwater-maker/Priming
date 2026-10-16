@@ -1470,3 +1470,12 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .copts>.frow{margin:0;flex:0 0 auto}
 .copts>.comfy-adv{flex:1 1 220px;margin:0}
 .comfy-view{margin:0 0 6px}
+/* 🎛 묶음 버튼(v0.9.39) — 글자 없이 단계 아이콘 + 작은 + · 대본 머리·④ 완성 공통 */
+.combo{display:inline-flex;align-items:center;gap:1px;line-height:1}
+.combo .cic{font-size:14px}
+.combo .cplus{font-size:10px;font-weight:800;color:var(--hook);margin:0 1px;opacity:.85}
+.combo-btn{padding-left:7px;padding-right:7px}
+.combo-sep{display:inline-block;width:1px;height:18px;background:var(--line);margin:0 3px;vertical-align:middle}
+.ribbon .combo-btn .cic{font-size:19px}
+.ribbon .combo-btn .cplus{font-size:12px;margin:0 2px}
+.ribbon .combo-btn{min-height:44px}

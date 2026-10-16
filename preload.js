@@ -247,7 +247,6 @@ contextBridge.exposeInMainWorld('api', {
   bookBuildQueue: (args) => ipcRenderer.invoke('book-build-queue', args),
   bookRevealFile: (p) => ipcRenderer.invoke('book-reveal-file', p),
   bookSaveGuide: () => ipcRenderer.invoke('book-save-guide'),
-  exportPremiere: (args) => ipcRenderer.invoke('export-premiere', args),
   makeAll: (args) => ipcRenderer.invoke('make-all', args),
   abort: () => ipcRenderer.invoke('abort'),
   stopAfterItem: (on) => ipcRenderer.invoke('stop-after-item', on),   // ⏸ 이번 편까지만 만들고 멈춤 예약(false=취소) — ■ 중단과 달리 만들던 대본은 끝까지

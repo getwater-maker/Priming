@@ -94,6 +94,24 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         ok((await c.count()) === 1 && await c.isVisible() && /예상 무료/.test(t) && /[\d,]+자/.test(t), `🎤 TTS 옆 💰 예상 비용 (${t})`); }
       await win.locator('.menus button[data-menu]', { hasText: '완성' }).first().click(); await win.waitForTimeout(250);
       ok(await win.locator('[data-testid="open-after-make"]').isVisible(), '④ 완성 메뉴에 「완성 후 열기」 체크');
+      // 🎛 v0.9.39 — ④ 완성: 묶음 버튼 3개(작업 순서 전체) · 대본 머리: TTS → 일괄첨부 → 이미지 → 비디오 → 묶음 3개 · 미리보기·만들기·프리미어 없음 · 「작업 순서(N)」
+      {
+        const rb = ['rb-combo-ti', 'rb-combo-iv', 'rb-combo-tiv'];
+        const vis = await Promise.all(rb.map((t) => win.locator(`[data-testid="${t}"]`).isVisible()));
+        ok(vis.every(Boolean), '④ 완성에 묶음 버튼 🎤+🖼 · 🖼+🎬 · 🎤+🖼+🎬');
+        const rbTxt = await Promise.all(rb.map((t) => win.locator(`[data-testid="${t}"]`).innerText()));
+        ok(rbTxt.every((t) => !/[가-힣A-Za-z]/.test(t)), '묶음 버튼은 글자 없이 아이콘만: ' + rbTxt.join(' / ').replace(/\s+/g, ''));
+        const btns = (await win.locator('.card h2 .cardbtns button').allInnerTexts()).map((t) => t.replace(/\s+/g, ''));
+        ok(btns.length === 7 && /TTS/.test(btns[0]) && /일괄첨부/.test(btns[1]) && /이미지/.test(btns[2]) && /비디오/.test(btns[3]) && btns[4] === '🎤+🖼' && btns[5] === '🖼+🎬' && btns[6] === '🎤+🖼+🎬', '대본 머리 버튼 순서: ' + btns.join(' | '));
+        ok(!btns.some((t) => /미리보기|만들기|프리미어/.test(t)), '대본 머리에 미리보기·만들기·프리미어 없음');
+        const cb = await win.locator('.card h2 .cardbtns').first().boundingBox();
+        const bw = await win.locator('.card h2 .cardbtns').first().evaluate((el) => el.scrollWidth);
+        console.log(`   대본 머리 버튼 줄 ${cb && Math.round(cb.width)}x${cb && Math.round(cb.height)} (내용 폭 ${bw})`);
+        ok(cb && cb.height < 80, `대본 머리 버튼 줄이 두 줄 안 (${cb && Math.round(cb.height)}px)`);
+        ok(/^작업 순서 \(\d+\)$/.test((await win.locator('.qlabel').first().innerText()).trim()), '큐 라벨 = 「작업 순서(N)」');
+        const mb3 = await win.locator('.menubar').boundingBox();
+        ok(mb3 && mb3.height < 56, `묶음 버튼을 더해도 1366px 메뉴 줄이 한 줄 (${mb3 && Math.round(mb3.height)}px)`);
+      }
       // ⬆ v0.8.7 — 「완성 후 업로드」 체크(MP4·화이트보드일 때만) · 📁 출력폴더는 고른 완성물 종류의 폴더
       {
         const sel = 'select[title^="완성물 종류"]';

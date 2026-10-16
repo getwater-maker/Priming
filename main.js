@@ -2143,37 +2143,7 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   return P.toDTO(S.parsed);
 }));
 
-// Premiere Pro 임포트용 XML(FCP7 xmeml) — 편별 시퀀스 파일 생성. Premiere: 파일 > 가져오기.
-ipcMain.handle('export-premiere', async (_e, args = {}) => {
-  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, captionMaxChars = 7 } = args;
-  const { buildPremiereXml } = require('./core/premiere-xml');
-  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
-  const outs = [];
-  for (const pr of S.parsed.projects) {
-    if (shortsNum && pr.shortsNum !== shortsNum) continue;
-    const baseName = vrewBaseName(pr);
-    const xmlPath = path.join(S.outRoot, `${baseName}_premiere.xml`);
-    // ttsDir 전달 — 오디오를 프로젝트 하위 tts-N 폴더 정본(<num>.mp3)으로 참조(캐시/임시 경로 방지).
-    const r = await buildPremiereXml(pr, { outPath: xmlPath, ttsDir: shortsDirs(S.outRoot, pr.shortsNum).tts, log });
-    if (r.success) {
-      outs.push(r.xmlPath);
-      // 자막(.srt) 을 XML 옆에 같이 생성 — Premiere 「캡션 가져오기」용.
-      //   ⚠ Premiere 는 BOM 없는 UTF-8 한글 srt 를 인코딩 오인(깨짐/미표시)하는 사례가 있어 BOM 을 붙인다.
-      try {
-        const srtPath = path.join(S.outRoot, `${baseName}_premiere.srt`);
-        P.writeSrt(pr, srtPath, captionMaxChars);
-        const buf = fs.readFileSync(srtPath);
-        if (!(buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF)) fs.writeFileSync(srtPath, Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), buf]));
-        log(`   📄 자막: ${baseName}_premiere.srt (UTF-8 BOM)`);
-      }
-      catch (e) { log(`   ⚠ srt 생성 실패: ${e.message}`); }
-    }
-    else log(`✗ ${prLabel(pr)} 프리미어 XML 실패: ${r.error}`);
-  }
-  if (outs.length) { try { shell.openPath(S.outRoot); } catch {} }
-  return { outs };
-});
+// 🎞 프리미어 XML 내보내기는 v0.9.39 에 뺐다(로이 2026-10-16 「버튼과 기능 제거」 · 옛 core/premiere-xml.js 삭제).
 
 // ── 🎬 리모션 모드 — TSV 를 열어 그 파일명 그대로 mp3 를 만든다 ──
 //   영상은 리모션이 만들고 이 앱은 **음성만** 담당한다(자막·이미지·비디오·.vrew 없음).
