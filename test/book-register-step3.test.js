@@ -50,19 +50,16 @@ function fakePage(body) {
   console.log('\n[2b] 🔔 사이트 확인창(alert/confirm) — 자동 취소로 사라지던 문제');
   {
     const mk = (type, message) => { const r = { acc: 0, dis: 0 }; return { type: () => type, message: () => message, accept: async () => { r.acc++; }, dismiss: async () => { r.dis++; }, r }; };
-    const hook = async (asker) => { let h; RB.setDialogAsker(asker); RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {}); return h; };
-    let asked = [];
-    let h = await hook(async (t, m) => { asked.push(t + ':' + m); return true; });
-    let d = mk('confirm', '표지를 이대로 진행할까요?'); await h(d);
-    ok(d.r.acc === 1 && d.r.dis === 0 && asked[0] === 'confirm:표지를 이대로 진행할까요?', 'confirm → 앱 창에서 묻고 「확인」이면 accept');
-    h = await hook(async () => false); d = mk('confirm', 'x'); await h(d);
-    ok(d.r.dis === 1 && d.r.acc === 0, '판별: 「취소」면 dismiss');
-    h = await hook(async () => { throw new Error('창 없음'); }); d = mk('confirm', 'x'); await h(d);
-    ok(d.r.dis === 1, '못 물으면 취소(안전한 쪽)');
-    asked = []; h = await hook(async (t, m) => { asked.push(t); return true; }); d = mk('alert', '파일 형식이 맞지 않습니다'); await h(d);
-    ok(d.r.acc === 1 && asked.length === 0, 'alert → 앱 팝업 없이 자동 accept(내용은 로그에만 · 로이 2026-10-02 「프라이밍 자체 팝업 제거」)');
-    h = await hook(null); d = mk('confirm', 'x'); await h(d);
-    ok(d.r.dis === 1, '앱이 질문 함수를 못 넣은 경우에도 멈추지 않는다(취소)');
+    let h;
+    RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {});
+    for (const type of ['confirm', 'prompt']) {
+      const d = mk(type, '최종 제출할까요?'); await h(d);
+      ok(d.r.acc === 0 && d.r.dis === 0, type + ' → 사이트에서 직접 응답하도록 유지');
+    }
+    const d = mk('alert', '파일 형식이 맞지 않습니다'); await h(d);
+    ok(d.r.acc === 1, 'alert → 앱 팝업 없이 로그에 남기고 확인');
+    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(!main.includes('setDialogAsker') && !main.includes("title: '부크크 확인'"), '앱 중복 확인창 및 제한시간 제거');
   }
   console.log('\n[3] 안전');
   const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'book', 'register-browser.js'), 'utf8');

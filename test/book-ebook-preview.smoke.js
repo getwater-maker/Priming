@@ -16,7 +16,13 @@ const BODY = `
 
 본문 문단입니다.[^1] 한 번 더.
 
+${'긴 본문을 스크롤하여 읽습니다. '.repeat(30) + '\n\n' + ('다음 문단의 내용입니다. '.repeat(30) + '\n\n').repeat(15)}
+
 [^1]: 각주 본문입니다.
+
+## 제2회 다음 이야기
+
+둘째 챕터입니다.
 
 ## [판권]
 
@@ -80,6 +86,33 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForFunction(() => /문서 2 \//.test(document.querySelector('[data-testid=bk-eb-pos]').textContent), null, { timeout: 15000 });
     const f = win.frameLocator('[data-testid=bk-eb-frame]');
     ok(/979-11-12-31221-1/.test(await f.locator('body').innerText()), '2번째 문서(판권)에 전자책 ISBN 이 보인다');
+    const area = await win.evaluate(() => {
+      const frame = document.querySelector('[data-testid=bk-eb-frame]').getBoundingClientRect();
+      const side = document.querySelector('[data-testid=bk-eb-side]').getBoundingClientRect();
+      return { beside: side.left >= frame.right - 1, sameTop: Math.abs(side.top - frame.top) < 2, height: frame.height };
+    });
+    ok(area.beside && area.sameTop && area.height > 200, '점검표가 본문 오른쪽에 있고 본문 높이를 줄이지 않는다');
+    const sel = win.locator('[data-testid=bk-ebook] .bkbar select');
+    const chapter = await sel.locator('option').evaluateAll(es => es.find(e => /시작/.test(e.textContent)).value);
+    await sel.selectOption(chapter);
+    await f.locator('body').getByText('긴 본문을 스크롤하여 읽습니다.', { exact: false }).first().waitFor();
+    const scroll = () => f.locator('html').evaluate(() => ({ top: document.scrollingElement.scrollTop, max: document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight }));
+    ok((await scroll()).max > 100, '긴 챕터의 본문은 스크롤 가능');
+    const rect = await win.locator('[data-testid=bk-eb-frame]').boundingBox();
+    await win.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await win.mouse.wheel(0, 300); await win.waitForTimeout(600);
+    ok((await scroll()).top > 0 && await sel.inputValue() === chapter, '챕터 안에서는 휠로 본문만 스크롤');
+    await f.locator('html').evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+    await win.mouse.wheel(0, 200);
+    await win.waitForFunction(n => document.querySelector('[data-testid=bk-ebook] .bkbar select').value === String(Number(n) + 1), chapter);
+    ok(true, '챕터 끝에서 휠을 내리면 다음 문서');
+    await win.waitForTimeout(600);
+    await f.locator('html').evaluate(() => window.scrollTo(0, 0));
+    await win.mouse.wheel(0, -200);
+    await win.waitForFunction(n => document.querySelector('[data-testid=bk-ebook] .bkbar select').value === n, chapter);
+    await win.waitForTimeout(200);
+    ok((await scroll()).top >= (await scroll()).max - 2, '위로 넘어오면 이전 챕터의 끝부터 이어 읽기');
+    await win.screenshot({ path: path.join(OUT, 'ebook-side.png') });
     // 종이책으로 돌아가기
     await win.click('[data-testid=bk-view-paper]');
     ok(await win.locator('[data-testid=bk-ebook]').count() === 0, '종이책으로 되돌아온다');
@@ -87,7 +120,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     // ── 판별력: 판권 정보가 빠진 원고 ──
     await open(F2);
     await win.click('[data-testid=bk-view-ebook]');
-    await win.waitForFunction(() => { const e = document.querySelector('[data-testid=bk-eb-chk-isbn]'); return e && e.getAttribute('data-level') === 'err'; }, null, { timeout: 120000 }).catch(() => {});
+    await win.locator('[data-testid=bk-ebook] .bkbar button[title="원고를 다시 읽어 ePub 을 새로 만듭니다"]').click();
+    await win.waitForFunction(() => { const e = document.querySelector('[data-testid=bk-eb-chk-isbn]'); return e && e.getAttribute('data-level') === 'err'; }, null, { timeout: 30000 }).catch(async () => { console.log(await win.locator('[data-testid=bk-ebook]').innerText()); });
     ok((await lv('isbn')) === 'err' && /ISBN 없음/.test(await win.locator('[data-testid=bk-eb-chk-isbn]').innerText()), '판권에 ISBN 이 없으면 ❌ 「판권에 ISBN 없음」');
     ok(await win.locator('[data-testid=bk-eb-checks]').evaluate((el) => el.open), '문제가 있으면 점검이 저절로 펼쳐진다');
     ok((await lv('date')) === 'err', '판권에 발행일이 없으면 ❌');

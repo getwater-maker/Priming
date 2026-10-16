@@ -36,7 +36,13 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 
     await win.click('[data-tab=bookk]');
     await win.waitForSelector('[data-testid=rg-box]', { timeout: 10000 });
-    ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 맨 위에 네 칸');
+    ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 발행일·ISBN 네 칸');
+    const sections = await win.evaluate(() => {
+      const y = (sel) => document.querySelector(sel).getBoundingClientRect().top;
+      return { build: y('[data-testid=bk-build-both]'), folder: y('[data-testid=bk-open-output]'), auto: y('[data-testid=bk-auto]'), isbn: y('[data-testid=rg-box]'), files: document.querySelectorAll('.bkreg .bkfile').length };
+    });
+    ok(sections.build < sections.folder && sections.folder < sections.auto && sections.auto < sections.isbn, '만들기·폴더 버튼 → 자동입력 → 발행일·ISBN 순서');
+    ok(sections.files === 0, '등록 탭 완성파일 목록 제거');
     for (const k of ['ebookIsbn', 'isbn', 'issueDate', 'ebookIssueDate']) ok(await win.locator('[data-testid=rg-' + k + ']').count() === 1, '칸: ' + k);
     ok(await win.locator('[data-testid=rg-box] .bkisbn-grid').count() === 0, '옛 격자 상자는 없다');
     { const ys = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3], '순서: 종이책 발행일 → 종이책 ISBN → 전자책 발행일 → 전자책 ISBN (2026-10-13 로이)'); }

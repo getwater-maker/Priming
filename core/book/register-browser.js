@@ -21,11 +21,7 @@ const SITES = {
 };
 
 let _ctx = null;   // 열려 있는 컨텍스트(한 번에 하나)
-// 🔔 사이트의 alert/confirm 창 처리(로이 2026-10-02 「3단계에서 다음으로 넘어가려니 팝업이 뜨는데 바로 사라져버리네」).
-//   자동화 크롬(Playwright)은 자바스크립트 대화상자를 **자동으로 취소**하고 사용자에게 보이지 않는다 → 사이트의 확인창이 눈 깜빡할 새 사라져 다음 단계로 못 넘어갔다.
-//   이제 창 내용을 로그에 남기고, alert 는 확인(내용을 읽을 수 있게 앱에 알림), confirm/prompt 는 **앱 창에서 로이에게 묻는다**(askDialog — main 이 넣는다).
-let _dialogAsker = null;
-function setDialogAsker(fn) { _dialogAsker = fn; }
+// 🔔 확인·입력창은 사이트 크롬에서 직접 응답한다. 리스너는 유지해 Playwright 자동 취소를 막는다.
 let _dlgCount = 0;   // 사이트 대화상자가 뜬 횟수 — 이동 버튼을 눌렀을 때 확인창이 떠서 click 이 시간 초과한 경우를 가려낸다
 const AUTO_CONFIRM = /선택하신\s*로고\s*색상\s*\(\s*파랑\s*\)/;   // 「선택하신 로고 색상(파랑)입니다. 현재 설정으로 진행할까요?」 — 이 확인창만 자동 확인
 const _hooked = new WeakSet();
@@ -38,10 +34,10 @@ function _hookDialogs(page, log) {
     log(`[등록] 🔔 부크크 ${type} 창: ${msg.replace(/\s+/g, ' ').slice(0, 240)}`);
     let accept = true;
     if (type === 'confirm' && AUTO_CONFIRM.test(msg)) {
-      log('[등록] ✓ 로고 색상 확인창 — 우리가 고른 파란색이라 자동으로 「확인」합니다');   // 3단계 → 4단계 이동 때 뜬다(로이 2026-10-02 「팝업에서 멈추네」). 파랑이 아닌 색이면 묻는다
+      log('[등록] ✓ 로고 색상 확인창 — 우리가 고른 파란색이라 자동으로 「확인」합니다');   // 3단계 → 4단계 이동 때 뜬다(로이 2026-10-02 「팝업에서 멈추네」). 파랑이 아닌 색이면 사이트에서 직접 확인한다
     } else if (type === 'confirm' || type === 'prompt') {
-      accept = false;
-      try { if (_dialogAsker) accept = !!(await _dialogAsker(type, msg)); } catch (_) { accept = false; }   // 못 물으면 취소(안전한 쪽)
+      log('[등록] 사이트 크롬의 확인창에서 직접 확인·취소해 주세요');
+      return;   // 사이트 창을 유지한다. 자동 확인·취소 또는 앱의 중복 팝업을 띄우지 않는다.
     }   // alert 는 로그에만 남기고 자동 확인(앱 팝업 없음 — 로이 2026-10-02)
     try { if (accept) await d.accept(); else await d.dismiss(); } catch (_) {}
   });
@@ -753,4 +749,4 @@ async function readBookkRetail(o) {
   return { items, cardCount: cards.length, rawFile, loggedIn: true };
 }
 
-module.exports = { readBookkRetail, findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, setDialogAsker, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };
+module.exports = { readBookkRetail, findPriceHints, clickNaverLogin: _clickNaverLogin, goStep: _goStep, verifyInput: _verifyInput, verifySelect: _verifySelect, shot: _shot, fillBookkPrice, fillBookkFinal, checkFinalSummary, continueFromStep4, PROFILE_DIR, SITES, hookDialogs: _hookDialogs, runRegister, runBookkCoverOnly, fillJakkawa, fillBookk, fillBookkCover, fillBookkEbook, fillBookkEbookInfo, fillBookkEbookManuscript, fillBookkEbookCover, fillBookkEbookPrice, runBookkEbookResume, runEbookFrom };

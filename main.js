@@ -11521,7 +11521,7 @@ ipcMain.handle('book-colophon-notes', (_e, args = {}) => {
   log(`📜 판권 고지문 ${notes.length}줄 저장`);
   return rebuildBook();
 });
-ipcMain.handle('book-set-meta', (_e, args = {}) => {
+regBook('book-set-meta', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
   const key = args.key; const value = String(args.value == null ? '' : args.value).trim();
   const target = bookEssentialPath();
@@ -12051,19 +12051,6 @@ ipcMain.handle('book-open-platform', (_e, u) => {
 });
 // 🤖 등록 도우미 자동 입력 — 로그인·저장·제출은 사람이 한다(core/book/register-browser.js 머리말).
 let _bookRegBusy = false;
-// 🔔 등록용 크롬의 사이트 확인창(alert/confirm)을 앱 창에서 보여 주고 답을 받는다 — 자동화 크롬은 이런 창을 자동 취소해 로이가 읽을 새 없이 사라졌다.
-try {
-  require('./core/book/register-browser').setDialogAsker(async (type, msg) => {
-    try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } catch (_) {}
-    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 120000);
-    try {
-      const c = await dialog.showMessageBox(win, type === 'alert'
-        ? { type: 'info', title: '부크크 알림', message: '부크크 화면의 알림', detail: msg, buttons: ['확인'], noLink: true, signal: ac.signal }
-        : { type: 'question', title: '부크크 확인', message: '부크크 화면의 확인창', detail: msg + '\n\n(120초 안에 고르지 않으면 취소됩니다)', buttons: ['확인', '취소'], defaultId: 1, cancelId: 1, noLink: true, signal: ac.signal });
-      return type === 'alert' ? true : c.response === 0;
-    } catch (_) { return false; } finally { clearTimeout(timer); }
-  });
-} catch (_) {}
 ipcMain.handle('book-register-run', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return { ok: false, error: '열린 출판 원고가 없습니다' };
   if (_bookRegBusy) return { ok: false, error: '이미 자동 입력이 진행 중입니다 — 열린 크롬 창을 확인하세요' };
@@ -12269,6 +12256,19 @@ ipcMain.handle('book-reveal-file', (_e, p) => {
   const root = S.outRoot || (S.scriptPath ? bookOutRoot(S.scriptPath, S.preset) : '');
   if (!root || !path.resolve(s).startsWith(path.resolve(root))) return false;
   shell.showItemInFolder(s); return true;
+});
+// 출판 메일: 별도 OAuth·OS 암호화 저장. 메일 내용은 명령으로 실행하지 않는다.
+require('./core/book/resubmit-ipc').install({
+  ipcMain, dialog, shell, win: () => win,
+  client: require('./core/book/gmail-client').createClient({ openExternal: u => shell.openExternal(u) }),
+  context: () => {
+    if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return null;
+    const h = require('crypto').createHash('sha256');
+    for (const p of bookFilePaths()) { h.update(p); h.update(fs.readFileSync(p)); }
+    return { scriptPath: S.scriptPath, base: bookFileBase(), meta: { ...S.parsed.meta }, sourceHash: h.digest('hex'), dto: currentDTO() };
+  },
+  setMeta: a => _BOOK_H['book-set-meta'](null, a),
+  build: a => _BOOK_H['book-build-pdf'](null, a),
 });
 ipcMain.handle('open-folder', async (_e, args = {}) => {
   // 📁 ④ 완성의 「출력폴더」 = 고른 완성물 종류의 폴더(v0.8.7 · 로이) — .vrew = 대본 출력 폴더 · 🎬 유튜브 MP4 = 채널 「저장 폴더」(없으면 다운로드) · ✏ 화이트보드 = 화이트보드 폴더

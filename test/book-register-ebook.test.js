@@ -172,13 +172,13 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
   ok(got === 17900, '종이책 4단계: 화면의 최종정가 17,900원을 plan.onPrice 로 기록');
   // 🔔 로고 색상 확인창은 자동 확인(파랑일 때만)
   { const mk = (type, message) => { const r = { acc: 0, dis: 0 }; return { type: () => type, message: () => message, accept: async () => { r.acc++; }, dismiss: async () => { r.dis++; }, r }; };
-    let asked = 0; let h; RB.setDialogAsker(async () => { asked++; return false; }); RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {});
+    let h; RB.hookDialogs({ on: (ev, fn) => { h = fn; } }, () => {});
     let d = mk('confirm', '선택하신 로고 색상(파랑)입니다.\n현재 설정으로 진행할까요?'); await h(d);
-    ok(d.r.acc === 1 && asked === 0, '「선택하신 로고 색상(파랑)」 확인창 → 묻지 않고 자동 확인(3→4단계에서 멈추던 것)');
+    ok(d.r.acc === 1, '「선택하신 로고 색상(파랑)」 확인창 → 묻지 않고 자동 확인(3→4단계에서 멈추던 것)');
     d = mk('confirm', '선택하신 로고 색상(빨강)입니다.\n현재 설정으로 진행할까요?'); await h(d);
-    ok(d.r.dis === 1 && asked === 1, '판별: 파랑이 아닌 색은 앱 창에서 묻는다(여기선 취소)');
+    ok(d.r.dis === 0 && d.r.acc === 0, '판별: 파랑이 아닌 색은 사이트 확인창 유지');
     d = mk('confirm', '무료 표지 디자인을 적용하게 되면 날개를 사용할 수 없습니다. 그래도 좋습니까?'); await h(d);
-    ok(d.r.dis === 1 && asked === 2, '다른 확인창은 그대로 묻는다'); }
+    ok(d.r.dis === 0 && d.r.acc === 0, '다른 확인창도 사이트에서 직접 응답'); }
 
   console.log('\n[7c] 단계 이동 버튼 — 번호로 찾는다 · 확인창 때문의 시간 초과는 이동으로 본다');
   {
@@ -190,9 +190,9 @@ function fakePage(body, { checked = true, blueActive = true, strip = false, mang
     ok(re.test('Step3 표지등록') && re.test('Step3 표지디자인') && re.test('Step3 꾸미기') && !re.test('Step30') && !re.test('Step4 가격정책'), '정규식이 Step3 의 어떤 이름에도 맞고 Step4·Step30 에는 안 맞는다');
     let threw = false; try { await RB.goStep(mkPg(async () => { throw new Error('Timeout 8000ms'); }), 3); } catch (_) { threw = true; }
     ok(threw, '판별: 확인창이 없었는데 시간 초과면 실패로 던진다');
-    let dlg; RB.setDialogAsker(async () => true); RB.hookDialogs({ on: (ev, fn) => { dlg = fn; } }, () => {});
+    let dlg; RB.hookDialogs({ on: (ev, fn) => { dlg = fn; } }, () => {});
     let ok2 = true; try { await RB.goStep(mkPg(async () => { await dlg({ type: () => 'confirm', message: () => '이동할까요?', accept: async () => {}, dismiss: async () => {} }); throw new Error('Timeout 8000ms'); }), 3); } catch (_) { ok2 = false; }
-    ok(ok2, '이동 버튼을 누르자 사이트 확인창이 떴다면 click 시간 초과를 실패로 보지 않는다(앱 창에서 답하는 동안 기다리다 생기는 시간 초과)');
+    ok(ok2, '이동 버튼을 누르자 사이트 확인창이 떴다면 click 시간 초과를 실패로 보지 않는다(사이트 창에서 답하는 동안 기다리다 생기는 시간 초과)');
   }
 
   console.log('\n[7d] 🟢 로그인 화면 NAVER 버튼');

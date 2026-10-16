@@ -1,11 +1,12 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.9.46",
+  "version": "0.9.47",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
   "scripts": {
+    "test:bookmail": "node test/book-mail.test.js && node test/book-mail.smoke.js",
     "test:recovery": "node test/image-recovery.test.js && node test/download-options.test.js && node test/ytdlp-auto-update.test.js",
     "start": "vite build && electron .",
     "build:renderer": "vite build",

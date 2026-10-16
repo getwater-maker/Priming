@@ -232,6 +232,7 @@ contextBridge.exposeInMainWorld('api', {
   bookClearCover: () => ipcRenderer.invoke('book-clear-cover'),
   bookToggleSection: (args) => ipcRenderer.invoke('book-toggle-section', args),
   bookColophonNotes: (args) => ipcRenderer.invoke('book-colophon-notes', args),
+  bookMail: (action, args) => ipcRenderer.invoke('book-mail-' + action, args),
   bookSetMeta: (args) => ipcRenderer.invoke('book-set-meta', args),
   bookApplyEdit: (args) => ipcRenderer.invoke('book-apply-edit', args),
   bookGetLines: (args) => ipcRenderer.invoke('book-get-lines', args),

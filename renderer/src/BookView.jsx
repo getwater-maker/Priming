@@ -10,6 +10,7 @@ import DK from '../../core/book/date-ko.js';   // 발행일 「2026년 10월 06�
 import BookDistribution from './BookDistribution.jsx';   // 📊 유통 현황(로이 2026-10-14)
 import OverseasRegister from './OverseasRegister.jsx';   // 🇺🇸 KDP·D2D 등록 복사 도우미(R27)
 import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
+import BookMail from './BookMail.jsx';
 
 // 메뉴(왼쪽) — 필수/선택은 플랫폼(작가와·부크크) 조사 기준. 파일 구조: [키, 아이콘, 이름]
 //   2026-10-14 로이 — 6탭 → 4탭: 구조·정보 / 판권 / 표지·조판 / 등록·유통(부크크 등록 + 유통 현황 + 아마존·D2D). 옛 탭 id 는 TAB_ALIAS 로 옮긴다.
@@ -116,6 +117,9 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   // 📱 미리보기 전환(R22) — 종이책(내지 조판) | 전자책(실제 ePub 의 spine 문서를 차례로 + 사전 점검)
   const [viewMode, setViewMode] = useState('paper');
   const [eb, setEb] = useState({ busy: false, error: '', docs: [], checks: [], n: 1, html: '', version: '', bytes: 0, forPath: '' });
+  const ebWheel = useRef({ busy: false, last: 0, bottom: false });
+  const ebCurrent = useRef(eb);
+  ebCurrent.current = eb;
   // 📜 판권 고지문 입력 — 비어 있는 새 칸 개수(저장 전). ⚠ 훅이라 `if (!loaded) return` 보다 앞에 둔다(뒤에 두면 React #310 — 화면이 백지)
   const [noteExtra, setNoteExtra] = useState(0);
   // ⚡ 입력하는 대로 저장(로이 2026-10-07) — 글자를 칠 때마다(0.4초 쉬면) 원고 메타에 저장한다. 입력칸 key 에 값이 들어 있으면
@@ -510,13 +514,39 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     if (building || epubChkBusy) return;
     await buildPdf('print', true);
     await buildEbook(true);
-    setStatus('📦 종이책 → 전자책 만들기 끝 — 각각 완성 파일에서 확인하세요');
+    setStatus('📦 종이책 → 전자책 만들기 끝 — 완성파일 폴더에서 확인하세요');
   }
   // 📱 전자책 미리보기 — 부크크에 올라가는 실제 ePub 을 임시로 만들어 문서(spine)를 차례로 보여 주고 사전 점검을 돌린다
   async function loadEbookDoc(docs, n) {
     const d = docs[n - 1]; if (!d) return;
     const r = await api.bookEbookDoc({ href: d.href });
     setEb((s) => ({ ...s, n, html: r && r.html ? r.html : '', error: r && r.error ? r.error : '' }));
+  }
+  // 문서 안에서는 일반 스크롤, 맨 아래/위에서는 다음/이전 챕터로 이어 읽기.
+  function bindEbookScroll(e) {
+    const frame = e.currentTarget;
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    if (ebWheel.current.bottom) {
+      ebWheel.current.bottom = false;
+      frame.contentWindow.requestAnimationFrame(() => frame.contentWindow.scrollTo(0, doc.scrollingElement.scrollHeight));
+    }
+    doc.addEventListener('wheel', async (event) => {
+      if (event.ctrlKey || event.metaKey || Math.abs(event.deltaY) < 4 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      const sc = doc.scrollingElement;
+      if (!sc) return;
+      const down = event.deltaY > 0;
+      const edge = down ? sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2 : sc.scrollTop <= 2;
+      if (!edge) return;
+      event.preventDefault();
+      const state = ebCurrent.current, gate = ebWheel.current;
+      const n = state.n + (down ? 1 : -1);
+      if (gate.busy || state.busy || Date.now() - gate.last < 450 || n < 1 || n > state.docs.length) return;
+      gate.busy = true; gate.last = Date.now(); gate.bottom = !down;
+      try { await loadEbookDoc(state.docs, n); }
+      catch (err) { gate.bottom = false; setStatus('⚠ 전자책 이동 실패: ' + err.message); }
+      finally { gate.busy = false; }
+    }, { passive: false });
   }
   async function refreshEbook() {
     setEb((s) => ({ ...s, busy: true, error: '' }));
@@ -832,7 +862,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     catch (_) { setStatus('⚠ 복사 실패 — 직접 선택해서 복사하세요'); }
   };
 
-  // 📤 부크크 등록 패널 — 종이책·전자책 통합(로이 2026-10-03): 자동 입력(맨 위) → 만들기 → 완성 파일 → 올리기 전 점검 → 종이책/전자책 점검표·옮겨 적을 값
+  // 📤 부크크 등록 패널 — 종이책·전자책 통합(로이 2026-10-03): 만들기 → 자동 입력 → 발행일·ISBN → 올리기 전 점검 → 종이책/전자책 점검표·옮겨 적을 값
   const registerPanel = () => {
     const stIcon = { ok: '✅', todo: '⬜', manual: '☐', info: '·' };
     const row = (it) => (
@@ -848,7 +878,6 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       </div>
     );
     const doneOf = (l) => l.required.filter((i) => i.state === 'ok').length;
-    const outs = (outputs || []).filter((o) => ['interior', 'cover', 'full', 'ebookCover', 'ebookBody', 'ebookPdf', 'epub'].includes(o.kind));
     const checklistBlock = (platform, title) => {
       const list = lists[platform];
       const rows = RG.summary(platform, rgCtx);
@@ -875,8 +904,28 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     [...(RG.LINKS.bookk || []), ...(RG.LINKS.ebook || [])].forEach(([t, u]) => { if (!seen.has(u)) { seen.add(u); links.push([t, u]); } });
     return (
       <div className="bkreg" data-testid="bk-reg">
-        {isbnBox('rg')}
-        {/* 1) 🤖 자동 입력 — 맨 위(로이 2026-10-03). 저장·「도서제출」은 직접 */}
+        {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 각각 만들어진다. 「한 번에」 = 종이책 → 전자책을 이어서 실행(로이 2026-10-07 재요청) */}
+        <div className="bkzone">📦 만들기</div>
+        <div className="bkactions">
+          <button disabled={building || epubChkBusy} data-testid="bk-build-both" title="종이책(표지·내지·표지+내지 PDF) → 전자책(표지·본문·표지+본문 PDF)을 차례로 만듭니다 — 판권은 각각 종이책 ISBN·전자책 ISBN 으로" onClick={buildBoth}>{building ? '⏳ 생성 중…' : '📦 종이책 + 전자책 한 번에'}</button>
+        </div>
+        <div className="bkactions">
+          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 표지.pdf(펼침면 · 책등·재단여백 포함) + 내지.pdf + 표지+내지.pdf(앞표지 1쪽 + 내지 · 보관·공유용). 판권은 종이책 ISBN·정가" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
+          <button disabled={building || epubChkBusy} data-testid="bk-ebook" title="부크크 전자책용 — 표지.pdf(앞표지 한 쪽) + 본문.pdf + 표지+본문.pdf(부크크에 올리는 파일). 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·종이책 표지 앞면 순" onClick={() => buildEbook()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
+        </div>
+        <div className="bkactions bkbuild">
+          <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 기본 켜짐 — 아마존 KDP·D2D 등록용. 만든 직후 규격 검증(EPUBCheck)이 자동으로 이어집니다"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
+        </div>
+        {epubChk && epubChk.messages && epubChk.messages.length > 0 && (
+          <div className="bkfit warn" data-testid="bk-epubcheck-msgs">
+            <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
+            {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
+          </div>
+        )}
+        <div className="bkactions">
+          <button className="ghost" data-testid="bk-open-output" onClick={() => api.openFolder()}>📁 완성파일 폴더 열기</button>
+        </div>
+        {/* 1) 🤖 자동 입력. 저장·「도서제출」은 직접 */}
         <div className="bkzone">🤖 자동 입력 <span className="meta">(로그인·「도서제출」은 직접)</span></div>
         <div className="bkauto" data-testid="bk-auto">
           <div className="bkauto-row">
@@ -920,32 +969,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           )}
         </div>
 
-        {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 각각 만들어진다. 「한 번에」 = 종이책 → 전자책을 이어서 실행(로이 2026-10-07 재요청) */}
-        <div className="bkzone">📦 만들기</div>
-        <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-build-both" title="종이책(표지·내지·표지+내지 PDF) → 전자책(표지·본문·표지+본문 PDF)을 차례로 만듭니다 — 판권은 각각 종이책 ISBN·전자책 ISBN 으로" onClick={buildBoth}>{building ? '⏳ 생성 중…' : '📦 종이책 + 전자책 한 번에'}</button>
-        </div>
-        <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 표지.pdf(펼침면 · 책등·재단여백 포함) + 내지.pdf + 표지+내지.pdf(앞표지 1쪽 + 내지 · 보관·공유용). 판권은 종이책 ISBN·정가" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
-          <button disabled={building || epubChkBusy} data-testid="bk-ebook" title="부크크 전자책용 — 표지.pdf(앞표지 한 쪽) + 본문.pdf + 표지+본문.pdf(부크크에 올리는 파일). 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·종이책 표지 앞면 순" onClick={() => buildEbook()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
-        </div>
-        <div className="bkactions bkbuild">
-          <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 기본 켜짐 — 아마존 KDP·D2D 등록용. 만든 직후 규격 검증(EPUBCheck)이 자동으로 이어집니다"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
-        </div>
-        {epubChk && epubChk.messages && epubChk.messages.length > 0 && (
-          <div className="bkfit warn" data-testid="bk-epubcheck-msgs">
-            <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
-            {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
-          </div>
-        )}
-        <div className="bkzone">완성 파일</div>
-        {outs.length ? outs.map((o) => (
-          <div className="bkfile" key={o.name}>
-            <span title={o.path}>📄 {o.name}</span>
-            <span className="meta">{(o.bytes / 1024 / 1024).toFixed(1)}MB</span>
-            <button className="ghost" onClick={() => api.bookRevealFile(o.path)}>위치</button>
-          </div>
-        )) : <div className="meta">아직 없습니다 — 위 버튼으로 만드세요</div>}
+        <div className="bkzone">발행일 · ISBN</div>
+        {isbnBox('rg')}
+        <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} />
 
         {/* 3) 🔎 올리기 전 점검(한 번) */}
         <div className="bkzone">🔎 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
@@ -1402,7 +1428,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         <div className="bkmode" data-testid="bk-viewmode">
           <button className={'bkmodebtn' + (viewMode === 'paper' ? ' on' : '')} data-testid="bk-view-paper" onClick={() => setViewMode('paper')} title="종이책 내지(조판) 미리보기">📕 종이책</button>
           <button className={'bkmodebtn' + (viewMode === 'ebook' ? ' on' : '')} data-testid="bk-view-ebook" onClick={() => setViewMode('ebook')} title="ePub(선택 산출물)을 임시로 만들어 문서 순서대로 보여 주고 전자책 점검 항목을 확인합니다 — 부크크에 올리는 파일은 전자책 PDF 입니다">📱 전자책</button>
-          {viewMode === 'ebook' && <span className="meta">리플로우 ePub — 쪽번호 대신 「문서 n / N」</span>}
+          {viewMode === 'ebook' && <span className="meta">리플로우 ePub · 휠로 읽기 · 문서 끝에서 다음 챕터</span>}
         </div>
         {viewMode === 'ebook' && (
           <div className="bkebook" data-testid="bk-ebook">
@@ -1420,6 +1446,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <button className="ghost" disabled={eb.busy} onClick={refreshEbook} title="원고를 다시 읽어 ePub 을 새로 만듭니다">🔄 전자책 갱신</button>
             </div>
             {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
+            <div className="bkeb-reader">
+            <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="allow-same-origin" srcDoc={eb.html} onLoad={bindEbookScroll} />
+            <aside className="bkeb-side" data-testid="bk-eb-side" aria-label="전자책 점검">
             {eb.checks.length > 0 && (() => {
               // 사람이 눈으로 확인하는 항목(표지에 제목 등)은 체크하면 통과로 센다 — 원고마다 이 PC 에 기억(localStorage)
               const confKey = (c) => 'pm.ebConfirm.' + ((dto && dto.scriptPath) || '') + '.' + c.id;
@@ -1436,7 +1465,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
                 </details>
               );
             })()}
-            <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="" srcDoc={eb.html} />
+            </aside>
+            </div>
           </div>
         )}
         <div style={{ display: viewMode === 'paper' ? 'contents' : 'none' }}>
