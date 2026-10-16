@@ -27,6 +27,9 @@ const EXE_NAME = IS_WIN ? 'yt-dlp.exe' : 'yt-dlp';
 const OWN_EXE = path.join(BIN_DIR, EXE_NAME);
 const RELEASE_URL = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${EXE_NAME}`;
 const NIGHTLY_URL = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${EXE_NAME}`;
+const NIGHTLY_RELEASE_API = 'https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest';
+let activeRuns = 0;
+let preparingTool = null;
 
 // 🔑 60일 — 실측에서 **73일 된 판이 이미 403** 이었다. 넉넉히 잡으면 사용자가 원인을 못 찾는다.
 const STALE_DAYS = 60;
@@ -82,10 +85,13 @@ async function findYtDlp() {
 }
 
 /** GitHub 공식 릴리스에서 최신 exe 를 받아 ~/.shots-maker/bin 에 둔다(약 17MB). */
-async function downloadYtDlp({ onLog, channel = 'stable' } = {}) {
+async function downloadYtDlp({ onLog, channel = 'stable', expectedVersion } = {}) {
+  if (activeRuns) throw new Error('다운로드가 진행 중이므로 도구 교체를 보류합니다');
   const log = onLog || (() => {});
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  const releaseUrl = channel === 'nightly' ? NIGHTLY_URL : RELEASE_URL;
+  const repo = channel === 'nightly' ? 'yt-dlp-nightly-builds' : 'yt-dlp';
+  if (expectedVersion && !/^\d{4}\.\d{2}\.\d{2}(?:\.\d+)*$/.test(expectedVersion)) throw new Error('올바르지 않은 yt-dlp 릴리스 버전입니다');
+  const releaseUrl = expectedVersion ? `https://github.com/yt-dlp/${repo}/releases/download/${expectedVersion}/${EXE_NAME}` : channel === 'nightly' ? NIGHTLY_URL : RELEASE_URL;
   log(`⬇ yt-dlp ${channel === 'nightly' ? 'nightly' : '안정판'}을 내려받습니다 — ${releaseUrl}`);
   const res = await fetch(releaseUrl, { redirect: 'follow', signal: AbortSignal.timeout(120000) });
   if (!res.ok) throw new Error(`yt-dlp 내려받기 실패 (HTTP ${res.status})`);
@@ -102,6 +108,8 @@ async function downloadYtDlp({ onLog, channel = 'stable' } = {}) {
     const r = await _run(tmp, ['--version'], { timeout: 20000 });
     ver = r.stdout.trim().split('\n').pop().trim();
     if (r.err || !parseVersionDate(ver)) throw new Error('받은 yt-dlp의 실행 검증에 실패했습니다');
+    if (expectedVersion && ver !== expectedVersion) throw new Error('받은 yt-dlp 버전이 요청한 릴리스와 다릅니다');
+    if (activeRuns) throw new Error('다운로드가 시작되어 도구 교체를 보류합니다');
     if (fs.existsSync(OWN_EXE)) { fs.rmSync(backup, { force: true }); fs.renameSync(OWN_EXE, backup); backedUp = true; }
     try { fs.renameSync(tmp, OWN_EXE); }
     catch (error) { if (backedUp) fs.renameSync(backup, OWN_EXE); throw error; }
@@ -112,31 +120,45 @@ async function downloadYtDlp({ onLog, channel = 'stable' } = {}) {
 }
 
 /**
- * 쓸 수 있는 yt-dlp 를 보장한다.
- * 🔑 **낡은 판은 조용히 쓰지 않는다** — 오디오가 403 으로 죽는데 사용자는 이유를 알 수 없다.
- *    낡았으면 최신판을 받아 그걸 쓰고, 내려받기에 실패하면 있는 것으로라도 진행한다(fail-open).
+ * 사이트 변경은 배포 후 며칠 안에도 발생하므로 경과일 대신 실제 최신 릴리스와 비교한다.
+ * 오프라인·업데이트 실패 때문에 이미 설치된 정상 실행 파일까지 잃지 않도록 보존한다.
  */
-async function ensureYtDlp({ onLog, forceUpdate = false } = {}) {
+async function prepareYtDlp({ onLog, forceUpdate = false } = {}) {
   const log = onLog || (() => {});
-  let found = await findYtDlp();
-
-  if (found && !forceUpdate && !found.stale) return found;
-
-  if (found && found.stale) {
-    log(`ⓘ yt-dlp ${found.version} 은 ${found.ageDays}일 된 판입니다 — 유튜브가 바뀌어 오디오가 막힐 수 있어 최신판을 받습니다.`);
-  } else if (!found) {
-    log('ⓘ 이 PC 에 yt-dlp 가 없습니다 — 최신판을 받습니다(약 17MB · 한 번만).');
-  }
-
+  const found = await findYtDlp();
   try {
-    return await downloadYtDlp({ onLog: log });
+    log('🔎 다운로드 도구 최신 버전 확인 중…');
+    const response = await fetch(NIGHTLY_RELEASE_API, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(8000), cache: 'no-store' });
+    if (!response.ok) throw new Error(`릴리스 확인 실패 (HTTP ${response.status})`);
+    const release = await response.json();
+    const version = release.tag_name;
+    if (typeof version !== 'string' || !/^\d{4}\.\d{2}\.\d{2}(?:\.\d+)*$/.test(version)) throw new Error('최신 릴리스 버전을 읽지 못했습니다');
+    if (found && !forceUpdate && compareToolVersions(found.version, version) >= 0) return found;
+    log(`⬇ 다운로드 도구 자동 업데이트${found ? ` (${found.version} → ${version})` : ` (${version})`}`);
+    return await downloadYtDlp({ onLog: log, channel: 'nightly', expectedVersion: version });
   } catch (e) {
     if (found) {
-      log(`⚠ 최신판을 받지 못했습니다 (${e.message}) — 있는 ${found.version} 으로 진행합니다.`);
+      log(`⚠ 자동 업데이트를 마치지 못했습니다 (${e.message}) — 기존 ${found.version}을 보존하고 진행합니다.`);
       return found;
     }
-    throw new Error(`yt-dlp 를 준비하지 못했습니다: ${e.message}`);
+    log(`⚠ 릴리스 확인 후 준비하지 못했습니다 (${e.message}) — 공식 최신 배포 주소로 다시 시도합니다`);
+    return downloadYtDlp({ onLog: log, channel: 'nightly' });
   }
+}
+
+function compareToolVersions(a, b) {
+  const left = String(a).split('.').map(Number), right = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const delta = (left[i] || 0) - (right[i] || 0);
+    if (delta) return Math.sign(delta);
+  }
+  return 0;
+}
+
+// 같은 시각 시작한 작업끼리 실행 파일을 중복으로 교체하지 않도록 준비 과정을 공유한다.
+async function ensureYtDlp(options = {}) {
+  if (!preparingTool) preparingTool = prepareYtDlp(options).finally(() => { preparingTool = null; });
+  return preparingTool;
 }
 
 // ── 자막 ────────────────────────────────────────────────
@@ -213,6 +235,9 @@ function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 10
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },   // ⚠ 한글 제목이 CP949 로 깨지지 않게
     });
+    activeRuns++;
+    let released = false;
+    const releaseRun = () => { if (!released) { released = true; activeRuns--; } };
     let out = '';
     let err = '';
     let killed = false;
@@ -231,8 +256,9 @@ function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 10
     };
     child.stdout.on('data', (b) => feed(b, false));
     child.stderr.on('data', (b) => feed(b, true));
-    child.on('error', (e) => { clearTimeout(timer); if (poll) clearInterval(poll); reject(e); });
+    child.on('error', (e) => { releaseRun(); clearTimeout(timer); if (poll) clearInterval(poll); reject(e); });
     child.on('close', (code) => {
+      releaseRun();
       clearTimeout(timer);
       if (poll) clearInterval(poll);
       if (killed === 'abort') return reject(new Error('중단됨'));
@@ -463,7 +489,7 @@ function _explain(stderr) {
   if (/HTTP Error 429|Too Many Requests/i.test(s))
     return '유튜브가 요청이 많다며 잠시 막았습니다(429) — 기다렸다 다시 해도 막혀 건너뜁니다. 몇 분 뒤 다시 받아 보세요.';
   if (/HTTP Error 403|Forbidden/i.test(s))
-    return '유튜브가 다운로드를 거부했습니다(403) — 재시도 후에도 실패했습니다. 요청 제한·실행 환경·버전을 확인해야 합니다. 계속되면 nightly 업데이트로 확인하세요.';
+    return '유튜브가 다운로드를 거부했습니다(403) — 재시도 후에도 실패했습니다. 요청 제한·실행 환경·버전을 확인해야 합니다. 자동 업데이트 후에도 계속되면 잠시 뒤 다시 시도하고 오류 로그를 확인하세요.';
   if (/DRM protected/i.test(s))
     return 'DRM 으로 보호된 영상이라 소리를 받을 수 없습니다(비메오 일부 영상 · 자막만 가능). 저작권 보호라 우회하지 않습니다.';
   if (needsVimeoPlayer(s))
@@ -653,8 +679,8 @@ function exportSubtitles(files, format = 'srt') {
 }
 
 module.exports = {
-  BIN_DIR, OWN_EXE, RELEASE_URL, NIGHTLY_URL, STALE_DAYS,
-  parseVersionDate, versionAgeDays, isStale,
+  BIN_DIR, OWN_EXE, RELEASE_URL, NIGHTLY_URL, NIGHTLY_RELEASE_API, STALE_DAYS,
+  parseVersionDate, versionAgeDays, isStale, compareToolVersions,
   findYtDlp, downloadYtDlp, ensureYtDlp,
   vttToText, subtitleFileToText, subLangPref, pickSubFile,
   probe, probeSmart, download, listChannelVideos, channelUrlOfVideo,

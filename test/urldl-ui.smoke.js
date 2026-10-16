@@ -89,14 +89,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(/채널 전체 받아서 전사/.test(await runBtn.innerText()), '채널 모드에서는 실행 버튼 문구가 분명히 바뀐다');
     await channelChk.click();
 
-    // [6] yt-dlp 상태가 창에 보인다(조회가 비동기라 값이 올 때까지 기다린다)
-    await win.waitForFunction(() => {
-      const el = document.querySelector('[data-testid="dl-modal"]');
-      return el && !el.textContent.includes('yt-dlp 확인 중');
-    }, null, { timeout: 30000 }).catch(() => {});
-    const body = await card.innerText();
-    ok(/yt-dlp|자동으로 내려받습니다/.test(body), 'yt-dlp 상태를 알려준다');
-    ok(/⬇ 업데이트/.test(body), '「⬇ 업데이트」 버튼이 있다(유튜브가 바뀌면 여기서 갱신)');
+    ok(await card.locator('[data-testid="dl-ytdlp"], [data-testid="dl-update-channel"]').count() === 0, '자동 업데이트하므로 버전·채널 선택을 표시하지 않는다');
+    ok(await card.locator('button:has-text("⬇ 업데이트")').count() === 0, '수동 업데이트 버튼을 표시하지 않는다');
     ok(/최대 해상도/.test(await hints()), '최고 화질 기본값과 해상도 선택을 안내한다');
 
     // [7] 주소가 없으면 받지 않는다(빈 입력 방어)

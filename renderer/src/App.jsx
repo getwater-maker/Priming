@@ -729,14 +729,12 @@ export default function App() {
   const [urlSubtitleLanguage, setUrlSubtitleLanguage] = useState('original');
   const [urlSubtitleTrack, setUrlSubtitleTrack] = useState('any');
   const [urlPlaylistAll, setUrlPlaylistAll] = useState(false);
-  const [ytdlpChannel, setYtdlpChannel] = useState('nightly');
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
   const [urlStt, setUrlStt] = useState(true);            // 📥 링크로 받은 뒤 STT 전사(끄면 받기만 · v0.9.17)
   const [dlTab, setDlTab] = useState('link');            // 📥 다운로드 · STT 창 탭: 'link' | 'file'(옛 리본 🎧 STT·🎵 mp3)
   const [fileMp3, setFileMp3] = useState(false);         // 📂 내 파일 → mp3 추출
   const [fileStt, setFileStt] = useState(true);          // 📂 내 파일 → STT 전사
   const [urlChannelAll, setUrlChannelAll] = useState(false); // 채널 /videos 전체를 기존 단일영상 경로로 순회
-  const [ytInfo, setYtInfo] = useState(null);            // yt-dlp 유무·버전
   const urlTextRef = useRef(null);                       // 비제어 — 글자마다 재렌더하지 않는다(v0.3.9)
   const [tsData, setTsData] = useState(null);    // { text, total, warns } — 열 때 계산
   const tsRef = useRef(null);                    // 편집 가능한 textarea (복사는 여기서 읽는다)
@@ -1284,7 +1282,6 @@ export default function App() {
   async function openUrlDl(tab) {
     setDlTab(tab === 'file' ? 'file' : 'link');
     setUrlOpen(true);
-    try { setYtInfo(await api.ytdlpStatus()); } catch { setYtInfo(null); }
   }
   async function runUrlDl() {
     const urls = String(urlTextRef.current?.value || '')
@@ -1314,16 +1311,6 @@ export default function App() {
     if (!urls.length) { logline('클립보드에 주소가 없습니다 — 유튜브 주소를 복사한 뒤 다시 눌러 주세요'); setStatus('클립보드에 주소 없음'); return; }
     if (urlTextRef.current) urlTextRef.current.value = urls.join('\n');
     await runUrlDl();
-  }
-  async function updateYtdlp() {
-    setUrlBusy(true);
-    try {
-      const r = await api.ytdlpUpdate({ channel: ytdlpChannel });
-      if (r && r.ok) { logline(`✓ yt-dlp ${r.version} (${ytdlpChannel}) 업데이트 확인 완료`); setStatus(`yt-dlp ${r.version} (${ytdlpChannel})`); }
-      else { logline('업데이트 실패: ' + (r?.error || '응답 없음')); setStatus('yt-dlp 업데이트 실패'); }
-      setYtInfo(await api.ytdlpStatus());
-    } catch (e) { logline('오류: ' + e.message); }
-    finally { setUrlBusy(false); }
   }
   async function runTts(shortsNum) {
     setStatus('TTS 생성중…');
@@ -7634,16 +7621,6 @@ export default function App() {
                 {urlStt && <Hint>자막이 있어도 Whisper 로 전사합니다 — 자막보다 정확하지만 GPU 를 오래 씁니다.</Hint>}
               </div>
               <div className="dl-foot">
-                <span className="meta" data-testid="dl-ytdlp">
-                  {/* 🔑 조회가 비동기라 처음엔 값이 없다 — 통째로 숨기면 조회 실패 때 단서가 없다(「⬇ 업데이트」도 사라진다). 항상 그린다. */}
-                  {!ytInfo ? <>yt-dlp 확인 중…</>
-                    : ytInfo.found
-                      ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판</span> : ` · ${ytInfo.ageDays}일 전 판`}</>
-                      : <>yt-dlp 없음 — 처음 받을 때 자동 설치</>}
-                </span>
-                <Hint>같은 채널의 최신판이면 업데이트 후에도 버전은 같습니다. 안정판에서 오류가 계속되면 최신 수정이 반영된 nightly를 선택할 수 있습니다.</Hint>
-                <select data-testid="dl-update-channel" aria-label="yt-dlp 업데이트 채널" disabled={urlBusy} value={ytdlpChannel} onChange={(e) => setYtdlpChannel(e.target.value)}><option value="nightly">nightly · 최신 수정</option><option value="stable">안정판</option></select>
-                <button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px' }} onClick={updateYtdlp}>⬇ 업데이트</button>
                 <span style={{ flex: 1 }} />
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
