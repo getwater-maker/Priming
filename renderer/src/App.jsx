@@ -699,6 +699,7 @@ export default function App() {
   // 🔗 URL 다운로드 → STT
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlBusy, setUrlBusy] = useState(false);
+  const [subtitleCopyMessage, setSubtitleCopyMessage] = useState('');
   const [urlProg, setUrlProg] = useState(null);
   const [mp3Prog, setMp3Prog] = useState(null);   // 📊 🎵 mp3 추출 진행(v0.9.31)
   const [sttProg, setSttProg] = useState(null);   // 📊 🎧 STT(파일 전사) 진행 패널(main 의 stt-progress)
@@ -1282,6 +1283,24 @@ export default function App() {
   async function openUrlDl(tab) {
     setDlTab(tab === 'file' ? 'file' : 'link');
     setUrlOpen(true);
+  }
+  async function copyUrlSubtitles() {
+    const urls = String(urlTextRef.current?.value || '').trim().split(/\s+/).filter(Boolean);
+    if (urls.length !== 1 || !/^https?:\/\//i.test(urls[0])) {
+      setSubtitleCopyMessage('자막을 복사할 영상 주소를 하나만 입력하세요'); return;
+    }
+    if (urlChannelAll || urlPlaylistAll) {
+      setSubtitleCopyMessage('자막 복사는 영상 한 개씩 지원합니다. 채널·재생목록 전체를 꺼 주세요'); return;
+    }
+    setUrlBusy(true); setSubtitleCopyMessage('⏳ 자막 가져오는 중…');
+    try {
+      const r = await api.copySubtitles({ url: urls[0], subtitleLanguage: urlSubtitleLanguage, subtitleTrack: urlSubtitleTrack });
+      if (!r?.ok) throw new Error(r?.error || '자막 복사에 실패했습니다');
+      setSubtitleCopyMessage(`✅ 자막 ${r.chars.toLocaleString()}자 복사 완료 — 붙여넣기(Ctrl+V) 하세요`);
+    } catch (e) {
+      console.error('자막 복사 실패', e);
+      logline('자막 복사 실패: ' + e.message); setSubtitleCopyMessage('자막 복사 실패: ' + e.message);
+    } finally { setUrlBusy(false); }
   }
   async function runUrlDl() {
     const urls = String(urlTextRef.current?.value || '')
@@ -7622,9 +7641,11 @@ export default function App() {
               </div>
               <div className="dl-foot">
                 <span style={{ flex: 1 }} />
+                <button className="ghost" disabled={urlBusy} data-testid="dl-copy-subs" onClick={copyUrlSubtitles} title="영상 한 개의 자막을 시간 정보 없이 복사합니다. 기본은 원본 언어이며 자막 저장 옵션에서 언어·트랙을 선택할 수 있습니다.">📋 자막 복사</button>
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
+              {subtitleCopyMessage && <p role="status" data-testid="dl-copy-status">{subtitleCopyMessage}</p>}
               {urlProg && <UrlProgress embedded prog={urlProg} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
             </div>)}
             {dlTab === 'file' && (<div className="dl-body">

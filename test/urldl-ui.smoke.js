@@ -16,6 +16,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 
 (async () => {
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
+  const initialClipboard = await app.evaluate(({ clipboard }) => clipboard.readText());
   const errs = [];
   try {
     const win = await app.firstWindow();
@@ -183,8 +184,33 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const embedded = await win.locator('[data-testid="dl-modal"] [data-testid="urldl-progress"]').innerText();
     ok(/자막 저장 1개/.test(embedded) && !/전사할 영상을/.test(embedded), '자막 저장 결과를 팝업 안에서 표시한다');
 
-    ok(errs.length === 0, `화면 오류 0건 (실제 ${errs.length}${errs.length ? ' — ' + errs.slice(0, 3).join(' / ') : ''})`);
+    await win.waitForFunction(() => !document.querySelector('[data-testid="dl-copy-subs"]').disabled);
+    await app.evaluate(({ app, clipboard }) => {
+      const MD = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/main.js')('./core/media-download');
+      MD.fetchSubtitleText = async (_url, opts) => {
+        if (opts.subtitleLanguage !== 'en' || opts.subtitleTrack !== 'auto') throw new Error('복사 설정 누락');
+        return { text: '복사 시험 자막', title: '시험' };
+      };
+      clipboard.writeText('기존 내용');
+    });
+    await win.locator('[data-testid="dl-copy-subs"]').click();
+    await win.waitForFunction(() => document.querySelector('[data-testid="dl-copy-status"]')?.textContent.includes('복사 완료'));
+    ok(await app.evaluate(({ clipboard }) => clipboard.readText()) === '복사 시험 자막', '실제 IPC에서 자막을 클립보드에 복사한다');
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 1, '복사 후 팝업을 유지한다');
+    await win.locator('[data-testid="dl-modal"] textarea').fill('');
+    await win.locator('[data-testid="dl-copy-subs"]').click();
+    ok(/하나만 입력/.test(await win.locator('[data-testid="dl-copy-status"]').innerText()), '빈 주소는 화면에서 안내한다');
+    await app.evaluate(({ app }) => {
+      process.getBuiltinModule('module').createRequire(app.getAppPath() + '/main.js')('./core/media-download').fetchSubtitleText = async () => { throw new Error('자막이 없습니다'); };
+    });
+    await win.locator('[data-testid="dl-modal"] textarea').fill('https://www.youtube.com/watch?v=no-subtitles');
+    await win.locator('[data-testid="dl-copy-subs"]').click();
+    await win.waitForFunction(() => document.querySelector('[data-testid="dl-copy-status"]')?.textContent.includes('자막 복사 실패'));
+    ok(await app.evaluate(({ clipboard }) => clipboard.readText()) === '복사 시험 자막', '자막이 없으면 기존 클립보드를 보존한다');
+    const unexpected = errs.filter((e) => !e.includes('자막 복사 실패'));
+    ok(unexpected.length === 0, `예상 밖 화면 오류 0건 (실제 ${unexpected.length})`);
   } finally {
+    await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), initialClipboard);
     await app.close();
   }
   console.log(`\n${fail ? '❌' : '✅'} 🔗 URL 화면 E2E ${pass}/${pass + fail}\n`);

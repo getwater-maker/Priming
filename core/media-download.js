@@ -678,12 +678,33 @@ function exportSubtitles(files, format = 'srt') {
   });
 }
 
+async function fetchSubtitleText(url, o = {}) {
+  const parsed = new URL(url);
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('영상 주소를 입력하세요');
+  const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
+  const { url: resolvedUrl, info } = await probeSmart(url, { tool, abortSignal: o.abortSignal });
+  if (info.isPlaylist) throw new Error('재생목록 대신 영상 한 개의 주소를 입력하세요');
+  if (!(o.subtitleTrack === 'auto' ? info.hasAutoSub : o.subtitleTrack === 'manual' ? info.hasManualSub : info.hasManualSub || info.hasAutoSub)) {
+    throw new Error('선택한 언어·트랙의 자막이 없습니다');
+  }
+  const language = selectSubtitleLanguage(info, o.subtitleLanguage, o.subtitleTrack);
+  if (!language) throw new Error('선택한 언어·트랙의 자막이 없습니다');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-subtitle-copy-'));
+  try {
+    const result = await download(resolvedUrl, { tool, outDir: dir, mode: 'subtitles', subs: true, requireSubs: true,
+      subtitleLanguage: language, subtitleTrack: o.subtitleTrack || 'any', abortSignal: o.abortSignal, onLog: o.onLog });
+    const text = subtitleFileToText(result.sub);
+    if (!text.trim()) throw new Error('복사할 자막 내용이 없습니다');
+    return { text, title: info.title, language };
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 module.exports = {
   BIN_DIR, OWN_EXE, RELEASE_URL, NIGHTLY_URL, NIGHTLY_RELEASE_API, STALE_DAYS,
   parseVersionDate, versionAgeDays, isStale, compareToolVersions,
   findYtDlp, downloadYtDlp, ensureYtDlp,
   vttToText, subtitleFileToText, subLangPref, pickSubFile,
-  probe, probeSmart, download, listChannelVideos, channelUrlOfVideo,
+  probe, probeSmart, download, fetchSubtitleText, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
   _explain, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,

@@ -1282,6 +1282,23 @@ ipcMain.handle('clipboard-read-text', () => {
   try { return require('electron').clipboard.readText() || ''; } catch { return ''; }
 });
 
+ipcMain.handle('copy-subtitles', async (_e, args = {}) => {
+  if (_dlActive > 0) return { ok: false, error: '진행 중인 다운로드가 끝난 뒤 복사하세요' };
+  _dlActive++;
+  try {
+    return await withAwake('자막 복사', async () => {
+      const result = await require('./core/media-download').fetchSubtitleText(String(args.url || ''), {
+        subtitleLanguage: args.subtitleLanguage || 'original', subtitleTrack: args.subtitleTrack || 'any', onLog: log,
+      });
+      require('electron').clipboard.writeText(result.text);
+      return { ok: true, title: result.title, chars: result.text.length };
+    });
+  } catch (e) {
+    log(`✗ 자막 복사 실패: ${e.message}`);
+    return { ok: false, error: e.message };
+  } finally { _dlActive--; }
+});
+
 ipcMain.handle('ytdlp-update', async (_e, args = {}) => {
   if (_dlActive > 0) return { ok: false, error: '다운로드가 끝난 뒤 업데이트하세요' };
   const MD = require('./core/media-download');
