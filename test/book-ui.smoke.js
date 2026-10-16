@@ -253,6 +253,19 @@ ${para}
       if (!/<img class="bg" src="media:\/\//.test(srcdoc || '') || !/width:\d+(\.\d+)?mm/.test(srcdoc || '')) throw new Error('표지 펼침면 iframe 에 첨부 이미지(media://)·스프레드 치수가 없음');
       const svgTxt = await win.locator('.bkcover-lines').innerHTML();
       if (!/책등|뒤표지|앞표지/.test(svgTxt) || !new RegExp(String(spec.spineMm)).test(svgTxt)) throw new Error('책등 mm·구획 표시가 없음');
+      // 🔍 표지 화면에서도 확대·축소가 먹는다(로이 2026-10-16 「표지에서는 줌인아웃이 안 된다」) — 배율 표시와 실제 종이 폭이 함께 커진다
+      const sheetW = () => win.locator('.bkcover-sheet').evaluate((e) => e.getBoundingClientRect().width);
+      const pct = () => win.locator('[data-testid=bk-zoom-pct]').innerText().then((t) => parseInt(t, 10));
+      const w0 = await sheetW(), p0 = await pct();
+      await win.click('[data-testid=bk-zoom-in]'); await win.click('[data-testid=bk-zoom-in]');
+      const w1 = await sheetW(), p1 = await pct();
+      if (!(w1 > w0 * 1.3 && p1 > p0)) throw new Error(`표지 확대가 안 됨: 폭 ${w0}→${w1} · ${p0}%→${p1}%`);
+      if (!(await win.locator('.bkcover-canvas').evaluate((e) => e.scrollWidth > e.clientWidth))) throw new Error('확대한 표지를 옆으로 스크롤할 수 없음');
+      await win.click('[data-testid=bk-zoom-out]');
+      if (!((await sheetW()) < w1)) throw new Error('표지 축소가 안 됨');
+      await win.click('button[title="화면에 맞춤"]');
+      if (Math.abs((await sheetW()) - w0) > 2) throw new Error('맞춤이 처음 크기로 돌아가지 않음');
+      if (!(await win.locator('[data-testid=bk-cover]').count())) throw new Error('확대·축소가 표지 화면을 닫았다');
       // ▶ = 내지 1쪽(표지는 사라진다) · ⏮ = 표지 · 1쪽에서 ◀ = 표지
       await win.click('.bkbar button[title="다음 펼침면"]');
       await win.waitForFunction(() => !document.querySelector('[data-testid=bk-cover]'), null, { timeout: 8000 });

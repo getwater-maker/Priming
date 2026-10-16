@@ -16,6 +16,12 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   const deliveryKey = (j, ed) => hash(j.email + '\n' + j.original.id + '\n' + ed);
   function delivery(j, ed, state) { const db = client.load(); db.deliveries = db.deliveries || {}; if (state) { db.deliveries[deliveryKey(j, ed)] = state; client.save(db); } return db.deliveries[deliveryKey(j, ed)]; }
   function publicJob(j) { return j ? { original: j.original, values: j.values, state: j.state, draftId: j.draftId, to: j.to, body: j.body, files: (j.files || []).map(f => ({ name: f.name, bytes: f.bytes })), sentAt: j.sentAt, note: j.note } : null; }
+  // 판권 값 쓰기 — ISBN 은 메일의 하이픈 꼴 그대로 · 이미 같은 글이면 다시 쓰지 않는다(원고 수정 시각이 바뀌어 방금 만든 PDF 가 「원고보다 오래됨」으로 뜬다)
+  async function writeMeta(c, ed, v) {
+    const keys = ed === 'ebook' ? ['ebookIsbn', 'ebookIssueDate'] : ['isbn', 'issueDate'];
+    const vals = [v.isbnText || v.isbn, v.issueDate];
+    for (let i = 0; i < 2; i++) if (String(same(c).meta[keys[i]] || '') !== vals[i]) { await setMeta({ key: keys[i], value: vals[i] }); same(c); }
+  }
   function assertValues(c, ed, j) {
     const meta = same(c).meta;
     if (String(meta[ed === 'ebook' ? 'ebookIsbn' : 'isbn'] || '').replace(/[\s-]/g, '') !== j.values.isbn || String(meta[ed === 'ebook' ? 'ebookIssueDate' : 'issueDate'] || '') !== j.values.issueDate) throw Error('ISBN·발행일이 초안 생성 이후 변경되었습니다. 초안을 다시 만드세요');
@@ -70,8 +76,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     const allowed = ed === 'ebook' ? ['ebookPdf', 'ebookBodyPdf', 'ebookCoverPdf'] : ['interiorPdf', 'coverPdf', 'fullPdf'];
     if (!kinds.length || kinds.some(k => !allowed.includes(k))) throw Error('업체가 요청한 첨부 종류를 선택하세요');
     if (!a.reviewed) throw Error('메일의 책·권·판 및 추가 수정 요청을 확인하세요');
-    await setMeta({ key: ed === 'ebook' ? 'ebookIsbn' : 'isbn', value: values.isbn }); same(c);
-    await setMeta({ key: ed === 'ebook' ? 'ebookIssueDate' : 'issueDate', value: values.issueDate }); same(c);
+    await writeMeta(c, ed, values);
     j.values = values; j.state = 'building'; saveJob(c, ed, j);
     j.sourceHash = same(c).sourceHash;
     const result = await build({ edition: ed, layout: a.layout, noOpen: true });
@@ -159,20 +164,19 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
       if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: v.why + ' — Gmail에서 직접 회신하세요' }); continue; }
-      log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbn} · ${x.issueDate} (${v.by})`);
-      const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: '' };
+      log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbnText} · ${x.issueDate} (${v.by})`);
+      const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbnText || x.isbn, issueDate: x.issueDate, note: '' };
       ready.push({ ed, msg, x, res }); results.push(res);
     }
     // 🔑 두 판의 판권 값을 원고에 먼저 다 쓴다 — 종이책 초안 뒤에 전자책 값을 쓰면 원고가 바뀌어 종이책 발송이 「원고 변경」으로 막힌다.
     for (const { ed, x } of ready) {
-      await setMeta({ key: ed === 'ebook' ? 'ebookIsbn' : 'isbn', value: x.isbn }); same(c);
-      await setMeta({ key: ed === 'ebook' ? 'ebookIssueDate' : 'issueDate', value: x.issueDate }); same(c);
+      await writeMeta(c, ed, x);
     }
     for (const { ed, msg, x, res } of ready) {
       try {
         const old = jobFor(c, ed);
         if (!(old && old.original.id === msg.id && old.state === 'draft')) await doLink({ ...a, edition: ed, id: msg.id });
-        const p = await doPrepare({ ...a, edition: ed, isbn: x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: AUTO_BODY });
+        const p = await doPrepare({ ...a, edition: ed, isbn: x.isbnText || x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: AUTO_BODY });
         const sn = await doSend({ ...a, edition: ed, draftId: p.job.draftId });
         res.state = sn.job.state;
         res.note = sn.job.state === 'sent' ? `발송 완료 → ${sn.job.to} (${sn.job.files.map(f => f.name).join(', ')})` : (sn.job.note || '발송 결과 확인 필요');

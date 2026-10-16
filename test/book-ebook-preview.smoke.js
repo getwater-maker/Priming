@@ -88,10 +88,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(/979-11-12-31221-1/.test(await f.locator('body').innerText()), '2번째 문서(판권)에 전자책 ISBN 이 보인다');
     const area = await win.evaluate(() => {
       const frame = document.querySelector('[data-testid=bk-eb-frame]').getBoundingClientRect();
-      const side = document.querySelector('[data-testid=bk-eb-side]').getBoundingClientRect();
-      return { beside: side.left >= frame.right - 1, sameTop: Math.abs(side.top - frame.top) < 2, height: frame.height };
+      const reader = document.querySelector('[data-testid=bk-ebook] .bkeb-reader').getBoundingClientRect();
+      const chk = document.querySelector('[data-testid=bk-eb-checks]');
+      return { inBar: !!chk.closest('.bkbar'), noSide: !document.querySelector('[data-testid=bk-eb-side]'), full: frame.width >= reader.width - 2, height: frame.height };
     });
-    ok(area.beside && area.sameTop && area.height > 200, '점검표가 본문 오른쪽에 있고 본문 높이를 줄이지 않는다');
+    // 오른쪽 점검 칸은 없앴다(로이 2026-10-16) — 점검은 막대 왼쪽 한 줄 · 본문은 칸 폭 전체
+    ok(area.inBar && area.noSide && area.full && area.height > 200, '점검표가 막대 왼쪽에 있고 본문이 칸 폭 전체를 쓴다');
     const sel = win.locator('[data-testid=bk-ebook] .bkbar select');
     const chapter = await sel.locator('option').evaluateAll(es => es.find(e => /시작/.test(e.textContent)).value);
     await sel.selectOption(chapter);

@@ -93,7 +93,7 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
       bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
       bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
     async function runAuto({ askFn, replied = [] } = {}) {
-      const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {};
+      const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}; let metaWrites = 0;
       const cc = { scriptPath: 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
       const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
       let nd = 0;
@@ -108,18 +108,21 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
       };
       install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: {}, dialog: {}, context: () => cc,
         // 실제처럼 판권 값을 쓰면 원고 해시가 바뀐다(종이책 초안 뒤에 전자책 값을 쓰면 종이책 발송이 막히던 순서 문제를 잡는다)
-        setMeta: async a => { cc.meta[a.key] = a.value; cc.sourceHash = JSON.stringify(cc.meta); },
+        setMeta: async a => { metaWrites++; cc.meta[a.key] = a.value; cc.sourceHash = JSON.stringify(cc.meta); },
         // 실제 빌더처럼 판마다 자기 파일만 쓴다(전자책 빌드는 종이책 내지를 건드리지 않는다)
         build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, '%PDF-' + a.edition); return own; },
         ask: askFn, client: { status: () => ({ connected: true, email: 'getwater@gmail.com' }), load: () => structuredClone(d), save: x => Object.assign(d, structuredClone(x)), api } });
       const r = await h['book-mail-auto'](null, {});
-      return { r, cc, sent, built };
+      return { r, cc, sent, built, metaWrites };
     }
     const att = raw => [...raw.matchAll(/filename\*=UTF-8''([^\r\n]+)/g)].map(m => decodeURIComponent(m[1]));
     let A = await runAuto();
     assert.equal(A.r.error, undefined, A.r.error);
     assert.deepEqual(A.built, ['print', 'ebook']);
-    assert.equal(A.cc.meta.isbn, P_ISBN); assert.equal(A.cc.meta.ebookIsbn, E_ISBN); assert.equal(A.cc.meta.issueDate, '2026년 10월 16일'); assert.equal(A.cc.meta.ebookIssueDate, '2026년 10월 16일');
+    // 판권에는 메일 꼴 그대로(하이픈 유지) — 숫자만 넣어 하이픈 빠진 PDF 를 보낸 사고
+    assert.equal(A.cc.meta.isbn, '979-11-12-32516-7'); assert.equal(A.cc.meta.ebookIsbn, '979-11-12-32518-1'); assert.equal(A.cc.meta.issueDate, '2026년 10월 16일'); assert.equal(A.cc.meta.ebookIssueDate, '2026년 10월 16일');
+    assert.equal(A.metaWrites, 4);   // 같은 값을 다시 쓰지 않는다(원고 수정 시각이 바뀌면 방금 만든 PDF 가 「원고보다 오래됨」)
+    assert.equal(A.r.results[0].isbn, '979-11-12-32516-7');
     assert.deepEqual(A.r.results.map(x => x.state), ['sent', 'sent'], JSON.stringify(A.r.results));
     assert.equal(A.sent.length, 2);
     assert.deepEqual(att(A.sent[0]), ['4_내지.pdf']); assert.deepEqual(att(A.sent[1]), ['[전자책] 4_표지+본문.pdf']);   // 요청한 파일만

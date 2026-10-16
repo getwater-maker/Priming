@@ -20,7 +20,10 @@ function message(m) {
 function extract(text) {
   // 인용된 옛 답장·서명의 날짜를 현재 요청으로 해석하지 않는다.
   const current = String(text || '').split(/\n(?:On .+wrote:|-----Original Message-----|보낸 사람\s*:|From\s*:)/i)[0].split('\n').filter(l => !/^\s*>/.test(l)).join('\n');
-  const isbns = [...new Set((current.match(/97[89](?:[\s-]*\d){10}/g) || []).map(normalizeIsbn13).filter(Boolean))];
+  const raws = (current.match(/97[89](?:[\s-]*\d){10}/g) || []).map(r => ({ n: normalizeIsbn13(r), t: r.replace(/\s+/g, '') })).filter(r => r.n);
+  const isbns = [...new Set(raws.map(r => r.n))];
+  // 판권에는 메일에 적힌 꼴 그대로(979-11-12-32516-7) — 숫자만 넣어 하이픈이 빠진 PDF 를 보낸 사고(2026-10-16)
+  const isbnText = isbns.length === 1 ? ((raws.find(r => r.n === isbns[0] && r.t.includes('-')) || {}).t || isbns[0]) : '';
   const dates = [];
   // 부크크는 「발행->2026년 10월 16일」로 쓴다(「일」 없음) — 「발행인」 줄만 뺀다.
   for (const line of current.split('\n').filter(l => /발행(?!\s*인)|출간\s*일/.test(l))) {
@@ -30,7 +33,7 @@ function extract(text) {
     }
   }
   const ds = [...new Set(dates)];
-  return { isbn: isbns.length === 1 ? isbns[0] : '', issueDate: ds.length === 1 ? ds[0] : '', ambiguous: isbns.length > 1 || ds.length > 1, note: isbns.length > 1 || ds.length > 1 ? 'ISBN 또는 발행일이 여러 개입니다. 해당 책·판의 값을 직접 확인하세요.' : '메일의 책·권·종이책/전자책 및 추가 수정 요청을 확인하세요.' };
+  return { isbn: isbns.length === 1 ? isbns[0] : '', isbnText, issueDate: ds.length === 1 ? ds[0] : '', ambiguous: isbns.length > 1 || ds.length > 1, note: isbns.length > 1 || ds.length > 1 ? 'ISBN 또는 발행일이 여러 개입니다. 해당 책·판의 값을 직접 확인하세요.' : '메일의 책·권·종이책/전자책 및 추가 수정 요청을 확인하세요.' };
 }
 function validate(isbn, date) {
   const x = extract(`ISBN: ${isbn}\n발행일: ${date}`);

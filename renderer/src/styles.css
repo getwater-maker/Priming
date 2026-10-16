@@ -334,7 +334,7 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkwrap{display:flex;gap:12px;align-items:stretch;padding:6px 2px 20px;height:calc(100vh - 130px);min-height:480px}
 .bkpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto}
 /* 왼쪽 = 메뉴(위) → 내용(가운데, 스크롤) → 로그(맨 아래 고정). 로그는 App 의 logBox 를 그대로 받는다. */
-.bkside{flex:0 0 330px;display:flex;flex-direction:column;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bkside{flex:0 0 495px;max-width:45vw;display:flex;flex-direction:column;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .bknav{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;border-bottom:1px solid var(--line);background:#faf6ee}
 .bktab{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 2px;font-size:11.5px;line-height:1.25;background:transparent;color:var(--base);border:1px solid transparent;border-radius:8px;cursor:pointer}
 .bktab:hover{background:#f1e8d8}
@@ -981,8 +981,8 @@ body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,
 .bkcover-top .meta{font-size:12px}
 .bkcover-warns{padding:4px 12px 0;background:#faf6ee}
 .bkcover-warns .bkwarn{margin:3px 0}
-.bkcover-canvas{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.bkcover-sheet{position:relative;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.45);flex:0 0 auto}
+.bkcover-canvas{flex:1;min-height:0;display:flex;overflow:auto}
+.bkcover-sheet{position:relative;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.45);flex:0 0 auto;margin:auto}
 .bkcover-frame{position:absolute;left:0;top:0;border:0;background:#fff;pointer-events:none}
 .bkcover-lines{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 
@@ -1042,8 +1042,9 @@ body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,
 .bkmodebtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .bkebook{flex:1;min-height:0;display:flex;flex-direction:column}
 .bkeb-reader{flex:1;min-height:0;min-width:0;display:flex;overflow:hidden}
-.bkeb-side{flex:0 0 clamp(180px,22%,260px);min-width:0;overflow:auto;border-left:1px solid var(--line);background:var(--card)}
-.bkeb-checks{padding:8px 12px;font-size:12.5px;line-height:1.6;overflow-wrap:anywhere}
+.bkeb-checks{position:relative;padding:0 4px;font-size:12.5px;line-height:1.6;overflow-wrap:anywhere}
+/* 📋 전자책 점검 = 막대 왼쪽 한 줄 · 펼치면 떠 있는 목록(본문 칸을 줄이지 않는다 · 로이 2026-10-16 오른쪽 칸 없앰) */
+.bkeb-pop{position:absolute;left:0;top:calc(100% + 4px);z-index:20;width:min(460px,70vw);max-height:60vh;overflow:auto;padding:8px 12px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.18)}
 .bkeb-chk.err{color:#c62828;font-weight:600}
 .bkeb-chk.warn{color:#b26a00}
 .bkeb-frame{flex:1;min-width:0;min-height:0;width:0;border:0;background:#fff}

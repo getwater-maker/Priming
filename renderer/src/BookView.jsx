@@ -191,6 +191,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const [showCover, setShowCover] = useState(true);  // 지금 표지 화면을 보고 있나
   const [coverLines, setCoverLines] = useState(true); // 책등 mm · 접힘선 · 재단선 표시
   const [coverFit, setCoverFit] = useState(0.4);     // 표지 펼침면 배율(mm → 화면 맞춤)
+  const [coverZoom, setCoverZoom] = useState(1);     // 🔍 표지 확대·축소(맞춤 배율에 곱한다 · 로이 2026-10-16 「표지에서는 줌인아웃이 안 된다」)
   const coverRef = useRef(null), showCoverRef = useRef(true), curRef = useRef(0), navRef = useRef(null), navBusyRef = useRef(false), navPendRef = useRef(null), navTimerRef = useRef(null), navFlushRef = useRef(null);
   const coverBoxRef = useRef(null), coverCanvasRef = useRef(null);
   coverRef.current = cover; showCoverRef.current = showCover;
@@ -202,7 +203,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   const refreshOutputs = useCallback(() => { api.bookOutputs().then((o) => setOutputs(Array.isArray(o) ? o : [])).catch(() => {}); }, []);
   useEffect(() => { if (loaded) refreshOutputs(); }, [loaded, dto && dto.scriptPath, tab]);
   const [titleFit, setTitleFit] = useState(null);
-  useEffect(() => { setShowCover(true); }, [dto && dto.scriptPath]);   // 원고를 열면 표지부터
+  useEffect(() => { setShowCover(true); setCoverZoom(1); }, [dto && dto.scriptPath]);   // 원고를 열면 표지부터
   useEffect(() => { if (!cover && showCover) setShowCover(false); }, [cover]);
   // 표지 배율 — 칸 크기에 맞춘다(펼침면 가로·세로 모두 들어가게)
   useEffect(() => {
@@ -816,13 +817,13 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       </label>
     );
     return (
-      <div className="bkisbn" data-testid={idp + '-box'}>
+      <div className="bkisbn" data-testid={idp + '-box'} title={!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim() ? '전자책 칸이 비어 있으면 전자책 판권에는 종이책 발행일·ISBN 이 실립니다' : undefined}>
         {one('issueDate', '종이책 발행일', '', true)}
         {one('isbn', '종이책 ISBN')}
         {one('ebookIssueDate', '전자책 발행일', '', true)}
         {one('ebookIsbn', '전자책 ISBN')}
         {!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim()
-          ? <div className="meta" data-testid={idp + '-ebook-fallback'}>전자책 칸이 비어 있으면 전자책 판권에는 종이책 발행일·ISBN 이 실립니다.</div> : null}
+          ? <span hidden data-testid={idp + '-ebook-fallback'} /> : null}
       </div>
     );
   };
@@ -926,8 +927,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <button className="ghost" data-testid="bk-open-output" onClick={() => api.openFolder()}>📁 완성파일 폴더 열기</button>
         </div>
         {/* 1) 🤖 자동 입력. 저장·「도서제출」은 직접 */}
-        <div className="bkzone">🤖 자동 입력 <span className="meta">(로그인·「도서제출」은 직접)</span></div>
-        <div className="bkauto" data-testid="bk-auto">
+        <div className="bkzone" title="로그인과 마지막 「도서제출」은 직접 누르세요">🤖 자동 입력</div>
+        <div className="bkauto" data-testid="bk-auto" title="항상 종이책을 먼저 등록하세요 — 4단계에서 읽은 종이책 최종정가의 70%(10원 단위 버림)가 전자책 정가가 됩니다">
           <div className="bkauto-row">
             <b>📕 종이책</b>
             <button disabled={regBusy || building} data-testid="bk-register-bookk"
@@ -946,10 +947,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요"
               onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>
           </div>
-          <div className="meta bknote">항상 <b>종이책을 먼저</b> 등록하세요 — 4단계에서 읽은 종이책 최종정가의 70%(10원 단위 버림)가 전자책 정가가 됩니다.</div>
         </div>
         <div className="bkprice" data-testid="bk-paper-price-row">
-          <div className="bkprice-head">💰 종이책 정가 <span className="meta">전자책 정가 = 이 값의 70%(10원 단위 버림)</span></div>
+          <div className="bkprice-head" title="전자책 정가 = 이 값의 70%(10원 단위 버림)">💰 종이책 정가</div>
           <div className="bkprice-row">
             <input type="number" step="100" min="0" placeholder={paperPrice && paperPrice.paper ? String(paperPrice.paper) : '예) 17900'} value={paperPriceIn} onChange={(e) => setPaperPriceIn(e.target.value)} data-testid="bk-paper-price-in" title="종이책을 앱 자동 입력으로 신청했다면 4단계 최종정가가 자동 기록됩니다 — 그렇지 않은 경우 여기에 종이책 정가를 적어 두세요" />
             <span className="meta">원</span>
@@ -1427,8 +1427,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       <div className="bkcenter">
         <div className="bkmode" data-testid="bk-viewmode">
           <button className={'bkmodebtn' + (viewMode === 'paper' ? ' on' : '')} data-testid="bk-view-paper" onClick={() => setViewMode('paper')} title="종이책 내지(조판) 미리보기">📕 종이책</button>
-          <button className={'bkmodebtn' + (viewMode === 'ebook' ? ' on' : '')} data-testid="bk-view-ebook" onClick={() => setViewMode('ebook')} title="ePub(선택 산출물)을 임시로 만들어 문서 순서대로 보여 주고 전자책 점검 항목을 확인합니다 — 부크크에 올리는 파일은 전자책 PDF 입니다">📱 전자책</button>
-          {viewMode === 'ebook' && <span className="meta">리플로우 ePub · 휠로 읽기 · 문서 끝에서 다음 챕터</span>}
+          <button className={'bkmodebtn' + (viewMode === 'ebook' ? ' on' : '')} data-testid="bk-view-ebook" onClick={() => setViewMode('ebook')} title="ePub(선택 산출물)을 임시로 만들어 문서 순서대로 보여 주고 전자책 점검 항목을 확인합니다 — 부크크에 올리는 파일은 전자책 PDF 입니다 · 휠로 읽고, 문서 끝에서 다음 챕터로 넘어갑니다">📱 전자책</button>
         </div>
         {viewMode === 'ebook' && (
           <div className="bkebook" data-testid="bk-ebook">
@@ -1441,15 +1440,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <select value={eb.n} disabled={eb.busy || !eb.docs.length} onChange={(e) => loadEbookDoc(eb.docs, Number(e.target.value))} style={{ maxWidth: 260 }}>
                 {eb.docs.map((d) => <option key={d.n} value={d.n}>{d.n}. {d.title}</option>)}
               </select>
-              <span className="grow" />
-              <span className="meta">{eb.busy ? '⏳ ePub 만드는 중…' : (eb.docs.length ? `EPUB ${eb.version} · ${(eb.bytes / 1048576).toFixed(1)}MB` : '')}</span>
-              <button className="ghost" disabled={eb.busy} onClick={refreshEbook} title="원고를 다시 읽어 ePub 을 새로 만듭니다">🔄 전자책 갱신</button>
-            </div>
-            {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
-            <div className="bkeb-reader">
-            <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="allow-same-origin" srcDoc={eb.html} onLoad={bindEbookScroll} />
-            <aside className="bkeb-side" data-testid="bk-eb-side" aria-label="전자책 점검">
-            {eb.checks.length > 0 && (() => {
+              {eb.checks.length > 0 && (() => {
               // 사람이 눈으로 확인하는 항목(표지에 제목 등)은 체크하면 통과로 센다 — 원고마다 이 PC 에 기억(localStorage)
               const confKey = (c) => 'pm.ebConfirm.' + ((dto && dto.scriptPath) || '') + '.' + c.id;
               const confirmed = (c) => { try { return localStorage.getItem(confKey(c)) === '1'; } catch (_) { return false; } };
@@ -1458,14 +1449,20 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               return (
                 <details className="bkeb-checks" data-testid="bk-eb-checks" open={bad.length > 0} key={eb.forPath + ':' + bad.length}>
                   <summary data-testid="bk-eb-sum">{bad.length ? `⚠ ${eb.platformLabel || '부크크'} 전자책 점검 — 확인할 것 ${bad.length}개` : `✅ ${eb.platformLabel || '부크크'} 전자책 점검 ${eb.checks.length}/${eb.checks.length} 통과`}</summary>
-                  {eb.checks.map((c) => (
+                  <div className="bkeb-pop">{eb.checks.map((c) => (
                     <div key={c.id} className={'bkeb-chk ' + lvl(c)} data-testid={'bk-eb-chk-' + c.id} data-level={lvl(c)}>{lvl(c) === 'ok' ? '✅' : lvl(c) === 'warn' ? '⚠' : '❌'} {c.text}
                       {c.confirm && <label style={{ marginLeft: 8 }}><input type="checkbox" data-testid={'bk-eb-confirm-' + c.id} checked={confirmed(c)} onChange={(e) => { try { localStorage.setItem(confKey(c), e.target.checked ? '1' : '0'); } catch (_) {} setEb((s) => ({ ...s })); }} /> 확인했습니다</label>}</div>
-                  ))}
+                  ))}</div>
                 </details>
               );
             })()}
-            </aside>
+              <span className="grow" />
+              <span className="meta">{eb.busy ? '⏳ ePub 만드는 중…' : (eb.docs.length ? `EPUB ${eb.version} · ${(eb.bytes / 1048576).toFixed(1)}MB` : '')}</span>
+              <button className="ghost" disabled={eb.busy} onClick={refreshEbook} title="원고를 다시 읽어 ePub 을 새로 만듭니다">🔄 전자책 갱신</button>
+            </div>
+            {eb.error && <div className="bkwarn" style={{ padding: '6px 10px' }}>⚠ {eb.error}</div>}
+            <div className="bkeb-reader">
+            <iframe className="bkeb-frame" title="전자책 미리보기" data-testid="bk-eb-frame" sandbox="allow-same-origin" srcDoc={eb.html} onLoad={bindEbookScroll} />
             </div>
           </div>
         )}
@@ -1473,7 +1470,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         <div className="bkbar">
           <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
           <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
-          <span className="bkpage" title={cover ? '맨 앞 화면 = 표지 펼침면(미리보기 전용 — 내지 PDF 에는 들어가지 않습니다)' : ''}>{showCover && cover ? '표지' : (pageInfo.cur > 0 ? pageInfo.cur : '–')} / {pageInfo.total || '–'}쪽</span>
+          <span className="bkpage" title={(cover ? '맨 앞 화면 = 표지 펼침면(미리보기 전용 — 내지 PDF 에는 들어가지 않습니다) · ' : '') + '글 클릭 = 수정 · 책 밖 좌/우 클릭·‹ ›·휠/←→ = 넘기기 · 확대하면 휠 = 스크롤'}>{showCover && cover ? '표지' : (pageInfo.cur > 0 ? pageInfo.cur : '–')} / {pageInfo.total || '–'}쪽</span>
           <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
           <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
           <input type="range" title="페이지 빠른 이동(드래그)" min={cover ? 0 : 1} max={Math.max(1, pageInfo.total || 0)} value={cover && showCover ? 0 : Math.max(1, pageInfo.cur || 1)}
@@ -1484,13 +1481,14 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, Math.max(1, v) - 1); } catch (_) {}
             }} />
           <span className="hdiv" />
-          <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
-          <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
-          <button className="ghost" onClick={() => applyZoom(zoomRef.current * 1.2)} title="확대">🔍＋</button>
-          <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
-          <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
+          {/* 표지 화면이면 표지 배율을, 아니면 내지 미리보기 배율을 바꾼다 */}
+          <button className="ghost" data-testid="bk-zoom-out" onClick={() => (showCover && cover ? setCoverZoom((z) => Math.max(0.3, z / 1.2)) : applyZoom(zoomRef.current / 1.2))} title="축소">🔍−</button>
+          <span className="meta" data-testid="bk-zoom-pct" style={{ minWidth: 42, textAlign: 'center' }}>{showCover && cover ? Math.round(coverFit * coverZoom * 100) : zoomPct}%</span>
+          <button className="ghost" data-testid="bk-zoom-in" onClick={() => (showCover && cover ? setCoverZoom((z) => Math.min(8, z * 1.2)) : applyZoom(zoomRef.current * 1.2))} title="확대">🔍＋</button>
+          <button className="ghost" onClick={() => (showCover && cover ? setCoverZoom(1 / (coverFit || 1)) : applyZoom(1))} title="원래 크기">1:1</button>
+          <button className="ghost" onClick={() => (showCover && cover ? setCoverZoom(1) : fitZoom())} title="화면에 맞춤">⛶ 맞춤</button>
           <span className="grow" />
-          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '글 클릭=수정 · 책 밖 좌/우 클릭·‹ ›·휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
+          {previewBusy && <span className="meta">⏳ 조판 중…</span>}
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
         <div className="bkstage">
@@ -1520,7 +1518,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <button className="bknavarrow left" data-testid="bk-prev" title="이전 쪽 (←) — 책 밖 왼쪽을 눌러도 됩니다" onClick={() => nav(Navigation.PREVIOUS)}>‹</button>
           <button className="bknavarrow right" data-testid="bk-next" title="다음 쪽 (→) — 책 밖 오른쪽을 눌러도 됩니다" onClick={() => nav(Navigation.NEXT)}>›</button>
           {cover && showCover && (() => {
-            const sp = cover.spread, k = coverFit, Wpx = sp.widthMm * 3.7795, Hpx = sp.heightMm * 3.7795;
+            const sp = cover.spread, k = coverFit * coverZoom, Wpx = sp.widthMm * 3.7795, Hpx = sp.heightMm * 3.7795;
             let x = 0; const bounds = []; const regions = [];
             for (const part of sp.parts) { regions.push({ ...part, x }); x += part.mm; if (part.name !== 'bleed') bounds.push(x); }
             bounds.pop();   // 맨 끝(재단 안쪽)은 재단선이 따로 그린다
@@ -1529,7 +1527,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             return (
               <div className="bkcover" ref={coverBoxRef} tabIndex={0} data-testid="bk-cover"
                 onKeyDown={(e) => { if (['ArrowRight', 'PageDown', ' ', 'End', 'ArrowDown'].includes(e.key)) { e.preventDefault(); nav(e.key === 'End' ? Navigation.LAST : Navigation.NEXT); } }}
-                onWheel={(e) => { if (e.deltaY > 0) nav(Navigation.NEXT); }}>
+                onWheel={(e) => { if (coverZoom <= 1.001 && e.deltaY > 0) nav(Navigation.NEXT); }}>
                 <div className="bkcover-top">
                   <b>🖼 표지 펼침면</b>
                   <span className="meta">{cover.kind === 'composed' ? '원고 [뒷표지]·[앞날개]… 로 조판한 표지' : `첨부 표지${cover.fileName ? ' — ' + cover.fileName : ''}${cover.kind === 'image+text' ? ' + 원고 표지 문구' : ''}`} · {sp.widthMm}×{sp.heightMm}mm · 책등 {sp.spineMm}mm · 날개 {cover.flaps ? '있음' : '없음'}</span>

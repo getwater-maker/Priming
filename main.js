@@ -11286,6 +11286,7 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
     const { buildBookHtml } = require('./core/book/html-builder');
     const { bundledFontCss } = require('./core/book/pdf-builder');
     rememberBookLayout(args.layout);
+    S.parsed._previewLayout = args.layout;   // 📌 쪽수 보고(book-report-pages)가 어떤 조판 설정의 미리보기인지
     const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
     const { html } = buildBookHtml(S.parsed, {
       ...bookLayoutOpts(args),
@@ -11320,9 +11321,21 @@ ipcMain.handle('book-report-pages', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
   if (_bookQueueBusy) return currentDTO();   // 큐 일괄 만들기 중에는 화면 미리보기의 쪽수 보고를 받지 않는다(다른 권의 쪽수로 덮어쓰는 것 방지)
   const n = Number(args.pages);
+  const built = S.parsed._builtPages;
+  if (built && built.n && built.sig === _bookPagesSig(S.parsed._previewLayout)) {
+    if (n !== built.n) log(`ℹ 미리보기 ${n}쪽 보고는 무시 — 같은 원고·조판으로 만든 내지 PDF 가 ${built.n}쪽입니다`);
+    if (S.parsed._lastPages !== built.n) { S.parsed._lastPages = built.n; storeActive(); }
+    return currentDTO();
+  }
   if (Number.isFinite(n) && n > 0) { S.parsed._lastPages = n; storeActive(); }
   return currentDTO();
 });
+// 원고 파일(크기·수정 시각) + 조판 설정 지문 — 이게 같으면 내지 PDF 쪽수가 미리보기보다 정확하다
+function _bookPagesSig(layout) {
+  const files = bookFilePaths().map((p) => { try { const s = fs.statSync(p); return `${p}:${s.size}:${s.mtimeMs}`; } catch (_) { return p; } });
+  let lay = ''; try { lay = JSON.stringify(layout || {}); } catch (_) {}
+  return files.join('|') + '#' + lay;
+}
 
 // PDF 생성 — 내지.pdf (+표지 이미지 있으면 표지.pdf). 완료 후 출력폴더 열기.
 regBook('book-build-pdf', async (_e, args = {}) => {
@@ -11367,6 +11380,9 @@ regBook('book-build-pdf', async (_e, args = {}) => {
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
     if (!r.success) { log('✗ 내지 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
     S.parsed._lastPages = r.pages || S.parsed._lastPages || 0;
+    // 📌 진짜 PDF 쪽수를 원고·조판 설정 지문과 함께 고정 — 미리보기가 쪽 나누기 도중의 숫자(31·177쪽)를 보고해
+    //   245쪽 PDF 의 점검이 「최소 50쪽」·「표지 치수 불일치」로 뜬 사고(삼국지 4 · 2026-10-16). 지문이 같으면 미리보기 보고를 받지 않는다.
+    if (r.pages) S.parsed._builtPages = { n: r.pages, sig: _bookPagesSig(args.layout) };
 
     // 규격 리포트 — 플랫폼 최소쪽수 경고 + 책등/표지 스프레드 안내
     const meta = S.parsed.meta || {};
