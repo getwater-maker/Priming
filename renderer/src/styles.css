@@ -1541,3 +1541,18 @@ main .card h2{top:var(--work-top-height,0px)}
 .pane1.auto-size .thumbgrid{flex:0 0 auto;aspect-ratio:16/9;width:100%;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
 .pane1.auto-size #logwrap.docked{flex:0 0 auto;min-height:0}
 .pane1.auto-size #log{min-height:140px;max-height:35vh}
+/* Two explicit format rows, with a full-height apply button. */
+.ribbon{height:100px;min-height:100px;padding:8px 12px}
+.ribbon .hgroup > button,.ribbon .hgroup > span > button{min-height:64px;padding:8px 10px;gap:6px}
+.ribbon .rb-ic{font-size:22px}
+.ribbon .rb-t{font-size:12.5px}
+.ribbon .hgroup select{min-height:32px}
+.ribbon .cf-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;height:84px;max-height:none;padding:6px 8px;align-self:center}
+.cf-lines{min-width:0;overflow-x:auto;scrollbar-width:thin}
+.cf-format-row{display:flex;align-items:center;gap:4px;min-height:30px;white-space:nowrap}
+.cf-format-row + .cf-format-row{margin-top:8px}
+.cf-format-row > *{flex-shrink:0}
+.ribbon .cf-bar button,.ribbon .cf-bar select,.ribbon .cf-bar input:not([type=checkbox]):not([type=color]){height:30px;line-height:26px;padding-top:1px;padding-bottom:1px}
+.ribbon .cf-bar .cf-applyall{height:auto;align-self:stretch;min-width:100px;padding:8px;white-space:normal;font-size:13px}
+.ribbon .cf-bar .cf-sel{line-height:28px}
+.cf-format-row > .cf-div:first-child,.cf-format-row > .cf-div:last-child{display:none}

@@ -42,7 +42,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const inp = win.locator('#find-input');
     const cnt = async () => (await win.locator('.fcnt').innerText()).trim();
     const curN = () => win.evaluate(() => { const c = document.querySelector('.sent.cur'); return c ? Number(c.getAttribute('data-ln')) : null; });
-    await inp.click(); await win.keyboard.type('5번째'); await win.waitForTimeout(900);
+    await inp.click(); await win.keyboard.type('5번째'); await win.keyboard.press('Enter'); await win.waitForTimeout(900);
     ok(await cnt() === '1/8', `8곳 중 첫 일치 「${await cnt()}」`);
     const n1 = await curN();
     await win.keyboard.press('Enter'); await win.waitForTimeout(500);
@@ -90,7 +90,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(500);
     ok(await inp.inputValue() === '', '전부 지웠다 (「' + await inp.inputValue() + '」 포커스 ' + await win.evaluate(() => (document.activeElement && (document.activeElement.id || document.activeElement.tagName)))+ ')');
     ok((await win.evaluate(() => document.activeElement && document.activeElement.id)) === 'find-input', '다 지운 뒤에도 포커스가 검색창에');
-    await win.keyboard.type('3장'); await win.waitForTimeout(800);
+    await win.keyboard.type('3장'); await win.keyboard.press('Enter'); await win.waitForTimeout(800);
     ok(await inp.inputValue() === '3장' && /^\d+\/10$/.test(await cnt()), `바로 다시 입력된다 (「${await inp.inputValue()}」 ${await cnt()})`);
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     ok((await win.evaluate(() => CSS.highlights.size)) === 0, 'Esc 로 강조도 지움');

@@ -17,7 +17,13 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     await win.waitForTimeout(1500);
     const inp = win.locator('#find-input');
     await inp.click();
+    await win.keyboard.type('sdp'); await win.waitForTimeout(600);
+    ok((await win.locator('.fcnt').innerText()).trim()==='', '입력만으로 검색하지 않음');
+    for(let i=0;i<3;i++) await win.keyboard.press('Backspace');
+    await win.waitForTimeout(600);
+    ok(await inp.evaluate(el=>document.activeElement===el), 'sdp를 Backspace로 모두 지워도 입력 포커스 유지');
     for (const ch of '설정') { await win.keyboard.type(ch); await win.waitForTimeout(450); }   // 디바운스보다 느리게 — 글자 사이에 검색이 실제로 돈다
+    await win.keyboard.press('Enter');
     await win.waitForTimeout(800);
     const v = await inp.inputValue();
     ok(v === '설정', `타이핑이 온전하다: 입력값 「${v}」 (기대 「설정」)`);
@@ -32,6 +38,7 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
     // 없는 글자 — 「없음」(검색창 자신만 일치)
     await inp.fill(''); await win.waitForTimeout(300);
     for (const ch of 'zqxjwv') { await win.keyboard.type(ch); await win.waitForTimeout(100); }
+    await win.keyboard.press('Enter');
     await win.waitForTimeout(900);
     const none = (await win.locator('.fcnt').innerText()).trim();
     ok((await inp.inputValue()) === 'zqxjwv' && none === '없음', `없는 글자: 입력 온전 + 표시 「${none}」`);

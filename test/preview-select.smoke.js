@@ -52,10 +52,13 @@ const assert = require('assert');
     });
     assert(ratio > 0.2 && ratio < 0.65, 'responsive left ratio: ' + ratio);
     await win.click('button:has-text("서식")');
-    const rows = await win.evaluate(() => ({shadow:document.querySelector('.ribbon [title="그림자"]').getBoundingClientRect().top, position:document.querySelector('.ribbon [data-testid="cf-posh"]').getBoundingClientRect().top}));
-    assert(rows.position > rows.shadow + 10, 'format controls break after shadow');
+    const rows = await win.evaluate(() => ({first:document.querySelector('.ribbon [title="글꼴"]').getBoundingClientRect().top, outline:document.querySelector('.ribbon [title="테두리 켜기/끄기"]').getBoundingClientRect().top, apply:document.querySelector('.cf-applyall').getBoundingClientRect().height}));
+    assert(rows.outline > rows.first + 30, 'format controls break before outline');
+    assert(rows.apply >= 60, 'apply button spans two rows');
+    await win.screenshot({path:path.join(os.tmpdir(),'priming-format-layout.png')});
     await win.click('button:has-text("이미지") >> nth=0');
     assert.equal(await win.locator('[data-testid="style-picker-btn"] img').count(),0);
+    assert.equal(await win.locator('[data-testid="style-picker-btn"] .stpick-caret').count(),0);
     // Cache offscreen group geometry, then resize: headers and clips must still align.
     await win.evaluate(() => { const m = document.querySelector('main.pane2'); m.scrollTop = m.scrollHeight; });
     await win.waitForTimeout(150);

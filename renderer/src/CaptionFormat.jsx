@@ -463,9 +463,11 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
   const H = POS_HS, V = POS_VS;
   return (
     <div className={'cf-bar' + (active ? '' : ' idle')} data-testid="cf-bar" onMouseDown={(e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT') e.preventDefault(); }}>
+      <div className="cf-lines">
+      <fieldset className="cf-ctrls" disabled={!active}>
+        <div className="cf-format-row">
       <span className="cf-sel" data-testid="cf-sel">{active ? `✏ ${label}` : '🎨 자막 서식'}</span>
       {!active && <span className="cf-hint" data-testid="cf-hint">자막 줄 번호(01 |)를 누르거나 글자를 드래그하세요 · 지금 보이는 값 = 채널 기본</span>}
-      <fieldset className="cf-ctrls" disabled={!active}>
         <ScopeBtn scope={scope} onScope={onScope} />
         <button className="ghost" title="서식 지우기 — 채널 기본 서식으로 되돌립니다(위치·정렬 포함)" onClick={onClear}>⌫ 서식 지우기</button>
         <select className="cf-savedsel" value="" title="저장된 서식 적용" onChange={(e) => { const s = saved.find((x) => x.id === e.target.value); if (s) onPatch(s.fmt); }}>
@@ -485,14 +487,14 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
           {[...new Set([...SIZES, Number(f.size || 100)])].sort((a, b) => a - b).map((v) => <option key={v} value={String(v)}>{v}</option>)}
         </select>
         <label className="cf-cbtn" title="글자색"><span style={{ color: f.fontColor, WebkitTextStroke: '0.5px #555' }}>A</span><Color value={f.fontColor} onChange={(v) => onPatch({ fontColor: v })} /></label>
-        <span className="cf-div" />
+        </div>
+        <div className="cf-format-row">
         <Toggle on={f.outlineOn !== false} onChange={(v) => onPatch({ outlineOn: v })} title="테두리 켜기/끄기">테두리</Toggle>
         <Color value={f.outlineColor} onChange={(v) => onPatch({ outlineColor: v, outlineOn: true })} />
         <Toggle on={!!f.boxOn} onChange={(v) => onPatch({ boxOn: v })} title="배경 상자(줄 전체)">배경</Toggle>
         <Toggle on={!!f.hlOn} onChange={(v) => onPatch({ hlOn: v })} title="형광펜(글자 뒤 칠)">형광펜</Toggle>
         <Color value={f.hlColor} onChange={(v) => onPatch({ hlColor: v, hlOn: true })} />
         <Toggle on={!!f.shadowOn} onChange={(v) => onPatch({ shadowOn: v })} title="그림자">그림자</Toggle>
-        <span className="cf-linebreak" aria-hidden="true" />
         <span className="cf-div" />
         {/* 📐 위치·정렬 — 고른 **줄 전체**에 적용된다(글자 일부를 골라도 그 줄이 움직인다 — Vrew 와 같다) */}
         <span className="cf-grp" data-testid="cf-posh" title="가로 정렬 · 가로 미세(+ = 오른쪽)">
@@ -507,8 +509,9 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
         <button className={'ghost' + (panel === 'fmt' ? ' on' : '')} title="고급 — 간격·이중 테두리·그림자 위치·저장된 서식" onClick={() => onPanel('fmt')}>⚙ 고급</button>
         <button className={'ghost' + (panel === 'anim' ? ' on' : '')} title="효과 — 등장·퇴장·강조 애니메이션" onClick={() => onPanel('anim')}>✨ 효과{info ? `: ${info.label}` : ''}</button>
         {onSaveDefault && <button className="ghost cf-savedef" data-testid="cf-savedef" title="지금 서식·위치를 이 채널의 기본값으로 저장합니다(⚙ 채널편집 → 📝 자막 과 같은 값 — 앞으로 모든 자막에 적용)" onClick={onSaveDefault}>💾 자막 서식 저장</button>}
+        </div>
       </fieldset>
-      <span className="cf-gap" />
+      </div>
       {/* ✕(선택 해제) 는 뺐다 — 툴바가 늘 떠 있으니 Esc · 다른 곳 누르기로 충분하다(로이 2026-09-25) */}
       {active && onApplyAll && <button className="ghost cf-applyall" title="이 줄의 서식을 대본의 모든 자막에 적용 — 한 줄을 꾸며 보고 마음에 들면 전체로 (Ctrl+Z 로 되돌리기)" onClick={onApplyAll}>⤢ 전체에 적용</button>}
     </div>

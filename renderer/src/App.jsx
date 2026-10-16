@@ -361,7 +361,7 @@ function StylePicker({ value, onChange, styles, samples, scriptId }) {
   return (
     <span className="stpick" ref={ref} data-testid="style-picker">
       <button className="ghost stpick-btn" title="이미지 스타일" data-testid="style-picker-btn" onClick={() => setOpen((o) => !o)}>
-        <span className="stpick-name">{cur.name}</span><span className="stpick-caret">▾</span>
+        <span className="stpick-name">{cur.name}</span>
       </button>
       {open && (<>
         <div className="stpick-pop" data-testid="style-picker-pop" onMouseLeave={() => setPeek(null)}>
@@ -5847,9 +5847,9 @@ export default function App() {
           <div className="findbar">
             <span title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동">🔍</span>
             {/* 비제어 — 검색어를 App state 에 두면 글자마다 전 화면이 다시 그려져 입력이 멈춘다(대본수정과 같은 원인) */}
-            <input id="find-input" defaultValue={findTextRef.current} onBlur={keepFindFocus} placeholder="검색" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; runFind(e.target.value, false); }} title="화면에서 검색 — Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
-              onChange={(e) => runFind(e.target.value, false)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findTextRef.current, true, !e.shiftKey); } else if (e.key === 'ArrowUp') { e.preventDefault(); runFind(findTextRef.current, true, false); } else if (e.key === 'ArrowDown') { e.preventDefault(); runFind(findTextRef.current, true, true); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
+            <input id="find-input" defaultValue={findTextRef.current} onBlur={keepFindFocus} placeholder="검색 · Enter" onCompositionStart={() => { findComposingRef.current = true; }} onCompositionEnd={(e) => { findComposingRef.current = false; findTextRef.current = e.target.value; }} title="Enter로 검색 · Enter / ↓ 다음 클립 · Shift+Enter / ↑ 이전 클립"
+              onChange={(e) => { findTextRef.current = e.target.value; }}
+              onKeyDown={(e) => { if (e.nativeEvent.isComposing || findComposingRef.current) return; if (e.key === 'Enter') { e.preventDefault(); runFind(e.currentTarget.value, true, !e.shiftKey); } else if (e.key === 'ArrowUp' && findSessionRef.current === e.currentTarget.value) { e.preventDefault(); runFind(findTextRef.current, true, false); } else if (e.key === 'ArrowDown' && findSessionRef.current === e.currentTarget.value) { e.preventDefault(); runFind(findTextRef.current, true, true); } else if (e.key === 'Escape') { e.preventDefault(); clearFind(); } }} />
             <span className="fcnt" title="검색된 클립 수(한 클립에 같은 말이 두 번 나와도 1개로 셉니다)">{findRes.total ? `${findRes.active}/${findRes.total}` : (findRes.none ? '없음' : '')}</span>
             <button className="ghost" title="이전 (Shift+Enter)" onClick={() => runFind(findTextRef.current, true, false)}>▲</button>
             <button className="ghost" title="다음 (Enter)" onClick={() => runFind(findTextRef.current, true, true)}>▼</button>
