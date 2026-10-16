@@ -111,6 +111,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         ok(/^작업 순서 \(\d+\)$/.test((await win.locator('.qlabel').first().innerText()).trim()), '큐 라벨 = 「작업 순서(N)」');
         const mb3 = await win.locator('.menubar').boundingBox();
         ok(mb3 && mb3.height < 56, `묶음 버튼을 더해도 1366px 메뉴 줄이 한 줄 (${mb3 && Math.round(mb3.height)}px)`);
+        // ⏸ 큐 작업 중에만 보이는 「이번 편까지만」이 붙어도 ■ 중단이 다음 줄로 넘어가지 않는다(v0.9.52 — 검색칸이 먼저 줄어든다)
+        const sa = await win.evaluate(() => {
+          const stop = [...document.querySelectorAll('.menubar button')].find((b) => /중단/.test(b.textContent));
+          const b = document.createElement('button'); b.className = 'ghost stop-after'; b.innerHTML = '⏸ 이번 편<span class="sa-long">까지</span>만'; stop.before(b);
+          const mb = document.querySelector('.menubar').getBoundingClientRect(); const r = stop.getBoundingClientRect();
+          const out = { h: Math.round(mb.height), right: Math.round(r.right), vw: window.innerWidth, find: Math.round(document.querySelector('.menubar .findbar').getBoundingClientRect().width) };
+          b.remove(); return out;
+        });
+        ok(sa.h < 56 && sa.right <= sa.vw, `「⏸ 이번 편까지만」이 있어도 1366px 메뉴 줄 한 줄 · ■ 중단이 화면 안 (${sa.h}px · 중단 오른쪽 ${sa.right}/${sa.vw} · 검색칸 ${sa.find}px)`);
       }
       // ⬆ v0.8.7 — 「완성 후 업로드」 체크(MP4·화이트보드일 때만) · 📁 출력폴더는 고른 완성물 종류의 폴더
       {

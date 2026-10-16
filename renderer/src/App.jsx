@@ -5875,7 +5875,7 @@ export default function App() {
                 title={stopAfter
                   ? '예약됨 — 지금 만드는 대본까지 끝내고 멈춥니다. 다시 누르면 예약을 취소하고 큐를 끝까지 이어갑니다.'
                   : '지금 만드는 대본은 끝까지 마치고, 다음 대본부터는 시작하지 않고 멈춥니다. (■ 중단은 만들던 것도 바로 멈춥니다) 남은 대본은 그대로 보존돼 ⚡ 만들기를 다시 누르면 이어서 만듭니다.'}
-                onClick={toggleStopAfter}>{stopAfter ? '⏸ 예약됨 · 취소' : '⏸ 이번 편까지만'}</button>
+                onClick={toggleStopAfter}>{stopAfter ? <>⏸ 예약됨<span className="sa-long"> · 취소</span></> : <>⏸ 이번 편<span className="sa-long">까지</span>만</>}</button>
             )}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
           </>)}

@@ -53,7 +53,7 @@ console.log('[4] 화면·preload 배선');
 ok(/stopAfterItem: \(on\) => ipcRenderer\.invoke\('stop-after-item', on\)/.test(PRE), 'preload 에 stopAfterItem');
 ok(/data-testid="stop-after-btn"/.test(APP) && /onClick=\{toggleStopAfter\}/.test(APP), '헤더에 ⏸ 버튼 → toggleStopAfter');
 ok(/\{queueBusy && \(\s*<button className=\{'ghost stop-after'/.test(APP), '버튼은 큐 작업 중(queueBusy)에만 보인다(평소 헤더 폭 불변)');
-ok(/stopAfter \? '⏸ 예약됨 · 취소' : '⏸ 이번 편까지만'/.test(APP), '예약되면 라벨이 바뀌어 취소임을 보인다');
+ok(/stopAfter \? <>⏸ 예약됨<span className="sa-long"> · 취소<\/span><\/> : <>⏸ 이번 편<span className="sa-long">까지<\/span>만<\/>/.test(APP), '예약되면 라벨이 바뀌어 취소임을 보인다(좁은 창은 「예약됨」·「이번 편만」)');
 const tg = APP.slice(APP.indexOf('async function toggleStopAfter'), APP.indexOf('async function toggleStopAfter') + 700);
 ok(/queueStopAfterRef\.current = on/.test(tg) && /api\.stopAfterItem\(on\)/.test(tg), '토글이 ref(화면 큐 루프)와 main(run-batch) 둘 다에 알린다');
 const ab = APP.slice(APP.indexOf('function abort()'), APP.indexOf('function abort()') + 260);

@@ -1535,7 +1535,16 @@ main.pane2 .sent.tts-now::after{content:'🎤 지금';position:absolute;right:6p
 .work-top{position:sticky;top:0;z-index:35;background:var(--bg);padding-top:8px;padding-bottom:1px}
 main .card h2{top:var(--work-top-height,0px)}
 .work-top .qlist{max-height:22vh;overflow:auto}
-.menubar .findbar{flex:0 1 300px;min-width:240px}
+/* 메뉴 줄은 늘 한 줄 — 「⏸ 이번 편까지만」이 붙어도 ■ 중단이 다음 줄로 넘어가지 않게 검색칸이 먼저 줄어든다(v0.9.52 · 로이 2026-10-16) */
+.menubar{flex-wrap:nowrap}
+.menubar > *{flex-shrink:0}
+.menubar .grow{flex:1 1 0;min-width:0}
+/* 🔴 입력란 폭이 0 이 되면 한글 타이핑이 뒤집힌다(「설정」→「정설」) — 입력란 최소 폭을 지키고 검색칸 최소 폭은 내용물 기준 */
+.menubar .findbar{flex:0 1 190px;min-width:auto}
+.menubar .findbar input{width:0;min-width:52px}
+.menubar .findbar .fcnt:empty{min-width:0;display:none}
+.menubar .findbar:has(.find-selall){flex:0 1 230px}
+@media (max-width:1500px){.menubar{gap:4px;padding-left:8px;padding-right:8px}.menubar .findbar > span:first-child{display:none}.menubar .findbar{flex:0 1 140px}.menubar .stop-after .sa-long{display:none}}
 .ribbon .cf-linebreak{flex-basis:100%;height:0}
 .pane1.auto-size{overflow-y:auto}
 .pane1.auto-size .thumbgrid{flex:0 0 auto;aspect-ratio:16/9;width:100%;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
