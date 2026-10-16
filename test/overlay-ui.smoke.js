@@ -382,12 +382,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(await row.locator('select').count() === 0, '위치는 채널편집이 아니라 삽입 메뉴에서');
     ok(!(await win.locator('.modal-card.tabbed').innerText()).includes('🎵 배경음악'), '🎵 배경음악은 채널편집에서 빠졌다(삽입 메뉴로)');
     await win.locator('.modal-card.tabbed button:has-text("🎙 음성")').first().click();
-    const rb = win.locator('.modal-card.tabbed button[title="미리듣기 / 멈춤"]').first();
-    await rb.click();
-    await win.waitForFunction(() => { const b = document.querySelector('.modal-card.tabbed button[title="미리듣기 / 멈춤"]'); return b && b.innerText.trim() === '■'; }, null, { timeout: 4000 }).catch(() => {});
-    ok((await rb.innerText()).trim() === '■', '참조음성 ▶ → ■');
-    await rb.click(); await win.waitForTimeout(300);
-    ok((await rb.innerText()).trim() === '▶', '■ → ▶ (멈춤)');
+    // 참조음성 ▶ 미리듣기는 v0.9.6(로이 2026-10-14)부터 「🔊 음성 설정」 창 한 곳 — 채널편집 음성 탭엔 그 창을 여는 단추만
+    ok(await win.locator('.modal-card.tabbed [data-testid=ch-voice-open]').count() === 1, '🎙 음성 탭 = 「🔊 음성 설정에서 바꾸기」(미리듣기는 그 창에서)');
     await win.keyboard.press('Escape');
     ok(errors.length === 0, `화면 오류 0 ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
   } catch (e) {

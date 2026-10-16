@@ -5947,11 +5947,11 @@ export default function App() {
                   <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
                   <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
                   <span className="meta">음량</span>
-                  <input className="nbox" data-testid="bgm-vol" type="number" min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
+                  <input className="nbox" data-testid="bgm-vol" type="number" style={{ width: 44 }} min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
                 </span>
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
-                  <span className="meta">🏷 로고 위치</span>
+                  <span className="meta">🏷 로고</span>
                   <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoPos() ? 'free' : curLogoSide()} onChange={(e) => { if (e.target.value !== 'free') setLogoSide(e.target.value); }}
                     title="↗/↖ = 정해진 자리 · ① 칸에서 로고를 끌면 「✋ 직접 옮김」(이 대본만) — ↗/↖ 를 다시 고르면 제자리">
                     <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option>
@@ -5967,7 +5967,7 @@ export default function App() {
                   <select data-testid="logo-queue" disabled={!loaded || !isLf} value={(() => { const o = curLogoOver(); return !o ? 'chan' : o.on ? 'on' : 'off'; })()}
                     title="🏷 롱폼 큐에 올라온 대본 모두에 로고 넣기·빼기 — 채널 설정(⚙ 채널편집의 로고)은 그대로 · 채널에 로고 그림이 없으면 그림을 고르라고 묻습니다"
                     onChange={(e) => setQueueLogo(e.target.value)}>
-                    <option value="chan">큐 전체: 채널대로</option><option value="on">큐 전체: 로고 넣기</option><option value="off">큐 전체: 로고 빼기</option></select>
+                    <option value="chan">큐: 채널대로</option><option value="on">큐: 로고 넣기</option><option value="off">큐: 로고 빼기</option></select>
                 </span>
               </span>
             )}
