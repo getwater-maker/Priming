@@ -46,11 +46,11 @@ function count(projects, { fromNum = null, toNum = null, sel = '' } = {}) {
 }
 
 // 진행 상태 하나(main 이 들고 있다)를 만들고 단계마다 고친다.
-function create({ title = '', queue = null, skip = {} } = {}) {
+function create({ title = '', queue = null, skip = {}, itemId = null } = {}) {   // itemId = 만드는 작업 순서 항목(작업 순서 줄 상태 · 화면 따라가기 · v0.9.42)
   const now = Date.now();
   const stages = {};
   for (const k of STAGES) stages[k] = { state: skip[k] ? 'skip' : 'wait', note: skip[k] || '', startedAt: null, endedAt: null, doneAtStart: 0 };
-  return { title, queue, phase: 'running', startedAt: now, endedAt: null, stages, outNote: '' };
+  return { title, queue, itemId, phase: 'running', startedAt: now, endedAt: null, stages, outNote: '' };
 }
 
 // 단계 시작·끝 — 시작 때의 완료 수를 적어 둬야 「이번에 만든 속도」로 남은 시간을 셀 수 있다(이어받은 것은 빼고).
@@ -80,7 +80,7 @@ function snapshot(st, projects, range) {
   const now = Date.now();
   const c = count(projects, range);
   return {
-    title: st.title, queue: st.queue, phase: st.phase,
+    title: st.title, queue: st.queue, itemId: st.itemId || null, phase: st.phase,
     startedAt: st.startedAt, endedAt: st.endedAt, now,
     stages: JSON.parse(JSON.stringify(st.stages)),
     outNote: st.outNote || '',

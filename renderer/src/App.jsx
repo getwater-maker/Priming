@@ -706,6 +706,7 @@ export default function App() {
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
+  const [stageRun, setStageRun] = useState(null); // 📋 단계 버튼(runStageQueue)이 지금 만드는 대본·단계 {id, phase} — 작업 순서 줄 표시(v0.9.42)
   const [mp4Prog, setMp4Prog] = useState(null);
   // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
   //   ✗ 실패도 닫는다(이유는 로그창에 남는다) · 닫기 직전 새 작업 소식이 왔으면(객체가 바뀜) 닫지 않는다.
@@ -945,6 +946,7 @@ export default function App() {
     if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) setMakeProg(d); });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
+    if (api.onQueueUpdate) api.onQueueUpdate((q) => { if (q) setQueue(q); });   // 📋 작업 순서 줄(보지 않는 대본 상태 포함)
     if (api.onScriptReloaded) api.onScriptReloaded(() => setReloadTick((t) => t + 1));   // 📄 대본 보기가 새로 그리게
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
@@ -1384,14 +1386,21 @@ export default function App() {
         if (queueStopAfterRef.current) { stoppedAfter = items.length - k; logline(`⏸ 큐 ${plabel} — 이번 편까지만 만들고 멈춥니다 (남은 ${stoppedAfter}편은 건너뜁니다)`); break; }
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
+        setStageRun({ id: it.id, phase: ph });
+        if (ph === phases[0]) { try { await api.queueMark(it.id, 'start'); } catch (_) {} }
         // 🎬 화면(보는 대본)은 바꾸지 않는다 — __item 으로 그 대본의 제작 칸에서 돈다(v0.9.23). 응답 DTO 는 그 대본 것이라 화면에 넣지 않는다(보고 있으면 main 이 밀어 준다).
         try {
-          if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); }
-          if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle }); }
-          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle }); }
+          // 🔀 목소리·배속은 **그 대본 채널**(v0.9.41 — 예전엔 헤더 채널 목소리로 모든 대본을 합성했다) · 그림 스타일은 main 이 같은 규칙(core/queue-channel)으로 정한다
+          const _its = it.settings || {};
+          const _sameCh = !_its.presetName || _its.presetName === presetName;
+          if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: _its.presetName || presetName || null, speed: (_sameCh ? ttsSpeed : (_its.ttsSpeed != null ? _its.ttsSpeed : ttsSpeed)) || null }); }
+          if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
+          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
+        if (ph === phases[phases.length - 1]) { try { await api.queueMark(it.id, 'end'); } catch (_) {} }
       }
     }
+    setStageRun(null);
     try { const r = await api.selectQueueItem(null, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 🎬 지금 보는 대본을 새로 받는다(화면을 옮기지 않는다 — 없는 id = 그대로)
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false);
     setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : stoppedAfter ? `⏸ 큐 ${label} — 이번 편까지 만들고 멈춤 (남은 ${stoppedAfter}편)` : `⚡ 큐 ${label} 완료`);
@@ -3418,18 +3427,8 @@ export default function App() {
   // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
   async function switchModeForChannel(name) {
     restoringItemRef.current = false; // 사용자가 채널을 직접 골랐으니 그 채널 기본값(배속·스타일·AI고지)을 적용
-    // 🔀 채널을 **바꾸면** 롱폼 큐를 비운다(v0.7.26 · 로이) — 같은 채널을 다시 고른 것은 제외 · 작업 중이면 main 이 비우지 않는다
-    //   queueBusy = 큐 순차 제작 중이면 호출하지 않는다(돌던 큐가 사라지지 않게).
-    let clearedN = 0;
-    if (name !== presetName && !queueBusy) {
-      try {
-        const r = await api.clearLongformQueue();
-        if (r && r.ok && r.count) {
-          clearedN = r.count;
-          if (mode === 'longform') { if (r.queue) setQueue(r.queue); setDto(null); setFtitle(''); }
-        } else if (r && r.busy) setStatus('작업이 도는 중이라 대본 큐는 그대로 둡니다');
-      } catch (e) { logline('채널 변경 — 큐 비우기 오류: ' + e.message); }
-    }
+    // 🔀 채널을 바꿔도 작업 순서를 **비우지 않는다**(v0.9.42 · 로이 2026-10-16 「다른 채널 대본도 넣고 순서대로」 — 옛 v0.7.26 「비운다」 폐기).
+    //   그 뒤에 여는 대본이 새 채널로 들어간다 · 이미 든 대본은 자기 채널 그대로(set-queue-settings 가 다른 채널 헤더 값을 그 대본에 쓰지 않는다).
     setPresetName(name);
     setMenu('script');   // 채널을 바꾸면 늘 「대본·음성」부터(로이 2026-09-26)
     try {
@@ -3439,7 +3438,6 @@ export default function App() {
       const sm = (_sm0 === 'book' || _sm0 === 'remotion') ? _sm0 : 'longform';
       await switchMode(sm, { keepChannel: true });   // 🌐 main 의 「보는 세계」도 함께 바꾼다(UI 만 바뀌면 출판 호출이 롱폼 세계로 간다)
     } catch {}
-    if (clearedN) setStatus(`🔀 채널 변경 — 대본 큐 ${clearedN}개를 비웠습니다 (「♻ 지난 큐 다시 열기」로 되살릴 수 있어요)`);
   }
   // 모달 내 참조음성 미리듣기
   // 참조음성 표시 이름 — `srv:<이름>`(서버 공용 라이브러리)은 ☁ 를 붙여 구분한다.
@@ -6020,19 +6018,7 @@ export default function App() {
             </div>
           )}
           {queue && queue[mode] && queue[mode].items.length > 0 && (
-            <div className="qstrip">
-              <span className="qlabel">작업 순서 ({queue[mode].items.length})</span>
-              {queue[mode].items.map((it) => (
-                <div key={it.id}
-                  className={'qchip' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
-                  title={it.file || it.title}
-                  onClick={() => { if (!it.active) selectQueueItem(it.id); }}>
-                  <span className="qttl">{it.title}</span>
-                  <span className="qmeta">{it.projects}편{it.status && it.status !== 'idle' ? ' · ' + (QSTATUS[it.status] || it.status) : ''}</span>
-                  <button className="qx" title="큐에서 제거" onClick={(e) => { e.stopPropagation(); removeQueueItem(it.id); }}>✕</button>
-                </div>
-              ))}
-            </div>
+            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={selectQueueItem} onRemove={removeQueueItem} />
           )}
           {aiPopEl}
           {wsOn && clipTb && !clipTb.hidden && clipTbOk() && (() => {
@@ -7795,6 +7781,61 @@ function fitSentBox(el) {
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 // ⚡ 그룹 하나 — 열쇠(rk)가 같으면 다시 그리지 않는다(Cards 의 cutKey 참고)
 const MemoCut = React.memo(function MemoCut({ render }) { try { window.__pmCutRenders = (window.__pmCutRenders || 0) + 1; } catch (_) {} return render(); }, (a, b) => a.rk === b.rk);   // __pmCutRenders = 다시 그린 그룹 수(테스트가 센다)
+// 📋 작업 순서 — 세로 목록(v0.9.42 · 로이 「앞에 진행 상황 · 파일명은 … · 끝에 구분자 + 총 제작시간」)
+//   한 줄 = [상태 배지들] [채널(섞였을 때)] 파일명… │ ⏱ 제작시간 · ✕
+//   상태: ⚡ 만들기 = main 진행 정보(makeProg.itemId) · 단계 버튼 = stageRun · 그 밖 = 항목 상태 / 업로드 = 항목 upload
+const STAGE_BADGE = { tts: '🎤 TTS', image: '🖼 이미지', video: '🎬 비디오', out: '📦 출력' };
+const UP_BADGE = { queued: ['⬆ 업로드 대기', 'up-wait'], uploading: ['⬆ 업로드 중', 'up-run'], done: ['✅ 업로드 완료', 'up-ok'], failed: ['⚠ 업로드 실패', 'up-bad'] };
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}시간 ${m}분` : m ? `${m}분 ${String(r).padStart(2, '0')}초` : `${r}초`;
+}
+function queueBadges(it, makeProg, stageRun) {
+  const out = [];
+  const live = makeProg && makeProg.itemId === it.id && makeProg.phase === 'running';
+  if (live) {
+    const st = makeProg.stages || {};
+    const cnt = { tts: makeProg.sent, image: makeProg.image, video: makeProg.video };
+    for (const k of ['tts', 'image', 'video', 'out']) if (st[k] && st[k].state === 'run') out.push([STAGE_BADGE[k] + (cnt[k] && cnt[k].total ? ` ${cnt[k].done}/${cnt[k].total}` : ''), 'run']);
+    if (!out.length) out.push(['⚡ 진행중', 'run']);
+  } else if (stageRun && stageRun.id === it.id) out.push([(STAGE_BADGE[stageRun.phase] || stageRun.phase) + ' 진행', 'run']);
+  else if (it.status === 'running') out.push(['⚡ 진행중', 'run']);
+  else if (it.status === 'done') out.push(['✓ 완료', 'ok']);
+  else if (it.status === 'failed') out.push(['✗ 실패', 'bad']);
+  else out.push(['대기', 'idle']);
+  const up = it.upload && UP_BADGE[it.upload.state];
+  if (up) out.push(up);
+  return out;
+}
+function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) {
+  const running = items.some((it) => it.run && it.run.startedAt && !it.run.endedAt);
+  const [, setTick] = useState(0);
+  useEffect(() => { if (!running) return undefined; const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, [running]);
+  const chs = new Set(items.map((it) => (it.settings && it.settings.presetName) || headerCh || ''));
+  const mixed = chs.size > 1;
+  const short = (n) => String(n || '').replace(/^\d+_/, '');
+  return (
+    <div className="qlist" data-testid="q-list">
+      <span className="qlabel">작업 순서 ({items.length}){mixed ? <span className="qmix" title="채널이 섞여 있습니다 — 목소리·스타일·자막·완성 종류는 대본마다 자기 채널, 이미지·비디오 도구는 헤더에서 고른 것"> · 🔀 채널 {chs.size}개</span> : null}</span>
+      <div className="qrows">
+        {items.map((it) => {
+          const ch = (it.settings && it.settings.presetName) || '';
+          const run = it.run && it.run.startedAt ? ((it.run.endedAt || Date.now()) - it.run.startedAt) : null;
+          return (
+            <div key={it.id} data-testid="q-row" className={'qrow' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
+              title={(it.file || it.title) + (ch ? `\n채널: ${ch}` : '') + (it.upload && it.upload.url ? `\n${it.upload.url}` : '') + (it.upload && it.upload.error ? `\n업로드 실패: ${it.upload.error}` : '')}
+              onClick={() => { if (!it.active) onSelect(it.id); }}>
+              <span className="qbadges">{queueBadges(it, makeProg, stageRun).map(([t, c], i) => <span key={i} className={'qb ' + c}>{t}</span>)}</span>
+              {mixed && ch ? <span className={'qch' + (ch === headerCh ? '' : ' other')}>{short(ch)}</span> : null}
+              <span className="qttl">{it.title}</span>
+              <span className="qtime" data-testid="q-time">│ ⏱ {run != null ? fmtDur(run) : '—'}</span>
+              <button className="qx" title="작업 순서에서 빼기" onClick={(e) => { e.stopPropagation(); onRemove(it.id); }}>✕</button>
+            </div>);
+        })}
+      </div>
+    </div>);
+}
 function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;

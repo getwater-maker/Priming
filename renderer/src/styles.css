@@ -1481,3 +1481,30 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .ribbon .combo-btn .cic{font-size:19px}
 .ribbon .combo-btn .cplus{font-size:12px;margin:0 2px}
 .ribbon .combo-btn{min-height:44px}
+
+/* 📋 작업 순서 — 세로 목록(v0.9.42) */
+.qlist{padding:6px 8px;margin-bottom:8px;background:#f3ede3;border:1px solid var(--line);border-radius:8px}
+.qlist .qlabel{display:block;margin:0 0 4px}
+.qlist .qmix{font-weight:600;color:var(--hook)}
+.qrows{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto}
+.qrow{display:flex;align-items:center;gap:6px;padding:3px 8px;background:#fff;border:1px solid var(--line);border-radius:6px;cursor:pointer;min-width:0;font-size:12px;line-height:1.5}
+.qrow:hover{border-color:#c9b48a}
+.qrow.active{background:#fff7e8;border-color:#e0b85a;box-shadow:0 0 0 1px #e0b85a inset;cursor:default}
+.qrow.s-running{border-color:#5a9;background:#eefaf4}
+.qrow.s-failed{border-color:#d66;background:#fdeeee}
+.qrow .qbadges{display:flex;gap:3px;flex:0 0 auto}
+.qb{font-size:11px;padding:0 6px;border-radius:9px;white-space:nowrap;border:1px solid transparent}
+.qb.idle{color:#998;background:#f4f0ea}
+.qb.run{color:#1f6b4c;background:#dff3e8;border-color:#a7d8bf;font-weight:700}
+.qb.ok{color:#5a6b55;background:#eef3ea}
+.qb.bad{color:#a33;background:#fbe3e3}
+.qb.up-wait{color:#7a6a40;background:#f7efd8}
+.qb.up-run{color:#2a5b9a;background:#e1ecfa;font-weight:700}
+.qb.up-ok{color:#1f6b4c;background:#e6f6ee}
+.qb.up-bad{color:#a33;background:#fbe3e3;font-weight:700}
+.qrow .qch{flex:0 0 auto;font-size:11px;color:#7a5a3a;background:#f6efe3;border-radius:4px;padding:0 5px;white-space:nowrap}
+.qrow .qch.other{color:#fff;background:#b9875a}
+.qrow .qttl{flex:1 1 auto;min-width:0;font-weight:600;color:#3a3128;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qrow .qtime{flex:0 0 auto;color:#8a7a5a;white-space:nowrap;font-variant-numeric:tabular-nums}
+.qrow .qx{border:none;background:transparent;color:#b99;cursor:pointer;font-size:12px;padding:0 2px;line-height:1;flex:0 0 auto}
+.qrow .qx:hover{color:#d44}

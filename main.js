@@ -2003,6 +2003,14 @@ function resolveScriptStyle(pr, requested) {
   if (!st) return { id: chFallback, from: 'channel', unknown: ss };
   return { id: st.id, from: 'script', name: st.name };
 }
+// 🔀 단계 버튼(작업 순서 전체 · __item)의 그림 스타일 — 헤더와 다른 채널 대본이면 그 채널 화풍(core/queue-channel 같은 규칙 · v0.9.41)
+//   args.headerPresetName 이 없으면(대본 머리 버튼·옛 호출) 넘어온 styleId 그대로.
+function _stageStyle(args) {
+  const req = args.styleId != null ? args.styleId : null;
+  if (!args.headerPresetName || !args.__item) return req;
+  const ov = require('./core/queue-channel').channelOverrides(S.preset, args.headerPresetName);
+  return 'styleId' in ov ? ov.styleId : req;
+}
 function effStyleId(requested, logf, pr) {
   const p = pr || (S.parsed && S.parsed.projects && S.parsed.projects[0]);
   const r = resolveScriptStyle(p, requested);
@@ -2998,8 +3006,13 @@ function ytLangOf(pr) {
  */
 function enqueueYtUpload(job) {
   ytPending++;
-  if (ytPending > 1) log(`⏳ 유튜브 업로드 대기 — 앞에 ${ytPending - 1}건 (${job.meta.title})`);
-  const run = ytChain.then(() => (job.finishOnly ? runYtFinish(job) : runYtUpload(job))).catch((e) => ({ ok: false, error: e.message })).finally(() => { ytPending--; });
+  if (ytPending > 1) log(`⏳ 유튜브 업로드 대기 — 앞에 ${ytPending - 1}건 (${job.meta ? job.meta.title : job.title})`);   // 🧷 마무리만(finishOnly)은 meta 가 없다
+  // ⬆ 작업 순서 줄의 업로드 상태(v0.9.42) — job.itemId 가 있으면 queued → uploading → done/failed (마무리만은 바꾸지 않는다)
+  const _up = (st, extra = {}) => { if (job.itemId && !job.finishOnly) setItemUpload(job.itemId, { state: st, ...extra }); };
+  _up('queued');
+  const run = ytChain.then(() => { _up('uploading'); return job.finishOnly ? runYtFinish(job) : runYtUpload(job); })
+    .then((r) => { if (r && r.ok) _up('done', { url: r.url || (r.duplicate && r.duplicate.url) || '' }); else if (r && !r.cancelled) _up('failed', { error: String((r && r.error) || '').slice(0, 200) }); else _up('failed', { error: '중단됨' }); return r; })
+    .catch((e) => { _up('failed', { error: e.message }); return { ok: false, error: e.message }; }).finally(() => { ytPending--; });
   ytChain = run;
   return run;
 }
@@ -3210,7 +3223,8 @@ function maybeAutoUpload(pr, file, preset, ctx = null, isVrewMp4 = false) {   //
     enqueueYtUpload({ finishOnly: true, channelId: preset.ytChannelId, videoId: done.videoId, title: done.title || vrewBaseName(pr, ctx), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset) });
     return;
   }
-  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset) });
+  const _ws = WORLD.store && WORLD.store();
+  enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isVrewMp4 ? preset : null), finish: ytFinishJob(ctx || { scriptPath: S.scriptPath }, preset), itemId: (_ws && _ws.item && _ws.item.id) || (activeItem() && activeItem().id) || null });
 }
 // 🏷 ⚙ 유튜브 채널 카드 — 채널 프로필 그림(받아 둔 파일 · 없으면 그 자리에서 받는다 · 채널당 한 번 · 최대 6초 기다림)을 붙인다(v0.9.34).
 ipcMain.handle('yt-status', async () => {
@@ -3341,7 +3355,7 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
         }
         force = true;
       }
-      enqueueYtUpload({ file, channelId: chId, meta: meta1, force, finish: ytFinishJob(ctx, preset) });
+      enqueueYtUpload({ file, channelId: chId, meta: meta1, force, finish: ytFinishJob(ctx, preset), itemId: (activeItem() && activeItem().id) || null });
       n++;
     }
     return { queued: n };
@@ -3352,7 +3366,7 @@ ipcMain.handle('yt-upload-current', async (_e, args = {}) => {
     fileFor: (pr, ctx, preset) => ytFileFor(pr, ctx, preset, isWb),
     exists: (f) => fs.existsSync(f), findUploaded: (ch, f) => YT.findUploaded(ch, f),
   });
-  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx, isWb ? null : j.preset), finish: ytFinishJob(j.ctx, j.preset) });
+  for (const j of jobs) enqueueYtUpload({ file: j.file, channelId: j.channelId, meta: ytMetaFor(j.pr, j.ctx, isWb ? null : j.preset), finish: ytFinishJob(j.ctx, j.preset), itemId: j.itemId || null });
   // 🧷 이미 올린 편은 다시 올리지 않고 마무리(썸네일 A · 재생목록)만 — 빠진 것만 채운다
   for (const f of finishes) enqueueYtUpload({ finishOnly: true, channelId: f.channelId, videoId: f.videoId, title: f.title, finish: ytFinishJob(f.ctx, f.preset) });
   log(`⬆ 큐 전체 업로드 — ${jobs.length}편 줄 세움${skipped.length ? ` · 건너뜀 ${skipped.length}편` : ''}`);
@@ -3380,7 +3394,7 @@ function planQueueUploads(items, o) {
       if (jobs.some((j) => j.channelId === chId && j.file === file)) continue;   // 같은 대본이 큐에 두 번
       const done = o.findUploaded(chId, file);
       if (done) { skipped.push(`${name} — ${done.at} 에 이미 올림 (https://youtu.be/${done.videoId}) → 마무리만`); finishes.push({ ctx, channelId: chId, preset, videoId: done.videoId, title: done.title || name }); continue; }
-      jobs.push({ pr, ctx, file, channelId: chId, preset });
+      jobs.push({ pr, ctx, file, channelId: chId, preset, itemId: it.id });
     }
   }
   return { jobs, skipped, finishes };
@@ -4954,6 +4968,28 @@ function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
   return n;
 }
 // 모드별 큐(적재된 대본 목록) 메타데이터 — 렌더러 큐 UI 용. 매 DTO 갱신에 첨부.
+// ⏱⬆ 작업 순서 줄 정보(v0.9.42) — 제작 시작·끝 · 업로드 상태. 다시 켜면 끝나지 않은 것은 정리한다(돌던 제작·업로드는 이어지지 않는다).
+function restoreRunInfo(wi) {
+  const run = wi && wi.run && wi.run.startedAt ? { startedAt: wi.run.startedAt, endedAt: wi.run.endedAt || null } : null;
+  if (run && !run.endedAt) run.endedAt = null;
+  const up = wi && wi.upload && (wi.upload.state === 'done' || wi.upload.state === 'failed') ? wi.upload : null;
+  return { run: run && run.endedAt ? run : null, upload: up };
+}
+function findQueueItem(id) { for (const m of ['longform', 'book']) { const it = (S.modes[m].items || []).find((x) => x.id === id); if (it) return it; } return null; }
+// 📋 작업 순서 줄만 화면에 — DTO 는 보는 대본만 밀지만(pushDtoUpdate) 줄 상태는 어느 대본이든 보여야 한다
+function pushQueueUpdate() { try { if (win && !win.isDestroyed()) win.webContents.send('queue-update', queueDTO()); } catch (_) {} }
+function markItemRun(it, phase) {
+  if (!it) return;
+  if (phase === 'start') it.run = { startedAt: Date.now(), endedAt: null };
+  else if (it.run) it.run.endedAt = Date.now();
+  writeWorkspace(); pushQueueUpdate();
+}
+function setItemUpload(itemId, up) {
+  const it = itemId ? findQueueItem(itemId) : null;
+  if (!it) return;
+  it.upload = up; writeWorkspace(); pushQueueUpdate();
+}
+ipcMain.handle('queue-mark', (_e, { id, phase } = {}) => { markItemRun(findQueueItem(id), phase === 'end' ? 'end' : 'start'); return { queue: queueDTO() }; });   // 단계 버튼(runStageQueue)이 대본마다 시작·끝을 알린다
 function queueDTO() {
   const mk = (mode) => {
     const q = S.modes[mode];
@@ -4966,6 +5002,8 @@ function queueDTO() {
         projects: (it.parsed && (it.parsed.projects ? it.parsed.projects.length
           : it.parsed.parts ? it.parsed.parts.reduce((n, p) => n + p.chapters.length, 0) : 0)) || 0,
         status: it.status || 'idle',
+        run: it.run || null,         // ⏱ 마지막 제작 시작·끝(작업 순서 줄 「│ 제작시간」 · v0.9.42)
+        upload: it.upload || null,   // ⬆ 업로드 상태 {state: queued|uploading|done|failed, url}
         settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
         ttsVoice: (it.parsed && it.parsed.projects && it.parsed.projects[0] && it.parsed.projects[0].ttsVoice) || null,   // 🎙 대본 목소리(v0.6.83)
         active: it.id === q.activeId,
@@ -5246,8 +5284,8 @@ async function autoFillPrompts(projects, logger) {
 }
 
 ipcMain.handle('image-build', (_e, args = {}) => {
-  const { shortsNum = null, engine = 'genspark', styleId: _styleArg = null } = args;
-  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
+  const { shortsNum = null, engine = 'genspark' } = args;
+  const styleId = effStyleId(_stageStyle(args));   // 🎨 대본 화풍 우선 · 🔀 다른 채널 대본이면 그 채널 화풍
   // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
   return enqueueImageJob(shortsNum ? `${shortsNum}편 이미지 생성` : '이미지 전체 생성', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -5568,8 +5606,8 @@ function rangeNums(project, fromNum, toNum, sel = null) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null, gensparkVideoModel = null } = args;
-  const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
+  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', gensparkVideoModel = null } = args;
+  const styleId = effStyleId(_stageStyle(args));   // 🎨 대본 화풍 우선 · 🔀 다른 채널 대본이면 그 채널 화풍
   let { fromNum = null, toNum = null } = args;
   let vidSel = VSel.normSel(args.vidSel);
   // 큐 전체(상단 🎬) = perItem — 그 대본에 저장된 범위(없으면 도입부)를 쓴다. 헤더 값 하나로 모든 대본을 덮지 않는다(v0.5.73).
@@ -7124,7 +7162,7 @@ function workspaceFile() { return path.join(workspaceDir(), 'workspace.json'); }
 function serializeQueue() {
   const ser = (mode) => {
     const q = S.modes[mode];
-    return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
+    return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle', run: it.run || null, upload: it.upload || null })) };
   };
   return { version: 1, mode: S.mode, longform: ser('longform'), book: ser('book') };
 }
@@ -7164,7 +7202,7 @@ function applyWorkspace(ws, opts = {}) {
           for (const pr of parsed.projects) pr.mode = mode;
           const outRoot = computeOutRoot(wi.scriptPath, preset, mode);
           const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot, settings: wi.settings || null,
-            status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) }; // 중단된 running 은 idle 로
+            status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')), ...restoreRunInfo(wi) }; // 중단된 running 은 idle 로
           q.items.push(it); restored++;
           if (wi.id === wq.activeId) activeNewId = it.id;
         } catch (e) { log(`큐 항목 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
@@ -7186,7 +7224,7 @@ function applyWorkspace(ws, opts = {}) {
           const folderKey = parsed.meta.title || path.basename(paths[0]).replace(/\.md$/i, '');
           attachWorkCover(parsed, paths[0], wi.settings && wi.settings.book && wi.settings.book.coverImage);
           const it = { id: newItemId(), parsed, scriptPath: paths[0], outRoot: bookOutRoot(folderKey + '.md', S.preset, paths[0]),
-            settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
+            settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')), ...restoreRunInfo(wi) };
           q.items.push(it); restored++;
           if (wi.id === ws.book.activeId) activeNewId = it.id;
         } catch (e) { log(`출판 복원 실패(${path.basename(paths[0])}): ${e.message}`); }
@@ -7645,7 +7683,8 @@ let _mk = null;
 let _mkQueuePos = null;   // run-batch 가 { idx, total } 을 적는다(단건 제작이면 null)
 function _mkStart(projects, range, title, skip) {
   const MP = require('./core/make-progress');
-  const st = MP.create({ title, queue: _mkQueuePos, skip });
+  const _wst = WORLD.store && WORLD.store();
+  const st = MP.create({ title, queue: _mkQueuePos, skip, itemId: (_wst && _wst.item && _wst.item.id) || (activeItem() && activeItem().id) || null });
   const send = () => { try { if (win && !win.isDestroyed()) win.webContents.send('make-progress', MP.snapshot(st, projects, range)); } catch {} };
   const timer = setInterval(send, 1000);
   send();
@@ -8083,6 +8122,8 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   _mp4DupAll = null;                         // 지난 큐의 「이번 큐 나머지도 같게」 선택이 남지 않게
   _stopAfterItem = false;                    // 지난 큐의 「이번 편까지만」 예약이 남아 새 큐가 첫 편 뒤에 멈추지 않게
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
+  { const _mix = require('./core/queue-channel').channelMix(plan.map((e) => S.modes.longform.items.find((x) => x.id === e.id)).filter(Boolean), common.presetName);
+    if (_mix.mixed) log(`🔀 채널 섞임 — ${_mix.counts.map(([n, k]) => `${n} ${k}편`).join(' · ')} (목소리·스타일·자막·완성 종류는 대본마다 자기 채널 · 이미지·비디오 도구는 헤더)`); }
   let okN = 0, failN = 0, skipN = 0, stoppedLeft = 0;
   for (let i = 0; i < plan.length; i++) {
     if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
@@ -8102,7 +8143,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     if (it.status === 'done') { skipN++; log(`⏭ [${i + 1}/${plan.length}] 이미 완료 — 건너뜀: ${path.basename(it.scriptPath || '') || it.id}`); continue; }
     // 🎬 화면(activeId)은 바꾸지 않는다 — 이 대본은 제작 칸(makeRun)에서 만들고, 사람은 다른 대본을 보고 고칠 수 있다(v0.9.23 · 로이 2026-10-15)
     if (!it.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
-    it.status = 'running'; pushDtoUpdate();
+    it.status = 'running'; markItemRun(it, 'start'); pushDtoUpdate();
     const label = (it.parsed.fileTitle) || (it.scriptPath || '');
     log(`▶ [${i + 1}/${plan.length}] 롱폼 · ${label}`);
     _mkQueuePos = { idx: i + 1, total: plan.length };
@@ -8123,6 +8164,9 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
       const _pn = s.presetName || common.presetName || null;
       if (!s.presetName && common.presetName) log(`  ⓘ 이 대본에 채널이 저장돼 있지 않아 헤더 채널 「${common.presetName}」 을 씁니다`);
       if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
+      // 🔀 다른 채널 대본 = 그림 스타일·자막·완성 종류도 그 채널(v0.9.41 · core/queue-channel 한 곳) — 헤더와 같은 채널이면 {}
+      const _ov = require('./core/queue-channel').channelOverrides(_pn ? resolvePreset(_pn) : null, common.presetName);
+      if (Object.keys(_ov).length) log(`  🔀 채널 「${_pn}」 대본 — 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || '(헤더)'} (그 채널 설정)`);
       const _rg = _itemRange(s, it.parsed);
       if (ve !== 'none') log(`  🎬 영상 범위 G${_rg.fromNum}~G${_rg.toNum} (${_rg.src})`);
       await makeRun(it, () => runMakeAllCore({   // 🎬 제작 칸 — 화면은 사람이 고른 대본에 그대로 둔다
@@ -8130,25 +8174,25 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         speed: (s.ttsSpeed != null ? s.ttsSpeed : (common.ttsSpeed != null ? common.ttsSpeed : null)),
         // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
         //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
-        styleId: (common.styleId != null ? common.styleId : (s.styleId || null)),
+        styleId: ('styleId' in _ov ? _ov.styleId : (common.styleId != null ? common.styleId : (s.styleId || null))),
         // ⚠ 영상 범위 = **대본마다 자기 범위**(_itemRange) — 헤더 범위를 모든 대본에 덮지 않는다(v0.5.73).
         fromNum: _rg.fromNum, toNum: _rg.toNum, vidSel: _rg.sel || '',
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         // 🎛 Genspark 비디오 모델도 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
         gensparkVideoModel: common.gensparkVideoModel || s.gensparkVideoModel || null,
-        captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
+        captionStyle: ('captionStyle' in _ov ? _ov.captionStyle : (common.captionStyle || null)), captionMaxChars: (_ov.captionMaxChars || common.captionMaxChars || 7),
         aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
         // ⚠ 출력 방식은 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
         outMode: (common.outMode != null ? common.outMode : (s.outMode || 'full')),
         // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
-        outTarget: (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew')),
+        outTarget: (_ov.outTarget || (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew'))),
         dry: !!(process.env.PM_UI_SMOKE && common.dry), openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음 · dry(무음)는 E2E 전용(test:makeview)
         uploadAfter: (common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null,   // ⬆ 헤더 「완성 후 업로드」
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
       }));
-      it.status = 'done'; okN++;
+      it.status = 'done'; okN++; markItemRun(it, 'end');
     } catch (e) {
-      it.status = 'failed'; failN++;
+      it.status = 'failed'; failN++; markItemRun(it, 'end');   // markItemRun 이 작업 순서 줄을 밀어 준다
       log(`✗ 실패: ${label} — ${e.message} (다음 대본 계속)`);
     }
     pushDtoUpdate();
@@ -8328,6 +8372,9 @@ ipcMain.handle('set-queue-settings', (_e, args = {}) => {
     // keepChannel: 채널(presetName)은 '대본 열 때' 확정된 값 유지 — 디바운스 자동저장이 헤더의
     //   (다음 대본용으로 바뀐) 채널을 이 항목에 덮어써서 목소리가 뒤섞이던 버그 방지. 배속·스타일 등만 갱신.
     if (args && args.keepChannel && ns && it.settings && it.settings.presetName) {
+      // 🔀 헤더가 **다른 채널**이면(채널 섞기 · v0.9.42) 그 채널의 배속·스타일 등을 이 대본에 쓰지 않는다 — 헤더를 바꿔 새 대본을 열려는 중이다.
+      //   이 대본 칩을 누르면 헤더가 이 대본 채널로 돌아오고, 그때부터 다시 저장된다.
+      if (ns.presetName && ns.presetName !== it.settings.presetName) return true;
       ns = { ...ns, presetName: it.settings.presetName };
     }
     it.settings = ns; scheduleAutoSave(); writeWorkspace();

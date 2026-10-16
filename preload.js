@@ -334,6 +334,8 @@ contextBridge.exposeInMainWorld('api', {
   ytdlpUpdate: () => ipcRenderer.invoke('ytdlp-update'),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),
   onDtoUpdate: (cb) => ipcRenderer.on('dto-update', (_e, dto) => cb(dto)),
+  onQueueUpdate: (cb) => ipcRenderer.on('queue-update', (_e, q) => cb(q)),   // 📋 작업 순서 줄만(보지 않는 대본의 상태·시간·업로드 · v0.9.42)
+  queueMark: (id, phase) => ipcRenderer.invoke('queue-mark', { id, phase }),
   onScriptReloaded: (cb) => ipcRenderer.on('script-reloaded', (_e, d) => cb(d)),
   onAutosaved: (cb) => ipcRenderer.on('autosaved', (_e, info) => cb(info)),
 });

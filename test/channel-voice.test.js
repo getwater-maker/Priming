@@ -255,5 +255,23 @@ console.log('[10] 소스 위생');
   ok(MAIN.indexOf('\u0000') < 0, 'ⓑ main.js 에 NUL 없음');
 }
 
+// 🔀 작업 순서 채널 섞기(v0.9.42) — 헤더와 같은 채널 = {} · 다른 채널 = 그 채널의 스타일·자막·글자 수·완성 종류
+{
+  const QC = require(path.join(__dirname, '..', 'core', 'queue-channel.js'));
+  const B = { name: '서재', styleLong: 'oil', capLong: { size: 90, yAlign: 'bottom' }, split: { longLen: 14 }, outTarget: 'mp4' };
+  ok(JSON.stringify(QC.channelOverrides(B, '서재')) === '{}', 'ⓠ 헤더와 같은 채널 → {}(예전 그대로)');
+  const o = QC.channelOverrides(B, '성경');
+  ok(o.styleId === 'oil' && o.captionStyle.size === 90 && o.captionMaxChars === 14 && o.outTarget === 'mp4', 'ⓠ 다른 채널 → 그 채널 스타일·자막·글자 수·완성 종류');
+  ok(QC.channelOverrides({ ...B, outTarget: 'weird', split: {} }, '성경').outTarget === 'vrew' && QC.channelOverrides({ ...B, split: {} }, '성경').captionMaxChars === 20, 'ⓠ 모르는 완성 종류 = vrew · 글자 수 없음 = 20(헤더 기본과 같다)');
+  ok(QC.channelOverrides({ ...B, capLong: null }, '성경').captionStyle === null, 'ⓠ 채널 자막 모양이 없으면 null(채널 captionStyle 폴백)');
+  ok(QC.channelOverrides({ ...B, styleLong: 'ink' }, '성경').styleId === 'ink', 'ⓠ 판정력: 채널 값을 바꾸면 결과도 바뀐다');
+  const mix = QC.channelMix([{ settings: { presetName: '서재' } }, { settings: { presetName: '성경' } }, { settings: null }], '서재');
+  ok(mix.mixed && JSON.stringify(mix.counts) === JSON.stringify([['서재', 2], ['성경', 1]]), 'ⓠ 채널 분포 — 채널 없는 항목은 헤더 채널로 센다');
+  ok(/const _ov = require\('\.\/core\/queue-channel'\)\.channelOverrides\(_pn \? resolvePreset\(_pn\) : null, common\.presetName\)/.test(MAIN)
+    && /styleId: \('styleId' in _ov \?/.test(MAIN) && /captionStyle: \('captionStyle' in _ov \?/.test(MAIN) && /outTarget: \(_ov\.outTarget \|\|/.test(MAIN), 'ⓠ run-batch 가 대본마다 같은 규칙을 쓴다');
+  ok(/presetName: _its\.presetName \|\| presetName \|\| null/.test(APP), 'ⓠ 단계 버튼 TTS = 그 대본 채널 목소리(옛: 헤더 채널로 모든 대본 합성)');
+  ok(/headerPresetName: presetName \|\| null/.test(APP) && /function _stageStyle\(args\)/.test(MAIN), 'ⓠ 단계 버튼 이미지·비디오 = main _stageStyle 이 같은 규칙');
+}
+
 console.log('\n' + (bad ? `❌ ${bad}/${n} 실패` : `✅ ${n}/${n} 통과`));
 process.exit(bad ? 1 : 0);

@@ -37,8 +37,8 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 마당', '', ...Array.from({ lengt
     await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
     await win.evaluate(async () => { const r = await window.api.selectQueueItem('__x__', 'longform'); return r; });
     // 큐 칩을 눌러 화면에 그 대본을 띄운다(앱 버튼과 같은 경로)
-    await win.waitForSelector('.qchip', { timeout: 10000 });
-    await win.click('.qchip');
+    await win.waitForSelector('[data-testid="q-row"]', { timeout: 10000 });   // v0.9.42 세로 목록(옛 .qchip)
+    await win.click('[data-testid="q-row"]');
     await win.waitForSelector('[data-testid="rail"]', { timeout: 15000 });
     await sleep(600);
     const s1 = await win.evaluate(() => ({ rails: [...document.querySelectorAll('[data-testid="rail"]')].map((r) => +r.getAttribute('data-g')), cuts: document.querySelectorAll('.cut').length }));

@@ -67,7 +67,7 @@
 - `~/.shots-maker/` 앱 상태(logs · tts-cache · electron userData · anti-detect) · `~/.priming-maker/` 설정(projects/*.smproj.json = **작업본, ⛔ 지우지 말 것** · comfy-*-config · *-accounts · image-rotation · youtube-auth · workspace.json) · `~/.flow-app/` TTS 채널·참조음성·스타일(`tts-presets.json`·`styles.json`·`channel-styles.json`).
 - 📁 **「대본 PDF」·「URL 받기」 폴더는 모든 채널 공통**(⚙ 설정 → 📁 폴더 · `~/.priming-maker/app-folders.json` · main `appFolder(kind)` 한 곳 · v0.9.16) — ⛔ 채널 `outReader`·`downloadFolder` 를 다시 읽지 않는다. 🖼 같은 곳의 「썸네일」 폴더(`thumbs` · 비우면 `D:\## 아도나이로이\99_썸네일` 이 있을 때만)를 로그 상자 🖼 탭이 `core/thumb-find` 로 읽기만 한다(v0.9.24 · `test:thumbs`).
 - 작업본(.smproj) 키 = **대본 파일명**(경로 아님). 대본을 옮겨도 이름이 같으면 이어받는다.
-- ⛔ **시작은 빈 화면**(로이 2026-06-22 — 큐 자동 복원 안 함). 지난 큐는 `workspace.last.json`(대본이 있을 때만 씀 · 빈 큐로 덮지 않음) → 큐 자리 「♻ 지난 큐 다시 열기」. 🔀 **헤더 채널을 바꾸면 롱폼 큐를 비운다**(v0.7.37 · 로이 — 같은 채널 재선택·작업 중(`_awake.n`)·큐 순차 제작 중에는 안 비움 · 비우기 전 last 갱신 → ♻ 로 되살림 · `clear-longform-queue` · `test:chqueue`).
+- ⛔ **시작은 빈 화면**(로이 2026-06-22 — 큐 자동 복원 안 함). 지난 큐는 `workspace.last.json`(대본이 있을 때만 씀 · 빈 큐로 덮지 않음) → 큐 자리 「♻ 지난 큐 다시 열기」. 🔀 **헤더 채널을 바꿔도 작업 순서(롱폼 큐)를 비우지 않는다 — 채널이 섞인 큐**(v0.9.42 · 로이 2026-10-16 · 옛 v0.7.37 「비운다」 폐기): 그 뒤에 여는 대본이 새 채널로 들어가고, 헤더가 다른 채널일 때는 `set-queue-settings` 가 그 값을 다른 채널 대본에 쓰지 않는다 · `test:chqueue`.
 - 🛡 **E2E(`PM_UI_SMOKE=1`)의 큐 파일(workspace·last·saves)은 `%TEMP%\priming-smoke-workspace` 로 간다**(`workspaceDir()` · v0.6.59 — 새 E2E 는 반드시 `PM_UI_SMOKE` 를 켤 것). 🧪 **E2E 의 Electron 저장 공간(userData·localStorage)은 `%TEMP%priming-smoke-electron`**(bootstrap.js · v0.6.81) → **로이 앱을 켜 둔 채로 E2E 를 돌릴 수 있다**. ⚠ `~/.flow-app`(채널 목록 등)·`~/.priming-maker` 설정 파일은 여전히 같이 쓴다 — 임시 채널(`__…`)·임시 출력폴더를 쓰고 지운다.
 
 ## 5. 외부 서버 (메인 PC)
@@ -90,6 +90,7 @@
 - **큐(여러 대본) 설정 우선순위** — 헤더(공통)가 이기는 것과 항목이 이기는 것이 다르다:
   - 헤더 우선: 이미지·비디오 **도구**, 이미지 **스타일**, 출력 방식, 완성물 종류, Genspark 비디오 모델, 자막 서식.
   - 항목 우선(없으면 헤더 폴백): **채널**(없으면 헤더 채널 — ⛔ 기본 채널로 조용히 떨어지지 않게), 배속, AI 고지.
+  - 🔀 **헤더와 다른 채널 대본 = 그림 스타일·자막 모양·자막 글자 수·완성 종류도 그 채널**(v0.9.42 · `core/queue-channel.channelOverrides` 한 곳 · 같은 채널이면 `{}` = 위 규칙 그대로) — ⚡ 만들기(run-batch)·단계 버튼(`_stageStyle`) 모두 · 이미지·비디오 **도구**는 헤더 하나 · 단계 버튼 TTS 는 그 대본 채널 목소리.
   - **영상 범위 = 대본마다 자기 범위**(`_itemRange`: 저장값 → 그 대본 도입부 끝 → G1). ⛔ 「미지정 = 전체 그룹」 금지(47개 영상 비용 사고). 큐 전체에 같은 범위는 ③ 비디오 「모두 적용」(`apply-range-all` — 누를 때만 · 확인창)으로만.
   - 대본을 열 때 헤더 채널을 그 항목에 박는다(`addItem` 은 settings **병합**). 🔴 모드·엔진 값 **정규화 함수가 선택을 조용히 되돌린 사고가 여러 번** 있었다 — 값을 추가하면 정규화하는 곳(App.jsx 2~4곳 + main run-batch)을 전부 grep.
 - 🎬 **영상 만들 그룹 = 범위(N~M) 또는 방식(`vidSel`: 도입부 전체·도입부 홀수·도입부 1번+짝수(항상 1번 포함) · **직접 입력 `list:1,2,5,7` = 적은 번호 그대로**, 빈 입력 = 0개 · 헤더에 N~M 칸은 없다 · 기본 = 도입부 전체 · 우선순위 대본 > 채널 > 도입부 · 옛 vidFrom/vidTo 는 읽지 않는다)**(v0.6.60 · `core/video-select` 한 곳 · 채널 `vidSel` 이 헤더 기본값). 영상 대상을 세는 새 경로는 `rangeNums`/`matcher` 를 거칠 것(범위 직접 비교 금지).
