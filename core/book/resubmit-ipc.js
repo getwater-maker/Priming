@@ -13,7 +13,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   const editionOf = a => a.edition === 'ebook' ? 'ebook' : 'print';
   function jobFor(c, ed) { const j = (client.load().jobs || {})[key(c, ed)]; return j && j.email === client.status().email ? j : null; }
   function saveJob(c, ed, j) { const db = client.load(); db.jobs = db.jobs || {}; db.jobs[key(c, ed)] = j; client.save(db); }
-  const deliveryKey = (j, ed) => hash(j.email + '\n' + j.original.id + '\n' + ed);
+  // round = 「다시 보내기」 회차 — 같은 업체 메일에 고친 파일을 한 번 더 회신할 때만 새 열쇠(중복 발송 방지는 회차마다)
+  const deliveryKey = (j, ed) => hash(j.email + '\n' + j.original.id + '\n' + ed + (j.round ? '\n' + j.round : ''));
   function delivery(j, ed, state) { const db = client.load(); db.deliveries = db.deliveries || {}; if (state) { db.deliveries[deliveryKey(j, ed)] = state; client.save(db); } return db.deliveries[deliveryKey(j, ed)]; }
   function publicJob(j) { return j ? { original: j.original, values: j.values, state: j.state, draftId: j.draftId, to: j.to, body: j.body, files: (j.files || []).map(f => ({ name: f.name, bytes: f.bytes })), sentAt: j.sentAt, note: j.note } : null; }
   // 판권 값 쓰기 — ISBN 은 메일의 하이픈 꼴 그대로 · 이미 같은 글이면 다시 쓰지 않는다(원고 수정 시각이 바뀌어 방금 만든 PDF 가 「원고보다 오래됨」으로 뜬다)
@@ -53,7 +54,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     const original = M.message(await client.api('messages/' + encodeURIComponent(String(a.id)) + '?format=full'));
     same(c);
     if (M.address(original.from) === client.status().email.toLowerCase()) throw Error('업체에서 받은 메일을 선택하세요');
-    const j = { email: client.status().email, original, values: M.extract(original.text), state: 'linked' };
+    const j = { email: client.status().email, original, values: M.extract(original.text), state: 'linked', ...(a.round ? { round: String(a.round) } : {}) };
     if (delivery(j, ed)) throw Error('이 메일은 이미 발송했거나 결과 확인이 필요합니다. 기존 기록에서 보낸편지함을 대조하세요');
     if (old && old.original.id === original.id && old.state === 'draft') return { job: publicJob(old) };
     saveJob(c, ed, j); return { job: publicJob(j) };
@@ -130,6 +131,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   //   정규식과 Claude 값이 어긋나거나, 이미 회신한 메일이면 그 판은 보내지 않고 이유를 알린다.
   const AUTO_KINDS = { print: ['interiorPdf'], ebook: ['ebookPdf'] };
   const AUTO_BODY = '안녕하세요.\n\n판권지 정보 수정하여 원고파일 전달합니다.\n\n감사합니다.';
+  const RESEND_BODY = '안녕하세요.\n\n앞서 보내드린 파일의 판권지 ISBN 표기(하이픈)를 바로잡아 다시 보내드립니다.\n이 파일로 확인 부탁드립니다.\n\n감사합니다.';
   async function review(msg, title, x) {
     const plain = M.plainRequest(msg.text);
     if (!ask) return plain.ok ? { ok: true, by: '정형 문구' } : { ok: false, why: '정형 문구 밖의 요청이 있습니다: ' + plain.odd.slice(0, 2).join(' / ') };
@@ -153,13 +155,14 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     const r = await client.api('messages?' + new URLSearchParams({ q: 'from:bookk.co.kr 판권지수정요청 newer_than:60d -in:sent -in:drafts', maxResults: '30' }));
     const all = await Promise.all((r.messages || []).map(async m => M.message(await client.api('messages/' + encodeURIComponent(m.id) + '?format=full'))));
     same(c);
-    const results = [], ready = [];
+    const results = [], ready = [], round = a.resend ? 'resend-' + Date.now() : '';
     for (const ed of ['print', 'ebook']) {
       const label = ed === 'ebook' ? '전자책' : '종이책';
       const msg = all.filter(m => { const q = M.requestOf(m.subject, title); return q && q.edition === ed; }).sort((x, y) => y.at - x.at)[0];
       if (!msg) { results.push({ edition: ed, label, state: 'none', note: `「${title}」 ${label} 판권지 수정 요청 메일이 없습니다` }); continue; }
       const th = await client.api('threads/' + encodeURIComponent(msg.threadId) + '?format=minimal');
-      if ((th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
+      // 🔁 resend = 로이가 「다시 보내기」를 누른 때만 — 이미 회신한 메일에도 고친 파일을 한 번 더 보낸다
+      if (!a.resend && (th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
       const x = M.extract(msg.text);
       if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
@@ -175,8 +178,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     for (const { ed, msg, x, res } of ready) {
       try {
         const old = jobFor(c, ed);
-        if (!(old && old.original.id === msg.id && old.state === 'draft')) await doLink({ ...a, edition: ed, id: msg.id });
-        const p = await doPrepare({ ...a, edition: ed, isbn: x.isbnText || x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: AUTO_BODY });
+        if (a.resend || !(old && old.original.id === msg.id && old.state === 'draft')) await doLink({ ...a, edition: ed, id: msg.id, round: a.resend ? round : '' });
+        const p = await doPrepare({ ...a, edition: ed, isbn: x.isbnText || x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: a.resend ? RESEND_BODY : AUTO_BODY });
         const sn = await doSend({ ...a, edition: ed, draftId: p.job.draftId });
         res.state = sn.job.state;
         res.note = sn.job.state === 'sent' ? `발송 완료 → ${sn.job.to} (${sn.job.files.map(f => f.name).join(', ')})` : (sn.job.note || '발송 결과 확인 필요');

@@ -35,17 +35,19 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('.bkwrap', { timeout: 10000 });
 
     await win.click('[data-tab=bookk]');
-    await win.waitForSelector('[data-testid=rg-box]', { timeout: 10000 });
-    ok(await win.locator('[data-testid=rg-box]').count() === 1, '📤 부크크 등록 탭 발행일·ISBN 네 칸');
+    // 📐 v0.9.55 넓은 패널 — 발행일·ISBN 은 📕 종이책 | 📘 전자책 두 칸에 나뉜다
+    await win.waitForSelector('[data-testid=rg-box-print]', { timeout: 10000 });
+    ok(await win.locator('[data-testid=rg-box-print]').count() === 1 && await win.locator('[data-testid=rg-box-ebook]').count() === 1, '📤 등록 탭 발행일·ISBN = 종이책 칸 · 전자책 칸');
     const sections = await win.evaluate(() => {
       const y = (sel) => document.querySelector(sel).getBoundingClientRect().top;
-      return { build: y('[data-testid=bk-build-both]'), folder: y('[data-testid=bk-open-output]'), auto: y('[data-testid=bk-auto]'), isbn: y('[data-testid=rg-box]'), files: document.querySelectorAll('.bkreg .bkfile').length };
+      return { build: y('[data-testid=bk-build-both]'), folder: y('[data-testid=bk-open-output]'), auto: y('[data-testid=bk-auto]'), isbn: y('[data-testid=rg-box-print]'), files: document.querySelectorAll('.bkreg .bkfile').length };
     });
-    ok(sections.build < sections.folder && sections.folder < sections.auto && sections.auto < sections.isbn, '만들기·폴더 버튼 → 자동입력 → 발행일·ISBN 순서');
+    ok(sections.folder < sections.build && sections.build < sections.auto && sections.auto < sections.isbn, '만들기 카드(제목 줄에 폴더) → 판별 카드(발행일·ISBN·자동 입력) 순서');
     ok(sections.files === 0, '등록 탭 완성파일 목록 제거');
     for (const k of ['ebookIsbn', 'isbn', 'issueDate', 'ebookIssueDate']) ok(await win.locator('[data-testid=rg-' + k + ']').count() === 1, '칸: ' + k);
-    ok(await win.locator('[data-testid=rg-box] .bkisbn-grid').count() === 0, '옛 격자 상자는 없다');
-    { const ys = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect().top)); ok(ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3], '순서: 종이책 발행일 → 종이책 ISBN → 전자책 발행일 → 전자책 ISBN (2026-10-13 로이)'); }
+    ok(await win.locator('.bkreg .bkisbn-grid').count() === 0, '옛 격자 상자는 없다');
+    { const b = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => { const r = document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect(); return { t: r.top, l: r.left }; }));
+      ok(b[0].t < b[1].t && b[2].t < b[3].t && Math.abs(b[0].t - b[2].t) < 2 && b[0].l < b[2].l, '순서: 종이책 칸(발행일 → ISBN) 왼쪽 · 전자책 칸(발행일 → ISBN) 오른쪽 같은 높이'); }
     ok(await win.locator('[data-testid=rg-ebook-fallback]').count() === 1, '전자책 칸이 비면 「종이책 값이 실린다」 안내');
     ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '기존 발행일이 칸에 보인다');
 

@@ -92,7 +92,7 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     const mails = [bk('p4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_종이책]', T('979-11-12-32516-7', '2026년 10월 16일'), 1792151859000),
       bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
       bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
-    async function runAuto({ askFn, replied = [] } = {}) {
+    async function runAuto({ askFn, replied = [], resend = false, twice = false } = {}) {
       const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}; let metaWrites = 0;
       const cc = { scriptPath: 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
       const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
@@ -112,7 +112,8 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
         // 실제 빌더처럼 판마다 자기 파일만 쓴다(전자책 빌드는 종이책 내지를 건드리지 않는다)
         build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, '%PDF-' + a.edition); return own; },
         ask: askFn, client: { status: () => ({ connected: true, email: 'getwater@gmail.com' }), load: () => structuredClone(d), save: x => Object.assign(d, structuredClone(x)), api } });
-      const r = await h['book-mail-auto'](null, {});
+      let r = await h['book-mail-auto'](null, {});
+      if (twice) r = await h['book-mail-auto'](null, { resend });
       return { r, cc, sent, built, metaWrites };
     }
     const att = raw => [...raw.matchAll(/filename\*=UTF-8''([^\r\n]+)/g)].map(m => decodeURIComponent(m[1]));
@@ -129,6 +130,13 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     assert.match(A.sent[0], /To: info@bookk.co.kr/); assert.match(A.sent[0], /In-Reply-To: <p4@bookk.co.kr>/); assert.match(A.sent[1], /In-Reply-To: <e4@bookk.co.kr>/);
     A = await runAuto({ replied: ['p4'] });
     assert.equal(A.r.results[0].state, 'done'); assert.deepEqual(A.built, ['ebook']); assert.equal(A.sent.length, 1);
+    // 🔁 다시 보내기 — 이미 회신한 두 메일에 고친 파일을 한 번 더(새 회차) · 본문은 「바로잡아 다시 보내드립니다」
+    A = await runAuto({ replied: ['p4', 'e4'], resend: true, twice: true });
+    assert.deepEqual(A.r.results.map(x => x.state), ['sent', 'sent'], JSON.stringify(A.r.results)); assert.equal(A.sent.length, 2);
+    const bodyOf = raw => { const m = raw.match(/charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+?)\r\n--/); return m ? Buffer.from(m[1].replace(/\r\n/g, ''), 'base64').toString() : ''; };
+    assert.ok(A.sent.every(raw => bodyOf(raw).includes('바로잡아 다시')), '다시 보내기 본문');
+    A = await runAuto({ replied: ['p4', 'e4'], twice: true });
+    assert.deepEqual(A.r.results.map(x => x.state), ['done', 'done']); assert.equal(A.sent.length, 0);   // 누르지 않으면 다시 보내지 않는다
     A = await runAuto({ askFn: async () => ({ ok: true, text: JSON.stringify({ edition: 'print', isbn: P_ISBN, issueDate: '2026-10-16', extraRequests: ['앞표지에 로고 추가'] }) }) });
     assert.deepEqual(A.r.results.map(x => x.state), ['stop', 'stop']); assert.match(A.r.results[0].note, /로고/); assert.deepEqual(A.built, []); assert.equal(A.sent.length, 0);
     A = await runAuto({ askFn: async o => ({ ok: true, text: JSON.stringify({ isbn: o.text.includes('전자책') ? E_ISBN : '9791112323170', issueDate: '2026-10-16', extraRequests: [] }) }) });

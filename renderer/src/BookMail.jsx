@@ -12,11 +12,11 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
     api.bookMail('status', {}).then(r => { if (live && r && !r.error) setMailStatus(r); });
     return () => { live = false; };
   }, [dto.scriptPath]);
-  async function send() {
+  async function send(resend) {
     const path = dto.scriptPath;
     setBusy(true); setError(''); setAuto(null); setBuilding(true);
     try {
-      const r = await api.bookMail('auto', { layout, scriptPath: path });
+      const r = await api.bookMail('auto', { layout, scriptPath: path, resend: !!resend });
       if (r?.error) throw Error(r.error);
       if (currentPath.current !== path) return;
       setAuto(r.results || []); if (r.dto) setDto(r.dto);
@@ -26,11 +26,13 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
   }
   const icon = s => s === 'sent' ? '✅' : s === 'stop' ? '⚠' : '·';
   return <div className="bkmail" data-testid="bk-mail">
-    <button data-testid="bk-mail-auto" disabled={busy || !status.connected} onClick={send}
+    <button data-testid="bk-mail-auto" disabled={busy || !status.connected} onClick={() => send(false)}
       title="부크크 「판권지수정요청」 메일을 종이책·전자책마다 찾아 ISBN·발행일을 판권에 넣고 PDF를 만들어 회신합니다(종이책 = 내지 PDF · 전자책 = 표지+본문 PDF).">
       {busy ? '⏳ 메일 찾기 → 판권 입력 → PDF → 발송 중…' : '📬 판권 수정해서 부크크에 회신'}</button>
     {!status.connected && <div className="meta">⚙ 설정 → 계정 탭에서 Gmail을 먼저 연결하세요.</div>}
-    {auto && <div className="bkmail-review" data-testid="bk-mail-auto-result">{auto.map(x => <div key={x.edition}>{icon(x.state)} <b>{x.label}</b> {x.isbn ? `ISBN ${x.isbn} · ${x.issueDate} — ` : ''}{x.note}</div>)}</div>}
+    {auto && <div className="bkmail-review" data-testid="bk-mail-auto-result">{auto.map(x => <div key={x.edition}>{icon(x.state)} <b>{x.label}</b> {x.isbn ? `ISBN ${x.isbn} · ${x.issueDate} — ` : ''}{x.note}</div>)}
+      {auto.some(x => x.state === 'done') && <button className="ghost" data-testid="bk-mail-resend" disabled={busy} onClick={() => send(true)}
+        title="이미 회신한 부크크 메일에, 지금 판권으로 PDF를 다시 만들어 「바로잡아 다시 보내드립니다」 답장을 한 번 더 보냅니다">🔁 고친 판권으로 다시 보내기</button>}</div>}
     {error && <div className="bkwarn" role="alert">{error}</div>}
   </div>;
 }

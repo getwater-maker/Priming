@@ -113,29 +113,31 @@ ${para}
       console.log('· 출판 탭 🌙 모니터 끄기 버튼 OK — 보임·눌림·메뉴 줄 한 줄');
     }
 
-    // 왼쪽 메뉴 — 7개 탭 + 로그가 왼쪽 맨 아래 + 표지 안내 쪽 없음(미리보기 1쪽 = 반표제지)
+    // 왼쪽 메뉴 — 5탭(구조·정보 · 판권 · 표지·조판 · 등록·유통 · 📜 로그 — 로그는 v0.9.55 에 아래 고정 칸에서 탭으로)
     const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
-    if (tabs !== 4) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 4 (구조·정보 · 판권 · 표지·조판 · 등록·유통 — 2026-10-14)');
+    if (tabs !== 5) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 5 (구조·정보 · 판권 · 표지·조판 · 등록·유통 · 로그)');
+    if (await win.locator('[data-testid=bk-side] #logwrap').count() !== 0) throw new Error('로그 탭이 아닌데 왼쪽 패널에 로그가 있다(아래 고정 로그 칸은 없앴다)');
+    const prevTab = await win.locator('[data-testid=bk-nav] .bktab.on').getAttribute('data-tab');
+    await win.click('[data-tab=log]');
+    await win.waitForSelector('[data-testid=bk-log-tab] #logwrap', { timeout: 5000 });
     const geo = await win.evaluate(() => {
       const side = document.querySelector('[data-testid=bk-side]').getBoundingClientRect();
       const log = document.querySelector('#logwrap').getBoundingClientRect();
       const nav = document.querySelector('[data-testid=bk-nav]').getBoundingClientRect();
-      return { sideL: side.left, sideR: side.right, sideB: side.bottom, logL: log.left, logR: log.right, logB: log.bottom, logT: log.top, navB: nav.bottom };
+      return { sideL: side.left, sideR: side.right, sideB: side.bottom, logL: log.left, logR: log.right, logB: log.bottom, logT: log.top, navB: nav.bottom, logH: log.height, sideH: side.height };
     });
-    if (!(geo.logL >= geo.sideL - 1 && geo.logR <= geo.sideR + 1 && Math.abs(geo.logB - geo.sideB) < 14 && geo.logT > geo.navB)) throw new Error('로그가 왼쪽 패널 맨 아래가 아님 ' + JSON.stringify(geo));
-    console.log('· 왼쪽 메뉴 7탭 + 로그 왼쪽 하단 OK');
-    // 화면 아래 끝까지 채운다(빈 공간 없음) · 내용과 로그 사이 간격 · 「원고 열기」는 출판 탭 바로 다음 · 출판 채널 자동 선택
+    if (!(geo.logL >= geo.sideL - 1 && geo.logR <= geo.sideR + 1 && geo.logT > geo.navB && geo.logH > geo.sideH * 0.6)) throw new Error('로그 탭이 왼쪽 패널을 채우지 않음 ' + JSON.stringify(geo));
+    await win.click('[data-tab=' + (prevTab || 'structure') + ']');
+    console.log('· 왼쪽 메뉴 5탭 + 📜 로그 탭 OK');
+    // 화면 아래 끝까지 채운다(빈 공간 없음) · 「원고 열기」는 출판 탭 바로 다음 · 출판 채널 자동 선택
     const fill = await win.evaluate(() => {
       const w = document.querySelector('.bkwrap').getBoundingClientRect();
-      const body = document.querySelector('.bkbody').getBoundingClientRect();
-      const log = document.querySelector('#logwrap').getBoundingClientRect();
       const tog = document.querySelector('.modetoggle');
       const nxt = tog && tog.nextElementSibling;
       const sel = [...document.querySelectorAll('header select')].find((s) => /채널/.test(s.title || ''));
-      return { gapBottom: window.innerHeight - w.bottom, gap: log.top - body.bottom, nextTxt: nxt ? nxt.textContent : '', chan: sel ? sel.value : null };
+      return { gapBottom: window.innerHeight - w.bottom, nextTxt: nxt ? nxt.textContent : '', chan: sel ? sel.value : null };
     });
     if (fill.gapBottom > 24) throw new Error('화면 아래 빈 공간 ' + Math.round(fill.gapBottom) + 'px');
-    if (fill.gap < 6) throw new Error('내용과 로그 사이 간격 없음 ' + fill.gap);
     if (!/원고 열기/.test(fill.nextTxt)) throw new Error('원고 열기 버튼이 출판 탭 다음이 아님: ' + fill.nextTxt);
     const pres = await win.evaluate(() => window.api.listPresets());
     const bkCh = (pres || []).find((p) => p.startMode === 'book');
@@ -195,9 +197,9 @@ ${para}
       if (await win.locator('[data-testid=bk-register-both]').count() !== 0) throw new Error('「종이책 → 전자책 한 번에 등록」 버튼이 남아 있다(제거됐어야 한다)');
       await win.waitForSelector('[data-testid=bk-reg] [data-testid=bk-preflight]', { timeout: 8000 }).catch(() => {});
       if (await win.locator('[data-testid=bk-reg] [data-testid=bk-preflight]').count() !== 1) throw new Error('출고 전 점검 패널이 1개가 아니다');
-      // 🔑 자동 입력이 패널 맨 위 — 만들기·점검표·점검 패널보다 위에 있다
+      // 📐 v0.9.55 배치 — 📦 만들기 카드 → 판별 카드(발행일·ISBN·정가·자동 입력) → 점검 → 점검표 (옛 「자동 입력 맨 위」 단언은 화면이 「만들기」 위로 바뀐 뒤 계속 실패하던 것)
       const ys = await win.evaluate(() => { const y = (s) => { const e = document.querySelector(s); return e ? e.getBoundingClientRect().top + window.scrollY : -1; }; return { auto: y('[data-testid=bk-auto]'), build: y('[data-testid=bk-pdf-print]'), pf: y('[data-testid=bk-preflight]'), chk: y('[data-testid=bk-reg-bookk]') }; });
-      if (!(ys.auto >= 0 && ys.auto < ys.build && ys.auto < ys.pf && ys.auto < ys.chk)) throw new Error('자동 입력이 맨 위가 아니다 ' + JSON.stringify(ys));
+      if (!(ys.build >= 0 && ys.build < ys.auto && ys.auto < ys.pf && ys.pf < ys.chk)) throw new Error('등록 패널 순서가 다르다(만들기 → 판별 카드 → 점검 → 점검표) ' + JSON.stringify(ys));
       if (await win.locator('[data-testid=bk-reg]').locator('text=작가와').count() > 0) throw new Error('부크크 등록 탭에 작가와 문구가 남아 있음');
       await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookk.png') });
       console.log('· 부크크 등록(통합) OK — 자동 입력 맨 위 · 점검표 2개 · 만들기 한 곳');

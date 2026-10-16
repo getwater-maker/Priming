@@ -16,6 +16,7 @@ import BookMail from './BookMail.jsx';
 //   2026-10-14 로이 — 6탭 → 4탭: 구조·정보 / 판권 / 표지·조판 / 등록·유통(부크크 등록 + 유통 현황 + 아마존·D2D). 옛 탭 id 는 TAB_ALIAS 로 옮긴다.
 const TABS = [
   ['structure', '📚', '구조·정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지·조판'], ['bookk', '📤', '등록·유통'],
+  ['log', '📜', '로그'],   // 📜 로그는 탭 하나(로이 2026-10-16 「아래 로그 창 위치가 불편」) — 패널 아래 고정 로그 칸은 없앴다
 ];
 const TAB_ALIAS = { info: 'structure', layout: 'cover', overseas: 'bookk', ebook: 'bookk', jakkawa: 'bookk' };
 // 책 정보 탭 — [키, 이름, 필수?, 도움말]
@@ -210,7 +211,8 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
     const el = coverCanvasRef.current;
     if (!el || !cover || !showCover) return undefined;
     const fit = () => {
-      const w = el.clientWidth - 28, h = el.clientHeight - 28;
+      // offsetWidth = 스크롤 막대를 뺀 값이 아님 — 확대해서 막대가 생겨도 맞춤 배율이 흔들리지 않게(clientWidth 였을 땐 「맞춤」이 처음 크기로 안 돌아왔다)
+      const w = el.offsetWidth - 28, h = el.offsetHeight - 28;
       const Wpx = cover.spread.widthMm * 3.7795, Hpx = cover.spread.heightMm * 3.7795;
       if (w > 20 && h > 20) setCoverFit(Math.max(0.1, Math.min(w / Wpx, h / Hpx)));
     };
@@ -790,7 +792,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   // 🔢 ISBN · 발행일 상자(2026-10-06 로이 — 부크크 「판권지 수정 요청: 발행일·ISBN 을 고쳐 원고를 다시 보내라」) — 종이책·전자책 따로.
   //   판권 탭과 📤 부크크 등록 탭이 **같은 상자**를 쓴다(칸이 두 벌이 되지 않게). 칸을 벗어나면 원고(.md) 메타에 바로 저장 → 판권에 반영.
   //   ISBN 은 체크 숫자까지 확인한다(틀린 번호를 판권·바코드에 싣지 않게) · 발행일은 판권 라벨 그대로(예: 발행일 2026-10-06).
-  const isbnBox = (idp) => {
+  const isbnBox = (idp, ed) => {
     // 🔢 ISBN·발행일 칸은 회색 자리표시를 두지 않는다 — 값이 들어 있는 것으로 착각한다(로이 2026-10-06)
     // 🔢 맨 위 네 칸(종이책 발행일·ISBN → 전자책 발행일·ISBN · 다른 칸과 같은 모양) — 칸을 벗어나면 원고 메타에 저장.
     //   ISBN 은 체크 숫자가 틀릴 때만 빨간 경고 · 발행일은 「2026년 10월 06일」 모양으로 바로잡아 저장(2026-10-06 으로 적어도 됨).
@@ -817,12 +819,12 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       </label>
     );
     return (
-      <div className="bkisbn" data-testid={idp + '-box'} title={!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim() ? '전자책 칸이 비어 있으면 전자책 판권에는 종이책 발행일·ISBN 이 실립니다' : undefined}>
-        {one('issueDate', '종이책 발행일', '', true)}
-        {one('isbn', '종이책 ISBN')}
-        {one('ebookIssueDate', '전자책 발행일', '', true)}
-        {one('ebookIsbn', '전자책 ISBN')}
-        {!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim()
+      <div className="bkisbn" data-testid={ed ? idp + '-box-' + ed : idp + '-box'} title={ed !== 'print' && !String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim() ? '전자책 칸이 비어 있으면 전자책 판권에는 종이책 발행일·ISBN 이 실립니다' : undefined}>
+        {ed !== 'ebook' && one('issueDate', ed ? '발행일' : '종이책 발행일', '', true)}
+        {ed !== 'ebook' && one('isbn', ed ? 'ISBN' : '종이책 ISBN')}
+        {ed !== 'print' && one('ebookIssueDate', ed ? '발행일' : '전자책 발행일', '', true)}
+        {ed !== 'print' && one('ebookIsbn', ed ? 'ISBN' : '전자책 ISBN')}
+        {ed !== 'print' && (!String(meta.ebookIssueDate || '').trim() || !String(meta.ebookIsbn || '').trim())
           ? <span hidden data-testid={idp + '-ebook-fallback'} /> : null}
       </div>
     );
@@ -906,75 +908,79 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     return (
       <div className="bkreg" data-testid="bk-reg">
         {/* 2) 📦 만들기 — 종이책과 전자책은 ISBN·판권·정가가 달라 각각 만들어진다. 「한 번에」 = 종이책 → 전자책을 이어서 실행(로이 2026-10-07 재요청) */}
-        <div className="bkzone">📦 만들기</div>
-        <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-build-both" title="종이책(표지·내지·표지+내지 PDF) → 전자책(표지·본문·표지+본문 PDF)을 차례로 만듭니다 — 판권은 각각 종이책 ISBN·전자책 ISBN 으로" onClick={buildBoth}>{building ? '⏳ 생성 중…' : '📦 종이책 + 전자책 한 번에'}</button>
-        </div>
-        <div className="bkactions">
-          <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 표지.pdf(펼침면 · 책등·재단여백 포함) + 내지.pdf + 표지+내지.pdf(앞표지 1쪽 + 내지 · 보관·공유용). 판권은 종이책 ISBN·정가" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
-          <button disabled={building || epubChkBusy} data-testid="bk-ebook" title="부크크 전자책용 — 표지.pdf(앞표지 한 쪽) + 본문.pdf + 표지+본문.pdf(부크크에 올리는 파일). 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·종이책 표지 앞면 순" onClick={() => buildEbook()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
-        </div>
-        <div className="bkactions bkbuild">
-          <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 기본 켜짐 — 아마존 KDP·D2D 등록용. 만든 직후 규격 검증(EPUBCheck)이 자동으로 이어집니다"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
-        </div>
-        {epubChk && epubChk.messages && epubChk.messages.length > 0 && (
-          <div className="bkfit warn" data-testid="bk-epubcheck-msgs">
-            <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
-            {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
+        {/* 📐 넓은 패널 배치(로이 2026-10-16 「공간이 생긴 만큼 새로 디자인」) — 📦 만들기 한 줄 → 📕 종이책 | 📘 전자책 두 칸(그 판의 발행일·ISBN·정가·자동 입력) → ✉ 부크크 회신 */}
+        <section className="bkcard" data-testid="bk-make">
+          <div className="bkcard-h">📦 만들기<span className="grow" />
+            <label className="meta" data-testid="bk-epub-opt" title="켜면 전자책을 만들 때 ePub(EPUB 2.0)도 함께 만들고 규격 검증까지 합니다 — 기본 켜짐 — 아마존 KDP·D2D 등록용. 만든 직후 규격 검증(EPUBCheck)이 자동으로 이어집니다"><input type="checkbox" checked={withEpub} onChange={(e) => toggleEpub(e.target.checked)} /> ePub 도 만들기(선택)</label>
+            <button className="ghost" data-testid="bk-open-output" onClick={() => api.openFolder()}>📁 완성파일 폴더 열기</button>
           </div>
-        )}
-        <div className="bkactions">
-          <button className="ghost" data-testid="bk-open-output" onClick={() => api.openFolder()}>📁 완성파일 폴더 열기</button>
-        </div>
-        {/* 1) 🤖 자동 입력. 저장·「도서제출」은 직접 */}
-        <div className="bkzone" title="로그인과 마지막 「도서제출」은 직접 누르세요">🤖 자동 입력</div>
-        <div className="bkauto" data-testid="bk-auto" title="항상 종이책을 먼저 등록하세요 — 4단계에서 읽은 종이책 최종정가의 70%(10원 단위 버림)가 전자책 정가가 됩니다">
-          <div className="bkauto-row">
-            <b>📕 종이책</b>
-            <button disabled={regBusy || building} data-testid="bk-register-bookk"
+          <div className="bkrow3">
+            <button disabled={building || epubChkBusy} data-testid="bk-build-both" title="종이책(표지·내지·표지+내지 PDF) → 전자책(표지·본문·표지+본문 PDF)을 차례로 만듭니다 — 판권은 각각 종이책 ISBN·전자책 ISBN 으로" onClick={buildBoth}>{building ? '⏳ 생성 중…' : '📦 둘 다 만들기'}</button>
+            <button disabled={building || epubChkBusy} data-testid="bk-pdf-print" title="종이책(POD) 입고용 — 표지.pdf(펼침면 · 책등·재단여백 포함) + 내지.pdf + 표지+내지.pdf(앞표지 1쪽 + 내지 · 보관·공유용). 판권은 종이책 ISBN·정가" onClick={() => buildPdf('print')}>{building ? '⏳ 생성 중…' : '📕 종이책 만들기'}</button>
+            <button disabled={building || epubChkBusy} data-testid="bk-ebook" title="부크크 전자책용 — 표지.pdf(앞표지 한 쪽) + 본문.pdf + 표지+본문.pdf(부크크에 올리는 파일). 판권은 전자책 ISBN. 표지는 전자책표지 메타·표지 도구의 전자책앞표지.jpg·종이책 표지 앞면 순" onClick={() => buildEbook()}>{building ? '⏳ 생성 중…' : '📱 전자책 만들기'}</button>
+          </div>
+          {epubChk && epubChk.messages && epubChk.messages.length > 0 && (
+          <div className="bkfit warn" data-testid="bk-epubcheck-msgs">
+          <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
+          {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
+          </div>
+          )}
+        </section>
+        <div className="bkreg-2" data-testid="bk-auto" title="항상 종이책을 먼저 등록하세요 — 4단계에서 읽은 종이책 최종정가의 70%(10원 단위 버림)가 전자책 정가가 됩니다 · 로그인과 마지막 「도서제출」은 직접 누르세요">
+          <section className="bkcard" data-ed="print">
+            <div className="bkcard-h">📕 종이책</div>
+            {isbnBox('rg', 'print')}
+            <div className="bkprice" data-testid="bk-paper-price-row">
+              <div className="bkprice-head" title="전자책 정가 = 이 값의 70%(10원 단위 버림)">💰 정가</div>
+              <div className="bkprice-row">
+                <input type="number" step="100" min="0" placeholder={paperPrice && paperPrice.paper ? String(paperPrice.paper) : '예) 17900'} value={paperPriceIn} onChange={(e) => setPaperPriceIn(e.target.value)} data-testid="bk-paper-price-in" title="종이책을 앱 자동 입력으로 신청했다면 4단계 최종정가가 자동 기록됩니다 — 그렇지 않은 경우 여기에 종이책 정가를 적어 두세요" />
+                <span className="meta">원</span>
+                <button className="ghost" disabled={!paperPriceIn} data-testid="bk-paper-price-save" onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: paperPriceIn }); if (r && r.ok) { setPaperPrice(r); setPaperPriceIn(''); setStatus(`💾 종이책 정가 기록 — 전자책 정가 ${r.ebook.toLocaleString('ko-KR')}원`); } else setStatus('⚠ ' + ((r && r.error) || '저장 실패')); }}>저장</button>
+              </div>
+              <div className="meta bkprice-info" data-testid="bk-paper-price-info">{paperPrice && paperPrice.paper ? `종이책 ${paperPrice.paper.toLocaleString('ko-KR')}원(${paperPrice.source === 'record' ? '기록' : '원고'}) → 전자책 ${paperPrice.ebook.toLocaleString('ko-KR')}원` : '종이책 정가를 모르면 전자책 4단계에서 멈춥니다'}</div>
+              {paperPrice && !paperPrice.price && (paperPrice.others || []).length > 0 && (
+                <div className="bkprice-others" data-testid="bk-paper-price-others">
+                  <span className="meta">이 권은 기록이 없습니다 · 다른 권 기록 →</span>
+                  {paperPrice.others.map((o) => (
+                    <button key={o.key} className="ghost" title={`${o.key} 에 기록된 종이책 정가를 이 권에도 씁니다(권마다 쪽수가 다르면 정가가 다를 수 있으니 확인하세요)`}
+                      onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: o.price }); if (r && r.ok) { setPaperPrice(r); setStatus(`💾 종이책 정가 ${o.price.toLocaleString('ko-KR')}원 기록 — 전자책 ${r.ebook.toLocaleString('ko-KR')}원`); } }}>
+                      {o.key.replace(/^.*_/, '')} {o.price.toLocaleString('ko-KR')}원 쓰기
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="bkrow2">
+              <button disabled={regBusy || building} data-testid="bk-register-bookk"
               title="크롬을 열어 부크크 종이책 1~5단계(책형태·원고·표지·가격·최종확인)를 채웁니다 — 로그인·도서제출은 직접. 4단계 최종정가는 기록해 전자책 정가에 씁니다"
               onClick={() => runRegister('bookk')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
-            <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover"
+              <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover"
               title="이미 열려 있는 등록용 크롬에서 3단계(표지) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요"
               onClick={() => runRegister('bookk', 'cover')}>🖼 이어 채우기</button>
-          </div>
-          <div className="bkauto-row">
-            <b>📘 전자책</b>
-            <button disabled={regBusy || building} data-testid="bk-register-ebook"
+            </div>
+          </section>
+          <section className="bkcard" data-ed="ebook">
+            <div className="bkcard-h">📘 전자책</div>
+            {isbnBox('rg', 'ebook')}
+            <div className="meta bkprice-info" title="전자책 정가 = 종이책 정가의 70%(10원 단위 버림)">정가 {paperPrice && paperPrice.ebook ? paperPrice.ebook.toLocaleString('ko-KR') + '원' : '— (종이책 정가를 먼저)'}</div>
+            <div className="bkrow2">
+              <button disabled={regBusy || building} data-testid="bk-register-ebook"
               title="크롬을 열어 부크크 새전자책 1~5단계(기본정보·전자책 PDF(표지+본문)·표지 PDF·정가·소개)를 채웁니다 — 로그인·도서제출은 직접"
               onClick={() => runRegister('ebook')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
-            <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume"
+              <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume"
               title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요"
               onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>
-          </div>
-        </div>
-        <div className="bkprice" data-testid="bk-paper-price-row">
-          <div className="bkprice-head" title="전자책 정가 = 이 값의 70%(10원 단위 버림)">💰 종이책 정가</div>
-          <div className="bkprice-row">
-            <input type="number" step="100" min="0" placeholder={paperPrice && paperPrice.paper ? String(paperPrice.paper) : '예) 17900'} value={paperPriceIn} onChange={(e) => setPaperPriceIn(e.target.value)} data-testid="bk-paper-price-in" title="종이책을 앱 자동 입력으로 신청했다면 4단계 최종정가가 자동 기록됩니다 — 그렇지 않은 경우 여기에 종이책 정가를 적어 두세요" />
-            <span className="meta">원</span>
-            <button className="ghost" disabled={!paperPriceIn} data-testid="bk-paper-price-save" onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: paperPriceIn }); if (r && r.ok) { setPaperPrice(r); setPaperPriceIn(''); setStatus(`💾 종이책 정가 기록 — 전자책 정가 ${r.ebook.toLocaleString('ko-KR')}원`); } else setStatus('⚠ ' + ((r && r.error) || '저장 실패')); }}>저장</button>
-          </div>
-          <div className="meta bkprice-info" data-testid="bk-paper-price-info">{paperPrice && paperPrice.paper ? `종이책 ${paperPrice.paper.toLocaleString('ko-KR')}원(${paperPrice.source === 'record' ? '기록' : '원고'}) → 전자책 ${paperPrice.ebook.toLocaleString('ko-KR')}원` : '종이책 정가를 모르면 전자책 4단계에서 멈춥니다'}</div>
-          {paperPrice && !paperPrice.price && (paperPrice.others || []).length > 0 && (
-            <div className="bkprice-others" data-testid="bk-paper-price-others">
-              <span className="meta">이 권은 기록이 없습니다 · 다른 권 기록 →</span>
-              {paperPrice.others.map((o) => (
-                <button key={o.key} className="ghost" title={`${o.key} 에 기록된 종이책 정가를 이 권에도 씁니다(권마다 쪽수가 다르면 정가가 다를 수 있으니 확인하세요)`}
-                  onClick={async () => { const r = await api.bookRegisterPaperPrice({ set: o.price }); if (r && r.ok) { setPaperPrice(r); setStatus(`💾 종이책 정가 ${o.price.toLocaleString('ko-KR')}원 기록 — 전자책 ${r.ebook.toLocaleString('ko-KR')}원`); } }}>
-                  {o.key.replace(/^.*_/, '')} {o.price.toLocaleString('ko-KR')}원 쓰기
-                </button>
-              ))}
             </div>
-          )}
+          </section>
         </div>
-
-        <div className="bkzone">발행일 · ISBN</div>
-        {isbnBox('rg')}
-        <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} />
+        <section className="bkcard">
+          <div className="bkcard-h">✉ 부크크 회신</div>
+          <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} />
+        </section>
 
         {/* 3) 🔎 올리기 전 점검(한 번) */}
-        <div className="bkzone">🔎 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
+        <section className="bkcard">
+        <div className="bkcard-h">🔎 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
         {pfx ? (
           <div className="bkpf" data-testid="bk-preflight">
             <div className={'bkpf-sum ' + (pfx.ready ? 'ok' : 'bad')}>
@@ -994,6 +1000,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             </details>
           </div>
         ) : <div className="meta">점검 중…</div>}
+        </section>
 
         {/* 4) 종이책·전자책 점검표 + 옮겨 적을 값(펼치고 접기) */}
         {checklistBlock('bookk', '📕 종이책 점검표')}
@@ -1372,6 +1379,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       case 'structure': return (<>{bodyOf('structure')}<div className="bkzone" data-testid="bk-zone-info">📋 책 정보</div>{bodyOf('info')}</>);
       case 'cover': return (<>{bodyOf('cover')}<div className="bkzone" data-testid="bk-zone-layout">📐 조판</div>{bodyOf('layout')}</>);
       case 'bookk': return (<>{bodyOf('bookk')}<BookDistribution dto={dto} setStatus={setStatus} busy={building} />{bodyOf('overseas')}</>);
+      case 'log': return <div className="bklog bklog-tab" data-testid="bk-log-tab">{logBox}</div>;
       default: return bodyOf(tab);
     }
   })();
@@ -1419,8 +1427,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {dto.trimId}
           {pf && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> ⚠ 최소 {pf.minPages}쪽</span> : null}
         </div>
-        <div className="bkbody" key={tab}>{sideBody}</div>
-        <div className="bklog">{logBox}</div>
+        <div className={'bkbody' + (tab === 'log' ? ' is-log' : '')} key={tab}>{sideBody}</div>
       </div>
 
       {/* ── 오른쪽: 실제 페이지 미리보기 ── */}

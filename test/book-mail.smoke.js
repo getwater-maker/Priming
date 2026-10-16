@@ -24,6 +24,14 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     assert.match(await res.innerText(), /⚠ 전자책 추가 요청/);
     await win.screenshot({ path: path.join(TMP, 'mail-button.png') });
     console.log('✓ 출판 패널 = 버튼 하나 → 판별 결과 표시');
+    // 📜 로그 = 위쪽 탭 — 다른 탭에선 패널 안에 로그가 없고, 로그 탭을 누르면 패널 전체가 로그
+    assert.equal(await win.locator('[data-testid=bk-side] #logwrap').count(), 0, '등록 탭 아래 고정 로그가 남아 있다');
+    await win.click('[data-tab=log]');
+    await win.locator('[data-testid=bk-log-tab] #logwrap').waitFor();
+    const lh = await win.evaluate(() => [document.querySelector('[data-testid=bk-log-tab]').getBoundingClientRect().height, document.querySelector('[data-testid=bk-side]').getBoundingClientRect().height]);
+    assert.ok(lh[0] > lh[1] * 0.6, '로그 탭이 패널 높이 대부분을 쓴다 ' + lh);
+    await win.click('[data-tab=bookk]');
+    console.log('✓ 📜 로그 탭');
     await win.click('button:has-text("⚙ 설정")');
     await win.click('.st-tabs button:has-text("👤 계정")');
     const conn = win.locator('[data-testid=bk-mail-connect]'); await conn.waitFor();
