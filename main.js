@@ -12385,6 +12385,8 @@ require('./core/book/resubmit-ipc').install({
   },
   setMeta: a => _BOOK_H['book-set-meta'](null, a),
   build: a => _BOOK_H['book-build-pdf'](null, a),
+  ask: o => require('./core/claude-api').ask({ ...o, log }),   // 📬 자동 처리의 메일 확인(키 없으면 정형 문구 검사로)
+  log,
 });
 ipcMain.handle('open-folder', async (_e, args = {}) => {
   // 📁 ④ 완성의 「출력폴더」 = 고른 완성물 종류의 폴더(v0.8.7 · 로이) — .vrew = 대본 출력 폴더 · 🎬 유튜브 MP4 = 채널 「저장 폴더」(없으면 다운로드) · ✏ 화이트보드 = 화이트보드 폴더

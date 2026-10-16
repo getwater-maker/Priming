@@ -6,7 +6,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
   const [email, setEmail] = useState('getwater@gmail.com'), [query, setQuery] = useState('부크크');
   const [messages, setMessages] = useState([]), [job, setJob] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [isbn, setIsbn] = useState(''), [date, setDate] = useState(''), [reviewed, setReviewed] = useState(false), [body, setBody] = useState('');
-  const [kinds, setKinds] = useState(['interiorPdf']), [incoming, setIncoming] = useState(null);
+  const [kinds, setKinds] = useState(['interiorPdf']), [incoming, setIncoming] = useState(null), [auto, setAuto] = useState(null);
   const currentPath = useRef(dto.scriptPath); currentPath.current = dto.scriptPath;
   const selection = useRef(0);
   function useJob(j) { setJob(j); setIsbn(j?.values?.isbn || ''); setDate(j?.values?.issueDate || ''); setBody(j?.body || ''); setReviewed(false); }
@@ -56,6 +56,18 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
     </details>}
     {status.connected && <>
       <div className="meta">연결 계정: {status.email}</div>
+      <button data-testid="bk-mail-auto" title="이 책의 부크크 「판권지수정요청」 메일을 종이책·전자책마다 찾아 ISBN·발행일을 넣고 PDF를 만든 뒤, 받는 사람·첨부를 보여 주는 확인창에서 「보내기」를 누르면 회신합니다. 추가 요청이 있는 메일은 멈추고 아래 수동 단계로 넘깁니다." disabled={busy} onClick={() => run(async valid => {
+        setAuto(null); setBuilding(true);
+        try {
+          const r = await call('auto', { layout });
+          if (!valid()) return;
+          setAuto(r.results || []); if (r.dto) setDto(r.dto);
+          const st = await call('status'); if (valid()) useJob(st.job);
+          setStatus('📬 부크크 메일 자동 처리 끝 — ' + (r.results || []).map(x => `${x.label} ${x.note}`).join(' · '));
+        } finally { setBuilding(false); }
+      })}>{busy ? '진행 중…' : '📬 부크크 판권 수정 요청 자동 처리'}</button>
+      {auto && <div className="bkmail-review" data-testid="bk-mail-auto-result">{auto.map(x => <div key={x.edition}>{x.state === 'sent' ? '✅' : x.state === 'draft' ? '📝' : x.state === 'stop' ? '⚠' : '·'} <b>{x.label}</b> {x.isbn ? `ISBN ${x.isbn} · ${x.issueDate} — ` : ''}{x.note}</div>)}</div>}
+      <details className="meta"><summary>수동으로 진행</summary>
       <div className="bkactions">
         <select aria-label="재제출 판" value={edition} disabled={busy} onChange={e => setEdition(e.target.value)}><option value="print">종이책</option><option value="ebook">전자책</option></select>
         <input aria-label="심사 메일 검색" value={query} disabled={busy} onChange={e => setQuery(e.target.value)} placeholder="책 제목 또는 from:업체주소" />
@@ -88,6 +100,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
           {job.note && <div className="bkwarn">{job.note}</div>}
         </div>}
       </>}
+      </details>
     </>}
     {error && <div className="bkwarn" role="alert">{error}</div>}
   </details>;

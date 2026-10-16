@@ -76,6 +76,64 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     assert.ok((await call('send', { draftId: 'draft1' })).error); assert.equal(sends, 2);
     r = await call('reconcile'); assert.equal(r.job.state, 'sent');
     console.log('✓ 책·판 분리, 요청 파일만 첨부, 원고/파일/초안 변경 차단, 중복 발송 및 통신 불확실성 처리');
+    // 📬 자동 처리 — 부크크 실제 문구(「발행->」), 제목으로 책·판 판별, 추가 요청이면 멈춤, 확인창 「보내기」 뒤에만 발송
+    const bk = (id, subject, text, at) => ({ id, threadId: 't' + id, internalDate: String(at), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: subject }, { name: 'From', value: '부크크 <info@bookk.co.kr>' }, { name: 'Message-ID', value: `<${id}@bookk.co.kr>` }], body: { data: Buffer.from(text).toString('base64url') } } });
+    const T = (isbn, d) => `안녕하세요. 부크크입니다.\n\n판권지의 정보 아래와 같이 수정하여 저희 메일로 전체 원고파일만 전달바랍니다.\n\n발행->${d}\nisbn->${isbn}\n\n감사합니다. 부크크 원고검수팀.`;
+    assert.equal(M.extract(T('979-11-12-32516-7', '2026년 10월 16일')).issueDate, '2026년 10월 16일');
+    assert.equal(M.extract('발행인: 한건희 2026년 1월 1일').issueDate, '');
+    assert.deepEqual(M.requestOf('[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', '삼국지 4 : 적벽대전'), { edition: 'ebook' });
+    assert.deepEqual(M.requestOf('[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', '삼국지 3 : 관도'), { edition: 'print' });
+    assert.equal(M.requestOf('[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', '삼국지 4 : 적벽대전'), null);
+    assert.equal(M.requestOf('[판권지수정요청]…[삼국지 40_종이책]', '삼국지 4'), null);
+    assert.equal(M.requestOf('Re: [판권지수정요청]…[삼국지 4_종이책]', '삼국지 4'), null);
+    assert.equal(M.plainRequest(T('979-11-12-32516-7', '2026년 10월 16일')).ok, true);
+    assert.equal(M.plainRequest('안녕하세요. 부크크입니다.\n제출하신 앞표지에 로고 작업하여 전달드립니다.\n' + T('979-11-12-32516-7', '2026년 10월 16일')).ok, false);
+    const P_ISBN = '9791112325167', E_ISBN = '9791112325181';
+    const mails = [bk('p4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_종이책]', T('979-11-12-32516-7', '2026년 10월 16일'), 1792151859000),
+      bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
+      bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
+    async function runAuto({ answer = 0, askFn, replied = [] } = {}) {
+      const h = {}, d = { jobs: {} }, sent = [], built = [];
+      const cc = { scriptPath: 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
+      const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
+      let nd = 0;
+      const api = async (route, body) => {
+        if (route.startsWith('messages?')) { assert.match(decodeURIComponent(route), /from:bookk\.co\.kr/); return { messages: mails.map(m => ({ id: m.id })) }; }
+        if (route.startsWith('messages/')) return mails.find(m => route.startsWith('messages/' + m.id + '?'));
+        if (route.startsWith('threads/')) { const id = route.slice(8, route.indexOf('?')).slice(1); return { messages: replied.includes(id) ? [{ labelIds: ['SENT'], internalDate: '1792200000000' }] : [] }; }
+        if (route === 'drafts') return { id: 'd' + (nd++) };
+        if (/^drafts\/d\d\?format=raw$/.test(route)) return { message: { raw: 'raw' } };
+        if (route === 'drafts/send') { sent.push(body.id); return { id: 'sent-' + body.id }; }
+        throw Error('Unexpected route: ' + route);
+      };
+      const asks = [];
+      install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: {}, context: () => cc,
+        dialog: { showMessageBox: async (_w, o) => { asks.push(o); return { response: answer }; } },
+        setMeta: async a => { cc.meta[a.key] = a.value; },
+        // 실제 빌더처럼 판마다 자기 파일만 쓴다(전자책 빌드는 종이책 내지를 건드리지 않는다)
+        build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, '%PDF-' + a.edition); return own; },
+        ask: askFn, client: { status: () => ({ connected: true, email: 'getwater@gmail.com' }), load: () => structuredClone(d), save: x => Object.assign(d, structuredClone(x)), api } });
+      const r = await h['book-mail-auto'](null, { edition: 'print' });
+      return { r, cc, sent, built, asks };
+    }
+    let A = await runAuto();
+    assert.equal(A.r.error, undefined, A.r.error);
+    assert.deepEqual(A.built, ['print', 'ebook']);
+    assert.equal(A.cc.meta.isbn, P_ISBN); assert.equal(A.cc.meta.ebookIsbn, E_ISBN); assert.equal(A.cc.meta.issueDate, '2026년 10월 16일'); assert.equal(A.cc.meta.ebookIssueDate, '2026년 10월 16일');
+    assert.equal(A.asks.length, 1); assert.match(A.asks[0].detail, /4_내지\.pdf/); assert.match(A.asks[0].detail, /\[전자책\] 4_표지\+본문\.pdf/); assert.match(A.asks[0].detail, /info@bookk\.co\.kr/);
+    assert.doesNotMatch(A.asks[0].detail, /4_표지\.pdf/);   // 요청한 파일만
+    assert.equal(A.sent.length, 2); assert.deepEqual(A.r.results.map(x => x.state), ['sent', 'sent']);
+    A = await runAuto({ answer: 1 });
+    assert.equal(A.sent.length, 0); assert.deepEqual(A.r.results.map(x => x.state), ['draft', 'draft']);
+    A = await runAuto({ replied: ['p4'] });
+    assert.equal(A.r.results[0].state, 'done'); assert.deepEqual(A.built, ['ebook']); assert.equal(A.sent.length, 1);
+    A = await runAuto({ askFn: async () => ({ ok: true, text: JSON.stringify({ edition: 'print', isbn: P_ISBN, issueDate: '2026-10-16', extraRequests: ['앞표지에 로고 추가'] }) }) });
+    assert.deepEqual(A.r.results.map(x => x.state), ['stop', 'stop']); assert.match(A.r.results[0].note, /로고/); assert.deepEqual(A.built, []); assert.equal(A.asks.length, 0);
+    A = await runAuto({ askFn: async o => ({ ok: true, text: JSON.stringify({ isbn: o.text.includes('전자책') ? E_ISBN : '9791112323170', issueDate: '2026-10-16', extraRequests: [] }) }) });
+    assert.deepEqual(A.r.results.map(x => x.state), ['stop', 'sent']); assert.match(A.r.results[0].note, /서로 다릅니다/);
+    A = await runAuto({ askFn: async () => ({ ok: false, noKey: true }) });
+    assert.deepEqual(A.r.results.map(x => x.state), ['sent', 'sent']);
+    console.log('✓ 📬 자동 처리: 「발행->」 추출·책/판 판별·추가 요청·값 불일치 멈춤·이미 회신 건너뜀·확인창 뒤에만 발송');
     console.log('✅ 출판 메일 검증 완료 (실제 메일 발송 없음)');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
