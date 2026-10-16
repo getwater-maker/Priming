@@ -72,8 +72,9 @@ const R2V_HEAD_RE = /^\s*subject_definitions\s*[:：]/i;
 const isMmVideoVal = (v) => { const p = parseComfyVal(v); return !!(p && /minimax/i.test(String(p.path || '')) && !/turbo_i2v/i.test(String(p.path || ''))); };   // ☁ Turbo i2v 는 인물 시트를 안 쓴다 → R2V 아님
 // ⚙ 설정 팝업의 「워크플로」 행 — **선택이 아니라 관리(추가·삭제)** 전용.
 //   모델 선택은 헤더 드롭다운이 하므로(2026-08-14), 여기 select 를 두면 "어느 쪽이 진짜인지" 헷갈린다.
-function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
-  const wfs = comfyWorkflows(cfg);
+function WorkflowManageRow({ cfg, kind, onAdd, onRemove, side = null }) {
+  // side = ⚙ 설정의 보기(☁/🖥) — 반대쪽 전용 워크플로(이름 끝 「(로컬)」·「(클라우드)」)는 숨긴다(v0.9.38 · 지우지 않는다)
+  const wfs = comfyWorkflows(cfg).filter((w) => !side || !wfSide(w) || wfSide(w) === side);
   const chip = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 4px 2px 9px', border: '1px solid var(--line)', borderRadius: 14, fontSize: 12 };
   return (<div className="frow" style={{ alignItems: 'flex-start' }}><label>워크플로</label>
     <div style={{ flex: 1, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -96,7 +97,7 @@ function WorkflowManageRow({ cfg, kind, onAdd, onRemove }) {
 //     v0.3.2 에서 워크플로 select 를 관리 전용으로 바꾼 것과 같은 정리다.
 //   설정파일이 로컬·클라우드 주소를 각각 기억하므로(localBaseUrl/cloudBaseUrl) 두 칸을 그대로 보여주면 된다.
 //   ⚠ 엔진이 실제로 쓰는 값은 `baseUrl` 이므로, **지금 쓰는 쪽을 고칠 때만** baseUrl 도 같이 갱신한다.
-function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
+function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe, view = null, title = null }) {   // title = 구역 이름(🖼 이미지) — 「지금 보내는 곳」 줄 앞에 붙여 한 줄로(v0.9.38 공간 절약)   // view = ⚙ 설정의 보기(☁/🖥) — 그쪽 칸 하나만(v0.9.38)
   const cloud = !!cfg.cloud;
   // 이름은 comfyWorkflows() 가 만든 목록에서 가져온다 — 활성 경로가 목록에 없어도 보강해 주므로 경로 파싱을 중복하지 않는다.
   const wfName = (comfyWorkflows(cfg).find((w) => w.path === cfg.workflowPath) || {}).name || "";
@@ -114,8 +115,8 @@ function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
     const on = isCloud === cloud;
     const url = (isCloud ? cfg.cloudBaseUrl : cfg.localBaseUrl) || "";
     return (
-      <div className={"tpane" + (on ? " on" : "")}>
-        <div className="thead">{isCloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}{on && <span className="use">지금 사용</span>}</div>
+      <div className={"tpane" + (on ? " on" : "") + (view ? " row" : "")}>
+        <div className="thead">{isCloud ? (view ? "☁ 클라우드" : "☁ 클라우드(comfy.org)") : (view ? "🖥 로컬" : "🖥 로컬(내 PC)")}{on && <span className="use">지금 사용</span>}</div>
         <input value={url} placeholder={isCloud ? "https://cloud.comfy.org" : "http://127.0.0.1:8188"}
           title={isCloud ? "comfy.org 클라우드 주소 (보통 그대로 두면 됩니다)" : "내 PC 에서 도는 ComfyUI 주소. 다른 PC 면 그 PC 의 IP:8188"}
           onChange={(e) => setCfg({ ...cfg, [isCloud ? "cloudBaseUrl" : "localBaseUrl"]: e.target.value })}
@@ -143,12 +144,15 @@ function ComfyTargets({ cfg, setCfg, save, kind, probes, onProbe }) {
   const localAllowed = (COMFY_SIDES[kind] || [true, false]).includes(false);
   return (<>
     <div className="nowuse">
+      {title && <b className="ctitle">{title}</b>}
       <span>지금 보내는 곳 <b>{cloud ? "☁ 클라우드(comfy.org)" : "🖥 로컬(내 PC)"}</b>{wfName ? <> · 모델 <b>{wfName}</b></> : <> · <span className="meta">워크플로 없음</span></>}</span>
       <Hint>— 바꾸려면 헤더 「{hdr}」 드롭다운에서 ☁/🖥 × 모델을 고르세요(여기선 주소·키만 관리).</Hint>
     </div>
-    {localAllowed
-      ? <div className="split2">{pane("local")}{pane("cloud")}</div>
-      : <div className="split2 one">{pane("cloud")}</div>}
+    {view && (view === "cloud" || localAllowed)
+      ? <div className="split2 one">{pane(view)}</div>
+      : localAllowed
+        ? <div className="split2">{pane("local")}{pane("cloud")}</div>
+        : <div className="split2 one">{pane("cloud")}</div>}
   </>);
 }
 
@@ -648,6 +652,7 @@ export default function App() {
   const [grokCool, setGrokCool] = useState(null); // Grok(영상) 한도 쿨다운 {until, label}
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
+  const [comfyView, setComfyView] = useState(null); // ⚙ ComfyUI 탭 보기(☁/🖥) — null = 이미지가 지금 쓰는 쪽(v0.9.38 · 보기만 · 저장 안 함)
   const [cvidOpen, setCvidOpen] = useState(false);
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v LTX) 설정
   const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
@@ -6928,54 +6933,70 @@ export default function App() {
             </div>
             <div className="st-body">
 
+            {/* ☁/🖥 보기(v0.9.38 · 로이 「ComfyUI 설정이 복잡하다」) — **보이는 칸만** 고른다. 실제로 보낼 곳은 여전히 헤더 드롭다운 하나
+                (2026-08-20 「두 곳에서 같은 값을 만지지 않는다」 결정 유지 · 저장 키 불변 · 숨긴 칸의 값은 그대로 남는다). 기본 = 이미지가 지금 쓰는 쪽. */}
+            {settingsTab === 'comfy' && comfyCfg && (() => {
+              const v = comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud');
+              return (<div className="comfy-view" data-testid="comfy-view">
+                <span className="meta">보기</span>
+                {[['cloud', '☁ 클라우드'], ['local', '🖥 로컬(내 PC)']].map(([k, lbl]) => (
+                  <button key={k} data-view={k} className={v === k ? 'on' : ''} onClick={() => setComfyView(k)}>{lbl}</button>))}
+                <Hint>고른 쪽에 필요한 칸만 보입니다(나머지는 숨김 — 지워지지 않습니다). <b>실제로 만들 곳과 모델은 헤더 「② 이미지」·「③ 비디오」 드롭다운</b>에서 고릅니다. 클라우드만 쓰는 PC(GPU 없음)는 ☁ 만 보면 됩니다.</Hint>
+              </div>);
+            })()}
             {settingsTab === 'comfy' && comfyCfg && (<div data-sec="img">
-              <div className="subhead">🖼 이미지</div>
-              <Hint>여기선 <b>주소·키·등록</b>만 정합니다. <b>어느 모델로 만들지는 헤더 「② 이미지」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × Z-Image·Krea2). ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다.</Hint>
-              <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image"
+              <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image" title="🖼 이미지" view={comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')}
                 probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
-              <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} />
-              <div className="frow"><label>프롬프트 노드</label>
-                <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
-              <div className="frow"><label>동시 생성</label>
-                <span className="meta" title="앱이 정한 고정값입니다. 3 이상은 검정·노이즈 이미지를 유발해(실측: 동시 4 에서 203장 중 7장) 코드가 상한 2 로 깎습니다. 로컬은 VRAM 때문에 항상 1장씩.">
-                  클라우드 <b>2장 동시</b> · 로컬 <b>1장씩</b> — 앱 고정(설정 불필요)</span></div>
-              <div className="frow"><label>타임아웃(초)</label>
-                <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
-                  onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
-                </label>
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}
-                  title="Qwen-Image 2.1 Turbo(로컬) 전용 — 대본 인물 카드로 얼굴 시트를 한 번 만들어 <출력>/characters/<이름>.face.png 에 두고, 샷 크기(close-up·medium shot)가 적힌 인물 장면에만 참조로 붙입니다. 원경·군중·어린 인물·카드와 나이가 크게 다른 장면은 붙이지 않습니다.">
+              <Hint>어느 모델로 만들지는 <b>헤더 「② 이미지」 드롭다운</b>에서 고릅니다. ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다. 동시 생성은 앱 고정입니다 — <b>클라우드 2장</b>(3장 이상은 검정·노이즈 이미지가 실측으로 나와 상한 2) · <b>로컬 1장</b>(VRAM).</Hint>
+              <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} side={comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')} />
+              <div className="copts">
+              {(comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')) === 'local' && (
+                <div className="frow"><label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.charRefs !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, charRefs: v }); saveComfyCfg({ charRefs: v }); }} /> 👤 인물 일관성(Qwen)
-                </label></div>
-              <Hint>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</Hint>
+                </label>
+                <Hint>Qwen-Image 2.1 Turbo(로컬) 전용 — 대본 인물 카드로 얼굴 시트를 한 번 만들어 <b>&lt;출력&gt;/characters/&lt;이름&gt;.face.png</b> 에 두고, 샷 크기(close-up·medium shot)가 적힌 인물 장면에만 참조로 붙입니다. 원경·군중·어린 인물·카드와 나이가 크게 다른 장면은 붙이지 않습니다.</Hint></div>)}
+              <details className="comfy-adv" data-testid="comfy-adv-img"><summary>⚙ 고급</summary>
+                <div className="frow"><label>프롬프트 노드</label>
+                  <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
+                    onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
+                <div className="frow"><label>타임아웃(초)</label>
+                  <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
+                    onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
+                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
+                  </label></div>
+              </details>
+              </div>
+              <Hint>{(comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')) === 'cloud'
+                ? <>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>만 있으면 됩니다(모델 설치 불필요).</>
+                : <>로컬은 내 PC ComfyUI 에 워크플로가 쓰는 모델이 설치돼 있어야 합니다.</>}</Hint>
             </div>)}
 
             {settingsTab === 'comfy' && cvidCfg && (<div data-sec="vid">
-              <div className="subhead">🎬 비디오</div>
-              <Hint>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. 여기선 <b>주소·키·등록</b>만 정하고, <b>어느 모델로 만들지는 헤더 「③ 비디오」 드롭다운</b>에서 고르세요(☁클라우드 / 🖥로컬 × LTX2.5·LTX2.3). 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록하면 됩니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도합니다).</Hint>
-              <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video"
+              <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video" title="🎬 비디오" view={comfyView || ((comfyCfg || cvidCfg).cloud === false ? 'local' : 'cloud')}
                 probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
-              <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} />
+              <Hint>그룹 이미지를 올려 <b>이미지→비디오</b>로 만듭니다. 어느 모델로 만들지는 <b>헤더 「③ 비디오」 드롭다운</b>에서 고릅니다. 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록합니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도). 동시 생성은 앱 고정입니다 — <b>클라우드 3개</b>(건당 수 분이라 동시에 돌려야 빨라집니다 · 총 크레딧은 같음) · <b>로컬 1개</b>(VRAM).</Hint>
+              <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} side={comfyView || ((comfyCfg || cvidCfg).cloud === false ? 'local' : 'cloud')} />
+              <div className="copts">
               <div className="frow"><label>최대 길이(초)</label>
-                <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8} title="0=제한없음(TTS 길이 그대로). 클라우드 GPU 시간/비용 상한"
+                <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8}
                   onChange={(e) => setCvidCfg({ ...cvidCfg, videoMaxSec: e.target.value })} onBlur={() => saveCvidCfg({ videoMaxSec: Math.max(0, parseInt(cvidCfg.videoMaxSec, 10) || 0) })} />
-                <label style={{ width: 'auto' }}>fps</label>
-                <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
-                <label style={{ width: 'auto' }}>타임아웃(초)</label>
-                <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} />
-                <span className="meta" title="앱이 정한 고정값입니다. i2v 는 건당 수 분이라 동시에 올려야 벽시계 시간이 줄어듭니다(5개×8분 순차 40분 → 동시3 약 14분). 총 크레딧은 동일. 로컬은 VRAM 때문에 항상 1개씩.">
-                  클라우드 <b>3개 동시</b> · 로컬 <b>1개씩</b> — 앱 고정</span></div>
-              <div className="frow"><label>프롬프트 노드</label>
-                <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
-                </label></div>
+                <Hint>영상 한 개의 최대 길이입니다(0 = 제한 없음 · 음성 길이 그대로). 클라우드는 길이가 곧 GPU 시간·크레딧이라 짧을수록 아낍니다.</Hint></div>
+              <details className="comfy-adv" data-testid="comfy-adv-vid"><summary>⚙ 고급</summary>
+                <div className="frow"><label>fps</label>
+                  <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
+                    onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
+                  <label style={{ width: 'auto' }}>타임아웃(초)</label>
+                  <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
+                    onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
+                <div className="frow"><label>프롬프트 노드</label>
+                  <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
+                    onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
+                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
+                  </label></div>
+              </details>
+              </div>
               {/* ⬆ 영상 업스케일 — Grok(720p) 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
                   🔴 2026-08-26 아내 PC: NVIDIA GPU 가 없어 Real-ESRGAN 이 영상 하나에 수십 분 걸렸다. */}
               <div className="frow" style={{ alignItems: "center", marginTop: 6, borderTop: "1px solid var(--line)", paddingTop: 8 }}>

@@ -344,13 +344,24 @@ async function listChannelVideos(url, o = {}) {
  *    `<lang>-orig` 가 원본이고, 원본이 그 언어면 `<lang>` 도 같은 내용이다(실측: 두 파일 바이트 동일).
  * 🔴 **정확 코드만 요청하면 사이트마다 조용히 놓친다** — 틱톡 자막 코드는 `eng-US` 라 `en` 과 안 맞아
  *    `요청한 언어의 자막이 없습니다` 로 떨어졌다(자막이 있는데도 매번 Whisper 를 돌렸다 · 2026-09-15 실측).
- *    → `<lang>.*` 를 **뒤에** 덧붙인다. 앞의 정확 코드가 먼저 걸리므로 유튜브 동작은 그대로다.
+ *    → `<lang>.*` 를 **뒤에** 덧붙인다(유튜브가 아닌 사이트만).
+ * 🔴 **유튜브 주소에는 `<lang>.*` 를 붙이지 않는다**(v0.9.38) — 유튜브 기계번역 자막 이름이 `en-ar`·`en-ko` 꼴이라 `en.*` 가
+ *    번역본 십수 개를 하나씩 따로 요청했고, 유튜브가 429(Too Many Requests)로 막자 **영상 받기 전체가 실패**했다(2026-10-16 실측).
+ *    ⚠ yt-dlp 는 언어 패턴을 **대소문자 구분 없이** 맞춘다(실측: `en[a-z]?-[A-Z]…` 도 en-ar 를 집었다) → 꼬리 패턴으로는 못 가른다.
+ *    유튜브 원본은 언제나 `<lang>-orig`·`<lang>` 로 온다.
  */
-function subLangPref(language) {
+const YT_URL_RE = /^https?:\/\/(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)\//i;
+function subLangPref(language, url = '') {
   const L = String(language || '').split('-')[0].trim();
-  if (L) return [`${L}-orig`, L, `${L}.*`];
-  return ['ko-orig', 'ko', 'ko.*', 'en-orig', 'en', 'en.*'];
+  const wild = !YT_URL_RE.test(String(url || ''));
+  const set = (x) => [`${x}-orig`, x, ...(wild ? [`${x}.*`] : [])];
+  if (L) return set(L);
+  return [...set('ko'), ...set('en')];
 }
+
+// 자막 단계 실패 판정 · 자막 인자(download 의 「자막 없이 다시」가 뺀다)
+const SUB_FAIL_RE = /download (?:video )?subtitles|subtitles? for '|Unable to download .*subtitle/i;
+const SUB_ARGS = new Set(['--write-subs', '--write-auto-subs', '--sub-format', '--sub-langs']);
 
 /** 파일명에서 자막 언어코드를 뗀다 — `제목.eng-US.vtt` → `eng-us` */
 function _subCode(file) {
@@ -459,13 +470,13 @@ async function download(url, o = {}) {
 
   if (o.subs) {
     args.push('--write-subs', '--write-auto-subs', '--sub-format', 'vtt',
-      '--sub-langs', subLangPref(o.language).join(','));
+      '--sub-langs', subLangPref(o.language, url).join(','));
   }
   if (o.ffmpegDir) args.push('--ffmpeg-location', o.ffmpegDir);
   args.push(url);
 
   let lastPct = -1;
-  const r = await _spawnYt(tool, args, {
+  const run = (a) => _spawnYt(tool, a, {
     abortSignal: o.abortSignal,
     timeoutMs: o.timeoutMs || 30 * 60 * 1000,
     onLine: (ln) => {
@@ -484,6 +495,13 @@ async function download(url, o = {}) {
       }
     },
   });
+  let r = await run(args);
+  // 🔁 자막만 실패(429 등)하면 영상까지 버리지 않는다 — 자막 없이 한 번 더(이미 받은 영상은 --no-overwrites 로 그대로 · 음성은 STT 가 맡는다 · v0.9.38)
+  if (r.code !== 0 && o.subs && SUB_FAIL_RE.test(r.stderr || '') && !(o.abortSignal && o.abortSignal())) {
+    if (o.onLog) o.onLog(`  ⚠ 자막을 못 받았습니다(${(_explain(r.stderr) || '').slice(0, 120)}) — 자막 없이 다시 받습니다(음성은 STT 로)`);
+    const noSub = args.filter((x, i) => !SUB_ARGS.has(x) && !(i > 0 && args[i - 1] === '--sub-format') && !(i > 0 && args[i - 1] === '--sub-langs'));
+    r = await run(noSub);
+  }
   if (r.code !== 0) {
     const err = new Error(_explain(r.stderr) || `다운로드 실패 (코드 ${r.code})`);
     err.raw = r.stderr;
@@ -502,7 +520,7 @@ async function download(url, o = {}) {
   };
   // 🔑 자막 고르기는 `pickSubFile` 한 곳에서만 한다(`-orig` 우선 → 요청 순서 → 첫 파일).
   const subFiles = candidates.filter((f) => /\.vtt$/i.test(f));
-  const subMain = pickSubFile(subFiles, subLangPref(o.language));
+  const subMain = pickSubFile(subFiles, subLangPref(o.language, url));
   return {
     audio: wantAudio ? pick(/\.mp3$/i) : null,
     video: wantVideo ? pick(/\.(mp4|mkv|webm)$/i) : null,

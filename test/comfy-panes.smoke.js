@@ -38,61 +38,50 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card .split2', { timeout: 10000 });
 
-    for (const [tab, kind, cfg] of [['🎛 ComfyUI', 'img', before.img], ['🎛 ComfyUI', 'vid', before.vid]]) {   // v0.7.40 — 이미지·비디오·TTS 서버가 한 탭(구역은 data-sec)
-      console.log(NL + '── ' + tab);
-      await win.click(`.modal-card button:has-text("${tab}")`);
+    // ☁/🖥 보기(v0.9.38 · 로이 「ComfyUI 설정이 복잡하다」) — 고른 쪽 칸 하나만 · 숨긴 쪽 값은 그대로 · 고급은 접힘
+    await win.click('.modal-card button:has-text("🎛 ComfyUI")');
+    await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="comfy-view"] button').count() === 2, '보기 단추 ☁ 클라우드 / 🖥 로컬');
+    const defView = await win.evaluate(() => (document.querySelector('[data-testid="comfy-view"] button.on') || {}).dataset.view);
+    ok(defView === (before.img.cloud === false ? 'local' : 'cloud'), '기본 보기 = 이미지가 지금 쓰는 쪽 (' + defView + ')');
+    for (const view of ['cloud', 'local']) {
+      await win.click('[data-testid="comfy-view"] button[data-view="' + view + '"]');
       await win.waitForTimeout(300);
-      const r = await win.evaluate((k) => {
-        const card = document.querySelector('.modal-card [data-sec="' + k + '"]');
-        const panes = [...card.querySelectorAll('.tpane')].map((p) => ({
-          head: (p.querySelector('.thead') || {}).textContent || '',
-          on: p.classList.contains('on'),
-          url: (p.querySelector('input') || {}).value || '',
-          hasKey: !!p.querySelector('input[type=password]'),
-        }));
-        return {
-          panes,
-          nowuse: (card.querySelector('.nowuse') || {}).textContent || '',
-          selects: [...card.querySelectorAll('select')].length,
-          checkboxes: [...card.querySelectorAll('input[type=checkbox]')].length,
-          text: card.innerText,
-        };
-      }, kind);
-      // 이미지·비디오 **둘 다 2칸**(2026-08-20 오후 — 로이 요청으로 비디오 로컬 칸 복구).
-      //   ⚠ "비디오는 클라우드 전용" 문구가 남아 있으면 안 된다(로컬을 고를 수 있게 됐으므로 거짓이 된다).
-      const want = 2;
-      ok(r.panes.length === want, `칸 ${want}개: ` + r.panes.map((p) => p.head).join(' / '));
-      ok(r.panes[0].head.includes('로컬') && r.panes[1].head.includes('클라우드'), '왼쪽=로컬 · 오른쪽=클라우드');
-      ok(!r.panes[0].hasKey && r.panes[1].hasKey, 'API 키 칸은 클라우드에만');
-      ok(r.panes[0].url === (cfg.localBaseUrl || ''), '로컬 주소 = 설정값 ' + r.panes[0].url);
-      ok(!r.text.includes('클라우드 전용'), '옛 「클라우드 전용」 문구 없음');
-      if (kind === 'vid') ok(r.text.includes('영상 업스케일'), '비디오 탭에 「영상 업스케일」 방식 선택이 있다');
-      const onIdx = r.panes.findIndex((p) => p.on);
-      ok(onIdx === (cfg.cloud ? 1 : 0), `'지금 사용' 배지가 설정(cloud=${!!cfg.cloud})과 일치`);
-      ok(r.panes[onIdx].head.includes('지금 사용'), '지금 쓰는 칸에 배지 표시');
-      ok(r.panes[1].url === (cfg.cloudBaseUrl || ''), '클라우드 주소 = 설정값 ' + r.panes[1].url);
-      ok(r.nowuse.includes(cfg.cloud ? '클라우드' : '로컬'), '「지금 보내는 곳」 표시: ' + r.nowuse.split('—')[0].trim());
-      const wantSel = kind === 'vid' ? 1 : 0;   // 비디오 탭: 영상 업스케일 select 1개가 정상
-      ok(r.selects === wantSel, '옛 서버 프로필 드롭다운 없음 (select ' + r.selects + '개 · 기대 ' + wantSel + ')');
-      ok(!r.text.includes('클라우드(comfy.org)') || !/클라우드(comfy.org)$/m.test(r.text), '옛 「클라우드」 체크박스 라벨 없음');
-      ok(!r.text.includes('연결 테스트'), '하단 중복 「연결 테스트」 버튼 없음(각 칸의 🔌 테스트로 통일)');
-      ok(!/동시[ ]*생성[sS]{0,40}input/.test(r.text), '「동시 생성」 입력칸 없음');
-
-      // 램프 — 열 때 자동 실측한 결과가 채워질 때까지 기다린다
-      await win.waitForFunction(({ k, kd }) => {
-        const l = [...document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')];
-        return l.length === k && l.every((x) => !x.className.includes('ing'));
-      }, { k: want, kd: kind }, { timeout: 20000 }).catch(() => {});
-      const lamps = await win.evaluate((kd) => [...document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')].map((x) => x.className.replace('lamp ', '') + ':' + x.textContent), kind);
-      console.log('  램프 → ' + lamps.join(' | '));
-      ok(lamps.length === want && lamps.every((x) => !x.startsWith('idle')), '모든 칸이 자동 실측됨(미확인 아님)');
-
-      // 🔌 테스트 버튼도 실제로 동작하는지(지금 쓰는 쪽)
-      await win.click(`.modal-card [data-sec="${kind}"] .tpane:nth-child(${onIdx + 1}) button:has-text("테스트")`);
-      await win.waitForTimeout(1200);
-      const one = await win.evaluate(({ k, kd }) => (document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')[k] || {}).className || '', { k: onIdx, kd: kind });
-      ok(/ok|no/.test(one), '🔌 테스트 클릭 → 결과 갱신 (' + one + ')');
+      for (const [kind, cfg] of [['img', before.img], ['vid', before.vid]]) {
+        console.log(NL + '── 보기 ' + view + ' · ' + kind);
+        const r = await win.evaluate((k) => {
+          const card = document.querySelector('.modal-card [data-sec="' + k + '"]');
+          const panes = [...card.querySelectorAll('.tpane')].map((p) => ({
+            head: (p.querySelector('.thead') || {}).textContent || '',
+            on: p.classList.contains('on'),
+            url: (p.querySelector('input') || {}).value || '',
+            hasKey: !!p.querySelector('input[type=password]'),
+          }));
+          return { panes, nowuse: (card.querySelector('.nowuse') || {}).textContent || '', selects: [...card.querySelectorAll('select')].length, text: card.innerText,
+            chips: [...card.querySelectorAll('.frow span[title]')].map((x) => x.textContent) };
+        }, kind);
+        ok(r.panes.length === 1, '칸 1개: ' + r.panes.map((p) => p.head).join(' / '));
+        const isCloud = view === 'cloud';
+        ok(r.panes[0].head.includes(isCloud ? '클라우드' : '로컬'), '보기에 맞는 칸');
+        ok(r.panes[0].hasKey === isCloud, 'API 키 칸은 클라우드 보기에만');
+        ok(r.panes[0].url === ((isCloud ? cfg.cloudBaseUrl : cfg.localBaseUrl) || ''), '주소 = 설정값 ' + r.panes[0].url);
+        ok(r.panes[0].on === (isCloud === !!cfg.cloud), '「지금 사용」 배지는 실제 설정을 따른다(보기와 무관)');
+        ok(r.nowuse.includes(cfg.cloud ? '클라우드' : '로컬'), '「지금 보내는 곳」 = 실제 설정: ' + r.nowuse.split('—')[0].trim());
+        ok(r.selects === (kind === 'vid' ? 1 : 0), '옛 서버 프로필 드롭다운 없음 (select ' + r.selects + ')');
+        ok(!/프롬프트 노드|타임아웃\(초\)/.test(r.text), '프롬프트 노드·타임아웃은 「⚙ 고급」 안에 접혀 있다');
+        ok(!/동시[ ]*생성[\s\S]{0,40}input/.test(r.text) && !/2장 동시|3개 동시/.test(r.text), '동시 생성은 칸·줄이 아니라 Hint 설명');
+        if (kind === 'img') ok(/인물 일관성\(Qwen\)/.test(r.text) === !isCloud, '👤 인물 일관성(Qwen 로컬 전용)은 로컬 보기에만');
+        if (kind === 'vid') ok(r.text.includes('영상 업스케일') && r.text.includes('최대 길이'), '비디오: 최대 길이 · 영상 업스케일은 그대로 보인다');
+        ok(!r.chips.some((c) => isCloud ? /\((로컬|local)\)/i.test(c) : /\((클라우드|cloud)\)/i.test(c)), '반대쪽 전용 워크플로 칩은 숨긴다: ' + r.chips.join(', '));
+        await win.waitForFunction((kd) => { const l = [...document.querySelectorAll('.modal-card [data-sec="' + kd + '"] .lamp')]; return l.length === 1 && !l[0].className.includes('ing'); }, kind, { timeout: 20000 }).catch(() => {});
+        const lamp = await win.evaluate((kd) => (document.querySelector('.modal-card [data-sec="' + kd + '"] .lamp') || {}).className || '', kind);
+        ok(/ok|no/.test(lamp), '보이는 칸이 자동 실측됨 (' + lamp + ')');
+      }
     }
+    await win.click('.modal-card [data-testid="comfy-adv-img"] summary');
+    await win.waitForTimeout(200);
+    ok(/프롬프트 노드/.test(await win.locator('.modal-card [data-sec="img"]').innerText()), '「⚙ 고급」을 펼치면 프롬프트 노드 칸이 보인다');
+    await win.click('[data-testid="comfy-view"] button[data-view="' + defView + '"]');
 
     // ── 헤더 드롭다운 왕복 — ☁↔🖥 전환이 실제로 설정을 바꾸고 팝업 배지가 따라오는지 ──
     await win.click('.modal-card button:has-text("닫기")');
@@ -195,8 +184,8 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     // ⚙ 설정 탭 구조(v0.7.40 · 로이): ComfyUI(이미지+비디오+TTS 서버) · Flow · API 키 · 유튜브 — 계정 탭 없음 · 브라우저 설치는 Flow 탭 · Flow 이미지 모델 = 2.1
     {
       const tabsTxt = await win.locator('.settings-card .st-tabs button').allInnerTexts();
-      ok(tabsTxt.length === 5 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /유튜브/.test(tabsTxt[3]) && /폴더/.test(tabsTxt[4]), '탭 5개(v0.9.16 📁 폴더): ' + tabsTxt.join(' / '));
-      ok(!tabsTxt.some((x) => /계정|TTS 서버|브라우저 이미지/.test(x)), '옛 「계정」·「TTS 서버」·「브라우저 이미지」 탭은 없다');
+      ok(tabsTxt.length === 6 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /채널 연결/.test(tabsTxt[3]) && /폴더/.test(tabsTxt[4]) && /계정/.test(tabsTxt[5]), '탭 6개(v0.9.26 👤 계정 · v0.9.36 📺 채널 연결): ' + tabsTxt.join(' / '));
+      ok(!tabsTxt.some((x) => /TTS 서버|브라우저 이미지|▶ 유튜브/.test(x)), '옛 「TTS 서버」·「브라우저 이미지」·「▶ 유튜브」 탭은 없다');
       ok(await win.locator('.settings-card button:has-text("브라우저 설치")').count() === 1, '「⬇ 브라우저 설치」 가 Flow 탭에 있다');
       ok((await win.locator('.settings-card select option[value="Nano Banana 2.1"]').count()) === 1, 'Flow 이미지 모델에 Nano Banana 2.1 이 있다');
       const w = await win.evaluate(() => Math.round(document.querySelector('.settings-card').getBoundingClientRect().width));

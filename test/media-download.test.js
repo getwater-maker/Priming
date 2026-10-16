@@ -101,9 +101,17 @@ console.log('\n[4] 자막 언어 — 🔴 번역본을 집으면 STT 보다 나�
   eq(MD.subLangPref('en-US').join(','), 'en-orig,en,en.*', '지역 코드가 붙어도 기본 언어로 자른다');
   eq(MD.subLangPref('').join(','), 'ko-orig,ko,ko.*,en-orig,en,en.*', '언어를 모를 때만 폴백 목록');
   // 🔴 실사고(틱톡): 자막 코드가 `eng-US` 라 정확 코드 `en` 과 안 맞아 **자막이 있는데도 매번 STT** 를 돌렸다.
-  ok(MD.subLangPref('en').includes('en.*'), '🔑 변종 코드(eng-US)를 잡는 와일드카드가 들어 있다');
+  ok(MD.subLangPref('en', 'https://www.tiktok.com/@a/video/1').includes('en.*'), '🔑 유튜브가 아닌 사이트는 변종 코드(eng-US)를 잡는 와일드카드가 들어 있다');
   ok(MD.subLangPref('ko').indexOf('ko-orig') < MD.subLangPref('ko').indexOf('ko.*'),
-    '⚠ 와일드카드는 **뒤**에 온다 — 정확 코드가 먼저 걸려 유튜브 동작이 그대로다');
+    '⚠ 와일드카드는 **뒤**에 온다 — 정확 코드가 먼저 걸린다');
+  // 🔴 실사고(2026-10-16): 유튜브에서 `en.*` 가 기계번역 자막 en-ar·en-ko … 를 하나씩 요청 → 429 로 영상 받기 전체 실패.
+  //   yt-dlp 는 대소문자 구분 없이 맞춰서(실측) 꼬리 패턴으로는 못 가른다 → 유튜브 주소엔 와일드카드를 붙이지 않는다.
+  for (const u of ['https://www.youtube.com/watch?v=LlhTEttKcwQ', 'https://youtu.be/LlhTEttKcwQ', 'https://m.youtube.com/watch?v=x', 'https://www.youtube.com/shorts/x'])
+    eq(MD.subLangPref('en', u).join(','), 'en-orig,en', '유튜브 주소 = 원본 두 개만: ' + u.slice(8, 30));
+  eq(MD.subLangPref('', 'https://youtu.be/x').join(','), 'ko-orig,ko,en-orig,en', '유튜브 · 언어 모름 = 원본만');
+  const ytMatchI = (langs, code) => langs.some((l) => new RegExp('^(?:' + l + ')$', 'i').test(code));   // yt-dlp 와 같은 판정(대소문자 무시)
+  ok(!['en-ar', 'en-ko', 'en-ja', 'en-US'].some((c) => ytMatchI(MD.subLangPref('en', 'https://youtu.be/x'), c)), '유튜브: 번역 자막(en-ar 등)을 집지 않는다');
+  ok(ytMatchI(['en.*'], 'en-ar'), '판정력: 옛 en.* 는 en-ar 를 집었다');
 }
 
 console.log('\n[4-b] 내려온 자막 고르기 — 번역본을 조용히 집지 않는다');
@@ -304,5 +312,39 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(bundle ? bundle.includes('다운로드 · STT') : true, '번들에 반영됨(소스만 고치고 빌드를 잊으면 화면은 옛것)');
 }
 
-console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
-process.exit(fail ? 1 : 0);
+// [자막 429] 자막만 실패해도 영상은 받는다(v0.9.38 · 2026-10-16 실사고) — 가짜 yt-dlp(node 스크립트)로 원문 download() 를 돈다
+(async () => {
+  console.log('\n[자막 429] 자막 받기가 막혀도 영상 받기는 끝까지 — 자막 없이 한 번 더');
+  const os = require('os');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'md-sub429-'));
+  const fake = path.join(T, 'fake-ytdlp.js');
+  const callLog = path.join(T, 'calls.txt');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "fs.appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');",
+    "const o = a[a.indexOf('-o') + 1].replace('%(title)s', 'T').replace('%(ext)s', 'mp4');",
+    "if (!fs.existsSync(o)) fs.writeFileSync(o, 'video');",
+    "if (a.includes('--write-subs') && process.env.FAKE_MODE === 'sub429') { process.stderr.write(\"ERROR: Unable to download video subtitles for 'en-ar': HTTP Error 429: Too Many Requests\\n\"); process.exit(1); }",
+    "if (process.env.FAKE_MODE === 'videofail') { process.stderr.write('ERROR: Video unavailable\\n'); process.exit(1); }",
+    'process.exit(0);',
+  ].join('\n'));
+  const tool = { cmd: process.execPath, args: [fake] };
+  const logs = [];
+  process.env.FAKE_LOG = callLog;
+  process.env.FAKE_MODE = 'sub429';
+  const out1 = path.join(T, 'a');
+  const r = await MD.download('https://youtu.be/x', { tool, outDir: out1, mode: 'video', subs: true, language: 'en', onLog: (l) => logs.push(l) });
+  const calls = fs.readFileSync(callLog, 'utf8').trim().split('\n');
+  ok(r.video && fs.existsSync(r.video) && r.sub === null, '자막 429 → 영상은 받았고 자막은 없음(→ STT 가 맡는다)');
+  ok(calls.length === 2 && calls[0].includes('--write-subs') && !/--write-subs|--write-auto-subs|--sub-langs|--sub-format/.test(calls[1]), '두 번째 실행은 자막 인자를 모두 뺀다');
+  ok(!calls[1].includes(' vtt ') && calls[1].includes('--no-overwrites'), '자막 값(vtt·언어 목록)도 함께 빠지고 나머지 인자는 그대로');
+  ok(logs.some((l) => /자막을 못 받았습니다.*자막 없이 다시 받습니다/.test(l)), '로그에 「자막 없이 다시」 안내');
+  fs.writeFileSync(callLog, '');
+  process.env.FAKE_MODE = 'videofail';
+  let threw = '';
+  try { await MD.download('https://youtu.be/y', { tool, outDir: path.join(T, 'b'), mode: 'video', subs: true, language: 'en' }); } catch (e) { threw = e.message; }
+  ok(threw && fs.readFileSync(callLog, 'utf8').trim().split('\n').length === 1, '판정력: 영상 자체 실패는 다시 하지 않고 그대로 실패');
+  try { fs.rmSync(T, { recursive: true, force: true }); } catch (_) {}
+  console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
+  process.exit(fail ? 1 : 0);
+})();
