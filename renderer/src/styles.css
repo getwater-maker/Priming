@@ -1450,3 +1450,4 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .ytcard.ytadd{border:2px dashed var(--line);background:transparent;align-items:center;justify-content:center;min-height:120px;cursor:pointer;font-size:14px;color:var(--hook)}
 .ytcard.ytadd:hover:not(:disabled){border-color:var(--hook);background:#fffaf2}
 .ytcard.ytadd:disabled{opacity:.55;cursor:default}
+.ytsubs{font-size:12px;color:var(--hook);font-weight:600}

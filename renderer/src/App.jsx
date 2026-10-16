@@ -32,6 +32,8 @@ function shortName(n, max = 14) {
   return [...body].length > max ? [...body].slice(0, max).join('') + '…' + ext : s;
 }
 const media = (p, version = '') => 'media://' + encodeURIComponent(p) + (version ? `?v=${encodeURIComponent(version)}` : '');
+// 👥 구독자 수 → 「1.2만명」·「3,456명」(유튜브는 3자리 유효숫자로 반올림해 준다 · v0.9.37)
+const fmtSubs = (n) => { n = Number(n) || 0; if (n >= 1e4) { const v = n / 1e4; return `${v >= 100 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, '')}만명`; } return `${n.toLocaleString('ko-KR')}명`; };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ComfyUI = 드롭다운에서 **모델(워크플로)까지 직접 고른다** (로이 2026-08-14).
@@ -3956,26 +3958,13 @@ export default function App() {
   async function pickAppFolder(kind) { const d = await api.pickDir(); if (d) saveAppFolders({ [kind]: d }); }
   // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
   async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
-  // ↕ 연결된 채널 순서 — 끌어서 놓으면 바로 저장(이 PC). 채널편집 「업로드채널」 목록도 이 순서를 따른다.
-  const ytDragRef = useRef(null);
-  const [ytDragOver, setYtDragOver] = useState(null);
-  const [ytMemoFocus, setYtMemoFocus] = useState(null);   // 📝 메모 칸을 고치는 동안 그 카드는 끌지 않는다(글자 선택이 카드 끌기가 되지 않게)
+  // 👥 채널 순서 = 구독자 많은 순(main yt-status 가 정렬 · v0.9.37 — 옛 「끌어서 순서 바꾸기」는 뺐다 · 로이 2026-10-16)
   async function ytSaveMemo(c, v) {
     const memo = String(v || '').trim();
     if (memo === (c.memo || '')) return;
     const r = await api.ytSetMemo(c.id, memo);
     if (r && r.ok) setYtSt((s) => (s ? { ...s, channels: s.channels.map((x) => (x.id === c.id ? { ...x, memo: r.memo } : x)) } : s));
     else setSettingsMsg(`❌ 메모 저장 실패 — ${(r && r.error) || ''}`);
-  }
-  async function ytDrop(toIdx) {
-    const from = ytDragRef.current; ytDragRef.current = null; setYtDragOver(null);
-    const list = (ytSt && ytSt.channels) || [];
-    if (from == null || from === toIdx || !list[from]) return;
-    const next = list.slice(); const [moved] = next.splice(from, 1); next.splice(toIdx, 0, moved);
-    setYtSt({ ...ytSt, channels: next });   // 먼저 보여 주고
-    const r = await api.ytReorder(next.map((c) => c.id));
-    if (!r || !r.ok) setSettingsMsg(`❌ 순서 저장 실패 — ${(r && r.error) || ''}`);
-    ytLoad();                                // 저장된 순서로 다시 맞춘다
   }
   async function ytImport() {
     const r = await api.ytImportClient();
@@ -7336,24 +7325,19 @@ export default function App() {
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널</label>
                   <Hint>카드의 <b>🔄 다시 연결</b> = 그 채널만(구글 화면에서 다른 채널을 고르면 저장하지 않습니다 · 메모에 적은 메일 계정을 먼저 잡습니다). <b>＋ 새 채널 추가</b> = 아직 없는 채널. 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</Hint>
                 </div>
-                {/* 🃏 채널 카드(v0.9.34 · 로이 「카드 형식 · 채널 로고 · 구글 계정」) — 끌어서 순서 바꾸기는 그대로 */}
+                {/* 🃏 채널 카드(v0.9.34 · 로이 「카드 형식 · 채널 로고 · 구글 계정」) — 순서 = 구독자 많은 순(main yt-status 가 정렬 · v0.9.37 · 끌기 없음) */}
                 <div className="ytcards" data-testid="yt-cards">
-                {((ytSt && ytSt.channels) || []).map((c, i) => {
+                {((ytSt && ytSt.channels) || []).map((c) => {
                   const warn = c.broken ? '연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? '재생목록 권한 없음 — 아래 「🔄 다시 연결」을 한 번 눌러 주세요' : '';
                   return (
-                  <div key={c.id} className={'ytcard' + (warn ? ' warn' : '') + (ytDragOver === i ? ' over' : '')} data-testid="yt-ch-row" draggable={ytMemoFocus !== c.id}
-                    title="끌어서 순서를 바꿉니다(채널편집 「업로드채널」 목록도 이 순서)"
-                    onDragStart={(e) => { ytDragRef.current = i; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id); } catch (_) {} }}
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (ytDragOver !== i) setYtDragOver(i); }}
-                    onDragLeave={() => { if (ytDragOver === i) setYtDragOver(null); }}
-                    onDrop={(e) => { e.preventDefault(); ytDrop(i); }}
-                    onDragEnd={() => { ytDragRef.current = null; setYtDragOver(null); }}>
+                  <div key={c.id} className={'ytcard' + (warn ? ' warn' : '')} data-testid="yt-ch-row">
                     <div className="ytcard-top">
                       {c.avatar ? <img className="ytav" src={media(c.avatar.path, c.avatar.v)} alt="" draggable={false} />
                         : <span className="ytav ytav-txt">{Array.from(c.title || '?')[0]}</span>}
                       <div className="ytcard-name">
                         <b title={c.title}>{c.title}</b>
                         <span className="meta">{c.handle || ' '}</span>
+                        <span className="ytsubs" data-testid="yt-ch-subs">{c.subsHidden ? '👥 구독자 수 비공개' : c.subs != null ? `👥 구독자 ${fmtSubs(c.subs)}` : '👥 구독자 —'}</span>
                       </div>
                       <button className="ghost ytx" title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
                     </div>
@@ -7362,8 +7346,7 @@ export default function App() {
                       : c.email ? <span title={c.email}>👤 {c.email}</span> : <span className="meta">👤 구글 계정 — 다시 연결하면 보입니다</span>}</div>
                     <input className="ytmemo" data-testid="yt-ch-memo" key={c.id + '|' + (c.memo || '')} defaultValue={c.memo || ''} maxLength={200}
                       placeholder="📝 로그인 계정 메모" title="이 채널에 어느 구글 계정으로 로그인하는지 적어 두세요(이 PC 에만 저장 · Enter = 저장)"
-                      onFocus={() => setYtMemoFocus(c.id)}
-                      onBlur={(e) => { setYtMemoFocus(null); ytSaveMemo(c, e.target.value); }}
+                      onBlur={(e) => ytSaveMemo(c, e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur(); if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.value = c.memo || ''; e.currentTarget.blur(); } }} />
                     <div className="meta ytcard-date">{c.connectedAt ? `${c.connectedAt} 연결` : ''}</div>
                     {warn && <div className="ytcard-warn">⚠ {warn}</div>}

@@ -281,7 +281,12 @@ const server = http.createServer(async (req, res) => {
   ok(M.includes('const finalDir = wbFinalDir(preset);'), '렌더와 업로드가 같은 화이트보드 폴더 함수');
   ok(M.includes('if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset, runCtx)'), '✏ 화이트보드 성공 뒤 자동 업로드 — 🔴 음성 있을 때만');
   ok(M.includes("ipcMain.handle('yt-reorder'") && PL.includes('ytReorder:'), 'IPC·preload yt-reorder');
-  ok(A.includes('data-testid="yt-ch-row" draggable') && A.includes('onDrop={(e) => { e.preventDefault(); ytDrop(i); }}'), '📺 채널 연결 채널 줄을 끌어서 놓기');
+  {
+    const fl = A.split('\n').find((x) => x.startsWith('const fmtSubs'));
+    const fmt = new Function(fl + ';return fmtSubs;')();
+    ok([999, 3456, 12345, 1234567].map(fmt).join('|') === '999명|3,456명|1.2만명|123만명', '👥 구독자 표기 — 1만 미만은 그대로 · 1만부터 「만명」');
+  }
+  ok(!A.includes('ytDrop(') && /st\.channels\.sort\(/.test(M) && A.includes('data-testid="yt-ch-subs"'), '📺 채널 연결 — 구독자 많은 순 정렬(main) · 구독자 줄 · 끌기 없음(v0.9.37)');
 
   console.log('\n[10b] ⬆ 큐 전체 업로드 — planQueueUploads 원문 실행');
   {

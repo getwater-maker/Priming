@@ -37,23 +37,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('[data-testid="yt-ch-reconnect"]').count() === st.channels.length, `카드마다 「🔄 다시 연결」(${st.channels.length}개)`);
     ok(await win.locator('[data-testid="yt-channels"] button:has-text("🔗 채널 연결")').count() === 0, '위쪽 공용 「🔗 채널 연결」 버튼은 없다');
     ok(await win.locator('text=비공개').count() > 0 && await win.locator('text=AI 합성 콘텐츠 표시').count() === 1, '안내: 비공개 · AI 합성 표시');
-    // ↕ 끌어서 순서 바꾸기(v0.5.81) — 채널이 2개 이상일 때만. 🔴 로이 PC 의 실제 순서를 바꾸므로 **끝나면 원래 순서로 되돌린다**.
-    if (st.channels.length >= 2) {
-      const orig = st.channels.map((c) => c.id);
+    // 👥 순서 = 구독자 많은 순(v0.9.37 — 끌어서 바꾸기는 뺐다) · 카드마다 구독자 줄
+    {
       const rows = win.locator('[data-testid="yt-ch-row"]');
-      ok(await rows.count() === orig.length, `채널 줄 ${orig.length}개 · 끌 수 있음(draggable)`);
-      try {
-        await rows.nth(0).dragTo(rows.nth(1), { sourcePosition: { x: 70, y: 14 }, targetPosition: { x: 70, y: 14 } });   // 카드 윗부분(이름 줄)을 잡는다 — 가운데는 메모 칸
-        await win.waitForTimeout(600);
-        const now = (await win.evaluate(() => window.api.ytStatus())).channels.map((c) => c.id);
-        ok(now[0] === orig[1] && now[1] === orig[0] && now.length === orig.length, '1번 줄을 2번 자리에 놓으면 저장 순서가 바뀐다');
-        const shown = await rows.allInnerTexts();
-        ok(shown[1].includes(st.channels[0].title), '화면 목록도 새 순서');
-      } finally {
-        await win.evaluate((ids) => window.api.ytReorder(ids), orig);
-        const back = (await win.evaluate(() => window.api.ytStatus())).channels.map((c) => c.id);
-        ok(back.join() === orig.join(), '(원래 순서로 되돌림)');
-      }
+      ok(await rows.count() === st.channels.length && await win.locator('[data-testid="yt-ch-subs"]').count() === st.channels.length, `채널 카드 ${st.channels.length}개 · 카드마다 👥 구독자 줄`);
+      const subs = st.channels.map((c) => (c.subs != null ? c.subs : -1));
+      ok(subs.every((v, i) => i === 0 || subs[i - 1] >= v), `yt-status 가 구독자 많은 순으로 준다 (${subs.join(" ≥ ")})`);
+      const shown = await rows.allInnerTexts();
+      ok(st.channels.every((c, i) => shown[i] && shown[i].includes(c.title)), "화면 카드도 같은 순서");
+      ok(await win.locator('[data-testid="yt-ch-row"][draggable="true"]').count() === 0, "카드는 끌리지 않는다");
     }
     await win.keyboard.press('Escape');
     await win.waitForTimeout(300);

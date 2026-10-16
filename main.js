@@ -3251,8 +3251,28 @@ ipcMain.handle('yt-status', async () => {
     const f = path.join(CH_AVATAR_DIR(), c.id + '.jpg');
     try { if (fs.existsSync(f)) c.avatar = { path: f, v: String(fs.statSync(f).mtimeMs | 0) }; } catch (_) {}
   }
+  // 👥 구독자 수(v0.9.37 · 로이 「구독자 수가 높은 곳부터 · 구독자 수도 표시」) — channels.list statistics(1단위) · 30분 기억 · 최대 6초.
+  //   목록 순서 = 구독자 많은 순(모르는 채널은 뒤에 원래 순서) — 채널편집 「업로드채널」 목록도 이 순서.
+  const stale = st.channels.filter((c) => !c.broken && !((_ytSubs.get(c.id) || {}).at > Date.now() - 30 * 60e3));
+  if (stale.length) await Promise.race([Promise.all(stale.map((c) => _ytSubsFetch(c.id).catch(() => null))), new Promise((r) => setTimeout(r, 6000))]);
+  for (const c of st.channels) { const s = _ytSubs.get(c.id); if (s) { c.subs = s.subs; c.subsHidden = s.hidden; } }
+  const order = new Map(st.channels.map((c, i) => [c.id, i]));
+  st.channels.sort((a, b) => ((b.subs != null ? b.subs : -1) - (a.subs != null ? a.subs : -1)) || (order.get(a.id) - order.get(b.id)));
   return st;
 });
+const _ytSubs = new Map();   // 채널ID → { subs, hidden, at }
+async function _ytSubsFetch(channelId) {
+  const t = await require('./core/youtube-upload').accessToken(channelId);
+  if (!t.ok) { _ytSubsWarn(channelId, t.error); return; }
+  const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(channelId)}`, { headers: { Authorization: `Bearer ${t.token}` } });
+  const j = await r.json().catch(() => ({}));
+  const s = j && j.items && j.items[0] && j.items[0].statistics;
+  if (s) _ytSubs.set(channelId, { subs: Number(s.subscriberCount) || 0, hidden: !!s.hiddenSubscriberCount, at: Date.now() });
+  else _ytSubsWarn(channelId, `(${r.status}) ${(j && j.error && j.error.message) || ''}`);
+}
+const _ytSubsWarned = new Set();   // 같은 채널 실패는 앱을 켠 동안 한 번만 로그
+function _ytSubsWarn(id, why) { if (_ytSubsWarned.has(id)) return; _ytSubsWarned.add(id); log(`👥 구독자 수 못 받음 — ${id}: ${why}`);
+}
 // ↩ 자기 프로젝트 파일을 버리고 앱 기본(Priming Upload)으로(v0.5.91)
 ipcMain.handle('yt-use-default-client', () => {
   const out = require('./core/youtube-upload').useDefaultClient();
