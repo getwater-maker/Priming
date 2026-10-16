@@ -96,7 +96,7 @@ function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
         ? (cover ? '체크 해제 = 표지 PDF 에서 제외 (원고 보존)' : '체크 해제 = 책에서 제외 (원고 보존 — 다시 체크하면 복원)')
         : (autoGen ? '원고에 [목차]가 없어 프로그램이 자동 생성합니다 — 체크 해제 = 목차 없이' : '체크 = 원고에 이 섹션 템플릿을 추가')}>
       <input type="checkbox" checked={checked} onChange={(e) => toggleSection(r.key, e.target.checked, present || autoGen)} /> {r.label}
-      {autoGen ? <span className="meta"> (자동 생성)</span> : (!present && <span className="meta"> (원고에 없음)</span>)}
+      {autoGen ? <span className="meta"> (자동)</span> : null}
     </label>
   );
 }
@@ -830,8 +830,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     );
   };
   // 판권 탭 입력칸 — 라벨 + 칸만(필수/선택 배지 없음). 칸을 벗어나면 원고 메타에 저장.
-  const cpField = (k, label) => (
-    <label key={k}>
+  const cpField = (k, label, cls) => (
+    <label key={k} className={cls || undefined}>
       <span>{label}</span>
       <input type="text" data-testid={'bk-cp-' + k} defaultValue={meta[k] || ''} key={dto.scriptPath + ':cp:' + k + ':' + fieldRev} {...liveMeta(k)} />
     </label>
@@ -843,12 +843,12 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   const saveNote = (i, v) => { const list = noteDraft.slice(); list[i] = String(v || ''); if (list.filter(Boolean).join('\u0001') !== cpNotes.join('\u0001')) saveNotes(list); };
   const delNote = (i) => { setNoteRev((r) => r + 1); if (i >= cpNotes.length) { setNoteExtra((n) => Math.max(0, n - 1)); return; } const list = cpNotes.slice(); list.splice(i, 1); saveNotes(list); };
   const addNote = () => setNoteExtra((n) => n + 1);
-  const field = (k, label, req, help) => (
-    <label key={k} className={req && missSet.has(k) ? 'bkmiss' : ''} title={help || ''}>
+  // 도움말은 화면에 늘어놓지 않고 마우스를 올리면 뜨는 title 로만(로이 2026-10-17)
+  const field = (k, label, req, help, cls) => (
+    <label key={k} className={[req && missSet.has(k) ? 'bkmiss' : '', cls || ''].join(' ').trim()} title={help || ''}>
       <span>{label} <em className={'bkbadge ' + (req ? 'req' : 'opt')}>{req ? '필수' : '선택'}</em></span>
       <input type="text" defaultValue={k === 'title' ? (meta.title || dto.fileTitle || '') : (meta[k] || '')}
         key={dto.scriptPath + ':' + k + ':' + fieldRev} {...liveMeta(k)} />
-      {help ? <span className="meta">{help}</span> : null}
     </label>
   );
   const select = (k, label, opts, req, help) => (
@@ -857,7 +857,6 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       <select value={meta[k] || ''} onChange={(e) => setMeta(k, e.target.value)}>
         {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
       </select>
-      {help ? <span className="meta">{help}</span> : null}
     </label>
   );
   const copy = async (text, what) => {
@@ -1021,85 +1020,104 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   // ── 왼쪽 탭 내용 ──
   const bodyOf = (tabId) => {
     switch (tabId) {
-      case 'structure': return (<>
-        <div className="bkzone">앞부속</div>
-        <label className="chk"><input type="checkbox" checked={!/^(off|no|없음|아니오|false|0|x)$/i.test(String(meta.halfTitle || 'on'))}
-          onChange={(e) => setMeta('halfTitle', e.target.checked ? '' : '없음')} /> 반표제지 <span className="meta">(자동)</span></label>
-        <label className="chk"><input type="checkbox" checked disabled /> 속표지 <span className="meta">(자동)</span></label>
-        {(dto.reserved || []).filter((r) => r.zone === 'front').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
-        <div className="bkzone">본문 — 장 {chapters.length}개</div>
-        {titleFit && (() => {
-          const f = titleFit, bad = f.count.header + f.count.toc3 + f.count.max;
-          return (
-            <div className={'bkfit' + (bad ? ' warn' : '')} data-testid="bk-titlefit" title="글꼴의 실제 글자 폭으로 잰 값입니다 — 머리글은 한 줄만 쓸 수 있어 넘치면 …로 줄어듭니다">
-              📏 <b>제목 길이 기준</b>
-              <div className="meta">머리글 한 줄 ≈ <b>{f.header.charsApprox}자</b>{f.header.usesFullTitle ? ' (지금 전체 회목을 머리글에 씁니다)' : ' — 지금 머리글은 전체 회목이 아니라 회목 길이와 무관'} · 목차 2줄 ≈ <b>{f.toc.chars2Approx}자</b> · 3줄 ≈ {f.toc.chars3Approx}자{f.limitChars ? <> · 원고 기준 <b>회목최대 {f.limitChars}자</b></> : null}</div>
-              {bad > 0
-                ? <div className="bkfit-bad">⚠ {f.count.header ? `머리글에서 잘리는 제목 ${f.count.header}개 · ` : ''}{f.count.toc3 ? `목차 4줄 이상 ${f.count.toc3}개 · ` : ''}{f.count.max ? `기준 초과 ${f.count.max}개 · ` : ''}아래 ⚠ 표시 — {f.count.header ? '머리글을 「제N회」로 바꾸거나 ' : ''}회목을 줄이세요</div>
-                : <div className="bkfit-ok">✓ 모든 회목이 기준 안에 들어갑니다</div>}
-              {bad === 0 && f.count.toc2 > 0 ? <div className="meta">(목차 3줄이 되는 회목 {f.count.toc2}개 — 허용 범위)</div> : null}
-            </div>
-          );
-        })()}
-        <div className="bkchapters">
-          {(dto.parts || []).map((p, pi) => (
-            <React.Fragment key={pi}>
-              {p.title ? <div className="bkpart">{p.num ? `제${p.num}부 ` : ''}{p.title}</div> : null}
-              {p.chapters.map((c) => {
-                const chOn = !(layout.excluded || []).includes('ch:' + String(c.title || '').trim());
-                return (
-                  <label key={c.num} className="bkch chk" style={chOn ? undefined : { opacity: 0.5, textDecoration: 'line-through' }}
-                    title={`문단 ${c.blocks}개 — 미리보기에서 클릭해 수정 · 체크 해제 = 책에서 제외(원고 보존)`}>
-                    <input type="checkbox" checked={chOn} disabled={!c.title}
-                      onChange={(e) => toggleChapter(c.title, e.target.checked)} />
-                    {(() => {
-                      const it = titleFit && (titleFit.items || []).find((x) => x.title === c.title);
-                      const why = it && it.flags.filter((x) => x !== 'toc2').map((x) => (x === 'header' ? '머리글에서 잘림' : x === 'toc3' ? `목차 ${it.tocLines}줄` : '회목최대 초과'));
-                      return why && why.length ? <span className="bkfit-badge" title={`${it.chars}자 — ${why.join(' · ')}`}>⚠ {why[0]}</span> : null;
-                    })()} {c.title || `(제목 없음)`}
-                  </label>
-                );
-              })}
-            </React.Fragment>
-          ))}
-          {!chapters.length && <div className="meta">본문 장이 없습니다 — 원고에 <code>## 1장. 제목</code>을 추가하세요.</div>}
+      // 📐 넓은 패널 배치(v0.9.56 · 로이 2026-10-17 「공간이 생긴 만큼 새로 디자인 · 설명은 마우스를 올리면」) — 구역마다 카드(.bkcard) · 칸은 2~4열 격자(.bkg2/.bkg3/.bkg4)
+      case 'structure': return (<div className="bkform bkcards">
+        <div className="bkg3">
+          <section className="bkcard">
+            <div className="bkcard-h" title="원고에 쓴 섹션은 자동으로 체크됩니다 · 체크 해제 = 원고는 그대로 두고 책에서만 제외 · 흐린 항목은 원고에 없는 것(체크 = 원고에 템플릿 추가)">📑 앞부속</div>
+            <label className="chk" title="프로그램이 자동으로 만듭니다 — 체크 해제 = 반표제지 없이"><input type="checkbox" checked={!/^(off|no|없음|아니오|false|0|x)$/i.test(String(meta.halfTitle || 'on'))}
+              onChange={(e) => setMeta('halfTitle', e.target.checked ? '' : '없음')} /> 반표제지 <span className="meta">(자동)</span></label>
+            <label className="chk" title="속표지는 언제나 자동으로 들어갑니다"><input type="checkbox" checked disabled /> 속표지 <span className="meta">(자동)</span></label>
+            {(dto.reserved || []).filter((r) => r.zone === 'front').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
+          </section>
+          <section className="bkcard">
+            <div className="bkcard-h" title="원고에 쓴 섹션은 자동으로 체크됩니다 · 체크 해제 = 원고는 그대로 두고 책에서만 제외">📎 뒷부속</div>
+            {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
+          </section>
+          <section className="bkcard" data-testid="bk-cover-sections">
+            <div className="bkcard-h" title="뒷표지 소개글·날개 글·책등 문구 — 원고에 쓰면 표지 PDF 에 조판됩니다 · 체크 해제 = 표지 PDF 에서 제외">🎨 표지 구성</div>
+            {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} cover />)}
+          </section>
         </div>
-        <div className="bkzone">뒷부속</div>
-        {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
-        <div className="bkzone">표지 구성 (표지 PDF)</div>
-        {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} cover />)}
-        <div className="meta" style={{ marginTop: 8 }}>원고에 쓴 섹션·본문 장은 자동으로 체크됩니다. 체크를 해제하면 <b>원고는 그대로 두고 책에서만 제외</b>합니다 — 진행표·체크리스트 같은 작업용 장을 인쇄물에서 뺄 때 쓰세요.</div>
-        {dto.footnoteCount > 0 && <div className="meta" style={{ marginTop: 8 }}>각주 {dto.footnoteCount}개 — {meta.footnoteMode === '미주' ? '미주(책 끝 모음)' : '각주(페이지 하단)'}</div>}
-      </>);
-      case 'info': return (<div className="bkform">
-        <div className="bkzone">책의 기본 정보</div>
-        {INFO_FIELDS.map(([k, l, req, help]) => field(k, l, req, help))}
-        <div className="bkzone">플랫폼 등록 정보 <span className="meta">(책에는 인쇄되지 않음)</span></div>
-        {REG_FIELDS.map(([k, l, help]) => field(k, l, false, help))}
-        {/* 🤖 Claude API(v0.7.94) — 초안만 만들고, 넣는 것은 「적용」을 누를 때만 */}
-        <div className="bkzone">🤖 Claude 도우미 <span className="meta">(Claude API · 충전금에서 요금)</span></div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
-          <button className="ghost" data-testid="bk-ai-blurb" disabled={!!aiBook.busy} title="원고를 읽고 키워드·한줄 소개·책 소개(부크크 5단계) 초안을 만듭니다 — 넣는 것은 「적용」을 누를 때만" onClick={runBlurb}>{aiBook.busy === 'blurb' ? '⏳ 쓰는 중…' : '✍ 소개글·키워드 초안'}</button>
-          <button className="ghost" data-testid="bk-ai-proof" disabled={!!aiBook.busy} title="원고 전체의 맞춤법 교정 제안을 받아 보고서(.md)로 저장합니다 — 원고는 고치지 않습니다 · 시작 전에 예상 요금을 보여 줍니다" onClick={runProofread}>{aiBook.busy === 'proof' ? '⏳ 교정 중…' : '🔎 교정 제안'}</button>
-        </div>
-        {aiBook.error && <div className="meta" style={{ color: '#c62828', fontWeight: 600 }}>⚠ {aiBook.error}</div>}
-        {(aiBook.keywords || aiBook.tagline) && (<div className="meta" style={{ display: 'grid', gap: 4, marginBottom: 6 }}>
-          {aiBook.keywords && <div>키워드: <b>{aiBook.keywords}</b> <button className="ghost" onClick={() => applyAi('keywords', aiBook.keywords)}>적용</button></div>}
-          {aiBook.tagline && <div>한줄 소개: <b>{aiBook.tagline}</b> <button className="ghost" onClick={() => applyAi('tagline', aiBook.tagline)}>적용</button></div>}
-        </div>)}
-        {aiBook.intro && (<div style={{ marginBottom: 6 }}>
-          <div className="meta">책 소개 초안(부크크 5단계 「책 소개」 · 등록정보 파일에 직접 옮겨 적으세요):</div>
-          <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box' }} value={aiBook.intro} />
-          <button className="ghost" onClick={() => copy(aiBook.intro, '책 소개')}>📋 복사</button>
-        </div>)}
-        {aiBook.proof && <div className="meta">🔎 교정 제안 {aiBook.proof.count}건{aiBook.proof.failed ? ` · 실패 ${aiBook.proof.failed}묶음` : ''} — <button className="ghost" onClick={() => api.bookRevealFile(aiBook.proof.path)}>보고서 위치</button></div>}
-        {select('printColor', '내지 색(종이책)', [['', '흑백 (기본)'], ['컬러', '컬러']], false, '부크크 인세: 사이트 흑백 35% · 컬러 15% / 외부유통 흑백 15% · 컬러 10%')}
-        {select('aiDisclosure', 'AI 사용 표기(전자책)',
-          [['', '— 선택 안 됨 —'], ['없음', '없음(직접 집필·번역)'], ['있음', '있음(AI 활용 — 저자명에 「AI」 표기)']], true,
-          '등록 화면의 AI 사용 표기 항목(부크크 요구 여부는 로그인 뒤 확인). 정직한 표기가 안전합니다')}
-        <div className="meta">값은 원고 상단 <code>&gt; 라벨: 값</code> 메타 줄로 저장됩니다.</div>
+        <section className="bkcard" data-testid="bk-chapters-card">
+          <div className="bkcard-h"><span title="체크 해제 = 원고는 그대로 두고 책에서만 제외 — 진행표·체크리스트 같은 작업용 장을 인쇄물에서 뺄 때">📖 본문 — 장 {chapters.length}개</span><span className="grow" />
+            {dto.footnoteCount > 0 && <span className="meta" title="각주 방식은 「표지·조판」 탭 → 🔤 본문 조판에서 바꿉니다">각주 {dto.footnoteCount}개 · {meta.footnoteMode === '미주' ? '미주(책 끝)' : '각주(쪽 아래)'}</span>}
+          </div>
+          {titleFit && (() => {
+            const f = titleFit, bad = f.count.header + f.count.toc3 + f.count.max;
+            return (
+              <div className={'bkfit' + (bad ? ' warn' : '')} data-testid="bk-titlefit" title="글꼴의 실제 글자 폭으로 잰 값입니다 — 머리글은 한 줄만 쓸 수 있어 넘치면 …로 줄어듭니다">
+                📏 <b>제목 길이 기준</b>
+                <div className="meta">머리글 한 줄 ≈ <b>{f.header.charsApprox}자</b>{f.header.usesFullTitle ? ' (지금 전체 회목을 머리글에 씁니다)' : ' — 지금 머리글은 전체 회목이 아니라 회목 길이와 무관'} · 목차 2줄 ≈ <b>{f.toc.chars2Approx}자</b> · 3줄 ≈ {f.toc.chars3Approx}자{f.limitChars ? <> · 원고 기준 <b>회목최대 {f.limitChars}자</b></> : null}</div>
+                {bad > 0
+                  ? <div className="bkfit-bad">⚠ {f.count.header ? `머리글에서 잘리는 제목 ${f.count.header}개 · ` : ''}{f.count.toc3 ? `목차 4줄 이상 ${f.count.toc3}개 · ` : ''}{f.count.max ? `기준 초과 ${f.count.max}개 · ` : ''}아래 ⚠ 표시 — {f.count.header ? '머리글을 「제N회」로 바꾸거나 ' : ''}회목을 줄이세요</div>
+                  : <div className="bkfit-ok">✓ 모든 회목이 기준 안에 들어갑니다</div>}
+                {bad === 0 && f.count.toc2 > 0 ? <div className="meta">(목차 3줄이 되는 회목 {f.count.toc2}개 — 허용 범위)</div> : null}
+              </div>
+            );
+          })()}
+          <div className="bkchapters">
+            {(dto.parts || []).map((p, pi) => (
+              <React.Fragment key={pi}>
+                {p.title ? <div className="bkpart">{p.num ? `제${p.num}부 ` : ''}{p.title}</div> : null}
+                {p.chapters.map((c) => {
+                  const chOn = !(layout.excluded || []).includes('ch:' + String(c.title || '').trim());
+                  return (
+                    <label key={c.num} className="bkch chk" style={chOn ? undefined : { opacity: 0.5, textDecoration: 'line-through' }}
+                      title={`문단 ${c.blocks}개 — 미리보기에서 클릭해 수정 · 체크 해제 = 책에서 제외(원고 보존)`}>
+                      <input type="checkbox" checked={chOn} disabled={!c.title}
+                        onChange={(e) => toggleChapter(c.title, e.target.checked)} />
+                      {(() => {
+                        const it = titleFit && (titleFit.items || []).find((x) => x.title === c.title);
+                        const why = it && it.flags.filter((x) => x !== 'toc2').map((x) => (x === 'header' ? '머리글에서 잘림' : x === 'toc3' ? `목차 ${it.tocLines}줄` : '회목최대 초과'));
+                        return why && why.length ? <span className="bkfit-badge" title={`${it.chars}자 — ${why.join(' · ')}`}>⚠ {why[0]}</span> : null;
+                      })()} {c.title || `(제목 없음)`}
+                    </label>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+            {!chapters.length && <div className="meta">본문 장이 없습니다 — 원고에 <code>## 1장. 제목</code>을 추가하세요.</div>}
+          </div>
+        </section>
       </div>);
-      case 'colophon': return (<div className="bkform" data-testid="bk-colophon-form">
+      case 'info': return (<div className="bkform bkcards">
+        <section className="bkcard" data-testid="bk-zone-info">
+          <div className="bkcard-h" title="값은 원고 상단 「> 라벨: 값」 메타 줄로 저장됩니다">📋 책 정보</div>
+          <div className="bkg2">
+            {INFO_FIELDS.map(([k, l, req, help]) => field(k, l, req, help, k === 'title' ? 'bkspan' : ''))}
+          </div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h" title="플랫폼 등록 화면에 옮겨 적는 값 — 책에는 인쇄되지 않습니다 · 원고 메타 줄로 저장">🏷 등록 정보</div>
+          <div className="bkg2">
+            {REG_FIELDS.map(([k, l, help]) => field(k, l, false, help, k === 'tagline' ? 'bkspan' : ''))}
+            {select('printColor', '내지 색(종이책)', [['', '흑백 (기본)'], ['컬러', '컬러']], false, '부크크 인세: 사이트 흑백 35% · 컬러 15% / 외부유통 흑백 15% · 컬러 10%')}
+            {select('aiDisclosure', 'AI 사용 표기(전자책)',
+              [['', '— 선택 안 됨 —'], ['없음', '없음(직접 집필·번역)'], ['있음', '있음(AI 활용 — 저자명에 「AI」 표기)']], true,
+              '등록 화면의 AI 사용 표기 항목(부크크 요구 여부는 로그인 뒤 확인). 정직한 표기가 안전합니다')}
+          </div>
+        </section>
+        {/* 🤖 Claude API(v0.7.94) — 초안만 만들고, 넣는 것은 「적용」을 누를 때만 */}
+        <section className="bkcard">
+          <div className="bkcard-h" title="Claude API — 충전금에서 요금이 나갑니다 · 초안만 만들고, 원고에 넣는 것은 「적용」을 누를 때만">🤖 Claude 도우미</div>
+          <div className="bkrow2 bkrow2-top">
+            <button className="ghost" data-testid="bk-ai-blurb" disabled={!!aiBook.busy} title="원고를 읽고 키워드·한줄 소개·책 소개(부크크 5단계) 초안을 만듭니다 — 넣는 것은 「적용」을 누를 때만" onClick={runBlurb}>{aiBook.busy === 'blurb' ? '⏳ 쓰는 중…' : '✍ 소개글·키워드 초안'}</button>
+            <button className="ghost" data-testid="bk-ai-proof" disabled={!!aiBook.busy} title="원고 전체의 맞춤법 교정 제안을 받아 보고서(.md)로 저장합니다 — 원고는 고치지 않습니다 · 시작 전에 예상 요금을 보여 줍니다" onClick={runProofread}>{aiBook.busy === 'proof' ? '⏳ 교정 중…' : '🔎 교정 제안'}</button>
+          </div>
+          {aiBook.error && <div className="meta" style={{ color: '#c62828', fontWeight: 600, marginTop: 6 }}>⚠ {aiBook.error}</div>}
+          {(aiBook.keywords || aiBook.tagline) && (<div className="meta" style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+            {aiBook.keywords && <div>키워드: <b>{aiBook.keywords}</b> <button className="ghost" onClick={() => applyAi('keywords', aiBook.keywords)}>적용</button></div>}
+            {aiBook.tagline && <div>한줄 소개: <b>{aiBook.tagline}</b> <button className="ghost" onClick={() => applyAi('tagline', aiBook.tagline)}>적용</button></div>}
+          </div>)}
+          {aiBook.intro && (<div style={{ marginTop: 8 }}>
+            <div className="bkcard-sub" title="부크크 5단계 「책 소개」 — 등록정보 파일에 직접 옮겨 적으세요">책 소개 초안<span className="grow" /><button className="ghost" onClick={() => copy(aiBook.intro, '책 소개')}>📋 복사</button></div>
+            <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box' }} value={aiBook.intro} />
+          </div>)}
+          {aiBook.proof && <div className="meta" style={{ marginTop: 6 }}>🔎 교정 제안 {aiBook.proof.count}건{aiBook.proof.failed ? ` · 실패 ${aiBook.proof.failed}묶음` : ''} — <button className="ghost" onClick={() => api.bookRevealFile(aiBook.proof.path)}>보고서 위치</button></div>}
+        </section>
+      </div>);
+      case 'colophon': return (<div className="bkform bkcards" data-testid="bk-colophon-form">
         {missing.length > 0 && (
           <div className="bkwarn" title="출판문화산업진흥법상 간행물 필수 기재사항">
             ⚠ 판권 필수 미입력: {missing.map(([, l]) => l).join(' · ')}
@@ -1107,90 +1125,119 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         )}
         {/* 📜 판권 페이지 = 아래 칸에 적은 그대로(2026-10-06 로이 「판권 내용을 이 칸들에 적으면 그대로 실리게」) — 비운 칸은 그 줄이 판권에 나오지 않는다.
             책 제목 줄(제목·부제·회차)만 책 정보에서 자동. 칸 이름은 판권에 찍히는 라벨과 같다. */}
-        <div className="bkzone">📜 판권 페이지 <span className="meta">— 적은 그대로 판권에 실립니다 · 비우면 그 줄은 빠집니다</span></div>
-        {isbnBox('co')}
-        <div className="bkzone">책마다 달라지는 항목 <span className="meta">(책 정보와 같은 값)</span></div>
-        {[['author', '지은이'], ['translator', '옮긴이'], ['editor', '편집인']].map(([k, l]) => cpField(k, l))}
-        <div className="bkzone">항상 같은 항목 <span className="meta">(출판사 고정 정보)</span></div>
-        {[['issuer', '발행인'], ['publisher', '발행처'], ['regNo', '등록'], ['address', '주소'], ['phone', '전화'], ['fax', '팩스'], ['email', '대표메일'], ['homepage', '홈페이지'], ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램']].map(([k, l]) => cpField(k, l))}
-        <div className="bkzone">고지문 <span className="meta">— 줄마다 한 칸 · 판권에 한 줄씩 「* …」 로 실립니다</span></div>
-        <div data-testid="bk-cp-notes">
-          {noteDraft.map((t, i) => (
-            <div className="bknote" key={i + ':' + fieldRev + ':' + noteRev}>
-              <input type="text" data-testid={'bk-cp-note-' + i} defaultValue={t} placeholder="예: 번역·기획: 고전서재의 로이"
-                onChange={(e) => { const v = e.target.value; clearTimeout(liveTimers.current['note' + i]); liveTimers.current['note' + i] = setTimeout(() => saveNote(i, v), 400); }}
-                onBlur={(e) => { clearTimeout(liveTimers.current['note' + i]); saveNote(i, e.target.value); setFieldRev((r) => r + 1); }} />
-              <button className="ghost" title="이 줄 지우기" data-testid={'bk-cp-note-del-' + i} onClick={() => delNote(i)}>✕</button>
+        <section className="bkcard">
+          <div className="bkcard-h" title="적은 그대로 판권에 실립니다 · 비우면 그 줄은 빠집니다 · 전자책 칸이 비면 전자책 판권에는 종이책 값이 실립니다">🔢 발행일 · ISBN</div>
+          <div className="bkisbn-2">{isbnBox('co')}</div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h" title="「구조·정보」 탭의 책 정보와 같은 값 — 어느 쪽에서 고쳐도 같습니다">✍ 책마다 달라지는 항목</div>
+          <div className="bkg3">{[['author', '지은이'], ['translator', '옮긴이'], ['editor', '편집인']].map(([k, l]) => cpField(k, l))}</div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h" title="출판사 고정 정보 — 비운 칸은 판권에 나오지 않습니다">🏢 출판사 정보</div>
+          <div className="bkg2">{[['issuer', '발행인'], ['publisher', '발행처'], ['regNo', '등록'], ['phone', '전화'], ['address', '주소', 'bkspan'], ['fax', '팩스'], ['email', '대표메일'], ['homepage', '홈페이지'], ['blog', '블로그'], ['facebook', '페이스북'], ['instagram', '인스타그램']].map(([k, l, c]) => cpField(k, l, c))}</div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h"><span title="줄마다 한 칸 — 판권에 한 줄씩 「* …」 로 실립니다 · 비운 줄은 사라집니다">📝 고지문</span><span className="grow" />
+            <button className="ghost" data-testid="bk-cp-note-add" onClick={addNote}>＋ 줄 추가</button></div>
+          <div data-testid="bk-cp-notes">
+            {noteDraft.map((t, i) => (
+              <div className="bknote" key={i + ':' + fieldRev + ':' + noteRev}>
+                <input type="text" data-testid={'bk-cp-note-' + i} defaultValue={t} placeholder="예: 번역·기획: 고전서재의 로이"
+                  onChange={(e) => { const v = e.target.value; clearTimeout(liveTimers.current['note' + i]); liveTimers.current['note' + i] = setTimeout(() => saveNote(i, v), 400); }}
+                  onBlur={(e) => { clearTimeout(liveTimers.current['note' + i]); saveNote(i, e.target.value); setFieldRev((r) => r + 1); }} />
+                <button className="ghost" title="이 줄 지우기" data-testid={'bk-cp-note-del-' + i} onClick={() => delNote(i)}>✕</button>
+              </div>
+            ))}
+            {!noteDraft.length && <div className="meta">고지문 없음</div>}
+          </div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h">© 저작권 · 안내문</div>
+          <div className="bkcol">
+            <label title="비우면 자동 — ⓒ 이름 연도. All rights reserved."><span>저작권(ⓒ)</span>
+              <input type="text" data-testid="bk-cp-copyright" placeholder="비우면 자동 — ⓒ 이름 연도. All rights reserved." defaultValue={meta.copyright || ''}
+                key={dto.scriptPath + ':copyright:' + fieldRev} {...liveMeta('copyright')} /></label>
+            <label title="비우면 기본 문구가 실립니다"><span>재사용 안내문</span>
+              <input type="text" data-testid="bk-cp-legal" placeholder={DEFAULT_LEGAL_TEXT} defaultValue={meta.legalText || ''}
+                key={dto.scriptPath + ':legalText:' + fieldRev} {...liveMeta('legalText')} /></label>
+          </div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h" title="판권 내용은 위 칸에 적은 줄로 조판됩니다">📐 판권 페이지</div>
+          <div className="bkg2">
+            <label title="판권 페이지를 책 맨 뒤(한국 관행)에 둘지, 속표지 뒷면에 둘지">판권 위치
+              <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
+                <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
+              </select>
+            </label>
+            <label title={cpAlignMeta ? '원고 메타 `> 판권정렬:` 이 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : '판권 내용을 판면 아래쪽에 붙일지(기본), 위에서 시작할지'}>판권 배치{cpAlignMeta ? ' 🔒' : ''}
+              <select value={cpAlignMeta || (layout.colophonAlign === 'top' ? 'top' : 'bottom')} disabled={!!cpAlignMeta} onChange={(e) => L('colophonAlign', e.target.value)}>
+                <option value="bottom">아래 (판면 하단 · 기본)</option><option value="top">위 (판면 상단)</option>
+              </select>
+            </label>
+          </div>
+          <details className="bkmore">
+            <summary>그 밖의 항목 (정가 · 전자책 가격 · 부가기호 · QR · 로고)</summary>
+            <div className="bkg2">{COLO_OPT.filter(([k]) => ['price', 'ebookPrice', 'isbnAddon', 'logo', 'qr', 'qrLabel'].includes(k)).map(([k, l]) => field(k, l, false))}</div>
+          </details>
+        </section>
+      </div>);
+      case 'cover': return (<div className="bkform bkcards">
+        <div className="bkreg-2">
+          <section className="bkcard" data-testid="bk-cover-print">
+            <div className="bkcard-h" title="재단여백 3mm(재단 때 잘리는 영역 — 배경을 끝까지 채우세요) · 안전여백 5mm">📕 종이책 표지</div>
+            <div className="bkspec" title={`총 ${dto.lastPages || '?'}쪽 기준${dto.flaps ? ' · 날개 포함' : ''} · 300dpi`}>
+              <span>책등</span><b>{spread.spineMm}mm</b>
+              <span>펼침면</span><b>{spread.widthMm}×{spread.heightMm}mm</b>
+              <span>픽셀</span><b>{spread.widthPx}×{spread.heightPx}px</b>
             </div>
-          ))}
-          <button className="ghost" data-testid="bk-cp-note-add" onClick={addNote}>＋ 고지문 줄 추가</button>
+            {dto.coverImagePath
+              ? (<>
+                  <div className="meta bkcover-file" title={dto.coverImagePath}>🖼 {dto.coverImagePath.split(/[\\/]/).pop()}</div>
+                  {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px{dto.coverCheck.flapHint ? <><br />이 파일은 날개 {dto.coverCheck.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — <b>날개 설정을 확인하세요</b>(지금: 날개 {dto.flaps ? '있음' : '없음'})</> : null}</div>}
+                  {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
+                  <div className="bkrow2"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
+                </>)
+              : <div className="bkrow1"><button onClick={attachCover} title="배경 이미지 — 펼침면 치수(위 픽셀)로 만든 그림">🖼 표지 이미지 첨부</button></div>}
+            <div className="bkrow2">
+              <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
+              <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
+            </div>
+          </section>
+          <section className="bkcard" data-testid="bk-cover-opts">
+            <div className="bkcard-h">🎛 표지 옵션</div>
+            <label className="chk" title="배경 이미지 위에 제목·부제·저자·출판사 글자를 얹어 조판 — 완성 이미지에 글자가 이미 있으면 끄세요">
+              <input type="checkbox" checked={!!layout.coverOverlay} onChange={(e) => L('coverOverlay', e.target.checked)} /> 앞표지에 제목·저자 얹기
+            </label>
+            <label className="chk" title={meta.isbn ? '뒷표지 오른쪽 하단에 ISBN 바코드+정가 자동 배치' : 'ISBN 을 먼저 적어야 켤 수 있습니다(판권 탭)'}>
+              <input type="checkbox" checked={layout.coverBarcode !== false} onChange={(e) => L('coverBarcode', e.target.checked)} disabled={!meta.isbn} /> 뒷표지 바코드·정가
+            </label>
+            <label className="chk" title="부크크 무료 표지는 날개가 없고, 날개 없이 승인된 도서에 나중에 날개를 추가할 수 없습니다">
+              <input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)
+            </label>
+            {(layout.coverOverlay || (dto.covers || []).length > 0) && (
+              <label className="chk">표지 글자색 <input type="color" value={layout.coverTextColor || '#111111'} onChange={(e) => L('coverTextColor', e.target.value)} style={{ width: 60, padding: 0, height: 26 }} /></label>
+            )}
+            <div className="bkcol" style={{ marginTop: 6 }}>
+              {select('coverMaterial', '표지 재질(부크크)',
+                [['', RG.DEFAULT_COVER_MATERIAL + ' (기본)'], ...RG.COVER_MATERIALS.slice(1).map((m) => [m, m])], false,
+                '두께·가격·표지 크기에 영향 없음(기록용). 글자가 있는 표지는 스노우 권장 · 재질 변경은 매주 금요일 무료')}
+            </div>
+            <div className="bkrow1">
+              <button className="ghost" data-testid="bk-cover-text-go" title="뒷표지 소개글·날개 글·책등 문구는 「구조·정보」 탭의 「🎨 표지 구성」(원고)에 쓰면 표지 PDF 에 조판됩니다" onClick={() => setTab('structure')}>✍ 표지 글 쓰기 ›</button>
+            </div>
+          </section>
         </div>
-        <div className="bkzone">저작권 · 안내문</div>
-        <label><span>저작권(ⓒ)</span>
-          <input type="text" data-testid="bk-cp-copyright" placeholder="비우면 자동 — ⓒ 이름 연도. All rights reserved." defaultValue={meta.copyright || ''}
-            key={dto.scriptPath + ':copyright:' + fieldRev} {...liveMeta('copyright')} /></label>
-        <label><span>재사용 안내문</span>
-          <input type="text" data-testid="bk-cp-legal" placeholder={DEFAULT_LEGAL_TEXT} defaultValue={meta.legalText || ''}
-            key={dto.scriptPath + ':legalText:' + fieldRev} {...liveMeta('legalText')} /></label>
-        <details className="bkmore">
-          <summary>그 밖의 항목 (정가 · 전자책 가격 · 부가기호 · QR · 로고)</summary>
-          {COLO_OPT.filter(([k]) => ['price', 'ebookPrice', 'isbnAddon', 'logo', 'qr', 'qrLabel'].includes(k)).map(([k, l]) => field(k, l, false))}
-        </details>
-        <div className="bkzone">판권 페이지</div>
-        <label title="판권 내용은 위 칸에 적은 줄로 조판됩니다">판권 위치
-          <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
-            <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
-          </select>
-        </label>
-        <label title={cpAlignMeta ? '원고 메타 `> 판권정렬:` 이 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : '판권 내용을 판면 아래쪽에 붙일지(기본), 위에서 시작할지'}>판권 배치{cpAlignMeta ? ' 🔒' : ''}
-          <select value={cpAlignMeta || (layout.colophonAlign === 'top' ? 'top' : 'bottom')} disabled={!!cpAlignMeta} onChange={(e) => L('colophonAlign', e.target.value)}>
-            <option value="bottom">아래 (판면 하단 · 기본)</option><option value="top">위 (판면 상단)</option>
-          </select>
-        </label>
+        <section className="bkcard" data-testid="bk-cover-ebook">
+          <div className="bkcard-h">📱 전자책 표지</div>
+          {field('ebookCover', '이미지 경로', false, '비우면 종이책 표지의 앞면을 자동으로 잘라 씁니다. 부크크 전자책 표지 규격(px·비율)은 로그인 뒤 화면에서 확인 필요')}
+        </section>
       </div>);
-      case 'cover': return (<div className="bkform">
-        <div className="bkzone">종이책 표지 스프레드</div>
-        <div className="meta bkcoverspec">
-          책등 <b>{spread.spineMm}mm</b> (총 {dto.lastPages || '?'}쪽 기준)<br />
-          스프레드 <b>{spread.widthMm}×{spread.heightMm}mm</b><br />
-          = <b>{spread.widthPx}×{spread.heightPx}px</b> @300dpi{dto.flaps ? ' · 날개 포함' : ''}<br />
-          <span title="재단 시 잘리는 영역 — 배경을 끝까지 채우세요">재단여백 3mm · 안전여백 5mm</span>
-        </div>
-        {dto.coverImagePath
-          ? (<>
-              <div className="meta" style={{ wordBreak: 'break-all' }}>🖼 {dto.coverImagePath.split(/[\\/]/).pop()}</div>
-              {dto.coverCheck && !dto.coverCheck.ok && <div className="bkwarn">⚠ 치수 불일치 — 기대 {dto.coverCheck.expected.widthPx}×{dto.coverCheck.expected.heightPx}px{dto.coverCheck.flapHint ? <><br />이 파일은 날개 {dto.coverCheck.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — <b>날개 설정을 확인하세요</b>(지금: 날개 {dto.flaps ? '있음' : '없음'})</> : null}</div>}
-              {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
-              <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
-            </>)
-          : <button onClick={attachCover}>🖼 표지 이미지 첨부 (배경)</button>}
-        <label className="chk" title="배경 이미지 위에 제목·부제·저자·출판사 글자를 얹어 조판 — 완성 이미지에 글자가 이미 있으면 끄세요">
-          <input type="checkbox" checked={!!layout.coverOverlay} onChange={(e) => L('coverOverlay', e.target.checked)} /> 앞표지에 제목·저자 얹기
-        </label>
-        <label className="chk" title="뒷표지 오른쪽 하단에 ISBN 바코드+정가 자동 배치">
-          <input type="checkbox" checked={layout.coverBarcode !== false} onChange={(e) => L('coverBarcode', e.target.checked)} disabled={!meta.isbn} /> 뒷표지 바코드·정가 {!meta.isbn && <span className="meta">(ISBN 필요)</span>}
-        </label>
-        {(layout.coverOverlay || (dto.covers || []).length > 0) && (
-          <label>표지 글자색 <input type="color" value={layout.coverTextColor || '#111111'} onChange={(e) => L('coverTextColor', e.target.value)} style={{ width: 60, padding: 0, height: 26 }} /></label>
-        )}
-        <label className="chk" title="부크크 무료 표지는 날개가 없고, 날개 없이 승인된 도서에 나중에 날개를 추가할 수 없습니다">
-          <input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)
-        </label>
-        {select('coverMaterial', '표지 재질(부크크)',
-          [['', RG.DEFAULT_COVER_MATERIAL + ' (기본)'], ...RG.COVER_MATERIALS.slice(1).map((m) => [m, m])], false,
-          '두께·가격·표지 크기에 영향 없음(기록용). 글자가 있는 표지는 스노우 권장 · 재질 변경은 매주 금요일 무료')}
-        <div className="meta">뒷표지 소개글·날개 글·책등 문구는 「구조」 탭의 「표지 구성」에 쓰면 표지 PDF 에 조판됩니다.</div>
-        <div className="mbtns">
-          <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
-          <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
-        </div>
-        <div className="bkzone">전자책 표지</div>
-        {field('ebookCover', '전자책 표지 이미지 경로', false, '비우면 종이책 표지의 앞면을 자동으로 잘라 씁니다. 부크크 전자책 표지 규격(px·비율)은 로그인 뒤 화면에서 확인 필요')}
-      </div>);
-      case 'layout': return (<>
-        <details open>
-          <summary>규격 (플랫폼·판형·용지)</summary>
-          <div className="bkform">
+      case 'layout': return (<div className="bkform bkcards">
+        <section className="bkcard" data-testid="bk-zone-layout">
+          <div className="bkcard-h">📏 규격</div>
+          <div className="bkg2">
             <label>플랫폼
               <select value={dto.platformId} onChange={(e) => setMeta('platform', e.target.value === 'kyobo' ? '교보' : e.target.value === 'jakkawa' ? '작가와' : e.target.value === 'kdp' ? 'KDP' : e.target.value === 'd2d' ? 'D2D' : '부크크')}>
                 {(dto.platforms || []).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -1213,45 +1260,34 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
                 {...liveMeta('spineMm')} />
             </label>
           </div>
-        </details>
-        <details open>
-          <summary>본문 조판</summary>
-          <div className="bkform">
-            <label>본문 폰트
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h">🔤 본문 조판</div>
+          <div className="bkg3">
+            <label className="bkspan2">본문 폰트
               <select value={layout.fontKey} onChange={(e) => L('fontKey', e.target.value)}>
                 {(dto.fontOptions || []).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
             </label>
-            <div className="bkrow">
-              <label>크기(pt) <input type="number" step="0.5" min="7" max="14" value={layout.fontSizePt} onChange={(e) => L('fontSizePt', Number(e.target.value) || 10)} /></label>
-              <label title="한국 단행본 관행 = 글자 크기의 1.7~2.0배 (대표 1.8)">행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight} onChange={(e) => L('lineHeight', Number(e.target.value) || 1.8)} /></label>
-            </div>
-            <div className="bkrow">
-              <label>굵기
-                <select value={layout.fontWeight} onChange={(e) => L('fontWeight', Number(e.target.value))}>
-                  <option value={300}>가늘게(300) — 단행본 관행</option><option value={400}>보통(400)</option><option value={700}>굵게(700)</option>
-                </select>
-              </label>
-              <label>자간(pt) <input type="number" step="0.1" min="-2" max="2" value={layout.letterSpacingPt} onChange={(e) => L('letterSpacingPt', Number(e.target.value) || 0)} /></label>
-            </div>
-            <div className="bkrow">
-              <label title="문단 첫 줄 들여쓰기">들여쓰기(pt) <input type="number" step="1" min="0" max="40" value={layout.indentPt} onChange={(e) => L('indentPt', Math.max(0, Number(e.target.value) || 0))} /></label>
-              <label title="문단과 문단 사이 간격 — 한국 단행본 관행은 0 (들여쓰기로만 문단 구분)">문단 간격(pt) <input type="number" step="1" min="0" max="40" value={layout.paragraphSpacingPt} onChange={(e) => L('paragraphSpacingPt', Math.max(0, Number(e.target.value) || 0))} /></label>
-            </div>
-            <label>장 시작
+            <label title="가늘게(300) = 단행본 관행">굵기
+              <select value={layout.fontWeight} onChange={(e) => L('fontWeight', Number(e.target.value))}>
+                <option value={300}>가늘게(300)</option><option value={400}>보통(400)</option><option value={700}>굵게(700)</option>
+              </select>
+            </label>
+            <label>크기(pt) <input type="number" step="0.5" min="7" max="14" value={layout.fontSizePt} onChange={(e) => L('fontSizePt', Number(e.target.value) || 10)} /></label>
+            <label title="한국 단행본 관행 = 글자 크기의 1.7~2.0배 (대표 1.8)">행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight} onChange={(e) => L('lineHeight', Number(e.target.value) || 1.8)} /></label>
+            <label>자간(pt) <input type="number" step="0.1" min="-2" max="2" value={layout.letterSpacingPt} onChange={(e) => L('letterSpacingPt', Number(e.target.value) || 0)} /></label>
+            <label title="문단 첫 줄 들여쓰기">들여쓰기(pt) <input type="number" step="1" min="0" max="40" value={layout.indentPt} onChange={(e) => L('indentPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            <label title="문단과 문단 사이 간격 — 한국 단행본 관행은 0 (들여쓰기로만 문단 구분)">문단 간격(pt) <input type="number" step="1" min="0" max="40" value={layout.paragraphSpacingPt} onChange={(e) => L('paragraphSpacingPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            <label title="홀수쪽(오른쪽) = 관행 · 다음 쪽 = 분량 절약">장 시작
               <select value={layout.chapterStart} onChange={(e) => L('chapterStart', e.target.value)}>
-                <option value="recto">홀수쪽(오른쪽) — 관행</option><option value="page">다음 쪽 (분량 절약)</option>
+                <option value="recto">홀수쪽(오른쪽)</option><option value="page">다음 쪽</option>
               </select>
             </label>
             <label>각주 방식
               <select value={meta.footnoteMode === '미주' ? '미주' : '각주'} onChange={(e) => setMeta('footnoteMode', e.target.value === '미주' ? '미주' : '')}>
-                <option value="각주">각주 (페이지 하단)</option><option value="미주">미주 (책 끝 모음)</option>
+                <option value="각주">각주 (쪽 아래)</option><option value="미주">미주 (책 끝 모음)</option>
               </select>
-            </label>
-            <label title="장마다 반복되는 코너의 소제목을 쉼표로 구분해 입력하면 그 구간을 옅은 배경 노트 박스로 본문과 다르게 조판합니다">
-              특별 섹션 (예: 역사 노트)
-              <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
-                onChange={(e) => L('specialKeyword', e.target.value)} />
             </label>
             <label title="양쪽 정렬 줄의 띄어쓰기가 크게 벌어지는 것을 줄입니다. 어절 = 지금 방식(어절 단위로만 줄바꿈) · 글자 = 어절 중간에서도 끊음(간격은 고르지만 낱말이 쪼개짐) · 절충 = 어절 단위를 지키되 많이 벌어질 줄만 다음 낱말을 글자 단위로 넘김(권장 시험). 마지막 줄에 한 글자만 남지 않게 끝 두 글자를 묶습니다. 원고 메타 `> 줄바꿈: 어절|글자|절충` 이 있으면 메타가 이깁니다">
               줄바꿈{meta.lineBreak ? ' 🔒' : ''}
@@ -1262,17 +1298,24 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
                 <option value="char">글자 단위</option>
               </select>
             </label>
-            <div className="bkrow" title="목차 항목의 글자 크기·행간 — 비우면 본문과 같습니다. 원고 메타 `> 목차글자:` `> 목차행간:` 이 있으면 메타가 이깁니다(삼국지: 9.5pt · 1.45)">
-              <label>목차 글자(pt){(meta.tocSize) ? ' 🔒' : ''} <input type="number" step="0.5" min="7" max="14" placeholder="본문과 같음" value={meta.tocSize ? meta.tocSize : (layout.tocSizePt || '')} disabled={!!meta.tocSize}
-                onChange={(e) => L('tocSizePt', Number(e.target.value) || 0)} /></label>
-              <label>목차 행간{(meta.tocLine) ? ' 🔒' : ''} <input type="number" step="0.05" min="1.1" max="2.5" placeholder="본문과 같음" value={meta.tocLine ? meta.tocLine : (layout.tocLineHeight || '')} disabled={!!meta.tocLine}
-                onChange={(e) => L('tocLineHeight', Number(e.target.value) || 0)} /></label>
-            </div>
+            <label title="목차 항목의 글자 크기 — 비우면 본문과 같습니다. 원고 메타 `> 목차글자:` 가 있으면 메타가 이깁니다(삼국지: 9.5pt)">목차 글자(pt){(meta.tocSize) ? ' 🔒' : ''} <input type="number" step="0.5" min="7" max="14" placeholder="본문과 같음" value={meta.tocSize ? meta.tocSize : (layout.tocSizePt || '')} disabled={!!meta.tocSize}
+              onChange={(e) => L('tocSizePt', Number(e.target.value) || 0)} /></label>
+            <label title="목차 항목의 행간 — 비우면 본문과 같습니다. 원고 메타 `> 목차행간:` 이 있으면 메타가 이깁니다(삼국지: 1.45)">목차 행간{(meta.tocLine) ? ' 🔒' : ''} <input type="number" step="0.05" min="1.1" max="2.5" placeholder="본문과 같음" value={meta.tocLine ? meta.tocLine : (layout.tocLineHeight || '')} disabled={!!meta.tocLine}
+              onChange={(e) => L('tocLineHeight', Number(e.target.value) || 0)} /></label>
+            <label title="장마다 반복되는 코너의 소제목을 쉼표로 구분해 입력하면 그 구간을 옅은 배경 노트 박스로 본문과 다르게 조판합니다 (예: 역사 노트)">
+              특별 섹션
+              <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목"
+                onChange={(e) => L('specialKeyword', e.target.value)} />
+            </label>
           </div>
-          <div className="bkform">
+          <div className="bkchks">
             <label className="chk" title="영상 제작용 블록(🎯 단일 아크 · 📝 주석·안전필터 · 🎨 일관성 앵커 · 🖼️ 이미지/🎬 영상 프롬프트)과 `---` 구분선을 조판에서 제외하고, 제목의 타임코드(— 0:00~0:30 · I2V 5샷)를 지웁니다. 본문 인용(성경 낭독 등)은 그대로 남습니다. 대본 파일은 수정되지 않습니다.">
               <input type="checkbox" checked={!!layout.scriptMode} onChange={(e) => L('scriptMode', e.target.checked)} />
-              🎬 영상 대본 모드 (제작용 블록 숨기고 읽기)
+              🎬 영상 대본 모드
+            </label>
+            <label className="chk" title="본문의 ../참고문헌/지도교수/오광만_박사논문2008_….pdf 같은 파일 경로에서 폴더를 떼고 파일명만 남깁니다. 원고는 수정되지 않습니다.">
+              <input type="checkbox" checked={!!layout.hidePaths} onChange={(e) => L('hidePaths', e.target.checked)} />
+              📁 작업용 파일 경로 → 파일명만
             </label>
             {layout.scriptMode ? (
               <label className="chk" title="샷 제목(### 샷1 — …)까지 숨겨 나레이션만 줄글로 읽습니다">
@@ -1280,94 +1323,75 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
                 샷 제목도 숨기기
               </label>
             ) : null}
-            <label className="chk" title="본문의 ../참고문헌/지도교수/오광만_박사논문2008_….pdf 같은 파일 경로에서 폴더를 떼고 파일명만 남깁니다. 원고는 수정되지 않습니다.">
-              <input type="checkbox" checked={!!layout.hidePaths} onChange={(e) => L('hidePaths', e.target.checked)} />
-              📁 작업용 파일 경로 → 파일명만
+          </div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h"><span title="기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다. 부크크 권고: 중요한 내용은 끝선에서 10~15mm 안쪽">📐 여백 (mm)</span><span className="grow" />
+            {(dto.platformId === 'kdp' || dto.platformId === 'd2d') && <span className="bkpill" data-testid="overseas-margin-hint" title={`위 값이 기본(20/15/20/17) 그대로면 자동 여백이 쓰입니다 — 위·아래 0.75″ · 바깥 0.5″ · 안쪽 = KDP 쪽수 구간표(≤150쪽 0.375″ · ≤300쪽 0.5″ · ≤500쪽 0.625″ · ≤700쪽 0.75″). 한 칸이라도 고치면 그 값이 이깁니다(점검 패널이 안쪽 여백 부족을 알려 줍니다)`}>🇺🇸 {dto.platformId === 'kdp' ? 'KDP' : 'D2D'} 자동 여백</span>}
+          </div>
+          <div className="bkg4">
+            <label>위 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.top} onChange={(e) => Lm('top', e.target.value)} /></label>
+            <label>아래 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.bottom} onChange={(e) => Lm('bottom', e.target.value)} /></label>
+            <label title="제본되는 안쪽(책등 쪽) — 무선제본은 파묻히므로 바깥보다 넓게">안쪽 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.inner} onChange={(e) => Lm('inner', e.target.value)} /></label>
+            <label>바깥 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.outer} onChange={(e) => Lm('outer', e.target.value)} /></label>
+          </div>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h" title="표제지·판권·백면·장 시작 쪽에는 머리글·쪽번호가 자동으로 표시되지 않습니다">📄 머리글 · 쪽번호</div>
+          <div className="bkg21">
+            <label title={hdrEvenMeta ? '원고 메타 `> 머리글짝수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : '책 제목 = 관행'}>짝수쪽 머리글{hdrEvenMeta ? ' 🔒' : ''}
+              <select value={hdrEvenMeta || layout.headerEven} disabled={!!hdrEvenMeta} onChange={(e) => L('headerEven', e.target.value)}>
+                <option value="title">책 제목 (관행)</option><option value="subtitle">책 부제</option>
+                <option value="chapter">장 제목</option><option value="section">소제목(절)</option>
+                <option value="none">표시 안 함</option>
+              </select>
             </label>
-          </div>
-        </details>
-        <details>
-          <summary>여백 (mm)</summary>
-          <div className="bkform">
-            <div className="bkrow">
-              <label>위 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.top} onChange={(e) => Lm('top', e.target.value)} /></label>
-              <label>아래 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.bottom} onChange={(e) => Lm('bottom', e.target.value)} /></label>
-            </div>
-            <div className="bkrow">
-              <label title="제본되는 안쪽(책등 쪽) — 무선제본은 파묻히므로 바깥보다 넓게">안쪽 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.inner} onChange={(e) => Lm('inner', e.target.value)} /></label>
-              <label>바깥 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.outer} onChange={(e) => Lm('outer', e.target.value)} /></label>
-            </div>
-            <div className="meta">기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다. 부크크 권고: 중요한 내용은 끝선에서 10~15mm 안쪽.</div>
-            {(dto.platformId === 'kdp' || dto.platformId === 'd2d') && <div className="meta" data-testid="overseas-margin-hint">🇺🇸 {dto.platformId === 'kdp' ? 'KDP' : 'D2D'}: 위 값이 기본(20/15/20/17) 그대로면 <b>자동 여백</b>이 쓰입니다 — 위·아래 0.75″ · 바깥 0.5″ · 안쪽 = KDP 쪽수 구간표(≤150쪽 0.375″ · ≤300쪽 0.5″ · ≤500쪽 0.625″ · ≤700쪽 0.75″). 한 칸이라도 고치면 그 값이 이깁니다(점검 패널이 안쪽 여백 부족을 알려 줍니다).</div>}
-          </div>
-        </details>
-        <details>
-          <summary>머리글 · 쪽번호</summary>
-          <div className="bkform">
-            <div className="bkrow">
-              <label title={hdrEvenMeta ? '원고 메타 `> 머리글짝수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : ''}>짝수쪽 머리글{hdrEvenMeta ? ' 🔒' : ''}
-                <select value={hdrEvenMeta || layout.headerEven} disabled={!!hdrEvenMeta} onChange={(e) => L('headerEven', e.target.value)}>
-                  <option value="title">책 제목 (관행)</option><option value="subtitle">책 부제</option>
-                  <option value="chapter">장 제목</option><option value="section">소제목(절)</option>
-                  <option value="none">표시 안 함</option>
-                </select>
-              </label>
-              <label>정렬
-                <select value={layout.headerEvenAlign} onChange={(e) => L('headerEvenAlign', e.target.value)}>
-                  <option value="left">왼쪽(바깥) — 관행</option><option value="center">가운데</option><option value="right">오른쪽</option>
-                </select>
-              </label>
-            </div>
-            <div className="bkrow">
-              <label title={hdrOddMeta ? '원고 메타 `> 머리글홀수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : ''}>홀수쪽 머리글{hdrOddMeta ? ' 🔒' : ''}
-                <select value={hdrOddMeta || layout.headerOdd} disabled={!!hdrOddMeta} onChange={(e) => L('headerOdd', e.target.value)}>
-                  <option value="chapter">장 제목 (관행)</option><option value="chapterShort">「제N회 + 짧은 제목」(원고 `> 짧은제목:`)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
-                  <option value="title">책 제목</option><option value="subtitle">책 부제</option>
-                  <option value="none">표시 안 함</option>
-                </select>
-              </label>
-              <label>정렬
-                <select value={layout.headerOddAlign} onChange={(e) => L('headerOddAlign', e.target.value)}>
-                  <option value="right">오른쪽(바깥) — 관행</option><option value="center">가운데</option><option value="left">왼쪽</option>
-                </select>
-              </label>
-            </div>
-            <label className="chk"><input type="checkbox" checked={layout.headerLine} onChange={(e) => L('headerLine', e.target.checked)} /> 머리글 아래 구분선</label>
-            <label>쪽번호
+            <label>정렬
+              <select value={layout.headerEvenAlign} onChange={(e) => L('headerEvenAlign', e.target.value)}>
+                <option value="left">왼쪽(바깥)</option><option value="center">가운데</option><option value="right">오른쪽</option>
+              </select>
+            </label>
+            <label title={hdrOddMeta ? '원고 메타 `> 머리글홀수:` 가 정합니다 — 바꾸려면 원고의 그 줄을 고치세요' : '장 제목 = 관행'}>홀수쪽 머리글{hdrOddMeta ? ' 🔒' : ''}
+              <select value={hdrOddMeta || layout.headerOdd} disabled={!!hdrOddMeta} onChange={(e) => L('headerOdd', e.target.value)}>
+                <option value="chapter">장 제목 (관행)</option><option value="chapterShort">「제N회 + 짧은 제목」(원고 `> 짧은제목:`)</option><option value="chapterNo">「제N회」만 (긴 회목용)</option><option value="section">소제목(절)</option>
+                <option value="title">책 제목</option><option value="subtitle">책 부제</option>
+                <option value="none">표시 안 함</option>
+              </select>
+            </label>
+            <label>정렬
+              <select value={layout.headerOddAlign} onChange={(e) => L('headerOddAlign', e.target.value)}>
+                <option value="right">오른쪽(바깥)</option><option value="center">가운데</option><option value="left">왼쪽</option>
+              </select>
+            </label>
+            <label title="바깥 하단 = 관행">쪽번호
               <select value={layout.pageNum} onChange={(e) => L('pageNum', e.target.value)}>
                 <option value="outer">바깥 하단 (관행)</option><option value="center">하단 가운데</option><option value="none">표시 안 함</option>
               </select>
             </label>
-            <div className="meta">표제지·판권·백면·장 시작 페이지에는 자동으로 표시되지 않습니다.</div>
+            <label className="chk bkchk-end"><input type="checkbox" checked={layout.headerLine} onChange={(e) => L('headerLine', e.target.checked)} /> 머리글 구분선</label>
           </div>
-        </details>
-        <details>
-          <summary>소제목(##) 스타일</summary>
-          <div className="bkform">
-            <div className="bkrow">
-              <label>크기(pt) <input type="number" step="0.5" min="8" max="18" value={layout.h2SizePt} onChange={(e) => L('h2SizePt', Number(e.target.value) || 10.5)} /></label>
-              <label>굵기
-                <select value={layout.h2Weight} onChange={(e) => L('h2Weight', Number(e.target.value))}>
-                  <option value={500}>중간(500)</option><option value={700}>굵게(700)</option>
-                </select>
-              </label>
-            </div>
-            <div className="bkrow">
-              <label>정렬
-                <select value={layout.h2Align} onChange={(e) => L('h2Align', e.target.value)}>
-                  <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
-                </select>
-              </label>
-              <label title="소제목 앞에 붙는 장식 문자 — 비우면 없음">장식 <input type="text" value={layout.h2Prefix} style={{ width: 50 }} onChange={(e) => L('h2Prefix', e.target.value)} /></label>
-            </div>
-            <div className="bkrow">
-              <label>위 여백(pt) <input type="number" step="1" min="0" max="60" value={layout.h2MarginTopPt} onChange={(e) => L('h2MarginTopPt', Math.max(0, Number(e.target.value) || 0))} /></label>
-              <label>아래 여백(pt) <input type="number" step="1" min="0" max="40" value={layout.h2MarginBottomPt} onChange={(e) => L('h2MarginBottomPt', Math.max(0, Number(e.target.value) || 0))} /></label>
-            </div>
-            <label className="chk"><input type="checkbox" checked={layout.h2Gothic} onChange={(e) => L('h2Gothic', e.target.checked)} /> 고딕체 사용 (해제 시 본문 폰트)</label>
+        </section>
+        <section className="bkcard">
+          <div className="bkcard-h">❖ 소제목(##) 스타일</div>
+          <div className="bkg3">
+            <label>크기(pt) <input type="number" step="0.5" min="8" max="18" value={layout.h2SizePt} onChange={(e) => L('h2SizePt', Number(e.target.value) || 10.5)} /></label>
+            <label>굵기
+              <select value={layout.h2Weight} onChange={(e) => L('h2Weight', Number(e.target.value))}>
+                <option value={500}>중간(500)</option><option value={700}>굵게(700)</option>
+              </select>
+            </label>
+            <label>정렬
+              <select value={layout.h2Align} onChange={(e) => L('h2Align', e.target.value)}>
+                <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
+              </select>
+            </label>
+            <label title="소제목 앞에 붙는 장식 문자 — 비우면 없음">장식 <input type="text" value={layout.h2Prefix} onChange={(e) => L('h2Prefix', e.target.value)} /></label>
+            <label>위 여백(pt) <input type="number" step="1" min="0" max="60" value={layout.h2MarginTopPt} onChange={(e) => L('h2MarginTopPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            <label>아래 여백(pt) <input type="number" step="1" min="0" max="40" value={layout.h2MarginBottomPt} onChange={(e) => L('h2MarginBottomPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            <label className="chk bkspan" title="해제하면 본문 폰트로"><input type="checkbox" checked={layout.h2Gothic} onChange={(e) => L('h2Gothic', e.target.checked)} /> 고딕체 사용</label>
           </div>
-        </details>
-      </>);
+        </section>
+      </div>);
       case 'bookk': return registerPanel();
       case 'overseas': return (dto.platformId === 'kdp' || dto.platformId === 'd2d') ? <OverseasRegister dto={dto} setStatus={setStatus} /> : null;
       default: return null;
@@ -1376,8 +1400,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   // 4탭 = 옛 탭 본문을 구역 제목으로 이어 붙인다(입력칸은 그대로 — 새로 마운트되지 않게 함수 호출)
   const sideBody = (() => {
     switch (tab) {
-      case 'structure': return (<>{bodyOf('structure')}<div className="bkzone" data-testid="bk-zone-info">📋 책 정보</div>{bodyOf('info')}</>);
-      case 'cover': return (<>{bodyOf('cover')}<div className="bkzone" data-testid="bk-zone-layout">📐 조판</div>{bodyOf('layout')}</>);
+      case 'structure': return (<>{bodyOf('structure')}{bodyOf('info')}</>);
+      case 'cover': return (<>{bodyOf('cover')}{bodyOf('layout')}</>);
       case 'bookk': return (<>{bodyOf('bookk')}<BookDistribution dto={dto} setStatus={setStatus} busy={building} />{bodyOf('overseas')}</>);
       case 'log': return <div className="bklog bklog-tab" data-testid="bk-log-tab">{logBox}</div>;
       default: return bodyOf(tab);
