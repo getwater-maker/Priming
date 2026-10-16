@@ -722,6 +722,14 @@ export default function App() {
   useAutoCloseProg(sttProg, setSttProg);
   useAutoCloseProg(ytProg, setYtProg);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
+  const [urlAudioFormat, setUrlAudioFormat] = useState('mp3');
+  const [urlQuality, setUrlQuality] = useState('best');
+  const [urlSaveSubs, setUrlSaveSubs] = useState(false);
+  const [urlSubtitleFormat, setUrlSubtitleFormat] = useState('srt');
+  const [urlSubtitleLanguage, setUrlSubtitleLanguage] = useState('original');
+  const [urlSubtitleTrack, setUrlSubtitleTrack] = useState('any');
+  const [urlPlaylistAll, setUrlPlaylistAll] = useState(false);
+  const [ytdlpChannel, setYtdlpChannel] = useState('nightly');
   const [urlForceStt, setUrlForceStt] = useState(false); // 켜면 자막이 있어도 Whisper 로 전사
   const [urlStt, setUrlStt] = useState(true);            // 📥 링크로 받은 뒤 STT 전사(끄면 받기만 · v0.9.17)
   const [dlTab, setDlTab] = useState('link');            // 📥 다운로드 · STT 창 탭: 'link' | 'file'(옛 리본 🎧 STT·🎵 mp3)
@@ -1282,11 +1290,12 @@ export default function App() {
     const urls = String(urlTextRef.current?.value || '')
       .split(/[\n\r]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s));
     if (!urls.length) { logline('주소를 한 줄에 하나씩 붙여넣으세요 (http… 로 시작)'); return; }
-    setUrlOpen(false);
     setUrlBusy(true);
     setStatus(urlChannelAll ? '📺 채널 영상 목록 확인 중…' : `🔗 ${urls.length}개 받는 중…`);
     try {
-      const r = await api.sttFromUrl({ urls, mode: urlMode, stt: urlStt, forceStt: urlStt && urlForceStt, channel: urlChannelAll, presetName: presetName || null });
+      const r = await api.sttFromUrl({ urls, mode: urlMode, stt: urlStt, forceStt: urlStt && urlForceStt, channel: urlChannelAll, playlist: urlPlaylistAll,
+        audioFormat: urlAudioFormat, quality: urlQuality, saveSubs: urlSaveSubs, subtitleFormat: urlSubtitleFormat,
+        subtitleLanguage: urlSubtitleLanguage, subtitleTrack: urlSubtitleTrack, presetName: presetName || null });
       if (!r || r.canceled) { setStatus('취소'); return; }
       if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
       const okN = (r.results || []).filter((x) => x.ok).length;
@@ -1309,8 +1318,9 @@ export default function App() {
   async function updateYtdlp() {
     setUrlBusy(true);
     try {
-      const r = await api.ytdlpUpdate();
-      if (r && r.ok) logline(`✓ yt-dlp ${r.version} 으로 업데이트했습니다`);
+      const r = await api.ytdlpUpdate({ channel: ytdlpChannel });
+      if (r && r.ok) { logline(`✓ yt-dlp ${r.version} (${ytdlpChannel}) 업데이트 확인 완료`); setStatus(`yt-dlp ${r.version} (${ytdlpChannel})`); }
+      else { logline('업데이트 실패: ' + (r?.error || '응답 없음')); setStatus('yt-dlp 업데이트 실패'); }
       setYtInfo(await api.ytdlpStatus());
     } catch (e) { logline('오류: ' + e.message); }
     finally { setUrlBusy(false); }
@@ -7562,15 +7572,14 @@ export default function App() {
           onAbort={() => { api.dlAbort(); setMp3Prog((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setMp3Prog(null)} />
       )}
-      {urlProg && (
+      {urlProg && !urlOpen && (
         <UrlProgress prog={urlProg}
           onAbort={() => { api.dlAbort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setUrlProg(null)} />
       )}
       {urlOpen && (
         <div className="modal-bg show">
-          {/* 📥 다운로드 · STT (v0.9.17 · v0.9.18 로이 「설명은 마우스 팝업 · 체크박스는 버튼 · 주소 칸 위에 사이트 로고 · 두 탭 같은 크기」)
-              🔗 링크 = 받기(+선택 STT) · 📂 내 파일 = mp3 추출·STT. 화질 칸은 없다 — 영상은 늘 최고 화질(같은 해상도면 H.264). */}
+          {/* 진행 창을 열어 둬야 선택한 설정과 다운로드 결과를 함께 볼 수 있다. */}
           <div className="modal-card dl-card" data-testid="dl-modal">
             <h3>📥 다운로드 · STT</h3>
             {(() => {   // 📊 이미 도는 받기·전사·mp3 가 있으면 창 맨 위에 알린다(v0.9.31) — 진행은 오른쪽 아래 패널
@@ -7589,16 +7598,28 @@ export default function App() {
                 <button disabled={urlBusy} className="dl-paste" onClick={pasteAndRunUrlDl}>📋 링크 붙여넣기</button>
                 <Hint>복사해 둔 주소를 붙여넣고 <b>바로 받습니다</b> — 오른쪽 설정을 그대로 따릅니다.</Hint>
                 <span className="meta">다운로드</span>
-                <select data-testid="dl-mode" value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
+                <select data-testid="dl-mode" disabled={urlBusy} value={urlMode} onChange={(e) => setUrlMode(e.target.value)}>
                   <option value="audio">🎵 오디오 (mp3)</option>
                   <option value="video">🎬 영상 (mp4 · 소리 포함)</option>
+                  <option value="subtitles">📝 자막만</option>
                 </select>
-                <Hint>영상은 <b>늘 최고 화질</b>로 받습니다(같은 해상도면 호환이 좋은 H.264 · 4K 처럼 H.264 판이 없으면 VP9).</Hint>
-                <button data-testid="dl-stt" aria-pressed={urlStt} className={'dl-tg' + (urlStt ? ' on' : '')} onClick={() => setUrlStt(!urlStt)}>{urlStt ? '✓ ' : ''}🎧 STT 전사</button>
+                <Hint>영상은 기본 최고 화질이며 아래에서 최대 해상도를 고를 수 있습니다.</Hint>
+                <button data-testid="dl-stt" disabled={urlBusy || urlMode === 'subtitles'} aria-pressed={urlMode !== 'subtitles' && urlStt} className={'dl-tg' + (urlMode !== 'subtitles' && urlStt ? ' on' : '')} onClick={() => setUrlStt(!urlStt)}>{urlMode !== 'subtitles' && urlStt ? '✓ ' : ''}🎧 STT 전사</button>
                 <Hint>{urlStt
                   ? <>받은 뒤 글(.txt)로 옮깁니다 — <b>자막이 있으면 그대로 .txt</b>(수 초 · GPU 0), 자막이 없는 영상만 Whisper 로 전사합니다.</>
-                  : <>지금은 <b>파일만 받습니다</b>(자막·.txt 를 만들지 않습니다). 누르면 전사도 합니다.</>}</Hint>
+                  : <>STT 전사는 끄고 파일을 받습니다. 자막 파일은 아래에서 별도로 선택합니다.</>}</Hint>
               </div>
+              <div className="dl-opts" data-testid="dl-format-options">
+                {urlMode === 'audio' && <label>음원 형식 <select data-testid="dl-audio-format" disabled={urlBusy} value={urlAudioFormat} onChange={(e) => setUrlAudioFormat(e.target.value)}><option value="mp3">MP3</option><option value="m4a">M4A</option></select></label>}
+                {urlMode === 'video' && <label>최대 화질 <select data-testid="dl-quality" disabled={urlBusy} value={urlQuality} onChange={(e) => setUrlQuality(e.target.value)}>{[['best', '최고 화질'], ['2160', '4K'], ['1440', '1440p'], ['1080', '1080p'], ['720', '720p'], ['480', '480p']].map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>}
+                {urlMode !== 'subtitles' && <button data-testid="dl-save-subs" disabled={urlBusy} aria-pressed={urlSaveSubs} className={'dl-tg' + (urlSaveSubs ? ' on' : '')} onClick={() => setUrlSaveSubs(!urlSaveSubs)}>{urlSaveSubs ? '✓ ' : ''}📝 자막 함께 저장</button>}
+              </div>
+              {(urlSaveSubs || urlMode === 'subtitles') && <div className="dl-opts" data-testid="dl-subtitle-options">
+                <label>자막 형식 <select data-testid="dl-sub-format" disabled={urlBusy} value={urlSubtitleFormat} onChange={(e) => setUrlSubtitleFormat(e.target.value)}>{['srt', 'vtt', 'txt'].map((v) => <option key={v} value={v}>{v.toUpperCase()}</option>)}</select></label>
+                <label>언어 <select data-testid="dl-sub-lang" disabled={urlBusy} value={urlSubtitleLanguage} onChange={(e) => setUrlSubtitleLanguage(e.target.value)}>{[['original', '원본 언어'], ['ko', '한국어'], ['en', '영어'], ['ja', '일본어'], ['zh-Hans', '중국어(간체)'], ['es', '스페인어']].map(([v, label]) => <option key={v} value={v}>{label}</option>)}</select></label>
+                <label>트랙 <select data-testid="dl-sub-track" disabled={urlBusy} value={urlSubtitleTrack} onChange={(e) => setUrlSubtitleTrack(e.target.value)}><option value="any">수동 자막 우선 · 없으면 자동</option><option value="manual">수동 자막</option><option value="auto">자동 자막</option></select></label>
+                <Hint>영상에서 제공되는 자막만 저장합니다. 선택한 언어가 없으면 결과에 표시합니다. SRT·VTT는 시간 정보를 유지합니다.</Hint>
+              </div>}
               <div className="dl-sites" data-testid="dl-sites"><SiteLogos /></div>
               <Hint>yt-dlp 가 받는 사이트는 이 밖에도 1,800곳이 넘습니다(인스타그램 · X · 네이버TV 등).</Hint>
               <textarea ref={urlTextRef} rows={4} spellCheck={false} autoFocus
@@ -7606,9 +7627,10 @@ export default function App() {
                 style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'Consolas,monospace', fontSize: 13 }} />
               <Hint>주소 여러 개는 <b>한 줄에 하나씩</b> 넣고 「받기」. 저장 위치 = <b>⚙ 설정 → 📁 폴더 「URL 받기」</b>(모든 채널 공통 · 비우면 윈도우 「다운로드」 폴더).</Hint>
               <div className="dl-opts">
-                <button data-testid="dl-channel" aria-pressed={urlChannelAll} className={'dl-tg' + (urlChannelAll ? ' on' : '')} onClick={() => setUrlChannelAll(!urlChannelAll)}>{urlChannelAll ? '✓ ' : ''}📺 유튜브 채널 전체</button>
+                <button data-testid="dl-channel" disabled={urlBusy} aria-pressed={urlChannelAll} className={'dl-tg' + (urlChannelAll ? ' on' : '')} onClick={() => { setUrlChannelAll(!urlChannelAll); setUrlPlaylistAll(false); }}>{urlChannelAll ? '✓ ' : ''}📺 유튜브 채널 전체</button>
+                <button data-testid="dl-playlist" disabled={urlBusy} aria-pressed={urlPlaylistAll} className={'dl-tg' + (urlPlaylistAll ? ' on' : '')} onClick={() => { setUrlPlaylistAll(!urlPlaylistAll); setUrlChannelAll(false); }}>{urlPlaylistAll ? '✓ ' : ''}📃 재생목록 전체</button>
                 <Hint>영상 주소를 넣어도 <b>그 영상의 채널 일반 영상 전체</b>를 받습니다 — 받기 전에 편수를 묻고, 채널별 폴더에, 이미 완료한 영상은 건너뜁니다.</Hint>
-                {urlStt && <button data-testid="dl-force" aria-pressed={urlForceStt} className={'dl-tg' + (urlForceStt ? ' on' : '')} onClick={() => setUrlForceStt(!urlForceStt)}>{urlForceStt ? '✓ ' : ''}🎙 자막 있어도 Whisper</button>}
+                {urlStt && urlMode !== 'subtitles' && <button data-testid="dl-force" disabled={urlBusy} aria-pressed={urlForceStt} className={'dl-tg' + (urlForceStt ? ' on' : '')} onClick={() => setUrlForceStt(!urlForceStt)}>{urlForceStt ? '✓ ' : ''}🎙 자막 있어도 Whisper</button>}
                 {urlStt && <Hint>자막이 있어도 Whisper 로 전사합니다 — 자막보다 정확하지만 GPU 를 오래 씁니다.</Hint>}
               </div>
               <div className="dl-foot">
@@ -7619,12 +7641,14 @@ export default function App() {
                       ? <>yt-dlp <b>{ytInfo.version}</b>{ytInfo.stale ? <span style={{ color: 'var(--bad, #c0392b)' }}> · {ytInfo.ageDays}일 된 판</span> : ` · ${ytInfo.ageDays}일 전 판`}</>
                       : <>yt-dlp 없음 — 처음 받을 때 자동 설치</>}
                 </span>
-                <Hint>{ytInfo && ytInfo.found && ytInfo.stale ? <>오래된 판이라 오디오가 막힐 수 있습니다 — 받을 때 자동으로 최신판을 내려받습니다.</> : <>유튜브가 바뀌어 받기가 안 되면 「⬇ 업데이트」를 누르세요. 처음 한 번은 자동으로 내려받습니다(약 17MB).</>}</Hint>
+                <Hint>같은 채널의 최신판이면 업데이트 후에도 버전은 같습니다. 안정판에서 오류가 계속되면 최신 수정이 반영된 nightly를 선택할 수 있습니다.</Hint>
+                <select data-testid="dl-update-channel" aria-label="yt-dlp 업데이트 채널" disabled={urlBusy} value={ytdlpChannel} onChange={(e) => setYtdlpChannel(e.target.value)}><option value="nightly">nightly · 최신 수정</option><option value="stable">안정판</option></select>
                 <button className="ghost" disabled={urlBusy} style={{ padding: '1px 8px' }} onClick={updateYtdlp}>⬇ 업데이트</button>
                 <span style={{ flex: 1 }} />
-                <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : '') + (urlStt ? '받아서 전사' : '받기')}</button>
+                <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
+              {urlProg && <UrlProgress embedded prog={urlProg} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
             </div>)}
             {dlTab === 'file' && (<div className="dl-body">
               <div className="dl-tiles">
@@ -9100,6 +9124,9 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview, onMenu }) {
   }
   if (c.imageStatus === 'generating') {
     return <div className={'thumbwrap' + cls}><div className={'thumb none gen' + cls} />{genOv('🖼 이미지 생성 중…')}</div>;
+  }
+  if (c.imageStatus === 'fail' && c.imageError) {
+    return <div className={'thumb none' + cls} data-testid="image-recovery-needed" title={c.imageError + ' · 클릭: 메뉴에서 재생성'} onClick={onEmpty}>⚠ 이미지 복구 필요</div>;
   }
   if (c.imageStale) {
     return <div className={'thumbwrap' + cls} title="새 이미지가 필요합니다 — 클릭: 메뉴" onClick={onEmpty}>

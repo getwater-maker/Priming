@@ -26,6 +26,7 @@ const BIN_DIR = path.join(os.homedir(), '.shots-maker', 'bin');
 const EXE_NAME = IS_WIN ? 'yt-dlp.exe' : 'yt-dlp';
 const OWN_EXE = path.join(BIN_DIR, EXE_NAME);
 const RELEASE_URL = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${EXE_NAME}`;
+const NIGHTLY_URL = `https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${EXE_NAME}`;
 
 // 🔑 60일 — 실측에서 **73일 된 판이 이미 403** 이었다. 넉넉히 잡으면 사용자가 원인을 못 찾는다.
 const STALE_DAYS = 60;
@@ -81,22 +82,31 @@ async function findYtDlp() {
 }
 
 /** GitHub 공식 릴리스에서 최신 exe 를 받아 ~/.shots-maker/bin 에 둔다(약 17MB). */
-async function downloadYtDlp({ onLog } = {}) {
+async function downloadYtDlp({ onLog, channel = 'stable' } = {}) {
   const log = onLog || (() => {});
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  log(`⬇ yt-dlp 최신판을 내려받습니다 — ${RELEASE_URL}`);
-  const res = await fetch(RELEASE_URL, { redirect: 'follow' });
+  const releaseUrl = channel === 'nightly' ? NIGHTLY_URL : RELEASE_URL;
+  log(`⬇ yt-dlp ${channel === 'nightly' ? 'nightly' : '안정판'}을 내려받습니다 — ${releaseUrl}`);
+  const res = await fetch(releaseUrl, { redirect: 'follow', signal: AbortSignal.timeout(120000) });
   if (!res.ok) throw new Error(`yt-dlp 내려받기 실패 (HTTP ${res.status})`);
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length < 1024 * 1024) throw new Error(`받은 파일이 너무 작습니다 (${buf.length} 바이트)`);
   // ⚠ 실행 중인 파일은 덮어쓸 수 없다 → tmp 로 받아 rename(원자적)
-  const tmp = OWN_EXE + '.tmp';
+  const tmp = path.join(BIN_DIR, `yt-dlp-download-${process.pid}-${Date.now()}${IS_WIN ? '.exe' : ''}`);
   fs.writeFileSync(tmp, buf);
-  try { fs.rmSync(OWN_EXE, { force: true }); } catch {}
-  fs.renameSync(tmp, OWN_EXE);
-  if (!IS_WIN) { try { fs.chmodSync(OWN_EXE, 0o755); } catch {} }
-  const r = await _run(OWN_EXE, ['--version'], { timeout: 20000 });
-  const ver = r.stdout.trim().split('\n').pop().trim();
+  let ver;
+  const backup = OWN_EXE + '.previous';
+  let backedUp = false;
+  try {
+    if (!IS_WIN) fs.chmodSync(tmp, 0o755);
+    const r = await _run(tmp, ['--version'], { timeout: 20000 });
+    ver = r.stdout.trim().split('\n').pop().trim();
+    if (r.err || !parseVersionDate(ver)) throw new Error('받은 yt-dlp의 실행 검증에 실패했습니다');
+    if (fs.existsSync(OWN_EXE)) { fs.rmSync(backup, { force: true }); fs.renameSync(OWN_EXE, backup); backedUp = true; }
+    try { fs.renameSync(tmp, OWN_EXE); }
+    catch (error) { if (backedUp) fs.renameSync(backup, OWN_EXE); throw error; }
+    if (backedUp) fs.rmSync(backup, { force: true });
+  } finally { fs.rmSync(tmp, { force: true }); }
   log(`✓ yt-dlp ${ver} 준비 완료 (${(buf.length / 1048576).toFixed(1)}MB)`);
   return { cmd: OWN_EXE, args: [], kind: 'own', version: ver, stale: isStale(ver), ageDays: versionAgeDays(ver) };
 }
@@ -151,7 +161,7 @@ function vttToText(vtt) {
     if (/^\d+$/.test(t)) continue;            // SRT 의 큐 번호
 
     let s = t
-      .replace(/<\d{2}:\d{2}:\d{2}[.,]\d{3}>/g, '')   // 단어별 타이밍 태그
+      .replace(/<(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}>/g, '')   // 단어별 타이밍 태그
       .replace(/<\/?[a-zA-Z][^>]*>/g, '')             // <c> <i> <v …> 등 서식 태그
       .replace(/&nbsp;/g, ' ')
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -330,7 +340,7 @@ function channelUrlOfVideo(j) {
 
 async function listChannelVideos(url, o = {}) {
   const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
-  const channelUrl = normalizeChannelUrl(url);
+  const channelUrl = o.playlist ? normalizePlaylistUrl(url) : normalizeChannelUrl(url);
   const r = await _spawnYt(tool, [
     '--flat-playlist', '--skip-download', '--dump-single-json', '--no-warnings', channelUrl,
   ], { abortSignal: o.abortSignal, timeoutMs: o.timeoutMs || 10 * 60 * 1000 });
@@ -342,7 +352,7 @@ async function listChannelVideos(url, o = {}) {
   const line = r.stdout.split('\n').find((x) => x.trim().startsWith('{'));
   if (!line) throw new Error('채널 영상 목록 응답이 없습니다');
   const j = JSON.parse(line);
-  const ofVideo = !o._fromVideo && channelUrlOfVideo(j);
+  const ofVideo = !o.playlist && !o._fromVideo && channelUrlOfVideo(j);
   if (ofVideo) {
     if (o.onLog) o.onLog(`  ↳ 영상 주소입니다 — 이 영상의 채널 「${j.channel || j.uploader || ''}」 전체를 읽습니다`);
     return listChannelVideos(ofVideo, { ...o, tool, _fromVideo: true });
@@ -354,9 +364,25 @@ async function listChannelVideos(url, o = {}) {
   })).filter((e) => e.url);
   return {
     url: channelUrl,
-    title: String(j.channel || j.uploader || j.title || '채널 영상'),
+    title: String((o.playlist && j.title) || j.channel || j.uploader || j.title || '채널 영상'),
     entries,
   };
+}
+
+function normalizePlaylistUrl(value) {
+  const url = new URL(value);
+  const id = url.searchParams.get('list');
+  if (!/^(www\.|m\.|music\.)?youtube\.com$/i.test(url.hostname) || !id || !/^[\w-]+$/.test(id)) throw new Error('재생목록 ID(list)가 포함된 유튜브 주소를 넣으세요');
+  return `https://www.youtube.com/playlist?list=${id}`;
+}
+
+function selectSubtitleLanguage(info, language = 'original', track = 'any') {
+  const manual = track === 'auto' ? [] : (info.subLangs || []);
+  const auto = track === 'manual' ? [] : (info.autoLangs || []);
+  if (language && language !== 'original') return language;
+  const lang = String(info.language || '').split('-')[0];
+  const pick = (items) => items.find((x) => x === `${lang}-orig`) || items.find((x) => x === info.language || x === lang) || items.find((x) => /-orig$/.test(x));
+  return pick(manual) || pick(auto) || manual[0] || (lang || 'original');
 }
 
 /**
@@ -437,7 +463,7 @@ function _explain(stderr) {
   if (/HTTP Error 429|Too Many Requests/i.test(s))
     return '유튜브가 요청이 많다며 잠시 막았습니다(429) — 기다렸다 다시 해도 막혀 건너뜁니다. 몇 분 뒤 다시 받아 보세요.';
   if (/HTTP Error 403|Forbidden/i.test(s))
-    return '유튜브가 다운로드를 거부했습니다(403) — 기다렸다 다시 해도 막혀 건너뜁니다. 보통 잠시 뒤 풀립니다(몇 분 뒤 다시) · 계속되면 yt-dlp 「⬇ 업데이트」.';
+    return '유튜브가 다운로드를 거부했습니다(403) — 재시도 후에도 실패했습니다. 요청 제한·실행 환경·버전을 확인해야 합니다. 계속되면 nightly 업데이트로 확인하세요.';
   if (/DRM protected/i.test(s))
     return 'DRM 으로 보호된 영상이라 소리를 받을 수 없습니다(비메오 일부 영상 · 자막만 가능). 저작권 보호라 우회하지 않습니다.';
   if (needsVimeoPlayer(s))
@@ -465,13 +491,12 @@ function _explain(stderr) {
  *   o.language  probe 로 알아낸 원본 언어(자막 고를 때 씀)
  * @returns {{audio?:string, video?:string, sub?:string}} 실제로 생긴 파일 경로
  */
-async function download(url, o = {}) {
-  const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
-  const outDir = o.outDir;
-  if (!outDir) throw new Error('저장 폴더가 지정되지 않았습니다');
-  fs.mkdirSync(outDir, { recursive: true });
+function requestedSubtitleLanguages(url, o) {
+  return o.subtitleLanguage && o.subtitleLanguage !== 'original' ? [o.subtitleLanguage] : subLangPref(o.language, url);
+}
 
-  const before = new Set(fs.readdirSync(outDir));
+function buildDownloadArgs(url, o = {}) {
+  const outDir = o.outDir;
   const outputName = o.filenameWithId ? '%(title)s [%(id)s].%(ext)s' : '%(title)s.%(ext)s';
   const args = [
     '--no-playlist',            // 🔑 재생목록 주소 하나가 수백 개를 받는 사고를 막는다
@@ -484,30 +509,53 @@ async function download(url, o = {}) {
 
   const wantAudio = o.mode === 'audio' || o.mode === 'both';
   const wantVideo = o.mode === 'video' || o.mode === 'both';
+  const audioFormat = o.audioFormat === 'm4a' ? 'm4a' : 'mp3';
+  const quality = ['2160', '1440', '1080', '720', '480'].includes(String(o.quality)) ? String(o.quality) : '';
+  args.push('--ignore-config', '--no-cache-dir', '--no-simulate', '--no-quiet', '--progress', '--print', 'before_dl:__PRIMING_BASE__%(filename)s');
 
-  if (wantVideo) {
+  if (o.mode === 'subtitles') {
+    args.push('--skip-download');
+  } else if (wantVideo) {
     // 🎞 화질 = 늘 최고(해상도·fps 먼저) · **같은 해상도면 H.264 + AAC 우선**(v0.9.17 · 로이 승인 2026-10-14)
     //   정렬 없이 고르면 유튜브는 AV1 + Opus 를 준다(실측: 4K·1080·240p 모두) — Vrew·윈도우 기본 플레이어가 못 열 수 있다.
     //   `vcodec:h264` = 「h264 이하 코덱 중 가장 좋은 것」 우선. 4K·AI 업스케일처럼 H.264 판이 없으면 VP9/AV1 이 그대로 온다.
-    args.push('-f', 'bestvideo*+bestaudio/best', '-S', 'res,fps,vcodec:h264,acodec:m4a', '--merge-output-format', 'mp4');
-    if (wantAudio) args.push('--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0', '-k');
+    args.push('-f', quality ? `bestvideo*[height<=${quality}]+bestaudio/best[height<=${quality}]` : 'bestvideo*+bestaudio/best', '-S', 'res,fps,vcodec:h264,acodec:m4a', '--merge-output-format', 'mp4');
+    if (wantAudio) args.push('--extract-audio', '--audio-format', audioFormat, '--audio-quality', '0', '-k');
   } else {
     args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best',
-      '--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0');
+      '--extract-audio', '--audio-format', audioFormat, '--audio-quality', '0');
   }
 
-  if (o.subs) {
-    args.push('--write-subs', '--write-auto-subs', '--sub-format', 'vtt',
-      '--sub-langs', subLangPref(o.language, url).join(','));
+  if (o.subs || o.mode === 'subtitles') {
+    const languages = requestedSubtitleLanguages(url, o);
+    if (!languages.every((lang) => /^[a-zA-Z0-9.*_-]+$/.test(lang))) throw new Error('지원하지 않는 자막 언어입니다');
+    if (o.subtitleTrack !== 'auto') args.push('--write-subs');
+    if (o.subtitleTrack !== 'manual') args.push('--write-auto-subs');
+    args.push('--sub-format', 'vtt', '--sub-langs', languages.join(','));
   }
   if (o.ffmpegDir) args.push('--ffmpeg-location', o.ffmpegDir);
   args.push(url);
+  return args;
+}
+
+async function download(url, o = {}) {
+  const tool = o.tool || await ensureYtDlp({ onLog: o.onLog });
+  const outDir = o.outDir;
+  if (!outDir) throw new Error('저장 폴더가 지정되지 않았습니다');
+  fs.mkdirSync(outDir, { recursive: true });
+  const before = new Set(fs.readdirSync(outDir));
+  const args = buildDownloadArgs(url, o);
+  const wantAudio = o.mode === 'audio' || o.mode === 'both';
+  const wantVideo = o.mode === 'video' || o.mode === 'both';
+  const audioFormat = o.audioFormat === 'm4a' ? 'm4a' : 'mp3';
+  let resolvedBase = '';
 
   let lastPct = -1;
   const run = (a) => _spawnYt(tool, a, {
     abortSignal: o.abortSignal,
     timeoutMs: o.timeoutMs || 30 * 60 * 1000,
     onLine: (ln) => {
+      if (ln.startsWith('__PRIMING_BASE__')) { resolvedBase = path.basename(ln.slice('__PRIMING_BASE__'.length)); return; }
       const m = ln.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
       if (m) {
         const raw = parseFloat(m[1]);
@@ -533,7 +581,7 @@ async function download(url, o = {}) {
     r = await run(args);
   }
   // 🔁 자막만 실패(429 등)하면 영상까지 버리지 않는다 — 자막 없이 한 번 더(이미 받은 영상은 --no-overwrites 로 그대로 · 음성은 STT 가 맡는다 · v0.9.38)
-  if (r.code !== 0 && o.subs && SUB_FAIL_RE.test(r.stderr || '') && !(o.abortSignal && o.abortSignal())) {
+  if (r.code !== 0 && o.subs && o.mode !== 'subtitles' && !o.requireSubs && SUB_FAIL_RE.test(r.stderr || '') && !(o.abortSignal && o.abortSignal())) {
     if (o.onLog) o.onLog(`  ⚠ 자막을 못 받았습니다(${(_explain(r.stderr) || '').slice(0, 120)}) — 자막 없이 다시 받습니다(음성은 STT 로)`);
     const noSub = args.filter((x, i) => !SUB_ARGS.has(x) && !(i > 0 && args[i - 1] === '--sub-format') && !(i > 0 && args[i - 1] === '--sub-langs'));
     r = await run(noSub);
@@ -549,31 +597,68 @@ async function download(url, o = {}) {
   const made = after.filter((f) => !before.has(f));
   // 채널 재실행은 ID가 붙은 기존 파일도 결과로 돌려준다. 그래야 이미 받은 수백 건을 다시 STT 하지 않는다.
   const idMark = o.mediaId ? `[${String(o.mediaId)}]` : '';
-  const candidates = idMark ? after.filter((f) => f.includes(idMark)) : made;
+  const stem = resolvedBase ? path.basename(resolvedBase, path.extname(resolvedBase)) : '';
+  const candidates = stem ? after.filter((f) => f === resolvedBase || f.startsWith(stem + '.')) : idMark ? after.filter((f) => f.includes(idMark)) : made;
   const pick = (re) => {
-    const f = candidates.filter((x) => re.test(x)).sort((a, b) => b.length - a.length)[0];
+    const f = candidates.find((x) => stem && path.basename(x, path.extname(x)) === stem && re.test(x)) || (!stem && candidates.filter((x) => re.test(x)).sort((a, b) => b.length - a.length)[0]);
     return f ? path.join(outDir, f) : null;
   };
   // 🔑 자막 고르기는 `pickSubFile` 한 곳에서만 한다(`-orig` 우선 → 요청 순서 → 첫 파일).
-  const subFiles = candidates.filter((f) => /\.vtt$/i.test(f));
+  const languages = requestedSubtitleLanguages(url, o);
+  const subFiles = candidates.filter((f) => /\.vtt$/i.test(f) && languages.some((lang) => {
+    const pattern = lang.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+    return new RegExp(`\\.${pattern}\\.vtt$`, 'i').test(f);
+  }));
   const subMain = pickSubFile(subFiles, subLangPref(o.language, url));
+  if (o.mode === 'subtitles' && !subMain) throw new Error('선택한 언어의 자막이 제공되지 않습니다');
+  const audio = wantAudio ? pick(new RegExp(`\\.${audioFormat}$`, 'i')) : null;
+  const video = wantVideo ? pick(/\.(mp4|mkv|webm)$/i) : null;
+  if ((wantAudio && !audio) || (wantVideo && !video)) throw new Error('다운로드 결과 파일을 찾지 못했습니다');
   return {
-    audio: wantAudio ? pick(/\.mp3$/i) : null,
-    video: wantVideo ? pick(/\.(mp4|mkv|webm)$/i) : null,
-    sub: o.subs && subMain ? path.join(outDir, subMain) : null,
+    audio, video,
+    sub: (o.subs || o.mode === 'subtitles') && subMain ? path.join(outDir, subMain) : null,
     subExtras: subFiles.filter((f) => f !== subMain).map((f) => path.join(outDir, f)),
     files: made.map((f) => path.join(outDir, f)),
     reused: !!idMark && candidates.some((f) => before.has(f)),
   };
 }
 
+function vttToSrt(value) {
+  const cues = [];
+  const stamp = (s) => (s.split(':').length === 2 ? '00:' + s : s).replace('.', ',');
+  for (const block of String(value || '').replace(/\r/g, '').split(/\n\s*\n/)) {
+    const lines = block.split('\n');
+    const at = lines.findIndex((line) => /\d{2}:\d{2}[.,]\d{3}\s*-->/.test(line));
+    if (at < 0) continue;
+    const time = lines[at].match(/((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})\s*-->\s*((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})/);
+    if (!time) continue;
+    const text = lines.slice(at + 1).join('\n').replace(/<[^>]*>/g, '').trim();
+    if (text) cues.push(`${cues.length + 1}\n${stamp(time[1])} --> ${stamp(time[2])}\n${text}`);
+  }
+  if (!cues.length) throw new Error('자막에서 시간 정보를 읽지 못했습니다');
+  return cues.join('\n\n') + '\n';
+}
+
+function exportSubtitles(files, format = 'srt') {
+  if (!['srt', 'vtt', 'txt'].includes(format)) throw new Error('지원하지 않는 자막 형식입니다');
+  return files.filter(Boolean).map((file) => {
+    if (format === 'vtt') return file;
+    const content = fs.readFileSync(file, 'utf8');
+    const out = file.replace(/\.vtt$/i, '.' + format);
+    const text = format === 'srt' ? vttToSrt(content) : vttToText(content).join('\n');
+    if (!text.trim()) throw new Error('자막 내용이 비어 있습니다');
+    if (!fs.existsSync(out)) fs.writeFileSync(out, text, { encoding: 'utf8', flag: 'wx' });
+    return out;
+  });
+}
+
 module.exports = {
-  BIN_DIR, OWN_EXE, RELEASE_URL, STALE_DAYS,
+  BIN_DIR, OWN_EXE, RELEASE_URL, NIGHTLY_URL, STALE_DAYS,
   parseVersionDate, versionAgeDays, isStale,
   findYtDlp, downloadYtDlp, ensureYtDlp,
   vttToText, subtitleFileToText, subLangPref, pickSubFile,
   probe, probeSmart, download, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
-  _explain, jsRuntimeArgs,
+  _explain, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,
 };

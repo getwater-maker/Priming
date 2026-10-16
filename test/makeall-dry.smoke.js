@@ -111,7 +111,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
       } catch (e) { return 'ERR: ' + e.message; }
     }, CH);
     console.log('  (만들기 ' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
-    ok(res === 'ok', '⚡ 만들기(무음) 예외 없이 완주: ' + res);
+    ok(/빠진 이미지·음성이 있어 제작을 완료하지 못했습니다/.test(res), '이미지가 빠진 전체 제작은 완료로 처리하지 않는다: ' + res);
     ok(!/is not defined/.test(res), '🔴 ReferenceError 없음(imgEngine 계열 사고 재발 방지)');
 
     // ③-2 📊 진행 팝업(v0.6.26) — 만들기가 끝나면 「✅ 만들기 완료」 + 문장 n/n · 그림 0/3 · 영상 건너뜀.
@@ -123,7 +123,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
       return el ? { all: el.textContent, sent: t('문장'), image: t('그림'), video: t('영상'), out: t('출력') } : null;
     });
     ok(!!mkp, '📊 진행 팝업이 떴다');
-    ok(!!mkp && /만들기 완료/.test(mkp.all), '📊 팝업 머리 = 만들기 완료: ' + (mkp && mkp.all.slice(0, 40)));
+    ok(!!mkp && /만들기 실패/.test(mkp.all), '📊 누락 이미지가 있으면 만들기 실패 표시: ' + (mkp && mkp.all.slice(0, 40)));
     const sentM = mkp && mkp.sent.match(/(\d+)\s*\/\s*(\d+)\s*문장/);
     ok(!!sentM && sentM[1] === sentM[2] && Number(sentM[2]) >= 3, '📊 문장 n/n 문장: ' + (mkp && mkp.sent));
     ok(!!mkp && /0\s*\/\s*3\s*장/.test(mkp.image), '📊 그림 0/3 장(무음 모드는 그림을 안 만든다): ' + (mkp && mkp.image));
@@ -142,7 +142,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     // ⑤ 단계가 끝까지 흘렀는지 — 여기까지 로그가 찍히면 runMakeAllCore 를 완주한 것이다.
     ok(/1단계 — 음성/.test(logText), '1단계 실행됨');
     ok(/4단계 — .vrew/.test(logText), '4단계 도달(함수 끝까지 실행)');
-    ok(/전체 제작 완료/.test(logText), '정상 종료');
+    ok(!/전체 제작 완료/.test(logText), '이미지 누락을 전체 제작 완료로 기록하지 않는다');
     ok(/절전 차단 해제/.test(logText), '절전 차단이 해제됨(finally 통과)');
     // ⑥ 무음 모드는 **이미지가 없으므로 이미지 게이트가 .vrew 를 막는 것이 정상**이다.
     //    → 이 줄이 뜨는 것 자체가 v0.3.10 이미지 게이트가 살아 있다는 증거(반쪽 .vrew 방지).

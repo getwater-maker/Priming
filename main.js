@@ -1282,10 +1282,11 @@ ipcMain.handle('clipboard-read-text', () => {
   try { return require('electron').clipboard.readText() || ''; } catch { return ''; }
 });
 
-ipcMain.handle('ytdlp-update', async () => {
+ipcMain.handle('ytdlp-update', async (_e, args = {}) => {
+  if (_dlActive > 0) return { ok: false, error: '다운로드가 끝난 뒤 업데이트하세요' };
   const MD = require('./core/media-download');
   try {
-    const t = await MD.downloadYtDlp({ onLog: log });
+    const t = await MD.downloadYtDlp({ onLog: log, channel: args.channel === 'nightly' ? 'nightly' : 'stable' });
     return { ok: true, version: t.version };
   } catch (e) { log(`✗ yt-dlp 업데이트 실패: ${e.message}`); return { ok: false, error: e.message }; }
 });
@@ -1301,10 +1302,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const urls = (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
   if (!urls.length) return { ok: false, error: '주소가 없습니다' };
 
-  const mode = ['audio', 'video', 'both'].includes(args.mode) ? args.mode : 'audio';   // 화면은 audio·video 둘만 보낸다(v0.9.17 — both 는 옛 호출 호환)
+  const mode = ['audio', 'video', 'both', 'subtitles'].includes(args.mode) ? args.mode : 'audio';
   const forceStt = !!args.forceStt;
-  const doStt = args.stt !== false;
-  const channelMode = !!args.channel;
+  const doStt = mode !== 'subtitles' && args.stt !== false;
+  const saveSubs = mode === 'subtitles' || !!args.saveSubs;
+  const channelMode = !!args.channel || !!args.playlist;
 
   // 저장 폴더 — ⚙ 설정 → 📁 폴더 「URL 받기」(모든 채널 공통 · 2026-10-14), 없으면 **윈도우 「다운로드」 폴더**,
   //   그마저 못 찾을 때만 그 자리에서 고르게 한다. (옛 채널별 downloadFolder 는 읽지 않는다)
@@ -1330,7 +1332,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     phase: 'prepare', total: 0, startedAt: Date.now(), outDir,
     dl: { done: 0, idx: 0, title: '', pct: 0, stage: '' },
     stt: { done: 0, pending: 0, cur: null },
-    sub: 0, skip: 0, fail: 0, fails: [],
+    sub: 0, skip: 0, fail: 0, fails: [], doStt, savedSubs: 0, subtitleMissing: 0,
   };
   let _progT = 0, _progTimer = null;
   const sendProg = (now) => {
@@ -1370,7 +1372,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         if (_dlAbort) break;
         try {
           log(`📺 채널 영상 목록 확인: ${channelUrl}`);
-          const channel = await MD.listChannelVideos(channelUrl, { tool, abortSignal: () => _dlAbort, onLog: log });
+          const channel = await MD.listChannelVideos(channelUrl, { tool, playlist: !!args.playlist, abortSignal: () => _dlAbort, onLog: log });
           const channelDir = path.join(outDir, MD.safeFolderName(channel.title));
           log(`  ✓ 「${channel.title}」 일반 영상 ${channel.entries.length}개 · 저장 ${channelDir}`);
           for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir });
@@ -1385,7 +1387,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const names = [...new Set(jobs.map((j) => j.channelTitle))].join(' · ');
         const ans = await dialog.showMessageBox(win, {
           type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
-          title: '채널 전체 받기',
+          title: args.playlist ? '재생목록 전체 받기' : '채널 전체 받기',
           message: `「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'}.`,
           detail: '이미 전사한 영상은 건너뜁니다. 한 편만 받으려면 취소하고 「채널 전체」 체크를 끄세요.',
         });
@@ -1461,10 +1463,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
 
         // .txt 머리말에는 **사용자가 붙여넣은 원래 주소**를 쓴다(나중에 다시 열어볼 주소는 그쪽이다).
         const head = { url, title: info.title };
-        // 🔑 STT 를 끄면 받기만 한다 — 자막도 받지 않고 .txt 도 만들지 않는다(v0.9.17)
-        const wantSubs = doStt && !forceStt;
+        const wantSubs = saveSubs || (doStt && !forceStt);
         const r = await MD.download(dlUrl, {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
+          audioFormat: args.audioFormat, quality: args.quality, subtitleTrack: args.subtitleTrack,
+          subtitleLanguage: saveSubs ? MD.selectSubtitleLanguage(info, args.subtitleLanguage, args.subtitleTrack) : 'original', requireSubs: mode === 'subtitles',
           filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
           ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log,
           onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
@@ -1495,13 +1498,19 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
             log('  ⓘ 자막이 비어 있어 STT 로 진행합니다.');
           }
         }
-        // 받아 둔 .vtt 는 텍스트로 옮겼으니 남기지 않는다(출력 폴더가 지저분해진다).
+        let subtitleFiles = [];
+        if (saveSubs) {
+          subtitleFiles = MD.exportSubtitles([r.sub, ...(r.subExtras || [])], args.subtitleFormat || 'srt');
+          prog.savedSubs += subtitleFiles.length;
+          if (!subtitleFiles.length) { prog.subtitleMissing++; log(`  ⚠ 「${info.title}」 선택한 언어의 자막이 없습니다 — 미디어 파일은 저장했습니다`); }
+          else log(`  📝 자막 저장: ${subtitleFiles.map((f) => path.basename(f)).join(', ')}`);
+        }
         for (const f of [r.sub, ...(r.subExtras || [])]) {
-          if (f) { try { fs.rmSync(f, { force: true }); } catch {} }
+          if (f && !subtitleFiles.includes(f)) { try { fs.rmSync(f, { force: true }); } catch (error) { log(`⚠ 임시 자막 정리 실패: ${error.message}`); } }
         }
 
         const done = { url, ok: true, title: info.title, audio: r.audio, video: r.video,
-          txt: txtFrom ? outTxt : null, from: txtFrom };
+          txt: txtFrom ? outTxt : null, from: txtFrom, subtitles: subtitleFiles };
         if (!txtFrom && doStt) {
           if (!mediaFile) throw new Error('받은 음성·영상 파일이 없습니다');
           // 🔑 다운로드를 멈추지 않고 전사 줄에 세운다 — 다음 영상은 곧바로 받기 시작한다.
@@ -4370,19 +4379,21 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     const qx = qr ? await qr.forGroup(project, g, stylePrompt) : null;
     if (qx) prompt += qx.extra;
     const _t0 = Date.now();
-    const r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort, refs: qx ? qx.refs : null });
+    let r;
+    try { r = await eng.textToImage({ prompt, aspect: project.aspect || '16:9', outputPath: base, abortSignal: () => S.abort, refs: qx ? qx.refs : null }); }
+    catch (error) { r = { success: false, error: error.message }; }
     const _el = (Date.now() - _t0) / 1000;
     if (r.success) {
       // ⚠ 이상 이미지 검증 — 서버가 completed 로 보고해도 검정이거나 노이즈일 수 있다(동시 생성 시 발생).
       if (await looksBadImage(r.imagePath)) {
         try { fs.rmSync(r.imagePath, { force: true }); } catch {}
         try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {}
-        g.imagePath = null; g.imageStatus = 'fail'; g.imageCleared = true; // 캐시로 되살아나지 않게
+        g.imagePath = null; g.imageStatus = 'fail'; g.imageCleared = true; g.imageError = '검정·노이즈 이미지'; // 캐시로 되살아나지 않게
         blanks.push(g); // 아래에서 순차로 재생성
         logger(`  ⬛ G${g.num} 이상 이미지(검정·노이즈) 감지 (${_dur(_el)}) — 폐기 후 재생성 대기`);
-      } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; imgTimes.push(_el); logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)} (${_dur(_el)})`); }
+      } else { g.imagePath = r.imagePath; g.imageStatus = 'done'; g.imageError = null; g.imageCleared = false; g.imageStale = false; imgTimes.push(_el); logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)} (${_dur(_el)})`); }
     } else {
-      g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패 (${_dur(_el)}): ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
+      g.imageStatus = 'fail'; g.imageError = r.error; logger(`  ✗ G${g.num} 실패 (${_dur(_el)}): ${r.error}`); // 성공/실패 모두 스피너 해제(고착 방지)
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
     }
     pushDtoUpdate();
@@ -4416,10 +4427,17 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
         if (S.abort) { logger('⏹ 중단됨'); return; }
         await genOne(g, att);            // ⚠ att 를 넘겨 **프롬프트를 바꿔** 재시도(같은 글자면 같은 노이즈)
         if (g.imagePath) break;          // 정상 생성됨
-        if (att === 2) logger(`  ✗ G${g.num} 재생성 2회 실패 — 이 그룹 이미지 없음(프롬프트 확인 필요)`);
+        if (att === 2) logger(`  ⚠ G${g.num} 일반 재시도 실패 — Claude 프롬프트 복구로 전환합니다`);
       }
     }
     blanks.length = 0; // 재시도 중 다시 쌓인 항목 정리(무한 반복 방지)
+    pushDtoUpdate();
+  }
+  if (!S.abort) {
+    await require('./core/image-recovery').recoverImages({
+      project, groups: targets.filter((g) => g.imageStatus === 'fail' && !imgDone(g, force)),
+      generate: (g) => genOne(g, 0), log: logger, aborted: () => S.abort,
+    });
     pushDtoUpdate();
   }
   // ⏱ 장당 몇 초였나 — 로이가 로그에서 바로 확인할 수 있게(동시 생성이면 벽시계 < 합계).
@@ -5295,6 +5313,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
   await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log);
   const _imgT0 = Date.now();
   S.timings.image = 0;
+  const imageFailures = [];
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     if (S.abort) { log('⏹ 중단됨'); break; }
@@ -5309,8 +5328,11 @@ ipcMain.handle('image-build', (_e, args = {}) => {
       }
       cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
       let _bLeft = 0; try { if (engine === 'gemini-batch' && S.scriptPath) _bLeft = require('./core/gemini-batch-store').pendingAllForScript(S.scriptPath).length; } catch {}
+      const missing = missingVisualGroups(pr);
+      if (missing.length && !_bLeft && !S.abort) throw new Error(`이미지 복구 필요: G${missing.join(', G')}`);
       log(_bLeft ? `⏳ ${prLabel(pr)} 이미지 단계 끝 — 못 받은 배치 ${_bLeft}개가 남았습니다(「이미지」를 다시 누르면 가져옵니다)` : `✓ ${prLabel(pr)} 이미지 완료`);
     } catch (e) {
+      imageFailures.push(`${prLabel(pr)} ${e.message}`);
       log(`✗ ${prLabel(pr)} 이미지 실패: ${e.message}`);
     }
     pushDtoUpdate(); // 생성된 이미지(g.imagePath)를 UI 썸네일에 즉시 반영
@@ -5318,6 +5340,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
   try { await closeFlowEng(); } catch {} // Flow 이미지 창 닫고 마무리
   S.timings.image = (Date.now() - _imgT0) / 1000;
   pushDtoUpdate();
+  if (imageFailures.length) throw new Error(imageFailures.join(' / '));
   return P.toDTO(S.parsed);
   }, engine);   // engine 전달 = 로컬 ComfyUI 면 TTS 와 같은 'localGpu' 레인을 잡는다(OOM·감속 방지)
 });
@@ -7703,6 +7726,7 @@ async function runMakeAllCore(opts = {}) {
   finally { if (_mk) { _mk.stop(S.abort ? 'aborted' : 'done'); _mk = null; } }
 }
 async function runMakeAllBody(opts = {}) {
+  let outputIncomplete = '';
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
@@ -8081,6 +8105,7 @@ async function runMakeAllBody(opts = {}) {
     if (_mk) { _mk.end('out'); if (incomplete.length || noTts.length) _mk.note('⛔ 빠진 그림·음성이 있어 만들지 않음'); }
     warnIncompleteVisuals(incomplete);
     warnMissingTts(noTts);
+    if (incomplete.length || noTts.length) outputIncomplete = '빠진 이미지·음성이 있어 제작을 완료하지 못했습니다';
   } else {
     log('⏹ 중단됨 — .vrew 생성 및 이후 작업 생략');
   }
@@ -8092,6 +8117,7 @@ async function runMakeAllBody(opts = {}) {
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   // ⚠ 작업 완료 시 탐색기 자동 열기는 폐지(로이 2026-08-12) — .vrew 만 열리면 충분하다.
   //   큐로 여러 대본을 돌리면 폴더 창이 그 수만큼 쌓여 방해가 됐다. 폴더가 필요하면 헤더 '출력폴더' 버튼.
+  if (outputIncomplete && !S.abort) throw new Error(outputIncomplete);
   log(S.abort
     ? `⏹ 중단됨 — 완료된 자산만 보존 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s)`
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
@@ -8675,10 +8701,19 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
     _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 그림을 가리지 않게
     log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
+    const _prevImg = g.imagePath, _prevEng = g.imageEngine;
+    const previousState = { imageCleared: g.imageCleared, imageStale: g.imageStale, imagePrompt: g.imagePrompt, imageError: g.imageError, _imgCacheKey: g._imgCacheKey, _userImage: g._userImage };
+    const canRestore = !!(_prevImg && fs.existsSync(_prevImg) && (_userAttached(g, 'image') || !await looksBadImage(_prevImg)));
+    let restored = false;
+    const restorePrevious = () => {
+      if (!canRestore || !fs.existsSync(_prevImg)) return;
+      g.imagePath = _prevImg; g.imageEngine = _prevEng; g.imageStatus = 'done';
+      Object.assign(g, previousState); restored = true;
+      log(`↩ G${groupNum} 기존 이미지를 그대로 둡니다 (${path.basename(_prevImg)})`);
+    };
     try {
       // ⚠ 실패하면 **원래 있던 이미지 참조가 끊긴 채로 남는다**(파일은 폴더에 그대로인데 그룹은 이미지 없음
       //   → .vrew 게이트에 막힌다). 그래서 이전 경로를 들고 있다가 실패 시 되돌린다(로이 2026-08-26).
-      const _prevImg = g.imagePath, _prevEng = g.imageEngine;
       g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
       // 🔑 **누를 때마다 프롬프트를 바꾼다.** 씨앗만 새로 뽑으면 같은 글자가 다시 나가는데, comfy.org Krea2 CLIP 의
       //   조건 깨짐은 **프롬프트 텍스트에 결정적**이라 똑같이 망가진 그림이 또 온다(로이 2026-08-19:
@@ -8691,10 +8726,11 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
       if (g.imagePath && g.imageStatus === 'done') log(`✓ G${groupNum} 재생성 완료`);
       else {
         g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패 — 이미지가 생성되지 않았습니다 (엔진 한도·오류·결제 확인)`); // 실패 시 'generating' 고착 방지
-        if (_prevImg && fs.existsSync(_prevImg)) { g.imagePath = _prevImg; g.imageEngine = _prevEng; g.imageStatus = 'done'; log(`↩ G${groupNum} 기존 이미지를 그대로 둡니다 (${path.basename(_prevImg)})`); }
+        restorePrevious();
       }
-    } catch (e) { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+    } catch (e) { g.imageStatus = 'fail'; g.imageError = e.message; log(`✗ G${groupNum} 재생성 실패: ${e.message}`); restorePrevious(); }
     pushDtoUpdate(); // 성공/실패 최종 상태를 UI 에 반영(스피너 해제)
+    if (!restored && (!g.imagePath || g.imageStatus !== 'done') && !S.abort) throw new Error(`G${groupNum} 이미지 복구 필요 — ${g.imageError || '정상 이미지가 없습니다'}`);
     return P.toDTO(S.parsed);
   }, engine);   // 로컬 ComfyUI 면 TTS 와 같은 레인(내 PC GPU)에 줄 세운다
 });

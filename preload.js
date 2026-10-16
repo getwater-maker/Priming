@@ -331,7 +331,7 @@ contextBridge.exposeInMainWorld('api', {
   sttFromUrl: (a) => ipcRenderer.invoke('stt-from-url', a),
   readClipboardText: () => ipcRenderer.invoke('clipboard-read-text'),   // 📋 대본다운 「링크 붙여넣기」
   ytdlpStatus: () => ipcRenderer.invoke('ytdlp-status'),
-  ytdlpUpdate: () => ipcRenderer.invoke('ytdlp-update'),
+  ytdlpUpdate: (args) => ipcRenderer.invoke('ytdlp-update', args),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),
   onDtoUpdate: (cb) => ipcRenderer.on('dto-update', (_e, dto) => cb(dto)),
   onQueueUpdate: (cb) => ipcRenderer.on('queue-update', (_e, q) => cb(q)),   // 📋 작업 순서 줄만(보지 않는 대본의 상태·시간·업로드 · v0.9.42)

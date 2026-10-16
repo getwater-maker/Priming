@@ -51,7 +51,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const sel = card.locator('[data-testid="dl-mode"]');
     ok(await sel.inputValue() === 'audio', '「다운로드」 기본값 = 오디오(로이 확정)');
     const opts = await sel.locator('option').allTextContents();
-    ok(opts.length === 2 && /오디오/.test(opts[0]) && /영상/.test(opts[1]), `오디오·영상 두 가지 (${opts.join(' | ')})`);
+    ok(opts.length === 3 && /오디오/.test(opts[0]) && /영상/.test(opts[1]) && /자막/.test(opts[2]), `오디오·영상·자막 (${opts.join(' | ')})`);
     ok(await bar.locator('select').count() === 1 && !/화질/.test(await bar.innerText()), '화질 칸이 없다(늘 최고)');
     const on = async (l) => (await l.getAttribute('aria-pressed')) === 'true';   // ✓ 켜고 끄는 버튼(v0.9.18 — 체크박스 아님)
     const hints = async () => (await card.locator('.hint-src').allTextContents()).join(' ');   // 설명은 숨김 → 마우스 팝업
@@ -59,13 +59,23 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await on(sttChk), '「STT 전사」 기본 켜짐(옛 대본다운과 같은 동작)');
     await sel.selectOption('video');
     ok(await sel.inputValue() === 'video', '영상으로 전환된다');
+    await card.locator('[data-testid="dl-quality"]').selectOption('1080');
+    ok(await card.locator('[data-testid="dl-quality"]').inputValue() === '1080', '최대 해상도를 선택한다');
+    await sel.selectOption('subtitles');
+    ok(await sttChk.isDisabled(), '자막만 받기는 STT를 실행하지 않는다');
+    await card.locator('[data-testid="dl-sub-format"]').selectOption('txt');
+    await card.locator('[data-testid="dl-sub-lang"]').selectOption('en');
+    await card.locator('[data-testid="dl-sub-track"]').selectOption('auto');
+    ok(await card.locator('[data-testid="dl-sub-format"]').inputValue() === 'txt', '자막 형식·언어·트랙 선택');
     await sel.selectOption('audio');
+    await card.locator('[data-testid="dl-audio-format"]').selectOption('m4a');
+    ok(await card.locator('[data-testid="dl-audio-format"]').inputValue() === 'm4a', 'M4A 음원을 선택한다');
     const runBtn = card.locator('[data-testid="dl-run"]');
     ok(/받아서 전사/.test(await runBtn.innerText()), 'STT 켜짐 → 「받아서 전사」');
     await sttChk.click();
     ok(/^받기$/.test((await runBtn.innerText()).trim()), 'STT 끔 → 「받기」');
     ok(await card.locator('[data-testid="dl-force"]').count() === 0, 'STT 를 끄면 「자막이 있어도 Whisper」 칸도 숨는다');
-    ok(/파일만 받습니다/.test(await hints()), 'STT 끔 = 파일만 받는다고 알려 준다(마우스 팝업)');
+    ok(/STT 전사는 끄고 파일/.test(await hints()), 'STT와 자막 파일 저장을 구분해 안내한다');
     ok(await card.locator('.hint-i').count() === 0 && !/파일만 받습니다/.test(await card.innerText()), '설명글은 화면에 늘어놓지 않는다(ⓘ 도 없음)');
     ok(await card.locator('[data-testid="dl-sites"] .dl-site').count() >= 8, '주소 칸 위에 사이트 로고가 늘어서 있다');
     await sttChk.click();
@@ -87,7 +97,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const body = await card.innerText();
     ok(/yt-dlp|자동으로 내려받습니다/.test(body), 'yt-dlp 상태를 알려준다');
     ok(/⬇ 업데이트/.test(body), '「⬇ 업데이트」 버튼이 있다(유튜브가 바뀌면 여기서 갱신)');
-    ok(/늘 최고 화질/.test(await hints()), '영상은 늘 최고 화질이라고 알려 준다');
+    ok(/최대 해상도/.test(await hints()), '최고 화질 기본값과 해상도 선택을 안내한다');
 
     // [7] 주소가 없으면 받지 않는다(빈 입력 방어)
     await runBtn.click();
@@ -156,6 +166,28 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await pnl.locator('button:has-text("닫기")').click();
     await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="urldl-progress"]').count() === 0, '닫기로 패널이 사라진다');
+
+    await app.evaluate(({ ipcMain, BrowserWindow }) => {
+      ipcMain.removeHandler('stt-from-url');
+      ipcMain.handle('stt-from-url', (_e, args) => {
+        if (args.mode !== 'subtitles' || args.subtitleFormat !== 'txt' || args.subtitleLanguage !== 'en' || args.subtitleTrack !== 'auto') throw new Error('자막 설정 IPC 누락');
+        BrowserWindow.getAllWindows()[0].webContents.send('urldl-progress', {
+          phase: 'done', total: 1, startedAt: Date.now(), endedAt: Date.now(), doStt: false, okN: 1,
+          savedSubs: 1, sub: 0, skip: 0, fail: 0, fails: [], outDir: 'C:\\test',
+          dl: { done: 1, idx: 0, pct: 100, stage: 'done' }, stt: { done: 0, pending: 0, cur: null },
+        });
+        return { ok: true, results: [{ ok: true, subtitles: ['sample.en.txt'] }] };
+      });
+    });
+    await btn.click();
+    await win.waitForSelector('[data-testid="dl-modal"]');
+    await win.locator('[data-testid="dl-mode"]').selectOption('subtitles');
+    await win.locator('[data-testid="dl-modal"] textarea').fill('https://www.youtube.com/watch?v=oKRJ0kiHHLw');
+    await win.locator('[data-testid="dl-run"]').click();
+    await win.waitForSelector('[data-testid="dl-modal"] [data-testid="urldl-progress"]');
+    ok(await win.locator('[data-testid="dl-modal"]').count() === 1, '다운로드 실행 후에도 팝업을 유지한다');
+    const embedded = await win.locator('[data-testid="dl-modal"] [data-testid="urldl-progress"]').innerText();
+    ok(/자막 저장 1개/.test(embedded) && !/전사할 영상을/.test(embedded), '자막 저장 결과를 팝업 안에서 표시한다');
 
     ok(errs.length === 0, `화면 오류 0건 (실제 ${errs.length}${errs.length ? ' — ' + errs.slice(0, 3).join(' / ') : ''})`);
   } finally {

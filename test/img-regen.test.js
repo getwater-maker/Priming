@@ -88,13 +88,13 @@ const sigs = [
   ['runGeminiImages', 'async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force = false) {'],
 ];
 sigs.forEach(([name, sig]) => ok(MAIN.indexOf(sig) >= 0, name + ' 가 force 를 받는다'));
-eq((MAIN.match(/!imgDone\(g, force\)/g) || []).length, 4, '대상 필터 4곳이 전부 imgDone(g, force)');
+sigs.forEach(([name]) => ok(extractFn(MAIN, name).includes('!imgDone(g, force)'), name + ' 대상 필터는 imgDone(g, force)'));
 ok(MAIN.indexOf('!hasVisual(g) && (!onlyNums') < 0, '옛 필터(!hasVisual(g) && onlyNums)가 남아 있지 않다');
 ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force)') >= 0, '순환→Gemini 위임에 force 전파');
 ok(MAIN.indexOf('comfyWfOf(startEngine), retryLevel, force)') >= 0, '순환→Comfy 위임에 force 전파');
 ok(MAIN.indexOf('runFlowImages(project, imagesDir, logger, styleId, nums, force)') >= 0, '순환 안 Flow 호출에 force 전파');
 ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, nums, force)') >= 0, '순환 안 Gemini 호출에 force 전파');
-eq((MAIN.match(/noTargetMsg\(onlyNums\)/g) || []).length, 4, '대상 0개 로그가 순환·Comfy·Flow·Gemini 4곳에');
+sigs.forEach(([name]) => ok(/noTargetMsg\(onlyNums\)|생성할 그룹 없음/.test(extractFn(MAIN, name)), name + ' 대상 0개 로그'));
 
 console.log('[5] 배선 대조 — force 를 켜는 곳(명시적 재생성 4곳)');
 const forced = [
@@ -111,7 +111,7 @@ ok(MAIN.indexOf('runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNu
 
 console.log('[6] 🔄 실패해도 원래 이미지를 잃지 않는다');
 ok(MAIN.indexOf('const _prevImg = g.imagePath, _prevEng = g.imageEngine;') >= 0, '재생성 전 기존 경로를 기억한다');
-ok(MAIN.indexOf('if (_prevImg && fs.existsSync(_prevImg)) { g.imagePath = _prevImg;') >= 0, '실패 시 기존 이미지 참조 복원');
+ok(MAIN.includes('if (!canRestore || !fs.existsSync(_prevImg)) return;') && MAIN.includes('g.imagePath = _prevImg; g.imageEngine = _prevEng;') && MAIN.includes('restorePrevious();'), '실패 시 검증된 기존 이미지 참조 복원');
 ok(MAIN.indexOf('기존 이미지를 그대로 둡니다') >= 0, '복원했음을 로그로 알린다');
 
 console.log('[7] 회귀 — Genspark 는 원래부터 이미지 유무만 봤다(나머지를 그쪽에 맞춘 것)');

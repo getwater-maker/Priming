@@ -147,7 +147,7 @@ console.log('\n[4-c] 비메오 주소 — 🔴 로그인 요구를 플레이어 
 console.log('\n[5] 실패 문구 — 무엇을 해야 하는지 알려준다');
 {
   { const m = MD._explain('ERROR: unable to download video data: HTTP Error 403: Forbidden');
-    ok(/403/.test(m) && /잠시|몇 분 뒤/.test(m) && !/낡았을 때 나는 증상/.test(m), '403 은 「일시 차단 — 몇 분 뒤」로 안내한다(최신판에서도 났다 · 2026-10-16)'); }
+    ok(/403/.test(m) && /요청 제한·실행 환경·버전/.test(m) && !/낡았을 때 나는 증상/.test(m), '403 원인을 버전 하나로 단정하지 않는다'); }
   ok(/429/.test(MD._explain('ERROR: unable to download video data: HTTP Error 429: Too Many Requests')), '429 는 「요청이 많아 잠시 막음」');
   ok(/비공개|연령|멤버십/.test(MD._explain('ERROR: Private video. Sign in if you have been granted access')), '비공개 영상');
   ok(/찾을 수 없/.test(MD._explain('ERROR: Video unavailable')), '삭제·지역제한');
@@ -189,7 +189,7 @@ console.log('\n[5-a] 채널 전체 — 일반 영상 탭·항목 URL·안전한 
     '돌려받은 채널 주소는 일반 영상 탭으로 정규화된다');
   const dlSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(/!o\._fromVideo && channelUrlOfVideo/.test(dlSrc), '다시 읽기는 한 번만(_fromVideo 가드)');
-  ok(/편 받기`, '취소'\][\s\S]{0,120}title: '채널 전체 받기'/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')),
+  ok(/편 받기`, '취소'\][\s\S]{0,200}title: args\.playlist \? '재생목록 전체 받기' : '채널 전체 받기'/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')),
     '🔴 채널 전체는 받기 전에 편수를 보여 주고 묻는다(붙여넣기 즉시 시작 · 실측 505편)');
 }
 
@@ -283,7 +283,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   { const bar = (app.match(/data-testid="dl-linkbar"[\s\S]*?<\/div>/) || [''])[0];
     ok(bar && (bar.match(/<select/g) || []).length === 1 && !/>화질</.test(bar), '화질 칸이 없다 — 링크 줄의 고르기는 「다운로드」 하나(늘 최고 화질 · 로이 2026-10-14)'); }
   { const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    ok(/const wantSubs = doStt && !forceStt;/.test(mainSrc) && /if \(!txtFrom && doStt && r\.sub && !forceStt\)/.test(mainSrc), '🔑 STT 를 끄면 자막도 .txt 도 만들지 않는다');
+    ok(/const wantSubs = saveSubs \|\| \(doStt && !forceStt\);/.test(mainSrc) && /if \(!txtFrom && doStt && r\.sub && !forceStt\)/.test(mainSrc), '자막 파일 저장과 STT 전사를 별도로 선택한다');
     ok(/ipcMain\.handle\('pick-media-files'/.test(mainSrc) && /ipcMain\.handle\('stt-transcribe', async \(_e, args = \{\}\)[\s\S]{0,120}args\.files/.test(mainSrc) && /ipcMain\.handle\('extract-mp3', async \(_e, args = \{\}\)[\s\S]{0,120}args\.files/.test(mainSrc), 'STT·mp3 가 고른 파일 목록(args.files)을 받는다'); }
   ok(/'-S', 'res,fps,vcodec:h264,acodec:m4a'/.test(dl), '🎞 영상 = 최고 해상도 · 같은 해상도면 H.264+AAC(정렬 없으면 AV1+Opus)');
   ok(!/rb-t">URL</.test(app), '옛 「URL」 버튼 라벨이 남지 않았다');

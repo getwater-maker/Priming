@@ -14,7 +14,7 @@ const PHASE = {
   aborted: '⏹ 중단됨',
   done: '✅ 끝',
 };
-const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: 'mp3 변환', done: '완료' };
+const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: '병합·변환', done: '완료' };
 
 function fmtDur(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -31,7 +31,7 @@ function Bar({ value, color }) {
   );
 }
 
-export default function UrlProgress({ prog, onAbort, onClose }) {
+export default function UrlProgress({ prog, onAbort, onClose, embedded = false }) {
   const [, tick] = useState(0);
   const live = prog && !['done', 'aborted'].includes(prog.phase);
   useEffect(() => {                       // 경과 시간이 멈춰 보이지 않게 1초마다 다시 그린다
@@ -53,8 +53,8 @@ export default function UrlProgress({ prog, onAbort, onClose }) {
   const chunkPct = stt.cur && stt.cur.chunks ? (stt.cur.chunk / stt.cur.chunks) * 100 : 0;
 
   return (
-    <div data-testid="urldl-progress" data-dl-dock="0" style={{
-      position: 'fixed', right: 16, bottom: dockBottom, width: 380, zIndex: DL_Z, transition: 'bottom .2s',
+    <div data-testid="urldl-progress" data-dl-dock={embedded ? undefined : '0'} style={{
+      position: embedded ? 'relative' : 'fixed', right: embedded ? undefined : 16, bottom: embedded ? undefined : dockBottom, width: embedded ? 'auto' : 380, zIndex: embedded ? undefined : DL_Z, transition: 'bottom .2s',
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10,
       boxShadow: '0 6px 24px rgba(0,0,0,.14)', padding: '12px 14px', fontSize: 13, color: 'var(--base)',
     }}>
@@ -80,7 +80,7 @@ export default function UrlProgress({ prog, onAbort, onClose }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+          {prog.doStt !== false && <><div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
             <span>🎧 전사 <b style={{ color: 'var(--strong)' }}>{stt.done}</b>{sttTotal ? ` / ${sttTotal}` : ''}</span>
             <span style={{ color: '#999', fontSize: 12 }}>{stt.pending ? `대기 ${stt.pending}건` : ''}</span>
           </div>
@@ -96,10 +96,12 @@ export default function UrlProgress({ prog, onAbort, onClose }) {
             </div>
           ) : (
             <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>{live ? '전사할 영상을 기다리는 중' : ''}</div>
-          )}
+          )}</>}
 
           <div style={{ marginTop: 10, fontSize: 12, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
-            📝 .txt 완료 <b style={{ color: 'var(--strong)' }}>{txtDone}</b>
+            {prog.doStt !== false ? <>📝 .txt 완료 <b style={{ color: 'var(--strong)' }}>{txtDone}</b></> : <>⬇ 다운로드 완료 <b style={{ color: 'var(--strong)' }}>{prog.okN ?? dl.done}</b></>}
+            {prog.savedSubs ? ` · 자막 저장 ${prog.savedSubs}개` : ''}
+            {prog.subtitleMissing ? ` · 자막 없음 ${prog.subtitleMissing}건` : ''}
             {prog.sub ? ` · 자막 사용 ${prog.sub}` : ''}
             {prog.skip ? ` · 이미 완료 ${prog.skip}` : ''}
             {prog.fail ? <span style={{ color: 'var(--danger)' }}> · 실패 {prog.fail}</span> : ''}
