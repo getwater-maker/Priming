@@ -21,7 +21,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     if (String(meta[ed === 'ebook' ? 'ebookIsbn' : 'isbn'] || '').replace(/[\s-]/g, '') !== j.values.isbn || String(meta[ed === 'ebook' ? 'ebookIssueDate' : 'issueDate'] || '') !== j.values.issueDate) throw Error('ISBN·발행일이 초안 생성 이후 변경되었습니다. 초안을 다시 만드세요');
     if (j.sourceHash && same(c).sourceHash !== j.sourceHash) throw Error('원고가 초안 생성 이후 변경되었습니다. 초안을 다시 만드세요');
   }
-  route('status', a => ({ ...client.status(), job: publicJob(jobFor(book(), editionOf(a))) }));
+  // ⚙ 설정 → 계정 탭은 원고 없이 부른다 — 원고가 없으면 연결 상태만
+  route('status', a => { const c = context(); return { ...client.status(), job: c && c.scriptPath ? publicJob(jobFor(c, editionOf(a))) : null }; });
   route('import', mutate(async () => {
     const r = await dialog.showOpenDialog(win(), { title: '출판 메일용 Google 데스크톱 OAuth JSON', properties: ['openFile'], filters: [{ name: 'Google OAuth JSON', extensions: ['json'] }] });
     if (r.canceled) return { canceled: true };
@@ -120,7 +121,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   }));
   // 📬 자동 처리(로이 2026-10-16 「너무 복잡하다 — 메일 찾기·ISBN/발행일 입력·첨부 회신을 자동으로」):
   //   이 책의 부크크 「판권지수정요청」 메일을 판마다 찾아 → 값 추출(정규식 + Claude 대조) → 원고 메타 → PDF → 회신 초안 →
-  //   ⛔ 발송은 확인창 한 번(받는 사람·판·ISBN·첨부를 보여 준다)을 거친 뒤에만. 추가 요청이 있거나 값이 어긋나면 그 판은 멈추고 이유를 알린다.
+  //   발송까지 버튼 하나(로이 2026-10-16 「버튼 하나만 눌러서 … 메일 발송」 — 확인창 없음). 대신 책·판이 제목과 맞지 않거나, 추가 요청이 있거나,
+  //   정규식과 Claude 값이 어긋나거나, 이미 회신한 메일이면 그 판은 보내지 않고 이유를 알린다.
   const AUTO_KINDS = { print: ['interiorPdf'], ebook: ['ebookPdf'] };
   const AUTO_BODY = '안녕하세요.\n\n판권지 정보 수정하여 원고파일 전달합니다.\n\n감사합니다.';
   async function review(msg, title, x) {
@@ -154,26 +156,27 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       const th = await client.api('threads/' + encodeURIComponent(msg.threadId) + '?format=minimal');
       if ((th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
       const x = M.extract(msg.text);
-      if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — 아래 수동 단계로 진행하세요' }); continue; }
+      if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
-      if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: v.why + ' — 아래 수동 단계로 진행하세요' }); continue; }
+      if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: v.why + ' — Gmail에서 직접 회신하세요' }); continue; }
       log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbn} · ${x.issueDate} (${v.by})`);
-      const old = jobFor(c, ed);
-      if (!(old && old.original.id === msg.id && old.state === 'draft')) await doLink({ ...a, edition: ed, id: msg.id });
-      const p = await doPrepare({ ...a, edition: ed, isbn: x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: AUTO_BODY });
-      ready.push({ ed, label, job: p.job });
-      results.push({ edition: ed, label, state: 'draft', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: '회신 초안 준비됨' });
+      const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: '' };
+      ready.push({ ed, msg, x, res }); results.push(res);
     }
-    if (ready.length) {
-      const detail = ready.map(({ label, job }) => `■ ${label} — ${job.original.subject}\n   받는 사람: ${job.to}\n   ISBN ${job.values.isbn} · 발행일 ${job.values.issueDate}\n   첨부: ${job.files.map(f => `${f.name} (${(f.bytes / 1048576).toFixed(1)}MB)`).join(', ')}`).join('\n\n');
-      const ok = await dialog.showMessageBox(win(), { type: 'question', buttons: ['보내기', '초안만 두기'], defaultId: 0, cancelId: 1, noLink: true, title: '부크크 회신', message: `부크크에 회신 ${ready.length}통을 보냅니다`, detail: detail + '\n\n본문:\n' + AUTO_BODY });
-      if (ok.response === 0) {
-        for (const it of ready) {
-          const res = results.find(x => x.edition === it.ed);
-          try { const s = await doSend({ ...a, edition: it.ed, draftId: it.job.draftId }); res.state = s.job.state; res.note = s.job.state === 'sent' ? '발송 완료' : (s.job.note || '발송 결과 확인 필요'); }
-          catch (e) { res.state = 'stop'; res.note = '발송 실패 — ' + e.message; }
-        }
-      } else for (const res of results) if (res.state === 'draft') res.note = '초안만 만들었습니다 — Gmail 임시보관함에서 확인하세요';
+    // 🔑 두 판의 판권 값을 원고에 먼저 다 쓴다 — 종이책 초안 뒤에 전자책 값을 쓰면 원고가 바뀌어 종이책 발송이 「원고 변경」으로 막힌다.
+    for (const { ed, x } of ready) {
+      await setMeta({ key: ed === 'ebook' ? 'ebookIsbn' : 'isbn', value: x.isbn }); same(c);
+      await setMeta({ key: ed === 'ebook' ? 'ebookIssueDate' : 'issueDate', value: x.issueDate }); same(c);
+    }
+    for (const { ed, msg, x, res } of ready) {
+      try {
+        const old = jobFor(c, ed);
+        if (!(old && old.original.id === msg.id && old.state === 'draft')) await doLink({ ...a, edition: ed, id: msg.id });
+        const p = await doPrepare({ ...a, edition: ed, isbn: x.isbn, issueDate: x.issueDate, kinds: AUTO_KINDS[ed], reviewed: true, body: AUTO_BODY });
+        const sn = await doSend({ ...a, edition: ed, draftId: p.job.draftId });
+        res.state = sn.job.state;
+        res.note = sn.job.state === 'sent' ? `발송 완료 → ${sn.job.to} (${sn.job.files.map(f => f.name).join(', ')})` : (sn.job.note || '발송 결과 확인 필요');
+      } catch (e) { res.state = 'stop'; res.note = '보내지 못했습니다 — ' + e.message; }
     }
     for (const res of results) log(`📬 ${res.label}: ${res.note}`);
     return { results, dto: context().dto };

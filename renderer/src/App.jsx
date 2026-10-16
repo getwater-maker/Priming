@@ -10,6 +10,7 @@ import VSpan from '../../core/visual-span.js';
 import ClipJoin from '../../core/clip-join.js';
 import FollowT from '../../core/follow-target.js';
 import BookView from './BookView.jsx';
+import { BookMailConnect } from './BookMail.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
 import SttProgress from './SttProgress.jsx';
@@ -7506,6 +7507,7 @@ export default function App() {
               </div>
             </div>)}
             {settingsTab === 'account' && (<div data-testid="account-tab">
+              <BookMailConnect />
               {!lic ? <div className="meta">불러오는 중…</div> : !lic.enforced ? (
                 <Hint>개발 실행(또는 시험) 중이라 회원 확인을 하지 않습니다. 설치본에서는 primingwave.com 회원 로그인이 필요합니다.</Hint>
               ) : (<>
