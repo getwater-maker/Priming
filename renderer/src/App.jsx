@@ -8,6 +8,7 @@ import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
 import ClipJoin from '../../core/clip-join.js';
+import FollowT from '../../core/follow-target.js';
 import BookView from './BookView.jsx';
 import RemotionView from './RemotionView.jsx';
 import UrlProgress from './UrlProgress.jsx';
@@ -706,6 +707,10 @@ export default function App() {
   const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
+  // 📍 제작 화면 따라가기(v0.9.43 · 로이 2026-10-16) — 만드는 대본으로 화면을 옮기고 ①·② 를 core/follow-target 기준으로.
+  //   사람이 제작 중 다른 대본을 고르면 이 제작이 끝날 때까지 멈춘다(followOff · 진행 팝업 「📍 제작 화면으로」로 다시) · 칸을 만지면 15초 쉰다.
+  const followRef = useRef({ state: null, lastMove: 0, lastUser: 0, lastSel: null, nowEl: null });
+  const [followOff, setFollowOff] = useState(false);
   const [stageRun, setStageRun] = useState(null); // 📋 단계 버튼(runStageQueue)이 지금 만드는 대본·단계 {id, phase} — 작업 순서 줄 표시(v0.9.42)
   const [mp4Prog, setMp4Prog] = useState(null);
   // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
@@ -1167,6 +1172,13 @@ export default function App() {
     } catch (e) { logline('범위 모두 적용 오류: ' + e.message); }
   }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
+  // 👆 작업 순서 줄을 사람이 누름 — 제작 중 다른 대본을 고르면 따라가기를 멈추고, 만드는 대본을 고르면 다시 따라간다
+  function pickQueueItem(id) {
+    const prodId = (makeProg && makeProg.phase === 'running' && makeProg.itemId) || (stageRun && stageRun.id) || null;
+    if (prodId) setFollowOff(id !== prodId);
+    return selectQueueItem(id);
+  }
+  function followNow() { setFollowOff(false); followRef.current.lastSel = null; followRef.current.lastUser = 0; }
   async function selectQueueItem(id) {
     // 👆 누른 칩을 먼저 「선택됨」으로(v0.9.28) — 큰 대본은 화면을 다시 그리는 데 1초 안팎 걸려, 그동안 눌렸는지 모르고 또 누르게 된다
     setQueue((q) => (q && q[mode] ? { ...q, [mode]: { ...q[mode], activeId: id, items: q[mode].items.map((x) => ({ ...x, active: x.id === id })) } } : q));
@@ -3971,6 +3983,57 @@ export default function App() {
   }
   async function pickAppFolder(kind) { const d = await api.pickDir(); if (d) saveAppFolders({ [kind]: d }); }
   // ⬆ 유튜브 — 연결 파일 가져오기 · 채널 연결/해제 · 지금 대본 올리기
+  // 📍 사람이 ①·② 칸을 만지면(스크롤·클릭·키) 따라가기가 15초 쉰다
+  useEffect(() => {
+    const on = (e) => { const t = e.target; if (t && t.closest && t.closest('section.pane1, main.pane2')) followRef.current.lastUser = Date.now(); };
+    const evs = ['wheel', 'mousedown', 'keydown'];
+    for (const ev of evs) window.addEventListener(ev, on, true);
+    return () => { for (const ev of evs) window.removeEventListener(ev, on, true); };
+  }, []);
+  // 📍 단계 버튼(작업 순서 전체) — 만드는 대본으로 화면만 옮긴다(① ② 기준은 ⚡ 만들기 진행 정보가 있을 때만)
+  useEffect(() => {
+    if (!stageRun || followOff || mode !== 'longform') return;
+    const act = queue && queue.longform && queue.longform.activeId;
+    if (act !== stageRun.id && followRef.current.lastSel !== stageRun.id) { followRef.current.lastSel = stageRun.id; selectQueueItem(stageRun.id); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageRun, followOff]);
+  // 📍 ⚡ 만들기 — 만드는 대본으로 옮기고, ① = 방금 완성된 그림·영상 그룹 · ② = 지금 음성을 만드는 문장(core/follow-target)
+  useEffect(() => {
+    const P = makeProg, F = followRef.current;
+    const clearNow = () => { if (F.nowEl) { try { F.nowEl.classList.remove('tts-now'); } catch (_) {} F.nowEl = null; } };
+    if (!P || P.phase !== 'running') { F.state = null; F.lastSel = null; clearNow(); if (followOff) setFollowOff(false); return; }
+    if (followOff || mode !== 'longform') { clearNow(); return; }
+    const act = queue && queue.longform && queue.longform.activeId;
+    if (P.itemId && act !== P.itemId) {
+      if (F.lastSel !== P.itemId) { F.lastSel = P.itemId; F.state = null; selectQueueItem(P.itemId); }
+      return;
+    }
+    F.state = FollowT.step(F.state, P);   // 「방금 완성」을 놓치지 않게 스냅샷마다(이동은 아래에서 쉰다)
+    const now = Date.now();
+    if (now - F.lastUser < 15000 || now - F.lastMove < 2000) return;
+    const t = FollowT.targets(F.state, P);
+    const firstSn = dto && dto.projects && dto.projects[0] ? dto.projects[0].shortsNum : null;
+    const lineOf = (x) => {
+      if (!x) return null;
+      const sn = x.sn != null ? x.sn : firstSn;
+      const lm = linesMap.get(sn); if (!lm) return null;
+      const l = x.ord != null ? lm.list.find((y) => y.ord === x.ord) : lm.list.find((y) => y.groupNum === x.group);
+      return l ? { sn, n: l.n } : null;
+    };
+    const pv = lineOf(t.preview), cl = lineOf(t.clip);
+    if (!pv && !cl) return;
+    F.lastMove = now;
+    if (pv && !(cursor && cursor.shortsNum === pv.sn && cursor.n === pv.n)) setCursor({ shortsNum: pv.sn, n: pv.n });
+    if (cl) {
+      requestAnimationFrame(() => {
+        const el = document.querySelector('.card[data-pr="' + cl.sn + '"] .sent[data-ln="' + cl.n + '"]') || document.querySelector('main.pane2 .sent[data-ln="' + cl.n + '"]');
+        if (!el) return;
+        if (t.clip && t.clip.ord != null) { if (F.nowEl !== el) { clearNow(); el.classList.add('tts-now'); F.nowEl = el; } } else clearNow();
+        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [makeProg, followOff]);
   async function ytLoad() { try { setYtSt(await api.ytStatus()); } catch (_) {} }
   // 👥 채널 순서 = 구독자 많은 순(main yt-status 가 정렬 · v0.9.37 — 옛 「끌어서 순서 바꾸기」는 뺐다 · 로이 2026-10-16)
   async function ytSaveMemo(c, v) {
@@ -6018,7 +6081,7 @@ export default function App() {
             </div>
           )}
           {queue && queue[mode] && queue[mode].items.length > 0 && (
-            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={selectQueueItem} onRemove={removeQueueItem} />
+            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={pickQueueItem} onRemove={removeQueueItem} />
           )}
           {aiPopEl}
           {wsOn && clipTb && !clipTb.hidden && clipTbOk() && (() => {
@@ -7480,7 +7543,7 @@ export default function App() {
           openUrl={(u) => api.ytOpenUrl(u)} />
       )}
       {makeProg && mode === 'longform' && (
-        <MakeProgress prog={makeProg}
+        <MakeProgress prog={makeProg} followOff={followOff} onFollow={followNow}
           onAbort={() => { abort(); }}
           onClose={() => setMakeProg(null)} />
       )}

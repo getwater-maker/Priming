@@ -1508,3 +1508,7 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .qrow .qtime{flex:0 0 auto;color:#8a7a5a;white-space:nowrap;font-variant-numeric:tabular-nums}
 .qrow .qx{border:none;background:transparent;color:#b99;cursor:pointer;font-size:12px;padding:0 2px;line-height:1;flex:0 0 auto}
 .qrow .qx:hover{color:#d44}
+
+/* 📍 제작 화면 따라가기 — 지금 음성을 만드는 문장(v0.9.43) */
+main.pane2 .sent.tts-now{box-shadow:0 0 0 2px #5a9 inset;position:relative}
+main.pane2 .sent.tts-now::after{content:'🎤 지금';position:absolute;right:6px;top:4px;font-size:11px;font-weight:700;color:#1f6b4c;background:#dff3e8;border-radius:8px;padding:0 6px;pointer-events:none}

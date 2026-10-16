@@ -107,7 +107,7 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
     try { snapB = fs.readFileSync(snapOf(B_NAME), 'utf8'); } catch (_) {}
     ok(!/에이 1번째 절/.test(snapB), 'B 작업본에 A 문장이 섞이지 않았다');
 
-    // ⑥ 큐 순차 제작(run-batch) — 예전엔 대본마다 activeId 를 바꿔 화면을 빼앗았다. B 를 보는 채로 A 만 큐 제작
+    // ⑥ 큐 순차 제작(run-batch) — main 은 activeId 를 바꾸지 않는다(v0.9.23). 📍 화면은 **렌더러가 따라간다**(v0.9.43 · 로이 「지금 작업 중인 대본을 보여 줘라」)
     try { fs.rmSync(path.join(A_OUT, 'tts-1'), { recursive: true, force: true }); } catch (_) {}
     await win.evaluate(() => { window.__pushes = []; });
     const tB0 = Date.now();
@@ -119,11 +119,30 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
       } catch (e) { return { err: e.message }; }
     }, { id: idA.id, name: CH });
     const tB1 = Date.now();
-    ok(!rb.err && /보는 대본/.test(rb.title || '') && /보는 대본/.test(rb.active || ''), '🔴 큐 순차 제작이 화면(활성)을 A 로 옮기지 않는다: ' + JSON.stringify(rb));
+    { const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8'); const rbSrc = M.slice(M.indexOf("ipcMain.handle('run-batch'"), M.indexOf('// 미리보기 오디오 — 파일을 base64'));
+      ok(!rb.err && !/activeId\s*=/.test(rbSrc) && !/selectQueueItem/.test(rbSrc), 'main(run-batch) 은 화면(활성)을 스스로 옮기지 않는다(옮기는 것은 렌더러 따라가기 하나): ' + (rb.err || 'ok')); }
+    await sleep(800);
+    const fol = await win.evaluate(async () => { const r = await window.api.listQueue(); const it = r.queue.longform.items.find((x) => x.active); return it && it.title; });
+    ok(/만드는 대본/.test(fol || ''), '📍 화면은 만드는 대본(A)을 따라갔다(렌더러 selectQueueItem): ' + fol);
     const wavsA2 = fs.existsSync(path.join(A_OUT, 'tts-1')) ? fs.readdirSync(path.join(A_OUT, 'tts-1')).filter((f) => /\.(wav|mp3)$/i.test(f)).length : 0;
     ok(wavsA2 >= 450, '큐 제작 결과는 A 폴더에: ' + wavsA2 + '개');
     const pushes2 = await win.evaluate(({ a, b }) => window.__pushes.filter((p) => p.t >= a && p.t <= b).map((p) => p.title), { a: tB0, b: tB1 });
-    ok(!pushes2.some((t) => /만드는 대본/.test(t)), '큐 제작 중 A 의 DTO 가 화면으로 오지 않았다: [' + [...new Set(pushes2)].join(', ') + ']');
+    ok(pushes2.some((t) => /만드는 대본/.test(t)), '📍 따라간 뒤에는 A 의 DTO 가 화면으로 온다: [' + [...new Set(pushes2)].join(', ') + ']');
+
+    // ⑦ 사람이 제작 중 다른 대본(B)을 누르면 따라가기를 멈춘다(v0.9.23 「사람은 제작 중 다른 대본을 보고 고친다」 유지)
+    try { fs.rmSync(path.join(A_OUT, 'tts-1'), { recursive: true, force: true }); } catch (_) {}
+    await win.evaluate(({ id, name }) => {
+      window.__rb2 = 'running';
+      window.api.runBatch({ plan: [{ mode: 'longform', id, settings: { presetName: name } }], common: { dry: true, imgEngine: 'comfy::dummy.json', videoEngine: 'none', outMode: 'audio', presetName: name, captionMaxChars: 7 }, openEach: false })
+        .then(() => { window.__rb2 = 'ok'; }, (e) => { window.__rb2 = 'err ' + e.message; });
+    }, { id: idA.id, name: CH });
+    await win.waitForFunction(async () => { const r = await window.api.listQueue(); const it = r.queue.longform.items.find((x) => x.active); return it && /만드는 대본/.test(it.title); }, null, { timeout: 15000 }).catch(() => {});
+    await win.locator('[data-testid="q-row"]', { hasText: '보는 대본' }).first().click();
+    await sleep(600);
+    await win.waitForFunction(() => window.__rb2 !== 'running', null, { timeout: 60000 }).catch(() => {});
+    const act3 = await win.evaluate(async () => { const r = await window.api.listQueue(); const it = r.queue.longform.items.find((x) => x.active); return it && it.title; });
+    ok(/보는 대본/.test(act3 || ''), '사람이 B 를 누르면 제작이 끝날 때까지 B 에 머문다(다시 A 로 끌려가지 않는다): ' + act3);
+
 
     const logText = await win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');
     ok(!/is not defined/.test(logText), '로그에 미정의 오류 없음');

@@ -44,7 +44,7 @@ function Row({ icon, label, st, c, unit, sub, ended }) {
 
 const gList = (a) => (a && a.length ? a.slice(0, 8).map((n) => 'G' + n).join(', ') + (a.length > 8 ? ` 외 ${a.length - 8}` : '') : '');
 
-export default function MakeProgress({ prog, onAbort, onClose }) {
+export default function MakeProgress({ prog, onAbort, onClose, followOff = false, onFollow = null }) {
   const [mini, setMini] = useState(false);
   if (!prog) return null;
   const live = prog.phase === 'running';
@@ -108,6 +108,7 @@ export default function MakeProgress({ prog, onAbort, onClose }) {
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
+        {live && followOff && onFollow && <button data-testid="follow-now" title="다른 대본을 보고 계셔서 화면 따라가기를 멈췄습니다 — 누르면 만드는 대본으로 돌아가 다시 따라갑니다" onClick={onFollow}>📍 제작 화면으로</button>}
         <button className="ghost" onClick={() => setMini(true)} title="작게 접기(한 줄)">접기</button>
         {live
           ? <button className="ghost" onClick={onAbort}>⏹ 중단</button>

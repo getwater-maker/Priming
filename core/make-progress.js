@@ -20,25 +20,26 @@ function clip(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.
 // 셈 — projects 는 runMakeAllCore 가 고정해 둔 이 대본의 편들(S.parsed 아님 — 큐에서 다른 대본을 봐도 섞이지 않게).
 function count(projects, { fromNum = null, toNum = null, sel = '' } = {}) {
   const sent = { done: 0, total: 0, cur: null };
-  const image = { done: 0, total: 0, active: [] };
-  const video = { done: 0, total: 0, active: [] };
+  const image = { done: 0, total: 0, active: [], sn: null };   // sn = 만드는 그룹의 편(📍 화면 따라가기 · v0.9.43)
+  const video = { done: 0, total: 0, active: [], sn: null };
   for (const pr of projects || []) {
     const inVid = VS.matcher(pr.groups || [], sel, fromNum, toNum);   // 🎬 범위 또는 방식
+    let ord = 0;   // 편 안 문장 순번(1부터) — 화면 줄 목록(buildProjLines)의 ord 와 같다
     for (const s of pr.sentences || []) {
-      sent.total++;
+      sent.total++; ord++;
       if (sentDone(s)) sent.done++;
-      else if (!sent.cur) sent.cur = { num: s.num, text: clip(s.text, 40) };   // 음성은 순서대로 만든다 → 첫 빈 문장 = 지금 만드는 문장
+      else if (!sent.cur) sent.cur = { num: s.num, text: clip(s.text, 40), ord, sn: pr.shortsNum != null ? pr.shortsNum : null };   // 음성은 순서대로 만든다 → 첫 빈 문장 = 지금 만드는 문장
     }
     for (const g of pr.groups || []) {
       if (needsVisual(g)) {
         image.total++;
         if (visualDone(g)) image.done++;
-        else if (g.imageStatus === 'generating') image.active.push(g.num);
+        else if (g.imageStatus === 'generating') { image.active.push(g.num); if (image.sn == null) image.sn = pr.shortsNum != null ? pr.shortsNum : null; }
       }
       if (inVid(g.num)) {
         video.total++;
         if (g.videoPath) video.done++;
-        else if (g.videoStatus === 'generating' || g.videoStatus === 'upscaling') video.active.push(g.num);
+        else if (g.videoStatus === 'generating' || g.videoStatus === 'upscaling') { video.active.push(g.num); if (video.sn == null) video.sn = pr.shortsNum != null ? pr.shortsNum : null; }
       }
     }
   }
