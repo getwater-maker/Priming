@@ -53,10 +53,11 @@ export default function MakeProgress({ prog, onAbort, onClose, followOff = false
   const sent = prog.sent || {}, image = prog.image || {}, video = prog.video || {};
   const elapsed = (prog.endedAt || prog.now || Date.now()) - prog.startedAt;
   const q = prog.queue ? `[${prog.queue.idx}/${prog.queue.total}] ` : '';
-  const head = prog.phase === 'done' ? '✅ 만들기 완료'
+  const taskLabel = prog.actionLabel || (prog.kind === 'tts' ? 'TTS' : '만들기');
+  const head = prog.phase === 'done' ? `✅ ${taskLabel} 완료`
     : prog.phase === 'aborted' ? '⏹ 중단됨'
-    : prog.phase === 'error' ? '✗ 만들기 실패'
-    : '⚡ 만드는 중';
+    : prog.phase === 'error' ? `✗ ${taskLabel} 실패`
+    : `⚡ ${taskLabel} 진행 중`;
 
   const box = {
     position: 'fixed', right: 16, bottom: 16, zIndex: 61,   // 🗂 MP4(62)·업로드(63) 팝업과 한 자리에 겹친다(v0.6.46)
@@ -95,6 +96,9 @@ export default function MakeProgress({ prog, onAbort, onClose, followOff = false
         {q}{prog.title || '(제목 없음)'}
       </div>
 
+      {prog.jobs?.length > 1 && <div data-testid="work-jobs" style={{marginTop:8,fontSize:11}}>
+        {prog.jobs.map(j => <div key={j.operationId}>{j.operationId === prog.operationId ? '▶ ' : '· '}{j.title}</div>)}
+      </div>}
       <div style={{ marginTop: 8 }}>
         <Row icon="🎙" label="문장" unit="문장" st={S.tts} c={sent} sub={sentSub} ended={ended} />
         <Row icon="🖼" label="그림" unit="장" st={S.image} c={image} sub={imgSub} ended={ended} />

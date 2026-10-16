@@ -467,6 +467,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       if (++_skipN % 100 === 0) await new Promise((r) => setImmediate(r));
       continue;
     }
+    s.ttsStatus = 'generating';
+    try {
     const _genT0 = Date.now(); // 생성 소요시간 측정 (RTF = 생성시간/음성길이)
     // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사. (force 면 건너뜀)
     //   🔑 키는 원문이 아니라 **실제 합성될 문자열**(발음사전+정규화 적용) 기준이다. 원문으로
@@ -609,6 +611,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     if (onLine) onLine(`tts ${label} 컷${s.num}: ${s.ttsDurationSec.toFixed(2)}s${sf !== 1 ? ` (${sf}x)` : ''}${s.ttsGainDb ? ` · 음량 ${s.ttsGainDb > 0 ? '+' : ''}${s.ttsGainDb}dB` : ''}${s.ttsSeedSwapped ? ` · 시드 교체(${s.ttsSeedSwapped})` : ''}${res.leadBreathSec ? ' · 😮‍💨 앞 숨 지움' : ''}${s.backcheck ? (s.backcheck.unknown ? ' · 🔎 확인 불가' : ` · 🔎 ${Math.round(s.backcheck.score * 100)}%`) : ''} · 생성 ${s.ttsGenSec.toFixed(1)}s`);
     // 문장 한 개 변환 완료 → 화면 갱신(시간 표시). 1초에 한 번까지(TTS_PROGRESS_GAP_MS) — 나머지는 다음 갱신·끝에 같이 나간다.
     progress(true);
+    } finally { delete s.ttsStatus; }
   }
   if (_progPending && onProgress) { try { onProgress(); } catch {} }   // 몰아 둔 갱신 — 루프가 끝나면(중단·break 포함) 반드시 한 번
   // 🔎 역대조 결과표 — 일본어·베트남어 문장이 있을 때만(대본마다 한 장, tts-N 옆). 본부(아도나이로이)가 이 파일로 편마다 판정한다.
@@ -666,10 +669,11 @@ function fillSilent(project, workDir) {
 
 // 무음(dry) 만들기용 — 문장마다 ffmpeg 를 동기로 부르므로 긴 대본이면 main 이 수십 초 굳는다(IPC·화면이 그동안 멈춘다).
 //   몇 문장마다 이벤트 루프에 양보한다. 세계 분리 E2E(test/world-isolation.smoke.js)가 「제작 도중 다른 호출이 처리되는지」를 보려면 필요하다.
-async function fillSilentYield(project, workDir) {
+async function fillSilentYield(project, workDir, abortSignal = null) {
   fs.mkdirSync(workDir, { recursive: true });
   let i = 0;
   for (const s of project.sentences) {
+    if (abortSignal && abortSignal()) break;
     const dur = Math.min(6.5, Math.max(2.2, 1.0 + (s.charCount || 0) * 0.16));
     const mp3 = path.join(workDir, `${s.num}.mp3`);
     makeSilentMp3(dur, mp3);

@@ -50,6 +50,8 @@ function targets(state, prog) {
   if (!preview && vid.length) preview = { sn: vid[0].sn, group: vid[0].num };
   const visualStage = ['image', 'video'].some((k) => S[k] && S[k].state !== 'skip');
   if (!preview && !visualStage) preview = clip;   // 🎤 음성만 — 미리보기도 지금 문장
+  if (!clip && prog.focus) clip = prog.focus;
+  if (!preview && prog.focus) preview = prog.focus;
   return { clip, preview };
 }
 

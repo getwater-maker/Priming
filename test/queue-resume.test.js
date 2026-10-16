@@ -1,0 +1,24 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { resumePlan } = require('../core/queue-resume');
+const src = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
+const start = src.indexOf('async function runMakeAllCore(opts = {}) {');
+const end = src.indexOf('\nasync function runMakeAllBody', start);
+const build = new Function('S', 'activeItem', 'markItemRun', 'runMakeAllBody', "const workClocks = new WeakMap(); const startWorkClock = it => {it.status='running';markItemRun(it,'start');}; const endWorkClock = (it,phase) => markItemRun(it,'end'); let _mk = null; " + src.slice(start, end) + '; return runMakeAllCore;');
+(async () => {
+  const it = {id:'a'}, S = {abort:false};
+  const mark = (it, phase) => { if (phase === 'start') it.run = {startedAt:1}; else it.run.endedAt = 2; };
+  const run = (body, opts) => build(S, () => it, mark, body)(opts);
+  await assert.rejects(run(async () => { S.abort = true; return {completed:false}; }), {code:'MAKE_ABORTED'});
+  assert.equal(it.status, 'interrupted'); assert.notEqual(it.run.completed, true);
+  await assert.rejects(run(async () => undefined)); assert.equal(it.status, 'failed');
+  await assert.rejects(run(async () => { throw Error('출력 실패'); })); assert.equal(it.status, 'failed');
+  await run(async () => ({completed:true})); assert.equal(it.status,'done'); assert.equal(it.run.completed,true);
+  S.abort = true;
+  await assert.rejects(run(async () => ({completed:true}), {_fromQueue:true}), {code:'MAKE_ABORTED'});
+  const items = [{id:'new',status:'idle'}, {id:'old',status:'done'}, {id:'stop',status:'interrupted'}, {id:'good',status:'done',run:{completed:true}}, {id:'fail',status:'failed'}];
+  assert.deepEqual(resumePlan(items.map(({id}) => ({id})), items).map(x => x.id), ['old','stop','fail','new','good']);
+  console.log('PASS: aborted/failed/early-return never complete; successful completion verified; unfinished priority and legacy done recovery');
+})().catch(e => { console.error(e); process.exitCode=1; });

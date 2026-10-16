@@ -58,11 +58,17 @@ const pr = {
   snap.stages.tts.state = 'x';
   ok(st.stages.tts.state === 'done', '스냅샷은 사본(보낸 뒤 바뀌어도 원본 불변)');
 }
+// 실패한 이전 문장보다 실제 합성 중인 문장이 따라가기 대상이다.
+{
+  const MP = require('../core/make-progress');
+  const c = MP.count([{shortsNum:1, groups:[], sentences:[{num:1,text:'실패'}, {num:2,text:'생성 중',ttsStatus:'generating'}]}]);
+  ok(c.sent.cur.num === 2, '따라가기 = 첫 빈 문장이 아니라 실제 합성 중인 문장');
+}
 // [5] main 이 이 모듈 하나로 센다 — 같은 셈을 main 에 다시 만들지 않는다(두 벌 방지)
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
   ok((src.match(/send\('make-progress'/g) || []).length === 1, "main 의 'make-progress' 전송은 한 곳");
-  ok(/finally \{ if \(_mk\) \{ _mk\.stop\(/.test(src), '끝 처리는 runMakeAllCore finally 한 곳');
+  ok(/finally \{\s*if \(_mk\) \{ _mk\.stop\(/.test(src), '끝 처리는 runMakeAllCore finally 한 곳');
 }
 
 console.log(bad ? `\n❌ ${bad}/${n} 실패` : `\n✅ make-progress ${n}/${n} 통과`);

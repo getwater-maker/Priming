@@ -36,6 +36,9 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   ok((await findThumbs(R, '[고전_9999]')).length === 0, '없는 편 → 빈 목록');
   ok((await findThumbs(path.join(R, '없는폴더'), '[고전_1019]')).length === 0, '없는 폴더 → 빈 목록(던지지 않음)');
   ok((await findThumbs(R, '')).length === 0, '빈 열쇠 → 빈 목록(전부 잡지 않음)');
+  mk('A.png'); mk('B.jpg'); mk('C.webp');
+  const direct = await findThumbs(R, '', 3, true);
+  ok(direct.length === 3 && direct.every((f) => path.dirname(f.path) === R), '일반 폴더: 바로 안의 이미지 최대 3장만 표시');
   fs.rmSync(R, { recursive: true, force: true });
 
   console.log(`\n${fail ? '❌' : '✅'} thumb-find — ${pass} 통과 / ${fail} 실패`);

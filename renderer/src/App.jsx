@@ -777,7 +777,7 @@ export default function App() {
   const [clipDetail, setClipDetail] = useState(() => lsGet('pm.clipDetail', '1') !== '0');
   const pickClipDetail = (on) => { setClipDetail(on); lsSet('pm.clipDetail', on ? '1' : '0'); };
   // ① 칸 폭 = **비율**(기본 40% — Vrew 와 비슷). 🔴 px 로 두면 창이 처음 뜰 때의 너비로 계산돼, 창을 줄인 뒤 ① 이 화면을 다 먹었다(실측).
-  const [pane1W, setPane1W] = useState(() => { const r = Number(lsGet('pm.pane1R', 0.4)); return r >= 0.2 && r <= 0.7 ? r : 0.4; });
+  const [pane1W, setPane1W] = useState(() => { const r = Number(lsGet('pm.pane1R.v2', 0.4)); return r >= 0.2 && r <= 0.7 ? r : 0.4; });
   const [cursor, setCursor] = useState(null);       // { shortsNum, n } — ② 에서 지금 가리키는 자막 줄
   const lastVisRef = useRef(null);                   // ① 에 지금 깔린 그림/영상(같으면 다시 깔지 않는다 — 영상이 처음부터 다시 돈다)
   const stopLineRef = useRef(null);                 // 미리보기 재생 — 지금 도는 자막 효과 멈춤
@@ -955,7 +955,7 @@ export default function App() {
     if (api.onSttProgress) api.onSttProgress((d) => { if (d) setSttProg(d); });
     if (api.onMp3Progress) api.onMp3Progress((d) => { if (d) setMp3Prog(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
-    if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) setMakeProg(d); });
+    if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) { if (d.operationId && followRef.current.operationId !== d.operationId) { followRef.current.operationId = d.operationId; followRef.current.state = null; followRef.current.lastMove = 0; followRef.current.lastUser = 0; } setMakeProg(d); } });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     if (api.onQueueUpdate) api.onQueueUpdate((q) => { if (q) setQueue(q); });   // 📋 작업 순서 줄(보지 않는 대본 상태 포함)
@@ -1332,6 +1332,7 @@ export default function App() {
     await runUrlDl();
   }
   async function runTts(shortsNum) {
+    followNow();
     setStatus('TTS 생성중…');
     try {
       const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null });
@@ -1358,6 +1359,7 @@ export default function App() {
     return await new Promise((resolve) => setStylePick({ resolve }));
   }
   async function runImg(shortsNum) {
+    followNow();
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return; // 이미지 버튼=이미지 프롬프트만
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`이미지 생성중(${imgEngine})…`);
@@ -1365,6 +1367,7 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runVid(shortsNum) {
+    followNow();
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
@@ -1394,6 +1397,7 @@ export default function App() {
   // ── 상단 버튼 = 큐 전체(현재 모드) ── 그 단계를 큐의 모든 대본에 순차 적용. 기존 단건 핸들러를 항목마다 재사용(안정).
   //   stage: 'tts' | 'image' | 'video' | 'imgvid'(이미지 전부 → 비디오). 대본 위 버튼은 그대로 그 대본만.
   async function runStageQueue(stage) {
+    followNow();
     try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 헤더값을 활성 항목에 반영
     const items = (queue && queue[mode] && queue[mode].items) || [];
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
@@ -1406,7 +1410,7 @@ export default function App() {
     queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(items.length > 1);   // ⏸ 지난 예약 초기화 · 대본이 둘 이상일 때만 버튼을 보인다
     let stoppedAfter = 0;                                // ⏸ 「이번 편까지만」으로 멈추며 남긴 편수
-    for (const ph of phases) {
+    stageLoop: for (const ph of phases) {
       if (queueAbortRef.current || stoppedAfter) break;
       const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
       for (let k = 0; k < items.length; k++) {
@@ -1415,7 +1419,7 @@ export default function App() {
         const it = items[k];
         setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
         setStageRun({ id: it.id, phase: ph });
-        if (ph === phases[0]) { try { await api.queueMark(it.id, 'start'); } catch (_) {} }
+        // 실행시간은 각 실제 작업의 공통 진행 처리에서 기록합니다.
         // 🎬 화면(보는 대본)은 바꾸지 않는다 — __item 으로 그 대본의 제작 칸에서 돈다(v0.9.23). 응답 DTO 는 그 대본 것이라 화면에 넣지 않는다(보고 있으면 main 이 밀어 준다).
         try {
           // 🔀 목소리·배속은 **그 대본 채널**(v0.9.41 — 예전엔 헤더 채널 목소리로 모든 대본을 합성했다) · 그림 스타일은 main 이 같은 규칙(core/queue-channel)으로 정한다
@@ -1424,8 +1428,8 @@ export default function App() {
           if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: _its.presetName || presetName || null, speed: (_sameCh ? ttsSpeed : (_its.ttsSpeed != null ? _its.ttsSpeed : ttsSpeed)) || null }); }
           if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
           if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
-        } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
-        if (ph === phases[phases.length - 1]) { try { await api.queueMark(it.id, 'end'); } catch (_) {} }
+        } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); queueAbortRef.current = true; break stageLoop; }
+
       }
     }
     setStageRun(null);
@@ -1435,6 +1439,7 @@ export default function App() {
   }
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
   async function runImgVid(shortsNum) {
+    followNow();
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return;
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus('이미지→비디오 생성중…');
@@ -1446,6 +1451,7 @@ export default function App() {
   }
   // 🎤+🖼 · 🎤+🖼+🎬 — 이 대본만(v0.9.39 · 로이). TTS 를 먼저 끝낸 뒤 이미지(→ 비디오) — 단계마다 이미 있는 것은 건너뛴다.
   async function runTtsImg(shortsNum, withVid = false) {
+    followNow();
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: withVid && videoEngine !== 'none' ? 'range' : 'none' })) return;
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     const lbl = withVid ? 'TTS→이미지→비디오' : 'TTS→이미지';
@@ -1491,7 +1497,7 @@ export default function App() {
       : outTarget === 'whiteboard' ? '⚡ 제작중… (TTS+이미지 → ✏ 화이트보드 렌더)'
       : `⚡ 전체 제작중… (TTS+이미지→영상→${tgt})`);
     try { const d = await api.makeAll(args); setDto(d); setStatus(`⚡ 완료 — ${tgt}`); }
-    catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+    catch (e) { logline(e.message); setStatus(/제작 중단됨/.test(e.message) ? '⏹ 제작 중단됨 — 다시 만들면 이어서 진행합니다' : '⚠ 제작 미완료 — 로그를 확인하세요'); }
   }
   // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
   async function runMakeOrBatch() {
@@ -1508,7 +1514,7 @@ export default function App() {
     const plan = [];
     // 이미 완료(done)된 항목은 제외 — 다시 만들지 않고 .vrew 도 다시 열지 않음(vrew 버튼으로 열면 됨).
     for (const it of L) {
-      if (it && it.status !== 'done') plan.push({ mode: 'longform', id: it.id, settings: it.settings || null });
+      if (it && (it.status !== 'done' || !it.run?.completed)) plan.push({ mode: 'longform', id: it.id, settings: it.settings || null });
     }
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
@@ -1528,7 +1534,7 @@ export default function App() {
       const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
-      setStatus(r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
+      setStatus(r && r.aborted ? '⏹ 제작 중단됨 — 다시 만들면 미완료 작업부터 이어갑니다' : r && r.failed ? '⚠ 제작 미완료 — 문제를 해결한 뒤 만들기를 누르면 이 작업부터 재개합니다' : r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
     } catch (e) { logline('큐 제작 오류: ' + e.message); setStatus('큐 제작 오류'); }
     finally { queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false); }
   }
@@ -1570,6 +1576,7 @@ export default function App() {
   }
   // ✏ 그림 고치기(Qwen · 로컬) — 지시문을 받아 그 그룹의 그림을 고친다. 원본은 지우지 않으므로 Ctrl+Z 로 되돌린다.
   async function runEditImg(shortsNum, groupNum) {
+    followNow();
     const ins = await askName('✏ G' + groupNum + ' 그림 고치기 — 어떻게 고칠까요? (예: 여자의 검은 드레스를 짙은 초록색으로 바꿔 줘 · 나머지는 그대로 둡니다)', '');
     if (!ins || !String(ins).trim()) return;
     setStatus('G' + groupNum + ' 그림 고치는 중…');
@@ -1577,6 +1584,7 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('그림 고치기 실패'); }
   }
   async function runRegen(shortsNum, groupNum) {
+    followNow();
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 이미지 재생성…`);
     try { const d = await api.regenGroup({ shortsNum, groupNum, styleId: sid, engine: imgEngine }); setDto(d); setStatus('재생성 완료'); }
@@ -1586,11 +1594,13 @@ export default function App() {
   // roll(Shift+클릭) 일 때만 시드를 갈아끼워 '다른 take' 를 뽑는다. 평소엔 **채널 시드 고정** —
   //   시드가 매번 달라지면 그 그룹만 톤이 달라져 한 영상 안에서 목소리가 바뀐 것처럼 들린다.
   async function runGroupTts(shortsNum, groupNum, roll = false) {
+    followNow();
     setStatus(`G${groupNum} TTS…`);
     try { const d = await api.ttsGroup({ shortsNum, groupNum, presetName: presetName || null, speed: ttsSpeed || null, roll: !!roll }); setDto(d); setStatus(`G${groupNum} TTS 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runGroupVid(shortsNum, groupNum) {
+    followNow();
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 비디오…`);
     try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
@@ -4845,7 +4855,8 @@ export default function App() {
     const l = PL.list[ni];
     const info = { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to };
     userCursor({ shortsNum: cursor.shortsNum, n: l.n });
-    if (!extend && !playerOpen && !abs) { openEditAt(cursor.shortsNum, l.n, null, delta < 0 ? 'end' : 'start'); return; }   // ⌨ 키보드로 옮기면 늘 자막 칸에 커서(v0.5.95 로이)
+    // 방향키는 선택만 이동합니다. Enter로 편집을 시작합니다.
+
     setCapSel((cur) => {
       if (extend && cur && cur.mode === 'lines' && cur.shortsNum === cursor.shortsNum && cur.anchorN != null) {
         const a = Math.min(cur.anchorN, l.n), b = Math.max(cur.anchorN, l.n);
@@ -4904,7 +4915,7 @@ export default function App() {
         e.preventDefault();
         if (clipDetail) openLineEdit(ci.pr.shortsNum, ci.l.n, null);
         else startSentEdit(ci.pr.shortsNum, ci.cut.num, ci.l.sentIdx, ci.s.text);
-      } else if (e.key === ' ') { e.preventDefault(); if (tag === 'BUTTON' && t.blur) t.blur();
+      } else if (e.key === ' ') { e.preventDefault(); if (e.repeat) return; if (tag === 'BUTTON' && t.blur) t.blur();
         const pick = userPickRef.current;
         if (playerOpen && pick) { stopPlayer(); setCursor(pick); playFromCursor(pick, true); }   // 재생 중 클립을 골랐으면 → 그 클립부터
         else if (playerOpen) stopPlayer(); else playFromCursor(); }
@@ -4950,7 +4961,7 @@ export default function App() {
     const body = document.getElementById('body'); const BW = body ? body.clientWidth : window.innerWidth;
     const x0 = e.clientX, w0 = pane1W * BW;
     const mv = (ev) => setPane1W(Math.max(0.2, Math.min(0.7, (w0 + ev.clientX - x0) / BW)));
-    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); setPane1W((w) => { lsSet('pm.pane1R', w.toFixed(3)); return w; }); };
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); setPane1W((w) => { lsSet('pm.pane1R.v2', w.toFixed(3)); return w; }); };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   }
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
@@ -5698,6 +5709,9 @@ export default function App() {
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
   const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
   const lt = isBk ? 'log' : logTab;   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그만
+  const selectedStyle = styles.find((s) => s.id === styleId);
+  const selectedSample = styleSamples[styleId];
+  const selectedStyleName = selectedStyle?.name || (styleId === SCRIPT_STYLE_ID ? '대본스타일' : '스타일 없음');
   const logBox = (
         <aside id="logwrap" className={logDocked ? 'docked' : ''}>
             <div id="logbar">
@@ -5710,17 +5724,22 @@ export default function App() {
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
-              </>) : (
+              </>) : (<>
+                <button className="ghost" data-testid="thumb-folder" title="이 PC에서 사용할 썸네일 폴더 선택" onClick={() => pickAppFolder('thumbs')}>📁 폴더</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="썸네일 폴더를 다시 읽기" onClick={loadThumbs}>🔄</button>
-              )}
+              </>)}
             </div>
             {lt === 'thumb' && (
               <div className="thumbgrid" data-testid="thumbgrid" title={thumbs.root || ''}>
-                {!(thumbs.files && thumbs.files.length)
-                  ? <div className="thumbcell empty" data-testid="thumbmsg" style={{ gridColumn: '1 / -1', gridRow: '1 / -1' }}>{thumbs.msg || '썸네일을 찾는 중…'}</div>
-                  : [0, 1, 2, 3].map((i) => {
-                  const f = thumbs.files[i];
-                  if (!f) return <div key={i} className="thumbcell empty" />;
+                <div className={'thumbcell' + (selectedSample ? '' : ' empty')} data-testid="style-preview"
+                  title={selectedStyleName + (selectedSample ? ' — 클릭: 크게 보기' : ' — 샘플 없음')}
+                  onClick={() => selectedSample && setPreview({ kind: 'img', src: media(selectedSample.path, selectedSample.v), caption: selectedStyleName })}>
+                  {selectedSample ? <img src={media(selectedSample.path, selectedSample.v)} alt={selectedStyleName} /> : <span>{selectedStyleName}<br />샘플 이미지 없음</span>}
+                  <span className="thumblbl">이미지 스타일 · {selectedStyleName}</span>
+                </div>
+                {[0, 1, 2].map((i) => {
+                  const f = thumbs.files?.[i];
+                  if (!f) return <div key={i} className="thumbcell empty" data-testid={i === 0 ? 'thumbmsg' : undefined}>{i === 0 ? (thumbs.msg || '썸네일이 없습니다') : `썸네일 ${i + 1}`}</div>;
                   const src = media(f.path, String(Math.round(f.mtimeMs || 0)));
                   const lbl = f.name.replace(/\.[^.]+$/, '').replace(thumbs.key || '', '').trim();
                   return (
@@ -6072,12 +6091,12 @@ export default function App() {
       {/* 🧭 가로 3칸(Vrew) — ① 영상·이미지(커서 줄 자막) ② 자막 클립 목록 ③ 자세한 설정(열릴 때만) */}
       <div id="body" className={wsOn ? 'ws' : ''}>
         {wsOn && (<>
-          <section className="pane1" data-testid="pane1" style={{ width: (pane1W * 100).toFixed(1) + '%' }}>
+          <section className="pane1" data-testid="pane1" style={{ width: `calc(${(pane1W * 100).toFixed(1)}% - 196px)` }}>
             {stageEl}
             {clipInfo}
             {logBox}
           </section>
-          <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절" onMouseDown={startPaneDrag} />
+          <div className="pane-split" data-testid="pane-split" title="끌어서 폭 조절 · 더블클릭: 왼쪽 영역/작업 영역 4:6" onDoubleClick={() => { setPane1W(0.4); lsSet('pm.pane1R.v2', '0.4'); }} onMouseDown={startPaneDrag} />
           {groupCol}
         </>)}
         <main className={wsOn ? 'pane2' : ''}>
@@ -7492,7 +7511,7 @@ export default function App() {
                 <input style={{ flex: 1 }} data-testid="app-folder-thumbs" placeholder={appFolders.thumbsDef ? '비우면 ' + appFolders.thumbsDef : '패키징 썸네일 폴더 — <폴더>\\<채널>\\[약칭_MMDD] 썸네일_A.png'} value={appFolders.thumbs || ''}
                   onChange={(e) => setAppFolders((f) => ({ ...f, thumbs: e.target.value }))} onBlur={(e) => saveAppFolders({ thumbs: e.target.value })} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder('thumbs')}>찾기</button></div>
-              <Hint>🖼 로그 상자의 「썸네일」 탭이 이 폴더에서 지금 대본의 <b>[약칭_MMDD]</b> 로 시작하는 그림을 찾아 4칸에 보여 줍니다(채널 폴더 한 단계 아래까지).</Hint>
+              <Hint>🖼 로그 상자의 「썸네일」 탭이 이 폴더에서 지금 대본의 <b>[약칭_MMDD]</b> 로 시작하는 그림 3장을 찾습니다(채널 폴더 한 단계 아래까지). 일치하는 파일이 없으면 지정 폴더 바로 안의 일반 이미지 3장을 이름순으로 보여 줍니다. 첫 칸에는 선택한 이미지 스타일을 표시합니다.</Hint>
               <Hint>입력 후 칸 밖을 클릭하거나 「찾기」로 고르면 바로 저장됩니다.</Hint>
             </div>)}
             {settingsTab === 'comfy' && (<div>
@@ -7887,6 +7906,7 @@ function queueBadges(it, makeProg, stageRun) {
   } else if (stageRun && stageRun.id === it.id) out.push([(STAGE_BADGE[stageRun.phase] || stageRun.phase) + ' 진행', 'run']);
   else if (it.status === 'running') out.push(['⚡ 진행중', 'run']);
   else if (it.status === 'done') out.push(['✓ 완료', 'ok']);
+  else if (it.status === 'interrupted') out.push(['⏹ 중단 · 이어하기', 'idle']);
   else if (it.status === 'failed') out.push(['✗ 실패', 'bad']);
   else out.push(['대기', 'idle']);
   const up = it.upload && UP_BADGE[it.upload.state];
@@ -7906,7 +7926,7 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) 
       <div className="qrows">
         {items.map((it) => {
           const ch = (it.settings && it.settings.presetName) || '';
-          const run = it.run && it.run.startedAt ? ((it.run.endedAt || Date.now()) - it.run.startedAt) : null;
+          const run = it.run && it.run.startedAt ? ((Number(it.run.elapsedMs) || 0) + (it.run.endedAt || Date.now()) - it.run.startedAt) : null;
           return (
             <div key={it.id} data-testid="q-row" className={'qrow' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
               title={(it.file || it.title) + (ch ? `\n채널: ${ch}` : '') + (it.upload && it.upload.url ? `\n${it.upload.url}` : '') + (it.upload && it.upload.error ? `\n업로드 실패: ${it.upload.error}` : '')}
@@ -7914,7 +7934,7 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) 
               <span className="qbadges">{queueBadges(it, makeProg, stageRun).map(([t, c], i) => <span key={i} className={'qb ' + c}>{t}</span>)}</span>
               {mixed && ch ? <span className={'qch' + (ch === headerCh ? '' : ' other')}>{short(ch)}</span> : null}
               <span className="qttl">{it.title}</span>
-              <span className="qtime" data-testid="q-time">│ ⏱ {run != null ? fmtDur(run) : '—'}</span>
+              <span className="qtime" data-testid="q-time" title="실제 작업 누적시간 · 중단 후 대기시간 제외">│ ⏱ {run != null ? fmtDur(run) : '—'}</span>
               <button className="qx" title="작업 순서에서 빼기" onClick={(e) => { e.stopPropagation(); onRemove(it.id); }}>✕</button>
             </div>);
         })}
@@ -8180,15 +8200,16 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                       {/* 합친 그룹 안의 옛 섹션 경계 — 그림은 앞 그림을 이어 쓰지만 챕터(타임스탬프)는 여기서 갈린다 */}
                       {s.mark && <div className="smark" title="앞 그룹 그림을 이어 쓰는 구간 — 유튜브 챕터는 여기서 새로 시작합니다">⤒ {s.mark.h2 && s.mark.phase && s.mark.h2 !== s.mark.phase ? `${s.mark.h2} · ${s.mark.phase}` : (s.mark.phase || s.mark.h2)}</div>}
                       <div className={'sblk-lines' + (capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum && capSel.items.some((x) => x.groupNum === c.num && x.sentIdx === si) ? ' capsel' : '')}
-                        title="클릭해서 이 문장 고치기 · 글자를 드래그하면 그 글자만 서식 · 줄 번호를 누르면 그 줄 서식"
+                        title="클릭: 재생 위치 선택 · 더블클릭/Enter: 자막 편집 · Space: 재생/멈춤"
                         onClick={(ev) => {
                           // 🎨 글자를 드래그해 골랐으면 고치기 대신 서식 선택(Vrew 처럼 단어 하나만 굵게·색…)
                           const rg = onPickCapChars ? selectionRange(ev.currentTarget) : null;
-                          if (rg) { _S.onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
-                          // 🧭 누른 줄로 커서 이동 + 바로 고치기(로이 확정)
+                          if (rg && ev.detail < 2) { _S.onPickCapChars(pr.shortsNum, c.num, si, rg); return; }
+                          // 클릭은 커서 이동, 두 번째 클릭은 명시적인 편집 진입
                           const lnEl = ev.target && ev.target.closest ? ev.target.closest('[data-ln]') : null;
                           const clickN = lnEl ? Number(lnEl.getAttribute('data-ln')) : (_S.nAt(ev.currentTarget.querySelector('[data-ln]')) || (lines.length ? lines[0].n : 1));
                           if (onCursor) _S.onCursor(pr.shortsNum, clickN);
+                          if (ev.detail < 2) return; // 단일 클릭은 선택만: Space가 자막에 입력되지 않게
                           const cl = detail ? (_S.lineAt(pr.shortsNum, clickN) || lines.find((x) => x.n === clickN)) : null;
                           _caretSide = caretSideFromClick(ev, lnEl ? (lnEl.querySelector('.clip-cap') || lnEl) : ev.currentTarget);
                           _E.start(pr.shortsNum, c.num, si, s.text, 1, cl ? { n: cl.n, from: cl.range.from, to: cl.range.to } : null);

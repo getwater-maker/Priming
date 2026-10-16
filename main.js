@@ -128,7 +128,11 @@ WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ?
     // 응답 DTO 는 그 대본을 보고 있을 때만 그대로 — 아니면 지금 보는 대본의 DTO(화면이 남의 대본으로 덮이지 않게)
     after: (_ch, r, st) => ((r && r.projects && !_makeViewed(st)) ? WORLD.run('longform', () => (S.parsed ? currentDTO() : null)) : r),
   });
-const PIN_ON_CLICK = new Set(['tts-build', 'image-build', 'video-build']);
+const WORK_ACTIONS = require('./core/work-actions');
+const PIN_ON_CLICK = new Set(Object.keys(WORK_ACTIONS.ACTIONS));
+const workContext = new (require('async_hooks').AsyncLocalStorage)();
+let workAbortEpoch = 0;
+const workClocks = new WeakMap();
 
 // ── 🔐 회원 확인(v0.9.26 · 로이 2026-10-15 「결제 회원만 사용」 · docs/회원제-설계.md) ──
 //   설치본에서만 막는다(개발 실행·E2E 는 열림 — PM_LICENSE_FORCE=1 이면 E2E 도 막는다). 화면은 LicenseGate 가 막고,
@@ -148,6 +152,13 @@ function isOwner() { return !LIC.enforce || !!(LIC.state && LIC.state.ok && LIC.
     if (!LIC_OPEN.has(ch) && !licOk()) throw new Error('로그인이 필요합니다 — Priming 회원으로 로그인하세요.');
     return fn(e, ...a);
   });
+}
+
+// WORLD가 대본을 고정한 뒤 공통 진행 수명주기를 적용한다.
+{
+  const register = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => register(channel, (e, args, ...rest) =>
+    WORK_ACTIONS.ACTIONS[channel] ? runTrackedAction(channel, args || {}, () => fn(e, args, ...rest)) : fn(e, args, ...rest));
 }
 
 // ── 🎬 제작 칸 — 「만드는 대본」과 「보는 대본」을 가른다(v0.9.23 · 로이 2026-10-15) ──
@@ -2150,7 +2161,9 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return { ok: false, error: 'gpu-busy' }; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
-  S.abort = false;
+  resetWorkAbort();
+  const projects = S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum);
+  const started = Date.now();
   if (!dry && !(await royGate(S.parsed, { what: '전체 TTS' }))) return { ok: false, error: 'roy-open' };   // 🟥 미확인 경험
   if (!dry) {
     S.preset = P.getPreset(presetName);
@@ -2162,18 +2175,19 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
     S.ttsMgr = mgr;
   }
 
-  const _ttsT0 = Date.now();
-  S.timings.tts = 0;
+  S.timings.tts = (Date.now() - started) / 1000;
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
     if (S.abort) { log('⏹ 중단됨'); break; }
-    if (dry) { P.fillSilent(pr, ttsDir); log(`✓ ${prLabel(pr)} 무음 오디오`); }
-    else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, scriptVoicePreset(S.preset, pr), S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); log(`✓ ${prLabel(pr)} 음성 완료`); }
+    if (dry) { await P.fillSilentYield(pr, ttsDir, () => S.abort); log(`✓ ${prLabel(pr)} 무음 오디오`); }
+    else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, scriptVoicePreset(S.preset, pr), S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); if (!S.abort) log(`✓ ${prLabel(pr)} 음성 변환 종료`); }
     pushDtoUpdate();
   }
-  S.timings.tts = (Date.now() - _ttsT0) / 1000;
+  S.timings.tts = (Date.now() - started) / 1000;
   pushDtoUpdate();
+  if (S.abort) throw new Error('TTS 중단됨 — 완료된 음성은 보존했습니다');
+  if (projects.some((pr) => missingTtsNums(pr).length)) throw new Error('TTS 미완료 — 음성이 없는 문장이 있습니다');
   return P.toDTO(S.parsed);
 }));
 
@@ -3498,7 +3512,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   //   이미지는 지워졌는데 다시 만들어지지 않고 게이트가 .vrew 를 막아 눌러도 눌러도 같은 팝업만 뜬다
   //   (로이 2026-09-07 실제로 겪음: `⏹ 중단됨` → `순환 엔진 모두 소진` → `.vrew 건너뜀` 4연속).
   //   다른 핸들러 20여 곳은 전부 시작할 때 이걸 한다 — 여기만 빠져 있었다.
-  S.abort = false;
+  resetWorkAbort();
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false, styleId: _styleArg = null, engine = null } = args;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   const outMode = normOutMode(args.outMode);
@@ -5005,18 +5019,22 @@ function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
 // 모드별 큐(적재된 대본 목록) 메타데이터 — 렌더러 큐 UI 용. 매 DTO 갱신에 첨부.
 // ⏱⬆ 작업 순서 줄 정보(v0.9.42) — 제작 시작·끝 · 업로드 상태. 다시 켜면 끝나지 않은 것은 정리한다(돌던 제작·업로드는 이어지지 않는다).
 function restoreRunInfo(wi) {
-  const run = wi && wi.run && wi.run.startedAt ? { startedAt: wi.run.startedAt, endedAt: wi.run.endedAt || null } : null;
-  if (run && !run.endedAt) run.endedAt = null;
+  const run = wi && wi.run && wi.run.startedAt ? { startedAt: wi.run.startedAt, endedAt: wi.run.endedAt || null, completed: wi.run.completed === true, elapsedMs: Number(wi.run.elapsedMs) || 0 } : null;
+  if (run && !run.endedAt) run.endedAt = run.startedAt; // 앱이 꺼져 있던 시간을 작업시간에 넣지 않는다.
   const up = wi && wi.upload && (wi.upload.state === 'done' || wi.upload.state === 'failed') ? wi.upload : null;
-  return { run: run && run.endedAt ? run : null, upload: up };
+  return { run, upload: up };
 }
 function findQueueItem(id) { for (const m of ['longform', 'book']) { const it = (S.modes[m].items || []).find((x) => x.id === id); if (it) return it; } return null; }
 // 📋 작업 순서 줄만 화면에 — DTO 는 보는 대본만 밀지만(pushDtoUpdate) 줄 상태는 어느 대본이든 보여야 한다
 function pushQueueUpdate() { try { if (win && !win.isDestroyed()) win.webContents.send('queue-update', queueDTO()); } catch (_) {} }
 function markItemRun(it, phase) {
   if (!it) return;
-  if (phase === 'start') it.run = { startedAt: Date.now(), endedAt: null };
-  else if (it.run) it.run.endedAt = Date.now();
+  if (phase === 'start') {
+    if (it.run && !it.run.endedAt) return; // 큐 단계와 내부 TTS의 중복 시작 기록 방지
+    const old = it.run;
+    const elapsedMs = old ? (Number(old.elapsedMs) || 0) + Math.max(0, (old.endedAt || old.startedAt) - old.startedAt) : 0;
+    it.run = { startedAt: Date.now(), endedAt: null, elapsedMs };
+  } else if (it.run && !it.run.endedAt) it.run.endedAt = Date.now();
   writeWorkspace(); pushQueueUpdate();
 }
 function setItemUpload(itemId, up) {
@@ -5324,7 +5342,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
   // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
   return enqueueImageJob(shortsNum ? `${shortsNum}편 이미지 생성` : '이미지 전체 생성', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  S.abort = false;
+  resetWorkAbort();
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   // 프롬프트 없는 그룹 → API로 자동 생성 (내용 맞는 이미지)
   await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log);
@@ -5664,7 +5682,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     const _gc = grokCoolUntil();
     if (_gc) { log(`⏭ Grok 한도 — ${fmtClock(_gc)}까지 영상 생성 건너뜀 (재설정 후 다시 시도)`); return P.toDTO(S.parsed); }
   }
-  S.abort = false;
+  resetWorkAbort();
   S.grokLimit = null;
   const _vidT0 = Date.now();
   S.timings.video = 0;
@@ -5794,7 +5812,7 @@ ipcMain.handle('claude-vision-check', async (_e, args = {}) => {
     items.push({ pr, g });
   }
   if (!items.length) { log('🔍 그림 검수 — 검사할 그림이 없습니다'); return { dto: P.toDTO(S.parsed), checked: 0, failed: 0, flagged: [] }; }
-  S.abort = false;
+  resetWorkAbort();
   log(`🔍 그림 검수(Claude) — ${items.length}장${pick ? '(고른 그룹)' : ''} · 한 장 ≈ $0.01 안팎(추정)`);
   const flagged = []; let checked = 0, failed = 0, next = 0;
   const worker = async () => {
@@ -6069,13 +6087,9 @@ function loadAppFolders() {
 }
 function appFolder(kind) { return String(loadAppFolders()[kind] || '').trim() || defaultDownloadDir(); }
 // 🖼 썸네일 폴더(v0.9.24 · 로이 2026-10-15) — 패키징이 만든 썸네일 3안(`<폴더>\<채널>\[약칭_MMDD] 썸네일_A.png`)을 로그 상자 🖼 탭에 보인다.
-//   비우면 이 PC 에 채널사업부 폴더(D:\## 아도나이로이\99_썸네일)가 있을 때만 그것 · 없으면 빈 값(다른 PC·회원은 ⚙ 에서 고른다).
-//   defOnly = 기본값만(설정 화면의 안내용).
-const THUMB_DEFAULT = path.join('D:\\', '## 아도나이로이', '99_썸네일');
+// 사용자 PC별로 지정한 폴더만 사용합니다.
 function thumbRoot(defOnly = false) {
-  const v = defOnly ? '' : String(loadAppFolders().thumbs || '').trim();
-  if (v) return v;
-  try { return fs.existsSync(THUMB_DEFAULT) ? THUMB_DEFAULT : ''; } catch (_) { return ''; }
+  return defOnly ? '' : String(loadAppFolders().thumbs || '').trim();
 }
 ipcMain.handle('get-app-folders', () => ({ ...loadAppFolders(), def: defaultDownloadDir(), thumbsDef: thumbRoot(true) }));
 ipcMain.handle('save-app-folders', (_e, patch = {}) => {
@@ -6090,13 +6104,12 @@ ipcMain.handle('save-app-folders', (_e, patch = {}) => {
 ipcMain.handle('list-thumbs', async () => {
   const TF = require('./core/thumb-find');
   const sp = S.scriptPath;
-  if (!sp) return { ok: false, msg: '대본을 열면 그 대본의 썸네일이 여기에 보입니다' };
   const key = TF.thumbKey(sp);
-  if (!key) return { ok: false, msg: '대본 파일 이름 앞에 [약칭_MMDD] 가 없어 썸네일을 찾을 수 없습니다' };
   const root = thumbRoot();
   if (!root || !fs.existsSync(root)) return { ok: false, key, msg: '썸네일 폴더가 없습니다 — ⚙ 설정 → 📁 폴더에서 고르세요' };
-  const files = await TF.findThumbs(root, key, 4);
-  return { ok: true, key, root, files, msg: files.length ? '' : `${key} 썸네일이 아직 없습니다 (패키징 뒤에 생깁니다)` };
+  let files = key ? await TF.findThumbs(root, key, 3) : [];
+  if (!files.length) files = await TF.findThumbs(root, '', 3, true);
+  return { ok: true, key, root, files, msg: files.length ? '' : '선택한 폴더에 이미지가 없습니다 (PNG · JPG · WebP)' };
 });
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
@@ -7242,7 +7255,7 @@ function applyWorkspace(ws, opts = {}) {
           for (const pr of parsed.projects) pr.mode = mode;
           const outRoot = computeOutRoot(wi.scriptPath, preset, mode);
           const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot, settings: wi.settings || null,
-            status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')), ...restoreRunInfo(wi) }; // 중단된 running 은 idle 로
+            status: (wi.status === 'running' || (wi.status === 'done' && !wi.run?.completed) ? 'interrupted' : (wi.status || 'idle')), ...restoreRunInfo(wi) }; // 중단된 실행·완료 확인 기록 없는 옛 완료건은 재확인
           q.items.push(it); restored++;
           if (wi.id === wq.activeId) activeNewId = it.id;
         } catch (e) { log(`큐 항목 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
@@ -7721,11 +7734,84 @@ ipcMain.handle('load-project', async () => {
 //   🔑 끝(완료·중단·예외)은 runMakeAllCore 의 finally 한 곳에서 닫는다 — 예외로 빠져도 팝업이 「진행 중」에 갇히지 않게.
 let _mk = null;
 let _mkQueuePos = null;   // run-batch 가 { idx, total } 을 적는다(단건 제작이면 null)
+function resetWorkAbort() {
+  const ctx = workContext.getStore();
+  if (ctx && ctx.epoch !== workAbortEpoch) throw new Error('작업 중단됨');
+  if (!ctx) S.abort = false;
+}
+function startWorkClock(it) {
+  if (!it) return;
+  const n = workClocks.get(it) || 0;
+  if (!n) { it.status = 'running'; markItemRun(it, 'start'); }
+  workClocks.set(it, n + 1);
+}
+function endWorkClock(it, phase) {
+  if (!it) return;
+  const n = Math.max(0, (workClocks.get(it) || 1) - 1);
+  workClocks.set(it, n);
+  if (phase !== 'done') it.status = phase === 'aborted' ? 'interrupted' : 'failed';
+  if (!n) {
+    if (it.status === 'running' || (it.status === 'done' && !it.run?.completed)) it.status = 'idle';
+    markItemRun(it, 'end');
+  } else pushQueueUpdate();
+}
+async function runTrackedAction(channel, args, fn) {
+  if (!S.parsed || !S.parsed.projects) return fn();
+  const [stage, label, queued] = WORK_ACTIONS.ACTIONS[channel];
+  if (stage === 'video' && args.perItem) { const r = _itemRange(activeItem()?.settings || {}, S.parsed); args = {...args, fromNum:r.fromNum, toNum:r.toNum, vidSel:r.sel || ''}; }
+  const projects = WORK_ACTIONS.scope(S.parsed.projects, args);
+  const it = activeItem(), epoch = workAbortEpoch;
+  const skip = Object.fromEntries(['tts', 'image', 'video', 'out'].filter(k => k !== stage).map(k => [k, '이번 작업 제외']));
+  const prog = _mkStart(projects, {fromNum: args.fromNum, toNum: args.toNum, sel: args.vidSel || ''}, label + ' · ' + (S.parsed.fileTitle || ''), skip);
+  prog.st.kind = stage; prog.st.actionLabel = label;
+  if (args.groupNum != null) prog.st.focus = {sn:args.shortsNum, group:args.groupNum};
+  let started = false, phase = 'error', error = '';
+  const start = () => {
+    if (epoch !== workAbortEpoch) throw new Error('작업 중단됨 — 대기 중인 작업도 취소했습니다');
+    if (started) return;
+    started = true; S.abort = false;
+    prog.st.startedAt = Date.now(); prog.note(''); prog.begin(stage);
+    startWorkClock(it);
+  };
+  if (queued) prog.note('앞선 작업이 끝나기를 기다리는 중');
+  try {
+    if (!queued) start();
+    const result = await workContext.run({start, epoch}, fn);
+    if (S.abort || epoch !== workAbortEpoch) throw new Error('작업 중단됨 — 완료된 자산은 보존했습니다');
+    if (result && (result.ok === false || result.error)) throw new Error(result.error || '작업을 완료하지 못했습니다');
+    if (stage === 'tts' && projects.some(p => p.sentences.some(x => (!p._progressSentenceIds || p._progressSentenceIds.has(x.id)) && (!x.ttsAudioPath || !fs.existsSync(x.ttsAudioPath))))) throw new Error('음성이 없는 문장이 남아 있습니다');
+    if (stage === 'image' && projects.some(p => missingVisualGroups(p).length)) throw new Error('이미지가 없는 그룹이 남아 있습니다');
+    if (stage === 'video' && args.engine !== 'none' && projects.some(p => rangeNums(p, args.fromNum, args.toNum, args.vidSel).some(n => !hasVideoFile(p.groups.find(g => g.num === n) || {})))) throw new Error('비디오가 없는 그룹이 남아 있습니다');
+    if (channel === 'export-vrew' && (!result?.outs?.length || result.outs.length < projects.length)) throw new Error('최종 출력을 완료하지 못했습니다');
+    if (channel === 'export-vrew' && args.outTarget === 'mp4' && normOutMode(args.outMode) === 'full' && result.outs.some(x => !x.mp4Path)) throw new Error('MP4 출력을 완료하지 못했습니다');
+    phase = 'done';
+    return result;
+  } catch (e) {
+    phase = S.abort || epoch !== workAbortEpoch ? 'aborted' : 'error'; error = e.message;
+    throw e;
+  } finally {
+    prog.stop(phase, error);
+    if (started) { if (it?.run) it.run.completed = false; endWorkClock(it, phase); }
+    pushDtoUpdate();
+  }
+}
+let _mkSerial = 0;
+const _mkReports = new Map();
 function _mkStart(projects, range, title, skip) {
   const MP = require('./core/make-progress');
   const _wst = WORLD.store && WORLD.store();
   const st = MP.create({ title, queue: _mkQueuePos, skip, itemId: (_wst && _wst.item && _wst.item.id) || (activeItem() && activeItem().id) || null });
-  const send = () => { try { if (win && !win.isDestroyed()) win.webContents.send('make-progress', MP.snapshot(st, projects, range)); } catch {} };
+  st.operationId = ++_mkSerial;
+  const send = () => {
+    try {
+      const snap = MP.snapshot(st, projects, range);
+      if (st.phase === 'running') _mkReports.set(st.operationId, snap); else _mkReports.delete(st.operationId);
+      const jobs = [..._mkReports.values()].sort((a,b) => b.operationId - a.operationId);
+      const live = jobs.filter(j => Object.values(j.stages).some(x => x.state === 'run'));
+      const shown = live[0] || jobs[0] || snap;
+      if (win && !win.isDestroyed()) win.webContents.send('make-progress', {...shown, jobs: jobs.map(j => ({operationId:j.operationId, title:j.title, phase:j.phase, sent:j.sent, image:j.image, video:j.video}))});
+    } catch {}
+  };
   const timer = setInterval(send, 1000);
   send();
   return {
@@ -7738,9 +7824,28 @@ function _mkStart(projects, range, title, skip) {
   };
 }
 async function runMakeAllCore(opts = {}) {
-  try { return await runMakeAllBody(opts); }
-  catch (e) { if (_mk) { _mk.stop('error', e.message); _mk = null; } throw e; }
-  finally { if (_mk) { _mk.stop(S.abort ? 'aborted' : 'done'); _mk = null; } }
+  // 중단 플래그는 작업 시작 시에만 해제한다. 서버 연결을 기다리는 중의 중단 요청은 보존한다.
+  if (!opts._fromQueue) S.abort = false;
+  const it = activeItem();
+  startWorkClock(it);
+  let phase = 'error', error = '';
+  try {
+    const result = await runMakeAllBody(opts);
+    if (S.abort) throw Object.assign(new Error('제작 중단됨 — 완료된 자산을 보존했습니다'), { code: 'MAKE_ABORTED' });
+    if (!result || !result.completed) throw new Error('제작이 마무리되지 않았습니다');
+    phase = 'done';
+    if (it) { it.status = 'done'; it.run.completed = (workClocks.get(it) || 1) === 1; }
+    return result;
+  } catch (e) {
+    const aborted = S.abort || e.code === 'MAKE_ABORTED';
+    phase = aborted ? 'aborted' : 'error'; error = e.message;
+    if (it) it.status = aborted ? 'interrupted' : 'failed';
+    if (aborted) e.code = 'MAKE_ABORTED';
+    throw e;
+  } finally {
+    if (_mk) { _mk.stop(phase, error); _mk = null; }
+    endWorkClock(it, phase);
+  }
 }
 async function runMakeAllBody(opts = {}) {
   let outputIncomplete = '';
@@ -7778,7 +7883,6 @@ async function runMakeAllBody(opts = {}) {
     if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(_pv)}' 미가동 (서버 또는 API 키 확인)`);
     ttsMgr = mgr;
   }
-  S.abort = false;
   S.grokLimit = null; // 이번 실행 중 Grok 요청 한도 감지 여부(감지 시 작업 중단 + 팝업)
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
@@ -8048,6 +8152,11 @@ async function runMakeAllBody(opts = {}) {
     const incomplete = [];
     const noTts = [];
     for (const pr of projects) {
+      if (S.abort) break;
+      if (!dry && !skipVisual && !wbGo && videoEngine !== 'none' && !_grokCool) {
+        const missing = rangeNums(pr, fromNum, toNum, vidSel).filter((n) => !hasVideoFile(pr.groups.find((g) => g.num === n) || {}));
+        if (missing.length) { outputIncomplete = `영상 미생성 그룹 ${missing.length}개 (G${missing.join(', G')})`; log(`⛔ ${prLabel(pr)} — ${outputIncomplete} → 최종 출력 보류`); continue; }
+      }
       const miss = gateVisual(outMode) ? missingVisualGroups(pr) : [];
       if (miss.length) {
         incomplete.push({ label: prLabel(pr), nums: miss });
@@ -8061,6 +8170,7 @@ async function runMakeAllBody(opts = {}) {
         log(`⛔ ${prLabel(pr)} — 음성 없는 문장 ${mtts4.length}/${(pr.sentences || []).length}개 (컷 ${mtts4.slice(0, 8).join(', ')}${mtts4.length > 8 ? ' …' : ''}) → .vrew 건너뜀`);
         continue;
       }
+      if (S.abort) break;
       if (wbGo) {
         // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 확인 팝업은 없다(누르면 바로 만든다).
         const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars, ctx: runCtx });
@@ -8070,7 +8180,7 @@ async function runMakeAllBody(opts = {}) {
           if (wr.hasAudio) { try { maybeAutoUpload(pr, wr.output, preset, runCtx); } catch (e) { log(`⚠ 유튜브 업로드 준비 실패: ${e.message}`); } }
           else if (preset && preset.ytAuto) log(`⏭ 유튜브 업로드 건너뜀 — 화이트보드 MP4 에 음성이 없습니다(${wr.audioError || '음성 얹기 실패'})`);
         }
-        else if (!wr.cancelled) log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${wr.error}`);
+        else { outputIncomplete = wr.error || '화이트보드 제작 미완료'; if (wr.cancelled) S.abort = true; log(`✗ ${prLabel(pr)} 화이트보드 실패 — ${outputIncomplete}`); }
         continue;
       }
       let ep = preset;
@@ -8115,9 +8225,9 @@ async function runMakeAllBody(opts = {}) {
           // .vrew 를 입력으로 굽는다 — Vrew 가 받는 것과 같은 입력이라 렌더 규칙이 두 벌이 되지 않는다.
           const mr = await renderUploadMp4(vrewPath, baseName, preset, pr, runCtx);
           if (mr.ok) { await BF.recordMp4({ outRoot, baseName, mp4Path }); if (openVrew) { try { shell.openPath(mr.output); } catch (_) {} } }
-          else if (!mr.cancelled && openVrew) shell.openPath(vrewPath); // MP4 가 실패하면 Vrew 로 마무리할 수 있게
+          else { outputIncomplete = mr.error || 'MP4 제작 미완료'; if (mr.cancelled) S.abort = true; else if (openVrew) shell.openPath(vrewPath); }
         } else if (openVrew) shell.openPath(vrewPath);
-      } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
+      } catch (e) { outputIncomplete = e.message || '최종 파일 생성 실패'; log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
     }
     if (_mk) { _mk.end('out'); if (incomplete.length || noTts.length) _mk.note('⛔ 빠진 그림·음성이 있어 만들지 않음'); }
     warnIncompleteVisuals(incomplete);
@@ -8138,6 +8248,7 @@ async function runMakeAllBody(opts = {}) {
   log(S.abort
     ? `⏹ 중단됨 — 완료된 자산만 보존 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s)`
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
+  return { completed: !S.abort && !outputIncomplete };
 }
 
 
@@ -8153,11 +8264,11 @@ ipcMain.handle('make-all', (_e, args = {}) => { const _it = activeItem(); return
 }); });
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
-//   실패해도 해당 항목만 '실패' 표시 후 다음 진행.
+//   중단·실패한 항목이 마무리될 때까지 다음 새 대본을 시작하지 않는다.
 //   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
 //   탐색기(출력폴더)는 어느 경우에도 자동으로 열지 않는다 — 필요하면 헤더 '출력폴더' 버튼.
 ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작', async () => {
-  const plan = Array.isArray(args.plan) ? args.plan : [];
+  const plan = require('./core/queue-resume').resumePlan(Array.isArray(args.plan) ? args.plan : [], S.modes.longform.items);
   const common = args.common || {};
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
@@ -8183,10 +8294,10 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     if (!it) { log(`(건너뜀) 큐 항목 없음 [${i + 1}/${plan.length}]`); continue; }
     // 이미 완료(done)된 항목은 건너뜀 — 다시 만들지 않고 .vrew 도 다시 열지 않음(필요하면 vrew 버튼으로 열기).
     //   활성 전환(무거운 대본 재렌더)·vrew 재열기를 안 하므로 만들기 눌렀을 때 멈춤도 크게 줄어듦.
-    if (it.status === 'done') { skipN++; log(`⏭ [${i + 1}/${plan.length}] 이미 완료 — 건너뜀: ${path.basename(it.scriptPath || '') || it.id}`); continue; }
+    if (it.status === 'done' && it.run?.completed) { skipN++; log(`⏭ [${i + 1}/${plan.length}] 이미 완료 — 건너뜀: ${path.basename(it.scriptPath || '') || it.id}`); continue; }
     // 🎬 화면(activeId)은 바꾸지 않는다 — 이 대본은 제작 칸(makeRun)에서 만들고, 사람은 다른 대본을 보고 고칠 수 있다(v0.9.23 · 로이 2026-10-15)
     if (!it.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
-    it.status = 'running'; markItemRun(it, 'start'); pushDtoUpdate();
+    pushDtoUpdate();
     const label = (it.parsed.fileTitle) || (it.scriptPath || '');
     log(`▶ [${i + 1}/${plan.length}] 롱폼 · ${label}`);
     _mkQueuePos = { idx: i + 1, total: plan.length };
@@ -8233,10 +8344,14 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
         uploadAfter: (common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null,   // ⬆ 헤더 「완성 후 업로드」
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
       }));
-      it.status = 'done'; okN++; markItemRun(it, 'end');
+      okN++;
     } catch (e) {
-      it.status = 'failed'; failN++; markItemRun(it, 'end');   // markItemRun 이 작업 순서 줄을 밀어 준다
-      log(`✗ 실패: ${label} — ${e.message} (다음 대본 계속)`);
+      const aborted = S.abort || e.code === 'MAKE_ABORTED';
+      it.status = aborted ? 'interrupted' : 'failed';
+      if (!aborted) failN++;
+      markItemRun(it, 'end'); pushDtoUpdate();
+      log(`${aborted ? '⏹ 중단' : '✗ 실패'}: ${label} — ${e.message} (미완료 작업 우선 — 다음 대본은 시작하지 않음)`);
+      break;
     }
     pushDtoUpdate();
   }
@@ -8245,7 +8360,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   _mkQueuePos = null;
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
-  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), stoppedEarly: stoppedLeft > 0, remaining: stoppedLeft };
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: !!S.abort, failed: failN, stoppedEarly: stoppedLeft > 0, remaining: _batchRemaining(plan, 0, S.modes.longform.items) };
 }));
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
@@ -8253,6 +8368,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
 // 📥 받기·전사 패널의 ⏹ — 제작(S.abort)은 건드리지 않는다.
 ipcMain.handle('dl-abort', () => { _dlAbort = true; log('⏹ 받기·전사 중단 요청 — 현재 단계 마치는 대로 멈춥니다'); return true; });
 ipcMain.handle('abort', () => {
+  workAbortEpoch++;
   S.abort = true;
   if (_awake.n - _dlActive <= 0) _dlAbort = true;   // 받기·전사만 돌고 있을 때는 헤더 ■ 이 그것도 멈춘다(제작이 같이 돌면 제작만)
   // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
@@ -8439,7 +8555,7 @@ ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환'
   if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);
   const ttsDir = shortsDirs(S.outRoot, shortsNum).tts;
   const sents = pr.getSentencesOfGroup(g);
-  S.abort = false;
+  resetWorkAbort();
   // 🔑 **기본은 채널 시드 고정**이다 — 시드가 다르면 화자는 같아도 톤·호흡이 달라져
   //   그 그룹만 다른 소리로 들린다(로이 2026-09-15: "같은 채널 영상인데 음성이 바뀐다").
   //   ⚠ 2026-09-15 까지는 **매 클릭 seed 를 랜덤화**했다(v0.1.73 쇼츠 시절의 '새로 뽑기'). 버튼 설명은
@@ -8510,7 +8626,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
-  S.abort = false;
+  resetWorkAbort();
   _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 영상을 가리지 않게
   const videoDir = shortsDirs(S.outRoot, shortsNum).media;
   // 이미지가 없으면 먼저 생성(비어있는 것 채움) → 그 이미지로 영상.
@@ -8586,7 +8702,7 @@ function _runOnLanes(lanes, label, fn) {
     const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일', flowBrowser: 'Flow 브라우저', gensparkBrowser: 'Genspark 브라우저', whiteboard: '화이트보드 렌더' };
     log(`⏳ ${label} — ${busy.map((k) => ko[k]).join('·')} 작업이 끝난 뒤 시작합니다 (앞에 ${Math.max(...busy.map((k) => _lanePending[k])) - 1}건)`);
   }
-  const p = Promise.allSettled(prev).then(() => withAwake(label, fn));
+  const p = Promise.allSettled(prev).then(() => withAwake(label, () => { const ctx = workContext.getStore(); if (ctx) ctx.start(); return fn(); }));
   const done = () => { for (const k of lanes) _lanePending[k]--; };
   const tail = p.then(done, done);
   for (const k of lanes) _LANES[k] = tail;
@@ -8714,7 +8830,7 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
     // 문장 인라인 수정 직후에는 옛 프롬프트도 함께 무효화된다. 단건 🔄 에서도 현재 문장으로 먼저 채운다.
     if (!g.imagePrompt || !g.imagePrompt.trim()) await autoFillPrompts([pr], log);
     if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
-    S.abort = false;
+    resetWorkAbort();
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
     _softenCoverOf(pr, g);   // 🪶 덮고 있던 앞 그림이 새 그림을 가리지 않게
     log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
@@ -8779,7 +8895,7 @@ ipcMain.handle('edit-group-image', (_e, args = {}) => {
     await awaitForeignTtsIdle('그림 고치기', log);
     const dim = require('./vrew/vrew-builder').readImageSize(g.imagePath);
     if (!dim || !dim.w || !dim.h) throw new Error('그림 크기를 읽지 못했습니다.');
-    S.abort = false;
+    resetWorkAbort();
     const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
     const want = path.join(mediaDir, String(g.num).padStart(2, '0') + '_edit.png');
     const out = P.claimPath(want, null, P.IMG_EXTS);
@@ -10344,7 +10460,7 @@ ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 
   const roll = !!args.roll;
   const usePreset = roll ? { ...preset, seed: Math.floor(Math.random() * 1e9) } : preset;
   const sp = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
-  S.abort = false;
+  resetWorkAbort();
   log(roll ? `🎲 클립 음성 새로 뽑기 (${sents.length}문장 · ${voiceLabel(preset)} → 시드 ${usePreset.seed} · 이 문장들만 톤이 달라집니다)`
     : `🎤 클립 음성 다시 만들기 (${sents.length}문장 · ${voiceLabel(preset)} · 채널 시드 그대로)`);
   await P.fillTtsList(sents, usePreset, mgr, shortsDirs(S.outRoot, pr.shortsNum).tts, log, () => S.abort, sp, '클립', pushDtoUpdate, true);
@@ -10791,7 +10907,7 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   const { styleName = '', fromNum = null, toNum = null } = args;
   const mode = args.mode === 'image' || args.mode === 'video' ? args.mode : 'fill';
   if (!require('./core/claude-api').available()) throw new Error('Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요.');
-  S.abort = false;
+  resetWorkAbort();
   const callAnswer = (req) => PromptIO.callLlmTextApi('claude', '', req, { log, label: '프롬프트' });
   const _pr0 = S.parsed.projects[0];
   const _vm = VSel.matcher((_pr0 && _pr0.groups) || [], args.vidSel, fromNum, toNum);
@@ -11792,7 +11908,7 @@ ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   const speed = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
   const introSents = pr.sentences.filter((s) => s.isIntro);
   if (!introSents.length) { log('도입부 문장이 없습니다 — 대본에 "## 도입" 헤더가 필요합니다.'); return P.toDTO(S.parsed); }
-  S.abort = false;
+  resetWorkAbort();
   log(`🎬 도입부 ${introSents.length}문장 TTS 후 10초 재배치… (${voiceLabel(preset)})`);
   const { mgr, ok } = await P.makeTtsManager(log, preset);
   if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)`);

@@ -26,7 +26,10 @@ function count(projects, { fromNum = null, toNum = null, sel = '' } = {}) {
     const inVid = VS.matcher(pr.groups || [], sel, fromNum, toNum);   // 🎬 범위 또는 방식
     let ord = 0;   // 편 안 문장 순번(1부터) — 화면 줄 목록(buildProjLines)의 ord 와 같다
     for (const s of pr.sentences || []) {
-      sent.total++; ord++;
+      ord++;
+      if (pr._progressSentenceIds && !pr._progressSentenceIds.has(s.id)) continue;
+      sent.total++;
+      if (s.ttsStatus === 'generating') sent.cur = { num: s.num, text: clip(s.text, 40), ord, sn: pr.shortsNum ?? null };
       if (sentDone(s)) sent.done++;
       else if (!sent.cur) sent.cur = { num: s.num, text: clip(s.text, 40), ord, sn: pr.shortsNum != null ? pr.shortsNum : null };   // 음성은 순서대로 만든다 → 첫 빈 문장 = 지금 만드는 문장
     }
@@ -81,7 +84,7 @@ function snapshot(st, projects, range) {
   const now = Date.now();
   const c = count(projects, range);
   return {
-    title: st.title, queue: st.queue, itemId: st.itemId || null, phase: st.phase,
+    operationId: st.operationId || null, focus: st.focus || null, title: st.title, kind: st.kind || null, actionLabel: st.actionLabel || null, queue: st.queue, itemId: st.itemId || null, phase: st.phase,
     startedAt: st.startedAt, endedAt: st.endedAt, now,
     stages: JSON.parse(JSON.stringify(st.stages)),
     outNote: st.outNote || '',

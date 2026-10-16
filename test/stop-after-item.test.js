@@ -34,8 +34,8 @@ const iRun = RB.indexOf('runMakeAllCore(');   // 🎬 v0.9.23: await makeRun(it,
 ok(iAbort > 0 && iStop > iAbort, '■ 중단 검사 다음에 이번 편까지만 검사');
 ok(iStore > iStop && iRun > iStop, '다음 대본을 시작(storeActive·runMakeAllCore)하기 **전에** 검사한다 — 만들던 대본은 끝까지');
 ok(/_stopAfterItem = false;\s*\/\/[^\n]*\n\s*log\(`⚡⚡ 큐 순차 제작 시작/.test(RB), '큐 시작 때 지난 예약을 푼다');
-ok(/_stopAfterItem = false;\n\s*log\(`⚡⚡ 큐 제작 종료/.test(RB), '큐가 끝나면 예약을 푼다');
-ok(/stoppedEarly: stoppedLeft > 0, remaining: stoppedLeft/.test(RB), '화면에 stoppedEarly·remaining 을 돌려준다');
+ok(/_stopAfterItem = false;\s*_mp4DupAll = null;\s*_mkQueuePos = null;\s*log\(`⚡⚡ 큐 제작 종료/.test(RB), '큐가 끝나면 예약을 푼다');
+ok(/stoppedEarly: stoppedLeft > 0, remaining: _batchRemaining\(plan, 0, S.modes.longform.items\)/.test(RB), '화면에 stoppedEarly·remaining 을 돌려준다');
 ok(/let _stopAfterItem = false;/.test(MAIN), '모듈 수준 플래그가 있다');
 
 console.log('[3] S.abort 와 분리');

@@ -20,8 +20,8 @@ function thumbKey(scriptPath) {
 }
 
 /** root 아래에서 key 로 시작하는 그림 — [{ path, name, mtimeMs }] 이름순 · 최대 max 개 */
-async function findThumbs(root, key, max = 4) {
-  if (!root || !key) return [];
+async function findThumbs(root, key, max = 4, directOnly = false) {
+  if (!root || (!key && !directOnly)) return [];
   const out = [];
   const scan = async (dir) => {
     let ents;
@@ -30,7 +30,7 @@ async function findThumbs(root, key, max = 4) {
   };
   const top = await scan(root);
   const dirs = [root];
-  for (const e of top) if (e.isDirectory() && !e.name.startsWith('_')) dirs.push(path.join(root, e.name));
+  for (const e of top) if (!directOnly && e.isDirectory() && !e.name.startsWith('_')) dirs.push(path.join(root, e.name));
   for (const d of dirs) {
     const ents = d === root ? top : await scan(d);
     for (const e of ents) {
