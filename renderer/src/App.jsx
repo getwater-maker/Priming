@@ -713,6 +713,7 @@ export default function App() {
   //   사람이 제작 중 다른 대본을 고르면 이 제작이 끝날 때까지 멈춘다(followOff · 진행 팝업 「📍 제작 화면으로」로 다시) · 칸을 만지면 15초 쉰다.
   const followRef = useRef({ state: null, lastMove: 0, lastUser: 0, lastSel: null, nowEl: null });
   const [followOff, setFollowOff] = useState(false);
+  const [workGrp, setWorkGrp] = useState(null);   // 🧩 그룹 칸 「⚙ 작업 중」 그룹 번호(제작 따라가기)
   const [stageRun, setStageRun] = useState(null); // 📋 단계 버튼(runStageQueue)이 지금 만드는 대본·단계 {id, phase} — 작업 순서 줄 표시(v0.9.42)
   const [mp4Prog, setMp4Prog] = useState(null);
   // 🗂 진행 팝업(만들기·MP4·업로드)은 끝나면 3초 뒤 저절로 닫는다(로이 2026-10-02 — 겹친 팝업이 목록을 가렸다).
@@ -4030,8 +4031,9 @@ export default function App() {
   useEffect(() => {
     const P = makeProg, F = followRef.current;
     const clearNow = () => { if (F.nowEl) { try { F.nowEl.classList.remove('tts-now'); } catch (_) {} F.nowEl = null; } };
-    if (!P || P.phase !== 'running') { F.state = null; F.lastSel = null; clearNow(); if (followOff) setFollowOff(false); return; }
-    if (followOff || mode !== 'longform') { clearNow(); return; }
+    const clearGrp = () => { if (F.workG != null) { F.workG = null; setWorkGrp(null); } };
+    if (!P || P.phase !== 'running') { F.state = null; F.lastSel = null; clearNow(); clearGrp(); if (followOff) setFollowOff(false); return; }
+    if (followOff || mode !== 'longform') { clearNow(); clearGrp(); return; }
     const act = queue && queue.longform && queue.longform.activeId;
     if (P.itemId && act !== P.itemId) {
       if (F.lastSel !== P.itemId) { F.lastSel = P.itemId; F.state = null; selectQueueItem(P.itemId); }
@@ -4047,18 +4049,27 @@ export default function App() {
       const sn = x.sn != null ? x.sn : firstSn;
       const lm = linesMap.get(sn); if (!lm) return null;
       const l = x.ord != null ? lm.list.find((y) => y.ord === x.ord) : lm.list.find((y) => y.groupNum === x.group);
-      return l ? { sn, n: l.n } : null;
+      return l ? { sn, n: l.n, g: l.groupNum } : null;
     };
     const pv = lineOf(t.preview), cl = lineOf(t.clip);
     if (!pv && !cl) return;
     F.lastMove = now;
     if (pv && !(cursor && cursor.shortsNum === pv.sn && cursor.n === pv.n)) setCursor({ shortsNum: pv.sn, n: pv.n });
+    // 🧩 그룹 칸 = ② 와 같은 그룹(지금 작업하는 곳) · 「⚙ 작업 중」 표시는 React 상태로(DOM 클래스는 다시 그리기에 지워진다 · v0.9.57 · 로이 2026-10-17)
+    if (cl && F.workG !== cl.g) { F.workG = cl.g; setWorkGrp(cl.g); }
     if (cl) {
       requestAnimationFrame(() => {
         const el = document.querySelector('.card[data-pr="' + cl.sn + '"] .sent[data-ln="' + cl.n + '"]') || document.querySelector('main.pane2 .sent[data-ln="' + cl.n + '"]');
         if (!el) return;
         if (t.clip && t.clip.ord != null) { if (F.nowEl !== el) { clearNow(); el.classList.add('tts-now'); F.nowEl = el; } } else clearNow();
         try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+        const pane = document.querySelector('.pane-groups');   // 그룹 칸도 그 그룹을 가운데로
+        const gi = pane && pane.querySelector('[data-testid="group-item"][data-g="' + cl.g + '"]');
+        if (!gi) return;
+        const head = pane.querySelector('.pg-head.sticky'); const hh = head ? head.getBoundingClientRect().height : 0;
+        const pr = pane.getBoundingClientRect(), er = gi.getBoundingClientRect();
+        const top = Math.max(0, pane.scrollTop + (er.top - pr.top) - ((pane.clientHeight + hh) / 2 - er.height / 2));
+        if (Math.abs(top - pane.scrollTop) > 4) { try { pane.scrollTo({ top, behavior: 'smooth' }); } catch (_) { pane.scrollTop = top; } }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5486,7 +5497,7 @@ export default function App() {
         {rows.map((r) => (
           <div key={r.num} className={'pg-row' + (r.intro ? ' intro' : '')}>
             <span className="pg-lead"><span className="pg-no">{r.num}</span><input type="checkbox" data-testid="group-chk" data-g={r.num} checked={isOn(r)} onChange={(e) => setGroups([r], e.target.checked)} /></span>
-            <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)} onDoubleClick={() => renameGroup(pr.shortsNum, r.num)} title="누르면 그 그룹으로 · 더블클릭 = 그룹 이름 바꾸기">
+            <button type="button" className={'pg-item' + (curL && curL.groupNum === r.num ? ' cur' : '') + (workGrp === r.num ? ' work-now' : '')} data-testid="group-item" data-g={r.num} onClick={() => go(r)} onDoubleClick={() => renameGroup(pr.shortsNum, r.num)} title="누르면 그 그룹으로 · 더블클릭 = 그룹 이름 바꾸기">
               <span className={'pg-title' + (r.title ? '' : ' none')}>{r.title || '제목 없는 그룹'}</span>
               <span className="pg-thumb">{r.vidFile ? <FrameImg file={r.vidFile} version={r.vidVer} t={0.5} fit="contain" /> : r.img ? <img src={r.img} alt="" draggable={false} /> : <em>{r.vid ? '🎬 영상만 있음' : '그림 없음'}</em>}<b>{r.text}</b></span>
               <span className="pg-meta">{mmss(r.t0)} + {Math.round(r.dur)}초 · 클립 {r.n}</span>
@@ -5505,6 +5516,7 @@ export default function App() {
   })();
   useEffect(() => {
     if (pgCurGroup == null || !groupCol) return;
+    if (followRef.current.workG != null && Date.now() - followRef.current.lastMove < 1500) return;   // 📍 제작 따라가기가 그룹 칸을 ② 작업 그룹에 두는 중
     const pane = document.querySelector('.pane-groups'); const el = pane && pane.querySelector('.pg-item.cur'); if (!pane || !el) return;
     const head = pane.querySelector('.pg-head.sticky'); const hh = head ? head.getBoundingClientRect().height : 0;
     const pr = pane.getBoundingClientRect(), er = el.getBoundingClientRect();
@@ -5514,7 +5526,8 @@ export default function App() {
   const curGroupNum = (() => { if (!cursor) return null; const PL = linesMap.get(cursor.shortsNum); const l = PL && PL.list.find((x) => x.n === cursor.n); return l ? l.groupNum : null; })();
   useEffect(() => {   // 지금 그룹이 칸 안에 보이게(재생·이동을 따라간다)
     if (!wsOn || curGroupNum == null) return;
-    const e = document.querySelector('[data-testid="group-item"][data-g="' + curGroupNum + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' });
+    if (followRef.current.workG != null && Date.now() - followRef.current.lastMove < 1500) return;
+    const e =document.querySelector('[data-testid="group-item"][data-g="' + curGroupNum + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest' });
   }, [wsOn, curGroupNum]);
   /** 🏷 AI 고지를 화면의 9칸(상·중·하 × 좌·중·우)에 놓는다 — ① 칸에 그려진 고지의 실제 크기를 재서 가장자리 여백(기본 자리와 같은 여백)을 지킨다 */
   function placeAi(h, v) {

@@ -1206,6 +1206,8 @@ details.bkeb-checks:not([open])>summary{color:#2e7d32}
 .pane-groups .pg-item:hover{border-color:var(--accent)}
 .pane-groups .pg-item.cur{border-color:#19a8d6;box-shadow:0 0 0 1px #19a8d6}
 .pane-groups .pg-item.cur .pg-title{background:#19a8d6;color:#fff}
+.pane-groups .pg-item.work-now{position:relative;outline:2px solid #5a9;outline-offset:-1px}
+.pane-groups .pg-item.work-now::after{content:'⚙ 작업 중';position:absolute;right:4px;top:3px;font-size:10px;font-weight:700;color:#1f6b4c;background:#dff3e8;border-radius:8px;padding:0 5px;pointer-events:none}
 .pane-groups .pg-title{font-size:12px;font-weight:700;padding:4px 8px;background:#f1e9db;color:var(--strong,#3a342e);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pane-groups .pg-title.none{font-weight:500;color:var(--muted,#8a7a5c)}
 .pane-groups .pg-thumb{position:relative;display:block;margin:6px 6px 2px;aspect-ratio:16/9;background:#1c1a17;border-radius:4px;overflow:hidden}
