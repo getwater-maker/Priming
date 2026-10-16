@@ -3284,6 +3284,7 @@ ipcMain.handle('yt-disconnect', async (_e, id) => {
   return r;
 });
 ipcMain.handle('yt-reorder', (_e, ids) => require('./core/youtube-upload').reorderChannels(ids));   // ↕ 채널 순서(끌어서)
+ipcMain.handle('yt-set-memo', (_e, { id, memo } = {}) => require('./core/youtube-upload').setMemo(id, memo));   // 📝 채널 카드 로그인 계정 메모(v0.9.35)
 ipcMain.handle('yt-abort', () => { S.ytAbort = true; return true; });
 // Studio·영상 주소 열기 — 유튜브 주소만 연다(임의 주소를 외부 브라우저로 넘기지 않는다).
 ipcMain.handle('yt-open-url', (_e, u) => {

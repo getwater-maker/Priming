@@ -176,7 +176,9 @@ function status() {
   const channels = Object.keys(d.channels).map((id) => {
     const x = d.channels[id] || {};
     return { id, title: x.title || id, handle: x.handle || '', connectedAt: x.connectedAt || '', broken: !!x.broken, needsReconnect: !String(x.scopes || '').includes(SCOPE_MANAGE),
-      email: x.email || '', avatarUrl: x.avatarUrl || '' };
+      email: x.email || '', avatarUrl: x.avatarUrl || '',
+      // 🏢 브랜드 계정이면 구글은 내부 주소(…@pages.plusgoogle.com)만 준다 — 로그인한 개인 계정은 API 로 알 수 없다(v0.9.35)
+      brand: /@pages\.plusgoogle\.com$/i.test(String(x.email || '')), memo: x.memo || '' };
   });
   return { available: available(), hasClient: !!c, projectId: c ? c.projectId : '', clientSource: cs.source, dailyCap: cs.cap, uploadsToday: cs.today, channels };
 }
@@ -283,6 +285,7 @@ async function connectChannel(o = {}) {
       connectedAt: _kst(),
       scopes: granted,   // 🧷 받은 권한 — 재생목록 권한(force-ssl)이 없으면 「다시 연결」 안내
       email,             // 👤 연결한 구글 계정 — ⚙ 유튜브 카드에 보이기만 한다
+      memo: (d2.channels[ch.id] && d2.channels[ch.id].memo) || '',   // 📝 로그인 계정 메모 — 다시 연결해도 남긴다
       avatarUrl: (th.high || th.medium || th.default || {}).url || '',   // 🏷 채널 프로필 그림 주소(파일은 main 이 받아 둔다)
     };
     if (!_save(d2)) return { ok: false, error: '연결 정보 저장 실패' };
@@ -637,6 +640,13 @@ async function uploadVideo(o = {}) {
  *   (설정 목록 · 채널편집 「업로드채널」 목록 둘 다 status() 순서). 모르는 ID 는 무시, 빠진 채널은 뒤에 원래 순서로 붙인다(잃지 않는다).
  *   채널 ID 는 「UC…」 라 숫자 키 정렬 규칙에 걸리지 않는다. 다시 연결해도 자리는 그대로(기존 키에 덮어쓰기).
  */
+/** 📝 채널 카드의 「로그인 계정 메모」(v0.9.35) — 브랜드 계정은 로그인한 개인 계정을 구글이 알려 주지 않아 로이가 적어 둔다. 이 PC 에만 · 200자. */
+function setMemo(channelId, memo) {
+  const d = _load();
+  if (!d.channels[channelId]) return { ok: false, error: '연결된 채널이 아닙니다' };
+  d.channels[channelId].memo = Array.from(String(memo || '').replace(/[\r\n]+/g, ' ').trim()).slice(0, 200).join('');
+  return _save(d) ? { ok: true, memo: d.channels[channelId].memo } : { ok: false, error: '설정 파일 저장 실패' };
+}
 function reorderChannels(ids) {
   const d = _load();
   const next = {};
@@ -647,7 +657,7 @@ function reorderChannels(ids) {
 }
 
 module.exports = {
-  SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels,
+  SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels, setMemo,
   uploadVideo, findUploaded, findUploadedByTitle, listChannelTitles, checkDuplicate, normTitle, _clearRemoteTitles: () => _remoteTitles.clear(), cleanTitle, cleanDescription, cleanTags, explainApiError,
   authFile, uploadsFile, _setEndpoints, _setCrypto, _setDefaultClient,
 };

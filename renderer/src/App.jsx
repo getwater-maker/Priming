@@ -3959,6 +3959,14 @@ export default function App() {
   // ↕ 연결된 채널 순서 — 끌어서 놓으면 바로 저장(이 PC). 채널편집 「업로드채널」 목록도 이 순서를 따른다.
   const ytDragRef = useRef(null);
   const [ytDragOver, setYtDragOver] = useState(null);
+  const [ytMemoFocus, setYtMemoFocus] = useState(null);   // 📝 메모 칸을 고치는 동안 그 카드는 끌지 않는다(글자 선택이 카드 끌기가 되지 않게)
+  async function ytSaveMemo(c, v) {
+    const memo = String(v || '').trim();
+    if (memo === (c.memo || '')) return;
+    const r = await api.ytSetMemo(c.id, memo);
+    if (r && r.ok) setYtSt((s) => (s ? { ...s, channels: s.channels.map((x) => (x.id === c.id ? { ...x, memo: r.memo } : x)) } : s));
+    else setSettingsMsg(`❌ 메모 저장 실패 — ${(r && r.error) || ''}`);
+  }
   async function ytDrop(toIdx) {
     const from = ytDragRef.current; ytDragRef.current = null; setYtDragOver(null);
     const list = (ytSt && ytSt.channels) || [];
@@ -7328,7 +7336,7 @@ export default function App() {
                 {((ytSt && ytSt.channels) || []).map((c, i) => {
                   const warn = c.broken ? '연결이 끊겼습니다 — 다시 연결하세요' : c.needsReconnect ? '재생목록 권한 없음 — 「🔗 채널 연결」로 한 번 다시 연결' : '';
                   return (
-                  <div key={c.id} className={'ytcard' + (warn ? ' warn' : '') + (ytDragOver === i ? ' over' : '')} data-testid="yt-ch-row" draggable
+                  <div key={c.id} className={'ytcard' + (warn ? ' warn' : '') + (ytDragOver === i ? ' over' : '')} data-testid="yt-ch-row" draggable={ytMemoFocus !== c.id}
                     title="끌어서 순서를 바꿉니다(채널편집 「업로드채널」 목록도 이 순서)"
                     onDragStart={(e) => { ytDragRef.current = i; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id); } catch (_) {} }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (ytDragOver !== i) setYtDragOver(i); }}
@@ -7344,7 +7352,14 @@ export default function App() {
                       </div>
                       <button className="ghost ytx" title="연결 해제" onClick={() => ytDisconnect(c)}>✕</button>
                     </div>
-                    <div className="ytcard-acct" data-testid="yt-ch-email">👤 {c.email ? <span title={c.email}>{c.email}</span> : <span className="meta">구글 계정 — 다시 연결하면 보입니다</span>}</div>
+                    <div className="ytcard-acct" data-testid="yt-ch-email">{c.brand
+                      ? <span title={`구글이 알려 준 값은 브랜드 계정의 내부 주소(${c.email})입니다 — 로그인한 개인 계정은 알려 주지 않아 아래 메모에 적어 둡니다`}>🏢 브랜드 계정</span>
+                      : c.email ? <span title={c.email}>👤 {c.email}</span> : <span className="meta">👤 구글 계정 — 다시 연결하면 보입니다</span>}</div>
+                    <input className="ytmemo" data-testid="yt-ch-memo" key={c.id + '|' + (c.memo || '')} defaultValue={c.memo || ''} maxLength={200}
+                      placeholder="📝 로그인 계정 메모" title="이 채널에 어느 구글 계정으로 로그인하는지 적어 두세요(이 PC 에만 저장 · Enter = 저장)"
+                      onFocus={() => setYtMemoFocus(c.id)}
+                      onBlur={(e) => { setYtMemoFocus(null); ytSaveMemo(c, e.target.value); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur(); if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.value = c.memo || ''; e.currentTarget.blur(); } }} />
                     <div className="meta ytcard-date">{c.connectedAt ? `${c.connectedAt} 연결` : ''}</div>
                     {warn && <div className="ytcard-warn">⚠ {warn}</div>}
                   </div>);

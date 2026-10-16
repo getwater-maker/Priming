@@ -46,7 +46,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (u.pathname === '/revoke') { G.revoked.push(new URLSearchParams(b.toString()).get('token')); return J(200, {}); }
   if (u.pathname === '/api/channels') return J(200, { items: G.channel ? [G.channel] : [] });
-  if (u.pathname === '/userinfo') return J(200, { email: 'roy.classic@gmail.com', sub: '1' });
+  if (u.pathname === '/userinfo') return J(200, { email: G.email || 'roy.classic@gmail.com', sub: '1' });
   if (u.pathname === '/upload' && req.method === 'POST') {
     G.meta = JSON.parse(b.toString() || '{}'); G.total = Number(req.headers['x-upload-content-length']);
     if (G.beginStatus !== 200) return J(G.beginStatus, G.beginBody || {});
@@ -115,6 +115,18 @@ const server = http.createServer(async (req, res) => {
   c = await YT.connectChannel({ openUrl: (u) => browse(u) });
   st = YT.status();
   ok(c.ok && st.channels[0].email === 'roy.classic@gmail.com' && st.channels[0].avatarUrl === 'https://yt3/h.jpg' && !st.channels[0].needsReconnect, '👤 다시 연결 → 구글 계정 이메일 · 채널 그림 주소(high) 저장 · 권한 안내 사라짐');
+  ok(!st.channels[0].brand, '🏢 개인 계정 메일은 브랜드 계정이 아니다');
+  // 📝 로그인 계정 메모(v0.9.35) — 저장 · 줄바꿈 접기 · 200자 · 다시 연결해도 남는다 · 모르는 채널 거부
+  let mm = YT.setMemo('UC_TEST_1', '  roy.main@gmail.com\n로그인  ');
+  ok(mm.ok && YT.status().channels[0].memo === 'roy.main@gmail.com 로그인', '메모 저장(앞뒤 공백·줄바꿈 정리)');
+  ok(Array.from(YT.setMemo('UC_TEST_1', '가'.repeat(300)).memo).length === 200 && !YT.setMemo('UC_NONE', 'x').ok, '메모 200자 · 연결 안 된 채널은 거부');
+  YT.setMemo('UC_TEST_1', 'roy.main@gmail.com');
+  G.email = 'yoru-no-roudokushits-3749@pages.plusgoogle.com';
+  c = await YT.connectChannel({ openUrl: (u) => browse(u) });
+  st = YT.status();
+  ok(c.ok && st.channels[0].brand && st.channels[0].email === G.email, '🏢 pages.plusgoogle.com 주소 = 브랜드 계정으로 판정');
+  ok(st.channels[0].memo === 'roy.main@gmail.com', '📝 다시 연결해도 메모가 남는다');
+  G.email = '';
   delete G.channel.snippet.thumbnails;
   G.scope = 'https://www.googleapis.com/auth/youtube.readonly';
   c = await YT.connectChannel({ openUrl: (u) => browse(u) });
