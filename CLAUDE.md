@@ -174,6 +174,7 @@
 > 일본어·베트남어(참조음성·역대조·루비·글꼴)를 건드리기 전에 [`docs/규칙/다국어.md`](docs/규칙/다국어.md) 를 읽는다.
 - 🔴 새 규칙은 **ja/cjk/vi 일 때만**(`core/lang.js` `detectLang` 한 곳) — ⛔ 한국어 경로를 바꾸지 않는다(바꾸면 `test:lang` [7]).
 - 🇯🇵 **일본어 인용 뒤 이어지는 글(「…。」と言った)은 한 문장** — `sentence-splitter._protectJaQuotes`(가나 있고 한글 없는 줄만 · 표식 `\uE010~2` — ⛔ 루비 표식 `\uE000~2` 와 겹치게 쓰지 말 것 · v0.9.7 · `test:jaquote`) · 📜 카드는 일본어 문장에 걸리면 명조 Noto Serif JP Medium(`assets/fonts` · 로이 승인 동봉 2026-10-14 · 없으면 Noto Sans JP 폴백) · 인물 카드 이름은 `char-refs.NAME_OK`(가나·한자 포함).
+- 🔎 **일본어 역대조 = 읽기(가나) 대조**(v0.9.60 · `scoreJaKana` · 서버 `/ja-kana` fugashi · 받아쓰기 `language:'ja'` 고정 · 루비 낱말 인식) — ⛔ 한자 글자 대조로 되돌리지 않는다(루비 있음·없음을 58%·57% 로 못 가렸다) · 서버 기능 없으면 글자 대조로 fail-open · `test:bcja`.
 - 🔴 **참조음성은 어느 언어든(한국어 포함) 낱말 도중에 끝나면 안 된다** — 쉼에서 끊고 참조텍스트를 그 구간에 맞춘다(`cutRange`·`refTextForCut` — 안 그러면 끝 글자가 새 문장 앞에 샌다).
 
 ### 대본 · 편집 · 보기

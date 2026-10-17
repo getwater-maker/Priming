@@ -106,6 +106,8 @@ async function transcribe(audioPath, opts = {}) {
   const blob = new Blob([buf]);
   const form = new FormData();
   form.append('file', blob, filename);
+  // 🇯🇵 받아쓰기 언어 고정(역대조 일본어 — 안 주면 Whisper 가 영어로 번역해 적는다). 옛 서버는 이 칸을 무시한다.
+  if (opts.language) form.append('language', String(opts.language));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -362,4 +364,31 @@ async function syncServerTags(items = {}) {
   return r.ok && r.tags && typeof r.tags === 'object' ? { ok: true, tags: r.tags } : { ok: false, error: r.error || 'fail' };
 }
 
-module.exports = { syncServerTags, getServerVoiceAudio, deleteServerVoice, getServerFaces, getServerFace, putServerFace, transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };
+/**
+ * 🇯🇵 일본어 글 → 읽기(가타카나) — 서버 /ja-kana(fugashi + unidic-lite). 역대조 가나 대조용(core/tts-backcheck).
+ *   ⛔ 앱에 형태소 분석기를 들이지 않는다(npm 의존성 = 라이트 업데이트 막힘) — 그래서 서버가 한다.
+ * @param {string[]} texts
+ * @returns {Promise<string[]>} 같은 순서의 읽기. 서버에 기능이 없거나(404·옛 서버) 실패하면 던진다 — 호출부가 글자 대조로 돌아간다.
+ */
+async function toKana(texts, opts = {}) {
+  const base = _baseUrl();
+  if (!base) throw new Error('OmniVoice baseUrl 미설정');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs || 15000);
+  try {
+    const res = await fetch(base + '/ja-kana', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+      body: JSON.stringify({ texts: (texts || []).map((t) => String(t || '')) }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`/ja-kana HTTP ${res.status}`);
+    const j = await res.json();
+    if (!j || !Array.isArray(j.kana)) throw new Error('/ja-kana 응답 형식 이상');
+    return j.kana.map((k) => String(k || ''));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+module.exports = { toKana, syncServerTags, getServerVoiceAudio, deleteServerVoice, getServerFaces, getServerFace, putServerFace, transcribe, transcribeLong, needsAudioConvert, ASR_DIRECT_EXT, checkAsrStatus, listServerVoices, saveServerVoice, getSharedStyles, putSharedStyles, designVoiceOmni };

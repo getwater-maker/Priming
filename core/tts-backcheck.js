@@ -60,6 +60,141 @@ function scoreText(orig, heard, lang) {
   return { score: r.n ? Math.max(0, 1 - r.dist / r.n) : 0, unit: '글자', n: r.n, errors: r.dist, toneErrors: 0 };
 }
 
+// ── 🇯🇵 일본어 = 가나(읽기) 대조 (2026-10-17 · v0.9.60) ──────────────────────────────
+//   왜: 글자(한자) 대조는 받아쓰기의 **표기 흔들림**(堀辰雄→堀達夫 · 押し→推し)까지 오류로 세서, 4편 4,817문장 중
+//   34% 를 미달로 잡았다 — 그리고 1021 A/B 실험(150문장)에서 **루비를 빼서 읽기가 틀려진 음성도 같은 58% 로** 봤다
+//   (= 읽기 오류를 못 가린 채 다시 만들기에 시간만 썼다). 가나로 바꿔 대조하면 미달 12% vs 35% 로 갈린다.
+//   읽기 변환(형태소 분석 fugashi+unidic-lite)은 **서버 /ja-kana** 가 한다(⛔ npm 형태소 분석기 금지 · 라이트 업데이트).
+//   서버에 그 기능이 없거나 실패하면 예전 글자 대조로 돌아간다(fail-open — 검사일 뿐 합성은 성공이다).
+const JA_DIGITS = '〇一二三四五六七八九';
+function _kanjiSmall(n) {   // 0 < n < 10000
+  let s = '';
+  for (const [v, name] of [[1000, '千'], [100, '百'], [10, '十']]) {
+    const q = Math.floor(n / v);
+    if (q) { s += (q === 1 ? '' : JA_DIGITS[q]) + name; n %= v; }
+  }
+  return s + (n ? JA_DIGITS[n] : '');
+}
+/** 아라비아 숫자 → 한자 숫자(七月 ↔ 7月 · 百二十万 ↔ 120万 을 같은 읽기로) */
+function numToKanji(n) {
+  if (n === 0) return '〇';
+  let out = '';
+  for (const [unit, name] of [[1e8, '億'], [1e4, '万']]) {
+    if (n >= unit) { out += _kanjiSmall(Math.floor(n / unit) % 10000) + name; n %= unit; }
+  }
+  return out + (n ? _kanjiSmall(n) : '');
+}
+const jaDigits = (s) => String(s || '').normalize('NFKC').replace(/\d+/g, (m) => (m.length <= 12 ? numToKanji(Number(m)) : m));
+const kataToHira = (s) => String(s || '').replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+const _VOWEL = {};
+for (const [row, v] of [['あかさたなはまやらわがざだばぱぁゃ', 'a'], ['いきしちにひみりぎじぢびぴぃ', 'i'], ['うくすつぬふむゆるぐずづぶぷぅゅ', 'u'], ['えけせてねへめれげぜでべぺぇ', 'e'], ['おこそとのほもよろをごぞどぼぽぉょ', 'o']]) for (const c of row) _VOWEL[c] = v;
+const _BARE = { 'あ': 'a', 'い': 'i', 'う': 'u', 'え': 'e', 'お': 'o' };
+/** 장음 표기 맞춤 — ー 와 앞 모음을 늘이는 모음(レエ/レー · おう/おお · えい)을 같게 본다(양쪽에 똑같이 건다) */
+function longVowelNorm(s) {
+  const out = [];
+  for (const c of String(s || '')) {
+    if (c === 'ー') continue;
+    if (_BARE[c] && out.length) {
+      const pv = _VOWEL[out[out.length - 1]], b = _BARE[c];
+      if (pv === b || (pv === 'o' && b === 'u') || (pv === 'e' && b === 'i')) continue;
+    }
+    out.push(c);
+  }
+  return out.join('');
+}
+/**
+ * 루비 짝 — 본문(한자)과 루비 읽기(ttsText)를 맞대어 달라진 덩어리를 (본문, 읽기) 짝으로 뽑는다.
+ *   예) 「姉の安寿と」·「姉のあんじゅと」 → [['安寿','あんじゅ']]. 루비 표식은 문장에 남지 않으므로(project-model) 두 글에서 되살린다.
+ */
+//   🔴 단순 최장 공통 부분(LCS)은 읽기 속 가나에 본문 가나를 잘못 맞춘다 — 「国守の掟」·「くにのかみのおきて」 를
+//     国守→くに · 掟→かみのおきて 로 뽑았다(읽기 속 「の」). 그래서 먼저 **나누기 DP** 로 짝을 고른다:
+//     본문의 가나·기호는 읽기에도 그대로 있어야 하고(루비는 본문 한자만 바꾼다), 한자 덩어리 → 읽기 덩어리 짝은
+//     「한 글자에 가나 두 개 안팎」에서 멀수록 비싸다. 못 맞추면(본문과 읽기가 루비 말고도 다르면) LCS 로 물러선다.
+const _KANJI_RE = /[㐀-鿿豈-﫿々〆ヶ]/;
+function rubyPairs(text, alt) {
+  const a = [...String(text || '')], b = [...String(alt || '')];
+  if (!a.length || !b.length || text === alt) return [];
+  const seg = _rubySegDP(a, b);
+  if (seg) return seg;
+  const n = a.length, m = b.length;
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const pairs = [];
+  let i = 0, j = 0, ra = '', rb = '';
+  const flush = () => { if (ra && rb && /[㐀-鿿豈-﫿々〆ヶ]/.test(ra)) pairs.push([ra, rb]); ra = ''; rb = ''; };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { flush(); i++; j++; }
+    else if (j >= m || (i < n && L[i + 1][j] >= L[i][j + 1])) ra += a[i++];
+    else rb += b[j++];
+  }
+  flush();
+  return pairs;
+}
+/** 나누기 DP — 본문 a 를 「그대로 같은 글자」와 「루비 덩어리(한자 포함) → 읽기 덩어리」로 나눈다. 못 나누면 null. */
+function _rubySegDP(a, b) {
+  const n = a.length, m = b.length;
+  if (n > 400 || m > 800) return null;
+  const MAXA = 12, MAXB = 30, INF = 1e9;
+  const f = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(INF));
+  const back = Array.from({ length: n + 1 }, () => new Array(m + 1));
+  f[n][m] = 0;
+  for (let i = n; i >= 0; i--) {
+    for (let j = m; j >= 0; j--) {
+      if (i === n && j === m) continue;
+      let best = INF, bp = null;
+      if (i < n && j < m && a[i] === b[j] && f[i + 1][j + 1] < best) { best = f[i + 1][j + 1]; bp = [i + 1, j + 1]; }
+      if (i < n) {
+        let hasKanji = false, kanaIn = 0;
+        for (let i2 = i + 1; i2 <= Math.min(n, i + MAXA); i2++) {
+          if (_KANJI_RE.test(a[i2 - 1])) hasKanji = true; else kanaIn++;
+          const la = i2 - i;
+          for (let j2 = j + 1; j2 <= Math.min(m, j + MAXB); j2++) {
+            if (f[i2][j2] >= INF) continue;
+            // 덩어리 안에 본문 가나를 삼키면 비싸다(그 가나는 읽기에 그대로 있어야 정상) — 「国守の掟だ」 통째 묶기 방지
+            const c = 1 + Math.abs((j2 - j) - 2 * la) + 3 * kanaIn + (hasKanji ? 0 : 10) + f[i2][j2];
+            if (c < best) { best = c; bp = [i2, j2, true]; }
+          }
+        }
+      }
+      f[i][j] = best; back[i][j] = bp;
+    }
+  }
+  if (f[0][0] >= INF) return null;
+  const pairs = [];
+  let i = 0, j = 0;
+  while (i < n || j < m) {
+    const bp = back[i][j];
+    if (!bp) return null;
+    if (bp[2]) {
+      const base = a.slice(i, bp[0]).join(''), rd = b.slice(j, bp[1]).join('');
+      if (_KANJI_RE.test(base) && base !== rd) pairs.push([base, rd]);
+    }
+    i = bp[0]; j = bp[1];
+  }
+  return pairs;
+}
+
+/** 받아쓰기에 루비 낱말의 본문 한자가 그대로 나오면 루비 읽기로 바꿔 둔다 — 「おきて」를 Whisper 가 「掟」로 적은 것을 오독으로 세지 않게 */
+function applyRuby(heard, pairs) {
+  let h = String(heard || '');
+  for (const [base, rd] of [...pairs].sort((x, y) => y[0].length - x[0].length)) h = h.split(base).join(rd);
+  return h;
+}
+/**
+ * 일본어 가나 점수 — 원문 읽기(루비 읽기가 있으면 그것) 대 받아쓰기 읽기. 서버 /ja-kana 로 읽기를 얻는다.
+ * @returns {Promise<{score, unit, n, errors, toneErrors}|null>} 읽기 변환을 못 하면 null(호출부가 글자 대조로)
+ */
+async function scoreJaKana(text, heard, altText, client) {
+  if (!client || typeof client.toKana !== 'function') return null;
+  const ref = altText && altText !== text ? altText : text;
+  const fixed = applyRuby(heard, rubyPairs(text, altText));
+  const kana = await client.toKana([jaDigits(ref), jaDigits(fixed)]);
+  if (!Array.isArray(kana) || kana.length !== 2 || typeof kana[0] !== 'string' || typeof kana[1] !== 'string') return null;
+  const r = align(cjkChars(longVowelNorm(kataToHira(kana[0]))), cjkChars(longVowelNorm(kataToHira(kana[1]))));
+  if (!r.n) return null;
+  return { score: Math.max(0, 1 - r.dist / r.n), unit: '가나', n: r.n, errors: r.dist, toneErrors: 0 };
+}
+
 /** WAV 앞뒤에 무음을 덧댄다(같은 형식 · 무손실). 실패하면 원본 그대로. */
 function padWav(buf, sec) {
   try {
@@ -89,10 +224,17 @@ async function checkAudio(wavBuf, text, lang, tmpDir, asr, altText) {
     for (const pad of [0.5, 0.3, 1.0]) {
       try {
         fs.writeFileSync(tmp, padWav(wavBuf, pad));
-        const a = await client.transcribe(tmp, { timeoutMs: 60000 });
+        // 🇯🇵 일본어는 받아쓰기 언어를 ja 로 못 박는다 — 안 그러면 Whisper 가 일본어 음성을 **영어로 번역해** 적는다
+        //   (4편 결과표 15문장 · 「The story has not yet answered anything.」 → 0점 → 헛된 다시 만들기 두 번)
+        const a = await client.transcribe(tmp, lang === 'ja' ? { timeoutMs: 60000, language: 'ja' } : { timeoutMs: 60000 });
         last = String((a && (a.text || a)) || '').trim();
       } catch (e) { last = ''; continue; }
       if (!last || isHallucination(last)) continue;
+      if (lang === 'ja') {
+        let ks = null;
+        try { ks = await scoreJaKana(text, last, altText, client); } catch (_) { ks = null; }
+        if (ks) return { ok: ks.score >= (PASS[lang] || 0.85), score: ks.score, heard: last, detail: ks };
+      }
       // 일본어는 받아쓰기가 한자를 가나로(또는 반대로) 적을 수 있다 — 루비 읽기(altText)와도 대조해 높은 쪽을 쓴다
       let sc = scoreText(text, last, lang);
       if (altText && altText !== text) { const s2 = scoreText(altText, last, lang); if (s2.score > sc.score) sc = s2; }
@@ -153,4 +295,4 @@ function refTextForCut(orig, heard, lang) {
   return best.sc >= 0.85 ? best.t : h;
 }
 
-module.exports = { refTextForCut, PASS, MAX_RETRY, HALLU, isHallucination, scoreText, padWav, checkAudio, writeReport, align };
+module.exports = { refTextForCut, PASS, MAX_RETRY, HALLU, isHallucination, scoreText, padWav, checkAudio, writeReport, align, scoreJaKana, rubyPairs, applyRuby, numToKanji, jaDigits, kataToHira, longVowelNorm };
