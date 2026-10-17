@@ -528,11 +528,17 @@ async function uploadVideo(o = {}) {
       defaultAudioLanguage: o.language || 'ko',
     },
     status: {
-      privacyStatus: 'private',                          // 🔑 미심사 프로젝트는 어차피 비공개로 강제된다
+      privacyStatus: 'private',                          // 🔑 미심사 프로젝트는 어차피 비공개로 강제된다 · 예약(publishAt)도 private 과 함께 보낸다
       selfDeclaredMadeForKids: !!o.madeForKids,          // 아동용 아님(로이 채널 기본) — Studio 에서 바꿀 수 있다
       containsSyntheticMedia: o.synthetic !== false,     // 🤖 「변경되거나 합성된 콘텐츠」 = 예 (AI 음성·이미지)
     },
   };
+  // ⏰ 예약(v0.9.68) — publishAt = UTC ISO(미래). 모양이 틀리면 보내지 않고 비공개로만 올린다(조용히 잘못된 시각을 박지 않는다).
+  if (o.publishAt) {
+    const t = Date.parse(o.publishAt);
+    if (Number.isFinite(t) && t > Date.now()) meta.status.publishAt = new Date(t).toISOString();
+    else log(`⚠ 예약 시각(${o.publishAt})이 올바르지 않거나 이미 지나 비공개로만 올립니다`);
+  }
   const startedAt = Date.now();
   const tick = (phase, sent, extra = {}) => { try { onProgress({ phase, sent, total: size, startedAt, ...extra }); } catch (_) {} };
 
@@ -605,6 +611,7 @@ async function uploadVideo(o = {}) {
           url: `https://youtu.be/${id}`,
           studioUrl: `https://studio.youtube.com/video/${id}/edit`,
           privacy: (j.status && j.status.privacyStatus) || 'private',
+          publishAt: (j.status && j.status.publishAt) || '',
           sec: (Date.now() - startedAt) / 1000,
         };
         _recordUpload(o.channelId, o.file, { videoId: id, at: _kst(), title });

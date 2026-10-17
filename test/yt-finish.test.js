@@ -141,7 +141,7 @@ const PLID = 'PLabcdefghijklmnopqrstuvwxyz012345';
 
   console.log('\n[8] main.js · 화면 배선');
   const run = M.slice(M.indexOf('async function runYtUpload'), M.indexOf('/** 렌더가 끝난 뒤'));
-  ok(/if \(finish\) r\.finish = await runYtFinish\(\{ channelId, videoId: r\.videoId, title, finish \}\)/.test(run), '업로드 성공 뒤 마무리');
+  ok(/if \(finish\) r\.finish = await runYtFinish\(\{ channelId, videoId: r\.videoId, title, finish: sched \? \{ \.\.\.finish, schedule: \{[^}]*\} \} : finish \}\)/.test(run), '업로드 성공 뒤 마무리(예약이 있으면 예약을 함께 싣는다 · v0.9.68)');
   ok(/if \(finish && dup\.videoId\) await runYtFinish\(\{ channelId, videoId: dup\.videoId, title, finish \}\)/.test(run), '이미 올린 영상(중복)이면 마무리만');
   const fin = M.slice(M.indexOf('async function runYtFinish'), M.indexOf('/** 렌더가 끝난 뒤'));
   ok(/thumbRoot\(\)/.test(fin) && /findThumbs\(/.test(fin) && /findPackagingFile\(finish\.scriptPath\)/.test(fin), '마무리는 업로드를 줄 세운 순간의 대본(finish.scriptPath)으로 패키징·썸네일을 찾는다');

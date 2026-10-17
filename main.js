@@ -3172,7 +3172,10 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
       return { ok: true, skipped: true, duplicate: dup, url: dup.url };
     }
   }
-  log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · 비공개 · 제목 「${title}」`);
+  // ⏰ 예약(v0.9.68 · core/yt-schedule) — 채널 설정 ytSchedule 이 켜져 있으면 다음 빈 날(하루 한 편)의 같은 시각(KST)에 공개 예약
+  const YS = require('./core/yt-schedule');
+  const sched = YS.planFor(channelId, finish && finish.preset && finish.preset.ytSchedule);
+  log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · ${sched ? `비공개 → ${sched.kst} (KST) 공개 예약` : '비공개'} · 제목 「${title}」`);
   log(`   설명 ${meta.source === 'packaging' ? '패키징 파일' : '(패키징 없음)'} · 챕터 ${meta.chapters}개 · 태그 ${meta.tags.length}개 · AI 합성 표시 = 예`);
   for (const n of (meta.notes || [])) log(`   ⓘ ${n}`);
   let _pt = 0, _pTimer = null, _pLast = null, _pPhase = '';
@@ -3187,13 +3190,14 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
   };
   const r = await YT.uploadVideo({
     channelId, file, title, description: meta.description, tags: meta.tags, synthetic: true, language: meta.language || 'ko',
-    log, onProgress, isAborted: () => !!S.ytAbort,
+    log, onProgress, isAborted: () => !!S.ytAbort, publishAt: sched ? sched.publishAt : undefined,
   });
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (r.ok) {
-    log(`✅ 유튜브 업로드 완료 — 비공개 · ${r.url} (${_dur(r.sec)})`);
-    if (finish) r.finish = await runYtFinish({ channelId, videoId: r.videoId, title, finish });
-    log(`   고정댓글·A/B·종료화면·예약은 Studio 에서: ${r.studioUrl}`);
+    log(`✅ 유튜브 업로드 완료 — ${sched ? `예약 ${sched.kst} (KST)` : '비공개'} · ${r.url} (${_dur(r.sec)})`);
+    if (sched) YS.recordAssigned(channelId, sched.ms);   // 성공한 뒤에만 — 다음 편은 그 다음 날
+    if (finish) r.finish = await runYtFinish({ channelId, videoId: r.videoId, title, finish: sched ? { ...finish, schedule: { publishAt: sched.publishAt, kst: sched.kst } } : finish });
+    log(`   고정댓글·A/B·종료화면${sched ? '' : '·예약'}은 Studio 에서: ${r.studioUrl}`);
   } else if (r.cancelled) {
     ytSend({ ...(_pLast || base), phase: 'aborted', endedAt: Date.now() });
   } else {
@@ -3218,7 +3222,7 @@ async function runYtFinish({ channelId, videoId, title, finish }) {
     const root = thumbRoot();
     const key = TF.thumbKey(finish.scriptPath);
     const thumbs = root && key ? await TF.findThumbs(root, key, 6) : [];
-    const plan = YF.planFinish({ pack, packagingPath: pf, preset: finish.preset, thumbs });
+    const plan = YF.planFinish({ pack, packagingPath: pf, preset: finish.preset, thumbs, schedule: finish.schedule });
     const token = async (force) => { const t = await YT.accessToken(channelId, { force }); if (!t.ok) throw new Error(t.error); return t.token; };
     const res = await YF.finishVideo({ channelId, videoId, plan, token, log });
     for (const l of YF.reportLines(title, res)) log(l);

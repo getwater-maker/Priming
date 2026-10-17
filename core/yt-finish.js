@@ -7,7 +7,7 @@
  *   앱이 하는 것: ① 썸네일 A(`<썸네일 폴더>\<채널>\[약칭_MMDD] 썸네일_A.png`) → thumbnails.set
  *                ② 재생목록에 담기 → playlistItems.insert (이미 들어 있으면 그대로) → 다시 읽어 들어갔는지 확인
  *   API 가 없어 Studio 몫으로 남는 것(확인표에 「✋ Studio」로 적는다): 고정댓글(고정 API 없음) · 썸네일 B·C A/B 테스트 ·
- *                종료화면 · 예약(미심사 프로젝트라 비공개 강제).
+ *                종료화면 · 예약(채널 설정에서 안 켠 경우 · v0.9.68 부터 켜면 앱이 publishAt 을 싣고 다시 읽어 확인).
  *
  *   재생목록을 정하는 순서(먼저 찾은 것): 패키징 「## 재생목록」(이름·주소·ID) → 고정댓글의 `list=` 링크 → 설명글의 `list=` 링크
  *                → 채널 설정 `ytPlaylist`(이름). 이름은 그 채널의 재생목록 제목과 **똑같아야** 한다(비슷한 이름 자동 매칭 금지).
@@ -67,7 +67,9 @@ function planFinish(a = {}) {
     [a.preset && a.preset.ytPlaylist, '채널 설정 「재생목록」'],
   ];
   for (const [v, src] of tries) { const r = parsePlaylistRef(v); if (r) { playlist = { ...r, source: src }; break; } }
-  return { thumbA, thumbOthers: others, playlist, pinned: String(pk.pinned || '').trim(), packagingPath: a.packagingPath || null };
+  // ⏰ schedule = 이번 업로드에 실은 예약 {publishAt(ISO UTC), kst} — 없으면 예약은 Studio 몫(확인표 ✋)
+  const sc = a.schedule && a.schedule.publishAt ? { publishAt: a.schedule.publishAt, kst: a.schedule.kst || '' } : null;
+  return { thumbA, thumbOthers: others, playlist, pinned: String(pk.pinned || '').trim(), packagingPath: a.packagingPath || null, schedule: sc };
 }
 
 async function _json(res) { try { return await res.json(); } catch (_) { return {}; } }
@@ -198,7 +200,21 @@ async function finishVideo(o) {
   add('pinned', '고정댓글', plan.pinned ? 'manual' : 'fail', plan.pinned ? `문구 준비됨(${Array.from(plan.pinned).length}자) — 일부 공개 → 댓글 → 고정` : '패키징에 「## 고정댓글」이 없습니다');
   add('abtest', '썸네일 A/B', plan.thumbOthers.length ? 'manual' : 'skip', plan.thumbOthers.length ? `${plan.thumbOthers.map((t) => t.name.replace(/^.*썸네일_/, '')).join('·')} — 편집 화면 「A/B 테스팅」` : 'B·C 파일 없음');
   add('endscreen', '종료화면', 'manual', 'Studio 편집 화면');
-  add('schedule', '예약', 'manual', 'Studio 공개 상태 → 예약(고정댓글을 단 뒤에)');
+  if (!plan.schedule) add('schedule', '예약', 'manual', '채널 설정에서 예약을 켜지 않았습니다 — 필요하면 Studio 공개 상태 → 예약(고정댓글을 단 뒤에)');
+  else {
+    // ⏰ 올릴 때 실은 publishAt 이 **실제로 적용됐는지 다시 읽어** 확인한다(videos.list · 1단위)
+    try {
+      const r = await fetch(`${EP.api}/videos?part=status&id=${encodeURIComponent(videoId)}`, H());
+      const j = await _json(r);
+      if (r.status !== 200) add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약을 실었지만 다시 읽지 못했습니다 — ${_apiMsg(r.status, j)} · Studio 에서 확인하세요`);
+      else {
+        const st = ((j.items || [])[0] || {}).status || {};
+        const want = Date.parse(plan.schedule.publishAt), got = Date.parse(st.publishAt || '');
+        if (Number.isFinite(got) && Math.abs(got - want) < 60000) add('schedule', '예약', 'ok', `${plan.schedule.kst} (KST) 공개 예약 적용됨 — 유튜브가 돌려준 값과 일치(${st.privacyStatus || 'private'})`);
+        else add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약을 실었지만 유튜브에 예약이 없습니다(공개 상태 ${st.privacyStatus || '?'}) — 구글 API 심사 전이면 예약이 막힐 수 있습니다. Studio 에서 직접 예약하세요`);
+      }
+    } catch (e) { add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약 확인 실패 — ${e.message}`); }
+  }
 
   const failed = items.filter((x) => x.status === 'fail').length;
   const manual = items.filter((x) => x.status === 'manual').length;

@@ -3509,6 +3509,7 @@ export default function App() {
       outUpload: p.outUpload || '',
       // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
+      ytSchedule: { on: !!(p.ytSchedule && p.ytSchedule.on), time: (p.ytSchedule && p.ytSchedule.time) || '18:00' },   // ⏰ 예약 업로드(KST) · ⚠ 저장 patch 에도
       ytPlaylist: p.ytPlaylist || '',   // 🧷 업로드 마무리 — 이 채널 영상을 담을 재생목록 이름(패키징에 없을 때) · ⚠ 저장 patch 에도
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
       wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
@@ -4005,6 +4006,7 @@ export default function App() {
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
       ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
+      ytSchedule: { on: !!(ch.ytSchedule && ch.ytSchedule.on) && /^\d{1,2}:\d{2}$/.test((ch.ytSchedule && ch.ytSchedule.time) || ''), time: (ch.ytSchedule && ch.ytSchedule.time) || '18:00' },   // ⏰ 예약 업로드 — ⚠ 마찬가지
       ytPlaylist: String(ch.ytPlaylist || '').trim(),   // 🧷 업로드 마무리 재생목록 이름 — ⚠ 마찬가지
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
@@ -6908,6 +6910,11 @@ export default function App() {
                           {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
                         <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
+                        <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} data-testid="ch-yt-sched">
+                          <button data-testid="ch-yt-sched-on" aria-pressed={!!(ch.ytSchedule && ch.ytSchedule.on)} className={'dl-tg' + (ch.ytSchedule && ch.ytSchedule.on ? ' on' : '')} onClick={() => setCh({ ...ch, ytSchedule: { time: '18:00', ...(ch.ytSchedule || {}), on: !(ch.ytSchedule && ch.ytSchedule.on) } })}>{ch.ytSchedule && ch.ytSchedule.on ? '✓ 예약' : '예약 끔'}</button>
+                          <input data-testid="ch-yt-sched-time" type="time" style={{ flex: '0 0 92px' }} value={(ch.ytSchedule && ch.ytSchedule.time) || '18:00'} disabled={!(ch.ytSchedule && ch.ytSchedule.on)} onChange={(e) => setCh({ ...ch, ytSchedule: { ...(ch.ytSchedule || {}), time: e.target.value } })} /><span className="meta">KST</span>
+                        </span>
+                        <Hint>⏰ <b>예약</b>을 켜면 올릴 때 공개 시각을 함께 보냅니다(하루 한 편 · 여러 편이면 다음 날로 이어 붙임 · 시각은 한국 시간). 올린 뒤 유튜브에 예약이 <b>실제로 잡혔는지 다시 읽어</b> 로그에 ✅/⚠ 로 적습니다. 끄면 예전처럼 비공개로만 올립니다. ⚠ 구글 API 심사 전에는 예약이 막힐 수 있습니다(그땐 ⚠ 로 알려 줍니다).</Hint>
                         <input data-testid="ch-yt-playlist" placeholder="재생목록 이름" value={ch.ytPlaylist || ''} onChange={(e) => setCh({ ...ch, ytPlaylist: e.target.value })} />
                         <Hint>🧷 업로드가 끝나면 썸네일 A 와 이 <b>재생목록</b>을 앱이 넣고 다시 읽어 확인합니다. 이름은 유튜브의 재생목록 제목과 <b>똑같이</b> 적으세요. 패키징 「## 재생목록」이나 고정댓글의 재생목록 링크가 있으면 그것이 먼저입니다. 고정댓글·썸네일 A/B·종료화면·예약은 Studio 에서 합니다.</Hint>
                       </div>
