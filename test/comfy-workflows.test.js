@@ -98,7 +98,13 @@ const QWEN = 'comfy/image_qwen21_turbo.json';
 ok(fs.existsSync(path.join(ROOT, QWEN)), '번들 워크플로가 실재한다: ' + QWEN);
 const q = JSON.parse(R(QWEN));
 ok(!q.nodes && Object.values(q).every((v) => v && typeof v.class_type === 'string'), 'Qwen 워크플로는 API 포맷이다');
-ok(IMG_SRC.includes("name: 'Qwen-Image 2.1 Turbo (로컬)'"), 'Qwen 드롭다운 이름에 「로컬」 표시가 있다(클라우드 보유 미확인 → 반대쪽 그룹에서 감춘다)');
+ok(IMG_SRC.includes("name: 'Qwen-Image 2.1 Turbo',"), 'Qwen 드롭다운 이름에 「(로컬)」이 없다 — ☁ 클라우드·🖥 로컬 두 그룹에 다 나온다(v0.9.65 · 클라우드에 모델 3개·노드 확인)');
+{
+  // 클라우드 카탈로그(2026-10-17)에 있던 파일 이름 그대로 쓰는가 — 이름을 바꾸면 클라우드에서 「모델 없음」이 된다
+  const ld = Object.values(q).map((v) => v.inputs || {});
+  ok(ld.some((i) => i.unet_name === 'qwen_image_2.1_turbo_int8_convrot.safetensors') && ld.some((i) => i.clip_name === 'qwen3vl_8b_int8_convrot.safetensors') && ld.some((i) => i.vae_name === 'qwen_image_2.1_vae_bf16.safetensors'), 'Qwen 워크플로 모델 3개 = 클라우드에도 있는 파일 이름');
+  ok(/refs && refs\.length && !this\.cloud && supportsRefs\(graph\)/.test(IMG_SRC), '클라우드에서는 인물 참조를 붙이지 않는다(글 프롬프트만)');
+}
 ok(names.includes('image_qwen21_turbo.json'), 'loadConfig() 결과의 워크플로 목록에 Qwen Turbo 가 등록된다');
 {
   const { ComfyImage } = require('../core/comfy-image');

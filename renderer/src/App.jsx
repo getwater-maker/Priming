@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
@@ -347,10 +348,18 @@ const WB_SUB_POS = [['bottom', '아래'], ['middle', '가운데'], ['top', '위'
 function StylePicker({ value, onChange, styles, samples, scriptId }) {
   const [open, setOpen] = useState(false);
   const [peek, setPeek] = useState(null);
+  const [at, setAt] = useState(null);   // 팝업 자리(화면 좌표) — body 로 띄운다(리본 안에 두면 아래 칸들에 가려 눌리지 않았다 · v0.9.65)
   const ref = useRef(null);
+  const popRef = useRef(null);
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const b = ref.current && ref.current.getBoundingClientRect();
+    setAt(b ? { left: Math.max(8, Math.min(b.left, window.innerWidth - 308)), top: b.bottom + 4 } : { left: 8, top: 8 });
+    setOpen(true);
+  };
   useEffect(() => {
     if (!open) return undefined;
-    const down = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const down = (e) => { if (ref.current && !ref.current.contains(e.target) && !(popRef.current && popRef.current.contains(e.target))) setOpen(false); };
     const key = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', down); document.addEventListener('keydown', key);
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
@@ -361,10 +370,10 @@ function StylePicker({ value, onChange, styles, samples, scriptId }) {
   const thumb = (id, cls) => { const x = sm(id); return x ? <img className={cls} src={media(x.path, x.v)} alt="" /> : <span className={cls + ' none'}>{id === scriptId ? '📜' : id ? '샘플 없음' : '—'}</span>; };
   return (
     <span className="stpick" ref={ref} data-testid="style-picker">
-      <button className="ghost stpick-btn" title="이미지 스타일" data-testid="style-picker-btn" onClick={() => setOpen((o) => !o)}>
+      <button className="ghost stpick-btn" title="이미지 스타일" data-testid="style-picker-btn" onClick={toggle}>
         <span className="stpick-name">{cur.name}</span>
       </button>
-      {open && (<>
+      {open && at && createPortal(<div ref={popRef} className="stpick-layer" style={{ left: at.left, top: at.top }}>
         <div className="stpick-pop" data-testid="style-picker-pop" onMouseLeave={() => setPeek(null)}>
           {items.map((it) => (
             <div key={it.id || '_none'} className={'stpick-item' + (it.id === value ? ' on' : '')} data-testid="style-picker-item" data-id={it.id} title={it.tip || it.name}
@@ -377,7 +386,7 @@ function StylePicker({ value, onChange, styles, samples, scriptId }) {
         {peek && sm(peek) && (
           <div className="stpick-peek" data-testid="style-picker-peek"><img src={media(sm(peek).path, sm(peek).v)} alt="" /><span>{(items.find((x) => x.id === peek) || {}).name}</span></div>
         )}
-      </>)}
+      </div>, document.body)}
     </span>
   );
 }

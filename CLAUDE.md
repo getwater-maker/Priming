@@ -123,7 +123,7 @@
 - 😮‍💨 **문장 앞 들숨 = OmniVoice provider 의 `muteLeadBreath` 한 곳**(v0.9.20 · 길이 불변 · 정적 30ms 기준 · 캐시 키 `lb` 와 짝) — 상세 [TTS](docs/규칙/TTS.md).
 
 ### 이미지
-- 🆕 **Qwen-Image 2.1 Turbo (로컬)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
+- 🆕 **Qwen-Image 2.1 Turbo (☁ 클라우드 · 🖥 로컬 둘 다 · v0.9.65)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
 - 👤 **Qwen 인물 참조 = 얼굴 시트(`characters/<이름>.face.png`) + `char-refs.refGate` 를 통과한 장면만**(v0.7.84 · 샷 크기 낱말 close-up·medium 이 없거나 원경·군중·3명+·18세 미만·카드와 10살+ 차이면 안 붙인다 — ⛔ 지시문만으로 풀려고 게이트를 넓히지 말 것: P0 에서 안 막혔다 · 설계안 `docs/인물일관성-Qwen-설계.md`).
 - 엔진: **Flow(구독) · Genspark(구독) · ComfyUI(☁/🖥 × 워크플로) · 나노바나나(유료 API)**. **Flow 와 Genspark 는 완전히 분리 — 고른 엔진 하나만 돌고 서로 이어받지 않는다**(로이 2026-10-02 · 옛 「이어받기 끄기 없음」 확정을 뒤집음 · `image-rotation.activeOrder` 한 곳). 한도면 미생성으로 두고 게이트가 막는다.
 - 🧥 **노출 방지 = 인물이 나오는 장면엔 `POS_MODEST`(옷차림 **긍정** 서술 — 부정문 금지) 자동**(v0.6.96 · `buildImagePrompt` 한 곳 · 사람 없는 장면엔 붙이지 않는다 — 사람을 그려 넣는다 · 판정 `PERSON_RE` · 🚫 `no people` 류 부정 토막은 `PERSON_NEG_RE` 로 먼저 지운다 — v0.9.22) · ✍ 자동 작성 요청·대본 작성 가이드도 「옷차림 명시(필수)」. ⚠ 리모션 TSV 그림은 프롬프트를 가공하지 않으므로 해당 없음.
@@ -233,6 +233,7 @@
 - React: ⛔ `setState` 직후 그 state 를 읽지 않는다(값을 직접 넘긴다) · 한 번 만든 클로저(`onended` 등)에서 state 읽지 않는다 · ⛔ 제어 checkbox/radio 의 click 에서 `preventDefault` 금지 · 편집면(contentEditable)은 React 가 다시 그리지 않게 고정 · 한글 조합 중(`isComposing`)엔 저장·Enter 처리 안 함 · 서식 막대는 mousedown 을 막아 초점을 지킨다.
 - 비동기 재생·루프는 **번호표**(`playGenRef` 식)로 「내가 아직 현재 작업인가」를 확인한다 — 멈춘 옛 재생의 await 가 깨어나 새 재생을 닫은 사고. 대본 전환 전 밀린 자동저장을 먼저 쓴다(`syncActiveToS` → `flushAutoSave`).
 - ⚡ **그룹 칸 `.cut` 은 `content-visibility:auto`(화면 밖 배치 건너뜀 · v0.9.29) — 그룹마다 위치를 재는 코드는 화면 근처 그룹만 잴 것**(화면 밖 그룹 안의 `getBoundingClientRect` 가 억지 배치를 일으켜 큰 대본 큐 전환이 2.8초로 돌아간다 · 레일 `near()` · `test:railvis`).
+- 🔴 **헤더·리본 안에서 펼치는 목록(팝업)은 `createPortal` 로 body 고정 층에 띄운다** — 리본 안에 두면 z-index 를 올려도 아래 칸에 가려 눌리지 않는다(v0.9.65 스타일 고르개 · E2E 는 `elementFromPoint` 로 실제로 눌리는지).
 - 목록에 `<video>` 를 수백 개 두지 않는다(Chromium 플레이어 한도 ≈75 — 썸네일은 `video-frame` 한 장 이미지). 렌더 예외는 `ErrorBoundary` + `window.onerror` 가 로그창(`🐞 화면 오류`)에 남긴다.
 - Electron `findInPage(text, {findNext})` 의 findNext 는 「새 세션을 시작하는가」다(true = 새 검색). 타이핑은 디바운스. 🔴 **검색창 자기 글자도 일치로 잡혀 입력창을 선택·포커스를 가져간다** — 결과마다 자기 일치 건너뛰기 + 포커스·캐럿 복구 + 개수 −1(App.jsx `onFindResult`, `test:find`).
 - Electron: 모달 대화상자는 부모 창을 앞으로 끌어온 뒤 연다(숨으면 입력 전체가 잠긴다 — 10초 넘게 잠기면 자동 해제 + 🩹 로그) · `media://` 는 **자르기 → 디코드** 순(경로의 `#`) · 스트리밍 응답(동기 읽기 금지) · 클립보드는 main 에서 읽는다 · `app.getVersion()` 은 라이트 업데이트 전 값이라 디스크의 package.json 을 읽는다.

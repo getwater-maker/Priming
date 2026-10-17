@@ -46,7 +46,10 @@ const key = (v) => String(v || '').replace(/[^A-Za-z0-9가-힣_.-]/g, '_').slice
     ok(await win.getAttribute('[data-testid="style-picker-btn"]', 'title') === '이미지 스타일', '① 고르개 버튼(title 「이미지 스타일」)');
     await win.click('[data-testid="style-picker-btn"]');
     await win.waitForSelector('[data-testid="style-picker-pop"]', { timeout: 5000 });
-    const it = await win.evaluate(({ a, b }) => {
+    // 🔴 목록이 아래 칸(pane2 등)에 가려 눌리지 않던 사고(v0.9.65 · 로이 2026-10-17) — 항목 가운데가 실제로 그 항목인가
+    const hid = await win.evaluate(() => [...document.querySelectorAll('[data-testid="style-picker-item"]')].slice(0, 6).filter((x) => { const b = x.getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !x.contains(e); }).length);
+    ok(hid === 0, '① 목록 항목이 다른 칸에 가리지 않고 실제로 눌린다(가린 항목 ' + hid + '개)');
+    const it =await win.evaluate(({ a, b }) => {
       const items = [...document.querySelectorAll('[data-testid="style-picker-item"]')];
       const ia = items.find((x) => x.getAttribute('data-id') === a), ib = items.find((x) => x.getAttribute('data-id') === b);
       const img = ia && ia.querySelector('img');
