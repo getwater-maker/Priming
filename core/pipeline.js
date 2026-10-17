@@ -312,6 +312,17 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       }
     } catch (_) { /* 경고일 뿐 — 음성 생성을 막지 않는다 */ }
   }
+  // 🇯🇵 루비 없는 드문 한자(상용한자표 밖) — TTS 가 읽기를 추측하는 자리. 로그 요약 + 대본 폴더 옆 목록(v0.9.62 · core/ja-ruby-check)
+  try {
+    const RC = require('./ja-ruby-check');
+    const rc = RC.rareKanjiWithoutRuby(sentences);
+    if (rc.total) {
+      const file = path.join(path.dirname(workDir), `루비확인_목록${label && label !== '롱폼' ? '_' + String(label).replace(/[\\/:*?"<>|]/g, '') : ''}.tsv`);
+      const kst = new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' KST';
+      try { RC.writeRubyTodo(file, rc, { title: path.basename(path.dirname(workDir)), when: kst }); } catch (_) {}
+      if (onLine) onLine(`⚠ 🇯🇵 루비 없는 드문 한자 ${rc.total}곳(낱말 ${rc.words.length}개) — TTS 가 읽기를 추측합니다: ${rc.words.slice(0, 12).map((w) => `${w.word}(${w.count})`).join(' ')}${rc.words.length > 12 ? ' …' : ''} → 대본에 루비 《よみ》를 다세요 · 목록 ${file}`);
+    }
+  } catch (_) { /* 경고일 뿐 */ }
   const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
   if (sf !== 1 && (!ffmpegPath || !fs.existsSync(ffmpegPath))) {
     if (onLine) onLine(`⚠ ffmpeg 사용 불가 — 배속(${sf}x) 미적용, 정속 WAV 로 진행 (경로: ${ffmpegPath || '없음'})`);

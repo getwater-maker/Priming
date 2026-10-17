@@ -7029,9 +7029,10 @@ function snapshotMatchesScript(parsed, snap) {
   try {
     const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim();
     const a = [];
-    for (const pr of parsed.projects) for (const g of pr.groups) for (const s of pr.getSentencesOfGroup(g)) a.push(norm(s.text));
+    // 🇯🇵 루비 읽기(ttsText)도 함께 본다 — 화면 글자만 같고 읽기가 바뀐 대본을 「같다」고 보면 옛 읽기 음성이 남는다(v0.9.62)
+    for (const pr of parsed.projects) for (const g of pr.groups) for (const s of pr.getSentencesOfGroup(g)) a.push(norm(s.text) + '\u0001' + norm(s.ttsText));
     const b = [];
-    for (const ps of (snap.projects || [])) for (const gs of (ps.groups || [])) for (const ss of (gs.sentences || [])) b.push(norm(ss.text));
+    for (const ps of (snap.projects || [])) for (const gs of (ps.groups || [])) for (const ss of (gs.sentences || [])) b.push(norm(ss.text) + '\u0001' + norm(ss.tt));
     if (!a.length || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     // 대본에 명시된 프롬프트가 작업본과 다르면 작업본 전체를 그대로 신뢰할 수 없다.
@@ -7444,6 +7445,8 @@ function overlaySnapshot(parsed, snap) {
       pairs.forEach(([ss, s]) => {
         if (!s) return;
         if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
+        // 🇯🇵 루비 읽기만 바뀜(大夫《たいふ》→《だゆう》 — 화면 글자는 같다) → 옛 음성은 옛 읽기다. 이어받지 않는다(v0.9.62)
+        if ((ss.tt || null) !== (s.ttsText || null)) return;
         if (Array.isArray(ss.capSpans) && ss.capSpans.length && ss.text === s.text) s.capSpans = ss.capSpans;   // 🎨 자막 서식(글자 위치 기준이라 글이 같을 때만)
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath && ss.text === s.text) s.backcheck = ss.bc;   // 🔎 역대조 결과(같은 문장·같은 음성일 때만)
