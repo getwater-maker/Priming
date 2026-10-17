@@ -42,7 +42,7 @@ console.log('\n[2] 화풍 결정 — 대본 > 채널(헤더) > 기본 · 모르�
   const logs = [];
   const ctx = { S: { parsed: null, scriptPath: 'x.md' }, log: (m) => logs.push(m), require: (m) => (/style-store/.test(m) ? fakeSS : require(m)), console };
   vm.createContext(ctx);
-  vm.runInContext(M.slice(i0, i1) + '\nthis.eff = effStyleId; this.res = resolveScriptStyle;', ctx);
+  vm.runInContext(M.slice(i0, i1) + '\nthis.eff = effStyleId; this.res = resolveScriptStyle; this.qis = _queueItemStyle;', ctx);
   const pr = (ss) => ({ scriptStyle: ss });
   const SC = '__script__';
   ctx.S.preset = { styleLong: 'cinematic' };   // 채널 화풍(안전망 폴백)
@@ -60,6 +60,18 @@ console.log('\n[2] 화풍 결정 — 대본 > 채널(헤더) > 기본 · 모르�
   ok(ctx.eff(SC, null, pr({ id: 'nope', name: '다산의뜰 수채화', raw: 'nope (다산의뜰 수채화)' })) === 'u3', 'id 가 틀려도 이름과 같은 스타일이 **하나뿐**이면 그것');
   ok(ctx.eff(SC, null, pr({ id: 'nope2', name: '따듯한 회화풍 일러스트', raw: 'nope2 (따듯한 회화풍 일러스트)' })) === 'cinematic', '🔴 같은 이름이 둘(따듯한 회화풍 일러스트 u1·u2)이면 이름으로 고르지 않는다 → 채널');
   ok(ctx.eff(SC, null, pr({ id: 'u2', name: '따듯한 회화풍 일러스트', raw: 'u2' })) === 'u2', '🔑 id 로 정확히 — u2');
+
+  // 📜 작업 순서(여러 대본) — 대본마다 자기 🎨 줄(v0.9.64 · 로이 2026-10-17 「화풍이 하나로 통일돼 버린다」)
+  ctx.S.preset = { styleLong: 'cinematic' };
+  const W = pr({ id: 'watercolor', name: '수채화', raw: 'watercolor' }), N = pr(null);
+  ok(ctx.qis(SC, { styleFallback: 'u3' }, {}, W) === SC && ctx.eff(ctx.qis(SC, { styleFallback: 'u3' }, {}, W), null, W) === 'watercolor', '🔑 큐: 지금 대본에 🎨 줄이 없어 팝업에서 고른 대체(u3)가 🎨 줄 있는 다른 대본을 덮지 않는다');
+  ok(ctx.qis(SC, { styleFallback: 'u3' }, {}, N) === 'u3', '큐: 🎨 줄 없는 대본만 팝업에서 고른 대체 스타일');
+  ok(ctx.qis(SC, { styleFallback: null }, {}, N) === null, '큐: 팝업에서 「스타일 없음」 → 없음');
+  ok(ctx.qis(SC, {}, {}, N) === SC, '큐: 대체를 안 골랐으면(옛 호출) 그대로 → effStyleId 안전망');
+  ok(ctx.qis(SC, {}, { styleId: 'cinematic' }, W) === SC, '🔑 다른 채널 대본이어도 헤더가 대본스타일이고 🎨 줄이 있으면 그 줄(채널 화풍이 덮지 않는다)');
+  ok(ctx.qis(SC, { styleFallback: 'u3' }, { styleId: 'cinematic' }, N) === 'cinematic', '다른 채널 + 🎨 줄 없음 → 그 채널 화풍');
+  ok(ctx.qis('cinematic', {}, {}, W) === 'cinematic' && ctx.qis('cinematic', {}, { styleId: 'u3' }, W) === 'u3', '헤더에서 스타일을 직접 고르면 예전 그대로(같은 채널 = 헤더 · 다른 채널 = 그 채널)');
+  ok(/styleId: _queueItemStyle\(/.test(M) && /return _queueItemStyle\(req, args, ov,/.test(M), '큐 전체 제작(run-batch) · 단계 버튼(_stageStyle) 둘 다 _queueItemStyle 한 곳');
   // 채널 기본 스타일이 「대본스타일」(`__script__`) 이면 폴백으로 쓰지 않는다(없는 스타일 id 로 그림을 시도하지 않게 · v0.7.41)
   ctx.S.preset = { styleLong: SC };
   ok(ctx.eff(SC, null, pr(null)) === null, '채널 기본이 대본스타일이고 대본에 🎨 줄이 없으면 폴백 = 없음(스타일 id 로 __script__ 를 넘기지 않는다)');
@@ -90,9 +102,9 @@ console.log('\n[3] 모든 이미지 입구가 대본 화풍을 거친다(소스 
   ok(/scriptStyle: pr\.scriptStyle \|\| null,       \/\/ 🎨 대본 화풍\(정해진 화풍/.test(M) && /proj\.scriptStyle = scriptStyle \|\| \(ps && ps\.scriptStyle\) \|\| null;/.test(M) && /scriptStyle = _LP\.scriptStyleOf\(_raw\)/.test(M), '작업본에 저장 · 다시 열 때 .md 로 다시 채운다(작업본 복원 경로)');
   const APP = read('renderer/src/App.jsx');
   ok(/data-testid="style-src"/.test(APP) && /🎨 대본: \{hit\.name\}/.test(APP) && /value=\{SCRIPT_STYLE_ID\}[\s\S]{0,160}📜 대본스타일<\/option>/.test(APP), '화면: ② 이미지 스타일 목록에 「📜 대본스타일」 · 고른 때만 출처 표시');
-  ok(/data-testid="style-pick"/.test(APP) && (APP.match(/await runStyleId\(\)/g) || []).length >= 7 && /qStyle = await runStyleId\(\)/.test(APP) && /batchStyle = await runStyleId\(\)/.test(APP), '대본스타일 + 대본에 🎨 없음 → 만들기 전에 스타일 선택 팝업(이미지·영상·🔄·큐·만들기·배치) · 취소하면 시작하지 않는다');
+  ok(/data-testid="style-pick"/.test(APP) && (APP.match(/await runStyleId\(\)/g) || []).length >= 7 && /qFb\.styleFallback = fb/.test(APP) && /batchFb\.styleFallback = fb/.test(APP) && !/(qStyle|batchStyle) = await runStyleId/.test(APP), '대본스타일 + 대본에 🎨 없음 → 만들기 전에 스타일 선택 팝업(이미지·영상·🔄·큐·만들기·배치) · 취소하면 시작하지 않는다');
   ok(!/<option value="grok(-api)?">/.test(APP), '③ 비디오 목록(헤더·채널 편집)에 Grok 구독·API 항목이 없다');
-  ok(/## 2\.5\. 🎨 이 편의 화풍/.test(read('docs/대본-작성-가이드.md')), '대본-작성-가이드.md 에 규격');
+  ok(/### 7\.1 화풍 — `> 🎨 화풍:/.test(read('docs/대본-작성-가이드.md')), '대본-작성-가이드.md 에 규격');
 }
 
 console.log(`\n${fail ? '❌' : '✅'} script-style ${pass}/${pass + fail}`);

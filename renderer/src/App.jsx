@@ -1413,8 +1413,9 @@ export default function App() {
     // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
     // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
     const phases = stage === 'imgvid' ? ['image', 'video'] : stage === 'ttsimg' ? ['tts', 'image'] : stage === 'ttsimgvid' ? ['tts', 'image', 'video'] : [stage];   // ttsimgvid = 전 편 TTS → 전 편 이미지 → 전 편 비디오(v0.9.39)   // ttsimg = 전 편 TTS → 전 편 이미지(GPU 를 번갈아 쓰지 않게 · v0.7.72)
-    let qStyle = styleId || null;   // 📜 대본스타일 + 이 대본에 🎨 줄 없음 → 시작 전에 한 번 묻는다(큐의 다른 대본은 main 이 채널 화풍으로 폴백)
-    if (stage !== 'tts') { qStyle = await runStyleId(); if (qStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
+    // 📜 대본스타일 + 이 대본에 🎨 줄 없음 → 시작 전에 한 번 묻는다 — 고른 값은 🎨 줄 **없는** 대본에만(styleFallback · v0.9.64 · 다른 대본은 각자 🎨 줄)
+    const qStyle = styleId || null; const qFb = {};
+    if (stage !== 'tts' && qStyle === SCRIPT_STYLE_ID && !scriptStyleHit()) { const fb = await runStyleId(); if (fb === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } qFb.styleFallback = fb; }
     queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(items.length > 1);   // ⏸ 지난 예약 초기화 · 대본이 둘 이상일 때만 버튼을 보인다
     let stoppedAfter = 0;                                // ⏸ 「이번 편까지만」으로 멈추며 남긴 편수
@@ -1434,8 +1435,8 @@ export default function App() {
           const _its = it.settings || {};
           const _sameCh = !_its.presetName || _its.presetName === presetName;
           if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: _its.presetName || presetName || null, speed: (_sameCh ? ttsSpeed : (_its.ttsSpeed != null ? _its.ttsSpeed : ttsSpeed)) || null }); }
-          if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
-          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle, headerPresetName: presetName || null }); }
+          if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle, ...qFb, headerPresetName: presetName || null }); }
+          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle, ...qFb, headerPresetName: presetName || null }); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); queueAbortRef.current = true; break stageLoop; }
 
       }
@@ -1526,9 +1527,10 @@ export default function App() {
     }
     if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: effOutMode() === 'audio' ? 'none' : 'all', video: effOutMode() === 'audio' ? 'none' : needVideoPrompts() })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'·화이트보드는 i2v 불요)
-    let batchStyle = styleId || null;   // 📜 대본스타일 — 지금 대본에 🎨 줄이 없으면 시작 전에 묻는다(다른 대본은 각자 🎨 줄 · 없으면 채널 화풍)
+    const batchStyle = styleId || null;   // 📜 대본스타일 — 지금 대본에 🎨 줄이 없으면 시작 전에 묻고, 고른 값은 🎨 줄 **없는** 대본에만(styleFallback · v0.9.64)
+    const batchFb = {};
     if (effOutMode() !== 'audio') {
-      if (styleId === SCRIPT_STYLE_ID && !scriptStyleHit()) { batchStyle = await runStyleId(); if (batchStyle === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } }
+      if (styleId === SCRIPT_STYLE_ID && !scriptStyleHit()) { const fb = await runStyleId(); if (fb === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } batchFb.styleFallback = fb; }
     }
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(true);   // ⏸ 버튼을 보이고, 지난 예약은 초기화(main run-batch 도 시작 때 푼다)
@@ -1539,7 +1541,7 @@ export default function App() {
       //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위는 공통으로 보내지 않는다 — main 이 대본마다 자기 범위(저장값 → 도입부)를 쓴다(v0.5.73).
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, ...batchFb, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus(r && r.aborted ? '⏹ 제작 중단됨 — 다시 만들면 미완료 작업부터 이어갑니다' : r && r.failed ? '⚠ 제작 미완료 — 문제를 해결한 뒤 만들기를 누르면 이 작업부터 재개합니다' : r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');

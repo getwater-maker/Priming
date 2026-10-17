@@ -2044,9 +2044,19 @@ function resolveScriptStyle(pr, requested) {
 //   args.headerPresetName 이 없으면(대본 머리 버튼·옛 호출) 넘어온 styleId 그대로.
 function _stageStyle(args) {
   const req = args.styleId != null ? args.styleId : null;
-  if (!args.headerPresetName || !args.__item) return req;
-  const ov = require('./core/queue-channel').channelOverrides(S.preset, args.headerPresetName);
-  return 'styleId' in ov ? ov.styleId : req;
+  if (!args.__item) return req;
+  const ov = args.headerPresetName ? require('./core/queue-channel').channelOverrides(S.preset, args.headerPresetName) : {};
+  return _queueItemStyle(req, args, ov, S.parsed && S.parsed.projects && S.parsed.projects[0]);
+}
+// 📜 작업 순서(여러 대본)의 대본 하나가 쓸 그림 스타일 — run-batch · 단계 버튼 한 곳(v0.9.64 · 로이 2026-10-17 「대본마다 자기 화풍」)
+//   헤더가 「📜 대본스타일」이고 이 대본에 🎨 줄이 있으면 = 그 줄(다른 채널 대본이어도 · 시작 때 고른 대체 스타일도 덮지 않는다).
+//   그 밖: 다른 채널 대본이면 그 채널 화풍 → 🎨 줄 없는 대본이면 시작 때 팝업에서 고른 대체(`styleFallback`) → 헤더 값.
+//   (예전엔 지금 보는 대본에 🎨 줄이 없어 팝업에서 고른 스타일이 큐의 **모든** 대본을 덮었다.)
+function _queueItemStyle(req, src, ov, pr) {
+  if (req === SCRIPT_STYLE_ID && resolveScriptStyle(pr, SCRIPT_STYLE_ID).from === 'script') return SCRIPT_STYLE_ID;
+  if (ov && 'styleId' in ov) return ov.styleId;
+  if (req === SCRIPT_STYLE_ID && src && Object.prototype.hasOwnProperty.call(src, 'styleFallback')) return src.styleFallback;
+  return req;
 }
 function effStyleId(requested, logf, pr) {
   const p = pr || (S.parsed && S.parsed.projects && S.parsed.projects[0]);
@@ -8380,7 +8390,8 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
         speed: (s.ttsSpeed != null ? s.ttsSpeed : (common.ttsSpeed != null ? common.ttsSpeed : null)),
         // 이미지 스타일도 **헤더(공통) 우선** — 항목 저장값만 보면, 대본을 열고 바로 만들기를 누를 때(저장 전)
         //   styleId 가 null 이 되어 **스타일 프롬프트가 아예 안 붙어 실사 이미지가 나오는** 사고가 있었음.
-        styleId: ('styleId' in _ov ? _ov.styleId : (common.styleId != null ? common.styleId : (s.styleId || null))),
+        //   📜 헤더가 「대본스타일」이면 대본마다 자기 🎨 줄(_queueItemStyle 한 곳 · v0.9.64)
+        styleId: _queueItemStyle(common.styleId != null ? common.styleId : (s.styleId || null), common, _ov, it.parsed && it.parsed.projects && it.parsed.projects[0]),
         // ⚠ 영상 범위 = **대본마다 자기 범위**(_itemRange) — 헤더 범위를 모든 대본에 덮지 않는다(v0.5.73).
         fromNum: _rg.fromNum, toNum: _rg.toNum, vidSel: _rg.sel || '',
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
