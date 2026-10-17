@@ -56,6 +56,18 @@ console.log('[3] 루비 없는 드문 한자 찾기');
   ok(L[0].startsWith('﻿# 루비 확인 목록') && L[1] === '낱말\t표 밖 한자\t횟수\t문장번호\t예문' && L[2].startsWith('厨子王\t厨\t2\t3 5\t'), '목록 TSV(엑셀용 BOM · 칸 순서)');
 }
 
+console.log('[3b] 대본 쪽 명령 도구 (tools/ja-ruby-todo.js)');
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-'));
+  const md = path.join(d, '[일본_9999] 시험.md');
+  fs.writeFileSync(md, '# 시험\n\n## 一\n\n[朗読] 弟の厨子王《ずしおう》は蓆の上で泣いた。\n\n[室主] 厨子王は逃げました。\n', 'utf8');
+  const out = path.join(d, 'todo.tsv');
+  const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'ja-ruby-todo.js'), md, out], { encoding: 'utf8' });
+  const L = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').split('\r\n') : [];
+  const rows = L.slice(2).filter(Boolean).map((l) => l.split('\t')[0]);
+  ok(r.status === 0 && rows.includes('蓆') && rows.includes('厨子王') && rows.length === 2, `대본 .md → 목록 (루비 단 첫 厨子王 은 빼고 루비 없는 室主 줄의 厨子王·蓆 · ${JSON.stringify(rows)})`);
+}
+
 console.log('[4] 연결');
 {
   const PL = fs.readFileSync(path.join(__dirname, '..', 'core', 'pipeline.js'), 'utf8');
