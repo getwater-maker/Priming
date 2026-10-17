@@ -7497,8 +7497,8 @@ export default function App() {
             </div>)}
             {settingsTab === 'yt' && (<div>
               <Hint>
-                🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
-                <b>공개·예약·썸네일·재생목록</b>은 Studio 에서 직접 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
+                🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>(채널 편집에서 ⏰ 예약을 켜면 예약 공개)로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
+                올린 뒤 <b>썸네일·재생목록</b>은 앱이 넣고, 채널 편집에서 <b>⏰ 예약</b>을 켜면 공개 시각도 함께 보냅니다. 고정댓글·종료화면은 Studio 에서 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
               </Hint>
               {ytSt && !ytSt.available && <Hint>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</Hint>}
               <div data-testid="yt-client" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>

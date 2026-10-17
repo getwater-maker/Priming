@@ -108,3 +108,9 @@
 - 업로드 창에 「예약」 칸(채널 편집의 기본값 + 대본마다 덮어쓰기 · 하루 1편 간격 자동 배정은 로이 의견 후).
 - 심사 **통과 전**에는 구글이 비공개로 강제하므로 `publishAt` 을 보내도 공개 전환이 안 될 수 있다 → 앱은 통과 여부를 모르니, 결과 영상의 `privacyStatus`/`publishAt` 을 다시 읽어(`videos.list`) 「예약이 적용됐다/안 됐다」를 확인표에 적는다(조용히 틀리지 않게).
 - 문서 규칙 갱신: `docs/규칙/유튜브업로드.md` 에 한 줄 + 대본 작성 가이드 영향 없음.
+
+## 6. GCP 「범위가 어떤 방식으로 사용되나요?」 칸에 붙여넣을 글 (1000자 이내 · 907자)
+
+Priming is a desktop app that lets a channel owner publish videos they made on their own YouTube channel. youtube.upload: upload the owner's own video (resumable videos.insert) with title, description, tags, synthetic-content disclosure and an optional scheduled publish time (status.publishAt). youtube.readonly: show which channel is connected, list the owner's own playlists for selection, and check the owner's uploads list for a duplicate title before uploading (prevents double uploads). youtube.force-ssl: required only for thumbnails.set and playlistItems.insert, which Google does not allow with youtube.upload alone; used after an upload to set the owner's thumbnail and add the video to the playlist the owner chose, then re-read to confirm. No comments, subscribers, analytics or any other person's data is read. Tokens stay encrypted on the user's PC; YouTube data is never sent to our servers.
+
+> 같은 화면의 「YouTube 링크」 칸 = §3 시나리오로 찍은 시연 영상(일부 공개). **영상이 있어야 신청이 된다.**
