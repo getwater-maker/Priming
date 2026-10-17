@@ -187,12 +187,45 @@ function applyRuby(heard, pairs) {
 async function scoreJaKana(text, heard, altText, client) {
   if (!client || typeof client.toKana !== 'function') return null;
   const ref = altText && altText !== text ? altText : text;
-  const fixed = applyRuby(heard, rubyPairs(text, altText));
+  const pairs = rubyPairs(text, altText);
+  const fixed = applyRuby(heard, pairs);
   const kana = await client.toKana([jaDigits(ref), jaDigits(fixed)]);
   if (!Array.isArray(kana) || kana.length !== 2 || typeof kana[0] !== 'string' || typeof kana[1] !== 'string') return null;
   const r = align(cjkChars(longVowelNorm(kataToHira(kana[0]))), cjkChars(longVowelNorm(kataToHira(kana[1]))));
   if (!r.n) return null;
-  return { score: Math.max(0, 1 - r.dist / r.n), unit: '가나', n: r.n, errors: r.dist, toneErrors: 0 };
+  return { score: Math.max(0, 1 - r.dist / r.n), unit: '가나', n: r.n, errors: r.dist, toneErrors: 0, rubyMiss: rubyMisses(pairs, kana[1]) };
+}
+
+/**
+ * 🔖 루비 낱말 단위 검사(v0.9.61 · 로이 「루비 읽기가 받아쓰기에 없으면 미달로」) — 문장 점수만으로는 긴 문장에서 한 낱말을
+ *   틀려도 85% 를 넘는다(1021 실험: 安寿→「アジ」·国守→「くにむり」 가 86~90% 로 통과). 그래서 루비 낱말마다 그 읽기가
+ *   받아쓰기 읽기 안에 있는지 따로 본다.
+ *   허용(2026-10-17 실험 300건으로 정함): **탁음·반탁음은 무시**(받아쓰기가 ずしおう→寿司王(すしおう)·だゆう→太夫(たゆう)로
+ *   적는다) + 세 글자 이상 읽기는 한 글자 차이까지. → 루비를 뺀 음성 72/150 문장 · 루비 있는 음성 18/150 문장에서 걸렸다
+ *   (루비 있는 쪽에 걸린 것도 받아쓰기가 다른 한자로 적은 것이 섞여 있다 — 결과표의 「루비틀림」 칸을 사람이 본다).
+ */
+const _rubyNorm = (s) => [...longVowelNorm(kataToHira(String(s || '').normalize('NFKC'))).normalize('NFD')]
+  .filter((c) => /[\p{L}\p{N}]/u.test(c)).join('').normalize('NFC');
+function _subDist(rd, h) {   // h 안에서 rd 와 가장 가까운 조각의 편집 거리
+  const n = rd.length;
+  let best = n;
+  for (let L = Math.max(1, n - 1); L <= n + 1; L++) {
+    for (let i = 0; i + L <= h.length; i++) {
+      const d = align([...rd], [...h.slice(i, i + L)]).dist;
+      if (d < best) { best = d; if (!best) return 0; }
+    }
+  }
+  return best;
+}
+function rubyMisses(pairs, heardKana) {
+  const H = _rubyNorm(heardKana);
+  const miss = [];
+  for (const [base, rd] of pairs || []) {
+    const R = _rubyNorm(rd);
+    if (!R || miss.includes(base)) continue;
+    if (_subDist(R, H) > (R.length >= 3 ? 1 : 0)) miss.push(base);
+  }
+  return miss;
 }
 
 /** WAV 앞뒤에 무음을 덧댄다(같은 형식 · 무손실). 실패하면 원본 그대로. */
@@ -233,7 +266,7 @@ async function checkAudio(wavBuf, text, lang, tmpDir, asr, altText) {
       if (lang === 'ja') {
         let ks = null;
         try { ks = await scoreJaKana(text, last, altText, client); } catch (_) { ks = null; }
-        if (ks) return { ok: ks.score >= (PASS[lang] || 0.85), score: ks.score, heard: last, detail: ks };
+        if (ks) return { ok: ks.score >= (PASS[lang] || 0.85) && !(ks.rubyMiss && ks.rubyMiss.length), score: ks.score, heard: last, detail: ks };
       }
       // 일본어는 받아쓰기가 한자를 가나로(또는 반대로) 적을 수 있다 — 루비 읽기(altText)와도 대조해 높은 쪽을 쓴다
       let sc = scoreText(text, last, lang);
@@ -254,9 +287,9 @@ function writeReport(file, rows, meta = {}) {
   const head = [
     `# 역대조 보고 — ${esc(meta.title || '')} · 만든 시각 ${esc(meta.when || '')} · 기준 ${esc(meta.threshold || '')}`,
     `# 문장 ${rows.length} · 통과 ${pass} · 미달 ${flagged} · 확인 불가 ${unknown} · 평균 일치율 ${avg.length ? (avg.reduce((a, r) => a + r.score, 0) / avg.length * 100).toFixed(1) + '%' : '-'}`,
-    ['문장번호', '언어', '일치율(%)', '성조오류', '재합성', '상태', '원문', '받아쓰기'].join('\t'),
+    ['문장번호', '언어', '일치율(%)', '성조오류', '재합성', '상태', '원문', '받아쓰기', '루비틀림'].join('\t'),
   ];
-  const body = rows.map((r) => [r.num, r.lang, r.score == null ? '' : (r.score * 100).toFixed(1), r.toneErrors || 0, r.retries || 0, r.status, esc(r.text), esc(r.heard)].join('\t'));
+  const body = rows.map((r) => [r.num, r.lang, r.score == null ? '' : (r.score * 100).toFixed(1), r.toneErrors || 0, r.retries || 0, r.status, esc(r.text), esc(r.heard), esc((r.rubyMiss || []).join('·'))].join('\t'));
   fs.writeFileSync(file, '﻿' + [...head, ...body].join('\r\n') + '\r\n', 'utf8');
   return { pass, flagged, unknown };
 }
@@ -295,4 +328,4 @@ function refTextForCut(orig, heard, lang) {
   return best.sc >= 0.85 ? best.t : h;
 }
 
-module.exports = { refTextForCut, PASS, MAX_RETRY, HALLU, isHallucination, scoreText, padWav, checkAudio, writeReport, align, scoreJaKana, rubyPairs, applyRuby, numToKanji, jaDigits, kataToHira, longVowelNorm };
+module.exports = { refTextForCut, PASS, MAX_RETRY, HALLU, isHallucination, scoreText, padWav, checkAudio, writeReport, align, scoreJaKana, rubyPairs, applyRuby, rubyMisses, numToKanji, jaDigits, kataToHira, longVowelNorm };

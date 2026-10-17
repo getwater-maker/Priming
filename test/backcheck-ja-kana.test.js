@@ -76,6 +76,32 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'bc-ja-'));
     ok(r.score === 1, '숫자 표기(7月↔七月 · 120万↔百二十万)는 같은 읽기');
   }
 
+  console.log('[2b] 🔖 루비 낱말 단위 검사 (v0.9.61)');
+  {
+    // 긴 문장에서 루비 낱말 하나만 틀림 — 문장 점수는 85% 를 넘지만 미달이어야 한다(실측: 安寿→アジ 88% 통과였다)
+    const text = '別れぎわ、母は姉の安寿に守本尊の地蔵様を、大切にするようにと言い残しました';
+    const tts = '別れぎわ、母は姉のあんじゅにまもりほんぞんの地蔵様を、大切にするようにと言い残しました';
+    const c = mkClient('別れぎわ、母は姉のアジにまもりほんぞんの地蔵様を、大切にするようにと言い残しました');
+    const r = await BC.checkAudio(WAV, text, 'ja', TMP, c, tts);
+    ok(r.score >= 0.85 && !r.ok && JSON.stringify(r.detail.rubyMiss) === '["安寿"]', `한 낱말만 틀려도 미달 (점수 ${r.score.toFixed(2)} · 루비 틀림 ${JSON.stringify(r.detail.rubyMiss)})`);
+    const c2 = mkClient(tts);
+    const r2 = await BC.checkAudio(WAV, text, 'ja', TMP, c2, tts);
+    ok(r2.ok && r2.detail.rubyMiss.length === 0, '루비대로 읽으면 통과(루비 틀림 없음)');
+  }
+  ok(BC.rubyMisses([['厨子王', 'ずしおう']], 'スシオウハ').length === 0, '탁음 차이(ずしおう↔寿司王 すしおう)는 받아쓰기 탓으로 보고 통과');
+  ok(BC.rubyMisses([['厨子王', 'ずしおう']], 'ちゅしおうは').length === 0 && BC.rubyMisses([['安寿', 'あんじゅ']], 'あずみに').length === 1, '세 글자 이상은 한 글자 차이까지 · 그 이상 다르면 틀림(판정력)');
+  ok(BC.rubyMisses([['粟', 'あわ']], 'いわのほ').length === 1 && BC.rubyMisses([['粟', 'あわ']], 'あわのほ').length === 0, '두 글자 이하 읽기는 정확히 있어야 한다');
+  {
+    const f = path.join(TMP, 'rep.tsv');
+    BC.writeReport(f, [{ num: 1, lang: 'ja', score: 0.9, retries: 2, status: '미달', text: 'x', heard: 'y', rubyMiss: ['安寿', '国守'] }]);
+    const lines = fs.readFileSync(f, 'utf8').split('\r\n');
+    ok(lines[2].endsWith('\t루비틀림') && lines[3].endsWith('\t安寿·国守'), '결과표 마지막 칸 = 루비틀림');
+  }
+  {
+    const PL = fs.readFileSync(path.join(__dirname, '..', 'core', 'pipeline.js'), 'utf8');
+    ok(/miss\(c2\) < miss\(best\.chk\)/.test(PL) && /rubyMiss: d\.rubyMiss \|\| \[\]/.test(PL) && /rubyMiss: b\.rubyMiss \|\| \[\]/.test(PL), '합성 루프 — 다시 만든 것 중 루비 틀림이 적은 것을 고르고 결과표에 싣는다');
+  }
+
   console.log('[3] 서버에 읽기 기능이 없으면 예전 글자 대조');
   {
     const c = mkClient('堀達夫が書いた', { kana: false });

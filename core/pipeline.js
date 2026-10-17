@@ -552,15 +552,18 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
           const r2 = await ttsMgr.synthesize(s.ttsText || s.text, { ...sOpts, seed: sd });
           assertRealAudio(r2, s.num);
           const c2 = await BC.checkAudio(r2.mp3Buffer, s.text, bcLang, workDir, null, s.ttsText);
-          if (c2.score != null && c2.score > (best.chk.score || 0)) best = { res: r2, chk: c2, seed: sd };
+          // 🔖 고르는 순서: 통과 > 루비 낱말 틀림이 적음 > 점수(v0.9.61 — 점수만 보면 루비를 틀린 높은 점수가 이긴다)
+          const miss = (c) => ((c && c.detail && c.detail.rubyMiss) || []).length;
+          const better = c2.score != null && ((c2.ok && !best.chk.ok) || (c2.ok === !!best.chk.ok && (miss(c2) < miss(best.chk) || (miss(c2) === miss(best.chk) && c2.score > (best.chk.score || 0)))));
+          if (better) best = { res: r2, chk: c2, seed: sd };
           if (c2.ok) break;
         } catch (_) { /* 재합성 실패는 무시 — 처음 것을 쓴다 */ }
       }
       res = best.res;
       if (best.seed != null) seedOverride = best.seed;
       const d = best.chk.detail || {};
-      s.backcheck = { lang: bcLang, score: best.chk.score, ok: !!best.chk.ok, unknown: !!best.chk.unknown, heard: best.chk.heard || '', retries, tone: d.toneErrors || 0 };
-      if (onLine && !best.chk.ok) onLine(`⚠ 컷${s.num} 역대조 미달 ${Math.round((best.chk.score || 0) * 100)}% (다시 만들기 ${retries}번) — 받아쓰기 「${String(best.chk.heard || '').slice(0, 60)}」 · 결과표에 표시합니다`);
+      s.backcheck = { lang: bcLang, score: best.chk.score, ok: !!best.chk.ok, unknown: !!best.chk.unknown, heard: best.chk.heard || '', retries, tone: d.toneErrors || 0, rubyMiss: d.rubyMiss || [] };
+      if (onLine && !best.chk.ok) onLine(`⚠ 컷${s.num} 역대조 미달 ${Math.round((best.chk.score || 0) * 100)}% (다시 만들기 ${retries}번)${(d.rubyMiss && d.rubyMiss.length) ? ' · 루비 틀림 ' + d.rubyMiss.join('·') : ''} — 받아쓰기 「${String(best.chk.heard || '').slice(0, 60)}」 · 결과표에 표시합니다`);
     }
     consecFail = 0;
     if (seedOverride != null) s.ttsSeedSwapped = seedOverride;   // 로그에 남긴다(왜 이 문장만 톤이 다를 수 있는지)
@@ -621,7 +624,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       const rows = fore.map((x) => {
         const b = x.backcheck && x.backcheck.audio === x.ttsAudioPath ? x.backcheck : null;
         if (!b) return { num: x.num, lang: Lang.detectLang(x.text), score: null, retries: 0, status: x.ttsAudioPath ? '확인 안 함(이전 음성)' : '음성 없음', text: x.text, heard: '' };
-        return { num: x.num, lang: b.lang, score: b.score, toneErrors: b.tone, retries: b.retries, status: b.unknown ? '확인 불가' : b.ok ? '통과' : '미달', text: x.text, heard: b.heard };
+        return { num: x.num, lang: b.lang, score: b.score, toneErrors: b.tone, rubyMiss: b.rubyMiss || [], retries: b.retries, status: b.unknown ? '확인 불가' : b.ok ? '통과' : '미달', text: x.text, heard: b.heard };
       });
       const file = path.join(path.dirname(workDir), `역대조_보고${label && label !== '롱폼' ? '_' + String(label).replace(/[\\/:*?"<>|]/g, '') : ''}.tsv`);
       const kst = new Date(Date.now() + 9 * 3600e3).toISOString().replace('T', ' ').slice(0, 16) + ' KST';
