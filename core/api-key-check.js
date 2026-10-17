@@ -9,6 +9,7 @@
  *     elevenlabs GET /v2/voices?page_size=1                            — Voices 읽기 권한이 없으면 「키는 맞지만 권한 부족」
  *     pexels     GET /v1/search?per_page=1 · pixabay GET /api/?per_page=3 — 🔎 무료 스톡(검색 1건 · 무료)
  *     claude     GET /v1/models?limit=1                                — Claude API(무료 조회)
+ *     kie        GET https://api.kie.ai/api/v1/chat/credit             — 🧩 kie.ai 남은 크레딧(무료 조회 · v0.9.66)
  *   결과 = { ok, level: 'ok'|'warn'|'bad', message } — 사람 말. ⛔ 키 원문을 메시지·로그에 싣지 않는다.
  *   level: ok = 통과 · warn = 키는 유효하지만 확인할 것이 있음(모델명·권한·한도) · bad = 거부됨/연결 실패.
  *   ⚠ 메인 프로세스 전용(전역 fetch) — 렌더러 번들에 넣지 말 것.
@@ -102,6 +103,13 @@ async function verify(id, key, o = {}, fetchImpl) {
       if (r.status === 403) return warn('Claude 키는 인식됐지만 권한이 없습니다(403) — 콘솔에서 키·작업공간을 확인하세요');
       return generic(r, 'Claude');
     }
+    if (id === 'kie') {   // 🧩 남은 크레딧 조회(무료) — /api/v1/* 는 오류도 HTTP 200 이라 몸의 code 를 본다
+      const r = await http('https://api.kie.ai/api/v1/chat/credit', { Authorization: 'Bearer ' + k }, fetchImpl);
+      const code = r.json && r.json.code != null ? Number(r.json.code) : r.status;
+      if (code === 200) { const c = Number(r.json && r.json.data); return good(`kie.ai 키 통과${Number.isFinite(c) ? ` · 남은 크레딧 ${c.toLocaleString()}` : ''}`); }
+      if (code === 401 || code === 403) return bad(`kie.ai 키가 거부됐습니다(${code}) — 키를 다시 확인하세요`);
+      return generic({ ...r, status: code }, 'kie.ai');
+    }
     return bad('알 수 없는 키 종류: ' + id);
   } catch (e) {
     const m = String((e && e.message) || e);
@@ -109,4 +117,4 @@ async function verify(id, key, o = {}, fetchImpl) {
   }
 }
 
-module.exports = { verify, ids: ['gemini', 'gemini-image', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude'] };
+module.exports = { verify, ids: ['gemini', 'gemini-image', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude', 'kie'] };

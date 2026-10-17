@@ -4573,6 +4573,71 @@ async function runGrokApiVideos(pr, mediaDir, onlyNums) {
   }
 }
 
+// 🧩 kie.ai (v0.9.66 · 로이 2026-10-17 「장기적으로 kie 하나로 운영」) — 이미지·비디오 엔진 값 `kie:<모델>` · 요청·대기·받기는 core/kie-api 한 곳
+//   원격 API 라 로컬 GPU 레인을 잡지 않는다 · 동시 3개(kie 한도 10초에 20건 안쪽) · 크레딧 부족이면 남은 것을 만들지 않고 멈춘다.
+async function _kiePool(items, conc, fn) {
+  let i = 0;
+  const run = async () => { while (i < items.length && !S.abort) { const it = items[i++]; await fn(it); } };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, items.length)) }, run));
+}
+async function runKieImages(project, imagesDir, logger, styleId, onlyNums, engine, force = false) {
+  require('./core/visual-span').markCovered(project, hasVisual);
+  const KA = require('./core/kie-api'), KM = require('./core/kie-models');
+  const m = KM.byVal(engine, 'image');
+  if (!m) { logger(`⚠ 알 수 없는 kie 이미지 모델: ${engine} — 헤더 「② 이미지」에서 다시 고르세요`); return; }
+  if (!KA.hasKey()) { logger('⚠ kie.ai API 키가 없습니다 — ⚙ 설정 → 🔑 API 키 → 🧩 kie.ai 에 붙여넣으세요'); return; }
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!targets.length) { logger(noTargetMsg(onlyNums)); return; }
+  try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
+  logger(`🧩 kie.ai 이미지(${m.label}) — ${targets.length}장 생성 · 장당 약 $${m.usd}`);
+  let stop = null; const t0 = Date.now(); let made = 0;
+  await _kiePool(targets, 3, async (g) => {
+    if (stop) return;
+    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
+    const base = P.claimPath(path.join(imagesDir, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS).replace(/\.png$/, '');   // 🔒
+    g.imageStatus = 'generating'; pushDtoUpdate();
+    const r = await KA.generateImageToFile({ model: m, prompt, aspect: project.aspect || '16:9', outPathNoExt: base, abortSignal: () => S.abort || !!stop });
+    if (r.ok) { g.imagePath = r.path; g.imageStatus = 'done'; g.imageEngine = 'kie'; made++; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); }
+    else {
+      g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`);
+      if (r.fatal && !stop) { stop = r.error; logger(`⏹ ${r.fatal} — 남은 그림은 만들지 않고 멈춥니다(이미 만든 그림은 그대로 · 고친 뒤 「이미지」를 다시 누르면 이어서 만듭니다)`); }
+    }
+    pushDtoUpdate();
+  });
+  for (const g of targets) if (g.imageStatus === 'generating') g.imageStatus = g.imagePath ? 'done' : 'fail';
+  logger(`⏱ kie 이미지 ${made}/${targets.length}장 · ${Math.round((Date.now() - t0) / 1000)}초`);
+}
+async function runKieVideos(pr, mediaDir, onlyNums, engine) {
+  const KA = require('./core/kie-api'), KM = require('./core/kie-models');
+  const m = KM.byVal(engine, 'video');
+  if (!m) { log(`⚠ 알 수 없는 kie 비디오 모델: ${engine} — 헤더 「③ 비디오」에서 다시 고르세요`); return; }
+  if (!KA.hasKey()) { log('⚠ kie.ai API 키가 없습니다 — ⚙ 설정 → 🔑 API 키 → 🧩 kie.ai 에 붙여넣으세요'); return; }
+  const targets = pr.groups.filter((g) => (g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)) && !(g.videoPath && fs.existsSync(g.videoPath)));
+  if (!targets.length) { log('🎬 kie — 영상화할(이미지 있는) 그룹이 없습니다'); return; }
+  fs.mkdirSync(mediaDir, { recursive: true });
+  log(`🎬 ${prLabel(pr)} 비디오 생성 (kie.ai · ${m.label} · ${targets.length}개 그룹)…`);
+  let stop = null; const t0 = Date.now(); let made = 0;
+  await _kiePool(targets, 3, async (g) => {
+    if (stop) return;
+    const totalSec = pr.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+    const durationSec = KM.pickDuration(m, totalSec > 0 ? totalSec : 6);   // 모델이 받는 길이 중 음성보다 길거나 같은 가장 짧은 것(모자라면 video-fit 이 맞춘다)
+    const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
+    const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
+    g.videoStatus = 'generating'; pushDtoUpdate();
+    log(`  · G${g.num} → kie ${m.label} (${durationSec}초 · 약 $${KM.videoUsd(m, durationSec).toFixed(2)})…`);
+    const r = await KA.generateVideoToFile({ model: m, imagePath: g.imagePath, prompt, aspect: pr.aspect || '16:9', durationSec, outputPath: out, abortSignal: () => S.abort || !!stop, logger: log });
+    if (r.ok) { g.videoPath = r.path; g.videoStatus = 'done'; made++; log(`  ✓ G${g.num} 완료`); }
+    else {
+      g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
+      if (r.fatal && !stop) { stop = r.error; log(`⏹ ${r.fatal} — 남은 영상은 만들지 않고 멈춥니다(이미지로 진행)`); }
+    }
+    pushDtoUpdate();
+  });
+  for (const g of targets) if (g.videoStatus === 'generating') g.videoStatus = g.videoPath ? 'done' : 'fail';
+  log(`⏱ kie 영상 ${made}/${targets.length}개 · ${Math.round((Date.now() - t0) / 1000)}초`);
+}
+
 // ComfyUI i2v (LTX2.5/2.3 등) — 이미지 있는 그룹만. workflowPath 지정 시 그 워크플로 사용.
 async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const CV = require('./core/comfy-video');
@@ -4849,6 +4914,7 @@ function _warnR2vEngine(pr, onlyNums, videoEngine) {
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   _warnR2vEngine(pr, onlyNums, videoEngine);
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
+  if (require('./core/kie-models').isKieVal(videoEngine)) { await runKieVideos(pr, mediaDir, onlyNums, videoEngine); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
   // Genspark 비디오 — 브라우저. **이미지 순환과 같은 크롬 프로필**을 쓰므로 전용 레인으로 직렬화한다.
   if (videoEngine === 'genspark') {
@@ -4896,6 +4962,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
     return runGeminiBatchImages(project, imagesDir, logger, styleId, onlyNums, force);
   }
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
+  if (require('./core/kie-models').isKieVal(startEngine)) return runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
@@ -5799,6 +5866,19 @@ ipcMain.handle('stock-key-save', (_e, { id, key, clear } = {}) => {
   SS.set(id, { ...old, key: v }); log(`🔑 ${id} 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
 ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) shell.openExternal(STOCK_KEY_URL[id]); return true; });
+// 🧩 kie.ai API 키(v0.9.66) — secret-store 'kie' · 원문은 돌려주지 않는다(끝 4자리만) · 이미지·비디오 생성은 core/kie-api 한 곳
+ipcMain.handle('kie-key-get', () => {
+  const k = require('./core/kie-api').kieKey();
+  return { has: !!k, tail: k ? k.slice(-4) : '' };
+});
+ipcMain.handle('kie-key-save', (_e, { key, clear } = {}) => {
+  if (process.env.PM_UI_SMOKE) return { ok: false };   // 🧪 E2E 는 진짜 키 저장소를 안 건드린다
+  const SS = require('./tts/secret-store'); const old = SS.get('kie') || {};
+  if (clear) { delete old.key; SS.set('kie', old); log('🔑 kie 키 지움'); return { ok: true }; }
+  const v = String(key || '').trim(); if (!v) return { ok: false };
+  SS.set('kie', { ...old, key: v }); log(`🔑 kie 키 저장(…${v.slice(-4)})`); return { ok: true };
+});
+ipcMain.handle('kie-open-key', () => { shell.openExternal('https://kie.ai/api-key'); return true; });
 // 🤖 Claude API 키·모델(v0.7.93 · 모델 v0.7.94) — secret-store 'claude' {key, model} · 원문은 돌려주지 않는다(끝 4자리만) · 부르는 곳은 core/claude-api 한 곳
 ipcMain.handle('claude-key-get', () => {
   const CA = require('./core/claude-api'); const c = CA.cfg();

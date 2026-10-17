@@ -584,11 +584,12 @@ function img(dir, num) {
   {
     // 🔑 비디오 엔진을 고르는 곳은 **두 군데**다 — 헤더 「③ 비디오」와 ⚙ 채널 편집.
     //   한쪽만 고치면 채널에 Flow 를 지정할 수 없다(2026-08-29 로이 지적: 채널 편집에 VEO 가 없었다).
-    const cnt = (APP.match(/<option value="flow">Flow · Veo \(구독\)<\/option>/g) || []).length;
-    ok(cnt === 2, '「Flow · Veo (구독)」 항목이 **헤더와 채널 편집 양쪽**에 있다  (실제 ' + cnt + '곳)');
+    //   🧩 v0.9.66(로이 2026-10-17 「kie 하나로 운영」) — Flow 는 목록에서 뺐다. 두 곳이 같은 EngineOptions 를 쓰고, 저장값이 flow 면 「(옛 설정)」으로 보인다.
+    const cnt = (APP.match(/<EngineOptions kind="video"/g) || []).length;
+    ok(cnt === 2, '비디오 목록(EngineOptions)이 **헤더와 채널 편집 양쪽**에 있다  (실제 ' + cnt + '곳)');
   }
-  ok(APP.indexOf('<option value="flow">Flow (구독)</option>') >= 0,
-    '이미지 쪽 Flow 항목은 그대로다 (회귀)');
+  ok(/flow: 'Flow \(구독\)'/.test(APP) && /\(옛 설정\)/.test(APP),
+    '저장값이 Flow 면 「(옛 설정) Flow (구독)」으로 보인다(빈칸 금지)');
   ok(!/\['flow', 'wan', 'grok10'\]\.includes/.test(APP),
     "⛔ 'flow' 를 grok 으로 되돌리는 정규화가 없다 — 있으면 골라도 다음에 열 때 Grok 으로 돌아간다");
   eq((APP.match(/\['wan', 'grok10'\]\.includes/g) || []).length, 2,
@@ -607,7 +608,7 @@ function img(dir, num) {
       for (const f of fs.readdirSync(dist)) if (/\.js$/.test(f)) js += fs.readFileSync(path.join(dist, f), 'utf8');
     } catch (_) {}
     ok(js.length > 0, '렌더러 번들이 있다');
-    ok(js.indexOf('Flow · Veo (구독)') >= 0, '번들에도 Flow 항목이 들어갔다 (빌드 반영 확인)');
+    ok(js.indexOf('MiniMax H3 레퍼런스 (R2V)') >= 0 && js.indexOf('kie.ai 비디오') >= 0, '번들에도 새 비디오 목록이 들어갔다 (빌드 반영 확인)');
   }
 
   console.log('\n[8] image-rotation — flowVideoModel 저장·로드 (실제 홈 파일은 건드리지 않는다)');

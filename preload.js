@@ -119,6 +119,9 @@ contextBridge.exposeInMainWorld('api', {
   stockKeysGet: () => ipcRenderer.invoke('stock-keys-get'),
   stockKeySave: (args) => ipcRenderer.invoke('stock-key-save', args),
   stockOpenKey: (id) => ipcRenderer.invoke('stock-open-key', id),
+  kieKeyGet: () => ipcRenderer.invoke('kie-key-get'),                // 🧩 kie.ai API 키(v0.9.66)
+  kieKeySave: (args) => ipcRenderer.invoke('kie-key-save', args),
+  kieOpenKey: () => ipcRenderer.invoke('kie-open-key'),
   claudeKeyGet: () => ipcRenderer.invoke('claude-key-get'),          // 🤖 Claude API 키(v0.7.93)
   claudeKeySave: (args) => ipcRenderer.invoke('claude-key-save', args),
   claudeOpenKey: () => ipcRenderer.invoke('claude-open-key'),

@@ -123,6 +123,7 @@
 - 😮‍💨 **문장 앞 들숨 = OmniVoice provider 의 `muteLeadBreath` 한 곳**(v0.9.20 · 길이 불변 · 정적 30ms 기준 · 캐시 키 `lb` 와 짝) — 상세 [TTS](docs/규칙/TTS.md).
 
 ### 이미지
+- 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(첫 항목 = 🖥 Qwen 2.1 로컬 / ☁ MiniMax R2V · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
 - 🆕 **Qwen-Image 2.1 Turbo (☁ 클라우드 · 🖥 로컬 둘 다 · v0.9.65)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
 - 👤 **Qwen 인물 참조 = 얼굴 시트(`characters/<이름>.face.png`) + `char-refs.refGate` 를 통과한 장면만**(v0.7.84 · 샷 크기 낱말 close-up·medium 이 없거나 원경·군중·3명+·18세 미만·카드와 10살+ 차이면 안 붙인다 — ⛔ 지시문만으로 풀려고 게이트를 넓히지 말 것: P0 에서 안 막혔다 · 설계안 `docs/인물일관성-Qwen-설계.md`).
 - 엔진: **Flow(구독) · Genspark(구독) · ComfyUI(☁/🖥 × 워크플로) · 나노바나나(유료 API)**. **Flow 와 Genspark 는 완전히 분리 — 고른 엔진 하나만 돌고 서로 이어받지 않는다**(로이 2026-10-02 · 옛 「이어받기 끄기 없음」 확정을 뒤집음 · `image-rotation.activeOrder` 한 곳). 한도면 미생성으로 두고 게이트가 막는다.
@@ -140,7 +141,7 @@
 - Genspark 한도 메시지의 재설정 시각을 파싱해 계정 쿨다운(침묵 정체 3연속 = 추정 30분). 배지 = 리본 capbar 맨 앞.
 
 ### 비디오
-- 엔진(🔴 Grok 구독·API 는 v0.7.38 에 목록에서 뺐다 — 옛 저장값은 「없음」으로 읽는다): **☁ ComfyUI LTX2.5(주력 · 1920x1088 직접 생성 → 업스케일 생략)** · ☁/🖥 MiniMax H3 레퍼런스 · 🖥 LTX2.3 · Grok(브라우저) · Grok API · Flow·Veo · Genspark · 없음. 드롭다운은 **헤더 + 채널편집 두 곳**(엔진 추가 시 둘 다).
+- 엔진(🔴 Grok 구독·API 는 v0.7.38 에 목록에서 뺐다 — 옛 저장값은 「없음」으로 읽는다): **☁ ComfyUI LTX2.5(주력 · 1920x1088 직접 생성 → 업스케일 생략)** · ☁/🖥 MiniMax H3 레퍼런스 · 🖥 LTX2.3 · Grok(브라우저) · Grok API · Flow·Veo · Genspark · 없음. 드롭다운은 **헤더 + 채널편집 두 곳이 같은 `EngineOptions`**(v0.9.66 — 목록 = ☁ MiniMax H3 R2V → 🧩 kie 비디오 → 없음 · Flow·Genspark·LTX 는 목록에서만 뺐다 · 엔진 추가는 `core/kie-models` 표에).
 - 대상 = 영상 범위 안에서 **이미지 있고 영상 없는** 그룹(이어받기). 직전에 `autoRelinkVideos`(폴더에 남은 `NN_1080.mp4`/`NN.mp4` 다시 잇기, `videoCleared` 는 제외).
 - 업스케일은 해상도를 재서 목표 이상이면 생략, **못 재면 건너뛴다(fail-closed)**, `upscale` 전용 레인, auto 모드는 한 영상 5분 넘으면 ffmpeg 로 강등.
 - 영상이 TTS 보다 짧으면 `video-fit`(≤1.3배 느리게 / 넘으면 반복+크로스페이드, 결과는 캐시 폴더 · 원본 불변). 🔴 **맞출 길이가 90초 넘으면 파일을 늘리지 않고 Vrew 반복 재생**(`endBehavior:'loop'`) — 18분짜리를 구워 Vrew 가 응답없음이 된 사고.

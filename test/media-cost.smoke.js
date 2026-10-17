@@ -60,29 +60,29 @@ for (let g = 5; g <= 6; g++) lines.push(`### 〔장면 ${g}〕`, `> 🖼️ 이�
 
     // ② 이미지 메뉴 — 엔진별 💰
     await win.click('button[data-menu="image"]'); await win.waitForTimeout(300);
-    const imgSel = win.locator('select:has(option[value="gemini-batch"])').first();
+    const imgSel = win.locator('[data-testid="img-engine"]');
     const costTxt = async () => (await win.locator('[data-testid="img-cost"]').innerText()).trim();
-    await imgSel.selectOption('gemini'); await win.waitForTimeout(300);
+    await imgSel.selectOption('kie:nano-banana-2'); await win.waitForTimeout(300);
     const t1 = await costTxt();
-    ok(/4장/.test(t1) && /원/.test(t1), '즉시 — 4장 · 원화 표시: ' + t1);
-    await imgSel.selectOption('gemini-batch'); await win.waitForTimeout(300);
+    ok(/4장/.test(t1) && /원/.test(t1), 'Nano Banana 2 — 4장 · 원화 표시: ' + t1);
+    await imgSel.selectOption('kie:nano-banana-2-1'); await win.waitForTimeout(300);
     const t2 = await costTxt();
-    ok(/4장/.test(t2) && t2 !== t1, '배치 — 값이 달라졌다(판정력): ' + t2);
+    ok(/4장/.test(t2) && t2 !== t1, 'Nano Banana 2.1 — 값이 달라졌다(판정력): ' + t2);
     const num = (s) => Number((s.match(/([\d,.]+)원/) || [])[1].replace(/,/g, ''));
-    ok(Math.abs(num(t2) * 2 - num(t1)) <= 0.2 + num(t1) * 0.05, `배치 ≈ 즉시의 절반 (${num(t2)}원 × 2 ≈ ${num(t1)}원)`);
-    await imgSel.selectOption('flow'); await win.waitForTimeout(300);
-    ok(/구독/.test(await costTxt()), 'Flow = 구독으로 표시: ' + await costTxt());
+    ok(Math.abs(num(t2) * 2 - num(t1)) <= 0.2 + num(t1) * 0.05, `2.1 ≈ 2 의 절반 (${num(t2)}원 × 2 ≈ ${num(t1)}원)`);
+    await imgSel.selectOption('kie:z-image'); await win.waitForTimeout(300);
+    ok(/원/.test(await costTxt()) && (await costTxt()) !== t2, 'kie Z-Image = 다른 원화 값: ' + await costTxt());
     const tip = await win.locator('[data-testid="img-cost"]').getAttribute('title');
     ok(/아직 안 만든 그림 4장/.test(tip) && /1달러 ≈/.test(tip), '말풍선에 근거(장수·환율)가 있다');
 
     // ③ 비디오 메뉴 — 방식에 따라 개수
     await win.click('button[data-menu="video"]'); await win.waitForTimeout(300);
-    const vidSelEng = win.locator('select:has(option[value="none"])').first();
+    const vidSelEng = win.locator('[data-testid="video-engine"]');
     await vidSelEng.selectOption('none'); await win.waitForTimeout(300);
     ok((await win.locator('[data-testid="vid-cost"]').count()) === 0, '영상 없음 → 💰 를 보이지 않는다');
-    await vidSelEng.selectOption('flow'); await win.waitForTimeout(300);
+    await vidSelEng.selectOption('kie:grok-video-1-5'); await win.waitForTimeout(300);
     const v1 = (await win.locator('[data-testid="vid-cost"]').innerText()).trim();
-    ok(/구독/.test(v1) && /2개/.test(v1), '도입부 전체 = 영상 2개(1·2번 · 구독): ' + v1);
+    ok(/원/.test(v1) && /2개/.test(v1), '도입부 전체 = 영상 2개(1·2번 · kie 초당 요금): ' + v1);
     await win.locator('[data-testid="vid-sel"]').selectOption('intro_odd'); await win.waitForTimeout(300);
     const v2 = (await win.locator('[data-testid="vid-cost"]').innerText()).trim();
     ok(/1개/.test(v2), '도입부 홀수 = 영상 1개(1번): ' + v2);
@@ -94,14 +94,14 @@ for (let g = 5; g <= 6; g++) lines.push(`### 〔장면 ${g}〕`, `> 🖼️ 이�
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForTimeout(1500);
     await win.click('button[data-menu="image"]'); await win.waitForTimeout(1200);
-    const imgSel2 = win.locator('select:has(option[value="gemini-batch"])').first();
-    await imgSel2.selectOption('gemini'); await win.waitForTimeout(1200);
+    const imgSel2 = win.locator('[data-testid="img-engine"]');
+    await imgSel2.selectOption('kie:nano-banana-2'); await win.waitForTimeout(1200);
     const q1 = (await win.locator('[data-testid="img-cost"]').innerText()).trim();
     ok(/큐 2편/.test(q1) && /8장/.test(q1), '대본 2개 → 큐 2편 · 8장 합계: ' + q1);
     const one = Number(((q1.match(/💰\s*([\d,.]+)원 · 4장/) || [])[1] || '0').replace(/,/g, ''));
     const all = Number(((q1.match(/큐 2편\s*([\d,.]+)원/) || [])[1] || '0').replace(/,/g, ''));
     ok(one > 0 && Math.abs(all - one * 2) <= 1, `큐 합계 = 한 편의 2배 (${one}원 → ${all}원)`);
-    await imgSel2.selectOption('gemini-batch'); await win.waitForTimeout(1200);
+    await imgSel2.selectOption('kie:nano-banana-2-1'); await win.waitForTimeout(1200);
     const q2 = (await win.locator('[data-testid="img-cost"]').innerText()).trim();
     ok(q2 !== q1 && /큐 2편/.test(q2), '엔진을 바꾸면 큐 합계도 바뀐다(판정력): ' + q2);
     await win.click('button[data-menu="video"]'); await win.waitForTimeout(1200);

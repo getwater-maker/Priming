@@ -186,10 +186,11 @@ ok(!/comfyVideoPipeline[^\n]*genspark/.test(MAIN), 'genspark 는 Comfy 파이프
 {
   // ⚠ 이미지 엔진 드롭다운에도 같은 문자열의 Genspark 항목이 **이미 2곳** 있다(v0.3.50).
   //   그래서 그냥 세면 4곳이 나온다 → **Flow·Veo 바로 뒤에 오는 것**(=비디오 드롭다운)만 센다.
-  const cnt = (APP.match(/<option value="flow">Flow · Veo \(구독\)<\/option>\s*\n\s*<option value="genspark">Genspark \(구독\)<\/option>/g) || []).length;
+  //   🧩 v0.9.66 — Genspark 는 목록에서 뺐다(로이 2026-10-17 「kie 하나로 운영」) · 두 곳이 같은 EngineOptions · 저장값이면 「(옛 설정)」
+  const cnt = (APP.match(/<EngineOptions kind="video"/g) || []).length;
   ok(cnt === 2, `🔴 비디오 드롭다운이 **두 곳**(헤더 + 채널편집)에 있다 — 실제 ${cnt}곳 (v0.3.76 교훈)`);
-  const allGs = (APP.match(/<option value="genspark">Genspark \(구독\)<\/option>/g) || []).length;
-  ok(allGs === 4, `이미지 2곳 + 비디오 2곳 = 4곳 (실제 ${allGs})`);
+  const allGs = (APP.match(/<EngineOptions kind="(image|video)"/g) || []).length;
+  ok(allGs === 4 && /genspark: 'Genspark \(구독\)'/.test(APP), `이미지 2곳 + 비디오 2곳 = 4곳 (실제 ${allGs}) · 옛 Genspark 값은 이름으로 보인다`);
   ok(/gensparkVideoModel: e\.target\.value/.test(APP), '설정 select 가 gensparkVideoModel 을 저장한다');
   ok(/gensparkVideoTier: e\.target\.value/.test(APP), '설정 select 가 gensparkVideoTier 를 저장한다');
   ok(/GS_VIDEO_MODELS\.map/.test(APP), '모델 select 를 목록으로 렌더한다');

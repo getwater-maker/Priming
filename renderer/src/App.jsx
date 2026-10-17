@@ -10,6 +10,7 @@ import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
 import ClipJoin from '../../core/clip-join.js';
 import FollowT from '../../core/follow-target.js';
+import KM from '../../core/kie-models.js';
 import BookView from './BookView.jsx';
 import { BookMailConnect } from './BookMail.jsx';
 import RemotionView from './RemotionView.jsx';
@@ -212,6 +213,35 @@ function ComfyEngineOptions({ cfg, kind = 'image', value = '' }) {
             .map((w) => <option key={(cloud ? 'c' : 'l') + w.path} value={mkComfyVal(cloud, w.path)}>{cloud ? '☁' : '🖥'} {wfLabel(w)}</option>)}
       </optgroup>
     ))}
+  </>);
+}
+// 🧩 ② 이미지 · ③ 비디오 도구 목록(v0.9.66 · 로이 2026-10-17 「장기적으로 kie 하나로 운영」) — **헤더·채널 편집이 이 하나를 쓴다**
+//   이미지 = 🖥 Qwen-Image 2.1 Turbo(로컬) → kie 이미지 모델 · 비디오 = ☁ MiniMax H3 레퍼런스(R2V) → kie 비디오 모델 → 없음.
+//   Flow·Genspark·나노바나나·다른 ComfyUI 워크플로는 목록에서 뺐다(코드는 남김) — 저장된 값이 그것이면 「(옛 설정) …」으로 그대로 보이고 그대로 돈다
+//   (일치하는 option 이 없으면 드롭다운이 빈칸이 되고, 조용히 다른 엔진으로 바꾸면 요금이 바뀐다).
+const QWEN_LOCAL_WF_RE = /image_qwen21_turbo\.json$/i;
+const MM_R2V_WF_RE = /video_minimax_h3_ref2v_cloud\.json$/i;
+const LEGACY_ENGINE_LABEL = { flow: 'Flow (구독)', genspark: 'Genspark (구독)', gemini: '나노바나나 2.1 즉시', 'gemini-batch': '나노바나나 2.1 배치', 'grok-api': 'Grok API', grok: 'Grok', grok10: 'Grok 10초' };
+function legacyEngineLabel(v, cfg) {
+  const c = parseComfyVal(v);
+  if (c) { const w = comfyWorkflows(cfg).find((x) => x.path === c.path); return `${c.cloud ? '☁' : '🖥'} ${w ? wfLabel(w) : (String(c.path).split(/[\\/]/).pop() || 'ComfyUI')}`; }
+  if (KM.isKieVal(v)) return `kie · ${KM.idOf(v)}`;
+  return LEGACY_ENGINE_LABEL[v] || v;
+}
+function EngineOptions({ kind = 'image', cfg, value = '' }) {
+  const isVid = kind === 'video';
+  const wf = comfyWorkflows(cfg).find((w) => (isVid ? MM_R2V_WF_RE : QWEN_LOCAL_WF_RE).test(w.path));
+  const first = wf ? mkComfyVal(isVid, wf.path) : null;   // 이미지 = 로컬 · 비디오 = 클라우드
+  const models = isVid ? KM.VIDEO : KM.IMAGE;
+  const known = new Set([first, ...models.map((m) => KM.valOf(m)), isVid ? 'none' : null].filter(Boolean));
+  const legacy = value && !known.has(value) ? value : null;
+  return (<>
+    {first && <option value={first}>{isVid ? '☁ MiniMax H3 레퍼런스 (R2V)' : '🖥 Qwen-Image 2.1 Turbo (로컬)'}</option>}
+    <optgroup label={isVid ? 'kie.ai 비디오 (그림 → 영상)' : 'kie.ai 이미지'}>
+      {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>🧩 {m.label} · {KM.priceTag(m)}</option>)}
+    </optgroup>
+    {isVid && <option value="none">없음 (이미지만)</option>}
+    {legacy && <option value={legacy}>(옛 설정) {legacyEngineLabel(legacy, cfg)}</option>}
   </>);
 }
 const CAP_POS_OPTIONS = [0.3, 0.15, 0, -0.15, -0.3]; // 상하위치 select 값 (capFine 으로 미세조정)
@@ -580,7 +610,7 @@ export default function App() {
   const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('genspark'); // 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
+  const [imgEngine, setImgEngine] = useState('comfy'); // 'comfy[::경로]'(기본 = 활성 워크플로) | 'kie:<모델>'(v0.9.66) | 옛 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
   const [videoEngine, setVideoEngine] = useState('none'); // 비디오 제작 도구 — 기본 「없음(이미지만)」
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -892,6 +922,13 @@ export default function App() {
     const r = await api.claudeKeySave(patch); await loadClaudeKey();
     setClaudeKey((x) => ({ ...x, draft: '', msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
   }
+  // 🧩 kie.ai API 키(v0.9.66) — 이미지·비디오 생성(헤더 「kie」 항목) · { info: {has, tail}, draft, msg } · 원문은 다시 보이지 않는다
+  const [kieKey, setKieKey] = useState({ info: {}, draft: '', msg: '' });
+  async function loadKieKey() { try { const r = await api.kieKeyGet(); if (r) setKieKey((x) => ({ ...x, info: r })); } catch {} }
+  async function saveKieKey(patch) {
+    const r = await api.kieKeySave(patch); await loadKieKey();
+    setKieKey((x) => ({ ...x, draft: '', msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
+  }
   async function verifyKey(id, draft, extra) {
     setKeyChk((x) => ({ ...x, [id]: { busy: true } }));
     let r; try { r = await api.apiKeyVerify({ id, key: String(draft || '').trim(), ...(extra || {}) }); } catch (e) { r = { level: 'bad', message: e.message }; }
@@ -904,6 +941,7 @@ export default function App() {
     for (const id of ['gemini', 'mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
     for (const id of ['pexels', 'pixabay']) if ((stockKeys.info[id] && stockKeys.info[id].has) || (stockKeys.draft[id] || '').trim()) await verifyKey(id, stockKeys.draft[id]);
     if (claudeKey.info.has || claudeKey.draft.trim()) await verifyKey('claude', claudeKey.draft);
+    if (kieKey.info.has || kieKey.draft.trim()) await verifyKey('kie', kieKey.draft);
   }
   const keyChkMark = (id) => { const c = keyChk[id]; return c && !c.busy && c.message ? <div className="meta" data-testid={'keychk-' + id} data-level={c.level} style={{ marginTop: 3, fontWeight: 600, color: c.level === 'ok' ? '#16a34a' : c.level === 'warn' ? '#b45309' : '#c62828' }}>{c.level === 'ok' ? '✅' : c.level === 'warn' ? '⚠' : '❌'} {c.message}</div> : null; };
   const keyChkBtn = (id, draft, extra, tip) => <button className="ghost" style={{ flex: '0 0 auto' }} data-testid={'keychk-btn-' + id} disabled={!!(keyChk[id] && keyChk[id].busy)} title={tip || '이 키가 지금 통하는지 확인합니다(무료 조회 — 요금 없음)'} onClick={() => verifyKey(id, draft, extra)}>{keyChk[id] && keyChk[id].busy ? '⏳ 확인 중…' : '✔ 검증'}</button>;
@@ -2718,7 +2756,7 @@ export default function App() {
   }
   // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
   async function openTtsKeySettings() { setTtsEng(null); await openSettings('keys'); }
-  useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); loadClaudeKey(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
+  useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); loadClaudeKey(); loadKieKey(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
   //   식은 팝업·main(tts-engines.estimateUsd)과 같다: 글자당 단가 또는 음성 초당 단가(한국어 초당 koCps 자로 추정)
   //   🎙 문장마다 **실제로 읽을 목소리**의 단가로 센다(v0.6.84) — 순서는 main/pipeline 과 같다:
@@ -3462,7 +3500,7 @@ export default function App() {
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
-      imgEngine: p.imgEngine || 'genspark', videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
+      imgEngine: p.imgEngine || 'comfy', videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
       vidSel: normVidSel(p.vidSel),            // 🎬 영상 대상 방식(채널 기본값) — ⚠ 아래 저장 patch 에도 실을 것
       outLong: p.outLong || p.outputFolder || '',
@@ -3960,7 +3998,7 @@ export default function App() {
       ttsTargetDb: numOr(ch.ttsTargetDb, -15),
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
-      imgEngine: ch.imgEngine || 'genspark', videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
+      imgEngine: ch.imgEngine || 'comfy', videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       vidSel: normVidSel(ch.vidSel),            // 🎬 영상 대상 방식 — ⚠ 마찬가지
       outLong: (ch.outLong || '').trim(),
@@ -5327,6 +5365,7 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
+    if (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine)) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭
     if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
     if (imgEngine === 'gemini' || imgEngine === 'gemini-batch') return 'keys';
     return 'flow';
@@ -5971,14 +6010,10 @@ export default function App() {
               if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 만들 때 선택</span>;
               return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
-            <select title="이미지 생성 방식 — Flow·Genspark(브라우저 · 각 서비스 구독 요금제. 한도면 서로 이어받고, 한도 재설정 시각이 지나면 같은 대본 도중에도 원래 엔진으로 되돌아옵니다) / 나노바나나 2.1(API 사용량 과금) / ComfyUI 로컬·클라우드 × 모델(Krea2·Z-Image)"
+            <select data-testid="img-engine" title="이미지 도구 — 🖥 Qwen-Image 2.1 Turbo(내 PC ComfyUI · 무료) 또는 🧩 kie.ai 모델(장당 요금 · ⚙ 설정 → 🔑 API 키에 kie 키)"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <option value="flow">Flow (구독)</option>
-              <option value="genspark">Genspark (구독)</option>
-              <option value="gemini">유료(나노바나나 2.1 즉시)</option>
-              <option value="gemini-batch">유료(나노바나나 2.1 배치)</option>
-              <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             {loaded && imgCost && (
               <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
@@ -5999,12 +6034,9 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
-              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 엔진 — ComfyUI 로컬/클라우드 × 모델(LTX2.5·LTX2.3 = 그림 한 장에서 i2v · MiniMax H3 = 그림 + 인물 시트 레퍼런스 R2V)'}
+              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 도구 — ☁ MiniMax H3 레퍼런스(ComfyUI 클라우드 · 그림 + 인물 시트 R2V) 또는 🧩 kie.ai 모델(그룹 그림에서 영상 · 초당 요금 · ⚙ 설정 → 🔑 API 키에 kie 키)'}
               value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
-              <option value="flow">Flow · Veo (구독)</option>
-                <option value="genspark">Genspark (구독)</option>
-              <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(videoEngine, cvidCfg)} />
-              <option value="none">없음 (이미지만)</option>
+              <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
             </select>
             <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}>{impBusy ? '⏳' : '🔁 영상 프롬프트'}</button>
             {loaded && vidCost && (
@@ -6770,23 +6802,16 @@ export default function App() {
                   <div className="col">
                     <div className="crow stack"><span className="l">이미지</span>
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
-                      <select value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)}
+                      <select value={comfySelectValue(ch.imgEngine || 'comfy', comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <option value="flow">Flow (구독)</option>
-                        <option value="genspark">Genspark (구독)</option>
-                        <option value="gemini">유료(나노바나나 2.1 즉시)</option>
-              <option value="gemini-batch">유료(나노바나나 2.1 배치)</option>
-                        <ComfyEngineOptions cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'genspark', comfyCfg)} />
+                        <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'comfy', comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
                     <div className="crow stack"><span className="l">비디오</span>
                       <select value={comfySelectValue(normVideoEngine(ch.videoEngine || 'none'), cvidCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, videoEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <ComfyEngineOptions cfg={cvidCfg} kind="video" value={comfySelectValue(normVideoEngine(ch.videoEngine || 'none'), cvidCfg)} />
-                        <option value="flow">Flow · Veo (구독)</option>
-                <option value="genspark">Genspark (구독)</option>
-                        <option value="none">없음(이미지 고정)</option>
+                        <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(normVideoEngine(ch.videoEngine || 'none'), cvidCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
@@ -7277,6 +7302,24 @@ export default function App() {
               <div className="frow" style={{ margin: '0 0 10px', alignItems: 'center' }}>
                 <button className="ghost" data-testid="keychk-all" title="저장된(또는 방금 붙여넣은) 모든 키를 차례로 확인합니다 — 무료 조회, 요금 없음" onClick={verifyAllKeys}>🔍 모든 키 검증</button>
                 <Hint>각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</Hint>
+              </div>
+              {/* 🧩 kie.ai(유료 · v0.9.66) — 헤더 ② 이미지 · ③ 비디오의 「kie」 항목이 이 키로 만든다 · secret-store 'kie' · 원문은 다시 보이지 않는다(끝 4자리만) */}
+              <div data-testid="kie-key" className="kp-card">
+                <div className="kp-line">
+                  <b className="kp-name">🧩 kie.ai (이미지 · 비디오)</b>
+                  <Hint>kie.ai → API Key 에서 만든 키입니다. 헤더 「② 이미지」·「③ 비디오」에서 <b>kie</b> 항목을 고르면 이 키로 만듭니다. 충전한 크레딧에서 쓴 만큼 빠지고, 실패한 작업은 빠지지 않습니다. 「✔ 검증」은 남은 크레딧만 조회해 요금이 들지 않습니다.</Hint>
+                  <span className="kp-state" style={{ color: kieKey.info.has ? '#16a34a' : '#b45309' }}>{kieKey.info.has ? `🔑 저장됨(…${kieKey.info.tail})` : '🔑 없음'}</span>
+                  <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.kieOpenKey()}>발급 ↗</button>
+                </div>
+                <div className="kp-line">
+                  <input type="password" autoComplete="off" className="kp-in" data-testid="kie-key-in" placeholder={kieKey.info.has ? 'API 키 바꿀 때만 붙여넣기' : '🔑 kie.ai API 키 붙여넣기'}
+                    value={kieKey.draft} onChange={(e) => { const v = e.target.value; setKieKey((x) => ({ ...x, draft: v })); }}
+                    onBlur={() => { const v = kieKey.draft.trim(); if (v) saveKieKey({ key: v }); }} />
+                  {keyChkBtn('kie', kieKey.draft, undefined, '키가 통하는지·남은 크레딧을 확인합니다(무료 조회)')}
+                  <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!kieKey.info.has} title="저장된 키를 지웁니다" onClick={() => { if (uiConfirm('kie.ai 키를 지울까요?')) saveKieKey({ clear: true }); }}>지우기</button>
+                </div>
+                {keyChkMark('kie')}
+                {kieKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{kieKey.msg}</div>}
               </div>
               {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
               <div className="kp-card">

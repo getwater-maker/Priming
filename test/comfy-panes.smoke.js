@@ -23,6 +23,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
 (async () => {
   const before = { img: read('comfy-image-config.json'), vid: read('comfy-video-config.json') };
+  const rawBefore = {}; for (const f of ['comfy-image-config.json', 'comfy-video-config.json']) { try { rawBefore[f] = fs.readFileSync(CFG(f), 'utf8'); } catch (_) {} }   // 🛡 왕복 뒤 원문 그대로 되돌린다(v0.9.66 — 옛 항목은 떠나면 목록에서 사라져 드롭다운으로 못 돌아간다)
   console.log('── 헤더 드롭다운 처리 함수(App.jsx 원문)');
   for (const fn of ['onPickImgEngine', 'pickComfy', 'onPickVideoEngine', 'parseComfyVal']) {
     ok(APP.includes('function ' + fn + '('), fn + ' 정의됨');
@@ -85,76 +86,28 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     // ── 헤더 드롭다운 왕복 — ☁↔🖥 전환이 실제로 설정을 바꾸고 팝업 배지가 따라오는지 ──
     await win.click('.modal-card button:has-text("닫기")');
-    // 비디오 드롭다운에 🖥 로컬 항목이 **있어야** 한다(2026-08-20 오후 로이: "비디오에서 로컬 LTX2.5도 추가해줘")
+    // 🧩 v0.9.66(로이 2026-10-17 「장기적으로 kie 하나로 운영」) — 목록 = 첫 항목(ComfyUI 하나) + kie.ai 모델
+    //   비디오: ☁ MiniMax H3 레퍼런스(R2V) → kie 비디오 → 없음 · 이미지: 🖥 Qwen-Image 2.1 Turbo(로컬) → kie 이미지
+    //   Flow·Genspark·나노바나나·다른 ComfyUI 워크플로는 뺐다 — 저장값이 그것이면 「(옛 설정) …」 한 줄로만 보인다.
     await menu(win, 'video');
     const vidOpts = await win.locator('.hgroup select[data-testid="video-engine"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
-    ok(vidOpts.some((o) => o.includes('::local::')), '비디오 드롭다운에 로컬 항목 있음');
-    ok(vidOpts.some((o) => o.includes('🖥')), '비디오 드롭다운에 🖥 표시 있음');
-    ok(vidOpts.some((o) => o.includes('::cloud::')), '비디오 드롭다운에 클라우드 항목도 있다');
-    ok(vidOpts.some((o) => /::local::.*LTX2\.5/.test(o)), '🖥 로컬 × LTX2.5 조합이 목록에 있다: '
-       + (vidOpts.filter((o) => o.includes('::local::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
-    // ☁ MiniMax H3 레퍼런스(클라우드) — 2026-08-30 신설. 번들 등록만으로 드롭다운에 떠야 한다
-    //   (ComfyUI 워크플로는 하드코딩 <option> 이 아니라 목록 기반이라 헤더·채널편집 양쪽에 자동 반영된다).
-    ok(vidOpts.some((o) => /::cloud::.*MiniMax H3 레퍼런스/.test(o)),
-       '☁ 클라우드 × MiniMax H3 레퍼런스 조합이 목록에 있다: '
-       + (vidOpts.filter((o) => o.includes('::cloud::')).map((o) => o.split('|')[1]).join(', ') || '(없음)'));
+    ok(/::cloud::.*\|☁ MiniMax H3 레퍼런스 \(R2V\)$/.test(vidOpts[0] || ''), '비디오 첫 항목 = ☁ MiniMax H3 레퍼런스 (R2V): ' + (vidOpts[0] || ''));
+    const vKie = vidOpts.filter((o) => o.indexOf('kie:') === 0);
+    ok(vKie.length >= 10 && vKie.every((o) => /\|🧩 .+ · \$[\d.]+\/(초|편~)$/.test(o)), `kie 비디오 ${vKie.length}개 · 이름 · 요금: ` + vKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
+    ok(vidOpts.some((o) => o.startsWith('none|')), '「없음 (이미지만)」 유지');
+    ok(!vidOpts.some((o) => /^(flow|genspark)\|/.test(o) || /\|☁ LTX|\|🖥 LTX/.test(o) || (/^comfy::/.test(o) && !/\(옛 설정\)/.test(o) && o !== vidOpts[0])),
+       '옛 항목(Flow·Genspark·LTX 등)은 목록에 없다(저장값이면 「(옛 설정)」 한 줄만)');
     await menu(win, 'image');
-    const imgOpts = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value));
-    ok(imgOpts.some((o) => o.includes('::local::')) && imgOpts.some((o) => o.includes('::cloud::')),
-       '이미지 드롭다운은 로컬·클라우드 둘 다 유지');
-    // ── 🌐 브라우저 이미지 — 옛 「⚙ 이미지 순환」 모달을 없애고 드롭다운·설정탭으로 분리 (2026-08-26 로이 요청) ──
-    //   ① 드롭다운은 Flow·Genspark 로 분리(고른 쪽이 먼저 돌고 한도면 다른 쪽이 이어받는다)
-    //   ② 이미지 줄 ⚙ 버튼은 1개(옛 ⚙순환 + ⚙ComfyUI 두 개를 통합)
-    //   ③ LoRA 수집은 ⚙ 설정 → 🌐 브라우저 이미지 탭으로 이동
-    const imgPairs = await win.locator('.hgroup select[title^="이미지 생성 방식"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
-    ok(imgPairs.some((o) => o.startsWith('flow|')), '이미지 드롭다운에 Flow 항목: ' + (imgPairs.find((o) => o.startsWith('flow|')) || ''));
-    ok(imgPairs.some((o) => o.startsWith('genspark|')), '이미지 드롭다운에 Genspark 항목: ' + (imgPairs.find((o) => o.startsWith('genspark|')) || ''));
-    ok(!imgPairs.some((o) => o.startsWith('rotate|')), '옛 「순환(무료)」 항목 없음');
-    // ── 「(로컬)」 중복 제거 (로이 2026-09-16: "컴피유아이에 로컬이 있는 이유는? 중복이면 제거해") ──
-    //   optgroup 이 이미 로컬/클라우드를 가르므로 **이름 접미사 「(로컬)」 은 표시에서 떼고**,
-    //   그 워크플로(= 클라우드에 없는 모델)는 ☁ 그룹에서 **아예 감춘다**(고르면 반드시 실패하는 항목).
-    const imgComfy = imgPairs.filter((o) => o.indexOf('comfy::') === 0);
-    // ⚠ 🖥 는 서로게이트 페어라 문자 클래스 [☁🖥] 로는 반쪽만 지워진다 → 대안(|)으로 통째 제거.
-    const labelOf = (o) => (o.split('|')[1] || '').replace(/^(?:☁|🖥)\s*/u, '').trim();
-    ok(!imgComfy.some((o) => /\((?:로컬|local)\)/i.test(labelOf(o))),
-       '드롭다운 라벨에 「(로컬)」 접미사 없음: ' + imgComfy.map(labelOf).join(' / '));
-    const side = (k) => imgComfy.filter((o) => o.includes('::' + k + '::')).map(labelOf);
-    const cloudNames = side('cloud'), localNames = side('local');
-    ok(cloudNames.length && localNames.length, '☁·🖥 양쪽 모두 항목이 있다');
-    ok(cloudNames.every((nm) => localNames.includes(nm)), '☁ 목록 ⊆ 🖥 목록 (클라우드에만 있는 유령 항목 없음)');
-    // 설정에 로컬 전용(이름 끝 「(로컬)」) 워크플로가 있으면 ☁ 에서 빠져 있어야 한다.
-    //   ⚠ 지금 클라우드를 쓰고 그 워크플로가 선택돼 있으면 일부러 보여 주므로(빈칸 방지) 그때는 건너뛴다.
-    const icfg = read('comfy-image-config.json');
-    const onlyLocal = ((icfg && icfg.workflows) || [])
-      .filter((w) => w && /\((?:로컬|local)\)\s*$/i.test(w.name || ''))
-      .map((w) => w.name.replace(/\s*\((?:로컬|local)\)\s*$/i, '').trim());
-    if (onlyLocal.length && !icfg.cloud) {
-      ok(onlyLocal.every((nm) => localNames.includes(nm) && !cloudNames.includes(nm)),
-         '로컬 전용 워크플로는 🖥 에만 나온다: ' + onlyLocal.join(', ')
-         + ' (☁ ' + cloudNames.join('/') + ' · 🖥 ' + localNames.join('/') + ')');
-    } else console.log('  · (로컬 전용 워크플로가 없거나 클라우드 모드 — 이 검사는 건너뜀)');
-    // 반대 방향도 대칭으로 — 「(클라우드)」 이름은 🖥 로컬 그룹에서 감춘다(로컬엔 그 노드가 없다, v0.3.85).
-    const vcfg = require('../core/comfy-video').loadConfig();   // 앱과 같은 읽기(번들 이름은 loadConfig 가 늘 새로 매긴다 · 저장 파일엔 옛 이름이 남을 수 있다 · v0.8.14)
-    const vComfy = vidOpts.filter((o) => o.indexOf('comfy::') === 0);
-    const vSide = (k) => vComfy.filter((o) => o.includes('::' + k + '::')).map(labelOf);
-    const vCloud = vSide('cloud'), vLocal = vSide('local');
-    ok(!vComfy.some((o) => /\((?:로컬|local|클라우드|cloud)\)/i.test(labelOf(o))),
-       '비디오 라벨에도 「(로컬)·(클라우드)」 접미사 없음: ' + vComfy.map(labelOf).join(' / '));
-    const onlyCloud = ((vcfg && vcfg.workflows) || [])
-      .filter((w) => w && /\((?:클라우드|cloud)\)\s*$/i.test(w.name || ''))
-      .map((w) => w.name.replace(/\s*\((?:클라우드|cloud)\)\s*$/i, '').trim());
-    if (onlyCloud.length) {
-      ok(onlyCloud.every((nm) => vCloud.includes(nm) && !vLocal.includes(nm)),
-         '클라우드 전용 워크플로는 ☁ 에만 나온다: ' + onlyCloud.join(', ')
-         + ' (☁ ' + vCloud.join('/') + ' · 🖥 ' + vLocal.join('/') + ')');
-    }
-    // 🔴 Genspark·Flow 는 **무료가 아니다** — 각 서비스 구독 요금제(Genspark 구독 / Flow 는 Google AI Pro·Ultra).
-    //   라벨이 「무료」면 사용자가 과금 구조를 오해한다(2026-08-27 로이 지적 + v0.3.36 실측: 구독 없는 Flow 계정은 소개 페이지만 열림).
-    ok(!imgPairs.some((o) => /무료/.test(o)), '이미지 드롭다운에 「무료」 표기가 없다: ' + imgPairs.join(' / '));
-    ok(imgPairs.some((o) => o.startsWith('genspark|') && /구독/.test(o)), 'Genspark 항목이 「구독」으로 표기된다');
-    ok(imgPairs.some((o) => o.startsWith('flow|') && /구독/.test(o)), 'Flow 항목도 「구독」으로 표기된다(Google AI 구독 필요)');
+    const imgPairs = await win.locator('.hgroup select[data-testid="img-engine"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
+    ok(/::local::.*image_qwen21_turbo\.json\|🖥 Qwen-Image 2\.1 Turbo \(로컬\)$/.test(imgPairs[0] || ''), '이미지 첫 항목 = 🖥 Qwen-Image 2.1 Turbo (로컬): ' + (imgPairs[0] || ''));
+    const iKie = imgPairs.filter((o) => o.indexOf('kie:') === 0);
+    ok(iKie.length >= 10 && iKie.every((o) => /\|🧩 .+ · \$[\d.]+\/장$/.test(o)), `kie 이미지 ${iKie.length}개 · 장당 요금: ` + iKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
+    ok(!imgPairs.some((o) => /^(flow|genspark|gemini|gemini-batch|rotate)\|/.test(o) && !/\(옛 설정\)/.test(o)), '옛 항목(Flow·Genspark·나노바나나·순환)은 목록에 없다');
+    ok(!imgPairs.some((o) => /무료/.test(o)), '이미지 드롭다운에 「무료」 표기가 없다');
+    // 채널 편집도 같은 목록(EngineOptions 한 곳)
+    ok((APP.match(/<EngineOptions kind="image"/g) || []).length === 2 && (APP.match(/<EngineOptions kind="video"/g) || []).length === 2, '헤더·채널 편집이 같은 목록을 쓴다');
     const row = await win.evaluate(() => {
-      const sel = document.querySelector('.hgroup select[title^="이미지 생성 방식"]');
+      const sel = document.querySelector('.hgroup select[data-testid="img-engine"]');
       const grp = sel && sel.closest('.hgroup');
       return grp ? [...grp.querySelectorAll('button')].map((b) => ((b.getAttribute('title') || '') + '~' + (b.textContent || '').trim())) : [];
     });
@@ -226,7 +179,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     for (const [kind, file, cfg0] of [['image', 'comfy-image-config.json', before.img], ['video', 'comfy-video-config.json', before.vid]]) {
       await menu(win, kind);
-      const sel = kind === 'image' ? '.hgroup select[title^="이미지 생성 방식"]' : '.hgroup select[data-testid="video-engine"]';
+      const sel = kind === 'image' ? '.hgroup select[data-testid="img-engine"]' : '.hgroup select[data-testid="video-engine"]';
       const cur = await win.locator(sel).inputValue();
       const opts = await win.locator(sel + ' option').evaluateAll((os) => os.map((o) => o.value));
       if (cur.indexOf('comfy::') !== 0) { console.log('  (건너뜀 — 지금 ComfyUI 가 아님: ' + kind + ')'); continue; }
@@ -243,12 +196,14 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
       await win.click('button:has-text("⚙ 설정")');
       await win.click('.modal-card button:has-text("🎛 ComfyUI")');
       await win.waitForTimeout(400);
-      const onIdx2 = await win.evaluate((kd) => [...document.querySelectorAll('.modal-card [data-sec="' + (kd === 'image' ? 'img' : 'vid') + '"] .tpane')].findIndex((p) => p.classList.contains('on')), kind);
-      ok(onIdx2 === (after1.cloud ? 1 : 0), `${kind} 「지금 사용」 배지가 전환을 따라옴`);
+      await win.click('[data-testid="comfy-view"] button[data-view="' + (after1.cloud ? 'cloud' : 'local') + '"]').catch(() => {});
+      await win.waitForTimeout(250);
+      const onHead = await win.evaluate((kd) => { const p = document.querySelector('.modal-card [data-sec="' + (kd === 'image' ? 'img' : 'vid') + '"] .tpane.on .thead'); return p ? p.textContent : ''; }, kind);
+      ok(onHead.includes(after1.cloud ? '☁' : '🖥') && onHead.includes('지금 사용'), `${kind} 「지금 사용」 배지가 전환을 따라옴 (${onHead})`);
       await win.click('.modal-card button:has-text("닫기")');
       // 원래대로 되돌린다(사용자 설정 보존)
-      await win.locator(sel).selectOption(cur);
-      await win.waitForTimeout(700);
+      if ((await win.locator(sel + ' option').evaluateAll((os) => os.map((o) => o.value))).includes(cur)) { await win.locator(sel).selectOption(cur); await win.waitForTimeout(700); }
+      else { fs.writeFileSync(CFG(file), rawBefore[file], 'utf8'); console.log('  · (옛 설정 항목은 목록에 없어 파일 원문으로 되돌림)'); }
       const back = read(file);
       ok(!!back.cloud === !!cfg0.cloud, `${kind} 원래 상태로 복구 (cloud=${!!back.cloud})`);
     }
