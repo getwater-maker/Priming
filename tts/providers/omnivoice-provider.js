@@ -83,12 +83,34 @@ class OmniVoiceProvider {
   async init() {
     const res = await quietGet(this.baseUrl + '/health', { timeoutMs: 5000 });
     if (res.status === 200) {
+      await this.wake();   // 💤 내려놓은 모델이면 미리 올린다(첫 문장이 60초 제한에 걸리지 않게)
       this.ready = true;
       return true;
     }
     // 503 = 로딩 중, 0 = 연결 실패
     this.ready = false;
     return false;
+  }
+
+  // 💤 모델 내려놓기·깨우기(2026-10-17 · 서버 api.py 의 /release·/wake) — 음성 단계가 끝나면 서버가 RAM·VRAM 을 비워
+  //   이미지(ComfyUI)가 느려지지 않게 한다. 다른 PC 가 쓰는 중이면 서버가 거절한다. 옛 서버(404)·오류는 조용히 넘어간다(fail-open).
+  async wake() {
+    try {
+      const b = await fetch(this.baseUrl + '/busy', { headers: _authHeaders(), signal: AbortSignal.timeout(4000) });
+      if (!b.ok) return null;
+      const j = await b.json();
+      if (!j || !j.released) return null;
+      const r = await fetch(this.baseUrl + '/wake', { method: 'POST', headers: _authHeaders(), signal: AbortSignal.timeout(240000) });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
+  }
+
+  async release() {
+    try {
+      const r = await fetch(this.baseUrl + '/release', { method: 'POST', headers: _authHeaders(), signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return { released: false, reason: 'http-' + r.status };
+      return await r.json();
+    } catch (e) { return { released: false, reason: e.message }; }
   }
 
   /**

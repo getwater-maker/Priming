@@ -5487,6 +5487,23 @@ async function verifyRestoredAudio(parsed, outRootGuess) {
   if (S.parsed === parsed) { storeActive(); pushDtoUpdate(); }
   return { checked: items.length, missing, relinked, unreachable };
 }
+// 💤 OmniVoice 모델 내려놓기·깨우기(v0.9.59 · 로이 2026-10-17) — 음성 단계가 끝나면 서버(api.py /release)가 RAM 약 12GB·VRAM 을 비워
+//   이어지는 로컬 이미지(Qwen 2.1 · RAM 에서 가중치를 스트리밍)가 RAM 부족으로 장당 15초 → 1~5분이 되지 않게 한다.
+//   🔑 다른 PC 가 최근 3분 안에 합성했거나 합성 중이면 서버가 거절한다(아내 PC 보호 · 판정은 서버 한 곳).
+//   다시 올리기는 provider.init()(= makeTtsManager) 의 wake 가 한다 · 옛 서버(404)·연결 실패는 아무것도 안 한다(fail-open).
+async function omniRelease(ttsMgr) {
+  try {
+    const pv = ttsMgr && ttsMgr.getProvider && ttsMgr.getProvider('omnivoice');
+    if (!pv || typeof pv.release !== 'function') return;
+    const r = await pv.release();
+    if (r && r.released) log('💤 음성 서버가 모델을 내려놓았습니다 — 이미지 단계에 메모리를 비워 줍니다(다음 음성 작업 때 다시 올림)');
+    else if (r && r.reason === 'other-client') log('💤 음성 서버 모델은 그대로 둡니다 — 다른 PC 가 최근에 음성을 만들었습니다');
+    else if (r && r.reason === 'busy') log('💤 음성 서버 모델은 그대로 둡니다 — 지금 다른 음성을 만드는 중입니다');
+  } catch (_) {}
+}
+async function omniWake(ttsMgr) {
+  try { const pv = ttsMgr && ttsMgr.getProvider && ttsMgr.getProvider('omnivoice'); if (pv && typeof pv.wake === 'function') await pv.wake(); } catch (_) {}
+}
 function missingTtsNums(project) {
   return (project.sentences || []).filter((s) => !ttsFileOk(s.ttsAudioPath)).map((s) => s.num);
 }
@@ -7962,6 +7979,7 @@ async function runMakeAllBody(opts = {}) {
     }
     ttsStageDone = true;
     _mk && _mk.end('tts');
+    if (!dry && !S.abort) await omniRelease(ttsMgr);   // 💤 음성이 끝났으면 TTS 서버가 RAM·VRAM 을 비우게(이미지가 느려지지 않게)
   };
   const imageStage = async () => {
     // 스타일이 실제로 적용되는지 눈으로 확인 가능하게 로그에 표기(스타일 누락 → 실사 이미지 사고 방지).
@@ -8161,7 +8179,7 @@ async function runMakeAllBody(opts = {}) {
         const dirs = shortsDirs(outRoot, pr.shortsNum);
         try {
           if (dry) await P.fillSilentYield({ sentences: lack }, dirs.tts, () => S.abort);
-          else await P.fillTtsList(lack, scriptVoicePreset(preset, pr), ttsMgr, dirs.tts, log, () => S.abort, speed, '보충', pushDtoUpdate);
+          else { await omniWake(ttsMgr); await P.fillTtsList(lack, scriptVoicePreset(preset, pr), ttsMgr, dirs.tts, log, () => S.abort, speed, '보충', pushDtoUpdate); await omniRelease(ttsMgr); }
         } catch (e) { log(`⚠ ${prLabel(pr)} 음성 보충 오류: ${e.message}`); }
         const left = missingTtsNums(pr).length;
         log(left ? `⛔ ${prLabel(pr)} — 보충 뒤에도 음성 없는 문장 ${left}개` : `✓ ${prLabel(pr)} — 빠진 음성 ${lack.length}개 보충 완료`);

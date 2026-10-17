@@ -63,7 +63,8 @@ fs.rmSync(tmp, { recursive: true, force: true });
 ok((MAIN.match(/missingTtsNums\(pr\)/g) || []).length >= 2, '두 경로 모두 missingTtsNums 로 검사한다');
 ok((MAIN.match(/warnMissingTts\(noTts\)/g) || []).length >= 2, '두 경로 모두 팝업으로 알린다');
 ok(/음성 없는 문장 \$\{mtts/.test(MAIN) || /음성 없는 문장/.test(MAIN), '건너뛴 이유를 로그에 남긴다');
-const gateBlocks = MAIN.split('missingTtsNums(pr)');
+const gateBlocks = MAIN.split('gateTts(outMode) ? missingTtsNums(pr)');   // 게이트 자리만(v0.9.58 보충 뒤 「남은 개수」 세기는 게이트가 아니다)
+ok(gateBlocks.length - 1 >= 2, '게이트 자리 2곳(export-vrew · ⚡만들기 4단계)');
 ok(gateBlocks.slice(1).every((b) => b.slice(0, 700).includes('continue;')), '누락이면 그 편을 continue 로 건너뛴다(.vrew 생성 안 함)');
 
 // ── ③ 문장 실패가 대본 전체를 죽이지 않는지 (pipeline 원문 대조) ──
