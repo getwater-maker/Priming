@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('api', {
   onMp3Progress: (cb) => ipcRenderer.on('mp3-progress', (_e, d) => cb(d)),   // 📊 🎵 mp3 추출 진행 패널(v0.9.31)
   onMp4Progress: (cb) => ipcRenderer.on('mp4-progress', (_e, d) => cb(d)),
   onMakeProgress: (cb) => ipcRenderer.on('make-progress', (_e, d) => cb(d)),   // 📊 롱폼 ⚡ 만들기 진행 팝업
+  onMakePending: (cb) => ipcRenderer.on('make-pending', (_e, d) => cb(d)),     // ⏳ ⚡ 를 누른 대본(줄 서는 중 포함 · 끝나면 null)
   // ⬆ 유튜브 비공개 업로드 (core/youtube-upload.js)
   ytStatus: () => ipcRenderer.invoke('yt-status'),
   ytImportClient: () => ipcRenderer.invoke('yt-import-client'),

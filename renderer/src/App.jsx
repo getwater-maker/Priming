@@ -713,6 +713,9 @@ export default function App() {
   //   사람이 제작 중 다른 대본을 고르면 이 제작이 끝날 때까지 멈춘다(followOff · 진행 팝업 「📍 제작 화면으로」로 다시) · 칸을 만지면 15초 쉰다.
   const followRef = useRef({ state: null, lastMove: 0, lastUser: 0, lastSel: null, nowEl: null });
   const [followOff, setFollowOff] = useState(false);
+  // ⏳ ⚡ 를 눌렀지만 아직 줄을 서는 대본(v0.9.58) — 이때 사람이 다른 대본을 고르면 그 선택도 「사람이 고름」으로 친다
+  //   (안 그러면 제작이 시작되는 순간 화면이 만드는 대본으로 끌려가, 보던 대본에 하던 편집이 만드는 대본에 들어간다 · test:makeview)
+  const pendingMakeRef = useRef(null);
   const [workGrp, setWorkGrp] = useState(null);   // 🧩 그룹 칸 「⚙ 작업 중」 그룹 번호(제작 따라가기)
   const [stageRun, setStageRun] = useState(null); // 📋 단계 버튼(runStageQueue)이 지금 만드는 대본·단계 {id, phase} — 작업 순서 줄 표시(v0.9.42)
   const [mp4Prog, setMp4Prog] = useState(null);
@@ -959,6 +962,7 @@ export default function App() {
     if (api.onSttProgress) api.onSttProgress((d) => { if (d) setSttProg(d); });
     if (api.onMp3Progress) api.onMp3Progress((d) => { if (d) setMp3Prog(d); });
     if (api.onMp4Progress) api.onMp4Progress((d) => { if (d) setMp4Prog(d); });
+    if (api.onMakePending) api.onMakePending((d) => { const id = (d && d.itemId) || null; const was = pendingMakeRef.current; pendingMakeRef.current = id; if (!id && was) setFollowOff(false); });   // ⏳ 제작이 끝나면 「사람이 고름」 멈춤도 푼다
     if (api.onMakeProgress) api.onMakeProgress((d) => { if (d) { if (d.operationId && followRef.current.operationId !== d.operationId) { followRef.current.operationId = d.operationId; followRef.current.state = null; followRef.current.lastMove = 0; followRef.current.lastUser = 0; } setMakeProg(d); } });
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
@@ -1185,7 +1189,7 @@ export default function App() {
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   // 👆 작업 순서 줄을 사람이 누름 — 제작 중 다른 대본을 고르면 따라가기를 멈추고, 만드는 대본을 고르면 다시 따라간다
   function pickQueueItem(id) {
-    const prodId = (makeProg && makeProg.phase === 'running' && makeProg.itemId) || (stageRun && stageRun.id) || null;
+    const prodId = (makeProg && makeProg.phase === 'running' && makeProg.itemId) || (stageRun && stageRun.id) || pendingMakeRef.current || null;
     if (prodId) setFollowOff(id !== prodId);
     return selectQueueItem(id);
   }
@@ -4032,7 +4036,7 @@ export default function App() {
     const P = makeProg, F = followRef.current;
     const clearNow = () => { if (F.nowEl) { try { F.nowEl.classList.remove('tts-now'); } catch (_) {} F.nowEl = null; } };
     const clearGrp = () => { if (F.workG != null) { F.workG = null; setWorkGrp(null); } };
-    if (!P || P.phase !== 'running') { F.state = null; F.lastSel = null; clearNow(); clearGrp(); if (followOff) setFollowOff(false); return; }
+    if (!P || P.phase !== 'running') { F.state = null; F.lastSel = null; clearNow(); clearGrp(); if (followOff && !pendingMakeRef.current) setFollowOff(false); return; }
     if (followOff || mode !== 'longform') { clearNow(); clearGrp(); return; }
     const act = queue && queue.longform && queue.longform.activeId;
     if (P.itemId && act !== P.itemId) {

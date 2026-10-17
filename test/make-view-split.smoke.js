@@ -53,12 +53,14 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
     const ob = await openOne(B_PATH);
     await openOne(C_PATH);
     const q = await win.evaluate(async () => (await window.api.selectQueueItem('__없음__', 'longform')).queue.longform);
-    const idA = q.items.find((x) => /만드는 대본/.test(x.title || x.name || x.label || JSON.stringify(x)));
+    let idA = q.items.find((x) => /만드는 대본/.test(x.title || x.name || x.label || JSON.stringify(x)));
     const idB = q.items.find((x) => /보는 대본/.test(x.title || x.name || x.label || JSON.stringify(x)));
     ok(!!oa && !!ob && q.items.length === 3 && idA && idB, '세 대본을 큐에 열었다: ' + q.items.length + '개');
 
     // 🔴 작업 줄을 C 의 TTS 로 먼저 채운다 → A 의 ⚡ 는 줄을 선다. 줄을 서는 사이 B 를 골라도 A 가 만들어져야 한다(누른 순간의 대본)
     await win.evaluate((name) => { window.__blk = window.api.ttsBuild({ shortsNum: null, dry: true, presetName: name }).then(() => 'ok', (e) => 'ERR ' + e.message); }, CH);
+    // 🔕 팝업은 로이 화면에 띄우지 않고 모아 둔다(v0.9.58 — 이 시험의 「음성 누락」 팝업이 로이 화면에 떴다)
+    await app.evaluate(({ dialog }) => { global.__boxes = []; dialog.showMessageBox = async (_w, o) => { global.__boxes.push(String((o && (o.title || o.message)) || (_w && (_w.title || _w.message)) || '')); return { response: 0 }; }; });
     // A 를 골라 ⚡ 만들기(무음 · 음성만) 시작 — 기다리지 않는다
     await win.evaluate((id) => window.api.selectQueueItem(id, 'longform'), idA.id);
     await win.evaluate(() => { window.__pushes = []; window.api.onDtoUpdate((d) => window.__pushes.push({ t: Date.now(), title: (d && d.fileTitle) || '' })); });
@@ -68,7 +70,11 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
     }, CH);
 
     // 제작 도중 B 를 고른다(큐 클릭과 같은 IPC) → B 의 문장을 고친다
-    const sel = await win.evaluate(async (id) => { const r = await window.api.selectQueueItem(id, 'longform'); return r && r.dto ? r.dto.fileTitle : null; }, idB.id);
+    //   🔴 사람처럼 작업 순서 줄을 **눌러서** 고른다(v0.9.58) — IPC 를 바로 부르면 화면 따라가기가 「사람이 고름」을 몰라,
+    //     A 제작이 시작되는 순간 화면을 A 로 되돌리고 아래 편집이 A 의 1번 문장에 들어갔다(음성 누락 팝업까지 떴다).
+    await win.locator('[data-testid="q-row"]', { hasText: '보는 대본' }).first().click();
+    await sleep(400);
+    const sel = await win.evaluate(async () => { const r = await window.api.listQueue(); const it = r.queue.longform.items.find((x) => x.active); return it ? it.title : null; });
     ok(/보는 대본/.test(sel || ''), '⚡ 를 누르자마자(줄 서는 중) B 로 전환: ' + sel);
     ok((await win.evaluate(() => window.__blk)) === 'ok', '앞선 C 작업 완료');
     await sleep(1500);   // A 제작이 문장 합성에 들어간 뒤
@@ -80,6 +86,8 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
 
     const res = await win.evaluate(() => window.__job);
     ok(res === 'ok', '🔴 A 제작이 B 편집과 겹쳐도 끝까지 성공: ' + res);
+    const boxes = await app.evaluate(() => global.__boxes || []);
+    ok(!boxes.some((t) => /음성\(TTS\) 누락/.test(t)), 'A 제작에 음성 누락 팝업이 없다(B 편집이 A 로 새지 않았다): [' + boxes.join(' | ') + ']');
     const tEnd = Date.now();
 
     // ② 화면은 B 그대로
@@ -106,6 +114,41 @@ const cleanSnaps = () => { for (const nm of [A_NAME, B_NAME, C_NAME]) { try { fs
     let snapB = '';
     try { snapB = fs.readFileSync(snapOf(B_NAME), 'utf8'); } catch (_) {}
     ok(!/에이 1번째 절/.test(snapB), 'B 작업본에 A 문장이 섞이지 않았다');
+
+    // ⑤-2 🎤 빠진 음성 보충(v0.9.58 · 로이 2026-10-17) — A 를 보며 만드는 도중 A 의 1번 문장을 고친다 → 그 음성은 1단계가 지나간 뒤라 비지만,
+    //   4단계 직전 보충이 그 문장만 다시 만들어 .vrew 가 나와야 한다(예전: 「음성(TTS) 누락」 팝업 + .vrew 없음).
+    {
+      await win.locator('[data-testid="q-row"]', { hasText: '만드는 대본' }).first().click();
+      await sleep(400);
+      try { fs.rmSync(path.join(A_OUT, 'tts-1'), { recursive: true, force: true }); } catch (_) {}
+      for (const f of (fs.existsSync(A_OUT) ? fs.readdirSync(A_OUT) : [])) if (/\.vrew$/i.test(f)) { try { fs.rmSync(path.join(A_OUT, f), { force: true }); } catch (_) {} }
+      await app.evaluate(() => { global.__boxes = []; });
+      await win.evaluate(() => { window.__logs = []; window.api.onLog((l) => window.__logs.push(String(l))); });
+      await win.evaluate((name) => {
+        window.__job2 = window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 7, aiNotice: false, outMode: 'audio', openVrew: false })
+          .then(() => 'ok', (e) => 'ERR: ' + e.message);
+      }, CH);
+      await sleep(2500);   // 1번 문장 음성이 만들어진 뒤
+      const ed2 = await win.evaluate(async () => { try { const r = await window.api.editSentences({ shortsNum: 1, groupNum: 1, sentIdx: 0, count: 1, text: '제작 중에 고친 에이 문장이다.' }); return r && !r.error ? 'ok' : JSON.stringify(r && r.error); } catch (e) { return 'ERR ' + e.message; } });
+      ok(ed2 === 'ok', '제작 도중 A(만드는 대본) 1번 문장 고치기: ' + ed2);
+      const r2 = await win.evaluate(() => window.__job2);
+      ok(r2 === 'ok', 'A 제작 성공: ' + r2);
+      const logs2 = await win.evaluate(() => window.__logs);
+      ok(logs2.some((l) => /빠진 음성 \d+개 보충 완료/.test(l)), '🎤 4단계 직전에 빠진 음성을 보충했다: ' + (logs2.find((l) => /빠진 음성/.test(l)) || '(보충 로그 없음)'));
+      const boxes2 = await app.evaluate(() => global.__boxes || []);
+      ok(!boxes2.some((t) => /음성\(TTS\) 누락/.test(t)), '보충 뒤에는 음성 누락 팝업이 없다: [' + boxes2.join(' | ') + ']');
+      const vrews = fs.existsSync(A_OUT) ? fs.readdirSync(A_OUT).filter((f) => /\.vrew$/i.test(f)) : [];
+      ok(vrews.length >= 1, '보충 뒤 .vrew 가 만들어졌다: ' + vrews.join(', '));
+      fs.writeFileSync(A_PATH, A_MD, 'utf8');   // 아래 블록을 위해 A 대본을 되돌린다
+      // 이제 A 는 「완료」라 큐 제작이 건너뛴다 → 큐에서 빼고 다시 열어 새 항목으로(예전엔 위 누락 때문에 미완료로 남아 다시 만들어졌다)
+      await win.evaluate((id) => window.api.removeQueueItem(id, 'longform'), idA.id);
+      await openOne(A_PATH);
+      const q2 = await win.evaluate(async () => (await window.api.listQueue()).queue.longform);
+      idA = q2.items.find((x) => /만드는 대본/.test(x.title || ''));
+      ok(!!idA && idA.status !== 'done', 'A 를 다시 열어 새 큐 항목으로: ' + (idA && idA.status));
+      await win.locator('[data-testid="q-row"]', { hasText: '보는 대본' }).first().click();
+      await sleep(400);
+    }
 
     // ⑥ 큐 순차 제작(run-batch) — main 은 activeId 를 바꾸지 않는다(v0.9.23). 📍 화면은 **렌더러가 따라간다**(v0.9.43 · 로이 「지금 작업 중인 대본을 보여 줘라」)
     try { fs.rmSync(path.join(A_OUT, 'tts-1'), { recursive: true, force: true }); } catch (_) {}

@@ -8149,6 +8149,25 @@ async function runMakeAllBody(opts = {}) {
       if (still.length) log(`⛔ ${prLabel(pr)} — 재생성 후에도 이상: G${still.join(', G')} (프롬프트를 바꿔 🔄 재생성하세요)`);
       pushDtoUpdate();
     }
+    // 🎤 빠진 음성 한 번 보충(v0.9.58 · 로이 2026-10-17 「1~2개 누락으로 편 전체가 멈춘다」) — 제작 중에 고친 문장·한 번 실패한 문장은
+    //   1단계가 끝난 뒤라 아무도 다시 만들지 않았다. 게이트 직전에 그 문장만 한 번 더 만들고, 그래도 빠졌을 때만 아래 게이트가 막는다(fail-closed 유지).
+    if (gateTts(outMode)) {
+      for (const pr of projects) {
+        if (S.abort) break;
+        const lack = (pr.sentences || []).filter((s) => !ttsFileOk(s.ttsAudioPath));
+        if (!lack.length) continue;
+        log(`🎤 ${prLabel(pr)} — 빠진 음성 ${lack.length}개(컷 ${lack.slice(0, 8).map((s) => s.num).join(', ')}${lack.length > 8 ? ' …' : ''}) 다시 만듭니다`);
+        for (const s of lack) { s.ttsAudioPath = null; s.ttsDurationSec = 0; }   // 헤더만 남은 파일은 fillTts 가 「있음」으로 건너뛴다
+        const dirs = shortsDirs(outRoot, pr.shortsNum);
+        try {
+          if (dry) await P.fillSilentYield({ sentences: lack }, dirs.tts, () => S.abort);
+          else await P.fillTtsList(lack, scriptVoicePreset(preset, pr), ttsMgr, dirs.tts, log, () => S.abort, speed, '보충', pushDtoUpdate);
+        } catch (e) { log(`⚠ ${prLabel(pr)} 음성 보충 오류: ${e.message}`); }
+        const left = missingTtsNums(pr).length;
+        log(left ? `⛔ ${prLabel(pr)} — 보충 뒤에도 음성 없는 문장 ${left}개` : `✓ ${prLabel(pr)} — 빠진 음성 ${lack.length}개 보충 완료`);
+        pushDtoUpdate();
+      }
+    }
     const incomplete = [];
     const noTts = [];
     for (const pr of projects) {
@@ -8254,20 +8273,32 @@ async function runMakeAllBody(opts = {}) {
 
 // 🎬 만들 대본 = ⚡ 를 **누른 순간**의 활성 대본(v0.9.24) — 작업 줄(enqueueTtsJob)에서 기다리는 사이 다른 대본을 고르면, 시작할 때 읽던 옛 방식은
 //   고른 대본을 만들었다(test:makeview 가 잡음).
-ipcMain.handle('make-all', (_e, args = {}) => { const _it = activeItem(); return enqueueTtsJob('전체 만들기', async () => {
+// ⏳ ⚡ 를 누른 대본을 화면에 알린다(v0.9.58) — 줄을 서는 동안 사람이 다른 대본을 고르면 화면 따라가기가 그 선택을 「사람이 고름」으로 친다
+//   (안 그러면 제작이 시작되는 순간 화면이 만드는 대본으로 끌려가, 보던 대본에 하던 편집이 만드는 대본에 들어간다 · test:makeview).
+let _pendingMake = null;
+function _markMakePending(id) {
+  _pendingMake = id || null;
+  try { if (win && !win.isDestroyed()) win.webContents.send('make-pending', { itemId: _pendingMake }); } catch (_) {}
+}
+function _withMakePending(id, p) {
+  _markMakePending(id);
+  const clear = () => { if (_pendingMake === (id || null)) _markMakePending(null); };
+  return p.then((r) => { clear(); return r; }, (e) => { clear(); throw e; });
+}
+ipcMain.handle('make-all', (_e, args = {}) => { const _it = activeItem(); return _withMakePending(_it && _it.id, enqueueTtsJob('전체 만들기', async () => {
   _mp4DupAll = null;   // 단건 제작은 항상 새로 묻는다
   _mkQueuePos = null;  // 📊 단건 — 진행 팝업에 큐 순번을 달지 않는다
   // 📂 openVrew = 헤더 「완성 후 열기」(기본 연다 · false 면 .vrew·MP4 를 열지 않는다 — 자는 동안 MP4 재생 방지)
   // 🎬 제작 칸에서 — 만드는 동안 다른 대본을 열어 고쳐도 이 제작은 이 대본만 본다(v0.9.23)
   await makeRun(_it, () => runMakeAllCore({ ...args, openVrew: args.openVrew !== false }));
   return S.parsed ? P.toDTO(S.parsed) : null;   // 응답 = 지금 화면이 보는 대본(제작 대본이 아닐 수 있다)
-}); });
+})); });
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
 //   중단·실패한 항목이 마무리될 때까지 다음 새 대본을 시작하지 않는다.
 //   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
 //   탐색기(출력폴더)는 어느 경우에도 자동으로 열지 않는다 — 필요하면 헤더 '출력폴더' 버튼.
-ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작', async () => {
+ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(args.plan) && args.plan[0] && args.plan[0].mode === 'longform' ? args.plan[0].id : null, enqueueTtsJob('큐 순차 제작', async () => {
   const plan = require('./core/queue-resume').resumePlan(Array.isArray(args.plan) ? args.plan : [], S.modes.longform.items);
   const common = args.common || {};
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
@@ -8361,7 +8392,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: !!S.abort, failed: failN, stoppedEarly: stoppedLeft > 0, remaining: _batchRemaining(plan, 0, S.modes.longform.items) };
-}));
+})));
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
 // 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
