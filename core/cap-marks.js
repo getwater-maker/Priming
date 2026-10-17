@@ -150,7 +150,7 @@ async function run(texts, o = {}) {
       if (o.isAborted && o.isAborted()) { stop = true; break; }
       const batch = batches[next++];
       const input = batch.map((t, i) => `${i + 1}\t${t}`).join('\n');
-      const r = await SC.runClaude(input, { system: o.system || SYSTEM, timeoutMs: TIMEOUT_MS, tmpPrefix: 'priming-capmarks-', exe: o.exe });
+      const r = await SC.runClaude(input, { use: 'capmarks', system: o.system || SYSTEM, timeoutMs: TIMEOUT_MS, tmpPrefix: 'priming-capmarks-', exe: o.exe });
       if (!r.ok) {
         failed += batch.length; error = r.error;
         if (/claude 가 없습니다|로그인/.test(r.error || '')) stop = true;   // 이 PC 에서 더 해도 소용없다

@@ -128,7 +128,7 @@ async function runClaude(input, o = {}) {
   // 🤖 v0.7.94 — Claude API 키가 있으면 API 먼저(아내 PC 처럼 Claude Code 가 없는 PC 도 된다) · 실패하면 claude CLI(구독)로 한 번 더
   //   테스트가 가짜 claude(exe·PM_CLAUDE_EXE)를 주면 API 를 건너뛴다.
   if (!o.exe && !process.env.PM_CLAUDE_EXE && CA.available()) {
-    const a = await CA.ask({ system: o.system || SYSTEM, text: String(input), timeoutMs: Math.max(o.timeoutMs || TIMEOUT_MS, 120000) });   // API 는 생각할 시간이 더 든다
+    const a = await CA.ask({ use: o.use || 'spell', system: o.system || SYSTEM, text: String(input), timeoutMs: Math.max(o.timeoutMs || TIMEOUT_MS, 120000) });   // API 는 생각할 시간이 더 든다
     if (a.ok) {
       // CLI 와 같은 JSON 모양으로 감싸 같은 읽기 함수를 탄다(맞춤법·끊어 읽기 파서 한 벌)
       const read = o.read || readClaudeJson;

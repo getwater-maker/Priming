@@ -90,7 +90,7 @@ function wav(samples, amp) {
     const silentLines = PL.slice(PL.indexOf('function fillSilent('), PL.indexOf('function fillSilent(') + 400);
     ok(ttsBare.filter((l) => !silentLines.includes(l.trim())).length === 0, 'TTS 저장 자리(캐시 복사·배속·정속·폴백) 전부 claimPath');
     const nClaim = (M.match(/P\.claimPath\(/g) || []).length;
-    ok(nClaim >= 10, `main.js claimPath 호출 ${nClaim}곳(배치 수거·Flow 이미지·Flow 영상·나노바나나·ComfyUI 이미지·Grok API·ComfyUI 영상·Genspark 영상·Flow 매핑·캐시 프리필)`);
+    ok(nClaim >= 8, `main.js claimPath 호출 ${nClaim}곳(배치 수거·나노바나나·ComfyUI 이미지·Grok API·ComfyUI 영상·Genspark 영상·AI 이미지·AI 영상·캐시 프리필)`);
     ok((M.match(/!_usedByOther\(pr, g, x\)/g) || []).length === 3, '번호로 다시 잇기 3곳(그림·영상 relink · autoRelinkVideos)이 남의 파일을 집지 않는다');
     ok(/if \(_usedByOther\(project, g, out\)\)/.test(M), '업스케일본(NN_1080.mp4)도 이웃 것 위에 쓰지 않는다');
   }
@@ -113,28 +113,7 @@ function wav(samples, amp) {
     fs.rmSync(d, { recursive: true, force: true });
   }
 
-  console.log('\n[5] 📥 Flow 받기 폴더 — %TEMP% 가 아니라 대본(.vrew) 폴더 안 · 못 옮긴 파일은 남긴다');
-  {
-    const M = read('main.js'), FE = read('flow-engine.js');
-    const body = (name) => { const i = M.indexOf('async function ' + name + '('); return M.slice(i, M.indexOf('\n}\n', i)); };
-    ok(!/os\.tmpdir\(\)/.test(body('runFlowImages')) && /_flowStageDir\(imagesDir,/.test(body('runFlowImages')), 'Flow 이미지 — 임시폴더 안 씀');
-    ok(!/os\.tmpdir\(\)/.test(body('runFlowVideos')) && /_flowStageDir\(mediaDir,/.test(body('runFlowVideos')), 'Flow 영상 — 임시폴더 안 씀');
-    ok(!/rmSync\(workDir/.test(body('runFlowImages') + body('runFlowVideos')), '받기 폴더를 무조건 지우지 않는다(_flowUnstage 만)');
-    ok(/this\._dlDir = \(config && config\.outputDir\)/.test(FE) && (FE.match(/path\.join\(this\._dlDir \|\| os\.tmpdir\(\)/g) || []).length === 2, 'Flow 엔진 내부 다운로드도 받기 폴더에');
-    const grab = (name) => { const i = M.indexOf('function ' + name + '('); const j = M.indexOf('\n}\n', i) + 3; return M.slice(i, j); };
-    const ctx = { fs, path, console }; vm.createContext(ctx);
-    vm.runInContext(grab('_flowStageDir') + grab('_flowUnstage') + '\nthis.api = { _flowStageDir, _flowUnstage };', ctx);
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-stage-'));
-    const media = path.join(root, 'media-1'); fs.mkdirSync(media);
-    const w = ctx.api._flowStageDir(media, 'flow_a_1');
-    ok(path.dirname(path.dirname(w)) === root && fs.existsSync(path.join(w, 'images')), '받기 폴더 = <대본 폴더>/_받기/<실행>/images (media-1 옆)');
-    fs.writeFileSync(path.join(w, 'images', '01_a.png'), 'x'); fs.writeFileSync(path.join(w, 'images', '02_b.png'), 'x');
-    const logs = [];
-    ok(ctx.api._flowUnstage(w, path.join(w, 'images'), /\.png$/i, 1, (m) => logs.push(m)) === false && fs.existsSync(path.join(w, 'images', '02_b.png')), '🔑 2장 받아 1장만 옮겼으면 받기 폴더를 **남긴다**(크레딧 쓴 결과물)');
-    ok(/지우지 않고 남겨 둡니다/.test(logs.join('')), '어디 남겼는지 로그로 알린다');
-    ok(ctx.api._flowUnstage(w, path.join(w, 'images'), /\.png$/i, 2, null) === true && !fs.existsSync(path.join(root, '_받기')), '다 옮겼으면 받기 폴더(빈 _받기 까지) 치운다');
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  // [5] 📥 Flow 받기 폴더 — Flow 는 v0.9.67 에 지웠다(로이 2026-10-17)
 
   os.homedir = realHomedir;
   try { fs.rmSync(home, { recursive: true, force: true }); } catch {}

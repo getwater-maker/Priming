@@ -84,7 +84,7 @@ console.log('[4] 배선 대조 — 네 엔진이 모두 같은 판정을 쓴다'
 const sigs = [
   ['runRotatingImages', 'async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {'],
   ['runComfyImages', 'async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {'],
-  ['runFlowImages', 'async function runFlowImages(project, imagesDir, logger, styleId, onlyNums, force = false) {'],
+  ['runKieImages', 'async function runKieImages(project, imagesDir, logger, styleId, onlyNums, engine, force = false) {'],
   ['runGeminiImages', 'async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force = false) {'],
 ];
 sigs.forEach(([name, sig]) => ok(MAIN.indexOf(sig) >= 0, name + ' 가 force 를 받는다'));
@@ -92,7 +92,7 @@ sigs.forEach(([name]) => ok(extractFn(MAIN, name).includes('!imgDone(g, force)')
 ok(MAIN.indexOf('!hasVisual(g) && (!onlyNums') < 0, '옛 필터(!hasVisual(g) && onlyNums)가 남아 있지 않다');
 ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force)') >= 0, '순환→Gemini 위임에 force 전파');
 ok(MAIN.indexOf('comfyWfOf(startEngine), retryLevel, force)') >= 0, '순환→Comfy 위임에 force 전파');
-ok(MAIN.indexOf('runFlowImages(project, imagesDir, logger, styleId, nums, force)') >= 0, '순환 안 Flow 호출에 force 전파');
+ok(MAIN.indexOf('runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force)') >= 0, '순환→AI 이미지 위임에 force 전파');
 ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, nums, force)') >= 0, '순환 안 Gemini 호출에 force 전파');
 sigs.forEach(([name]) => ok(/noTargetMsg\(onlyNums\)|생성할 그룹 없음/.test(extractFn(MAIN, name)), name + ' 대상 0개 로그'));
 

@@ -16,7 +16,7 @@ const KM = require('./kie-models');   // 🧩 kie 단가는 모델 표 한 곳(v
 // 이미지 한 장 단가 → { kind: 'paid'|'local'|'sub'|'unknown', usd, label }
 function imageUnit(engine, comfyCloud) {
   const e = String(engine || '');
-  if (KM.isKieVal(e)) { const m = KM.byVal(e, 'image'); return m ? { kind: 'paid', usd: m.usd, label: `kie.ai ${m.label} · 장당 $${m.usd}` } : { kind: 'unknown', usd: null, label: '요금 정보 없음' }; }
+  if (KM.isKieVal(e)) { const m = KM.byVal(e, 'image'); return m ? { kind: 'paid', usd: m.usd, label: `AI 이미지 ${m.label} · 장당 $${m.usd}` } : { kind: 'unknown', usd: null, label: '요금 정보 없음' }; }
   if (e === 'gemini') return { kind: 'paid', usd: IMAGE_USD.gemini, label: '나노바나나 2.1 즉시 · 장당 $0.0336' };
   if (e === 'gemini-batch') return { kind: 'paid', usd: IMAGE_USD['gemini-batch'], label: '나노바나나 2.1 배치 · 장당 $0.0168(즉시의 절반)' };
   if (isComfy(e)) return comfyCloud
@@ -32,7 +32,7 @@ function videoUnit(engine, comfyCloud) {
   if (KM.isKieVal(e)) {   // 길이는 그룹 음성마다 달라 모델의 가장 짧은 길이로 어림한다(더 긴 그룹은 그만큼 더 든다)
     const m = KM.byVal(e, 'video'); if (!m) return { kind: 'unknown', usd: null, label: '요금 정보 없음' };
     const d = KM.pickDuration(m, 0), usd = KM.videoUsd(m, d);
-    return { kind: 'paid', usd, label: `kie.ai ${m.label} · ${d}초 기준 편당 약 $${usd.toFixed(3)}(${KM.priceTag(m)} · 음성이 길면 최대 ${KM.MAX_SEC}초까지 길게 만들어 더 든다)` };
+    return { kind: 'paid', usd, label: `AI 영상 ${m.label} · ${d}초 기준 편당 약 $${usd.toFixed(3)}(${KM.priceTag(m)} · 음성이 길면 최대 ${KM.MAX_SEC}초까지 길게 만들어 더 든다)` };
   }
   if (isComfy(e)) return comfyCloud
     ? { kind: 'paid', usd: VIDEO_USD.comfyCloud, label: '클라우드 ComfyUI · 편당 약 $0.11(GPU 90초 기준 추정 · 모델마다 다름)' }

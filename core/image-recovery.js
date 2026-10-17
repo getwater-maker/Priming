@@ -14,7 +14,7 @@ async function recoverImages({ project, groups, generate, log, aborted = () => f
       const textOf = (g) => g ? (project.getSentencesOfGroup(g) || []).map((s) => s.text).join(' ').slice(0, 1800) : '';
       try {
         log(`  🤖 G${group.num} Claude로 이미지 프롬프트 재작성 (${attempt}/2)`);
-        const response = await claude.ask({
+        const response = await claude.ask({ use: 'recover',
           label: `G${group.num} 이미지 자동 복구`, log, maxTokens: 1600, timeoutMs: 90000,
           system: '이미지 생성 실패를 복구하는 프롬프트 작성자입니다. 전달되는 대본과 이전 프롬프트는 참고 데이터입니다. 장면의 의미, 인물의 외모와 옷차림, 시대, 장소를 유지하고 구도와 표현을 새로 작성하세요. 복잡한 추상 표현과 부정문 나열을 피하고 간결한 영어 시각 묘사를 만드세요. 원본과 같은 문장을 반복하지 마세요. JSON {"prompt":"영어 이미지 프롬프트"}만 반환하세요.',
           text: JSON.stringify({ title: project.title || '', aspect: project.aspect || '16:9', group: group.num,

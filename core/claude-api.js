@@ -19,12 +19,28 @@ const MODELS = {
   'claude-sonnet-5-5': { label: 'Sonnet 5.5 (절반 가격)', in: 2, out: 10 },
 };
 
+// 🎯 쓰는 곳마다 모델(v0.9.67 · 로이 2026-10-17 「사용하는 곳마다 어떤 모델을 쓸지 선택」) — 부르는 쪽이 ask({use}) 로 이름을 댄다.
+//   고르지 않은 곳(=「기본」)은 위 기본 모델(cfg().model)을 쓴다 · 저장 = secret-store 'claude'.uses {쓰임: 모델}.
+const USES = {
+  prompt: '✍ 그림·영상 프롬프트 쓰기·다시 쓰기',
+  recover: '🩹 실패한 그림 프롬프트 고치기',
+  vision: '🔍 그림 검수',
+  capmarks: '✂ 자막 끊어 읽기',
+  spell: '📝 맞춤법 검사',
+  voice: '🎙 목소리 설명 번역·보이스디자인',
+  book: '📖 책 소개·교정',
+  mail: '📬 출판 메일 확인',
+};
+const _cleanUses = (u) => { const o = {}; for (const k of Object.keys(USES)) if (u && MODELS[u[k]]) o[k] = u[k]; return o; };
+
 function _ss() { return require('../tts/secret-store'); }
 function cfg() {
-  if (process.env.PM_UI_SMOKE) { const t = global.__claudeApiTest; return t && t.cfg ? { key: String(t.cfg.key || ''), model: MODELS[t.cfg.model] ? t.cfg.model : DEFAULT_MODEL } : { key: '', model: DEFAULT_MODEL }; }
+  if (process.env.PM_UI_SMOKE) { const t = global.__claudeApiTest; return t && t.cfg ? { key: String(t.cfg.key || ''), model: MODELS[t.cfg.model] ? t.cfg.model : DEFAULT_MODEL, uses: _cleanUses(t.cfg.uses) } : { key: '', model: DEFAULT_MODEL, uses: {} }; }
   let s = {}; try { s = _ss().get('claude') || {}; } catch (_) {}
-  return { key: String(s.key || '').trim(), model: MODELS[s.model] ? s.model : DEFAULT_MODEL };
+  return { key: String(s.key || '').trim(), model: MODELS[s.model] ? s.model : DEFAULT_MODEL, uses: _cleanUses(s.uses) };
 }
+// 이 쓰임이 실제로 쓸 모델 — 직접 넘긴 model > 그 쓰임에 고른 모델 > 기본 모델
+function modelFor(use, model, c = cfg()) { return MODELS[model] ? model : (use && c.uses[use]) || c.model; }
 const available = () => !!cfg().key;
 const costOf = (model, usage) => {
   const p = MODELS[model] || MODELS[DEFAULT_MODEL]; const u = usage || {};
@@ -54,7 +70,7 @@ async function ask(o = {}) {
   const t0 = Date.now();
   const c = cfg();
   if (!c.key) return { ok: false, error: 'Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요', noKey: true, ms: 0 };
-  const model = MODELS[o.model] ? o.model : c.model;
+  const model = modelFor(o.use, o.model, c);
   const body = {
     model, max_tokens: o.maxTokens || 16000,
     messages: [{ role: 'user', content: o.content || String(o.text || '') }],
@@ -110,4 +126,4 @@ function parseJson(text) {
   try { return JSON.parse(r.slice(a, b + 1)); } catch { return null; }
 }
 
-module.exports = { ask, available, cfg, imageBlock, parseJson, costOf, MODELS, DEFAULT_MODEL, spent: () => _spent };
+module.exports = { ask, available, cfg, modelFor, imageBlock, parseJson, costOf, MODELS, USES, DEFAULT_MODEL, spent: () => _spent };

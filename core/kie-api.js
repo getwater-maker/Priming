@@ -24,11 +24,11 @@ const scrub = (s, key) => String(s || '').split(key || '\u0000').join('***').rep
 // 몸의 code → 사람 말 · fatal = 다음 그룹도 똑같이 실패할 이유(키·크레딧) → 남은 것을 멈춘다
 function explain(code, msg) {
   const m = String(msg || '');
-  if (code === 401) return { error: `kie 키가 거부됐습니다(401) — ⚙ 설정 → 🔑 API 키에서 확인하세요`, fatal: 'kie 키 오류' };
-  if (code === 402) return { error: `kie 크레딧이 부족합니다(402) — kie.ai 에서 충전하세요`, fatal: 'kie 크레딧 부족' };
-  if (code === 429) return { error: `kie 요청 속도 제한(429)${m ? ' · ' + m : ''}`, retry: true };
-  if (code === 455 || code === 500 || code === 501 || code === 503) return { error: `kie 서버 문제(${code})${m ? ' · ' + m : ''}`, retry: true };
-  return { error: `kie 오류(${code})${m ? ' · ' + m : ''}` };
+  if (code === 401) return { error: `생성 서비스 인증이 거부됐습니다(401)`, fatal: '생성 서비스 인증 오류' };
+  if (code === 402) return { error: `생성 크레딧이 부족합니다(402)`, fatal: '생성 크레딧 부족' };
+  if (code === 429) return { error: `생성 서비스 요청 속도 제한(429)${m ? ' · ' + m : ''}`, retry: true };
+  if (code === 455 || code === 500 || code === 501 || code === 503) return { error: `생성 서버 문제(${code})${m ? ' · ' + m : ''}`, retry: true };
+  return { error: `생성 서비스 오류(${code})${m ? ' · ' + m : ''}` };
 }
 
 async function call(method, url, body, { key, timeoutMs = 60000 } = {}) {
@@ -127,7 +127,7 @@ function _imgExt(url) { const m = /\.(png|jpe?g|webp)(?:\?|$)/i.exec(String(url 
 /** 글 → 그림 파일 { ok, path } | { ok:false, error, fatal? } */
 async function generateImageToFile({ model, prompt, aspect, outPathNoExt, abortSignal }) {
   const KM = require('./kie-models');
-  const key = kieKey(); if (!key) return { ok: false, error: 'kie.ai API 키 없음', fatal: 'kie 키 없음' };
+  const key = kieKey(); if (!key) return { ok: false, error: '생성 서비스 키 없음', fatal: '생성 서비스 키 없음' };
   try {
     const input = KM.buildImageInput(model, { prompt, aspect });
     const c = await createTask(model.model, input, key);
@@ -143,7 +143,7 @@ async function generateImageToFile({ model, prompt, aspect, outPathNoExt, abortS
 /** 그림 → 영상 파일 { ok, path } | { ok:false, error, fatal? } */
 async function generateVideoToFile({ model, imagePath, prompt, aspect, durationSec, outputPath, abortSignal, logger }) {
   const KM = require('./kie-models');
-  const key = kieKey(); if (!key) return { ok: false, error: 'kie.ai API 키 없음', fatal: 'kie 키 없음' };
+  const key = kieKey(); if (!key) return { ok: false, error: '생성 서비스 키 없음', fatal: '생성 서비스 키 없음' };
   try {
     const up = await uploadFile(imagePath, key);
     if (!up.ok) return up;

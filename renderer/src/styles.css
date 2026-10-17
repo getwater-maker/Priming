@@ -699,6 +699,8 @@ main.pane2{min-width:0}
 .ribbon .rb-ic{font-size:19px;line-height:1}
 .ribbon .rb-t{font-size:11.5px;font-weight:600;white-space:nowrap}
 .ribbon .hgroup .glabel{writing-mode:horizontal-tb;align-self:center}
+/* 📐 메뉴를 바꿔도 첫 칸(대본 열기 · 이미지 도구 · 비디오 도구)이 같은 자리에 오게 — 줄 첫 이름표 폭을 고정한다(v0.9.67 · 로이 2026-10-17) */
+.ribbon > .hgroup:first-child > .glabel{width:96px;box-sizing:border-box;text-align:center;flex:0 0 96px}
 
 /* ── 🧩 v0.5.44 Vrew 클립 모양 — 왼쪽 번호 칸 | 1행 화자·시각·칩 / 2행 🗨 자막 + 가 ─────────── */
 .sent.clip{display:grid;grid-template-columns:44px 1fr;padding:0;overflow:hidden}

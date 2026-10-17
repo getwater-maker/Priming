@@ -186,7 +186,7 @@ function applyPromptsToProjects(projects, text, opts = {}) {
 const LLM_TEXT_MODELS = { claude: 'claude-opus-5-5' };
 async function callLlmTextApi(provider, key, promptText, opts = {}) {
   const CA = require('./claude-api');
-  const r = await CA.ask({ text: promptText, model: opts.model, maxTokens: opts.maxTokens || 16000, log: opts.log, label: opts.label });
+  const r = await CA.ask({ use: opts.use || 'prompt', text: promptText, model: opts.model, maxTokens: opts.maxTokens || 16000, log: opts.log, label: opts.label });
   if (!r.ok) throw new Error(r.error);
   return r.text;
 }

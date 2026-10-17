@@ -35,7 +35,7 @@
   - 매니페스트 제외: 폴더 **이름**이 `scripts`·`.venv`·`qwen-design` 등인 곳 전체, `assets/fonts/book/`, **git 무시 파일**(`git check-ignore`). 🔴 배포할 파이썬은 `scripts/` 라는 이름 폴더에 두지 말 것(조용히 빠진다). 해시는 LF 정규화 기준.
   - 🔴 **`assets/fonts/book/` 는 매니페스트에서 제외되지만 `NotoSerifKR-`·`HanjaSerif-`·`CrimsonText-`(영어 책 본문 · 로이 승인 2026-10-13) 로 시작하는 글꼴은 예외로 배포한다**(안 그러면 설치본에 글꼴 파일이 없어 한자가 고딕으로 튄다 · R15). 새 동봉 글꼴은 `BUNDLED_FACES` 에 올리고 이 예외 접두사도 함께 본다(`test:book` font-ship).
   - 설치본 버전 확인: `%LOCALAPPDATA%\Programs\priming\resources\app\package.json`. 발행 직후 「안 된다」면 먼저 이걸 본다(CDN 이 옛 매니페스트를 준 적 있음 — 한 번 더 재시작).
-- 로그: `~/.shots-maker/logs/YYYY-MM-DD.log`(KST · 7일 보관 · 화면 줄은 `[화면]` 접두). 로그창 「📁 파일」. 엔진(Flow 등) 로그도 파일로 후킹돼 있다.
+- 로그: `~/.shots-maker/logs/YYYY-MM-DD.log`(KST · 7일 보관 · 화면 줄은 `[화면]` 접두). 로그창 「📁 파일」. 엔진(Genspark 등) 로그도 파일로 후킹돼 있다.
 
 - 📘 **기능을 고치면 「📘 대본 작성 기준」(`docs/대본-작성-가이드.md`)도 같은 커밋에서 고친다 — 발행 세트의 일부다**(2026-10-12 로이 지정). 대상 = 대본을 쓰는 사람·AI 가 알아야 하는 변화 전부: 대본 문법·파서(문장·문단·장면 나누기) · 음성으로 읽는 법(숫자·기호·발음) · 자막 · 그림/영상 프롬프트 · 화면·정보 카드 · 화자 · 챕터 · 새 표시 줄. 고친 절 + 머리의 「마지막 정리: 날짜 (버전)」 줄을 함께 바꾼다. 「쓰지 말라」던 제약이 풀렸으면 그 경고부터 지운다(v0.8.10 소수점 경고가 그 예). **영향이 없으면 작업노트 그 절에 「📘 가이드 영향 없음」 한 줄**을 남긴다(빠뜨린 것과 구분되게).
 - 🔴 **문서(CLAUDE.md·작업노트·docs)만 고친 커밋도 푸시 전에 `npm run update:manifest` 로 매니페스트를 다시 만들어 같은 커밋에 넣는다**(매니페스트에 든 파일의 해시가 서버와 어긋나면 업데이터가 「파일 1개를 못받았습니다」로 전 PC 업데이트를 막는다 · 2026-10-07 작업노트 문서만 고친 커밋 사고) — 푸시 뒤 `update:verify --all` 로 확인.
@@ -51,8 +51,8 @@
 | 대본 편집·보기 | `core/script-edit.js`(문장 범위 치환) · `core/script-reader.js`(대본 보기·A4 PDF) · `core/group-merge.js` · `core/visual-span.js`(그림 범위·레이어) · `core/visual-look.js` · `core/overlay-layers.js`(삽입·로고) | [대본편집](docs/규칙/대본편집.md) |
 | 자막 | `core/caption-splitter.js`(🔑 줄 나누기 **유일한 구현** — 렌더러 `renderer/src/lib/captions.js` 는 re-export) · `core/caption-format.js`(서식 모델) · `core/caption-ass.js` · `core/caption-anim*.js` · `core/font-store.js` | [자막](docs/규칙/자막.md) |
 | TTS | `tts/tts-manager.js`(싱글톤) · `tts/providers/omnivoice-provider.js` · `tts/text-pronouncer.js`(🔑 `processForTTS` = TTS 텍스트 가공 유일한 문) · `tts/preset-store.js`(채널) · `core/tts-cache.js` · `core/audio-normalize.js` · `tts/asr-client.js`(STT) | [TTS](docs/규칙/TTS.md) · 채널·목소리 분류 → [채널설정](docs/규칙/채널설정.md) · ja/vi → [다국어](docs/규칙/다국어.md) |
-| 이미지 | `core/comfy-image.js` · `core/comfy-models.js`(모델 자동 대체) · `core/comfy-perf.js` · `genspark-engine.js` · `flow-engine.js`(⚠ CRLF 파일) · `core/image-rotation.js` · `core/style-store.js` · `core/media-cache.js` | Gemini → [나노바나나](docs/규칙/나노바나나.md) · 스타일 → [채널설정](docs/규칙/채널설정.md) |
-| 비디오 | `core/comfy-video.js` · `grok-engine.js` · `core/grok-api.js` · `flow-engine.js`(Veo) · `genspark-engine.js`(비디오) · `core/video-fit.js` · `core/upscaler.js` | [비디오엔진](docs/규칙/비디오엔진.md) |
+| 이미지 | `core/comfy-image.js` · `core/comfy-models.js`(모델 자동 대체) · `core/comfy-perf.js` · `core/kie-models.js`·`core/kie-api.js`(☁ AI 이미지·영상) · `genspark-engine.js` · `core/image-rotation.js` · `core/style-store.js` · `core/media-cache.js` | Gemini → [나노바나나](docs/규칙/나노바나나.md) · 스타일 → [채널설정](docs/규칙/채널설정.md) |
+| 비디오 | `core/comfy-video.js` · `grok-engine.js` · `core/grok-api.js` · `genspark-engine.js`(비디오) · `core/video-fit.js` · `core/upscaler.js` | [비디오엔진](docs/규칙/비디오엔진.md) |
 | 출력 | `vrew/vrew-builder.js`(.vrew) · `core/vrew-render.js`(.vrew → MP4) · `core/whiteboard-*.js` + `whiteboard/`(벤더링) · `core/youtube-upload.js`·`yt-packaging.js`·`yt-chapters.js` | youtube-*·yt-* → [유튜브업로드](docs/규칙/유튜브업로드.md) |
 | 리모션 | `core/tsv-tts.js` · `core/tsv-images.js` · `core/audio-trim.js` · `renderer/src/RemotionView.jsx` | [출판](docs/규칙/출판.md) |
 | 출판 | `core/book/*`(parser·html-builder·pdf-builder·epub-builder·spine-calc·isbn-barcode) · `renderer/src/BookView.jsx` | [출판](docs/규칙/출판.md) |
@@ -84,7 +84,7 @@
 ## 6. 만들기 파이프라인 규칙
 
 - 「⚡ 만들기」 = `runMakeAllCore`: 1 TTS → 2 이미지 → 3 비디오 → 4 출력(.vrew / 유튜브 MP4 / 화이트보드). 완성 버튼은 이것 하나(💾 .vrew·MP4 굽기·✏ 렌더 버튼은 없앴다 — IPC 는 남김).
-- **병렬**: 로컬 GPU 를 쓰는 작업끼리는 겹치지 않는다. 레인 `_LANES = {tts, image, localGpu, upscale, flowBrowser, gensparkBrowser, whiteboard}` · `_runOnLanes`. TTS 는 항상 `localGpu`, 로컬 ComfyUI 이미지·비디오도 `localGpu`, 클라우드는 안 잡는다. 🔴 make-all 내부에서 `enqueue*Job` 을 다시 부르면 자기 자신을 기다려 교착 — 래퍼는 수동 버튼 경로에만. 남의 PC 가 쓰는 GPU 는 `awaitForeignComfyIdle`·`awaitForeignTtsIdle`(fail-open · 상한 10분).
+- **병렬**: 로컬 GPU 를 쓰는 작업끼리는 겹치지 않는다. 레인 `_LANES = {tts, image, localGpu, upscale, gensparkBrowser, whiteboard}` · `_runOnLanes`. TTS 는 항상 `localGpu`, 로컬 ComfyUI 이미지·비디오도 `localGpu`, 클라우드는 안 잡는다. 🔴 make-all 내부에서 `enqueue*Job` 을 다시 부르면 자기 자신을 기다려 교착 — 래퍼는 수동 버튼 경로에만. 남의 PC 가 쓰는 GPU 는 `awaitForeignComfyIdle`·`awaitForeignTtsIdle`(fail-open · 상한 10분).
 - **게이트(빠진 채로 내보내지 않는다)**: `missingTtsNums`(파일 실재 + 크기 — 헤더만 44바이트 WAV 도 누락) · `missingVisualGroups`(imagePrompt 있는데 그림·영상 없음 · `imageStale` 포함) · `sweepBadVisuals`(검정·노이즈·색깨짐 + **그림 비율이 프로젝트 비율과 다름** 재검사, `.vrew` 직전 — 틀린 비율은 비우고 재생성). 막히면 팝업으로 어느 그룹인지 알린다. 두 경로(export-vrew · make-all 4단계) 모두. 🎤 **make-all 4단계는 게이트 직전에 빠진 음성만 한 번 보충**(v0.9.58 — 제작 중에 고친 문장 · 그래도 빠지면 막는다 · `test:makeview`).
 - **출력 방식** `outMode`: 전체 / 🎤 음성만(`withoutVisuals` — 빌드 중에만 그림 참조를 비움, 파일은 안 지움) / 🖼 화면만(`withSilentTts` — 무음은 임시폴더, tts-N 오염 금지). 판정은 `gateVisual`/`gateTts`/`buildForMode` 한 곳.
 - **큐(여러 대본) 설정 우선순위** — 헤더(공통)가 이기는 것과 항목이 이기는 것이 다르다:
@@ -124,9 +124,11 @@
 
 ### 이미지
 - 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(첫 항목 = 🖥 Qwen 2.1 로컬 / ☁ MiniMax R2V · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
+- 🙈 **사용자 화면에 서비스 이름(kie)·달러 가격을 보이지 않는다**(로이 2026-10-17 — 판매용) — 목록 묶음은 「AI 이미지」·「AI 영상」, 항목은 `☁ 모델 이름` · 로그·오류도 「AI 이미지/영상」·「생성 서비스」 · kie 키 칸과 키 안내는 관리자(`owner`/`isOwner()`)에게만 · 차감 표시는 포인트 기준이 정해지면 그때(`test:ribbonlead`).
+- 📐 **리본 첫 칸(📂 열기 · 이미지 도구 · 비디오 도구)은 메뉴를 바꿔도 같은 x** — 줄 첫 이름표 폭 고정(styles.css `.ribbon > .hgroup:first-child > .glabel`) · 도구 선택은 이름표 바로 뒤 · `test:ribbonlead`.
 - 🆕 **Qwen-Image 2.1 Turbo (☁ 클라우드 · 🖥 로컬 둘 다 · v0.9.65)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
 - 👤 **Qwen 인물 참조 = 얼굴 시트(`characters/<이름>.face.png`) + `char-refs.refGate` 를 통과한 장면만**(v0.7.84 · 샷 크기 낱말 close-up·medium 이 없거나 원경·군중·3명+·18세 미만·카드와 10살+ 차이면 안 붙인다 — ⛔ 지시문만으로 풀려고 게이트를 넓히지 말 것: P0 에서 안 막혔다 · 설계안 `docs/인물일관성-Qwen-설계.md`).
-- 엔진: **Flow(구독) · Genspark(구독) · ComfyUI(☁/🖥 × 워크플로) · 나노바나나(유료 API)**. **Flow 와 Genspark 는 완전히 분리 — 고른 엔진 하나만 돌고 서로 이어받지 않는다**(로이 2026-10-02 · 옛 「이어받기 끄기 없음」 확정을 뒤집음 · `image-rotation.activeOrder` 한 곳). 한도면 미생성으로 두고 게이트가 막는다.
+- 🗑 **Flow(이미지·Veo 비디오)는 v0.9.67 에 지웠다**(로이 2026-10-17 「flow 는 더이상 필요없어」 · `flow-engine.js`·`core/flow-accounts.js`·Flow 테스트 삭제) — 옛 저장값 `flow` 는 이미지면 「삭제됐다」 로그 후 건너뜀 · 비디오면 「없음」(큐는 `none` 으로 보정) · ⛔ 되살리지 말 것. 남은 옛 엔진(목록에 없음 · 저장값일 때만 돈다): Genspark(구독) · 나노바나나(유료 API).
 - 🧥 **노출 방지 = 인물이 나오는 장면엔 `POS_MODEST`(옷차림 **긍정** 서술 — 부정문 금지) 자동**(v0.6.96 · `buildImagePrompt` 한 곳 · 사람 없는 장면엔 붙이지 않는다 — 사람을 그려 넣는다 · 판정 `PERSON_RE` · 🚫 `no people` 류 부정 토막은 `PERSON_NEG_RE` 로 먼저 지운다 — v0.9.22) · ✍ 자동 작성 요청·대본 작성 가이드도 「옷차림 명시(필수)」. ⚠ 리모션 TSV 그림은 프롬프트를 가공하지 않으므로 해당 없음.
 - 🎨 **화풍 = 헤더 스타일 목록의 「📜 대본스타일」(`__script__`)을 고른 때만 대본 `> 🎨 화풍: <id>` 를 쓴다**(v0.7.38 — 옛 「대본 > 헤더」 우선은 폐기 · 대본에 줄이 없으면 만들기 전 `runStyleId` 팝업 · `effStyleId` 한 곳 — 이미지 입구를 새로 만들면 반드시 거칠 것(렌더러는 `runStyleId`) · 캐시 키도 같은 값). id 로 찾는다(같은 이름 둘 있음) · 모르는 id = 경고 + 채널.
 - 프롬프트 = `<스타일>, <대본 프롬프트>, …` 부정 절은 **맨 끝으로 모으고 중복 제거**(`normalizePromptNegations`) + 긍정 억제 표현. **항상 마침표로 끝낸다**(Krea2 CLIP 토큰 경계 버그 회피). 재시도·🔄 는 프롬프트 변형 단계를 번갈아 적용.
@@ -191,11 +193,12 @@
 ### 채널 · 스타일 · 공유
 > ⚙ **채널 프리셋·채널 편집 창·⚙ 설정 팝업·API 키·이미지 스타일·목소리 분류·계정을 고치기 전에 [`docs/규칙/채널설정.md`](docs/규칙/채널설정.md) 를 먼저 읽는다**(2026-10-09 원문 그대로 옮김).
 - 🔒 자격증명은 `safeStorage` 암호화(평문 저장 거부 · 렌더러로 비밀번호를 돌려주지 않는다) · API 키 원문을 로그·메시지에 싣지 않는다 · 키 검증은 `core/api-key-check.js` 한 곳(**읽기 전용·무료 GET 만** — 새 유료 키도 여기에) · 자동 로그인은 1회 시도 후 CAPTCHA/2FA 면 사람에게.
-- 새 설정 칸은 ⚙ 설정 탭(ComfyUI · Flow · API 키 · 유튜브)에, 설명글은 `<Hint>` 로 · 채널 편집 「자막·분할」 탭은 스크롤 없이 한 화면 · ⛔ 채널 이름 유사도 자동 매칭 금지 · 채널 목록은 파일 순서 그대로(`srv:` 참조음성은 정규화에서 지우지 않는다) · 목소리 분류는 `tts/voice-tags.js` 한 곳(서버 공유).
+- 새 설정 칸은 ⚙ 설정 탭(ComfyUI · 🌐 브라우저(옛 Flow 탭 — Genspark·계정·브라우저 설치) · API 키 · 유튜브)에, 설명글은 `<Hint>` 로 · 채널 편집 「자막·분할」 탭은 스크롤 없이 한 화면 · ⛔ 채널 이름 유사도 자동 매칭 금지 · 채널 목록은 파일 순서 그대로(`srv:` 참조음성은 정규화에서 지우지 않는다) · 목소리 분류는 `tts/voice-tags.js` 한 곳(서버 공유).
 - 🔄 **앱 안 업데이트 단추(헤더 ⟳) = 시작 때와 같은 `light-updater.applyUpdates` 한 곳**(v0.7.9) — 작업 중(`_awake.n`)·개발 실행·새 버전 아님이면 적용하지 않고, 파일을 바꾼 뒤에만 다시 시작한다. 업데이트 방식을 바꾸면 시작 경로와 단추 경로를 함께 본다(`test:update`). 앱 이름 클릭은 고정 주소(`open-tube-site`) 하나만 연다.
 
 ### 🤖 Claude API
 - **LLM 글·그림 판단은 `core/claude-api` 한 곳**(v0.7.94 · 키·모델 = secret-store `claude` · ⚙ 설정 → 🔑 API 키) — ⛔ **Ollama·Gemini 글 생성은 뺐다**(로이 2026-10-11 · Gemini 키는 나노바나나·Gemini TTS 용으로 그대로) · 쓰는 곳: ✍ 빈 프롬프트 채우기 · 🔁 이미지/영상 프롬프트 다시 쓰기(`generate-prompts-api` mode) · 🔍 그림 검수(보고만 — 다시 그리기는 로이가 고름 · 첨부 그림 제외) · 끊어 읽기·맞춤법(키 없으면 CLI) · 목소리 설명 번역 · 🎨 보이스디자인 설명 · 📖 책 소개·교정(원고 불변 · 보고서만).
+- 🎯 **Claude 모델은 쓰는 곳마다 고른다**(v0.9.67 · `CA.USES` 표 · secret-store `claude.uses` · 비우면 기본 모델) — 새 Claude 입구는 `ask({ use: … })` 로 이름을 댄다(이름 없는 입구는 `test:claude` 의 claude-uses 가 잡는다) · 쓰임을 새로 만들면 `USES` 에 넣는다.
 - ⛔ **E2E 는 `global.__claudeApiTest = {cfg, fetch}` 가짜 없이 부르지 않는다**(`PM_UI_SMOKE` 면 가짜가 없을 때 키 없음으로 본다 — 로이 충전금 · `test:claude`) · ⛔ 모델 목록에 haiku 를 넣지 않는다(끊어 읽기가 관형절을 가른다) · 새 LLM 입구는 `CA.ask` 를 거칠 것(비용 로그 💳 가 한 곳에서 나온다) · ⛔ npm SDK 를 들이지 않는다(전역 fetch — 라이트 업데이트).
 
 ### 브라우저 자동화 공통
@@ -229,7 +232,7 @@
 
 - 🔴 **미정의 식별자는 빌드·단위테스트가 못 잡는다**(`imgEngine`·`onPickImgEngine`·`label`·`failCount` 사고). main.js 를 고치면 **`npm run test:makeall`(무음 E2E, 20초)** 을 반드시 돌린다. 함수 블록을 지울 땐 아래 어디까지 지워지는지 눈으로 확인.
 - 🔴 **셸이 역슬래시·백틱을 먹는다**(heredoc·`node -e` 에서 `\b`→0x08, `\n`→줄바꿈, `'\0'` NUL). 백슬래시가 든 코드는 **Write/Edit 도구**로, 편집 뒤 제어문자 검사. 한글 파일명 비교는 node 로(PowerShell 5.1 은 ANSI 로 읽는다).
-- 줄끝: `.gitattributes` `* text=auto eol=lf` → 커밋 blob 은 LF. `flow-engine.js` 작업 사본은 CRLF 유지(테스트가 단언 · `git stash pop` 후 LF 로 바뀌면 되돌린다). 원문을 `\n` 으로 자르는 테스트는 먼저 정규화. ⛔ `grep -c $'\r'` 로 재지 말 것(Git Bash 에서 글자 r 을 센다).
+- 줄끝: `.gitattributes` `* text=auto eol=lf` → 커밋 blob 은 LF. 원문을 `\n` 으로 자르는 테스트는 먼저 정규화. ⛔ `grep -c $'\r'` 로 재지 말 것(Git Bash 에서 글자 r 을 센다).
 - ⚡ **목록(Cards)은 그룹마다 `MemoCut` — 열쇠(`cutKey`)가 같으면 다시 그리지 않는다**(v0.5.95). 그룹 모양에 새 값을 쓰면 **`cutKey` 에 넣을 것**(안 넣으면 바뀌어도 화면이 그대로) · 그룹 안 처리기는 **안정 래퍼 `_S`·`_E` 로만**(옛 렌더의 함수·상태를 쓰지 않게) · 줄 번호·순번은 누르는 순간 DOM(효과가 고쳐 둔 `data-ln`·`data-ord`)에서. 응답으로 DTO 를 돌려주는 명령은 `pushDtoUpdate` 대신 `dtoByReply`(같은 DTO 두 번 = 두 번 다시 그리기). `test:editspeed` 가 다시 그린 그룹 수를 센다.
 - React: ⛔ `setState` 직후 그 state 를 읽지 않는다(값을 직접 넘긴다) · 한 번 만든 클로저(`onended` 등)에서 state 읽지 않는다 · ⛔ 제어 checkbox/radio 의 click 에서 `preventDefault` 금지 · 편집면(contentEditable)은 React 가 다시 그리지 않게 고정 · 한글 조합 중(`isComposing`)엔 저장·Enter 처리 안 함 · 서식 막대는 mousedown 을 막아 초점을 지킨다.
 - 비동기 재생·루프는 **번호표**(`playGenRef` 식)로 「내가 아직 현재 작업인가」를 확인한다 — 멈춘 옛 재생의 await 가 깨어나 새 재생을 닫은 사고. 대본 전환 전 밀린 자동저장을 먼저 쓴다(`syncActiveToS` → `flushAutoSave`).
@@ -258,7 +261,7 @@
 ## 10. 로이 확정 결정 (⛔ 다시 꺼내지 말 것)
 
 - 모드는 롱폼/리모션/출판. 쇼츠·플리·ACE-Step 생성 제거(2026-08-22). 내부 이름(`shortsNum`·`shortsDirs`·`~/.shots-maker`)은 유지.
-- Flow 동시 생성 안 함(2026-08-29). Flow/Genspark 이어받기 **폐기**(2026-10-02 — 완전 분리). 모델 파일명 `krea2Int4Convrot…` 바꾸지 않음(int4 는 로컬 전용).
+- Flow 는 삭제(2026-10-17). 모델 파일명 `krea2Int4Convrot…` 바꾸지 않음(int4 는 로컬 전용).
 - 비디오 로컬 항목 유지(여유 있을 때 MiniMax turbo4). 기본 비디오 = ☁ LTX2.5. LTX2.5 t2v 도입 안 함(파트너 과금·대본 비호환).
 - TTS = OmniVoice 유지(CosyVoice3 A/B 기각 · 3~4배 느림). 품질 설정 축소 금지.
 - 그룹 영상 음소거 유지(내레이션과 겹침) — 삽입 영상만 소리.
@@ -277,5 +280,4 @@
 - 🌏 일본어·베트남어(v0.5.76~78): 참조음성 4개 등록·역대조 검증 완료. 원어민 청취 검수 · Vrew 에서 일본어 자막 표시 · 5천 클립 .vrew 를 Vrew 로 여는 것은 실물 확인 대기. 루비 문장을 앱에서 고치면 읽기(ttsText)가 사라진다(대본에서 고칠 것). 콘텐츠 판단은 아도나이로이 「다음 작업」 세션.
 - Vrew 실물 확인 대기: 줄별 자막 서식·효과, 일부 clip 에만 건 bgm 트랙, 배경음악(업데이트 후).
 - 화이트보드 3단계(화풍 이미지) 미착수 · 확인 그림 일부 실패 원인 미확정.
-- Flow 비디오 새 UI 의 진행률·다운로드 메뉴 실물 미검증(첨부까지 확인).
 - 큐의 대본별 영상 범위(v0.5.73) 실사용 확인 — 로그 `🎬 영상 범위 G1~G3 (도입부 기본)`.

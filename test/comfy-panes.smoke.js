@@ -93,7 +93,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     const vidOpts = await win.locator('.hgroup select[data-testid="video-engine"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
     ok(/::cloud::.*\|☁ MiniMax H3 레퍼런스 \(R2V\)$/.test(vidOpts[0] || ''), '비디오 첫 항목 = ☁ MiniMax H3 레퍼런스 (R2V): ' + (vidOpts[0] || ''));
     const vKie = vidOpts.filter((o) => o.indexOf('kie:') === 0);
-    ok(vKie.length >= 10 && vKie.every((o) => /\|🧩 .+ · \$[\d.]+\/(초|편~)$/.test(o)), `kie 비디오 ${vKie.length}개 · 이름 · 요금: ` + vKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
+    ok(vKie.length >= 10 && vKie.every((o) => /\|☁ [^$]+$/.test(o) && !/kie|\$/.test(o.split('|')[1])), `AI 비디오 ${vKie.length}개 · 이름만(서비스 이름·가격 없음 · v0.9.67): ` + vKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
     ok(vidOpts.some((o) => o.startsWith('none|')), '「없음 (이미지만)」 유지');
     ok(!vidOpts.some((o) => /^(flow|genspark)\|/.test(o) || /\|☁ LTX|\|🖥 LTX/.test(o) || (/^comfy::/.test(o) && !/\(옛 설정\)/.test(o) && o !== vidOpts[0])),
        '옛 항목(Flow·Genspark·LTX 등)은 목록에 없다(저장값이면 「(옛 설정)」 한 줄만)');
@@ -101,7 +101,7 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     const imgPairs = await win.locator('.hgroup select[data-testid="img-engine"] option').evaluateAll((os) => os.map((o) => o.value + '|' + o.textContent));
     ok(/::local::.*image_qwen21_turbo\.json\|🖥 Qwen-Image 2\.1 Turbo \(로컬\)$/.test(imgPairs[0] || ''), '이미지 첫 항목 = 🖥 Qwen-Image 2.1 Turbo (로컬): ' + (imgPairs[0] || ''));
     const iKie = imgPairs.filter((o) => o.indexOf('kie:') === 0);
-    ok(iKie.length >= 10 && iKie.every((o) => /\|🧩 .+ · \$[\d.]+\/장$/.test(o)), `kie 이미지 ${iKie.length}개 · 장당 요금: ` + iKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
+    ok(iKie.length >= 10 && iKie.every((o) => /\|☁ [^$]+$/.test(o) && !/kie|\$/.test(o.split('|')[1])), `AI 이미지 ${iKie.length}개 · 이름만(서비스 이름·가격 없음): ` + iKie.slice(0, 3).map((o) => o.split('|')[1]).join(' / '));
     ok(!imgPairs.some((o) => /^(flow|genspark|gemini|gemini-batch|rotate)\|/.test(o) && !/\(옛 설정\)/.test(o)), '옛 항목(Flow·Genspark·나노바나나·순환)은 목록에 없다');
     ok(!imgPairs.some((o) => /무료/.test(o)), '이미지 드롭다운에 「무료」 표기가 없다');
     // 채널 편집도 같은 목록(EngineOptions 한 곳)
@@ -122,8 +122,8 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
 
     await win.click('button:has-text("⚙ 설정")');
     await win.waitForSelector('.modal-card', { timeout: 10000 });
-    ok(await win.locator('.modal-card button:has-text("🌐 Flow")').count() === 1, '설정에 「🌐 Flow」 탭이 있다(옛 「브라우저 이미지·비디오」)');
-    await win.click('.modal-card button:has-text("🌐 Flow")');
+    ok(await win.locator('.modal-card button:has-text("🌐 브라우저")').count() === 1 && await win.locator('.modal-card button:has-text("🌐 Flow")').count() === 0, '설정에 「🌐 브라우저」 탭(v0.9.67 Flow 삭제 · 옛 「🌐 Flow」 없음)');
+    await win.click('.modal-card button:has-text("🌐 브라우저")');
     await win.waitForTimeout(250);
     const free = await win.evaluate(() => {
       const c = document.querySelector('.modal-card');
@@ -131,23 +131,21 @@ const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.j
     });
     ok(free.text.includes('LoRA 학습용 이미지 수집'), 'LoRA 수집 섹션이 설정 탭으로 옮겨졌다');
     ok(free.text.includes('트리거'), 'LoRA 트리거 입력이 있다');
-    ok(free.opts.includes('Nano Banana 2 Lite'), 'Flow 이미지 모델 선택이 있다');
-    ok(free.text.includes('이어받지 않습니다'), 'Flow·Genspark 는 서로 이어받지 않는다는 안내가 있다');
-    ok(free.text.includes('구독') && !free.text.includes('무료'), '탭 안내가 「구독 요금제」로 정정됐다(무료 아님)');
+    ok(!free.opts.includes('Nano Banana 2 Lite') && !/Flow 이미지 모델|Flow 비디오 모델|Flow 첨부|Flow 다운로드/.test(free.text), 'Flow 칸(이미지·비디오 모델·첨부·다운로드)이 없다(v0.9.67)');
+    ok(free.text.includes('계정 관리'), '👤 계정 관리 단추는 남는다(Genspark·Grok)');
     // ⚙ 설정 탭 구조(v0.7.40 · 로이): ComfyUI(이미지+비디오+TTS 서버) · Flow · API 키 · 유튜브 — 계정 탭 없음 · 브라우저 설치는 Flow 탭 · Flow 이미지 모델 = 2.1
     {
       const tabsTxt = await win.locator('.settings-card .st-tabs button').allInnerTexts();
-      ok(tabsTxt.length === 6 && /ComfyUI/.test(tabsTxt[0]) && /Flow/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /채널 연결/.test(tabsTxt[3]) && /폴더/.test(tabsTxt[4]) && /계정/.test(tabsTxt[5]), '탭 6개(v0.9.26 👤 계정 · v0.9.36 📺 채널 연결): ' + tabsTxt.join(' / '));
+      ok(tabsTxt.length === 6 && /ComfyUI/.test(tabsTxt[0]) && /브라우저/.test(tabsTxt[1]) && /API/.test(tabsTxt[2]) && /채널 연결/.test(tabsTxt[3]) && /폴더/.test(tabsTxt[4]) && /계정/.test(tabsTxt[5]), '탭 6개(v0.9.26 👤 계정 · v0.9.36 📺 채널 연결): ' + tabsTxt.join(' / '));
       ok(!tabsTxt.some((x) => /TTS 서버|브라우저 이미지|▶ 유튜브/.test(x)), '옛 「TTS 서버」·「브라우저 이미지」·「▶ 유튜브」 탭은 없다');
-      ok(await win.locator('.settings-card button:has-text("브라우저 설치")').count() === 1, '「⬇ 브라우저 설치」 가 Flow 탭에 있다');
-      ok((await win.locator('.settings-card select option[value="Nano Banana 2.1"]').count()) === 1, 'Flow 이미지 모델에 Nano Banana 2.1 이 있다');
+      ok(await win.locator('.settings-card button:has-text("브라우저 설치")').count() === 1, '「⬇ 브라우저 설치」 가 브라우저 탭에 있다');
       const w = await win.evaluate(() => Math.round(document.querySelector('.settings-card').getBoundingClientRect().width));
       ok(w <= 800, '팝업 폭이 줄었다(' + w + 'px)');
       await win.click('.settings-card button:has-text("🎛 ComfyUI")');
       await win.waitForTimeout(400);
       const ctext = await win.evaluate(() => document.querySelector('.settings-card .st-body').textContent);
       ok(/이미지/.test(ctext) && /비디오/.test(ctext) && /TTS 서버/.test(ctext), 'ComfyUI 탭 안에 이미지·비디오·TTS 서버가 함께 있다');
-      await win.click('.settings-card button:has-text("🌐 Flow")');
+      await win.click('.settings-card button:has-text("🌐 브라우저")');
       await win.waitForTimeout(300);
     }
     // 💡 설명글은 평소엔 안 보이고, 설명이 달린 칸에 마우스를 올릴 때만 팝업으로 뜬다(v0.7.39 · v0.9.18 ⓘ 없음 · 줄 차지 없음)

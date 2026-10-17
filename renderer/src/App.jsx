@@ -225,7 +225,7 @@ const LEGACY_ENGINE_LABEL = { flow: 'Flow (구독)', genspark: 'Genspark (구독
 function legacyEngineLabel(v, cfg) {
   const c = parseComfyVal(v);
   if (c) { const w = comfyWorkflows(cfg).find((x) => x.path === c.path); return `${c.cloud ? '☁' : '🖥'} ${w ? wfLabel(w) : (String(c.path).split(/[\\/]/).pop() || 'ComfyUI')}`; }
-  if (KM.isKieVal(v)) return `kie · ${KM.idOf(v)}`;
+  if (KM.isKieVal(v)) return `AI · ${KM.idOf(v)}`;
   return LEGACY_ENGINE_LABEL[v] || v;
 }
 function EngineOptions({ kind = 'image', cfg, value = '' }) {
@@ -237,8 +237,8 @@ function EngineOptions({ kind = 'image', cfg, value = '' }) {
   const legacy = value && !known.has(value) ? value : null;
   return (<>
     {first && <option value={first}>{isVid ? '☁ MiniMax H3 레퍼런스 (R2V)' : '🖥 Qwen-Image 2.1 Turbo (로컬)'}</option>}
-    <optgroup label={isVid ? 'kie.ai 비디오 (그림 → 영상)' : 'kie.ai 이미지'}>
-      {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>🧩 {m.label} · {KM.priceTag(m)}</option>)}
+    <optgroup label={isVid ? 'AI 영상 (그림 → 영상)' : 'AI 이미지'}>
+      {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>☁ {m.label}</option>)}
     </optgroup>
     {isVid && <option value="none">없음 (이미지만)</option>}
     {legacy && <option value={legacy}>(옛 설정) {legacyEngineLabel(legacy, cfg)}</option>}
@@ -5281,12 +5281,10 @@ export default function App() {
   // 🔒 비밀번호는 저장만 하고 되돌려 받지 않는다(hasPassword 플래그만). OS 암호화(safeStorage).
   const ACCT_SVCS = [
     { id: 'genspark', icon: '🖼', name: 'Genspark', note: '이미지 생성 (순환 1번)' },
-    { id: 'flow', icon: '🖼', name: 'Google Flow', note: '이미지 생성 (순환 2번)' },
     { id: 'grok', icon: '🎬', name: 'Grok (X)', note: '비디오 생성 (브라우저)' },
   ];
   const ACCT_API = {
     genspark: { add: 'addGensparkAccount', rm: 'removeGensparkAccount', ren: 'renameGensparkAccount', cap: 'setGensparkCap', login: 'gensparkLogin' },
-    flow: { add: 'addFlowAccount', rm: 'removeFlowAccount', ren: 'renameFlowAccount', cap: 'setFlowCap', login: 'flowLogin' },
     grok: { add: 'addGrokAccount', rm: 'removeGrokAccount', ren: 'renameGrokAccount', cap: 'setGrokCap', login: 'grokLogin' },
   };
   async function loadAcct() {
@@ -5365,7 +5363,7 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
-    if (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine)) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭
+    if (owner && (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine))) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭(관리자에게만 보인다)
     if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
     if (imgEngine === 'gemini' || imgEngine === 'gemini-batch') return 'keys';
     return 'flow';
@@ -5995,6 +5993,11 @@ export default function App() {
             {menu === 'image' && (<>
           <span className="hgroup">
             <span className="glabel">② 이미지</span>
+            <select data-testid="img-engine" title="이미지 도구 — 🖥 Qwen-Image 2.1 Turbo(내 PC) 또는 ☁ AI 이미지 모델"
+              value={comfySelectValue(imgEngine, comfyCfg)}
+              onChange={(e) => onPickImgEngine(e.target.value)}>
+              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+            </select>
             <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
             <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}>🔁 이미지 프롬프트</button>
             <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}>{visionBusy ? '⏳ 검수중…' : '🔍 검수'}</button>
@@ -6010,11 +6013,6 @@ export default function App() {
               if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 만들 때 선택</span>;
               return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
-            <select data-testid="img-engine" title="이미지 도구 — 🖥 Qwen-Image 2.1 Turbo(내 PC ComfyUI · 무료) 또는 🧩 kie.ai 모델(장당 요금 · ⚙ 설정 → 🔑 API 키에 kie 키)"
-              value={comfySelectValue(imgEngine, comfyCfg)}
-              onChange={(e) => onPickImgEngine(e.target.value)}>
-              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
-            </select>
             {loaded && imgCost && (
               <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
                 title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다)${imgCost.q ? `\n작업큐 전체 ${imgCost.q.n}편 · 남은 그림 ${imgCost.q.sum}장 합계 ${imgCost.q.txt}(고른 이미지 도구 기준 · 헤더 설정이 모든 대본에 적용됩니다)${imgCost.q.unk ? ` · ${imgCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
@@ -6034,7 +6032,7 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
-              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 도구 — ☁ MiniMax H3 레퍼런스(ComfyUI 클라우드 · 그림 + 인물 시트 R2V) 또는 🧩 kie.ai 모델(그룹 그림에서 영상 · 초당 요금 · ⚙ 설정 → 🔑 API 키에 kie 키)'}
+              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 도구 — ☁ MiniMax H3 레퍼런스(그림 + 인물 시트 R2V) 또는 ☁ AI 영상 모델(그룹 그림에서 영상)'}
               value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
             </select>
@@ -6045,7 +6043,6 @@ export default function App() {
                 💰 <b>{vidCost.txt}</b>{vidCost.q && <> · <span data-testid="vid-cost-q">큐 {vidCost.q.n}편 <b>{vidCost.q.txt}</b></span></>}
               </span>
             )}
-            {videoEngine === 'flow' && <button className="ghost" title="Flow 비디오 모델(Veo) · 계정 — 그룹 이미지를 시작 프레임으로 i2v. 생성당 크레딧을 씁니다" onClick={() => openSettings('free')}><span className="rb-ic">⚙</span> <span className="rb-t">Veo</span></button>}
             {videoEngine === 'genspark' && (
               <select style={{ maxWidth: 190 }} value={gsVideoModel}
                 title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
@@ -7106,7 +7103,7 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 Flow'], ['keys', '🔑 API 키'], ['yt', '📺 채널 연결'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
+              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 브라우저'], ['keys', '🔑 API 키'], ['yt', '📺 채널 연결'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
                 <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
               ))}
             </div>
@@ -7202,51 +7199,11 @@ export default function App() {
                 <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
                   title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
                   {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
-                <Hint>브라우저 자동화(Genspark·Flow)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 이 버튼을 누르세요.</Hint>
+                <Hint>브라우저 자동화(Genspark)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 이 버튼을 누르세요.</Hint>
               </div>
-              <Hint>
-                브라우저로 생성하는 <b>Flow · Genspark</b> 설정입니다 — 둘 다 <b>각 서비스의 구독 요금제</b>로 만듭니다(Genspark 구독 · Flow 는 Google AI Pro/Ultra 구독). 어느 쪽으로 만들지는 헤더 <b>「② 이미지」</b> 드롭다운에서 고르세요.
-                <b>Flow 와 Genspark 는 서로 이어받지 않습니다</b> — 고른 쪽이 한도에 걸리면 남은 이미지는 만들어지지 않은 채로 멈추고(.vrew 도 막힙니다), 한도가 풀린 뒤 다시 누르면 이어서 만듭니다. 다른 쪽으로 만들고 싶으면 헤더 드롭다운을 직접 바꾸세요.
-              </Hint>
+              {/* 🗑 Flow(이미지·Veo 비디오)는 v0.9.67 에 지웠다(로이 2026-10-17 「flow 는 더이상 필요없어」) — 이 탭엔 브라우저 설치·Genspark·계정만 남는다 */}
               <div className="frow" style={{ alignItems: 'center' }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 이미지 모델</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowImageModel) || 'Nano Banana 2.1'}
-                  title="Flow 이미지 생성 모델 — 2.1 이 새 버전(2026-10). Lite 는 더 빠르고 저렴한 경량 모델. Flow 화면에 그 옵션이 없으면 현재 모델로 진행하고 로그에 알립니다."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowImageModel: e.target.value })}>
-                  <option value="Nano Banana 2.1">Nano Banana 2.1 (새 버전)</option>
-                  <option value="Nano Banana 2">Nano Banana 2</option>
-                  <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
-                </select>
-                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Flow 계정 추가·로그인·일일한도" onClick={() => { setSettingsMsg(''); if (!acctOpen) loadAcct(); setAcctOpen((o) => !o); }}>👤 계정 관리 {acctOpen ? '▴' : '▾'}</button>
-              </div>
-              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 비디오 모델</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoModel) || 'Veo 3.1 - Lite'}
-                  title="Flow i2v 비디오 모델(Veo). 그룹 이미지를 시작 프레임으로 넣어 만듭니다. 생성당 크레딧을 씁니다 — Lite x1 = 10크레딧."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoModel: e.target.value })}>
-                  <option value="Veo 3.1 - Lite">Veo 3.1 - Lite (기본 · 10크레딧)</option>
-                  <option value="Veo 3.1 - Fast">Veo 3.1 - Fast</option>
-                  <option value="Veo 3.1 - Quality">Veo 3.1 - Quality (고화질 · 크레딧↑)</option>
-                </select>
-              </div>
-              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 첨부 방식</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoAttach) || 'frame'}
-                  title="그룹 이미지를 어떻게 붙일지. 프레임 = 첫 프레임이 그 그림으로 고정(원본을 그대로 움직인다) · 애셋 = 참조로만 전달(구도·인물이 달라질 수 있다)."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoAttach: e.target.value })}>
-                  <option value="frame">프레임 — 첫 프레임 고정 (권장)</option>
-                  <option value="asset">애셋 — 참조 이미지</option>
-                </select>
-              </div>
-              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Flow 다운로드</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.flowVideoDownload) || '1080p'}
-                  title="완성된 영상을 어느 해상도로 받을지. 1080p 로 받으면 이 PC 의 GPU 업스케일(장당 수 분)이 생략됩니다."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), flowVideoDownload: e.target.value })}>
-                  <option value="1080p">1080p — 업스케일본 (권장)</option>
-                  <option value="720p">720p — 원본 크기</option>
-                  <option value="off">다운로드 안 함 — 재생 소스(720p)</option>
-                </select>
+                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Grok 계정 추가·로그인·일일한도" onClick={() => { setSettingsMsg(''); if (!acctOpen) loadAcct(); setAcctOpen((o) => !o); }}>👤 계정 관리 {acctOpen ? '▴' : '▾'}</button>
               </div>
               <div className="frow" style={{ alignItems: 'center', marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
                 <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 비디오 모델</label>
@@ -7304,7 +7261,7 @@ export default function App() {
                 <Hint>각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</Hint>
               </div>
               {/* 🧩 kie.ai(유료 · v0.9.66) — 헤더 ② 이미지 · ③ 비디오의 「kie」 항목이 이 키로 만든다 · secret-store 'kie' · 원문은 다시 보이지 않는다(끝 4자리만) */}
-              <div data-testid="kie-key" className="kp-card">
+              {owner && <div data-testid="kie-key" className="kp-card">
                 <div className="kp-line">
                   <b className="kp-name">🧩 kie.ai (이미지 · 비디오)</b>
                   <Hint>kie.ai → API Key 에서 만든 키입니다. 헤더 「② 이미지」·「③ 비디오」에서 <b>kie</b> 항목을 고르면 이 키로 만듭니다. 충전한 크레딧에서 쓴 만큼 빠지고, 실패한 작업은 빠지지 않습니다. 「✔ 검증」은 남은 크레딧만 조회해 요금이 들지 않습니다.</Hint>
@@ -7320,7 +7277,7 @@ export default function App() {
                 </div>
                 {keyChkMark('kie')}
                 {kieKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{kieKey.msg}</div>}
-              </div>
+              </div>}
               {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
               <div className="kp-card">
                 <div className="kp-line">
@@ -7373,8 +7330,20 @@ export default function App() {
                   <select data-testid="claude-model" value={claudeKey.info.model || 'claude-opus-5-5'} onChange={async (e) => { const m = e.target.value; await api.claudeKeySave({ model: m }); await loadClaudeKey(); }}>
                     {(claudeKey.info.models || [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }]).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
                   </select>
-                  <Hint>쓰는 곳: ✍ 프롬프트 채우기 · 🔁 이미지/영상 프롬프트 다시 쓰기 · 🔍 그림 검수 · 자막 끊어 읽기 · 맞춤법 검사 · 목소리 설명 번역 · 🎨 보이스디자인 설명 · 📖 책 소개·교정. 키가 없으면 끊어 읽기·맞춤법은 예전처럼 Claude Code(구독)로 합니다.</Hint>
+                  <Hint>이 모델은 아래에서 「기본」으로 둔 곳에 씁니다. 키가 없으면 끊어 읽기·맞춤법은 예전처럼 Claude Code(구독)로 합니다.</Hint>
                   {claudeKey.info.spent > 0 && <span className="meta" data-testid="claude-spent">이번 실행 ≈ ${Number(claudeKey.info.spent).toFixed(3)}</span>}
+                </div>
+                {/* 🎯 쓰는 곳마다 모델(v0.9.67 · 로이 2026-10-17) — 비우면(기본) 위 모델 · 저장 = secret-store 'claude'.uses */}
+                <div data-testid="claude-uses" className="kp-uses" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '3px 8px', alignItems: 'center', marginTop: 4 }}>
+                  {(claudeKey.info.uses || []).map((u) => (
+                    <React.Fragment key={u.id}>
+                      <span className="kp-lab" style={{ minWidth: 0 }}>{u.label}</span>
+                      <select data-testid={'claude-use-' + u.id} value={u.model || ''} onChange={async (e) => { await api.claudeKeySave({ use: u.id, model: e.target.value }); await loadClaudeKey(); }}>
+                        <option value="">기본 ({((claudeKey.info.models || []).find((m) => m.id === claudeKey.info.model) || {}).label || '기본 모델'})</option>
+                        {(claudeKey.info.models || []).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                      </select>
+                    </React.Fragment>
+                  ))}
                 </div>
                 {claudeKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{claudeKey.msg}</div>}
               </div>
@@ -7444,7 +7413,7 @@ export default function App() {
             </div>)}
 
             {settingsTab === 'flow' && acctOpen && (<div className="st-sec">
-              <div className="subhead">👤 계정 (Genspark · Flow)</div>
+              <div className="subhead">👤 계정 (Genspark · Grok)</div>
               
               <Hint>
                 브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
