@@ -726,9 +726,15 @@ export default function App() {
       return <span className="pts" data-testid="member-points" data-empty="1" onClick={() => refreshPoints(false)}
         title={(adm ? '관리자 계정 — 포인트 제한 없이 씁니다.' : '아직 지급받은 포인트가 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 포인트 없이 쓸 수 있습니다.') + '\n(누르면 바로 새로고침)'}
         style={{ padding: '3px 9px', borderRadius: 6, background: '#fff6dc', color: '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
-        {adm ? <>🪙 제한 없음</> : <>🪙 남은 <b>0</b> / 지급 0</>}</span>;
+        {adm ? <>🪙 제한 없음 · 보유 <b>0</b></> : <>🪙 남은 <b>0</b> / 지급 0</>}</span>;
     }
     const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
+    if (licKind && licKind.admin) {   // v0.9.81 — 관리자는 포인트가 있어도 「제한 없음」이 먼저 · 보유 포인트(있으면)는 함께
+      return <span className="pts" data-testid="member-points" data-admin="1" onClick={() => refreshPoints(false)}
+        title={`관리자 계정 — 포인트 제한 없이 씁니다.\n보유 포인트: 남은 ${f(points.remaining)} / 지급 ${f(points.granted)}\n(누르면 바로 새로고침)`}
+        style={{ padding: '3px 9px', borderRadius: 6, background: '#fff6dc', color: '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
+        🪙 제한 없음 · 보유 <b>{f(points.remaining)}</b></span>;
+    }
     const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
     return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 포인트 — 지급받은 포인트 ${f(points.granted)} 중 남은 포인트 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 바로 새로고침)`}
       style={{ padding: '3px 9px', borderRadius: 6, background: low ? '#fde8e8' : '#fff6dc', color: low ? '#a3352b' : '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
