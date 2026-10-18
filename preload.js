@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('api', {
   scriptGuide: (args) => ipcRenderer.invoke('script-guide', args),   // 📘 대본 작성 기준(docs/대본-작성-가이드.md) — 내용·경로·열기
   appendLog: (line) => ipcRenderer.invoke('append-log', line),
   openLogs: () => ipcRenderer.invoke('open-logs'),
+  appAsk: (a) => ipcRenderer.invoke('app-ask', a),   // 💬 프로그램에 묻기(v0.9.77)
   attachAsset: (args) => ipcRenderer.invoke('attach-asset', args),
   stockKeysGet: () => ipcRenderer.invoke('stock-keys-get'),
   stockKeySave: (args) => ipcRenderer.invoke('stock-key-save', args),

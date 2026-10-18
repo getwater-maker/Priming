@@ -204,6 +204,7 @@
 ### 🤖 Claude API
 - **LLM 글·그림 판단은 `core/claude-api` 한 곳**(v0.7.94 · 키·모델 = secret-store `claude` · ⚙ 설정 → 🔑 API 키) — ⛔ **Ollama·Gemini 글 생성은 뺐다**(로이 2026-10-11 · Gemini 키는 나노바나나·Gemini TTS 용으로 그대로) · 쓰는 곳: ✍ 빈 프롬프트 채우기 · 🔁 이미지/영상 프롬프트 다시 쓰기(`generate-prompts-api` mode) · 🔍 그림 검수(보고만 — 다시 그리기는 로이가 고름 · 첨부 그림 제외) · 끊어 읽기·맞춤법(키 없으면 CLI) · 목소리 설명 번역 · 🎨 보이스디자인 설명 · 📖 책 소개·교정(원고 불변 · 보고서만).
 - 🎯 **Claude 모델은 쓰는 곳마다 고른다**(v0.9.67 · `CA.USES` 표 · secret-store `claude.uses` · 비우면 기본 모델) — 새 Claude 입구는 `ask({ use: … })` 로 이름을 댄다(이름 없는 입구는 `test:claude` 의 claude-uses 가 잡는다) · 쓰임을 새로 만들면 `USES` 에 넣는다.
+- 💬 **「프로그램에 묻기」(로그 상자 💬 탭 · v0.9.77)는 읽기 전용 — 입구는 main `app-ask` 한 곳(`CA.ask({use:'helper'})` · 기본 Sonnet) · 로그는 `log-scrub` 후에만 보낸다 · 질문으로 설정·작업을 바꾸게 만들지 말 것**(`test:apphelper`).
 - ⛔ **E2E 는 `global.__claudeApiTest = {cfg, fetch}` 가짜 없이 부르지 않는다**(`PM_UI_SMOKE` 면 가짜가 없을 때 키 없음으로 본다 — 로이 충전금 · `test:claude`) · ⛔ 모델 목록에 haiku 를 넣지 않는다(끊어 읽기가 관형절을 가른다) · 새 LLM 입구는 `CA.ask` 를 거칠 것(비용 로그 💳 가 한 곳에서 나온다) · ⛔ npm SDK 를 들이지 않는다(전역 fetch — 라이트 업데이트).
 
 ### 브라우저 자동화 공통

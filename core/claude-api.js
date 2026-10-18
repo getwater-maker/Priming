@@ -30,6 +30,7 @@ const USES = {
   voice: '🎙 목소리 설명 번역·보이스디자인',
   book: '📖 책 소개·교정',
   mail: '📬 출판 메일 확인',
+  helper: '💬 프로그램에 묻기 (안 고르면 Sonnet)',
 };
 const _cleanUses = (u) => { const o = {}; for (const k of Object.keys(USES)) if (u && MODELS[u[k]]) o[k] = u[k]; return o; };
 

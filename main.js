@@ -5519,6 +5519,17 @@ ipcMain.handle('claude-key-save', (_e, { key, clear, model, use } = {}) => {
   const v = String(key || '').trim(); if (!v) return { ok: false };
   SS.set('claude', { ...old, key: v }); log(`🔑 claude 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
+// 💬 프로그램에 묻기(v0.9.77) — 오늘 로그 끝 + 큐 요약을 Sonnet 에 붙여 답을 받는다. 읽기 전용(아무것도 바꾸지 않음) · 글 가공은 core/app-helper 한 곳
+ipcMain.handle('app-ask', async (_e, { question, history } = {}) => {
+  const CA = require('./core/claude-api'), AH = require('./core/app-helper');
+  const q = String(question || '').trim();
+  if (!q) return { ok: false, error: '질문을 적어 주세요' };
+  let logText = ''; try { logText = await fs.promises.readFile(path.join(LOG_DIR, `${_kstDayStr()}.log`), 'utf8'); } catch (_) {}
+  const P = AH.buildPrompt({ question: q, logText, queue: queueDTO(), version: _diskVersion(), history, now: `${_kstDayStr()} ${_kstClock()}` });
+  const c = CA.cfg();
+  const r = await CA.ask({ use: 'helper', model: c.uses.helper || AH.HELPER_MODEL, system: P.system, text: P.text, maxTokens: 1500, timeoutMs: 90000, log, label: '프로그램에 묻기' });
+  return r.ok ? { ok: true, text: r.text.trim(), costUsd: r.costUsd } : { ok: false, error: r.error, noKey: !!r.noKey };
+});
 ipcMain.handle('claude-open-key', () => { shell.openExternal('https://platform.claude.com/settings/keys'); return true; });
 
 // ── 🔍 그림 검수(Claude 가 그림을 직접 본다 · v0.7.94) ─────────────────────────────────

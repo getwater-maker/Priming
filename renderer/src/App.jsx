@@ -1172,6 +1172,20 @@ export default function App() {
   // 🖼 로그 상자 탭(v0.9.24 · 로이 2026-10-15) — 기본 = 썸네일(패키징 썸네일 3안 · 2×2) · 📜 로그. #log 는 숨겨도 늘 그린다(E2E 가 글을 읽는다).
   const [logTab, setLogTab] = useState('thumb');
   const logTabRef = useRef('thumb'); logTabRef.current = logTab;
+  // 💬 프로그램에 묻기(v0.9.77) — 오늘 로그·큐를 보고 Claude(Sonnet)가 답한다. 읽기 전용 · 대화는 화면에만(저장 안 함)
+  const [askMsgs, setAskMsgs] = useState([]);   // [{q, a, err}]
+  const [askQ, setAskQ] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+  const askEndRef = useRef(null);
+  async function sendAsk() {
+    const q = askQ.trim(); if (!q || askBusy) return;
+    const history = askMsgs.filter((m) => m.a).map((m) => ({ q: m.q, a: m.a }));
+    setAskQ(''); setAskBusy(true); setAskMsgs((m) => [...m, { q, a: '' }]);
+    let r; try { r = await api.appAsk({ question: q, history }); } catch (e) { r = { ok: false, error: e.message }; }
+    setAskMsgs((m) => m.map((x, i) => i === m.length - 1 ? (r && r.ok ? { q, a: r.text } : { q, a: '', err: (r && r.error) || '답을 받지 못했습니다' }) : x));
+    setAskBusy(false);
+    setTimeout(() => { if (askEndRef.current) askEndRef.current.scrollIntoView({ block: 'end' }); }, 0);
+  }
   const [logUnseen, setLogUnseen] = useState(false);
   const [thumbs, setThumbs] = useState({ ok: false, msg: '', files: [] });
   async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
@@ -5833,12 +5847,15 @@ export default function App() {
               {isBk ? <b>로그</b> : <span className="logtabs">
                 <button data-testid="logtab-thumb" className={logTab === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
                 <button data-testid="logtab-log" className={logTab === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
+                <button data-testid="logtab-ask" className={logTab === 'ask' ? 'on' : ''} title="지금 상황(로그·큐)을 보고 프로그램이 답해 줍니다 — 예: 왜 1028 은 진행을 안 했어?" onClick={() => pickLogTab('ask')}>💬 질문</button>
               </span>}
               <span id="status">{status ? '· ' + status : ''}</span>
               {lt === 'log' ? (<>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+              </>) : lt === 'ask' ? (<>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="대화 지우기" onClick={() => setAskMsgs([])}>지우기</button>
               </>) : (<>
                 <button className="ghost" data-testid="thumb-folder" title="이 PC에서 사용할 썸네일 폴더 선택" onClick={() => pickAppFolder('thumbs')}>📁 폴더</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="썸네일 폴더를 다시 읽기" onClick={loadThumbs}>🔄</button>
@@ -5864,6 +5881,26 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {lt === 'ask' && (
+              <div className="askbox" data-testid="askbox">
+                <div className="askmsgs">
+                  {!askMsgs.length && <div className="askhint">오늘 로그와 작업 순서를 보고 답합니다(읽기만 하고 아무것도 바꾸지 않아요).<br />예: 「1028 은 왜 진행을 안 했어?」 · 「이미지가 왜 멈췄어?」</div>}
+                  {askMsgs.map((m, i) => (
+                    <div key={i} className="askturn">
+                      <div className="askq">🙋 {m.q}</div>
+                      <div className={'aska' + (m.err ? ' err' : '')}>{m.err ? '⚠ ' + m.err : m.a ? m.a : '⏳ 로그를 읽는 중…'}</div>
+                    </div>
+                  ))}
+                  <div ref={askEndRef} />
+                </div>
+                <div className="askrow">
+                  <input data-testid="ask-input" value={askQ} placeholder="프로그램에 대해 물어보세요" disabled={askBusy}
+                    onChange={(e) => setAskQ(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); sendAsk(); } }} />
+                  <button className="ghost" data-testid="ask-send" disabled={askBusy || !askQ.trim()} onClick={sendAsk}>{askBusy ? '⏳' : '보내기'}</button>
+                </div>
               </div>
             )}
             <div id="log" ref={logRef} style={lt === 'log' ? undefined : { display: 'none' }}>{logText}</div>
