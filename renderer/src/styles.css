@@ -1474,7 +1474,7 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .dl-tile:hover:not(:disabled){background:#fffaf3;color:var(--muted);border-color:#e6d4b6}
 .dl-tg.on:hover:not(:disabled){background:var(--accent-d);color:#fff;border-color:var(--accent-d)}
 .dl-tile.on:hover:not(:disabled){background:#f8ead3;color:var(--strong)}
-.chcards{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;align-items:start}
+.chcards{margin-top:14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}   /* v0.9.83 — 칸 수를 고정(2열)해 카드가 들쭉날쭉·넘치지 않게(제작 도구 탭처럼 균일한 카드) */
 .chcards .col{min-width:0;flex:none}
 .chcards .col:first-child{grid-column:1/-1}
 .chcards .col:first-child .crow.stack{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 10px;align-items:center}
@@ -1684,3 +1684,8 @@ main .card h2{top:var(--work-top-height,0px)}
   .pane1{min-width:230px}
   #body.ws main.pane2{min-width:480px}
 }
+
+/* v0.9.83 — 📁 폴더 탭 카드 줄: 카드 안 가로 묶음이 카드 밖으로 삐져나오지 않게(채널 로고 줄이 133px 넘쳤다) */
+.chcards .col .crow.stack{min-width:0}
+.chcards .col .crow.stack>span{min-width:0;flex-wrap:wrap}
+.chcards .col{overflow:hidden}

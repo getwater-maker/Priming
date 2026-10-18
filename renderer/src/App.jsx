@@ -6734,14 +6734,14 @@ export default function App() {
             </div>
             <div className="tabbody">
 
-              {chTab === 'list' && (<div>
+              {chTab === 'list' && (<div data-testid="ch-list-tab" style={{ display: 'flex', flexDirection: 'column', minHeight: 490 }}>   {/* v0.9.83 — 목록이 남는 높이를 채우고 「＋ 새 채널」은 맨 아래로(로이 2026-10-18 · 창 높이는 그대로 490) */}
                 <Hint>
                   <b>✎ = 지금 편집 중</b> · <b>★ = 헤더에서 고른 작업 채널</b>.
                   <b>▲▼</b> 로 순서를 바꾸면 <b>바로 저장</b>됩니다(헤더 드롭다운에 이 순서로 보입니다).
                   이름을 누르면 그 채널로 <b>편집 대상이 바뀝니다</b> —
                   <b style={{ color: 'var(--danger)' }}>저장하지 않은 변경은 사라집니다.</b>
                 </Hint>
-                <div style={{ maxHeight: 250, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
+                <div data-testid="ch-list-box" style={{ flex: '1 1 0', minHeight: 120, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8, padding: 6 }}>
                   {(presets || []).map((p, i) => {
                     const editing = p.name === ((ch._raw && ch._raw.name) || ch.name);
                     return (
@@ -6794,7 +6794,7 @@ export default function App() {
                     : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</Hint>
                 </div>
                 {/* 🖼 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 🎨 제작 도구 탭은 높이가 넘쳐 🏠 기본으로 · 값·저장은 그대로 presetPrompt) */}
-                <div className="frow"><label>이미지 사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
+                <div className="frow"><label>이미지<br />사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
               </div>)}
 
               {/* 🎙 음성 탭(v0.6.80 정리) — ① 이 채널 목소리 요약(엔진·목소리 · 「🔊 음성 설정」에서 바꾼다) ② OmniVoice 참조음성(OmniVoice 일 때만)
