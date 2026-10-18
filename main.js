@@ -11852,6 +11852,8 @@ ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고
   return { ok: !!(r && r.ok), reason: r && r.reason };
 });
 ipcMain.handle('license-open-site', () => { try { shell.openExternal(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
+// 👑 관리자 페이지 열기(v0.9.79) — 로이(관리자 계정)에게만 · 회원 PC 에서는 열지 않는다(주소는 공개돼 있어도 사이트가 관리자만 들인다)
+ipcMain.handle('license-open-admin', () => { if (!isOwner()) return false; try { shell.openExternal(require('./core/license').SITE_ADMIN); } catch (_) {} return true; });
 ipcMain.handle('open-logs', async () => {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
   shell.openPath(LOG_DIR);

@@ -19,6 +19,7 @@ const SUPABASE_URL = 'https://tvvcwhxullrwpsitmyep.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_feodjOad34xOpdoIcRp8IQ_TgcI2k80';
 const UPDATE_BASE = 'https://updates.primingwave.com';
 const SITE_DEVICES = 'https://www.primingwave.com/member/devices';
+const SITE_ADMIN = 'https://www.primingwave.com/admin/priming';   // 👑 관리자 화면(회원·기기·포인트 지급·오류) — wise-priming src/app/admin/priming · 로그인은 사이트 관리자 계정
 const GRACE_MS = 7 * 24 * 3600 * 1000;
 
 const apiBase = () => process.env.PM_LICENSE_API || SUPABASE_URL;
@@ -154,4 +155,4 @@ function forApp() {
   });
 }
 
-module.exports = { createLicense, forApp, pointsOf, SITE_DEVICES, GRACE_MS };
+module.exports = { createLicense, forApp, pointsOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
