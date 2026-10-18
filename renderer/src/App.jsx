@@ -5846,14 +5846,17 @@ export default function App() {
   })();
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
   const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
-  const lt = isBk ? 'log' : logTab;   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그만
+  const lt = isBk ? (logTab === 'ask' ? 'ask' : 'log') : logTab;   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그 · 💬 질문
   const selectedStyle = styles.find((s) => s.id === styleId);
   const selectedSample = styleSamples[styleId];
   const selectedStyleName = selectedStyle?.name || (styleId === SCRIPT_STYLE_ID ? '대본스타일' : '스타일 없음');
   const logBox = (
         <aside id="logwrap" className={logDocked ? 'docked' : ''}>
             <div id="logbar">
-              {isBk ? <b>로그</b> : <span className="logtabs">
+              {isBk ? <span className="logtabs">
+                <button data-testid="logtab-log" className={lt === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
+                <button data-testid="logtab-ask" className={lt === 'ask' ? 'on' : ''} title="지금 상황(로그)을 보고 프로그램이 답해 줍니다" onClick={() => pickLogTab('ask')}>💬 질문</button>
+              </span> : <span className="logtabs">
                 <button data-testid="logtab-thumb" className={logTab === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
                 <button data-testid="logtab-log" className={logTab === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
                 <button data-testid="logtab-ask" className={logTab === 'ask' ? 'on' : ''} title="지금 상황(로그·큐)을 보고 프로그램이 답해 줍니다 — 예: 왜 1028 은 진행을 안 했어?" onClick={() => pickLogTab('ask')}>💬 질문</button>

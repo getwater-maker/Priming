@@ -752,7 +752,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   if (!loaded) {
     return (
       <div className="bkwrap" ref={wrapRef}>
-        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 종이책 · 전자책)가 나타납니다.</div></div><div className="bklog">{logBox}</div></div>
+        <div className="bkside"><div className="bkbody"><div className="meta">원고를 열면 메뉴(구조 · 책 정보 · 판권 · 표지 · 조판 · 종이책 · 전자책)가 나타납니다.</div></div></div>
         <div className="bkcenter"><div className="bkempty">
           <h2>📖 출판 — MD 원고 → 종이책 · 전자책</h2>
           <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>

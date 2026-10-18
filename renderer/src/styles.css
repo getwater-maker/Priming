@@ -359,6 +359,7 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 📜 로그 탭 — 패널 높이 전체를 로그가 쓴다 */
 .bkbody.is-log{display:flex;padding:8px;overflow:hidden}
 .bklog-tab{flex:1;padding:0}
+.bklog-tab #logbar{flex-wrap:wrap;row-gap:4px}   /* 출판 왼쪽 패널(좁음) — 탭 둘 + 단추 셋이 넘치면 줄바꿈 */
 /* 📐 등록·유통 넓은 패널 배치(v0.9.55) — 카드 + 종이책|전자책 두 칸 */
 .bkcard{border:1px solid var(--line);border-radius:10px;background:#fdfaf4;padding:10px 12px;margin-top:10px}
 .bkcard-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--strong);margin-bottom:8px}
