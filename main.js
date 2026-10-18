@@ -11809,9 +11809,11 @@ function licPublic(s) {
     devices: (s.devices || []).map((d) => ({ name: d.name || '', lastSeen: d.last_seen || null, me: d.device_id === (LIC.L ? LIC.L.deviceId() : '') })),
     autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, owner: isOwner(), site: require('./core/license').SITE_DEVICES };
 }
-async function licCheck(why) {
+async function licCheck(why, quiet) {
+  const prevOk = !!(LIC.state && LIC.state.ok);
   const s = await licApi().check();
   LIC.state = s;
+  if (quiet && s.ok && prevOk) { licStartReporter(); return s; }   // v0.9.80 — 포인트 갱신용 잦은 확인(1분)은 상태가 그대로면 로그를 남기지 않는다
   log(s.ok ? `🔐 회원 확인 ✓${s.admin ? ' (관리자)' : ''}${s.offline ? ' — 인터넷 연결 없음 · 여유 기간' : ''}${s.expiresAt ? ' · 만료 ' + String(s.expiresAt).slice(0, 10) : ''}`
     : `🔐 회원 확인 — ${({ logged_out: '로그인 필요', bad_login: '이메일·비밀번호가 맞지 않음', not_member: '회원 기간 없음', expired: '회원 기간 만료', device_limit: 'PC 대수 초과', offline: '인터넷 연결 없음(여유 기간 지남)' })[s.reason] || s.reason}${why ? ' · ' + why : ''}`);
   licStartReporter();
@@ -11832,7 +11834,7 @@ function licStartReporter() {
 function _diskVersion() { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || ''; } catch (_) { return ''; } }
 app.whenReady().then(() => { if (LIC.enforce) LIC.ready = licCheck('앱 시작').catch((e) => { LIC.state = { ok: false, reason: 'error' }; log('🔐 회원 확인 중 문제: ' + e.message); }); });
 ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licPublic(LIC.state); });
-ipcMain.handle('license-recheck', async () => { if (LIC.enforce) await licCheck('다시 확인'); return licPublic(LIC.state); });
+ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licPublic(LIC.state); });
 ipcMain.handle('license-login', async (_e, a = {}) => {
   if (!LIC.enforce && !process.env.PM_LICENSE_API) return licPublic(LIC.state);
   const s = await licApi().login(a.email, a.password);
