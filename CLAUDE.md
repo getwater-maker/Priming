@@ -126,6 +126,7 @@
 ### 이미지
 - 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(첫 항목 = 🖥 Qwen 2.1 로컬 / ☁ MiniMax R2V · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
 - 🙈 **사용자 화면에 서비스 이름(kie)·달러 가격을 보이지 않는다**(로이 2026-10-17 — 판매용) — 목록 묶음은 「AI 이미지」·「AI 영상」, 항목은 `☁ 모델 이름` · 로그·오류도 「AI 이미지/영상」·「생성 서비스」 · kie 키 칸과 키 안내는 관리자(`owner`/`isOwner()`)에게만 · 차감 표시는 포인트 기준이 정해지면 그때(`test:ribbonlead`).
+- 📐 **좁은 창(≤1300px) 규칙은 `styles.css` 맨 끝 「v0.9.73」 블록 한 곳** — ② 칸 최소 폭·헤더 `.lbl`·리본 촘촘히를 다른 곳에 따로 두지 말 것(1075px 에서 헤더·리본·#body 가로 넘침 0 이 기준 · 헤더 버튼 글자는 `<span className="lbl">` 로 감싸면 좁을 때 아이콘만).
 - 📐 **리본 첫 칸(📂 열기 · 이미지 도구 · 비디오 도구)은 메뉴를 바꿔도 같은 x** — 줄 첫 이름표 폭 고정(styles.css `.ribbon > .hgroup:first-child > .glabel`) · 도구 선택은 이름표 바로 뒤 · `test:ribbonlead`.
 - 🆕 **Qwen-Image 2.1 Turbo (☁ 클라우드 · 🖥 로컬 둘 다 · v0.9.65)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
 - 👤 **Qwen 인물 참조 = 얼굴 시트(`characters/<이름>.face.png`) + `char-refs.refGate` 를 통과한 장면만**(v0.7.84 · 샷 크기 낱말 close-up·medium 이 없거나 원경·군중·3명+·18세 미만·카드와 10살+ 차이면 안 붙인다 — ⛔ 지시문만으로 풀려고 게이트를 넓히지 말 것: P0 에서 안 막혔다 · 설계안 `docs/인물일관성-Qwen-설계.md`).

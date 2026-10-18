@@ -5950,14 +5950,14 @@ export default function App() {
             <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
           </div>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
-              style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙ 설정</button>
+              style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙<span className="lbl"> 설정</span></button>
             {isBk && (<>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
               <button className="ghost" disabled={!loaded} title="원고 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
               <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
             </>)}
           {!isBk && (
-            <button className="ghost reset-btn" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕 초기화</button>
+            <button className="ghost reset-btn" title="새 작업 — 현재 화면 비우기 (작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}>🆕<span className="lbl"> 초기화</span></button>
           )}
           {!noProduction && (<>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0); return (<>
@@ -5974,7 +5974,7 @@ export default function App() {
           </>)}
         </div>
         {!noProduction && (
-          <div className="ribbon" data-testid="ribbon" data-menu-on={menu}>
+          <div className="ribbon" data-testid="ribbon" data-menu-on={menu} onWheel={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY; }}>
             {menu === 'script' && (<>
           <span className="hgroup">
             <span className="glabel">① 대본·음성</span>
