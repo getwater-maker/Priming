@@ -75,7 +75,7 @@ const T = (s) => Date.parse(s);   // 'YYYY-MM-DDTHH:MM:SS+09:00' → 순간
   ok(row(r).status === 'ok' && /18:00/.test(row(r).detail), '유튜브가 같은 시각을 돌려주면 ✅');
   G.videoStatus = { privacyStatus: 'private' };
   r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan, token });
-  ok(row(r).status === 'fail' && /심사/.test(row(r).detail), '판정력: 예약이 없으면 ⚠ (조용히 성공 처리하지 않는다)');
+  ok(row(r).status === 'fail' && /구글이 예약을 받지 않았습니다/.test(row(r).detail) && !/심사/.test(row(r).detail), '판정력: 예약이 없으면 ⚠ (조용히 성공 처리하지 않는다 · 「심사 전이라 막힌다」는 옛 안내는 쓰지 않는다)');
   G.videoStatus = { privacyStatus: 'private', publishAt: '2026-10-19T09:00:00Z' };
   r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan, token });
   ok(row(r).status === 'fail', '다른 시각이면 ⚠');

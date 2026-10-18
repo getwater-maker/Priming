@@ -3,10 +3,12 @@
  * youtube-upload.js — 🎬 유튜브 MP4 를 **비공개**로 채널에 올린다 (2026-09-24, v0.5.31)
  *
  * 로이 결정: 업로드 전용 구글 클라우드 프로젝트 「Priming Upload」(분석용 AdonaiRoy 와 분리 — YPP 정지 전염 우려 기록).
- *   앱이 하는 일 = 비공개 업로드 + 제목 + 설명 + AI 합성 표시. 공개·예약·썸네일·재생목록은 로이가 Studio 에서.
+ *   앱이 하는 일 = 비공개(또는 채널 설정에서 켠 예약 공개) 업로드 + 제목 + 설명 + AI 합성 표시 + 업로드 뒤 썸네일·재생목록(yt-finish). 고정댓글·종료화면은 Studio 에서.
  *
- * 🔑 미심사(unverified) 프로젝트라 **API 로 올린 영상은 구글이 비공개로 강제한다** — public 을 보내도 소용없다.
- *   그래서 처음부터 private 로 보낸다(요청과 결과가 같아야 로그가 거짓말을 안 한다).
+ * 🔑 ⚠ **「미심사 프로젝트는 API 영상이 비공개로 잠긴다」는 옛 믿음은 틀렸다**(2026-10-19 실측): 구글 공식 문서(videos.insert)는
+ *   「Videos uploaded from unverified API projects are not restricted to private viewing mode」라고 적고 있고, 이 프로젝트가
+ *   API 로 올린 영상을 Studio 에서 「일부 공개」로 바꿀 수 있었다(잠금 없음). 앱이 private 만 보내는 것은 **로이의 선택(안전한 기본값)** 이다.
+ *   예약은 private + publishAt 으로 보낸다(구글 규칙) — 올린 뒤 videos.list 로 다시 읽어 확인한다(yt-finish).
  *
  * 저장(이 PC 에만): ~/.priming-maker/youtube-auth.json
  *   { v, client: <암호화된 {clientId, clientSecret, projectId}>, channels: { <채널ID>: { title, handle, refresh: <암호화>, connectedAt } } }
@@ -528,7 +530,7 @@ async function uploadVideo(o = {}) {
       defaultAudioLanguage: o.language || 'ko',
     },
     status: {
-      privacyStatus: 'private',                          // 🔑 미심사 프로젝트는 어차피 비공개로 강제된다 · 예약(publishAt)도 private 과 함께 보낸다
+      privacyStatus: 'private',                          // 🔑 안전한 기본값(로이 선택 — 구글이 강제하는 것이 아니다) · 예약(publishAt)도 private 과 함께 보낸다
       selfDeclaredMadeForKids: !!o.madeForKids,          // 아동용 아님(로이 채널 기본) — Studio 에서 바꿀 수 있다
       containsSyntheticMedia: o.synthetic !== false,     // 🤖 「변경되거나 합성된 콘텐츠」 = 예 (AI 음성·이미지)
     },

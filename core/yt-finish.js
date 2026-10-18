@@ -211,7 +211,7 @@ async function finishVideo(o) {
         const st = ((j.items || [])[0] || {}).status || {};
         const want = Date.parse(plan.schedule.publishAt), got = Date.parse(st.publishAt || '');
         if (Number.isFinite(got) && Math.abs(got - want) < 60000) add('schedule', '예약', 'ok', `${plan.schedule.kst} (KST) 공개 예약 적용됨 — 유튜브가 돌려준 값과 일치(${st.privacyStatus || 'private'})`);
-        else add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약을 실었지만 유튜브에 예약이 없습니다(공개 상태 ${st.privacyStatus || '?'}) — 구글 API 심사 전이면 예약이 막힐 수 있습니다. Studio 에서 직접 예약하세요`);
+        else add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약을 실었지만 유튜브에 예약이 없습니다(공개 상태 ${st.privacyStatus || '?'}) — 구글이 예약을 받지 않았습니다. Studio 에서 직접 예약하세요`);
       }
     } catch (e) { add('schedule', '예약', 'fail', `${plan.schedule.kst} 예약 확인 실패 — ${e.message}`); }
   }

@@ -6940,7 +6940,7 @@ export default function App() {
                           <button data-testid="ch-yt-sched-on" aria-pressed={!!(ch.ytSchedule && ch.ytSchedule.on)} className={'dl-tg' + (ch.ytSchedule && ch.ytSchedule.on ? ' on' : '')} onClick={() => setCh({ ...ch, ytSchedule: { time: '18:00', ...(ch.ytSchedule || {}), on: !(ch.ytSchedule && ch.ytSchedule.on) } })}>{ch.ytSchedule && ch.ytSchedule.on ? '✓ 예약' : '예약 끔'}</button>
                           <input data-testid="ch-yt-sched-time" type="time" style={{ flex: '0 0 92px' }} value={(ch.ytSchedule && ch.ytSchedule.time) || '18:00'} disabled={!(ch.ytSchedule && ch.ytSchedule.on)} onChange={(e) => setCh({ ...ch, ytSchedule: { ...(ch.ytSchedule || {}), time: e.target.value } })} /><span className="meta">KST</span>
                         </span>
-                        <Hint>⏰ <b>예약</b>을 켜면 올릴 때 공개 시각을 함께 보냅니다(하루 한 편 · 여러 편이면 다음 날로 이어 붙임 · 시각은 한국 시간). 올린 뒤 유튜브에 예약이 <b>실제로 잡혔는지 다시 읽어</b> 로그에 ✅/⚠ 로 적습니다. 끄면 예전처럼 비공개로만 올립니다. ⚠ 구글 API 심사 전에는 예약이 막힐 수 있습니다(그땐 ⚠ 로 알려 줍니다).</Hint>
+                        <Hint>⏰ <b>예약</b>을 켜면 올릴 때 공개 시각을 함께 보냅니다(하루 한 편 · 여러 편이면 다음 날로 이어 붙임 · 시각은 한국 시간). 올린 뒤 유튜브에 예약이 <b>실제로 잡혔는지 다시 읽어</b> 로그에 ✅/⚠ 로 적습니다. 끄면 예전처럼 비공개로만 올립니다. 예약이 안 잡혔으면 ⚠ 로 알려 줍니다.</Hint>
                         <input data-testid="ch-yt-playlist" placeholder="재생목록 이름" value={ch.ytPlaylist || ''} onChange={(e) => setCh({ ...ch, ytPlaylist: e.target.value })} />
                         <Hint>🧷 업로드가 끝나면 썸네일 A 와 이 <b>재생목록</b>을 앱이 넣고 다시 읽어 확인합니다. 이름은 유튜브의 재생목록 제목과 <b>똑같이</b> 적으세요. 패키징 「## 재생목록」이나 고정댓글의 재생목록 링크가 있으면 그것이 먼저입니다. 고정댓글·썸네일 A/B·종료화면·예약은 Studio 에서 합니다.</Hint>
                       </div>
