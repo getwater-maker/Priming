@@ -5389,7 +5389,7 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
-    if (owner && (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine))) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭(관리자에게만 보인다)
+    if (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine)) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭(회원도 자기 키를 넣는다 · v0.9.76)
     if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
     if (imgEngine === 'gemini' || imgEngine === 'gemini-batch') return 'keys';
     return 'flow';
@@ -7294,7 +7294,8 @@ export default function App() {
                 <Hint>각 키 옆 「✔ 검증」은 그 키만 확인합니다. 읽기 전용 조회라 요금이 들지 않습니다.</Hint>
               </div>
               {/* 🧩 kie.ai(유료 · v0.9.66) — 헤더 ② 이미지 · ③ 비디오의 「kie」 항목이 이 키로 만든다 · secret-store 'kie' · 원문은 다시 보이지 않는다(끝 4자리만) */}
-              {owner && <div data-testid="kie-key" className="kp-card">
+              {/* v0.9.76 — 회원도 자기 kie 키를 넣는다(kie 지원팀 2026-10-18 허용 · 키는 kie.ai 에서 받으므로 이 칸에는 서비스 이름이 보인다 — 목록·로그의 이름 숨김은 그대로) */}
+              <div data-testid="kie-key" className="kp-card">
                 <div className="kp-line">
                   <b className="kp-name">🧩 kie.ai (이미지 · 비디오)</b>
                   <Hint>kie.ai → API Key 에서 만든 키입니다. 헤더 「② 이미지」·「③ 비디오」에서 <b>kie</b> 항목을 고르면 이 키로 만듭니다. 충전한 크레딧에서 쓴 만큼 빠지고, 실패한 작업은 빠지지 않습니다. 「✔ 검증」은 남은 크레딧만 조회해 요금이 들지 않습니다.</Hint>
@@ -7310,7 +7311,7 @@ export default function App() {
                 </div>
                 {keyChkMark('kie')}
                 {kieKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{kieKey.msg}</div>}
-              </div>}
+              </div>
               {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
               <div className="kp-card">
                 <div className="kp-line">

@@ -4216,8 +4216,8 @@ async function runGrokApiVideos(pr, mediaDir, onlyNums) {
 
 // 🧩 kie.ai (v0.9.66 · 로이 2026-10-17 「장기적으로 kie 하나로 운영」) — 이미지·비디오 엔진 값 `kie:<모델>` · 요청·대기·받기는 core/kie-api 한 곳
 //   원격 API 라 로컬 GPU 레인을 잡지 않는다 · 동시 3개(kie 한도 10초에 20건 안쪽) · 크레딧 부족이면 남은 것을 만들지 않고 멈춘다.
-// 사용자에게는 서비스 이름(kie)을 보이지 않는다(로이 2026-10-17 — 판매용) · 키를 넣는 곳은 관리자 화면에만 있다
-function _kieNoKeyMsg() { return isOwner() ? '⚠ AI 생성 서비스 키가 없습니다 — ⚙ 설정 → 🔑 API 키 → 🧩 kie.ai 에 붙여넣으세요' : '⚠ AI 생성 서비스에 연결되어 있지 않습니다 — 관리자에게 문의하세요'; }
+// 목록·로그에는 서비스 이름(kie)을 보이지 않는다(로이 2026-10-17 — 판매용) · 키 칸은 회원에게도 열려 있다(v0.9.76 — 회원이 본인 kie 키를 넣는다)
+function _kieNoKeyMsg() { return '⚠ AI 생성 서비스 키가 없습니다 — ⚙ 설정 → 🔑 API 키 → 🧩 kie.ai 에 본인 키를 붙여넣거나, 로컬(🖥) 도구로 바꿔 쓰세요'; }   // v0.9.76 — 회원도 본인 키(kie 지원팀 허용 2026-10-18)
 async function _kiePool(items, conc, fn) {
   let i = 0;
   const run = async () => { while (i < items.length && !S.abort) { const it = items[i++]; await fn(it); } };
