@@ -5345,6 +5345,19 @@ function _batchRemaining(plan, from, items) {
   }
   return n;
 }
+// 🛫 큐 사전 점검 — 만들기를 누른 순간 모든 대본을 먼저 훑어, 시작하면 곧 막힐 대본(🟥 미확인 경험)을 미리 찾는다(v0.9.75 · 앞 대본을 몇 시간 만든 뒤 뒷 대본에서 멈추는 낭비 방지)
+//   royInfo(parsed) → {open, lostOpen}. 건너뛸 대본(이미 완료·대본 없음)은 점검하지 않는다. 순수 함수 — 테스트가 원문을 뽑아 실행한다.
+function _batchPreflight(plan, items, royInfo) {
+  const out = [];
+  for (let i = 0; i < plan.length; i++) {
+    const it = (items || []).find((x) => x && plan[i] && x.id === plan[i].id);
+    if (!it || !it.parsed) continue;
+    if (it.status === 'done' && it.run && it.run.completed) continue;
+    const r = royInfo(it.parsed) || {};
+    if (r.open > 0) out.push({ idx: i + 1, id: it.id, label: (it.parsed.fileTitle) || it.scriptPath || it.id, reason: `🟥 미확인 경험 ${r.open}곳` });
+  }
+  return out;
+}
 // 🔗 영상 참조가 비었는데 출력 폴더(media-N)에 그 그룹 번호의 영상이 남아 있으면 다시 잇는다(v0.5.49 · 아내 PC 실사고).
 //   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(Grok·Comfy 크레딧 보호).
 //   ⚠ ✕ 로 지운 영상(videoCleared)은 파일이 남아 있어도 되살리지 않는다. 그림이 없는 그룹도 건드리지 않는다.
@@ -8027,8 +8040,33 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
   const common = args.common || {};
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
+  // 🛫 사전 점검 — 하나라도 막히면 시작 전에 알린다(dry 는 royGate 도 건너뛰므로 점검도 안 한다)
+  if (!(process.env.PM_UI_SMOKE && common.dry)) {
+    const blocked = _batchPreflight(plan, S.modes.longform.items, royOpenInfo);
+    if (blocked.length) {
+      log(`🛫 사전 점검 — 만들기 전에 막히는 대본 ${blocked.length}편: ` + blocked.map((b) => `[${b.idx}/${plan.length}] ${b.label} (${b.reason})`).join(' / '));
+      const lines = blocked.map((b) => `• [${b.idx}번째] ${b.label} — ${b.reason}`).join('\n');
+      let skip = false;
+      try {
+        const c = await dialog.showMessageBox(win, {
+          type: 'warning', title: '🛫 만들기 전 점검', buttons: ['멈춤 (먼저 고치기)', '막힌 대본 빼고 진행'], defaultId: 0, cancelId: 0, noLink: true,
+          message: `큐의 ${plan.length}편 중 ${blocked.length}편은 지금 만들 수 없습니다.`,
+          detail: `${lines}\n\n📄 대본 보기에서 🟥 문단을 실제 일로 고치거나 「사실 확인」을 누르면 풀립니다.\n「막힌 대본 빼고 진행」을 누르면 위 대본은 건너뛰고 나머지를 만듭니다.`,
+        });
+        skip = c.response === 1;
+      } catch (_) { skip = false; }
+      if (!skip) {
+        log('⏹ 사전 점검에서 멈춤 — 아무 대본도 시작하지 않았습니다(막힌 대본을 고친 뒤 ⚡ 만들기를 다시 누르세요)');
+        return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: false, failed: 0, stoppedEarly: false, blocked: blocked.map((b) => ({ id: b.id, label: b.label, reason: b.reason })), remaining: _batchRemaining(plan, 0, S.modes.longform.items) };
+      }
+      const bad = new Set(blocked.map((b) => b.id));
+      for (let k = plan.length - 1; k >= 0; k--) if (plan[k] && bad.has(plan[k].id)) plan.splice(k, 1);
+      log(`⚠ 막힌 대본 ${blocked.length}편을 빼고 나머지 ${plan.length}편을 만듭니다`);
+      if (!plan.length) return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: false, failed: 0, stoppedEarly: false, remaining: 0 };
+    }
+  }
   S.abort = false;
-  _mp4DupAll = null;                         // 지난 큐의 「이번 큐 나머지도 같게」 선택이 남지 않게
+  _mp4DupAll = null;                        // 지난 큐의 「이번 큐 나머지도 같게」 선택이 남지 않게
   _stopAfterItem = false;                    // 지난 큐의 「이번 편까지만」 예약이 남아 새 큐가 첫 편 뒤에 멈추지 않게
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
   { const _mix = require('./core/queue-channel').channelMix(plan.map((e) => S.modes.longform.items.find((x) => x.id === e.id)).filter(Boolean), common.presetName);
