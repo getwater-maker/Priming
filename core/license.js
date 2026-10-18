@@ -33,6 +33,9 @@ function pointsOf(j) {
   return granted == null && remaining == null ? null : { granted, remaining };
 }
 
+// 🪙 kie 보유 크레딧(관리자에게만) — 서버가 priming_license 에 kie_credits 를 주면 그 숫자, 없으면 null(v0.9.82)
+function kieOf(j) { const v = j && j.kie_credits; return v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v); }
+
 function createLicense(opts = {}) {
   const dir = opts.dir || defaultDir();
   const doFetch = opts.fetch || ((...a) => fetch(...a));
@@ -99,7 +102,7 @@ function createLicense(opts = {}) {
       const st = readState();
       const exp = st.expiresAt ? Date.parse(st.expiresAt) : null;
       if (st.lastOkAt && now() - st.lastOkAt < GRACE_MS && !(exp && exp < now())) {
-        return { ok: true, offline: true, admin: !!st.admin, email: s.email, expiresAt: st.expiresAt || null, graceUntil: st.lastOkAt + GRACE_MS, points: st.points || null };
+        return { ok: true, offline: true, admin: !!st.admin, email: s.email, expiresAt: st.expiresAt || null, graceUntil: st.lastOkAt + GRACE_MS, points: st.points || null, kie: st.kie == null ? null : st.kie };
       }
       return { ok: false, offline: true, reason: 'offline', email: s.email };
     };
@@ -113,8 +116,8 @@ function createLicense(opts = {}) {
     } catch (_) { return offlineState(); }
     if (r.status === 401) { clearSession(); return { ok: false, reason: 'logged_out' }; }
     if (!r.ok || !j || typeof j !== 'object') return offlineState();
-    const out = { ok: !!j.ok, admin: !!j.admin, email: s.email, expiresAt: j.expires_at || null, reason: j.reason || null, deviceLimit: j.device_limit == null ? null : j.device_limit, devices: Array.isArray(j.devices) ? j.devices : [], points: pointsOf(j) };
-    if (out.ok) writeState({ lastOkAt: now(), admin: out.admin, expiresAt: out.expiresAt, email: s.email, points: out.points });
+    const out = { ok: !!j.ok, admin: !!j.admin, email: s.email, expiresAt: j.expires_at || null, reason: j.reason || null, deviceLimit: j.device_limit == null ? null : j.device_limit, devices: Array.isArray(j.devices) ? j.devices : [], points: pointsOf(j), kie: kieOf(j) };
+    if (out.ok) writeState({ lastOkAt: now(), admin: out.admin, expiresAt: out.expiresAt, email: s.email, points: out.points, kie: out.kie });
     else writeState({ lastOkAt: 0 });
     return out;
   }
@@ -155,4 +158,4 @@ function forApp() {
   });
 }
 
-module.exports = { createLicense, forApp, pointsOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
+module.exports = { createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };

@@ -11805,7 +11805,7 @@ ipcMain.handle('append-log', (_e, line) => { logToFile(`[화면] ${String(line)}
 function licPublic(s) {
   s = s || {};
   return { enforced: LIC.enforce, ok: licOk(), member: !!s.ok, admin: !!s.admin, email: s.email || '', expiresAt: s.expiresAt || null,
-    points: s.points || null, reason: s.reason || null, offline: !!s.offline, graceUntil: s.graceUntil || null, deviceLimit: s.deviceLimit == null ? null : s.deviceLimit,
+    points: s.points || null, kie: s.kie == null ? null : s.kie, reason: s.reason || null, offline: !!s.offline, graceUntil: s.graceUntil || null, deviceLimit: s.deviceLimit == null ? null : s.deviceLimit,
     devices: (s.devices || []).map((d) => ({ name: d.name || '', lastSeen: d.last_seen || null, me: d.device_id === (LIC.L ? LIC.L.deviceId() : '') })),
     autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, owner: isOwner(), site: require('./core/license').SITE_DEVICES };
 }

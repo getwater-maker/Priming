@@ -704,13 +704,13 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   // 👑 로이(관리자) PC 인가(v0.9.27) — 로이 전용 안내(아도나이로이 대시보드 등)는 회원 화면에 보이지 않게 · 개발 실행·E2E 는 로이 PC
   const [owner, setOwner] = useState(true);
-  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // 🪙 회원 포인트(지급 · 남음) — 5분마다 다시 읽는다(v0.9.72). 서버가 값을 안 주는 회원(원장이 비어 있음)·서버가 아직 준비 전이어도
   //   설치본(회원 확인을 켠 앱)에서는 칸이 보인다(v0.9.78 — 「포인트 0」· 관리자 「제한 없음」) · 개발 실행·E2E(확인 끔)는 숨김
   const [points, setPoints] = useState(null);
   const [licKind, setLicKind] = useState(null);   // { enforced, admin } — 포인트 칸을 보일지 · 문구 판단용
   // v0.9.80 — 관리자가 포인트를 줘도 앱을 껐다 켜야 보이던 것: 1분마다(창이 보일 때만) · 창을 다시 누를 때 · 포인트 칸을 누를 때 바로 다시 읽는다
-  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin } : null); } catch (_) {} };
+  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie } : null); } catch (_) {} };
   useEffect(() => {
     let last = 0;
     const tick = () => { if (document.visibilityState !== 'visible') return; last = Date.now(); refreshPoints(true); };
@@ -723,17 +723,18 @@ export default function App() {
   const pointsEl = (points || (licKind && licKind.enforced)) ? (() => {
     if (!points) {   // 서버가 포인트 값을 주지 않음 — 관리자는 제한 없음 · 회원은 0(아직 지급받지 않음)
       const adm = !!(licKind && licKind.admin);
+      const kieTxt = adm && licKind.kie != null ? <> · kie 보유 <b>{Number(licKind.kie).toLocaleString()}</b></> : null;
       return <span className="pts" data-testid="member-points" data-empty="1" onClick={() => refreshPoints(false)}
-        title={(adm ? '관리자 계정 — 포인트 제한 없이 씁니다.' : '아직 지급받은 포인트가 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 포인트 없이 쓸 수 있습니다.') + '\n(누르면 바로 새로고침)'}
+        title={(adm ? '관리자 계정 — 포인트 제한 없이 씁니다.' + (licKind.kie != null ? '\nkie 보유 크레딧: ' + Number(licKind.kie).toLocaleString() : '') : '아직 지급받은 포인트가 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 포인트 없이 쓸 수 있습니다.') + '\n(누르면 바로 새로고침)'}
         style={{ padding: '3px 9px', borderRadius: 6, background: '#fff6dc', color: '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
-        {adm ? <>🪙 제한 없음 · 보유 <b>0</b></> : <>🪙 남은 <b>0</b> / 지급 0</>}</span>;
+        {adm ? <>🪙 제한 없음{kieTxt}</> : <>🪙 남은 <b>0</b> / 지급 0</>}</span>;
     }
     const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
     if (licKind && licKind.admin) {   // v0.9.81 — 관리자는 포인트가 있어도 「제한 없음」이 먼저 · 보유 포인트(있으면)는 함께
       return <span className="pts" data-testid="member-points" data-admin="1" onClick={() => refreshPoints(false)}
-        title={`관리자 계정 — 포인트 제한 없이 씁니다.\n보유 포인트: 남은 ${f(points.remaining)} / 지급 ${f(points.granted)}\n(누르면 바로 새로고침)`}
+        title={`관리자 계정 — 포인트 제한 없이 씁니다.${licKind.kie != null ? '\nkie 보유 크레딧: ' + f(licKind.kie) : ''}\n회원 포인트: 남은 ${f(points.remaining)} / 지급 ${f(points.granted)}\n(누르면 바로 새로고침)`}
         style={{ padding: '3px 9px', borderRadius: 6, background: '#fff6dc', color: '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
-        🪙 제한 없음 · 보유 <b>{f(points.remaining)}</b></span>;
+        🪙 제한 없음{licKind.kie != null ? <> · kie 보유 <b>{f(licKind.kie)}</b></> : null}</span>;
     }
     const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
     return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 포인트 — 지급받은 포인트 ${f(points.granted)} 중 남은 포인트 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 바로 새로고침)`}
