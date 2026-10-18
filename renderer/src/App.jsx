@@ -10,6 +10,7 @@ import VLook from '../../core/visual-look.js';
 import VSpan from '../../core/visual-span.js';
 import ClipJoin from '../../core/clip-join.js';
 import FollowT from '../../core/follow-target.js';
+import MenuFollow from '../../core/menu-follow.js';
 import KM from '../../core/kie-models.js';
 import BookView from './BookView.jsx';
 import { BookMailConnect } from './BookMail.jsx';
@@ -703,7 +704,20 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   // 👑 로이(관리자) PC 인가(v0.9.27) — 로이 전용 안내(아도나이로이 대시보드 등)는 회원 화면에 보이지 않게 · 개발 실행·E2E 는 로이 PC
   const [owner, setOwner] = useState(true);
-  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // 🪙 회원 포인트(지급 · 남음) — 서버가 값을 주는 회원에게만 보인다. 5분마다 다시 읽는다(v0.9.72)
+  const [points, setPoints] = useState(null);
+  useEffect(() => {
+    const t = setInterval(async () => { try { const s = await api.licenseRecheck(); setPoints(s && s.points ? s.points : null); } catch (_) {} }, 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+  const pointsEl = points ? (() => {
+    const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
+    const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
+    return <span className="pts" data-testid="member-points" title={`내 포인트 — 지급받은 포인트 ${f(points.granted)} 중 남은 포인트 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}`}
+      style={{ padding: '3px 9px', borderRadius: 6, background: low ? '#fde8e8' : '#fff6dc', color: low ? '#a3352b' : '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center' }}>
+      🪙 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
+  })() : null;
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
   const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt' | 'folders'(📁 공통 폴더 · v0.9.16)  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
   const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
@@ -4082,6 +4096,16 @@ export default function App() {
     if (act !== stageRun.id && followRef.current.lastSel !== stageRun.id) { followRef.current.lastSel = stageRun.id; selectQueueItem(stageRun.id); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageRun, followOff]);
+  // 🧭 리본 메뉴 따라가기(v0.9.72) — 돌아가는 작업에 맞춰 대본·음성 / 이미지 / 비디오 / 완성 메뉴를 연다(동시에 돌면 core/menu-follow 의 우선순위)
+  //   사람이 메뉴를 직접 누르면 그대로 둔다 — 따라갈 메뉴가 **바뀔 때만** 다시 옮긴다(같은 작업 도중 되돌리지 않는다).
+  const menuFollowRef = useRef(null);
+  useEffect(() => {
+    const top = MenuFollow.pick({ make: makeProg, stage: stageRun, mp4: mp4Prog, yt: ytProg });
+    if (top === menuFollowRef.current) return;
+    menuFollowRef.current = top;
+    if (top && mode === 'longform') setMenu(top);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [makeProg, stageRun, mp4Prog, ytProg]);
   // 📍 ⚡ 만들기 — 만드는 대본으로 옮기고, ① = 방금 완성된 그림·영상 그룹 · ② = 지금 음성을 만드는 문장(core/follow-target)
   useEffect(() => {
     const P = makeProg, F = followRef.current;
@@ -5870,6 +5894,7 @@ export default function App() {
             </span>
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
             {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
+            {noProduction && pointsEl}
             {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
           {!noProduction && (
             <nav className="menus" data-testid="menus">
@@ -6160,6 +6185,7 @@ export default function App() {
             {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
             <span className="hgroup rb-reader">
               {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}
+              {pointsEl}
               <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
               {/* 📥 다운로드(v0.9.17 · 옛 「📥 대본다운」 + 🎧 STT + 🎵 mp3 통합) — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞). 대본이 없어도 쓴다(받는 중만 막힘). */}
               <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>
