@@ -764,7 +764,7 @@ export default function App() {
 
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
-  const [chTab, setChTab] = useState('basic'); // 채널편집 탭 (basic·voice·caption·tools·folder)
+  const [chTab, setChTab] = useState('basic'); // 채널편집 탭 (list·basic(기본·음성)·caption·tools·folder)
   // 채널 설정이 저장될 때마다 +1 — 채널 값을 읽어 쓰는 화면이 이걸 보고 다시 읽는다.
   const [presetRev, setPresetRev] = useState(0);
   const [ch, setCh] = useState(null);          // 편집 중 프리셋 폼
@@ -2795,7 +2795,7 @@ export default function App() {
       setChVoiceInfo({ name, id, engLabel: String(e.label || id).replace(/ TTS$/, '').replace(/^(Microsoft|Google) /, ''), vname: vv ? vv.name : String(vid || '').replace(/^srv:/, ''), face: (e.faces || {})[vid] || null, gender: vv && vv.gender });
     } catch { setChVoiceInfo(null); }
   }
-  useEffect(() => { if (chOpen && chTab === 'voice' && ch && ch.name) loadChVoiceInfo(ch.name); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [chOpen, chTab, ch && ch.name]);
+  useEffect(() => { if (chOpen && chTab === 'basic' && ch && ch.name) loadChVoiceInfo(ch.name); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [chOpen, chTab, ch && ch.name]);
   // 🔑 TTS API 키 — ⚙ 설정 → 🔑 API 키 탭(음성 설정 팝업의 「키 넣기」도 여기로 온다)
   async function loadTtsKeys() {
     try { const r = await api.ttsEnginesGet(); if (r) setTtsKeys((x) => ({ ...x, info: r.keys || {}, region: r.region || 'eastus' })); } catch {}
@@ -6726,7 +6726,7 @@ export default function App() {
             {/* 섹션을 세로로 쌓지 않고 탭으로 나눈다 — 스크롤 없이 한 화면에 들어오게 (2026-08-14) */}
             <div className="tabbar">
               {/* 🎬 리모션 채널은 음성만 만든다 — 자막·이미지·비디오가 없으므로 그 두 탭을 감춘다. */}
-              {[['list', '📋 채널'], ['basic', '🏠 기본'], ['voice', '🎙 음성'],
+              {[['list', '📋 채널'], ['basic', '🏠 기본·음성'],
                 ...(ch.startMode === 'remotion' ? [] : [['caption', '📝 자막'], ['tools', '🖼 제작 도구']]),
                 ['folder', '📁 폴더']].map(([id, lbl]) => (
                 <button key={id} className={chTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setChTab(id)}>{lbl}</button>
@@ -6773,98 +6773,112 @@ export default function App() {
                 </div>
               </div>)}
 
-              {chTab === 'basic' && (<div>
-                <div className="frow"><label>채널 이름</label>
-                  <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
-                    onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
-                <div className="frow"><label>그룹(구분)</label>
-                  <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 (비우면 구분 없음)" list="ch-group-list"
-                    onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
-                  <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
-                <div className="frow"><label>시작 화면</label>
-                  <select style={{ flex: '0 0 220px', padding: 6 }}
-                    value={(ch.startMode === 'book' || ch.startMode === 'remotion') ? ch.startMode : 'longform'}
-                    onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
-                    <option value="longform">롱폼 (16:9)</option>
-                    <option value="remotion">🎬 리모션 (음성만)</option>
-                    <option value="book">📖 출판</option>
-                  </select>
-                  <Hint>{ch.startMode === 'remotion'
-                    ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
-                    : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</Hint>
-                </div>
-                {/* 🖼 이미지 사전설정 — 🎙 음성 탭에 있던 것을 여기로(v0.6.80 · 🎨 제작 도구 탭은 높이가 넘쳐 🏠 기본으로 · 값·저장은 그대로 presetPrompt) */}
-                <div className="frow"><label>이미지<br />사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
-              </div>)}
-
-              {/* 🎙 음성 탭(v0.6.80 정리) — ① 이 채널 목소리 요약(엔진·목소리 · 「🔊 음성 설정」에서 바꾼다) ② OmniVoice 참조음성(OmniVoice 일 때만)
-                  ③ 화자별 목소리(OmniVoice 전용) ④ 소리 다듬기(배속·문장무음·음량 — 모든 엔진 공통).
-                  ⚠ 필드·저장(saveChannel)은 그대로 — 배치만 바꿨다. 이미지 「사전설정」은 🎨 제작 도구 탭으로 옮겼다. */}
-              {chTab === 'voice' && (() => {
+              {/* 🏠 기본·음성 탭(v0.9.84 — 옛 🏠 기본 + 🎙 음성을 한 탭으로 · 로이 2026-10-20). 균등 카드(.eqgrid) 5줄, 탭 높이 490px 안(스크롤 없음).
+                  ① 이름·그룹·시작 화면·언어 ② 이미지 사전설정 ③ 이 채널 목소리 요약 ④ 시드·Clone강도·배속·문장무음·음량 ⑤ 🎭 화자별 목소리(OmniVoice 전용).
+                  ⚠ 필드·저장(saveChannel)은 그대로 — 배치만 바꿨다. */}
+              {chTab === 'basic' && (() => {
                 const vi = chVoiceInfo && chVoiceInfo.name === ch.name ? chVoiceInfo : null;
                 const engId = (vi && vi.id) || 'omnivoice';
                 const isOmni = engId === 'omnivoice';
-                return (<div>
-                <div data-testid="ch-voice-sum" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 10, background: '#fbf6ee', marginBottom: 10 }}>
-                  <Face face={vi && vi.face} name={(vi && vi.vname) || refLabel(ch.voiceCloneRefAudio) || '?'} gender={vi && vi.gender} size={44} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700 }}>{vi ? vi.engLabel : 'OmniVoice'} · {isOmni ? (refLabel(ch.voiceCloneRefAudio) || '참조음성 없음') : ((vi && vi.vname) || '목소리 없음')}</div>
-                    <div className="meta" style={{ fontSize: 11 }}>{isOmni ? '내 GPU 서버 · 무료 · 이 참조음성(목소리)으로 읽습니다' : '유료 API — 목소리·모델·말투는 「🔊 음성 설정」에서 · 아래 참조음성·Clone 강도·화자 목소리는 쓰지 않습니다'}</div>
-                  </div>
-                  <button className="ghost" data-testid="ch-voice-open" style={{ flex: '0 0 auto' }} title="엔진(OmniVoice·Gemini·MAI·타입캐스트·ElevenLabs)과 목소리를 카드로 고릅니다" onClick={() => openTtsEngines(ch.name)}>🔊 음성 설정에서 바꾸기</button>
+                return (<div className="basicvoice">
+                <div className="eqgrid" style={{ '--n': 4 }}>
+                  <div className="col"><div className="crow stack"><span className="l">채널 이름</span>
+                    <input style={{ fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
+                      onChange={(e) => setCh({ ...ch, name: e.target.value })} /></div>
+                    <Hint>이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">그룹(구분)</span>
+                    <input value={ch.group || ''} placeholder="예: 고전 / 역사" list="ch-group-list"
+                      onChange={(e) => setCh({ ...ch, group: e.target.value })} />
+                    <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
+                    <Hint>같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다. 비우면 구분 없음</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">시작 화면</span>
+                    <select value={(ch.startMode === 'book' || ch.startMode === 'remotion') ? ch.startMode : 'longform'}
+                      onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
+                      <option value="longform">롱폼 (16:9)</option>
+                      <option value="remotion">🎬 리모션 (음성만)</option>
+                      <option value="book">📖 출판</option>
+                    </select></div>
+                    <Hint>{ch.startMode === 'remotion'
+                      ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
+                      : '이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)'}</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">언어</span>
+                    <select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="ja">日本語 (일본어)</option><option value="vi">Tiếng Việt (베트남어)</option><option value="en">English</option></select></div></div>
                 </div>
-                <div className="frow"><label>언어</label><select style={{ flex: '0 0 160px' }} value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="ja">日本語 (일본어)</option><option value="vi">Tiếng Việt (베트남어)</option><option value="en">English</option></select>
-                  <span className="mini" title="같은 시드 = 편마다 같은 톤. OmniVoice·ElevenLabs 가 씁니다.">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
 
-                {isOmni ? (<>
-                  {/* 🎙 참조음성 고르기·미리듣기·🎨 보이스디자인은 「🔊 음성 설정」 창 한 곳에서(로이 2026-10-14 — 같은 기능이 두 곳이라 정리).
-                      여기엔 그 창에 없는 Clone 강도만 남긴다. 저장 값(voiceCloneRefAudio·cfgValue)·저장 코드는 그대로. */}
-                  <div className="subhead" data-testid="ch-omni-settings">🎙 OmniVoice 설정</div>
-                  <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /><Hint>참조음성을 얼마나 따라 할지(기본 2). 목소리(참조음성)는 위 「🔊 음성 설정에서 바꾸기」에서 고릅니다 — 미리듣기·🎨 보이스디자인도 그 창에 있습니다.</Hint></div>
+                <div className="eqgrid" style={{ '--n': 1 }}>
+                  <div className="col"><div className="crow stack"><label className="l">이미지 사전설정</label>
+                    <textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div></div>
+                </div>
 
-                  <div className="subhead" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></div>
-                  <div style={{ maxHeight: 92, overflowY: 'auto' }}>
-                    {(ch.speakers || []).map((r, i) => (
-                      <div className="crow" key={i} style={{ gap: 6 }}>
-                        <input style={{ flex: '0 0 90px', width: 90 }} placeholder="이름" value={r.name}
-                          onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], name: e.target.value }; setCh({ ...ch, speakers: a }); }} />
-                        <select style={{ flex: 1, padding: 4 }} value={r.voice}
-                          onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], voice: e.target.value }; setCh({ ...ch, speakers: a }); }}>
-                          {!r.voice ? <option value="">— 목소리 선택 —</option> : null}
-                          {r.voice && chRefList.every((x) => x.path !== r.voice) ? <option value={r.voice}>{refLabel(r.voice)}</option> : null}
-                          {chRefList.map((x) => <option key={x.path} value={x.path}>{x.name}</option>)}
-                        </select>
-                        <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기 / 멈춤" disabled={!r.voice} onClick={() => playRef(r.voice)}>{pvBtn('ref:' + r.voice)}</button>
-                        <button className="ghost" style={{ flex: '0 0 auto' }} title="이 화자 지우기" onClick={() => setCh({ ...ch, speakers: ch.speakers.filter((_, j) => j !== i) })}>✕</button>
-                      </div>
-                    ))}
+                <div className="eqgrid" style={{ '--n': 1 }}>
+                  <div className="col" data-testid="ch-voice-sum" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Face face={vi && vi.face} name={(vi && vi.vname) || refLabel(ch.voiceCloneRefAudio) || '?'} gender={vi && vi.gender} size={40} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700 }}>{vi ? vi.engLabel : 'OmniVoice'} · {isOmni ? (refLabel(ch.voiceCloneRefAudio) || '참조음성 없음') : ((vi && vi.vname) || '목소리 없음')}</div>
+                      <div className="meta" style={{ fontSize: 11 }}>{isOmni ? '내 GPU 서버 · 무료 · 이 참조음성(목소리)으로 읽습니다' : '유료 API — 목소리·모델·말투는 「🔊 음성 설정」에서 · 참조음성·Clone 강도·화자 목소리는 쓰지 않습니다'}</div>
+                    </div>
+                    <button className="ghost" data-testid="ch-voice-open" style={{ flex: '0 0 auto' }} title="엔진(OmniVoice·Gemini·MAI·타입캐스트·ElevenLabs)과 목소리를 카드로 고릅니다" onClick={() => openTtsEngines(ch.name)}>🔊 음성 설정에서 바꾸기</button>
                   </div>
-                  <div className="crow"><button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button></div>
-                </>) : (
+                </div>
+
+                <div className="eqgrid" style={{ '--n': 5 }}>
+                  <div className="col"><div className="crow stack"><span className="l">시드</span>
+                    <input className="nbox" type="number" value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
+                    <Hint>같은 시드 = 편마다 같은 톤. OmniVoice·ElevenLabs 가 씁니다.</Hint></div>
+                  <div className="col" data-testid="ch-omni-settings"><div className="crow stack"><label className="l">Clone강도</label>
+                    <input className="nbox" type="number" step="0.1" disabled={!isOmni} value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} /></div>
+                    <Hint>{isOmni ? '참조음성을 얼마나 따라 할지(기본 2). 목소리(참조음성)는 「🔊 음성 설정에서 바꾸기」에서 고릅니다 — 미리듣기·🎨 보이스디자인도 그 창에 있습니다.' : '🎙 OmniVoice 로 읽을 때만 씁니다(저장된 값은 그대로 남아 있습니다 — OmniVoice 로 돌아가면 다시 씁니다).'}</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">배속</span>
+                    <input className="n" type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} /></div>
+                    <Hint>음성 배속(0.5~2). ⚠ 배속·문장무음·음량을 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">문장무음 (초)</span>
+                    <input className="n" type="number" step="0.1" min="0" max="5" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /></div>
+                    <Hint>문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. 0 = 사용 안 함, 권장 0.5~1.5초. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.</Hint></div>
+                  <div className="col"><div className="crow stack"><span className="l">음량 맞추기</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input type="checkbox" style={{ width: 'auto' }} checked={ch.ttsNormalize !== false}
+                        onChange={(e) => setCh({ ...ch, ttsNormalize: e.target.checked })} />
+                      <span className="meta">문장마다 같게</span>
+                    </label>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <input className="n" type="number" step="1" min="-30" max="-6" style={{ width: 56 }}
+                        disabled={ch.ttsNormalize === false}
+                        value={ch.ttsTargetDb != null && ch.ttsTargetDb !== '' ? ch.ttsTargetDb : -15}
+                        onChange={(e) => setCh({ ...ch, ttsTargetDb: e.target.value })} />
+                      <span className="meta">dB (목표)</span>
+                    </span></div>
+                    <Hint>음량 맞추기 = 짧은 문장·의문문이 작게 나오는 것과 참조음성이 조용해 전체가 작아지는 것을 함께 잡습니다. ⚠ 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.</Hint></div>
+                </div>
+
+                {isOmni ? (
+                  <div className="eqgrid" style={{ '--n': 1 }}>
+                    <div className="col" title="대본에서 줄 맨 앞에 [이름] 을 쓰면(예: [엄마] 얘야, 밥 먹어라.) 그 줄을 여기서 고른 목소리로 읽습니다. 자막에는 이름이 나오지 않습니다. 연결하지 않은 이름은 위의 채널 목소리로 읽습니다.">
+                      <div className="crow" style={{ justifyContent: 'space-between' }}>
+                        <span className="l">🎭 화자별 목소리 <span className="meta" style={{ fontWeight: 400 }}>— 대본 줄 맨 앞 [이름] 대사</span></span>
+                        <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 8px' }} onClick={() => setCh({ ...ch, speakers: [...(ch.speakers || []), { name: '', voice: '' }] })}>＋ 화자 추가</button>
+                      </div>
+                      <div className="spkgrid">
+                        {(ch.speakers || []).map((r, i) => (
+                          <div className="crow" key={i} style={{ gap: 4, margin: 0, flexWrap: 'nowrap' }}>
+                            <input style={{ flex: '0 0 70px', width: 70 }} placeholder="이름" value={r.name}
+                              onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], name: e.target.value }; setCh({ ...ch, speakers: a }); }} />
+                            <select style={{ flex: 1, minWidth: 0, padding: 3 }} value={r.voice}
+                              onChange={(e) => { const a = [...ch.speakers]; a[i] = { ...a[i], voice: e.target.value }; setCh({ ...ch, speakers: a }); }}>
+                              {!r.voice ? <option value="">— 목소리 선택 —</option> : null}
+                              {r.voice && chRefList.every((x) => x.path !== r.voice) ? <option value={r.voice}>{refLabel(r.voice)}</option> : null}
+                              {chRefList.map((x) => <option key={x.path} value={x.path}>{x.name}</option>)}
+                            </select>
+                            <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 6px' }} title="미리듣기 / 멈춤" disabled={!r.voice} onClick={() => playRef(r.voice)}>{pvBtn('ref:' + r.voice)}</button>
+                            <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 6px' }} title="이 화자 지우기" onClick={() => setCh({ ...ch, speakers: ch.speakers.filter((_, j) => j !== i) })}>✕</button>
+                          </div>
+                        ))}
+                        {!(ch.speakers || []).length ? <span className="meta">등록된 화자가 없습니다 — 「＋ 화자 추가」</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <Hint>🎙 OmniVoice 참조음성·Clone 강도·🎭 화자별 목소리는 OmniVoice 로 읽을 때만 씁니다(저장된 값은 그대로 남아 있습니다 — OmniVoice 로 돌아가면 다시 씁니다).</Hint>
                 )}
-
-                <div className="subhead">🎚 소리 다듬기 <span className="meta" style={{ fontWeight: 400 }}>— 모든 엔진 공통</span></div>
-                <div className="crow"><span className="l">배속</span><input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.05" min="0.5" max="2" value={ch.speedLong} onChange={(e) => setCh({ ...ch, speedLong: e.target.value })} />
-                  <span className="meta" style={{ marginLeft: 12 }} title="문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.">문장무음</span>
-                  <input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="0.1" min="0" max="5" title="0 = 사용 안 함. 권장 0.5~1.5초." value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
-                <div className="crow">
-                  <span className="l">음량 맞추기</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={ch.ttsNormalize !== false}
-                      onChange={(e) => setCh({ ...ch, ttsNormalize: e.target.checked })} />
-                    <span className="meta">문장마다 같은 음량으로</span>
-                  </label>
-                  <span className="meta" style={{ marginLeft: 10 }}>목표</span>
-                  <input className="n" style={{ flex: '0 0 62px', width: 62 }} type="number" step="1" min="-30" max="-6"
-                    disabled={ch.ttsNormalize === false}
-                    value={ch.ttsTargetDb != null && ch.ttsTargetDb !== '' ? ch.ttsTargetDb : -15}
-                    onChange={(e) => setCh({ ...ch, ttsTargetDb: e.target.value })} />
-                  <span className="meta">dB</span>
-                </div>
-                <Hint>
-                  음량 맞추기 = 짧은 문장·의문문이 작게 나오는 것과 참조음성이 조용해 전체가 작아지는 것을 함께 잡습니다. ⚠ 배속·문장무음·음량을 바꾸면 그 채널 음성이 다음 변환 때 새로 만들어집니다.
-                </Hint>
               </div>);
               })()}
 
@@ -6886,7 +6900,7 @@ export default function App() {
                 {owner && <Hint>☁ 이 채널의 화풍은 <b>~/.flow-app/channel-styles.json</b> 으로 자동 내보내집니다 — 아도나이로이 대시보드가 그 값을 읽어 <b>썸네일 프롬프트</b>를 만듭니다. 썸네일은 인물이 주인공이라 본문과 다른 화풍을 쓸 수 있어 따로 고릅니다(비우면 롱폼과 같게).</Hint>}
 
                 <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
-                <div className="twocol">
+                <div className="eqgrid" style={{ '--n': 3 }}>
                   <div className="col">
                     <div className="crow stack"><span className="l">이미지</span>
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
@@ -6924,24 +6938,26 @@ export default function App() {
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
                 {/* 다섯 칸을 한 줄에(v0.6.82 — 탭 높이를 다른 탭과 맞춘다). 값·저장 키는 그대로 wbSub.{sizePct,marginPct,pos,font,bold} */}
-                <div className="twocol">
+                <div className="eqgrid" style={{ '--n': 5 }}>
                   <div className="col">
                     <div className="crow stack"><span className="l">글자 크기</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="1080 세로 기준 픽셀로 환산한 값이 옆에 보입니다">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <input type="number" min="1" max="20" step="0.1" style={{ width: 56 }}
                           value={(ch.wbSub && ch.wbSub.sizePct) != null ? ch.wbSub.sizePct : WB_SUB_DEFAULT.sizePct}
                           onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), sizePct: e.target.value } })} />
-                        <span className="meta" style={{ whiteSpace: 'nowrap' }}>% · {Math.round(1080 * (Number((ch.wbSub && ch.wbSub.sizePct) ?? WB_SUB_DEFAULT.sizePct) || WB_SUB_DEFAULT.sizePct) / 100)}px</span>
-                      </span></div>
+                        <span className="meta">%</span>
+                      </span>
+                      <span className="meta" title="1080 세로 기준 픽셀로 환산한 값">{Math.round(1080 * (Number((ch.wbSub && ch.wbSub.sizePct) ?? WB_SUB_DEFAULT.sizePct) || WB_SUB_DEFAULT.sizePct) / 100)}px</span></div>
                   </div>
                   <div className="col">
                     <div className="crow stack"><span className="l">가장자리 여백</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="위치가 가운데일 땐 무시합니다">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <input type="number" min="0" max="45" step="0.5" style={{ width: 56 }}
                           value={(ch.wbSub && ch.wbSub.marginPct) != null ? ch.wbSub.marginPct : WB_SUB_DEFAULT.marginPct}
                           onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), marginPct: e.target.value } })} />
                         <span className="meta">%</span>
-                      </span></div>
+                      </span>
+                      <span className="meta" title="위치가 가운데일 땐 무시합니다">가운데면 무시</span></div>
                   </div>
                   <div className="col">
                     <div className="crow stack"><span className="l">위치</span>
@@ -6957,9 +6973,9 @@ export default function App() {
                         {WB_SUB_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
                       </select></div>
                   </div>
-                  <div className="col" style={{ flex: '0 0 auto' }}>
+                  <div className="col">
                     <div className="crow stack"><span className="l">굵게</span>
-                      <input type="checkbox" style={{ width: 'auto' }} checked={!(ch.wbSub && ch.wbSub.bold === false)}
+                      <input type="checkbox" style={{ width: 'auto', alignSelf: 'flex-start' }} checked={!(ch.wbSub && ch.wbSub.bold === false)}
                         onChange={(e) => setCh({ ...ch, wbSub: { ...(ch.wbSub || WB_SUB_DEFAULT), bold: e.target.checked } })} /></div>
                   </div>
                 </div>

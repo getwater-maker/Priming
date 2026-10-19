@@ -1,7 +1,7 @@
 'use strict';
 /**
  * node test/voice-design-vi.smoke.js — 🎨 보이스디자인 창에서 **베트남어 목소리를 실제로 만든다**(2026-09-26).
- *   채널편집 → 🎙 음성 → 🔊 음성 설정 → 🎨 보이스디자인 탭 → 언어 Tiếng Việt → 성별·나이·음높이 → 생성 → 받아쓰기 확인 % 표시.
+ *   채널편집 → 🏠 기본·음성 → 🔊 음성 설정 → 🎨 보이스디자인 탭 → 언어 Tiếng Việt → 성별·나이·음높이 → 생성 → 받아쓰기 확인 % 표시.
  *   ⚠ OmniVoice 서버를 실제로 쓴다(문장 1개 · 수 초). 서버가 바쁘면(/busy) 생성은 건너뛴다(로이 작업 GPU 를 뺏지 않는다).
  *   ⚠ 저장하지 않는다 — 참조음성 라이브러리 무변경.
  */
@@ -32,7 +32,7 @@ async function serverBusy() {
     await win.click('button[title^="채널(프리셋)"]');
     await win.waitForTimeout(700);
     const card = win.locator('.modal-card.tabbed').first();
-    await card.locator('button:has-text("🎙")').first().click();
+    await card.locator('button:has-text("🏠")').first().click();
     await win.waitForTimeout(300);
     // 🎨 보이스디자인은 「🔊 음성 설정에서 바꾸기」 창의 탭(v0.9.6 — 채널편집의 참조음성 줄을 정리)
     await card.locator('[data-testid="ch-voice-open"]').first().click();

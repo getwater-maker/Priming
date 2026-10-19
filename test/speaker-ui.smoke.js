@@ -21,14 +21,14 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForTimeout(700);
     const card = win.locator('.modal-card.tabbed').first();
     const heights = {};
-    for (const t of ['🏠', '🎙', '📝', '🖼', '📁']) {
+    for (const t of ['🏠', '📝', '🖼', '📁']) {
       await card.locator(`button:has-text("${t}")`).first().click();
       await win.waitForTimeout(250);
       heights[t] = await card.evaluate((el) => Math.round(el.getBoundingClientRect().height));
     }
-    await card.locator('button:has-text("🎙")').first().click();
+    await card.locator('button:has-text("🏠")').first().click();
     await win.waitForTimeout(300);
-    ok(await card.locator('text=🎭 화자별 목소리').count() === 1, '🎙 음성 탭에 「🎭 화자별 목소리」');
+    ok(await card.locator('text=🎭 화자별 목소리').count() === 1, '🏠 기본·음성 탭에 「🎭 화자별 목소리」');
     const add = card.locator('button:has-text("＋ 화자 추가")');
     ok(await add.count() === 1, '「＋ 화자 추가」 버튼');
     const before = await card.locator('input[placeholder="이름"]').count();

@@ -1689,3 +1689,11 @@ main .card h2{top:var(--work-top-height,0px)}
 .chcards .col .crow.stack{min-width:0}
 .chcards .col .crow.stack>span{min-width:0;flex-wrap:wrap}
 .chcards .col{overflow:hidden}
+
+/* v0.9.84 — 채널 편집 균등 카드 격자: 칸 수는 --n, 카드는 같은 폭·같은 높이(들쭉날쭉 금지) · 기본·음성 탭은 5줄이 490px 안에 들어간다 */
+.eqgrid{display:grid;grid-template-columns:repeat(var(--n,1),minmax(0,1fr));gap:8px;margin:0 0 8px;align-items:stretch}
+.eqgrid .col{min-width:0;flex:none;background:#fbf6ee;border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.eqgrid .crow{margin:0}
+.eqgrid .crow.stack>.l{font-size:12px}
+.eqgrid textarea{width:100%;box-sizing:border-box;resize:none}
+.basicvoice .spkgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px;max-height:104px;overflow-y:auto;margin-top:4px}
