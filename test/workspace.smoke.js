@@ -153,7 +153,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     }
     await win.waitForFunction(() => document.querySelectorAll('.cut img.thumb').length >= 2, null, { timeout: 8000 }).catch(() => {});
     const hb = await win.locator('.topsticky').boundingBox();
-    ok(hb && hb.height < 140, `헤더(메뉴+리본) 높이 ${hb && Math.round(hb.height)}px — 예전 약 400px`);
+    // v0.9.50 — 리본을 일부러 100px(큰 버튼 64px)로 키워 메뉴 44 + 리본 100 = 약 145px · 이 검사는 「예전 약 400px 로 돌아가지 않는가」를 본다
+    ok(hb && hb.height < 160, `헤더(메뉴+리본) 높이 ${hb && Math.round(hb.height)}px — 예전 약 400px`);
 
     // [2] 3칸
     const p1 = await win.locator('[data-testid=pane1]').boundingBox();
