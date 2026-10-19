@@ -181,15 +181,13 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.keyboard.press('ArrowUp');
     await win.waitForTimeout(200);
     ok(/red\.png/.test(await stageImg()), '↑ 로 돌아가면 다시 빨강');
-    // ⌨ v0.5.95 — 키보드로 옮기면 그 클립 자막 칸이 열린다(커서가 늘 칸 안) · 칸 안에서 Home/End 는 글자 커서 → 처음·마지막 클립은 Ctrl+Home/End
-    ok(await win.locator('textarea:focus').count() === 1, '⌨ ↑↓ 로 옮기면 자막 칸에 커서가 있다');
-    // Ctrl+End — 커서가 글 끝이면 마지막 클립 · 아니면 먼저 글 끝(텍스트 칸 기본) → 많아야 두 번
-    for (let i = 0; i < 2 && !/마지막 문장/.test(await stageCap()); i++) { await win.keyboard.press('Control+End'); await win.waitForTimeout(400); }
-    ok(/마지막 문장/.test(await stageCap()) && await win.locator('textarea:focus').count() === 1, 'Ctrl+End = 마지막 줄(칸 안 그대로 · 글 끝에서 누르면 바로)');
-    for (let i = 0; i < 2 && (await win.locator('.sent.cur').getAttribute('data-ln')) !== '1'; i++) { await win.keyboard.press('Control+Home'); await win.waitForTimeout(400); }
-    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '1' && await win.locator('textarea:focus').count() === 1, 'Ctrl+Home = 첫 줄(칸 안 그대로)');
+    // ⌨ 로이 확정(2026-10-20 · 커밋 8cdaa306 의 동작) — 방향키·PageUp/Down 은 **선택만** 옮긴다(자막 칸을 열지 않는다 · Space 재생이 자막에 입력되지 않게) · 편집은 Enter·더블클릭
+    const noEdit = async () => await win.locator('textarea:focus').count() === 0 && await win.locator('.sent.clip.editing').count() === 0;
+    ok(await noEdit(), '⌨ ↑↓ 은 선택만 옮긴다 — 자막 칸이 열리지 않는다');
     await win.keyboard.press('PageDown'); await win.waitForTimeout(400);
-    ok((await win.locator('.sent.cur').getAttribute('data-ln')) !== '1' && await win.locator('textarea:focus').count() === 1, 'PageDown = 아래로 여러 클립(칸 안 그대로)');
+    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '4' && /마지막 문장/.test(await stageCap()) && await noEdit(), 'PageDown = 아래로 여러 클립(끝이면 마지막 줄) · 선택만');
+    await win.keyboard.press('PageUp'); await win.waitForTimeout(400);
+    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '1' && await noEdit(), 'PageUp = 위로 여러 클립(처음이면 첫 줄) · 선택만');
     await win.keyboard.press('Escape'); await win.waitForTimeout(200);
 
     // [4] Enter 고치기 · Esc
@@ -199,12 +197,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.keyboard.press('Escape');
     await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
 
-    // [5] 마우스 — 글자 클릭 = 커서 이동 + 바로 고치기
-    await win.locator('.sent[data-ln="4"] .clip-cap').click();   // 상세 보기 — 자막 줄(🗨 칸)을 누르면 그 줄 고치기
+    // [5] 마우스 — 한 번 클릭 = 커서(선택)만 이동 · 더블클릭 = 그 줄 고치기(로이 확정 2026-10-20)
+    await win.locator('.sent[data-ln="4"] .clip-cap').click();
+    await win.waitForTimeout(400);
+    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '4' && /마지막 문장/.test(await stageCap()) && await win.locator('.sent.clip.editing').count() === 0, '글자 한 번 클릭 = 커서 04 로 이동만(편집칸 안 열림) · ① 도 04');
+    await win.locator('.sent[data-ln="4"] .clip-cap').dblclick();
     await win.waitForSelector('.sent.clip.editing .clip-edit', { timeout: 3000 });
+    ok(true, '더블클릭 = 그 줄 고치기');
     await win.keyboard.press('Escape');
     await win.waitForSelector('.sent.clip.editing', { state: 'detached', timeout: 3000 });
-    ok((await win.locator('.sent.cur').getAttribute('data-ln')) === '4' && /마지막 문장/.test(await stageCap()), '글자 클릭 = 커서 04 로 이동 + 편집칸(로이 확정) · ① 도 04');
 
     // [6] 줄 번호 → 서식 메뉴 · ⚙ 고급 → ③ 칸
     await win.locator('.sent[data-ln="3"] .cf-lineno').click();
@@ -282,16 +283,15 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.keyboard.press('ArrowDown'); await win.keyboard.press('ArrowDown'); await win.waitForTimeout(800);
       const v2 = await vs();
       ok(v2 && v2.paused && v2.t > v1.t + 0.5, `🔑 클립을 옮기면 그 클립 장면으로(${v1 && v1.t}초 → ${v2 && v2.t}초 · 여전히 멈춤)`);
-      // ⌨ v0.5.95 — 키보드로 옮기면 자막 칸이 열려 있다 → 칸 안에서는 Ctrl+Space 로 재생(Space 는 글자)
-      ok(await win.locator('textarea:focus').count() === 1, '⌨ 옮긴 뒤 자막 칸에 커서');
-      await win.keyboard.press('Control+Space'); await win.waitForTimeout(900);
+      // ⌨ 로이 확정(2026-10-20) — 방향키는 선택만(자막 칸 안 열림) → Space 가 곧 재생/멈춤(자막에 글자가 들어갈 칸이 없다)
+      ok(await win.locator('textarea:focus').count() === 0 && await win.locator('.sent.clip.editing').count() === 0, '⌨ 옮긴 뒤에도 선택만(자막 칸이 열리지 않는다)');
+      await win.keyboard.press(' '); await win.waitForTimeout(900);
       const v3 = await vs();
-      ok(v3 && !v3.paused, '재생하면 영상이 움직인다');
-      const txtBefore = await win.locator('textarea:focus').inputValue().catch(() => null);
-      await win.keyboard.press(' '); await win.waitForTimeout(600);   // 재생 중 칸 안 Space = 멈춤
+      ok(v3 && !v3.paused, '재생하면 영상이 움직인다(Space)');
+      await win.keyboard.press(' '); await win.waitForTimeout(600);   // 재생 중 Space = 멈춤
       const v4 = await vs();
-      ok(v4 && v4.paused, '멈추면 다시 정지 장면(칸 안에서 Space)');
-      ok(txtBefore == null || (await win.locator('textarea').first().inputValue().catch(() => txtBefore)) === txtBefore, '🔑 재생 중 칸 안의 Space 는 자막에 빈칸을 넣지 않는다');
+      ok(v4 && v4.paused, '멈추면 다시 정지 장면(Space)');
+      ok(await win.locator('.sent.clip.editing').count() === 0, '🔑 Space 는 재생·멈춤만 — 자막 칸을 열지 않는다');
       // 정리 — 삽입 지우기
       await win.locator('[data-testid=ov-range]').first().click();
       await win.click('[data-testid=ins-del]'); await win.waitForTimeout(500);
@@ -451,7 +451,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(await win.locator('.sent.clip .clip-no').count() === 4 && await win.locator('.sent.clip .clip-r1').count() === 4 && await win.locator('.sent.clip .clip-r2 .clip-fmt').count() === 4,
       '클립 = 왼쪽 번호 칸 | 1행(화자·시각·칩) / 2행(🗨 자막 + 가)');
     const h0 = (await win.locator('.sent[data-ln="2"]').boundingBox()).height;
-    await win.locator('.sent[data-ln="2"] .clip-cap').click();
+    await win.locator('.sent[data-ln="2"] .clip-cap').dblclick();   // 로이 확정(2026-10-20) — 편집은 더블클릭(한 번 클릭 = 선택만)
     await win.waitForSelector('.sent.clip.editing[data-ln="2"] .clip-edit', { timeout: 3000 });
     ok(await win.locator('.clip-edit').inputValue() === '첫째 그룹 둘째 문장입니다.', '편집칸에는 그 줄 글자만');
     const h1 = (await win.locator('.sent[data-ln="2"]').boundingBox()).height;
