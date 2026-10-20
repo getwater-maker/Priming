@@ -1864,8 +1864,15 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   // 다중 선택은 OS 가 주는 순서가 제각각 → 파일명 자연정렬로 큐 순서를 예측 가능하게.
   const paths = r.filePaths.slice().sort((a, b) => path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
   if (paths.length > 1) log(`📂 대본 ${paths.length}개 열기 — 작업큐에 순서대로 추가합니다`);
+  const okN = await _openScriptEntries(paths.map((scriptPath) => ({ scriptPath, preset, settings: (preset && preset.name) ? { presetName: preset.name } : null })));
+  if (!okN) return null;
+  if (paths.length > 1) log(`📂 총 ${okN}/${paths.length}개 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
+  return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
+});
+// 📂 대본 파일들을 롱폼 큐에 연다 — 「📂 열기」와 「📅 오늘 대본」이 같은 길을 탄다. entries = [{scriptPath, preset, settings}] → 연 개수
+async function _openScriptEntries(entries) {
   let okN = 0;
-  for (const scriptPath of paths) {
+  for (const { scriptPath, preset, settings } of entries) {
     try {
       S.scriptPath = scriptPath;
       S.mode = 'longform';   // 영상 대본은 롱폼 단일 모드 (쇼츠 모드는 2026-08-22 제거)
@@ -1882,7 +1889,7 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
       //   렌더러의 디바운스 자동저장이 닿는 **활성 항목(마지막에 연 것) 하나만** presetName 을 갖게 됐다.
       //   그 상태로 「만들기」를 누르면 나머지 대본은 presetName=null → getPreset(null) = **기본 채널**로
       //   합성돼 **엉뚱한 목소리**가 나갔다(고전서재 대본이 04_역사이야기 목소리·seed 5697 로 나감).
-      addItem(S.parsed, S.scriptPath, S.outRoot, (preset && preset.name) ? { presetName: preset.name } : null);
+      addItem(S.parsed, S.scriptPath, S.outRoot, settings);
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
       log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
@@ -1902,8 +1909,60 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
       log(`✗ 대본 열기 실패 (${path.basename(scriptPath)}): ${e.message}`);
     }
   }
+  return okN;
+}
+
+// 📅 오늘 작업할 대본(v0.9.85 · 로이 2026-10-20) — 채널마다 게시일 ≥ 오늘(KST) 중 아직 안 만든 가장 이른 편. 고르기 규칙은 core/today-scripts 한 곳.
+//   「만들었다」 = 출력 폴더의 .vrew · 저장 폴더의 같은 이름 MP4(화이트보드 포함) · 유튜브 업로드 기록에 같은 이름 MP4(올린 뒤 지운 파일).
+function _uploadedNames() {
+  const set = new Set();
+  try { const all = JSON.parse(fs.readFileSync(require('./core/youtube-upload').uploadsFile(), 'utf8')) || {}; for (const k of Object.keys(all)) { const nm = k.split('|')[1]; if (nm) set.add(nm.toLowerCase()); } } catch (_) {}
+  return set;
+}
+function _scriptMade(scriptPath, preset, uploaded) {
+  const base = _safeFolder(path.basename(scriptPath).replace(/\.md$/i, ''));
+  const outRoot = computeOutRoot(scriptPath, preset, 'longform');
+  const vrew = path.join(outRoot, base + '.vrew');
+  if (fs.existsSync(vrew)) return true;
+  if (fs.existsSync(uploadMp4Path(base, preset, vrew))) return true;
+  const wb = wbFinalDir(preset);
+  if (wb && fs.existsSync(path.join(wb, base + '_whiteboard.mp4'))) return true;
+  return uploaded.has((base + '.mp4').toLowerCase());
+}
+// 큐 항목 설정 — 그 채널을 헤더에서 고르고 연 것과 같은 값(배속·스타일·영상 방식·완성 종류 · App.jsx presetName 효과와 같은 키)
+function _channelItemSettings(preset) {
+  if (!preset || !preset.name) return null;
+  const { MODE_PROFILES } = require('./core/mode-profiles');
+  const sp = preset.speedLong != null ? preset.speedLong : MODE_PROFILES.longform.defaultTtsSpeed;
+  const s = { presetName: preset.name, ttsSpeed: String(sp), styleId: preset.styleLong || preset.styleId || 'chibi', aiNotice: true, vidSel: preset.vidSel || 'intro' };
+  if (preset.outTarget != null) s.outTarget = require('./core/queue-channel').normOutTarget(preset.outTarget);
+  return s;
+}
+ipcMain.handle('today-scripts-scan', () => {
+  const TS = require('./core/today-scripts');
+  const all = require('./tts/preset-store').loadAll();
+  const chans = all.filter((p) => p && p.name && !p.name.startsWith('__') && (p.startMode || 'longform') === 'longform' && p.scriptFolder);
+  const byName = new Map(chans.map((p) => [p.name, p]));
+  const uploaded = _uploadedNames();
+  const r = TS.findToday(chans.map((p) => ({ name: p.name, folder: p.scriptFolder })), (f, ch) => _scriptMade(f.path, byName.get(ch), uploaded));
+  const inQueue = new Set(((S.modes.longform && S.modes.longform.items) || []).map((it) => it.scriptPath));
+  r.items = r.items.map((it) => ({ ...it, inQueue: inQueue.has(it.path) }));
+  log(`📅 오늘(${r.today}) 작업할 대본 — 채널 ${chans.length}개 중 ${new Set(r.items.map((x) => x.channel)).size}개 채널에서 ${r.items.length}편`);
+  return r;
+});
+ipcMain.handle('open-scripts-list', async (_e, args = {}) => {
+  const list = Array.isArray(args.items) ? args.items : [];
+  const entries = [];
+  for (const x of list) {
+    const preset = P.getPreset(x && x.presetName);
+    if (!preset || !x.path || !fs.existsSync(x.path)) { log(`⚠ 대본을 열 수 없습니다 — ${x && x.path ? path.basename(x.path) : '(경로 없음)'}`); continue; }
+    entries.push({ scriptPath: x.path, preset, settings: _channelItemSettings(preset) });
+  }
+  if (!entries.length) return null;
+  log(`📅 오늘 대본 ${entries.length}편을 작업큐에 넣습니다 — 대본마다 자기 채널로 만듭니다`);
+  const okN = await _openScriptEntries(entries);
   if (!okN) return null;
-  if (paths.length > 1) log(`📂 총 ${okN}/${paths.length}개 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
+  log(`📅 ${okN}/${entries.length}편 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
 

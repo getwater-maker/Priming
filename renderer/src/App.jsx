@@ -884,6 +884,7 @@ export default function App() {
   const findSessionRef = useRef('');                      // 지금 열려 있는 검색 세션의 문자열(Electron findNext 판정용)
   const [scriptText, setScriptText] = useState('');
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
+  const [todayPick, setTodayPick] = useState(null);           // 📅 오늘 작업할 대본 고르기 창 {loading} | {today, items, empty, sel}
   const [stylePick, setStylePick] = useState(null);          // 📜 대본스타일인데 대본에 🎨 줄이 없을 때 만들기 전에 묻는 팝업 {resolve}
   const [styleSync, setStyleSync] = useState('');            // ☁ 공용 스타일 동기화 상태/경고
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
@@ -1261,6 +1262,28 @@ export default function App() {
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
     // 「출력」(전체/음성만/화면만) 고르기는 v0.6.67 에 화면에서 뺐다(로이 2026-10-04) — 옛 저장값이 「화면만」이어도 늘 전체로 만든다.
     if (s.outTarget != null) setOutTarget(normOutTargetUi(s.outTarget));
+  }
+  // 📅 오늘 작업할 대본(v0.9.85) — main 이 채널마다 다음 편을 찾아 주면 골라서 큐에 넣는다. 항목마다 자기 채널(헤더 채널로 덮지 않는다).
+  async function openTodayScripts() {
+    setTodayPick({ loading: true });
+    try {
+      const r = await api.todayScriptsScan();
+      setTodayPick({ ...r, sel: Object.fromEntries((r.items || []).map((x) => [x.path, !x.inQueue])) });
+    } catch (e) { setTodayPick(null); logline('오늘 대본 찾기 오류: ' + e.message); }
+  }
+  async function addTodayScripts() {
+    const tp = todayPick; setTodayPick(null);
+    const items = ((tp && tp.items) || []).filter((x) => tp.sel[x.path]).map((x) => ({ path: x.path, presetName: x.channel }));
+    if (!items.length) return;
+    const r = await api.openScriptsList(items);
+    if (!r) { setStatus('오늘 대본을 열지 못했습니다 — 로그를 보세요'); return; }
+    hasStoredRangeRef.current = false;
+    if (mode !== 'longform') setMode('longform');
+    if (r.queue) setQueue(r.queue);
+    const aid = r.queue && r.queue.longform && r.queue.longform.activeId;
+    if (aid) await selectQueueItem(aid);   // 헤더를 마지막에 연 대본의 채널·설정으로(칩을 누른 것과 같다)
+    else { setDto(r.dto); setFtitle(r.dto.fileTitle); }
+    setStatus(`📅 오늘 대본 ${items.length}편 · 큐에 추가`);
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -6042,6 +6065,7 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">① 대본·음성</span>
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
+            <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
             {/* 🎧 STT · 🎵 mp3 버튼은 「📥 다운로드 · STT」 창의 「📂 내 파일」 탭으로 합쳤다(v0.9.17 · 로이 2026-10-14). */}
@@ -7093,6 +7117,32 @@ export default function App() {
         </div>
       )}
 
+      {todayPick && (
+        <div className="modal-bg show" data-testid="today-pick">
+          <div className="modal-card wide" style={{ maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
+            <h3>📅 오늘 작업할 대본{todayPick.today ? ` (${todayPick.today})` : ''}</h3>
+            {todayPick.loading ? <div className="meta">채널 대본 폴더를 찾는 중…</div> : (<>
+              <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {!(todayPick.items || []).length && <div className="meta">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
+                {(todayPick.items || []).map((x) => (
+                  <label key={x.path} className="frow" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }} title={x.path}>
+                    <input type="checkbox" checked={!!todayPick.sel[x.path]} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
+                    <span style={{ flex: '0 0 150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.channel}</span>
+                    <span style={{ flex: '0 0 48px' }}>{x.date.slice(5).replace('-', '')}</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span>
+                    <span className="meta" style={{ flex: '0 0 auto' }}>{x.inQueue ? '이미 큐에 있음' : x.waiting ? `뒤로 ${x.waiting}편` : ''}</span>
+                  </label>
+                ))}
+                {(todayPick.empty || []).length > 0 && <div className="meta" style={{ marginTop: 6 }}>없음: {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
+              </div>
+            </>)}
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
+              <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path])} onClick={addTodayScripts}>작업큐에 넣기</button>
+            </div>
+          </div>
+        </div>
+      )}
       {stylePick && (
         <div className="modal-bg show" data-testid="style-pick">
           <div className="modal-card" style={{ maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}>

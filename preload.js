@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('api', {
   clearAccountCreds: (service, accId) => ipcRenderer.invoke('clear-account-creds', { service, accId }),
   getAccountStatus: (service) => ipcRenderer.invoke('get-account-status', { service }),
   openScript: (args) => ipcRenderer.invoke('open-script', args),
+  todayScriptsScan: () => ipcRenderer.invoke('today-scripts-scan'),   // 📅 오늘 작업할 대본(v0.9.85)
+  openScriptsList: (items) => ipcRenderer.invoke('open-scripts-list', { items }),
   ttsBuild: (args) => ipcRenderer.invoke('tts-build', args),
   deleteTts: () => ipcRenderer.invoke('delete-tts'),
   imageBuild: (args) => ipcRenderer.invoke('image-build', args),
