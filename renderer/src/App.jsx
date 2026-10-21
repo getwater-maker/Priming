@@ -2626,6 +2626,18 @@ export default function App() {
       setStatus(`${roll ? '🎲' : '🎤'} 고른 클립 음성 완료 (${items.length}문장)`);
     } catch (e) { logline('클립 음성 오류: ' + e.message); setStatus('⚠ ' + e.message); }
   }
+  // ⏩ 클립 배속(Lab) — 고른 클립이 든 문장 전체에 건다(문장 = 음성 한 개). 원본 음성은 그대로 · Ctrl+Z 한 번
+  async function clipSpeedSet(speed) {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
+    const items = []; const seen = new Set();
+    for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    setStatus(`⏩ 클립 배속 ${speed}× 적용 중…`);
+    try {
+      const r = await api.clipSpeed({ shortsNum: sel.shortsNum, items, speed, presetName: presetName || null });
+      if (r && r.dto) setDto(r.dto);
+      setStatus(r && r.ok ? `⏩ 클립 배속 ${r.speed}× — 문장 ${items.length}개 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '배속 실패'));
+    } catch (e) { logline('클립 배속 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
   function clipPlay() { if (!clipSelOk()) return; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; setClipMenu(null); playFromCursor({ shortsNum: capSel.shortsNum, n: first.n }, true); }
   async function clipInsertFile() {
     if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
@@ -6367,7 +6379,10 @@ export default function App() {
               <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
               {soon('◐', '화면 전환')}
               {soon('🔉', '볼륨 조절')}
-              {soon('⏩', '배속 효과')}
+              <div className="ctb-speed" data-testid="ctb-speed" title="⏩ 클립 배속 — 고른 클립이 든 문장의 음성을 빠르게·느리게(문장 뒤 무음은 그대로 · Ctrl+Z 되돌리기)">
+                <span>⏩ 배속</span>
+                {[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <button key={v} data-testid={'ctb-speed-' + v} onClick={() => clipSpeedSet(v)}>{v === 1 ? '1×' : v}</button>)}
+              </div>
               {soon('🎨', '클립 배경색')}
             </div>}
             {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0, ...tbFlip }}>
@@ -8539,6 +8554,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       title={(vt ? `이 대본의 ${s.speaker ? `화자 「${s.speaker}」` : '내레이션'} 목소리: ${vt}` : s.speaker ? `화자 「${s.speaker}」 — 채널 화자 목소리(⚙ 채널편집 → 🎙 음성) 또는 내레이션 목소리` : '채널 기본 목소리') + (onClipVoice ? `\n누르면 🔊 음성 설정 — 이 대본의 ${s.speaker ? `「${s.speaker}」 클립 모두` : '내레이션 클립 모두'}` : '')}
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                    {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (
                                         <span key={w.from} className={'chip' + (selChars.some((x) => x.from < w.to && x.to > w.from) ? ' on' : '')}

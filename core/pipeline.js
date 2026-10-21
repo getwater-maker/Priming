@@ -126,6 +126,7 @@ function toDTO(parseResult) {
               dur: s.ttsDurationSec || null,
               audio: s.ttsAudioPath || null,
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
+              cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
               card: (_cm && _cm.bySid.get(s.id)) || null,   // 📜 이 문장에서 뜨는 화면 카드 {label, role:start|cont, last, tip, pause, interlude}
@@ -656,9 +657,9 @@ async function quietPass(sentences, preset, workDir, onLine, abortSignal) {
   try {
     const QT = require('./quiet-trim');
     const key = QT.keyOf(preset);
-    if (!key && !(sentences || []).some((x) => x && x.quiet)) return null;
+    if (!key && !(sentences || []).some((x) => x && (x.quiet || QT.normSpeed(x.clipSpeed) !== 1))) return null;
     const r = await QT.ensureSentences(sentences, preset, workDir, { ffmpegPath, claimPath, onLine, abortSignal });
-    if (onLine && r.changed) onLine(key ? `✂ 쉼 줄이기 — 문장 ${r.changed}개 · 쉼 ${r.cut}곳 · ${r.removedSec.toFixed(1)}초 줄임 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : `✂ 쉼 줄이기 끔 — 문장 ${r.restored}개를 원래 음성으로 되돌렸습니다`);
+    if (onLine && r.changed) onLine(`✂ 음성 사본 맞춤 — 문장 ${r.changed}개${key ? ` · 쉼 ${r.cut}곳 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : ''}${r.sped ? ` · ⏩ 클립 배속 ${r.sped}개` : ''}${r.restored ? ` · 원래 음성으로 ${r.restored}개` : ''} · 길이 ${r.removedSec >= 0 ? '−' : '+'}${Math.abs(r.removedSec).toFixed(1)}초`);
     if (onLine && r.failed) onLine(`⚠ 쉼 줄이기 — ${r.failed}개 문장은 원래 음성 그대로입니다(읽기 실패)`);
     return r;
   } catch (e) { if (onLine) onLine('⚠ 쉼 줄이기 실패: ' + e.message); return null; }

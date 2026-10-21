@@ -1705,3 +1705,9 @@ main .card h2{top:var(--work-top-height,0px)}
 .eqgrid .crow.stack>.l{font-size:12px}
 .eqgrid textarea{width:100%;box-sizing:border-box;resize:none}
 .basicvoice .spkgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px;max-height:104px;overflow-y:auto;margin-top:4px}
+
+/* ⏩ 클립 배속(Lab) — 효과 메뉴의 배속 줄 · 클립 배지 */
+.clip-tb-menu .ctb-speed{display:flex;align-items:center;gap:3px;padding:4px 6px;white-space:nowrap}
+.clip-tb-menu .ctb-speed>span{margin-right:4px}
+.clip-tb-menu .ctb-speed button{display:inline-block;width:auto;min-width:30px;padding:2px 5px;margin:0;text-align:center}
+.clip-speed{font-size:11px;color:#9a5b16;background:#fbefdc;border-radius:6px;padding:0 5px;margin-left:4px;white-space:nowrap}

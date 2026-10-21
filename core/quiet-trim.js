@@ -127,16 +127,49 @@ function decodePcm(file, ffmpegPath, rate = 24000) {
   });
 }
 
+// ⏩ 클립 배속(Lab · 차이표 #13) — 문장마다 s.clipSpeed(0.5~2 · 1 = 없음). 같은 사본 체인의 마지막 단계:
+//   원본 → (쉼 줄이기) → (배속) → `<번호>_q.wav`. 🔑 문장 뒤 문장무음(apad — 끝의 정확한 0 샘플)은 빠르게 하지 않는다(클립 간격은 채널 값 그대로).
+const SPEEDS = [0.5, 0.75, 0.8, 0.9, 1, 1.1, 1.2, 1.25, 1.3, 1.5, 2];
+function normSpeed(v) { const n = Number(v); return (isFinite(n) && n >= 0.5 && n <= 2) ? Math.round(n * 100) / 100 : 1; }
+// 문장 하나의 사본 열쇠 — '' = 원본 그대로
+function sentKey(preset, s) {
+  const q = keyOf(preset), sp = normSpeed(s && s.clipSpeed);
+  return q + (sp !== 1 ? `|s${sp.toFixed(2)}` : '');
+}
+function trailingZeros(pcm) { let z = 0; for (let i = pcm.length - 1; i >= 0 && pcm[i] === 0; i--) z++; return z; }
+// PCM 에 atempo(ffmpeg · 비동기) — 끝의 정확한 0(문장무음)은 떼어 두었다가 그대로 붙인다
+function tempoPcm(pcm, speed, ffmpegPath, rate = 24000) {
+  return new Promise((resolve) => {
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) return resolve(null);
+    const z = Math.min(trailingZeros(pcm), Math.max(0, pcm.length - rate * 0.1));
+    const head = pcm.subarray(0, pcm.length - z);
+    const p = require('child_process').spawn(ffmpegPath, ['-v', 'error', '-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', '-', '-af', `atempo=${speed}`, '-f', 's16le', '-ar', String(rate), '-ac', '1', '-'], { windowsHide: true });
+    const bufs = [];
+    p.stdout.on('data', (d) => bufs.push(d));
+    p.on('error', () => resolve(null));
+    p.stdin.on('error', () => {});
+    p.on('close', (code) => {
+      if (code !== 0) return resolve(null);
+      const b = Buffer.concat(bufs); const n = Math.floor(b.length / 2);
+      const out = new Int16Array(n + z);
+      for (let i = 0; i < n; i++) out[i] = b.readInt16LE(i * 2);
+      resolve(out);   // 뒤 z 개는 0(문장무음 그대로)
+    });
+    p.stdin.end(Buffer.from(head.buffer, head.byteOffset, head.byteLength));
+  });
+}
+
 /**
- * 문장들에 지금 설정(key)을 맞춘다 → { changed, cut, restored, removedSec, failed }
+ * 문장들에 지금 설정(쉼 줄이기 · 클립 배속)을 맞춘다 → { changed, cut, restored, removedSec, sped, failed }
  *   opts: { ffmpegPath, claimPath(want, own), onLine, abortSignal }
  */
 async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
-  const key = keyOf(preset), K = parseKey(key);
-  const r = { changed: 0, cut: 0, restored: 0, removedSec: 0, failed: 0 };
+  const K = parseKey(keyOf(preset));
+  const r = { changed: 0, cut: 0, restored: 0, removedSec: 0, sped: 0, failed: 0 };
   for (const s of sentences || []) {
     if (opts.abortSignal && opts.abortSignal()) break;
     if (!s || !s.ttsAudioPath) continue;
+    const key = sentKey(preset, s);
     const q = s.quiet;
     const derived = !!(q && q.out && s.ttsAudioPath === q.out && q.src && fs.existsSync(q.src));
     if (derived && q.key === key) continue;                       // 이미 이 설정
@@ -148,27 +181,37 @@ async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
       continue;
     }
     if (!fs.existsSync(raw)) continue;
-    const pcm = await decodePcm(raw, opts.ffmpegPath);
+    let pcm = await decodePcm(raw, opts.ffmpegPath);
     if (!pcm) { r.failed++; delete s.quiet; continue; }
-    const c = compactPcm(pcm, 24000, K);
-    if (!c) {                                                      // 줄일 것 없음 — 원본 그대로 이 설정으로 표시
+    let touched = false, cuts = 0;
+    if (K) { const c = compactPcm(pcm, 24000, K); if (c) { pcm = c.pcm; touched = true; cuts = c.cuts; } }
+    const sp = normSpeed(s.clipSpeed);
+    if (sp !== 1) {
+      const t = await tempoPcm(pcm, sp, opts.ffmpegPath);
+      if (!t) { r.failed++; if (opts.onLine) opts.onLine(`⚠ 컷${s.num} 배속 ${sp}× 실패 — 원래 빠르기 그대로`); }
+      else { pcm = t; touched = true; r.sped++; }
+    }
+    if (!touched) {                                                // 바꿀 것 없음 — 원본 그대로 이 설정으로 표시
       s.quiet = { key, src: raw, srcDur: rawDur, out: raw };
       if (derived) { s.ttsAudioPath = raw; s.ttsDurationSec = rawDur; r.changed++; }
       continue;
     }
     try {
-      const want = path.join(ttsDir, `${s.num}_q.wav`);
-      const out = opts.claimPath ? opts.claimPath(want, derived ? q.out : null) : want;
+      // 🔑 이름에 「설정 + 원본 신원」 지문 — 설정을 바꿔도 옛 사본을 덮지 않는다(Ctrl+Z 가 옛 경로로 돌아가면 옛 내용이 그대로 있어야 한다)
+      let rid = raw; try { const st = fs.statSync(raw); rid += '|' + st.size + '|' + Math.round(st.mtimeMs); } catch {}
+      const tag = require('crypto').createHash('sha1').update(key + '|' + rid).digest('hex').slice(0, 8);
+      const want = path.join(ttsDir, `${s.num}_q${tag}.wav`);
+      const out = opts.claimPath ? opts.claimPath(want, fs.existsSync(want) ? want : null) : want;
       const tmp = out + '.tmp';
-      fs.writeFileSync(tmp, wavOf(c.pcm, 24000));
+      fs.writeFileSync(tmp, wavOf(pcm, 24000));
       fs.renameSync(tmp, out);
       s.quiet = { key, src: raw, srcDur: rawDur, out };
       s.ttsAudioPath = out;
-      s.ttsDurationSec = c.pcm.length / 24000;
-      r.changed++; r.cut += c.cuts; r.removedSec += (rawDur || 0) - s.ttsDurationSec;
-    } catch (e) { r.failed++; if (opts.onLine) opts.onLine(`⚠ 컷${s.num} 쉼 줄이기 실패: ${e.message}`); }
+      s.ttsDurationSec = pcm.length / 24000;
+      r.changed++; r.cut += cuts; r.removedSec += (rawDur || 0) - s.ttsDurationSec;
+    } catch (e) { r.failed++; if (opts.onLine) opts.onLine(`⚠ 컷${s.num} 음성 사본 쓰기 실패: ${e.message}`); }
   }
   return r;
 }
 
-module.exports = { keyOf, parseKey, compactPcm, wavOf, decodePcm, ensureSentences, VER };
+module.exports = { keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, wavOf, decodePcm, ensureSentences, VER };

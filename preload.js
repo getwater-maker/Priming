@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld('api', {
   lastQueueInfo: () => ipcRenderer.invoke('last-queue-info'),
   restoreLastQueue: () => ipcRenderer.invoke('restore-last-queue'),
   backupList: () => ipcRenderer.invoke('backup-list'),
+  clipSpeed: (args) => ipcRenderer.invoke('clip-speed', args),
   backupRestore: (args) => ipcRenderer.invoke('backup-restore', args),
   crashDismiss: () => ipcRenderer.invoke('crash-dismiss'),
   clearSaves: () => ipcRenderer.invoke('clear-saves'),
