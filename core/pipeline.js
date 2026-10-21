@@ -1137,8 +1137,11 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
 // 🔑 시각 포맷은 core/caption-splitter 하나만 쓴다 — 자막을 내는 곳이 셋(.srt · 프리미어 · 화이트보드)이라
 //   세 벌로 두면 어느 하나만 고쳐져 조용히 갈라진다.
 const _fmtSrt = require('./caption-splitter').fmtSrtTime;
-function writeSrt(project, srtPath, maxChars = 7) {
+// ⏸ preset 을 주면 막간 쉼(pausePlanOf)만큼 뒤 자막을 민다 — .vrew 가 그 문장 음성 뒤에 무음을 덧대므로(R4 · v0.9.94).
+//   쉼 동안은 자막 없음(그 문장 자막 끝 = 음성 끝). 쉼 계획이 없으면 예전과 한 글자도 같다.
+function writeSrt(project, srtPath, maxChars = 7, preset = null) {
   fs.mkdirSync(path.dirname(srtPath), { recursive: true });
+  const pauses = pausePlanOf(project, preset).map;
   let t = 0, idx = 1, out = '';
   for (const g of project.groups) {
     for (const s of project.getSentencesOfGroup(g)) {
@@ -1153,7 +1156,7 @@ function writeSrt(project, srtPath, maxChars = 7) {
         out += `${idx++}\n${_fmtSrt(start)} --> ${_fmtSrt(end)}\n${c}\n\n`;
         acc = end;
       });
-      t += dur;
+      t += dur + ((s.ttsAudioPath && s.ttsDurationSec > 0 && pauses.get(s.id)) || 0);   // .vrew 가 무음을 덧대는 조건과 같게(buildProjectVrew)
     }
   }
   try { fs.writeFileSync(srtPath, out, 'utf8'); } catch {}

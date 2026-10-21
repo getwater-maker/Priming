@@ -1640,7 +1640,12 @@ main .card h2{top:var(--work-top-height,0px)}
 .menubar .findbar:has(.find-selall){flex:0 1 230px}
 @media (max-width:1500px){.menubar{gap:4px;padding-left:8px;padding-right:8px}.menubar .findbar > span:first-child{display:none}.menubar .findbar{flex:0 1 140px}.menubar .stop-after .sa-long{display:none}}
 .ribbon .cf-linebreak{flex-basis:100%;height:0}
-.pane1.auto-size{overflow-y:auto}
+/* 🔴 스크롤바 자리를 늘 비워 둔다(v0.9.89) — ① 칸 내용이 칸 높이를 8~24px 넘는 구간에서 「스크롤바 생김 → 폭 17px 줄어 16:9 미리보기가 낮아짐 → 넘침 사라져 스크롤바 없어짐 → 다시 넘침」이
+   제작 중 1초마다 다시 그릴 때마다 뒤집혀 미리보기 칸이 커졌다 작아졌다 떨렸다(로이 2026-10-21 · test:pane1gutter) */
+.pane1.auto-size{overflow-y:auto;scrollbar-gutter:stable}
+.pane1.auto-size::-webkit-scrollbar{width:8px}
+.pane1.auto-size::-webkit-scrollbar-thumb{background:#5a5048;border-radius:4px}
+.pane1.auto-size::-webkit-scrollbar-track{background:transparent}
 .pane1.auto-size .thumbgrid{flex:0 0 auto;aspect-ratio:16/9;width:100%;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
 .pane1.auto-size #logwrap.docked{flex:0 0 auto;min-height:0}
 .pane1.auto-size #log{min-height:140px;max-height:35vh}
@@ -1650,6 +1655,10 @@ main .card h2{top:var(--work-top-height,0px)}
 .ribbon .rb-ic{font-size:22px}
 .ribbon .rb-t{font-size:12.5px}
 .ribbon .hgroup select{min-height:32px}
+/* 🔗 ① 대본·음성 오른쪽 칸 = 🔊 음성 설정 + 🔗 다시 연결을 위아래로(v0.9.94) — 옆으로 두면 1366px 에서 리본이 51px 넘친다 */
+.ribbon .hgroup > span.rb-stack{display:inline-flex;flex-direction:column;justify-content:center;gap:4px}
+.ribbon .hgroup > span.rb-stack > button{flex-direction:row;justify-content:flex-start;min-height:30px;min-width:0;padding:3px 10px;gap:6px}
+.ribbon .rb-stack .rb-ic{font-size:16px}
 .ribbon .cf-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;height:84px;max-height:none;padding:6px 8px;align-self:center}
 .cf-lines{min-width:0;overflow-x:auto;scrollbar-width:thin}
 .cf-format-row{display:flex;align-items:center;gap:4px;min-height:30px;white-space:nowrap}
@@ -1662,6 +1671,15 @@ main .card h2{top:var(--work-top-height,0px)}
 
 /* ── 📐 v0.9.73 좁은 창(≈1100px)에서 잘리지 않게 — 로이 2026-10-18 ────────────────────────────
    원인: 가운데 ② 칸 최소 폭 640 + ① 칸 최소 320 + 그룹 칸이 창보다 넓어 오른쪽이 잘렸고, 헤더 줄은 flex-shrink:0 이라 초기화·만들기가 밀려났다. */
+/* v0.9.95 — 1366px 에서 ② 이미지 리본이 178~405px 넘쳤다(AI 모델 선택 200~236px · 비용 · 화풍 경고가 붙은 뒤 · test:groupops 「1366px 리본 넘침 없음」)
+   → 1440px 이하: 도구 선택 상자 170px 상한(이름은 펼치면 다 보인다) · 모든 메뉴 오른쪽 끝 공통 칸(🌙·📥·📄·📘)은 아이콘만 · 버튼 좌우 여백 줄임 */
+@media (max-width:1440px){
+  .ribbon select[data-testid=img-engine],.ribbon select[data-testid=video-engine]{max-width:170px}
+  .ribbon [data-testid=style-src]{max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 대본 화풍 이름이 길면 … (전체는 마우스 글) */
+  .ribbon .hgroup.rb-reader .rb-t{display:none}
+  .ribbon .hgroup.rb-reader > button{min-width:40px;padding-left:6px;padding-right:6px}
+  .ribbon .hgroup > button,.ribbon .hgroup > span > button{padding-left:6px;padding-right:6px}
+}
 @media (max-width:1300px){
   .pane1{min-width:260px;max-width:300px}
   #body.ws main.pane2{min-width:560px}
@@ -1683,6 +1701,8 @@ main .card h2{top:var(--work-top-height,0px)}
   .ribbon .hgroup + .hgroup,.ribbon .hgroup + .splitbar{padding-left:6px}
   .ribbon .hgroup > button,.ribbon .hgroup > span > button{min-width:40px;padding:8px 5px}
   .ribbon .rb-t{font-size:11px}
+  .ribbon .hgroup > span.rb-stack > button{padding:3px 6px}
+  .ribbon .rb-stack .rb-t{display:none}   /* 🔊·🔗 위아래 칸은 좁으면 아이콘만(이름은 마우스 글) */
   /* 클립 카드 — 이력 단추를 작게 */
   .clip-r1 .clip-hist{min-width:0;padding:2px 8px}
   .cuts-grid.clips .cut.lf{grid-template-columns:104px 1fr}

@@ -37,12 +37,14 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sent[data-ln]', { timeout: 20000 });
     lsDetail = await win.evaluate(() => { try { return localStorage.getItem('pm.clipDetail'); } catch (_) { return null; } });
-    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
+    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outMode: 'audio', openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
     ok(made === 'ok', '무음 만들기로 음성 채우기 ' + made);
     await win.waitForTimeout(600);
     // v0.7.80 — 막대는 체크박스로 골랐을 때만 뜬다: 하나 고르기 = 선택을 풀고(Esc) 그 클립 체크 · mod 가 있으면 체크만 더한다
     const pick = async (n, mod) => {
       if (!mod) { await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(120); }
+      // 그 클립을 목록 가운데로 — 칸 아래 끝에 걸쳐 있으면 막대가 「가장자리에 붙어」 위로 밀린다(정상 동작 · 2026-10-22 간격 -92px 의 원인)
+      await win.locator(`.sent[data-ln="${n}"]`).first().evaluate((e) => e.scrollIntoView({ block: 'center' })); await win.waitForTimeout(150);
       await win.locator(`.sent[data-ln="${n}"] .clip-chk`).first().click(); await win.waitForTimeout(250);
     };
 

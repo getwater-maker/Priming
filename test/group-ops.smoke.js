@@ -57,7 +57,7 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sent[data-ln]', { timeout: 20000 });
     lsDetail = await win.evaluate(() => { try { return localStorage.getItem('pm.clipDetail'); } catch (_) { return null; } });
-    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
+    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outMode: 'audio', openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
     ok(made === 'ok', '무음 만들기로 음성 채우기 ' + made);
     await win.waitForTimeout(4200);   // 만들기 진행 팝업(끝나면 3초 뒤 닫힘)이 단추를 가리지 않게
     const body = () => md().split('\n').filter((l) => /문장입니다|새 그룹/.test(l));
@@ -83,7 +83,8 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await app.evaluate(({ BrowserWindow }, sz) => BrowserWindow.getAllWindows()[0].setSize(sz[0], sz[1]), sz0); await win.waitForTimeout(400);
     console.log('\n[2] 클립 사이 막대 — 마우스를 가져가면 「＋ 클립 추가」 · 화살표(그룹 나누기)');
     const clips = () => win.evaluate(() => [...document.querySelectorAll('.sent.clip[data-ln]')].map((x) => ({ n: Number(x.dataset.ln), t: (x.querySelector('.clip-cap') || {}).innerText || '' })));
-    const hoverGap = async (n) => { const el = win.locator(`.sent.clip[data-ln="${n}"]`).first(); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await win.mouse.move(bx.x + bx.width / 2, bx.y + bx.height - 30); await win.mouse.move(bx.x + bx.width / 2, bx.y + bx.height + 6, { steps: 3 }); await win.waitForTimeout(250); };
+    // 클립을 가운데로 — scrollIntoViewIfNeeded 는 클립 아래 끝을 칸 아래 끝에 맞춰, 그 밑 12px 틈이 스크롤 칸 밖에 남는다(2026-10-22)
+    const hoverGap = async (n) => { const el = win.locator(`.sent.clip[data-ln="${n}"]`).first(); await el.evaluate((e) => e.scrollIntoView({ block: 'center' })); await win.waitForTimeout(150); const bx = await el.boundingBox(); await win.mouse.move(bx.x + bx.width / 2, bx.y + bx.height - 30); await win.mouse.move(bx.x + bx.width / 2, bx.y + bx.height + 6, { steps: 3 }); await win.waitForTimeout(250); };
     const gapShown = (n) => win.evaluate((k) => { const b = document.querySelector(`.sent.clip[data-ln="${k}"] .cg-bar`); return !!(b && getComputedStyle(b).display !== 'none'); }, n);
     let cl = await clips();
     const nOf = (re) => (cl.find((x) => re.test(x.t)) || {}).n;

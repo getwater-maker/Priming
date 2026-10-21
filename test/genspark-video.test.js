@@ -130,7 +130,7 @@ ok(/waitForEvent\('filechooser'[\s\S]{0,300}await plus\.click/.test(ENGSRC), '�
   ok(ROT.DEFAULTS.gensparkVideoModel === 'MiniMax H3 Max', '기본 모델을 참조 가능한 것으로 바꿨다');
   ok(ENG.gsVideoModelTakesImage(ROT.DEFAULTS.gensparkVideoModel) === true, '🔴 기본 모델은 참조 이미지를 받는다');
   // UI 경고
-  ok(/참조 이미지를 받지 않습니다/.test(APP), '설정 UI 가 미지원 모델을 경고한다');
+  ok(!/참조 이미지를 받지 않습니다/.test(APP), '⚙ 설정의 Genspark 미지원 모델 경고 칸은 지웠다(v0.9.92 · Genspark 사용 중단)');
   ok(/imgRef: false/.test(APP), '렌더러 목록에 imgRef 가 있다');
   // 🔴 엔진 ↔ 렌더러의 imgRef 까지 같은지
   const rm = APP.match(/const GS_VIDEO_MODELS = \[([\s\S]*?)\n\];/);
@@ -192,10 +192,9 @@ ok(!/comfyVideoPipeline[^\n]*genspark/.test(MAIN), 'genspark 는 Comfy 파이프
   const allGs = (APP.match(/<EngineOptions kind="(image|video)"/g) || []).length;
   ok(allGs === 4 && /genspark: 'Genspark \(구독\)'/.test(APP), `이미지 2곳 + 비디오 2곳 = 4곳 (실제 ${allGs}) · 옛 Genspark 값은 이름으로 보인다`);
   ok(/gensparkVideoModel: e\.target\.value/.test(APP), '설정 select 가 gensparkVideoModel 을 저장한다');
-  ok(/gensparkVideoTier: e\.target\.value/.test(APP), '설정 select 가 gensparkVideoTier 를 저장한다');
+  // 🔁 v0.9.92 — Genspark 를 쓰지 않는다(로이 2026-10-21) · ⚙ 🌐 브라우저 탭(Genspark 모델·품질 등급·안내)을 지웠다 → 그 칸이 없어야 한다
+  ok(!/gensparkVideoTier: e\.target\.value/.test(APP) && !/이미지 순환과 같은 크롬/.test(APP), '⚙ 설정의 Genspark 칸(품질 등급·안내)은 지웠다(v0.9.92)');
   ok(/GS_VIDEO_MODELS\.map/.test(APP), '모델 select 를 목록으로 렌더한다');
-  ok(/720p 모델/.test(APP), '⚠ 720p 모델은 업스케일이 붙는다고 알린다');
-  ok(/이미지 순환과 같은 크롬/.test(APP), '동시에 돌지 않는다는 것을 알린다');
 }
 // 정규화가 선택을 되돌리지 않는지 — v0.3.50 계열 사고
 ok(!/\['wan', 'grok10', 'genspark'\]/.test(MAIN) && !/genspark'\]\.includes\(rawVe\)/.test(MAIN), '🔴 run-batch 정규화가 genspark 를 되돌리지 않는다');

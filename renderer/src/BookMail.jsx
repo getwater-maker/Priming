@@ -39,7 +39,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding }
 
 // ⚙ 설정 → 계정 탭 「✉ 출판 메일(Gmail)」 — 한 번만 하는 연결
 export function BookMailConnect() {
-  const [status, setMailStatus] = useState({}), [email, setEmail] = useState('getwater@gmail.com'), [busy, setBusy] = useState(false), [msg, setMsg] = useState('');
+  const [status, setMailStatus] = useState({}), [email, setEmail] = useState(''), [busy, setBusy] = useState(false), [msg, setMsg] = useState('');
   useEffect(() => { api.bookMail('status', {}).then(r => { if (r && !r.error) { setMailStatus(r); if (r.email) setEmail(r.email); } }); }, []);
   async function run(action, args) {
     setBusy(true); setMsg('');
@@ -50,7 +50,7 @@ export function BookMailConnect() {
     <div className="frow"><label>출판 메일</label>
       {status.connected
         ? <><span style={{ flex: 1 }}><b>{status.email}</b> · Gmail 연결됨</span><button className="ghost" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => run('disconnect')}>연결 해제</button></>
-        : <><input style={{ flex: 1 }} aria-label="출판 메일 계정" type="email" value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+        : <><input style={{ flex: 1 }} aria-label="출판 메일 계정" type="email" placeholder="Gmail 주소" value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
           <button className="ghost" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => run('import')}>연결 JSON 가져오기</button>
           <button style={{ flex: '0 0 auto' }} disabled={busy || !status.configured} onClick={() => run('connect', { email })}>Google 로그인</button></>}
     </div>

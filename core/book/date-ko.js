@@ -3,7 +3,7 @@
  * date-ko.js — 판권 발행일을 「2026년 10월 06일」 모양으로 (2026-10-06 로이 — 부크크 판권지 수정 요청: 「발행 → 2026년 10월 06일」)
  *   · formatKo('2026-10-06') → '2026년 10월 06일' · '2026.10.6' · '2026/10/06' · '2026. 10. 06.' · '2026년 10월 6일' 도 같은 모양(월·일 두 자리)
  *   · 이미 그 모양이거나 날짜가 아닌 글은 그대로(라벨만 있는 글 · 「초판 1쇄 발행 2026년 …」 의 라벨은 건드리지 않는다)
- *   · normalizeMeta('발행일 2026-10-06') → '발행일 2026년 10월 06일' (라벨 + 날짜 · `;` 로 이은 여러 쇄도 하나씩)
+ *   · normalizeMeta('발행일 2026-10-06') → '2026년 10월 06일' (기본 라벨 「발행일」은 떼고 날짜만 · 다른 라벨은 그대로 · `;` 로 이은 여러 쇄도 하나씩)
  *   ⚠ 순수 함수 — 렌더러 번들에 들어간다.
  */
 function formatKo(v) {
@@ -16,11 +16,14 @@ function formatKo(v) {
   const rest = String(m[4] || '').trim();
   return `${m[1]}년 ${String(mo).padStart(2, '0')}월 ${String(da).padStart(2, '0')}일${rest ? ' ' + rest : ''}`;
 }
+// 🔢 「발행일」 라벨은 값에 적지 않는다 — 판권이 라벨 없는 날짜에 「발행일」을 붙인다(로이 2026-10-21 「발행일이 두 번 입력되는 모양새」).
+//   다른 라벨(「1판 2쇄 발행」 등)은 그대로 둔다.
+const DEFAULT_LABEL_RE = /^발행일?\s*[:：]?$/;
 function normalizeMeta(v) {
   return String(v == null ? '' : v).split(/\s*[;；]\s*/).map((p) => p.trim()).filter(Boolean).map((p) => {
     const m = p.match(/^(.*?)\s*((?:19|20)\d{2}[\D].*)$/);
     if (!m) return p;
-    const label = m[1].trim();
+    const label = DEFAULT_LABEL_RE.test(m[1].trim()) ? '' : m[1].trim();
     const val = formatKo(m[2]);
     return label ? `${label} ${val}` : val;
   }).join('; ');

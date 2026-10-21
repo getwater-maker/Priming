@@ -806,7 +806,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   }
 
   const presentKeys = new Set([...(dto.front || []), ...(dto.back || []), ...(dto.covers || [])].map((s) => s.key));
-  const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
+  // 🔁 부크크 2단계 — 발행일은 ISBN 과 함께 심사 통과 메일로 온다. ISBN 을 받기 전(심사 신청 단계)엔 비어 있는 게 맞다(2026-10-21 로이)
+  const hasIsbn = !!String(meta.isbn || meta.ebookIsbn || '').trim();
+  const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'issueDate' && !hasIsbn) && !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
   const missSet = new Set(missing.map(([k]) => k));
   const spread = dto.spread || {};
   const cpAlignMeta = /하단|아래|bottom/i.test(String(meta.colophonAlignMeta || '')) ? 'bottom' : /상단|위|top/i.test(String(meta.colophonAlignMeta || '')) ? 'top' : '';   // 원고 메타 「판권정렬」 이 화면 값을 이긴다(안 비추면 실제와 다르게 보인다 — 로이 2026-10-02)
@@ -846,13 +848,18 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         const v = e.target.value.trim();
         await p.onBlur(e);
         const dk = DATE_OF[k];
-        if (dk && v && ISBNC.normalizeIsbn13(v) && !String(meta[dk] || '').trim()) await setMeta(dk, DK.todayKo());
+        //   부크크 2단계: 발행일은 부크크 메일에 적힌 날이다 — 오늘로 채운 값은 메일 날짜와 다를 수 있어 확인을 알린다(메일 회신 버튼은 메일 값으로 덮어쓴다)
+        if (dk && v && ISBNC.normalizeIsbn13(v) && !String(meta[dk] || '').trim()) {
+          await setMeta(dk, DK.todayKo());
+          const msg = `📅 ${dk === 'ebookIssueDate' ? '전자책 ' : ''}발행일을 오늘(${DK.todayKo()})로 채웠습니다 — 부크크 메일의 발행일과 다르면 고쳐 주세요`;
+          setStatus(msg); logline(msg);
+        }
       } };
     };
     const one = (k, label, ph, isDate) => (
       <label key={k}>
         <span>{label}</span>
-        <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
+        <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={(isDate ? DK.normalizeMeta(meta[k]) : meta[k]) || ''}
           key={dto.scriptPath + ':' + idp + ':' + k + ':' + fieldRev} {...(isDate ? liveMeta(k, null, (v) => DK.normalizeMeta(v)) : isbnProps(k))} />
         {!isDate && bad(meta[k]) ? <span className="bkisbn-bad" data-testid={idp + '-' + k + '-bad'}>⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요</span> : null}
       </label>

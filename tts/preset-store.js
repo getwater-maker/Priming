@@ -36,6 +36,9 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const EM = require('../core/engine-migrate');
+const _engineMigrations = [];   // loadAll 이 바꾼 이미지·비디오 도구(main 이 takeEngineMigrations 로 꺼내 로그에 남긴다)
+const takeEngineMigrations = () => _engineMigrations.splice(0);
 
 const STORE_DIR = path.join(os.homedir(), '.flow-app');
 const STORE_PATH = path.join(STORE_DIR, 'tts-presets.json');
@@ -134,8 +137,15 @@ function loadAll() {
             omni.isDefault = true;
           }
         }
+        // 🔁 ComfyUI·Genspark 이미지·비디오 도구 → AI 이미지·AI 영상(v0.9.92 · core/engine-migrate 한 곳) — 바꾼 내역은 main 이 로그로 남긴다
+        let engMoved = 0;
+        for (const p of data) {
+          const ch = EM.migratePreset(p);
+          for (const c of ch) _engineMigrations.push({ name: p.name || p.id || '', ...c });
+          engMoved += ch.length;
+        }
         // 마이그레이션 결과 디스크 반영
-        if (dropped > 0) saveAll(data);
+        if (dropped > 0 || engMoved > 0) saveAll(data);
         return data;
       }
     }
@@ -226,6 +236,6 @@ function getDefault() {
 }
 
 module.exports = {
-  loadAll, getById, add, update, remove, reorder, isUsable, getDefault,
+  loadAll, getById, add, update, remove, reorder, isUsable, getDefault, takeEngineMigrations,
   SEED_PRESETS, STORE_PATH,
 };

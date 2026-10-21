@@ -76,7 +76,7 @@ ok(names.includes('MiniMax H3 레퍼런스 (R2V) (클라우드)') && names.inclu
 const app = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8');
 ok(/const suffix = kind === 'video' \? ' 비디오'/.test(app), '그룹 이름 「ComfyUI 클라우드 비디오」(i2v 아님)');
 ok(/const r2vBad = r2vN > 0 && !isMmVideoVal\(/.test(app) && /data-r2v-bad=\{r2vBad/.test(app), '③ 비디오 드롭다운 — R2V 대본 + MiniMax 아님 = 노란 테두리');
-ok(/function _warnR2vEngine[\s\S]{0,900}isMiniMaxRef\(\)/.test(main) && /async function _genGroupVideosCore\([^)]*\) \{\n  _warnR2vEngine\(/.test(main), '만들기 시작 때(모든 엔진 공통 입구) 로그 ⚠');
+ok(/function _warnR2vEngine[\s\S]{0,900}isMiniMaxRef\(\)/.test(main) && /async function _genGroupVideosCore\([^)]*\) \{\n  videoEngine = _migVid\(videoEngine\);\n  _warnR2vEngine\(/.test(main), '만들기 시작 때(모든 엔진 공통 입구) 로그 ⚠');
 // 판정이 같다 — 화면 정규식과 core isR2V
 const RE = /^\s*subject_definitions\s*[:：]/i;
 ok(['subject_definitions: a', '  subject_definitions：b', 'slow push-in', 'x subject_definitions: c'].every((t) => RE.test(t) === R.isR2V(t)), '화면 판정(R2V_HEAD_RE) = core isR2V');

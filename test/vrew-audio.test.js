@@ -129,7 +129,7 @@ function stage2() {
   ok(/probeDur: \(f\) => media\.getMediaDuration\(f\)/.test(MAIN), '🔴 길이를 실측한다(파일 크기 추정은 4배까지 틀린다)');
   ok(/const \[outMode, setOutMode\] = useState\('full'\)/.test(APP), '렌더러 state 기본값 = 전체');
   ok((APP.match(/outMode/g) || []).length >= 5, '렌더러가 outMode 를 실제로 배선한다(v0.6.67 — 고르기 칸이 빠져 8→6, 늘 전체로 보낸다)');
-  ok(/aiNotice, outMode: effOutMode\(\) \}/.test(APP), '큐(common)에 outMode 를 실어 보낸다');
+  ok(/common: \{[^}]*aiNotice, outMode: effOutMode\(\)[,\s}]/.test(APP), '큐(common)에 outMode 를 실어 보낸다(v0.8.7 부터 뒤에 uploadAfter 가 붙는다)');
   ok(!/💾 \.vrew<\/button>/.test(APP), '💾 .vrew 버튼은 없다 — ⚡ 만들기로 통일(2026-09-24)');
   ok(/outMode: effOutMode\(\),  \/\/ 전체 \/ 음성만 \/ 화면만/.test(APP), '⚡ 만들기에도 넘긴다(화이트보드는 늘 전체)');
   ok(/_needImg = \(om === 'audio'\) \? 'none' : 'all'/.test(APP), '🎤 음성만은 이미지 프롬프트를 요구하지 않는다');

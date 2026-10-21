@@ -38,6 +38,15 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     assert.match(await conn.innerText(), /getwater@gmail\.com · Gmail 연결됨/);
     assert.equal(await conn.getByRole('button', { name: '연결 해제' }).count(), 1);
     console.log('✓ ⚙ 설정 → 👤 계정 탭에 Gmail 연결 칸');
+    // 연결 안 된 PC(회원) = 빈칸 — 판매자 Gmail 을 기본값으로 채우지 않는다(로이 2026-10-21)
+    await win.click('.st-x');
+    await app.evaluate(({ ipcMain }) => { ipcMain.removeHandler('book-mail-status'); ipcMain.handle('book-mail-status', () => ({ configured: true, connected: false, email: '', job: null })); });
+    await win.click('button:has-text("⚙ 설정")');
+    await win.click('.st-tabs button:has-text("👤 계정")');
+    const inp = win.locator('[aria-label="출판 메일 계정"]'); await inp.waitFor();
+    assert.equal(await inp.inputValue(), '', '연결 안 된 PC 에 메일 주소가 미리 채워져 있다');
+    assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'renderer/src/BookMail.jsx'), 'utf8'), /@gmail\.com/, 'BookMail.jsx 에 판매자 메일 주소가 박혀 있다');
+    console.log('✓ 연결 안 된 PC 의 출판 메일 칸 = 빈칸');
     console.log('SCREENSHOT=' + path.join(TMP, 'mail-button.png'));
   } finally { await app.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

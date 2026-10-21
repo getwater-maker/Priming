@@ -142,6 +142,21 @@ const withDur = (pj, d = 3) => { pj.sentences.forEach((s) => { s.ttsAudioPath = 
     const kB = mean(raw(base.mp4, 7.5)), kP = mean(raw(pz.mp4, 10.5));
     ok(kB < mPic * 0.5 && kP < mPic * 0.5, `해설 카드가 쉼만큼 밀려 그려진다(기본 7.5초 ${kB.toFixed(0)} · 쉼 10.5초 ${kP.toFixed(0)})`);
     ok(pz.pj.sentences.every((s) => s.ttsDurationSec === 3 && /s\d\.wav$/.test(s.ttsAudioPath)) && pz.tmpLeft === 0, '문장(작업본)·tts 원본 불변 · 임시 무음 파일은 지워진다');
+    // 📝 SRT(v0.9.94 · Lab 요청 2026-10-21) — 쉼만큼 뒤 자막이 밀려야 위 MP4(다음 낭독 6초~)와 맞는다
+    {
+      const starts = (f) => fs.readFileSync(f, 'utf8').split(/\n\n+/).filter(Boolean).map((b) => { const m = /^(\d\d):(\d\d):(\d\d),(\d{3}) --> (\d\d):(\d\d):(\d\d),(\d{3})/m.exec(b); return m ? [(+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000, (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]) + (+m[8]) / 1000] : null; }).filter(Boolean);
+      const sB = path.join(tmp, 'b.srt'), sB2 = path.join(tmp, 'b2.srt'), sB3 = path.join(tmp, 'b3.srt'), sP = path.join(tmp, 'p.srt');
+      P.writeSrt(base.pj, sB, 20); P.writeSrt(base.pj, sB2, 20, {}); P.writeSrt(base.pj, sB3, 20, { interludePauseSec: 0 }); P.writeSrt(pz.pj, sP, 20, { interludePauseSec: 3 });
+      ok(fs.readFileSync(sB, 'utf8') === fs.readFileSync(sB2, 'utf8') && fs.readFileSync(sB, 'utf8') === fs.readFileSync(sB3, 'utf8'), 'SRT: 쉼이 없으면(preset 없음 · {} · 0초) 예전과 한 글자도 같다');
+      const tb = starts(sB), tp = starts(sP);
+      ok(tb.length === 3 && tb.map((x) => x[0]).join() === '0,3,6', `SRT 기본 시작 = 0·3·6초 (${tb.map((x) => x[0]).join(',')})`);
+      ok(tp.length === 3 && tp.map((x) => x[0]).join() === '0,6,9', `🔑 SRT 쉼 3초 = 막간 뒤 자막이 3초 밀린다 0·6·9초 (${tp.map((x) => x[0]).join(',')}) — MP4 다음 낭독 6초~와 같다`);
+      ok(tp[0][1] === 3, `SRT: 쉼 동안은 자막 없음(막간 문장 자막 끝 = 음성 끝 3초 · ${tp[0] && tp[0][1]})`);
+      ok(Math.abs(tp[2][1] - dP) < 0.15, `SRT 마지막 자막 끝 = 영상 길이(${tp[2][1]} · ${dP.toFixed(2)}초)`);
+      const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+      const calls = M.match(/P\.writeSrt\([^\n]*/g) || [];
+      ok(calls.length === 2 && calls.every((c) => /captionMaxChars, (preset|ep)\)/.test(c)), `main 의 SRT 쓰기 ${calls.length}곳 모두 .vrew 와 같은 preset 을 넘긴다`);
+    }
     if (process.env.PM_SHOT_DIR) { fs.mkdirSync(process.env.PM_SHOT_DIR, { recursive: true }); for (const [t, nm] of [[1.5, 'pause_title'], [4.5, 'pause_mid'], [7.5, 'pause_after'], [10.5, 'pause_kaisetsu']]) execFileSync(FF, ['-y', '-v', 'error', '-ss', String(t), '-i', pz.mp4, '-frames:v', '1', path.join(process.env.PM_SHOT_DIR, nm + '.png')]); }
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 

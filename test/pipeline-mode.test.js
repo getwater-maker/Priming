@@ -33,7 +33,8 @@ ok(/const _imgLocalGpu = isComfyVal\(engine\)/.test(SRC), '이미지 로컬 GPU 
   ok(body.length > 3000, 'runMakeAllCore 본문을 제대로 잘라냈다 (' + body.length + '자)');
   const code = body.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n'); // 주석 줄 제외
   ok(!/\bimgEngine\b/.test(code), 'runMakeAllCore 안에 스코프 밖 변수 imgEngine 이 없다');
-  ok(/\bengine = 'genspark'/.test(code), 'runMakeAllCore 의 이미지 엔진 인자 이름은 engine');
+  // v0.9.92 — 인자는 `engine: _engineArg` 로 받고 옛 ComfyUI·Genspark 값을 바꾼 뒤 `engine` 으로 쓴다(core/engine-migrate)
+  ok(/\bengine: _engineArg = 'genspark'/.test(code) && /const engine = _migImg\(_engineArg\)/.test(code), 'runMakeAllCore 의 이미지 엔진 변수 이름은 engine(옛 값 변환 뒤)');
 }
 ok(/comfy-image'\)\.loadConfig\(\)\.cloud/.test(SRC), '이미지 설정의 cloud 를 실제로 읽는다');
 ok(/comfy-video'\)\.loadConfig\(\)\.cloud/.test(SRC), '비디오 설정의 cloud 를 실제로 읽는다');

@@ -49,7 +49,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     { const b = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => { const r = document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect(); return { t: r.top, l: r.left }; }));
       ok(b[0].t < b[1].t && b[2].t < b[3].t && Math.abs(b[0].t - b[2].t) < 2 && b[0].l < b[2].l, '순서: 종이책 칸(발행일 → ISBN) 왼쪽 · 전자책 칸(발행일 → ISBN) 오른쪽 같은 높이'); }
     ok(await win.locator('[data-testid=rg-ebook-fallback]').count() === 1, '전자책 칸이 비면 「종이책 값이 실린다」 안내');
-    ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '기존 발행일이 칸에 보인다');
+    // 🔢 원고 「발행일 2026-10-02」 → 칸엔 날짜만(「발행일」 라벨은 판권이 붙인다 · 2026-10-21 「발행일이 두 번」)
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '2026년 10월 02일', '기존 발행일이 칸에 날짜만 보인다(라벨 「발행일」 없이)');
 
     // 틀린 번호 → ⚠ (판정력) · 맞는 번호 → ✅
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
@@ -57,14 +58,25 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-isbn-bad]').count() === 0, '부크크가 보낸 979-11-12-31240-2 → 경고 없음(체크 숫자 통과)');
     // 📅 발행일 = ISBN 받은 날 — 이미 적힌 발행일은 ISBN 을 넣어도 그대로, 비어 있으면 ISBN 을 넣는 순간 오늘(KST)
-    ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '2026년 10월 02일', '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
     await win.locator('[data-testid=rg-issueDate]').fill(''); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '발행일 비움');
+    // 🔁 부크크 2단계 — ISBN 이 있으면 빈 발행일은 판권 필수 미입력, ISBN 이 없으면(심사 신청 단계) 아니다(2026-10-21)
+    { const coloMiss = () => win.evaluate(() => { const b = document.querySelector('[data-tab=colophon] .bkcnt'); return b ? Number(b.textContent) : 0; });
+      const n1 = await coloMiss();
+      await win.locator('[data-testid=rg-isbn]').fill(''); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
+      const n0 = await coloMiss();
+      ok(n1 === n0 + 1, `ISBN 이 있을 때만 빈 발행일을 판권 필수로 센다(ISBN 있음 ${n1} · 없음 ${n0})`); }
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '틀린 ISBN 으로는 발행일을 채우지 않는다');
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(700);
     { const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).split('-'); const want = `${kst[0]}년 ${kst[1]}월 ${kst[2]}일`;
-      ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want); }
+      ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want);
+      // 🔁 부크크 2단계 — 오늘로 채운 발행일은 메일 날짜와 다를 수 있어 확인을 알린다(v0.9.89)
+      const back = await win.locator('[data-testid=bk-nav] .bktab.on').getAttribute('data-tab');
+      await win.click('[data-tab=log]'); await win.waitForSelector('[data-testid=bk-log-tab] #logwrap', { timeout: 5000 });
+      ok(/부크크 메일의 발행일과 다르면/.test(await win.locator('[data-testid=bk-log-tab]').innerText()), '오늘로 채우면 로그에 「부크크 메일의 발행일과 다르면 고쳐 주세요」 안내');
+      await win.click(`[data-tab=${back}]`); await win.locator('[data-testid=rg-issueDate]').waitFor(); }
     await win.locator('[data-testid=rg-issueDate]').fill('2026-10-06'); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(400);
     // 📅 전자책 ISBN 을 넣으면 **전자책** 발행일만 오늘(KST)로 채운다 — 종이책 발행일은 그대로
     await win.locator('[data-testid=rg-ebookIsbn]').fill('979-11-12-31221-1'); await win.locator('[data-testid=rg-ebookIsbn]').blur(); await win.waitForTimeout(700);

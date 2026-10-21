@@ -76,6 +76,8 @@ function preflight(x) {
   const waitIsbn = !has(m.issueDate) && !has(m.isbn) && !has(m.ebookIsbn);
   if (!has(m.issueDate) && !waitIsbn) miss.push('발행일');
   out.push(it('meta', '필수 정보', miss.length ? 'error' : 'ok', miss.length ? `비어 있음: ${miss.join(', ')}` : waitIsbn ? '제목·저자·출판사 있음 — 발행일은 ISBN 을 받은 뒤 입력(ISBN 을 넣으면 오늘로 채워집니다)' : '제목·저자·출판사·발행일 있음', 'info'));
+  // 🔁 부크크 2단계 — 발행일·ISBN 은 심사 통과 메일로 함께 온다. ISBN 없이 발행일만 있으면 견본에서 옮겨 온 자리표시일 수 있다(2026-10-21 일곱 권 사고)
+  if (has(m.issueDate) && !has(m.isbn) && !has(m.ebookIsbn)) out.push(it('issue-date-early', '발행일', 'warn', `ISBN 없이 발행일(${String(m.issueDate).trim()})만 있습니다 — 심사 신청 단계라면 비워 두세요(발행일은 부크크 메일로 ISBN 과 함께 옵니다)`, 'colophon'));
   // 7) 완성 파일이 원고보다 낡았나
   const find = (k) => (x.outputs || []).filter((o) => o.kind === k).sort((a, b) => b.mtime - a.mtime)[0];
   // 📄 전자책은 PDF(표지+본문)를 올린다(2026-10-12) — ePub 은 선택 산출물이라 만들었을 때만 본다
