@@ -9,6 +9,7 @@ import HK from '../../core/book/header-kind.js';
 import DK from '../../core/book/date-ko.js';   // 발행일 「2026년 10월 06일」 모양
 import BookDistribution from './BookDistribution.jsx';   // 📊 유통 현황(로이 2026-10-14)
 import OverseasRegister from './OverseasRegister.jsx';   // 🇺🇸 KDP·D2D 등록 복사 도우미(R27)
+import PVP from '../../core/book/preview-pages.js';   // 미리보기 쪽수 보고 판정(옛 뷰어·중간 숫자 거르기 · v0.9.88)
 import ISBNC from '../../core/book/isbn-barcode.js';   // normalizeIsbn13 — ISBN 체크 숫자 확인(순수 함수)
 import BookMail from './BookMail.jsx';
 
@@ -336,13 +337,22 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       renderAllPages: true, pageViewMode: PageViewMode.SPREAD, fitToScreen: true, autoResize: true,
     });
     viewerRef.current = viewer;
+    // 🔴 옛 뷰어는 새 미리보기가 시작돼도 버려진 문서에서 계속 돌다 'complete' 를 낸다 — 지금 뷰어가 아니면 듣지 않는다(v0.9.88 · core/book/preview-pages)
+    const isCurrent = () => viewerRef.current === viewer;
     viewer.addListener('nav', (p) => {
+      if (!isCurrent()) return;
       try { navFlushRef.current && navFlushRef.current(); } catch (_) {}   // 앞 이동이 끝났다 — 기다리던 이동이 있으면 이어서
       if (p && typeof p.epage === 'number') { curRef.current = Math.round(p.epage) + 1; setPageInfo((pi) => ({ ...pi, cur: Math.round(p.epage) + 1 })); }
     });
     viewer.addListener('readystatechange', () => {
       if (viewer.readyState === 'complete') {
         const total = Math.max(0, (viewer.getPageSizes() || []).length);
+        let domPages = -1; try { domPages = vp.querySelectorAll('[data-vivliostyle-page-container]').length; } catch (_) {}
+        const pr = PVP.pageReport({ isCurrent: isCurrent() && vp.isConnected, total, domPages, known: dtoPagesRef.current });
+        if (!pr.show) {
+          if (pr.reason !== 'stale-viewer') logline(`ℹ 미리보기 쪽수 보고 보류 — 뷰어 ${total}쪽 · 화면에 그려진 쪽 ${domPages}개(${pr.reason})`);
+          return;
+        }
         setPageInfo((pi) => ({ ...pi, total }));
         setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
         try { fdoc.body.style.zoom = zoomRef.current; syncBodyMin(fdoc, zoomRef.current); } catch (_) {}
@@ -350,7 +360,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         // 쪽수가 **서버가 아는 값과 다를 때만** 보고한다(책등·규격 재계산 · 같은 값이면 재렌더 회피).
         //   예전엔 「이전에 보고한 값」과 비교해서, 🆕 초기화 뒤 같은 원고를 다시 열면(조판 쪽수가 똑같아) 보고가 건너뛰어져 서버 쪽수가 0 으로 남았다 →
         //   「총 ?쪽 · 책등 0mm · 쪽수 미확정 · 표지 치수 불일치」 가 조판이 끝나도 사라지지 않았다(로이 2026-10-03 빨간머리앤 369쪽).
-        if (total > 0 && total !== dtoPagesRef.current) {
+        if (pr.report) {
           lastPagesRef.current = total;
           api.bookReportPages({ pages: total }).then((d) => { if (d) setDto(d); }).catch(() => {});
         }
