@@ -806,7 +806,9 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   }
 
   const presentKeys = new Set([...(dto.front || []), ...(dto.back || []), ...(dto.covers || [])].map((s) => s.key));
-  const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
+  // 🔁 부크크 2단계 — 발행일은 ISBN 과 함께 심사 통과 메일로 온다. ISBN 을 받기 전(심사 신청 단계)엔 비어 있는 게 맞다(2026-10-21 로이)
+  const hasIsbn = !!String(meta.isbn || meta.ebookIsbn || '').trim();
+  const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'issueDate' && !hasIsbn) && !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
   const missSet = new Set(missing.map(([k]) => k));
   const spread = dto.spread || {};
   const cpAlignMeta = /하단|아래|bottom/i.test(String(meta.colophonAlignMeta || '')) ? 'bottom' : /상단|위|top/i.test(String(meta.colophonAlignMeta || '')) ? 'top' : '';   // 원고 메타 「판권정렬」 이 화면 값을 이긴다(안 비추면 실제와 다르게 보인다 — 로이 2026-10-02)

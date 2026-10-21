@@ -61,6 +61,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '2026년 10월 02일', '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
     await win.locator('[data-testid=rg-issueDate]').fill(''); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '발행일 비움');
+    // 🔁 부크크 2단계 — ISBN 이 있으면 빈 발행일은 판권 필수 미입력, ISBN 이 없으면(심사 신청 단계) 아니다(2026-10-21)
+    { const coloMiss = () => win.evaluate(() => { const b = document.querySelector('[data-tab=colophon] .bkcnt'); return b ? Number(b.textContent) : 0; });
+      const n1 = await coloMiss();
+      await win.locator('[data-testid=rg-isbn]').fill(''); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
+      const n0 = await coloMiss();
+      ok(n1 === n0 + 1, `ISBN 이 있을 때만 빈 발행일을 판권 필수로 센다(ISBN 있음 ${n1} · 없음 ${n0})`); }
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '틀린 ISBN 으로는 발행일을 채우지 않는다');
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(700);
