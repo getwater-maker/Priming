@@ -12,6 +12,7 @@
 > - ✂ **쉼 줄이기 = `core/quiet-trim` 한 곳**(채널 `quietMaxSec`·`quietEdge` · 원본 음성은 두고 `<번호>_q.wav` 사본 + `s.quiet` · 부르는 곳 `P.quietPass` = fillTtsList 끝 · 4단계·export-vrew 지문보다 먼저) — 길이를 바꾸는 새 음성 처리도 이 길로 · `test:quiet`.
 > - ⏩ **클립 배속 = 같은 사본 체인**(`s.clipSpeed` · 열쇠 `sentKey` · IPC `clip-speed`) — 🔴 사본 이름은 `<번호>_q<지문>.wav`(⛔ 고정 이름으로 덮어쓰지 말 것 — Ctrl+Z 가 옛 소리를 잃는다) · 음성을 물려받는 새 편집 경로는 `s.quiet`·`clipSpeed` 도 함께 넘길 것(안 넘기면 배속이 두 번 걸린다).
 > - ⏸ **화면 시각의 막간 쉼 = DTO 문장 `pz`(`P.setPauseHook` → `pausePlanOf` 한 곳)** · 화면 누적은 `sentSpan(se)`·`buildProjLines` — ⛔ 화면에서 쉼 규칙을 다시 만들지 않는다 · 새 시각 계산도 `sentSpan` 으로 · `test:pausepv`.
+> - 🎞 **켄번스 = `core/ken-burns` 한 곳**(빌더 표·번호 공식·클램프·구간 · ① 미리보기 CSS 는 같은 표에서 생성 — ⛔ styles.css 에 @keyframes kbN 을 다시 손으로 쓰지 말 것 · `test:kbpv`) · 📐 **자막 자리 = `core/caption-geom.boxPx` 한 곳**(MP4 반올림 · 미리보기 소수 — ⛔ 0.72·24.6·105.5 를 다른 파일에 다시 두지 말 것 · `test:capgeom`).
 
 > 이 폴더에서 여는 모든 세션에 통째로 실리는 문서다. **지금 유효한 규칙·금지선·구조만** 둔다.
 > 경위·실측 수치·버전별 기록은 [`docs/작업노트/`](docs/작업노트/) 에 **원문 그대로** 있다(2026-09-26 슬림화 전 CLAUDE.md 전체 = 557,605자).

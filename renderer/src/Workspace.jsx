@@ -8,6 +8,7 @@
  *   · buildProjLines — 편의 자막 줄 목록(번호·그룹·문장·글자 범위). ①·②·키보드가 **같은 번호**를 쓴다(두 벌 금지).
  *   · stageCapGeom   — 미리보기 자막 크기·위치 = **유튜브 MP4 와 같은 공식**(core/vrew-render captionAssStyle).
  */
+import CG from '../../core/caption-geom.js';
 import { splitLines, mLen } from './lib/captions.js';
 import CF from '../../core/caption-format.js';
 
@@ -58,31 +59,21 @@ export function buildProjLines(pr, capChars) {
   return { list, bySent };
 }
 
-// ── 미리보기 자막 배치 — core/vrew-render.js 의 captionAssStyle 과 같은 수치(1920×1080 기준) ──
-const SIZE_K = 0.72;          // Vrew size → 픽셀
-const BOX_PAD_X = 24.6;       // 텍스트박스 안쪽 가로 여백
-const CAP_BOTTOM_BASE = 105.5; // yOffset 0 일 때의 아래(위) 여백
-const HALF_H = 540;
-
+// ── 미리보기 자막 배치 — core/caption-geom 한 곳(🎬 MP4 captionAssStyle 과 같은 함수 · 1920×1080 기준 · Lab 차이표 #12) ──
 /**
- * @param pos   { align, yAlign, yOffset, xOffset } (core/caption-format linePos 결과)
+ * @param pos   { align, yAlign, yOffset, xOffset, width? } (core/caption-format linePos 결과)
  * @param size  Vrew 글자 크기
  * @param stageW 미리보기 폭(px)
  * @returns CSS 값 묶음 + s(미리보기 px / 1080 화면 px — 테두리·그림자 환산에 쓴다)
  */
 export function stageCapGeom(pos, size, stageW) {
   const s = stageW > 0 ? stageW / 1920 : 0.28;
-  const x = Number(pos && pos.xOffset) || 0;
-  const y = Number(pos && pos.yOffset) || 0;
-  const boxLeft = (1 - 0.96) / 2 * 1920 + x * 960;
-  const mL = boxLeft + BOX_PAD_X;
-  const mR = 1920 - (boxLeft + 0.96 * 1920) + BOX_PAD_X;
-  const align = pos && pos.align === 'end' ? 'right' : pos && pos.align === 'center' ? 'center' : 'left';
-  const out = { s, left: mL * s, right: mR * s, textAlign: align, fontSize: (Number(size) || 100) * SIZE_K * s };
-  const va = pos && pos.yAlign;
-  if (va === 'top') { out.top = (CAP_BOTTOM_BASE + y * HALF_H) * s; out.bottom = null; out.transform = 'none'; }
-  else if (va === 'middle') { out.top = (HALF_H + y * HALF_H) * s; out.bottom = null; out.transform = 'translateY(-50%)'; }
-  else { out.bottom = (CAP_BOTTOM_BASE + (-y) * HALF_H) * s; out.top = null; out.transform = 'none'; }
+  const g = CG.boxPx({ hAlign: pos && pos.align, yAlign: pos && pos.yAlign, yOffset: pos && pos.yOffset, xOffset: pos && pos.xOffset, width: pos && pos.width }, Number(size) || 100);
+  const align = g.hAlign === 'end' ? 'right' : g.hAlign === 'center' ? 'center' : 'left';
+  const out = { s, left: g.marginL * s, right: g.marginR * s, textAlign: align, fontSize: g.sizePx * s };
+  if (g.yAlign === 'top') { out.top = g.marginV * s; out.bottom = null; out.transform = 'none'; }
+  else if (g.yAlign === 'middle') { out.top = (CG.HALF_H + g.offsetY) * s; out.bottom = null; out.transform = 'translateY(-50%)'; }
+  else { out.bottom = g.marginV * s; out.top = null; out.transform = 'none'; }
   return out;
 }
 

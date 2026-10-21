@@ -45,11 +45,13 @@ const DEFAULT_CHUNK_SEC = 20;    // 긴 이미지 구간을 나누는 단위(병
 //   하단 자막: yOffset -0.125 에서 MarginV 173 (yOffset 1 단위 = 화면 높이의 절반 = 540px)
 //   ⚠ 하단·왼쪽정렬·yOffset -0.125 **한 가지 스타일만** 실측으로 맞췄다(로이 채널 5개가 전부 이 스타일).
 //     다른 위치·정렬은 같은 공식을 쓰지만 검증되지 않았다 → 로그로 알린다.
-const SIZE_K = 0.72;
-const BOX_PAD_X = 24.6;
+// 📐 자막 상수·공식 = core/caption-geom 한 곳(① 미리보기와 같은 수치 · Lab 차이표 #12)
+const CG = require('./caption-geom');
+const SIZE_K = CG.SIZE_K;
+const BOX_PAD_X = CG.BOX_PAD_X;
 const WEB_PAD_X = 23.6;
 const WEB_PAD_Y = 12.2;
-const CAP_BOTTOM_BASE = 105.5;   // yOffset 0 일 때의 하단 여백(= 173 − 0.125×540)
+const CAP_BOTTOM_BASE = CG.CAP_BOTTOM_BASE;   // yOffset 0 일 때의 하단 여백(= 173 − 0.125×540)
 const HALF_H = H / 2;
 
 function getFfmpeg() {
@@ -308,21 +310,16 @@ function captionAssStyle(capStyle, fontName) {
   const at = (capStyle && capStyle.attrs) || {};
   const ca = Array.isArray(st.customAttributes) ? st.customAttributes : [];
   const alignV = ((ca.find((x) => x.attributeName === '--textbox-align') || {}).value) || 'center';
-  const hAlign = ['start', 'center', 'end'].includes(alignV) ? alignV : 'center';
-  const yAlign = ['top', 'middle', 'bottom'].includes(st.yAlign) ? st.yAlign : 'bottom';
-  const yOff = isFinite(+st.yOffset) ? +st.yOffset : 0;
-  const width = isFinite(+st.width) && +st.width > 0 ? +st.width : 0.96;
-  const xOff = isFinite(+st.xOffset) ? +st.xOffset : 0;
-  const size = Math.max(8, Math.round((+at.size || 100) * SIZE_K));
-  const boxLeft = (1 - width) / 2 * W + xOff * (W / 2);
-  const marginL = Math.max(0, Math.round(boxLeft + BOX_PAD_X));
-  const marginR = Math.max(0, Math.round(W - (boxLeft + width * W) + BOX_PAD_X));
-  let align, marginV;
-  if (yAlign === 'bottom') { align = ALIGN_BOTTOM[hAlign]; marginV = Math.round(CAP_BOTTOM_BASE + (-yOff) * HALF_H); }
-  else if (yAlign === 'top') { align = ALIGN_TOP[hAlign]; marginV = Math.round(CAP_BOTTOM_BASE + yOff * HALF_H); }
-  else { align = ALIGN_MIDDLE[hAlign]; marginV = 0; }
+  // 📐 자리 계산은 core/caption-geom.boxPx 한 곳 — 여기서는 ASS 용으로 정수 반올림만
+  const _g = CG.boxPx({ hAlign: alignV, yAlign: st.yAlign, yOffset: st.yOffset, xOffset: st.xOffset, width: st.width }, at.size);
+  const { hAlign, yAlign, yOff, width, xOff } = _g;
+  const size = Math.max(8, Math.round(_g.sizePx));
+  const marginL = Math.max(0, Math.round(_g.marginL));
+  const marginR = Math.max(0, Math.round(_g.marginR));
+  const align = (yAlign === 'bottom' ? ALIGN_BOTTOM : yAlign === 'top' ? ALIGN_TOP : ALIGN_MIDDLE)[hAlign];
+  const marginV = yAlign === 'middle' ? 0 : Math.round(_g.marginV);
   // 가운데 정렬의 세로 위치 — 여백으로는 표현이 안 돼 기준점을 옮긴다(+ = 아래). 예전엔 버려져 가운데 자막이 늘 정가운데였다.
-  const offsetY = yAlign === 'middle' ? Math.round(yOff * HALF_H) : 0;
+  const offsetY = Math.round(_g.offsetY);
   const outlineOn = String(at['outline-on'] ?? 'true') !== 'false';
   // 🎨 배경 상자(--textbox-color) — Vrew 는 .textarea 에 background + width: fit-content 로 그린다(글자 폭 상자).
   //   투명(알파 0)이면 없음. 여백은 그 CSS 의 padding(가로 5px·세로 약 2px @ 25px 글꼴)을 글자 크기에 비례해 옮긴다.
