@@ -53,10 +53,22 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('[data-testid=keychk-all]', { timeout: 10000 });
     t = await tabs();
     ok(JSON.stringify(t) === JSON.stringify(['🔑 API 키', '📺 채널 연결', '📁 폴더', '👤 계정']), '회원 탭 = API 키·채널 연결·폴더·계정 — ' + t.join(' · '));
-    ok(await win.locator('[data-testid=member-ai-card]').count() === 1 && /남은 40 pt/.test(await win.locator('[data-testid=member-ai-card]').innerText()), '회원 🔑 맨 위 = 🪙 포인트 안내(남은 40 pt)');
+    ok(await win.locator('[data-testid=member-ai-card]').count() === 1 && /남은 40 크레딧/.test(await win.locator('[data-testid=member-ai-card]').innerText()), '회원 🔑 맨 위 = 🪙 크레딧 안내(남은 40 크레딧)');
     ok(/내 kie\.ai 키/.test(await win.locator('[data-testid=kie-key]').innerText()), '회원 kie 칸 = 「내 키 (선택)」');
     ok(await win.locator('[data-testid=gemini-image-key]').count() === 0, '회원에겐 나노바나나 칸이 없다');
     ok(await win.locator('[data-testid=claude-key]').count() === 1 && await win.locator('[data-testid=tts-keys]').count() === 1, '회원도 Claude·TTS 키 칸은 있다');
+    await win.click('.st-x');
+    // 💳 헤더 크레딧 칸(v0.9.93) — 회원 = 「🪙 크레딧 남은 40 / 지급 100」 · ⛔ kie 이름 없음
+    { const h = await win.locator('[data-testid=member-points]').innerText();
+      ok(/크레딧 남은 40/.test(h) && /지급 100/.test(h) && !/kie|포인트/i.test(h + (await win.locator('[data-testid=member-points]').getAttribute('title'))), '회원 헤더 = 크레딧 남은 40 / 지급 100 (kie·포인트 낱말 없음) — ' + h); }
+    // 관리자 = 우리 kie 계정 잔액 「🧩 kie크레딧 남은 786」(지급 칸 없음)
+    await app.evaluate(({ ipcMain }) => {
+      const m = { ok: true, enforced: true, owner: true, admin: true, email: 'admin@example.com', points: null, kie: 786 };
+      for (const n of ['license-state', 'license-recheck']) { ipcMain.removeHandler(n); ipcMain.handle(n, () => m); }
+    });
+    await win.reload(); await win.waitForSelector('[data-testid=member-points]', { timeout: 20000 });
+    { const h = await win.locator('[data-testid=member-points]').innerText();
+      ok(/kie크레딧 남은 786/.test(h) && !/지급/.test(h), '관리자 헤더 = kie크레딧 남은 786 — ' + h); }
   } finally { await app.close(); }
   console.log(`\n${fail ? '❌' : '✅'} api-key-ui — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);

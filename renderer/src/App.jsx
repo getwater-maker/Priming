@@ -712,13 +712,13 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   // 👑 로이(관리자) PC 인가(v0.9.27) — 로이 전용 안내(아도나이로이 대시보드 등)는 회원 화면에 보이지 않게 · 개발 실행·E2E 는 로이 PC
   const [owner, setOwner] = useState(true);
-  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // 🪙 회원 포인트(지급 · 남음) — 5분마다 다시 읽는다(v0.9.72). 서버가 값을 안 주는 회원(원장이 비어 있음)·서버가 아직 준비 전이어도
   //   설치본(회원 확인을 켠 앱)에서는 칸이 보인다(v0.9.78 — 「포인트 0」) · 개발 실행·E2E(확인 끔)는 숨김
   const [points, setPoints] = useState(null);
   const [licKind, setLicKind] = useState(null);   // { enforced, admin } — 포인트 칸을 보일지 · 문구 판단용
   // v0.9.80 — 관리자가 포인트를 줘도 앱을 껐다 켜야 보이던 것: 1분마다(창이 보일 때만) · 창을 다시 누를 때 · 포인트 칸을 누를 때 바로 다시 읽는다
-  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie } : null); } catch (_) {} };
+  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} };
   useEffect(() => {
     let last = 0;
     const tick = () => { if (document.visibilityState !== 'visible') return; last = Date.now(); refreshPoints(true); };
@@ -728,21 +728,30 @@ export default function App() {
     return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
-  // v0.9.86 — 관리자도 회원과 똑같이 자기 잔여 포인트를 본다(로이 2026-10-21 「나도 충전해서 쓰는 입장」 · 옛 「제한 없음」 폐기)
-  //   kie 보유 크레딧은 관리자에게만 마우스 팝업으로
+  // 💳 크레딧 칸(v0.9.93 · 로이 2026-10-21 「포인트 → kie크레딧 · 실제로 쓸 수 있는 크레딧을」 · 옛 「포인트」 이름 폐기 · 1크레딧 = kie 1크레딧)
+  //   관리자 = 우리 kie 계정 잔액(이 PC 의 kie 키로 main 이 직접 조회) 「🧩 kie크레딧 남은 N」 — 관리자 화면에만 서비스 이름(로이 확정)
+  //   회원 = 서버가 준 자기 크레딧 「🪙 크레딧 남은 N / 지급 M」 — ⛔ 회원 화면에 kie 이름을 넣지 않는다
   const pointsEl = (points || (licKind && licKind.enforced)) ? (() => {
     const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
-    const kieTip = licKind && licKind.admin && licKind.kie != null ? '\nkie 보유 크레딧: ' + f(licKind.kie) : '';
-    if (!points) {   // 서버가 포인트 값을 주지 않음 = 0(아직 지급받지 않음)
+    const box = (bg, fg) => ({ padding: '3px 9px', borderRadius: 6, background: bg, color: fg, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' });
+    if (licKind && licKind.admin) {
+      if (licKind.kie == null) return <span className="pts" data-testid="member-points" data-admin="1" data-empty="1" onClick={() => refreshPoints(false)}
+        title={(licKind.kieNoKey ? '이 PC 에 kie 키가 없어 잔액을 볼 수 없습니다 — ⚙ 설정 → 🔑 API 키에 같은 키를 넣으면 다른 관리자 PC 와 같은 잔액을 보고 함께 씁니다.' : 'kie 잔액을 불러오지 못했습니다.') + '\n(누르면 바로 새로고침)'}
+        style={box('#eef0f4', '#5a6270')}>🧩 kie크레딧 <b>{licKind.kieNoKey ? '키 없음' : '-'}</b></span>;
+      const low = licKind.kie < 100;
+      return <span className="pts" data-testid="member-points" data-admin="1" onClick={() => refreshPoints(false)}
+        title={`우리 kie 계정에 남은 크레딧 ${f(licKind.kie)} — 같은 키를 넣은 관리자 PC 끼리 함께 씁니다${low ? '\n⚠ 거의 다 썼습니다 — kie 에서 충전하세요' : ''}\n(누르면 바로 새로고침)`}
+        style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>🧩 kie크레딧 남은 <b>{f(licKind.kie)}</b></span>;
+    }
+    if (!points) {   // 서버가 크레딧 값을 주지 않음 = 0(아직 지급받지 않음)
       return <span className="pts" data-testid="member-points" data-empty="1" onClick={() => refreshPoints(false)}
-        title={'아직 지급받은 포인트가 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 포인트 없이 쓸 수 있습니다.' + kieTip + '\n(누르면 바로 새로고침)'}
-        style={{ padding: '3px 9px', borderRadius: 6, background: '#fff6dc', color: '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
-        🪙 남은 <b>0</b> / 지급 0</span>;
+        title={'아직 지급받은 크레딧이 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 크레딧 없이 쓸 수 있습니다.\n(누르면 바로 새로고침)'}
+        style={box('#fff6dc', '#7a5a00')}>🪙 크레딧 남은 <b>0</b> / 지급 0</span>;
     }
     const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
-    return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 포인트 — 지급받은 포인트 ${f(points.granted)} 중 남은 포인트 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}${kieTip}\n(누르면 바로 새로고침)`}
-      style={{ padding: '3px 9px', borderRadius: 6, background: low ? '#fde8e8' : '#fff6dc', color: low ? '#a3352b' : '#7a5a00', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' }}>
-      🪙 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
+    return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 크레딧 — 지급받은 크레딧 ${f(points.granted)} 중 남은 크레딧 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 바로 새로고침)`}
+      style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>
+      🪙 크레딧 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
   })() : null;
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
   const [settingsTab, setSettingsTab] = useState('keys');   // SETTINGS_TABS 의 id — 'keys' | 'server'(판매자) | 'yt' | 'folders' | 'account' (v0.9.92 · 옛 comfy·flow 는 SETTINGS_TAB_ALIAS)
@@ -7279,16 +7288,16 @@ export default function App() {
                   ⚠ 회원 대신 부르는 서버 대행(docs/요청서_wise-priming-kie대행.md)이 붙기 전에는 내 키가 있어야 만들어진다 → KIE_PROXY_READY 가 문구를 가른다 */}
               {!owner && (<div data-testid="member-ai-card" className="kp-card">
                 <div className="kp-line">
-                  <b className="kp-name">🪙 AI 이미지 · 영상 = 포인트</b>
-                  <span className="kp-state">{points ? `남은 ${Number(points.remaining || 0).toLocaleString()} pt` : '남은 0 pt'}</span>
+                  <b className="kp-name">🪙 AI 이미지 · 영상 = 크레딧</b>
+                  <span className="kp-state">{points ? `남은 ${Number(points.remaining || 0).toLocaleString()} 크레딧` : '남은 0 크레딧'}</span>
                 </div>
                 <div className="meta" style={{ marginTop: 2 }}>{KIE_PROXY_READY
-                  ? <>헤더 「② 이미지」·「③ 비디오」의 ☁ AI 모델은 <b>포인트</b>로 만듭니다 — 키를 넣지 않아도 됩니다. 아래에 <b>내 키</b>를 넣으면 포인트 대신 내 키로 만듭니다.</>
-                  : <>포인트로 만드는 기능은 <b>준비 중</b>입니다. 그때까지는 아래 <b>내 키</b>를 넣으면 ☁ AI 모델로 만들 수 있습니다.</>}</div>
+                  ? <>헤더 「② 이미지」·「③ 비디오」의 ☁ AI 모델은 <b>크레딧</b>으로 만듭니다 — 키를 넣지 않아도 됩니다. 아래에 <b>내 키</b>를 넣으면 크레딧 대신 내 키로 만듭니다.</>
+                  : <>크레딧으로 만드는 기능은 <b>준비 중</b>입니다. 그때까지는 아래 <b>내 키</b>를 넣으면 ☁ AI 모델로 만들 수 있습니다.</>}</div>
               </div>)}
               <div data-testid="kie-key" className="kp-card">
                 <div className="kp-line">
-                  <b className="kp-name">{owner ? '🧩 kie.ai (이미지 · 비디오 · 회원 포인트의 원천)' : '🧩 내 kie.ai 키 (선택)'}</b>
+                  <b className="kp-name">{owner ? '🧩 kie.ai (이미지 · 비디오 · 회원 크레딧의 원천)' : '🧩 내 kie.ai 키 (선택)'}</b>
                   <Hint>kie.ai → API Key 에서 만든 키입니다. 헤더 「② 이미지」·「③ 비디오」에서 <b>kie</b> 항목을 고르면 이 키로 만듭니다. 충전한 크레딧에서 쓴 만큼 빠지고, 실패한 작업은 빠지지 않습니다. 「✔ 검증」은 남은 크레딧만 조회해 요금이 들지 않습니다.</Hint>
                   <span className="kp-state" style={{ color: kieKey.info.has ? '#16a34a' : '#b45309' }}>{kieKey.info.has ? `🔑 저장됨(…${kieKey.info.tail})` : '🔑 없음'}</span>
                   <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.kieOpenKey()}>발급 ↗</button>
@@ -7508,7 +7517,7 @@ export default function App() {
                 <div className="frow"><label>이 계정의 PC</label><span style={{ flex: 1 }}>{(lic.devices || []).map((d, i) => <span key={i} style={{ marginRight: 12 }}>🖥 {d.name || '(이름 없음)'}{d.me ? ' (이 PC)' : ''}</span>)}{lic.deviceLimit ? <span className="meta"> · 최대 {lic.deviceLimit}대</span> : null}</span>
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => api.licenseOpenSite()}>내 기기 관리</button></div>
                 <Hint>PC 를 바꿨다면 primingwave.com 「🖥 내 기기」에서 쓰지 않는 PC 를 해제하세요.</Hint>
-                {lic.owner && <div className="frow"><label>👑 관리자</label><span style={{ flex: 1 }} className="meta">회원·기기 · 포인트 지급 · 오류 로그</span>
+                {lic.owner && <div className="frow"><label>👑 관리자</label><span style={{ flex: 1 }} className="meta">회원·기기 · 크레딧 지급 · 오류 로그</span>
                   <button className="ghost" data-testid="open-admin" style={{ flex: '0 0 auto' }} onClick={() => api.licenseOpenAdmin()}>관리자 페이지 열기</button></div>}
                 <div className="frow"><label>오류 로그</label>
                   <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" data-testid="autolog" checked={lic.autoLog !== false} onChange={async (e) => setLic(await api.licenseSetAutoLog(e.target.checked))} /> 오류가 나면 로그를 자동으로 보냅니다</label></div>

@@ -11959,8 +11959,22 @@ function licStartReporter() {
 }
 function _diskVersion() { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || ''; } catch (_) { return ''; } }
 app.whenReady().then(() => { if (LIC.enforce) LIC.ready = licCheck('앱 시작').catch((e) => { LIC.state = { ok: false, reason: 'error' }; log('🔐 회원 확인 중 문제: ' + e.message); }); });
-ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licPublic(LIC.state); });
-ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licPublic(LIC.state); });
+// 🧩 관리자 = 우리 kie 계정 잔액을 「kie크레딧」으로(v0.9.93 · 로이 2026-10-21 「판매자가 가진 크레딧 786 을 관리자는 남은 크레딧으로」)
+//   이 PC 의 kie 키로 kie 에 직접 묻는다(무료 GET · 1분 기억) — 같은 키를 넣은 PC 끼리 같은 잔액을 보고 함께 쓴다 · 회원은 묻지 않는다
+const _kieBal = { at: 0, v: null };
+async function licWithKie(s) {
+  const out = licPublic(s);
+  if (!out.admin) return out;
+  try {
+    const KIE = require('./core/kie-api');
+    if (!KIE.hasKey()) { out.kie = null; out.kieNoKey = true; return out; }
+    if (Date.now() - _kieBal.at > 60 * 1000) { const r = await KIE.credits(KIE.kieKey()); _kieBal.at = Date.now(); if (r && r.ok && Number.isFinite(r.credits)) _kieBal.v = r.credits; }
+    if (_kieBal.v != null) out.kie = _kieBal.v;
+  } catch (_) {}
+  return out;
+}
+ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licWithKie(LIC.state); });
+ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licWithKie(LIC.state); });
 ipcMain.handle('license-login', async (_e, a = {}) => {
   if (!LIC.enforce && !process.env.PM_LICENSE_API) return licPublic(LIC.state);
   const s = await licApi().login(a.email, a.password);
