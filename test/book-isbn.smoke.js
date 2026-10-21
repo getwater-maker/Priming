@@ -49,7 +49,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     { const b = await win.evaluate(() => ['issueDate', 'isbn', 'ebookIssueDate', 'ebookIsbn'].map((k) => { const r = document.querySelector('[data-testid=rg-' + k + ']').getBoundingClientRect(); return { t: r.top, l: r.left }; }));
       ok(b[0].t < b[1].t && b[2].t < b[3].t && Math.abs(b[0].t - b[2].t) < 2 && b[0].l < b[2].l, '순서: 종이책 칸(발행일 → ISBN) 왼쪽 · 전자책 칸(발행일 → ISBN) 오른쪽 같은 높이'); }
     ok(await win.locator('[data-testid=rg-ebook-fallback]').count() === 1, '전자책 칸이 비면 「종이책 값이 실린다」 안내');
-    ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '기존 발행일이 칸에 보인다');
+    // 🔢 원고 「발행일 2026-10-02」 → 칸엔 날짜만(「발행일」 라벨은 판권이 붙인다 · 2026-10-21 「발행일이 두 번」)
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '2026년 10월 02일', '기존 발행일이 칸에 날짜만 보인다(라벨 「발행일」 없이)');
 
     // 틀린 번호 → ⚠ (판정력) · 맞는 번호 → ✅
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
@@ -57,7 +58,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-isbn-bad]').count() === 0, '부크크가 보낸 979-11-12-31240-2 → 경고 없음(체크 숫자 통과)');
     // 📅 발행일 = ISBN 받은 날 — 이미 적힌 발행일은 ISBN 을 넣어도 그대로, 비어 있으면 ISBN 을 넣는 순간 오늘(KST)
-    ok(/2026-10-02/.test(await win.locator('[data-testid=rg-issueDate]').inputValue()), '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
+    ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '2026년 10월 02일', '발행일이 있으면 ISBN 을 넣어도 덮어쓰지 않는다');
     await win.locator('[data-testid=rg-issueDate]').fill(''); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '발행일 비움');
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-3'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(500);

@@ -17,6 +17,10 @@ ok(r.ready && r.summary.error === 0 && r.summary.warn === 0, `모든 것이 갖�
 r = preflight({ ...good, pages: 0 });
 ok(by(r, 'pages').state === 'pending' && /실제 쪽수/.test(by(r, 'pages').detail) && r.summary.warn === 0, '쪽수 미확정 → ⏳ 대기(문제로 세지 않음) + 안내');
 ok(by(preflight({ ...good, pages: 30 }), 'pages').state === 'error', '30쪽 → 최소 50쪽 error');
+// 🔁 부크크 2단계 — ISBN 없이 발행일만 있으면 견본 자리표시일 수 있다(2026-10-21 일곱 권)
+{ const e = by(preflight({ ...good, meta: { ...good.meta, isbn: '' } }), 'issue-date-early');
+  ok(e && e.state === 'warn' && /비워 두세요/.test(e.detail), 'ISBN 없이 발행일만 → 확인(비워 두라는 안내)');
+  ok(!by(preflight(good), 'issue-date-early') && !by(preflight({ ...good, meta: { ...good.meta, isbn: '', issueDate: '' } }), 'issue-date-early'), 'ISBN 이 있거나 둘 다 비면 안내 없음'); }
 ok(by(preflight({ ...good, coverImagePath: 'x/표지_시안.png' }), 'cover').state === 'warn' && !by(preflight({ ...good, meta: { title: 'T' }, coverImagePath: 'x/표지.png' }), 'price'), '「시안」 표지 원본 → 확인(warn — 업로드는 앱이 만든 표지 PDF) · 가격·ISBN 은 점검하지 않는다');
 ok(by(preflight({ ...good, coverCheck: { ...good.coverCheck, exact: false, mmW: 514.1 } }), 'cover').state === 'warn' && /다시 만드세요/.test(by(preflight({ ...good, coverCheck: { ...good.coverCheck, exact: false, mmW: 514.1 } }), 'cover').detail), '폭 ±1mm 밖(비율로만 통과) → 책등 다시 안내');
 ok(by(preflight({ ...good, coverCheck: { ok: false, flapHint: 'file-has-flaps', expected: {}, } }), 'cover').state === 'error', '날개 힌트 → error');

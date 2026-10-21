@@ -857,7 +857,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     const one = (k, label, ph, isDate) => (
       <label key={k}>
         <span>{label}</span>
-        <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={meta[k] || ''}
+        <input type="text" data-testid={idp + '-' + k} placeholder={ph || ''} defaultValue={(isDate ? DK.normalizeMeta(meta[k]) : meta[k]) || ''}
           key={dto.scriptPath + ':' + idp + ':' + k + ':' + fieldRev} {...(isDate ? liveMeta(k, null, (v) => DK.normalizeMeta(v)) : isbnProps(k))} />
         {!isDate && bad(meta[k]) ? <span className="bkisbn-bad" data-testid={idp + '-' + k + '-bad'}>⚠ ISBN 체크 숫자가 맞지 않습니다 — 번호를 다시 확인하세요</span> : null}
       </label>
