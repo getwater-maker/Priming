@@ -7,6 +7,20 @@ import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vi
 import { mcImageUnit, mcVideoUnit, mcCostText } from './lib/mediaCost.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
+import KB from '../../core/ken-burns.js';
+// 🎞 켄번스 CSS = core/ken-burns 표에서 만든다(.vrew 빌더와 같은 표 · 옛 styles.css 손글씨 kb0~kb11 대신 · Lab 차이표 #12)
+(() => { try { if (typeof document === 'undefined' || document.getElementById('kb-css')) return; const el = document.createElement('style'); el.id = 'kb-css'; el.textContent = KB.patternCss(); document.head.appendChild(el); } catch (_) {} })();
+// 🎞 켄번스 구간(그룹 look.kbSeg) — 빌더와 같은 planSegments 로 웨이포인트·구간 경계를 정해 그룹마다 @keyframes 를 만든다
+const _kbSegNames = new Set();
+function kbSegKeyframes(frames, stops) {
+  const key = JSON.stringify([frames, stops]); let h = 0; for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  const name = 'kbs_' + (h >>> 0).toString(36);
+  if (!_kbSegNames.has(name)) {
+    _kbSegNames.add(name);
+    try { let el = document.getElementById('kb-seg-css'); if (!el) { el = document.createElement('style'); el.id = 'kb-seg-css'; document.head.appendChild(el); } el.textContent += KB.cssKeyframes(name, frames, stops) + '\n'; } catch (_) {}
+  }
+  return name;
+}
 import VSpan from '../../core/visual-span.js';
 import ClipJoin from '../../core/clip-join.js';
 import FollowT from '../../core/follow-target.js';
@@ -4454,7 +4468,7 @@ export default function App() {
     if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
     else {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
-      const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
+      const kbIdx = KB.patternIndexOf({ num: c.num, look: lk });   // core/ken-burns — 빌더와 같은 번호
       const kbCls = lk.motion === 'none' ? 'kbnone' : `kb kb${kbIdx}`;
       inner = `<img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}>`;
     }
@@ -4510,6 +4524,7 @@ export default function App() {
       if (L.ovId || L.videoPath) continue;
       const im = v.querySelector('.vlayer[data-num="' + L.num + '"] img.kb'); if (!im) continue;
       const tot = kbTotalSec(pr, L);
+      { const sa = kbSegAnim(pr, L); if (sa) im.style.animationName = sa; }   // 🎞 켄번스 구간(빌더와 같은 웨이포인트)
       im.style.animationDuration = tot.toFixed(2) + 's'; im.style.animationTimingFunction = 'linear';
       if (playingRef.current) {
         const so = L.span ? L.span.from : ordOf(pr, L, 0);
@@ -4517,6 +4532,22 @@ export default function App() {
         if (t > 0.05) im.style.animationDelay = (-Math.min(t, tot)).toFixed(2) + 's';
       }
     }
+  }
+  // 🎞 켄번스 구간 애니메이션 이름 — 그룹 look.kbSeg 가 없으면 null(기본 kbN 그대로). 빌더: 그 그림이 보이는 문장들(음성 + 막간 쉼) → planSegments
+  function kbSegAnim(pr, L) {
+    const lk = VLook.normLook(L.look);
+    const want = lk.kbSeg === 'off' ? 1 : (lk.kbSeg || 1);
+    if (want === 1 || want === '1' || lk.motion === 'none') return null;
+    const so = L.span ? L.span.from : ordOf(pr, L, 0);
+    const n = L.span ? (L.span.to - L.span.from + 1) : ((L.sentences || []).length || 1);
+    const all = []; for (const x of pr.cuts) for (const se of (x.sentences || [])) all.push(se);
+    const vis = all.slice(so - 1, so - 1 + n).map((se) => ({ d: se.dur > 0 ? sentSpan(se) : 0 }));
+    const pl = KB.planSegments(want, vis, KB.forLook({ num: L.num, look: lk }), L.num);
+    if (!pl || !(pl.total > 0)) return null;
+    const stops = []; let acc = 0;
+    vis.forEach((x, i) => { const k = pl.segOf[i]; if (stops[k] == null) stops[k] = acc / pl.total; acc += x.d; });
+    stops[0] = 0; stops.push(1);
+    return kbSegKeyframes(pl.wp, stops);
   }
   // 그림 하나가 화면에 머무는 전체 시간(초) — 그림 범위(span)가 있으면 그 문장들, 없으면 그 그룹 문장 전부
   function kbTotalSec(pr, L) {
@@ -4544,6 +4575,7 @@ export default function App() {
       const im = el.querySelector('img.kb');
       if (im) {
         const tot = (!L.ovId && !L.videoPath) ? kbTotalSec(pr, L) : 7;   // 그룹 길이 전체(setVisual 과 같은 규칙)
+        if (!L.ovId && !L.videoPath) { const sa = kbSegAnim(pr, L); if (sa) im.style.animationName = sa; }   // 🎞 켄번스 구간
         im.style.animationDuration = tot.toFixed(2) + 's'; im.style.animationTimingFunction = 'linear';
         im.style.animationPlayState = 'paused'; im.style.animationDelay = (-Math.min(t, tot)).toFixed(2) + 's';
       }

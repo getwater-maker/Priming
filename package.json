@@ -46,6 +46,7 @@
     "test:makeall": "node test/makeall-dry.smoke.js",
     "test:backup": "node test/gen-backup.test.js && node test/backup-ui.smoke.js",
     "test:pausepv": "node test/pause-preview.smoke.js",
+    "test:kbpv": "node test/kbseg.test.js && node test/kb-preview.smoke.js",
     "test:quiet": "node test/quiet-trim.test.js && node test/clip-speed.smoke.js",
     "test:makeupload": "node test/makeall-upload.smoke.js",
     "test:refvoice": "node test/ref-voice.test.js",

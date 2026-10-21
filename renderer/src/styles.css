@@ -245,8 +245,8 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 #stageVisual{width:100%;height:100%}
 #stageVisual img,#stageVisual video{width:100%;height:100%;display:block;background:#000}
 #stageVisual video{object-fit:contain}
-/* 켄번스: 항상 cover(꽉 채움)로 깔고, scale·translate 를 안전범위 안에서만 움직여 뒤 검정 노출 0.
-   안전조건: scale s 에서 한 방향 translate ≤ (s−1)/(2s). 아래 값은 모두 그 범위 내. */
+/* 켄번스: 항상 cover(꽉 채움)로 깔고, scale·translate 로 움직인다. 🔑 @keyframes kb0~kb11 은 여기 없다 — core/ken-burns 표에서
+   App.jsx 가 만들어 넣는다(.vrew 빌더와 같은 표 · 검정 방지 클램프 포함 · Lab 차이표 #12). */
 #stageVisual img.kb{object-fit:cover;transform-origin:center;will-change:transform;animation:kb0 7s ease-out forwards}
 #stageVisual img.kb0{animation-name:kb0}
 #stageVisual img.kb1{animation-name:kb1}
@@ -260,18 +260,6 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 #stageVisual img.kb9{animation-name:kb9}
 #stageVisual img.kb10{animation-name:kb10}
 #stageVisual img.kb11{animation-name:kb11}
-@keyframes kb0{from{transform:scale(1.08)}to{transform:scale(1.22)}}                                  /* 중앙 줌인 */
-@keyframes kb1{from{transform:scale(1.22)}to{transform:scale(1.08)}}                                  /* 중앙 줌아웃 */
-@keyframes kb2{from{transform:scale(1.16) translate(-5%,0)}to{transform:scale(1.16) translate(5%,0)}} /* 좌→우 */
-@keyframes kb3{from{transform:scale(1.16) translate(5%,0)}to{transform:scale(1.16) translate(-5%,0)}} /* 우→좌 */
-@keyframes kb4{from{transform:scale(1.16) translate(0,5%)}to{transform:scale(1.16) translate(0,-5%)}} /* 하→상 */
-@keyframes kb5{from{transform:scale(1.16) translate(0,-5%)}to{transform:scale(1.16) translate(0,5%)}} /* 상→하 */
-@keyframes kb6{from{transform:scale(1.10) translate(-4%,-4%)}to{transform:scale(1.20) translate(2%,2%)}}   /* 좌상→중앙 */
-@keyframes kb7{from{transform:scale(1.10) translate(4%,-4%)}to{transform:scale(1.20) translate(-2%,2%)}}   /* 우상→중앙 */
-@keyframes kb8{from{transform:scale(1.10) translate(-4%,4%)}to{transform:scale(1.20) translate(2%,-2%)}}   /* 좌하→중앙 */
-@keyframes kb9{from{transform:scale(1.10) translate(4%,4%)}to{transform:scale(1.20) translate(-2%,-2%)}}   /* 우하→중앙 */
-@keyframes kb10{from{transform:scale(1.08)}to{transform:scale(1.22) translate(5%,-5%)}}               /* 우상 코너 푸시 */
-@keyframes kb11{from{transform:scale(1.08)}to{transform:scale(1.22) translate(-5%,5%)}}              /* 좌하 코너 푸시 */
 #stageCap{position:absolute;left:0;right:0;bottom:8%;text-align:center;color:#fff;font-size:18px;font-weight:700;
   padding:0 6%;line-height:1.4;text-shadow:0 2px 6px rgba(0,0,0,.9),0 0 3px rgba(0,0,0,.9)}
 #playerBar{margin-top:14px;color:#e8dcc8;display:flex;gap:14px;align-items:center;font-size:13px}
