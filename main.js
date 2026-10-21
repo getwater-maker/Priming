@@ -336,6 +336,7 @@ function bookDTO(parsed) {
     coverImagePath: parsed.coverImagePath || null,
     coverCheck: (parsed._coverCheck && parsed._coverCheck.imgW) ? coverCheckFor(parsed, parsed._coverCheck.imgW, parsed._coverCheck.imgH, pages) : (parsed._coverCheck || null),
     lastPages: pages,
+    pagesSure: parsed === S.parsed ? bookPagesState().sure : false,   // 📌 false = 미리보기 숫자(잠정) — 화면이 「(미리보기)」를 붙인다
     platformId, trimId, paperId, flaps, spread,
     paperLocked: !!pf.spineFormula,          // 부크크 = 용지를 쪽수가 정한다(고를 수 없다)
     spineManual: meta.spineMm || '',
@@ -11102,7 +11103,8 @@ ipcMain.handle('book-cover-preview', (_e, args = {}) => {
     const PB = require('./core/book/pdf-builder');
     const layoutOpts = bookLayoutOpts(args);
     const meta = S.parsed.meta || {};
-    const pages = S.parsed._lastPages || 0;
+    const ps = bookPagesState();   // 📌 확정(내지 PDF) / 잠정(미리보기) — 잠정이면 치수 불일치를 경고로 띄우지 않는다
+    const pages = ps.n;
     const { spread, flaps } = bookSpec(meta, pages);
     const plan = bookCoverPlan(layoutOpts, meta, null);
     if (!plan.has) return { kind: null };
@@ -11113,7 +11115,14 @@ ipcMain.handle('book-cover-preview', (_e, args = {}) => {
     const fileName = plan.hasImg ? path.basename(plan.imagePath) : '';
     if (plan.hasImg && /시안/.test(fileName)) warnings.push(`파일 이름에 「시안」 — 인쇄용이 아닙니다(접힘선·자리 표시가 들어 있을 수 있습니다): ${fileName}`);
     const cc = S.parsed._coverCheck;
-    if (plan.hasImg && cc && cc.imgW) {
+    const notes = [];   // ⏳ 쪽수 확정 전 안내(경고 아님)
+    if (plan.hasImg && cc && cc.imgW && pages > 0 && !ps.sure) {
+      const chk = coverCheckFor(S.parsed, cc.imgW, cc.imgH, pages);
+      // 날개 있음/없음 차이(수백 mm)는 쪽수 몇십 쪽 차이로 생기지 않는다 — 잠정 쪽수여도 그대로 경고
+      if (!chk.ok && chk.flapHint) warnings.push(`이 표지 파일은 날개 ${chk.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${flaps ? '있음' : '없음'})`);
+      else if (!chk.ok || !chk.exact) notes.push(`표지 치수는 쪽수가 확정된 뒤 점검합니다 — 지금 ${pages}쪽은 미리보기 숫자입니다(파일 폭 ${chk.mmW}mm · 미리보기 쪽수로 셈한 폭 ${chk.expected.widthMm}mm). 종이책을 만들면 실제 쪽수로 다시 잽니다`);
+      else if (chk.lowDpi) warnings.push(`해상도 낮음(실효 ${chk.effectiveDpi}dpi < 300)`);
+    } else if (plan.hasImg && cc && cc.imgW) {
       const chk = coverCheckFor(S.parsed, cc.imgW, cc.imgH, pages);
       if (!chk.ok && chk.flapHint) warnings.push(`이 표지 파일은 날개 ${chk.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요(지금: 날개 ${flaps ? '있음' : '없음'})`);
       else if (!chk.ok) warnings.push(`표지 치수 불일치 — 기대 ${chk.expected.widthPx}×${chk.expected.heightPx}px (${chk.expected.widthMm}×${chk.expected.heightMm}mm), 파일 ${cc.imgW}×${cc.imgH}px`);
@@ -11122,10 +11131,10 @@ ipcMain.handle('book-cover-preview', (_e, args = {}) => {
       if (chk.ok && !chk.exact && pages > 0) warnings.push(`표지 폭이 기대와 ${Math.abs(chk.mmW - chk.expected.widthMm).toFixed(1)}mm 다릅니다(파일 ${chk.mmW}mm · 기대 ${chk.expected.widthMm}mm, 허용 ±1mm) — 쪽수 ${pages}쪽 기준 책등 ${spread.spineMm}mm 로 표지를 다시 만드세요`);
     }
     if (plan.hasImg && plan.hasText) warnings.push('첨부 표지 위에 원고의 표지 문구([뒷표지]·[앞날개]…)·앞표지 글이 얹혀 표지 PDF 가 만들어집니다 — 완성 표지라면 구조 탭 「표지 구성」을 체크 해제하세요');
-    if (pages <= 0) warnings.push('쪽수 미확정 — 조판이 끝나면 책등 두께가 정해집니다');
+    if (pages <= 0) notes.push('쪽수 미확정 — 조판이 끝나면 책등 두께가 정해집니다');
     return {
       kind: plan.hasImg ? (plan.hasText ? 'image+text' : 'image') : 'composed',
-      html, fileName, warnings, flaps,
+      html, fileName, warnings, notes, flaps, pagesSure: ps.sure, pages,
       spread: { widthMm: spread.widthMm, heightMm: spread.heightMm, spineMm: spread.spineMm, safeMm: spread.safeMm, parts: spread.parts },
     };
   } catch (e) { log('표지 미리보기 오류: ' + e.message); return { kind: null, error: e.message }; }
@@ -11180,6 +11189,37 @@ ipcMain.handle('book-report-pages', (_e, args = {}) => {
   if (Number.isFinite(n) && n > 0) { S.parsed._lastPages = n; storeActive(); }
   return currentDTO();
 });
+// ⏹ 출판 만들기 취소(만들기 팝업의 「취소」) — 돌고 있는 조판(vivliostyle·크롬)을 끝내고, 그 판의 다음 단계(표지·완성본)를 만들지 않는다.
+//   큐는 다음 권으로 넘어가지 않는다. ⛔ S.abort(롱폼 제작 중단)와 섞지 않는다 — 출판 취소가 롱폼 제작을 멈추면 안 된다.
+//   취소 표시는 새 만들기가 시작될 때 푼다(큐 안에서 권마다 부르는 핸들러는 풀지 않는다 — 큐 전체가 멈춰야 한다).
+function bookCancelReset() { if (_bookQueueBusy) return; try { require('./core/book/pdf-builder').resetCancel(); } catch (_) {} }
+function bookCancelledResult(step) { log(`⏹ 만들기 취소 — ${step} 단계에서 멈췄습니다(만들던 파일은 완성되지 않았습니다)`); return { dto: currentDTO(), error: '취소됨', cancelled: true }; }
+ipcMain.handle('book-build-cancel', () => {
+  const PB = require('./core/book/pdf-builder');
+  const n = PB.cancelAll();
+  log(`⏹ 출판 만들기 취소 요청 — ${n ? '조판 중인 작업을 끝냅니다' : '다음 단계부터 멈춥니다'}`);
+  return true;
+});
+// 📌 쪽수가 확정됐나 — 확정 = 같은 원고·조판으로 만든 내지 PDF 의 쪽수(이번 실행) 또는 원고보다 새로운 종이책 내지 PDF 의 실제 쪽수(앱을 다시 켠 뒤).
+//   그 밖(미리보기가 보고한 숫자)은 잠정 — 쪽 나누기 도중의 숫자(31·71쪽)를 보고한 사고가 있어 표지 치수·최소 쪽수를 「고쳐야 할 것」으로 판정하지 않는다(v0.9.87).
+const _pdfPagesMemo = new Map();
+function bookPagesState() {
+  const p = S.parsed; const n = (p && p._lastPages) || 0;
+  if (!p) return { n: 0, sure: false, from: '' };
+  const built = p._builtPages;
+  if (built && built.n && built.sig === _bookPagesSig(p._previewLayout)) return { n: built.n, sure: true, from: 'pdf' };
+  try {
+    let src = 0; for (const f of bookFilePaths()) { try { src = Math.max(src, fs.statSync(f).mtimeMs); } catch (_) {} }
+    const iv = listBookOutputs().filter((k) => k.kind === 'interior').sort((a, b) => b.mtime - a.mtime)[0];
+    if (iv && src && iv.mtime + 1000 >= src) {
+      const key = iv.path + '|' + iv.mtime;
+      if (!_pdfPagesMemo.has(key)) _pdfPagesMemo.set(key, require('./core/book/pdf-builder').pdfPageCount(iv.path) || 0);
+      const pn = _pdfPagesMemo.get(key);
+      if (pn > 0) return { n: pn, sure: true, from: 'pdf-file' };
+    }
+  } catch (_) {}
+  return { n, sure: false, from: n ? 'preview' : '' };
+}
 // 원고 파일(크기·수정 시각) + 조판 설정 지문 — 이게 같으면 내지 PDF 쪽수가 미리보기보다 정확하다
 function _bookPagesSig(layout) {
   const files = bookFilePaths().map((p) => { try { const s = fs.statSync(p); return `${p}:${s.size}:${s.mtimeMs}`; } catch (_) { return p; } });
@@ -11204,6 +11244,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
     return { dto: currentDTO(), error: msg };
   }
   const t0 = Date.now();
+  bookCancelReset();
   try {
     const { buildBookHtml, metaPlatformId } = require('./core/book/html-builder');
     const PB = require('./core/book/pdf-builder');
@@ -11228,6 +11269,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
     const base = bookFileBase();   // 작품 폴더면 「삼국지_제1권」
     const interiorPdf = OL.outPath(outRoot, 'print', 'interior', base);
     const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
+    if (r.cancelled || PB.isCancelled()) return bookCancelledResult('종이책 내지 PDF');
     if (!r.success) { log('✗ 내지 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
     S.parsed._lastPages = r.pages || S.parsed._lastPages || 0;
     // 📌 진짜 PDF 쪽수를 원고·조판 설정 지문과 함께 고정 — 미리보기가 쪽 나누기 도중의 숫자(31·177쪽)를 보고해
@@ -11271,6 +11313,7 @@ regBook('book-build-pdf', async (_e, args = {}) => {
         spread, outPdf: coverPdf, workDir, log,
         compose: cvPlan.compose,
       });
+      if (coverResult.cancelled || PB.isCancelled()) return bookCancelledResult('종이책 표지 PDF');
       if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
       else {
         // 📄 완성본(로이 2026-10-14 · v0.9.28) — 표지 펼침면 전체(뒷표지·책등·날개) 1쪽 + 내지 전체. ⛔ 앞표지만 잘라 붙이지 않는다(그건 전자책).
@@ -11324,8 +11367,10 @@ async function buildEbookPdf(args, outRoot, t0) {
   });
   const bodyPdf = OL.outPath(outRoot, 'ebook', 'body', base);
   const r = await PB.buildInteriorPdf({ html, outPdf: bodyPdf, workDir, log });
+  if (r.cancelled || PB.isCancelled()) return bookCancelledResult('전자책 본문 PDF');
   if (!r.success) { log('✗ 전자책 본문 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
   const coverPdf = await buildEbookFrontCoverPdf(outRoot, base, workDir, args);
+  if (PB.isCancelled()) return bookCancelledResult('전자책 표지 PDF');
   let fullPdf = null, fullPages = 0;
   if (coverPdf) {
     try {
@@ -11632,6 +11677,8 @@ const _mainLog = log;   // 아래 함수 안에서 log 를 덮어쓰기 위해(�
 async function bookBuildEpubImpl(args = {}) {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
   const log = (m) => { if (args.__logs) args.__logs.push(String(m)); _mainLog(m); };
+  bookCancelReset();
+  if (require('./core/book/pdf-builder').isCancelled()) return bookCancelledResult('ePub');
   try {
     const { buildEpub } = require('./core/book/epub-builder');
     const lo = bookLayoutOpts(args);   // 구조 패널 제외·대본 모드·경로 축약(내지와 동일)
@@ -11994,7 +12041,14 @@ ipcMain.handle('book-preflight', async (_e, args = {}) => {
     let missingFonts = []; try { missingFonts = require('./core/book/pdf-builder').missingBundledFonts(); } catch (_) {}
     let sourceMtime = 0; for (const p of bookFilePaths()) { try { sourceMtime = Math.max(sourceMtime, fs.statSync(p).mtimeMs); } catch (_) {} }
     const pfId = require('./core/book/html-builder').metaPlatformId(S.parsed.meta || {}), pfDef = require('./core/book/platform-presets').getPlatform(pfId);
+    // 📌 쪽수 확정/잠정 — 확정 쪽수(내지 PDF)가 미리보기 숫자와 다르면 확정 쪽수로 책등·표지 치수를 다시 잰다
+    const ps = bookPagesState();
+    if (ps.sure && ps.n !== dto.lastPages) {
+      dto.lastPages = ps.n; dto.spread = bookSpec(S.parsed.meta || {}, ps.n).spread;
+      const cc0 = S.parsed._coverCheck; if (cc0 && cc0.imgW) dto.coverCheck = coverCheckFor(S.parsed, cc0.imgW, cc0.imgH, ps.n);
+    }
     return PF.preflight({
+      pagesSure: ps.sure,
       platformId: pfId, platformLabel: pfDef.label, minPages: pfDef.minPages,
       interior: (pfId === 'kdp' || pfId === 'd2d') ? await overseasInteriorFacts(args, pfId, dto).catch((e) => { log('내지 점검 사실 모으기 오류: ' + e.message); return null; }) : null,
       spread: dto.spread, kdpTemplate: { widthIn: S.parsed.meta && S.parsed.meta.kdpCoverW, heightIn: S.parsed.meta && S.parsed.meta.kdpCoverH, spineIn: S.parsed.meta && S.parsed.meta.kdpSpine },
@@ -12014,9 +12068,12 @@ function bookOutputKind(f) {
 function listBookOutputs() {
   const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
   const out = [];
+  // 📁 작품 폴더(`<작품>\완성\`)는 여러 권이 한 폴더를 쓴다 — 이 권의 파일만(「001_삼국지_제5권_…」). 안 거르면 5권 점검이 4권 내지 PDF 를 「낡았다」고 봤다(v0.9.87).
+  const base = OL.isLayout(root) ? bookFileBase() : '';
   try {
     for (const full of OL.listAll(root)) {
       const f = path.basename(full);
+      if (base && !f.replace(/^\[[^\]]*\]\s*/, '').startsWith(base + '_')) continue;
       const kind = bookOutputKind(f);
       if (!kind) continue;
       const st = fs.statSync(full);
@@ -12183,6 +12240,8 @@ ipcMain.handle('book-build-queue', async (_e, args = {}) => {
   const q = S.modes.book;
   const items = (q.items || []).filter((it) => it.parsed && it.parsed.kind === 'book');
   if (!items.length) return { ok: false, error: '출판 큐가 비어 있습니다' };
+  bookCancelReset();   // 큐가 도는 동안엔 풀지 않으므로 시작 전에 한 번
+  const PBq = require('./core/book/pdf-builder');
   _bookQueueBusy = true;
   const ed = args.edition === 'print' || args.edition === 'ebook' ? args.edition : 'both';
   const doPrint = ed !== 'ebook', doEbook = ed !== 'print';
@@ -12195,7 +12254,7 @@ ipcMain.handle('book-build-queue', async (_e, args = {}) => {
     S.abort = false;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      if (S.abort) { log('⏹ 큐 만들기 중단'); break; }
+      if (S.abort || PBq.isCancelled()) { log('⏹ 큐 만들기 중단 — 남은 권은 만들지 않습니다'); break; }
       q.activeId = it.id; syncActiveToS();
       const name = path.basename(it.scriptPath || '') || it.parsed.fileTitle;
       log(`📦 [${i + 1}/${items.length}] ${name} 만드는 중 — ${edLabel}`);
@@ -12207,6 +12266,7 @@ ipcMain.handle('book-build-queue', async (_e, args = {}) => {
           res.pdf = !!(r1 && !r1.error); res.pages = (r1 && r1.pages) || 0; res.cover = !!(r1 && r1.coverPdf && !r1.coverError); res.coverFit = (r1 && r1.coverFit) || null;
           if (r1 && r1.error) { res.error = '내지 PDF: ' + r1.error; printOk = false; }
         }
+        if (PBq.isCancelled()) { res.error = res.error || '취소됨'; results.push(res); break; }
         if (doEbook && printOk) {
           const rE = await _BOOK_H['book-build-pdf'](null, { ...args, edition: 'ebook', noOpen: true });
           res.ebook = !!(rE && !rE.error && rE.ebookPdf); res.ebookCover = !!(rE && rE.ebookCoverPdf);

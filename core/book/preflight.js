@@ -23,8 +23,11 @@ function preflight(x) {
     for (const iss of BL.platformLangIssues(x.platformId, lang)) out.push(it('lang', '책 언어 × 플랫폼', iss.state, iss.text));
     if (x.platformId === 'kdp' || x.platformId === 'd2d') { if (!BL.platformLangIssues(x.platformId, lang).length) out.push(it('lang', '책 언어', 'ok', lang === 'en' ? 'English — 영어 조판(lang=en · 하이픈 · 영어 판권)' : lang)); }
   }
-  // 1) 쪽수·책등
-  if (!(x.pages > 0)) out.push(it('pages', '쪽수 확정', 'warn', '미리보기 조판이 끝나면 쪽수가 정해지고, 쪽수로 책등 두께가 정해집니다 — 표지는 쪽수가 확정된 뒤에 만드세요', 'layout'));
+  // 1) 쪽수·책등 — 📌 확정(내지 PDF 의 실제 쪽수)일 때만 판정한다. 미리보기 숫자는 잠정(⏳ pending) — 쪽 나누기 도중의 숫자를 보고한 사고(31·71쪽)가 있었다.
+  //   pagesSure 를 안 넘기면(옛 호출) 확정으로 본다.
+  const sure = x.pagesSure !== false;
+  if (!(x.pages > 0)) out.push(it('pages', '쪽수 확정', 'pending', '종이책을 만들면 실제 쪽수가 정해지고, 쪽수로 책등 두께가 정해집니다', 'layout'));
+  else if (!sure) out.push(it('pages', '쪽수', 'pending', `미리보기 ${x.pages}쪽(잠정) — 종이책을 만들면 실제 쪽수로 확정됩니다`, 'layout'));
   else if (x.pages < (x.minPages || 50)) out.push(it('pages', '쪽수', 'error', `${x.pages}쪽 — ${x.platformLabel || '부크크'} 종이책은 최소 ${x.minPages || 50}쪽입니다`, 'layout'));
   else out.push(it('pages', '쪽수', 'ok', `${x.pages}쪽 → 책등 ${x.spineMm}mm`));
   // 1b) 🇺🇸 KDP·D2D 표지 — 책등 글자(79쪽 초과만) · 바코드 자리 · 공식 표지 계산기 값 대조
@@ -44,6 +47,7 @@ function preflight(x) {
   const cc = x.coverCheck;
   if (!x.coverImagePath) out.push(it('cover', '표지 이미지', 'warn', '완성 표지 이미지를 첨부하지 않았습니다(표지 탭) — 앱이 만든 간단한 표지가 나갑니다', 'cover'));
   else if (/시안/.test(String(x.coverImagePath))) out.push(it('cover', '표지 원본 파일', 'warn', '첨부한 표지 원본의 파일 이름에 「시안」이 있습니다 — 최종 표지 파일로 바꿔 첨부하세요. (업로드는 쪽수에 맞춰 앱이 만든 표지 PDF 로 하고, 쪽수가 정해지면 책등 mm 가 맞는지 다시 확인합니다)', 'cover'));
+  else if (cc && !cc.flapHint && (!cc.ok || !cc.exact) && !(sure && x.pages > 0)) out.push(it('cover', '표지 치수', 'pending', `쪽수가 확정된 뒤 점검합니다 — 파일 폭 ${cc.mmW}mm${x.pages > 0 ? ` · 미리보기 ${x.pages}쪽으로 셈한 폭 ${cc.expected.widthMm}mm` : ''}`, 'cover'));
   else if (cc && !cc.ok) out.push(it('cover', '표지 치수', 'error', cc.flapHint ? `이 표지 파일은 날개 ${cc.flapHint === 'file-has-flaps' ? '포함' : '없는'} 치수입니다 — 날개 설정을 확인하세요` : `치수 불일치 — 기대 ${cc.expected.widthMm}×${cc.expected.heightMm}mm, 파일 ${cc.mmW}×${cc.mmH}mm`, 'cover'));
   else if (cc && !cc.exact && x.pages > 0) out.push(it('cover', '표지 폭', 'warn', `기대 ${cc.expected.widthMm}mm · 파일 ${cc.mmW}mm (허용 ±1mm 밖) — 쪽수 ${x.pages}쪽 기준 책등 ${x.spineMm}mm 로 표지를 다시 만드세요`, 'cover'));
   else if (cc && cc.lowDpi) out.push(it('cover', '표지 해상도', 'warn', `실효 ${cc.effectiveDpi}dpi < 300 — 반려 사유 1위`, 'cover'));
@@ -77,15 +81,17 @@ function preflight(x) {
   // 📄 전자책은 PDF(표지+본문)를 올린다(2026-10-12) — ePub 은 선택 산출물이라 만들었을 때만 본다
   for (const [kind, label] of [['interior', '내지 PDF'], ['cover', '표지 PDF'], ['ebookPdf', '전자책 PDF(표지+본문)'], ['epub', 'ePub(선택)']]) {
     const o = find(kind);
-    if (!o) { if (kind !== 'epub') out.push(it('out-' + kind, label, 'info', '아직 만들지 않았습니다')); continue; }
+    // 📝 아직 안 만들었거나 원고보다 낡은 완성 파일 = 「남은 단계」(todo) — 문제(⚠)가 아니라 할 일이다(v0.9.87)
+    if (!o) { if (kind !== 'epub') out.push(it('out-' + kind, label, 'todo', '아직 만들지 않았습니다')); continue; }
     const stale = x.sourceMtime && o.mtime + 1000 < x.sourceMtime;
-    out.push(it('out-' + kind, label, stale ? 'warn' : 'ok', stale ? `원고가 ${o.name} 보다 새롭습니다 — 다시 만드세요` : `${o.name} (${(o.bytes / 1048576).toFixed(1)}MB)`));
+    out.push(it('out-' + kind, label, stale ? 'todo' : 'ok', stale ? `원고가 ${o.name} 보다 새롭습니다 — 다시 만드세요` : `${o.name} (${(o.bytes / 1048576).toFixed(1)}MB)`));
   }
   const ebp = find('ebookPdf');
   if (ebp && ebp.bytes > 20 * 1048576) out.push(it('ebookpdf-size', '전자책 PDF 용량', 'error', `${(ebp.bytes / 1048576).toFixed(1)}MB — 부크크 20MB 한도 초과`));
   const ep = find('epub');
   if (ep && ep.bytes > 20 * 1048576) out.push(it('epub-size', 'ePub 용량', 'error', `${(ep.bytes / 1048576).toFixed(1)}MB — 부크크 20MB 한도 초과`));
-  const summary = { error: out.filter((i) => i.state === 'error').length, warn: out.filter((i) => i.state === 'warn').length };
+  const cnt = (s) => out.filter((i) => i.state === s).length;
+  const summary = { error: cnt('error'), warn: cnt('warn'), pending: cnt('pending'), todo: cnt('todo') };
   return { items: out, summary, ready: summary.error === 0 };
 }
 module.exports = { preflight };

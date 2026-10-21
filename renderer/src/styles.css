@@ -410,6 +410,9 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkrow1 button{padding:7px 6px;font-size:12.5px}
 .bkreg-2>.bkcard>.bkrow1:last-child{margin-top:auto;padding-top:8px}
 .bkreg-2>.bkcard .bkrow1+.bkrow2,.bkreg-2>.bkcard .bkrow2+.bkrow2{margin-top:6px}
+/* 부크크 등록 카드(종이책·전자책)의 「자동 입력 · 이어 채우기」 — 카드가 좁으면 두 줄로 내려 글자가 잘리지 않게(v0.9.87) */
+.bkreg-2>.bkcard .bkrow2{grid-template-columns:repeat(auto-fit,minmax(118px,1fr))}
+.bkreg-2>.bkcard .bkrow2 button{display:flex;align-items:center;justify-content:center;gap:4px;padding:7px 8px;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
 .bkspec{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;background:#f6efe3;border-radius:7px;padding:8px 10px;margin-bottom:6px;cursor:help}
 .bkspec>span{color:var(--base)}
 .bkspec>b{color:var(--strong);font-variant-numeric:tabular-nums}
@@ -1061,6 +1064,10 @@ body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,
 .bkcover-top .meta{font-size:12px}
 .bkcover-warns{padding:4px 12px 0;background:#faf6ee}
 .bkcover-warns .bkwarn{margin:3px 0}
+/* 표지 펼침면 ⏳ 안내(쪽수 확정 전 — 경고 아님 · v0.9.87) · 출판 만들기 팝업 경과 시간·취소 */
+.bkcover-wait{font-size:12px;color:#5f5444;background:#f5efe4;border:1px solid #e3d6c0;border-radius:7px;padding:6px 9px;margin:3px 0}
+.bkbuild-elapsed{font-size:20px;font-weight:700;color:var(--accent-d);margin:4px 0 6px;font-variant-numeric:tabular-nums}
+.bkbuild-cancel{margin-top:14px;min-width:120px;padding:7px 18px}
 .bkcover-canvas{flex:1;min-height:0;display:flex;overflow:auto}
 .bkcover-sheet{position:relative;background:#fff;box-shadow:0 4px 22px rgba(0,0,0,.45);flex:0 0 auto;margin:auto}
 .bkcover-frame{position:absolute;left:0;top:0;border:0;background:#fff;pointer-events:none}
@@ -1075,7 +1082,8 @@ body:has(.vr-menu:not(.clip-tb-menu)) .clip-tb,body:has(.clip-add-pop) .clip-tb,
 /* 🔎 부크크 올리기 전 점검 */
 .bkpf{border:1px solid var(--line);border-radius:8px;background:#fdfaf4;padding:7px 10px;margin:4px 0 8px;font-size:12.5px;line-height:1.55}
 .bkpf-sum{font-weight:700;margin-bottom:4px}
-.bkpf-sum.ok{color:#2e7d32}.bkpf-sum.bad{color:#b3261e}
+.bkpf-sum.ok{color:#2e7d32}.bkpf-sum.bad{color:#b3261e}.bkpf-sum.wait{color:#6b5d4a}
+.bkpf-row.st-pending .bkchk-t,.bkpf-row.st-todo .bkchk-t{color:#6b5d4a}
 .bkpf-row{display:flex;gap:6px;align-items:flex-start;padding:2px 0}
 .bkpf-row.st-error .bkchk-t{color:#b3261e}
 .bkpf-row.st-warn .bkchk-t{color:#9a6a00}

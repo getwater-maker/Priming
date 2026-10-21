@@ -121,8 +121,22 @@ function prepareWorkAssets(workDir) {
   return { fontCss, imageUrl };
 }
 
+// ⏹ 만들기 취소 — 돌고 있는 vivliostyle(과 그 아래 크롬)을 프로세스 트리째 끝낸다. 취소 뒤 새 CLI 는 띄우지 않는다(resetCancel 까지).
+const _running = new Set();
+let _cancelled = false;
+function killTree(child) {
+  try {
+    if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
+    else child.kill();
+  } catch (_) {}
+}
+function cancelAll() { _cancelled = true; for (const c of _running) killTree(c); return _running.size; }
+function resetCancel() { _cancelled = false; }
+function isCancelled() { return _cancelled; }
+
 function runCli(args, log, timeoutMs = 15 * 60 * 1000, cwd = null) {
   return new Promise((resolve) => {
+    if (_cancelled) return resolve({ code: -2, out: '', err: '취소됨', cancelled: true });
     const isElectron = !!process.versions.electron;
     const cmd = process.execPath;
     const fullArgs = [CLI_JS, ...args];
@@ -131,12 +145,13 @@ function runCli(args, log, timeoutMs = 15 * 60 * 1000, cwd = null) {
     // ⚠ cwd 를 작업폴더로 명시 — 앱 cwd(설치폴더 C:)와 입출력(G: 등)이 다른 드라이브면 vivliostyle 이
     //   "output ... overwrite the original manuscript" 오탐으로 실패(실측). 같은 드라이브 기준이면 정상.
     const child = spawn(cmd, fullArgs, { env, windowsHide: true, ...(cwd ? { cwd } : {}) });
+    _running.add(child);
     let out = '', err = '';
     const timer = setTimeout(() => { try { child.kill(); } catch (_) {} }, timeoutMs);
     child.stdout.on('data', (d) => { const s = d.toString(); out += s; if (log) for (const l of s.split('\n')) if (l.trim()) log(`  [vivliostyle] ${l.trim()}`); });
     child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e.message || e) }); });
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
+    child.on('error', (e) => { clearTimeout(timer); _running.delete(child); resolve({ code: -1, out, err: String(e.message || e), cancelled: _cancelled }); });
+    child.on('close', (code) => { clearTimeout(timer); _running.delete(child); resolve({ code, out, err, cancelled: _cancelled }); });
   });
 }
 
@@ -197,6 +212,7 @@ async function buildInteriorPdf(a) {
     }
     log(`📕 내지 PDF 조판 중… (Vivliostyle)`);
     const r = await runCli(args, log, (a.timeoutSec || 600) * 1000 + 60000, a.workDir);
+    if (r.cancelled) return { success: false, cancelled: true, error: '취소됨' };
     if (r.code !== 0 || !fs.existsSync(a.outPdf)) {
       return { success: false, error: `vivliostyle 실패 (code ${r.code}) ${lastLines(r.err || r.out)}` };
     }
@@ -239,6 +255,7 @@ async function buildCoverPdf({ imagePath, spread, outPdf, workDir, log, timeoutS
     if (chrome && fs.existsSync(chrome)) args.push('--executable-browser', chrome);
     L('🖼 표지 PDF 생성 중…');
     const r = await runCli(args, L, (timeoutSec || 180) * 1000 + 30000, workDir);
+    if (r.cancelled) return { success: false, cancelled: true, error: '취소됨' };
     if (r.code !== 0 || !fs.existsSync(outPdf)) return { success: false, error: `표지 PDF 실패 (code ${r.code}) ${lastLines(r.err || r.out)}` };
     L(`🖼 표지 PDF 완료 — ${spread.widthMm}×${spread.heightMm}mm (책등 ${spread.spineMm}mm)`);
     return { success: true, pdfPath: outPdf };
@@ -358,4 +375,4 @@ function lastLines(s, n = 4) {
   return lines.slice(-n).join(' | ').slice(0, 400);
 }
 
-module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, missingBundledFonts, BUNDLED_FACES, EXTERNAL_FONT_DIR, EXTERNAL_FACES, externalFaces, externalFontAvailable, prepareWorkAssets, pdfPageCount };
+module.exports = { buildInteriorPdf, buildCoverPdf, buildCoverHtml, bundledFontCss, missingBundledFonts, BUNDLED_FACES, EXTERNAL_FONT_DIR, EXTERNAL_FACES, externalFaces, externalFontAvailable, prepareWorkAssets, pdfPageCount, cancelAll, resetCancel, isCancelled };

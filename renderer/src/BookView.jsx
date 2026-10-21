@@ -440,29 +440,50 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
   // 생성(빌드) 중 경과 시간 — 중앙 진행 모달 표시용
   const [buildMsg, setBuildMsg] = useState('');
   const [buildElapsed, setBuildElapsed] = useState(0);
+  // ⏹ 만들기 취소(v0.9.87) — 취소할 수 있는 만들기(PDF·ePub·큐)만 팝업에 「취소」를 보인다(부크크 회신 메일 발송 중엔 숨김).
+  //   cancelRef = 눌렀나(이어지는 단계 — 종이책 → 전자책 → ePub — 를 시작하지 않는다) · runT0Ref = 여러 단계 묶음의 시작 시각(경과 시간이 단계마다 0 으로 돌아가지 않게)
+  const [cancelable, setCancelable] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const cancelRef = useRef(false);
+  const runT0Ref = useRef(0);
   useEffect(() => {
-    if (!building) { setBuildElapsed(0); return; }
-    const t0 = Date.now();
+    if (!building) { if (!runT0Ref.current) { setBuildElapsed(0); setCancelable(false); setCancelling(false); } return; }
+    const t0 = runT0Ref.current || Date.now();
+    setBuildElapsed(Math.round((Date.now() - t0) / 1000));
     const t = setInterval(() => setBuildElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(t);
   }, [building]);
+  // 여러 단계를 한 번에(📦 둘 다 · 전자책 + ePub) — 시작에 begin, 끝에 end. 단계 하나짜리는 buildPdf 등이 스스로 감싼다.
+  function runBegin() { if (runT0Ref.current) return false; runT0Ref.current = Date.now(); cancelRef.current = false; setCancelable(true); setCancelling(false); return true; }
+  function runEnd(own) { if (!own) return; runT0Ref.current = 0; setCancelable(false); setCancelling(false); setBuildElapsed(0); }
+  async function cancelBuild() {
+    if (cancelRef.current) return;
+    cancelRef.current = true; setCancelling(true); setBuildMsg('⏹ 취소하는 중 — 지금 단계를 멈추고 있습니다');
+    try { await api.bookBuildCancel(); } catch (_) {}
+  }
+  const fmtElapsed = (s) => (s >= 60 ? `${Math.floor(s / 60)}분 ${String(s % 60).padStart(2, '0')}초` : `${s}초`);
 
   // ── 액션 ──
   // 📕 종이책(표지·내지·표지+내지 PDF) / 📱 전자책(표지·본문·표지+본문 PDF — 부크크에 올리는 파일) — 같은 원고, 판만 다르다(로이 2026-10-12)
   async function buildPdf(edition, quiet) {
     const ebook = edition === 'ebook';
+    if (cancelRef.current && runT0Ref.current) return { cancelled: true };   // 묶음 안에서 앞 단계가 취소됐다
+    const own = runBegin();
     setBuilding(true);
     setBuildMsg(ebook ? '📱 전자책 PDF 생성 중 — 표지 · 본문 · 표지+본문' : '📕 종이책 PDF 생성 중 — 내지 조판 + 표지');
     setStatus(ebook ? '전자책 PDF 생성 중…' : 'PDF 생성 중… (내지 조판 + 표지)');
+    let r = null;
     try {
-      const r = await api.bookBuildPdf({ layout, edition: ebook ? 'ebook' : 'print', noOpen: !!quiet });
+      r = await api.bookBuildPdf({ layout, edition: ebook ? 'ebook' : 'print', noOpen: !!quiet });
       if (r && r.dto) setDto(r.dto);
-      setStatus(r && !r.error
+      if (r && r.cancelled) cancelRef.current = true;
+      setStatus(r && r.cancelled ? '⏹ 만들기를 취소했습니다' : r && !r.error
         ? (ebook ? (r.ebookPdf ? `전자책 PDF 완료 — 본문 ${r.pages || '?'}쪽 + 표지` : `⚠ 전자책 본문 ${r.pages || '?'}쪽만 — 표지가 없어 표지+본문 PDF 를 못 만들었습니다(로그 확인)`)
           : (r.coverError ? `⚠ 내지 ${r.pages}쪽 완료 · 표지 실패 — 로그 확인` : `종이책 PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}`))
         : 'PDF 실패 — 로그 확인');
     } catch (e) { logline('PDF 오류: ' + e.message); }
-    setBuilding(false); refreshOutputs();
+    setBuilding(false); refreshOutputs(); runEnd(own);
+    return r;
   }
   // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
   async function runRegister(platform, only) {
@@ -494,30 +515,36 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     setEpubChkBusy(false);
   }
   async function buildEpubFile(quiet) {
+    if (cancelRef.current && runT0Ref.current) return;
+    const own = runBegin();
     setEpubChk(null);
     setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
     try {
       const r = await api.bookBuildEpub({ noOpen: quiet === true });
       if (r && r.dto) setDto(r.dto);
-      setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
-      if (r && !r.error) { setBuilding(false); await runEpubCheckUi(); }   // 만든 직후 규격 검증까지가 한 세트(도구 없는 PC 는 건너뜀)
+      setStatus(r && r.cancelled ? '⏹ 만들기를 취소했습니다' : r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
+      if (r && !r.error && !cancelRef.current) { setBuilding(false); await runEpubCheckUi(); }   // 만든 직후 규격 검증까지가 한 세트(도구 없는 PC 는 건너뜀)
     } catch (e) { logline('ePub 오류: ' + e.message); }
-    setBuilding(false); refreshOutputs();
+    setBuilding(false); refreshOutputs(); runEnd(own);
   }
   // 📱 ePub 은 선택(로이 2026-10-12 — 기본은 PDF 셋 · 부크크에도 PDF 를 올린다). 켜 두면 전자책을 만들 때 ePub → 규격 검증까지 함께. 이 PC 의 화면 설정으로만 기억한다.
   const [withEpub, setWithEpub] = useState(() => { try { return localStorage.getItem('bk-with-epub') !== '0'; } catch (_) { return true; } });
   const toggleEpub = (on) => { setWithEpub(on); try { localStorage.setItem('bk-with-epub', on ? '1' : '0'); } catch (_) {} };
   async function buildEbook(quiet) {
+    const own = runBegin();
     await buildPdf('ebook', quiet);
-    if (withEpub) await buildEpubFile(true);
+    if (withEpub && !cancelRef.current) await buildEpubFile(true);
+    runEnd(own);
   }
   // 📦 종이책 → 전자책 차례로 한 번에(로이 2026-10-07 — 「한 번에 만들기」 다시 요청). 두 판은 ISBN·판권·정가가 달라 **따로 만들어진다**(합치지 않고 이어서 실행만).
   //   종이책이 실패해도 전자책은 계속 만든다. 끝나면 폴더를 열지 않는다(quiet).
   async function buildBoth() {
     if (building || epubChkBusy) return;
+    const own = runBegin();
     await buildPdf('print', true);
-    await buildEbook(true);
-    setStatus('📦 종이책 → 전자책 만들기 끝 — 완성파일 폴더에서 확인하세요');
+    if (!cancelRef.current) await buildEbook(true);
+    setStatus(cancelRef.current ? '⏹ 만들기를 취소했습니다 — 남은 단계는 만들지 않았습니다' : '📦 종이책 → 전자책 만들기 끝 — 완성파일 폴더에서 확인하세요');
+    runEnd(own);
   }
   // 📱 전자책 미리보기 — 부크크에 올라가는 실제 ePub 을 임시로 만들어 문서(spine)를 차례로 보여 주고 사전 점검을 돌린다
   async function loadEbookDoc(docs, n) {
@@ -568,6 +595,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     if (building) return;
     const n = queue && queue.items ? queue.items.length : 0;
     const what = edition === 'ebook' ? `전자책(PDF${withEpub ? ' + ePub' : ''})` : '종이책(내지·표지 PDF)';
+    const own = runBegin();
     setBuilding(true); setBuildMsg(`📚 큐 ${n}권 ${what} 만드는 중 (시간이 걸립니다)`);
     setStatus(`📚 큐 ${n}권 ${what} 만드는 중… (진행은 로그 확인)`);
     try {
@@ -583,7 +611,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         ? `${x.ebook && (!withEpub || x.epub) ? '✅' : '⚠'} ${x.file} — 전자책 PDF ${x.ebook ? '✓' : '✗'}${withEpub ? ` · ePub ${x.epub ? '✓' : '✗'}` : ''}${x.check ? ' · 검증 ' + x.check : ''}${x.error ? ' · ' + x.error : ''}`
         : `${x.pdf && !(x.coverFit && !x.coverFit.ok) ? '✅' : '⚠'} ${x.file} — 내지 ${x.pdf ? x.pages + '쪽' : '실패'} · 표지 ${coverLabel(x)}${x.error ? ' · ' + x.error : ''}`));
     } catch (e) { logline('큐 만들기 오류: ' + e.message); setStatus('⚠ 큐 만들기 오류 — 로그 확인'); }
-    setBuilding(false); refreshOutputs();
+    if (cancelRef.current) setStatus('⏹ 큐 만들기를 취소했습니다 — 남은 권은 만들지 않았습니다(로그 확인)');
+    setBuilding(false); refreshOutputs(); runEnd(own);
   }
   // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
   //   원고에 없는 섹션을 체크하면 템플릿을 원고에 삽입.
@@ -982,12 +1011,14 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         <div className="bkcard-h">🔎 올리기 전 점검 <button className="bklink" onClick={loadPf} title="다시 점검">↻</button></div>
         {pfx ? (
           <div className="bkpf" data-testid="bk-preflight">
-            <div className={'bkpf-sum ' + (pfx.ready ? 'ok' : 'bad')}>
-              {pfx.ready ? '✅ 막히는 항목 없음' : `⛔ 고쳐야 할 것 ${pfx.summary.error}개`}{pfx.summary.warn ? ` · ⚠ 확인 ${pfx.summary.warn}개` : ''}
+            {/* 요약 = 문제(⛔·⚠)와 할 일(⏳ 쪽수 확정 대기 · 📝 남은 단계)을 나눠 센다 — 아직 안 한 단계가 문제처럼 보이지 않게(v0.9.87) */}
+            <div className={'bkpf-sum ' + (!pfx.ready ? 'bad' : pfx.summary.pending ? 'wait' : 'ok')} data-testid="bk-preflight-sum">
+              {!pfx.ready ? `⛔ 고쳐야 할 것 ${pfx.summary.error}개` : pfx.summary.pending ? '⏳ 쪽수 확정 전 — 종이책을 만들면 표지까지 점검합니다' : '✅ 막히는 항목 없음'}
+              {pfx.summary.warn ? ` · ⚠ 확인 ${pfx.summary.warn}개` : ''}{pfx.summary.todo ? ` · 📝 남은 단계 ${pfx.summary.todo}개` : ''}
             </div>
             {pfx.items.filter((i) => i.state !== 'ok' || i.id === 'pages' || i.id === 'cover').map((i) => (
               <div className={'bkpf-row st-' + i.state} key={i.id}>
-                <span className="bkic">{{ ok: '✅', warn: '⚠', error: '⛔', info: 'ℹ' }[i.state]}</span>
+                <span className="bkic">{{ ok: '✅', warn: '⚠', error: '⛔', info: 'ℹ', pending: '⏳', todo: '📝' }[i.state]}</span>
                 <div className="bkchk-body">
                   <div className="bkchk-t">{i.label}{i.tab && i.state !== 'ok' ? <button className="bklink" onClick={() => setTab(i.tab)}>이동 ›</button> : null}</div>
                   <div className="meta">{i.detail}</div>
@@ -1416,7 +1447,14 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <div className="modal-card" style={{ width: 400, textAlign: 'center' }}>
             <div className="spin" style={{ width: 38, height: 38, border: '4px solid #eee', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
             <div style={{ fontWeight: 700, color: 'var(--strong)', marginBottom: 6 }}>{buildMsg || '생성 중…'}</div>
-            <div className="meta">내지 조판(Vivliostyle)은 원고 길이에 따라 수 분 걸릴 수 있습니다 · 경과 {buildElapsed}초</div>
+            <div className="bkbuild-elapsed" data-testid="bk-build-elapsed">⏱ 경과 {fmtElapsed(buildElapsed)}</div>
+            <div className="meta">내지 조판은 원고 길이에 따라 수 분 걸릴 수 있습니다</div>
+            {cancelable && (
+              <button className="ghost bkbuild-cancel" data-testid="bk-build-cancel" disabled={cancelling} onClick={cancelBuild}
+                title="지금 만드는 단계를 멈추고, 이어지는 단계(표지·전자책·다음 권)는 만들지 않습니다 — 이미 다 만든 파일은 그대로 둡니다">
+                {cancelling ? '⏹ 취소하는 중…' : '⏹ 취소'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1449,7 +1487,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         </nav>
         <div className="bkstatus">
           총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {dto.trimId}
-          {pf && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> ⚠ 최소 {pf.minPages}쪽</span> : null}
+          {dto.lastPages > 0 && dto.pagesSure === false ? <span className="meta" data-testid="bk-pages-provisional" title="미리보기가 알려 준 쪽수입니다 — 종이책을 만들면 실제 쪽수로 확정되고 책등·표지 치수를 다시 잽니다"> (미리보기 · 잠정)</span> : null}
+          {pf && dto.pagesSure !== false && dto.lastPages > 0 && dto.lastPages < pf.minPages ? <span className="bkwarn"> ⚠ 최소 {pf.minPages}쪽</span> : null}
         </div>
         <div className={'bkbody' + (tab === 'log' ? ' is-log' : '')} key={tab}>{sideBody}</div>
       </div>
@@ -1561,13 +1600,16 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
                 onWheel={(e) => { if (coverZoom <= 1.001 && e.deltaY > 0) nav(Navigation.NEXT); }}>
                 <div className="bkcover-top">
                   <b>🖼 표지 펼침면</b>
-                  <span className="meta">{cover.kind === 'composed' ? '원고 [뒷표지]·[앞날개]… 로 조판한 표지' : `첨부 표지${cover.fileName ? ' — ' + cover.fileName : ''}${cover.kind === 'image+text' ? ' + 원고 표지 문구' : ''}`} · {sp.widthMm}×{sp.heightMm}mm · 책등 {sp.spineMm}mm · 날개 {cover.flaps ? '있음' : '없음'}</span>
+                  <span className="meta">{cover.kind === 'composed' ? '원고 [뒷표지]·[앞날개]… 로 조판한 표지' : `첨부 표지${cover.fileName ? ' — ' + cover.fileName : ''}${cover.kind === 'image+text' ? ' + 원고 표지 문구' : ''}`} · {sp.widthMm}×{sp.heightMm}mm · 책등 {sp.spineMm}mm{cover.pagesSure === false && cover.pages > 0 ? '(미리보기 쪽수 기준 · 잠정)' : ''} · 날개 {cover.flaps ? '있음' : '없음'}</span>
                   <span className="grow" />
                   <label className="chk"><input type="checkbox" checked={coverLines} onChange={(e) => setCoverLines(e.target.checked)} /> 책등·접힘선·재단선</label>
                   <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="내지 1쪽으로">내지 보기 ▶</button>
                 </div>
                 {cover.warnings && cover.warnings.length > 0 && (
                   <div className="bkcover-warns">{cover.warnings.map((w, i) => <div key={i} className="bkwarn" data-testid="bk-cover-warn">⚠ {w}</div>)}</div>
+                )}
+                {cover.notes && cover.notes.length > 0 && (
+                  <div className="bkcover-warns">{cover.notes.map((w, i) => <div key={i} className="bkcover-wait" data-testid="bk-cover-note">⏳ {w}</div>)}</div>
                 )}
                 <div className="bkcover-canvas" ref={coverCanvasRef}>
                   <div className="bkcover-sheet" style={{ width: Wpx * k, height: Hpx * k }}>
