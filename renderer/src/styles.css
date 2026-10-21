@@ -1640,7 +1640,12 @@ main .card h2{top:var(--work-top-height,0px)}
 .menubar .findbar:has(.find-selall){flex:0 1 230px}
 @media (max-width:1500px){.menubar{gap:4px;padding-left:8px;padding-right:8px}.menubar .findbar > span:first-child{display:none}.menubar .findbar{flex:0 1 140px}.menubar .stop-after .sa-long{display:none}}
 .ribbon .cf-linebreak{flex-basis:100%;height:0}
-.pane1.auto-size{overflow-y:auto}
+/* 🔴 스크롤바 자리를 늘 비워 둔다(v0.9.89) — ① 칸 내용이 칸 높이를 8~24px 넘는 구간에서 「스크롤바 생김 → 폭 17px 줄어 16:9 미리보기가 낮아짐 → 넘침 사라져 스크롤바 없어짐 → 다시 넘침」이
+   제작 중 1초마다 다시 그릴 때마다 뒤집혀 미리보기 칸이 커졌다 작아졌다 떨렸다(로이 2026-10-21 · test:pane1gutter) */
+.pane1.auto-size{overflow-y:auto;scrollbar-gutter:stable}
+.pane1.auto-size::-webkit-scrollbar{width:8px}
+.pane1.auto-size::-webkit-scrollbar-thumb{background:#5a5048;border-radius:4px}
+.pane1.auto-size::-webkit-scrollbar-track{background:transparent}
 .pane1.auto-size .thumbgrid{flex:0 0 auto;aspect-ratio:16/9;width:100%;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
 .pane1.auto-size #logwrap.docked{flex:0 0 auto;min-height:0}
 .pane1.auto-size #log{min-height:140px;max-height:35vh}
