@@ -6097,8 +6097,10 @@ export default function App() {
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
           </span>
               <span className="hgroup rb-extra">
-        {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」·「🔗 다시 연결」 자리(로이 2026-10-04 — 더는 안 쓴다).
-            ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio·runRelinkWork)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다. */}
+        {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」 자리(로이 2026-10-04 — 더는 안 쓴다).
+            ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다.
+            🔗 「다시 연결」은 2026-10-21 로이 「다시 쓰고 싶다」로 되살렸다(v0.9.94 · 🔊 음성 설정 바로 뒤). */}
+        <span className="rb-stack">
         <button className="ghost" data-testid="tts-engine-btn" onClick={openScriptVoice}
           title={(loaded && mode === 'longform'
             ? '열려 있는 대본의 목소리를 고릅니다 — 큐에 대본이 여럿이면 모두에 적용(채널 기본은 그대로 · ⚙ 채널편집에서).\n'
@@ -6107,6 +6109,10 @@ export default function App() {
             + '얼굴·샘플 듣기·요금도 여기서 · 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
           {/* 🔊 음성 설정 팝업을 여는 버튼(로이 2026-10-05) — 지금 목소리는 마우스를 올리면(title) 보인다 */}
           <span className="rb-ic">🔊</span> <span className="rb-t">음성 설정</span></button>
+        <button className="ghost" disabled={!loaded} data-testid="relink-work"
+          title={'출력 폴더에 파일은 남아 있는데 화면에 그림·영상·음성이 비어 있을 때 — 다시 연결합니다.\n(그림·영상 = 그룹 번호 · 음성 = 출력 폴더 .vrew 의 자막 글자로 맞춤 · 이미 연결된 것은 그대로 · Ctrl+Z 로 되돌리기)'}
+          onClick={runRelinkWork}><span className="rb-ic">🔗</span> <span className="rb-t">다시 연결</span></button>
+        </span>
               </span>
               {splitBar}
             </>)}

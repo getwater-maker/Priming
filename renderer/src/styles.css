@@ -1655,6 +1655,10 @@ main .card h2{top:var(--work-top-height,0px)}
 .ribbon .rb-ic{font-size:22px}
 .ribbon .rb-t{font-size:12.5px}
 .ribbon .hgroup select{min-height:32px}
+/* 🔗 ① 대본·음성 오른쪽 칸 = 🔊 음성 설정 + 🔗 다시 연결을 위아래로(v0.9.94) — 옆으로 두면 1366px 에서 리본이 51px 넘친다 */
+.ribbon .hgroup > span.rb-stack{display:inline-flex;flex-direction:column;justify-content:center;gap:4px}
+.ribbon .hgroup > span.rb-stack > button{flex-direction:row;justify-content:flex-start;min-height:30px;min-width:0;padding:3px 10px;gap:6px}
+.ribbon .rb-stack .rb-ic{font-size:16px}
 .ribbon .cf-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;height:84px;max-height:none;padding:6px 8px;align-self:center}
 .cf-lines{min-width:0;overflow-x:auto;scrollbar-width:thin}
 .cf-format-row{display:flex;align-items:center;gap:4px;min-height:30px;white-space:nowrap}
@@ -1688,6 +1692,8 @@ main .card h2{top:var(--work-top-height,0px)}
   .ribbon .hgroup + .hgroup,.ribbon .hgroup + .splitbar{padding-left:6px}
   .ribbon .hgroup > button,.ribbon .hgroup > span > button{min-width:40px;padding:8px 5px}
   .ribbon .rb-t{font-size:11px}
+  .ribbon .hgroup > span.rb-stack > button{padding:3px 6px}
+  .ribbon .rb-stack .rb-t{display:none}   /* 🔊·🔗 위아래 칸은 좁으면 아이콘만(이름은 마우스 글) */
   /* 클립 카드 — 이력 단추를 작게 */
   .clip-r1 .clip-hist{min-width:0;padding:2px 8px}
   .cuts-grid.clips .cut.lf{grid-template-columns:104px 1fr}

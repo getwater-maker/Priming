@@ -32,7 +32,7 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     await btn.waitFor({ timeout: 10000 });
     ok(await btn.isVisible(), '🔊 음성 엔진 버튼이 보인다');
     ok((await win.locator('.rb-t', { hasText: 'Vrew 음성' }).count()) === 0, '「Vrew 음성」 버튼 없음');
-    ok((await win.locator('.rb-t', { hasText: '다시 연결' }).count()) === 0, '「다시 연결」 버튼 없음');
+    ok((await win.locator('.rb-t', { hasText: '다시 연결' }).count()) === 1 && (await win.locator('[data-testid="relink-work"]').count()) === 1, '「🔗 다시 연결」 버튼 하나(되살림 2026-10-21 · 눌리는지는 test:relink)');
     ok((await win.locator('option[value="visual"]').count()) === 0, '「출력 — 화면만」 고르기 없음');
     const hit = await btn.evaluate((el) => { const r = el.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!t && el.contains(t); });
     ok(hit, '버튼이 실제로 눌리는 자리(elementFromPoint)');

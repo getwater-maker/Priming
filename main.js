@@ -7,6 +7,7 @@ const os = require('os');
 const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const P = require('./core/pipeline');
+const { writeTextAtomicSync: writeScriptAtomic } = require('./core/atomic-write');   // 대본(.md) 덮어쓰기는 전부 이것(임시 파일 → rename)
 const TtsEngines = require('./tts/tts-engines'); // 🔊 헤더 「음성 엔진」(v0.6.67) — 유료 API 엔진 선택
 const { getModeProfile } = require('./core/mode-profiles');
 const VSel = require('./core/video-select');   // 🎬 영상 대상 방식(홀수·짝수…) — 영상 대상 판정은 이 모듈 한 곳
@@ -2992,8 +2993,7 @@ ipcMain.handle('info-edit', async (_e, args = {}) => {
     const r = args.op === 'pos' ? IE.setPos(raw, mi, args.pos || null) : args.op === 'text' ? IE.setText(raw, mi, args.payload || {}) : { ok: false, error: '모르는 명령입니다' };
     if (!r.ok) { log(`⚠ 정보 카드 고치기 실패 — ${r.error}`); return r; }
     if (r.same) return { ok: true, same: true, numChanged: false };
-    const tmp = sp + '.priming-tmp';
-    await P.retryFs(() => { fs.writeFileSync(tmp, r.raw, 'utf8'); fs.renameSync(tmp, sp); }, '대본 표시 줄 쓰기', log);
+    await P.retryFs(() => writeScriptAtomic(sp, r.raw), '대본 표시 줄 쓰기', log);
     _infoPvCache.clear();
     log(`📇 정보 카드 ${args.op === 'pos' ? `자리 → ${args.pos ? require('./core/info-cards').posName(args.pos) : '자동'}` : '글 고침'} — 대본(.md)의 표시 줄 ${mi + 1}번째만 바꿨습니다 (${path.basename(sp)})`);
     if (r.numChanged) log('⚠ 정보 카드 숫자가 바뀌었습니다 — 팩트시트 대조 필요: 「' + String(r.before || '').split('\n').join(' / ') + '」 → 「' + String(r.after || '').split('\n').join(' / ') + '」');
@@ -3609,7 +3609,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     try {
       const build = () => P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
       const res = await buildForMode(outMode, pr, build);
-      P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+      P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars, preset);   // ⏸ .vrew 와 같은 preset — 막간 쉼만큼 뒤 자막이 밀린다
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
       if (mp4Go) {
@@ -8065,7 +8065,7 @@ async function runMakeAllBody(opts = {}) {
         if (!vrewReady) {
           const build = () => P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
           const res = await buildForMode(outMode, pr, build);
-          P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+          P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars, ep);   // ⏸ .vrew 와 같은 preset(막간 쉼)
           log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
           await BF.recordBuilt({ outRoot, baseName, fp, vrewPath });   // MP4 는 아래에서 구운 뒤 덧붙인다
         }
@@ -8920,7 +8920,7 @@ function _restoreState(st) {
   }
   if (st.md != null && S.scriptPath) {
     try {
-      fs.writeFileSync(S.scriptPath, st.md, 'utf8');
+      writeScriptAtomic(S.scriptPath, st.md);
       const nh = scriptHash(S.scriptPath);   // 🔑 밖에서 고친 것으로 보고 다시 읽지 않게
       try { Object.defineProperty(S.parsed, '_srcHash', { value: nh, enumerable: false, writable: true }); } catch { S.parsed._srcHash = nh; }
     } catch (e) { log('⚠ 되돌리기 — 대본(.md)을 쓰지 못했습니다: ' + e.message); }
@@ -9134,7 +9134,7 @@ async function _editSentences(args = {}) {
 
   // ── 여기서부터 실제 반영 ── (.md 먼저, 그다음 파싱본 — .md 쓰기가 실패하면 화면도 안 바꾼다)
   const _u = undoPush('문장 고치기', { md: true });
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); }
   catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
   const old = gs.slice(si, si + n);
@@ -9263,7 +9263,7 @@ function _royAfterEdit(pr, mids, { noBank = false } = {}) {   // noBank = 맞춤
     if (!m) { log(`⚠ 고친 문장의 🟥·🟨 표시(${mid})를 다시 찾지 못해 은행에 적지 않았습니다`); continue; }
     if (m.k === 'exp' && m.st !== '확인') {
       const nr = RoyMarks.setMarkState(fs.readFileSync(sp, 'utf8'), m.line, '확인');
-      if (nr) { fs.writeFileSync(sp, nr, 'utf8'); ensureRoyMarks(S.parsed, true); m = pr._roy.marks.find((x) => x.mid === mid) || m; log(`🟥 고쳐 저장한 경험 문단을 「확인」으로 바꿨습니다(${mid})`); }
+      if (nr) { writeScriptAtomic(sp, nr); ensureRoyMarks(S.parsed, true); m = pr._roy.marks.find((x) => x.mid === mid) || m; log(`🟥 고쳐 저장한 경험 문단을 「확인」으로 바꿨습니다(${mid})`); }
     }
     if (!noBank) out.push(_royAppend(S.parsed, sp, m, '수정'));
   }
@@ -9423,7 +9423,7 @@ ipcMain.handle('roy-confirm', async (_e, args = {}) => {
   const nr = RoyMarks.setMarkState(fs.readFileSync(sp, 'utf8'), m.line, '확인');
   if (!nr) return { ok: false, error: '표시 줄을 고치지 못했습니다 — 대본(.md)의 표시 줄을 확인하세요.' };
   const _u = undoPush('사실 확인', { md: true });
-  try { fs.writeFileSync(sp, nr, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(sp, nr); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   _setSrcHash();
   ensureRoyMarks(S.parsed, true);
   m = pr._roy.marks.find((x) => x.mid === args.mid) || m;
@@ -9734,7 +9734,7 @@ ipcMain.handle('merge-sentence-across', async (_e, args = {}) => {
     return { ok: false, error: '고친 내용이 대본에서 다른 문장으로 나뉩니다 — 안전을 위해 취소했습니다.' };
   }
   const _u = undoPush('클립 합치기', { md: true });
-  try { fs.writeFileSync(S.scriptPath, p2.raw, 'utf8'); }
+  try { writeScriptAtomic(S.scriptPath, p2.raw); }
   catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
   const merged = p2.newTexts[0];
@@ -9936,7 +9936,7 @@ ipcMain.handle('delete-clips', async (_e, args = {}) => {
   const plan = _planMdEdits(pr, jobs.map((j) => ({ idx: j.idx, text: j.text, n: j.text ? 1 : 0 })));
   if (!plan.ok) return plan;
   const _u = undoPush('클립 삭제', { md: true });
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const used = new Set(pr.sentences.map((x) => x.id));
   const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
   const tmp = path.join(ttsDir, '.clip-tmp');
@@ -10031,7 +10031,7 @@ async function _pasteClips(args = {}) {
   if (!plan.ok) return plan;
   const _u = undoPush('클립 붙여넣기', { md: true });
   _sw('되돌리기 기억');
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const made = plan.outs.get(j.idx);
   const used = new Set(pr.sentences.map((x) => x.id));
   const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
@@ -10125,7 +10125,7 @@ ipcMain.handle('move-clips', async (_e, args = {}) => {
   const plan = _planMdEdits(pr, edits);
   if (!plan.ok) return plan;
   const _u = undoPush('클립 옮기기', { md: true });
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const used = new Set(pr.sentences.map((x) => x.id));
   const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
   const tmp = path.join(ttsDir, '.clip-tmp');
@@ -10212,7 +10212,7 @@ ipcMain.handle('merge-clips', async (_e, args = {}) => {
   const plan = _planMdEdits(pr, edits);
   if (!plan.ok) return plan;
   const _u = undoPush('클립 합치기', { md: true });
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const used = new Set(pr.sentences.map((x) => x.id));
   const ns = _mkSent(plan.outs.get(first.idx)[0], first.s, used); if (first.s.chapterMark) ns.chapterMark = first.s.chapterMark;
   ns.num = first.s.num;
@@ -10626,7 +10626,7 @@ ipcMain.handle('split-group-at', async (_e, args = {}) => {
     const plan = _planMdEdits(pr, [{ idx: j.idx, text: texts.join(' '), n: 2 }]);
     if (!plan.ok) return plan;
     const _u = undoPush('그룹 나누기', { md: true });
-    try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+    try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
     const made = plan.outs.get(j.idx);
     const used = new Set(pr.sentences.map((x) => x.id));
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
@@ -10753,7 +10753,7 @@ ipcMain.handle('add-group', async (_e, args = {}) => {
   const plan = _planMdEdits(pr, [{ idx, text: head + ' ' + NEW_GROUP_TEXT, n: 2 }]);
   if (!plan.ok) return plan;
   const _u = undoPush('그룹 추가', { md: true });
-  try { fs.writeFileSync(S.scriptPath, plan.raw, 'utf8'); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
+  try { writeScriptAtomic(S.scriptPath, plan.raw); } catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
   const made = plan.outs.get(idx);
   const used = new Set(pr.sentences.map((x) => x.id));
   const ns = _mkSent(made[1], { isIntro: g.isIntro }, used);
@@ -10864,7 +10864,7 @@ function rebuildBook() {
 function applyBookText(text) {
   if (isMultiBook()) { log('⚠ 다중 파일 원고 — 전체 텍스트 일괄 수정은 지원하지 않습니다. 미리보기에서 문단을 클릭해 수정하세요.'); return currentDTO(); }
   const fallback = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '') : '책';
-  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('원고 저장 실패: ' + e.message); } }
+  if (S.scriptPath) { try { writeScriptAtomic(S.scriptPath, text); } catch (e) { log('원고 저장 실패: ' + e.message); } }
   return rebuildBook();
 }
 function bookScriptText() {
@@ -11810,7 +11810,7 @@ ipcMain.handle('apply-script-text', (_e, args = {}) => {
   if (S.mode === 'book' || (S.parsed && S.parsed.kind === 'book')) return applyBookText(text); // 출판 — book-parser 로
   S.parsed = P.parseScriptText(text, currentMode(), presetThresholds(S.preset));
   storeActive();
-  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('대본 파일 저장 실패: ' + e.message); } }
+  if (S.scriptPath) { try { writeScriptAtomic(S.scriptPath, text); } catch (e) { log('대본 파일 저장 실패: ' + e.message); } }
   log(`✏ 대본 수정 적용 — 재파싱 (편 ${S.parsed.projects.length})`);
   return P.toDTO(S.parsed);
 });

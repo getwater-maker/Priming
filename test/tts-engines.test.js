@@ -233,7 +233,7 @@ function makeWav(samples, sr = 24000) {
   console.log('\n[6] 화면');
   const app = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
   ok(!/<span className="rb-t">Vrew 음성<\/span>/.test(app), '「Vrew 음성」 버튼 없음');
-  ok(!/<span className="rb-t">다시 연결<\/span>/.test(app), '「다시 연결」 버튼 없음');
+  ok((app.match(/<span className="rb-t">다시 연결<\/span>/g) || []).length === 1 && /data-testid="relink-work"[\s\S]{0,400}onClick=\{runRelinkWork\}/.test(app), '「🔗 다시 연결」 버튼 하나 — 되살림(로이 2026-10-21 · 🔊 음성 설정 뒤)');
   ok(!/<option value="visual">🖼 화면만<\/option>/.test(app), '「출력」 고르기 없음');
   ok(/data-testid="tts-engine-btn"/.test(app), '🔊 음성 엔진 버튼 있음');
   const dlg = fs.readFileSync(path.join(ROOT, 'renderer/src/TtsEngineDialog.jsx'), 'utf8');
