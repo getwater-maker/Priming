@@ -2949,13 +2949,15 @@ function cardsOptsFor(pr, preset) {
 }
 // 📇 정보 카드(v0.8.2 · 정보튜브) — 채널 옵션 「정보 카드」가 켜져 있을 때만. 대본(.md)을 다시 읽어 표시 위치(다음 낭독 문단)와 구간 표지를 계획한다.
 //   작업본 문장과 안 맞으면 ⚠ 로그 후 그 판만(전부면 전부) 건너뛴다 — 조용히 줄이지 않는다 · 꺼져 있으면 null(= 예전 MP4 와 같다)
+// ⏸ 정보 카드가 시각을 재는 프로젝트 — 막간 쉼만큼 뒤 시각을 민다(.vrew 와 같은 시각). 출력(infoOptsFor)·① 미리보기(infoPreviewFor) 한 곳.
+function infoProjOf(pr, preset) { return require('./core/screen-cards').withPauses(pr, P.pausePlanOf(pr, preset).map); }
 function infoOptsFor(pr, preset, scriptPath) {
   try {
     if (!pr || !preset || !preset.infoCards) return null;
     if (!scriptPath || !fs.existsSync(scriptPath)) { log('⚠ 정보 카드 — 대본(.md)을 읽을 수 없어 건너뜁니다: ' + (scriptPath || '(경로 없음)')); return null; }
     const IC = require('./core/info-cards');
     const parsed = IC.fromRaw(fs.readFileSync(scriptPath, 'utf8'));
-    const r = IC.plan(require('./core/screen-cards').withPauses(pr, P.pausePlanOf(pr, preset).map), parsed, { sections: true });   // ⏸ 막간 쉼만큼 뒤 시각이 밀린다(.vrew 와 같은 시각)
+    const r = IC.plan(infoProjOf(pr, preset), parsed, { sections: true });   // ⏸ 막간 쉼만큼 뒤 시각이 밀린다(.vrew 와 같은 시각)
     for (const w of r.warnings) log('⚠ ' + w);
     if (parsed.orphan) log(`⚠ 정보 카드 — 뒤따르는 낭독 문장이 없는 표시 줄 ${parsed.orphan}개(대본 끝) → 건너뜁니다`);
     if (r.panels.length) { const c = {}; for (const q of r.panels) c[q.type] = (c[q.type] || 0) + 1; log(`📇 정보 카드 ${r.panels.length}판(낱말 ${c.words || 0} · 구간 표지 ${c.cover || 0} · 표 ${c.table || 0} · 확인표 ${c.check || 0}) · 표시 줄 ${parsed.marks.length}개`); }
@@ -2970,11 +2972,12 @@ async function infoPreviewFor(pr, presetName, scriptPath) {
   if (!pr || !preset || !preset.infoCards) return { ok: true, off: true, panels: [] };
   if (!scriptPath || !fs.existsSync(scriptPath)) return { ok: true, panels: [], error: '대본(.md)을 읽을 수 없습니다' };
   let mt = 0; try { mt = fs.statSync(scriptPath).mtimeMs; } catch (_) {}
-  const sig = JSON.stringify([scriptPath, mt, presetName, (pr.sentences || []).length, Math.round((pr.sentences || []).reduce((a, x) => a + (+x.ttsDurationSec || 0), 0) * 10), (pr.groups || []).map((g) => g.imagePath || '').join('|')]);
+  const _pzT = P.pausePlanOf(pr, preset).total;   // ⏸ 쉼이 바뀌면(채널 막간 쉼·카드 줄) 다시 계획
+  const sig = JSON.stringify([scriptPath, mt, presetName, _pzT, (pr.sentences || []).length, Math.round((pr.sentences || []).reduce((a, x) => a + (+x.ttsDurationSec || 0), 0) * 10), (pr.groups || []).map((g) => g.imagePath || '').join('|')]);
   if (_infoPvCache.has(sig)) return _infoPvCache.get(sig);
   const IC = require('./core/info-cards'), IA = require('./core/info-ass'), IT = require('./core/info-theme');
   const parsed = IC.fromRaw(fs.readFileSync(scriptPath, 'utf8'));
-  const r = IC.plan(pr, parsed, { sections: true, estimate: true });
+  const r = IC.plan(infoProjOf(pr, preset), parsed, { sections: true, estimate: true });   // ⏸ 출력과 같은 시각(막간 쉼 포함)
   const spans = (r.spans || []).map((sp) => ({ ...sp, file: ((pr.groups || [])[sp.gi] || {}).imagePath || null }));
   const segAt = (t) => { const sp = spans.find((x) => t >= x.t0 && t < x.t1); return sp && sp.file && fs.existsSync(sp.file) ? { file: sp.file, rel: 0 } : null; };
   const capY = (preset.capLong && preset.capLong.yAlign) || (preset.captionStyle && preset.captionStyle.yAlign) || 'bottom';
