@@ -350,7 +350,7 @@ function bookDTO(parsed) {
 function createWindow() {
   win = new BrowserWindow({
     width: 1240, height: 860,
-    title: 'Priming',
+    title: process.env.PM_LAB ? 'Priming Lab' : 'Priming',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     backgroundColor: '#faf6f0',
     webPreferences: {
@@ -450,6 +450,8 @@ app.whenReady().then(() => {
   //   창을 막지 않도록 뒤로 미루고, 실패해도 조용히 넘어간다(오프라인·서버 꺼짐).
   setTimeout(() => {
     (async () => {
+      // 🧪 Priming Lab — 공용 서버(참조음성·스타일·얼굴·태그)에 올리거나 받지 않는다(원본 데이터 보호).
+      if (process.env.PM_LAB) { logToFile('🧪 Lab — 시작 서버 동기화 건너뜀'); return; }
       try {
         const names = await require('./tts/asr-client').listServerVoices();
         await syncRefAudioToServer(names);
@@ -740,6 +742,7 @@ ipcMain.handle('app-update-check', async () => {
 ipcMain.handle('app-update-apply', async () => {
   try {
     if (!app.isPackaged) return { ok: false, reason: 'dev', message: '개발 실행(npm start)에서는 자동 업데이트를 하지 않습니다 — 설치본에서 쓰세요' };
+    if (process.env.PM_LAB) return { ok: false, reason: 'lab', message: 'Priming Lab 은 업데이트를 받지 않습니다' };
     if (_awake.n > 0) return { ok: false, reason: 'busy', message: '지금 작업(음성·이미지·영상·만들기)이 진행 중입니다 — 끝난 뒤에 업데이트하세요' };
     const LU = require('./light-updater');
     const chk = require('./core/update-check').evaluate(await LU.fetchManifest(), LU.localPackage());

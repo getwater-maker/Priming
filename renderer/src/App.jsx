@@ -5964,7 +5964,7 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className="vhead">
         <div className="menubar">
-            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>🎬 Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
+            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>{api.isLab ? '🧪' : '🎬'} Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
             <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
               title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
               onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>

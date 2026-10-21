@@ -109,6 +109,8 @@ function localPackage() {
  */
 async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } = {}) {
   if (!app.isPackaged) { log('dev 모드 — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'dev' }; }
+  // 🧪 Priming Lab(복제본) — 원본 저장소의 파일로 Lab 코드를 덮어쓰지 않는다(설치본이어도).
+  if (process.env.PM_LAB) { log('Lab — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'lab' }; }
   const appDir = app.getAppPath(); // asar:false → resources/app
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).

@@ -1,5 +1,14 @@
 # Priming — 규칙과 지도
 
+> ## 🧪 이 폴더는 **Priming Lab**(`D:\Priming-VrewLab`) — 원본 `D:\Priming` 의 실험 복제본이다 (2026-10-21 로이 승인)
+> - 목적: Vrew 에 있고 Priming 에 없는 기능을 원본과 떼어 놓고 만든다. 차이표·경위 = [`docs/VrewLab/`](docs/VrewLab/).
+> - ⛔ **발행하지 않는다** — 전역 「코드 수정 = 발행까지 한 세트」 규칙의 **예외**. `update:publish`·`update:manifest`·`npm run dist`·푸시 금지. 아래 §2 의 발행 절차는 원본 몫이다.
+> - git: 브랜치 `vrewlab` 에만 커밋. `origin` = 로컬 `D:\Priming`(받기 전용 · 푸시 주소 `DISABLED`). ⛔ GitHub 주소를 remote 로 넣지 않는다(푸시 = 전 회원 PC 배포). 원본 따라잡기는 `git fetch origin; git merge origin/main`.
+> - 실행은 **`lab-start.ps1` 로만**(USERPROFILE 을 `D:\Priming-VrewLab-data\home` 으로 돌리고 `PM_LAB=1`) — ⛔ 그냥 `npm start` 하면 원본 데이터(~/.flow-app·~/.priming-maker)를 같이 쓴다. 원본 설정 복사는 보통 셸에서 `node lab-import.js`(토큰 제외 · 키는 `--with-keys`).
+> - 대본은 `D:\Priming-VrewLab-data\scripts` 에 **복사해서** 연다(원본 대본을 열면 Lab 편집이 원본 .md 를 고친다).
+> - E2E·시험도 Lab 홈으로 돌린다(`USERPROFILE=D:\Priming-VrewLab-data\home`). GPU 서버(OmniVoice·ComfyUI)는 원본과 같이 쓴다 — 원본이 제작 중이면 Lab 생성 시험을 하지 않는다.
+> - 원본 결함은 여기서 고치지 않고 원본 세션에 요청서로 넘긴다. Lab 에서 검증된 기능만 원본으로 가져간다.
+
 > 이 폴더에서 여는 모든 세션에 통째로 실리는 문서다. **지금 유효한 규칙·금지선·구조만** 둔다.
 > 경위·실측 수치·버전별 기록은 [`docs/작업노트/`](docs/작업노트/) 에 **원문 그대로** 있다(2026-09-26 슬림화 전 CLAUDE.md 전체 = 557,605자).
 
