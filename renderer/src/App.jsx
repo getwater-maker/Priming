@@ -22,6 +22,7 @@ import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
+import BackupModal from './BackupModal.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -822,6 +823,8 @@ export default function App() {
   // ⏳ 그림·영상 불러오기 진행 — 작업했던 대본을 열면 썸네일이 한동안 검게 비어 있다(구글드라이브에서 받아 오는 중).
   //   화면의 그림·영상 칸이 **실제로 다 그려질 때까지** 가운데 창으로 보여 준다(0.4초 안에 끝나면 띄우지 않는다).
   const [mediaLoad, setMediaLoad] = useState(null);   // { done, total, img, imgT, vid, vidT, sec }
+  const [backupDlg, setBackupDlg] = useState(false);   // 🕘 백업에서 되살리기 창(Lab)
+  const [crashed, setCrashed] = useState(false);       // 🩹 지난번 비정상 종료 — 시작 화면 안내만(빈 화면 시작은 그대로)
   const [lastQ, setLastQ] = useState(null);   // ♻ 지난 큐 { count, first } — 큐가 비었을 때만 버튼으로 보인다
   const mediaLoadKeyRef = useRef('');
   const mediaLoadHiddenRef = useRef(false);   // 「숨기기」 — 이 대본이 다 뜰 때까지 다시 띄우지 않는다(세기·로그는 계속)
@@ -1363,7 +1366,19 @@ export default function App() {
       const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
       if (it && it.settings) applySettings(it.settings);
       setStatus(`♻ 지난 큐 — ${r.count}개 대본 다시 열기`);
+      if (crashed) { setCrashed(false); api.crashDismiss().catch(() => {}); }
     } catch (e) { logline('지난 큐 오류: ' + e.message); }
+  }
+  // 🕘 백업에서 되살린 뒤 — 되살린 대본이 큐에 다시 열려 활성이 된다(지난 큐 다시 열기와 같은 화면 갱신)
+  function onBackupRestored(r) {
+    setBackupDlg(false);
+    if (r.queue) setQueue(r.queue);
+    setMode('longform');
+    if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+    const it = r.queue && r.queue.longform && r.queue.longform.items.find((x) => x.active);
+    if (it && it.settings) applySettings(it.settings);
+    setStatus('🕘 백업에서 되살렸습니다' + (r.before ? ' — 되살리기 전 상태도 백업에 남겼습니다' : ''));
+    if (crashed) { setCrashed(false); api.crashDismiss().catch(() => {}); }
   }
   // 저장 폴더(saves) 전체삭제 — 확인 팝업 필수
   async function deleteSaves() {
@@ -1842,6 +1857,7 @@ export default function App() {
     if (!_qEmpty) { setLastQ(null); return; }
     let alive = true;
     api.lastQueueInfo().then((r) => { if (alive) setLastQ(r && r.count ? r : null); }).catch(() => {});
+    api.backupList().then((r) => { if (alive) setCrashed(!!(r && r.crashed)); }).catch(() => {});
     return () => { alive = false; };
   }, [_qEmpty]);
   // ⏳ 대본이 바뀌면(열기·큐 선택) 화면의 그림·영상이 다 뜰 때까지 센다
@@ -6299,11 +6315,14 @@ export default function App() {
           ) : isBk ? (
             <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} logBox={logBox} queue={queue && queue.book} setQueue={setQueue} onSelectQueue={selectBookItem} onRemoveQueue={removeQueueItem} />
           ) : (<>
-          {mode === 'longform' && _qEmpty && lastQ && (
+          {mode === 'longform' && _qEmpty && (lastQ || crashed) && (
             <div className="qstrip" data-testid="last-queue">
-              <span className="qlabel">지난 큐</span>
-              <button className="ghost" title={'마지막으로 열어 둔 대본 목록을 그대로 다시 엽니다(작업본도 이어받습니다)\n첫 대본: ' + (lastQ.first || '')}
-                onClick={restoreLastQueue}>♻ 지난 큐 다시 열기 ({lastQ.count}개)</button>
+              {crashed && <span className="qlabel" data-testid="crash-note" title="지난번에 앱이 정상적으로 닫히지 않았습니다(강제 종료·정전 등). 작업본은 자동저장돼 있어 대본을 다시 열면 이어집니다.">🩹 지난번에 비정상 종료</span>}
+              {lastQ && <span className="qlabel">지난 큐</span>}
+              {lastQ && <button className={crashed ? '' : 'ghost'} title={'마지막으로 열어 둔 대본 목록을 그대로 다시 엽니다(작업본도 이어받습니다)\n첫 대본: ' + (lastQ.first || '')}
+                onClick={restoreLastQueue}>♻ 지난 큐 다시 열기 ({lastQ.count}개)</button>}
+              <button className="ghost" data-testid="backup-open-strip" title="대본마다 10분 간격으로 남긴 백업(대본 .md + 작업본)에서 고른 시각으로 되살립니다" onClick={() => setBackupDlg(true)}>🕘 백업에서 되살리기</button>
+              {crashed && <button className="ghost" title="이 안내 닫기" onClick={() => { setCrashed(false); api.crashDismiss().catch(() => {}); }}>✕</button>}
             </div>
           )}
           {aiPopEl}
@@ -6539,7 +6558,7 @@ export default function App() {
       {/* ② 위 얇은 막대 — 진행 통계 + 보기 전환(Vrew 「개요/상세」 자리) */}
           <div className="work-top" data-testid="work-top">
           {queue && queue[mode] && queue[mode].items.length > 0 && (
-            <QueueList items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={pickQueueItem} onRemove={removeQueueItem} />
+            <QueueList onBackup={mode === 'longform' ? () => setBackupDlg(true) : null} items={queue[mode].items} makeProg={makeProg} stageRun={stageRun} headerCh={presetName} onSelect={pickQueueItem} onRemove={removeQueueItem} />
           )}
           <div className="clipbar" data-testid="clipbar">
             {workTimes}
@@ -6724,6 +6743,7 @@ export default function App() {
           <button type="button" data-testid="clip-add-image" title="이미지 파일을 고르면 이 클립 뒤에 그 그림을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('image')}><span className="ca-ic">🖼</span><span>이미지 클립</span></button>
           <button type="button" data-testid="clip-add-video" title="비디오 파일을 고르면 이 클립 뒤에 그 영상을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('video')}><span className="ca-ic">🎬</span><span>비디오 클립</span></button>
         </div></>)}
+      {backupDlg && <BackupModal onClose={() => setBackupDlg(false)} onRestored={onBackupRestored} />}
       {stockDlg && <StockDialog target={stockDlg} onClose={() => setStockDlg(null)} onOpenKeys={() => { setStockDlg(null); openSettings('keys'); }}
         onAttached={(d, it) => { if (d) setDto(d); setStatus(`🔎 G${stockDlg.groupNum} 에 ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'}을 넣었습니다`); }} />}
       {nameAsk && (
@@ -8140,7 +8160,7 @@ function queueBadges(it, makeProg, stageRun) {
   if (up) out.push(up);
   return out;
 }
-function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) {
+function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, onBackup }) {
   const running = items.some((it) => it.run && it.run.startedAt && !it.run.endedAt);
   const [, setTick] = useState(0);
   useEffect(() => { if (!running) return undefined; const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, [running]);
@@ -8149,7 +8169,7 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) 
   const short = (n) => String(n || '').replace(/^\d+_/, '');
   return (
     <div className="qlist" data-testid="q-list">
-      <span className="qlabel">작업 순서 ({items.length}){mixed ? <span className="qmix" title="채널이 섞여 있습니다 — 목소리·스타일·자막·완성 종류는 대본마다 자기 채널, 이미지·비디오 도구는 헤더에서 고른 것"> · 🔀 채널 {chs.size}개</span> : null}</span>
+      <span className="qlabel">작업 순서 ({items.length}){mixed ? <span className="qmix" title="채널이 섞여 있습니다 — 목소리·스타일·자막·완성 종류는 대본마다 자기 채널, 이미지·비디오 도구는 헤더에서 고른 것"> · 🔀 채널 {chs.size}개</span> : null}</span>{onBackup ? <button className="qx" data-testid="backup-open" style={{ marginLeft: 4 }} title="🕘 백업 — 대본마다 10분 간격으로 남긴 대본(.md)·작업본에서 고른 시각으로 되살립니다(되살리기 전 상태도 남깁니다)" onClick={onBackup}>🕘</button> : null}
       <div className="qrows">
         {items.map((it) => {
           const ch = (it.settings && it.settings.presetName) || '';

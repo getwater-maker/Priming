@@ -40,6 +40,7 @@
     "test:tts": "node test/tts-gate.test.js && node test/fs-retry.test.js && node test/tts-number.test.js && node test/channel-voice.test.js && node test/audio-normalize.test.js && node test/tts-lead-breath.test.js && node test/tts-empty-audio.test.js && node test/tts-silence.test.js && node test/tts-progress.test.js && node test/tts-audible.test.js && node test/tts-engines.test.js",
     "test:appfolders": "node test/app-folders.smoke.js",
     "test:makeall": "node test/makeall-dry.smoke.js",
+    "test:backup": "node test/gen-backup.test.js && node test/backup-ui.smoke.js",
     "test:makeupload": "node test/makeall-upload.smoke.js",
     "test:refvoice": "node test/ref-voice.test.js",
     "test:bcja": "node test/backcheck-ja-kana.test.js",

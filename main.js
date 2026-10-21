@@ -118,7 +118,7 @@ const S = { ttsMgr: null, abort: false,   // parsed·scriptPath·outRoot·preset
 //   🔑 ④ 가 핵심이다 — 화면이 출판으로 바뀐 뒤에 오는 제작 호출(예: 이미지→비디오 두 번째 호출)도 롱폼 세계로 간다.
 //   🎬 제작 칸(v0.9.23): 만들기·큐 제작은 그 대본만의 칸('make' · S.mode 는 longform)에서 돈다 — 화면은 다른 대본을 보고 고쳐도 된다(makeRun).
 const WORLD = require('./core/world-ctx').createWorlds(S, { worlds: ['longform', 'book'], norm: (w) => (w === 'book' ? 'book' : 'longform'), modeOf: (w) => (w === 'make' ? 'longform' : w) });
-const VIEW_FOLLOW_CHANNELS = new Set(['set-mode', 'reset-project', 'list-queue', 'save-queue', 'load-queue', 'last-queue-info', 'restore-last-queue',
+const VIEW_FOLLOW_CHANNELS = new Set(['set-mode', 'reset-project', 'list-queue', 'save-queue', 'load-queue', 'last-queue-info', 'restore-last-queue', 'backup-restore',
   'select-queue-item', 'remove-queue-item', 'set-queue-settings', 'get-script-text', 'apply-script-text', 'open-folder', 'clear-saves']);
 WORLD.wrapHandle(ipcMain, (ch, _args, view) => (/^(book-|open-book-)/.test(ch) ? 'book' : VIEW_FOLLOW_CHANNELS.has(ch) ? view : 'longform'),
   (id) => { const it = S.modes.longform.items.find((x) => x.id === id); return it && it.parsed ? makeStoreFor(it) : null; },   // 🎬 __item = 그 대본의 제작 칸(큐 단계 루프)
@@ -433,7 +433,9 @@ app.whenReady().then(() => {
   });
   // 시작은 항상 빈 화면(초기화 상태) — 지난 세션 큐 자동복원 안 함(사용자 요청). 대본은 직접 열기.
   //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
+  try { _crashInfo = require('./core/session-lock').begin(sessionLockFile(), { version: (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version; } catch { return ''; } })() }); } catch {}
   createWindow();
+  if (_crashInfo.crashed) setTimeout(() => log(`🩹 지난번(${(_crashInfo.prev && _crashInfo.prev.version) ? 'v' + _crashInfo.prev.version : ''} 시작분)에 앱이 정상적으로 닫히지 않았습니다 — 「♻ 지난 큐 다시 열기」나 「🕘 백업」으로 이어갈 수 있습니다`), 1500);
   // 로그 파일에 세션 구분선 — 하루치 파일 안에서 "몇 시 실행의 로그인지" 가 보여야 한다.
   //   ⚠ log() 가 아니라 logToFile() 이다 — 화면 로그창까지 이 줄로 시작할 필요는 없다.
   // ⚠ `app.getVersion()` 은 **업데이트가 적용되기 전** 버전을 준다 — Electron 이 실행 시점의 package.json 을
@@ -486,6 +488,7 @@ app.on('will-quit', () => { try { require('electron').globalShortcut.unregisterA
 app.on('before-quit', () => {
   try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장(롱폼·출판 세계 모두)
   try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙 감시가 앱보다 오래 남지 않게
+  try { require('./core/session-lock').end(sessionLockFile()); } catch {}   // 🩹 정상 종료 표시(잠금 지우기)
   // 작업 중 강제 종료돼도 절전 차단이 남지 않게 확실히 해제(카운터 무시)
   try {
     if (_awake.id != null && powerSaveBlocker.isStarted(_awake.id)) powerSaveBlocker.stop(_awake.id);
@@ -1894,6 +1897,7 @@ async function _openScriptEntries(entries) {
       //   그 상태로 「만들기」를 누르면 나머지 대본은 presetName=null → getPreset(null) = **기본 채널**로
       //   합성돼 **엉뚱한 목소리**가 나갔다(고전서재 대본이 04_역사이야기 목소리·seed 5697 로 나감).
       addItem(S.parsed, S.scriptPath, S.outRoot, settings);
+      _genBackup(scriptPath, null, 'open', { minGapMs: 0 });   // 🕘 열 때 한 세대 — 이번에 고치기 전 상태(직전 세대와 같으면 건너뜀)
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
       log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
@@ -6976,6 +6980,7 @@ function writeSnapshotSync(ctx) {
     const tmp = file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(buildSnapshot(ctx ? X : undefined), null, 2), 'utf8');
     fs.renameSync(tmp, file);
+    _genBackup(X.scriptPath, file, 'auto');   // 🕘 10분마다 한 세대(내용이 같으면 건너뜀)
     return file;
   } catch (e) { log('자동저장 실패: ' + (e && e.message)); return null; }
 }
@@ -7020,6 +7025,20 @@ function flushAutoSave() {
 const SMOKE_WS_DIR = path.join(os.tmpdir(), 'priming-smoke-workspace');
 function workspaceDir() { return process.env.PM_UI_SMOKE ? SMOKE_WS_DIR : path.join(os.homedir(), '.priming-maker'); }
 function workspaceFile() { return path.join(workspaceDir(), 'workspace.json'); }
+// 🕘 세대별 백업(core/gen-backup) — 작업본·대본 .md 를 세대로 보관 · 위치 = 큐 파일 옆 history/(E2E 는 TEMP 로 간다)
+function historyRoot() { return path.join(workspaceDir(), 'history'); }
+function _genBackup(scriptPath, snapFile, reason, opts) {
+  if (!scriptPath) return null;
+  try {
+    const base = path.basename(snapFile || snapshotFile(scriptPath).file).replace(/\.smproj\.json$/i, '');
+    const r = require('./core/gen-backup').maybeBackup({ root: historyRoot(), base, snapFile: snapFile || snapshotFile(scriptPath).file, scriptPath, reason, opts });
+    if (r.why === 'error') logToFile('🕘 백업 실패: ' + r.error);
+    return r;
+  } catch (e) { logToFile('🕘 백업 실패: ' + e.message); return null; }
+}
+// 🩹 비정상 종료 감지(core/session-lock) — 시작 때 잠금을 쓰고 정상 종료 때 지운다
+function sessionLockFile() { return path.join(workspaceDir(), 'session.lock'); }
+let _crashInfo = { crashed: false, prev: null };
 // 큐 전체 직렬화 (workspace 자동저장 + '큐 저장' 공용). 대본경로·설정·상태만 저장(작업물은 .smproj).
 function serializeQueue() {
   const ser = (mode) => {
@@ -8331,6 +8350,44 @@ ipcMain.handle('restore-last-queue', async () => {
   writeWorkspace();
   log(`♻ 지난 큐 다시 열기 — ${n}개 대본`);
   return { ok: n > 0, count: n, dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), mode: S.mode };
+});
+// 🕘 백업 목록 · 되살리기(Lab · core/gen-backup) — 비정상 종료였으면 crashed 도 함께 알린다(시작 화면 안내용)
+ipcMain.handle('backup-list', () => {
+  const list = require('./core/gen-backup').listAll(historyRoot());
+  return { crashed: !!_crashInfo.crashed, list: list.map((x) => ({ ...x, name: path.basename(x.scriptPath || x.base).replace(/\.md$/i, ''), open: !!_queueItemOf(x.scriptPath), exists: !!(x.scriptPath && fs.existsSync(x.scriptPath)) })) };
+});
+ipcMain.handle('crash-dismiss', () => { _crashInfo = { crashed: false, prev: null }; return true; });
+function _samePath(a, b) { return !!(a && b) && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase(); }
+function _queueItemOf(scriptPath) { const q = S.modes.longform; return (q && q.items || []).find((it) => _samePath(it.scriptPath, scriptPath)) || null; }
+ipcMain.handle('backup-restore', async (_e, args = {}) => {
+  if (_awake.n > 0) return { ok: false, error: '작업(만들기·음성·이미지·영상)이 진행 중입니다 — 끝난 뒤에 되살려 주세요.' };
+  const GB = require('./core/gen-backup');
+  const base = String(args.base || ''), id = String(args.id || '');
+  const gen = GB.listGens(historyRoot(), base).find((g) => g.id === id);
+  if (!gen) return { ok: false, error: '그 백업을 찾지 못했습니다.' };
+  const scriptPath = gen.scriptPath;
+  if (!scriptPath) return { ok: false, error: '이 백업에는 대본 위치가 적혀 있지 않습니다.' };
+  const snapFile = path.join(snapshotFile(scriptPath).projDir, base + '.smproj.json');
+  // 큐에 열려 있으면: 지금 고친 것까지 먼저 쓰고(되살리기 직전 세대로 남는다) 큐에서 내린 뒤 되살려 다시 연다
+  const q = S.modes.longform;
+  const it = _queueItemOf(scriptPath);
+  let settings = null;
+  if (it) {
+    settings = it.settings || null;
+    if (q.activeId === it.id && S.mode === 'longform') { try { flushAutoSave(); } catch {} }
+    const A = _asWorlds.longform; if (A.t) { clearTimeout(A.t); A.t = null; } A.since = 0;   // 내린 대본의 밀린 저장이 되살린 작업본을 덮지 않게
+    q.items = q.items.filter((x) => x.id !== it.id);
+    if (q.activeId === it.id) q.activeId = q.items.length ? q.items[q.items.length - 1].id : null;
+    syncActiveToS();
+  }
+  let r;
+  try { r = GB.restore({ root: historyRoot(), base, id, snapFile, scriptPath }); }
+  catch (e) { writeWorkspace(); return { ok: false, error: e.message, queue: queueDTO() }; }
+  log(`🕘 백업 되살리기 — ${path.basename(scriptPath)} · ${id}${r.before ? ` (되살리기 전 상태는 ${r.before} 로 남김)` : ''}`);
+  const preset = P.getPreset((settings && settings.presetName) || null);
+  const n = await _openScriptEntries([{ scriptPath, preset, settings: settings || ((preset && preset.name) ? { presetName: preset.name } : null) }]);
+  writeWorkspace();
+  return { ok: n > 0, before: r.before, dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), mode: S.mode };
 });
 ipcMain.handle('select-queue-item', (_e, args = {}) => {
   const id = args && args.id;
