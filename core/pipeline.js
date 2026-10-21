@@ -643,10 +643,25 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       if (onLine) onLine(`🔎 역대조 ${rows.length}문장 — 통과 ${sum.pass} · 미달 ${sum.flagged} · 확인 불가 ${sum.unknown} → ${file}`);
     }
   } catch (e) { if (onLine) onLine('⚠ 역대조 결과표 쓰기 실패: ' + e.message); }
+  await quietPass(sentences, preset, workDir, onLine, abortSignal);   // ✂ 쉼 줄이기(채널 quietMaxSec) — 모든 TTS 입구가 여기를 지난다
   if (failed.length && onLine) {
     onLine(`⚠ ${label} 음성 실패 ${failed.length}개 (컷 ${failed.slice(0, 12).join(', ')}${failed.length > 12 ? ' …' : ''}) — 「🎤 TTS」를 다시 누르면 빠진 것만 다시 만듭니다.`);
   }
   return { failed };
+}
+
+// ✂ 쉼 줄이기(Lab · core/quiet-trim) — 문장들을 채널 설정(quietMaxSec·quietEdge)에 맞춘다(끄면 원본으로).
+//   TTS 끝(fillTtsList)과 .vrew 직전(main 4단계·export-vrew)에서 부른다 — 설정을 TTS 뒤에 바꿔도 출력에 맞게.
+async function quietPass(sentences, preset, workDir, onLine, abortSignal) {
+  try {
+    const QT = require('./quiet-trim');
+    const key = QT.keyOf(preset);
+    if (!key && !(sentences || []).some((x) => x && x.quiet)) return null;
+    const r = await QT.ensureSentences(sentences, preset, workDir, { ffmpegPath, claimPath, onLine, abortSignal });
+    if (onLine && r.changed) onLine(key ? `✂ 쉼 줄이기 — 문장 ${r.changed}개 · 쉼 ${r.cut}곳 · ${r.removedSec.toFixed(1)}초 줄임 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : `✂ 쉼 줄이기 끔 — 문장 ${r.restored}개를 원래 음성으로 되돌렸습니다`);
+    if (onLine && r.failed) onLine(`⚠ 쉼 줄이기 — ${r.failed}개 문장은 원래 음성 그대로입니다(읽기 실패)`);
+    return r;
+  } catch (e) { if (onLine) onLine('⚠ 쉼 줄이기 실패: ' + e.message); return null; }
 }
 
 // 채널의 화자 → 참조음성 표. 저장 형태는 [{name, voice}](화면 순서) — 옛 객체 형태도 받는다. 빈 목소리는 뺀다.
@@ -1143,7 +1158,7 @@ function sanitize(name) {
 
 module.exports = { setRoyHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
-  makeTtsManager, fillTts, fillTtsList, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, sanitize,
+  makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,

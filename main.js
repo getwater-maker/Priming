@@ -3612,6 +3612,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const baseName = vrewBaseName(pr, runCtx);
     const vrewPath = path.join(outRoot, `${baseName}.vrew`);
     try {
+      if (gateTts(outMode)) await P.quietPass(pr.sentences, preset, dirs.tts, log, () => S.abort);   // ✂ 쉼 줄이기(4단계와 같은 자리)
       const build = () => P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
       const res = await buildForMode(outMode, pr, build);
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
@@ -6965,7 +6966,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null })),
       })),
     })),
   };
@@ -7161,6 +7162,7 @@ function projectsFromSnapshot(snap) {
         if (Array.isArray(ss.capSpans) && ss.capSpans.length) s.capSpans = ss.capSpans;   // 🎨 줄별·글자별 자막 서식
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length) s.capBreaks = ss.capBreaks;   // ✂ 사람이 정한 자막 줄 나눔
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath) s.backcheck = ss.bc;   // 🔎 역대조 결과(그 음성 파일에 대한 것일 때만)
+        if (ss.q && ss.q.out && ss.q.out === s.ttsAudioPath) s.quiet = ss.q;   // ✂ 쉼 줄인 사본이면 원본을 기억(끄면 원본으로)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -7261,7 +7263,7 @@ function overlaySnapshot(parsed, snap) {
         if (Array.isArray(ss.capBreaks) && ss.capBreaks.length && ss.text === s.text) s.capBreaks = ss.capBreaks;   // ✂ 줄 나눔(같은 이유)
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath && ss.text === s.text) s.backcheck = ss.bc;   // 🔎 역대조 결과(같은 문장·같은 음성일 때만)
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
-        if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
+        if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; if (ss.q && ss.q.out === ss.ttsAudioPath) s.quiet = ss.q; }
       });
     }
   }
@@ -7999,6 +8001,8 @@ async function runMakeAllBody(opts = {}) {
         pushDtoUpdate();
       }
     }
+    // ✂ 쉼 줄이기 — TTS 뒤에 채널 설정을 바꿨어도 출력은 지금 설정대로(지문·게이트보다 먼저 · core/quiet-trim)
+    for (const pr of projects) { if (S.abort) break; if (gateTts(outMode)) await P.quietPass(pr.sentences, preset, shortsDirs(outRoot, pr.shortsNum).tts, log, () => S.abort); }
     const incomplete = [];
     const noTts = [];
     for (const pr of projects) {

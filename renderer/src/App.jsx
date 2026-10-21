@@ -3570,6 +3570,7 @@ export default function App() {
       aiPos: (p.aiNotice && p.aiNotice.pos && typeof p.aiNotice.pos === 'object') ? p.aiNotice.pos : null,
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
+      quietMaxSec: p.quietMaxSec != null ? p.quietMaxSec : 0, quietEdge: !!p.quietEdge,   // ✂ 쉼 줄이기(Lab) — ⚠ 안 실으면 저장 때 지워진다
       // 🎭 화자별 목소리 [{name, voice}] — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       speakers: Array.isArray(p.speakers) ? p.speakers.map((r) => ({ name: r.name || '', voice: r.voice || '' }))
         : (p.speakers && typeof p.speakers === 'object' ? Object.keys(p.speakers).map((k) => ({ name: k, voice: p.speakers[k] })) : []),
@@ -4064,6 +4065,7 @@ export default function App() {
       presetPrompt: ch.presetPrompt || '',
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
+      quietMaxSec: Math.max(0, Math.min(3, numOr(ch.quietMaxSec, 0))), quietEdge: !!ch.quietEdge,   // ✂ 쉼 줄이기(Lab)
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
       kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
@@ -6860,7 +6862,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="eqgrid" style={{ '--n': 5 }}>
+                <div className="eqgrid" style={{ '--n': 6 }}>
                   <div className="col"><div className="crow stack"><span className="l">시드</span>
                     <input className="nbox" type="number" value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
                     <Hint>같은 시드 = 편마다 같은 톤. OmniVoice·ElevenLabs 가 씁니다.</Hint></div>
@@ -6873,6 +6875,10 @@ export default function App() {
                   <div className="col"><div className="crow stack"><span className="l">문장무음 (초)</span>
                     <input className="n" type="number" step="0.1" min="0" max="5" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /></div>
                     <Hint>문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. 0 = 사용 안 함, 권장 0.5~1.5초. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.</Hint></div>
+                  <div className="col" data-testid="ch-quiet"><div className="crow stack"><span className="l">쉼 줄이기 (초)</span>
+                    <input className="n" type="number" step="0.05" min="0" max="3" value={ch.quietMaxSec} onChange={(e) => setCh({ ...ch, quietMaxSec: e.target.value })} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!ch.quietEdge} onChange={(e) => setCh({ ...ch, quietEdge: e.target.checked })} /><span className="meta">앞뒤 여백도</span></label></div>
+                    <Hint>문장 안에서 이 길이보다 긴 쉼을 이 길이로 줄입니다(Vrew 「무음 구간 줄이기」). 0 = 끔, 권장 0.3~0.5초. 「앞뒤 여백도」를 켜면 모델이 문장 앞뒤에 붙이는 여백(약 0.35초)도 0.05초로 줄입니다(「문장무음」은 그대로). 원래 음성 파일은 그대로 두고 줄인 사본을 쓰므로 0 으로 돌리면 원래 음성으로 돌아갑니다. 이미 만든 음성에도 다음 음성 변환·⚡ 만들기 때 적용됩니다.</Hint></div>
                   <div className="col"><div className="crow stack"><span className="l">음량 맞추기</span>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <input type="checkbox" style={{ width: 'auto' }} checked={ch.ttsNormalize !== false}

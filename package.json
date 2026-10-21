@@ -41,6 +41,7 @@
     "test:appfolders": "node test/app-folders.smoke.js",
     "test:makeall": "node test/makeall-dry.smoke.js",
     "test:backup": "node test/gen-backup.test.js && node test/backup-ui.smoke.js",
+    "test:quiet": "node test/quiet-trim.test.js",
     "test:makeupload": "node test/makeall-upload.smoke.js",
     "test:refvoice": "node test/ref-voice.test.js",
     "test:bcja": "node test/backcheck-ja-kana.test.js",
