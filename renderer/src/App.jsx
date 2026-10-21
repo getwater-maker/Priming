@@ -12,6 +12,7 @@ import ClipJoin from '../../core/clip-join.js';
 import FollowT from '../../core/follow-target.js';
 import MenuFollow from '../../core/menu-follow.js';
 import KM from '../../core/kie-models.js';
+import EM from '../../core/engine-migrate.js';
 import BookView from './BookView.jsx';
 import { BookMailConnect } from './BookMail.jsx';
 import RemotionView from './RemotionView.jsx';
@@ -231,13 +232,10 @@ function legacyEngineLabel(v, cfg) {
 }
 function EngineOptions({ kind = 'image', cfg, value = '' }) {
   const isVid = kind === 'video';
-  const wf = comfyWorkflows(cfg).find((w) => (isVid ? MM_R2V_WF_RE : QWEN_LOCAL_WF_RE).test(w.path));
-  const first = wf ? mkComfyVal(isVid, wf.path) : null;   // 이미지 = 로컬 · 비디오 = 클라우드
   const models = isVid ? KM.VIDEO : KM.IMAGE;
-  const known = new Set([first, ...models.map((m) => KM.valOf(m)), isVid ? 'none' : null].filter(Boolean));
+  const known = new Set([...models.map((m) => KM.valOf(m)), isVid ? 'none' : null].filter(Boolean));
   const legacy = value && !known.has(value) ? value : null;
   return (<>
-    {first && <option value={first}>{isVid ? '☁ MiniMax H3 레퍼런스 (R2V)' : '🖥 Qwen-Image 2.1 Turbo (로컬)'}</option>}
     <optgroup label={isVid ? 'AI 영상 (그림 → 영상)' : 'AI 이미지'}>
       {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>☁ {m.label}</option>)}
     </optgroup>
@@ -339,7 +337,17 @@ function phaseBadge(p) {
 //   (렌더러는 require 를 못 쓴다. 테스트가 두 목록의 이름을 대조해 어긋남을 막는다.)
 // 🎬 Grok(구독·API) 비디오 항목은 헤더·채널 목록에서 뺐다(2026-10-07 로이). 예전에 저장된 값(grok·grok10·grok-api·wan)은 「없음(이미지만)」으로 읽는다 —
 //   조용히 다른 유료 엔진(Flow·Veo)으로 넘어가 크레딧을 쓰지 않게.
-const normVideoEngine = (v) => (['grok', 'grok10', 'grok-api', 'wan'].includes(v) ? 'none' : v);
+const normVideoEngine = (v) => EM.migrateVideo(['grok', 'grok10', 'grok-api', 'wan'].includes(v) ? 'none' : v).v;
+// 🔁 ComfyUI·Genspark(옛 순환 rotate 포함)·빈 값 → AI 이미지(v0.9.92 · 로이 2026-10-21 「컴피유아이와 브라우저는 사용하지 않아」 · core/engine-migrate 한 곳 · 비디오도 위 normVideoEngine 이 같은 모듈)
+const normImgEngine = (v) => EM.migrateImage(v).v;
+// ⚙ 설정 탭(v0.9.92) — 판매자(owner) = 🔑 API 키 · 🖧 서버 · 📺 · 📁 · 👤 / 회원 = 🔑 · 📺 · 📁 · 👤 · 🎛 ComfyUI·🌐 브라우저 탭은 뺐다(로이 2026-10-21)
+// 🪙 회원 포인트로 AI 이미지·영상을 대신 부르는 서버 대행이 붙었는가 — 붙으면 true 로(회원 🔑 API 키 맨 위 안내 문구가 바뀐다 · v0.9.92)
+const KIE_PROXY_READY = false;
+const SETTINGS_TABS = (owner) => [['keys', '🔑 API 키'], ...(owner ? [['server', '🖧 서버']] : []), ['yt', '📺 채널 연결'], ['folders', '📁 폴더'], ['account', '👤 계정']];
+const SETTINGS_TAB_ALIAS = (tab, owner) => {
+  const t = ({ comfy: 'server', img: 'server', vid: 'server', tts: 'server', flow: 'keys', free: 'keys', acct: 'keys' })[tab] || tab || 'keys';
+  return SETTINGS_TABS(owner).some(([id]) => id === t) ? t : 'keys';
+};
 const SCRIPT_STYLE_ID = '__script__';   // 📜 이미지 스타일 목록의 「대본스타일」 — main.js 의 SCRIPT_STYLE_ID 와 같은 값
 const GS_VIDEO_MODELS = [
   { name: '모델 자동 선택', note: 'Genspark 이 고름 — 참조 이미지를 쓸지 알 수 없음', imgRef: null },
@@ -611,7 +619,7 @@ export default function App() {
   const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('comfy'); // 'comfy[::경로]'(기본 = 활성 워크플로) | 'kie:<모델>'(v0.9.66) | 옛 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
+  const [imgEngine, setImgEngine] = useState(EM.IMG_DEFAULT); // 'kie:<모델>'(v0.9.66 · 기본 = AI 이미지 Qwen-Image 2.1 · v0.9.92) | 옛 'comfy[::경로]' | 옛 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
   const [videoEngine, setVideoEngine] = useState('none'); // 비디오 제작 도구 — 기본 「없음(이미지만)」
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -737,7 +745,7 @@ export default function App() {
       🪙 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
   })() : null;
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
-  const [settingsTab, setSettingsTab] = useState('comfy');   // 'comfy'(이미지·비디오·TTS 서버) | 'flow' | 'keys' | 'yt' | 'folders'(📁 공통 폴더 · v0.9.16)  (v0.7.40 — 옛 img·vid·tts → comfy · free·acct → flow)
+  const [settingsTab, setSettingsTab] = useState('keys');   // SETTINGS_TABS 의 id — 'keys' | 'server'(판매자) | 'yt' | 'folders' | 'account' (v0.9.92 · 옛 comfy·flow 는 SETTINGS_TAB_ALIAS)
   const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
   // 👤 계정 탭 — {genspark|flow|grok: {dailyCap, accounts:[{id,label,used,creds,login}]}}
   const [acct, setAcct] = useState(null);
@@ -1104,7 +1112,7 @@ export default function App() {
         // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 레거시값은 정규화.
         //   옛 'rotate'(순환) → 'genspark'. 드롭다운이 Flow·Genspark 로 분리됐고(2026-08-26), 고른 쪽을
         //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
-        if (p.imgEngine != null) setImgEngine(p.imgEngine === 'rotate' ? 'genspark' : p.imgEngine);
+        if (p.imgEngine != null) setImgEngine(normImgEngine(p.imgEngine));
         if (p.videoEngine != null) setVideoEngine(normVideoEngine(p.videoEngine));
         if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
         setVidSel(normVidSel(p.vidSel) || 'intro');   // 🎬 채널에 등록한 영상 대상 방식(없으면 도입부 전체)
@@ -1245,7 +1253,7 @@ export default function App() {
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
     // comfy(z-image/Krea2)·gemini·genspark·flow 는 유효 — 보존. 옛 'rotate' 만 genspark 로 이관.
-    if (s.imgEngine != null) setImgEngine(s.imgEngine === 'rotate' ? 'genspark' : s.imgEngine);
+    if (s.imgEngine != null) setImgEngine(normImgEngine(s.imgEngine));
     // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
     if (s.videoEngine != null) setVideoEngine(normVideoEngine(s.videoEngine));
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
@@ -3569,7 +3577,7 @@ export default function App() {
       ttsTargetDb: p.ttsTargetDb != null ? p.ttsTargetDb : -15,
       styleLong: p.styleLong || p.styleId || 'chibi',
       styleThumb: p.styleThumb || '',   // 🖼 썸네일용 화풍 — 비우면 롱폼 것을 쓴다(대시보드가 그렇게 읽는다)
-      imgEngine: p.imgEngine || 'comfy', videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
+      imgEngine: normImgEngine(p.imgEngine), videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
       vidSel: normVidSel(p.vidSel),            // 🎬 영상 대상 방식(채널 기본값) — ⚠ 아래 저장 patch 에도 실을 것
       outLong: p.outLong || p.outputFolder || '',
@@ -4068,7 +4076,7 @@ export default function App() {
       ttsTargetDb: numOr(ch.ttsTargetDb, -15),
       styleLong: ch.styleLong,
       styleThumb: ch.styleThumb || '',
-      imgEngine: ch.imgEngine || 'comfy', videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
+      imgEngine: normImgEngine(ch.imgEngine), videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       vidSel: normVidSel(ch.vidSel),            // 🎬 영상 대상 방식 — ⚠ 마찬가지
       outLong: (ch.outLong || '').trim(),
@@ -5444,16 +5452,13 @@ export default function App() {
   function probeBoth(kind) { probeComfyTarget(kind, "local"); probeComfyTarget(kind, "cloud"); }
   // 지금 고른 엔진에 맞는 설정 탭 — 옛 「② 이미지」 줄 ⚙ 가 쓰던 판정을 그대로 가져왔다(그 버튼은 제거).
   function settingsTabForEngine() {
-    if (KM.isKieVal(imgEngine) || KM.isKieVal(videoEngine)) return 'keys';   // 🧩 kie 키는 🔑 API 키 탭(회원도 자기 키를 넣는다 · v0.9.76)
-    if (isComfyEngine(imgEngine) || isComfyEngine(videoEngine)) return 'comfy';
-    if (imgEngine === 'gemini' || imgEngine === 'gemini-batch') return 'keys';
-    return 'flow';
+    return 'keys';   // 🧩 AI 이미지·영상·나노바나나 모두 🔑 API 키 탭(ComfyUI·브라우저 탭은 v0.9.92 에 뺐다)
   }
   async function openSettings(tab) {
-    // 옛 탭 이름(img·vid·tts·free·acct)으로 부르는 곳이 많아 여기서 한 번에 새 탭으로 옮긴다
-    const tabId = ({ img: 'comfy', vid: 'comfy', tts: 'comfy', free: 'flow', acct: 'flow' })[tab] || tab || 'comfy';
+    // 옛 탭 이름으로 부르는 곳이 많아 여기서 한 번에 새 탭으로 옮긴다 — 🎛 ComfyUI·🌐 브라우저 탭은 v0.9.92 에 뺐다(로이 2026-10-21)
+    //   음성 서버 주소·영상 업스케일은 판매자 전용 「🖧 서버」 탭으로 옮겼다 · 회원은 🔑 API 키로
+    const tabId = SETTINGS_TAB_ALIAS(tab, owner);
     setSettingsTab(tabId);
-    if (tab === 'acct') setAcctOpen(true);
     // 🌐 브라우저 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
     try { setImgRot(await api.getImageRotation()); } catch (_) {}
     try { setLora(await api.getLoraCollect()); } catch (_) {}
@@ -5475,9 +5480,6 @@ export default function App() {
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
     try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
     // ⚙ 를 열면 로컬·클라우드 양쪽을 바로 찔러 본다 — "로컬이 꺼져 있는데 로컬로 보내고 있었다"를 미리 안다.
-    setComfyProbe({}); setCvidProbe({});
-    if (tabId === 'comfy') { probeBoth('image'); probeBoth('video'); }
-    if (tab === 'acct') { await loadAcct(); }
     setSettingsOpen(true);
   }
   async function openComfy() { return openSettings('comfy'); }
@@ -5541,7 +5543,7 @@ export default function App() {
   const r2vN = ((dto && dto.projects) || []).reduce((a, pj) => a + ((pj.cuts || []).filter((c) => R2V_HEAD_RE.test(c.videoPrompt || '')).length), 0);
   const r2vBad = r2vN > 0 && !isMmVideoVal(comfySelectValue(videoEngine, cvidCfg));
   async function onPickVideoEngine(val) {
-    if (r2vN > 0 && !isMmVideoVal(val)) setStatus(`⚠ 이 대본에 R2V 꼴 🎬 장면이 ${r2vN}개 있습니다 — 이 엔진은 인물 시트를 쓰지 않고 🎬 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요`);
+    if (r2vN > 0 && !isMmVideoVal(val)) setStatus(`⚠ 이 대본에 R2V 꼴 🎬 장면이 ${r2vN}개 있습니다 — 이 비디오 도구는 인물 시트를 받지 않아 🎬 글만 넣습니다`);
     return pickComfy(val, setVideoEngine, cvidCfg, saveCvidCfg, 'vid');
   }
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
@@ -6102,7 +6104,7 @@ export default function App() {
             {menu === 'image' && (<>
           <span className="hgroup">
             <span className="glabel">② 이미지</span>
-            <select data-testid="img-engine" title="이미지 도구 — 🖥 Qwen-Image 2.1 Turbo(내 PC) 또는 ☁ AI 이미지 모델"
+            <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
               <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
@@ -6141,7 +6143,7 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
-              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 엔진은 시트를 쓰지 않고 글만 넣습니다. 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요.\n\n` : '') + '비디오 도구 — ☁ MiniMax H3 레퍼런스(그림 + 인물 시트 R2V) 또는 ☁ AI 영상 모델(그룹 그림에서 영상)'}
+              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 비디오 도구는 인물 시트를 받지 않아 글만 넣습니다.\n\n` : '') + '비디오 도구 — ☁ AI 영상 모델(그룹 그림에서 영상)'}
               value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
             </select>
@@ -6923,9 +6925,9 @@ export default function App() {
                   <div className="col">
                     <div className="crow stack"><span className="l">이미지</span>
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
-                      <select value={comfySelectValue(ch.imgEngine || 'comfy', comfyCfg)}
+                      <select value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(ch.imgEngine || 'comfy', comfyCfg)} />
+                        <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
@@ -7260,157 +7262,11 @@ export default function App() {
           <div className="modal-card wide settings-card">
             <div className="st-head"><h3>⚙ 설정</h3><button className="ghost st-x" title="닫기 (Esc)" onClick={() => setSettingsOpen(false)}>✕</button></div>
             <div className="st-tabs">
-              {[['comfy', '🎛 ComfyUI'], ['flow', '🌐 브라우저'], ['keys', '🔑 API 키'], ['yt', '📺 채널 연결'], ['folders', '📁 폴더'], ['account', '👤 계정']].map(([id, lbl]) => (
-                <button key={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'flow' && acctOpen) loadAcct(); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); if (id === 'comfy') { setComfyProbe({}); probeBoth('image'); setCvidProbe({}); probeBoth('video'); } }}>{lbl}</button>
+              {SETTINGS_TABS(owner).map(([id, lbl]) => (
+                <button key={id} data-tab={id} className={settingsTab === id ? 'on' : ''} onClick={() => { setSettingsTab(id); setSettingsMsg(''); if (id === 'yt') ytLoad(); if (id === 'folders') loadAppFolders(); }}>{lbl}</button>
               ))}
             </div>
             <div className="st-body">
-
-            {/* ☁/🖥 보기(v0.9.38 · 로이 「ComfyUI 설정이 복잡하다」) — **보이는 칸만** 고른다. 실제로 보낼 곳은 여전히 헤더 드롭다운 하나
-                (2026-08-20 「두 곳에서 같은 값을 만지지 않는다」 결정 유지 · 저장 키 불변 · 숨긴 칸의 값은 그대로 남는다). 기본 = 이미지가 지금 쓰는 쪽. */}
-            {settingsTab === 'comfy' && comfyCfg && (() => {
-              const v = comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud');
-              return (<div className="comfy-view" data-testid="comfy-view">
-                <span className="meta">보기</span>
-                {[['cloud', '☁ 클라우드'], ['local', '🖥 로컬(내 PC)']].map(([k, lbl]) => (
-                  <button key={k} data-view={k} className={v === k ? 'on' : ''} onClick={() => setComfyView(k)}>{lbl}</button>))}
-                <Hint>고른 쪽에 필요한 칸만 보입니다(나머지는 숨김 — 지워지지 않습니다). <b>실제로 만들 곳과 모델은 헤더 「② 이미지」·「③ 비디오」 드롭다운</b>에서 고릅니다. 클라우드만 쓰는 PC(GPU 없음)는 ☁ 만 보면 됩니다.</Hint>
-              </div>);
-            })()}
-            {settingsTab === 'comfy' && comfyCfg && (<div data-sec="img">
-              <ComfyTargets cfg={comfyCfg} setCfg={setComfyCfg} save={saveComfyCfg} kind="image" title="🖼 이미지" view={comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')}
-                probes={comfyProbe} onProbe={(side, over) => probeComfyTarget("image", side, over)} />
-              <Hint>어느 모델로 만들지는 <b>헤더 「② 이미지」 드롭다운</b>에서 고릅니다. ComfyUI 에서 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하면 그 드롭다운에 나타납니다. 동시 생성은 앱 고정입니다 — <b>클라우드 2장</b>(3장 이상은 검정·노이즈 이미지가 실측으로 나와 상한 2) · <b>로컬 1장</b>(VRAM).</Hint>
-              <WorkflowManageRow cfg={comfyCfg} kind="image" onAdd={pickComfyWf} onRemove={removeComfyWf} side={comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')} />
-              <div className="copts">
-              {(comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')) === 'local' && (
-                <div className="frow"><label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.charRefs !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, charRefs: v }); saveComfyCfg({ charRefs: v }); }} /> 👤 인물 일관성(Qwen)
-                </label>
-                <Hint>Qwen-Image 2.1 Turbo(로컬) 전용 — 대본 인물 카드로 얼굴 시트를 한 번 만들어 <b>&lt;출력&gt;/characters/&lt;이름&gt;.face.png</b> 에 두고, 샷 크기(close-up·medium shot)가 적힌 인물 장면에만 참조로 붙입니다. 원경·군중·어린 인물·카드와 나이가 크게 다른 장면은 붙이지 않습니다.</Hint></div>)}
-              <details className="comfy-adv" data-testid="comfy-adv-img"><summary>⚙ 고급</summary>
-                <div className="frow"><label>프롬프트 노드</label>
-                  <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
-                    onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
-                <div className="frow"><label>타임아웃(초)</label>
-                  <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
-                    onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
-                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                    <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
-                  </label></div>
-              </details>
-              </div>
-              <Hint>{(comfyView || (comfyCfg.cloud === false ? 'local' : 'cloud')) === 'cloud'
-                ? <>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>만 있으면 됩니다(모델 설치 불필요).</>
-                : <>로컬은 내 PC ComfyUI 에 워크플로가 쓰는 모델이 설치돼 있어야 합니다.</>}</Hint>
-            </div>)}
-
-            {settingsTab === 'comfy' && cvidCfg && (<div data-sec="vid">
-              <ComfyTargets cfg={cvidCfg} setCfg={setCvidCfg} save={saveCvidCfg} kind="video" title="🎬 비디오" view={comfyView || ((comfyCfg || cvidCfg).cloud === false ? 'local' : 'cloud')}
-                probes={cvidProbe} onProbe={(side, over) => probeComfyTarget("video", side, over)} />
-              <Hint>그룹 이미지를 올려 <b>이미지→비디오</b>로 만듭니다. 어느 모델로 만들지는 <b>헤더 「③ 비디오」 드롭다운</b>에서 고릅니다. 직접 만든 i2v 워크플로는 <b>「저장(API 포맷)」</b> JSON 을 <b>＋추가</b>로 등록합니다(<b>Load Image → start_image</b> 연결 필요 — 없으면 앱이 자동 주입을 시도). 동시 생성은 앱 고정입니다 — <b>클라우드 3개</b>(건당 수 분이라 동시에 돌려야 빨라집니다 · 총 크레딧은 같음) · <b>로컬 1개</b>(VRAM).</Hint>
-              <WorkflowManageRow cfg={cvidCfg} kind="video" onAdd={pickCvidWf} onRemove={removeCvidWf} side={comfyView || ((comfyCfg || cvidCfg).cloud === false ? 'local' : 'cloud')} />
-              <div className="copts">
-              <div className="frow"><label>최대 길이(초)</label>
-                <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8}
-                  onChange={(e) => setCvidCfg({ ...cvidCfg, videoMaxSec: e.target.value })} onBlur={() => saveCvidCfg({ videoMaxSec: Math.max(0, parseInt(cvidCfg.videoMaxSec, 10) || 0) })} />
-                <Hint>영상 한 개의 최대 길이입니다(0 = 제한 없음 · 음성 길이 그대로). 클라우드는 길이가 곧 GPU 시간·크레딧이라 짧을수록 아낍니다.</Hint></div>
-              <details className="comfy-adv" data-testid="comfy-adv-vid"><summary>⚙ 고급</summary>
-                <div className="frow"><label>fps</label>
-                  <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
-                    onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
-                  <label style={{ width: 'auto' }}>타임아웃(초)</label>
-                  <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
-                    onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
-                <div className="frow"><label>프롬프트 노드</label>
-                  <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
-                    onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
-                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                    <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
-                  </label></div>
-              </details>
-              </div>
-              {/* ⬆ 영상 업스케일 — Grok(720p) 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
-                  🔴 2026-08-26 아내 PC: NVIDIA GPU 가 없어 Real-ESRGAN 이 영상 하나에 수십 분 걸렸다. */}
-              <div className="frow" style={{ alignItems: "center", marginTop: 6, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
-                <label style={{ flex: "0 0 auto", minWidth: 110 }}>영상 업스케일</label>
-                <select style={{ flex: "0 0 auto", width: "auto" }} value={(upCfg && upCfg.mode) || "auto"}
-                  title="저해상도 영상(Grok 720p 등)을 1080p 로 키우는 방식. 이미 1080p 이상이면 어느 방식이든 자동으로 건너뜁니다."
-                  onChange={(e) => saveUpCfg({ mode: e.target.value })}>
-                  <option value="auto">자동 (AI로 시작 · 너무 느리면 빠름으로)</option>
-                  <option value="ai">AI 고정 (Real-ESRGAN · 화질 우선 · GPU 필요)</option>
-                  <option value="fast">빠름 고정 (ffmpeg · 몇 초 · 화질 낮음)</option>
-                  <option value="off">끔 (원본 해상도 그대로)</option>
-                </select>
-              </div>
-              <Hint>⬆ <b>이미 1920x1080 이상인 영상은 어느 방식이든 건너뜁니다</b>(☁ LTX2.5 는 1920x1088 로 나옵니다). Grok(720p)처럼 낮을 때만 동작합니다. <b>AI(Real-ESRGAN)는 프레임을 한 장씩 확대</b>해서 15초 영상이 361프레임 — <b>GPU 가 없는 PC 에서는 수십 분</b>이 걸립니다. 「자동」은 한 영상이 5분을 넘으면 남은 영상을 빠른 방식으로 낮춥니다.<br /><br />클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬(🖥)은 <b>그 PC ComfyUI 에 LTX2.5 모델 파일</b>(unet <code>ltx-2.5-22b-*</code> · clip <code>gemma4-12b-with-proj-ltx-2.5-*</code> · vae <code>ltx-2.5-*-vae-*</code>)이 설치돼 있어야 합니다. ⚠ LTX2.5 는 <b>22B</b> — RTX 3060(12GB)에서는 시스템 RAM 으로 넘겨 매우 느리거나 실패할 수 있습니다(모델이 없으면 오류에 그 서버의 파일 목록이 함께 나옵니다). i2v는 그룹 이미지가 있어야 동작합니다.</Hint>
-            </div>)}
-
-            {/* 🌐 브라우저 이미지 — Flow·Genspark(브라우저) 설정 + LoRA 수집.
-                2026-08-26: 옛 「⚙ 이미지 순환」 모달을 없애고 이 탭으로 옮겼다. 드롭다운이 Flow·Genspark 로
-                분리됐고(2026-10-02부터 이어받기도 없다) 순서/체크는 필요 없다 — 고른 쪽만 돈다. */}
-            {settingsTab === 'flow' && (<div>
-              {/* ⬇ 폴백 브라우저 — Chrome 실행이 실패했을 때 앱이 쓰는 대체 브라우저(옛 계정 탭에서 옮김 · v0.7.40).
-                  🔴 터미널에서 npx playwright install 을 돌리면 엉뚱한 버전이 깔린다 — 이 버튼은 앱 안의 playwright CLI 로 돌려 버전이 맞는다. */}
-              <div className="frow" style={{ alignItems: 'center', marginBottom: 6 }}>
-                <button className="ghost" style={{ flex: '0 0 auto' }} disabled={browserBusy} onClick={installBrowser}
-                  title="앱에 맞는 판의 Chromium 을 내려받습니다(수백 MB). ⚠ 터미널에서 npx playwright install 을 돌리면 버전이 어긋나 소용없습니다.">
-                  {browserBusy ? '⏳ 설치 중…' : '⬇ 브라우저 설치'}</button>
-                <Hint>브라우저 자동화(Genspark)는 <b>정식 Chrome</b> 을 씁니다. 실행이 실패하면 앱이 프로필을 정리해 한 번 더 시도하고, 그래도 안 되면 <b>대체 Chromium</b> 으로 넘어갑니다. 그게 없다는 오류가 나오면 이 버튼을 누르세요.</Hint>
-              </div>
-              {/* 🗑 Flow(이미지·Veo 비디오)는 v0.9.67 에 지웠다(로이 2026-10-17 「flow 는 더이상 필요없어」) — 이 탭엔 브라우저 설치·Genspark·계정만 남는다 */}
-              <div className="frow" style={{ alignItems: 'center' }}>
-                <button className="ghost" style={{ flex: '0 0 auto' }} title="Genspark·Grok 계정 추가·로그인·일일한도" onClick={() => { setSettingsMsg(''); if (!acctOpen) loadAcct(); setAcctOpen((o) => !o); }}>👤 계정 관리 {acctOpen ? '▴' : '▾'}</button>
-              </div>
-              <div className="frow" style={{ alignItems: 'center', marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 비디오 모델</label>
-                <select style={{ flex: '1 1 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max'}
-                  title="Genspark 비디오를 어느 모델로 만들지. 모델마다 길이·해상도·비용이 다릅니다. 괄호 안이 그 모델의 규격입니다."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
-                  {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name}>{m.name} — {m.note}</option>)}
-                </select>
-              </div>
-              {(() => {
-                const cur = (imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max';
-                const m = GS_VIDEO_MODELS.find((x) => x.name === cur);
-                if (!m || m.imgRef === true) return null;
-                return (
-                  <div className="meta" style={{ marginTop: 6, padding: '6px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontWeight: 700 }}>
-                    {m.imgRef === false
-                      ? <>⛔ 「{cur}」 은 <b>참조 이미지를 받지 않습니다</b> — 그룹 이미지를 첨부해도 무시되고 <b>화풍과 무관한 영상(실사)</b>이 나옵니다. 이 모델로는 <b>비디오를 만들지 않습니다</b>(크레딧 낭비 방지). 위에서 <b>이미지 장수가 적힌 모델</b>을 고르세요.</>
-                      : <>⚠ 「{cur}」 이 참조 이미지를 쓰는지 알 수 없습니다 — 결과 화풍을 확인하세요.</>}
-                  </div>
-                );
-              })()}
-              <div className="frow" style={{ alignItems: 'center', marginTop: 6 }}>
-                <label style={{ flex: '0 0 auto', minWidth: 120 }}>Genspark 품질 등급</label>
-                <select style={{ flex: '0 0 auto', width: 'auto' }} value={(imgRot && imgRot.gensparkVideoTier) || 'Standard'}
-                  title="Standard / Ultra. Ultra 는 더 강한 모델 조합이지만 크레딧을 더 씁니다."
-                  onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoTier: e.target.value })}>
-                  <option value="Standard">Standard</option>
-                  <option value="Ultra">Ultra — 더 강함(크레딧 더 씀)</option>
-                </select>
-              </div>
-              <Hint>🎬 <b>Genspark 비디오</b>는 헤더 「③ 비디오」에서 <b>Genspark</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만듭니다(i2v). 첨부가 실패하면 <b>그 컷을 만들지 않습니다</b> — 원본과 무관한 영상에 크레딧을 쓰지 않기 위해서입니다.<br />🔑 <b>어느 모델이 좋은지는 써 보고 정하세요.</b> 길이는 그룹 TTS 길이로 요청하고, <b>모델이 받아 주는 범위로 앱이 맞춥니다</b>(예: Omni Flash 3~10초 · Seedance 2.5 4~30초 · Veo 3.1 은 4·6·8초만). ⚠ <b>720p 모델</b>(Omni Flash·Kling V3 등)은 이 PC GPU 업스케일이 붙어 영상당 수 분이 더 걸립니다 — 1080p 모델을 고르면 그 단계가 생략됩니다.<br />⚠ Genspark 비디오는 <b>이미지 순환과 같은 크롬</b>을 쓰므로 둘이 동시에 돌지 않습니다(순서대로 처리됩니다).<br /><br />🎬 <b>Flow 비디오</b>는 헤더 「③ 비디오」에서 <b>Flow · Veo</b>를 고르면 씁니다. 그룹 이미지를 <b>시작 프레임</b>으로 넣어 만들므로 화풍이 유지됩니다(t2v 가 아닙니다). ⚠ Flow 화면에 <b>길이 옵션이 없어</b> Veo 가 정하는 길이(약 8초)로 나옵니다 — 그룹 TTS 가 더 길면 .vrew 에서 뒷부분은 이미지가 채웁니다.<br />🔑 <b>프레임</b>은 그 그림이 <b>첫 프레임으로 고정</b>돼 원본을 그대로 움직입니다(화풍 유지에 안전). <b>애셋</b>은 <b>참조</b>로만 전달돼 Veo 가 새로 그리므로 <b>구도·인물이 달라질 수 있습니다</b> — 캐릭터나 분위기만 참고시키고 싶을 때 쓰세요.<br />🔑 <b>다운로드 1080p</b>: Flow 는 재생 소스로 <b>720p 원본</b>만 주고, 1080p 는 카드 메뉴의 <b>다운로드 → 1080p(업스케일)</b> 로만 받을 수 있습니다. 이걸로 받으면 이 PC 의 <b>GPU 업스케일(장당 수 분)이 통째로 생략</b>됩니다.<br /><br />⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</Hint>
-              {lora && (
-                <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 10 }}>
-                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
-                    <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
-                    📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
-                  </label>
-                  <Hint>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 학습 오염을 막으려고 수집하지 않습니다.</Hint>
-                  <div className="frow" style={{ marginTop: 6, alignItems: 'center' }}>
-                    <label style={{ flex: '0 0 auto' }}>트리거</label>
-                    <input style={{ flex: '0 0 auto', width: 130 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
-                    <span className="meta" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lora.dir}>📁 {lora.dir}</span>
-                  </div>
-                  <div className="mbtns" style={{ marginTop: 6 }}>
-                    <button className="ghost" onClick={pickLoraDir}>폴더 변경</button>
-                    <button className="ghost" onClick={() => api.openLoraFolder()}>📂 데이터셋 열기</button>
-                  </div>
-                </div>
-              )}
-            </div>)}
 
             {settingsTab === 'keys' && (<div>
               <div className="frow" style={{ margin: '0 0 10px', alignItems: 'center' }}>
@@ -7419,9 +7275,20 @@ export default function App() {
               </div>
               {/* 🧩 kie.ai(유료 · v0.9.66) — 헤더 ② 이미지 · ③ 비디오의 「kie」 항목이 이 키로 만든다 · secret-store 'kie' · 원문은 다시 보이지 않는다(끝 4자리만) */}
               {/* v0.9.76 — 회원도 자기 kie 키를 넣는다(kie 지원팀 2026-10-18 허용 · 키는 kie.ai 에서 받으므로 이 칸에는 서비스 이름이 보인다 — 목록·로그의 이름 숨김은 그대로) */}
+              {/* 🪙 회원 화면(v0.9.92 · 로이 2026-10-21 「회원의 api키 화면과 판매자의 api키 화면이 달라야」) — AI 이미지·영상은 판매자가 산 포인트로 쓴다.
+                  ⚠ 회원 대신 부르는 서버 대행(docs/요청서_wise-priming-kie대행.md)이 붙기 전에는 내 키가 있어야 만들어진다 → KIE_PROXY_READY 가 문구를 가른다 */}
+              {!owner && (<div data-testid="member-ai-card" className="kp-card">
+                <div className="kp-line">
+                  <b className="kp-name">🪙 AI 이미지 · 영상 = 포인트</b>
+                  <span className="kp-state">{points ? `남은 ${Number(points.remaining || 0).toLocaleString()} pt` : '남은 0 pt'}</span>
+                </div>
+                <div className="meta" style={{ marginTop: 2 }}>{KIE_PROXY_READY
+                  ? <>헤더 「② 이미지」·「③ 비디오」의 ☁ AI 모델은 <b>포인트</b>로 만듭니다 — 키를 넣지 않아도 됩니다. 아래에 <b>내 키</b>를 넣으면 포인트 대신 내 키로 만듭니다.</>
+                  : <>포인트로 만드는 기능은 <b>준비 중</b>입니다. 그때까지는 아래 <b>내 키</b>를 넣으면 ☁ AI 모델로 만들 수 있습니다.</>}</div>
+              </div>)}
               <div data-testid="kie-key" className="kp-card">
                 <div className="kp-line">
-                  <b className="kp-name">🧩 kie.ai (이미지 · 비디오)</b>
+                  <b className="kp-name">{owner ? '🧩 kie.ai (이미지 · 비디오 · 회원 포인트의 원천)' : '🧩 내 kie.ai 키 (선택)'}</b>
                   <Hint>kie.ai → API Key 에서 만든 키입니다. 헤더 「② 이미지」·「③ 비디오」에서 <b>kie</b> 항목을 고르면 이 키로 만듭니다. 충전한 크레딧에서 쓴 만큼 빠지고, 실패한 작업은 빠지지 않습니다. 「✔ 검증」은 남은 크레딧만 조회해 요금이 들지 않습니다.</Hint>
                   <span className="kp-state" style={{ color: kieKey.info.has ? '#16a34a' : '#b45309' }}>{kieKey.info.has ? `🔑 저장됨(…${kieKey.info.tail})` : '🔑 없음'}</span>
                   <button className="ghost" style={{ flex: '0 0 auto', marginLeft: 'auto' }} title="키 발급 페이지" onClick={() => api.kieOpenKey()}>발급 ↗</button>
@@ -7436,8 +7303,9 @@ export default function App() {
                 {keyChkMark('kie')}
                 {kieKey.msg && <div className="meta" style={{ marginTop: 4, fontWeight: 600 }}>{kieKey.msg}</div>}
               </div>
-              {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치) */}
-              <div className="kp-card">
+              {/* 🍌 유료 나노바나나2 (Gemini) — 한 줄: 이름 · 비율 전송 · 인물 일관성 · ⓘ / 다음 줄: 키 입력 · 검증 · 모델 (v0.7.40 · 로이 배치)
+                  v0.9.92 — 판매자 화면에만(이미지 목록에서 빠진 옛 도구 · 회원에겐 보이지 않는다) */}
+              {owner && <div className="kp-card" data-testid="gemini-image-key">
                 <div className="kp-line">
                   <b className="kp-name">🍌 유료 나노바나나 2.1 (Gemini)</b>
                   {giCfg && (<>
@@ -7466,7 +7334,7 @@ export default function App() {
                   </>)}
                 </div>
                 {keyChkMark('gemini-image')}
-              </div>
+              </div>}
               {/* 🤖 Claude API(유료 · v0.7.93) — secret-store 'claude' · 원문은 다시 보이지 않는다(끝 4자리만) */}
               <div data-testid="claude-key" className="kp-card">
                 <div className="kp-line">
@@ -7570,82 +7438,6 @@ export default function App() {
               </div>
             </div>)}
 
-            {settingsTab === 'flow' && acctOpen && (<div className="st-sec">
-              <div className="subhead">👤 계정 (Genspark · Grok)</div>
-              
-              <Hint>
-                브라우저 자동화 계정입니다. <b>계정 1개 = 브라우저 프로필 1개</b> — <b>🔑 로그인</b>으로 한 번 로그인하면
-                그 프로필에 쿠키가 남아 <b>한동안 다시 로그인하지 않아도</b> 됩니다(X 는 보통 몇 달).
-                아이디·비밀번호를 저장해 두면 로그인 창에서 <b>자동 입력</b>됩니다.
-              <br /><br />
-                ⚠ 완전 자동 로그인은 <b>구조적으로 불가능</b>합니다 — 구글은 자동화 브라우저의 비밀번호 로그인을
-                차단하고(“이 브라우저 또는 앱은 안전하지 않을 수 있습니다”), X 는 CAPTCHA·2단계 인증을 요구합니다.
-                그 화면이 나오면 앱이 <b>거기서 멈추고 창을 열어 둡니다</b> — 직접 마무리한 뒤 [로그인 완료]를 누르세요.
-                반복 실패는 계정 잠금으로 이어질 수 있어 <b>재시도하지 않습니다</b>.
-              </Hint>
-              {!credsOk && (
-                <div className="meta" style={{ marginBottom: 8, color: '#b03a3a' }}>
-                  ⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 <b>비밀번호를 저장하지 않습니다</b>
-                  (평문으로 몰래 남기지 않는 정책). 🔑 로그인에서 직접 입력하세요.
-                </div>
-              )}
-              {!acct && <div className="meta">불러오는 중…</div>}
-              {acct && ACCT_SVCS.map((s) => {
-                const d = acct[s.id] || { accounts: [] };
-                return (
-                  <div key={s.id} style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
-                    <div className="frow" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-                      <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>{s.icon} {s.name}</label>
-                      <Hint>{s.note}</Hint>
-                      <label style={{ width: 'auto' }}>일일 한도</label>
-                      <input className="n" type="number" min="0" style={{ width: 64 }} value={d.dailyCap != null ? d.dailyCap : 0}
-                        onChange={(e) => acctDo(s.id, 'cap', e.target.value)} />
-                      <span className="meta">0=무제한</span>
-                    </div>
-                    {(d.accounts || []).map((a) => {
-                      const st = acctLoginLabel(a);
-                      const ku = `${s.id}:${a.id}:u`;
-                      const kp = `${s.id}:${a.id}:p`;
-                      const hasPw = !!(a.creds && a.creds.hasPassword);
-                      return (
-                        <div key={a.id} style={{ borderTop: '1px dashed var(--line)', padding: '6px 0 4px' }}>
-                          <div className="frow" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                            <input defaultValue={a.label} onBlur={(e) => acctDo(s.id, 'ren', a.id, e.target.value)}
-                              title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 110px', fontWeight: 700 }} />
-                            <span className="meta">오늘 {a.used}/{d.dailyCap > 0 ? d.dailyCap : '무제한'}</span>
-                            <span className="meta" style={{ color: st.c, fontWeight: 600 }}>{st.t}</span>
-                            <span style={{ flex: 1 }} />
-                            <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => acctLogin(s.id, a.id)}>🔑 로그인</button>
-                            {a.id !== 'default' && (
-                              <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => acctRemove(s.id, a.id, a.label)}>✕</button>
-                            )}
-                          </div>
-                          <div className="frow" style={{ alignItems: 'center', flexWrap: 'wrap', marginTop: 2 }}>
-                            <input placeholder="아이디 / 이메일" style={{ flex: 1, minWidth: 140 }}
-                              value={acctEdit[ku] !== undefined ? acctEdit[ku] : ((a.creds && a.creds.username) || '')}
-                              onChange={(e) => setAcctEdit((v) => ({ ...v, [ku]: e.target.value }))} />
-                            <input type="password" placeholder={hasPw ? '비밀번호 (저장됨 — 바꿀 때만)' : '비밀번호'}
-                              style={{ flex: 1, minWidth: 140 }} value={acctEdit[kp] || ''}
-                              onChange={(e) => setAcctEdit((v) => ({ ...v, [kp]: e.target.value }))} />
-                            <button className="ghost" style={{ flex: '0 0 auto' }} disabled={!credsOk}
-                              onClick={() => acctSaveCreds(s.id, a.id)}>💾 저장</button>
-                            {(hasPw || (a.creds && a.creds.username)) && (
-                              <button className="ghost" style={{ flex: '0 0 auto' }} title="저장된 아이디·비밀번호 삭제"
-                                onClick={() => acctClearCreds(s.id, a.id)}>🔒 지우기</button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="frow" style={{ marginTop: 6 }}>
-                      <button onClick={() => acctAdd(s.id)}>+ 계정 추가</button>
-                      <Hint>계정을 추가하면 <b>별도 브라우저 프로필</b>이 생깁니다 — 그 창에서 로그인한 계정이 곧 그 프로필의 계정입니다.</Hint>
-                    </div>
-                  </div>
-                );
-              })}
-              <Hint>⚠ 여러 계정으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로 쓰세요.</Hint>
-            </div>)}
             {settingsTab === 'yt' && (<div>
               <Hint>
                 🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>(채널 편집에서 ⏰ 예약을 켜면 예약 공개)로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
@@ -7741,7 +7533,8 @@ export default function App() {
               <Hint>🖼 로그 상자의 「썸네일」 탭이 이 폴더에서 지금 대본의 <b>[약칭_MMDD]</b> 로 시작하는 그림 3장을 찾습니다(채널 폴더 한 단계 아래까지). 일치하는 파일이 없으면 지정 폴더 바로 안의 일반 이미지 3장을 이름순으로 보여 줍니다. 첫 칸에는 선택한 이미지 스타일을 표시합니다.</Hint>
               <Hint>입력 후 칸 밖을 클릭하거나 「찾기」로 고르면 바로 저장됩니다.</Hint>
             </div>)}
-            {settingsTab === 'comfy' && (<div>
+            {settingsTab === 'server' && owner && (<div data-testid="server-tab">
+              {/* 🖧 판매자 전용(v0.9.92) — 옛 🎛 ComfyUI 탭 아래에 있던 음성 서버 주소 + 영상 업스케일만 옮겼다(ComfyUI·브라우저 칸은 뺐다) */}
               <div className="subhead">🖧 TTS 서버</div>
               <Hint>
                 OmniVoice 는 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
@@ -7758,6 +7551,21 @@ export default function App() {
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={testVdSrv}>연결테스트</button></div>
               <Hint>보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.
                 {' '}메인 PC 에서는 <b>비워 두면</b> 창을 열 때 자동으로 서버가 켜집니다.<br /><br />입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</Hint>
+              <div className="subhead" style={{ marginTop: 12 }}>🎞 영상</div>
+              {/* ⬆ 영상 업스케일 — Grok(720p) 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
+                  🔴 2026-08-26 아내 PC: NVIDIA GPU 가 없어 Real-ESRGAN 이 영상 하나에 수십 분 걸렸다. */}
+              <div className="frow" style={{ alignItems: "center", marginTop: 6, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+                <label style={{ flex: "0 0 auto", minWidth: 110 }}>영상 업스케일</label>
+                <select style={{ flex: "0 0 auto", width: "auto" }} value={(upCfg && upCfg.mode) || "auto"}
+                  title="저해상도 영상(Grok 720p 등)을 1080p 로 키우는 방식. 이미 1080p 이상이면 어느 방식이든 자동으로 건너뜁니다."
+                  onChange={(e) => saveUpCfg({ mode: e.target.value })}>
+                  <option value="auto">자동 (AI로 시작 · 너무 느리면 빠름으로)</option>
+                  <option value="ai">AI 고정 (Real-ESRGAN · 화질 우선 · GPU 필요)</option>
+                  <option value="fast">빠름 고정 (ffmpeg · 몇 초 · 화질 낮음)</option>
+                  <option value="off">끔 (원본 해상도 그대로)</option>
+                </select>
+              </div>
+              <Hint>⬆ <b>이미 1920x1080 이상인 영상은 어느 방식이든 건너뜁니다</b>(AI 영상은 대개 720p 라 이 단계를 거칩니다). <b>AI(Real-ESRGAN)는 프레임을 한 장씩 확대</b>해서 15초 영상이 361프레임 — <b>GPU 가 없는 PC 에서는 수십 분</b>이 걸립니다. 「자동」은 한 영상이 5분을 넘으면 남은 영상을 빠른 방식으로 낮춥니다.</Hint>
             </div>)}
 
             </div>{/* /st-body */}

@@ -31,6 +31,32 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const lv = await win.locator('[data-testid=keychk-gemini-image]').getAttribute('data-level');
     ok(lv === 'bad', '엉터리 키 → ❌ 거부로 표시 — ' + (await win.locator('[data-testid=keychk-gemini-image]').innerText()));
     await box.fill(had);   // 되돌림(저장 안 됨)
+
+    // ── v0.9.92 판매자/회원 화면(로이 2026-10-21) — 판매자 = 개발 실행(회원 확인 없음 = owner) ──
+    const tabs = async () => (await win.locator('.st-tabs button').allInnerTexts()).map((t) => t.trim());
+    let t = await tabs();
+    ok(JSON.stringify(t) === JSON.stringify(['🔑 API 키', '🖧 서버', '📺 채널 연결', '📁 폴더', '👤 계정']), '판매자 탭 = API 키·서버·채널 연결·폴더·계정 — ' + t.join(' · '));
+    ok(await win.locator('[data-testid=member-ai-card]').count() === 0, '판매자 화면엔 회원 포인트 안내가 없다');
+    await win.click('.st-tabs button[data-tab=server]');
+    const srv = win.locator('[data-testid=server-tab]'); await srv.waitFor({ timeout: 5000 });
+    const st = await srv.innerText();
+    ok(/OmniVoice/.test(st) && /영상 업스케일/.test(st) && !/ComfyUI|LTX2\.5|워크플로/.test(st), '🖧 서버 탭 = TTS 서버 + 영상 업스케일만(ComfyUI 칸 없음)');
+    await win.click('.st-x');
+
+    // ── 회원 = license-state 를 회원 응답으로 바꾸고 다시 읽기 ──
+    await app.evaluate(({ ipcMain }) => {
+      const m = { ok: true, enforced: true, owner: false, admin: false, email: 'member@example.com', points: { granted: 100, remaining: 40 } };
+      for (const n of ['license-state', 'license-recheck']) { ipcMain.removeHandler(n); ipcMain.handle(n, () => m); }
+    });
+    await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
+    await win.click('button[title^="통합 설정"]');
+    await win.waitForSelector('[data-testid=keychk-all]', { timeout: 10000 });
+    t = await tabs();
+    ok(JSON.stringify(t) === JSON.stringify(['🔑 API 키', '📺 채널 연결', '📁 폴더', '👤 계정']), '회원 탭 = API 키·채널 연결·폴더·계정 — ' + t.join(' · '));
+    ok(await win.locator('[data-testid=member-ai-card]').count() === 1 && /남은 40 pt/.test(await win.locator('[data-testid=member-ai-card]').innerText()), '회원 🔑 맨 위 = 🪙 포인트 안내(남은 40 pt)');
+    ok(/내 kie\.ai 키/.test(await win.locator('[data-testid=kie-key]').innerText()), '회원 kie 칸 = 「내 키 (선택)」');
+    ok(await win.locator('[data-testid=gemini-image-key]').count() === 0, '회원에겐 나노바나나 칸이 없다');
+    ok(await win.locator('[data-testid=claude-key]').count() === 1 && await win.locator('[data-testid=tts-keys]').count() === 1, '회원도 Claude·TTS 키 칸은 있다');
   } finally { await app.close(); }
   console.log(`\n${fail ? '❌' : '✅'} api-key-ui — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);

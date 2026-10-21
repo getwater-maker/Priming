@@ -126,7 +126,8 @@
 - 😮‍💨 **문장 앞 들숨 = OmniVoice provider 의 `muteLeadBreath` 한 곳**(v0.9.20 · 길이 불변 · 정적 30ms 기준 · 캐시 키 `lb` 와 짝) — 상세 [TTS](docs/규칙/TTS.md).
 
 ### 이미지
-- 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(첫 항목 = 🖥 Qwen 2.1 로컬 / ☁ MiniMax R2V · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
+- 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(= AI 모델만 + 비디오 「없음」 · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
+- 🔁 **ComfyUI·Genspark 는 더 쓰지 않는다(로이 2026-10-21 · v0.9.92)** — 옛 도구 값(`comfy`·`comfy::…`·`genspark`·`rotate`·이미지 빈 값)은 **`core/engine-migrate` 한 곳**이 AI 이미지(`kie:qwen-2-1`)·AI 영상(`kie:minimax-h3`)으로 바꾼다: 채널 저장소(`preset-store.loadAll` 이 바꿔 저장 → main 시작 때 로그) · 화면(`normImgEngine`·`normVideoEngine`) · 제작 입구(`runRotatingImages`·`_genGroupVideosCore`·`runMakeAllBody`) · ⛔ 비디오 「없음」·빈 값은 바꾸지 않는다(조용히 유료 영상을 켜지 않게) · 엔진 코드(`comfy-*`·`genspark-engine`)는 남겼다 · `test:engmig`.
 - 🙈 **사용자 화면에 서비스 이름(kie)·달러 가격을 보이지 않는다**(로이 2026-10-17 — 판매용) — 목록 묶음은 「AI 이미지」·「AI 영상」, 항목은 `☁ 모델 이름` · 로그·오류도 「AI 이미지/영상」·「생성 서비스」 · 🔑 **kie 키 칸은 회원에게도 연다**(v0.9.76 · 로이 2026-10-18 — kie 지원팀이 「회원이 자기 키를 앱에 넣는 것」·「우리 백엔드·키로 대신 호출하고 포인트로 과금」을 허용 · 키를 kie.ai 에서 받으므로 **그 칸에는 서비스 이름이 보인다** — 목록·로그의 이름·달러 숨김은 그대로) · 포인트 정책 정본 = [`docs/회원제-설계.md`](docs/회원제-설계.md) §7-3 · 서버 대행 요청서 `docs/요청서_wise-priming-kie대행.md`(`test:ribbonlead`).
 - 📐 **좁은 창(≤1300px) 규칙은 `styles.css` 맨 끝 「v0.9.73」 블록 한 곳** — ② 칸 최소 폭·헤더 `.lbl`·리본 촘촘히를 다른 곳에 따로 두지 말 것(1075px 에서 헤더·리본·#body 가로 넘침 0 이 기준 · 헤더 버튼 글자는 `<span className="lbl">` 로 감싸면 좁을 때 아이콘만).
 - 📐 **리본 첫 칸(📂 열기 · 이미지 도구 · 비디오 도구)은 메뉴를 바꿔도 같은 x** — 줄 첫 이름표 폭 고정(styles.css `.ribbon > .hgroup:first-child > .glabel`) · 도구 선택은 이름표 바로 뒤 · `test:ribbonlead`.
@@ -147,7 +148,7 @@
 - Genspark 한도 메시지의 재설정 시각을 파싱해 계정 쿨다운(침묵 정체 3연속 = 추정 30분). 배지 = 리본 capbar 맨 앞.
 
 ### 비디오
-- 엔진(🔴 Grok 구독·API 는 v0.7.38 에 목록에서 뺐다 — 옛 저장값은 「없음」으로 읽는다): **☁ ComfyUI LTX2.5(주력 · 1920x1088 직접 생성 → 업스케일 생략)** · ☁/🖥 MiniMax H3 레퍼런스 · 🖥 LTX2.3 · Grok(브라우저) · Grok API · Flow·Veo · Genspark · 없음. 드롭다운은 **헤더 + 채널편집 두 곳이 같은 `EngineOptions`**(v0.9.66 — 목록 = ☁ MiniMax H3 R2V → 🧩 kie 비디오 → 없음 · Flow·Genspark·LTX 는 목록에서만 뺐다 · 엔진 추가는 `core/kie-models` 표에).
+- 엔진(🔴 Grok 구독·API 는 v0.7.38 에 목록에서 뺐다 — 옛 저장값은 「없음」으로 읽는다): **☁ ComfyUI LTX2.5(주력 · 1920x1088 직접 생성 → 업스케일 생략)** · ☁/🖥 MiniMax H3 레퍼런스 · 🖥 LTX2.3 · Grok(브라우저) · Grok API · Flow·Veo · Genspark · 없음. 드롭다운은 **헤더 + 채널편집 두 곳이 같은 `EngineOptions`**(v0.9.92 — 목록 = ☁ AI 영상 → 없음 · ComfyUI(MiniMax R2V·LTX)·Genspark 는 목록에서 뺐다 — 위 🔁 · 엔진 추가는 `core/kie-models` 표에).
 - 대상 = 영상 범위 안에서 **이미지 있고 영상 없는** 그룹(이어받기). 직전에 `autoRelinkVideos`(폴더에 남은 `NN_1080.mp4`/`NN.mp4` 다시 잇기, `videoCleared` 는 제외).
 - 업스케일은 해상도를 재서 목표 이상이면 생략, **못 재면 건너뛴다(fail-closed)**, `upscale` 전용 레인, auto 모드는 한 영상 5분 넘으면 ffmpeg 로 강등.
 - 영상이 TTS 보다 짧으면 `video-fit`(≤1.3배 느리게 / 넘으면 반복+크로스페이드, 결과는 캐시 폴더 · 원본 불변). 🔴 **맞출 길이가 90초 넘으면 파일을 늘리지 않고 Vrew 반복 재생**(`endBehavior:'loop'`) — 18분짜리를 구워 Vrew 가 응답없음이 된 사고.
@@ -200,7 +201,8 @@
 > ⚙ **채널 프리셋·채널 편집 창·⚙ 설정 팝업·API 키·이미지 스타일·목소리 분류·계정을 고치기 전에 [`docs/규칙/채널설정.md`](docs/규칙/채널설정.md) 를 먼저 읽는다**(2026-10-09 원문 그대로 옮김).
 - 🧩 **채널 편집 창 = 5탭(채널·기본·음성·자막·제작 도구·폴더에서 기본+음성을 합침 · 탭 id `basic`)** — 칸은 균등 카드 `.eqgrid`(`--n`), 탭마다 본문 490px 안·스크롤 없음(v0.9.84 · `speaker-ui.smoke` 가 높이 검사).
 - 🔒 자격증명은 `safeStorage` 암호화(평문 저장 거부 · 렌더러로 비밀번호를 돌려주지 않는다) · API 키 원문을 로그·메시지에 싣지 않는다 · 키 검증은 `core/api-key-check.js` 한 곳(**읽기 전용·무료 GET 만** — 새 유료 키도 여기에) · 자동 로그인은 1회 시도 후 CAPTCHA/2FA 면 사람에게.
-- 새 설정 칸은 ⚙ 설정 탭(ComfyUI · 🌐 브라우저(옛 Flow 탭 — Genspark·계정·브라우저 설치) · API 키 · 유튜브)에, 설명글은 `<Hint>` 로 · 채널 편집 「자막·분할」 탭은 스크롤 없이 한 화면 · ⛔ 채널 이름 유사도 자동 매칭 금지 · 채널 목록은 파일 순서 그대로(`srv:` 참조음성은 정규화에서 지우지 않는다) · 목소리 분류는 `tts/voice-tags.js` 한 곳(서버 공유).
+- ⚙ **설정 탭 = 판매자 🔑 API 키 · 🖧 서버(TTS 서버 주소·영상 업스케일) · 📺 · 📁 · 👤 / 회원 = 🔑 · 📺 · 📁 · 👤**(v0.9.92 · `SETTINGS_TABS(owner)`·옛 탭 이름은 `SETTINGS_TAB_ALIAS` 한 곳 · 🎛 ComfyUI·🌐 브라우저 탭은 뺐다) · 회원 🔑 = 맨 위 🪙 포인트 안내 + 「내 kie.ai 키(선택)」 · Claude · 스톡 · TTS(나노바나나 칸은 판매자만) · 서버 대행이 붙으면 `KIE_PROXY_READY` 를 true 로(`test:keys`).
+- 새 설정 칸은 ⚙ 설정 탭에, 설명글은 `<Hint>` 로 · 채널 편집 「자막·분할」 탭은 스크롤 없이 한 화면 · ⛔ 채널 이름 유사도 자동 매칭 금지 · 채널 목록은 파일 순서 그대로(`srv:` 참조음성은 정규화에서 지우지 않는다) · 목소리 분류는 `tts/voice-tags.js` 한 곳(서버 공유).
 - 🎬 **밖으로 나가는 로그에 YouTube 에서 받은 값(채널 이름·영상 제목·재생목록 이름·영상 ID)을 싣지 않는다**(v0.9.69 · `log-scrub.scrubYouTube` — 새 유튜브 로그 줄은 이름·제목을 「」 로 감쌀 것 · 구글 심사 방침 문장의 근거).
 - 🔄 **앱 안 업데이트 단추(헤더 ⟳) = 시작 때와 같은 `light-updater.applyUpdates` 한 곳**(v0.7.9) — 작업 중(`_awake.n`)·개발 실행·새 버전 아님이면 적용하지 않고, 파일을 바꾼 뒤에만 다시 시작한다. 업데이트 방식을 바꾸면 시작 경로와 단추 경로를 함께 본다(`test:update`). 앱 이름 클릭은 고정 주소(`open-tube-site`) 하나만 연다.
 
@@ -272,7 +274,7 @@
 ## 10. 로이 확정 결정 (⛔ 다시 꺼내지 말 것)
 
 - 모드는 롱폼/리모션/출판. 쇼츠·플리·ACE-Step 생성 제거(2026-08-22). 내부 이름(`shortsNum`·`shortsDirs`·`~/.shots-maker`)은 유지.
-- Flow 는 삭제(2026-10-17). 모델 파일명 `krea2Int4Convrot…` 바꾸지 않음(int4 는 로컬 전용).
+- Flow 는 삭제(2026-10-17). **ComfyUI·Genspark(브라우저)도 쓰지 않는다**(2026-10-21 — 목록·설정 탭에서 뺐다 · 옛 값은 AI 이미지·AI 영상). 모델 파일명 `krea2Int4Convrot…` 바꾸지 않음(int4 는 로컬 전용).
 - 비디오 로컬 항목 유지(여유 있을 때 MiniMax turbo4). 기본 비디오 = ☁ LTX2.5. LTX2.5 t2v 도입 안 함(파트너 과금·대본 비호환).
 - TTS = OmniVoice 유지(CosyVoice3 A/B 기각 · 3~4배 느림). 품질 설정 축소 금지.
 - 그룹 영상 음소거 유지(내레이션과 겹침) — 삽입 영상만 소리.

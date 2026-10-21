@@ -461,6 +461,8 @@ app.whenReady().then(() => {
       try { await syncVoiceTags(); } catch {}    // 🏷 목소리 태그도(v0.7.36)
       // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
       try { exportChannelStyles(); } catch {}
+      // 🔁 채널의 옛 ComfyUI·Genspark 도구 → AI 이미지·AI 영상(v0.9.92 · 바꾼 것은 preset-store 가 저장 · 여기서 로그)
+      try { const PS = require('./tts/preset-store'); PS.loadAll(); _logEngineMigrations(PS.takeEngineMigrations()); } catch {}
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
       //   로이가 잊어도 앱이 먼저 말한다(2026-08-22 요청: "몇 주 데이터가 쌓이면 나에게도 알려줘").
       try {
@@ -4611,10 +4613,25 @@ function _warnR2vEngine(pr, onlyNums, videoEngine) {
     if (!gs.length) return;
     let mm = false;
     if (isComfyVal(videoEngine)) { const CV = require('./core/comfy-video'); const cfg = CV.loadConfig(); mm = new CV.ComfyVideo({ ...cfg, workflowPath: comfyWfOf(videoEngine) || cfg.workflowPath }).isMiniMaxRef(); }
-    if (!mm) log(`⚠ 🎬 R2V 꼴 장면 ${gs.length}개(${gs.slice(0, 8).map((g) => 'G' + g.num).join('·')}${gs.length > 8 ? '…' : ''}) — 지금 비디오 엔진은 MiniMax H3 레퍼런스가 아니라 인물 시트 없이 🎬 글만 넣습니다 · ③ 비디오에서 「☁ MiniMax H3 레퍼런스 (R2V)」를 고르세요`);
+    if (!mm) log(`⚠ 🎬 R2V 꼴 장면 ${gs.length}개(${gs.slice(0, 8).map((g) => 'G' + g.num).join('·')}${gs.length > 8 ? '…' : ''}) — 지금 비디오 도구는 인물 시트를 받지 않아 🎬 글만 넣습니다`);
   } catch (_) {}
 }
+// 🔁 ComfyUI·Genspark 를 쓰지 않는다(로이 2026-10-21 · v0.9.92) — 옛 값이 제작 입구까지 오면 AI 이미지·AI 영상으로 바꾸고 알린다(판정은 core/engine-migrate 한 곳)
+function _logEngineMigrations(list) {
+  for (const c of (list || [])) log(`🔁 채널 「${c.name}」 ${c.kind} 도구: ${c.from} → ${require('./core/engine-migrate').toLabel(c.to)} (ComfyUI·Genspark 는 더 쓰지 않습니다)`);
+}
+function _migImg(v, logger) {
+  const EM = require('./core/engine-migrate'); const m = EM.migrateImage(v);
+  if (m.from && m.from !== '빈 값') (logger || log)(`🔁 이미지 도구 ${m.from} → ${EM.toLabel(m.v)} (ComfyUI·Genspark 는 더 쓰지 않습니다 — 헤더 「② 이미지」에서 바꿀 수 있습니다)`);
+  return m.v;
+}
+function _migVid(v, logger) {
+  const EM = require('./core/engine-migrate'); const m = EM.migrateVideo(v);
+  if (m.from) (logger || log)(`🔁 비디오 도구 ${m.from} → ${EM.toLabel(m.v)} (ComfyUI·Genspark 는 더 쓰지 않습니다 — 헤더 「③ 비디오」에서 바꿀 수 있습니다)`);
+  return m.v;
+}
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
+  videoEngine = _migVid(videoEngine);
   _warnR2vEngine(pr, onlyNums, videoEngine);
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (require('./core/kie-models').isKieVal(videoEngine)) { await runKieVideos(pr, mediaDir, onlyNums, videoEngine); return {}; }
@@ -4647,6 +4664,7 @@ function imgEngineReady(engineId) {
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
+  startEngine = _migImg(startEngine, logger);
   { const nC = require('./core/visual-span').markCovered(project, hasVisual); if (nC && !onlyNums) (logger || log)(`🖼 앞 그룹 그림이 아래층으로 이어지는 그룹 ${nC}개는 따로 그림을 만들지 않습니다`); }
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   // 🌙 배치 항목 — 그룹 하나만 다시 만들 때(onlyNums)는 몇 분을 기다리게 하지 않고 즉시 생성으로 대신한다.
@@ -7665,8 +7683,10 @@ async function runMakeAllBody(opts = {}) {
   //   이 함수 안에서 이름·제목·대본 경로가 필요한 곳은 전부 runCtx 를 넘긴다(test:runctx 가 센다).
   const scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
   if (!opts.dry && !(await royGate(parsed, { queue: !!opts._fromQueue, what: '만들기' }))) return;   // 🟥 미확인 경험(큐 = 던져서 그 편 실패·다음 편 계속)
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null, uploadAfter = null } = opts;
+  const { shortsNum = null, engine: _engineArg = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine: _videoArg = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null, uploadAfter = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
+  // 🔁 옛 ComfyUI·Genspark 값 → AI 이미지·AI 영상(v0.9.92) — 아래 레인·파이프라인 판정이 바뀐 값을 보게 맨 앞에서
+  const engine = _migImg(_engineArg), videoEngine = _migVid(_videoArg);
   if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
