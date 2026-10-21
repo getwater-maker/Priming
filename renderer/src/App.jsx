@@ -4776,7 +4776,7 @@ export default function App() {
     }
   }
   // 편 문장 번호 a 부터 b 앞까지 음성 길이 합(초) — 미리보기에서 삽입 소리의 이어 틀 위치
-  function secBetween(pr, a, b) { let o = 0, t = 0; for (const x of pr.cuts) for (const se of (x.sentences || [])) { o++; if (o >= a && o < b) t += se.dur || 2.5; } return t; }
+  function secBetween(pr, a, b) { let o = 0, t = 0; for (const x of pr.cuts) for (const se of (x.sentences || [])) { o++; if (o >= a && o < b) t += sentSpan(se); } return t; }
   function ordOf(pr, cut, si) { let o = 0; for (const x of pr.cuts) { if (x.num === cut.num) return o + si + 1; o += (x.sentences || []).length; } return 0; }
   // start = { si, li } — 이 그룹의 si 번째 문장 · li 번째 자막 줄(클립)부터(🧭 Space = 커서 클립부터 · v0.5.59)
   async function playCut(c, info, sn, start) {
@@ -4827,6 +4827,16 @@ export default function App() {
       }
       if (stale(_g)) return;
       await stepCaptions(clips.length ? clips : [''], dur * 1000, s, sn != null && c.sentences && c.sentences.length ? { shortsNum: sn, groupNum: c.num, sentIdx: si } : null, first ? li0 : 0, _prP ? { c, pr: _prP, si } : null);
+      // ⏸ 막간 쉼 — .vrew 는 이 문장 음성 뒤에 무음을 덧댄다(pausePlanOf) → 미리보기도 그만큼 쉰다(자막은 지운다 — MP4 가 그 구간 자막을 가린다)
+      if (s.audio && s.pz > 0) {
+        if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
+        const capEl = stageCapRef.current;
+        if (capEl) capEl.style.visibility = 'hidden';
+        try {
+          const until = Date.now() + s.pz * 1000;
+          while (Date.now() < until) { if (stale(_g)) return; await new Promise((r) => setTimeout(r, 100)); }
+        } finally { if (capEl) capEl.style.visibility = ''; }   // 멈춰도 자막이 숨은 채로 남지 않게
+      }
     }
   }
   async function playProjects(projs, blackBetween, key, start) {
@@ -5750,7 +5760,7 @@ export default function App() {
     const ci = cursorInfo(); if (!ci) return null;
     let tot = 0, miss = 0, before = 0, ord = 0, myOrd = ci.l.sentIdx + 1;
     for (let i = 0; i < ci.l.ci; i++) myOrd += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
-    for (const cu of ci.pr.cuts) for (const se of (cu.sentences || [])) { ord++; const d = se.dur > 0 ? se.dur : (miss++, 2.5); if (ord < myOrd) before += d; tot += d; }
+    for (const cu of ci.pr.cuts) for (const se of (cu.sentences || [])) { ord++; if (!(se.dur > 0)) miss++; const d = sentSpan(se); if (ord < myOrd) before += d; tot += d; }   // ⏸ 막간 쉼 포함(출력과 같은 시각)
     return { cur: ci.l.start != null ? ci.l.start : before, tot, miss, dur: ci.l.dur > 0 ? ci.l.dur : 2.5, key: ci.l.n };
   })();
   // 🎚 재생 막대로 옮기기 — 그 시각이 든 자막 줄(시작 ≤ 시각 중 마지막)로 커서 · 재생 중이면 그 줄부터 다시 재생. 음성이 없는 문장은 2.5초 어림(시계와 같다)
@@ -5758,7 +5768,7 @@ export default function App() {
     const ci = cursorInfo(); if (!ci) return;
     const sn = ci.pr.shortsNum; const PL = linesMap.get(sn); if (!PL) return;
     const sStart = new Map(); let acc = 0;
-    for (const cu of ci.pr.cuts) (cu.sentences || []).forEach((se, si) => { sStart.set(cu.num + ':' + si, acc); acc += se.dur > 0 ? se.dur : 2.5; });
+    for (const cu of ci.pr.cuts) (cu.sentences || []).forEach((se, si) => { sStart.set(cu.num + ':' + si, acc); acc += sentSpan(se); });
     let pick = PL.list[0] || null;
     for (const l of PL.list) { const st = l.start != null ? l.start : (sStart.get(l.groupNum + ':' + l.sentIdx) || 0); if (st <= sec + 1e-6) pick = l; else break; }
     if (!pick) return;
@@ -8181,6 +8191,8 @@ function queueBadges(it, makeProg, stageRun) {
   if (up) out.push(up);
   return out;
 }
+// ⏸ 문장 하나가 타임라인에서 차지하는 길이 — 음성(없으면 2.5초 어림) + 막간 쉼(pz · 음성이 있을 때만 · core/pipeline toDTO = .vrew 빌드와 같은 값)
+function sentSpan(se) { const d = se && se.dur > 0 ? Number(se.dur) : 2.5; return d + (se && se.dur > 0 && se.pz > 0 ? Number(se.pz) : 0); }
 function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, onBackup }) {
   const running = items.some((it) => it.run && it.run.startedAt && !it.run.endedAt);
   const [, setTick] = useState(0);
@@ -8334,7 +8346,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
         const visSig = JSON.stringify([(pr.cuts || []).map((x) => [x.num, x.imagePath, x.imageVersion, x.videoPath, x.videoVersion, x.span, x.look, x.imageStatus, x.videoStatus]), pr.overlays || null, (pr.overlays || []).length && _PL ? _PL.list.length : 0]);   // 줄 수는 삽입(범위 표시)이 있을 때만
         // ⏱ 편 문장 번호(1부터) → 시작 초(음성 길이 누적 — .vrew 와 같다) · 없으면 2.5초로 어림
         const sStart = [0, 0];
-        for (const c0 of pr.cuts) for (const se of (c0.sentences || [])) sStart.push(sStart[sStart.length - 1] + (se.dur || 2.5));
+        for (const c0 of pr.cuts) for (const se of (c0.sentences || [])) sStart.push(sStart[sStart.length - 1] + sentSpan(se));
         // ⚡ 그룹 열쇠 — 이 그룹 모양에 영향을 주는 값 전부(하나라도 바뀌면 다시 그린다)
         const cutKey = (pr0, c, gs, sig, PL) => {
           const sn = pr0.shortsNum, ss = c.sentences || [], ge = gs + ss.length - 1;
@@ -8499,7 +8511,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                           const insHere = !vrewLay && onInsMark ? insMarksAt(pr, _pl && _pl.list, l.n) : [];
                           // 📜 이 문장에서 뜨는 화면 카드(v0.9.25 · 문장 첫 줄에만) — 시작 = 종류 · +N 이어짐 = 옅은 📜… · ⏸ = 끝 문장 뒤 쉼(칸 쉼= > 채널 막간 쉼)
                           const cm = li === 0 && s.card ? s.card : null;
-                          const cmPause = cm && cm.last ? (cm.pause != null ? cm.pause : (cm.interlude ? (cardPause || 0) : 0)) : 0;
+                          const cmPause = cm && cm.last ? (s.pz > 0 ? s.pz : (cm.pause != null ? cm.pause : (cm.interlude ? (cardPause || 0) : 0))) : 0;   // ⏸ 음성이 있으면 출력과 같은 값(s.pz) · 음성 전엔 대본·채널 값으로 어림
                           const cardMark = cm ? (
                             <span className={'card-mark' + (cm.role === 'cont' ? ' cont' : '')} data-testid="card-mark" data-role={cm.role}
                               title={cm.tip + (cm.role === 'cont' ? '\n(앞 문장에서 이어지는 카드 — 이 문장 동안에도 떠 있음)' : '') + (cmPause > 0 ? `\n⏸ 이 문장 소리가 끝난 뒤 ${cmPause}초 쉼 — 그동안 카드만 보이고 자막은 없음` : '') + '\n🎬 유튜브 MP4 에만 나옵니다'}>
@@ -8553,7 +8565,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                     <span className={'clip-spk' + (vt ? ' own' : s.speaker ? '' : ' narr') + (onClipVoice ? ' click' : '')} data-testid="clip-spk" role={onClipVoice ? 'button' : undefined}
                                       title={(vt ? `이 대본의 ${s.speaker ? `화자 「${s.speaker}」` : '내레이션'} 목소리: ${vt}` : s.speaker ? `화자 「${s.speaker}」 — 채널 화자 목소리(⚙ 채널편집 → 🎙 음성) 또는 내레이션 목소리` : '채널 기본 목소리') + (onClipVoice ? `\n누르면 🔊 음성 설정 — 이 대본의 ${s.speaker ? `「${s.speaker}」 클립 모두` : '내레이션 클립 모두'}` : '')}
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
-                                    {!vrewLay && tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                    {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (
@@ -8604,7 +8616,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                         </div>
                                       );
                                     })()}
-                                    {tm && <span className="clip-time" title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 — .vrew 와 같다)">{tm}</span>}
+                                    {tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                   </div>
                                 )}
                                 {/* ✂ 클립 사이 호버 막대(v0.7.72 · 브루 — 클립 사이에 마우스를 가져가면 「＋ 클립 추가」 와 화살표 단추 · 화살표에 마우스를 올리면 「그룹 나누기」 로 펼쳐진다) */}
@@ -8647,7 +8659,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                       {vrewLay && (() => {
                         // 🎬 그룹 머리줄 = Vrew 의 「씬」 머리줄(v0.5.59 · 로이) — ⌄ 접기 · G번호 · 제목 · 그룹 단추 · 시작 시각 + 길이
                         const fk = pr.shortsNum + ':' + c.num, fo = folded.has(fk);
-                        const t0 = sStart[gs] || 0, dur = c.groupDurationSec || 0;
+                        const t0 = sStart[gs] || 0, dur = (c.groupDurationSec || 0) + (c.groupPauseSec || 0);
                         const head = fmtClipTime(t0, 1).replace(/ \+ .*$/, '');
                         return (
                           <div className={'scene-h' + (c.isIntro ? ' intro' : '')} data-testid="scene-h">

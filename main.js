@@ -9286,6 +9286,13 @@ function ensureRoyMarks(parsed, force = false) {
   }
 }
 P.setRoyHook((parsed) => ensureRoyMarks(parsed));
+// ⏸ 화면 DTO 의 문장별 막간 쉼(Lab · 차이표 #12) — 그 편이 든 큐 항목의 채널로 본 pausePlanOf(.vrew 빌드와 같은 계산)
+P.setPauseHook((pr) => {
+  let presetName = null;
+  for (const m of ['longform']) for (const it of ((S.modes[m] && S.modes[m].items) || [])) if (it.parsed && (it.parsed.projects || []).includes(pr)) presetName = (it.settings && it.settings.presetName) || null;
+  const preset = presetName ? resolvePreset(presetName) : S.preset;
+  return P.pausePlanOf(pr, preset).map;
+});
 /** 미확인 🟥 개수(렌더·TTS 관문) — open = 미확인 전체(떨어진 표시 포함) · lostOpen = 그중 문단을 못 찾은 것 */
 function royOpenInfo(parsed) {
   try { ensureRoyMarks(parsed); } catch (_) { return { open: 0, lostOpen: 0 }; }

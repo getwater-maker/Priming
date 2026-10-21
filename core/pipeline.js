@@ -64,6 +64,10 @@ function parseScriptText(text, mode = 'longform', thresholds = {}) {
 //   DTO 를 만들 때마다 부르되 main 쪽이 (.md 수정 시각 + 문장 id) 로 캐시한다 · 실패해도 DTO 는 만든다(fail-open — 색만 빠진다).
 let _royHook = null;
 function setRoyHook(fn) { _royHook = typeof fn === 'function' ? fn : null; }
+// ⏸ 막간 쉼 훅(Lab · 차이표 #12) — main 이 「그 대본 채널로 본 pausePlanOf(pr, preset).map」을 준다.
+//   화면(② 클립 시각·① 시계·재생)이 출력(.vrew 빌드)과 **같은 계산**으로 쉼을 알게 한다 — 화면에서 쉼 규칙을 다시 만들지 않는다.
+let _pauseHook = null;
+function setPauseHook(fn) { _pauseHook = typeof fn === 'function' ? fn : null; }
 function toDTO(parseResult) {
   const { fileTitle, meta, projects } = parseResult;
   if (_royHook) { try { _royHook(parseResult); } catch (_) {} }
@@ -85,6 +89,7 @@ function toDTO(parseResult) {
       const _para = pr.readerParas ? require('./script-reader').alignParas(pr.sentences || [], pr.readerParas) : null;
       // 📜 화면 카드 자리(v0.9.25 · ② 클립 칸 왼쪽 표시) — 대본 카드 줄이 가리킨 문장 · 못 찾은 줄은 cardBad
       const _cm = (Array.isArray(pr.screenCards) && pr.screenCards.length) ? (() => { try { return require('./screen-cards').marksBySentence(pr, pr.screenCards); } catch (_) { return null; } })() : null;
+      const _pz = (_pauseHook && Array.isArray(pr.screenCards) && pr.screenCards.length) ? (() => { try { return _pauseHook(pr) || null; } catch (_) { return null; } })() : null;   // ⏸ 문장 id → 쉼(초)
       return {
         shortsNum: pr.shortsNum,   // 편 주소 키(롱폼=1 고정) — 스냅샷·IPC 호환을 위해 이름 유지
         title: pr.title,
@@ -127,6 +132,7 @@ function toDTO(parseResult) {
               audio: s.ttsAudioPath || null,
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
+              pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
               card: (_cm && _cm.bySid.get(s.id)) || null,   // 📜 이 문장에서 뜨는 화면 카드 {label, role:start|cont, last, tip, pause, interlude}
@@ -139,6 +145,7 @@ function toDTO(parseResult) {
               lines: splitCaptionLines(s.text || '', capChars, s.capBreaks, s.capMarks).map((t) => ({ n: ++capN, text: t })),
             })),
             groupDurationSec: sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0) || null,
+            groupPauseSec: _pz ? (sents.reduce((a, s) => a + (_pz.get(s.id) || 0), 0) || null) : null,   // ⏸ 그룹 안 막간 쉼 합(groupDurationSec 은 음성만 — 옛 뜻 그대로)
             groupGenSec: sents.reduce((a, s) => a + (s.ttsGenSec || 0), 0) || null,
             imagePrompt: g.imagePrompt || '',
             videoPrompt: g.videoPrompt || '',
@@ -1157,7 +1164,7 @@ function sanitize(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-module.exports = { setRoyHook, speakerVoiceMap, nudgePromptForRetry,
+module.exports = { setRoyHook, setPauseHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,

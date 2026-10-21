@@ -50,7 +50,7 @@ export function buildProjLines(pr, capChars) {
         acc += w;
         return o;
       });
-      t0 += dur;
+      t0 += dur + (dur && Number(s.pz) > 0 ? Number(s.pz) : 0);   // ⏸ 막간 쉼(.vrew 가 이 문장 음성 뒤에 덧대는 무음 — DTO pz)
       bySent.set(c.num + ':' + si, lines);
       for (const l of lines) list.push(l);
     });
