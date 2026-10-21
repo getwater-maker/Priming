@@ -8,6 +8,8 @@
 > - 대본은 `D:\Priming-VrewLab-data\scripts` 에 **복사해서** 연다(원본 대본을 열면 Lab 편집이 원본 .md 를 고친다).
 > - E2E·시험도 Lab 홈으로 돌린다(`USERPROFILE=D:\Priming-VrewLab-data\home`). GPU 서버(OmniVoice·ComfyUI)는 원본과 같이 쓴다 — 원본이 제작 중이면 Lab 생성 시험을 하지 않는다.
 > - 원본 결함은 여기서 고치지 않고 원본 세션에 요청서로 넘긴다. Lab 에서 검증된 기능만 원본으로 가져간다.
+> - 🕘 **세대 백업·되살리기 = `core/gen-backup` 한 곳**(작업본 저장 `writeSnapshotSync` 뒤 · 대본 열 때 · 위치 `workspaceDir()/history`) · 🩹 비정상 종료 = `core/session-lock`(안내만 — 빈 화면 시작 불변) · `test:backup`.
+> - ✂ **쉼 줄이기 = `core/quiet-trim` 한 곳**(채널 `quietMaxSec`·`quietEdge` · 원본 음성은 두고 `<번호>_q.wav` 사본 + `s.quiet` · 부르는 곳 `P.quietPass` = fillTtsList 끝 · 4단계·export-vrew 지문보다 먼저) — 길이를 바꾸는 새 음성 처리도 이 길로 · `test:quiet`.
 
 > 이 폴더에서 여는 모든 세션에 통째로 실리는 문서다. **지금 유효한 규칙·금지선·구조만** 둔다.
 > 경위·실측 수치·버전별 기록은 [`docs/작업노트/`](docs/작업노트/) 에 **원문 그대로** 있다(2026-09-26 슬림화 전 CLAUDE.md 전체 = 557,605자).

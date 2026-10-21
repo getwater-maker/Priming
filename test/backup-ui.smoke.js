@@ -23,6 +23,7 @@ fs.mkdirSync(WS, { recursive: true });
 try { fs.rmSync(path.join(WS, 'workspace.json'), { force: true }); } catch {}
 fs.writeFileSync(path.join(WS, 'session.lock'), JSON.stringify({ pid: 999999, version: '0.0.1' }));   // 지난번 비정상 종료 흉내
 
+const outRootOf = async () => (() => { try { const lg = fs.readdirSync(path.join(os.homedir(), '.shots-maker', 'logs')).filter((n) => /^\d{4}-\d\d-\d\d\.log$/.test(n)).sort().pop(); const t = fs.readFileSync(path.join(os.homedir(), '.shots-maker', 'logs', lg), 'utf8'); const m = new RegExp('출력 (.+' + NAME + ')').exec(t); return m ? m[1].trim() : null; } catch { return null; } })();
 (async () => {
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
   try {
@@ -83,6 +84,7 @@ fs.writeFileSync(path.join(WS, 'session.lock'), JSON.stringify({ pid: 999999, ve
     try { const b = fs.readdirSync(HIST).filter((x) => x.startsWith('백업시험_')); for (const x of b) fs.rmSync(path.join(HIST, x), { recursive: true, force: true }); } catch {}
     try { fs.rmSync(T, { recursive: true, force: true }); } catch {}
     try { const pd = path.join(os.homedir(), '.priming-maker', 'projects'); for (const f of fs.readdirSync(pd)) if (f.startsWith(NAME)) fs.rmSync(path.join(pd, f), { force: true }); } catch {}
+    try { const out = await outRootOf(); if (out && path.basename(out).startsWith('백업시험_')) fs.rmSync(out, { recursive: true, force: true }); } catch {}
   }
   console.log(`\n${fail ? '❌' : '✅'} backup-ui ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
