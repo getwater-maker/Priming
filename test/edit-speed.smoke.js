@@ -39,17 +39,19 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForSelector('.sent[data-ln]', { timeout: 20000 });
     lsDetail = await win.evaluate(() => { try { return localStorage.getItem('pm.clipDetail'); } catch (_) { return null; } });
     if (await win.locator('.clipbar button[data-detail="1"]').count()) await win.click('.clipbar button[data-detail="1"]');
-    await win.evaluate(async (name) => { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 40, aiNotice: false, openVrew: false }); }, chan);
+    await win.evaluate(async (name) => { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 40, aiNotice: false, outMode: 'audio', openVrew: false }); }, chan);
     await win.waitForTimeout(800);
     const nLines = await win.evaluate(() => document.querySelectorAll('.sent[data-ln]').length);
     ok(nLines === 24, `클립 24개(8그룹 × 3) — ${nLines}`);
 
-    console.log('\n[1] ⌨ ↓ 로 옮기면 자막 칸이 열린다');
+    console.log('\n[1] ⌨ ↓ = 선택만 · Enter = 고치기 · 고치는 중 ↓ = 칸 채 다음 클립(로이 확정 2026-10-20)');
     await win.locator('.sent[data-ln="1"] .cf-lineno').first().click(); await win.waitForTimeout(200);
     await win.keyboard.press('Escape'); await win.waitForTimeout(150);
     await win.locator('.clipbar').click();
     await win.keyboard.press('ArrowDown'); await win.waitForTimeout(400);
-    ok(await win.evaluate(() => { const t = document.activeElement; return !!(t && t.tagName === 'TEXTAREA' && t.closest('.sent[data-ln="2"]')); }), '↓ → 2번 클립 자막 칸에 커서');
+    ok(await win.evaluate(() => { const c = document.querySelector('.sent.cur'); const t = document.activeElement; return !!c && c.getAttribute('data-ln') === '2' && !(t && t.tagName === 'TEXTAREA') && !document.querySelector('.sent.clip.editing'); }), '↓ → 2번 클립 선택만(자막 칸은 안 열린다)');
+    await win.keyboard.press('Enter'); await win.waitForTimeout(400);
+    ok(await win.evaluate(() => { const t = document.activeElement; return !!(t && t.tagName === 'TEXTAREA' && t.closest('.sent[data-ln="2"]')); }), 'Enter → 2번 클립 자막 칸에 커서');
     await win.keyboard.press('ArrowDown'); await win.waitForTimeout(400);
     ok(await win.evaluate(() => { const t = document.activeElement; return !!(t && t.tagName === 'TEXTAREA' && t.closest('.sent[data-ln="3"]')); }), '칸 안에서 ↓ → 3번 클립 칸(계속 칸 안)');
 
@@ -81,9 +83,9 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(tb.picked.length === 1 && tb.picked[0] === '20', `🔑 20번을 누르면 20번이 골라진다(옛 번호 21 이 아니라) — ${JSON.stringify(tb.picked)}`);
     const txt20 = await win.locator('.sent[data-ln="20"] .clip-cap').first().innerText();
     await win.keyboard.press('Escape'); await win.waitForTimeout(150);
-    await win.locator('.sent[data-ln="20"] .clip-cap').first().click(); await win.waitForTimeout(300);
+    await win.locator('.sent[data-ln="20"] .clip-cap').first().dblclick(); await win.waitForTimeout(300);   // 한 번 클릭 = 선택만 · 더블클릭 = 고치기(2026-10-20)
     const edv = await win.evaluate(() => { const t = document.activeElement; return t && t.tagName === 'TEXTAREA' ? t.value : null; });
-    ok(edv === txt20, `20번 글자를 누르면 그 줄 칸이 열린다(「${edv}」)`);
+    ok(edv === txt20, `20번 글자를 더블클릭하면 그 줄 칸이 열린다(「${edv}」)`);
     await win.keyboard.press('Escape');
 
     ok(errors.length === 0, `화면 오류 0건 ${errors.length ? '— ' + errors.slice(0, 3).join(' | ') : ''}`);

@@ -1980,7 +1980,8 @@ export default function App() {
   function openNewClipEditor(sn, sentIdx) {
     setTimeout(() => {
       const el = document.querySelector('.card[data-pr="' + sn + '"] .sblk[data-ord="' + (sentIdx + 1) + '"] .sblk-lines');
-      if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} window.__pmSelAll = true; el.click(); }
+      // 🔴 el.click() 은 한 번 클릭(detail 0) = 선택만이다(로이 확정 2026-10-20) → 편집이 안 열려 「클립 추가 → 바로 쓰기」가 깨졌다(v0.9.95) — 편집 진입 = 두 번째 클릭(detail 2)으로 보낸다
+      if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} window.__pmSelAll = true; el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, detail: 2 })); }
     }, 350);
   }
   // 🖼🎬 이미지 클립·비디오 클립 — 파일을 고르면 그 클립 뒤에 그 파일을 넣은 새 그룹(main add-media-clip)
@@ -6124,9 +6125,9 @@ export default function App() {
               onChange={(e) => onPickImgEngine(e.target.value)}>
               <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
-            <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
-            <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}>🔁 이미지 프롬프트</button>
-            <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}>{visionBusy ? '⏳ 검수중…' : '🔍 검수'}</button>
+            <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
+            <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
+            <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}><span className="rb-ic">{visionBusy ? '⏳' : '🔍'}</span> <span className="rb-t">{visionBusy ? '검수중…' : '검수'}</span></button>
             <button className="ghost" disabled={!loaded} title="웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 프롬프트 적용(고급)" onClick={() => { setImpText(''); setImpOpen(true); }}>📥</button>
             {/* 🎨 그림 목록 고르개(v0.9.30) — 옛 <select> 자리 · 샘플 그림은 ✎ 편집창에서 그린다 */}
             <StylePicker value={styleId} onChange={setStyleId} styles={styles} samples={styleSamples} scriptId={SCRIPT_STYLE_ID} />
@@ -6134,9 +6135,9 @@ export default function App() {
             {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
               if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
               const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
-              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 대본에 🎨 없음 → 만들 때 선택</span>;
+              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 🎨 없음</span>;   // 짧게 — 리본 1366px 한 줄(v0.9.95) · 설명은 마우스 글
               const hit = scriptStyleHit();
-              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 대본 🎨 「{ssp.id}」 없음 → 만들 때 선택</span>;
+              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 🎨 「{ssp.id}」 없음</span>;
               return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
             {loaded && imgCost && (
@@ -6162,7 +6163,7 @@ export default function App() {
               value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
               <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
             </select>
-            <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}>{impBusy ? '⏳' : '🔁 영상 프롬프트'}</button>
+            <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}><span className="rb-ic">{impBusy ? '⏳' : '🔁'}</span> <span className="rb-t">영상 프롬프트</span></button>
             {loaded && vidCost && (
               <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
                 title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준${vidCost.q ? `\n작업큐 전체 ${vidCost.q.n}편 · 남은 영상 ${vidCost.q.sum}개 합계 ${vidCost.q.txt}(대본마다 자기 범위/방식 기준)${vidCost.q.unk ? ` · ${vidCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>

@@ -129,7 +129,7 @@
 - 🧩 **kie.ai = 이미지·비디오 주력 방향(로이 2026-10-17 「장기적으로 kie 하나로」 · v0.9.66)** — 모델 표·가격은 `core/kie-models` 한 곳(엔진 값 `kie:<id>` · ⛔ id 를 바꾸지 말 것) · 요청은 `core/kie-api` 한 곳(오류도 HTTP 200 → 몸의 code · 402/401 = 멈춤) · 키 secret-store `kie` · ② 이미지·③ 비디오 목록은 헤더·채널 편집 모두 `EngineOptions` 하나(= AI 모델만 + 비디오 「없음」 · 옛 엔진은 저장값일 때만 「(옛 설정)」) · `test:kie`.
 - 🔁 **ComfyUI·Genspark 는 더 쓰지 않는다(로이 2026-10-21 · v0.9.92)** — 옛 도구 값(`comfy`·`comfy::…`·`genspark`·`rotate`·이미지 빈 값)은 **`core/engine-migrate` 한 곳**이 AI 이미지(`kie:qwen-2-1`)·AI 영상(`kie:minimax-h3`)으로 바꾼다: 채널 저장소(`preset-store.loadAll` 이 바꿔 저장 → main 시작 때 로그) · 화면(`normImgEngine`·`normVideoEngine`) · 제작 입구(`runRotatingImages`·`_genGroupVideosCore`·`runMakeAllBody`) · ⛔ 비디오 「없음」·빈 값은 바꾸지 않는다(조용히 유료 영상을 켜지 않게) · 엔진 코드(`comfy-*`·`genspark-engine`)는 남겼다 · `test:engmig`.
 - 🙈 **사용자 화면에 서비스 이름(kie)·달러 가격을 보이지 않는다**(로이 2026-10-17 — 판매용) — 목록 묶음은 「AI 이미지」·「AI 영상」, 항목은 `☁ 모델 이름` · 로그·오류도 「AI 이미지/영상」·「생성 서비스」 · 🔑 **kie 키 칸은 회원에게도 연다**(v0.9.76 · 로이 2026-10-18 — kie 지원팀이 「회원이 자기 키를 앱에 넣는 것」·「우리 백엔드·키로 대신 호출하고 포인트로 과금」을 허용 · 키를 kie.ai 에서 받으므로 **그 칸에는 서비스 이름이 보인다** — 목록·로그의 이름·달러 숨김은 그대로) · 포인트 정책 정본 = [`docs/회원제-설계.md`](docs/회원제-설계.md) §7-3 · 서버 대행 요청서 `docs/요청서_wise-priming-kie대행.md`(`test:ribbonlead`).
-- 📐 **좁은 창(≤1300px) 규칙은 `styles.css` 맨 끝 「v0.9.73」 블록 한 곳** — ② 칸 최소 폭·헤더 `.lbl`·리본 촘촘히를 다른 곳에 따로 두지 말 것(1075px 에서 헤더·리본·#body 가로 넘침 0 이 기준 · 헤더 버튼 글자는 `<span className="lbl">` 로 감싸면 좁을 때 아이콘만).
+- 📐 **좁은 창(≤1300px) 규칙은 `styles.css` 맨 끝 「v0.9.73」 블록 한 곳** — ② 칸 최소 폭·헤더 `.lbl`·리본 촘촘히를 다른 곳에 따로 두지 말 것(1075px 에서 헤더·리본·#body 가로 넘침 0 이 기준 · 헤더 버튼 글자는 `<span className="lbl">` 로 감싸면 좁을 때 아이콘만) · 🔲 **1366px 은 네 메뉴 리본 모두 한 줄**(넘침 0 · `test:groupops`·`test:relink`) — 1440px 이하 리본 압축(도구 선택 170px · 화풍 표시 62px · 오른쪽 공통 칸 아이콘만)은 그 블록 바로 앞 「v0.9.95」 블록 · 리본 버튼은 `rb-ic`/`rb-t` 두 칸 꼴로(글 한 줄 버튼은 넓다).
 - 📐 **리본 첫 칸(📂 열기 · 이미지 도구 · 비디오 도구)은 메뉴를 바꿔도 같은 x** — 줄 첫 이름표 폭 고정(styles.css `.ribbon > .hgroup:first-child > .glabel`) · 도구 선택은 이름표 바로 뒤 · `test:ribbonlead`.
 - 🆕 **Qwen-Image 2.1 Turbo (☁ 클라우드 · 🖥 로컬 둘 다 · v0.9.65)** = ComfyUI 워크플로 `comfy/image_qwen21_turbo.json`(v0.7.83 · 프롬프트는 `TextEncodeQwenImage21.prompt` · 1344x768 약 18초 · 서버 ComfyUI ≥0.39 + 모델 3개 필요 · 시험·비교 근거는 작업노트 2026-10). 인물 묘사 충실도는 Krea2 가 낫다 — 이 엔진으로 바꿀 때 인물 일관성을 눈으로 확인할 것.
 - 👤 **Qwen 인물 참조 = 얼굴 시트(`characters/<이름>.face.png`) + `char-refs.refGate` 를 통과한 장면만**(v0.7.84 · 샷 크기 낱말 close-up·medium 이 없거나 원경·군중·3명+·18세 미만·카드와 10살+ 차이면 안 붙인다 — ⛔ 지시문만으로 풀려고 게이트를 넓히지 말 것: P0 에서 안 막혔다 · 설계안 `docs/인물일관성-Qwen-설계.md`).
@@ -195,7 +195,7 @@
 - 💾 **대본 .md 덮어쓰기는 `writeScriptAtomic`(`core/atomic-write` · 임시 파일 → rename) 한 곳**(v0.9.94 — 제자리 `writeFileSync` 는 쓰는 도중 꺼지면 대본이 반쪽이 된다) · 새로 대본을 쓰는 곳도 이것으로(`test:atomicmd` 가 직접 쓰기 0곳·호출 수를 센다).
 - ⛔ **분할·합치기에서 프롬프트·그림·음성을 비우지 않는다**(빈 그림·빈 음성 금지 — 이어 붙이기·쉼에서 자르기·visSpan) · 지우는 파일은 `.priming-undo/` 로 옮긴다 · 작업본 스냅샷은 지우지 말고 격리 · 통합본은 자산을 **복사**(⛔ 원본 참조 · ⛔ .vrew 자르기·합치기).
 - 🟥 경험·🟨 해석 표시 문법은 채널사업부 화자 규약과 공유(바꾸면 알릴 것) · ⛔ E2E 는 `PM_ROY_BANK_DIR`·`PM_ROY_HOME` 없이 은행을 쓰지 않는다(로이의 진짜 은행) · 맞춤법 검사 ⛔ haiku·자동 저장마다 호출 · 대본 글자 수를 제목 줄에 적지 않는다.
-- ⌨ **② 클립: 한 번 클릭·방향키 = 선택만 · Enter·더블클릭 = 편집 · Space = 재생/멈춤**(로이 확정 2026-10-20 — 옛 「옮기면 바로 자막 칸」 폐기 · 상세 [클립화면](docs/규칙/클립화면.md)).
+- ⌨ **② 클립: 한 번 클릭·방향키 = 선택만 · Enter·더블클릭 = 편집 · Space = 재생/멈춤**(로이 확정 2026-10-20 — 옛 「옮기면 바로 자막 칸」 폐기 · 상세 [클립화면](docs/규칙/클립화면.md)) · 🔴 코드가 편집칸을 열 땐 `openEditAt` 또는 `detail:2` 클릭으로(`el.click()` = 선택만 — 「＋ 클립 추가」 뒤 편집이 안 열린 v0.9.95 사고).
 - 🧩 **② 클립 칸·그룹 칸·클립 도구 막대의 화면 규칙**(막대 메뉴·숨김·스크롤 · 도입부 노랑 · AI 고지 팝업 · 체크박스 · 그룹 칸 · 재생 멈춤 · Home/End)은 [`docs/규칙/클립화면.md`](docs/규칙/클립화면.md) — **그 화면을 고치기 전에 읽는다**. 🔴 「막대가 안 보인다」는 코드가 지워졌다는 뜻이 아닐 수 있다(먼저 `test:cliptb`·`test:cliptbscroll` 로 재현) · E2E 는 `renderer/dist` 를 읽는다 — 화면 코드를 고치면 `npm run build:renderer` 뒤에 돌린다.
 
 ### 채널 · 스타일 · 공유
@@ -270,7 +270,7 @@
 - 스크립트 목록은 `package.json`(test:* 40여 개). 알려진 기존 실패: `img-rotate-resume`(27/34 — v0.3.84 부터, 원인 미확정) · `remotion-ui.smoke` 채널편집 대기 타임아웃 · `comfy-video-minimax` 의 「기본 활성」 단언(로이 PC 설정을 읽음).
 - 🔴 E2E 는 큐 파일(PM_UI_SMOKE → TEMP)·Electron 저장 공간(→ TEMP)을 로이 앱과 나눴다. 채널 목록 파일(`~/.flow-app/tts-presets.json`)은 같이 쓰므로 전후 백업·비교를 권한다(v0.5.79 사고 계열). 헤더에 버튼을 더하면 **대본을 연 상태**의 1366px 한 줄을 본다(`test:workspace`).
 - 버튼·라벨을 고치면 그 라벨·title 로 찾는 테스트를 함께 grep 한다(완전 일치 선택자가 조용히 깨진 사고 여러 번). 화면 배치 검증은 `elementFromPoint` 로 **실제로 눌리는지**까지 본다.
-- E2E 는 Playwright `_electron` · `app.evaluate` 로 `dialog.showOpenDialog` 를 스텁해 실제 파일을 연다. E2E 는 상태를 바꾸는 블록을 뒤에 둔다.
+- E2E 는 Playwright `_electron` · `app.evaluate` 로 `dialog.showOpenDialog` 를 스텁해 실제 파일을 연다. 무음(`dry`) 만들기로 음성만 채우는 E2E 는 **`outMode:'audio'`** 를 넘긴다(그림이 빠지면 제작 실패로 throw — v0.9.44) · 클립 위치·막대를 재는 E2E 는 그 클립을 `scrollIntoView({block:'center'})` 로 먼저 가운데에(목록 아래 끝에 걸리면 막대·틈이 칸 밖이다). E2E 는 상태를 바꾸는 블록을 뒤에 둔다.
 
 ## 10. 로이 확정 결정 (⛔ 다시 꺼내지 말 것)
 

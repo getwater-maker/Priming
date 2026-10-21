@@ -284,7 +284,8 @@ function makeWav(samples, sr = 24000) {
       eq([needsTr('Warm calm narrator'), needsTr('따뜻한 목소리'), needsTr('ko'), needsTr(''), needsTr('내 복제 · middle_aged · calm narrator')], [true, false, false, false, true], '번역할 글 고르기(영어가 한글보다 많으면 · 「내 복제」 섞인 옛 목록도)');
       ok(/badge: v.cloned_by_count/.test(fs.readFileSync(path.join(ROOT, 'tts/providers/elevenlabs-provider.js'), 'utf8')), '「복제 N회」는 설명이 아니라 badge(설명은 영어만 → 번역)');
       ok(!dlg.includes('shown.slice(0, 80)') && dlg.includes('need.length >= 120'), '보이는 카드 전부 번역(120개씩)');
-      ok(/gemini: 'gemini-3\.8-flash'/.test(fs.readFileSync(path.join(ROOT, 'core/prompt-io.js'), 'utf8')), 'Gemini 글 모델 = 3.8-flash(2.5-flash 는 신규 사용자 404)'); }
+      { const pio = fs.readFileSync(path.join(ROOT, 'core/prompt-io.js'), 'utf8');   // v0.7.94 — Gemini 글 생성은 뺐다(Claude API 하나 · 옛 단언 「Gemini 글 모델 = 3.8-flash」 폐기)
+        ok(!/gemini-\d/.test(pio) && /require\('\.\/claude-api'\)|claude-api/.test(pio), 'prompt-io 글 생성 = Claude API 하나(Gemini 글 모델 없음)'); } }
     { // 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78)
       const APP2 = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
       ok(/data-testid="tts-keys"/.test(APP2) && ['gemini', 'mai', 'typecast', 'elevenlabs'].every((id) => APP2.includes(`['${id}', `)), '⚙ 설정 → 🔑 API 키에 TTS API 4개(Gemini·MAI·타입캐스트·ElevenLabs)');

@@ -76,7 +76,7 @@ let lsDetail = null;
     console.log('\n[1] 화면에서 같은 문장을 두 번 연속 고친다');
     const block = (g, i) => win.locator('.cut').nth(g).locator('.sblk').nth(i);
     for (const [round, txt] of [[1, '첫 번째로 고친 문장입니다.'], [2, '두 번째로 다시 고친 문장입니다.']]) {
-      await block(0, 1).locator('.sblk-lines').click();
+      await block(0, 1).locator('.sblk-lines').dblclick();
       await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
       await win.fill('.sblk.editing textarea', txt);
       await win.locator('.sblk.editing textarea').blur();
@@ -85,7 +85,7 @@ let lsDetail = null;
       ok(okMd && fs.readFileSync(MD, 'utf8').includes(txt), `${round}번째 수정이 저장됐다 (화면 · 대본 .md)`);
     }
     // 세 번째: 다른 그룹의 문장도(편집 잠금이 남아 있지 않은가)
-    await block(1, 0).locator('.sblk-lines').click();
+    await block(1, 0).locator('.sblk-lines').dblclick();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.fill('.sblk.editing textarea', '다른 그룹도 고칩니다.');
     await win.locator('.sblk.editing textarea').blur();
@@ -144,7 +144,7 @@ let lsDetail = null;
     // ── [5] 수정 실패 뒤에도 편집이 잠기지 않는다(화면)
     console.log('\n[5] 저장이 거절된 뒤에도 다시 고칠 수 있다');
     const mdNow = fs.readFileSync(MD, 'utf8');
-    await block(0, 0).locator('.sblk-lines').click();
+    await block(0, 0).locator('.sblk-lines').dblclick();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     // 다음 저장 한 번을 실패시킨다(대본 파일을 잠깐 지운다 → '대본 파일을 찾을 수 없습니다')
     await win.evaluate(() => { window.__origConfirm = window.confirm; window.confirm = () => false; });   // 「편집창을 열까요?」에 아니요
@@ -155,7 +155,7 @@ let lsDetail = null;
     fs.renameSync(MD + '.hold', MD);
     // 같은 편집칸(또는 새로 연 칸)에서 다시 고친다
     if (!(await win.locator('.sblk.editing textarea').count())) {
-      await block(0, 0).locator('.sblk-lines').click();
+      await block(0, 0).locator('.sblk-lines').dblclick();
       await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     }
     await win.fill('.sblk.editing textarea', '실패 뒤에 다시 고친 문장입니다.');

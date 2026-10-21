@@ -97,7 +97,8 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
       const gen = await win.evaluate(() => { const b = document.querySelector('[data-testid="vd-generate"]'); const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!(el && el.closest('[data-testid="vd-generate"]')); });
       ok(gen, '목소리 생성 단추가 실제로 눌리는 자리에 있다(elementFromPoint)');
       // 🎨 v0.7.23 — 설명 칸 안내·기본 문장·후보 여러 개·설명 도우미·고른 후보 저장
-      ok((await pane.locator('[data-testid="vd-instruct"]').getAttribute('placeholder')) === '영어로 입력해주세요.', '목소리 설명 칸 안내 = 「영어로 입력해주세요.」');
+      { const ph = (await pane.locator('[data-testid="vd-instruct"]').getAttribute('placeholder')) || '';   // v0.7.94 — 뒤에 「🤖 칸에 한국어로 적으면 Claude 가 영어 설명」 안내가 붙었다
+        ok(ph.startsWith('영어로 입력해주세요.') && /Claude/.test(ph), `목소리 설명 칸 안내 = 「영어로 입력해주세요.」 + Claude 도우미 안내 (${ph})`); }
       ok((await pane.locator('textarea').nth(1).inputValue()) === '오래전 이 땅에 살았던 사람들의 이야기를, 차분한 목소리로 하나씩 풀어 보겠습니다.', '미리들을 문장 = 짧은 한 문장');
       await pane.locator('[data-testid="vd-chips"] button', { hasText: '여성' }).click();
       await pane.locator('[data-testid="vd-chips"] button', { hasText: '차분한' }).click();

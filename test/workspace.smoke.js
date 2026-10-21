@@ -421,7 +421,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.click('.clipbar button[data-detail="1"]');
     // 시각 — 무음(dry)으로 음성 길이를 채운다(TTS 서버·GPU 안 씀 · 임시 채널 출력 = 임시 폴더)
     const made = await win.evaluate(async (name) => {
-      try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; }
+      try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outMode: 'audio', openVrew: false }); return 'ok'; }
       catch (e) { return String(e && e.message || e); }
     }, CH);
     await win.waitForFunction(() => document.querySelectorAll('.sent.clip .clip-time').length === 4, null, { timeout: 30000 }).catch(() => {});

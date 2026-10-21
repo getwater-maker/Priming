@@ -39,7 +39,7 @@ const body = () => md().split('\n').filter((l) => /문장입니다/.test(l));   
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sent[data-ln]', { timeout: 20000 });
     lsDetail = await win.evaluate(() => { try { return localStorage.getItem('pm.clipDetail'); } catch (_) { return null; } });
-    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
+    const made = await win.evaluate(async (name) => { try { await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 20, aiNotice: false, outMode: 'audio', openVrew: false }); return 'ok'; } catch (e) { return e.message; } }, chan);
     ok(made === 'ok', '무음 만들기로 음성 채우기 ' + made);
     await win.waitForTimeout(600);
     const row = (n) => win.locator(`.sent.clip[data-ln="${n}"]`).first();

@@ -73,8 +73,8 @@ const cleanup = () => {
     ok(/첫째 문장입니다/.test(firstText), '첫 블록이 첫 문장이다');
     eqNum(await win.locator('.sblk button').count(), 0, '🔑 문장 블록에 버튼이 하나도 없다(호버 ✎·⤋ 제거)');
 
-    // [3] 문장을 **클릭**하면 그 자리가 편집칸이 된다
-    await blocks.first().locator('.sblk-lines').click();
+    // [3] 문장을 **더블클릭**하면 그 자리가 편집칸이 된다(한 번 클릭 = 선택만 · 로이 확정 2026-10-20)
+    await blocks.first().locator('.sblk-lines').dblclick();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     ok(await win.locator('.sblk.editing textarea').inputValue() === '첫째 문장입니다.', '편집칸에 그 문장이 들어 있다');
     eqNum(await win.locator('.sblk.editing button').count(), 0, '🔑 편집칸에도 저장·취소·나누기 버튼이 없다');
@@ -122,7 +122,7 @@ const cleanup = () => {
 
     // [5] 🔑 **아랫줄 맨 앞에서 ←Backspace = 윗줄과 합치기** (로이가 요청한 그 동작)
     const b2 = win.locator('.cut').first().locator('.sblk');
-    await b2.nth(1).locator('.sblk-lines').click();          // 둘째 문장을 연다
+    await b2.nth(1).locator('.sblk-lines').dblclick();          // 둘째 문장을 연다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.press('.sblk.editing textarea', 'Control+Home'); // 커서를 맨 앞으로
     await win.press('.sblk.editing textarea', 'Backspace');
@@ -137,7 +137,7 @@ const cleanup = () => {
 
     // [6] 🔑 **윗줄 맨 끝에서 Del = 아랫줄을 끌어올려 합치기**
     const b3 = win.locator('.cut').first().locator('.sblk');
-    if (!(await win.locator('.sblk.editing textarea').count())) await b3.first().locator('.sblk-lines').click();   // 합친 뒤 이미 열려 있다
+    if (!(await win.locator('.sblk.editing textarea').count())) await b3.first().locator('.sblk-lines').dblclick();   // 합친 뒤 이미 열려 있다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.press('.sblk.editing textarea', 'Control+End');   // 커서를 맨 끝으로
     await win.press('.sblk.editing textarea', 'Delete');
@@ -148,7 +148,7 @@ const cleanup = () => {
 
     // [7] 🔑 **Enter = 커서 자리에서 나누기** (저장이 아니다)
     const b4 = win.locator('.cut').first().locator('.sblk');
-    if (!(await win.locator('.sblk.editing textarea').count())) await b4.first().locator('.sblk-lines').click();   // 합친 뒤 이미 열려 있다
+    if (!(await win.locator('.sblk.editing textarea').count())) await b4.first().locator('.sblk-lines').dblclick();   // 합친 뒤 이미 열려 있다
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.fill('.sblk.editing textarea', '앞 조각입니다 뒤 조각입니다');
     await win.locator('.sblk.editing textarea').evaluate((el) => el.setSelectionRange(7, 7)); // '앞 조각입니다' 뒤
@@ -160,7 +160,7 @@ const cleanup = () => {
     // [8] 그룹 첫 문장에서 Backspace → 윗 그룹과는 합치지 않는다(대본이 그대로여야 한다)
     const mdBefore = fs.readFileSync(MD, 'utf8');
     const b5 = win.locator('.cut').first().locator('.sblk');
-    await b5.first().locator('.sblk-lines').click();
+    await b5.first().locator('.sblk-lines').dblclick();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.press('.sblk.editing textarea', 'Control+Home');
     await win.press('.sblk.editing textarea', 'Backspace');
@@ -172,7 +172,7 @@ const cleanup = () => {
 
     // [9] Esc 로 취소하면 아무것도 안 바뀐다
     const b6 = win.locator('.cut').first().locator('.sblk');
-    await b6.first().locator('.sblk-lines').click();
+    await b6.first().locator('.sblk-lines').dblclick();
     await win.waitForSelector('.sblk.editing textarea', { timeout: 5000 });
     await win.fill('.sblk.editing textarea', '이건 취소할 글입니다.');
     await win.press('.sblk.editing textarea', 'Escape');
@@ -197,7 +197,7 @@ const cleanup = () => {
         await win.waitForSelector('.sblk', { timeout: 20000 });
         const made = await win.evaluate(async (name) => {
           try {
-            await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 7, aiNotice: false, openVrew: false });
+            await window.api.makeAll({ presetName: name, dry: true, engine: 'comfy::dummy.json', videoEngine: 'none', styleId: null, captionMaxChars: 7, aiNotice: false, outMode: 'audio', openVrew: false });
             return 'ok';
           } catch (e) { return 'ERR: ' + e.message; }
         }, chan);

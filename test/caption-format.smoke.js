@@ -182,8 +182,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { if (fs.existsSync(f)
     // 🧩 v0.5.44 — 상세 보기는 자막 줄(🗨 칸)을 눌러 **그 줄 글자만** 같은 모양 그대로 고친다(짧은 문장이라 줄 = 문장)
     const ED = '.sblk.editing textarea, .sent.clip.editing .clip-edit';
     await ((await win.locator('.cut .sblk').nth(1).locator('.clip-cap').count())
-      ? win.locator('.cut .sblk').nth(1).locator('.clip-cap').first().click()
-      : win.locator('.cut .sblk').nth(1).locator('.sblk-lines').click());
+      ? win.locator('.cut .sblk').nth(1).locator('.clip-cap').first().dblclick()   // 한 번 클릭 = 선택만 · 더블클릭 = 고치기(로이 확정 2026-10-20)
+      : win.locator('.cut .sblk').nth(1).locator('.sblk-lines').dblclick());
     await win.waitForSelector(ED, { timeout: 5000 });
     await win.fill(ED, '둘째 문장이에요.');
     await win.locator(ED).blur();
