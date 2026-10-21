@@ -846,7 +846,12 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         const v = e.target.value.trim();
         await p.onBlur(e);
         const dk = DATE_OF[k];
-        if (dk && v && ISBNC.normalizeIsbn13(v) && !String(meta[dk] || '').trim()) await setMeta(dk, DK.todayKo());
+        //   부크크 2단계: 발행일은 부크크 메일에 적힌 날이다 — 오늘로 채운 값은 메일 날짜와 다를 수 있어 확인을 알린다(메일 회신 버튼은 메일 값으로 덮어쓴다)
+        if (dk && v && ISBNC.normalizeIsbn13(v) && !String(meta[dk] || '').trim()) {
+          await setMeta(dk, DK.todayKo());
+          const msg = `📅 ${dk === 'ebookIssueDate' ? '전자책 ' : ''}발행일을 오늘(${DK.todayKo()})로 채웠습니다 — 부크크 메일의 발행일과 다르면 고쳐 주세요`;
+          setStatus(msg); logline(msg);
+        }
       } };
     };
     const one = (k, label, ph, isDate) => (

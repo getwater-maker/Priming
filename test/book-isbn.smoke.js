@@ -64,7 +64,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === '', '틀린 ISBN 으로는 발행일을 채우지 않는다');
     await win.locator('[data-testid=rg-isbn]').fill('979-11-12-31240-2'); await win.locator('[data-testid=rg-isbn]').blur(); await win.waitForTimeout(700);
     { const kst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).split('-'); const want = `${kst[0]}년 ${kst[1]}월 ${kst[2]}일`;
-      ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want); }
+      ok(await win.locator('[data-testid=rg-issueDate]').inputValue() === want, '발행일이 비어 있을 때 맞는 ISBN 을 넣으면 오늘(KST) — ' + want);
+      // 🔁 부크크 2단계 — 오늘로 채운 발행일은 메일 날짜와 다를 수 있어 확인을 알린다(v0.9.89)
+      const back = await win.locator('[data-testid=bk-nav] .bktab.on').getAttribute('data-tab');
+      await win.click('[data-tab=log]'); await win.waitForSelector('[data-testid=bk-log-tab] #logwrap', { timeout: 5000 });
+      ok(/부크크 메일의 발행일과 다르면/.test(await win.locator('[data-testid=bk-log-tab]').innerText()), '오늘로 채우면 로그에 「부크크 메일의 발행일과 다르면 고쳐 주세요」 안내');
+      await win.click(`[data-tab=${back}]`); await win.locator('[data-testid=rg-issueDate]').waitFor(); }
     await win.locator('[data-testid=rg-issueDate]').fill('2026-10-06'); await win.locator('[data-testid=rg-issueDate]').blur(); await win.waitForTimeout(400);
     // 📅 전자책 ISBN 을 넣으면 **전자책** 발행일만 오늘(KST)로 채운다 — 종이책 발행일은 그대로
     await win.locator('[data-testid=rg-ebookIsbn]').fill('979-11-12-31221-1'); await win.locator('[data-testid=rg-ebookIsbn]').blur(); await win.waitForTimeout(700);
