@@ -10,6 +10,7 @@ const BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
 function _sleep(ms) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) {} }
 
 // 동기(호출하는 곳이 모두 동기 try 안이다). 실패하면 throw — 원래 파일은 그대로 남는다.
+// Buffer 도 그대로 쓴다(Lab · .vrew zip — 'utf8' 은 문자열에만 걸린다).
 function writeTextAtomicSync(file, text, opts = {}) {
   const fsx = opts.fs || fs;
   const tmp = file + TMP_SUFFIX;

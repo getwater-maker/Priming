@@ -1497,7 +1497,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       zip.addLocalFile(path.join(tmpMedia, fn), 'media');
     }
   }
-  zip.writeZip(vrewPath);
+  // 같은 폴더 임시 파일에 다 쓴 뒤 rename — 쓰는 도중 꺼져도 옛 .vrew 가 그대로 남는다(writeZip 도 안에서 toBuffer 를 만든다 · 메모리 같음).
+  require('../core/atomic-write').writeTextAtomicSync(vrewPath, zip.toBuffer());
 
   log(`[Vrew] (4.0.1 test.vrew 형식) ${pj.transcript.clips.length}개 clip · ${imageGroupCount}개 image · ${sentenceCount}개 TTS → ${path.basename(vrewPath)}`);
   if (missingImg.length > 0) log(`[Vrew] 이미지 누락 그룹: ${missingImg.join(', ')}`);

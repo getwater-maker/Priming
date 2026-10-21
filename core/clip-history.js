@@ -44,7 +44,7 @@ function save() {
     try {
       const out = chains.slice(-MAX_CHAINS).map((c) => ({ versions: c.versions, idx: c.idx, ids: [...c.ids], scope: c.scope }));
       fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-      fs.writeFileSync(FILE(), JSON.stringify(out), 'utf8');
+      require('./atomic-write').writeTextAtomicSync(FILE(), JSON.stringify(out));   // 쓰는 도중 꺼져도 옛 이력이 남는다
     } catch { /* 이력 저장 실패가 편집을 막으면 안 된다 */ }
   }, 500);
   if (_timer.unref) _timer.unref();

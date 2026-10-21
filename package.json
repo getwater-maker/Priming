@@ -18,6 +18,7 @@
     "test:g429": "node test/gemini-429.smoke.js",
     "test:cards": "node test/screen-cards.test.js",
     "test:atomicmd": "node test/atomic-md.test.js",
+    "test:atomiclab": "node test/atomic-lab.test.js",
     "test:relink": "node test/relink-work.smoke.js",
     "test:pause": "node test/interlude-pause.test.js && node test/card-mark.smoke.js",
     "test:info": "node test/info-cards.test.js && node test/info-edit.test.js && node test/info-preview.smoke.js",

@@ -80,7 +80,7 @@ function writeRecord(outRoot, baseName, rec) {
   try {
     const f = recordPath(outRoot, baseName);
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, JSON.stringify(rec), 'utf8');
+    require('./atomic-write').writeTextAtomicSync(f, JSON.stringify(rec));   // 반쪽 기록 = 읽기 실패 = 새로 만든다(fail-closed)이지만, 쓰는 도중 꺼져도 옛 기록이 남게
     return true;
   } catch { return false; }
 }
