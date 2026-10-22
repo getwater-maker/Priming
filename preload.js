@@ -182,6 +182,8 @@ contextBridge.exposeInMainWorld('api', {
   licenseState: () => ipcRenderer.invoke('license-state'),
   licenseRecheck: (opts) => ipcRenderer.invoke('license-recheck', opts || {}),
   licenseLogin: (email, password) => ipcRenderer.invoke('license-login', { email, password }),
+  licenseSignup: (email, password, code) => ipcRenderer.invoke('license-signup', { email, password, code }),
+  licenseRedeem: (code) => ipcRenderer.invoke('license-redeem', { code }),
   licenseLogout: () => ipcRenderer.invoke('license-logout'),
   licenseSetAutoLog: (on) => ipcRenderer.invoke('license-set-autolog', on),
   licenseReport: (text) => ipcRenderer.invoke('license-report', { text }),

@@ -22,6 +22,7 @@ const server = http.createServer((req, res) => {
     if (SRV.down) { req.socket.destroy(); return; }
     if (!req.headers.apikey) return send(401, { msg: 'no apikey' });
     const j = body ? JSON.parse(body) : {};
+    if (req.url.endsWith('/auth/v1/signup')) { SRV.signups = (SRV.signups || 0) + 1; return send(200, { access_token: 'A:' + j.email, refresh_token: 'R:' + j.email, expires_in: 3600, user: { email: j.email } }); }
     if (req.url.includes('grant_type=password')) {
       if (j.password !== 'pw-test-1') return send(400, { error: 'invalid_grant' });
       return send(200, { access_token: 'A:' + j.email, refresh_token: 'R:' + j.email, expires_in: 3600, user: { email: j.email } });
@@ -33,9 +34,11 @@ const server = http.createServer((req, res) => {
       if (who === 'nomember@test') return send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'full@test') return send(200, { ok: false, member: true, reason: 'device_limit', device_limit: 2, devices: [{ device_id: 'aaaaaaaa1', name: '집PC' }, { device_id: 'bbbbbbbb2', name: '회사PC' }] });
       if (who === 'admin@test') return send(200, { ok: true, member: true, admin: true, expires_at: null, device_limit: null, devices: [] });
+      if (who === 'newbie@test.kr') return SRV.redeemed ? send(200, { ok: true, member: true, admin: false, expires_at: '2099-01-01T00:00:00Z', device_limit: 2, devices: [] }) : send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'good@test') return send(200, { ok: true, member: true, admin: false, expires_at: '2099-12-31T00:00:00Z', device_limit: 2, devices: [{ device_id: j.p_device_id, name: j.p_device_name, last_seen: '2026-10-15T00:00:00Z' }] });
       return send(401, { msg: 'jwt' });
     }
+    if (req.url.endsWith('/rpc/priming_redeem_code')) { if (j.p_code === 'CODE-30') { SRV.redeemed = true; return send(200, { ok: true, days: 30, expires_at: '2099-01-01T00:00:00Z' }); } return send(200, { ok: false, reason: 'invalid_code' }); }
     if (req.url.endsWith('/rpc/priming_log')) { SRV.logs.push(j); return send(200, { ok: true, id: SRV.logs.length }); }
     send(404, {});
   });
@@ -130,6 +133,29 @@ async function launch() {
     await A.win.reload();
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
     ok(!fs.existsSync(path.join(LDIR, 'session.bin')), '⑧ 로그아웃 → 관문 · 세션 파일 삭제');
+    // ⑨ 🆕 앱 안 회원가입 + 가입 코드(v0.9.98)
+    await A.win.click('[data-testid="license-tab-signup"]');
+    const su = A.win.locator('[data-testid="license-signup"]');
+    await A.win.fill('[data-testid="license-email"]', 'newbie@test.kr');
+    await A.win.fill('[data-testid="license-password"]', 'abcdef');
+    await A.win.fill('[data-testid="license-password2"]', 'abcdeX');
+    ok(await su.isDisabled(), '⑨ 비밀번호 확인이 다르면 가입 버튼이 잠긴다');
+    await A.win.fill('[data-testid="license-password2"]', 'abcdef');
+    ok(await su.isDisabled(), '⑨ 약관에 동의해야 가입 버튼이 열린다');
+    await A.win.check('[data-testid="license-agree"]');
+    ok(!(await su.isDisabled()), '⑨ 입력·동의가 끝나면 가입 버튼이 열린다');
+    await su.click(); await sleep(900);
+    ok(SRV.signups === 1 && /이용 기간이 없습니다/.test(await A.win.textContent('[data-testid="license-msg"]')), '⑨ 코드 없이 가입 → 계정만 생기고 이용 기간 없음 안내');
+    await A.win.fill('[data-testid="license-code"]', 'WRONG');
+    await A.win.click('[data-testid="license-redeem"]'); await sleep(700);
+    ok(/맞지 않습니다/.test(await A.win.textContent('[data-testid="license-code-msg"]')), '⑨ 틀린 코드 안내');
+    await A.win.fill('[data-testid="license-code"]', 'CODE-30');
+    await A.win.click('[data-testid="license-redeem"]');
+    await A.win.waitForSelector('[data-testid="app-title"]', { timeout: 15000 });
+    ok(true, '⑨ 맞는 코드 → 이용 기간 시작 · 앱이 열린다');
+    await A.win.evaluate(() => window.api.licenseLogout());
+    await A.win.reload();
+    await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
     // 👑 관리자 계정 = owner true
     await A.win.fill('[data-testid="license-email"]', 'admin@test');
     await A.win.fill('[data-testid="license-password"]', 'pw-test-1');

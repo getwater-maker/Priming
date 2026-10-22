@@ -80,6 +80,42 @@ function createLicense(opts = {}) {
     saveSession(sessFrom(j));
     return check();
   }
+  // 🆕 앱 안 회원가입(v0.9.98 · 로이 2026-10-23 「앱 비밀번호 따로 정하기 불편」) — 이메일·비밀번호로 바로 가입. 이메일 확인이 켜져 있으면 세션이 오지 않는다(confirm_mail).
+  async function signup(email, password) {
+    const em = String(email || '').trim();
+    if (!/^\S+@\S+\.\S+$/.test(em)) return { ok: false, reason: 'bad_email' };
+    if (String(password || '').length < 6) return { ok: false, reason: 'weak_password' };
+    let r;
+    try { r = await doFetch(`${apiBase()}/auth/v1/signup`, { method: 'POST', headers: H(), body: JSON.stringify({ email: em, password: String(password) }) }); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    const msg = String((j && (j.msg || j.message || j.error_description || j.error_code)) || '');
+    if (!r.ok) {
+      if (/already|registered|exists/i.test(msg)) return { ok: false, reason: 'already_registered' };
+      if (/weak|short|at least|password/i.test(msg)) return { ok: false, reason: 'weak_password' };
+      if (r.status === 429 || /rate|too many/i.test(msg)) return { ok: false, reason: 'rate_limited' };
+      return { ok: false, reason: 'server' };
+    }
+    if (!j.access_token) {   // 이메일 확인 대기 — 이미 가입된 주소도 같은 응답(계정 존재 노출 방지)
+      return { ok: false, reason: 'confirm_mail', email: em };
+    }
+    saveSession(sessFrom(j));
+    return { ok: true, signedUp: true };
+  }
+  // 🆕 가입 코드 사용 — 서버 RPC priming_redeem_code(p_code): 코드에 정해진 일수만큼 priming-app 이용 기간을 만든다(이미 회원이면 연장). 약속 = docs/요청서_wise-priming-앱가입.md
+  async function redeem(code) {
+    const c = String(code || '').trim();
+    if (!c) return { ok: false, reason: 'no_code' };
+    const tok = await accessToken();
+    if (!tok) return { ok: false, reason: 'logged_out' };
+    let r, j;
+    try { r = await doFetch(`${apiBase()}/rest/v1/rpc/priming_redeem_code`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_code: c }) }); j = await r.json().catch(() => ({})); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    if (r.status === 404) return { ok: false, reason: 'redeem_unavailable' };
+    if (r.status === 401) return { ok: false, reason: 'logged_out' };
+    if (!r.ok || !j || typeof j !== 'object') return { ok: false, reason: 'server' };
+    return j.ok ? { ok: true, days: j.days == null ? null : Number(j.days), expiresAt: j.expires_at || null } : { ok: false, reason: String(j.reason || 'invalid_code') };
+  }
   // 유효한 access token(1분 안에 끝나면 refresh) — 없거나 갱신 실패면 null
   async function accessToken() {
     const s = loadSession();
@@ -145,7 +181,7 @@ function createLicense(opts = {}) {
     };
   }
 
-  return { deviceId, login, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
+  return { deviceId, login, signup, redeem, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
 }
 
 /** Electron 앱에서 쓰는 기본 묶음 — safeStorage 는 app ready 뒤에만 쓸 수 있다(부르는 쪽이 whenReady 를 기다린다) */

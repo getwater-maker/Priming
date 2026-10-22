@@ -142,7 +142,7 @@ const LIC = {
   enforce: process.env.PM_LICENSE_FORCE === '1' || (app.isPackaged && !process.env.PM_UI_SMOKE),
   state: null, ready: null, L: null,
 };
-const LIC_OPEN = new Set(['license-state', 'license-login', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
+const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
 function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
 // 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
@@ -11982,6 +11982,26 @@ ipcMain.handle('license-login', async (_e, a = {}) => {
   log(s.ok ? `🔐 로그인 ✓ ${s.email || ''}` : `🔐 로그인 — ${s.reason}`);
   licStartReporter();
   return licPublic(s);
+});
+// 🆕 앱 안 회원가입 + 가입 코드(v0.9.98) — 가입(세션까지) → 코드가 있으면 이용 기간 부여 요청 → 회원 확인. 코드·비밀번호는 로그에 싣지 않는다
+async function _licFinish(extra) {
+  LIC.state = await licApi().check();
+  log(LIC.state.ok ? '🔐 회원 확인 ✓ (가입·코드 뒤)' : `🔐 회원 확인 — ${LIC.state.reason}`);
+  licStartReporter();
+  return { ...licPublic(LIC.state), ...extra };
+}
+ipcMain.handle('license-signup', async (_e, a = {}) => {
+  const r = await licApi().signup(a.email, a.password);
+  if (!r.ok) { log(`🔐 앱 가입 — ${r.reason}`); LIC.state = { ok: false, reason: r.reason, email: r.email || String(a.email || '').trim() }; return licPublic(LIC.state); }
+  log('🔐 앱 가입 ✓');
+  let ex = {};
+  if (String(a.code || '').trim()) { const c = await licApi().redeem(a.code); ex = c.ok ? { redeemDays: c.days } : { redeemReason: c.reason }; log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`); }
+  return _licFinish(ex);
+});
+ipcMain.handle('license-redeem', async (_e, a = {}) => {
+  const c = await licApi().redeem(a.code);
+  log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`);
+  return _licFinish(c.ok ? { redeemDays: c.days } : { redeemReason: c.reason });
 });
 ipcMain.handle('license-logout', async () => { licApi().logout(); LIC.state = { ok: false, reason: 'logged_out' }; log('🔐 로그아웃'); return licPublic(LIC.state); });
 ipcMain.handle('license-set-autolog', async (_e, on) => { licApi().writeState({ autoLog: on !== false }); log(`📮 오류 로그 자동 전송 ${on !== false ? '켬' : '끔'}`); return licPublic(LIC.state); });

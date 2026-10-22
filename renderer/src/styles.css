@@ -1748,3 +1748,12 @@ main .card h2{top:var(--work-top-height,0px)}
 .today-none{margin-top:10px;padding:8px 10px;font-size:12px;line-height:1.5;color:#8a7a66;background:#f7f2e9;border-radius:8px}
 .today-none b{color:var(--strong);margin-right:4px}
 .modal-card.today-card .today-actions{margin-top:14px;flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px}
+
+/* 🔐 로그인 관문 — 회원가입 탭·코드 칸(v0.9.98) */
+.lictabs{display:flex;border:1px solid var(--accent);border-radius:8px;overflow:hidden}
+.lictabs button{flex:1;border:none;border-radius:0;background:transparent;color:var(--accent-d);padding:7px 0}
+.lictabs button.on{background:var(--accent);color:#fff}
+.licok{margin:0;color:#3d6b3a;font-size:13px;background:#eaf3e6;border-radius:8px;padding:8px 10px}
+.licwarn{margin:-4px 0 0;color:#b4412b;font-size:12px}
+.licagree{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--base)}
+.licagree input{margin-top:3px;padding:0}

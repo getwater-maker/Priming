@@ -16,6 +16,11 @@ function fakeServer() {
     if (S.down) throw new Error('ECONNREFUSED');
     const body = init.body ? JSON.parse(init.body) : {};
     if (!init.headers || !init.headers.apikey) return res(401, { error: 'no apikey' });
+    if (url.endsWith('/auth/v1/signup')) {
+      if (body.email === 'dup@x.kr') return res(422, { error_code: 'user_already_exists', msg: 'User already registered' });
+      if (S.confirm) return res(200, { id: 'u1', email: body.email });
+      S.accessN++; return res(200, { access_token: 'acc' + S.accessN, refresh_token: 'ref' + S.accessN, expires_in: 3600, user: { email: body.email } });
+    }
     if (url.includes('grant_type=password')) {
       if (body.password !== 'right') return res(400, { error: 'invalid_grant' });
       S.accessN++; return res(200, { access_token: 'acc' + S.accessN, refresh_token: 'ref' + S.accessN, expires_in: 3600, user: { email: body.email } });
@@ -27,6 +32,12 @@ function fakeServer() {
     const auth = (init.headers.Authorization || '').replace('Bearer ', '');
     if (!/^acc\d+$/.test(auth)) return res(401, { message: 'JWT' });
     if (url.endsWith('/rpc/priming_license')) { S.lastDevice = body.p_device_id; return res(200, S.member); }
+    if (url.endsWith('/rpc/priming_redeem_code')) {
+      if (S.noRedeem) return res(404, {});
+      if (body.p_code === 'GOOD-30') return res(200, { ok: true, days: 30, expires_at: '2026-11-22T00:00:00Z' });
+      if (body.p_code === 'USED') return res(200, { ok: false, reason: 'already_used' });
+      return res(200, { ok: false, reason: 'invalid_code' });
+    }
     if (url.endsWith('/rpc/priming_log')) { S.logs.push(body); return res(200, { ok: true, id: S.logs.length }); }
     return res(404, {});
   };
@@ -113,6 +124,27 @@ const mk = (S, clock) => {
     ok(src && src.headers.Authorization === 'Bearer acc1', 'Worker 경로 + Bearer 토큰');
     ok(src.fileUrl('renderer/dist/assets/a b.js', 5) === 'https://updates.primingwave.com/file/renderer/dist/assets/a%20b.js?t=5', '파일 주소: 조각별 인코딩 · ?t=');
     ok(src.manifestUrl(7) === 'https://updates.primingwave.com/manifest?t=7', '매니페스트 주소');
+    fs.rmSync(dir, { recursive: true, force: true }); }
+
+  console.log('[8] 앱 안 가입 · 가입 코드');
+  { const clock = { t: 1e12 }; const S = fakeServer(); const { L, dir } = mk(S, clock);
+    ok((await L.signup('not-an-email', 'abcdef')).reason === 'bad_email', '이메일 모양이 틀리면 서버에 묻지 않고 bad_email');
+    ok((await L.signup('a@x.kr', '123')).reason === 'weak_password' && !S.calls.some((c) => c.url.endsWith('/signup')), '비밀번호 6자 미만 = weak_password(서버 호출 없음)');
+    ok((await L.signup('dup@x.kr', 'abcdef')).reason === 'already_registered', '이미 가입된 이메일');
+    S.confirm = true;
+    ok((await L.signup('a@x.kr', 'abcdef')).reason === 'confirm_mail' && !L.loadSession(), '이메일 확인이 켜져 있으면 세션 없이 confirm_mail');
+    S.confirm = false;
+    const r = await L.signup('a@x.kr', 'abcdef');
+    ok(r.ok && L.loadSession() && L.loadSession().access === 'acc1', '가입 → 세션 저장(토큰은 main 안에만)');
+    ok(!JSON.stringify(S.calls.filter((c) => c.url.endsWith('/signup')).map((c) => c.init.headers)).includes('Authorization'), '가입 요청에 토큰 헤더 없음');
+    ok((await L.redeem('')).reason === 'no_code', '빈 코드');
+    ok((await L.redeem('NOPE')).reason === 'invalid_code', '틀린 코드 → invalid_code');
+    ok((await L.redeem('USED')).reason === 'already_used', '쓴 코드 → already_used');
+    const g = await L.redeem('GOOD-30');
+    ok(g.ok && g.days === 30 && g.expiresAt === '2026-11-22T00:00:00Z', '맞는 코드 → 일수·만료일');
+    S.noRedeem = true;
+    ok((await L.redeem('GOOD-30')).reason === 'redeem_unavailable', '서버에 RPC 가 아직 없으면 redeem_unavailable(404)');
+    L.logout(); ok((await L.redeem('GOOD-30')).reason === 'logged_out', '로그아웃 상태 = logged_out');
     fs.rmSync(dir, { recursive: true, force: true }); }
 
   console.log('[7] 소스 검사');
