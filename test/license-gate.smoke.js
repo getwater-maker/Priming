@@ -38,6 +38,7 @@ const server = http.createServer((req, res) => {
       if (who === 'good@test') return send(200, { ok: true, member: true, admin: false, expires_at: '2099-12-31T00:00:00Z', device_limit: 2, devices: [{ device_id: j.p_device_id, name: j.p_device_name, last_seen: '2026-10-15T00:00:00Z' }] });
       return send(401, { msg: 'jwt' });
     }
+    if (req.url.endsWith('/rpc/accept_consents')) { SRV.consents = (SRV.consents || 0) + 1; return send(204, {}); }
     if (req.url.endsWith('/rpc/priming_redeem_code')) { if (j.p_code === 'CODE-30') { SRV.redeemed = true; return send(200, { ok: true, days: 30, expires_at: '2099-01-01T00:00:00Z' }); } return send(200, { ok: false, reason: 'invalid_code' }); }
     if (req.url.endsWith('/rpc/priming_log')) { SRV.logs.push(j); return send(200, { ok: true, id: SRV.logs.length }); }
     send(404, {});
@@ -153,6 +154,7 @@ async function launch() {
     await A.win.click('[data-testid="license-redeem"]');
     await A.win.waitForSelector('[data-testid="app-title"]', { timeout: 15000 });
     ok(true, '⑨ 맞는 코드 → 이용 기간 시작 · 앱이 열린다');
+    ok(SRV.consents === 1, '⑨ 가입 때 체크한 약관 동의가 서버에 한 번 남는다');
     await A.win.evaluate(() => window.api.licenseLogout());
     await A.win.reload();
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });

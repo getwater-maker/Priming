@@ -20,6 +20,8 @@ const SUPABASE_KEY = 'sb_publishable_feodjOad34xOpdoIcRp8IQ_TgcI2k80';
 const UPDATE_BASE = 'https://updates.primingwave.com';
 const SITE_DEVICES = 'https://www.primingwave.com/member/devices';
 const SITE_ADMIN = 'https://www.primingwave.com/admin/priming';   // 👑 관리자 화면(회원·기기·포인트 지급·오류) — wise-priming src/app/admin/priming · 로그인은 사이트 관리자 계정
+// 📜 약관 동의 버전 — 사이트 consent.ts(TERMS_VERSION·PRIVACY_VERSION)와 같아야 사이트 ConsentGate 가 다시 묻지 않는다(개정되면 여기 한 곳만 고친다 · wise-priming 약속 2026-10-23)
+const CONSENT = { terms: '2026-10-06', privacy: '2026-10-08' };
 const GRACE_MS = 7 * 24 * 3600 * 1000;
 
 const apiBase = () => process.env.PM_LICENSE_API || SUPABASE_URL;
@@ -81,7 +83,7 @@ function createLicense(opts = {}) {
     return check();
   }
   // 🆕 앱 안 회원가입(v0.9.98 · 로이 2026-10-23 「앱 비밀번호 따로 정하기 불편」) — 이메일·비밀번호로 바로 가입. 이메일 확인이 켜져 있으면 세션이 오지 않는다(confirm_mail).
-  async function signup(email, password) {
+  async function signup(email, password, opts = {}) {
     const em = String(email || '').trim();
     if (!/^\S+@\S+\.\S+$/.test(em)) return { ok: false, reason: 'bad_email' };
     if (String(password || '').length < 6) return { ok: false, reason: 'weak_password' };
@@ -96,6 +98,7 @@ function createLicense(opts = {}) {
       if (r.status === 429 || /rate|too many/i.test(msg)) return { ok: false, reason: 'rate_limited' };
       return { ok: false, reason: 'server' };
     }
+    if (opts.consent) writeState({ consentPending: em.toLowerCase() });   // 동의는 세션이 생긴 첫 로그인 직후 서버에 남긴다(확인 메일을 거치면 그때)
     if (!j.access_token) {   // 이메일 확인 대기 — 이미 가입된 주소도 같은 응답(계정 존재 노출 방지)
       return { ok: false, reason: 'confirm_mail', email: em };
     }
@@ -130,6 +133,15 @@ function createLicense(opts = {}) {
       return j.access_token;
     } catch (_) { return s.exp && s.exp > now() ? s.access : null; }
   }
+  // 📜 앱에서 가입하며 체크한 동의를 서버에 남긴다(RPC accept_consents · 실패하면 다음 확인 때 다시 · 마케팅 수신은 항상 false)
+  async function recordConsent(tok, email) {
+    const st = readState();
+    if (!st.consentPending || String(email || '').toLowerCase() !== st.consentPending) return;
+    try {
+      const r = await doFetch(`${apiBase()}/rest/v1/rpc/accept_consents`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_terms_version: CONSENT.terms, p_privacy_version: CONSENT.privacy, p_marketing: false }) });
+      if (r.ok) writeState({ consentPending: null });
+    } catch (_) {}
+  }
   // 회원 확인 — 결과는 state.json 에(인터넷이 끊겼을 때의 여유 판단 근거)
   async function check() {
     const s = loadSession();
@@ -152,6 +164,7 @@ function createLicense(opts = {}) {
     } catch (_) { return offlineState(); }
     if (r.status === 401) { clearSession(); return { ok: false, reason: 'logged_out' }; }
     if (!r.ok || !j || typeof j !== 'object') return offlineState();
+    if (j.ok || j.member) await recordConsent(tok, s.email);
     const out = { ok: !!j.ok, admin: !!j.admin, email: s.email, expiresAt: j.expires_at || null, reason: j.reason || null, deviceLimit: j.device_limit == null ? null : j.device_limit, devices: Array.isArray(j.devices) ? j.devices : [], points: pointsOf(j), kie: kieOf(j) };
     if (out.ok) writeState({ lastOkAt: now(), admin: out.admin, expiresAt: out.expiresAt, email: s.email, points: out.points, kie: out.kie });
     else writeState({ lastOkAt: 0 });
@@ -194,4 +207,4 @@ function forApp() {
   });
 }
 
-module.exports = { createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
+module.exports = { CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };

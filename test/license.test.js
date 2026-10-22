@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createLicense, GRACE_MS } = require('../core/license');
+const { createLicense, GRACE_MS, CONSENT } = require('../core/license');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
@@ -32,6 +32,7 @@ function fakeServer() {
     const auth = (init.headers.Authorization || '').replace('Bearer ', '');
     if (!/^acc\d+$/.test(auth)) return res(401, { message: 'JWT' });
     if (url.endsWith('/rpc/priming_license')) { S.lastDevice = body.p_device_id; return res(200, S.member); }
+    if (url.endsWith('/rpc/accept_consents')) { S.consents = (S.consents || []).concat([body]); return res(S.consentFail ? 500 : 204, {}); }
     if (url.endsWith('/rpc/priming_redeem_code')) {
       if (S.noRedeem) return res(404, {});
       if (body.p_code === 'GOOD-30') return res(200, { ok: true, days: 30, expires_at: '2026-11-22T00:00:00Z' });
@@ -145,6 +146,18 @@ const mk = (S, clock) => {
     S.noRedeem = true;
     ok((await L.redeem('GOOD-30')).reason === 'redeem_unavailable', '서버에 RPC 가 아직 없으면 redeem_unavailable(404)');
     L.logout(); ok((await L.redeem('GOOD-30')).reason === 'logged_out', '로그아웃 상태 = logged_out');
+    // 📜 동의 기록 — 가입 때 체크했으면 세션이 생긴 첫 확인 직후 accept_consents 1회
+    { const S2 = fakeServer(); const m2 = mk(S2, clock); S2.confirm = true;
+      await m2.L.signup('c@x.kr', 'abcdef', { consent: true });
+      ok(!S2.consents, '확인 메일 대기 중엔 동의를 보내지 않는다(세션 없음)');
+      ok((await m2.L.login('c@x.kr', 'right')).ok && S2.consents && S2.consents.length === 1, '첫 로그인 직후 accept_consents 호출');
+      const c0 = S2.consents[0];
+      ok(c0.p_terms_version === CONSENT.terms && c0.p_privacy_version === CONSENT.privacy && c0.p_marketing === false, '약관·개인정보 버전은 설정값 · 마케팅 수신 false');
+      await m2.L.check(); ok(S2.consents.length === 1, '한 번 남기면 다시 보내지 않는다');
+      const S3 = fakeServer(); S3.consentFail = true; const m3 = mk(S3, clock);
+      await m3.L.signup('d@x.kr', 'abcdef', { consent: true }); await m3.L.check(); await m3.L.check();
+      ok(S3.consents.length === 2, '서버가 실패하면 다음 확인 때 다시 시도');
+      const S4 = fakeServer(); const m4 = mk(S4, clock); await m4.L.login('roy@x.kr', 'right'); ok(!S4.consents, '가입으로 동의하지 않은 로그인은 동의를 보내지 않는다'); }
     fs.rmSync(dir, { recursive: true, force: true }); }
 
   console.log('[7] 소스 검사');

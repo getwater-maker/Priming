@@ -11991,7 +11991,7 @@ async function _licFinish(extra) {
   return { ...licPublic(LIC.state), ...extra };
 }
 ipcMain.handle('license-signup', async (_e, a = {}) => {
-  const r = await licApi().signup(a.email, a.password);
+  const r = await licApi().signup(a.email, a.password, { consent: true });   // 화면이 약관 체크 없이는 가입 버튼을 열지 않는다
   if (!r.ok) { log(`🔐 앱 가입 — ${r.reason}`); LIC.state = { ok: false, reason: r.reason, email: r.email || String(a.email || '').trim() }; return licPublic(LIC.state); }
   log('🔐 앱 가입 ✓');
   let ex = {};
