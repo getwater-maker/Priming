@@ -42,6 +42,7 @@ const server = http.createServer((req, res) => {
       { slug: 'a', title: '유튜브 수익화 강의', owned: false, url: 'https://www.primingwave.com/courses/a', summary: '채널 운영 A to Z' },
       { slug: 'b', title: '이미 들은 강의', owned: true, url: 'https://www.primingwave.com/courses/b' },
       { slug: 'c', title: '낯선 주소 강의', owned: false, url: 'https://evil.example.com/c' }] });
+    if (req.url.endsWith('/rpc/get_my_consent')) return send(200, null);
     if (req.url.endsWith('/rpc/accept_consents')) { SRV.consents = (SRV.consents || 0) + 1; return send(204, {}); }
     if (req.url.endsWith('/rpc/priming_redeem_code')) { if (j.p_code === 'CODE-30') { SRV.redeemed = true; return send(200, { ok: true, days: 30, expires_at: '2099-01-01T00:00:00Z' }); } return send(200, { ok: false, reason: 'invalid_code' }); }
     if (req.url.endsWith('/rpc/priming_log')) { SRV.logs.push(j); return send(200, { ok: true, id: SRV.logs.length }); }

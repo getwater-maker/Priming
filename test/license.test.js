@@ -32,6 +32,7 @@ function fakeServer() {
     const auth = (init.headers.Authorization || '').replace('Bearer ', '');
     if (!/^acc\d+$/.test(auth)) return res(401, { message: 'JWT' });
     if (url.endsWith('/rpc/priming_license')) { S.lastDevice = body.p_device_id; return res(200, S.member); }
+    if (url.endsWith('/rpc/get_my_consent')) { if (S.getFail) return res(500, {}); return res(200, S.consentRow === undefined ? null : S.consentRow); }
     if (url.endsWith('/rpc/accept_consents')) { S.consents = (S.consents || []).concat([body]); return res(S.consentFail ? 500 : 204, {}); }
     if (url.endsWith('/rpc/priming_redeem_code')) {
       if (S.noRedeem) return res(404, {});
@@ -157,6 +158,15 @@ const mk = (S, clock) => {
       const S3 = fakeServer(); S3.consentFail = true; const m3 = mk(S3, clock);
       await m3.L.signup('d@x.kr', 'abcdef', { consent: true }); await m3.L.check(); await m3.L.check();
       ok(S3.consents.length === 2, '서버가 실패하면 다음 확인 때 다시 시도');
+      const S5 = fakeServer(); S5.consentRow = { terms_version: CONSENT.terms, privacy_version: CONSENT.privacy, marketing: true }; const m5 = mk(S5, clock);
+      await m5.L.signup('e@x.kr', 'abcdef', { consent: true }); await m5.L.check();
+      ok(!S5.consents && !m5.L.readState().consentPending, '사이트에서 이미 같은 버전으로 동의했으면 덮어쓰지 않는다(대기도 해제)');
+      const S6 = fakeServer(); S6.consentRow = { terms_version: '2025-01-01', privacy_version: CONSENT.privacy, marketing: true }; const m6 = mk(S6, clock);
+      await m6.L.signup('f@x.kr', 'abcdef', { consent: true }); await m6.L.check();
+      ok(S6.consents.length === 1 && S6.consents[0].p_marketing === true, '버전이 다르면 갱신하되 마케팅 동의 값은 그대로 넘긴다');
+      const S7 = fakeServer(); S7.getFail = true; const m7 = mk(S7, clock);
+      await m7.L.signup('g@x.kr', 'abcdef', { consent: true }); await m7.L.check();
+      ok(!S7.consents && m7.L.readState().consentPending, '현재 동의를 읽지 못하면 덮어쓰지 않고 다음에 다시');
       const S4 = fakeServer(); const m4 = mk(S4, clock); await m4.L.login('roy@x.kr', 'right'); ok(!S4.consents, '가입으로 동의하지 않은 로그인은 동의를 보내지 않는다'); }
     fs.rmSync(dir, { recursive: true, force: true }); }
 

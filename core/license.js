@@ -160,12 +160,20 @@ function createLicense(opts = {}) {
       return j.access_token;
     } catch (_) { return s.exp && s.exp > now() ? s.access : null; }
   }
-  // 📜 앱에서 가입하며 체크한 동의를 서버에 남긴다(RPC accept_consents · 실패하면 다음 확인 때 다시 · 마케팅 수신은 항상 false)
+  // 📜 앱에서 가입하며 체크한 동의를 서버에 남긴다 — 먼저 get_my_consent() 로 읽어, 행이 없거나 버전이 다를 때만 accept_consents(실패하면 다음 확인 때 다시).
+  //   accept_consents 는 user_consents 를 덮어쓰므로(마케팅 포함) 이미 사이트에서 동의한 회원의 마케팅 값은 그대로 넘긴다(wise-priming 약속 2026-10-23).
   async function recordConsent(tok, email) {
     const st = readState();
     if (!st.consentPending || String(email || '').toLowerCase() !== st.consentPending) return;
     try {
-      const r = await doFetch(`${apiBase()}/rest/v1/rpc/accept_consents`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_terms_version: CONSENT.terms, p_privacy_version: CONSENT.privacy, p_marketing: false }) });
+      const g = await doFetch(`${apiBase()}/rest/v1/rpc/get_my_consent`, { method: 'POST', headers: H(tok), body: '{}' });
+      if (!g.ok) return;   // 읽지 못하면 덮어쓰지 않는다 — 다음 확인 때 다시
+      let row = await g.json().catch(() => null);
+      if (Array.isArray(row)) row = row[0] || null;
+      const f = (o, k) => (o ? (o[k] != null ? o[k] : o['p_' + k]) : undefined);
+      const cur = row && typeof row === 'object' ? { terms: f(row, 'terms_version'), privacy: f(row, 'privacy_version'), marketing: !!f(row, 'marketing') } : null;
+      if (cur && cur.terms === CONSENT.terms && cur.privacy === CONSENT.privacy) { writeState({ consentPending: null }); return; }
+      const r = await doFetch(`${apiBase()}/rest/v1/rpc/accept_consents`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_terms_version: CONSENT.terms, p_privacy_version: CONSENT.privacy, p_marketing: cur ? cur.marketing : false }) });
       if (r.ok) writeState({ consentPending: null });
     } catch (_) {}
   }
