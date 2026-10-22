@@ -24,6 +24,8 @@ const SITE_ADMIN = 'https://www.primingwave.com/admin/priming';   // 👑 관리
 const CONSENT = { terms: '2026-10-06', privacy: '2026-10-08' };
 const GRACE_MS = 7 * 24 * 3600 * 1000;
 
+// 앱이 열어 주는 사이트 주소는 우리 도메인(https)만 — 서버 값에 낯선 주소가 섞여도 열지 않는다
+const isSiteUrl = (u) => { try { const x = new URL(String(u)); return x.protocol === 'https:' && /^(www\.)?primingwave\.com$/.test(x.hostname); } catch (_) { return false; } };
 const apiBase = () => process.env.PM_LICENSE_API || SUPABASE_URL;
 const updateBase = () => process.env.PM_UPDATE_BASE || UPDATE_BASE;
 const defaultDir = () => process.env.PM_LICENSE_DIR || path.join(os.homedir(), '.priming-maker', 'license');
@@ -119,6 +121,31 @@ function createLicense(opts = {}) {
     if (!r.ok || !j || typeof j !== 'object') return { ok: false, reason: 'server' };
     return j.ok ? { ok: true, days: j.days == null ? null : Number(j.days), expiresAt: j.expires_at || null } : { ok: false, reason: String(j.reason || 'invalid_code') };
   }
+  // 🆕 구글 로그인(PKCE) — 돌아온 code 를 세션으로 맞바꾼다(core/license-oauth 가 code 를 받아 온다) · 구글로 들어온 사람도 앱에서 약관 동의를 한 번 남긴다
+  async function exchangeCode(code, verifier) {
+    let r;
+    try { r = await doFetch(`${apiBase()}/auth/v1/token?grant_type=pkce`, { method: 'POST', headers: H(), body: JSON.stringify({ auth_code: String(code || ''), code_verifier: String(verifier || '') }) }); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.access_token) return { ok: false, reason: 'google_failed' };
+    const sess = sessFrom(j);
+    saveSession(sess);
+    if (sess.email) writeState({ consentPending: String(sess.email).toLowerCase() });
+    return { ok: true };
+  }
+  // 🛍 이 회원이 가진 상품 + 판매 중 강의(앱 안 업셀 안내) — RPC priming_products · 서버에 없으면(404) null = 안내를 숨긴다
+  async function products() {
+    const tok = await accessToken();
+    if (!tok) return null;
+    try {
+      const r = await doFetch(`${apiBase()}/rest/v1/rpc/priming_products`, { method: 'POST', headers: H(tok), body: '{}' });
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null);
+      if (!j || j.ok === false) return null;
+      const courses = (Array.isArray(j.courses) ? j.courses : []).filter((c) => c && c.title && isSiteUrl(c.url)).map((c) => ({ slug: String(c.slug || ''), title: String(c.title), owned: !!c.owned, url: String(c.url), summary: c.summary ? String(c.summary) : '' }));
+      return { priming: { owned: !!(j.priming && j.priming.owned), expiresAt: (j.priming && j.priming.expires_at) || null }, courses };
+    } catch (_) { return null; }
+  }
   // 유효한 access token(1분 안에 끝나면 refresh) — 없거나 갱신 실패면 null
   async function accessToken() {
     const s = loadSession();
@@ -194,7 +221,7 @@ function createLicense(opts = {}) {
     };
   }
 
-  return { deviceId, login, signup, redeem, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
+  return { deviceId, login, signup, redeem, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
 }
 
 /** Electron 앱에서 쓰는 기본 묶음 — safeStorage 는 app ready 뒤에만 쓸 수 있다(부르는 쪽이 whenReady 를 기다린다) */
@@ -207,4 +234,4 @@ function forApp() {
   });
 }
 
-module.exports = { CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
+module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };

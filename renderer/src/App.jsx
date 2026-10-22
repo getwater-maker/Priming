@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import Upsell from './Upsell.jsx';
 import { createPortal } from 'react-dom';
 import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
 import api from './lib/ipc.js';
@@ -7539,6 +7540,7 @@ export default function App() {
                 <Hint>PC 를 바꿨다면 primingwave.com 「🖥 내 기기」에서 쓰지 않는 PC 를 해제하세요.</Hint>
                 {lic.owner && <div className="frow"><label>👑 관리자</label><span style={{ flex: 1 }} className="meta">회원·기기 · 크레딧 지급 · 오류 로그</span>
                   <button className="ghost" data-testid="open-admin" style={{ flex: '0 0 auto' }} onClick={() => api.licenseOpenAdmin()}>관리자 페이지 열기</button></div>}
+                {!lic.admin && <Upsell />}
                 <div className="frow"><label>오류 로그</label>
                   <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" data-testid="autolog" checked={lic.autoLog !== false} onChange={async (e) => setLic(await api.licenseSetAutoLog(e.target.checked))} /> 오류가 나면 로그를 자동으로 보냅니다</label></div>
                 <Hint>오류가 난 앞뒤 로그(최근 200줄)를 보내 문제를 고치는 데 씁니다. API 키·이메일·전화번호·사용자 폴더 이름은 <b>지운 뒤</b> 보내고, 30일 뒤 지웁니다.</Hint>

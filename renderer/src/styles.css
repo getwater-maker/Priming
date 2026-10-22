@@ -1757,3 +1757,16 @@ main .card h2{top:var(--work-top-height,0px)}
 .licwarn{margin:-4px 0 0;color:#b4412b;font-size:12px}
 .licagree{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--base)}
 .licagree input{margin-top:3px;padding:0}
+
+/* 🔐 구글로 계속하기 · 🛍 교차 노출 안내(v0.9.100) */
+.licgoogle{display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#3c4043;border:1px solid #dadce0;font-weight:600;padding:10px 12px}
+.licgoogle:hover:not(:disabled){background:#f6f8fe;color:#3c4043;border-color:#c6d2f0}
+.licgoogle:disabled{opacity:.75;cursor:default}
+.licgcancel{align-self:center;padding:4px 14px}
+.licgnote{margin:0;font-size:11.5px;line-height:1.55;color:var(--muted,#7a6c58)}
+.licor{display:flex;align-items:center;gap:8px;color:#a39683;font-size:11.5px}
+.licor::before,.licor::after{content:"";flex:1;height:1px;background:#e2d5c0}
+.upsell{display:flex;flex-direction:column;gap:6px;padding:10px 12px;margin:8px 0;background:#fbf3e6;border:1px solid #ecd9ba;border-radius:10px;font-size:13px}
+.upsell .upitem{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:#fff;color:var(--strong);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.upsell .upitem:hover{background:#fffaf0;border-color:var(--accent);color:var(--strong)}
+.upsell .upt{font-weight:600}.upsell .ups{font-size:12px;color:var(--base);font-weight:400}.upsell .upgo{font-size:11.5px;color:var(--accent-d)}

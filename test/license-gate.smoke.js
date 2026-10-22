@@ -38,6 +38,10 @@ const server = http.createServer((req, res) => {
       if (who === 'good@test') return send(200, { ok: true, member: true, admin: false, expires_at: '2099-12-31T00:00:00Z', device_limit: 2, devices: [{ device_id: j.p_device_id, name: j.p_device_name, last_seen: '2026-10-15T00:00:00Z' }] });
       return send(401, { msg: 'jwt' });
     }
+    if (req.url.endsWith('/rpc/priming_products')) return send(200, { ok: true, priming: { owned: false }, courses: [
+      { slug: 'a', title: '유튜브 수익화 강의', owned: false, url: 'https://www.primingwave.com/courses/a', summary: '채널 운영 A to Z' },
+      { slug: 'b', title: '이미 들은 강의', owned: true, url: 'https://www.primingwave.com/courses/b' },
+      { slug: 'c', title: '낯선 주소 강의', owned: false, url: 'https://evil.example.com/c' }] });
     if (req.url.endsWith('/rpc/accept_consents')) { SRV.consents = (SRV.consents || 0) + 1; return send(204, {}); }
     if (req.url.endsWith('/rpc/priming_redeem_code')) { if (j.p_code === 'CODE-30') { SRV.redeemed = true; return send(200, { ok: true, days: 30, expires_at: '2099-01-01T00:00:00Z' }); } return send(200, { ok: false, reason: 'invalid_code' }); }
     if (req.url.endsWith('/rpc/priming_log')) { SRV.logs.push(j); return send(200, { ok: true, id: SRV.logs.length }); }
@@ -61,6 +65,7 @@ async function launch() {
     A.win.on('pageerror', (e) => errs.push(e.message));
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 20000 });
     ok(!(await A.win.$('[data-testid="app-title"]')), '① 로그인 전: 관문만 보이고 앱 화면은 없다');
+    if (process.env.SHOT) await A.win.screenshot({ path: process.env.SHOT });
     const blocked = await A.win.evaluate(async () => { try { await window.api.listThumbs(); return 'passed'; } catch (e) { return e.message; } });
     ok(/로그인이 필요/.test(blocked), '① main 이 로그인 전 IPC 를 거부: ' + blocked.slice(-40));
 
@@ -135,6 +140,7 @@ async function launch() {
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
     ok(!fs.existsSync(path.join(LDIR, 'session.bin')), '⑧ 로그아웃 → 관문 · 세션 파일 삭제');
     // ⑨ 🆕 앱 안 회원가입 + 가입 코드(v0.9.98)
+    ok(await A.win.locator('[data-testid="license-google"]').isVisible(), '⑨ 「Google 로 계속하기」 버튼이 맨 위에 보인다');
     await A.win.click('[data-testid="license-tab-signup"]');
     const su = A.win.locator('[data-testid="license-signup"]');
     await A.win.fill('[data-testid="license-email"]', 'newbie@test.kr');
@@ -147,6 +153,8 @@ async function launch() {
     ok(!(await su.isDisabled()), '⑨ 입력·동의가 끝나면 가입 버튼이 열린다');
     await su.click(); await sleep(900);
     ok(SRV.signups === 1 && /이용 기간이 없습니다/.test(await A.win.textContent('[data-testid="license-msg"]')), '⑨ 코드 없이 가입 → 계정만 생기고 이용 기간 없음 안내');
+    { const items = await A.win.locator('[data-testid="upsell-item"]').allTextContents();
+      ok(items.length === 1 && /유튜브 수익화 강의/.test(items[0]), '⑨ 이용 기간이 없는 회원에게 안 들은 강의만 안내(들은 강의·낯선 주소 제외)'); }
     await A.win.fill('[data-testid="license-code"]', 'WRONG');
     await A.win.click('[data-testid="license-redeem"]'); await sleep(700);
     ok(/맞지 않습니다/.test(await A.win.textContent('[data-testid="license-code-msg"]')), '⑨ 틀린 코드 안내');

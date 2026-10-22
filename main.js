@@ -142,7 +142,7 @@ const LIC = {
   enforce: process.env.PM_LICENSE_FORCE === '1' || (app.isPackaged && !process.env.PM_UI_SMOKE),
   state: null, ready: null, L: null,
 };
-const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
+const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-google', 'license-google-cancel', 'license-products', 'license-open-url', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
 function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
 // 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
@@ -12003,6 +12003,28 @@ ipcMain.handle('license-redeem', async (_e, a = {}) => {
   log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`);
   return _licFinish(c.ok ? { redeemDays: c.days } : { redeemReason: c.reason });
 });
+// 🆕 구글로 계속하기(v0.9.100) — 브라우저 로그인 + 127.0.0.1 복귀(PKCE · core/license-oauth) → 세션 → 회원 확인. 진행 중 하나만.
+let _googleLogin = null;
+ipcMain.handle('license-google', async () => {
+  if (_googleLogin) return { ...licPublic(LIC.state), reason: 'google_busy' };
+  const OA = require('./core/license-oauth');
+  const pk = OA.makePkce();
+  const lis = await OA.listen();
+  _googleLogin = lis;
+  try {
+    if (!lis.port) { log('🔐 구글 로그인 — 돌아올 포트가 모두 사용 중'); return licPublic({ ok: false, reason: 'google_failed' }); }
+    try { await shell.openExternal(OA.authorizeUrl(licApi().apiBase(), lis.port, pk.challenge)); } catch (_) { lis.cancel(); }
+    const res = await lis.wait;
+    if (!res.code) { log(`🔐 구글 로그인 — ${res.error}`); return licPublic({ ok: false, reason: res.error === 'cancelled' ? 'logged_out' : res.error === 'timeout' ? 'google_timeout' : 'google_failed' }); }
+    const x = await licApi().exchangeCode(res.code, pk.verifier);
+    if (!x.ok) { log(`🔐 구글 로그인 — ${x.reason}`); return licPublic({ ok: false, reason: x.reason }); }
+    log('🔐 구글 로그인 ✓');
+    return _licFinish({});
+  } finally { _googleLogin = null; }
+});
+ipcMain.handle('license-google-cancel', () => { if (_googleLogin) _googleLogin.cancel(); return true; });
+ipcMain.handle('license-products', async () => licApi().products());
+ipcMain.handle('license-open-url', (_e, url) => { try { if (!require('./core/license').isSiteUrl(url)) return false; shell.openExternal(String(url)); return true; } catch (_) { return false; } });
 ipcMain.handle('license-logout', async () => { licApi().logout(); LIC.state = { ok: false, reason: 'logged_out' }; log('🔐 로그아웃'); return licPublic(LIC.state); });
 ipcMain.handle('license-set-autolog', async (_e, on) => { licApi().writeState({ autoLog: on !== false }); log(`📮 오류 로그 자동 전송 ${on !== false ? '켬' : '끔'}`); return licPublic(LIC.state); });
 ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고(수동) — 그날 로그 전체(끝 64KB) + 회원이 쓴 설명

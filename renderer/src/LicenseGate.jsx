@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Upsell from './Upsell.jsx';
 
 // 🔐 회원 로그인 관문(v0.9.26 · 로이 2026-10-15 「결제 회원만 사용」 · docs/회원제-설계.md §3)
 //   회원 확인을 통과해야 App 을 그린다(App 의 처음 IPC 들이 로그인 전에 돌지 않게 — main 도 LIC_OPEN 밖 IPC 를 거부한다).
@@ -17,6 +18,9 @@ const REASON = {
   already_registered: '이미 가입된 이메일입니다. 「로그인」으로 들어가세요. (구글로 가입하셨다면 사이트 「내 기기」에서 앱 비밀번호를 정하세요.)',
   confirm_mail: '가입 확인 메일을 보냈습니다. 메일의 확인 링크를 누른 뒤 「로그인」으로 들어오세요. 이미 가입한 주소라면 메일이 오지 않으니 「로그인」을 눌러 보세요.',
   rate_limited: '시도가 너무 많습니다. 잠시 뒤 다시 시도하세요.',
+  google_failed: '구글 로그인을 마치지 못했습니다. 다시 시도하세요.',
+  google_timeout: '3분 안에 구글 로그인이 끝나지 않았습니다. 다시 시도하세요.',
+  google_busy: '구글 로그인이 이미 진행 중입니다. 열린 브라우저 창에서 마치세요.',
 };
 const CODE_REASON = {
   invalid_code: '가입 코드가 맞지 않습니다. 받은 코드를 다시 확인하세요.',
@@ -29,7 +33,7 @@ const CODE_REASON = {
   offline: '인터넷에 연결할 수 없습니다.',
   server: '서버에 잠시 연결할 수 없습니다. 다시 시도하세요.',
 };
-const FORM_REASONS = new Set(['bad_email', 'weak_password', 'already_registered', 'confirm_mail', 'rate_limited']);
+const FORM_REASONS = new Set(['google_failed', 'google_timeout', 'google_busy', 'bad_email', 'weak_password', 'already_registered', 'confirm_mail', 'rate_limited']);
 
 export default function LicenseGate({ children }) {
   const api = window.api;
@@ -41,6 +45,7 @@ export default function LicenseGate({ children }) {
   const [pw2, setPw2] = useState('');
   const [code, setCode] = useState('');
   const [agree, setAgree] = useState(false);
+  const [gBusy, setGBusy] = useState(false);   // 브라우저에서 구글 로그인 진행 중
   useEffect(() => { (async () => { try { const s = await api.licenseState(); setSt(s); if (s && s.email) setEmail(s.email); } catch (e) { setSt({ ok: false, enforced: true, reason: 'error' }); } })(); }, []);
   if (!st) return <div className="licgate"><div className="liccard"><b>🎬 Priming</b><p className="licmsg">회원 확인 중…</p></div></div>;
   if (st.ok) return children;
@@ -52,11 +57,20 @@ export default function LicenseGate({ children }) {
   const signup = () => { if (canSignup) go(() => api.licenseSignup(email.trim(), pw, code.trim())); };
   const redeem = () => { if (!busy && code.trim()) go(() => api.licenseRedeem(code.trim())); };
   const needCode = loggedIn && (st.reason === 'not_member' || st.reason === 'expired');
+  const google = async () => { if (gBusy || busy) return; setGBusy(true); try { setSt(await api.licenseGoogle()); } catch (_) { setSt({ ...st, ok: false, reason: 'google_failed' }); } finally { setGBusy(false); } };
   const sw = (m) => { setMode(m); setPw(''); setPw2(''); };
   return (
     <div className="licgate" data-testid="license-gate">
       <div className="liccard">
         <h2>🎬 Priming {mode === 'signup' && !loggedIn ? '회원가입' : '로그인'}</h2>
+        {!loggedIn && (<>
+          <button className="licgoogle" data-testid="license-google" disabled={busy || gBusy} onClick={google}>
+            <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.8-4.6l-7.9-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.9l-7.9 6.2C6.5 42.6 14.6 48 24 48z"/></svg>
+            {gBusy ? '브라우저에서 구글 로그인을 마치세요…' : 'Google 로 계속하기'}</button>
+          {gBusy ? <button className="ghost licgcancel" data-testid="license-google-cancel" onClick={() => api.licenseGoogleCancel()}>취소</button>
+            : <p className="licgnote">처음이면 가입이, 이미 가입했다면 로그인이 한 번에 됩니다. 계속하면 이용약관·개인정보 처리방침에 동의한 것으로 봅니다. primingwave.com 과 같은 계정입니다.</p>}
+          <div className="licor"><span>또는 이메일로</span></div>
+        </>)}
         {!loggedIn && <div className="lictabs">
           <button className={mode === 'login' ? 'on' : ''} data-testid="license-tab-login" onClick={() => sw('login')}>로그인</button>
           <button className={mode === 'signup' ? 'on' : ''} data-testid="license-tab-signup" onClick={() => sw('signup')}>회원가입</button>
@@ -82,7 +96,7 @@ export default function LicenseGate({ children }) {
         </>)}
         {!loggedIn && mode === 'login' && (<>
           <input data-testid="license-email" type="email" placeholder="이메일" value={email} autoFocus={!email} onChange={(e) => setEmail(e.target.value)} />
-          <input data-testid="license-password" type="password" placeholder="앱 비밀번호" value={pw} autoFocus={!!email}
+          <input data-testid="license-password" type="password" placeholder="비밀번호" value={pw} autoFocus={!!email}
             onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit(); }} />
           <button data-testid="license-login" disabled={busy || !email.trim() || !pw} onClick={submit}>{busy ? '확인 중…' : '로그인'}</button>
         </>)}
@@ -91,12 +105,13 @@ export default function LicenseGate({ children }) {
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) redeem(); }} />
           <button data-testid="license-redeem" disabled={busy || !code.trim()} onClick={redeem}>{busy ? '확인 중…' : '가입 코드로 이용 시작'}</button>
         </>)}
+        {loggedIn && <Upsell />}
         {loggedIn && (<div className="licrow">
           <button data-testid="license-retry" disabled={busy} onClick={() => go(() => api.licenseRecheck())}>{busy ? '확인 중…' : '다시 확인'}</button>
           <button className="ghost" disabled={busy} onClick={() => go(() => api.licenseLogout())}>다른 계정으로</button>
         </div>)}
         <p className="licfoot">
-          구글로 가입하셨다면 사이트의 「🖥 내 기기」에서 앱 비밀번호를 먼저 정하세요.{' '}
+          이용 기간·기기 관리는 사이트에서 합니다.{' '}
           <a href="#" onClick={(e) => { e.preventDefault(); api.licenseOpenSite(); }}>primingwave.com 열기</a>
         </p>
       </div>
