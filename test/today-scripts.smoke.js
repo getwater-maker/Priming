@@ -25,8 +25,9 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const txt = await win.locator('[data-testid="today-pick"]').textContent();
     const rows = await win.locator('[data-testid="today-pick"] input[type="checkbox"]').count();
     console.log(`  (대본 ${rows}편)`);
-    ok(/오늘 작업할 대본 \(\d{4}-\d{2}-\d{2}\)/.test(txt), '창 제목에 오늘 날짜(KST)');
+    ok(/오늘 작업할 대본\s*\d{4}-\d{2}-\d{2}/.test(txt), '창 제목에 오늘 날짜(KST)');
     ok(rows > 0 || /아직 안 만든 대본이 없습니다/.test(txt), '목록 또는 「없습니다」');
+    if (process.env.SHOT) await win.locator('[data-testid="today-pick"]').screenshot({ path: process.env.SHOT });
     const addOn = !(await win.locator('[data-testid="today-add"]').isDisabled());
     ok(rows > 0 ? addOn : !addOn, '고른 대본이 있을 때만 「작업큐에 넣기」가 눌린다');
     await win.click('[data-testid="today-pick"] button:has-text("취소")');

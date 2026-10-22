@@ -7132,24 +7132,37 @@ export default function App() {
 
       {todayPick && (
         <div className="modal-bg show" data-testid="today-pick">
-          <div className="modal-card wide" style={{ maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
-            <h3>📅 오늘 작업할 대본{todayPick.today ? ` (${todayPick.today})` : ''}</h3>
-            {todayPick.loading ? <div className="meta">채널 대본 폴더를 찾는 중…</div> : (<>
-              <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {!(todayPick.items || []).length && <div className="meta">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
-                {(todayPick.items || []).map((x) => (
-                  <label key={x.path} className="frow" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }} title={x.path}>
-                    <input type="checkbox" checked={!!todayPick.sel[x.path]} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
-                    <span style={{ flex: '0 0 150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.channel}</span>
-                    <span style={{ flex: '0 0 48px' }}>{x.date.slice(5).replace('-', '')}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span>
-                    <span className="meta" style={{ flex: '0 0 auto' }}>{x.inQueue ? '이미 큐에 있음' : x.waiting ? `뒤로 ${x.waiting}편` : ''}</span>
-                  </label>
-                ))}
-                {(todayPick.empty || []).length > 0 && <div className="meta" style={{ marginTop: 6 }}>없음: {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
+          <div className="modal-card wide today-card">
+            <div className="today-head">
+              <h3>📅 오늘 작업할 대본</h3>
+              {todayPick.today && <span className="today-date">{todayPick.today}</span>}
+            </div>
+            {todayPick.loading ? <div className="today-empty">채널 대본 폴더를 찾는 중…</div> : (<>
+              <div className="today-sub">
+                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path]).length} / {(todayPick.items || []).length}편 선택</span>
+                {(todayPick.items || []).length > 0 && (() => {
+                  const all = (todayPick.items || []).every((x) => todayPick.sel[x.path]);
+                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
+                })()}
               </div>
+              <div className="today-list">
+                {!(todayPick.items || []).length && <div className="today-empty">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
+                {(todayPick.items || []).map((x) => {
+                  const on = !!todayPick.sel[x.path];
+                  return (
+                    <label key={x.path} className={`today-row${on ? ' on' : ''}`} title={x.path}>
+                      <input type="checkbox" checked={on} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
+                      <span className="today-ch">{x.channel}</span>
+                      <span className="today-md">{x.date.slice(5).replace('-', '')}</span>
+                      <span className="today-name">{x.name}</span>
+                      {x.inQueue ? <span className="today-tag q">이미 큐에 있음</span> : x.waiting ? <span className="today-tag">뒤로 {x.waiting}편</span> : null}
+                    </label>
+                  );
+                })}
+              </div>
+              {(todayPick.empty || []).length > 0 && <div className="today-none"><b>없음</b> {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
             </>)}
-            <div className="modal-actions">
+            <div className="modal-actions today-actions">
               <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
               <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path])} onClick={addTodayScripts}>작업큐에 넣기</button>
             </div>

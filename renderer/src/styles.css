@@ -1725,3 +1725,26 @@ main .card h2{top:var(--work-top-height,0px)}
 .eqgrid .crow.stack>.l{font-size:12px}
 .eqgrid textarea{width:100%;box-sizing:border-box;resize:none}
 .basicvoice .spkgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px;max-height:104px;overflow-y:auto;margin-top:4px}
+
+/* 📅 오늘 작업할 대본 고르기 창(v0.9.96 · 로이 2026-10-23 디자인 다시) — 카드 줄 + 채널 알약 + 날짜 칩 */
+.modal-card.today-card{width:760px;max-width:94vw;max-height:78vh;display:flex;flex-direction:column;overflow:hidden;padding:20px 22px 16px}
+.today-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.today-head h3{margin:0}
+.today-date{font-size:12px;font-weight:600;color:var(--accent-d);background:#f3e7d5;border-radius:999px;padding:3px 10px}
+.today-sub{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--base);margin:6px 0 8px}
+.today-all{padding:3px 10px;font-size:12px}
+.today-list{overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:2px 4px 2px 0}
+.today-row{display:grid;grid-template-columns:18px minmax(110px,170px) 52px minmax(0,1fr) auto;align-items:center;gap:10px;
+  padding:9px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:background .12s,border-color .12s}
+.today-row:hover{border-color:var(--accent)}
+.today-row.on{background:#fbf3e6;border-color:var(--accent)}
+.today-row input{margin:0;accent-color:var(--accent-d)}
+.today-ch{font-weight:600;color:var(--strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.today-md{font-variant-numeric:tabular-nums;font-size:12px;text-align:center;color:var(--accent-d);background:#f3e7d5;border-radius:6px;padding:2px 0}
+.today-name{color:var(--base);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.today-tag{font-size:11.5px;color:#8a7a66;background:#f3ede3;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.today-tag.q{color:#a0522d;background:#f7e3d6}
+.today-empty{padding:28px 0;text-align:center;color:#8a7a66}
+.today-none{margin-top:10px;padding:8px 10px;font-size:12px;line-height:1.5;color:#8a7a66;background:#f7f2e9;border-radius:8px}
+.today-none b{color:var(--strong);margin-right:4px}
+.modal-card.today-card .today-actions{margin-top:14px;flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px}

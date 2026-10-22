@@ -21,12 +21,13 @@ function normFx(v) {
 }
 const fxIsOff = (f) => !f || KINDS.every((k) => !f[k]);
 
-/** 강도별 파라미터(느리고 약하게). level 1~3 */
+/** 강도별 파라미터(느리고 부드럽게). level 1~3 — 🔴 v0.7.98: 3(강)이 눈에 안 보인다는 로이 지적(안개 3 = 밝기 +4/255)으로 **보이는 세기**로 올렸다.
+ *   기준 = 같은 그림에 입혀 원본과 나란히 봤을 때: 1 = 은은(옛 3단계 수준) · 2 = 보임 · 3 = 뚜렷(그래도 깜박이지 않고 천천히). 측정·그림은 작업노트 2026-10 「효과 세기」. */
 const P = {
-  fog: { opacity: [0.05, 0.08, 0.12], speed: [4, 5, 7], speed2: [3, 4, 5] },     // opacity = 밝기에 더하는 비율(screen) · speed = 초당 픽셀
-  dust: { op: [0.35, 0.5, 0.7], rise: [5, 7, 9], sway: [16, 20, 24] },         // 위로 천천히 · 좌우로 살랑
-  firefly: { op: [0.45, 0.65, 0.9], rise: [3, 4, 5], sway: [34, 42, 50] },
-  flicker: { amp: [0.004, 0.007, 0.011] },                                         // 밝기 흔들림(0~1 기준 ±)
+  fog: { opacity: [0.12, 0.25, 0.40], speed: [4, 5, 7], speed2: [3, 4, 5] },     // opacity = 밝기에 더하는 비율(screen) · speed = 초당 픽셀
+  dust: { op: [0.5, 0.75, 1.0], rise: [5, 7, 9], sway: [16, 20, 24] },         // 위로 천천히 · 좌우로 살랑
+  firefly: { op: [0.55, 0.8, 1.0], rise: [3, 4, 5], sway: [34, 42, 50] },
+  flicker: { amp: [0.010, 0.020, 0.035] },                                         // 밝기 흔들림(0~1 기준 ±)
 };
 const clampLv = (l) => Math.max(1, Math.min(3, l | 0)) - 1;
 
@@ -111,12 +112,12 @@ async function prepareTextures(ff, tmpDir, fx) {
   if (fx.fog) { fs.writeFileSync(path.join(tmpDir, 'fx_fog.png'), fogPng()); need.fog = 'fx_fog.png'; }
   if (fx.dust) {
     // 먼지 — 작고 흐릿한 점 많이 + 아주 드문 조금 큰 점
-    fs.writeFileSync(path.join(tmpDir, 'fx_dust.png'), dotsPng(3, [{ n: 900, sigma: [0.7, 1.3], peak: [90, 200] }, { n: 80, sigma: [1.6, 2.4], peak: [60, 120] }]));
+    fs.writeFileSync(path.join(tmpDir, 'fx_dust.png'), dotsPng(3, [{ n: 700, sigma: [1.1, 2.0], peak: [110, 220] }, { n: 60, sigma: [2.4, 3.6], peak: [80, 150] }]));
     need.dust = 'fx_dust.png';
   }
   if (fx.firefly) {
     // 반딧불 — 드문(타일에 24개) 크고 부드러운 빛 번짐 + 밝은 심지
-    fs.writeFileSync(path.join(tmpDir, 'fx_firefly.png'), dotsPng(4, [{ n: 24, sigma: [2.6, 4.6], peak: [150, 255] }, { n: 24, sigma: [0.9, 1.4], peak: [200, 255] }]));
+    fs.writeFileSync(path.join(tmpDir, 'fx_firefly.png'), dotsPng(4, [{ n: 24, sigma: [3.6, 6.0], peak: [150, 255] }, { n: 24, sigma: [1.2, 1.8], peak: [200, 255] }]));
     need.firefly = 'fx_firefly.png';
   }
   return need;
