@@ -71,6 +71,21 @@ function fakeServer(state) {
     const _f0 = M.indexOf('🎤 빠진 음성 한 번 보충'); const fill = M.slice(_f0, M.indexOf('const incomplete = [];', _f0));
     ok(/omniWake\(ttsMgr\);\s*await P\.fillTtsList/.test(fill) && /fillTtsList\([^;]+\);\s*await omniRelease\(ttsMgr\)/.test(fill), '보충 앞 omniWake · 뒤 omniRelease'); }
 
+  console.log('[6] ⏱ 합성 요청에 「앱이 기다리는 초」를 싣는다(v0.9.113 — 서버가 포기된 요청을 버린다)');
+  { let hdr = null;
+    const srv = http.createServer((req, res) => { if (req.url === '/tts') hdr = req.headers['x-client-timeout']; res.writeHead(500, { 'Content-Type': 'application/json' }); res.end('{"detail":"x"}'); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const p = new Cls({ baseUrl: 'http://127.0.0.1:' + srv.address().port, timeout: 45000 });
+    p.ready = true;   // init(/health) 없이 바로 합성 요청만 본다
+    try { await p.synthesize('가나다', {}); } catch (_) {}
+    srv.close();
+    ok(hdr === '45', 'X-Client-Timeout = provider 시간초과(45초) — 실제 ' + hdr);
+    const api = 'D:\\TTS_Model\\omnivoice\\api.py';
+    if (fs.existsSync(api)) {
+      const A = fs.readFileSync(api, 'utf8');
+      ok(/x-client-timeout/.test(A) && /_GPU_LOCK\.acquire\(timeout=left\)/.test(A) && /status_code=408/.test(A), '이 PC 서버(api.py)가 기다릴 시간이 지난 요청을 408 로 버린다');
+    } else console.log('  · 이 PC 에 음성 서버가 없어 api.py 검사는 건너뜀'); }
+
   console.log(`\n${fail ? '❌' : '✅'} omni-release — ${pass} 통과 / ${fail} 실패`);
   process.exitCode = fail ? 1 : 0;   // process.exit 는 윈도우에서 닫히는 fetch 핸들과 부딪혀 libuv 단언으로 죽는다
 })().catch((e) => { console.error(e); process.exitCode = 1; });
