@@ -1608,6 +1608,7 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .qrow.s-running{border-color:#5a9;background:#eefaf4}
 .qrow.s-failed{border-color:#d66;background:#fdeeee}
 .qrow .qbadges{display:flex;gap:3px;flex:0 0 auto}
+.qrow .qnum{flex:0 0 auto;min-width:1.4em;text-align:right;font-weight:700;color:#8a7a5a;font-variant-numeric:tabular-nums}
 .qb{font-size:11px;padding:0 6px;border-radius:9px;white-space:nowrap;border:1px solid transparent}
 .qb.idle{color:#998;background:#f4f0ea}
 .qb.run{color:#1f6b4c;background:#dff3e8;border-color:#a7d8bf;font-weight:700}

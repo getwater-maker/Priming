@@ -8073,13 +8073,14 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove }) 
     <div className="qlist" data-testid="q-list">
       <span className="qlabel">작업 순서 ({items.length}){mixed ? <span className="qmix" title="채널이 섞여 있습니다 — 목소리·스타일·자막·완성 종류는 대본마다 자기 채널, 이미지·비디오 도구는 헤더에서 고른 것"> · 🔀 채널 {chs.size}개</span> : null}</span>
       <div className="qrows">
-        {items.map((it) => {
+        {items.map((it, qi) => {
           const ch = (it.settings && it.settings.presetName) || '';
           const run = it.run && it.run.startedAt ? ((Number(it.run.elapsedMs) || 0) + (it.run.endedAt || Date.now()) - it.run.startedAt) : null;
           return (
             <div key={it.id} data-testid="q-row" className={'qrow' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
               title={(it.file || it.title) + (ch ? `\n채널: ${ch}` : '') + (it.upload && it.upload.url ? `\n${it.upload.url}` : '') + (it.upload && it.upload.error ? `\n업로드 실패: ${it.upload.error}` : '')}
               onClick={() => { if (!it.active) onSelect(it.id); }}>
+              <span className="qnum" data-testid="q-num">{qi + 1}</span>{/* 🔢 순번(v0.9.110 · 로이 「앞부분에 넘버링」) */}
               <span className="qbadges">{queueBadges(it, makeProg, stageRun).map(([t, c], i) => <span key={i} className={'qb ' + c}>{t}</span>)}</span>
               {mixed && ch ? <span className={'qch' + (ch === headerCh ? '' : ' other')}>{short(ch)}</span> : null}
               <span className="qttl">{it.title}</span>

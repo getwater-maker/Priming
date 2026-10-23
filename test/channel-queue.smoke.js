@@ -69,6 +69,9 @@ const qLen = (win) => win.evaluate(async () => { const r = await window.api.list
     const chips = await win.locator('[data-testid="q-row"]').evaluateAll((els) => els.map((e) => e.textContent));
     ok(chips.length === 2 && chips.some((t) => t.includes(cur.replace(/^\d+_/, ''))) && chips.some((t) => t.includes(other.replace(/^\d+_/, ''))), '작업 순서 줄에 채널 이름이 보인다: ' + chips.map((t) => t.replace(/s+/g, ' ')).join(' / '));
 
+    const nums = await win.locator('[data-testid="q-num"]').evaluateAll((els) => els.map((e) => e.textContent.trim()));
+    ok(nums.join(',') === '1,2', '🔢 작업 순서 줄 앞에 순번 1·2 (v0.9.110): ' + nums.join(','));
+
     console.log('[4] A 를 누르면 헤더가 A 채널로');
     await win.locator('[data-testid="q-row"]').first().click(); await win.waitForTimeout(1500);
     ok(await sel.inputValue() === cur, `헤더 채널 = 「${cur}」`);
