@@ -5934,6 +5934,55 @@ ipcMain.handle('list-thumbs', async () => {
   if (!files.length) files = await TF.findThumbs(root, '', 3, true);
   return { ok: true, key, root, files, msg: files.length ? '' : '선택한 폴더에 이미지가 없습니다 (PNG · JPG · WebP)' };
 });
+// 🖼 썸네일 편집기(v0.9.102 · 로이 2026-10-23 · 설계 docs/썸네일-편집기-설계.md) — 읽기: 바탕·패키징 문구·사이드카 / 쓰기: 완성본 폴더(기존 파일은 _캔바원본\\ 으로 보존)뿐
+let _thumbEditOk = new Set();   // 이번에 편집기가 열어 준 그림 경로(렌더러가 임의 파일을 읽지 못하게)
+ipcMain.handle('thumb-edit-open', async () => {
+  const TE = require('./core/thumb-edit'), PK = require('./core/yt-packaging');
+  const sp = S.scriptPath, key = TE.keyOf(sp), root = thumbRoot();
+  if (!sp || !key) return { ok: false, msg: '대본 이름 앞에 [약칭_MMDD] 가 있어야 썸네일을 찾을 수 있습니다' };
+  if (!root || !fs.existsSync(root)) return { ok: false, msg: '썸네일 폴더가 없습니다 — ⚙ 설정 → 📁 폴더에서 고르세요' };
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) return { ok: false, msg: `「${key}」 썸네일 완성본을 찾지 못했습니다(저장할 폴더를 알 수 없어 편집기를 열지 않습니다)` };
+  let pack = {};
+  const pf = PK.findPackagingFile(sp);
+  if (pf) { try { pack = TE.parseThumbText(await fs.promises.readFile(pf, 'utf8')); } catch (_) {} }
+  const codex = TE.findCodexBases(path.dirname(root), key);
+  const side = fin.sidecar ? TE.readSidecar(fin.sidecar) : null;
+  _thumbEditOk = new Set();
+  const ans = {};
+  for (const a of TE.AN) {
+    const final = fin.finals[a] || null;
+    const bg = fin.bgs[a] || codex[a] || null, bgKind = fin.bgs[a] ? 'canva' : codex[a] ? 'codex' : null;
+    if (final) _thumbEditOk.add(final);
+    if (bg) _thumbEditOk.add(bg);
+    const e = side && side.안 && side.안[a];
+    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e && e.크기 ? Number(e.크기) : 0, cell: e && e.자리 ? String(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e };
+  }
+  log(`🖼 썸네일 편집기 열기 — ${key} · 완성본 폴더 ${path.basename(fin.dir)}${pf ? '' : ' · ⚠ 패키징 파일 없음(문구를 직접 적으세요)'}`);
+  return { ok: true, key, dir: fin.dir, packaging: !!pf, an: ans };
+});
+// 편집기가 쓸 그림 한 장(data URL — media:// 는 캔버스를 오염시켜 내보낼 수 없다) · 열어 준 경로만
+ipcMain.handle('thumb-edit-image', async (_e, p) => {
+  if (!_thumbEditOk.has(p)) return null;
+  try { const buf = await fs.promises.readFile(p); const ext = path.extname(p).slice(1).toLowerCase(); return `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,` + buf.toString('base64'); } catch (_) { return null; }
+});
+ipcMain.handle('thumb-edit-save', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), { writeTextAtomicSync } = require('./core/atomic-write');
+  const root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) throw new Error('썸네일 위치를 알 수 없습니다');
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) throw new Error('완성본 폴더를 찾지 못했습니다');
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const buf = Buffer.from(a.png);
+  const r = TE.saveFinal(fin.dir, fileName, buf);
+  const scFile = TE.sidecarPath(fin.dir, key);
+  const cur = TE.readSidecar(scFile) || { 편: key.replace(/^\[|\]$/g, ''), 캔버스: TE.W, 안: {} };
+  cur.캔버스 = TE.W; cur.안 = cur.안 || {};
+  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: 'Pretendard Bold', edited: !!a.edited });
+  try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 썼습니다: ${e.message}`); }
+  log(`🖼 썸네일 ${a.an} 저장 — ${fileName} (${(buf.length / 1024).toFixed(0)}KB)${r.preserved ? ' · 이전 파일은 _캔바원본 에 보존' : ''}${a.edited ? ' · 문구 수정(사이드카에 로이수정 표시)' : ''}`);
+  return { ok: true, saved: r.saved, preserved: r.preserved, bytes: buf.length };
+});
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
   const p = all.find((x) => x.name === name) || null;

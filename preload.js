@@ -177,6 +177,9 @@ contextBridge.exposeInMainWorld('api', {
   pickDir: () => ipcRenderer.invoke('pick-dir'),
   getAppFolders: () => ipcRenderer.invoke('get-app-folders'),
   saveAppFolders: (patch) => ipcRenderer.invoke('save-app-folders', patch),
+  thumbEditOpen: () => ipcRenderer.invoke('thumb-edit-open'),
+  thumbEditImage: (p) => ipcRenderer.invoke('thumb-edit-image', p),
+  thumbEditSave: (a) => ipcRenderer.invoke('thumb-edit-save', a),
   listThumbs: () => ipcRenderer.invoke('list-thumbs'),   // 🖼 로그 상자 썸네일 탭(v0.9.24)
   // 🔐 회원(v0.9.25) — 토큰은 main 에만(화면엔 이메일·상태만)
   licenseState: () => ipcRenderer.invoke('license-state'),

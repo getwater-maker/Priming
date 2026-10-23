@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import Upsell from './Upsell.jsx';
+import ThumbEditor from './ThumbEditor.jsx';
 import { createPortal } from 'react-dom';
 import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
 import api from './lib/ipc.js';
@@ -1225,6 +1226,8 @@ export default function App() {
   }
   const [logUnseen, setLogUnseen] = useState(false);
   const [thumbs, setThumbs] = useState({ ok: false, msg: '', files: [] });
+  const [thumbEd, setThumbEd] = useState(null);   // 🖼 썸네일 편집기 {data} — 로그 상자 🖼 탭의 ✏ 수정
+  async function openThumbEditor() { try { const r = await api.thumbEditOpen(); if (!r || !r.ok) { uiAlert((r && r.msg) || '썸네일 편집기를 열 수 없습니다'); return; } setThumbEd(r); } catch (e) { uiAlert('썸네일 편집기: ' + e.message); } }
   async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
   useEffect(() => { if (logTab === 'thumb') loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
   function pickLogTab(t) { setLogTab(t); if (t === 'log') { setLogUnseen(false); setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 0); } }
@@ -5916,6 +5919,7 @@ export default function App() {
               </>) : (<>
                 <button className="ghost" data-testid="thumb-folder" title="이 PC에서 사용할 썸네일 폴더 선택" onClick={() => pickAppFolder('thumbs')}>📁 폴더</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="썸네일 폴더를 다시 읽기" onClick={loadThumbs}>🔄</button>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} data-testid="thumb-edit" title="썸네일 문구·자리를 고쳐 다시 내보내기(기존 파일은 _캔바원본 에 보존)" onClick={openThumbEditor}>✏ 수정</button>
               </>)}
             </div>
             {lt === 'thumb' && (
@@ -7131,6 +7135,7 @@ export default function App() {
         </div>
       )}
 
+      {thumbEd && <ThumbEditor data={thumbEd} onClose={() => setThumbEd(null)} onSaved={loadThumbs} />}
       {todayPick && (
         <div className="modal-bg show" data-testid="today-pick">
           <div className="modal-card wide today-card">

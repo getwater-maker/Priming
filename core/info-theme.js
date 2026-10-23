@@ -14,6 +14,7 @@ const IA = require('./info-ass');
 
 const SHAPES = ['bar', 'tag', 'underline', 'frame'];
 const GW = 64, GH = 36;
+const { rgb2hsv, isSkin, regionSkin, FACE_VETO } = require('./skin-region');   // 살색·얼굴 가림 판정은 한 곳(썸네일 편집기와 공유 · v0.9.102)
 const TEXT_HEX = 'F4F1EA';
 
 function hash32(str) { let h = 2166136261 >>> 0; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; }
@@ -64,13 +65,6 @@ function grabFrame(ffmpeg, file, rel) {
     ps.on('close', () => { clearTimeout(to); const b = Buffer.concat(chunks); fin(b.length >= GW * GH * 3 ? b.subarray(0, GW * GH * 3) : null); });
   });
 }
-function rgb2hsv(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
-  let h = 0;
-  if (d > 1e-9) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; }
-  return [h, mx === 0 ? 0 : d / mx, mx];
-}
 /** 그림들 → 주된 색조 {h1, h2, sat} (색이 거의 없으면 null) */
 function dominantHues(frames) {
   const bins = new Array(36).fill(0); let wSum = 0, sSum = 0;
@@ -88,20 +82,6 @@ function dominantHues(frames) {
   const h2 = i2 >= 0 && best >= sm[i1] * 0.35 ? i2 * 10 + 5 : h1 + 28;
   return { h1, h2, sat: sSum / wSum };
 }
-/** 살색(얼굴·손) 화소인가 — 색조 5~30° · 채도 0.34~0.7 · 밝기 85~205. 🔴 색만으로는 얼굴을 못 가린다(베이지 벽·흙·지붕도 비슷하다) — 그래서 채도를 높게 잡고 아래에서 덩어리로 본다 */
-function isSkin(r, g, b) {
-  const [h, sat] = rgb2hsv(r, g, b), y = 0.299 * r + 0.587 * g + 0.114 * b;
-  return h >= 5 && h <= 30 && sat >= 0.34 && sat <= 0.7 && y >= 85 && y <= 205;
-}
-/** 구역 안 「살색 덩어리」 칸 수 — 살색 칸 중 가로·세로로 이웃한 살색 칸이 모두 있는 칸(문틀 같은 세로선·흩어진 점은 뺀다) */
-function regionSkin(f, x0, y0, w, h) {
-  const gx0 = Math.max(0, Math.floor(x0 / 30)), gy0 = Math.max(0, Math.floor(y0 / 30)), gx1 = Math.min(GW - 1, Math.ceil((x0 + w) / 30)), gy1 = Math.min(GH - 1, Math.ceil((y0 + h) / 30));
-  const sk = (x, y) => { if (x < 0 || y < 0 || x >= GW || y >= GH) return false; const i = (y * GW + x) * 3; return isSkin(f[i], f[i + 1], f[i + 2]); };
-  let n = 0, blob = 0;
-  for (let y = gy0; y <= gy1; y++) for (let x = gx0; x <= gx1; x++) { n++; if (sk(x, y) && (sk(x - 1, y) || sk(x + 1, y)) && (sk(x, y - 1) || sk(x, y + 1))) blob++; }
-  return { cells: blob, frac: n ? blob / n : 0 };
-}
-const FACE_VETO = (r) => r.cells >= 4;   // 판이 덮는 곳에 살색 덩어리 칸이 4개 이상이면 그 자리는 점수 비교 전에 탈락(썸네일 규약 「얼굴 가림」)
 /** 빈 자리 점수(작을수록 비어 있음) — 가장자리(그림 기울기) + 밝기 흩어짐 + 살색 비율(작은 가중) */
 function regionScore(f, x0, y0, w, h) {
   const gx0 = Math.max(0, Math.floor(x0 / 30)), gy0 = Math.max(0, Math.floor(y0 / 30)), gx1 = Math.min(GW - 1, Math.ceil((x0 + w) / 30)), gy1 = Math.min(GH - 1, Math.ceil((y0 + h) / 30));
