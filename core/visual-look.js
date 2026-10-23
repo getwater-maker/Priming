@@ -139,4 +139,39 @@ function aiNoticeOn(timing, range, line) {
   return e > a && s < b;
 }
 
-module.exports = { FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+/**
+ * ➕ 삽입 그림·영상의 모양(v0.9.104 · 로이 「Vrew 처럼 세로 도구 막대」) — pr.overlays[] 의 평평한 필드:
+ *   fill 'cover'(꽉 채우기 · 없음 = 맞추기) · flipH/flipV · motion(그룹 그림과 같은 id · 없음 = 멈춤 · 그림만) · opacity 0~100(없음 = 100) · crop {t,r,b,l}(원본 비율 0..0.9 · 사각 · Vrew editInfo.crop)
+ *   box = 보이는(잘린) 영역의 자리 — 있으면 fill 보다 이긴다. 🔑 .vrew · MP4 · ① 칸이 **같은 계산(ovBox)** 을 쓴다.
+ */
+const OV_MOTIONS = ['in', 'out', 'lr', 'rl', 'bt', 'tb'];
+function normCrop(c) {
+  if (!c || typeof c !== 'object') return null;
+  const r = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(0.9, Math.round(n * 10000) / 10000)) : 0; };
+  const o = { t: r(c.t), r: r(c.r), b: r(c.b), l: r(c.l) };
+  if (o.l + o.r > 0.9 || o.t + o.b > 0.9) return null;
+  return (o.t || o.r || o.b || o.l) ? o : null;
+}
+const normOpacity = (v) => { const n = Number(v); return (v != null && v !== '' && Number.isFinite(n)) ? Math.max(0, Math.min(100, Math.round(n))) : 100; };
+/** 잘린 뒤 보이는 비율 {w, h}(0..1) */
+function cropVis(c) { const k = normCrop(c); return k ? { w: 1 - k.l - k.r, h: 1 - k.t - k.b } : { w: 1, h: 1 }; }
+/** Vrew editInfo.crop 문자열 — Vrew 설치본 실측: `inset(위% 오른쪽% 아래% 왼쪽%)` */
+function cropInset(c) { const k = normCrop(c); return k ? `inset(${k.t * 100}% ${k.r * 100}% ${k.b * 100}% ${k.l * 100}%)` : ''; }
+/** inset 문자열 → {t,r,b,l} (.vrew 를 읽는 MP4 렌더러용) */
+function parseInset(s) {
+  const m = /^inset\(\s*([\d.eE+-]+)%\s+([\d.eE+-]+)%\s+([\d.eE+-]+)%\s+([\d.eE+-]+)%\s*\)$/.exec(String(s || '').trim());
+  return m ? normCrop({ t: m[1] / 100, r: m[2] / 100, b: m[3] / 100, l: m[4] / 100 }) : null;
+}
+/** 삽입 그림·영상이 캔버스(cW×cH)에서 차지하는 자리(0..1) — 원본 w×h(픽셀)를 모르면 화면 가득. 잘렸다면 **잘린 뒤 비율**로 맞춘다 */
+function ovBox(o, w, h, cW, cH) {
+  if (o && o.box) return { ...o.box };
+  if (!(w > 0 && h > 0)) return { x: 0, y: 0, w: 1, h: 1 };
+  const v = cropVis(o && o.crop), ww = w * v.w, hh = h * v.h;
+  const s = (o && o.fill === 'cover') ? Math.max(cW / ww, cH / hh) : Math.min(cW / ww, cH / hh);
+  const wF = (ww * s) / cW, hF = (hh * s) / cH;
+  return { x: (1 - wF) / 2, y: (1 - hF) / 2, w: wF, h: hF };
+}
+/** 삽입 그림의 켄번스 종류(그룹 MOTIONS 의 in·out·lr·rl·bt·tb) — 이상하면 '' */
+const normOvMotion = (m) => (OV_MOTIONS.includes(m) ? m : '');
+
+module.exports = { OV_MOTIONS, normCrop, normOpacity, cropVis, cropInset, parseInset, ovBox, normOvMotion, FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

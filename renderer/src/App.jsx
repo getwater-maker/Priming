@@ -4424,15 +4424,24 @@ export default function App() {
     const fitS = fit ? ` style="object-fit:${fit}"` : '';
     const bx = lk.box;
     const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
+    // ➕ 삽입의 자르기(사각 · look.crop)·불투명도(look.opacity) — 보이는 영역 = 자리(box) · 그림은 자른 만큼 키워 밀어 놓는다(Vrew 와 같은 계산)
+    const cr = VLook.normCrop(c.look && c.look.crop);
+    const opq = c.look && c.look.opacity != null && c.look.opacity < 100 ? `;opacity:${(c.look.opacity / 100).toFixed(3)}` : '';
     let inner;
-    if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
+    const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
+    if (cr) {
+      const vw = 1 - cr.l - cr.r, vh = 1 - cr.t - cr.b;
+      const cs = ` style="position:absolute;left:${(-cr.l / vw * 100).toFixed(3)}%;top:${(-cr.t / vh * 100).toFixed(3)}%;width:${(100 / vw).toFixed(3)}%;height:${(100 / vh).toFixed(3)}%;object-fit:fill"`;
+      const kbw = !c.videoPath && lk.motion !== 'none' ? ` kb kb${kbIdx}` : '';   // 움직임은 바깥 칸에(보이는 영역 기준 — .vrew·MP4 와 같다)
+      const mm = c.videoPath ? `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${cs}></video>` : `<img src="${media(c.imagePath, c.imageVersion)}"${cs}>`;
+      inner = `<div class="vcrop${kbw}" style="position:relative;width:100%;height:100%;overflow:hidden">${mm}</div>`;
+    } else if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
     else {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
-      const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
       const kbCls = lk.motion === 'none' ? 'kbnone' : `kb kb${kbIdx}`;
       inner = `<img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}>`;
     }
-    return `<div class="vlayer" data-num="${c.num}" style="${pos}"><div class="vlook"${flipT}>${inner}</div></div>`;
+    return `<div class="vlayer" data-num="${c.num}" style="${pos}${opq}"><div class="vlook"${flipT}>${inner}</div></div>`;
   }
   // 🖼 이 문장을 덮는 그림(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 아래층으로 이어진 그림(core/visual-span 과 같은 규칙: 그룹 순서 = 쌓는 순서)
   function visLayersAt(pr, cut, sentIdx, rg) {
@@ -5824,6 +5833,24 @@ export default function App() {
         const lk = lay ? VLook.normLook(lay.look) : null;
         const sn = stageSel.sn;
         const stop = (e) => { e.stopPropagation(); };
+        if (String(stageSel.num)[0] === 'O' && lay && lay.ovRaw) {
+          // ➕ 삽입 그림·영상 — 채우기 · 애니메이션 · 순서 · 불투명도 · 자르기 · 반전 · 교체(v0.9.104 · 배경제거는 하지 않기로 했다)
+          const ov = lay.ovRaw, isImg = ov.kind === 'image';
+          const open = (name) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === name && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: name, subY: r.top, num: stageSel.num, cap: '', only: true })); };
+          const ob = (icon, title, fn, tid, on) => (<button key={title} className={'vtb-b' + (on ? ' on' : '')} title={title} data-testid={tid} onClick={(e) => { e.stopPropagation(); fn(e); }}>{icon}</button>);
+          const filled = ov.fill === 'cover' && !ov.box;
+          return (
+            <div className="stage-vtb" data-testid="stage-vtb" onMouseDown={stop} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+              {ob('⛶', filled ? '채우기 — 지금 꽉 채움(누르면 맞추기로)' : '채우기 — 화면 전체로 키웁니다(비율 유지 · 넘치는 쪽은 잘림)', () => overlayOp({ shortsNum: sn, op: 'look', id: ov.id, patch: { fill: filled ? 'contain' : 'cover' } }), 'vtb-fill', filled)}
+              {ob('🎞', '애니메이션', isImg ? open('motion') : () => setStatus('영상은 제 움직임이 있어 애니메이션을 따로 주지 않습니다'), 'vtb-motion', isImg && !!ov.motion)}
+              {ob('☰', '순서 — 앞으로·뒤로', open('ord'), 'vtb-ord')}
+              {ob('◐', '불투명도', open('opac'), 'vtb-opac', ov.opacity != null && ov.opacity < 100)}
+              {ob('⌗', '자르기 — 사각', open('crop'), 'vtb-crop', !!ov.crop)}
+              {ob('⇋', '반전 — 좌우·상하', open('flip'), 'vtb-flip', !!(ov.flipH || ov.flipV))}
+              {ob('⟳', '교체하기 — 범위·자리는 그대로, 파일만 바꿉니다', async () => { const r = await overlayOp({ shortsNum: sn, op: 'replace', id: ov.id }); if (r && r.ok) setStatus('⟳ 삽입을 바꿨습니다 (Ctrl+Z 되돌리기)'); }, 'vtb-replace')}
+            </div>
+          );
+        }
         const tb = (icon, title, fn, extra = {}) => (
           <button key={title} className={'vtb-b' + (extra.soon || (!extra.any && grpNum == null) ? ' soon' : '') + (extra.on ? ' on' : '')} title={title} data-testid={extra.tid}
             onClick={(e) => { e.stopPropagation(); if (extra.soon) { setStatus(`「${title}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); return; } if (!extra.any && grpNum == null) { setStatus('삽입 그림·영상은 이 막대로 바꿀 수 없습니다 — 목록의 ➕ 마크에서'); return; } fn(e); }}>{icon}</button>
@@ -6390,7 +6417,7 @@ export default function App() {
         const top = Math.max(4, Math.min(stageCtx.y, window.innerHeight - 360));
         const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
         const run = (fn) => () => { setStageCtx(null); fn(); };
-        const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
+        const hov = (sub) => (e) => { if (!sub && e.currentTarget.closest && e.currentTarget.closest('.clip-ctx-sub')) return; /* 아래 칸(하위 목록) 안의 줄에 마우스가 들어가도 목록을 닫지 않는다 */ const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
         const soonT = (t) => { setStageCtx(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); };
         const Row = ({ icon, label, onClick, soon, sub, kbd, dis, tid, red }) => (
           <button className={'cx-row' + (soon || dis ? ' soon' : '') + (red ? ' red' : '') + (sub && stageCtx.sub === sub ? ' open' : '')} data-testid={tid} onMouseEnter={hov(sub || null)}
@@ -6401,9 +6428,26 @@ export default function App() {
         );
         const subTop = Math.max(4, Math.min(stageCtx.subY - 6, window.innerHeight - 220));
         const num = stageCtx.num;
-        const fillSub = <>
+        const ovR = lay && lay.ovRaw;   // ➕ 삽입이면 원본 값(오른쪽 도구 막대에서 연 칸)
+        const ovLook = (patch) => overlayOp({ shortsNum: pr.shortsNum, op: 'look', id: ovR.id, patch });
+        const fillSub = ovR ? <>
+          <Row icon={!(ovR.fill === 'cover' && !ovR.box) ? '✓' : ''} label="맞추기" tid="sx-fill-contain" onClick={run(() => ovLook({ fill: 'contain' }))} />
+          <Row icon={ovR.fill === 'cover' && !ovR.box ? '✓' : ''} label="꽉 채우기" tid="sx-fill-cover" onClick={run(() => ovLook({ fill: 'cover' }))} />
+        </> : <>
           {VLook.FILLS.map((f) => <Row key={f.id} icon={lk && lk.fill === f.id ? '✓' : ''} label={f.label} tid={'sx-fill-' + f.id} dis={!grp} onClick={run(() => setGroupLook(pr.shortsNum, num, { fill: f.id }))} />)}
         </>;
+        const sldRow = (label, min, max, val, tid, onVal, edge) => (
+          <div className="cx-sld" key={label}><span>{label}</span>
+            <input type="range" min={min} max={max} defaultValue={val} data-testid={tid} data-edge={edge} onInput={(e) => { const v = +e.currentTarget.value; e.currentTarget.nextSibling.textContent = v + '%'; onVal(v, e.currentTarget); }} /><b>{val}%</b></div>
+        );
+        const cropNow = (ovR && ovR.crop) || { t: 0, r: 0, b: 0, l: 0 };
+        const cropSet = (edge, el) => {
+          const box = el.closest('.cx-crop'); const g = (k) => +box.querySelector('[data-edge=' + k + ']').value;
+          const c = { t: g('t'), r: g('r'), b: g('b'), l: g('l') };
+          const other = { t: 'b', b: 't', l: 'r', r: 'l' }[edge];
+          if (c[edge] + c[other] > 90) { c[edge] = 90 - c[other]; el.value = c[edge]; el.nextSibling.textContent = c[edge] + '%'; }
+          ovLook({ crop: { t: c.t / 100, r: c.r / 100, b: c.b / 100, l: c.l / 100 } });
+        };
         return (<>
           <div className="vr-menu-bg" data-testid="sx-bg" onMouseDown={() => setStageCtx(null)} onContextMenu={(e) => { e.preventDefault(); setStageCtx(null); }} />
           {!stageCtx.only && <div className="vr-menu clip-ctx" data-testid="stage-ctx" style={{ left, top, width: W }} onMouseDown={(e) => e.preventDefault()}>
@@ -6416,21 +6460,42 @@ export default function App() {
             <Row icon="🗑" label="삭제" red dis={!grp} tid="sx-del" onClick={run(() => stageDeleteImage(num))} />
             <div className="vr-sep" />
             <Row icon="🎬" label="비디오 생성" sub="vid" dis={!grp} tid="sx-vid" />
-            <Row icon="⛶" label="채우기" sub="fill" dis={!grp} tid="sx-fill" />
+            <Row icon="⛶" label="채우기" sub="fill" dis={!grp && !ovR} tid="sx-fill" />
             <Row icon="☰" label="순서" sub="ord" tid="sx-ord" />
           </div>}
-          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 160)) : subTop, width: SW }} onMouseDown={(e) => e.preventDefault()}>
+          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 220)) : subTop, width: SW }} onMouseDown={(e) => { if (stageCtx.sub !== 'opac' && stageCtx.sub !== 'crop') e.preventDefault(); }}>
             {stageCtx.sub === 'fill' && fillSub}
             {stageCtx.sub === 'vid' && <>
               <Row icon="🎬" label={'AI 비디오 G' + num} tid="sx-vid-ai" onClick={run(() => runGroupVid(pr.shortsNum, num))} />
               <Row icon="🖥" label="PC 에서 불러오기" tid="sx-vid-pc" onClick={run(() => attachAsset(pr.shortsNum, num))} />
             </>}
-            {stageCtx.sub === 'ord' && <>
+            {stageCtx.sub === 'ord' && (ovR ? <>
+              <Row icon="⇧" label="맨 앞으로" tid="sx-ord-front" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'front' }))} />
+              <Row icon="↑" label="앞으로" tid="sx-ord-up" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'up' }))} />
+              <Row icon="↓" label="뒤로" tid="sx-ord-down" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'down' }))} />
+              <Row icon="⇩" label="맨 뒤로" tid="sx-ord-back" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'back' }))} />
+            </> : <>
               <Row icon="⇧" label="맨 앞으로" soon />
               <Row icon="↑" label="앞으로" soon />
               <Row icon="↓" label="뒤로" soon />
               <Row icon="⇩" label="맨 뒤로" soon />
+            </>)}
+            {ovR && stageCtx.sub === 'motion' && VLook.MOTIONS.filter((m) => m.id !== 'auto').map((m) => <Row key={m.id} icon={(ovR.motion || 'none') === m.id ? '✓' : ''} label={m.label} tid={'sx-motion-' + m.id} onClick={run(() => ovLook({ motion: m.id === 'none' ? '' : m.id }))} />)}
+            {ovR && stageCtx.sub === 'flip' && <>
+              <Row icon={ovR.flipH ? '✓' : ''} label="좌우 반전" tid="sx-flip-h" onClick={run(() => ovLook({ flipH: !ovR.flipH }))} />
+              <Row icon={ovR.flipV ? '✓' : ''} label="상하 반전" tid="sx-flip-v" onClick={run(() => ovLook({ flipV: !ovR.flipV }))} />
             </>}
+            {ovR && stageCtx.sub === 'opac' && <>
+              {sldRow('불투명도', 0, 100, ovR.opacity != null ? ovR.opacity : 100, 'sx-opac', (v) => ovLook({ opacity: v }))}
+              <Row icon="" label="100% 로 되돌리기" tid="sx-opac-reset" onClick={run(() => ovLook({ opacity: 100 }))} />
+            </>}
+            {ovR && stageCtx.sub === 'crop' && <div className="cx-crop">
+              {sldRow('위', 0, 80, Math.round(cropNow.t * 100), 'sx-crop-t', (v, el) => cropSet('t', el), 't')}
+              {sldRow('아래', 0, 80, Math.round(cropNow.b * 100), 'sx-crop-b', (v, el) => cropSet('b', el), 'b')}
+              {sldRow('왼쪽', 0, 80, Math.round(cropNow.l * 100), 'sx-crop-l', (v, el) => cropSet('l', el), 'l')}
+              {sldRow('오른쪽', 0, 80, Math.round(cropNow.r * 100), 'sx-crop-r', (v, el) => cropSet('r', el), 'r')}
+              <Row icon="" label="자르기 없애기" tid="sx-crop-reset" onClick={run(() => ovLook({ crop: null }))} />
+            </div>}
           </div>}
         </>);
       })()}
@@ -8591,7 +8656,7 @@ function layersAtOrd(pr, ord, rg) {
   out.sort((x, y) => x.rank - y.rank);
   for (const v of ((pr && pr.overlays) || [])) {
     if (v.kind === 'audio' || !ovIn(v, ord, rg)) continue;
-    out.push({ key: 'o' + v.id, video: v.kind === 'video', file: v.file, version: v.version, box: v.box || null, fit: 'contain', startOrd: v.from });
+    out.push({ key: 'o' + v.id, video: v.kind === 'video', file: v.file, version: v.version, box: v.box || null, fit: 'contain', startOrd: v.from, flipH: !!v.flipH, flipV: !!v.flipV });
   }
   return out;
 }
@@ -8899,8 +8964,12 @@ function insMarksAt(pr, lines, n) {
   return L.filter((x) => !x.broken && ovClips(lines, x).f === n);
 }
 function ovAsLayer(o) {
+  // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다) · 자르기·꽉 채우기는 원본 크기(dim)로 자리를 계산한다(VLook.ovBox — .vrew·MP4 와 같은 식 · 16:9 기준)
+  const d = o.dim, cr = o.crop || null, op = o.opacity != null ? o.opacity : 100;
+  const box = (o.box || (d && (cr || o.fill === 'cover'))) ? VLook.ovBox(o, d ? d.w : 0, d ? d.h : 0, 1920, 1080) : null;
   return { num: 'O' + o.id, ovId: o.id, once: !!o.once, ovFrom: o.from, ovVol: o.kind === 'video' ? (o.volume == null ? 100 : o.volume) : 0, imagePath: o.kind === 'image' ? o.file : null, videoPath: o.kind === 'video' ? o.file : null,
-    imageVersion: o.version, videoVersion: o.version, look: o.box ? { motion: 'none', box: o.box } : { motion: 'none', fill: 'contain' } };   // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다)
+    imageVersion: o.version, videoVersion: o.version, ovKind: o.kind, ovRaw: o,
+    look: { motion: o.kind === 'image' && o.motion ? o.motion : 'none', ...(o.flipH ? { flipH: true } : {}), ...(o.flipV ? { flipV: true } : {}), ...(box ? { box } : { fill: 'contain' }), ...(cr ? { crop: cr } : {}), ...(op < 100 ? { opacity: op } : {}) } };
 }
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
 function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {

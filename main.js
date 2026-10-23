@@ -5956,7 +5956,7 @@ ipcMain.handle('thumb-edit-open', async () => {
     if (final) _thumbEditOk.add(final);
     if (bg) _thumbEditOk.add(bg);
     const e = side && side.안 && side.안[a];
-    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e && e.크기 ? Number(e.크기) : 0, cell: e && e.자리 ? String(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e };
+    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e ? TE.sizeFromSidecar(e.크기, side.캔버스) : 0, cell: e ? TE.normCell(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e };
   }
   log(`🖼 썸네일 편집기 열기 — ${key} · 완성본 폴더 ${path.basename(fin.dir)}${pf ? '' : ' · ⚠ 패키징 파일 없음(문구를 직접 적으세요)'}`);
   return { ok: true, key, dir: fin.dir, packaging: !!pf, an: ans };
@@ -5977,8 +5977,12 @@ ipcMain.handle('thumb-edit-save', async (_e, a = {}) => {
   const r = TE.saveFinal(fin.dir, fileName, buf);
   const scFile = TE.sidecarPath(fin.dir, key);
   const cur = TE.readSidecar(scFile) || { 편: key.replace(/^\[|\]$/g, ''), 캔버스: TE.W, 안: {} };
-  cur.캔버스 = TE.W; cur.안 = cur.안 || {};
-  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: 'Pretendard Bold', edited: !!a.edited });
+  cur.안 = cur.안 || {};
+  // 사이드카가 1920 기준(다산)이었다면 이미 1280 기준으로 바뀐 값을 쓰므로 캔버스도 1280 으로 맞춘다 — 다른 안의 크기도 같은 기준으로 환산해 둔다
+  const oldCanvas = Number(cur.캔버스) > 0 ? Number(cur.캔버스) : TE.W;
+  if (oldCanvas !== TE.W) for (const k of Object.keys(cur.안)) if (k !== a.an && cur.안[k] && cur.안[k].크기) cur.안[k].크기 = TE.sizeFromSidecar(cur.안[k].크기, oldCanvas);
+  cur.캔버스 = TE.W;
+  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: 'Pretendard Bold', edited: !!a.edited }, cur.안[a.an]);
   try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 썼습니다: ${e.message}`); }
   log(`🖼 썸네일 ${a.an} 저장 — ${fileName} (${(buf.length / 1024).toFixed(0)}KB)${r.preserved ? ' · 이전 파일은 _캔바원본 에 보존' : ''}${a.edited ? ' · 문구 수정(사이드카에 로이수정 표시)' : ''}`);
   return { ok: true, saved: r.saved, preserved: r.preserved, bytes: buf.length };
@@ -8916,7 +8920,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o)), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -8961,7 +8965,7 @@ function _restoreState(st) {
     pr.groups = sp.groups.map(_cloneObj);
     pr.sentences = sp.sentences.map(_cloneObj);
     pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
-    pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
+    pr.overlays = (sp.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o));
     pr.logoSide = sp.logoSide || undefined;
     if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
     if (sp.logoOver) pr.logoOver = { ...sp.logoOver }; else delete pr.logoOver;
@@ -9625,7 +9629,7 @@ ipcMain.handle('set-logo-pos', (_e, args = {}) => {
 //   op = add {kind, from, to}(문장 번호 1부터 · 비우면 전체) | range {from, to} | box | vol {volume} | remove | order
 ipcMain.handle('overlay-op', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
-  const OL = require('./core/overlay-layers');
+  const OL = require('./core/overlay-layers'); const VL = require('./core/visual-look');
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
   if (!pr) throw new Error('편을 찾을 수 없습니다.');
   const list = pr.overlays || (pr.overlays = []);
@@ -9634,6 +9638,15 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
   const rangeTxt = (ids) => { const r = OL.rangeOf(pr, ids); const n = pr.sentences.length; if (!r) return '?';
     if (r.a === 0 && r.b === n - 1 && !(ids.sc > 0) && ids.ec == null) return '전체';
     return `문장 ${r.a + 1}${ids.sc > 0 ? `(${ids.sc}자~)` : ''}~${r.b + 1}${ids.ec != null ? `(~${ids.ec}자 줄)` : ''}`; };
+  // 🖼 원본 크기(w×h px) — 자르기·꽉 채우기를 ① 칸·.vrew·MP4 가 같은 비율로 계산하려면 필요(없는 옛 삽입은 모양을 만질 때 채운다)
+  const ensureDim = async (ov, force) => {
+    if (ov.kind === 'audio' || (!force && ov.dim && ov.dim.w > 0)) return;
+    try {
+      if (ov.kind === 'image') { const z = require('./vrew/vrew-builder').readImageSize(ov.file); ov.dim = z && z.w > 0 ? { w: z.w, h: z.h } : undefined; }
+      else { const m = await require('./core/media-utils').getMediaInfo(ov.file); ov.dim = m && m.width > 0 ? { w: m.width, h: m.height } : undefined; }
+    } catch (_) { ov.dim = undefined; }
+    if (!ov.dim) delete ov.dim;
+  };
   if (op === 'add') {
     let file = args.file;
     if (!file) {
@@ -9657,7 +9670,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       fs.copyFileSync(file, dst);
     } catch (e) { dst = file; log('⚠ 삽입 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
     undoPush('삽입');
-    { const ov = { id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}) }; OL.applyIds(ov, ids); list.push(ov); }
+    { const ov = { id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}) }; OL.applyIds(ov, ids); await ensureDim(ov, true); list.push(ov); }
     log(`➕ ${prLabel(pr)} ${KIND[kind][0]} 삽입 — ${path.basename(file)} · ${rangeTxt(ids)}`);
     storeActive(); pushDtoUpdate();
     return { ok: true, id, dto: P.toDTO(S.parsed) };
@@ -9696,13 +9709,66 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       undoPush('삽입 음량', { coalesce: true }); ov.volume = ov.kind === 'video' ? OL.volOfVideo(args.volume) : OL.normVol(args.volume);
     } else if (op === 'box') {
       undoPush('삽입 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
+      if (ov.box) delete ov.fill;   // 사람이 자리를 정하면 「꽉 채우기」는 풀린다(자리가 이긴다)
     } else if (op === 'remove') {
       undoPush('삽입 지우기'); list.splice(list.indexOf(ov), 1);   // 파일은 남긴다(↶ 되돌리기)
       log(`➕ ${prLabel(pr)} 삽입 지움 — ${ov.name || path.basename(ov.file)}`);
     } else if (op === 'order') {
-      const i = list.indexOf(ov), j = i + (args.dir === 'down' ? -1 : 1);
-      if (j < 0 || j >= list.length) return { ok: true, dto: P.toDTO(S.parsed) };
+      // 🔝 순서 = 목록 순서(뒤가 위 · vrew zIndex 900+) — up·down 한 층 · front·back 맨 앞·맨 뒤(⚠ 그룹 그림 아래로는 못 내린다: 삽입은 늘 그룹 그림 위)
+      const i = list.indexOf(ov);
+      const j = args.dir === 'front' ? list.length - 1 : args.dir === 'back' ? 0 : i + (args.dir === 'down' ? -1 : 1);
+      if (j < 0 || j >= list.length || j === i) return { ok: true, dto: P.toDTO(S.parsed) };
       undoPush('삽입 순서'); list.splice(i, 1); list.splice(j, 0, ov);
+      log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 순서 → ${args.dir === 'front' ? '맨 앞으로' : args.dir === 'back' ? '맨 뒤로' : args.dir === 'down' ? '뒤로' : '앞으로'}`);
+    } else if (op === 'look') {
+      // 🖼 모양 — patch: fill('cover'|null) · flipH · flipV · motion('in'..|'' ) · opacity(0~100) · crop({t,r,b,l}|null)
+      if (ov.kind === 'audio') return { ok: false, error: '오디오에는 모양이 없습니다' };
+      const pt = args.patch || {};
+      await ensureDim(ov);
+      undoPush('삽입 모양', { coalesce: true });
+      if ('fill' in pt) { if (pt.fill === 'cover') { ov.fill = 'cover'; ov.box = null; } else delete ov.fill; if (pt.fill === 'cover' || pt.fill === 'contain') ov.box = null; }
+      if ('flipH' in pt) { if (pt.flipH) ov.flipH = true; else delete ov.flipH; }
+      if ('flipV' in pt) { if (pt.flipV) ov.flipV = true; else delete ov.flipV; }
+      if ('motion' in pt) { const m = VL.normOvMotion(pt.motion); if (m && ov.kind === 'image') ov.motion = m; else delete ov.motion; }
+      if ('opacity' in pt) { const o = VL.normOpacity(pt.opacity); if (o < 100) ov.opacity = o; else delete ov.opacity; }
+      if ('crop' in pt) {
+        // 자르기 — 자리(box)가 있으면 **그림이 놓인 자리는 그대로** 잘린 만큼만 box 를 줄인다(Vrew 처럼 제자리에서 자른다)
+        const oldV = VL.cropVis(ov.crop), nc = VL.normCrop(pt.crop), newV = VL.cropVis(nc);
+        if (ov.box) {
+          const w = ov.box.w * (newV.w / oldV.w), h = ov.box.h * (newV.h / oldV.h);
+          const ocx = ov.box.x - (ov.crop ? ov.crop.l : 0) / oldV.w * ov.box.w;   // 잘리기 전 전체 그림의 왼쪽 위(캔버스 0..1)
+          const ocy = ov.box.y - (ov.crop ? ov.crop.t : 0) / oldV.h * ov.box.h;
+          const fullW = ov.box.w / oldV.w, fullH = ov.box.h / oldV.h;
+          const nl = nc ? nc.l : 0, nt = nc ? nc.t : 0;
+          ov.box = OL.normBox({ x: ocx + nl * fullW, y: ocy + nt * fullH, w, h }) || ov.box;
+        }
+        if (nc) ov.crop = nc; else delete ov.crop;
+      }
+      log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 모양 → ${Object.keys(pt).join('·')}`);
+    } else if (op === 'replace') {
+      // ⟳ 교체 — 범위·자리·모양은 그대로, 파일만 다른 것으로(그림 ↔ 영상도 된다 · 소리 없는 그림이 되면 음량·1회 재생은 버린다)
+      if (ov.kind === 'audio') return { ok: false, error: '오디오는 지우고 다시 삽입하세요' };
+      let file = args.file;
+      if (!file) {
+        const r = await dialog.showOpenDialog(win, { title: '바꿀 그림·영상', properties: ['openFile'], filters: [{ name: '그림·영상', extensions: [].concat(KIND.image[1], KIND.video[1]) }] });
+        if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+        file = r.filePaths[0];
+      }
+      const kind = OL.kindOf(file);
+      if (kind !== 'image' && kind !== 'video') return { ok: false, error: '그림(png·jpg·webp) 또는 영상(mp4·mov·webm) 파일이어야 합니다' };
+      let dst = file;
+      try {
+        const dir = path.join(shortsDirs(S.outRoot, pr.shortsNum).media, 'overlays');
+        fs.mkdirSync(dir, { recursive: true });
+        dst = path.join(dir, ov.id + '_' + Date.now().toString(36) + path.extname(file).toLowerCase());   // 옛 파일을 덮지 않는다(↶ 되돌리기)
+        fs.copyFileSync(file, dst);
+      } catch (e) { dst = file; log('⚠ 교체 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
+      undoPush('삽입 교체');
+      const keepKind = ov.kind === kind;
+      ov.file = dst; ov.name = path.basename(file); ov.kind = kind; ov.dim = undefined;
+      if (!keepKind) { if (kind === 'video') ov.volume = OL.volOfVideo(undefined); else { delete ov.volume; delete ov.once; } if (kind === 'video') delete ov.motion; }
+      await ensureDim(ov, true);
+      log(`➕ ${prLabel(pr)} 삽입 교체 → ${path.basename(file)}`);
     } else return { ok: false, error: '알 수 없는 동작' };
   }
   storeActive(); pushDtoUpdate();

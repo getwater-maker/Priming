@@ -248,6 +248,8 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 /* 켄번스: 항상 cover(꽉 채움)로 깔고, scale·translate 를 안전범위 안에서만 움직여 뒤 검정 노출 0.
    안전조건: scale s 에서 한 방향 translate ≤ (s−1)/(2s). 아래 값은 모두 그 범위 내. */
 #stageVisual img.kb{object-fit:cover;transform-origin:center;will-change:transform;animation:kb0 7s ease-out forwards}
+#stageVisual div.kb{transform-origin:center;will-change:transform;animation:kb0 7s ease-out forwards}   /* ➕ 삽입 자르기 칸의 움직임 */
+#stageVisual div.kb0{animation-name:kb0}#stageVisual div.kb1{animation-name:kb1}#stageVisual div.kb2{animation-name:kb2}#stageVisual div.kb3{animation-name:kb3}#stageVisual div.kb4{animation-name:kb4}#stageVisual div.kb5{animation-name:kb5}
 #stageVisual img.kb0{animation-name:kb0}
 #stageVisual img.kb1{animation-name:kb1}
 #stageVisual img.kb2{animation-name:kb2}
@@ -1790,3 +1792,9 @@ main .card h2{top:var(--work-top-height,0px)}
 .thed-warns{display:flex;flex-direction:column;gap:4px}.thed-w{font-size:12px;color:#a3352b;background:#fde8e8;border-radius:7px;padding:6px 9px}.thed-w.ok{color:#5a4a1a;background:#fff6dc}
 .thed-msg{font-size:12.5px;color:#a3352b;background:#fde8e8;border-radius:7px;padding:7px 10px}.thed-msg.ok{color:#3d6b3a;background:#eaf3e6}
 .thed-foot{display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap}.thed-foot .meta{flex:1 1 100%;font-size:11.5px}
+
+/* ➕ 삽입 도구 막대의 슬라이더 칸(불투명도 · 자르기) — v0.9.104 */
+.vr-menu .cx-sld{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:13px;color:var(--strong)}
+.vr-menu .cx-sld span{width:44px;flex:none}
+.vr-menu .cx-sld input[type=range]{flex:1;min-width:0}
+.vr-menu .cx-sld b{width:38px;text-align:right;font-weight:600;flex:none}
