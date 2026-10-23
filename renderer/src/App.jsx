@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { sameGeo, frameGuard } from '../../core/rail-geo.js';
 import Upsell from './Upsell.jsx';
 import ThumbEditor from './ThumbEditor.jsx';
 import { createPortal } from 'react-dom';
@@ -8897,10 +8898,17 @@ function RailLayer({ pr, drag, pending, onGrab }) {
       out.push({ num: c.num, from: r.from, to: r.to, gs, ge, has: !!(c.imagePath || c.videoPath), live: !!d,
         top: Math.round(a.top - G.top), bot: Math.round(b.bottom - G.top), ownTop: Math.round(a2.top - G.top), ownBot: Math.round(b2.bottom - G.top), x: Math.round(cut.getBoundingClientRect().left - G.left) });
     }
-    setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+    setGeo((prev) => (sameGeo(prev, out) ? prev : out));   // 1~2px 흔들림은 같은 값(재기↔다시 그리기가 끝없이 도는 React #185 막기 · core/rail-geo)
   };
-  useLayoutEffect(measure);
   const measureRef = useRef(measure); measureRef.current = measure;   // 스크롤·크기 변경은 늘 지금 그린 것(대본·끌기 상태)으로 잰다
+  // 한 프레임에 연달아 재는 횟수를 막는다 — 넘으면 다음 프레임에 한 번만(그래도 화면 전체가 지워지는 일은 없다)
+  const guardRef = useRef(null); if (!guardRef.current) guardRef.current = frameGuard((f) => requestAnimationFrame(f));
+  const deferRef = useRef(0);
+  useLayoutEffect(() => {
+    if (guardRef.current.allow()) { measure(); return; }
+    if (!deferRef.current) deferRef.current = requestAnimationFrame(() => { deferRef.current = 0; guardRef.current.reset(); measureRef.current(); });
+  });
+  useEffect(() => () => { if (deferRef.current) cancelAnimationFrame(deferRef.current); }, []);
   useEffect(() => {
     const grid = ref.current && ref.current.parentElement;
     if (!grid || typeof ResizeObserver === 'undefined') return undefined;
