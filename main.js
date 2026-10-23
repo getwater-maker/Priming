@@ -4066,10 +4066,22 @@ const isComfyVal = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') ==
 const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).slice(7) : '');
 
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {
+// 👑 🖥 로컬 Qwen-Image 2.1(관리자 전용 · v0.9.109) — 설정 파일의 클라우드/로컬 값과 무관하게 이 PC 의 ComfyUI 로 보낸다(설정 파일은 바꾸지 않는다)
+function _forceLocalComfy(cfg) {
+  cfg.cloud = false;
+  cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
+  return cfg;
+}
+// 번들 Qwen 워크플로 — 설정에 등록된 경로가 있으면 그것, 없으면 앱 폴더의 comfy/image_qwen21_turbo.json
+function _localQwenWfPath(cfg) {
+  const wf = ((cfg && cfg.workflows) || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
+  return wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+}
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false, forceLocal = false) {
   require('./core/visual-span').markCovered(project, hasVisual);
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
+  if (forceLocal) _forceLocalComfy(cfg);
   if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
   if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 워크플로(API 포맷 JSON)를 지정하세요.'); return; }
   const eng = new CI.ComfyImage(cfg, logger);
@@ -4674,6 +4686,16 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   }
   if (startEngine === 'flow') { logger('⏭ Flow 이미지는 삭제됐습니다(v0.9.67) — 헤더 「② 이미지」에서 다른 도구를 고르세요'); return; }
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
+  // 👑 🖥 로컬 Qwen-Image 2.1 — 관리자만(회원이면 AI 이미지로 · 값이 회원 PC 에 들어와도 로컬 GPU 를 찾지 않게)
+  if (require('./core/engine-migrate').isLocalQwen(startEngine)) {
+    if (isOwner()) {
+      const CI = require('./core/comfy-image');
+      if (!fs.existsSync(_localQwenWfPath(CI.loadConfig()))) { logger('⚠ 🖥 로컬 Qwen-Image 2.1 워크플로를 찾지 못했습니다'); return; }
+      return runComfyImages(project, imagesDir, logger, styleId, onlyNums, _localQwenWfPath(CI.loadConfig()), retryLevel, force, true);
+    }
+    startEngine = require('./core/engine-migrate').IMG_DEFAULT;
+    logger('🔁 🖥 로컬 Qwen-Image 2.1 은 관리자 전용입니다 → AI 이미지로 만듭니다');
+  }
   if (require('./core/kie-models').isKieVal(startEngine)) return runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
   const Rot = require('./core/image-rotation');
@@ -6770,10 +6792,8 @@ ipcMain.handle('style-sample-make', async (_e, { ids = null, force = false } = {
     .filter((s) => force || !_faceFiles(STYLE_SAMPLE_ENGINE)[s.id]);
   if (!want.length) return { ok: true, made: 0, failed: 0, note: '그릴 스타일이 없습니다(이미 샘플이 있음)' };
   const cfg = CI.loadConfig();
-  cfg.cloud = false;
-  cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
-  const wf = (cfg.workflows || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
-  cfg.workflowPath = wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+  _forceLocalComfy(cfg);
+  cfg.workflowPath = _localQwenWfPath(cfg);
   if (!fs.existsSync(cfg.workflowPath)) return { ok: false, error: 'Qwen-Image 2.1 워크플로를 찾지 못했습니다' };
   _styleSampleBusy = true; S.abort = false;
   let made = 0, failed = 0; const errs = [];
@@ -7817,9 +7837,7 @@ async function runMakeAllBody(opts = {}) {
   //     예전엔 `noLocalGpuImg = true` 로 **하드코딩**돼 있어 로컬 이미지를 골라도 병렬로 돌았다.
   //   ⚠ 이 함수에서 **이미지 엔진 변수명은 `engine`** 이다(비디오는 `videoEngine`). `imgEngine` 으로 쓰면
   //     런타임 ReferenceError 가 나고 큐 7개가 전부 "imgEngine is not defined" 로 죽는다(2026-08-20 실사고).
-  const _imgLocalGpu = isComfyVal(engine) && (() => {
-    try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
-  })();
+  const _imgLocalGpu = _imgUsesLocalGpu(engine);   // 판정 한 곳(👑 로컬 Qwen 포함 · v0.9.109)
   const canParallel = !dry && !_imgLocalGpu;
 
   // ── 3단계 파이프라인 조건 ──
@@ -8668,6 +8686,7 @@ function _runOnLanes(lanes, label, fn) {
 }
 // 이미지 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI 이면서 클라우드가 아닐 때만 참.
 function _imgUsesLocalGpu(engine) {
+  if (require('./core/engine-migrate').isLocalQwen(engine)) return isOwner();   // 👑 로컬 Qwen = 늘 이 PC GPU(회원은 AI 이미지로 돈다)
   if (!isComfyVal(engine)) return false;
   try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
 }

@@ -232,15 +232,17 @@ function legacyEngineLabel(v, cfg) {
   if (KM.isKieVal(v)) return `AI · ${KM.idOf(v)}`;
   return LEGACY_ENGINE_LABEL[v] || v;
 }
-function EngineOptions({ kind = 'image', cfg, value = '' }) {
+function EngineOptions({ kind = 'image', cfg, value = '', owner = false }) {
   const isVid = kind === 'video';
   const models = isVid ? KM.VIDEO : KM.IMAGE;
-  const known = new Set([...models.map((m) => KM.valOf(m)), isVid ? 'none' : null].filter(Boolean));
+  const localQwen = !isVid && owner;   // 👑 🖥 로컬 Qwen-Image 2.1 = 관리자 화면에만(v0.9.109 · 회원 PC 엔 로컬 GPU 서버가 없다)
+  const known = new Set([...models.map((m) => KM.valOf(m)), isVid ? 'none' : null, localQwen ? EM.LOCAL_QWEN : null].filter(Boolean));
   const legacy = value && !known.has(value) ? value : null;
   return (<>
     <optgroup label={isVid ? 'AI 영상 (그림 → 영상)' : 'AI 이미지'}>
       {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>☁ {m.label}</option>)}
     </optgroup>
+    {localQwen && <optgroup label="관리자 · 이 PC"><option value={EM.LOCAL_QWEN} title="이 PC 의 ComfyUI 로 그립니다(무료 · 꺼져 있으면 앱이 켬 · 음성과 GPU 를 번갈아 씀)">🖥 로컬 Qwen-Image 2.1</option></optgroup>}
     {isVid && <option value="none">없음 (이미지만)</option>}
     {legacy && <option value={legacy}>(옛 설정) {legacyEngineLabel(legacy, cfg)}</option>}
   </>);
@@ -6166,7 +6168,7 @@ export default function App() {
             <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+              <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
             <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
@@ -7024,7 +7026,7 @@ export default function App() {
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
                       <select value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
+                        <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
