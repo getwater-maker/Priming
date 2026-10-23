@@ -19,7 +19,7 @@ function draw(ctx, img, st, show) {
   st.lines.forEach((l, i) => {
     const y = st.pos.y + i * st.size * GAP;
     ctx.lineWidth = Math.max(4, st.size * 0.16); ctx.strokeStyle = '#000'; ctx.strokeText(l.text, st.pos.x, y);
-    ctx.fillStyle = l.color === 'yellow' ? TE.YELLOW : TE.WHITE; ctx.fillText(l.text, st.pos.x, y);
+    ctx.fillStyle = TE.lineHex(l); ctx.fillText(l.text, st.pos.x, y);
   });
   if (show) {   // 편집 보조선(내보내기에는 없다)
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 1; ctx.setLineDash([6, 6]);
@@ -39,11 +39,12 @@ export default function ThumbEditor({ data, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [sts, setSts] = useState(() => Object.fromEntries(TE.AN.map((a) => {
     const d = data.an[a], lines = (d.lines || []).map((l) => ({ ...l }));
-    const cell = TE.ALLOWED.includes(d.cell) ? d.cell : '왼쪽-가운데';
-    const b = TE.cellBox(cell);
-    return [a, { lines, size: d.size || 0, cell, pos: { x: b.x, y: b.y }, edited: !!d.edited, dirty: false }];
+    const cell = TE.CELLS.includes(d.cell) ? d.cell : '왼쪽-가운데';
+    return [a, { lines, size: d.size || 0, cell, pos: null, edited: !!d.edited, dirty: false }];   // pos = 끌어서 정한 자리(없으면 칸 기준 자동)
   })));
-  const st = sts[an], d = data.an[an];
+  const raw = sts[an], d = data.an[an];
+  const blockH = Math.round(raw.lines.length * raw.size * GAP);
+  const st = { ...raw, pos: raw.pos || (({ x, y }) => ({ x, y }))(TE.cellBox(raw.cell, W, H, blockH)) };
   const patch = (p, dirty = true) => setSts((s) => ({ ...s, [an]: { ...s[an], ...p, dirty: s[an].dirty || dirty } }));
 
   // 글꼴·그림 읽기 + 안마다 글자 크기가 비었으면 자동 크기
@@ -83,7 +84,7 @@ export default function ThumbEditor({ data, onClose, onSaved }) {
   const sugg = f ? TE.suggestCells(f, st.lines, st.size, measure) : [];
 
   const setLine = (i, p) => patch({ lines: st.lines.map((l, k) => (k === i ? { ...l, ...p } : l)), edited: p.text != null ? true : st.edited });
-  const setCell = (cell) => { const b = TE.cellBox(cell); patch({ cell, pos: { x: b.x, y: b.y } }); };
+  const setCell = (cell) => patch({ cell, pos: null });
 
   async function save() {
     setBusy(true); setMsg('');
@@ -115,7 +116,7 @@ export default function ThumbEditor({ data, onClose, onSaved }) {
               {st.lines.map((l, i) => (
                 <div key={i} className="thed-line">
                   <input value={l.text} data-testid={'thed-line-' + i} onChange={(e) => setLine(i, { text: e.target.value })} />
-                  <button className={'thed-col' + (l.color === 'yellow' ? ' y' : '')} title="흰색 ↔ 노랑(강조)" onClick={() => setLine(i, { color: l.color === 'yellow' ? 'white' : 'yellow' })}>●</button>
+                  <button className={'thed-col' + (l.color === 'yellow' ? ' y' : '')} style={l.hex ? { color: l.hex } : undefined} title="흰색 ↔ 노랑(강조)" onClick={() => setLine(i, { color: l.color === 'yellow' ? 'white' : 'yellow', hex: undefined })}>●</button>
                   <button className="ghost thed-x" title="이 줄 지우기" onClick={() => patch({ lines: st.lines.filter((_, k) => k !== i), edited: true })}>✕</button>
                 </div>))}
               <button className="ghost thed-add" onClick={() => patch({ lines: [...st.lines, { text: '', color: 'white' }], edited: true })}>＋ 줄 추가</button>

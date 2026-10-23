@@ -67,11 +67,13 @@ function parseThumbText(md) {
 }
 
 // ───────── 배치 ─────────
-/** 칸 이름 → 글상자 왼쪽 위(x,y)와 최대 폭 · 높이(1280×720). 왼쪽 정렬로 칸 왼쪽 여백에서 시작해 이웃 칸까지 쓸 수 있다. */
-function cellBox(name, w = W, h = H) {
+/** 칸 이름 → 글상자 왼쪽 위(x,y)와 최대 폭 · 높이(1280×720). 왼쪽 정렬로 칸 왼쪽 여백에서 시작해 이웃 칸까지 쓸 수 있다.
+ *  blockH(글 덩어리 전체 높이)를 주면 행 기준으로 놓는다 — 위: 위 여백 · 가운데: 세로 가운데 · 아래: 아래 여백(실제 캔바본이 이렇게 놓인다 · 정보_1027 실측). */
+function cellBox(name, w = W, h = H, blockH = 0) {
   const ci = COLS.findIndex((c) => String(name).startsWith(c)), ri = ROWS.findIndex((r) => String(name).endsWith(r));
-  const c = ci < 0 ? 0 : ci, r = ri < 0 ? 1 : ri, m = Math.round(w * 0.04);
-  return { x: Math.round((w / 3) * c) + m, y: Math.round((h / 3) * r) + Math.round(h * 0.02), maxW: c === 0 ? Math.round(w * 0.62) : Math.round(w * 0.58) - m, maxH: Math.round(h / 3) * 1.02 };
+  const c = ci < 0 ? 0 : ci, r = ri < 0 ? 1 : ri, m = Math.round(w * 0.03), vm = Math.round(h * 0.04);
+  const y = blockH > 0 ? (r === 0 ? vm : r === 1 ? Math.max(vm, Math.round((h - blockH) / 2)) : Math.max(vm, Math.round(h - vm - blockH))) : Math.round((h / 3) * r) + Math.round(h * 0.02);
+  return { x: Math.round((w / 3) * c) + m, y, maxW: c === 0 ? Math.round(w * 0.62) : Math.round(w * 0.58) - m, maxH: Math.round(h / 3) * 1.02 };
 }
 /** 모든 줄이 같은 크기 — 가장 넓은 줄이 maxW 안에 들고 전체 높이가 maxH(여러 칸을 쓰면 더 큼) 안에 드는 가장 큰 글자 크기. measure(text, size) → 가로 화소. */
 function fitSize(lines, measure, maxW, maxH, { min = 40, max = 200, gap = 1.12 } = {}) {
@@ -107,7 +109,7 @@ function faceCover(f, rect, w = W, h = H) {
 /** 6개 허용 칸 중 얼굴을 덜 가리는 칸을 점수순으로 — [{cell, cells, veto}] */
 function suggestCells(f, lines, size, measure, w = W, h = H) {
   return ALLOWED.map((name, i) => {
-    const b = cellBox(name, w, h), rect = textRect(b.x, b.y, lines, size, measure);
+    const b = cellBox(name, w, h, Math.round((lines || []).length * size * 1.12)), rect = textRect(b.x, b.y, lines, size, measure);
     const c = faceCover(f, rect, w, h);
     return { cell: name, cells: c.cells, veto: c.veto, i };
   }).sort((a, b) => (a.veto - b.veto) || (a.cells - b.cells) || (a.i - b.i)).map(({ i, ...x }) => x);
@@ -188,16 +190,38 @@ function findFinalAssets(thumbRoot, key) {
 // ───────── 사이드카 ─────────
 function readSidecar(file) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j === 'object' ? j : null; } catch (_) { return null; } }
 const sidecarPath = (dir, key) => path.join(dir, `${key} 썸네일_문구.json`);
-/** 안 하나의 편집 값 → 사이드카 한 칸 { 줄:[{글,색}], 크기, 자리, 글꼴, 로이수정? } (색은 #rrggbb) */
-function sidecarEntry({ lines, size, cell, font, edited }) {
-  const e = { 줄: (lines || []).map((l) => ({ 글: l.text, 색: l.color === 'yellow' ? YELLOW : WHITE })), 크기: size, 자리: cell, 글꼴: font || '' };
-  if (edited) e.로이수정 = true;
+/** 줄의 실제 글자색(#rrggbb) — 사이드카에서 읽은 hex 가 있으면 그것(템플릿 색이 패키징 색보다 앞서는 채널이 있다 · 채널사업부 회신 2026-10-23), 없으면 흰/노랑 */
+const lineHex = (l) => (l && /^#[0-9a-f]{6}$/i.test(l.hex || '') ? l.hex.toLowerCase() : l && l.color === 'yellow' ? YELLOW : WHITE);
+/** hex → 편집기 색 이름(노란 계열이면 yellow) — 토글·표시용 */
+function colorNameOf(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || '')); if (!m) return 'white';
+  const [r, g, b] = [1, 2, 3].map((k) => parseInt(m[k], 16));
+  return r > 200 && g > 150 && b < 90 ? 'yellow' : 'white';
+}
+/** 사이드카 `자리`(9칸 이름 — `왼쪽-가운데` · `가운데` · `왼쪽위` 같은 꼴까지) → 편집기 칸 이름. 못 읽으면 ''. */
+function normCell(name) {
+  const t = String(name || '').replace(/[\s_-]+/g, '');
+  if (!t) return '';
+  if (t === '가운데' || t === '중앙') return '왼쪽-가운데';   // 단독 「가운데」 = 세로 가운데 · 글은 왼쪽 정렬(정보_1027 실측: 줄이 x≈40 에서 시작)
+  const col = COLS.find((c) => t.startsWith(c)), rest = col ? t.slice(col.length) : '';
+  const row = ROWS.find((r) => rest === r);
+  return col && row ? `${col}-${row}` : '';
+}
+/** 안 하나의 편집 값 → 사이드카 한 칸 { 줄:[{글,색}], 크기, 자리, 편집기글꼴, 로이수정? } (색은 #rrggbb) — 캔바 쪽 값(글꼴 fontRef·캔바디자인·패키징반영)은 prev 에서 그대로 이어받는다 */
+function sidecarEntry({ lines, size, cell, font, edited }, prev) {
+  const e = { ...(prev && typeof prev === 'object' ? prev : {}) };
+  e.줄 = (lines || []).map((l) => ({ 글: l.text, 색: lineHex(l) }));
+  e.크기 = size; e.자리 = cell; e.편집기글꼴 = font || '';
+  if (edited || (prev && prev.로이수정)) e.로이수정 = true;   // 한 번 단 표시는 편집기가 지우지 않는다(패키징반영 약속 — 반영 대기 = 로이수정 + 글이 패키징과 다름)
+  else delete e.로이수정;
   return e;
 }
-/** 사이드카 → 편집기 줄 [{text,color}] */
+/** 사이드카 → 편집기 줄 [{text,color,hex}] */
 function linesFromSidecar(entry) {
-  return Array.isArray(entry && entry.줄) ? entry.줄.map((l) => ({ text: String(l.글 || ''), color: /^#?ffd600$|^#?f[b-f][a-f0-9]{4}$/i.test(String(l.색 || '').replace('#', '')) && String(l.색 || '').toLowerCase() !== '#ffffff' ? 'yellow' : 'white' })).filter((l) => l.text) : [];
+  return Array.isArray(entry && entry.줄) ? entry.줄.map((l) => { const hex = /^#[0-9a-f]{6}$/i.test(String(l.색 || '')) ? String(l.색).toLowerCase() : ''; return { text: String(l.글 || ''), color: colorNameOf(hex), ...(hex ? { hex } : {}) }; }).filter((l) => l.text) : [];
 }
+/** 사이드카 크기(캔바 API px · `캔버스` 기준) → 1280 기준 */
+const sizeFromSidecar = (size, canvas) => { const n = Number(size); return Number.isFinite(n) && n > 0 ? Math.round(n * (W / (Number(canvas) > 0 ? Number(canvas) : W))) : 0; };
 /** 편집기 줄이 패키징 줄과 글자까지 같은가(공백 포함 완전 일치 — 채널사업부 오탈자 대조와 같은 기준) */
 const sameLines = (a, b) => (a || []).length === (b || []).length && (a || []).every((l, i) => l.text === (b[i] || {}).text);
 
@@ -234,4 +258,4 @@ function saveFinal(destDir, fileName, buf) {
   return { saved: target, preserved };
 }
 
-module.exports = { W, H, MAX_BYTES, AN, YELLOW, WHITE, CELLS, ALLOWED, parseBlock, parseThumbText, cellBox, fitSize, textRect, cellsCovered, faceCover, suggestCells, pngSize, checkSpec, keyOf, findCodexBases, findFinalAssets, readSidecar, sidecarPath, sidecarEntry, linesFromSidecar, sameLines, saveFinal };
+module.exports = { lineHex, colorNameOf, normCell, sizeFromSidecar, W, H, MAX_BYTES, AN, YELLOW, WHITE, CELLS, ALLOWED, parseBlock, parseThumbText, cellBox, fitSize, textRect, cellsCovered, faceCover, suggestCells, pngSize, checkSpec, keyOf, findCodexBases, findFinalAssets, readSidecar, sidecarPath, sidecarEntry, linesFromSidecar, sameLines, saveFinal };

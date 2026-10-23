@@ -33,6 +33,7 @@ console.log('[2] 자리 · 크기 · 얼굴');
   const s1 = TE.fitSize(lines, m, 700, 400), s2 = TE.fitSize(lines, m, 350, 400);
   ok(s1 > s2 && m('열두글자열두글자열두', s1) <= 700 && m('열두글자열두글자열두', s1 + 1) > 700 || s1 >= 200, '폭에 맞는 가장 큰 크기(폭이 좁으면 작아진다): ' + s1 + ' / ' + s2);
   ok(TE.fitSize([{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }, { text: 'e' }, { text: 'f' }], m, 9999, 600) <= Math.floor(600 / 6 / 1.12), '줄이 많으면 높이 한도로도 줄어든다');
+  { const b = TE.cellBox('왼쪽-가운데', 1280, 720, 504); ok(b.y === 108 && b.x === 38, '세로 가운데 칸 = 글 덩어리를 세로 가운데로(504px → y 108) · 왼쪽 여백 3%'); ok(TE.cellBox('왼쪽-위', 1280, 720, 300).y < TE.cellBox('왼쪽-아래', 1280, 720, 300).y && TE.cellBox('왼쪽-아래', 1280, 720, 300).y + 300 <= 720, '위·아래 칸은 위·아래 여백 기준'); }
   const right = TE.cellsCovered({ x: 700, y: 100, w: 400, h: 100 });
   ok(right.some((c) => c.startsWith('오른쪽')), '글상자가 오른쪽 열에 걸리면 감지');
   ok(!TE.cellsCovered({ x: 50, y: 250, w: 600, h: 200 }).some((c) => c.startsWith('오른쪽')), '왼쪽·가운데만 덮으면 통과');
@@ -100,6 +101,18 @@ console.log('[5] 저장 · 보존 · 사이드카');
   const back = TE.linesFromSidecar(e);
   ok(back[0].color === 'white' && back[1].color === 'yellow' && back[1].text === '나', '사이드카 → 편집기 줄 되돌림');
   ok(!TE.sidecarEntry({ lines: [], size: 1, cell: 'x' }).로이수정, '고치지 않았으면 로이수정 표시 없음');
+  // 채널사업부 회신(2026-10-23) — 사이드카 색·크기·자리·플래그 약속
+  { const side = { 줄: [{ 글: '통장 잔액 봤는데', 색: '#ffffff' }, { 글: '흰줄', 색: '#ffffff' }, { 글: '노랑줄', 색: '#ffd600' }, { 글: '주황', 색: '#ff8800' }], 크기: 150, 자리: '가운데', 글꼴: 'YAHO4j0__20,0', 캔바디자인: 'DAHY', 패키징반영: '2026-10-23T10:07+09:00', 로이수정: true };
+    const ls = TE.linesFromSidecar(side);
+    ok(ls[2].color === 'yellow' && ls[1].color === 'white' && ls[3].hex === '#ff8800' && TE.lineHex(ls[3]) === '#ff8800', '사이드카의 실제 색(#rrggbb)을 그대로 그린다(패키징 색보다 앞선다)');
+    ok(TE.lineHex({ text: 'a', color: 'yellow' }) === '#ffd600' && TE.lineHex({ text: 'a', color: 'white', hex: undefined }) === '#ffffff', 'hex 없는 줄은 흰/노랑');
+    const out = TE.sidecarEntry({ lines: ls, size: 90, cell: '왼쪽-가운데', font: 'Pretendard Bold', edited: false }, side);
+    ok(out.글꼴 === 'YAHO4j0__20,0' && out.캔바디자인 === 'DAHY' && out.패키징반영 === '2026-10-23T10:07+09:00' && out.편집기글꼴 === 'Pretendard Bold', '캔바 fontRef·디자인 id·패키징반영 키는 그대로 이어받는다(지우지 않는다)');
+    ok(out.로이수정 === true, '한 번 단 로이수정은 지우지 않는다(두 프로그램이 플래그를 두고 다투지 않게)');
+    ok(out.줄[3].색 === '#ff8800' && out.크기 === 90 && out.자리 === '왼쪽-가운데', '줄 색·크기·자리는 새 값');
+    ok(!TE.sidecarEntry({ lines: [], size: 1, cell: 'x' }, { 로이수정: undefined }).로이수정 && !TE.sidecarEntry({ lines: [], size: 1, cell: 'x' }, {}).로이수정, '처음 쓰는 안은 고치지 않았으면 표시 없음');
+    ok(TE.normCell('가운데') === '왼쪽-가운데' && TE.normCell('왼쪽-가운데') === '왼쪽-가운데' && TE.normCell('왼쪽위') === '왼쪽-위' && TE.normCell('이상한') === '', '9칸 이름 정규화(단독 「가운데」 · 붙은 꼴 · 모르면 빈 값)');
+    ok(TE.sizeFromSidecar(150, 1280) === 150 && TE.sizeFromSidecar(225, 1920) === 150 && TE.sizeFromSidecar(null, 1280) === 0, '크기 환산(다산 1920 기준 → 1280)'); }
   ok(TE.sameLines([{ text: 'a' }], [{ text: 'a' }]) && !TE.sameLines([{ text: 'a' }], [{ text: 'a ' }]) && !TE.sameLines([{ text: 'a' }], []), '문구 대조는 공백 포함 완전 일치');
   fs.rmSync(R, { recursive: true, force: true }); }
 
