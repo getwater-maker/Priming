@@ -4077,6 +4077,29 @@ function _localQwenWfPath(cfg) {
   const wf = ((cfg && cfg.workflows) || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
   return wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
 }
+// 🛑 로컬 Qwen 그림이 끝나면 ComfyUI 서버를 끈다(v0.9.111 · 로이 2026-10-23 — /free 뒤에도 RAM 약 11GB 를 쥐어 다음 대본 TTS 가 시간초과)
+//   그림 단계 전체(onlyNums 없음) = 끝나자마자 · 그룹 몇 개만 다시 그리기 = 3분 쉬면 끈다(연달아 고칠 때마다 1분씩 다시 켜지 않게)
+//   중단·실패여도 끈다(finally) · 다른 로컬 Qwen 작업이 돌고 있으면 끄지 않는다.
+let _localQwenActive = 0, _localQwenStopTimer = null;
+const LOCAL_QWEN_IDLE_STOP_MS = 3 * 60 * 1000;
+async function _stopLocalQwenComfy(logger) {
+  if (_localQwenActive) return;
+  try {
+    const cfg = _forceLocalComfy(require('./core/comfy-image').loadConfig());
+    await require('./core/comfy-launch').stopLocalComfy({ baseUrl: cfg.baseUrl, log: logger || log });
+  } catch (e) { (logger || log)('  ⚠ ComfyUI 서버 끄기 오류 — ' + e.message); }
+}
+async function _withLocalQwenStop(onlyNums, logger, fn) {
+  if (_localQwenStopTimer) { clearTimeout(_localQwenStopTimer); _localQwenStopTimer = null; }
+  _localQwenActive++;
+  try { return await fn(); } finally {
+    _localQwenActive--;
+    if (!_localQwenActive) {
+      if (onlyNums && onlyNums.length) _localQwenStopTimer = setTimeout(() => { _localQwenStopTimer = null; _stopLocalQwenComfy(log); }, LOCAL_QWEN_IDLE_STOP_MS);
+      else await _stopLocalQwenComfy(logger);
+    }
+  }
+}
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false, forceLocal = false) {
   require('./core/visual-span').markCovered(project, hasVisual);
   const CI = require('./core/comfy-image');
@@ -4105,7 +4128,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       for (const w of d.warnings) logger('  ' + w);
     } catch (_) {}
   }
-  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성', logger);   // 이 GPU 에서 TTS 중이면 대기(2단계)
+  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성', logger, { untilDone: forceLocal });   // 이 GPU 에서 TTS 중이면 대기(2단계 · 👑 로컬 Qwen 은 끝까지 — v0.9.111)
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
   //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
@@ -4691,7 +4714,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
     if (isOwner()) {
       const CI = require('./core/comfy-image');
       if (!fs.existsSync(_localQwenWfPath(CI.loadConfig()))) { logger('⚠ 🖥 로컬 Qwen-Image 2.1 워크플로를 찾지 못했습니다'); return; }
-      return runComfyImages(project, imagesDir, logger, styleId, onlyNums, _localQwenWfPath(CI.loadConfig()), retryLevel, force, true);
+      return _withLocalQwenStop(onlyNums, logger, () => runComfyImages(project, imagesDir, logger, styleId, onlyNums, _localQwenWfPath(CI.loadConfig()), retryLevel, force, true));
     }
     startEngine = require('./core/engine-migrate').IMG_DEFAULT;
     logger('🔁 🖥 로컬 Qwen-Image 2.1 은 관리자 전용입니다 → AI 이미지로 만듭니다');
@@ -8713,7 +8736,8 @@ function enqueueImageJob(label, fn, engine) {
 //   ⚠ **구버전 서버면 404/401 이 온다 → 그냥 진행**(fail-open). 서버를 재시작하기 전까지는 무동작.
 //   ⚠ 전제: 이 집 구성은 **GPU 머신이 하나**다. ComfyUI 가 로컬(비클라우드)이면 그 GPU 의 TTS 를 기다린다.
 const FOREIGN_TTS_WAIT_MS = 10 * 60 * 1000;   // 10분 — 넘으면 경고만 남기고 진행
-async function awaitForeignTtsIdle(label, logger) {
+// untilDone = 10분 상한 없이 음성이 끝날 때까지(👑 로컬 Qwen · v0.9.111 — 10분 뒤 억지로 겹쳐 돌리자 그림 장당 26초→60~78초 · RAM 이 넘쳐 TTS 도 시간초과) · ⏹ 중단이면 멈춘다
+async function awaitForeignTtsIdle(label, logger, { untilDone = false } = {}) {
   const say = typeof logger === "function" ? logger : log;
   let base = "";
   let headers = {};
@@ -8726,7 +8750,9 @@ async function awaitForeignTtsIdle(label, logger) {
   if (!base) return;
   const t0 = Date.now();
   let waited = false;
-  while (Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
+  let lastNote = Date.now();
+  while (untilDone || Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
+    if (untilDone && S.abort) { say("  ⏹ " + label + " — 중단됨(음성 대기 중)"); return; }
     let n = 0;
     try {
       const r = await fetch(base + "/busy", { headers, signal: AbortSignal.timeout(4000) });
@@ -8741,7 +8767,10 @@ async function awaitForeignTtsIdle(label, logger) {
     }
     if (!waited) {
       waited = true;
-      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지");
+      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지" + (untilDone ? " (끝까지 기다림)" : ""));
+    } else if (untilDone && Date.now() - lastNote >= 5 * 60 * 1000) {
+      lastNote = Date.now();
+      say("  ⏳ " + label + " — 아직 음성 변환 중(" + n + "건 · " + Math.round((Date.now() - t0) / 60000) + "분째) · 끝까지 기다립니다");
     }
     await new Promise((r) => setTimeout(r, 3000));
   }

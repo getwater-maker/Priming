@@ -73,7 +73,7 @@ ok('main·화면 입구가 core/engine-migrate 를 거친다');
   assert.match(app, /const localQwen = !isVid && owner;/, '화면 항목이 관리자 조건 뒤에 있지 않다');
   assert.equal((app.match(/<EngineOptions kind="image" owner=\{owner\}/g) || []).length, 2, '헤더·채널 편집 두 곳 모두 owner 를 넘겨야 한다');
   assert.match(main, /isLocalQwen\(startEngine\)\) \{\n    if \(isOwner\(\)\) \{/, '이미지 입구가 관리자인지 보지 않는다');
-  assert.match(main, /return runComfyImages\([^\n]*, retryLevel, force, true\);/, '로컬 강제(forceLocal) 없이 부른다 — 설정 파일이 클라우드면 클라우드로 간다');
+  assert.match(main, /runComfyImages\([^\n]*, retryLevel, force, true\)\);/, '로컬 강제(forceLocal) 없이 부른다 — 설정 파일이 클라우드면 클라우드로 간다');
   assert.match(main, /function _imgUsesLocalGpu\(engine\) \{\n  if \(require\('\.\/core\/engine-migrate'\)\.isLocalQwen\(engine\)\) return isOwner\(\);/, 'GPU 레인 판정에 로컬 Qwen 이 없다(TTS 와 겹친다)');
   assert.match(main, /const _imgLocalGpu = _imgUsesLocalGpu\(engine\);/, '⚡ 만들기의 GPU 판정이 한 곳을 거치지 않는다');
 }
