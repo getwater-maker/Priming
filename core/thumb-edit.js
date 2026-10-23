@@ -67,13 +67,17 @@ function parseThumbText(md) {
 }
 
 // ───────── 배치 ─────────
-/** 칸 이름 → 글상자 왼쪽 위(x,y)와 최대 폭 · 높이(1280×720). 왼쪽 정렬로 칸 왼쪽 여백에서 시작해 이웃 칸까지 쓸 수 있다.
- *  blockH(글 덩어리 전체 높이)를 주면 행 기준으로 놓는다 — 위: 위 여백 · 가운데: 세로 가운데 · 아래: 아래 여백(실제 캔바본이 이렇게 놓인다 · 정보_1027 실측). */
-function cellBox(name, w = W, h = H, blockH = 0) {
+/** 칸 이름 → 글 정렬(열 기준) — 왼쪽 열 = 왼쪽 정렬 · 가운데 열 = 가운데 정렬 · 오른쪽 열 = 오른쪽 정렬 */
+function alignOf(name) { const ci = COLS.findIndex((c) => String(name).startsWith(c)); return ci === 1 ? 'center' : ci === 2 ? 'right' : 'left'; }
+/** 칸 이름 → 글 덩어리 왼쪽 위(x,y)와 최대 폭 · 높이(1280×720).
+ *  blockH·blockW(글 덩어리 전체 크기)를 주면 칸 기준으로 놓는다 — 세로: 위 = 위 여백 · 가운데 = 세로 가운데 · 아래 = 아래 여백 /
+ *  가로: 왼쪽 열 = 왼쪽 여백 · 가운데 열 = 화면 가로 가운데 · 오른쪽 열 = 오른쪽 여백(실제 캔바본·정보_1027 실측: 세로 가운데 · 왼쪽 정렬). */
+function cellBox(name, w = W, h = H, blockH = 0, blockW = 0) {
   const ci = COLS.findIndex((c) => String(name).startsWith(c)), ri = ROWS.findIndex((r) => String(name).endsWith(r));
   const c = ci < 0 ? 0 : ci, r = ri < 0 ? 1 : ri, m = Math.round(w * 0.03), vm = Math.round(h * 0.04);
   const y = blockH > 0 ? (r === 0 ? vm : r === 1 ? Math.max(vm, Math.round((h - blockH) / 2)) : Math.max(vm, Math.round(h - vm - blockH))) : Math.round((h / 3) * r) + Math.round(h * 0.02);
-  return { x: Math.round((w / 3) * c) + m, y, maxW: c === 0 ? Math.round(w * 0.62) : Math.round(w * 0.58) - m, maxH: Math.round(h / 3) * 1.02 };
+  const x = blockW > 0 ? (c === 0 ? m : c === 1 ? Math.max(m, Math.round((w - blockW) / 2)) : Math.max(m, Math.round(w - m - blockW))) : Math.round((w / 3) * c) + m;
+  return { x, y, maxW: c === 0 ? Math.round(w * 0.62) : Math.round(w * 0.58) - m, maxH: Math.round(h / 3) * 1.02 };
 }
 /** 모든 줄이 같은 크기 — 가장 넓은 줄이 maxW 안에 들고 전체 높이가 maxH(여러 칸을 쓰면 더 큼) 안에 드는 가장 큰 글자 크기. measure(text, size) → 가로 화소. */
 function fitSize(lines, measure, maxW, maxH, { min = 40, max = 200, gap = 1.12 } = {}) {
@@ -109,7 +113,7 @@ function faceCover(f, rect, w = W, h = H) {
 /** 6개 허용 칸 중 얼굴을 덜 가리는 칸을 점수순으로 — [{cell, cells, veto}] */
 function suggestCells(f, lines, size, measure, w = W, h = H) {
   return ALLOWED.map((name, i) => {
-    const b = cellBox(name, w, h, Math.round((lines || []).length * size * 1.12)), rect = textRect(b.x, b.y, lines, size, measure);
+    const bw = Math.max(0, ...(lines || []).map((l) => measure(l.text, size))), b = cellBox(name, w, h, Math.round((lines || []).length * size * 1.12), bw), rect = textRect(b.x, b.y, lines, size, measure);
     const c = faceCover(f, rect, w, h);
     return { cell: name, cells: c.cells, veto: c.veto, i };
   }).sort((a, b) => (a.veto - b.veto) || (a.cells - b.cells) || (a.i - b.i)).map(({ i, ...x }) => x);
@@ -190,6 +194,80 @@ function findFinalAssets(thumbRoot, key) {
 // ───────── 사이드카 ─────────
 function readSidecar(file) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j === 'object' ? j : null; } catch (_) { return null; } }
 const sidecarPath = (dir, key) => path.join(dir, `${key} 썸네일_문구.json`);
+// ───────── 글 모델(v0.9.105) — 한 줄 입력 「첫 줄/둘째 줄」 · `/` 가 줄바꿈 · 색은 글자 범위(spans) ─────────
+const HEX = /^#[0-9a-f]{6}$/i;
+/** 입력 글 → 줄 [{text(앞뒤 공백 뺀 글), start, end(원문 안 글자 위치 · end 미포함)}] — 빈 줄은 뺀다 */
+function splitLines(raw) {
+  const out = []; const s = String(raw == null ? '' : raw); let from = 0;
+  for (let i = 0; i <= s.length; i++) {
+    if (i === s.length || s[i] === '/') {
+      let a = from, b = i;
+      while (a < b && /\s/.test(s[a])) a++;
+      while (b > a && /\s/.test(s[b - 1])) b--;
+      if (b > a) out.push({ text: s.slice(a, b), start: a, end: b });
+      from = i + 1;
+    }
+  }
+  return out;
+}
+/** 글자 범위 색 정리 — 겹침은 뒤에 적은 것이 이긴다 · 흰색(기본)은 지운다 · 이웃한 같은 색은 합친다 */
+function normSpans(spans, len) {
+  const col = new Array(Math.max(0, len)).fill(null);
+  for (const sp of spans || []) {
+    const a = Math.max(0, Math.floor(Number(sp.from))), b = Math.min(len, Math.floor(Number(sp.to)));
+    if (!HEX.test(sp.hex || '')) continue;
+    for (let i = a; i < b; i++) col[i] = String(sp.hex).toLowerCase();
+  }
+  const out = [];
+  for (let i = 0; i < col.length;) {
+    if (!col[i] || col[i] === WHITE) { i++; continue; }
+    let j = i; while (j < col.length && col[j] === col[i]) j++;
+    out.push({ from: i, to: j, hex: col[i] }); i = j;
+  }
+  return out;
+}
+/** [from,to) 글자 범위에 색을 칠한다(기본색 흰색이면 지움) → 새 spans */
+function applySpan(spans, from, to, hex, len) { return normSpans([...(spans || []), { from, to, hex: HEX.test(hex || '') ? hex : WHITE }], len); }
+/** 글을 고쳤을 때 색 범위를 따라 옮긴다 — 앞·뒤에서 같은 부분을 찾아 가운데만 바뀐 것으로 본다 */
+function shiftSpans(spans, oldText, newText) {
+  const a = String(oldText || ''), b = String(newText || '');
+  let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let q = 0; while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
+  const delta = b.length - a.length, oldMidEnd = a.length - q;
+  const out = [];
+  for (const sp of spans || []) {
+    const parts = [];
+    if (sp.from < p) parts.push([sp.from, Math.min(sp.to, p)]);   // 바뀐 부분 앞
+    if (sp.to > oldMidEnd) parts.push([Math.max(sp.from, oldMidEnd) + delta, sp.to + delta]);   // 바뀐 부분 뒤
+    for (const [f, t] of parts) if (t > f) out.push({ from: f, to: t, hex: sp.hex });
+  }
+  return normSpans(out, b.length);
+}
+/** 줄 모델 — [{ text, runs:[{text,hex}], hex(가장 많은 글자 색), color(흰/노랑 이름) }] — 그리기·사이드카·대조가 모두 이것 하나를 쓴다 */
+function lineModels(raw, spans) {
+  const s = String(raw == null ? '' : raw), sp = normSpans(spans, s.length);
+  const at = (i) => { for (const x of sp) if (i >= x.from && i < x.to) return x.hex; return WHITE; };
+  return splitLines(s).map((ln) => {
+    const runs = []; const cnt = {};
+    for (let i = ln.start; i < ln.end; i++) {
+      const h = at(i); cnt[h] = (cnt[h] || 0) + 1;
+      if (runs.length && runs[runs.length - 1].hex === h) runs[runs.length - 1].text += s[i]; else runs.push({ text: s[i], hex: h });
+    }
+    const hex = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || WHITE;
+    return { text: ln.text, runs, hex, color: colorNameOf(hex) };
+  });
+}
+/** 줄 목록 [{text,hex|color,runs?}] → 입력 글(`/` 로 이음)과 색 범위 */
+function textFromLines(lines) {
+  let raw = ''; const spans = [];
+  (lines || []).forEach((l, i) => {
+    if (i) raw += '/';
+    const runs = l.runs && l.runs.length ? l.runs : [{ text: l.text, hex: lineHex(l) }];
+    for (const r of runs) { const f = raw.length; raw += r.text; if (r.hex && r.hex !== WHITE) spans.push({ from: f, to: raw.length, hex: r.hex }); }
+  });
+  return { raw, spans: normSpans(spans, raw.length) };
+}
+
 /** 줄의 실제 글자색(#rrggbb) — 사이드카에서 읽은 hex 가 있으면 그것(템플릿 색이 패키징 색보다 앞서는 채널이 있다 · 채널사업부 회신 2026-10-23), 없으면 흰/노랑 */
 const lineHex = (l) => (l && /^#[0-9a-f]{6}$/i.test(l.hex || '') ? l.hex.toLowerCase() : l && l.color === 'yellow' ? YELLOW : WHITE);
 /** hex → 편집기 색 이름(노란 계열이면 yellow) — 토글·표시용 */
@@ -208,17 +286,26 @@ function normCell(name) {
   return col && row ? `${col}-${row}` : '';
 }
 /** 안 하나의 편집 값 → 사이드카 한 칸 { 줄:[{글,색}], 크기, 자리, 편집기글꼴, 로이수정? } (색은 #rrggbb) — 캔바 쪽 값(글꼴 fontRef·캔바디자인·패키징반영)은 prev 에서 그대로 이어받는다 */
-function sidecarEntry({ lines, size, cell, font, edited }, prev) {
+function sidecarEntry({ lines, size, cell, font, bold, edited }, prev) {
   const e = { ...(prev && typeof prev === 'object' ? prev : {}) };
-  e.줄 = (lines || []).map((l) => ({ 글: l.text, 색: lineHex(l) }));
+  e.줄 = (lines || []).map((l) => {
+    const o = { 글: l.text, 색: lineHex(l) };
+    if (l.runs && l.runs.length > 1) o.조각 = l.runs.map((r) => ({ 글: r.text, 색: r.hex }));   // 글자 범위 색 — 채널사업부는 글·색만 읽고 조각은 무시한다
+    return o;
+  });
   e.크기 = size; e.자리 = cell; e.편집기글꼴 = font || '';
+  if (bold != null) e.편집기굵기 = bold;
   if (edited || (prev && prev.로이수정)) e.로이수정 = true;   // 한 번 단 표시는 편집기가 지우지 않는다(패키징반영 약속 — 반영 대기 = 로이수정 + 글이 패키징과 다름)
   else delete e.로이수정;
   return e;
 }
-/** 사이드카 → 편집기 줄 [{text,color,hex}] */
+/** 사이드카 → 편집기 줄 [{text,color,hex,runs?}] */
 function linesFromSidecar(entry) {
-  return Array.isArray(entry && entry.줄) ? entry.줄.map((l) => { const hex = /^#[0-9a-f]{6}$/i.test(String(l.색 || '')) ? String(l.색).toLowerCase() : ''; return { text: String(l.글 || ''), color: colorNameOf(hex), ...(hex ? { hex } : {}) }; }).filter((l) => l.text) : [];
+  return Array.isArray(entry && entry.줄) ? entry.줄.map((l) => {
+    const hex = HEX.test(String(l.색 || '')) ? String(l.색).toLowerCase() : '';
+    const runs = Array.isArray(l.조각) ? l.조각.map((r) => ({ text: String(r.글 || ''), hex: HEX.test(String(r.색 || '')) ? String(r.색).toLowerCase() : WHITE })).filter((r) => r.text) : [];
+    return { text: String(l.글 || ''), color: colorNameOf(hex), ...(hex ? { hex } : {}), ...(runs.length > 1 && runs.map((r) => r.text).join('') === String(l.글 || '') ? { runs } : {}) };
+  }).filter((l) => l.text) : [];
 }
 /** 사이드카 크기(캔바 API px · `캔버스` 기준) → 1280 기준 */
 const sizeFromSidecar = (size, canvas) => { const n = Number(size); return Number.isFinite(n) && n > 0 ? Math.round(n * (W / (Number(canvas) > 0 ? Number(canvas) : W))) : 0; };
@@ -258,4 +345,36 @@ function saveFinal(destDir, fileName, buf) {
   return { saved: target, preserved };
 }
 
-module.exports = { lineHex, colorNameOf, normCell, sizeFromSidecar, W, H, MAX_BYTES, AN, YELLOW, WHITE, CELLS, ALLOWED, parseBlock, parseThumbText, cellBox, fitSize, textRect, cellsCovered, faceCover, suggestCells, pngSize, checkSpec, keyOf, findCodexBases, findFinalAssets, readSidecar, sidecarPath, sidecarEntry, linesFromSidecar, sameLines, saveFinal };
+// ───────── 이전 버전 되돌리기(v0.9.105) — `_캔바원본\\` 에 쌓인 보존본 ─────────
+const VERSION_DIR = '_캔바원본';
+/** 완성본 한 장의 이전 버전들 — [{ name, mtimeMs, size, first }] 최근 것이 먼저 · first = 가장 오래된 것(캔바 원본) */
+function listVersions(destDir, finalName) {
+  const base = path.basename(finalName, path.extname(finalName)), od = path.join(destDir, VERSION_DIR);
+  const re = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:_\\d+)?\\.png$', 'i');
+  const out = [];
+  for (const e of _ls(od)) {
+    if (!e.isFile() || !re.test(e.name)) continue;
+    try { const st = fs.statSync(path.join(od, e.name)); out.push({ name: e.name, mtimeMs: st.mtimeMs, size: st.size }); } catch (_) {}
+  }
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (out.length) out[out.length - 1].first = true;
+  return out;
+}
+/** 보존본에 딸린 문구 기록(그 버전 때의 사이드카 항목) 파일 이름 */
+const snapshotFile = (preservedPath) => preservedPath + '.문구.json';
+/** 이전 버전으로 되돌리기 — 지금 완성본은 먼저 `_캔바원본\` 에 보존하고(잃지 않는다) 고른 버전을 복사해 원래 이름으로 둔다(고른 버전은 그대로 남는다) */
+function restoreVersion(destDir, finalName, versionName) {
+  const od = path.join(destDir, VERSION_DIR), src = path.join(od, path.basename(String(versionName || '')));
+  if (path.basename(src) !== versionName || !listVersions(destDir, finalName).some((v) => v.name === versionName)) throw new Error('되돌릴 버전을 찾지 못했습니다');
+  const buf = fs.readFileSync(src);
+  const sp = checkSpec(buf, finalName);
+  if (!sp.ok) throw new Error('규격: ' + sp.errors.join(' · '));
+  const target = path.join(destDir, finalName);
+  let preserved = '';
+  if (fs.existsSync(target)) { fs.mkdirSync(od, { recursive: true }); const ext = path.extname(finalName); preserved = _uniq(od, path.basename(finalName, ext), ext); fs.renameSync(target, preserved); }
+  try { _writeAtomic(target, buf); }
+  catch (e) { if (preserved) { try { fs.renameSync(preserved, target); } catch (_) {} } throw e; }
+  return { restored: target, from: src, preserved };
+}
+
+module.exports = { alignOf, splitLines, normSpans, applySpan, shiftSpans, lineModels, textFromLines, listVersions, restoreVersion, snapshotFile, VERSION_DIR, lineHex, colorNameOf, normCell, sizeFromSidecar, W, H, MAX_BYTES, AN, YELLOW, WHITE, CELLS, ALLOWED, parseBlock, parseThumbText, cellBox, fitSize, textRect, cellsCovered, faceCover, suggestCells, pngSize, checkSpec, keyOf, findCodexBases, findFinalAssets, readSidecar, sidecarPath, sidecarEntry, linesFromSidecar, sameLines, saveFinal };

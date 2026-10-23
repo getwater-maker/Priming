@@ -5956,7 +5956,7 @@ ipcMain.handle('thumb-edit-open', async () => {
     if (final) _thumbEditOk.add(final);
     if (bg) _thumbEditOk.add(bg);
     const e = side && side.안 && side.안[a];
-    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e ? TE.sizeFromSidecar(e.크기, side.캔버스) : 0, cell: e ? TE.normCell(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e };
+    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e ? TE.sizeFromSidecar(e.크기, side.캔버스) : 0, cell: e ? TE.normCell(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e, font: e && e.편집기글꼴 ? String(e.편집기글꼴) : '', bold: e && e.편집기굵기 != null ? Number(e.편집기굵기) : null };
   }
   log(`🖼 썸네일 편집기 열기 — ${key} · 완성본 폴더 ${path.basename(fin.dir)}${pf ? '' : ' · ⚠ 패키징 파일 없음(문구를 직접 적으세요)'}`);
   return { ok: true, key, dir: fin.dir, packaging: !!pf, an: ans };
@@ -5982,10 +5982,44 @@ ipcMain.handle('thumb-edit-save', async (_e, a = {}) => {
   const oldCanvas = Number(cur.캔버스) > 0 ? Number(cur.캔버스) : TE.W;
   if (oldCanvas !== TE.W) for (const k of Object.keys(cur.안)) if (k !== a.an && cur.안[k] && cur.안[k].크기) cur.안[k].크기 = TE.sizeFromSidecar(cur.안[k].크기, oldCanvas);
   cur.캔버스 = TE.W;
-  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: 'Pretendard Bold', edited: !!a.edited }, cur.안[a.an]);
+  const prevEntry = cur.안[a.an] ? JSON.parse(JSON.stringify(cur.안[a.an])) : null;
+  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: a.font || '', bold: a.bold, edited: !!a.edited }, cur.안[a.an]);
+  // 보존한 이전 파일에 「그 버전 때의 문구 기록」을 딸려 둔다 — 이전 버전으로 되돌릴 때 사이드카도 함께 되돌리려고
+  if (r.preserved && prevEntry) { try { fs.writeFileSync(TE.snapshotFile(r.preserved), JSON.stringify({ 캔버스: oldCanvas, 항목: prevEntry }, null, 2), 'utf8'); } catch (_) {} }
   try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 썼습니다: ${e.message}`); }
   log(`🖼 썸네일 ${a.an} 저장 — ${fileName} (${(buf.length / 1024).toFixed(0)}KB)${r.preserved ? ' · 이전 파일은 _캔바원본 에 보존' : ''}${a.edited ? ' · 문구 수정(사이드카에 로이수정 표시)' : ''}`);
   return { ok: true, saved: r.saved, preserved: r.preserved, bytes: buf.length };
+});
+// 🖼 이전 버전(`_캔바원본\\` 보존본) 목록 · 되돌리기 — 되돌릴 때도 지금 완성본은 먼저 보존한다(잃지 않는다)
+ipcMain.handle('thumb-edit-versions', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) return { ok: false, versions: [] };
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) return { ok: false, versions: [] };
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const versions = TE.listVersions(fin.dir, fileName);
+  for (const v of versions) _thumbEditOk.add(path.join(fin.dir, TE.VERSION_DIR, v.name));
+  return { ok: true, versions: versions.map((v) => ({ ...v, path: path.join(fin.dir, TE.VERSION_DIR, v.name) })) };
+});
+ipcMain.handle('thumb-edit-restore', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), { writeTextAtomicSync } = require('./core/atomic-write');
+  const root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) throw new Error('썸네일 위치를 알 수 없습니다');
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) throw new Error('완성본 폴더를 찾지 못했습니다');
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const r = TE.restoreVersion(fin.dir, fileName, String(a.name || ''));
+  // 사이드카도 그 버전 때로 — 문구 기록이 있으면 그것으로, 없으면 이 안의 항목을 지운다(PNG 와 다른 글이 남지 않게)
+  const scFile = TE.sidecarPath(fin.dir, key), cur = TE.readSidecar(scFile);
+  if (cur && cur.안 && cur.안[a.an] !== undefined) {
+    let snap = null; try { snap = JSON.parse(fs.readFileSync(TE.snapshotFile(r.from), 'utf8')); } catch (_) {}
+    if (snap && snap.항목) { const e = snap.항목; if (e.크기 && Number(snap.캔버스) > 0 && Number(snap.캔버스) !== TE.W) e.크기 = TE.sizeFromSidecar(e.크기, snap.캔버스); cur.안[a.an] = e; }
+    else delete cur.안[a.an];
+    cur.캔버스 = TE.W;
+    try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 되돌렸습니다: ${e.message}`); }
+  }
+  log(`🖼 썸네일 ${a.an} 이전 버전으로 되돌림 — ${a.name}${r.preserved ? ' · 되돌리기 전 파일은 _캔바원본 에 보존' : ''}`);
+  return { ok: true, restored: r.restored };
 });
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();

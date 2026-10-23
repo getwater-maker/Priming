@@ -116,6 +116,48 @@ console.log('[5] 저장 · 보존 · 사이드카');
   ok(TE.sameLines([{ text: 'a' }], [{ text: 'a' }]) && !TE.sameLines([{ text: 'a' }], [{ text: 'a ' }]) && !TE.sameLines([{ text: 'a' }], []), '문구 대조는 공백 포함 완전 일치');
   fs.rmSync(R, { recursive: true, force: true }); }
 
+console.log('[5b] 글 모델 — 한 줄 입력(/) · 글자 범위 색');
+{ const sl = TE.splitLines(' 첫 줄 / 둘째 줄 //셋째');
+  ok(sl.map((x) => x.text).join('|') === '첫 줄|둘째 줄|셋째' && sl[0].start === 1 && sl[0].end === 4, '「/」 로 줄을 나누고 앞뒤 공백·빈 줄은 뺀다');
+  const raw = '가나다라/마바사';
+  let sp = TE.applySpan([], 2, 5, '#ffd600', raw.length);
+  const lm = TE.lineModels(raw, sp);
+  ok(lm.length === 2 && lm[0].runs.map((r) => r.text + r.hex).join(',') === '가나#ffffff,다라#ffd600' && lm[1].runs.length === 1 && lm[1].runs[0].hex === '#ffffff' , '글자 범위 색이 줄마다 조각으로 나뉜다(「/」는 그리지 않음 · 범위 밖 줄은 흰색)');
+  ok(lm[0].hex === '#ffffff' || lm[0].hex === '#ffd600', '줄 대표 색(가장 많은 글자)');
+  ok(TE.applySpan(sp, 2, 5, '#ffffff', raw.length).length === 0, '흰색(기본)을 칠하면 색 범위가 지워진다');
+  const raw2 = '가나X다라/마바사', sp2 = TE.shiftSpans(sp, raw, raw2);
+  ok(sp2.length === 1 && sp2[0].from === 3 && raw2.slice(sp2[0].from, sp2[0].to).includes('다라'), '글을 고쳐도 색 범위가 따라간다(가운데에 글자 끼움)'.concat(JSON.stringify(sp2)));
+  const raw3 = '다라/마바사', sp3 = TE.shiftSpans(sp, raw, raw3);
+  ok(sp3.every((x) => x.from >= 0 && x.to <= raw3.length), '앞을 지워도 범위가 글 밖으로 나가지 않는다');
+  const t = TE.textFromLines([{ text: '가나', color: 'white' }, { text: '다라', color: 'yellow' }, { text: '섞임', runs: [{ text: '섞', hex: '#ff4d4d' }, { text: '임', hex: '#ffffff' }] }]);
+  ok(t.raw === '가나/다라/섞임' && TE.lineModels(t.raw, t.spans).map((l) => l.runs.length).join() === '1,1,2', '줄 목록 ↔ 한 줄 입력 왕복(줄 색·조각 보존)');
+  const e = TE.sidecarEntry({ lines: lm, size: 90, cell: '왼쪽-가운데', font: 'F', bold: 3, edited: true }, null);
+  ok(e.줄[0].조각 && e.줄[0].조각.length === 2 && e.줄[1].조각 === undefined && e.편집기굵기 === 3, '사이드카: 여러 색이면 조각(글·색)을 함께 · 한 색이면 조각 없음 · 글자 굵기 기록');
+  ok(TE.linesFromSidecar(e)[0].runs.length === 2 && TE.linesFromSidecar(e)[0].text === lm[0].text, '사이드카 조각 읽기');
+  ok(TE.alignOf('왼쪽-위') === 'left' && TE.alignOf('가운데-아래') === 'center' && TE.alignOf('오른쪽-가운데') === 'right', '칸 → 정렬(열 기준)');
+  const c = TE.cellBox('가운데-가운데', 1280, 720, 300, 500), l = TE.cellBox('왼쪽-위', 1280, 720, 300, 500), r = TE.cellBox('오른쪽-아래', 1280, 720, 300, 500);
+  ok(c.x === 390 && c.y === 210 && l.x === 38 && l.y === 29 && r.x === 1280 - 38 - 500 && r.y + 300 <= 720, '자리: 가운데 열 = 화면 가로 가운데 · 왼쪽 = 왼쪽 여백 · 오른쪽 = 오른쪽 여백 · 세로는 행 기준'); }
+
+console.log('[5c] 이전 버전 되돌리기');
+{ const R = T(), D = path.join(R, '99_썸네일', 'ch'); fs.mkdirSync(D, { recursive: true });
+  const mk = (n) => { const b = Buffer.alloc(40 + n); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b); b.writeUInt32BE(1280, 16); b.writeUInt32BE(720, 20); return b; };
+  const NAME = '[a_1] 썸네일_A.png';
+  fs.writeFileSync(path.join(D, NAME), mk(1));
+  TE.saveFinal(D, NAME, mk(10)); TE.saveFinal(D, NAME, mk(20));   // 보존본 2개: 처음(41B) · 두 번째(50B)
+  fs.writeFileSync(path.join(D, '_캔바원본', NAME + '.문구.json'), '{}');   // 딸린 기록 파일은 목록에 안 나온다
+  fs.writeFileSync(path.join(D, '_캔바원본', '[a_1] 썸네일_B.png'), mk(5));   // 다른 안은 안 나온다
+  const vs = TE.listVersions(D, NAME);
+  ok(vs.length === 2 && vs.every((v) => /^\[a_1\] 썸네일_A(_2)?\.png$/.test(v.name)) && vs.filter((v) => v.first).length === 1, '이 안의 보존본만 목록에(딸린 .json·다른 안 제외) · 하나에만 first 표시');
+  const first = vs.find((v) => v.first), other = vs.find((v) => !v.first);
+  const cur0 = fs.readFileSync(path.join(D, NAME)).length;
+  const rr = TE.restoreVersion(D, NAME, first.name);
+  ok(fs.readFileSync(path.join(D, NAME)).length === first.size && fs.existsSync(path.join(D, '_캔바원본', first.name)), '고른 버전이 원래 이름으로 돌아오고, 그 버전 파일도 남는다');
+  ok(rr.preserved && fs.statSync(rr.preserved).size === cur0 && TE.listVersions(D, NAME).length === 3, '되돌리기 전 파일은 먼저 보존된다(잃지 않는다 · 목록 3개)');
+  let err = ''; try { TE.restoreVersion(D, NAME, '..' + path.sep + '..' + path.sep + 'x.png'); } catch (e) { err = e.message; }
+  ok(/찾지 못/.test(err), '목록에 없는 이름(경로 탈출)은 거부');
+  ok(TE.snapshotFile('C:/a/b.png') === 'C:/a/b.png.문구.json', '보존본에 딸린 문구 기록 이름');
+  fs.rmSync(R, { recursive: true, force: true }); }
+
 console.log('[6] 소스 검사');
 { const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'thumb-edit.js'), 'utf8').replace(/\/\/.*|\/\*[\s\S]*?\*\//g, '');
   ok(!/require\(['"]electron['"]\)/.test(src) && !/require\.main/.test(src), '순수 모듈(Electron·require.main 없음 — 렌더러 번들에 들어간다)');

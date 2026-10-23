@@ -1798,3 +1798,17 @@ main .card h2{top:var(--work-top-height,0px)}
 .vr-menu .cx-sld span{width:44px;flex:none}
 .vr-menu .cx-sld input[type=range]{flex:1;min-width:0}
 .vr-menu .cx-sld b{width:38px;text-align:right;font-weight:600;flex:none}
+
+/* 🖼 썸네일 편집기 v0.9.105 — 한 줄 입력·글자 범위 색·글꼴·이전 버전 */
+.thed-hbtns{display:flex;align-items:center;gap:6px}.thed-hbtns>button{padding:4px 11px;font-size:15px}
+.thed-text{padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;width:100%;box-sizing:border-box}
+.thed-colors{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.thed-sw{width:22px;height:22px;padding:0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #bbb}
+.thed-sw:hover{background-clip:padding-box;transform:scale(1.12)}
+.thed-pick{width:30px;height:24px;padding:0;border:1px solid var(--line);border-radius:6px;background:#fff}
+.thed-prev{background:#2b2620;border-radius:8px;padding:8px 10px;font-weight:800;font-size:16px;line-height:1.35;min-height:20px}
+.thed-font{flex:1;min-width:0;padding:6px 8px}
+.thed-ver{display:flex;flex-direction:column;gap:6px;padding:8px;background:#f7f2e9;border-radius:8px}
+.thed-vimg{width:100%;border-radius:6px;border:1px solid var(--line)}
+.thed-side{max-height:calc(94vh - 120px);overflow-y:auto;padding-right:4px}
+.thed-foot{position:sticky;bottom:0;background:var(--card);padding-top:6px;border-top:1px solid var(--line)}
