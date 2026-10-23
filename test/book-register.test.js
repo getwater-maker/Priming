@@ -58,5 +58,13 @@ ok(sum.find(([k]) => k === '표지 재질')[1] === RG.DEFAULT_COVER_MATERIAL, '�
 ok(/316\.36/.test(sum.find(([k]) => k === '표지 스프레드')[1]), '표지 스프레드 mm/px');
 ok(RG.AUTO_UPLOAD.api === false && RG.LINKS.bookk.every(([, u]) => /^https:\/\/(www\.)?bookk\.co\.kr\//.test(u)) && RG.LINKS.jakkawa.every(([, u]) => /^https:\/\/www\.jakkawa\.com\//.test(u)), '링크는 공식 도메인만 · 자동업로드 API 없음 기록');
 
+console.log('\n[6] 등록·유통현황은 남아 있던 S.abort 로 멈추지 않는다(번호표 · 2026-10-23)');
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const reg = src.match(/RB\.runRegister\(\{[^}]*\}\)/), ret = src.match(/RB\.readBookkRetail\)\(\{[^\n]*/);
+  ok(reg && /isAborted: \(\) => workAbortEpoch !== _ep/.test(reg[0]) && !/S\.abort/.test(reg[0]), '자동 입력 = 시작 뒤 누른 ⏹ 만');
+  ok(ret && /workAbortEpoch !== ep/.test(ret[0]) && !/isAborted: \(\) => !!S\.abort/.test(ret[0]), '유통 현황 = 시작 뒤 누른 ⏹ 만');
+}
+
 console.log(`\n${fail ? '❌' : '✅'} book-register — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);

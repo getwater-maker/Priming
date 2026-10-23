@@ -12398,7 +12398,9 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }
     log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
-    const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });
+    // 🛑 중단은 이 작업이 시작된 뒤 누른 ⏹ 만 본다(번호표) — 롱폼 제작을 멈춘 뒤 남아 있던 S.abort 때문에 로그인 대기에 들어가자마자 「중단됨」으로 끝났다(2026-10-23)
+    const _ep = workAbortEpoch;
+    const r = await RB.runRegister({ platform, plan, log, isAborted: () => workAbortEpoch !== _ep });
     return { ok: r.ok, done: r.done, failed: r.failed, manual: r.manual };
   } catch (e) {
     log('✗ [등록 도우미] ' + e.message);
@@ -12429,7 +12431,7 @@ ipcMain.handle('book-distribution-refresh', async () => {
     const RB = require('./core/book/register-browser'); const RS = require('./core/book/retail-status');
     const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
     log('📊 [유통현황] 부크크 외부유통 화면 읽기 시작 — 읽기만 합니다(아무것도 누르지 않음)');
-    const r = await (global.__readRetailTest || RB.readBookkRetail)({ log, isAborted: () => !!S.abort, rawDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+    const r = await (global.__readRetailTest || RB.readBookkRetail)({ log, isAborted: ((ep) => () => workAbortEpoch !== ep)(workAbortEpoch) /* 🛑 남아 있던 S.abort 무시 — 등록 도우미와 같은 번호표 */, rawDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
     RS.saveItems(r.items);
     log(`📊 [유통현황] ${r.items.length}건 읽음`);
     return { ..._distView(), read: r.items.length };
