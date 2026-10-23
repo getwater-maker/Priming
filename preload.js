@@ -197,6 +197,7 @@ contextBridge.exposeInMainWorld('api', {
   licenseSetAutoLog: (on) => ipcRenderer.invoke('license-set-autolog', on),
   licenseReport: (text) => ipcRenderer.invoke('license-report', { text }),
   licenseOpenSite: () => ipcRenderer.invoke('license-open-site'),
+  openChargePage: () => ipcRenderer.invoke('open-charge-page'),
   licenseOpenAdmin: () => ipcRenderer.invoke('license-open-admin'),
   saveProject: () => ipcRenderer.invoke('save-project'),
   loadProject: () => ipcRenderer.invoke('load-project'),

@@ -12111,8 +12111,9 @@ app.whenReady().then(() => { if (LIC.enforce) LIC.ready = licCheck('앱 시작')
 // 🧩 관리자 = 우리 kie 계정 잔액을 「kie크레딧」으로(v0.9.93 · 로이 2026-10-21 「판매자가 가진 크레딧 786 을 관리자는 남은 크레딧으로」)
 //   이 PC 의 kie 키로 kie 에 직접 묻는다(무료 GET · 1분 기억) — 같은 키를 넣은 PC 끼리 같은 잔액을 보고 함께 쓴다 · 회원은 묻지 않는다
 const _kieBal = { at: 0, v: null };
-async function licWithKie(s) {
+async function licWithKie(s, force) {
   const out = licPublic(s);
+  if (force) _kieBal.at = 0;   // 충전 직후 등 — 1분 기억을 건너뛰고 바로 다시 묻는다(「충전했는데 안 바뀐다」 v0.9.107)
   if (!out.admin) return out;
   try {
     const KIE = require('./core/kie-api');
@@ -12123,7 +12124,7 @@ async function licWithKie(s) {
   return out;
 }
 ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licWithKie(LIC.state); });
-ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licWithKie(LIC.state); });
+ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licWithKie(LIC.state, !!(o && o.force)); });
 ipcMain.handle('license-login', async (_e, a = {}) => {
   if (!LIC.enforce && !process.env.PM_LICENSE_API) return licPublic(LIC.state);
   const s = await licApi().login(a.email, a.password);
@@ -12183,6 +12184,14 @@ ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고
   const r = await licApi().sendLog({ kind: 'report', summary: scrub(String(a.text || '문제 보고')).slice(0, 300), body, appVersion: _diskVersion() });
   log(r && r.ok ? '📮 문제 보고를 보냈습니다' : `📮 문제 보고를 못 보냈습니다(${(r && r.reason) || '?'})`);
   return { ok: !!(r && r.ok), reason: r && r.reason };
+});
+// 💳 크레딧 칸을 누르면 충전 페이지로 — 판매자(관리자) = kie 결제 페이지 · 회원 = primingwave.com 크레딧 충전 페이지(고정 주소 두 개뿐 · 렌더러가 주소를 정하지 않는다)
+const KIE_BILLING_URL = 'https://kie.ai/billing';
+ipcMain.handle('open-charge-page', () => {
+  try {
+    if (isOwner()) { shell.openExternal(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
+    shell.openExternal(require('./core/license').SITE_CHARGE); return { ok: true, kind: 'site' };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('license-open-site', () => { try { shell.openExternal(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
 // 👑 관리자 페이지 열기(v0.9.79) — 로이(관리자 계정)에게만 · 회원 PC 에서는 열지 않는다(주소는 공개돼 있어도 사이트가 관리자만 들인다)

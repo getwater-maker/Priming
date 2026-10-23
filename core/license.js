@@ -19,6 +19,7 @@ const SUPABASE_URL = 'https://tvvcwhxullrwpsitmyep.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_feodjOad34xOpdoIcRp8IQ_TgcI2k80';
 const UPDATE_BASE = 'https://updates.primingwave.com';
 const SITE_DEVICES = 'https://www.primingwave.com/member/devices';
+const SITE_CHARGE = 'https://www.primingwave.com/member/credits';   // 💳 회원 크레딧 충전 페이지(wise-priming 에 요청 — 2026-10-23 · 주소가 다르게 정해지면 여기 한 곳만 고친다)
 const SITE_ADMIN = 'https://www.primingwave.com/admin/priming';   // 👑 관리자 화면(회원·기기·포인트 지급·오류) — wise-priming src/app/admin/priming · 로그인은 사이트 관리자 계정
 // 📜 약관 동의 버전 — 사이트 consent.ts(TERMS_VERSION·PRIVACY_VERSION)와 같아야 사이트 ConsentGate 가 다시 묻지 않는다(개정되면 여기 한 곳만 고친다 · wise-priming 약속 2026-10-23)
 const CONSENT = { terms: '2026-10-06', privacy: '2026-10-08' };
@@ -242,4 +243,4 @@ function forApp() {
   });
 }
 
-module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
+module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, SITE_CHARGE, GRACE_MS };

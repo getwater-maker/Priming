@@ -720,12 +720,21 @@ export default function App() {
   const [points, setPoints] = useState(null);
   const [licKind, setLicKind] = useState(null);   // { enforced, admin } — 포인트 칸을 보일지 · 문구 판단용
   // v0.9.80 — 관리자가 포인트를 줘도 앱을 껐다 켜야 보이던 것: 1분마다(창이 보일 때만) · 창을 다시 누를 때 · 포인트 칸을 누를 때 바로 다시 읽는다
-  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} };
+  const chargeRef = useRef(false);   // 충전 페이지를 연 뒤 앱으로 돌아오면 바로 다시 읽기
+  const openCharge = async () => { chargeRef.current = true; refreshPoints(false, true); try { await api.openChargePage(); } catch (_) {} };
+  const refreshPoints = async (quiet, force) => { try { const s = await api.licenseRecheck({ ...(quiet ? { quiet: true } : {}), ...(force ? { force: true } : {}) }); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} };
   useEffect(() => {
     let last = 0;
     const tick = () => { if (document.visibilityState !== 'visible') return; last = Date.now(); refreshPoints(true); };
     const t = setInterval(tick, 60 * 1000);
-    const onFocus = () => { if (Date.now() - last > 15000) tick(); };   // 15초 안에 또 부르지 않는다
+    const onFocus = () => {
+      if (chargeRef.current) {   // 충전 페이지를 열었다가 돌아온 때 — 15초 제한·1분 기억을 건너뛰고 바로, 그리고 반영이 늦을 수 있어 두 번 더(8초·25초 뒤)
+        chargeRef.current = false; last = Date.now();
+        refreshPoints(false, true); setTimeout(() => refreshPoints(true, true), 8000); setTimeout(() => refreshPoints(true, true), 25000);
+        return;
+      }
+      if (Date.now() - last > 15000) tick();   // 15초 안에 또 부르지 않는다
+    };
     window.addEventListener('focus', onFocus);
     return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -737,21 +746,21 @@ export default function App() {
     const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
     const box = (bg, fg) => ({ padding: '3px 9px', borderRadius: 6, background: bg, color: fg, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' });
     if (licKind && licKind.admin) {
-      if (licKind.kie == null) return <span className="pts" data-testid="member-points" data-admin="1" data-empty="1" onClick={() => refreshPoints(false)}
-        title={(licKind.kieNoKey ? '이 PC 에 kie 키가 없어 잔액을 볼 수 없습니다 — ⚙ 설정 → 🔑 API 키에 같은 키를 넣으면 다른 관리자 PC 와 같은 잔액을 보고 함께 씁니다.' : 'kie 잔액을 불러오지 못했습니다.') + '\n(누르면 바로 새로고침)'}
+      if (licKind.kie == null) return <span className="pts" data-testid="member-points" data-admin="1" data-empty="1" onClick={openCharge}
+        title={(licKind.kieNoKey ? '이 PC 에 kie 키가 없어 잔액을 볼 수 없습니다 — ⚙ 설정 → 🔑 API 키에 같은 키를 넣으면 다른 관리자 PC 와 같은 잔액을 보고 함께 씁니다.' : 'kie 잔액을 불러오지 못했습니다.') + '\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)'}
         style={box('#eef0f4', '#5a6270')}>🧩 kie크레딧 <b>{licKind.kieNoKey ? '키 없음' : '-'}</b></span>;
       const low = licKind.kie < 100;
-      return <span className="pts" data-testid="member-points" data-admin="1" onClick={() => refreshPoints(false)}
-        title={`우리 kie 계정에 남은 크레딧 ${f(licKind.kie)} — 같은 키를 넣은 관리자 PC 끼리 함께 씁니다${low ? '\n⚠ 거의 다 썼습니다 — kie 에서 충전하세요' : ''}\n(누르면 바로 새로고침)`}
+      return <span className="pts" data-testid="member-points" data-admin="1" onClick={openCharge}
+        title={`우리 kie 계정에 남은 크레딧 ${f(licKind.kie)} — 같은 키를 넣은 관리자 PC 끼리 함께 씁니다${low ? '\n⚠ 거의 다 썼습니다 — kie 에서 충전하세요' : ''}\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)`}
         style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>🧩 kie크레딧 남은 <b>{f(licKind.kie)}</b></span>;
     }
     if (!points) {   // 서버가 크레딧 값을 주지 않음 = 0(아직 지급받지 않음)
-      return <span className="pts" data-testid="member-points" data-empty="1" onClick={() => refreshPoints(false)}
-        title={'아직 지급받은 크레딧이 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 크레딧 없이 쓸 수 있습니다.\n(누르면 바로 새로고침)'}
+      return <span className="pts" data-testid="member-points" data-empty="1" onClick={openCharge}
+        title={'아직 지급받은 크레딧이 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 크레딧 없이 쓸 수 있습니다.\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)'}
         style={box('#fff6dc', '#7a5a00')}>🪙 크레딧 남은 <b>0</b> / 지급 0</span>;
     }
     const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
-    return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 크레딧 — 지급받은 크레딧 ${f(points.granted)} 중 남은 크레딧 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 바로 새로고침)`}
+    return <span className="pts" data-testid="member-points" onClick={openCharge} title={`내 크레딧 — 지급받은 크레딧 ${f(points.granted)} 중 남은 크레딧 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)`}
       style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>
       🪙 크레딧 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
   })() : null;
