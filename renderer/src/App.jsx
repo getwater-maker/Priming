@@ -8,6 +8,7 @@ import { mcImageUnit, mcVideoUnit, mcCostText } from './lib/mediaCost.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import KB from '../../core/ken-burns.js';
+import OL from '../../core/overlay-layers.js';   // 🏷 로고 켜기·자리·상자 = .vrew 빌드와 같은 함수(effLogo · posOfLogo · logoBox · chanLogoPos)
 // 🎞 켄번스 CSS = core/ken-burns 표에서 만든다(.vrew 빌더와 같은 표 · 옛 styles.css 손글씨 kb0~kb11 대신 · Lab 차이표 #12)
 (() => { try { if (typeof document === 'undefined' || document.getElementById('kb-css')) return; const el = document.createElement('style'); el.id = 'kb-css'; el.textContent = KB.patternCss(); document.head.appendChild(el); } catch (_) {} })();
 // 🎞 켄번스 구간(그룹 look.kbSeg) — 빌더와 같은 planSegments 로 웨이포인트·구간 경계를 정해 그룹마다 @keyframes 를 만든다
@@ -1114,7 +1115,7 @@ export default function App() {
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
-      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
+      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: OL.chanLogoPos(p) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       setAiCfg(p.aiNotice && typeof p.aiNotice === 'object' ? p.aiNotice : {});   // 🏷 AI 고지 문구·시각(① 칸 미리보기 · v0.6.88)
       setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼
       const prof = (modeProfiles && modeProfiles[mode]) || {};
@@ -1156,7 +1157,7 @@ export default function App() {
     api.getPresetDetail(presetName).then((p) => {
       if (!p) return;
       setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });
-      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: chanLogoPosOf(p) });
+      setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: OL.chanLogoPos(p) });
       setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼(채널편집에서 바꾼 값)
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2399,12 +2400,20 @@ export default function App() {
   const curLogoPos = () => { const pj = curProject(); return (pj && pj.logoPos) || null; };
   // 🏷 이 대본 로고 넣기/빼기(logoOver · 큐 일괄 v0.6.86) — 있으면 채널 켜기보다 이긴다(main overlay-layers.effLogo 와 같은 규칙)
   const curLogoOver = () => { const pj = curProject(); return (pj && pj.logoOver) || null; };
+  // 🏷 켜기·그림 = core/overlay-layers.effLogo(.vrew 빌드와 같은 함수 — 채널 켜기 · 대본 logoOver 넣기/빼기)
   const effLogoCfg = () => {
-    const o = curLogoOver();
-    if (o) { if (!o.on) return null; const p = o.path || logoCfg.path; return p ? { ...logoCfg, on: true, path: p } : null; }
-    return logoCfg.on && logoCfg.path ? logoCfg : null;
+    const base = { enabled: !!(logoCfg.on && logoCfg.path), path: logoCfg.path || '', size: (Number(logoCfg.size) || 12) / 100, pos: logoCfg.pos || null };
+    const e = OL.effLogo(base, curProject());
+    return e.enabled && e.path ? { ...logoCfg, on: true, path: e.path } : null;
   };
-  const stageLogo = (() => { const b = effLogoCfg(); return b ? { ...b, side: curLogoSide(), pos: logoDrag || curLogoPos() || (curLogoSide() === 'left' ? null : (b.pos || null)) } : null; })();   // 자리 = 끌기 중 > 대본 끌어 옮김 > ↖ > 채널 기본 자리(overlay-layers.posOfLogo 와 같은 규칙)
+  // 🏷 자리 = 끌기 중 > overlay-layers.posOfLogo(대본 끌어 옮김 > ↖ > 채널 기본 자리 > 오른쪽 위) · 상자 = logoBox(가장자리 여백·화면 안으로 자르기)
+  const [logoRatio, setLogoRatio] = useState(1);   // 로고 그림 가로/세로 — 아래 끝 자르기에 쓴다(logoBox 의 imgRatio)
+  const stageLogo = (() => {
+    const b = effLogoCfg(); if (!b) return null;
+    const pos = logoDrag || OL.posOfLogo({ pos: b.pos }, curProject());
+    const box = OL.logoBox({ side: curLogoSide(), size: (Number(b.size) || 12) / 100, imgRatio: logoRatio, canvasW: 1920, canvasH: 1080, pos });
+    return { ...b, side: curLogoSide(), pos, box };
+  })();   // 자리 = 끌기 중 > 대본 끌어 옮김 > ↖ > 채널 기본 자리(overlay-layers.posOfLogo 와 같은 규칙)
   // 🏷 롱폼 큐의 대본 모두에 로고 넣기/빼기 — 채널 설정(⚙ 채널편집)은 그대로
   async function setQueueLogo(mode) {
     const n = (queue && queue.longform && queue.longform.items.length) || 0;
@@ -4117,7 +4126,7 @@ export default function App() {
       infoCards: !!ch.infoCards,   // 📇 정보 카드 — ⚠ 안 실으면 저장할 때 지워진다
       interludePauseSec: Math.max(0, Math.min(15, numOr(ch.interludePauseSec, 0))),   // ⏸ 막간 쉼(초 · 0 = 끔) — ⚠ 안 실으면 저장할 때 지워진다
       fx: VLook.normFxChan(ch.fx),   // 🌫 채널 오버레이 모션 — ⚠ 안 실으면 저장할 때 지워진다
-      ...(() => { const lp = chanLogoPosOf({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
+      ...(() => { const lp = OL.chanLogoPos({ logoX: ch.logoX, logoY: ch.logoY }); return lp ? { logoX: Math.round(lp.x * 10000) / 100, logoY: Math.round(lp.y * 10000) / 100 } : { logoX: '', logoY: '' }; })(),   // 🏷 기본 자리(% · 둘 다 있을 때만)
       // 🎭 이름이 빈 줄은 버린다(목소리가 빈 줄은 남긴다 — 나중에 고를 수 있게. TTS 는 빈 목소리를 기본 목소리로 읽는다)
       speakers: (ch.speakers || []).map((r) => ({ name: String(r.name || '').replace(/[\[\]]/g, '').trim(), voice: String(r.voice || '').trim() })).filter((r) => r.name),
       cfgValue: numOr(ch.cfgValue, 2),
@@ -5876,8 +5885,9 @@ export default function App() {
       {stageLogo && <img className={'stage-logo' + (wsOn && isLf && !playerOpen ? ' drag' : '') + (logoDrag ? ' dragging' : '')} data-testid="stage-logo" alt="" src={media(stageLogo.path)} draggable={false}
         title={wsOn && isLf && !playerOpen ? '🏷 끌어서 로고 옮기기(이 대본) — 오른쪽 위·왼쪽 위 근처에 놓으면 제자리에 붙습니다' : undefined}
         onMouseDown={wsOn && isLf && !playerOpen ? onLogoDown : undefined}
-        style={stageLogo.pos ? { width: stageLogo.size + '%', left: (stageLogo.pos.x * 100).toFixed(3) + '%', top: (stageLogo.pos.y * 100).toFixed(3) + '%' }
-          : { width: stageLogo.size + '%', top: (2.5 * 16 / 9).toFixed(3) + '%', [stageLogo.side]: '2.5%' }} />}
+        onLoad={(e) => { const im = e.currentTarget; if (im.naturalWidth > 0 && im.naturalHeight > 0) setLogoRatio(im.naturalWidth / im.naturalHeight); }}
+        data-x={stageLogo.box.x.toFixed(4)} data-y={stageLogo.box.y.toFixed(4)} data-w={stageLogo.box.w.toFixed(4)}
+        style={{ width: (stageLogo.box.w * 100).toFixed(3) + '%', left: (stageLogo.box.x * 100).toFixed(3) + '%', top: (stageLogo.box.y * 100).toFixed(3) + '%' }} />}
       {wsOn && stageSel && !playerOpen && (
         <div className="ssel" data-testid="stage-sel" style={{ left: (stageSel.box.x * 100) + '%', top: (stageSel.box.y * 100) + '%', width: (stageSel.box.w * 100) + '%', height: (stageSel.box.h * 100) + '%' }}
           title="끌어서 옮기기 · 모서리를 끌어 크기(비율 유지) · 가운데에 가까우면 붙는다 · Esc 해제">
@@ -7962,12 +7972,6 @@ export default function App() {
 
 // ✏ 편집칸을 글 높이에 딱 맞춘다 — 그 줄 자리에서 고치는 느낌이 나도록(빈 줄·스크롤 없음).
 // 🖱 자막을 눌러 고치기 시작할 때 커서 자리 — 글자 위 = 맨 앞 · 글자 뒤 빈 곳 = 맨 끝(로이 2026-09-25)
-// 🏷 채널 기본 로고 자리 — 채널 설정 logoX·logoY(%) → {x,y}(0..1) 또는 null(core/overlay-layers.chanLogoPos 와 같은 규칙)
-function chanLogoPosOf(p) {
-  const f = (v) => (v === '' || v == null ? NaN : Number(v));
-  const x = f(p && p.logoX), y = f(p && p.logoY);
-  return isFinite(x) && isFinite(y) && x >= 0 && x <= 100 && y >= 0 && y <= 100 ? { x: Math.round(x * 100) / 10000, y: Math.round(y * 100) / 10000 } : null;
-}
 let _caretSide = null;
 function caretSideFromClick(ev, box) {
   try {
