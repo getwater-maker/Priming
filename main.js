@@ -8389,7 +8389,18 @@ ipcMain.handle('abort', () => {
   clearGeneratingStatus();
   pushDtoUpdate();
   log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
+  if (_localQwenActive) _abortLocalQwenComfy();   // 🛑 로컬 Qwen 이 그리는 중 — ComfyUI 에 넘긴 그림까지 멈추고 서버를 끈다(v0.9.112 · 기다리지 않는다)
 });
+// ⏹ 로컬 Qwen 중단 — 멈춤 신호 + 대기열 비우기 → 서버 끄기(force — 큐에 남은 건 우리 작업). 남의 PC 작업은 로컬 Qwen 이 그리는 동안 이 서버에 없다(localGpu 레인).
+async function _abortLocalQwenComfy() {
+  try {
+    const CL = require('./core/comfy-launch');
+    const baseUrl = _forceLocalComfy(require('./core/comfy-image').loadConfig()).baseUrl;
+    const r = await CL.interruptLocalComfy({ baseUrl });
+    if (r.interrupted) log('  ⏹ 로컬 ComfyUI — 멈춤 신호를 보내고 대기열을 비웠습니다');
+    await CL.stopLocalComfy({ baseUrl, log, force: true });
+  } catch (e) { log('  ⚠ 로컬 ComfyUI 중단 오류 — ' + e.message); }
+}
 
 // ⏸ 이번 편까지만 — 큐 순차 제작이 지금 만드는 대본을 끝까지 마친 뒤 멈추게 예약/취소(on=false). ■ 중단과 달리 만들던 건 그대로 끝낸다.
 ipcMain.handle('stop-after-item', (_e, on) => {

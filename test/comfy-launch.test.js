@@ -287,6 +287,31 @@ function stubServer() {
     chk(!/execFileSync/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-launch.js'), 'utf8')), '동기 자식 프로세스 없음(메인 프로세스가 얼지 않게)');
   }
 
+  console.log('\n[13] ⏹ 중단 — 멈춤 신호 + 대기열 비우기 + 로컬 Qwen 이면 끄기(v0.9.112)');
+  {
+    const http = require('http');
+    const hits = [];
+    const srv = await new Promise((res) => {
+      const s = http.createServer((req, rsp) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { hits.push(req.method + ' ' + req.url + (b ? ' ' + b : '')); rsp.setHeader('Content-Type', 'application/json'); rsp.end(req.url.startsWith('/queue') ? JSON.stringify({ queue_running: [[1]], queue_pending: [[2]] }) : '{}'); }); });
+      s.listen(0, '127.0.0.1', () => res(s));
+    });
+    const base = 'http://127.0.0.1:' + srv.address().port;
+    const r = await CL.interruptLocalComfy({ baseUrl: base });
+    const qi = hits.indexOf('POST /queue {"clear":true}'), ii = hits.indexOf('POST /interrupt');
+    chk(r.interrupted && qi >= 0 && ii > qi, `대기열 비우기 → 멈춤 신호 순서 (${hits.filter((h) => h.startsWith('POST')).join(' · ')})`);
+    // force — 큐에 작업이 있어도(우리 것) 끈다 / force 없으면 안 끈다(판정력)
+    const L = 'x\\comfy-server.pyw'; const calls = [];
+    const ex = (cmd, args, _o, cb) => { calls.push(cmd); if (/powershell/i.test(cmd)) return cb(null, JSON.stringify({ pid: 2, cmd: L, ppid: 1, pcmd: L })); srv.close(); cb(null, 'ok'); };
+    let s1 = await CL.stopLocalComfy({ baseUrl: base, execFileFn: ex });
+    chk(s1.skipped === 'busy' && !calls.length, 'force 없으면 큐에 작업이 있을 때 안 끈다');
+    s1 = await CL.stopLocalComfy({ baseUrl: base, execFileFn: ex, force: true, waitMs: 3000 });
+    chk(s1.stopped && calls.some((c) => /taskkill/i.test(c)), 'force(⏹ 중단)면 큐가 차 있어도 끈다');
+    chk((await CL.interruptLocalComfy({ baseUrl: 'http://10.0.0.5:8188' })).skipped === 'remote', '원격 주소엔 멈춤 신호를 보내지 않는다');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    chk(/log\('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다'\);\n  if \(_localQwenActive\) _abortLocalQwenComfy\(\);/.test(src), '헤더 ⏹ 가 로컬 Qwen 중일 때만 ComfyUI 를 멈춘다');
+    chk(/interruptLocalComfy\(\{ baseUrl \}\)[\s\S]{0,200}stopLocalComfy\(\{ baseUrl, log, force: true \}\)/.test(src), '멈춤 신호 → 서버 끄기(force)');
+  }
+
   console.log('\n결과: ' + ok + ' OK / ' + fail + ' FAIL');
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -221,12 +221,27 @@ function _run(execFileFn, cmd, args) {
     execFileFn(cmd, args, { windowsHide: true, timeout: 20000, encoding: 'utf8' }, (err, stdout) => resolve({ err, out: String(stdout || '') }));
   });
 }
-async function stopLocalComfy(opts = {}) {
-  const { baseUrl, log = () => {}, execFileFn = require('child_process').execFile, fetchFn = fetch, waitMs = 15000 } = opts;
+/**
+ * ⏹ 중단 — 로컬 ComfyUI 에 멈춤 신호(/interrupt) + 대기열 비우기(/queue clear) (v0.9.112 · 로이 2026-10-23).
+ *   ⚠ ComfyUI 는 단계 사이에서만 멈춤 신호를 본다 — 모델(8.9GB)을 올리는 중엔 못 받아 18:45 중단 뒤에도 계속 돌았다.
+ *   그래서 로컬 Qwen 이면 이어서 stopLocalComfy({ force: true }) 로 서버를 끈다(호출부).
+ */
+async function interruptLocalComfy(opts = {}) {
+  const { baseUrl, fetchFn = fetch } = opts;
   if (!isLocalUrl(baseUrl)) return { ok: true, skipped: 'remote' };
   const base = String(baseUrl || '').replace(/\/+$/, '');
   if (!(await ping(base))) return { ok: true, skipped: 'not-running' };
-  try {   // 남의 PC 가 이 ComfyUI 로 그리는 중이면 끄지 않는다
+  const post = (p, body) => fetchFn(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(4000) }).catch(() => null);
+  await post('/queue', { clear: true });   // 대기 먼저 비워야 멈춘 뒤 다음 것이 시작되지 않는다
+  await post('/interrupt');
+  return { ok: true, interrupted: true };
+}
+async function stopLocalComfy(opts = {}) {
+  const { baseUrl, log = () => {}, execFileFn = require('child_process').execFile, fetchFn = fetch, waitMs = 15000, force = false } = opts;   // force = ⏹ 중단 — 큐에 남은 건 우리 작업이라 검사를 건너뛴다
+  if (!isLocalUrl(baseUrl)) return { ok: true, skipped: 'remote' };
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  if (!(await ping(base))) return { ok: true, skipped: 'not-running' };
+  if (!force) try {   // 남의 PC 가 이 ComfyUI 로 그리는 중이면 끄지 않는다
     const r = await fetchFn(base + '/queue', { signal: AbortSignal.timeout(4000) });
     const j = r && r.ok ? await r.json() : null;
     const n = j ? ((j.queue_running || []).length + (j.queue_pending || []).length) : 0;
@@ -247,6 +262,6 @@ async function stopLocalComfy(opts = {}) {
 }
 
 module.exports = {
-  ensureLocalComfy, stopLocalComfy, pickKillTarget, ping, isLocalUrl, findExe, candidates,
+  ensureLocalComfy, stopLocalComfy, interruptLocalComfy, pickKillTarget, ping, isLocalUrl, findExe, candidates,
   findInstance, instancePython, launcherScript, resolveLaunch,
 };
