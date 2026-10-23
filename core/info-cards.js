@@ -5,8 +5,8 @@
  * 화면 4종(글자는 AI 그림 안에 넣지 않고 **위에 얹는다** · 그림을 글자 화면으로 바꾸지 않는다):
  *   ① 낱말 카드  `> 🔤 카드: A | B | C`        — 오른쪽 판에 낱말 1~3개 · 다음 낭독 문단 첫 문장부터 다음 🔤·`###`·`##` 전까지 · 끄기 `> 🔤 카드: -`
  *   ② 구간 표지  `##` 제목(자동 · 채널 옵션)    — 3.5초 · 「N / M」 · 이름 · 진행 막대 · 도입부 없음 · 「마무리」는 번호 없이 이름만(막대 꽉 참)
- *   ③ 표         `> 📊 표: 제목` + `> | … |` 줄들(첫 줄 = 머리) + `> 📊 출처: …` — 다음 문단 하나 동안(최소 6초) 전체 화면
- *   ④ 확인표     `> ✅ 확인: 문구`              — 오른쪽 판 · 다음 문단 하나 동안 · **영상 전체에서 쌓인다**(최근 5줄 · 방금 것만 진하게)
+ *   ③ 표         `> 📊 표: 제목` + `> | … |` 줄들(첫 줄 = 머리) + `> 📊 출처: …` — 다음 문단 하나 동안(최소 6초) 전체 화면 · 낭독이 말하는 줄을 밝힌다(v0.9.106 `rowCues`)
+ *   ④ 확인표     `> ✅ 확인: 문구`              — 오른쪽 판 · 다음 문단 하나 동안 · **영상 전체에서 쌓인다**(최근 5줄 · 방금 것만 진하게 · 방금 것의 체크는 1초 뒤 찍힌다)
  * 겹침 순서: 표 > 구간 표지 > 확인표 > 낱말 카드(위가 이기면 아래는 그동안 숨었다 끝나면 돌아온다).
  *
  * 🔑 이 줄들은 **낭독·자막·그림·영상 프롬프트로 읽히지 않는다** — sentence-splitter 가 프롬프트 판정(「이미지:」「영상:」 낱말)보다 먼저 가로챈다.
@@ -112,6 +112,61 @@ const normText = (t) => String(t == null ? '' : t).normalize('NFC').replace(/[\s
 const stripNum = (t) => String(t || '').replace(/^\s*\d+\s*(?:장|회|부|강|편)?\s*[—–\-:·.]\s*/, '').trim();
 const CLOSING_RE = /마무리|맺음|맺는/;
 
+// ── 📊 표 줄 강조 · ✅ 체크 찍기(v0.9.106) ───────────────────────────────────
+const CHECK_TICK_SEC = 1.0, HI_MIN_SEC = 0.8;
+const NUM_SCAN = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;   // 3,511 = 3511 · 107.2
+const numsOf = (s) => [...String(s || '').matchAll(NUM_SCAN)].map((m) => ({ v: m[0].replace(/,/g, ''), at: m.index }));
+/** 데이터 줄(머리 제외)마다 그 줄에만 있는 열쇠 — 두 자리 이상 숫자 · 없으면 3글자 이상 낱말(KTX 는 2글자 영문도). 다른 줄에도 있는 것은 어느 줄인지 못 가르므로 뺀다 */
+function rowKeys(rows) {
+  const raw = (rows || []).map((r, ri) => {
+    if (!ri) return null;
+    const s = r.join(' ');
+    return { nums: [...new Set(numsOf(s).map((x) => x.v).filter((v) => v.replace('.', '').length >= 2))], words: [...new Set(s.match(/[가-힣]{3,}|[A-Za-z]{2,}/g) || [])] };
+  });
+  const cnt = (k, v) => raw.filter((t) => t && t[k].includes(v)).length;
+  return raw.map((t) => {
+    if (!t) return null;
+    const nums = t.nums.filter((v) => cnt('nums', v) === 1);
+    const words = nums.length ? [] : t.words.filter((v) => cnt('words', v) === 1);
+    return nums.length || words.length ? { nums, words } : null;
+  });
+}
+/**
+ * 낭독 문장들(표가 뜬 동안) → 강조할 줄의 시간 창 [{row, t0, t1, s0, s1}]. 문장 안의 자리는 글자 위치 비율로 어림(음성은 글자 수에 거의 비례).
+ *   두 줄 이상을 말해야 켠다(한 줄만 걸리면 우연일 수 있다 — 조용히 틀리느니 안 켠다) · 0.8초 미만 창은 버리고 앞뒤를 잇는다 · s0~s1 = 이 창이 가장 오래 덮는 문장(① 미리보기용)
+ */
+function rowCues(rows, said, p0, p1) {
+  const keys = rowKeys(rows);
+  if (keys.filter(Boolean).length < 2) return [];
+  const hits = [];
+  for (const s of (said || [])) {
+    const txt = String(s.text || ''), len = Math.max(1, txt.length);
+    const at = (pos) => Math.max(p0, s.t0 + (s.t1 - s.t0) * (pos / len));
+    for (const n of numsOf(txt)) keys.forEach((k, ri) => { if (k && k.nums.includes(n.v)) hits.push({ t: at(n.at), row: ri }); });
+    keys.forEach((k, ri) => { if (!k) return; for (const w of k.words) for (let x = txt.indexOf(w); x >= 0; x = txt.indexOf(w, x + w.length)) hits.push({ t: at(x), row: ri }); });
+  }
+  hits.sort((a, b) => a.t - b.t || a.row - b.row);
+  if (new Set(hits.map((h) => h.row)).size < 2) return [];
+  let seq = [];
+  for (const h of hits) if (h.t < p1 && (!seq.length || seq[seq.length - 1].row !== h.row)) seq.push(h);
+  for (let changed = true; changed;) {   // 짧은 창을 버리면 이웃이 같은 줄로 붙을 수 있다 — 더 안 바뀔 때까지
+    changed = false;
+    const keep = seq.filter((h, k) => k === seq.length - 1 || seq[k + 1].t - h.t >= HI_MIN_SEC);
+    const merged = []; for (const h of keep) if (!merged.length || merged[merged.length - 1].row !== h.row) merged.push(h);
+    if (merged.length !== seq.length) { seq = merged; changed = true; }
+  }
+  const out = seq.map((h, k) => ({ row: h.row, t0: h.t, t1: k + 1 < seq.length ? seq[k + 1].t : p1 })).filter((w) => w.t1 - w.t0 >= HI_MIN_SEC);
+  if (new Set(out.map((w) => w.row)).size < 2) return [];
+  // ① 미리보기 — 문장마다 가장 오래 덮는 창 하나(한 문장에 두 줄을 말하면 더 긴 쪽) · 맡은 문장이 없는 창은 -1(미리보기엔 안 보임 · MP4 는 그대로)
+  for (const w of out) { w.s0 = -1; w.s1 = -1; }
+  for (const s of (said || [])) {
+    let best = null, bo = 0;
+    for (const w of out) { const o = Math.min(s.t1, w.t1) - Math.max(s.t0, w.t0); if (o > bo + 1e-9) { bo = o; best = w; } }
+    if (best) { if (best.s0 < 0 || s.i < best.s0) best.s0 = s.i; if (s.i > best.s1) best.s1 = s.i; }
+  }
+  return out;
+}
+
 /**
  * 판 계획 — 재료 + 프로젝트(문장 시각) → { panels, warnings }.
  *   panel = { type:'cover'|'words'|'table'|'check', t0, t1, hideCaptions?, ... 종류별 자료 }
@@ -180,12 +235,19 @@ function plan(project, parsed, opts = {}) {
       const hasHead = m.rows.length >= 1;
       if (!hasHead) { warnings.push(`📇 정보 카드 — 📊 표 「${m.title.slice(0, 20)}」 에 표 줄(> | … |)이 없습니다 → 건너뜁니다`); continue; }
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'table', mi, scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true });
+      const tb = { type: 'table', mi, scene: GI[m.sent], t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + TABLE_MIN_SEC)), title: m.title, rows: m.rows, source: m.source || '', hideCaptions: true };
+      // 📊 표 줄 강조(v0.9.106) — 표가 뜬 동안 낭독이 말하는 줄
+      const said = []; for (let i = 0; i < sents.length; i++) if (T[i] && ok[i] && T[i][1] > tb.t0 && T[i][0] < tb.t1) said.push({ i, text: sents[i].text, t0: T[i][0], t1: T[i][1] });
+      const hi = rowCues(tb.rows, said, tb.t0, tb.t1);
+      if (hi.length) tb.rowHi = hi;
+      panels.push(tb);
     } else if (m.kind === 'check') {
       if (m.text.length > CHECK_WARN_CHARS) warnings.push(`📇 정보 카드 — ✅ 문구가 ${m.text.length}자(권장 ${CHECK_WARN_CHARS}자 이하): 「${m.text}」 — 판 폭을 넘으면 그대로 그립니다`);
       checkTexts.push(m.text);
       const eIdx = paraEnd(m.sent), endTm = T[eIdx] || tm;
-      panels.push({ type: 'check', mi, scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: Math.min(total, Math.max(endTm[1], tm[0] + 2)), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
+      const ck1 = Math.min(total, Math.max(endTm[1], tm[0] + 2));
+      // ✅ 방금 것의 체크 표시는 판이 뜬 뒤에 찍힌다(v0.9.106) — 겹침으로 판이 잘려도 처음 뜬 시각 기준
+      panels.push({ type: 'check', mi, scene: GI[m.sent], ...(m.pos ? { pos: m.pos } : {}), t0: tm[0], t1: ck1, tick: tm[0] + Math.min(CHECK_TICK_SEC, (ck1 - tm[0]) / 3), list: checkTexts.slice(-MAX_CHECK_LINES), done: Math.min(checkTexts.length, MAX_CHECK_LINES), all: checkTexts.length });
     }
   }
   // 📍 자리 꼬리표(`@왼쪽위`) — 「그 줄이 시작한 장면」 단위 · 한 장면에 서로 다른 꼬리표가 있으면 첫 것만 쓰고 ⚠(한 장면 안에서 판이 뛰지 않는다)
@@ -236,4 +298,4 @@ function plan(project, parsed, opts = {}) {
   return { panels: out, warnings, spans, total };
 }
 
-module.exports = { POS_TAGS, POS_NAMES, splitPosTag, freePos, posName, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };
+module.exports = { POS_TAGS, POS_NAMES, splitPosTag, freePos, posName, fromRaw, MAX_WORDS, MAX_CHECK_LINES, CHECK_WARN_CHARS, COVER_SEC, TABLE_MIN_SEC, FADE_SEC, CHECK_TICK_SEC, HI_MIN_SEC, rowKeys, rowCues, lineKind, isInfoLine, collect, fromItems, signatureOf, plan, normText, stripNum };

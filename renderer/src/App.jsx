@@ -5781,7 +5781,9 @@ export default function App() {
     if (!infoPv || !isLf || !cursor) return null;
     const ci = cursorInfo(); if (!ci) return null;
     let ord = ci.l.sentIdx; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
-    const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1);
+    const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1)
+      // ⏱ 시간 창이 있는 조각(📊 강조할 줄 · v0.9.106)은 그 문장에서만 — onS 는 main 이 렌더와 같은 계산으로 준 문장 범위
+      .map((q) => (q.prims && q.prims.some((x) => x.onS) ? { ...q, prims: q.prims.filter((x) => !x.onS || (x.onS[0] <= ord && ord <= x.onS[1])) } : q));
     return act.length ? act : null;
   })();
   stageInfoRef.current = stageInfo;   // 📇 오른쪽 클릭 복사 메뉴가 「지금 보이는 판」을 집는다
@@ -9176,8 +9178,12 @@ function drawInfoPanels(ctx, panels, cw, ch, which) {
       const lines = q.lines || [], fs = q.fs * kx, lh = q.fs * 1.22 * ky;
       ctx.save(); ctx.font = `700 ${fs}px ${fam}`; ctx.fillStyle = col(q.color, q.op);
       if ('letterSpacing' in ctx) ctx.letterSpacing = q.sp ? `${q.sp * kx}px` : '0px';
-      ctx.textBaseline = 'middle'; ctx.textAlign = q.an === 5 ? 'center' : 'left';
-      lines.forEach((l, i) => ctx.fillText(l, q.x * kx, q.y * ky + (i - (lines.length - 1) / 2) * lh));
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      lines.forEach((l, i) => {
+        const runs = (q.runs && q.runs[i]) || [{ t: l }], y = q.y * ky + (i - (lines.length - 1) / 2) * lh;   // 🔢 숫자 조각은 강조색(v0.9.106)
+        let x = q.x * kx - (q.an === 5 ? ctx.measureText(l).width / 2 : 0);
+        for (const r of runs) { ctx.fillStyle = col(r.c || q.color, q.op); ctx.fillText(r.t, x, y); x += ctx.measureText(r.t).width; }
+      });
       ctx.restore();
     }
   }

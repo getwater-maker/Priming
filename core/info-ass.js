@@ -53,7 +53,18 @@ function rrPath(w, h, r) {
 }
 
 // ── 판 배치(프리미티브) ──────────────────────────────────────────────────────
-const rect = (x, y, w, h, color, op, layer, r = 0) => ({ k: 'rect', x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), color, op, layer, r });
+const rect = (x, y, w, h, color, op, layer, r = 0, extra = {}) => ({ k: 'rect', x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), color, op, layer, r, ...extra });
+// ⏱ 조각마다 보이는 시간 창(v0.9.106) — on:[t0,t1](영상 시각 · 판 안에서 다시 0.3초 페이드) · onS:[s0,s1] = ① 미리보기가 그 문장에서만 보이게(main 이 그대로 넘긴다)
+const HI_FADE = 0.3;
+// 🔢 낱말 카드의 숫자(금액·나이·날짜·비율) — 단위까지 강조색으로(v0.9.106). 글자 폭은 그대로라 판 크기·줄바꿈이 안 바뀐다
+const NUM_RUN = /\d[\d,.]*(?:\s*[~～\-–]\s*\d[\d,.]*)?(?:\s?만\s?원|년생|개월|[%％세년월일원만억천배살시분초회번명장개])?/g;
+function numRuns(line, hc) {
+  const s = String(line || ''), out = []; let last = 0;
+  for (const m of s.matchAll(NUM_RUN)) { if (m.index > last) out.push({ t: s.slice(last, m.index) }); out.push({ t: m[0], c: hc }); last = m.index + m[0].length; }
+  if (!out.length) return null;
+  if (last < s.length) out.push({ t: s.slice(last) });
+  return out;
+}
 const text = (x, y, an, lines, fs, color, op, extra = {}) => ({ k: 'text', x: Math.round(x), y: Math.round(y), an, lines, fs, color, op, layer: 8, ...extra });
 const check = (x, y, size, color, op) => ({ k: 'check', x: Math.round(x), y: Math.round(y), size, color, op, layer: 8 });
 
@@ -102,7 +113,7 @@ function layoutWords(p, warn) {
   const d = decor(shape, x0, y0, panelW, panelH, c, 0.84);
   const out = [...d.out];
   let y = y0 + d.inT + padY;
-  blocks.forEach((b) => { b.forEach((l) => { out.push(text(x0 + d.inL + padX, y + lh / 2, 4, [l], fs, c.text, 1, {})); y += lh; }); y += gap; });
+  blocks.forEach((b) => { b.forEach((l) => { const runs = numRuns(l, c.accent); out.push(text(x0 + d.inL + padX, y + lh / 2, 4, [l], fs, c.text, 1, runs ? { runs: [runs] } : {})); y += lh; }); y += gap; });
   void warn;
   return out;
 }
@@ -127,7 +138,8 @@ function layoutCheck(p, warn) {
     if (cur) out.push(rect(x0 + d.inL + 10, yc - lh / 2 + 4, panelW - d.inL * 2 - 20, lh - 8, c.accent, 0.16, 7, 10));
     const bx = x0 + d.inL + padX, by = yc - boxS / 2;
     out.push(rect(bx, by, boxS, boxS, cur ? c.accent : c.dim, cur ? 1 : 0.55, 7, 9));
-    out.push(check(bx, by, boxS, c.bg, 1));
+    // ✅ 방금 것은 판이 뜬 뒤(p.tick)에 체크가 찍힌다 — 앞의 것들은 이미 찍혀 있다
+    out.push({ ...check(bx, by, boxS, c.bg, 1), ...(cur && p.tick > p.t0 ? { on: [p.tick, p.t1] } : {}) });
     out.push(text(bx + boxS + gapBox, yc, 4, [t], fs, cur ? c.text : c.dim, cur ? 1 : 0.85, {}));
   });
   return out;
@@ -191,6 +203,14 @@ function layoutTable(p, warn) {
   const topY = tableTop + Math.max(0, Math.round((availH - best.total) / 2));   // 표를 제목·출처 사이 세로 가운데로
   let y = topY;
   out.push(rect(marginX - 12, topY - 8, availW + 24, best.total + 16, 'FFFFFF', 0.06, 5, 16));   // 층: 자막 층(1~4)과 겹치지 않게 5 이상
+  // 📊 낭독이 말하는 줄을 밝힌다(info-cards.rowCues 의 창 · 머리 줄은 안 밝힌다) — 바탕 띠 + 왼쪽 막대, 글자는 그대로
+  const rowY = []; { let yy = topY; best.heights.forEach((h) => { rowY.push(yy); yy += h; }); }
+  for (const w of (p.rowHi || [])) {
+    if (!(w.row >= 1 && w.row < rows.length)) continue;
+    const ry = rowY[w.row], rh = best.heights[w.row], tw = { on: [w.t0, w.t1], onS: [w.s0, w.s1] };
+    out.push(rect(marginX, ry + 3, availW, rh - 6, th.accent, 0.3, 6, 10, tw));
+    out.push(rect(marginX, ry + 8, 10, rh - 16, th.accent, 1, 7, 5, tw));
+  }
   rows.forEach((r, ri) => {
     const rh = best.heights[ri];
     if (ri === 0) out.push(rect(marginX, y, availW, rh, th.accent, 0.2, 5, 10));
@@ -223,6 +243,15 @@ function opacityAt(p, t) {
   if (t > p.t1 - f) return (p.t1 - t) / f;
   return 1;
 }
+/** 조각 시간 창의 불투명도(0.3초 페이드 · 창이 짧으면 창의 1/3) */
+const winFade = (on) => Math.max(0.05, Math.min(HI_FADE, (on[1] - on[0]) / 3));
+function winOp(on, t) {
+  const [s, e] = on, f = winFade(on);
+  if (t <= s || t >= e) return 0;
+  if (t < s + f) return (t - s) / f;
+  if (t > e - f) return (e - t) / f;
+  return 1;
+}
 
 /**
  * 이 창 [w0, w1](초 · 영상 전체 시각)에 걸친 판 → Dialogue 줄. family = ASS 글꼴 이름(Pretendard 대체본).
@@ -234,19 +263,24 @@ function events(panels, w0, w1, family, warn = () => {}) {
     const a = Math.max(p.t0, w0), b = Math.min(p.t1, w1);
     if (!(b - a > 0.005)) continue;
     const f = fadeOf(p);
-    const knots = [a, ...[p.t0 + f, p.t1 - f].filter((x) => x > a + 1e-6 && x < b - 1e-6), b];
-    const rel = (t) => Math.round((t - a) * 1000);
-    const ramp = (max) => {
-      let tag = `\\1a&H${alphaHex(opacityAt(p, a + 0.001), max)}&`;
-      for (let k = 0; k + 1 < knots.length; k++) {
-        const o0 = k === 0 ? opacityAt(p, knots[0] + 0.001) : opacityAt(p, knots[k]);
-        const o1 = k + 2 === knots.length ? opacityAt(p, knots[k + 1] - 0.001) : opacityAt(p, knots[k + 1]);
-        if (Math.abs(o1 - o0) > 1e-4) tag += `\\t(${rel(knots[k])},${rel(knots[k + 1])},\\1a&H${alphaHex(o1, max)}&)`;
-      }
-      return tag;
-    };
-    const st = fmtT(a - w0), en = fmtT(b - w0);
     for (const q of layoutOf(p, warn)) {
+      // ⏱ 조각의 시간 창(q.on) — 판 창과 겹친 구간만 · 불투명도 = 판 페이드 × 조각 페이드(창이 없으면 예전과 한 글자도 같다)
+      const qa = q.on ? Math.max(a, q.on[0]) : a, qb = q.on ? Math.min(b, q.on[1]) : b;
+      if (!(qb - qa > 0.005)) continue;
+      const opf = (t) => opacityAt(p, t) * (q.on ? winOp(q.on, t) : 1);
+      const inner = [p.t0 + f, p.t1 - f, ...(q.on ? [q.on[0] + winFade(q.on), q.on[1] - winFade(q.on)] : [])].filter((x) => x > qa + 1e-6 && x < qb - 1e-6).sort((x, y) => x - y);
+      const knots = [qa, ...inner, qb];
+      const rel = (t) => Math.round((t - qa) * 1000);
+      const ramp = (max) => {
+        let tag = `\\1a&H${alphaHex(opf(qa + 0.001), max)}&`;
+        for (let k = 0; k + 1 < knots.length; k++) {
+          const o0 = k === 0 ? opf(knots[0] + 0.001) : opf(knots[k]);
+          const o1 = k + 2 === knots.length ? opf(knots[k + 1] - 0.001) : opf(knots[k + 1]);
+          if (Math.abs(o1 - o0) > 1e-4) tag += `\\t(${rel(knots[k])},${rel(knots[k + 1])},\\1a&H${alphaHex(o1, max)}&)`;
+        }
+        return tag;
+      };
+      const st = fmtT(qa - w0), en = fmtT(qb - w0);
       if (q.k === 'rect') {
         out.push(`Dialogue: ${q.layer},${st},${en},N,,0,0,0,,{\\an7\\pos(${q.x},${q.y})\\bord0\\shad0\\1c&H${bgr(q.color)}&${ramp(q.op)}\\p1}${rrPath(q.w, q.h, q.r)}{\\p0}`);
       } else if (q.k === 'check') {
@@ -254,7 +288,8 @@ function events(panels, w0, w1, family, warn = () => {}) {
         const s = q.size, poly = [[0.20, 0.54], [0.31, 0.43], [0.44, 0.56], [0.71, 0.25], [0.82, 0.36], [0.44, 0.78]].map(([x, y]) => `${Math.round(x * s)} ${Math.round(y * s)}`);
         out.push(`Dialogue: ${q.layer},${st},${en},N,,0,0,0,,{\\an7\\pos(${q.x},${q.y})\\bord0\\shad0\\1c&H${bgr(q.color)}&${ramp(q.op)}\\p1}m ${poly[0]} l ${poly.slice(1).join(' ')}{\\p0}`);
       } else {
-        const body = q.lines.map(esc).join('\\N');
+        // 🔢 숫자 조각(q.runs)은 그 조각만 글자색을 바꿨다 되돌린다 — \1a 페이드는 줄 전체에 그대로 걸린다
+        const body = q.runs ? q.runs.map((rs, li) => (rs || [{ t: q.lines[li] }]).map((r) => (r.c ? `{\\1c&H${bgr(r.c)}&}${esc(r.t)}{\\1c&H${bgr(q.color)}&}` : esc(r.t))).join('')).join('\\N') : q.lines.map(esc).join('\\N');
         out.push(`Dialogue: ${q.layer},${st},${en},N,,0,0,0,,{\\an${q.an}\\pos(${q.x},${q.y})\\fn${family}\\fs${q.fs}\\b1\\i0\\bord0\\shad0\\q2\\fsp${q.sp || 0}\\1c&H${bgr(q.color)}&${ramp(q.op)}}${body}`);
       }
     }
