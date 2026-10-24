@@ -1,5 +1,5 @@
 {
-  "version": "0.9.117",
+  "version": "0.9.118",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -233,7 +233,7 @@
     "docs/작업노트/2026-07.md": "ffcd84815de471b5f92606409e1ad94ae92f4ceb",
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
-    "docs/작업노트/2026-10.md": "afbf006b30832937633289daaa2cf98a291a77b1",
+    "docs/작업노트/2026-10.md": "562f99010dd6e633e942e335bd053830c63858ef",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/참고-4K비디오다운로더플러스-분석.md": "c39fc380ecd852b59e8600416025be438b1e31c3",
     "docs/참조음성만들기-CLI.md": "8d755802a069d271fc48d6584d357274e0c64329",
@@ -247,9 +247,9 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "0741bcb4cca77d35cb10a498e50fde0d83eb73d8",
     "light-updater.js": "7eb3477d2d9375e34f04778dc4cd932eedf050ff",
-    "main.js": "a1eb6c2e2d350d6ae7a417914ec6c7363fdf13f4",
+    "main.js": "7433aaea46314786f4655c2c3e1f32c6084a4998",
     "package-lock.json": "4cfbf76e1a7b6c412a1f33a9dcd538eb5de43e32",
-    "package.json": "d2324a0e6b87e0de8af0e22d9b08c3ac3c21bd51",
+    "package.json": "d556abb34d2b425fab05a69e78a3935e9243468a",
     "preload.js": "0de0d4b0edf1f47bd10b34ddf9ae0d23d2f12867",
     "renderer/dist/assets/index-CGkDFXGm.css": "877e5deb0f8fa800a4755e83827bbfef90892d11",
     "renderer/dist/assets/index-VSsEu9sf.js": "4bf6ea3946c5a87ca464d422f2543245691689ae",

@@ -189,8 +189,12 @@ console.log('\n[5-a] 채널 전체 — 일반 영상 탭·항목 URL·안전한 
     '돌려받은 채널 주소는 일반 영상 탭으로 정규화된다');
   const dlSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(/!o\._fromVideo && channelUrlOfVideo/.test(dlSrc), '다시 읽기는 한 번만(_fromVideo 가드)');
-  ok(/편 받기`, '취소'\][\s\S]{0,200}title: args\.playlist \? '재생목록 전체 받기' : '채널 전체 받기'/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')),
-    '🔴 채널 전체는 받기 전에 편수를 보여 주고 묻는다(붙여넣기 즉시 시작 · 실측 505편)');
+  {
+    const mainSrc0 = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const seg = mainSrc0.slice(mainSrc0.indexOf("ipcMain.handle('stt-from-url'"), mainSrc0.indexOf("ipcMain.handle('stt-from-url'") + 20000);
+    ok(!/showMessageBox/.test(seg) && /일반 영상 \$\{jobs\.length\}편을 받/.test(seg),
+      '채널 전체는 확인 팝업 없이 바로 시작하고 편수는 로그로(로이 2026-10-24 — 멈춤은 ⏹ 중단)');
+  }
 }
 
 console.log('\n[5-b] 전사 .txt 머리말 — 1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용 (로이 확정)');

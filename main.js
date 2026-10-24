@@ -1402,21 +1402,10 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           results.push({ url: channelUrl, ok: false, error: e.message });
         }
       }
-      // 🔴 채널 전체는 편수를 보여 주고 한 번 묻는다(2026-09-26) — 「📋 링크 붙여넣기」는 누르자마자 시작하고,
-      //   체크가 켜진 채 영상 주소를 붙여넣으면 그 채널 전체(실측 505편)가 확인 없이 시작됐다.
-      if (jobs.length && !_dlAbort && !process.env.PM_UI_SMOKE) {
+      // ⛔ 「N편 받기 / 취소」 확인 팝업은 없앴다(v0.9.118 · 로이 2026-10-24) — 편수는 로그로 알리고 바로 시작한다 · 멈추려면 📥 창·진행 패널의 ⏹ 중단
+      if (jobs.length && !_dlAbort) {
         const names = [...new Set(jobs.map((j) => j.channelTitle))].join(' · ');
-        const ans = await dialog.showMessageBox(win, {
-          type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
-          title: args.playlist ? '재생목록 전체 받기' : '채널 전체 받기',
-          message: `「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'}.`,
-          detail: '이미 전사한 영상은 건너뜁니다. 한 편만 받으려면 취소하고 「채널 전체」 체크를 끄세요.',
-        });
-        if (ans.response !== 0) {
-          log('⏹ 채널 전체 받기 취소');
-          prog.phase = 'done'; prog.okN = 0; prog.endedAt = Date.now(); sendProg(true);
-          return { ok: false, canceled: true };
-        }
+        log(`📺 「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'} — 이미 끝난 영상은 건너뜁니다`);
       }
     } else if (retryJobs.length) {
       for (const j of retryJobs) jobs.push({ ...j, outDir: j.outDir || outDir });
