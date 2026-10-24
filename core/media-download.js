@@ -157,6 +157,8 @@ function compareToolVersions(a, b) {
 
 // 같은 시각 시작한 작업끼리 실행 파일을 중복으로 교체하지 않도록 준비 과정을 공유한다.
 async function ensureYtDlp(options = {}) {
+  // 🧪 E2E 전용 가짜 도구(PM_UI_SMOKE 일 때만) — 진짜 유튜브에 요청하지 않는다
+  if (process.env.PM_UI_SMOKE && global.__ytdlpTest) return global.__ytdlpTest;
   if (!preparingTool) preparingTool = prepareYtDlp(options).finally(() => { preparingTool = null; });
   return preparingTool;
 }
@@ -279,7 +281,7 @@ async function probe(url, { tool, abortSignal, onLog, infoJsonFile, paced, _wait
   // ⏳ 정보 확인도 일시 차단(429·403)이면 기다렸다 두 번까지 다시(v0.9.116 — 예전엔 받기에만 있어 막히면 4초마다 다음 영상으로 넘어갔다)
   for (const wait of BLOCK_WAITS) {
     if (r.code === 0 || !BLOCK_RE.test(r.stderr || '') || (abortSignal && abortSignal())) break;
-    if (onLog) onLog(`  ⏳ 유튜브가 잠시 막았습니다(${/429|Too Many/i.test(r.stderr) ? '429' : '403'}) — ${wait}초 뒤 정보를 다시 읽습니다`);
+    if (onLog) onLog(`  ⏳ 유튜브가 잠시 막았습니다(${blockLabel(r.stderr)}) — ${wait}초 뒤 정보를 다시 읽습니다`);
     await new Promise((res) => setTimeout(res, (_waitScale != null ? _waitScale : 1000) * wait));
     if (abortSignal && abortSignal()) break;
     r = await _spawnYt(t, a, { abortSignal, timeoutMs: 3 * 60 * 1000 });
@@ -447,8 +449,10 @@ function subLangPref(language, url = '') {
 }
 
 // 일시 차단(영상 받기 단계) — 기다렸다 다시(download) · 대기 초
-const BLOCK_RE = /HTTP Error (?:403|429)|Too Many Requests|Forbidden/i;
+// 「Sign in to confirm you’re not a bot」 = 이 PC(IP)를 잠시 막은 것 — 429 와 같이 쉬었다 이어간다(v0.9.117 · 2026-10-24 실측: 클라이언트 5종 모두 같은 거절 → 클라이언트 바꾸기는 소용없다)
+const BLOCK_RE = /HTTP Error (?:403|429)|Too Many Requests|Forbidden|confirm you.re not a bot/i;
 const BLOCK_WAITS = [15, 45];
+const blockLabel = (s) => (/not a bot/i.test(s) ? '로봇 확인' : /429|Too Many/i.test(s) ? '429' : '403');
 const isBlocked = (e) => BLOCK_RE.test(String((e && (e.raw || e.message)) || '')) || /잠시 막았습니다/.test(String((e && e.message) || ''));
 // 🐢 여러 편을 연달아 받을 때(채널·재생목록) 요청 사이 쉼 — 몰아치면 유튜브가 429 로 막는다(2026-10-24 · 48편째에 막힘)
 const PACE_ARGS = ['--sleep-requests', '1', '--sleep-subtitles', '2'];
@@ -502,6 +506,8 @@ function altUrl(url, stderr) {
 function _explain(stderr) {
   const s = String(stderr || '');
   // ⚠ 「낡은 yt-dlp」로 단정하지 않는다(2026-10-16 — 최신판에서도 유튜브의 일시 차단으로 403 이 났다 · 낡았는지는 버전 줄 「N일 전 판」이 따로 알린다)
+  if (/confirm you.re not a bot/i.test(s))
+    return '유튜브가 이 PC 의 요청이 많다며 「로봇이 아닌지 확인」을 요구합니다(일시 차단) — 몇 시간 쉬었다 다시 받으세요. 로그인·쿠키로 우회하지 않습니다.';
   if (/HTTP Error 429|Too Many Requests/i.test(s))
     return '유튜브가 요청이 많다며 잠시 막았습니다(429) — 기다렸다 다시 해도 막혀 건너뜁니다. 몇 분 뒤 다시 받아 보세요.';
   if (/HTTP Error 403|Forbidden/i.test(s))
@@ -623,7 +629,7 @@ async function download(url, o = {}) {
   if (li >= 0) args = [...args.slice(0, li), ...args.slice(li + 2), url];
   for (const wait of BLOCK_WAITS) {
     if (r.code === 0 || !BLOCK_RE.test(r.stderr || '') || SUB_FAIL_RE.test(r.stderr || '') || (o.abortSignal && o.abortSignal())) break;
-    if (o.onLog) o.onLog(`  ⏳ 유튜브가 잠시 막았습니다(${/429|Too Many/i.test(r.stderr) ? '429' : '403'}) — ${wait}초 뒤 다시 받습니다`);
+    if (o.onLog) o.onLog(`  ⏳ 유튜브가 잠시 막았습니다(${blockLabel(r.stderr)}) — ${wait}초 뒤 다시 받습니다`);
     await new Promise((res) => setTimeout(res, (o._waitScale != null ? o._waitScale : 1000) * wait));
     if (o.abortSignal && o.abortSignal()) break;
     r = await run(args);

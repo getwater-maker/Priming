@@ -1138,6 +1138,7 @@ function txtWithHead(text, head) {
 // 📥 받기·전사(대본다운·STT)는 **자기 중단 플래그**를 쓴다(v0.5.104) — 제작(S.abort)과 공유하면 받기를 시작할 때 제작의 중단 요청이 풀리고,
 //   받기 패널의 ⏹ 가 돌고 있는 제작까지 멈췄다. 헤더 ■ 중단은 제작만 멈추고(제작이 없을 때만 받기도), 받기 패널 ⏹ 는 받기만 멈춘다.
 let _dlAbort = false, _dlActive = 0;
+let _lastDlRetry = { jobs: [], outDir: '' };   // 🔁 지난 URL 받기의 실패·남은 영상(「실패한 영상만 다시」 · v0.9.117)
 async function transcribeToTxt(file, opts = {}) {
   const media = require('./core/media-utils');
   const asr = require('./tts/asr-client');
@@ -1312,18 +1313,23 @@ ipcMain.handle('ytdlp-update', async (_e, args = {}) => {
 ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const MD = require('./core/media-download');
   const media = require('./core/media-utils');
-  const urls = (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
+  // 🔁 「실패한 영상만 다시」(v0.9.117 · 4K Video Downloader 의 Retry Download) — 지난 실행이 main 에 남긴 항목 그대로(폴더·[ID] 이름 유지)
+  //   ⚠ 화면에서 폴더 경로를 받지 않는다 — main 이 기억한 것만 쓴다
+  if (args.retryLast && _dlActive > 0) return { ok: false, error: '받기가 끝난 뒤 다시 받으세요' };
+  const retryJobs = args.retryLast ? _lastDlRetry.jobs.slice() : [];
+  if (args.retryLast && !retryJobs.length) return { ok: false, error: '다시 받을 실패 영상이 없습니다' };
+  const urls = retryJobs.length ? retryJobs.map((j) => j.url) : (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
   if (!urls.length) return { ok: false, error: '주소가 없습니다' };
 
   const mode = ['audio', 'video', 'both', 'subtitles'].includes(args.mode) ? args.mode : 'audio';
   const forceStt = !!args.forceStt;
   const doStt = mode !== 'subtitles' && args.stt !== false;
   const saveSubs = mode === 'subtitles' || !!args.saveSubs;
-  const channelMode = !!args.channel || !!args.playlist;
+  const channelMode = !retryJobs.length && (!!args.channel || !!args.playlist);
 
   // 저장 폴더 — ⚙ 설정 → 📁 폴더 「URL 받기」(모든 채널 공통 · 2026-10-14), 없으면 **윈도우 「다운로드」 폴더**,
   //   그마저 못 찾을 때만 그 자리에서 고르게 한다. (옛 채널별 downloadFolder 는 읽지 않는다)
-  let outDir = args.outDir || appFolder('download');
+  let outDir = args.outDir || (retryJobs.length && _lastDlRetry.outDir) || appFolder('download');
   if (!outDir) {
     const pick = await dialog.showOpenDialog(win, {
       title: '받은 파일을 저장할 폴더 선택 (채널편집 → 📁 폴더 에 지정해 두면 다음부터 안 묻습니다)',
@@ -1345,7 +1351,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     phase: 'prepare', total: 0, startedAt: Date.now(), outDir,
     dl: { done: 0, idx: 0, title: '', pct: 0, stage: '' },
     stt: { done: 0, pending: 0, cur: null },
-    sub: 0, skip: 0, fail: 0, fails: [], doStt, savedSubs: 0, subtitleMissing: 0,
+    sub: 0, skip: 0, fail: 0, fails: [], retry: [], doStt, savedSubs: 0, subtitleMissing: 0,
   };
   let _progT = 0, _progTimer = null;
   const sendProg = (now) => {
@@ -1357,9 +1363,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     if (_progTimer) return;
     _progTimer = setTimeout(fire, Math.max(0, 250 - (Date.now() - _progT)));
   };
-  const noteFail = (idx, title, error) => {
+  const noteFail = (idx, title, error, job) => {
     prog.fail++; prog.fails.push({ idx, title: title || '', error: String(error || '').slice(0, 160) });
     if (prog.fails.length > 30) prog.fails.shift();
+    // 🔁 다시 받을 항목은 잘라내지 않고 모두 기억한다(화면 목록은 30줄만 보여도)
+    if (job && job.url) prog.retry.push({ url: job.url, id: job.id || '', title: title || job.title || '', outDir: job.outDir || '', idName: !!job.idName });
   };
   sendProg(true);
 
@@ -1388,7 +1396,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           const channel = await MD.listChannelVideos(channelUrl, { tool, playlist: !!args.playlist, abortSignal: () => _dlAbort, onLog: log });
           const channelDir = path.join(outDir, MD.safeFolderName(channel.title));
           log(`  ✓ 「${channel.title}」 일반 영상 ${channel.entries.length}개 · 저장 ${channelDir}`);
-          for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir });
+          for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir, idName: true });
         } catch (e) {
           log(`  ✗ 채널 목록 실패: ${e.message}`);
           results.push({ url: channelUrl, ok: false, error: e.message });
@@ -1410,6 +1418,9 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           return { ok: false, canceled: true };
         }
       }
+    } else if (retryJobs.length) {
+      for (const j of retryJobs) jobs.push({ ...j, outDir: j.outDir || outDir });
+      log(`🔁 실패한 영상 ${jobs.length}편만 다시 받습니다`);
     } else {
       for (const url of urls) jobs.push({ url, id: '', title: '', outDir });
     }
@@ -1448,7 +1459,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         } catch (e) {
           log(`  ✗ ${t.label} 전사 실패: ${e.message}`);
           slots[i] = { url: t.done.url, ok: false, error: e.message };
-          noteFail(i + 1, t.done.title, '전사 실패: ' + e.message);
+          noteFail(i + 1, t.done.title, '전사 실패: ' + e.message, jobs[i]);
         } finally {
           sttPending--;
           prog.stt.cur = null; prog.stt.pending = sttPending; sendProg(true);
@@ -1462,20 +1473,28 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     const paced = jobs.length > 1;
     const BLOCK_PAUSE_MIN = [3, 10, 20];
     let blockedRun = 0, touched = false;
-    const dlSleep = async (ms) => { const end = Date.now() + ms; while (Date.now() < end && !_dlAbort) await new Promise((res) => setTimeout(res, Math.min(500, end - Date.now()))); };
+    // 🧪 E2E 만 대기를 줄인다(PM_UI_SMOKE + global.__dlWaitScale = 1초당 ms · 0 = 바로)
+    const waitScale = process.env.PM_UI_SMOKE && global.__dlWaitScale != null ? global.__dlWaitScale : null;
+    const dlSleep = async (ms) => { if (waitScale != null) ms = ms * waitScale / 1000; const end = Date.now() + ms; while (Date.now() < end && !_dlAbort) await new Promise((res) => setTimeout(res, Math.min(500, end - Date.now()))); };
     for (let i = 0; i < jobs.length; i++) {
       if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
       const job = jobs[i];
       const url = job.url;
       const itemOutDir = job.outDir || outDir;
       const tag = `[${i + 1}/${jobs.length}]`;
-      if (channelMode && job.id && doStt && !saveSubs) {
-        let doneTxt = null;
-        try { doneTxt = fs.readdirSync(itemOutDir).find((f) => f.endsWith(`[${job.id}].txt`)); } catch (_) {}
-        if (doneTxt) {
-          log(`  ↷ ${tag} 이미 완료됨: ${doneTxt}`);
+      // ↷ 받기 전 검사(pre-check) — 이미 끝난 영상은 유튜브에 묻지 않는다. 전사 = `[id].txt` · 받기만 = 그 형식의 `[id].<확장자>`
+      const doneMark = job.idName && job.id && !saveSubs
+        ? (doStt ? ['.txt'] : mode === 'audio' ? ['.' + (args.audioFormat === 'm4a' ? 'm4a' : 'mp3')] : mode === 'video' ? ['.mp4', '.mkv', '.webm'] : null)
+        : null;
+      if (doneMark) {
+        let doneFile = null;
+        try { doneFile = fs.readdirSync(itemOutDir).find((f) => doneMark.some((ext) => f.endsWith(`[${job.id}]${ext}`))); } catch (_) {}
+        if (doneFile) {
+          log(`  ↷ ${tag} 이미 완료됨: ${doneFile}`);
           prog.skip++; prog.dl.done++; sendProg();
-          slots[i] = { url, ok: true, title: job.title || '', txt: path.join(itemOutDir, doneTxt), from: 'existing', subtitles: [] };
+          const full = path.join(itemOutDir, doneFile);
+          slots[i] = doStt ? { url, ok: true, title: job.title || '', txt: full, from: 'existing', subtitles: [] }
+            : { url, ok: true, title: job.title || '', audio: mode === 'audio' ? full : null, video: mode === 'video' ? full : null, from: 'existing', subtitles: [] };
           continue;
         }
       }
@@ -1488,7 +1507,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
-        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced });
+        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced, _waitScale: waitScale });
         const info = pr0.info;
         const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
@@ -1502,8 +1521,8 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
           audioFormat: args.audioFormat, quality: args.quality, subtitleTrack: args.subtitleTrack,
           subtitleLanguage: saveSubs ? MD.selectSubtitleLanguage(info, args.subtitleLanguage, args.subtitleTrack) : 'original', requireSubs: mode === 'subtitles',
-          filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
-          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced,
+          filenameWithId: !!job.idName, mediaId: job.idName ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
+          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced, _waitScale: waitScale,
           onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
         });
         blockedRun = 0;
@@ -1516,7 +1535,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const outTxt = base + '.txt';
 
         let txtFrom = null;
-        if (channelMode && r.reused && fs.existsSync(outTxt)) {
+        if (job.idName && r.reused && fs.existsSync(outTxt)) {
           log(`  ↷ 이미 완료됨: ${path.basename(outTxt)}`);
           txtFrom = 'existing';
           prog.skip++;
@@ -1567,12 +1586,15 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           }
           log(`  ⏹ 유튜브가 계속 막고 있어 여기서 멈춥니다 — ${jobs.length - i}편 남음 · 몇 시간 뒤 같은 채널을 다시 돌리면 받은 영상은 건너뛰고 이어서 받습니다`);
           slots[i] = { url, ok: false, error: e.message };
-          noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
+          noteFail(i + 1, prog.dl.title, e.message, jobs[i]);
+          // 멈춘 뒤 남은 영상도 「실패한 영상만 다시」에 함께 싣는다(실패 수에는 넣지 않음)
+          for (const rest of jobs.slice(i + 1)) prog.retry.push({ url: rest.url, id: rest.id || '', title: rest.title || '', outDir: rest.outDir || '', idName: !!rest.idName });
+          sendProg(true);
           break;
         }
         log(`  ✗ 실패: ${e.message}`);
         slots[i] = { url, ok: false, error: e.message };
-        noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
+        noteFail(i + 1, prog.dl.title, e.message, jobs[i]); sendProg(true);
       } finally {
         try { fs.rmSync(infoJsonFile, { force: true }); } catch (_) {}
       }
@@ -1586,6 +1608,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     const okN = results.filter((x) => x.ok).length;
     const subN = results.filter((x) => x.from === 'subtitle').length;
     log(`🔗 완료: 성공 ${okN}/${results.length}${subN ? ` (자막 ${subN}건은 STT 생략)` : ''}`);
+    _lastDlRetry = { jobs: prog.retry.slice(), outDir };
     prog.phase = _dlAbort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
     if (okN) { try { shell.openPath(outDir); } catch {} }
     return { ok: true, results, outDir };

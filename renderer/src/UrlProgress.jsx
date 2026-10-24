@@ -31,7 +31,7 @@ function Bar({ value, color }) {
   );
 }
 
-export default function UrlProgress({ prog, onAbort, onClose, embedded = false }) {
+export default function UrlProgress({ prog, onAbort, onClose, onRetry, embedded = false }) {
   const [, tick] = useState(0);
   const live = prog && !['done', 'aborted'].includes(prog.phase);
   useEffect(() => {                       // 경과 시간이 멈춰 보이지 않게 1초마다 다시 그린다
@@ -125,7 +125,11 @@ export default function UrlProgress({ prog, onAbort, onClose, embedded = false }
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
         {live
           ? <button className="ghost" disabled={prog.phase === 'aborting'} onClick={onAbort}>⏹ 중단</button>
-          : <button className="ghost" onClick={onClose}>닫기</button>}
+          : <>
+            {/* 🔁 실패한 영상만 다시(v0.9.117 · 4K Video Downloader 의 Retry Download) — 막혀서 멈춘 뒤 남은 영상도 포함 */}
+            {onRetry && prog.retry && prog.retry.length > 0 && <button data-testid="urldl-retry" onClick={() => onRetry(prog.retry)}>🔁 실패한 영상만 다시 ({prog.retry.length})</button>}
+            <button className="ghost" onClick={onClose}>닫기</button>
+          </>}
       </div>
     </div>
   );

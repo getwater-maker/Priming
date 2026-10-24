@@ -1474,6 +1474,22 @@ export default function App() {
         }}>{stopping ? '⏳ 멈추는 중…' : '⏹ 중단'}</button>
     );
   }
+  // 🔁 실패한 영상만 다시(v0.9.117) — 항목(주소·폴더·[ID] 이름)은 main 이 기억한 것 · 받는 방식은 지금 창 값
+  async function retryUrlFails(retryJobs) {
+    if (urlBusy || !retryJobs || !retryJobs.length) return;
+    setUrlBusy(true);
+    setStatus(`🔁 실패한 ${retryJobs.length}편 다시 받는 중…`);
+    try {
+      const r = await api.sttFromUrl({ retryLast: true, mode: urlMode, stt: urlStt, forceStt: urlStt && urlForceStt,
+        audioFormat: urlAudioFormat, quality: urlQuality, saveSubs: urlSaveSubs, subtitleFormat: urlSubtitleFormat,
+        subtitleLanguage: urlSubtitleLanguage, subtitleTrack: urlSubtitleTrack, presetName: presetName || null });
+      if (!r || r.canceled) { setStatus('취소'); return; }
+      if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
+      const okN = (r.results || []).filter((x) => x.ok).length;
+      setStatus(`🔁 다시 받기 완료 (${okN}/${(r.results || []).length})`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+    finally { setUrlBusy(false); }
+  }
   async function runUrlDl() {
     const urls = String(urlTextRef.current?.value || '')
       .split(/[\n\r]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s));
@@ -7763,7 +7779,7 @@ export default function App() {
           onClose={() => setMp3Prog(null)} />
       )}
       {urlProg && !urlOpen && (
-        <UrlProgress prog={urlProg}
+        <UrlProgress prog={urlProg} onRetry={retryUrlFails}
           onAbort={() => { api.dlAbort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setUrlProg(null)} />
       )}
@@ -7831,7 +7847,7 @@ export default function App() {
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
               {subtitleCopyMessage && <p role="status" data-testid="dl-copy-status">{subtitleCopyMessage}</p>}
-              {urlProg && <UrlProgress embedded prog={urlProg} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
+              {urlProg && <UrlProgress embedded prog={urlProg} onRetry={retryUrlFails} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
             </div>)}
             {dlTab === 'file' && (<div className="dl-body">
               <div className="dl-tiles">

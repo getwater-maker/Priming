@@ -245,9 +245,9 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/ipcMain\.handle\('ytdlp-update'/.test(main), 'IPC ytdlp-update');
   ok(/sttFromUrl:/.test(pre) && /ytdlpStatus:/.test(pre) && /ytdlpUpdate:/.test(pre), 'preload 3개');
   ok(/MD\.listChannelVideos\(channelUrl,/.test(main), '채널 모드가 전체 영상 목록을 먼저 펼친다');
-  ok(/filenameWithId: channelMode, mediaId:/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다');
+  ok(/filenameWithId: !!job\.idName, mediaId:/.test(main) && /outDir: channelDir, idName: true \}/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다(채널 항목 = idName · 다시 받기도 이어받음)');
   // 🔴 2026-09-23 실사고: 단일 URL 에도 mediaId 를 넘겨 파일명에 없는 [ID] 로 찾다가 「받은 파일이 없습니다」로 전부 실패
-  ok(/mediaId: channelMode \? \(job\.id \|\| info\.id\) : ''/.test(main), '🔴 단일 URL 은 mediaId 를 넘기지 않는다(받은 파일을 못 찾는다)');
+  ok(/mediaId: job\.idName \? \(job\.id \|\| info\.id\) : ''/.test(main) && /jobs\.push\(\{ url, id: '', title: '', outDir \}\)/.test(main), '🔴 단일 URL 은 mediaId 를 넘기지 않는다(받은 파일을 못 찾는다 · 단일 항목엔 idName 없음)');
   ok(/win\.webContents\.send\('urldl-progress'/.test(main) && /onUrldlProgress:/.test(pre), '📊 진행 상황을 화면으로 보낸다');
   ok(/onProgress: \(p\) => \{ prog\.dl\.pct/.test(main), '다운로드 퍼센트를 진행 패널에 싣는다');
   ok(/onChunk:/.test(main) && /opts\.onChunk/.test(main), '전사 청크 진행을 진행 패널에 싣는다');
@@ -300,7 +300,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(!/downloadFolder/.test(app), '채널편집에 옛 받기 폴더 칸이 남아 있지 않다');
   ok(/\['download', 'URL 받기'/.test(app), '⚙ 설정 → 📁 폴더에 「URL 받기」 칸');
   { const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    ok(/let outDir = args\.outDir \|\| appFolder\('download'\)/.test(mainSrc), 'stt-from-url 은 공통 받기 폴더를 쓴다');
+    ok(/let outDir = args\.outDir \|\| \(retryJobs\.length && _lastDlRetry\.outDir\) \|\| appFolder\('download'\)/.test(mainSrc), 'stt-from-url 은 공통 받기 폴더를 쓴다(다시 받기는 지난 실행 폴더)');
     ok(!/pr && pr\.downloadFolder/.test(mainSrc), '채널 downloadFolder 를 더 이상 읽지 않는다'); }
 
   const bundle = (() => {
@@ -415,8 +415,11 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
     const c2 = fs.readFileSync(callLog, 'utf8').trim().split('\n');
     ok(res2.video && c2.length === 2 && c2[0].includes('--load-info-json') && !c2[1].includes('--load-info-json') && c2[1].endsWith('https://youtu.be/p1'), '막혀서 다시 받을 땐 남긴 정보를 버리고 주소로');
     ok(MD.isBlocked({ message: 'x', raw: 'HTTP Error 429' }) && MD.isBlocked(new Error('유튜브가 요청이 많다며 잠시 막았습니다(429)')) && !MD.isBlocked(new Error('Video unavailable')), 'isBlocked: 429·403 만 막힘으로 본다');
+    const bot = 'ERROR: [youtube] x: Sign in to confirm you’re not a bot. This helps protect our community.';
+    ok(MD.isBlocked({ message: MD._explain(bot), raw: bot }) && /로봇이 아닌지/.test(MD._explain(bot)) && !/로그인·쿠키로 우회합니다/.test(MD._explain(bot)), '「로봇 확인」(2026-10-24 실측 문구) = 막힘 · 사람 말 안내(우회 안 함)');
+    ok(!MD.isBlocked({ message: 'x', raw: 'ERROR: Sign in to confirm your age' }), '연령 확인은 막힘이 아니다(쉬어도 안 풀림)');
     const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    ok(/BLOCK_PAUSE_MIN = \[3, 10, 20\]/.test(mainJs) && /i--; continue;/.test(mainJs) && /endsWith\(`\[\$\{job\.id\}\]\.txt`\)/.test(mainJs), 'main: 막히면 쉬었다 같은 영상부터 · 이미 전사한 영상은 유튜브에 묻지 않음');
+    ok(/BLOCK_PAUSE_MIN = \[3, 10, 20\]/.test(mainJs) && /i--; continue;/.test(mainJs) && /f\.endsWith\(`\[\$\{job\.id\}\]\$\{ext\}`\)/.test(mainJs) && /doStt \? \['\.txt'\]/.test(mainJs), 'main: 막히면 쉬었다 같은 영상부터 · 이미 전사한 영상은 유튜브에 묻지 않음');
   }
   // 🧩 JS 실행기 — 버전을 모르거나 옛 yt-dlp 면 붙이지 않는다(--js-runtimes 를 모르는 판이 깨지지 않게)
   const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
