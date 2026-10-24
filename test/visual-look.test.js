@@ -17,7 +17,7 @@ ok(JSON.stringify(VL.normLook(null)) === JSON.stringify({ fill: 'auto', flipH: f
 ok(VL.isDefault({}) && !VL.isDefault({ flipH: true }) && !VL.isDefault({ motion: 'none' }), '기본인지 판정(기본이면 그룹에 필드를 두지 않는다)');
 ok(VL.normLook({ fill: 'weird', motion: 'spin' }).fill === 'auto' && VL.normLook({ motion: 'spin' }).motion === 'auto', '모르는 값은 기본으로');
 ok(/좌우 반전/.test(VL.describe({ flipH: true })) && /맞추기/.test(VL.describe({ fill: 'contain' })), '로그용 설명');
-ok(!/require\(/.test(read('core/visual-look.js').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), '🔑 렌더러 번들에 들어간다 — CJS 런타임 참조 없음');
+ok(!/require\(/.test(read('core/visual-look.js').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/require\('\.\/clip-effects'\)/g, '')), '🔑 렌더러 번들에 들어간다 — CJS 런타임 참조 없음(순수 모듈 ./clip-effects 의 정적 require 하나만 허용 — overlay-layers 가 visual-span 을 부르는 것과 같다)');
 
 console.log('\n[2] AI 고지 범위 → 시각');
 const mkPr = (durs) => {

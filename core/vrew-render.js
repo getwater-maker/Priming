@@ -616,16 +616,22 @@ function isStandardBox(tr) {
   const t = tr || {};
   const x = +t.xPos || 0, y = +t.yPos || 0, w = typeof t.width === 'number' ? t.width : 1, h = typeof t.height === 'number' ? t.height : 1;
   const centered = Math.abs(x + w / 2 - 0.5) < 0.01 && Math.abs(y + h / 2 - 0.5) < 0.01;
-  return centered && (w >= 0.98 || h >= 0.98);
+  // 🎛 회전이 있거나 기본 8% 확대(1.08)보다 더 큰 박스(확대 효과)는 표준이 아니다 → 레이어 길(박스 크기로 굽고 얹는다 — 캔버스 밖은 잘린다)
+  return centered && (w >= 0.98 || h >= 0.98) && !(+t.rotation) && w <= 1.09 && h <= 1.09;
+}
+/** 🎛 회전(° · 시계 방향 +) — 투명 바탕 위에서 돌린다(캔버스가 커진 만큼 투명). 박스 가운데를 중심으로 놓는 건 overlay 쪽 식이 한다. */
+function rotateFilter(deg) {
+  const rad = `${(+deg || 0).toFixed(4)}*PI/180`;
+  return `,format=yuva420p,rotate=a=${rad}:ow=rotw(${rad}):oh=roth(${rad}):c=none`;
 }
 /** 겹칠 그림을 박스 크기로 한 번만 굽는다(반전 포함) */
-function boxImage(file, bw, bh, flip, ctx) {
+function boxImage(file, bw, bh, flip, ctx, rot = 0) {
   ctx.boxes = ctx.boxes || new Map();
-  const key = [file, bw, bh, flip].join('|');
+  const key = [file, bw, bh, flip, rot].join('|');
   if (!ctx.boxes.has(key)) {
     const name = `box_${ctx.boxes.size}.png`;
     ctx.boxes.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
-      '-vf', `scale=${bw}:${bh}:flags=lanczos,setsar=1${flip}`, '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
+      '-vf', `scale=${bw}:${bh}:flags=lanczos,setsar=1${flip}${rot ? rotateFilter(rot) : ''}`, '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
   }
   return ctx.boxes.get(key);
 }
@@ -793,18 +799,20 @@ async function renderChunk(ch, i, ctx) {
     for (let k = 0; k < L.length; k++) {
       const l = L[k], tr = l.track || {};
       const bw = Math.max(2, Math.round(((+tr.width || 1) * W) / 2) * 2), bh = Math.max(2, Math.round(((+tr.height || 1) * H) / 2) * 2);
-      const bx = Math.round((+tr.xPos || 0) * W), by = Math.round((+tr.yPos || 0) * H);
+      const rot = +tr.rotation || 0;   // 🎛 회전 — 박스 가운데를 그대로 두고 돌린다(돌린 그림은 더 커지므로 overlay 가 가운데 맞춤)
+      const bx = rot ? `${Math.round(((+tr.xPos || 0) + (typeof tr.width === 'number' ? tr.width : 1) / 2) * W)}-w/2` : Math.round((+tr.xPos || 0) * W);
+      const by = rot ? `${Math.round(((+tr.yPos || 0) + (typeof tr.height === 'number' ? tr.height : 1) / 2) * H)}-h/2` : Math.round((+tr.yPos || 0) * H);
       const fl = (tr.editInfo && tr.editInfo.flip) || {};
       const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
       const lo = Math.max(0, Math.round((ch.f0 / FPS - l.t0) * FPS));   // 이 그림이 이 조각 전까지 보인 프레임 수
       const lt = Math.max(lo + frames, Math.round((l.tAll || 0) * FPS));
       if (l.type === 'image') {
-        const png = await boxImage(l.file, bw, bh, flip, ctx);
+        const png = await boxImage(l.file, bw, bh, flip, ctx, rot);
         ins.push('-i', png);
-        parts.push(`[${k + 1}:v]format=${/\.png$/i.test(l.file) ? 'yuva420p' : 'yuv420p'},loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
+        parts.push(`[${k + 1}:v]format=${(rot || /\.png$/i.test(l.file)) ? 'yuva420p' : 'yuv420p'},loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
       } else {
         ins.push(...videoInArgs(tr, lo / FPS), '-i', l.file);
-        parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600,format=yuv420p[l${k}]`);
+        parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600${rot ? rotateFilter(rot) : ',format=yuv420p'}[l${k}]`);
       }
       parts.push(`${prev}[l${k}]overlay=x=${bx}:y=${by}:eof_action=repeat${k === L.length - 1 ? '' : `[b${k}]`}`);
       prev = `[b${k}]`;

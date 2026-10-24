@@ -7,6 +7,8 @@
  *   ⚠ 렌더러 번들에도 들어간다 — CJS 런타임 참조 금지(v0.3.40 백지 화면 사고).
  */
 
+const CE = require('./clip-effects');   // 🎛 확대·회전 규칙은 한 곳(효과_규칙_설계.md)
+
 const FILLS = [
   { id: 'auto', label: '자동', hint: '그림 비율이 화면과 같으면 꽉 채우고, 다르면 맞춥니다(지금까지의 동작)' },
   { id: 'cover', label: '꽉 채우기', hint: '화면을 빈틈없이 채웁니다 — 비율이 다르면 넘치는 쪽이 잘립니다' },
@@ -67,15 +69,20 @@ function normLook(l) {
   if (bx) out.box = bx;
   const fxg = normFxGroup(o.fx);
   if (fxg) out.fx = fxg;   // 없음(채널 설정대로)이면 필드를 두지 않는다
+  const zm = CE.normZoom(o.zoom);
+  if (zm) out.zoom = zm;   // 🎛 확대 %(기본 100 = 필드 없음)
+  const rt = CE.normRot(o.rot);
+  if (rt) out.rot = rt;   // 🎛 회전 °(기본 0 = 필드 없음)
   const ks = normKbSegGroup(o.kbSeg);
   if (ks) out.kbSeg = ks;   // 없음(채널 설정대로)이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로)
   return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot;
 }
-function describe(l) {
+function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)); }
+function _describeBase(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
   const m = MOTIONS.find((x) => x.id === n.motion).label;

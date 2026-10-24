@@ -271,6 +271,7 @@ const DEFAULT_SPEAKER = {
 };
 
 // 🎞 켄번스 표·공식·클램프·구간 = core/ken-burns 한 곳(Lab — ① 미리보기와 같은 표)
+const CE = require('../core/clip-effects');   // 🎛 확대·회전(효과 ① · 규칙은 한 곳)
 const { KEN_BURNS_PATTERNS, _pickKenBurnsIndex, _clampKbFrame, kbWaypoints, kbSegCount, _kenBurnsForLook, _kenBurnsFor, planSegments: _kbPlanSegments } = require('../core/ken-burns');
 // 반전 — Vrew 설치본 JS 실측: track.editInfo.flip = {vertical, horizontal} (둘 다 false 면 필드 없음)
 function _editInfoForLook(g) {
@@ -954,6 +955,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         editInfo: _editInfoForLook(g),
         fillType: 'cut',                 // 트랙 박스가 영상 비율과 동일 → cut 이어도 잘리지 않고 전체 표시
       };
+      CE.applyToTrack(pj.props.tracks[videoTid], g.look);   // 🎛 확대·회전(영상 그룹도 같다)
       // 비디오 오디오 트랙 — volume:0 (PrimingFlow TTS 만 들리도록 음소거)
       pj.props.tracks[audioTid] = {
         trackId: audioTid, mediaId: mid,
@@ -1038,6 +1040,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     }
     // 📐 ① 칸에서 사람이 옮기고 줄인 자리(look.box) — 채우기보다 우선
     { const bx = _boxOfLook(g); if (bx) { track.xPos = bx.x; track.yPos = bx.y; track.width = bx.w; track.height = bx.h; } }
+    CE.applyToTrack(track, g.look);   // 🎛 확대(박스 가운데 기준) · 회전(track.rotation · 켄번스는 끈다)
     pj.props.tracks[tid] = track;
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     groupImageAsset.set(g.id, { aid, mid, fn });

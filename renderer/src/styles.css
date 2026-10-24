@@ -1979,3 +1979,10 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .marker-item .mi-n{font-variant-numeric:tabular-nums;color:var(--muted)}
 .marker-item .mi-g{color:var(--sky);font-size:var(--fs-sm)}
 .marker-item .mi-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 🎛 확대 및 회전 패널(효과 ①) */
+.vr-menu.zr-panel{position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:3100;display:flex;flex-direction:column;gap:10px;padding:14px 16px;width:340px}
+.zr-panel label{display:flex;align-items:center;gap:8px}
+.zr-panel input[type=range]{flex:1}
+.zr-panel .zr-v{width:52px;text-align:right;font-variant-numeric:tabular-nums}
+.zr-panel .zr-btns{display:flex;gap:8px;justify-content:flex-end}

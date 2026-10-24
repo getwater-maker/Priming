@@ -41,6 +41,7 @@ import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
 import BackupModal from './BackupModal.jsx';
 import AccountPage from './AccountPage.jsx';
+import CEff from '../../core/clip-effects.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -4567,10 +4568,11 @@ export default function App() {
     else {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
       const kbIdx = KB.patternIndexOf({ num: c.num, look: lk });   // core/ken-burns — 빌더와 같은 번호
-      const kbCls = lk.motion === 'none' ? 'kbnone' : `kb kb${kbIdx}`;
+      const kbCls = (lk.motion === 'none' || lk.rot) ? 'kbnone' : `kb kb${kbIdx}`;   // 🎛 회전하면 켄번스는 끈다(.vrew·MP4 와 같다)
       inner = `<img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}>`;
     }
-    return `<div class="vlayer" data-num="${c.num}" style="${pos}"><div class="vlook"${flipT}>${inner}</div></div>`;
+    const ce = CEff.cssTransform(lk);   // 🎛 확대·회전 — 박스(= 이 칸) 가운데 기준
+    return `<div class="vlayer" data-num="${c.num}" style="${pos}${ce ? `;transform-origin:center center;transform:${ce}` : ''}"><div class="vlook"${flipT}>${inner}</div></div>`;
   }
   // 🖼 이 문장을 덮는 그림(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 아래층으로 이어진 그림(core/visual-span 과 같은 규칙: 그룹 순서 = 쌓는 순서)
   function visLayersAt(pr, cut, sentIdx, rg) {
@@ -6383,6 +6385,27 @@ export default function App() {
   const ribGuide = (<button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>);
   // ⚑ 마커 — 달기/지우기(고른 클립의 문장) · 모아 보기(목록 → 그 클립으로 이동)
   const [markerList, setMarkerList] = useState(null);   // { x, y } | null
+  // 🎛 확대 및 회전(효과 ①) — 고른 클립이 든 그룹(여럿이면 각각)에 look.zoom·rot 을 적는다
+  const [zrPanel, setZrPanel] = useState(null);   // { sn, gs:[그룹 번호], zoom, rot }
+  const zrTimerRef = useRef(null);
+  function openZoomRot() {
+    if (!clipSelOk()) { setStatus('🎛 확대·회전을 줄 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum;
+    const gs = [...new Set(capSel.items.map((x) => x.groupNum))].sort((x, y) => x - y);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const c = pr ? pr.cuts.find((x) => x.num === gs[0]) : null;
+    const lk = VLook.normLook(c && c.look);
+    setZrPanel({ sn, gs, zoom: lk.zoom || 100, rot: lk.rot || 0 });
+  }
+  function zrChange(patch) {
+    setZrPanel((p) => (p ? { ...p, ...patch } : p));
+    if (zrTimerRef.current) clearTimeout(zrTimerRef.current);
+    const sel = zrPanel; if (!sel) return;
+    const next = { zoom: sel.zoom, rot: sel.rot, ...patch };
+    zrTimerRef.current = setTimeout(async () => {   // 슬라이더를 끄는 동안 매번 보내지 않는다
+      for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
+    }, 250);
+  }
   async function clipMarker(mode) {
     if (!clipSelOk()) { setStatus('⚑ 마커를 달 클립을 먼저 고르세요'); return; } const sel = capSel; setClipMenu(null); setClipCtx(null);
     const items = []; const seen = new Set();
@@ -6460,6 +6483,7 @@ export default function App() {
     <span className="hdiv" />
     <button data-testid="rb-fit-contain" disabled={!selOk} title="맞춤 — 고른 클립의 그림·영상을 화면에 맞춰 통째로 보이게" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}><span className="rb-ic">▣</span> <span className="rb-t">맞춤</span></button>
     <button data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
+    <button data-testid="rb-zoomrot" disabled={!selOk} title="확대 및 회전 — 고른 클립이 든 그림·영상 그룹을 확대(100~300%)하거나 돌립니다(−180~180°). 돌리면 켄번스(천천히 움직임)는 꺼집니다" onClick={openZoomRot}><span className="rb-ic">⤢</span> <span className="rb-t">확대·회전</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     {pointsEl}
@@ -6697,7 +6721,7 @@ export default function App() {
             </div>}
             {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230, ...tbFlip }}>
               {soon('✳', '필터')}
-              {soon('⤢', '확대 및 회전')}
+              <button data-testid="ctb-zoomrot" onClick={() => { setClipMenu(null); openZoomRot(); }}>⤢ 확대 및 회전</button>
               <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
               {soon('◐', '화면 전환')}
@@ -6770,6 +6794,14 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {zrPanel && <div className="vr-menu-bg" onMouseDown={() => setZrPanel(null)} />}
+          {zrPanel && <div className="vr-menu zr-panel" data-testid="zr-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>⤢ 확대 및 회전 · {zrPanel.gs.map((g) => 'G' + g).join(' ')}</b>
+            <label>확대 <input type="range" data-testid="zr-zoom" min={CEff.ZOOM.min} max={CEff.ZOOM.max} step={CEff.ZOOM.step} value={zrPanel.zoom} onChange={(e) => zrChange({ zoom: Number(e.target.value) })} /><span className="zr-v" data-testid="zr-zoom-v">{zrPanel.zoom}%</span></label>
+            <label>회전 <input type="range" data-testid="zr-rot" min={CEff.ROT.min} max={CEff.ROT.max} step={CEff.ROT.step} value={zrPanel.rot} onChange={(e) => zrChange({ rot: Number(e.target.value) })} /><span className="zr-v" data-testid="zr-rot-v">{zrPanel.rot}°</span></label>
+            <span className="meta">그림 가운데를 기준으로 합니다 · ① 칸에서 끌어 옮긴 자리는 그 자리 가운데 기준 · 회전하면 켄번스는 꺼집니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button className="ghost" data-testid="zr-reset" onClick={() => zrChange({ zoom: 100, rot: 0 })}>초기화</button><button data-testid="zr-close" onClick={() => setZrPanel(null)}>닫기</button></div>
+          </div>}
           {markerList && <div className="vr-menu-bg" onMouseDown={() => setMarkerList(null)} />}
           {markerList && (() => {
             const es = markerEntries();
@@ -6886,7 +6918,7 @@ export default function App() {
             </>}
             {clipCtx.sub === 'fx' && <>
               <Row icon="✳" label="필터" soon />
-              <Row icon="⤢" label="확대 및 회전" soon />
+              <Row icon="⤢" label="확대 및 회전" onClick={() => openZoomRot()} tid="cx-fx-zoomrot" />
               <Row icon="◐" label="화면 전환" soon />
               <Row icon="🔉" label="볼륨 조절" soon />
               <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
