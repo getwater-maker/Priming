@@ -19,6 +19,7 @@ const TABS = [
   ['structure', '📚', '구조·정보'], ['colophon', '©', '판권'], ['cover', '🎨', '표지·조판'], ['bookk', '📤', '등록·유통'],
   ['log', '📜', '로그'],   // 📜 로그는 탭 하나(로이 2026-10-16 「아래 로그 창 위치가 불편」) — 패널 아래 고정 로그 칸은 없앴다
 ];
+export const BOOK_TABS = TABS;   // 메뉴 줄(App)이 그린다 — 출판 모드의 탭은 메뉴 줄로 옮겼다(메뉴 줄 4단계)
 const TAB_ALIAS = { info: 'structure', layout: 'cover', overseas: 'bookk', ebook: 'bookk', jakkawa: 'bookk' };
 // 책 정보 탭 — [키, 이름, 필수?, 도움말]
 const INFO_FIELDS = [
@@ -178,6 +179,15 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
   // ── 왼쪽 메뉴 · 등록 점검(개인 편의값은 이 PC 브라우저에만 — 실패해도 화면은 정상) ──
   const [tab, setTabRaw] = useState(() => { try { const t = localStorage.getItem('bk-tab') || 'structure'; return TAB_ALIAS[t] || t; } catch (_) { return 'structure'; } });   // 옛 「전자책·작가와」 탭 → 부크크 전자책
   const setTab = (t0) => { const t = TAB_ALIAS[t0] || t0; setTabRaw(t); try { localStorage.setItem('bk-tab', t); } catch (_) {} };
+  useEffect(() => { const f = (e) => { if (e && e.detail) setTab(e.detail); }; window.addEventListener('bk-set-tab', f); return () => window.removeEventListener('bk-set-tab', f); }, []);   // 메뉴 줄의 탭 누름
+  const badgeRef = useRef({});
+  const bkSentRef = useRef('');
+  useEffect(() => {   // 메뉴 줄이 켜진 탭·미완 개수를 그린다(원고를 열기 전에도 loaded:false 로 알린다)
+    const detail = { tab, badge: badgeRef.current || {}, loaded };
+    const k = JSON.stringify(detail);
+    if (k !== bkSentRef.current) { bkSentRef.current = k; window.dispatchEvent(new CustomEvent('bk-state', { detail })); }
+  });
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('bk-state', { detail: null })), []);
   const confirmKey = 'bk-confirm:' + ((dto && dto.scriptPath) || '');
   const [confirmed, setConfirmed] = useState({});
   useEffect(() => {
@@ -828,6 +838,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     colophon: COLO_REQ.filter(([k]) => missSet.has(k)).length,
     bookk: RG.blocking(lists.bookk) + RG.blocking(lists.ebook),   // 종이책 + 전자책 막히는 필수 항목 합
   };
+  badgeRef.current = badge;   // 아래(조기 return 앞)의 알림 effect 가 읽는다
 
   // ── 작은 부품(함수로 호출 — 컴포넌트로 만들면 렌더마다 새로 마운트돼 입력칸 초점을 잃는다) ──
   // 🔢 ISBN · 발행일 상자(2026-10-06 로이 — 부크크 「판권지 수정 요청: 발행일·ISBN 을 고쳐 원고를 다시 보내라」) — 종이책·전자책 따로.
@@ -1494,14 +1505,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             </div>
           </div>
         )}
-        <nav className="bknav" data-testid="bk-nav">
-          {TABS.map(([id, ic, name]) => (
-            <button key={id} data-tab={id} className={'bktab' + (tab === id ? ' on' : '')} onClick={() => setTab(id)} title={name}>
-              <span className="bkti">{ic}</span><span>{name}</span>
-              {badge[id] > 0 ? <em className="bkcnt" title={`아직 끝나지 않은 필수 항목 ${badge[id]}개 — 탭을 열어 확인하세요`}>{badge[id]}</em> : null}
-            </button>
-          ))}
-        </nav>
+        {/* 탭 줄은 메뉴 줄로 옮겼다(Lab 메뉴 줄 4단계) — App 의 <nav data-testid="bk-nav"> 가 같은 일을 한다 */}
         <div className="bkstatus">
           총 <b>{dto.lastPages || '?'}쪽</b> · 책등 <b>{spread.spineMm}mm</b> · {dto.trimId}
           {dto.lastPages > 0 && dto.pagesSure === false ? <span className="meta" data-testid="bk-pages-provisional" title="미리보기가 알려 준 쪽수입니다 — 종이책을 만들면 실제 쪽수로 확정되고 책등·표지 치수를 다시 잽니다"> (미리보기 · 잠정)</span> : null}

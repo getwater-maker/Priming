@@ -288,6 +288,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
   const vidRows = imgRows.filter((r) => r.video);
   // 하나만 열려 있으면 탭과 상관없이 그것을 보여 준다(빈 화면을 만들지 않는다).
   const showTab = (rows.length && imgRows.length) ? tab : (imgRows.length ? 'img' : 'tts');
+  useEffect(() => { const f = (e) => { if (e && (e.detail === 'tts' || e.detail === 'img')) setTab(e.detail); }; window.addEventListener('rx-set-tab', f); return () => window.removeEventListener('rx-set-tab', f); }, []);
+  useEffect(() => { window.dispatchEvent(new CustomEvent('rx-state', { detail: { tab: showTab, nRows: rows.length, nImg: imgRows.length } })); return () => window.dispatchEvent(new CustomEvent('rx-state', { detail: null })); }, [showTab, rows.length, imgRows.length]);
 
   return (
     <div style={{ padding: '10px 14px' }}>
@@ -474,13 +476,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         </div>
       )}
 
-      {/* 음성·그림 표 — 둘 다 열려 있으면 탭으로 고른다. */}
-      {rows.length > 0 && imgRows.length > 0 && (
-        <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
-          <button className={showTab === 'tts' ? '' : 'ghost'} onClick={() => setTab('tts')}>🎤 음성 {rows.length}행</button>
-          <button className={showTab === 'img' ? '' : 'ghost'} onClick={() => setTab('img')}>🖼 그림 {imgRows.length}장</button>
-        </div>
-      )}
+      {/* 음성·그림 탭은 메뉴 줄로 옮겼다(Lab 메뉴 줄 4단계) — App 의 <nav data-testid="rx-nav"> */}
 
       {showTab === 'tts' && rows.length > 0 && (
         <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6 }}>

@@ -115,7 +115,10 @@ ${para}
 
     // 왼쪽 메뉴 — 5탭(구조·정보 · 판권 · 표지·조판 · 등록·유통 · 📜 로그 — 로그는 v0.9.55 에 아래 고정 칸에서 탭으로)
     const tabs = await win.locator('[data-testid=bk-nav] .bktab').count();
-    if (tabs !== 5) throw new Error('왼쪽 메뉴 탭 ' + tabs + '개 ≠ 5 (구조·정보 · 판권 · 표지·조판 · 등록·유통 · 로그)');
+    if (tabs !== 5) throw new Error('메뉴 줄 출판 탭 ' + tabs + '개 ≠ 5 (구조·정보 · 판권 · 표지·조판 · 등록·유통 · 로그)');
+    // 메뉴 줄 4단계 — 탭은 메뉴 줄에 있고 왼쪽 패널의 옛 탭 줄(.bknav)은 없다
+    if (await win.locator('.bknav').count() !== 0) throw new Error('옛 왼쪽 탭 줄(.bknav)이 아직 있다');
+    if (await win.locator('.menubar [data-testid=bk-nav] .bktab').count() !== 5) throw new Error('출판 탭이 메뉴 줄 안에 없다');
     if (await win.locator('[data-testid=bk-side] #logwrap').count() !== 0) throw new Error('로그 탭이 아닌데 왼쪽 패널에 로그가 있다(아래 고정 로그 칸은 없앴다)');
     const prevTab = await win.locator('[data-testid=bk-nav] .bktab.on').getAttribute('data-tab');
     await win.click('[data-tab=log]');

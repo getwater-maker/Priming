@@ -1925,3 +1925,9 @@ main .card h2{top:var(--work-top-height,0px)}
 .cf-homefont .cf-fontsel{width:132px;min-width:0}
 .cf-homefont select{height:30px}
 @media (max-width:1440px){ #body .ribbon [data-testid="home-to-format"] .rb-t{display:none} }
+/* 출판 모드 메뉴 줄(탭 5개가 메뉴 줄로 올라옴) — 1440px 이하에서 한 줄 유지 */
+@media (max-width:1440px){
+  .menubar .bktab .bkti{display:none}
+  .menubar .bktab{padding:6px 5px}
+  .menubar .bktab .bkcnt{margin-left:3px}
+}
