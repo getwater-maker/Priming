@@ -366,6 +366,23 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
     if (want) ok(res && res.video && n === 3 && lg.filter((l) => /잠시 막았습니다\(403\)/.test(l)).length === 2, '403 두 번 → 기다렸다 다시 → 세 번째에 받음');
     else ok(!res && /403/.test(err) && n === 3, '세 번 다 403 이면 그만두고 「잠시 막음」으로 알린다(무한 반복 안 함)');
   }
+  // 🔤 한글 파일 이름 — yt-dlp 2026.10.23 은 --encoding 없으면 CP949 로 내보낸다(2026-10-24 · 받은 mp3 를 못 찾던 사고)
+  console.log('\n[인코딩] --encoding utf-8 이 있어야 한글 이름을 찾는다');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "const o = a[a.indexOf('-o') + 1]; const dir = require('path').dirname(o);",
+    "const name = '년도 이야기 [kr1].mp3'; fs.writeFileSync(require('path').join(dir, name), 'audio');",
+    "const utf8 = a[a.indexOf('--encoding') + 1] === 'utf-8' && a.includes('--encoding');",
+    // CP949 「년」 = B3 E2 — UTF-8 로 읽으면 깨진다
+    "process.stdout.write(Buffer.concat([Buffer.from('__PRIMING_BASE__'), utf8 ? Buffer.from('년') : Buffer.from([0xB3, 0xE2]), Buffer.from('도 이야기 [kr1].webm\\n')]));",
+    "process.exit(0);",
+  ].join('\n'));
+  {
+    let res = null, err = '';
+    try { res = await MD.download('https://youtu.be/kr1', { tool, outDir: path.join(T, 'enc'), mode: 'audio', subs: false }); } catch (e) { err = e.message; }
+    ok(res && res.audio && /년도 이야기 \[kr1\]\.mp3$/.test(res.audio), `한글 이름 mp3 를 찾는다 ${err}`);
+    ok(/const YT_ENC_ARGS = \['--encoding', 'utf-8'\]/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8')), 'yt-dlp 실행에 --encoding utf-8');
+  }
   // 🧩 JS 실행기 — 버전을 모르거나 옛 yt-dlp 면 붙이지 않는다(--js-runtimes 를 모르는 판이 깨지지 않게)
   const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(!fs.readFileSync(callLog, 'utf8').includes('--js-runtimes'), '버전 없는 도구(가짜)에는 --js-runtimes 를 붙이지 않는다');

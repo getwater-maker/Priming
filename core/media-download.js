@@ -225,9 +225,12 @@ async function jsRuntimeArgs(tool) {
 }
 
 // ── 실행 ────────────────────────────────────────────────
+// 🔤 `--encoding utf-8` = 한글 파일 이름·오류를 UTF-8 로(v0.9.115) — yt-dlp 2026.10.23 부터 PYTHONIOENCODING 을 무시하고
+//   CP949 로 내보내 `--print` 파일 이름이 깨졌다 → 받은 mp3 를 못 찾고 「결과 파일을 찾지 못했습니다」(2026-10-24 실측)
+const YT_ENC_ARGS = ['--encoding', 'utf-8'];
 async function _spawnYt(tool, args, opts = {}) {
   const extra = await jsRuntimeArgs(tool);
-  return _spawnYtRaw(tool, [...extra, ...args], opts);
+  return _spawnYtRaw(tool, [...YT_ENC_ARGS, ...extra, ...args], opts);
 }
 function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
