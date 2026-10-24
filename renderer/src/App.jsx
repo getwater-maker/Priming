@@ -43,7 +43,7 @@ import BackupModal from './BackupModal.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
-import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
+import { CF, CaptionToolbar, CaptionFontBar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
 import { MENUS, MENU_ALIAS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
@@ -6182,7 +6182,7 @@ export default function App() {
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
             <button disabled={!loaded} data-testid="rb-tts-image" title="작업큐의 모든 대본을 TTS(음성) 먼저 만들고 이어서 이미지까지 만듭니다 — 이미 있는 음성·그림은 건너뜁니다 (비디오는 안 만듭니다)" onClick={() => runStageQueue('ttsimg')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS+이미지</span></button>
             <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            <button className="ghost" data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
+            <button data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
 
           </span>
             </>);
@@ -6222,7 +6222,7 @@ export default function App() {
                   <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
                 </>)}
             <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            <button className="ghost" data-testid="rb-stock-video" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 영상을 찾아 지금 그룹에 넣습니다" onClick={() => openStockFor('video')}><span className="rb-ic">🔎</span> <span className="rb-t">무료비디오</span></button>
+            <button data-testid="rb-stock-video" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 영상을 찾아 지금 그룹에 넣습니다" onClick={() => openStockFor('video')}><span className="rb-ic">🔎</span> <span className="rb-t">무료비디오</span></button>
           </span>
             </>);
   const ribFinish = () => (<>
@@ -6327,18 +6327,18 @@ export default function App() {
     setStatus(`ⓘ 작업 파일 「${dto.fileTitle || ''}」 — 그룹 ${groups} · 클립(문장) ${clips} · 음성 ${voiced}/${clips} · 그림 ${imgs}/${groups} · 채널 「${presetName || ''}」`);
   };
   const ribUndo = () => (<>
-    <button className="ghost" data-testid="rb-undo" disabled={!loaded} title="되돌리기 (Ctrl+Z)" onClick={() => runUndo(false, true)}><span className="rb-ic">↶</span> <span className="rb-t">되돌리기</span></button>
-    <button className="ghost" data-testid="rb-redo" disabled={!loaded} title="다시 실행 (Ctrl+Shift+Z)" onClick={() => runUndo(true, true)}><span className="rb-ic">↷</span> <span className="rb-t">다시실행</span></button>
+    <button data-testid="rb-undo" disabled={!loaded} title="되돌리기 (Ctrl+Z)" onClick={() => runUndo(false, true)}><span className="rb-ic">↶</span> <span className="rb-t">되돌리기</span></button>
+    <button data-testid="rb-redo" disabled={!loaded} title="다시 실행 (Ctrl+Shift+Z)" onClick={() => runUndo(true, true)}><span className="rb-ic">↷</span> <span className="rb-t">다시실행</span></button>
   </>);
   const ribClipboard = () => (<>
-    <button className="ghost" data-testid="rb-cut" disabled={!selOk} title="잘라내기 (Ctrl+X) — 고른 클립(글 + 음성)을 잘라 냅니다" onClick={() => clipCopy(true)}><span className="rb-ic">✂</span> <span className="rb-t">잘라내기</span></button>
-    <button className="ghost" data-testid="rb-copy" disabled={!selOk} title="복사하기 (Ctrl+C) — 고른 클립(글 + 음성)" onClick={() => clipCopy(false)}><span className="rb-ic">⧉</span> <span className="rb-t">복사하기</span></button>
-    <button className="ghost" data-testid="rb-paste" disabled={!selOk || !clipBoard} title={clipBoard ? '붙여넣기 (Ctrl+V) — 고른 클립 뒤에' : '붙여넣기 — 먼저 복사하거나 잘라내세요'} onClick={clipPaste}><span className="rb-ic">📋</span> <span className="rb-t">붙여넣기</span></button>
+    <button data-testid="rb-cut" disabled={!selOk} title="잘라내기 (Ctrl+X) — 고른 클립(글 + 음성)을 잘라 냅니다" onClick={() => clipCopy(true)}><span className="rb-ic">✂</span> <span className="rb-t">잘라내기</span></button>
+    <button data-testid="rb-copy" disabled={!selOk} title="복사하기 (Ctrl+C) — 고른 클립(글 + 음성)" onClick={() => clipCopy(false)}><span className="rb-ic">⧉</span> <span className="rb-t">복사하기</span></button>
+    <button data-testid="rb-paste" disabled={!selOk || !clipBoard} title={clipBoard ? '붙여넣기 (Ctrl+V) — 고른 클립 뒤에' : '붙여넣기 — 먼저 복사하거나 잘라내세요'} onClick={clipPaste}><span className="rb-ic">📋</span> <span className="rb-t">붙여넣기</span></button>
   </>);
   const ribClipOps = () => (<>
-    <button className="ghost" data-testid="rb-clip-merge" disabled={!selOk || (capSel && capSel.items.length < 2)} title="클립 합치기 — 고른 클립을 하나로(두 개 이상 고를 때)" onClick={clipMerge}><span className="rb-ic">⊟</span> <span className="rb-t">클립 합치기</span></button>
-    <button className="ghost" data-testid="rb-clip-split" disabled={!selOk} title="클립 나누기 — 고른 클립의 자막 칸을 열어 줍니다(나눌 자리에 커서를 놓고 Enter)" onClick={clipSplitHere}><span className="rb-ic">✂</span> <span className="rb-t">클립 나누기</span></button>
-    <button className="ghost" data-testid="rb-clip-quiet" disabled={!selOk} title="무음 구간 줄이기 — 고른 클립의 쉼을 최대 0.3초로(세부 값은 클립 우클릭 ▸ 무음 구간 줄이기)" onClick={() => clipQuietSet(0.3, false)}><span className="rb-ic">⇥</span> <span className="rb-t">무음 구간 줄이기</span></button>
+    <button data-testid="rb-clip-merge" disabled={!selOk || (capSel && capSel.items.length < 2)} title="클립 합치기 — 고른 클립을 하나로(두 개 이상 고를 때)" onClick={clipMerge}><span className="rb-ic">⊟</span> <span className="rb-t">클립 합치기</span></button>
+    <button data-testid="rb-clip-split" disabled={!selOk} title="클립 나누기 — 고른 클립의 자막 칸을 열어 줍니다(나눌 자리에 커서를 놓고 Enter)" onClick={clipSplitHere}><span className="rb-ic">✂</span> <span className="rb-t">클립 나누기</span></button>
+    <button data-testid="rb-clip-quiet" disabled={!selOk} title="무음 구간 줄이기 — 고른 클립의 쉼을 최대 0.3초로(세부 값은 클립 우클릭 ▸ 무음 구간 줄이기)" onClick={() => clipQuietSet(0.3, false)}><span className="rb-ic">⇥</span> <span className="rb-t">무음 구간 줄이기</span></button>
   </>);
   const ribEdit = (<span className="hgroup" data-testid="rib-edit"><span className="glabel">편집</span>
     {ribUndo()}
@@ -6354,10 +6354,10 @@ export default function App() {
     <span className="hdiv" />
     {ribClipOps()}
     <span className="hdiv" />
-    <button className="ghost soon" data-testid="rb-marker" title="마커 — 준비 중" onClick={() => clipSoon('마커')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
-    <button className="ghost soon" data-testid="rb-overwrite-voice" title="음성 덮어쓰기 — 준비 중" onClick={() => clipSoon('음성 덮어쓰기')}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
+    <button className="soon" data-testid="rb-marker" title="마커 — 준비 중" onClick={() => clipSoon('마커')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
+    <button className="soon" data-testid="rb-overwrite-voice" title="음성 덮어쓰기 — 준비 중" onClick={() => clipSoon('음성 덮어쓰기')}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
     <span className="hdiv" />
-    <button className="ghost" data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
+    <button data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
   </span>);
   const ribEffect = (<span className="hgroup" data-testid="rib-effect"><span className="glabel">효과</span>
     <span className="rb-stack" title="배속 효과 — 고른 클립이 든 문장의 음성을 빠르게·느리게(원본 음성은 그대로 · Ctrl+Z 한 번)">
@@ -6365,13 +6365,13 @@ export default function App() {
       <span style={{ display: 'flex', gap: 3 }}>{[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <button key={v} className="ghost" data-testid={'rb-speed-' + v} disabled={!selOk} onClick={() => clipSpeedSet(v)}>{v === 1 ? '1×' : v}</button>)}</span>
     </span>
     <span className="hdiv" />
-    <button className="ghost" data-testid="rb-fit-contain" disabled={!selOk} title="맞춤 — 고른 클립의 그림·영상을 화면에 맞춰 통째로 보이게" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}><span className="rb-ic">▣</span> <span className="rb-t">맞춤</span></button>
-    <button className="ghost" data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
+    <button data-testid="rb-fit-contain" disabled={!selOk} title="맞춤 — 고른 클립의 그림·영상을 화면에 맞춰 통째로 보이게" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}><span className="rb-ic">▣</span> <span className="rb-t">맞춤</span></button>
+    <button data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     {pointsEl}
-    <button className="ghost" data-testid="rb-help-settings" title="통합 설정 — API 키 · 서버 · 채널 연결 · 폴더 · 계정" onClick={() => openSettings(settingsTabForEngine())}><span className="rb-ic">⚙</span> <span className="rb-t">설정</span></button>
-    <button className="ghost" data-testid="rb-help-update" disabled={upd.busy} title="업데이트 확인 — 새 버전이 있으면 받아서 다시 시작합니다(작업 중이 아닐 때)" onClick={runUpdate}><span className="rb-ic">⟳</span> <span className="rb-t">업데이트</span></button>
+    <button data-testid="rb-help-settings" title="통합 설정 — API 키 · 서버 · 채널 연결 · 폴더 · 계정" onClick={() => openSettings(settingsTabForEngine())}><span className="rb-ic">⚙</span> <span className="rb-t">설정</span></button>
+    <button data-testid="rb-help-update" disabled={upd.busy} title="업데이트 확인 — 새 버전이 있으면 받아서 다시 시작합니다(작업 중이 아닐 때)" onClick={runUpdate}><span className="rb-ic">⟳</span> <span className="rb-t">업데이트</span></button>
     {ribGuide}
     {ribMonitor}
   </span>);
@@ -6382,13 +6382,20 @@ export default function App() {
     {splitBar}
     <span className="hgroup" data-testid="rib-caption"><span className="glabel">자막</span>
       {ribReaderBtn}
-      <button className="ghost" data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
+      <button data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
+      <button className="soon" data-testid="rb-clear-all-caps" title="전체 자막 지우기 — 준비 중" onClick={() => clipSoon('전체 자막 지우기')}><span className="rb-ic">▥</span> <span className="rb-t">전체 자막 지우기</span></button>
+      <button className="soon" data-testid="rb-ai-translate" title="AI 자막 번역 — 준비 중" onClick={() => clipSoon('AI 자막 번역')}><span className="rb-ic">🌐</span> <span className="rb-t">AI 자막 번역</span></button>
+      <button className="soon" data-testid="rb-ai-proof" title="AI 자막 교정 — 준비 중(지금은 🟥·🟨 문단 맞춤법 검사가 별도로 있습니다)" onClick={() => clipSoon('AI 자막 교정')}><span className="rb-ic">✓</span> <span className="rb-t">AI 자막 교정</span></button>
     </span>
   </>);
+  const ribHomeFont = () => (<span className="hgroup" data-testid="rib-home-font">
+    <CaptionFontBar fmt={capSelFmt()} active={!!capSel} onPatch={(p) => applyCapFmt(p)} />
+    <button data-testid="home-to-format" title="[서식] 메뉴로 이동 — 테두리·배경·형광펜·그림자·정렬·효과 등 자세한 서식" onClick={() => pickMenu('format')}><span className="rb-ic">⋯</span> <span className="rb-t">[서식] 메뉴로 이동</span></button>
+  </span>);
   const ribFileVrew = () => (<span className="hgroup" data-testid="rib-file-vrew">
-    <button className="ghost" data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
-    <button className="ghost" data-testid="rb-backup" disabled={!loaded} title="백업에서 되살리기 — 대본마다 10분 간격으로 남긴 백업에서 고른 시각으로" onClick={() => setBackupDlg(true)}><span className="rb-ic">🕘</span> <span className="rb-t">백업</span></button>
-    <button className="ghost" data-testid="rb-fileinfo" disabled={!loaded} title="작업 파일 정보 — 그룹·클립·음성·그림 개수" onClick={showFileInfo}><span className="rb-ic">ⓘ</span> <span className="rb-t">파일 정보</span></button>
+    <button data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
+    <button data-testid="rb-backup" disabled={!loaded} title="백업에서 되살리기 — 대본마다 10분 간격으로 남긴 백업에서 고른 시각으로" onClick={() => setBackupDlg(true)}><span className="rb-ic">🕘</span> <span className="rb-t">백업</span></button>
+    <button data-testid="rb-fileinfo" disabled={!loaded} title="작업 파일 정보 — 그룹·클립·음성·그림 개수" onClick={showFileInfo}><span className="rb-ic">ⓘ</span> <span className="rb-t">파일 정보</span></button>
   </span>);
   const ribMakeExtra = (<span className="hgroup" data-testid="rib-make-extra">{ribDl}</span>);
   const ribMakeSub = (<span className="hgroup make-sub" data-testid="rib-make-sub">
@@ -6499,7 +6506,7 @@ export default function App() {
         {!noProduction && (
           <div className="ribbon" data-testid="ribbon" data-menu-on={menu} onWheel={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY; }}>
             {menu === 'file' && (<>{ribOpen(true)}{ribFileVrew()}{ribFinish()}</>)}
-            {menu === 'home' && (<>{ribOpen()}<span className="hdiv" />{ribUndo()}<span className="hdiv" />{ribClipboard()}<span className="hdiv" />{ribClipOps()}</>)}
+            {menu === 'home' && (<>{ribOpen()}<span className="hgroup" data-testid="rib-home-undo">{ribUndo()}</span><span className="hgroup" data-testid="rib-home-clip">{ribClipboard()}</span><span className="hgroup" data-testid="rib-home-ops">{ribClipOps()}</span>{ribHomeFont()}</>)}
             {menu === 'edit' && (<>{ribEdit}</>)}
             {menu === 'caption' && (<>{ribCaption()}</>)}
             {menu === 'format' && (<>{ribFormat()}</>)}

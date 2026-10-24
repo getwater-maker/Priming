@@ -6,6 +6,9 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+// 🧪 E2E(PM_UI_SMOKE=1)는 만든 .vrew·MP4·폴더를 진짜로 열지 않는다 — 시험이 만든 임시 .vrew 가 설치된 Vrew 를 수십 개 띄워 오류 창이 쌓였다(2026-10-24).
+//   시험이 shell.openPath 를 직접 바꿔 끼우면(makeall-dry 의 호출 기록 등) 그쪽이 이긴다.
+if (process.env.PM_UI_SMOKE === '1') { shell.openPath = async () => ''; }
 const P = require('./core/pipeline');
 const { writeTextAtomicSync: writeScriptAtomic } = require('./core/atomic-write');   // 대본(.md) 덮어쓰기는 전부 이것(임시 파일 → rename)
 const TtsEngines = require('./tts/tts-engines'); // 🔊 헤더 「음성 엔진」(v0.6.67) — 유료 API 엔진 선택

@@ -32,7 +32,7 @@ fs.writeFileSync(MD, ['# 메뉴줄 시험', '', '## 장', '### ① 첫 장면', 
     ok(await win.locator('.menus button.on').innerText() === '홈', '기본 탭 = 홈');
 
     console.log('\n[2] 탭마다 리본이 바뀌고 한 줄에 들어간다(1366px)');
-    const expect = { file: ['open-after-make', 'rb-new', 'rb-backup', 'rb-fileinfo'], home: ['today-scripts', 'rb-undo', 'rb-redo', 'rb-cut', 'rb-copy', 'rb-paste', 'rb-clip-merge', 'rb-clip-split', 'rb-clip-quiet'], edit: ['rb-undo', 'rb-clip-select', 'rb-cut', 'rb-clip-split', 'rb-clip-merge', 'rb-clip-quiet', 'rb-marker', 'rb-overwrite-voice', 'rb-find-edit'], caption: ['reader-open', 'rb-copy-all-caps'], format: [], insert: ['ins-image', 'ins-logo'], voice: ['tts-engine-btn', 'relink-work', 'tts-cost'], template: ['rib-template'], effect: ['rb-speed-1.5', 'rb-fit-contain'], make: ['make-sub-image', 'urldl-open'], help: ['rb-help-settings', 'rb-help-update', 'guide-open-btn', 'monitor-off'] };
+    const expect = { file: ['open-after-make', 'rb-new', 'rb-backup', 'rb-fileinfo'], home: ['today-scripts', 'rb-undo', 'rb-redo', 'rb-cut', 'rb-copy', 'rb-paste', 'rb-clip-merge', 'rb-clip-split', 'rb-clip-quiet', 'home-font', 'home-size', 'home-to-format'], edit: ['rb-undo', 'rb-clip-select', 'rb-cut', 'rb-clip-split', 'rb-clip-merge', 'rb-clip-quiet', 'rb-marker', 'rb-overwrite-voice', 'rb-find-edit'], caption: ['reader-open', 'rb-copy-all-caps', 'rb-clear-all-caps', 'rb-ai-translate', 'rb-ai-proof'], format: [], insert: ['ins-image', 'ins-logo'], voice: ['tts-engine-btn', 'relink-work', 'tts-cost'], template: ['rib-template'], effect: ['rb-speed-1.5', 'rb-fit-contain'], make: ['make-sub-image', 'urldl-open'], help: ['rb-help-settings', 'rb-help-update', 'guide-open-btn', 'monitor-off'] };
     const seen = new Set();
     for (const id of Object.keys(expect)) {
       await win.click(`.menus button[data-menu="${id}"]`); await win.waitForTimeout(150);
@@ -77,6 +77,20 @@ fs.writeFileSync(MD, ['# 메뉴줄 시험', '', '## 장', '### ① 첫 장면', 
     ok(await win.evaluate(() => document.body.innerText.includes('나눌 자리에 커서')), '클립 나누기 = 자막 칸 열림 + 안내');
     await win.keyboard.press('Escape');
 
+    console.log('\n[6] 홈의 글꼴·크기·글자색 — 고른 자막에 적용 · [서식] 메뉴로 이동(3단계)');
+    await win.click('.menus button[data-menu="home"]'); await win.waitForTimeout(150);
+    ok(await win.locator('[data-testid="home-to-format"]').count() === 1, '[서식] 메뉴로 이동 단추');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(150);
+    await win.locator('.sent[data-ln="1"] .clip-chk').first().click(); await win.waitForTimeout(300);
+    await win.click('.menus button[data-menu="home"]'); await win.waitForTimeout(200);
+    const sizeSel = win.locator('[data-testid="home-size"]');
+    ok(!(await sizeSel.isDisabled()), '자막을 고르면 홈의 글자 크기가 켜진다');
+    await sizeSel.selectOption('150'); await win.waitForTimeout(800);
+    await win.click('[data-testid="home-to-format"]'); await win.waitForTimeout(250);
+    ok((await win.locator('.menus button.on').innerText()) === '서식', '[서식] 메뉴로 이동 → 서식 탭');
+    ok(await win.locator('.ribbon .cf-bar select[title="글자 크기"]').inputValue() === '150', '홈에서 바꾼 크기 150 이 서식 탭에도 보인다');
+    const order = await win.evaluate(() => [...document.querySelectorAll('.ribbon .cf-format-row')][0].children.length ? [...document.querySelectorAll('.ribbon .cf-format-row')][0].innerText.replace(/\s+/g, ' ').slice(0, 40) : '');
+    ok(/^⌫ 서식 지우기/.test(order), '서식 탭 첫 줄은 「서식 지우기」부터(Vrew 순서): ' + order);
     ok(errors.length === 0, '화면 오류 없음 ' + errors.join(' | ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외 ' + (e && e.stack || e)); }
   finally { await app.close().catch(() => {}); try { fs.rmSync(MD, { force: true }); } catch {} }

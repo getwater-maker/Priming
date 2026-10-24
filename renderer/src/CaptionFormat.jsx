@@ -466,14 +466,14 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
       <div className="cf-lines">
       <fieldset className="cf-ctrls" disabled={!active}>
         <div className="cf-format-row">
-      <span className="cf-sel" data-testid="cf-sel">{active ? `✏ ${label}` : '🎨 자막 서식'}</span>
-      {!active && <span className="cf-hint" data-testid="cf-hint">자막 줄 번호(01 |)를 누르거나 글자를 드래그하세요 · 지금 보이는 값 = 채널 기본</span>}
-        <ScopeBtn scope={scope} onScope={onScope} />
         <button className="ghost" title="서식 지우기 — 채널 기본 서식으로 되돌립니다(위치·정렬 포함)" onClick={onClear}>⌫ 서식 지우기</button>
         <select className="cf-savedsel" value="" title="저장된 서식 적용" onChange={(e) => { const s = saved.find((x) => x.id === e.target.value); if (s) onPatch(s.fmt); }}>
           <option value="">저장된 서식 ▾</option>
           {saved.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+      <span className="cf-sel" data-testid="cf-sel">{active ? `✏ ${label}` : '🎨 자막 서식'}</span>
+      {!active && <span className="cf-hint" data-testid="cf-hint">자막 줄 번호(01 |)를 누르거나 글자를 드래그하세요 · 지금 보이는 값 = 채널 기본</span>}
+        <ScopeBtn scope={scope} onScope={onScope} />
         <span className="cf-div" />
         <Toggle on={f.bold} onChange={(v) => onPatch({ bold: v })} title="굵게"><b>B</b></Toggle>
         <Toggle on={f.italic} onChange={(v) => onPatch({ italic: v })} title="기울임"><i>I</i></Toggle>
@@ -515,6 +515,26 @@ export function CaptionToolbar({ fmt, pos, active = true, onPatch, onClear, onPa
       {/* ✕(선택 해제) 는 뺐다 — 툴바가 늘 떠 있으니 Esc · 다른 곳 누르기로 충분하다(로이 2026-09-25) */}
       {active && onApplyAll && <button className="ghost cf-applyall" title="이 줄의 서식을 대본의 모든 자막에 적용 — 한 줄을 꾸며 보고 마음에 들면 전체로 (Ctrl+Z 로 되돌리기)" onClick={onApplyAll}>⤢ 전체에 적용</button>}
     </div>
+  );
+}
+
+/**
+ * 🧭 홈 탭의 글꼴·크기·글자색(Vrew 홈 항목) — 서식 막대와 **같은 onPatch** 로 고른 클립에 얹는다. 고른 게 없으면 꺼진다.
+ */
+export function CaptionFontBar({ fmt, active, onPatch }) {
+  const f = fmt || CF.normFmt({});
+  const { fonts } = useCaptionFonts();
+  return (
+    <fieldset className="cf-homefont" data-testid="cf-homefont" disabled={!active} onMouseDown={(e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'INPUT') e.preventDefault(); }}>
+      <select className="cf-fontsel" data-testid="home-font" value={f.font} title={active ? '글꼴 — 고른 자막에' : '글꼴 — 자막을 먼저 고르세요(줄 번호 · 글자 드래그)'} style={{ fontFamily: fontCss(f.font).family }} onChange={(e) => onPatch({ font: e.target.value })}>
+        {!fonts.some((x) => x.vrewName === f.font) && <option value={f.font}>{fontLabel(fonts, f.font)}</option>}
+        {fonts.map((x) => <option key={x.vrewName} value={x.vrewName}>{x.label} {x.weight}</option>)}
+      </select>
+      <select data-testid="home-size" value={String(f.size || 100)} title={active ? '글자 크기' : '글자 크기 — 자막을 먼저 고르세요'} onChange={(e) => onPatch({ size: Number(e.target.value) })}>
+        {[...new Set([...SIZES, Number(f.size || 100)])].sort((x, y) => x - y).map((v) => <option key={v} value={String(v)}>{v}</option>)}
+      </select>
+      <label className="cf-cbtn" title="글자색"><span style={{ color: f.fontColor, WebkitTextStroke: '0.5px #555' }}>A</span><Color value={f.fontColor} onChange={(v) => onPatch({ fontColor: v })} /></label>
+    </fieldset>
   );
 }
 

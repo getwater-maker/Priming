@@ -1920,3 +1920,8 @@ main .card h2{top:var(--work-top-height,0px)}
 .ribbon .seg-v button{padding:4px 8px;font-size:12px;white-space:nowrap;border:1px solid var(--accent);border-radius:var(--r-md)}
 .ribbon .seg-v button.on{background:var(--accent);color:var(--fg-ffffff)}
 @media (max-width:1440px){ .ribbon .make-sub{min-width:84px;width:84px} }
+/* 홈 탭 글꼴·크기·글자색(Vrew 홈 항목) — 폭이 좁아도 한 줄 */
+.cf-homefont{display:flex;align-items:center;gap:6px;border:0;margin:0;padding:0;min-width:0}
+.cf-homefont .cf-fontsel{width:132px;min-width:0}
+.cf-homefont select{height:30px}
+@media (max-width:1440px){ #body .ribbon [data-testid="home-to-format"] .rb-t{display:none} }
