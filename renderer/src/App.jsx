@@ -8,6 +8,7 @@ import { mcImageUnit, mcVideoUnit, mcCostText } from './lib/mediaCost.js';
 import ytChapters from '../../core/yt-chapters.js';
 import VLook from '../../core/visual-look.js';
 import KB from '../../core/ken-burns.js';
+import WA from '../../core/word-align.js';   // 🔤 어절 경계 → 줄 시작(재생이 .vrew 와 같은 자리에서 자막을 바꾼다)
 import OL from '../../core/overlay-layers.js';   // 🏷 로고 켜기·자리·상자 = .vrew 빌드와 같은 함수(effLogo · posOfLogo · logoBox · chanLogoPos)
 // 🎞 켄번스 CSS = core/ken-burns 표에서 만든다(.vrew 빌더와 같은 표 · 옛 styles.css 손글씨 kb0~kb11 대신 · Lab 차이표 #12)
 (() => { try { if (typeof document === 'undefined' || document.getElementById('kb-css')) return; const el = document.createElement('style'); el.id = 'kb-css'; el.textContent = KB.patternCss(); document.head.appendChild(el); } catch (_) {} })();
@@ -3623,7 +3624,7 @@ export default function App() {
       aiPos: (p.aiNotice && p.aiNotice.pos && typeof p.aiNotice.pos === 'object') ? p.aiNotice.pos : null,
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
-      quietMaxSec: p.quietMaxSec != null ? p.quietMaxSec : 0, quietEdge: !!p.quietEdge,   // ✂ 쉼 줄이기(Lab) — ⚠ 안 실으면 저장 때 지워진다
+      quietMaxSec: p.quietMaxSec != null ? p.quietMaxSec : 0, quietEdge: !!p.quietEdge, wordAlign: !!p.wordAlign,   // ✂ 쉼 줄이기(Lab) — ⚠ 안 실으면 저장 때 지워진다
       // 🎭 화자별 목소리 [{name, voice}] — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       speakers: Array.isArray(p.speakers) ? p.speakers.map((r) => ({ name: r.name || '', voice: r.voice || '' }))
         : (p.speakers && typeof p.speakers === 'object' ? Object.keys(p.speakers).map((k) => ({ name: k, voice: p.speakers[k] })) : []),
@@ -4118,7 +4119,7 @@ export default function App() {
       presetPrompt: ch.presetPrompt || '',
       language: ch.language || 'ko',
       silenceSec: numOr(ch.silenceSec, 0),
-      quietMaxSec: Math.max(0, Math.min(3, numOr(ch.quietMaxSec, 0))), quietEdge: !!ch.quietEdge,   // ✂ 쉼 줄이기(Lab)
+      quietMaxSec: Math.max(0, Math.min(3, numOr(ch.quietMaxSec, 0))), quietEdge: !!ch.quietEdge, wordAlign: !!ch.wordAlign,   // ✂ 쉼 줄이기 · 🔤 단어 자리 맞추기(Lab)
       bgmOn: !!ch.bgmOn, bgmPath: (ch.bgmPath || '').trim(), bgmVolume: Math.max(0, Math.min(100, numOr(ch.bgmVolume, 15))),   // 🎵 배경음악
       logoOn: !!ch.logoOn, logoPath: (ch.logoPath || '').trim(), logoSize: Math.max(4, Math.min(40, numOr(ch.logoSize, 12))),   // 🏷 채널 로고
       kbSeg: VLook.normKbSeg(ch.kbSeg),   // 🎞 채널 기본 켄번스 구간 — ⚠ 안 실으면 저장할 때 지워진다
@@ -4764,16 +4765,19 @@ export default function App() {
     const PLw = where ? linesMap.get(where.shortsNum) : null;
     const wLines = PLw ? (PLw.bySent.get(where.groupNum + ':' + where.sentIdx) || []) : [];
     const total = clips.reduce((a, c) => a + Math.max(1, mLen(c)), 0) || 1;
+    // 🔤 정렬이 있으면(DTO wb = 어절 경계) 이 화면의 줄 구분으로 core/word-align.offsetsFor — .vrew 와 같은 자리로 줄 시간을 나눈다 · 없으면 예전 글자 비례
+    const _lo = s && Array.isArray(s.wb) && clips.length > 1 && durMs > 0 ? WA.offsetsFor(String(s.text || ''), s.wb, CF.lineRanges(String(s.text || ''), clips), durMs / 1000) : null;
+    const _fr = (i) => (_lo ? (_lo[i + 1] - _lo[i]) / (durMs / 1000) : (Math.max(1, mLen(clips[i])) / total));
     // 🎨 서식·효과 — 채널 기본 + 문장 덮어쓰기(core/caption-format)를 그대로 그리고, 효과는 core/caption-anim 로 움직인다(MP4 와 같은 키프레임)
     const text = s ? String(s.text || '') : '';
     const ranges = s ? CF.lineRanges(text, clips) : null;
     const base = CF.normFmt(capBase); base.size = capBase.size;
     const i0 = Math.max(0, startLi || 0);
-    let elapsed = clips.slice(0, i0).reduce((a, c) => a + durMs * (Math.max(1, mLen(c)) / total), 0);
+    let elapsed = clips.slice(0, i0).reduce((a, c, k) => a + durMs * _fr(k), 0);
     for (let i = i0; i < clips.length; i++) {
       const cl = clips[i];
       if (stale(_g)) return;
-      const d = Math.max(250, durMs * (Math.max(1, mLen(cl)) / total));
+      const d = Math.max(250, durMs * _fr(i));
       // ➕ 클립 단위 삽입 — 문장 한가운데 줄에서 그림·소리가 바뀔 수 있다(첫 줄은 playCut 이 이미 깔았다)
       if (vis && ranges && i > i0) {
         if (lastVisRef.current !== visKeyAt(vis.c, vis.pr, vis.si, ranges[i])) setVisual(vis.c, vis.pr, vis.si, elapsed / 1000, ranges[i]);
@@ -6962,8 +6966,9 @@ export default function App() {
                     <Hint>문장을 읽고 난 뒤 넣는 무음(초). 모델이 이미 문장마다 0.35초를 붙이므로 실제 문장 간격은 여기에 0.35초가 더해집니다. 배속과 무관하게 넣은 값 그대로 붙습니다. 0 = 사용 안 함, 권장 0.5~1.5초. ⚠ 값을 바꾸면 그 채널 음성이 전량 다시 만들어집니다.</Hint></div>
                   <div className="col" data-testid="ch-quiet"><div className="crow stack"><span className="l">쉼 줄이기 (초)</span>
                     <input className="n" type="number" step="0.05" min="0" max="3" value={ch.quietMaxSec} onChange={(e) => setCh({ ...ch, quietMaxSec: e.target.value })} />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!ch.quietEdge} onChange={(e) => setCh({ ...ch, quietEdge: e.target.checked })} /><span className="meta">앞뒤 여백도</span></label></div>
-                    <Hint>문장 안에서 이 길이보다 긴 쉼을 이 길이로 줄입니다(Vrew 「무음 구간 줄이기」). 0 = 끔, 권장 0.3~0.5초. 「앞뒤 여백도」를 켜면 모델이 문장 앞뒤에 붙이는 여백(약 0.35초)도 0.05초로 줄입니다(「문장무음」은 그대로). 원래 음성 파일은 그대로 두고 줄인 사본을 쓰므로 0 으로 돌리면 원래 음성으로 돌아갑니다. 이미 만든 음성에도 다음 음성 변환·⚡ 만들기 때 적용됩니다.</Hint></div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!ch.quietEdge} onChange={(e) => setCh({ ...ch, quietEdge: e.target.checked })} /><span className="meta">앞뒤 여백도</span></label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} data-testid="ch-wordalign" checked={!!ch.wordAlign} onChange={(e) => setCh({ ...ch, wordAlign: e.target.checked })} /><span className="meta">단어 자리 맞추기</span></label></div>
+                    <Hint>문장 안에서 이 길이보다 긴 쉼을 이 길이로 줄입니다(Vrew 「무음 구간 줄이기」). 0 = 끔, 권장 0.3~0.5초. 「앞뒤 여백도」를 켜면 모델이 문장 앞뒤에 붙이는 여백(약 0.35초)도 0.05초로 줄입니다(「문장무음」은 그대로). 🔤 「단어 자리 맞추기」(한국어)를 켜면 자막이 바뀌는 자리와 .vrew 단어 시각을 글자 수 비례 대신 **소리의 쉼·골짜기**에 놓습니다 — 「문장무음」이 길수록 지금 방식은 뒤쪽 자막이 늦게 바뀝니다(0.8초면 평균 0.26초). 꺼 두면 예전과 한 글자도 다르지 않습니다. 원래 음성 파일은 그대로 두고 줄인 사본을 쓰므로 0 으로 돌리면 원래 음성으로 돌아갑니다. 이미 만든 음성에도 다음 음성 변환·⚡ 만들기 때 적용됩니다.</Hint></div>
                   <div className="col"><div className="crow stack"><span className="l">음량 맞추기</span>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <input type="checkbox" style={{ width: 'auto' }} checked={ch.ttsNormalize !== false}

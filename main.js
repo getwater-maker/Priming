@@ -1902,6 +1902,7 @@ async function _openScriptEntries(entries) {
       //   그 상태로 「만들기」를 누르면 나머지 대본은 presetName=null → getPreset(null) = **기본 채널**로
       //   합성돼 **엉뚱한 목소리**가 나갔다(고전서재 대본이 04_역사이야기 목소리·seed 5697 로 나감).
       addItem(S.parsed, S.scriptPath, S.outRoot, settings);
+      wordAlignKick();   // 🔤 (켜져 있으면) 열자마자 정렬이 빈 문장을 맞춘다
       _genBackup(scriptPath, null, 'open', { minGapMs: 0 });   // 🕘 열 때 한 세대 — 이번에 고치기 전 상태(직전 세대와 같으면 건너뜀)
       log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
       if (restoreNote) log(restoreNote);
@@ -6989,7 +6990,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7018,9 +7019,30 @@ function syncSnapshotNow() { try { flushAutoSave(); } catch (_) {} }
 // ⚡ 응답으로 DTO 를 돌려주는 편집 명령용 — 화면에 DTO 를 **밀어 보내지 않는다**(화면은 응답으로 한 번만 받는다 · v0.5.95 · 같은 DTO 두 번 = 903줄 두 번 다시 그리기 ≈ 0.5초).
 //   자동저장만 예약한다(syncSnapshotNow 를 부르는 곳은 그것으로 즉시 쓴다).
 function dtoByReply() { scheduleAutoSave(); }
+// 🔤 단어 시각 정렬 자동 맞춤(Lab · core/word-align) — 채널 wordAlign 이 켜져 있고 음성은 있는데 정렬이 없거나 어긋난 문장(글·음성을 고친 뒤 · 처음 켠 뒤)을 잠시 뒤 맞춘다.
+//   ⚠ DTO 를 밀어도 scheduleAutoSave 를 다시 부르지 않는다(서로 끝없이 부르지 않게) — 저장은 flushAutoSave 로.
+let _waTimer = null;
+function wordAlignKick() {
+  if (S.mode !== 'longform' || !S.parsed || S.parsed.kind === 'book') return;
+  if (_waTimer) clearTimeout(_waTimer);
+  _waTimer = setTimeout(() => { _waTimer = null; wordAlignTick().catch((e) => logToFile('⚠ 단어 시각 맞춤 오류: ' + e.message)); }, 1200);
+}
+async function wordAlignTick() {
+  const parsed = S.parsed;
+  if (!parsed || parsed.kind === 'book' || S.mode !== 'longform') return;
+  const it = activeItem();
+  const preset = resolvePreset((it && it.settings && it.settings.presetName) || null);
+  if (!(preset && preset.wordAlign)) return;
+  const PASS = require('./core/word-align-pass');
+  const need = (parsed.projects || []).flatMap((pr) => pr.sentences || []).filter((s) => PASS.needs(s));
+  if (!need.length) return;
+  const r = await PASS.ensureSentences(need, preset, { ffmpegPath: require('./core/media-utils').getFfmpegPath() });
+  if (r.aligned && S.parsed === parsed) { pushDtoUpdate(); flushAutoSave(); }
+}
 function scheduleAutoSave() {
   if (!S.parsed) return;
   capMarksKick();   // ✂🤖 데이터가 바뀌면(대본 열기·문장 고치기) 끊어 읽기도 — 디바운스 · 기억에 있으면 붙이기만
+  wordAlignKick();   // 🔤 채널 wordAlign 이 켜져 있으면 음성이 바뀐 문장의 어절 경계를 다시 맞춘다(디바운스)
   const now = Date.now();
   const A = _asW(), wk = WORLD.key();
   if (!A.since) A.since = now;
@@ -7187,6 +7209,7 @@ function projectsFromSnapshot(snap) {
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath) s.backcheck = ss.bc;   // 🔎 역대조 결과(그 음성 파일에 대한 것일 때만)
         if (ss.q && ss.q.out && ss.q.out === s.ttsAudioPath) s.quiet = ss.q;   // ✂ 쉼 줄인 사본이면 원본을 기억(끄면 원본으로)
         if (ss.cs) s.clipSpeed = ss.cs;   // ⏩ 클립 배속
+        if (ss.wt) s.wt = ss.wt;   // 🔤 단어 시각 정렬(열쇠 = 음성 경로·길이·글 — 맞지 않으면 쓰이지 않는다)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
@@ -7289,6 +7312,7 @@ function overlaySnapshot(parsed, snap) {
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; if (ss.q && ss.q.out === ss.ttsAudioPath) s.quiet = ss.q; }
         if (ss.cs && ss.text === s.text) s.clipSpeed = ss.cs;   // ⏩ 클립 배속(같은 문장일 때만)
+        if (ss.wt && ss.text === s.text) s.wt = ss.wt;   // 🔤 단어 시각 정렬(같은 문장일 때만 — 열쇠가 다시 걸러 준다)
       });
     }
   }

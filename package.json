@@ -46,6 +46,7 @@
     "test:makeall": "node test/makeall-dry.smoke.js",
     "test:backup": "node test/gen-backup.test.js && node test/backup-ui.smoke.js",
     "test:pausepv": "node test/pause-preview.smoke.js",
+    "test:walign": "node test/word-align.test.js && node test/word-align-ui.smoke.js",
     "test:logopv": "node test/logo-preview.smoke.js",
     "test:capgeom": "node test/caption-geom.test.js",
     "test:kbpv": "node test/kbseg.test.js && node test/kb-preview.smoke.js",

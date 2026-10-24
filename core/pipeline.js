@@ -142,6 +142,7 @@ function toDTO(parseResult) {
               hn: require('./clip-history').countOf(s) || 0,
               roy: (pr._roy && pr._roy.bySid[s.id]) || null,   // 🟥·🟨 표시 {mid, k:'exp'|'int', st, first}   // 🕘 이 문장을 고친 횟수(이력 버튼 배지)
               // 브루 클립 단위(모드별 자막 글자수/쉼표) + 이어지는 넘버링
+              wb: (() => { try { const b = require('./word-align').validBounds(s); return b ? b.map((x) => Math.round(x * 1000) / 1000) : null; } catch (_) { return null; } })(),   // 🔤 정렬한 어절 경계(문장 음성 시작 기준 초 · 어절 수+1개 · 유효할 때만) — 줄 구분이 쓰는 쪽마다 달라 줄 경계는 화면이 같은 core/word-align.offsetsFor 로 계산한다
               lines: splitCaptionLines(s.text || '', capChars, s.capBreaks, s.capMarks).map((t) => ({ n: ++capN, text: t })),
             })),
             groupDurationSec: sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0) || null,
@@ -661,15 +662,27 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
 // ✂ 쉼 줄이기(Lab · core/quiet-trim) — 문장들을 채널 설정(quietMaxSec·quietEdge)에 맞춘다(끄면 원본으로).
 //   TTS 끝(fillTtsList)과 .vrew 직전(main 4단계·export-vrew)에서 부른다 — 설정을 TTS 뒤에 바꿔도 출력에 맞게.
 async function quietPass(sentences, preset, workDir, onLine, abortSignal) {
+  let qr = null;
   try {
     const QT = require('./quiet-trim');
     const key = QT.keyOf(preset);
-    if (!key && !(sentences || []).some((x) => x && (x.quiet || QT.normSpeed(x.clipSpeed) !== 1))) return null;
-    const r = await QT.ensureSentences(sentences, preset, workDir, { ffmpegPath, claimPath, onLine, abortSignal });
-    if (onLine && r.changed) onLine(`✂ 음성 사본 맞춤 — 문장 ${r.changed}개${key ? ` · 쉼 ${r.cut}곳 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : ''}${r.sped ? ` · ⏩ 클립 배속 ${r.sped}개` : ''}${r.restored ? ` · 원래 음성으로 ${r.restored}개` : ''} · 길이 ${r.removedSec >= 0 ? '−' : '+'}${Math.abs(r.removedSec).toFixed(1)}초`);
-    if (onLine && r.failed) onLine(`⚠ 쉼 줄이기 — ${r.failed}개 문장은 원래 음성 그대로입니다(읽기 실패)`);
-    return r;
-  } catch (e) { if (onLine) onLine('⚠ 쉼 줄이기 실패: ' + e.message); return null; }
+    if (key || (sentences || []).some((x) => x && (x.quiet || QT.normSpeed(x.clipSpeed) !== 1))) {
+      const r = await QT.ensureSentences(sentences, preset, workDir, { ffmpegPath, claimPath, onLine, abortSignal });
+      qr = r;
+      if (onLine && r.changed) onLine(`✂ 음성 사본 맞춤 — 문장 ${r.changed}개${key ? ` · 쉼 ${r.cut}곳 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : ''}${r.sped ? ` · ⏩ 클립 배속 ${r.sped}개` : ''}${r.restored ? ` · 원래 음성으로 ${r.restored}개` : ''} · 길이 ${r.removedSec >= 0 ? '−' : '+'}${Math.abs(r.removedSec).toFixed(1)}초`);
+      if (onLine && r.failed) onLine(`⚠ 쉼 줄이기 — ${r.failed}개 문장은 원래 음성 그대로입니다(읽기 실패)`);
+    }
+  } catch (e) { if (onLine) onLine('⚠ 쉼 줄이기 실패: ' + e.message); }
+  // 🔤 단어 시각 정렬(채널 wordAlign · core/word-align) — **최종 음성**(쉼 줄이기·배속 뒤) 기준이라 반드시 위 단계 다음에
+  try {
+    if ((preset && preset.wordAlign) || (sentences || []).some((x) => x && x.wt)) {
+      const wr = await require('./word-align-pass').ensureSentences(sentences, preset, { ffmpegPath, onLine, abortSignal });
+      if (onLine && wr.aligned) onLine(`🔤 단어 시각 맞춤 — 문장 ${wr.aligned}개(소리의 쉼·골짜기에 어절 경계 · 자막·.vrew 단어가 같은 자리)`);
+      if (onLine && wr.failed) onLine(`⚠ 단어 시각 — ${wr.failed}개 문장은 소리를 읽지 못해 글자 비례 그대로입니다`);
+      qr = qr || wr;
+    }
+  } catch (e) { if (onLine) onLine('⚠ 단어 시각 맞춤 실패: ' + e.message); }
+  return qr;
 }
 
 // 채널의 화자 → 참조음성 표. 저장 형태는 [{name, voice}](화면 순서) — 옛 객체 형태도 받는다. 빈 목소리는 뺀다.
@@ -795,7 +808,8 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
       padded.set(s.id, { ttsAudioPath: out, ttsDurationSec: s.ttsDurationSec + sec });
     }
     if (logger) logger(`⏸ 막간 쉼 ${padded.size}곳 · ${Math.round(pz.total * 10) / 10}초 (${pz.list.map((x) => '대본 ' + x.line + '줄 ' + x.sec + '초').slice(0, 4).join(' · ')}${pz.list.length > 4 ? ' …' : ''}) — 그 문장 소리가 끝난 뒤 무음 · 카드는 무음 동안 그대로`);
-    const sentences = project.sentences.map((s) => (padded.has(s.id) ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, padded.get(s.id)) : s));
+    const WAb = require('./word-align');
+    const sentences = project.sentences.map((s) => (padded.has(s.id) ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, padded.get(s.id), (() => { const wb = WAb.validBounds(s); return wb ? { _wtB: wb } : {}; })()) : s));   // 🔤 복제본은 경로·길이가 달라 열쇠가 안 맞는다 → 원본에서 미리 뽑은 정렬(_wtB)
     return await buildVrew({ sentences, groups: project.groups, vrewPath, opts });
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 }
@@ -1148,11 +1162,13 @@ function writeSrt(project, srtPath, maxChars = 7, preset = null) {
       const dur = s.ttsDurationSec || 2.5;
       const clips = splitCaptionLines(s.text, maxChars, s.capBreaks, s.capMarks);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
+      // 🔤 정렬이 있으면 .vrew 와 같은 줄 경계(core/word-align.lineOffsets) — 없으면 예전 글자 비례 그대로
+      const lo = clips.length > 1 && s.ttsDurationSec > 0 ? require('./word-align').lineOffsets(s, require('./caption-format').lineRanges(s.text, clips), dur) : null;
       let acc = t;
       clips.forEach((c, i) => {
         const cd = dur * (Math.max(1, meaningfulLen(c)) / totW);
-        const start = acc;
-        const end = (i === clips.length - 1) ? t + dur : acc + cd;
+        const start = lo ? t + lo[i] : acc;
+        const end = lo ? t + lo[i + 1] : ((i === clips.length - 1) ? t + dur : acc + cd);
         out += `${idx++}\n${_fmtSrt(start)} --> ${_fmtSrt(end)}\n${c}\n\n`;
         acc = end;
       });

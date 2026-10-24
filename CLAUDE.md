@@ -14,6 +14,7 @@
 > - ⏸ **화면 시각의 막간 쉼 = DTO 문장 `pz`(`P.setPauseHook` → `pausePlanOf` 한 곳)** · 화면 누적은 `sentSpan(se)`·`buildProjLines` — ⛔ 화면에서 쉼 규칙을 다시 만들지 않는다 · 새 시각 계산도 `sentSpan` 으로 · `test:pausepv`.
 > - 🎞 **켄번스 = `core/ken-burns` 한 곳**(빌더 표·번호 공식·클램프·구간 · ① 미리보기 CSS 는 같은 표에서 생성 — ⛔ styles.css 에 @keyframes kbN 을 다시 손으로 쓰지 말 것 · `test:kbpv`) · 📐 **자막 자리 = `core/caption-geom.boxPx` 한 곳**(MP4 반올림 · 미리보기 소수 — ⛔ 0.72·24.6·105.5 를 다른 파일에 다시 두지 말 것 · `test:capgeom`).
 > - 🏷 **① 칸 로고도 `core/overlay-layers` 를 직접 쓴다**(effLogo · posOfLogo · logoBox · chanLogoPos — ⛔ App.jsx 에 로고 켜기·자리·여백 규칙을 다시 두지 말 것 · `test:logopv`).
+> - 🔤 **단어·줄 시각 정렬 = `core/word-align`(순수) 한 곳**(채널 `wordAlign` · 한국어만 · 열쇠 `s.wt.k` 가 안 맞으면 쓰지 않는다 = 예전 글자 비례) — 🔴 .vrew 빌더·SRT·② 화면은 **같은 `offsetsFor`** 를 쓴다(⛔ 줄 경계를 DTO 에 담아 보내지 말 것 — 줄 구분이 쓰는 쪽마다 달라 어긋난다 · DTO 는 어절 경계 `wb` 만) · 음성이 바뀌는 새 처리는 `P.quietPass` 를 거쳐야 정렬이 따라간다 · 서버(Whisper)를 쓰지 않는다(실측 근거 작업노트) · `test:walign`.
 
 > 이 폴더에서 여는 모든 세션에 통째로 실리는 문서다. **지금 유효한 규칙·금지선·구조만** 둔다.
 > 경위·실측 수치·버전별 기록은 [`docs/작업노트/`](docs/작업노트/) 에 **원문 그대로** 있다(2026-09-26 슬림화 전 CLAUDE.md 전체 = 557,605자).

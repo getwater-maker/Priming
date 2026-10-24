@@ -1179,14 +1179,19 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       return _ovHere.filter((i) => _OL.coversLine(_ovProj.overlays[i], _ovR[i], _sOrd, rg.from, rg.to)).map((i) => _ovAid.get(i)).filter(Boolean);
     };
 
+    // 🔤 단어 시각 정렬(core/word-align · 채널 wordAlign) — 이 문장에 유효한 정렬(s.wt)이 있으면 줄(클립) 경계·단어 경계를 소리의 쉼·골짜기에 놓는다.
+    //   없으면(꺼짐·한국어 아님·음성이 바뀜) 아래 예전 글자 비례 그대로 — .vrew 가 한 글자도 다르지 않다. 화면 DTO(lt)·SRT 가 같은 lineOffsets 를 쓴다.
+    const _WA = require('../core/word-align');
+    const _lo = subClips.every((c) => c.range) ? _WA.lineOffsets(s, subClips.map((c) => c.range), ttsDur) : null;
+    const _T = _lo ? _WA.mapperFor(s, ttsDur) : null;
     let acc = 0;
     for (let i = 0; i < subClips.length; i++) {
       const vc = subClips[i];
       const w = (vc.weight || 1) / totalWeight;
       const clipDur = ttsDur * w;
       const isLast = (i === subClips.length - 1);
-      const sourceIn = acc;
-      const sourceOut = isLast ? ttsDur : Math.min(acc + clipDur, ttsDur);
+      const sourceIn = _lo ? _lo[i] : acc;
+      const sourceOut = _lo ? _lo[i + 1] : (isLast ? ttsDur : Math.min(acc + clipDur, ttsDur));
       const realDur = sourceOut - sourceIn;
 
       // 단어 단위 ttsClip 트랙 — 같은 sentence audio 의 시간 슬라이스를 단어 수만큼.
@@ -1194,15 +1199,29 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       const tokens = splitWordsForVrew(vc.text);
       const totalChars = tokens.reduce((sum, t) => sum + (t.length || 0), 0) || 1;
 
+      // 🔤 정렬이 있으면 어절마다 시작 시각(이 클립 시작 기준) — 문장 글에서 순서대로 찾는다(줄 글자와 공백이 달라도 어긋나지 않게). 못 찾으면 예전 글자 비례.
+      let _wStarts = null;
+      if (_T && vc.range) {
+        _wStarts = []; let cur = vc.range.from;
+        for (const tk of tokens) {
+          const k = String(s.text).indexOf(tk, cur);
+          if (k < 0 || k > vc.range.to) { _wStarts = null; break; }
+          cur = k + tk.length;
+          _wStarts.push(Math.min(realDur, Math.max(0, _T(k) - sourceIn)));
+        }
+        if (_wStarts && _wStarts.length) { _wStarts[0] = 0; for (let q = 1; q < _wStarts.length; q++) if (_wStarts[q] < _wStarts[q - 1]) _wStarts[q] = _wStarts[q - 1]; }
+      }
       const wordsArr = [];
       let wAcc = 0;
       for (let wi = 0; wi < tokens.length; wi++) {
         const tk = tokens[wi];
         const isLastWord = (wi === tokens.length - 1);
         // 글자수 비율로 sub-clip 시간 분배. 마지막 단어는 잔여 시간 모두 흡수.
-        const wDur = isLastWord
-          ? Math.max(0, realDur - wAcc)
-          : realDur * ((tk.length || 1) / totalChars);
+        const wDur = _wStarts
+          ? Math.max(0, (isLastWord ? realDur : _wStarts[wi + 1]) - _wStarts[wi])
+          : (isLastWord
+            ? Math.max(0, realDur - wAcc)
+            : realDur * ((tk.length || 1) / totalChars));
 
         const wTtsTid = sid();
         const wTtsAid = uid();

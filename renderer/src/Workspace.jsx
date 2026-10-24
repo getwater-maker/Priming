@@ -9,6 +9,7 @@
  *   · stageCapGeom   — 미리보기 자막 크기·위치 = **유튜브 MP4 와 같은 공식**(core/vrew-render captionAssStyle).
  */
 import CG from '../../core/caption-geom.js';
+import WA from '../../core/word-align.js';   // 🔤 어절 경계 → 줄 시작(.vrew·SRT 와 같은 함수)
 import { splitLines, mLen } from './lib/captions.js';
 import CF from '../../core/caption-format.js';
 
@@ -44,10 +45,14 @@ export function buildProjLines(pr, capChars) {
       const dur = Number(s.dur) > 0 ? Number(s.dur) : 0;
       const tot = lt.reduce((a, t) => a + Math.max(1, mLen(t)), 0) || 1;
       let acc = 0;
+      // 🔤 정렬이 있으면(DTO wb = 어절 경계) **이 화면의 줄 구분**으로 core/word-align.offsetsFor — .vrew·SRT 와 같은 규칙 · 없으면 예전 글자 비례
+      const _lo = dur > 0 && Array.isArray(s.wb) && lt.length > 1 ? WA.offsetsFor(s.text, s.wb, rg, dur) : null;
+      const ltS = _lo ? _lo.slice(1, -1) : null;
       const lines = lt.map((t, li) => {
         const w = Math.max(1, mLen(t));
+        const a0 = ltS ? (li === 0 ? 0 : ltS[li - 1]) : 0, a1 = ltS ? (li === lt.length - 1 ? dur : ltS[li]) : 0;
         const o = { n: ++n, t, range: rg[li], groupNum: c.num, sentIdx: si, from: rg[li].from, to: rg[li].to, ci, ord,
-          start: dur ? t0 + dur * acc / tot : null, dur: dur ? dur * w / tot : null, speaker: s.speaker || null };
+          start: dur ? t0 + (ltS ? a0 : dur * acc / tot) : null, dur: dur ? (ltS ? a1 - a0 : dur * w / tot) : null, speaker: s.speaker || null };
         acc += w;
         return o;
       });
