@@ -41,7 +41,7 @@ const key = (v) => String(v || '').replace(/[^A-Za-z0-9가-힣_.-]/g, '_').slice
     await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
 
     // ② 이미지 메뉴 → 고르개
-    await win.click('button[data-menu="image"]');
+    await win.click('button[data-menu="make"]'); await win.click('[data-testid="make-sub-image"]');
     await win.waitForSelector('[data-testid="style-picker-btn"]', { timeout: 10000 });
     ok(await win.getAttribute('[data-testid="style-picker-btn"]', 'title') === '이미지 스타일', '① 고르개 버튼(title 「이미지 스타일」)');
     await win.click('[data-testid="style-picker-btn"]');

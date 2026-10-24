@@ -110,7 +110,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.locator('[data-testid=cf-side] .cf-x').click(); await win.waitForTimeout(200);
 
     console.log('\n[5] 🏷 열린 대본 모두 — 로고 넣기·빼기(큐 2개 · 채널 불변)');
-    await win.click('.menubar button:text-is("삽입")'); await win.waitForTimeout(300);
+    await require('./_menu').byText(win, '삽입'); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid=logo-queue]').inputValue() === 'chan' && await win.locator('[data-testid=stage-logo]').count() === 0, '처음 = 채널 설정대로(채널 로고 꺼짐 → 없음)');
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, LOGO);
     await win.selectOption('[data-testid=logo-queue]', 'on'); await win.waitForTimeout(1200);
@@ -125,7 +125,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       ok(s.every((o) => o == null), '채널 설정대로 → 덮어쓰기 지움(두 대본)'); }
     console.log('\n[6] 🧩 ① 칸 편집칸 — 정렬을 누르면 곧바로 · 🏷 ① 칸 AI 고지(v0.6.88)');
     {
-      await win.click('.menubar button:text-is("대본·음성")').catch(() => {});
+      await require('./_menu').byText(win, '대본·음성').catch(() => {});
       await win.keyboard.press('Escape'); await win.waitForTimeout(200);
       await clipNo(1).click(); await win.waitForTimeout(300); await clipNo(1).click(); await win.waitForTimeout(300);   // 커서 1 · 선택 해제
       await win.locator('#stageCap .cf-stageline').first().click(); await win.waitForSelector('[data-testid=stage-ta]', { timeout: 5000 });
@@ -141,7 +141,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.reload(); await win.waitForSelector('.sent.clip', { timeout: 20000 }); await win.waitForTimeout(800);
       for (const m of ['완성', '대본·음성', '이미지', '비디오']) {
         if (await win.locator('label.chk:has-text("AI 고지") input').count()) break;
-        await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); await win.waitForTimeout(200);
+        await require('./_menu').byText(win, m).catch(() => {}); await win.waitForTimeout(200);
       }
       const chk = win.locator('label.chk:has-text("AI 고지") input').first();
       if (!(await chk.isChecked())) await chk.check();
@@ -186,7 +186,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         await win.locator('.clipbar').click({ position: { x: 3, y: 3 } }); await win.keyboard.press('Control+y'); await win.waitForTimeout(700);
         ok((await preset()).text === '고친 AI 고지 문구', 'Ctrl+Y → 다시 하기');
       }
-      await chk.uncheck().catch(async () => { for (const m of ['완성', '대본·음성']) { await win.click(`.menubar button:text-is("${m}")`).catch(() => {}); if (await win.locator('label.chk:has-text("AI 고지") input').count()) break; } await win.locator('label.chk:has-text("AI 고지") input').first().uncheck(); });
+      await chk.uncheck().catch(async () => { for (const m of ['완성', '대본·음성']) { await require('./_menu').byText(win, m).catch(() => {}); if (await win.locator('label.chk:has-text("AI 고지") input').count()) break; } await win.locator('label.chk:has-text("AI 고지") input').first().uncheck(); });
       await win.waitForTimeout(300);
       ok(await win.locator('[data-testid=stage-ai]').count() === 0, '작업바 「AI 고지」를 끄면 ① 칸에서도 사라진다');
     }

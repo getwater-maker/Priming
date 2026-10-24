@@ -52,6 +52,7 @@
     "test:capgeom": "node test/caption-geom.test.js",
     "test:kbpv": "node test/kbseg.test.js && node test/kb-preview.smoke.js",
     "test:theme": "node test/theme-tokens.test.js",
+    "test:menubar": "node test/menubar-frame.smoke.js",
     "test:quiet": "node test/quiet-trim.test.js && node test/clip-speed.smoke.js && node test/clip-ctx-wire.smoke.js",
     "test:makeupload": "node test/makeall-upload.smoke.js",
     "test:refvoice": "node test/ref-voice.test.js",

@@ -54,7 +54,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.click('.ribbon button:has-text("열기")');
     await win.waitForSelector('.sblk[data-ord]', { timeout: 20000 });
     const key = async (k) => { await win.click('[data-testid=clipbar]', { position: { x: 5, y: 5 } }); await win.keyboard.press(k); };
-    const menu = async (t) => win.locator(`.menubar button:text-is("${t}")`).first().click();
+    const menu = async (t) => require('./_menu').byText(win, t);
 
     console.log('[1] 준비 — 문장마다 자막 두 줄(클립 번호 ≠ 문장 번호)');
     const lay = await win.evaluate(() => [...document.querySelectorAll('.sblk[data-ord]')].map((b) => b.querySelectorAll('.sent.clip').length));

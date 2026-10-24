@@ -15,13 +15,20 @@ import CF from '../../core/caption-format.js';
 
 // 메뉴(리본) — [id, 라벨]. 라벨은 Vrew 메뉴처럼 짧게.
 export const MENUS = [
-  ['script', '대본·음성'],
-  ['image', '이미지'],
-  ['video', '비디오'],
-  ['finish', '완성'],
+  ['file', '파일'],
+  ['home', '홈'],
+  ['edit', '편집'],
+  ['caption', '자막'],
   ['format', '서식'],
-  ['insert', '삽입'],   // ➕ 그림·영상·오디오·로고 삽입(v0.5.54) — 앞으로 넣을 것들도 여기에
+  ['insert', '삽입'],
+  ['voice', 'AI 목소리'],
+  ['template', '템플릿'],
+  ['effect', '효과'],
+  ['make', '제작'],   // Priming 전용 — 이미지·비디오 단계(채널·큐·만들기는 헤더·큰 단추)
+  ['help', '도움말'],
 ];
+// 옛 메뉴 이름 → 새 탭(메뉴 따라가기·옛 코드·시험 호환)
+export const MENU_ALIAS = { script: 'home', image: 'make', video: 'make', finish: 'file' };
 
 // localStorage — 사생활 창·차단 환경에서 던질 수 있어 늘 감싼다(없어도 화면은 정상).
 export function lsGet(k, d) { try { const v = window.localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } }

@@ -24,7 +24,7 @@ fs.writeFileSync(MD, lines.join('\n'), 'utf8');
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
-    await win.click('button[data-menu="video"]'); await win.waitForTimeout(500);
+    await win.click('button[data-menu="make"]'); await win.click('[data-testid="make-sub-video"]'); await win.waitForTimeout(500);
     const now = Date.now();
     const prog = (k) => ({ operationId: 'probe', title: '떨림', itemId: null, phase: 'running', startedAt: now, endedAt: null, queue: { i: 1, n: 2 },
       stages: { tts: { state: 'done' }, image: { state: 'done' }, video: { state: 'run', startedAt: now, doneAtStart: 0 }, out: { state: 'wait' } },

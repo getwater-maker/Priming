@@ -1898,3 +1898,25 @@ main .card h2{top:var(--work-top-height,0px)}
 /* 🗑▶ 고른 어절 곁 단추(Lab #11) — ② 클립 줄의 어절 칩 바로 뒤 */
 .chip-act{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
 .chip-act button{padding:0 6px;min-width:26px;height:22px;line-height:20px;font-size:var(--fs-sm)}
+
+/* ── Lab 메뉴 줄(Vrew 12탭 · 2026-10-24) — 탭이 6 → 11개로 늘고 모드 전환이 오른쪽 위로 와서 1440px 이하에서 줄이 넘쳤다 ── */
+@media (max-width:1440px){
+  .menubar .menus{margin-left:2px}
+  .menubar .menus .menu{padding:6px 5px;font-size:13px}
+  .menubar .modetoggle button{padding:5px 6px}
+  .menubar .lbl{display:none}
+  .menubar > select{max-width:112px}
+  .menubar .findbar{flex:0 1 100px;min-width:76px}
+  .menubar button.cta{padding:6px 10px}
+}
+.menus .menu.on{color:var(--accent-d);font-weight:800}
+.ribbon .seg{display:inline-flex;gap:0;border:1px solid var(--accent);border-radius:var(--r-md);overflow:hidden}
+.ribbon .seg button{border:0;border-radius:0;padding:6px 12px;background:transparent;color:var(--accent-d)}
+.ribbon .seg button.on{background:var(--accent);color:var(--fg-ffffff)}
+/* 제작 탭 — 이미지/비디오 전환을 이름표 칸 자리에 세로로(리본 폭은 옛 이미지·비디오 메뉴와 같게) */
+.ribbon[data-menu-on="make"] .hgroup > .glabel{display:none}
+.ribbon .make-sub{min-width:96px;width:96px;box-sizing:border-box}
+.ribbon .seg-v{display:flex;flex-direction:column;gap:3px}
+.ribbon .seg-v button{padding:4px 8px;font-size:12px;white-space:nowrap;border:1px solid var(--accent);border-radius:var(--r-md)}
+.ribbon .seg-v button.on{background:var(--accent);color:var(--fg-ffffff)}
+@media (max-width:1440px){ .ribbon .make-sub{min-width:84px;width:84px} }

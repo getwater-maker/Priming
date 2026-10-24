@@ -36,7 +36,7 @@ const outRootOf = async () => (() => { try { const lg = fs.readdirSync(path.join
     ok(await win.locator('[data-testid="backup-open-strip"]').count() === 1, '① 안내 줄에 「🕘 백업에서 되살리기」');
 
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
-    await win.click('button[data-menu="script"]').catch(() => {});
+    await win.click('button[data-menu="home"]').catch(() => {});
     await win.locator('[data-testid="ribbon"] button', { hasText: '열기' }).first().click();
     await win.waitForFunction(() => document.querySelectorAll('.cut').length >= 2, null, { timeout: 20000 });
     const baseDir = () => { try { return fs.readdirSync(HIST).find((b) => b.startsWith(NAME)); } catch { return null; } };

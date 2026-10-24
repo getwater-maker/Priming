@@ -19,7 +19,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
     await win.waitForSelector('[data-testid="ribbon"]', { timeout: 30000 });
     const lead = async (menu, sel) => {
-      await win.click(`button[data-menu="${menu}"]`); await win.waitForTimeout(250);
+      if (menu === 'image' || menu === 'video') { await win.click('button[data-menu="make"]'); await win.click(`[data-testid="make-sub-${menu}"]`); } else await win.click(`button[data-menu="${menu === 'script' ? 'home' : menu}"]`); await win.waitForTimeout(250);
       return win.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) }; }, sel);
     };
     const open = await lead('script', '[data-testid="ribbon"] > .hgroup:first-child > .glabel + button');
@@ -31,11 +31,11 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(open && vid && Math.abs(open.x - vid.x) <= 1, `열기 x=${open && open.x} · 비디오 도구 x=${vid && vid.x} — 같은 자리`);
     ok(open && open.h >= 48 && open.w >= 48 && open.w <= 70, `📂 열기 단추 크기 그대로(${open && open.w}×${open && open.h})`);
     // 첫 칸이 이름표 바로 뒤에 있다(다른 단추가 끼지 않는다)
-    const firstAfterLabel = await win.evaluate(() => { const l = document.querySelector('[data-testid="ribbon"] > .hgroup:first-child > .glabel'); return l && l.nextElementSibling ? l.nextElementSibling.getAttribute('data-testid') : null; });
-    ok(firstAfterLabel === 'video-engine', '비디오 메뉴: 이름표 다음이 바로 비디오 도구');
-    await win.click('button[data-menu="image"]'); await win.waitForTimeout(250);
+    const firstAfterLabel = await win.evaluate(() => { const g = document.querySelector('[data-testid="ribbon"] > .hgroup.make-sub + .hgroup'); if (!g) return null; const kids = [...g.children].filter((e) => getComputedStyle(e).display !== 'none'); return kids[0] ? kids[0].getAttribute('data-testid') : null; });
+    ok(firstAfterLabel === 'video-engine', '제작 ▸ 비디오: 이름표 칸에는 이미지·비디오 전환, 그 다음이 바로 비디오 도구');
+    await win.click('button[data-menu="make"]'); await win.click('[data-testid="make-sub-image"]'); await win.waitForTimeout(250);
     const imgTexts = await win.locator('[data-testid="img-engine"] option, [data-testid="img-engine"] optgroup').evaluateAll((os) => os.map((o) => o.label || o.textContent));
-    await win.click('button[data-menu="video"]'); await win.waitForTimeout(250);
+    await win.click('button[data-menu="make"]'); await win.click('[data-testid="make-sub-video"]'); await win.waitForTimeout(250);
     const vidTexts = await win.locator('[data-testid="video-engine"] option, [data-testid="video-engine"] optgroup').evaluateAll((os) => os.map((o) => o.label || o.textContent));
     const all = imgTexts.concat(vidTexts).join(' / ');
     ok(!/kie/i.test(all), '목록에 서비스 이름(kie)이 없다');

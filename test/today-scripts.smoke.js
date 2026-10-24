@@ -16,7 +16,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     const win = await app.firstWindow();
     await win.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
     await win.waitForSelector('[data-testid="ribbon"]', { timeout: 30000 });
-    await win.click('button[data-menu="script"]'); await win.waitForTimeout(250);
+    await win.click('button[data-menu="home"]'); await win.waitForTimeout(250);
     const b = await win.locator('[data-testid="today-scripts"]').boundingBox();
     ok(!!b && await win.evaluate(({ x, y }) => !!(document.elementFromPoint(x, y) || {}).closest?.('[data-testid="today-scripts"]'), { x: b.x + b.width / 2, y: b.y + b.height / 2 }), '📅 오늘 대본 버튼이 보이고 눌리는 자리');
     await win.click('[data-testid="today-scripts"]');

@@ -63,7 +63,7 @@ function wsRestore(b) { try { if (b === null) { if (fs.existsSync(WS)) fs.unlink
     await btn.waitFor({ timeout: 10000 });
     if (await btn.isDisabled()) throw new Error('TTS 가 있는데 버튼이 비활성 — capbar: ' + (await win.locator('.worktimes').innerText()));
     // 🧭 v0.5.42 — 타임스탬프는 「완성」 메뉴 리본(#capbar), 분할바는 「대본·음성」 메뉴로 갔다(한 줄에 같이 있지 않다)
-    const inFinish = await win.evaluate(() => !!document.querySelector('.ribbon[data-menu-on="finish"] #capbar'));
+    const inFinish = await win.evaluate(() => !!document.querySelector('.ribbon[data-menu-on="file"] #capbar'));
     if (!inFinish) throw new Error('타임스탬프 버튼이 완성 메뉴에 없음');
     console.log('· 버튼 위치 OK (완성 메뉴)');
 

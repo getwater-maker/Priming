@@ -59,7 +59,7 @@ const files = (d) => { const o = []; const walk = (p) => { for (const n of fs.re
     }, { jpg: fs.readFileSync(JPG).toString('base64'), mp4: fs.readFileSync(MP4).toString('base64') });
 
     await win.locator('[data-testid="group-item"][data-g="2"]').click(); await win.waitForTimeout(300);
-    await win.locator('.menubar button:text-is("이미지")').first().click(); await win.waitForTimeout(200);   // 스톡 단추는 리본 이미지·비디오 탭에 있다(v0.7.71 — 그룹 칸 단추는 없앴다)
+    await require('./_menu').byText(win, '이미지'); await win.waitForTimeout(200);   // 스톡 단추는 리본 이미지·비디오 탭에 있다(v0.7.71 — 그룹 칸 단추는 없앴다)
     await win.locator('[data-testid="rb-stock-image"]').click();
     await win.waitForSelector('[data-testid="stock-dlg"]', { timeout: 5000 });
     ok(await win.locator('[data-testid="stock-nokey"]').isVisible(), '키 없음 → 「⚙ 설정 → API 키」 안내');
@@ -106,7 +106,7 @@ const files = (d) => { const o = []; const walk = (p) => { for (const n of fs.re
     ok(/G3 · Pexels 영상 · Park/.test(fs.readFileSync(credit || path.join(outDir, 'x'), 'utf8')), '영상 출처도 기록');
     // 🎛 리본(v0.7.68): 이미지 탭 「무료이미지」 = 사진 · 비디오 탭 「무료비디오」 = 영상 — 지금 커서 그룹
     for (const [menu, tid, kd, lab] of [['image', 'rb-stock-image', 'photo', '무료이미지'], ['video', 'rb-stock-video', 'video', '무료비디오']]) {
-      await win.click(`.menus button[data-menu="${menu}"]`); await win.waitForTimeout(300);
+      await win.click('.menus button[data-menu="make"]'); await win.click(`[data-testid="make-sub-${menu}"]`); await win.waitForTimeout(300);
       const b = win.locator(`[data-testid="${tid}"]`);
       ok(await b.isVisible() && (await b.innerText()).includes(lab), `${menu} 탭에 「${lab}」 단추`);
       const one = await b.evaluate((e) => { const r = e.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { y: r.height, hit: !!(h && h.closest('[data-testid="' + e.dataset.testid + '"]')) }; });

@@ -68,8 +68,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
 
     // [1] 메뉴 줄 + 리본
     const menus = await win.locator('.menus button[data-menu]').allInnerTexts();
-    ok(menus.join(',') === '대본·음성,이미지,비디오,완성,서식,삽입', `메뉴 6개 — 서식 옆에 ➕ 삽입 (${menus.join(' · ')})`);
-    ok(await win.locator('.ribbon[data-menu-on="script"]').count() === 1, '켤 때 메뉴 = 대본·음성');
+    ok(menus.join(',') === '파일,홈,편집,자막,서식,삽입,AI 목소리,템플릿,효과,제작,도움말', `메뉴 11개 — Vrew 순서 + Priming 전용 「제작」 (${menus.join(' · ')})`);
+    ok(await win.locator('.ribbon[data-menu-on="home"]').count() === 1, '켤 때 메뉴 = 홈');
     const mb = await win.locator('.menubar').boundingBox();
     ok(mb && mb.height < 56, `1366px 에서 메뉴 줄이 한 줄 (${mb && Math.round(mb.height)}px)`);
     for (const [id, want] of [['image', '② 이미지'], ['video', '③ 비디오'], ['finish', '④ 완성']]) {
@@ -92,7 +92,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       { const c = win.locator('[data-testid="tts-cost"]');
         const t = (await c.count()) ? (await c.innerText()).replace(/\s+/g, ' ') : '';
         ok((await c.count()) === 1 && await c.isVisible() && /예상 무료/.test(t) && /[\d,]+자/.test(t), `🎤 TTS 옆 💰 예상 비용 (${t})`); }
-      await win.locator('.menus button[data-menu]', { hasText: '완성' }).first().click(); await win.waitForTimeout(250);
+      await win.locator('.menus button[data-menu]', { hasText: '파일' }).first().click(); await win.waitForTimeout(250);
       ok(await win.locator('[data-testid="open-after-make"]').isVisible(), '④ 완성 메뉴에 「완성 후 열기」 체크');
       // 🎛 v0.9.39 — ④ 완성: 묶음 버튼 3개(작업 순서 전체) · 대본 머리: TTS → 일괄첨부 → 이미지 → 비디오 → 묶음 3개 · 미리보기·만들기·프리미어 없음 · 「작업 순서(N)」
       {
@@ -141,7 +141,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       }
       const mo = await win.locator('[data-testid="monitor-off"]').boundingBox();
       ok(!!mo && await win.evaluate(({ x, y }) => !!(document.elementFromPoint(x, y) || {}).closest?.('[data-testid="monitor-off"]'), { x: mo.x + mo.width / 2, y: mo.y + mo.height / 2 }), '🌙 모니터 끄기 버튼이 보이고 눌리는 자리(누르지는 않는다)');
-      await win.locator('.menus button[data-menu]', { hasText: '대본·음성' }).first().click(); await win.waitForTimeout(250);
+      await win.locator('.menus button[data-menu]', { hasText: '홈' }).first().click(); await win.waitForTimeout(250);
     }
     for (const [g, img] of [[1, imgR], [2, imgB]]) {
       // 화면의 ＋ 칸을 눌러 첨부한다(API 를 직접 부르면 화면 상태가 안 바뀐다)

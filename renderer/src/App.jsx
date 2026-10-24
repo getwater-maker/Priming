@@ -44,7 +44,7 @@ import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
 import { CF, CaptionToolbar, CaptionMiniBar, CaptionFormatPanel, CaptionAnimPanel, LineRuns, selectionRange, renderStageLine, fmtCss } from './CaptionFormat.jsx';
-import { MENUS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
+import { MENUS, MENU_ALIAS, lsGet, lsSet, buildProjLines, stageCapGeom, applyStageGeom, fmtClipTime, lineWords } from './Workspace.jsx';
 
 // 같은 01.png 경로를 새 이미지로 덮어써도 Chromium 메모리 캐시가 옛 그림을 보여주지 않게
 // main 이 준 파일 수정 버전을 URL query 로 붙인다(media 프로토콜은 query 를 제거한 뒤 파일을 읽는다).
@@ -881,8 +881,10 @@ export default function App() {
   const [capPanel, setCapPanel] = useState(null);   // 'fmt' | 'anim'
   // 🧭 Vrew 식 작업 화면(v0.5.42) — 메뉴(리본) · 보기(클립/카드) · ① 칸 폭 · 커서(자막 줄)
   // 메뉴는 켤 때마다 「대본·음성」부터(Vrew 도 홈부터) — 기억해 두면 다음 실행이 엉뚱한 메뉴로 열려 「열기」가 안 보인다
-  const [menu, setMenu] = useState('script');
-  const pickMenu = (id) => { if (MENUS.some((x) => x[0] === id)) setMenu(id); };
+  const [menu, setMenu] = useState('home');
+  const [makeSub, setMakeSub] = useState('image');   // 제작 탭 안: 이미지 | 비디오
+  // 옛 메뉴 이름(script·image·video·finish)도 받는다 — 메뉴 따라가기·시험·옛 코드가 부른다
+  const pickMenu = (id) => { const to = MENU_ALIAS[id] || id; if (id === 'image' || id === 'video') setMakeSub(id); if (MENUS.some((x) => x[0] === to)) setMenu(to); };
   const [view, setView] = useState(() => (lsGet('pm.view', 'clips') === 'cards' ? 'cards' : 'clips'));
   const pickView = (v) => { setView(v); lsSet('pm.view', v); };
   // 🧩 클립 보기의 개요/상세(Vrew 오른쪽 위 토글) — 상세 = 클립마다 화자·시각 머리줄 + 어절 칩 + 자막 줄
@@ -3691,7 +3693,7 @@ export default function App() {
     // 🔀 채널을 바꿔도 작업 순서를 **비우지 않는다**(v0.9.42 · 로이 2026-10-16 「다른 채널 대본도 넣고 순서대로」 — 옛 v0.7.26 「비운다」 폐기).
     //   그 뒤에 여는 대본이 새 채널로 들어간다 · 이미 든 대본은 자기 채널 그대로(set-queue-settings 가 다른 채널 헤더 값을 그 대본에 쓰지 않는다).
     setPresetName(name);
-    setMenu('script');   // 채널을 바꾸면 늘 「대본·음성」부터(로이 2026-09-26)
+    setMenu('home');   // 채널을 바꾸면 늘 「홈」(옛 「대본·음성」)부터(로이 2026-09-26)
     try {
       const p = await api.getPresetDetail(name);
       // 옛 저장값(startMode:'shorts'|'playlist')은 롱폼으로 정규화 — 제거된 모드 화면에 진입하지 않게.
@@ -4255,7 +4257,7 @@ export default function App() {
     const top = MenuFollow.pick({ make: makeProg, stage: stageRun, mp4: mp4Prog, yt: ytProg });
     if (top === menuFollowRef.current) return;
     menuFollowRef.current = top;
-    if (top && mode === 'longform') setMenu(top);
+    if (top && mode === 'longform') pickMenu(top);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [makeProg, stageRun, mp4Prog, ytProg]);
   // 📍 ⚡ 만들기 — 만드는 대본으로 옮기고, ① = 방금 완성된 그림·영상 그룹 · ② = 지금 음성을 만드는 문장(core/follow-target)
@@ -6105,6 +6107,244 @@ export default function App() {
         </span>
   );
   // ── 렌더 ─────────────────────────────────────────────────
+
+  // 🧭 메뉴 줄(Vrew 12탭 · Lab) — 옛 리본 블록을 조각으로 잘라 새 탭에 다시 끼운 것. 기능·testid 는 그대로(대조표 docs/VrewLab/리본_선택자_대조표.md)
+  const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
+            <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
+            {!compact && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+</span>);
+  const ribVoice = (noLabel) => (<span className="hgroup" data-testid="rib-voice">{!noLabel && <span className="glabel">음성</span>}
+            <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS</span></button>
+            {/* 💰 TTS 예상 비용 — 지금 대본 · 이 채널 목소리 엔진 기준 · 음성이 아직 없는 문장만(이미 있는 문장은 건너뛰므로) */}
+            {loaded && ttsCost && (
+              <span data-testid="tts-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, maxWidth: 130, cursor: 'pointer' }} onClick={openTtsEngines}
+                title={`TTS 예상 비용 — 채널 「${presetName || ''}」 · ${ttsEngActive.label}\n음성이 없는 문장 ${ttsCost.need}개 · ${ttsCost.chars.toLocaleString()}자 (전체 ${ttsCost.total}개 · ${ttsCost.allChars.toLocaleString()}자)\n전체를 새로 만들면 ≈ ${ttsCost.allTxt}\n${ttsCost.note}\n누르면 🔊 음성 설정`}>
+                💰 예상 <b>{ttsCost.txt}</b><br />{ttsCost.chars ? `${ttsCost.chars.toLocaleString()}자` : '남은 문장 없음'}
+              </span>
+            )}
+            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
+          </span>);
+  const ribVoiceExtra = () => (
+              <span className="hgroup rb-extra">
+        {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」 자리(로이 2026-10-04 — 더는 안 쓴다).
+            ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다.
+            🔗 「다시 연결」은 2026-10-21 로이 「다시 쓰고 싶다」로 되살렸다(v0.9.94 · 🔊 음성 설정 바로 뒤). */}
+        <span className="rb-stack">
+        <button className="ghost" data-testid="tts-engine-btn" onClick={openScriptVoice}
+          title={(loaded && mode === 'longform'
+            ? '열려 있는 대본의 목소리를 고릅니다 — 큐에 대본이 여럿이면 모두에 적용(채널 기본은 그대로 · ⚙ 채널편집에서).\n'
+              + '지금 대본: ' + ((dto && dto.projects && dto.projects[0] && dto.projects[0].ttsVoiceText) || '채널 목소리') + '\n'
+            : '대본이 없어 채널 기본 목소리를 고릅니다.\n')
+            + '얼굴·샘플 듣기·요금도 여기서 · 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
+          {/* 🔊 음성 설정 팝업을 여는 버튼(로이 2026-10-05) — 지금 목소리는 마우스를 올리면(title) 보인다 */}
+          <span className="rb-ic">🔊</span> <span className="rb-t">음성 설정</span></button>
+        <button className="ghost" disabled={!loaded} data-testid="relink-work"
+          title={'출력 폴더에 파일은 남아 있는데 화면에 그림·영상·음성이 비어 있을 때 — 다시 연결합니다.\n(그림·영상 = 그룹 번호 · 음성 = 출력 폴더 .vrew 의 자막 글자로 맞춤 · 이미 연결된 것은 그대로 · Ctrl+Z 로 되돌리기)'}
+          onClick={runRelinkWork}><span className="rb-ic">🔗</span> <span className="rb-t">다시 연결</span></button>
+        </span>
+              </span>
+              );
+  const ribImage = () => (<>
+          <span className="hgroup">
+            <span className="glabel">② 이미지</span>
+            <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
+              value={comfySelectValue(imgEngine, comfyCfg)}
+              onChange={(e) => onPickImgEngine(e.target.value)}>
+              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+            </select>
+            <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
+            <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
+            <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}><span className="rb-ic">{visionBusy ? '⏳' : '🔍'}</span> <span className="rb-t">{visionBusy ? '검수중…' : '검수'}</span></button>
+            <button className="ghost" disabled={!loaded} title="웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 프롬프트 적용(고급)" onClick={() => { setImpText(''); setImpOpen(true); }}>📥</button>
+            {/* 🎨 그림 목록 고르개(v0.9.30) — 옛 <select> 자리 · 샘플 그림은 ✎ 편집창에서 그린다 */}
+            <StylePicker value={styleId} onChange={setStyleId} styles={styles} samples={styleSamples} scriptId={SCRIPT_STYLE_ID} />
+            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
+            {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
+              if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
+              const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
+              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 🎨 없음</span>;   // 짧게 — 리본 1366px 한 줄(v0.9.95) · 설명은 마우스 글
+              const hit = scriptStyleHit();
+              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 🎨 「{ssp.id}」 없음</span>;
+              return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
+            })()}
+            {loaded && imgCost && (
+              <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
+                title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다)${imgCost.q ? `\n작업큐 전체 ${imgCost.q.n}편 · 남은 그림 ${imgCost.q.sum}장 합계 ${imgCost.q.txt}(고른 이미지 도구 기준 · 헤더 설정이 모든 대본에 적용됩니다)${imgCost.q.unk ? ` · ${imgCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{imgCost.txt.replace('개', '장')}</b>{imgCost.q && <> · <span data-testid="img-cost-q">큐 {imgCost.q.n}편 <b>{imgCost.q.txt.replace('개', '장')}</b></span></>}
+              </span>
+            )}
+            {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
+                대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
+            <button disabled={!loaded} data-testid="rb-tts-image" title="작업큐의 모든 대본을 TTS(음성) 먼저 만들고 이어서 이미지까지 만듭니다 — 이미 있는 음성·그림은 건너뜁니다 (비디오는 안 만듭니다)" onClick={() => runStageQueue('ttsimg')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS+이미지</span></button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
+
+          </span>
+            </>);
+  const ribVideo = () => (<>
+          <span className="hgroup">
+            <span className="glabel">③ 비디오</span>
+            <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
+              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 비디오 도구는 인물 시트를 받지 않아 글만 넣습니다.\n\n` : '') + '비디오 도구 — ☁ AI 영상 모델(그룹 그림에서 영상)'}
+              value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
+              <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
+            </select>
+            <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}><span className="rb-ic">{impBusy ? '⏳' : '🔁'}</span> <span className="rb-t">영상 프롬프트</span></button>
+            {loaded && vidCost && (
+              <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
+                title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준${vidCost.q ? `\n작업큐 전체 ${vidCost.q.n}편 · 남은 영상 ${vidCost.q.sum}개 합계 ${vidCost.q.txt}(대본마다 자기 범위/방식 기준)${vidCost.q.unk ? ` · ${vidCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
+                💰 <b>{vidCost.txt}</b>{vidCost.q && <> · <span data-testid="vid-cost-q">큐 {vidCost.q.n}편 <b>{vidCost.q.txt}</b></span></>}
+              </span>
+            )}
+            {videoEngine === 'genspark' && (
+              <select style={{ maxWidth: 190 }} value={gsVideoModel}
+                title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
+                onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
+                {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name} title={m.note}>{m.imgRef === false ? '❌ ' : ''}{m.name}</option>)}
+              </select>
+            )}
+            {videoEngine === 'none'
+              ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
+              : (<>
+                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 「직접 입력」은 그룹 번호를 쉼표로 적는다(예: 1,2,5,7). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidIsList(vidSel) ? 'list' : (vidSel || 'intro')} onChange={(e) => setVidSel(e.target.value === 'list' ? VID_LIST + (vidListText(vidSel) || '1') : (normVidSel(e.target.value) || 'intro'))}>
+                    {VID_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.label}</option>)}
+                    <option value="list">직접 입력 (쉼표)</option>
+                  </select>
+                  {vidIsList(vidSel) && <input data-testid="vid-list" type="text" inputMode="numeric" style={{ width: 120 }} placeholder="1,2,5,7" title="영상을 만들 그룹 번호 — 쉼표로 구분(예: 1,2,5,7). 3-5 처럼 구간도 됩니다. 이 번호의 그룹만 만든다" value={vidListText(vidSel)} onChange={(e) => setVidSel(normVidSel(VID_LIST + e.target.value))} />}
+                  <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
+                    title="이 범위를 작업큐의 모든 대본에 넣습니다 (평소엔 대본마다 자기 범위 — 누를 때만 전체에 적용)" onClick={applyRangeToAll}><span className="rb-t">모두 적용</span></button>
+                  <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                  <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
+                </>)}
+            <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
+            <button className="ghost" data-testid="rb-stock-video" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 영상을 찾아 지금 그룹에 넣습니다" onClick={() => openStockFor('video')}><span className="rb-ic">🔎</span> <span className="rb-t">무료비디오</span></button>
+          </span>
+            </>);
+  const ribFinish = () => (<>
+          <span className="hgroup">
+            <span className="glabel">④ 완성</span>
+            <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
+              <option value="vrew">.vrew (Vrew)</option>
+              <option value="whiteboard">✏ 화이트보드 MP4</option>
+              <option value="mp4">🎬 유튜브 MP4</option>
+            </select>
+            {/* 📂 완성 후 열기(v0.5.79) — 헤더(⚡ 만들기 옆)에 두면 1366px 에서 ■ 중단이 둘째 줄로 밀린다(v0.5.81 실측) → 완성 종류 옆으로 */}
+            <label className="chk" data-testid="open-after-make" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>
+            {(outTarget === 'mp4' || outTarget === 'whiteboard') && (() => {
+              const chp = (presets || []).find((q) => q.name === presetName) || null;
+              const eff = uploadAfter === 'on';   // 업로드 여부는 이 체크박스 하나만 정한다(채널 설정 무관)
+              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 업로드 여부는 이 체크박스 하나만 정합니다(이 PC 에 기억 · 채널 설정에는 올릴 채널만 고릅니다).' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={eff} onChange={(e) => { pickUploadAfter(e.target.checked); if (e.target.checked && chp && !chp.ytChannelId) setStatus('⚠ 이 채널은 업로드채널이 정해지지 않아 올리지 못합니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); }} />완성 후 업로드</label>;
+            })()}
+            {outTarget === 'whiteboard' && (<>
+              <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
+                <option value="1920">1920 (최종)</option>
+                <option value="1080">1080 (빠름)</option>
+                <option value="640">640 (시험)</option>
+              </select>
+              <label className="chk" title="자막을 영상에 굽습니다(하드번) — 화이트보드는 Vrew 를 거치지 않는 최종물이라 굽지 않으면 화면에 글자가 안 보입니다. ⚠ 구우면 영상을 다시 인코딩하므로 길이에 비례해 몇 분 더 걸립니다. 꺼도 .srt 파일은 옆에 남습니다." style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
+              </label>
+              <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}><span className="rb-ic">📋</span> <span className="rb-t">장면 계획</span></button>
+            </>)}
+            {/* 🎛 작업 순서(롱폼 큐) **전체**에 묶음 단계(v0.9.39 · 로이) — 대본 머리의 같은 아이콘은 그 대본만 */}
+            <span className="hdiv" />
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-ti" title="작업 순서의 모든 대본 — 🎤 TTS 를 전부 만든 뒤 🖼 이미지 (이미 있는 것은 건너뜀)" onClick={() => runStageQueue('ttsimg')}><ComboIc ics={COMBO_TI} /></button>
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-iv" title="작업 순서의 모든 대본 — 🖼 이미지를 전부 만든 뒤 🎬 비디오 (모델 스왑 1번 · 이미 있는 것은 건너뜀)" onClick={() => runStageQueue('imgvid')}><ComboIc ics={COMBO_IV} /></button>
+            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-tiv" title="작업 순서의 모든 대본 — 🎤 TTS → 🖼 이미지 → 🎬 비디오를 단계마다 전부 (이미 있는 것은 건너뜀 · 완성 파일은 만들지 않음 — 완성은 ⚡ 만들기)" onClick={() => runStageQueue('ttsimgvid')}><ComboIc ics={COMBO_TIV} /></button>
+            <span className="hdiv" />
+            {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
+            {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
+            {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
+            <button className="ghost" disabled={!loaded} data-testid="open-out-folder" title={outTarget === 'mp4' ? '🎬 유튜브 MP4 가 저장되는 폴더(채널 「저장 폴더」)를 엽니다' : outTarget === 'whiteboard' ? '✏ 화이트보드 MP4 폴더를 엽니다' : '.vrew 가 저장되는 대본 폴더를 엽니다'} onClick={() => api.openFolder({ target: outTarget, presetName: presetName || null })}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
+          </span>
+              <span className="hgroup rb-extra" id="capbar">
+        <button className="ghost" disabled={!loaded || prog.ttsD === 0}
+          title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
+          onClick={openTimestamps}><span className="rb-ic">⏱</span> <span className="rb-t">타임스탬프</span></button>
+        <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
+              </span>
+            </>);
+  const ribInsert = () => (
+              <span className="hgroup" data-testid="ins-ribbon">
+                <span className="glabel">➕ 삽입</span>
+                <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
+                <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
+                <span className="hdiv" />
+                <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
+                  <label className="chk"><input type="checkbox" data-testid="bgm-on" checked={!!bgmCfg.on} disabled={!presetName} onChange={(e) => (e.target.checked && !bgmCfg.path ? pickBgm(false) : saveBgm({ on: e.target.checked }))} />🎵 배경음악</label>
+                  <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
+                  <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
+                  <span className="meta">음량</span>
+                  <input className="nbox" data-testid="bgm-vol" type="number" style={{ width: 44 }} min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
+                </span>
+                <span className="hdiv" />
+                <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
+                  <span className="meta">🏷 로고</span>
+                  <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoPos() ? 'free' : curLogoSide()} onChange={(e) => { if (e.target.value !== 'free') setLogoSide(e.target.value); }}
+                    title="↗/↖ = 정해진 자리 · ① 칸에서 로고를 끌면 「✋ 직접 옮김」(이 대본만) — ↗/↖ 를 다시 고르면 제자리">
+                    <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option>
+                    {curLogoPos() && <option value="free">✋ 직접 옮김</option>}</select>
+                  <button className="ghost" data-testid="logo-pos-chan" disabled={!presetName || !isLf || !(curLogoPos() || logoCfg.pos)}
+                    title={curLogoPos() ? '📌 채널 기본으로 — 이 대본에서 끌어 옮긴 로고 자리를 채널 기본 자리로 저장 — 이 채널의 모든 영상(.vrew·MP4)에 늘 그 자리' : (logoCfg.pos ? `📌✕ 채널 기본 자리 해제(지금 왼쪽에서 ${Math.round(logoCfg.pos.x * 100)}% · 위에서 ${Math.round(logoCfg.pos.y * 100)}%) — 기본(오른쪽 위)으로` : '① 칸에서 로고를 끌어 옮기면 켜집니다')}
+                    onClick={() => saveChanLogoPos(curLogoPos() ? curLogoPos() : null)}>{curLogoPos() ? '📌' : '📌✕'}</button>
+                  <span className="meta">크기</span>
+                  <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
+                    title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"
+                    value={logoCfg.size} onChange={(e) => setLogoSize(e.target.value)} onBlur={() => { if (!(Number(logoCfg.size) >= 4)) setLogoSize(12); }} /><span className="meta">%</span>
+                  {!stageLogo && <span className="meta" data-testid="logo-off">{curLogoOver() && !curLogoOver().on ? '(이 대본 로고 뺌)' : '(이 채널 로고 꺼짐)'}</span>}
+                  <select data-testid="logo-queue" disabled={!loaded || !isLf} value={(() => { const o = curLogoOver(); return !o ? 'chan' : o.on ? 'on' : 'off'; })()}
+                    title="🏷 롱폼 큐에 올라온 대본 모두에 로고 넣기·빼기 — 채널 설정(⚙ 채널편집의 로고)은 그대로 · 채널에 로고 그림이 없으면 그림을 고르라고 묻습니다"
+                    onChange={(e) => setQueueLogo(e.target.value)}>
+                    <option value="chan">큐: 채널대로</option><option value="on">큐: 로고 넣기</option><option value="off">큐: 로고 빼기</option></select>
+                </span>
+              </span>
+            );
+  const ribFormat = () => (
+              <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
+                onPatch={(p) => applyCapFmt(p)} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll} scope={capScope} onScope={setCapScope}
+                onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
+                onDone={() => { setCapSel(null); setCapPanel(null); }}
+                onSaveDefault={saveCapDefault} />
+            );
+  const selOk = clipSelOk();
+  const ribEdit = (<span className="hgroup" data-testid="rib-edit"><span className="glabel">편집</span>
+    <button className="ghost" data-testid="rb-undo" disabled={!loaded} title="되돌리기 (Ctrl+Z)" onClick={() => runUndo(false, true)}><span className="rb-ic">↶</span> <span className="rb-t">되돌리기</span></button>
+    <button className="ghost" data-testid="rb-redo" disabled={!loaded} title="다시 실행 (Ctrl+Shift+Z)" onClick={() => runUndo(true, true)}><span className="rb-ic">↷</span> <span className="rb-t">다시실행</span></button>
+    <span className="hdiv" />
+    <button className="ghost" data-testid="rb-clip-split" disabled={!selOk} title="클립 나누기 — 고른 클립의 자막 칸을 열어 줍니다(나눌 자리에 커서를 놓고 Enter)" onClick={clipSplitHere}><span className="rb-ic">✂</span> <span className="rb-t">클립 나누기</span></button>
+    <button className="ghost" data-testid="rb-clip-merge" disabled={!selOk || (capSel && capSel.items.length < 2)} title="클립 합치기 — 고른 클립을 하나로(두 개 이상 고를 때)" onClick={clipMerge}><span className="rb-ic">⊟</span> <span className="rb-t">클립 합치기</span></button>
+    <button className="ghost" data-testid="rb-clip-quiet" disabled={!selOk} title="무음 구간 줄이기 — 고른 클립의 쉼을 최대 0.3초로(세부 값은 클립 우클릭 ▸ 무음 구간 줄이기)" onClick={() => clipQuietSet(0.3, false)}><span className="rb-ic">⇥</span> <span className="rb-t">무음 구간 줄이기</span></button>
+    <span className="hdiv" />
+    <button className="ghost" data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
+  </span>);
+  const ribEffect = (<span className="hgroup" data-testid="rib-effect"><span className="glabel">효과</span>
+    <span className="rb-stack" title="배속 효과 — 고른 클립이 든 문장의 음성을 빠르게·느리게(원본 음성은 그대로 · Ctrl+Z 한 번)">
+      <span className="meta">⏩ 배속 효과</span>
+      <span style={{ display: 'flex', gap: 3 }}>{[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <button key={v} className="ghost" data-testid={'rb-speed-' + v} disabled={!selOk} onClick={() => clipSpeedSet(v)}>{v === 1 ? '1×' : v}</button>)}</span>
+    </span>
+    <span className="hdiv" />
+    <button className="ghost" data-testid="rb-fit-contain" disabled={!selOk} title="맞춤 — 고른 클립의 그림·영상을 화면에 맞춰 통째로 보이게" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}><span className="rb-ic">▣</span> <span className="rb-t">맞춤</span></button>
+    <button className="ghost" data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
+  </span>);
+  const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
+    <button className="ghost" data-testid="rb-help-settings" title="통합 설정 — API 키 · 서버 · 채널 연결 · 폴더 · 계정" onClick={() => openSettings(settingsTabForEngine())}><span className="rb-ic">⚙</span> <span className="rb-t">설정</span></button>
+    <button className="ghost" data-testid="rb-help-update" disabled={upd.busy} title="업데이트 확인 — 새 버전이 있으면 받아서 다시 시작합니다(작업 중이 아닐 때)" onClick={runUpdate}><span className="rb-ic">⟳</span> <span className="rb-t">업데이트</span></button>
+  </span>);
+  const ribTemplate = (<span className="hgroup" data-testid="rib-template"><span className="glabel">템플릿</span>
+    <span className="meta" style={{ alignSelf: 'center' }}>준비 중 — 로고는 삽입 메뉴, 정보 카드는 대본의 표시 줄로 만듭니다</span>
+  </span>);
+  const ribMakeSub = (<span className="hgroup make-sub" data-testid="rib-make-sub">
+    <span className="rb-stack seg-v">
+      <button className={makeSub === 'image' ? 'on' : 'ghost'} data-testid="make-sub-image" onClick={() => setMakeSub('image')}>② 이미지</button>
+      <button className={makeSub === 'video' ? 'on' : 'ghost'} data-testid="make-sub-video" onClick={() => setMakeSub('video')}>③ 비디오</button>
+    </span>
+  </span>);
+
   return (
     <>
       <div className="topsticky">
@@ -6116,11 +6356,6 @@ export default function App() {
             <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
               title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
               onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>
-            <span className="modetoggle">
-              <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
-              <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
-              <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
-            </span>
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
             {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
             {noProduction && pointsEl}
@@ -6178,6 +6413,12 @@ export default function App() {
             {wsOn && findRes.total > 0 && findHitRef.current.total > 0 && <button className="ghost find-selall" data-testid="find-selall" title={`검색된 클립 ${findHitRef.current.total}개(클립 단위 — 한 클립에 두 번 나와도 1개)를 모두 체크 — 음성 다시 만들기·삭제 등을 한 번에`} onClick={selectFindHits}>☑</button>}
             <button className="ghost" title="검색어 지우기 (Esc)" onClick={clearFind}>✕</button>
           </div>
+            {/* 🔀 모드 전환(롱폼·리모션·출판) — Vrew 의 오른쪽 위 도구 자리(Lab 메뉴 줄 1단계) */}
+            <span className="modetoggle">
+              <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
+              <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
+              <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
+            </span>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
               style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙<span className="lbl"> 설정</span></button>
             {isBk && (<>
@@ -6204,220 +6445,17 @@ export default function App() {
         </div>
         {!noProduction && (
           <div className="ribbon" data-testid="ribbon" data-menu-on={menu} onWheel={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY; }}>
-            {menu === 'script' && (<>
-          <span className="hgroup">
-            <span className="glabel">① 대본·음성</span>
-            <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
-            <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>
-            {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
-                화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
-            {/* 🎧 STT · 🎵 mp3 버튼은 「📥 다운로드 · STT」 창의 「📂 내 파일」 탭으로 합쳤다(v0.9.17 · 로이 2026-10-14). */}
-            {/* 🔗 URL 버튼은 리본 오른쪽 끝 「📄 대본 보기」 바로 앞으로 옮기고 이름을 「📥 대본다운」으로 바꿨다(로이 2026-09-26). */}
-            <span className="hdiv" />
-            {/* 「저장·불러오기」 버튼들(작업저장·작업열기·큐저장·큐열기·전체삭제)은 화면에서만 뺐다 (2026-09-16).
-                근거: ~/.priming-maker/saves 가 0개 = 한 번도 쓴 적이 없다. 작업물은 자동저장이 늘 이어받는다
-                (대본마다 projects/<대본>.smproj.json + 큐 구성 workspace.json → 대본을 다시 열면 그대로 이어짐).
-                ⚠ 기능은 그대로다 — IPC 5개와 렌더러 함수 5개 무수정. 되살리려면 옛 hgroup 블록을 되돌리면 된다. */}
-            {/* 🆕 초기화는 상단 첫 줄 끝으로 옮겼다(로이 2026-09-24 — 눈에 잘 띄게, 남은 폭을 꽉 채워서).
-                대본 + 음성을 **한 섹션으로** 합쳤다 (로이 2026-09-16) — 대본을 열고 바로 음성을 만드는 한 호흡이다.
-                그래서 이미지·비디오·완성의 번호가 다시 한 칸씩 당겨졌다(②③④). */}
-            <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
-            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS</span></button>
-            {/* 💰 TTS 예상 비용 — 지금 대본 · 이 채널 목소리 엔진 기준 · 음성이 아직 없는 문장만(이미 있는 문장은 건너뛰므로) */}
-            {loaded && ttsCost && (
-              <span data-testid="tts-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, maxWidth: 130, cursor: 'pointer' }} onClick={openTtsEngines}
-                title={`TTS 예상 비용 — 채널 「${presetName || ''}」 · ${ttsEngActive.label}\n음성이 없는 문장 ${ttsCost.need}개 · ${ttsCost.chars.toLocaleString()}자 (전체 ${ttsCost.total}개 · ${ttsCost.allChars.toLocaleString()}자)\n전체를 새로 만들면 ≈ ${ttsCost.allTxt}\n${ttsCost.note}\n누르면 🔊 음성 설정`}>
-                💰 예상 <b>{ttsCost.txt}</b><br />{ttsCost.chars ? `${ttsCost.chars.toLocaleString()}자` : '남은 문장 없음'}
-              </span>
-            )}
-            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
-          </span>
-              <span className="hgroup rb-extra">
-        {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」 자리(로이 2026-10-04 — 더는 안 쓴다).
-            ⚠ 그 기능의 IPC·main 코드와 렌더러 함수(runImportVrewAudio)는 그대로 둔다 — 되살리려면 이 자리만 되돌리면 된다.
-            🔗 「다시 연결」은 2026-10-21 로이 「다시 쓰고 싶다」로 되살렸다(v0.9.94 · 🔊 음성 설정 바로 뒤). */}
-        <span className="rb-stack">
-        <button className="ghost" data-testid="tts-engine-btn" onClick={openScriptVoice}
-          title={(loaded && mode === 'longform'
-            ? '열려 있는 대본의 목소리를 고릅니다 — 큐에 대본이 여럿이면 모두에 적용(채널 기본은 그대로 · ⚙ 채널편집에서).\n'
-              + '지금 대본: ' + ((dto && dto.projects && dto.projects[0] && dto.projects[0].ttsVoiceText) || '채널 목소리') + '\n'
-            : '대본이 없어 채널 기본 목소리를 고릅니다.\n')
-            + '얼굴·샘플 듣기·요금도 여기서 · 채널 「' + (presetName || '') + '」: ' + ttsEngActive.label}>
-          {/* 🔊 음성 설정 팝업을 여는 버튼(로이 2026-10-05) — 지금 목소리는 마우스를 올리면(title) 보인다 */}
-          <span className="rb-ic">🔊</span> <span className="rb-t">음성 설정</span></button>
-        <button className="ghost" disabled={!loaded} data-testid="relink-work"
-          title={'출력 폴더에 파일은 남아 있는데 화면에 그림·영상·음성이 비어 있을 때 — 다시 연결합니다.\n(그림·영상 = 그룹 번호 · 음성 = 출력 폴더 .vrew 의 자막 글자로 맞춤 · 이미 연결된 것은 그대로 · Ctrl+Z 로 되돌리기)'}
-          onClick={runRelinkWork}><span className="rb-ic">🔗</span> <span className="rb-t">다시 연결</span></button>
-        </span>
-              </span>
-              {splitBar}
-            </>)}
-            {menu === 'image' && (<>
-          <span className="hgroup">
-            <span className="glabel">② 이미지</span>
-            <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
-              value={comfySelectValue(imgEngine, comfyCfg)}
-              onChange={(e) => onPickImgEngine(e.target.value)}>
-              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
-            </select>
-            <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
-            <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
-            <button className="ghost" data-testid="vision-check" disabled={!loaded || visionBusy} title="🔍 Claude 가 그림을 직접 보고 글자·손가락·노출·시대 불일치를 찾습니다 — 고른 그룹 또는 전체 · 끝에 다시 그릴 그룹을 고릅니다" onClick={runVisionCheck}><span className="rb-ic">{visionBusy ? '⏳' : '🔍'}</span> <span className="rb-t">{visionBusy ? '검수중…' : '검수'}</span></button>
-            <button className="ghost" disabled={!loaded} title="웹 LLM(claude.ai 등) 답변을 직접 붙여넣어 프롬프트 적용(고급)" onClick={() => { setImpText(''); setImpOpen(true); }}>📥</button>
-            {/* 🎨 그림 목록 고르개(v0.9.30) — 옛 <select> 자리 · 샘플 그림은 ✎ 편집창에서 그린다 */}
-            <StylePicker value={styleId} onChange={setStyleId} styles={styles} samples={styleSamples} scriptId={SCRIPT_STYLE_ID} />
-            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사) — 목록은 다른 PC 와 공유됩니다" onClick={openStyleEditor}>✎</button>
-            {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
-              if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
-              const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
-              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 🎨 없음</span>;   // 짧게 — 리본 1366px 한 줄(v0.9.95) · 설명은 마우스 글
-              const hit = scriptStyleHit();
-              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 🎨 「{ssp.id}」 없음</span>;
-              return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
-            })()}
-            {loaded && imgCost && (
-              <span data-testid="img-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
-                title={`이미지 예상 비용 — ${imgCost.unit.label}\n아직 안 만든 그림 ${imgCost.need}장 기준(이미 있는 그림은 건너뜁니다)${imgCost.q ? `\n작업큐 전체 ${imgCost.q.n}편 · 남은 그림 ${imgCost.q.sum}장 합계 ${imgCost.q.txt}(고른 이미지 도구 기준 · 헤더 설정이 모든 대본에 적용됩니다)${imgCost.q.unk ? ` · ${imgCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(imgCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
-                💰 <b>{imgCost.txt.replace('개', '장')}</b>{imgCost.q && <> · <span data-testid="img-cost-q">큐 {imgCost.q.n}편 <b>{imgCost.q.txt.replace('개', '장')}</b></span></>}
-              </span>
-            )}
-            {/* ⚙ 는 없앴다 (로이 2026-09-16) — 첫 줄의 「⚙ 설정」과 **같은 팝업**이었다.
-                대신 그 버튼이 지금 고른 엔진에 맞는 탭을 연다(settingsTabForEngine). */}
-            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
-            <button disabled={!loaded} data-testid="rb-tts-image" title="작업큐의 모든 대본을 TTS(음성) 먼저 만들고 이어서 이미지까지 만듭니다 — 이미 있는 음성·그림은 건너뜁니다 (비디오는 안 만듭니다)" onClick={() => runStageQueue('ttsimg')}><span className="rb-ic">🎤</span> <span className="rb-t">TTS+이미지</span></button>
-            <button className="ghost" disabled={!loaded} title="이미 만든 이미지 파일·재활용 캐시를 삭제합니다 (비디오는 유지 · 다음 생성은 전부 새로 만듭니다)" onClick={deleteImagesAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            <button className="ghost" data-testid="rb-stock-image" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 사진을 찾아 지금 그룹에 넣습니다 — 사진은 화면 비율로 잘려 들어갑니다" onClick={() => openStockFor('photo')}><span className="rb-ic">🔎</span> <span className="rb-t">무료이미지</span></button>
-
-          </span>
-            </>)}
-            {menu === 'video' && (<>
-          <span className="hgroup">
-            <span className="glabel">③ 비디오</span>
-            <select data-testid="video-engine" data-r2v-bad={r2vBad ? '1' : undefined} style={r2vBad ? { outline: '2px solid #e0a800', outlineOffset: 1 } : undefined}
-              title={(r2vBad ? `⚠ 이 대본의 🎬 ${r2vN}개 장면이 R2V 꼴(인물 시트를 함께 넣는 MiniMax H3 공식 꼴)입니다 — 지금 비디오 도구는 인물 시트를 받지 않아 글만 넣습니다.\n\n` : '') + '비디오 도구 — ☁ AI 영상 모델(그룹 그림에서 영상)'}
-              value={comfySelectValue(videoEngine, cvidCfg)} onChange={(e) => onPickVideoEngine(e.target.value)}>
-              <EngineOptions kind="video" cfg={cvidCfg} value={comfySelectValue(videoEngine, cvidCfg)} />
-            </select>
-            <button className="ghost" data-testid="rewrite-vid-prompts" disabled={!loaded || impBusy} title="🔁 영상(모션) 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 영상 범위/방식의 그룹 (그림 프롬프트에 맞는 움직임 · 덮어씀 · Ctrl+Z)" onClick={() => runRewritePrompts('video')}><span className="rb-ic">{impBusy ? '⏳' : '🔁'}</span> <span className="rb-t">영상 프롬프트</span></button>
-            {loaded && vidCost && (
-              <span data-testid="vid-cost" className="meta" style={{ alignSelf: 'center', fontSize: 11, lineHeight: 1.25, whiteSpace: 'nowrap' }}
-                title={`영상 예상 비용 — ${vidCost.unit.label}\n고른 범위/방식 안에서 아직 영상이 없는 그룹 ${vidCost.need}개 기준${vidCost.q ? `\n작업큐 전체 ${vidCost.q.n}편 · 남은 영상 ${vidCost.q.sum}개 합계 ${vidCost.q.txt}(대본마다 자기 범위/방식 기준)${vidCost.q.unk ? ` · ${vidCost.q.unk}편은 아직 읽지 않아 뺐습니다` : ''}` : ''} · 1달러 ≈ ${Math.round(vidCost.krw).toLocaleString()}원 · 실제 청구와 다를 수 있습니다`}>
-                💰 <b>{vidCost.txt}</b>{vidCost.q && <> · <span data-testid="vid-cost-q">큐 {vidCost.q.n}편 <b>{vidCost.q.txt}</b></span></>}
-              </span>
-            )}
-            {videoEngine === 'genspark' && (
-              <select style={{ maxWidth: 190 }} value={gsVideoModel}
-                title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
-                onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
-                {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name} title={m.note}>{m.imgRef === false ? '❌ ' : ''}{m.name}</option>)}
-              </select>
-            )}
-            {videoEngine === 'none'
-              ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
-              : (<>
-                  <select data-testid="vid-sel" title="영상으로 만들 그룹을 고르는 방식 — 「직접 입력」은 그룹 번호를 쉼표로 적는다(예: 1,2,5,7). 채널 편집 ▸ 제작 도구에 미리 등록해 둘 수 있다" value={vidIsList(vidSel) ? 'list' : (vidSel || 'intro')} onChange={(e) => setVidSel(e.target.value === 'list' ? VID_LIST + (vidListText(vidSel) || '1') : (normVidSel(e.target.value) || 'intro'))}>
-                    {VID_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.label}</option>)}
-                    <option value="list">직접 입력 (쉼표)</option>
-                  </select>
-                  {vidIsList(vidSel) && <input data-testid="vid-list" type="text" inputMode="numeric" style={{ width: 120 }} placeholder="1,2,5,7" title="영상을 만들 그룹 번호 — 쉼표로 구분(예: 1,2,5,7). 3-5 처럼 구간도 됩니다. 이 번호의 그룹만 만든다" value={vidListText(vidSel)} onChange={(e) => setVidSel(normVidSel(VID_LIST + e.target.value))} />}
-                  <button className="ghost" data-testid="range-all" disabled={!loaded || !(queue && queue.longform && queue.longform.items.length > 1)}
-                    title="이 범위를 작업큐의 모든 대본에 넣습니다 (평소엔 대본마다 자기 범위 — 누를 때만 전체에 적용)" onClick={applyRangeToAll}><span className="rb-t">모두 적용</span></button>
-                  <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본을 i2v 비디오로 변환 — 범위는 대본마다 자기 것(큐에서 그 대본을 눌러 고친 값, 안 고쳤으면 그 대본의 도입부)" onClick={() => runStageQueue('video')}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
-                  <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}><span className="rb-ic">🖼→🎬</span> <span className="rb-t">이미지+비디오</span></button>
-                </>)}
-            <button className="ghost" disabled={!loaded} title="이미 만든 비디오 파일·재활용 캐시를 삭제합니다 (이미지는 유지 → 켄번스로 진행 가능)" onClick={deleteVideosAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
-            <button className="ghost" data-testid="rb-stock-video" disabled={!loaded} title="무료 스톡(Pexels · Pixabay)에서 영상을 찾아 지금 그룹에 넣습니다" onClick={() => openStockFor('video')}><span className="rb-ic">🔎</span> <span className="rb-t">무료비디오</span></button>
-          </span>
-            </>)}
-            {menu === 'finish' && (<>
-          <span className="hgroup">
-            <span className="glabel">④ 완성</span>
-            <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
-              <option value="vrew">.vrew (Vrew)</option>
-              <option value="whiteboard">✏ 화이트보드 MP4</option>
-              <option value="mp4">🎬 유튜브 MP4</option>
-            </select>
-            {/* 📂 완성 후 열기(v0.5.79) — 헤더(⚡ 만들기 옆)에 두면 1366px 에서 ■ 중단이 둘째 줄로 밀린다(v0.5.81 실측) → 완성 종류 옆으로 */}
-            <label className="chk" data-testid="open-after-make" title="체크: 다 만들면 .vrew·MP4 를 바로 엽니다(MP4 는 재생됩니다 · 큐면 대본마다). 해제: 아무것도 열지 않습니다 — 자는 동안 돌릴 때" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => pickOpenAfterMake(e.target.checked)} />완성 후 열기</label>
-            {(outTarget === 'mp4' || outTarget === 'whiteboard') && (() => {
-              const chp = (presets || []).find((q) => q.name === presetName) || null;
-              const eff = uploadAfter === 'on';   // 업로드 여부는 이 체크박스 하나만 정한다(채널 설정 무관)
-              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 업로드 여부는 이 체크박스 하나만 정합니다(이 PC 에 기억 · 채널 설정에는 올릴 채널만 고릅니다).' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={eff} onChange={(e) => { pickUploadAfter(e.target.checked); if (e.target.checked && chp && !chp.ytChannelId) setStatus('⚠ 이 채널은 업로드채널이 정해지지 않아 올리지 못합니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); }} />완성 후 업로드</label>;
-            })()}
-            {outTarget === 'whiteboard' && (<>
-              <select title="출력 긴변(px) — 렌더 시간은 픽셀 수에 비례합니다. 1920 은 22분 편에 약 30분. 확인·튜닝 중엔 1080·640 으로 낮춰 돌리세요." value={String((wbCfg && wbCfg.capLongEdge) || 1920)} onChange={(e) => saveWbCfg({ capLongEdge: parseInt(e.target.value, 10) })}>
-                <option value="1920">1920 (최종)</option>
-                <option value="1080">1080 (빠름)</option>
-                <option value="640">640 (시험)</option>
-              </select>
-              <label className="chk" title="자막을 영상에 굽습니다(하드번) — 화이트보드는 Vrew 를 거치지 않는 최종물이라 굽지 않으면 화면에 글자가 안 보입니다. ⚠ 구우면 영상을 다시 인코딩하므로 길이에 비례해 몇 분 더 걸립니다. 꺼도 .srt 파일은 옆에 남습니다." style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={!wbCfg || wbCfg.subtitle !== false} onChange={(e) => saveWbCfg({ subtitle: e.target.checked })} />💬 자막
-              </label>
-              <button className="ghost" disabled={!loaded} title="관문 A — 장면 계획만 봅니다(그룹→장면 · 영역 수 · 예상 렌더 시간). 파이썬을 부르지 않아 즉시 뜹니다." onClick={showWhiteboardPlan}><span className="rb-ic">📋</span> <span className="rb-t">장면 계획</span></button>
-            </>)}
-            {/* 🎛 작업 순서(롱폼 큐) **전체**에 묶음 단계(v0.9.39 · 로이) — 대본 머리의 같은 아이콘은 그 대본만 */}
-            <span className="hdiv" />
-            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-ti" title="작업 순서의 모든 대본 — 🎤 TTS 를 전부 만든 뒤 🖼 이미지 (이미 있는 것은 건너뜀)" onClick={() => runStageQueue('ttsimg')}><ComboIc ics={COMBO_TI} /></button>
-            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-iv" title="작업 순서의 모든 대본 — 🖼 이미지를 전부 만든 뒤 🎬 비디오 (모델 스왑 1번 · 이미 있는 것은 건너뜀)" onClick={() => runStageQueue('imgvid')}><ComboIc ics={COMBO_IV} /></button>
-            <button disabled={!loaded} className="combo-btn" data-testid="rb-combo-tiv" title="작업 순서의 모든 대본 — 🎤 TTS → 🖼 이미지 → 🎬 비디오를 단계마다 전부 (이미 있는 것은 건너뜀 · 완성 파일은 만들지 않음 — 완성은 ⚡ 만들기)" onClick={() => runStageQueue('ttsimgvid')}><ComboIc ics={COMBO_TIV} /></button>
-            <span className="hdiv" />
-            {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
-            {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
-            {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
-            <button className="ghost" disabled={!loaded} data-testid="open-out-folder" title={outTarget === 'mp4' ? '🎬 유튜브 MP4 가 저장되는 폴더(채널 「저장 폴더」)를 엽니다' : outTarget === 'whiteboard' ? '✏ 화이트보드 MP4 폴더를 엽니다' : '.vrew 가 저장되는 대본 폴더를 엽니다'} onClick={() => api.openFolder({ target: outTarget, presetName: presetName || null })}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
-          </span>
-              <span className="hgroup rb-extra" id="capbar">
-        <button className="ghost" disabled={!loaded || prog.ttsD === 0}
-          title="유튜브 설명글에 넣을 챕터 타임스탬프 — 각 그룹의 TTS 길이를 누적해 만듭니다(상위 H2 섹션 = 챕터 1개). TTS 변환을 끝낸 뒤 누르세요."
-          onClick={openTimestamps}><span className="rb-ic">⏱</span> <span className="rb-t">타임스탬프</span></button>
-        <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입 (기본 표시 · 언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
-              </span>
-            </>)}
-            {menu === 'insert' && (
-              <span className="hgroup" data-testid="ins-ribbon">
-                <span className="glabel">➕ 삽입</span>
-                <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
-                <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
-                <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
-                <span className="hdiv" />
-                <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
-                  <label className="chk"><input type="checkbox" data-testid="bgm-on" checked={!!bgmCfg.on} disabled={!presetName} onChange={(e) => (e.target.checked && !bgmCfg.path ? pickBgm(false) : saveBgm({ on: e.target.checked }))} />🎵 배경음악</label>
-                  <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
-                  <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
-                  <span className="meta">음량</span>
-                  <input className="nbox" data-testid="bgm-vol" type="number" style={{ width: 44 }} min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
-                </span>
-                <span className="hdiv" />
-                <span className="ins-logo" data-testid="ins-logo" title={stageLogo ? '🏷 이 대본의 로고 자리 — 로고 그림·크기·켜기는 ⚙ 채널편집 → 📁 폴더' : '이 채널은 로고가 꺼져 있습니다 — ⚙ 채널편집 → 📁 폴더 → 🏷 채널 로고'}>
-                  <span className="meta">🏷 로고</span>
-                  <select data-testid="logo-side" disabled={!loaded || !isLf} value={curLogoPos() ? 'free' : curLogoSide()} onChange={(e) => { if (e.target.value !== 'free') setLogoSide(e.target.value); }}
-                    title="↗/↖ = 정해진 자리 · ① 칸에서 로고를 끌면 「✋ 직접 옮김」(이 대본만) — ↗/↖ 를 다시 고르면 제자리">
-                    <option value="right">↗ 오른쪽 위</option><option value="left">↖ 왼쪽 위</option>
-                    {curLogoPos() && <option value="free">✋ 직접 옮김</option>}</select>
-                  <button className="ghost" data-testid="logo-pos-chan" disabled={!presetName || !isLf || !(curLogoPos() || logoCfg.pos)}
-                    title={curLogoPos() ? '📌 채널 기본으로 — 이 대본에서 끌어 옮긴 로고 자리를 채널 기본 자리로 저장 — 이 채널의 모든 영상(.vrew·MP4)에 늘 그 자리' : (logoCfg.pos ? `📌✕ 채널 기본 자리 해제(지금 왼쪽에서 ${Math.round(logoCfg.pos.x * 100)}% · 위에서 ${Math.round(logoCfg.pos.y * 100)}%) — 기본(오른쪽 위)으로` : '① 칸에서 로고를 끌어 옮기면 켜집니다')}
-                    onClick={() => saveChanLogoPos(curLogoPos() ? curLogoPos() : null)}>{curLogoPos() ? '📌' : '📌✕'}</button>
-                  <span className="meta">크기</span>
-                  <input className="nbox" data-testid="logo-size" type="number" min="4" max="40" step="1" style={{ width: 44 }} disabled={!presetName}
-                    title="로고 크기 — 화면 너비 대비 % (4~40 · 기본 12) · 채널 값이라 ⚙ 채널편집의 크기와 늘 같고, 바꾸면 곧바로 저장됩니다"
-                    value={logoCfg.size} onChange={(e) => setLogoSize(e.target.value)} onBlur={() => { if (!(Number(logoCfg.size) >= 4)) setLogoSize(12); }} /><span className="meta">%</span>
-                  {!stageLogo && <span className="meta" data-testid="logo-off">{curLogoOver() && !curLogoOver().on ? '(이 대본 로고 뺌)' : '(이 채널 로고 꺼짐)'}</span>}
-                  <select data-testid="logo-queue" disabled={!loaded || !isLf} value={(() => { const o = curLogoOver(); return !o ? 'chan' : o.on ? 'on' : 'off'; })()}
-                    title="🏷 롱폼 큐에 올라온 대본 모두에 로고 넣기·빼기 — 채널 설정(⚙ 채널편집의 로고)은 그대로 · 채널에 로고 그림이 없으면 그림을 고르라고 묻습니다"
-                    onChange={(e) => setQueueLogo(e.target.value)}>
-                    <option value="chan">큐: 채널대로</option><option value="on">큐: 로고 넣기</option><option value="off">큐: 로고 빼기</option></select>
-                </span>
-              </span>
-            )}
-            {menu === 'format' && (
-              <CaptionToolbar fmt={capSelFmt()} pos={capSelPos()} active={!!capSel} label={capSelLabel()} panel={capSel ? capPanel : null}
-                onPatch={(p) => applyCapFmt(p)} onClear={() => clearCapFmt(null)} onApplyAll={applyCapFmtAll} scope={capScope} onScope={setCapScope}
-                onPanel={(p) => setCapPanel((cur) => (cur === p ? null : p))}
-                onDone={() => { setCapSel(null); setCapPanel(null); }}
-                onSaveDefault={saveCapDefault} />
-            )}
+            {menu === 'file' && (<>{ribOpen(true)}{ribFinish()}</>)}
+            {menu === 'home' && (<>{ribOpen()}{ribVoice(true)}{ribVoiceExtra()}{splitBar}</>)}
+            {menu === 'edit' && (<>{ribEdit}</>)}
+            {menu === 'caption' && (<>{splitBar}</>)}
+            {menu === 'format' && (<>{ribFormat()}</>)}
+            {menu === 'insert' && (<>{ribInsert()}</>)}
+            {menu === 'voice' && (<>{ribVoice()}{ribVoiceExtra()}</>)}
+            {menu === 'template' && (<>{ribTemplate}</>)}
+            {menu === 'effect' && (<>{ribEffect}</>)}
+            {menu === 'make' && (<>{ribMakeSub}{makeSub === 'video' ? ribVideo() : ribImage()}</>)}
+            {menu === 'help' && (<>{ribHelp}</>)}
             {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
             <span className="hgroup rb-reader">
               {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}

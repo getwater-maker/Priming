@@ -74,7 +74,7 @@ const md = () => fs.readFileSync(MD, 'utf8');
     ok(btn.every((b) => b.sw <= b.cw + 1), '글자가 잘리거나 넘치지 않는다 ' + JSON.stringify(btn.map((b) => [b.sw, b.cw])));
     ok(await win.locator('[data-testid="group-stock"]').count() === 0, '그룹 칸에 스톡 단추 없음');
 
-    await win.locator('.menubar button:text-is("이미지")').first().click(); await win.waitForTimeout(250);
+    await require('./_menu').byText(win, '이미지'); await win.waitForTimeout(250);
     ok(await win.locator('[data-testid="rb-tts-image"]').isVisible() && /TTS\+이미지/.test(await win.locator('[data-testid="rb-tts-image"]').innerText()), '이미지 탭에 「TTS+이미지」 단추(큐 전체를 TTS → 이미지 순서로)');
     const sz0 = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1366, 850)); await win.waitForTimeout(500);
@@ -256,7 +256,7 @@ const md = () => fs.readFileSync(MD, 'utf8');
 
     console.log('\n[5] 채널 로고 기본 자리 — 삽입 메뉴 「채널 기본으로」 · 채널편집 X·Y');
     const detail = () => win.evaluate(async (n) => { const d = await window.api.getPresetDetail(n); return { x: d.logoX, y: d.logoY }; }, chan);
-    await win.locator('.menubar button:text-is("삽입")').first().click(); await win.waitForTimeout(300);
+    await require('./_menu').byText(win, '삽입'); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="logo-pos-chan"]').isDisabled(), '끌어 옮긴 자리도 채널 기본 자리도 없으면 📌 꺼져 있다');
     await win.evaluate(async () => { const r = await window.api.listQueue(); await window.api.setLogoPos({ shortsNum: r.dto.projects[0].shortsNum, pos: { x: 0.3, y: 0.4 } }); });
     await win.waitForTimeout(500);

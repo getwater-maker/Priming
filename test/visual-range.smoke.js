@@ -65,7 +65,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     // [0] 리본 높이 · 서식 막대 ✕
     const hs = [];
     for (const t of ['대본·음성', '이미지', '비디오', '완성', '서식']) {
-      await win.locator(`.menubar button:text-is("${t}")`).first().click();
+      await require('./_menu').byText(win, t);
       await win.waitForTimeout(150);
       hs.push(await win.evaluate(() => Math.round(document.querySelector('#body').getBoundingClientRect().top)));
     }
@@ -74,7 +74,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     await win.waitForSelector('.cf-bar:not(.idle)', { timeout: 5000 });
     ok(!(await win.locator('.cf-bar').innerText()).includes('✕'), '서식 막대에 ✕(선택 해제) 없음');
     await win.keyboard.press('Escape'); await win.keyboard.press('Escape');
-    await win.locator('.menubar button:text-is("대본·음성")').first().click();
+    await require('./_menu').byText(win, '대본·음성');
 
     ok(JSON.stringify(await groups()) === JSON.stringify(G3), '처음 = 그룹 3개 · 문장 2개씩');
 
@@ -248,7 +248,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
 
     // [4d] 🏷 AI 고지 범위 — 꼬리표 → 이 클립부터 끝까지
     const aiOn = await win.evaluate(() => !!document.querySelector('[data-testid=ai-tag]'));
-    if (!aiOn) { await win.locator('.menubar button:text-is("완성")').first().click(); await win.locator('label.chk:has-text("AI 고지") input').check(); await win.locator('.menubar button:text-is("대본·음성")').first().click(); }
+    if (!aiOn) { await require('./_menu').byText(win, '완성'); await win.locator('label.chk:has-text("AI 고지") input').check(); await require('./_menu').byText(win, '대본·음성'); }
     await win.waitForSelector('[data-testid=ai-tag]', { timeout: 5000 });
     ok((await win.locator('[data-testid=ai-tag]').innerText()).includes('채널 설정'), '🏷 AI 고지 꼬리표(첫 문장 위 · 채널 설정대로)');
     await win.click('[data-testid=ai-tag]');
@@ -301,7 +301,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     await win.click('button.reset-btn');
     await win.waitForFunction(() => !document.querySelector('.sblk[data-ord]'), null, { timeout: 5000 }).catch(() => {});
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
-    await win.locator('.menubar button:text-is("대본·음성")').first().click();
+    await require('./_menu').byText(win, '대본·음성');
     await win.click('.ribbon button:has-text("열기")');
     await win.waitForSelector('.cut img.thumb', { timeout: 10000 }).catch(() => {});
     await win.waitForTimeout(2500);
