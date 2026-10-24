@@ -138,7 +138,8 @@ ${para}
       return { gapBottom: window.innerHeight - w.bottom, nextTxt: nxt ? nxt.textContent : '', chan: sel ? sel.value : null };
     });
     if (fill.gapBottom > 24) throw new Error('화면 아래 빈 공간 ' + Math.round(fill.gapBottom) + 'px');
-    if (!/원고 열기/.test(fill.nextTxt)) throw new Error('원고 열기 버튼이 출판 탭 다음이 아님: ' + fill.nextTxt);
+    // 메뉴 줄 1단계 — 모드 전환이 오른쪽 위로 가서 「원고 열기」는 왼쪽(로고·업데이트 뒤)에 남는다
+    { const ob = await win.locator('.menubar [data-testid="open-book"]').boundingBox(); const tg = await win.locator('.modetoggle').boundingBox(); if (!ob || !tg || ob.x > tg.x) throw new Error('원고 열기 버튼이 메뉴 줄에 없거나 모드 전환 뒤에 있음'); }
     const pres = await win.evaluate(() => window.api.listPresets());
     const bkCh = (pres || []).find((p) => p.startMode === 'book');
     if (bkCh && fill.chan !== bkCh.name && fill.chan !== '출판') throw new Error('출판 탭인데 채널이 ' + fill.chan + ' (기대 출판 채널)');

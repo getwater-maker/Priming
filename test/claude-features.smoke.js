@@ -62,7 +62,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(gs[1].img === 'filled image 2' && gs[0].img === 'old prompt one' && gs[2].img === 'old prompt three', '✍ 빈 칸만 채움: ' + gs.map((g) => g.img).join(' | '));
 
     // ② 🔁 이미지 프롬프트 — 리본 단추(② 이미지 탭) · 고른 그룹 없음 = 전체 덮어쓰기
-    await win.click('button:has-text("이미지")').catch(() => {});
+    await require('./_menu').byText(win, '이미지').catch(() => {});
     const btnI = win.locator('[data-testid=rewrite-img-prompts]');
     ok(await btnI.count() === 1, '② 이미지 리본에 🔁 이미지 프롬프트 단추');
     await btnI.click();
@@ -72,7 +72,7 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     ok(gs[1].vid === 'filled motion 2', '이미지만 다시 쓸 땐 영상 프롬프트는 그대로');
 
     // ③ 🔁 영상 프롬프트(③ 비디오 탭) — 영상 범위 = 직접 입력 없음이면 도입부 → G1 · 그다음 Ctrl+Z
-    await win.click('button:has-text("비디오")').catch(() => {});
+    await require('./_menu').byText(win, '비디오').catch(() => {});
     const btnV = win.locator('[data-testid=rewrite-vid-prompts]');
     ok(await btnV.count() === 1, '③ 비디오 리본에 🔁 영상 프롬프트 단추');
     await btnV.click();

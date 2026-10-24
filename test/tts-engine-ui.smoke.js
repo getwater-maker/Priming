@@ -28,6 +28,7 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
     const win = await app.firstWindow();
     win.on('pageerror', (e) => errs.push(String(e.message || e)));
     await win.waitForSelector('h1', { timeout: 20000 });
+    await require('./_menu')(win, 'voice');
     const btn = win.locator('[data-testid="tts-engine-btn"]');
     await btn.waitFor({ timeout: 10000 });
     ok(await btn.isVisible(), '🔊 음성 엔진 버튼이 보인다');

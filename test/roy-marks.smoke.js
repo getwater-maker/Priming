@@ -45,6 +45,7 @@ const bankRows = (f) => { try { return fs.readFileSync(path.join(BANK, f), 'utf8
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sblk', { timeout: 20000 });
+    await require('./_menu')(win, 'caption');
     await win.locator('[data-testid="reader-open"]').click();
     await win.waitForSelector('[data-testid="script-reader"]', { timeout: 5000 });
     const R = win.locator('[data-testid="script-reader"]');

@@ -13,6 +13,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(1366, 820); });
     win.on('pageerror', (e) => errors.push(String(e)));
     await win.waitForSelector('h1', { timeout: 20000 });
+    await require('./_menu')(win, 'voice');
     await win.locator('button[title^="발음사전"]').first().click();
     await win.waitForSelector('[data-testid=dict-dlg]', { timeout: 8000 });
     // 🔑 입력칸과 추가 단추가 처음부터 보인다(눌러야 칸이 생기던 것을 바꿨다) · 등록된 단어 영역과 구분

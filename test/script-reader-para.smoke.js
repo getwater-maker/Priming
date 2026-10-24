@@ -63,6 +63,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForTimeout(2500);
 
+    await require('./_menu')(win, 'caption');
     await win.click('[data-testid="reader-open"]');
     await win.waitForSelector('[data-testid="script-reader"]', { timeout: 5000 });
     const R = win.locator('[data-testid="script-reader"]');
@@ -112,6 +113,7 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     await win.waitForTimeout(300);
 
     // 📘 작성 기준 — 대본 보기 바로 옆 · 내용과 파일 위치
+    await require('./_menu')(win, 'help');
     await win.click('[data-testid="guide-open-btn"]');
     await win.waitForSelector('[data-testid="guide-body"]', { timeout: 5000 });
     const gp = await win.locator('[data-testid="guide-path"]').innerText();

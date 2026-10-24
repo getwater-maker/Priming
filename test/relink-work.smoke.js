@@ -37,12 +37,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(await win.evaluate(async ({ name, dir }) => { try { await window.api.addPreset({ name }); await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, scriptFolder: dir } }); return true; } catch (_) { return false; } }, { name: chan, dir: outDir }), '임시 채널');
     await win.reload(); await win.waitForSelector('h1', { timeout: 20000 }); await win.waitForTimeout(400);
     await win.selectOption('select[title^="채널(프리셋)"]', chan); await win.waitForTimeout(600);
+    await require('./_menu')(win, 'voice');
     const btn = win.locator('[data-testid="relink-work"]');
     ok(await btn.count() === 1 && await btn.isDisabled(), '대본이 없으면 🔗 다시 연결은 눌리지 않는다(disabled)');
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
+    await require('./_menu')(win, 'home');
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sent[data-ln]', { timeout: 20000 });
     await win.waitForTimeout(600);
+    await require('./_menu')(win, 'voice');
     const html0 = await win.evaluate(() => document.body.innerHTML);
     ok(!/media-1[\\/%2F5Cc]*01\.png/i.test(html0) && !html0.includes('01.png'), '열었을 때는 그림이 비어 있다');
 

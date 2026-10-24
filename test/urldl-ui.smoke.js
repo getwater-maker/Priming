@@ -27,20 +27,20 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
 
     // [1] 📥 다운로드 버튼(v0.9.17 · 옛 대본다운 + 🎧 STT + 🎵 mp3) — 리본 오른쪽 끝(상시) 「📄 대본 보기」 바로 앞
     ok(await win.locator('button:has-text("🔗 URL")').count() === 0, '옛 🔗 URL 버튼이 없다');
+    await menu(win, 'make');   // 메뉴 줄 2단계 — 📥 다운로드는 제작 탭(옛 상시 묶음에서 이동)
     const btn = win.locator('[data-testid="urldl-open"]');
-    ok(await btn.count() === 1 && /다운로드/.test(await btn.innerText()), '📥 다운로드 버튼이 하나 있다');
-    const order = await win.locator('.rb-reader button').evaluateAll((bs) => bs.map((b) => b.dataset.testid || ''));
-    ok(order.indexOf('urldl-open') >= 0 && order.indexOf('urldl-open') + 1 === order.indexOf('reader-open'), `다운로드가 대본 보기 바로 앞 (${order.join(', ')})`);
-    for (const m of ['image', 'finish']) {
+    ok(await btn.count() === 1, '📥 다운로드 버튼이 하나 있다(제작 탭)');
+    for (const m of ['image', 'video']) {
       await menu(win, m);
-      ok(await btn.isVisible(), `${m} 메뉴에서도 보인다(상시)`);
+      ok(await btn.isVisible(), `제작 ▸ ${m} 에서도 보인다`);
     }
-    await menu(win, 'script');
+    await menu(win, 'home');
+    ok(await win.locator('[data-testid="urldl-open"]').count() === 0, '홈 탭에는 없다(상시 묶음 해체)');
     ok(await win.locator('.ribbon .rb-t', { hasText: /^STT$/ }).count() === 0 && await win.locator('.ribbon .rb-t', { hasText: /^mp3$/ }).count() === 0,
       '리본에 옛 🎧 STT · 🎵 mp3 버튼이 없다(📂 내 파일 탭으로 합침)');
 
     // [2] 눌러서 창이 뜬다 — 여기서 미정의 식별자가 있으면 터진다
-    await btn.click();
+    await menu(win, 'make'); await btn.click();
     await win.waitForSelector('[data-testid="dl-modal"]', { timeout: 8000 });
     const card = win.locator('[data-testid="dl-modal"]');
     ok(/다운로드 · STT/.test(await card.locator('h3').innerText()), '창이 열린다 — 제목 「📥 다운로드 · STT」');
@@ -174,7 +174,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
         return { ok: true, results: [{ ok: true, subtitles: ['sample.en.txt'] }] };
       });
     });
-    await btn.click();
+    await menu(win, 'make'); await btn.click();
     await win.waitForSelector('[data-testid="dl-modal"]');
     await win.locator('[data-testid="dl-mode"]').selectOption('subtitles');
     await win.locator('[data-testid="dl-modal"] textarea').fill('https://www.youtube.com/watch?v=oKRJ0kiHHLw');

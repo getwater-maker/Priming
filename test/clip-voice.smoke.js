@@ -48,12 +48,14 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(600);
 
     // ⓪ 대본 없이 리본 버튼 = 채널 기본(채널 목록)
+    await require('./_menu')(win, 'voice');
     await win.locator('[data-testid="tts-engine-btn"]').click();
     await win.locator('[data-testid="tts-eng-card"]').waitFor({ timeout: 8000 });
     ok(await win.locator('[data-testid="tts-chan-list"]').count() === 1 && /채널 기본/.test(await win.locator('[data-testid="tts-mode"]').innerText()), '대본이 없으면 리본 🔊 = 채널 기본 목소리(채널 목록)');
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
 
     await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, MD);
+    await require('./_menu')(win, 'home');
     await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")');
     await win.waitForSelector('.sent.clip', { timeout: 20000 });
 
@@ -81,7 +83,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
 
     // ② 리본 🔊 → 열린 대본 모드(클립을 고르면 리본이 서식으로 바뀐다 → 대본·음성으로)
-    await menu(win, 'script');
+    await menu(win, 'voice');
     { const info = await win.locator('[data-testid="tts-engine-btn"]').evaluate((el) => { const r = el.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { vis: r.width + 'x' + r.height + '@' + Math.round(r.left) + ',' + Math.round(r.top), hit: t ? (t.className || t.tagName) + '' : null, inside: !!t && el.contains(t) }; });
       ok(info.inside, `리본 🔊 버튼이 실제로 눌리는 자리 (${JSON.stringify(info)})`); }
     await win.locator('[data-testid="tts-engine-btn"]').click({ timeout: 5000 });
@@ -110,6 +112,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(800);
     ok(/own/.test(await clip('밥 먹어라').getAttribute('class')) && /own/.test(await clip('어서 들어오너라').getAttribute('class')) && /MAI-Voice · 해나/.test(await clip('어서 들어오너라').getAttribute('title')), '🗣 엄마 배지 둘 다 = 이 대본 화자 목소리(파랗게)');
     ok(/own/.test(await clip('셋째 문장입니다').getAttribute('class')) && /내레목소리/.test(await clip('셋째 문장입니다').getAttribute('title')), '🗣 내레이션 배지 = 이 대본 내레이션 목소리');
+    await require('./_menu')(win, 'voice');
     { const tt = await win.locator('[data-testid="tts-cost"]').getAttribute('title');
       ok(/MAI-Voice · ko-KR-Haena \d+자/.test(tt) && /OmniVoice \d+자/.test(tt), `💰 예상 비용 = 목소리별(엄마 = MAI · 내레이션 = OmniVoice) (${(tt || '').split('\n')[2] || ''})`);
       ok(!/무료/.test(await win.locator('[data-testid="tts-cost"]').innerText()), '💰 유료 목소리(엄마)가 있어 「무료」가 아니다'); }

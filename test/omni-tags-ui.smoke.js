@@ -15,6 +15,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1', PRIMING_VOICE_TAGS_FILE: TAGS } });
   try {
     const win = await app.firstWindow();
+    await require('./_menu')(win, 'voice');
     await win.waitForSelector('[data-testid="tts-engine-btn"]', { timeout: 20000 });
     await win.locator('[data-testid="tts-engine-btn"]').click();
     await win.locator('[data-testid="tts-eng-card"]').waitFor({ timeout: 8000 });

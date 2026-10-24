@@ -59,6 +59,7 @@ const files = [1, 2].map((i) => { const f = path.join(TMP, `clip${i}.mp4`); exec
     const low = await win.evaluate(() => Math.round(window.innerHeight - document.querySelector('[data-testid="urldl-progress"]').getBoundingClientRect().bottom));
     ok(low >= 12 && low <= 20, '③ 제작 팝업이 없으면 맨 아래(16px)로: ' + low + 'px');
     // ④ 다운로드 창을 다시 열면 「진행 중」
+    await require('./_menu')(win, 'make');   // 📥 다운로드 단추는 제작 탭(메뉴 줄 2단계)
     await win.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /다운로드/.test(x.textContent || '') || /다운로드/.test(x.title || '')); if (b) b.click(); });
     await win.waitForSelector('[data-testid="dl-modal"]', { timeout: 5000 });
     const busy = await win.evaluate(() => (document.querySelector('[data-testid="dl-busy"]') || {}).textContent || '');

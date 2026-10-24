@@ -89,6 +89,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       const mb2 = await win.locator('.menubar').boundingBox();
       ok(mb2 && mb2.height < 56, `대본을 연 뒤에도 1366px 메뉴 줄이 한 줄 (${mb2 && Math.round(mb2.height)}px)`);
       // 💰 대본 TTS 예상 비용(v0.6.76) — 임시 채널 = OmniVoice → 「무료」 · 음성 없는 문장 글자 수
+      await menu(win, 'voice');
       { const c = win.locator('[data-testid="tts-cost"]');
         const t = (await c.count()) ? (await c.innerText()).replace(/\s+/g, ' ') : '';
         ok((await c.count()) === 1 && await c.isVisible() && /예상 무료/.test(t) && /[\d,]+자/.test(t), `🎤 TTS 옆 💰 예상 비용 (${t})`); }
@@ -139,6 +140,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
         await win.evaluate(() => localStorage.removeItem('pm.uploadAfterMake'));
         await win.selectOption(sel, before || 'vrew'); await win.waitForTimeout(150);
       }
+      await menu(win, 'help');
       const mo = await win.locator('[data-testid="monitor-off"]').boundingBox();
       ok(!!mo && await win.evaluate(({ x, y }) => !!(document.elementFromPoint(x, y) || {}).closest?.('[data-testid="monitor-off"]'), { x: mo.x + mo.width / 2, y: mo.y + mo.height / 2 }), '🌙 모니터 끄기 버튼이 보이고 눌리는 자리(누르지는 않는다)');
       await win.locator('.menus button[data-menu]', { hasText: '홈' }).first().click(); await win.waitForTimeout(250);

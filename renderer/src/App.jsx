@@ -6112,6 +6112,8 @@ export default function App() {
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
             {!compact && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
+                화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
 </span>);
   const ribVoice = (noLabel) => (<span className="hgroup" data-testid="rib-voice">{!noLabel && <span className="glabel">음성</span>}
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
@@ -6312,15 +6314,50 @@ export default function App() {
                 onSaveDefault={saveCapDefault} />
             );
   const selOk = clipSelOk();
-  const ribEdit = (<span className="hgroup" data-testid="rib-edit"><span className="glabel">편집</span>
+
+  // 🧭 메뉴 줄 2단계 — 옛 상시 묶음(rb-reader)의 단추를 탭으로: 대본 보기 → 자막 · 다운로드 → 제작 · 모니터 끄기·작성 기준·크레딧 → 도움말
+  const ribMonitor = (<button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>);
+  const ribDl = (<button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>);
+  const ribReaderBtn = (<button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>);
+  const ribGuide = (<button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>);
+  const showFileInfo = () => {
+    if (!loaded || !dto || !dto.projects) { setStatus('ⓘ 열려 있는 대본이 없습니다'); return; }
+    let groups = 0, clips = 0, voiced = 0, imgs = 0;
+    for (const p of dto.projects) for (const c of (p.cuts || [])) { groups++; if (c.imagePath || c.image) imgs++; for (const s of (c.sentences || [])) { clips++; if (s.audio) voiced++; } }
+    setStatus(`ⓘ 작업 파일 「${dto.fileTitle || ''}」 — 그룹 ${groups} · 클립(문장) ${clips} · 음성 ${voiced}/${clips} · 그림 ${imgs}/${groups} · 채널 「${presetName || ''}」`);
+  };
+  const ribUndo = () => (<>
     <button className="ghost" data-testid="rb-undo" disabled={!loaded} title="되돌리기 (Ctrl+Z)" onClick={() => runUndo(false, true)}><span className="rb-ic">↶</span> <span className="rb-t">되돌리기</span></button>
     <button className="ghost" data-testid="rb-redo" disabled={!loaded} title="다시 실행 (Ctrl+Shift+Z)" onClick={() => runUndo(true, true)}><span className="rb-ic">↷</span> <span className="rb-t">다시실행</span></button>
-    <span className="hdiv" />
-    <button className="ghost" data-testid="rb-clip-split" disabled={!selOk} title="클립 나누기 — 고른 클립의 자막 칸을 열어 줍니다(나눌 자리에 커서를 놓고 Enter)" onClick={clipSplitHere}><span className="rb-ic">✂</span> <span className="rb-t">클립 나누기</span></button>
+  </>);
+  const ribClipboard = () => (<>
+    <button className="ghost" data-testid="rb-cut" disabled={!selOk} title="잘라내기 (Ctrl+X) — 고른 클립(글 + 음성)을 잘라 냅니다" onClick={() => clipCopy(true)}><span className="rb-ic">✂</span> <span className="rb-t">잘라내기</span></button>
+    <button className="ghost" data-testid="rb-copy" disabled={!selOk} title="복사하기 (Ctrl+C) — 고른 클립(글 + 음성)" onClick={() => clipCopy(false)}><span className="rb-ic">⧉</span> <span className="rb-t">복사하기</span></button>
+    <button className="ghost" data-testid="rb-paste" disabled={!selOk || !clipBoard} title={clipBoard ? '붙여넣기 (Ctrl+V) — 고른 클립 뒤에' : '붙여넣기 — 먼저 복사하거나 잘라내세요'} onClick={clipPaste}><span className="rb-ic">📋</span> <span className="rb-t">붙여넣기</span></button>
+  </>);
+  const ribClipOps = () => (<>
     <button className="ghost" data-testid="rb-clip-merge" disabled={!selOk || (capSel && capSel.items.length < 2)} title="클립 합치기 — 고른 클립을 하나로(두 개 이상 고를 때)" onClick={clipMerge}><span className="rb-ic">⊟</span> <span className="rb-t">클립 합치기</span></button>
+    <button className="ghost" data-testid="rb-clip-split" disabled={!selOk} title="클립 나누기 — 고른 클립의 자막 칸을 열어 줍니다(나눌 자리에 커서를 놓고 Enter)" onClick={clipSplitHere}><span className="rb-ic">✂</span> <span className="rb-t">클립 나누기</span></button>
     <button className="ghost" data-testid="rb-clip-quiet" disabled={!selOk} title="무음 구간 줄이기 — 고른 클립의 쉼을 최대 0.3초로(세부 값은 클립 우클릭 ▸ 무음 구간 줄이기)" onClick={() => clipQuietSet(0.3, false)}><span className="rb-ic">⇥</span> <span className="rb-t">무음 구간 줄이기</span></button>
+  </>);
+  const ribEdit = (<span className="hgroup" data-testid="rib-edit"><span className="glabel">편집</span>
+    {ribUndo()}
     <span className="hdiv" />
-    <button className="ghost" data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
+    <span className="rb-stack" title="클립 선택 — 현재 클립 · 전체 · 홀수 · 짝수 · 선택 반전">
+      <span className="meta">☑ 클립 선택</span>
+      <select data-testid="rb-clip-select" disabled={!loaded} value="" onChange={(e) => { if (e.target.value) ctxSelect(e.target.value); e.target.value = ''; }}>
+        <option value="">고르기…</option><option value="cur">현재 클립</option><option value="all">전체</option><option value="odd">홀수 클립</option><option value="even">짝수 클립</option><option value="inv">선택 반전</option>
+      </select>
+    </span>
+    <span className="hdiv" />
+    {ribClipboard()}
+    <span className="hdiv" />
+    {ribClipOps()}
+    <span className="hdiv" />
+    <button className="ghost soon" data-testid="rb-marker" title="마커 — 준비 중" onClick={() => clipSoon('마커')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
+    <button className="ghost soon" data-testid="rb-overwrite-voice" title="음성 덮어쓰기 — 준비 중" onClick={() => clipSoon('음성 덮어쓰기')}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
+    <span className="hdiv" />
+    <button className="ghost" data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
   </span>);
   const ribEffect = (<span className="hgroup" data-testid="rib-effect"><span className="glabel">효과</span>
     <span className="rb-stack" title="배속 효과 — 고른 클립이 든 문장의 음성을 빠르게·느리게(원본 음성은 그대로 · Ctrl+Z 한 번)">
@@ -6332,12 +6369,28 @@ export default function App() {
     <button className="ghost" data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
+    {pointsEl}
     <button className="ghost" data-testid="rb-help-settings" title="통합 설정 — API 키 · 서버 · 채널 연결 · 폴더 · 계정" onClick={() => openSettings(settingsTabForEngine())}><span className="rb-ic">⚙</span> <span className="rb-t">설정</span></button>
     <button className="ghost" data-testid="rb-help-update" disabled={upd.busy} title="업데이트 확인 — 새 버전이 있으면 받아서 다시 시작합니다(작업 중이 아닐 때)" onClick={runUpdate}><span className="rb-ic">⟳</span> <span className="rb-t">업데이트</span></button>
+    {ribGuide}
+    {ribMonitor}
   </span>);
   const ribTemplate = (<span className="hgroup" data-testid="rib-template"><span className="glabel">템플릿</span>
     <span className="meta" style={{ alignSelf: 'center' }}>준비 중 — 로고는 삽입 메뉴, 정보 카드는 대본의 표시 줄로 만듭니다</span>
   </span>);
+  const ribCaption = () => (<>
+    {splitBar}
+    <span className="hgroup" data-testid="rib-caption"><span className="glabel">자막</span>
+      {ribReaderBtn}
+      <button className="ghost" data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
+    </span>
+  </>);
+  const ribFileVrew = () => (<span className="hgroup" data-testid="rib-file-vrew">
+    <button className="ghost" data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
+    <button className="ghost" data-testid="rb-backup" disabled={!loaded} title="백업에서 되살리기 — 대본마다 10분 간격으로 남긴 백업에서 고른 시각으로" onClick={() => setBackupDlg(true)}><span className="rb-ic">🕘</span> <span className="rb-t">백업</span></button>
+    <button className="ghost" data-testid="rb-fileinfo" disabled={!loaded} title="작업 파일 정보 — 그룹·클립·음성·그림 개수" onClick={showFileInfo}><span className="rb-ic">ⓘ</span> <span className="rb-t">파일 정보</span></button>
+  </span>);
+  const ribMakeExtra = (<span className="hgroup" data-testid="rib-make-extra">{ribDl}</span>);
   const ribMakeSub = (<span className="hgroup make-sub" data-testid="rib-make-sub">
     <span className="rb-stack seg-v">
       <button className={makeSub === 'image' ? 'on' : 'ghost'} data-testid="make-sub-image" onClick={() => setMakeSub('image')}>② 이미지</button>
@@ -6445,28 +6498,17 @@ export default function App() {
         </div>
         {!noProduction && (
           <div className="ribbon" data-testid="ribbon" data-menu-on={menu} onWheel={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY; }}>
-            {menu === 'file' && (<>{ribOpen(true)}{ribFinish()}</>)}
-            {menu === 'home' && (<>{ribOpen()}{ribVoice(true)}{ribVoiceExtra()}{splitBar}</>)}
+            {menu === 'file' && (<>{ribOpen(true)}{ribFileVrew()}{ribFinish()}</>)}
+            {menu === 'home' && (<>{ribOpen()}<span className="hdiv" />{ribUndo()}<span className="hdiv" />{ribClipboard()}<span className="hdiv" />{ribClipOps()}</>)}
             {menu === 'edit' && (<>{ribEdit}</>)}
-            {menu === 'caption' && (<>{splitBar}</>)}
+            {menu === 'caption' && (<>{ribCaption()}</>)}
             {menu === 'format' && (<>{ribFormat()}</>)}
             {menu === 'insert' && (<>{ribInsert()}</>)}
             {menu === 'voice' && (<>{ribVoice()}{ribVoiceExtra()}</>)}
             {menu === 'template' && (<>{ribTemplate}</>)}
             {menu === 'effect' && (<>{ribEffect}</>)}
-            {menu === 'make' && (<>{ribMakeSub}{makeSub === 'video' ? ribVideo() : ribImage()}</>)}
+            {menu === 'make' && (<>{ribMakeSub}{makeSub === 'video' ? ribVideo() : ribImage()}{ribMakeExtra}</>)}
             {menu === 'help' && (<>{ribHelp}</>)}
-            {/* 📄 대본 보기 — 메뉴와 상관없이 늘 리본 오른쪽 끝(■ 중단 아래 자리). sticky 라 리본이 가로로 넘쳐도 보인다 */}
-            <span className="hgroup rb-reader">
-              {/* 🌙 모니터 끄기(v0.5.80) — 헤더에 두면 1366px 에서 메뉴 줄이 두 줄이 된다(v0.5.81 실측 78px) → 늘 보이는 이 자리로 */}
-              {pointsEl}
-              <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>
-              {/* 📥 다운로드(v0.9.17 · 옛 「📥 대본다운」 + 🎧 STT + 🎵 mp3 통합) — 구 ① 「🔗 URL」(로이 2026-09-26 · 대본 보기 바로 앞). 대본이 없어도 쓴다(받는 중만 막힘). */}
-              <button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>
-              <button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>
-              {/* 📘 대본 작성 기준 — 대본 보기 바로 옆(로이 2026-10-12) · 대본이 없어도 본다 */}
-              <button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>
-            </span>
           </div>
         )}
       </header>

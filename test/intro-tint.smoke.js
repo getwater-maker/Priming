@@ -51,6 +51,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     win.on('pageerror', (e) => errors.push(String(e)));
     await win.waitForSelector('h1', { timeout: 20000 });
+    await win.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));   // 이 시험의 기대 색은 라이트 값
     lsSaved = await win.evaluate(() => { const o = {}; for (const k of ['pm.view', 'pm.pane1R', 'pm.clipDetail']) { try { o[k] = localStorage.getItem(k); localStorage.removeItem(k); } catch (_) {} } return o; });
     await win.evaluate(async ({ name, dir }) => {
       const ps = (await window.api.listPresets()) || [];
@@ -59,7 +60,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await window.api.savePreset({ name, patch: { outputFolder: dir, outLong: dir, scriptFolder: dir } });
     }, { name: CH, dir: TMP });
     chMade = true;
-    await win.reload(); await win.waitForSelector('h1', { timeout: 20000 });
+    await win.reload(); await win.waitForSelector('h1', { timeout: 20000 }); await win.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));   // 이 시험의 기대 색은 라이트 값
     await win.waitForFunction((n) => [...document.querySelectorAll('select option')].some((o) => o.value === n), CH, { timeout: 8000 });
     await win.selectOption('select[title^="채널(프리셋) — 고르면"]', CH);
     await win.waitForTimeout(800);

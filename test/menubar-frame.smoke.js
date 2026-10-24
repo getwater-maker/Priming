@@ -32,7 +32,7 @@ fs.writeFileSync(MD, ['# 메뉴줄 시험', '', '## 장', '### ① 첫 장면', 
     ok(await win.locator('.menus button.on').innerText() === '홈', '기본 탭 = 홈');
 
     console.log('\n[2] 탭마다 리본이 바뀌고 한 줄에 들어간다(1366px)');
-    const expect = { file: ['open-after-make'], home: ['today-scripts', 'tts-engine-btn'], edit: ['rb-clip-split', 'rb-clip-merge', 'rb-clip-quiet', 'rb-undo'], caption: [], format: [], insert: ['ins-image', 'ins-logo'], voice: ['tts-engine-btn'], template: ['rib-template'], effect: ['rb-speed-1.5', 'rb-fit-contain'], make: ['make-sub-image'], help: ['rb-help-settings', 'rb-help-update'] };
+    const expect = { file: ['open-after-make', 'rb-new', 'rb-backup', 'rb-fileinfo'], home: ['today-scripts', 'rb-undo', 'rb-redo', 'rb-cut', 'rb-copy', 'rb-paste', 'rb-clip-merge', 'rb-clip-split', 'rb-clip-quiet'], edit: ['rb-undo', 'rb-clip-select', 'rb-cut', 'rb-clip-split', 'rb-clip-merge', 'rb-clip-quiet', 'rb-marker', 'rb-overwrite-voice', 'rb-find-edit'], caption: ['reader-open', 'rb-copy-all-caps'], format: [], insert: ['ins-image', 'ins-logo'], voice: ['tts-engine-btn', 'relink-work', 'tts-cost'], template: ['rib-template'], effect: ['rb-speed-1.5', 'rb-fit-contain'], make: ['make-sub-image', 'urldl-open'], help: ['rb-help-settings', 'rb-help-update', 'guide-open-btn', 'monitor-off'] };
     const seen = new Set();
     for (const id of Object.keys(expect)) {
       await win.click(`.menus button[data-menu="${id}"]`); await win.waitForTimeout(150);
@@ -42,6 +42,9 @@ fs.writeFileSync(MD, ['# 메뉴줄 시험', '', '## 장', '### ① 첫 장면', 
       for (const t of expect[id]) ok(await win.locator(`[data-testid="${t}"]`).count() >= 1, `${id} 탭에 ${t}`);
     }
     ok(seen.size >= 9, `탭마다 리본 내용이 다르다(${seen.size}종)`);
+    ok(await win.locator('.rb-reader').count() === 0, '옛 상시 묶음(rb-reader)이 없다 — 단추는 탭으로 흩어졌다');
+    await win.click('.menus button[data-menu="home"]'); await win.waitForTimeout(100);
+    for (const gone of ['reader-open', 'urldl-open', 'guide-open-btn']) ok(await win.locator(`[data-testid="${gone}"]`).count() === 0, `홈 탭에는 ${gone} 없음(자기 탭에서만 보인다)`);
     const mb = await win.locator('.menubar').boundingBox();
     ok(mb && mb.height < 56, `메뉴 줄 한 줄(${mb && Math.round(mb.height)}px)`);
 
