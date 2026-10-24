@@ -1931,3 +1931,37 @@ main .card h2{top:var(--work-top-height,0px)}
   .menubar .bktab{padding:6px 5px}
   .menubar .bktab .bkcnt{margin-left:3px}
 }
+
+/* 👤 계정·크레딧 화면(메뉴 줄 5단계 · Vrew 계정 화면의 틀) */
+#body.acct-hidden{display:none}
+.acct-btn.on{background:var(--accent);color:var(--fg-ffffff)}
+.acct-page{flex:1;overflow:auto;padding:18px 16px 40px;background:var(--bg)}
+.acct-col{max-width:560px;margin:0 auto}
+.acct-top{display:flex;justify-content:flex-end;margin-bottom:6px}
+.acct-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;margin:0 0 6px}
+.acct-card:first-of-type{display:flex;align-items:center;gap:14px}
+.acct-avatar{flex:0 0 56px;height:56px;border-radius:50%;background:var(--sky);color:var(--fg-ffffff);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800}
+.acct-who{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.acct-who b{font-size:18px;color:var(--strong)}
+.acct-h{margin:18px 2px 8px;font-size:var(--fs-md);font-weight:700;color:var(--muted)}
+.acct-hrow{display:flex;align-items:center;justify-content:space-between}
+.acct-plan{display:flex;align-items:center;justify-content:space-between}
+.acct-plan b{display:block;font-size:17px;color:var(--strong);margin-bottom:3px}
+.acct-credit-h{font-weight:700;color:var(--strong);margin-bottom:6px}
+.acct-gauge{position:relative;width:260px;margin:4px auto 0}
+.acct-gauge svg{width:100%;display:block}
+.acct-gauge-n{position:absolute;left:0;right:0;bottom:6px;text-align:center;display:flex;flex-direction:column}
+.acct-gauge-n b{font-size:28px;color:var(--strong)}
+.acct-gauge-n span{font-size:var(--fs-sm);color:var(--muted)}
+.acct-scale{display:flex;justify-content:space-between;width:260px;margin:0 auto;font-size:var(--fs-sm);color:var(--muted)}
+.acct-note{text-align:center;margin-top:10px}
+.acct-admin{margin-top:10px;padding:6px 10px;border-radius:var(--r-md);background:var(--paper-3);color:var(--strong);font-size:var(--fs-md)}
+.acct-usage{min-height:70px}
+header.vhead.acct-on .ribbon{display:none}   /* 계정 화면 = Vrew 처럼 리본 없이 */
+header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(--strong)}
+/* 👤 계정 단추가 늘어 「⏸ 이번 편까지만」이 뜨는 1366px 에서 27px 넘쳤다 — 탭 패딩·간격을 더 줄인다 */
+@media (max-width:1440px){
+  .menubar{gap:4px}
+  .menubar .menus .menu{padding:6px 4px}
+}
+@media (max-width:1440px){ .menubar .modetoggle button{padding:5px 4px} }

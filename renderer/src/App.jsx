@@ -40,6 +40,7 @@ import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
 import BackupModal from './BackupModal.jsx';
+import AccountPage from './AccountPage.jsx';
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -883,11 +884,12 @@ export default function App() {
   // 메뉴는 켤 때마다 「대본·음성」부터(Vrew 도 홈부터) — 기억해 두면 다음 실행이 엉뚱한 메뉴로 열려 「열기」가 안 보인다
   const [menu, setMenu] = useState('home');
   const [makeSub, setMakeSub] = useState('image');
+  const [acctPage, setAcctPage] = useState(false);   // 👤 계정·크레딧 화면(메뉴 줄 5단계) — 열려 있으면 본문(#body)을 숨기고 이 화면을 보인다
   const [bkState, setBkState] = useState(null);   // 출판 모드: { tab, badge } — BookView 가 알린다(메뉴 줄 4단계)
   const [rxState, setRxState] = useState(null);   // 리모션 모드: { tab, nRows, nImg }
   useEffect(() => { const f = (e) => setBkState(e.detail || null); const g = (e) => setRxState(e.detail || null); window.addEventListener('bk-state', f); window.addEventListener('rx-state', g); return () => { window.removeEventListener('bk-state', f); window.removeEventListener('rx-state', g); }; }, []);   // 제작 탭 안: 이미지 | 비디오
   // 옛 메뉴 이름(script·image·video·finish)도 받는다 — 메뉴 따라가기·시험·옛 코드가 부른다
-  const pickMenu = (id) => { const to = MENU_ALIAS[id] || id; if (id === 'image' || id === 'video') setMakeSub(id); if (MENUS.some((x) => x[0] === to)) setMenu(to); };
+  const pickMenu = (id) => { setAcctPage(false); const to = MENU_ALIAS[id] || id; if (id === 'image' || id === 'video') setMakeSub(id); if (MENUS.some((x) => x[0] === to)) setMenu(to); };
   const [view, setView] = useState(() => (lsGet('pm.view', 'clips') === 'cards' ? 'cards' : 'clips'));
   const pickView = (v) => { setView(v); lsSet('pm.view', v); };
   // 🧩 클립 보기의 개요/상세(Vrew 오른쪽 위 토글) — 상세 = 클립마다 화자·시각 머리줄 + 어절 칩 + 자막 줄
@@ -6413,18 +6415,19 @@ export default function App() {
       <div className="topsticky">
       {/* 🧭 v0.5.42 — Vrew 처럼 **메뉴 줄 + 리본**(로이 2026-09-25: 「메뉴를 누르면 그 메뉴에 관련된 항목이 나오게」).
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
-      <header className="vhead">
+      <header className={'vhead' + (acctPage ? ' acct-on' : '')}>
         <div className="menubar">
             <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>{api.isLab ? '🧪' : '🎬'} Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
             <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
               title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
               onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>
+            <button className={'ghost acct-btn' + (acctPage ? ' on' : '')} data-testid="acct-open" title="내 계정 · 요금제 · 크레딧" onClick={() => { setAcctPage((v) => !v); if (!acctPage) refreshPoints(true); }}><span aria-hidden="true">👤</span><span className="lbl"> 계정</span></button>
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
             {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
             {noProduction && pointsEl}
             {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
           {isBk && bkState && bkState.loaded && (
-            <nav className="menus" data-testid="bk-nav">
+            <nav className="menus" data-testid="bk-nav" onClickCapture={() => setAcctPage(false)}>
               {BOOK_TABS.map(([id, ic, name]) => (
                 <button key={id} data-tab={id} className={'menu bktab' + (bkState && bkState.tab === id ? ' on' : '')} onClick={() => window.dispatchEvent(new CustomEvent('bk-set-tab', { detail: id }))} title={name}>
                   <span className="bkti">{ic}</span> <span>{name}</span>
@@ -6434,7 +6437,7 @@ export default function App() {
             </nav>
           )}
           {isRx && rxState && rxState.nRows > 0 && rxState.nImg > 0 && (
-            <nav className="menus" data-testid="rx-nav">
+            <nav className="menus" data-testid="rx-nav" onClickCapture={() => setAcctPage(false)}>
               <button className={'menu' + (rxState.tab === 'tts' ? ' on' : '')} onClick={() => window.dispatchEvent(new CustomEvent('rx-set-tab', { detail: 'tts' }))}>🎤 음성 {rxState.nRows}행</button>
               <button className={'menu' + (rxState.tab === 'img' ? ' on' : '')} onClick={() => window.dispatchEvent(new CustomEvent('rx-set-tab', { detail: 'img' }))}>🖼 그림 {rxState.nImg}장</button>
             </nav>
@@ -6540,7 +6543,10 @@ export default function App() {
       </header>
       </div>
       {/* 🧭 가로 3칸(Vrew) — ① 영상·이미지(커서 줄 자막) ② 자막 클립 목록 ③ 자세한 설정(열릴 때만) */}
-      <div id="body" className={wsOn ? 'ws' : ''}>
+      {acctPage && <AccountPage points={points} licKind={licKind} refreshPoints={refreshPoints} onClose={() => setAcctPage(false)}
+        onSettings={() => { setAcctPage(false); openSettings('account'); }}
+        onLogout={async () => { if (!uiConfirm('로그아웃하면 다시 로그인할 때까지 앱을 쓸 수 없습니다. 로그아웃할까요?')) return; await api.licenseLogout(); location.reload(); }} />}
+      <div id="body" className={(wsOn ? 'ws' : '') + (acctPage ? ' acct-hidden' : '')}>
         {wsOn && (<>
           <section className={'pane1' + (paneAuto ? ' auto-size' : '')} data-testid="pane1" style={{ width: `calc(${(pane1W * 100).toFixed(1)}% - 196px)` }}>
             {stageEl}
