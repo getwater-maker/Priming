@@ -446,7 +446,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
               <button type="button" className="ghost" data-testid="reader-roy-exp" disabled={royC.exp === 0} title="누르면 🟥 경험 표시로 이동 — 미확인부터, 한 번 더 누르면 다음" style={{ padding: '1px 7px', fontWeight: 700, color: royC.expOpen ? 'var(--danger)' : 'var(--base)' }} onClick={() => jumpRoy('exp')}>
                 🟥 미확인 {royC.expOpen}{royC.exp > royC.expOpen ? ` (확인 ${royC.exp - royC.expOpen})` : ''}</button>
               <span>·</span>
-              <button type="button" className="ghost" data-testid="reader-roy-int" disabled={royC.int === 0} title="누르면 🟨 해석 표시로 이동 — 한 번 더 누르면 다음" style={{ padding: '1px 7px', fontWeight: 700, color: '#8a6a00' }} onClick={() => jumpRoy('int')}>
+              <button type="button" className="ghost" data-testid="reader-roy-int" disabled={royC.int === 0} title="누르면 🟨 해석 표시로 이동 — 한 번 더 누르면 다음" style={{ padding: '1px 7px', fontWeight: 700, color: 'var(--fg-8a6a00,#8a6a00)' }} onClick={() => jumpRoy('int')}>
                 🟨 {royC.int}</button>
               {royC.lost ? <span>· ⚠ 못 찾은 표시 {royC.lost}</span> : null}
             </span>
@@ -477,14 +477,14 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
         </div>
         {msg && <div className="meta" data-testid="reader-msg" style={{ padding: '6px 14px', background: msg.startsWith('✗') ? '#fbeaea' : '#f3f8ef', borderBottom: '1px solid var(--line)', color: msg.startsWith('✗') ? 'var(--danger)' : 'var(--base)' }}>{msg}</div>}
         {(spellBusy > 0 || spellNote || spell.length > 0) && (
-          <div data-testid="reader-spell" style={{ padding: '6px 14px', borderBottom: '1px solid var(--line)', background: '#f6f3fb', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div data-testid="reader-spell" style={{ padding: '6px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg-f6f3fb,#f6f3fb)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {spellBusy > 0 && <div className="meta">🔎 맞춤법 검사 중… (Claude · 몇 초)</div>}
             {spellNote && !spellBusy && <div className="meta" data-testid="reader-spell-note">{spellNote}</div>}
             {spell.map((row) => (
               <div key={row.mid} data-testid="reader-spell-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                 <b style={{ color: row.k === 'exp' ? '#9b2c22' : '#6b5400' }}>{row.k === 'exp' ? '🟥' : '🟨'} 「{row.head}…」 맞춤법</b>
                 {row.items.map((it) => (
-                  <span key={it['틀림']} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '1px 6px' }}>
+                  <span key={it['틀림']} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', background: 'var(--bg-ffffff,#fff)', border: '1px solid var(--line)', borderRadius: 6, padding: '1px 6px' }}>
                     <s style={{ color: 'var(--danger)' }}>{it['틀림']}</s> → <b>{it['바름']}</b>
                     <button className="ghost" style={{ padding: '0 6px' }} data-testid="spell-apply" onClick={() => applySpell(row, [it])}>반영</button>
                     <button className="ghost" style={{ padding: '0 6px' }} onClick={() => dismissSpell(row, [it])}>무시</button>
@@ -496,7 +496,7 @@ export default function ScriptReader({ api, dto, onDto, onClose, uiConfirm, log,
           </div>
         )}
         <div style={{ flex: 1, overflow: 'auto', padding: '26px 16px 60px' }}>
-          <div style={{ maxWidth: 760, margin: '0 auto', background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '40px 52px', fontSize: fontPx, lineHeight: 1.85, color: '#1d1a16', wordBreak: 'keep-all', fontFamily: "'Malgun Gothic', sans-serif" }}>
+          <div style={{ maxWidth: 760, margin: '0 auto', background: 'var(--bg-ffffff,#fff)', border: '1px solid var(--line)', borderRadius: 6, padding: '40px 52px', fontSize: fontPx, lineHeight: 1.85, color: 'var(--fg-1d1a16,#1d1a16)', wordBreak: 'keep-all', fontFamily: "'Malgun Gothic', sans-serif" }}>
             {!projects.length && <div className="meta">대본을 먼저 여세요.</div>}
             <div ref={docRef} data-testid="reader-doc" contentEditable suppressContentEditableWarning spellCheck={false}
               style={{ outline: 'none', whiteSpace: 'pre-wrap', cursor: 'text' }}

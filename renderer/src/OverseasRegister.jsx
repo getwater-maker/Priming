@@ -53,7 +53,7 @@ export default function OverseasRegister({ dto, setStatus }) {
       <div style={{ marginTop: 8 }}>
         <b>항목별 값</b> <span className="meta">(사이트 화면 순서)</span>
         {plan.fields.map((f) => (
-          <div key={f.key} className="bkfield" data-testid={'ovr-field-' + f.key} style={{ borderTop: '1px solid var(--line, #ddd)', padding: '6px 0' }}>
+          <div key={f.key} className="bkfield" data-testid={'ovr-field-' + f.key} style={{ borderTop: '1px solid var(--line, var(--bd-dddddd,#ddd))', padding: '6px 0' }}>
             <div className="bkrow" style={{ alignItems: 'center', gap: 6 }}>
               <b>{f.label}</b>
               <span className="meta" title={f.step}>→ {f.site}</span>
@@ -64,7 +64,7 @@ export default function OverseasRegister({ dto, setStatus }) {
             {f.hint && <div className="meta">{f.hint}</div>}
             {f.list && f.list.length > 0
               ? f.list.map((v, i) => (<div key={i} className="bkrow" style={{ gap: 6 }}><span style={{ flex: 1, wordBreak: 'break-word' }}>{i + 1}. {v}</span><button className="ghost" onClick={() => doCopy(f.key + i, v)}>{copied === f.key + i ? '✓' : '📋'}</button></div>))
-              : (f.value ? <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{f.value}</div> : <div className="meta" style={{ color: '#b45309' }}>(비어 있음 — 등록정보 파일에 적어 주세요)</div>)}
+              : (f.value ? <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{f.value}</div> : <div className="meta" style={{ color: 'var(--fg-b45309,#b45309)' }}>(비어 있음 — 등록정보 파일에 적어 주세요)</div>)}
           </div>
         ))}
       </div>

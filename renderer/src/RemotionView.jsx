@@ -311,7 +311,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         {playing && <button className="ghost" onClick={stopPlay}>⏹ 정지</button>}
         <button className="ghost" onClick={openOut} disabled={busy}
           title="만들어진 mp3 가 있는 폴더를 엽니다">📁 mp3 폴더</button>
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border,#ddd)', margin: '0 2px' }} />
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border,var(--bg-dddddd,#ddd))', margin: '0 2px' }} />
         <button onClick={openImageTsv} disabled={busy || imgBusy || allBusy}
           title="장면 그림 목록(경로·장면·한글·positive·negative) TSV 를 엽니다.
 여러 개 고를 수 있고, 대본 없이 이것만 열어 그림만 만들 수도 있습니다.">🖼 그림 TSV 열기</button>
@@ -369,7 +369,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         <b>📖 발음사전</b>{' '}
         {dict
           ? <span title={dict.path}>{dict.name}</span>
-          : <span style={{ color: '#b8791a' }}>물려 있지 않습니다 — 채널 편집 → 📁 폴더 → 「발음사전」 에서 지정하세요</span>}
+          : <span style={{ color: 'var(--fg-b8791a,#b8791a)' }}>물려 있지 않습니다 — 채널 편집 → 📁 폴더 → 「발음사전」 에서 지정하세요</span>}
       </div>
 
       <div className="meta" style={{ marginTop: 6 }}>
@@ -383,8 +383,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       </div>
 
       {errs.length > 0 && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, background: '#fdf0ee' }}>
-          <b style={{ color: '#c0392b' }}>TSV 오류 {errs.length}건 — 하나라도 있으면 만들지 않습니다</b>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, background: 'var(--bg-fdf0ee,#fdf0ee)' }}>
+          <b style={{ color: 'var(--fg-c0392b,#c0392b)' }}>TSV 오류 {errs.length}건 — 하나라도 있으면 만들지 않습니다</b>
           <ul style={{ margin: '6px 0 0 18px' }}>
             {errs.slice(0, 12).map((e, i) => <li key={i}>{e.line}행: {e.message}</li>)}
           </ul>
@@ -393,8 +393,8 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
 
       {prog && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ height: 8, background: '#eee', borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: (prog.n ? (prog.i / prog.n * 100) : 0) + '%', background: 'var(--accent,#c9884a)' }} />
+          <div style={{ height: 8, background: 'var(--bg-eeeeee,#eee)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: (prog.n ? (prog.i / prog.n * 100) : 0) + '%', background: 'var(--accent,var(--bg-c9884a,#c9884a))' }} />
           </div>
           <div className="meta" style={{ marginTop: 4 }}>
             {prog.images ? '🖼 그림 ' : (prog.preview ? '🎧 미리듣기 ' : '')}{prog.i} / {prog.n}
@@ -412,7 +412,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       )}
 
       {pvNames.length > 0 && (
-        <div style={{ marginTop: 10, padding: '6px 10px', border: '1px solid var(--border,#ddd)', borderRadius: 6,
+        <div style={{ marginTop: 10, padding: '6px 10px', border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6,
           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <b>🎧 미리듣기 {pvNames.length}개</b>
           <button className="ghost" onClick={() => playSeq(pvNames)} disabled={busy}>▶ 이어 듣기</button>
@@ -423,7 +423,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       )}
 
       {result && !result.error && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6 }}>
           <b>완료</b> — 만듦 {result.made} · 건너뜀 {result.skipped} · 실패 {result.failed.length} / 전체 {result.total}
           {result.totalTrimmedSec > 0 && <> · 무음 {result.totalTrimmedSec.toFixed(1)}초 제거</>}
           {result.rtf != null && (
@@ -435,21 +435,21 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
           )}
           <div className="meta" style={{ marginTop: 4 }}>{result.outDir}</div>
           {result.failed.length > 0 && (
-            <ul style={{ margin: '6px 0 0 18px', color: '#c0392b' }}>
+            <ul style={{ margin: '6px 0 0 18px', color: 'var(--fg-c0392b,#c0392b)' }}>
               {result.failed.slice(0, 10).map((f, i) => <li key={i}>{f.name} — {f.reason}</li>)}
             </ul>
           )}
         </div>
       )}
       {result && result.error && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, color: '#c0392b' }}>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, color: 'var(--fg-c0392b,#c0392b)' }}>
           {result.error}
         </div>
       )}
 
       {imgErrs.length > 0 && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, background: '#fdf0ee' }}>
-          <b style={{ color: '#c0392b' }}>그림목록 오류 {imgErrs.length}건 — 하나라도 있으면 만들지 않습니다</b>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, background: 'var(--bg-fdf0ee,#fdf0ee)' }}>
+          <b style={{ color: 'var(--fg-c0392b,#c0392b)' }}>그림목록 오류 {imgErrs.length}건 — 하나라도 있으면 만들지 않습니다</b>
           <ul style={{ margin: '6px 0 0 18px' }}>
             {imgErrs.slice(0, 12).map((e, i) => <li key={i}>{e.line}행: {e.message}</li>)}
           </ul>
@@ -457,19 +457,19 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       )}
 
       {imgResult && !imgResult.error && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6 }}>
           <b>🖼 그림 완료</b> — 만듦 {imgResult.made} · 건너뜀 {imgResult.skipped} · 실패 {imgResult.failed.length} / 전체 {imgResult.total}
           {imgResult.perImageSec != null && <> · 장당 {imgResult.perImageSec.toFixed(1)}초</>}
           <div className="meta" style={{ marginTop: 4 }}>{imgResult.outRoot}</div>
           {imgResult.failed.length > 0 && (
-            <ul style={{ margin: '6px 0 0 18px', color: '#c0392b' }}>
+            <ul style={{ margin: '6px 0 0 18px', color: 'var(--fg-c0392b,#c0392b)' }}>
               {imgResult.failed.slice(0, 10).map((f, i) => <li key={i}>{f.rel} — {f.reason}</li>)}
             </ul>
           )}
         </div>
       )}
       {imgResult && imgResult.error && (
-        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, color: '#c0392b' }}>
+        <div style={{ marginTop: 10, padding: 10, border: '1px solid #c0392b', borderRadius: 6, color: 'var(--fg-c0392b,#c0392b)' }}>
           {imgResult.error}
         </div>
       )}
@@ -483,9 +483,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       )}
 
       {showTab === 'tts' && rows.length > 0 && (
-        <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+        <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,#fff)' }}>
+            <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,var(--bg-ffffff,#fff))' }}>
               <th style={{ textAlign: 'center', padding: '6px 4px', width: 30 }} title="미리듣기로 들어볼 문장을 고릅니다 (Shift 클릭 = 범위)">🎧</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 46 }}>#</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 180 }}>파일명</th>
@@ -498,7 +498,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
                 const pv = previews[r.name];
                 const isPlaying = playing === r.name;
                 return (
-                <tr key={r.name} style={{ borderTop: '1px solid var(--border,#eee)',
+                <tr key={r.name} style={{ borderTop: '1px solid var(--border,var(--bd-eeeeee,#eee))',
                   background: isPlaying ? '#fdf1e0' : (isPicked ? '#f6f1ea' : 'transparent') }}>
                   <td style={{ padding: '4px 4px', textAlign: 'center' }}>
                     <input type="checkbox" checked={isPicked} disabled={busy || pvBusy}
@@ -522,9 +522,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
       )}
 
       {showTab === 'img' && imgRows.length > 0 && (
-        <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,#ddd)', borderRadius: 6 }}>
+        <div style={{ marginTop: 12, maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 6 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,#fff)' }}>
+            <thead><tr style={{ position: 'sticky', top: 0, background: 'var(--card,var(--bg-ffffff,#fff))' }}>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 46 }}>#</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 70 }}>장면</th>
               <th style={{ textAlign: 'left', padding: '6px 8px', width: 300 }}>저장 경로</th>
@@ -533,7 +533,7 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
             </tr></thead>
             <tbody>
               {imgRows.map((r, i) => (
-                <tr key={r.rel} style={{ borderTop: '1px solid var(--border,#eee)' }}>
+                <tr key={r.rel} style={{ borderTop: '1px solid var(--border,var(--bd-eeeeee,#eee))' }}>
                   <td style={{ padding: '4px 8px', color: '#999' }}>{i + 1}</td>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.scene}</td>
                   <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 12 }} title={r.positive}>{r.rel}</td>

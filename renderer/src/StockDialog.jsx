@@ -117,7 +117,7 @@ export default function StockDialog({ target, onClose, onAttached, onOpenKeys })
             </div>
           )}
         </>)}
-        {errs.map((e, i) => <div key={i} className="meta" style={{ color: '#b45309', fontWeight: 600 }}>⚠ {e}</div>)}
+        {errs.map((e, i) => <div key={i} className="meta" style={{ color: 'var(--fg-b45309,#b45309)', fontWeight: 600 }}>⚠ {e}</div>)}
         {busy && !msg && <div className="meta">⏳ 검색 중…</div>}
         {msg && <div className="meta" data-testid="stock-msg" style={{ fontWeight: 600 }}>{msg}</div>}
         <div className="mbtns">

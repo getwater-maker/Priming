@@ -503,8 +503,8 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                 <span style={{ flex: 1 }} />
                 {/* 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78) — 여기는 상태와 그리로 가는 버튼만 */}
                 {eng.paid && (k.has
-                  ? <span className="meta" style={{ color: '#16a34a', fontWeight: 600 }} title={`${eng.keyLabel} 저장됨(…${k.tail}) — 바꾸기·지우기는 ⚙ 설정 → 🔑 API 키`}>🔑 키 저장됨</span>
-                  : <button data-testid="tts-key-goto" className="ghost" style={{ padding: '2px 8px', color: '#b45309' }} title="⚙ 설정 → 🔑 API 키 에서 넣습니다" onClick={() => (onOpenKeys ? onOpenKeys() : null)}>🔑 키 넣기 → ⚙ 설정</button>)}
+                  ? <span className="meta" style={{ color: 'var(--fg-16a34a,#16a34a)', fontWeight: 600 }} title={`${eng.keyLabel} 저장됨(…${k.tail}) — 바꾸기·지우기는 ⚙ 설정 → 🔑 API 키`}>🔑 키 저장됨</span>
+                  : <button data-testid="tts-key-goto" className="ghost" style={{ padding: '2px 8px', color: 'var(--fg-b45309,#b45309)' }} title="⚙ 설정 → 🔑 API 키 에서 넣습니다" onClick={() => (onOpenKeys ? onOpenKeys() : null)}>🔑 키 넣기 → ⚙ 설정</button>)}
                 {eng.models && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>모델
                   <select value={model} onChange={(ev) => setCfg({ model: ev.target.value })}>{eng.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></span>)}
                 {eng.regions && (<span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>지역
@@ -566,7 +566,7 @@ export default function TtsEngineDialog({ initialChannel, scriptChars, onClose, 
                   ? <button className="ghost" onClick={() => { stopRef.current = true; }}>⏹ 멈춤</button>
                   : <button className="ghost" data-testid="tts-more" title="한꺼번에 하기 · 목록 다시 받기" onClick={() => setMoreOpen((x) => !x)}>⋯</button>}
                 {moreOpen && !busyBatch && (
-                  <div className="tts-more" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 5, background: 'var(--bg, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: 6, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', minWidth: 210 }} onClick={() => setMoreOpen(false)}>
+                  <div className="tts-more" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 5, background: 'var(--bg, var(--bg-ffffff,#fff))', border: '1px solid var(--line)', borderRadius: 8, padding: 6, boxShadow: '0 6px 18px rgba(0,0,0,0.12)', minWidth: 210 }} onClick={() => setMoreOpen(false)}>
                     {tab === 'omnivoice' && shown.length > 0 && <button className="ghost" data-testid="tts-tag-many" disabled={!!busy} title="지금 보이는 목소리 전부에 같은 언어·성별·연령대를 한 번에 지정합니다(예: 「미표시」로 거른 뒤 전부 여성·청년) — 비워 둔 칸은 건드리지 않습니다" onClick={() => { setMoreOpen(false); setTagEdit({ names: shown.map((x) => x.name), title: `보이는 ${shown.length}개`, gender: '', age: '', lang: '', kw: '', many: true }); }}>🏷 보이는 {shown.length}개 한꺼번에 분류</button>}
                     {shown.length > 0 && !isLib && <button className="ghost" data-testid="tts-face-all" disabled={!!busy} title="보이는 목소리 중 얼굴이 없는 것을 🖥 로컬 ComfyUI 로(무료)" onClick={() => drawAllFaces(shown)}>🎨 얼굴 모두 그리기</button>}
                     {tab !== 'omnivoice' && shown.length > 0 && <button className="ghost" disabled={!!busy || (eng.paid && !hasKey(tab))} title="보이는 목소리 중 샘플이 없는 것을 한 번에(요금 확인 후)" onClick={() => makeAllSamples(shown)}>📦 샘플 모두 만들기</button>}
@@ -645,9 +645,9 @@ function PromoBanner({ p, krw, unit }) {
   if (p.ended) return <div data-testid="tts-promo" className="meta" style={{ fontSize: 12, padding: '3px 8px', borderRadius: 8, background: 'rgba(0,0,0,0.05)' }}>🎉 {p.label} — {md(p.until)}에 끝났습니다(지금은 정가로 계산)</div>;
   return (
     <div data-testid="tts-promo" title={[p.extra, p.caveat, '출처: ' + p.src].filter(Boolean).join('\n')}
-      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '7px 12px', borderRadius: 10, background: 'linear-gradient(90deg, #fff1e6, #ffe4ec)', border: '1.5px solid #f97316', color: '#9a3412' }}>
+      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '7px 12px', borderRadius: 10, background: 'linear-gradient(90deg, var(--bg-fff1e6,#fff1e6), var(--bg-ffe4ec,#ffe4ec))', border: '1.5px solid #f97316', color: 'var(--fg-9a3412,#9a3412)' }}>
       <span style={{ fontSize: 15, fontWeight: 800 }}>🎉 {p.label}</span>
-      <span style={{ fontSize: 15, fontWeight: 800, color: '#c2410c' }}>{md(p.from)} ~ {md(p.until)}</span>
+      <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--fg-c2410c,#c2410c)' }}>{md(p.from)} ~ {md(p.until)}</span>
       <span data-testid="tts-promo-dday" style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: left <= 2 ? '#dc2626' : '#f97316', borderRadius: 12, padding: '1px 9px' }}>{left > 0 ? `D-${left}` : '오늘까지'}</span>
       <span style={{ fontSize: 12 }}>{Object.entries(p.models).map(([m, u]) => `${NAMES[m] || m} 1만 자 ${wonTxt(u * 1e4, krw)}${unit && unit[m] && unit[m].listUsd ? `(정가 ${wonTxt(unit[m].listUsd * 1e4, krw)})` : ''}`).join(' · ')}</span>
       <span className="meta" style={{ fontSize: 11 }}>ⓘ 끝나는 시각은 공지에 없음</span>

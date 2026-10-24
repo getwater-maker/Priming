@@ -55,7 +55,7 @@ export default function BackupModal({ onClose, onRestored }) {
               ))}
             </div>
             <div style={{ flex: 1, maxHeight: 420, overflowY: 'auto' }}>
-              {cur && !cur.exists && <div className="meta" style={{ color: 'var(--warn, #b45309)' }}>⚠ 원래 대본 파일이 그 자리에 없습니다 — 되살리면 그 자리에 다시 만듭니다.</div>}
+              {cur && !cur.exists && <div className="meta" style={{ color: 'var(--warn, var(--fg-b45309,#b45309))' }}>⚠ 원래 대본 파일이 그 자리에 없습니다 — 되살리면 그 자리에 다시 만듭니다.</div>}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>시각(KST)</th><th style={{ textAlign: 'left' }}>언제</th><th style={{ textAlign: 'right' }}>문장</th><th style={{ textAlign: 'right' }}>대본</th><th /></tr></thead>
                 <tbody>

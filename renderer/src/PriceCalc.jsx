@@ -26,7 +26,7 @@ export default function PriceCalc({ plan }) {
   const row = { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '4px 0' };
   const inp = (w) => ({ width: w, padding: '3px 5px' });
   return (
-    <details open data-testid="price-calc" style={{ marginTop: 10, borderTop: '1px solid var(--line, #ddd)', paddingTop: 6 }}>
+    <details open data-testid="price-calc" style={{ marginTop: 10, borderTop: '1px solid var(--line, var(--bd-dddddd,#ddd))', paddingTop: 6 }}>
       <summary><b>💲 가격 · 인쇄비 · 인세 계산기</b> <span className="meta">(참고용 · 값 확인일 {PC.RATES.asOf})</span></summary>
       <div className="meta">값은 바뀝니다 — 등록 전에 공식 계산기와 대조하세요. <button className="ghost" onClick={() => open(isKdp ? 'https://kdp.amazon.com/en_US/royalty-calculator' : PC.RATES.d2d.calcUrl)}>🌐 공식 계산기 열기</button></div>
       {isKdp ? (<>
@@ -41,7 +41,7 @@ export default function PriceCalc({ plan }) {
           {pb.error ? <div className="bkwarn">⚠ {pb.error}</div> : (<>
             <div>인쇄비 <b data-testid="pc-cost">{usd(pb.cost)}</b> <span className="meta">({pb.pages}쪽 · {pb.large ? '대형' : '일반'} 판형 · 고정 ${pb.fixed}{pb.perPage ? ` + 쪽당 $${pb.perPage}` : ''}{pb.ambiguous ? ' · 110쪽은 두 구간에 적혀 높은 쪽 기준' : ''})</span></div>
             <div>인세율 <b>{Math.round(pb.rate * 100)}%</b> → 권당 인세 <b data-testid="pc-royalty" style={{ color: pb.royalty < 0 ? '#b00020' : undefined }}>{usd(pb.royalty)}</b> <span className="meta">= ({pb.rate}×정가) − 인쇄비</span></div>
-            <div>최소 정가 <b data-testid="pc-min">{usd(pb.minList)}</b> <span className="meta">(인세가 0 이상이 되는 가장 낮은 가격)</span>{pb.belowMin ? <b style={{ color: '#b00020' }}> ⚠ 지금 정가로는 인쇄비를 못 덮습니다</b> : null}</div>
+            <div>최소 정가 <b data-testid="pc-min">{usd(pb.minList)}</b> <span className="meta">(인세가 0 이상이 되는 가장 낮은 가격)</span>{pb.belowMin ? <b style={{ color: 'var(--fg-b00020,#b00020)' }}> ⚠ 지금 정가로는 인쇄비를 못 덮습니다</b> : null}</div>
             <div style={row}><label>공식 계산기 인쇄비 USD <input data-testid="pc-official" type="number" step="0.01" style={inp(80)} value={official} onChange={(e) => setOfficial(e.target.value)} /></label>
               {cmp.given && <span data-testid="pc-compare" style={{ color: cmp.ok ? '#15803d' : '#b00020' }}>{cmp.ok ? '✅ 앱 계산과 같습니다' : `⚠ 앱 ${usd(cmp.app)} ≠ 공식 ${usd(cmp.official)} (차이 ${usd(cmp.diff)}) — 값이 바뀌었을 수 있습니다`}</span>}</div>
           </>)}
@@ -53,8 +53,8 @@ export default function PriceCalc({ plan }) {
           {plan.publicDomain && <span className="meta">퍼블릭 도메인 — 70% 옵션 불가</span>}
         </div>
         <div data-testid="pc-kdp-ebook">
-          <div>35% 옵션: {eb.r35.ok ? <b>{usd(eb.r35.royalty)}</b> : <b style={{ color: '#b45309' }}>가격 범위 밖(${eb.r35.min}~${eb.r35.max})</b>}</div>
-          <div>70% 옵션: {eb.r70.publicDomainBlocked ? <b style={{ color: '#b45309' }}>퍼블릭 도메인은 불가</b> : eb.r70.ok ? <b>{usd(eb.r70.royalty)} <span className="meta">(전송비 {usd(eb.r70.delivery)})</span></b> : <b style={{ color: '#b45309' }}>정가 ${eb.r70.band[0]}~${eb.r70.band[1]} 밖(35% 적용)</b>}</div>
+          <div>35% 옵션: {eb.r35.ok ? <b>{usd(eb.r35.royalty)}</b> : <b style={{ color: 'var(--fg-b45309,#b45309)' }}>가격 범위 밖(${eb.r35.min}~${eb.r35.max})</b>}</div>
+          <div>70% 옵션: {eb.r70.publicDomainBlocked ? <b style={{ color: 'var(--fg-b45309,#b45309)' }}>퍼블릭 도메인은 불가</b> : eb.r70.ok ? <b>{usd(eb.r70.royalty)} <span className="meta">(전송비 {usd(eb.r70.delivery)})</span></b> : <b style={{ color: 'var(--fg-b45309,#b45309)' }}>정가 ${eb.r70.band[0]}~${eb.r70.band[1]} 밖(35% 적용)</b>}</div>
         </div>
       </>) : (<>
         <div className="bkchk" style={{ fontWeight: 700, marginTop: 6 }}>📕 D2D Print</div>

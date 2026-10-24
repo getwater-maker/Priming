@@ -1153,7 +1153,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             <button className="ghost" data-testid="bk-ai-blurb" disabled={!!aiBook.busy} title="원고를 읽고 키워드·한줄 소개·책 소개(부크크 5단계) 초안을 만듭니다 — 넣는 것은 「적용」을 누를 때만" onClick={runBlurb}>{aiBook.busy === 'blurb' ? '⏳ 쓰는 중…' : '✍ 소개글·키워드 초안'}</button>
             <button className="ghost" data-testid="bk-ai-proof" disabled={!!aiBook.busy} title="원고 전체의 맞춤법 교정 제안을 받아 보고서(.md)로 저장합니다 — 원고는 고치지 않습니다 · 시작 전에 예상 요금을 보여 줍니다" onClick={runProofread}>{aiBook.busy === 'proof' ? '⏳ 교정 중…' : '🔎 교정 제안'}</button>
           </div>
-          {aiBook.error && <div className="meta" style={{ color: '#c62828', fontWeight: 600, marginTop: 6 }}>⚠ {aiBook.error}</div>}
+          {aiBook.error && <div className="meta" style={{ color: 'var(--fg-c62828,#c62828)', fontWeight: 600, marginTop: 6 }}>⚠ {aiBook.error}</div>}
           {(aiBook.keywords || aiBook.tagline) && (<div className="meta" style={{ display: 'grid', gap: 4, marginTop: 8 }}>
             {aiBook.keywords && <div>키워드: <b>{aiBook.keywords}</b> <button className="ghost" onClick={() => applyAi('keywords', aiBook.keywords)}>적용</button></div>}
             {aiBook.tagline && <div>한줄 소개: <b>{aiBook.tagline}</b> <button className="ghost" onClick={() => applyAi('tagline', aiBook.tagline)}>적용</button></div>}
@@ -1462,7 +1462,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
       {building && (
         <div className="modal-bg show" style={{ zIndex: 90 }}>
           <div className="modal-card" style={{ width: 400, textAlign: 'center' }}>
-            <div className="spin" style={{ width: 38, height: 38, border: '4px solid #eee', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
+            <div className="spin" style={{ width: 38, height: 38, border: '4px solid var(--bd-eeeeee,#eee)', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
             <div style={{ fontWeight: 700, color: 'var(--strong)', marginBottom: 6 }}>{buildMsg || '생성 중…'}</div>
             <div className="bkbuild-elapsed" data-testid="bk-build-elapsed">⏱ 경과 {fmtElapsed(buildElapsed)}</div>
             <div className="meta">내지 조판은 원고 길이에 따라 수 분 걸릴 수 있습니다</div>

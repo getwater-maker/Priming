@@ -193,7 +193,7 @@ class ErrorBoundary extends React.Component {
   }
   render() {
     if (!this.state.err) return this.props.children;
-    return (<div style={{ padding: 16, margin: 12, border: '1px solid #c0392b', borderRadius: 8, background: '#fff5f5', color: '#c0392b', fontSize: 13 }}>
+    return (<div style={{ padding: 16, margin: 12, border: '1px solid #c0392b', borderRadius: 8, background: 'var(--bg-fff5f5,#fff5f5)', color: 'var(--fg-c0392b,#c0392b)', fontSize: 13 }}>
       <b>🐞 화면 오류로 이 영역을 그릴 수 없습니다.</b>
       <div style={{ margin: '6px 0', whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>{String(this.state.err && this.state.err.message)}</div>
       <button className="ghost" onClick={() => this.setState({ err: null })}>다시 시도</button>
@@ -453,7 +453,7 @@ function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove, sample, o
   useEffect(() => { setName(s.name); setPrompt(s.prompt); }, [s.id]);
   const dirty = name !== s.name || prompt !== s.prompt;
   return (
-    <div style={{ border: '1px solid var(--border,#ddd)', borderRadius: 8, padding: 8, marginBottom: 8, display: 'flex', gap: 8 }}>
+    <div style={{ border: '1px solid var(--border,var(--bd-dddddd,#ddd))', borderRadius: 8, padding: 8, marginBottom: 8, display: 'flex', gap: 8 }}>
       {/* 🎨 샘플 그림(v0.9.30) — 그리기 = 🖥 로컬 Qwen-Image 2.1(무료) · 📎 = 직접 지정 */}
       <div className="st-sample" data-testid="style-sample" data-id={s.id}>
         {sample ? <img src={media(sample.path, sample.v)} alt="" /> : <span className="none">샘플 없음</span>}
@@ -4055,7 +4055,7 @@ export default function App() {
 받아쓰기 ${Math.round(c.asrMatch * 100)}% 일치` : ''}`}>
                           <button className="ghost" style={{ padding: '1px 7px' }} onClick={() => (playing ? stopPreviewAudio() : vdPickCand(c, true))}>{playing ? '■' : '▶'} 후보 {c.n}</button>
                           <span className="meta" style={{ fontSize: 11 }}>{c.dur.toFixed(1)}초{c.asrMatch != null ? ` · ${Math.round(c.asrMatch * 100)}%` : ''}</span>
-                          {cur ? <b style={{ fontSize: 11, color: '#a8692a' }}>✔ 고름</b> : <button className="ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => vdPickCand(c, false)}>고르기</button>}
+                          {cur ? <b style={{ fontSize: 11, color: 'var(--fg-a8692a,#a8692a)' }}>✔ 고름</b> : <button className="ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => vdPickCand(c, false)}>고르기</button>}
                           <button className="ghost" style={{ padding: '0 5px', fontSize: 11 }} title="이 후보 버리기" onClick={() => vdDropCand(c)}>✕</button>
                         </span>); })}
                     </div>
@@ -6135,13 +6135,13 @@ export default function App() {
           <span className="grow" />
         {gsCool && gsCool.until > 0 && (
           <span title={`Genspark 이미지가 구독 한도에 도달했습니다. 그 전까지는 Genspark 에 접속하지 않고 바로 Flow 로 만들고, 이 시각이 지나면 만들던 대본 도중이라도 자동으로 Genspark 로 되돌아가 남은 이미지를 이어서 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            style={{ padding: '3px 9px', borderRadius: 6, background: 'var(--bg-fde8e8,#fde8e8)', color: 'var(--fg-a3352b,#a3352b)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
             🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
           </span>
         )}
         {grokCool && grokCool.until > 0 && (
           <span title={`Grok 영상이 한도에 도달했습니다. 이 시각 이후 재설정됩니다. 그 전까지는 Grok(브라우저) 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            style={{ padding: '3px 9px', borderRadius: 6, background: 'var(--bg-e8eefd,#e8eefd)', color: 'var(--fg-2b45a3,#2b45a3)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
             🎬 Grok 비디오 생성가능시간: {fmtKoTime(grokCool.until)}
           </span>
         )}
@@ -6271,9 +6271,9 @@ export default function App() {
             {(() => {   // 🎨 「📜 대본스타일」을 골랐을 때만 대본 화풍 상태를 보인다 — 다른 스타일을 고르면 대본 🎨 줄은 무시(2026-10-07 대본 우선 폐기)
               if (!loaded || styleId !== SCRIPT_STYLE_ID) return null;
               const ssp = dto && dto.projects && dto.projects[0] && dto.projects[0].scriptStyle;
-              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 🎨 없음</span>;   // 짧게 — 리본 1366px 한 줄(v0.9.95) · 설명은 마우스 글
+              if (!ssp) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title="이 대본에는 🎨 화풍 줄이 없습니다 — 이미지를 만들 때 스타일을 고르는 팝업이 뜹니다">⚠ 🎨 없음</span>;   // 짧게 — 리본 1366px 한 줄(v0.9.95) · 설명은 마우스 글
               const hit = scriptStyleHit();
-              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: '#b45309' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 🎨 「{ssp.id}」 없음</span>;
+              if (!hit) return <span className="meta" data-testid="style-src" style={{ color: 'var(--fg-b45309,#b45309)' }} title={`대본의 🎨 화풍 「${ssp.raw}」 — 이런 스타일이 없습니다. 만들 때 스타일을 고르는 팝업이 뜹니다`}>⚠ 🎨 「{ssp.id}」 없음</span>;
               return <span className="meta" data-testid="style-src" style={{ fontWeight: 700 }} title={`대본의 「> 🎨 화풍: ${ssp.raw}」 줄로 그립니다(이 대본의 모든 그림 · 한 장 다시 뽑기도 같은 화풍)`}>🎨 대본: {hit.name}</span>;
             })()}
             {loaded && imgCost && (
@@ -6820,7 +6820,7 @@ export default function App() {
               <input data-testid="info-edit-source" style={{ width: '100%', marginTop: 4 }} value={infoEdit.source} onChange={(ev) => setInfoEdit({ ...infoEdit, source: ev.target.value, err: '' })} />
             </>)}
             <div className="meta" style={{ marginTop: 8 }}>⚠ 숫자를 고치면 「팩트시트 대조 필요」 경고가 뜹니다. 대본(.md)의 그 표시 줄만 바뀌고 낭독·🖼️·🎬 줄은 그대로입니다.</div>
-            {infoEdit.err && <div style={{ color: '#b00020', marginTop: 6 }} data-testid="info-edit-err">⚠ {infoEdit.err}</div>}
+            {infoEdit.err && <div style={{ color: 'var(--fg-b00020,#b00020)', marginTop: 6 }} data-testid="info-edit-err">⚠ {infoEdit.err}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
               <button className="ghost" onClick={() => setInfoEdit(null)}>취소</button>
               <button data-testid="info-edit-save" onClick={saveInfoEdit}>저장</button>
@@ -6882,7 +6882,7 @@ export default function App() {
                 );
               })}
             </div>
-            {clipHist.error && <div style={{ color: '#b3261e', marginTop: 6 }}>⚠ {clipHist.error}</div>}
+            {clipHist.error && <div style={{ color: 'var(--fg-b3261e,#b3261e)', marginTop: 6 }}>⚠ {clipHist.error}</div>}
             <div className="mbtns"><button className="ghost" onClick={() => setClipHist(null)} disabled={clipHist.busy}>닫기</button></div>
           </div>
         </div>
@@ -7284,7 +7284,7 @@ export default function App() {
               </div>)}
 
             </div>
-            <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: '#c0392b' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
+            <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: 'var(--fg-c0392b,#c0392b)' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
           </div>
         </div>
       )}
@@ -7346,7 +7346,7 @@ export default function App() {
                   sample={styleSamples[s.id]} sampleBusy={sampleBusy} onSampleMake={(id) => makeStyleSamples([id], true)} onSamplePick={pickStyleSample} onSampleClear={clearStyleSample} />
               ))}
             </div>
-            <div style={{ borderTop: '1px solid var(--border,#ddd)', paddingTop: 8, marginTop: 4 }}>
+            <div style={{ borderTop: '1px solid var(--border,var(--bd-dddddd,#ddd))', paddingTop: 8, marginTop: 4 }}>
               <div className="subhead">➕ 새 스타일 추가</div>
               <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                 <input style={{ flex: '0 0 180px' }} placeholder="이름 (예: 나만의 수묵화)" value={newStyle.name} onChange={(e) => setNewStyle({ ...newStyle, name: e.target.value })} />
@@ -7619,7 +7619,7 @@ export default function App() {
                 올린 뒤 <b>썸네일·재생목록</b>은 앱이 넣고, 채널 편집에서 <b>⏰ 예약</b>을 켜면 공개 시각도 함께 보냅니다. 고정댓글·종료화면은 Studio 에서 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
               </Hint>
               {ytSt && !ytSt.available && <Hint>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</Hint>}
-              <div data-testid="yt-client" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+              <div data-testid="yt-client" style={{ background: 'var(--bg-fbf6ee,#fbf6ee)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 앱 연결</label>
                   <span className="meta" style={{ flex: 1 }} data-testid="yt-source">{ytSt && ytSt.hasClient
@@ -7632,7 +7632,7 @@ export default function App() {
                     : <button className="ghost" style={{ flex: '0 0 auto' }} data-testid="yt-import" title="고급 — 내 구글 클라우드 프로젝트의 client_secret_….json 을 쓰면 업로드 한도를 나 혼자 씁니다(대량 업로드용)" onClick={ytImport}>고급: 내 프로젝트 파일…</button>}
                 </div>
               </div>
-              <div data-testid="yt-channels" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+              <div data-testid="yt-channels" style={{ background: 'var(--bg-fbf6ee,#fbf6ee)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>② 채널</label>
                   <Hint>카드의 <b>🔄 다시 연결</b> = 그 채널만(구글 화면에서 다른 채널을 고르면 저장하지 않습니다 · 메모에 적은 메일 계정을 먼저 잡습니다). <b>＋ 새 채널 추가</b> = 아직 없는 채널. 「확인되지 않은 앱」이 뜨면 <b>고급 → Priming(으)로 이동</b> → 허용.</Hint>
@@ -7908,7 +7908,7 @@ export default function App() {
               총 길이 <b>{fmtMinSec(tsData.total)}</b>
             </div>
             {tsData.warns.map((w, i) => (
-              <div key={i} className="meta" style={{ marginBottom: 4, color: '#a3352b' }}>⚠ {w}</div>
+              <div key={i} className="meta" style={{ marginBottom: 4, color: 'var(--fg-a3352b,#a3352b)' }}>⚠ {w}</div>
             ))}
             {/* 비제어(uncontrolled) — 긴 텍스트를 제어 state 로 두면 타이핑마다 전 화면이 재렌더된다(2026-08-14 사고) */}
             <textarea ref={tsRef} rows="14" defaultValue={tsData.text} spellCheck={false}
@@ -7958,7 +7958,7 @@ export default function App() {
               <span style={{ fontWeight: 400 }}> — 스타일 「{(finalPrompt && finalPrompt.styleName) || promptView.styleName}」
                 {finalPrompt && !finalPrompt.styleHasPrompt ? ' ⚠(스타일 프롬프트 비어있음)' : ''} + 자동 네거티브 포함</span>
             </div>
-            <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: '#f6f2ea' }}
+            <textarea readOnly rows="7" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: 'var(--bg-f6f2ea,#f6f2ea)' }}
               value={(finalPrompt && finalPrompt.image) || '(계산 중…)'} />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
               <button className="ghost" disabled={!finalPrompt} onClick={() => { try { navigator.clipboard.writeText(finalPrompt.image); } catch (_) {} setStatus('최종 이미지 프롬프트 복사됨'); }}>📋 최종 프롬프트 복사</button>
@@ -7975,7 +7975,7 @@ export default function App() {
               ✅ <b>실제 생성에 전송되는 영상 프롬프트 전체</b>
               <span style={{ fontWeight: 400 }}> — 출처: {(finalPrompt && finalPrompt.videoSrc) || '…'} · 영상엔 스타일을 붙이지 않습니다(원본 이미지가 화풍을 가짐)</span>
             </div>
-            <textarea readOnly rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: '#f6f2ea' }}
+            <textarea readOnly rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11, background: 'var(--bg-f6f2ea,#f6f2ea)' }}
               value={(finalPrompt && finalPrompt.video) || '(계산 중…)'} />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
               <button className="ghost" disabled={!finalPrompt} onClick={() => { try { navigator.clipboard.writeText(finalPrompt.video); } catch (_) {} setStatus('최종 영상 프롬프트 복사됨'); }}>📋 최종 프롬프트 복사</button>

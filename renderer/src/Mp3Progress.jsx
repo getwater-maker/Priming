@@ -44,7 +44,7 @@ export default function Mp3Progress({ prog, onAbort, onClose }) {
       </div>
       {live && prog.file && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 12, color: '#7a6c58', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={prog.file} data-testid="mp3-cur">[{prog.idx}/{prog.total}] {prog.file}</div>
+          <div style={{ fontSize: 12, color: 'var(--fg-7a6c58,#7a6c58)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={prog.file} data-testid="mp3-cur">[{prog.idx}/{prog.total}] {prog.file}</div>
           <div className="dl-indet" />
         </div>
       )}

@@ -74,7 +74,7 @@ export default function SttProgress({ prog, onAbort, onClose }) {
                 <i style={{ width: donePct + '%' }} />
                 {live && <b className="stt-run" style={{ left: donePct + '%', width: (chunks ? slice : 100) + '%' }} />}
               </div>
-              {firstWait && <div style={{ color: '#b9772f', marginTop: 3 }}>⏳ Whisper 모델을 불러오는 중일 수 있습니다 — 처음이면 5분 넘게 걸립니다. 멈춘 게 아닙니다.</div>}
+              {firstWait && <div style={{ color: 'var(--fg-b9772f,#b9772f)', marginTop: 3 }}>⏳ Whisper 모델을 불러오는 중일 수 있습니다 — 처음이면 5분 넘게 걸립니다. 멈춘 게 아닙니다.</div>}
               <div style={{ color: '#999', marginTop: 3 }}>서버가 한 덩어리를 끝낼 때까지 중간 % 를 알려 주지 않아, 끝난 덩어리 수로 진행을 보여 드립니다.</div>
             </>
           )}

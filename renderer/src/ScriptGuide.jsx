@@ -81,11 +81,11 @@ export default function ScriptGuide({ api, onClose }) {
           <button className="ghost" data-testid="guide-open" onClick={() => act('open', '✓ 기본 프로그램으로 열었습니다')}>📝 파일 열기</button>
           <button className="ghost" onClick={onClose}>닫기</button>
         </div>
-        <div className="meta" data-testid="guide-path" style={{ padding: '6px 14px', borderBottom: '1px solid var(--line)', background: '#f3f8ef', wordBreak: 'break-all', userSelect: 'text' }}>
+        <div className="meta" data-testid="guide-path" style={{ padding: '6px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg-f3f8ef,#f3f8ef)', wordBreak: 'break-all', userSelect: 'text' }}>
           📍 파일 위치: <b>{info ? info.path : '…'}</b>{msg ? <span style={{ marginLeft: 10 }}>{msg}</span> : null}
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: '22px 16px 60px' }}>
-          <div style={{ maxWidth: 880, margin: '0 auto', background: '#fff', border: '1px solid var(--line)', borderRadius: 6, padding: '28px 40px', fontSize: 15, lineHeight: 1.7, color: '#1d1a16', wordBreak: 'keep-all', userSelect: 'text' }}>
+          <div style={{ maxWidth: 880, margin: '0 auto', background: 'var(--bg-ffffff,#fff)', border: '1px solid var(--line)', borderRadius: 6, padding: '28px 40px', fontSize: 15, lineHeight: 1.7, color: 'var(--fg-1d1a16,#1d1a16)', wordBreak: 'keep-all', userSelect: 'text' }}>
             {!info && <div className="meta">읽는 중…</div>}
             {info && !info.ok && <div style={{ color: 'var(--danger)' }}>✗ {info.error}</div>}
             {info && info.ok && <div data-testid="guide-body" dangerouslySetInnerHTML={{ __html: mdToHtml(info.text) }} />}
