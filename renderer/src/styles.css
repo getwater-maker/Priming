@@ -1719,3 +1719,7 @@ main .card h2{top:var(--work-top-height,0px)}
 .clip-tb-menu .ctb-speed>span{margin-right:4px}
 .clip-tb-menu .ctb-speed button{display:inline-block;width:auto;min-width:30px;padding:2px 5px;margin:0;text-align:center}
 .clip-speed{font-size:11px;color:#9a5b16;background:#fbefdc;border-radius:6px;padding:0 5px;margin-left:4px;white-space:nowrap}
+
+/* 🗑▶ 고른 어절 곁 단추(Lab #11) — ② 클립 줄의 어절 칩 바로 뒤 */
+.chip-act{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
+.chip-act button{padding:0 6px;min-width:26px;height:22px;line-height:20px;font-size:12px}

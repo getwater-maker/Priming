@@ -4759,7 +4759,7 @@ export default function App() {
     const e = document.querySelector('.sent[data-ln="' + n + '"]');
     if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
-  async function stepCaptions(clips, durMs, s, where, startLi, vis) {
+  async function stepCaptions(clips, durMs, s, where, startLi, vis, skipMs) {
     const _g = playGenRef.current;
     // 🧭 재생 중에도 ② 커서가 따라간다 — where = { shortsNum, groupNum, sentIdx }
     const PLw = where ? linesMap.get(where.shortsNum) : null;
@@ -4777,7 +4777,7 @@ export default function App() {
     for (let i = i0; i < clips.length; i++) {
       const cl = clips[i];
       if (stale(_g)) return;
-      const d = Math.max(250, durMs * _fr(i));
+      const d = Math.max(250, durMs * _fr(i) - (i === i0 && skipMs > 0 ? skipMs : 0));   // 단어부터 재생(▶)이면 첫 줄은 남은 시간만
       // ➕ 클립 단위 삽입 — 문장 한가운데 줄에서 그림·소리가 바뀔 수 있다(첫 줄은 playCut 이 이미 깔았다)
       if (vis && ranges && i > i0) {
         if (lastVisRef.current !== visKeyAt(vis.c, vis.pr, vis.si, ranges[i])) setVisual(vis.c, vis.pr, vis.si, elapsed / 1000, ranges[i]);
@@ -4853,7 +4853,12 @@ export default function App() {
     const li0 = start && start.li > 0 && start.li < clips0.length ? start.li : 0;
     const tot0 = clips0.reduce((a, x) => a + Math.max(1, mLen(x)), 0) || 1;
     const frac0 = li0 ? clips0.slice(0, li0).reduce((a, x) => a + Math.max(1, mLen(x)), 0) / tot0 : 0;
-    const skip0 = frac0 * (sents[si0].dur || 2.5);
+    // 🔤 정렬(DTO wb)이 있으면 그 줄의 소리 기준 시작부터(글자 비례 위치에서 시작하면 .vrew 와 어긋난 자리에서 재생된다) · 단어부터(▶)는 offSec — 그 줄 시작 이후
+    const _d0 = sents[si0].dur || 2.5;
+    const _lo0 = Array.isArray(sents[si0].wb) && clips0.length > 1 && sents[si0].dur > 0 ? WA.offsetsFor(String(sents[si0].text || ''), sents[si0].wb, CF.lineRanges(String(sents[si0].text || ''), clips0), sents[si0].dur) : null;
+    const lineStart0 = _lo0 ? _lo0[li0] : frac0 * _d0;
+    const skip0 = (start && start.offSec != null) ? Math.max(lineStart0, Math.min(_d0, start.offSec)) : lineStart0;
+    const skipMs0 = (skip0 - lineStart0) * 1000;   // 그 줄 안에서 이미 지나간 시간 — 첫 줄 자막이 그만큼 짧게 보인다
     insAudStartRef.current = { ord: _prP ? ordOf(_prP, c, si0) : -1, sec: skip0 };
     const rg0 = CF.lineRanges(sents[si0].text || '', clips0)[li0];
     setVisual(c, _prP, si0, skip0, rg0); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
@@ -4879,9 +4884,9 @@ export default function App() {
           const url = await api.readAudio(s.audio);
           if (url) {
             const a = new Audio(url); curAudioRef.current = a;
-            if (first) {
+            if (si === si0 && skip0 > 0.001) {
               await new Promise((r) => { if (a.readyState >= 1) r(); else { a.addEventListener('loadedmetadata', r, { once: true }); a.addEventListener('error', r, { once: true }); } });
-              try { a.currentTime = frac0 * (a.duration || dur); } catch (_) {}
+              try { a.currentTime = Math.min(skip0 * ((a.duration || dur) / dur), (a.duration || dur)); } catch (_) {}
             }
             await a.play();
           }
@@ -4889,7 +4894,7 @@ export default function App() {
         } catch (e) { logline('미리듣기 오디오 실패: ' + e.message); }
       }
       if (stale(_g)) return;
-      await stepCaptions(clips.length ? clips : [''], dur * 1000, s, sn != null && c.sentences && c.sentences.length ? { shortsNum: sn, groupNum: c.num, sentIdx: si } : null, first ? li0 : 0, _prP ? { c, pr: _prP, si } : null);
+      await stepCaptions(clips.length ? clips : [''], dur * 1000, s, sn != null && c.sentences && c.sentences.length ? { shortsNum: sn, groupNum: c.num, sentIdx: si } : null, first ? li0 : 0, _prP ? { c, pr: _prP, si } : null, si === si0 ? skipMs0 : 0);
       // ⏸ 막간 쉼 — .vrew 는 이 문장 음성 뒤에 무음을 덧댄다(pausePlanOf) → 미리보기도 그만큼 쉰다(자막은 지운다 — MP4 가 그 구간 자막을 가린다)
       if (s.audio && s.pz > 0) {
         if (stopLineRef.current) { stopLineRef.current(); stopLineRef.current = null; }
@@ -4981,6 +4986,26 @@ export default function App() {
   //   재생이 자막마다 옮기는 커서(stepCaptions 의 setCursor)는 여기로 오지 않는다 → 고르지 않았으면 Space = 그냥 멈춤.
   const userPickRef = useRef(null);
   function userCursor(c) { setCursor(c); if (playingRef.current) userPickRef.current = c; }
+  // ▶ 단어부터 재생(Lab #11) — 정렬(DTO wb)이 가리키는 소리 기준 위치에서. 자막은 그 줄의 남은 시간만큼만 보인다(playCut 의 offSec).
+  function playFromWord(sn, groupNum, si, from) {
+    if (!dto) return;
+    const pr = dto.projects.find((p) => p.shortsNum === sn); const c = pr && pr.cuts.find((x) => x.num === groupNum); const s = c && (c.sentences || [])[si];
+    if (!s || !Array.isArray(s.wb) || !(s.dur > 0)) { setStatus('이 문장은 단어 시각이 없어 그 자리부터 재생할 수 없습니다 — 채널 「단어 자리 맞추기」를 켜세요'); return; }
+    const T = WA.timeMapper(String(s.text || ''), s.wb.slice(0, -1).concat([s.dur]));
+    if (!T) return;
+    const lines = splitLines(s.text || '', effCap, s.breaks, s.marks); const rg = CF.lineRanges(String(s.text || ''), lines);
+    let li = 0; rg.forEach((r, i) => { if (from >= r.from) li = i; });
+    playFrom(sn, groupNum, { si, li, offSec: T(from) }, 'word', true);
+  }
+  // 🗑 단어 지우기(Lab #11) — 글(.md)과 소리에서 함께. 되돌리기 = Ctrl+Z 한 번(확인창 없음 — 되돌릴 수 있다)
+  async function deleteWords(sn, groupNum, si, from, to) {
+    setStatus('🗑 단어를 글(.md)과 소리에서 지우는 중…');
+    try {
+      const r = await api.deleteWords({ shortsNum: sn, groupNum, sentIdx: si, from, to });
+      if (r && r.ok) { if (r.dto) setDto(r.dto); setCapSel(null); setStatus('🗑 「' + r.removed + '」 지움 — 소리 ' + Number(r.removedSec).toFixed(2) + '초 · Ctrl+Z 로 되돌립니다'); }
+      else setStatus('⚠ ' + ((r && r.error) || '단어를 지우지 못했습니다').replace(/\n/g, ' '));
+    } catch (e) { logline('단어 지우기 오류: ' + e.message); setStatus('⚠ 단어 지우기 오류: ' + e.message); }
+  }
   function playFromCursor(cur0, force) {
     const cur = cur0 || cursor;
     userPickRef.current = null;
@@ -6694,7 +6719,7 @@ export default function App() {
             onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
             onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} onWordPlay={isLf ? playFromWord : null} onWordDelete={isLf ? deleteWords : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -8086,7 +8111,7 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, on
       </div>
     </div>);
 }
-function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause }) {
+function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause, onWordPlay, onWordDelete }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -8148,11 +8173,11 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
   //   🔴 건너뛴 그룹의 클릭 처리기는 옛 렌더의 것이다 → 처리기는 모두 **최신 함수를 부르는 안정 래퍼(_S · _E)** 로만 부른다(옛 상태를 읽지 않게).
   //   그룹 모양에 새 값을 쓰면 cutKey 에도 넣을 것(안 넣으면 그 값이 바뀌어도 화면이 그대로다).
   const _L = useRef({});
-  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, linesMap, dto };
+  _L.current = { onPickCapLine, onPickCapChars, onCursor, edit, onSplit, onMerge, onRegen, onPlayGroup, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onAttach, onClear, onPreview, onInsMark, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, onWordPlay, onWordDelete, linesMap, dto };
   const _S = useMemo(() => {
     const mk = (k) => (...a) => { const f = _L.current[k]; return typeof f === 'function' ? f(...a) : undefined; };
     const o = {};
-    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt', 'onClipAdd', 'onRename']) o[k] = mk(k);
+    for (const k of ['onPickCapLine', 'onPickCapChars', 'onCursor', 'onSplit', 'onMerge', 'onRegen', 'onPlayGroup', 'onPlayFrom', 'onGroupTts', 'onGroupVid', 'onShowPrompt', 'onAttach', 'onClear', 'onPreview', 'onInsMark', 'onClipVoice', 'onClipMove', 'onSplitAt', 'onClipAdd', 'onRename', 'onWordPlay', 'onWordDelete']) o[k] = mk(k);
     // ⚡ 번호가 당겨져도 다시 그리지 않은 그룹이 있다 → 처리기는 **누르는 순간** DOM(아래 효과가 고쳐 둔 data-ln·data-ord)과 최신 목록에서 읽는다
     o.nAt = (el) => { const x = el && el.closest ? el.closest('[data-ln]') : null; const n = x ? Number(x.getAttribute('data-ln')) : NaN; return n > 0 ? n : null; };
     o.lineAt = (sn, n) => { const L = ((_L.current.linesMap && _L.current.linesMap.get(sn)) || {}).list || []; const l = L.find((x) => x.n === n); return l ? { n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to, range: { from: l.from, to: l.to } } : null; };
@@ -8228,7 +8253,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
           return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
-            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0, cardPause || 0].join('#');   // ⏸ 채널 막간 쉼(📜 카드 표시의 ⏸ N초)
+            layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0, onWordPlay ? 1 : 0, cardPause || 0].join('#');   // ⏸ 채널 막간 쉼(📜 카드 표시의 ⏸ N초)
         };
         return (
           <div className="card" key={pr.shortsNum} data-pr={pr.shortsNum}>
@@ -8445,6 +8470,21 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                             _S.onPickCapChars(pr.shortsNum, c.num, si, { from, to });
                                           }}>{w.w}</span>
                                       ))}
+                                      {onWordPlay && selChars.length > 0 && (() => {
+                                        // 🗑▶ 고른 어절(칩) 곁 단추(Lab #11) — 이 줄에서 시작한 선택에만 · 소리 기준 위치는 정렬(s.wb)이 있을 때만
+                                        const a0 = Math.min(...selChars.map((x) => x.from)), b0 = Math.max(...selChars.map((x) => x.to));
+                                        if (!(a0 >= l.range.from && a0 < l.range.to)) return null;
+                                        const has = Array.isArray(s.wb) && s.dur > 0;
+                                        const why = has ? '' : '이 문장은 단어 시각이 없습니다 — 채널 편집 → 음성 → 「단어 자리 맞추기」를 켜세요(한국어 · 켠 뒤 잠시 지나면 맞춰집니다)';
+                                        return (
+                                          <span className="chip-act" data-testid="word-act">
+                                            <button className="ghost" data-testid="word-play" disabled={!has} title={has ? '이 단어부터 재생 — 소리 기준 위치에서(자막도 그 자리부터)' : why}
+                                              onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); _S.onWordPlay(pr.shortsNum, c.num, si, a0); }}>▶</button>
+                                            <button className="ghost" data-testid="word-del" disabled={!has} title={has ? '이 단어를 글(.md)과 소리에서 함께 지웁니다 — 소리는 어절 경계(쉼·골짜기)에서 자르고, Ctrl+Z 로 되돌립니다' : why}
+                                              onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); _S.onWordDelete(pr.shortsNum, c.num, si, a0, b0); }}>🗑</button>
+                                          </span>
+                                        );
+                                      })()}
                                     </span>
                                     {ai && <span className="cf-animbadge" title={`효과: ${ai.label} (${lp.anim.duration / 1000}초)`}>✨</span>}
                                     <button className={'clip-hist' + (s.hn ? ' has' : '')} data-testid="clip-hist-btn" title={s.hn ? `이 클립 수정 이력 — ${s.hn}번 고침 · 눌러서 고치기 전으로 돌아가기` : '이 클립 수정 이력(아직 고친 기록 없음)'}

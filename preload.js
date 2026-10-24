@@ -307,6 +307,7 @@ contextBridge.exposeInMainWorld('api', {
   setSavedCapFormats: (list) => ipcRenderer.invoke('set-saved-cap-formats', list),
   // ✏ 문장 인라인 편집 — 화면에서 고친 문장을 .md 의 그 자리에만 반영(수정·병합·분할·삭제 공용).
   editSentences: (args) => ipcRenderer.invoke('edit-sentences', args),
+  deleteWords: (args) => ipcRenderer.invoke('delete-words', args),   // 🗑 단어 지우기(Lab #11) — 글(.md)·소리 함께
   royConfirm: (args) => ipcRenderer.invoke('roy-confirm', args),   // 🟥 사실 확인(v0.7.3)
   roySpell: (args) => ipcRenderer.invoke('roy-spell', args),   // 🔎 맞춤법 검사(v0.7.13 · claude -p)
   roySpellList: () => ipcRenderer.invoke('roy-spell-list'),

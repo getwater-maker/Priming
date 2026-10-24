@@ -273,6 +273,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       const handlers = {};
       const ctx = { fs, path, console, S: { parsed, scriptPath: md, outRoot: tmp, preset: null }, ipcMain: { handle: (n, fn) => { handlers[n] = fn; } },
         require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: { ...P, toDTO: () => null }, UNDO: { seq: 0 },
+        writeScriptAtomic: require('../core/atomic-write').writeTextAtomicSync,   // main.js 맨 위의 대본 쓰기(v0.9.94) — 뽑은 블록이 쓴다
         currentMode: () => 'longform', presetThresholds: () => ({}), undoPush: () => ({}), undoDrop: () => {}, scriptHash: () => 'h',
         storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]', shortsDirs: () => ({ media }),
         _inDir: () => true, _toTrash: () => {}, renumberMediaFiles: () => {} };

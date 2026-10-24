@@ -58,4 +58,25 @@ function needs(s) {
   return WA.tokenize(s.text).length >= 2;
 }
 
-module.exports = { readWavPcm, ensureSentences, needs };
+/**
+ * 단어 지우기(#11) — 음성 파일에서 어절 j0..j1-1 의 소리를 들어내 **새 파일**로 쓴다(원본은 그대로 — Ctrl+Z 가 옛 소리로 돌아간다).
+ *   → { ok, dur, removedSec, cut:[t0,t1] } | { ok:false, error }
+ *   opts: { src, bounds(s.wt.b), j0, j1, outPath, ffmpegPath }
+ */
+async function deleteWordsAudio(opts) {
+  const { src, bounds, j0, j1, outPath, ffmpegPath } = opts || {};
+  let a = /\.wav$/i.test(src || '') ? readWavPcm(src) : null;
+  if (!a && ffmpegPath) { const pcm = await require('./quiet-trim').decodePcm(src, ffmpegPath); if (pcm) a = { pcm, rate: 24000 }; }
+  if (!a) return { ok: false, error: '음성 파일을 읽지 못했습니다' };
+  const c = WA.cutWords(a.pcm, a.rate, bounds, j0, j1);
+  if (!c) return { ok: false, error: '지울 소리를 찾지 못했습니다(너무 짧거나 문장 전체입니다)' };
+  const QT = require('./quiet-trim');
+  try {
+    const tmp = outPath + '.tmp';
+    fs.writeFileSync(tmp, QT.wavOf(c.pcm, a.rate));
+    fs.renameSync(tmp, outPath);
+  } catch (e) { return { ok: false, error: '음성을 저장하지 못했습니다: ' + e.message }; }
+  return { ok: true, dur: c.pcm.length / a.rate, removedSec: c.removedSec, cut: c.cut };
+}
+
+module.exports = { readWavPcm, ensureSentences, needs, deleteWordsAudio };

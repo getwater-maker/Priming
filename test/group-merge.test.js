@@ -221,7 +221,7 @@ console.log('\n[8] ↶ 되돌리기 — 그림 파일이 제자리로(번호 정
   ok(Object.getPrototypeOf(pr.groups[0]) === Group.prototype, '되살린 그룹은 Group 그대로(메서드 유지)');
   fs.rmSync(tmp, { recursive: true, force: true });
   const APP8 = read('renderer/src/App.jsx');
-  ok(/t\.tagName === 'INPUT' \|\| t\.tagName === 'TEXTAREA'/.test(APP8) && /runUndo\(k === 'y' \|\| \(k === 'z' && ev\.shiftKey\)\)/.test(APP8), 'Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) — 글자칸 안에서는 그 칸의 되돌리기');
+  ok(/t\.tagName === 'INPUT' \|\| t\.tagName === 'TEXTAREA'/.test(APP8) && /runUndo\(k === 'y' \|\| \(k === 'z' && ev\.shiftKey\)(?:, untouched)?\)/.test(APP8), 'Ctrl+Z / Ctrl+Y(Ctrl+Shift+Z) — 글자칸 안에서는 그 칸의 되돌리기');
   ok(/undoPush\('문장 고치기', \{ md: true \}\)/.test(M) && /undoPush\('클립 합치기', \{ md: true \}\)/.test(M) && /undoPush\('그림 적용 범위'\)/.test(M) && /undoPush\('그룹 합치기'\)/.test(M) && /undoPush\('그룹 분할'\)/.test(M) && /undoPush\('자막 서식', \{ coalesce: true \}\)/.test(M), '되돌리기가 기억하는 동작 6가지(문장·클립 합치기는 .md 까지)');
   ok(!/fs\.rmSync\(want/.test(M), '번호 정리가 덮이는 파일을 지우지 않고 휴지통으로');
 

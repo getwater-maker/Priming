@@ -49,6 +49,7 @@ function setup() {
   const ctx = { fs, path, console, S: { parsed, scriptPath: md, outRoot: dir, preset: null },
     require: (m) => require(m.startsWith('./') ? path.join(ROOT, m) : m), P: { ...P, toDTO: () => ({}) }, UNDO: { seq: 0 },
     ipcMain: { handle: (n, f) => { handlers[n] = f; } }, enqueueTtsJob: (l, f) => f, gpuBusyReason: () => null, currentDTO: () => ({}),
+    writeScriptAtomic: require('../core/atomic-write').writeTextAtomicSync,   // main.js 맨 위의 대본 쓰기(v0.9.94) — 뽑은 블록이 쓴다
     currentMode: () => 'longform', presetThresholds: () => ({}), undoPush: () => ({}), undoDrop: () => {}, scriptHash: () => 'h',
     storeActive: () => {}, pushDtoUpdate: () => {}, syncSnapshotNow: () => {}, dtoByReply: () => {}, log: () => {}, prLabel: () => '[t]',
     shortsDirs: () => ({ media, tts }), _inDir: () => true, _toTrash: (f) => trashed.push(f), renumberMediaFiles: () => {},

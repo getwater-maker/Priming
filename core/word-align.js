@@ -187,4 +187,53 @@ function offsetsFor(text, bounds, ranges, dur) {
 }
 function lineOffsets(s, ranges, dur) { const b = validBounds(s); return b ? offsetsFor(s.text, b, ranges, dur) : null; }
 
-module.exports = { VER, FR, charWeight, tokenize, textKey, analyze, alignBounds, timeMapper, keyOf, validBounds, mapperFor, offsetsFor, lineOffsets };
+// ── 단어 지우기(#11) — 글에서 어절을 빼고, 음성에서 그 어절의 소리를 들어낸다 ─────────────────────────────────────────────
+// 글 범위 [from,to) 와 겹치는 어절 번호 {j0, j1(포함 안 함), n} | null
+function tokenRange(text, from, to) {
+  const toks = tokenize(text);
+  let j0 = -1, j1 = -1;
+  toks.forEach((t, j) => { if (t.to > from && t.from < to) { if (j0 < 0) j0 = j; j1 = j + 1; } });
+  return j0 < 0 ? null : { j0, j1, n: toks.length };
+}
+// 어절 j0..j1-1 을 뺀 글 | null(문장 전체를 지우는 경우 · 범위 오류).
+//   🔑 문장 끝 부호(. ! ? …)는 지킨다 — 마지막 어절을 지워도 부호가 사라지면 .md 에서 다음 문장과 한 문장으로 합쳐진다.
+function textWithout(text, j0, j1) {
+  const toks = tokenize(text), n = toks.length;
+  if (!(j0 >= 0 && j1 > j0 && j1 <= n) || (j0 === 0 && j1 === n)) return null;
+  const t = String(text);
+  const from = toks[j0].from, to = toks[j1 - 1].to;
+  let left = t.slice(0, from).replace(/\s+$/, ''), right = t.slice(to).replace(/^\s+/, '');
+  if (j1 === n) {
+    const m = /[.!?…。！？]+["'”’)\]」』]*$/.exec(t.slice(toks[j1 - 1].from, to));
+    if (m) left += m[0];
+    right = '';
+  }
+  const out = (left && right ? left + ' ' + right : left + right).trim();
+  return out || null;
+}
+// 음성에서 어절 j0..j1-1 의 소리를 들어낸 PCM — 경계는 정렬이 소리의 쉼·골짜기에 놓은 자리라 깨끗이 이어 붙는다(이은 자리 8ms 페이드).
+//   앞 여백(첫 어절을 지울 때)과 끝 여백(마지막 어절을 지울 때 · 문장무음 포함)은 남긴다 → 문장 앞뒤 간격이 그대로.
+//   → { pcm, cut: [t0, t1](원래 음성 초), removedSec } | null
+function cutWords(pcm, rate, bounds, j0, j1) {
+  const n = (bounds || []).length - 1;
+  if (!(j0 >= 0 && j1 > j0 && j1 <= n) || (j0 === 0 && j1 === n) || !pcm || !(rate > 0)) return null;
+  let t0 = bounds[j0], t1 = bounds[j1];
+  if (j0 === 0 || j1 === n) {
+    const A = analyze(pcm, rate);
+    if (A) { if (j0 === 0) t0 = Math.max(t0, A.on * FR); if (j1 === n) t1 = Math.min(t1, A.off * FR); }
+  }
+  const s0 = Math.max(0, Math.min(pcm.length, Math.round(t0 * rate))), s1 = Math.max(0, Math.min(pcm.length, Math.round(t1 * rate)));
+  if (s1 - s0 < Math.round(rate * 0.03)) return null;   // 30ms 도 안 되는 구간은 지울 소리가 없다
+  const out = new Int16Array(pcm.length - (s1 - s0));
+  out.set(pcm.subarray(0, s0), 0);
+  out.set(pcm.subarray(s1), s0);
+  const xf = Math.round(rate * 0.008);   // 이은 자리 양쪽 8ms — 딸깍 소리 방지(자리가 골짜기라 들리지 않는다)
+  for (let i = 0; i < xf; i++) {
+    const g = (i + 1) / (xf + 1);
+    if (s0 - 1 - i >= 0) out[s0 - 1 - i] = Math.round(out[s0 - 1 - i] * g);
+    if (s0 + i < out.length) out[s0 + i] = Math.round(out[s0 + i] * g);
+  }
+  return { pcm: out, cut: [s0 / rate, s1 / rate], removedSec: (s1 - s0) / rate };
+}
+
+module.exports = { VER, FR, charWeight, tokenize, textKey, analyze, alignBounds, timeMapper, keyOf, validBounds, mapperFor, offsetsFor, lineOffsets, tokenRange, textWithout, cutWords };

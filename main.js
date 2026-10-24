@@ -9229,6 +9229,7 @@ async function _editSentences(args = {}) {
 
   // ── 여기서부터 실제 반영 ── (.md 먼저, 그다음 파싱본 — .md 쓰기가 실패하면 화면도 안 바꾼다)
   const _u = undoPush('문장 고치기', { md: true });
+  if (_u && args._wordCut) _u.label = '단어 지우기';   // 🗑 단어 지우기는 이름을 따로(Ctrl+Z 안내) — 위 호출 모양은 test:gmerge 가 소스로 찾는다
   try { writeScriptAtomic(S.scriptPath, plan.raw); }
   catch (e) { undoDrop(_u); return { ok: false, error: '대본 파일을 저장하지 못했습니다: ' + e.message }; }
 
@@ -9261,6 +9262,8 @@ async function _editSentences(args = {}) {
       if (keep.quiet && keep.quiet.out === keep.ttsAudioPath) s.quiet = { ...keep.quiet };
       if (keep.clipSpeed) s.clipSpeed = keep.clipSpeed;
     } else if (old.length === 1 && plan.newTexts.length === 1 && old[0].clipSpeed) s.clipSpeed = old[0].clipSpeed;   // ⏩ 한 문장을 고쳐 한 문장 = 배속 유지(음성은 새로 만든 뒤 다시 건다)
+    // 🗑 단어 지우기(#11) — 소리를 들어낸 새 음성 파일이 이 문장의 음성이다. 배속·쉼 줄이기는 이미 그 소리에 구워져 있으므로 기록을 비워 두 번 걸리지 않게(wt 는 다시 맞춘다)
+    if (args._wordCut && plan.newTexts.length === 1) { s.ttsAudioPath = args._wordCut.path; s.ttsDurationSec = args._wordCut.dur; s.ttsStatus = 'done'; delete s.quiet; delete s.clipSpeed; delete s.wt; }
     return s;
   });
   const gPos = g.sentenceIds.indexOf(old[0].id);
@@ -9299,6 +9302,36 @@ async function _editSentences(args = {}) {
   return { ok: true, dto: P.toDTO(S.parsed), royBank };
 }
 ipcMain.handle('edit-sentences', (_e, args = {}) => _editSentences(args));   // async
+
+// 🗑 단어 지우기(Lab · 차이표 #11) — 고른 어절을 **글(.md)과 소리에서 함께** 지운다(Vrew 의 단어 삭제).
+//   args = { shortsNum, groupNum, sentIdx, from, to } — 글 범위 [from,to) 와 겹치는 어절 전부.
+//   🔑 소리는 #10 의 어절 경계(s.wt)로 자른다 — 경계가 소리의 쉼·골짜기라 깨끗이 이어진다 · 정렬이 없으면(채널 「단어 자리 맞추기」 꺼짐 등) 지우지 않는다(글만 지우면 소리와 어긋난다).
+//   원본 음성은 두고 새 파일 `<번호>_d<지문>.wav` 를 만든다 → Ctrl+Z 한 번에 글(.md)·음성이 옛 것으로. 글 쪽은 `_editSentences` 가 맡는다(원자 쓰기 · 검증 재파싱 · 이력 · 서식 따라가기).
+ipcMain.handle('delete-words', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
+  if (_jobsBusy()) return { ok: false, error: '작업(만들기·음성·이미지·영상) 중에는 단어를 지울 수 없습니다 — 끝난 뒤에 해 주세요.' };
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  const s = g ? pr.getSentencesOfGroup(g)[Number(args.sentIdx)] : null;
+  if (!s) return { ok: false, error: '그 문장을 찾지 못했습니다.' };
+  const WAl = require('./core/word-align'), PASS = require('./core/word-align-pass');
+  if (!s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) return { ok: false, error: '이 문장은 음성이 없습니다 — 음성을 만든 뒤에 단어를 지울 수 있습니다(글만 고치려면 클립을 고쳐 주세요).' };
+  const b = WAl.validBounds(s);
+  if (!b) return { ok: false, error: '이 문장은 단어 시각이 없어 소리를 자를 수 없습니다 — 채널 편집 → 음성 → 「단어 자리 맞추기」를 켜면(한국어) 잠시 뒤 맞춰집니다.' };
+  const rg = WAl.tokenRange(s.text, Number(args.from) || 0, Number(args.to) || 0);
+  const newText = rg ? WAl.textWithout(s.text, rg.j0, rg.j1) : null;
+  if (!rg || !newText) return { ok: false, error: rg ? '문장 전체를 지울 수는 없습니다 — 클립을 지우려면 🗑(클립 도구 막대)를 쓰세요.' : '지울 단어를 고르지 못했습니다.' };
+  const toks = WAl.tokenize(s.text);
+  const removed = s.text.slice(toks[rg.j0].from, toks[rg.j1 - 1].to);
+  let tag = ''; try { const st = fs.statSync(s.ttsAudioPath); tag = require('crypto').createHash('sha1').update([s.ttsAudioPath, rg.j0, rg.j1, st.size, Math.round(st.mtimeMs)].join('|')).digest('hex').slice(0, 8); } catch (_) {}
+  const out = P.claimPath(path.join(shortsDirs(S.outRoot, pr.shortsNum).tts, `${s.num}_d${tag}.wav`));
+  const cut = await PASS.deleteWordsAudio({ src: s.ttsAudioPath, bounds: b, j0: rg.j0, j1: rg.j1, outPath: out, ffmpegPath: require('./core/media-utils').getFfmpegPath() });
+  if (!cut.ok) return { ok: false, error: cut.error };
+  const r = await _editSentences({ shortsNum: args.shortsNum, groupNum: args.groupNum, sentIdx: Number(args.sentIdx), count: 1, text: newText, expect: [s.text], _wordCut: { path: out, dur: cut.dur } });
+  if (!r || !r.ok) { try { fs.rmSync(out, { force: true }); } catch (_) {} return r || { ok: false, error: '지우지 못했습니다.' }; }
+  log(`🗑 단어 지우기 — 「${removed}」 소리 ${cut.removedSec.toFixed(2)}초 · 글(.md)과 음성이 함께 바뀌었습니다 (Ctrl+Z 되돌리기)`);
+  return { ...r, removed, removedSec: cut.removedSec };
+});
 
 // ── 🟥 경험 · 🟨 해석 표시 + 로이은행 (v0.7.3 · 채널사업부 요청 2026-10-06 「화자는 실제 로이」) ─────────────────
 //   표시 문법·문장 맞추기 = core/roy-marks(순수) · 은행 쓰기·원문 기억 = core/roy-bank. 여기는 .md 를 읽고 쓰는 접착만.
