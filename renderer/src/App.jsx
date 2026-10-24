@@ -1459,6 +1459,21 @@ export default function App() {
       logline('자막 복사 실패: ' + e.message); setSubtitleCopyMessage('자막 복사 실패: ' + e.message);
     } finally { setUrlBusy(false); }
   }
+  // ⏹ 받기·전사·mp3 를 📥 창 안에서 바로 멈춘다(v0.9.116 · 로이 2026-10-24) — 진행 패널을 닫았어도 창에 늘 있다
+  const dlRunning = (p) => p && !['done', 'aborted'].includes(p.phase);
+  function dlStopButton() {
+    const busy = dlRunning(urlProg) || dlRunning(sttProg) || dlRunning(mp3Prog);
+    const stopping = [urlProg, sttProg, mp3Prog].some((p) => p && p.phase === 'aborting');
+    return (
+      <button className="ghost dl-stop" data-testid="dl-stop" disabled={!busy || stopping}
+        title={busy ? '지금 도는 받기·전사·mp3 추출을 멈춥니다(받던 영상까지만 · 받은 파일은 남깁니다)' : '도는 받기·전사가 없습니다'}
+        onClick={() => {
+          api.dlAbort();
+          const mark = (p) => (dlRunning(p) ? { ...p, phase: 'aborting' } : p);
+          setUrlProg(mark); setSttProg(mark); setMp3Prog(mark);
+        }}>{stopping ? '⏳ 멈추는 중…' : '⏹ 중단'}</button>
+    );
+  }
   async function runUrlDl() {
     const urls = String(urlTextRef.current?.value || '')
       .split(/[\n\r]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s));
@@ -7812,6 +7827,7 @@ export default function App() {
                 <span style={{ flex: 1 }} />
                 <button className="ghost" disabled={urlBusy} data-testid="dl-copy-subs" onClick={copyUrlSubtitles} title="영상 한 개의 자막을 시간 정보 없이 복사합니다. 기본은 원본 언어이며 자막 저장 옵션에서 언어·트랙을 선택할 수 있습니다.">📋 자막 복사</button>
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>
+                {dlStopButton()}
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
               {subtitleCopyMessage && <p role="status" data-testid="dl-copy-status">{subtitleCopyMessage}</p>}
@@ -7830,6 +7846,7 @@ export default function App() {
                 <span style={{ flex: 1 }} />
                 <button data-testid="dl-file-run" disabled={!fileMp3 && !fileStt} onClick={runFileJob}>📂 파일 고르기</button>
                 <Hint>이 PC 의 음성·영상 파일을 고릅니다(여러 개 가능).</Hint>
+                {dlStopButton()}
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
             </div>)}

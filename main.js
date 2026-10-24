@@ -1456,18 +1456,39 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       });
     };
 
+    // 🐢 여러 편(채널·재생목록·주소 여러 줄)은 유튜브에 몰아치지 않는다(v0.9.116 · 2026-10-24 48편째에 429)
+    //   ① 이미 전사한 영상은 유튜브에 묻지 않고 건너뛴다 ② 정보 확인 결과로 받는다(같은 영상 두 번 묻지 않음)
+    //   ③ 요청·영상 사이 쉼 ④ 그래도 막히면 실패로 넘기지 않고 쉬었다 같은 영상부터 — 계속 막히면 멈춘다
+    const paced = jobs.length > 1;
+    const BLOCK_PAUSE_MIN = [3, 10, 20];
+    let blockedRun = 0, touched = false;
+    const dlSleep = async (ms) => { const end = Date.now() + ms; while (Date.now() < end && !_dlAbort) await new Promise((res) => setTimeout(res, Math.min(500, end - Date.now()))); };
     for (let i = 0; i < jobs.length; i++) {
       if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
       const job = jobs[i];
       const url = job.url;
       const itemOutDir = job.outDir || outDir;
       const tag = `[${i + 1}/${jobs.length}]`;
+      if (channelMode && job.id && doStt && !saveSubs) {
+        let doneTxt = null;
+        try { doneTxt = fs.readdirSync(itemOutDir).find((f) => f.endsWith(`[${job.id}].txt`)); } catch (_) {}
+        if (doneTxt) {
+          log(`  ↷ ${tag} 이미 완료됨: ${doneTxt}`);
+          prog.skip++; prog.dl.done++; sendProg();
+          slots[i] = { url, ok: true, title: job.title || '', txt: path.join(itemOutDir, doneTxt), from: 'existing', subtitles: [] };
+          continue;
+        }
+      }
+      if (paced && touched) await dlSleep(3000 + Math.random() * 4000);
+      if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
+      touched = true;
       log(`🔗 ${tag} 받기: ${job.title || url}`);
       prog.dl = { done: prog.dl.done, idx: i + 1, title: job.title || url, pct: 0, stage: 'probe' }; sendProg(true);
+      const infoJsonFile = path.join(os.tmpdir(), `priming-info-${process.pid}-${i}.json`);
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
-        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log });
+        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced });
         const info = pr0.info;
         const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
@@ -1482,9 +1503,10 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           audioFormat: args.audioFormat, quality: args.quality, subtitleTrack: args.subtitleTrack,
           subtitleLanguage: saveSubs ? MD.selectSubtitleLanguage(info, args.subtitleLanguage, args.subtitleTrack) : 'original', requireSubs: mode === 'subtitles',
           filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
-          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log,
+          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced,
           onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
         });
+        blockedRun = 0;
         prog.dl.done++; prog.dl.pct = 100; prog.dl.stage = 'done'; sendProg(true);
 
         const mediaFile = r.audio || r.video;
@@ -1532,9 +1554,27 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           slots[i] = done;
         }
       } catch (e) {
+        if (paced && !_dlAbort && MD.isBlocked(e)) {
+          const rawLine = String(e.raw || '').split('\n').filter((l) => /ERROR/.test(l)).pop();
+          if (rawLine) log(`  ⓘ 원문: ${rawLine.slice(0, 200)}`);
+          if (blockedRun < BLOCK_PAUSE_MIN.length) {
+            const min = BLOCK_PAUSE_MIN[blockedRun++];
+            log(`  ⏳ 유튜브가 요청이 많다며 막았습니다 — 실패로 넘기지 않고 ${min}분 쉬었다 이 영상부터 다시 받습니다(${blockedRun}/${BLOCK_PAUSE_MIN.length})`);
+            prog.dl.stage = 'wait'; prog.dl.waitUntil = Date.now() + min * 60000; sendProg(true);
+            await dlSleep(min * 60000);
+            prog.dl.waitUntil = 0;
+            i--; continue;
+          }
+          log(`  ⏹ 유튜브가 계속 막고 있어 여기서 멈춥니다 — ${jobs.length - i}편 남음 · 몇 시간 뒤 같은 채널을 다시 돌리면 받은 영상은 건너뛰고 이어서 받습니다`);
+          slots[i] = { url, ok: false, error: e.message };
+          noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
+          break;
+        }
         log(`  ✗ 실패: ${e.message}`);
         slots[i] = { url, ok: false, error: e.message };
         noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
+      } finally {
+        try { fs.rmSync(infoJsonFile, { force: true }); } catch (_) {}
       }
     }
     prog.dl.idx = 0; prog.dl.stage = ''; prog.phase = _dlAbort ? 'aborting' : (sttPending ? 'stt-only' : 'running');

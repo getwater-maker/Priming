@@ -272,10 +272,18 @@ function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 10
 }
 
 /** URL 하나의 정보(제목·길이·언어·자막 유무)를 미리 읽는다 — 내려받지 않는다. */
-async function probe(url, { tool, abortSignal } = {}) {
+async function probe(url, { tool, abortSignal, onLog, infoJsonFile, paced, _waitScale } = {}) {
   const t = tool || await ensureYtDlp();
-  const r = await _spawnYt(t, ['--no-playlist', '--skip-download', '--dump-single-json', url],
-    { abortSignal, timeoutMs: 3 * 60 * 1000 });
+  const a = [...(paced ? PACE_ARGS : []), '--no-playlist', '--skip-download', '--dump-single-json', url];
+  let r = await _spawnYt(t, a, { abortSignal, timeoutMs: 3 * 60 * 1000 });
+  // ⏳ 정보 확인도 일시 차단(429·403)이면 기다렸다 두 번까지 다시(v0.9.116 — 예전엔 받기에만 있어 막히면 4초마다 다음 영상으로 넘어갔다)
+  for (const wait of BLOCK_WAITS) {
+    if (r.code === 0 || !BLOCK_RE.test(r.stderr || '') || (abortSignal && abortSignal())) break;
+    if (onLog) onLog(`  ⏳ 유튜브가 잠시 막았습니다(${/429|Too Many/i.test(r.stderr) ? '429' : '403'}) — ${wait}초 뒤 정보를 다시 읽습니다`);
+    await new Promise((res) => setTimeout(res, (_waitScale != null ? _waitScale : 1000) * wait));
+    if (abortSignal && abortSignal()) break;
+    r = await _spawnYt(t, a, { abortSignal, timeoutMs: 3 * 60 * 1000 });
+  }
   // ⚠ 사람 말로 바꾼 메시지만 던지면 호출부가 원인을 못 가린다 → 원문을 `raw` 로 함께 준다(altUrl 판정에 쓴다).
   if (r.code !== 0) {
     const err = new Error(_explain(r.stderr) || `정보를 읽지 못했습니다 (코드 ${r.code})`);
@@ -285,6 +293,8 @@ async function probe(url, { tool, abortSignal } = {}) {
   const line = r.stdout.split('\n').find((x) => x.trim().startsWith('{'));
   if (!line) throw new Error('정보를 읽지 못했습니다 (응답 없음)');
   const j = JSON.parse(line);
+  // 📄 받은 정보를 파일로 남기면 download 가 `--load-info-json` 으로 다시 묻지 않고 받는다(유튜브 요청 절반 · v0.9.116)
+  if (infoJsonFile) { try { fs.writeFileSync(infoJsonFile, line, 'utf8'); } catch (_) {} }
   const auto = j.automatic_captions || {};
   const manual = j.subtitles || {};
   return {
@@ -439,6 +449,9 @@ function subLangPref(language, url = '') {
 // 일시 차단(영상 받기 단계) — 기다렸다 다시(download) · 대기 초
 const BLOCK_RE = /HTTP Error (?:403|429)|Too Many Requests|Forbidden/i;
 const BLOCK_WAITS = [15, 45];
+const isBlocked = (e) => BLOCK_RE.test(String((e && (e.raw || e.message)) || '')) || /잠시 막았습니다/.test(String((e && e.message) || ''));
+// 🐢 여러 편을 연달아 받을 때(채널·재생목록) 요청 사이 쉼 — 몰아치면 유튜브가 429 로 막는다(2026-10-24 · 48편째에 막힘)
+const PACE_ARGS = ['--sleep-requests', '1', '--sleep-subtitles', '2'];
 // 자막 단계 실패 판정 · 자막 인자(download 의 「자막 없이 다시」가 뺀다)
 const SUB_FAIL_RE = /download (?:video )?subtitles|subtitles? for '|Unable to download .*subtitle/i;
 const SUB_ARGS = new Set(['--write-subs', '--write-auto-subs', '--sub-format', '--sub-langs']);
@@ -563,7 +576,10 @@ function buildDownloadArgs(url, o = {}) {
     args.push('--sub-format', 'vtt', '--sub-langs', languages.join(','));
   }
   if (o.ffmpegDir) args.push('--ffmpeg-location', o.ffmpegDir);
-  args.push(url);
+  if (o.paced) args.push(...PACE_ARGS);
+  // 📄 정보 확인(probe)이 남긴 정보로 받는다 — 같은 영상을 유튜브에 두 번 묻지 않는다
+  if (o.infoJsonFile && fs.existsSync(o.infoJsonFile)) args.push('--load-info-json', o.infoJsonFile);
+  else args.push(url);
   return args;
 }
 
@@ -573,7 +589,7 @@ async function download(url, o = {}) {
   if (!outDir) throw new Error('저장 폴더가 지정되지 않았습니다');
   fs.mkdirSync(outDir, { recursive: true });
   const before = new Set(fs.readdirSync(outDir));
-  const args = buildDownloadArgs(url, o);
+  let args = buildDownloadArgs(url, o);
   const wantAudio = o.mode === 'audio' || o.mode === 'both';
   const wantVideo = o.mode === 'video' || o.mode === 'both';
   const audioFormat = o.audioFormat === 'm4a' ? 'm4a' : 'mp3';
@@ -602,6 +618,9 @@ async function download(url, o = {}) {
   });
   let r = await run(args);
   // ⏳ 유튜브의 일시 차단(403·429)은 잠깐 기다리면 풀린다(2026-10-16 실측: 앱에서 5초 만에 403 → 몇 분 뒤 같은 영상 정상) — 두 번까지 다시
+  //   다시 받을 땐 남겨 둔 정보(--load-info-json)를 버리고 주소로 — 받을 주소가 낡아 막혔을 수 있다
+  const li = args.indexOf('--load-info-json');
+  if (li >= 0) args = [...args.slice(0, li), ...args.slice(li + 2), url];
   for (const wait of BLOCK_WAITS) {
     if (r.code === 0 || !BLOCK_RE.test(r.stderr || '') || SUB_FAIL_RE.test(r.stderr || '') || (o.abortSignal && o.abortSignal())) break;
     if (o.onLog) o.onLog(`  ⏳ 유튜브가 잠시 막았습니다(${/429|Too Many/i.test(r.stderr) ? '429' : '403'}) — ${wait}초 뒤 다시 받습니다`);
@@ -710,5 +729,5 @@ module.exports = {
   probe, probeSmart, download, fetchSubtitleText, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
-  _explain, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,
+  _explain, isBlocked, PACE_ARGS, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,
 };

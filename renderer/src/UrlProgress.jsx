@@ -14,7 +14,7 @@ const PHASE = {
   aborted: '⏹ 중단됨',
   done: '✅ 끝',
 };
-const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: '병합·변환', done: '완료' };
+const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: '병합·변환', done: '완료', wait: '⏳ 유튜브가 잠시 막아 쉬는 중' };
 
 function fmtDur(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -75,7 +75,7 @@ export default function UrlProgress({ prog, onAbort, onClose, embedded = false }
               <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={dl.title}>
                 [{dl.idx}] {dl.title}
               </div>
-              <div style={{ color: '#999' }}>{DL_STAGE[dl.stage] || ''}{dl.stage === 'download' ? ` ${Math.floor(dl.pct)}%` : ''}</div>
+              <div style={{ color: '#999' }}>{DL_STAGE[dl.stage] || ''}{dl.stage === 'download' ? ` ${Math.floor(dl.pct)}%` : ''}{dl.stage === 'wait' && dl.waitUntil ? ` — ${Math.max(0, Math.ceil((dl.waitUntil - Date.now()) / 60000))}분 뒤 이어서` : ''}</div>
               <Bar value={curDlPct} color="var(--accent-d)" />
             </div>
           )}

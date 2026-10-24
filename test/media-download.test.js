@@ -383,6 +383,41 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
     ok(res && res.audio && /년도 이야기 \[kr1\]\.mp3$/.test(res.audio), `한글 이름 mp3 를 찾는다 ${err}`);
     ok(/const YT_ENC_ARGS = \['--encoding', 'utf-8'\]/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8')), 'yt-dlp 실행에 --encoding utf-8');
   }
+  // 🐢 429 줄이기(v0.9.116) — 정보 확인 재시도 · 정보 파일로 받기(두 번 묻지 않음) · 여러 편이면 요청 사이 쉼
+  console.log('\n[429 줄이기] 정보 확인 재시도 · --load-info-json · 쉼');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "fs.appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');",
+    "const n = Number(fs.existsSync(process.env.FAKE_CNT) ? fs.readFileSync(process.env.FAKE_CNT, 'utf8') : 0) + 1; fs.writeFileSync(process.env.FAKE_CNT, String(n));",
+    "if (n <= Number(process.env.FAKE_FAILS)) { process.stderr.write('ERROR: [youtube] p1: HTTP Error 429: Too Many Requests\\n'); process.exit(1); }",
+    "if (a.includes('--dump-single-json')) { process.stdout.write(JSON.stringify({ id: 'p1', title: 'P', duration: 9 }) + '\\n'); process.exit(0); }",
+    "const o = a[a.indexOf('-o') + 1].replace('%(title)s', 'P').replace('%(ext)s', 'mp4'); fs.writeFileSync(o, 'video'); process.exit(0);",
+  ].join('\n'));
+  {
+    const ij = path.join(T, 'info.json');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '2';
+    const lg = [];
+    const info = await MD.probe('https://youtu.be/p1', { tool, infoJsonFile: ij, paced: true, _waitScale: 0, onLog: (l) => lg.push(l) });
+    const calls = fs.readFileSync(callLog, 'utf8').trim().split('\n');
+    ok(info.id === 'p1' && calls.length === 3 && lg.filter((l) => /정보를 다시 읽습니다/.test(l)).length === 2, '정보 확인이 429 두 번 → 기다렸다 다시 → 세 번째에 읽음');
+    ok(fs.existsSync(ij) && JSON.parse(fs.readFileSync(ij, 'utf8')).id === 'p1', '읽은 정보를 파일로 남긴다');
+    ok(calls[2].includes('--sleep-requests 1') && calls[2].includes('--sleep-subtitles 2'), '여러 편(paced)이면 요청 사이 쉼 인자');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '0';
+    const res = await MD.download('https://youtu.be/p1', { tool, outDir: path.join(T, 'lij'), mode: 'video', subs: false, infoJsonFile: ij });
+    const c1 = fs.readFileSync(callLog, 'utf8').trim();
+    ok(res.video && c1.includes('--load-info-json ' + ij) && !c1.includes('https://youtu.be/p1'), '정보 파일이 있으면 주소 대신 --load-info-json(유튜브에 다시 묻지 않음)');
+    ok(!c1.includes('--sleep-requests'), '한 편(paced 아님)은 쉼 인자 없음 — 단일 주소는 예전 속도');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '1';
+    const res2 = await MD.download('https://youtu.be/p1', { tool, outDir: path.join(T, 'lij2'), mode: 'video', subs: false, infoJsonFile: ij, _waitScale: 0 });
+    const c2 = fs.readFileSync(callLog, 'utf8').trim().split('\n');
+    ok(res2.video && c2.length === 2 && c2[0].includes('--load-info-json') && !c2[1].includes('--load-info-json') && c2[1].endsWith('https://youtu.be/p1'), '막혀서 다시 받을 땐 남긴 정보를 버리고 주소로');
+    ok(MD.isBlocked({ message: 'x', raw: 'HTTP Error 429' }) && MD.isBlocked(new Error('유튜브가 요청이 많다며 잠시 막았습니다(429)')) && !MD.isBlocked(new Error('Video unavailable')), 'isBlocked: 429·403 만 막힘으로 본다');
+    const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/BLOCK_PAUSE_MIN = \[3, 10, 20\]/.test(mainJs) && /i--; continue;/.test(mainJs) && /endsWith\(`\[\$\{job\.id\}\]\.txt`\)/.test(mainJs), 'main: 막히면 쉬었다 같은 영상부터 · 이미 전사한 영상은 유튜브에 묻지 않음');
+  }
   // 🧩 JS 실행기 — 버전을 모르거나 옛 yt-dlp 면 붙이지 않는다(--js-runtimes 를 모르는 판이 깨지지 않게)
   const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(!fs.readFileSync(callLog, 'utf8').includes('--js-runtimes'), '버전 없는 도구(가짜)에는 --js-runtimes 를 붙이지 않는다');
