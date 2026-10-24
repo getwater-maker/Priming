@@ -23,7 +23,7 @@ fs.writeFileSync(MD, ['# 큰 대본', '', '## 마당', '', ...Array.from({ lengt
   // ③ 소스 — CSS 와 레일 규칙
   const CSS = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'styles.css'), 'utf8');
   const APP = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8');
-  ok(/\.cut\{content-visibility:auto;contain-intrinsic-size:auto \d+px\}/.test(CSS), '③ .cut = content-visibility:auto(화면 밖 배치 건너뛰기)');
+  ok(/\.cut\{content-visibility:auto;contain-intrinsic-(?:block-)?size:auto \d+px\}/.test(CSS), '③ .cut = content-visibility:auto(화면 밖 배치 건너뛰기)');
   ok(/if \(!near\(cutEl\.get\(String\(c\.num\)\)\)\) continue;/.test(APP) && /addEventListener\('scroll', onScroll/.test(APP) && /measureRef\.current\(\)/.test(APP), '③ 레일은 화면 근처만 · 스크롤에 다시 잼 · 늘 최신 measure');
 
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
