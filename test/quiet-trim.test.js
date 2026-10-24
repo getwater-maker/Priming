@@ -102,7 +102,7 @@ const s = { num: 3, ttsAudioPath: raw, ttsDurationSec: dA };
   ok(fl.indexOf('TtsCache.put') < fl.indexOf('await quietPass('), '캐시에는 원본이 들어간다(쉼 줄이기는 캐시 뒤)');
   const st4 = M.slice(M.indexOf('// ✂ 쉼 줄이기 — TTS 뒤에 채널 설정을 바꿨어도'));
   ok(st4.indexOf('P.quietPass') < st4.indexOf('BF.fingerprint'), '4단계: 지문 계산보다 먼저');
-  ok((M.match(/await P\.quietPass\(/g) || []).length === 3, 'main: 4단계 · export-vrew · ⏩ clip-speed 세 곳');
+  ok((M.match(/await P\.quietPass\(/g) || []).length === 4, 'main: 4단계 · export-vrew · ⏩ clip-speed · ✂ clip-quiet 네 곳');
   ok(/q: s\.quiet \|\| null/.test(M) && (M.match(/s\.quiet = ss\.q/g) || []).length === 2, '작업본에 저장 · 이어받기 두 곳');
   ok(/cs: \(s\.clipSpeed && s\.clipSpeed !== 1\)/.test(M) && (M.match(/s\.clipSpeed = ss\.cs/g) || []).length === 2, '⏩ 작업본에 배속 저장 · 이어받기 두 곳');
   const ed = M.slice(M.indexOf('const keep = old.find((o) => SE.sigOf(o.text) === SE.sigOf(t));'));
@@ -111,6 +111,23 @@ const s = { num: 3, ttsAudioPath: raw, ttsDurationSec: dA };
   ok(cs.indexOf("undoPush('클립 배속')") > 0 && cs.indexOf("undoPush('클립 배속')") < cs.indexOf('s.clipSpeed = sp'), '⏩ clip-speed: 바꾸기 전에 되돌리기 기억');
   ok(/cs: \(s\.clipSpeed && s\.clipSpeed !== 1\) \? s\.clipSpeed : null,   \/\/ ⏩/.test(PL), '⏩ 화면 DTO 에 cs');
   ok(/quietMaxSec: p\.quietMaxSec != null/.test(APP) && /quietMaxSec: Math\.max\(0, Math\.min\(3, numOr\(ch\.quietMaxSec/.test(APP), '채널 편집 읽기·저장 두 곳');
+  // ✂ 클립별 무음 구간 줄이기(quietOver) — 채널 값 대신 그 문장에만
+  {
+    const ch = { quietMaxSec: 0 };
+    ok(QT.sentKey(ch, {}) === '', 'quietOver 없음 + 채널 꺼짐 = 원본');
+    const a = QT.sentKey(ch, { quietOver: { max: 0.2, edge: false } });
+    const b = QT.sentKey(ch, { quietOver: { max: 0.5, edge: false } });
+    const c = QT.sentKey(ch, { quietOver: { max: 0.2, edge: true } });
+    ok(a && b && c && a !== b && a !== c, 'quietOver 값마다 다른 열쇠(판정력)');
+    ok(QT.sentKey({ quietMaxSec: 0.3 }, { quietOver: { max: 0, edge: false } }) === '', 'max 0 = 채널이 켜져 있어도 이 클립은 안 줄임');
+    ok(QT.sentKey({ quietMaxSec: 0.3 }, {}) !== '', '채널 값은 그대로 쓰임');
+    ok(QT.effPreset(ch, null) === ch, 'effPreset 문장 없음 = 원래 것');
+    ok(/qo: s\.quietOver \|\| null/.test(M) && /qo: s\.quietOver \|\| null/.test(PL), '작업본·DTO 에 qo');
+    ok((M.match(/s\.quietOver = ss\.qo/g) || []).length === 2 && /s\.quietOver = keep\.quietOver/.test(M), '이어받기: 작업본 2곳 + 글 고침 1곳');
+    ok(/delete s\.quietOver; delete s\.wt/.test(M), '단어 지우기는 quietOver 도 비움(이미 구워짐)');
+    const cq = M.slice(M.indexOf("ipcMain.handle('clip-quiet'"), M.indexOf("ipcMain.handle('tts-sentences'"));
+    ok(cq.indexOf("undoPush('무음 구간 줄이기')") > 0 && cq.indexOf("undoPush('무음 구간 줄이기')") < cq.indexOf('s.quietOver = {'), 'clip-quiet: 바꾸기 전에 되돌리기 저장');
+  }
   try { fs.rmSync(T, { recursive: true, force: true }); } catch {}
   console.log(`\n${pass} 통과 · ${fail} 실패`);
   process.exit(fail ? 1 : 0);

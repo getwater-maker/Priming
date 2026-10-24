@@ -219,6 +219,7 @@ contextBridge.exposeInMainWorld('api', {
   restoreLastQueue: () => ipcRenderer.invoke('restore-last-queue'),
   backupList: () => ipcRenderer.invoke('backup-list'),
   clipSpeed: (args) => ipcRenderer.invoke('clip-speed', args),
+  clipQuiet: (args) => ipcRenderer.invoke('clip-quiet', args),   // ✂ 무음 구간 줄이기(고른 클립만)
   backupRestore: (args) => ipcRenderer.invoke('backup-restore', args),
   crashDismiss: () => ipcRenderer.invoke('crash-dismiss'),
   clearSaves: () => ipcRenderer.invoke('clear-saves'),

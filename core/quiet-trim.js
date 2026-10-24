@@ -132,8 +132,13 @@ function decodePcm(file, ffmpegPath, rate = 24000) {
 const SPEEDS = [0.5, 0.75, 0.8, 0.9, 1, 1.1, 1.2, 1.25, 1.3, 1.5, 2];
 function normSpeed(v) { const n = Number(v); return (isFinite(n) && n >= 0.5 && n <= 2) ? Math.round(n * 100) / 100 : 1; }
 // 문장 하나의 사본 열쇠 — '' = 원본 그대로
+// 🔑 이 문장에 쓸 설정 — 클립에 quietOver{max,edge} 가 있으면 채널 값 대신(max 0 = 이 클립은 안 줄임)
+function effPreset(preset, s) {
+  const o = s && s.quietOver;
+  return o ? { ...(preset || {}), quietMaxSec: o.max, quietEdge: !!o.edge } : preset;
+}
 function sentKey(preset, s) {
-  const q = keyOf(preset), sp = normSpeed(s && s.clipSpeed);
+  const q = keyOf(effPreset(preset, s)), sp = normSpeed(s && s.clipSpeed);
   return q + (sp !== 1 ? `|s${sp.toFixed(2)}` : '');
 }
 function trailingZeros(pcm) { let z = 0; for (let i = pcm.length - 1; i >= 0 && pcm[i] === 0; i--) z++; return z; }
@@ -164,12 +169,12 @@ function tempoPcm(pcm, speed, ffmpegPath, rate = 24000) {
  *   opts: { ffmpegPath, claimPath(want, own), onLine, abortSignal }
  */
 async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
-  const K = parseKey(keyOf(preset));
   const r = { changed: 0, cut: 0, restored: 0, removedSec: 0, sped: 0, failed: 0 };
   for (const s of sentences || []) {
     if (opts.abortSignal && opts.abortSignal()) break;
     if (!s || !s.ttsAudioPath) continue;
     const key = sentKey(preset, s);
+    const K = parseKey(keyOf(effPreset(preset, s)));
     const q = s.quiet;
     const derived = !!(q && q.out && s.ttsAudioPath === q.out && q.src && fs.existsSync(q.src));
     if (derived && q.key === key) continue;                       // 이미 이 설정
@@ -214,4 +219,4 @@ async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
   return r;
 }
 
-module.exports = { keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, wavOf, decodePcm, ensureSentences, VER };
+module.exports = { effPreset, keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, wavOf, decodePcm, ensureSentences, VER };

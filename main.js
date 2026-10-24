@@ -6990,7 +6990,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, wt: s.wt || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7209,6 +7209,7 @@ function projectsFromSnapshot(snap) {
         if (ss.bc && ss.bc.audio && ss.bc.audio === ss.ttsAudioPath) s.backcheck = ss.bc;   // 🔎 역대조 결과(그 음성 파일에 대한 것일 때만)
         if (ss.q && ss.q.out && ss.q.out === s.ttsAudioPath) s.quiet = ss.q;   // ✂ 쉼 줄인 사본이면 원본을 기억(끄면 원본으로)
         if (ss.cs) s.clipSpeed = ss.cs;   // ⏩ 클립 배속
+        if (ss.qo) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기
         if (ss.wt) s.wt = ss.wt;   // 🔤 단어 시각 정렬(열쇠 = 음성 경로·길이·글 — 맞지 않으면 쓰이지 않는다)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
@@ -7312,6 +7313,7 @@ function overlaySnapshot(parsed, snap) {
         if ((ss.speaker || null) !== (s.speaker || null)) return; // 🎭 화자가 바뀜(대본에 [이름] 을 붙이거나 뗌) → 옛 목소리 음성을 쓰지 않는다
         if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; if (ss.q && ss.q.out === ss.ttsAudioPath) s.quiet = ss.q; }
         if (ss.cs && ss.text === s.text) s.clipSpeed = ss.cs;   // ⏩ 클립 배속(같은 문장일 때만)
+        if (ss.qo && ss.text === s.text) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기(같은 문장일 때만)
         if (ss.wt && ss.text === s.text) s.wt = ss.wt;   // 🔤 단어 시각 정렬(같은 문장일 때만 — 열쇠가 다시 걸러 준다)
       });
     }
@@ -9261,9 +9263,10 @@ async function _editSentences(args = {}) {
       // ⏩✂ 사본 체인도 함께 — 물려받은 음성이 배속·쉼 줄인 사본이면 그 기록이 있어야 배속이 두 번 걸리지 않는다
       if (keep.quiet && keep.quiet.out === keep.ttsAudioPath) s.quiet = { ...keep.quiet };
       if (keep.clipSpeed) s.clipSpeed = keep.clipSpeed;
+      if (keep.quietOver) s.quietOver = keep.quietOver;
     } else if (old.length === 1 && plan.newTexts.length === 1 && old[0].clipSpeed) s.clipSpeed = old[0].clipSpeed;   // ⏩ 한 문장을 고쳐 한 문장 = 배속 유지(음성은 새로 만든 뒤 다시 건다)
     // 🗑 단어 지우기(#11) — 소리를 들어낸 새 음성 파일이 이 문장의 음성이다. 배속·쉼 줄이기는 이미 그 소리에 구워져 있으므로 기록을 비워 두 번 걸리지 않게(wt 는 다시 맞춘다)
-    if (args._wordCut && plan.newTexts.length === 1) { s.ttsAudioPath = args._wordCut.path; s.ttsDurationSec = args._wordCut.dur; s.ttsStatus = 'done'; delete s.quiet; delete s.clipSpeed; delete s.wt; }
+    if (args._wordCut && plan.newTexts.length === 1) { s.ttsAudioPath = args._wordCut.path; s.ttsDurationSec = args._wordCut.dur; s.ttsStatus = 'done'; delete s.quiet; delete s.clipSpeed; delete s.quietOver; delete s.wt; }
     return s;
   });
   const gPos = g.sentenceIds.indexOf(old[0].id);
@@ -10475,6 +10478,26 @@ ipcMain.handle('clip-speed', async (_e, args = {}) => {
   if (!r && !sents.some((s) => s.clipSpeed)) undoDrop(_u);
   storeActive(); syncSnapshotNow();
   return { ok: true, speed: sp, dto: P.toDTO(S.parsed) };
+});
+// ✂ 무음 구간 줄이기(Lab · Vrew 「무음 구간 줄이기」) — 고른 클립 문장에만 채널 값 대신 이 값을 쓴다
+//   args = { shortsNum, items, maxSec(0 = 이 클립은 줄이지 않음 · null = 채널 값으로 되돌림), edge, presetName } · 원본 음성 그대로 · Ctrl+Z 한 번
+ipcMain.handle('clip-quiet', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
+  const pr = c.pr;
+  const seen = new Set(); const sents = [];
+  for (const it of args.items || []) { const s = _sentAt(pr, it.groupNum, it.sentIdx); if (s && !seen.has(s.id)) { seen.add(s.id); sents.push(s); } }
+  if (!sents.length) return { ok: false, error: '고른 클립이 없습니다', dto: P.toDTO(S.parsed) };
+  const _u = undoPush('무음 구간 줄이기');
+  const reset = args.maxSec == null;
+  const mx = reset ? 0 : Math.max(0, Math.min(3, Number(args.maxSec) || 0));
+  for (const s of sents) { if (reset) delete s.quietOver; else s.quietOver = { max: mx, edge: !!args.edge }; }
+  const _it = activeItem();
+  const preset = resolvePreset((_it && _it.settings && _it.settings.presetName) || args.presetName || null);
+  const r = await P.quietPass(sents, preset, shortsDirs(S.outRoot, pr.shortsNum).tts, log, () => false);
+  const noAudio = sents.filter((s) => !s.ttsAudioPath).length;
+  log(`✂ 무음 구간 줄이기 — ${reset ? '채널 값으로 되돌림' : mx > 0 ? '쉼 최대 ' + mx + '초' + (args.edge ? ' · 앞뒤 여백 포함' : '') : '이 클립은 줄이지 않음'} · 문장 ${sents.length}개${noAudio ? ` (음성 없는 ${noAudio}개는 음성을 만들 때 적용)` : ''}${r && r.cut ? ' · 쉼 ' + r.cut + '곳' : ''}`);
+  storeActive(); syncSnapshotNow();
+  return { ok: true, reset, maxSec: mx, cut: r ? r.cut : 0, removedSec: r ? r.removedSec : 0, dto: P.toDTO(S.parsed) };
 });
 ipcMain.handle('tts-sentences', (_e, args = {}) => enqueueTtsJob('클립 음성 변환', async () => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }

@@ -132,6 +132,7 @@ function toDTO(parseResult) {
               audio: s.ttsAudioPath || null,
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
+              qo: s.quietOver || null,   // ✂ 이 클립만의 무음 구간 줄이기
               pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함
@@ -666,7 +667,7 @@ async function quietPass(sentences, preset, workDir, onLine, abortSignal) {
   try {
     const QT = require('./quiet-trim');
     const key = QT.keyOf(preset);
-    if (key || (sentences || []).some((x) => x && (x.quiet || QT.normSpeed(x.clipSpeed) !== 1))) {
+    if (key || (sentences || []).some((x) => x && (x.quiet || x.quietOver || QT.normSpeed(x.clipSpeed) !== 1))) {
       const r = await QT.ensureSentences(sentences, preset, workDir, { ffmpegPath, claimPath, onLine, abortSignal });
       qr = r;
       if (onLine && r.changed) onLine(`✂ 음성 사본 맞춤 — 문장 ${r.changed}개${key ? ` · 쉼 ${r.cut}곳 (최대 ${preset.quietMaxSec}초${preset.quietEdge ? ' · 앞뒤 여백 포함' : ''})` : ''}${r.sped ? ` · ⏩ 클립 배속 ${r.sped}개` : ''}${r.restored ? ` · 원래 음성으로 ${r.restored}개` : ''} · 길이 ${r.removedSec >= 0 ? '−' : '+'}${Math.abs(r.removedSec).toFixed(1)}초`);

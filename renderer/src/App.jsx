@@ -2680,6 +2680,31 @@ export default function App() {
       setStatus(r && r.ok ? `⏩ 클립 배속 ${r.speed}× — 문장 ${items.length}개 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '배속 실패'));
     } catch (e) { logline('클립 배속 오류: ' + e.message); setStatus('⚠ ' + e.message); }
   }
+  // ✂ 무음 구간 줄이기(Lab · Vrew 「무음 구간 줄이기」) — 고른 클립 문장에만. maxSec: 0 = 이 클립은 안 줄임 · null = 채널 값으로
+  async function clipQuietSet(maxSec, edge) {
+    if (!clipSelOk()) return; const sel = capSel; setClipMenu(null); setClipCtx(null);
+    const items = []; const seen = new Set();
+    for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    setStatus('✂ 무음 구간 줄이는 중…');
+    try {
+      const r = await api.clipQuiet({ shortsNum: sel.shortsNum, items, maxSec, edge: !!edge, presetName: presetName || null });
+      if (r && r.dto) setDto(r.dto);
+      setStatus(r && r.ok ? (r.reset ? '✂ 채널 값으로 되돌렸습니다' : maxSec > 0 ? `✂ 무음 구간 줄임 — 문장 ${items.length}개 · 쉼 ${r.cut || 0}곳 · ${Math.abs(r.removedSec || 0).toFixed(1)}초 짧아짐 (Ctrl+Z 되돌리기)` : '✂ 이 클립은 쉼을 줄이지 않습니다') : '⚠ ' + ((r && r.error) || '무음 구간 줄이기 실패'));
+    } catch (e) { logline('무음 구간 줄이기 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
+  // ✂ 클립 나누기 — 고른 첫 클립의 자막 칸을 열어 준다(나눌 자리에 커서를 놓고 Enter = 기존 문장 나누기)
+  function clipSplitHere() {
+    if (!clipSelOk()) return; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; const sn = capSel.shortsNum;
+    setClipMenu(null); setClipCtx(null);
+    if (openEditAt(sn, first.n, undefined, 'end')) setStatus('✂ 나눌 자리에 커서를 놓고 Enter 를 누르세요 (Esc = 취소)');
+  }
+  // ▤ 전체 자막 복사하기 — 이 대본의 모든 클립 글을 줄마다 한 줄씩 클립보드로
+  async function copyAllCaptions() {
+    const sn = capSel && capSel.shortsNum; const PL = sn != null ? linesMap.get(sn) : null; setClipCtx(null);
+    if (!PL || !PL.list.length) return;
+    const txt = PL.list.map((l) => l.t).join('\n');
+    try { await navigator.clipboard.writeText(txt); setStatus(`▤ 자막 ${PL.list.length}줄을 복사했습니다`); } catch (e) { setStatus('⚠ 복사하지 못했습니다: ' + e.message); }
+  }
   function clipPlay() { if (!clipSelOk()) return; const first = [...capSel.items].sort((a, b) => a.n - b.n)[0]; setClipMenu(null); playFromCursor({ shortsNum: capSel.shortsNum, n: first.n }, true); }
   async function clipInsertFile() {
     if (!clipSelOk()) return; const sel = capSel; setClipMenu(null);
@@ -6555,7 +6580,8 @@ export default function App() {
         const top = Math.max(4, Math.min(clipCtx.y, window.innerHeight - mh - 4));
         const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
         const run = (fn) => () => { setClipCtx(null); fn(); };
-        const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setClipCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
+        const hov = (sub) => (e) => { if (!sub && e.currentTarget.closest('.clip-ctx-sub')) return;   // 하위 칸 안의 줄에 닿는다고 그 칸을 닫지 않는다
+          const r = e.currentTarget.getBoundingClientRect(); setClipCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
         const Row = ({ icon, label, onClick, soon, sub, kbd, dis, tid }) => (
           <button className={'cx-row' + (soon || dis ? ' soon' : '') + (sub && clipCtx.sub === sub ? ' open' : '')} data-testid={tid} onMouseEnter={hov(sub || null)}
             onClick={sub ? hov(sub) : (dis || soon ? () => clipSoon(label) : onClick)}>
@@ -6579,16 +6605,16 @@ export default function App() {
             <div className="vr-sep" />
             <Row icon="☑" label="클립 선택" sub="sel" tid="cx-sel" />
             <Row icon="⊟" label="클립 합치기" dis={n < 2} onClick={run(clipMerge)} tid="cx-merge" />
-            <Row icon="✂" label="클립 나누기" soon />
+            <Row icon="✂" label="클립 나누기" onClick={clipSplitHere} tid="cx-split" />
             <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" soon />
             <Row icon="🎙" label="음성 덮어쓰기" soon />
             <div className="vr-sep" />
             <Row icon="⚑" label="마커" soon />
-            <Row icon="▤" label="전체 자막 복사하기" soon />
+            <Row icon="▤" label="전체 자막 복사하기" onClick={copyAllCaptions} tid="cx-copyall" />
             <Row icon="▥" label="전체 자막 지우기" soon />
             <div className="vr-sep" />
             <Row icon="🌐" label="번역하기" soon />
-            <Row icon="⇥" label="무음 구간 줄이기" soon />
+            <Row icon="⇥" label="무음 구간 줄이기" sub="quiet" tid="cx-quiet" />
             <div className="vr-sep" />
             <Row icon="✨" label="AI 이미지 자동삽입" soon />
             <Row icon="🖼" label="이미지 삽입" sub="img" tid="cx-img" />
@@ -6629,12 +6655,22 @@ export default function App() {
               <Row icon="🎞" label="무료 비디오" soon />
               <Row icon="🎬" label={'AI 비디오 G' + g} onClick={run(() => { if (cg) runGroupVid(cg.sn, cg.g); })} tid="cx-vid-ai" />
             </>}
+            {clipCtx.sub === 'quiet' && <>
+              {[0.1, 0.2, 0.3, 0.5, 1].map((v) => <Row key={v} icon="⇥" label={'쉼 최대 ' + v + '초'} onClick={() => clipQuietSet(v, false)} tid={'cx-quiet-' + v} />)}
+              <Row icon="⇤" label="앞뒤 여백도 줄이기 (0.3초)" onClick={() => clipQuietSet(0.3, true)} tid="cx-quiet-edge" />
+              <Row icon="⊘" label="이 클립은 줄이지 않음" onClick={() => clipQuietSet(0, false)} tid="cx-quiet-off" />
+              <Row icon="↺" label="채널 값으로 되돌리기" onClick={() => clipQuietSet(null, false)} tid="cx-quiet-reset" />
+            </>}
+            {clipCtx.sub === 'speed' && <>
+              {[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <Row key={v} icon="⏩" label={v === 1 ? '보통 속도 (1×)' : v + '배속'} onClick={run(() => clipSpeedSet(v))} tid={'cx-speed-' + v} />)}
+              <Row icon="◂" label="효과로 돌아가기" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'fx' } : c))} tid="cx-speed-back" />
+            </>}
             {clipCtx.sub === 'fx' && <>
               <Row icon="✳" label="필터" soon />
               <Row icon="⤢" label="확대 및 회전" soon />
               <Row icon="◐" label="화면 전환" soon />
               <Row icon="🔉" label="볼륨 조절" soon />
-              <Row icon="⏩" label="배속 효과" soon />
+              <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
               <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />
               <Row icon="■" label={'채움 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); })} tid="cx-fx-cover" />
               <Row icon="🎨" label="클립 배경색" soon />
