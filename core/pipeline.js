@@ -133,6 +133,7 @@ function toDTO(parseResult) {
               speaker: s.speaker || null,   // [이름] 대사 — 화면 배지
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
               qo: s.quietOver || null,   // ✂ 이 클립만의 무음 구간 줄이기
+              mk: s.marker ? 1 : null,   // ⚑ 마커
               pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
               spans: (() => { const e = require('./caption-format').withAll(pr.capAll, s.capSpans, String(s.text || '').length); return e.length ? e : null; })(),   // 🎨 줄별·글자별 자막 서식(문장 글자 위치) — 🌐 대본 「모든 자막」(capAll) 포함

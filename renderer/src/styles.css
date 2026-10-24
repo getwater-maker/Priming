@@ -1969,3 +1969,13 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 /* 번호로 선택 입력 창(우클릭 메뉴 ▸ 클립 선택 ▸ 클립·씬 번호로 선택) */
 .vr-menu.selnum{position:fixed;left:50%;top:30%;transform:translateX(-50%);z-index:3100;display:flex;flex-direction:column;gap:8px;padding:14px 16px;width:300px}
 .vr-menu.selnum input{padding:6px 8px}
+
+/* ⚑ 마커 — 클립 표시 + 모아 보기 목록 */
+.clip-marker{display:inline-block;margin:0 4px;color:var(--gold);font-weight:800;text-shadow:0 0 2px var(--bg-000000)}
+.vr-menu.marker-list{position:fixed;z-index:3100;width:320px;max-height:300px;display:flex;flex-direction:column;gap:6px;padding:10px 12px}
+.marker-items{overflow:auto;display:flex;flex-direction:column;gap:2px}
+.marker-item{display:flex;gap:8px;align-items:center;text-align:left;background:transparent;border:0;border-radius:var(--r-sm);padding:4px 6px;color:var(--strong)}
+.marker-item:hover{background:var(--paper-3)}
+.marker-item .mi-n{font-variant-numeric:tabular-nums;color:var(--muted)}
+.marker-item .mi-g{color:var(--sky);font-size:var(--fs-sm)}
+.marker-item .mi-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

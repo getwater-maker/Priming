@@ -6381,6 +6381,37 @@ export default function App() {
   const ribDl = (<button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>);
   const ribReaderBtn = (<button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>);
   const ribGuide = (<button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>);
+  // ⚑ 마커 — 달기/지우기(고른 클립의 문장) · 모아 보기(목록 → 그 클립으로 이동)
+  const [markerList, setMarkerList] = useState(null);   // { x, y } | null
+  async function clipMarker(mode) {
+    if (!clipSelOk()) { setStatus('⚑ 마커를 달 클립을 먼저 고르세요'); return; } const sel = capSel; setClipMenu(null); setClipCtx(null);
+    const items = []; const seen = new Set();
+    for (const it of sel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    try {
+      const r = await api.clipMarker({ shortsNum: sel.shortsNum, items, mode: mode || 'toggle' });
+      if (r && r.dto) setDto(r.dto);
+      setStatus(r && r.ok ? `⚑ 마커 ${r.on ? '달기' : '지우기'} — 문장 ${r.count}개 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '마커 실패'));
+    } catch (e) { logline('마커 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
+  // 마커가 달린 문장들 — [{ sn, groupNum, sentIdx, n(첫 줄 번호), text }] (화면 순서)
+  function markerEntries() {
+    const out = [];
+    if (!dto || !dto.projects) return out;
+    for (const pr of dto.projects) {
+      const PL = linesMap.get(pr.shortsNum);
+      for (const c of (pr.cuts || [])) (c.sentences || []).forEach((s, si) => {
+        if (!s.mk) return;
+        const ls = PL ? (PL.bySent.get(c.num + ':' + si) || []) : [];
+        out.push({ sn: pr.shortsNum, groupNum: c.num, sentIdx: si, n: ls.length ? ls[0].n : null, text: String(s.text || '') });
+      });
+    }
+    return out;
+  }
+  function jumpToClip(sn, n) {
+    if (n == null) return;
+    userCursor({ shortsNum: sn, n });
+    setTimeout(() => { const e = document.querySelector('.sent[data-ln="' + n + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 60);
+  }
   const showFileInfo = () => {
     if (!loaded || !dto || !dto.projects) { setStatus('ⓘ 열려 있는 대본이 없습니다'); return; }
     let groups = 0, clips = 0, voiced = 0, imgs = 0;
@@ -6415,7 +6446,8 @@ export default function App() {
     <span className="hdiv" />
     {ribClipOps()}
     <span className="hdiv" />
-    <button className="soon" data-testid="rb-marker" title="마커 — 준비 중" onClick={() => clipSoon('마커')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
+    <button data-testid="rb-marker" disabled={!selOk} title="마커 — 고른 클립에 표식을 달거나 지웁니다(이미 다 달려 있으면 지움 · 대본·출력에는 영향 없음)" onClick={() => clipMarker('toggle')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
+    <button data-testid="rb-marker-list" disabled={!loaded} title="마커 모아 보기 — 표식이 달린 클립 목록 · 누르면 그 클립으로 이동" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMarkerList((v) => (v ? null : { x: r.left, y: r.bottom + 4 })); }}><span className="rb-ic">⚑</span> <span className="rb-t">마커 목록{markerEntries().length ? ` (${markerEntries().length})` : ''}</span></button>
     <button className="soon" data-testid="rb-overwrite-voice" title="음성 덮어쓰기 — 준비 중" onClick={() => clipSoon('음성 덮어쓰기')}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
     <span className="hdiv" />
     <button data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
@@ -6738,6 +6770,21 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {markerList && <div className="vr-menu-bg" onMouseDown={() => setMarkerList(null)} />}
+          {markerList && (() => {
+            const es = markerEntries();
+            return (<div className="vr-menu marker-list" data-testid="marker-list" style={{ left: Math.max(8, Math.min(markerList.x, window.innerWidth - 340)), top: Math.min(markerList.y, window.innerHeight - 320) }} onMouseDown={(e) => e.stopPropagation()}>
+              <b>⚑ 마커 {es.length}개</b>
+              {!es.length && <span className="meta">아직 없습니다 — 클립을 고르고 우클릭 ▸ 마커</span>}
+              <div className="marker-items">
+                {es.map((x, i) => (
+                  <button key={x.groupNum + ':' + x.sentIdx} className="marker-item" data-testid="marker-item" data-n={x.n} onClick={() => { setMarkerList(null); jumpToClip(x.sn, x.n); }}>
+                    <span className="mi-n">{x.n != null ? String(x.n).padStart(2, '0') : '--'}</span><span className="mi-g">G{x.groupNum}</span><span className="mi-t">{x.text.length > 34 ? x.text.slice(0, 34) + '…' : x.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>);
+          })()}
           {selByNum && <div className="vr-menu-bg" onMouseDown={() => setSelByNum(null)} />}
           {selByNum && <div className="vr-menu selnum" data-testid="selnum" onMouseDown={(e) => e.stopPropagation()}>
             <b>{selByNum.kind === 'scene' ? '씬 번호로 선택' : '클립 번호로 선택'}</b>
@@ -6783,7 +6830,8 @@ export default function App() {
             <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" onClick={clipNewScene} tid="cx-newscene" />
             <Row icon="🎙" label="음성 덮어쓰기" soon />
             <div className="vr-sep" />
-            <Row icon="⚑" label="마커" soon />
+            <Row icon="⚑" label="마커" kbd={(() => { const ss = capSel ? capSel.items.map((it) => capSentence(capSel.shortsNum, it.groupNum, it.sentIdx)).filter(Boolean) : []; return ss.length && ss.every((s) => s.mk) ? '✓' : null; })()} onClick={run(() => clipMarker('toggle'))} tid="cx-marker" />
+            <Row icon="⚐" label="마커 모아 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setClipCtx(null); setMarkerList({ x: Math.min(r.left, window.innerWidth - 340), y: Math.max(8, r.top) }); }} tid="cx-marker-list" />
             <Row icon="▤" label="전체 자막 복사하기" onClick={copyAllCaptions} tid="cx-copyall" />
             <div className="vr-sep" />
             <Row icon="🌐" label="번역하기" soon />
@@ -8663,6 +8711,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       title={(vt ? `이 대본의 ${s.speaker ? `화자 「${s.speaker}」` : '내레이션'} 목소리: ${vt}` : s.speaker ? `화자 「${s.speaker}」 — 채널 화자 목소리(⚙ 채널편집 → 🎙 음성) 또는 내레이션 목소리` : '채널 기본 목소리') + (onClipVoice ? `\n누르면 🔊 음성 설정 — 이 대본의 ${s.speaker ? `「${s.speaker}」 클립 모두` : '내레이션 클립 모두'}` : '')}
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
+                                    {li === 0 && s.mk ? <span className="clip-marker" data-testid="clip-marker" title="⚑ 마커 — 클립 우클릭 ▸ 마커 로 지우기 · 편집 탭 ▸ 마커 목록으로 모아 보기">⚑</span> : null}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (
