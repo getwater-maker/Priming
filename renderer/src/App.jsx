@@ -2705,6 +2705,61 @@ export default function App() {
     setClipMenu(null); setClipCtx(null);
     if (openEditAt(sn, first.n, undefined, 'end')) setStatus('✂ 나눌 자리에 커서를 놓고 Enter 를 누르세요 (Esc = 취소)');
   }
+  // #️⃣ 번호로 선택 — "1-5, 8, 10~12" 같은 글을 번호 목록으로
+  function parseNumSpec(txt) {
+    const out = new Set();
+    for (const part of String(txt || '').split(/[,\s]+/).filter(Boolean)) {
+      const m = /^(\d+)\s*[-~]\s*(\d+)$/.exec(part);
+      if (m) { let a0 = +m[1], b0 = +m[2]; if (a0 > b0) [a0, b0] = [b0, a0]; for (let i = a0; i <= b0 && out.size < 100000; i++) out.add(i); }
+      else if (/^\d+$/.test(part)) out.add(+part);
+      else return null;   // 알 수 없는 글자 — 통째로 거부
+    }
+    return out;
+  }
+  const [selByNum, setSelByNum] = useState(null);   // { kind: 'clip' | 'scene', text }
+  function openSelByNum(kind) { setClipCtx(null); setSelByNum({ kind, text: '' }); }
+  function applySelByNum() {
+    if (!selByNum) return;
+    const sn = capSel && capSel.shortsNum; const PL = sn != null ? linesMap.get(sn) : null;
+    const want = parseNumSpec(selByNum.text);
+    if (!PL || !PL.list.length) { setSelByNum(null); return; }
+    if (!want || !want.size) { setStatus('⚠ 번호를 「1-5, 8」 처럼 적어 주세요'); return; }
+    const list = PL.list.filter((x) => (selByNum.kind === 'scene' ? want.has(x.groupNum) : want.has(x.n)));
+    setSelByNum(null);
+    if (!list.length) { setCapSel(null); setStatus(`고른 ${selByNum.kind === 'scene' ? '씬' : '클립'} 번호에 맞는 클립이 없습니다`); return; }
+    const mk = (x) => ({ n: x.n, groupNum: x.groupNum, sentIdx: x.sentIdx, from: x.from, to: x.to });
+    setCapSel({ shortsNum: sn, mode: 'lines', items: list.map(mk), anchorN: list[0].n }); setChkSel(true);
+    setStatus(`${selByNum.kind === 'scene' ? '씬' : '클립'} 번호로 클립 ${list.length}개를 골랐습니다`);
+  }
+  // ⊞ 선택한 클립으로 새 씬 만들기 — 같은 그룹 안의 이어진 클립을 앞·뒤에서 잘라 그룹(씬) 하나로(기존 그룹 나누기 두 번 · 뒤쪽 먼저)
+  async function clipNewScene() {
+    if (!clipSelOk()) return; const sel = capSel; setClipCtx(null);
+    const sn = sel.shortsNum; const PL = linesMap.get(sn); if (!PL) return;
+    const items = [...sel.items].sort((x, y) => x.n - y.n);
+    if (new Set(items.map((x) => x.groupNum)).size !== 1) { setStatus('⚠ 한 그룹(씬) 안의 클립만 새 씬으로 만들 수 있습니다'); return; }
+    const inG = PL.list.filter((l) => l.groupNum === items[0].groupNum).sort((x, y) => x.n - y.n);
+    const i0 = inG.findIndex((l) => l.n === items[0].n), i1 = inG.findIndex((l) => l.n === items[items.length - 1].n);
+    if (i0 < 0 || i1 < 0 || i1 - i0 + 1 !== items.length) { setStatus('⚠ 이어진 클립만 새 씬으로 만들 수 있습니다'); return; }
+    const last = inG[i1], before = i0 > 0 ? inG[i0 - 1] : null, hasAfter = i1 + 1 < inG.length;
+    if (!before && !hasAfter) { setStatus('이미 이 클립들이 한 씬입니다'); return; }
+    if (hasAfter) await splitGroupAt(sn, { groupNum: last.groupNum, sentIdx: last.sentIdx, n: last.n });
+    if (before) await splitGroupAt(sn, { groupNum: before.groupNum, sentIdx: before.sentIdx, n: before.n });
+    setStatus('⊞ 고른 클립을 새 씬(그룹)으로 만들었습니다 (Ctrl+Z 되돌리기)');
+  }
+  // ✨ AI 이미지 자동삽입 — 고른 클립이 든 그룹의 그림을 AI 로(기존 「AI 이미지 G」 와 같은 일을 그룹마다)
+  async function clipAiAuto() {
+    if (!clipSelOk()) return; const sel = capSel; setClipCtx(null);
+    const gs = [...new Set(sel.items.map((x) => x.groupNum))].sort((x, y) => x - y);
+    if (gs.length > 1 && !uiConfirm(`고른 클립이 든 그룹 ${gs.length}개(G${gs.join(', G')})의 그림을 AI 로 만듭니다(유료 도구면 요금이 듭니다). 계속할까요?`)) return;
+    for (const g of gs) { await runRegen(sel.shortsNum, g); }
+  }
+  // 🖼 무료 이미지·비디오 — 지금 고른 클립의 그룹에 스톡 찾기 창을 연다
+  function openStockForSel(kind) {
+    const cg = clipGroup(); if (!cg) return;
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === cg.sn) : null; const c = pr ? pr.cuts.find((x) => x.num === cg.g) : null;
+    setClipCtx(null);
+    setStockDlg({ shortsNum: cg.sn, groupNum: cg.g, intro: !!(c && c.isIntro), kind });
+  }
   // ▤ 전체 자막 복사하기 — 이 대본의 모든 클립 글을 줄마다 한 줄씩 클립보드로
   async function copyAllCaptions() {
     const sn = capSel && capSel.shortsNum; const PL = sn != null ? linesMap.get(sn) : null; setClipCtx(null);
@@ -2757,6 +2812,7 @@ export default function App() {
     else if (kind === 'all') list = PL.list;
     else if (kind === 'odd') list = PL.list.filter((x) => x.n % 2 === 1);
     else if (kind === 'even') list = PL.list.filter((x) => x.n % 2 === 0);
+    else if (kind === 'voice') list = PL.list.filter((x) => { const s = capSentence(sn, x.groupNum, x.sentIdx); return !!(s && s.audio); });   // AI 목소리(음성)가 이미 있는 클립
     else list = PL.list.filter((x) => !cur.has(x.n));   // 반전
     if (!list.length) { setCapSel(null); setStatus('고른 클립이 없습니다'); return; }
     setCapSel({ shortsNum: sn, mode: 'lines', items: list.map(mk), anchorN: list[0].n }); setChkSel(true);
@@ -6388,7 +6444,6 @@ export default function App() {
     <span className="hgroup" data-testid="rib-caption"><span className="glabel">자막</span>
       {ribReaderBtn}
       <button data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
-      <button className="soon" data-testid="rb-clear-all-caps" title="전체 자막 지우기 — 준비 중" onClick={() => clipSoon('전체 자막 지우기')}><span className="rb-ic">▥</span> <span className="rb-t">전체 자막 지우기</span></button>
       <button className="soon" data-testid="rb-ai-translate" title="AI 자막 번역 — 준비 중" onClick={() => clipSoon('AI 자막 번역')}><span className="rb-ic">🌐</span> <span className="rb-t">AI 자막 번역</span></button>
       <button className="soon" data-testid="rb-ai-proof" title="AI 자막 교정 — 준비 중(지금은 🟥·🟨 문단 맞춤법 검사가 별도로 있습니다)" onClick={() => clipSoon('AI 자막 교정')}><span className="rb-ic">✓</span> <span className="rb-t">AI 자막 교정</span></button>
     </span>
@@ -6683,6 +6738,13 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {selByNum && <div className="vr-menu-bg" onMouseDown={() => setSelByNum(null)} />}
+          {selByNum && <div className="vr-menu selnum" data-testid="selnum" onMouseDown={(e) => e.stopPropagation()}>
+            <b>{selByNum.kind === 'scene' ? '씬 번호로 선택' : '클립 번호로 선택'}</b>
+            <input autoFocus data-testid="selnum-input" value={selByNum.text} placeholder="예: 1-5, 8, 10~12" onChange={(e) => setSelByNum({ ...selByNum, text: e.target.value })}
+              onKeyDown={(e) => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') { e.preventDefault(); applySelByNum(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSelByNum(null); } }} />
+            <button data-testid="selnum-ok" onClick={applySelByNum}>선택</button>
+          </div>}
           {wsOn && clipCtx && clipSelOk() && (() => {
         // 🖱 클립 오른쪽 클릭 메뉴(Vrew 모양) — 없는 기능은 「준비 중」으로 흐리게(막대와 같은 약속)
         const n = capSel.items.length; const cg = clipGroup();
@@ -6718,17 +6780,16 @@ export default function App() {
             <Row icon="☑" label="클립 선택" sub="sel" tid="cx-sel" />
             <Row icon="⊟" label="클립 합치기" dis={n < 2} onClick={run(clipMerge)} tid="cx-merge" />
             <Row icon="✂" label="클립 나누기" onClick={clipSplitHere} tid="cx-split" />
-            <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" soon />
+            <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" onClick={clipNewScene} tid="cx-newscene" />
             <Row icon="🎙" label="음성 덮어쓰기" soon />
             <div className="vr-sep" />
             <Row icon="⚑" label="마커" soon />
             <Row icon="▤" label="전체 자막 복사하기" onClick={copyAllCaptions} tid="cx-copyall" />
-            <Row icon="▥" label="전체 자막 지우기" soon />
             <div className="vr-sep" />
             <Row icon="🌐" label="번역하기" soon />
             <Row icon="⇥" label="무음 구간 줄이기" sub="quiet" tid="cx-quiet" />
             <div className="vr-sep" />
-            <Row icon="✨" label="AI 이미지 자동삽입" soon />
+            <Row icon="✨" label="AI 이미지 자동삽입" onClick={clipAiAuto} tid="cx-ai-auto" />
             <Row icon="🖼" label="이미지 삽입" sub="img" tid="cx-img" />
             <Row icon="🎞" label="비디오 삽입" sub="vid" tid="cx-vid" />
             <Row icon="T" label="텍스트 삽입" soon />
@@ -6740,31 +6801,29 @@ export default function App() {
             <div className="vr-sep" />
             <Row icon="🎛" label="효과" sub="fx" tid="cx-fx" />
             <div className="vr-sep" />
-            <Row icon="ⓘ" label="작업 파일 정보" soon />
+            <Row icon="ⓘ" label="작업 파일 정보" onClick={run(showFileInfo)} tid="cx-fileinfo" />
           </div>
           {clipCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'cx-sub-' + clipCtx.sub} style={{ left: subLeft, top: subTop, width: SW }} onMouseDown={(e) => e.preventDefault()}>
             {clipCtx.sub === 'sel' && <>
               <Row icon="▢" label="현재 클립" onClick={() => ctxSelect('cur')} tid="cx-sel-cur" />
               <Row icon="▣" label="전체" kbd="Ctrl+A" onClick={() => ctxSelect('all')} tid="cx-sel-all" />
-              <Row icon="#" label="클립 번호로 선택" soon />
-              <Row icon="#" label="씬 번호로 선택" soon />
+              <Row icon="#" label="클립 번호로 선택" onClick={() => openSelByNum('clip')} tid="cx-sel-num" />
+              <Row icon="#" label="씬 번호로 선택" onClick={() => openSelByNum('scene')} tid="cx-sel-scene" />
               <Row icon="1" label="홀수 클립" onClick={() => ctxSelect('odd')} tid="cx-sel-odd" />
               <Row icon="2" label="짝수 클립" onClick={() => ctxSelect('even')} tid="cx-sel-even" />
               <Row icon="⇄" label="선택 반전" onClick={() => ctxSelect('inv')} tid="cx-sel-inv" />
-              <Row icon="🎙" label="AI 목소리 클립" soon />
+              <Row icon="🎙" label="AI 목소리 클립" onClick={() => ctxSelect('voice')} tid="cx-sel-voice" />
             </>}
             {clipCtx.sub === 'img' && <>
               <Row icon="🖥" label="PC에서 불러오기" onClick={run(clipInsertFile)} tid="cx-img-pc" />
-              <Row icon="📱" label="모바일에서 불러오기" soon />
-              <Row icon="🗂" label="내 이미지" soon />
-              <Row icon="🖼" label="무료 이미지" soon />
+              <Row icon="🗂" label="내 이미지" onClick={run(clipInsertFile)} tid="cx-img-mine" />
+              <Row icon="🖼" label="무료 이미지" onClick={() => openStockForSel('photo')} tid="cx-img-free" />
               <Row icon="✨" label={'AI 이미지 G' + g} onClick={run(() => { if (cg) runRegen(cg.sn, cg.g); })} tid="cx-img-ai" />
             </>}
             {clipCtx.sub === 'vid' && <>
               <Row icon="🖥" label="PC에서 불러오기" onClick={run(clipInsertFile)} tid="cx-vid-pc" />
-              <Row icon="📱" label="모바일에서 불러오기" soon />
-              <Row icon="🗂" label="내 비디오" soon />
-              <Row icon="🎞" label="무료 비디오" soon />
+              <Row icon="🗂" label="내 비디오" onClick={run(clipInsertFile)} tid="cx-vid-mine" />
+              <Row icon="🎞" label="무료 비디오" onClick={() => openStockForSel('video')} tid="cx-vid-free" />
               <Row icon="🎬" label={'AI 비디오 G' + g} onClick={run(() => { if (cg) runGroupVid(cg.sn, cg.g); })} tid="cx-vid-ai" />
             </>}
             {clipCtx.sub === 'quiet' && <>

@@ -1965,3 +1965,7 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
   .menubar .menus .menu{padding:6px 4px}
 }
 @media (max-width:1440px){ .menubar .modetoggle button{padding:5px 4px} }
+
+/* 번호로 선택 입력 창(우클릭 메뉴 ▸ 클립 선택 ▸ 클립·씬 번호로 선택) */
+.vr-menu.selnum{position:fixed;left:50%;top:30%;transform:translateX(-50%);z-index:3100;display:flex;flex-direction:column;gap:8px;padding:14px 16px;width:300px}
+.vr-menu.selnum input{padding:6px 8px}

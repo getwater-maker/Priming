@@ -115,6 +115,52 @@ function speech() {
     const st = await win.evaluate(() => document.body.innerText.match(/자막 \d+줄을 복사했습니다|복사하지 못했습니다[^\n]*/));
     ok(st && /줄을 복사했습니다/.test(st[0]), '복사 완료 안내 ' + (st && st[0]));
 
+    console.log('\n[7] 준비 중 정리 — 파일 정보 · 번호로 선택 · AI 목소리 클립 · 새 씬 · 무료 이미지(2026-10-25)');
+    const sub = async (parent) => { await rightClick(1); await hover(parent); };
+    const status = () => win.evaluate(() => document.body.innerText);
+    // 작업 파일 정보
+    await rightClick(1);
+    ok(await win.locator('[data-testid="cx-fileinfo"].soon').count() === 0, '작업 파일 정보는 더 이상 준비 중이 아니다');
+    await win.click('[data-testid="cx-fileinfo"]'); await win.waitForTimeout(300);
+    ok(/작업 파일 「.*」 — 그룹 \d+ · 클립\(문장\) \d+ · 음성 \d+\/\d+/.test(await status()), '작업 파일 정보 = 그룹·클립·음성 개수 안내');
+    // 클립 번호로 선택
+    await sub('cx-sel');
+    ok(await win.locator('[data-testid="cx-sel-num"].soon').count() === 0 && await win.locator('[data-testid="cx-sel-scene"].soon').count() === 0, '번호로 선택은 준비 중이 아니다');
+    await win.click('[data-testid="cx-sel-num"]');
+    await win.waitForSelector('[data-testid="selnum-input"]', { timeout: 3000 });
+    await win.fill('[data-testid="selnum-input"]', '1-2'); await win.click('[data-testid="selnum-ok"]'); await win.waitForTimeout(300);
+    ok(/클립 번호로 클립 2개를 골랐습니다/.test(await status()), '「1-2」 → 클립 2개');
+    // 잘못된 글은 거부
+    await sub('cx-sel'); await win.click('[data-testid="cx-sel-num"]'); await win.waitForSelector('[data-testid="selnum-input"]');
+    await win.fill('[data-testid="selnum-input"]', '가나다'); await win.press('[data-testid="selnum-input"]', 'Enter'); await win.waitForTimeout(250);
+    ok(await win.locator('[data-testid="selnum"]').count() === 1 && /번호를 「1-5, 8」/.test(await status()), '알 수 없는 글은 거부하고 창을 닫지 않는다');
+    await win.press('[data-testid="selnum-input"]', 'Escape'); await win.waitForTimeout(150);
+    // 씬 번호로 선택(2씬 = 셋째 문장 1개)
+    await rightClick(1); await hover('cx-sel'); await win.click('[data-testid="cx-sel-scene"]');
+    await win.waitForSelector('[data-testid="selnum-input"]'); await win.fill('[data-testid="selnum-input"]', '2'); await win.click('[data-testid="selnum-ok"]'); await win.waitForTimeout(300);
+    ok(/씬 번호로 클립 \d+개를 골랐습니다/.test(await status()), '씬 번호 2 → 그 씬의 클립');
+    // AI 목소리 클립(음성이 있는 클립)
+    await rightClick(1); await hover('cx-sel'); await win.click('[data-testid="cx-sel-voice"]'); await win.waitForTimeout(300);
+    ok(/클립 \d+개를 골랐습니다/.test(await status()), 'AI 목소리 클립 = 음성이 있는 클립 선택');
+    // 무료 이미지 → 스톡 창
+    await rightClick(1); await hover('cx-img');
+    ok(await win.locator('[data-testid="cx-img-free"].soon').count() === 0 && await win.locator('[data-testid="cx-img-mine"].soon').count() === 0 && await win.locator('.cx-row:has-text("모바일에서 불러오기")').count() === 0, '이미지 ▸ 내 이미지·무료 이미지는 연결 · 모바일 줄은 뺐다');
+    await win.click('[data-testid="cx-img-free"]');
+    await win.waitForSelector('[data-testid="stock-dlg"]', { timeout: 5000 });
+    ok(true, '무료 이미지 = 스톡 찾기 창이 열린다');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(300);
+    // 새 씬 만들기 — 1씬(클립 1·2) 중 2번만 → 그룹 수 +1
+    const groups = () => win.evaluate(async () => { const r = await window.api.listQueue(); return r.dto.projects[0].cuts.length; });
+    const g0 = await groups();
+    await win.keyboard.press('Escape'); await win.locator('.sent[data-ln="2"] .clip-r1').first().click({ button: 'right', position: { x: 4, y: 4 } });
+    await win.waitForSelector('[data-testid="clip-ctx"]'); await win.click('[data-testid="cx-newscene"]'); await win.waitForTimeout(1500);
+    const g1 = await groups();
+    ok(g1 === g0 + 1, `선택한 클립(2번)을 새 씬으로 — 그룹 ${g0} → ${g1}`);
+    // 전체 자막 지우기는 만들지 않는다(대본 글 = 자막)
+    await win.keyboard.press('Escape'); await rightClick(1);
+    ok(await win.locator('.cx-row:has-text("전체 자막 지우기")').count() === 0, '「전체 자막 지우기」 줄은 뺐다(대본 글 = 자막이라 지우면 대본이 비워짐)');
+    await win.keyboard.press('Escape');
+
     ok(errors.length === 0, '화면 오류 없음 ' + errors.join(' | ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외 ' + (e && e.stack || e)); }
   finally {
