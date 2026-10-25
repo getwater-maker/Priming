@@ -49,7 +49,7 @@ function paraInner(sents, groupNum, groupNums) {
       const r = s.roy, bg = r ? ROY_BG[r.k === 'exp' ? (r.st === '확인' ? 'ok' : 'exp') : 'int'] : '';
       return (r && r.first ? royChip(r) : '')
         + (s.speaker ? `<b ${NE} data-spk="1" style="color:#8a4b1f;user-select:none">${escHtml(s.speaker)}<button type="button" data-spk-clear="${s.i}" title="이 문장의 화자 「${escHtml(s.speaker)}」 떼기 — 내레이션으로 읽습니다(대본에서 문장 앞 [이름] 이 빠집니다). 화자를 바꾸려면 문장 앞에 [새이름] 을 쓰세요" style="font-size:0.7em;padding:0 4px;margin:0 3px 0 2px;border-radius:4px;border:1px solid #c9a98a;background:#fff;color:#8a4b1f;cursor:pointer;vertical-align:1px">✕</button> </b>` : '')
-        + (bg ? `<span data-roy="${r.k}" data-mid="${escHtml(r.mid)}" style="background:${bg};border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
+        + (bg ? `<span data-roy="${r.k}" data-mid="${escHtml(r.mid)}" style="background:${bg};color:#2b2b2b;border-radius:3px">${escHtml(s.text)}</span>` : escHtml(s.text))
         + (k < sents.length - 1 ? ' ' : '');
     }).join('');
 }
