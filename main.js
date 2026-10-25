@@ -10948,6 +10948,29 @@ ipcMain.handle('clip-pause-word', async (_e, args = {}) => {
   storeActive(); syncSnapshotNow(); pushDtoUpdate();
   return { ok: true, sec, j, n, dur: r.dur, dto: P.toDTO(S.parsed) };
 });
+// 🎞 영상 장면 전환 찾기(Lab · 남은 기능 ⑥ · Vrew 「영상 분석」) — 그룹 영상에서 ffmpeg 장면 점수로 전환 시각을 찾는다(core/scene-detect · 찾기만).
+//   args = { shortsNum, groupNum, threshold?(0.1~0.9 · 기본 0.35), mark?(true = 전환이 든 클립에 ⚑ 마커 달기 — 되돌릴 수 있다) }
+//   시각 → 클립: 영상은 그 그룹의 첫 문장과 함께 시작한다고 보고, 문장 길이(음성 + 막간 쉼)를 이어 붙인 시간표에서 찾는다(영상이 더 짧으면 그 안의 전환만)
+ipcMain.handle('video-scenes', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr; const g = pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) return { ok: false, error: '그룹을 찾을 수 없습니다' };
+  if (!g.videoPath || !fs.existsSync(g.videoPath)) return { ok: false, error: '이 그룹에는 영상이 없습니다 — 영상을 만들거나 불러온 그룹에서 찾으세요' };
+  const SD = require('./core/scene-detect');
+  const r = await SD.detect({ src: g.videoPath, threshold: args.threshold, ffmpegPath: require('./core/media-utils').getFfmpegPath() });
+  if (!r.ok) return { ok: false, error: r.error };
+  const sents = pr.getSentencesOfGroup(g);
+  const pz = P.pausePlanOf(pr, resolvePreset(args.presetName || null)).map;
+  const durs = sents.map((s) => ((s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec + (pz.get(s.id) || 0) : 0));
+  const scenes = r.scenes.map((x) => { const i = SD.sentenceAt(durs, x.t); return { t: Math.round(x.t * 100) / 100, score: Math.round(x.score * 1000) / 1000, sentIdx: i, num: i >= 0 ? sents[i].num : null }; });
+  let marked = 0;
+  if (args.mark) {
+    const idxs = [...new Set(scenes.filter((x) => x.sentIdx >= 0).map((x) => x.sentIdx))];
+    if (idxs.length) { undoPush('장면 전환 마커'); for (const i of idxs) sents[i].marker = true; marked = idxs.length; storeActive(); syncSnapshotNow(); pushDtoUpdate(); }
+  }
+  log(`🎞 G${g.num} 영상 장면 전환 ${scenes.length}곳(민감도 ${r.threshold})${marked ? ` · ⚑ 마커 ${marked}개` : ''}`);
+  return { ok: true, threshold: r.threshold, scenes, marked, videoSec: null, dto: marked ? P.toDTO(S.parsed) : undefined };
+});
 // 🕳 빈 클립 삽입(Lab · Vrew 「빈 클립 삽입」) — 고른 클립들 **맨 뒤 문장** 음성 뒤에 N초 무음(s.padAfter · 화면은 이어지고 자막은 없다).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], sec, mode:'add'(기본 · 더한다)|'set'(그 값으로) } · sec 0 + set = 지움 · 음성 있는 문장만
 //   설계 docs/VrewLab/빈클립_정지워드_설계.md — 합치는 곳은 pipeline.pausePlanOf 한 곳(빌더·SRT·챕터·카드·지문이 그걸 읽는다)

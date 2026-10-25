@@ -67,6 +67,7 @@
     "test:denoise": "node test/denoise.test.js && node test/denoise-ui.smoke.js",
     "test:medialib": "node test/media-lib.test.js",
     "test:dualsub": "node test/dual-sub.test.js",
+    "test:scenes": "node test/scene-detect.test.js",
     "test:fxflt": "node test/fx-filter.test.js && node test/fx-filter.smoke.js && node test/fx-filter-ui.smoke.js",
     "test:marker": "node test/marker.test.js && node test/marker-ui.smoke.js",
     "test:menubar": "node test/menubar-frame.smoke.js && node test/account-page.smoke.js",

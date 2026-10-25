@@ -2137,3 +2137,8 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .lib-grid.sfx .lib-ic{height:auto;width:34px;font-size:18px;flex:none;background:none}
 .lib-item .lib-nm{font-size:var(--fs-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .lib-item .lib-bt{display:flex;gap:4px;justify-content:flex-end}
+
+/* 🎞 장면 전환 찾기 */
+.scene-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:3px}
+.scene-row{display:flex;gap:12px;font-size:var(--fs-md);padding:2px 4px;border-bottom:1px solid var(--line)}
+.scene-row b{min-width:52px;color:var(--sky)}

@@ -6584,6 +6584,27 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🎞 영상 장면 전환 찾기 — 그룹 영상에서 전환 시각을 찾아 보여 주고(찾기만) 원하면 그 클립에 ⚑ 마커(core/scene-detect · main video-scenes)
+  const [scenePanel, setScenePanel] = useState(null);   // { sn, groupNum, th, busy, res, err }
+  function openSceneFind(pre) {
+    let sn, groupNum;
+    if (pre && pre.sn != null) { sn = pre.sn; groupNum = pre.groupNum; }
+    else { if (!clipSelOk()) { setStatus('🎞 영상이 있는 그룹의 클립을 먼저 고르세요'); return; } const it = [...capSel.items].sort((x, y) => x.n - y.n)[0]; sn = capSel.shortsNum; groupNum = it.groupNum; }
+    setClipMenu(null); setClipCtx(null);
+    const pj = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const cut = pj ? pj.cuts.find((x) => x.num === groupNum) : null;
+    if (!cut || !cut.videoPath) { setStatus('🎞 G' + groupNum + ' 에는 영상이 없습니다 — 영상이 있는 그룹의 클립을 고르세요'); return; }
+    setScenePanel({ sn, groupNum, th: 0.35, busy: false, res: null, err: '' });
+  }
+  async function sceneRun(mark) {
+    const p = scenePanel; if (!p || p.busy) return;
+    setScenePanel({ ...p, busy: true, err: '' });
+    try {
+      const r = await api.videoScenes({ shortsNum: p.sn, groupNum: p.groupNum, threshold: p.th, mark: !!mark });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.ok) { setScenePanel({ ...p, busy: false, res: r, err: '' }); if (mark) setStatus(r.marked ? '⚑ 장면 전환이 든 클립 ' + r.marked + '개에 마커를 달았습니다 (Ctrl+Z 되돌리기)' : '마커를 달 클립이 없습니다(전환이 음성이 있는 문장 시간 밖)'); }
+      else setScenePanel({ ...p, busy: false, err: (r && r.error) || '찾지 못했습니다' });
+    } catch (e) { setScenePanel({ ...p, busy: false, err: e.message }); }
+  }
   // 🗂 내 미디어 · 🔊 효과음 — 폴더를 키워드로 찾아 고른 클립 구간에 넣는다(core/media-lib · main lib-search · 넣기는 기존 overlay-op add)
   const [libPanel, setLibPanel] = useState(null);   // { lib, q, res, busy, sn, a, b, playing }
   const libAudioRef = useRef(null);
@@ -7210,6 +7231,24 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {scenePanel && <div className="vr-menu-bg" onMouseDown={() => setScenePanel(null)} />}
+          {scenePanel && <div className="vr-menu zr-panel scene-panel" data-testid="scene-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🎞 영상 장면 전환 찾기 · G{scenePanel.groupNum}</b>
+            <label>민감도 <input type="range" data-testid="scene-th" min="0.1" max="0.9" step="0.05" value={scenePanel.th} onChange={(e) => setScenePanel({ ...scenePanel, th: Number(e.target.value) })} /><span className="zr-v">{scenePanel.th}</span></label>
+            <span className="meta">낮을수록 작은 변화도 전환으로 봅니다(기본 0.35) · 장면 점수는 <b>밝기 변화</b>를 봅니다(밝기가 비슷한 채 색만 바뀌는 전환은 놓칠 수 있습니다) · 찾기만 합니다 — 영상·대본은 바뀌지 않습니다</span>
+            {scenePanel.err && <span className="meta" data-testid="scene-err">⚠ {scenePanel.err}</span>}
+            {scenePanel.busy && <span className="meta">영상을 분석하는 중입니다…</span>}
+            {scenePanel.res && <div className="scene-list" data-testid="scene-list">
+              {scenePanel.res.scenes.length === 0 ? <span className="meta" data-testid="scene-none">장면 전환을 찾지 못했습니다(민감도를 낮춰 보세요)</span>
+                : scenePanel.res.scenes.map((x, i) => <div key={i} className="scene-row" data-testid="scene-row"><b>{Math.floor(x.t / 60)}:{(x.t % 60).toFixed(1).padStart(4, '0')}</b><span>점수 {x.score}</span><span>{x.num != null ? '클립(문장) ' + x.num : '음성 시간 밖'}</span></div>)}
+            </div>}
+            <div className="zr-btns">
+              <button data-testid="scene-run" disabled={scenePanel.busy} onClick={() => sceneRun(false)}>찾기</button>
+              <button className="ghost" data-testid="scene-mark" disabled={scenePanel.busy || !scenePanel.res || !scenePanel.res.scenes.some((x) => x.sentIdx >= 0)} title="찾은 전환이 든 클립에 ⚑ 마커를 답니다(마커 모아 보기로 이동 · 되돌릴 수 있음)" onClick={() => sceneRun(true)}>전환이 든 클립에 ⚑ 마커</button>
+              <button className="ghost" data-testid="scene-copy" disabled={!scenePanel.res || !scenePanel.res.scenes.length} onClick={() => { try { navigator.clipboard.writeText(scenePanel.res.scenes.map((x) => x.t.toFixed(2)).join('\n')); setStatus('🎞 전환 시각 ' + scenePanel.res.scenes.length + '개를 복사했습니다'); } catch (_) {} }}>시각 복사</button>
+              <button className="ghost" data-testid="scene-close" onClick={() => setScenePanel(null)}>닫기</button>
+            </div>
+          </div>}
           {libPanel && <div className="vr-menu-bg" onMouseDown={() => { try { if (libAudioRef.current) libAudioRef.current.pause(); } catch (_) {} setLibPanel(null); }} />}
           {libPanel && <div className="vr-menu zr-panel lib-panel" data-testid="lib-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>{libPanel.lib === 'sfx' ? '🔊 효과음' : '🗂 내 이미지 · 비디오'} · 문장 {libPanel.a}~{libPanel.b} 에 넣기</b>
@@ -7410,6 +7449,7 @@ export default function App() {
             <Row icon="⇥" label="무음 구간 줄이기" sub="quiet" tid="cx-quiet" />
             <div className="vr-sep" />
             <Row icon="✨" label="AI 이미지 자동삽입" onClick={clipAiAuto} tid="cx-ai-auto" />
+            <Row icon="🎞" label="영상 장면 전환 찾기" onClick={() => openSceneFind()} tid="cx-scene-find" />
             <Row icon="🖼" label="이미지 삽입" sub="img" tid="cx-img" />
             <Row icon="🎞" label="비디오 삽입" sub="vid" tid="cx-vid" />
             <Row icon="T" label="텍스트 삽입" onClick={() => openTextIns('basic')} tid="cx-text-ins" />
