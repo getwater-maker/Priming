@@ -7015,7 +7015,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, wt: s.wt || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, pa: s.padAfter > 0 ? s.padAfter : null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7238,6 +7238,7 @@ function projectsFromSnapshot(snap) {
         if (ss.mk) s.marker = true;   // ⚑ 마커
         if (ss.vl != null) s.vol = ss.vl;   // 🔉 볼륨
         if (ss.ow) s.voiceOwn = true;   // 🎙 덮어쓴 음성
+        if (ss.pa > 0) s.padAfter = ss.pa;   // 🕳 빈 클립
         if (ss.wt) s.wt = ss.wt;   // 🔤 단어 시각 정렬(열쇠 = 음성 경로·길이·글 — 맞지 않으면 쓰이지 않는다)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
@@ -7345,6 +7346,7 @@ function overlaySnapshot(parsed, snap) {
         if (ss.mk && ss.text === s.text) s.marker = true;   // ⚑ 마커(같은 문장일 때만)
         if (ss.vl != null && ss.text === s.text) s.vol = ss.vl;   // 🔉 볼륨(같은 문장일 때만)
         if (ss.ow && ss.text === s.text) s.voiceOwn = true;   // 🎙 덮어쓴 음성(같은 문장일 때만)
+        if (ss.pa > 0 && ss.text === s.text) s.padAfter = ss.pa;   // 🕳 빈 클립(같은 문장일 때만)
         if (ss.wt && ss.text === s.text) s.wt = ss.wt;   // 🔤 단어 시각 정렬(같은 문장일 때만 — 열쇠가 다시 걸러 준다)
       });
     }
@@ -9297,6 +9299,7 @@ async function _editSentences(args = {}) {
       if (keep.quietOver) s.quietOver = keep.quietOver;
       if (keep.marker) s.marker = true;   // ⚑ 글이 같은 문장은 마커도 따라온다
       if (keep.vol != null) s.vol = keep.vol;   // 🔉 볼륨도
+      if (keep.padAfter > 0) s.padAfter = keep.padAfter;   // 🕳 빈 클립도(글이 같으면)
       if (keep.voiceOwn) s.voiceOwn = true;   // 🎙 덮어쓴 음성도(글이 같으면 음성도 따라온다)
     } else if (old.length === 1 && plan.newTexts.length === 1 && old[0].clipSpeed) s.clipSpeed = old[0].clipSpeed;   // ⏩ 한 문장을 고쳐 한 문장 = 배속 유지(음성은 새로 만든 뒤 다시 건다)
     if (s.vol == null && old.length === 1 && plan.newTexts.length === 1 && old[0].vol != null) s.vol = old[0].vol;   // 🔉 한 문장을 고쳐 한 문장 = 볼륨 유지
@@ -10611,6 +10614,28 @@ ipcMain.handle('ai-translate', async (_e, args = {}) => {
   P.writeSrt(t.pr, out, L.maxChars, resolvePreset(args.presetName || null), (s) => map.get(byId.get(s.id)) || '');
   log(`🌐 AI 자막 번역 → ${out}${missing.length ? ` (번역이 빠진 문장 ${missing.length}개는 한국어 그대로)` : ''}`);
   return { ok: true, path: out, count: map.size, missing, lang: L.id };
+});
+// 🕳 빈 클립 삽입(Lab · Vrew 「빈 클립 삽입」) — 고른 클립들 **맨 뒤 문장** 음성 뒤에 N초 무음(s.padAfter · 화면은 이어지고 자막은 없다).
+//   args = { shortsNum, items:[{groupNum, sentIdx}], sec, mode:'add'(기본 · 더한다)|'set'(그 값으로) } · sec 0 + set = 지움 · 음성 있는 문장만
+//   설계 docs/VrewLab/빈클립_정지워드_설계.md — 합치는 곳은 pipeline.pausePlanOf 한 곳(빌더·SRT·챕터·카드·지문이 그걸 읽는다)
+ipcMain.handle('clip-pad', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
+  const pr = c.pr; const SCd = require('./core/screen-cards');
+  let last = null, lastKey = -1;
+  for (const it of args.items || []) {
+    const g = pr.groups.find((x) => x.num === it.groupNum); const s = _sentAt(pr, it.groupNum, it.sentIdx); if (!g || !s) continue;
+    const key = pr.groups.indexOf(g) * 100000 + Number(it.sentIdx); if (key > lastKey) { lastKey = key; last = s; }
+  }
+  if (!last) return { ok: false, error: '고른 클립이 없습니다', dto: P.toDTO(S.parsed) };
+  const mode = args.mode === 'set' ? 'set' : 'add';
+  const cur = SCd.normPad(last.padAfter);
+  const next = mode === 'set' ? SCd.normPad(args.sec) : SCd.normPad(cur + (Number(args.sec) || 0));
+  if (next > 0 && !(last.ttsAudioPath && last.ttsDurationSec > 0)) return { ok: false, error: '빈 클립은 음성이 있는 문장 뒤에만 넣을 수 있습니다(음성을 먼저 만드세요)', dto: P.toDTO(S.parsed) };
+  undoPush(next > 0 ? '빈 클립 삽입' : '빈 클립 지우기');
+  if (next > 0) last.padAfter = next; else delete last.padAfter;
+  log(`🕳 컷${last.num} 뒤 빈 클립 ${next > 0 ? next + '초' : '지움'}`);
+  storeActive(); syncSnapshotNow(); pushDtoUpdate();
+  return { ok: true, sec: next, prev: cur, dto: P.toDTO(S.parsed) };
 });
 // 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
 //   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }

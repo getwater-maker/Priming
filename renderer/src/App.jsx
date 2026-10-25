@@ -43,7 +43,8 @@ import BackupModal from './BackupModal.jsx';
 import AccountPage from './AccountPage.jsx';
 import CEff from '../../core/clip-effects.js';
 import AISub from '../../core/ai-subtitle.js';
-import TxO from '../../core/text-overlay.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
+import TxO from '../../core/text-overlay.js';
+import SCards from '../../core/screen-cards.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -6350,6 +6351,7 @@ export default function App() {
                 <span className="glabel">➕ 삽입</span>
                 <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
                 <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
+                <button className="ghost" data-testid="ins-pad" disabled={!loaded || !isLf} title="빈 클립 삽입 — 고른 클립 음성 뒤에 N초 무음(그림은 이어지고 자막은 없음)" onClick={openPadPanel}>▭ 빈 클립</button>
                 <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
@@ -6495,6 +6497,26 @@ export default function App() {
     zrTimerRef.current = setTimeout(async () => {   // 슬라이더를 끄는 동안 매번 보내지 않는다
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
+  }
+  // 🕳 빈 클립 삽입 — 고른 클립들 맨 뒤 문장 음성 뒤에 N초 무음(s.padAfter · 합치는 곳은 pausePlanOf 한 곳)
+  const [padPanel, setPadPanel] = useState(null);   // { sn, items, sec, cur, num, busy }
+  function openPadPanel() {
+    if (!clipSelOk()) { setStatus('▭ 빈 클립을 넣을 위치의 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum; const items = capSel.items.map((it) => ({ groupNum: it.groupNum, sentIdx: it.sentIdx }));
+    const lastIt = [...capSel.items].sort((x, y) => x.n - y.n)[capSel.items.length - 1];
+    const s = capSentence(sn, lastIt.groupNum, lastIt.sentIdx);
+    setPadPanel({ sn, items, sec: SCards.PAD.def, cur: (s && s.pa) || 0, num: s ? s.num : null, busy: false, sound: !!(s && s.audio) });
+  }
+  async function padApply(mode, sec) {
+    const p = padPanel; if (!p || p.busy) return;
+    setPadPanel({ ...p, busy: true });
+    try {
+      const r = await api.clipPad({ shortsNum: p.sn, items: p.items, sec, mode });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.ok) { setStatus(r.sec > 0 ? `▭ 컷${p.num} 뒤 빈 클립 ${r.sec}초 (Ctrl+Z 되돌리기)` : '▭ 빈 클립을 지웠습니다 (Ctrl+Z 되돌리기)'); setPadPanel({ ...p, busy: false, cur: r.sec }); }
+      else { setStatus('⚠ ' + ((r && r.error) || '빈 클립을 넣지 못했습니다')); setPadPanel({ ...p, busy: false }); }
+    } catch (e) { setStatus('⚠ ' + e.message); setPadPanel({ ...p, busy: false }); }
   }
   // 🅣 글 삽입 — 투명 PNG 한 장으로 그려 그림 위층(overlay-op add)으로 넣는다(core/text-overlay · 새 트랙·렌더 규칙 없음)
   const [textIns, setTextIns] = useState(null);   // { presetId, o:{text,size,color,bold,box,shadow,pos}, sn, a, b, busy }
@@ -6967,6 +6989,14 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {padPanel && <div className="vr-menu-bg" onMouseDown={() => setPadPanel(null)} />}
+          {padPanel && <div className="vr-menu zr-panel pad-panel" data-testid="pad-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>▭ 빈 클립 삽입 · 컷{padPanel.num} 뒤</b>
+            <span className="meta" data-testid="pad-cur">{padPanel.cur > 0 ? `지금 이 클립 뒤에 빈 클립 ${padPanel.cur}초가 있습니다 — 넣으면 더해집니다` : '지금은 이 클립 뒤에 빈 클립이 없습니다'}</span>
+            <label>길이 <input type="range" data-testid="pad-sec" min={SCards.PAD.min} max={SCards.PAD.max} step={SCards.PAD.step} value={padPanel.sec} onChange={(e) => setPadPanel({ ...padPanel, sec: Number(e.target.value) })} /><span className="zr-v" data-testid="pad-v">{padPanel.sec}초</span></label>
+            <span className="meta">이 클립 음성 <b>뒤에 무음</b>이 들어가고 그림은 그대로 이어집니다(자막은 쉼 동안 없습니다) — 고른 클립이 여럿이면 맨 뒤 클립 뒤에 넣습니다 · 클립 앞에는 넣지 않습니다(앞 클립 뒤에 넣으세요) · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button data-testid="pad-run" disabled={padPanel.busy || !padPanel.sound} onClick={() => padApply('add', padPanel.sec)}>넣기(더하기)</button><button className="ghost" data-testid="pad-clear" disabled={padPanel.busy || !(padPanel.cur > 0)} onClick={() => padApply('set', 0)}>빈 클립 지우기</button><button className="ghost" data-testid="pad-close" onClick={() => setPadPanel(null)}>닫기</button></div>
+          </div>}
           {textIns && <div className="vr-menu-bg" onMouseDown={() => setTextIns(null)} />}
           {textIns && <div className="vr-menu zr-panel text-panel" data-testid="text-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>T {TxO.PRESETS[textIns.presetId].label} · 문장 {textIns.a}~{textIns.b}</b>
@@ -7118,7 +7148,7 @@ export default function App() {
             <Row icon="T" label="텍스트 삽입" onClick={() => openTextIns('basic')} tid="cx-text-ins" />
             <Row icon="☺" label="캐릭터 삽입" soon />
             <div className="vr-sep" />
-            <Row icon="▭" label="빈 클립 삽입" soon />
+            <Row icon="▭" label="빈 클립 삽입" onClick={openPadPanel} tid="cx-pad" />
             <Row icon="⋯" label="빈 워드 삽입" soon />
             <Row icon="❄" label="정지 워드 삽입" soon />
             <div className="vr-sep" />
@@ -8987,6 +9017,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                     {li === 0 && s.mk ? <span className="clip-marker" data-testid="clip-marker" title="⚑ 마커 — 클립 우클릭 ▸ 마커 로 지우기 · 편집 탭 ▸ 마커 목록으로 모아 보기">⚑</span> : null}
+                                    {li === 0 && s.pa > 0 ? <span className="clip-vol" data-testid="clip-pad" title={`▭ 이 클립 뒤에 빈 클립(무음) ${s.pa}초 — 클립 우클릭 ▸ 삽입 ▸ 빈 클립 삽입`}>▭{s.pa}초</span> : null}
                                     {li === 0 && s.ow ? <span className="clip-vol" data-testid="clip-own" title="🎙 이 문장 음성은 내 녹음으로 덮어썼습니다(다시 변환해도 유지 · 클립 우클릭 ▸ 덮어쓴 음성 해제)">🎙</span> : null}
                                     {li === 0 && s.vl != null ? <span className="clip-vol" data-testid="clip-vol" title={`🔉 이 문장 음성 볼륨 ${Math.round(s.vl * 100)}% (클립 우클릭 ▸ 효과 ▸ 볼륨 조절)`}>🔉{Math.round(s.vl * 100)}%</span> : null}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}

@@ -89,7 +89,7 @@ function toDTO(parseResult) {
       const _para = pr.readerParas ? require('./script-reader').alignParas(pr.sentences || [], pr.readerParas) : null;
       // 📜 화면 카드 자리(v0.9.25 · ② 클립 칸 왼쪽 표시) — 대본 카드 줄이 가리킨 문장 · 못 찾은 줄은 cardBad
       const _cm = (Array.isArray(pr.screenCards) && pr.screenCards.length) ? (() => { try { return require('./screen-cards').marksBySentence(pr, pr.screenCards); } catch (_) { return null; } })() : null;
-      const _pz = (_pauseHook && Array.isArray(pr.screenCards) && pr.screenCards.length) ? (() => { try { return _pauseHook(pr) || null; } catch (_) { return null; } })() : null;   // ⏸ 문장 id → 쉼(초)
+      const _pz = (_pauseHook && ((Array.isArray(pr.screenCards) && pr.screenCards.length) || (pr.sentences || []).some((x) => x && x.padAfter))) ? (() => { try { return _pauseHook(pr) || null; } catch (_) { return null; } })() : null;   // ⏸ 문장 id → 쉼(초)
       return {
         shortsNum: pr.shortsNum,   // 편 주소 키(롱폼=1 고정) — 스냅샷·IPC 호환을 위해 이름 유지
         title: pr.title,
@@ -134,6 +134,7 @@ function toDTO(parseResult) {
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
               qo: s.quietOver || null,   // ✂ 이 클립만의 무음 구간 줄이기
               mk: s.marker ? 1 : null,   // ⚑ 마커
+              pa: s.padAfter > 0 ? s.padAfter : null,   // 🕳 빈 클립(문장 뒤 무음 초)
               ow: s.voiceOwn ? 1 : null,   // 🎙 내 녹음으로 덮어쓴 음성
               vl: (s.vol != null && s.vol !== 1) ? s.vol : null,   // 🔉 볼륨 조절(0~2 · 없으면 1)
               pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
@@ -740,8 +741,41 @@ async function fillSilentYield(project, workDir, abortSignal = null) {
 // ⏸ 막간 쉼 계획 — 채널 「막간 쉼(초)」(preset.interludePauseSec) + 대본 카드 줄의 `쉼=`. 카드 줄이 없으면 빈 계획(= 예전과 같다).
 //   시각을 쓰는 곳(.vrew 빌드 · 화면 카드 · 정보 카드 · 유튜브 챕터)이 모두 이것 하나를 본다 — 하나라도 빠지면 막간마다 N초씩 밀린다.
 function pausePlanOf(project, preset) {
-  if (!project || !Array.isArray(project.screenCards) || !project.screenCards.length) return { map: new Map(), list: [], total: 0, warnings: [] };
-  return require('./screen-cards').pausesOf(project, project.screenCards, preset && preset.interludePauseSec);
+  const SCd = require('./screen-cards');
+  const base = (project && Array.isArray(project.screenCards) && project.screenCards.length)
+    ? SCd.pausesOf(project, project.screenCards, preset && preset.interludePauseSec)
+    : { map: new Map(), list: [], total: 0, warnings: [] };
+  // 🕳 빈 클립(s.padAfter) — 카드 쉼과 같은 문장이면 **합**(카드 쉼 동안 카드가 뜨고 그 뒤 빈 클립이 이어진다) · 합치는 곳은 여기 한 곳
+  const sents = (project && project.sentences) || [];
+  if (!sents.some((s) => s && s.padAfter)) return base;
+  const map = new Map(base.map), list = base.list.map((x) => ({ ...x })); let total = base.total;
+  for (const s of sents) {
+    const u = SCd.padOf(s); if (!u) continue;
+    if (map.has(s.id)) { map.set(s.id, map.get(s.id) + u); const e = list.find((x) => x.id === s.id); if (e) e.sec += u; } else { map.set(s.id, u); list.push({ id: s.id, sec: u, line: 0, pad: true }); }
+    total += u;
+  }
+  return { map, list, total, warnings: base.warnings };
+}
+// 🕳 MP4 렌더러가 쉼 동안 자막을 빼도록 옆 파일(<이름>.vrew.fx.json)에 쉼 창을 합친다 — 빈 클립(padAfter)만(카드 쉼은 카드 계획이 따로 안다)
+//   창 = [그 문장 음성 끝, +쉼] · 시각은 writeSrt 와 같은 누적(문장 음성 + 그 문장 쉼 전체) · 없으면 옛 창을 지운다
+function userPauseWins(project, preset) {
+  const pauses = pausePlanOf(project, preset).map; const SCd = require('./screen-cards');
+  const wins = []; let t = 0;
+  for (const g of project.groups || []) for (const s of project.getSentencesOfGroup(g)) {
+    const dur = s.ttsDurationSec || 2.5; const sound = !!(s.ttsAudioPath && s.ttsDurationSec > 0);
+    const total = (sound && pauses.get(s.id)) || 0; const u = SCd.padOf(s);
+    if (u > 0) wins.push([Math.round((t + dur + (total - u)) * 1000) / 1000, Math.round((t + dur + total) * 1000) / 1000]);
+    t += dur + total;
+  }
+  return wins;
+}
+function _syncFxPauseWins(vrewPath, wins) {
+  try {
+    const fp = vrewPath + '.fx.json'; let j = null;
+    try { j = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (_) {}
+    if (wins.length) { j = j && typeof j === 'object' ? j : { v: 1 }; j.pauseWins = wins; fs.writeFileSync(fp, JSON.stringify(j), 'utf8'); }
+    else if (j && j.pauseWins) { delete j.pauseWins; if (Object.keys(j).filter((k) => k !== 'v').length) fs.writeFileSync(fp, JSON.stringify(j), 'utf8'); else fs.rmSync(fp, { force: true }); }
+  } catch (_) {}
 }
 // 음성 파일 → 끝에 무음을 붙여 정확히 durSec 인 wav(24kHz mono) · 비동기(main 을 멈추지 않는다)
 function padAudioTo(src, out, durSec) {
@@ -801,7 +835,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
   if (project.capAll) opts.capAll = project.capAll;   // 🌐 대본 「모든 자막」 서식(문장 덮어쓰기 아래층)
   // ⏸ 막간 쉼(v0.9.25) — 막간 카드 끝 문장의 음성 뒤에 무음을 덧댄 **임시 사본**으로 빌드한다(문장 객체·tts-N 원본은 그대로 · 빌드가 끝나면 임시 파일을 지운다)
   const pz = pausePlanOf(project, preset);
-  if (!pz.list.length) return buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts });
+  if (!pz.list.length) { const r0 = await buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts }); _syncFxPauseWins(vrewPath, []); return r0; }
   const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pm-pause-'));
   try {
     const padded = new Map();
@@ -814,7 +848,9 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (logger) logger(`⏸ 막간 쉼 ${padded.size}곳 · ${Math.round(pz.total * 10) / 10}초 (${pz.list.map((x) => '대본 ' + x.line + '줄 ' + x.sec + '초').slice(0, 4).join(' · ')}${pz.list.length > 4 ? ' …' : ''}) — 그 문장 소리가 끝난 뒤 무음 · 카드는 무음 동안 그대로`);
     const WAb = require('./word-align');
     const sentences = project.sentences.map((s) => (padded.has(s.id) ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, padded.get(s.id), (() => { const wb = WAb.validBounds(s); return wb ? { _wtB: wb } : {}; })()) : s));   // 🔤 복제본은 경로·길이가 달라 열쇠가 안 맞는다 → 원본에서 미리 뽑은 정렬(_wtB)
-    return await buildVrew({ sentences, groups: project.groups, vrewPath, opts });
+    const r1 = await buildVrew({ sentences, groups: project.groups, vrewPath, opts });
+    _syncFxPauseWins(vrewPath, userPauseWins(project, preset));
+    return r1;
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 }
 // ── 이미지 생성 ─────────────────────────────────────────
@@ -1190,7 +1226,7 @@ function sanitize(name) {
 
 module.exports = { setRoyHook, setPauseHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
-  makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, sanitize,
+  makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, userPauseWins, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,

@@ -65,7 +65,7 @@ const withDur = (pj, d = 3) => { pj.sentences.forEach((s) => { s.ttsAudioPath = 
     ok(SC.withPauses(pj, new Map()) === pj, '쉼이 없으면 그대로(같은 객체)');
     // 렌더: 쉼 구간의 자막은 쉼 시작에서 끊긴다(제목을 읽는 동안은 보인다)
     const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'vrew-render.js'), 'utf8');
-    ok(/pauseCaptionWins = pw/.test(src) && /e = \{ \.\.\.e, end: w\[0\] \}/.test(src), '렌더: 쉼 창에 걸친 자막은 쉼 시작에서 끊고, 쉼 안에서 시작한 자막은 뺀다');
+    ok(/pauseCaptionWins = \[\.\.\.\(ctx\.pauseCaptionWins \|\| \[\]\), \.\.\.pw\]/.test(src) && /e = \{ \.\.\.e, end: w\[0\] \}/.test(src), '렌더: 쉼 창에 걸친 자막은 쉼 시작에서 끊고, 쉼 안에서 시작한 자막은 뺀다');
   }
 
   console.log('\n[3] 대본 보기 표시(DTO)');

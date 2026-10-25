@@ -1015,8 +1015,8 @@ async function renderVrewToMp4(opts = {}) {
 
     const dSec = Math.max(0, Math.min(10, +opts.dissolveSec || 0));
     // 🎬 그룹별 화면 전환(효과 ⑥) — 빌더가 .vrew 옆에 둔 <이름>.vrew.fx.json(trackId → {type, sec}). 없거나 못 읽으면 전환 없음(컷)
-    let perTrans = null;
-    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object') perTrans = j.trans; } } catch (_) {}
+    let perTrans = null, userPauseWins = null;
+    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object' && Object.keys(j.trans).length) perTrans = j.trans; if (j && Array.isArray(j.pauseWins)) userPauseWins = j.pauseWins.filter((w) => Array.isArray(w) && w[1] > w[0]); } } catch (_) {}   // 🕳 pauseWins = 빈 클립 쉼 창(자막을 뺀다)
     const maxTr = perTrans ? Math.max(0, ...Object.values(perTrans).map((x) => +x.sec || 0)) : 0;
     const tailSec = Math.max(dSec, maxTr);
     let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, tailSec > 0 ? { minTailFrames: Math.round(tailSec * FPS) } : {});
@@ -1070,10 +1070,11 @@ async function renderVrewToMp4(opts = {}) {
       } catch (e) { log('   ⚠ 자막 폭 줄이기 실패: ' + e.message); }
     }
     // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
+    if (userPauseWins && userPauseWins.length) { ctx.pauseCaptionWins = userPauseWins.map((w) => [w[0], w[1]]); log(`   🕳 빈 클립 ${userPauseWins.length}곳 — 쉼 동안 자막을 뺍니다`); }
     if (Array.isArray(opts.cards) && opts.cards.length) {
       ctx.cards = opts.cards;
       { const hw = opts.cards.filter((c) => c.hideCaptions).map((c) => [c.t0, c.t1]); if (hw.length) ctx.hideCaptionWins = [...(ctx.hideCaptionWins || []), ...hw]; }   // 🙈 자막=숨김 카드의 시간 창(정보 카드의 표 창과 합친다)
-      { const pw = opts.cards.filter((c) => !c.hideCaptions && c.pauseSec > 0).map((c) => [c.t1 - c.pauseSec, c.t1]); if (pw.length) ctx.pauseCaptionWins = pw; }   // ⏸ 막간 쉼(v0.9.25) — 무음 동안은 카드만(끝 문장 자막이 늘어져 남지 않게)
+      { const pw = opts.cards.filter((c) => !c.hideCaptions && c.pauseSec > 0).map((c) => [c.t1 - c.pauseSec, c.t1]); if (pw.length) ctx.pauseCaptionWins = [...(ctx.pauseCaptionWins || []), ...pw]; }   // ⏸ 막간 쉼(v0.9.25) — 무음 동안은 카드만(끝 문장 자막이 늘어져 남지 않게)
       const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
       if (opts.cards.some((c) => c.lang === 'ja')) { try { fs.copyFileSync(path.join(fdir, '..', CARD_FONT_JA_FILE), path.join(fontsDir, CARD_FONT_JA_FILE)); } catch (_) { miss.push(CARD_FONT_JA_FILE); } }

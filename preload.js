@@ -224,6 +224,7 @@ contextBridge.exposeInMainWorld('api', {
   stagePasteImage: (args) => ipcRenderer.invoke('stage-paste-image', args),   // 📋 ① 칸 그림 붙여넣기
   aiProof: (args) => ipcRenderer.invoke('ai-proof', args),   // 🌐 AI 자막 교정(제안만)
   aiTranslate: (args) => ipcRenderer.invoke('ai-translate', args),   // 🌐 AI 자막 번역(SRT)
+  clipPad: (args) => ipcRenderer.invoke('clip-pad', args),   // 🕳 빈 클립 삽입
   clipVoiceOverwrite: (args) => ipcRenderer.invoke('clip-voice-overwrite', args),   // 🎙 음성 덮어쓰기
   clipVolume: (args) => ipcRenderer.invoke('clip-volume', args),   // 🔉 볼륨 조절
   clipMarker: (args) => ipcRenderer.invoke('clip-marker', args),   // ⚑ 마커 달기·지우기   // ✂ 무음 구간 줄이기(고른 클립만)

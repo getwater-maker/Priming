@@ -77,6 +77,13 @@ const PAUSE_MAX = 15;        // 쉼 상한(초)
 const PAUSE_KIND = '막간';    // 채널 값이 붙는 종류(이름)
 
 /** 대본 순서 문장 목록(시각 없이) — 열쇠 맞추기용 */
+/**
+ * 🕳 빈 클립(Lab) — 문장 `s.padAfter`(초 · 0.2~10) = 그 문장 음성 **뒤 무음**(화면은 이어지고 자막은 없다). 음성이 있는 문장만.
+ *   막간 카드의 쉼(pausesOf)과 **합쳐** 한 계획이 된다 — 합치는 곳은 pipeline.pausePlanOf 한 곳.
+ */
+const PAD = { min: 0.2, max: 10, step: 0.1, def: 1 };
+function normPad(v) { const n = Number(v); if (!isFinite(n) || n <= 0) return 0; return Math.round(Math.max(PAD.min, Math.min(PAD.max, n)) * 10) / 10; }
+function padOf(s) { return (s && s.ttsAudioPath && s.ttsDurationSec > 0) ? normPad(s.padAfter) : 0; }
 function sentsOf(project) {
   const byId = new Map((project.sentences || []).map((s) => [s.id, s]));
   const out = [];
@@ -180,7 +187,7 @@ function plan(project, markers, opts = {}) {
   warnings.push(...pz.warnings);
   // 문장 목록(대본 순서) + 그룹 이름 + 시각(쉼 포함)
   const sents = sentsOf(project); let t = 0;
-  for (const x of sents) { const p = x.sound ? (pz.map.get(x.s.id) || 0) : 0; x.t0 = t; x.t1 = t + x.d + p; x.pause = p; t = x.t1; }
+  for (const x of sents) { const p = x.sound ? (pz.map.get(x.s.id) || 0) : 0; const u = padOf(x.s); x.t0 = t; x.t1 = t + x.d + p; x.pause = p; t = x.t1 + u; }   // 🕳 빈 클립은 카드 시각을 뒤로 민다(카드 자체는 안 늘린다)
   for (const m of list) {
     const tag = `📜 화면카드 ${m.line}줄`;
     const bad = (why) => warnings.push(`${tag} — ${why} → 이 카드만 건너뜁니다`);
@@ -265,4 +272,4 @@ function opacityAt(c, t) {
   return 1;
 }
 
-module.exports = { KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
+module.exports = { PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
