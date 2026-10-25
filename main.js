@@ -10971,21 +10971,6 @@ ipcMain.handle('video-scenes', async (_e, args = {}) => {
   log(`🎞 G${g.num} 영상 장면 전환 ${scenes.length}곳(민감도 ${r.threshold})${marked ? ` · ⚑ 마커 ${marked}개` : ''}`);
   return { ok: true, threshold: r.threshold, scenes, marked, videoSec: null, dto: marked ? P.toDTO(S.parsed) : undefined };
 });
-// 🎬 외부 편집기 내보내기(Lab · 남은 기능 ⑧) — FCPXML 1.9(Final Cut Pro X · DaVinci Resolve · Premiere 가 읽는다). 앱 상태는 바꾸지 않는다(읽기만) · 파일은 완성물 폴더 루트의 <대본이름>.fcpxml
-//   args = { shortsNum, presetName? } → { ok, path, totalSec, assets, clips } · 소재(그림·영상·음성·삽입)와 길이·자리만 — 효과·자막은 담지 않는다(core/fcpxml)
-ipcMain.handle('export-fcpxml', async (_e, args = {}) => {
-  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
-  const pr = c.pr; const FX = require('./core/fcpxml');
-  if (!pr.sentences.some((s) => s.ttsAudioPath && s.ttsDurationSec > 0)) return { ok: false, error: '음성이 있는 문장이 없습니다 — 음성을 먼저 만드세요(시간표를 음성 길이로 만듭니다)' };
-  const pz = P.pausePlanOf(pr, resolvePreset(args.presetName || null)).map;
-  const base = vrewBaseName(pr);
-  const r = FX.build(pr, { name: base, pauses: pz, canvas: { w: 1920, h: 1080 }, exists: (f) => fs.existsSync(f) });
-  if (!r.clips) return { ok: false, error: '내보낼 소재가 없습니다(그림·영상·음성)' };
-  const out = path.join(S.outRoot, base + '.fcpxml');
-  try { fs.mkdirSync(path.dirname(out), { recursive: true }); require('./core/atomic-write').writeTextAtomicSync(out, r.xml); } catch (e) { return { ok: false, error: '저장하지 못했습니다: ' + e.message }; }
-  log(`🎬 FCPXML 내보냄 — ${path.basename(out)} (소재 ${r.assets}개 · 클립 ${r.clips}개 · ${(r.totalSec / 60).toFixed(1)}분 · 효과·자막은 담지 않음)`);
-  return { ok: true, path: out, totalSec: r.totalSec, assets: r.assets, clips: r.clips };
-});
 // 📋 효과 템플릿(Lab · 남은 기능 ⑨) — 그림 그룹 효과 + 문장 소리 효과(볼륨·노이즈)를 이름 붙여 저장해 두고 다른 클립에 한 번에 입힌다(core/templates · 저장 ~/.priming-maker/templates.json).
 //   tpl-list → [{id,name,desc,at}] · tpl-save {shortsNum, items, name} (고른 첫 클립의 효과 · 같은 이름이면 덮어씀) · tpl-apply {shortsNum, items, id} (되돌릴 수 있게 undoPush · 자리·순서·켄번스 구간은 그대로) · tpl-delete {id}
 const TPL_FILE = () => path.join(os.homedir(), '.priming-maker', 'templates.json');
@@ -11051,19 +11036,6 @@ ipcMain.handle('clip-pad', async (_e, args = {}) => {
   log(`🕳 컷${last.num} 뒤 빈 클립 ${next > 0 ? next + '초' : '지움'}`);
   storeActive(); syncSnapshotNow(); pushDtoUpdate();
   return { ok: true, sec: next, prev: cur, dto: P.toDTO(S.parsed) };
-});
-// 🎤 녹음 저장(Lab · 남은 기능 ⑦) — 렌더러 MediaRecorder 가 만든 소리(webm/opus)를 임시 폴더에 쓰고 경로를 돌려준다. 그 뒤 화면이 clip-voice-overwrite(path)로 문장 음성을 바꾼다
-//   args = { bytes: Uint8Array } · 임시 `priming-rec/녹음_<시각>.webm` · 300MB 넘으면 거부 · 소리가 아닌 데이터는 거부(WebM 머리 확인)
-ipcMain.handle('rec-save', (_e, args = {}) => {
-  const b = args.bytes ? Buffer.from(args.bytes) : null;
-  if (!b || b.length < 100) return { ok: false, error: '녹음된 소리가 없습니다' };
-  if (b.length > 300 * 1048576) return { ok: false, error: '녹음이 너무 깁니다(300MB 넘음)' };
-  if (!(b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) && b.slice(0, 4).toString('latin1') !== 'OggS' && b.slice(0, 4).toString('latin1') !== 'RIFF') return { ok: false, error: '소리 데이터가 아닙니다' };
-  const dir = path.join(require('os').tmpdir(), 'priming-rec'); fs.mkdirSync(dir, { recursive: true });
-  const ext = b.slice(0, 4).toString('latin1') === 'RIFF' ? 'wav' : b.slice(0, 4).toString('latin1') === 'OggS' ? 'ogg' : 'webm';
-  const fp = path.join(dir, `녹음_${Date.now()}.${ext}`);
-  try { fs.writeFileSync(fp, b); } catch (e) { return { ok: false, error: e.message }; }
-  return { ok: true, path: fp, bytes: b.length };
 });
 // 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
 //   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }

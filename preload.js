@@ -239,14 +239,12 @@ contextBridge.exposeInMainWorld('api', {
   tplSave: (args) => ipcRenderer.invoke('tpl-save', args),
   tplApply: (args) => ipcRenderer.invoke('tpl-apply', args),
   tplDelete: (args) => ipcRenderer.invoke('tpl-delete', args),
-  exportFcpxml: (args) => ipcRenderer.invoke('export-fcpxml', args),   // 🎬 외부 편집기(FCPXML) 내보내기
   videoScenes: (args) => ipcRenderer.invoke('video-scenes', args),   // 🎞 영상 장면 전환 찾기
   setDualSub: (args) => ipcRenderer.invoke('set-dual-sub', args),   // 🌐 이중 자막 켜기·끄기
   aiProof: (args) => ipcRenderer.invoke('ai-proof', args),   // 🌐 AI 자막 교정(제안만)
   aiTranslate: (args) => ipcRenderer.invoke('ai-translate', args),   // 🌐 AI 자막 번역(SRT)
   clipPauseWord: (args) => ipcRenderer.invoke('clip-pause-word', args),   // 🕳 정지·빈 워드 삽입
   clipPad: (args) => ipcRenderer.invoke('clip-pad', args),   // 🕳 빈 클립 삽입
-  recSave: (args) => ipcRenderer.invoke('rec-save', args),   // 🎤 녹음 임시 저장
   clipVoiceOverwrite: (args) => ipcRenderer.invoke('clip-voice-overwrite', args),   // 🎙 음성 덮어쓰기
   clipDenoise: (args) => ipcRenderer.invoke('clip-denoise', args),   // 🔇 노이즈 줄이기
   clipVolume: (args) => ipcRenderer.invoke('clip-volume', args),   // 🔉 볼륨 조절

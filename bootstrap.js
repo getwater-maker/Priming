@@ -27,8 +27,6 @@ try {
   app.setPath('userData', electronDir);
   // 디스크/GPU 캐시 경로 고정 — "Unable to move the cache" 권한 경고 회피.
   app.commandLine.appendSwitch('disk-cache-dir', path.join(electronDir, 'cache'));
-  // 🧪 E2E 는 가짜 마이크(녹음 시험 — Lab 남은 기능 ⑦) — 진짜 마이크·허용 창을 쓰지 않는다
-  if (process.env.PM_UI_SMOKE) { app.commandLine.appendSwitch('use-fake-device-for-media-stream'); app.commandLine.appendSwitch('use-fake-ui-for-media-stream'); }
 } catch (_) {}
 
 // 라이트 자동 업데이트 — main.js 를 로드하기 "전에" 변경된 파일만 받아 교체.
