@@ -2142,3 +2142,9 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .scene-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:3px}
 .scene-row{display:flex;gap:12px;font-size:var(--fs-md);padding:2px 4px;border-bottom:1px solid var(--line)}
 .scene-row b{min-width:52px;color:var(--sky)}
+
+/* 🎤 녹음 패널 */
+.rec-row{display:flex;align-items:center;gap:10px}
+.rec-dot{color:var(--danger);font-weight:700;animation:recblink 1s infinite}
+@keyframes recblink{50%{opacity:.3}}
+.rec-panel audio{width:100%}

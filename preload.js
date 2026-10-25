@@ -241,6 +241,7 @@ contextBridge.exposeInMainWorld('api', {
   aiTranslate: (args) => ipcRenderer.invoke('ai-translate', args),   // 🌐 AI 자막 번역(SRT)
   clipPauseWord: (args) => ipcRenderer.invoke('clip-pause-word', args),   // 🕳 정지·빈 워드 삽입
   clipPad: (args) => ipcRenderer.invoke('clip-pad', args),   // 🕳 빈 클립 삽입
+  recSave: (args) => ipcRenderer.invoke('rec-save', args),   // 🎤 녹음 임시 저장
   clipVoiceOverwrite: (args) => ipcRenderer.invoke('clip-voice-overwrite', args),   // 🎙 음성 덮어쓰기
   clipDenoise: (args) => ipcRenderer.invoke('clip-denoise', args),   // 🔇 노이즈 줄이기
   clipVolume: (args) => ipcRenderer.invoke('clip-volume', args),   // 🔉 볼륨 조절

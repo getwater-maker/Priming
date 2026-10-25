@@ -10993,6 +10993,19 @@ ipcMain.handle('clip-pad', async (_e, args = {}) => {
   storeActive(); syncSnapshotNow(); pushDtoUpdate();
   return { ok: true, sec: next, prev: cur, dto: P.toDTO(S.parsed) };
 });
+// 🎤 녹음 저장(Lab · 남은 기능 ⑦) — 렌더러 MediaRecorder 가 만든 소리(webm/opus)를 임시 폴더에 쓰고 경로를 돌려준다. 그 뒤 화면이 clip-voice-overwrite(path)로 문장 음성을 바꾼다
+//   args = { bytes: Uint8Array } · 임시 `priming-rec/녹음_<시각>.webm` · 300MB 넘으면 거부 · 소리가 아닌 데이터는 거부(WebM 머리 확인)
+ipcMain.handle('rec-save', (_e, args = {}) => {
+  const b = args.bytes ? Buffer.from(args.bytes) : null;
+  if (!b || b.length < 100) return { ok: false, error: '녹음된 소리가 없습니다' };
+  if (b.length > 300 * 1048576) return { ok: false, error: '녹음이 너무 깁니다(300MB 넘음)' };
+  if (!(b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) && b.slice(0, 4).toString('latin1') !== 'OggS' && b.slice(0, 4).toString('latin1') !== 'RIFF') return { ok: false, error: '소리 데이터가 아닙니다' };
+  const dir = path.join(require('os').tmpdir(), 'priming-rec'); fs.mkdirSync(dir, { recursive: true });
+  const ext = b.slice(0, 4).toString('latin1') === 'RIFF' ? 'wav' : b.slice(0, 4).toString('latin1') === 'OggS' ? 'ogg' : 'webm';
+  const fp = path.join(dir, `녹음_${Date.now()}.${ext}`);
+  try { fs.writeFileSync(fp, b); } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: true, path: fp, bytes: b.length };
+});
 // 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
 //   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }
 //   녹음은 24kHz 모노 WAV 새 파일(`<번호>_o<지문>.wav` — Ctrl+Z 가 옛 소리로)로 바꿔 tts-N 에 두고 원본 녹음은 그대로 둔다 ·
