@@ -42,7 +42,7 @@ console.log('\n[2] 실제 빌더 — .vrew 트랙 zIndex');
       pr.groups.forEach((g, i) => { g.look = looks[i]; });
       const v = path.join(tmp, 'o' + Math.random().toString(36).slice(2) + '.vrew'); await P.buildProjectVrew(pr, v, {}, () => {}, 20, 1);
       const pj = JSON.parse(new AdmZip(v).readAsText('project.json'));
-      return Object.values(pj.props.tracks).filter((t) => t.type === 'image').sort((x, y) => x.trackId < y.trackId ? -1 : 1).map((t) => t.zIndex);
+      return Object.values(pj.props.tracks).filter((t) => t.type === 'image').map((t) => t.zIndex)   // 삽입 순서 = 그룹 순서(trackId 는 무작위라 정렬하지 않는다);
     };
     const z0 = await zOf([undefined, undefined]);
     const z1 = await zOf([{ layer: 1 }, undefined]);
