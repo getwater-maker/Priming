@@ -56,6 +56,7 @@ const SCRIPT = ['# 빈 클립 시험', '', '## 장', '### ① 첫 장면', '> �
     await win.waitForTimeout(600);
     await openPanel(1);
     ok(/없습니다/.test(await win.locator('[data-testid="pad-cur"]').innerText()), '처음엔 빈 클립이 없다고 알려 준다');
+    ok(await win.locator('[data-testid="pad-v"]').innerText() === '5초', 'Vrew 기본 = 빈 클립 5초');
     await win.locator('[data-testid="pad-sec"]').fill('2'); await win.waitForTimeout(150);
     ok(await win.locator('[data-testid="pad-v"]').innerText() === '2초', '길이 2초');
     await win.click('[data-testid="pad-run"]'); await win.waitForTimeout(1500);
@@ -63,6 +64,11 @@ const SCRIPT = ['# 빈 클립 시험', '', '## 장', '### ① 첫 장면', '> �
     ok(s[0].pa === 2 && s[0].pz >= 2 && s[1].pa === 0, `첫 문장에만 pa=2 · 화면 쉼 pz≥2 ${JSON.stringify(s[0])}`);
     ok(await win.locator('[data-testid="clip-pad"]').count() === 1 && /2/.test(await win.locator('[data-testid="clip-pad"]').first().innerText()), '클립에 ▭2초 배지');
     ok(/2초가 있습니다/.test(await win.locator('[data-testid="pad-cur"]').innerText()), '패널이 지금 값을 보여 준다');
+    await win.click('[data-testid="pad-close"]'); await win.waitForTimeout(200);
+    ok(await win.locator('[data-testid="clip-pad-row"]').count() === 1 && await win.locator('[data-testid="clip-pad-row"] .cp-chip').count() === 2 && /빈 클립/.test(await win.locator('[data-testid="clip-pad-row"]').innerText()), '🔑 Vrew 처럼 클립 사이에 파란 「빈 클립」 줄 + 1초 빈 워드 칩 2개(2초)');
+    await win.locator('[data-testid="clip-pad-row"]').click(); await win.waitForSelector('[data-testid="pad-panel"]', { timeout: 3000 });
+    ok(/2초가 있습니다/.test(await win.locator('[data-testid="pad-cur"]').innerText()), '줄을 누르면 패널이 그 클립 기준으로 열린다');
+    await win.locator('[data-testid="pad-sec"]').fill('2'); await win.waitForTimeout(150);
 
     console.log('\n[3] 더하기 · 지우기 · Ctrl+Z');
     await win.click('[data-testid="pad-run"]'); await win.waitForTimeout(1200);

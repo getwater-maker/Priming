@@ -86,6 +86,7 @@ function synth(text, dur) {
     await win.click('[data-testid="word-pause"]');
     await win.waitForSelector('[data-testid="wp-panel"]', { timeout: 3000 });
     ok(await win.locator('[data-testid="wp-pos"] option[value="word"]').count() === 1 && await win.locator('[data-testid="wp-pos"]').inputValue() === 'word', '패널: 「고른 단어 앞」이 기본');
+    ok(await win.locator('[data-testid="wp-sec"]').inputValue() === '1', 'Vrew 기본 = 정지 워드 1초');
     await win.locator('[data-testid="wp-sec"]').fill('0.8'); await win.waitForTimeout(150);
     await win.click('[data-testid="wp-run"]');
     let s2 = null; for (let i = 0; i < 20; i++) { await win.waitForTimeout(250); const q = await sent(); if (q.audio !== s0.audio) { s2 = q; break; } }
@@ -122,6 +123,17 @@ function synth(text, dur) {
     await openClips();
     const s5 = await sent();
     ok(s5.audio === s2.audio && Math.abs(s5.pi - 0.8) < 0.02, '새로고침(작업본 이어받기) 뒤에도 소리·정지 표시 유지');
+    console.log('\n[4] AI 목소리 탭의 「정지 워드 ▾」 드롭다운(Vrew 캡처 정지워드_5·6·7·8)');
+    await win.keyboard.press('Escape');
+    await win.locator('.sent[data-ln="1"] .clip-chk').first().click(); await win.waitForTimeout(250);
+    await win.click('.menus button[data-menu="voice"]'); await win.waitForTimeout(250);
+    ok(await win.locator('[data-testid="rb-pauseword"]').count() === 1 && /정지 워드/.test(await win.locator('[data-testid="rb-pauseword"]').innerText()), '단추 이름은 처음엔 「정지 워드」');
+    await win.click('[data-testid="rb-pauseword-more"]'); await win.waitForSelector('[data-testid="pw-menu"]', { timeout: 3000 });
+    ok(await win.locator('[data-testid="pw-menu"] button').allInnerTexts().then((x) => x.join('|')) === '빈 클립|빈 워드|정지 워드', '드롭다운 = 빈 클립 · 빈 워드 · 정지 워드(Vrew 와 같은 순서)');
+    await win.click('[data-testid="pw-blank"]'); await win.waitForSelector('[data-testid="wp-panel"]', { timeout: 3000 });
+    ok(await win.locator('[data-testid="wp-sec"]').inputValue() === '0.3' && /빈 워드/.test(await win.locator('[data-testid="wp-panel"]').innerText()), '「빈 워드」를 고르면 그 패널(0.3초)');
+    ok(/빈 워드/.test(await win.locator('[data-testid="rb-pauseword"]').innerText()), 'Vrew 처럼 단추 이름이 마지막으로 고른 것을 따라간다');
+    await win.click('[data-testid="wp-close"]');
     ok(errors.length === 0, '화면 오류 없음 ' + errors.join(' | ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외 ' + (e && e.stack || e)); }
   finally {

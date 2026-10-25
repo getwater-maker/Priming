@@ -2021,3 +2021,13 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 /* 🅣 글 삽입 패널 */
 .text-panel{max-width:520px}
 .text-panel textarea{width:100%;resize:vertical;font-family:var(--font);font-size:var(--fs-lg)}
+
+/* ▭ 빈 클립 줄(Vrew 캡처 정지워드_6.png — 클립 사이 파란 「빈 클립」 줄 + 1초 빈 워드 칩) · 표시 전용 */
+.clip-padrow{display:flex;align-items:center;gap:8px;margin:-2px 0 8px 44px;padding:6px 10px;border:1px solid var(--accent);border-radius:var(--r-lg);background:var(--card);cursor:pointer;font-size:var(--fs-md)}
+.clip-padrow .cp-ic{width:16px;height:12px;border-radius:3px;background:var(--sky);flex:none}
+.clip-padrow b{color:var(--strong)}
+.clip-padrow .cp-chips{display:flex;flex-wrap:wrap;gap:4px;flex:1}
+.clip-padrow .cp-chip{border:1px solid var(--line-2);border-radius:var(--r-sm);padding:1px 6px;color:var(--sky);font-size:var(--fs-sm)}
+.clip-padrow .cp-time{color:var(--muted);font-size:var(--fs-sm);flex:none}
+.pw-menu{display:flex;flex-direction:column;min-width:120px}
+.pw-menu button{text-align:left}

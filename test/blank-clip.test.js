@@ -17,7 +17,7 @@ const R = require('../core/vrew-render');
 const FF = require('../core/media-utils').getFfmpegPath();
 
 console.log('\n[1] 순수 규칙');
-ok(SC.normPad(0) === 0 && SC.normPad(-1) === 0 && SC.normPad('x') === 0 && SC.normPad(0.05) === 0.2 && SC.normPad(99) === 10 && SC.normPad(1.26) === 1.3, '정규화(0·음수·못 읽음 = 없음 · 0.2~10초 · 0.1 단위)');
+ok(SC.normPad(0) === 0 && SC.normPad(-1) === 0 && SC.normPad('x') === 0 && SC.normPad(0.05) === 0.2 && SC.normPad(99) === 30 && SC.normPad(1.26) === 1.3, '정규화(0·음수·못 읽음 = 없음 · 0.2~30초 · 0.1 단위)');
 const mkProj = (padFirst, withSound = true) => {
   const r = P.parseScriptText('# t\n## 장\n### ① 가\n첫째 문장입니다. 둘째 문장입니다.\n', 'longform', {});
   const pr = r.projects[0];

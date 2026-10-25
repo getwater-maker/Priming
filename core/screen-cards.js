@@ -81,7 +81,7 @@ const PAUSE_KIND = '막간';    // 채널 값이 붙는 종류(이름)
  * 🕳 빈 클립(Lab) — 문장 `s.padAfter`(초 · 0.2~10) = 그 문장 음성 **뒤 무음**(화면은 이어지고 자막은 없다). 음성이 있는 문장만.
  *   막간 카드의 쉼(pausesOf)과 **합쳐** 한 계획이 된다 — 합치는 곳은 pipeline.pausePlanOf 한 곳.
  */
-const PAD = { min: 0.2, max: 10, step: 0.1, def: 1 };
+const PAD = { min: 0.2, max: 30, step: 0.1, def: 5 };   // Vrew: 빈 클립 = 1초 빈 워드 5개(5초)
 function normPad(v) { const n = Number(v); if (!isFinite(n) || n <= 0) return 0; return Math.round(Math.max(PAD.min, Math.min(PAD.max, n)) * 10) / 10; }
 function padOf(s) { return (s && s.ttsAudioPath && s.ttsDurationSec > 0) ? normPad(s.padAfter) : 0; }
 function sentsOf(project) {

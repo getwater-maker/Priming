@@ -10631,7 +10631,7 @@ ipcMain.handle('clip-pause-word', async (_e, args = {}) => {
   if (!s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) return { ok: false, error: '이 문장은 음성이 없습니다 — 음성을 먼저 만드세요.' };
   const WAl = require('./core/word-align'), PASS = require('./core/word-align-pass');
   const blank = args.kind === 'blank';
-  const sec = Math.round(Math.max(0.1, Math.min(5, Number(args.sec) || (blank ? 0.3 : 0.5))) * 10) / 10;
+  const sec = Math.round(Math.max(0.1, Math.min(5, Number(args.sec) || (blank ? 0.3 : 1))) * 10) / 10;   // Vrew 기본: 빈 워드 0.3초 · 정지 워드 1초
   const b = WAl.validBounds(s);
   const toks = WAl.tokenize(s.text); const n = toks.length;
   const at = Number(args.at); if (!isFinite(at)) return { ok: false, error: '넣을 자리를 정하지 못했습니다(글 안에 커서를 두세요).' };

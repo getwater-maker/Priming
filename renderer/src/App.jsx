@@ -6204,6 +6204,13 @@ export default function App() {
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}><span className="rb-ic">🗑</span> <span className="rb-t">삭제</span></button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}><span className="rb-ic">📖</span> <span className="rb-t">발음사전</span></button>
           </span>);
+  const [pwMenu, setPwMenu] = useState(null);   // { x, y } — 포털 목록 위치
+  const [pwLast, setPwLast] = useState('pause');   // 마지막으로 고른 것(Vrew 처럼 단추 이름이 따라간다)
+  const pwPick = (k) => { setPwMenu(null); setPwLast(k); if (k === 'clip') openPadPanel(); else openWordPause(k); };
+  const ribPauseWord = () => (<span className="hgroup" data-testid="rib-pauseword"><span className="glabel">정지</span>
+    <button data-testid="rb-pauseword" disabled={!loaded || !isLf} title="정지 워드 — 빈 클립(문장 뒤 무음) · 빈 워드(0.3초) · 정지 워드(1초)를 고른 클립 자리에 넣습니다. 누르면 마지막으로 고른 것을 엽니다" onClick={() => pwPick(pwLast)}><span className="rb-ic">{pwLast === 'clip' ? '▭' : pwLast === 'blank' ? '⋯' : '❄'}</span> <span className="rb-t">{pwLast === 'clip' ? '빈 클립' : pwLast === 'blank' ? '빈 워드' : '정지 워드'}</span></button>
+    <button data-testid="rb-pauseword-more" disabled={!loaded || !isLf} title="빈 클립 · 빈 워드 · 정지 워드 중에서 고르기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPwMenu((v) => (v ? null : { x: r.left - 60, y: r.bottom + 2 })); }}><span className="rb-ic">▾</span></button>
+  </span>);
   const ribVoiceExtra = () => (
               <span className="hgroup rb-extra">
         {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」 자리(로이 2026-10-04 — 더는 안 쓴다).
@@ -6351,7 +6358,7 @@ export default function App() {
                 <span className="glabel">➕ 삽입</span>
                 <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
                 <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
-                <button className="ghost" data-testid="ins-pad" disabled={!loaded || !isLf} title="빈 클립 삽입 — 고른 클립 음성 뒤에 N초 무음(그림은 이어지고 자막은 없음)" onClick={openPadPanel}>▭ 빈 클립</button>
+                <button className="ghost" data-testid="ins-pad" disabled={!loaded || !isLf} title="빈 클립 삽입 — 고른 클립 음성 뒤에 N초 무음(그림은 이어지고 자막은 없음)" onClick={() => openPadPanel()}>▭ 빈 클립</button>
                 <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
@@ -6512,7 +6519,7 @@ export default function App() {
     setClipMenu(null); setClipCtx(null);
     const s = capSentence(sn, groupNum, sentIdx);
     if (!s || !s.audio) { setStatus('❄ 이 문장은 음성이 없습니다 — 음성을 먼저 만드세요'); return; }
-    setWpPanel({ sn, groupNum, sentIdx, kind, pos: at != null ? 'word' : 'start', at, sec: kind === 'blank' ? 0.3 : 0.5, hasWord: at != null, hasWb: Array.isArray(s.wb), busy: false, num: s.num });
+    setWpPanel({ sn, groupNum, sentIdx, kind, pos: at != null ? 'word' : 'start', at, sec: kind === 'blank' ? 0.3 : 1, hasWord: at != null, hasWb: Array.isArray(s.wb), busy: false, num: s.num });
   }
   useEffect(() => { const h = (e) => { const d = e.detail || {}; openWordPause(d.kind || 'pause', d); }; window.addEventListener('pm-word-pause', h); return () => window.removeEventListener('pm-word-pause', h); });
   async function wordPauseRun() {
@@ -6528,14 +6535,19 @@ export default function App() {
   }
   // 🕳 빈 클립 삽입 — 고른 클립들 맨 뒤 문장 음성 뒤에 N초 무음(s.padAfter · 합치는 곳은 pausePlanOf 한 곳)
   const [padPanel, setPadPanel] = useState(null);   // { sn, items, sec, cur, num, busy }
-  function openPadPanel() {
-    if (!clipSelOk()) { setStatus('▭ 빈 클립을 넣을 위치의 클립을 먼저 고르세요'); return; }
+  function openPadPanel(pre) {
+    let sn, items, lastIt;
+    if (pre && pre.sn != null) { sn = pre.sn; items = [{ groupNum: pre.groupNum, sentIdx: pre.sentIdx }]; lastIt = items[0]; }
+    else {
+      if (!clipSelOk()) { setStatus('▭ 빈 클립을 넣을 위치의 클립을 먼저 고르세요'); return; }
+      sn = capSel.shortsNum; items = capSel.items.map((it) => ({ groupNum: it.groupNum, sentIdx: it.sentIdx }));
+      lastIt = [...capSel.items].sort((x, y) => x.n - y.n)[capSel.items.length - 1];
+    }
     setClipMenu(null); setClipCtx(null);
-    const sn = capSel.shortsNum; const items = capSel.items.map((it) => ({ groupNum: it.groupNum, sentIdx: it.sentIdx }));
-    const lastIt = [...capSel.items].sort((x, y) => x.n - y.n)[capSel.items.length - 1];
     const s = capSentence(sn, lastIt.groupNum, lastIt.sentIdx);
     setPadPanel({ sn, items, sec: SCards.PAD.def, cur: (s && s.pa) || 0, num: s ? s.num : null, busy: false, sound: !!(s && s.audio) });
   }
+  useEffect(() => { const h = (e) => openPadPanel(e.detail); window.addEventListener('pm-open-pad', h); return () => window.removeEventListener('pm-open-pad', h); });
   async function padApply(mode, sec) {
     const p = padPanel; if (!p || p.busy) return;
     setPadPanel({ ...p, busy: true });
@@ -6866,7 +6878,7 @@ export default function App() {
             {menu === 'caption' && (<>{ribCaption()}</>)}
             {menu === 'format' && (<>{ribFormat()}</>)}
             {menu === 'insert' && (<>{ribInsert()}</>)}
-            {menu === 'voice' && (<>{ribVoice()}{ribVoiceExtra()}</>)}
+            {menu === 'voice' && (<>{ribVoice()}{ribPauseWord()}{ribVoiceExtra()}</>)}
             {menu === 'template' && (<>{ribTemplate}</>)}
             {menu === 'effect' && (<>{ribEffect}</>)}
             {menu === 'make' && (<>{ribMakeSub}{makeSub === 'video' ? ribVideo() : ribImage()}{ribMakeExtra}</>)}
@@ -7017,6 +7029,12 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {pwMenu && createPortal(<div className="vr-menu-bg" onMouseDown={() => setPwMenu(null)} />, document.body)}
+          {pwMenu && createPortal(<div className="vr-menu pw-menu" data-testid="pw-menu" style={{ position: 'fixed', left: pwMenu.x, top: pwMenu.y, zIndex: 9000 }} onMouseDown={(e) => e.stopPropagation()}>
+            <button data-testid="pw-clip" onClick={() => pwPick('clip')}>빈 클립</button>
+            <button data-testid="pw-blank" onClick={() => pwPick('blank')}>빈 워드</button>
+            <button data-testid="pw-pause" onClick={() => pwPick('pause')}>정지 워드</button>
+          </div>, document.body)}
           {wpPanel && <div className="vr-menu-bg" onMouseDown={() => setWpPanel(null)} />}
           {wpPanel && <div className="vr-menu zr-panel wp-panel" data-testid="wp-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>{wpPanel.kind === 'blank' ? '⋯ 빈 워드 삽입' : '❄ 정지 워드 삽입'} · 컷{wpPanel.num}</b>
@@ -7187,7 +7205,7 @@ export default function App() {
             <Row icon="T" label="텍스트 삽입" onClick={() => openTextIns('basic')} tid="cx-text-ins" />
             <Row icon="☺" label="캐릭터 삽입" soon />
             <div className="vr-sep" />
-            <Row icon="▭" label="빈 클립 삽입" onClick={openPadPanel} tid="cx-pad" />
+            <Row icon="▭" label="빈 클립 삽입" onClick={() => openPadPanel()} tid="cx-pad" />
             <Row icon="⋯" label="빈 워드 삽입" onClick={() => openWordPause('blank')} tid="cx-blank-word" />
             <Row icon="❄" label="정지 워드 삽입" onClick={() => openWordPause('pause')} tid="cx-pause-word" />
             <div className="vr-sep" />
@@ -9027,7 +9045,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                             const selChars = capSel && capSel.mode === 'chars' && capSel.shortsNum === pr.shortsNum ? capSel.items.filter((x) => x.groupNum === c.num && x.sentIdx === si) : [];
                             const tm = fmtClipTime(l.start, l.dur);
                             const lineEd = ed && ed.line && ed.where !== 'stage' && edHere && ed.sentIdx === si && ed.line.n === l.n;
-                            return (
+                            return (<React.Fragment key={l.n}>
                               <div className={'sent clip' + (vrewLay ? ' vside' : '') + (picked ? ' picked' : '') + (isCur ? ' cur' : '') + (isCur && playing && playing.key ? ' reading' : '') + (lineEd ? ' editing' : '')} key={l.n} data-ln={l.n}
                                 onDragOver={onClipMove ? (ev) => _S.onClipMove('over', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}
                                 onDrop={onClipMove ? (ev) => _S.onClipMove('drop', pr.shortsNum, _S.nAt(ev.currentTarget), ev) : undefined}>
@@ -9144,6 +9162,19 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                   </div>
                                 )}
                               </div>
+                              {vrewLay && li === lines.length - 1 && s.pa > 0 && (() => {
+                                const full = Math.floor(s.pa + 1e-9), rest = Math.round((s.pa - full) * 10) / 10;
+                                const chips = Array.from({ length: Math.min(full, 30) }, (_, k) => '1초').concat(rest > 0 ? [rest + '초'] : []);
+                                return (
+                                  <div className="clip-padrow" data-testid="clip-pad-row" title="빈 클립 — 이 클립 뒤의 무음(그림은 이어집니다). 눌러서 길이를 바꾸거나 지웁니다"
+                                    onClick={(ev) => { ev.stopPropagation(); window.dispatchEvent(new CustomEvent('pm-open-pad', { detail: { sn: pr.shortsNum, groupNum: c.num, sentIdx: si } })); }}>
+                                    <span className="cp-ic" aria-hidden="true" /><b>빈 클립</b>
+                                    <span className="cp-chips">{chips.map((t, k) => <span key={k} className="cp-chip">🕒[‥ {t}]</span>)}</span>
+                                    <span className="cp-time">+{Math.round(s.pa * 10) / 10}초</span>
+                                  </div>
+                                );
+                              })()}
+                            </React.Fragment>
                             );
                           }
                           return (
