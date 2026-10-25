@@ -345,7 +345,7 @@ const durOf = (f) => parseWav(fs.readFileSync(f)).durationSec;
       ok(ctx.f(old, old.groups[1]) === 1 && old.groups[0].visSpan.soft === true, '옛 작업본: B 를 통째로 덮던 A 범위가 B 에 그림을 넣는 순간 soft 로');
       const part = mk(); part.groups[0].visSpan = { endId: part.groups[1].sentenceIds[0] };
       ok(ctx.f(part, part.groups[1]) === 0 && !part.groups[0].visSpan.soft, '(판정력) 일부만 걸친 범위(손으로 늘린 겹침)는 그대로');
-      ok((M.match(/_softenCoverOf\(pr, g\);/g) || []).length === 4, '파일 교체 · 🔄 이미지 재생성 · 🎬 그룹 영상 · 🔎 스톡 넣기 네 곳에서 부른다(v0.7.67 에 스톡이 늘었다)');
+      ok((M.match(/_softenCoverOf\(pr, g\);/g) || []).length === 5, '파일 교체 · 🔄 이미지 재생성 · 🎬 그룹 영상 · 🔎 스톡 넣기 · 📋 붙여넣기(Lab) 다섯 곳에서 부른다');
       // ✂ 은 늘 보인다
       const APP = read('renderer/src/App.jsx');
       ok(!/groupDurationSec > 10 && \(c\.sentences && c\.sentences\.length >= 2\) &&/.test(APP) && (APP.match(/disabled=\{!\(c\.sentences && c\.sentences\.length >= 2\)\}/g) || []).length === 3, '🔑 ✂ 분할은 세 곳(그룹 줄 두 모양 · 그룹 메뉴) 모두 늘 보인다(문장 1개면 흐리게 + 이유)');

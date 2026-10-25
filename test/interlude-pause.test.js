@@ -96,7 +96,7 @@ const withDur = (pj, d = 3) => { pj.sentences.forEach((s) => { s.ttsAudioPath = 
     ok(JSON.stringify(P.vrewInputsOf(pj, { interludePauseSec: 3 }, 20).pauses) !== JSON.stringify(b.pauses), '쉼 길이를 바꾸면 지문이 달라진다');
     const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
     ok(/plan\(pr, pr\.screenCards, \{ pauseSec: preset && preset\.interludePauseSec \}\)/.test(M) && /cards: cardsOptsFor\(pr, preset\)/.test(M), 'MP4 카드 계획 = 같은 채널 쉼');
-    ok(/IC\.plan\(require\('\.\/core\/screen-cards'\)\.withPauses\(pr, P\.pausePlanOf\(pr, preset\)\.map\)/.test(M), '정보 카드 시각도 쉼만큼 민다');
+    ok(/function infoProjOf\(pr, preset\) \{ return require\('\.\/core\/screen-cards'\)\.withPauses\(pr, P\.pausePlanOf\(pr, preset\)\.map\); \}/.test(M) && /IC\.plan\(infoProjOf\(pr, preset\)/.test(M), '정보 카드 시각도 쉼만큼 민다(Lab: infoProjOf 한 곳 — 렌더 계획·① 미리보기 둘 다 이 함수)');
     ok(/addPausesToDtoProject\(dp, pr, P\.pausePlanOf\(pr, pausePreset\)\.map\)/.test(M) && (M.match(/maybeAutoUpload\([^)]*, true\)/g) || []).length === 2 && /ytMetaFor\(pr, ctx, isWb \? null : preset\)/.test(M) && /ytMetaFor\(j\.pr, j\.ctx, isWb \? null : j\.preset\)/.test(M), '유튜브 챕터도 쉼만큼 민다(MP4 업로드만 · 화이트보드는 아님)');
   }
 

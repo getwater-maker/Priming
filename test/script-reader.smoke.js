@@ -61,8 +61,8 @@ const cleanup = () => { for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force
     // 📄 대본 보기 = 메뉴와 상관없이 늘 리본 오른쪽 끝(로이 2026-09-26) — ④ 완성에서는 뺐다
     const btn = win.locator('[data-testid="reader-open"]');
     const seen = [];
-    for (const m of ['script', 'image', 'video', 'finish', 'insert', 'format']) { await menu(win, m); seen.push(await btn.count()); }
-    ok(seen.every((n) => n === 1), `「📄 대본 보기」가 모든 메뉴에서 보인다 (${seen.join('/')})`);
+    for (const m of ['caption']) { await menu(win, m); seen.push(await btn.count()); }   // Lab 메뉴 줄 2단계: 대본 보기는 자막 탭(Vrew 모양)
+    ok(seen.every((n) => n === 1), `「📄 대본 보기」는 자막 탭에서 보인다 (${seen.join('/')})`);
     ok(await win.locator('.hgroup:has(.glabel:has-text("완성")) button:has-text("📄 대본 보기")').count() === 0, '④ 완성에는 없다');
     const geo = await win.evaluate(() => { const r = document.querySelector('[data-testid=ribbon]').getBoundingClientRect(), b = document.querySelector('[data-testid=reader-open]').getBoundingClientRect(), g = document.querySelector('[data-testid=guide-open-btn]').getBoundingClientRect();
       const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = document.elementFromPoint(x, y);

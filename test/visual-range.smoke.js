@@ -140,7 +140,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     // [3b] ✂ 한 문장 안 자막 줄 나누기·합치기 — 문장 1 「첫째 문장입니다.」 를 「첫째」 / 「문장입니다.」 로
     const lines1 = async () => win.evaluate(() => [...document.querySelectorAll('.sblk[data-ord="1"] .sent')].length);
     const c1 = win.locator('.sent[data-ln="1"] .clip-cap');
-    if (await c1.count()) await c1.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
+    if (await c1.count()) await c1.dblclick(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
     await win.locator('textarea:focus').waitFor({ timeout: 5000 });
     await win.keyboard.press('Home'); for (let k = 0; k < 2; k++) await win.keyboard.press('ArrowRight');
     await win.keyboard.press('Enter');
@@ -148,7 +148,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     ok(await lines1() === 2, '✂ Enter — 한 문장이 자막 두 줄(클립 두 개)로');
     ok(fs.readFileSync(MD, 'utf8') === SCRIPT, '대본(.md)은 그대로 · 음성도 그대로(문장이 안 바뀐다)');
     const c2 = win.locator('.sent[data-ln="2"] .clip-cap');
-    if (await c2.count()) await c2.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
+    if (await c2.count()) await c2.dblclick(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click();
     await win.locator('textarea:focus').waitFor({ timeout: 5000 });
     await win.keyboard.press('Home');
     await win.keyboard.press('Backspace');
@@ -162,7 +162,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
 
     // [4] 🧩 그룹 경계 넘기 — G1 마지막 문장(2) 끝에서 Del
     const cap = win.locator('.sent[data-ln="2"] .clip-cap');
-    if (await cap.count()) await cap.click(); else await win.locator('.sblk[data-ord="2"] .sblk-lines').click();
+    if (await cap.count()) await cap.dblclick(); else await win.locator('.sblk[data-ord="2"] .sblk-lines').click();
     const ta = win.locator('textarea:focus');
     await ta.waitFor({ timeout: 5000 });
     await win.keyboard.press('End');
@@ -176,7 +176,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
 
     // [4b] 🧩 반대 방향 — G2 첫 문장(3) 맨 앞에서 Backspace = 앞 그룹 끝에 붙는다
     const cap3 = win.locator('.sent[data-ln="3"] .clip-cap');
-    if (await cap3.count()) await cap3.click(); else await win.locator('.sblk[data-ord="3"] .sblk-lines').click();
+    if (await cap3.count()) await cap3.dblclick(); else await win.locator('.sblk[data-ord="3"] .sblk-lines').click();
     await win.locator('textarea:focus').waitFor({ timeout: 5000 });
     await win.keyboard.press('Home');
     await win.keyboard.press('Backspace');
@@ -212,7 +212,7 @@ const cleanup = () => { for (const f of [MD, SNAP, path.join(os.tmpdir(), `${TAG
     ok(await win.evaluate(() => !document.querySelector('#stageVisual img.kbnone')), '↶ 움직임 되돌리기');
 
     // [4c2] 📐 ① 칸에서 그림 옮기기·크기 — 누르면 선택 틀 · 끌면 옮김 · 가운데에 붙으며 안내선 · 모서리 = 크기
-    { const cc = win.locator('.sent[data-ln="1"] .clip-cap'); if (await cc.count()) await cc.click(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click(); await win.keyboard.press('Escape'); }
+    { const cc = win.locator('.sent[data-ln="1"] .clip-cap'); if (await cc.count()) await cc.dblclick(); else await win.locator('.sblk[data-ord="1"] .sblk-lines').click(); await win.keyboard.press('Escape'); }
     await win.waitForSelector('#stageVisual .vlayer[data-num="1"]', { timeout: 5000 });
     const sv = await win.locator('#stageVisual').boundingBox();
     const cx = sv.x + sv.width / 2, cy = sv.y + sv.height / 2;

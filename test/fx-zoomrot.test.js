@@ -51,7 +51,7 @@ ok(std({ xPos: 0.125, yPos: 0, width: 0.75, height: 1 }), '가운데 맞추기(�
 console.log('\n[4] 소스 배선');
 const VB = read('vrew/vrew-builder.js'), RN = read('core/vrew-render.js'), APP = read('renderer/src/App.jsx');
 ok((VB.match(/CE\.applyToTrack\(/g) || []).length === 2 && /CE\.applyToTrack\(pj\.props\.tracks\[videoTid\], g\.look\)/.test(VB), '빌더: 그림·영상 트랙 모두 CE.applyToTrack');
-ok(/function rotateFilter/.test(RN) && /boxImage\(l\.file, bw, bh, flip, ctx, rot\)/.test(RN) && /-w\/2/.test(RN), '렌더러: 회전 필터 · 박스 가운데 맞춤 overlay');
+ok(/function rotateFilter/.test(RN) && /boxImage\(l\.file, bw, bh, flip, ctx, rot, ed\.crop\)/.test(RN) && /-w\/2/.test(RN), '렌더러: 회전 필터 · 박스 가운데 맞춤 overlay');
 ok(/CEff\.cssTransform\(lk\)/.test(APP) && /lk\.motion === 'none' \|\| lk\.rot/.test(APP), '미리보기: 같은 CSS 식 · 회전하면 켄번스 끔');
 ok(/data-testid="zr-panel"/.test(APP) && /tid="cx-fx-zoomrot"/.test(APP) && !/soon\('⤢'/.test(APP) && !/label="확대 및 회전" soon/.test(APP), '메뉴: 우클릭 효과 · 막대 · 편집/효과 탭 · 패널 — 준비 중 표시 없음');
 ok(!/확대|회전|zoom|rot\b/.test(read('core/whiteboard-pipeline.js').replace(/\/\/.*$/gm, '')) || true, '화이트보드 MP4 는 효과를 쓰지 않는다(look 과 같은 이유)');

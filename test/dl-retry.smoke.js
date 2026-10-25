@@ -51,6 +51,7 @@ fs.writeFileSync(path.join(chDir, `제목3 [${ID[2]}].mp3`), 'audio');
       global.__dlWaitScale = 0;
     }, fake);
     // 📥 창을 열고 STT 를 끈다(받기만)
+    await win.locator('.menubar button[data-menu="make"]').first().click(); await win.waitForSelector('.ribbon[data-menu-on="make"]', { timeout: 5000 }); await win.waitForTimeout(200);   // Lab: 다운로드 단추는 제작 탭에 있다
     await win.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /다운로드/.test(x.textContent || '') || /다운로드/.test(x.title || '')); if (b) b.click(); });
     await win.waitForSelector('[data-testid="dl-modal"]', { timeout: 5000 });
     if (await win.getAttribute('[data-testid="dl-stt"]', 'aria-pressed') === 'true') await win.click('[data-testid="dl-stt"]');
