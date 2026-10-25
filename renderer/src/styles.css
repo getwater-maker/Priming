@@ -11,7 +11,7 @@
   --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px;
 }
 /* 다크(Vrew 캡처 근사) — 라이트로 되돌리기: index.html 의 data-theme 를 light 로(또는 localStorage 'priming-theme'='light') */
-:root[data-theme="dark"]{
+:root[data-theme="dark"],:root[data-theme="purple"]{
   --bg:#27292b; --card:#1d1f20; --accent:#33a2b3; --accent-d:#2a8796;
   --strong:#eceeee; --base:#c3c8c8; --line:#3a3d3f;
   --ok:#5fbf72; --warn:#e8a657; --danger:#e07a7a; --hook:#d9a15a;
@@ -99,7 +99,7 @@
   --bd-efe6d6:#efe6d6; --bd-ffffff:#ffffff;
   /* JSX 인라인 색 */ --bg-fff5f5:#fff5f5; --fg-c0392b:#c0392b; --bd-dddddd:#dddddd; --fg-a8692a:#a8692a; --bg-fde8e8:#fde8e8; --fg-a3352b:#a3352b; --bg-e8eefd:#e8eefd; --fg-2b45a3:#2b45a3; --fg-b45309:#b45309; --fg-b00020:#b00020; --bg-fbf6ee:#fbf6ee; --bg-f6f2ea:#f6f2ea; --bd-eeeeee:#eeeeee; --bg-dddddd:#dddddd; --fg-b8791a:#b8791a; --bg-fdf0ee:#fdf0ee; --bg-eeeeee:#eeeeee; --bg-c9884a:#c9884a; --bg-f3f8ef:#f3f8ef; --fg-1d1a16:#1d1a16; --fg-8a6a00:#8a6a00; --bg-f6f3fb:#f6f3fb; --fg-16a34a:#16a34a; --bg-fff1e6:#fff1e6; --bg-ffe4ec:#ffe4ec; --fg-9a3412:#9a3412; --fg-c2410c:#c2410c;
 }
-:root[data-theme="dark"]{
+:root[data-theme="dark"],:root[data-theme="purple"]{
   --bg-000000:#000000; --bg-05a081:#0a7761; --bg-0b2a33:#1d2021; --bg-0f2a31:#1e2122;
   --bg-145063:#145063; --bg-151210:#131212; --bg-161616:#161616; --bg-1a1714:#171717;
   --bg-1b1b1b:#1b1b1b; --bg-1c1a17:#1a1a19; --bg-1d6f8a:#1b5467; --bg-1f1b17:#1b1b1b;
@@ -2000,3 +2000,12 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 
 /* 🔉 볼륨 표시(효과 ④) */
 .clip-vol{display:inline-block;margin:0 4px;color:var(--sky);font-weight:700;font-size:var(--fs-sm)}
+
+/* 🟣 보라 테마 — 다크와 같은 토큰 위에 색조만 보라로(index.html data-theme="purple" · localStorage 'priming-theme') */
+:root[data-theme="purple"]{
+  --bg:#262033; --card:#1b1626; --accent:#a678f5; --accent-d:#8a5ad8;
+  --strong:#f0ebfa; --base:#cbc3dc; --line:#3d3354;
+  --paper:#1b1626; --paper-2:#201a2d; --paper-3:#2c2540; --line-2:#493d66;
+  --muted:#9a90b0; --sky:#b48cff; --sky-l:#c7a6ff; --brown:#e3c8ff;
+  color-scheme:dark;
+}

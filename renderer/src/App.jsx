@@ -6432,6 +6432,14 @@ export default function App() {
     const sel = trPanel; if (!sel) return;
     for (const g of sel.gs) await setGroupLook(sel.sn, g, { trans: type ? { type, sec } : null });
   }
+  // 🌗 화면 테마(다크 · 보라 · 라이트) — <html data-theme> + localStorage 'priming-theme'(index.html 이 시작 때 읽는다)
+  const [themeId, setThemeId] = useState(() => { const t = document.documentElement.getAttribute('data-theme'); return t === 'purple' || t === 'light' ? t : 'dark'; });
+  function cycleTheme() {
+    const next = ({ dark: 'purple', purple: 'light', light: 'dark' })[themeId] || 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('priming-theme', next); } catch (_) {}
+    setThemeId(next);
+  }
   const [flPanel, setFlPanel] = useState(null);   // { sn, gs, id, video }
   function openFilterPanel() {
     if (!clipSelOk()) { setStatus('🎞 필터를 줄 클립을 먼저 고르세요'); return; }
@@ -6564,6 +6572,7 @@ export default function App() {
     <button data-testid="rb-volume" disabled={!selOk} title="볼륨 조절 — 고른 클립이 든 문장의 음성을 0~200% 로(1 초과는 찌그러지지 않는 만큼만 · 완성 파일에 구워집니다)" onClick={openVolPanel}><span className="rb-ic">🔉</span> <span className="rb-t">볼륨</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
+    <button data-testid="theme-switch" title={`화면 테마: ${({ dark: '다크', purple: '보라', light: '라이트' })[themeId]} — 누르면 ${({ dark: '보라', purple: '라이트', light: '다크' })[themeId]}로(다크 → 보라 → 라이트)`} onClick={cycleTheme}><span className="rb-ic">{({ dark: '🌙', purple: '🟣', light: '☀' })[themeId]}</span> <span className="rb-t">테마</span></button>
     {pointsEl}
     <button data-testid="rb-help-settings" title="통합 설정 — API 키 · 서버 · 채널 연결 · 폴더 · 계정" onClick={() => openSettings(settingsTabForEngine())}><span className="rb-ic">⚙</span> <span className="rb-t">설정</span></button>
     <button data-testid="rb-help-update" disabled={upd.busy} title="업데이트 확인 — 새 버전이 있으면 받아서 다시 시작합니다(작업 중이 아닐 때)" onClick={runUpdate}><span className="rb-ic">⟳</span> <span className="rb-t">업데이트</span></button>
