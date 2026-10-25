@@ -62,7 +62,7 @@ const cleanup = () => { for (const f of [MD, PNG, SNAP]) { try { if (fs.existsSy
     await win.mouse.click(cx, cy);
     await win.waitForSelector('[data-testid=stage-vtb]', { timeout: 3000 });
     ok(await win.locator('[data-testid=stage-vtb] .vtb-b').count() === 6, '세로 막대 버튼 6개(채우기 · 순서 · 투명도 · 자르기 · 좌우 반전 · 교체)');
-    ok(await win.locator('[data-testid=stage-vtb] .vtb-b.soon').count() === 2, '준비 중 2개(투명도 · 자르기 — 순서는 동작)');
+    ok(await win.locator('[data-testid=stage-vtb] .vtb-b.soon').count() === 0, '준비 중 없음(순서 · 불투명도 · 자르기 모두 동작)');
     const box = await win.evaluate(() => { const b = document.querySelector('[data-testid=stage-vtb]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return { inside: b.left >= s.left && b.right <= s.right + 1 && b.top >= s.top && b.bottom <= s.bottom }; });
     ok(box.inside, '막대가 스테이지 안(오른쪽 가장자리)');
     await win.locator('[data-testid=vtb-flip]').click(); await win.waitForTimeout(500);

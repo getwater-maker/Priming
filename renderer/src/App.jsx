@@ -6118,8 +6118,8 @@ export default function App() {
           <div className="stage-vtb" data-testid="stage-vtb" onMouseDown={stop} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
             {tb('⛶', '채우기 — 맞추기·꽉 채우기', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx({ x: Math.max(4, r.left - 196), y: r.top, sub: 'fill', subY: r.top, num: stageSel.num, cap: '', only: true }); }, { tid: 'vtb-fill' })}
             {tb('☰', '순서 — 앞으로·뒤로', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx({ x: Math.max(4, r.left - 196), y: r.top, sub: 'ord', subY: r.top, num: stageSel.num, cap: '', only: true }); }, { tid: 'vtb-ord' })}
-            {tb('◐', '투명도', null, { soon: true })}
-            {tb('⌗', '자르기', null, { soon: true })}
+            {tb('◐', '불투명도 — 그림을 반투명으로', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === 'opac' && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: 'opac', subY: r.top, num: stageSel.num, cap: '', only: true })); }, { tid: 'vtb-opac', on: !!(lk && lk.opacity != null && lk.opacity < 100) })}
+            {tb('⌗', '자르기 — 사각(위·아래·왼쪽·오른쪽)', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === 'crop' && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: 'crop', subY: r.top, num: stageSel.num, cap: '', only: true })); }, { tid: 'vtb-crop', on: !!(lk && lk.crop) })}
             {tb('⇋', '좌우 반전', () => setGroupLook(sn, grpNum, { flipH: !(lk && lk.flipH) }), { tid: 'vtb-flip', on: !!(lk && lk.flipH) })}
             {tb('⟳', '그림 교체 — 파일을 골라 바꾸기', () => attachAsset(sn, grpNum), { tid: 'vtb-replace' })}
           </div>
@@ -7074,6 +7074,10 @@ export default function App() {
         const num = stageCtx.num;
         const ovR = lay && lay.ovRaw;   // ➕ 삽입이면 원본 값(오른쪽 도구 막대에서 연 칸)
         const ovLook = (patch) => overlayOp({ shortsNum: pr.shortsNum, op: 'look', id: ovR.id, patch });
+        // 🖼 본 그림(삽입이 아닌)의 불투명도·자르기(Lab) = 그룹 look.opacity·look.crop — 같은 하위 메뉴를 삽입과 함께 쓴다
+        const grR = !ovR && grp && lk ? { opacity: lk.opacity != null ? lk.opacity : 100, crop: lk.crop || null } : null;
+        const tgtR = ovR || grR;
+        const tgtLook = (patch) => (ovR ? ovLook(patch) : setGroupLook(pr.shortsNum, stageCtx.num, patch));
         const fillSub = ovR ? <>
           <Row icon={!(ovR.fill === 'cover' && !ovR.box) ? '✓' : ''} label="맞추기" tid="sx-fill-contain" onClick={run(() => ovLook({ fill: 'contain' }))} />
           <Row icon={ovR.fill === 'cover' && !ovR.box ? '✓' : ''} label="꽉 채우기" tid="sx-fill-cover" onClick={run(() => ovLook({ fill: 'cover' }))} />
@@ -7084,13 +7088,13 @@ export default function App() {
           <div className="cx-sld" key={label}><span>{label}</span>
             <input type="range" min={min} max={max} defaultValue={val} data-testid={tid} data-edge={edge} onInput={(e) => { const v = +e.currentTarget.value; e.currentTarget.nextSibling.textContent = v + '%'; onVal(v, e.currentTarget); }} /><b>{val}%</b></div>
         );
-        const cropNow = (ovR && ovR.crop) || { t: 0, r: 0, b: 0, l: 0 };
+        const cropNow = (tgtR && tgtR.crop) || { t: 0, r: 0, b: 0, l: 0 };
         const cropSet = (edge, el) => {
           const box = el.closest('.cx-crop'); const g = (k) => +box.querySelector('[data-edge=' + k + ']').value;
           const c = { t: g('t'), r: g('r'), b: g('b'), l: g('l') };
           const other = { t: 'b', b: 't', l: 'r', r: 'l' }[edge];
           if (c[edge] + c[other] > 90) { c[edge] = 90 - c[other]; el.value = c[edge]; el.nextSibling.textContent = c[edge] + '%'; }
-          ovLook({ crop: { t: c.t / 100, r: c.r / 100, b: c.b / 100, l: c.l / 100 } });
+          tgtLook({ crop: { t: c.t / 100, r: c.r / 100, b: c.b / 100, l: c.l / 100 } });
         };
         return (<>
           <div className="vr-menu-bg" data-testid="sx-bg" onMouseDown={() => setStageCtx(null)} onContextMenu={(e) => { e.preventDefault(); setStageCtx(null); }} />
@@ -7131,16 +7135,16 @@ export default function App() {
               <Row icon={ovR.flipH ? '✓' : ''} label="좌우 반전" tid="sx-flip-h" onClick={run(() => ovLook({ flipH: !ovR.flipH }))} />
               <Row icon={ovR.flipV ? '✓' : ''} label="상하 반전" tid="sx-flip-v" onClick={run(() => ovLook({ flipV: !ovR.flipV }))} />
             </>}
-            {ovR && stageCtx.sub === 'opac' && <>
-              {sldRow('불투명도', 0, 100, ovR.opacity != null ? ovR.opacity : 100, 'sx-opac', (v) => ovLook({ opacity: v }))}
-              <Row icon="" label="100% 로 되돌리기" tid="sx-opac-reset" onClick={run(() => ovLook({ opacity: 100 }))} />
+            {tgtR && stageCtx.sub === 'opac' && <>
+              {sldRow('불투명도', 0, 100, tgtR.opacity != null ? tgtR.opacity : 100, 'sx-opac', (v) => tgtLook({ opacity: v }))}
+              <Row icon="" label="100% 로 되돌리기" tid="sx-opac-reset" onClick={run(() => tgtLook({ opacity: 100 }))} />
             </>}
-            {ovR && stageCtx.sub === 'crop' && <div className="cx-crop">
+            {tgtR && stageCtx.sub === 'crop' && <div className="cx-crop">
               {sldRow('위', 0, 80, Math.round(cropNow.t * 100), 'sx-crop-t', (v, el) => cropSet('t', el), 't')}
               {sldRow('아래', 0, 80, Math.round(cropNow.b * 100), 'sx-crop-b', (v, el) => cropSet('b', el), 'b')}
               {sldRow('왼쪽', 0, 80, Math.round(cropNow.l * 100), 'sx-crop-l', (v, el) => cropSet('l', el), 'l')}
               {sldRow('오른쪽', 0, 80, Math.round(cropNow.r * 100), 'sx-crop-r', (v, el) => cropSet('r', el), 'r')}
-              <Row icon="" label="자르기 없애기" tid="sx-crop-reset" onClick={run(() => ovLook({ crop: null }))} />
+              <Row icon="" label="자르기 없애기" tid="sx-crop-reset" onClick={run(() => tgtLook({ crop: null }))} />
             </div>}
           </div>}
         </>);

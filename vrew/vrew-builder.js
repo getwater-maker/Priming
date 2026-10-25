@@ -310,7 +310,18 @@ const { KEN_BURNS_PATTERNS, _pickKenBurnsIndex, _clampKbFrame, kbWaypoints, kbSe
 // 반전 — Vrew 설치본 JS 실측: track.editInfo.flip = {vertical, horizontal} (둘 다 false 면 필드 없음)
 function _editInfoForLook(g) {
   const lk = (g && g.look) || {};
-  return (lk.flipH || lk.flipV) ? { flip: { vertical: !!lk.flipV, horizontal: !!lk.flipH } } : {};
+  const e = (lk.flipH || lk.flipV) ? { flip: { vertical: !!lk.flipV, horizontal: !!lk.flipH } } : {};
+  // 🖼 본 그림의 자르기·불투명도(Lab) — 삽입 그림과 같은 editInfo 규칙(Vrew 4.7.2 실측 {crop:'inset(…)', opacity}) · MP4 렌더러가 이미 읽는다
+  const VLc = require('../core/visual-look');
+  const ci = VLc.cropInset(lk.crop); if (ci) e.crop = ci;
+  const op = VLc.normOpacity(lk.opacity); if (op < 100) e.opacity = op / 100;
+  return e;
+}
+// 자른 뒤 보이는 크기(박스·비율 계산용) — 자르기가 없으면 그대로
+function _cropDims(z, look) {
+  if (!z) return z;
+  const v = require('../core/visual-look').cropVis(look && look.crop);
+  return { w: z.w * v.w, h: z.h * v.h };
 }
 // 채우기 — 트랙 박스(0..1 캔버스)를 비율로 계산한다. contain = 맞추기(레터박스) · cover = 꽉 채우기(넘치는 쪽은 잘린다)
 function _fillBox(fill, w, h, cW, cH) {
@@ -927,7 +938,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       let _vBgBaked = false;
       if ((CE.filterActive(g.look) || CE.bgActive(g.look)) && _vmeta0 && _vmeta0.width > 0) {
         let _bbox = null;
-        if (CE.bgActive(g.look) && !_boxOfLook(g)) {
+        if (CE.bgActive(g.look) && !_boxOfLook(g) && !require('../core/visual-look').normCrop(g.look.crop)) {
           const _vf0 = (g.look && g.look.fill) || 'auto';
           const _vmis0 = Math.abs(_vmeta0.width / _vmeta0.height - _frameRatio) > 0.06;
           if (_vf0 === 'contain' || (_vf0 === 'auto' && _vmis0)) _bbox = _fillBox('contain', _vmeta0.width, _vmeta0.height, _canvasW, _canvasH);
@@ -986,18 +997,20 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       // 하단에 얇은 흰 줄을 봤음. 8% 마진으로 늘려서 가장자리 픽셀까지 화면 밖으로
       // 밀어냄 (각 변 4%씩 잘림 — 영상 중앙 콘텐츠는 그대로 보존).
       // 비율: 캔버스와 비슷하면 8% 확대 cover(꽉 채움), 다르면(가로영상↔9:16 등) 비율유지 레터박스 가운데(전체 표시).
-      const _vRatio = videoHeight > 0 ? (videoWidth / videoHeight) : _frameRatio;
+      const _vcv = require('../core/visual-look').cropVis(g.look && g.look.crop);   // 🖼 자르기 = 자른 뒤 크기로 박스·비율 계산
+      const _vWc = videoWidth * _vcv.w, _vHc = videoHeight * _vcv.h;
+      const _vRatio = _vHc > 0 ? (_vWc / _vHc) : _frameRatio;
       const _vMismatch = Math.abs(_vRatio - _frameRatio) > 0.06;
       let _vx, _vy, _vw, _vh;
       const _vFill = (g.look && g.look.fill) || 'auto';
       if (_vFill !== 'auto' && videoWidth > 0 && videoHeight > 0) {
-        const b = _fillBox(_vFill, videoWidth, videoHeight, _canvasW, _canvasH);
+        const b = _fillBox(_vFill, _vWc, _vHc, _canvasW, _canvasH);
         _vx = b.x; _vy = b.y; _vw = b.w; _vh = b.h;
         log(`[Vrew] G${g.num} 영상 채우기 = ${_vFill === 'cover' ? '꽉 채우기' : '맞추기'}`);
       } else if (_vMismatch) {
-        const _scale = Math.min(_canvasW / videoWidth, _canvasH / videoHeight);
-        _vw = (videoWidth * _scale) / _canvasW;
-        _vh = (videoHeight * _scale) / _canvasH;
+        const _scale = Math.min(_canvasW / _vWc, _canvasH / _vHc);
+        _vw = (_vWc * _scale) / _canvasW;
+        _vh = (_vHc * _scale) / _canvasH;
         _vx = (1 - _vw) / 2; _vy = (1 - _vh) / 2;       // 가운데
         log(`[Vrew] G${g.num} 영상 ${videoWidth}x${videoHeight}(비율${_vRatio.toFixed(2)}) — 비율유지 가운데 레터박스(전체 표시)`);
       } else {
@@ -1043,7 +1056,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     // 🎨 클립 배경색(효과 ②) — 그림을 캔버스 크기 사본에 배경색 위로 얹어 구워 그 사본을 가리킨다(굽기 · Vrew 가 아는 그림 파일 형식만).
     //   박스(look.box)가 있으면 쓰지 않는다 · 원본은 그대로 · 켄번스는 사본(띠 포함) 위에서 돈다 · 실패하면 원본으로 계속한다
     let _imgPath = g.imagePath, _bgBaked = false;
-    if (CE.bgActive(g.look)) {
+    if (CE.bgActive(g.look) && require('../core/visual-look').normCrop(g.look.crop)) log(`[Vrew] G${g.num} 자른 그림에는 배경색을 쓰지 않습니다(자르기가 이긴다)`);
+    else if (CE.bgActive(g.look)) {
       const _osz = readImageSize(g.imagePath);
       if (_osz && _osz.w > 0 && _osz.h > 0) {
         const _ofill = (g.look && g.look.fill) || 'auto';
@@ -1077,7 +1091,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
     // 이미지 실제 비율 확인 — 캔버스와 다르면(예: 1:1 이미지를 9:16 쇼츠에) 늘리지 않고
     // 비율 유지한 채 상하좌우 가운데 배치(레터박스). 비슷하면 기존처럼 꽉 채움(켄번스).
-    const isz = readImageSize(_imgPath);
+    const isz = _cropDims(readImageSize(_imgPath), g.look);   // 🖼 자르기 = 자른 뒤 크기로 박스·비율 계산
     const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? (isz.w / isz.h) : _frameRatio;
     const mismatch = Math.abs(imgRatio - _frameRatio) > 0.06;
     const _iFill = (g.look && g.look.fill) || 'auto';

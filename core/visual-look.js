@@ -75,6 +75,8 @@ function normLook(l) {
   if (rt) out.rot = rt;   // 🎛 회전 °(기본 0 = 필드 없음)
   const flt = CE.normFilter(o.filter);
   if (flt) out.filter = flt;   // 🎞 필터(기본 = 필드 없음)
+  const opn = normOpacity(o.opacity); if (opn < 100) out.opacity = opn;   // 🖼 본 그림 불투명도(기본 100 = 필드 없음)
+  const crn = normCrop(o.crop); if (crn) out.crop = crn;   // 🖼 본 그림 자르기(사각 · 없으면 필드 없음)
   const trn = CE.normTrans(o.trans);
   if (trn) out.trans = trn;   // 🎬 화면 전환(기본 = 필드 없음 · MP4 만)
   const ly = Math.trunc(Number(o.layer)); if (isFinite(ly) && ly) out.layer = Math.max(-99, Math.min(99, ly));   // 🖼 겹친 그림 순서(기본 0 = 필드 없음)
@@ -86,9 +88,9 @@ function normLook(l) {
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer && n.opacity == null && !n.crop;
 }
-function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : ''); }
+function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : '') + (normLook(l).opacity != null ? ` · 불투명도 ${normLook(l).opacity}%` : '') + (normLook(l).crop ? ' · 자르기' : ''); }
 function _describeBase(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
