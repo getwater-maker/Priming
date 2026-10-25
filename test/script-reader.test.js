@@ -168,7 +168,7 @@ console.log('[7] 📝 제작 메모(`> 📝 …` · 낭독 제외) — 장 제�
   const guide = fs.readFileSync(path.join(__dirname, '..', 'docs', '대본-작성-가이드.md'), 'utf8');
   ok(/ipcMain\.handle\('script-guide'/.test(main) && /path\.join\(__dirname, 'docs', '대본-작성-가이드\.md'\)/.test(main), '📘 작성 기준 = 앱 폴더 docs/대본-작성-가이드.md');
   const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
-  ok(/const ribReaderBtn = \(<button className="ghost" data-testid="reader-open"/.test(app) && /const ribGuide = \(<button className="ghost" data-testid="guide-open-btn"/.test(app) && /\{menu === 'caption' && \(<>\{ribCaption\(\)\}<\/>\)\}/.test(app) && /const ribHelp = [\s\S]{0,1200}\{ribGuide\}/.test(app), '📄 대본 보기 = 자막 탭 · 📘 작성 기준 = 도움말 탭(메뉴 줄 2단계)');
+  ok(/const ribReaderBtn = \(<button className="ghost" data-testid="reader-open"/.test(app) && /const ribGuide = \(<button className="ghost" data-testid="guide-open-btn"/.test(app) && /\{!compact && ribReaderBtn\}/.test(app) && /const ribHelp = [\s\S]{0,1200}\{ribGuide\}/.test(app), '📄 대본 보기 = 홈 탭(오늘 대본 옆) · 📘 작성 기준 = 도움말 탭(메뉴 줄 2단계)');
   const ex = [...guide.matchAll(/```markdown\n([\s\S]*?)```/g)].map((m) => m[1]);
   const last = parseLongform(ex[ex.length - 1], 'x').projects[0];
   ok(last.groups.length === 4 && last.groups.every((g) => g.imagePrompt && !/^\.\.\./.test(g.imagePrompt)) && last.groups[0].isIntro && last.groups[0].videoPrompt && !last.groups.slice(1).some((g) => g.videoPrompt), '가이드 부록 예시 = 장면 4개 · 장면마다 그림 · 도입부만 영상');

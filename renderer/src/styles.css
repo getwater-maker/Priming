@@ -1827,10 +1827,11 @@ main .card h2{top:var(--work-top-height,0px)}
 .ribbon .hgroup > span.rb-stack{display:inline-flex;flex-direction:column;justify-content:center;gap:4px}
 .ribbon .hgroup > span.rb-stack > button{flex-direction:row;justify-content:flex-start;min-height:30px;min-width:0;padding:3px 10px;gap:6px}
 .ribbon .rb-stack .rb-ic{font-size:16px}
-.ribbon .cf-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;height:84px;max-height:none;padding:6px 8px;align-self:center}
-.cf-lines{min-width:0;overflow-x:auto;scrollbar-width:thin}
+.ribbon .cf-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;height:48px;max-height:none;padding:6px 8px;align-self:center}
+.cf-lines{min-width:0;overflow-x:auto;scrollbar-width:thin;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.cf-lines > *{flex-shrink:0}
 .cf-format-row{display:flex;align-items:center;gap:4px;min-height:30px;white-space:nowrap}
-.cf-format-row + .cf-format-row{margin-top:8px}
+.cf-format-row + .cf-format-row{margin-top:0}
 .cf-format-row > *{flex-shrink:0}
 .ribbon .cf-bar button,.ribbon .cf-bar select,.ribbon .cf-bar input:not([type=checkbox]):not([type=color]){height:30px;line-height:26px;padding-top:1px;padding-bottom:1px}
 .ribbon .cf-bar .cf-applyall{height:auto;align-self:stretch;min-width:100px;padding:8px;white-space:normal;font-size:var(--fs-md)}
@@ -2153,3 +2154,5 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .tpl-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
 .tpl-item{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:var(--r-md);padding:6px 8px;background:var(--card)}
 .tpl-item .tpl-nm{flex:1;min-width:0;display:flex;flex-direction:column}
+/* 서식 탭 한 줄 배열(로이 2026-10-26) — 좁은 창에선 줄이 가로로 밀리되 「자막 서식 저장」은 오른쪽 끝에 붙어 늘 보인다 */
+.cf-format-row > .cf-savedef{position:sticky;right:0;z-index:2;background:var(--bg-ffffff)}

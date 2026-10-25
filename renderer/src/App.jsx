@@ -789,6 +789,13 @@ export default function App() {
       style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>
       🪙 크레딧 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
   })() : null;
+  // 🏠 홈 탭 맨 오른쪽 「잔여포인트 / N」 — 관리자 = 우리 kie 계정 잔액 · 회원 = 서버가 준 남은 크레딧(없으면 0). 누르면 충전 페이지
+  const homePtsEl = (points || (licKind && licKind.enforced)) ? (() => {
+    const admin = !!(licKind && licKind.admin);
+    const v = admin ? licKind.kie : (points ? points.remaining : 0);
+    return <span className="hgroup home-pts" data-testid="home-points" style={{ marginLeft: 'auto', alignSelf: 'center', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 700 }} onClick={openCharge}
+      title="내가 쓸 수 있는 포인트(크레딧) — 누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다">잔여포인트 / {v == null ? '-' : Number(v).toLocaleString()}</span>;
+  })() : null;
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
   const [settingsTab, setSettingsTab] = useState('keys');   // SETTINGS_TABS 의 id — 'keys' | 'server'(판매자) | 'yt' | 'folders' | 'account' (v0.9.92 · 옛 comfy·flow 는 SETTINGS_TAB_ALIAS)
   const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
@@ -2145,6 +2152,7 @@ export default function App() {
     const r = await api.resetProject();
     if (r && r.queue) setQueue(r.queue);
     setDto(null); setFtitle(''); setStatus('초기화됨 — 현재 모드 큐 비움');
+    setAcctPage(false); setMenu('home');   // 초기화하면 늘 「홈」 탭부터(로이 2026-10-26)
   }
   async function saveProject() {
     try { const r = await api.saveProject(); setStatus('프로젝트 저장됨'); logline('저장: ' + r.file); }
@@ -6265,6 +6273,7 @@ export default function App() {
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
             {!compact && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {!compact && ribReaderBtn}
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
 </span>);
@@ -6919,7 +6928,6 @@ export default function App() {
   const ribCaption = () => (<>
     {splitBar}
     <span className="hgroup" data-testid="rib-caption"><span className="glabel">자막</span>
-      {ribReaderBtn}
       <button data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
       <button data-testid="rb-ai-translate" disabled={!loaded} title="AI 자막 번역 — 이 편의 자막을 고른 언어로 번역해 SRT 파일로 저장합니다(나레이션·대본·음성은 그대로 · Claude API 키 필요)" onClick={() => setAiTr({ lang: 'en', busy: false, res: null })}><span className="rb-ic">🌐</span> <span className="rb-t">AI 자막 번역</span></button>
       <button data-testid="rb-ai-proof" disabled={!loaded} title="AI 자막 교정 — 고른 클립(없으면 이 편 전체)의 오탈자·띄어쓰기를 찾아 제안합니다. 제안을 눌러 적용할 때만 대본이 바뀝니다(그 문장 음성은 다시 만들어야 합니다 · Claude API 키 필요)" onClick={aiProofRun}><span className="rb-ic">✓</span> <span className="rb-t">AI 자막 교정</span></button>
@@ -6927,7 +6935,7 @@ export default function App() {
   </>);
   const ribHomeFont = () => (<span className="hgroup" data-testid="rib-home-font">
     <CaptionFontBar fmt={capSelFmt()} active={!!capSel} onPatch={(p) => applyCapFmt(p)} />
-    <button data-testid="home-to-format" title="[서식] 메뉴로 이동 — 테두리·배경·형광펜·그림자·정렬·효과 등 자세한 서식" onClick={() => pickMenu('format')}><span className="rb-ic">⋯</span> <span className="rb-t">[서식] 메뉴로 이동</span></button>
+    <button data-testid="home-to-format" title="[서식] 메뉴로 이동 — 테두리·배경·형광펜·그림자·정렬·효과 등 자세한 서식" onClick={() => pickMenu('format')}><span className="rb-ic">⋯</span> <span className="rb-t">[서식]</span></button>
   </span>);
   const ribFileVrew = () => (<span className="hgroup" data-testid="rib-file-vrew">
     <button data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
@@ -7060,7 +7068,7 @@ export default function App() {
         {!noProduction && (
           <div className="ribbon" data-testid="ribbon" data-menu-on={menu} onWheel={(e) => { const el = e.currentTarget; if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY; }}>
             {menu === 'file' && (<>{ribOpen(true)}{ribFileVrew()}{ribFinish()}</>)}
-            {menu === 'home' && (<>{ribOpen()}<span className="hgroup" data-testid="rib-home-undo">{ribUndo()}</span><span className="hgroup" data-testid="rib-home-clip">{ribClipboard()}</span><span className="hgroup" data-testid="rib-home-ops">{ribClipOps()}</span>{ribHomeFont()}</>)}
+            {menu === 'home' && (<>{ribOpen()}<span className="hgroup" data-testid="rib-home-undo">{ribUndo()}</span><span className="hgroup" data-testid="rib-home-clip">{ribClipboard()}</span><span className="hgroup" data-testid="rib-home-ops">{ribClipOps()}</span>{ribHomeFont()}{homePtsEl}</>)}
             {menu === 'edit' && (<>{ribEdit}</>)}
             {menu === 'caption' && (<>{ribCaption()}</>)}
             {menu === 'format' && (<>{ribFormat()}</>)}
