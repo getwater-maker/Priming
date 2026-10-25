@@ -7200,6 +7200,7 @@ function buildSnapshot(ctx) {
       logoPos: pr.logoPos || null,     // 🏷 끌어 옮긴 로고 자리 {x,y}
       logoOver: pr.logoOver || null,   // 🏷 이 대본 로고 넣기/빼기(큐 일괄)
       capAll: pr.capAll || null,       // 🌐 「모든 자막」 서식(새 문장에도 저절로)
+      dualSub: pr.dualSub || null,     // 🌐 이중 자막(번역 SRT 를 MP4 둘째 줄로)
       format: pr.format || X.parsed.format || null, // 대본 형식 보존
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, h2Title: g.h2Title || null, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
@@ -7455,6 +7456,7 @@ function projectsFromSnapshot(snap) {
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) proj.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) proj.logoOver = lo; }   // 🏷 로고 넣기/빼기
     { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) proj.capAll = ca; }   // 🌐 모든 자막 서식
+    if (ps.dualSub && ps.dualSub.srt) proj.dualSub = { ...ps.dualSub };   // 🌐 이중 자막
     if (readerNotes.length) proj.readerNotes = readerNotes;
     if (readerParas) proj.readerParas = readerParas;   // 📄 대본 읽기 문단(빈 줄 기준 · v0.8.9)
     if (screenCards) proj.screenCards = screenCards;   // 📜 화면 카드 마커(R4) — .md 가 정본
@@ -7482,6 +7484,7 @@ function overlaySnapshot(parsed, snap) {
     { const lp = require('./core/overlay-layers').normLogoPos(ps.logoPos); if (lp) pr.logoPos = lp; }   // 🏷 끌어 옮긴 자리
     { const lo = require('./core/overlay-layers').normLogoOver(ps.logoOver); if (lo) pr.logoOver = lo; }   // 🏷 로고 넣기/빼기
     { const ca = require('./core/caption-format').mergeAll(ps.capAll, {}); if (ca) pr.capAll = ca; }   // 🌐 모든 자막 서식(문장이 바뀌어도 대본 서식은 그대로)
+    if (ps.dualSub && ps.dualSub.srt) pr.dualSub = { ...ps.dualSub };   // 🌐 이중 자막(대본 단위 — 글이 바뀌어도 그대로)
     if (ps.ttsVoice) pr.ttsVoice = ps.ttsVoice;         // 🎙 대본 목소리(대본이 바뀌어도 이 대본의 선택은 그대로)
     if (ps.spkVoices) pr.spkVoices = ps.spkVoices;       // 🎙 이 대본 화자 목소리(화자 이름 기준 — 문장이 바뀌어도 그대로)
     // ➕ 삽입 — 문장 수가 같을 때만 순번 그대로 되살린다(대본이 크게 바뀌면 엉뚱한 구간에 올라간다)
@@ -9215,7 +9218,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o)), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o)), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null, dualSub: pr.dualSub ? { ...pr.dualSub } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -9265,6 +9268,7 @@ function _restoreState(st) {
     if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
     if (sp.logoOver) pr.logoOver = { ...sp.logoOver }; else delete pr.logoOver;
     if (sp.capAll) pr.capAll = { ...sp.capAll }; else delete pr.capAll;
+    if (sp.dualSub) pr.dualSub = { ...sp.dualSub }; else delete pr.dualSub;
   }
   if (st.md != null && S.scriptPath) {
     try {
@@ -10851,6 +10855,20 @@ ipcMain.handle('clip-marker', async (_e, args = {}) => {
 });
 // 🔉 볼륨 조절(Lab · Vrew 「볼륨 조절」 · 효과 ④) — 고른 클립이 든 문장의 음성 배율 s.vol(0~2 · 1 = 기본 = 필드 없음).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], vol } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 에 구워진다(1 초과는 피크 여유 안에서만) · Ctrl+Z 한 번
+// 🌐 이중 자막(Lab · 남은 기능 ⑤) — 번역 SRT(ai-translate 가 만든 `<자막 폴더>/<대본>_<언어>.srt`)를 MP4 의 둘째 자막 줄로 굽도록 이 대본에 골라 둔다.
+//   args = { shortsNum, lang, path } · lang '' = 끄기 · 파일이 있어야 한다 · `.vrew` 는 자막 트랙이 한 벌이라 MP4 에만(전환·빈 클립 쉼과 같은 옆 파일 `.vrew.fx.json` 의 dualSub) · Ctrl+Z
+ipcMain.handle('set-dual-sub', (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr; const lang = String(args.lang || '');
+  if (!lang) { undoPush('이중 자막 끄기'); delete pr.dualSub; log('🌐 이중 자막 끔'); storeActive(); syncSnapshotNow(); pushDtoUpdate(); return { ok: true, off: true, dto: P.toDTO(S.parsed) }; }
+  const file = String(args.path || '');
+  if (!file || !fs.existsSync(file)) return { ok: false, error: '번역 자막(.srt) 파일을 찾을 수 없습니다 — 먼저 「AI 자막 번역」으로 만드세요', dto: P.toDTO(S.parsed) };
+  undoPush('이중 자막');
+  pr.dualSub = { lang, srt: file };
+  log(`🌐 이중 자막 켬 — ${lang} · ${path.basename(file)} (유튜브 MP4 의 첫 자막 아래 둘째 줄 · .vrew 에는 안 들어감)`);
+  storeActive(); syncSnapshotNow(); pushDtoUpdate();
+  return { ok: true, lang, dto: P.toDTO(S.parsed) };
+});
 // 🌐 AI 자막 교정·번역(Lab · Vrew 「AI 자막 교정/번역」) — core/ai-subtitle(프롬프트·답 해석) + core/claude-api `ask({use})` 한 곳.
 //   대상 = args.items(고른 클립 · 없으면 이 편 전체) · 번호 n = 편 안의 문장 순번(1부터).
 function _aiTargets(args) {

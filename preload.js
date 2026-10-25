@@ -235,6 +235,7 @@ contextBridge.exposeInMainWorld('api', {
   clipQuiet: (args) => ipcRenderer.invoke('clip-quiet', args),
   textPngSave: (args) => ipcRenderer.invoke('text-png-save', args),   // 🅣 글 삽입용 PNG 저장
   stagePasteImage: (args) => ipcRenderer.invoke('stage-paste-image', args),   // 📋 ① 칸 그림 붙여넣기
+  setDualSub: (args) => ipcRenderer.invoke('set-dual-sub', args),   // 🌐 이중 자막 켜기·끄기
   aiProof: (args) => ipcRenderer.invoke('ai-proof', args),   // 🌐 AI 자막 교정(제안만)
   aiTranslate: (args) => ipcRenderer.invoke('ai-translate', args),   // 🌐 AI 자막 번역(SRT)
   clipPauseWord: (args) => ipcRenderer.invoke('clip-pause-word', args),   // 🕳 정지·빈 워드 삽입

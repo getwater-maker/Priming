@@ -98,6 +98,7 @@ function toDTO(parseResult) {
         voice: pr.voice,
         aiNoticeRange: pr.aiNoticeRange || null,   // 🏷 AI 고지를 보일 문장 범위(없으면 채널 기본 = 5초 뒤 5초)
         logoSide: pr.logoSide === 'left' ? 'left' : 'right',   // 🏷 이 대본 로고 자리
+        dualSub: pr.dualSub ? pr.dualSub.lang : null,   // 🌐 이중 자막(번역 SRT 를 MP4 둘째 줄로 — 언어)
         logoPos: pr.logoPos || null,
         logoOver: pr.logoOver || null,
         capAll: pr.capAll || null,   // 🌐 이 대본 「모든 자막」 서식(새 문장에도 저절로 · v0.6.87)   // 🏷 이 대본 로고 넣기/빼기(큐 일괄 · 없으면 채널 설정대로)   // 🏷 ① 칸에서 끌어 옮긴 자리 {x,y}(있으면 위 자리보다 이긴다)
@@ -771,12 +772,16 @@ function userPauseWins(project, preset) {
   }
   return wins;
 }
-function _syncFxPauseWins(vrewPath, wins) {
+// 🌐 이중 자막(Lab · 남은 기능 ⑤) — 대본이 번역 SRT 를 골라 두었고(pr.dualSub = {lang, srt}) 그 파일이 있으면 옆 파일에 실어 MP4 렌더러가 둘째 자막 줄로 굽게 한다(.vrew 는 자막 트랙이 한 벌이라 MP4 만)
+function _dualOf(project) { const d = project && project.dualSub; return (d && d.srt && fs.existsSync(d.srt)) ? { lang: String(d.lang || ''), srt: d.srt } : null; }
+function _syncFxPauseWins(vrewPath, wins, dual = null) {
   try {
     const fp = vrewPath + '.fx.json'; let j = null;
     try { j = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (_) {}
-    if (wins.length) { j = j && typeof j === 'object' ? j : { v: 1 }; j.pauseWins = wins; fs.writeFileSync(fp, JSON.stringify(j), 'utf8'); }
-    else if (j && j.pauseWins) { delete j.pauseWins; if (Object.keys(j).filter((k) => k !== 'v').length) fs.writeFileSync(fp, JSON.stringify(j), 'utf8'); else fs.rmSync(fp, { force: true }); }
+    j = (j && typeof j === 'object') ? j : { v: 1 };
+    if (wins && wins.length) j.pauseWins = wins; else delete j.pauseWins;
+    if (dual) j.dualSub = dual; else delete j.dualSub;
+    if (Object.keys(j).filter((k) => k !== 'v').length) fs.writeFileSync(fp, JSON.stringify(j), 'utf8'); else fs.rmSync(fp, { force: true });
   } catch (_) {}
 }
 // 음성 파일 → 끝에 무음을 붙여 정확히 durSec 인 wav(24kHz mono) · 비동기(main 을 멈추지 않는다)
@@ -837,7 +842,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
   if (project.capAll) opts.capAll = project.capAll;   // 🌐 대본 「모든 자막」 서식(문장 덮어쓰기 아래층)
   // ⏸ 막간 쉼(v0.9.25) — 막간 카드 끝 문장의 음성 뒤에 무음을 덧댄 **임시 사본**으로 빌드한다(문장 객체·tts-N 원본은 그대로 · 빌드가 끝나면 임시 파일을 지운다)
   const pz = pausePlanOf(project, preset);
-  if (!pz.list.length) { const r0 = await buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts }); _syncFxPauseWins(vrewPath, []); return r0; }
+  if (!pz.list.length) { const r0 = await buildVrew({ sentences: project.sentences, groups: project.groups, vrewPath, opts }); _syncFxPauseWins(vrewPath, [], _dualOf(project)); return r0; }
   const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pm-pause-'));
   try {
     const padded = new Map();
@@ -851,7 +856,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     const WAb = require('./word-align');
     const sentences = project.sentences.map((s) => (padded.has(s.id) ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, padded.get(s.id), (() => { const wb = WAb.validBounds(s); return wb ? { _wtB: wb } : {}; })()) : s));   // 🔤 복제본은 경로·길이가 달라 열쇠가 안 맞는다 → 원본에서 미리 뽑은 정렬(_wtB)
     const r1 = await buildVrew({ sentences, groups: project.groups, vrewPath, opts });
-    _syncFxPauseWins(vrewPath, userPauseWins(project, preset));
+    _syncFxPauseWins(vrewPath, userPauseWins(project, preset), _dualOf(project));
     return r1;
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 }

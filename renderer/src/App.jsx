@@ -6744,6 +6744,12 @@ export default function App() {
     }
     setAiProof({ ...cur, items: [...cur.items] }); setStatus('✓ AI 교정 ' + ok + '개 적용(Ctrl+Z 되돌리기) — 고친 문장의 음성은 다시 만드세요');
   }
+  async function dualSet(lang, srt) {
+    const cur = aiTr; if (!cur) return;
+    const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
+    try { const r = await api.setDualSub({ shortsNum: sn, lang, path: srt }); if (r && r.dto) setDto(r.dto); setStatus(r && r.ok ? (lang ? '🌐 이중 자막을 켰습니다 — 유튜브 MP4 에 첫 자막 아래 둘째 줄로 굽습니다 (Ctrl+Z 되돌리기)' : '🌐 이중 자막을 껐습니다') : '⚠ ' + ((r && r.error) || '실패')); }
+    catch (e) { setStatus('⚠ ' + e.message); }
+  }
   async function aiTrRun() {
     const cur = aiTr; if (!cur || cur.busy) return;
     const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
@@ -7279,7 +7285,9 @@ export default function App() {
             {aiTr.busy && <span className="meta" data-testid="ai-tr-busy">번역하는 중입니다…</span>}
             {aiTr.res && aiTr.res.ok && <span className="meta" data-testid="ai-tr-done">✓ SRT 로 저장했습니다 — {aiTr.res.path}{aiTr.res.missing && aiTr.res.missing.length ? ` (번역이 빠진 문장 ${aiTr.res.missing.length}개는 한국어 그대로)` : ''}</span>}
             {aiTr.res && !aiTr.res.ok && <span className="meta" data-testid="ai-tr-err">⚠ {aiTr.res.error}</span>}
-            <span className="meta">이 편 전체를 번역해 <b>자막 폴더에 .srt 파일</b>로 저장합니다(시각은 한국어 자막과 같음) · 나레이션·대본·음성은 바뀌지 않습니다 · 영상에 번역 자막을 굽는 기능은 아직 없습니다</span>
+            {aiTr.res && aiTr.res.ok && (() => { const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1; const pj = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const on = pj && pj.dualSub === aiTr.res.lang; return (
+              <label className="meta" data-testid="ai-dual-row"><input type="checkbox" data-testid="ai-dual" checked={!!on} onChange={(e) => dualSet(e.target.checked ? aiTr.res.lang : '', aiTr.res.path)} /> 🌐 이 번역을 <b>유튜브 MP4 에 둘째 자막 줄</b>로 굽기(첫 자막 아래 · .vrew 에는 안 들어갑니다)</label>); })()}
+            <span className="meta">이 편 전체를 번역해 <b>자막 폴더에 .srt 파일</b>로 저장합니다(시각은 한국어 자막과 같음) · 나레이션·대본·음성은 바뀌지 않습니다 · 영상에 굽으려면 위 「둘째 자막 줄로 굽기」를 켜세요(MP4 만)</span>
             <div className="zr-btns"><button data-testid="ai-tr-run" disabled={aiTr.busy} onClick={aiTrRun}>번역해서 저장</button><button className="ghost" data-testid="ai-tr-close" onClick={() => setAiTr(null)}>닫기</button></div>
           </div>}
           {trPanel && <div className="vr-menu-bg" onMouseDown={() => setTrPanel(null)} />}

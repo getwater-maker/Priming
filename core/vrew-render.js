@@ -454,6 +454,18 @@ function normCue(c, cs) {
  * @param extra.eventLines  미리 만든 자막 이벤트 줄(렌더 조각 — 효과 시각이 조각 경계에서 끊기지 않게 전체 시각으로 만든 뒤 자른 것)
  * @param extra.layout      caption-ass 배치
  */
+/** 🌐 이중 자막 — 번역 SRT 의 둘째 줄(첫 자막 아래 · 작게). 이 조각(t0 ~ t0+dur)에 걸친 것만 · 시각은 조각 기준 */
+function dualEvents(cues, t0, dur, fontName) {
+  const out = [];
+  const y = Math.round(H * 0.865), fs2 = Math.round(H * 0.04);
+  for (const c of cues || []) {
+    if (!(c && c.text) || !(c.end > t0) || !(c.start < t0 + dur)) continue;
+    const s = Math.max(0, c.start - t0), e = Math.min(dur, c.end - t0);
+    if (!(e > s)) continue;
+    out.push(`Dialogue: 4,${fmtAss(s)},${fmtAss(e)},N,,0,0,0,,{\\an8\\pos(${Math.round(W / 2)},${y})\\fs${fs2}\\bord4}${assEsc(String(c.text).replace(/\r?\n/g, ' '))}`);
+  }
+  return out;
+}
 function buildAss(cues, overlays, cs, extra = {}) {
   const L = extra.layout || layoutFor(cs);
   const b = cs.bold ? -1 : 0;
@@ -497,6 +509,7 @@ function buildAss(cues, overlays, cs, extra = {}) {
     }
     ev.push(`Dialogue: 6,${fmtAss(o.start)},${fmtAss(o.end)},N,,0,0,0,,{\\an7\\pos(${o.x},${o.y})\\fs${o.size}${fx}\\1c${bgr(o.color)}\\3c${bgr(o.outlineColor)}\\bord${o.outline}${tagFade}}${assEsc(o.text)}`);
   }
+  if (extra.dualLines && extra.dualLines.length) ev.push(...extra.dualLines);   // 🌐 이중 자막 둘째 줄
   if (extra.cardLines && extra.cardLines.length) ev.push(...extra.cardLines);   // 📜 화면 카드(R4) — 어두운 판은 자막 아래 층 · 글자는 맨 위 층
   return head.join('\n') + '\n' + ev.join('\n') + '\n';
 }
@@ -771,7 +784,7 @@ async function renderChunk(ch, i, ctx) {
   const eventLines = CAS.formatEvents(segEv, t0, dur);
   const segOv = overlays.filter((o) => o.end > t0 && o.start < t0 + dur)
     .map((o) => ({ ...o, start: Math.max(0, o.start - t0), end: Math.min(dur, o.end - t0), fadeFrom: o.start - t0 }));
-  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, layout: ctx.layout, cardLines: ((ctx.cards && ctx.cards.length) || (ctx.info && ctx.info.length)) ? [...((ctx.cards && ctx.cards.length) ? cardEvents(ctx.cards, t0, t0 + dur) : []), ...((ctx.info && ctx.info.length) ? require('./info-ass').events(ctx.info, t0, t0 + dur, ctx.infoFont, ctx.infoWarn) : [])] : null }), 'utf8');   // 📜 화면 카드 + 📇 정보 카드 판
+  fs.writeFileSync(path.join(tmpDir, assName), buildAss([], segOv, cs, { eventLines, dualLines: ctx.dualCues ? dualEvents(ctx.dualCues, t0, dur) : null, layout: ctx.layout, cardLines: ((ctx.cards && ctx.cards.length) || (ctx.info && ctx.info.length)) ? [...((ctx.cards && ctx.cards.length) ? cardEvents(ctx.cards, t0, t0 + dur) : []), ...((ctx.info && ctx.info.length) ? require('./info-ass').events(ctx.info, t0, t0 + dur, ctx.infoFont, ctx.infoWarn) : [])] : null }), 'utf8');   // 📜 화면 카드 + 📇 정보 카드 판
   const assFilter = `ass=${assName}:fontsdir=${fontsDirName}`;
 
   let args;
@@ -1030,8 +1043,8 @@ async function renderVrewToMp4(opts = {}) {
 
     const dSec = Math.max(0, Math.min(10, +opts.dissolveSec || 0));
     // 🎬 그룹별 화면 전환(효과 ⑥) — 빌더가 .vrew 옆에 둔 <이름>.vrew.fx.json(trackId → {type, sec}). 없거나 못 읽으면 전환 없음(컷)
-    let perTrans = null, userPauseWins = null;
-    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object' && Object.keys(j.trans).length) perTrans = j.trans; if (j && Array.isArray(j.pauseWins)) userPauseWins = j.pauseWins.filter((w) => Array.isArray(w) && w[1] > w[0]); } } catch (_) {}   // 🕳 pauseWins = 빈 클립 쉼 창(자막을 뺀다)
+    let perTrans = null, userPauseWins = null, dualFx = null;
+    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object' && Object.keys(j.trans).length) perTrans = j.trans; if (j && Array.isArray(j.pauseWins)) userPauseWins = j.pauseWins.filter((w) => Array.isArray(w) && w[1] > w[0]); if (j && j.dualSub && j.dualSub.srt) dualFx = j.dualSub; } } catch (_) {}   // 🕳 pauseWins = 빈 클립 쉼 창(자막을 뺀다)
     const maxTr = perTrans ? Math.max(0, ...Object.values(perTrans).map((x) => +x.sec || 0)) : 0;
     const tailSec = Math.max(dSec, maxTr);
     let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, tailSec > 0 ? { minTailFrames: Math.round(tailSec * FPS) } : {});
@@ -1085,6 +1098,10 @@ async function renderVrewToMp4(opts = {}) {
       } catch (e) { log('   ⚠ 자막 폭 줄이기 실패: ' + e.message); }
     }
     // 📜 화면 카드(R4) — 카드가 있으면 한자·한글 명조를 이 렌더의 글꼴 폴더에 복사한다(없으면 알리고 자막 글꼴로 — 한자가 안 나올 수 있다)
+    if (dualFx) {   // 🌐 이중 자막 — 번역 SRT 를 읽는다(없거나 못 읽으면 알리고 건너뜀 · 첫 자막은 그대로)
+      try { ctx.dualCues = require('./whiteboard-subtitle').cuesFromSrt(fs.readFileSync(dualFx.srt, 'utf8')).filter((c) => c && c.text && c.end > c.start); log(`   🌐 이중 자막 ${dualFx.lang || ''} — 둘째 줄 ${ctx.dualCues.length}개(첫 자막 아래)`); }
+      catch (e) { log('   ⚠ 이중 자막 파일을 읽지 못해 첫 자막만 굽습니다: ' + e.message); }
+    }
     if (userPauseWins && userPauseWins.length) { ctx.pauseCaptionWins = userPauseWins.map((w) => [w[0], w[1]]); log(`   🕳 빈 클립 ${userPauseWins.length}곳 — 쉼 동안 자막을 뺍니다`); }
     if (Array.isArray(opts.cards) && opts.cards.length) {
       ctx.cards = opts.cards;
