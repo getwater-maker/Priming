@@ -6993,7 +6993,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, wt: s.wt || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7215,6 +7215,7 @@ function projectsFromSnapshot(snap) {
         if (ss.qo) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기
         if (ss.mk) s.marker = true;   // ⚑ 마커
         if (ss.vl != null) s.vol = ss.vl;   // 🔉 볼륨
+        if (ss.ow) s.voiceOwn = true;   // 🎙 덮어쓴 음성
         if (ss.wt) s.wt = ss.wt;   // 🔤 단어 시각 정렬(열쇠 = 음성 경로·길이·글 — 맞지 않으면 쓰이지 않는다)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
@@ -7321,6 +7322,7 @@ function overlaySnapshot(parsed, snap) {
         if (ss.qo && ss.text === s.text) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기(같은 문장일 때만)
         if (ss.mk && ss.text === s.text) s.marker = true;   // ⚑ 마커(같은 문장일 때만)
         if (ss.vl != null && ss.text === s.text) s.vol = ss.vl;   // 🔉 볼륨(같은 문장일 때만)
+        if (ss.ow && ss.text === s.text) s.voiceOwn = true;   // 🎙 덮어쓴 음성(같은 문장일 때만)
         if (ss.wt && ss.text === s.text) s.wt = ss.wt;   // 🔤 단어 시각 정렬(같은 문장일 때만 — 열쇠가 다시 걸러 준다)
       });
     }
@@ -9273,6 +9275,7 @@ async function _editSentences(args = {}) {
       if (keep.quietOver) s.quietOver = keep.quietOver;
       if (keep.marker) s.marker = true;   // ⚑ 글이 같은 문장은 마커도 따라온다
       if (keep.vol != null) s.vol = keep.vol;   // 🔉 볼륨도
+      if (keep.voiceOwn) s.voiceOwn = true;   // 🎙 덮어쓴 음성도(글이 같으면 음성도 따라온다)
     } else if (old.length === 1 && plan.newTexts.length === 1 && old[0].clipSpeed) s.clipSpeed = old[0].clipSpeed;   // ⏩ 한 문장을 고쳐 한 문장 = 배속 유지(음성은 새로 만든 뒤 다시 건다)
     if (s.vol == null && old.length === 1 && plan.newTexts.length === 1 && old[0].vol != null) s.vol = old[0].vol;   // 🔉 한 문장을 고쳐 한 문장 = 볼륨 유지
     if (!s.marker && old.length === 1 && plan.newTexts.length === 1 && old[0].marker) s.marker = true;   // ⚑ 한 문장을 고쳐 한 문장 = 마커 유지(Vrew 처럼 글을 고쳐도 표식은 남는다)
@@ -10528,6 +10531,52 @@ ipcMain.handle('clip-marker', async (_e, args = {}) => {
 });
 // 🔉 볼륨 조절(Lab · Vrew 「볼륨 조절」 · 효과 ④) — 고른 클립이 든 문장의 음성 배율 s.vol(0~2 · 1 = 기본 = 필드 없음).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], vol } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 에 구워진다(1 초과는 피크 여유 안에서만) · Ctrl+Z 한 번
+// 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
+//   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }
+//   녹음은 24kHz 모노 WAV 새 파일(`<번호>_o<지문>.wav` — Ctrl+Z 가 옛 소리로)로 바꿔 tts-N 에 두고 원본 녹음은 그대로 둔다 ·
+//   쉼 줄이기·배속은 새 소리에서 다시 만들고(옛 사본·단어 정렬은 비운다) · 「다시 변환」·만들기가 이 음성을 덮지 않는다(해제 = 음성을 비워 TTS 가 다시 채운다)
+ipcMain.handle('clip-voice-overwrite', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
+  const pr = c.pr;
+  const seen = new Set(); const sents = [];
+  for (const it of args.items || []) { const s = _sentAt(pr, it.groupNum, it.sentIdx); if (s && !seen.has(s.id)) { seen.add(s.id); sents.push(s); } }
+  if (!sents.length) return { ok: false, error: '고른 클립이 없습니다', dto: P.toDTO(S.parsed) };
+  const wipe = (s) => { delete s.quiet; delete s.wt; };
+  if (args.clear) {
+    undoPush('덮어쓴 음성 해제');
+    let n = 0; for (const s of sents) { if (!s.voiceOwn) continue; delete s.voiceOwn; s.ttsAudioPath = null; s.ttsDurationSec = null; wipe(s); n++; }
+    log(`🎙 덮어쓴 음성 해제 — 문장 ${n}개 (음성 단계를 다시 돌리면 목소리로 채워집니다)`);
+    storeActive(); syncSnapshotNow();
+    return { ok: true, cleared: n, dto: P.toDTO(S.parsed) };
+  }
+  if (sents.length !== 1) return { ok: false, error: '음성 덮어쓰기는 클립 하나씩 합니다(녹음 한 개 = 문장 한 개)', dto: P.toDTO(S.parsed) };
+  const s = sents[0];
+  let src = args.path;
+  if (!src) {
+    const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: '녹음 파일', extensions: ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'webm'] }] });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true, dto: P.toDTO(S.parsed) };
+    src = r.filePaths[0];
+  }
+  if (!fs.existsSync(src)) return { ok: false, error: '파일을 찾을 수 없습니다', dto: P.toDTO(S.parsed) };
+  const ff = require('./core/media-utils').getFfmpegPath();
+  if (!ff || !fs.existsSync(ff)) return { ok: false, error: 'ffmpeg 를 쓸 수 없습니다', dto: P.toDTO(S.parsed) };
+  const st = fs.statSync(src);
+  const hash = require('crypto').createHash('sha1').update(src + '|' + st.size + '|' + Math.round(st.mtimeMs)).digest('hex').slice(0, 8);
+  const dir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+  const out = path.join(dir, `${s.num}_o${hash}.wav`);
+  const okc = await new Promise((resolve) => {
+    const p = require('child_process').spawn(ff, ['-y', '-hide_banner', '-loglevel', 'error', '-i', src, '-vn', '-ar', '24000', '-ac', '1', '-codec:a', 'pcm_s16le', out], { windowsHide: true, stdio: 'ignore' });
+    p.on('error', () => resolve(false)); p.on('close', (code) => resolve(code === 0 && fs.existsSync(out)));
+  });
+  if (!okc) return { ok: false, error: '이 파일을 소리로 읽지 못했습니다', dto: P.toDTO(S.parsed) };
+  const dur = (fs.statSync(out).size - 44) / (24000 * 2);
+  if (!(dur > 0.05)) { try { fs.rmSync(out, { force: true }); } catch {} return { ok: false, error: '소리가 거의 없는 파일입니다', dto: P.toDTO(S.parsed) }; }
+  undoPush('음성 덮어쓰기');
+  s.ttsAudioPath = out; s.ttsDurationSec = dur; s.voiceOwn = true; wipe(s);
+  log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${path.basename(src)} (${dur.toFixed(1)}초)`);
+  storeActive(); syncSnapshotNow();
+  return { ok: true, dur, dto: P.toDTO(S.parsed) };
+});
 ipcMain.handle('clip-volume', async (_e, args = {}) => {
   const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
   const pr = c.pr;

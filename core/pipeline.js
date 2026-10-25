@@ -134,6 +134,7 @@ function toDTO(parseResult) {
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
               qo: s.quietOver || null,   // ✂ 이 클립만의 무음 구간 줄이기
               mk: s.marker ? 1 : null,   // ⚑ 마커
+              ow: s.voiceOwn ? 1 : null,   // 🎙 내 녹음으로 덮어쓴 음성
               vl: (s.vol != null && s.vol !== 1) ? s.vol : null,   // 🔉 볼륨 조절(0~2 · 없으면 1)
               pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)
@@ -485,7 +486,7 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     // 이미 음성이 있으면 건너뜀 — '비어있는 것만' 채움. (분할 등으로 재구성돼도 문장은 그대로라 재사용)
     //   force=true('🔁 다시 변환') 면 기존 음성·캐시를 모두 무시하고 무조건 재합성.
-    if (!force && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) {
+    if ((!force || s.voiceOwn) && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) {   // 🎙 덮어쓴 음성은 「다시 변환」에도 지키는 쪽(풀기 = 덮어쓰기 해제)
       progress(false);
       if (++_skipN % 100 === 0) await new Promise((r) => setImmediate(r));
       continue;

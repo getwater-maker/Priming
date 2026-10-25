@@ -6488,6 +6488,19 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🎙 음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음으로(clear = 해제). 파일 고르기는 main 이 연다
+  async function clipVoiceOverwrite(clear) {
+    setClipMenu(null); setClipCtx(null);
+    if (!clipSelOk()) { setStatus('🎙 클립을 먼저 고르세요'); return; }
+    const sn = capSel.shortsNum; const items = []; const seen = new Set();
+    for (const it of capSel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    try {
+      const r = await api.clipVoiceOverwrite({ shortsNum: sn, items, clear: !!clear });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.canceled) return;
+      setStatus(r && r.ok ? (clear ? `🎙 덮어쓴 음성 ${r.cleared}개 해제 — 음성 단계가 다시 채웁니다 (Ctrl+Z 되돌리기)` : `🎙 내 녹음으로 덮어썼습니다 (${r.dur.toFixed(1)}초 · Ctrl+Z 되돌리기)`) : '⚠ ' + ((r && r.error) || '음성 덮어쓰기 실패'));
+    } catch (e) { logline('음성 덮어쓰기 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+  }
   async function clipMarker(mode) {
     if (!clipSelOk()) { setStatus('⚑ 마커를 달 클립을 먼저 고르세요'); return; } const sel = capSel; setClipMenu(null); setClipCtx(null);
     const items = []; const seen = new Set();
@@ -6553,7 +6566,8 @@ export default function App() {
     <span className="hdiv" />
     <button data-testid="rb-marker" disabled={!selOk} title="마커 — 고른 클립에 표식을 달거나 지웁니다(이미 다 달려 있으면 지움 · 대본·출력에는 영향 없음)" onClick={() => clipMarker('toggle')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
     <button data-testid="rb-marker-list" disabled={!loaded} title="마커 모아 보기 — 표식이 달린 클립 목록 · 누르면 그 클립으로 이동" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMarkerList((v) => (v ? null : { x: r.left, y: r.bottom + 4 })); }}><span className="rb-ic">⚑</span> <span className="rb-t">마커 목록{markerEntries().length ? ` (${markerEntries().length})` : ''}</span></button>
-    <button className="soon" data-testid="rb-overwrite-voice" title="음성 덮어쓰기 — 준비 중" onClick={() => clipSoon('음성 덮어쓰기')}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
+    <button data-testid="rb-overwrite-voice" disabled={!selOk} title="음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음 파일로 바꿉니다(Ctrl+Z 로 되돌림 · 다시 변환·만들기가 덮지 않습니다)" onClick={() => clipVoiceOverwrite(false)}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
+    <button data-testid="rb-overwrite-clear" disabled={!selOk} title="덮어쓴 음성 해제 — 고른 클립의 녹음을 빼고 음성 단계가 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}><span className="rb-ic">↩</span> <span className="rb-t">녹음 해제</span></button>
     <span className="hdiv" />
     <button data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
   </span>);
@@ -6983,7 +6997,8 @@ export default function App() {
             <Row icon="⊟" label="클립 합치기" dis={n < 2} onClick={run(clipMerge)} tid="cx-merge" />
             <Row icon="✂" label="클립 나누기" onClick={clipSplitHere} tid="cx-split" />
             <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" onClick={clipNewScene} tid="cx-newscene" />
-            <Row icon="🎙" label="음성 덮어쓰기" soon />
+            <Row icon="🎙" label="음성 덮어쓰기" onClick={() => clipVoiceOverwrite(false)} tid="cx-overwrite-voice" />
+            <Row icon="↩" label="덮어쓴 음성 해제" onClick={() => clipVoiceOverwrite(true)} tid="cx-overwrite-clear" />
             <div className="vr-sep" />
             <Row icon="⚑" label="마커" kbd={(() => { const ss = capSel ? capSel.items.map((it) => capSentence(capSel.shortsNum, it.groupNum, it.sentIdx)).filter(Boolean) : []; return ss.length && ss.every((s) => s.mk) ? '✓' : null; })()} onClick={run(() => clipMarker('toggle'))} tid="cx-marker" />
             <Row icon="⚐" label="마커 모아 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setClipCtx(null); setMarkerList({ x: Math.min(r.left, window.innerWidth - 340), y: Math.max(8, r.top) }); }} tid="cx-marker-list" />
@@ -8867,6 +8882,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                     {li === 0 && s.mk ? <span className="clip-marker" data-testid="clip-marker" title="⚑ 마커 — 클립 우클릭 ▸ 마커 로 지우기 · 편집 탭 ▸ 마커 목록으로 모아 보기">⚑</span> : null}
+                                    {li === 0 && s.ow ? <span className="clip-vol" data-testid="clip-own" title="🎙 이 문장 음성은 내 녹음으로 덮어썼습니다(다시 변환해도 유지 · 클립 우클릭 ▸ 덮어쓴 음성 해제)">🎙</span> : null}
                                     {li === 0 && s.vl != null ? <span className="clip-vol" data-testid="clip-vol" title={`🔉 이 문장 음성 볼륨 ${Math.round(s.vl * 100)}% (클립 우클릭 ▸ 효과 ▸ 볼륨 조절)`}>🔉{Math.round(s.vl * 100)}%</span> : null}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">

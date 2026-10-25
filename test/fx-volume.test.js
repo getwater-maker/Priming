@@ -31,7 +31,7 @@ console.log('\n[2] 소스 배선');
 const VB = read('vrew/vrew-builder.js'), M = read('main.js'), P = read('core/pipeline.js'), PL = read('preload.js'), APP = read('renderer/src/App.jsx');
 ok(/function _mp3Key\(s\)/.test(VB) && /_mp3Cache\.get\(_mp3Key\(s\)\)/.test(VB), '빌더: 사본 열쇠에 볼륨이 들어간다(같은 파일·다른 볼륨 = 다른 사본)');
 ok(/`volume=\$\{gain\.toFixed\(4\)\}`/.test(VB) && !/alimiter|acompressor|dynaudnorm/.test(VB.slice(VB.indexOf('async function preConvertWavsToMp3'), VB.indexOf('async function preConvertWavsToMp3') + 3000)), '빌더: volume= 만 얹는다(리미터·압축 없음)');
-ok(/vl: \(s\.vol != null && s\.vol !== 1\) \? s\.vol : null/.test(P) && /vl: \(s\.vol != null && s\.vol !== 1\) \? s\.vol : null, wt:/.test(M), 'DTO(pipeline)와 작업본 저장(main)에 vl');
+ok(/vl: \(s\.vol != null && s\.vol !== 1\) \? s\.vol : null/.test(P) && /vl: \(s\.vol != null && s\.vol !== 1\) \? s\.vol : null, ow:/.test(M), 'DTO(pipeline)와 작업본 저장(main)에 vl');
 ok((M.match(/s\.vol = ss\.vl;/g) || []).length === 2, '작업본 이어받기 두 곳(무조건 · 같은 문장일 때만)');
 ok(/if \(keep\.vol != null\) s\.vol = keep\.vol/.test(M), '글이 같은 문장은 편집 뒤에도 볼륨 유지');
 const cv = M.slice(M.indexOf("ipcMain.handle('clip-volume'"), M.indexOf("ipcMain.handle('tts-sentences'"));
