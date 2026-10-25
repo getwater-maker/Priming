@@ -10986,6 +10986,50 @@ ipcMain.handle('export-fcpxml', async (_e, args = {}) => {
   log(`🎬 FCPXML 내보냄 — ${path.basename(out)} (소재 ${r.assets}개 · 클립 ${r.clips}개 · ${(r.totalSec / 60).toFixed(1)}분 · 효과·자막은 담지 않음)`);
   return { ok: true, path: out, totalSec: r.totalSec, assets: r.assets, clips: r.clips };
 });
+// 📋 효과 템플릿(Lab · 남은 기능 ⑨) — 그림 그룹 효과 + 문장 소리 효과(볼륨·노이즈)를 이름 붙여 저장해 두고 다른 클립에 한 번에 입힌다(core/templates · 저장 ~/.priming-maker/templates.json).
+//   tpl-list → [{id,name,desc,at}] · tpl-save {shortsNum, items, name} (고른 첫 클립의 효과 · 같은 이름이면 덮어씀) · tpl-apply {shortsNum, items, id} (되돌릴 수 있게 undoPush · 자리·순서·켄번스 구간은 그대로) · tpl-delete {id}
+const TPL_FILE = () => path.join(os.homedir(), '.priming-maker', 'templates.json');
+function _tplLoad() { try { const j = JSON.parse(fs.readFileSync(TPL_FILE(), 'utf8')); return Array.isArray(j) ? j.filter((t) => t && t.id && t.name) : []; } catch (_) { return []; } }
+function _tplSave(list) { fs.mkdirSync(path.dirname(TPL_FILE()), { recursive: true }); require('./core/atomic-write').writeTextAtomicSync(TPL_FILE(), JSON.stringify(list, null, 2)); }
+function _tplView(list) { const TP = require('./core/templates'); return list.map((t) => ({ id: t.id, name: t.name, desc: TP.describe(t), at: t.at })); }
+ipcMain.handle('tpl-list', () => ({ ok: true, list: _tplView(_tplLoad()) }));
+ipcMain.handle('tpl-save', (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const TP = require('./core/templates'); const pr = c.pr;
+  const it = (args.items || [])[0]; const g = it && pr.groups.find((x) => x.num === it.groupNum); const s = it && _sentAt(pr, it.groupNum, it.sentIdx);
+  if (!g || !s) return { ok: false, error: '템플릿으로 저장할 클립을 먼저 고르세요' };
+  const t = TP.make(args.name, g.look, { vol: s.vol, denoise: s.denoise });
+  if (!t) return { ok: false, error: '템플릿 이름을 적으세요' };
+  if (TP.isEmpty(t)) return { ok: false, error: '이 클립에는 저장할 효과가 없습니다(그림 효과·볼륨·노이즈 줄이기를 먼저 주세요)' };
+  const list = _tplLoad(); const old = list.findIndex((x) => x.name === t.name);
+  const rec = { id: old >= 0 ? list[old].id : 'tp' + Date.now().toString(36), ...t, at: Date.now() };
+  if (old >= 0) list[old] = rec; else list.push(rec);
+  try { _tplSave(list); } catch (e) { return { ok: false, error: '저장하지 못했습니다: ' + e.message }; }
+  log(`📋 템플릿 ${old >= 0 ? '덮어씀' : '저장'} — 「${t.name}」 · ${TP.describe(t)}`);
+  return { ok: true, replaced: old >= 0, list: _tplView(list) };
+});
+ipcMain.handle('tpl-apply', (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error, dto: P.toDTO(S.parsed) };
+  const TP = require('./core/templates'); const VLk = require('./core/visual-look'); const pr = c.pr;
+  const t = _tplLoad().find((x) => x.id === args.id);
+  if (!t) return { ok: false, error: '템플릿을 찾을 수 없습니다', dto: P.toDTO(S.parsed) };
+  const gs = new Set(), ss = new Map();
+  for (const it of args.items || []) { const g = pr.groups.find((x) => x.num === it.groupNum); const s = _sentAt(pr, it.groupNum, it.sentIdx); if (g) gs.add(g); if (s) ss.set(s.id, s); }
+  if (!gs.size && !ss.size) return { ok: false, error: '입힐 클립을 먼저 고르세요', dto: P.toDTO(S.parsed) };
+  undoPush('템플릿 적용');
+  for (const g of gs) g.look = TP.applyLook(g.look, t.look);
+  for (const s of ss.values()) { if (t.vol != null) s.vol = t.vol; else delete s.vol; if (t.denoise) s.denoise = t.denoise; else delete s.denoise; }
+  log(`📋 템플릿 「${t.name}」 적용 — 그룹 ${gs.size}개 · 문장 ${ss.size}개`);
+  storeActive(); syncSnapshotNow(); pushDtoUpdate();
+  return { ok: true, groups: gs.size, sentences: ss.size, dto: P.toDTO(S.parsed) };
+});
+ipcMain.handle('tpl-delete', (_e, args = {}) => {
+  const list = _tplLoad(); const i = list.findIndex((x) => x.id === args.id);
+  if (i < 0) return { ok: false, error: '템플릿을 찾을 수 없습니다', list: _tplView(list) };
+  const [gone] = list.splice(i, 1); try { _tplSave(list); } catch (e) { return { ok: false, error: e.message, list: _tplView(list) }; }
+  log(`📋 템플릿 지움 — 「${gone.name}」`);
+  return { ok: true, list: _tplView(list) };
+});
 // 🕳 빈 클립 삽입(Lab · Vrew 「빈 클립 삽입」) — 고른 클립들 **맨 뒤 문장** 음성 뒤에 N초 무음(s.padAfter · 화면은 이어지고 자막은 없다).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], sec, mode:'add'(기본 · 더한다)|'set'(그 값으로) } · sec 0 + set = 지움 · 음성 있는 문장만
 //   설계 docs/VrewLab/빈클립_정지워드_설계.md — 합치는 곳은 pipeline.pausePlanOf 한 곳(빌더·SRT·챕터·카드·지문이 그걸 읽는다)

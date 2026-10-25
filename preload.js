@@ -235,6 +235,10 @@ contextBridge.exposeInMainWorld('api', {
   clipQuiet: (args) => ipcRenderer.invoke('clip-quiet', args),
   textPngSave: (args) => ipcRenderer.invoke('text-png-save', args),   // 🅣 글 삽입용 PNG 저장
   stagePasteImage: (args) => ipcRenderer.invoke('stage-paste-image', args),   // 📋 ① 칸 그림 붙여넣기
+  tplList: () => ipcRenderer.invoke('tpl-list'),   // 📋 효과 템플릿
+  tplSave: (args) => ipcRenderer.invoke('tpl-save', args),
+  tplApply: (args) => ipcRenderer.invoke('tpl-apply', args),
+  tplDelete: (args) => ipcRenderer.invoke('tpl-delete', args),
   exportFcpxml: (args) => ipcRenderer.invoke('export-fcpxml', args),   // 🎬 외부 편집기(FCPXML) 내보내기
   videoScenes: (args) => ipcRenderer.invoke('video-scenes', args),   // 🎞 영상 장면 전환 찾기
   setDualSub: (args) => ipcRenderer.invoke('set-dual-sub', args),   // 🌐 이중 자막 켜기·끄기

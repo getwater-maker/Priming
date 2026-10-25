@@ -2148,3 +2148,10 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .rec-dot{color:var(--danger);font-weight:700;animation:recblink 1s infinite}
 @keyframes recblink{50%{opacity:.3}}
 .rec-panel audio{width:100%}
+
+/* 📋 효과 템플릿 패널 */
+.tpl-panel{width:580px;max-width:92vw}
+.tpl-save-row{display:flex;gap:6px}.tpl-save-row input{flex:1;padding:5px 8px}
+.tpl-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
+.tpl-item{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:var(--r-md);padding:6px 8px;background:var(--card)}
+.tpl-item .tpl-nm{flex:1;min-width:0;display:flex;flex-direction:column}

@@ -70,6 +70,7 @@
     "test:scenes": "node test/scene-detect.test.js",
     "test:record": "node test/record.smoke.js",
     "test:fcpxml": "node test/fcpxml.test.js",
+    "test:templates": "node test/templates.test.js",
     "test:fxflt": "node test/fx-filter.test.js && node test/fx-filter.smoke.js && node test/fx-filter-ui.smoke.js",
     "test:marker": "node test/marker.test.js && node test/marker-ui.smoke.js",
     "test:menubar": "node test/menubar-frame.smoke.js && node test/account-page.smoke.js",

@@ -6584,6 +6584,33 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 📋 효과 템플릿 — 그림 효과 + 문장 소리 효과를 이름 붙여 저장하고 다른 클립에 한 번에 입힌다(core/templates · main tpl-*)
+  const [tplPanel, setTplPanel] = useState(null);   // { list, name, sn, items, n, busy, msg }
+  async function openTpl() {
+    let sn = null, items = [];
+    if (clipSelOk()) { sn = capSel.shortsNum; const seen = new Set(); for (const it of capSel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } } }
+    setClipMenu(null); setClipCtx(null);
+    setTplPanel({ list: [], name: '', sn, items, n: items.length, busy: true, msg: '' });
+    try { const r = await api.tplList(); setTplPanel((p) => (p ? { ...p, list: (r && r.list) || [], busy: false } : p)); } catch (e) { setTplPanel((p) => (p ? { ...p, busy: false, msg: '⚠ ' + e.message } : p)); }
+  }
+  async function tplSave() {
+    const p = tplPanel; if (!p || p.busy) return;
+    if (!p.items.length) { setTplPanel({ ...p, msg: '⚠ 템플릿으로 저장할 클립을 먼저 고르세요(고른 첫 클립의 효과를 저장합니다)' }); return; }
+    setTplPanel({ ...p, busy: true, msg: '' });
+    try { const r = await api.tplSave({ shortsNum: p.sn, items: p.items, name: p.name }); setTplPanel((q) => (q ? { ...q, busy: false, list: (r && r.list) || q.list, name: r && r.ok ? '' : q.name, msg: r && r.ok ? '✓ ' + (r.replaced ? '같은 이름을 덮어썼습니다' : '저장했습니다') : '⚠ ' + ((r && r.error) || '실패') } : q)); }
+    catch (e) { setTplPanel((q) => (q ? { ...q, busy: false, msg: '⚠ ' + e.message } : q)); }
+  }
+  async function tplApply(id) {
+    const p = tplPanel; if (!p || p.busy) return;
+    if (!p.items.length) { setTplPanel({ ...p, msg: '⚠ 입힐 클립을 먼저 고르세요' }); return; }
+    setTplPanel({ ...p, busy: true, msg: '' });
+    try { const r = await api.tplApply({ shortsNum: p.sn, items: p.items, id }); if (r && r.dto) setDto(r.dto); setTplPanel((q) => (q ? { ...q, busy: false, msg: r && r.ok ? `✓ 그룹 ${r.groups}개 · 문장 ${r.sentences}개에 입혔습니다 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '실패') } : q)); }
+    catch (e) { setTplPanel((q) => (q ? { ...q, busy: false, msg: '⚠ ' + e.message } : q)); }
+  }
+  async function tplDelete(id) {
+    const p = tplPanel; if (!p) return;
+    try { const r = await api.tplDelete({ id }); setTplPanel((q) => (q ? { ...q, list: (r && r.list) || q.list, msg: r && r.ok ? '✓ 지웠습니다' : '⚠ ' + ((r && r.error) || '실패') } : q)); } catch (e) { setTplPanel((q) => (q ? { ...q, msg: '⚠ ' + e.message } : q)); }
+  }
   // 🎬 외부 편집기 내보내기(FCPXML) — 소재와 길이·자리만(core/fcpxml · main export-fcpxml)
   async function exportFcpxml() {
     const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
@@ -6941,7 +6968,9 @@ export default function App() {
     {ribMonitor}
   </span>);
   const ribTemplate = (<span className="hgroup" data-testid="rib-template"><span className="glabel">템플릿</span>
-    <span className="meta" style={{ alignSelf: 'center' }}>준비 중 — 로고는 삽입 메뉴, 정보 카드는 대본의 표시 줄로 만듭니다</span>
+    <button data-testid="rb-tpl-save" disabled={!loaded} title="효과 템플릿으로 저장 — 고른 클립의 그림 효과(확대·회전·배경색·필터·불투명도·자르기·전환·반전·채우기)와 소리 효과(볼륨·노이즈)를 이름 붙여 저장합니다" onClick={openTpl}><span className="rb-ic">💾</span> <span className="rb-t">템플릿 저장</span></button>
+    <button data-testid="rb-tpl-apply" disabled={!loaded} title="효과 템플릿 불러오기 — 저장한 효과를 고른 클립에 한 번에 입힙니다(자리·순서·켄번스 구간은 그대로)" onClick={openTpl}><span className="rb-ic">📋</span> <span className="rb-t">템플릿 불러오기</span></button>
+    <span className="meta" style={{ alignSelf: 'center' }}>Vrew 의 .vrt 틀은 만들지 않았습니다 — Priming 의 효과 묶음을 저장합니다. 로고는 삽입 메뉴, 정보 카드는 대본의 표시 줄로 만듭니다</span>
   </span>);
   const ribCaption = () => (<>
     {splitBar}
@@ -7288,6 +7317,18 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {tplPanel && <div className="vr-menu-bg" onMouseDown={() => setTplPanel(null)} />}
+          {tplPanel && <div className="vr-menu zr-panel tpl-panel" data-testid="tpl-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>📋 효과 템플릿 {tplPanel.n ? <span className="meta">· 고른 클립 {tplPanel.n}개</span> : <span className="meta" data-testid="tpl-nosel">· 고른 클립 없음(저장·적용은 클립을 고른 뒤)</span>}</b>
+            <div className="tpl-save-row"><input data-testid="tpl-name" placeholder="저장할 이름(예: 회상 장면)" maxLength={40} value={tplPanel.name} onChange={(e) => setTplPanel({ ...tplPanel, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') tplSave(); }} /><button data-testid="tpl-save" disabled={tplPanel.busy || !tplPanel.name.trim()} onClick={tplSave}>고른 첫 클립의 효과 저장</button></div>
+            {tplPanel.msg && <span className="meta" data-testid="tpl-msg">{tplPanel.msg}</span>}
+            <div className="tpl-list" data-testid="tpl-list">
+              {tplPanel.list.length === 0 ? <span className="meta" data-testid="tpl-empty">저장한 템플릿이 없습니다</span>
+                : tplPanel.list.map((t) => <div key={t.id} className="tpl-item" data-testid="tpl-item"><span className="tpl-nm"><b>{t.name}</b><span className="meta">{t.desc}</span></span><button data-testid="tpl-apply" disabled={tplPanel.busy || !tplPanel.n} onClick={() => tplApply(t.id)}>고른 클립에 입히기</button><button className="ghost" data-testid="tpl-del" onClick={() => tplDelete(t.id)}>삭제</button></div>)}
+            </div>
+            <span className="meta">저장하는 것: 그림 효과(채우기·반전·움직임·확대·회전·배경색·필터·불투명도·자르기·전환) + 소리 효과(볼륨·노이즈 줄이기) · 입혀도 <b>자리·순서·켄번스 구간</b>은 그대로 · 템플릿에 없는 효과는 입힌 클립에서 꺼집니다(템플릿 = 효과 한 벌)</span>
+            <div className="zr-btns"><button data-testid="tpl-close" onClick={() => setTplPanel(null)}>닫기</button></div>
+          </div>}
           {recPanel && <div className="vr-menu-bg" onMouseDown={() => { recCleanup(false); setRecPanel(null); }} />}
           {recPanel && <div className="vr-menu zr-panel rec-panel" data-testid="rec-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>🎤 녹음해서 덮어쓰기 · 컷{recPanel.num}</b>
