@@ -977,12 +977,27 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       missingImg.push(g.num ?? g.id);
       continue;
     }
+    // 🎨 클립 배경색(효과 ②) — 그림을 캔버스 크기 사본에 배경색 위로 얹어 구워 그 사본을 가리킨다(굽기 · Vrew 가 아는 그림 파일 형식만).
+    //   박스(look.box)가 있으면 쓰지 않는다 · 원본은 그대로 · 켄번스는 사본(띠 포함) 위에서 돈다 · 실패하면 원본으로 계속한다
+    let _imgPath = g.imagePath, _bgBaked = false;
+    if (CE.bgActive(g.look)) {
+      const _osz = readImageSize(g.imagePath);
+      if (_osz && _osz.w > 0 && _osz.h > 0) {
+        const _ofill = (g.look && g.look.fill) || 'auto';
+        const _omis = Math.abs(_osz.w / _osz.h - _frameRatio) > 0.06;
+        const _bb = (_ofill !== 'auto' || _omis) ? _fillBox(_ofill === 'auto' ? 'contain' : _ofill, _osz.w, _osz.h, _canvasW, _canvasH)
+          : { x: _aspect === '16:9' ? -0.004 : 0, y: 0, w: _aspect === '16:9' ? 1.008 : 1, h: 1 };
+        const _baked = await require('../core/clip-effects-bake').bakeBackground({ src: g.imagePath, bg: CE.normBg(g.look.bg), W: _canvasW, H: _canvasH, box: _bb, ffmpegPath: _ffmpegPath });
+        if (_baked) { _imgPath = _baked; _bgBaked = true; log(`[Vrew] G${g.num} 배경색 ${CE.normBg(g.look.bg)} — 캔버스 크기 사본으로 굽기`); }
+        else log(`[Vrew] ⚠ G${g.num} 배경색 사본을 만들지 못해 원본 그림으로 계속합니다`);
+      }
+    }
     const mid = uid();
     const aid = uid();
     const tid = sid();
-    const ext = (path.extname(g.imagePath).toLowerCase().replace('.jpeg', '.jpg').replace('.', '')) || 'png';
+    const ext = (path.extname(_imgPath).toLowerCase().replace('.jpeg', '.jpg').replace('.', '')) || 'png';
     const fn = `${mid}.${ext}`;
-    const fileSize = fs.statSync(g.imagePath).size;
+    const fileSize = fs.statSync(_imgPath).size;
 
     pj.files.push({
       version: 1, mediaId: mid, sourceOrigin: 'USER',
@@ -992,7 +1007,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
 
     // 이미지 실제 비율 확인 — 캔버스와 다르면(예: 1:1 이미지를 9:16 쇼츠에) 늘리지 않고
     // 비율 유지한 채 상하좌우 가운데 배치(레터박스). 비슷하면 기존처럼 꽉 채움(켄번스).
-    const isz = readImageSize(g.imagePath);
+    const isz = readImageSize(_imgPath);
     const imgRatio = (isz && isz.w > 0 && isz.h > 0) ? (isz.w / isz.h) : _frameRatio;
     const mismatch = Math.abs(imgRatio - _frameRatio) > 0.06;
     const _iFill = (g.look && g.look.fill) || 'auto';
@@ -1045,7 +1060,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     groupImageAsset.set(g.id, { aid, mid, fn });
     groupTopY.set(g.id, track.yPos || 0); // 레터박스면 이미지 상단 y(검정띠 끝)
-    mediaZip.push({ src: g.imagePath, name: fn });
+    mediaZip.push({ src: _imgPath, name: fn });
     groupIdx++;
   }
 

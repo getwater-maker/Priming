@@ -4560,7 +4560,8 @@ export default function App() {
     const lk = VLook.normLook(c.look);
     const flipT = (lk.flipH || lk.flipV) ? ` style="transform:scale(${lk.flipH ? -1 : 1},${lk.flipV ? -1 : 1})"` : '';
     const fit = lk.box ? 'fill' : (lk.fill === 'auto' ? '' : lk.fill);
-    const fitS = fit ? ` style="object-fit:${fit}"` : '';
+    const bgC = (!c.videoPath && CEff.cssBg(lk)) || '';   // 🎨 클립 배경색 — 그림 요소에 칠한다(켄번스와 함께 움직인다 = 굽기 사본과 같다)
+    const fitS = (fit || bgC) ? ` style="${fit ? `object-fit:${fit}` : ''}${fit && bgC ? ';' : ''}${bgC ? `background-color:${bgC}` : ''}"` : '';
     const bx = lk.box;
     const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
     let inner;
@@ -6388,6 +6389,24 @@ export default function App() {
   // 🎛 확대 및 회전(효과 ①) — 고른 클립이 든 그룹(여럿이면 각각)에 look.zoom·rot 을 적는다
   const [zrPanel, setZrPanel] = useState(null);   // { sn, gs:[그룹 번호], zoom, rot }
   const zrTimerRef = useRef(null);
+  // 🎨 클립 배경색(효과 ②) — 맞추기(띠)·투명 PNG 바닥. 그림 그룹만 · 사람이 옮긴 자리(look.box)가 있으면 쓰이지 않는다
+  const [bgPanel, setBgPanel] = useState(null);   // { sn, gs, color('' = 없음), boxed }
+  const bgTimerRef = useRef(null);
+  function openBgPanel() {
+    if (!clipSelOk()) { setStatus('🎨 배경색을 줄 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum;
+    const gs = [...new Set(capSel.items.map((x) => x.groupNum))].sort((x, y) => x - y);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const c = pr ? pr.cuts.find((x) => x.num === gs[0]) : null;
+    const lk = VLook.normLook(c && c.look);
+    setBgPanel({ sn, gs, color: lk.bg || '', boxed: !!lk.box, video: !!(c && c.videoPath) });
+  }
+  function bgChange(color) {
+    setBgPanel((p) => (p ? { ...p, color } : p));
+    if (bgTimerRef.current) clearTimeout(bgTimerRef.current);
+    const sel = bgPanel; if (!sel) return;
+    bgTimerRef.current = setTimeout(async () => { for (const g of sel.gs) await setGroupLook(sel.sn, g, { bg: color || '' }); }, 250);
+  }
   function openZoomRot() {
     if (!clipSelOk()) { setStatus('🎛 확대·회전을 줄 클립을 먼저 고르세요'); return; }
     setClipMenu(null); setClipCtx(null);
@@ -6484,6 +6503,7 @@ export default function App() {
     <button data-testid="rb-fit-contain" disabled={!selOk} title="맞춤 — 고른 클립의 그림·영상을 화면에 맞춰 통째로 보이게" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}><span className="rb-ic">▣</span> <span className="rb-t">맞춤</span></button>
     <button data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
     <button data-testid="rb-zoomrot" disabled={!selOk} title="확대 및 회전 — 고른 클립이 든 그림·영상 그룹을 확대(100~300%)하거나 돌립니다(−180~180°). 돌리면 켄번스(천천히 움직임)는 꺼집니다" onClick={openZoomRot}><span className="rb-ic">⤢</span> <span className="rb-t">확대·회전</span></button>
+    <button data-testid="rb-bg" disabled={!selOk} title="클립 배경색 — 맞추기로 생기는 띠와 투명 PNG 바닥에 색을 칠합니다(그림 그룹 · 그림을 직접 옮긴 자리에는 쓰이지 않음)" onClick={openBgPanel}><span className="rb-ic">🎨</span> <span className="rb-t">배경색</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     {pointsEl}
@@ -6730,7 +6750,7 @@ export default function App() {
                 <span>⏩ 배속</span>
                 {[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <button key={v} data-testid={'ctb-speed-' + v} onClick={() => clipSpeedSet(v)}>{v === 1 ? '1×' : v}</button>)}
               </div>
-              {soon('🎨', '클립 배경색')}
+              <button data-testid="ctb-bg" onClick={() => { setClipMenu(null); openBgPanel(); }}>🎨 클립 배경색</button>
             </div>}
             {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0, ...tbFlip }}>
               <button data-testid="ctb-voice-redo" title="고른 클립의 문장 음성을 채널 목소리·시드 그대로 다시 만듭니다(글을 고친 뒤)" onClick={() => clipTts(false)}>🎤 다시 만들기</button>
@@ -6794,6 +6814,16 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {bgPanel && <div className="vr-menu-bg" onMouseDown={() => setBgPanel(null)} />}
+          {bgPanel && <div className="vr-menu zr-panel bg-panel" data-testid="bg-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🎨 클립 배경색 · {bgPanel.gs.map((g) => 'G' + g).join(' ')}</b>
+            <label>색 <input type="color" data-testid="bg-color" value={bgPanel.color || '#000000'} onChange={(e) => bgChange(e.target.value)} /><span className="zr-v" data-testid="bg-color-v">{bgPanel.color || '없음'}</span></label>
+            <div className="bg-swatches">{['#000000', '#ffffff', '#1f2937', '#0b3d2e', '#7c2d12', '#3b0764'].map((c) => <button key={c} className="bg-sw" data-testid="bg-sw" title={c} style={{ background: c }} onClick={() => bgChange(c)} />)}</div>
+            {bgPanel.boxed && <span className="meta" data-testid="bg-note-box">⚠ 이 그림은 ① 칸에서 직접 옮기고 줄인 자리가 있어 배경색이 쓰이지 않습니다(자리 원래대로를 하면 쓰입니다)</span>}
+            {bgPanel.video && <span className="meta">⚠ 영상 그룹에는 아직 적용되지 않습니다(그림 그룹만)</span>}
+            <span className="meta">맞추기(레터박스)로 생기는 위아래·좌우 띠와 투명한 PNG 의 투명한 부분에 칠합니다 · 꽉 채우기면 보이지 않습니다 · 켄번스·확대·회전과 함께 움직입니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button className="ghost" data-testid="bg-clear" onClick={() => bgChange('')}>없음(기본 검정)</button><button data-testid="bg-close" onClick={() => setBgPanel(null)}>닫기</button></div>
+          </div>}
           {zrPanel && <div className="vr-menu-bg" onMouseDown={() => setZrPanel(null)} />}
           {zrPanel && <div className="vr-menu zr-panel" data-testid="zr-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>⤢ 확대 및 회전 · {zrPanel.gs.map((g) => 'G' + g).join(' ')}</b>
@@ -6924,7 +6954,7 @@ export default function App() {
               <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
               <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />
               <Row icon="■" label={'채움 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); })} tid="cx-fx-cover" />
-              <Row icon="🎨" label="클립 배경색" soon />
+              <Row icon="🎨" label="클립 배경색" onClick={() => openBgPanel()} tid="cx-fx-bg" />
             </>}
           </div>}
         </>);

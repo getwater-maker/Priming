@@ -23,7 +23,19 @@ function normRot(v) {
   if (!isFinite(n)) return 0;
   return Math.max(ROT.min, Math.min(ROT.max, n));
 }
-const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot)));
+/** 🎨 클립 배경색 — '#rrggbb'(소문자) · 못 읽으면 ''(= 기본 · 필드 없음) */
+function normBg(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/.exec(s);
+  if (!m) return '';
+  const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+  return '#' + h;
+}
+/** 배경색이 **실제로 쓰이는가** — 사람이 그림을 직접 옮기고 줄인 자리(look.box)가 있으면 쓰지 않는다(그 자리 밖은 캔버스 검정 그대로 · 설계 §3-3) */
+function bgActive(look) { return !!(look && normBg(look.bg) && !look.box); }
+/** 👁 미리보기 — 그림 요소(img)에 칠하는 배경색(빈 곳도 그림 요소 안이라 켄번스와 함께 움직인다 = 굽기 사본과 같다). 없으면 '' */
+function cssBg(look) { return bgActive(look) ? normBg(look.bg) : ''; }
+const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg)));
 
 /**
  * 박스(캔버스 0..1)를 **자기 가운데** 기준으로 키운다 — 비율 유지. 사람이 옮긴 박스(look.box)면 그 박스 가운데.
@@ -68,7 +80,8 @@ function cssTransform(look) {
 /** 설명 글(그림 모양 로그·툴팁) */
 function describeFx(look) {
   const z = normZoom(look && look.zoom), r = normRot(look && look.rot);
-  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '');
+  const bg = normBg(look && look.bg);
+  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '');
 }
 
-module.exports = { ZOOM, ROT, normZoom, normRot, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
+module.exports = { ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
