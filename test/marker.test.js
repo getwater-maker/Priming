@@ -19,7 +19,7 @@ ok(/old\.length === 1 && plan\.newTexts\.length === 1 && old\[0\]\.marker\) s\.m
 ok(/function _captureState/.test(M) && /sentences: pr\.sentences\.map\(_cloneObj\)/.test(M), '되돌리기 캡처가 문장을 통째로 복제 — 새 필드도 자동으로 따라간다');
 
 console.log('\n[2] IPC clip-marker');
-const cm = M.slice(M.indexOf("ipcMain.handle('clip-marker'"), M.indexOf("ipcMain.handle('clip-voice-overwrite'"));
+const cm = M.slice(M.indexOf("ipcMain.handle('clip-marker'"), M.indexOf("ipcMain.handle('clip-pause-word'"));
 ok(cm.length > 200, 'clip-marker 핸들러 있음');
 ok(cm.indexOf("undoPush(") > 0 && cm.indexOf('undoPush(') < cm.indexOf('s.marker = true'), '바꾸기 전에 되돌리기 저장');
 ok(/mode === 'on' \|\| args\.mode === 'off'/.test(cm) && /sents\.every\(\(s\) => !!s\.marker\)/.test(cm), 'toggle = 전부 달려 있으면 지움 · 아니면 모두 닮');

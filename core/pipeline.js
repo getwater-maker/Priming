@@ -134,6 +134,7 @@ function toDTO(parseResult) {
               cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null,   // ⏩ 클립 배속(Lab · core/quiet-trim)
               qo: s.quietOver || null,   // ✂ 이 클립만의 무음 구간 줄이기
               mk: s.marker ? 1 : null,   // ⚑ 마커
+              pi: (s.pauseIn && s.pauseIn.length) ? s.pauseIn.reduce((a, x) => a + (x.sec || 0), 0) : null,   // 🕳 문장 안 정지·빈 워드 무음 합(초 · 표시용)
               pa: s.padAfter > 0 ? s.padAfter : null,   // 🕳 빈 클립(문장 뒤 무음 초)
               ow: s.voiceOwn ? 1 : null,   // 🎙 내 녹음으로 덮어쓴 음성
               vl: (s.vol != null && s.vol !== 1) ? s.vol : null,   // 🔉 볼륨 조절(0~2 · 없으면 1)

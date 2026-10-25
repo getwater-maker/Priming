@@ -79,4 +79,22 @@ async function deleteWordsAudio(opts) {
   return { ok: true, dur: c.pcm.length / a.rate, removedSec: c.removedSec, cut: c.cut };
 }
 
-module.exports = { readWavPcm, ensureSentences, needs, deleteWordsAudio };
+/**
+ * 🕳 정지 워드 — 음성의 어절 경계 j 에 무음을 끼운 새 WAV(원본 불변).
+ *   opts: { src, bounds(s.wt.b | null — 없으면 앞·끝만), j(0..n 또는 끝 = Infinity), sec, outPath, ffmpegPath }
+ *   → { ok, dur, bounds, addSec } | { ok:false, error }
+ */
+async function insertSilenceAudio(opts) {
+  const { src, bounds, j, sec, outPath, ffmpegPath } = opts || {};
+  let a = /\.wav$/i.test(src || '') ? readWavPcm(src) : null;
+  if (!a && ffmpegPath) { const pcm = await require('./quiet-trim').decodePcm(src, ffmpegPath); if (pcm) a = { pcm, rate: 24000 }; }
+  if (!a) return { ok: false, error: '음성 파일을 읽지 못했습니다' };
+  const r = WA.insertSilence(a.pcm, a.rate, bounds || null, j, sec);
+  if (!r) return { ok: false, error: '그 자리에는 무음을 넣을 수 없습니다' };
+  const QT = require('./quiet-trim');
+  try { const tmp = outPath + '.tmp'; fs.writeFileSync(tmp, QT.wavOf(r.pcm, a.rate)); fs.renameSync(tmp, outPath); }
+  catch (e) { return { ok: false, error: '음성을 저장하지 못했습니다: ' + e.message }; }
+  return { ok: true, dur: r.pcm.length / a.rate, bounds: r.bounds, addSec: r.addSec };
+}
+
+module.exports = { readWavPcm, ensureSentences, needs, deleteWordsAudio, insertSilenceAudio };

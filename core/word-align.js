@@ -236,4 +236,36 @@ function cutWords(pcm, rate, bounds, j0, j1) {
   return { pcm: out, cut: [s0 / rate, s1 / rate], removedSec: (s1 - s0) / rate };
 }
 
-module.exports = { VER, FR, charWeight, tokenize, textKey, analyze, alignBounds, timeMapper, keyOf, validBounds, mapperFor, offsetsFor, lineOffsets, tokenRange, textWithout, cutWords };
+// 🕳 정지 워드(Lab · 설계 docs/VrewLab/빈클립_정지워드_설계.md) — 어절 경계 j(0..n)에 sec 초 무음을 끼운다.
+//   j=0 = 문장 맨 앞 · j=n = 맨 끝(경계 시각이 없어도 된다 · bounds 가 없으면 null) · 그 사이 = bounds[j] 에서 PCM 을 갈라 0 을 끼운다(양쪽 8ms 페이드).
+//   → { pcm, bounds(있으면 새 경계: i<j 그대로 · i≥j 는 +sec · j=0 이면 b[0]=0 유지), at(원래 음성 초), addSec } | null
+function insertSilence(pcm, rate, bounds, j, sec) {
+  const n = bounds ? bounds.length - 1 : -1;
+  if (!pcm || !(rate > 0) || !(sec > 0) || !(j >= 0)) return null;
+  const mid = bounds && j > 0 && j < n;
+  if (mid && !(bounds[j] > 0)) return null;
+  if (!bounds && j !== 0 && j !== Infinity) return null;   // 경계가 없으면 앞·끝만(끝 = Infinity)
+  if (bounds && j > n) return null;
+  const atSec = !bounds ? (j === 0 ? 0 : pcm.length / rate) : (j === 0 ? 0 : j === n ? pcm.length / rate : bounds[j]);
+  const s0 = Math.max(0, Math.min(pcm.length, Math.round(atSec * rate)));
+  const add = Math.round(sec * rate);
+  const out = new Int16Array(pcm.length + add);
+  out.set(pcm.subarray(0, s0), 0);
+  out.set(pcm.subarray(s0), s0 + add);
+  const xf = Math.round(rate * 0.008);
+  for (let i = 0; i < xf; i++) {
+    const g = (i + 1) / (xf + 1);
+    if (s0 - 1 - i >= 0 && s0 > xf) out[s0 - 1 - i] = Math.round(out[s0 - 1 - i] * g);
+    if (s0 + add + i < out.length && s0 < pcm.length - xf) out[s0 + add + i] = Math.round(out[s0 + add + i] * g);
+  }
+  let nb = null;
+  if (bounds) { nb = bounds.map((b, i) => (i >= j ? b + sec : b)); if (j === 0) nb[0] = 0; }
+  return { pcm: out, bounds: nb, at: atSec, addSec: add / rate };
+}
+// 커서(글자 위치 at)에 가장 가까운 어절 경계 번호 j(0..n) — 어절 가운데면 가까운 쪽
+function boundaryAt(text, at) {
+  const toks = tokenize(text); const a = Number(at);
+  if (!isFinite(a)) return null;
+  return toks.filter((tk) => (tk.from + tk.to) / 2 < a).length;
+}
+module.exports = { insertSilence, boundaryAt, VER, FR, charWeight, tokenize, textKey, analyze, alignBounds, timeMapper, keyOf, validBounds, mapperFor, offsetsFor, lineOffsets, tokenRange, textWithout, cutWords };

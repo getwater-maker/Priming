@@ -45,7 +45,7 @@ const M = read('main.js'), PL = read('preload.js'), APP = read('renderer/src/App
 ok(/ipcMain\.handle\('clip-pad'/.test(M) && /clipPad: \(args\)/.test(PL), 'IPC clip-pad + preload');
 const cp = M.slice(M.indexOf("ipcMain.handle('clip-pad'"), M.indexOf("ipcMain.handle('clip-voice-overwrite'"));
 ok(cp.indexOf('undoPush(') > 0 && cp.indexOf('undoPush(') < cp.indexOf('last.padAfter = next') && /storeActive\(\); syncSnapshotNow\(\)/.test(cp) && !/ttsAudioPath = /.test(cp), '바꾸기 전에 되돌리기 저장 · 작업본 저장 · 음성 파일은 건드리지 않는다');
-ok(/pa: s\.padAfter > 0 \? s\.padAfter : null/.test(PP) && /pa: s\.padAfter > 0 \? s\.padAfter : null, wt:/.test(M) && (M.match(/s\.padAfter = ss\.pa/g) || []).length === 2 && /keep\.padAfter > 0/.test(M), 'DTO pa · 작업본 저장·이어받기 2곳 · 글 고침 유지');
+ok(/pa: s\.padAfter > 0 \? s\.padAfter : null/.test(PP) && /pa: s\.padAfter > 0 \? s\.padAfter : null, ks:/.test(M) && (M.match(/s\.padAfter = ss\.pa/g) || []).length === 2 && /keep\.padAfter > 0/.test(M), 'DTO pa · 작업본 저장·이어받기 2곳 · 글 고침 유지');
 ok(/function pausePlanOf/.test(PP) && /SCd\.padOf\(s\)/.test(PP) && !/padAfter/.test(read('vrew/vrew-builder.js')), '🔑 padAfter 를 읽는 곳은 pausePlanOf 한 곳(빌더는 읽지 않는다)');
 ok(/j\.pauseWins/.test(RV) && /ctx\.pauseCaptionWins = \[\.\.\.\(ctx\.pauseCaptionWins \|\| \[\]\), \.\.\.pw\]/.test(RV), '렌더러: 옆 파일 pauseWins → 자막 가림(카드 쉼 창과 합침)');
 ok(/data-testid="pad-panel"/.test(APP) && /tid="cx-pad"/.test(APP) && /data-testid="ins-pad"/.test(APP) && !/label="빈 클립 삽입" soon/.test(APP), '화면: 패널 · 우클릭 · 삽입 탭 단추');

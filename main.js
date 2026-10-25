@@ -7015,7 +7015,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, pa: s.padAfter > 0 ? s.padAfter : null, wt: s.wt || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, pa: s.padAfter > 0 ? s.padAfter : null, ks: s.keepSil ? 1 : null, pin: (s.pauseIn && s.pauseIn.length) ? s.pauseIn : null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7239,6 +7239,7 @@ function projectsFromSnapshot(snap) {
         if (ss.vl != null) s.vol = ss.vl;   // 🔉 볼륨
         if (ss.ow) s.voiceOwn = true;   // 🎙 덮어쓴 음성
         if (ss.pa > 0) s.padAfter = ss.pa;   // 🕳 빈 클립
+        if (ss.ks) { s.keepSil = true; if (ss.pin) s.pauseIn = ss.pin; }   // 🕳 정지·빈 워드
         if (ss.wt) s.wt = ss.wt;   // 🔤 단어 시각 정렬(열쇠 = 음성 경로·길이·글 — 맞지 않으면 쓰이지 않는다)
         g.sentenceIds.push(s.id); sentences.push(s);
       });
@@ -7347,6 +7348,7 @@ function overlaySnapshot(parsed, snap) {
         if (ss.vl != null && ss.text === s.text) s.vol = ss.vl;   // 🔉 볼륨(같은 문장일 때만)
         if (ss.ow && ss.text === s.text) s.voiceOwn = true;   // 🎙 덮어쓴 음성(같은 문장일 때만)
         if (ss.pa > 0 && ss.text === s.text) s.padAfter = ss.pa;   // 🕳 빈 클립(같은 문장일 때만)
+        if (ss.ks && ss.text === s.text) { s.keepSil = true; if (ss.pin) s.pauseIn = ss.pin; }   // 🕳 정지·빈 워드(같은 문장일 때만)
         if (ss.wt && ss.text === s.text) s.wt = ss.wt;   // 🔤 단어 시각 정렬(같은 문장일 때만 — 열쇠가 다시 걸러 준다)
       });
     }
@@ -9299,6 +9301,7 @@ async function _editSentences(args = {}) {
       if (keep.quietOver) s.quietOver = keep.quietOver;
       if (keep.marker) s.marker = true;   // ⚑ 글이 같은 문장은 마커도 따라온다
       if (keep.vol != null) s.vol = keep.vol;   // 🔉 볼륨도
+      if (keep.keepSil) { s.keepSil = true; if (keep.pauseIn) s.pauseIn = keep.pauseIn; }   // 🕳 정지·빈 워드(글이 같으면 소리도 같다)
       if (keep.padAfter > 0) s.padAfter = keep.padAfter;   // 🕳 빈 클립도(글이 같으면)
       if (keep.voiceOwn) s.voiceOwn = true;   // 🎙 덮어쓴 음성도(글이 같으면 음성도 따라온다)
     } else if (old.length === 1 && plan.newTexts.length === 1 && old[0].clipSpeed) s.clipSpeed = old[0].clipSpeed;   // ⏩ 한 문장을 고쳐 한 문장 = 배속 유지(음성은 새로 만든 뒤 다시 건다)
@@ -10614,6 +10617,39 @@ ipcMain.handle('ai-translate', async (_e, args = {}) => {
   P.writeSrt(t.pr, out, L.maxChars, resolvePreset(args.presetName || null), (s) => map.get(byId.get(s.id)) || '');
   log(`🌐 AI 자막 번역 → ${out}${missing.length ? ` (번역이 빠진 문장 ${missing.length}개는 한국어 그대로)` : ''}`);
   return { ok: true, path: out, count: map.size, missing, lang: L.id };
+});
+// 🕳 정지 워드·빈 워드 삽입(Lab · Vrew 「정지 워드 삽입」「빈 워드 삽입」) — 문장 음성의 어절 경계에 N초 무음을 끼운다(새 WAV · 원본 불변 · 글 불변).
+//   args = { shortsNum, groupNum, sentIdx, at(글자 위치 — 가까운 어절 경계), sec, kind:'pause'|'blank' } · 가운데 자리는 단어 시각(s.wt)이 있어야 · 문장 맨 앞(at=0)·끝(at=글 길이 이상)은 없어도 된다
+//   설계 docs/VrewLab/빈클립_정지워드_설계.md — wt 경계는 지우지 않고 뒤를 sec 만큼 민다 · s.keepSil 로 쉼 줄이기에서 지킨다 · 배속·쉼 줄이기 기록(이미 소리에 구워짐)은 비운다(단어 지우기와 같다)
+ipcMain.handle('clip-pause-word', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
+  if (_jobsBusy()) return { ok: false, error: '작업(만들기·음성·이미지·영상) 중에는 소리를 바꿀 수 없습니다 — 끝난 뒤에 해 주세요.' };
+  const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  const s = g ? pr.getSentencesOfGroup(g)[Number(args.sentIdx)] : null;
+  if (!s) return { ok: false, error: '그 문장을 찾지 못했습니다.' };
+  if (!s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) return { ok: false, error: '이 문장은 음성이 없습니다 — 음성을 먼저 만드세요.' };
+  const WAl = require('./core/word-align'), PASS = require('./core/word-align-pass');
+  const blank = args.kind === 'blank';
+  const sec = Math.round(Math.max(0.1, Math.min(5, Number(args.sec) || (blank ? 0.3 : 0.5))) * 10) / 10;
+  const b = WAl.validBounds(s);
+  const toks = WAl.tokenize(s.text); const n = toks.length;
+  const at = Number(args.at); if (!isFinite(at)) return { ok: false, error: '넣을 자리를 정하지 못했습니다(글 안에 커서를 두세요).' };
+  const j = at <= 0 ? 0 : at >= s.text.length ? n : WAl.boundaryAt(s.text, at);
+  if (j == null) return { ok: false, error: '넣을 자리를 정하지 못했습니다.' };
+  if (j > 0 && j < n && !b) return { ok: false, error: '문장 가운데에 넣으려면 단어 시각이 필요합니다 — 채널 편집 → 음성 → 「단어 자리 맞추기」를 켜면(한국어) 잠시 뒤 맞춰집니다. 문장 맨 앞·맨 끝에는 지금도 넣을 수 있습니다.' };
+  let tag = ''; try { const st = fs.statSync(s.ttsAudioPath); tag = require('crypto').createHash('sha1').update([s.ttsAudioPath, j, sec, st.size, Math.round(st.mtimeMs)].join('|')).digest('hex').slice(0, 8); } catch (_) {}
+  const out = P.claimPath(path.join(shortsDirs(S.outRoot, pr.shortsNum).tts, `${s.num}_p${tag}.wav`));
+  const r = await PASS.insertSilenceAudio({ src: s.ttsAudioPath, bounds: b ? (j === 0 || j === n ? b : b) : null, j: (!b && j === n) ? Infinity : j, sec, outPath: out, ffmpegPath: require('./core/media-utils').getFfmpegPath() });
+  if (!r.ok) return { ok: false, error: r.error };
+  undoPush(blank ? '빈 워드 삽입' : '정지 워드 삽입');
+  s.ttsAudioPath = out; s.ttsDurationSec = r.dur; s.ttsStatus = 'done';
+  delete s.quiet; delete s.clipSpeed; delete s.quietOver;
+  if (b && r.bounds && s.wt) s.wt = { ...s.wt, b: r.bounds, k: WAl.keyOf(s) }; else delete s.wt;   // 🔑 열쇠 k 는 음성 경로·길이를 품는다 — 새 소리 기준으로 다시 찍어야 경계가 계속 유효하다
+  s.keepSil = true; (s.pauseIn = s.pauseIn || []).push({ j, sec });
+  log(`🕳 컷${s.num} ${blank ? '빈 워드' : '정지 워드'} ${sec}초 — ${j === 0 ? '문장 맨 앞' : j === n ? '문장 맨 끝' : '어절 ' + j + ' 앞'} (소리에 무음이 끼었습니다 · Ctrl+Z 되돌리기)`);
+  storeActive(); syncSnapshotNow(); pushDtoUpdate();
+  return { ok: true, sec, j, n, dur: r.dur, dto: P.toDTO(S.parsed) };
 });
 // 🕳 빈 클립 삽입(Lab · Vrew 「빈 클립 삽입」) — 고른 클립들 **맨 뒤 문장** 음성 뒤에 N초 무음(s.padAfter · 화면은 이어지고 자막은 없다).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], sec, mode:'add'(기본 · 더한다)|'set'(그 값으로) } · sec 0 + set = 지움 · 음성 있는 문장만

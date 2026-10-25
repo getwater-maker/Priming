@@ -174,7 +174,7 @@ async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
     if (opts.abortSignal && opts.abortSignal()) break;
     if (!s || !s.ttsAudioPath) continue;
     const key = sentKey(preset, s);
-    const K = parseKey(keyOf(effPreset(preset, s)));
+    const K = s.keepSil ? null : parseKey(keyOf(effPreset(preset, s)));   // 🕳 사람이 일부러 넣은 정지·빈 워드 무음이 있으면 쉼 줄이기를 건너뛴다(배속은 그대로)
     const q = s.quiet;
     const derived = !!(q && q.out && s.ttsAudioPath === q.out && q.src && fs.existsSync(q.src));
     if (derived && q.key === key) continue;                       // 이미 이 설정

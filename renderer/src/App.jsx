@@ -6498,6 +6498,34 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🕳 정지 워드·빈 워드 삽입 — 문장 음성의 어절 경계에 N초 무음(새 WAV · 글 불변 · main `clip-pause-word`)
+  const [wpPanel, setWpPanel] = useState(null);   // { sn, groupNum, sentIdx, kind, pos:'word'|'start'|'end', at, sec, hasWord, hasWb, busy, num }
+  function openWordPause(kind, pre) {
+    let sn, groupNum, sentIdx, at = null;
+    if (pre) { ({ sn, groupNum, sentIdx, at } = pre); }
+    else {
+      if (!clipSelOk()) { setStatus('❄ 정지 워드를 넣을 클립을 먼저 고르세요'); return; }
+      const it = [...capSel.items].sort((x, y) => x.n - y.n)[0];
+      sn = capSel.shortsNum; groupNum = it.groupNum; sentIdx = it.sentIdx;
+      if (capSel.mode === 'chars' && capSel.items[0] && capSel.items[0].from != null) at = capSel.items[0].from;
+    }
+    setClipMenu(null); setClipCtx(null);
+    const s = capSentence(sn, groupNum, sentIdx);
+    if (!s || !s.audio) { setStatus('❄ 이 문장은 음성이 없습니다 — 음성을 먼저 만드세요'); return; }
+    setWpPanel({ sn, groupNum, sentIdx, kind, pos: at != null ? 'word' : 'start', at, sec: kind === 'blank' ? 0.3 : 0.5, hasWord: at != null, hasWb: Array.isArray(s.wb), busy: false, num: s.num });
+  }
+  useEffect(() => { const h = (e) => { const d = e.detail || {}; openWordPause(d.kind || 'pause', d); }; window.addEventListener('pm-word-pause', h); return () => window.removeEventListener('pm-word-pause', h); });
+  async function wordPauseRun() {
+    const p = wpPanel; if (!p || p.busy) return;
+    const at = p.pos === 'start' ? 0 : p.pos === 'end' ? 1e9 : p.at;
+    setWpPanel({ ...p, busy: true });
+    try {
+      const r = await api.clipPauseWord({ shortsNum: p.sn, groupNum: p.groupNum, sentIdx: p.sentIdx, at, sec: p.sec, kind: p.kind });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.ok) { setStatus((p.kind === 'blank' ? '⋯ 빈 워드 ' : '❄ 정지 워드 ') + r.sec + '초 — 소리에 무음이 끼었습니다 (Ctrl+Z 되돌리기)'); setWpPanel(null); }
+      else { setStatus('⚠ ' + ((r && r.error) || '넣지 못했습니다')); setWpPanel({ ...p, busy: false }); }
+    } catch (e) { setStatus('⚠ ' + e.message); setWpPanel({ ...p, busy: false }); }
+  }
   // 🕳 빈 클립 삽입 — 고른 클립들 맨 뒤 문장 음성 뒤에 N초 무음(s.padAfter · 합치는 곳은 pausePlanOf 한 곳)
   const [padPanel, setPadPanel] = useState(null);   // { sn, items, sec, cur, num, busy }
   function openPadPanel() {
@@ -6989,6 +7017,17 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {wpPanel && <div className="vr-menu-bg" onMouseDown={() => setWpPanel(null)} />}
+          {wpPanel && <div className="vr-menu zr-panel wp-panel" data-testid="wp-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>{wpPanel.kind === 'blank' ? '⋯ 빈 워드 삽입' : '❄ 정지 워드 삽입'} · 컷{wpPanel.num}</b>
+            <label>자리 <select data-testid="wp-pos" value={wpPanel.pos} onChange={(e) => setWpPanel({ ...wpPanel, pos: e.target.value })}>
+              {wpPanel.hasWord && <option value="word">고른 단어 앞</option>}
+              <option value="start">문장 맨 앞</option><option value="end">문장 맨 끝</option></select></label>
+            <label>길이 <input type="range" data-testid="wp-sec" min="0.1" max="5" step="0.1" value={wpPanel.sec} onChange={(e) => setWpPanel({ ...wpPanel, sec: Number(e.target.value) })} /><span className="zr-v" data-testid="wp-v">{wpPanel.sec}초</span></label>
+            {!wpPanel.hasWord && <span className="meta">문장 가운데에 넣으려면 ② 칸에서 <b>단어(칩)를 먼저 고른 뒤</b> 단어 곁 ⏸ 단추를 누르세요(채널 「단어 자리 맞추기」를 켠 한국어 문장)</span>}
+            <span className="meta">문장 <b>소리 안</b>에 무음이 끼고 글(자막 글자)은 그대로입니다 — 자막 줄 시각은 쉼만큼 늘어납니다 · 새 음성 파일이 만들어지고 원본은 그대로(Ctrl+Z) · 쉼 줄이기가 이 무음을 줄이지 않습니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button data-testid="wp-run" disabled={wpPanel.busy} onClick={wordPauseRun}>넣기</button><button className="ghost" data-testid="wp-close" onClick={() => setWpPanel(null)}>닫기</button></div>
+          </div>}
           {padPanel && <div className="vr-menu-bg" onMouseDown={() => setPadPanel(null)} />}
           {padPanel && <div className="vr-menu zr-panel pad-panel" data-testid="pad-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>▭ 빈 클립 삽입 · 컷{padPanel.num} 뒤</b>
@@ -7149,8 +7188,8 @@ export default function App() {
             <Row icon="☺" label="캐릭터 삽입" soon />
             <div className="vr-sep" />
             <Row icon="▭" label="빈 클립 삽입" onClick={openPadPanel} tid="cx-pad" />
-            <Row icon="⋯" label="빈 워드 삽입" soon />
-            <Row icon="❄" label="정지 워드 삽입" soon />
+            <Row icon="⋯" label="빈 워드 삽입" onClick={() => openWordPause('blank')} tid="cx-blank-word" />
+            <Row icon="❄" label="정지 워드 삽입" onClick={() => openWordPause('pause')} tid="cx-pause-word" />
             <div className="vr-sep" />
             <Row icon="🎛" label="효과" sub="fx" tid="cx-fx" />
             <div className="vr-sep" />
@@ -9017,6 +9056,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                     {li === 0 && s.mk ? <span className="clip-marker" data-testid="clip-marker" title="⚑ 마커 — 클립 우클릭 ▸ 마커 로 지우기 · 편집 탭 ▸ 마커 목록으로 모아 보기">⚑</span> : null}
+                                    {li === 0 && s.pi > 0 ? <span className="clip-vol" data-testid="clip-pi" title={`❄ 이 문장 소리 안에 정지·빈 워드 무음 ${Math.round(s.pi * 10) / 10}초(쉼 줄이기가 줄이지 않음)`}>❄{Math.round(s.pi * 10) / 10}초</span> : null}
                                     {li === 0 && s.pa > 0 ? <span className="clip-vol" data-testid="clip-pad" title={`▭ 이 클립 뒤에 빈 클립(무음) ${s.pa}초 — 클립 우클릭 ▸ 삽입 ▸ 빈 클립 삽입`}>▭{s.pa}초</span> : null}
                                     {li === 0 && s.ow ? <span className="clip-vol" data-testid="clip-own" title="🎙 이 문장 음성은 내 녹음으로 덮어썼습니다(다시 변환해도 유지 · 클립 우클릭 ▸ 덮어쓴 음성 해제)">🎙</span> : null}
                                     {li === 0 && s.vl != null ? <span className="clip-vol" data-testid="clip-vol" title={`🔉 이 문장 음성 볼륨 ${Math.round(s.vl * 100)}% (클립 우클릭 ▸ 효과 ▸ 볼륨 조절)`}>🔉{Math.round(s.vl * 100)}%</span> : null}
@@ -9046,6 +9086,8 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                               onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); _S.onWordPlay(pr.shortsNum, c.num, si, a0); }}>▶</button>
                                             <button className="ghost" data-testid="word-del" disabled={!has} title={has ? '이 단어를 글(.md)과 소리에서 함께 지웁니다 — 소리는 어절 경계(쉼·골짜기)에서 자르고, Ctrl+Z 로 되돌립니다' : why}
                                               onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); _S.onWordDelete(pr.shortsNum, c.num, si, a0, b0); }}>🗑</button>
+                                            <button className="ghost" data-testid="word-pause" disabled={!has} title={has ? '이 단어 앞에 정지(무음)를 넣습니다 — 소리에 무음이 끼고 글은 그대로(Ctrl+Z 되돌리기)' : why}
+                                              onMouseDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); window.dispatchEvent(new CustomEvent('pm-word-pause', { detail: { sn: pr.shortsNum, groupNum: c.num, sentIdx: si, at: a0, kind: 'pause' } })); }}>⏸</button>
                                           </span>
                                         );
                                       })()}
