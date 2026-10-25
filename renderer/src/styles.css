@@ -2017,3 +2017,7 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .ai-item.done{opacity:.55}
 .ai-item s{color:var(--muted)}
 .ai-item em{color:var(--muted);font-style:normal}
+
+/* 🅣 글 삽입 패널 */
+.text-panel{max-width:520px}
+.text-panel textarea{width:100%;resize:vertical;font-family:var(--font);font-size:var(--fs-lg)}

@@ -9751,6 +9751,19 @@ ipcMain.handle('set-logo-pos', (_e, args = {}) => {
 });
 // ➕ 삽입 — 그림·영상·오디오를 정한 **클립(문장) 범위** 동안(v0.5.52 · 「삽입」 메뉴 v0.5.54). 그림·영상은 모든 그룹 그림 위층.
 //   op = add {kind, from, to}(문장 번호 1부터 · 비우면 전체) | range {from, to} | box | vol {volume} | remove | order
+// 🅣 글 삽입 — 렌더러가 그린 투명 PNG(data URL)를 임시 폴더에 저장하고 경로를 돌려준다(그 뒤 overlay-op add 가 작업 폴더로 복사해 그림 위층으로 넣는다)
+ipcMain.handle('text-png-save', (_e, args = {}) => {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(args.dataUrl || ''));
+  if (!m) return { ok: false, error: '그림 데이터가 올바르지 않습니다' };
+  const buf = Buffer.from(m[1], 'base64');
+  if (buf.length < 100 || buf.length > 8 * 1048576) return { ok: false, error: '그림 크기가 올바르지 않습니다' };
+  const dir = path.join(require('os').tmpdir(), 'priming-text'); fs.mkdirSync(dir, { recursive: true });
+  const hash = require('crypto').createHash('sha1').update(buf).digest('hex').slice(0, 8);
+  const base = String(args.name || '텍스트').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 24) || '텍스트';
+  const fp = path.join(dir, `${base}_${hash}.png`);
+  try { fs.writeFileSync(fp, buf); } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: true, path: fp };
+});
 ipcMain.handle('overlay-op', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   const OL = require('./core/overlay-layers');

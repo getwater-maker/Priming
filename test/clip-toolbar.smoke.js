@@ -68,7 +68,7 @@ const md = () => fs.readFileSync(MD, 'utf8');
 
     console.log('\n[2] 메뉴 — 삽입 · 효과 · 목소리');
     await win.click('[data-testid="ctb-ins"]');
-    ok(await win.locator('[data-testid="ctb-ins-menu"] button').count() === 8 && await win.locator('[data-testid="ctb-ins-menu"] button.soon').count() === 5, '삽입 메뉴 8개(PC에서 불러오기 · AI 이미지 · AI 비디오는 동작 · 나머지 5개 준비 중)');
+    ok(await win.locator('[data-testid="ctb-ins-menu"] button').count() === 8 && await win.locator('[data-testid="ctb-ins-menu"] button.soon').count() === 2, '삽입 메뉴 8개(PC · 무료 이미지·비디오 · 텍스트 2종 · AI 이미지 · AI 비디오는 동작 · 모바일/내 이미지·비디오 2개만 준비 중)');
     await win.click('[data-testid="ctb-fx"]');
     ok(await win.locator('[data-testid="ctb-ins-menu"]').count() === 0 && await win.locator('[data-testid="ctb-fx-menu"] > button').count() === 7 && await win.locator('[data-testid="ctb-fx-menu"] > button.soon').count() === 0 && await win.locator('[data-testid="ctb-speed"] button').count() === 7, '효과 메뉴(맞춤·채움 동작 · 준비 중 없음 · 전환(⑥)·볼륨(④)·확대 및 회전(①)·클립 배경색(②)·필터(③)는 연결 · ⏩ 배속 줄 7단계 — Lab) · 삽입 메뉴는 닫힘');
     await win.click('[data-testid="ctb-fx-cover"]'); await win.waitForTimeout(400);

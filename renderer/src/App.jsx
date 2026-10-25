@@ -42,7 +42,8 @@ import StockDialog from './StockDialog.jsx';
 import BackupModal from './BackupModal.jsx';
 import AccountPage from './AccountPage.jsx';
 import CEff from '../../core/clip-effects.js';
-import AISub from '../../core/ai-subtitle.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
+import AISub from '../../core/ai-subtitle.js';
+import TxO from '../../core/text-overlay.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -6495,6 +6496,40 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🅣 글 삽입 — 투명 PNG 한 장으로 그려 그림 위층(overlay-op add)으로 넣는다(core/text-overlay · 새 트랙·렌더 규칙 없음)
+  const [textIns, setTextIns] = useState(null);   // { presetId, o:{text,size,color,bold,box,shadow,pos}, sn, a, b, busy }
+  const textCvRef = useRef(null);
+  function drawTextPng(cv, o) {
+    const ctx = cv.getContext('2d'); cv.width = TxO.W; cv.height = TxO.H; ctx.clearRect(0, 0, TxO.W, TxO.H);
+    const font = (o.bold ? '700 ' : '400 ') + o.size + 'px "Pretendard","Malgun Gothic",sans-serif';
+    ctx.font = font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const L = TxO.layout(o, (s) => ctx.measureText(s).width); if (!L) return false;
+    if (o.box) { ctx.fillStyle = o.box; ctx.beginPath(); const r = Math.round(o.size * 0.25), b = L.box; ctx.moveTo(b.x + r, b.y); ctx.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + b.h, r); ctx.arcTo(b.x + b.w, b.y + b.h, b.x, b.y + b.h, r); ctx.arcTo(b.x, b.y + b.h, b.x, b.y, r); ctx.arcTo(b.x, b.y, b.x + b.w, b.y, r); ctx.closePath(); ctx.fill(); }
+    if (o.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.85)'; ctx.shadowBlur = Math.round(o.size * 0.12); ctx.shadowOffsetY = Math.round(o.size * 0.04); }
+    ctx.fillStyle = o.color;
+    L.lines.forEach((ln, i) => ctx.fillText(ln, L.textX, L.textY0 + i * L.lh));
+    return true;
+  }
+  function openTextIns(presetId) {
+    if (!clipSelOk()) { setStatus('T 글을 넣을 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const ns = capSel.items.map((x) => x.n);
+    setTextIns({ presetId, o: TxO.norm({ text: '' }, presetId), sn: capSel.shortsNum, a: Math.min(...ns), b: Math.max(...ns), busy: false });
+  }
+  async function textInsRun() {
+    const cur = textIns; if (!cur || cur.busy) return;
+    const cv = document.createElement('canvas');
+    if (!drawTextPng(cv, cur.o)) { setStatus('T 넣을 글을 적으세요'); return; }
+    setTextIns({ ...cur, busy: true });
+    try {
+      const s = await api.textPngSave({ dataUrl: cv.toDataURL('image/png'), name: TxO.fileNameOf(cur.o.text) });
+      if (!s || !s.ok) { setStatus('⚠ ' + ((s && s.error) || '글 그림을 저장하지 못했습니다')); setTextIns({ ...cur, busy: false }); return; }
+      const r = await overlayOp({ shortsNum: cur.sn, op: 'add', file: s.path });
+      if (r && r.ok && r.id) { await insRange(cur.sn, r.id, cur.a, cur.b); setStatus('T 글을 위층으로 넣었습니다 — ① 칸에서 끌어 자리·크기를 바꿀 수 있습니다 (Ctrl+Z 되돌리기)'); setTextIns(null); }
+      else setTextIns({ ...cur, busy: false });
+    } catch (e) { setStatus('⚠ ' + e.message); setTextIns({ ...cur, busy: false }); }
+  }
+  useEffect(() => { if (textIns && textCvRef.current) drawTextPng(textCvRef.current, textIns.o); }, [textIns]);
   // 🌐 AI 자막 교정(제안만) · 번역(SRT) — core/ai-subtitle · main `ai-proof`·`ai-translate`
   const [aiProof, setAiProof] = useState(null);   // { busy, error, items:[{...제안, on, done}], asked, dropped, sn }
   const [aiTr, setAiTr] = useState(null);   // { lang, busy, res }
@@ -6850,11 +6885,11 @@ export default function App() {
               <button data-testid="ctb-ins-pc" title="그림·영상·오디오 파일을 고른 클립 구간에 위층으로 넣습니다(➕ 삽입과 같은 기능)" onClick={clipInsertFile}>🖥 PC에서 불러오기</button>
               {soon('📱', '모바일에서 불러오기')}
               {soon('🗂', '내 이미지 · 비디오')}
-              {soon('🖼', '무료 이미지 · 비디오')}
+              <button data-testid="ctb-ins-free" title="무료 스톡 사진·영상(Pexels·Pixabay)을 검색해 고른 클립 구간에 넣습니다" onClick={() => openStockForSel('photo')}>🖼 무료 이미지 · 비디오</button>
               <button data-testid="ctb-ins-aiimg" title="이 클립이 든 그룹의 그림을 AI 로 다시 만듭니다(그룹의 🔄 와 같다)" onClick={() => { setClipMenu(null); if (cg) runRegen(cg.sn, cg.g); }}>✨ AI 이미지 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-ins-aivid" title="이 클립이 든 그룹의 그림으로 AI 영상을 만듭니다(그룹의 🎬 와 같다)" onClick={() => { setClipMenu(null); if (cg) runGroupVid(cg.sn, cg.g); }}>🎬 AI 비디오 <i>G{cg ? cg.g : ''}</i></button>
-              {soon('T', '기본 텍스트')}
-              {soon('𝕋', '디자인 텍스트')}
+              <button data-testid="ctb-ins-text" title="고른 클립 구간에 글을 위층으로 넣습니다(투명 그림 한 장 — ➕ 삽입과 같은 그림 위층) · 흰 글자 + 그림자" onClick={() => openTextIns('basic')}>T 기본 텍스트</button>
+              <button data-testid="ctb-ins-text-design" title="고른 클립 구간에 꾸민 글(굵은 노랑 + 어두운 상자)을 위층으로 넣습니다" onClick={() => openTextIns('design')}>𝕋 디자인 텍스트</button>
             </div>}
             {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230, ...tbFlip }}>
               <button data-testid="ctb-filter" onClick={() => { setClipMenu(null); openFilterPanel(); }}>✳ 필터</button>
@@ -6932,6 +6967,19 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {textIns && <div className="vr-menu-bg" onMouseDown={() => setTextIns(null)} />}
+          {textIns && <div className="vr-menu zr-panel text-panel" data-testid="text-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>T {TxO.PRESETS[textIns.presetId].label} · 문장 {textIns.a}~{textIns.b}</b>
+            <textarea data-testid="text-input" rows={3} placeholder="넣을 글을 적으세요(Enter = 줄바꿈)" value={textIns.o.text} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, text: e.target.value } })} />
+            <label>크기 <input type="range" data-testid="text-size" min={TxO.SIZE.min} max={TxO.SIZE.max} step={TxO.SIZE.step} value={textIns.o.size} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, size: Number(e.target.value) } })} /><span className="zr-v">{textIns.o.size}</span></label>
+            <label>글자색 <input type="color" data-testid="text-color" value={textIns.o.color} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, color: e.target.value } })} /></label>
+            <label>자리 <select data-testid="text-pos" value={textIns.o.pos} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, pos: e.target.value } })}>{TxO.POS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
+            <label><input type="checkbox" data-testid="text-bold" checked={textIns.o.bold} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, bold: e.target.checked } })} /> 굵게</label>
+            <label><input type="checkbox" data-testid="text-box" checked={!!textIns.o.box} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, box: e.target.checked ? 'rgba(20,20,20,0.78)' : '' } })} /> 어두운 상자</label>
+            <canvas ref={textCvRef} data-testid="text-preview" style={{ width: '100%', background: 'repeating-conic-gradient(#555 0 25%, #777 0 50%) 0 0/16px 16px', borderRadius: 6 }} />
+            <span className="meta">글은 투명 그림 한 장으로 만들어 고른 클립 구간 <b>위층</b>에 넣습니다(➕ 삽입과 같은 그림 · 범위·순서·지우기도 같음) — 넣은 뒤 ① 칸에서 끌어 자리·크기를 바꿀 수 있고, 글을 고치려면 지우고 다시 넣습니다 · 화이트보드 MP4 에는 들어가지 않습니다</span>
+            <div className="zr-btns"><button data-testid="text-run" disabled={textIns.busy || !textIns.o.text.trim()} onClick={textInsRun}>넣기</button><button className="ghost" data-testid="text-close" onClick={() => setTextIns(null)}>닫기</button></div>
+          </div>}
           {aiProof && <div className="vr-menu-bg" onMouseDown={() => setAiProof(null)} />}
           {aiProof && <div className="vr-menu zr-panel ai-panel" data-testid="ai-proof-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>✓ AI 자막 교정</b>
@@ -7067,7 +7115,7 @@ export default function App() {
             <Row icon="✨" label="AI 이미지 자동삽입" onClick={clipAiAuto} tid="cx-ai-auto" />
             <Row icon="🖼" label="이미지 삽입" sub="img" tid="cx-img" />
             <Row icon="🎞" label="비디오 삽입" sub="vid" tid="cx-vid" />
-            <Row icon="T" label="텍스트 삽입" soon />
+            <Row icon="T" label="텍스트 삽입" onClick={() => openTextIns('basic')} tid="cx-text-ins" />
             <Row icon="☺" label="캐릭터 삽입" soon />
             <div className="vr-sep" />
             <Row icon="▭" label="빈 클립 삽입" soon />
