@@ -611,9 +611,22 @@ function coverImage(file, ctx, tr) {
  *   박스가 캔버스보다 작으면(한쪽이 모자람) = 맞추기(검정 띠 · 가운데) · 아니면 = 꽉 채우기(가운데 자르기).
  *   반전 = editInfo.flip(Vrew 형식). 옛 판은 이미지를 늘 꽉 채웠다 → 비율이 다른 그림이 .vrew 는 레터박스인데 MP4 는 잘렸다(이제 같다).
  */
+/** ➕ 삽입 그림·영상의 editInfo(Vrew 4.7.2 실측 {crop:'inset(..)', opacity:0~1, flip}) → { crop:{t,r,b,l}|null, opacity(기본 1), flip } — 읽기는 한 곳 */
+function editOf(tr) {
+  const e = (tr && tr.editInfo) || {};
+  const VL = require('./visual-look');
+  const op = Number(e.opacity);
+  return { crop: VL.parseInset(e.crop), opacity: Number.isFinite(op) ? Math.max(0, Math.min(1, op)) : 1 };
+}
+/** 자르기 → ffmpeg crop 필터(원본 비율 · 없으면 빈 문자열) */
+function cropFilter(c) {
+  if (!c) return '';
+  return `crop=iw*${(1 - c.l - c.r).toFixed(6)}:ih*${(1 - c.t - c.b).toFixed(6)}:iw*${c.l.toFixed(6)}:ih*${c.t.toFixed(6)},`;
+}
 /** 📐 화면 가운데에 놓인 「꽉 채우기 · 맞추기」 박스인가(그러면 예전 빠른 길 — 한 장을 캔버스에 맞춰 굽는다) */
 function isStandardBox(tr) {
   const t = tr || {};
+  if (editOf(t).crop || editOf(t).opacity < 1) return false;   // ➕ 삽입의 자르기·불투명도는 겹침 경로(한 장을 캔버스에 맞춰 굽는 빠른 길은 이 둘을 모른다)
   const x = +t.xPos || 0, y = +t.yPos || 0, w = typeof t.width === 'number' ? t.width : 1, h = typeof t.height === 'number' ? t.height : 1;
   const centered = Math.abs(x + w / 2 - 0.5) < 0.01 && Math.abs(y + h / 2 - 0.5) < 0.01;
   // 🎛 회전이 있거나 기본 8% 확대(1.08)보다 더 큰 박스(확대 효과)는 표준이 아니다 → 레이어 길(박스 크기로 굽고 얹는다 — 캔버스 밖은 잘린다)
@@ -625,13 +638,13 @@ function rotateFilter(deg) {
   return `,format=yuva420p,rotate=a=${rad}:ow=rotw(${rad}):oh=roth(${rad}):c=none`;
 }
 /** 겹칠 그림을 박스 크기로 한 번만 굽는다(반전 포함) */
-function boxImage(file, bw, bh, flip, ctx, rot = 0) {
+function boxImage(file, bw, bh, flip, ctx, rot = 0, crop = null) {
   ctx.boxes = ctx.boxes || new Map();
-  const key = [file, bw, bh, flip, rot].join('|');
+  const key = [file, bw, bh, flip, rot, crop ? JSON.stringify(crop) : ''].join('|');
   if (!ctx.boxes.has(key)) {
     const name = `box_${ctx.boxes.size}.png`;
     ctx.boxes.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
-      '-vf', `scale=${bw}:${bh}:flags=lanczos,setsar=1${flip}${rot ? rotateFilter(rot) : ''}`, '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
+      '-vf', `${cropFilter(crop)}scale=${bw}:${bh}:flags=lanczos,setsar=1${flip}${rot ? rotateFilter(rot) : ''}`, '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
   }
   return ctx.boxes.get(key);
 }
@@ -810,13 +823,15 @@ async function renderChunk(ch, i, ctx) {
       const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
       const lo = Math.max(0, Math.round((ch.f0 / FPS - l.t0) * FPS));   // 이 그림이 이 조각 전까지 보인 프레임 수
       const lt = Math.max(lo + frames, Math.round((l.tAll || 0) * FPS));
+      const ed = editOf(tr);
+      const opq = ed.opacity < 1 ? `,format=yuva420p,colorchannelmixer=aa=${ed.opacity.toFixed(4)}` : '';   // ➕ 삽입 불투명도 — 알파를 곱한다
       if (l.type === 'image') {
-        const png = await boxImage(l.file, bw, bh, flip, ctx, rot);
+        const png = await boxImage(l.file, bw, bh, flip, ctx, rot, ed.crop);
         ins.push('-i', png);
-        parts.push(`[${k + 1}:v]format=${(rot || /\.png$/i.test(l.file)) ? 'yuva420p' : 'yuv420p'},loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}[l${k}]`);
+        parts.push(`[${k + 1}:v]format=${(rot || /\.png$/i.test(l.file)) ? 'yuva420p' : 'yuv420p'},loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, lo, lt)}${opq}[l${k}]`);
       } else {
         ins.push(...videoInArgs(tr, lo / FPS), '-i', l.file);
-        parts.push(`[${k + 1}:v]scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600${rot ? rotateFilter(rot) : ',format=yuv420p'}[l${k}]`);
+        parts.push(`[${k + 1}:v]${cropFilter(ed.crop)}scale=${bw}:${bh}:flags=lanczos,setsar=1${flip},fps=${FPS},tpad=stop_mode=clone:stop_duration=3600${rot ? rotateFilter(rot) : ''}${opq || (rot ? '' : ',format=yuv420p')}[l${k}]`);
       }
       parts.push(`${prev}[l${k}]overlay=x=${bx}:y=${by}:eof_action=repeat${k === L.length - 1 ? '' : `[b${k}]`}`);
       prev = `[b${k}]`;

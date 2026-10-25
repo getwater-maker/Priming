@@ -175,7 +175,9 @@ class OmniVoiceProvider {
     try {
       response = await fetch(this.baseUrl + '/tts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        // ⏱ X-Client-Timeout = 이 앱이 기다리는 초(v0.9.113) — 서버는 그 안에 차례(GPU)가 안 오면 합성하지 않고 버린다.
+        //   예전엔 시간초과로 앱이 포기한 요청도 서버가 끝까지 만들어 재시도마다 쌓였다(2026-10-23 중단 뒤에도 「4건 처리 중」).
+        headers: { 'Content-Type': 'application/json', 'X-Client-Timeout': String(Math.round(this.timeout / 1000)), ..._authHeaders() },
         body: JSON.stringify(payload),
         signal: ctrl.signal,
       });

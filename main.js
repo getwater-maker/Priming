@@ -145,7 +145,7 @@ const LIC = {
   enforce: process.env.PM_LICENSE_FORCE === '1' || (app.isPackaged && !process.env.PM_UI_SMOKE),
   state: null, ready: null, L: null,
 };
-const LIC_OPEN = new Set(['license-state', 'license-login', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
+const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-google', 'license-google-cancel', 'license-products', 'license-open-url', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
 function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
 // 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
@@ -1149,6 +1149,7 @@ function txtWithHead(text, head) {
 // 📥 받기·전사(대본다운·STT)는 **자기 중단 플래그**를 쓴다(v0.5.104) — 제작(S.abort)과 공유하면 받기를 시작할 때 제작의 중단 요청이 풀리고,
 //   받기 패널의 ⏹ 가 돌고 있는 제작까지 멈췄다. 헤더 ■ 중단은 제작만 멈추고(제작이 없을 때만 받기도), 받기 패널 ⏹ 는 받기만 멈춘다.
 let _dlAbort = false, _dlActive = 0;
+let _lastDlRetry = { jobs: [], outDir: '' };   // 🔁 지난 URL 받기의 실패·남은 영상(「실패한 영상만 다시」 · v0.9.117)
 async function transcribeToTxt(file, opts = {}) {
   const media = require('./core/media-utils');
   const asr = require('./tts/asr-client');
@@ -1323,18 +1324,23 @@ ipcMain.handle('ytdlp-update', async (_e, args = {}) => {
 ipcMain.handle('stt-from-url', async (_e, args = {}) => {
   const MD = require('./core/media-download');
   const media = require('./core/media-utils');
-  const urls = (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
+  // 🔁 「실패한 영상만 다시」(v0.9.117 · 4K Video Downloader 의 Retry Download) — 지난 실행이 main 에 남긴 항목 그대로(폴더·[ID] 이름 유지)
+  //   ⚠ 화면에서 폴더 경로를 받지 않는다 — main 이 기억한 것만 쓴다
+  if (args.retryLast && _dlActive > 0) return { ok: false, error: '받기가 끝난 뒤 다시 받으세요' };
+  const retryJobs = args.retryLast ? _lastDlRetry.jobs.slice() : [];
+  if (args.retryLast && !retryJobs.length) return { ok: false, error: '다시 받을 실패 영상이 없습니다' };
+  const urls = retryJobs.length ? retryJobs.map((j) => j.url) : (args.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
   if (!urls.length) return { ok: false, error: '주소가 없습니다' };
 
   const mode = ['audio', 'video', 'both', 'subtitles'].includes(args.mode) ? args.mode : 'audio';
   const forceStt = !!args.forceStt;
   const doStt = mode !== 'subtitles' && args.stt !== false;
   const saveSubs = mode === 'subtitles' || !!args.saveSubs;
-  const channelMode = !!args.channel || !!args.playlist;
+  const channelMode = !retryJobs.length && (!!args.channel || !!args.playlist);
 
   // 저장 폴더 — ⚙ 설정 → 📁 폴더 「URL 받기」(모든 채널 공통 · 2026-10-14), 없으면 **윈도우 「다운로드」 폴더**,
   //   그마저 못 찾을 때만 그 자리에서 고르게 한다. (옛 채널별 downloadFolder 는 읽지 않는다)
-  let outDir = args.outDir || appFolder('download');
+  let outDir = args.outDir || (retryJobs.length && _lastDlRetry.outDir) || appFolder('download');
   if (!outDir) {
     const pick = await dialog.showOpenDialog(win, {
       title: '받은 파일을 저장할 폴더 선택 (채널편집 → 📁 폴더 에 지정해 두면 다음부터 안 묻습니다)',
@@ -1356,7 +1362,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     phase: 'prepare', total: 0, startedAt: Date.now(), outDir,
     dl: { done: 0, idx: 0, title: '', pct: 0, stage: '' },
     stt: { done: 0, pending: 0, cur: null },
-    sub: 0, skip: 0, fail: 0, fails: [], doStt, savedSubs: 0, subtitleMissing: 0,
+    sub: 0, skip: 0, fail: 0, fails: [], retry: [], doStt, savedSubs: 0, subtitleMissing: 0,
   };
   let _progT = 0, _progTimer = null;
   const sendProg = (now) => {
@@ -1368,9 +1374,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     if (_progTimer) return;
     _progTimer = setTimeout(fire, Math.max(0, 250 - (Date.now() - _progT)));
   };
-  const noteFail = (idx, title, error) => {
+  const noteFail = (idx, title, error, job) => {
     prog.fail++; prog.fails.push({ idx, title: title || '', error: String(error || '').slice(0, 160) });
     if (prog.fails.length > 30) prog.fails.shift();
+    // 🔁 다시 받을 항목은 잘라내지 않고 모두 기억한다(화면 목록은 30줄만 보여도)
+    if (job && job.url) prog.retry.push({ url: job.url, id: job.id || '', title: title || job.title || '', outDir: job.outDir || '', idName: !!job.idName });
   };
   sendProg(true);
 
@@ -1399,28 +1407,20 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           const channel = await MD.listChannelVideos(channelUrl, { tool, playlist: !!args.playlist, abortSignal: () => _dlAbort, onLog: log });
           const channelDir = path.join(outDir, MD.safeFolderName(channel.title));
           log(`  ✓ 「${channel.title}」 일반 영상 ${channel.entries.length}개 · 저장 ${channelDir}`);
-          for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir });
+          for (const entry of channel.entries) jobs.push({ ...entry, channelTitle: channel.title, outDir: channelDir, idName: true });
         } catch (e) {
           log(`  ✗ 채널 목록 실패: ${e.message}`);
           results.push({ url: channelUrl, ok: false, error: e.message });
         }
       }
-      // 🔴 채널 전체는 편수를 보여 주고 한 번 묻는다(2026-09-26) — 「📋 링크 붙여넣기」는 누르자마자 시작하고,
-      //   체크가 켜진 채 영상 주소를 붙여넣으면 그 채널 전체(실측 505편)가 확인 없이 시작됐다.
-      if (jobs.length && !_dlAbort && !process.env.PM_UI_SMOKE) {
+      // ⛔ 「N편 받기 / 취소」 확인 팝업은 없앴다(v0.9.118 · 로이 2026-10-24) — 편수는 로그로 알리고 바로 시작한다 · 멈추려면 📥 창·진행 패널의 ⏹ 중단
+      if (jobs.length && !_dlAbort) {
         const names = [...new Set(jobs.map((j) => j.channelTitle))].join(' · ');
-        const ans = await dialog.showMessageBox(win, {
-          type: 'question', buttons: [`${jobs.length}편 받기`, '취소'], defaultId: 1, cancelId: 1,
-          title: args.playlist ? '재생목록 전체 받기' : '채널 전체 받기',
-          message: `「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'}.`,
-          detail: '이미 전사한 영상은 건너뜁니다. 한 편만 받으려면 취소하고 「채널 전체」 체크를 끄세요.',
-        });
-        if (ans.response !== 0) {
-          log('⏹ 채널 전체 받기 취소');
-          prog.phase = 'done'; prog.okN = 0; prog.endedAt = Date.now(); sendProg(true);
-          return { ok: false, canceled: true };
-        }
+        log(`📺 「${names}」 일반 영상 ${jobs.length}편을 받${doStt ? '아 전사합니다' : '습니다(전사 안 함)'} — 이미 끝난 영상은 건너뜁니다`);
       }
+    } else if (retryJobs.length) {
+      for (const j of retryJobs) jobs.push({ ...j, outDir: j.outDir || outDir });
+      log(`🔁 실패한 영상 ${jobs.length}편만 다시 받습니다`);
     } else {
       for (const url of urls) jobs.push({ url, id: '', title: '', outDir });
     }
@@ -1459,7 +1459,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         } catch (e) {
           log(`  ✗ ${t.label} 전사 실패: ${e.message}`);
           slots[i] = { url: t.done.url, ok: false, error: e.message };
-          noteFail(i + 1, t.done.title, '전사 실패: ' + e.message);
+          noteFail(i + 1, t.done.title, '전사 실패: ' + e.message, jobs[i]);
         } finally {
           sttPending--;
           prog.stt.cur = null; prog.stt.pending = sttPending; sendProg(true);
@@ -1467,18 +1467,47 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
       });
     };
 
+    // 🐢 여러 편(채널·재생목록·주소 여러 줄)은 유튜브에 몰아치지 않는다(v0.9.116 · 2026-10-24 48편째에 429)
+    //   ① 이미 전사한 영상은 유튜브에 묻지 않고 건너뛴다 ② 정보 확인 결과로 받는다(같은 영상 두 번 묻지 않음)
+    //   ③ 요청·영상 사이 쉼 ④ 그래도 막히면 실패로 넘기지 않고 쉬었다 같은 영상부터 — 계속 막히면 멈춘다
+    const paced = jobs.length > 1;
+    const BLOCK_PAUSE_MIN = [3, 10, 20];
+    let blockedRun = 0, touched = false;
+    // 🧪 E2E 만 대기를 줄인다(PM_UI_SMOKE + global.__dlWaitScale = 1초당 ms · 0 = 바로)
+    const waitScale = process.env.PM_UI_SMOKE && global.__dlWaitScale != null ? global.__dlWaitScale : null;
+    const dlSleep = async (ms) => { if (waitScale != null) ms = ms * waitScale / 1000; const end = Date.now() + ms; while (Date.now() < end && !_dlAbort) await new Promise((res) => setTimeout(res, Math.min(500, end - Date.now()))); };
     for (let i = 0; i < jobs.length; i++) {
       if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
       const job = jobs[i];
       const url = job.url;
       const itemOutDir = job.outDir || outDir;
       const tag = `[${i + 1}/${jobs.length}]`;
+      // ↷ 받기 전 검사(pre-check) — 이미 끝난 영상은 유튜브에 묻지 않는다. 전사 = `[id].txt` · 받기만 = 그 형식의 `[id].<확장자>`
+      const doneMark = job.idName && job.id && !saveSubs
+        ? (doStt ? ['.txt'] : mode === 'audio' ? ['.' + (args.audioFormat === 'm4a' ? 'm4a' : 'mp3')] : mode === 'video' ? ['.mp4', '.mkv', '.webm'] : null)
+        : null;
+      if (doneMark) {
+        let doneFile = null;
+        try { doneFile = fs.readdirSync(itemOutDir).find((f) => doneMark.some((ext) => f.endsWith(`[${job.id}]${ext}`))); } catch (_) {}
+        if (doneFile) {
+          log(`  ↷ ${tag} 이미 완료됨: ${doneFile}`);
+          prog.skip++; prog.dl.done++; sendProg();
+          const full = path.join(itemOutDir, doneFile);
+          slots[i] = doStt ? { url, ok: true, title: job.title || '', txt: full, from: 'existing', subtitles: [] }
+            : { url, ok: true, title: job.title || '', audio: mode === 'audio' ? full : null, video: mode === 'video' ? full : null, from: 'existing', subtitles: [] };
+          continue;
+        }
+      }
+      if (paced && touched) await dlSleep(3000 + Math.random() * 4000);
+      if (_dlAbort) { log('⏹ 중단됨 — 새로 받지 않습니다'); break; }
+      touched = true;
       log(`🔗 ${tag} 받기: ${job.title || url}`);
       prog.dl = { done: prog.dl.done, idx: i + 1, title: job.title || url, pct: 0, stage: 'probe' }; sendProg(true);
+      const infoJsonFile = path.join(os.tmpdir(), `priming-info-${process.pid}-${i}.json`);
       try {
         // 🔑 비메오는 `vimeo.com/<번호>` 가 로그인을 요구한다 → 플레이어 주소로 한 번 더 시도한다.
         //    받을 때도 **성공한 그 주소**를 써야 한다(probe 만 바꾸면 다운로드가 또 막힌다).
-        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log });
+        const pr0 = await MD.probeSmart(url, { tool, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced, _waitScale: waitScale });
         const info = pr0.info;
         const dlUrl = pr0.url;
         const mmss = `${Math.floor(info.duration / 60)}분 ${Math.round(info.duration % 60)}초`;
@@ -1492,10 +1521,11 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           tool, mode, subs: wantSubs, outDir: itemOutDir, language: info.language,
           audioFormat: args.audioFormat, quality: args.quality, subtitleTrack: args.subtitleTrack,
           subtitleLanguage: saveSubs ? MD.selectSubtitleLanguage(info, args.subtitleLanguage, args.subtitleTrack) : 'original', requireSubs: mode === 'subtitles',
-          filenameWithId: channelMode, mediaId: channelMode ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
-          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log,
+          filenameWithId: !!job.idName, mediaId: job.idName ? (job.id || info.id) : '',  // ⚠ 단일 URL 은 파일명에 [ID] 가 없다 — ID 로 찾으면 받은 파일을 못 찾는다
+          ffmpegDir: ffDir, abortSignal: () => _dlAbort, onLog: log, infoJsonFile, paced, _waitScale: waitScale,
           onProgress: (p) => { prog.dl.pct = p.pct; prog.dl.stage = p.stage; sendProg(); },
         });
+        blockedRun = 0;
         prog.dl.done++; prog.dl.pct = 100; prog.dl.stage = 'done'; sendProg(true);
 
         const mediaFile = r.audio || r.video;
@@ -1505,7 +1535,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
         const outTxt = base + '.txt';
 
         let txtFrom = null;
-        if (channelMode && r.reused && fs.existsSync(outTxt)) {
+        if (job.idName && r.reused && fs.existsSync(outTxt)) {
           log(`  ↷ 이미 완료됨: ${path.basename(outTxt)}`);
           txtFrom = 'existing';
           prog.skip++;
@@ -1543,9 +1573,30 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
           slots[i] = done;
         }
       } catch (e) {
+        if (paced && !_dlAbort && MD.isBlocked(e)) {
+          const rawLine = String(e.raw || '').split('\n').filter((l) => /ERROR/.test(l)).pop();
+          if (rawLine) log(`  ⓘ 원문: ${rawLine.slice(0, 200)}`);
+          if (blockedRun < BLOCK_PAUSE_MIN.length) {
+            const min = BLOCK_PAUSE_MIN[blockedRun++];
+            log(`  ⏳ 유튜브가 요청이 많다며 막았습니다 — 실패로 넘기지 않고 ${min}분 쉬었다 이 영상부터 다시 받습니다(${blockedRun}/${BLOCK_PAUSE_MIN.length})`);
+            prog.dl.stage = 'wait'; prog.dl.waitUntil = Date.now() + min * 60000; sendProg(true);
+            await dlSleep(min * 60000);
+            prog.dl.waitUntil = 0;
+            i--; continue;
+          }
+          log(`  ⏹ 유튜브가 계속 막고 있어 여기서 멈춥니다 — ${jobs.length - i}편 남음 · 몇 시간 뒤 같은 채널을 다시 돌리면 받은 영상은 건너뛰고 이어서 받습니다`);
+          slots[i] = { url, ok: false, error: e.message };
+          noteFail(i + 1, prog.dl.title, e.message, jobs[i]);
+          // 멈춘 뒤 남은 영상도 「실패한 영상만 다시」에 함께 싣는다(실패 수에는 넣지 않음)
+          for (const rest of jobs.slice(i + 1)) prog.retry.push({ url: rest.url, id: rest.id || '', title: rest.title || '', outDir: rest.outDir || '', idName: !!rest.idName });
+          sendProg(true);
+          break;
+        }
         log(`  ✗ 실패: ${e.message}`);
         slots[i] = { url, ok: false, error: e.message };
-        noteFail(i + 1, prog.dl.title, e.message); sendProg(true);
+        noteFail(i + 1, prog.dl.title, e.message, jobs[i]); sendProg(true);
+      } finally {
+        try { fs.rmSync(infoJsonFile, { force: true }); } catch (_) {}
       }
     }
     prog.dl.idx = 0; prog.dl.stage = ''; prog.phase = _dlAbort ? 'aborting' : (sttPending ? 'stt-only' : 'running');
@@ -1557,6 +1608,7 @@ ipcMain.handle('stt-from-url', async (_e, args = {}) => {
     const okN = results.filter((x) => x.ok).length;
     const subN = results.filter((x) => x.from === 'subtitle').length;
     log(`🔗 완료: 성공 ${okN}/${results.length}${subN ? ` (자막 ${subN}건은 STT 생략)` : ''}`);
+    _lastDlRetry = { jobs: prog.retry.slice(), outDir };
     prog.phase = _dlAbort ? 'aborted' : 'done'; prog.okN = okN; prog.endedAt = Date.now(); sendProg(true);
     if (okN) { try { shell.openPath(outDir); } catch {} }
     return { ok: true, results, outDir };
@@ -4083,10 +4135,45 @@ const isComfyVal = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') ==
 const comfyWfOf = (v) => (String(v || '').indexOf('comfy::') === 0 ? String(v).slice(7) : '');
 
 // ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy[::경로]' 일 때. 워크플로 JSON(API 포맷) 필요.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {
+// 👑 🖥 로컬 Qwen-Image 2.1(관리자 전용 · v0.9.109) — 설정 파일의 클라우드/로컬 값과 무관하게 이 PC 의 ComfyUI 로 보낸다(설정 파일은 바꾸지 않는다)
+function _forceLocalComfy(cfg) {
+  cfg.cloud = false;
+  cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
+  return cfg;
+}
+// 번들 Qwen 워크플로 — 설정에 등록된 경로가 있으면 그것, 없으면 앱 폴더의 comfy/image_qwen21_turbo.json
+function _localQwenWfPath(cfg) {
+  const wf = ((cfg && cfg.workflows) || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
+  return wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+}
+// 🛑 로컬 Qwen 그림이 끝나면 ComfyUI 서버를 끈다(v0.9.111 · 로이 2026-10-23 — /free 뒤에도 RAM 약 11GB 를 쥐어 다음 대본 TTS 가 시간초과)
+//   그림 단계 전체(onlyNums 없음) = 끝나자마자 · 그룹 몇 개만 다시 그리기 = 3분 쉬면 끈다(연달아 고칠 때마다 1분씩 다시 켜지 않게)
+//   중단·실패여도 끈다(finally) · 다른 로컬 Qwen 작업이 돌고 있으면 끄지 않는다.
+let _localQwenActive = 0, _localQwenStopTimer = null;
+const LOCAL_QWEN_IDLE_STOP_MS = 3 * 60 * 1000;
+async function _stopLocalQwenComfy(logger) {
+  if (_localQwenActive) return;
+  try {
+    const cfg = _forceLocalComfy(require('./core/comfy-image').loadConfig());
+    await require('./core/comfy-launch').stopLocalComfy({ baseUrl: cfg.baseUrl, log: logger || log });
+  } catch (e) { (logger || log)('  ⚠ ComfyUI 서버 끄기 오류 — ' + e.message); }
+}
+async function _withLocalQwenStop(onlyNums, logger, fn) {
+  if (_localQwenStopTimer) { clearTimeout(_localQwenStopTimer); _localQwenStopTimer = null; }
+  _localQwenActive++;
+  try { return await fn(); } finally {
+    _localQwenActive--;
+    if (!_localQwenActive) {
+      if (onlyNums && onlyNums.length) _localQwenStopTimer = setTimeout(() => { _localQwenStopTimer = null; _stopLocalQwenComfy(log); }, LOCAL_QWEN_IDLE_STOP_MS);
+      else await _stopLocalQwenComfy(logger);
+    }
+  }
+}
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false, forceLocal = false) {
   require('./core/visual-span').markCovered(project, hasVisual);
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
+  if (forceLocal) _forceLocalComfy(cfg);
   if (workflowPath) cfg.workflowPath = workflowPath;   // 드롭다운이 모델(워크플로)까지 지정한 경우 — 비디오와 동일
   if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 워크플로(API 포맷 JSON)를 지정하세요.'); return; }
   const eng = new CI.ComfyImage(cfg, logger);
@@ -4110,7 +4197,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
       for (const w of d.warnings) logger('  ' + w);
     } catch (_) {}
   }
-  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성', logger);   // 이 GPU 에서 TTS 중이면 대기(2단계)
+  if (!cfg.cloud) await awaitForeignTtsIdle('로컬 이미지 생성', logger, { untilDone: forceLocal });   // 이 GPU 에서 TTS 중이면 대기(2단계 · 👑 로컬 Qwen 은 끝까지 — v0.9.111)
   if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   // ── 동시 생성(클라우드만) ── 한 장씩 순차면 업로드·폴링·다운로드 동안 GPU 가 놀아 장당 12~18초(서버 실측 5~6초).
   //   여러 장을 큐에 함께 넣어 GPU 를 쉬지 않게 한다. 로컬은 VRAM 때문에 항상 1장씩.
@@ -4691,6 +4778,16 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   }
   if (startEngine === 'flow') { logger('⏭ Flow 이미지는 삭제됐습니다(v0.9.67) — 헤더 「② 이미지」에서 다른 도구를 고르세요'); return; }
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
+  // 👑 🖥 로컬 Qwen-Image 2.1 — 관리자만(회원이면 AI 이미지로 · 값이 회원 PC 에 들어와도 로컬 GPU 를 찾지 않게)
+  if (require('./core/engine-migrate').isLocalQwen(startEngine)) {
+    if (isOwner()) {
+      const CI = require('./core/comfy-image');
+      if (!fs.existsSync(_localQwenWfPath(CI.loadConfig()))) { logger('⚠ 🖥 로컬 Qwen-Image 2.1 워크플로를 찾지 못했습니다'); return; }
+      return _withLocalQwenStop(onlyNums, logger, () => runComfyImages(project, imagesDir, logger, styleId, onlyNums, _localQwenWfPath(CI.loadConfig()), retryLevel, force, true));
+    }
+    startEngine = require('./core/engine-migrate').IMG_DEFAULT;
+    logger('🔁 🖥 로컬 Qwen-Image 2.1 은 관리자 전용입니다 → AI 이미지로 만듭니다');
+  }
   if (require('./core/kie-models').isKieVal(startEngine)) return runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
   const Rot = require('./core/image-rotation');
@@ -5973,6 +6070,93 @@ ipcMain.handle('list-thumbs', async () => {
   if (!files.length) files = await TF.findThumbs(root, '', 3, true);
   return { ok: true, key, root, files, msg: files.length ? '' : '선택한 폴더에 이미지가 없습니다 (PNG · JPG · WebP)' };
 });
+// 🖼 썸네일 편집기(v0.9.102 · 로이 2026-10-23 · 설계 docs/썸네일-편집기-설계.md) — 읽기: 바탕·패키징 문구·사이드카 / 쓰기: 완성본 폴더(기존 파일은 _캔바원본\\ 으로 보존)뿐
+let _thumbEditOk = new Set();   // 이번에 편집기가 열어 준 그림 경로(렌더러가 임의 파일을 읽지 못하게)
+ipcMain.handle('thumb-edit-open', async () => {
+  const TE = require('./core/thumb-edit'), PK = require('./core/yt-packaging');
+  const sp = S.scriptPath, key = TE.keyOf(sp), root = thumbRoot();
+  if (!sp || !key) return { ok: false, msg: '대본 이름 앞에 [약칭_MMDD] 가 있어야 썸네일을 찾을 수 있습니다' };
+  if (!root || !fs.existsSync(root)) return { ok: false, msg: '썸네일 폴더가 없습니다 — ⚙ 설정 → 📁 폴더에서 고르세요' };
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) return { ok: false, msg: `「${key}」 썸네일 완성본을 찾지 못했습니다(저장할 폴더를 알 수 없어 편집기를 열지 않습니다)` };
+  let pack = {};
+  const pf = PK.findPackagingFile(sp);
+  if (pf) { try { pack = TE.parseThumbText(await fs.promises.readFile(pf, 'utf8')); } catch (_) {} }
+  const codex = TE.findCodexBases(path.dirname(root), key);
+  const side = fin.sidecar ? TE.readSidecar(fin.sidecar) : null;
+  _thumbEditOk = new Set();
+  const ans = {};
+  for (const a of TE.AN) {
+    const final = fin.finals[a] || null;
+    const bg = fin.bgs[a] || codex[a] || null, bgKind = fin.bgs[a] ? 'canva' : codex[a] ? 'codex' : null;
+    if (final) _thumbEditOk.add(final);
+    if (bg) _thumbEditOk.add(bg);
+    const e = side && side.안 && side.안[a];
+    ans[a] = { final, finalName: final ? path.basename(final) : `${key} 썸네일_${a}.png`, bg, bgKind, packLines: pack[a] || [], lines: e ? TE.linesFromSidecar(e) : (pack[a] || []), size: e ? TE.sizeFromSidecar(e.크기, side.캔버스) : 0, cell: e ? TE.normCell(e.자리) : '', edited: !!(e && e.로이수정), fromSidecar: !!e, font: e && e.편집기글꼴 ? String(e.편집기글꼴) : '', bold: e && e.편집기굵기 != null ? Number(e.편집기굵기) : null };
+  }
+  log(`🖼 썸네일 편집기 열기 — ${key} · 완성본 폴더 ${path.basename(fin.dir)}${pf ? '' : ' · ⚠ 패키징 파일 없음(문구를 직접 적으세요)'}`);
+  return { ok: true, key, dir: fin.dir, packaging: !!pf, an: ans };
+});
+// 편집기가 쓸 그림 한 장(data URL — media:// 는 캔버스를 오염시켜 내보낼 수 없다) · 열어 준 경로만
+ipcMain.handle('thumb-edit-image', async (_e, p) => {
+  if (!_thumbEditOk.has(p)) return null;
+  try { const buf = await fs.promises.readFile(p); const ext = path.extname(p).slice(1).toLowerCase(); return `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,` + buf.toString('base64'); } catch (_) { return null; }
+});
+ipcMain.handle('thumb-edit-save', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), { writeTextAtomicSync } = require('./core/atomic-write');
+  const root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) throw new Error('썸네일 위치를 알 수 없습니다');
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) throw new Error('완성본 폴더를 찾지 못했습니다');
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const buf = Buffer.from(a.png);
+  const r = TE.saveFinal(fin.dir, fileName, buf);
+  const scFile = TE.sidecarPath(fin.dir, key);
+  const cur = TE.readSidecar(scFile) || { 편: key.replace(/^\[|\]$/g, ''), 캔버스: TE.W, 안: {} };
+  cur.안 = cur.안 || {};
+  // 사이드카가 1920 기준(다산)이었다면 이미 1280 기준으로 바뀐 값을 쓰므로 캔버스도 1280 으로 맞춘다 — 다른 안의 크기도 같은 기준으로 환산해 둔다
+  const oldCanvas = Number(cur.캔버스) > 0 ? Number(cur.캔버스) : TE.W;
+  if (oldCanvas !== TE.W) for (const k of Object.keys(cur.안)) if (k !== a.an && cur.안[k] && cur.안[k].크기) cur.안[k].크기 = TE.sizeFromSidecar(cur.안[k].크기, oldCanvas);
+  cur.캔버스 = TE.W;
+  const prevEntry = cur.안[a.an] ? JSON.parse(JSON.stringify(cur.안[a.an])) : null;
+  cur.안[a.an] = TE.sidecarEntry({ lines: a.lines, size: a.size, cell: a.cell, font: a.font || '', bold: a.bold, edited: !!a.edited }, cur.안[a.an]);
+  // 보존한 이전 파일에 「그 버전 때의 문구 기록」을 딸려 둔다 — 이전 버전으로 되돌릴 때 사이드카도 함께 되돌리려고
+  if (r.preserved && prevEntry) { try { fs.writeFileSync(TE.snapshotFile(r.preserved), JSON.stringify({ 캔버스: oldCanvas, 항목: prevEntry }, null, 2), 'utf8'); } catch (_) {} }
+  try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 썼습니다: ${e.message}`); }
+  log(`🖼 썸네일 ${a.an} 저장 — ${fileName} (${(buf.length / 1024).toFixed(0)}KB)${r.preserved ? ' · 이전 파일은 _캔바원본 에 보존' : ''}${a.edited ? ' · 문구 수정(사이드카에 로이수정 표시)' : ''}`);
+  return { ok: true, saved: r.saved, preserved: r.preserved, bytes: buf.length };
+});
+// 🖼 이전 버전(`_캔바원본\\` 보존본) 목록 · 되돌리기 — 되돌릴 때도 지금 완성본은 먼저 보존한다(잃지 않는다)
+ipcMain.handle('thumb-edit-versions', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) return { ok: false, versions: [] };
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) return { ok: false, versions: [] };
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const versions = TE.listVersions(fin.dir, fileName);
+  for (const v of versions) _thumbEditOk.add(path.join(fin.dir, TE.VERSION_DIR, v.name));
+  return { ok: true, versions: versions.map((v) => ({ ...v, path: path.join(fin.dir, TE.VERSION_DIR, v.name) })) };
+});
+ipcMain.handle('thumb-edit-restore', async (_e, a = {}) => {
+  const TE = require('./core/thumb-edit'), { writeTextAtomicSync } = require('./core/atomic-write');
+  const root = thumbRoot(), key = TE.keyOf(S.scriptPath);
+  if (!root || !key || !TE.AN.includes(a.an)) throw new Error('썸네일 위치를 알 수 없습니다');
+  const fin = TE.findFinalAssets(root, key);
+  if (!fin.dir) throw new Error('완성본 폴더를 찾지 못했습니다');
+  const fileName = fin.finals[a.an] ? path.basename(fin.finals[a.an]) : `${key} 썸네일_${a.an}.png`;
+  const r = TE.restoreVersion(fin.dir, fileName, String(a.name || ''));
+  // 사이드카도 그 버전 때로 — 문구 기록이 있으면 그것으로, 없으면 이 안의 항목을 지운다(PNG 와 다른 글이 남지 않게)
+  const scFile = TE.sidecarPath(fin.dir, key), cur = TE.readSidecar(scFile);
+  if (cur && cur.안 && cur.안[a.an] !== undefined) {
+    let snap = null; try { snap = JSON.parse(fs.readFileSync(TE.snapshotFile(r.from), 'utf8')); } catch (_) {}
+    if (snap && snap.항목) { const e = snap.항목; if (e.크기 && Number(snap.캔버스) > 0 && Number(snap.캔버스) !== TE.W) e.크기 = TE.sizeFromSidecar(e.크기, snap.캔버스); cur.안[a.an] = e; }
+    else delete cur.안[a.an];
+    cur.캔버스 = TE.W;
+    try { writeTextAtomicSync(scFile, JSON.stringify(cur, null, 2)); } catch (e) { log(`⚠ 썸네일 사이드카를 못 되돌렸습니다: ${e.message}`); }
+  }
+  log(`🖼 썸네일 ${a.an} 이전 버전으로 되돌림 — ${a.name}${r.preserved ? ' · 되돌리기 전 파일은 _캔바원본 에 보존' : ''}`);
+  return { ok: true, restored: r.restored };
+});
 ipcMain.handle('get-preset-detail', (_e, name) => {
   const all = require('./tts/preset-store').loadAll();
   const p = all.find((x) => x.name === name) || null;
@@ -6722,10 +6906,8 @@ ipcMain.handle('style-sample-make', async (_e, { ids = null, force = false } = {
     .filter((s) => force || !_faceFiles(STYLE_SAMPLE_ENGINE)[s.id]);
   if (!want.length) return { ok: true, made: 0, failed: 0, note: '그릴 스타일이 없습니다(이미 샘플이 있음)' };
   const cfg = CI.loadConfig();
-  cfg.cloud = false;
-  cfg.baseUrl = cfg.localBaseUrl || 'http://127.0.0.1:8188';
-  const wf = (cfg.workflows || []).find((w) => /image_qwen21_turbo\.json$/i.test(String(w.path || ''))) || null;
-  cfg.workflowPath = wf ? wf.path : path.join(__dirname, 'comfy', 'image_qwen21_turbo.json');
+  _forceLocalComfy(cfg);
+  cfg.workflowPath = _localQwenWfPath(cfg);
   if (!fs.existsSync(cfg.workflowPath)) return { ok: false, error: 'Qwen-Image 2.1 워크플로를 찾지 못했습니다' };
   _styleSampleBusy = true; S.abort = false;
   let made = 0, failed = 0; const errs = [];
@@ -7822,9 +8004,7 @@ async function runMakeAllBody(opts = {}) {
   //     예전엔 `noLocalGpuImg = true` 로 **하드코딩**돼 있어 로컬 이미지를 골라도 병렬로 돌았다.
   //   ⚠ 이 함수에서 **이미지 엔진 변수명은 `engine`** 이다(비디오는 `videoEngine`). `imgEngine` 으로 쓰면
   //     런타임 ReferenceError 가 나고 큐 7개가 전부 "imgEngine is not defined" 로 죽는다(2026-08-20 실사고).
-  const _imgLocalGpu = isComfyVal(engine) && (() => {
-    try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
-  })();
+  const _imgLocalGpu = _imgUsesLocalGpu(engine);   // 판정 한 곳(👑 로컬 Qwen 포함 · v0.9.109)
   const canParallel = !dry && !_imgLocalGpu;
 
   // ── 3단계 파이프라인 조건 ──
@@ -8355,7 +8535,18 @@ ipcMain.handle('abort', () => {
   clearGeneratingStatus();
   pushDtoUpdate();
   log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
+  if (_localQwenActive) _abortLocalQwenComfy();   // 🛑 로컬 Qwen 이 그리는 중 — ComfyUI 에 넘긴 그림까지 멈추고 서버를 끈다(v0.9.112 · 기다리지 않는다)
 });
+// ⏹ 로컬 Qwen 중단 — 멈춤 신호 + 대기열 비우기 → 서버 끄기(force — 큐에 남은 건 우리 작업). 남의 PC 작업은 로컬 Qwen 이 그리는 동안 이 서버에 없다(localGpu 레인).
+async function _abortLocalQwenComfy() {
+  try {
+    const CL = require('./core/comfy-launch');
+    const baseUrl = _forceLocalComfy(require('./core/comfy-image').loadConfig()).baseUrl;
+    const r = await CL.interruptLocalComfy({ baseUrl });
+    if (r.interrupted) log('  ⏹ 로컬 ComfyUI — 멈춤 신호를 보내고 대기열을 비웠습니다');
+    await CL.stopLocalComfy({ baseUrl, log, force: true });
+  } catch (e) { log('  ⚠ 로컬 ComfyUI 중단 오류 — ' + e.message); }
+}
 
 // ⏸ 이번 편까지만 — 큐 순차 제작이 지금 만드는 대본을 끝까지 마친 뒤 멈추게 예약/취소(on=false). ■ 중단과 달리 만들던 건 그대로 끝낸다.
 ipcMain.handle('stop-after-item', (_e, on) => {
@@ -8713,6 +8904,7 @@ function _runOnLanes(lanes, label, fn) {
 }
 // 이미지 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI 이면서 클라우드가 아닐 때만 참.
 function _imgUsesLocalGpu(engine) {
+  if (require('./core/engine-migrate').isLocalQwen(engine)) return isOwner();   // 👑 로컬 Qwen = 늘 이 PC GPU(회원은 AI 이미지로 돈다)
   if (!isComfyVal(engine)) return false;
   try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
 }
@@ -8739,7 +8931,8 @@ function enqueueImageJob(label, fn, engine) {
 //   ⚠ **구버전 서버면 404/401 이 온다 → 그냥 진행**(fail-open). 서버를 재시작하기 전까지는 무동작.
 //   ⚠ 전제: 이 집 구성은 **GPU 머신이 하나**다. ComfyUI 가 로컬(비클라우드)이면 그 GPU 의 TTS 를 기다린다.
 const FOREIGN_TTS_WAIT_MS = 10 * 60 * 1000;   // 10분 — 넘으면 경고만 남기고 진행
-async function awaitForeignTtsIdle(label, logger) {
+// untilDone = 10분 상한 없이 음성이 끝날 때까지(👑 로컬 Qwen · v0.9.111 — 10분 뒤 억지로 겹쳐 돌리자 그림 장당 26초→60~78초 · RAM 이 넘쳐 TTS 도 시간초과) · ⏹ 중단이면 멈춘다
+async function awaitForeignTtsIdle(label, logger, { untilDone = false } = {}) {
   const say = typeof logger === "function" ? logger : log;
   let base = "";
   let headers = {};
@@ -8752,7 +8945,9 @@ async function awaitForeignTtsIdle(label, logger) {
   if (!base) return;
   const t0 = Date.now();
   let waited = false;
-  while (Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
+  let lastNote = Date.now();
+  while (untilDone || Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
+    if (untilDone && S.abort) { say("  ⏹ " + label + " — 중단됨(음성 대기 중)"); return; }
     let n = 0;
     try {
       const r = await fetch(base + "/busy", { headers, signal: AbortSignal.timeout(4000) });
@@ -8767,7 +8962,10 @@ async function awaitForeignTtsIdle(label, logger) {
     }
     if (!waited) {
       waited = true;
-      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지");
+      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지" + (untilDone ? " (끝까지 기다림)" : ""));
+    } else if (untilDone && Date.now() - lastNote >= 5 * 60 * 1000) {
+      lastNote = Date.now();
+      say("  ⏳ " + label + " — 아직 음성 변환 중(" + n + "건 · " + Math.round((Date.now() - t0) / 60000) + "분째) · 끝까지 기다립니다");
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
@@ -8999,7 +9197,7 @@ function _captureState(label, opts = {}) {
   const st = { label, at: Date.now(), projects: [], media: [] };
   for (const pr of S.parsed.projects) {
     // 편 단위 설정도 함께(AI 고지 범위 등) — 안 담으면 그 변경은 되돌려지지 않는다
-    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null })), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
+    st.projects.push({ shortsNum: pr.shortsNum, groups: pr.groups.map(_cloneObj), sentences: pr.sentences.map(_cloneObj), aiNoticeRange: pr.aiNoticeRange ? { ...pr.aiNoticeRange } : null, overlays: (pr.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o)), logoSide: pr.logoSide || null, logoPos: pr.logoPos ? { ...pr.logoPos } : null, logoOver: pr.logoOver ? { ...pr.logoOver } : null, capAll: pr.capAll ? { ...pr.capAll } : null });
     const mdir = shortsDirs(S.outRoot, pr.shortsNum).media;
     for (const g of pr.groups) for (const k of ['imagePath', 'videoPath']) {
       const f = g[k]; if (!f || !_inDir(f, mdir)) continue;
@@ -9044,7 +9242,7 @@ function _restoreState(st) {
     pr.groups = sp.groups.map(_cloneObj);
     pr.sentences = sp.sentences.map(_cloneObj);
     pr.aiNoticeRange = sp.aiNoticeRange ? { ...sp.aiNoticeRange } : undefined;
-    pr.overlays = (sp.overlays || []).map((o) => ({ ...o, box: o.box ? { ...o.box } : null }));
+    pr.overlays = (sp.overlays || []).map((o) => require('./core/overlay-layers').cloneOv(o));
     pr.logoSide = sp.logoSide || undefined;
     if (sp.logoPos) pr.logoPos = { ...sp.logoPos }; else delete pr.logoPos;
     if (sp.logoOver) pr.logoOver = { ...sp.logoOver }; else delete pr.logoOver;
@@ -9772,7 +9970,7 @@ ipcMain.handle('text-png-save', (_e, args = {}) => {
 });
 ipcMain.handle('overlay-op', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
-  const OL = require('./core/overlay-layers');
+  const OL = require('./core/overlay-layers'); const VL = require('./core/visual-look');
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
   if (!pr) throw new Error('편을 찾을 수 없습니다.');
   const list = pr.overlays || (pr.overlays = []);
@@ -9781,6 +9979,15 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
   const rangeTxt = (ids) => { const r = OL.rangeOf(pr, ids); const n = pr.sentences.length; if (!r) return '?';
     if (r.a === 0 && r.b === n - 1 && !(ids.sc > 0) && ids.ec == null) return '전체';
     return `문장 ${r.a + 1}${ids.sc > 0 ? `(${ids.sc}자~)` : ''}~${r.b + 1}${ids.ec != null ? `(~${ids.ec}자 줄)` : ''}`; };
+  // 🖼 원본 크기(w×h px) — 자르기·꽉 채우기를 ① 칸·.vrew·MP4 가 같은 비율로 계산하려면 필요(없는 옛 삽입은 모양을 만질 때 채운다)
+  const ensureDim = async (ov, force) => {
+    if (ov.kind === 'audio' || (!force && ov.dim && ov.dim.w > 0)) return;
+    try {
+      if (ov.kind === 'image') { const z = require('./vrew/vrew-builder').readImageSize(ov.file); ov.dim = z && z.w > 0 ? { w: z.w, h: z.h } : undefined; }
+      else { const m = await require('./core/media-utils').getMediaInfo(ov.file); ov.dim = m && m.width > 0 ? { w: m.width, h: m.height } : undefined; }
+    } catch (_) { ov.dim = undefined; }
+    if (!ov.dim) delete ov.dim;
+  };
   if (op === 'add') {
     let file = args.file;
     if (!file) {
@@ -9804,7 +10011,7 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       fs.copyFileSync(file, dst);
     } catch (e) { dst = file; log('⚠ 삽입 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
     undoPush('삽입');
-    { const ov = { id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}) }; OL.applyIds(ov, ids); list.push(ov); }
+    { const ov = { id, file: dst, name: path.basename(file), kind, box: null, ...(kind === 'audio' ? { volume: OL.normVol(args.volume) } : kind === 'video' ? { volume: OL.volOfVideo(args.volume) } : {}) }; OL.applyIds(ov, ids); await ensureDim(ov, true); list.push(ov); }
     log(`➕ ${prLabel(pr)} ${KIND[kind][0]} 삽입 — ${path.basename(file)} · ${rangeTxt(ids)}`);
     storeActive(); pushDtoUpdate();
     return { ok: true, id, dto: P.toDTO(S.parsed) };
@@ -9843,13 +10050,66 @@ ipcMain.handle('overlay-op', async (_e, args = {}) => {
       undoPush('삽입 음량', { coalesce: true }); ov.volume = ov.kind === 'video' ? OL.volOfVideo(args.volume) : OL.normVol(args.volume);
     } else if (op === 'box') {
       undoPush('삽입 자리', { coalesce: true }); ov.box = args.box === null ? null : OL.normBox(args.box);
+      if (ov.box) delete ov.fill;   // 사람이 자리를 정하면 「꽉 채우기」는 풀린다(자리가 이긴다)
     } else if (op === 'remove') {
       undoPush('삽입 지우기'); list.splice(list.indexOf(ov), 1);   // 파일은 남긴다(↶ 되돌리기)
       log(`➕ ${prLabel(pr)} 삽입 지움 — ${ov.name || path.basename(ov.file)}`);
     } else if (op === 'order') {
-      const i = list.indexOf(ov), j = i + (args.dir === 'down' ? -1 : 1);
-      if (j < 0 || j >= list.length) return { ok: true, dto: P.toDTO(S.parsed) };
+      // 🔝 순서 = 목록 순서(뒤가 위 · vrew zIndex 900+) — up·down 한 층 · front·back 맨 앞·맨 뒤(⚠ 그룹 그림 아래로는 못 내린다: 삽입은 늘 그룹 그림 위)
+      const i = list.indexOf(ov);
+      const j = args.dir === 'front' ? list.length - 1 : args.dir === 'back' ? 0 : i + (args.dir === 'down' ? -1 : 1);
+      if (j < 0 || j >= list.length || j === i) return { ok: true, dto: P.toDTO(S.parsed) };
       undoPush('삽입 순서'); list.splice(i, 1); list.splice(j, 0, ov);
+      log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 순서 → ${args.dir === 'front' ? '맨 앞으로' : args.dir === 'back' ? '맨 뒤로' : args.dir === 'down' ? '뒤로' : '앞으로'}`);
+    } else if (op === 'look') {
+      // 🖼 모양 — patch: fill('cover'|null) · flipH · flipV · motion('in'..|'' ) · opacity(0~100) · crop({t,r,b,l}|null)
+      if (ov.kind === 'audio') return { ok: false, error: '오디오에는 모양이 없습니다' };
+      const pt = args.patch || {};
+      await ensureDim(ov);
+      undoPush('삽입 모양', { coalesce: true });
+      if ('fill' in pt) { if (pt.fill === 'cover') { ov.fill = 'cover'; ov.box = null; } else delete ov.fill; if (pt.fill === 'cover' || pt.fill === 'contain') ov.box = null; }
+      if ('flipH' in pt) { if (pt.flipH) ov.flipH = true; else delete ov.flipH; }
+      if ('flipV' in pt) { if (pt.flipV) ov.flipV = true; else delete ov.flipV; }
+      if ('motion' in pt) { const m = VL.normOvMotion(pt.motion); if (m && ov.kind === 'image') ov.motion = m; else delete ov.motion; }
+      if ('opacity' in pt) { const o = VL.normOpacity(pt.opacity); if (o < 100) ov.opacity = o; else delete ov.opacity; }
+      if ('crop' in pt) {
+        // 자르기 — 자리(box)가 있으면 **그림이 놓인 자리는 그대로** 잘린 만큼만 box 를 줄인다(Vrew 처럼 제자리에서 자른다)
+        const oldV = VL.cropVis(ov.crop), nc = VL.normCrop(pt.crop), newV = VL.cropVis(nc);
+        if (ov.box) {
+          const w = ov.box.w * (newV.w / oldV.w), h = ov.box.h * (newV.h / oldV.h);
+          const ocx = ov.box.x - (ov.crop ? ov.crop.l : 0) / oldV.w * ov.box.w;   // 잘리기 전 전체 그림의 왼쪽 위(캔버스 0..1)
+          const ocy = ov.box.y - (ov.crop ? ov.crop.t : 0) / oldV.h * ov.box.h;
+          const fullW = ov.box.w / oldV.w, fullH = ov.box.h / oldV.h;
+          const nl = nc ? nc.l : 0, nt = nc ? nc.t : 0;
+          ov.box = OL.normBox({ x: ocx + nl * fullW, y: ocy + nt * fullH, w, h }) || ov.box;
+        }
+        if (nc) ov.crop = nc; else delete ov.crop;
+      }
+      log(`➕ ${prLabel(pr)} ${ov.name || path.basename(ov.file)} 모양 → ${Object.keys(pt).join('·')}`);
+    } else if (op === 'replace') {
+      // ⟳ 교체 — 범위·자리·모양은 그대로, 파일만 다른 것으로(그림 ↔ 영상도 된다 · 소리 없는 그림이 되면 음량·1회 재생은 버린다)
+      if (ov.kind === 'audio') return { ok: false, error: '오디오는 지우고 다시 삽입하세요' };
+      let file = args.file;
+      if (!file) {
+        const r = await dialog.showOpenDialog(win, { title: '바꿀 그림·영상', properties: ['openFile'], filters: [{ name: '그림·영상', extensions: [].concat(KIND.image[1], KIND.video[1]) }] });
+        if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+        file = r.filePaths[0];
+      }
+      const kind = OL.kindOf(file);
+      if (kind !== 'image' && kind !== 'video') return { ok: false, error: '그림(png·jpg·webp) 또는 영상(mp4·mov·webm) 파일이어야 합니다' };
+      let dst = file;
+      try {
+        const dir = path.join(shortsDirs(S.outRoot, pr.shortsNum).media, 'overlays');
+        fs.mkdirSync(dir, { recursive: true });
+        dst = path.join(dir, ov.id + '_' + Date.now().toString(36) + path.extname(file).toLowerCase());   // 옛 파일을 덮지 않는다(↶ 되돌리기)
+        fs.copyFileSync(file, dst);
+      } catch (e) { dst = file; log('⚠ 교체 파일을 작업 폴더로 복사하지 못해 원본을 가리킵니다: ' + e.message); }
+      undoPush('삽입 교체');
+      const keepKind = ov.kind === kind;
+      ov.file = dst; ov.name = path.basename(file); ov.kind = kind; ov.dim = undefined;
+      if (!keepKind) { if (kind === 'video') ov.volume = OL.volOfVideo(undefined); else { delete ov.volume; delete ov.once; } if (kind === 'video') delete ov.motion; }
+      await ensureDim(ov, true);
+      log(`➕ ${prLabel(pr)} 삽입 교체 → ${path.basename(file)}`);
     } else return { ok: false, error: '알 수 없는 동작' };
   }
   storeActive(); pushDtoUpdate();
@@ -12378,8 +12638,9 @@ app.whenReady().then(() => { if (LIC.enforce) LIC.ready = licCheck('앱 시작')
 // 🧩 관리자 = 우리 kie 계정 잔액을 「kie크레딧」으로(v0.9.93 · 로이 2026-10-21 「판매자가 가진 크레딧 786 을 관리자는 남은 크레딧으로」)
 //   이 PC 의 kie 키로 kie 에 직접 묻는다(무료 GET · 1분 기억) — 같은 키를 넣은 PC 끼리 같은 잔액을 보고 함께 쓴다 · 회원은 묻지 않는다
 const _kieBal = { at: 0, v: null };
-async function licWithKie(s) {
+async function licWithKie(s, force) {
   const out = licPublic(s);
+  if (force) _kieBal.at = 0;   // 충전 직후 등 — 1분 기억을 건너뛰고 바로 다시 묻는다(「충전했는데 안 바뀐다」 v0.9.107)
   if (!out.admin) return out;
   try {
     const KIE = require('./core/kie-api');
@@ -12390,7 +12651,7 @@ async function licWithKie(s) {
   return out;
 }
 ipcMain.handle('license-state', async () => { if (LIC.ready) await LIC.ready; return licWithKie(LIC.state); });
-ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licWithKie(LIC.state); });
+ipcMain.handle('license-recheck', async (_e, o) => { if (LIC.enforce) await licCheck('다시 확인', !!(o && o.quiet)); return licWithKie(LIC.state, !!(o && o.force)); });
 ipcMain.handle('license-login', async (_e, a = {}) => {
   if (!LIC.enforce && !process.env.PM_LICENSE_API) return licPublic(LIC.state);
   const s = await licApi().login(a.email, a.password);
@@ -12399,6 +12660,48 @@ ipcMain.handle('license-login', async (_e, a = {}) => {
   licStartReporter();
   return licPublic(s);
 });
+// 🆕 앱 안 회원가입 + 가입 코드(v0.9.98) — 가입(세션까지) → 코드가 있으면 이용 기간 부여 요청 → 회원 확인. 코드·비밀번호는 로그에 싣지 않는다
+async function _licFinish(extra) {
+  LIC.state = await licApi().check();
+  log(LIC.state.ok ? '🔐 회원 확인 ✓ (가입·코드 뒤)' : `🔐 회원 확인 — ${LIC.state.reason}`);
+  licStartReporter();
+  return { ...licPublic(LIC.state), ...extra };
+}
+ipcMain.handle('license-signup', async (_e, a = {}) => {
+  const r = await licApi().signup(a.email, a.password, { consent: true });   // 화면이 약관 체크 없이는 가입 버튼을 열지 않는다
+  if (!r.ok) { log(`🔐 앱 가입 — ${r.reason}`); LIC.state = { ok: false, reason: r.reason, email: r.email || String(a.email || '').trim() }; return licPublic(LIC.state); }
+  log('🔐 앱 가입 ✓');
+  let ex = {};
+  if (String(a.code || '').trim()) { const c = await licApi().redeem(a.code); ex = c.ok ? { redeemDays: c.days } : { redeemReason: c.reason }; log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`); }
+  return _licFinish(ex);
+});
+ipcMain.handle('license-redeem', async (_e, a = {}) => {
+  const c = await licApi().redeem(a.code);
+  log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`);
+  return _licFinish(c.ok ? { redeemDays: c.days } : { redeemReason: c.reason });
+});
+// 🆕 구글로 계속하기(v0.9.100) — 브라우저 로그인 + 127.0.0.1 복귀(PKCE · core/license-oauth) → 세션 → 회원 확인. 진행 중 하나만.
+let _googleLogin = null;
+ipcMain.handle('license-google', async () => {
+  if (_googleLogin) return { ...licPublic(LIC.state), reason: 'google_busy' };
+  const OA = require('./core/license-oauth');
+  const pk = OA.makePkce();
+  const lis = await OA.listen();
+  _googleLogin = lis;
+  try {
+    if (!lis.port) { log('🔐 구글 로그인 — 돌아올 포트가 모두 사용 중'); return licPublic({ ok: false, reason: 'google_failed' }); }
+    try { await shell.openExternal(OA.authorizeUrl(licApi().apiBase(), lis.port, pk.challenge)); } catch (_) { lis.cancel(); }
+    const res = await lis.wait;
+    if (!res.code) { log(`🔐 구글 로그인 — ${res.error}`); return licPublic({ ok: false, reason: res.error === 'cancelled' ? 'logged_out' : res.error === 'timeout' ? 'google_timeout' : 'google_failed' }); }
+    const x = await licApi().exchangeCode(res.code, pk.verifier);
+    if (!x.ok) { log(`🔐 구글 로그인 — ${x.reason}`); return licPublic({ ok: false, reason: x.reason }); }
+    log('🔐 구글 로그인 ✓');
+    return _licFinish({});
+  } finally { _googleLogin = null; }
+});
+ipcMain.handle('license-google-cancel', () => { if (_googleLogin) _googleLogin.cancel(); return true; });
+ipcMain.handle('license-products', async () => licApi().products());
+ipcMain.handle('license-open-url', (_e, url) => { try { if (!require('./core/license').isSiteUrl(url)) return false; shell.openExternal(String(url)); return true; } catch (_) { return false; } });
 ipcMain.handle('license-logout', async () => { licApi().logout(); LIC.state = { ok: false, reason: 'logged_out' }; log('🔐 로그아웃'); return licPublic(LIC.state); });
 ipcMain.handle('license-set-autolog', async (_e, on) => { licApi().writeState({ autoLog: on !== false }); log(`📮 오류 로그 자동 전송 ${on !== false ? '켬' : '끔'}`); return licPublic(LIC.state); });
 ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고(수동) — 그날 로그 전체(끝 64KB) + 회원이 쓴 설명
@@ -12408,6 +12711,14 @@ ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고
   const r = await licApi().sendLog({ kind: 'report', summary: scrub(String(a.text || '문제 보고')).slice(0, 300), body, appVersion: _diskVersion() });
   log(r && r.ok ? '📮 문제 보고를 보냈습니다' : `📮 문제 보고를 못 보냈습니다(${(r && r.reason) || '?'})`);
   return { ok: !!(r && r.ok), reason: r && r.reason };
+});
+// 💳 크레딧 칸을 누르면 충전 페이지로 — 판매자(관리자) = kie 결제 페이지 · 회원 = primingwave.com 크레딧 충전 페이지(고정 주소 두 개뿐 · 렌더러가 주소를 정하지 않는다)
+const KIE_BILLING_URL = 'https://kie.ai/billing';
+ipcMain.handle('open-charge-page', () => {
+  try {
+    if (isOwner()) { shell.openExternal(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
+    shell.openExternal(require('./core/license').SITE_CHARGE); return { ok: true, kind: 'site' };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('license-open-site', () => { try { shell.openExternal(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
 // 👑 관리자 페이지 열기(v0.9.79) — 로이(관리자 계정)에게만 · 회원 PC 에서는 열지 않는다(주소는 공개돼 있어도 사이트가 관리자만 들인다)
@@ -12614,7 +12925,9 @@ ipcMain.handle('book-register-run', async (_e, args = {}) => {
       return { ok: rc.ok, done: rc.done, failed: rc.failed, manual: rc.manual };
     }
     log('📤 [등록 도우미] ' + RB.SITES[platform].label + ' 자동 입력 시작 — 저장·제출 버튼은 누르지 않습니다');
-    const r = await RB.runRegister({ platform, plan, log, isAborted: () => !!S.abort });
+    // 🛑 중단은 이 작업이 시작된 뒤 누른 ⏹ 만 본다(번호표) — 롱폼 제작을 멈춘 뒤 남아 있던 S.abort 때문에 로그인 대기에 들어가자마자 「중단됨」으로 끝났다(2026-10-23)
+    const _ep = workAbortEpoch;
+    const r = await RB.runRegister({ platform, plan, log, isAborted: () => workAbortEpoch !== _ep });
     return { ok: r.ok, done: r.done, failed: r.failed, manual: r.manual };
   } catch (e) {
     log('✗ [등록 도우미] ' + e.message);
@@ -12645,7 +12958,7 @@ ipcMain.handle('book-distribution-refresh', async () => {
     const RB = require('./core/book/register-browser'); const RS = require('./core/book/retail-status');
     const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
     log('📊 [유통현황] 부크크 외부유통 화면 읽기 시작 — 읽기만 합니다(아무것도 누르지 않음)');
-    const r = await (global.__readRetailTest || RB.readBookkRetail)({ log, isAborted: () => !!S.abort, rawDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
+    const r = await (global.__readRetailTest || RB.readBookkRetail)({ log, isAborted: ((ep) => () => workAbortEpoch !== ep)(workAbortEpoch) /* 🛑 남아 있던 S.abort 무시 — 등록 도우미와 같은 번호표 */, rawDir: WF.tmpDir(root, '_등록캡처', '등록캡처') });
     RS.saveItems(r.items);
     log(`📊 [유통현황] ${r.items.length}건 읽음`);
     return { ..._distView(), read: r.items.length };

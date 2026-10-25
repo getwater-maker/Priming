@@ -14,7 +14,7 @@ const PHASE = {
   aborted: '⏹ 중단됨',
   done: '✅ 끝',
 };
-const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: '병합·변환', done: '완료' };
+const DL_STAGE = { probe: '정보 확인', download: '받는 중', convert: '병합·변환', done: '완료', wait: '⏳ 유튜브가 잠시 막아 쉬는 중' };
 
 function fmtDur(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -31,7 +31,7 @@ function Bar({ value, color }) {
   );
 }
 
-export default function UrlProgress({ prog, onAbort, onClose, embedded = false }) {
+export default function UrlProgress({ prog, onAbort, onClose, onRetry, embedded = false }) {
   const [, tick] = useState(0);
   const live = prog && !['done', 'aborted'].includes(prog.phase);
   useEffect(() => {                       // 경과 시간이 멈춰 보이지 않게 1초마다 다시 그린다
@@ -75,7 +75,7 @@ export default function UrlProgress({ prog, onAbort, onClose, embedded = false }
               <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={dl.title}>
                 [{dl.idx}] {dl.title}
               </div>
-              <div style={{ color: '#999' }}>{DL_STAGE[dl.stage] || ''}{dl.stage === 'download' ? ` ${Math.floor(dl.pct)}%` : ''}</div>
+              <div style={{ color: '#999' }}>{DL_STAGE[dl.stage] || ''}{dl.stage === 'download' ? ` ${Math.floor(dl.pct)}%` : ''}{dl.stage === 'wait' && dl.waitUntil ? ` — ${Math.max(0, Math.ceil((dl.waitUntil - Date.now()) / 60000))}분 뒤 이어서` : ''}</div>
               <Bar value={curDlPct} color="var(--accent-d)" />
             </div>
           )}
@@ -125,7 +125,11 @@ export default function UrlProgress({ prog, onAbort, onClose, embedded = false }
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
         {live
           ? <button className="ghost" disabled={prog.phase === 'aborting'} onClick={onAbort}>⏹ 중단</button>
-          : <button className="ghost" onClick={onClose}>닫기</button>}
+          : <>
+            {/* 🔁 실패한 영상만 다시(v0.9.117 · 4K Video Downloader 의 Retry Download) — 막혀서 멈춘 뒤 남은 영상도 포함 */}
+            {onRetry && prog.retry && prog.retry.length > 0 && <button data-testid="urldl-retry" onClick={() => onRetry(prog.retry)}>🔁 실패한 영상만 다시 ({prog.retry.length})</button>}
+            <button className="ghost" onClick={onClose}>닫기</button>
+          </>}
       </div>
     </div>
   );

@@ -809,7 +809,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
     // 🎞 채널 화면 연출(켄번스 구간 · 디졸브 · 오버레이 모션)은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값(kbSeg·dissolveSec·fx)을 읽지 않는다.
     //   ⛔ 다시 읽게 하지 말 것(채널편집에 칸이 없어 숨은 채로 적용된다 · 06_고전서재에 디졸브 4초가 남아 있다). 그룹별 look.kbSeg 는 그대로.
-    if (preset.infoCards) { inp.infoCards = true; if (Array.isArray(project.infoMarks) && project.infoMarks.length) inp.info = project.infoMarks; }   // 📇 정보 카드 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
+    if (preset.infoCards) { inp.infoCards = true; inp.infoLook = 2; /* 2 = 표 줄 강조·체크 찍기·숫자 강조(v0.9.106) — 그리는 법이 바뀌면 올린다 */ if (Array.isArray(project.infoMarks) && project.infoMarks.length) inp.info = project.infoMarks; }   // 📇 정보 카드 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) inp.bgm = preset.bgm;
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) inp.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 대본 덮어쓰기(logoOver) 포함 · 자리 = 대본 끌어 옮김 > ↖ > 채널 기본 자리
   }

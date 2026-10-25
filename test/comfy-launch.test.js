@@ -241,6 +241,77 @@ function stubServer() {
     }
   }
 
+  console.log('\n[12] 🛑 로컬 Qwen 그림 뒤 ComfyUI 끄기(v0.9.111) — 가짜 서버 + 가짜 execFile');
+  {
+    const http = require('http');
+    const mkServer = (queue) => new Promise((res) => {
+      const srv = http.createServer((req, rsp) => { rsp.setHeader('Content-Type', 'application/json'); rsp.end(req.url.startsWith('/queue') ? JSON.stringify(queue) : '{}'); });
+      srv.listen(0, '127.0.0.1', () => res(srv));
+    });
+    const L = 'C:\\x\\pythonw.exe -s "D:\\Priming\\comfy\\comfy-server.pyw"';
+    chk(CL.pickKillTarget({ pid: 20, cmd: L, ppid: 10, pcmd: L }) === 10, '런처 부모가 있으면 부모(자식까지 /T)를 끈다');
+    chk(CL.pickKillTarget({ pid: 20, cmd: L, ppid: 10, pcmd: 'explorer.exe' }) === 20, '부모가 런처가 아니면 그 프로세스만');
+    chk(CL.pickKillTarget({ pid: 20, cmd: 'python main.py', ppid: 10, pcmd: 'cmd.exe' }) === 0, '우리 런처가 아니면 끄지 않는다(판정력)');
+    // 끄는 경우 — taskkill 을 부모 PID 로 부르고, 서버가 내려간 걸 확인한다
+    let srv = await mkServer({ queue_running: [], queue_pending: [] });
+    let base = 'http://127.0.0.1:' + srv.address().port;
+    const calls = [];
+    const fakeExec = (s) => (cmd, args, _o, cb) => {
+      calls.push([cmd, args]);
+      if (/powershell/i.test(cmd)) return cb(null, JSON.stringify({ pid: 20, cmd: L, ppid: 10, pcmd: L }));
+      if (s) s.close();
+      cb(null, 'SUCCESS');
+    };
+    let r = await CL.stopLocalComfy({ baseUrl: base, execFileFn: fakeExec(srv), waitMs: 5000 });
+    const tk = calls.find((c) => /taskkill/i.test(c[0]));
+    chk(r.stopped === true && tk && tk[1].join(' ') === '/PID 10 /T /F', `부모 PID 로 taskkill /T /F (실제 ${tk ? tk[1].join(' ') : '없음'})`);
+    chk(!(await CL.ping(base, 1000)), '끈 뒤 서버가 응답하지 않는다');
+    // 큐에 남의 작업이 있으면 끄지 않는다
+    srv = await mkServer({ queue_running: [[1]], queue_pending: [] });
+    base = 'http://127.0.0.1:' + srv.address().port; calls.length = 0;
+    r = await CL.stopLocalComfy({ baseUrl: base, execFileFn: fakeExec(null) });
+    chk(r.skipped === 'busy' && !calls.length, '큐에 작업이 있으면 끄지 않는다(명령 0개)');
+    srv.close();
+    // 원격 주소·꺼진 서버는 손대지 않는다
+    calls.length = 0;
+    r = await CL.stopLocalComfy({ baseUrl: 'http://100.1.2.3:8188', execFileFn: fakeExec(null) });
+    chk(r.skipped === 'remote' && !calls.length, '원격 주소는 손대지 않는다');
+    r = await CL.stopLocalComfy({ baseUrl: base, execFileFn: fakeExec(null) });
+    chk(r.skipped === 'not-running' && !calls.length, '꺼져 있으면 아무것도 안 한다');
+    // main 연결(소스 검사)
+    const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    chk(/return _withLocalQwenStop\(onlyNums, logger, \(\) => runComfyImages\(/.test(src), '로컬 Qwen 입구가 끄기 래퍼를 거친다');
+    chk(/try \{ return await fn\(\); \} finally \{\n    _localQwenActive--;/.test(src), '중단·실패여도 끈다(finally)');
+    chk(/awaitForeignTtsIdle\('로컬 이미지 생성', logger, \{ untilDone: forceLocal \}\)/.test(src), '로컬 Qwen 은 음성이 끝날 때까지 기다린다');
+    chk(/while \(untilDone \|\| Date\.now\(\) - t0 < FOREIGN_TTS_WAIT_MS\)/.test(src) && /untilDone && S\.abort/.test(src), '끝까지 대기 · ⏹ 중단이면 멈춘다');
+    chk(!/execFileSync/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-launch.js'), 'utf8')), '동기 자식 프로세스 없음(메인 프로세스가 얼지 않게)');
+  }
+
+  console.log('\n[13] ⏹ 중단 — 멈춤 신호 + 대기열 비우기 + 로컬 Qwen 이면 끄기(v0.9.112)');
+  {
+    const http = require('http');
+    const hits = [];
+    const srv = await new Promise((res) => {
+      const s = http.createServer((req, rsp) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { hits.push(req.method + ' ' + req.url + (b ? ' ' + b : '')); rsp.setHeader('Content-Type', 'application/json'); rsp.end(req.url.startsWith('/queue') ? JSON.stringify({ queue_running: [[1]], queue_pending: [[2]] }) : '{}'); }); });
+      s.listen(0, '127.0.0.1', () => res(s));
+    });
+    const base = 'http://127.0.0.1:' + srv.address().port;
+    const r = await CL.interruptLocalComfy({ baseUrl: base });
+    const qi = hits.indexOf('POST /queue {"clear":true}'), ii = hits.indexOf('POST /interrupt');
+    chk(r.interrupted && qi >= 0 && ii > qi, `대기열 비우기 → 멈춤 신호 순서 (${hits.filter((h) => h.startsWith('POST')).join(' · ')})`);
+    // force — 큐에 작업이 있어도(우리 것) 끈다 / force 없으면 안 끈다(판정력)
+    const L = 'x\\comfy-server.pyw'; const calls = [];
+    const ex = (cmd, args, _o, cb) => { calls.push(cmd); if (/powershell/i.test(cmd)) return cb(null, JSON.stringify({ pid: 2, cmd: L, ppid: 1, pcmd: L })); srv.close(); cb(null, 'ok'); };
+    let s1 = await CL.stopLocalComfy({ baseUrl: base, execFileFn: ex });
+    chk(s1.skipped === 'busy' && !calls.length, 'force 없으면 큐에 작업이 있을 때 안 끈다');
+    s1 = await CL.stopLocalComfy({ baseUrl: base, execFileFn: ex, force: true, waitMs: 3000 });
+    chk(s1.stopped && calls.some((c) => /taskkill/i.test(c)), 'force(⏹ 중단)면 큐가 차 있어도 끈다');
+    chk((await CL.interruptLocalComfy({ baseUrl: 'http://10.0.0.5:8188' })).skipped === 'remote', '원격 주소엔 멈춤 신호를 보내지 않는다');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    chk(/log\('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다'\);\n  if \(_localQwenActive\) _abortLocalQwenComfy\(\);/.test(src), '헤더 ⏹ 가 로컬 Qwen 중일 때만 ComfyUI 를 멈춘다');
+    chk(/interruptLocalComfy\(\{ baseUrl \}\)[\s\S]{0,200}stopLocalComfy\(\{ baseUrl, log, force: true \}\)/.test(src), '멈춤 신호 → 서버 끄기(force)');
+  }
+
   console.log('\n결과: ' + ok + ' OK / ' + fail + ' FAIL');
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

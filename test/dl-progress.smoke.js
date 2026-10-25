@@ -64,6 +64,17 @@ const files = [1, 2].map((i) => { const f = path.join(TMP, `clip${i}.mp4`); exec
     await win.waitForSelector('[data-testid="dl-modal"]', { timeout: 5000 });
     const busy = await win.evaluate(() => (document.querySelector('[data-testid="dl-busy"]') || {}).textContent || '');
     ok(/받기/.test(busy) && /전사/.test(busy) && !/mp3/.test(busy), '④ 창 맨 위 「진행 중」 한 줄(끝난 mp3 는 빠짐): ' + busy);
+    // ⑤ 📥 창 안 ⏹ 중단(v0.9.116) — 도는 작업이 있으면 눌리고, 누르면 main dl-abort + 「멈추는 중」
+    await app.evaluate(({ ipcMain }) => { global.__dlAbortHits = 0; ipcMain.removeHandler('dl-abort'); ipcMain.handle('dl-abort', () => { global.__dlAbortHits++; return { ok: true }; }); });
+    const stop = win.locator('[data-testid="dl-modal"] [data-testid="dl-stop"]');
+    ok(await stop.count() === 1 && await stop.isEnabled(), '⑤ 받기가 도는 중이면 창 안 「⏹ 중단」이 눌린다');
+    const box = await stop.boundingBox();
+    const hitOk = await win.evaluate(({ x, y }) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest('[data-testid="dl-stop"]')); }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    ok(hitOk, '⑤ 「⏹ 중단」이 실제로 눌리는 자리(가려지지 않음)');
+    await stop.click();
+    await sleep(300);
+    const hits = await app.evaluate(() => global.__dlAbortHits);
+    ok(hits === 1 && /멈추는 중/.test(await stop.textContent()) && !(await stop.isEnabled()), '⑤ 누르면 dl-abort 한 번 · 「⏳ 멈추는 중…」으로 바뀐다');
     ok(errs.length === 0, '화면 오류 0건' + (errs.length ? ': ' + errs[0] : ''));
   } finally {
     await app.close();

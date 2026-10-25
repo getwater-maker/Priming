@@ -1,4 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { sameGeo, frameGuard } from '../../core/rail-geo.js';
+import Upsell from './Upsell.jsx';
+import ThumbEditor from './ThumbEditor.jsx';
 import { createPortal } from 'react-dom';
 import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
 import api from './lib/ipc.js';
@@ -252,15 +255,17 @@ function legacyEngineLabel(v, cfg) {
   if (KM.isKieVal(v)) return `AI · ${KM.idOf(v)}`;
   return LEGACY_ENGINE_LABEL[v] || v;
 }
-function EngineOptions({ kind = 'image', cfg, value = '' }) {
+function EngineOptions({ kind = 'image', cfg, value = '', owner = false }) {
   const isVid = kind === 'video';
   const models = isVid ? KM.VIDEO : KM.IMAGE;
-  const known = new Set([...models.map((m) => KM.valOf(m)), isVid ? 'none' : null].filter(Boolean));
+  const localQwen = !isVid && owner;   // 👑 🖥 로컬 Qwen-Image 2.1 = 관리자 화면에만(v0.9.109 · 회원 PC 엔 로컬 GPU 서버가 없다)
+  const known = new Set([...models.map((m) => KM.valOf(m)), isVid ? 'none' : null, localQwen ? EM.LOCAL_QWEN : null].filter(Boolean));
   const legacy = value && !known.has(value) ? value : null;
   return (<>
     <optgroup label={isVid ? 'AI 영상 (그림 → 영상)' : 'AI 이미지'}>
       {models.map((m) => <option key={m.id} value={KM.valOf(m)} title={m.note || ''}>☁ {m.label}</option>)}
     </optgroup>
+    {localQwen && <optgroup label="관리자 · 이 PC"><option value={EM.LOCAL_QWEN} title="이 PC 의 ComfyUI 로 그립니다(무료 · 꺼져 있으면 앱이 켬 · 음성과 GPU 를 번갈아 씀)">🖥 로컬 Qwen-Image 2.1</option></optgroup>}
     {isVid && <option value="none">없음 (이미지만)</option>}
     {legacy && <option value={legacy}>(옛 설정) {legacyEngineLabel(legacy, cfg)}</option>}
   </>);
@@ -740,12 +745,21 @@ export default function App() {
   const [points, setPoints] = useState(null);
   const [licKind, setLicKind] = useState(null);   // { enforced, admin } — 포인트 칸을 보일지 · 문구 판단용
   // v0.9.80 — 관리자가 포인트를 줘도 앱을 껐다 켜야 보이던 것: 1분마다(창이 보일 때만) · 창을 다시 누를 때 · 포인트 칸을 누를 때 바로 다시 읽는다
-  const refreshPoints = async (quiet) => { try { const s = await api.licenseRecheck(quiet ? { quiet: true } : {}); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} };
+  const chargeRef = useRef(false);   // 충전 페이지를 연 뒤 앱으로 돌아오면 바로 다시 읽기
+  const openCharge = async () => { chargeRef.current = true; refreshPoints(false, true); try { await api.openChargePage(); } catch (_) {} };
+  const refreshPoints = async (quiet, force) => { try { const s = await api.licenseRecheck({ ...(quiet ? { quiet: true } : {}), ...(force ? { force: true } : {}) }); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} };
   useEffect(() => {
     let last = 0;
     const tick = () => { if (document.visibilityState !== 'visible') return; last = Date.now(); refreshPoints(true); };
     const t = setInterval(tick, 60 * 1000);
-    const onFocus = () => { if (Date.now() - last > 15000) tick(); };   // 15초 안에 또 부르지 않는다
+    const onFocus = () => {
+      if (chargeRef.current) {   // 충전 페이지를 열었다가 돌아온 때 — 15초 제한·1분 기억을 건너뛰고 바로, 그리고 반영이 늦을 수 있어 두 번 더(8초·25초 뒤)
+        chargeRef.current = false; last = Date.now();
+        refreshPoints(false, true); setTimeout(() => refreshPoints(true, true), 8000); setTimeout(() => refreshPoints(true, true), 25000);
+        return;
+      }
+      if (Date.now() - last > 15000) tick();   // 15초 안에 또 부르지 않는다
+    };
     window.addEventListener('focus', onFocus);
     return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -757,21 +771,21 @@ export default function App() {
     const f = (v) => (v == null ? '-' : Number(v).toLocaleString());
     const box = (bg, fg) => ({ padding: '3px 9px', borderRadius: 6, background: bg, color: fg, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', alignSelf: 'center', cursor: 'pointer' });
     if (licKind && licKind.admin) {
-      if (licKind.kie == null) return <span className="pts" data-testid="member-points" data-admin="1" data-empty="1" onClick={() => refreshPoints(false)}
-        title={(licKind.kieNoKey ? '이 PC 에 kie 키가 없어 잔액을 볼 수 없습니다 — ⚙ 설정 → 🔑 API 키에 같은 키를 넣으면 다른 관리자 PC 와 같은 잔액을 보고 함께 씁니다.' : 'kie 잔액을 불러오지 못했습니다.') + '\n(누르면 바로 새로고침)'}
+      if (licKind.kie == null) return <span className="pts" data-testid="member-points" data-admin="1" data-empty="1" onClick={openCharge}
+        title={(licKind.kieNoKey ? '이 PC 에 kie 키가 없어 잔액을 볼 수 없습니다 — ⚙ 설정 → 🔑 API 키에 같은 키를 넣으면 다른 관리자 PC 와 같은 잔액을 보고 함께 씁니다.' : 'kie 잔액을 불러오지 못했습니다.') + '\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)'}
         style={box('#eef0f4', '#5a6270')}>🧩 kie크레딧 <b>{licKind.kieNoKey ? '키 없음' : '-'}</b></span>;
       const low = licKind.kie < 100;
-      return <span className="pts" data-testid="member-points" data-admin="1" onClick={() => refreshPoints(false)}
-        title={`우리 kie 계정에 남은 크레딧 ${f(licKind.kie)} — 같은 키를 넣은 관리자 PC 끼리 함께 씁니다${low ? '\n⚠ 거의 다 썼습니다 — kie 에서 충전하세요' : ''}\n(누르면 바로 새로고침)`}
+      return <span className="pts" data-testid="member-points" data-admin="1" onClick={openCharge}
+        title={`우리 kie 계정에 남은 크레딧 ${f(licKind.kie)} — 같은 키를 넣은 관리자 PC 끼리 함께 씁니다${low ? '\n⚠ 거의 다 썼습니다 — kie 에서 충전하세요' : ''}\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)`}
         style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>🧩 kie크레딧 남은 <b>{f(licKind.kie)}</b></span>;
     }
     if (!points) {   // 서버가 크레딧 값을 주지 않음 = 0(아직 지급받지 않음)
-      return <span className="pts" data-testid="member-points" data-empty="1" onClick={() => refreshPoints(false)}
-        title={'아직 지급받은 크레딧이 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 크레딧 없이 쓸 수 있습니다.\n(누르면 바로 새로고침)'}
+      return <span className="pts" data-testid="member-points" data-empty="1" onClick={openCharge}
+        title={'아직 지급받은 크레딧이 없습니다.\n🖥 내 PC(로컬)와 내 API 키로 만드는 것은 크레딧 없이 쓸 수 있습니다.\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)'}
         style={box('#fff6dc', '#7a5a00')}>🪙 크레딧 남은 <b>0</b> / 지급 0</span>;
     }
     const low = points.granted > 0 && points.remaining != null && points.remaining / points.granted <= 0.1;
-    return <span className="pts" data-testid="member-points" onClick={() => refreshPoints(false)} title={`내 크레딧 — 지급받은 크레딧 ${f(points.granted)} 중 남은 크레딧 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 바로 새로고침)`}
+    return <span className="pts" data-testid="member-points" onClick={openCharge} title={`내 크레딧 — 지급받은 크레딧 ${f(points.granted)} 중 남은 크레딧 ${f(points.remaining)}${low ? '\n⚠ 거의 다 썼습니다' : ''}\n(누르면 충전 페이지가 열리고, 돌아오면 자동으로 다시 읽습니다)`}
       style={low ? box('#fde8e8', '#a3352b') : box('#fff6dc', '#7a5a00')}>
       🪙 크레딧 남은 <b>{f(points.remaining)}</b> / 지급 {f(points.granted)}</span>;
   })() : null;
@@ -1254,6 +1268,8 @@ export default function App() {
   }
   const [logUnseen, setLogUnseen] = useState(false);
   const [thumbs, setThumbs] = useState({ ok: false, msg: '', files: [] });
+  const [thumbEd, setThumbEd] = useState(null);   // 🖼 썸네일 편집기 {data} — 로그 상자 🖼 탭의 ✏ 수정
+  async function openThumbEditor() { try { const r = await api.thumbEditOpen(); if (!r || !r.ok) { uiAlert((r && r.msg) || '썸네일 편집기를 열 수 없습니다'); return; } setThumbEd(r); } catch (e) { uiAlert('썸네일 편집기: ' + e.message); } }
   async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
   useEffect(() => { if (logTab === 'thumb') loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
   function pickLogTab(t) { setLogTab(t); if (t === 'log') { setLogUnseen(false); setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 0); } }
@@ -1484,6 +1500,37 @@ export default function App() {
       console.error('자막 복사 실패', e);
       logline('자막 복사 실패: ' + e.message); setSubtitleCopyMessage('자막 복사 실패: ' + e.message);
     } finally { setUrlBusy(false); }
+  }
+  // ⏹ 받기·전사·mp3 를 📥 창 안에서 바로 멈춘다(v0.9.116 · 로이 2026-10-24) — 진행 패널을 닫았어도 창에 늘 있다
+  const dlRunning = (p) => p && !['done', 'aborted'].includes(p.phase);
+  function dlStopButton() {
+    const busy = dlRunning(urlProg) || dlRunning(sttProg) || dlRunning(mp3Prog);
+    const stopping = [urlProg, sttProg, mp3Prog].some((p) => p && p.phase === 'aborting');
+    return (
+      <button className="ghost dl-stop" data-testid="dl-stop" disabled={!busy || stopping}
+        title={busy ? '지금 도는 받기·전사·mp3 추출을 멈춥니다(받던 영상까지만 · 받은 파일은 남깁니다)' : '도는 받기·전사가 없습니다'}
+        onClick={() => {
+          api.dlAbort();
+          const mark = (p) => (dlRunning(p) ? { ...p, phase: 'aborting' } : p);
+          setUrlProg(mark); setSttProg(mark); setMp3Prog(mark);
+        }}>{stopping ? '⏳ 멈추는 중…' : '⏹ 중단'}</button>
+    );
+  }
+  // 🔁 실패한 영상만 다시(v0.9.117) — 항목(주소·폴더·[ID] 이름)은 main 이 기억한 것 · 받는 방식은 지금 창 값
+  async function retryUrlFails(retryJobs) {
+    if (urlBusy || !retryJobs || !retryJobs.length) return;
+    setUrlBusy(true);
+    setStatus(`🔁 실패한 ${retryJobs.length}편 다시 받는 중…`);
+    try {
+      const r = await api.sttFromUrl({ retryLast: true, mode: urlMode, stt: urlStt, forceStt: urlStt && urlForceStt,
+        audioFormat: urlAudioFormat, quality: urlQuality, saveSubs: urlSaveSubs, subtitleFormat: urlSubtitleFormat,
+        subtitleLanguage: urlSubtitleLanguage, subtitleTrack: urlSubtitleTrack, presetName: presetName || null });
+      if (!r || r.canceled) { setStatus('취소'); return; }
+      if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
+      const okN = (r.results || []).filter((x) => x.ok).length;
+      setStatus(`🔁 다시 받기 완료 (${okN}/${(r.results || []).length})`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+    finally { setUrlBusy(false); }
   }
   async function runUrlDl() {
     const urls = String(urlTextRef.current?.value || '')
@@ -4569,16 +4616,25 @@ export default function App() {
     const fitS = _st ? ` style="${_st}"` : '';
     const bx = lk.box;
     const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
+    // ➕ 삽입의 자르기(사각 · look.crop)·불투명도(look.opacity) — 보이는 영역 = 자리(box) · 그림은 자른 만큼 키워 밀어 놓는다(Vrew 와 같은 계산)
+    const cr = VLook.normCrop(c.look && c.look.crop);
+    const opq = c.look && c.look.opacity != null && c.look.opacity < 100 ? `;opacity:${(c.look.opacity / 100).toFixed(3)}` : '';
     let inner;
-    if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
+    const kbIdx = lk.motion === 'auto' ? ((Number(c.num) || 0) * 7 + 3) % 12 : ({ in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[lk.motion]);
+    if (cr) {
+      const vw = 1 - cr.l - cr.r, vh = 1 - cr.t - cr.b;
+      const cs = ` style="position:absolute;left:${(-cr.l / vw * 100).toFixed(3)}%;top:${(-cr.t / vh * 100).toFixed(3)}%;width:${(100 / vw).toFixed(3)}%;height:${(100 / vh).toFixed(3)}%;object-fit:fill"`;
+      const kbw = !c.videoPath && lk.motion !== 'none' ? ` kb kb${kbIdx}` : '';   // 움직임은 바깥 칸에(보이는 영역 기준 — .vrew·MP4 와 같다)
+      const mm = c.videoPath ? `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${cs}></video>` : `<img src="${media(c.imagePath, c.imageVersion)}"${cs}>`;
+      inner = `<div class="vcrop${kbw}" style="position:relative;width:100%;height:100%;overflow:hidden">${mm}</div>`;
+    } else if (c.videoPath) inner = `<video src="${media(c.videoPath, c.videoVersion)}"${playingRef.current ? ' autoplay' : ' preload="auto"'} muted${c.once ? '' : ' loop'} playsinline${fitS}></video>`;   // ⏸ 평소엔 멈춘 장면(v0.5.62)
     else {
       // 그룹마다 다른 켄번스 변형(vrew 와 동일 분포: (n*7+3)%12) · 움직임을 정했으면 그 종류(vrew-builder _kenBurnsForLook 과 같은 번호)
-      const kbIdx = KB.patternIndexOf({ num: c.num, look: lk });   // core/ken-burns — 빌더와 같은 번호
       const kbCls = (lk.motion === 'none' || lk.rot) ? 'kbnone' : `kb kb${kbIdx}`;   // 🎛 회전하면 켄번스는 끈다(.vrew·MP4 와 같다)
       inner = `<img class="${kbCls}" src="${media(c.imagePath, c.imageVersion)}"${fitS}>`;
     }
     const ce = CEff.cssTransform(lk);   // 🎛 확대·회전 — 박스(= 이 칸) 가운데 기준
-    return `<div class="vlayer" data-num="${c.num}" style="${pos}${ce ? `;transform-origin:center center;transform:${ce}` : ''}"><div class="vlook"${flipT}>${inner}</div></div>`;
+    return `<div class="vlayer" data-num="${c.num}" style="${pos}${opq}${ce ? `;transform-origin:center center;transform:${ce}` : ''}"><div class="vlook"${flipT}>${inner}</div></div>`;
   }
   // 🖼 이 문장을 덮는 그림(아래 → 위) — 자기 그룹 그림 + 앞 그룹에서 아래층으로 이어진 그림(core/visual-span 과 같은 규칙: 그룹 순서 = 쌓는 순서)
   function visLayersAt(pr, cut, sentIdx, rg) {
@@ -5981,7 +6037,9 @@ export default function App() {
     if (!infoPv || !isLf || !cursor) return null;
     const ci = cursorInfo(); if (!ci) return null;
     let ord = ci.l.sentIdx; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
-    const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1);
+    const act = infoPv.panels.filter((q) => q.s0 <= ord && ord <= q.s1)
+      // ⏱ 시간 창이 있는 조각(📊 강조할 줄 · v0.9.106)은 그 문장에서만 — onS 는 main 이 렌더와 같은 계산으로 준 문장 범위
+      .map((q) => (q.prims && q.prims.some((x) => x.onS) ? { ...q, prims: q.prims.filter((x) => !x.onS || (x.onS[0] <= ord && ord <= x.onS[1])) } : q));
     return act.length ? act : null;
   })();
   stageInfoRef.current = stageInfo;   // 📇 오른쪽 클릭 복사 메뉴가 「지금 보이는 판」을 집는다
@@ -6034,6 +6092,24 @@ export default function App() {
         const lk = lay ? VLook.normLook(lay.look) : null;
         const sn = stageSel.sn;
         const stop = (e) => { e.stopPropagation(); };
+        if (String(stageSel.num)[0] === 'O' && lay && lay.ovRaw) {
+          // ➕ 삽입 그림·영상 — 채우기 · 애니메이션 · 순서 · 불투명도 · 자르기 · 반전 · 교체(v0.9.104 · 배경제거는 하지 않기로 했다)
+          const ov = lay.ovRaw, isImg = ov.kind === 'image';
+          const open = (name) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === name && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: name, subY: r.top, num: stageSel.num, cap: '', only: true })); };
+          const ob = (icon, title, fn, tid, on) => (<button key={title} className={'vtb-b' + (on ? ' on' : '')} title={title} data-testid={tid} onClick={(e) => { e.stopPropagation(); fn(e); }}>{icon}</button>);
+          const filled = ov.fill === 'cover' && !ov.box;
+          return (
+            <div className="stage-vtb" data-testid="stage-vtb" onMouseDown={stop} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+              {ob('⛶', filled ? '채우기 — 지금 꽉 채움(누르면 맞추기로)' : '채우기 — 화면 전체로 키웁니다(비율 유지 · 넘치는 쪽은 잘림)', () => overlayOp({ shortsNum: sn, op: 'look', id: ov.id, patch: { fill: filled ? 'contain' : 'cover' } }), 'vtb-fill', filled)}
+              {ob('🎞', '애니메이션', isImg ? open('motion') : () => setStatus('영상은 제 움직임이 있어 애니메이션을 따로 주지 않습니다'), 'vtb-motion', isImg && !!ov.motion)}
+              {ob('☰', '순서 — 앞으로·뒤로', open('ord'), 'vtb-ord')}
+              {ob('◐', '불투명도', open('opac'), 'vtb-opac', ov.opacity != null && ov.opacity < 100)}
+              {ob('⌗', '자르기 — 사각', open('crop'), 'vtb-crop', !!ov.crop)}
+              {ob('⇋', '반전 — 좌우·상하', open('flip'), 'vtb-flip', !!(ov.flipH || ov.flipV))}
+              {ob('⟳', '교체하기 — 범위·자리는 그대로, 파일만 바꿉니다', async () => { const r = await overlayOp({ shortsNum: sn, op: 'replace', id: ov.id }); if (r && r.ok) setStatus('⟳ 삽입을 바꿨습니다 (Ctrl+Z 되돌리기)'); }, 'vtb-replace')}
+            </div>
+          );
+        }
         const tb = (icon, title, fn, extra = {}) => (
           <button key={title} className={'vtb-b' + (extra.soon || (!extra.any && grpNum == null) ? ' soon' : '') + (extra.on ? ' on' : '')} title={title} data-testid={extra.tid}
             onClick={(e) => { e.stopPropagation(); if (extra.soon) { setStatus(`「${title}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); return; } if (!extra.any && grpNum == null) { setStatus('삽입 그림·영상은 이 막대로 바꿀 수 없습니다 — 목록의 ➕ 마크에서'); return; } fn(e); }}>{icon}</button>
@@ -6129,6 +6205,7 @@ export default function App() {
               </>) : (<>
                 <button className="ghost" data-testid="thumb-folder" title="이 PC에서 사용할 썸네일 폴더 선택" onClick={() => pickAppFolder('thumbs')}>📁 폴더</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="썸네일 폴더를 다시 읽기" onClick={loadThumbs}>🔄</button>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} data-testid="thumb-edit" title="썸네일 문구·자리를 고쳐 다시 내보내기(기존 파일은 _캔바원본 에 보존)" onClick={openThumbEditor}>✏ 수정</button>
               </>)}
             </div>
             {lt === 'thumb' && (
@@ -6237,7 +6314,7 @@ export default function App() {
             <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+              <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
             <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
@@ -6984,7 +7061,7 @@ export default function App() {
         const top = Math.max(4, Math.min(stageCtx.y, window.innerHeight - 360));
         const subLeft = left + W + 4 + SW > window.innerWidth ? Math.max(4, left - SW - 4) : left + W + 4;
         const run = (fn) => () => { setStageCtx(null); fn(); };
-        const hov = (sub) => (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
+        const hov = (sub) => (e) => { if (!sub && e.currentTarget.closest && e.currentTarget.closest('.clip-ctx-sub')) return; /* 아래 칸(하위 목록) 안의 줄에 마우스가 들어가도 목록을 닫지 않는다 */ const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && (c.sub !== sub || (sub && c.subY !== r.top)) ? { ...c, sub, subY: r.top } : c)); };
         const soonT = (t) => { setStageCtx(null); setStatus(`「${t}」은(는) 준비 중입니다 — 다음 판에서 만듭니다`); };
         const Row = ({ icon, label, onClick, soon, sub, kbd, dis, tid, red }) => (
           <button className={'cx-row' + (soon || dis ? ' soon' : '') + (red ? ' red' : '') + (sub && stageCtx.sub === sub ? ' open' : '')} data-testid={tid} onMouseEnter={hov(sub || null)}
@@ -6995,9 +7072,26 @@ export default function App() {
         );
         const subTop = Math.max(4, Math.min(stageCtx.subY - 6, window.innerHeight - 220));
         const num = stageCtx.num;
-        const fillSub = <>
+        const ovR = lay && lay.ovRaw;   // ➕ 삽입이면 원본 값(오른쪽 도구 막대에서 연 칸)
+        const ovLook = (patch) => overlayOp({ shortsNum: pr.shortsNum, op: 'look', id: ovR.id, patch });
+        const fillSub = ovR ? <>
+          <Row icon={!(ovR.fill === 'cover' && !ovR.box) ? '✓' : ''} label="맞추기" tid="sx-fill-contain" onClick={run(() => ovLook({ fill: 'contain' }))} />
+          <Row icon={ovR.fill === 'cover' && !ovR.box ? '✓' : ''} label="꽉 채우기" tid="sx-fill-cover" onClick={run(() => ovLook({ fill: 'cover' }))} />
+        </> : <>
           {VLook.FILLS.map((f) => <Row key={f.id} icon={lk && lk.fill === f.id ? '✓' : ''} label={f.label} tid={'sx-fill-' + f.id} dis={!grp} onClick={run(() => setGroupLook(pr.shortsNum, num, { fill: f.id }))} />)}
         </>;
+        const sldRow = (label, min, max, val, tid, onVal, edge) => (
+          <div className="cx-sld" key={label}><span>{label}</span>
+            <input type="range" min={min} max={max} defaultValue={val} data-testid={tid} data-edge={edge} onInput={(e) => { const v = +e.currentTarget.value; e.currentTarget.nextSibling.textContent = v + '%'; onVal(v, e.currentTarget); }} /><b>{val}%</b></div>
+        );
+        const cropNow = (ovR && ovR.crop) || { t: 0, r: 0, b: 0, l: 0 };
+        const cropSet = (edge, el) => {
+          const box = el.closest('.cx-crop'); const g = (k) => +box.querySelector('[data-edge=' + k + ']').value;
+          const c = { t: g('t'), r: g('r'), b: g('b'), l: g('l') };
+          const other = { t: 'b', b: 't', l: 'r', r: 'l' }[edge];
+          if (c[edge] + c[other] > 90) { c[edge] = 90 - c[other]; el.value = c[edge]; el.nextSibling.textContent = c[edge] + '%'; }
+          ovLook({ crop: { t: c.t / 100, r: c.r / 100, b: c.b / 100, l: c.l / 100 } });
+        };
         return (<>
           <div className="vr-menu-bg" data-testid="sx-bg" onMouseDown={() => setStageCtx(null)} onContextMenu={(e) => { e.preventDefault(); setStageCtx(null); }} />
           {!stageCtx.only && <div className="vr-menu clip-ctx" data-testid="stage-ctx" style={{ left, top, width: W }} onMouseDown={(e) => e.preventDefault()}>
@@ -7010,22 +7104,44 @@ export default function App() {
             <Row icon="🗑" label="삭제" red dis={!grp} tid="sx-del" onClick={run(() => stageDeleteImage(num))} />
             <div className="vr-sep" />
             <Row icon="🎬" label="비디오 생성" sub="vid" dis={!grp} tid="sx-vid" />
-            <Row icon="⛶" label="채우기" sub="fill" dis={!grp} tid="sx-fill" />
+            <Row icon="⛶" label="채우기" sub="fill" dis={!grp && !ovR} tid="sx-fill" />
             <Row icon="☰" label="순서" sub="ord" tid="sx-ord" />
           </div>}
-          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 160)) : subTop, width: SW }} onMouseDown={(e) => e.preventDefault()}>
+          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 220)) : subTop, width: SW }} onMouseDown={(e) => { if (stageCtx.sub !== 'opac' && stageCtx.sub !== 'crop') e.preventDefault(); }}>
             {stageCtx.sub === 'fill' && fillSub}
             {stageCtx.sub === 'vid' && <>
               <Row icon="🎬" label={'AI 비디오 G' + num} tid="sx-vid-ai" onClick={run(() => runGroupVid(pr.shortsNum, num))} />
               <Row icon="🖥" label="PC 에서 불러오기" tid="sx-vid-pc" onClick={run(() => attachAsset(pr.shortsNum, num))} />
             </>}
-            {stageCtx.sub === 'ord' && <>
+            {stageCtx.sub === 'ord' && (ovR ? <>
+              <Row icon="⇧" label="맨 앞으로" tid="sx-ord-front" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'front' }))} />
+              <Row icon="↑" label="앞으로" tid="sx-ord-up" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'up' }))} />
+              <Row icon="↓" label="뒤로" tid="sx-ord-down" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'down' }))} />
+              <Row icon="⇩" label="맨 뒤로" tid="sx-ord-back" onClick={run(() => overlayOp({ shortsNum: pr.shortsNum, op: 'order', id: ovR.id, dir: 'back' }))} />
+            </> : <>
+              {/* 🖼 그룹 그림(삽입이 아닌 본 그림) 순서 = 그룹 look.layer → core/visual-span.groupRanks 한 곳 */}
               <Row icon="⇧" label="맨 앞으로" dis={!grp} tid="sx-ord-front" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: 99 }))} />
               <Row icon="↑" label="앞으로" dis={!grp} tid="sx-ord-up" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: Math.min(98, ((lk && lk.layer) || 0) + 1) }))} />
               <Row icon="↓" label="뒤로" dis={!grp} tid="sx-ord-down" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: Math.max(-98, ((lk && lk.layer) || 0) - 1) }))} />
               <Row icon="⇩" label="맨 뒤로" dis={!grp} tid="sx-ord-back" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: -99 }))} />
               <Row icon="↺" label="순서 원래대로" dis={!grp || !(lk && lk.layer)} tid="sx-ord-reset" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: 0 }))} />
+            </>)}
+            {ovR && stageCtx.sub === 'motion' && VLook.MOTIONS.filter((m) => m.id !== 'auto').map((m) => <Row key={m.id} icon={(ovR.motion || 'none') === m.id ? '✓' : ''} label={m.label} tid={'sx-motion-' + m.id} onClick={run(() => ovLook({ motion: m.id === 'none' ? '' : m.id }))} />)}
+            {ovR && stageCtx.sub === 'flip' && <>
+              <Row icon={ovR.flipH ? '✓' : ''} label="좌우 반전" tid="sx-flip-h" onClick={run(() => ovLook({ flipH: !ovR.flipH }))} />
+              <Row icon={ovR.flipV ? '✓' : ''} label="상하 반전" tid="sx-flip-v" onClick={run(() => ovLook({ flipV: !ovR.flipV }))} />
             </>}
+            {ovR && stageCtx.sub === 'opac' && <>
+              {sldRow('불투명도', 0, 100, ovR.opacity != null ? ovR.opacity : 100, 'sx-opac', (v) => ovLook({ opacity: v }))}
+              <Row icon="" label="100% 로 되돌리기" tid="sx-opac-reset" onClick={run(() => ovLook({ opacity: 100 }))} />
+            </>}
+            {ovR && stageCtx.sub === 'crop' && <div className="cx-crop">
+              {sldRow('위', 0, 80, Math.round(cropNow.t * 100), 'sx-crop-t', (v, el) => cropSet('t', el), 't')}
+              {sldRow('아래', 0, 80, Math.round(cropNow.b * 100), 'sx-crop-b', (v, el) => cropSet('b', el), 'b')}
+              {sldRow('왼쪽', 0, 80, Math.round(cropNow.l * 100), 'sx-crop-l', (v, el) => cropSet('l', el), 'l')}
+              {sldRow('오른쪽', 0, 80, Math.round(cropNow.r * 100), 'sx-crop-r', (v, el) => cropSet('r', el), 'r')}
+              <Row icon="" label="자르기 없애기" tid="sx-crop-reset" onClick={run(() => ovLook({ crop: null }))} />
+            </div>}
           </div>}
         </>);
       })()}
@@ -7063,7 +7179,7 @@ export default function App() {
             <label>자리 <select data-testid="text-pos" value={textIns.o.pos} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, pos: e.target.value } })}>{TxO.POS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
             <label><input type="checkbox" data-testid="text-bold" checked={textIns.o.bold} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, bold: e.target.checked } })} /> 굵게</label>
             <label><input type="checkbox" data-testid="text-box" checked={!!textIns.o.box} onChange={(e) => setTextIns({ ...textIns, o: { ...textIns.o, box: e.target.checked ? 'rgba(20,20,20,0.78)' : '' } })} /> 어두운 상자</label>
-            <canvas ref={textCvRef} data-testid="text-preview" style={{ width: '100%', background: 'repeating-conic-gradient(#555 0 25%, #777 0 50%) 0 0/16px 16px', borderRadius: 6 }} />
+            <canvas ref={textCvRef} data-testid="text-preview" style={{ width: '100%', background: 'repeating-conic-gradient(var(--bg-555555,#555) 0 25%, var(--bg-777777,#777) 0 50%) 0 0/16px 16px', borderRadius: 6 }} />
             <span className="meta">글은 투명 그림 한 장으로 만들어 고른 클립 구간 <b>위층</b>에 넣습니다(➕ 삽입과 같은 그림 · 범위·순서·지우기도 같음) — 넣은 뒤 ① 칸에서 끌어 자리·크기를 바꿀 수 있고, 글을 고치려면 지우고 다시 넣습니다 · 화이트보드 MP4 에는 들어가지 않습니다</span>
             <div className="zr-btns"><button data-testid="text-run" disabled={textIns.busy || !textIns.o.text.trim()} onClick={textInsRun}>넣기</button><button className="ghost" data-testid="text-close" onClick={() => setTextIns(null)}>닫기</button></div>
           </div>}
@@ -7683,7 +7799,7 @@ export default function App() {
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
                       <select value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <EngineOptions kind="image" cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
+                        <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
@@ -7870,26 +7986,40 @@ export default function App() {
         </div>
       )}
 
+      {thumbEd && <ThumbEditor data={thumbEd} onClose={() => setThumbEd(null)} onSaved={loadThumbs} />}
       {todayPick && (
         <div className="modal-bg show" data-testid="today-pick">
-          <div className="modal-card wide" style={{ maxHeight: '75vh', display: 'flex', flexDirection: 'column' }}>
-            <h3>📅 오늘 작업할 대본{todayPick.today ? ` (${todayPick.today})` : ''}</h3>
-            {todayPick.loading ? <div className="meta">채널 대본 폴더를 찾는 중…</div> : (<>
-              <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {!(todayPick.items || []).length && <div className="meta">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
-                {(todayPick.items || []).map((x) => (
-                  <label key={x.path} className="frow" style={{ gap: 8, alignItems: 'center', cursor: 'pointer' }} title={x.path}>
-                    <input type="checkbox" checked={!!todayPick.sel[x.path]} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
-                    <span style={{ flex: '0 0 150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.channel}</span>
-                    <span style={{ flex: '0 0 48px' }}>{x.date.slice(5).replace('-', '')}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span>
-                    <span className="meta" style={{ flex: '0 0 auto' }}>{x.inQueue ? '이미 큐에 있음' : x.waiting ? `뒤로 ${x.waiting}편` : ''}</span>
-                  </label>
-                ))}
-                {(todayPick.empty || []).length > 0 && <div className="meta" style={{ marginTop: 6 }}>없음: {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
+          <div className="modal-card wide today-card">
+            <div className="today-head">
+              <h3>📅 오늘 작업할 대본</h3>
+              {todayPick.today && <span className="today-date">{todayPick.today}</span>}
+            </div>
+            {todayPick.loading ? <div className="today-empty">채널 대본 폴더를 찾는 중…</div> : (<>
+              <div className="today-sub">
+                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path]).length} / {(todayPick.items || []).length}편 선택</span>
+                {(todayPick.items || []).length > 0 && (() => {
+                  const all = (todayPick.items || []).every((x) => todayPick.sel[x.path]);
+                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
+                })()}
               </div>
+              <div className="today-list">
+                {!(todayPick.items || []).length && <div className="today-empty">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
+                {(todayPick.items || []).map((x) => {
+                  const on = !!todayPick.sel[x.path];
+                  return (
+                    <label key={x.path} className={`today-row${on ? ' on' : ''}`} title={x.path}>
+                      <input type="checkbox" checked={on} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
+                      <span className="today-ch">{x.channel}</span>
+                      <span className="today-md">{x.date.slice(5).replace('-', '')}</span>
+                      <span className="today-name">{x.name}</span>
+                      {x.inQueue ? <span className="today-tag q">이미 큐에 있음</span> : x.waiting ? <span className="today-tag">뒤로 {x.waiting}편</span> : null}
+                    </label>
+                  );
+                })}
+              </div>
+              {(todayPick.empty || []).length > 0 && <div className="today-none"><b>없음</b> {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
             </>)}
-            <div className="modal-actions">
+            <div className="modal-actions today-actions">
               <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
               <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path])} onClick={addTodayScripts}>작업큐에 넣기</button>
             </div>
@@ -8266,6 +8396,7 @@ export default function App() {
                 <Hint>PC 를 바꿨다면 primingwave.com 「🖥 내 기기」에서 쓰지 않는 PC 를 해제하세요.</Hint>
                 {lic.owner && <div className="frow"><label>👑 관리자</label><span style={{ flex: 1 }} className="meta">회원·기기 · 크레딧 지급 · 오류 로그</span>
                   <button className="ghost" data-testid="open-admin" style={{ flex: '0 0 auto' }} onClick={() => api.licenseOpenAdmin()}>관리자 페이지 열기</button></div>}
+                {!lic.admin && <Upsell />}
                 <div className="frow"><label>오류 로그</label>
                   <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" data-testid="autolog" checked={lic.autoLog !== false} onChange={async (e) => setLic(await api.licenseSetAutoLog(e.target.checked))} /> 오류가 나면 로그를 자동으로 보냅니다</label></div>
                 <Hint>오류가 난 앞뒤 로그(최근 200줄)를 보내 문제를 고치는 데 씁니다. API 키·이메일·전화번호·사용자 폴더 이름은 <b>지운 뒤</b> 보내고, 30일 뒤 지웁니다.</Hint>
@@ -8389,7 +8520,7 @@ export default function App() {
           onClose={() => setMp3Prog(null)} />
       )}
       {urlProg && !urlOpen && (
-        <UrlProgress prog={urlProg}
+        <UrlProgress prog={urlProg} onRetry={retryUrlFails}
           onAbort={() => { api.dlAbort(); setUrlProg((p) => (p ? { ...p, phase: 'aborting' } : p)); }}
           onClose={() => setUrlProg(null)} />
       )}
@@ -8453,10 +8584,11 @@ export default function App() {
                 <span style={{ flex: 1 }} />
                 <button className="ghost" disabled={urlBusy} data-testid="dl-copy-subs" onClick={copyUrlSubtitles} title="영상 한 개의 자막을 시간 정보 없이 복사합니다. 기본은 원본 언어이며 자막 저장 옵션에서 언어·트랙을 선택할 수 있습니다.">📋 자막 복사</button>
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>
+                {dlStopButton()}
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
               {subtitleCopyMessage && <p role="status" data-testid="dl-copy-status">{subtitleCopyMessage}</p>}
-              {urlProg && <UrlProgress embedded prog={urlProg} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
+              {urlProg && <UrlProgress embedded prog={urlProg} onRetry={retryUrlFails} onAbort={() => { api.dlAbort(); setUrlProg((p) => p ? { ...p, phase: 'aborting' } : p); }} onClose={() => setUrlProg(null)} />}
             </div>)}
             {dlTab === 'file' && (<div className="dl-body">
               <div className="dl-tiles">
@@ -8471,6 +8603,7 @@ export default function App() {
                 <span style={{ flex: 1 }} />
                 <button data-testid="dl-file-run" disabled={!fileMp3 && !fileStt} onClick={runFileJob}>📂 파일 고르기</button>
                 <Hint>이 PC 의 음성·영상 파일을 고릅니다(여러 개 가능).</Hint>
+                {dlStopButton()}
                 <button className="ghost" onClick={() => setUrlOpen(false)}>닫기</button>
               </div>
             </div>)}
@@ -8711,13 +8844,14 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, on
     <div className="qlist" data-testid="q-list">
       <span className="qlabel">작업 순서 ({items.length}){mixed ? <span className="qmix" title="채널이 섞여 있습니다 — 목소리·스타일·자막·완성 종류는 대본마다 자기 채널, 이미지·비디오 도구는 헤더에서 고른 것"> · 🔀 채널 {chs.size}개</span> : null}</span>{onBackup ? <button className="qx" data-testid="backup-open" style={{ marginLeft: 4 }} title="🕘 백업 — 대본마다 10분 간격으로 남긴 대본(.md)·작업본에서 고른 시각으로 되살립니다(되살리기 전 상태도 남깁니다)" onClick={onBackup}>🕘</button> : null}
       <div className="qrows">
-        {items.map((it) => {
+        {items.map((it, qi) => {
           const ch = (it.settings && it.settings.presetName) || '';
           const run = it.run && it.run.startedAt ? ((Number(it.run.elapsedMs) || 0) + (it.run.endedAt || Date.now()) - it.run.startedAt) : null;
           return (
             <div key={it.id} data-testid="q-row" className={'qrow' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
               title={(it.file || it.title) + (ch ? `\n채널: ${ch}` : '') + (it.upload && it.upload.url ? `\n${it.upload.url}` : '') + (it.upload && it.upload.error ? `\n업로드 실패: ${it.upload.error}` : '')}
               onClick={() => { if (!it.active) onSelect(it.id); }}>
+              <span className="qnum" data-testid="q-num">{qi + 1}</span>{/* 🔢 순번(v0.9.110 · 로이 「앞부분에 넘버링」) */}
               <span className="qbadges">{queueBadges(it, makeProg, stageRun).map(([t, c], i) => <span key={i} className={'qb ' + c}>{t}</span>)}</span>
               {mixed && ch ? <span className={'qch' + (ch === headerCh ? '' : ' other')}>{short(ch)}</span> : null}
               <span className="qttl">{it.title}</span>
@@ -9343,7 +9477,7 @@ function layersAtOrd(pr, ord, rg) {
   out.sort((x, y) => x.rank - y.rank);
   for (const v of ((pr && pr.overlays) || [])) {
     if (v.kind === 'audio' || !ovIn(v, ord, rg)) continue;
-    out.push({ key: 'o' + v.id, video: v.kind === 'video', file: v.file, version: v.version, box: v.box || null, fit: 'contain', startOrd: v.from });
+    out.push({ key: 'o' + v.id, video: v.kind === 'video', file: v.file, version: v.version, box: v.box || null, fit: 'contain', startOrd: v.from, flipH: !!v.flipH, flipV: !!v.flipV });
   }
   return out;
 }
@@ -9570,10 +9704,17 @@ function RailLayer({ pr, drag, pending, onGrab }) {
       out.push({ num: c.num, from: r.from, to: r.to, gs, ge, has: !!(c.imagePath || c.videoPath), live: !!d,
         top: Math.round(a.top - G.top), bot: Math.round(b.bottom - G.top), ownTop: Math.round(a2.top - G.top), ownBot: Math.round(b2.bottom - G.top), x: Math.round(cut.getBoundingClientRect().left - G.left) });
     }
-    setGeo((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+    setGeo((prev) => (sameGeo(prev, out) ? prev : out));   // 1~2px 흔들림은 같은 값(재기↔다시 그리기가 끝없이 도는 React #185 막기 · core/rail-geo)
   };
-  useLayoutEffect(measure);
   const measureRef = useRef(measure); measureRef.current = measure;   // 스크롤·크기 변경은 늘 지금 그린 것(대본·끌기 상태)으로 잰다
+  // 한 프레임에 연달아 재는 횟수를 막는다 — 넘으면 다음 프레임에 한 번만(그래도 화면 전체가 지워지는 일은 없다)
+  const guardRef = useRef(null); if (!guardRef.current) guardRef.current = frameGuard((f) => requestAnimationFrame(f));
+  const deferRef = useRef(0);
+  useLayoutEffect(() => {
+    if (guardRef.current.allow()) { measure(); return; }
+    if (!deferRef.current) deferRef.current = requestAnimationFrame(() => { deferRef.current = 0; guardRef.current.reset(); measureRef.current(); });
+  });
+  useEffect(() => () => { if (deferRef.current) cancelAnimationFrame(deferRef.current); }, []);
   useEffect(() => {
     const grid = ref.current && ref.current.parentElement;
     if (!grid || typeof ResizeObserver === 'undefined') return undefined;
@@ -9651,8 +9792,12 @@ function insMarksAt(pr, lines, n) {
   return L.filter((x) => !x.broken && ovClips(lines, x).f === n);
 }
 function ovAsLayer(o) {
+  // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다) · 자르기·꽉 채우기는 원본 크기(dim)로 자리를 계산한다(VLook.ovBox — .vrew·MP4 와 같은 식 · 16:9 기준)
+  const d = o.dim, cr = o.crop || null, op = o.opacity != null ? o.opacity : 100;
+  const box = (o.box || (d && (cr || o.fill === 'cover'))) ? VLook.ovBox(o, d ? d.w : 0, d ? d.h : 0, 1920, 1080) : null;
   return { num: 'O' + o.id, ovId: o.id, once: !!o.once, ovFrom: o.from, ovVol: o.kind === 'video' ? (o.volume == null ? 100 : o.volume) : 0, imagePath: o.kind === 'image' ? o.file : null, videoPath: o.kind === 'video' ? o.file : null,
-    imageVersion: o.version, videoVersion: o.version, look: o.box ? { motion: 'none', box: o.box } : { motion: 'none', fill: 'contain' } };   // 자리가 없으면 화면 가득(비율이 다르면 맞추기 — vrew-builder 와 같다)
+    imageVersion: o.version, videoVersion: o.version, ovKind: o.kind, ovRaw: o,
+    look: { motion: o.kind === 'image' && o.motion ? o.motion : 'none', ...(o.flipH ? { flipH: true } : {}), ...(o.flipV ? { flipV: true } : {}), ...(box ? { box } : { fill: 'contain' }), ...(cr ? { crop: cr } : {}), ...(op < 100 ? { opacity: op } : {}) } };
 }
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
 function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {
@@ -9859,8 +10004,12 @@ function drawInfoPanels(ctx, panels, cw, ch, which) {
       const lines = q.lines || [], fs = q.fs * kx, lh = q.fs * 1.22 * ky;
       ctx.save(); ctx.font = `700 ${fs}px ${fam}`; ctx.fillStyle = col(q.color, q.op);
       if ('letterSpacing' in ctx) ctx.letterSpacing = q.sp ? `${q.sp * kx}px` : '0px';
-      ctx.textBaseline = 'middle'; ctx.textAlign = q.an === 5 ? 'center' : 'left';
-      lines.forEach((l, i) => ctx.fillText(l, q.x * kx, q.y * ky + (i - (lines.length - 1) / 2) * lh));
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      lines.forEach((l, i) => {
+        const runs = (q.runs && q.runs[i]) || [{ t: l }], y = q.y * ky + (i - (lines.length - 1) / 2) * lh;   // 🔢 숫자 조각은 강조색(v0.9.106)
+        let x = q.x * kx - (q.an === 5 ? ctx.measureText(l).width / 2 : 0);
+        for (const r of runs) { ctx.fillStyle = col(r.c || q.color, q.op); ctx.fillText(r.t, x, y); x += ctx.measureText(r.t).width; }
+      });
       ctx.restore();
     }
   }

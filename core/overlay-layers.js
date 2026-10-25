@@ -11,6 +11,7 @@
  *   ⚠ 렌더러가 import 하지 않는다(렌더러는 DTO 의 from/to 만 쓴다).
  */
 const VS = require('./visual-span');
+const VL = require('./visual-look');
 
 const IMG_EXT = /\.(png|jpe?g|webp)$/i, VID_EXT = /\.(mp4|mov|webm|m4v)$/i, AUD_EXT = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
 function kindOf(file) { return VID_EXT.test(file || '') ? 'video' : (IMG_EXT.test(file || '') ? 'image' : (AUD_EXT.test(file || '') ? 'audio' : null)); }
@@ -73,6 +74,19 @@ function idsFromGroups(pr, fromNum, toNum) {
 }
 /** 문장 id → 그 문장이 든 그룹 번호 */
 function groupNumOf(pr, sid) { const g = pr.groups.find((x) => (x.sentenceIds || []).includes(sid)); return g ? g.num : null; }
+/** 🖼 모양 필드(채우기·반전·움직임·불투명도·자르기 · 원본 크기 dim) — 기본값이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로 · visual-look 참고) */
+function lookFields(o) {
+  const out = {};
+  if (!o) return out;
+  if (o.fill === 'cover') out.fill = 'cover';
+  if (o.flipH) out.flipH = true;
+  if (o.flipV) out.flipV = true;
+  const mo = VL.normOvMotion(o.motion); if (mo) out.motion = mo;
+  const op = VL.normOpacity(o.opacity); if (op < 100) out.opacity = op;
+  const cr = VL.normCrop(o.crop); if (cr) out.crop = cr;
+  const d = o.dim; if (d && d.w > 0 && d.h > 0) out.dim = { w: Math.round(d.w), h: Math.round(d.h) };
+  return out;
+}
 /** DTO — 화면용(그룹 번호 · 편 문장 번호 1부터) */
 function toDTO(pr) {
   const c = VS.orderOf(pr);
@@ -80,13 +94,13 @@ function toDTO(pr) {
     const r = rangeOf(pr, ov, c);
     return { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : null), total: c.order.length,
       fromGroup: r ? groupNumOf(pr, c.order[r.a]) : null, toGroup: r ? groupNumOf(pr, c.order[r.b]) : null,
-      from: r ? r.a + 1 : null, to: r ? r.b + 1 : null, sc: ov.sc > 0 ? ov.sc : 0, ec: ov.ec != null ? ov.ec : null, broken: !r, once: !!ov.once };
+      from: r ? r.a + 1 : null, to: r ? r.b + 1 : null, sc: ov.sc > 0 ? ov.sc : 0, ec: ov.ec != null ? ov.ec : null, broken: !r, once: !!ov.once, ...lookFields(ov) };
   });
 }
 /** 작업본 저장·복원 — 순번으로 */
 function toSnap(pr) {
   const c = VS.orderOf(pr);
-  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : undefined), ...(ov.once ? { once: true } : {}), ...clipChars(ov.sc, ov.ec), from: r.a, to: r.b } : null; }).filter(Boolean);
+  return (pr.overlays || []).map((ov) => { const r = rangeOf(pr, ov, c); return r ? { id: ov.id, file: ov.file, name: ov.name || null, kind: ov.kind, box: ov.box || null, volume: ov.kind === 'audio' ? normVol(ov.volume) : (ov.kind === 'video' ? volOfVideo(ov.volume) : undefined), ...(ov.once ? { once: true } : {}), ...lookFields(ov), ...clipChars(ov.sc, ov.ec), from: r.a, to: r.b } : null; }).filter(Boolean);
 }
 function fromSnap(pr, list) {
   if (!Array.isArray(list) || !list.length) return;
@@ -95,7 +109,7 @@ function fromSnap(pr, list) {
   for (const o of list) {
     if (!o || !o.file) continue;
     const a = Math.max(0, Math.min(n - 1, o.from | 0)), b = Math.max(a, Math.min(n - 1, o.to | 0));
-    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, ...(o.kind === 'audio' ? { volume: normVol(o.volume) } : (o.kind === 'video' ? { volume: volOfVideo(o.volume) } : {})), kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), ...(o.once ? { once: true } : {}), ...clipChars(o.sc, o.ec), startId: c.order[a], endId: c.order[b] });
+    out.push({ id: o.id || ('ov' + Math.random().toString(36).slice(2, 8)), file: o.file, name: o.name || null, ...(o.kind === 'audio' ? { volume: normVol(o.volume) } : (o.kind === 'video' ? { volume: volOfVideo(o.volume) } : {})), kind: o.kind || kindOf(o.file) || 'image', box: normBox(o.box), ...(o.once ? { once: true } : {}), ...lookFields(o), ...clipChars(o.sc, o.ec), startId: c.order[a], endId: c.order[b] });
   }
   if (out.length) pr.overlays = out;
 }
@@ -107,6 +121,8 @@ function remapIds(pr, map) {
     if (map.has(ov.endId)) { if (map.get(ov.endId) !== ov.endId) delete ov.ec; ov.endId = map.get(ov.endId); }
   }
 }
+/** 되돌리기·복제용 — 안의 객체(box·crop·dim)까지 새로 */
+function cloneOv(o) { return { ...o, box: o.box ? { ...o.box } : null, ...(o.crop ? { crop: { ...o.crop } } : {}), ...(o.dim ? { dim: { ...o.dim } } : {}) }; }
 function normBox(b) {
   if (!b) return null;
   const n = (v) => (typeof v === 'number' && isFinite(v) ? v : NaN);
@@ -181,4 +197,4 @@ function effLogo(base, pr) {
   return { enabled: true, path: p, side: 'right', size: b.size || 0.12, over: true, pos: b.pos || null };
 }
 
-module.exports = { clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, chanLogoPos, posOfLogo, logoOptsOf, normLogoOver, effLogo, IMG_EXT, VID_EXT };
+module.exports = { lookFields, cloneOv, clipChars, coversLine, applyIds, volOfVideo, normVol, idsFromOrds, AUD_EXT, kindOf, rangeOf, bySentence, idsFromGroups, groupNumOf, toDTO, toSnap, fromSnap, remapIds, normBox, logoBox, normLogoPos, chanLogoPos, posOfLogo, logoOptsOf, normLogoOver, effLogo, IMG_EXT, VID_EXT };

@@ -46,7 +46,7 @@ export default function InfoPreview({ panels, testid = 'stage-info', onPanelDown
           )}
           {(p.prims || []).map((q, i) => {
             if (q.k === 'rect') {
-              return <div key={i} style={{ position: 'absolute', left: (q.x / (W / 100)) + '%', top: (q.y / (H / 100)) + '%', width: (q.w / (W / 100)) + '%', height: (q.h / (H / 100)) + '%', background: rgba(q.color, q.op), borderRadius: q.r ? px(q.r) : 0, zIndex: q.layer }} />;
+              return <div key={i} data-testid={q.onS ? 'info-hi' : undefined} style={{ position: 'absolute', left: (q.x / (W / 100)) + '%', top: (q.y / (H / 100)) + '%', width: (q.w / (W / 100)) + '%', height: (q.h / (H / 100)) + '%', background: rgba(q.color, q.op), borderRadius: q.r ? px(q.r) : 0, zIndex: q.layer }} />;
             }
             if (q.k === 'check') {
               const pts = CHECK_POLY.map(([x, y]) => `${(x * q.size).toFixed(1)},${(y * q.size).toFixed(1)}`).join(' ');
@@ -54,7 +54,9 @@ export default function InfoPreview({ panels, testid = 'stage-info', onPanelDown
             }
             // 글자 — an4 = 왼쪽 가운데 기준 · an5 = 가운데 기준
             const center = q.an === 5;
-            return <div key={i} style={{ position: 'absolute', left: (q.x / (W / 100)) + '%', top: (q.y / (H / 100)) + '%', transform: center ? 'translate(-50%,-50%)' : 'translate(0,-50%)', textAlign: center ? 'center' : 'left', whiteSpace: 'pre', fontWeight: 700, fontFamily: infoFontFamily(), lineHeight: 1.22, fontSize: px(q.fs), letterSpacing: q.sp ? px(q.sp) : undefined, color: rgba(q.color, q.op), zIndex: q.layer }}>{(q.lines || []).join('\n')}</div>;
+            return <div key={i} style={{ position: 'absolute', left: (q.x / (W / 100)) + '%', top: (q.y / (H / 100)) + '%', transform: center ? 'translate(-50%,-50%)' : 'translate(0,-50%)', textAlign: center ? 'center' : 'left', whiteSpace: 'pre', fontWeight: 700, fontFamily: infoFontFamily(), lineHeight: 1.22, fontSize: px(q.fs), letterSpacing: q.sp ? px(q.sp) : undefined, color: rgba(q.color, q.op), zIndex: q.layer }}>
+              {q.runs ? (q.lines || []).map((l, li) => <React.Fragment key={li}>{li ? '\n' : ''}{((q.runs[li]) || [{ t: l }]).map((r, ri) => (r.c ? <span key={ri} data-testid="info-num" style={{ color: rgba(r.c, q.op) }}>{r.t}</span> : r.t))}</React.Fragment>) : (q.lines || []).join('\n')}
+            </div>;
           })}
         </div>
       ))}

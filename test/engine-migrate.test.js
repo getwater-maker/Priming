@@ -65,4 +65,18 @@ assert.match(app, /const normImgEngine = \(v\) => EM\.migrateImage\(v\)\.v;/);
 assert.match(app, /const normVideoEngine = \(v\) => EM\.migrateVideo\(/);
 ok('main·화면 입구가 core/engine-migrate 를 거친다');
 
-console.log(`\n${n}/5 통과`);
+// [6] 👑 관리자 전용 🖥 로컬 Qwen-Image 2.1(v0.9.109) — 이전 규칙이 되돌리지 않고 · 화면은 관리자에게만 · main 은 회원이면 AI 이미지로
+{
+  const m = EM.migrateImage(EM.LOCAL_QWEN); assert.equal(m.v, EM.LOCAL_QWEN); assert.equal(m.from, '');
+  const p = { imgEngine: EM.LOCAL_QWEN }; assert.equal(EM.migratePreset(p).length, 0); assert.equal(p.imgEngine, EM.LOCAL_QWEN);
+  assert.ok(!EM.isComfy(EM.LOCAL_QWEN), 'comfy 꼴이면 위 이전 규칙에 걸린다');
+  assert.match(app, /const localQwen = !isVid && owner;/, '화면 항목이 관리자 조건 뒤에 있지 않다');
+  assert.equal((app.match(/<EngineOptions kind="image" owner=\{owner\}/g) || []).length, 2, '헤더·채널 편집 두 곳 모두 owner 를 넘겨야 한다');
+  assert.match(main, /isLocalQwen\(startEngine\)\) \{\n    if \(isOwner\(\)\) \{/, '이미지 입구가 관리자인지 보지 않는다');
+  assert.match(main, /runComfyImages\([^\n]*, retryLevel, force, true\)\);/, '로컬 강제(forceLocal) 없이 부른다 — 설정 파일이 클라우드면 클라우드로 간다');
+  assert.match(main, /function _imgUsesLocalGpu\(engine\) \{\n  if \(require\('\.\/core\/engine-migrate'\)\.isLocalQwen\(engine\)\) return isOwner\(\);/, 'GPU 레인 판정에 로컬 Qwen 이 없다(TTS 와 겹친다)');
+  assert.match(main, /const _imgLocalGpu = _imgUsesLocalGpu\(engine\);/, '⚡ 만들기의 GPU 판정이 한 곳을 거치지 않는다');
+}
+ok('👑 로컬 Qwen-Image 2.1 = 관리자 전용 · 이전 규칙 예외 · 이 PC GPU 레인');
+
+console.log(`\n${n}/6 통과`);

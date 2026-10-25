@@ -19,9 +19,14 @@ const SUPABASE_URL = 'https://tvvcwhxullrwpsitmyep.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_feodjOad34xOpdoIcRp8IQ_TgcI2k80';
 const UPDATE_BASE = 'https://updates.primingwave.com';
 const SITE_DEVICES = 'https://www.primingwave.com/member/devices';
+const SITE_CHARGE = 'https://www.primingwave.com/member/credits';   // 💳 회원 크레딧 충전 페이지(wise-priming 에 요청 — 2026-10-23 · 주소가 다르게 정해지면 여기 한 곳만 고친다)
 const SITE_ADMIN = 'https://www.primingwave.com/admin/priming';   // 👑 관리자 화면(회원·기기·포인트 지급·오류) — wise-priming src/app/admin/priming · 로그인은 사이트 관리자 계정
+// 📜 약관 동의 버전 — 사이트 consent.ts(TERMS_VERSION·PRIVACY_VERSION)와 같아야 사이트 ConsentGate 가 다시 묻지 않는다(개정되면 여기 한 곳만 고친다 · wise-priming 약속 2026-10-23)
+const CONSENT = { terms: '2026-10-06', privacy: '2026-10-08' };
 const GRACE_MS = 7 * 24 * 3600 * 1000;
 
+// 앱이 열어 주는 사이트 주소는 우리 도메인(https)만 — 서버 값에 낯선 주소가 섞여도 열지 않는다
+const isSiteUrl = (u) => { try { const x = new URL(String(u)); return x.protocol === 'https:' && /^(www\.)?primingwave\.com$/.test(x.hostname); } catch (_) { return false; } };
 const apiBase = () => process.env.PM_LICENSE_API || SUPABASE_URL;
 const updateBase = () => process.env.PM_UPDATE_BASE || UPDATE_BASE;
 const defaultDir = () => process.env.PM_LICENSE_DIR || path.join(os.homedir(), '.priming-maker', 'license');
@@ -80,6 +85,68 @@ function createLicense(opts = {}) {
     saveSession(sessFrom(j));
     return check();
   }
+  // 🆕 앱 안 회원가입(v0.9.98 · 로이 2026-10-23 「앱 비밀번호 따로 정하기 불편」) — 이메일·비밀번호로 바로 가입. 이메일 확인이 켜져 있으면 세션이 오지 않는다(confirm_mail).
+  async function signup(email, password, opts = {}) {
+    const em = String(email || '').trim();
+    if (!/^\S+@\S+\.\S+$/.test(em)) return { ok: false, reason: 'bad_email' };
+    if (String(password || '').length < 6) return { ok: false, reason: 'weak_password' };
+    let r;
+    try { r = await doFetch(`${apiBase()}/auth/v1/signup`, { method: 'POST', headers: H(), body: JSON.stringify({ email: em, password: String(password) }) }); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    const msg = String((j && (j.msg || j.message || j.error_description || j.error_code)) || '');
+    if (!r.ok) {
+      if (/already|registered|exists/i.test(msg)) return { ok: false, reason: 'already_registered' };
+      if (/weak|short|at least|password/i.test(msg)) return { ok: false, reason: 'weak_password' };
+      if (r.status === 429 || /rate|too many/i.test(msg)) return { ok: false, reason: 'rate_limited' };
+      return { ok: false, reason: 'server' };
+    }
+    if (opts.consent) writeState({ consentPending: em.toLowerCase() });   // 동의는 세션이 생긴 첫 로그인 직후 서버에 남긴다(확인 메일을 거치면 그때)
+    if (!j.access_token) {   // 이메일 확인 대기 — 이미 가입된 주소도 같은 응답(계정 존재 노출 방지)
+      return { ok: false, reason: 'confirm_mail', email: em };
+    }
+    saveSession(sessFrom(j));
+    return { ok: true, signedUp: true };
+  }
+  // 🆕 가입 코드 사용 — 서버 RPC priming_redeem_code(p_code): 코드에 정해진 일수만큼 priming-app 이용 기간을 만든다(이미 회원이면 연장). 약속 = docs/요청서_wise-priming-앱가입.md
+  async function redeem(code) {
+    const c = String(code || '').trim();
+    if (!c) return { ok: false, reason: 'no_code' };
+    const tok = await accessToken();
+    if (!tok) return { ok: false, reason: 'logged_out' };
+    let r, j;
+    try { r = await doFetch(`${apiBase()}/rest/v1/rpc/priming_redeem_code`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_code: c }) }); j = await r.json().catch(() => ({})); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    if (r.status === 404) return { ok: false, reason: 'redeem_unavailable' };
+    if (r.status === 401) return { ok: false, reason: 'logged_out' };
+    if (!r.ok || !j || typeof j !== 'object') return { ok: false, reason: 'server' };
+    return j.ok ? { ok: true, days: j.days == null ? null : Number(j.days), expiresAt: j.expires_at || null } : { ok: false, reason: String(j.reason || 'invalid_code') };
+  }
+  // 🆕 구글 로그인(PKCE) — 돌아온 code 를 세션으로 맞바꾼다(core/license-oauth 가 code 를 받아 온다) · 구글로 들어온 사람도 앱에서 약관 동의를 한 번 남긴다
+  async function exchangeCode(code, verifier) {
+    let r;
+    try { r = await doFetch(`${apiBase()}/auth/v1/token?grant_type=pkce`, { method: 'POST', headers: H(), body: JSON.stringify({ auth_code: String(code || ''), code_verifier: String(verifier || '') }) }); }
+    catch (_) { return { ok: false, reason: 'offline' }; }
+    let j = {}; try { j = await r.json(); } catch (_) {}
+    if (!r.ok || !j.access_token) return { ok: false, reason: 'google_failed' };
+    const sess = sessFrom(j);
+    saveSession(sess);
+    if (sess.email) writeState({ consentPending: String(sess.email).toLowerCase() });
+    return { ok: true };
+  }
+  // 🛍 이 회원이 가진 상품 + 판매 중 강의(앱 안 업셀 안내) — RPC priming_products · 서버에 없으면(404) null = 안내를 숨긴다
+  async function products() {
+    const tok = await accessToken();
+    if (!tok) return null;
+    try {
+      const r = await doFetch(`${apiBase()}/rest/v1/rpc/priming_products`, { method: 'POST', headers: H(tok), body: '{}' });
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null);
+      if (!j || j.ok === false) return null;
+      const courses = (Array.isArray(j.courses) ? j.courses : []).filter((c) => c && c.title && isSiteUrl(c.url)).map((c) => ({ slug: String(c.slug || ''), title: String(c.title), owned: !!c.owned, url: String(c.url), summary: c.summary ? String(c.summary) : '' }));
+      return { priming: { owned: !!(j.priming && j.priming.owned), expiresAt: (j.priming && j.priming.expires_at) || null }, courses };
+    } catch (_) { return null; }
+  }
   // 유효한 access token(1분 안에 끝나면 refresh) — 없거나 갱신 실패면 null
   async function accessToken() {
     const s = loadSession();
@@ -93,6 +160,23 @@ function createLicense(opts = {}) {
       saveSession({ ...sessFrom(j), email: (j.user && j.user.email) || s.email });
       return j.access_token;
     } catch (_) { return s.exp && s.exp > now() ? s.access : null; }
+  }
+  // 📜 앱에서 가입하며 체크한 동의를 서버에 남긴다 — 먼저 get_my_consent() 로 읽어, 행이 없거나 버전이 다를 때만 accept_consents(실패하면 다음 확인 때 다시).
+  //   accept_consents 는 user_consents 를 덮어쓰므로(마케팅 포함) 이미 사이트에서 동의한 회원의 마케팅 값은 그대로 넘긴다(wise-priming 약속 2026-10-23).
+  async function recordConsent(tok, email) {
+    const st = readState();
+    if (!st.consentPending || String(email || '').toLowerCase() !== st.consentPending) return;
+    try {
+      const g = await doFetch(`${apiBase()}/rest/v1/rpc/get_my_consent`, { method: 'POST', headers: H(tok), body: '{}' });
+      if (!g.ok) return;   // 읽지 못하면 덮어쓰지 않는다 — 다음 확인 때 다시
+      let row = await g.json().catch(() => null);
+      if (Array.isArray(row)) row = row[0] || null;
+      const f = (o, k) => (o ? (o[k] != null ? o[k] : o['p_' + k]) : undefined);
+      const cur = row && typeof row === 'object' ? { terms: f(row, 'terms_version'), privacy: f(row, 'privacy_version'), marketing: !!f(row, 'marketing') } : null;
+      if (cur && cur.terms === CONSENT.terms && cur.privacy === CONSENT.privacy) { writeState({ consentPending: null }); return; }
+      const r = await doFetch(`${apiBase()}/rest/v1/rpc/accept_consents`, { method: 'POST', headers: H(tok), body: JSON.stringify({ p_terms_version: CONSENT.terms, p_privacy_version: CONSENT.privacy, p_marketing: cur ? cur.marketing : false }) });
+      if (r.ok) writeState({ consentPending: null });
+    } catch (_) {}
   }
   // 회원 확인 — 결과는 state.json 에(인터넷이 끊겼을 때의 여유 판단 근거)
   async function check() {
@@ -116,6 +200,7 @@ function createLicense(opts = {}) {
     } catch (_) { return offlineState(); }
     if (r.status === 401) { clearSession(); return { ok: false, reason: 'logged_out' }; }
     if (!r.ok || !j || typeof j !== 'object') return offlineState();
+    if (j.ok || j.member) await recordConsent(tok, s.email);
     const out = { ok: !!j.ok, admin: !!j.admin, email: s.email, expiresAt: j.expires_at || null, reason: j.reason || null, deviceLimit: j.device_limit == null ? null : j.device_limit, devices: Array.isArray(j.devices) ? j.devices : [], points: pointsOf(j), kie: kieOf(j) };
     if (out.ok) writeState({ lastOkAt: now(), admin: out.admin, expiresAt: out.expiresAt, email: s.email, points: out.points, kie: out.kie });
     else writeState({ lastOkAt: 0 });
@@ -145,7 +230,7 @@ function createLicense(opts = {}) {
     };
   }
 
-  return { deviceId, login, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
+  return { deviceId, login, signup, redeem, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
 }
 
 /** Electron 앱에서 쓰는 기본 묶음 — safeStorage 는 app ready 뒤에만 쓸 수 있다(부르는 쪽이 whenReady 를 기다린다) */
@@ -158,4 +243,4 @@ function forApp() {
   });
 }
 
-module.exports = { createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, GRACE_MS };
+module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, SITE_CHARGE, GRACE_MS };

@@ -189,8 +189,12 @@ console.log('\n[5-a] 채널 전체 — 일반 영상 탭·항목 URL·안전한 
     '돌려받은 채널 주소는 일반 영상 탭으로 정규화된다');
   const dlSrc = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(/!o\._fromVideo && channelUrlOfVideo/.test(dlSrc), '다시 읽기는 한 번만(_fromVideo 가드)');
-  ok(/편 받기`, '취소'\][\s\S]{0,200}title: args\.playlist \? '재생목록 전체 받기' : '채널 전체 받기'/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8')),
-    '🔴 채널 전체는 받기 전에 편수를 보여 주고 묻는다(붙여넣기 즉시 시작 · 실측 505편)');
+  {
+    const mainSrc0 = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const seg = mainSrc0.slice(mainSrc0.indexOf("ipcMain.handle('stt-from-url'"), mainSrc0.indexOf("ipcMain.handle('stt-from-url'") + 20000);
+    ok(!/showMessageBox/.test(seg) && /일반 영상 \$\{jobs\.length\}편을 받/.test(seg),
+      '채널 전체는 확인 팝업 없이 바로 시작하고 편수는 로그로(로이 2026-10-24 — 멈춤은 ⏹ 중단)');
+  }
 }
 
 console.log('\n[5-b] 전사 .txt 머리말 — 1줄 주소 · 2줄 제목 · 3줄 빈 줄 · 4줄부터 내용 (로이 확정)');
@@ -245,9 +249,9 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(/ipcMain\.handle\('ytdlp-update'/.test(main), 'IPC ytdlp-update');
   ok(/sttFromUrl:/.test(pre) && /ytdlpStatus:/.test(pre) && /ytdlpUpdate:/.test(pre), 'preload 3개');
   ok(/MD\.listChannelVideos\(channelUrl,/.test(main), '채널 모드가 전체 영상 목록을 먼저 펼친다');
-  ok(/filenameWithId: channelMode, mediaId:/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다');
+  ok(/filenameWithId: !!job\.idName, mediaId:/.test(main) && /outDir: channelDir, idName: true \}/.test(main), '채널 파일명에 영상 ID를 붙여 중복을 판별한다(채널 항목 = idName · 다시 받기도 이어받음)');
   // 🔴 2026-09-23 실사고: 단일 URL 에도 mediaId 를 넘겨 파일명에 없는 [ID] 로 찾다가 「받은 파일이 없습니다」로 전부 실패
-  ok(/mediaId: channelMode \? \(job\.id \|\| info\.id\) : ''/.test(main), '🔴 단일 URL 은 mediaId 를 넘기지 않는다(받은 파일을 못 찾는다)');
+  ok(/mediaId: job\.idName \? \(job\.id \|\| info\.id\) : ''/.test(main) && /jobs\.push\(\{ url, id: '', title: '', outDir \}\)/.test(main), '🔴 단일 URL 은 mediaId 를 넘기지 않는다(받은 파일을 못 찾는다 · 단일 항목엔 idName 없음)');
   ok(/win\.webContents\.send\('urldl-progress'/.test(main) && /onUrldlProgress:/.test(pre), '📊 진행 상황을 화면으로 보낸다');
   ok(/onProgress: \(p\) => \{ prog\.dl\.pct/.test(main), '다운로드 퍼센트를 진행 패널에 싣는다');
   ok(/onChunk:/.test(main) && /opts\.onChunk/.test(main), '전사 청크 진행을 진행 패널에 싣는다');
@@ -300,7 +304,7 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   ok(!/downloadFolder/.test(app), '채널편집에 옛 받기 폴더 칸이 남아 있지 않다');
   ok(/\['download', 'URL 받기'/.test(app), '⚙ 설정 → 📁 폴더에 「URL 받기」 칸');
   { const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-    ok(/let outDir = args\.outDir \|\| appFolder\('download'\)/.test(mainSrc), 'stt-from-url 은 공통 받기 폴더를 쓴다');
+    ok(/let outDir = args\.outDir \|\| \(retryJobs\.length && _lastDlRetry\.outDir\) \|\| appFolder\('download'\)/.test(mainSrc), 'stt-from-url 은 공통 받기 폴더를 쓴다(다시 받기는 지난 실행 폴더)');
     ok(!/pr && pr\.downloadFolder/.test(mainSrc), '채널 downloadFolder 를 더 이상 읽지 않는다'); }
 
   const bundle = (() => {
@@ -365,6 +369,61 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
     const n = fs.readFileSync(callLog, 'utf8').trim().split('\n').length;
     if (want) ok(res && res.video && n === 3 && lg.filter((l) => /잠시 막았습니다\(403\)/.test(l)).length === 2, '403 두 번 → 기다렸다 다시 → 세 번째에 받음');
     else ok(!res && /403/.test(err) && n === 3, '세 번 다 403 이면 그만두고 「잠시 막음」으로 알린다(무한 반복 안 함)');
+  }
+  // 🔤 한글 파일 이름 — yt-dlp 2026.10.23 은 --encoding 없으면 CP949 로 내보낸다(2026-10-24 · 받은 mp3 를 못 찾던 사고)
+  console.log('\n[인코딩] --encoding utf-8 이 있어야 한글 이름을 찾는다');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "const o = a[a.indexOf('-o') + 1]; const dir = require('path').dirname(o);",
+    "const name = '년도 이야기 [kr1].mp3'; fs.writeFileSync(require('path').join(dir, name), 'audio');",
+    "const utf8 = a[a.indexOf('--encoding') + 1] === 'utf-8' && a.includes('--encoding');",
+    // CP949 「년」 = B3 E2 — UTF-8 로 읽으면 깨진다
+    "process.stdout.write(Buffer.concat([Buffer.from('__PRIMING_BASE__'), utf8 ? Buffer.from('년') : Buffer.from([0xB3, 0xE2]), Buffer.from('도 이야기 [kr1].webm\\n')]));",
+    "process.exit(0);",
+  ].join('\n'));
+  {
+    let res = null, err = '';
+    try { res = await MD.download('https://youtu.be/kr1', { tool, outDir: path.join(T, 'enc'), mode: 'audio', subs: false }); } catch (e) { err = e.message; }
+    ok(res && res.audio && /년도 이야기 \[kr1\]\.mp3$/.test(res.audio), `한글 이름 mp3 를 찾는다 ${err}`);
+    ok(/const YT_ENC_ARGS = \['--encoding', 'utf-8'\]/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8')), 'yt-dlp 실행에 --encoding utf-8');
+  }
+  // 🐢 429 줄이기(v0.9.116) — 정보 확인 재시도 · 정보 파일로 받기(두 번 묻지 않음) · 여러 편이면 요청 사이 쉼
+  console.log('\n[429 줄이기] 정보 확인 재시도 · --load-info-json · 쉼');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "fs.appendFileSync(process.env.FAKE_LOG, a.join(' ') + '\\n');",
+    "const n = Number(fs.existsSync(process.env.FAKE_CNT) ? fs.readFileSync(process.env.FAKE_CNT, 'utf8') : 0) + 1; fs.writeFileSync(process.env.FAKE_CNT, String(n));",
+    "if (n <= Number(process.env.FAKE_FAILS)) { process.stderr.write('ERROR: [youtube] p1: HTTP Error 429: Too Many Requests\\n'); process.exit(1); }",
+    "if (a.includes('--dump-single-json')) { process.stdout.write(JSON.stringify({ id: 'p1', title: 'P', duration: 9 }) + '\\n'); process.exit(0); }",
+    "const o = a[a.indexOf('-o') + 1].replace('%(title)s', 'P').replace('%(ext)s', 'mp4'); fs.writeFileSync(o, 'video'); process.exit(0);",
+  ].join('\n'));
+  {
+    const ij = path.join(T, 'info.json');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '2';
+    const lg = [];
+    const info = await MD.probe('https://youtu.be/p1', { tool, infoJsonFile: ij, paced: true, _waitScale: 0, onLog: (l) => lg.push(l) });
+    const calls = fs.readFileSync(callLog, 'utf8').trim().split('\n');
+    ok(info.id === 'p1' && calls.length === 3 && lg.filter((l) => /정보를 다시 읽습니다/.test(l)).length === 2, '정보 확인이 429 두 번 → 기다렸다 다시 → 세 번째에 읽음');
+    ok(fs.existsSync(ij) && JSON.parse(fs.readFileSync(ij, 'utf8')).id === 'p1', '읽은 정보를 파일로 남긴다');
+    ok(calls[2].includes('--sleep-requests 1') && calls[2].includes('--sleep-subtitles 2'), '여러 편(paced)이면 요청 사이 쉼 인자');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '0';
+    const res = await MD.download('https://youtu.be/p1', { tool, outDir: path.join(T, 'lij'), mode: 'video', subs: false, infoJsonFile: ij });
+    const c1 = fs.readFileSync(callLog, 'utf8').trim();
+    ok(res.video && c1.includes('--load-info-json ' + ij) && !c1.includes('https://youtu.be/p1'), '정보 파일이 있으면 주소 대신 --load-info-json(유튜브에 다시 묻지 않음)');
+    ok(!c1.includes('--sleep-requests'), '한 편(paced 아님)은 쉼 인자 없음 — 단일 주소는 예전 속도');
+    fs.writeFileSync(callLog, ''); try { fs.unlinkSync(cnt); } catch (_) {}
+    process.env.FAKE_FAILS = '1';
+    const res2 = await MD.download('https://youtu.be/p1', { tool, outDir: path.join(T, 'lij2'), mode: 'video', subs: false, infoJsonFile: ij, _waitScale: 0 });
+    const c2 = fs.readFileSync(callLog, 'utf8').trim().split('\n');
+    ok(res2.video && c2.length === 2 && c2[0].includes('--load-info-json') && !c2[1].includes('--load-info-json') && c2[1].endsWith('https://youtu.be/p1'), '막혀서 다시 받을 땐 남긴 정보를 버리고 주소로');
+    ok(MD.isBlocked({ message: 'x', raw: 'HTTP Error 429' }) && MD.isBlocked(new Error('유튜브가 요청이 많다며 잠시 막았습니다(429)')) && !MD.isBlocked(new Error('Video unavailable')), 'isBlocked: 429·403 만 막힘으로 본다');
+    const bot = 'ERROR: [youtube] x: Sign in to confirm you’re not a bot. This helps protect our community.';
+    ok(MD.isBlocked({ message: MD._explain(bot), raw: bot }) && /로봇이 아닌지/.test(MD._explain(bot)) && !/로그인·쿠키로 우회합니다/.test(MD._explain(bot)), '「로봇 확인」(2026-10-24 실측 문구) = 막힘 · 사람 말 안내(우회 안 함)');
+    ok(!MD.isBlocked({ message: 'x', raw: 'ERROR: Sign in to confirm your age' }), '연령 확인은 막힘이 아니다(쉬어도 안 풀림)');
+    const mainJs = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/BLOCK_PAUSE_MIN = \[3, 10, 20\]/.test(mainJs) && /i--; continue;/.test(mainJs) && /f\.endsWith\(`\[\$\{job\.id\}\]\$\{ext\}`\)/.test(mainJs) && /doStt \? \['\.txt'\]/.test(mainJs), 'main: 막히면 쉬었다 같은 영상부터 · 이미 전사한 영상은 유튜브에 묻지 않음');
   }
   // 🧩 JS 실행기 — 버전을 모르거나 옛 yt-dlp 면 붙이지 않는다(--js-runtimes 를 모르는 판이 깨지지 않게)
   const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');

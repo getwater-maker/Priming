@@ -571,8 +571,17 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
     let w0 = 0, h0 = 0, dur = 5;
     if (isVid) { const m = readMp4VideoMeta(ov.file); if (m) { w0 = m.width; h0 = m.height; if (m.duration > 0) dur = m.duration; } }
     else { const z = readImageSize(ov.file); if (z) { w0 = z.w; h0 = z.h; } }
-    const ratio = (w0 > 0 && h0 > 0) ? w0 / h0 : canvas.w / canvas.h;
-    const bx = ov.box || (w0 > 0 && h0 > 0 ? _fillBox('contain', w0, h0, canvas.w, canvas.h) : { x: 0, y: 0, w: 1, h: 1 });
+    // 🖼 모양(v0.9.104 · core/visual-look 「삽입 모양」) — 자르기는 보이는 영역이 트랙 박스 · 비율은 잘린 뒤 비율(Vrew 와 같다) · 불투명도·반전·자르기는 editInfo(Vrew 4.7.2 설치본 실측 {crop, opacity, flip})
+    const VL = require('../core/visual-look');
+    const cv = VL.cropVis(ov.crop);
+    const ratio = (w0 > 0 && h0 > 0) ? (w0 * cv.w) / (h0 * cv.h) : canvas.w / canvas.h;
+    const bx = VL.ovBox(ov, w0, h0, canvas.w, canvas.h);
+    const editInfo = {};
+    { const ci = VL.cropInset(ov.crop); if (ci) editInfo.crop = ci; }
+    { const op = VL.normOpacity(ov.opacity); if (op < 100) editInfo.opacity = op / 100; }
+    if (ov.flipH || ov.flipV) editInfo.flip = { vertical: !!ov.flipV, horizontal: !!ov.flipH };
+    const ovMo = VL.normOvMotion(ov.motion);
+    const ovKb = (ovMo && !isVid) ? _kenBurnsForLook({ look: { motion: ovMo } }) : null;
     const ext = isVid ? 'mp4' : ((path.extname(ov.file).toLowerCase().replace('.jpeg', '.jpg').replace('.', '')) || 'png');
     const fn = `${mid}.${ext}`;
     const fileSize = fs.statSync(ov.file).size;
@@ -585,7 +594,7 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
       });
       const atid = sid();
       pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'video',
-        sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo: {}, ...(ov.once ? {} : { endBehavior: 'loop' }), fillType: 'cut' };
+        sourceIn: 0, sourceOut: dur, originalWidthHeightRatio: ratio, isTrimmable: true, hasAlphaChannel: false, editInfo, ...(ov.once ? {} : { endBehavior: 'loop' }), fillType: 'cut' };
       // 🔊 삽입 영상의 소리 — 음량 %(기본 100 · 0 = 끔). 그룹 영상은 내레이션과 겹치지 않게 늘 음소거(위 그룹 분기)
       const _vv = (isFinite(+ov.volume) ? +ov.volume : 100) / 100;
       pj.props.tracks[atid] = { trackId: atid, mediaId: mid, volume: _vv, sourceIn: 0, sourceOut: dur, loop: !ov.once, playbackRate: 1, type: 'videoAudio' };
@@ -593,7 +602,7 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
     } else {
       pj.files.push({ version: 1, mediaId: mid, sourceOrigin: 'USER', fileSize, name: fn, type: 'Image', isTransparent: ext === 'png', fileLocation: 'IN_MEMORY' });
       pj.props.tracks[tid] = { trackId: tid, mediaId: mid, xPos: bx.x, yPos: bx.y, height: bx.h, width: bx.w, rotation: 0, zIndex: 900 + i, type: 'image',
-        originalWidthHeightRatio: ratio, editInfo: {}, stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 } };
+        originalWidthHeightRatio: ratio, editInfo, ...(ovKb ? { kenburnsAnimationInfo: { type: 'custom', from: { ...ovKb.from }, to: { ...ovKb.to } } } : {}), stats: { fillType: 'cut', fillMenu: 'floating', rearrangeCount: 0 } };
       pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
     }
     mediaZip.push({ src: ov.file, name: fn });

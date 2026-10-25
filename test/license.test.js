@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createLicense, GRACE_MS } = require('../core/license');
+const { createLicense, GRACE_MS, CONSENT } = require('../core/license');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
@@ -16,6 +16,11 @@ function fakeServer() {
     if (S.down) throw new Error('ECONNREFUSED');
     const body = init.body ? JSON.parse(init.body) : {};
     if (!init.headers || !init.headers.apikey) return res(401, { error: 'no apikey' });
+    if (url.endsWith('/auth/v1/signup')) {
+      if (body.email === 'dup@x.kr') return res(422, { error_code: 'user_already_exists', msg: 'User already registered' });
+      if (S.confirm) return res(200, { id: 'u1', email: body.email });
+      S.accessN++; return res(200, { access_token: 'acc' + S.accessN, refresh_token: 'ref' + S.accessN, expires_in: 3600, user: { email: body.email } });
+    }
     if (url.includes('grant_type=password')) {
       if (body.password !== 'right') return res(400, { error: 'invalid_grant' });
       S.accessN++; return res(200, { access_token: 'acc' + S.accessN, refresh_token: 'ref' + S.accessN, expires_in: 3600, user: { email: body.email } });
@@ -27,6 +32,14 @@ function fakeServer() {
     const auth = (init.headers.Authorization || '').replace('Bearer ', '');
     if (!/^acc\d+$/.test(auth)) return res(401, { message: 'JWT' });
     if (url.endsWith('/rpc/priming_license')) { S.lastDevice = body.p_device_id; return res(200, S.member); }
+    if (url.endsWith('/rpc/get_my_consent')) { if (S.getFail) return res(500, {}); return res(200, S.consentRow === undefined ? null : S.consentRow); }
+    if (url.endsWith('/rpc/accept_consents')) { S.consents = (S.consents || []).concat([body]); return res(S.consentFail ? 500 : 204, {}); }
+    if (url.endsWith('/rpc/priming_redeem_code')) {
+      if (S.noRedeem) return res(404, {});
+      if (body.p_code === 'GOOD-30') return res(200, { ok: true, days: 30, expires_at: '2026-11-22T00:00:00Z' });
+      if (body.p_code === 'USED') return res(200, { ok: false, reason: 'already_used' });
+      return res(200, { ok: false, reason: 'invalid_code' });
+    }
     if (url.endsWith('/rpc/priming_log')) { S.logs.push(body); return res(200, { ok: true, id: S.logs.length }); }
     return res(404, {});
   };
@@ -113,6 +126,48 @@ const mk = (S, clock) => {
     ok(src && src.headers.Authorization === 'Bearer acc1', 'Worker 경로 + Bearer 토큰');
     ok(src.fileUrl('renderer/dist/assets/a b.js', 5) === 'https://updates.primingwave.com/file/renderer/dist/assets/a%20b.js?t=5', '파일 주소: 조각별 인코딩 · ?t=');
     ok(src.manifestUrl(7) === 'https://updates.primingwave.com/manifest?t=7', '매니페스트 주소');
+    fs.rmSync(dir, { recursive: true, force: true }); }
+
+  console.log('[8] 앱 안 가입 · 가입 코드');
+  { const clock = { t: 1e12 }; const S = fakeServer(); const { L, dir } = mk(S, clock);
+    ok((await L.signup('not-an-email', 'abcdef')).reason === 'bad_email', '이메일 모양이 틀리면 서버에 묻지 않고 bad_email');
+    ok((await L.signup('a@x.kr', '123')).reason === 'weak_password' && !S.calls.some((c) => c.url.endsWith('/signup')), '비밀번호 6자 미만 = weak_password(서버 호출 없음)');
+    ok((await L.signup('dup@x.kr', 'abcdef')).reason === 'already_registered', '이미 가입된 이메일');
+    S.confirm = true;
+    ok((await L.signup('a@x.kr', 'abcdef')).reason === 'confirm_mail' && !L.loadSession(), '이메일 확인이 켜져 있으면 세션 없이 confirm_mail');
+    S.confirm = false;
+    const r = await L.signup('a@x.kr', 'abcdef');
+    ok(r.ok && L.loadSession() && L.loadSession().access === 'acc1', '가입 → 세션 저장(토큰은 main 안에만)');
+    ok(!JSON.stringify(S.calls.filter((c) => c.url.endsWith('/signup')).map((c) => c.init.headers)).includes('Authorization'), '가입 요청에 토큰 헤더 없음');
+    ok((await L.redeem('')).reason === 'no_code', '빈 코드');
+    ok((await L.redeem('NOPE')).reason === 'invalid_code', '틀린 코드 → invalid_code');
+    ok((await L.redeem('USED')).reason === 'already_used', '쓴 코드 → already_used');
+    const g = await L.redeem('GOOD-30');
+    ok(g.ok && g.days === 30 && g.expiresAt === '2026-11-22T00:00:00Z', '맞는 코드 → 일수·만료일');
+    S.noRedeem = true;
+    ok((await L.redeem('GOOD-30')).reason === 'redeem_unavailable', '서버에 RPC 가 아직 없으면 redeem_unavailable(404)');
+    L.logout(); ok((await L.redeem('GOOD-30')).reason === 'logged_out', '로그아웃 상태 = logged_out');
+    // 📜 동의 기록 — 가입 때 체크했으면 세션이 생긴 첫 확인 직후 accept_consents 1회
+    { const S2 = fakeServer(); const m2 = mk(S2, clock); S2.confirm = true;
+      await m2.L.signup('c@x.kr', 'abcdef', { consent: true });
+      ok(!S2.consents, '확인 메일 대기 중엔 동의를 보내지 않는다(세션 없음)');
+      ok((await m2.L.login('c@x.kr', 'right')).ok && S2.consents && S2.consents.length === 1, '첫 로그인 직후 accept_consents 호출');
+      const c0 = S2.consents[0];
+      ok(c0.p_terms_version === CONSENT.terms && c0.p_privacy_version === CONSENT.privacy && c0.p_marketing === false, '약관·개인정보 버전은 설정값 · 마케팅 수신 false');
+      await m2.L.check(); ok(S2.consents.length === 1, '한 번 남기면 다시 보내지 않는다');
+      const S3 = fakeServer(); S3.consentFail = true; const m3 = mk(S3, clock);
+      await m3.L.signup('d@x.kr', 'abcdef', { consent: true }); await m3.L.check(); await m3.L.check();
+      ok(S3.consents.length === 2, '서버가 실패하면 다음 확인 때 다시 시도');
+      const S5 = fakeServer(); S5.consentRow = { terms_version: CONSENT.terms, privacy_version: CONSENT.privacy, marketing: true }; const m5 = mk(S5, clock);
+      await m5.L.signup('e@x.kr', 'abcdef', { consent: true }); await m5.L.check();
+      ok(!S5.consents && !m5.L.readState().consentPending, '사이트에서 이미 같은 버전으로 동의했으면 덮어쓰지 않는다(대기도 해제)');
+      const S6 = fakeServer(); S6.consentRow = { terms_version: '2025-01-01', privacy_version: CONSENT.privacy, marketing: true }; const m6 = mk(S6, clock);
+      await m6.L.signup('f@x.kr', 'abcdef', { consent: true }); await m6.L.check();
+      ok(S6.consents.length === 1 && S6.consents[0].p_marketing === true, '버전이 다르면 갱신하되 마케팅 동의 값은 그대로 넘긴다');
+      const S7 = fakeServer(); S7.getFail = true; const m7 = mk(S7, clock);
+      await m7.L.signup('g@x.kr', 'abcdef', { consent: true }); await m7.L.check();
+      ok(!S7.consents && m7.L.readState().consentPending, '현재 동의를 읽지 못하면 덮어쓰지 않고 다음에 다시');
+      const S4 = fakeServer(); const m4 = mk(S4, clock); await m4.L.login('roy@x.kr', 'right'); ok(!S4.consents, '가입으로 동의하지 않은 로그인은 동의를 보내지 않는다'); }
     fs.rmSync(dir, { recursive: true, force: true }); }
 
   console.log('[7] 소스 검사');

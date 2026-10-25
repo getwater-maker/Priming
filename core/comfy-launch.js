@@ -191,7 +191,77 @@ async function ensureLocalComfy(opts = {}) {
   return _pending;
 }
 
+/**
+ * 🛑 로컬 ComfyUI 서버 끄기 — RAM 을 윈도우에 돌려준다(v0.9.111 · 로이 2026-10-23).
+ *   실측: Qwen-Image 2.1 그림을 다 만든 뒤 /free 를 보내도 ComfyUI 가 RAM 약 11GB 를 쥐고 있어
+ *   다음 대본 TTS(OmniVoice 17GB)와 32GB 를 넘겨 음성 5문장이 60초 시간초과로 실패했다. → 프로세스를 끈다.
+ *   안전선: 로컬 주소만 · 큐(/queue)에 남의 작업이 있으면 끄지 않는다 · 포트를 연 프로세스의 명령줄에
+ *   `comfy-server.pyw` 가 있을 때만 끈다(다른 프로그램을 잘못 죽이지 않게) · 비동기(메인 프로세스 동기 자식 금지).
+ *   다음에 필요하면 ensureLocalComfy 가 다시 켠다.
+ * @returns {Promise<{ok:boolean, stopped?:boolean, skipped?:string, message?:string}>}
+ */
+const PS_FIND_PORT = (port) => [
+  `$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1`,
+  `if (-not $c) { 'none'; exit }`,
+  `$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $c.OwningProcess)`,
+  `$q = $null; if ($p) { $q = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p.ParentProcessId) }`,
+  `[Console]::OutputEncoding = [Text.Encoding]::UTF8`,
+  `@{ pid = $c.OwningProcess; cmd = [string]$p.CommandLine; ppid = $(if ($q) { $q.ProcessId } else { 0 }); pcmd = $(if ($q) { [string]$q.CommandLine } else { '' }) } | ConvertTo-Json -Compress`,
+].join('; ');
+const LAUNCHER_RE = /comfy-server\.pyw/i;
+// 포트를 연 프로세스와 그 부모 중 무엇을 끌지 — 둘 다 우리 런처면 부모(venv pythonw 가 실제 파이썬을 자식으로 띄운다)
+function pickKillTarget(info) {
+  if (!info || !info.pid) return 0;
+  if (info.ppid && LAUNCHER_RE.test(info.pcmd || '')) return info.ppid;
+  if (LAUNCHER_RE.test(info.cmd || '')) return info.pid;
+  return 0;
+}
+function _run(execFileFn, cmd, args) {
+  return new Promise((resolve) => {
+    execFileFn(cmd, args, { windowsHide: true, timeout: 20000, encoding: 'utf8' }, (err, stdout) => resolve({ err, out: String(stdout || '') }));
+  });
+}
+/**
+ * ⏹ 중단 — 로컬 ComfyUI 에 멈춤 신호(/interrupt) + 대기열 비우기(/queue clear) (v0.9.112 · 로이 2026-10-23).
+ *   ⚠ ComfyUI 는 단계 사이에서만 멈춤 신호를 본다 — 모델(8.9GB)을 올리는 중엔 못 받아 18:45 중단 뒤에도 계속 돌았다.
+ *   그래서 로컬 Qwen 이면 이어서 stopLocalComfy({ force: true }) 로 서버를 끈다(호출부).
+ */
+async function interruptLocalComfy(opts = {}) {
+  const { baseUrl, fetchFn = fetch } = opts;
+  if (!isLocalUrl(baseUrl)) return { ok: true, skipped: 'remote' };
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  if (!(await ping(base))) return { ok: true, skipped: 'not-running' };
+  const post = (p, body) => fetchFn(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(4000) }).catch(() => null);
+  await post('/queue', { clear: true });   // 대기 먼저 비워야 멈춘 뒤 다음 것이 시작되지 않는다
+  await post('/interrupt');
+  return { ok: true, interrupted: true };
+}
+async function stopLocalComfy(opts = {}) {
+  const { baseUrl, log = () => {}, execFileFn = require('child_process').execFile, fetchFn = fetch, waitMs = 15000, force = false } = opts;   // force = ⏹ 중단 — 큐에 남은 건 우리 작업이라 검사를 건너뛴다
+  if (!isLocalUrl(baseUrl)) return { ok: true, skipped: 'remote' };
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  if (!(await ping(base))) return { ok: true, skipped: 'not-running' };
+  if (!force) try {   // 남의 PC 가 이 ComfyUI 로 그리는 중이면 끄지 않는다
+    const r = await fetchFn(base + '/queue', { signal: AbortSignal.timeout(4000) });
+    const j = r && r.ok ? await r.json() : null;
+    const n = j ? ((j.queue_running || []).length + (j.queue_pending || []).length) : 0;
+    if (n) { log(`  🖥 ComfyUI 큐에 다른 작업 ${n}건 — 서버를 끄지 않습니다`); return { ok: true, skipped: 'busy' }; }
+  } catch (_) {}
+  let port = 8188; try { port = Number(new URL(base).port) || 8188; } catch (_) {}
+  const f = await _run(execFileFn, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_FIND_PORT(port)]);
+  let info = null; try { info = JSON.parse(f.out.trim() || 'null'); } catch (_) {}
+  if (f.out.trim() === 'none') return { ok: true, skipped: 'not-running' };
+  const target = pickKillTarget(info);
+  if (!target) { log('  ⚠ ComfyUI 서버를 끄지 않았습니다 — 포트를 연 프로그램이 Priming 런처가 아닙니다'); return { ok: false, skipped: 'not-ours' }; }
+  const k = await _run(execFileFn, 'taskkill.exe', ['/PID', String(target), '/T', '/F']);
+  if (k.err) { log(`  ⚠ ComfyUI 서버 끄기 실패 — ${k.err.message || k.err}`); return { ok: false, message: String(k.err.message || k.err) }; }
+  const t0 = Date.now();
+  while (Date.now() - t0 < waitMs) { if (!(await ping(base, 1500))) break; await new Promise((r) => setTimeout(r, 500)); }
+  log('  🛑 로컬 ComfyUI 서버를 껐습니다 — RAM 을 돌려줍니다(다음 그림 때 자동으로 다시 켭니다)');
+  return { ok: true, stopped: true };
+}
+
 module.exports = {
-  ensureLocalComfy, ping, isLocalUrl, findExe, candidates,
+  ensureLocalComfy, stopLocalComfy, interruptLocalComfy, pickKillTarget, ping, isLocalUrl, findExe, candidates,
   findInstance, instancePython, launcherScript, resolveLaunch,
 };

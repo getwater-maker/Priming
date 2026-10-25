@@ -8,6 +8,10 @@
 
 const IMG_DEFAULT = 'kie:qwen-2-1';
 const VID_DEFAULT = 'kie:minimax-h3';
+// 👑 관리자 전용 예외(로이 2026-10-23 「관리자용에서만 QWEN-IMAGE2.1 로컬」 · v0.9.109) — 이 PC 의 ComfyUI 로 번들 Qwen 워크플로를 돌린다.
+//   `comfy…` 꼴이 아니라 따로 이름을 둬서 위 이전 규칙에 걸리지 않는다(채널 저장소가 되돌려 저장하지 않게) · 회원이면 main 이 AI 이미지로 돌린다.
+const LOCAL_QWEN = 'local:qwen-2-1';
+const isLocalQwen = (v) => v === LOCAL_QWEN;
 
 const isComfy = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') === 0;
 function retiredName(v) {
@@ -41,6 +45,6 @@ function migratePreset(p) {
   }
   return out;
 }
-const toLabel = (v) => (v === IMG_DEFAULT ? 'AI 이미지 · Qwen-Image 2.1' : v === VID_DEFAULT ? 'AI 영상 · MiniMax H3' : v);
+const toLabel = (v) => (v === IMG_DEFAULT ? 'AI 이미지 · Qwen-Image 2.1' : v === VID_DEFAULT ? 'AI 영상 · MiniMax H3' : v === LOCAL_QWEN ? '🖥 로컬 Qwen-Image 2.1' : v);
 
-module.exports = { IMG_DEFAULT, VID_DEFAULT, isComfy, retiredName, migrateImage, migrateVideo, migratePreset, toLabel };
+module.exports = { IMG_DEFAULT, VID_DEFAULT, LOCAL_QWEN, isLocalQwen, isComfy, retiredName, migrateImage, migrateVideo, migratePreset, toLabel };
