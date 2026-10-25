@@ -30,7 +30,8 @@ ok(!/require\(/.test(read('core/clip-effects.js').replace(/\/\/.*$/gm, '').repla
 console.log('\n[2] 소스 배선');
 const VB = read('vrew/vrew-builder.js'), APP = read('renderer/src/App.jsx');
 ok(/CE\.filterActive\(g\.look\)/.test(VB) && /bakeFilter\(\{ src: _fsrc/.test(VB), '빌더: 필터가 있으면 (배경색 사본까지 입힌 화면에) 사본을 굽는다');
-ok(VB.indexOf('CE.bgActive(g.look)') < VB.indexOf('CE.filterActive(g.look)'), '순서: 배경색 먼저 → 필터(띠도 함께 필터 = 미리보기 img 요소의 filter 와 같은 범위)');
+const _img = VB.indexOf('(b) 비디오 없으면 기존 이미지 분기');
+ok(VB.indexOf('CE.bgActive(g.look)', _img) < VB.indexOf('CE.filterActive(g.look)', _img), '순서: 배경색 먼저 → 필터(띠도 함께 필터 = 미리보기 img 요소의 filter 와 같은 범위)');
 ok(/CEff\.cssFilter\(lk\)/.test(APP) && /filter:\$\{fltC\}/.test(APP), '미리보기: 그림 요소에 같은 CSS 식');
 ok(/data-testid="fl-panel"/.test(APP) && /tid="cx-fx-filter"/.test(APP) && !/label="필터" soon/.test(APP) && !/soon\('✳'/.test(APP), '메뉴: 우클릭 효과 · 막대 · 효과 탭 · 패널 — 준비 중 표시 없음');
 

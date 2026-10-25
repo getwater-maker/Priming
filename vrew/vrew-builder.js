@@ -912,6 +912,23 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
           } catch (e) { log(`⚠ G${g.num} 영상 길이 맞추기 오류: ${e.message}`); }
         }
       }
+      // 🎞🎨 영상 그룹의 필터·배경색(효과 ⑤) — 재인코딩 사본을 가리킨다(원본 불변 · 실패하면 원본으로 계속).
+      //   배경색은 영상이 캔버스 안에 들어가는 자리(맞추기·가로↔세로 레터박스)일 때만 의미가 있다(꽉 채우면 띠가 없다 · 직접 옮긴 자리 look.box 가 있으면 안 쓴다 — 그림과 같은 규칙)
+      let _vBgBaked = false;
+      if ((CE.filterActive(g.look) || CE.bgActive(g.look)) && _vmeta0 && _vmeta0.width > 0) {
+        let _bbox = null;
+        if (CE.bgActive(g.look) && !_boxOfLook(g)) {
+          const _vf0 = (g.look && g.look.fill) || 'auto';
+          const _vmis0 = Math.abs(_vmeta0.width / _vmeta0.height - _frameRatio) > 0.06;
+          if (_vf0 === 'contain' || (_vf0 === 'auto' && _vmis0)) _bbox = _fillBox('contain', _vmeta0.width, _vmeta0.height, _canvasW, _canvasH);
+          else log(`[Vrew] G${g.num} 영상이 화면을 꽉 채워 배경색을 쓰지 않습니다`);
+        }
+        const _vbk = await require('../core/clip-effects-bake').bakeVideo({ src: _vsrc, filter: CE.filterActive(g.look) ? g.look.filter : '', bg: _bbox ? CE.normBg(g.look.bg) : '', box: _bbox, W: _canvasW, H: _canvasH, ffmpegPath: _ffmpegPath });
+        if (_vbk) {
+          const _m3 = readMp4VideoMeta(_vbk);
+          if (_m3) { _vsrc = _vbk; _vmeta0 = _m3; _vBgBaked = !!_bbox; log(`[Vrew] G${g.num} 영상 ${[CE.filterActive(g.look) ? '필터 ' + g.look.filter : '', _bbox ? '배경색 ' + CE.normBg(g.look.bg) : ''].filter(Boolean).join(' + ')} — 재인코딩 사본으로 굽기`); }
+        } else log(`[Vrew] ⚠ G${g.num} 영상 필터·배경색 사본을 만들지 못해 원본 영상으로 계속합니다`);
+      }
       { // 영상은 항상 사용 — 캔버스와 비율이 비슷하면 꽉 채우고, 다르면(가로↔9:16 등) 레터박스 가운데(전체 표시)
       const mid = uid();
       const aid = uid();
@@ -979,6 +996,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       }
       // 📐 ① 칸에서 사람이 옮기고 줄인 자리(look.box) — 채우기보다 우선
       { const bx = _boxOfLook(g); if (bx) { _vx = bx.x; _vy = bx.y; _vw = bx.w; _vh = bx.h; } }
+      if (_vBgBaked) { _vx = 0; _vy = 0; _vw = 1; _vh = 1; }   // 🎨 사본이 이미 캔버스 크기(띠 포함)
       pj.props.tracks[videoTid] = {
         trackId: videoTid, mediaId: mid,
         xPos: _vx, yPos: _vy, height: _vh, width: _vw,
@@ -998,7 +1016,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       };
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
       groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid, loopNative: _loopNative, fileDur: dur });
-      groupTopY.set(g.id, (_vMismatch || _vFill === 'contain') ? Math.max(0, _vy) : 0); // 레터박스면 영상 상단 y(검정띠 끝)
+      groupTopY.set(g.id, _vBgBaked ? 0 : (_vMismatch || _vFill === 'contain') ? Math.max(0, _vy) : 0); // 레터박스면 영상 상단 y(검정띠 끝)
       mediaZip.push({ src: _vsrc, name: fn });
       groupIdx++;
       continue;

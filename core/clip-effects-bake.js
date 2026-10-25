@@ -80,4 +80,45 @@ function bakeFilter(o) {
   });
 }
 
-module.exports = { CACHE_DIR, bakeKey, bakeBackground, bakeFilter };
+/**
+ * 영상 사본(필터·배경색 · 효과 ⑤) — 재인코딩(libx264 crf 18 · 오디오는 그대로). 같은 입력은 다시 굽지 않는다 → 경로(실패하면 null).
+ *   bg + box 가 있으면: 영상을 box(캔버스 0..1 · 캔버스 안에 들어가는 자리만)에 맞춰 줄여 캔버스 크기에 배경색으로 pad → 필터는 그 위에(띠도 함께 · 그림과 같은 범위).
+ * @param {{src:string, filter?:string, bg?:string, W?:number, H?:number, box?:{x,y,w,h}, ffmpegPath:string, dir?:string}} o
+ */
+function bakeVideo(o) {
+  const CE = require('./clip-effects');
+  const { src, ffmpegPath } = o;
+  return new Promise((resolve) => {
+    try {
+      const flt = o.filter ? CE.ffmpegFilter(o.filter) : '';
+      const useBg = !!(o.bg && /^#[0-9a-f]{6}$/.test(o.bg) && o.box && o.W > 0 && o.H > 0);
+      if ((!flt && !useBg) || !ffmpegPath || !fs.existsSync(ffmpegPath) || !fs.existsSync(src)) return resolve(null);
+      const dir = o.dir || CACHE_DIR;
+      fs.mkdirSync(dir, { recursive: true });
+      const ev = (n) => Math.max(2, Math.round(n / 2) * 2);
+      const r = (v) => Math.round(Number(v) * 10000) / 10000;
+      let id = src; try { const st = fs.statSync(src); id += '|' + st.size + '|' + Math.round(st.mtimeMs); } catch (_) {}
+      const parts = [id, o.filter || '', flt, useBg ? [o.bg, o.W, o.H, r(o.box.x), r(o.box.y), r(o.box.w), r(o.box.h)].join(',') : '', 'vf1'];
+      const out = path.join(dir, crypto.createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16) + '.mp4');
+      if (fs.existsSync(out) && fs.statSync(out).size > 1024) return resolve(out);
+      const chain = [];
+      if (useBg) {
+        const bw = ev(o.box.w * o.W), bh = ev(o.box.h * o.H), bx = Math.round(o.box.x * o.W), by = Math.round(o.box.y * o.H);
+        chain.push(`scale=${bw}:${bh}:flags=lanczos`, `setsar=1`, `pad=${ev(o.W)}:${ev(o.H)}:${bx}:${by}:color=0x${o.bg.slice(1)}`);
+      }
+      if (flt) chain.push(flt);
+      chain.push('format=yuv420p');
+      const tmp = out + '.tmp.mp4';
+      const p = spawn(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', src, '-vf', chain.join(','),
+        '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-bf', '0', '-c:a', 'copy', '-movflags', '+faststart', tmp], { windowsHide: true, stdio: 'ignore' });
+      p.on('error', () => resolve(null));
+      p.on('close', (code) => {
+        try { if (code === 0 && fs.existsSync(tmp)) { fs.renameSync(tmp, out); return resolve(out); } } catch (_) {}
+        try { fs.rmSync(tmp, { force: true }); } catch (_) {}
+        resolve(null);
+      });
+    } catch (_) { resolve(null); }
+  });
+}
+
+module.exports = { CACHE_DIR, bakeKey, bakeBackground, bakeFilter, bakeVideo };

@@ -4560,8 +4560,8 @@ export default function App() {
     const lk = VLook.normLook(c.look);
     const flipT = (lk.flipH || lk.flipV) ? ` style="transform:scale(${lk.flipH ? -1 : 1},${lk.flipV ? -1 : 1})"` : '';
     const fit = lk.box ? 'fill' : (lk.fill === 'auto' ? '' : lk.fill);
-    const bgC = (!c.videoPath && CEff.cssBg(lk)) || '';   // 🎨 클립 배경색 — 그림 요소에 칠한다(켄번스와 함께 움직인다 = 굽기 사본과 같다)
-    const fltC = (!c.videoPath && CEff.cssFilter(lk)) || '';   // 🎞 필터 — 그림 요소에(배경색 사본까지 입힌 화면 = .vrew 의 굽기 사본과 같은 범위)
+    const bgC = CEff.cssBg(lk) || '';   // 🎨 클립 배경색 — 그림 요소에 칠한다(켄번스와 함께 움직인다 = 굽기 사본과 같다)
+    const fltC = CEff.cssFilter(lk) || '';   // 🎞 필터 — 그림 요소에(배경색 사본까지 입힌 화면 = .vrew 의 굽기 사본과 같은 범위)
     const _st = [fit ? `object-fit:${fit}` : '', bgC ? `background-color:${bgC}` : '', fltC ? `filter:${fltC}` : ''].filter(Boolean).join(';');
     const fitS = _st ? ` style="${_st}"` : '';
     const bx = lk.box;
@@ -6869,7 +6869,7 @@ export default function App() {
               <button className={'fl-item' + (!flPanel.id ? ' on' : '')} data-testid="fl-none" onClick={() => pickFilter('')}>없음</button>
               {CEff.FILTERS.map((f) => <button key={f.id} className={'fl-item' + (flPanel.id === f.id ? ' on' : '')} data-testid={'fl-' + f.id} style={{ filter: CEff.cssFilter(f.id) }} onClick={() => pickFilter(f.id)}>{f.label}</button>)}
             </div>
-            {flPanel.video && <span className="meta">⚠ 영상 그룹에는 아직 적용되지 않습니다(그림 그룹만)</span>}
+            {flPanel.video && <span className="meta">🎞 영상 그룹은 .vrew·MP4 를 만들 때 다시 인코딩해 입힙니다(시간이 조금 더 걸립니다)</span>}
             <span className="meta">원본 그림은 그대로 두고 필터를 입힌 사본을 만들어 .vrew·MP4 에 씁니다 · Vrew 에서 열면 필터가 이미 입혀진 그림으로 보입니다(Vrew 쪽에서 끌 수 없음) · 배경색·확대·회전과 함께 쓸 수 있습니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
             <div className="zr-btns"><button data-testid="fl-close" onClick={() => setFlPanel(null)}>닫기</button></div>
           </div>}
@@ -6879,7 +6879,7 @@ export default function App() {
             <label>색 <input type="color" data-testid="bg-color" value={bgPanel.color || '#000000'} onChange={(e) => bgChange(e.target.value)} /><span className="zr-v" data-testid="bg-color-v">{bgPanel.color || '없음'}</span></label>
             <div className="bg-swatches">{['#000000', '#ffffff', '#1f2937', '#0b3d2e', '#7c2d12', '#3b0764'].map((c) => <button key={c} className="bg-sw" data-testid="bg-sw" title={c} style={{ background: c }} onClick={() => bgChange(c)} />)}</div>
             {bgPanel.boxed && <span className="meta" data-testid="bg-note-box">⚠ 이 그림은 ① 칸에서 직접 옮기고 줄인 자리가 있어 배경색이 쓰이지 않습니다(자리 원래대로를 하면 쓰입니다)</span>}
-            {bgPanel.video && <span className="meta">⚠ 영상 그룹에는 아직 적용되지 않습니다(그림 그룹만)</span>}
+            {bgPanel.video && <span className="meta">🎞 영상 그룹은 화면에 꽉 차지 않는 영상(맞추기·가로↔세로)만 띠에 색이 보이고, 만들 때 다시 인코딩해 입힙니다</span>}
             <span className="meta">맞추기(레터박스)로 생기는 위아래·좌우 띠와 투명한 PNG 의 투명한 부분에 칠합니다 · 꽉 채우기면 보이지 않습니다 · 켄번스·확대·회전과 함께 움직입니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
             <div className="zr-btns"><button className="ghost" data-testid="bg-clear" onClick={() => bgChange('')}>없음(기본 검정)</button><button data-testid="bg-close" onClick={() => setBgPanel(null)}>닫기</button></div>
           </div>}
