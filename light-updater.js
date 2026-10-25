@@ -51,7 +51,7 @@ function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex');
 
 // 텍스트는 CRLF→LF 정규화 후 해시 (gen-manifest 와 동일 규칙) — 설치파일이 CRLF 로 패키징돼도
 //   매니페스트(LF) 와 일치해 불필요한 재다운로드 방지. 바이너리는 원본 바이트.
-const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg']);
+const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
 function normalizeLF(buf) {
   const out = Buffer.allocUnsafe(buf.length);
   let j = 0;

@@ -27,6 +27,7 @@ const EXCLUDE_DIR_NAMES = new Set(['node_modules', '.git', 'output', 'test', 'lo
 const EXCLUDE_REL = [
   /^dist\//,            // electron-builder 설치파일 산출물 (renderer/dist 는 제외 안 됨)
   /^renderer\/src\//,
+  /^docs\/VrewLab\/vrew-화면\//,   // 문서용 캡처(webp) — 앱이 안 쓴다 · 옛 업데이터가 이진 파일을 텍스트로 해시해 업데이트가 막혔다(2026-10-25)
   /^tts\/omnivoice-backend\//,
   // 출판용 폰트(56MB)만 제외한다. 🎬 유튜브 MP4 자막 폰트(assets/fonts/Pretendard-Bold.ttf · 2.4MB)는
   //   **배포해야 한다** — 예전엔 assets/fonts/ 전체를 막아서 아내 PC 에 폰트가 없으면 자막이 맑은 고딕으로 나간다.
@@ -46,7 +47,7 @@ const EXCLUDE_REL = [
 const EXCLUDE_FILE = [/\.(exe|msi|zip|7z|rar|dmg|iso)$/i, /\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/];
 
 // 바이너리 확장자 (.gitattributes 의 binary 선언과 일치) — EOL 정규화 안 함, 원본 바이트로 해시.
-const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg']);
+const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
 
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
 
