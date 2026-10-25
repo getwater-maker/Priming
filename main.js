@@ -6041,8 +6041,8 @@ function defaultDownloadDir() {
 //   채널 값(outReader·downloadFolder)은 더 이상 읽지 않는다(파일에는 남아 있다). 비우면 윈도우 「다운로드」 폴더.
 const APP_FOLDERS_FILE = () => path.join(os.homedir(), '.priming-maker', 'app-folders.json');
 function loadAppFolders() {
-  try { const j = JSON.parse(fs.readFileSync(APP_FOLDERS_FILE(), 'utf8')); return { reader: String(j.reader || ''), download: String(j.download || ''), thumbs: String(j.thumbs || '') }; }
-  catch (_) { return { reader: '', download: '', thumbs: '' }; }
+  try { const j = JSON.parse(fs.readFileSync(APP_FOLDERS_FILE(), 'utf8')); return { reader: String(j.reader || ''), download: String(j.download || ''), thumbs: String(j.thumbs || ''), media: String(j.media || ''), sfx: String(j.sfx || '') }; }
+  catch (_) { return { reader: '', download: '', thumbs: '', media: '', sfx: '' }; }
 }
 function appFolder(kind) { return String(loadAppFolders()[kind] || '').trim() || defaultDownloadDir(); }
 // 🖼 썸네일 폴더(v0.9.24 · 로이 2026-10-15) — 패키징이 만든 썸네일 3안(`<폴더>\<채널>\[약칭_MMDD] 썸네일_A.png`)을 로그 상자 🖼 탭에 보인다.
@@ -6050,10 +6050,26 @@ function appFolder(kind) { return String(loadAppFolders()[kind] || '').trim() ||
 function thumbRoot(defOnly = false) {
   return defOnly ? '' : String(loadAppFolders().thumbs || '').trim();
 }
+// 🗂 내 미디어 보관함 · 🔊 효과음 패널(Lab · 남은 기능 ③④) — ⚙ 설정 → 📁 폴더 의 「내 미디어」「효과음」 폴더를 훑어 키워드로 찾는다(읽기만 · core/media-lib).
+//   args = { lib:'media'|'sfx', query?, offset?, limit?, refresh? } → { ok, root, total, shown, items:[{path,name,rel,kind,size}], truncated } | { ok:false, error, unset? }
+//   찾은 파일을 넣는 것은 화면이 기존 overlay-op add 로(이 IPC 는 넣지 않는다) · 훑은 결과는 15초 기억(글자를 칠 때마다 폴더를 다시 읽지 않게)
+const _libCache = new Map();
+ipcMain.handle('lib-search', (_e, args = {}) => {
+  const ML = require('./core/media-lib');
+  const lib = args.lib === 'sfx' ? 'sfx' : 'media';
+  const root = String(loadAppFolders()[lib] || '').trim();
+  if (!root) return { ok: false, unset: true, error: lib === 'sfx' ? '효과음 폴더가 정해져 있지 않습니다 — ⚙ 설정 → 📁 폴더 → 「효과음」' : '내 미디어 폴더가 정해져 있지 않습니다 — ⚙ 설정 → 📁 폴더 → 「내 미디어」' };
+  const key = lib + '|' + root; const now = Date.now(); let hit = _libCache.get(key);
+  if (!hit || args.refresh || now - hit.t > 15000) { hit = { t: now, res: ML.scan(root, lib) }; _libCache.set(key, hit); }
+  if (hit.res.error) return { ok: false, error: hit.res.error, root };
+  const all = ML.filter(hit.res.items, args.query);
+  const items = ML.page(all, Number(args.offset) || 0, Math.min(500, Number(args.limit) || 120));
+  return { ok: true, root, total: all.length, all: hit.res.items.length, shown: items.length, items, truncated: !!hit.res.truncated };
+});
 ipcMain.handle('get-app-folders', () => ({ ...loadAppFolders(), def: defaultDownloadDir(), thumbsDef: thumbRoot(true) }));
 ipcMain.handle('save-app-folders', (_e, patch = {}) => {
   const cur = loadAppFolders();
-  for (const k of ['reader', 'download', 'thumbs']) if (typeof patch[k] === 'string') cur[k] = patch[k].trim();
+  for (const k of ['reader', 'download', 'thumbs', 'media', 'sfx']) if (typeof patch[k] === 'string') cur[k] = patch[k].trim();
   fs.mkdirSync(path.dirname(APP_FOLDERS_FILE()), { recursive: true });
   fs.writeFileSync(APP_FOLDERS_FILE(), JSON.stringify(cur, null, 2), 'utf8');
   log(`📁 공통 폴더 저장 — 대본 PDF: ${cur.reader || '(다운로드)'} · URL 받기: ${cur.download || '(다운로드)'} · 썸네일: ${cur.thumbs || thumbRoot(true) || '(없음)'}`);

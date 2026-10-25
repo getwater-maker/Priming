@@ -176,6 +176,7 @@ contextBridge.exposeInMainWorld('api', {
   testTtsServer: (args) => ipcRenderer.invoke('test-tts-server', args),
   pickFile: (args) => ipcRenderer.invoke('pick-file', args),
   pickDir: () => ipcRenderer.invoke('pick-dir'),
+  libSearch: (args) => ipcRenderer.invoke('lib-search', args),   // 🗂 내 미디어 · 🔊 효과음 찾기
   getAppFolders: () => ipcRenderer.invoke('get-app-folders'),
   saveAppFolders: (patch) => ipcRenderer.invoke('save-app-folders', patch),
   thumbEditOpen: () => ipcRenderer.invoke('thumb-edit-open'),

@@ -6436,6 +6436,8 @@ export default function App() {
                 <button className="ghost" data-testid="ins-image" disabled={!loaded || !isLf} title="그림 삽입 — 정한 클립 범위 동안 모든 그림·영상 위층에(인물 사진·지도·글 카드 등). 배경 투명 PNG 도 됩니다." onClick={(e) => insertMedia('image', e)}><span className="rb-ic">🖼</span> <span className="rb-t">이미지</span></button>
                 <button className="ghost" data-testid="ins-video" disabled={!loaded || !isLf} title="영상 삽입 — 정한 클립 범위 동안 위층에서 반복 재생" onClick={(e) => insertMedia('video', e)}><span className="rb-ic">🎬</span> <span className="rb-t">비디오</span></button>
                 <button className="ghost" data-testid="ins-pad" disabled={!loaded || !isLf} title="빈 클립 삽입 — 고른 클립 음성 뒤에 N초 무음(그림은 이어지고 자막은 없음)" onClick={() => openPadPanel()}>▭ 빈 클립</button>
+                <button className="ghost" data-testid="ins-lib" disabled={!loaded || !isLf} title="내 이미지·비디오 — 내 미디어 폴더에서 키워드로 찾아 넣기" onClick={() => openLib('media')}>🗂 내 미디어</button>
+                <button className="ghost" data-testid="ins-sfx" disabled={!loaded || !isLf} title="효과음 — 효과음 폴더에서 키워드로 찾아 미리 듣고 넣기" onClick={() => openLib('sfx')}>🔊 효과음</button>
                 <button className="ghost" data-testid="ins-audio" disabled={!loaded || !isLf} title="오디오 삽입 — 정한 클립 범위 동안 음악·효과음(반복 · 앞뒤 부드럽게). 영상 전체 배경음악은 ⚙ 채널편집 → 📁 폴더 → 🎵 배경음악" onClick={(e) => insertMedia('audio', e)}><span className="rb-ic">🎵</span> <span className="rb-t">오디오</span></button>
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
@@ -6581,6 +6583,41 @@ export default function App() {
     zrTimerRef.current = setTimeout(async () => {   // 슬라이더를 끄는 동안 매번 보내지 않는다
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
+  }
+  // 🗂 내 미디어 · 🔊 효과음 — 폴더를 키워드로 찾아 고른 클립 구간에 넣는다(core/media-lib · main lib-search · 넣기는 기존 overlay-op add)
+  const [libPanel, setLibPanel] = useState(null);   // { lib, q, res, busy, sn, a, b, playing }
+  const libAudioRef = useRef(null);
+  const libTimerRef = useRef(null);
+  async function libLoad(lib, q, refresh) {
+    try { const r = await api.libSearch({ lib, query: q, refresh: !!refresh }); setLibPanel((p) => (p && p.lib === lib ? { ...p, res: r, busy: false } : p)); }
+    catch (e) { setLibPanel((p) => (p ? { ...p, res: { ok: false, error: e.message }, busy: false } : p)); }
+  }
+  function openLib(lib) {
+    if (!clipSelOk()) { setStatus((lib === 'sfx' ? '🔊 효과음' : '🗂 내 미디어') + '를 넣을 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const ns = capSel.items.map((x) => x.n);
+    setLibPanel({ lib, q: '', res: null, busy: true, sn: capSel.shortsNum, a: Math.min(...ns), b: Math.max(...ns), playing: '' });
+    libLoad(lib, '', true);
+  }
+  function libQuery(q) {
+    setLibPanel((p) => (p ? { ...p, q, busy: true } : p));
+    if (libTimerRef.current) clearTimeout(libTimerRef.current);
+    const lib = libPanel && libPanel.lib; libTimerRef.current = setTimeout(() => libLoad(lib, q, false), 250);
+  }
+  function libPlay(it) {
+    try { if (libAudioRef.current) { libAudioRef.current.pause(); libAudioRef.current = null; } } catch (_) {}
+    setLibPanel((p) => {
+      if (!p) return p;
+      if (p.playing === it.path) return { ...p, playing: '' };
+      const au = new Audio(media(it.path)); au.onended = () => setLibPanel((q) => (q ? { ...q, playing: '' } : q)); au.play().catch(() => {}); libAudioRef.current = au;
+      return { ...p, playing: it.path };
+    });
+  }
+  async function libInsert(it) {
+    const p = libPanel; if (!p) return;
+    try { if (libAudioRef.current) { libAudioRef.current.pause(); libAudioRef.current = null; } } catch (_) {}
+    const r = await overlayOp({ shortsNum: p.sn, op: 'add', file: it.path });
+    if (r && r.ok && r.id) { await insRange(p.sn, r.id, p.a, p.b); setStatus((p.lib === 'sfx' ? '🔊 ' : '🗂 ') + it.name + ' 을(를) 고른 클립 구간에 넣었습니다 (Ctrl+Z 되돌리기)'); setLibPanel(null); }
   }
   // 🕳 정지 워드·빈 워드 삽입 — 문장 음성의 어절 경계에 N초 무음(새 WAV · 글 불변 · main `clip-pause-word`)
   const [wpPanel, setWpPanel] = useState(null);   // { sn, groupNum, sentIdx, kind, pos:'word'|'start'|'end', at, sec, hasWord, hasWb, busy, num }
@@ -7040,7 +7077,8 @@ export default function App() {
             {clipMenu === 'ins' && <div className="vr-menu clip-tb-menu" data-testid="ctb-ins-menu" style={{ left: n >= 2 ? 250 : 150, ...tbFlip }}>
               <button data-testid="ctb-ins-pc" title="그림·영상·오디오 파일을 고른 클립 구간에 위층으로 넣습니다(➕ 삽입과 같은 기능)" onClick={clipInsertFile}>🖥 PC에서 불러오기</button>
               {soon('📱', '모바일에서 불러오기')}
-              {soon('🗂', '내 이미지 · 비디오')}
+              <button data-testid="ctb-ins-lib" title="내 미디어 폴더(⚙ 설정 → 📁 폴더)의 그림·영상을 키워드로 찾아 고른 클립 구간에 넣습니다" onClick={() => openLib('media')}>🗂 내 이미지 · 비디오</button>
+              <button data-testid="ctb-ins-sfx" title="효과음 폴더(⚙ 설정 → 📁 폴더)에서 키워드로 찾아 미리 듣고 고른 클립 구간에 넣습니다" onClick={() => openLib('sfx')}>🔊 효과음</button>
               <button data-testid="ctb-ins-free" title="무료 스톡 사진·영상(Pexels·Pixabay)을 검색해 고른 클립 구간에 넣습니다" onClick={() => openStockForSel('photo')}>🖼 무료 이미지 · 비디오</button>
               <button data-testid="ctb-ins-aiimg" title="이 클립이 든 그룹의 그림을 AI 로 다시 만듭니다(그룹의 🔄 와 같다)" onClick={() => { setClipMenu(null); if (cg) runRegen(cg.sn, cg.g); }}>✨ AI 이미지 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-ins-aivid" title="이 클립이 든 그룹의 그림으로 AI 영상을 만듭니다(그룹의 🎬 와 같다)" onClick={() => { setClipMenu(null); if (cg) runGroupVid(cg.sn, cg.g); }}>🎬 AI 비디오 <i>G{cg ? cg.g : ''}</i></button>
@@ -7166,6 +7204,26 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {libPanel && <div className="vr-menu-bg" onMouseDown={() => { try { if (libAudioRef.current) libAudioRef.current.pause(); } catch (_) {} setLibPanel(null); }} />}
+          {libPanel && <div className="vr-menu zr-panel lib-panel" data-testid="lib-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>{libPanel.lib === 'sfx' ? '🔊 효과음' : '🗂 내 이미지 · 비디오'} · 문장 {libPanel.a}~{libPanel.b} 에 넣기</b>
+            <input data-testid="lib-q" autoFocus placeholder={libPanel.lib === 'sfx' ? '키워드로 찾기(파일·폴더 이름 — 예: 박수 웃음)' : '키워드로 찾기(파일·폴더 이름)'} value={libPanel.q} onChange={(e) => libQuery(e.target.value)} />
+            {libPanel.res && !libPanel.res.ok && <span className="meta" data-testid="lib-err">⚠ {libPanel.res.error}</span>}
+            {libPanel.res && libPanel.res.ok && <span className="meta" data-testid="lib-count">{libPanel.res.root} · {libPanel.res.total}개{libPanel.res.total !== libPanel.res.all ? ` (전체 ${libPanel.res.all}개 중)` : ''}{libPanel.res.truncated ? ' · 폴더가 커서 앞 5,000개만 훑었습니다' : ''}{libPanel.res.shown < libPanel.res.total ? ` · 앞 ${libPanel.res.shown}개만 보임 — 키워드를 더 적어 좁히세요` : ''}</span>}
+            <div className={'lib-grid' + (libPanel.lib === 'sfx' ? ' sfx' : '')} data-testid="lib-grid">
+              {((libPanel.res && libPanel.res.items) || []).map((it) => (
+                <div key={it.path} className="lib-item" data-testid="lib-item" title={it.rel}>
+                  {it.kind === 'image' ? <img src={media(it.path)} loading="lazy" alt="" /> : it.kind === 'video' ? <span className="lib-ic">🎞</span> : <span className="lib-ic">🔊</span>}
+                  <span className="lib-nm">{it.name}</span>
+                  <span className="lib-bt">
+                    {it.kind === 'audio' && <button className="ghost" data-testid="lib-play" onClick={() => libPlay(it)}>{libPanel.playing === it.path ? '■' : '▶'}</button>}
+                    <button data-testid="lib-add" onClick={() => libInsert(it)}>넣기</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="zr-btns"><button className="ghost" data-testid="lib-refresh" onClick={() => { setLibPanel((p) => (p ? { ...p, busy: true } : p)); libLoad(libPanel.lib, libPanel.q, true); }}>폴더 다시 읽기</button><button data-testid="lib-close" onClick={() => { try { if (libAudioRef.current) libAudioRef.current.pause(); } catch (_) {} setLibPanel(null); }}>닫기</button></div>
+          </div>}
           {pwMenu && createPortal(<div className="vr-menu-bg" onMouseDown={() => setPwMenu(null)} />, document.body)}
           {pwMenu && createPortal(<div className="vr-menu pw-menu" data-testid="pw-menu" style={{ position: 'fixed', left: pwMenu.x, top: pwMenu.y, zIndex: 9000 }} onMouseDown={(e) => e.stopPropagation()}>
             <button data-testid="pw-clip" onClick={() => pwPick('clip')}>빈 클립</button>
@@ -8446,6 +8504,12 @@ export default function App() {
                 <input style={{ flex: 1 }} data-testid="app-folder-thumbs" placeholder={appFolders.thumbsDef ? '비우면 ' + appFolders.thumbsDef : '패키징 썸네일 폴더 — <폴더>\\<채널>\\[약칭_MMDD] 썸네일_A.png'} value={appFolders.thumbs || ''}
                   onChange={(e) => setAppFolders((f) => ({ ...f, thumbs: e.target.value }))} onBlur={(e) => saveAppFolders({ thumbs: e.target.value })} />
                 <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder('thumbs')}>찾기</button></div>
+              {[['media', '내 미디어', '🗂 삽입 ▸ 「내 이미지 · 비디오」가 보여 줄 그림·영상 폴더(하위 4단계까지)'], ['sfx', '효과음', '🔊 삽입 ▸ 「효과음」이 찾을 오디오 폴더(mp3·wav·m4a … · 하위 4단계까지)']].map(([k, lbl, ph]) => (
+                <div className="frow" key={k}><label>{lbl}</label>
+                  <input style={{ flex: 1 }} data-testid={'app-folder-' + k} placeholder={ph} value={appFolders[k] || ''}
+                    onChange={(e) => setAppFolders((f) => ({ ...f, [k]: e.target.value }))} onBlur={(e) => saveAppFolders({ [k]: e.target.value })} />
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => pickAppFolder(k)}>찾기</button></div>
+              ))}
               <Hint>🖼 로그 상자의 「썸네일」 탭이 이 폴더에서 지금 대본의 <b>[약칭_MMDD]</b> 로 시작하는 그림 3장을 찾습니다(채널 폴더 한 단계 아래까지). 일치하는 파일이 없으면 지정 폴더 바로 안의 일반 이미지 3장을 이름순으로 보여 줍니다. 첫 칸에는 선택한 이미지 스타일을 표시합니다.</Hint>
               <Hint>입력 후 칸 밖을 클릭하거나 「찾기」로 고르면 바로 저장됩니다.</Hint>
             </div>)}
