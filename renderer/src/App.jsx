@@ -6584,6 +6584,12 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🎬 외부 편집기 내보내기(FCPXML) — 소재와 길이·자리만(core/fcpxml · main export-fcpxml)
+  async function exportFcpxml() {
+    const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
+    try { const r = await api.exportFcpxml({ shortsNum: sn }); setStatus(r && r.ok ? `🎬 FCPXML 로 내보냈습니다 — ${r.path} (소재 ${r.assets}개 · 클립 ${r.clips}개 · 효과·자막은 담지 않습니다)` : '⚠ ' + ((r && r.error) || '내보내지 못했습니다')); }
+    catch (e) { setStatus('⚠ ' + e.message); }
+  }
   // 🎞 영상 장면 전환 찾기 — 그룹 영상에서 전환 시각을 찾아 보여 주고(찾기만) 원하면 그 클립에 ⚑ 마커(core/scene-detect · main video-scenes)
   const [scenePanel, setScenePanel] = useState(null);   // { sn, groupNum, th, busy, res, err }
   function openSceneFind(pre) {
@@ -6953,6 +6959,7 @@ export default function App() {
   const ribFileVrew = () => (<span className="hgroup" data-testid="rib-file-vrew">
     <button data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
     <button data-testid="rb-backup" disabled={!loaded} title="백업에서 되살리기 — 대본마다 10분 간격으로 남긴 백업에서 고른 시각으로" onClick={() => setBackupDlg(true)}><span className="rb-ic">🕘</span> <span className="rb-t">백업</span></button>
+    <button data-testid="rb-fcpxml" disabled={!loaded} title="외부 편집기로 내보내기(FCPXML) — Final Cut · DaVinci Resolve · Premiere 가 읽는 파일을 완성물 폴더에 만듭니다(그림·영상·음성·삽입의 소재와 길이·자리만 · 효과와 자막은 담지 않음)" onClick={exportFcpxml}><span className="rb-ic">🎬</span> <span className="rb-t">FCPXML 내보내기</span></button>
     <button data-testid="rb-fileinfo" disabled={!loaded} title="작업 파일 정보 — 그룹·클립·음성·그림 개수" onClick={showFileInfo}><span className="rb-ic">ⓘ</span> <span className="rb-t">파일 정보</span></button>
   </span>);
   const ribMakeExtra = (<span className="hgroup" data-testid="rib-make-extra">{ribDl}</span>);

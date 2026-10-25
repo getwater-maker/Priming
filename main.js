@@ -10971,6 +10971,21 @@ ipcMain.handle('video-scenes', async (_e, args = {}) => {
   log(`🎞 G${g.num} 영상 장면 전환 ${scenes.length}곳(민감도 ${r.threshold})${marked ? ` · ⚑ 마커 ${marked}개` : ''}`);
   return { ok: true, threshold: r.threshold, scenes, marked, videoSec: null, dto: marked ? P.toDTO(S.parsed) : undefined };
 });
+// 🎬 외부 편집기 내보내기(Lab · 남은 기능 ⑧) — FCPXML 1.9(Final Cut Pro X · DaVinci Resolve · Premiere 가 읽는다). 앱 상태는 바꾸지 않는다(읽기만) · 파일은 완성물 폴더 루트의 <대본이름>.fcpxml
+//   args = { shortsNum, presetName? } → { ok, path, totalSec, assets, clips } · 소재(그림·영상·음성·삽입)와 길이·자리만 — 효과·자막은 담지 않는다(core/fcpxml)
+ipcMain.handle('export-fcpxml', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr; const FX = require('./core/fcpxml');
+  if (!pr.sentences.some((s) => s.ttsAudioPath && s.ttsDurationSec > 0)) return { ok: false, error: '음성이 있는 문장이 없습니다 — 음성을 먼저 만드세요(시간표를 음성 길이로 만듭니다)' };
+  const pz = P.pausePlanOf(pr, resolvePreset(args.presetName || null)).map;
+  const base = vrewBaseName(pr);
+  const r = FX.build(pr, { name: base, pauses: pz, canvas: { w: 1920, h: 1080 }, exists: (f) => fs.existsSync(f) });
+  if (!r.clips) return { ok: false, error: '내보낼 소재가 없습니다(그림·영상·음성)' };
+  const out = path.join(S.outRoot, base + '.fcpxml');
+  try { fs.mkdirSync(path.dirname(out), { recursive: true }); require('./core/atomic-write').writeTextAtomicSync(out, r.xml); } catch (e) { return { ok: false, error: '저장하지 못했습니다: ' + e.message }; }
+  log(`🎬 FCPXML 내보냄 — ${path.basename(out)} (소재 ${r.assets}개 · 클립 ${r.clips}개 · ${(r.totalSec / 60).toFixed(1)}분 · 효과·자막은 담지 않음)`);
+  return { ok: true, path: out, totalSec: r.totalSec, assets: r.assets, clips: r.clips };
+});
 // 🕳 빈 클립 삽입(Lab · Vrew 「빈 클립 삽입」) — 고른 클립들 **맨 뒤 문장** 음성 뒤에 N초 무음(s.padAfter · 화면은 이어지고 자막은 없다).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], sec, mode:'add'(기본 · 더한다)|'set'(그 값으로) } · sec 0 + set = 지움 · 음성 있는 문장만
 //   설계 docs/VrewLab/빈클립_정지워드_설계.md — 합치는 곳은 pipeline.pausePlanOf 한 곳(빌더·SRT·챕터·카드·지문이 그걸 읽는다)
