@@ -1991,3 +1991,9 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .bg-panel input[type=color]{width:44px;height:28px;padding:0;border:1px solid var(--line-2);border-radius:var(--r-sm);background:transparent}
 .bg-swatches{display:flex;gap:6px}
 .bg-sw{width:26px;height:26px;border-radius:50%;border:1px solid var(--line-2);padding:0}
+
+/* ✳ 필터 패널(효과 ③) */
+.fl-panel{width:360px}
+.fl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.fl-item{padding:8px 4px;border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--paper-2);color:var(--strong);font-weight:700}
+.fl-item.on{outline:2px solid var(--accent)}

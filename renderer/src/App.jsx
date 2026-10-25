@@ -4561,7 +4561,9 @@ export default function App() {
     const flipT = (lk.flipH || lk.flipV) ? ` style="transform:scale(${lk.flipH ? -1 : 1},${lk.flipV ? -1 : 1})"` : '';
     const fit = lk.box ? 'fill' : (lk.fill === 'auto' ? '' : lk.fill);
     const bgC = (!c.videoPath && CEff.cssBg(lk)) || '';   // 🎨 클립 배경색 — 그림 요소에 칠한다(켄번스와 함께 움직인다 = 굽기 사본과 같다)
-    const fitS = (fit || bgC) ? ` style="${fit ? `object-fit:${fit}` : ''}${fit && bgC ? ';' : ''}${bgC ? `background-color:${bgC}` : ''}"` : '';
+    const fltC = (!c.videoPath && CEff.cssFilter(lk)) || '';   // 🎞 필터 — 그림 요소에(배경색 사본까지 입힌 화면 = .vrew 의 굽기 사본과 같은 범위)
+    const _st = [fit ? `object-fit:${fit}` : '', bgC ? `background-color:${bgC}` : '', fltC ? `filter:${fltC}` : ''].filter(Boolean).join(';');
+    const fitS = _st ? ` style="${_st}"` : '';
     const bx = lk.box;
     const pos = bx ? `left:${(bx.x * 100).toFixed(3)}%;top:${(bx.y * 100).toFixed(3)}%;width:${(bx.w * 100).toFixed(3)}%;height:${(bx.h * 100).toFixed(3)}%` : 'left:0;top:0;width:100%;height:100%';
     let inner;
@@ -6392,6 +6394,22 @@ export default function App() {
   // 🎨 클립 배경색(효과 ②) — 맞추기(띠)·투명 PNG 바닥. 그림 그룹만 · 사람이 옮긴 자리(look.box)가 있으면 쓰이지 않는다
   const [bgPanel, setBgPanel] = useState(null);   // { sn, gs, color('' = 없음), boxed }
   const bgTimerRef = useRef(null);
+  // 🎞 필터(효과 ③) — 그림 그룹 · 프리셋 9종 + 없음
+  const [flPanel, setFlPanel] = useState(null);   // { sn, gs, id, video }
+  function openFilterPanel() {
+    if (!clipSelOk()) { setStatus('🎞 필터를 줄 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum;
+    const gs = [...new Set(capSel.items.map((x) => x.groupNum))].sort((x, y) => x - y);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const c = pr ? pr.cuts.find((x) => x.num === gs[0]) : null;
+    const lk = VLook.normLook(c && c.look);
+    setFlPanel({ sn, gs, id: lk.filter || '', video: !!(c && c.videoPath) });
+  }
+  async function pickFilter(id) {
+    setFlPanel((p) => (p ? { ...p, id } : p));
+    const sel = flPanel; if (!sel) return;
+    for (const g of sel.gs) await setGroupLook(sel.sn, g, { filter: id || '' });
+  }
   function openBgPanel() {
     if (!clipSelOk()) { setStatus('🎨 배경색을 줄 클립을 먼저 고르세요'); return; }
     setClipMenu(null); setClipCtx(null);
@@ -6504,6 +6522,7 @@ export default function App() {
     <button data-testid="rb-fit-cover" disabled={!selOk} title="채움 — 고른 클립의 그림·영상으로 화면을 가득 채우기" onClick={() => { const cg = clipGroup(); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}><span className="rb-ic">■</span> <span className="rb-t">채움</span></button>
     <button data-testid="rb-zoomrot" disabled={!selOk} title="확대 및 회전 — 고른 클립이 든 그림·영상 그룹을 확대(100~300%)하거나 돌립니다(−180~180°). 돌리면 켄번스(천천히 움직임)는 꺼집니다" onClick={openZoomRot}><span className="rb-ic">⤢</span> <span className="rb-t">확대·회전</span></button>
     <button data-testid="rb-bg" disabled={!selOk} title="클립 배경색 — 맞추기로 생기는 띠와 투명 PNG 바닥에 색을 칠합니다(그림 그룹 · 그림을 직접 옮긴 자리에는 쓰이지 않음)" onClick={openBgPanel}><span className="rb-ic">🎨</span> <span className="rb-t">배경색</span></button>
+    <button data-testid="rb-filter" disabled={!selOk} title="필터 — 고른 클립이 든 그림 그룹의 색감을 바꿉니다(흑백·세피아·따뜻하게 …). 원본 그림은 그대로 두고 필터를 입힌 사본을 만듭니다" onClick={openFilterPanel}><span className="rb-ic">✳</span> <span className="rb-t">필터</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     {pointsEl}
@@ -6740,7 +6759,7 @@ export default function App() {
               {soon('𝕋', '디자인 텍스트')}
             </div>}
             {clipMenu === 'fx' && <div className="vr-menu clip-tb-menu" data-testid="ctb-fx-menu" style={{ left: n >= 2 ? 330 : 230, ...tbFlip }}>
-              {soon('✳', '필터')}
+              <button data-testid="ctb-filter" onClick={() => { setClipMenu(null); openFilterPanel(); }}>✳ 필터</button>
               <button data-testid="ctb-zoomrot" onClick={() => { setClipMenu(null); openZoomRot(); }}>⤢ 확대 및 회전</button>
               <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
@@ -6814,6 +6833,17 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {flPanel && <div className="vr-menu-bg" onMouseDown={() => setFlPanel(null)} />}
+          {flPanel && <div className="vr-menu zr-panel fl-panel" data-testid="fl-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>✳ 필터 · {flPanel.gs.map((g) => 'G' + g).join(' ')}</b>
+            <div className="fl-grid">
+              <button className={'fl-item' + (!flPanel.id ? ' on' : '')} data-testid="fl-none" onClick={() => pickFilter('')}>없음</button>
+              {CEff.FILTERS.map((f) => <button key={f.id} className={'fl-item' + (flPanel.id === f.id ? ' on' : '')} data-testid={'fl-' + f.id} style={{ filter: CEff.cssFilter(f.id) }} onClick={() => pickFilter(f.id)}>{f.label}</button>)}
+            </div>
+            {flPanel.video && <span className="meta">⚠ 영상 그룹에는 아직 적용되지 않습니다(그림 그룹만)</span>}
+            <span className="meta">원본 그림은 그대로 두고 필터를 입힌 사본을 만들어 .vrew·MP4 에 씁니다 · Vrew 에서 열면 필터가 이미 입혀진 그림으로 보입니다(Vrew 쪽에서 끌 수 없음) · 배경색·확대·회전과 함께 쓸 수 있습니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button data-testid="fl-close" onClick={() => setFlPanel(null)}>닫기</button></div>
+          </div>}
           {bgPanel && <div className="vr-menu-bg" onMouseDown={() => setBgPanel(null)} />}
           {bgPanel && <div className="vr-menu zr-panel bg-panel" data-testid="bg-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>🎨 클립 배경색 · {bgPanel.gs.map((g) => 'G' + g).join(' ')}</b>
@@ -6947,7 +6977,7 @@ export default function App() {
               <Row icon="◂" label="효과로 돌아가기" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'fx' } : c))} tid="cx-speed-back" />
             </>}
             {clipCtx.sub === 'fx' && <>
-              <Row icon="✳" label="필터" soon />
+              <Row icon="✳" label="필터" onClick={() => openFilterPanel()} tid="cx-fx-filter" />
               <Row icon="⤢" label="확대 및 회전" onClick={() => openZoomRot()} tid="cx-fx-zoomrot" />
               <Row icon="◐" label="화면 전환" soon />
               <Row icon="🔉" label="볼륨 조절" soon />

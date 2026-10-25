@@ -992,6 +992,13 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         else log(`[Vrew] ⚠ G${g.num} 배경색 사본을 만들지 못해 원본 그림으로 계속합니다`);
       }
     }
+    // 🎞 필터(효과 ③) — 배경색 사본(있으면)까지 입힌 **최종 화면**에 필터를 굽는다(미리보기의 img 요소 filter 와 같은 범위 · 띠도 함께 필터)
+    if (CE.filterActive(g.look)) {
+      const _fsrc = _imgPath;
+      const _flt = await require('../core/clip-effects-bake').bakeFilter({ src: _fsrc, filter: g.look.filter, ffmpegPath: _ffmpegPath });
+      if (_flt) { _imgPath = _flt; log(`[Vrew] G${g.num} 필터 ${g.look.filter} — 사본으로 굽기`); }
+      else log(`[Vrew] ⚠ G${g.num} 필터 사본을 만들지 못해 원본 그림으로 계속합니다`);
+    }
     const mid = uid();
     const aid = uid();
     const tid = sid();

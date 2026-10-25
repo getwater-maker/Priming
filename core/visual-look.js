@@ -73,6 +73,8 @@ function normLook(l) {
   if (zm) out.zoom = zm;   // 🎛 확대 %(기본 100 = 필드 없음)
   const rt = CE.normRot(o.rot);
   if (rt) out.rot = rt;   // 🎛 회전 °(기본 0 = 필드 없음)
+  const flt = CE.normFilter(o.filter);
+  if (flt) out.filter = flt;   // 🎞 필터(기본 = 필드 없음)
   const bgc = CE.normBg(o.bg);
   if (bgc) out.bg = bgc;   // 🎨 클립 배경색(기본 = 필드 없음 · look.box 가 있으면 저장은 하되 쓰지 않는다)
   const ks = normKbSegGroup(o.kbSeg);
@@ -81,7 +83,7 @@ function normLook(l) {
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter;
 }
 function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)); }
 function _describeBase(l) {

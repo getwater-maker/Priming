@@ -35,7 +35,77 @@ function normBg(v) {
 function bgActive(look) { return !!(look && normBg(look.bg) && !look.box); }
 /** 👁 미리보기 — 그림 요소(img)에 칠하는 배경색(빈 곳도 그림 요소 안이라 켄번스와 함께 움직인다 = 굽기 사본과 같다). 없으면 '' */
 function cssBg(look) { return bgActive(look) ? normBg(look.bg) : ''; }
-const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg)));
+
+/**
+ * 🎞 필터 — **CSS 와 ffmpeg 가 같은 뜻을 갖는 연산만**(밝기·대비·채도·색조·흑백·세피아 = CSS filter 함수 명세의 행렬/식).
+ *   한 표(params)에서 CSS 문자열(미리보기)과 ffmpeg 식(굽기)을 **둘 다 만든다** → 식이 두 벌로 갈라지지 않는다.
+ *   순서(CSS 와 같다): 흑백 → 세피아 → 채도 → 색조 → 밝기 → 대비. 밝기는 행렬에 곱해 넣고, 대비는 lutrgb(곱+더하기)로 한다.
+ *   ⚠ ffmpeg 의 colorchannelmixer 는 8비트 sRGB 값에 곱하므로 CSS filter(sRGB)와 같다. 일치는 test/fx-filter.smoke.js 가 단색으로 잰다.
+ */
+const FILTER_DEF = { gray: 0, sepia: 0, sat: 1, hue: 0, bright: 1, contrast: 1 };
+const FILTERS = [
+  { id: 'bw', label: '흑백', params: { gray: 1 } },
+  { id: 'sepia', label: '세피아', params: { sepia: 0.8 } },
+  { id: 'warm', label: '따뜻하게', params: { sepia: 0.3, sat: 1.15 } },
+  { id: 'cool', label: '차갑게', params: { hue: -18, sat: 1.05 } },
+  { id: 'vivid', label: '선명하게', params: { contrast: 1.15, sat: 1.3 } },
+  { id: 'dark', label: '어둡게', params: { bright: 0.75 } },
+  { id: 'bright', label: '밝게', params: { bright: 1.25 } },
+  { id: 'vintage', label: '빈티지', params: { sepia: 0.4, contrast: 0.9, sat: 0.85, bright: 1.05 } },
+  { id: 'fade', label: '바랜 필름', params: { contrast: 0.8, sat: 0.7, bright: 1.1 } },
+];
+const FILTER_IDS = new Set(FILTERS.map((f) => f.id));
+const normFilter = (v) => (FILTER_IDS.has(String(v)) ? String(v) : '');
+const filterParams = (id) => { const f = FILTERS.find((x) => x.id === id); return f ? { ...FILTER_DEF, ...f.params } : null; };
+const filterActive = (look) => !!(look && normFilter(look.filter));
+/** 👁 CSS `filter` 값(미리보기 · 일치 시험의 캔버스) — 없으면 '' */
+function cssFilter(idOrLook) {
+  const id = normFilter(idOrLook && typeof idOrLook === 'object' ? idOrLook.filter : idOrLook);
+  const p = filterParams(id); if (!p) return '';
+  const parts = [];
+  if (p.gray) parts.push(`grayscale(${p.gray})`);
+  if (p.sepia) parts.push(`sepia(${p.sepia})`);
+  if (p.sat !== 1) parts.push(`saturate(${p.sat})`);
+  if (p.hue) parts.push(`hue-rotate(${p.hue}deg)`);
+  if (p.bright !== 1) parts.push(`brightness(${p.bright})`);
+  if (p.contrast !== 1) parts.push(`contrast(${p.contrast})`);
+  return parts.join(' ');
+}
+// CSS filter 명세의 3×3 행렬(행 우선 9개) — 같은 식을 ffmpeg 쪽이 쓴다
+const mGray = (a) => { const m = 1 - Math.max(0, Math.min(1, a)); return [0.2126 + 0.7874 * m, 0.7152 - 0.7152 * m, 0.0722 - 0.0722 * m, 0.2126 - 0.2126 * m, 0.7152 + 0.2848 * m, 0.0722 - 0.0722 * m, 0.2126 - 0.2126 * m, 0.7152 - 0.7152 * m, 0.0722 + 0.9278 * m]; };
+const mSepia = (a) => { const m = 1 - Math.max(0, Math.min(1, a)); return [0.393 + 0.607 * m, 0.769 - 0.769 * m, 0.189 - 0.189 * m, 0.349 - 0.349 * m, 0.686 + 0.314 * m, 0.168 - 0.168 * m, 0.272 - 0.272 * m, 0.534 - 0.534 * m, 0.131 + 0.869 * m]; };
+const mSat = (s) => [0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s, 0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s];
+const mHue = (deg) => { const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t); return [0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928, 0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283, 0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072]; };
+/**
+ * 필터 → 단계 목록 [{m:[9]}…] + contrast. **CSS 처럼 단계마다 0~255 로 자른다**(합성 행렬 하나로 곱하면 중간 클램프가 빠져 색이 어긋났다 —
+ *   차갑게 × 순수 파랑에서 248 ↔ 238 · test/fx-filter.smoke.js 가 잡았다). 그래서 ffmpeg 도 단계마다 colorchannelmixer 한 번씩.
+ */
+function filterStages(id) {
+  const p = filterParams(normFilter(id)); if (!p) return null;
+  const stages = [];
+  if (p.gray) stages.push(mGray(p.gray));
+  if (p.sepia) stages.push(mSepia(p.sepia));
+  if (p.sat !== 1) stages.push(mSat(p.sat));
+  if (p.hue) stages.push(mHue(p.hue));
+  if (p.bright !== 1) stages.push([p.bright, 0, 0, 0, p.bright, 0, 0, 0, p.bright]);
+  return { stages, contrast: p.contrast };
+}
+/** 🔥 굽기(ffmpeg) `-vf` 식 — 단계마다 colorchannelmixer + 마지막에 lutrgb(대비). 없으면 '' */
+function ffmpegFilter(id) {
+  const fs_ = filterStages(id); if (!fs_) return '';
+  const n = (v) => (Math.round(v * 1e5) / 1e5).toString();
+  let s = 'format=rgba';
+  for (const m of fs_.stages) {
+    s += `,colorchannelmixer=rr=${n(m[0])}:rg=${n(m[1])}:rb=${n(m[2])}:gr=${n(m[3])}:gg=${n(m[4])}:gb=${n(m[5])}:br=${n(m[6])}:bg=${n(m[7])}:bb=${n(m[8])}`;
+  }
+  if (fs_.contrast !== 1) {
+    const off = Math.round((0.5 - 0.5 * fs_.contrast) * 255 * 1e3) / 1e3;
+    const e = `'clip(val*${n(fs_.contrast)}+${off},0,maxval)'`;
+    s += `,lutrgb=r=${e}:g=${e}:b=${e}`;
+  }
+  return s;
+}
+const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg) || normFilter(look.filter)));
 
 /**
  * 박스(캔버스 0..1)를 **자기 가운데** 기준으로 키운다 — 비율 유지. 사람이 옮긴 박스(look.box)면 그 박스 가운데.
@@ -81,7 +151,8 @@ function cssTransform(look) {
 function describeFx(look) {
   const z = normZoom(look && look.zoom), r = normRot(look && look.rot);
   const bg = normBg(look && look.bg);
-  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '');
+  const fl = FILTERS.find((x) => x.id === normFilter(look && look.filter));
+  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '') + (fl ? ` · 필터 ${fl.label}` : '');
 }
 
-module.exports = { ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
+module.exports = { ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };

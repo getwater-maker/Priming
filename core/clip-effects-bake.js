@@ -51,4 +51,33 @@ function bakeBackground(o) {
   });
 }
 
-module.exports = { CACHE_DIR, bakeKey, bakeBackground };
+/**
+ * 필터 사본(그림) — 원본(또는 배경색 사본) 크기 그대로 PNG. 같은 입력은 다시 굽지 않는다 → 경로(실패하면 null).
+ * @param {{src:string, filter:string(id), ffmpegPath:string, dir?:string}} o
+ */
+function bakeFilter(o) {
+  const CE = require('./clip-effects');
+  const { src, filter, ffmpegPath } = o;
+  return new Promise((resolve) => {
+    try {
+      const vf = CE.ffmpegFilter(filter);
+      if (!vf || !ffmpegPath || !fs.existsSync(ffmpegPath) || !fs.existsSync(src)) return resolve(null);
+      const dir = o.dir || CACHE_DIR;
+      fs.mkdirSync(dir, { recursive: true });
+      let id = src; try { const st = fs.statSync(src); id += '|' + st.size + '|' + Math.round(st.mtimeMs); } catch (_) {}
+      const key = crypto.createHash('sha1').update([id, filter, vf, 'fl1'].join('|')).digest('hex').slice(0, 16);
+      const out = path.join(dir, key + '.png');
+      if (fs.existsSync(out) && fs.statSync(out).size > 64) return resolve(out);
+      const tmp = out + '.tmp.png';
+      const p = spawn(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', src, '-vf', vf + ',format=rgba', '-frames:v', '1', tmp], { windowsHide: true, stdio: 'ignore' });
+      p.on('error', () => resolve(null));
+      p.on('close', (code) => {
+        try { if (code === 0 && fs.existsSync(tmp)) { fs.renameSync(tmp, out); return resolve(out); } } catch (_) {}
+        try { fs.rmSync(tmp, { force: true }); } catch (_) {}
+        resolve(null);
+      });
+    } catch (_) { resolve(null); }
+  });
+}
+
+module.exports = { CACHE_DIR, bakeKey, bakeBackground, bakeFilter };
