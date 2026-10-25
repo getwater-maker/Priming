@@ -6959,10 +6959,10 @@ export default function App() {
   const ribFileVrew = () => (<span className="hgroup" data-testid="rib-file-vrew">
     <button data-testid="rb-new" title="새로 만들기 — 현재 화면을 비웁니다(작업물은 자동저장돼 있어 대본을 다시 열면 이어집니다)" onClick={resetProject}><span className="rb-ic">🆕</span> <span className="rb-t">새로 만들기</span></button>
     <button data-testid="rb-backup" disabled={!loaded} title="백업에서 되살리기 — 대본마다 10분 간격으로 남긴 백업에서 고른 시각으로" onClick={() => setBackupDlg(true)}><span className="rb-ic">🕘</span> <span className="rb-t">백업</span></button>
-    <button data-testid="rb-fcpxml" disabled={!loaded} title="외부 편집기로 내보내기(FCPXML) — Final Cut · DaVinci Resolve · Premiere 가 읽는 파일을 완성물 폴더에 만듭니다(그림·영상·음성·삽입의 소재와 길이·자리만 · 효과와 자막은 담지 않음)" onClick={exportFcpxml}><span className="rb-ic">🎬</span> <span className="rb-t">FCPXML 내보내기</span></button>
     <button data-testid="rb-fileinfo" disabled={!loaded} title="작업 파일 정보 — 그룹·클립·음성·그림 개수" onClick={showFileInfo}><span className="rb-ic">ⓘ</span> <span className="rb-t">파일 정보</span></button>
   </span>);
-  const ribMakeExtra = (<span className="hgroup" data-testid="rib-make-extra">{ribDl}</span>);
+  const ribMakeExtra = (<span className="hgroup" data-testid="rib-make-extra">{ribDl}
+    <button data-testid="rb-fcpxml" disabled={!loaded} title="외부 편집기로 내보내기(FCPXML) — Final Cut · DaVinci Resolve · Premiere 가 읽는 파일을 완성물 폴더에 만듭니다(그림·영상·음성·삽입의 소재와 길이·자리만 · 효과와 자막은 담지 않음)" onClick={exportFcpxml}><span className="rb-ic">🎬</span> <span className="rb-t">FCPXML 내보내기</span></button></span>);
   const ribMakeSub = (<span className="hgroup make-sub" data-testid="rib-make-sub">
     <span className="rb-stack seg-v">
       <button className={makeSub === 'image' ? 'on' : 'ghost'} data-testid="make-sub-image" onClick={() => setMakeSub('image')}>② 이미지</button>

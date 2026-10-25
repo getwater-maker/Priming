@@ -70,7 +70,7 @@ const mkProj = () => {
 console.log('\n[2] 실제 앱');
 (async () => {
   const M = read('main.js'), PL = read('preload.js'), APP = read('renderer/src/App.jsx');
-  ok(/ipcMain\.handle\('export-fcpxml'/.test(M) && /exportFcpxml: \(args\)/.test(PL) && /data-testid="rb-fcpxml"/.test(APP), '소스 배선: IPC · preload · 파일 탭 단추');
+  ok(/ipcMain\.handle\('export-fcpxml'/.test(M) && /exportFcpxml: \(args\)/.test(PL) && /data-testid="rb-fcpxml"/.test(APP), '소스 배선: IPC · preload · 제작 탭 단추');
   const TAG = `fcp시험_${process.pid}`;
   const MD = path.join(os.tmpdir(), `${TAG}.md`);
   const SNAP = path.join(os.homedir(), '.priming-maker', 'projects', `${TAG}.smproj.json`);
