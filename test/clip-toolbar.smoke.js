@@ -70,7 +70,7 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await win.click('[data-testid="ctb-ins"]');
     ok(await win.locator('[data-testid="ctb-ins-menu"] button').count() === 8 && await win.locator('[data-testid="ctb-ins-menu"] button.soon').count() === 5, '삽입 메뉴 8개(PC에서 불러오기 · AI 이미지 · AI 비디오는 동작 · 나머지 5개 준비 중)');
     await win.click('[data-testid="ctb-fx"]');
-    ok(await win.locator('[data-testid="ctb-ins-menu"]').count() === 0 && await win.locator('[data-testid="ctb-fx-menu"] > button').count() === 7 && await win.locator('[data-testid="ctb-fx-menu"] > button.soon').count() === 1 && await win.locator('[data-testid="ctb-speed"] button').count() === 7, '효과 메뉴(맞춤·채움 동작 · 1개 준비 중 · 볼륨(④)·확대 및 회전(①)·클립 배경색(②)·필터(③)는 연결 · ⏩ 배속 줄 7단계 — Lab) · 삽입 메뉴는 닫힘');
+    ok(await win.locator('[data-testid="ctb-ins-menu"]').count() === 0 && await win.locator('[data-testid="ctb-fx-menu"] > button').count() === 7 && await win.locator('[data-testid="ctb-fx-menu"] > button.soon').count() === 0 && await win.locator('[data-testid="ctb-speed"] button').count() === 7, '효과 메뉴(맞춤·채움 동작 · 준비 중 없음 · 전환(⑥)·볼륨(④)·확대 및 회전(①)·클립 배경색(②)·필터(③)는 연결 · ⏩ 배속 줄 7단계 — Lab) · 삽입 메뉴는 닫힘');
     await win.click('[data-testid="ctb-fx-cover"]'); await win.waitForTimeout(400);
     ok(/G2 그림 모양을 바꿨습니다/.test(await win.locator('body').innerText()), '■ 채움: 이 클립이 든 그룹(G2)의 그림 모양을 바꿨다');
     await win.keyboard.press('Control+z'); await win.waitForTimeout(500);

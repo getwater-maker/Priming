@@ -6416,6 +6416,22 @@ export default function App() {
     }, 250);
   }
   // 🎞 필터(효과 ③) — 그림 그룹 · 프리셋 9종 + 없음
+  // 🎬 화면 전환(효과 ⑥) — 고른 클립이 든 그룹의 그림이 앞 그림에서 바뀌는 자리 · MP4 에만 들어간다(.vrew 는 담지 못한다)
+  const [trPanel, setTrPanel] = useState(null);   // { sn, gs, type, sec }
+  function openTransPanel() {
+    if (!clipSelOk()) { setStatus('◐ 전환을 줄 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum;
+    const gs = [...new Set(capSel.items.map((x) => x.groupNum))].sort((x, y) => x - y);
+    const pr = dto && dto.projects ? dto.projects.find((p) => p.shortsNum === sn) : null; const c = pr ? pr.cuts.find((x) => x.num === gs[0]) : null;
+    const lk = VLook.normLook(c && c.look);
+    setTrPanel({ sn, gs, type: (lk.trans && lk.trans.type) || '', sec: (lk.trans && lk.trans.sec) || CEff.TRANS_SEC.def });
+  }
+  async function transChange(type, sec) {
+    setTrPanel((p) => (p ? { ...p, type, sec } : p));
+    const sel = trPanel; if (!sel) return;
+    for (const g of sel.gs) await setGroupLook(sel.sn, g, { trans: type ? { type, sec } : null });
+  }
   const [flPanel, setFlPanel] = useState(null);   // { sn, gs, id, video }
   function openFilterPanel() {
     if (!clipSelOk()) { setStatus('🎞 필터를 줄 클립을 먼저 고르세요'); return; }
@@ -6544,6 +6560,7 @@ export default function App() {
     <button data-testid="rb-zoomrot" disabled={!selOk} title="확대 및 회전 — 고른 클립이 든 그림·영상 그룹을 확대(100~300%)하거나 돌립니다(−180~180°). 돌리면 켄번스(천천히 움직임)는 꺼집니다" onClick={openZoomRot}><span className="rb-ic">⤢</span> <span className="rb-t">확대·회전</span></button>
     <button data-testid="rb-bg" disabled={!selOk} title="클립 배경색 — 맞추기로 생기는 띠와 투명 PNG 바닥에 색을 칠합니다(그림 그룹 · 그림을 직접 옮긴 자리에는 쓰이지 않음)" onClick={openBgPanel}><span className="rb-ic">🎨</span> <span className="rb-t">배경색</span></button>
     <button data-testid="rb-filter" disabled={!selOk} title="필터 — 고른 클립이 든 그림 그룹의 색감을 바꿉니다(흑백·세피아·따뜻하게 …). 원본 그림은 그대로 두고 필터를 입힌 사본을 만듭니다" onClick={openFilterPanel}><span className="rb-ic">✳</span> <span className="rb-t">필터</span></button>
+    <button data-testid="rb-trans" disabled={!selOk} title="화면 전환 — 고른 클립이 든 그룹의 그림이 앞 그림에서 바뀔 때의 전환(디졸브·닦아내기·밀기 …). 유튜브 MP4 에만 들어갑니다(.vrew 는 담지 못합니다)" onClick={openTransPanel}><span className="rb-ic">◐</span> <span className="rb-t">전환</span></button>
     <button data-testid="rb-volume" disabled={!selOk} title="볼륨 조절 — 고른 클립이 든 문장의 음성을 0~200% 로(1 초과는 찌그러지지 않는 만큼만 · 완성 파일에 구워집니다)" onClick={openVolPanel}><span className="rb-ic">🔉</span> <span className="rb-t">볼륨</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
@@ -6785,7 +6802,7 @@ export default function App() {
               <button data-testid="ctb-zoomrot" onClick={() => { setClipMenu(null); openZoomRot(); }}>⤢ 확대 및 회전</button>
               <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
-              {soon('◐', '화면 전환')}
+              <button data-testid="ctb-trans" onClick={() => { setClipMenu(null); openTransPanel(); }}>◐ 화면 전환</button>
               <button data-testid="ctb-volume" onClick={() => { setClipMenu(null); openVolPanel(); }}>🔉 볼륨 조절</button>
               <div className="ctb-speed" data-testid="ctb-speed" title="⏩ 클립 배속 — 고른 클립이 든 문장의 음성을 빠르게·느리게(문장 뒤 무음은 그대로 · Ctrl+Z 되돌리기)">
                 <span>⏩ 배속</span>
@@ -6855,6 +6872,14 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {trPanel && <div className="vr-menu-bg" onMouseDown={() => setTrPanel(null)} />}
+          {trPanel && <div className="vr-menu zr-panel tr-panel" data-testid="tr-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>◐ 화면 전환 · {trPanel.gs.map((g) => 'G' + g).join(' ')}</b>
+            <label>종류 <select data-testid="tr-type" value={trPanel.type} onChange={(e) => transChange(e.target.value, trPanel.sec)}><option value="">없음(컷)</option>{CEff.TRANS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></label>
+            <label>길이 <input type="range" data-testid="tr-sec" min={CEff.TRANS_SEC.min} max={CEff.TRANS_SEC.max} step={CEff.TRANS_SEC.step} value={trPanel.sec} disabled={!trPanel.type} onChange={(e) => transChange(trPanel.type, Number(e.target.value))} /><span className="zr-v" data-testid="tr-v">{trPanel.sec}초</span></label>
+            <span className="meta">🎬 이 그룹의 그림이 <b>앞 그림에서 바뀌는 자리</b>에 들어갑니다(경계 앞뒤로 겹쳐 섞음 — 길이·음성·자막 시간은 그대로) · 유튜브 <b>MP4 에만</b> 들어갑니다(.vrew 는 전환을 담지 못합니다) · 앞뒤 둘 다 그림 한 장(영상·겹친 그림 제외)이고 서로 다른 그림일 때만 · 화이트보드 MP4 에는 적용되지 않습니다 · 미리보기 화면에는 보이지 않습니다</span>
+            <div className="zr-btns"><button data-testid="tr-close" onClick={() => setTrPanel(null)}>닫기</button></div>
+          </div>}
           {volPanel && <div className="vr-menu-bg" onMouseDown={() => setVolPanel(null)} />}
           {volPanel && <div className="vr-menu zr-panel vol-panel" data-testid="vol-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>🔉 볼륨 조절 · 문장 {volPanel.n}개</b>
@@ -7008,7 +7033,7 @@ export default function App() {
             {clipCtx.sub === 'fx' && <>
               <Row icon="✳" label="필터" onClick={() => openFilterPanel()} tid="cx-fx-filter" />
               <Row icon="⤢" label="확대 및 회전" onClick={() => openZoomRot()} tid="cx-fx-zoomrot" />
-              <Row icon="◐" label="화면 전환" soon />
+              <Row icon="◐" label="화면 전환" onClick={() => openTransPanel()} tid="cx-fx-trans" />
               <Row icon="🔉" label="볼륨 조절" onClick={() => openVolPanel()} tid="cx-fx-volume" />
               <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
               <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />

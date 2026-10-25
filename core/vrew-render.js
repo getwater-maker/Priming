@@ -701,10 +701,10 @@ function planChunks(segments, chunkSec = DEFAULT_CHUNK_SEC, opts = {}) {
  *   · 경계 조각을 잘라 그 자리에 `type:'dissolve'` 조각을 끼운다. 앞 그림은 자기 끝 크롭에 고정(진행 ≤ 1), 뒤 그림은 시작 크롭에 고정(진행 ≥ 0) 한 채 섞이고, 창이 끝나면 뒤 그림이 **이어서** 움직인다(kbOff 보정).
  *   · 창 길이는 두 구간 길이의 45% 를 넘지 않는다(짧은 구간이 통째로 섞이지 않게). 8프레임보다 짧아지면 컷.
  */
-function planDissolves(chunks, dissolveSec) {
+function planDissolves(chunks, dissolveSec, perTrack) {
   const D = Math.max(0, Math.min(10, +dissolveSec || 0));
-  if (!(D > 0) || chunks.length < 2) return chunks;
-  const half = Math.round((D * FPS) / 2);
+  const hasPer = !!(perTrack && Object.keys(perTrack).length);
+  if ((!(D > 0) && !hasPer) || chunks.length < 2) return chunks;   // 🎬 perTrack = 그룹별 화면 전환(효과 ⑥ · trackId → {type, sec})
   const single = (c) => c.type === 'image' && c.file && isStandardBox(c.track) && (c.layers || []).filter((l) => l.file).length <= 1;
   const out = chunks.map((c) => ({ ...c }));
   const res = [];
@@ -713,7 +713,10 @@ function planDissolves(chunks, dissolveSec) {
   let made = 0;
   for (let i = 0; i < out.length; i++) {
     const p = res.length ? res[res.length - 1] : null, q = out[i];
-    if (p && p.type !== 'dissolve' && p.segIdx !== q.segIdx && p.f1 === q.f0 && single(p) && single(q) && p.file !== q.file) {
+    const per = hasPer && q.track && perTrack[q.track.trackId] || null;   // 이 그림으로 바뀌는 자리의 그룹별 전환(채널 디졸브보다 우선)
+    const Dq = per ? Math.max(0, Math.min(10, +per.sec || 0)) : D;
+    if (Dq > 0 && p && p.type !== 'dissolve' && p.segIdx !== q.segIdx && p.f1 === q.f0 && single(p) && single(q) && p.file !== q.file) {
+      const half = Math.round((Dq * FPS) / 2);
       const cap = (c) => Math.floor((c.f1 - c.f0) * 0.45);
       const h = Math.min(half, cap(p), cap(q), Math.floor(0.45 * Math.min(segLen.get(p.segIdx) || 0, segLen.get(q.segIdx) || 0)));
       if (h >= 4) {   // 양쪽 h 프레임(합 8프레임 이상)
@@ -721,7 +724,7 @@ function planDissolves(chunks, dissolveSec) {
         const a = { ...p }, b = { ...q };   // 자르기 전 값(진행 계산용)
         p.f1 = w0;
         q.f0 = w1; q.kbOff = (q.kbOff || 0) + h;
-        res.push({ type: 'dissolve', f0: w0, f1: w1, segIdx: q.segIdx, a, b, layers: [], dissolve: true });
+        res.push({ type: 'dissolve', f0: w0, f1: w1, segIdx: q.segIdx, a, b, layers: [], dissolve: true, trans: per ? per.type : 'dissolve' });
         made++;
       }
     }
@@ -780,15 +783,16 @@ async function renderChunk(ch, i, ctx) {
     // 🔴 섞는 비율은 blend 의 all_expr(화소마다 식 계산)이 아니라 **불투명도를 프레임마다 sendcmd 로** 바꾼다 — all_expr 은 프레임당 수백 ms 라 4초 창 하나가 렌더의 끝을 40초 붙잡았다(실측 +80%).
     //   normal 모드는 SIMD 라 빠르다. 위(첫 입력) = 뒤 그림 B, 아래 = 앞 그림 A → 불투명도 st 가 B 의 비율(smoothstep).
     const dzName = `dz_${id}.txt`;
-    { const n1 = Math.max(1, frames - 1), cmd = []; for (let k = 0; k < frames; k++) { const u = Math.min(1, k / n1); cmd.push(`${(k / FPS).toFixed(4)} blend@dz all_opacity ${(3 * u * u - 2 * u * u * u).toFixed(5)};`); } fs.writeFileSync(path.join(tmpDir, dzName), cmd.join('\n') + '\n'); }
+    if (ch.trans && ch.trans !== 'dissolve') { /* 🎬 xfade 전환 — 아래 g 에서 sendcmd 대신 쓴다 */ } else { const n1 = Math.max(1, frames - 1), cmd = []; for (let k = 0; k < frames; k++) { const u = Math.min(1, k / n1); cmd.push(`${(k / FPS).toFixed(4)} blend@dz all_opacity ${(3 * u * u - 2 * u * u * u).toFixed(5)};`); } fs.writeFileSync(path.join(tmpDir, dzName), cmd.join('\n') + '\n'); }
     const tA = (a.f0 + (a.f1 - a.f0) / 2) / FPS, tB = (b.f0 + (b.f1 - b.f0) / 2) / FPS;   // 앞·뒤 그림이 속한 그룹의 fx(경계에서 갑자기 켜지거나 꺼지지 않게 각자 입고 섞는다)
     const fa = fxOn(tA, 2, 'xa'), fb = fxOn(tB, 2 + (fa ? fa.ins.filter((q) => q === '-i').length : 0), 'xb');
     const g = [
       `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}[${fa ? 'xain' : 'da'}]`,
       `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}[${fb ? 'xbin' : 'db'}]`,
       ...(fa ? [...fa.parts, `${fa.out}null[da]`] : []), ...(fb ? [...fb.parts, `${fb.out}null[db]`] : []),
-      `[da]sendcmd=f=${dzName}[dax]`,
-      `[db][dax]blend@dz=all_mode=normal:all_opacity=0:shortest=1,${assFilter}[vout]`,
+      ...((ch.trans && ch.trans !== 'dissolve')
+        ? [`[da][db]xfade=transition=${ch.trans}:duration=${(Math.max(1, frames - 1) / FPS).toFixed(4)}:offset=0,${assFilter}[vout]`]   // 🎬 앞 그림 = 첫 입력 · 창 전체가 전환(선형)
+        : [`[da]sendcmd=f=${dzName}[dax]`, `[db][dax]blend@dz=all_mode=normal:all_opacity=0:shortest=1,${assFilter}[vout]`]),
     ].join(';');
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', covA, '-i', covB, ...(fa ? fa.ins : []), ...(fb ? fb.ins : []), '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
   } else if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
@@ -1010,8 +1014,14 @@ async function renderVrewToMp4(opts = {}) {
     if (missAudio) log(`   ⚠ 음성 파일이 없는 문장 ${missAudio}개 — 그 자리는 무음으로 채웁니다`);
 
     const dSec = Math.max(0, Math.min(10, +opts.dissolveSec || 0));
-    let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, dSec > 0 ? { minTailFrames: Math.round(dSec * FPS) } : {});
-    if (dSec > 0) { chunks = planDissolves(chunks, dSec); log(`   🌫 디졸브 ${dSec}초 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤 ${dSec / 2}초씩 섞음 · 길이·음성·자막은 그대로)`); }
+    // 🎬 그룹별 화면 전환(효과 ⑥) — 빌더가 .vrew 옆에 둔 <이름>.vrew.fx.json(trackId → {type, sec}). 없거나 못 읽으면 전환 없음(컷)
+    let perTrans = null;
+    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object') perTrans = j.trans; } } catch (_) {}
+    const maxTr = perTrans ? Math.max(0, ...Object.values(perTrans).map((x) => +x.sec || 0)) : 0;
+    const tailSec = Math.max(dSec, maxTr);
+    let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, tailSec > 0 ? { minTailFrames: Math.round(tailSec * FPS) } : {});
+    if (perTrans && !(dSec > 0)) { chunks = planDissolves(chunks, 0, perTrans); log(`   🎬 화면 전환 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤로 겹쳐 섞음 · 길이·음성·자막은 그대로)`); }
+    if (dSec > 0) { chunks = planDissolves(chunks, dSec, perTrans); log(`   🌫 디졸브 ${dSec}초 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤 ${dSec / 2}초씩 섞음 · 길이·음성·자막은 그대로)`); }
     const totalFrames = chunks.length ? chunks[chunks.length - 1].f1 : 0;
     const enc = await pickEncoder(tmpDir, log);
     Object.assign(st.video, { total: chunks.length, framesTotal: totalFrames, startedAt: Date.now() });

@@ -886,6 +886,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     return d;
   };
   _VS.markCovered(_vsProj, (x) => !!((x.videoPath && fs.existsSync(x.videoPath)) || (x.imagePath && fs.existsSync(x.imagePath))));
+  const _transByTrack = {};   // 🎬 trackId → {type, sec} — .vrew 는 담지 못해 옆 파일(<이름>.vrew.fx.json)로 렌더러에 넘긴다
   for (const g of groups) {
     // (a) 비디오가 있으면 비디오 자산 + video/videoAudio 두 트랙 생성 (음소거)
     //     9:16 쇼츠 캔버스: 세로 영상만 사용(가로 16:9 그록영상은 흰 여백 → 이미지 폴백).
@@ -1014,6 +1015,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         volume: 0, sourceIn: 0, sourceOut: dur,
         loop: true, playbackRate: 1, type: 'videoAudio',
       };
+      if (CE.normTrans(g.look && g.look.trans)) _transByTrack[videoTid] = CE.normTrans(g.look.trans);   // 🎬 화면 전환(MP4 만) — 영상 그룹
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
       groupImageAsset.set(g.id, { aid, mid, fn, isVideo: true, videoTid, audioTid, loopNative: _loopNative, fileDur: dur });
       groupTopY.set(g.id, _vBgBaked ? 0 : (_vMismatch || _vFill === 'contain') ? Math.max(0, _vy) : 0); // 레터박스면 영상 상단 y(검정띠 끝)
@@ -1117,6 +1119,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     CE.applyToTrack(track, g.look);   // 🎛 확대(박스 가운데 기준) · 회전(track.rotation · 켄번스는 끈다)
     pj.props.tracks[tid] = track;
     pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+    if (CE.normTrans(g.look && g.look.trans)) _transByTrack[tid] = CE.normTrans(g.look.trans);   // 🎬 화면 전환(MP4 만) — 그림 그룹
     groupImageAsset.set(g.id, { aid, mid, fn });
     groupTopY.set(g.id, track.yPos || 0); // 레터박스면 이미지 상단 y(검정띠 끝)
     mediaZip.push({ src: _imgPath, name: fn });
@@ -1501,6 +1504,13 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   }
   // 같은 폴더 임시 파일에 다 쓴 뒤 rename — 쓰는 도중 꺼져도 옛 .vrew 가 그대로 남는다(writeZip 도 안에서 toBuffer 를 만든다 · 메모리 같음).
   require('../core/atomic-write').writeTextAtomicSync(vrewPath, zip.toBuffer());
+
+  // 🎬 화면 전환 옆 파일 — 있으면 쓰고 없으면 옛 것을 지운다(MP4 렌더러만 읽는다 · Vrew 는 모른다)
+  try {
+    const _fxp = vrewPath + '.fx.json';
+    if (Object.keys(_transByTrack).length) { fs.writeFileSync(_fxp, JSON.stringify({ v: 1, trans: _transByTrack }), 'utf8'); log(`[Vrew] 🎬 화면 전환 ${Object.keys(_transByTrack).length}곳 — MP4 에만 들어갑니다(.vrew 에는 담기지 않음)`); }
+    else if (fs.existsSync(_fxp)) fs.rmSync(_fxp, { force: true });
+  } catch (_) {}
 
   log(`[Vrew] (4.0.1 test.vrew 형식) ${pj.transcript.clips.length}개 clip · ${imageGroupCount}개 image · ${sentenceCount}개 TTS → ${path.basename(vrewPath)}`);
   if (missingImg.length > 0) log(`[Vrew] 이미지 누락 그룹: ${missingImg.join(', ')}`);

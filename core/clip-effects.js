@@ -128,7 +128,27 @@ function volGain(vol, peakDb) {
   const gain = Math.min(v, Math.max(1, allowed));
   return { gain, capped: gain < v - 1e-6 };
 }
-const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg) || normFilter(look.filter)));
+/**
+ * 🎬 화면 전환(효과 ⑥) — 그룹 look.trans = { type, sec } : **이 그룹의 그림이 앞 그림에서 바뀌는 자리**에 들어간다(앞 그림 → 이 그림).
+ *   .vrew 는 전환을 담지 못한다 → **MP4 에만**(렌더러 xfade · 디졸브와 같은 길 — 타임라인·음성·자막 길이는 그대로, 경계 앞뒤 sec/2 씩 겹쳐 섞는다).
+ *   id 는 ffmpeg xfade 이름 그대로.
+ */
+const TRANS = [
+  { id: 'dissolve', label: '디졸브' }, { id: 'fadeblack', label: '검정으로 사라졌다 나오기' }, { id: 'fadewhite', label: '흰색으로 사라졌다 나오기' },
+  { id: 'wipeleft', label: '왼쪽으로 닦아내기' }, { id: 'wiperight', label: '오른쪽으로 닦아내기' },
+  { id: 'slideleft', label: '왼쪽으로 밀기' }, { id: 'slideright', label: '오른쪽으로 밀기' }, { id: 'circleopen', label: '원으로 열기' },
+];
+const TRANS_SEC = { min: 0.2, max: 4, step: 0.1, def: 1 };
+/** {type, sec} → 정규화(모르는 type 이면 null = 없음) */
+function normTrans(t) {
+  if (!t || typeof t !== 'object') return null;
+  const type = String(t.type || '');
+  if (!TRANS.some((x) => x.id === type)) return null;
+  let sec = Number(t.sec); if (!isFinite(sec)) sec = TRANS_SEC.def;
+  sec = Math.round(Math.max(TRANS_SEC.min, Math.min(TRANS_SEC.max, sec)) * 10) / 10;
+  return { type, sec };
+}
+const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg) || normFilter(look.filter) || normTrans(look.trans)));
 
 /**
  * 박스(캔버스 0..1)를 **자기 가운데** 기준으로 키운다 — 비율 유지. 사람이 옮긴 박스(look.box)면 그 박스 가운데.
@@ -175,7 +195,8 @@ function describeFx(look) {
   const z = normZoom(look && look.zoom), r = normRot(look && look.rot);
   const bg = normBg(look && look.bg);
   const fl = FILTERS.find((x) => x.id === normFilter(look && look.filter));
-  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '') + (fl ? ` · 필터 ${fl.label}` : '');
+  const tr = normTrans(look && look.trans); const trl = tr && TRANS.find((x) => x.id === tr.type);
+  return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '') + (fl ? ` · 필터 ${fl.label}` : '') + (tr ? ` · 전환 ${trl.label} ${tr.sec}초(MP4)` : '');
 }
 
-module.exports = { VOL, normVol, volGain, ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
+module.exports = { TRANS, TRANS_SEC, normTrans, VOL, normVol, volGain, ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
