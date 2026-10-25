@@ -23,6 +23,10 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log('✗', m); } };
   // 작업본 왕복(undefined 소실·null) + 진행 상태 값은 지문에 영향 없음
   const rt = JSON.parse(JSON.stringify(mk())); rt.sentences[0].ttsStatus = 'idle'; rt.groups[0].selected = true; rt.groups[0].extra = null;
   ok(a === await fpOf(rt), '왕복·진행상태 무관');
+  // ⚑ 마커는 편집 보조 표식 — 출력에 영향이 없으니 지문도 같다(문장 객체가 통째로 지문에 들어가므로 VOLATILE_KEYS 에서 뺀다 · 2026-10-25)
+  { const mk2 = mk(); mk2.sentences[0].marker = true; ok(a === await fpOf(mk2), '마커만 달아도 지문은 같다(.vrew 를 다시 만들지 않는다)'); }
+  // 🔉 문장 볼륨(s.vol)은 출력(음성 MP3)에 구워지므로 지문이 달라진다(판정력)
+  { const v2 = mk(); v2.sentences[0].vol = 0.5; ok(a !== await fpOf(v2), '문장 볼륨을 바꾸면 지문이 달라진다'); }
   // 바뀌면 달라진다 (판정력)
   const t = mk(); t.sentences[0].text = '안녕하세요';
   ok(a !== await fpOf(t), '문장 수정');

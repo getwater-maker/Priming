@@ -29,7 +29,7 @@ ok(/clipMarker: \(args\) => ipcRenderer\.invoke\('clip-marker', args\)/.test(PL)
 
 console.log('\n[3] 출력에 영향 없음(판정력)');
 ok(!/marker|\.mk\b/.test(VB), '.vrew 빌더가 marker 를 읽지 않는다');
-ok(!/marker/.test(P.slice(P.indexOf('function vrewInputsOf'), P.indexOf('function vrewInputsOf') + 6000)), '빌드 지문(vrewInputsOf)에 marker 가 없다 — 마커만 달아도 .vrew 를 다시 만들지 않는다');
+ok(/VOLATILE_KEYS = new Set\(\[[^\]]*'marker'/.test(rd('core/build-fingerprint.js')), '🔑 빌드 지문이 marker 를 뺀다(문장 객체가 통째로 지문에 들어가므로 VOLATILE_KEYS — 마커만 달아도 .vrew 를 다시 만들지 않는다 · test:buildfp 가 실측)');
 
 console.log('\n[4] 화면');
 ok(/data-testid="clip-marker"/.test(APP) && /li === 0 && s\.mk/.test(APP), '클립(문장 첫 줄)에 ⚑ 표시');

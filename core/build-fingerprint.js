@@ -12,7 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const VOLATILE_KEYS = new Set(['selected', 'ttsStatus', 'imageStatus', 'videoStatus', 'generating', 'progress', 'error', 'ttsPresetId']);
+// 'marker' = ⚑ 마커(Lab) — 편집 보조 표식이라 출력에 영향이 없다. 문장 객체가 통째로 지문에 들어가므로 여기서 빼지 않으면 마커만 달아도 .vrew 를 다시 만든다.
+const VOLATILE_KEYS = new Set(['selected', 'ttsStatus', 'imageStatus', 'videoStatus', 'generating', 'progress', 'error', 'ttsPresetId', 'marker']);
 const PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
 function collectPaths(v, out) {
