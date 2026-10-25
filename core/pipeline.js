@@ -1157,17 +1157,18 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
 const _fmtSrt = require('./caption-splitter').fmtSrtTime;
 // ⏸ preset 을 주면 막간 쉼(pausePlanOf)만큼 뒤 자막을 민다 — .vrew 가 그 문장 음성 뒤에 무음을 덧대므로(R4 · v0.9.94).
 //   쉼 동안은 자막 없음(그 문장 자막 끝 = 음성 끝). 쉼 계획이 없으면 예전과 한 글자도 같다.
-function writeSrt(project, srtPath, maxChars = 7, preset = null) {
+function writeSrt(project, srtPath, maxChars = 7, preset = null, textOf = null) {   // textOf = 번역 SRT(문장 → 번역 글 · 없으면 원문) — 시각은 같다
   fs.mkdirSync(path.dirname(srtPath), { recursive: true });
   const pauses = pausePlanOf(project, preset).map;
   let t = 0, idx = 1, out = '';
   for (const g of project.groups) {
     for (const s of project.getSentencesOfGroup(g)) {
       const dur = s.ttsDurationSec || 2.5;
-      const clips = splitCaptionLines(s.text, maxChars, s.capBreaks, s.capMarks);
+      const _txt = textOf ? (textOf(s) || s.text) : s.text;
+      const clips = splitCaptionLines(_txt, maxChars, textOf ? null : s.capBreaks, textOf ? null : s.capMarks);
       const totW = clips.reduce((a, c) => a + Math.max(1, meaningfulLen(c)), 0) || 1;
       // 🔤 정렬이 있으면 .vrew 와 같은 줄 경계(core/word-align.lineOffsets) — 없으면 예전 글자 비례 그대로
-      const lo = clips.length > 1 && s.ttsDurationSec > 0 ? require('./word-align').lineOffsets(s, require('./caption-format').lineRanges(s.text, clips), dur) : null;
+      const lo = !textOf && clips.length > 1 && s.ttsDurationSec > 0 ? require('./word-align').lineOffsets(s, require('./caption-format').lineRanges(s.text, clips), dur) : null;
       let acc = t;
       clips.forEach((c, i) => {
         const cd = dur * (Math.max(1, meaningfulLen(c)) / totW);

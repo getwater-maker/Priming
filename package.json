@@ -58,6 +58,7 @@
     "test:fxvid": "node test/fx-video.test.js",
     "test:fxtrans": "node test/fx-trans.test.js && node test/fx-trans-ui.smoke.js",
     "test:voiceow": "node test/voice-overwrite.smoke.js",
+    "test:aisub": "node test/ai-subtitle.test.js && node test/ai-subtitle-ui.smoke.js",
     "test:fxflt": "node test/fx-filter.test.js && node test/fx-filter.smoke.js && node test/fx-filter-ui.smoke.js",
     "test:marker": "node test/marker.test.js && node test/marker-ui.smoke.js",
     "test:menubar": "node test/menubar-frame.smoke.js && node test/account-page.smoke.js",

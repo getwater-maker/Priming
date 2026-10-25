@@ -41,7 +41,8 @@ import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
 import BackupModal from './BackupModal.jsx';
 import AccountPage from './AccountPage.jsx';
-import CEff from '../../core/clip-effects.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
+import CEff from '../../core/clip-effects.js';
+import AISub from '../../core/ai-subtitle.js';   // 🎛 확대·회전 규칙(빌더·렌더러와 같은 모듈)
 import ScriptReader from './ScriptReader.jsx';
 import ScriptGuide from './ScriptGuide.jsx';
 import TtsEngineDialog, { Face } from './TtsEngineDialog.jsx';
@@ -6488,6 +6489,35 @@ export default function App() {
       for (const g of sel.gs) await setGroupLook(sel.sn, g, { zoom: next.zoom, rot: next.rot });
     }, 250);
   }
+  // 🌐 AI 자막 교정(제안만) · 번역(SRT) — core/ai-subtitle · main `ai-proof`·`ai-translate`
+  const [aiProof, setAiProof] = useState(null);   // { busy, error, items:[{...제안, on, done}], asked, dropped, sn }
+  const [aiTr, setAiTr] = useState(null);   // { lang, busy, res }
+  async function aiProofRun() {
+    const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
+    const items = (clipSelOk() ? capSel.items : []).map((it) => ({ groupNum: it.groupNum, sentIdx: it.sentIdx }));
+    setAiProof({ busy: true, error: '', items: [], sn });
+    try {
+      const r = await api.aiProof({ shortsNum: sn, items });
+      if (!r || !r.ok) { setAiProof({ busy: false, error: (r && r.error) || '교정하지 못했습니다', items: [], sn }); return; }
+      setAiProof({ busy: false, error: '', items: r.proposals.map((p) => ({ ...p, on: true, done: false })), asked: r.asked, dropped: r.dropped, sn });
+    } catch (e) { setAiProof({ busy: false, error: e.message, items: [], sn }); }
+  }
+  async function aiProofApply() {
+    const cur = aiProof; if (!cur) return;
+    let ok = 0;
+    for (const it of cur.items) {
+      if (!it.on || it.done) continue;
+      try { const r = await api.editSentences({ shortsNum: cur.sn, groupNum: it.groupNum, sentIdx: it.sentIdx, count: 1, text: it.after }); if (r && r.ok) { ok++; it.done = true; if (r.dto) setDto(r.dto); } } catch (e) { logline('AI 교정 적용 오류: ' + e.message); }
+    }
+    setAiProof({ ...cur, items: [...cur.items] }); setStatus('✓ AI 교정 ' + ok + '개 적용(Ctrl+Z 되돌리기) — 고친 문장의 음성은 다시 만드세요');
+  }
+  async function aiTrRun() {
+    const cur = aiTr; if (!cur || cur.busy) return;
+    const sn = (capSel && capSel.shortsNum) || (dto && dto.projects && dto.projects[0] && dto.projects[0].shortsNum) || 1;
+    setAiTr({ ...cur, busy: true, res: null });
+    try { const r = await api.aiTranslate({ shortsNum: sn, lang: cur.lang }); setAiTr({ ...cur, busy: false, res: r }); }
+    catch (e) { setAiTr({ ...cur, busy: false, res: { ok: false, error: e.message } }); }
+  }
   // 🎙 음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음으로(clear = 해제). 파일 고르기는 main 이 연다
   async function clipVoiceOverwrite(clear) {
     setClipMenu(null); setClipCtx(null);
@@ -6601,8 +6631,8 @@ export default function App() {
     <span className="hgroup" data-testid="rib-caption"><span className="glabel">자막</span>
       {ribReaderBtn}
       <button data-testid="rb-copy-all-caps" disabled={!loaded} title="전체 자막 복사하기 — 이 대본의 모든 줄을 클립보드로" onClick={copyAllCaptions}><span className="rb-ic">▤</span> <span className="rb-t">전체 자막 복사하기</span></button>
-      <button className="soon" data-testid="rb-ai-translate" title="AI 자막 번역 — 준비 중" onClick={() => clipSoon('AI 자막 번역')}><span className="rb-ic">🌐</span> <span className="rb-t">AI 자막 번역</span></button>
-      <button className="soon" data-testid="rb-ai-proof" title="AI 자막 교정 — 준비 중(지금은 🟥·🟨 문단 맞춤법 검사가 별도로 있습니다)" onClick={() => clipSoon('AI 자막 교정')}><span className="rb-ic">✓</span> <span className="rb-t">AI 자막 교정</span></button>
+      <button data-testid="rb-ai-translate" disabled={!loaded} title="AI 자막 번역 — 이 편의 자막을 고른 언어로 번역해 SRT 파일로 저장합니다(나레이션·대본·음성은 그대로 · Claude API 키 필요)" onClick={() => setAiTr({ lang: 'en', busy: false, res: null })}><span className="rb-ic">🌐</span> <span className="rb-t">AI 자막 번역</span></button>
+      <button data-testid="rb-ai-proof" disabled={!loaded} title="AI 자막 교정 — 고른 클립(없으면 이 편 전체)의 오탈자·띄어쓰기를 찾아 제안합니다. 제안을 눌러 적용할 때만 대본이 바뀝니다(그 문장 음성은 다시 만들어야 합니다 · Claude API 키 필요)" onClick={aiProofRun}><span className="rb-ic">✓</span> <span className="rb-t">AI 자막 교정</span></button>
     </span>
   </>);
   const ribHomeFont = () => (<span className="hgroup" data-testid="rib-home-font">
@@ -6895,6 +6925,26 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {aiProof && <div className="vr-menu-bg" onMouseDown={() => setAiProof(null)} />}
+          {aiProof && <div className="vr-menu zr-panel ai-panel" data-testid="ai-proof-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>✓ AI 자막 교정</b>
+            {aiProof.busy && <span className="meta" data-testid="ai-proof-busy">Claude 가 읽는 중입니다…</span>}
+            {aiProof.error && <span className="meta" data-testid="ai-proof-err">⚠ {aiProof.error}</span>}
+            {!aiProof.busy && !aiProof.error && !aiProof.items.length && <span className="meta" data-testid="ai-proof-none">고칠 곳을 찾지 못했습니다(문장 {aiProof.asked}개 검사)</span>}
+            <div className="ai-list">{aiProof.items.map((it) => <label key={it.n} className={'ai-item' + (it.done ? ' done' : '')} data-testid="ai-proof-item"><input type="checkbox" checked={it.on && !it.done} disabled={it.done} onChange={(e) => { it.on = e.target.checked; setAiProof({ ...aiProof, items: [...aiProof.items] }); }} /><span><s>{it.before}</s><br />{it.after}{it.why ? <em> — {it.why}</em> : null}{it.done ? ' ✓ 적용됨' : ''}</span></label>)}</div>
+            <span className="meta">제안만 합니다 — 체크한 것만 적용하고, 적용하면 그 문장 글이 바뀌어 음성은 다시 만들어야 합니다(Ctrl+Z 로 되돌림)</span>
+            <div className="zr-btns"><button data-testid="ai-proof-apply" disabled={!aiProof.items.some((x) => x.on && !x.done)} onClick={aiProofApply}>체크한 것 적용</button><button className="ghost" data-testid="ai-proof-close" onClick={() => setAiProof(null)}>닫기</button></div>
+          </div>}
+          {aiTr && <div className="vr-menu-bg" onMouseDown={() => setAiTr(null)} />}
+          {aiTr && <div className="vr-menu zr-panel ai-panel" data-testid="ai-tr-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🌐 AI 자막 번역</b>
+            <label>언어 <select data-testid="ai-tr-lang" value={aiTr.lang} disabled={aiTr.busy} onChange={(e) => setAiTr({ ...aiTr, lang: e.target.value, res: null })}>{AISub.LANGS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}</select></label>
+            {aiTr.busy && <span className="meta" data-testid="ai-tr-busy">번역하는 중입니다…</span>}
+            {aiTr.res && aiTr.res.ok && <span className="meta" data-testid="ai-tr-done">✓ SRT 로 저장했습니다 — {aiTr.res.path}{aiTr.res.missing && aiTr.res.missing.length ? ` (번역이 빠진 문장 ${aiTr.res.missing.length}개는 한국어 그대로)` : ''}</span>}
+            {aiTr.res && !aiTr.res.ok && <span className="meta" data-testid="ai-tr-err">⚠ {aiTr.res.error}</span>}
+            <span className="meta">이 편 전체를 번역해 <b>자막 폴더에 .srt 파일</b>로 저장합니다(시각은 한국어 자막과 같음) · 나레이션·대본·음성은 바뀌지 않습니다 · 영상에 번역 자막을 굽는 기능은 아직 없습니다</span>
+            <div className="zr-btns"><button data-testid="ai-tr-run" disabled={aiTr.busy} onClick={aiTrRun}>번역해서 저장</button><button className="ghost" data-testid="ai-tr-close" onClick={() => setAiTr(null)}>닫기</button></div>
+          </div>}
           {trPanel && <div className="vr-menu-bg" onMouseDown={() => setTrPanel(null)} />}
           {trPanel && <div className="vr-menu zr-panel tr-panel" data-testid="tr-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>◐ 화면 전환 · {trPanel.gs.map((g) => 'G' + g).join(' ')}</b>

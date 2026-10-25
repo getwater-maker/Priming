@@ -2009,3 +2009,11 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
   --muted:#9a90b0; --sky:#b48cff; --sky-l:#c7a6ff; --brown:#e3c8ff;
   color-scheme:dark;
 }
+
+/* 🌐 AI 자막 교정·번역 패널 */
+.ai-panel{max-width:560px}
+.ai-list{max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.ai-item{display:flex;gap:8px;align-items:flex-start;font-size:var(--fs-md);padding:4px 6px;border:1px solid var(--line);border-radius:var(--r-sm)}
+.ai-item.done{opacity:.55}
+.ai-item s{color:var(--muted)}
+.ai-item em{color:var(--muted);font-style:normal}

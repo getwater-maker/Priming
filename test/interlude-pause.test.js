@@ -154,7 +154,7 @@ const withDur = (pj, d = 3) => { pj.sentences.forEach((s) => { s.ttsAudioPath = 
       ok(tp[0][1] === 3, `SRT: 쉼 동안은 자막 없음(막간 문장 자막 끝 = 음성 끝 3초 · ${tp[0] && tp[0][1]})`);
       ok(Math.abs(tp[2][1] - dP) < 0.15, `SRT 마지막 자막 끝 = 영상 길이(${tp[2][1]} · ${dP.toFixed(2)}초)`);
       const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-      const calls = M.match(/P\.writeSrt\([^\n]*/g) || [];
+      const calls = (M.match(/P\.writeSrt\([^\n]*/g) || []).filter((c) => !/L\.maxChars/.test(c));   // 🌐 AI 번역 SRT(언어별 글자 수 · resolvePreset 으로 같은 쉼)는 따로
       ok(calls.length === 2 && calls.every((c) => /captionMaxChars, (preset|ep)\)/.test(c)), `main 의 SRT 쓰기 ${calls.length}곳 모두 .vrew 와 같은 preset 을 넘긴다`);
     }
     if (process.env.PM_SHOT_DIR) { fs.mkdirSync(process.env.PM_SHOT_DIR, { recursive: true }); for (const [t, nm] of [[1.5, 'pause_title'], [4.5, 'pause_mid'], [7.5, 'pause_after'], [10.5, 'pause_kaisetsu']]) execFileSync(FF, ['-y', '-v', 'error', '-ss', String(t), '-i', pz.mp4, '-frames:v', '1', path.join(process.env.PM_SHOT_DIR, nm + '.png')]); }

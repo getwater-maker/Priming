@@ -10531,6 +10531,52 @@ ipcMain.handle('clip-marker', async (_e, args = {}) => {
 });
 // 🔉 볼륨 조절(Lab · Vrew 「볼륨 조절」 · 효과 ④) — 고른 클립이 든 문장의 음성 배율 s.vol(0~2 · 1 = 기본 = 필드 없음).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], vol } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 에 구워진다(1 초과는 피크 여유 안에서만) · Ctrl+Z 한 번
+// 🌐 AI 자막 교정·번역(Lab · Vrew 「AI 자막 교정/번역」) — core/ai-subtitle(프롬프트·답 해석) + core/claude-api `ask({use})` 한 곳.
+//   대상 = args.items(고른 클립 · 없으면 이 편 전체) · 번호 n = 편 안의 문장 순번(1부터).
+function _aiTargets(args) {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { error: c.error };
+  const pr = c.pr; const want = (args.items && args.items.length) ? new Set(args.items.map((it) => it.groupNum + ':' + it.sentIdx)) : null;
+  const list = []; let n = 0;
+  for (const g of pr.groups) pr.getSentencesOfGroup(g).forEach((s, i) => { n++; if (!want || want.has(g.num + ':' + i)) list.push({ n, text: s.text, s, ref: { groupNum: g.num, sentIdx: i } }); });
+  return { pr, list };
+}
+// 교정 = 제안만(대본을 고치지 않는다) — 적용은 화면이 문장마다 edit-sentences 로
+ipcMain.handle('ai-proof', async (_e, args = {}) => {
+  const AS = require('./core/ai-subtitle'), CA = require('./core/claude-api');
+  const t = _aiTargets(args); if (t.error) return { ok: false, error: t.error };
+  if (!t.list.length) return { ok: false, error: '교정할 문장이 없습니다' };
+  const proposals = []; let dropped = 0;
+  log(`🌐 AI 자막 교정 — 문장 ${t.list.length}개`);
+  for (const part of AS.chunks(t.list)) {
+    const rq = AS.proofRequest(part);
+    const r = await CA.ask({ use: 'spell', system: rq.system, text: rq.text, maxTokens: 8000, log, label: '자막 교정' });
+    if (!r.ok) { log(`🌐 AI 자막 교정 못 함 — ${r.error}`); return { ok: false, error: r.error, noKey: !!r.noKey }; }
+    const p = AS.parseProof(CA.parseJson(r.text), part); proposals.push(...p.proposals); dropped += p.dropped;
+  }
+  log(`🌐 AI 자막 교정 — 제안 ${proposals.length}개${dropped ? ` (안전 검사로 ${dropped}개 버림)` : ''}`);
+  return { ok: true, proposals: proposals.map((x) => ({ n: x.n, before: x.before, after: x.after, why: x.why, groupNum: x.ref.groupNum, sentIdx: x.ref.sentIdx })), asked: t.list.length, dropped };
+});
+// 번역 = SRT 파일만(나레이션·대본·음성 불변) — <subtitles-N>/<대본이름>_<언어>.srt · 시각은 한국어 .srt 와 같다
+ipcMain.handle('ai-translate', async (_e, args = {}) => {
+  const AS = require('./core/ai-subtitle'), CA = require('./core/claude-api');
+  const L = AS.langOf(args.lang); if (!L) return { ok: false, error: '번역할 언어를 고르세요' };
+  const t = _aiTargets({ ...args, items: null }); if (t.error) return { ok: false, error: t.error };   // 시각이 이어지므로 항상 편 전체
+  if (!t.list.length) return { ok: false, error: '번역할 문장이 없습니다' };
+  const map = new Map(); const missing = [];
+  log(`🌐 AI 자막 번역(${L.label}) — 문장 ${t.list.length}개`);
+  for (const part of AS.chunks(t.list)) {
+    const rq = AS.translateRequest(part, L.id);
+    const r = await CA.ask({ use: 'translate', system: rq.system, text: rq.text, maxTokens: 12000, log, label: '자막 번역' });
+    if (!r.ok) { log(`🌐 AI 자막 번역 못 함 — ${r.error}`); return { ok: false, error: r.error, noKey: !!r.noKey }; }
+    const p = AS.parseTranslate(CA.parseJson(r.text), part); for (const [k, v] of p.map) map.set(k, v); missing.push(...p.missing);
+  }
+  const byId = new Map(t.list.map((x) => [x.s.id, x.n]));
+  const base = path.basename(S.scriptPath || 'subtitle', path.extname(S.scriptPath || '')) || 'subtitle';
+  const out = path.join(shortsDirs(S.outRoot, t.pr.shortsNum).subtitles, `${base}_${L.id}.srt`);
+  P.writeSrt(t.pr, out, L.maxChars, resolvePreset(args.presetName || null), (s) => map.get(byId.get(s.id)) || '');
+  log(`🌐 AI 자막 번역 → ${out}${missing.length ? ` (번역이 빠진 문장 ${missing.length}개는 한국어 그대로)` : ''}`);
+  return { ok: true, path: out, count: map.size, missing, lang: L.id };
+});
 // 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
 //   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }
 //   녹음은 24kHz 모노 WAV 새 파일(`<번호>_o<지문>.wav` — Ctrl+Z 가 옛 소리로)로 바꿔 tts-N 에 두고 원본 녹음은 그대로 둔다 ·
