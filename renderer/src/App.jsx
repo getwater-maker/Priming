@@ -4768,6 +4768,12 @@ export default function App() {
       setStatus(info ? (text ? '📋 그림 + 자막 + 정보 카드 복사됨' : '📋 그림 + 정보 카드 복사됨') : withCap && text ? '📋 그림 + 자막 복사됨' : '📋 그림 복사됨'); return true; }
     catch (e) { setStatus('그림 복사 실패: ' + e.message); return false; }
   }
+  /** 📋 ① 칸 그림 붙여넣기 — 클립보드의 그림을 그 그룹의 그림으로(main 이 읽는다) */
+  async function stagePaste(num) {
+    const sn = (stageLayersRef.current && stageLayersRef.current.pr && stageLayersRef.current.pr.shortsNum) || 1;
+    try { const r = await api.stagePasteImage({ shortsNum: sn, groupNum: num }); if (r && r.dto) setDto(r.dto); setStatus(r && r.ok ? '📋 클립보드 그림을 G' + num + ' 그림으로 붙여넣었습니다 (Ctrl+Z 되돌리기)' : '⚠ ' + ((r && r.error) || '붙여넣지 못했습니다')); }
+    catch (e) { setStatus('⚠ ' + e.message); }
+  }
   /** ① 칸 그림 지우기(✕ 와 같다 — 삽입 그림은 목록의 ➕ 마크에서) */
   async function stageDeleteImage(num, confirmFirst = true) {
     const { pr } = stageLayersRef.current || {}; if (!pr || typeof num !== 'number') return;
@@ -6033,7 +6039,7 @@ export default function App() {
         return (
           <div className="stage-vtb" data-testid="stage-vtb" onMouseDown={stop} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
             {tb('⛶', '채우기 — 맞추기·꽉 채우기', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx({ x: Math.max(4, r.left - 196), y: r.top, sub: 'fill', subY: r.top, num: stageSel.num, cap: '', only: true }); }, { tid: 'vtb-fill' })}
-            {tb('☰', '순서 — 앞으로·뒤로', null, { soon: true })}
+            {tb('☰', '순서 — 앞으로·뒤로', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx({ x: Math.max(4, r.left - 196), y: r.top, sub: 'ord', subY: r.top, num: stageSel.num, cap: '', only: true }); }, { tid: 'vtb-ord' })}
             {tb('◐', '투명도', null, { soon: true })}
             {tb('⌗', '자르기', null, { soon: true })}
             {tb('⇋', '좌우 반전', () => setGroupLook(sn, grpNum, { flipH: !(lk && lk.flipH) }), { tid: 'vtb-flip', on: !!(lk && lk.flipH) })}
@@ -6903,7 +6909,7 @@ export default function App() {
             <Row icon="💬" label="그림 + 자막 복사" dis={!stageCtx.cap} tid="sx-copy-cap" onClick={run(() => stageCopyImage(num, true, stageCtx.cap))} />
             {/* 📇 그림 + 자막 + 정보 카드(v0.8.13) — 지금 ① 칸에 보이는 그대로(판이 자막을 가리는 표·구간 표지면 자막 없이) */}
             <Row icon="📇" label="그림 + 자막 + 정보 카드 복사" dis={!(stageCtx.info && stageCtx.info.length)} tid="sx-copy-info" onClick={run(() => stageCopyImage(num, true, stageCtx.cap, stageCtx.info))} />
-            <Row icon="📋" label="붙여넣기" kbd="Ctrl + V" soon />
+            <Row icon="📋" label="붙여넣기" kbd="그림" dis={!grp} tid="sx-paste" onClick={run(() => stagePaste(num))} />
             <Row icon="🗑" label="삭제" red dis={!grp} tid="sx-del" onClick={run(() => stageDeleteImage(num))} />
             <div className="vr-sep" />
             <Row icon="🎬" label="비디오 생성" sub="vid" dis={!grp} tid="sx-vid" />
@@ -6917,10 +6923,11 @@ export default function App() {
               <Row icon="🖥" label="PC 에서 불러오기" tid="sx-vid-pc" onClick={run(() => attachAsset(pr.shortsNum, num))} />
             </>}
             {stageCtx.sub === 'ord' && <>
-              <Row icon="⇧" label="맨 앞으로" soon />
-              <Row icon="↑" label="앞으로" soon />
-              <Row icon="↓" label="뒤로" soon />
-              <Row icon="⇩" label="맨 뒤로" soon />
+              <Row icon="⇧" label="맨 앞으로" dis={!grp} tid="sx-ord-front" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: 99 }))} />
+              <Row icon="↑" label="앞으로" dis={!grp} tid="sx-ord-up" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: Math.min(98, ((lk && lk.layer) || 0) + 1) }))} />
+              <Row icon="↓" label="뒤로" dis={!grp} tid="sx-ord-down" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: Math.max(-98, ((lk && lk.layer) || 0) - 1) }))} />
+              <Row icon="⇩" label="맨 뒤로" dis={!grp} tid="sx-ord-back" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: -99 }))} />
+              <Row icon="↺" label="순서 원래대로" dis={!grp || !(lk && lk.layer)} tid="sx-ord-reset" onClick={run(() => setGroupLook(pr.shortsNum, num, { layer: 0 }))} />
             </>}
           </div>}
         </>);

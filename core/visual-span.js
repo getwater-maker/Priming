@@ -89,7 +89,14 @@ function groupRanks(project, hasVisual, ctx) {
     const own = { a: c.pos.get(ids[0]), b: c.pos.get(ids[ids.length - 1]) };
     return { own, eff: effRange(project, gi, c, hasVisual) || own };
   });
-  return stackRanks(ranges);
+  const rk = stackRanks(ranges);
+  // 🖼 순서 바꾸기(look.layer · 정수 · + = 위로 · − = 아래로 · 한 칸 = 이웃 하나를 넘는다 · ±99 = 맨 앞/뒤) — 쌓는 순위 위에 얹는다
+  const ly = (project.groups || []).map((g) => Math.trunc(+((g && g.look && g.look.layer) || 0)) || 0);
+  if (!ly.some(Boolean)) return rk;
+  const key = rk.map((r, i) => r + (ly[i] ? ly[i] + (ly[i] > 0 ? 0.5 : -0.5) : 0));
+  const idx = rk.map((_, i) => i).sort((x, y) => (key[x] - key[y]) || (rk[x] - rk[y]));
+  const out = new Array(rk.length); idx.forEach((gi, r) => { out[gi] = r; });
+  return out;
 }
 /**
  * 문장마다 그 문장을 덮는 그림 그룹(아래 → 위 순서 — stackRanks).

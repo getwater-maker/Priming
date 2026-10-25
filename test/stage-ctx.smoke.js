@@ -62,7 +62,7 @@ const cleanup = () => { for (const f of [MD, PNG, SNAP]) { try { if (fs.existsSy
     await win.mouse.click(cx, cy);
     await win.waitForSelector('[data-testid=stage-vtb]', { timeout: 3000 });
     ok(await win.locator('[data-testid=stage-vtb] .vtb-b').count() === 6, '세로 막대 버튼 6개(채우기 · 순서 · 투명도 · 자르기 · 좌우 반전 · 교체)');
-    ok(await win.locator('[data-testid=stage-vtb] .vtb-b.soon').count() === 3, '준비 중 3개(순서 · 투명도 · 자르기)');
+    ok(await win.locator('[data-testid=stage-vtb] .vtb-b.soon').count() === 2, '준비 중 2개(투명도 · 자르기 — 순서는 동작)');
     const box = await win.evaluate(() => { const b = document.querySelector('[data-testid=stage-vtb]').getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect(); return { inside: b.left >= s.left && b.right <= s.right + 1 && b.top >= s.top && b.bottom <= s.bottom }; });
     ok(box.inside, '막대가 스테이지 안(오른쪽 가장자리)');
     await win.locator('[data-testid=vtb-flip]').click(); await win.waitForTimeout(500);
@@ -118,7 +118,7 @@ const cleanup = () => { for (const f of [MD, PNG, SNAP]) { try { if (fs.existsSy
     ok(await win.evaluate(() => { const i = document.querySelector('#stageVisual .vlayer img'); return !!i && getComputedStyle(i).objectFit === 'cover'; }), '꽉 채우기가 그림에 적용');
     await win.mouse.click(cx, cy, { button: 'right' }); await win.waitForTimeout(300);
     await win.locator('[data-testid=sx-ord]').hover(); await win.waitForTimeout(200);
-    ok(await win.locator('[data-testid=sx-sub-ord] .soon').count() === 4, '순서 ▸ 4개 모두 준비 중');
+    ok(await win.locator('[data-testid=sx-sub-ord] .soon').count() === 1, '순서 ▸ 앞/뒤 4줄은 동작 · 「원래대로」만 흐림(순서를 안 바꿨을 때)');
     await win.keyboard.press('Escape'); await win.waitForTimeout(150);
     await win.mouse.click(cx, cy, { button: 'right' }); await win.waitForTimeout(300);
     await win.click('[data-testid=sx-del]'); await win.waitForTimeout(800);

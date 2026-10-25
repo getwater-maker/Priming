@@ -5538,6 +5538,28 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
 });
 
 // 그룹에 이미지/비디오 직접 첨부 (썸네일 클릭 → 파일 선택)
+// 📋 ① 칸 그림 붙여넣기(Lab · Vrew 「붙여넣기」) — 클립보드의 **그림**을 그 그룹의 그림으로 첨부한다(사람이 넣은 것 표시 — 이상 판정 제외).
+//   args = { shortsNum, groupNum } · 그림 파일은 media-N 에 `paste_<지문>.png` 새 파일(번호 이름이 아니라 이웃 그림을 덮지 않는다) · Ctrl+Z 한 번
+ipcMain.handle('stage-paste-image', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind === 'book') return { ok: false, error: '대본을 먼저 여세요.' };
+  const pr = S.parsed.projects.find((p) => p.shortsNum === args.shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === args.groupNum);
+  if (!g) return { ok: false, error: '그룹을 찾을 수 없습니다.' };
+  let img;
+  try { img = require('electron').clipboard.readImage(); } catch { img = null; }
+  if (!img || img.isEmpty()) return { ok: false, error: '클립보드에 그림이 없습니다 — 그림을 복사한 뒤 붙여넣으세요' };
+  const png = img.toPNG();
+  const hash = require('crypto').createHash('sha1').update(png).digest('hex').slice(0, 10);
+  const dir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  const fp = path.join(dir, `paste_${hash}.png`);
+  try { if (!fs.existsSync(fp)) fs.writeFileSync(fp, png); } catch (e) { return { ok: false, error: '그림을 저장하지 못했습니다: ' + e.message }; }
+  undoPush('그림 붙여넣기');
+  _softenCoverOf(pr, g);
+  g.imagePath = fp; g.imageStatus = 'done'; g.imageCleared = false; g._userImage = _visKey(fp);
+  log(`📋 붙여넣기(이미지) ${pr.title} G${g.num}: ${path.basename(fp)} (${img.getSize().width}×${img.getSize().height})`);
+  storeActive(); pushDtoUpdate();
+  return { ok: true, dto: P.toDTO(S.parsed) };
+});
 ipcMain.handle('attach-asset', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum } = args;

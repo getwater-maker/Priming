@@ -77,6 +77,7 @@ function normLook(l) {
   if (flt) out.filter = flt;   // 🎞 필터(기본 = 필드 없음)
   const trn = CE.normTrans(o.trans);
   if (trn) out.trans = trn;   // 🎬 화면 전환(기본 = 필드 없음 · MP4 만)
+  const ly = Math.trunc(Number(o.layer)); if (isFinite(ly) && ly) out.layer = Math.max(-99, Math.min(99, ly));   // 🖼 겹친 그림 순서(기본 0 = 필드 없음)
   const bgc = CE.normBg(o.bg);
   if (bgc) out.bg = bgc;   // 🎨 클립 배경색(기본 = 필드 없음 · look.box 가 있으면 저장은 하되 쓰지 않는다)
   const ks = normKbSegGroup(o.kbSeg);
@@ -85,9 +86,9 @@ function normLook(l) {
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer;
 }
-function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)); }
+function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : ''); }
 function _describeBase(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
