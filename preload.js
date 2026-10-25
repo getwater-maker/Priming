@@ -239,6 +239,7 @@ contextBridge.exposeInMainWorld('api', {
   clipPauseWord: (args) => ipcRenderer.invoke('clip-pause-word', args),   // 🕳 정지·빈 워드 삽입
   clipPad: (args) => ipcRenderer.invoke('clip-pad', args),   // 🕳 빈 클립 삽입
   clipVoiceOverwrite: (args) => ipcRenderer.invoke('clip-voice-overwrite', args),   // 🎙 음성 덮어쓰기
+  clipDenoise: (args) => ipcRenderer.invoke('clip-denoise', args),   // 🔇 노이즈 줄이기
   clipVolume: (args) => ipcRenderer.invoke('clip-volume', args),   // 🔉 볼륨 조절
   clipMarker: (args) => ipcRenderer.invoke('clip-marker', args),   // ⚑ 마커 달기·지우기   // ✂ 무음 구간 줄이기(고른 클립만)
   backupRestore: (args) => ipcRenderer.invoke('backup-restore', args),

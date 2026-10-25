@@ -6635,6 +6635,22 @@ export default function App() {
       else { setStatus('⚠ ' + ((r && r.error) || '빈 클립을 넣지 못했습니다')); setPadPanel({ ...p, busy: false }); }
     } catch (e) { setStatus('⚠ ' + e.message); setPadPanel({ ...p, busy: false }); }
   }
+  // 🔇 기본 노이즈 줄이기 — 문장 소리에 afftdn(약·중·강) 굽기 · main `clip-denoise`
+  const [dnPanel, setDnPanel] = useState(null);   // { sn, items, level, n }
+  function openDenoise() {
+    if (!clipSelOk()) { setStatus('🔇 노이즈를 줄일 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum; const items = []; const seen = new Set();
+    for (const it of capSel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    const s0 = capSentence(sn, items[0].groupNum, items[0].sentIdx);
+    setDnPanel({ sn, items, n: items.length, level: (s0 && s0.dn) || 0 });
+  }
+  async function denoiseSet(level) {
+    const p = dnPanel; if (!p) return;
+    setDnPanel({ ...p, level });
+    try { const r = await api.clipDenoise({ shortsNum: p.sn, items: p.items, level }); if (r && r.dto) setDto(r.dto); setStatus(r && r.ok ? `🔇 노이즈 줄이기 ${level ? CEff.DENOISE[level].label : '끔'} — 문장 ${r.count}개 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '실패')); }
+    catch (e) { setStatus('⚠ ' + e.message); }
+  }
   // 🅣 글 삽입 — 투명 PNG 한 장으로 그려 그림 위층(overlay-op add)으로 넣는다(core/text-overlay · 새 트랙·렌더 규칙 없음)
   const [textIns, setTextIns] = useState(null);   // { presetId, o:{text,size,color,bold,box,shadow,pos}, sn, a, b, busy }
   const textCvRef = useRef(null);
@@ -6794,6 +6810,7 @@ export default function App() {
     <button data-testid="rb-filter" disabled={!selOk} title="필터 — 고른 클립이 든 그림 그룹의 색감을 바꿉니다(흑백·세피아·따뜻하게 …). 원본 그림은 그대로 두고 필터를 입힌 사본을 만듭니다" onClick={openFilterPanel}><span className="rb-ic">✳</span> <span className="rb-t">필터</span></button>
     <button data-testid="rb-trans" disabled={!selOk} title="화면 전환 — 고른 클립이 든 그룹의 그림이 앞 그림에서 바뀔 때의 전환(디졸브·닦아내기·밀기 …). 유튜브 MP4 에만 들어갑니다(.vrew 는 담지 못합니다)" onClick={openTransPanel}><span className="rb-ic">◐</span> <span className="rb-t">전환</span></button>
     <button data-testid="rb-volume" disabled={!selOk} title="볼륨 조절 — 고른 클립이 든 문장의 음성을 0~200% 로(1 초과는 찌그러지지 않는 만큼만 · 완성 파일에 구워집니다)" onClick={openVolPanel}><span className="rb-ic">🔉</span> <span className="rb-t">볼륨</span></button>
+    <button data-testid="rb-denoise" disabled={!selOk} title="노이즈 줄이기 — 고른 클립이 든 문장 소리의 잡음을 줄입니다(약·중·강 · ffmpeg 기본 필터 — AI 가 아니라서 심한 잡음에는 한계가 있습니다 · 완성 파일에 구워집니다)" onClick={openDenoise}><span className="rb-ic">🔇</span> <span className="rb-t">노이즈</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     <button data-testid="theme-switch" title={`화면 테마: ${({ dark: '다크', purple: '보라', light: '라이트' })[themeId]} — 누르면 ${({ dark: '보라', purple: '라이트', light: '다크' })[themeId]}로(다크 → 보라 → 라이트)`} onClick={cycleTheme}><span className="rb-ic">{({ dark: '🌙', purple: '🟣', light: '☀' })[themeId]}</span> <span className="rb-t">테마</span></button>
@@ -7215,6 +7232,13 @@ export default function App() {
             <span className="meta">🎬 이 그룹의 그림이 <b>앞 그림에서 바뀌는 자리</b>에 들어갑니다(경계 앞뒤로 겹쳐 섞음 — 길이·음성·자막 시간은 그대로) · 유튜브 <b>MP4 에만</b> 들어갑니다(.vrew 는 전환을 담지 못합니다) · 앞뒤 둘 다 그림 한 장(영상·겹친 그림 제외)이고 서로 다른 그림일 때만 · 화이트보드 MP4 에는 적용되지 않습니다 · 미리보기 화면에는 보이지 않습니다</span>
             <div className="zr-btns"><button data-testid="tr-close" onClick={() => setTrPanel(null)}>닫기</button></div>
           </div>}
+          {dnPanel && <div className="vr-menu-bg" onMouseDown={() => setDnPanel(null)} />}
+          {dnPanel && <div className="vr-menu zr-panel dn-panel" data-testid="dn-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🔇 노이즈 줄이기 · 문장 {dnPanel.n}개</b>
+            <div className="dn-levels">{CEff.DENOISE.map((d) => <button key={d.id} className={'ghost' + (dnPanel.level === d.id ? ' on' : '')} data-testid={'dn-' + d.id} onClick={() => denoiseSet(d.id)}>{d.label}</button>)}</div>
+            <span className="meta">기본 노이즈 억제(ffmpeg afftdn)를 .vrew·MP4 를 만들 때 문장 소리에 구워 넣습니다 — 원본 음성은 그대로 · <b>AI 노이즈 제거가 아니라서</b> 일정한 잡음(바람·히스·험)에 효과가 있고 심한 잡음·소리가 섞인 잡음에는 한계가 있습니다 · 강할수록 목소리도 조금 먹먹해질 수 있습니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button data-testid="dn-close" onClick={() => setDnPanel(null)}>닫기</button></div>
+          </div>}
           {volPanel && <div className="vr-menu-bg" onMouseDown={() => setVolPanel(null)} />}
           {volPanel && <div className="vr-menu zr-panel vol-panel" data-testid="vol-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>🔉 볼륨 조절 · 문장 {volPanel.n}개</b>
@@ -7371,6 +7395,7 @@ export default function App() {
               <Row icon="⤢" label="확대 및 회전" onClick={() => openZoomRot()} tid="cx-fx-zoomrot" />
               <Row icon="◐" label="화면 전환" onClick={() => openTransPanel()} tid="cx-fx-trans" />
               <Row icon="🔉" label="볼륨 조절" onClick={() => openVolPanel()} tid="cx-fx-volume" />
+              <Row icon="🔇" label="노이즈 줄이기" onClick={() => openDenoise()} tid="cx-fx-denoise" />
               <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
               <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />
               <Row icon="■" label={'채움 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); })} tid="cx-fx-cover" />
@@ -9215,6 +9240,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                     {li === 0 && s.pi > 0 ? <span className="clip-vol" data-testid="clip-pi" title={`❄ 이 문장 소리 안에 정지·빈 워드 무음 ${Math.round(s.pi * 10) / 10}초(쉼 줄이기가 줄이지 않음)`}>❄{Math.round(s.pi * 10) / 10}초</span> : null}
                                     {li === 0 && s.pa > 0 ? <span className="clip-vol" data-testid="clip-pad" title={`▭ 이 클립 뒤에 빈 클립(무음) ${s.pa}초 — 클립 우클릭 ▸ 삽입 ▸ 빈 클립 삽입`}>▭{s.pa}초</span> : null}
                                     {li === 0 && s.ow ? <span className="clip-vol" data-testid="clip-own" title="🎙 이 문장 음성은 내 녹음으로 덮어썼습니다(다시 변환해도 유지 · 클립 우클릭 ▸ 덮어쓴 음성 해제)">🎙</span> : null}
+                                    {li === 0 && s.dn > 0 ? <span className="clip-vol" data-testid="clip-dn" title={`🔇 이 문장 소리에 노이즈 줄이기 ${CEff.DENOISE[s.dn].label} (클립 우클릭 ▸ 효과 ▸ 노이즈 줄이기)`}>🔇{CEff.DENOISE[s.dn].label}</span> : null}
                                     {li === 0 && s.vl != null ? <span className="clip-vol" data-testid="clip-vol" title={`🔉 이 문장 음성 볼륨 ${Math.round(s.vl * 100)}% (클립 우클릭 ▸ 효과 ▸ 볼륨 조절)`}>🔉{Math.round(s.vl * 100)}%</span> : null}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">

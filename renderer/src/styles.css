@@ -2120,3 +2120,7 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .thed-vimg{width:100%;border-radius:6px;border:1px solid var(--line)}
 .thed-side{max-height:calc(94vh - 120px);overflow-y:auto;padding-right:4px}
 .thed-foot{position:sticky;bottom:0;background:var(--card);padding-top:6px;border-top:1px solid var(--line)}
+
+/* 🔇 노이즈 줄이기 패널 */
+.dn-levels{display:flex;gap:6px}
+.dn-levels button.on{background:var(--accent);color:var(--card);border-color:var(--accent)}

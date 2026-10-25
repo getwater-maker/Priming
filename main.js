@@ -7197,7 +7197,7 @@ function buildSnapshot(ctx) {
         imageCleared: !!g.imageCleared, // ✕ 삭제·이상 폐기 표시 — 없으면 재시작 후 캐시가 되살린다(2026-08-19)
         // 📎 직접 첨부 표시(경로+수정시각+크기) — 없으면 재시작 후 sweep 이 사용자 그림을 판정해 버린다(2026-09-07)
         userImage: g._userImage || null, userVideo: g._userVideo || null,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, pa: s.padAfter > 0 ? s.padAfter : null, ks: s.keepSil ? 1 : null, pin: (s.pauseIn && s.pauseIn.length) ? s.pauseIn : null, wt: s.wt || null })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro, chapterMark: s.chapterMark || null, speaker: s.speaker || null, capSpans: (s.capSpans && s.capSpans.length) ? s.capSpans : null, capBreaks: (s.capBreaks && s.capBreaks.length) ? s.capBreaks : null, bc: s.backcheck || null, tt: s.ttsText || null, q: s.quiet || null, cs: (s.clipSpeed && s.clipSpeed !== 1) ? s.clipSpeed : null, qo: s.quietOver || null, mk: s.marker ? 1 : null, vl: (s.vol != null && s.vol !== 1) ? s.vol : null, ow: s.voiceOwn ? 1 : null, dn: s.denoise > 0 ? s.denoise : null, pa: s.padAfter > 0 ? s.padAfter : null, ks: s.keepSil ? 1 : null, pin: (s.pauseIn && s.pauseIn.length) ? s.pauseIn : null, wt: s.wt || null })),
       })),
     })),
   };
@@ -7419,6 +7419,7 @@ function projectsFromSnapshot(snap) {
         if (ss.qo) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기
         if (ss.mk) s.marker = true;   // ⚑ 마커
         if (ss.vl != null) s.vol = ss.vl;   // 🔉 볼륨
+        if (ss.dn > 0) s.denoise = ss.dn;   // 🔇 노이즈 줄이기
         if (ss.ow) s.voiceOwn = true;   // 🎙 덮어쓴 음성
         if (ss.pa > 0) s.padAfter = ss.pa;   // 🕳 빈 클립
         if (ss.ks) { s.keepSil = true; if (ss.pin) s.pauseIn = ss.pin; }   // 🕳 정지·빈 워드
@@ -7528,6 +7529,7 @@ function overlaySnapshot(parsed, snap) {
         if (ss.qo && ss.text === s.text) s.quietOver = ss.qo;   // ✂ 이 클립만의 무음 구간 줄이기(같은 문장일 때만)
         if (ss.mk && ss.text === s.text) s.marker = true;   // ⚑ 마커(같은 문장일 때만)
         if (ss.vl != null && ss.text === s.text) s.vol = ss.vl;   // 🔉 볼륨(같은 문장일 때만)
+        if (ss.dn > 0 && ss.text === s.text) s.denoise = ss.dn;   // 🔇 노이즈 줄이기(같은 문장일 때만)
         if (ss.ow && ss.text === s.text) s.voiceOwn = true;   // 🎙 덮어쓴 음성(같은 문장일 때만)
         if (ss.pa > 0 && ss.text === s.text) s.padAfter = ss.pa;   // 🕳 빈 클립(같은 문장일 때만)
         if (ss.ks && ss.text === s.text) { s.keepSil = true; if (ss.pin) s.pauseIn = ss.pin; }   // 🕳 정지·빈 워드(같은 문장일 때만)
@@ -9499,6 +9501,7 @@ async function _editSentences(args = {}) {
       if (keep.quietOver) s.quietOver = keep.quietOver;
       if (keep.marker) s.marker = true;   // ⚑ 글이 같은 문장은 마커도 따라온다
       if (keep.vol != null) s.vol = keep.vol;   // 🔉 볼륨도
+      if (keep.denoise > 0) s.denoise = keep.denoise;   // 🔇 노이즈 줄이기도(글이 같으면 소리도 같다)
       if (keep.keepSil) { s.keepSil = true; if (keep.pauseIn) s.pauseIn = keep.pauseIn; }   // 🕳 정지·빈 워드(글이 같으면 소리도 같다)
       if (keep.padAfter > 0) s.padAfter = keep.padAfter;   // 🕳 빈 클립도(글이 같으면)
       if (keep.voiceOwn) s.voiceOwn = true;   // 🎙 덮어쓴 음성도(글이 같으면 음성도 따라온다)
@@ -10978,6 +10981,21 @@ ipcMain.handle('clip-voice-overwrite', async (_e, args = {}) => {
   log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${path.basename(src)} (${dur.toFixed(1)}초)`);
   storeActive(); syncSnapshotNow();
   return { ok: true, dur, dto: P.toDTO(S.parsed) };
+});
+// 🔇 기본 노이즈 줄이기(Lab · 남은 기능 ②) — 고른 클립이 든 문장의 소리에 ffmpeg afftdn 을 굽는다(s.denoise 0~3 · 0 = 끔).
+//   args = { shortsNum, items:[{groupNum, sentIdx}], level } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 사본에 구워진다(볼륨과 같은 길) · Ctrl+Z 한 번
+ipcMain.handle('clip-denoise', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);
+  const pr = c.pr; const CEf = require('./core/clip-effects');
+  const seen = new Set(); const sents = [];
+  for (const it of args.items || []) { const s = _sentAt(pr, it.groupNum, it.sentIdx); if (s && !seen.has(s.id)) { seen.add(s.id); sents.push(s); } }
+  if (!sents.length) return { ok: false, error: '고른 클립이 없습니다', dto: P.toDTO(S.parsed) };
+  const lv = CEf.normDenoise(args.level);
+  undoPush(lv ? '노이즈 줄이기' : '노이즈 줄이기 끄기');
+  for (const s of sents) { if (lv) s.denoise = lv; else delete s.denoise; }
+  log(`🔇 노이즈 줄이기 ${lv ? CEf.DENOISE[lv].label : '끔'} — 문장 ${sents.length}개`);
+  storeActive(); syncSnapshotNow(); pushDtoUpdate();
+  return { ok: true, level: lv, count: sents.length, dto: P.toDTO(S.parsed) };
 });
 ipcMain.handle('clip-volume', async (_e, args = {}) => {
   const c = _clipCtx(args.shortsNum); if (c.error) throw new Error(c.error);

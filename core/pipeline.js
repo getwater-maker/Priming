@@ -137,6 +137,7 @@ function toDTO(parseResult) {
               pi: (s.pauseIn && s.pauseIn.length) ? s.pauseIn.reduce((a, x) => a + (x.sec || 0), 0) : null,   // 🕳 문장 안 정지·빈 워드 무음 합(초 · 표시용)
               pa: s.padAfter > 0 ? s.padAfter : null,   // 🕳 빈 클립(문장 뒤 무음 초)
               ow: s.voiceOwn ? 1 : null,   // 🎙 내 녹음으로 덮어쓴 음성
+              dn: s.denoise > 0 ? s.denoise : null,   // 🔇 노이즈 줄이기(1~3)
               vl: (s.vol != null && s.vol !== 1) ? s.vol : null,   // 🔉 볼륨 조절(0~2 · 없으면 1)
               pz: (_pz && _pz.get(s.id)) || null,   // ⏸ 이 문장 음성 뒤 막간 쉼(초) — .vrew 빌드(pausePlanOf)와 같은 값 · 화면 시각은 dur + pz 로 누적
               para: _para ? (_para.get(s.id) ?? null) : null,   // 📄 대본 문단 번호(대본 읽기 줄바꿈)

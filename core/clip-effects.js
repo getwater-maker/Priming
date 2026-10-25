@@ -148,6 +148,27 @@ function normTrans(t) {
   sec = Math.round(Math.max(TRANS_SEC.min, Math.min(TRANS_SEC.max, sec)) * 10) / 10;
   return { type, sec };
 }
+/**
+ * 🔇 기본 노이즈 줄이기(Lab) — 문장 `s.denoise` 0(없음)~3(강) · ffmpeg 내장 `afftdn`(FFT 노이즈 억제 · 새 모델·의존성 없음) · 볼륨과 같은 굽기(문장 MP3 사본 · 원본 불변).
+ *   AI 노이즈 제거(Resemble Enhance 등)는 모델 내려받기가 필요해 만들지 않았다(docs/VrewLab/남은기능_설계.md).
+ */
+const DENOISE = [{ id: 0, label: '없음' }, { id: 1, label: '약', nr: 10 }, { id: 2, label: '중', nr: 18 }, { id: 3, label: '강', nr: 30 }];
+function normDenoise(v) { const n = Math.round(Number(v)); return (isFinite(n) && n >= 1 && n <= 3) ? n : 0; }
+/** 잡음 바닥(dBFS · RMS) 추정 — 50ms 창마다 RMS 를 재어 가장 조용한 10% 의 값(말 사이·앞뒤 숨소리 구간). 소리가 거의 없으면 null */
+function noiseFloorDb(pcm, rate) {
+  if (!pcm || !(rate > 0)) return null;
+  const w = Math.max(1, Math.round(rate * 0.05)), db = [];
+  for (let i = 0; i + w <= pcm.length; i += w) { let s = 0; for (let k = i; k < i + w; k++) { const v = pcm[k] / 32768; s += v * v; } const r = Math.sqrt(s / w); if (r > 1e-6) db.push(20 * Math.log10(r)); }
+  if (db.length < 6) return null;
+  db.sort((x, y) => x - y);
+  return db[Math.floor(db.length * 0.1)];
+}
+/** 굽기용 ffmpeg 필터(없으면 빈 문자열) — nr = 줄일 dB · nf = 잡음 바닥(noiseFloorDb 로 잰 값 · 못 재면 -50) · 🔑 tn=0(추적 끔) — tn=1 은 일정한 잡음에서 거의 줄이지 못했다(실측) */
+function denoiseFilter(v, nfDb) {
+  const l = DENOISE.find((x) => x.id === normDenoise(v)); if (!l || !l.nr) return '';
+  const nf = (nfDb != null && isFinite(nfDb)) ? Math.max(-80, Math.min(-20, Math.round(nfDb))) : -50;
+  return `afftdn=nr=${l.nr}:nf=${nf}:tn=0`;
+}
 const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg) || normFilter(look.filter) || normTrans(look.trans)));
 
 /**
@@ -199,4 +220,4 @@ function describeFx(look) {
   return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '') + (fl ? ` · 필터 ${fl.label}` : '') + (tr ? ` · 전환 ${trl.label} ${tr.sec}초(MP4)` : '');
 }
 
-module.exports = { TRANS, TRANS_SEC, normTrans, VOL, normVol, volGain, ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
+module.exports = { DENOISE, normDenoise, denoiseFilter, noiseFloorDb, TRANS, TRANS_SEC, normTrans, VOL, normVol, volGain, ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };

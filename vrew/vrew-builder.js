@@ -61,7 +61,7 @@ function wavToMp3(wavPath, mp3Path, gain = 1) {
 // 기존엔 빌드 루프에서 spawnSync 로 1개씩 직렬 변환 → 366개면 ~9분. 이걸 비동기 spawn 병렬로
 // 바꿔 수십 초로 단축 + 변환 중 메인 스레드가 양보되어 진행률 UI 도 갱신됨. (MP3 출력 유지 = 형식 안전)
 // 🔉 문장 음성 → MP3 사본의 열쇠 — 같은 파일이라도 볼륨이 다르면 다른 사본(효과 ④)
-function _mp3Key(s) { const v = CE.normVol(s && s.vol); return `${s && s.ttsAudioPath}|v${v == null ? 1 : v}`; }
+function _mp3Key(s) { const v = CE.normVol(s && s.vol); return `${s && s.ttsAudioPath}|v${v == null ? 1 : v}|d${CE.normDenoise(s && s.denoise)}`; }   // 같은 파일이라도 볼륨·노이즈 줄이기가 다르면 다른 사본
 // ffmpeg volumedetect 로 원음의 최대 음량(dB) — 못 재면 NaN(그러면 1 초과 볼륨은 키우지 않는다)
 function _peakDb(src) {
   return new Promise((resolve) => {
@@ -87,17 +87,22 @@ async function preConvertWavsToMp3(sentences, log, concurrency = 8) {
     if (!s || !s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) continue;
     const vol = CE.normVol(s.vol);
     const isWav = path.extname(s.ttsAudioPath).toLowerCase() === '.wav';
-    if (!isWav && vol == null) continue;   // mp3 그대로(볼륨 없음)
-    jobs.set(_mp3Key(s), { src: s.ttsAudioPath, vol, num: s.num });
+    const dn = CE.normDenoise(s.denoise);
+    if (!isWav && vol == null && !dn) continue;   // mp3 그대로(볼륨·노이즈 줄이기 없음)
+    jobs.set(_mp3Key(s), { src: s.ttsAudioPath, vol, dn, num: s.num });
   }
   const list = [...jobs.entries()];
   if (!list.length) return map;
-  const volN = list.filter(([, j]) => j.vol != null).length;
-  log(`[Vrew] WAV→MP3 병렬 변환 시작 — ${list.length}개 (동시 ${concurrency})${volN ? ` · 🔉 볼륨 조절 ${volN}개` : ''}`);
+  const volN = list.filter(([, j]) => j.vol != null).length, dnN = list.filter(([, j]) => j.dn).length;
+  log(`[Vrew] WAV→MP3 병렬 변환 시작 — ${list.length}개 (동시 ${concurrency})${volN ? ` · 🔉 볼륨 조절 ${volN}개` : ''}${dnN ? ` · 🔇 노이즈 줄이기 ${dnN}개` : ''}`);
 
   let idx = 0, done = 0;
   const convertOne = async ([key, j]) => {
-    let gain = 1;
+    let gain = 1, nf = null;
+    if (j.dn) {   // 🔇 잡음 바닥을 재서 afftdn 의 nf 로(일정한 잡음일수록 잘 줄인다)
+      try { const pcm = await require('../core/quiet-trim').decodePcm(j.src, _ffmpegPath); nf = CE.noiseFloorDb(pcm, 24000); } catch (_) {}
+      log(`[Vrew] 🔇 컷${j.num} 노이즈 줄이기 ${CE.DENOISE[j.dn].label} — 잡음 바닥 ${nf == null ? '못 잼(기본값)' : nf.toFixed(1) + ' dB'}`);
+    }
     if (j.vol != null) {
       const peak = j.vol > 1 ? await _peakDb(j.src) : 0;
       const g = CE.volGain(j.vol, peak);
@@ -110,7 +115,7 @@ async function preConvertWavsToMp3(sentences, log, concurrency = 8) {
       try {
         p = spawn(_ffmpegPath, [
           '-y', '-i', j.src,
-          ...(Math.abs(gain - 1) > 1e-6 ? ['-af', `volume=${gain.toFixed(4)}`] : []),
+          ...(() => { const af = []; const df = CE.denoiseFilter(j.dn, nf); if (df) af.push(df); if (Math.abs(gain - 1) > 1e-6) af.push(`volume=${gain.toFixed(4)}`); return af.length ? ['-af', af.join(',')] : []; })(),   // 노이즈 줄이기 → 볼륨(노이즈를 먼저 줄인 뒤 키운다)
           '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '24000', '-ac', '1',
           mp3Path,
         ], { stdio: 'ignore' });
@@ -1215,10 +1220,10 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     let ttsSrc  = s.ttsAudioPath;
     let outExt  = srcExt;
     let codec   = (srcExt === 'wav') ? 'wav' : 'mp3';
-    if (srcExt !== 'wav' && CE.normVol(s.vol) != null) {   // 🔉 mp3 인데 볼륨을 준 문장 — 사전 변환이 gain 을 얹어 새 MP3 를 만들었다
+    if (srcExt !== 'wav' && (CE.normVol(s.vol) != null || CE.normDenoise(s.denoise))) {   // 🔉🔇 mp3 인데 볼륨·노이즈 줄이기를 준 문장 — 사전 변환이 gain 을 얹어 새 MP3 를 만들었다
       const _vm = _mp3Cache.get(_mp3Key(s));
       if (_vm && fs.existsSync(_vm)) { ttsSrc = _vm; outExt = 'mp3'; codec = 'mp3'; }
-      else log(`[Vrew] ⚠ 컷${s.num} 볼륨 사본을 만들지 못해 원래 음량으로 계속합니다`);
+      else log(`[Vrew] ⚠ 컷${s.num} 볼륨·노이즈 줄이기 사본을 만들지 못해 원래 소리로 계속합니다`);
     }
     if (srcExt === 'wav') {
       // 1순위: 병렬 사전 변환 캐시. 미스(변환 실패)면 동기 1회 폴백, 그래도 실패면 wav 그대로.
