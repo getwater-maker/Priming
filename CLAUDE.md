@@ -1,13 +1,6 @@
 # Priming — 규칙과 지도
 
-> ## 🧪 이 폴더는 **Priming Lab**(`D:\Priming-VrewLab`) — 원본 `D:\Priming` 의 실험 복제본이다 (2026-10-21 로이 승인)
-> - 목적: Vrew 에 있고 Priming 에 없는 기능을 원본과 떼어 놓고 만든다. 차이표·경위 = [`docs/VrewLab/`](docs/VrewLab/).
-> - ⛔ **발행하지 않는다** — 전역 「코드 수정 = 발행까지 한 세트」 규칙의 **예외**. `update:publish`·`update:manifest`·`npm run dist`·푸시 금지. 아래 §2 의 발행 절차는 원본 몫이다.
-> - git: 브랜치 `vrewlab` 에만 커밋. `origin` = 로컬 `D:\Priming`(받기 전용 · 푸시 주소 `DISABLED`). ⛔ GitHub 주소를 remote 로 넣지 않는다(푸시 = 전 회원 PC 배포). 원본 따라잡기는 `git fetch origin; git merge origin/main`.
-> - 실행은 **`lab-start.ps1` 로만**(USERPROFILE 을 `D:\Priming-VrewLab-data\home` 으로 돌리고 `PM_LAB=1`) — ⛔ 그냥 `npm start` 하면 원본 데이터(~/.flow-app·~/.priming-maker)를 같이 쓴다. 원본 설정 복사는 보통 셸에서 `node lab-import.js`(토큰 제외 · 키는 `--with-keys`).
-> - 대본은 `D:\Priming-VrewLab-data\scripts` 에 **복사해서** 연다(원본 대본을 열면 Lab 편집이 원본 .md 를 고친다). 🔁 **그림·음성까지 같이 가져오기 = 보통 셸에서 `node lab-import-script.js "<작업본 이름 일부>"`**(출력 폴더·작업본 복사 + 작업본 안 절대경로를 Lab 폴더로 바꿔 씀 — ⛔ 경로를 안 바꾸면 Lab 편집이 원본 그림·음성 파일에 닿는다 · `--dry` 로 계획만).
-> - E2E·시험도 Lab 홈으로 돌린다(`USERPROFILE=D:\Priming-VrewLab-data\home`). GPU 서버(OmniVoice·ComfyUI)는 원본과 같이 쓴다 — 원본이 제작 중이면 Lab 생성 시험을 하지 않는다.
-> - 원본 결함은 여기서 고치지 않고 원본 세션에 요청서로 넘긴다. Lab 에서 검증된 기능만 원본으로 가져간다.
+> ## ✅ Vrew 동일화 이식됨 (v1.0.0 · 2026-10-25 로이 승인) — Lab(Lab 폴더)에서 검증한 기능이 이 저장소에 들어왔다. 설계·차이표·경위 = [`docs/VrewLab/`](docs/VrewLab/). 화면은 **라이트가 기본**(도움말 탭 「테마」로 다크·보라) · 아래 규칙 줄들은 모듈 규칙이므로 그대로 유지한다.
 > - 🕘 **세대 백업·되살리기 = `core/gen-backup` 한 곳**(작업본 저장 `writeSnapshotSync` 뒤 · 대본 열 때 · 위치 `workspaceDir()/history`) · 🩹 비정상 종료 = `core/session-lock`(안내만 — 빈 화면 시작 불변) · `test:backup`.
 > - ✂ **쉼 줄이기 = `core/quiet-trim` 한 곳**(채널 `quietMaxSec`·`quietEdge` · 원본 음성은 두고 `<번호>_q.wav` 사본 + `s.quiet` · 부르는 곳 `P.quietPass` = fillTtsList 끝 · 4단계·export-vrew 지문보다 먼저) — 길이를 바꾸는 새 음성 처리도 이 길로 · `test:quiet`.
 > - ⏩ **클립 배속 = 같은 사본 체인**(`s.clipSpeed` · 열쇠 `sentKey` · IPC `clip-speed`) — 🔴 사본 이름은 `<번호>_q<지문>.wav`(⛔ 고정 이름으로 덮어쓰지 말 것 — Ctrl+Z 가 옛 소리를 잃는다) · 음성을 물려받는 새 편집 경로는 `s.quiet`·`clipSpeed` 도 함께 넘길 것(안 넘기면 배속이 두 번 걸린다).
@@ -34,7 +27,6 @@
 > - 🎞 **장면 전환 찾기 = `core/scene-detect`(ffmpeg 장면 점수 · 찾기만 · 밝기 변화 기준)** · 📋 **효과 템플릿 = `core/templates`(효과 한 벌 · 자리·순서·켄번스 구간은 담지도 건드리지도 않는다)** · `test:scenes`·`test:templates`.
 > - 🌗 **화면은 다크가 기본(Vrew 동일화 B단계) — 색은 토큰 `--bg-/--fg-/--bd-<16진>`(라이트 = 원래 색 · 다크 = `[data-theme="dark"]` 계산값)·`--bg`·`--card` 등 기본 토큰만 쓴다**(⛔ 색 속성에 16진을 새로 쓰지 말 것 — 새 색이 필요하면 `:root` 두 블록에 짝으로 추가 · 라이트로 되돌리기 = index.html `data-theme` · `test:theme`).
 > - 🏷 **① 칸 로고도 `core/overlay-layers` 를 직접 쓴다**(effLogo · posOfLogo · logoBox · chanLogoPos — ⛔ App.jsx 에 로고 켜기·자리·여백 규칙을 다시 두지 말 것 · `test:logopv`).
-> - 🎯 **Lab 방침(로이 2026-10-24): Vrew 를 기준으로 디자인·기능을 같게 만든다 — 단 Priming 만의 기능은 반드시 유지**(목록 = [`docs/VrewLab/Vrew동일화_지도.md`](docs/VrewLab/Vrew동일화_지도.md) §3). 따르는 것 = 배치·조작·기능 구성·파일 형식 / 가져오지 않는 것 = Vrew 의 코드·아이콘·일러스트·문구 원문·이름(경계는 로이 확인 대기 — 지도 §0·§7). 디자인 값(배치·색)은 정적 분석으로 못 얻는다 → 로이 캡처(`docs/VrewLab/vrew-화면/`)를 기다린다. 새 메뉴·화면은 Vrew 에 있는 이름·자리를 먼저 본다(화면에 「준비 중」 자리가 이미 약 45개).
 > - 🔤 **단어·줄 시각 정렬 = `core/word-align`(순수) 한 곳**(채널 `wordAlign` · 한국어만 · 열쇠 `s.wt.k` 가 안 맞으면 쓰지 않는다 = 예전 글자 비례) — 🔴 .vrew 빌더·SRT·② 화면은 **같은 `offsetsFor`** 를 쓴다(⛔ 줄 경계를 DTO 에 담아 보내지 말 것 — 줄 구분이 쓰는 쪽마다 달라 어긋난다 · DTO 는 어절 경계 `wb` 만) · 음성이 바뀌는 새 처리는 `P.quietPass` 를 거쳐야 정렬이 따라간다 · 서버(Whisper)를 쓰지 않는다(실측 근거 작업노트) · `test:walign`.
 > - 🗑 **단어 지우기 = IPC `delete-words` 한 곳**(글은 `_editSentences` + `_wordCut` · 소리는 `word-align.cutWords` — ⛔ 글만 지우고 소리를 두지 말 것(어긋난다) · ⛔ 원본 음성을 덮어쓰지 말 것(새 `<번호>_d<지문>.wav` — Ctrl+Z 가 옛 소리로) · 정렬(`s.wt`)이 없으면 거부) · ▶ 단어부터 재생은 `playCut` 의 `start.offSec` · `test:wdel`.
 

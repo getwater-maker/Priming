@@ -35,7 +35,7 @@ const body = css.replace(/(^|\n):root(?:\[data-theme="(?:dark|purple)"\](?:,:roo
 const left = [...body.matchAll(/(background[a-z-]*|color|border[a-z-]*|outline[a-z-]*|fill|stroke)\s*:\s*([^;{}]*#[0-9a-fA-F]{3,6}\b[^;{}]*)/g)].map((m) => m[0]);
 console.log(`  · 남은 직접 색(속성 안) ${left.length}건`);
 ok(left.length <= 10, '④ 색 속성의 직접 16진은 거의 없다(≤10)');
-ok(/data-theme="dark"/.test(html) && /localStorage\.getItem\('priming-theme'\)/.test(html) && (html.match(/priming-theme/g) || []).length === 1, '⑤ index.html 테마 속성 + 되돌리기 스위치 한 벌');
+ok(/data-theme="light"/.test(html) && /localStorage\.getItem\('priming-theme'\)/.test(html) && (html.match(/priming-theme/g) || []).length === 1, '⑤ index.html 테마 속성 + 되돌리기 스위치 한 벌');
 const pm = /:root\[data-theme="purple"\]\{([^}]*)\}/.exec(css.replace(/:root\[data-theme="dark"\],:root\[data-theme="purple"\]\{/g, ''));
 const PU = pm ? defs(pm[1]) : new Map();
 ok(PU.has('accent') && PU.get('accent') !== D.get('accent') && PU.get('bg') !== D.get('bg') && /purple/.test(html) && /purple: 'light'/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8')), '⑥ 보라 테마 — 다크 토큰 위에 색조만 덮고(accent·bg 가 다크와 다르다) index.html·화면 스위치가 안다');
