@@ -8193,7 +8193,7 @@ export default function App() {
                   );
                 })}
               </div>
-              {(todayPick.empty || []).length > 0 && <div className="today-none"><b>없음</b> {todayPick.empty.map((e) => `${e.channel}(${e.reason})`).join(' · ')}</div>}
+              {(todayPick.empty || []).length > 0 && <div className="today-none" title={todayPick.empty.map((e) => `${e.channel} — ${e.reason}`).join('\n')}>대본이 없는 채널 {todayPick.empty.length}개 (마우스를 올리면 목록)</div>}
             </>)}
             <div className="modal-actions today-actions">
               <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
