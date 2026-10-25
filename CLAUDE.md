@@ -24,6 +24,8 @@
 > - 🎙 **음성 덮어쓰기 = 문장 `s.voiceOwn`(IPC `clip-voice-overwrite` · 새 WAV `<번호>_o<지문>.wav` · 원본 녹음 불변) — `fillTtsList` 가 `voiceOwn` 이면 force 에도 건너뛴다**(마커·볼륨과 같은 길로 물려줄 것: DTO `ow`·작업본 2곳·글 고침) · `test:voiceow`.
 > - 🖼 **겹친 그림 순서 = 그룹 `look.layer`(±99) → `visual-span.groupRanks` 한 곳**(.vrew zIndex·② 레이어·미리보기·MP4 가 같이 쓴다 — ⛔ 다른 곳에서 쌓는 순서를 따로 계산하지 말 것) · 📋 ① 칸 붙여넣기 = IPC `stage-paste-image`(main 이 클립보드를 읽는다) · `test:stageord`.
 > - 🅣 **글 삽입 = 투명 PNG 한 장(`core/text-overlay`)을 기존 그림 위층(`overlay-op add`)으로** — ⛔ 글 전용 트랙·렌더 규칙을 만들지 말 것 · `test:textins`.
+> - ▭ **빈 클립 = 문장 `s.padAfter`(초) — 읽는 곳은 `pipeline.pausePlanOf` 한 곳(카드 쉼과 **합**)**: 빌더·SRT·지문·챕터·정보 카드·DTO `pz`·화면 카드 시각이 그걸 따른다(⛔ 다른 곳에서 padAfter 를 직접 읽지 말 것 — 빌더는 읽지 않는다) · MP4 쉼 동안 자막 가림은 `.vrew.fx.json` 의 `pauseWins`(`P.userPauseWins`) · `test:blank`.
+> - ❄ **정지·빈 워드 = 문장 소리의 어절 경계에 무음을 끼운 새 WAV(`word-align.insertSilence` · IPC `clip-pause-word`)** — `s.wt` 는 지우지 않고 **뒤로 밀고 열쇠 `k`(=`keyOf`, 경로·길이 포함)를 다시 찍는다**(안 찍으면 `wb` 가 null) · `s.keepSil` 이면 쉼 줄이기가 건너뛴다 · 경계 없는 문장은 앞·끝만 · `test:pauseword`.
 > - 🌐 **AI 자막 교정 = 제안만(대본을 고치지 않는다 — 적용은 화면이 `edit-sentences` 로) · 번역 = SRT 파일만(`P.writeSrt` 의 `textOf` — 한국어 .srt 와 같은 시각)** · 호출은 `CA.ask({use:'spell'|'translate'})` 한 곳(`core/ai-subtitle` 이 프롬프트·안전 검사) · `test:aisub`.
 > - 🌗 **화면은 다크가 기본(Vrew 동일화 B단계) — 색은 토큰 `--bg-/--fg-/--bd-<16진>`(라이트 = 원래 색 · 다크 = `[data-theme="dark"]` 계산값)·`--bg`·`--card` 등 기본 토큰만 쓴다**(⛔ 색 속성에 16진을 새로 쓰지 말 것 — 새 색이 필요하면 `:root` 두 블록에 짝으로 추가 · 라이트로 되돌리기 = index.html `data-theme` · `test:theme`).
 > - 🏷 **① 칸 로고도 `core/overlay-layers` 를 직접 쓴다**(effLogo · posOfLogo · logoBox · chanLogoPos — ⛔ App.jsx 에 로고 켜기·자리·여백 규칙을 다시 두지 말 것 · `test:logopv`).
