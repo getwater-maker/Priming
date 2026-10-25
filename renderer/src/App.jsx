@@ -4977,6 +4977,7 @@ export default function App() {
           const url = await api.readAudio(s.audio);
           if (url) {
             const a = new Audio(url); curAudioRef.current = a;
+            a.volume = Math.max(0, Math.min(1, s.vl != null ? s.vl : 1));   // 🔉 볼륨 조절(미리보기는 100% 까지 — 그 이상은 .vrew·MP4 에 반영)
             if (si === si0 && skip0 > 0.001) {
               await new Promise((r) => { if (a.readyState >= 1) r(); else { a.addEventListener('loadedmetadata', r, { once: true }); a.addEventListener('error', r, { once: true }); } });
               try { a.currentTime = Math.min(skip0 * ((a.duration || dur) / dur), (a.duration || dur)); } catch (_) {}
@@ -6394,6 +6395,26 @@ export default function App() {
   // 🎨 클립 배경색(효과 ②) — 맞추기(띠)·투명 PNG 바닥. 그림 그룹만 · 사람이 옮긴 자리(look.box)가 있으면 쓰이지 않는다
   const [bgPanel, setBgPanel] = useState(null);   // { sn, gs, color('' = 없음), boxed }
   const bgTimerRef = useRef(null);
+  // 🔉 볼륨 조절(효과 ④) — 고른 클립이 든 **문장**의 음성 배율(0~200%) · 음성은 .vrew 를 만들 때 구워진다
+  const [volPanel, setVolPanel] = useState(null);   // { sn, items, pct, n }
+  const volTimerRef = useRef(null);
+  function openVolPanel() {
+    if (!clipSelOk()) { setStatus('🔉 볼륨을 줄 클립을 먼저 고르세요'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const sn = capSel.shortsNum; const items = []; const seen = new Set();
+    for (const it of capSel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    const s0 = capSentence(sn, items[0].groupNum, items[0].sentIdx);
+    setVolPanel({ sn, items, n: items.length, pct: Math.round(((s0 && s0.vl != null) ? s0.vl : 1) * 100) });
+  }
+  function volChange(pct) {
+    setVolPanel((p) => (p ? { ...p, pct } : p));
+    if (volTimerRef.current) clearTimeout(volTimerRef.current);
+    const sel = volPanel; if (!sel) return;
+    volTimerRef.current = setTimeout(async () => {
+      try { const r = await api.clipVolume({ shortsNum: sel.sn, items: sel.items, vol: pct / 100 }); if (r && r.dto) setDto(r.dto); setStatus(r && r.ok ? `🔉 볼륨 ${pct}% — 문장 ${r.count}개 (Ctrl+Z 되돌리기)` : '⚠ ' + ((r && r.error) || '볼륨 실패')); }
+      catch (e) { logline('볼륨 오류: ' + e.message); setStatus('⚠ ' + e.message); }
+    }, 250);
+  }
   // 🎞 필터(효과 ③) — 그림 그룹 · 프리셋 9종 + 없음
   const [flPanel, setFlPanel] = useState(null);   // { sn, gs, id, video }
   function openFilterPanel() {
@@ -6523,6 +6544,7 @@ export default function App() {
     <button data-testid="rb-zoomrot" disabled={!selOk} title="확대 및 회전 — 고른 클립이 든 그림·영상 그룹을 확대(100~300%)하거나 돌립니다(−180~180°). 돌리면 켄번스(천천히 움직임)는 꺼집니다" onClick={openZoomRot}><span className="rb-ic">⤢</span> <span className="rb-t">확대·회전</span></button>
     <button data-testid="rb-bg" disabled={!selOk} title="클립 배경색 — 맞추기로 생기는 띠와 투명 PNG 바닥에 색을 칠합니다(그림 그룹 · 그림을 직접 옮긴 자리에는 쓰이지 않음)" onClick={openBgPanel}><span className="rb-ic">🎨</span> <span className="rb-t">배경색</span></button>
     <button data-testid="rb-filter" disabled={!selOk} title="필터 — 고른 클립이 든 그림 그룹의 색감을 바꿉니다(흑백·세피아·따뜻하게 …). 원본 그림은 그대로 두고 필터를 입힌 사본을 만듭니다" onClick={openFilterPanel}><span className="rb-ic">✳</span> <span className="rb-t">필터</span></button>
+    <button data-testid="rb-volume" disabled={!selOk} title="볼륨 조절 — 고른 클립이 든 문장의 음성을 0~200% 로(1 초과는 찌그러지지 않는 만큼만 · 완성 파일에 구워집니다)" onClick={openVolPanel}><span className="rb-ic">🔉</span> <span className="rb-t">볼륨</span></button>
   </span>);
   const ribHelp = (<span className="hgroup" data-testid="rib-help"><span className="glabel">도움말</span>
     {pointsEl}
@@ -6764,7 +6786,7 @@ export default function App() {
               <button data-testid="ctb-fx-contain" title="그림 전체가 보이게(비율이 다르면 검은 띠) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); }}>▣ 맞춤 <i>G{cg ? cg.g : ''}</i></button>
               <button data-testid="ctb-fx-cover" title="화면을 빈틈없이 채우기(넘치는 쪽은 잘림) — 이 클립이 든 그룹의 그림" onClick={() => { setClipMenu(null); if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); }}>■ 채움 <i>G{cg ? cg.g : ''}</i></button>
               {soon('◐', '화면 전환')}
-              {soon('🔉', '볼륨 조절')}
+              <button data-testid="ctb-volume" onClick={() => { setClipMenu(null); openVolPanel(); }}>🔉 볼륨 조절</button>
               <div className="ctb-speed" data-testid="ctb-speed" title="⏩ 클립 배속 — 고른 클립이 든 문장의 음성을 빠르게·느리게(문장 뒤 무음은 그대로 · Ctrl+Z 되돌리기)">
                 <span>⏩ 배속</span>
                 {[0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5].map((v) => <button key={v} data-testid={'ctb-speed-' + v} onClick={() => clipSpeedSet(v)}>{v === 1 ? '1×' : v}</button>)}
@@ -6833,6 +6855,13 @@ export default function App() {
           </div>}
         </>);
       })()}
+          {volPanel && <div className="vr-menu-bg" onMouseDown={() => setVolPanel(null)} />}
+          {volPanel && <div className="vr-menu zr-panel vol-panel" data-testid="vol-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🔉 볼륨 조절 · 문장 {volPanel.n}개</b>
+            <label>볼륨 <input type="range" data-testid="vol-range" min={CEff.VOL.min * 100} max={CEff.VOL.max * 100} step={CEff.VOL.step * 100} value={volPanel.pct} onChange={(e) => volChange(Number(e.target.value))} /><span className="zr-v" data-testid="vol-v">{volPanel.pct}%</span></label>
+            <span className="meta">100% = 원래 음량 · 0% = 무음 · 100% 를 넘기면 소리가 찌그러지지 않는 만큼만 커집니다(넘치는 부분은 자동으로 깎고 만들 때 알립니다 — 압축·리미터는 쓰지 않습니다) · 음량은 .vrew·MP4 를 만들 때 문장 음성에 구워집니다 · 이 화면 재생은 100% 까지만 들립니다 · 그룹 영상 소리·배경음악·삽입 오디오는 대상이 아닙니다 · 화이트보드 MP4 에는 적용되지 않습니다</span>
+            <div className="zr-btns"><button className="ghost" data-testid="vol-reset" onClick={() => volChange(100)}>100% 로</button><button data-testid="vol-close" onClick={() => setVolPanel(null)}>닫기</button></div>
+          </div>}
           {flPanel && <div className="vr-menu-bg" onMouseDown={() => setFlPanel(null)} />}
           {flPanel && <div className="vr-menu zr-panel fl-panel" data-testid="fl-panel" onMouseDown={(e) => e.stopPropagation()}>
             <b>✳ 필터 · {flPanel.gs.map((g) => 'G' + g).join(' ')}</b>
@@ -6980,7 +7009,7 @@ export default function App() {
               <Row icon="✳" label="필터" onClick={() => openFilterPanel()} tid="cx-fx-filter" />
               <Row icon="⤢" label="확대 및 회전" onClick={() => openZoomRot()} tid="cx-fx-zoomrot" />
               <Row icon="◐" label="화면 전환" soon />
-              <Row icon="🔉" label="볼륨 조절" soon />
+              <Row icon="🔉" label="볼륨 조절" onClick={() => openVolPanel()} tid="cx-fx-volume" />
               <Row icon="⏩" label="배속 효과" onClick={() => setClipCtx((c) => (c ? { ...c, sub: 'speed' } : c))} tid="cx-speed" />
               <Row icon="▣" label={'맞춤 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'contain' }); })} tid="cx-fx-contain" />
               <Row icon="■" label={'채움 G' + g} onClick={run(() => { if (cg) setGroupLook(cg.sn, cg.g, { fill: 'cover' }); })} tid="cx-fx-cover" />
@@ -8804,6 +8833,7 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                       onClick={onClipVoice ? (ev) => { ev.stopPropagation(); _S.onClipVoice(pr.shortsNum, s); } : undefined}>🗣 {s.speaker || '내레이션'}</span>); })()}
                                     {!vrewLay && tm && <span className="clip-time" data-start={l.start != null ? l.start.toFixed(3) : ''} title="이 줄의 시작 시각 + 길이(문장 음성 길이를 글자수 비례로 나눈 값 · ⏸ 막간 쉼 포함 — .vrew 와 같다)">{tm}</span>}
                                     {li === 0 && s.mk ? <span className="clip-marker" data-testid="clip-marker" title="⚑ 마커 — 클립 우클릭 ▸ 마커 로 지우기 · 편집 탭 ▸ 마커 목록으로 모아 보기">⚑</span> : null}
+                                    {li === 0 && s.vl != null ? <span className="clip-vol" data-testid="clip-vol" title={`🔉 이 문장 음성 볼륨 ${Math.round(s.vl * 100)}% (클립 우클릭 ▸ 효과 ▸ 볼륨 조절)`}>🔉{Math.round(s.vl * 100)}%</span> : null}
                                     {li === 0 && s.cs ? <span className="clip-speed" data-testid="clip-speed-badge" title={`⏩ 이 문장 음성 배속 ${s.cs}× (클립 도구 막대 → 효과 → 배속에서 바꾸기)`}>⏩{s.cs}×</span> : null}
                                     <span className="clip-chips">
                                       {lineWords(s.text, l.range).map((w) => (

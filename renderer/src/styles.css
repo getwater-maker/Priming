@@ -1997,3 +1997,6 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .fl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .fl-item{padding:8px 4px;border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--paper-2);color:var(--strong);font-weight:700}
 .fl-item.on{outline:2px solid var(--accent)}
+
+/* 🔉 볼륨 표시(효과 ④) */
+.clip-vol{display:inline-block;margin:0 4px;color:var(--sky);font-weight:700;font-size:var(--fs-sm)}

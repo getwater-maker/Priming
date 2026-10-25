@@ -105,6 +105,29 @@ function ffmpegFilter(id) {
   }
   return s;
 }
+/**
+ * 🔉 볼륨 조절(문장 = 클립의 음성) — s.vol 0~2(선형 배율 · 1 = 기본 = 필드 없음 · 0 = 무음). 굽기: 문장 음성을 MP3 로 바꿀 때 volume= 을 얹는다.
+ *   ⛔ TTS 「리미터·압축 금지」 — 1 초과는 **피크 여유(−1 dBFS 까지)만큼만** 키운다(넘으면 깎고 알린다 · 압축·리미터는 쓰지 않는다).
+ */
+const VOL = { min: 0, max: 2, step: 0.05, ceilDb: -1 };
+/** 볼륨 → 0~2(소수 둘째 자리) · 기본(1)이거나 못 읽으면 null(= 필드 없음). 0(무음)은 유효하다 */
+function normVol(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!isFinite(n)) return null;
+  const c = Math.round(Math.max(VOL.min, Math.min(VOL.max, n)) * 100) / 100;
+  return Math.abs(c - 1) < 0.005 ? null : c;
+}
+/** 실제로 얹을 배율 — vol ≤ 1 은 그대로 · vol > 1 은 피크 여유 안에서만(peakDb = 원음 최대 음량 dB · 못 재면 키우지 않는다) */
+function volGain(vol, peakDb) {
+  const v = normVol(vol);
+  if (v == null) return { gain: 1, capped: false };
+  if (v <= 1) return { gain: v, capped: false };
+  if (!isFinite(peakDb)) return { gain: 1, capped: true };
+  const allowed = Math.pow(10, (VOL.ceilDb - peakDb) / 20);
+  const gain = Math.min(v, Math.max(1, allowed));
+  return { gain, capped: gain < v - 1e-6 };
+}
 const hasEffects = (look) => !!(look && (normZoom(look.zoom) || normRot(look.rot) || normBg(look.bg) || normFilter(look.filter)));
 
 /**
@@ -155,4 +178,4 @@ function describeFx(look) {
   return (z ? ` · 확대 ${z}%` : '') + (r ? ` · 회전 ${r}°` : '') + (bg ? ` · 배경색 ${bg}` : '') + (fl ? ` · 필터 ${fl.label}` : '');
 }
 
-module.exports = { ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };
+module.exports = { VOL, normVol, volGain, ZOOM, ROT, normZoom, normRot, normBg, bgActive, cssBg, FILTERS, normFilter, filterParams, filterActive, cssFilter, filterStages, ffmpegFilter, hasEffects, scaleBox, applyToTrack, cssTransform, describeFx };

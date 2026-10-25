@@ -12,7 +12,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.log(`  ✗ ${m}`); } };
 
 console.log('\n[1] 저장·이어받기');
-ok(/mk: s\.marker \? 1 : null/.test(P) && /mk: s\.marker \? 1 : null, wt:/.test(M), 'DTO(pipeline)와 작업본 저장(main)에 mk');
+ok(/mk: s\.marker \? 1 : null/.test(P) && /mk: s\.marker \? 1 : null, vl:/.test(M), 'DTO(pipeline)와 작업본 저장(main)에 mk');
 ok((M.match(/s\.marker = true;\s*\/\/ ⚑ 마커/g) || []).length === 2 && /ss\.mk && ss\.text === s\.text\) s\.marker = true/.test(M), '작업본 이어받기 두 곳(무조건 · 같은 문장일 때만)');
 ok(/if \(keep\.marker\) s\.marker = true/.test(M), '글이 같은 문장은 편집 뒤에도 마커 유지');
 ok(/old\.length === 1 && plan\.newTexts\.length === 1 && old\[0\]\.marker\) s\.marker = true/.test(M), '한 문장을 고쳐 한 문장이면 마커 유지');

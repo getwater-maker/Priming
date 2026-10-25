@@ -40,11 +40,12 @@ try {
 
 // wav → mp3 (libmp3lame, 192kbps, 24kHz mono — OmniVoice 출력 그대로 인코딩)
 // .vrew 호환성 향상 (Vrew 가 mp3 권장 형식). 실패 시 false.
-function wavToMp3(wavPath, mp3Path) {
+function wavToMp3(wavPath, mp3Path, gain = 1) {
   if (!_ffmpegPath || !fs.existsSync(_ffmpegPath)) return false;
   try {
     const r = spawnSync(_ffmpegPath, [
       '-y', '-i', wavPath,
+      ...(Math.abs(gain - 1) > 1e-6 ? ['-af', `volume=${gain.toFixed(4)}`] : []),
       '-codec:a', 'libmp3lame',
       '-b:a', '192k',
       '-ar', '24000', '-ac', '1',
@@ -59,41 +60,74 @@ function wavToMp3(wavPath, mp3Path) {
 // 모든 WAV 문장을 MP3 로 **병렬** 사전 변환 (동시 N개). 반환: Map<wavPath, mp3Path>.
 // 기존엔 빌드 루프에서 spawnSync 로 1개씩 직렬 변환 → 366개면 ~9분. 이걸 비동기 spawn 병렬로
 // 바꿔 수십 초로 단축 + 변환 중 메인 스레드가 양보되어 진행률 UI 도 갱신됨. (MP3 출력 유지 = 형식 안전)
+// 🔉 문장 음성 → MP3 사본의 열쇠 — 같은 파일이라도 볼륨이 다르면 다른 사본(효과 ④)
+function _mp3Key(s) { const v = CE.normVol(s && s.vol); return `${s && s.ttsAudioPath}|v${v == null ? 1 : v}`; }
+// ffmpeg volumedetect 로 원음의 최대 음량(dB) — 못 재면 NaN(그러면 1 초과 볼륨은 키우지 않는다)
+function _peakDb(src) {
+  return new Promise((resolve) => {
+    try {
+      const { spawn } = require('child_process');
+      const p = spawn(_ffmpegPath, ['-hide_banner', '-nostats', '-i', src, '-vn', '-af', 'volumedetect', '-f', 'null', '-'], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      let err = ''; p.stderr.on('data', (d) => { err += d; });
+      p.on('error', () => resolve(NaN));
+      p.on('close', () => { const m = /max_volume:\s*(-?[\d.]+)\s*dB/.exec(err); resolve(m ? parseFloat(m[1]) : NaN); });
+    } catch (_) { resolve(NaN); }
+  });
+}
+// 모든 WAV 문장을 MP3 로 **병렬** 사전 변환 (동시 N개). 반환: Map<_mp3Key(문장), mp3Path>.
+// 기존엔 빌드 루프에서 spawnSync 로 1개씩 직렬 변환 → 366개면 ~9분. 이걸 비동기 spawn 병렬로
+// 바꿔 수십 초로 단축 + 변환 중 메인 스레드가 양보되어 진행률 UI 도 갱신됨. (MP3 출력 유지 = 형식 안전)
+// 🔉 볼륨(s.vol)이 있는 문장은 wav 가 아니어도(mp3) 여기서 gain 을 얹어 새 MP3 로 만든다(효과 ④ · 1 초과는 피크 여유 안에서만).
 async function preConvertWavsToMp3(sentences, log, concurrency = 8) {
   const { spawn } = require('child_process');
   const map = new Map();
   if (!_ffmpegPath || !fs.existsSync(_ffmpegPath)) return map;  // ffmpeg 없으면 루프가 wav 그대로 폴백
-  const uniq = [...new Set(
-    (sentences || [])
-      .map(s => s && s.ttsAudioPath)
-      .filter(p => p && path.extname(p).toLowerCase() === '.wav' && fs.existsSync(p))
-  )];
-  if (!uniq.length) return map;
-  log(`[Vrew] WAV→MP3 병렬 변환 시작 — ${uniq.length}개 (동시 ${concurrency})`);
+  const jobs = new Map();
+  for (const s of sentences || []) {
+    if (!s || !s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) continue;
+    const vol = CE.normVol(s.vol);
+    const isWav = path.extname(s.ttsAudioPath).toLowerCase() === '.wav';
+    if (!isWav && vol == null) continue;   // mp3 그대로(볼륨 없음)
+    jobs.set(_mp3Key(s), { src: s.ttsAudioPath, vol, num: s.num });
+  }
+  const list = [...jobs.entries()];
+  if (!list.length) return map;
+  const volN = list.filter(([, j]) => j.vol != null).length;
+  log(`[Vrew] WAV→MP3 병렬 변환 시작 — ${list.length}개 (동시 ${concurrency})${volN ? ` · 🔉 볼륨 조절 ${volN}개` : ''}`);
 
   let idx = 0, done = 0;
-  const convertOne = (wavPath) => new Promise((resolve) => {
-    const mp3Path = path.join(os.tmpdir(), `pf_tts_${sid()}.mp3`);
-    let p;
-    try {
-      p = spawn(_ffmpegPath, [
-        '-y', '-i', wavPath,
-        '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '24000', '-ac', '1',
-        mp3Path,
-      ], { stdio: 'ignore' });
-    } catch (_) { done++; return resolve(); }
-    p.on('close', (code) => {
-      if (code === 0 && fs.existsSync(mp3Path)) map.set(wavPath, mp3Path);
-      done++;
-      if (done % 20 === 0 || done === uniq.length) log(`[Vrew] WAV→MP3 변환 ${done}/${uniq.length}`);
-      resolve();
+  const convertOne = async ([key, j]) => {
+    let gain = 1;
+    if (j.vol != null) {
+      const peak = j.vol > 1 ? await _peakDb(j.src) : 0;
+      const g = CE.volGain(j.vol, peak);
+      gain = g.gain;
+      if (g.capped) log(`[Vrew] ⚠ 컷${j.num} 볼륨 ${Math.round(j.vol * 100)}% → ${Math.round(gain * 100)}% (원음 피크 ${isFinite(peak) ? peak.toFixed(1) + ' dB' : '측정 실패'} — 찌그러지지 않는 만큼만 키웁니다)`);
+    }
+    return new Promise((resolve) => {
+      const mp3Path = path.join(os.tmpdir(), `pf_tts_${sid()}.mp3`);
+      let p;
+      try {
+        p = spawn(_ffmpegPath, [
+          '-y', '-i', j.src,
+          ...(Math.abs(gain - 1) > 1e-6 ? ['-af', `volume=${gain.toFixed(4)}`] : []),
+          '-codec:a', 'libmp3lame', '-b:a', '192k', '-ar', '24000', '-ac', '1',
+          mp3Path,
+        ], { stdio: 'ignore' });
+      } catch (_) { done++; return resolve(); }
+      p.on('close', (code) => {
+        if (code === 0 && fs.existsSync(mp3Path)) map.set(key, mp3Path);
+        done++;
+        if (done % 20 === 0 || done === list.length) log(`[Vrew] WAV→MP3 변환 ${done}/${list.length}`);
+        resolve();
+      });
+      p.on('error', () => { done++; resolve(); });
     });
-    p.on('error', () => { done++; resolve(); });
-  });
+  };
 
-  const worker = async () => { while (idx < uniq.length) { await convertOne(uniq[idx++]); } };
-  await Promise.all(Array.from({ length: Math.min(concurrency, uniq.length) }, worker));
-  log(`[Vrew] WAV→MP3 변환 완료 — 성공 ${map.size}/${uniq.length}`);
+  const worker = async () => { while (idx < list.length) { await convertOne(list[idx++]); } };
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
+  log(`[Vrew] WAV→MP3 변환 완료 — 성공 ${map.size}/${list.length}`);
   return map;
 }
 
@@ -1137,16 +1171,21 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     let ttsSrc  = s.ttsAudioPath;
     let outExt  = srcExt;
     let codec   = (srcExt === 'wav') ? 'wav' : 'mp3';
+    if (srcExt !== 'wav' && CE.normVol(s.vol) != null) {   // 🔉 mp3 인데 볼륨을 준 문장 — 사전 변환이 gain 을 얹어 새 MP3 를 만들었다
+      const _vm = _mp3Cache.get(_mp3Key(s));
+      if (_vm && fs.existsSync(_vm)) { ttsSrc = _vm; outExt = 'mp3'; codec = 'mp3'; }
+      else log(`[Vrew] ⚠ 컷${s.num} 볼륨 사본을 만들지 못해 원래 음량으로 계속합니다`);
+    }
     if (srcExt === 'wav') {
       // 1순위: 병렬 사전 변환 캐시. 미스(변환 실패)면 동기 1회 폴백, 그래도 실패면 wav 그대로.
-      const cachedMp3 = _mp3Cache.get(s.ttsAudioPath);
+      const cachedMp3 = _mp3Cache.get(_mp3Key(s));
       if (cachedMp3 && fs.existsSync(cachedMp3)) {
         ttsSrc = cachedMp3;
         outExt = 'mp3';
         codec  = 'mp3';
       } else {
         const mp3Path = path.join(os.tmpdir(), `pf_tts_${ttsMid}.mp3`);
-        if (wavToMp3(s.ttsAudioPath, mp3Path)) {
+        if (wavToMp3(s.ttsAudioPath, mp3Path, Math.min(1, CE.normVol(s.vol) == null ? 1 : CE.normVol(s.vol)))) {
           ttsSrc = mp3Path;
           outExt = 'mp3';
           codec  = 'mp3';

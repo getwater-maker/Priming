@@ -54,6 +54,7 @@
     "test:theme": "node test/theme-tokens.test.js",
     "test:fxzr": "node test/fx-zoomrot.test.js && node test/fx-zoomrot-ui.smoke.js",
     "test:fxbg": "node test/fx-bg.test.js && node test/fx-bg-ui.smoke.js",
+    "test:fxvol": "node test/fx-volume.test.js && node test/fx-volume-ui.smoke.js",
     "test:fxflt": "node test/fx-filter.test.js && node test/fx-filter.smoke.js && node test/fx-filter-ui.smoke.js",
     "test:marker": "node test/marker.test.js && node test/marker-ui.smoke.js",
     "test:menubar": "node test/menubar-frame.smoke.js && node test/account-page.smoke.js",
