@@ -1,0 +1,142 @@
+[
+  {
+    "id": "k-webtoon",
+    "name": "한국 웹툰",
+    "prompt": "beautiful Korean webtoon style, manhwa art, soft shading, detailed characters, emotional expressions, Korean comic illustration, clean lineart, pastel colors, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "webtoon-illust",
+    "name": "웹툰 일러스트",
+    "prompt": "webtoon illustration style, digital painting, semi-realistic, vivid colors, detailed background, Korean manhwa inspired, clean composition, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "dramatic-webtoon",
+    "name": "극적웹툰",
+    "prompt": "Dramatic Korean webtoon/manhwa illustration, semi-realistic, bold clean confident ink linework, rich cel-style shading, dramatic cinematic lighting (warm key light, deep shadows), high contrast, muted palette with a bold red-and-gold focal point, highly readable, consistent with the reference image, realistic adult body proportions and mature detailed faces — NOT chibi, NOT super-deformed, NOT big-head, NOT small-body, NOT cute, NOT kawaii, NOT pastel, NOT 3D Pixar, NOT photorealistic, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "cinematic",
+    "name": "시네마틱 (영화풍)",
+    "prompt": "cinematic film still, dramatic lighting, movie scene, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "photorealistic",
+    "name": "포토리얼 (실사)",
+    "prompt": "photorealistic photography, high detail, natural lighting, 8K, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "illustration",
+    "name": "일러스트",
+    "prompt": "digital illustration, clean lines, warm colors, detailed, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "anime",
+    "name": "애니메이션",
+    "prompt": "anime style illustration, vibrant colors, expressive characters, Japanese animation, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "watercolor",
+    "name": "수채화",
+    "prompt": "traditional watercolor painting, aquarelle, wet-on-wet technique, visible paper texture, soft pastel color washes, flowing translucent pigments, hand-painted on cotton paper, loose brush strokes, bleeding colors, artistic fine art, NOT digital illustration, NOT line art, NOT webtoon, NOT manhwa, NOT anime, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "biblical-watercolor",
+    "name": "수채화 (성경시대)",
+    "prompt": "traditional watercolor painting of ancient biblical era, aquarelle, wet-on-wet technique, visible paper texture, soft earth-tone washes (ochre, sand, olive, terracotta), flowing translucent pigments, hand-painted on cotton paper, loose brush strokes, ancient Middle Eastern setting, biblical figures in flowing robes and tunics, head coverings, sandals, bearded elders, Holy Land landscape with olive trees and stone buildings, reverent atmosphere, sacred scripture illustration, fine art, NOT digital illustration, NOT line art, NOT webtoon, NOT manhwa, NOT anime, NOT modern clothing, NOT Korean historical drama, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "ink",
+    "name": "수묵화",
+    "prompt": "ink wash painting, traditional, minimalist, elegant brush strokes, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "oil",
+    "name": "유화",
+    "prompt": "oil painting, classical, rich colors, elegant brushwork, fine art, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "fantasy",
+    "name": "판타지 아트",
+    "prompt": "fantasy art, epic scene, magical atmosphere, detailed environment, concept art, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "noir",
+    "name": "필름 누아르",
+    "prompt": "film noir, black and white, high contrast, shadows, dramatic mood, vintage, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "pixel",
+    "name": "픽셀 아트",
+    "prompt": "pixel art, retro game style, 16-bit, vibrant colors, detailed sprites, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "comic",
+    "name": "만화/코믹",
+    "prompt": "comic book style, bold outlines, dynamic composition, vivid colors, action panels, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "3d",
+    "name": "3D 렌더링",
+    "prompt": "3D rendered scene, ray tracing, realistic materials, cinematic lighting, Unreal Engine, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "stickman",
+    "name": "졸라맨 (스틱맨)",
+    "prompt": "simple stick figure drawing, black lines on white background, minimalist doodle, hand-drawn sketch style, funny stick characters"
+  },
+  {
+    "id": "ghibli",
+    "name": "수채 감성 애니",
+    "prompt": "hand-painted anime style, soft watercolor backgrounds, warm natural lighting, lush detailed nature, gentle nostalgic atmosphere, cel-shaded illustration, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "disney",
+    "name": "말랑 3D 애니",
+    "prompt": "cute warm 3D-animated illustration, big expressive eyes, soft rounded features, smooth shading, friendly heartwarming character design, glossy render, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "chibi",
+    "name": "치비 (귀여운)",
+    "prompt": "chibi anime style, cute super-deformed characters, big eyes, small body, kawaii, pastel colors, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "retro",
+    "name": "레트로 80s",
+    "prompt": "retro 80s synthwave, neon colors, grid landscape, sunset, VHS aesthetic, vaporwave, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "sketch",
+    "name": "연필 스케치",
+    "prompt": "pencil sketch drawing, graphite on paper, detailed cross-hatching, artistic hand-drawn, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "pop",
+    "name": "팝아트",
+    "prompt": "pop art style, bold flat colors, thick black outlines, halftone dot shading, comic book aesthetic, high contrast, retro print look, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "monochrome",
+    "name": "모노크롬",
+    "prompt": "monochrome digital painting, smooth grayscale shading, black and white, strong contrast, dramatic cinematic lighting, realistic idealized llustration, detailed rendering, 4K, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "infographic-3d",
+    "name": "인포그래픽 3D",
+    "prompt": "아래 내용의 대표이미지 한컷을 3D인포그래픽 작성, 한글로 작성, 어른들이 보기 편하게 작성, no watermark"
+  },
+  {
+    "id": "infographic-2d",
+    "name": "인포그래픽 2D",
+    "prompt": "아래 내용의 대표이미지 한컷을 2D인포그래픽 작성, 한글로 작성, 어른들이 보기 편하게 작성, no watermark"
+  },
+  {
+    "id": "biblical-chibi",
+    "name": "치비 (성경시대)",
+    "prompt": "chibi anime style, cute super-deformed characters with big sparkling eyes and small bodies, kawaii, soft pastel earth tones (ochre, sand, olive, terracotta), ancient biblical era setting, characters wearing flowing robes and tunics, simple head coverings, leather sandals, bearded elders, Holy Land scenery with olive trees and stone buildings, gentle reverent atmosphere, hand-drawn anime illustration, NOT modern clothing, NOT Korean historical drama, NOT photorealistic, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  },
+  {
+    "id": "three-kingdoms",
+    "name": "흑백 수묵화",
+    "prompt": "monochrome ink-wash painting style, traditional brush and ink art, smooth grayscale shading, black and white, fine ink rendering, realistic idealized rendering, strong contrast, cinematic lighting, detailed, 4K, attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark"
+  }
+]
