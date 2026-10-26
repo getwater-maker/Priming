@@ -37,6 +37,10 @@ import socket
 import sys
 
 PORT = int(os.environ.get('PRIMING_COMFY_PORT') or 8188)
+# 🔑 --disable-pinned-memory: 모델 가중치를 고정(pinned) RAM 에 올리지 않는다.
+#   실측(2026-10-27, Qwen-Image 2.1 Turbo 5장): 작업 메모리 10.3GB → 2.7GB · 시스템 최소 여유 2.0GB → 9.3GB ·
+#   대신 장당 33초 → 43초. (--disable-smart-memory·--cache-none 은 메모리 효과 없음 · 느려지기만)
+MEM_FLAGS = ['--disable-pinned-memory']
 APPDATA = os.environ.get('APPDATA') or ''
 CD_DIR = os.path.join(APPDATA, 'Comfy Desktop')
 LOG_DIR = os.path.join(os.path.expanduser('~'), '.shots-maker', 'logs')
@@ -173,6 +177,10 @@ def main():
                 argv += [flag, v]
     except Exception:
         pass
+
+    # 메모리 옵션 — 기본값 MEM_FLAGS, 시험용으로 PRIMING_COMFY_EXTRA(공백 구분)가 있으면 그것이 이긴다.
+    extra = os.environ.get('PRIMING_COMFY_EXTRA')
+    argv += (extra.split() if extra is not None else MEM_FLAGS)
 
     say('ComfyUI 서버 시작 — port %d · %s' % (PORT, comfy_dir))
     say('  python: %s' % running)
