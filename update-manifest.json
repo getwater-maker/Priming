@@ -1,5 +1,5 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -274,11 +274,11 @@
     "light-updater.js": "3ebc413a8dc9a9997f37a31a68faf1939ff6995a",
     "main.js": "dacbb133852fe0a41f91906f2f31cf6b46bc614c",
     "package-lock.json": "4cfbf76e1a7b6c412a1f33a9dcd538eb5de43e32",
-    "package.json": "9464271daa6e8544395f2773a885f015fef7ba3c",
+    "package.json": "4d1d66d3747091fbd24dee785d11a0a38c75546a",
     "preload.js": "20d1900cfa38f3801e9184f49a989a3bb6b00749",
-    "renderer/dist/assets/index-CCRTThr8.js": "3b9d9aca55949d1111108e19f1e337c64893913c",
-    "renderer/dist/assets/index-CJoaMD2N.css": "87f0563c991f9eb8edfabc4775bec5fa6649b11a",
-    "renderer/dist/index.html": "c49cf3407d5287b4353d7628af3b3510ead62b2c",
+    "renderer/dist/assets/index-BEyllEwq.js": "3b9d9aca55949d1111108e19f1e337c64893913c",
+    "renderer/dist/assets/index-Dd7Wkk3I.css": "408569323626899f80b7d831fa75a7273f7abd04",
+    "renderer/dist/index.html": "6e7e2d500b927d16313860cafbd74029ba0f52d8",
     "renderer/index.html": "24d940ed9dcea512f5693dfdd561e7219ea69e3a",
     "tools/ja-ruby-todo.js": "a4fb54b1708c6ca44db66a7c1efd71389b8cc0f2",
     "tools/member-preview.js": "816a59b1b079ac2d306ba490707816aabd561da9",

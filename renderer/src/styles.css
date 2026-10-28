@@ -2156,3 +2156,10 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .tpl-item .tpl-nm{flex:1;min-width:0;display:flex;flex-direction:column}
 /* 서식 탭 한 줄 배열(로이 2026-10-26) — 좁은 창에선 줄이 가로로 밀리되 「자막 서식 저장」은 오른쪽 끝에 붙어 늘 보인다 */
 .cf-format-row > .cf-savedef{position:sticky;right:0;z-index:2;background:var(--bg-ffffff)}
+
+/* v1.0.5 — 메뉴 줄 오른쪽이 잘리던 것(큐 작업 중 「이번 편까지만」·「중단」이 붙으면 1900px 폭에서도 넘쳤다 · 로이 2026-10-29)
+   원인: 모든 칸이 flex-shrink:0 이라 줄어들 칸이 없었다 → 채널 목록·자동저장 표시·검색창은 남는 폭만큼 줄어들게 한다. 단추는 그대로. */
+.menubar > select{flex-shrink:1;min-width:96px}
+.menubar .autosave-ind{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menubar .findbar{flex-shrink:1}
+.menubar .findbar input{min-width:28px}
