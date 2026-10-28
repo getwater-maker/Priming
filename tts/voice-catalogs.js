@@ -5,7 +5,7 @@
  *
  *   - Gemini : 기본 목소리 30개 — 이름·특징은 ai.google.dev/gemini-api/docs/speech-generation 「Voice options」 그대로.
  *              성별은 공식 표기가 없어 커뮤니티 청취 기준(옛 gemini-provider.getVoices 와 같은 값).
- *              ➕ 확장 라이브러리(수백 개)는 API(GET /v1beta/voices)로 불러온다(main · gemini-voices).
+ *              🧩 v1.0.4 부터 Gemini 는 kie.ai 경유 — 목소리 70개 전부 내장(확장 라이브러리 불러오기는 없앴다).
  *   - MAI    : learn.microsoft.com/azure/ai-services/speech-service/mai-voices 「Managed voices and styles」 표 전체
  *              (2026-09-30 판 · 97개 · 모든 목소리가 MAI-Voice-2.1 · 2.1-Flash 둘 다 지원).
  *   타입캐스트·ElevenLabs 는 계정마다 목록이 달라 API 로 불러온다(내장 목록 없음).
@@ -25,7 +25,23 @@ const GEMINI_RAW = [
   ['Achird', 'Friendly', '친근한', 'male'], ['Zubenelgenubi', 'Casual', '편안한', 'male'], ['Vindemiatrix', 'Gentle', '온화한', 'female'],
   ['Sadachbia', 'Lively', '활기찬', 'male'], ['Sadaltager', 'Knowledgeable', '박식한', 'male'], ['Sulafat', 'Warm', '따뜻한', 'female'],
 ];
-const GEMINI = GEMINI_RAW.map(([id, en, ko, g]) => ({ id, name: id, gender: g, lang: '다국어', desc: `${ko} (${en})` }));
+// 🧩 kie.ai 의 Gemini 3.8 TTS 는 목소리 70개(위 30 + 아래 40 · 용도별 분류) — 성별 표기가 없어 비워 둔다.
+const GEMINI_KIE_EXTRA = [
+  ['Bodi', '튜터'], ['Lumi', '튜터'], ['Sola', '튜터'], ['Varo', '튜터'],
+  ['Koda', '광고 내레이션'], ['Nika', '광고 내레이션'], ['Tavi', '광고 내레이션'], ['Zeno', '광고 내레이션'],
+  ['Kira', '교육·설명'], ['Ludo', '교육·설명'], ['Mako', '교육·설명'], ['Rina', '교육·설명'],
+  ['Brio', '팟캐스트'], ['Jori', '팟캐스트'], ['Rami', '팟캐스트'], ['Veda', '팟캐스트'],
+  ['Enzo', '이야기꾼'], ['Riko', '이야기꾼'], ['Sami', '이야기꾼'], ['Zali', '이야기꾼'],
+  ['Gero', '디지털 비서'], ['Neno', '디지털 비서'], ['Olin', '디지털 비서'], ['Tari', '디지털 비서'],
+  ['Daro', '콜센터'], ['Fola', '콜센터(기본)'], ['Hali', '콜센터'], ['Milo', '콜센터'],
+  ['Arlo', '안내 데스크'], ['Cleo', '안내 데스크'], ['Finn', '안내 데스크'], ['Lora', '안내 데스크'],
+  ['Enya', '기술 지원'], ['Jett', '기술 지원'], ['Knox', '기술 지원'], ['Nyla', '기술 지원'],
+  ['Cruz', '전문가'], ['Elio', '전문가'], ['Tova', '전문가'], ['Zuri', '전문가'],
+];
+const GEMINI = [
+  ...GEMINI_RAW.map(([id, en, ko, g]) => ({ id, name: id, gender: g, lang: '다국어', desc: `${ko} (${en})` })),
+  ...GEMINI_KIE_EXTRA.map(([id, use]) => ({ id, name: id, gender: '', lang: '다국어', desc: use })),
+];
 
 // ── MAI-Voice — 공식 표 그대로 ───────────────────────────────────────────────
 const S_NARR = 'agent,audiobook,customer_call_center,educational,narrator,neutral';

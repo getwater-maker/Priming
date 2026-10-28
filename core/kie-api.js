@@ -157,4 +157,25 @@ async function generateVideoToFile({ model, imagePath, prompt, aspect, durationS
   } catch (e) { return { ok: false, error: scrub(e && e.message, key) }; }
 }
 
-module.exports = { kieKey, hasKey, credits, uploadFile, createTask, waitTask, download, generateImageToFile, generateVideoToFile, explain, _resultUrls };
+/**
+ * 🔊 Gemini 3.8 TTS(kie 경유 · v1.0.4) — 한 사람이 읽는 글 → WAV 바이트. 크레딧은 kie 가 성공한 작업에만 차감한다.
+ *   model = 'google/gemini-3-8-flash-tts' | 'google/gemini-3-8-flash-lite-tts' · 출력 WAV 24kHz 16bit mono
+ *   → { ok, buffer } | { ok:false, error, fatal? }
+ */
+async function speechToBuffer({ model, voice, style, text, abortSignal }) {
+  const key = kieKey(); if (!key) return { ok: false, error: '생성 서비스 키 없음', fatal: '생성 서비스 키 없음' };
+  try {
+    const turn = { speaker_id: 'Speaker 1', text: String(text) };
+    if (style) turn.style = String(style);
+    const input = { temperature: 1, speakers: [{ speaker_id: 'Speaker 1', voice_name: voice || 'Fola' }], dialogue_turns: [turn] };
+    const c = await createTask(model, input, key);
+    if (!c.ok) return c;
+    const w = await waitTask(c.taskId, { key, abortSignal, timeoutMs: 5 * 60 * 1000, everyMs: 2000 });
+    if (!w.ok) return w;
+    const res = await _fetch()(w.urls[0], { signal: AbortSignal.timeout(120000) });
+    if (!res.ok) return { ok: false, error: `음성 받기 실패(${res.status})` };
+    return { ok: true, buffer: Buffer.from(await res.arrayBuffer()), taskId: c.taskId };
+  } catch (e) { return { ok: false, error: scrub(e && e.message, key) }; }
+}
+
+module.exports = { kieKey, hasKey, credits, uploadFile, createTask, waitTask, download, generateImageToFile, generateVideoToFile, speechToBuffer, explain, _resultUrls };

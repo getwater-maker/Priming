@@ -60,8 +60,8 @@ function makeWav(samples, sr = 24000) {
   ok(Math.abs(TE.estimateUsd('mai', 'MAI-Voice-2.1-Flash', 1e6) - 15) < 1e-9, 'MAI Flash = $15');
   ok(Math.abs(TE.PRICING.eleven_v4.usd * 1000 - 0.08) < 1e-9 && Math.abs(TE.estimateUsd('elevenlabs', 'eleven_v4', 1000) - TE.unitFor('eleven_v4').usd * 1000) < 1e-9, 'ElevenLabs v4 = 정가 1천 자 $0.08 · 요금 추정은 지금 걸린 할인(unitFor)을 탄다(v0.6.84)');
   ok(Math.abs(TE.estimateUsd('typecast', 'ssfm-v30', 1000) - 0.075) < 1e-9, '타입캐스트 = 1천 자 $0.075');
-  ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 0, 60) - 60 * 25 * 9 / 1e6) < 1e-12, 'Gemini 3.8 = 초당 음성 토큰 25 × $9/1M');
-  ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 700) - 100 * 25 * 9 / 1e6) < 1e-12, 'Gemini — 길이 모르면 한국어 초당 7자로 추정');
+  ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 0, 60) - 60 * 25 * 6.3 / 1e6) < 1e-12, 'Gemini 3.8 Flash = 초당 음성 토큰 25 × $6.30/1M(kie 단가)');
+  ok(Math.abs(TE.estimateUsd('gemini', 'gemini-3.8-flash-tts', 700) - 100 * 25 * 6.3 / 1e6) < 1e-12, 'Gemini — 길이 모르면 한국어 초당 7자로 추정');
   eq(TE.estimateUsd('omnivoice', '', 1e6), 0, 'OmniVoice = 무료');
   eq(TE.estimateUsd('mai', 'nope', 10), null, '모르는 모델 = null(지어내지 않는다)');
   ok(TE.ENGINES.every((e) => !e.paid || e.models.every((m) => TE.PRICING[m.id])), '모든 유료 모델에 단가가 있다');
@@ -143,13 +143,6 @@ function makeWav(samples, sr = 24000) {
     eq(L.map((v) => v.id), ['e1', 'e2'], 'ElevenLabs — 다음 쪽까지 전부 불러온다');
     ok(urls[1].includes('next_page_token=T2'), 'ElevenLabs 쪽 넘김 토큰');
     eq([L[0].gender, L[0].badge, L[0].desc, L[0].preview], ['female', '내 복제', '', 'https://x/p.mp3'], 'ElevenLabs 카드(성별 · 분류는 badge · 설명은 영어만 · 샘플)'); }
-  { let n = 0;
-    setFetch(() => { n++; return mockRes(200, null, n === 1 ? { voices: [{ id: 'voice_a', display_name: '서윤', gender: 'FEMALE', language_code: 'ko-KR', persona: '내레이터' }], next_page_token: 'P' } : { voices: [{ id: 'voice_b', display_name: 'B' }] }); });
-    const { listVoices: gList } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
-    const L = await gList('g');
-    eq(L.map((v) => v.id), ['voice_a', 'voice_b'], 'Gemini 확장 라이브러리 — 쪽 넘김');
-    eq([last.url.includes('page_token=P'), last.init.headers['x-goog-api-key'], L[0].gender, L[0].lang], [true, 'g', 'female', 'ko-KR'], 'Gemini 목록 요청·카드');
-    ok(last.url.includes('language_code=ko-KR'), '🇰🇷 Gemini 확장 라이브러리 기본 = 한국어'); }
 
   { // 📚 보이스 라이브러리(한국어) — 찾기 · 추가
     const urls = [];
@@ -167,40 +160,47 @@ function makeWav(samples, sr = 24000) {
     setFetch(() => mockRes(403, null, { detail: 'missing permission' }));
     try { await EL.addShared('k', 'o1', 's1', 'x'); ok(false, '403 은 던져야 함'); } catch (e) { ok(/Voices – Write/.test(e.message), '권한 없음 → 「Voices – Write」 가 필요하다고 알린다'); }
   }
-  const { GeminiProvider } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
-  const gm = new GeminiProvider(); await gm.init();
+  const { GeminiProvider, KIE_MODELS } = require(path.join(ROOT, 'tts/providers/gemini-provider'));
+  SecretStore.set('kie', { key: 'kie-key' });
+  const gm = new GeminiProvider(); ok(await gm.init(), 'Gemini TTS = 생성 서비스(kie) 키로 준비됨');
   const wav = makeWav(24000);
-  setFetch(() => mockRes(200, null, { steps: [{ type: 'thought' }, { type: 'model_output', content: [{ type: 'text', text: 'x' }, { type: 'audio', data: wav.toString('base64') }] }] }));
+  let seen = [];
+  const kieFetch = (audio) => (url, init) => {
+    seen.push({ url, init });
+    if (/createTask/.test(url)) return mockRes(200, null, { code: 200, data: { taskId: 't1' } });
+    if (/recordInfo/.test(url)) return mockRes(200, null, { code: 200, data: { state: 'success', resultJson: JSON.stringify({ resultUrls: ['https://f.example/a.wav'] }) } });
+    return mockRes(200, audio);
+  };
+  setFetch(kieFetch(wav));
   r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Charon', style: '차분하게' });
-  eq(last.url, 'https://generativelanguage.googleapis.com/v1beta/interactions', 'Gemini 3.8 = Interactions API');
-  const gb = JSON.parse(last.init.body);
-  eq([gb.model, gb.generation_config.speech_config[0].voice, gb.input[0].content[0].annotations[0].style], ['gemini-3.8-flash-tts', 'Charon', '차분하게'], 'Gemini 3.8 본문(목소리·말투)');
-  ok(Math.abs(r.durationSec - 1) < 1e-6, 'Gemini 3.8 WAV 응답 → 1.0초');
-  setFetch(() => mockRes(200, null, { steps: [{ type: 'model_output', content: [{ type: 'audio', data: wav.subarray(44).toString('base64') }] }] }));
+  const ct = seen.find((s) => /createTask/.test(s.url)); const kb = JSON.parse(ct.init.body);
+  eq([ct.url, ct.init.headers.Authorization], ['https://api.kie.ai/api/v1/jobs/createTask', 'Bearer kie-key'], 'Gemini = kie createTask · kie 키');
+  eq([kb.model, kb.input.speakers[0].voice_name, kb.input.dialogue_turns[0].style, kb.input.dialogue_turns[0].text], ['google/gemini-3-8-flash-tts', 'Charon', '차분하게', '안녕'], 'Gemini 3.8 Flash 본문(목소리·말투·글)');
+  ok(Math.abs(r.durationSec - 1) < 1e-6, 'WAV 응답 → 1.0초');
+  seen = []; setFetch(kieFetch(wav.subarray(44)));
   r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-lite-tts', voice: 'Kore' });
-  ok(r.mp3Buffer.toString('ascii', 0, 4) === 'RIFF' && Math.abs(r.durationSec - 1) < 1e-6, 'Gemini 헤더 없는 PCM 도 WAV 로');
-  // 🔑 429 차단은 그 키에만(2026-10-07 아내 PC — 새 키로 바꿨는데 옛 키 차단이 남아 구글에 묻지도 않고 실패)
-  let calls = 0;
-  setFetch(() => { calls++; return mockRes(429, null, { error: { message: 'Rate limit exceeded' } }); });
-  try { await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' }); ok(false, '429 는 던져야 함'); } catch (_) {}
-  calls = 0;
-  try { await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' }); } catch (e) { ok(/이 키/.test(e.message), '같은 키 → 차단 메시지'); }
-  eq(calls, 0, '같은 키는 차단 중 구글에 보내지 않는다');
-  SecretStore.set('gemini', { key: 'g-key-NEW', other: 'keep' });
-  setFetch(() => { calls++; return mockRes(200, null, { steps: [{ type: 'model_output', content: [{ type: 'audio', data: wav.toString('base64') }] }] }); });
-  r = await gm.synthesize('안녕', { model: 'gemini-3.8-flash-tts', voice: 'Kore' });
-  ok(calls === 1 && last.init.headers['x-goog-api-key'] === 'g-key-NEW' && r.durationSec > 0, '설정에서 키를 바꾸면 차단 없이 새 키로 바로 보낸다(앱 재시작 없이)');
-  SecretStore.set('gemini', { key: 'g-key', other: 'keep' });
+  eq(JSON.parse(seen.find((s) => /createTask/.test(s.url)).init.body).model, 'google/gemini-3-8-flash-lite-tts', 'Flash-Lite 모델 문자열');
+  ok(r.mp3Buffer.toString('ascii', 0, 4) === 'RIFF' && Math.abs(r.durationSec - 1) < 1e-6, '헤더 없는 PCM 도 WAV 로');
+  seen = []; setFetch(kieFetch(wav));
+  await gm.synthesize('안녕', { model: 'gemini-3.1-flash-tts-preview', voice: 'Kore' });
+  eq(JSON.parse(seen.find((s) => /createTask/.test(s.url)).init.body).model, 'google/gemini-3-8-flash-tts', '옛 모델 id(구판) → 3.8 Flash 로');
+  eq(Object.keys(KIE_MODELS).length, 2, '모델은 3.8 Flash · Flash-Lite 둘뿐');
+  setFetch(() => mockRes(200, null, { code: 402, msg: 'Credits insufficient' }));
+  try { await gm.synthesize('안녕', { voice: 'Kore' }); ok(false, '402 는 던져야 함'); } catch (e) { ok(/크레딧/.test(e.message) && e.fatal, '크레딧 부족 → 사람 말 오류(fatal)'); }
+  SecretStore.set('kie', { key: '' });
+  try { await gm.synthesize('안녕', { voice: 'Kore' }); ok(false, '키 없으면 던져야 함'); } catch (e) { ok(/키가 없습니다/.test(e.message), '키 없음 → 사람 말 오류'); }
+  SecretStore.set('kie', { key: 'kie-key' });
+  ok(!/googleapis/.test(fs.readFileSync(path.join(ROOT, 'tts/providers/gemini-provider.js'), 'utf8')), 'Gemini provider 는 Google 주소를 쓰지 않는다');
   global.fetch = realFetch;
 
   console.log('\n[4b] 내장 목록');
   const VC = require(path.join(ROOT, 'tts/voice-catalogs'));
-  eq(VC.GEMINI.length, 30, 'Gemini 기본 목소리 30개(공식)');
+  eq(VC.GEMINI.length, 70, 'Gemini 목소리 70개(공식 30 + kie 추가 40)'); eq(new Set(VC.GEMINI.map((v) => v.id)).size, 70, 'Gemini id 중복 없음');
   eq(VC.MAI.length, 97, 'MAI 목소리 97개(공식 표 전체)');
   eq(new Set(VC.MAI.map((v) => v.id)).size, 97, 'MAI id 중복 없음');
   eq(VC.MAI.filter((v) => v.locale === 'ko-KR').map((v) => v.id).sort(), ['ko-KR-Grant', 'ko-KR-Haena', 'ko-KR-Harper', 'ko-KR-Junho'], 'MAI 한국어 4개');
   ok(VC.MAI.every((v) => v.styles.length >= 1 && v.styles.includes('neutral')), 'MAI 모든 목소리에 neutral 말투');
-  ok(VC.GEMINI.every((v) => /\(.+\)/.test(v.desc)), 'Gemini 카드에 공식 특징(영문) 병기');
+  ok(VC.GEMINI.slice(0, 30).every((v) => /\(.+\)/.test(v.desc)), 'Gemini 기본 30개 카드에 공식 특징(영문) 병기');
   eq(TE.synthExtra('mai', { voiceEngine: { id: 'mai', voice: 'ko-KR-Grant', style: 'whispering' } }).style, undefined, 'MAI — 목소리가 못 하는 말투는 보내지 않는다(Grant 는 whispering 없음)');
   eq(TE.synthExtra('mai', { voiceEngine: { id: 'mai', voice: 'ko-KR-Grant', style: 'narrator' } }).style, 'narrator', 'MAI — 되는 말투는 보낸다');
   ok(/MAI-Voice · MAI-Voice-2\.1 · 목소리 ko-KR-Haena/.test(TE.label('mai', chB)), '로그 표기 = 그 채널의 모델·목소리');
@@ -288,7 +288,7 @@ function makeWav(samples, sr = 24000) {
         ok(!/gemini-\d/.test(pio) && /require\('\.\/claude-api'\)|claude-api/.test(pio), 'prompt-io 글 생성 = Claude API 하나(Gemini 글 모델 없음)'); } }
     { // 🔑 키는 ⚙ 설정 → 🔑 API 키 한 곳에서(v0.6.78)
       const APP2 = fs.readFileSync(path.join(ROOT, 'renderer/src/App.jsx'), 'utf8');
-      ok(/data-testid="tts-keys"/.test(APP2) && ['gemini', 'mai', 'typecast', 'elevenlabs'].every((id) => APP2.includes(`['${id}', `)), '⚙ 설정 → 🔑 API 키에 TTS API 4개(Gemini·MAI·타입캐스트·ElevenLabs)');
+      ok(/data-testid="tts-keys"/.test(APP2) && ['mai', 'typecast', 'elevenlabs'].every((id) => APP2.includes(`['${id}', `)) && !APP2.includes("['gemini', 'Google Gemini TTS'"), '⚙ 설정 → 🔑 API 키에 TTS API 3개(MAI·타입캐스트·ElevenLabs — Gemini 는 생성 서비스 키)');
       ok(!/type="password"/.test(dlg), '음성 설정 팝업에는 키 입력칸이 없다(설정으로 안내만)');
       ok(/data-testid="tts-key-goto"/.test(dlg) && /onOpenKeys=\{openTtsKeySettings\}/.test(APP2), '키 없으면 「🔑 키 넣기 → ⚙ 설정」 버튼이 설정 키 탭을 연다'); }
     { // 🎙 채널편집 음성 탭 정리 · 🔈 아이콘 버튼 · 채널 그림(v0.6.80)

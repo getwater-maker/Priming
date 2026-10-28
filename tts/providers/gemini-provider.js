@@ -1,172 +1,67 @@
 /**
- * Google Gemini TTS
- * Gemini 2.5 Flash/Pro 의 native 음성 생성 (responseModalities: AUDIO)
+ * Gemini TTS — 🧩 v1.0.4 부터 **생성 서비스(kie.ai) 키 + 크레딧**으로 읽는다(로이 2026-10-29 · Google 키는 더 쓰지 않는다).
+ * 모델은 Gemini 3.8 Flash · 3.8 Flash-Lite 둘뿐. 요청·결과 받기는 core/kie-api.speechToBuffer 한 곳.
  *
- * 인증: API 키 (Google AI Studio 에서 발급, https://aistudio.google.com/apikey)
- * 비용: 무료 quota (분당 호출수 제한, 일일 토큰 한도)
+ * 인증: secret-store 'kie' 의 키(⚙ 설정 → 🔑 API 키) · 비용: 만들 때마다 크레딧 차감(실패한 작업은 차감 없음)
+ * 출력: WAV 24kHz 16bit mono (호출자는 확장자만 wav 로)
  *
- * 출력: PCM raw 24kHz 16-bit mono signed → WAV header 추가해서 반환.
- *       (msedge/azure 는 mp3, gemini 는 wav — 호출자에서 확장자만 분기)
- *
- * API 문서:
- *   https://ai.google.dev/gemini-api/docs/speech-generation
+ * ⛔ provider id 는 'gemini' 를 유지한다 — 채널 voiceEngine·TTS 캐시 키(engineSig)가 이 id 를 가리킨다.
  */
 
 const SecretStore = require('../secret-store');
 const Usage = require('../gemini-usage-store');
-const { quietPostJson } = require('../quiet-http');
 
 const PROVIDER_ID = 'gemini';
+const KEY_ID = 'kie';
 
-// Circuit breaker (단계형) — TTS 측. ai-splitter 와 동일 정책:
-//   첫 429   → 1시간 대기  (시간당 한도 또는 burst)
-//   연속 429 → 24시간 대기 (일일 한도 — 다음날 자정에 reset)
-// 60초 짧은 cycle 로 자동 재시도하면 사용자 PrimingFlow 띄워둔 시간만큼 누적됨.
-let _gemini429Until = 0;
-let _gemini429Streak = 0;
-// 🔑 차단은 **그 429 를 받은 키**에만 건다(2026-10-07 아내 PC — 충전된 새 키로 바꿨는데도 옛 키의 차단(58분)이 남아
-//   구글에 묻지도 않고 「한도 초과」로 실패했다). 키가 바뀌면 차단·연속 횟수는 새로 시작한다.
-let _gemini429Key = null;
-const SHORT_BREAKER_MS = 60 * 60 * 1000;       // 1시간
-const LONG_BREAKER_MS  = 24 * 60 * 60 * 1000;  // 24시간
+// 화면 모델 id → kie 모델 문자열(이 표에 없는 옛 모델 id 는 기본(Flash)으로)
+const KIE_MODELS = {
+  'gemini-3.8-flash-tts': 'google/gemini-3-8-flash-tts',
+  'gemini-3.8-flash-lite-tts': 'google/gemini-3-8-flash-lite-tts',
+};
+const DEFAULT_MODEL = 'gemini-3.8-flash-tts';
 
 class GeminiProvider {
   constructor(opts = {}) {
     this.id = PROVIDER_ID;
-    this.label = 'Google Gemini';
+    this.label = 'Gemini TTS';
     this.ready = false;
-    this.apiKey = null;
     this.voice = opts.voice || 'Kore';
-    this.model = opts.model || 'gemini-3.8-flash-tts';
+    this.model = KIE_MODELS[opts.model] ? opts.model : DEFAULT_MODEL;
+  }
+
+  _hasKey() {
+    try { return !!String((SecretStore.get(KEY_ID) || {}).key || '').trim(); } catch { return false; }
   }
 
   async init() {
-    const secret = SecretStore.get(PROVIDER_ID);
-    if (!secret || !secret.key) {
-      this.ready = false;
-      return false;
-    }
-    this.apiKey = secret.key;
-    this.ready = true;
-    return true;
-  }
-
-  // PCM raw → WAV (header 44 bytes 추가)
-  _pcmToWav(pcmBuffer, sampleRate = 24000) {
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
-    const blockAlign = numChannels * bitsPerSample / 8;
-    const dataSize = pcmBuffer.length;
-    const fileSize = 36 + dataSize;
-
-    const header = Buffer.alloc(44);
-    header.write('RIFF', 0);
-    header.writeUInt32LE(fileSize, 4);
-    header.write('WAVE', 8);
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);                 // PCM
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(byteRate, 28);
-    header.writeUInt16LE(blockAlign, 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write('data', 36);
-    header.writeUInt32LE(dataSize, 40);
-
-    return Buffer.concat([header, pcmBuffer]);
+    this.ready = this._hasKey();
+    return this.ready;
   }
 
   /**
    * @param {string} text
-   * @param {object} opts - { voice }  (Gemini 는 speed/pitch 직접 지원 안 함)
+   * @param {object} opts - { voice, model, style }
    * @returns {Promise<{ mp3Buffer: Buffer, durationSec: number, providerUsed: 'gemini', format: 'wav' }>}
    */
   async synthesize(text, opts = {}) {
-    if (!this.ready) throw new Error('Gemini provider not ready — API 키 미설정');
-    // ⚙ 설정에서 키를 바꿨으면 앱을 다시 켜지 않아도 새 키를 쓴다(공급자 인스턴스는 init 때 한 번만 키를 읽는다).
-    try { const sec = SecretStore.get(PROVIDER_ID); if (sec && sec.key && sec.key !== this.apiKey) this.apiKey = sec.key; } catch (_) {}
-
-    // Circuit breaker — 최근 429 받았으면 호출 자체 스킵 (네트워크 round-trip 안 함).
-    if (_gemini429Until > Date.now() && _gemini429Key === this.apiKey) {
-      const remainSec = Math.ceil((_gemini429Until - Date.now()) / 1000);
-      const remainHuman = remainSec >= 3600
-        ? `${Math.ceil(remainSec / 3600)}시간`
-        : `${Math.ceil(remainSec / 60)}분`;
-      throw new Error(`Gemini 한도 초과(이 키 · 구글이 429 를 보냄) — ${remainHuman} 동안 이 키로는 보내지 않습니다 · ⚙ 설정에서 키를 바꾸면 바로 다시 시도합니다 (또는 OmniVoice 사용)`);
-    }
-
+    // ⚙ 설정에서 키를 넣거나 바꿨으면 앱을 다시 켜지 않아도 바로 쓴다(키는 매번 secret-store 에서 읽는다).
+    if (!this._hasKey()) throw new Error('Gemini TTS — 생성 서비스 키가 없습니다(⚙ 설정 → 🔑 API 키)');
+    const KA = require('../../core/kie-api');
     const voice = opts.voice || this.voice;
-    const model = opts.model || this.model;
-    // 🆕 Gemini 3.8 TTS 는 Interactions API(/v1beta/interactions)만 받는다(generateContent 예시 없음 · 2026-10 공식 문서).
-    //   구판(3.1·2.5)은 지금까지의 generateContent 그대로.
-    const pcmOrWav = /^gemini-3\.8/.test(model)
-      ? await this._synthInteractions(text, voice, model, opts.style)
-      : await this._synthGenerate(text, voice, model);
-    _gemini429Streak = 0;  // 성공했으니 streak 초기화
+    const modelId = KIE_MODELS[opts.model] ? opts.model : DEFAULT_MODEL;
+    const r = await KA.speechToBuffer({ model: KIE_MODELS[modelId], voice, style: opts.style, text });
+    if (!r.ok) {
+      Usage.bump(/429|속도 제한/.test(String(r.error)) ? 'tts_429' : 'tts_fail');
+      const err = new Error(`Gemini TTS 실패: ${r.error}`);
+      if (r.fatal) err.fatal = r.fatal;
+      throw err;
+    }
     Usage.bump('tts_ok');
-    const { isWav, wavResult } = require('./audio-util');
-    const wavBuffer = isWav(pcmOrWav) ? pcmOrWav : this._pcmToWav(pcmOrWav, 24000);
-    // 🔑 빈 음성은 던진다(옛 `Math.max(0.5, …)` 바닥값이 빈 음성을 0.5초 정상 음성으로 위장시키던 것과 같은 계열 — OmniVoice 사고).
-    return wavResult(wavBuffer, 'gemini', 'Gemini');
-  }
-
-  _on429() {
-    Usage.bump('tts_429');
-    if (_gemini429Key !== this.apiKey) { _gemini429Streak = 0; _gemini429Key = this.apiKey; }
-    _gemini429Streak++;
-    const breakerMs = (_gemini429Streak >= 2) ? LONG_BREAKER_MS : SHORT_BREAKER_MS;
-    _gemini429Until = Date.now() + breakerMs;
-  }
-
-  async _synthGenerate(text, voice, model) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-    const body = {
-      contents: [{ parts: [{ text: String(text) }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-      },
-    };
-    // quietPostJson — fetch 대신 Node http 사용 (DevTools 콘솔에 빨간 에러 안 찍힘)
-    const response = await quietPostJson(url, body, { timeoutMs: 60000 });
-    if (!response.ok) {
-      if (response.status === 429) this._on429();
-      const errText = await response.text().catch(() => '');
-      throw new Error(`Gemini TTS 실패 (${response.status}): ${errText.substring(0, 200)}`);
-    }
-    const json = await response.json();
-    const audioData = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) throw new Error('Gemini 응답에 오디오 데이터 없음');
-    return Buffer.from(audioData, 'base64');
-  }
-
-  async _synthInteractions(text, voice, model, style) {
-    const { fetchWithTimeout, httpError } = require('./audio-util');
-    const part = { type: 'text', text: String(text) };
-    if (style) part.annotations = [{ type: 'speech_metadata', style: String(style) }];
-    const body = {
-      model,
-      input: [{ type: 'user_input', content: [part] }],
-      response_format: { type: 'audio' },
-      generation_config: { speech_config: [{ voice }] },
-    };
-    const res = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/interactions', {
-      method: 'POST',
-      headers: { 'x-goog-api-key': this.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, 90000, 'Gemini');
-    if (!res.ok) { if (res.status === 429) this._on429(); throw await httpError(res, 'Gemini TTS'); }
-    const json = await res.json();
-    // 오디오 = steps[] 중 model_output 의 content[] 중 type 'audio' 의 data(base64)
-    let data = null;
-    for (const st of (json && json.steps) || []) {
-      for (const c of (st && st.content) || []) if (c && c.type === 'audio' && c.data) { data = c.data; break; }
-      if (data) break;
-    }
-    if (!data) throw new Error('Gemini 응답에 오디오 데이터 없음');
-    return Buffer.from(data, 'base64');
+    const { isWav, wavResult, pcmToWav } = require('./audio-util');
+    const wav = isWav(r.buffer) ? r.buffer : pcmToWav(r.buffer, 24000);
+    // 🔑 빈 음성은 던진다(바닥값으로 정상 음성인 척하지 않는다 — OmniVoice 사고).
+    return wavResult(wav, 'gemini', 'Gemini');
   }
 
   async stop() {
@@ -174,68 +69,8 @@ class GeminiProvider {
   }
 
   static getVoices() {
-    // Gemini 2.5 prebuilt voices 30개 — 남/여 분류 (커뮤니티 청취 기반 추정)
-    // 출처: https://ai.google.dev/gemini-api/docs/speech-generation
-    // gender 가 부정확하다 느끼면 사용자가 직접 들어보고 알려주면 수정
-    return [
-      // ─── 여성 voices (♀) ──────────────────────────
-      { id: 'Zephyr',       name: '♀ Zephyr (밝은)',          gender: 'female' },
-      { id: 'Aoede',        name: '♀ Aoede (가벼운)',         gender: 'female' },
-      { id: 'Kore',         name: '♀ Kore (확실한)',          gender: 'female' },
-      { id: 'Leda',         name: '♀ Leda (젊은)',            gender: 'female' },
-      { id: 'Callirrhoe',   name: '♀ Callirrhoe (편안한)',    gender: 'female' },
-      { id: 'Autonoe',      name: '♀ Autonoe (밝은)',         gender: 'female' },
-      { id: 'Despina',      name: '♀ Despina (부드러운)',     gender: 'female' },
-      { id: 'Erinome',      name: '♀ Erinome (명확한)',       gender: 'female' },
-      { id: 'Laomedeia',    name: '♀ Laomedeia (밝은)',       gender: 'female' },
-      { id: 'Achernar',     name: '♀ Achernar (부드러운)',    gender: 'female' },
-      { id: 'Gacrux',       name: '♀ Gacrux (성숙한)',        gender: 'female' },
-      { id: 'Pulcherrima',  name: '♀ Pulcherrima (앞선)',     gender: 'female' },
-      { id: 'Vindemiatrix', name: '♀ Vindemiatrix (온화한)',  gender: 'female' },
-      { id: 'Sulafat',      name: '♀ Sulafat (따뜻한)',       gender: 'female' },
-
-      // ─── 남성 voices (♂) ──────────────────────────
-      { id: 'Puck',         name: '♂ Puck (경쾌한)',          gender: 'male' },
-      { id: 'Charon',       name: '♂ Charon (정보적)',        gender: 'male' },
-      { id: 'Fenrir',       name: '♂ Fenrir (활기찬)',        gender: 'male' },
-      { id: 'Orus',         name: '♂ Orus (확고한)',          gender: 'male' },
-      { id: 'Iapetus',      name: '♂ Iapetus (명확한)',       gender: 'male' },
-      { id: 'Algieba',      name: '♂ Algieba (부드러운)',     gender: 'male' },
-      { id: 'Algenib',      name: '♂ Algenib (자갈자갈)',     gender: 'male' },
-      { id: 'Rasalgethi',   name: '♂ Rasalgethi (정보적)',    gender: 'male' },
-      { id: 'Achird',       name: '♂ Achird (친근한)',        gender: 'male' },
-      { id: 'Zubenelgenubi', name: '♂ Zubenelgenubi (자유)',  gender: 'male' },
-      { id: 'Sadachbia',    name: '♂ Sadachbia (활동적)',     gender: 'male' },
-      { id: 'Sadaltager',   name: '♂ Sadaltager (잘아는)',    gender: 'male' },
-      { id: 'Schedar',      name: '♂ Schedar (균형)',         gender: 'male' },
-      { id: 'Enceladus',    name: '♂ Enceladus (숨소리)',     gender: 'male' },
-      { id: 'Umbriel',      name: '♂ Umbriel (편안한)',       gender: 'male' },
-      { id: 'Alnilam',      name: '♂ Alnilam (단호한)',       gender: 'male' },
-    ];
+    return require('../voice-catalogs').GEMINI.map((v) => ({ ...v }));
   }
 }
 
-/**
- * 확장 라이브러리 목록 — GET /v1beta/voices (page_size 최대 1000 · next_page_token)
- *   근거: ai.google.dev/api/voices · 받은 id 는 speech_config 의 voice 에 그대로 넣는다(3.8 모델).
- */
-async function listVoices(key, { languageCode = 'ko-KR' } = {}) {   // 🇰🇷 기본 = 한국어 목소리만(빈 값이면 전부)
-  const { fetchWithTimeout, httpError } = require('./audio-util');
-  const out = []; let tok = '';
-  for (let page = 0; page < 20; page++) {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/voices?page_size=1000' + (languageCode ? '&language_code=' + encodeURIComponent(languageCode) : '') + (tok ? '&page_token=' + encodeURIComponent(tok) : '');
-    const res = await fetchWithTimeout(url, { headers: { 'x-goog-api-key': key } }, 30000, 'Gemini');
-    if (!res.ok) throw await httpError(res, 'Gemini 목소리 목록');
-    const j = await res.json();
-    for (const v of (j && j.voices) || []) {
-      const id = v.id || v.key || v.name; if (!id) continue;
-      const desc = [v.description, v.persona, v.context, v.accent].filter(Boolean).join(' · ');
-      out.push({ id, name: v.display_name || v.displayName || id, gender: String(v.gender || '').toLowerCase(), lang: v.language_code || v.languageCode || '', desc, ext: true });
-    }
-    tok = j && (j.next_page_token || j.nextPageToken);
-    if (!tok) break;
-  }
-  return out;
-}
-
-module.exports = { GeminiProvider, listVoices };
+module.exports = { GeminiProvider, KIE_MODELS };

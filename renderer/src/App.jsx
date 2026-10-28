@@ -1039,7 +1039,7 @@ export default function App() {
   async function verifyAllKeys() {
     const inf = ttsKeys.info || {};
     if (giKey.trim()) await verifyKey('gemini-image', giKey, { model: (giCfg && giCfg.model) || '' });
-    for (const id of ['gemini', 'mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
+    for (const id of ['mai', 'typecast', 'elevenlabs']) if ((inf[id] && inf[id].has) || (ttsKeys.draft[id] || '').trim()) await verifyKey(id, ttsKeys.draft[id], id === 'mai' ? { region: ttsKeys.region } : undefined);
     for (const id of ['pexels', 'pixabay']) if ((stockKeys.info[id] && stockKeys.info[id].has) || (stockKeys.draft[id] || '').trim()) await verifyKey(id, stockKeys.draft[id]);
     if (claudeKey.info.has || claudeKey.draft.trim()) await verifyKey('claude', claudeKey.draft);
     if (kieKey.info.has || kieKey.draft.trim()) await verifyKey('kie', kieKey.draft);
@@ -8479,7 +8479,6 @@ export default function App() {
               <div data-testid="tts-keys" className="kp-card">
                 <div className="kp-title">🔊 TTS API (유료)</div>
                 {[
-                  ['gemini', 'Google Gemini TTS', 'API 키', 'Gemini 음성 생성(TTS)에만 쓰는 키입니다 — 🍌 나노바나나 이미지 키와 따로입니다(같은 키를 넣어도 되지만 쓰임은 나뉩니다)'],
                   ['mai', 'Microsoft MAI-Voice', 'Speech 키', 'Azure 포털 → Speech(Foundry) 리소스 → 키 및 엔드포인트의 KEY 1 · 지역은 리소스를 만든 곳'],
                   ['typecast', '타입캐스트', 'API 키', 'typecast.ai → Developers → API 키'],
                   ['elevenlabs', 'ElevenLabs', 'API 키', '권한: Text to Speech + Voices 읽기(라이브러리 목소리 추가는 Voices 쓰기도)'],

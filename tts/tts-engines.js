@@ -8,7 +8,7 @@
  *     · id 가 없거나 'omnivoice' 면 지금까지처럼 채널의 참조음성(voiceCloneRefAudio)·시드로 읽는다.
  *     · ⚠ 채널의 `engine` 필드는 건드리지 않는다(preset-store 가 omnivoice/gemini 밖의 값을 지운다).
  *   - 전역(~/.priming-maker/tts-engines.json)에는 **계정 공통값만**: MAI 지역 · 환율.
- *   - API 키 = tts/secret-store (gemini 키 = Gemini TTS 전용 · 🍌 나노바나나 이미지는 'gemini-image' 로 따로 — v0.9.32) · 렌더러엔 끝 4자리만.
+ *   - API 키 = tts/secret-store (🧩 gemini 엔진은 v1.0.4 부터 kie 키·크레딧 · 🍌 나노바나나 이미지는 'gemini-image') · 렌더러엔 끝 4자리만.
  *   - 유료 엔진이면 채널의 참조음성·instruct·cfg·화자별 목소리는 쓰지 않는다(로그로 알린다).
  *
  * 🔑 엔진 해석 `resolveEngine(preset)` · 합성 인자 `synthExtra(id, preset)` · 요금 `estimateUsd` **한 곳**.
@@ -28,17 +28,16 @@ const ENGINES = [
     note: '서버 공용 목소리 하나를 고르면 이 채널의 참조음성이 됩니다(⚙ 채널편집 🎙 의 참조음성과 같은 값). 시드·화자 목소리는 채널편집에서. 서버 주소는 ⚙ 설정 → 🖧 TTS 서버.',
   },
   {
-    id: 'gemini', label: 'Google Gemini TTS', sub: 'Google AI Studio API 키', paid: true,
-    keyId: 'gemini', keyLabel: 'API 키', keyUrl: 'https://aistudio.google.com/apikey',
+    // 🧩 v1.0.4 — Google 키를 쓰지 않고 **생성 서비스(kie.ai) 키 + 크레딧**으로 읽는다(로이 2026-10-29). 모델은 3.8 둘뿐.
+    id: 'gemini', label: 'Gemini TTS', sub: '크레딧 사용 · 생성 서비스 키', paid: true,
+    keyId: 'kie', keyLabel: '생성 서비스 키', keyUrl: 'https://kie.ai/api-key',
     models: [
-      { id: 'gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS (최신 · 고품질)' },
+      { id: 'gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS (고품질)' },
       { id: 'gemini-3.8-flash-lite-tts', name: 'Gemini 3.8 Flash-Lite TTS (빠르고 쌈)' },
-      { id: 'gemini-3.1-flash-tts-preview', name: 'Gemini 3.1 Flash TTS (구판)' },
-      { id: 'gemini-2.5-pro-preview-tts', name: 'Gemini 2.5 Pro TTS (구판)' },
     ],
     defaultVoice: 'Kore', hasStyle: true,
-    listVoices: true,
-    note: '기본 목소리 30개 + 「확장 라이브러리 불러오기」(수백 개 · 3.8 모델용). ⚙ 설정 → 🔑 API 키 → 🔊 TTS API 의 Gemini 키(음성 전용 — 🍌 나노바나나 이미지 키와 따로)를 씁니다. 「말투 지시」는 3.8 모델에만 적용됩니다.',
+    listVoices: false,
+    note: '목소리 70개 내장. ⚙ 설정 → 🔑 API 키 의 생성 서비스 키로 읽고, 음성을 만들 때마다 크레딧이 쓰입니다. 「말투 지시」를 쓸 수 있습니다.',
   },
   {
     id: 'mai', label: 'Microsoft MAI-Voice', sub: 'Azure Speech(Foundry) 키 + 지역', paid: true,
@@ -85,10 +84,9 @@ const byId = (id) => ENGINES.find((e) => e.id === id) || null;
 //   근거: ai.google.dev/gemini-api/docs/pricing · MAI(1백만 글자 $22 / Flash $15 · 2026년 말까지 도입가)
 //         typecast.ai/developers/api(1글자 = 1크레딧 · Lite $0.075/1천 크레딧) · elevenlabs.io/pricing/api(1천 글자당)
 const PRICING = {
-  'gemini-3.8-flash-tts': { kind: 'sec', usd: 25 * 9 / 1e6, free: '무료 등급 있음(호출 수 제한)', note: '2026년 말까지 · 2027-01부터 2배' },
-  'gemini-3.8-flash-lite-tts': { kind: 'sec', usd: 25 * 6 / 1e6, free: '무료 등급 있음(호출 수 제한)', note: '2026년 말까지 · 2027-01부터 2배' },
-  'gemini-3.1-flash-tts-preview': { kind: 'sec', usd: 25 * 20 / 1e6, free: '무료 등급 있음(호출 수 제한)' },
-  'gemini-2.5-pro-preview-tts': { kind: 'sec', usd: 25 * 20 / 1e6, free: '무료 등급 없음' },
+  // 🧩 kie.ai 단가(출력 음성 토큰 1백만당 Flash $6.30 · Flash-Lite $4.20 · 크레딧 1 = $0.005 · 2026-12-31 까지 · 이후 바뀔 수 있다)
+  'gemini-3.8-flash-tts': { kind: 'sec', usd: 25 * 6.3 / 1e6, note: '크레딧으로 차감 · 2026년 말까지 단가' },
+  'gemini-3.8-flash-lite-tts': { kind: 'sec', usd: 25 * 4.2 / 1e6, note: '크레딧으로 차감 · 2026년 말까지 단가' },
   'MAI-Voice-2.1': { kind: 'char', usd: 22 / 1e6, note: '도입가(2026년 말까지)' },
   'MAI-Voice-2.1-Flash': { kind: 'char', usd: 15 / 1e6, note: '도입가(2026년 말까지)' },
   'ssfm-v30': { kind: 'char', usd: 0.075 / 1e3, free: '무료 월 1만5천 자(⚠ 상업 이용 불가)', note: 'Lite 요금제 기준 · 초과분 1천 자 $0.09' },

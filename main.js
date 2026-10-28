@@ -6450,7 +6450,7 @@ ipcMain.handle('tts-engines-get', async () => {
   // 목소리 카드 = 내장 목록(Gemini 30 · MAI 97) + 불러온 목록(Gemini 확장 · 타입캐스트 · ElevenLabs)
   const voicesOf = (id) => {
     const c = _readVoiceCache(id);
-    if (id === 'gemini') return { voices: [...VC.GEMINI, ...((c && c.voices) || [])], at: c ? c.at : 0 };
+    if (id === 'gemini') return { voices: VC.GEMINI, at: 0 };   // 🧩 v1.0.4 — kie 경유 · 70개 내장(옛 확장 라이브러리 캐시는 쓰지 않는다)
     if (id === 'mai') return { voices: VC.MAI, at: 0 };
     return { voices: (c && c.voices) || [], at: c ? c.at : 0 };
   };
@@ -6617,11 +6617,9 @@ ipcMain.handle('tts-engine-voices', async (_e, { id, key, model } = {}) => {
     let voices = null;
     if (id === 'typecast') voices = await require('./tts/providers/typecast-provider').listVoices(k, model || 'ssfm-v30');
     else if (id === 'elevenlabs') voices = await require('./tts/providers/elevenlabs-provider').listVoices(k);
-    else if (id === 'gemini') voices = await require('./tts/providers/gemini-provider').listVoices(k);
     else return { ok: false, error: '이 엔진은 목소리 목록을 불러오지 않습니다' };
     _writeVoiceCache(id, voices);
     log(`🔊 ${id} 목소리 ${voices.length}개 불러옴`);
-    if (id === 'gemini') voices = [...require('./tts/voice-catalogs').GEMINI, ...voices];
     return { ok: true, voices };
   } catch (e) { return { ok: false, error: e.message }; }
 });

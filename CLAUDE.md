@@ -153,6 +153,7 @@
 - 📞 **전화번호는 음성만 한 자리씩**(「1577-1000」→「일오칠칠에 일공공공」 · 로이 지정 · v0.8.11 · `readPhoneNumbers` · `test:phone`) — 연도 범위처럼 보이는 것은 문장에 전화 낱말이 있고 뒤에 「년」이 없을 때만 번호로 본다(생몰년 헛변환 금지).
 - 🔑 TTS 텍스트 가공은 `processForTTS` 한 곳(⛔ 다른 곳에 가공 추가 금지) · 캐시 키 = 실제 합성 문자열 + 목소리·시드·배속·정규화·무음 — 설정을 더하면 캐시 키에 넣을지 판단 · 엔진 해석·요금은 `tts/tts-engines.js` 한 곳(새 TTS 입구는 preset 을 넘기고 `scriptVoicePreset` 을 거칠 것) · 채널은 `resolvePreset`(낡은 `S.preset` 금지).
 - 🔴 TTS 는 직렬 큐 `enqueueTtsJob` · 빈 음성(헤더만)·무음 음성은 시드를 갈아 다시 만들고 게이트가 막는다 · 문장 사이 쉼은 음성 파일의 `apad`(⛔ vrew 에 빈 클립 금지) · 테스트의 정상 음성 픽스처는 소리가 든 WAV.
+- 🔊 **Gemini TTS 는 Google 키가 아니라 kie 키·크레딧으로**(v1.0.4 · 로이 2026-10-29 · `core/kie-api.speechToBuffer` 한 곳 · 모델은 3.8 Flash·Flash-Lite 둘뿐 · ⛔ Google API 로 되돌리거나 모델을 더하지 말 것 · provider id `'gemini'` 유지 · `test:tts`).
 - 😮‍💨 **문장 앞 들숨 = OmniVoice provider 의 `muteLeadBreath` 한 곳**(v0.9.20 · 길이 불변 · 정적 30ms 기준 · 캐시 키 `lb` 와 짝) — 상세 [TTS](docs/규칙/TTS.md).
 
 ### 이미지
