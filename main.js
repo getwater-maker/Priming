@@ -3079,6 +3079,25 @@ ipcMain.handle('info-preview', async (_e, args = {}) => {
     return await infoPreviewFor(pr, String(args.presetName || ''), S.scriptPath);
   } catch (e) { return { ok: false, error: (e && e.message) || String(e), panels: [] }; }
 });
+// 📜 화면 카드 ① 미리보기(v1.0.7 · 로이 2026-10-29 「MP4 와 동일하게」) — 카드가 어느 문장 범위에서 어떤 모양·자리로 뜨는지(screen-cards.previewCards · 좌표는 layoutOf 한 곳 = MP4 와 같다)
+//   소리가 없어도(TTS 전에도) 보인다 · 마커가 없으면 빈 목록 · 시험 `screen-cards.test` [6]
+ipcMain.handle('screen-card-preview', (_e, args = {}) => {
+  try {
+    const pr = S.parsed && S.parsed.projects && S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
+    if (!pr || !Array.isArray(pr.screenCards) || !pr.screenCards.length) return { ok: true, cards: [] };
+    const r = require('./core/screen-cards').previewCards(pr, pr.screenCards);
+    return { ok: true, cards: r.cards, warnings: r.warnings };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e), cards: [] }; }
+});
+// 📜 카드 글꼴 — MP4 와 같은 글꼴(한자 · 한글 명조 · 일본어 명조)을 ① 미리보기가 쓰게 base64 로(처음 그 글꼴이 필요할 때 하나씩 · 4~6MB)
+ipcMain.handle('card-font', async (_e, key) => {
+  try {
+    const A = path.join(__dirname, 'assets', 'fonts');
+    const file = { han: path.join(A, 'book', 'HanjaSerif-Light.ttf'), ko: path.join(A, 'book', 'NotoSerifKR-Light.ttf'), ja: fs.existsSync(path.join(A, 'NotoSerifJP-Medium.otf')) ? path.join(A, 'NotoSerifJP-Medium.otf') : path.join(A, 'NotoSansJP-Bold.otf') }[String(key)];
+    if (!file) return { ok: false, error: '모르는 글꼴' };
+    return { ok: true, data: (await fs.promises.readFile(file)).toString('base64') };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null) {   // ctx = { parsed, scriptPath } — 업로드 제목이 화면에서 고른 대본을 따라가지 않게
   const VR = require('./core/vrew-render');
   const outPath = uploadMp4Path(baseName, preset, vrewPath);

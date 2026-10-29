@@ -4,6 +4,7 @@ import Upsell from './Upsell.jsx';
 import ThumbEditor from './ThumbEditor.jsx';
 import { createPortal } from 'react-dom';
 import InfoPreview, { loadInfoFont, infoFontFamily } from './InfoPreview.jsx';
+import CardPreview from './CardPreview.jsx';   // 📜 화면 카드 ① 미리보기(v1.0.7)
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
 import { VID_MODES, VID_LIST, normVidSel, vidSelLabel, vidMatcher, vidIsList, vidListText } from './lib/videoSelect.js';
@@ -2413,6 +2414,17 @@ export default function App() {
     }, 500);
     return () => { dead = true; clearTimeout(tm); };
   }, [dto, presetName, isLf, cursor && cursor.shortsNum, infoRev]);
+  // 📜 화면 카드(해설·막간·병기·낱말) ① 미리보기 — main(screen-card-preview)이 MP4 와 같은 좌표(layoutOf)로 준 카드 · 대본 .md 가 바뀌면(dto) 다시 받는다
+  const [cardPv, setCardPv] = useState(null);
+  useEffect(() => {
+    if (!isLf || !dto || !api.screenCardPreview) { setCardPv(null); return undefined; }
+    const pj = curProject(); if (!pj) return undefined;
+    let dead = false;
+    const tm = setTimeout(async () => {
+      try { const r = await api.screenCardPreview({ shortsNum: pj.shortsNum }); if (!dead) setCardPv(r && r.ok && r.cards && r.cards.length ? r.cards : null); } catch (_) { if (!dead) setCardPv(null); }
+    }, 400);
+    return () => { dead = true; clearTimeout(tm); };
+  }, [dto, isLf, cursor && cursor.shortsNum]);
   // 📇 정보 카드 끌어 옮기기·글자 고치기(v0.8.8) — 둘 다 대본(.md)의 그 표시 줄만 바꾼다(자리 = 줄 끝 `@왼쪽위` · 글자 = 줄 안) → 렌더(MP4)도 같은 결과
   const [infoEdit, setInfoEdit] = useState(null);       // { mi, kind, ... } — 글자 고치기 창
   function onInfoDown(ev, p) {
@@ -6050,6 +6062,14 @@ export default function App() {
       .map((q) => (q.prims && q.prims.some((x) => x.onS) ? { ...q, prims: q.prims.filter((x) => !x.onS || (x.onS[0] <= ord && ord <= x.onS[1])) } : q));
     return act.length ? act : null;
   })();
+  // 📜 지금 문장에서 보이는 화면 카드(문장 범위 s0~s1 · 정보 카드와 같은 순번)
+  const stageCards = (() => {
+    if (!cardPv || !isLf || !cursor) return null;
+    const ci = cursorInfo(); if (!ci) return null;
+    let ord = ci.l.sentIdx; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
+    const act = cardPv.filter((q) => q.s0 <= ord && ord <= q.s1);
+    return act.length ? act : null;
+  })();
   stageInfoRef.current = stageInfo;   // 📇 오른쪽 클릭 복사 메뉴가 「지금 보이는 판」을 집는다
   // 🎞 스테이지(① 칸 · 카드 보기에선 덮는 창) — 하나만 그린다(ref 가 같아야 재생 코드가 그대로 돈다)
   const stageEl = (<>
@@ -6135,8 +6155,9 @@ export default function App() {
       })()}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.v && <div className="sguide v" data-testid="guide-v" />}
       {wsOn && stageSel && stageSel.guides && stageSel.guides.h && <div className="sguide h" data-testid="guide-h" />}
+      {stageCards && <CardPreview cards={stageCards} />}
       {stageInfo && <InfoPreview panels={stageInfo} drag={infoDrag} onPanelDown={wsOn && !playerOpen ? onInfoDown : undefined} onPanelDbl={wsOn && !playerOpen ? onInfoDbl : undefined} />}
-      <div id="stageCap" ref={stageCapRef} style={stageInfo && stageInfo.some((q) => q.hide) ? { visibility: 'hidden' } : undefined} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
+      <div id="stageCap" ref={stageCapRef} style={(stageInfo && stageInfo.some((q) => q.hide)) || (stageCards && stageCards.some((q) => q.hide)) ? { visibility: 'hidden' } : undefined} className={wsOn && !playerOpen ? 'capdrag' : undefined} title={wsOn ? '누르면 이 자리에서 글자·서식 고치기 · 끌면 자막 자리 옮기기' : undefined}
         onMouseDown={onStageCapDown}
         onClick={(ev) => { if (wsOn && ev.target.closest && ev.target.closest('.cf-stageline')) openStageEdit(); }} />
       {wsOn && sentEdit && sentEdit.where === 'stage' && stageEditBox && (() => {

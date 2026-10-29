@@ -247,6 +247,62 @@ const SCRIPT = [
       if (process.env.PM_SHOT_DIR) { fs.mkdirSync(process.env.PM_SHOT_DIR, { recursive: true }); for (const [t, nm] of [[2, 'ja_kaisetsu'], [10, 'ja_makuai'], [14, 'ja_kotoba']]) spawnSync(FF, ['-y', '-v', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', path.join(process.env.PM_SHOT_DIR, nm + '.png')]); }
     } finally { try { fs.rmSync(tmpj, { recursive: true, force: true }); } catch {} }
   }
+  console.log('\n[7] 📍 자리(한쪽 카드) · 배치 한 곳 · ① 미리보기 (v1.0.7)');
+  {
+    const pj = mkProj(['今夜の作家は、山本周五郎です。', 'ここから本文です。', '二つ目の文です。'], [{ phase: '今夜の二篇', n: [0, 1, 2] }], [4, 5, 3]);
+    const mkr = (line) => SC.markersOf('### 今夜の二篇\n' + line + '\n');
+    // 전체 화면(자리 없음) — 예전 MP4 와 같은 값
+    const full = SC.plan(pj, mkr('> 📜 화면카드: 해설 | 문장=今夜の作家は'));
+    const fl = SC.layoutOf(full.cards[0]);
+    ok(!full.cards[0].place && fl.side === false && fl.plate.w === 1920 && fl.plate.h === 1080 && fl.rows[0].cy === 520 && fl.rows[0].fs === 84 && fl.rules[0].y === 610, '자리 없음 = 전체 화면 카드(예전 값 그대로: 글 y 520 · 크기 84 · 줄 y 610)');
+    // 한쪽 — 자리를 읽고, 판이 화면 안에 있다
+    const places = Object.keys(SC.PLACES);
+    for (const pl of places) {
+      const r = SC.plan(pj, mkr('> 📜 화면카드: 해설 | 문장=今夜の作家は | 자리=' + pl));
+      const c = r.cards[0]; const L = SC.layoutOf(c); const P = L.plate;
+      ok(c.place === pl && L.side && P.x >= 0 && P.y >= 0 && P.x + P.w <= 1920 && P.y + P.h <= 1080 && P.w < 1920 && P.h < 1080, '자리=' + pl + ' → 한쪽 카드가 화면 안(' + P.x + ',' + P.y + ' ' + P.w + 'x' + P.h + ')');
+    }
+    const tl = SC.layoutOf({ kind: 'interlude', trans: ['가'], place: '왼쪽위' }).plate, br = SC.layoutOf({ kind: 'interlude', trans: ['가'], place: '오른쪽아래' }).plate;
+    ok(tl.x < 100 && tl.y < 100 && br.x + br.w > 1820 && br.y + br.h > 980, '왼쪽위는 왼쪽 위 모서리 · 오른쪽아래는 오른쪽 아래 모서리');
+    const bad = SC.plan(pj, mkr('> 📜 화면카드: 해설 | 문장=今夜の作家は | 자리=한가운데쯤'));
+    ok(bad.cards.length === 1 && !bad.cards[0].place && bad.warnings.some((w) => /자리= 값을 모릅니다/.test(w)), '모르는 자리 = 경고 + 전체 화면 카드(조용히 바꾸지 않는다)');
+    const long = SC.plan(mkProj([Array(40).fill('아주 긴 해설 문장입니다.').join(' ')], [{ phase: 'p', n: [0] }], [6]), SC.markersOf('### p\n> 📜 화면카드: 해설 | 문장=아주 긴 해설 | 자리=왼쪽'));
+    ok(long.warnings.some((w) => /넘칩니다/.test(w)), '글이 너무 길면 넘친다고 경고');
+    // 일본어 줄 나누기 — 줄 머리에 마침표가 오지 않는다
+    const kin = SC.layoutOf({ kind: 'interlude', trans: ['今夜の作家は、山本周五郎です。'], place: '왼쪽위', lang: 'ja' });
+    ok(kin.rows[0].lines.every((l) => !/^[。、]/.test(l)), '일본어 한쪽 카드 — 줄 머리에 「。」「、」 없음');
+    // ASS — 한쪽 카드는 그 자리에 판 · 글은 자동 줄바꿈 끔(\\q2) · 전체 카드는 예전 줄(전체 사각형)
+    const evS = R.cardEvents([{ ...full.cards[0], place: '오른쪽위' }], 0, 100).join('\n'), evF = R.cardEvents(full.cards, 0, 100).join('\n');
+    const pS = SC.layoutOf({ ...full.cards[0], place: '오른쪽위' }).plate;
+    ok(evS.includes('\\pos(' + pS.x + ',' + pS.y + ')') && evS.includes('\\q2') && !evF.includes('\\q2') && evF.includes('\\pos(0,0)') && evF.includes('m 0 0 l 1920 0 1920 1080 0 1080'), 'ASS: 한쪽 카드 = 그 자리 사각형 + \\q2 · 전체 카드 = 화면 전체 사각형(예전과 같다)');
+    // ① 미리보기 — 소리 없이도 · 문장 범위 · plan 과 같은 글
+    const pj2 = mkProj(['天下大勢，分久必合，合久必分。', '천하의 큰 흐름은 나뉜 지 오래되면 합쳐집니다.', '이야기는 시작합니다.'], [{ phase: '서술', n: [0, 1, 2] }], [0, 0, 0]);
+    const mk2 = SC.markersOf('### 서술\n> 📜 화면카드: 병기 | 원문=天下大勢分久必合 | 번역=천하의 큰 흐름 +1 | 자리=왼쪽아래 | 자막=숨김\n');
+    const pv = SC.previewCards(pj2, mk2);
+    ok(pv.cards.length === 1 && pv.cards[0].s0 === 0 && pv.cards[0].s1 === 2 && pv.cards[0].place === '왼쪽아래' && pv.cards[0].hide === true && pv.cards[0].layout.side, '미리보기: 음성이 없어도 · 문장 범위 0~2(원문 0 · 번역 1~2) · 자리 · 자막 숨김');
+    const pj3 = mkProj(['天下大勢，分久必合，合久必分。', '천하의 큰 흐름은 나뉜 지 오래되면 합쳐집니다.', '이야기는 시작합니다.'], [{ phase: '서술', n: [0, 1, 2] }], [6, 7, 5]);
+    for (const line of ['> 📜 화면카드: 병기 | 원문=天下大勢分久必合 | 번역=천하의 큰 흐름 +1', '> 📜 화면카드: 막간 | 문장=이야기는 시작', '> 📜 화면카드: 병기 | 때=천하의 큰 흐름 | 원문=天下 // 大勢 | 번역=번역 글']) {
+      const m3 = SC.markersOf('### 서술\n' + line + '\n');
+      const a1 = SC.plan(pj3, m3).cards[0], b1 = SC.previewCards(pj3, m3).cards[0];
+      ok(a1 && b1 && JSON.stringify([a1.kind, a1.orig, a1.trans]) === JSON.stringify([b1.kind, b1.orig, b1.trans]), '미리보기 글 = MP4 계획 글(' + line.slice(10, 22) + '…)');
+    }
+    ok(SC.previewCards(pj2, []).cards.length === 0 && SC.previewCards(null, mk2).cards.length === 0, '마커·프로젝트가 없으면 빈 목록');
+    // 한쪽 카드 실물 — ASS 로 한 프레임 그려 판 안 화소가 어둡고 판 밖은 배경 그대로(렌더러 변경 없이 같은 ASS 줄을 쓴다)
+    {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sidecard-'));
+      try {
+        for (const f of ['HanjaSerif-Light.ttf', 'NotoSerifKR-Light.ttf']) fs.copyFileSync(path.join(__dirname, '..', 'assets', 'fonts', 'book', f), path.join(tmp, f));
+        fs.copyFileSync(path.join(__dirname, '..', 'assets', 'fonts', 'NotoSerifJP-Medium.otf'), path.join(tmp, 'NotoSerifJP-Medium.otf'));
+        const card = { kind: 'interlude', t0: 0, t1: 4, orig: [], trans: ['今夜の作家は、山本周五郎です。'], place: '왼쪽위', lang: 'ja' };
+        const ass = ['[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 1920', 'PlayResY: 1080', '', '[V4+ Styles]', 'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding', 'Style: N,Arial,40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,10,10,10,1', '', '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text', ...R.cardEvents([card], 0, 4)].join('\n');
+        fs.writeFileSync(path.join(tmp, 'c.ass'), ass, 'utf8');
+        const r = spawnSync(FF, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0xCCCCCC:s=1920x1080:d=4', '-vf', 'ass=c.ass:fontsdir=.,scale=480:270,format=gray', '-ss', '2', '-frames:v', '1', '-f', 'rawvideo', 'o.raw'], { cwd: tmp });
+        const raw = fs.readFileSync(path.join(tmp, 'o.raw'));
+        const at = (x, y) => raw[Math.round(y / 4) * 480 + Math.round(x / 4)];
+        ok(r.status === 0 && at(100, 100) < 90 && at(1500, 700) > 190 && at(1500, 100) > 190 && at(100, 700) > 190, '실물: 왼쪽 위 판 안은 어둡고(' + at(100, 100) + ') 나머지 화면은 배경 그대로(' + at(1500, 700) + ')');
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    }
+  }
   console.log(`\n${fail ? '❌' : '✅'} screen-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });

@@ -549,23 +549,18 @@ function cardEvents(cards, w0, w1) {
       return tag;
     };
     const st = fmtAss(a - w0), en = fmtAss(b - w0);
-    // ① 어두운 판 — 화면 전체(벡터 사각형) · 층 0(자막 층 1~4 보다 아래)
-    out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H0E0B0B&${ramp(CARD_BG_MAX)}\\p1}m 0 0 l ${W} 0 ${W} ${H} 0 ${H}{\\p0}`);
-    const txt = (lines, o) => {   // 글자 한 덩어리(가운데 정렬 · 줄바꿈 \N)
-      const body = lines.map((x) => assEsc(String(x).replace(/\s+/g, ' ').trim())).join('\\N');
-      out.push(`Dialogue: 8,${st},${en},N,,${o.ml || 240},${o.ml || 240},0,,{\\an5\\pos(${W / 2},${o.y})\\fn${o.font}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}\\1c&H${o.color}&${ramp(1)}}${body}`);
-    };
-    const rule = (y) => out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an7\\pos(${W / 2 - 70},${y})\\bord0\\shad0\\1c&H8C8C8C&${ramp(0.55)}\\p1}m 0 0 l 140 0 140 2 0 2{\\p0}`);
-    const ja = c.lang === 'ja';
-    if (c.kind === 'interlude') {
-      txt(c.trans, { y: H / 2 - 20, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 84, color: 'D0E0EA', sp: 4, b: ja ? 0 : 1 });
-      rule(H / 2 + 70);
-    } else {
-      const hasOrig = c.orig && c.orig.length;
-      if (hasOrig) txt(c.orig, { y: 360, font: ja ? CARD_FONT_JA : CARD_FONT.han, fs: 66, color: 'D0E0EA', sp: 4 });
-      if (hasOrig) rule(500);
-      txt(c.trans || [], { y: hasOrig ? 660 : 540, font: ja ? CARD_FONT_JA : CARD_FONT.ko, fs: 62, color: 'D0E0EA', sp: 1, b: ja ? 0 : 1 });   // 🔎 시니어 시청층(고전서재 요청 v0.8.1): 번역 글을 한문 줄과 비슷한 크기·같은 밝은 색·굵게(옛 46 · 회색)
+    // 📍 모양·자리는 screen-cards.layoutOf 한 곳(① 미리보기와 같은 좌표) — 전체 화면 카드는 예전과 같은 값, 한쪽 카드는 c.place 가 정한 자리
+    const L = SC.layoutOf(c);
+    const bgrOf = (rgb) => rgb.slice(4, 6) + rgb.slice(2, 4) + rgb.slice(0, 2);
+    const fontOf = (k) => (k === 'ja' ? CARD_FONT_JA : k === 'han' ? CARD_FONT.han : CARD_FONT.ko);
+    const P0 = L.plate;
+    // ① 어두운 판 — 층 0(자막 층 1~4 보다 아래) · 전체는 화면 전체 사각형, 한쪽은 그 자리 사각형
+    out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(${P0.x},${P0.y})\\bord0\\shad0\\1c&H${bgrOf(SC.CARD_RGB.plate)}&${ramp(P0.max)}\\p1}m 0 0 l ${P0.w} 0 ${P0.w} ${P0.h} 0 ${P0.h}{\\p0}`);
+    for (const o of L.rows) {   // 글자 한 덩어리(가운데 정렬 · 줄바꿈 \N) — 한쪽 카드는 줄을 우리가 나눴으니 자동 줄바꿈을 끈다(\q2)
+      const body = o.lines.map((x) => assEsc(String(x).replace(/\s+/g, ' ').trim())).join('\\N');
+      out.push(`Dialogue: 8,${st},${en},N,,${o.ml},${o.ml},0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${fontOf(o.font)}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}${o.nowrap ? '\\q2' : ''}\\1c&H${bgrOf(SC.CARD_RGB.text)}&${ramp(1)}}${body}`);
     }
+    for (const r of L.rules) out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\bord0\\shad0\\1c&H${bgrOf(SC.CARD_RGB.rule)}&${ramp(r.max)}\\p1}m 0 0 l ${r.w} 0 ${r.w} 2 0 2{\\p0}`);
   }
   return out;
 }

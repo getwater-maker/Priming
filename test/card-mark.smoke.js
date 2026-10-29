@@ -14,7 +14,7 @@ const SNAP = path.join(os.homedir(), '.priming-maker', 'projects', `${TAG}.smpro
 const SCRIPT = ['# 카드 표시 테스트', '', '## 本編', '### 一', '> 🖼️ 이미지: a starry night town',
   '> 📜 화면카드: 막간 | 때=第一章午后 +1 | 제목=一、午后の授業',
   '[室主] 第一章、午后の授業。', '', '[朗読] 「ではみなさんは。」と先生が云いました。', '',
-  '> 📜 화면카드: 해설 | 때=活版所というのは | 제목=活版所 // 印刷する所',
+  '> 📜 화면카드: 해설 | 때=活版所というのは | 제목=活版所 // 印刷する所 | 자리=왼쪽위',
   '[室主] 活版所というのは、印刷する所のことです。', '', '[朗読] ジョバンニはまっ赤になってうなずきました。', '',
   '> 📜 화면카드: 낱말 | 때=どこにもない文です | 원문=x | 번역=y', ''].join('\n');
 let pass = 0, fail = 0;
@@ -55,6 +55,15 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     ok(marks.every((m) => m.left && m.hit), '모두 문장 행 왼쪽 바깥 열 · 실제로 마우스가 닿는다(elementFromPoint)');
     const bad = await win.locator('[data-testid="card-bad"]').first();
     ok(await bad.count() === 1 && /1줄/.test(await bad.innerText()) && /どこにもない文です/.test(await bad.getAttribute('title')), '못 찾은 카드 줄 = 편 머리 ⚠(마우스 = 이유)');
+    // ① 미리보기(v1.0.7) — 카드가 뜨는 문장을 고르면 ① 칸에 카드가 보인다: 막간(자리 없음) = 전체 화면 · 해설(자리=왼쪽위) = 한쪽 판
+    await win.locator('.sent[data-ln="' + m1.ln + '"]').first().click(); await win.waitForTimeout(1200);
+    const fullN = await win.locator('[data-testid="card-full"]').count();
+    ok(fullN === 1, '① 칸: 막간 문장 → 전체 화면 카드 1장 (' + fullN + ')');
+    await win.locator('.sent[data-ln="' + m3.ln + '"]').first().click(); await win.waitForTimeout(1200);
+    const sideInfo = await win.evaluate(() => { const el = document.querySelector('[data-testid="card-side"]'); if (!el) return null; const st = document.querySelector('.stage-card').getBoundingClientRect(); const pl = el.querySelector('[data-testid="card-plate"]').getBoundingClientRect(); return { place: el.getAttribute('data-place'), label: el.getAttribute('data-label'), w: pl.width / st.width, h: pl.height / st.height, left: (pl.left - st.left) / st.width, top: (pl.top - st.top) / st.height, text: el.querySelector('[data-testid="card-text"]').textContent }; });
+    ok(sideInfo && sideInfo.place === '왼쪽위' && sideInfo.label === '해설' && sideInfo.w < 0.4 && sideInfo.h < 0.4 && sideInfo.left < 0.06 && sideInfo.top < 0.1 && /活版所/.test(sideInfo.text), '① 칸: 해설(자리=왼쪽위) → 왼쪽 위 작은 판 ' + JSON.stringify(sideInfo));
+    ok(await win.locator('[data-testid="card-full"]').count() === 0, '한쪽 카드 문장에선 전체 화면 카드가 없다');
+    await win.locator('.sent[data-ln="' + marks[0].ln + '"]').first().click(); await win.waitForTimeout(200);
     if (process.env.PM_SHOT_DIR) { fs.mkdirSync(process.env.PM_SHOT_DIR, { recursive: true }); await win.screenshot({ path: path.join(process.env.PM_SHOT_DIR, 'card-mark.png') }); }
 
     // 채널 막간 쉼 0 → ⏸ 사라짐(채널편집 저장과 같은 길: savePreset → presetRev)

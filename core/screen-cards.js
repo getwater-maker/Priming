@@ -19,6 +19,9 @@
  *   · 조용히 줄이지 않는다 — 문장을 못 찾음 · 둘 이상 맞음 · 앞부분이 짧음 · 종류 모름 · 음성 없음 → 경고 줄을 돌려주고 **그 카드만** 건너뛴다.
  * 마커가 하나도 없으면 아무것도 안 한다(기본값 = 예전 출력과 한 글자도 다르지 않다).
  *
+ * 📍 **자리**(v1.0.7 · 로이 2026-10-29): 줄 끝에 `| 자리=왼쪽위` 를 쓰면 **한쪽 카드** — 화면 전체를 덮지 않고 그림 위 그 자리에 작은 판으로 뜬다(왼쪽위·오른쪽위·왼쪽아래·오른쪽아래·왼쪽·오른쪽·위·아래).
+ *     안 쓰면 예전처럼 화면 전체 카드. 모양·자리 계산은 `layoutOf` **한 곳**(MP4 ASS · ① 미리보기가 같이 쓴다 — ⛔ 다른 곳에서 카드 좌표를 다시 계산하지 말 것).
+ *
  * main·렌더 전용이 아니다 — 순수 함수라 테스트가 그대로 부른다(core/*.js 는 렌더러 번들에 들어갈 수 있으니 fs·require.main 을 쓰지 않는다).
  */
 // 🇯🇵 해설·낱말(v0.9.7 · 일본 채널 요청 7) = 그리는 모양은 막간·병기와 같고 이름만 다르다 — 채널 게이트가 종류를 이름으로 가른다.
@@ -227,6 +230,8 @@ function plan(project, markers, opts = {}) {
     { const endRow = sents[lastOf(r.idx)]; if (endRow.pause > 0 && Math.abs(endRow.t1 - card.t1) < 1e-6) card.pauseSec = endRow.pause; }   // ⏸ 카드 끝에 쉼이 붙었다 — 렌더가 [t1-쉼, t1] 자막을 가린다
     if (hide) card.hideCaptions = true;
     card.label = m.kindName; { const L = langOf(rows); if (L) card.lang = L; }
+    if (m.f['자리']) { if (PLACES[m.f['자리'].raw]) card.place = m.f['자리'].raw; else warnings.push(`${tag} — 자리= 값을 모릅니다(「${m.f['자리'].raw}」 · ${Object.keys(PLACES).join(' · ')}) → 화면 전체 카드로 그립니다`); }
+    if (card.place) { const lo = layoutOf(card); if (lo.plate.h >= H - 2 * SIDE.margin - 1) warnings.push(`${tag} — 글이 길어 한쪽 카드가 화면 높이를 넘칩니다(줄이거나 자리를 바꾸세요)`); }
     const clash = cards.find((c) => card.t0 < c.t1 - 1e-6 && card.t1 > c.t0 + 1e-6);
     if (clash) warnings.push(`${tag} — ${clash.line}줄 카드와 시간이 겹칩니다(둘 다 그립니다)`);
     cards.push(card);
@@ -252,6 +257,7 @@ function marksBySentence(project, markers) {
     for (const k of ['제목', '원문', '번역']) if (m.f[k]) tipLines.push(`${k}: ${String(m.f[k].raw).split(/\s+\/\/\s+/).join(' / ')}`);
     if (!r.literal || !(m.f['제목'] || m.f['번역'])) tipLines.push('글: 가리킨 문장 그대로');
     if (m.f['자막'] && /^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) tipLines.push('🙈 뜨는 동안 자막 숨김');
+    if (m.f['자리'] && PLACES[m.f['자리'].raw]) tipLines.push('📍 한쪽 카드 · ' + m.f['자리'].raw);
     const order = [...new Set(r.idx)].sort((a, b) => a - b), last = lastOf(r.idx);
     order.forEach((i, k) => {
       const id = sents[i].s.id; if (bySid.has(id) && bySid.get(id).role === 'start') return;   // 먼저 시작한 카드 표시를 지킨다
@@ -260,6 +266,94 @@ function marksBySentence(project, markers) {
     });
   }
   return { bySid, bad };
+}
+
+// ── 📍 카드 배치(v1.0.7) — MP4(ASS)와 ① 미리보기가 같은 좌표를 쓴다 · 1920x1080 기준 ──────────────────────────────
+const W = 1920, H = 1080;
+const PLACES = { '왼쪽위': 'tl', '오른쪽위': 'tr', '왼쪽아래': 'bl', '오른쪽아래': 'br', '왼쪽': 'l', '오른쪽': 'r', '위': 't', '아래': 'b' };
+const CARD_RGB = { text: 'EAE0D0', plate: '0B0B0E', rule: '8C8C8C' };   // RGB(ASS 는 BGR 로 바꿔 쓴다)
+const PLATE_MAX = 0.84, SIDE_PLATE_MAX = 0.8;
+const SIDE = { margin: 60, pad: 36, wSide: 640, wBand: 1280, fsKo: 40, fsOrig: 44, lh: 1.35, gap: 20 };
+const isWideCh = (ch) => /[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch);
+const chW = (ch) => (isWideCh(ch) ? 1 : ch === ' ' ? 0.3 : 0.55);
+/** 글자 폭 어림으로 줄 나누기 — ASS 자동 줄바꿈(\q2 로 끔)을 쓰지 않으니 미리보기·MP4 가 같은 줄이 된다 */
+function wrapEst(text, fs, maxW) {
+  const out = []; let cur = '', w = 0;
+  for (const ch of Array.from(String(text))) {
+    const cw = chW(ch) * fs;
+    if (cur && w + cw > maxW && !/[。、，．,.!?！？」』）)]/.test(ch)) { out.push(cur.trim()); cur = ''; w = 0; if (ch === ' ') continue; }   // 줄 머리에 마침표·닫는 괄호가 오지 않게(줄 끝에 붙인다)
+    cur += ch; w += cw;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out.length ? out : [''];
+}
+/**
+ * 카드 하나의 그리기 계획 → { side, plate:{x,y,w,h,max}, rows:[{lines, cx, cy, fs, sp, b, font:'han'|'ko'|'ja', nowrap, ml}], rules:[{x,y,w,max}] }
+ *   전체 화면(side=false)은 예전 MP4 와 같은 값 그대로(좌표·크기 — 바꾸지 말 것). 한쪽(side=true)은 c.place 가 정한 자리의 작은 판.
+ */
+function layoutOf(c) {
+  const ja = c.lang === 'ja';
+  const hasOrig = !!(c.orig && c.orig.length);
+  if (!c.place || !PLACES[c.place]) {
+    const rows = [], rules = [];
+    if (c.kind === 'interlude') {
+      rows.push({ lines: c.trans || [], cx: W / 2, cy: H / 2 - 20, fs: 84, sp: 4, b: !ja, font: ja ? 'ja' : 'ko', ml: 240 });
+      rules.push({ x: W / 2 - 70, y: H / 2 + 70, w: 140, max: 0.55 });
+    } else {
+      if (hasOrig) { rows.push({ lines: c.orig, cx: W / 2, cy: 360, fs: 66, sp: 4, b: false, font: ja ? 'ja' : 'han', ml: 240 }); rules.push({ x: W / 2 - 70, y: 500, w: 140, max: 0.55 }); }
+      rows.push({ lines: c.trans || [], cx: W / 2, cy: hasOrig ? 660 : 540, fs: 62, sp: 1, b: !ja, font: ja ? 'ja' : 'ko', ml: 240 });
+    }
+    return { side: false, plate: { x: 0, y: 0, w: W, h: H, max: PLATE_MAX }, rows, rules };
+  }
+  const code = PLACES[c.place], S = SIDE;
+  const w = (code === 't' || code === 'b') ? S.wBand : S.wSide;
+  const maxW = w - 2 * S.pad;
+  const blocks = [];
+  if (hasOrig) blocks.push({ lines: c.orig.flatMap((l) => wrapEst(l, S.fsOrig, maxW)), fs: S.fsOrig, font: ja ? 'ja' : 'han', sp: 2, b: false });
+  blocks.push({ lines: (c.trans || []).flatMap((l) => wrapEst(l, S.fsKo, maxW)), fs: S.fsKo, font: ja ? 'ja' : 'ko', sp: 0, b: !ja });
+  const hs = blocks.map((b) => b.lines.length * Math.round(b.fs * S.lh));
+  const h = Math.min(H - 2 * S.margin, hs.reduce((a, v) => a + v, 0) + (blocks.length - 1) * S.gap + 2 * S.pad);
+  const isL = code === 'l' || code === 'tl' || code === 'bl', isR = code === 'r' || code === 'tr' || code === 'br';
+  const x = isL ? S.margin : isR ? W - S.margin - w : Math.round((W - w) / 2);
+  const y = (code === 't' || code === 'tl' || code === 'tr') ? S.margin : (code === 'b' || code === 'bl' || code === 'br') ? H - S.margin - h : Math.round((H - h) / 2);
+  let yy = y + S.pad;
+  const rows = blocks.map((b, i) => { const bh = hs[i]; const r = { lines: b.lines, cx: x + w / 2, cy: yy + bh / 2, fs: b.fs, sp: b.sp, b: b.b, font: b.font, ml: 0, nowrap: true }; yy += bh + S.gap; return r; });
+  return { side: true, plate: { x, y, w, h, max: SIDE_PLATE_MAX }, rows, rules: [] };
+}
+
+/**
+ * 🖥 ① 미리보기용 — 소리가 없어도(TTS 전에도) 카드가 어느 문장 범위에서 어떤 모양으로 뜨는지. 시각·서서히 나타남은 없다(문장 단위로 켜고 끈다).
+ *   글 규칙은 plan 과 같다(시험이 plan 결과와 글이 같은지 확인한다).
+ * @returns {{cards: Array<{label, kind, s0, s1, orig, trans, lang?, place?, hide?, layout, line}>, warnings: string[]}}
+ */
+function previewCards(project, markers) {
+  const cards = [], warnings = [];
+  if (!project || !(markers || []).length) return { cards, warnings };
+  const sents = sentsOf(project);
+  for (const m of markers) {
+    const tag = `📜 화면카드 ${m.line}줄`;
+    const r = resolveMarker(sents, m); if (r.err) { warnings.push(`${tag} — ${r.err}`); continue; }
+    const rows = r.idx.map((i) => sents[i]);
+    const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
+    let card;
+    if (r.literal) {
+      const own = rows.map((x) => x.text);
+      if (m.kind === 'pair') card = { kind: 'pair', orig: m.f['원문'] ? lines(m.f['원문']) : [], trans: m.f['번역'] ? lines(m.f['번역']) : own };
+      else card = { kind: 'interlude', orig: [], trans: m.f['제목'] ? lines(m.f['제목']) : own };
+    } else {
+      card = m.kind === 'pair'
+        ? { kind: 'pair', orig: r.by['원문'].map((i) => sents[i].text), trans: r.by['번역'].map((i) => sents[i].text) }
+        : { kind: 'interlude', orig: [], trans: r.by['문장'].map((i) => sents[i].text) };
+    }
+    card.label = m.kindName; card.line = m.line;
+    card.s0 = Math.min(...r.idx); card.s1 = Math.max(...r.idx);
+    { const L = langOf(rows); if (L) card.lang = L; }
+    if (m.f['자리'] && PLACES[m.f['자리'].raw]) card.place = m.f['자리'].raw;
+    if (m.kind && m.f['자막'] && /^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) card.hide = true;
+    card.layout = layoutOf(card);
+    cards.push(card);
+  }
+  return { cards, warnings };
 }
 
 /** 카드의 보임 정도 0~1 (시각 t · 초) — 서서히 나타남 · 유지 · 서서히 사라짐 */
@@ -272,4 +366,4 @@ function opacityAt(c, t) {
   return 1;
 }
 
-module.exports = { PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
+module.exports = { PLACES, CARD_RGB, layoutOf, previewCards, PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
