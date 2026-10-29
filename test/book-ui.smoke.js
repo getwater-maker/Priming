@@ -186,7 +186,7 @@ ${para}
       }
       const one = async (tid, what) => { const n = await win.locator(`[data-testid=${tid}]`).count(); if (n !== 1) throw new Error(`${what} 개수 ${n}`); };
       await one('bk-register-bookk', '종이책 자동 입력 버튼'); await one('bk-register-ebook', '전자책 자동 입력 버튼');
-      await one('bk-register-cover', '종이책 이어 채우기'); await one('bk-register-ebook-resume', '전자책 이어 채우기');
+      for (const t of ['bk-register-cover', 'bk-register-ebook-resume']) if (await win.locator(`[data-testid=${t}]`).count() !== 0) throw new Error('이어 채우기 버튼이 다시 생겼다(v1.0.6 에 없앴다): ' + t);
       await one('bk-paper-price-row', '종이책 정가 줄');
       await one('bk-pdf-print', '종이책 만들기'); await one('bk-ebook', '전자책 만들기(PDF 셋)'); await one('bk-epub-opt', 'ePub 선택 체크');
       // 📱 ePub 은 선택(로이 2026-10-12) — 꺼져 있으면 ePub 검증 단추가 없고, 켜면 생긴다 · 옛 「참고용 전자책 PDF」·「ePub 만들기」 단추는 없다

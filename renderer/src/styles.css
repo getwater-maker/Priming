@@ -2163,3 +2163,5 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .menubar .autosave-ind{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .menubar .findbar{flex-shrink:1}
 .menubar .findbar input{min-width:28px}
+/* v1.0.6 — 출판 모드처럼 단추가 더 붙는 화면에서도 오른쪽이 잘리지 않게: 한 줄에 다 안 들어가면 다음 줄로 내린다(들어가면 예전과 같은 한 줄) */
+@media (min-width:1367px){.menubar{flex-wrap:wrap;row-gap:4px}}

@@ -1010,9 +1010,6 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <button disabled={regBusy || building} data-testid="bk-register-bookk"
               title="크롬을 열어 부크크 종이책 1~5단계(책형태·원고·표지·가격·최종확인)를 채웁니다 — 로그인·도서제출은 직접. 4단계 최종정가는 기록해 전자책 정가에 씁니다"
               onClick={() => runRegister('bookk')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
-              <button className="ghost" disabled={regBusy || building} data-testid="bk-register-cover"
-              title="이미 열려 있는 등록용 크롬에서 3단계(표지) 화면을 찾아(3·4·5단계 어디든) 거기서부터 5단계 최종확인까지 이어서 채웁니다 — 마지막 「도서제출」은 직접 누르세요"
-              onClick={() => runRegister('bookk', 'cover')}>🖼 이어 채우기</button>
             </div>
           </section>
           <section className="bkcard" data-ed="ebook">
@@ -1023,9 +1020,6 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
               <button disabled={regBusy || building} data-testid="bk-register-ebook"
               title="크롬을 열어 부크크 새전자책 1~5단계(기본정보·전자책 PDF(표지+본문)·표지 PDF·정가·소개)를 채웁니다 — 로그인·도서제출은 직접"
               onClick={() => runRegister('ebook')}>{regBusy ? '⏳ 진행 중…' : '🤖 자동 입력'}</button>
-              <button className="ghost" disabled={regBusy || building} data-testid="bk-register-ebook-resume"
-              title="이미 열려 있는 등록용 크롬의 전자책 화면(1~5단계 어디든)에서 지금 단계부터 5단계 최종확인까지 이어서 채웁니다 — 「도서제출」은 직접 누르세요"
-              onClick={() => runRegister('ebook', 'cover')}>📘 이어 채우기</button>
             </div>
           </section>
         </div>

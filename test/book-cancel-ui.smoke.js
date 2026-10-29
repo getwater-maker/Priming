@@ -1,5 +1,5 @@
 'use strict';
-// node test/book-cancel-ui.smoke.js — ⏹ 출판 만들기 팝업(v0.9.87): 경과 시간 · 「취소」로 조판을 멈춘다 · 등록 카드 「이어 채우기」 글자가 잘리지 않는다
+// node test/book-cancel-ui.smoke.js — ⏹ 출판 만들기 팝업(v0.9.87): 경과 시간 · 「취소」로 조판을 멈춘다 · 등록 카드 버튼 글자가 잘리지 않는다
 const path = require('path');
 const fs = require('fs');
 const { _electron: electron } = require('playwright');
@@ -27,11 +27,11 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.click('[data-tab=bookk]');
     await win.waitForSelector('[data-testid=bk-pdf-print]', { timeout: 10000 });
 
-    // [1] 이어 채우기 — 버튼 글자가 잘리지 않는다(좁은 카드면 두 줄로 내려간다)
-    const clip = await win.evaluate(() => ['bk-register-bookk', 'bk-register-cover', 'bk-register-ebook', 'bk-register-ebook-resume'].map((id) => {
+    // [1] 등록 버튼 — 글자가 잘리지 않는다(이어 채우기 버튼은 v1.0.6 에 없앴다)(좁은 카드면 두 줄로 내려간다)
+    const clip = await win.evaluate(() => ['bk-register-bookk', 'bk-register-ebook'].map((id) => {
       const b = document.querySelector(`[data-testid=${id}]`); return b ? { id, sw: b.scrollWidth, cw: b.clientWidth } : { id, missing: true };
     }));
-    ok(clip.every((c) => !c.missing && c.sw <= c.cw + 1), '등록 버튼 4개 글자 잘림 없음 ' + JSON.stringify(clip));
+    ok(clip.every((c) => !c.missing && c.sw <= c.cw + 1), '등록 버튼 2개 글자 잘림 없음 ' + JSON.stringify(clip));
 
     // [2] 종이책 만들기 → 팝업에 경과 시간 · 취소 버튼
     await win.click('[data-testid=bk-pdf-print]');
