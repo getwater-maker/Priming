@@ -95,14 +95,14 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     const mails = [bk('p4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_종이책]', T('979-11-12-32516-7', '2026년 10월 16일'), 1792151859000),
       bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
       bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
-    async function runAuto({ askFn, replied = [], resend = false, twice = false, inbox = false, scripts = [{ path: 'D:/출판/004/원고/vol4.md', title: '삼국지 4 : 적벽대전' }] } = {}) {
+    async function runAuto({ askFn, replied = [], resend = false, twice = false, inbox = false, scripts = [{ path: 'D:/출판/004/원고/vol4.md', title: '삼국지 4 : 적벽대전' }], mailList = mails } = {}) {
       const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}, opens = []; let metaWrites = 0, isOpen = !inbox;
-      const cc = { scriptPath: inbox ? scripts[0].path : 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
+      const cc = { scriptPath: inbox ? scripts[0].path : 'vol4.md', base: '삼국지_제4권', meta: { title: scripts[0].title }, sourceHash: 's4' };
       const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
       let nd = 0;
       const api = async (route, body) => {
-        if (route.startsWith('messages?')) { assert.match(decodeURIComponent(route), /from:bookk.co.kr/); return { messages: mails.map(m => ({ id: m.id })) }; }
-        if (route.startsWith('messages/')) return mails.find(m => route.startsWith('messages/' + m.id + '?'));
+        if (route.startsWith('messages?')) { assert.match(decodeURIComponent(route), /from:bookk.co.kr/); return { messages: mailList.map(m => ({ id: m.id })) }; }
+        if (route.startsWith('messages/')) return mailList.find(m => route.startsWith('messages/' + m.id + '?'));
         if (route.startsWith('threads/')) { const id = route.slice(8, route.indexOf('?')).slice(1); return { messages: replied.includes(id) ? [{ labelIds: ['SENT'], internalDate: '1792200000000' }] : [] }; }
         if (route === 'drafts') { const id = 'd' + (nd++); raws[id] = Buffer.from(body.message.raw, 'base64url').toString(); return { id }; }
         if (/^drafts\/d\d\?format=raw$/.test(route)) return { message: { raw: 'raw' } };
@@ -163,6 +163,25 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     A = await runAuto({ inbox: true, scripts: [{ path: 'x/원고/vol4.md', title: '삼국지 4 : 적벽대전' }, { path: 'x/기준/조판시험.md', title: '삼국지 4' }] });
     assert.deepEqual(A.opens, ['x/원고/vol4.md']);   // 같은 이름이 여럿이면 「원고」 폴더 것만
     console.log('✓ 📬 원고 없이 회신: 메일 → 원고 찾기·열기 → 같은 처리 · 원고 없음·여럿이면 멈춤 · 다 회신한 책은 열지 않음');
+    // 📬 실물(2026-11-02) — 화살표 「→」 + ⓒ 줄 + 부제 붙은 꼬리표. ⓒ 는 판권지 정보(추가 요청 아님) → 판권 ⓒ 줄에 넣고 보낸다
+    const T2 = '안녕하세요. 부크크입니다.\n\n판권지의 정보 아래와 같이 수정하여 저희 메일로 전체 원고파일만 전달바랍니다.\n\n발행 → 2026년 11월 2일\nISBN → 979-11-12-34199-0\nⓒ → 루시 모드 몽고메리 2026\n\n감사합니다. 부크크 원고검수팀.';
+    const x2 = M.extract(T2);
+    assert.deepEqual([x2.isbnText, x2.issueDate, x2.copyright, x2.ambiguous], ['979-11-12-34199-0', '2026년 11월 02일', '루시 모드 몽고메리 2026', false]);
+    assert.equal(M.plainRequest(T2).ok, true, JSON.stringify(M.plainRequest(T2).odd));
+    assert.equal(M.extract(T2 + '\nⓒ → 로이 2026').ambiguous, true);
+    const anne = [bk('a1', '[판권지수정요청]안녕하세요. 부크크입니다.[빨간 머리 앤 초록 지붕 집의 앤_전자책]', T2, 1792300000000)];
+    const annePath = 'D:/출판/002/원고/빨간머리앤.md';
+    A = await runAuto({ inbox: true, mailList: anne, scripts: [{ path: annePath, title: '빨간 머리 앤 : 초록 지붕 집의 앤' }] });
+    assert.equal(A.r.error, undefined, A.r.error);
+    assert.deepEqual(A.opens, [annePath]); assert.equal(A.sent.length, 1, JSON.stringify(A.r.results));
+    assert.equal(A.cc.meta.ebookIsbn, '979-11-12-34199-0'); assert.equal(A.cc.meta.copyright, 'ⓒ 루시 모드 몽고메리 2026. All rights reserved.');
+    // Claude 대조 — ⓒ 를 정식 값으로 읽으면 통과, 다르게 읽으면 멈춤
+    const cl = cp => async () => ({ ok: true, text: JSON.stringify({ isbn: '9791112341990', issueDate: '2026-11-02', copyright: cp, extraRequests: [] }) });
+    A = await runAuto({ inbox: true, mailList: anne, scripts: [{ path: annePath, title: '빨간 머리 앤 : 초록 지붕 집의 앤' }], askFn: cl('루시 모드 몽고메리 2026') });
+    assert.equal(A.sent.length, 1, JSON.stringify(A.r.results));
+    A = await runAuto({ inbox: true, mailList: anne, scripts: [{ path: annePath, title: '빨간 머리 앤 : 초록 지붕 집의 앤' }], askFn: cl('로이 2026') });
+    assert.equal(A.sent.length, 0); assert.ok(A.r.results.some(x => /ⓒ 값이 서로/.test(x.note)));
+    console.log('✓ 📬 실물 메일: 「→」·ⓒ 줄 = 판권지 정보 → 판권 ⓒ 줄에 넣고 발송 · 부제 붙은 꼬리표 · Claude ⓒ 대조');
     console.log('✅ 출판 메일 검증 완료 (실제 메일 발송 없음)');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -22,7 +22,10 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     const keys = ed === 'ebook' ? ['ebookIsbn', 'ebookIssueDate'] : ['isbn', 'issueDate'];
     const vals = [v.isbnText || v.isbn, v.issueDate];
     for (let i = 0; i < 2; i++) if (String(same(c).meta[keys[i]] || '') !== vals[i]) { await setMeta({ key: keys[i], value: vals[i] }); same(c); }
+    // ⓒ — 메일이 준 값을 자동 문구와 같은 꼴로(`ⓒ 이름 연도. All rights reserved.`) · 판권 한 줄이라 종이책·전자책이 같이 쓴다
+    if (v.copyright) { const cp = copyrightLine(v.copyright); if (String(same(c).meta.copyright || '') !== cp) { await setMeta({ key: 'copyright', value: cp }); same(c); } }
   }
+  const copyrightLine = v => `ⓒ ${String(v).replace(/^\s*(?:ⓒ|©)\s*/, '').trim()}. All rights reserved.`;
   function assertValues(c, ed, j) {
     const meta = same(c).meta;
     if (String(meta[ed === 'ebook' ? 'ebookIsbn' : 'isbn'] || '').replace(/[\s-]/g, '') !== j.values.isbn || String(meta[ed === 'ebook' ? 'ebookIssueDate' : 'issueDate'] || '') !== j.values.issueDate) throw Error('ISBN·발행일이 초안 생성 이후 변경되었습니다. 초안을 다시 만드세요');
@@ -146,6 +149,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     if (extra.length) return { ok: false, why: '추가 요청이 있습니다: ' + extra.join(' / ') };
     let cx; try { cx = M.validate(j.isbn, j.issueDate); } catch (_) { return { ok: false, why: 'Claude 가 ISBN·발행일을 읽지 못했습니다' }; }
     if (cx.isbn !== x.isbn || cx.issueDate !== x.issueDate) return { ok: false, why: `값이 서로 다릅니다(정규식 ${x.isbn}·${x.issueDate} / Claude ${cx.isbn}·${cx.issueDate})` };
+    const sq = s => String(s || '').replace(/^\s*(?:ⓒ|©)\s*/, '').replace(/[\s.]/g, '');
+    if (sq(j.copyright) !== sq(x.copyright)) return { ok: false, why: `ⓒ 값이 서로 다릅니다(정규식 「${x.copyright || '없음'}」 / Claude 「${j.copyright || '없음'}」)` };
     return { ok: true, by: 'Claude 대조' };
   }
   function parseJson(t) { const m = String(t || '').match(/\{[\s\S]*\}/); try { return m ? JSON.parse(m[0]) : null; } catch (_) { return null; } }
@@ -173,7 +178,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       if (!mine.length) continue;
       mine.forEach(m => hit.add(m.id));
       const key = M.shortTitle(s.title).replace(/\s+/g, '');
-      const b = books.get(key) || { title: M.shortTitle(s.title), paths: [], mails: mine };
+      const b = books.get(key) || { title: M.shortTitle(s.title), full: s.title, paths: [], mails: mine };   // 판 가르기는 전체 제목으로(부제 붙은 꼬리표 · 짧은 제목으로 가르면 null)
       b.paths.push(s.path); books.set(key, b);
     }
     for (const m of all) if (!hit.has(m.id) && /판권지\s*수정\s*요청/.test(m.subject) && !/^\s*(?:re|fw|fwd)\s*:/i.test(m.subject))
@@ -182,7 +187,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     for (const b of books.values()) {
       const pending = [];
       for (const ed of ['print', 'ebook']) {
-        const msg = b.mails.filter(m => M.requestOf(m.subject, b.title).edition === ed).sort((x, y) => y.at - x.at)[0];
+        const msg = b.mails.filter(m => (M.requestOf(m.subject, b.full) || {}).edition === ed).sort((x, y) => y.at - x.at)[0];
         if (msg && !(await replied(msg))) pending.push(msg);
       }
       if (!pending.length) { doneN++; continue; }
@@ -208,7 +213,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     const results = [], ready = [], round = a.resend ? 'resend-' + Date.now() : '';
     for (const ed of ['print', 'ebook']) {
       const label = ed === 'ebook' ? '전자책' : '종이책';
-      const msg = all.filter(m => { const q = M.requestOf(m.subject, title); return q && q.edition === ed; }).sort((x, y) => y.at - x.at)[0];
+      // 전체 제목으로 비교(부제 붙은 꼬리표도)
+      const msg = all.filter(m => { const q = M.requestOf(m.subject, c.meta.title || c.base); return q && q.edition === ed; }).sort((x, y) => y.at - x.at)[0];
       if (!msg) { results.push({ edition: ed, label, state: 'none', note: `「${title}」 ${label} 판권지 수정 요청 메일이 없습니다` }); continue; }
       // 🔁 resend = 로이가 「다시 보내기」를 누른 때만 — 이미 회신한 메일에도 고친 파일을 한 번 더 보낸다
       if (!a.resend && await replied(msg)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
@@ -216,8 +222,8 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
       if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: v.why + ' — Gmail에서 직접 회신하세요' }); continue; }
-      log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbnText} · ${x.issueDate} (${v.by})`);
-      const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbnText || x.isbn, issueDate: x.issueDate, note: '' };
+      log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbnText} · ${x.issueDate}${x.copyright ? ' · ⓒ ' + x.copyright : ''} (${v.by})`);
+      const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbnText || x.isbn, issueDate: x.issueDate + (x.copyright ? ' · ⓒ ' + x.copyright : ''), note: '' };
       ready.push({ ed, msg, x, res }); results.push(res);
     }
     // 🔑 두 판의 판권 값을 원고에 먼저 다 쓴다 — 종이책 초안 뒤에 전자책 값을 쓰면 원고가 바뀌어 종이책 발송이 「원고 변경」으로 막힌다.
