@@ -86,6 +86,9 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     assert.equal(M.requestOf('[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', '삼국지 4 : 적벽대전'), null);
     assert.equal(M.requestOf('[판권지수정요청]…[삼국지 40_종이책]', '삼국지 4'), null);
     assert.equal(M.requestOf('Re: [판권지수정요청]…[삼국지 4_종이책]', '삼국지 4'), null);
+    // 부제까지 붙인 꼬리표(실물 2026-11-02) — 원고 제목 「빨간 머리 앤 : 초록 지붕 집의 앤」
+    assert.deepEqual(M.requestOf('[판권지수정요청]안녕하세요. 부크크입니다.[빨간 머리 앤 초록 지붕 집의 앤_전자책]', '빨간 머리 앤 : 초록 지붕 집의 앤'), { edition: 'ebook' });
+    assert.equal(M.requestOf('[판권지수정요청]…[빨간 머리 앤 초록 지붕_전자책]', '빨간 머리 앤 : 초록 지붕 집의 앤'), null);
     assert.equal(M.plainRequest(T('979-11-12-32516-7', '2026년 10월 16일')).ok, true);
     assert.equal(M.plainRequest('안녕하세요. 부크크입니다.\n제출하신 앞표지에 로고 작업하여 전달드립니다.\n' + T('979-11-12-32516-7', '2026년 10월 16일')).ok, false);
     const P_ISBN = '9791112325167', E_ISBN = '9791112325181';

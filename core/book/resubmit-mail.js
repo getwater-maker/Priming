@@ -59,7 +59,8 @@ function requestOf(subject, title) {
   const tags = [...s.matchAll(/\[([^\]]+)\]/g)].map(m => m[1]).filter(t => !/판권지\s*수정\s*요청/.test(t));
   for (const t of tags) {
     const m = t.match(/^(.*?)(?:[_\s-]*(종이책|전자책))?\s*$/);
-    if (m && squash(m[1]) === squash(shortTitle(title))) return { edition: m[2] === '전자책' ? 'ebook' : 'print' };
+    // 부크크 꼬리표는 짧은 제목(`[삼국지 4]`)일 때도, 부제까지 붙인 제목(`[빨간 머리 앤 초록 지붕 집의 앤_전자책]` · 2026-11-02 실물)일 때도 있다
+    if (m && [shortTitle(title), String(title || '').replace(/[:：]/g, ' ')].some(t => squash(m[1]) === squash(t))) return { edition: m[2] === '전자책' ? 'ebook' : 'print' };
   }
   return null;
 }
