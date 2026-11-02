@@ -92,9 +92,9 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     const mails = [bk('p4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_종이책]', T('979-11-12-32516-7', '2026년 10월 16일'), 1792151859000),
       bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
       bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
-    async function runAuto({ askFn, replied = [], resend = false, twice = false } = {}) {
-      const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}; let metaWrites = 0;
-      const cc = { scriptPath: 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
+    async function runAuto({ askFn, replied = [], resend = false, twice = false, inbox = false, scripts = [{ path: 'D:/출판/004/원고/vol4.md', title: '삼국지 4 : 적벽대전' }] } = {}) {
+      const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}, opens = []; let metaWrites = 0, isOpen = !inbox;
+      const cc = { scriptPath: inbox ? scripts[0].path : 'vol4.md', base: '삼국지_제4권', meta: { title: '삼국지 4 : 적벽대전' }, sourceHash: 's4' };
       const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
       let nd = 0;
       const api = async (route, body) => {
@@ -106,12 +106,14 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
         if (route === 'drafts/send') { sent.push(raws[body.id]); return { id: 'sent-' + body.id }; }
         throw Error('Unexpected route: ' + route);
       };
-      install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: {}, dialog: {}, context: () => cc,
+      install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: {}, dialog: {}, context: () => (isOpen ? cc : null),
+        findScripts: async () => scripts, openBook: async p => { opens.push(p); isOpen = true; return { queue: 'Q' }; },
         // 실제처럼 판권 값을 쓰면 원고 해시가 바뀐다(종이책 초안 뒤에 전자책 값을 쓰면 종이책 발송이 막히던 순서 문제를 잡는다)
         setMeta: async a => { metaWrites++; cc.meta[a.key] = a.value; cc.sourceHash = JSON.stringify(cc.meta); },
         // 실제 빌더처럼 판마다 자기 파일만 쓴다(전자책 빌드는 종이책 내지를 건드리지 않는다)
         build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, '%PDF-' + a.edition); return own; },
         ask: askFn, client: { status: () => ({ connected: true, email: 'getwater@gmail.com' }), load: () => structuredClone(d), save: x => Object.assign(d, structuredClone(x)), api } });
+      if (inbox) return { r: await h['book-mail-inbox'](null, {}), cc, sent, built, metaWrites, opens };
       let r = await h['book-mail-auto'](null, {});
       if (twice) r = await h['book-mail-auto'](null, { resend });
       return { r, cc, sent, built, metaWrites };
@@ -144,6 +146,20 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     A = await runAuto({ askFn: async () => ({ ok: false, noKey: true }) });
     assert.deepEqual(A.r.results.map(x => x.state), ['sent', 'sent']);
     console.log('✓ 📬 자동 처리: 「발행->」 추출·책/판 판별·추가 요청·값 불일치 멈춤·이미 회신 건너뜀·두 판 판권 먼저 쓰고 판마다 PDF→발송');
+    // 📬 원고 없이(출판 첫 화면) — 메일 먼저 → 제목의 책 원고를 찾아 열고 같은 처리 · 원고 없는 메일은 멈춤 · 다 회신했으면 열지 않음
+    A = await runAuto({ inbox: true });
+    assert.equal(A.r.error, undefined, A.r.error);
+    assert.deepEqual(A.opens, ['D:/출판/004/원고/vol4.md']); assert.equal(A.r.queue, 'Q');
+    assert.equal(A.sent.length, 2); assert.equal(A.cc.meta.isbn, '979-11-12-32516-7');
+    assert.ok(A.r.results.some(x => x.state === 'stop' && /삼국지 3/.test(x.note) && /찾지 못했/.test(x.note)), JSON.stringify(A.r.results));
+    assert.deepEqual(A.r.results.filter(x => x.state === 'sent').map(x => x.label), ['삼국지 4 종이책', '삼국지 4 전자책']);
+    A = await runAuto({ inbox: true, replied: ['p4', 'e4'] });
+    assert.deepEqual(A.opens, []); assert.equal(A.sent.length, 0); assert.ok(A.r.results.some(x => x.state === 'info' && /1권/.test(x.note)));
+    A = await runAuto({ inbox: true, scripts: [{ path: 'a/vol4.md', title: '삼국지 4 : 적벽대전' }, { path: 'b/조판시험.md', title: '삼국지 4' }] });
+    assert.deepEqual(A.opens, []); assert.equal(A.sent.length, 0); assert.ok(A.r.results.some(x => x.state === 'stop' && /2개/.test(x.note)));
+    A = await runAuto({ inbox: true, scripts: [{ path: 'x/원고/vol4.md', title: '삼국지 4 : 적벽대전' }, { path: 'x/기준/조판시험.md', title: '삼국지 4' }] });
+    assert.deepEqual(A.opens, ['x/원고/vol4.md']);   // 같은 이름이 여럿이면 「원고」 폴더 것만
+    console.log('✓ 📬 원고 없이 회신: 메일 → 원고 찾기·열기 → 같은 처리 · 원고 없음·여럿이면 멈춤 · 다 회신한 책은 열지 않음');
     console.log('✅ 출판 메일 검증 완료 (실제 메일 발송 없음)');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

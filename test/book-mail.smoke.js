@@ -8,10 +8,27 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
   const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
   try {
     const win = await app.firstWindow(); await win.waitForSelector('h1');
-    await win.evaluate(p => window.api.openBookPath({ scriptPath: p }), md);
-    await app.evaluate(({ ipcMain }) => {
-      for (const n of ['status', 'auto']) ipcMain.removeHandler('book-mail-' + n);
+    // 📬 원고를 열기 전(출판 첫 화면)에도 회신 단추 — 누르면 main 이 메일의 책 원고를 열고, 결과는 등록·유통 탭에 이어 보인다
+    await app.evaluate(({ ipcMain }, p) => {
+      for (const n of ['status', 'inbox']) ipcMain.removeHandler('book-mail-' + n);
       ipcMain.handle('book-mail-status', () => ({ configured: true, connected: true, email: 'getwater@gmail.com', job: null }));
+      ipcMain.handle('book-mail-inbox', async () => {
+        const open = ipcMain._invokeHandlers.get('open-book-path');
+        const o = await open({ sender: null }, { scriptPath: p });
+        return { results: [{ edition: 'print', label: '메일 시험 종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (내지.pdf)', scriptPath: p }, { edition: 'none', label: '', state: 'stop', note: '「[삼국지 9]」 — 원고 폴더에서 이 책 원고를 찾지 못했습니다' }], dto: o.dto, queue: o.queue };
+      });
+    }, md);
+    await win.click('.modetoggle button:has-text("📖 출판")');
+    const first = win.locator('[data-testid=bk-mail-inbox]'); await first.waitFor();
+    assert.match(await first.innerText(), /부크크 메일 확인/);
+    await first.click();
+    const res0 = win.locator('[data-testid=bk-mail-auto-result]'); await res0.waitFor();
+    assert.match(await res0.innerText(), /✅ 메일 시험 종이책 ISBN 9791112325167/);
+    assert.match(await res0.innerText(), /찾지 못했습니다/);
+    assert.equal(await win.locator('[data-testid=bk-mail-auto]').count(), 1, '원고가 열린 뒤 등록·유통 탭의 회신 칸');
+    console.log('✓ 출판 첫 화면 회신 단추 → 원고 열림 → 결과가 등록·유통 탭에 이어 보임');
+    await app.evaluate(({ ipcMain }) => {
+      for (const n of ['auto']) ipcMain.removeHandler('book-mail-' + n);
       ipcMain.handle('book-mail-auto', () => ({ results: [{ edition: 'print', label: '종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (4_내지.pdf)' }, { edition: 'ebook', label: '전자책', state: 'stop', note: '추가 요청이 있습니다: 앞표지 로고 — Gmail에서 직접 회신하세요' }] }));
     });
     await win.click('.modetoggle button:has-text("📖 출판")'); await win.click('[data-tab=bookk]');

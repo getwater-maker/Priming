@@ -149,6 +149,7 @@ export default function BookView({ dto, setDto, setStatus, logline, logBox, queu
     return () => clearInterval(id);
   }, [previewBusy]);
   const [building, setBuilding] = useState(false);
+  const [mailResult, setMailResult] = useState(null);   // 📬 첫 화면 회신 결과 — 원고가 열린 뒤 등록·유통 탭 BookMail 이 이어 보여 준다
   const [pageInfo, setPageInfo] = useState({ cur: 0, total: 0 });
   const [edit, setEdit] = useState(null); // { lineStart, lineEnd, text, file }
   // 문단 수정창은 ESC 로도 닫는다(취소 버튼과 동일) — 앱 전체 팝업 닫기 규칙과 일관.
@@ -810,6 +811,11 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
             핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
             대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 종이책은 규격에 맞는 표지·내지·표지+내지 PDF, 전자책은 표지·본문·표지+본문 PDF 를 만듭니다(ePub 은 선택).
           </p>
+          <section className="bkcard bkempty-mail">
+            <div className="bkcard-h">✉ 부크크 회신</div>
+            <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} inbox setQueue={setQueue}
+              onInboxDone={(res, p) => { setMailResult({ path: p, res }); setTab('bookk'); }} />
+          </section>
         </div></div>
       </div>
     );
@@ -1025,7 +1031,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         </div>
         <section className="bkcard">
           <div className="bkcard-h">✉ 부크크 회신</div>
-          <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} />
+          <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} initial={mailResult && mailResult.path === dto.scriptPath ? mailResult.res : null} />
         </section>
 
         {/* 3) 🔎 올리기 전 점검(한 번) */}

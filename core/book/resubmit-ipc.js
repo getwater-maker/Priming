@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const M = require('./resubmit-mail');
 const hash = b => crypto.createHash('sha256').update(b).digest('hex');
-function install({ ipcMain, dialog, shell, win, context, setMeta, build, client, ask, log = () => {} }) {
+function install({ ipcMain, dialog, shell, win, context, setMeta, build, client, ask, findScripts, openBook, log = () => {} }) {
   let busy = false;
   const book = () => { const c = context(); if (!c || !c.scriptPath) throw Error('출판 원고를 먼저 여세요'); return c; };
   const same = c => { const n = book(); if (n.scriptPath !== c.scriptPath || n.base !== c.base) throw Error('원고가 변경되었습니다. 해당 책을 다시 열고 진행하세요'); return n; };
@@ -149,20 +149,69 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     return { ok: true, by: 'Claude 대조' };
   }
   function parseJson(t) { const m = String(t || '').match(/\{[\s\S]*\}/); try { return m ? JSON.parse(m[0]) : null; } catch (_) { return null; } }
-  route('auto', mutate(async a => {
-    const c = book(), title = M.shortTitle(c.meta.title || c.base);
+  async function fetchRequests() {
     if (!client.status().connected) throw Error('Gmail 을 먼저 연결하세요');
     const r = await client.api('messages?' + new URLSearchParams({ q: 'from:bookk.co.kr 판권지수정요청 newer_than:60d -in:sent -in:drafts', maxResults: '30' }));
-    const all = await Promise.all((r.messages || []).map(async m => M.message(await client.api('messages/' + encodeURIComponent(m.id) + '?format=full'))));
+    return Promise.all((r.messages || []).map(async m => M.message(await client.api('messages/' + encodeURIComponent(m.id) + '?format=full'))));
+  }
+  const replied = async msg => { const th = await client.api('threads/' + encodeURIComponent(msg.threadId) + '?format=minimal'); return (th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at); };
+  route('auto', mutate(async a => {
+    const c = book(), all = await fetchRequests();
     same(c);
+    return runAuto(a, c, all);
+  }));
+  // 📬 원고를 열지 않고 누르는 회신(로이 2026-11-02 「파일은 이미 만들어져 있다 — 메일을 확인하고 해당 원고를 고쳐 보내라」):
+  //   메일 먼저 → 제목 꼬리표의 책 이름으로 원고 폴더에서 원고를 찾아 연다 → 위 자동 처리를 그대로. 답하지 않은 메일이 있는 책만 연다.
+  //   원고를 못 찾거나 같은 이름 원고가 여럿이면 그 메일은 보내지 않는다.
+  route('inbox', mutate(async a => {
+    if (!findScripts || !openBook) throw Error('원고 찾기를 쓸 수 없습니다');
+    const all = await fetchRequests(), scripts = await findScripts();
+    const start = context(), results = [], books = new Map(), hit = new Set();
+    let queue = null;
+    for (const s of scripts) {
+      const mine = all.filter(m => M.requestOf(m.subject, s.title));
+      if (!mine.length) continue;
+      mine.forEach(m => hit.add(m.id));
+      const key = M.shortTitle(s.title).replace(/\s+/g, '');
+      const b = books.get(key) || { title: M.shortTitle(s.title), paths: [], mails: mine };
+      b.paths.push(s.path); books.set(key, b);
+    }
+    for (const m of all) if (!hit.has(m.id) && /판권지\s*수정\s*요청/.test(m.subject) && !/^\s*(?:re|fw|fwd)\s*:/i.test(m.subject))
+      results.push({ edition: 'none', label: '', state: 'stop', subject: m.subject, note: `「${m.subject}」 — 원고 폴더에서 이 책 원고를 찾지 못했습니다` });
+    let doneN = 0;
+    for (const b of books.values()) {
+      const pending = [];
+      for (const ed of ['print', 'ebook']) {
+        const msg = b.mails.filter(m => M.requestOf(m.subject, b.title).edition === ed).sort((x, y) => y.at - x.at)[0];
+        if (msg && !(await replied(msg))) pending.push(msg);
+      }
+      if (!pending.length) { doneN++; continue; }
+      const paths = b.paths.length > 1 ? b.paths.filter(p => /[\\/]원고[\\/][^\\/]+$/.test(p)) : b.paths;
+      if (paths.length !== 1) { results.push({ edition: 'none', label: b.title, state: 'stop', note: `원고가 ${b.paths.length}개라 고르지 못했습니다(${b.paths.map(p => path.basename(p)).join(', ')}) — 원고를 열고 「판권 수정해서 부크크에 회신」을 누르세요` }); continue; }
+      try {
+        const o = await openBook(paths[0]); if (o && o.queue) queue = o.queue;
+        const c = book();
+        if (c.scriptPath !== paths[0]) throw Error('원고를 열지 못했습니다');
+        log(`📬 ${b.title} — 답하지 않은 부크크 메일 ${pending.length}통 · 원고 ${path.basename(paths[0])} 열기`);
+        const r = await runAuto({ ...a, layout: undefined, resend: false, __quiet: true }, c, all);   // 조판은 그 권에 저장된 값(화면의 빈 값으로 덮지 않게)
+        for (const x of r.results) results.push({ ...x, label: `${b.title} ${x.label}`, scriptPath: c.scriptPath });
+      } catch (e) { results.push({ edition: 'none', label: b.title, state: 'stop', note: '보내지 못했습니다 — ' + e.message }); }
+    }
+    if (doneN) results.push({ edition: 'none', label: '', state: 'info', note: `이미 회신한 책 ${doneN}권` });
+    if (!results.length) results.push({ edition: 'none', label: '', state: 'none', note: '부크크 판권지 수정 요청 메일이 없습니다' });
+    for (const res of results) log(`📬 ${res.label}: ${res.note}`);
+    const now = context();
+    return { results, dto: now ? now.dto : null, queue, opened: !!(now && (!start || now.scriptPath !== start.scriptPath)) };
+  }));
+  async function runAuto(a, c, all) {
+    const title = M.shortTitle(c.meta.title || c.base);
     const results = [], ready = [], round = a.resend ? 'resend-' + Date.now() : '';
     for (const ed of ['print', 'ebook']) {
       const label = ed === 'ebook' ? '전자책' : '종이책';
       const msg = all.filter(m => { const q = M.requestOf(m.subject, title); return q && q.edition === ed; }).sort((x, y) => y.at - x.at)[0];
       if (!msg) { results.push({ edition: ed, label, state: 'none', note: `「${title}」 ${label} 판권지 수정 요청 메일이 없습니다` }); continue; }
-      const th = await client.api('threads/' + encodeURIComponent(msg.threadId) + '?format=minimal');
       // 🔁 resend = 로이가 「다시 보내기」를 누른 때만 — 이미 회신한 메일에도 고친 파일을 한 번 더 보낸다
-      if (!a.resend && (th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
+      if (!a.resend && await replied(msg)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
       const x = M.extract(msg.text);
       if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
@@ -185,9 +234,9 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
         res.note = sn.job.state === 'sent' ? `발송 완료 → ${sn.job.to} (${sn.job.files.map(f => f.name).join(', ')})` : (sn.job.note || '발송 결과 확인 필요');
       } catch (e) { res.state = 'stop'; res.note = '보내지 못했습니다 — ' + e.message; }
     }
-    for (const res of results) log(`📬 ${res.label}: ${res.note}`);
+    if (!a.__quiet) for (const res of results) log(`📬 ${res.label}: ${res.note}`);
     return { results, dto: context().dto };
-  }));
+  }
   route('open', () => shell.openExternal('https://mail.google.com/mail/?authuser=' + encodeURIComponent(client.status().email) + '#drafts'));
   route('setup', () => shell.openExternal('https://console.cloud.google.com/apis/library/gmail.googleapis.com'));
 }
