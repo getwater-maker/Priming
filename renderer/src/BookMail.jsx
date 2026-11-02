@@ -6,7 +6,7 @@ import api from './lib/ipc.js';
 //   Gmail 연결(계정·JSON·로그인)은 ⚙ 설정 → 계정 탭의 <BookMailConnect>(로이 「좁은 곳에 너무 많은 입력」).
 //   inbox = 원고를 열기 전 출판 첫 화면(로이 2026-11-02) — 메일을 먼저 찾고, 그 메일의 책 원고를 원고 폴더에서 찾아 열어 같은 처리를 한다(main `book-mail-inbox`).
 //   열린 뒤엔 화면이 그 원고로 바뀌므로 결과는 onInboxDone 으로 넘겨 등록·유통 탭의 BookMail 이 initial 로 이어 보여 준다.
-export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, inbox, setQueue, onInboxDone, initial }) {
+export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, inbox, setQueue, onInboxDone, initial, presetName }) {
   const [status, setMailStatus] = useState({}), [busy, setBusy] = useState(false), [error, setError] = useState(''), [auto, setAuto] = useState(initial || null);
   const scriptPath = dto ? dto.scriptPath : '';
   const currentPath = useRef(scriptPath); currentPath.current = scriptPath;
@@ -19,7 +19,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
   async function sendInbox() {
     setBusy(true); setError(''); setAuto(null); setBuilding(true);
     try {
-      const r = await api.bookMail('inbox', {});
+      const r = await api.bookMail('inbox', { presetName: presetName || null });   // 헤더 채널(원고 폴더)
       if (r?.error) throw Error(r.error);
       const res = r.results || [];
       setAuto(res);

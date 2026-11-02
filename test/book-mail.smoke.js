@@ -12,7 +12,8 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     await app.evaluate(({ ipcMain }, p) => {
       for (const n of ['status', 'inbox']) ipcMain.removeHandler('book-mail-' + n);
       ipcMain.handle('book-mail-status', () => ({ configured: true, connected: true, email: 'getwater@gmail.com', job: null }));
-      ipcMain.handle('book-mail-inbox', async () => {
+      ipcMain.handle('book-mail-inbox', async (_e, a) => {
+        global.__inboxArg = a;
         const open = ipcMain._invokeHandlers.get('open-book-path');
         const o = await open({ sender: null }, { scriptPath: p });
         return { results: [{ edition: 'print', label: '메일 시험 종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (내지.pdf)', scriptPath: p }, { edition: 'none', label: '', state: 'stop', note: '「[삼국지 9]」 — 원고 폴더에서 이 책 원고를 찾지 못했습니다' }], dto: o.dto, queue: o.queue };
@@ -25,6 +26,9 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     const res0 = win.locator('[data-testid=bk-mail-auto-result]'); await res0.waitFor();
     assert.match(await res0.innerText(), /✅ 메일 시험 종이책 ISBN 9791112325167/);
     assert.match(await res0.innerText(), /찾지 못했습니다/);
+    // 원고를 열기 전엔 main 이 헤더 채널을 모른다 — 단추가 헤더 채널 이름을 넘겨야 원고 폴더를 찾는다(「원고 폴더가 없습니다」 사고)
+    const sentArg = await app.evaluate(() => global.__inboxArg);
+    assert.ok(sentArg && typeof sentArg.presetName === 'string' && sentArg.presetName, '헤더 채널 이름이 안 넘어왔다 ' + JSON.stringify(sentArg));
     assert.equal(await win.locator('[data-testid=bk-mail-auto]').count(), 1, '원고가 열린 뒤 등록·유통 탭의 회신 칸');
     console.log('✓ 출판 첫 화면 회신 단추 → 원고 열림 → 결과가 등록·유통 탭에 이어 보임');
     await app.evaluate(({ ipcMain }) => {

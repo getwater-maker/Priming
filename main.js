@@ -13216,8 +13216,8 @@ require('./core/book/resubmit-ipc').install({
   build: a => _BOOK_H['book-build-pdf'](null, a),
   ask: o => require('./core/claude-api').ask({ use: 'mail', ...o, log }),   // 📬 자동 처리의 메일 확인(키 없으면 정형 문구 검사로)
   // 📬 원고 없이 누르는 회신 — 헤더 채널(출판)의 원고 폴더에서 `# 제목` 줄로 원고를 찾고, 고른 원고는 「원고 열기」와 같은 길로 연다
-  findScripts: () => require('./core/book/script-find').findBookScripts(S.preset && S.preset.scriptFolder),
-  openBook: p => openBookPaths([p], S.preset),
+  findScripts: n => { const pr = resolvePreset(n || null); if (pr) S.preset = pr; return require('./core/book/script-find').findBookScripts(pr && pr.scriptFolder); },
+  openBook: (p, n) => openBookPaths([p], resolvePreset(n || null)),
   log,
 });
 ipcMain.handle('open-folder', async (_e, args = {}) => {

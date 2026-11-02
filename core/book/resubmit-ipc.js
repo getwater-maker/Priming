@@ -165,7 +165,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   //   원고를 못 찾거나 같은 이름 원고가 여럿이면 그 메일은 보내지 않는다.
   route('inbox', mutate(async a => {
     if (!findScripts || !openBook) throw Error('원고 찾기를 쓸 수 없습니다');
-    const all = await fetchRequests(), scripts = await findScripts();
+    const all = await fetchRequests(), scripts = await findScripts(a.presetName);   // 원고를 열기 전엔 main 이 헤더 채널을 모른다 — 화면이 이름을 넘긴다
     const start = context(), results = [], books = new Map(), hit = new Set();
     let queue = null;
     for (const s of scripts) {
@@ -189,7 +189,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       const paths = b.paths.length > 1 ? b.paths.filter(p => /[\\/]원고[\\/][^\\/]+$/.test(p)) : b.paths;
       if (paths.length !== 1) { results.push({ edition: 'none', label: b.title, state: 'stop', note: `원고가 ${b.paths.length}개라 고르지 못했습니다(${b.paths.map(p => path.basename(p)).join(', ')}) — 원고를 열고 「판권 수정해서 부크크에 회신」을 누르세요` }); continue; }
       try {
-        const o = await openBook(paths[0]); if (o && o.queue) queue = o.queue;
+        const o = await openBook(paths[0], a.presetName); if (o && o.queue) queue = o.queue;
         const c = book();
         if (c.scriptPath !== paths[0]) throw Error('원고를 열지 못했습니다');
         log(`📬 ${b.title} — 답하지 않은 부크크 메일 ${pending.length}통 · 원고 ${path.basename(paths[0])} 열기`);

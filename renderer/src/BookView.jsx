@@ -103,7 +103,7 @@ function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
   );
 }
 
-export default function BookView({ dto, setDto, setStatus, logline, logBox, queue, setQueue, onSelectQueue, onRemoveQueue }) {
+export default function BookView({ dto, setDto, setStatus, logline, logBox, queue, setQueue, onSelectQueue, onRemoveQueue, presetName }) {
   const [layout, setLayout] = useState(LAYOUT_DEFAULTS);
   // 원고 전환 시 저장된 조판 설정 복원(없으면 기본값)
   const layoutLoadedFor = useRef('');
@@ -813,7 +813,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           </p>
           <section className="bkcard bkempty-mail">
             <div className="bkcard-h">✉ 부크크 회신</div>
-            <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} inbox setQueue={setQueue}
+            <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} inbox setQueue={setQueue} presetName={presetName}
               onInboxDone={(res, p) => { setMailResult({ path: p, res }); setTab('bookk'); }} />
           </section>
         </div></div>
