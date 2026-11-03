@@ -88,10 +88,11 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
     if (!result || result.error) throw Error(result && result.error || 'PDF 생성에 실패했습니다');
     const files = kinds.map(k => {
       const p = result[k]; if (!p || !fs.existsSync(p)) throw Error('요청한 파일을 만들지 못했습니다: ' + k);
-      if (fs.statSync(p).size > 18 * 1024 * 1024) throw Error('첨부파일이 18MB를 넘습니다. Gmail에서 직접 첨부하세요');
+      // 📎 Gmail 한 통 25MB(첨부는 인코딩으로 약 1/3 커진다) — 넘으면 만든 파일 정보를 실어 화면이 「직접 보내기」 팝업을 띄운다(로이 2026-11-03)
+      if (fs.statSync(p).size > 18 * 1024 * 1024) throw Object.assign(Error('첨부파일이 18MB를 넘습니다. Gmail에서 직접 첨부하세요'), { manualFile: p });
       const buffer = fs.readFileSync(p); return { path: p, name: path.basename(p), bytes: buffer.length, hash: hash(buffer), buffer };
     });
-    if (files.reduce((n, f) => n + f.bytes, 0) > 18 * 1024 * 1024) throw Error('첨부 합계가 18MB를 넘습니다. 파일 종류를 줄이거나 Gmail에서 직접 첨부하세요');
+    if (files.reduce((n, f) => n + f.bytes, 0) > 18 * 1024 * 1024) throw Object.assign(Error('첨부 합계가 18MB를 넘습니다. 파일 종류를 줄이거나 Gmail에서 직접 첨부하세요'), { manualFile: files[0].path });
     // 다른 권의 파일이 섞이지 않도록 빌더가 이번 호출에서 반환한 경로만 사용한다.
     const id = crypto.randomUUID();
     const body = String(a.body || '').trim() || `안녕하세요.\n\n${c.base} ${ed === 'ebook' ? '전자책' : '종이책'} 수정 파일을 보내드립니다.\nISBN: ${values.isbn}\n발행일: ${values.issueDate}\n\n요청하신 수정 사항을 반영했습니다. 확인 부탁드립니다.\n감사합니다.`;
@@ -156,7 +157,7 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
   function parseJson(t) { const m = String(t || '').match(/\{[\s\S]*\}/); try { return m ? JSON.parse(m[0]) : null; } catch (_) { return null; } }
   async function fetchRequests() {
     if (!client.status().connected) throw Error('Gmail 을 먼저 연결하세요');
-    const r = await client.api('messages?' + new URLSearchParams({ q: 'from:bookk.co.kr 판권지수정요청 newer_than:60d -in:sent -in:drafts', maxResults: '30' }));
+    const r = await client.api('messages?' + new URLSearchParams({ q: 'from:bookk.co.kr 판권지수정요청 newer_than:60d -in:sent -in:drafts', maxResults: '100' }));
     return Promise.all((r.messages || []).map(async m => M.message(await client.api('messages/' + encodeURIComponent(m.id) + '?format=full'))));
   }
   const replied = async msg => { const th = await client.api('threads/' + encodeURIComponent(msg.threadId) + '?format=minimal'); return (th.messages || []).some(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) > msg.at); };
@@ -219,9 +220,9 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
       // 🔁 resend = 로이가 「다시 보내기」를 누른 때만 — 이미 회신한 메일에도 고친 파일을 한 번 더 보낸다
       if (!a.resend && await replied(msg)) { results.push({ edition: ed, label, state: 'done', subject: msg.subject, note: '이미 회신한 메일입니다' }); continue; }
       const x = M.extract(msg.text);
-      if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
+      if (!x.isbn || !x.issueDate || x.ambiguous) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, manual: manualOf(msg), note: 'ISBN·발행일을 메일에서 하나로 읽지 못했습니다 — Gmail에서 직접 회신하세요' }); continue; }
       const v = await review(msg, title, x);
-      if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, note: v.why + ' — Gmail에서 직접 회신하세요' }); continue; }
+      if (!v.ok) { results.push({ edition: ed, label, state: 'stop', subject: msg.subject, isbn: x.isbn, issueDate: x.issueDate, manual: manualOf(msg), note: v.why + ' — Gmail에서 직접 회신하세요' }); continue; }
       log(`📬 ${title} ${label} — ${msg.subject} · ISBN ${x.isbnText} · ${x.issueDate}${x.copyright ? ' · ⓒ ' + x.copyright : ''} (${v.by})`);
       const res = { edition: ed, label, state: 'ready', subject: msg.subject, isbn: x.isbnText || x.isbn, issueDate: x.issueDate + (x.copyright ? ' · ⓒ ' + x.copyright : ''), note: '' };
       ready.push({ ed, msg, x, res }); results.push(res);
@@ -238,11 +239,21 @@ function install({ ipcMain, dialog, shell, win, context, setMeta, build, client,
         const sn = await doSend({ ...a, edition: ed, draftId: p.job.draftId });
         res.state = sn.job.state;
         res.note = sn.job.state === 'sent' ? `발송 완료 → ${sn.job.to} (${sn.job.files.map(f => f.name).join(', ')})` : (sn.job.note || '발송 결과 확인 필요');
-      } catch (e) { res.state = 'stop'; res.note = '보내지 못했습니다 — ' + e.message; }
+      } catch (e) { res.state = 'stop'; res.note = '보내지 못했습니다 — ' + e.message; res.manual = manualOf(msg, e.manualFile); }
     }
     if (!a.__quiet) for (const res of results) log(`📬 ${res.label}: ${res.note}`);
     return { results, dto: context().dto };
   }
+  // 📮 직접 보내기 팝업 — 이번 처리에서 이 앱이 알려 준 메일·파일만 열 수 있다(화면이 넘긴 임의 경로·주소는 열지 않는다)
+  const manualSeen = { threads: new Set(), files: new Set() };
+  function manualOf(msg, file) {
+    manualSeen.threads.add(msg.threadId);
+    const m = { threadId: msg.threadId, subject: msg.subject };
+    if (file && fs.existsSync(file)) { manualSeen.files.add(file); Object.assign(m, { file, name: path.basename(file), mb: Math.round(fs.statSync(file).size / 1048576 * 10) / 10 }); }
+    return m;
+  }
+  route('thread', a => { if (!manualSeen.threads.has(a.threadId)) throw Error('열 수 없는 메일입니다'); return shell.openExternal('https://mail.google.com/mail/?authuser=' + encodeURIComponent(client.status().email) + '#all/' + encodeURIComponent(a.threadId)); });
+  route('reveal', a => { if (!manualSeen.files.has(a.file)) throw Error('열 수 없는 파일입니다'); shell.showItemInFolder(a.file); return { ok: true }; });
   route('open', () => shell.openExternal('https://mail.google.com/mail/?authuser=' + encodeURIComponent(client.status().email) + '#drafts'));
   route('setup', () => shell.openExternal('https://console.cloud.google.com/apis/library/gmail.googleapis.com'));
 }

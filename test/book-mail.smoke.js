@@ -16,7 +16,8 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
         global.__inboxArg = a;
         const open = ipcMain._invokeHandlers.get('open-book-path');
         const o = await open({ sender: null }, { scriptPath: p });
-        return { results: [{ edition: 'print', label: '메일 시험 종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (내지.pdf)', scriptPath: p }, { edition: 'none', label: '', state: 'stop', note: '「[삼국지 9]」 — 원고 폴더에서 이 책 원고를 찾지 못했습니다' }], dto: o.dto, queue: o.queue };
+        return { results: [{ edition: 'print', label: '메일 시험 종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (내지.pdf)', scriptPath: p }, { edition: 'none', label: '', state: 'stop', note: '「[삼국지 9]」 — 원고 폴더에서 이 책 원고를 찾지 못했습니다' },
+          { edition: 'print', label: '빨간 머리 앤 종이책', state: 'stop', note: '보내지 못했습니다 — 첨부파일이 18MB를 넘습니다', manual: { threadId: 't9', subject: 's', file: p, name: '내지.pdf', mb: 19.5 } }], dto: o.dto, queue: o.queue };
       });
     }, md);
     await win.click('.modetoggle button:has-text("📖 출판")');
@@ -31,6 +32,16 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     assert.ok(sentArg && typeof sentArg.presetName === 'string' && sentArg.presetName, '헤더 채널 이름이 안 넘어왔다 ' + JSON.stringify(sentArg));
     assert.equal(await win.locator('[data-testid=bk-mail-auto]').count(), 1, '원고가 열린 뒤 등록·유통 탭의 회신 칸');
     console.log('✓ 출판 첫 화면 회신 단추 → 원고 열림 → 결과가 등록·유통 탭에 이어 보임');
+    // 📮 직접 보내야 하는 메일 = 팝업(원고가 열린 뒤에도) · 「확인」으로 닫으면 탭을 다시 열어도 또 뜨지 않는다
+    const pop = win.locator('[data-testid=bk-mail-manual]'); await pop.waitFor();
+    assert.match(await pop.innerText(), /직접 보내야 하는 메일 1통/); assert.match(await pop.innerText(), /빨간 머리 앤 종이책/); assert.match(await pop.innerText(), /19\.5MB/);
+    assert.equal(await pop.getByRole('button', { name: /파일 위치 보기/ }).count(), 1);
+    await pop.getByRole('button', { name: '확인' }).click();
+    assert.equal(await pop.count(), 0);
+    await win.click('[data-tab=log]'); await win.click('[data-tab=bookk]');
+    await win.locator('[data-testid=bk-mail-auto-result]').waitFor();
+    assert.equal(await win.locator('[data-testid=bk-mail-manual]').count(), 0, '탭을 다시 열었더니 팝업이 또 떴다');
+    console.log('✓ 📮 직접 보내기 팝업 — 원고 열린 뒤 표시 · 한 번만');
     await app.evaluate(({ ipcMain }) => {
       for (const n of ['auto']) ipcMain.removeHandler('book-mail-' + n);
       ipcMain.handle('book-mail-auto', () => ({ results: [{ edition: 'print', label: '종이책', state: 'sent', isbn: '9791112325167', issueDate: '2026년 10월 16일', note: '발송 완료 → info@bookk.co.kr (4_내지.pdf)' }, { edition: 'ebook', label: '전자책', state: 'stop', note: '추가 요청이 있습니다: 앞표지 로고 — Gmail에서 직접 회신하세요' }] }));

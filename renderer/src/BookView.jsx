@@ -814,7 +814,7 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <section className="bkcard bkempty-mail">
             <div className="bkcard-h">✉ 부크크 회신</div>
             <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} inbox setQueue={setQueue} presetName={presetName}
-              onInboxDone={(res, p) => { setMailResult({ path: p, res }); setTab('bookk'); }} />
+              onInboxDone={(res, p) => { setMailResult({ path: p, res, popShown: false }); setTab('bookk'); }} />
           </section>
         </div></div>
       </div>
@@ -1031,7 +1031,8 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
         </div>
         <section className="bkcard">
           <div className="bkcard-h">✉ 부크크 회신</div>
-          <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} initial={mailResult && mailResult.path === dto.scriptPath ? mailResult.res : null} />
+          <BookMail dto={dto} layout={layout} setDto={setDto} setStatus={setStatus} setBuilding={setBuilding} initial={mailResult && mailResult.path === dto.scriptPath ? mailResult.res : null}
+            popInitial={!!(mailResult && mailResult.path === dto.scriptPath && !mailResult.popShown)} onPopShown={() => setMailResult((m) => (m ? { ...m, popShown: true } : m))} />
         </section>
 
         {/* 3) 🔎 올리기 전 점검(한 번) */}

@@ -6,8 +6,13 @@ import api from './lib/ipc.js';
 //   Gmail 연결(계정·JSON·로그인)은 ⚙ 설정 → 계정 탭의 <BookMailConnect>(로이 「좁은 곳에 너무 많은 입력」).
 //   inbox = 원고를 열기 전 출판 첫 화면(로이 2026-11-02) — 메일을 먼저 찾고, 그 메일의 책 원고를 원고 폴더에서 찾아 열어 같은 처리를 한다(main `book-mail-inbox`).
 //   열린 뒤엔 화면이 그 원고로 바뀌므로 결과는 onInboxDone 으로 넘겨 등록·유통 탭의 BookMail 이 initial 로 이어 보여 준다.
-export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, inbox, setQueue, onInboxDone, initial, presetName }) {
+//   📮 자동으로 못 보낸 메일(첨부가 Gmail 한도를 넘음 · 추가 요청 등)은 팝업으로 알린다 — 로이가 Gmail 에서 직접 보낸다(로이 2026-11-03).
+const manualOf = res => (res || []).filter(x => x.state === 'stop' && x.manual);
+export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, inbox, setQueue, onInboxDone, initial, presetName, popInitial, onPopShown }) {
   const [status, setMailStatus] = useState({}), [busy, setBusy] = useState(false), [error, setError] = useState(''), [auto, setAuto] = useState(initial || null);
+  const [pop, setPop] = useState(() => (popInitial && manualOf(initial).length ? manualOf(initial) : null));
+  useEffect(() => { if (pop && onPopShown) onPopShown(); }, []);   // 같은 결과로 탭을 다시 열 때 또 띄우지 않게
+  const showPop = res => { const m = manualOf(res); if (m.length) setPop(m); };
   const scriptPath = dto ? dto.scriptPath : '';
   const currentPath = useRef(scriptPath); currentPath.current = scriptPath;
   const firstRef = useRef(true);
@@ -26,7 +31,8 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       setAuto(res);
       setStatus('📬 부크크 회신 — ' + res.map(x => `${x.label} ${x.note}`.trim()).join(' · '));
       if (r.queue && setQueue) setQueue(r.queue);
-      if (r.dto) { if (onInboxDone) onInboxDone(res, r.dto.scriptPath); setDto(r.dto); }
+      if (r.dto) { if (onInboxDone) onInboxDone(res, r.dto.scriptPath); setDto(r.dto); }   // 원고가 열리면 이 칸은 사라진다 — 팝업은 등록·유통 탭의 칸이 initial 로 띄운다
+      else showPop(res);
     } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); refreshStatus(); }   // 만료면 main 이 연결을 끊었다 — 단추·안내를 바로 바꾼다
     finally { setBusy(false); setBuilding(false); }
   }
@@ -37,7 +43,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       const r = await api.bookMail('auto', { layout, scriptPath: path, resend: !!resend });
       if (r?.error) throw Error(r.error);
       if (currentPath.current !== path) return;
-      setAuto(r.results || []); if (r.dto) setDto(r.dto);
+      setAuto(r.results || []); showPop(r.results); if (r.dto) setDto(r.dto);
       setStatus('📬 부크크 회신 — ' + (r.results || []).map(x => `${x.label} ${x.note}`).join(' · '));
     } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); refreshStatus(); }   // 만료면 main 이 연결을 끊었다 — 단추·안내를 바로 바꾼다
     finally { setBusy(false); setBuilding(false); }
@@ -56,6 +62,21 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       {!inbox && auto.some(x => x.state === 'done' && (!x.scriptPath || x.scriptPath === scriptPath)) && <button className="ghost" data-testid="bk-mail-resend" disabled={busy} onClick={() => send(true)}
         title="이미 회신한 부크크 메일에, 지금 판권으로 PDF를 다시 만들어 「바로잡아 다시 보내드립니다」 답장을 한 번 더 보냅니다">🔁 고친 판권으로 다시 보내기</button>}</div>}
     {error && <div className="bkwarn" role="alert">{error}</div>}
+    {pop && <div className="modal-bg show" style={{ zIndex: 92 }} data-testid="bk-mail-manual">
+      <div className="modal-card" style={{ width: 'min(560px, 92vw)' }}>
+        <h3 style={{ marginTop: 0 }}>📮 직접 보내야 하는 메일 {pop.length}통</h3>
+        <div className="meta" style={{ marginBottom: 10 }}>자동으로 보내지 못했습니다. Gmail 에서 그 메일에 답장하고 파일을 첨부해 주세요(큰 파일은 Gmail 이 Drive 링크로 바꿔 보냅니다).</div>
+        {pop.map((x, i) => <div key={i} className="bkcard" style={{ marginBottom: 8 }}>
+          <div><b>{x.label}</b> — {x.note}</div>
+          {x.manual.file && <div className="meta">📎 {x.manual.name} ({x.manual.mb}MB)</div>}
+          <div className="bkrow2" style={{ marginTop: 6 }}>
+            <button className="ghost" onClick={() => api.bookMail('thread', { threadId: x.manual.threadId })}>✉ Gmail 에서 그 메일 열기</button>
+            {x.manual.file && <button className="ghost" onClick={() => api.bookMail('reveal', { file: x.manual.file })}>📂 파일 위치 보기</button>}
+          </div>
+        </div>)}
+        <div style={{ textAlign: 'right' }}><button onClick={() => setPop(null)}>확인</button></div>
+      </div>
+    </div>}
   </div>;
 }
 

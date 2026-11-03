@@ -122,7 +122,8 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     const mails = [bk('p4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_종이책]', T('979-11-12-32516-7', '2026년 10월 16일'), 1792151859000),
       bk('e4', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 4_전자책] ', T('979-11-12-32518-1', '2026년 10월 16일'), 1792152017000),
       bk('p3', '[판권지수정요청]안녕하세요. 부크크입니다.[삼국지 3]', T('979-11-12-32317-0', '2026년 10월 15일'), 1792048616000)];
-    async function runAuto({ askFn, replied = [], resend = false, twice = false, inbox = false, scripts = [{ path: 'D:/출판/004/원고/vol4.md', title: '삼국지 4 : 적벽대전' }], mailList = mails } = {}) {
+    async function runAuto({ askFn, replied = [], resend = false, twice = false, inbox = false, scripts = [{ path: 'D:/출판/004/원고/vol4.md', title: '삼국지 4 : 적벽대전' }], mailList = mails, big = false } = {}) {
+      const shellLog = { reveal: [], open: [] };
       const h = {}, d = { jobs: {} }, sent = [], built = [], raws = {}, opens = []; let metaWrites = 0, isOpen = !inbox;
       const cc = { scriptPath: inbox ? scripts[0].path : 'vol4.md', base: '삼국지_제4권', meta: { title: scripts[0].title }, sourceHash: 's4' };
       const f4 = { interiorPdf: path.join(tmp, '4_내지.pdf'), ebookPdf: path.join(tmp, '[전자책] 4_표지+본문.pdf'), coverPdf: path.join(tmp, '4_표지.pdf') };
@@ -136,17 +137,17 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
         if (route === 'drafts/send') { sent.push(raws[body.id]); return { id: 'sent-' + body.id }; }
         throw Error('Unexpected route: ' + route);
       };
-      install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: {}, dialog: {}, context: () => (isOpen ? cc : null),
+      install({ ipcMain: { handle: (n, fn) => { h[n] = fn; } }, win: () => null, shell: { showItemInFolder: f => shellLog.reveal.push(f), openExternal: u => shellLog.open.push(u) }, dialog: {}, context: () => (isOpen ? cc : null),
         findScripts: async () => scripts, openBook: async p => { opens.push(p); isOpen = true; return { queue: 'Q' }; },
         // 실제처럼 판권 값을 쓰면 원고 해시가 바뀐다(종이책 초안 뒤에 전자책 값을 쓰면 종이책 발송이 막히던 순서 문제를 잡는다)
         setMeta: async a => { metaWrites++; cc.meta[a.key] = a.value; cc.sourceHash = JSON.stringify(cc.meta); },
         // 실제 빌더처럼 판마다 자기 파일만 쓴다(전자책 빌드는 종이책 내지를 건드리지 않는다)
-        build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, '%PDF-' + a.edition); return own; },
+        build: async a => { built.push(a.edition); const own = a.edition === 'ebook' ? { ebookPdf: f4.ebookPdf } : { interiorPdf: f4.interiorPdf, coverPdf: f4.coverPdf }; for (const p of Object.values(own)) fs.writeFileSync(p, big && p === f4.interiorPdf ? Buffer.alloc(19 * 1024 * 1024, 32) : '%PDF-' + a.edition); return own; },
         ask: askFn, client: { status: () => ({ connected: true, email: 'getwater@gmail.com' }), load: () => structuredClone(d), save: x => Object.assign(d, structuredClone(x)), api } });
       if (inbox) return { r: await h['book-mail-inbox'](null, {}), cc, sent, built, metaWrites, opens };
       let r = await h['book-mail-auto'](null, {});
       if (twice) r = await h['book-mail-auto'](null, { resend });
-      return { r, cc, sent, built, metaWrites };
+      return { r, cc, sent, built, metaWrites, h, shellLog };
     }
     const att = raw => [...raw.matchAll(/filename\*=UTF-8''([^\r\n]+)/g)].map(m => decodeURIComponent(m[1]));
     let A = await runAuto();
@@ -208,6 +209,20 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     assert.equal(A.sent.length, 1, JSON.stringify(A.r.results));
     A = await runAuto({ inbox: true, mailList: anne, scripts: [{ path: annePath, title: '빨간 머리 앤 : 초록 지붕 집의 앤' }], askFn: cl('로이 2026') });
     assert.equal(A.sent.length, 0); assert.ok(A.r.results.some(x => /ⓒ 값이 서로/.test(x.note)));
+    // 📮 첨부가 Gmail 한도를 넘으면(2026-11-03 빨간 머리 앤 내지 19.5MB) — 보내지 않고, 화면 팝업용 메일·파일 정보를 싣는다 · 팝업 단추는 알려 준 것만 연다
+    A = await runAuto({ big: true });
+    assert.equal(A.r.results[0].state, 'stop'); assert.match(A.r.results[0].note, /18MB/);
+    assert.equal(A.r.results[0].manual.file, path.join(tmp, '4_내지.pdf')); assert.equal(A.r.results[0].manual.mb, 19); assert.equal(A.r.results[0].manual.threadId, 'tp4');
+    assert.equal(A.r.results[1].state, 'sent'); assert.equal(A.r.results[1].manual, undefined);   // 보낸 판은 팝업에 넣지 않는다
+    assert.equal(A.sent.length, 1);
+    await A.h['book-mail-reveal'](null, { file: A.r.results[0].manual.file }); assert.deepEqual(A.shellLog.reveal, [path.join(tmp, '4_내지.pdf')]);
+    assert.match((await A.h['book-mail-reveal'](null, { file: 'C:/Windows/notepad.exe' })).error, /열 수 없는/); assert.equal(A.shellLog.reveal.length, 1);
+    await A.h['book-mail-thread'](null, { threadId: 'tp4' }); assert.ok(A.shellLog.open[0].endsWith('#all/tp4'), A.shellLog.open[0]);
+    assert.match((await A.h['book-mail-thread'](null, { threadId: 'other' })).error, /열 수 없는/);
+    fs.writeFileSync(path.join(tmp, '4_내지.pdf'), '%PDF-small');
+    A = await runAuto({ askFn: async () => ({ ok: true, text: JSON.stringify({ isbn: P_ISBN, issueDate: '2026-10-16', extraRequests: ['앞표지 로고'] }) }) });
+    assert.ok(A.r.results.every(x => x.state === 'stop' && x.manual && !x.manual.file));   // 추가 요청 = 팝업(메일만 · 파일 없음)
+    console.log('✓ 📮 직접 보내기: 첨부 한도 초과·추가 요청 → 메일·파일 정보 · 팝업 단추는 알려 준 메일·파일만');
     console.log('✓ 📬 실물 메일: 「→」·ⓒ 줄 = 판권지 정보 → 판권 ⓒ 줄에 넣고 발송 · 부제 붙은 꼬리표 · Claude ⓒ 대조');
     console.log('✅ 출판 메일 검증 완료 (실제 메일 발송 없음)');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
