@@ -4,7 +4,8 @@
  *
  * 규칙(한 곳): **헤더 채널과 같은 채널의 대본 = 헤더 값(예전 그대로) · 다른 채널의 대본 = 그 채널 설정 값.**
  *   다른 채널 대본이 그 채널을 따르는 값 = 그림 스타일 · 자막 모양 · 자막 글자 수 · 완성 종류.
- *   (목소리·배경음악·로고·AI 고지·업로드 채널은 원래 대본 채널을 따른다 · 이미지·비디오 **도구**는 헤더 하나로 통일 — 로이 결정)
+ *   (목소리·배경음악·로고·AI 고지·업로드 채널은 원래 대본 채널을 따른다 · 이미지·비디오 **도구**는 헤더 하나로 통일 — 로이 결정 ·
+ *    단 채널 비디오가 「없음」이면 그 대본은 영상을 만들지 않는다 — v1.0.14)
  *   같은 채널만 있는 큐는 {} 를 돌려 결과가 예전과 한 글자도 다르지 않다.
  * 키 이름은 렌더러 헤더가 채널을 읽는 곳(App.jsx presetName 효과)과 같다: styleLong · capLong · split.longLen · outTarget.
  * 테스트: test/channel-voice.test.js
@@ -23,6 +24,9 @@ function channelOverrides(preset, headerName) {
   const sl = preset.split || { longLen: preset.longLen };
   out.captionMaxChars = Math.max(2, parseInt(sl.longLen, 10) || 20);
   if (preset.outTarget != null) out.outTarget = normOutTarget(preset.outTarget);
+  // 🎬 채널 비디오가 「없음」이면 헤더 도구를 따르지 않는다(v1.0.14 · 로이 2026-11-04 — 다산의뜰 「없음」이 헤더 AI 영상에 덮여 22편 과금).
+  //   끄는 쪽만 — 채널에 도구가 있어도 헤더가 「없음」이면 켜지 않는다(유료를 조용히 켜지 않게).
+  if (preset.videoEngine === 'none') out.videoEngine = 'none';
   return out;
 }
 

@@ -73,6 +73,11 @@ const KA = require('../core/kie-api');
   script = [{ re: /jobs\/createTask/, res: mkRes({ code: 402, msg: 'Credits insufficient' }) }];
   r = await KA.generateImageToFile({ model: zi, prompt: 'x', aspect: '16:9', outPathNoExt: path.join(tmp, '02') });
   ok(!r.ok && r.fatal && /크레딧/.test(r.error), '402 → 크레딧 부족 · 멈춤(fatal)');
+  // 💸 2026-11-03 실측 — 크레딧 부족이 500 + 글로 왔다(15그룹을 다 시도) → 글로도 멈춘다
+  script = [{ re: /jobs\/createTask/, res: mkRes({ code: 500, msg: 'Credits insufficient : Your current balance isn’t enough to run this request. Please top up to continue.' }) }];
+  r = await KA.generateImageToFile({ model: zi, prompt: 'x', aspect: '16:9', outPathNoExt: path.join(tmp, '02b') });
+  ok(!r.ok && r.fatal && /크레딧/.test(r.error), '500 + 「Credits insufficient」 → 크레딧 부족 · 멈춤(fatal)');
+  ok(!KA.explain(500, 'internal error').fatal && KA.explain(500, 'internal error').retry, '판정력: 그냥 500 은 멈추지 않고 다시 시도');
   script = [{ re: /jobs\/createTask/, res: mkRes({ code: 401, msg: 'You do not have access permissions ' + KEY }) }];
   r = await KA.generateImageToFile({ model: zi, prompt: 'x', aspect: '16:9', outPathNoExt: path.join(tmp, '03') });
   ok(!r.ok && r.fatal && !r.error.includes(KEY), '401 → 키 오류 · 멈춤 · 키 원문이 메시지에 없음');

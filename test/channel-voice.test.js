@@ -265,6 +265,11 @@ console.log('[10] 소스 위생');
   ok(QC.channelOverrides({ ...B, outTarget: 'weird', split: {} }, '성경').outTarget === 'vrew' && QC.channelOverrides({ ...B, split: {} }, '성경').captionMaxChars === 20, 'ⓠ 모르는 완성 종류 = vrew · 글자 수 없음 = 20(헤더 기본과 같다)');
   ok(QC.channelOverrides({ ...B, capLong: null }, '성경').captionStyle === null, 'ⓠ 채널 자막 모양이 없으면 null(채널 captionStyle 폴백)');
   ok(QC.channelOverrides({ ...B, styleLong: 'ink' }, '성경').styleId === 'ink', 'ⓠ 판정력: 채널 값을 바꾸면 결과도 바뀐다');
+  // 🎬 채널 비디오 「없음」은 헤더 도구보다 이긴다(끄는 쪽만 · v1.0.14 — 다산의뜰 22편 과금 사고)
+  ok(QC.channelOverrides({ ...B, videoEngine: 'none' }, '성경').videoEngine === 'none', 'ⓥ 다른 채널 비디오 「없음」 → videoEngine none');
+  ok(!('videoEngine' in QC.channelOverrides({ ...B, videoEngine: 'kie:minimax-h3' }, '성경')) && !('videoEngine' in o), 'ⓥ 채널에 도구가 있거나 비어 있으면 헤더 그대로(켜는 쪽은 없다)');
+  ok(/const ve = _ov\.videoEngine === 'none' \? 'none' : _ve0;/.test(MAIN), 'ⓥ run-batch 가 채널 「없음」을 따른다');
+  ok(/channelOverrides\(S\.preset, args\.headerPresetName\)\.videoEngine === 'none'/.test(MAIN), 'ⓥ 큐 🎬 단계 버튼(video-build)도 같은 규칙');
   const mix = QC.channelMix([{ settings: { presetName: '서재' } }, { settings: { presetName: '성경' } }, { settings: null }], '서재');
   ok(mix.mixed && JSON.stringify(mix.counts) === JSON.stringify([['서재', 2], ['성경', 1]]), 'ⓠ 채널 분포 — 채널 없는 항목은 헤더 채널로 센다');
   ok(/const _ov = require\('\.\/core\/queue-channel'\)\.channelOverrides\(_pn \? resolvePreset\(_pn\) : null, common\.presetName\)/.test(MAIN)

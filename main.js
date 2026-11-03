@@ -5595,8 +5595,15 @@ function rangeNums(project, fromNum, toNum, sel = null) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', gensparkVideoModel = null } = args;
+  const { shortsNum = null, flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', gensparkVideoModel = null } = args;
+  let { engine = 'grok' } = args;
   const styleId = effStyleId(_stageStyle(args));   // 🎨 대본 화풍 우선 · 🔀 다른 채널 대본이면 그 채널 화풍
+  // 🎬 큐 단계 버튼도 같은 규칙 — 다른 채널 대본의 채널 비디오가 「없음」이면 만들지 않는다(v1.0.14 · core/queue-channel)
+  if (args.__item && args.headerPresetName && engine !== 'none'
+    && require('./core/queue-channel').channelOverrides(S.preset, args.headerPresetName).videoEngine === 'none') {
+    log(`🎬 채널 「${(S.preset && S.preset.name) || ''}」 비디오 = 없음 — 이 대본은 영상을 만들지 않습니다(헤더 도구 무시)`);
+    engine = 'none';
+  }
   let { fromNum = null, toNum = null } = args;
   let vidSel = VSel.normSel(args.vidSel);
   // 큐 전체(상단 🎬) = perItem — 그 대본에 저장된 범위(없으면 도입부)를 쓴다. 헤더 값 하나로 모든 대본을 덮지 않는다(v0.5.73).
@@ -8507,7 +8514,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
       //   제거된 영상엔진(wan/grok10)은 grok 으로 보정. (comfy::path·grok-api·flow 는 그대로)
       //   ⚠ 'flow' 를 여기 넣지 말 것 — 2026-08-28 에 Flow·Veo 비디오가 부활했다. 넣으면 헤더에서 골라도 조용히 Grok 으로 만든다(v0.3.50 과 같은 계열의 사고).
       const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
-      const ve = (['wan', 'grok', 'grok10', 'grok-api', 'flow'].includes(rawVe)) ? 'none' : rawVe;   // 🗑 Flow 도 v0.9.67 에 지웠다   // 🎬 Grok 항목은 UI 에서 뺐다(2026-10-07) — 옛 저장값은 「없음(이미지만)」
+      const _ve0 = (['wan', 'grok', 'grok10', 'grok-api', 'flow'].includes(rawVe)) ? 'none' : rawVe;   // 🗑 Flow 도 v0.9.67 에 지웠다   // 🎬 Grok 항목은 UI 에서 뺐다(2026-10-07) — 옛 저장값은 「없음(이미지만)」
       const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
       // 🔴 채널(목소리)은 **항목값 우선 → 헤더 폴백**. 둘 다 없으면 getPreset(null)=기본 채널이 되어
       //   **엉뚱한 목소리로 조용히 합성**된다(2026-08-31 실사고). 배속·AI고지도 같은 구멍이라 함께 폴백한다.
@@ -8517,6 +8524,9 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
       // 🔀 다른 채널 대본 = 그림 스타일·자막·완성 종류도 그 채널(v0.9.41 · core/queue-channel 한 곳) — 헤더와 같은 채널이면 {}
       const _ov = require('./core/queue-channel').channelOverrides(_pn ? resolvePreset(_pn) : null, common.presetName);
       if (Object.keys(_ov).length) log(`  🔀 채널 「${_pn}」 대본 — 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || '(헤더)'} (그 채널 설정)`);
+      // 🎬 채널 비디오 「없음」 = 헤더 도구보다 이긴다(끄는 쪽만 · v1.0.14)
+      const ve = _ov.videoEngine === 'none' ? 'none' : _ve0;
+      if (ve === 'none' && _ve0 !== 'none') log(`  🎬 채널 「${_pn}」 비디오 = 없음 — 이 대본은 영상을 만들지 않습니다(헤더 도구 무시)`);
       const _rg = _itemRange(s, it.parsed);
       if (ve !== 'none') log(`  🎬 영상 범위 G${_rg.fromNum}~G${_rg.toNum} (${_rg.src})`);
       await makeRun(it, () => runMakeAllCore({   // 🎬 제작 칸 — 화면은 사람이 고른 대본에 그대로 둔다

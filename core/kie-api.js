@@ -25,7 +25,8 @@ const scrub = (s, key) => String(s || '').split(key || '\u0000').join('***').rep
 function explain(code, msg) {
   const m = String(msg || '');
   if (code === 401) return { error: `생성 서비스 인증이 거부됐습니다(401)`, fatal: '생성 서비스 인증 오류' };
-  if (code === 402) return { error: `생성 크레딧이 부족합니다(402)`, fatal: '생성 크레딧 부족' };
+  // 💸 크레딧 부족이 500 + 「Credits insufficient」 글로 오는 일이 있다(2026-11-03 실측 — 15그룹을 다 시도했다) → 글로도 멈춘다
+  if (code === 402 || /credits?\s+insufficient|insufficient\s+(credit|balance)|top\s*up/i.test(m)) return { error: `생성 크레딧이 부족합니다(${code})`, fatal: '생성 크레딧 부족' };
   if (code === 429) return { error: `생성 서비스 요청 속도 제한(429)${m ? ' · ' + m : ''}`, retry: true };
   if (code === 455 || code === 500 || code === 501 || code === 503) return { error: `생성 서버 문제(${code})${m ? ' · ' + m : ''}`, retry: true };
   return { error: `생성 서비스 오류(${code})${m ? ' · ' + m : ''}` };
