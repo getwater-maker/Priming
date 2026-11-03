@@ -18,7 +18,8 @@ function createClient({ dir = path.join(os.homedir(), '.priming-maker'), cipher,
     const data = await r.json();
     if (!r.ok) {
       const code = data.error && (data.error.status || data.error) || r.status;
-      throw Error(`Gmail 연결 오류 (${typeof code === 'string' ? code : r.status}) — Gmail API 활성화·권한·계정 연결을 확인하세요`);
+      const e = Error(`Gmail 연결 오류 (${typeof code === 'string' ? code : r.status}) — Gmail API 활성화·권한·계정 연결을 확인하세요`);
+      e.code = typeof code === 'string' ? code : ''; throw e;
     }
     return data;
   }
@@ -27,14 +28,22 @@ function createClient({ dir = path.join(os.homedir(), '.priming-maker'), cipher,
     if (access && access.until > Date.now() + 60000) return access.value;
     const db = load();
     if (!db.refresh || !db.client) throw Error('먼저 Gmail을 연결하세요');
-    const t = await tokenPost({ client_id: db.client.client_id, client_secret: db.client.client_secret, refresh_token: db.refresh, grant_type: 'refresh_token' });
+    let t;
+    try { t = await tokenPost({ client_id: db.client.client_id, client_secret: db.client.client_secret, refresh_token: db.refresh, grant_type: 'refresh_token' }); }
+    catch (e) {
+      // 🔑 invalid_grant = 연결 허가가 만료·취소됨(2026-11-03 실측 「Token has been expired or revoked」 — OAuth 앱이 「테스트」 상태면 7일마다).
+      //   죽은 토큰을 지워 화면이 「연결 안 됨」을 보이게 하고, 메일 주소는 남겨 다시 연결 칸에 그대로 둔다.
+      if (e.code !== 'invalid_grant') throw e;
+      delete db.refresh; db.expiredAt = Date.now(); save(db); access = null;
+      throw Error(EXPIRED_MSG);
+    }
     access = { value: t.access_token, until: Date.now() + t.expires_in * 1000 };
     return access.value;
   }
   async function api(route, body, method) {
     return request('https://gmail.googleapis.com/gmail/v1/users/me/' + route, { method: method || (body ? 'POST' : 'GET'), headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   }
-  function status() { const d = load(); return { configured: !!d.client, connected: !!d.refresh, email: d.email || '', connecting }; }
+  function status() { const d = load(); return { configured: !!d.client, connected: !!d.refresh, expired: !d.refresh && !!d.expiredAt, email: d.email || '', connecting }; }
   function importClient(text) {
     const c = JSON.parse(text).installed;
     if (!c || !c.client_id || !c.client_secret) throw Error('Google Cloud에서 받은 데스크톱 앱 OAuth JSON을 선택하세요');
@@ -72,12 +81,13 @@ function createClient({ dir = path.join(os.homedir(), '.priming-maker'), cipher,
       if (!t.refresh_token || !SCOPES.every(s => String(t.scope || '').split(' ').includes(s))) throw Error('메일 읽기·초안 및 발송 권한을 모두 허용해야 합니다');
       const profile = await request('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: 'Bearer ' + t.access_token } });
       if (String(profile.emailAddress).toLowerCase() !== email.toLowerCase()) throw Error('선택한 Google 계정이 입력한 메일 주소와 다릅니다');
-      db.refresh = t.refresh_token; db.email = profile.emailAddress; save(db);
+      db.refresh = t.refresh_token; db.email = profile.emailAddress; delete db.expiredAt; save(db);
       access = { value: t.access_token, until: Date.now() + t.expires_in * 1000 };
       return status();
     } finally { connecting = false; clearTimeout(timer); if (server) server.close(); }
   }
-  function disconnect() { const db = load(); delete db.refresh; delete db.email; save(db); access = null; return status(); }
+  function disconnect() { const db = load(); delete db.refresh; delete db.email; delete db.expiredAt; save(db); access = null; return status(); }
   return { api, load, save, status, importClient, connect, disconnect };
 }
-module.exports = { createClient, SCOPES };
+const EXPIRED_MSG = 'Gmail 연결이 만료됐습니다 — ⚙ 설정 → 👤 계정 탭에서 「Google 로그인」으로 다시 연결하세요(Google Cloud 의 OAuth 앱이 「테스트」 상태면 7일마다 끊깁니다)';
+module.exports = { createClient, SCOPES, EXPIRED_MSG };

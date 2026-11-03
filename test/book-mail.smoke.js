@@ -68,6 +68,15 @@ const md = path.join(TMP, '메일 시험.md'); fs.writeFileSync(md, '# 메일 �
     assert.equal(await inp.inputValue(), '', '연결 안 된 PC 에 메일 주소가 미리 채워져 있다');
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, 'renderer/src/BookMail.jsx'), 'utf8'), /@gmail\.com/, 'BookMail.jsx 에 판매자 메일 주소가 박혀 있다');
     console.log('✓ 연결 안 된 PC 의 출판 메일 칸 = 빈칸');
+    // 연결 만료(invalid_grant) — 계정 탭에 만료 안내 + 다시 연결 칸(주소 그대로)
+    await win.click('.st-x');
+    await app.evaluate(({ ipcMain }) => { ipcMain.removeHandler('book-mail-status'); ipcMain.handle('book-mail-status', () => ({ configured: true, connected: false, expired: true, email: 'getwater@gmail.com', job: null })); });
+    await win.click('button:has-text("⚙ 설정")');
+    await win.click('.st-tabs button:has-text("👤 계정")');
+    const exp = win.locator('[data-testid=bk-mail-expired]'); await exp.waitFor();
+    assert.match(await exp.innerText(), /만료/);
+    assert.equal(await win.locator('[aria-label="출판 메일 계정"]').inputValue(), 'getwater@gmail.com');
+    console.log('✓ 연결 만료 → 계정 탭 만료 안내 · 다시 연결 칸');
     console.log('SCREENSHOT=' + path.join(TMP, 'mail-button.png'));
   } finally { await app.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

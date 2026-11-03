@@ -16,6 +16,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
     api.bookMail('status', {}).then(r => { if (live && r && !r.error) setMailStatus(r); });
     return () => { live = false; };
   }, [scriptPath]);
+  const refreshStatus = () => api.bookMail('status', {}).then(r => { if (r && !r.error) setMailStatus(r); }).catch(() => {});
   async function sendInbox() {
     setBusy(true); setError(''); setAuto(null); setBuilding(true);
     try {
@@ -26,7 +27,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       setStatus('📬 부크크 회신 — ' + res.map(x => `${x.label} ${x.note}`.trim()).join(' · '));
       if (r.queue && setQueue) setQueue(r.queue);
       if (r.dto) { if (onInboxDone) onInboxDone(res, r.dto.scriptPath); setDto(r.dto); }
-    } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); }
+    } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); refreshStatus(); }   // 만료면 main 이 연결을 끊었다 — 단추·안내를 바로 바꾼다
     finally { setBusy(false); setBuilding(false); }
   }
   async function send(resend) {
@@ -38,7 +39,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       if (currentPath.current !== path) return;
       setAuto(r.results || []); if (r.dto) setDto(r.dto);
       setStatus('📬 부크크 회신 — ' + (r.results || []).map(x => `${x.label} ${x.note}`).join(' · '));
-    } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); }
+    } catch (e) { setError(e.message); setStatus('⚠ ' + e.message); refreshStatus(); }   // 만료면 main 이 연결을 끊었다 — 단추·안내를 바로 바꾼다
     finally { setBusy(false); setBuilding(false); }
   }
   const icon = s => s === 'sent' ? '✅' : s === 'stop' ? '⚠' : '·';
@@ -50,7 +51,7 @@ export default function BookMail({ dto, layout, setDto, setStatus, setBuilding, 
       : <button data-testid="bk-mail-auto" disabled={busy || !status.connected} onClick={() => send(false)}
         title="부크크 「판권지수정요청」 메일을 종이책·전자책마다 찾아 ISBN·발행일을 판권에 넣고 PDF를 만들어 회신합니다(종이책 = 내지 PDF · 전자책 = 표지+본문 PDF).">
         {busy ? '⏳ 메일 찾기 → 판권 입력 → PDF → 발송 중…' : '📬 판권 수정해서 부크크에 회신'}</button>}
-    {!status.connected && <div className="meta">⚙ 설정 → 계정 탭에서 Gmail을 먼저 연결하세요.</div>}
+    {!status.connected && <div className="meta" data-testid="bk-mail-need">{status.expired ? '⚠ Gmail 연결이 만료됐습니다 — ⚙ 설정 → 👤 계정 탭에서 「Google 로그인」으로 다시 연결하세요.' : '⚙ 설정 → 계정 탭에서 Gmail을 먼저 연결하세요.'}</div>}
     {auto && <div className="bkmail-review" data-testid="bk-mail-auto-result">{auto.map((x, i) => <div key={i}>{icon(x.state)} <b>{x.label}</b> {x.isbn ? `ISBN ${x.isbn} · ${x.issueDate} — ` : ''}{x.note}</div>)}
       {!inbox && auto.some(x => x.state === 'done' && (!x.scriptPath || x.scriptPath === scriptPath)) && <button className="ghost" data-testid="bk-mail-resend" disabled={busy} onClick={() => send(true)}
         title="이미 회신한 부크크 메일에, 지금 판권으로 PDF를 다시 만들어 「바로잡아 다시 보내드립니다」 답장을 한 번 더 보냅니다">🔁 고친 판권으로 다시 보내기</button>}</div>}
@@ -68,6 +69,7 @@ export function BookMailConnect() {
     catch (e) { setMsg('⚠ ' + e.message); } finally { setBusy(false); }
   }
   return <div data-testid="bk-mail-connect">
+    {status.expired && <div className="bkwarn" data-testid="bk-mail-expired">⚠ 연결이 만료됐습니다 — 「Google 로그인」으로 다시 연결하세요. Google Cloud 의 OAuth 동의 화면이 「테스트」면 7일마다 끊깁니다(「프로덕션으로 게시」하면 끊기지 않습니다).</div>}
     <div className="frow"><label>출판 메일</label>
       {status.connected
         ? <><span style={{ flex: 1 }}><b>{status.email}</b> · Gmail 연결됨</span><button className="ghost" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => run('disconnect')}>연결 해제</button></>
@@ -75,7 +77,7 @@ export function BookMailConnect() {
           <button className="ghost" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => run('import')}>연결 JSON 가져오기</button>
           <button style={{ flex: '0 0 auto' }} disabled={busy || !status.configured} onClick={() => run('connect', { email })}>Google 로그인</button></>}
     </div>
-    <div className="meta">📖 출판 「📬 판권 수정해서 부크크에 회신」이 이 Gmail로 부크크 메일을 읽고 답장합니다. 처음 한 번: Google Cloud에서 Gmail API를 켜고, 테스트 사용자·gmail.readonly·gmail.compose를 넣은 데스크톱 OAuth JSON을 받아 가져오세요. <button className="ghost" onClick={() => api.bookMail('setup', {})}>Google Cloud 열기</button></div>
+    <div className="meta">📖 출판 「📬 판권 수정해서 부크크에 회신」이 이 Gmail로 부크크 메일을 읽고 답장합니다. 처음 한 번: Google Cloud에서 Gmail API를 켜고, gmail.readonly·gmail.compose 범위의 데스크톱 OAuth JSON을 받아 가져오세요. OAuth 동의 화면은 「프로덕션으로 게시」로 두세요(「테스트」면 7일마다 다시 연결해야 합니다). <button className="ghost" onClick={() => api.bookMail('setup', {})}>Google Cloud 열기</button></div>
     {msg && <div className="bkwarn" role="alert">{msg}</div>}
   </div>;
 }

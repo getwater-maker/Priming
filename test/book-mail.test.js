@@ -42,6 +42,33 @@ const inbound = { id: 'in1', threadId: 'th1', internalDate: '1792100000000', pay
     assert.equal(JSON.stringify(gmail.status()).includes('SECRET'), false);
     assert.equal(refreshes, 1); gmail.disconnect(); assert.equal(gmail.status().connected, false);
     console.log('✓ OAuth loopback·PKCE·계정 확인·OS 암호화 저장 경로');
+    // 🔑 연결 만료(2026-11-03 실물 — 「테스트」 OAuth 앱은 7일마다 invalid_grant) → 사람 말 안내 · 연결 끊김으로 표시 · 메일 주소는 남김 · 다시 연결하면 풀림
+    {
+      const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-mail-exp-')); let expired = true, apiCalls = 0;
+      const g2 = createClient({ dir: dir2, cipher,
+        openExternal: async u => { const a = new URL(u); const cb = new URL(a.searchParams.get('redirect_uri')); cb.searchParams.set('state', a.searchParams.get('state')); cb.searchParams.set('code', 'c2'); await fetch(cb); },
+        fetcher: async (u, o) => {
+          if (u.includes('/token')) {
+            if (o.body.get('grant_type') === 'refresh_token' && expired) return { ok: false, status: 400, json: async () => ({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }) };
+            return { ok: true, json: async () => ({ access_token: 'A2', refresh_token: 'R2', scope: SCOPES.join(' '), expires_in: -1 }) };
+          }
+          if (u.includes('/profile')) return { ok: true, json: async () => ({ emailAddress: 'getwater@gmail.com' }) };
+          apiCalls++; return { ok: true, json: async () => ({ messages: [] }) };
+        } });
+      g2.importClient(JSON.stringify({ installed: { client_id: 'c', client_secret: 's' } }));
+      // 접속 토큰이 바로 낡게(expires_in -1) — 다음 호출은 갱신을 거친다
+      await g2.connect('getwater@gmail.com');
+      const db0 = g2.load(); db0.refresh = 'R2'; g2.save(db0);
+      await assert.rejects(g2.api('messages?q=x'), /만료됐습니다.*다시 연결/);
+      assert.deepEqual([g2.status().connected, g2.status().expired, g2.status().email], [false, true, 'getwater@gmail.com']);
+      assert.equal(apiCalls, 0);
+      await assert.rejects(g2.api('messages?q=x'), /먼저 Gmail을 연결/);   // 죽은 토큰으로 다시 묻지 않는다
+      // 다른 오류(권한 없음 등)는 연결을 끊지 않는다
+      expired = false; await g2.connect('getwater@gmail.com');
+      assert.deepEqual([g2.status().connected, g2.status().expired], [true, false]);
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+    console.log('✓ 연결 만료(invalid_grant) → 만료 안내 · 연결 끊김 표시 · 다시 연결하면 풀림');
 
     const handlers = {}, db = { jobs: {} }; let sends = 0, drafts = 0, failSend = false, draftRaw = 'raw';
     let c = { scriptPath: 'book1.md', base: '삼국지_제1권', meta: {}, sourceHash: 'source-v1' };
