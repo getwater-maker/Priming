@@ -532,7 +532,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       // 🔑 **검사를 통과한 뒤에만 `res` 에 담는다.** 먼저 대입하면 assertRealAudio 가 던져도 빈 결과가
       //   res 에 남아, 루프를 다 쓰고 나온 뒤 `if (!res)` 를 통과해 **그 빈 음성이 그대로 저장된다**
       //   (테스트 [6]-ⓑ 가 실제로 잡았다). provider 가 던지는 경우엔 안 드러나는 구멍이다.
-      try { const r = await ttsMgr.synthesize(s.ttsText || s.text, attemptOpts); assertRealAudio(r, s.num); res = r; break; }
+      // 🚦 onGpuWait·gpuWaitAborted = 원격(아내 PC) 우선으로 서버가 미룰 때 안내·중단(v1.0.15 · 캐시 키는 위에서 이미 정했다)
+      try { const r = await ttsMgr.synthesize(s.ttsText || s.text, { ...attemptOpts, onGpuWait: onLine, gpuWaitAborted: abortSignal }); assertRealAudio(r, s.num); res = r; break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
         // 🔴 **빈 음성은 같은 입력으로 다시 보내도 똑같이 빈 음성이 온다** — 시드를 주면 모델이 결정적이다.

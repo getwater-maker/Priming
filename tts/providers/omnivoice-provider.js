@@ -69,6 +69,10 @@ function _authHeaders() {
   return {};
 }
 
+// 🚦 「미룸」 대기를 멈출지 — main 이 setAbortCheck(() => S.abort) 로 건다(fillTts 가 아닌 입구도 중단 버튼을 따르게)
+let _abortCheck = null;
+function setAbortCheck(fn) { _abortCheck = typeof fn === 'function' ? fn : null; }
+
 class OmniVoiceProvider {
   constructor(opts = {}) {
     this.id = PROVIDER_ID;
@@ -168,10 +172,13 @@ class OmniVoiceProvider {
       payload.instruct = opts.instruct;
     }
 
+    // 🚦 원격 우선(v1.0.15 · 서버 GpuGate) — 아내 PC 요청이 먼저라 서버가 이 PC 요청을 미루면 503 + X-GPU-Deferred 로 답한다.
+    //   그건 실패가 아니다 → 세지 않고 다시 보낸다(상한 없음 · 로이 결정 「아내분 우선」). 중단 버튼이면 멈춘다.
+    let response;
+    let noted = false;
+    for (;;) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeout);
-
-    let response;
     try {
       response = await fetch(this.baseUrl + '/tts', {
         method: 'POST',
@@ -191,6 +198,17 @@ class OmniVoiceProvider {
       throw e;
     } finally {
       clearTimeout(t);
+    }
+    if (response.status !== 503 || !response.headers.get('x-gpu-deferred')) break;
+    await response.arrayBuffer().catch(() => null);
+    const stop = opts.gpuWaitAborted || _abortCheck;
+    if (stop && stop()) throw new Error('중단됨 — 원격(아내 PC) 음성이 먼저라 기다리던 중이었습니다');
+    if (!noted) {
+      noted = true;
+      const msg = '🚦 원격(아내 PC) 음성이 먼저라 이 PC 음성은 기다립니다 — 끝나면 바로 이어 갑니다';
+      if (typeof opts.onGpuWait === 'function') opts.onGpuWait(msg); else console.log('[OmniVoice] ' + msg);
+    }
+    await new Promise((r) => setTimeout(r, 200));
     }
 
     if (!response.ok) {
@@ -296,4 +314,4 @@ class OmniVoiceProvider {
   }
 }
 
-module.exports = { OmniVoiceProvider, measureWav, MIN_AUDIO_SEC };
+module.exports = { OmniVoiceProvider, measureWav, MIN_AUDIO_SEC, setAbortCheck };

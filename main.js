@@ -4270,6 +4270,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, wor
     while (queue.length) {
       if (S.abort) { return; }
       if (degraded) return; // 동시 제한 감지 → 이 워커 종료(남은 건 아래에서 순차 처리)
+      if (!cfg.cloud) { await _yieldGpuToRemote(logger); if (S.abort) return; }   // 🚦 원격(아내 PC) 음성이 먼저(v1.0.15)
       const g = queue.shift();
       if (!g) return;
       await genOne(g);
@@ -8978,6 +8979,20 @@ function enqueueImageJob(label, fn, engine) {
 //       수정 뒤 실측: 합성 내내 /busy 가 **1~4ms** 로 busy:true 를 정확히 반환한다.
 //   ⚠ **구버전 서버면 404/401 이 온다 → 그냥 진행**(fail-open). 서버를 재시작하기 전까지는 무동작.
 //   ⚠ 전제: 이 집 구성은 **GPU 머신이 하나**다. ComfyUI 가 로컬(비클라우드)이면 그 GPU 의 TTS 를 기다린다.
+// 🚦 원격 우선(v1.0.15) — 서버가 이 PC 음성을 미루는 동안의 대기도 중단 버튼을 따른다(core/gpu-share · 서버 GpuGate)
+require('./tts/providers/omnivoice-provider').setAbortCheck(() => S.abort);
+// 🚦 이 PC 의 로컬 그림(ComfyUI)은 장마다 원격(아내 PC) 음성에 양보한다 — 서버 /gpu-status 로 판정 · 상한 없음 · 서버 이상은 그냥 진행
+async function _yieldGpuToRemote(logger) {
+  let base = '', headers = {};
+  try {
+    base = String(require('./tts/tts-config').getProvider('omnivoice').baseUrl || '').trim();
+    const s = require('./tts/secret-store').get('omnivoice');
+    if (s && s.apiKey) headers['X-API-Key'] = s.apiKey;
+  } catch { return; }
+  const GS = require('./core/gpu-share');
+  if (!base || !GS.isLocalBaseUrl(base)) return;   // 음성 서버가 다른 PC 면 이 PC GPU 와 무관
+  await GS.waitRemoteIdle({ baseUrl: base, headers, label: '로컬 이미지', log: typeof logger === 'function' ? logger : log, aborted: () => S.abort });
+}
 const FOREIGN_TTS_WAIT_MS = 10 * 60 * 1000;   // 10분 — 넘으면 경고만 남기고 진행
 // untilDone = 10분 상한 없이 음성이 끝날 때까지(👑 로컬 Qwen · v0.9.111 — 10분 뒤 억지로 겹쳐 돌리자 그림 장당 26초→60~78초 · RAM 이 넘쳐 TTS 도 시간초과) · ⏹ 중단이면 멈춘다
 async function awaitForeignTtsIdle(label, logger, { untilDone = false } = {}) {
@@ -9036,6 +9051,9 @@ async function awaitForeignComfyIdle(label) {
   let base = String(cfg.baseUrl || '').trim();
   while (base.endsWith('/')) base = base.slice(0, -1);
   if (!base) return;
+  // 🚦 원격 우선(v1.0.15) — ComfyUI 가 다른 PC(GPU 주인 PC)에 있으면 이 앱이 원격이다 → 주인 PC 의 그림을 기다리지 않는다
+  //   (주인 PC 의 그림이 장마다 이쪽 음성에 양보하고, 음성 서버가 이쪽 요청을 먼저 넣는다)
+  if (!require('./core/gpu-share').isLocalBaseUrl(base)) return;
   const t0 = Date.now();
   let waited = false;
   while (Date.now() - t0 < FOREIGN_GPU_WAIT_MS) {

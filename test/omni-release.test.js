@@ -83,7 +83,7 @@ function fakeServer(state) {
     const api = 'D:\\TTS_Model\\omnivoice\\api.py';
     if (fs.existsSync(api)) {
       const A = fs.readFileSync(api, 'utf8');
-      ok(/x-client-timeout/.test(A) && /_GPU_LOCK\.acquire\(timeout=left\)/.test(A) && /status_code=408/.test(A), '이 PC 서버(api.py)가 기다릴 시간이 지난 요청을 408 로 버린다');
+      ok(/x-client-timeout/.test(A) && /_GPU_LOCK\.take\(kind, ip, timeout=left\)/.test(A) && /status_code=408/.test(A), '이 PC 서버(api.py)가 기다릴 시간이 지난 요청을 408 로 버린다');
     } else console.log('  · 이 PC 에 음성 서버가 없어 api.py 검사는 건너뜀'); }
 
   console.log(`\n${fail ? '❌' : '✅'} omni-release — ${pass} 통과 / ${fail} 실패`);
