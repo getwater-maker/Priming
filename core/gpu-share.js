@@ -63,8 +63,14 @@ async function waitRemoteIdle({ baseUrl, headers = {}, label = '', log = () => {
     await new Promise((r) => setTimeout(r, pollMs));
   }
   const sec = (Date.now() - t0) / 1000;
-  if (waited) log(`  ▶ ${label} — 원격이 끝났습니다. 이어 갑니다 (${Math.round(sec)}초 대기)`);
+  if (waited) { addYield(sec, 'image'); log(`  ▶ ${label} — 원격이 끝났습니다. 이어 갑니다 (${Math.round(sec)}초 대기)`); }
   return { waited, aborted: false, sec };
 }
 
-module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle };
+// ⏱ 양보로 기다린 시간(v1.0.18 · 2.0 무인 제작 ⑥ 「양보로 잃은 분」) — 이 프로세스가 원격에 비켜 선 초를 쌓는다(그림 = 위 waitRemoteIdle · 음성 = omnivoice-provider 의 미룸 답)
+const _yield = { image: 0, tts: 0 };
+function addYield(sec, kind = 'tts') { const v = Number(sec) || 0; if (v > 0) _yield[kind === 'image' ? 'image' : 'tts'] += v; }
+function yieldStats() { return { image: _yield.image, tts: _yield.tts, total: _yield.image + _yield.tts }; }
+function resetYield() { _yield.image = 0; _yield.tts = 0; }
+
+module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle, addYield, yieldStats, resetYield };

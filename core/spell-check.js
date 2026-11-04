@@ -141,6 +141,7 @@ async function runClaude(input, o = {}) {
 }
 async function runCli(input, o = {}) {
   const t0 = Date.now();
+  if (process.env.PM_NO_PAID === '1') throw new Error('무인 제작 — Claude 를 부르지 않습니다');   // 🤖 v1.0.18
   let exe = o.exe || await findClaude();
   let pre = o.preArgs || [], env = process.env;
   // 🧪 PM_CLAUDE_EXE 가 .js 면 가짜 claude(테스트) — node 로 돌린다(Electron 안이면 ELECTRON_RUN_AS_NODE)

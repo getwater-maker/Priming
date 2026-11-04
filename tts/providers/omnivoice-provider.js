@@ -176,7 +176,9 @@ class OmniVoiceProvider {
     //   그건 실패가 아니다 → 세지 않고 다시 보낸다(상한 없음 · 로이 결정 「아내분 우선」). 중단 버튼이면 멈춘다.
     let response;
     let noted = false;
+    let deferT0 = 0;   // ⏱ 미룸이 시작된 때 — 차례를 얻으면 기다린 초를 core/gpu-share 에 쌓는다(⑥ 양보로 잃은 분)
     for (;;) {
+    const reqT0 = Date.now();
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeout);
     try {
@@ -199,7 +201,11 @@ class OmniVoiceProvider {
     } finally {
       clearTimeout(t);
     }
-    if (response.status !== 503 || !response.headers.get('x-gpu-deferred')) break;
+    if (response.status !== 503 || !response.headers.get('x-gpu-deferred')) {
+      if (deferT0) { try { require('../../core/gpu-share').addYield((reqT0 - deferT0) / 1000, 'tts'); } catch (_) {} }
+      break;
+    }
+    if (!deferT0) deferT0 = reqT0;
     await response.arrayBuffer().catch(() => null);
     const stop = opts.gpuWaitAborted || _abortCheck;
     if (stop && stop()) throw new Error('중단됨 — 원격(아내 PC) 음성이 먼저라 기다리던 중이었습니다');

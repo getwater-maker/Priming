@@ -9,6 +9,20 @@ const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('e
 // 🧪 E2E(PM_UI_SMOKE=1)는 만든 .vrew·MP4·폴더를 진짜로 열지 않는다 — 시험이 만든 임시 .vrew 가 설치된 Vrew 를 수십 개 띄워 오류 창이 쌓였다(2026-10-24).
 //   시험이 shell.openPath 를 직접 바꿔 끼우면(makeall-dry 의 호출 기록 등) 그쪽이 이긴다.
 if (process.env.PM_UI_SMOKE === '1') { shell.openPath = async () => ''; }
+// 🤖 무인 실행(PM_HEADLESS=1 · v1.0.18 · 2.0 무인 제작 ①) — 창 · 소리 · 알림 없음: 파일을 열지 않고, 묻는 창은 띄우지 않고 기본값(cancelId)으로 답한다.
+//   켜는 곳은 bootstrap.js(--order 등 명령줄) 한 곳 · 본체는 아래 runOrderHeadless.
+const HEADLESS = process.env.PM_HEADLESS === '1';
+const _realOpenExternal = shell.openExternal.bind(shell);   // 🔑 유튜브 앱 연결(--yt-connect)은 로이가 앞에 있을 때 브라우저를 연다
+if (HEADLESS) {
+  shell.openPath = async () => '';
+  shell.openExternal = async () => {};
+  shell.showItemInFolder = () => {};
+  dialog.showMessageBox = async (a, b) => { const o = (b || a) || {}; return { response: o.cancelId != null ? o.cancelId : (o.defaultId || 0), checkboxChecked: false }; };
+  dialog.showMessageBoxSync = (a, b) => { const o = (b || a) || {}; return o.cancelId != null ? o.cancelId : (o.defaultId || 0); };
+  dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+  dialog.showSaveDialog = async () => ({ canceled: true });
+  dialog.showErrorBox = () => {};
+}
 const P = require('./core/pipeline');
 const { writeTextAtomicSync: writeScriptAtomic } = require('./core/atomic-write');   // 대본(.md) 덮어쓰기는 전부 이것(임시 파일 → rename)
 const TtsEngines = require('./tts/tts-engines'); // 🔊 헤더 「음성 엔진」(v0.6.67) — 유료 API 엔진 선택
@@ -437,6 +451,7 @@ app.whenReady().then(() => {
       return new Response('not found', { status: 404 });
     }
   });
+  if (HEADLESS) { _headlessMain(); return; }   // 🤖 무인 실행 — 창·세션 잠금·시작 동기화·단축키 없이 주문 하나만 처리하고 끝낸다
   // 시작은 항상 빈 화면(초기화 상태) — 지난 세션 큐 자동복원 안 함(사용자 요청). 대본은 직접 열기.
   //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
   try { _crashInfo = require('./core/session-lock').begin(sessionLockFile(), { version: (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version; } catch { return ''; } })() }); } catch {}
@@ -491,12 +506,12 @@ app.whenReady().then(() => {
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
   registerMonitorHotkeys();
 });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => { if (HEADLESS) return; if (process.platform !== 'darwin') app.quit(); });
 app.on('will-quit', () => { try { require('electron').globalShortcut.unregisterAll(); } catch (_) {} });
 app.on('before-quit', () => {
   try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장(롱폼·출판 세계 모두)
   try { if (_monGuard) _monGuard.kill(); } catch {}      // 🌙 감시가 앱보다 오래 남지 않게
-  try { require('./core/session-lock').end(sessionLockFile()); } catch {}   // 🩹 정상 종료 표시(잠금 지우기)
+  if (!HEADLESS) { try { require('./core/session-lock').end(sessionLockFile()); } catch {} }   // 🩹 정상 종료 표시(잠금 지우기) · 무인 실행은 잠금을 잡지 않았다
   // 작업 중 강제 종료돼도 절전 차단이 남지 않게 확실히 해제(카운터 무시)
   try {
     if (_awake.id != null && powerSaveBlocker.isStarted(_awake.id)) powerSaveBlocker.stop(_awake.id);
@@ -3288,7 +3303,7 @@ ipcMain.handle('script-reader-pdf', async (_e, args = {}) => {
 });
 
 const CHAPTER_TOL_SEC = 1.0;   // ⏱ 챕터 합계와 MP4 실제 길이 허용 차이
-async function runYtUpload({ file, channelId, meta, force = false, finish = null }) {
+async function runYtUpload({ file, channelId, meta, force = false, finish = null, noSchedule = false }) {   // noSchedule = 🤖 2.0 주문(예약·마무리는 2.0 이 API 로 · v1.0.18)
   const YT = require('./core/youtube-upload');
   S.ytAbort = false;
   const st = YT.status();
@@ -3323,7 +3338,7 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
   }
   // ⏰ 예약(v0.9.68 · core/yt-schedule) — 채널 설정 ytSchedule 이 켜져 있으면 다음 빈 날(하루 한 편)의 같은 시각(KST)에 공개 예약
   const YS = require('./core/yt-schedule');
-  const sched = YS.planFor(channelId, finish && finish.preset && finish.preset.ytSchedule);
+  const sched = noSchedule ? null : YS.planFor(channelId, finish && finish.preset && finish.preset.ytSchedule);
   log(`⬆ 유튜브 업로드 시작 — 「${ch.title}」 · ${sched ? `비공개 → ${sched.kst} (KST) 공개 예약` : '비공개'} · 제목 「${title}」`);
   log(`   설명 ${meta.source === 'packaging' ? '패키징 파일' : '(패키징 없음)'} · 챕터 ${meta.chapters}개 · 태그 ${meta.tags.length}개 · AI 합성 표시 = 예`);
   for (const n of (meta.notes || [])) log(`   ⓘ ${n}`);
@@ -4172,6 +4187,7 @@ let _localQwenActive = 0, _localQwenStopTimer = null;
 const LOCAL_QWEN_IDLE_STOP_MS = 3 * 60 * 1000;
 async function _stopLocalQwenComfy(logger) {
   if (_localQwenActive) return;
+  if (!HEADLESS && orderRunnerActive()) { (logger || log)('  ⓘ ComfyUI 서버는 끄지 않습니다 — 무인 제작(2.0 주문)이 쓰는 중입니다'); return; }
   try {
     const cfg = _forceLocalComfy(require('./core/comfy-image').loadConfig());
     await require('./core/comfy-launch').stopLocalComfy({ baseUrl: cfg.baseUrl, log: logger || log });
@@ -7348,6 +7364,7 @@ function serializeQueue() {
 function lastWorkspaceFile() { return path.join(workspaceDir(), 'workspace.last.json'); }
 function queueItemCount(ws) { return ['longform', 'book'].reduce((n, m) => n + (((ws && ws[m] && ws[m].items) || []).length), 0); }
 function writeWorkspace() {
+  if (HEADLESS) return;   // 🤖 무인 실행의 큐(주문 하나)로 로이 앱의 작업 큐 파일을 덮지 않는다
   try {
     const ws = serializeQueue();
     const f = workspaceFile(); const tmp = f + '.tmp';
@@ -7879,6 +7896,7 @@ ipcMain.handle('load-project', async () => {
 //   셈은 core/make-progress 한 곳(메모리 필드만 — fs 안 건드림). 단계 표시는 runMakeAllBody 안에서 _mk.begin/end.
 //   🔑 끝(완료·중단·예외)은 runMakeAllCore 의 finally 한 곳에서 닫는다 — 예외로 빠져도 팝업이 「진행 중」에 갇히지 않게.
 let _mk = null;
+let _orderStageHook = null;   // 🤖 무인 실행 — 제작 단계가 바뀔 때(tts·image·video·out) 진행 신호에 적는다
 let _mkQueuePos = null;   // run-batch 가 { idx, total } 을 적는다(단건 제작이면 null)
 function resetWorkAbort() {
   const ctx = workContext.getStore();
@@ -7962,7 +7980,7 @@ function _mkStart(projects, range, title, skip) {
   send();
   return {
     st,
-    begin(k) { MP.begin(st, k, (MP.count(projects, range)[k === 'tts' ? 'sent' : k] || {}).done || 0); send(); },
+    begin(k) { MP.begin(st, k, (MP.count(projects, range)[k === 'tts' ? 'sent' : k] || {}).done || 0); send(); if (_orderStageHook) { try { _orderStageHook(k); } catch (_) {} } },
     end(k) { MP.end(st, k); send(); },
     skip(k, note) { MP.skipStage(st, k, note); send(); },
     note(t) { st.outNote = t || ''; },
@@ -8570,6 +8588,299 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: !!S.abort, failed: failN, stoppedEarly: stoppedLeft > 0, remaining: _batchRemaining(plan, 0, S.modes.longform.items) };
 })));
+
+// ── 🤖 2.0 무인 제작 — 주문서 한 장 → 결과서 한 장(v1.0.18 · docs/요청서_2.0무인제작_2026-11-04.md ①~⑮) ──────────────
+//   입구 = tools/order.js → bootstrap(--order 등 · PM_HEADLESS) → _headlessMain. 판정·꼴은 core/order-contract 한 곳.
+//   제작은 화면의 ⚡ 만들기와 같은 길(_openScriptEntries → makeRun → runMakeAllCore) · 업로드는 같은 관문(enqueueYtUpload → runYtUpload).
+//   ⛔ 채널 설정 파일을 바꾸지 않는다 — 주문 값은 이 프로세스 안에서만 덮는다(P.setPresetOverride).
+//   ⛔ 바깥 유료 호출 0 — PM_NO_PAID(Claude·kie·Gemini 입구가 막는다) + 엔진은 로컬만(주문서 검사가 거절) + 끊어 읽기 끔(PM_CAPMARKS_OFF).
+//   🚦 GPU 차례는 화면 제작과 같다 — 음성 = 서버 GpuGate(원격 먼저) · 그림 = 장마다 _yieldGpuToRemote.
+const ORDER_EXIT = { '성공': 0, '실패': 1, '거절': 2, '중단됨': 3 };
+function _headlessArg(name) {
+  const a = process.argv;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === `--${name}`) return a[i + 1] && !String(a[i + 1]).startsWith('--') ? a[i + 1] : true;
+    if (String(a[i]).startsWith(`--${name}=`)) return String(a[i]).slice(name.length + 3);
+  }
+  return null;
+}
+function _headlessOut(obj) { try { process.stdout.write(JSON.stringify(obj) + '\n'); } catch (_) {} }
+async function _headlessMain() {
+  let code = 1;
+  process.on('uncaughtException', (e) => { logToFile(`🤖 무인 실행 — 처리 못 한 오류: ${(e && e.stack) || e}`); });
+  process.on('unhandledRejection', (e) => { logToFile(`🤖 무인 실행 — 처리 못 한 거절: ${(e && e.stack) || e}`); });
+  try {
+    logToFile(`──────── Priming v${appDiskVersion()} 무인 실행 시작 (${process.argv.slice(2).filter((x) => String(x).startsWith('--')).join(' ')}) ────────`);
+    const order = _headlessArg('order'), check = _headlessArg('order-check'), conn = _headlessArg('yt-connect');
+    if (typeof order === 'string') code = await runOrderHeadless(order);
+    else if (typeof check === 'string') code = await runOrderHeadless(check, { checkOnly: true });
+    else if (_headlessArg('list-names')) { _headlessOut(await _orderKnownNames()); code = 0; }
+    else if (typeof conn === 'string') code = await _headlessYtConnect(conn, _headlessArg('client'));
+    else { logToFile('🤖 무인 실행 — 할 일이 없습니다(--order <주문서> · --order-check <주문서> · --list-names · --yt-connect <앱 이름> [--client <파일>])'); code = 64; }
+  } catch (e) { logToFile(`🤖 무인 실행 오류: ${(e && e.stack) || e}`); code = 1; }
+  try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); } catch {}
+  app.exit(code);
+}
+/** ⑭ 이름으로 부르기 — Priming 채널(이름·목소리·그림 도구·그림체) · 음성 서버 목소리 · 그림체 id. 비밀 값은 싣지 않는다. */
+async function _orderKnownNames() {
+  const channels = require('./tts/preset-store').loadAll().filter((p) => p && p.name && !String(p.name).startsWith('__')).map((p) => {
+    const rv = String(p.voiceCloneRefAudio || '');
+    return { name: p.name, voice: rv.startsWith('srv:') ? rv.slice(4) : (rv ? '(파일) ' + path.basename(rv) : ''), voiceEngine: TtsEngines.resolveEngine(p), imgEngine: p.imgEngine || '', videoEngine: p.videoEngine || '', style: p.styleLong || p.styleId || '', speed: p.speedLong != null ? p.speedLong : null, ytChannelId: p.ytChannelId ? '(있음)' : '' };
+  });
+  let voices = null;
+  try { const v = await require('./tts/asr-client').listServerVoices(); if (Array.isArray(v)) voices = v.map((x) => (typeof x === 'string' ? x : (x && x.name) || '')).filter(Boolean); } catch (_) {}
+  const styles = require('./core/style-store').loadAll().map((x) => ({ id: x.id, name: x.name || '' }));
+  return { at: require('./core/order-contract').kst(), channels, voices, styles };
+}
+/** ④ 2.0 의 OAuth 앱으로 채널 연결 — 로이가 앞에 있을 때만(브라우저가 열린다). 앱 정보·토큰은 그 앱 이름의 프로필 파일에 암호화(safeStorage). */
+async function _headlessYtConnect(appName, clientFile) {
+  const OC = require('./core/order-contract');
+  const YT = require('./core/youtube-upload');
+  const cfg = OC.loadConfig();
+  const profile = YT.setAuthProfile(cfg.uploadApps[appName] || appName);
+  if (!profile) { _headlessOut({ ok: false, error: '앱 이름이 비었습니다' }); return 2; }
+  if (typeof clientFile === 'string') {
+    const r = YT.importClient(clientFile);
+    if (!r.ok) { _headlessOut({ ok: false, error: r.error }); return 1; }
+    log(`🤖 유튜브 앱 「${appName}」 — 클라이언트 파일을 암호화해 넣었습니다(프로필 ${profile})`);
+  }
+  const r = await YT.connectChannel({ openUrl: (u) => _realOpenExternal(u), log });
+  _headlessOut(r.ok ? { ok: true, profile, channelId: r.channelId || (r.channel && r.channel.id) || '', title: r.title || (r.channel && r.channel.title) || '' } : { ok: false, error: r.error });
+  return r.ok ? 0 : 1;
+}
+function _orderLockFile() { return path.join(os.homedir(), '.priming-maker', 'order-running.json'); }
+function _pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
+/** 무인 실행이 지금 도는가(로이 앱이 ComfyUI 를 끄기 전에 본다) */
+function orderRunnerActive() {
+  try { const j = JSON.parse(fs.readFileSync(_orderLockFile(), 'utf8')); return !!(j && j.pid && j.pid !== process.pid && _pidAlive(j.pid)); } catch (_) { return false; }
+}
+// 🖼 ⑧ 썸네일 배경 — 글자 없는 원본 PNG 1280×720 한 장(로컬 Qwen · 그 편 영상 바로 뒤). 이미 있으면 그대로(이어 하기).
+async function _orderThumbBg(prompt, styleId, outPath) {
+  if (fs.existsSync(outPath)) { log(`🖼 썸네일 배경 — 이미 있어 그대로 씁니다 (${path.basename(outPath)})`); return outPath; }
+  const CI = require('./core/comfy-image');
+  const cfg = _forceLocalComfy(CI.loadConfig());
+  cfg.workflowPath = _localQwenWfPath(cfg);
+  const eng = new CI.ComfyImage(cfg, log);
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const full = P.buildImagePrompt(stylePrompt, `${prompt}. Background artwork only, clean surfaces, leave open space for a title.`);
+  return _withLocalQwenStop(null, log, async () => {
+    const r0 = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+    if (!r0.ok) throw new Error(r0.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    await awaitForeignTtsIdle('썸네일 배경', log, { untilDone: true });
+    await _yieldGpuToRemote(log);
+    if (S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    log(`🖼 썸네일 배경 — 1280×720 한 장 그립니다(로컬 Qwen · 글자 없음)`);
+    const tmp = outPath.replace(/\.png$/i, '') + '.tmp.png';
+    const r = await eng.textToImage({ prompt: full, dims: { w: 1280, h: 720 }, outputPath: tmp, abortSignal: () => S.abort });
+    if (S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    if (!r.success) throw new Error('썸네일 배경 그림 실패 — ' + (r.error || ''));
+    const got = r.imagePath || tmp;
+    const z = require('./vrew/vrew-builder').readImageSize(got);
+    if (z && z.w === 1280 && z.h === 720 && /\.png$/i.test(got)) fs.renameSync(got, outPath);
+    else {   // 크기·꼴이 다르면 1280×720 PNG 로 맞춘다(원본 비율 16:9 그대로)
+      await new Promise((res, rej) => require('child_process').execFile(require('./core/media-utils').getFfmpegPath(), ['-y', '-hide_banner', '-loglevel', 'error', '-i', got, '-vf', 'scale=1280:720:flags=lanczos', '-frames:v', '1', outPath], { windowsHide: true }, (e) => (e ? rej(e) : res())));
+      try { fs.rmSync(got, { force: true }); } catch (_) {}
+    }
+    if (await looksBadImage(outPath)) { try { fs.rmSync(outPath, { force: true }); } catch (_) {} throw new Error('썸네일 배경이 검정·노이즈로 나왔습니다'); }
+    log(`✓ 썸네일 배경 → ${path.basename(outPath)}`);
+    return outPath;
+  });
+}
+/** ⑥ ⑨ 제작 기록 — 재서 적기만(판정 없음). 값을 모르면 null + why */
+async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec }) {
+  const OC = require('./core/order-contract');
+  const KB = require('./core/ken-burns');
+  const GS = require('./core/gpu-share');
+  const pr = it.parsed.projects[0];
+  const r1 = (x) => (x == null || !isFinite(x) ? null : Math.round(x * 10) / 10);
+  let mp4Sec = 0;
+  try { mp4Sec = Number(await require('./core/media-utils').getMediaDuration(mp4)) || 0; } catch (_) {}
+  const sp = Number(preset.speedLong) > 0 ? Number(preset.speedLong) : 1;   // 배속은 음성 파일에 이미 들어가 있다(atempo) — 길이는 그대로 쓴다
+  const pmap = P.pausePlanOf(pr, preset).map;
+  const raw = pr.groups.map((g) => {
+    const ss = pr.getSentencesOfGroup(g);
+    return { num: g.num, sec: ss.reduce((a, s) => a + (Number(s.ttsDurationSec) || 0) + (pmap.get(s.id) || 0), 0), motion: OC.motionName(KB.patternIndexOf(g)) };
+  });
+  // 장면 길이 = 문장 음성 + 쉼, 합계를 MP4 실제 길이에 맞춰 비례로 고친다(도입·끝 여백이 장면에 고루 들어가게)
+  const rawTotal = raw.reduce((a, x) => a + x.sec, 0);
+  const f = mp4Sec > 0 && rawTotal > 0 ? Math.min(2, Math.max(0.5, mp4Sec / rawTotal)) : 1;
+  const scenes = raw.map((x) => ({ ...x, sec: x.sec * f }));
+  const st = OC.sceneStats(scenes);
+  const longest = scenes.reduce((a, x) => (x.sec > (a ? a.sec : -1) ? x : a), null);
+  const speechSec = pr.sentences.reduce((a, s) => a + (Number(s.ttsDurationSec) || 0), 0);
+  const t = S.timings || {};
+  const ys = GS.yieldStats();
+  const makeMin = (Date.now() - T0) / 60000;
+  const durMin = mp4Sec / 60;
+  let bgm = '없음';
+  try { const eb = _resolveBgm(preset, it.scriptPath, () => {}); if (eb && eb.bgm && eb.bgm.audioPath) bgm = path.basename(eb.bgm.audioPath); } catch (_) {}
+  const wf = _localQwenWfPath(require('./core/comfy-image').loadConfig());
+  return {
+    durationSec: r1(mp4Sec) || null,
+    charsPerMin: OC.charsPerMin(pr.sentences.map((s) => s.text), speechSec),
+    scenes: st.scenes, sceneAvgSec: st.sceneAvgSec, sceneMaxSec: st.sceneMaxSec, sceneMaxAt: longest ? `G${longest.num}` : null, motions: st.motions,
+    gpuMin: r1(((Number(t.tts) || 0) + (Number(t.image) || 0) + (thumbSec || 0)) / 60),
+    yieldMin: r1(ys.total / 60), yieldTtsMin: r1(ys.tts / 60), yieldImageMin: r1(ys.image / 60),
+    makeMin: r1(makeMin),
+    k: durMin > 0 ? Math.round((makeMin / durMin) * 100) / 100 : null,
+    kNet: durMin > 0 ? Math.round(((makeMin - ys.total / 60) / durMin) * 100) / 100 : null,
+    bgm,
+    voice: order.voice, voiceEngine: 'OmniVoice', speed: sp,
+    imageEngine: order.imageEngine, imageModels: OC.workflowModels(wf), style: order.style,
+    captionBreaks: '규칙 줄 나누기(Claude 끊어 읽기 끔 — 유료 호출 0)',
+    prompts: pr.groups.map((g) => ({ g: g.num, prompt: g.imagePrompt || '' })),
+    thumbPrompt: order.thumbPrompt || '',
+    note: '이번 실행분만 센다(중단 뒤 이어 한 실행은 그 실행의 시간) · gpuMin = 음성 + 그림 + 썸네일 단계 벽시계(양보 대기 포함) · kNet = 양보 대기를 뺀 k',
+  };
+}
+async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
+  const OC = require('./core/order-contract');
+  const GS = require('./core/gpu-share');
+  process.env.PM_NO_PAID = '1';
+  process.env.PM_CAPMARKS_OFF = '1';
+  const cfg = OC.loadConfig();
+  const name = OC.orderName(orderPath);
+  const resultsDir = cfg.resultsDir;
+  const T0 = Date.now();
+  const res = OC.blankResult(null, { name, version: appDiskVersion() });
+  let stage = '주문 읽기', stopping = false, beatT = null, stopT = null, haveLock = false, it = null, abortP = null;
+  const L = (m) => log(`🤖 [${name}] ${m}`);
+  const finish = (status, reason = '', extra = {}) => {
+    Object.assign(res, extra, { status, stage: status === OC.STATUS.ok ? '끝' : stage, reason: reason ? OC.reasonLine(reason) : '', endedAt: OC.kst() });
+    if (checkOnly) { _headlessOut({ ...res, checkOnly: true }); return ORDER_EXIT[status]; }
+    try { const p = OC.writeResultOnce(resultsDir, name, res); L(`결과서 — ${status}${res.reason ? ' · ' + res.reason : ''} → ${p}`); }
+    catch (e) { L(`⚠ 결과서를 쓰지 못했습니다 — ${e.message}`); }
+    return ORDER_EXIT[status] != null ? ORDER_EXIT[status] : 1;
+  };
+  const hasPieces = () => { try { const pr = it && it.parsed && it.parsed.projects[0]; return !!(pr && (pr.sentences.some((s) => ttsFileOk(s.ttsAudioPath)) || pr.groups.some((g) => g.imagePath && fs.existsSync(g.imagePath)))); } catch (_) { return false; } };
+  const beat = () => { if (!checkOnly) { try { OC.writeBeat(resultsDir, name, { pid: process.pid, stage }); } catch (_) {} } };
+  try {
+    if (!checkOnly) {
+      if (orderRunnerActive()) return finish(OC.STATUS.reject, '다른 주문이 도는 중입니다 — 한 번에 하나씩 만듭니다');
+      try { fs.mkdirSync(path.dirname(_orderLockFile()), { recursive: true }); fs.writeFileSync(_orderLockFile(), JSON.stringify({ pid: process.pid, order: name, at: OC.kst() })); haveLock = true; } catch (_) {}
+      try { for (const f of OC.stopPaths(resultsDir, name)) fs.rmSync(f, { force: true }); } catch (_) {}   // 남은 중단 요청은 지난 실행의 것
+      OC.writeReceipt(resultsDir, name, { pid: process.pid, priming: res.priming });
+      beat(); beatT = setInterval(beat, 60 * 1000);
+      // ③ 중단 — 요청 파일을 1초마다 본다 → 제작·업로드 멈춤 + 로컬 ComfyUI 멈춤·끄기(돌던 MP4 조각도 vrew-render 가 끈다)
+      stopT = setInterval(() => {
+        if (stopping || !OC.stopRequested(resultsDir, name)) return;
+        stopping = true; L('⏹ 중단 요청 — 하던 일을 멈추고 GPU 를 비웁니다');
+        workAbortEpoch++; S.abort = true; S.ytAbort = true;
+        if (_localQwenActive) abortP = _abortLocalQwenComfy().catch(() => {});   // 끝내기 전에 기다린다(안 기다리면 프로세스가 먼저 끝나 ComfyUI 가 남는다 — 11-04 시험)
+      }, 1000);
+    }
+    _orderStageHook = (k) => { stage = { tts: '음성', image: '그림', video: '그림', out: '렌더' }[k] || stage; beat(); };
+    L(`주문 받음 — ${orderPath}`);
+    const r0 = OC.readOrder(orderPath);
+    const order = r0.order;
+    if (order) Object.assign(res, { order: order.name, orderId: order.orderId, channelId: order.channelId });
+    if (!r0.ok) return finish(OC.STATUS.reject, r0.errors.join(' / '));
+    const ops = OC.readOps(cfg.opsFile);
+    if (!ops.run) return finish(OC.STATUS.reject, ops.why);
+    const known = await _orderKnownNames();
+    const kerr = OC.checkKnown(order, { channels: known.channels.map((c) => c.name), voices: known.voices, styles: known.styles.map((x) => x.id) });
+    if (kerr.length) return finish(OC.STATUS.reject, kerr.join(' / '));
+    res.sameVoice = OC.sameVoiceInBatch(cfg.ordersDir, order);
+    if (res.sameVoice.length) L(`⚠ 같은 날 묶음에서 같은 목소리 「${order.voice}」 를 쓰는 다른 채널 — ${res.sameVoice.map((x) => x.channelId).join(', ')}`);
+    // ④ 이미 올린 주문 — 만들지도 올리지도 않는다
+    const done = order.upload.enabled ? OC.ledgerGet(order.orderId) : null;
+    if (done) {
+      L(`⏭ 이미 올린 주문입니다 — ${done.at} · 영상 ${done.videoId}`);
+      return finish(OC.STATUS.ok, '', { uploaded: '이미 올라감', videoId: done.videoId, files: { ...res.files, mp4: done.mp4 || null, thumbBg: done.thumbBg || null }, note: `${done.at} 에 이미 올렸습니다 — 다시 만들지도 올리지도 않았습니다` });
+    }
+    // 채널 값 덮기(이 프로세스 안에서만) — 주문서의 목소리·그림체·엔진 · 출력은 무인 제작 폴더 · 영상 없음 · 화면 업로드·예약 끔
+    const base = require('./tts/preset-store').loadAll().find((p) => p.name === order.primingChannel);
+    const scriptBase = _safeFolder(path.basename(order.script).replace(/\.md$/i, ''));
+    const preset = {
+      ...base, voice: 'clone', voiceCloneRefAudio: 'srv:' + order.voice, voiceEngine: { id: 'omnivoice' }, speakers: [],
+      styleId: order.style, styleLong: order.style, imgEngine: order.imageEngine, videoEngine: 'none',
+      outLong: cfg.outDir, outputFolder: cfg.outDir, outUpload: path.join(cfg.outDir, scriptBase), ytAuto: false, ytSchedule: { ...(base.ytSchedule || {}), on: false },
+    };
+    if (order.speed != null) preset.speedLong = order.speed;
+    P.setPresetOverride(base.name, preset);
+    S.abort = false;
+    const okN = await _openScriptEntries([{ scriptPath: order.script, preset, settings: _channelItemSettings(preset) }]);
+    it = okN ? S.modes.longform.items.find((x) => x.scriptPath === order.script) : null;
+    if (!it || !it.parsed || !it.parsed.projects || !it.parsed.projects[0]) return finish(OC.STATUS.reject, '제작본을 읽을 수 없습니다(문장·장면을 찾지 못함)');
+    const empty = OC.emptyPromptGroups(it.parsed);
+    if (empty.length) return finish(OC.STATUS.reject, `그림 지시문이 빈 장면 ${empty.length}개 (G${empty.slice(0, 12).join(', G')}${empty.length > 12 ? ' …' : ''}) — 비면 유료 호출로 채우게 되므로 만들지 않습니다`);
+    const roy = royOpenInfo(it.parsed);
+    if (roy.open) return finish(OC.STATUS.reject, `🟥 미확인 경험 ${roy.open}곳 — 확인된 경험만 쓸 수 있습니다`);
+    if (checkOnly) return finish(OC.STATUS.ok, '', { note: `확인만 — 만들지 않았습니다(장면 ${it.parsed.projects[0].groups.length}개 · 문장 ${it.parsed.projects[0].sentences.length}개)` });
+
+    // ① 제작 — 화면의 ⚡ 만들기와 같은 길(제작 칸 · 이어받기 · 게이트 그대로)
+    GS.resetYield();
+    stage = '음성'; beat();
+    const ov = require('./core/queue-channel').channelOverrides(preset, '\u0000무인');   // 그 채널의 자막 모양·글자 수(헤더가 없다)
+    const speed = order.speed != null ? order.speed : (preset.speedLong != null ? preset.speedLong : null);
+    try {
+      await makeRun(it, () => runMakeAllCore({
+        engine: order.imageEngine, presetName: base.name, speed, styleId: order.style, videoEngine: 'none', vidSel: '',
+        captionStyle: ov.captionStyle || null, captionMaxChars: ov.captionMaxChars || 7, aiNotice: true,
+        outMode: 'full', outTarget: 'mp4', openVrew: false, uploadAfter: 'off', _fromQueue: true,
+      }));
+    } catch (e) {
+      if (stopping || S.abort || e.code === 'MAKE_ABORTED') return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: hasPieces() });
+      return finish(OC.STATUS.fail, e, { resumable: hasPieces() });
+    }
+    const pr = it.parsed.projects[0];
+    const runCtx = { parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot };
+    const baseName = vrewBaseName(pr, runCtx);
+    const vrewPath = path.join(it.outRoot, `${baseName}.vrew`);
+    const mp4 = uploadMp4Path(baseName, preset, vrewPath);
+    stage = '렌더';
+    if (!fs.existsSync(mp4)) return finish(OC.STATUS.fail, `MP4 가 만들어지지 않았습니다 — ${mp4}`, { resumable: hasPieces() });
+    const srt = path.join(shortsDirs(it.outRoot, pr.shortsNum).subtitles, `${baseName}.srt`);   // ⑳ 자막 파일(덧붙임2) — 올리는 것은 2.0
+    res.files = { mp4, vrew: fs.existsSync(vrewPath) ? vrewPath : null, thumbBg: null, srt: fs.existsSync(srt) ? srt : null, outDir: it.outRoot };
+    // ⑧ 썸네일 배경
+    let thumbSec = 0;
+    if (order.thumbPrompt) {
+      stage = '썸네일 배경'; beat();
+      const t0 = Date.now();
+      try { res.files.thumbBg = await _orderThumbBg(order.thumbPrompt, order.style, path.join(it.outRoot, `${baseName}_썸네일배경.png`)); }
+      catch (e) {
+        if (stopping || S.abort || e.code === 'MAKE_ABORTED') return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: true });
+        return finish(OC.STATUS.fail, e, { resumable: true });
+      }
+      thumbSec = (Date.now() - t0) / 1000;
+    } else res.thumbNote = '썸네일 배경 지시문이 비어 만들지 않았습니다';
+    res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec });
+    // ④ ⑤ 업로드 — 비공개 · 임시 제목 · AI 사용 예(runYtUpload 고정) · 예약·썸네일·재생목록·설명·고정댓글 없음 · 그 주문의 OAuth 앱
+    if (!order.upload.enabled) return finish(OC.STATUS.ok, '', { note: '업로드하지 않는 주문입니다(upload.enabled = false)' });
+    stage = '업로드'; beat();
+    if (stopping || S.abort) return finish(OC.STATUS.abort, '중단 요청으로 업로드 전에 멈췄습니다', { resumable: true });
+    const ops2 = OC.readOps(cfg.opsFile);
+    if (!ops2.run) return finish(OC.STATUS.abort, `${ops2.why} — 업로드하지 않았습니다(다시 주문하면 만든 파일로 올립니다)`, { resumable: true });
+    const YT = require('./core/youtube-upload');
+    YT.setAuthProfile(cfg.uploadApps[order.upload.app] || order.upload.app);
+    const ytCh = order.upload.channelId || base.ytChannelId || '';
+    if (!ytCh) return finish(OC.STATUS.fail, '올릴 유튜브 채널이 정해지지 않았습니다(주문 upload.channelId 또는 Priming 채널의 업로드채널)', { resumable: true });
+    const meta = { title: order.upload.title, description: '', descriptionNoChapters: '', tags: [], chapters: 0, chapterTotalSec: 0, notes: [], source: '2.0 주문', language: ytLangOf(pr) };
+    const ur = await enqueueYtUpload({ file: mp4, channelId: ytCh, meta, finish: null, noSchedule: true, itemId: it.id });
+    const vidOf = (u) => { const m = /(?:youtu\.be\/|v=|\/video\/)([\w-]{11})/.exec(String(u || '')); return m ? m[1] : null; };
+    if (ur && ur.ok && ur.skipped) {
+      const vid = (ur.duplicate && ur.duplicate.videoId) || vidOf(ur.url);
+      if (vid) OC.ledgerSet(order.orderId, { videoId: vid, channelId: ytCh, app: order.upload.app, mp4, thumbBg: res.files.thumbBg });
+      return finish(OC.STATUS.ok, '', { uploaded: '이미 올라감', videoId: vid, note: `유튜브 관문이 같은 편을 찾았습니다 — ${(ur.duplicate && ur.duplicate.reason) || ''}` });
+    }
+    if (ur && ur.ok && ur.videoId) {
+      OC.ledgerSet(order.orderId, { videoId: ur.videoId, channelId: ytCh, app: order.upload.app, mp4, thumbBg: res.files.thumbBg });
+      return finish(OC.STATUS.ok, '', { uploaded: '함', videoId: ur.videoId, privacy: ur.privacy || 'private' });
+    }
+    if (ur && ur.cancelled) return finish(OC.STATUS.abort, '중단 요청으로 업로드를 멈췄습니다(올라간 영상 없음)', { resumable: true });
+    return finish(OC.STATUS.fail, (ur && ur.error) || '업로드 실패', { resumable: true });
+  } catch (e) {
+    if (stopping || e.code === 'MAKE_ABORTED') return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: hasPieces() });
+    return finish(OC.STATUS.fail, e, { resumable: hasPieces() });
+  } finally {
+    _orderStageHook = null;
+    if (beatT) clearInterval(beatT);
+    if (stopT) clearInterval(stopT);
+    if (!checkOnly) { try { fs.rmSync(OC.beatPath(resultsDir, name), { force: true }); } catch (_) {} try { for (const f of OC.stopPaths(resultsDir, name)) if (stopping) fs.rmSync(f, { force: true }); } catch (_) {} }
+    if (haveLock) { try { fs.rmSync(_orderLockFile(), { force: true }); } catch (_) {} }
+    if (abortP) { try { await abortP; } catch (_) {} }   // ③ 중단 = 로컬 ComfyUI 멈춤 신호·끄기가 끝난 뒤에 프로세스를 끝낸다
+  }
+}
 
 // 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
 // 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인

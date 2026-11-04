@@ -13,6 +13,7 @@ const API = 'https://api.kie.ai';
 const UPLOAD = 'https://kieai.redpandaai.co';
 
 function kieKey() {
+  if (process.env.PM_NO_PAID === '1') return '';   // 🤖 무인 제작(v1.0.18) — 바깥 유료 호출 0
   if (process.env.PM_UI_SMOKE && global.__kieTest) return global.__kieTest.key || '';   // 🧪 E2E 는 진짜 키를 안 쓴다
   try { return String((require('../tts/secret-store').get('kie') || {}).key || '').trim(); } catch { return ''; }
 }
@@ -33,6 +34,7 @@ function explain(code, msg) {
 }
 
 async function call(method, url, body, { key, timeoutMs = 60000 } = {}) {
+  if (process.env.PM_NO_PAID === '1') throw new Error('무인 제작 — 바깥 유료 호출(AI 생성 서비스)을 하지 않습니다');   // 🤖 v1.0.18
   key = key || kieKey();
   const res = await _fetch()(url, {
     method, headers: { Authorization: `Bearer ${key}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },

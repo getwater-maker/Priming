@@ -90,7 +90,7 @@ const server = http.createServer((req, res) => {
   ok(!bad.dup && /연결/.test(bad.warn || ''), '연결 안 된 채널 → 경고(로컬 판정만)');
 
   console.log('\n[7] main.js 배선 — 모든 업로드 경로가 하나의 관문을 지난다');
-  ok(/async function runYtUpload\(\{ file, channelId, meta, force = false, finish = null \}\)/.test(M), 'runYtUpload 에 force · 🧷 finish');
+  ok(/async function runYtUpload\(\{ file, channelId, meta, force = false, finish = null(?:, noSchedule = false)? \}\)/.test(M), 'runYtUpload 에 force · 🧷 finish');
   const run = M.slice(M.indexOf('async function runYtUpload'), M.indexOf('/** 렌더가 끝난 뒤'));
   ok(/if \(!force\) \{\s*const dup = await YT\.checkDuplicate\(\{ channelId, file, title \}\)/.test(run) && /skipped: true/.test(run), '관문: force 가 아니면 checkDuplicate → 중복이면 건너뜀(자동 업로드·큐 전체·이 대본 모두 여기를 지난다)');
   ok(run.indexOf('checkDuplicate') < run.indexOf('YT.uploadVideo('), '관문은 실제 업로드 호출보다 앞');

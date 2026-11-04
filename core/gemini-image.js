@@ -26,6 +26,7 @@ function saveConfig(patch) {
   return next;
 }
 function geminiKey() {
+  if (process.env.PM_NO_PAID === '1') return '';   // 🤖 무인 제작(v1.0.18) — 바깥 유료 호출 0
   try { const SS = require('../tts/secret-store'); return (SS.get(SS.IMAGE_ID) || {}).key || ''; } catch { return ''; }
 }
 

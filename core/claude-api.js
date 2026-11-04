@@ -43,7 +43,8 @@ function cfg() {
 }
 // 이 쓰임이 실제로 쓸 모델 — 직접 넘긴 model > 그 쓰임에 고른 모델 > 기본 모델
 function modelFor(use, model, c = cfg()) { return MODELS[model] ? model : (use && c.uses[use]) || c.model; }
-const available = () => !!cfg().key;
+// 🤖 무인 제작(PM_NO_PAID=1 · v1.0.18 · 2.0 주문 = 바깥 유료 호출 0) — 키가 있어도 없는 것으로 본다
+const available = () => process.env.PM_NO_PAID !== '1' && !!cfg().key;
 const costOf = (model, usage) => {
   const p = MODELS[model] || MODELS[DEFAULT_MODEL]; const u = usage || {};
   const inTok = (Number(u.input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0) * 1.25 + (Number(u.cache_read_input_tokens) || 0) * 0.1;
@@ -71,6 +72,7 @@ function errText(status, j, raw) {
 async function ask(o = {}) {
   const t0 = Date.now();
   const c = cfg();
+  if (process.env.PM_NO_PAID === '1') return { ok: false, error: '무인 제작 — 바깥 유료 호출(Claude)을 하지 않습니다', noKey: true, noPaid: true, ms: 0 };
   if (!c.key) return { ok: false, error: 'Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키에 넣으세요', noKey: true, ms: 0 };
   const model = modelFor(o.use, o.model, c);
   const body = {

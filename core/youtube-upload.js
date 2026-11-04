@@ -48,7 +48,12 @@ const EP = {
 function _setEndpoints(p) { Object.assign(EP, p || {}); }
 
 function _dir() { return path.join(os.homedir(), '.priming-maker'); }
-function authFile() { return path.join(_dir(), 'youtube-auth.json'); }
+// 🤖 인증 프로필(v1.0.18 · 2.0 무인 제작 ④) — 프로필을 정하면 그 프로필만의 파일(youtube-auth.<이름>.json)에 그 OAuth 앱·채널 토큰을 둔다.
+//   '' = 회원·로이 앱이 쓰는 기본 파일(예전 그대로). 프로필에서는 앱 기본(공용) 클라이언트로 **떨어지지 않는다**(공용 할당량을 나누지 않게).
+let _profile = '';
+function setAuthProfile(name) { const n = String(name || '').replace(/[^\w.-]/g, ''); if (n !== _profile) { _profile = n; try { _tok.clear(); } catch (_) {} } return _profile; }
+function authProfile() { return _profile; }
+function authFile() { return path.join(_dir(), _profile ? `youtube-auth.${_profile}.json` : 'youtube-auth.json'); }
 function uploadsFile() { return path.join(_dir(), 'youtube-uploads.json'); }
 
 // ── 암호화 ───────────────────────────────────────────────────────────────
@@ -140,7 +145,7 @@ function _ownClient(d = _load()) {
   try { const c = JSON.parse(ci.dec(d.client) || 'null'); return c && c.clientId && c.clientSecret ? c : null; } catch (_) { return null; }
 }
 /** 지금 쓰는 클라이언트 = 자기 것 > 앱 기본 */
-function _getClient(d = _load()) { return _ownClient(d) || _defaultClient(); }
+function _getClient(d = _load()) { return _ownClient(d) || (_profile ? null : _defaultClient()); }
 
 // 📊 기본(공용) 클라이언트를 쓸 때의 **PC 하루 업로드 상한** — 구글 한도는 프로젝트 하나에 걸려 모든 사용자가 나눠 쓴다.
 //   한 PC 가 다 써 버리지 않게 앱이 센다(KST 하루). 자기 프로젝트 파일을 쓰면 앱 상한은 없다(구글 한도만).
@@ -677,5 +682,5 @@ function reorderChannels(ids) {
 module.exports = {
   SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels, setMemo,
   uploadVideo, findUploaded, findUploadedByTitle, listChannelTitles, checkDuplicate, normTitle, _clearRemoteTitles: () => _remoteTitles.clear(), cleanTitle, cleanDescription, cleanTags, explainApiError,
-  authFile, uploadsFile, _setEndpoints, _setCrypto, _setDefaultClient,
+  authFile, uploadsFile, setAuthProfile, authProfile, _setEndpoints, _setCrypto, _setDefaultClient,
 };

@@ -180,7 +180,11 @@ function toDTO(parseResult) {
 }
 
 // ── 프리셋 ──────────────────────────────────────────────
+// 🤖 무인 제작(주문서 · v1.0.18) — 이 프로세스 안에서만 채널 값을 덮는다(채널 설정 파일은 그대로 · main runOrderHeadless 만 쓴다)
+const _presetOverrides = new Map();
+function setPresetOverride(name, obj) { if (obj) _presetOverrides.set(name, obj); else _presetOverrides.delete(name); }
 function getPreset(name) {
+  if (name && _presetOverrides.has(name)) return _presetOverrides.get(name);
   const all = presetStore.loadAll();
   return name ? all.find((p) => p.name === name) || null : presetStore.getDefault();
 }
@@ -1233,7 +1237,7 @@ function sanitize(name) {
 }
 
 module.exports = { setRoyHook, setPauseHook, speakerVoiceMap, nudgePromptForRetry,
-  parseScript, parseScriptText, toDTO, getPreset, listPresets,
+  parseScript, parseScriptText, toDTO, getPreset, setPresetOverride, listPresets,
   makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, userPauseWins, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
   buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,

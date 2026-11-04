@@ -1030,6 +1030,11 @@ async function renderVrewToMp4(opts = {}) {
   const lap = (k, t) => { timings[k] = +((Date.now() - t) / 1000).toFixed(1); };
   let tmpDir = null;
   const ctx = { children: [] };
+  // ⏹ 중단 = 돌던 ffmpeg 도 바로 끈다(v1.0.18 · 2.0 무인 제작 ③ 「1분 안 GPU 비움」) — 예전엔 새 조각만 안 시작하고 돌던 조각은 끝까지 갔다
+  const abortWatch = setInterval(() => {
+    if (!isAborted()) return;
+    for (const cp of ctx.children) { try { if (cp.exitCode == null) cp.kill(); } catch (_) {} }
+  }, 500);
   // 📊 진행 상태(2026-09-23 로이 「진행과정을 눈으로 확인할 수 있게」) — 화면(main → 렌더러)이 그대로 그린다.
   //   단계: read → video(조각 병렬) ∥ audio(동시) → concat → mux → done. 계산은 여기서, 표시는 화면에서.
   const st = {
@@ -1174,8 +1179,8 @@ async function renderVrewToMp4(opts = {}) {
       }
     };
     await Promise.all(Array.from({ length: par }, worker));
+    if (isAborted()) return { ok: false, cancelled: true, error: '중단됨' };   // 끈 ffmpeg 의 오류보다 중단이 먼저
     if (firstErr) return { ok: false, error: firstErr.message };
-    if (isAborted()) return { ok: false, cancelled: true, error: '중단됨' };
     lap('video', t);
 
     // 이어붙이기(무손실)
@@ -1215,8 +1220,10 @@ async function renderVrewToMp4(opts = {}) {
     Object.assign(st, { phase: 'done', endedAt: Date.now(), speed: durationSec / renderSec }); emit();
     return { ok: true, output: opts.outPath, durationSec, renderSec, timings, speed: durationSec / renderSec, encoder: enc };
   } catch (e) {
+    if (isAborted()) return { ok: false, cancelled: true, error: '중단됨' };
     return { ok: false, error: e && e.message ? e.message : String(e) };
   } finally {
+    clearInterval(abortWatch);
     for (const cp of ctx.children) { try { if (cp.exitCode == null) cp.kill(); } catch (_) {} }
     if (tmpDir && !opts.keepTmp) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {} }
   }
