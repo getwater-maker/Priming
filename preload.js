@@ -199,6 +199,9 @@ contextBridge.exposeInMainWorld('api', {
   licenseSetAutoLog: (on) => ipcRenderer.invoke('license-set-autolog', on),
   licenseReport: (text) => ipcRenderer.invoke('license-report', { text }),
   licenseOpenSite: () => ipcRenderer.invoke('license-open-site'),
+  linkBrowserGet: () => ipcRenderer.invoke('link-browser-get'),   // 🌐 링크를 열 브라우저(v1.0.21)
+  linkBrowserSet: (s) => ipcRenderer.invoke('link-browser-set', s),
+  linkBrowserTest: () => ipcRenderer.invoke('link-browser-test'),
   openChargePage: () => ipcRenderer.invoke('open-charge-page'),
   licenseOpenAdmin: () => ipcRenderer.invoke('license-open-admin'),
   saveProject: () => ipcRenderer.invoke('save-project'),

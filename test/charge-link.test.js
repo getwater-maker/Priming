@@ -13,7 +13,7 @@ const main = R('main.js'), app = R('renderer', 'src', 'App.jsx'), pre = R('prelo
 ok(/const KIE_BILLING_URL = 'https:\/\/kie\.ai\/billing';/.test(main), '판매자 충전 주소 = https://kie.ai/billing');
 ok(isSiteUrl(SITE_CHARGE) && /^https:\/\/www\.primingwave\.com\//.test(SITE_CHARGE), '회원 충전 주소는 primingwave.com(https): ' + SITE_CHARGE);
 { const h = main.slice(main.indexOf("ipcMain.handle('open-charge-page'"), main.indexOf("ipcMain.handle('license-open-site'"));
-  ok(/isOwner\(\)\) \{ shell\.openExternal\(KIE_BILLING_URL\)/.test(h) && /shell\.openExternal\(require\('\.\/core\/license'\)\.SITE_CHARGE\)/.test(h), '관리자만 kie · 그 밖은 사이트 충전 페이지');
+  ok(/isOwner\(\)\) \{ openLink\(KIE_BILLING_URL\)/.test(h) && /openLink\(require\('\.\/core\/license'\)\.SITE_CHARGE\)/.test(h), '관리자만 kie · 그 밖은 사이트 충전 페이지');
   ok(!/\(_e, \w+/.test(h.split('\n')[1] || ''), '주소를 렌더러에서 받지 않는다(인자 없음)'); }
 ok(/openChargePage: \(\) => ipcRenderer\.invoke\('open-charge-page'\)/.test(pre), 'preload 연결');
 ok(!/'open-charge-page'/.test(main.slice(main.indexOf('const LIC_OPEN'), main.indexOf('const LIC_OPEN') + 600)), '로그인 전에는 열리지 않는다(LIC_OPEN 밖)');

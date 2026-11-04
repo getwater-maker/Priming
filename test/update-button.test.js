@@ -41,7 +41,7 @@ ok(/writeWorkspace\(\)/.test(blk), '다시 시작 전에 큐를 저장한다(♻
 ok(/return \{ updated, failed, reason: 'applied'/.test(LU) && /module\.exports = \{ applyUpdates, fetchManifest, localPackage \}/.test(LU), 'applyUpdates 가 결과를 돌려준다(시작 호출은 값을 안 써서 영향 없음)');
 const chk = M.slice(M.indexOf("ipcMain.handle('app-update-check'"), M.indexOf("ipcMain.handle('app-update-apply'"));
 ok(!/applyUpdates/.test(chk), '확인은 매니페스트만 읽는다(파일을 바꾸지 않는다)');
-ok(/shell\.openExternal\('https:\/\/www\.primingwave\.com\/'\)/.test(M) && /ipcMain\.handle\('open-tube-site', \(\) =>/.test(M), '앱 이름 클릭 = 고정 주소만 연다(인자를 받지 않는다)');
+ok(/openLink\('https:\/\/www\.primingwave\.com\/'\)/.test(M) && /ipcMain\.handle\('open-tube-site', \(\) =>/.test(M), '앱 이름 클릭 = 고정 주소만 연다(인자를 받지 않는다)');
 ok(/data-testid="app-title"[^>]*onClick=\{\(\) => api\.openTubeSite\(\)\}/.test(APP), '헤더 앱 이름 클릭 → openTubeSite');
 ok(/data-testid="app-update"/.test(APP) && /appUpdateApply/.test(APP) && /appUpdateCheck/.test(P) && /openTubeSite/.test(P), '헤더 업데이트 단추 · preload 연결');
 console.log(`\n${fail ? '❌' : '✅'} update-button — ${pass} 통과 / ${fail} 실패`);

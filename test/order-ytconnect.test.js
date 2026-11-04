@@ -80,7 +80,7 @@ function run() {
   ok(/timeoutMs: 15 \* 60 \* 1000/.test(fn), '[3] 기다림 15분');
   ok(/expectId: expectId \|\| undefined/.test(fn) && /mismatch: true/.test(fn), '[3] --expect → expectId · mismatch 를 끝 JSON 에');
   ok(!/revoke/i.test(fn), '[3] mismatch 때 revoke 하지 않는다');
-  ok(/urlOut \?/.test(fn) && /_realOpenExternal/.test(fn), '[3] --url-out 이면 브라우저를 열지 않는다(없으면 예전처럼 연다)');
+  ok(/urlOut \? handUrl/.test(fn) && /openLink\(u, \{ allowHeadless: true, hand: handUrl \}\)/.test(fn), '[3] --url-out 이면 브라우저를 열지 않는다(없으면 「링크를 열 브라우저」 설정대로 · v1.0.21)');
 
   try { fs.unlinkSync(AUTH); } catch (_) {}
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}

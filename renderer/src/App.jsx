@@ -549,6 +549,31 @@ function Hint({ children }) {
   return <span ref={ref} className="hint-src" hidden>{children}</span>;
 }
 
+// 🌐 링크를 열 브라우저(v1.0.21 · ⚙ 설정 → 👤 계정) — 유튜브 연결·키 발급·충전·메일 등 앱이 여는 모든 바깥 링크가 따른다(main openLink · core/link-opener)
+//   목록 = 시스템 기본 · 이 PC 에 깔린 Chrome·Edge·ego lite · 주소만 넘기기 · 프로필은 그 브라우저에 둘 이상 있을 때만 고른다
+function LinkBrowserPick() {
+  const [st, setSt] = useState(null);
+  useEffect(() => { (async () => { try { setSt(await api.linkBrowserGet()); } catch (_) {} })(); }, []);
+  if (!st) return null;
+  const cur = st.setting || { browser: 'system', profile: '' };
+  const ch = (st.choices || []).find((c) => c.id === cur.browser) || st.choices[0];
+  const profs = (ch && ch.profiles) || [];
+  const save = async (s) => { try { setSt(await api.linkBrowserSet(s)); } catch (_) {} };
+  return (<div data-testid="link-browser">
+    <div className="frow"><label>🌐 링크 브라우저</label>
+      <select style={{ flex: 1 }} data-testid="link-browser-pick" value={cur.browser} onChange={(e) => save({ browser: e.target.value, profile: '' })}>
+        {(st.choices || []).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+      </select>
+      {profs.length > 1 && (<select style={{ flex: 1 }} data-testid="link-browser-profile" value={cur.profile || ''} onChange={(e) => save({ browser: cur.browser, profile: e.target.value })}>
+        <option value="">(마지막에 쓴 프로필)</option>
+        {profs.map((p) => <option key={p.dir} value={p.dir}>{p.name}</option>)}
+      </select>)}
+      {cur.browser !== 'none' && <button className="ghost" style={{ flex: '0 0 auto' }} data-testid="link-browser-test" onClick={() => api.linkBrowserTest()}>시험으로 열기</button>}
+    </div>
+    <Hint>유튜브 채널 연결 · API 키 발급 · 충전 · 메일처럼 앱이 바깥 링크를 열 때 쓸 브라우저입니다. 채널마다 구글 계정이 다르면 <b>그 채널이 로그인된 프로필</b>을 고른 뒤 「🔄 다시 연결」을 누르세요. 「열지 않고 주소만 넘기기」는 주소를 클립보드에 복사합니다(붙여 넣어 여세요). 목록에는 이 PC 에 설치된 브라우저만 나옵니다.</Hint>
+  </div>);
+}
+
 // 🔒 네이티브 alert/confirm 은 **창을 잠근다**(EnableWindow(false)) — 다른 창(Vrew·크롬) 뒤에 숨으면
 //   앱이 클릭·키·ESC 를 전부 거부하는 "입력 잠김"이 된다(로이 2026-08-14 증상).
 //   → 띄우기 직전에 창을 앞으로 끌어와 숨지 못하게 한다. main 은 별도 프로세스라 이 요청을 즉시 처리한다.
@@ -8556,6 +8581,7 @@ export default function App() {
                 올린 뒤 <b>썸네일·재생목록</b>은 앱이 넣고, 채널 편집에서 <b>⏰ 예약</b>을 켜면 공개 시각도 함께 보냅니다. 고정댓글·종료화면은 Studio 에서 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
               </Hint>
               {ytSt && !ytSt.available && <Hint>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</Hint>}
+              <LinkBrowserPick />{/* 🌐 연결 창을 열 브라우저·프로필 — 👤 계정 탭과 같은 값(채널마다 프로필을 바꾼 뒤 「🔄 다시 연결」) */}
               <div data-testid="yt-client" style={{ background: 'var(--bg-fbf6ee,#fbf6ee)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                 <div className="frow" style={{ alignItems: 'center' }}>
                   <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>① 앱 연결</label>
@@ -8609,6 +8635,7 @@ export default function App() {
               </div>
             </div>)}
             {settingsTab === 'account' && (<div data-testid="account-tab">
+              <LinkBrowserPick />
               <BookMailConnect />
               {!lic ? <div className="meta">불러오는 중…</div> : !lic.enforced ? (
                 <Hint>개발 실행(또는 시험) 중이라 회원 확인을 하지 않습니다. 설치본에서는 primingwave.com 회원 로그인이 필요합니다.</Hint>

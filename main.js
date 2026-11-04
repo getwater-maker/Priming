@@ -23,6 +23,22 @@ if (HEADLESS) {
   dialog.showSaveDialog = async () => ({ canceled: true });
   dialog.showErrorBox = () => {};
 }
+// 🌐 바깥 링크 = openLink 한 곳(v1.0.21 · core/link-opener · ⚙ 설정 → 👤 계정 「링크를 열 브라우저」) — ⛔ shell.openExternal 을 직접 부르지 않는다(test:linkopen).
+//   무인 실행에서는 열지 않는다(allowHeadless 인 유튜브 연결만) · 「주소만 넘기기」 = 화면은 클립보드 복사, 무인은 hand 로 넘긴 함수.
+//   🧪 E2E(PM_UI_SMOKE)는 로이의 설정 파일을 읽지 않는다(시스템 기본 = 시험이 바꿔 끼운 shell.openExternal) — PM_LINK_SETTING 으로만 바꾼다.
+const LinkOpener = require('./core/link-opener');
+let _linkDetected = null;
+function linkBrowsers(force = false) { if (force || !_linkDetected) _linkDetected = LinkOpener.detect(); return _linkDetected; }
+function linkSettingFile() { return process.env.PM_LINK_SETTING || (process.env.PM_UI_SMOKE === '1' ? path.join(os.tmpdir(), 'priming-smoke-link-browser.json') : LinkOpener.settingFile()); }
+function linkSetting() { return LinkOpener.loadSetting({ file: linkSettingFile() }); }
+async function openLink(url, { hand = null, allowHeadless = false } = {}) {
+  if (HEADLESS && !allowHeadless) return { ok: false, error: 'headless' };
+  return LinkOpener.open(url, {
+    setting: linkSetting(), detected: linkBrowsers(), log,
+    shellOpen: (u) => (HEADLESS ? _realOpenExternal(u) : shell.openExternal(u)), spawnFn: require('child_process').spawn,
+    onHand: hand || ((u) => { require('electron').clipboard.writeText(u); log('🔗 링크를 열지 않고 주소를 클립보드에 복사했습니다(⚙ 설정 → 👤 계정 「링크를 열 브라우저」) — 원하는 브라우저 주소창에 붙여 넣으세요'); }),
+  });
+}
 const P = require('./core/pipeline');
 const { writeTextAtomicSync: writeScriptAtomic } = require('./core/atomic-write');   // 대본(.md) 덮어쓰기는 전부 이것(임시 파일 → rename)
 const TtsEngines = require('./tts/tts-engines'); // 🔊 헤더 「음성 엔진」(v0.6.67) — 유료 API 엔진 선택
@@ -783,7 +799,12 @@ ipcMain.handle('app-update-apply', async () => {
   } catch (e) { return { ok: false, reason: 'error', message: '업데이트 실패: ' + e.message }; }
 });
 // 🌐 헤더의 앱 이름을 누르면 열리는 사이트 — 이 주소 하나만 연다(렌더러가 주소를 정하지 못하게)
-ipcMain.handle('open-tube-site', () => { shell.openExternal('https://www.primingwave.com/'); return true; });
+ipcMain.handle('open-tube-site', () => { openLink('https://www.primingwave.com/'); return true; });
+// 🌐 「링크를 열 브라우저」(v1.0.21 · ⚙ 설정 → 👤 계정) — 목록은 열 때마다 다시 찾는다(설치·프로필이 바뀔 수 있다)
+function _linkBrowserState() { const s = linkSetting(); return { setting: s, choices: LinkOpener.listChoices(linkBrowsers(true)) }; }
+ipcMain.handle('link-browser-get', () => _linkBrowserState());
+ipcMain.handle('link-browser-set', (_e, s = {}) => { const v = LinkOpener.saveSetting(s, { file: linkSettingFile() }); log('🌐 링크를 열 브라우저 = ' + LinkOpener.LABEL[v.browser] + (v.profile ? ' · ' + v.profile : '')); return _linkBrowserState(); });
+ipcMain.handle('link-browser-test', async () => openLink('https://www.youtube.com/'));
 ipcMain.handle('get-app-version', () => {
   try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || app.getVersion(); }
   catch { try { return app.getVersion(); } catch { return ''; } }
@@ -3463,7 +3484,7 @@ ipcMain.handle('yt-import-client', async () => {
 ipcMain.handle('yt-connect', async (_e, args = {}) => {
   const YT = require('./core/youtube-upload');
   const cur = args && args.id ? YT.status().channels.find((c) => c.id === args.id) : null;
-  const r = await YT.connectChannel({ openUrl: (u) => shell.openExternal(u), log, ...(cur ? { expectId: cur.id, expectTitle: cur.title, loginHint: cur.memo } : {}) });
+  const r = await YT.connectChannel({ openUrl: (u) => openLink(u), log, ...(cur ? { expectId: cur.id, expectTitle: cur.title, loginHint: cur.memo } : {}) });
   if (r.ok && r.channel) { try { await _ytAvatarFile(r.channel.id, true); } catch (_) {} }   // 🏷 다시 연결하면 채널 그림도 새로
   if (!r.ok) log(`${r.mismatch ? '⚠' : '✗'} 유튜브 채널 연결 — ${r.error}`);
   try { if (win.isMinimized()) win.restore(); win.focus(); } catch (_) {}
@@ -3481,7 +3502,7 @@ ipcMain.handle('yt-abort', () => { S.ytAbort = true; return true; });
 ipcMain.handle('yt-open-url', (_e, u) => {
   const s = String(u || '');
   if (!/^https:\/\/(studio\.youtube\.com|youtu\.be|www\.youtube\.com)\//.test(s)) return false;
-  shell.openExternal(s); return true;
+  openLink(s); return true;
 });
 // ⬆ 지금 대본의 MP4 를 올린다(자동 업로드를 끈 채널 · 실패 뒤 다시). MP4 는 이미 구워져 있어야 한다.
 /** 한 편의 업로드 파일 경로 — ⬆ 업로드(이 대본 · 큐 전체)가 같은 규칙을 쓴다. */
@@ -5747,7 +5768,7 @@ ipcMain.handle('stock-key-save', (_e, { id, key, clear } = {}) => {
   const v = String(key || '').trim(); if (!v) return { ok: false };
   SS.set(id, { ...old, key: v }); log(`🔑 ${id} 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
-ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) shell.openExternal(STOCK_KEY_URL[id]); return true; });
+ipcMain.handle('stock-open-key', (_e, id) => { if (STOCK_KEY_URL[id]) openLink(STOCK_KEY_URL[id]); return true; });
 // 🧩 kie.ai API 키(v0.9.66) — secret-store 'kie' · 원문은 돌려주지 않는다(끝 4자리만) · 이미지·비디오 생성은 core/kie-api 한 곳
 ipcMain.handle('kie-key-get', () => {
   const k = require('./core/kie-api').kieKey();
@@ -5760,7 +5781,7 @@ ipcMain.handle('kie-key-save', (_e, { key, clear } = {}) => {
   const v = String(key || '').trim(); if (!v) return { ok: false };
   SS.set('kie', { ...old, key: v }); log(`🔑 kie 키 저장(…${v.slice(-4)})`); return { ok: true };
 });
-ipcMain.handle('kie-open-key', () => { shell.openExternal('https://kie.ai/api-key'); return true; });
+ipcMain.handle('kie-open-key', () => { openLink('https://kie.ai/api-key'); return true; });
 // 🤖 Claude API 키·모델(v0.7.93 · 모델 v0.7.94) — secret-store 'claude' {key, model} · 원문은 돌려주지 않는다(끝 4자리만) · 부르는 곳은 core/claude-api 한 곳
 ipcMain.handle('claude-key-get', () => {
   const CA = require('./core/claude-api'); const c = CA.cfg();
@@ -5787,7 +5808,7 @@ ipcMain.handle('app-ask', async (_e, { question, history } = {}) => {
   const r = await CA.ask({ use: 'helper', model: c.uses.helper || AH.HELPER_MODEL, system: P.system, text: P.text, maxTokens: 1500, timeoutMs: 90000, log, label: '프로그램에 묻기' });
   return r.ok ? { ok: true, text: r.text.trim(), costUsd: r.costUsd } : { ok: false, error: r.error, noKey: !!r.noKey };
 });
-ipcMain.handle('claude-open-key', () => { shell.openExternal('https://platform.claude.com/settings/keys'); return true; });
+ipcMain.handle('claude-open-key', () => { openLink('https://platform.claude.com/settings/keys'); return true; });
 
 // ── 🔍 그림 검수(Claude 가 그림을 직접 본다 · v0.7.94) ─────────────────────────────────
 //   기계 판정(검정·노이즈·색깨짐 — sweepBadVisuals)이 못 보는 것: 글자·워터마크 · 손가락·얼굴 뭉개짐 · 노출 · 시대·옷차림 불일치 · 장면 무관.
@@ -5981,7 +6002,7 @@ ipcMain.handle('book-claude-proofread', async (_e, args = {}) => {
   return { ok: true, count: found.length, path: out, failed };
 });
 ipcMain.handle('stock-open-url', (_e, u) => {   // 작가·원본 페이지 — 두 사이트 주소만 연다
-  try { const x = new URL(String(u || '')); if (x.protocol === 'https:' && /(^|\.)(pexels\.com|pixabay\.com)$/.test(x.hostname)) { shell.openExternal(x.href); return true; } } catch {}
+  try { const x = new URL(String(u || '')); if (x.protocol === 'https:' && /(^|\.)(pexels\.com|pixabay\.com)$/.test(x.hostname)) { openLink(x.href); return true; } } catch {}
   return false;
 });
 ipcMain.handle('stock-search', async (_e, args = {}) => {
@@ -6641,7 +6662,7 @@ ipcMain.handle('tts-omni-delete', async (_e, { name } = {}) => {
 ipcMain.handle('tts-engine-open-key', (_e, id) => {
   const e = require('./tts/tts-engines').byId(id);
   if (!e || !/^https:\/\//.test(String(e.keyUrl || ''))) return false;
-  shell.openExternal(e.keyUrl); return true;
+  openLink(e.keyUrl); return true;
 });
 // 🔑 API 키 검증 — 읽기 전용·무료 호출만(core/api-key-check). 방금 붙여넣은 키가 있으면 그것, 없으면 저장된 키. 키 원문은 로그에 싣지 않는다.
 ipcMain.handle('api-key-verify', async (_e, { id, key, model, region } = {}) => {
@@ -8688,7 +8709,9 @@ async function _headlessYtConnect(appName, clientFile, { urlOut = false, expect 
     log(`🤖 유튜브 앱 「${appName}」 — 클라이언트 파일을 암호화해 넣었습니다(프로필 ${profile})`);
   }
   const expectId = typeof expect === 'string' && expect.trim() ? expect.trim() : '';
-  const openUrl = urlOut ? (u) => { _headlessOut({ authUrl: u }); log('🔗 동의 주소를 2.0 에 넘겼습니다(브라우저는 열지 않음) — 허용을 기다립니다(15분)'); } : (u) => _realOpenExternal(u);
+  // 🌐 --url-out 이 없으면 「링크를 열 브라우저」 설정을 따른다(설정이 「주소만 넘기기」여도 같은 JSON 한 줄)
+  const handUrl = (u) => { _headlessOut({ authUrl: u }); log('🔗 동의 주소를 2.0 에 넘겼습니다(브라우저는 열지 않음) — 허용을 기다립니다(15분)'); };
+  const openUrl = urlOut ? handUrl : (u) => openLink(u, { allowHeadless: true, hand: handUrl });
   const r = await YT.connectChannel({ openUrl, log, expectId: expectId || undefined, timeoutMs: 15 * 60 * 1000 });
   _headlessOut(r.ok ? { ok: true, profile, channelId: r.channelId || (r.channel && r.channel.id) || '', title: r.title || (r.channel && r.channel.title) || '' }
     : { ok: false, error: r.error, ...(r.mismatch ? { mismatch: true, picked: r.picked, expect: expectId } : {}) });
@@ -13277,7 +13300,7 @@ ipcMain.handle('license-google', async () => {
   _googleLogin = lis;
   try {
     if (!lis.port) { log('🔐 구글 로그인 — 돌아올 포트가 모두 사용 중'); return licPublic({ ok: false, reason: 'google_failed' }); }
-    try { await shell.openExternal(OA.authorizeUrl(licApi().apiBase(), lis.port, pk.challenge)); } catch (_) { lis.cancel(); }
+    try { await openLink(OA.authorizeUrl(licApi().apiBase(), lis.port, pk.challenge)); } catch (_) { lis.cancel(); }
     const res = await lis.wait;
     if (!res.code) { log(`🔐 구글 로그인 — ${res.error}`); return licPublic({ ok: false, reason: res.error === 'cancelled' ? 'logged_out' : res.error === 'timeout' ? 'google_timeout' : 'google_failed' }); }
     const x = await licApi().exchangeCode(res.code, pk.verifier);
@@ -13288,7 +13311,7 @@ ipcMain.handle('license-google', async () => {
 });
 ipcMain.handle('license-google-cancel', () => { if (_googleLogin) _googleLogin.cancel(); return true; });
 ipcMain.handle('license-products', async () => licApi().products());
-ipcMain.handle('license-open-url', (_e, url) => { try { if (!require('./core/license').isSiteUrl(url)) return false; shell.openExternal(String(url)); return true; } catch (_) { return false; } });
+ipcMain.handle('license-open-url', (_e, url) => { try { if (!require('./core/license').isSiteUrl(url)) return false; openLink(String(url)); return true; } catch (_) { return false; } });
 ipcMain.handle('license-logout', async () => { licApi().logout(); LIC.state = { ok: false, reason: 'logged_out' }; log('🔐 로그아웃'); return licPublic(LIC.state); });
 ipcMain.handle('license-set-autolog', async (_e, on) => { licApi().writeState({ autoLog: on !== false }); log(`📮 오류 로그 자동 전송 ${on !== false ? '켬' : '끔'}`); return licPublic(LIC.state); });
 ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고(수동) — 그날 로그 전체(끝 64KB) + 회원이 쓴 설명
@@ -13303,13 +13326,13 @@ ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고
 const KIE_BILLING_URL = 'https://kie.ai/billing';
 ipcMain.handle('open-charge-page', () => {
   try {
-    if (isOwner()) { shell.openExternal(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
-    shell.openExternal(require('./core/license').SITE_CHARGE); return { ok: true, kind: 'site' };
+    if (isOwner()) { openLink(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
+    openLink(require('./core/license').SITE_CHARGE); return { ok: true, kind: 'site' };
   } catch (e) { return { ok: false, error: e.message }; }
 });
-ipcMain.handle('license-open-site', () => { try { shell.openExternal(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
+ipcMain.handle('license-open-site', () => { try { openLink(require('./core/license').SITE_DEVICES); } catch (_) {} return true; });
 // 👑 관리자 페이지 열기(v0.9.79) — 로이(관리자 계정)에게만 · 회원 PC 에서는 열지 않는다(주소는 공개돼 있어도 사이트가 관리자만 들인다)
-ipcMain.handle('license-open-admin', () => { if (!isOwner()) return false; try { shell.openExternal(require('./core/license').SITE_ADMIN); } catch (_) {} return true; });
+ipcMain.handle('license-open-admin', () => { if (!isOwner()) return false; try { openLink(require('./core/license').SITE_ADMIN); } catch (_) {} return true; });
 ipcMain.handle('open-logs', async () => {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
   shell.openPath(LOG_DIR);
@@ -13438,7 +13461,7 @@ ipcMain.handle('book-outputs', () => {
 ipcMain.handle('book-open-platform', (_e, u) => {
   const s = String(u || '');
   if (!/^https:\/\/([a-z0-9-]+\.)?(bookk\.co\.kr|jakkawa\.com|kdp\.amazon\.com|draft2digital\.com)(\/|$)/.test(s)) return false;
-  shell.openExternal(s); return true;
+  openLink(s); return true;
 });
 // 🤖 등록 도우미 자동 입력 — 로그인·저장·제출은 사람이 한다(core/book/register-browser.js 머리말).
 let _bookRegBusy = false;
@@ -13655,8 +13678,8 @@ ipcMain.handle('book-reveal-file', (_e, p) => {
 });
 // 출판 메일: 별도 OAuth·OS 암호화 저장. 메일 내용은 명령으로 실행하지 않는다.
 require('./core/book/resubmit-ipc').install({
-  ipcMain, dialog, shell, win: () => win,
-  client: require('./core/book/gmail-client').createClient({ openExternal: u => shell.openExternal(u) }),
+  ipcMain, dialog, shell: { openExternal: (u) => openLink(u), showItemInFolder: (p) => shell.showItemInFolder(p) }, win: () => win,
+  client: require('./core/book/gmail-client').createClient({ openExternal: u => openLink(u) }),
   context: () => {
     if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return null;
     const h = require('crypto').createHash('sha256');
