@@ -8611,12 +8611,13 @@ async function _headlessMain() {
   process.on('unhandledRejection', (e) => { logToFile(`🤖 무인 실행 — 처리 못 한 거절: ${(e && e.stack) || e}`); });
   try {
     logToFile(`──────── Priming v${appDiskVersion()} 무인 실행 시작 (${process.argv.slice(2).filter((x) => String(x).startsWith('--')).join(' ')}) ────────`);
-    const order = _headlessArg('order'), check = _headlessArg('order-check'), conn = _headlessArg('yt-connect');
+    const order = _headlessArg('order'), check = _headlessArg('order-check'), conn = _headlessArg('yt-connect'), reg = _headlessArg('register');
     if (typeof order === 'string') code = await runOrderHeadless(order);
+    else if (typeof reg === 'string') code = await _headlessRegister(reg);
     else if (typeof check === 'string') code = await runOrderHeadless(check, { checkOnly: true });
     else if (_headlessArg('list-names')) { _headlessOut(await _orderKnownNames()); code = 0; }
     else if (typeof conn === 'string') code = await _headlessYtConnect(conn, _headlessArg('client'));
-    else { logToFile('🤖 무인 실행 — 할 일이 없습니다(--order <주문서> · --order-check <주문서> · --list-names · --yt-connect <앱 이름> [--client <파일>])'); code = 64; }
+    else { logToFile('🤖 무인 실행 — 할 일이 없습니다(--order <주문서> · --order-check <주문서> · --register <등록 파일> · --list-names · --yt-connect <앱 이름> [--client <파일>])'); code = 64; }
   } catch (e) { logToFile(`🤖 무인 실행 오류: ${(e && e.stack) || e}`); code = 1; }
   try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); } catch {}
   app.exit(code);
@@ -8631,6 +8632,46 @@ async function _orderKnownNames() {
   try { const v = await require('./tts/asr-client').listServerVoices(); if (Array.isArray(v)) voices = v.map((x) => (typeof x === 'string' ? x : (x && x.name) || '')).filter(Boolean); } catch (_) {}
   const styles = require('./core/style-store').loadAll().map((x) => ({ id: x.id, name: x.name || '' }));
   return { at: require('./core/order-contract').kst(), channels, voices, styles };
+}
+/** ⑭ 새 채널 등록 — 등록 파일 한 장 → 2.0 용 새 채널(새 이름) + 등록 결과서 한 장(core/channel-register 한 곳 · 저장은 화면과 같은 길) */
+async function _headlessRegister(file) {
+  const CR = require('./core/channel-register');
+  const OC = require('./core/order-contract');
+  const ASR = require('./tts/asr-client');
+  const RV = require('./core/ref-voice');
+  const cfg = OC.loadConfig();
+  const name = CR.regName(file);
+  const L = (m) => log(`🤖 [등록 ${name}] ${m}`);
+  L(`등록 파일 받음 — ${file}`);
+  let res;
+  try {
+    res = await CR.register(file, {
+      presets: require('./tts/preset-store'),
+      styles: require('./core/style-store'),
+      listVoices: () => ASR.listServerVoices(),
+      voiceAudio: (n) => ASR.getServerVoiceAudio(n),
+      localVoice: (n) => { try { return fs.readFileSync(path.join(RV.REF_DIR(), n + '.wav')); } catch (_) { return null; } },
+      checkAudio: (buf, text, lang) => require('./core/tts-backcheck').checkAudio(buf, text, lang, os.tmpdir()),
+      // 보이스디자인 「저장」과 같은 길 — 이 PC 참조음성 폴더(서버 PC 는 서버 라이브러리 폴더) + 서버 공용 라이브러리(같은 바이트면 서버가 중복으로 본다)
+      saveVoice: async ({ name: n, text, wavBuffer }) => {
+        if (!fs.existsSync(path.join(RV.REF_DIR(), n + '.wav'))) RV.saveLocal(n, wavBuffer, text);
+        return uploadRefVoice({ name: n, text, instruct: '', wavBuffer });
+      },
+      wavSec: (buf) => require('./core/wav-slice').parseWav(buf).durationSec,
+      pushStyles: () => pushStylesToServer(),
+      afterPreset: () => exportChannelStyles(),
+      log: L,
+      at: OC.kst(),
+      version: appDiskVersion(),
+    });
+  } catch (e) {
+    res = Object.assign(CR.blankResult(null, { name, at: OC.kst(), version: appDiskVersion() }), { status: CR.STATUS.fail, reason: OC.reasonLine(e) });
+  }
+  let out = null;
+  try { out = OC.writeResultOnce(cfg.regResultsDir, name, res); L(`등록 결과서 — ${res.status}${res.reason ? ' · ' + res.reason : ''} → ${out}`); }
+  catch (e) { L(`⚠ 등록 결과서를 쓰지 못했습니다 — ${e.message}`); }
+  _headlessOut({ ...res, resultFile: out });
+  return CR.EXIT[res.status] != null ? CR.EXIT[res.status] : 1;
 }
 /** ④ 2.0 의 OAuth 앱으로 채널 연결 — 로이가 앞에 있을 때만(브라우저가 열린다). 앱 정보·토큰은 그 앱 이름의 프로필 파일에 암호화(safeStorage). */
 async function _headlessYtConnect(appName, clientFile) {

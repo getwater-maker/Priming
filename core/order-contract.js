@@ -5,6 +5,7 @@
  *     <root>\주문\제작\<주문>.json(+ .md 제작본)  ← 2.0 이 씀
  *     <root>\결과\제작\<주문>.받음 · <주문>.진행 · <주문>.json ← Priming 이 씀(결과서는 덮어쓰지 않고 한 번만 · 다시 = _2 …)
  *     <root>\운영\운영상태.json                     ← 2.0 이 씀 · Priming 은 시작 전·업로드 직전에 읽기만(못 읽으면 멈춤)
+ *     <root>\주문\등록\<이름>.json → <root>\결과\등록\<이름>.json ← ⑭ 새 채널 등록(꼴·판정은 core/channel-register)
  *   🔑 이 파일은 순수(fs 만) — 판정·꼴은 여기 한 곳, 제작·업로드는 main.js `runOrderHeadless` 가 한다(test:order).
  *   ⛔ 주문서에 없는 값을 기본값으로 메우지 않는다(다른 채널 목소리·그림체 = 「같은 공장」 표지 · 빈 지시문 = 유료 호출) → 거절.
  */
@@ -34,6 +35,8 @@ function loadConfig(file = configFile()) {
     ordersDir: path.join(root, '주문', '제작'),
     resultsDir: path.join(root, '결과', '제작'),
     opsFile: path.join(root, '운영', '운영상태.json'),
+    regDir: path.join(root, '주문', '등록'),           // ⑭ 새 채널 등록 파일(2.0 이 씀) — core/channel-register
+    regResultsDir: path.join(root, '결과', '등록'),    // ⑭ 등록 결과서(Priming 이 씀 · 한 번만)
     outDir: String(c.outDir || DEFAULT_OUT),
     uploadApps: (c.uploadApps && typeof c.uploadApps === 'object') ? c.uploadApps : {},   // { "<앱 이름>": "<youtube 인증 프로필>" } — 비면 이름 그대로 프로필
   };

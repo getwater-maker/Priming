@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * tools/order.js — 🤖 2.0 무인 제작 명령(v1.0.18 · docs/요청서_2.0무인제작_2026-11-04.md)
+ * tools/order.js — 🤖 2.0 무인 제작 명령(v1.0.18 · ⑭ register v1.0.19 · docs/요청서_2.0무인제작_2026-11-04.md)
  *   2.0 문지기가 부르는 명령은 이것 하나다. 창 · 소리 · 알림 없음 · 업데이트 없음(bootstrap 의 무인 실행).
  *
  *   node tools/order.js run   <주문서.json>   주문 하나를 끝까지(받음 → 진행 신호 → 결과서). 끝날 때까지 기다린다.
@@ -9,9 +9,10 @@
  *   node tools/order.js stop  [<주문 이름>]   도는 주문을 멈춘다(이름이 없으면 도는 주문 전부) — 1분 안에 GPU 를 비운다
  *   node tools/order.js check <주문서.json>   만들지 않고 주문서만 확인(거절 사유를 화면에 JSON 한 줄로)
  *   node tools/order.js names                 Priming 채널 · 음성 서버 목소리 · 그림체 이름 목록(JSON)
+ *   node tools/order.js register <등록.json>  ⑭ 새 채널 등록(목소리 · 그림체 · 배속 → 2.0 용 새 채널 · 기존 채널은 그대로) → 결과\등록\<이름>.json
  *   node tools/order.js yt-connect <앱 이름> [--client <client_secret.json>]   그 앱으로 유튜브 채널 연결(로이가 앞에 있을 때 · 브라우저가 열린다)
  *
- *   끝 코드: 0 성공 · 1 실패 · 2 거절 · 3 중단됨 · 64 쓰는 법 틀림
+ *   끝 코드: 0 성공(등록 = 됨) · 1 실패 · 2 거절 · 3 중단됨 · 64 쓰는 법 틀림
  */
 const path = require('path');
 const fs = require('fs');
@@ -65,6 +66,7 @@ async function main(argv) {
     case 'start': if (!a1) break; return runElectron(['--order', abs(a1)], { detach: true });
     case 'check': if (!a1) break; return runElectron(['--order-check', abs(a1)], { quiet: true });
     case 'names': return runElectron(['--list-names'], { quiet: true });
+    case 'register': if (!a1) break; return runElectron(['--register', abs(a1)], { quiet: true });
     case 'stop': return stop(a1 && !a1.startsWith('--') ? a1 : '');
     case 'yt-connect': {
       if (!a1) break;
@@ -73,7 +75,7 @@ async function main(argv) {
     }
     default: break;
   }
-  process.stderr.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 13).join('\n') + '\n');
+  process.stderr.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 15).join('\n') + '\n');
   return 64;
 }
 

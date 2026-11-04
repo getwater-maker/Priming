@@ -8,7 +8,7 @@ const { app, protocol } = require('electron');
 
 // 🤖 무인 실행(v1.0.18 · 2.0 무인 제작) — 명령줄에 이 표시가 있으면 창 없이 한 가지 일만 하고 끝낸다(tools/order.js 가 부른다).
 //   ⛔ 업데이트하지 않는다(진행 중 코드가 바뀌지 않게) · 자기 Electron 저장 공간(로이 앱과 겹치지 않게) · 화면 가속 끔(GPU 메모리를 쓰지 않게).
-const HEADLESS_FLAGS = ['--order', '--order-check', '--list-names', '--yt-connect'];
+const HEADLESS_FLAGS = ['--order', '--order-check', '--register', '--list-names', '--yt-connect'];
 if (process.argv.some((a) => HEADLESS_FLAGS.some((f) => a === f || String(a).startsWith(f + '=')))) process.env.PM_HEADLESS = '1';
 const HEADLESS = process.env.PM_HEADLESS === '1';
 if (HEADLESS) { try { app.disableHardwareAcceleration(); } catch (_) {} }
