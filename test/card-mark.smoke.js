@@ -15,7 +15,7 @@ const SCRIPT = ['# 카드 표시 테스트', '', '## 本編', '### 一', '> 🖼
   '> 📜 화면카드: 막간 | 때=第一章午后 +1 | 제목=一、午后の授業',
   '[室主] 第一章、午后の授業。', '', '[朗読] 「ではみなさんは。」と先生が云いました。', '',
   '> 📜 화면카드: 해설 | 때=活版所というのは | 제목=活版所 // 印刷する所 | 자리=왼쪽위',
-  '[室主] 活版所というのは、印刷する所のことです。', '', '[朗読] ジョバンニはまっ赤になってうなずきました。', '',
+  '[室主] 活版所というのは、印刷する所のことです。', '', '> 📜 화면카드: 해설 | 때=ジョバンニはまっ赤 | 제목=ジョバンニ // 最後の文', '[朗読] ジョバンニはまっ赤になってうなずきました。', '',
   '> 📜 화면카드: 낱말 | 때=どこにもない文です | 원문=x | 번역=y', ''].join('\n');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
@@ -30,6 +30,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   let win;
   try {
     win = await app.firstWindow();
+    win.on('dialog', (d) => d.accept().catch(() => {}));   // 🖼 카드 클립 만들기 확인창
     win.on('pageerror', (e) => errors.push(String(e)));
     win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     await win.waitForSelector('h1', { timeout: 20000 });
@@ -42,12 +43,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForTimeout(600);
 
     const marks = await win.evaluate(() => [...document.querySelectorAll('[data-testid="card-mark"]')].map((el) => {
-      const row = el.closest('.sent'); const b = el.getBoundingClientRect(), rb = row.getBoundingClientRect();
+      const row = el.closest('.sent'); row.scrollIntoView({ block: 'center' }); const b = el.getBoundingClientRect(), rb = row.getBoundingClientRect();
       const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
       return { ln: row.getAttribute('data-ln'), role: el.getAttribute('data-role'), text: el.textContent, title: el.getAttribute('title') || '', left: b.right <= rb.left + 1, hit: !!hit && el.contains(hit) };
     }));
     console.log('   ', JSON.stringify(marks.map((m) => [m.ln, m.role, m.text])));
-    ok(marks.length === 3, `카드가 뜨는 문장 3개에 표시(막간 시작 · 막간 이어짐 · 해설) — ${marks.length}개`);
+    ok(marks.length === 4, `카드가 뜨는 문장 4개에 표시(막간 시작 · 막간 이어짐 · 해설(한쪽) · 해설) — ${marks.length}개`);
     const [m1, m2, m3] = marks;
     ok(m1 && m1.role === 'start' && /📜/.test(m1.text) && /막간/.test(m1.text) && !/⏸/.test(m1.text), '때= 문장: 「📜 막간」(쉼은 끝 문장에만)');
     ok(m2 && m2.role === 'cont' && /📜…/.test(m2.text) && /⏸5초/.test(m2.text), '+1 이어지는 끝 문장: 옅은 「📜…」 + ⏸5초(채널 막간 쉼)');
@@ -74,6 +75,18 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     if (!(await win.locator('.sent[data-ln]').count())) { await win.click('.hgroup:has(.glabel:has-text("대본")) button:has-text("열기")'); await win.waitForSelector('.sent[data-ln]', { timeout: 20000 }); await win.waitForTimeout(600); }
     const t2 = await win.evaluate(() => [...document.querySelectorAll('[data-testid="card-mark"]')].map((el) => el.textContent).join('|'));
     ok(t2 && !/⏸/.test(t2), `채널 막간 쉼 0 → ⏸ 표시 없음 (${t2})`);
+    // 🖼 전용 클립(v1.0.17) — 화면 전체 해설 카드 표식을 누르면 그 문장만의 새 그룹이 생기고 그림이 카드 그림이 된다
+    const grpN = () => win.evaluate(() => { const el = document.querySelector('[data-testid="group-head"]'); const m = el && /^그룹 \((\d+)\)/.exec(el.textContent.trim()); return m ? Number(m[1]) : -1; });
+    console.log('   group-head:', JSON.stringify(await win.evaluate(() => { const e = document.querySelector('[data-testid="group-head"]'); return e ? e.textContent : null; })));
+    const g0 = await grpN();
+    const canMark = await win.evaluate(() => [...document.querySelectorAll('[data-testid="card-mark"]')].map((el) => ({ role: el.getAttribute('data-role'), label: el.textContent, can: /누르면 이 카드를 전용 클립/.test(el.getAttribute('title') || '') })));
+    ok(canMark.filter((m) => m.can).length === 1 && canMark.find((m) => m.can).label.includes('해설'), '화면 전체 해설 카드 표식 하나만 「누르면 전용 클립」(한쪽 해설·막간은 아님) ' + JSON.stringify(canMark.map((m) => m.can)));
+    await win.locator('[data-testid="card-mark"][title*="누르면 이 카드를 전용 클립"]').first().click();
+    await win.waitForTimeout(2500);
+    const g1 = await grpN();
+    ok(g0 >= 1 && g1 === g0 + 1, '그룹 수 ' + g0 + ' → ' + g1 + ' (카드 문장만의 새 그룹)');
+    const after = await win.evaluate(() => [...document.querySelectorAll('[data-testid="card-mark"]')].map((el) => (el.getAttribute('title') || '').includes('전용 클립(그룹 그림)으로 만들어져')));
+    ok(after.filter(Boolean).length === 1, '표식 툴팁: 전용 클립으로 만들어져 있음');
     ok(errors.length === 0, '화면 오류 0건 ' + errors.join(' / ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외: ' + e.stack); }
   finally {

@@ -22,6 +22,9 @@
  * 📍 **자리**(v1.0.7 · 로이 2026-10-29): 줄 끝에 `| 자리=왼쪽위` 를 쓰면 **한쪽 카드** — 화면 전체를 덮지 않고 그림 위 그 자리에 작은 판으로 뜬다(왼쪽위·오른쪽위·왼쪽아래·오른쪽아래·왼쪽·오른쪽·위·아래).
  *     안 쓰면 예전처럼 화면 전체 카드. 모양·자리 계산은 `layoutOf` **한 곳**(MP4 ASS · ① 미리보기가 같이 쓴다 — ⛔ 다른 곳에서 카드 좌표를 다시 계산하지 말 것).
  *
+ * 🖼 **전용 클립**(v1.0.17 · 로이 2026-10-29): 자리 없는 **해설** 카드(화면 전체)는 「카드 클립 만들기」로 **그 문장들만의 그룹**(그림 = 카드 그림 `<출력>/_card/*.png`)이 된다.
+ *     그 그룹이 있으면 MP4·① 미리보기가 그 카드를 따로 그리지 않는다(그림이 이미 클립이다 · .vrew 에도 나온다). 판정 = `clipGroupOf` 한 곳.
+ *
  * main·렌더 전용이 아니다 — 순수 함수라 테스트가 그대로 부른다(core/*.js 는 렌더러 번들에 들어갈 수 있으니 fs·require.main 을 쓰지 않는다).
  */
 // 🇯🇵 해설·낱말(v0.9.7 · 일본 채널 요청 7) = 그리는 모양은 막간·병기와 같고 이름만 다르다 — 채널 게이트가 종류를 이름으로 가른다.
@@ -84,6 +87,9 @@ const PAUSE_KIND = '막간';    // 채널 값이 붙는 종류(이름)
  * 🕳 빈 클립(Lab) — 문장 `s.padAfter`(초 · 0.2~10) = 그 문장 음성 **뒤 무음**(화면은 이어지고 자막은 없다). 음성이 있는 문장만.
  *   막간 카드의 쉼(pausesOf)과 **합쳐** 한 계획이 된다 — 합치는 곳은 pipeline.pausePlanOf 한 곳.
  */
+const CLIP_KIND = '해설';                       // 전용 클립이 될 수 있는 종류(이름) — 자리 없는(화면 전체) 카드만
+const CARD_DIR = '_card';                       // 카드 그림 폴더(<출력>/_card · media-N 밖 — 번호 정리(renumberMediaFiles)가 건드리지 않는다)
+const CARD_DIR_RE = /[\\/]_card[\\/]/;
 const PAD = { min: 0.2, max: 30, step: 0.1, def: 5 };   // Vrew: 빈 클립 = 1초 빈 워드 5개(5초)
 function normPad(v) { const n = Number(v); if (!isFinite(n) || n <= 0) return 0; return Math.round(Math.max(PAD.min, Math.min(PAD.max, n)) * 10) / 10; }
 function padOf(s) { return (s && s.ttsAudioPath && s.ttsDurationSec > 0) ? normPad(s.padAfter) : 0; }
@@ -94,11 +100,23 @@ function sentsOf(project) {
     for (const id of (g.sentenceIds || [])) {
       const s = byId.get(id); if (!s) continue;
       const d = (s.ttsAudioPath && s.ttsDurationSec > 0) ? s.ttsDurationSec : 0;
-      out.push({ s, text: String(s.text || ''), key: norm(s.text), phase: norm(g.phase || g.title || ''), d, sound: d > 0 });
+      out.push({ s, g, text: String(s.text || ''), key: norm(s.text), phase: norm(g.phase || g.title || ''), d, sound: d > 0 });
     }
   }
   return out;
 }
+/**
+ * 🖼 이 카드가 이미 전용 클립인가 — 가리킨 문장들이 **한 그룹을 정확히 이루고** 그 그룹 그림이 카드 그림 폴더(_card)에 있으면 그 그룹. 아니면 null.
+ *   (그림 경로로만 본다 — 작업본에 따로 표시를 저장하지 않아도 다시 열었을 때 그대로 알아본다)
+ */
+function clipGroupOf(sents, idx) {
+  const u = [...new Set(idx)]; if (!u.length) return null;
+  const g = sents[u[0]].g; if (!g) return null;
+  if (u.some((i) => sents[i].g !== g)) return null;
+  if ((g.sentenceIds || []).length !== u.length) return null;
+  return CARD_DIR_RE.test(String(g.imagePath || '')) ? g : null;
+}
+const clipEligible = (m) => m.kindName === CLIP_KIND && !(m.f['자리'] && PLACES[m.f['자리'].raw]);
 function findIn(sents, m, a, label) {
   const k = norm(a.text);
   if (k.length < MIN_KEY) return { err: `${label} 앞부분이 너무 짧습니다(공백·문장부호 빼고 ${MIN_KEY}글자 이상) — 「${a.text}」` };
@@ -199,6 +217,7 @@ function plan(project, markers, opts = {}) {
     if (m.kind && m.f['자막']) { if (/^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) hide = true; else warnings.push(`${tag} — 자막= 값은 「숨김」만 쓸 수 있습니다(「${m.f['자막'].raw}」) → 자막은 그대로 보입니다`); }
     const r = resolveMarker(sents, m);
     if (r.err) { bad(r.err); continue; }
+    if (clipEligible(m) && clipGroupOf(sents, r.idx)) continue;   // 🖼 전용 클립이 된 해설 카드 — 그 그룹의 그림이 카드다(따로 그리지 않는다)
     const rows = r.idx.map((i) => sents[i]);
     let card;
     // 🅱 `때=` 꼴 — 글자는 적은 그대로 · 낭독 문장은 시간만
@@ -262,7 +281,9 @@ function marksBySentence(project, markers) {
     order.forEach((i, k) => {
       const id = sents[i].s.id; if (bySid.has(id) && bySid.get(id).role === 'start') return;   // 먼저 시작한 카드 표시를 지킨다
       bySid.set(id, { label: m.kindName, role: k === 0 ? 'start' : 'cont', last: i === last, line: m.line, tip: tipLines.join('\n'),
-        pause: p ? (p.err ? 0 : p.sec) : null, interlude: m.kindName === PAUSE_KIND });
+        pause: p ? (p.err ? 0 : p.sec) : null, interlude: m.kindName === PAUSE_KIND,
+        place: (m.f['자리'] && PLACES[m.f['자리'].raw]) ? m.f['자리'].raw : null,
+        clip: clipEligible(m) && !!clipGroupOf(sents, r.idx), canClip: clipEligible(m) && !clipGroupOf(sents, r.idx) });
     });
   }
   return { bySid, bad };
@@ -350,6 +371,8 @@ function previewCards(project, markers) {
     { const L = langOf(rows); if (L) card.lang = L; }
     if (m.f['자리'] && PLACES[m.f['자리'].raw]) card.place = m.f['자리'].raw;
     if (m.kind && m.f['자막'] && /^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) card.hide = true;
+    if (clipEligible(m) && clipGroupOf(sents, r.idx)) card.clip = true;   // 🖼 이미 전용 클립 — 화면은 이 카드를 따로 그리지 않는다
+    card.eligible = clipEligible(m);
     card.layout = layoutOf(card);
     cards.push(card);
   }
@@ -366,4 +389,4 @@ function opacityAt(c, t) {
   return 1;
 }
 
-module.exports = { PLACES, CARD_RGB, layoutOf, previewCards, PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
+module.exports = { CLIP_KIND, CARD_DIR, clipGroupOf, clipEligible, sentsOf, resolveMarker, PLACES, CARD_RGB, layoutOf, previewCards, PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };

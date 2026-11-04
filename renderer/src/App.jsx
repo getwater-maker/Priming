@@ -2082,6 +2082,23 @@ export default function App() {
       if (el) { try { el.scrollIntoView({ block: 'center' }); } catch (_) {} window.__pmSelAll = true; el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, detail: 2 })); }
     }, 350);
   }
+  // 🖼 해설 카드(화면 전체) → 전용 클립 — ② 카드 표식을 누르면 main card-clip-make 가 그 문장들만의 새 그룹(그림 = 카드 그림)을 만든다(창 이벤트 — 그룹 칸에서 prop 을 줄줄이 넘기지 않으려고)
+  useEffect(() => {
+    const h = async (e) => {
+      const d = (e && e.detail) || {};
+      if (!uiConfirm('이 해설 카드를 전용 클립으로 만들까요?\n\n가리킨 문장들만 새 그룹이 되고, 그 그룹의 그림이 카드 그림(어두운 판 + 글)이 됩니다. .vrew·MP4·① 칸에 모두 나옵니다.\n(Ctrl+Z 로 되돌릴 수 있습니다)')) return;
+      try {
+        const r = await api.cardClipMake({ shortsNum: d.sn, line: d.line });
+        if (r && r.ok) {
+          if (r.dto) setDto(r.dto);
+          setStatus(r.made ? `🖼 해설 카드 ${r.made}개를 전용 클립으로 만들었습니다 (Ctrl+Z 되돌리기)` : '🖼 만들 해설 카드가 없습니다');
+          if (r.skipped && r.skipped.length) logline('⚠ 카드 클립 건너뜀: ' + r.skipped.join(' / '));
+        } else setStatus('⚠ 카드 클립 만들기 실패: ' + ((r && r.error) || ''));
+      } catch (er) { logline('카드 클립 오류: ' + er.message); setStatus('⚠ 카드 클립 만들기 오류'); }
+    };
+    window.addEventListener('priming-card-clip', h);
+    return () => window.removeEventListener('priming-card-clip', h);
+  }, []);
   // 🖼🎬 이미지 클립·비디오 클립 — 파일을 고르면 그 클립 뒤에 그 파일을 넣은 새 그룹(main add-media-clip)
   async function addMediaClip(kind) {
     const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
@@ -6067,7 +6084,7 @@ export default function App() {
     if (!cardPv || !isLf || !cursor) return null;
     const ci = cursorInfo(); if (!ci) return null;
     let ord = ci.l.sentIdx; for (let i = 0; i < ci.l.ci; i++) ord += ((ci.pr.cuts[i] && ci.pr.cuts[i].sentences) || []).length;
-    const act = cardPv.filter((q) => q.s0 <= ord && ord <= q.s1);
+    const act = cardPv.filter((q) => !q.clip && q.s0 <= ord && ord <= q.s1);   // 🖼 전용 클립이 된 해설 카드는 그 그룹의 그림이 카드 — 따로 그리지 않는다
     return act.length ? act : null;
   })();
   stageInfoRef.current = stageInfo;   // 📇 오른쪽 클릭 복사 메뉴가 「지금 보이는 판」을 집는다
@@ -9370,7 +9387,9 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                           const cmPause = cm && cm.last ? (s.pz > 0 ? s.pz : (cm.pause != null ? cm.pause : (cm.interlude ? (cardPause || 0) : 0))) : 0;   // ⏸ 음성이 있으면 출력과 같은 값(s.pz) · 음성 전엔 대본·채널 값으로 어림
                           const cardMark = cm ? (
                             <span className={'card-mark' + (cm.role === 'cont' ? ' cont' : '')} data-testid="card-mark" data-role={cm.role}
-                              title={cm.tip + (cm.role === 'cont' ? '\n(앞 문장에서 이어지는 카드 — 이 문장 동안에도 떠 있음)' : '') + (cmPause > 0 ? `\n⏸ 이 문장 소리가 끝난 뒤 ${cmPause}초 쉼 — 그동안 카드만 보이고 자막은 없음` : '') + '\n🎬 유튜브 MP4 에만 나옵니다'}>
+                              title={cm.tip + (cm.role === 'cont' ? '\n(앞 문장에서 이어지는 카드 — 이 문장 동안에도 떠 있음)' : '') + (cmPause > 0 ? `\n⏸ 이 문장 소리가 끝난 뒤 ${cmPause}초 쉼 — 그동안 카드만 보이고 자막은 없음` : '') + (cm.clip ? '\n🖼 전용 클립(그룹 그림)으로 만들어져 있습니다 — 유튜브 MP4·.vrew·① 칸에 모두 나옵니다' : cm.place ? '\n📍 한쪽 카드 — 유튜브 MP4 · ① 미리보기에 나옵니다' : '\n🎬 유튜브 MP4 · ① 미리보기에 나옵니다') + (cm.canClip && cm.role === 'start' ? '\n👆 누르면 이 카드를 전용 클립(새 그룹 · 그림 = 카드)으로 만듭니다' : '')}
+                              onClick={cm.canClip && cm.role === 'start' ? ((ev) => { ev.stopPropagation(); window.dispatchEvent(new CustomEvent('priming-card-clip', { detail: { sn: pr.shortsNum, line: cm.line } })); }) : undefined}
+                              style={cm.canClip && cm.role === 'start' ? { cursor: 'pointer' } : undefined}>
                               <span className="cm-ic">{cm.role === 'cont' ? '📜…' : '📜'}</span>{cm.role === 'start' ? <span className="cm-k">{cm.label}</span> : null}
                               {cmPause > 0 ? <span className="cm-p" data-testid="card-pause">⏸{cmPause}초</span> : null}
                             </span>

@@ -565,6 +565,44 @@ function cardEvents(cards, w0, w1) {
   return out;
 }
 
+/**
+ * 🖼 카드 한 장 → 1920x1080 PNG(불투명 · 어두운 판 + 글 · 서서히 나타남 없음) — 「카드 클립」의 그림(v1.0.17).
+ *   🔑 MP4 와 **같은 ASS 엔진·같은 글꼴·같은 좌표**(screen-cards.layoutOf 의 전체 화면 모양)로 그린다 → 클립으로 봐도 카드가 MP4 의 카드와 같다.
+ *   ffmpeg 필터에 경로를 넣지 않으려고(한글·드라이브 콜론) 임시 폴더에 글꼴·ASS 를 복사하고 cwd 로 돌린다.
+ * @returns {Promise<{ok:boolean, error?:string}>}
+ */
+async function renderCardStill(card, outPath) {
+  const SC = require('./screen-cards');
+  const L = SC.layoutOf({ ...card, place: undefined });   // 화면 전체 모양
+  const bgrOf = (rgb) => rgb.slice(4, 6) + rgb.slice(2, 4) + rgb.slice(0, 2);
+  const fontOf = (k) => (k === 'ja' ? CARD_FONT_JA : k === 'han' ? CARD_FONT.han : CARD_FONT.ko);
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cardstill-'));
+  try {
+    const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book');
+    for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(tmp, f)); } catch (_) {} }
+    if (card.lang === 'ja') { try { fs.copyFileSync(path.join(fdir, '..', CARD_FONT_JA_FILE), path.join(tmp, CARD_FONT_JA_FILE)); } catch (_) {} }
+    const ev = [];
+    for (const o of L.rows) {
+      const body = o.lines.map((x) => assEsc(String(x).replace(/\s+/g, ' ').trim())).join('\\N');
+      ev.push(`Dialogue: 8,0:00:00.00,0:00:05.00,N,,${o.ml},${o.ml},0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${fontOf(o.font)}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}\\1c&H${bgrOf(SC.CARD_RGB.text)}&}${body}`);
+    }
+    for (const r of L.rules) ev.push(`Dialogue: 8,0:00:00.00,0:00:05.00,N,,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\bord0\\shad0\\1c&H${bgrOf(SC.CARD_RGB.rule)}&\\1a&H${Math.round(255 * (1 - r.max)).toString(16).padStart(2, '0').toUpperCase()}&\\p1}m 0 0 l ${r.w} 0 ${r.w} 2 0 2{\\p0}`);
+    const ass = ['[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${W}`, `PlayResY: ${H}`, '', '[V4+ Styles]',
+      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+      'Style: N,Arial,40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,10,10,10,1', '', '[Events]',
+      'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text', ...ev].join('\n');
+    fs.writeFileSync(path.join(tmp, 'c.ass'), ass, 'utf8');
+    const plate = SC.CARD_RGB.plate;
+    const args = ['-y', '-v', 'error', '-f', 'lavfi', '-i', `color=c=0x${plate}:s=${W}x${H}:d=2`, '-vf', 'ass=c.ass:fontsdir=.', '-ss', '1', '-frames:v', '1', 'o.png'];
+    const err = await new Promise((res) => { execFile(getFfmpeg(), args, { cwd: tmp, windowsHide: true, timeout: 60000 }, (e, _o, se) => res(e ? String(se || e.message).slice(0, 200) : null)); });
+    if (err) return { ok: false, error: '카드 그림 만들기 실패: ' + err };
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.copyFileSync(path.join(tmp, 'o.png'), outPath);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+  finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
+}
+
 // ── 켄번스 ─────────────────────────────────────────────────────────────────
 /**
  * Vrew 이미지 트랙(켄번스) → ffmpeg 필터. **입력은 이미 캔버스(1920x1080)로 cover 된 그림**이다
@@ -1188,6 +1226,6 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, narrowCuesForPanels,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, renderCardStill, narrowCuesForPanels,
   FONT_FILE, FPS, W, H,
 };

@@ -11504,6 +11504,72 @@ ipcMain.handle('split-group-at', async (_e, args = {}) => {
   return { ok: true, dto: _dto, groupNum: num0 + 1, firstSentence: pr.sentences.findIndex((x) => x.id === r.secondS[0].id) };
 });
 
+// 🖼 카드 클립 만들기(v1.0.17 · 로이 2026-10-29 「전체 화면 해설카드는 1개의 클립」) — 자리 없는 **해설** 카드가 가리킨 문장들만으로 그룹 하나를 만들고(앞 A · 카드 N · 뒤 B — add-media-clip 과 같은 방식),
+//   그 그룹의 그림을 카드 그림(MP4 와 같은 ASS 엔진으로 그린 PNG · <출력>/_card/)으로 한다. 카드 클립이 된 카드는 MP4·① 미리보기가 따로 그리지 않는다(screen-cards.clipGroupOf).
+//   args { shortsNum, line? } — line 이 있으면 그 대본 줄의 카드만, 없으면 아직 클립이 아닌 해설 카드 전부. 문장이 여러 그룹에 걸치거나 이어지지 않으면 그 카드만 건너뛴다(알린다). 되돌리기 한 번.
+ipcMain.handle('card-clip-make', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const pr = c.pr;
+  if (!Array.isArray(pr.screenCards) || !pr.screenCards.length) return { ok: false, error: '이 대본에는 📜 화면카드 줄이 없습니다.' };
+  const SC = require('./core/screen-cards'), VR = require('./core/vrew-render');
+  let todo = SC.previewCards(pr, pr.screenCards).cards.filter((x) => x.eligible && !x.clip);
+  if (args.line != null) todo = todo.filter((x) => x.line === Number(args.line));
+  if (!todo.length) return { ok: true, made: 0, skipped: [], dto: P.toDTO(S.parsed) };
+  const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+  const cardDir = path.join(S.outRoot, SC.CARD_DIR);
+  const order = []; for (const g of pr.groups) for (const id of g.sentenceIds) order.push(id);
+  const _u = undoPush('카드 클립 만들기');
+  UNDO.batch = true;
+  let made = 0; const skipped = [];
+  try {
+    for (const card of todo.sort((a, b) => b.s0 - a.s0)) {   // 뒤에서부터 — 앞 카드의 문장 위치가 그대로
+      const tag = `대본 ${card.line}줄 해설 카드`;
+      const ids = order.slice(card.s0, card.s1 + 1);
+      const A = pr.groups.find((x) => x.sentenceIds.includes(ids[0]));
+      const k = A ? A.sentenceIds.indexOf(ids[0]) : -1;
+      if (!A || k < 0 || A.sentenceIds.slice(k, k + ids.length).join('|') !== ids.join('|')) { skipped.push(`${tag} — 가리킨 문장이 한 그룹 안에 이어져 있지 않습니다(그룹 하나 안에 두세요)`); continue; }
+      const hash = require('crypto').createHash('sha1').update(JSON.stringify([card.orig, card.trans, card.lang || ''])).digest('hex').slice(0, 8);
+      const png = path.join(cardDir, `해설_${hash}.png`);
+      const rr = await VR.renderCardStill(card, png);
+      if (!rr.ok) { skipped.push(`${tag} — ${rr.error}`); continue; }
+      const gIdx = pr.groups.indexOf(A), len0 = A.sentenceIds.length, n = ids.length;
+      const src0 = { imagePath: A.imagePath, videoPath: A.videoPath, userImage: A._userImage, userVideo: A._userVideo };   // 뒤 그룹이 이어 갖도록 — 카드가 맨 앞이면 N 이 곧 A 라서 바꾸기 전에 잡아 둔다
+      if (k + n < len0) _splitGroupCore(pr, gIdx, k + n, { blankTitle: true, noExtend: true });   // A(…카드) | B
+      let N = A;
+      if (k > 0) { _splitGroupCore(pr, gIdx, k, { blankTitle: true, noExtend: true }); N = pr.groups[gIdx + 1]; }   // A | N(카드) | B
+      const B = k + n < len0 ? pr.groups[gIdx + (k > 0 ? 2 : 1)] : null;
+      N.imagePrompt = null; N.videoPrompt = null; N.motionNote = null; N.imagePath = null; N.videoPath = null; N.imageStatus = null; N.videoStatus = null;
+      if (k === 0) { N.phase = A.phase; N.title = A.title; }
+      if (B) {   // 뒤 그룹이 앞 그림·영상을 복사해 이어 갖는다(빈 공간이 없게 · 한 파일을 두 그룹이 쓰지 않게)
+        for (const key of ['imagePath', 'videoPath']) {
+          const src = src0[key]; if (!src || !fs.existsSync(src)) continue;
+          try {
+            fs.mkdirSync(mediaDir, { recursive: true });
+            const ext = path.extname(src);
+            const dst = P.claimPath(path.join(mediaDir, '_dup' + Date.now().toString(36) + ext), null, [ext]);
+            fs.copyFileSync(src, dst);
+            B[key] = dst;
+            if (key === 'imagePath') { B.imageStatus = 'done'; if (src0.userImage) B._userImage = _visKey(dst); } else { B.videoStatus = 'done'; B.videoCleared = false; if (src0.userVideo) B._userVideo = _visKey(dst); }
+          } catch (e) { log('⚠ 카드 클립 — 뒤 그룹에 앞 그림을 복사하지 못했습니다: ' + e.message); }
+        }
+      }
+      _softenCoverOf(pr, N);
+      N.imagePath = png; N.imageStatus = 'done'; N.imageCleared = false; N._userImage = _visKey(png);   // 사람이 넣은 그림과 같이 — 기계 판정·다시 그리기 제외
+      made++;
+      log(`🖼 ${prLabel(pr)} ${tag} → 전용 클립(새 그룹) · 문장 ${n}개${B ? ' · 뒤 그룹은 앞 그림을 복사해 이어 갖습니다' : ''}`);
+    }
+    try { renumberMediaFiles(pr, mediaDir); } catch {}
+    UNDO.batch = false;
+    if (!made) { undoDrop(_u); } else _afterClipOp(pr, null);
+    for (const w of skipped) log('⚠ 카드 클립 — ' + w);
+    return { ok: true, made, skipped, dto: P.toDTO(S.parsed) };
+  } catch (e) {
+    UNDO.batch = false;
+    log('⚠ 카드 클립 만들기 오류: ' + ((e && e.message) || e) + ' — 중간까지 바뀌었을 수 있습니다(Ctrl+Z 로 되돌리세요)');
+    return { ok: false, error: String((e && e.message) || e) };
+  } finally { UNDO.batch = false; }
+});
+
 // 🖼🎬 이미지 클립 · 비디오 클립(v0.7.72 · 로이 「브루처럼 — 파일을 고르면 그것을 넣은 그룹이 생긴다」) — 고른 클립 **바로 뒤**에 새 클립(문장 「새 클립입니다.」 — 바로 고친다) **한 개짜리 새 그룹**을 만들고
 //   고른 그림·영상 파일을 그 그룹에 넣는다. 클립이 그룹 한가운데면 그룹이 앞(A) · 새 그룹(N) · 뒤(B) 셋이 된다 — **뒤 그룹(B)은 A 의 그림·영상을 복사해 가진다**(빈 공간이 없게 · 로이 2026-09-29).
 //   파일은 복사하지 않고 원본을 가리킨다(그림 첨부와 같다 — 지우지 않는다). 대본(.md)·그룹·음성 모두 되돌리기 한 번(UNDO.batch).

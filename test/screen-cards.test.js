@@ -303,6 +303,34 @@ const SCRIPT = [
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     }
   }
+  console.log('\n[8] 🖼 전용 클립(카드 그룹) — 따로 그리지 않는다 · 카드 그림 (v1.0.17)');
+  {
+    const mk3 = (groups) => { const ss = ['今夜の作家は、山本周五郎です。', 'ここから本文です。', '二つ目の文です。'].map((x, i) => ({ id: 's' + i, text: x, ttsAudioPath: 'x.mp3', ttsDurationSec: 5 })); return { sentences: ss, groups }; };
+    const mkr = SC.markersOf('### g\n> 📜 화면카드: 해설 | 문장=今夜の作家は\n');
+    // 카드 그림 폴더(_card)의 그림을 가진 한 문장짜리 그룹 = 이미 전용 클립
+    const clipped = mk3([{ phase: 'g', sentenceIds: ['s0'], imagePath: 'D:\\out\\_card\\해설_ab12.png' }, { phase: 'h', sentenceIds: ['s1', 's2'], imagePath: 'D:\\out\\media-1\\02.png' }]);
+    const plain = mk3([{ phase: 'g', sentenceIds: ['s0', 's1', 's2'], imagePath: 'D:\\out\\media-1\\01.png' }]);
+    const widerGroup = mk3([{ phase: 'g', sentenceIds: ['s0', 's1'], imagePath: 'D:\\out\\_card\\해설_ab12.png' }, { phase: 'h', sentenceIds: ['s2'] }]);
+    ok(SC.plan(clipped, mkr).cards.length === 0 && SC.plan(clipped, mkr).warnings.length === 0, '전용 클립이 된 해설 카드 = MP4 계획에서 빠진다(경고 없음 · 중복으로 그리지 않는다)');
+    ok(SC.plan(plain, mkr).cards.length === 1, '아직 클립이 아니면 예전처럼 MP4 카드로 그린다');
+    ok(SC.plan(widerGroup, mkr).cards.length === 1, '카드 그림이 더 많은 문장을 덮은 그룹이면(카드 문장만의 그룹이 아니면) 클립으로 보지 않는다');
+    const pvC = SC.previewCards(clipped, mkr).cards[0], pvP = SC.previewCards(plain, mkr).cards[0];
+    ok(pvC.clip === true && pvC.eligible === true && !pvP.clip && pvP.eligible === true, '① 미리보기 목록: 클립이면 clip=true(화면이 따로 안 그린다) · 아니면 만들 수 있음(eligible)');
+    const mkSide = SC.markersOf('### g\n> 📜 화면카드: 해설 | 문장=今夜の作家は | 자리=왼쪽위\n'), mkMakjan = SC.markersOf('### g\n> 📜 화면카드: 막간 | 문장=今夜の作家は\n');
+    ok(SC.previewCards(plain, mkSide).cards[0].eligible === false && SC.previewCards(plain, mkMakjan).cards[0].eligible === false, '한쪽 카드(자리=)·막간 카드는 클립 대상이 아니다(해설 + 화면 전체만)');
+    const mC = SC.marksBySentence(clipped, mkr).bySid.get('s0'), mP = SC.marksBySentence(plain, mkr).bySid.get('s0');
+    ok(mC.clip === true && mC.canClip === false && mP.clip === false && mP.canClip === true, '② 표식: 클립이면 clip · 아니면 canClip(누르면 만든다)');
+    // 카드 그림(실물) — 1920x1080 · 판은 어둡고 글자 화소가 밝다 · MP4 와 같은 ASS 엔진
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cardstill-t-'));
+    try {
+      const png = path.join(tmp, '해설.png');
+      const rr = await R.renderCardStill({ kind: 'interlude', trans: ['今夜の作家は、山本周五郎です。'], lang: 'ja' }, png);
+      ok(rr.ok && fs.existsSync(png) && fs.statSync(png).size > 3000, '카드 그림 PNG 가 만들어진다');
+      const info = spawnSync(FF, ['-v', 'error', '-i', png, '-vf', 'scale=480:270,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 26 });
+      const px = info.stdout; let bright = 0, dark = 0; for (const v of px) { if (v > 150) bright++; else if (v < 30) dark++; }
+      ok(px.length === 480 * 270 && dark > px.length * 0.9 && bright > 100, '불투명한 어두운 판(' + Math.round(dark / px.length * 100) + '% 어둠) + 밝은 글자 화소 ' + bright);
+    } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  }
   console.log(`\n${fail ? '❌' : '✅'} screen-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });
