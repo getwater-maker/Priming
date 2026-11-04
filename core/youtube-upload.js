@@ -260,7 +260,7 @@ async function connectChannel(o = {}) {
 
   const timeoutMs = o.timeoutMs || 5 * 60 * 1000;
   let timer;
-  const timeoutP = new Promise((r) => { timer = setTimeout(() => r({ error: '5분 안에 연결을 마치지 않아 취소했습니다. 다시 「🔄 다시 연결」(새 채널은 「＋ 새 채널 추가」)을 누르세요.' }), timeoutMs); });
+  const timeoutP = new Promise((r) => { timer = setTimeout(() => r({ error: `${Math.max(1, Math.round(timeoutMs / 60000))}분 안에 연결을 마치지 않아 취소했습니다. ` + '다시 「🔄 다시 연결」(새 채널은 「＋ 새 채널 추가」)을 누르세요.' }), timeoutMs); });
   try {
     log('🔗 유튜브 채널 연결 — 브라우저에서 구글 로그인 → 채널 선택 → 허용을 눌러 주세요');
     try { await o.openUrl(url); } catch (e) { return { ok: false, error: `브라우저를 열지 못했습니다: ${e.message}` }; }

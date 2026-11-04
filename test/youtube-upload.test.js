@@ -152,7 +152,7 @@ const server = http.createServer(async (req, res) => {
   ok(!c.ok && /채널이 없습니다/.test(c.error), '채널 없는 계정 → 채널을 고르라고 안내');
   G.channel = { id: 'UC_TEST_1', snippet: { title: '로이의 고전이야기', customUrl: '@roy' } };
   c = await YT.connectChannel({ openUrl: () => {}, timeoutMs: 150 });
-  ok(!c.ok && /5분/.test(c.error), '응답 없으면 시간 초과로 끝난다(서버를 닫는다)');
+  ok(!c.ok && /분 안에 연결을 마치지 않아/.test(c.error), '응답 없으면 시간 초과로 끝난다(서버를 닫는다 · 안내 분은 기다린 시간대로 — 무인 연결 15분)');
 
   console.log('\n[4] 재개 가능 업로드 — 조각 · 503 뒤 이어받기 · 401 갱신');
   const mp4 = path.join(TMP, '[고전_0930] 단테.mp4');

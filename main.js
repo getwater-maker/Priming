@@ -8616,8 +8616,8 @@ async function _headlessMain() {
     else if (typeof reg === 'string') code = await _headlessRegister(reg);
     else if (typeof check === 'string') code = await runOrderHeadless(check, { checkOnly: true });
     else if (_headlessArg('list-names')) { _headlessOut(await _orderKnownNames()); code = 0; }
-    else if (typeof conn === 'string') code = await _headlessYtConnect(conn, _headlessArg('client'));
-    else { logToFile('🤖 무인 실행 — 할 일이 없습니다(--order <주문서> · --order-check <주문서> · --register <등록 파일> · --list-names · --yt-connect <앱 이름> [--client <파일>])'); code = 64; }
+    else if (typeof conn === 'string') code = await _headlessYtConnect(conn, _headlessArg('client'), { urlOut: !!_headlessArg('url-out'), expect: _headlessArg('expect') });
+    else { logToFile('🤖 무인 실행 — 할 일이 없습니다(--order <주문서> · --order-check <주문서> · --register <등록 파일> · --list-names · --yt-connect <앱 이름> [--client <파일>] [--url-out] [--expect <채널 ID>])'); code = 64; }
   } catch (e) { logToFile(`🤖 무인 실행 오류: ${(e && e.stack) || e}`); code = 1; }
   try { for (const w of WORLD.names) WORLD.run(w, () => { try { writeSnapshotSync(); } catch {} }); } catch {}
   app.exit(code);
@@ -8674,7 +8674,9 @@ async function _headlessRegister(file) {
   return CR.EXIT[res.status] != null ? CR.EXIT[res.status] : 1;
 }
 /** ④ 2.0 의 OAuth 앱으로 채널 연결 — 로이가 앞에 있을 때만(브라우저가 열린다). 앱 정보·토큰은 그 앱 이름의 프로필 파일에 암호화(safeStorage). */
-async function _headlessYtConnect(appName, clientFile) {
+// 🔗 --url-out = 브라우저를 열지 않고 동의 주소를 stdout JSON 한 줄 {authUrl} 로 넘긴다(2.0 이 ego-lite 채널 프로필로 연다 · 주소에 비밀값 없음 · 로그에 싣지 않는다)
+// --expect <채널 ID> = 다른 채널을 고르면 저장하지 않는다(mismatch · 끝 코드 1 · revoke 안 함) · 기다림 15분
+async function _headlessYtConnect(appName, clientFile, { urlOut = false, expect = null } = {}) {
   const OC = require('./core/order-contract');
   const YT = require('./core/youtube-upload');
   const cfg = OC.loadConfig();
@@ -8685,8 +8687,11 @@ async function _headlessYtConnect(appName, clientFile) {
     if (!r.ok) { _headlessOut({ ok: false, error: r.error }); return 1; }
     log(`🤖 유튜브 앱 「${appName}」 — 클라이언트 파일을 암호화해 넣었습니다(프로필 ${profile})`);
   }
-  const r = await YT.connectChannel({ openUrl: (u) => _realOpenExternal(u), log });
-  _headlessOut(r.ok ? { ok: true, profile, channelId: r.channelId || (r.channel && r.channel.id) || '', title: r.title || (r.channel && r.channel.title) || '' } : { ok: false, error: r.error });
+  const expectId = typeof expect === 'string' && expect.trim() ? expect.trim() : '';
+  const openUrl = urlOut ? (u) => { _headlessOut({ authUrl: u }); log('🔗 동의 주소를 2.0 에 넘겼습니다(브라우저는 열지 않음) — 허용을 기다립니다(15분)'); } : (u) => _realOpenExternal(u);
+  const r = await YT.connectChannel({ openUrl, log, expectId: expectId || undefined, timeoutMs: 15 * 60 * 1000 });
+  _headlessOut(r.ok ? { ok: true, profile, channelId: r.channelId || (r.channel && r.channel.id) || '', title: r.title || (r.channel && r.channel.title) || '' }
+    : { ok: false, error: r.error, ...(r.mismatch ? { mismatch: true, picked: r.picked, expect: expectId } : {}) });
   return r.ok ? 0 : 1;
 }
 function _orderLockFile() { return path.join(os.homedir(), '.priming-maker', 'order-running.json'); }

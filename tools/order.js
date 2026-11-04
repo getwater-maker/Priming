@@ -10,7 +10,8 @@
  *   node tools/order.js check <주문서.json>   만들지 않고 주문서만 확인(거절 사유를 화면에 JSON 한 줄로)
  *   node tools/order.js names                 Priming 채널 · 음성 서버 목소리 · 그림체 이름 목록(JSON)
  *   node tools/order.js register <등록.json>  ⑭ 새 채널 등록(목소리 · 그림체 · 배속 → 2.0 용 새 채널 · 기존 채널은 그대로) → 결과\등록\<이름>.json
- *   node tools/order.js yt-connect <앱 이름> [--client <client_secret.json>]   그 앱으로 유튜브 채널 연결(로이가 앞에 있을 때 · 브라우저가 열린다)
+ *   node tools/order.js yt-connect <앱 이름> [--client <client_secret.json>] [--url-out] [--expect <채널 ID>]   그 앱으로 유튜브 채널 연결(로이가 앞에 있을 때 · 15분)
+ *        --url-out = 브라우저를 열지 않고 동의 주소를 JSON 한 줄 {"authUrl":…} 로 낸다 · --expect = 다른 채널을 고르면 저장하지 않음(mismatch · 끝 코드 1)
  *
  *   끝 코드: 0 성공(등록 = 됨) · 1 실패 · 2 거절 · 3 중단됨 · 64 쓰는 법 틀림
  */
@@ -70,12 +71,15 @@ async function main(argv) {
     case 'stop': return stop(a1 && !a1.startsWith('--') ? a1 : '');
     case 'yt-connect': {
       if (!a1) break;
-      const ci = argv.indexOf('--client');
-      return runElectron(['--yt-connect', a1, ...(ci > 0 && argv[ci + 1] ? ['--client', abs(argv[ci + 1])] : [])], { quiet: true });
+      const ci = argv.indexOf('--client'), ei = argv.indexOf('--expect');
+      return runElectron(['--yt-connect', a1,
+        ...(ci > 0 && argv[ci + 1] ? ['--client', abs(argv[ci + 1])] : []),
+        ...(argv.includes('--url-out') ? ['--url-out'] : []),
+        ...(ei > 0 && argv[ei + 1] && !argv[ei + 1].startsWith('--') ? ['--expect', argv[ei + 1]] : [])], { quiet: true });
     }
     default: break;
   }
-  process.stderr.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 15).join('\n') + '\n');
+  process.stderr.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 16).join('\n') + '\n');
   return 64;
 }
 
