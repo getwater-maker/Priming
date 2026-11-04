@@ -80,6 +80,8 @@ function readOrder(orderPath) {
     thumbPrompt: _str(raw.thumbPrompt),
     lengthMin: raw.lengthMin == null ? null : Number(raw.lengthMin),
     noPaid: raw.noPaid !== false,
+    output: null,      // 📺 ⑯ { width, height, fps, bitrate:'8000k', kbps } — 없으면 렌더 기본(1920×1080 · 30 · 950k)
+    upscale: false,    // 🖼 ⑰ 그림 확대 켬/끔 — 없으면 끔(지금과 같음)
     upload: {
       enabled: up.enabled !== false,
       title: _str(up.title),
@@ -97,11 +99,42 @@ function readOrder(orderPath) {
   if (!IMAGE_ENGINES.includes(order.imageEngine)) errors.push(`그림 엔진 「${order.imageEngine}」 은 2.0 주문에서 쓸 수 없습니다(로컬만: ${IMAGE_ENGINES.join(', ')})`);
   if (!order.noPaid) errors.push('「바깥 유료 엔진 끔」(noPaid)이 꺼진 주문은 받지 않습니다 — 2.0 주문은 로컬 엔진만');
   if (order.speed != null && !(order.speed >= 0.5 && order.speed <= 2)) errors.push(`낭독 배속 ${raw.speed} 가 범위(0.5~2) 밖입니다`);
+  const oo = parseOutput(raw.output);
+  if (oo.error) errors.push(oo.error); else order.output = oo.output;
+  if (raw.upscale != null) {
+    const u = typeof raw.upscale === 'object' ? raw.upscale.on : raw.upscale;
+    if (typeof u !== 'boolean') errors.push(`그림 확대(upscale)는 true/false 여야 합니다 — ${JSON.stringify(raw.upscale)}`);
+    else order.upscale = u;
+  }
   if (order.upload.enabled) {
     if (!order.upload.title) errors.push('업로드 임시 제목(upload.title)이 비었습니다');
     if (!order.upload.app) errors.push('업로드 앱(upload.app)이 비었습니다 — 어느 OAuth 앱으로 올릴지 주문이 정합니다');
   }
   return { ok: !errors.length, order, errors };
+}
+
+/**
+ * 📺 ⑯ 출력 규격 — { width, height, fps, bitrate } 넷 다 있어야 한다(일부만 오면 거절 · 빈 칸을 기본값으로 메우지 않는다).
+ *   bitrate = "8M" · "16M" · "8000k" 꼴 글자 또는 Mbps 숫자(8). 크기 16:9 · 짝수 · 가로 1280~2560 · 프레임 30 만 · 1~40Mbps.
+ *   maxrate·bufsize 는 렌더러가 지금 비율대로(목표 × 1.05 · × 2) 붙인다.
+ *   돌려줌 { output: null(칸 없음) | { width, height, fps, bitrate:'8000k', kbps } , error }
+ */
+function parseOutput(o) {
+  if (o == null) return { output: null, error: '' };
+  if (typeof o !== 'object') return { output: null, error: '출력 규격(output)이 객체가 아닙니다' };
+  const miss = ['width', 'height', 'fps', 'bitrate'].filter((k) => o[k] == null || o[k] === '');
+  if (miss.length) return { output: null, error: `출력 규격(output)에 빈 칸이 있습니다 — ${miss.join(', ')}` };
+  const w = Number(o.width), h = Number(o.height), fps = Number(o.fps);
+  let kbps = NaN;
+  if (typeof o.bitrate === 'number') kbps = o.bitrate * 1000;
+  else { const m = /^\s*(\d+(?:\.\d+)?)\s*([kKmM])\s*$/.exec(String(o.bitrate)); if (m) kbps = Number(m[1]) * (/m/i.test(m[2]) ? 1000 : 1); }
+  const errs = [];
+  if (!(Number.isInteger(w) && Number.isInteger(h)) || w % 2 || h % 2 || w * 9 !== h * 16 || w < 1280 || w > 2560) errs.push(`출력 크기 ${o.width}×${o.height} 는 받지 않습니다(16:9 · 짝수 · 가로 1280~2560)`);
+  if (fps !== 30) errs.push(`프레임 ${o.fps} 는 받지 않습니다(30 만)`);
+  if (!(kbps >= 1000 && kbps <= 40000)) errs.push(`비트레이트 ${JSON.stringify(o.bitrate)} 는 받지 않습니다("8M" · "8000k" · 8 꼴 · 1~40Mbps)`);
+  if (errs.length) return { output: null, error: errs.join(' / ') };
+  kbps = Math.round(kbps);
+  return { output: { width: w, height: h, fps, bitrate: `${kbps}k`, kbps }, error: '' };
 }
 
 /**
@@ -251,7 +284,7 @@ function blankResult(order, info = {}) {
     uploaded: '안 함',
     videoId: null,
     resumable: false,
-    files: { mp4: null, thumbBg: null, vrew: null, srt: null, outDir: null },
+    files: { mp4: null, thumbBg: null, thumbBgUp: null, vrew: null, srt: null, outDir: null },   // thumbBgUp = ⑰ 확대가 켜진 주문의 썸네일 배경 2배(2560×1440)
     log: null,
     sameVoice: [],
     startedAt: info.startedAt || kst(),
@@ -264,6 +297,6 @@ module.exports = {
   VERSION, DEFAULT_ROOT, DEFAULT_OUT, VOICE_ENGINES, IMAGE_ENGINES, STATUS, STAGES, MOTION_NAMES,
   configFile, loadConfig, kst, orderName, mmddOf, readOrder, checkKnown, emptyPromptGroups, readOps,
   nextResultPath, writeResultOnce, receiptPath, beatPath, stopPaths, stopRequested, writeReceipt, writeBeat,
-  sameVoiceInBatch, sceneStats, motionName, charsPerMin, reasonLine, blankResult,
+  parseOutput, sameVoiceInBatch, sceneStats, motionName, charsPerMin, reasonLine, blankResult,
   ledgerFile, ledgerGet, ledgerSet, workflowModels,
 };

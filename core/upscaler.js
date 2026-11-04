@@ -18,20 +18,21 @@ const { spawn } = require('child_process');
 // 자식 프로세스를 비동기로 실행 — 메인 프로세스(이벤트 루프)를 막지 않는다.
 //   → 업스케일 도중에도 앱 UI·로그·중단 버튼이 살아있음 (spawnSync 는 동기라 앱 전체를 멈춤).
 //   abortSignal()===true 가 되면 자식을 강제 종료. 반환: { status, stdout, stderr, aborted }.
-function _run(cmd, args, { capture = false, abortSignal = null } = {}) {
+function _run(cmd, args, { capture = false, abortSignal = null, raw = false } = {}) {   // raw = stdout 을 바이트 그대로(buf)
   return new Promise((resolve) => {
     let child;
-    try { child = spawn(cmd, args, { stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'ignore' }); }
+    try { child = spawn(cmd, args, { stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'ignore', windowsHide: true }); }
     catch (e) { resolve({ status: -1, stdout: '', stderr: String((e && e.message) || e), aborted: false }); return; }
     let out = '', err = '', killed = false;
+    const bufs = [];
     if (capture) {
-      if (child.stdout) child.stdout.on('data', (d) => { out += d.toString(); });
+      if (child.stdout) child.stdout.on('data', (d) => { if (raw) bufs.push(d); else out += d.toString(); });
       if (child.stderr) child.stderr.on('data', (d) => { err += d.toString(); });
     }
     const timer = abortSignal ? setInterval(() => {
       try { if (abortSignal()) { killed = true; child.kill('SIGKILL'); } } catch {}
     }, 400) : null;
-    const finish = (status) => { if (timer) clearInterval(timer); resolve({ status: killed ? -2 : status, stdout: out, stderr: err, aborted: killed }); };
+    const finish = (status) => { if (timer) clearInterval(timer); resolve({ status: killed ? -2 : status, stdout: out, stderr: err, aborted: killed, buf: raw ? Buffer.concat(bufs) : null }); };
     child.on('error', () => finish(-1));
     child.on('close', (code) => finish(code == null ? -1 : code));
   });
@@ -185,4 +186,48 @@ async function upscaleVideo(input, output, opts = {}) {
   }
 }
 
-module.exports = { upscaleVideo, ensureRealesrgan, realesrganExe };
+/**
+ * 🖼 정지 그림 한 장 AI 확대(v1.0.22 · 2.0 무인 제작 ⑰) — Real-ESRGAN 만(ffmpeg 보간 폴백 없음: 「확대했다」고 적을 수 없는 결과를 내지 않는다).
+ *   output 은 PNG · 원본은 건드리지 않는다. 임시 이름에 쓴 뒤 옮긴다(반쯤 쓴 파일이 캐시로 남지 않게).
+ * opts: { scale=2(2·3·4), model='realesr-animevideov3', logger, abortSignal, autoDownload=true }
+ * 반환: { ok, sec } | { ok:false, error, aborted? }
+ */
+async function upscaleImage(input, output, opts = {}) {
+  const log = opts.logger || (() => {});
+  if (!fs.existsSync(input)) return { ok: false, error: '입력 그림 없음: ' + input };
+  const model = opts.model || 'realesr-animevideov3';
+  const scale = [2, 3, 4].includes(+opts.scale) ? +opts.scale : 2;
+  let exe = realesrganExe();
+  if (!exe && opts.autoDownload !== false) exe = await ensureRealesrgan(log);
+  if (!exe) return { ok: false, error: 'Real-ESRGAN 실행 파일이 없습니다' };
+  const t0 = Date.now();
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  const base = output.replace(/\.png$/i, '');
+  const tmp = base + '.tmp.png', src = base + '.in.png';
+  const clean = () => { for (const f of [tmp, src]) { try { fs.rmSync(f, { force: true }); } catch {} } };
+  // 🔴 입력은 늘 rgb24 로 바꿔 넣는다 — 로컬 Qwen 그림은 RGBA PNG 이고, Real-ESRGAN 은 알파를 0 으로 내보내 투명(= 렌더에서 검정) 사본이 됐다(v1.0.22 실물 주문)
+  const cv = await _run(_ffmpeg, ['-y', '-v', 'error', '-i', input, '-frames:v', '1', '-pix_fmt', 'rgb24', src], { abortSignal: opts.abortSignal });
+  if (cv.status !== 0 || !fs.existsSync(src)) { clean(); return { ok: false, aborted: cv.aborted, error: '입력 그림을 RGB 로 바꾸지 못했습니다' }; }
+  const r = await _run(exe, ['-i', src, '-o', tmp, '-n', model, '-s', String(scale), '-f', 'png'], { capture: true, abortSignal: opts.abortSignal });
+  if (r.aborted) { clean(); return { ok: false, aborted: true, error: '중단됨' }; }
+  if (r.status !== 0 || !fs.existsSync(tmp) || fs.statSync(tmp).size < 1000) {
+    clean();
+    return { ok: false, error: `Real-ESRGAN 실패(코드 ${r.status}) ${String(r.stderr || '').split(/\r?\n/).filter(Boolean).slice(-1)[0] || ''}`.trim() };
+  }
+  // 🛡 결과가 원본과 같은 그림인지(작게 줄여 화소 평균 차이) — 검정·투명·깨진 사본을 「확대했다」고 쓰지 않는다(fail-closed → 부르는 쪽은 원본으로 굽는다)
+  const d = await lookDiff(src, tmp);
+  if (!(d != null && d < 12)) { clean(); return { ok: false, error: `확대 결과가 원본과 다릅니다(차이 ${d == null ? '잴 수 없음' : d.toFixed(1)}) — 버렸습니다` }; }
+  fs.renameSync(tmp, output);
+  try { fs.rmSync(src, { force: true }); } catch {}
+  return { ok: true, sec: (Date.now() - t0) / 1000, diff: d };
+}
+/** 두 그림을 32×18 RGB 로 줄여 화소 평균 차이(0~255) — 못 재면 null */
+async function lookDiff(a, b) {
+  const px = (f) => _run(_ffmpeg, ['-v', 'error', '-i', f, '-frames:v', '1', '-vf', 'scale=32:18:flags=area,format=rgb24', '-f', 'rawvideo', '-'], { capture: true, raw: true });
+  const [x, y] = await Promise.all([px(a), px(b)]);
+  if (!x.buf || !y.buf || x.buf.length !== 32 * 18 * 3 || y.buf.length !== x.buf.length) return null;
+  let s = 0; for (let i = 0; i < x.buf.length; i++) s += Math.abs(x.buf[i] - y.buf[i]);
+  return s / x.buf.length;
+}
+
+module.exports = { upscaleVideo, upscaleImage, lookDiff, ensureRealesrgan, realesrganExe };

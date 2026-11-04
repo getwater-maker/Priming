@@ -103,6 +103,28 @@ async function getMediaInfo(filePath) {
 }
 
 /**
+ * 📺 영상 파일 실측(2.0 주문 결과서 ⑯ ㉔ · v1.0.22) — ffmpeg 머리 정보(ffprobe 와 같은 libavformat 값)를 읽는다.
+ *   videoKbps = 영상 흐름 비트레이트(mp4 가 적어 둔 값) · totalKbps = 파일 크기 × 8 ÷ 길이(소리 포함 평균).
+ * @returns {Promise<{width,height,fps,videoKbps,totalKbps,durationSec,bytes}|null>}
+ */
+async function probeVideo(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  let info = '';
+  try { info = await _probeFfmpeg(filePath); } catch { return null; }
+  const out = { width: null, height: null, fps: null, videoKbps: null, totalKbps: null, durationSec: null, bytes: fs.statSync(filePath).size };
+  const dm = info.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (dm) out.durationSec = (+dm[1]) * 3600 + (+dm[2]) * 60 + parseFloat(dm[3]);
+  const v = info.split('\n').find((l) => /\bVideo:/.test(l));
+  if (v) {
+    const rm = v.match(/(\d{3,5})x(\d{3,5})/); if (rm) { out.width = +rm[1]; out.height = +rm[2]; }
+    const km = v.match(/(\d+) kb\/s/); if (km) out.videoKbps = +km[1];
+    const fm = v.match(/([\d.]+) fps/); if (fm) out.fps = +fm[1];
+  }
+  if (out.durationSec > 0) out.totalKbps = Math.round(out.bytes * 8 / out.durationSec / 1000);
+  return out;
+}
+
+/**
  * 오디오/영상 길이(초)만 정확히 측정. 실패 시 null.
  * @param {string} filePath
  * @returns {Promise<number|null>}
@@ -251,6 +273,7 @@ async function concatAudio(inPaths, outPath) {
 }
 
 module.exports = {
+  probeVideo,
   getFfmpegPath,
   tmpFile,
   getMediaInfo,

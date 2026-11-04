@@ -3146,8 +3146,13 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (p.phase !== _pPhase) { _pPhase = p.phase; if (_pTimer) clearTimeout(_pTimer); send(); return; }
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsOptsFor(pr, preset), info: infoOptsFor(pr, preset, ctx && ctx.scriptPath), infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const OR = _orderRender;   // 📺 2.0 주문만 — 출력 크기·비트레이트·그림 확대(없으면 예전 그대로: 1920×1080 · 950k · 확대 없음)
+  const orderOpts = OR ? { ...(OR.output ? { output: { width: OR.output.width, height: OR.output.height }, fps: OR.output.fps, bitrate: OR.output.bitrate } : {}), ...(OR.upscale ? { upscale: { dir: OR.upscaleDir, beforeEach: () => _yieldGpuToRemote(log) } } : {}) } : {};
+  const cardsO = cardsOptsFor(pr, preset), infoO = infoOptsFor(pr, preset, ctx && ctx.scriptPath);
+  if (OR) OR.cards = { screen: (cardsO || []).length, info: (infoO || []).length };   // 📺 ㉔ 카드 수(이번 렌더에 구운 판)
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ ...orderOpts, vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsO, info: infoO, infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
+  if (OR) OR.result = r;
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
     send();
@@ -7918,6 +7923,8 @@ ipcMain.handle('load-project', async () => {
 //   🔑 끝(완료·중단·예외)은 runMakeAllCore 의 finally 한 곳에서 닫는다 — 예외로 빠져도 팝업이 「진행 중」에 갇히지 않게.
 let _mk = null;
 let _orderStageHook = null;   // 🤖 무인 실행 — 제작 단계가 바뀔 때(tts·image·video·out) 진행 신호에 적는다
+// 📺 2.0 주문의 렌더 규격(⑯ 출력 · ⑰ 그림 확대) — runOrderHeadless 만 채운다(null = 회원·채널사업부 렌더 그대로). renderUploadMp4 가 읽고 결과(result)를 적는다.
+let _orderRender = null;
 let _mkQueuePos = null;   // run-batch 가 { idx, total } 을 적는다(단건 제작이면 null)
 function resetWorkAbort() {
   const ctx = workContext.getStore();
@@ -8401,10 +8408,11 @@ async function runMakeAllBody(opts = {}) {
         // ⏭ 이미 최신이면 건너뛴다(로이 2026-10-01) — 지문(입력 전부 + 출력 방식 + 앱 버전)이 같고 .vrew(·MP4)가 기록 그대로일 때만.
         //   계산·읽기 실패는 fail-closed(= 새로 만든다). 판정은 core/build-fingerprint 한 곳.
         const BF = require('./core/build-fingerprint');
-        const fp = await BF.fingerprint({ v: appDiskVersion(), outMode, inputs: P.vrewInputsOf(pr, ep, captionMaxChars) });
+        const fp = await BF.fingerprint({ v: appDiskVersion(), outMode, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), ...(_orderRender ? { orderRender: _orderRenderKey(_orderRender) } : {}) });   // 📺 2.0 주문 규격이 바뀌면 다시 굽는다(회원 지문은 그대로)
         const mp4Path = mp4Go ? uploadMp4Path(baseName, preset, vrewPath) : null;
         // 🔖 기록이 없는 기존 완성물(이 기능이 생기기 전에 만든 것)은 .vrew 가 모든 입력 파일보다 새로우면 한 번 채택한다.
-        if (await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
+        //   📺 2.0 주문은 채택하지 않는다 — 기록 없는 MP4 가 어느 규격(크기·비트레이트·확대)으로 구워졌는지 알 수 없다(실물: 1440 주문이 옛 MP4 를 받아들였다)
+        if (!_orderRender && await BF.adoptIfFresh({ outRoot, baseName, fp, vrewPath, mp4Path, inputs: P.vrewInputsOf(pr, ep, captionMaxChars), extraPaths: [scriptPath] })) log(`🔖 ${pr.title} — 기록 없는 기존 완성물을 지금 파일 그대로 최신으로 채택합니다`);
         const utd = await BF.checkUpToDate({ outRoot, baseName, fp, vrewPath, mp4Path });
         let vrewReady = false;
         // ⬆ 다시 굽지 않고 넘어가도, 채널에 아직 없으면 올린다(v0.6.97 · 로이 「만들기만 누르면 MP4 확인 → 안 올라갔으면 업로드」).
@@ -8416,7 +8424,8 @@ async function runMakeAllBody(opts = {}) {
           continue;
         }
         if (mp4Go && fs.existsSync(mp4Path)) {   // 📂 같은 이름의 MP4 가 저장 폴더에 있으면 묻는다 — 기본 건너뛰기
-          if (await askMp4Exists(pr.title, mp4Path) === 'skip') { log(`⏭ ${pr.title} — 같은 이름의 MP4 가 이미 있어 건너뜁니다 (${mp4Path})`); uploadExisting(); continue; }
+          // 📺 2.0 주문은 묻지 않고 다시 굽는다(지문이 다르면 = 규격·입력이 바뀌었다 · 무인 실행의 창 기본값은 「건너뛰기」라 옛 규격이 남는다)
+          if (!_orderRender && await askMp4Exists(pr.title, mp4Path) === 'skip') { log(`⏭ ${pr.title} — 같은 이름의 MP4 가 이미 있어 건너뜁니다 (${mp4Path})`); uploadExisting(); continue; }
           log(`🔁 ${pr.title} — 같은 이름의 MP4 가 있지만 다시 만듭니다`);
         }
         if (utd.vrewOk && mp4Go) { vrewReady = true; log(`⏭ ${pr.title} — .vrew 는 최신이라 MP4 만 굽습니다`); }
@@ -8755,8 +8764,12 @@ async function _orderThumbBg(prompt, styleId, outPath) {
     return outPath;
   });
 }
+/** 📺 주문 렌더 규격 → 빌드 지문 조각(⑯ 크기·프레임·비트레이트 · ⑰ 확대 모델) — 바뀌면 같은 대본이라도 MP4 를 다시 굽는다 */
+function _orderRenderKey(OR) {
+  return { output: OR.output ? [OR.output.width, OR.output.height, OR.output.fps, OR.output.kbps] : null, upscale: OR.upscale ? require('./core/vrew-render').UPSCALE_MODEL : null };
+}
 /** ⑥ ⑨ 제작 기록 — 재서 적기만(판정 없음). 값을 모르면 null + why */
-async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec }) {
+async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
   const OC = require('./core/order-contract');
   const KB = require('./core/ken-burns');
   const GS = require('./core/gpu-share');
@@ -8784,7 +8797,32 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec }) {
   let bgm = '없음';
   try { const eb = _resolveBgm(preset, it.scriptPath, () => {}); if (eb && eb.bgm && eb.bgm.audioPath) bgm = path.basename(eb.bgm.audioPath); } catch (_) {}
   const wf = _localQwenWfPath(require('./core/comfy-image').loadConfig());
+  // 📺 ㉔ TV 화면 칸(덧붙임2) — 재서 적기만. 실측은 ffmpeg 머리 정보(ffprobe 와 같은 libavformat 값). R = 이번 실행에서 MP4 를 구웠을 때의 렌더 결과(건너뛰었으면 null)
+  const R = (_orderRender && _orderRender.result && _orderRender.result.ok) ? _orderRender.result : null;
+  const pv = await require('./core/media-utils').probeVideo(mp4).catch(() => null) || {};
+  const up = R && R.upscale;
+  const VRm = require('./core/vrew-render');
+  const cardN = _orderRender && _orderRender.cards;
+  const tv = {
+    outWidth: pv.width || null, outHeight: pv.height || null, outFps: pv.fps || null,
+    videoKbps: pv.videoKbps || null, totalKbps: pv.totalKbps || null, fileBytes: pv.bytes || null, fileMB: pv.bytes ? Math.round(pv.bytes / 1048576 * 10) / 10 : null,
+    orderedOutput: order.output ? { width: order.output.width, height: order.output.height, fps: order.output.fps, bitrate: order.output.bitrate } : null,
+    renderedNow: !!R,
+    uploadSec: null,
+    upscaleModel: order.upscale ? VRm.UPSCALE_MODEL : null,
+    upscale: up ? { images: up.images, upscaled: up.upscaled, reused: up.reused, enough: up.enough, failed: up.failed, scales: up.scales, sec: up.sec, dir: up.dir } : null,
+    images: pr.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath)).length,
+    shots: null, shotAvgSec: null, shotMaxSec: null,   // ⑱ 샷 나누기 전 — 지금은 한 그림 = 한 움직임(장면 값이 곧 그림 값)
+    imageMaxSec: st.sceneMaxSec,
+    transitions: R ? (R.transitions > 0 ? `겹침 전환 ${R.transitions}곳` : '컷') : null,
+    cards: cardN ? cardN.screen + cardN.info : null, cardsScreen: cardN ? cardN.screen : null, cardsInfo: cardN ? cardN.info : null,
+    maps: null, timelines: null, depthImages: null, fxLayers: null,   // ⑲ 지도·연표 · ㉑ 깊이 움직임 · ㉒ 효과 층 — 아직 없는 장치
+    videoClips: pr.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath)).length, videoEngine: null,   // 2.0 주문은 영상 「없음」
+    srt: srt || null,   // ⑳ 자막 파일(올리는 것은 2.0)
+    externalFiles: null,   // 2.0 이 넣는 바깥 자료 칸은 아직 없다
+  };
   return {
+    ...tv,
     durationSec: r1(mp4Sec) || null,
     charsPerMin: OC.charsPerMin(pr.sentences.map((s) => s.text), speechSec),
     scenes: st.scenes, sceneAvgSec: st.sceneAvgSec, sceneMaxSec: st.sceneMaxSec, sceneMaxAt: longest ? `G${longest.num}` : null, motions: st.motions,
@@ -8799,7 +8837,8 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec }) {
     captionBreaks: '규칙 줄 나누기(Claude 끊어 읽기 끔 — 유료 호출 0)',
     prompts: pr.groups.map((g) => ({ g: g.num, prompt: g.imagePrompt || '' })),
     thumbPrompt: order.thumbPrompt || '',
-    note: '이번 실행분만 센다(중단 뒤 이어 한 실행은 그 실행의 시간) · gpuMin = 음성 + 그림 + 썸네일 단계 벽시계(양보 대기 포함) · kNet = 양보 대기를 뺀 k',
+    note: '이번 실행분만 센다(중단 뒤 이어 한 실행은 그 실행의 시간) · gpuMin = 음성 + 그림 + 썸네일 단계 벽시계(양보 대기 포함) · kNet = 양보 대기를 뺀 k'
+      + ' · 📺 outWidth~fileMB = MP4 실측(ffmpeg 머리 정보) · renderedNow=false 면 같은 입력·규격이라 다시 굽지 않음(upscale·transitions·cards 는 null) · uploadSec = 업로드 걸린 초(올렸을 때만)',
   };
 }
 async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
@@ -8877,6 +8916,9 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     if (roy.open) return finish(OC.STATUS.reject, `🟥 미확인 경험 ${roy.open}곳 — 확인된 경험만 쓸 수 있습니다`);
     if (checkOnly) return finish(OC.STATUS.ok, '', { note: `확인만 — 만들지 않았습니다(장면 ${it.parsed.projects[0].groups.length}개 · 문장 ${it.parsed.projects[0].sentences.length}개)` });
 
+    // 📺 ⑯ ⑰ 렌더 규격 — 이 주문의 MP4 에만(renderUploadMp4 가 읽는다 · 확대 사본은 그 편 폴더의 _업스케일 — 원본 그림은 media-1 그대로)
+    _orderRender = { output: order.output, upscale: order.upscale, upscaleDir: path.join(it.outRoot, '_업스케일'), result: null };
+    if (order.output || order.upscale) L(`📺 렌더 규격 — ${order.output ? `${order.output.width}×${order.output.height} · ${order.output.fps}fps · ${order.output.bitrate}` : '기본(1920×1080 · 30fps · 950k)'} · 그림 확대 ${order.upscale ? '켬' : '끔'}`);
     // ① 제작 — 화면의 ⚡ 만들기와 같은 길(제작 칸 · 이어받기 · 게이트 그대로)
     GS.resetYield();
     stage = '음성'; beat();
@@ -8900,7 +8942,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     stage = '렌더';
     if (!fs.existsSync(mp4)) return finish(OC.STATUS.fail, `MP4 가 만들어지지 않았습니다 — ${mp4}`, { resumable: hasPieces() });
     const srt = path.join(shortsDirs(it.outRoot, pr.shortsNum).subtitles, `${baseName}.srt`);   // ⑳ 자막 파일(덧붙임2) — 올리는 것은 2.0
-    res.files = { mp4, vrew: fs.existsSync(vrewPath) ? vrewPath : null, thumbBg: null, srt: fs.existsSync(srt) ? srt : null, outDir: it.outRoot };
+    res.files = { mp4, vrew: fs.existsSync(vrewPath) ? vrewPath : null, thumbBg: null, thumbBgUp: null, srt: fs.existsSync(srt) ? srt : null, outDir: it.outRoot };
     // ⑧ 썸네일 배경
     let thumbSec = 0;
     if (order.thumbPrompt) {
@@ -8912,8 +8954,19 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         return finish(OC.STATUS.fail, e, { resumable: true });
       }
       thumbSec = (Date.now() - t0) / 1000;
+      // 🖼 ⑰ 같은 값 — 확대가 켜진 주문이면 썸네일 배경도 2배 사본(2560×1440)을 곁에 둔다(1280×720 원본은 그대로)
+      if (order.upscale && res.files.thumbBg) {
+        const upPath = res.files.thumbBg.replace(/\.png$/i, '') + '_x2.png';
+        if (fs.existsSync(upPath)) { const d = await require('./core/upscaler').lookDiff(res.files.thumbBg, upPath); if (!(d != null && d < 12)) { try { fs.rmSync(upPath, { force: true }); } catch (_) {} } }   // 원본과 다른(검은) 옛 사본은 버리고 새로
+        if (!fs.existsSync(upPath)) {
+          await _yieldGpuToRemote(log);
+          const ur = await require('./core/upscaler').upscaleImage(res.files.thumbBg, upPath, { scale: 2, model: require('./core/vrew-render').UPSCALE_MODEL, logger: log, abortSignal: () => S.abort });
+          if (!ur.ok) L(`⚠ 썸네일 배경 확대 실패 — ${ur.error} (1280×720 원본은 있습니다)`);
+        }
+        res.files.thumbBgUp = fs.existsSync(upPath) ? upPath : null;
+      }
     } else res.thumbNote = '썸네일 배경 지시문이 비어 만들지 않았습니다';
-    res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec });
+    res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt: res.files.srt });
     // ④ ⑤ 업로드 — 비공개 · 임시 제목 · AI 사용 예(runYtUpload 고정) · 예약·썸네일·재생목록·설명·고정댓글 없음 · 그 주문의 OAuth 앱
     if (!order.upload.enabled) return finish(OC.STATUS.ok, '', { note: '업로드하지 않는 주문입니다(upload.enabled = false)' });
     stage = '업로드'; beat();
@@ -8925,7 +8978,9 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     const ytCh = order.upload.channelId || base.ytChannelId || '';
     if (!ytCh) return finish(OC.STATUS.fail, '올릴 유튜브 채널이 정해지지 않았습니다(주문 upload.channelId 또는 Priming 채널의 업로드채널)', { resumable: true });
     const meta = { title: order.upload.title, description: '', descriptionNoChapters: '', tags: [], chapters: 0, chapterTotalSec: 0, notes: [], source: '2.0 주문', language: ytLangOf(pr) };
+    const tUp = Date.now();
     const ur = await enqueueYtUpload({ file: mp4, channelId: ytCh, meta, finish: null, noSchedule: true, itemId: it.id });
+    if (res.log) res.log.uploadSec = ur && ur.ok && ur.videoId && !ur.skipped ? Math.round((Date.now() - tUp) / 100) / 10 : null;   // 📺 ㉔ 업로드 걸린 시간(줄 대기 포함 · 무인은 한 건씩) — 올리지 않았으면 null
     const vidOf = (u) => { const m = /(?:youtu\.be\/|v=|\/video\/)([\w-]{11})/.exec(String(u || '')); return m ? m[1] : null; };
     if (ur && ur.ok && ur.skipped) {
       const vid = (ur.duplicate && ur.duplicate.videoId) || vidOf(ur.url);
@@ -8943,6 +8998,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     return finish(OC.STATUS.fail, e, { resumable: hasPieces() });
   } finally {
     _orderStageHook = null;
+    _orderRender = null;
     if (beatT) clearInterval(beatT);
     if (stopT) clearInterval(stopT);
     if (!checkOnly) { try { fs.rmSync(OC.beatPath(resultsDir, name), { force: true }); } catch (_) {} try { for (const f of OC.stopPaths(resultsDir, name)) if (stopping) fs.rmSync(f, { force: true }); } catch (_) {} }

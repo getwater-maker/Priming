@@ -224,7 +224,7 @@ const SCRIPT = [
     const pj2 = P.parseScriptText(SCRIPT.replace('내 자리 확인', '다른 문구'), 'longform', {}).projects[0];
     ok(JSON.stringify(P.vrewInputsOf(pj2, { infoCards: true }, 20).info) !== JSON.stringify(on.info), '표시 줄 글을 바꾸면 지문이 달라진다(MP4 를 다시 굽는다)');
     const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8'), A = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'App.jsx'), 'utf8');
-    ok(/info: infoOptsFor\(pr, preset, ctx && ctx\.scriptPath\)/.test(M) && /function infoOptsFor/.test(M) && /infoMarks = _sg/.test(M), 'main: MP4 렌더에 정보 카드를 넘기고 · 작업본 이어받기에서도 표시 줄을 .md 에서 다시 읽는다');
+    ok((/info: infoOptsFor\(pr, preset, ctx && ctx\.scriptPath\)/.test(M) || /infoO = infoOptsFor\(pr, preset, ctx && ctx\.scriptPath\)[\s\S]{0,600}info: infoO,/.test(M)) &&/function infoOptsFor/.test(M) && /infoMarks = _sg/.test(M), 'main: MP4 렌더에 정보 카드를 넘기고 · 작업본 이어받기에서도 표시 줄을 .md 에서 다시 읽는다');
     ok(/infoCards: !!ch\.infoCards/.test(A) && /infoCards: !!p\.infoCards/.test(A) && /data-testid="ch-infocards"/.test(A), '채널 편집: 「📇 정보 카드」 칸 · 읽기·저장 두 곳 다');
     const q = IC.signatureOf(IC.fromRaw(SCRIPT)); ok(q.length === 4 && /^표:/.test(q[1]), '서명 = 표시 줄 글 + 문장 위치');
   }

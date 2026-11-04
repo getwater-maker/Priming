@@ -639,18 +639,58 @@ function kenBurnsFilter(kb, frames, off = 0, total = 0, clamp = false) {
     + ':sense=source:interpolation=linear:eval=frame';
 }
 
+/**
+ * 📺 이 구간 그림을 덮을 캔버스(v1.0.22 · 2.0 무인 제작 ⑯ ⑰) — 기본 = 출력 크기(ctx.OW×OH · 주문이 없으면 1920×1080 그대로).
+ *   ⑰ 확대 사본(ctx.up)이 있으면 **출력 × K** 캔버스로 덮는다(K = 그 그림의 최대 확대 배율 · 사본이 덮을 수 있는 만큼까지)
+ *   → 켄번스(perspective · 소수 좌표 그대로)가 그 큰 그림에서 잘라 움직이고, 끝에서 출력 크기로 줄인다(outScale).
+ */
+function coverPlan(file, ctx) {
+  const OW = ctx.OW || W, OH = ctx.OH || H;
+  const up = ctx.up && ctx.up.get(file);
+  if (!up) return { file, cw: OW, ch: OH };
+  const K = Math.min(up.need, up.w / OW, up.h / OH);   // 사본보다 크게 늘리지 않는다
+  if (!(K > 1.01)) return { file: up.file, cw: OW, ch: OH };
+  const ev = (x) => Math.max(2, Math.round(x / 2) * 2);
+  return { file: up.file, cw: ev(OW * K), ch: ev(OH * K) };
+}
+/** 켄번스 뒤 출력 크기로 줄이기 — 캔버스가 출력 크기면 빈 문자열(예전 필터 그대로) */
+function outScale(file, ctx) {
+  const OW = ctx.OW || W, OH = ctx.OH || H;
+  const cp = coverPlan(file, ctx);
+  return cp.cw === OW && cp.ch === OH ? '' : `,scale=${OW}:${OH}:flags=lanczos,setsar=1`;   // setsar — 큰 캔버스는 짝수 반올림으로 16:9 에서 조금 벗어나, 그대로 줄이면 ffmpeg 가 화소 비율(SAR)을 고쳐 넣는다(실물: DAR 1561:878)
+}
 /** 구간 그림을 캔버스로 한 번만 cover 해 둔다(같은 구간의 조각들이 함께 쓴다). */
 function coverImage(file, ctx, tr) {
   ctx.covers = ctx.covers || new Map();
-  const fit = placeFilters(tr);
-  const key = file + '|' + fit;
+  const cp = coverPlan(file, ctx);
+  const fit = placeFilters(tr, cp.cw, cp.ch);
+  const key = cp.file + '|' + fit;
   if (!ctx.covers.has(key)) {
     const name = `cov_${ctx.covers.size}.png`;
-    ctx.covers.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', file,
+    ctx.covers.set(key, ff(['-y', '-hide_banner', '-loglevel', 'error', '-i', cp.file,
       '-vf', fit,
       '-frames:v', '1', name], { cwd: ctx.tmpDir, signal: ctx.children }).then(() => name));
   }
   return ctx.covers.get(key);
+}
+/** 켄번스 최대 확대 배율(1/보이는 비율의 최솟값 · 움직임 없음 = 1) */
+function kbZoomMax(tr) {
+  const kb = tr && tr.kenburnsAnimationInfo;
+  if (!kb || !kb.from) return 1;
+  const s = [kb.from.scale, (kb.to || kb.from).scale].map((v) => (v == null || !isFinite(+v) ? 1 : Math.min(1, +v))).filter((v) => v > 0);
+  return s.length ? 1 / Math.min(...s) : 1;
+}
+/**
+ * ⑰ 확대가 필요한가 — 출력 위 그림 화소가 최대 확대 끝에서도 1:1 이 되려면 그림이 (출력 × 배율)만큼 커야 한다.
+ *   cover = 짧은 쪽 비율이 막는다(min) · 맞추기(레터박스) = 긴 쪽(max). 2·3·4배 가운데 넉넉한 가장 작은 배수(모자라면 4).
+ *   돌려줌 { need, ratio, scale(0 = 확대 안 함) }
+ */
+function upscaleNeed(iw, ih, zoom, OW, OH, contain = false) {
+  const ratio = contain ? Math.max(iw / OW, ih / OH) : Math.min(iw / OW, ih / OH);
+  const need = Math.max(1, zoom);
+  if (!(iw > 0 && ih > 0) || ratio >= need - 0.01) return { need, ratio, scale: 0 };
+  const scale = [2, 3, 4].find((s) => ratio * s >= need - 0.01) || 4;
+  return { need, ratio, scale };
 }
 /**
  * 🖼 .vrew 트랙 → 화면에 놓는 필터. **트랙 박스가 정본**이다(빌더가 채우기를 박스로 적는다):
@@ -694,14 +734,15 @@ function boxImage(file, bw, bh, flip, ctx, rot = 0, crop = null) {
   }
   return ctx.boxes.get(key);
 }
-function placeFilters(tr) {
+function isContain(t) { return (typeof t.width === 'number' && t.width < 0.985) || (typeof t.height === 'number' && t.height < 0.985); }
+function placeFilters(tr, w = W, h = H) {   // w·h = 캔버스(기본 1920×1080 · 📺 주문 출력·⑰ 큰 캔버스)
   const t = tr || {};
-  const contain = (typeof t.width === 'number' && t.width < 0.985) || (typeof t.height === 'number' && t.height < 0.985);
+  const contain = isContain(t);
   const fl = (t.editInfo && t.editInfo.flip) || {};
   const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
   return (contain
-    ? `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`
-    : `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H},setsar=1`) + flip;
+    ? `scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`
+    : `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h},setsar=1`) + flip;
 }
 
 /**
@@ -846,8 +887,8 @@ async function renderChunk(ch, i, ctx) {
     const tA = (a.f0 + (a.f1 - a.f0) / 2) / FPS, tB = (b.f0 + (b.f1 - b.f0) / 2) / FPS;   // 앞·뒤 그림이 속한 그룹의 fx(경계에서 갑자기 켜지거나 꺼지지 않게 각자 입고 섞는다)
     const fa = fxOn(tA, 2, 'xa'), fb = fxOn(tB, 2 + (fa ? fa.ins.filter((q) => q === '-i').length : 0), 'xb');
     const g = [
-      `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}[${fa ? 'xain' : 'da'}]`,
-      `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}[${fb ? 'xbin' : 'db'}]`,
+      `[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(A.kenburnsAnimationInfo, frames, offA, totA, true)}${outScale(a.file, ctx)}[${fa ? 'xain' : 'da'}]`,
+      `[1:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(B.kenburnsAnimationInfo, frames, offB, totB, true)}${outScale(b.file, ctx)}[${fb ? 'xbin' : 'db'}]`,
       ...(fa ? [...fa.parts, `${fa.out}null[da]`] : []), ...(fb ? [...fb.parts, `${fb.out}null[db]`] : []),
       ...((ch.trans && ch.trans !== 'dissolve')
         ? [`[da][db]xfade=transition=${ch.trans}:duration=${(Math.max(1, frames - 1) / FPS).toFixed(4)}:offset=0,${assFilter}[vout]`]   // 🎬 앞 그림 = 첫 입력 · 창 전체가 전환(선형)
@@ -856,15 +897,16 @@ async function renderChunk(ch, i, ctx) {
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', covA, '-i', covB, ...(fa ? fa.ins : []), ...(fb ? fb.ins : []), '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
   } else if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) {
     // 🖼 겹친 그림(아래층으로 이어진 그림 위에 다음 그룹 그림) · 사람이 옮기고 줄인 그림 — 검은 바탕 위에 아래 → 위로 얹는다
-    const ins = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`];
+    const OW = ctx.OW || W, OH = ctx.OH || H;   // 📺 주문 출력(기본 1920×1080) — 박스·자리를 그 크기로(겹친 그림은 ⑰ 확대 사본을 쓰지 않는다)
+    const ins = ['-f', 'lavfi', '-i', `color=c=black:s=${OW}x${OH}:r=${FPS}`];
     const parts = [];
     let prev = '[0:v]';
     for (let k = 0; k < L.length; k++) {
       const l = L[k], tr = l.track || {};
-      const bw = Math.max(2, Math.round(((+tr.width || 1) * W) / 2) * 2), bh = Math.max(2, Math.round(((+tr.height || 1) * H) / 2) * 2);
+      const bw = Math.max(2, Math.round(((+tr.width || 1) * OW) / 2) * 2), bh = Math.max(2, Math.round(((+tr.height || 1) * OH) / 2) * 2);
       const rot = +tr.rotation || 0;   // 🎛 회전 — 박스 가운데를 그대로 두고 돌린다(돌린 그림은 더 커지므로 overlay 가 가운데 맞춤)
-      const bx = rot ? `${Math.round(((+tr.xPos || 0) + (typeof tr.width === 'number' ? tr.width : 1) / 2) * W)}-w/2` : Math.round((+tr.xPos || 0) * W);
-      const by = rot ? `${Math.round(((+tr.yPos || 0) + (typeof tr.height === 'number' ? tr.height : 1) / 2) * H)}-h/2` : Math.round((+tr.yPos || 0) * H);
+      const bx = rot ? `${Math.round(((+tr.xPos || 0) + (typeof tr.width === 'number' ? tr.width : 1) / 2) * OW)}-w/2` : Math.round((+tr.xPos || 0) * OW);
+      const by = rot ? `${Math.round(((+tr.yPos || 0) + (typeof tr.height === 'number' ? tr.height : 1) / 2) * OH)}-h/2` : Math.round((+tr.yPos || 0) * OH);
       const fl = (tr.editInfo && tr.editInfo.flip) || {};
       const flip = (fl.horizontal ? ',hflip' : '') + (fl.vertical ? ',vflip' : '');
       const lo = Math.max(0, Math.round((ch.f0 / FPS - l.t0) * FPS));   // 이 그림이 이 조각 전까지 보인 프레임 수
@@ -897,23 +939,23 @@ async function renderChunk(ch, i, ctx) {
     //   (실측 600프레임: 9.2초 → 5.3초 · 옛 zoompan 7.0초보다도 빠르다).
     const fx1 = fxOn(tMid, 1, 'xi');
     if (fx1) {   // 🌫 오버레이 모션을 얹는다(켄번스 → 안개·먼지·반딧불·깜박임 → 자막)
-      const g = [`[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal)}[xiin]`,
+      const g = [`[0:v]format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB,${kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal)}${outScale(ch.file, ctx)}[xiin]`,
         ...fx1.parts, `${fx1.out}${assFilter}[vout]`].join(';');
       args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov, ...fx1.ins, '-filter_complex', g, '-map', '[vout]', '-frames:v', String(frames), ...common];
     } else {
       const vf = [`format=yuv420p,loop=loop=${Math.max(0, frames - 1)}:size=1:start=0,setpts=N/${FPS}/TB`,
-        kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal), assFilter].join(',');
+        kenBurnsFilter(tr.kenburnsAnimationInfo, frames, ch.kbOff, ch.kbTotal) + outScale(ch.file, ctx), assFilter].join(',');
       args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-i', cov,
         '-frames:v', String(frames), '-vf', vf, ...common];
     }
   } else if (ch.type === 'video' && ch.file) {
     // 영상이 구간보다 짧으면 마지막 프레임을 이어 붙여 길이를 맞춘다.
-    const vf = [placeFilters(ch.track), `fps=${FPS}`,
+    const vf = [placeFilters(ch.track, ctx.OW || W, ctx.OH || H), `fps=${FPS}`,
       'tpad=stop_mode=clone:stop_duration=3600', assFilter].join(',');
     const ss = videoInArgs(ch.track, ch.kbOff > 0 ? ch.kbOff / FPS : 0);   // 🖼 아래층으로 이어진 영상 — 끊긴 데서 잇는다 · 반복 영상이면 되풀이
     args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', ...ss, '-i', ch.file, '-frames:v', String(frames), '-vf', vf, ...common];
   } else {
-    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${FPS}`,
+    args = [...pre, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${ctx.OW || W}x${ctx.OH || H}:r=${FPS}`,
       '-frames:v', String(frames), '-vf', assFilter, ...common];
   }
   try { await ff(args, { cwd: tmpDir, signal: ctx.children, low: true }); }
@@ -1010,8 +1052,84 @@ async function concatAudio(inputs, out, tmpDir, ctx, depth = 0) {
 // ── 폰트 ───────────────────────────────────────────────────────────────────
 const FONT_FILE = path.join(__dirname, '..', 'assets', 'fonts', 'Pretendard-Bold.ttf');
 
+// ── 📺 2.0 주문 출력 · ⑰ 그림 확대 (v1.0.22) ──────────────────────────────
+// 확대 모델 — Real-ESRGAN ncnn-vulkan 의 realesr-animevideov3(그림체용 작은 모델 · 영상 클립 업스케일에 이미 쓰던 것)
+//   권리: Real-ESRGAN(코드·모델) BSD-3-Clause · realesrgan-ncnn-vulkan MIT — docs/재료권리_정리_2026-11-04.md
+const UPSCALE_MODEL = 'realesr-animevideov3';
+/** 출력 규격 검사 — 오류 글(틀림) 또는 ''(괜찮음 · 없으면 1920×1080 그대로). 16:9 · 짝수 · 1280~2560(4K 는 받지 않는다) · 프레임은 30 만 */
+function checkOutput(out, fps) {
+  if (fps != null && +fps !== FPS) return `프레임 ${fps} 은 굽지 못합니다(${FPS} 만)`;
+  if (!out) return '';
+  const w = +out.width, h = +out.height;
+  if (!(Number.isInteger(w) && Number.isInteger(h))) return `출력 크기가 숫자가 아닙니다(${out.width}×${out.height})`;
+  if (w % 2 || h % 2) return `출력 크기는 짝수여야 합니다(${w}×${h})`;
+  if (w * 9 !== h * 16) return `출력 크기는 16:9 여야 합니다(${w}×${h})`;
+  if (w < 1280 || w > 2560) return `출력 가로 ${w} 는 받지 않습니다(1280~2560)`;
+  return '';
+}
+/**
+ * ⑰ 조각들이 쓸 그림 가운데 「출력 × 최대 확대 배율」보다 작은 것을 Real-ESRGAN 으로 키운 사본을 만든다 → ctx.up(원본 경로 → 사본).
+ *   대상 = 한 장을 캔버스에 덮는 정지 그림 구간(디졸브 양쪽 포함) — 겹친 그림·영상은 그대로.
+ *   사본 이름 = 내용 해시(.vrew 안 파일 이름은 매번 다르다) → 같은 그림이면 다음 렌더(1080 ↔ 1440 주문)도 다시 쓴다.
+ *   실패한 그림은 원본으로 굽고 셈에 남긴다(fail-open · 화질만의 일). 확대 전마다 up.beforeEach(원격 GPU 양보)를 기다린다.
+ */
+async function prepareUpscale(chunks, ctx, up, { OW, OH, log, isAborted }) {
+  const t0 = Date.now();
+  const crypto = require('crypto');
+  const UP = require('./upscaler');
+  const VB = require('../vrew/vrew-builder');
+  const model = up.model || UPSCALE_MODEL;
+  const rep = { model, images: 0, upscaled: 0, reused: 0, enough: 0, failed: 0, scales: {}, sec: 0, dir: up.dir, errors: [] };
+  const want = new Map();   // 파일 → { zoom, contain }
+  const add = (file, tr) => {
+    if (!file || !/\.(png|jpe?g|webp)$/i.test(file)) return;
+    const w = want.get(file) || { zoom: 1, contain: false };
+    w.zoom = Math.max(w.zoom, kbZoomMax(tr)); w.contain = w.contain || isContain(tr || {});
+    want.set(file, w);
+  };
+  for (const c of chunks) {
+    if (c.type === 'dissolve') { add(c.a && c.a.file, c.a && c.a.track); add(c.b && c.b.file, c.b && c.b.track); continue; }
+    const L = (c.layers || []).filter((l) => l.file);
+    if (L.length > 1 || (L.length === 1 && !isStandardBox(L[0].track))) continue;
+    if (c.type === 'image' && c.file) add(c.file, c.track);
+  }
+  ctx.up = new Map();
+  fs.mkdirSync(up.dir, { recursive: true });
+  for (const [file, w] of want) {
+    if (isAborted()) return { ...rep, cancelled: true };
+    rep.images++;
+    const z = VB.readImageSize(file) || {};
+    const nd = upscaleNeed(z.w, z.h, w.zoom, OW, OH, w.contain);
+    if (!nd.scale) { rep.enough++; continue; }
+    const hash = crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex').slice(0, 16);
+    const out = path.join(up.dir, `${hash}_${model}_x${nd.scale}.png`);
+    let ok = false;
+    if (fs.existsSync(out) && fs.statSync(out).size > 1000) {   // 다시 쓰기 전에도 원본과 같은 모습인지(검은·깨진 사본이 남아 있으면 지우고 새로)
+      const d = await UP.lookDiff(file, out);
+      if (d != null && d < 12) { ok = true; rep.reused++; } else { try { fs.rmSync(out, { force: true }); } catch (_) {} log(`   ⚠ 확대 사본이 원본과 달라(차이 ${d == null ? '?' : d.toFixed(1)}) 다시 만듭니다 — ${path.basename(out)}`); }
+    }
+    if (!ok) {
+      if (typeof up.beforeEach === 'function') { try { await up.beforeEach(); } catch (_) {} }
+      if (isAborted()) return { ...rep, cancelled: true };
+      const r = await UP.upscaleImage(file, out, { scale: nd.scale, model, logger: log, abortSignal: isAborted });
+      if (r.aborted) return { ...rep, cancelled: true };
+      if (r.ok) { ok = true; rep.upscaled++; } else { rep.failed++; if (rep.errors.length < 3) rep.errors.push(r.error); }
+    }
+    if (!ok) continue;
+    const bz = VB.readImageSize(out) || {};
+    if (!(bz.w > 0)) { rep.failed++; continue; }
+    ctx.up.set(file, { file: out, w: bz.w, h: bz.h, need: nd.need });
+    rep.scales['x' + nd.scale] = (rep.scales['x' + nd.scale] || 0) + 1;
+  }
+  rep.sec = +((Date.now() - t0) / 1000).toFixed(1);
+  log(`   🖼 그림 확대(${model}) — 그림 ${rep.images}장 · 새로 ${rep.upscaled} · 다시 씀 ${rep.reused} · 이미 큼 ${rep.enough}${rep.failed ? ` · ⚠ 실패 ${rep.failed}(원본으로 굽습니다: ${rep.errors.join(' / ')})` : ''} · ${rep.sec}초`);
+  return rep;
+}
+
 // ── 메인 ───────────────────────────────────────────────────────────────────
 /**
+ * @param opts.output     📺 { width, height } 출력 크기(2.0 주문 ⑯ · 없으면 1920×1080) · opts.fps 는 30 만
+ * @param opts.upscale    🖼 { dir, model?, beforeEach? } 그림 확대 사본(2.0 주문 ⑰ · 없으면 하지 않음)
  * @param opts.vrewPath   입력 .vrew
  * @param opts.outPath    출력 MP4
  * @param opts.log        (msg) => void
@@ -1030,6 +1148,11 @@ async function renderVrewToMp4(opts = {}) {
   const lap = (k, t) => { timings[k] = +((Date.now() - t) / 1000).toFixed(1); };
   let tmpDir = null;
   const ctx = { children: [] };
+  // 📺 출력 크기(v1.0.22 · 2.0 주문 ⑯) — 없으면 1920×1080(예전 그대로). 자막·카드(ASS)는 1920×1080 좌표 그대로 두고 libass 가 화면 크기로 늘린다(ScaledBorderAndShadow).
+  const oe = checkOutput(opts.output, opts.fps);
+  if (oe) return { ok: false, error: oe };
+  if (opts.output) { ctx.OW = +opts.output.width; ctx.OH = +opts.output.height; }
+  let upReport = null;
   // ⏹ 중단 = 돌던 ffmpeg 도 바로 끈다(v1.0.18 · 2.0 무인 제작 ③ 「1분 안 GPU 비움」) — 예전엔 새 조각만 안 시작하고 돌던 조각은 끝까지 갔다
   const abortWatch = setInterval(() => {
     if (!isAborted()) return;
@@ -1089,6 +1212,13 @@ async function renderVrewToMp4(opts = {}) {
     if (perTrans && !(dSec > 0)) { chunks = planDissolves(chunks, 0, perTrans); log(`   🎬 화면 전환 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤로 겹쳐 섞음 · 길이·음성·자막은 그대로)`); }
     if (dSec > 0) { chunks = planDissolves(chunks, dSec, perTrans); log(`   🌫 디졸브 ${dSec}초 — 그림이 바뀌는 자리 ${chunks.dissolves || 0}곳(경계 앞뒤 ${dSec / 2}초씩 섞음 · 길이·음성·자막은 그대로)`); }
     const totalFrames = chunks.length ? chunks[chunks.length - 1].f1 : 0;
+    // 🖼 ⑰ 그림 확대(2.0 주문만 · opts.upscale) — 조각을 그리기 전에 확대 사본을 만든다(원본 불변 · 사본은 upscale.dir 에 남는다)
+    if (opts.upscale && opts.upscale.dir) {
+      st.phase = 'upscale'; emit();
+      const ur = await prepareUpscale(chunks, ctx, opts.upscale, { OW: ctx.OW || W, OH: ctx.OH || H, log, isAborted });
+      upReport = ur;
+      if (ur.cancelled) return { ok: false, cancelled: true, error: '중단됨' };
+    }
     const enc = await pickEncoder(tmpDir, log);
     Object.assign(st.video, { total: chunks.length, framesTotal: totalFrames, startedAt: Date.now() });
     st.encoder = enc; st.phase = 'video'; st.audio = tl.audio.some((a) => a.file) ? 'run' : 'none'; emit();
@@ -1218,7 +1348,8 @@ async function renderVrewToMp4(opts = {}) {
     const renderSec = (Date.now() - T0) / 1000;
     const durationSec = totalFrames / FPS;
     Object.assign(st, { phase: 'done', endedAt: Date.now(), speed: durationSec / renderSec }); emit();
-    return { ok: true, output: opts.outPath, durationSec, renderSec, timings, speed: durationSec / renderSec, encoder: enc };
+    return { ok: true, output: opts.outPath, durationSec, renderSec, timings, speed: durationSec / renderSec, encoder: enc,
+      size: { width: ctx.OW || W, height: ctx.OH || H, fps: FPS, bitrate }, transitions: chunks.dissolves || 0, upscale: upReport };
   } catch (e) {
     if (isAborted()) return { ok: false, cancelled: true, error: '중단됨' };
     return { ok: false, error: e && e.message ? e.message : String(e) };
@@ -1235,4 +1366,5 @@ module.exports = {
   // 테스트·도구용
   buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, renderCardStill, narrowCuesForPanels,
   FONT_FILE, FPS, W, H,
+  checkOutput, upscaleNeed, kbZoomMax, coverPlan, outScale, prepareUpscale, UPSCALE_MODEL,   // 📺 2.0 주문 ⑯ ⑰
 };

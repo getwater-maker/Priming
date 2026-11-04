@@ -164,6 +164,56 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g,
     }
     const bad = await R.renderVrewToMp4({ vrewPath: path.join(tmp, 'none.vrew'), outPath: mp4 });
     ok(bad.ok === false && /없습니다/.test(bad.error), '없는 .vrew → 던지지 않고 {ok:false}');
+
+    // 📺 2.0 주문 ⑯ ⑰(v1.0.22) — 출력 크기·비트레이트를 받고, 작은 그림은 확대 사본에서 잘라 움직인다. 옵션이 없으면 위 [8] 과 같다(1920×1080).
+    console.log('[8b] 📺 주문 규격 — 2560×1440 · 16M · 그림 확대');
+    ok(R.checkOutput({ width: 2560, height: 1440 }) === '' && R.checkOutput(null) === '' && /16:9/.test(R.checkOutput({ width: 1920, height: 1088 })) && /1280~2560/.test(R.checkOutput({ width: 3840, height: 2160 })) && /30/.test(R.checkOutput(null, 60)), '출력 검사 — 16:9 · 가로 1280~2560 · 30fps 만');
+    const n1 = R.upscaleNeed(1344, 768, 1 / 0.82, 1920, 1080), n2 = R.upscaleNeed(1344, 768, 1 / 0.82, 2560, 1440), n3 = R.upscaleNeed(2688, 1536, 1 / 0.82, 1920, 1080), n4 = R.upscaleNeed(1920, 1080, 1, 1920, 1080);
+    ok(n1.scale === 2 && n2.scale === 3 && n3.scale === 0 && n4.scale === 0, `확대 배수 — 1080p ×${n1.scale} · 1440p ×${n2.scale} · 이미 큰 그림 ${n3.scale} · 움직임 없는 1920 그림 ${n4.scale}`);
+    ok(Math.abs(R.kbZoomMax({ kenburnsAnimationInfo: { from: { scale: 0.926 }, to: { scale: 0.82 } } }) - 1 / 0.82) < 1e-9 && R.kbZoomMax({}) === 1, '최대 확대 배율 = 1 / 보이는 비율의 최솟값');
+    const cpx = { up: new Map([['a.png', { file: 'b.png', w: 2688, h: 1536, need: 1 / 0.82 }]]) };
+    const cp = R.coverPlan('a.png', cpx);
+    ok(cp.file === 'b.png' && cp.cw === 2342 && cp.ch === 1318 && R.outScale('a.png', cpx) === ',scale=1920:1080:flags=lanczos,setsar=1' && R.outScale('z.png', {}) === '' && R.coverPlan('z.png', {}).cw === 1920, `큰 캔버스 ${cp.cw}×${cp.ch}(= 출력 × 1.22) → 끝에서 출력 크기 · 옵션 없으면 예전 그대로`);
+    ok(/-maxrate 16800k -bufsize 32000k/.test(R.encArgs('nvenc', '16000k').join(' ')), 'maxrate·bufsize 는 지금 비율(× 1.05 · × 2)');
+    const exe = require('../core/upscaler').realesrganExe();
+    const vt = path.join(tmp, 'tex.vrew');
+    makeVrew(vt, tmp, { tex: true });
+    const sharp = (file, w, h, t) => {   // 확대 끝(1.9초 — img1 이 1.22배) 오른쪽 아래 잔무늬(testsrc2 의 체크·잡음) 칸의 이웃 화소 차이 평균(선명할수록 크다)
+      const cw = 580, ch = 330;
+      const g = execFileSync(FF, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=${cw}:${ch}:1252:705`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { maxBuffer: 1 << 27 });
+      let s = 0, n = 0;
+      for (let y = 1; y < ch; y++) for (let x = 1; x < cw; x++) { s += Math.abs(g[y * cw + x] - g[y * cw + x - 1]) + Math.abs(g[y * cw + x] - g[(y - 1) * cw + x]); n += 2; }
+      return s / n;
+    };
+    const m0 = path.join(tmp, 'out', 'b0.mp4'), m1 = path.join(tmp, 'out', 'b1.mp4'), m2 = path.join(tmp, 'out', 'b2.mp4');
+    const r0 = await R.renderVrewToMp4({ vrewPath: vt, outPath: m0, par: 2, bitrate: '8000k' });
+    const r1 = await R.renderVrewToMp4({ vrewPath: vt, outPath: m1, par: 2, bitrate: '8000k', output: { width: 1920, height: 1080 }, upscale: exe ? { dir: path.join(tmp, 'up') } : null });
+    const r2 = await R.renderVrewToMp4({ vrewPath: vt, outPath: m2, par: 2, bitrate: '16000k', output: { width: 2560, height: 1440 }, fps: 30, upscale: exe ? { dir: path.join(tmp, 'up') } : null });
+    ok(r0.ok && r1.ok && r2.ok, `세 판 렌더 (${[r0, r1, r2].map((x) => x.ok ? x.renderSec.toFixed(1) + '초' : x.error).join(' · ')})`);
+    if (r2.ok) {
+      const pv = await require('../core/media-utils').probeVideo(m2);
+      ok(pv.width === 2560 && pv.height === 1440 && Math.round(pv.fps) === 30 && r2.size.width === 2560 && /DAR 16:9/.test(probe(m2)) && /DAR 16:9/.test(probe(m1)), `1440p 실측 ${pv.width}×${pv.height} · ${pv.fps}fps · 영상 ${pv.videoKbps}kb/s`);
+      const b = execFileSync(FF, ['-v', 'error', '-ss', '0.5', '-i', m2, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 28 });
+      let lo = 0, hi = 0; for (let y = 0; y < 1440; y++) for (let x = 0; x < 2560; x += 2) { const i = (y * 2560 + x) * 3; if (b[i] > 245 && b[i + 1] > 245 && b[i + 2] > 245) { if (y >= 933 && y < 1440) lo++; else if (y < 600) hi++; } }
+      ok(lo > 300, `자막이 1440 화면의 아래쪽에 늘어나 구워졌다 (흰 화소 ${lo})`);
+    }
+    if (exe && r1.ok && r2.ok) {
+      ok(r1.upscale && r1.upscale.images === 2 && r1.upscale.upscaled + r1.upscale.reused === 2 && r1.upscale.scales.x2 === 2 && r1.upscale.model === 'realesr-animevideov3', `확대 셈 — 그림 ${r1.upscale.images} · 새로 ${r1.upscale.upscaled} · ×2 ${r1.upscale.scales.x2}`);
+      ok(r2.upscale.scales.x3 === 2 && fs.readdirSync(path.join(tmp, 'up')).filter((f) => /_x[23]\.png$/.test(f)).length === 4, '1440p 는 ×3 사본 · 사본은 확대 폴더에 남는다(원본은 .vrew 안 그대로)');
+      const s0 = sharp(m0, 1920, 1080, 1.9), s1 = sharp(m1, 1920, 1080, 1.9);
+      ok(s1 > s0 * 1.3, `A/B — 확대 끝 선명도: 확대 사본 ${s1.toFixed(2)} > 예전(1920 캔버스) ${s0.toFixed(2)}`);
+      // 🔴 RGBA 그림(로컬 Qwen 의 PNG) — Real-ESRGAN 이 알파 0(투명)을 내 MP4 가 검게 구워졌다(v1.0.22 실물 주문) → 입력을 rgb24 로 바꿔 넣는다 · 원본과 다른 사본은 버린다
+      const UPm = require('../core/upscaler');
+      const rgba = path.join(tmp, 'rgba.png'), blk = path.join(tmp, 'blk.png');
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=672x384', '-frames:v', '1', '-pix_fmt', 'rgba', rgba]);
+      execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1344x768', '-frames:v', '1', blk]);
+      const ru = await UPm.upscaleImage(rgba, path.join(tmp, 'up', 'rgba_x2.png'), { scale: 2 });
+      ok(ru.ok && ru.diff < 12 && (await UPm.lookDiff(rgba, path.join(tmp, 'up', 'rgba_x2.png'))) < 12, `RGBA 그림도 제 모습으로 확대된다(원본과 차이 ${ru.diff != null ? ru.diff.toFixed(1) : '?'})`);
+      ok((await UPm.lookDiff(rgba, blk)) > 40, `판정력 — 검은 사본은 원본과 크게 다르다(${(await UPm.lookDiff(rgba, blk)).toFixed(1)} → 버림)`);
+      const r3 = await R.renderVrewToMp4({ vrewPath: vt, outPath: m1, par: 2, output: { width: 1920, height: 1080 }, upscale: { dir: path.join(tmp, 'up') } });
+      ok(r3.ok && r3.upscale.reused === 2 && r3.upscale.upscaled === 0, '같은 그림은 다음 렌더에서 다시 확대하지 않는다(내용 해시)');
+    } else console.log('  ⓘ Real-ESRGAN 이 없어 확대 판정은 건너뜀');
+    ok(r0.ok && !r0.upscale && r0.size.width === 1920 && r0.size.bitrate === '8000k', '옵션 없는 렌더 = 확대 없음 · 1920×1080');
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 
   console.log('[9] 배선 원문 대조');
@@ -220,12 +270,12 @@ function synthProject() {
     ] },
   };
 }
-function makeVrew(vrewPath, tmp) {
+function makeVrew(vrewPath, tmp, opt = {}) {   // opt.tex = 무늬 그림(선명도 비교용)
   const zip = new AdmZip();
   zip.addFile('project.json', Buffer.from(JSON.stringify(synthProject())));
   const gen = (name, args) => { const p = path.join(tmp, name); execFileSync(FF, ['-y', '-loglevel', 'error', ...args, p]); zip.addFile('media/' + name, fs.readFileSync(p)); };
-  gen('img1.png', ['-f', 'lavfi', '-i', 'color=c=0x3060a0:s=1344x768', '-frames:v', '1']);
-  gen('img2.png', ['-f', 'lavfi', '-i', 'color=c=0x806030:s=1344x768', '-frames:v', '1']);
+  gen('img1.png', ['-f', 'lavfi', '-i', opt.tex ? 'testsrc2=s=1344x768' : 'color=c=0x3060a0:s=1344x768', '-frames:v', '1', ...(opt.tex ? ['-pix_fmt', 'rgba'] : [])]);   // 무늬 판 = 로컬 Qwen 처럼 RGBA PNG
+  gen('img2.png', ['-f', 'lavfi', '-i', opt.tex ? 'mandelbrot=s=1344x768' : 'color=c=0x806030:s=1344x768', '-frames:v', '1']);
   // 🔑 실제 길이를 선언 길이와 **다르게** 둔다(2.1초 vs 2.0 · 0.8초 vs 1.0) — 길이 맞춤이 일하는지 본다
   gen('tts1.mp3', ['-f', 'lavfi', '-i', 'sine=f=440:d=2.1', '-ac', '1', '-ar', '24000']);
   gen('tts2.mp3', ['-f', 'lavfi', '-i', 'sine=f=660:d=0.8', '-ac', '1', '-ar', '24000']);

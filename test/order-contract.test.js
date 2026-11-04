@@ -148,6 +148,41 @@ console.log('[6] MP4 렌더 즉시 중단');
   ok(i1 > 0 && i2 > i1, '끈 ffmpeg 의 오류보다 중단이 먼저(결과 = 중단됨)');
 }
 
+console.log('[7] 📺 덧붙임2 ⑯ 출력 규격 · ⑰ 그림 확대 · ㉔ 결과서 칸 (v1.0.22)');
+{
+  const o1 = OC.parseOutput({ width: 1920, height: 1080, fps: 30, bitrate: '8M' }), o2 = OC.parseOutput({ width: 2560, height: 1440, fps: 30, bitrate: 16 }), o3 = OC.parseOutput({ width: 1920, height: 1080, fps: 30, bitrate: '5000k' });
+  ok(o1.output.bitrate === '8000k' && o1.output.kbps === 8000 && o2.output.bitrate === '16000k' && o3.output.kbps === 5000, '비트레이트 꼴 — "8M" · 16(Mbps 숫자) · "5000k"');
+  ok(OC.parseOutput(null).output === null && !OC.parseOutput(null).error, '칸이 없으면 렌더 기본(오류 아님)');
+  ok(/bitrate/.test(OC.parseOutput({ width: 1920, height: 1080, fps: 30 }).error), '일부만 오면 거절(빈 칸을 기본값으로 메우지 않는다)');
+  ok(/1280~2560/.test(OC.parseOutput({ width: 3840, height: 2160, fps: 30, bitrate: '8M' }).error) && /16:9/.test(OC.parseOutput({ width: 1920, height: 1200, fps: 30, bitrate: '8M' }).error), '4K · 16:9 아님 = 거절');
+  ok(/30/.test(OC.parseOutput({ width: 1920, height: 1080, fps: 60, bitrate: '8M' }).error) && /비트레이트/.test(OC.parseOutput({ width: 1920, height: 1080, fps: 30, bitrate: '8 Mbps' }).error) && /비트레이트/.test(OC.parseOutput({ width: 1920, height: 1080, fps: 30, bitrate: '80M' }).error), '프레임 30 만 · 비트레이트 꼴·범위(1~40M)');
+  const cfg = OC.loadConfig(path.join(tmp, 'cfg.json'));
+  const base = { script: 'roy-bible_1210.md', channelId: 'roy-bible', primingChannel: '05_로이의성경이야기', voice: 'v', style: 's', upload: { enabled: false } };
+  const a = OC.readOrder(W(path.join(cfg.ordersDir, 'tv_1210.json'), { ...base, output: { width: 2560, height: 1440, fps: 30, bitrate: '16M' }, upscale: true }));
+  ok(a.ok && a.order.output.width === 2560 && a.order.output.bitrate === '16000k' && a.order.upscale === true, '주문서 output · upscale 받기');
+  const b = OC.readOrder(W(path.join(cfg.ordersDir, 'tv2_1210.json'), base));
+  ok(b.ok && b.order.output === null && b.order.upscale === false, '두 칸이 없는 주문 = 지금과 같다(기본 렌더 · 확대 끔)');
+  ok(OC.readOrder(W(path.join(cfg.ordersDir, 'tv3_1210.json'), { ...base, upscale: { on: false } })).order.upscale === false, 'upscale 은 {on} 꼴도 받는다');
+  const c = OC.readOrder(W(path.join(cfg.ordersDir, 'tv4_1210.json'), { ...base, upscale: '켬', output: { width: 1920, height: 1080, fps: 30, bitrate: 'x' } }));
+  ok(!c.ok && c.errors.length === 2, `틀린 upscale · output = 거절 (${c.errors.length}건)`);
+  ok('thumbBgUp' in OC.blankResult(null).files, '결과서 files 에 썸네일 확대본 칸');
+  // main — 주문에서만 렌더 값을 넘기고(회원 경로 불변) · 규격이 바뀌면 다시 굽고 · ㉔ 칸을 적는다
+  const m = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const blk = m.slice(m.indexOf('async function runOrderHeadless'), m.indexOf('// 미리보기 오디오 — 파일을 base64'));
+  ok(/_orderRender = \{ output: order\.output, upscale: order\.upscale, upscaleDir: path\.join\(it\.outRoot, '_업스케일'\)/.test(blk) && /finally \{\n    _orderStageHook = null;\n    _orderRender = null;/.test(blk), '렌더 규격은 runOrderHeadless 만 켜고 끝나면 지운다');
+  ok((m.match(/_orderRender = \{/g) || []).length === 1, '규격을 켜는 곳은 한 곳');
+  const ru = m.slice(m.indexOf('async function renderUploadMp4'), m.indexOf('// ── ⬆ 유튜브 비공개 업로드'));
+  ok(/const orderOpts = OR \?/.test(ru) && /VR\.renderVrewToMp4\(\{ \.\.\.orderOpts, vrewPath/.test(ru), 'renderUploadMp4 — 주문일 때만 output·bitrate·upscale 를 넘긴다(아니면 빈 객체)');
+  ok(/\.\.\.\(_orderRender \? \{ orderRender: _orderRenderKey\(_orderRender\) \} : \{\}\)/.test(m) && /if \(!_orderRender && await askMp4Exists/.test(m), '규격이 지문에 들어가 바뀌면 다시 굽는다 · 주문은 같은 이름 MP4 를 묻지 않고 다시 굽는다(회원 지문·질문은 그대로)');
+  ok(/if \(!_orderRender && await BF\.adoptIfFresh\(/.test(m), '주문은 기록 없는 기존 MP4 를 채택하지 않는다(어느 규격인지 모른다)');
+  const lg = m.slice(m.indexOf('async function _orderMakeLog'), m.indexOf('async function runOrderHeadless'));
+  const keys = ['outWidth', 'outHeight', 'outFps', 'videoKbps', 'fileBytes', 'uploadSec', 'upscaleModel', 'images', 'shots', 'shotAvgSec', 'shotMaxSec', 'imageMaxSec', 'transitions', 'cards', 'maps', 'timelines', 'depthImages', 'fxLayers', 'videoClips', 'videoEngine', 'srt', 'externalFiles'];
+  const miss = keys.filter((k) => !new RegExp('\\b' + k + ':').test(lg));
+  ok(!miss.length, `㉔ 결과서 log 칸 ${keys.length}개${miss.length ? ' — 빠짐: ' + miss.join(',') : ''}`);
+  ok(/probeVideo\(mp4\)/.test(lg) && /res\.log\.uploadSec = /.test(blk), '실측(ffmpeg 머리 정보) · 업로드 시간은 올린 뒤 적는다');
+  ok(/order\.upscale && res\.files\.thumbBg/.test(blk) && /_x2\.png/.test(blk), '⑰ 썸네일 배경도 같은 값(확대 켬 = 2배 사본을 곁에)');
+}
+
 setTimeout(() => {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
   console.log(`\n${pass} 통과 · ${fail} 실패`);
