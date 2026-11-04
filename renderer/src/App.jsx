@@ -884,6 +884,18 @@ export default function App() {
   useAutoCloseProg(mp4Prog, setMp4Prog);
   useAutoCloseProg(sttProg, setSttProg);
   useAutoCloseProg(ytProg, setYtProg);   // 📊 🎬 유튜브 MP4 굽기 진행 패널(main 의 mp4-progress)   // 📊 URL 받아 전사 진행 패널(main 의 urldl-progress)
+  // 🔑 유튜브 로그인(v1.0.23 · 관리자 전용) — 쿠키 값은 안 받고 상태만(main `yt-login-status`)
+  const [ytLogin, setYtLogin] = useState(null);
+  const [ytLoginMsg, setYtLoginMsg] = useState('');
+  const refreshYtLogin = useCallback(async () => { try { setYtLogin(await api.ytLoginStatus()); } catch (_) { setYtLogin(null); } }, []);
+  useEffect(() => { refreshYtLogin(); let off; try { off = api.onYtLoginChanged && api.onYtLoginChanged(refreshYtLogin); } catch (_) {} return () => { try { off && off(); } catch (_) {} }; }, [refreshYtLogin]);
+  async function ytLoginOpen() {
+    setYtLoginMsg('로그인 창이 열렸습니다 — 전용 구글 계정으로 로그인하세요');
+    try { const r = await api.ytLoginOpen(); setYtLoginMsg(r && r.ok ? '✓ 로그인이 저장됐습니다' : (r && r.canceled ? '' : '로그인 실패 — ' + ((r && r.error) || '알 수 없음'))); }
+    catch (e) { setYtLoginMsg('로그인 실패 — ' + e.message); }
+    refreshYtLogin();
+  }
+  async function ytLoginClear() { try { await api.ytLoginClear(); setYtLoginMsg('로그인을 해제했습니다'); } catch (_) {} refreshYtLogin(); }
   const [urlMode, setUrlMode] = useState('audio');       // 기본은 mp3(로이 확정) — 영상은 크고 STT 엔 불필요
   const [urlAudioFormat, setUrlAudioFormat] = useState('mp3');
   const [urlQuality, setUrlQuality] = useState('best');
@@ -1561,7 +1573,8 @@ export default function App() {
       if (!r || r.canceled) { setStatus('취소'); return; }
       if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
       const okN = (r.results || []).filter((x) => x.ok).length;
-      setStatus(`🔁 다시 받기 완료 (${okN}/${(r.results || []).length})`);
+      const failedR = (r.results || []).filter((x) => !x.ok && x.error);
+      setStatus(`🔁 다시 받기 완료 (${okN}/${(r.results || []).length})${failedR.length ? ` · ✗ ${String(failedR[0].error).slice(0, 90)}` : ''}`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
     finally { setUrlBusy(false); }
   }
@@ -1579,7 +1592,9 @@ export default function App() {
       if (!r.ok) { logline('오류: ' + (r.error || '알 수 없음')); setStatus('오류'); return; }
       const okN = (r.results || []).filter((x) => x.ok).length;
       const subN = (r.results || []).filter((x) => x.from === 'subtitle').length;
-      setStatus(`🔗 완료 (${okN}/${(r.results || []).length})${subN ? ` · 자막 ${subN}건은 STT 생략` : ''}`);
+      const failed = (r.results || []).filter((x) => !x.ok && x.error);
+      setStatus(`🔗 완료 (${okN}/${(r.results || []).length})${subN ? ` · 자막 ${subN}건은 STT 생략` : ''}${failed.length ? ` · ✗ ${String(failed[0].error).slice(0, 90)}` : ''}`);
+      if (failed.length) logline('✗ 받기 실패 사유: ' + String(failed[0].error));
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
     finally { setUrlBusy(false); }
   }
@@ -8840,6 +8855,14 @@ export default function App() {
                 {urlStt && <Hint>자막이 있어도 Whisper 로 전사합니다 — 자막보다 정확하지만 GPU 를 오래 씁니다.</Hint>}
               </div>
               <div className="dl-foot">
+                {/* 🔑 유튜브 로그인 — 줄을 늘리지 않으려 푸터 왼쪽에(두 탭 창 크기가 같아야 한다 · 관리자 전용) */}
+                {ytLogin && ytLogin.allowed && <span data-testid="dl-yt-login" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)' }}
+                  title="유튜브가 「로봇 확인」으로 막을 때 로그인한 계정으로 받으면 풀립니다. ⚠ 채널·애드센스와 관계없는 전용 구글 계정만 쓰세요(받기를 많이 하면 그 계정이 제한될 수 있습니다). 비밀번호는 앱이 보지 않고, 쿠키는 이 PC 의 OS 암호화로만 보관됩니다.">
+                  🔑 유튜브 로그인 <b style={{ color: ytLogin.connected ? 'var(--ok)' : undefined }}>{ytLogin.connected ? '연결됨' : ytLogin.expired ? '만료됨' : '안 함'}</b>
+                  <button className="ghost" disabled={urlBusy} data-testid="dl-yt-login-open" onClick={ytLoginOpen}>{ytLogin.connected ? '다시 로그인' : '로그인'}</button>
+                  {ytLogin.connected && <button className="ghost" disabled={urlBusy} data-testid="dl-yt-login-clear" onClick={ytLoginClear}>해제</button>}
+                  {ytLoginMsg && <span role="status">{ytLoginMsg}</span>}
+                </span>}
                 <span style={{ flex: 1 }} />
                 <button className="ghost" disabled={urlBusy} data-testid="dl-copy-subs" onClick={copyUrlSubtitles} title="영상 한 개의 자막을 시간 정보 없이 복사합니다. 기본은 원본 언어이며 자막 저장 옵션에서 언어·트랙을 선택할 수 있습니다.">📋 자막 복사</button>
                 <button disabled={urlBusy} data-testid="dl-run" onClick={runUrlDl}>{(urlChannelAll ? '채널 전체 ' : urlPlaylistAll ? '재생목록 전체 ' : '') + (urlMode === 'subtitles' ? '자막 받기' : urlStt ? '받아서 전사' : '받기')}</button>

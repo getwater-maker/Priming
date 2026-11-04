@@ -110,11 +110,15 @@ export default function UrlProgress({ prog, onAbort, onClose, onRetry, embedded 
       )}
 
       {prog.fails && prog.fails.length > 0 && (
-        <details style={{ marginTop: 6, fontSize: 12 }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--danger)' }}>실패 목록 ({prog.fails.length})</summary>
-          <div style={{ maxHeight: 120, overflowY: 'auto', marginTop: 4 }}>
+        // 🔎 실패 사유는 접어 두지 않는다(v1.0.23 · 로이 「단순히 실패라고만 표시하지 말고」) — 영상마다 왜 못 받았는지 바로 보인다
+        <details open data-testid="urldl-fails" style={{ marginTop: 6, fontSize: 12 }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--danger)' }}>못 받은 영상 {prog.fails.length}건 — 사유</summary>
+          <div style={{ maxHeight: 160, overflowY: 'auto', marginTop: 4 }}>
             {prog.fails.map((f, k) => (
-              <div key={k} style={{ marginBottom: 3 }}>{f.idx ? `[${f.idx}] ` : ''}{f.title} — {f.error}</div>
+              <div key={k} style={{ marginBottom: 6, wordBreak: 'break-word' }}>
+                <div style={{ color: '#999' }}>{f.idx ? `[${f.idx}] ` : ''}{f.title || '(제목 확인 전)'}</div>
+                <div style={{ color: 'var(--danger)' }}>✗ {f.error || '사유를 알 수 없습니다 — 로그 파일(📁 파일)을 확인하세요'}</div>
+              </div>
             ))}
           </div>
         </details>

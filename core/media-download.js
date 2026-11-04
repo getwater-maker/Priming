@@ -230,9 +230,18 @@ async function jsRuntimeArgs(tool) {
 // 🔤 `--encoding utf-8` = 한글 파일 이름·오류를 UTF-8 로(v0.9.115) — yt-dlp 2026.10.23 부터 PYTHONIOENCODING 을 무시하고
 //   CP949 로 내보내 `--print` 파일 이름이 깨졌다 → 받은 mp3 를 못 찾고 「결과 파일을 찾지 못했습니다」(2026-10-24 실측)
 const YT_ENC_ARGS = ['--encoding', 'utf-8'];
+// 🔑 유튜브 로그인 쿠키(v1.0.23 · 관리자 전용 · `core/yt-cookies`) — yt-dlp 를 부르는 **유일한 문**(_spawnYt)에서 붙인다.
+//   main 이 `setCookieProvider(() => ({ file, release }) | null)` 로 건다. 없으면(회원·로그인 안 함) 예전과 같다.
+//   cookies.txt 에는 유튜브·구글 도메인 쿠키만 있어 다른 사이트(비메오 등)에는 아무것도 가지 않는다.
+let _cookieProvider = null;
+function setCookieProvider(fn) { _cookieProvider = typeof fn === 'function' ? fn : null; }
 async function _spawnYt(tool, args, opts = {}) {
   const extra = await jsRuntimeArgs(tool);
-  return _spawnYtRaw(tool, [...YT_ENC_ARGS, ...extra, ...args], opts);
+  let ck = null;
+  try { ck = _cookieProvider ? _cookieProvider() : null; } catch (_) { ck = null; }
+  try {
+    return await _spawnYtRaw(tool, [...YT_ENC_ARGS, ...extra, ...(ck && ck.file ? ['--cookies', ck.file] : []), ...args], opts);
+  } finally { if (ck && ck.release) { try { ck.release(); } catch (_) {} } }
 }
 function _spawnYtRaw(tool, args, { onLine, abortSignal, timeoutMs = 30 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -506,8 +515,10 @@ function altUrl(url, stderr) {
 function _explain(stderr) {
   const s = String(stderr || '');
   // ⚠ 「낡은 yt-dlp」로 단정하지 않는다(2026-10-16 — 최신판에서도 유튜브의 일시 차단으로 403 이 났다 · 낡았는지는 버전 줄 「N일 전 판」이 따로 알린다)
+  if (/cookies are no longer valid|account cookies.*(invalid|rotated)|Sign in again/i.test(s))
+    return '저장된 유튜브 로그인이 만료됐습니다 — 받기 창의 「🔑 유튜브 로그인」에서 다시 로그인하세요.';
   if (/confirm you.re not a bot/i.test(s))
-    return '유튜브가 이 PC 의 요청이 많다며 「로봇이 아닌지 확인」을 요구합니다(일시 차단) — 몇 시간 쉬었다 다시 받으세요. 로그인·쿠키로 우회하지 않습니다.';
+    return '유튜브가 이 PC 를 로봇으로 의심해 「로봇이 아닌지 확인」을 요구합니다(일시 차단 · 로그인 없이 받는 요청이 몰린 경우) — 받기 창의 「🔑 유튜브 로그인」(전용 계정)으로 연결하면 풀립니다. 몇 시간 쉬었다 다시 받아도 됩니다.';
   if (/HTTP Error 429|Too Many Requests/i.test(s))
     return '유튜브가 요청이 많다며 잠시 막았습니다(429) — 기다렸다 다시 해도 막혀 건너뜁니다. 몇 분 뒤 다시 받아 보세요.';
   if (/HTTP Error 403|Forbidden/i.test(s))
@@ -527,7 +538,10 @@ function _explain(stderr) {
   if (/Unable to download webpage|getaddrinfo|Temporary failure/i.test(s))
     return '네트워크에 연결하지 못했습니다.';
   const line = s.split('\n').map((x) => x.trim()).filter((x) => /^ERROR/i.test(x)).pop();
-  return line ? line.replace(/^ERROR:\s*/i, '') : '';
+  if (line) return line.replace(/^ERROR:\s*/i, '');
+  // 사유를 못 가려도 「실패」 한 단어로 끝내지 않는다 — 마지막 출력 줄을 그대로 보여 준다(v1.0.23)
+  const last = s.split('\n').map((x) => x.trim()).filter(Boolean).pop();
+  return last ? last.slice(0, 200) : '';
 }
 
 /**
@@ -744,5 +758,5 @@ module.exports = {
   probe, probeSmart, download, fetchSubtitleText, listChannelVideos, channelUrlOfVideo,
   normalizeChannelUrl, channelEntryUrl, safeFolderName,
   altUrl, needsVimeoPlayer, VIMEO_ID_RE,
-  _explain, isBlocked, PACE_ARGS, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,
+  setCookieProvider, _explain, isBlocked, PACE_ARGS, jsRuntimeArgs, buildDownloadArgs, vttToSrt, exportSubtitles, normalizePlaylistUrl, selectSubtitleLanguage,
 };
