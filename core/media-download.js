@@ -646,6 +646,15 @@ async function download(url, o = {}) {
     throw err;
   }
 
+  // 🧹 성공했으면 이 영상의 받다 만 조각(`<이름>.f399.mp4.part`·`.ytdl`)은 쓸모없다 — 지운다(다시 받기 재시도가 남긴 것).
+  //   이름을 알면 그 영상 것만, 모르면 이번에 새로 생긴 것만(다른 영상의 이어받기 조각을 건드리지 않는다)
+  const _stem0 = resolvedBase ? path.basename(resolvedBase, path.extname(resolvedBase)) : '';
+  for (const f of fs.readdirSync(outDir)) {
+    if (!/\.(part|ytdl)$/i.test(f)) continue;
+    if (_stem0 ? !f.startsWith(_stem0 + '.') : before.has(f)) continue;
+    try { fs.rmSync(path.join(outDir, f), { force: true }); } catch {}
+  }
+
   // 새로 생긴 파일만 집는다(같은 폴더에 예전 파일이 있어도 헷갈리지 않게)
   const after = fs.readdirSync(outDir);
   const made = after.filter((f) => !before.has(f));

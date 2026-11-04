@@ -429,6 +429,21 @@ console.log('\n[6] 배선 — 한쪽만 고쳐져 갈라지지 않는지 원문�
   const js = fs.readFileSync(path.join(__dirname, '..', 'core', 'media-download.js'), 'utf8');
   ok(!fs.readFileSync(callLog, 'utf8').includes('--js-runtimes'), '버전 없는 도구(가짜)에는 --js-runtimes 를 붙이지 않는다');
   ok(/JS_RT_MIN_YTDLP = '2025\.11\.01'/.test(js) && /Number\(m\[1\]\) >= 22/.test(js), 'node 22 이상 · yt-dlp 2025.11 이후만');
+  // 🧹 성공한 받기는 받다 만 .part 조각을 남기지 않는다(2026-11-04 · 863MB MP4 옆에 81MB .f3xx.part 가 남은 사고)
+  console.log('\n[.part 정리] 성공하면 이번에 생긴 조각은 지우고, 남의 이어받기 조각은 둔다');
+  const pp = path.join(T, 'part');
+  fs.mkdirSync(pp, { recursive: true });
+  fs.writeFileSync(path.join(pp, 'Other.f137.mp4.part'), 'resume-me');
+  fs.writeFileSync(fake, [
+    "const fs = require('fs'); const a = process.argv.slice(2);",
+    "const o = a[a.indexOf('-o') + 1].replace('%(title)s', 'T').replace('%(ext)s', 'mp4');",
+    "fs.writeFileSync(o, 'video'); fs.writeFileSync(o.replace(/\\.mp4$/, '.f399.mp4.part'), 'junk');",
+    'process.exit(0);',
+  ].join('\n'));
+  const rp = await MD.download('https://youtu.be/pt', { tool, outDir: pp, mode: 'video', subs: false });
+  ok(rp.video && fs.existsSync(rp.video), '.part: 영상은 그대로 받았다');
+  ok(!fs.readdirSync(pp).some((f) => /^T\.f399\.mp4\.part$/.test(f)), '.part: 이번에 생긴 조각은 지웠다');
+  ok(fs.existsSync(path.join(pp, 'Other.f137.mp4.part')), '판정력: 이번 받기가 만들지 않은 .part 는 건드리지 않는다');
   try { fs.rmSync(T, { recursive: true, force: true }); } catch (_) {}
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패\n`);
   process.exit(fail ? 1 : 0);
