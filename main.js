@@ -6155,6 +6155,16 @@ ipcMain.handle('list-thumbs', async () => {
   if (!files.length) files = await TF.findThumbs(root, '', 3, true);
   return { ok: true, key, root, files, msg: files.length ? '' : '선택한 폴더에 이미지가 없습니다 (PNG · JPG · WebP)' };
 });
+// 👤 캐릭터셋 보기(2.0 덧붙임4 ㊺ · v1.0.25) — 로그 상자 👤 탭 + ① 칸 아래 얼굴 띠. **읽기만**(core/char-sheets) · 관리자만
+ipcMain.handle('list-char-sheets', async () => {
+  if (!isOwner()) return { ok: false, cards: [], byGroup: {}, msg: '' };
+  const sp = S.scriptPath;
+  if (!sp || !S.parsed) return { ok: false, cards: [], byGroup: {}, msg: '대본을 열면 인물 시트가 보입니다' };
+  let md = '';
+  try { md = await fs.promises.readFile(sp, 'utf8'); } catch (_) {}
+  try { return require('./core/char-sheets').listCharSheets({ outRoot: S.outRoot, mdText: md, projects: S.parsed.projects }); }
+  catch (e) { return { ok: false, cards: [], byGroup: {}, msg: '인물 시트 읽기 실패: ' + e.message }; }
+});
 // 🖼 썸네일 편집기(v0.9.102 · 로이 2026-10-23 · 설계 docs/썸네일-편집기-설계.md) — 읽기: 바탕·패키징 문구·사이드카 / 쓰기: 완성본 폴더(기존 파일은 _캔바원본\\ 으로 보존)뿐
 let _thumbEditOk = new Set();   // 이번에 편집기가 열어 준 그림 경로(렌더러가 임의 파일을 읽지 못하게)
 ipcMain.handle('thumb-edit-open', async () => {

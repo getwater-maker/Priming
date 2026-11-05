@@ -1292,7 +1292,7 @@ export default function App() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-    if (logTabRef.current === 'thumb' && logText) setLogUnseen(true);   // 🖼 탭을 보는 동안 새 로그 → 📜 탭에 점
+    if ((logTabRef.current === 'thumb' || logTabRef.current === 'chars') && logText) setLogUnseen(true);   // 🖼 탭을 보는 동안 새 로그 → 📜 탭에 점
   }, [logText]);
   // 🖼 로그 상자 탭(v0.9.24 · 로이 2026-10-15) — 기본 = 썸네일(패키징 썸네일 3안 · 2×2) · 📜 로그. #log 는 숨겨도 늘 그린다(E2E 가 글을 읽는다).
   const [logTab, setLogTab] = useState('thumb');
@@ -1317,6 +1317,11 @@ export default function App() {
   async function openThumbEditor() { try { const r = await api.thumbEditOpen(); if (!r || !r.ok) { uiAlert((r && r.msg) || '썸네일 편집기를 열 수 없습니다'); return; } setThumbEd(r); } catch (e) { uiAlert('썸네일 편집기: ' + e.message); } }
   async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
   useEffect(() => { if (logTab === 'thumb') loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
+  // 👤 캐릭터셋 보기(2.0 덧붙임4 ㊺ · v1.0.25 · 관리자만) — 로그 상자 👤 탭 + ① 칸 아래 얼굴 띠. 읽기만(main list-char-sheets)
+  const [charSheets, setCharSheets] = useState({ cards: [], byGroup: {}, msg: '' });
+  async function loadCharSheets() { try { const r = await api.listCharSheets(); setCharSheets(r && r.cards ? r : { cards: [], byGroup: {}, msg: (r && r.msg) || '' }); } catch (_) { setCharSheets({ cards: [], byGroup: {}, msg: '' }); } }
+  useEffect(() => { if (owner) loadCharSheets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [owner, dto && dto.fileTitle]);
+  useEffect(() => { if (logTab === 'chars') loadCharSheets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [logTab]);
   function pickLogTab(t) { setLogTab(t); if (t === 'log') { setLogUnseen(false); setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 0); } }
 
 
@@ -6246,6 +6251,22 @@ export default function App() {
     </div>
   </>);
   // 🧭 클립 정보 상자(① 아래) — 커서 줄의 그룹 · 그림/영상 · 자주 쓰는 그룹 단추
+  // 👤 얼굴 띠 — 지금 장면(그룹)에 나오는 인물의 시트를 작게(얼굴 시트 → 표정 9칸 → 인물 시트 순으로 하나) · 클릭 = 크게
+  const showChars = owner && !isBk && charSheets.cards.length > 0;
+  function charFace(card) { const fs_ = card.files || []; return fs_.find((f) => f.kind === 'face') || fs_.find((f) => f.kind === 'expr') || fs_[0] || null; }
+  function charStrip(shortsNum, groupNum) {
+    if (!showChars) return null;
+    const names = charSheets.byGroup[shortsNum + ':' + groupNum] || [];
+    if (!names.length) return null;
+    return (<span className="charstrip" data-testid="char-strip">
+      {names.map((nm) => {
+        const card = charSheets.cards.find((x) => x.name === nm); const f = card && charFace(card);
+        return f ? <img key={nm} src={media(f.path, String(f.mtimeMs || 0))} alt={nm} title={`👤 ${nm} — ${f.label} · 클릭: 크게 보기`}
+          onClick={() => setPreview({ kind: 'img', src: media(f.path, String(f.mtimeMs || 0)), caption: `${nm} · ${f.label}` })} />
+          : <span key={nm} className="charnone" title={`👤 ${nm} — 아직 시트 없음`}>👤{nm}</span>;
+      })}
+    </span>);
+  }
   const clipInfo = (() => {
     if (!wsOn) return null;
     const ci = cursorInfo();
@@ -6255,6 +6276,7 @@ export default function App() {
       <div className="clipinfo" data-testid="clipinfo">
         <b>G{c.num}</b> <span className="meta">{c.phase || ''} · 자막 {ci.l.n}/{ci.total}</span>
         <span className="meta clipfile" title={c.videoPath || c.imagePath || ''}>{c.videoPath ? '🎬 ' + base(c.videoPath) : c.imagePath ? '🖼 ' + base(c.imagePath) : '그림 없음'}</span>
+        {charStrip(ci.pr.shortsNum, c.num)}
         <span className="grow" />
         <button className="gprev" title="이 그룹 그림/영상 첨부" onClick={() => attachAsset(ci.pr.shortsNum, c.num)}>📎</button>
         <button className="gprev" data-testid="stock-open" title="무료 스톡(Pexels · Pixabay)에서 사진·영상을 찾아 이 그룹에 넣기" onClick={() => setStockDlg({ shortsNum: ci.pr.shortsNum, groupNum: c.num, intro: !!c.isIntro })}>🔎</button>
@@ -6266,7 +6288,7 @@ export default function App() {
   })();
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
   const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
-  const lt = isBk ? (logTab === 'ask' ? 'ask' : 'log') : logTab;   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그 · 💬 질문
+  const lt = isBk ? (logTab === 'ask' ? 'ask' : 'log') : (logTab === 'chars' && !showChars ? 'thumb' : logTab);   // 👤 탭은 인물 카드가 있을 때만(관리자)   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그 · 💬 질문
   const selectedStyle = styles.find((s) => s.id === styleId);
   const selectedSample = styleSamples[styleId];
   const selectedStyleName = selectedStyle?.name || (styleId === SCRIPT_STYLE_ID ? '대본스타일' : '스타일 없음');
@@ -6277,7 +6299,8 @@ export default function App() {
                 <button data-testid="logtab-log" className={lt === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
                 <button data-testid="logtab-ask" className={lt === 'ask' ? 'on' : ''} title="지금 상황(로그)을 보고 프로그램이 답해 줍니다" onClick={() => pickLogTab('ask')}>💬 질문</button>
               </span> : <span className="logtabs">
-                <button data-testid="logtab-thumb" className={logTab === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
+                <button data-testid="logtab-thumb" className={lt === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
+                {showChars && <button data-testid="logtab-chars" className={lt === 'chars' ? 'on' : ''} title="이 대본 인물 카드의 시트(얼굴 · 표정 · 전신) — 장면 그림과 같은 얼굴인지 눈으로 견주는 곳(읽기만)" onClick={() => pickLogTab('chars')}>👤 캐릭터셋</button>}
                 <button data-testid="logtab-log" className={logTab === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
                 <button data-testid="logtab-ask" className={logTab === 'ask' ? 'on' : ''} title="지금 상황(로그·큐)을 보고 프로그램이 답해 줍니다 — 예: 왜 1028 은 진행을 안 했어?" onClick={() => pickLogTab('ask')}>💬 질문</button>
               </span>}
@@ -6286,6 +6309,8 @@ export default function App() {
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={copyLog}>📋 복사</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setLogText('')}>지우기</button>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="로그 파일 폴더 열기 (하루 1개 · 7일 보관)" onClick={() => { try { api.openLogs(); } catch (_) {} }}>📁 파일</button>
+              </>) : lt === 'chars' ? (<>
+                <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="인물 시트 다시 읽기" onClick={loadCharSheets}>🔄</button>
               </>) : lt === 'ask' ? (<>
                 <button className="ghost" style={{ padding: '2px 8px', fontSize: 11 }} title="대화 지우기" onClick={() => setAskMsgs([])}>지우기</button>
               </>) : (<>
@@ -6316,6 +6341,32 @@ export default function App() {
                 })}
               </div>
             )}
+            {lt === 'chars' && (() => {
+              const ci = cursorInfo(); const cur = ci ? (charSheets.byGroup[ci.pr.shortsNum + ':' + ci.cut.num] || []) : [];
+              const list = [...charSheets.cards].sort((a, b) => (cur.includes(b.name) ? 1 : 0) - (cur.includes(a.name) ? 1 : 0));
+              return (
+                <div className="charset" data-testid="charset" title={charSheets.dir || ''}>
+                  {charSheets.msg && <div className="charmsg">{charSheets.msg}</div>}
+                  {list.map((card) => (
+                    <div key={card.name} className={'charcard' + (cur.includes(card.name) ? ' cur' : '')} data-testid="charcard">
+                      <div className="charhead"><b>👤 {card.name}</b>
+                        <span className="meta">{cur.includes(card.name) ? `이 장면(G${ci.cut.num}) · ` : ''}장면 {card.scenes.length}개{card.scenes.length ? ` (G${card.scenes.slice(0, 8).join('·G')}${card.scenes.length > 8 ? '…' : ''})` : ''}</span>
+                      </div>
+                      <div className="charimgs">
+                        {card.files.length ? card.files.map((f) => {
+                          const src = media(f.path, String(f.mtimeMs || 0));
+                          return (<div key={f.path} className="charimg" title={`${f.name} — ${f.engine || f.label} · 클릭: 크게 보기
+바꾸려면 같은 이름 그림으로 바꿔 넣으세요`}
+                            onClick={() => setPreview({ kind: 'img', src, caption: `${card.name} · ${f.label}` })}>
+                            <img src={src} alt="" /><span className="thumblbl">{f.label}{f.engine ? ' · ' + f.engine : ''}</span>
+                          </div>);
+                        }) : <div className="charimg empty" title={card.desc}>아직 시트 없음</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {lt === 'ask' && (
               <div className="askbox" data-testid="askbox">
                 <div className="askmsgs">

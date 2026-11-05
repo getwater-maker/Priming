@@ -184,7 +184,8 @@ contextBridge.exposeInMainWorld('api', {
   thumbEditSave: (a) => ipcRenderer.invoke('thumb-edit-save', a),
   thumbEditVersions: (a) => ipcRenderer.invoke('thumb-edit-versions', a),
   thumbEditRestore: (a) => ipcRenderer.invoke('thumb-edit-restore', a),
-  listThumbs: () => ipcRenderer.invoke('list-thumbs'),   // 🖼 로그 상자 썸네일 탭(v0.9.24)
+  listThumbs: () => ipcRenderer.invoke('list-thumbs'),
+  listCharSheets: () => ipcRenderer.invoke('list-char-sheets'),   // 👤 캐릭터셋 보기(v1.0.25 · 읽기만)   // 🖼 로그 상자 썸네일 탭(v0.9.24)
   // 🔐 회원(v0.9.25) — 토큰은 main 에만(화면엔 이메일·상태만)
   licenseState: () => ipcRenderer.invoke('license-state'),
   licenseRecheck: (opts) => ipcRenderer.invoke('license-recheck', opts || {}),
