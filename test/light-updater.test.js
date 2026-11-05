@@ -125,6 +125,34 @@ const leftovers = () => { const out = []; (function w(d) { for (const e of fs.re
   ok(r.reason === 'applied' && read('main.js') === 'new main' && /member/.test(read('edition.json') || ''), 'K: 로이판 설치본이 판매판 매니페스트를 받으면 적용 + edition.json = member');
   ok(read('core/roy-bank.js') === null && fs.readFileSync(path.join(path.dirname(T), '밖.txt'), 'utf8') === 'keep', 'K: remove 의 로이 전용 파일만 지운다(설치폴더 밖 「..」 는 무시)');
   try { fs.unlinkSync(path.join(path.dirname(T), '밖.txt')); } catch (_) {}
+
+  // L~P) v1.0.35 — 로그인 전 판매판 업데이트 · 다른 판 매니페스트 적용 금지(응답 머리 X-Priming-Edition 까지)
+  const anonSrc = { headers: {}, manifestUrl: (t) => 'https://w.test/manifest?t=' + t, fileUrl: (rel, t) => 'https://w.test/file/' + rel.split('/').map(encodeURIComponent).join('/') + (t ? '?t=' + t : '') };
+  global.__fakeLic = { forApp: () => ({ updateSource: async () => null, anonUpdateSource: () => anonSrc }) };   // 로그인 안 함
+  const serveH = (man, hdr) => { global.fetch = async (url, init = {}) => {
+    const u = String(url); seen.push({ u, auth: init.headers && init.headers.Authorization });
+    const headers = { get: (k) => (String(k).toLowerCase() === 'x-priming-edition' ? hdr || null : null) };
+    if (u.startsWith('https://w.test/manifest')) return { ok: true, status: 200, headers, text: async () => JSON.stringify(man) };
+    if (u.startsWith('https://w.test/file/')) { const rel = decodeURIComponent(u.slice('https://w.test/file/'.length).replace(/\?.*$/, '')); const b = Buffer.from(NEW[rel]); return { ok: true, status: 200, headers, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }; }
+    const rel = u.replace(/\?.*$/, '').replace(/^.*\/main\//, '');
+    if (rel === 'update-manifest.json') return { ok: true, status: 200, headers, text: async () => JSON.stringify(manifest) };
+    const b = Buffer.from(NEW[rel]); return { ok: true, status: 200, headers, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) };
+  }; };
+  asMember(); seen.length = 0; serveH(memberMan, 'member');
+  r = await LU.applyUpdates();
+  ok(r.reason === 'applied' && read('main.js') === 'new main' && seen.length > 0 && seen.every((x) => x.u.startsWith('https://w.test/') && !x.auth), 'L: 판매판은 로그인 전에도 Worker 에 토큰 없이 물어 판매판을 적용 — ' + r.reason);
+  asMember(); seen.length = 0; serveH(manifest, 'studio');
+  r = await LU.applyUpdates();
+  ok(r.reason === 'not_member_manifest' && read('main.js') === 'old main', 'M: 판매판 + 머리 studio·edition 없는 매니페스트 → 적용 ⛔');
+  asMember(); seen.length = 0; serveH({ ...manifest }, 'member');
+  r = await LU.applyUpdates();
+  ok(r.reason === 'applied', 'M: 매니페스트에 edition 이 없어도 머리가 member 면 판매판으로 본다(판정력 짝)');
+  reset(); seen.length = 0; serveH(memberMan, 'member');
+  r = await LU.applyUpdates();
+  ok(!seen.some((x) => x.u.startsWith('https://w.test/')) && seen.some((x) => /raw\.githubusercontent/.test(x.u)) && read('edition.json') === null, 'N: 로이판 + 로그인 안 함 → Worker 를 묻지 않고 raw(로이판) · 판매판으로 바뀌지 않음');
+  ok(LU.editionGate('studio', memberMan, 'member', false).ok === false && LU.editionGate('studio', memberMan, 'member', false).reason === 'other_edition', 'O: 토큰 없이 온 판매판은 로이판 설치본에 적용 ⛔(로그아웃한 로이판 보호)');
+  ok(LU.editionGate('studio', memberMan, 'member', true).ok === true && LU.editionGate('studio', { files: {} }, 'member', true).served === 'member', 'O: 토큰으로 물어 서버가 회원으로 판정한 판매판은 적용(옛 회원 설치본 전환 · 머리만 member 여도)');
+  ok(LU.editionGate('member', { files: {} }, null, true).ok === false && LU.editionGate('studio', manifest, null, false).ok === true, 'P: 판매판 ← 로이판 ⛔ · 로이판 ← 로이판 ✓');
   global.__fakeLic = null;
 
   fs.rmSync(T, { recursive: true, force: true });

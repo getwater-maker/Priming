@@ -278,18 +278,23 @@ function createLicense(opts = {}) {
   }
 
   // 업데이트 받을 곳 — 로그인돼 있으면 회원 확인 Worker, 아니면 null(부르는 쪽이 옛 경로)
-  async function updateSource() {
-    const tok = await accessToken();
-    if (!tok) return null;
+  function sourceWith(headers) {
     const base = updateBase();
     return {
-      headers: { Authorization: `Bearer ${tok}` },
+      headers,
       manifestUrl: (t) => `${base}/manifest?t=${t}`,
       fileUrl: (rel, t) => `${base}/file/${String(rel).split('/').map(encodeURIComponent).join('/')}${t ? `?t=${t}` : ''}`,
     };
   }
+  async function updateSource() {
+    const tok = await accessToken();
+    if (!tok) return null;
+    return sourceWith({ Authorization: `Bearer ${tok}` });
+  }
+  // 🛒 토큰 없이 묻는 Worker 경로(v1.0.35) — Worker 는 토큰 없음 = 판매판을 준다 · 판매판 설치본의 로그인 전 업데이트만 쓴다(light-updater)
+  function anonUpdateSource() { return sourceWith({}); }
 
-  return { deviceId, login, signup, redeem, plans, apply, applicationMine, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
+  return { deviceId, login, signup, redeem, plans, apply, applicationMine, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, anonUpdateSource, readState, writeState, loadSession, dir };
 }
 
 /** Electron 앱에서 쓰는 기본 묶음 — safeStorage 는 app ready 뒤에만 쓸 수 있다(부르는 쪽이 whenReady 를 기다린다) */

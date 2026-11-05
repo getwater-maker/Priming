@@ -88,6 +88,14 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
     for (const id of ['book', 'remotion', 'whiteboard', 'thumbEdit', 'todayScripts', 'charSheets', 'localQwen', 'monitorOff']) ok(app.includes(`feat('${id}')`), `화면이 feat('${id}') 로 가른다`);
     const boot = fs.readFileSync(path.join(ROOT, 'bootstrap.js'), 'utf8');
     ok(/EDITION/.test(boot) && /app\.exit\(3\)/.test(boot), 'bootstrap — 판매판이면 무인 입구 거절');
+    // v1.0.35 — 로그인 전 판매판 업데이트 · 다른 판 적용 금지 · 「다시 확인」이 요금 목록도
+    const LU = fs.readFileSync(path.join(ROOT, 'light-updater.js'), 'utf8'), LIC = require('../core/license');
+    const lic = LIC.createLicense ? LIC.createLicense({ dir: fs.mkdtempSync(path.join(os.tmpdir(), 'ed-lic-')) }) : null;
+    const anon = lic && lic.anonUpdateSource && lic.anonUpdateSource();
+    ok(!!anon && JSON.stringify(anon.headers) === '{}' && /\/manifest\?t=1$/.test(anon.manifestUrl(1)), 'license.anonUpdateSource = 토큰 없는 Worker 경로');
+    ok(/localEdition === 'member' && typeof L\.anonUpdateSource === 'function'/.test(LU) && /function editionGate\(/.test(LU) && (LU.match(/editionGate\(/g) || []).length >= 3, 'light-updater — 토큰 없는 경로는 판매판만 · 판정은 editionGate 한 곳(적용·확인 둘 다)');
+    const gate = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'LicenseGate.jsx'), 'utf8');
+    ok(/const recheck = [^\n]*loadPlans\(\)/.test(gate), 'LicenseGate 「다시 확인」이 요금 목록(licensePlans)도 다시 읽는다');
   }
 
   console.log('[3] 판매판 매니페스트');

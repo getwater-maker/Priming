@@ -64,11 +64,12 @@ function hashLocal(absPath, rel) {
   return sha1(BINARY_EXT.has(ext) ? buf : normalizeLF(buf));
 }
 
-async function fetchWithTimeout(url, ms, asText, headers) {
+async function fetchWithTimeout(url, ms, asText, headers, meta) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
     const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store', ...(headers ? { headers } : {}) });
+    if (meta && r.headers && typeof r.headers.get === 'function') { try { meta.edition = r.headers.get('x-priming-edition') || null; } catch (_) {} }
     if (!r.ok) { const e = new Error(`HTTP ${r.status}`); e.status = r.status; try { e.body = String(await r.text()).slice(0, 300); } catch (_) {} throw e; }
     return asText ? await r.text() : Buffer.from(await r.arrayBuffer());
   } finally { clearTimeout(t); }
@@ -77,21 +78,45 @@ async function fetchWithTimeout(url, ms, asText, headers) {
 // 🔐 회원 업데이트 경로(v0.9.26 · docs/회원제-설계.md §4) — 로그인돼 있으면 회원 확인 Worker(updates.primingwave.com)에서 받는다.
 //   로그인 전·Worker 실패면 옛 경로(raw GitHub — 저장소가 공개인 동안만 된다 · 비공개 뒤엔 로그인한 회원만 업데이트).
 //   safeStorage 는 app ready 뒤에만 쓸 수 있다 — bootstrap 이 이 await 를 기다리는 동안 어차피 ready 가 된다(main.js 는 whenReady 로 받는다).
-async function workerSource() {
+//   🛒 v1.0.35(로이 「판매판 올려」 · Worker 66483e8): **판매판 설치본은 로그인 전에도** Worker 에 토큰 없이 묻는다(Worker 가 토큰 없음 = 판매판을 준다)
+//   · 🏠 로이판은 토큰이 없으면 Worker 를 건너뛴다(로그아웃한 로이판이 판매판을 받지 않게 · raw 경로는 예전 그대로).
+//   돌려주는 authed = 토큰으로 물었는가(서버가 계정으로 판을 정했다 — 로이판→판매판 전환은 이때만 허용).
+async function workerSource(localEdition = 'studio') {
   if (process.env.PM_NO_WORKER_UPDATE) return null;
-  try { await app.whenReady(); return await require('./core/license').forApp().updateSource(); }
+  try {
+    await app.whenReady();
+    const L = require('./core/license').forApp();
+    const s = await L.updateSource();
+    if (s) return { ...s, authed: true };
+    if (localEdition === 'member' && typeof L.anonUpdateSource === 'function') return { ...L.anonUpdateSource(), authed: false };
+    return null;
+  }
   catch (e) { log('회원 업데이트 경로 준비 실패 — 옛 경로로: ' + (e && e.message)); return null; }
+}
+/**
+ * 🛡 받은 매니페스트를 이 설치본에 적용해도 되는가(v1.0.35) — 판정 한 곳.
+ *   판 = manifest.edition || 응답 머리 X-Priming-Edition || studio.
+ *   · 판매판 설치본 ← 판매판만(로이판 매니페스트 ⛔ — 로이 전용 파일이 다시 들어온다)
+ *   · 로이판 설치본 ← 로이판 · 판매판은 **토큰으로 물어 서버가 회원으로 판정한 때만**(옛 회원 설치본의 전환) — 토큰 없이 온 판매판 ⛔(로그아웃한 로이판 보호)
+ */
+function editionGate(localEdition, manifest, headerEdition, authed) {
+  const served = (manifest && manifest.edition) || headerEdition || 'studio';
+  if (localEdition === 'member') return served === 'member' ? { ok: true, served } : { ok: false, served, reason: 'not_member_manifest' };
+  if (served === 'member' && !authed) return { ok: false, served, reason: 'other_edition' };
+  return { ok: true, served };
 }
 
 /** 원격 매니페스트만 읽는다(파일은 건드리지 않음) — 「업데이트 확인」 버튼용. 실패하면 null. */
 async function fetchManifest(timeoutMs = 6000) {
-  const W = await workerSource();
-  let member = false;
-  try { member = require('./core/edition').readEdition(app.getAppPath()) === 'member'; } catch (_) {}
+  let localEdition = 'studio';
+  try { localEdition = require('./core/edition').readEdition(app.getAppPath()); } catch (_) {}
+  const member = localEdition === 'member';
+  const W = await workerSource(localEdition);
   if (W) {
     try {
-      const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers));
-      if (m && m.files && typeof m.files === 'object') return member && m.edition !== 'member' ? null : m;   // 🛒 판매판은 판매판 매니페스트만(applyUpdates 와 같은 규칙)
+      const meta = {};
+      const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers, meta));
+      if (m && m.files && typeof m.files === 'object') return editionGate(localEdition, m, meta.edition, W.authed).ok ? m : null;   // applyUpdates 와 같은 판정
     }
     catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); }
   }
@@ -123,9 +148,9 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   try { localEdition = require('./core/edition').readEdition(appDir); } catch (_) {}
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
-  let manifest, RAW_BASE = null, lastErr = '', W = await workerSource();
+  let manifest, RAW_BASE = null, lastErr = '', W = await workerSource(localEdition), headerEdition = null;
   if (W) {
-    try { manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()) + '&edition=' + localEdition, manifestTimeoutMs, true, W.headers)); RAW_BASE = 'worker'; log('회원 경로로 업데이트 확인'); }
+    try { const meta = {}; manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()) + '&edition=' + localEdition, manifestTimeoutMs, true, W.headers, meta)); headerEdition = meta.edition || null; RAW_BASE = 'worker'; log(W.authed ? '회원 경로로 업데이트 확인' : '판매판 — 로그인 전 업데이트 확인'); }
     catch (e) {
       // 🛒 판매판이 아직 없다(Worker 404 no_member_release) — 로이판(raw main)으로 떨어지지 않고 지금 판으로 켠다
       if (e.status === 404 && /no_member_release/.test(e.body || '')) { log('판매판이 아직 발행되지 않았습니다 — 지금 버전으로 실행'); return { updated: 0, failed: 0, reason: 'no_member_release' }; }
@@ -147,7 +172,12 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   if (!manifest || !manifest.files || typeof manifest.files !== 'object') { log('매니페스트 형식 오류 — 건너뜀'); return { updated: 0, failed: 0, reason: 'format' }; }
   // 🛒 판매판 설치본은 판매판 매니페스트만 받는다(v1.0.27) — Worker 가 아직 판을 안 나누거나 관리자 계정으로 로그인한 판매판(로이 PC 의 판매판 미리보기)이
   //   로이판 매니페스트를 받으면 로이 전용 파일이 다시 들어온다 → 지금 판 그대로 켠다
-  if (localEdition === 'member' && manifest.edition !== 'member') { log('판매판 — 받은 매니페스트가 판매판이 아니라 건너뜀(지금 버전으로 실행)'); return { updated: 0, failed: 0, reason: 'not_member_manifest' }; }
+  //   🛡 v1.0.35: 판정은 editionGate 한 곳(응답 머리 X-Priming-Edition 까지 본다 · 토큰 없이 온 판매판은 로이판에 적용 ⛔)
+  const gate = editionGate(localEdition, manifest, RAW_BASE === 'worker' ? headerEdition : null, !!(W && W.authed));
+  if (!gate.ok) {
+    log(gate.reason === 'not_member_manifest' ? '판매판 — 받은 매니페스트가 판매판이 아니라 건너뜀(지금 버전으로 실행)' : '로이판 — 로그인 없이 받은 판매판 매니페스트라 건너뜀(지금 버전으로 실행)');
+    return { updated: 0, failed: 0, reason: gate.reason };
+  }
 
   // 로컬 package.json (버전·deps 비교용) — 루프에서 덮어쓰기 전에 미리 읽음
   let localPkg = {};
@@ -218,7 +248,7 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
     return { updated: 0, failed, reason: 'failed', from: localPkg.version, to: manifest.version };
   }
   // 🛒 판매판 매니페스트를 받았다(Worker 가 회원으로 판정) → 이 설치본을 판매판으로 표시한다(core/edition 이 읽는다) · 로이판 매니페스트(edition 없음)는 건드리지 않는다
-  const toMember = manifest.edition === 'member';
+  const toMember = gate.served === 'member';
   if (toMember && localEdition !== 'member') {
     try { fs.writeFileSync(path.join(appDir, 'edition.json'), JSON.stringify({ edition: 'member' }) + '\n'); log('🛒 판매판으로 표시(edition.json)'); }
     catch (e) { log('edition.json 쓰기 실패: ' + e.message); }
@@ -264,4 +294,4 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   return { updated, failed, reason: 'applied', from: localPkg.version, to: manifest.version };
 }
 
-module.exports = { applyUpdates, fetchManifest, localPackage };
+module.exports = { applyUpdates, fetchManifest, localPackage, editionGate };

@@ -111,7 +111,8 @@ export default function LicenseGate({ children }) {
     try { const r = await api.licenseApply(months); if (r && r.ok) { setChanging(false); await loadAppl(); } else setApplyMsg(APPLY_REASON[r && r.reason] || (r && r.reason) || '신청하지 못했습니다.'); }
     catch (_) { setApplyMsg(APPLY_REASON.server); } finally { setBusy(false); }
   };
-  const recheck = () => go(async () => { const s = await api.licenseRecheck(); if (!s.ok) loadAppl(); return s; });
+  // 「다시 확인」 = 회원 상태 + 내 신청 + 요금 목록을 함께 다시 읽는다(v1.0.35 — 서버가 요금표를 고쳐도 창을 다시 열어야 보이던 것)
+  const recheck = () => go(async () => { const s = await api.licenseRecheck(); if (!s.ok) { loadAppl(); loadPlans(); } return s; });
   const codeBox = (onEnter) => (<>
     {newFlow && <button type="button" className="liclink" data-testid="license-code-toggle" onClick={() => setShowCode(!showCode)}>{showCode ? '▾' : '▸'} 코드가 있으신가요?</button>}
     {codeOpen && <input data-testid="license-code" placeholder={newFlow ? '이벤트·체험 코드' : '가입 코드 (입금 확인 뒤 받은 코드)'} value={code} onChange={(e) => setCode(e.target.value)}
