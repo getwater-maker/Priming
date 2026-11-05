@@ -86,11 +86,16 @@ async function workerSource() {
 /** 원격 매니페스트만 읽는다(파일은 건드리지 않음) — 「업데이트 확인」 버튼용. 실패하면 null. */
 async function fetchManifest(timeoutMs = 6000) {
   const W = await workerSource();
+  let member = false;
+  try { member = require('./core/edition').readEdition(app.getAppPath()) === 'member'; } catch (_) {}
   if (W) {
-    try { const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers)); if (m && m.files && typeof m.files === 'object') return m; }
+    try {
+      const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers));
+      if (m && m.files && typeof m.files === 'object') return member && m.edition !== 'member' ? null : m;   // 🛒 판매판은 판매판 매니페스트만(applyUpdates 와 같은 규칙)
+    }
     catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); }
   }
-  try { if (require('./core/edition').readEdition(app.getAppPath()) !== 'studio') return null; } catch (_) {}   // 🛒 판매판은 옛 경로(로이판)를 보지 않는다
+  if (member) return null;   // 🛒 판매판은 옛 경로(로이판)를 보지 않는다
   for (const repo of REPOS) {
     try {
       const txt = await fetchWithTimeout(rawBase(repo) + 'update-manifest.json?t=' + Date.now(), timeoutMs, true);
@@ -140,6 +145,9 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   }
   if (!RAW_BASE) { log(`매니페스트 조회 실패(오프라인일 수 있음) — 현재 버전으로 실행: ${lastErr}`); return { updated: 0, failed: 0, reason: 'offline' }; }
   if (!manifest || !manifest.files || typeof manifest.files !== 'object') { log('매니페스트 형식 오류 — 건너뜀'); return { updated: 0, failed: 0, reason: 'format' }; }
+  // 🛒 판매판 설치본은 판매판 매니페스트만 받는다(v1.0.27) — Worker 가 아직 판을 안 나누거나 관리자 계정으로 로그인한 판매판(로이 PC 의 판매판 미리보기)이
+  //   로이판 매니페스트를 받으면 로이 전용 파일이 다시 들어온다 → 지금 판 그대로 켠다
+  if (localEdition === 'member' && manifest.edition !== 'member') { log('판매판 — 받은 매니페스트가 판매판이 아니라 건너뜀(지금 버전으로 실행)'); return { updated: 0, failed: 0, reason: 'not_member_manifest' }; }
 
   // 로컬 package.json (버전·deps 비교용) — 루프에서 덮어쓰기 전에 미리 읽음
   let localPkg = {};

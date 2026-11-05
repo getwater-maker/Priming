@@ -60,7 +60,13 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
     ok(ED.readEdition(T0) === 'studio', 'edition.json 없음 = studio');
     fs.writeFileSync(path.join(T0, 'edition.json'), '{"edition":"member"}'); ok(ED.readEdition(T0) === 'member', 'edition.json = member');
     fs.writeFileSync(path.join(T0, 'edition.json'), '{"edition":"gold"}'); ok(ED.readEdition(T0) === 'studio', '모르는 값 = studio');
+    // 🏠🛒 한 PC 에 두 판(v1.0.27) — dataHome 은 이름 하나만(경로·.. 거부) · 없으면 null(진짜 회원·로이판 = 예전 그대로)
+    ok(ED.readDataHome(T0) === null, 'dataHome 없음 = null');
+    fs.writeFileSync(path.join(T0, 'edition.json'), '{"edition":"member","dataHome":"PrimingMember"}'); ok(ED.readDataHome(T0) === 'PrimingMember', 'dataHome = 이름');
+    ok(['..', '../x', 'C:\\\\x', 'a/b', ''].every((d) => { fs.writeFileSync(path.join(T0, 'edition.json'), JSON.stringify({ edition: 'member', dataHome: d })); return ED.readDataHome(T0) === null; }), 'dataHome 경로·.. 는 거부');
     fs.rmSync(T0, { recursive: true, force: true });
+    const dm = fs.readFileSync(path.join(ROOT, 'scripts', 'dist-member.js'), 'utf8');
+    ok(/--preview/.test(dm) && /com\.user\.priming\.memberpreview/.test(dm) && /dataHome: 'PrimingMember'/.test(dm) && !/writeFileSync\(path\.join\(ROOT, 'edition\.json'\)/.test(dm), 'dist:member:preview = 다른 appId·데이터 폴더 · 저장소에 edition.json 을 쓰지 않는다');
     ok(ED.EDITION === 'studio' && !fs.existsSync(path.join(ROOT, 'edition.json')), '이 저장소는 로이판(edition.json 없음)');
     const gi = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
     ok(/^\/edition\.json$/m.test(gi), 'edition.json 은 저장소에 넣지 않는다(.gitignore)');
@@ -134,10 +140,16 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
   console.log('[7] 판매판 파일만으로 켜기');
   const M = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-member-'));
   const NM = path.join(M, 'node_modules');
+  const DH = 'PrimingEdTest' + process.pid, DHP = path.join(os.homedir(), DH);
+  const REAL_PRESETS = path.join(os.homedir(), '.flow-app', 'tts-presets.json');
+  const stampOf = (p) => { try { const s = fs.statSync(p); return s.size + ':' + s.mtimeMs; } catch (_) { return 'none'; } };
+  let realStamp = null;
   try {
     for (const rel of files) { const src = path.join(ROOT, rel.split('/').join(path.sep)), dst = path.join(M, rel.split('/').join(path.sep)); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); }
     fs.symlinkSync(path.join(ROOT, 'node_modules'), NM, 'junction');   // ⚠ 정리 때 링크만 먼저 끊는다(rmdir) — 원본을 지우지 않게
-    fs.writeFileSync(path.join(M, 'edition.json'), JSON.stringify({ edition: 'member' }));
+    // 🏠🛒 로이 PC 의 판매판 미리보기처럼 dataHome 을 준다(v1.0.27) — 앱 데이터가 「홈<DH>」 로 가고 로이판 채널·설정 파일은 그대로여야 한다
+    fs.writeFileSync(path.join(M, 'edition.json'), JSON.stringify({ edition: 'member', dataHome: DH }));
+    realStamp = stampOf(REAL_PRESETS);
     ok(!fs.existsSync(path.join(M, 'core', 'book')) && !fs.existsSync(path.join(M, 'core', 'roy-bank.js')) && !fs.existsSync(path.join(M, 'tools')), '임시 폴더엔 로이 전용 파일이 없다');
 
     // 2.0 무인 입구 거절
@@ -151,6 +163,8 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
     const { _electron: electron } = require('playwright');
     const app = await electron.launch({ args: [M], env: { ...process.env, PM_UI_SMOKE: '1' } });
     try {
+      const home = await app.evaluate(() => process.env.PM_DATA_HOME);   // bootstrap 이 os.homedir() 를 돌린 자리(같은 값)
+      ok(home === DHP && fs.existsSync(DHP), '판매판 미리보기 = 앱 데이터 홈이 따로(' + home + ')');
       const win = await app.firstWindow();
       const errs = [];
       win.on('pageerror', (e) => errs.push(e.message));
@@ -177,8 +191,11 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
     const mk = spawnSync(process.execPath, [path.join(M, 'test', 'makeall-dry.smoke.js')], { encoding: 'utf8', timeout: 240000, cwd: M });
     const tail = String(mk.stdout || '').trim().split('\n').slice(-1)[0];
     ok(mk.status === 0, '판매판에서 롱폼 무음 만들기 E2E 통과 — ' + tail);
+    ok(stampOf(REAL_PRESETS) === realStamp, '판매판에서 채널을 만들고 지워도 로이판 채널 파일(~/.flow-app/tts-presets.json)은 그대로');
+    ok(fs.existsSync(path.join(DHP, '.flow-app')) || fs.existsSync(path.join(DHP, '.priming-maker')), '판매판 설정은 따로 폴더에 쓰였다');
     if (mk.status !== 0) console.log(String(mk.stdout || '').split('\n').filter((l) => /✗|❌/.test(l)).slice(0, 8).join('\n') + '\n' + String(mk.stderr || '').slice(0, 800));
   } finally {
+    if (/PrimingEdTest\d+$/.test(DHP) && path.dirname(DHP) === os.homedir()) { try { fs.rmSync(DHP, { recursive: true, force: true }); } catch (_) {} }   // 이 시험이 만든 홈만
     try { fs.rmdirSync(NM); } catch (_) { try { fs.unlinkSync(NM); } catch (_) {} }
     if (!fs.existsSync(NM)) { try { fs.rmSync(M, { recursive: true, force: true }); } catch (_) {} }
     else console.log('  ⚠ node_modules 링크를 끊지 못해 임시 폴더를 남김: ' + M);

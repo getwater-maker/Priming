@@ -99,6 +99,32 @@ const leftovers = () => { const out = []; (function w(d) { for (const e of fs.re
   r = await LU.applyUpdates();
   ok(r.reason === 'applied' && seen.some((x) => x.u.includes('raw.githubusercontent.com')) && !seen.some((x) => x.u.startsWith('https://w.test/file/')), 'G: Worker 거부 → 옛 경로로 적용');
   const m = await LU.fetchManifest(); ok(m && m.version === '0.7.6', 'G: 「업데이트 확인」 매니페스트도 같은 순서');
+
+  // H~K) 🛒 판매판(v1.0.26~27) — 판매판 설치본은 판매판 매니페스트만 · 로이판 설치본이 판매판 매니페스트를 받으면 edition.json + 로이 전용 파일 지우기
+  const memberMan = { ...manifest, edition: 'member', ref: 'a'.repeat(40), remove: ['core/roy-bank.js', '../밖.txt'] };
+  const serveW = (resp) => { global.fetch = async (url) => {
+    const u = String(url); seen.push({ u });
+    if (u.startsWith('https://w.test/manifest')) return resp.status ? { ok: false, status: resp.status, text: async () => resp.body || '' } : { ok: true, status: 200, text: async () => JSON.stringify(resp.man) };
+    if (u.startsWith('https://w.test/file/')) { const rel = decodeURIComponent(u.slice('https://w.test/file/'.length).replace(/\?.*$/, '')); const b = Buffer.from(NEW[rel]); return { ok: true, status: 200, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }; }
+    return { ok: false, status: 599 };   // raw GitHub 을 부르면 안 된다(seen 에 남아 단언이 잡는다)
+  }; };
+  const asMember = () => { reset(); fs.writeFileSync(path.join(T, 'edition.json'), '{"edition":"member"}'); };
+  asMember(); seen.length = 0; serveW({ man: manifest });
+  r = await LU.applyUpdates();
+  ok(r.reason === 'not_member_manifest' && read('main.js') === 'old main', 'H: 판매판 설치본 + 로이판 매니페스트(관리자 로그인·Worker 미배포) → 건너뜀 — ' + r.reason);
+  ok((await LU.fetchManifest()) === null, 'H: 「업데이트 확인」도 로이판 매니페스트를 보이지 않는다');
+  asMember(); seen.length = 0; serveW({ status: 404, body: '{"error":"no_member_release"}' });
+  r = await LU.applyUpdates();
+  ok(r.reason === 'no_member_release' && !seen.some((x) => /raw\.githubusercontent/.test(x.u)), 'I: 404 no_member_release → 건너뜀(raw 로 안 떨어짐)');
+  asMember(); seen.length = 0; serveW({ status: 403 });
+  r = await LU.applyUpdates();
+  ok(r.reason === 'offline' && !seen.some((x) => /raw\.githubusercontent/.test(x.u)) && read('main.js') === 'old main', 'J: 판매판은 Worker 가 안 되면 옛 경로(로이판)로 받지 않는다');
+  reset(); fs.mkdirSync(path.join(T, 'core'), { recursive: true }); fs.writeFileSync(path.join(T, 'core', 'roy-bank.js'), 'x'); fs.writeFileSync(path.join(path.dirname(T), '밖.txt'), 'keep');
+  seen.length = 0; serveW({ man: memberMan });
+  r = await LU.applyUpdates();
+  ok(r.reason === 'applied' && read('main.js') === 'new main' && /member/.test(read('edition.json') || ''), 'K: 로이판 설치본이 판매판 매니페스트를 받으면 적용 + edition.json = member');
+  ok(read('core/roy-bank.js') === null && fs.readFileSync(path.join(path.dirname(T), '밖.txt'), 'utf8') === 'keep', 'K: remove 의 로이 전용 파일만 지운다(설치폴더 밖 「..」 는 무시)');
+  try { fs.unlinkSync(path.join(path.dirname(T), '밖.txt')); } catch (_) {}
   global.__fakeLic = null;
 
   fs.rmSync(T, { recursive: true, force: true });

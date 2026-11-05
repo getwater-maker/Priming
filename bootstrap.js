@@ -6,6 +6,19 @@ const path = require('path');
 const os = require('os');
 const { app, protocol } = require('electron');
 
+// 🏠🛒 한 PC 에 두 판(v1.0.27) — 판매판 미리보기 설치본(edition.json 의 dataHome)은 모든 앱 데이터(~/.flow-app · ~/.priming-maker · ~/.shots-maker ·
+//   로그인 · Electron 저장 공간)를 「홈\<dataHome>」 아래로 나눈다. ⚠ 다른 모듈이 os.homedir() 를 읽기 **전에**(맨 위에서) 바꾼다.
+//   환경 변수(USERPROFILE)는 그대로 둔다 — 자식 프로그램(claude CLI 등)은 진짜 홈을 본다. dataHome 이 없으면(로이판·진짜 회원 설치본) 아무것도 안 한다.
+try {
+  const dh = require('./core/edition').readDataHome();
+  if (dh) {
+    const realHome = os.homedir(), H = path.join(realHome, dh);
+    require('fs').mkdirSync(H, { recursive: true });
+    os.homedir = () => H;
+    process.env.PM_DATA_HOME = H;
+  }
+} catch (_) {}
+
 // 🤖 무인 실행(v1.0.18 · 2.0 무인 제작) — 명령줄에 이 표시가 있으면 창 없이 한 가지 일만 하고 끝낸다(tools/order.js 가 부른다).
 //   ⛔ 업데이트하지 않는다(진행 중 코드가 바뀌지 않게) · 자기 Electron 저장 공간(로이 앱과 겹치지 않게) · 화면 가속 끔(GPU 메모리를 쓰지 않게).
 const HEADLESS_FLAGS = ['--order', '--order-check', '--register', '--list-names', '--yt-connect'];

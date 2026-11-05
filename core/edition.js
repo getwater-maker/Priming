@@ -24,6 +24,19 @@ function readEdition(root = ROOT) {
   } catch (_) { return 'studio'; }
 }
 let EDITION = readEdition();
+/**
+ * 🏠🛒 한 PC 에 두 판(v1.0.27 · 로이 2026-11-05 「따로 쓰기」) — 로이 PC 의 판매판 미리보기 설치본(dist:member:preview)은
+ * edition.json 에 `dataHome`(홈 폴더 아래 이름 하나)을 싣는다 → bootstrap 이 os.homedir() 를 그 폴더로 돌려
+ * 설정·채널·키·작업본·로그·로그인(~/.flow-app · ~/.priming-maker · ~/.shots-maker)을 로이판과 나눈다(새 회원처럼 빈 상태).
+ * 진짜 회원 설치본엔 없다(null = 예전 그대로). 이름만 받는다(경로·.. 거부).
+ */
+function readDataHome(root = ROOT) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, 'edition.json'), 'utf8'));
+    const d = String((j && j.dataHome) || '').trim();
+    return /^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$/.test(d) ? d : null;
+  } catch (_) { return null; }
+}
 
 const S = ['studio'];
 // files: 매니페스트 상대경로(슬래시) — '/' 로 끝나면 폴더 통째 · channels: IPC 이름 정규식 · reply: 판매판에서 그 채널이 돌려줄 값(화면이 기대하는 꼴)
@@ -101,5 +114,5 @@ function _setEdition(e) { EDITION = EDITIONS.includes(e) ? e : 'studio'; }
 
 module.exports = {
   get EDITION() { return EDITION; }, EDITIONS, FEATURES, MEMBER_DROP, MEMBER_KEEP, MISSING_MSG,
-  readEdition, has, feat, features, channelFeature, missingReply, fileFeature, inEditionFile, optional, _setEdition,
+  readEdition, readDataHome, has, feat, features, channelFeature, missingReply, fileFeature, inEditionFile, optional, _setEdition,
 };

@@ -490,6 +490,7 @@ app.whenReady().then(() => {
     let v = app.getVersion();
     try { v = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || v; } catch {}
     logToFile(`──────── Priming v${v} 시작 ────────`);
+    if (ED.EDITION !== 'studio') logToFile(`🛒 판매판${process.env.PM_DATA_HOME ? ' · 데이터 폴더 ' + process.env.PM_DATA_HOME + '(로이판과 따로)' : ''}`);
   } catch {}
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   // 참조음성 동기화 — **앱을 켜기만 해도** 이 PC 의 목소리가 공용 라이브러리로 올라가게 한다.

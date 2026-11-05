@@ -1,30 +1,49 @@
 'use strict';
 /**
- * scripts/dist-member.js — 🛒 판매판 설치본(Priming-Setup-<ver>.exe) 만들기(v1.0.26 · 뼈대 · docs/판나누기-설계.md ②).
- *   ① 설치폴더에 들어갈 edition.json = member 를 잠깐 쓴다(끝나면 지운다 — 저장소엔 넣지 않는다 · .gitignore)
- *   ② package.json 의 build 설정을 복사해 판매판 제외 목록(core/edition)·설치본 이름을 더한 임시 설정으로 electron-builder 를 부른다.
+ * scripts/dist-member.js — 🛒 판매판 설치본 만들기(v1.0.26 뼈대 → v1.0.27 · docs/판나누기-설계.md ②).
+ *   기본          = 회원용 `dist/member/Priming-Setup-<ver>.exe`(appId 그대로 · edition.json = member)
+ *   `--preview`   = 🏠 로이 PC 에 로이판과 **나란히** 까는 판매판 미리보기(로이 2026-11-05 「따로 쓰기」)
+ *                   `dist/member-preview/Priming-Member-Preview-Setup-<ver>.exe` · 다른 appId·설치 폴더·이름(「Priming 판매판」)
+ *                   · edition.json 에 dataHome = 설정·채널·키·로그인을 「홈\PrimingMember」 아래로(로이판과 섞이지 않는다 · bootstrap)
+ *   edition.json 은 저장소 폴더에 쓰지 않는다 — 임시 파일을 extraResources 로 설치폴더(app/)에만 넣는다(그 사이 로이판 개발 실행이 판매판이 되지 않게).
  *   ⛔ 게시(--publish)하지 않는다 — 판매판 올리기는 로이 「판매판 올려」 때만(release:member).
  */
 const fs = require('fs'), path = require('path'), os = require('os');
 const { execFileSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const ED = require('../core/edition');
+const PREVIEW = process.argv.includes('--preview');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const cfg = JSON.parse(JSON.stringify(pkg.build));
-cfg.artifactName = 'Priming-Setup-${version}.${ext}';
-cfg.directories = { ...(cfg.directories || {}), output: 'dist/member' };
-const drop = [];
-for (const f of Object.values(ED.FEATURES)) if (!f.editions.includes('member')) for (const p of f.files || []) drop.push('!' + (p.endsWith('/') ? p + '**' : p));
-cfg.files = [...cfg.files, ...drop, '!docs/**', 'docs/대본-작성-가이드.md', '!CLAUDE.md', '!AGENTS.md', '!tools/**', '!test/**', '!scripts/**', '!update-manifest.json'];
+// 📦 담을 파일 = **판매판 매니페스트의 파일 목록 그대로**(허용 목록) + node_modules — v1.0.27 첫 빌드는 「전부 + 제외」 방식이라
+//   저장소 폴더의 작업 파일(lora-dataset-clean 2.2GB · video · 샘플.vrew …)이 섞여 2.7GB → NSIS 가 못 묶었다. 라이트 업데이트가 받는 파일과 설치본이 같아진다.
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-dist-member-'));
+const manOut = path.join(tmp, 'member-manifest.json');
+const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member', '--ref', ref, '--out', manOut], { cwd: ROOT, stdio: 'inherit' });
+const memberFiles = Object.keys(JSON.parse(fs.readFileSync(manOut, 'utf8')).files);
+cfg.files = [...memberFiles, 'node_modules/**/*'];
+delete cfg.asarUnpack;   // asar 꺼짐(설정 그대로) — 판매판에 없는 tts/omnivoice-backend 를 가리키지 않게
 delete cfg.publish;
-const tmpCfg = path.join(os.tmpdir(), 'priming-member-builder.json');
+const ed = PREVIEW ? { edition: 'member', dataHome: 'PrimingMember' } : { edition: 'member' };
+if (PREVIEW) {
+  cfg.appId = 'com.user.priming.memberpreview';
+  cfg.productName = 'Priming 판매판';
+  cfg.extraMetadata = { ...(cfg.extraMetadata || {}), name: 'priming-member-preview', productName: 'Priming 판매판' };   // 설치 폴더 = %LOCALAPPDATA%\Programs\priming-member-preview
+  cfg.artifactName = 'Priming-Member-Preview-Setup-${version}.${ext}';
+  cfg.directories = { ...(cfg.directories || {}), output: 'dist/member-preview' };
+} else {
+  cfg.artifactName = 'Priming-Setup-${version}.${ext}';
+  cfg.directories = { ...(cfg.directories || {}), output: 'dist/member' };
+}
+const edFile = path.join(tmp, 'edition.json');
+fs.writeFileSync(edFile, JSON.stringify(ed) + '\n');
+cfg.extraResources = [...(cfg.extraResources || []), { from: edFile, to: 'app/edition.json' }];
+const tmpCfg = path.join(tmp, 'builder.json');
 fs.writeFileSync(tmpCfg, JSON.stringify(cfg, null, 2));
-const EF = path.join(ROOT, 'edition.json');
-fs.writeFileSync(EF, JSON.stringify({ edition: 'member' }) + '\n');
 try {
-  execFileSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['electron-builder', '--win', 'nsis', '--x64', '--publish', 'never', '--config', tmpCfg], { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' });
-  console.log('🛒 판매판 설치본 → dist/member/');
+  execFileSync('npx', ['electron-builder', '--win', 'nsis', '--x64', '--publish', 'never', '--config', JSON.stringify(tmpCfg)], { cwd: ROOT, stdio: 'inherit', shell: true });
+  console.log(`🛒 판매판${PREVIEW ? ' 미리보기' : ''} 설치본 → ${cfg.directories.output}/`);
 } finally {
-  try { fs.unlinkSync(EF); } catch (_) {}
-  try { fs.unlinkSync(tmpCfg); } catch (_) {}
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
 }
