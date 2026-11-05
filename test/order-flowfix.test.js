@@ -58,6 +58,12 @@ console.log('[51] 그림체 사람 마디 끄기');
   ok(!r3.ok && /styleDrop/.test(r3.errors.join()), 'styleDrop 한 칸에 쉼표(마디 둘)면 거절');
 }
 
+console.log('[54] 업로드만 다시 넣기 — 다시 굽지 않은 run 도 샷 계획을 쓴다');
+{
+  const m = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  ok(/OR && OR\.shots && r\.ok && Array\.isArray\(r\.shots\)\) \{ try \{ fs\.writeFileSync\(outPath \+ '\.shots\.json'/.test(m), '굽고 나면 MP4 옆에 샷 계획(<mp4>.shots.json)을 남긴다(주문 shots 만)');
+  ok(/_orderShotsSaved\(it, preset, mp4Sec\)/.test(m) && /_orderShotsSavedAt\(mp4\) \|\| \{\}\)\.shots/.test(m), '굽지 않은 run 은 그 파일로 결과서 · 검수 판 샷 칸을 채운다');
+}
 console.log('[53] 대사 카드 모양');
 {
   const nanum = path.join(__dirname, '..', 'assets', 'fonts', 'book', 'NanumMyeongjo-Bold.ttf');

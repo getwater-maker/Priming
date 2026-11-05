@@ -3223,6 +3223,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
   const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, ...orderOpts, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsO, info: infoO, infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (OR) OR.result = r;
+  if (OR && OR.shots && r.ok && Array.isArray(r.shots)) { try { fs.writeFileSync(outPath + '.shots.json', JSON.stringify({ shots: r.shots, still: r.still || [] })); } catch (_) {} }   // 🎞 52 — 다시 굽지 않는 run(업로드만 등)도 같은 샷 계획을 결과서 · 검수 판에 쓰게
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
     _pLast = { ...(_pLast || {}), title: baseName, phase: r.cancelled ? 'aborted' : 'error', error: r.error || '', endedAt: Date.now() };
     send();
@@ -9198,11 +9199,14 @@ function _orderRenderKey(OR) {
     ...(qc ? { quoteCard: [qc.bg, qc.text, qc.accent, qc.fontName, qc.weight, qc.fontFile || null] } : {}),
     ...(OR.shots ? { shots: [OR.shots.maxSec, OR.shots.transSec, OR.shots.zoomPerSec, OR.shots.panPerSec, 'v1'] } : {}) };   // 🎞 52 — 칸이 있을 때만
 }
+/** 🎞 52 — 지난 렌더가 MP4 옆에 남긴 샷 계획(<mp4>.shots.json) · 없으면 null */
+function _orderShotsSavedAt(mp4) { try { const j = JSON.parse(fs.readFileSync(mp4 + '.shots.json', 'utf8')); return j && Array.isArray(j.shots) ? j : null; } catch (_) { return null; } }
+function _orderShotsSaved(it, preset, _sec) { try { const pr = it.parsed.projects[0]; const base = vrewBaseName(pr, { parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot }); return _orderShotsSavedAt(uploadMp4Path(base, preset, path.join(it.outRoot, `${base}.vrew`))); } catch (_) { return null; } }
 /** 🎞 ⑱ ㉕ 샷 칸(덧붙임5 52) — 렌더러가 돌려준 샷 계획을 장면(G번호)에 붙여 적는다. 칸이 없거나 이번에 굽지 않았으면 null */
 function _orderShotLog(order, R, pr, it, preset, mp4Sec) {
   const empty = { shots: null, shotAvgSec: null, shotMaxSec: null, shotList: null, stillPlanned: null, stillMaxSec: null };
   if (!order.shots) return empty;
-  if (!R || !Array.isArray(R.shots)) return { ...empty, shotsNote: '이번 실행에서 MP4 를 다시 굽지 않아 샷 계획이 없습니다(같은 입력 · 같은 규격)' };
+  if (!R || !Array.isArray(R.shots)) { const sv = _orderShotsSaved(it, preset, mp4Sec); if (sv) R = sv; else return { ...empty, shotsNote: '이번 실행에서 MP4 를 다시 굽지 않았고 지난 샷 계획 파일도 없습니다' }; }
   const SPl = require('./core/shot-plan');
   const RS = require('./core/review-sheet');
   const spans = RS.sceneSpans(pr, P.pausePlanOf(pr, preset).map, mp4Sec);
@@ -9506,7 +9510,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         const pmap = P.pausePlanOf(pr, preset).map;
         const cards = Array.isArray(pr.screenCards) && pr.screenCards.length ? SCr.plan(pr, pr.screenCards, { pauseSec: preset.interludePauseSec }).cards : [];
         const summaryOf = (g) => [g && g.layerOk ? '판 따로(층)' : OC.motionName(KB.patternIndexOf(g)), g && g.layered && !g.layerOk ? '판 따로→한 장' : ''].filter(Boolean).join(' · ');
-        const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0, shots: (_orderRender && _orderRender.result && _orderRender.result.shots) || null });
+        const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0, shots: (_orderRender && _orderRender.result && _orderRender.result.shots) || (order.shots ? (_orderShotsSavedAt(mp4) || {}).shots : null) || null });
         if (rv.ok) {
           res.files.review = rv.sheets; res.files.stillTsv = rv.stillTsv;
           res.log.reviewSheets = rv.sheets.length;
