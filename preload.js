@@ -88,6 +88,13 @@ contextBridge.exposeInMainWorld('api', {
   onRemotionActive: (cb) => ipcRenderer.on('remotion-active', (_e, d) => cb(d)),
   exportRemotion: (args) => ipcRenderer.invoke('export-remotion', args),
   onRemotionProgress: (cb) => ipcRenderer.on('remotion-progress', (_e, d) => cb(d)),
+  // 🎓 강의 HTML 굽기(㊿ · 관리자 · v1.0.34)
+  lectureStatus: () => ipcRenderer.invoke('lecture-status'),
+  lectureSetup: () => ipcRenderer.invoke('lecture-setup'),
+  lectureOpenScreen: () => ipcRenderer.invoke('lecture-open-screen'),
+  lectureRender: (args) => ipcRenderer.invoke('lecture-render', args),
+  lectureAbort: () => ipcRenderer.invoke('lecture-abort'),
+  onLectureProgress: (cb) => { const f = (_e, d) => cb(d); ipcRenderer.on('lecture-progress', f); return () => ipcRenderer.removeListener('lecture-progress', f); },
   onUrldlProgress: (cb) => ipcRenderer.on('urldl-progress', (_e, d) => cb(d)),
   onSttProgress: (cb) => ipcRenderer.on('stt-progress', (_e, d) => cb(d)),   // 📊 🎧 STT(파일 전사) 진행 패널
   onMp3Progress: (cb) => ipcRenderer.on('mp3-progress', (_e, d) => cb(d)),   // 📊 🎵 mp3 추출 진행 패널(v0.9.31)

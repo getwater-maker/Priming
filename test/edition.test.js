@@ -44,7 +44,7 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
   const given = argOf('--member-manifest');
   if (!given) {
     console.log('[1] core/edition 판정');
-    const OWN = ['charSheets', 'ytCookie', 'localQwen', 'gpuTemp'];   // 예전에 isOwner() 로 막던 것
+    const OWN = ['charSheets', 'ytCookie', 'localQwen', 'gpuTemp', 'lecture'];   // 예전에 isOwner() 로 막던 것 + 새 관리자 전용(🎓 강의 ㊿ · v1.0.34)
     for (const own of [true, false]) {
       const f = ED.features(() => own, 'studio');
       ok(Object.keys(ED.FEATURES).every((id) => f[id] === (OWN.includes(id) ? own : true)), `로이판(${own ? '관리자' : '회원 계정'}) = 예전과 같다(관리자 전용 ${OWN.length}개만 계정 따라)`);

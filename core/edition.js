@@ -55,6 +55,8 @@ const FEATURES = {
   // ⚠ core/gpu-share.js 는 남긴다 — 음성 서버 GPU 차례(omnivoice-provider)가 같이 쓴다
   localQwen:    { label: '🖥 로컬 Qwen·ComfyUI 서버 관리', editions: S, owner: true, files: ['core/comfy-launch.js', 'comfy/comfy-server.pyw', 'comfy/comfy-open.pyw'] },
   gpuTemp:      { label: '🌡 GPU 온도', editions: S, owner: true, files: ['core/gpu-temp.js'] },
+  // 🎓 강의 HTML 굽기(2.0 덧붙임4 ㊿ · v1.0.34) — HyperFrames 는 저장소 밖 폴더 · 관리자·개발 PC 전용
+  lecture:      { label: '🎓 강의 HTML', editions: S, owner: true, files: ['core/lecture-html.js', 'core/lecture-render.js'], channels: [/^lecture-/], reply: { installed: false } },
   monitorOff:   { label: '🌙 모니터 끄기', editions: S, files: [], channels: [/^monitor-off$/] },
   qwenDesign:   { label: '🎨 보이스디자인', editions: S, files: ['core/qwen-design.js'], channels: [/qwen-design/] },
   omniServer:   { label: '🖧 메인 PC 음성 서버', editions: S, files: ['core/studio-env.js'] },

@@ -2794,6 +2794,65 @@ ipcMain.handle('remotion-open-out', async (_e, args = {}) => {
   return dir;
 });
 
+// 🎓 강의 HTML 굽기(2.0 덧붙임4 ㊿ · v1.0.34) — 리모션 모드를 넓힌다: 화면표(TSV) + 이 강의 mp3 → HyperFrames(CSS 애니메이션) → 강의 MP4.
+//   관리자·개발 PC 전용(feat('lecture')) · 화면표를 열 때만 돈다(그 밖의 리모션·롱폼·2.0 주문 출력은 그대로) · 모듈은 함수 안에서만 읽는다(판매판엔 파일이 없다).
+let _lecture = null;   // { path, name, slides, errors }
+let _lectureAbort = false;
+function _lectureAudioDir(presetName) {
+  const preset = presetName ? P.getPreset(presetName) : S.preset;
+  if (!preset) throw new Error('채널을 먼저 고르세요.');
+  const outRoot = preset.outLong || preset.outputFolder;
+  if (!outRoot) throw new Error('채널 편집 → 📁 폴더 에서 「MP3 출력」 폴더를 정하세요.');
+  if (!S.tsv || !S.tsv.path) throw new Error('먼저 📄 대본 TSV 를 열고 🎤 mp3 를 만드세요 — 강의 화면은 그 mp3 길이로 맞춥니다.');
+  return path.join(outRoot, _safeFolder(path.basename(S.tsv.path).replace(/\.(tsv|txt)$/i, '')));
+}
+ipcMain.handle('lecture-status', async () => {
+  if (!feat('lecture')) return { ok: false, installed: false };
+  const st = await require('./core/lecture-render').status();
+  return { ok: true, ...st, screen: _lecture && { name: _lecture.name, slides: _lecture.slides.length, errors: _lecture.errors } };
+});
+ipcMain.handle('lecture-setup', async () => {
+  if (!feat('lecture')) return { ok: false, installed: false };
+  log('⬇ HyperFrames 설치 — 저장소 밖 폴더(개발 PC 전용 · package.json 은 그대로)');
+  const st = await require('./core/lecture-render').setup({ onLine: log });
+  log(`✅ HyperFrames ${st.version} 설치됨 — ${st.dir}`);
+  return { ok: true, ...st };
+});
+ipcMain.handle('lecture-open-screen', async () => {
+  if (!feat('lecture')) return { ok: false, installed: false };
+  const r = await dialog.showOpenDialog(win, {
+    title: '강의 화면표 열기 — 한 줄에 「파일명<탭>틀<탭>내용」 (틀: 제목·글머리·도식·코드·인용)',
+    defaultPath: S.tsv && S.tsv.path ? path.dirname(S.tsv.path) : undefined,
+    properties: ['openFile'], filters: [{ name: 'TSV', extensions: ['tsv', 'txt'] }],
+  });
+  if (r.canceled || !r.filePaths.length) return { ok: false };
+  const LH = require('./core/lecture-html');
+  const file = r.filePaths[0];
+  const { slides, errors } = LH.parseScreenTsv(fs.readFileSync(file, 'utf8'));
+  _lecture = { path: file, name: path.basename(file), slides, errors };
+  log(`🎓 화면표 ${_lecture.name} — 화면 ${slides.length}장` + (errors.length ? ` · ⚠ 오류 ${errors.length}건` : ''));
+  for (const e of errors.slice(0, 8)) log(`   ${e.line}행: ${e.message}`);
+  return { ok: true, name: _lecture.name, slides: slides.length, errors };
+});
+ipcMain.handle('lecture-render', async (_e, args = {}) => {
+  if (!feat('lecture')) return { ok: false, installed: false };
+  if (!_lecture) throw new Error('먼저 🎓 화면표를 여세요.');
+  if (_lecture.errors.length) throw new Error('화면표 오류가 있으면 굽지 않습니다 — ' + _lecture.errors.length + '건');
+  const audioDir = _lectureAudioDir(args.presetName);
+  const outFile = path.join(audioDir, _safeFolder(_lecture.name.replace(/\.(tsv|txt)$/i, '')) + '_강의.mp4');
+  _lectureAbort = false;
+  log(`🎓 강의 MP4 굽기 — 화면표 ${_lecture.name} · 소리 ${audioDir}`);
+  try {
+    const r = await withAwake('강의 MP4', () => require('./core/lecture-render').render({
+      screenPath: _lecture.path, audioDir, outFile, onLine: log,
+      onProgress: (p) => { try { win.webContents.send('lecture-progress', p); } catch {} },
+      abortSignal: () => _lectureAbort,
+    }));
+    return { ok: true, ...r };
+  } catch (e) { log(`❌ 강의 MP4 실패 — ${e.message}`); throw e; }
+});
+ipcMain.handle('lecture-abort', () => { _lectureAbort = true; return { ok: true }; });
+
 // 🎧 **몇 문장만 먼저 만들어 들어본다** — 355문장을 15분 돌리기 전에 목소리·배속·발음사전을 확인하는 자리.
 //   🔑 **임시 폴더에 만든다**(MP3 출력 폴더를 건드리지 않는다) — 부분 결과가 그 폴더의 `_manifest.json`
 //     에 섞이면 나중 전체 만들기가 그걸 「건너뜀」으로 잡아 무엇이 최신인지 알 수 없게 된다.

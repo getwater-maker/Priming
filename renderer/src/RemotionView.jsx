@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import LectureCard from './LectureCard.jsx';
 
 const api = window.api;
 
@@ -22,7 +23,7 @@ function fmtLeft(sec) {
 const _lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const _lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
-export default function RemotionView({ presetName, presetRev, setStatus, logline, imgToolOptions, vidToolOptions, defaultImgTool }) {
+export default function RemotionView({ presetName, presetRev, setStatus, logline, imgToolOptions, vidToolOptions, defaultImgTool, lectureOn }) {
   // 🎬 **강 여러 개**를 큐로 다룬다 — 음성 TSV 하나 = 강 하나, 같은 번호의 그림목록이 자동으로 붙는다.
   //   { items:[{id,num,ttsName,imgName,ttsCount,imgCount,…}], activeId, active:{name,rows,errors,img} }
   const [queue, setQueue] = useState(null);
@@ -349,6 +350,9 @@ export default function RemotionView({ presetName, presetRev, setStatus, logline
         <span style={{ flex: 1 }} />
         {tsv && <span className="meta">{tsv.name} · {rows.length ? rows.length + '행 · ' + chars.toLocaleString() + '자' : '🖼 ' + imgRows.length + '장 (그림만)'}</span>}
       </div>
+
+      {/* 🎓 강의 화면(㊿ · 관리자만 · 화면표를 열 때만 굽는다) */}
+      {lectureOn && <LectureCard presetName={presetName} logline={logline} hasTts={!!(tsv && tsv.hasTts)} />}
 
       {/* 🎬 강 목록 — 여러 개를 열면 여기서 고른다. 표·개별 버튼의 대상이 함께 바뀐다. */}
       {items.length > 1 && (

@@ -213,6 +213,13 @@ async function checkServerIdle() {
     await win.waitForSelector('button:has-text("📄 대본 TSV 열기")', { timeout: 10000 });
     ok(true, '리모션 화면이 뜬다 (📄 대본 TSV 열기)');
     ok(await win.isVisible('button:has-text("🎤 mp3 만들기")'), '🎤 mp3 만들기 버튼');
+    // 🎓 강의 카드(㊿ · v1.0.34) — 화면 판정(features.lecture)과 카드가 함께 간다 · 대본 TSV 가 없으면 굽기 단추는 꺼져 있다
+    {
+      const lecOn = await win.evaluate(async () => { const s = await window.api.licenseState().catch(() => null); const f = s && s.features; return f ? !!f.lecture : true; }).catch(() => null);
+      const card = await win.locator('[data-testid="lecture-card"]').count();
+      ok(lecOn === null || card === (lecOn ? 1 : 0), `🎓 강의 카드는 features.lecture 일 때만 (${lecOn} · 카드 ${card})`);
+      if (card) ok(await win.locator('[data-testid="lecture-render"]').isDisabled(), '🎓 화면표·mp3 가 없으면 굽기 단추가 꺼져 있다');
+    }
 
     // 🔴 채널에 사전이 저장돼 있으면 화면에 그 파일명이 보여야 한다.
     //   2026-08-26 사고: 저장은 정상인데 화면이 「물려 있지 않습니다」를 계속 띄웠다
