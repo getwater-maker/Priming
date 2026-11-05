@@ -208,10 +208,10 @@ class OmniVoiceProvider {
     if (!deferT0) deferT0 = reqT0;
     await response.arrayBuffer().catch(() => null);
     const stop = opts.gpuWaitAborted || _abortCheck;
-    if (stop && stop()) throw new Error('중단됨 — 원격(아내 PC) 음성이 먼저라 기다리던 중이었습니다');
+    if (stop && stop()) throw new Error('중단됨 — 원격(아내 PC) 작업이 먼저라 기다리던 중이었습니다');
     if (!noted) {
       noted = true;
-      const msg = '🚦 원격(아내 PC) 음성이 먼저라 이 PC 음성은 기다립니다 — 끝나면 바로 이어 갑니다';
+      const msg = '🚦 원격(아내 PC) 작업(음성·그림)이 먼저라 이 PC 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다';
       if (typeof opts.onGpuWait === 'function') opts.onGpuWait(msg); else console.log('[OmniVoice] ' + msg);
     }
     await new Promise((r) => setTimeout(r, 200));

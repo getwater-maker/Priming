@@ -63,6 +63,16 @@ g = G(grace=5.0); g.take('remote', 'R'); out['admin_busy'] = g.acquire(timeout=0
 st = g.status(); out['st_holder'] = st['holder']; g.release()
 out['admin_free'] = g.acquire(timeout=0.1); g.release()
 out['st_after'] = g.status()
+
+# ⑥ extra_hold(원격 그림 중) — 참인 동안 로컬은 못 들어가고(시간초과 이유 = 원격) · 원격·admin 은 들어가며 · 풀리면 로컬이 들어간다
+flag = {'on': True}
+g = G(grace=0.0, extra_hold=lambda: flag['on'])
+out['xh_timeout'] = list(g.take('local', 'B', timeout=0.3))
+out['xh_remote'] = g.take('remote', 'R', timeout=0.3)[0]; g.release()
+def unhold():
+    time.sleep(0.3); flag['on'] = False
+threading.Thread(target=unhold).start()
+t0 = time.time(); g.take('local', 'B'); out['xh_wait'] = round(time.time() - t0, 2); g.release()
 print(json.dumps(out))
 `;
 
@@ -84,6 +94,9 @@ print(json.dumps(out))
       ok(o.free_wait < 0.05, '원격이 없으면 로컬은 바로: ' + o.free_wait);
       ok(o.to_remote[0] === false && o.to_remote[1] === true, '원격 때문에 시간초과 → by_remote: ' + JSON.stringify(o.to_remote));
       ok(o.to_local[0] === false && o.to_local[1] === false, '로컬끼리 시간초과 → 원격 아님: ' + JSON.stringify(o.to_local));
+      ok(o.xh_timeout && o.xh_timeout[0] === false && o.xh_timeout[1] === true, '원격 그림 중 로컬은 못 들어감 → 미룸(by_remote): ' + JSON.stringify(o.xh_timeout));
+      ok(o.xh_remote === true, '원격 그림 중에도 원격 음성은 들어간다');
+      ok(o.xh_wait >= 0.2 && o.xh_wait < 2.5, '원격 그림이 끝나면 로컬이 들어간다: ' + o.xh_wait);
       ok(o.admin_busy === false && o.st_holder === 'remote' && o.admin_free === true, 'admin(/release) 은 비었을 때만');
       ok(o.st_after.holder === null && o.st_after.last_remote_ip === 'R' && o.st_after.wait_local === 0 && o.st_after.wait_remote === 0, '상태: ' + JSON.stringify(o.st_after));
     }
@@ -93,7 +106,14 @@ print(json.dumps(out))
   console.log('[2] api.py 연결(소스)');
   if (fs.existsSync(API)) {
     const A = fs.readFileSync(API, 'utf8');
-    ok(/_GPU_LOCK = GpuGate\(on_overtake=_log_overtake\)/.test(A), '잠금 = GpuGate + 기록');
+    ok(/_GPU_LOCK = GpuGate\(on_overtake=_log_overtake, extra_hold=lambda: _remote_img_active\(\)\)/.test(A), '잠금 = GpuGate + 기록 + 원격 그림 중 로컬 막기');
+    // 🖼 원격 그림이 먼저(v1.0.41 · 2026-11-05) — 로컬 요청을 바쁨 수 올리기 전에 막고 · /busy 는 막힌 로컬을 빼고 · 모델을 내렸다 다시 올린다
+    const W = A.slice(A.indexOf('def _tts_busy'), A.indexOf('@app.get("/busy")'));
+    ok(W.indexOf('_remote_img_active()') > -1 && W.indexOf('_remote_img_active()') < W.indexOf('_BUSY_N += 1'), '원격 그림 중이면 바쁨 수를 올리기 전에 기다린다(서로 막힘 방지)');
+    ok(/def _busy_effective[\s\S]*?wait_local/.test(A) && /def busy\(\):[\s\S]*?_busy_effective\(\)/.test(A), '/busy 는 차례를 못 받는 로컬 요청을 빼고 센다');
+    ok(/def _remote_img_guard[\s\S]*?_unload_model\([\s\S]*?_ensure_model\(\)/.test(A), '원격 그림 중 모델 내려놓기 → 끝나면 다시 올리기');
+    ok(/def comfy_touch[\s\S]*?_note_comfy_use/.test(A) && /def comfy_wake[\s\S]*?_note_comfy_use/.test(A), '원격 그림 신호 = /comfy-wake · /comfy-touch');
+    ok(/st\["remote_image"\] = _remote_img_active\(\)/.test(A), '/gpu-status 에 원격 그림 표시');
     ok(/ip == server/.test(A) && /_own_ips\(\)/.test(A), '로컬 판정 = 이 PC 주소 · 접속받은 주소와 같으면 로컬(100.x 로 자기 자신에 접속)');
     ok(/_REQ_CLIENT\.set\(_client_kind\(request\)\)/.test(A) && /_GPU_LOCK\.take\(kind, ip, timeout=left\)/.test(A), '합성 입구가 누가 보냈나로 차례를 잡는다');
     ok(/"X-GPU-Deferred": "remote"/.test(A) && /status_code=503/.test(A) && /status_code=408/.test(A), '원격 때문이면 503 + X-GPU-Deferred · 아니면 408');
