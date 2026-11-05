@@ -10054,35 +10054,23 @@ async function awaitForeignTtsIdle(label, logger, { untilDone = false } = {}) {
     const s = require("./tts/secret-store").get("omnivoice");
     if (s && s.apiKey) headers["X-API-Key"] = s.apiKey;
   } catch { return; }
-  while (base.endsWith("/")) base = base.slice(0, -1);
-  if (!base) return;
-  const t0 = Date.now();
-  let waited = false;
+  // 🎙 「끝났다」 = 15초 연속 조용함(core/gpu-share.waitTtsQuiet · v1.0.42 — 문장 사이 0.2초 틈을 끝으로 읽어 그림이 음성과 겹쳤다)
   let lastNote = Date.now();
-  while (untilDone || Date.now() - t0 < FOREIGN_TTS_WAIT_MS) {
-    if (untilDone && S.abort) { say("  ⏹ " + label + " — 중단됨(음성 대기 중)"); return; }
-    let n = 0;
-    try {
-      const r = await fetch(base + "/busy", { headers, signal: AbortSignal.timeout(4000) });
-      if (!r.ok) return;                       // 구버전 서버(404/401)·오류 → 그냥 진행
-      const j = await r.json();
-      if (!j || typeof j.busy === "undefined") return;
-      n = j.busy ? (j.n || 1) : 0;
-    } catch { return; }                        // 꺼져 있거나 못 닿으면 그냥 진행
-    if (!n) {
-      if (waited) say("  ▶ " + label + " — TTS 가 끝났습니다. 이미지 생성을 시작합니다 (" + ((Date.now() - t0) / 1000).toFixed(0) + "초 대기)");
-      return;
-    }
-    if (!waited) {
-      waited = true;
-      say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나면 시작합니다 — GPU 경합 방지" + (untilDone ? " (끝까지 기다림)" : ""));
-    } else if (untilDone && Date.now() - lastNote >= 5 * 60 * 1000) {
-      lastNote = Date.now();
-      say("  ⏳ " + label + " — 아직 음성 변환 중(" + n + "건 · " + Math.round((Date.now() - t0) / 60000) + "분째) · 끝까지 기다립니다");
-    }
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-  say("  ⚠ " + label + " — 음성 변환이 " + Math.round(FOREIGN_TTS_WAIT_MS / 60000) + "분 넘게 이어집니다. 더 기다리지 않고 시작합니다(둘 다 느려질 수 있습니다).");
+  const r = await require("./core/gpu-share").waitTtsQuiet({
+    baseUrl: base, headers,
+    maxMs: untilDone ? 0 : FOREIGN_TTS_WAIT_MS,
+    aborted: () => untilDone && S.abort,
+    onBusy: (n, sec, first) => {
+      if (first) say("  ⏳ " + label + " — 이 GPU 에서 음성 변환이 도는 중입니다(" + n + "건). 끝나고 15초 조용하면 시작합니다 — GPU 경합 방지" + (untilDone ? " (끝까지 기다림)" : ""));
+      else if (untilDone && Date.now() - lastNote >= 5 * 60 * 1000) {
+        lastNote = Date.now();
+        say("  ⏳ " + label + " — 아직 음성 변환 중(" + n + "건 · " + Math.round(sec / 60) + "분째) · 끝까지 기다립니다");
+      }
+    },
+  });
+  if (r.result === "aborted") { say("  ⏹ " + label + " — 중단됨(음성 대기 중)"); return; }
+  if (r.result === "quiet") { say("  ▶ " + label + " — TTS 가 끝났습니다. 이미지 생성을 시작합니다 (" + r.sec.toFixed(0) + "초 대기)"); return; }
+  if (r.result === "timeout") say("  ⚠ " + label + " — 음성 변환이 " + Math.round(FOREIGN_TTS_WAIT_MS / 60000) + "분 넘게 이어집니다. 더 기다리지 않고 시작합니다(둘 다 느려질 수 있습니다).");
 }
 // 🔴 **다른 PC 가 이 PC 의 로컬 ComfyUI 로 이미지를 만드는 중이면 TTS 를 기다린다** (2026-08-26, 1단계).
 //   앱의 GPU 레인(_runOnLanes)은 **같은 프로세스 안에서만** 작동한다. v0.3.46 에서 로컬 ComfyUI 를

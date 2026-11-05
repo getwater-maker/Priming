@@ -540,6 +540,13 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
       try { const r = await ttsMgr.synthesize(s.ttsText || s.text, { ...attemptOpts, onGpuWait: onLine, gpuWaitAborted: abortSignal }); assertRealAudio(r, s.num); res = r; break; }
       catch (e) {
         if (abortSignal && abortSignal()) throw e;
+        // ⏳ 음성 서버가 멈춘 합성에 묶였다(provider 가 10분 기다린 뒤 serverStuck · v1.0.42) — 다음 문장도 똑같으니 이 대본 음성을 멈춘다
+        if (e && e.serverStuck) {
+          failed.push(s.num);
+          consecFail = MAX_CONSEC_FAIL;
+          if (onLine) onLine(`✗ 컷${s.num} — ${e.message}`);
+          break;
+        }
         // 🔴 **빈 음성은 같은 입력으로 다시 보내도 똑같이 빈 음성이 온다** — 시드를 주면 모델이 결정적이다.
         //   실측(2026-09-13 · 컷857 '그렇습니다.' · seed 40469): 3회 전부 44바이트. 서버 로그도
         //   예외 없이 `TTS 합성 완료: 44 bytes, 0.0초` 로 남았다(= 모델이 빈 오디오를 만든 것).

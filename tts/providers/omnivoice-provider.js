@@ -60,14 +60,22 @@ function measureWav(buf) {
 }
 
 /** secret-store 의 omnivoice.apiKey 가 있으면 X-API-Key 헤더 반환 */
+//   + X-Priming-Proc = 이 프로그램의 표지(v1.0.42 · core/gpu-share.procId — 같은 PC 의 다른 Priming 그림과 가른다)
 function _authHeaders() {
+  const h = {};
+  try { Object.assign(h, require('../../core/gpu-share').procHeaders()); } catch {}
   try {
     const SecretStore = require('../secret-store');
     const s = SecretStore.get('omnivoice');
-    if (s && s.apiKey) return { 'X-API-Key': s.apiKey };
+    if (s && s.apiKey) h['X-API-Key'] = s.apiKey;
   } catch {}
-  return {};
+  return h;
 }
+
+// ⏳ 408 = 서버의 GPU 차례를 **다른 합성이 1분 넘게 쥐고 있다**(그 합성이 멈췄거나 몹시 느리다 · v1.0.42).
+//   예전엔 문장마다 3번 실패로 세고 건너뛰어, 멈춘 합성 하나에 문장이 줄줄이 빠졌다(2026-11-05 컷112~115).
+//   이제 이 시간 동안은 실패로 세지 않고 기다린다 → 넘으면 serverStuck 으로 던져 fillTts 가 그 대본 음성을 멈춘다.
+const GPU_HELD_WAIT_MS = 10 * 60 * 1000;
 
 // 🚦 「미룸」 대기를 멈출지 — main 이 setAbortCheck(() => S.abort) 로 건다(fillTts 가 아닌 입구도 중단 버튼을 따르게)
 let _abortCheck = null;
@@ -176,6 +184,7 @@ class OmniVoiceProvider {
     //   그건 실패가 아니다 → 세지 않고 다시 보낸다(상한 없음 · 로이 결정 「아내분 우선」). 중단 버튼이면 멈춘다.
     let response;
     let noted = false;
+    let heldT0 = 0, heldNoted = false;   // ⏳ 408(다른 합성이 차례를 쥠)이 시작된 때 · 안내 한 번
     let deferT0 = 0;   // ⏱ 미룸이 시작된 때 — 차례를 얻으면 기다린 초를 core/gpu-share 에 쌓는다(⑥ 양보로 잃은 분)
     for (;;) {
     const reqT0 = Date.now();
@@ -201,18 +210,36 @@ class OmniVoiceProvider {
     } finally {
       clearTimeout(t);
     }
+    const say = (msg) => { if (typeof opts.onGpuWait === 'function') opts.onGpuWait(msg); else console.log('[OmniVoice] ' + msg); };
+    const stop = opts.gpuWaitAborted || _abortCheck;
+    if (response.status === 408) {
+      // ⏳ 다른 합성이 차례를 쥐고 있다 — 실패로 세지 않고 기다린다(상한 GPU_HELD_WAIT_MS)
+      if (!heldT0) heldT0 = reqT0;
+      await response.arrayBuffer().catch(() => null);
+      if (stop && stop()) throw new Error('중단됨 — 음성 서버가 다른 합성에 묶여 기다리던 중이었습니다');
+      const heldLimit = this.gpuHeldWaitMs || GPU_HELD_WAIT_MS;
+      if (Date.now() - heldT0 >= heldLimit) {
+        const err = new Error(`음성 서버의 합성 하나가 ${Math.max(1, Math.round((Date.now() - heldT0) / 60000))}분 넘게 끝나지 않습니다 — 서버가 멈춘 것으로 봅니다. 그림 작업이 끝났는지 보고 음성 서버(OmniVoice)를 다시 시작하세요 (${this.baseUrl})`);
+        err.serverStuck = true;   // 🔑 fillTts 가 문장마다 재시도하지 않고 그 대본 음성을 멈추는 표식
+        throw err;
+      }
+      if (!heldNoted) { heldNoted = true; say('⏳ 음성 서버의 GPU 차례를 다른 합성이 1분 넘게 쥐고 있습니다(그림과 겹쳐 멈췄을 수 있음) — 실패로 세지 않고 기다립니다(최대 ' + Math.round(heldLimit / 60000) + '분)'); }
+      await new Promise((r) => setTimeout(r, this.gpuHeldPollMs || 2000));
+      continue;
+    }
     if (response.status !== 503 || !response.headers.get('x-gpu-deferred')) {
       if (deferT0) { try { require('../../core/gpu-share').addYield((reqT0 - deferT0) / 1000, 'tts'); } catch (_) {} }
       break;
     }
     if (!deferT0) deferT0 = reqT0;
+    const why = String(response.headers.get('x-gpu-deferred') || '');
     await response.arrayBuffer().catch(() => null);
-    const stop = opts.gpuWaitAborted || _abortCheck;
-    if (stop && stop()) throw new Error('중단됨 — 원격(아내 PC) 작업이 먼저라 기다리던 중이었습니다');
+    if (stop && stop()) throw new Error(why === 'local-image' ? '중단됨 — 이 PC 의 다른 Priming 그림이 먼저라 기다리던 중이었습니다' : '중단됨 — 원격(아내 PC) 작업이 먼저라 기다리던 중이었습니다');
     if (!noted) {
       noted = true;
-      const msg = '🚦 원격(아내 PC) 작업(음성·그림)이 먼저라 이 PC 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다';
-      if (typeof opts.onGpuWait === 'function') opts.onGpuWait(msg); else console.log('[OmniVoice] ' + msg);
+      say(why === 'local-image'
+        ? '🚦 이 PC 의 다른 Priming 프로그램(무인 제작 등)이 그림을 그리는 중이라 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다'
+        : '🚦 원격(아내 PC) 작업(음성·그림)이 먼저라 이 PC 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다');
     }
     await new Promise((r) => setTimeout(r, 200));
     }

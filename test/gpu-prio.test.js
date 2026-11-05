@@ -106,10 +106,10 @@ print(json.dumps(out))
   console.log('[2] api.py 연결(소스)');
   if (fs.existsSync(API)) {
     const A = fs.readFileSync(API, 'utf8');
-    ok(/_GPU_LOCK = GpuGate\(on_overtake=_log_overtake, extra_hold=lambda: _remote_img_active\(\)\)/.test(A), '잠금 = GpuGate + 기록 + 원격 그림 중 로컬 막기');
+    ok(/_GPU_LOCK = GpuGate\(on_overtake=_log_overtake, extra_hold=lambda: _img_active_for\(_my_img_key\(\)\)\)/.test(A), '잠금 = GpuGate + 기록 + 남의 그림 중 로컬 막기(v1.0.42 — 같은 PC 다른 프로그램 포함)');
     // 🖼 원격 그림이 먼저(v1.0.41 · 2026-11-05) — 로컬 요청을 바쁨 수 올리기 전에 막고 · /busy 는 막힌 로컬을 빼고 · 모델을 내렸다 다시 올린다
     const W = A.slice(A.indexOf('def _tts_busy'), A.indexOf('@app.get("/busy")'));
-    ok(W.indexOf('_remote_img_active()') > -1 && W.indexOf('_remote_img_active()') < W.indexOf('_BUSY_N += 1'), '원격 그림 중이면 바쁨 수를 올리기 전에 기다린다(서로 막힘 방지)');
+    ok(W.indexOf('_img_active_for(_me)') > -1 && W.indexOf('_img_active_for(_me)') < W.indexOf('_BUSY_N += 1'), '남의 그림 중이면 바쁨 수를 올리기 전에 기다린다(서로 막힘 방지)');
     ok(/def _busy_effective[\s\S]*?wait_local/.test(A) && /def busy\(\):[\s\S]*?_busy_effective\(\)/.test(A), '/busy 는 차례를 못 받는 로컬 요청을 빼고 센다');
     ok(/def _remote_img_guard[\s\S]*?_unload_model\([\s\S]*?_ensure_model\(\)/.test(A), '원격 그림 중 모델 내려놓기 → 끝나면 다시 올리기');
     ok(/def comfy_touch[\s\S]*?_note_comfy_use/.test(A) && /def comfy_wake[\s\S]*?_note_comfy_use/.test(A), '원격 그림 신호 = /comfy-wake · /comfy-touch');

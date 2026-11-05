@@ -67,10 +67,62 @@ async function waitRemoteIdle({ baseUrl, headers = {}, label = '', log = () => {
   return { waited, aborted: false, sec };
 }
 
+// 🖼 이 프로그램의 표지(v1.0.42) — 같은 PC 에 Priming 이 둘 돌 때(화면 앱 + 무인 제작) 음성 서버가 누구의 그림·음성인지 가른다.
+//   `/comfy-touch`·`/tts` 에 함께 싣는다(서버 api.py img-owner — 남의 그림이 도는 동안 이 프로그램 음성은 들어가지 않는다).
+let _proc = '';
+function procId() {
+  if (!_proc) {
+    const pid = (typeof process !== 'undefined' && process && process.pid) || 0;
+    _proc = 'p' + pid + '-' + Math.random().toString(36).slice(2, 8);
+  }
+  return _proc;
+}
+function procHeaders() { return { 'X-Priming-Proc': procId() }; }
+
+/**
+ * 🎙 이 GPU 의 음성이 「정말 끝났나」 — 서버 /busy 가 **연이어 조용할 때만** 끝난 것으로 본다(v1.0.42).
+ *   왜: 문장과 문장 사이에 바쁨 수가 0.2초쯤 0 이 된다. 한 번 0 을 보고 그림을 시작했다가(2026-11-05 무인 제작 썸네일)
+ *       화면 앱의 음성과 겹쳐 VRAM 이 넘치고 합성 하나가 멈춰 그 뒤 음성이 모두 408 이 됐다.
+ *   규칙: 음성을 한 번이라도 봤으면 quietMs(15초) · 처음부터 조용했으면 firstQuietMs(3초) 동안 계속 0 이어야 한다.
+ *   돌려줌 {result:'free'|'quiet'|'timeout'|'aborted'|'open', waited, sec, n} — 'open' = 옛 서버·못 닿음(그냥 진행 · fail-open).
+ */
+async function waitTtsQuiet({ baseUrl, headers = {}, quietMs = 15000, firstQuietMs = 3000, pollMs = 1000, maxMs = 0, aborted = () => false, onBusy = () => {}, fetchImpl, now = Date.now, sleep } = {}) {
+  const f = fetchImpl || fetch;
+  const nap = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  let base = String(baseUrl || '').trim();
+  while (base.endsWith('/')) base = base.slice(0, -1);
+  const t0 = now();
+  let waited = false, quietSince = null, lastN = 0;
+  const done = (result) => ({ result, waited, sec: (now() - t0) / 1000, n: lastN });
+  if (!base) return done('open');
+  for (;;) {
+    if (aborted()) return done('aborted');
+    let n = 0;
+    try {
+      const r = await f(base + '/busy', { headers, signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return done('open');
+      const j = await r.json();
+      if (!j || typeof j.busy === 'undefined') return done('open');
+      n = j.busy ? (j.n || 1) : 0;
+    } catch (_) { return done('open'); }
+    const t = now();
+    if (n) {
+      lastN = n; quietSince = null;
+      onBusy(n, (t - t0) / 1000, !waited);
+      waited = true;
+    } else {
+      if (quietSince == null) quietSince = t;
+      if (t - quietSince >= (waited ? quietMs : firstQuietMs)) return done(waited ? 'quiet' : 'free');
+    }
+    if (maxMs && t - t0 >= maxMs) return done('timeout');
+    await nap(pollMs);
+  }
+}
+
 // ⏱ 양보로 기다린 시간(v1.0.18 · 2.0 무인 제작 ⑥ 「양보로 잃은 분」) — 이 프로세스가 원격에 비켜 선 초를 쌓는다(그림 = 위 waitRemoteIdle · 음성 = omnivoice-provider 의 미룸 답)
 const _yield = { image: 0, tts: 0 };
 function addYield(sec, kind = 'tts') { const v = Number(sec) || 0; if (v > 0) _yield[kind === 'image' ? 'image' : 'tts'] += v; }
 function yieldStats() { return { image: _yield.image, tts: _yield.tts, total: _yield.image + _yield.tts }; }
 function resetYield() { _yield.image = 0; _yield.tts = 0; }
 
-module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle, addYield, yieldStats, resetYield };
+module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle, waitTtsQuiet, procId, procHeaders, addYield, yieldStats, resetYield };

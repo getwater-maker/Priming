@@ -26,7 +26,8 @@ const eq = (a, b, m) => ok(a === b, m + '  (기대 ' + JSON.stringify(b) + ' / �
 function extractAsync(src, name) {
   const i = src.indexOf('async function ' + name + '(');
   if (i < 0) throw new Error(name + ' 를 찾을 수 없습니다(원문에 없음)');
-  let d = 0, started = false, j = i;
+  // 본문 여는 괄호부터 센다(매개변수의 `{ untilDone = false } = {}` 를 본문으로 착각하지 않게 — v0.9.111 부터 깨져 있었다)
+  let d = 0, started = false, j = src.indexOf(') {', i) + 2;
   for (; j < src.length; j++) {
     const c = src[j];
     if (c === '{') { d++; started = true; }
@@ -41,7 +42,7 @@ function build({ cfg, queues, cap = 200, throwOn = null, status = 200 }) {
   const logs = [];
   const calls = [];
   let idx = 0;
-  const fakeRequire = () => ({ loadConfig: () => cfg });
+  const fakeRequire = () => ({ loadConfig: () => cfg, isLocalBaseUrl: () => true });   // v1.0.15 원격 PC 판정 — 이 시험은 늘 이 PC
   const fakeFetch = async (url) => {
     calls.push(url);
     if (throwOn === 'net') throw new Error('connect ECONNREFUSED');
@@ -139,13 +140,17 @@ eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에�
   //     /health 가 3초 타임아웃). 서버의 TTS 엔드포인트를 async def → def 로 바꿔 스레드풀에서
   //     돌린 뒤 실측하니 합성 내내 /busy 가 1~4ms 로 busy:true 를 정확히 반환했다.
   const BODY2 = extractAsync(MAIN, "awaitForeignTtsIdle");
-  function build2({ baseUrl = "http://desktop-cbqlolj:9881", apiKey = "K", bodies = [], cap = 200, throwOn = null, status = 200 }) {
+  function build2({ baseUrl = "http://desktop-cbqlolj:9881", apiKey = "K", bodies = [], cap = 600000, throwOn = null, status = 200 }) {   // cap = 가상 시계 ms(1초 = 즉시)
     const logs = [];
     const calls = [];
     let idx = 0;
+    // v1.0.42 — 판정 본체는 core/gpu-share.waitTtsQuiet(진짜) · 가짜 fetch 와 가상 시계(1초 = 즉시)만 끼운다
+    const GS = require("../core/gpu-share");
+    let vt = 0;
     const fakeRequire = (m) => {
       if (m.indexOf("tts-config") >= 0) return { getProvider: () => ({ baseUrl }) };
       if (m.indexOf("secret-store") >= 0) return { get: () => (apiKey ? { apiKey } : null) };
+      if (m.indexOf("gpu-share") >= 0) return { waitTtsQuiet: (o) => GS.waitTtsQuiet({ ...o, fetchImpl: fakeFetch, now: () => vt, sleep: async (ms) => { vt += ms; } }) };
       return {};
     };
     const fakeFetch = async (url, opt) => {
@@ -168,7 +173,7 @@ eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에�
   {
     const t = build2({ bodies: [IDLE] });
     await t.fn("로컬 이미지 생성");
-    eq(t.calls.length, 1, "[2단계] 유휴면 한 번만 묻는다");
+    eq(t.calls.length, 4, "[2단계] 처음부터 유휴면 3초(1초마다 네 번) 조용한지만 보고 바로 진행한다(v1.0.42)");
     eq(t.calls[0].url, "http://desktop-cbqlolj:9881/busy", "[2단계] /busy 로 정확히 요청한다");
     eq(t.calls[0].headers["X-API-Key"], "K", "[2단계] API 키를 함께 보낸다(없으면 401)");
     eq(t.logs.length, 0, "[2단계] 유휴면 조용하다");
@@ -180,6 +185,11 @@ eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에�
     ok(t.logs.some((m) => m.indexOf("음성 변환이 도는 중") >= 0), "[2단계] 대기 이유를 사람 말로 알린다");
     ok(t.logs.some((m) => m.indexOf("TTS 가 끝났습니다") >= 0), "[2단계] 시작할 때 알린다");
     eq(t.logs.filter((m) => m.indexOf("도는 중") >= 0).length, 1, "[2단계] 대기 로그는 한 번만");
+  }
+  { // 🔴 2026-11-05 사고 — 문장 사이 0.2초 틈(0)을 「끝」으로 읽고 그림을 시작했다
+    const t = build2({ bodies: [TTSBUSY, IDLE, TTSBUSY, IDLE, TTSBUSY, TTSBUSY, IDLE] });
+    await t.fn("썸네일 배경");
+    ok(t.calls.length >= 7 + 15, "[2단계] 틈의 0 한 번으로 시작하지 않는다 — 15초 연속 조용해야: " + t.calls.length + "번 물음");
   }
   {
     const t = build2({ bodies: [TTSBUSY], status: 404 });
@@ -226,7 +236,7 @@ eq(imgBody.includes('awaitForeignComfyIdle'), false, 'enqueueImageJob 본문에�
   ok(MAIN.indexOf("if (!cfg.cloud) await awaitForeignTtsIdle('로컬 비디오 생성'") >= 0, "[2단계] 비디오 경로에 배선돼 있다");
   // 🔴 미정의 식별자 재발 방지 — 호출부에 label 변수는 없다(두 함수 어디에도 정의돼 있지 않다).
   eq(MAIN.includes('await awaitForeignTtsIdle(label'), false, '[2단계] 호출부가 없는 변수(label)를 쓰지 않는다');
-  ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 이미지 생성', logger)") >= 0, "[2단계] 이미지 경로는 리터럴 라벨 + logger");
+  ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 이미지 생성', logger, { untilDone: forceLocal })") >= 0, "[2단계] 이미지 경로는 리터럴 라벨 + logger(+ 로컬 Qwen 은 끝까지 · v0.9.111)");
   ok(MAIN.indexOf("awaitForeignTtsIdle('로컬 비디오 생성', log)") >= 0, "[2단계] 비디오 경로는 리터럴 라벨 + 전역 log");
   ok(MAIN.indexOf("const FOREIGN_TTS_WAIT_MS") >= 0, "[2단계] 대기 상한 상수가 있다");
 

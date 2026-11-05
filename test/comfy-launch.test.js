@@ -283,7 +283,7 @@ function stubServer() {
     chk(/return _withLocalQwenStop\(onlyNums, logger, \(\) => runComfyImages\(/.test(src), '로컬 Qwen 입구가 끄기 래퍼를 거친다');
     chk(/try \{ return await fn\(\); \} finally \{\n    _localQwenActive--;/.test(src), '중단·실패여도 끈다(finally)');
     chk(/awaitForeignTtsIdle\('로컬 이미지 생성', logger, \{ untilDone: forceLocal \}\)/.test(src), '로컬 Qwen 은 음성이 끝날 때까지 기다린다');
-    chk(/while \(untilDone \|\| Date\.now\(\) - t0 < FOREIGN_TTS_WAIT_MS\)/.test(src) && /untilDone && S\.abort/.test(src), '끝까지 대기 · ⏹ 중단이면 멈춘다');
+    chk(/maxMs: untilDone \? 0 : FOREIGN_TTS_WAIT_MS/.test(src) && /aborted: \(\) => untilDone && S\.abort/.test(src), '끝까지 대기 · ⏹ 중단이면 멈춘다');
     chk(!/execFileSync/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'comfy-launch.js'), 'utf8')), '동기 자식 프로세스 없음(메인 프로세스가 얼지 않게)');
   }
 

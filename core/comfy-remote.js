@@ -19,9 +19,12 @@ const TOUCH_MS = 60 * 1000;
 function voiceBase() {
   try { return String((require('../tts/tts-config').getProvider('omnivoice') || {}).baseUrl || '').replace(/\/+$/, ''); } catch (_) { return ''; }
 }
+// 🖼 X-Priming-Proc = 이 프로그램의 표지(v1.0.42 · core/gpu-share.procId) — 같은 PC 의 다른 Priming 이 그리는 동안 서버가 이 프로그램 음성을 막는다
 function authHeaders() {
-  try { const s = require('../tts/secret-store').get('omnivoice'); if (s && s.apiKey) return { 'X-API-Key': s.apiKey }; } catch (_) {}
-  return {};
+  const h = {};
+  try { Object.assign(h, require('./gpu-share').procHeaders()); } catch (_) {}
+  try { const s = require('../tts/secret-store').get('omnivoice'); if (s && s.apiKey) h['X-API-Key'] = s.apiKey; } catch (_) {}
+  return h;
 }
 
 async function call(p, { method = 'POST', base = voiceBase(), fetchFn = fetch, timeoutMs = 20000 } = {}) {
