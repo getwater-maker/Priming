@@ -32,7 +32,7 @@ function canon(v) {
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 /** 대본 글 → 마커 · 쉼 · 지문 · .vrew · MP4 (임시 폴더 dir) */
-async function run(raw, dir, keep) {
+async function run(raw, dir, keep, qs) {
   const norm = (s) => String(s).split(dir).join('<T>').split(dir.replace(/\\/g, '\\\\')).join('<T>').split(dir.replace(/\\/g, '/')).join('<T>');
   const out = {};
   const preset = { interludePauseSec: 2 };   // 채널 막간 쉼이 켜져 있어도 카드 줄이 없으면 쉼이 없다
@@ -54,7 +54,7 @@ async function run(raw, dir, keep) {
   { const cj = JSON.stringify(canon(JSON.parse(norm(pj)))); if (process.env.ND_DUMP) fs.writeFileSync(process.env.ND_DUMP, cj); out.projectJson = sha(cj); }   // .vrew 는 실행마다 새 id 를 뽑고 id 로 엮은 묶음의 차례도 바뀐다 → id 를 지우고 내용으로 비교
   out.fxSide = fs.existsSync(vrew + '.fx.json');
   const mp4 = path.join(dir, 't.mp4');
-  const res = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: () => {}, par: 2, dissolveSec: 0, fx: null, cards: plan.cards.length ? plan.cards : null, info: null, infoSeed: 't' });
+  const res = await R.renderVrewToMp4({ vrewPath: vrew, outPath: mp4, log: () => {}, par: 2, dissolveSec: 0, fx: null, cards: plan.cards.length ? plan.cards.map((c) => (qs && c.kind === 'quote' ? { ...c, qs } : c)) : null, info: null, infoSeed: 't' });
   if (!res || !res.ok) throw new Error('렌더 실패 ' + (res && res.error));
   out.mp4 = sha(fs.readFileSync(mp4));
   if (keep) keep.push({ mp4, plan, pr });
@@ -102,6 +102,24 @@ function frameAt(f, t, rgb) {
       ok(fLate.bright > fEarly.bright * 1.5 && fLate.bright > 300, `글자가 차례로 찬다(0.5초 ${fEarly.bright} → 3초 ${fLate.bright} 화소)`);
     } catch (e) { ok(false, '판정력 실행 실패: ' + (e && e.stack || e)); }
     finally { try { fs.rmSync(dir2, { recursive: true, force: true }); } catch (_) {} }
+    console.log('[3] 💬 덧붙임5 53 — 주문 칸 quoteCard(판 · 강조 · 글꼴)가 있으면 그 값으로');
+    const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'nodir3-'));
+    try {
+      const raw3 = raw.replace('### 말하는 뱀\n', '### 말하는 뱀\n\n> 💬 대사카드: 뱀 | 하나님이 참으로 // 그렇게 말씀하시더냐\n');
+      const qc = require('../core/order-contract').parseQuoteCard({ bg: '#1A3050', accent: '#40C0A0', font: path.join(__dirname, '..', 'assets', 'fonts', 'book', 'NanumMyeongjo-Bold.ttf') }).quoteCard;
+      ok(qc && qc.bg === '1A3050' && qc.fontName && qc.fontFile, `칸 읽음(글꼴 이름 「${qc && qc.fontName}」)`);
+      const keep = [];
+      await run(raw3, dir3, keep, qc);
+      const { mp4, plan } = keep[0];
+      const c = plan.cards[0] || {};
+      const fNew = frameAt(mp4, c.t0 + 3.0, [0x1A, 0x30, 0x50]), fOld = frameAt(mp4, c.t0 + 3.0, [0x21, 0x1A, 0x13]);
+      ok(fNew.near > 0.85 && fOld.near < 0.02, `판이 주문 색(#1A3050 ${(fNew.near * 100).toFixed(0)}% · 옛 갈색 ${(fOld.near * 100).toFixed(0)}%)`);
+      ok(fNew.bright > 300, `글자가 그려진다(${fNew.bright} 화소 — 주문 글꼴로)`);
+      const fb = execFileSync(FF, ['-loglevel', 'error', '-ss', String(c.t0 + 3.0), '-i', mp4, '-frames:v', '1', '-vf', 'format=rgb24', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 25 });
+      let green = 0; for (let i = 0; i < fb.length; i += 3) if (fb[i + 1] > 140 && fb[i + 1] - fb[i] > 60) green++;   // 강조 색 #40C0A0 쪽 화소(판 #1A3050 · 글자 흰빛과 다름)
+      ok(green > 200, `말한 사람이 강조 색(#40C0A0 쪽 화소 ${green})`);
+    } catch (e) { ok(false, '53 실행 실패: ' + (e && e.stack || e)); }
+    finally { try { fs.rmSync(dir3, { recursive: true, force: true }); } catch (_) {} }
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
   console.log(`\n${fail ? '❌' : '✅'} no-directive ${pass}/${pass + fail}`);

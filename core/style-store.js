@@ -174,10 +174,32 @@ function getById(id) {
   return loadAll().find(s => s.id === id) || null;
 }
 
-/** style id → 영문 prompt. 없으면 null. */
+/** style id → 영문 prompt. 없으면 null.
+ *  🙅 2.0 주문의 그림체 다듬기(덧붙임5 51 · v1.0.35) — 무인 주문이 켠 동안만 그림체 글에서 마디를 뺀다:
+ *    `"beauty": false` = 사람을 부르는 마디(「beautiful women and handsome men」 등 · PERSON_RE) · `"styleDrop": [마디…]` = 적힌 마디 그대로(예: 「Korean manhwa inspired」).
+ *    그림 지시문을 만드는 모든 길(장면 · 판 따로 · 코덱스 · 썸네일)이 이 함수를 거치므로 여기 한 곳. 켜는 곳은 main runOrderHeadless 뿐 · 기본 = 꺼짐(예전과 같은 글).
+ *    마디 = 쉼표로 나눈 조각(괄호 안 쉼표는 한 마디 — layer-plates 배경판과 같은 규칙). */
+let _orderStyle = null;   // { noPeople, drop:[정규화한 마디] } | null
+const _normClause = (c) => String(c || '').toLowerCase().replace(/\s+/g, ' ').trim();
+function setOrderStyle(o) {
+  const drop = ((o && o.drop) || []).map(_normClause).filter(Boolean);
+  _orderStyle = o && (o.noPeople || drop.length) ? { noPeople: !!o.noPeople, drop } : null;
+}
+/** 그림 캐시 열쇠에 넣을 값 — 꺼져 있으면 '' (열쇠는 예전 그대로) */
+function orderStyleKey() { return _orderStyle ? JSON.stringify(_orderStyle) : ''; }
+/** 그림체 글 다듬기 → { prompt, dropped[], missing[] } (missing = styleDrop 에 적었지만 그림체에 없는 마디 — 부르는 쪽이 거절) */
+function trimStyle(prompt, o) {
+  const LP = require('./layer-plates'), RE = require('./pipeline').PERSON_RE;
+  const drop = ((o && o.drop) || []).map(_normClause).filter(Boolean);
+  const cl = LP.splitClauses(prompt);
+  const hit = (c) => (o && o.noPeople && RE.test(c)) || drop.includes(_normClause(c));
+  const have = new Set(cl.map(_normClause));
+  return { prompt: cl.filter((c) => !hit(c)).join(', '), dropped: cl.filter(hit), missing: drop.filter((d) => !have.has(d)) };
+}
 function getPrompt(id) {
   const s = getById(id);
-  return s ? s.prompt : null;
+  if (!s) return null;
+  return _orderStyle ? trimStyle(s.prompt, _orderStyle).prompt : s.prompt;
 }
 
 /** 코드의 씨앗 목록에 있는 id 인가 — **권한 판정이 아니다**(수정·삭제는 누구나 된다).
@@ -395,5 +417,5 @@ async function pushToServer(log = () => {}) {
   return { ok: false, error: w.error, unsupported: w.error === 'unsupported' };
 }
 
-module.exports = { loadAll, getById, getPrompt, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, SEED_PATH, BUILT_IN_STYLES,
+module.exports = { loadAll, getById, getPrompt, setOrderStyle, orderStyleKey, trimStyle, isBuiltIn, add, update, remove, setOrder, moveStyle, STORE_PATH, SEED_PATH, BUILT_IN_STYLES,
   pullFromServer, pushToServer, mergeStyles, mergeOrder, SYNC_PATH };

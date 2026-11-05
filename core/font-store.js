@@ -546,6 +546,6 @@ function addUserFont(srcFile) {
 }
 
 module.exports = {
-  listFonts, prepareFontsDir, convertedFile, addUserFont, assFamilyFor, convertFont, readTables, fontIdentity, kindOf,
+  listFonts, prepareFontsDir, convertedFile, addUserFont, assFamilyFor, convertFont, readTables, fontIdentity, kindOf, hasCodepoint,
   FALLBACK_VREW, USER_DIR,
 };

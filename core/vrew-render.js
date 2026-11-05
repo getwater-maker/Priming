@@ -577,7 +577,12 @@ function quoteEvents(c, a, b, st, en, ramp, rel) {
   const bgrOf = (rgb) => rgb.slice(4, 6) + rgb.slice(2, 4) + rgb.slice(0, 2);
   const out = [];
   const P0 = L.plate;
-  out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(${P0.x},${P0.y})\\bord0\\shad0\\1c&H${bgrOf(P0.rgb)}&${ramp(P0.max)}\\p1}m 0 0 l ${P0.w} 0 ${P0.w} ${P0.h} 0 ${P0.h}{\\p0}`);
+  // 💬 덧붙임5 53 — 2.0 주문 칸 quoteCard(c.qs)가 있으면 판 · 글자 · 강조(말한 사람) 색과 글꼴을 그 값으로(빈 칸은 지금 값) · 없으면 예전과 한 글자도 같다
+  const qs = c.qs || null;
+  const rgbOf = (o) => (qs ? (o.role === 'speaker' ? qs.accent : o.role === 'quote' ? qs.text : null) : null) || o.rgb;
+  const fontName = (qs && qs.fontName) || QUOTE_FONT;
+  const boldOf = (o) => (qs && qs.fontName ? (o.b && !(Number(qs.weight) >= 600) ? 1 : 0) : (o.b ? 1 : 0));   // 굵은 글꼴 파일이면 가짜 굵게를 겹치지 않는다
+  out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(${P0.x},${P0.y})\\bord0\\shad0\\1c&H${bgrOf((qs && qs.bg) || P0.rgb)}&${ramp(P0.max)}\\p1}m 0 0 l ${P0.w} 0 ${P0.w} ${P0.h} 0 ${P0.h}{\\p0}`);
   const f = SC.fadeOf(c);
   const al = (op) => Math.round(255 * (1 - Math.max(0, Math.min(1, op))));
   const cl = (x) => Math.max(a, Math.min(b, x));
@@ -598,7 +603,7 @@ function quoteEvents(c, a, b, st, en, ramp, rel) {
         return r <= 0 ? `{\\1a&H00&}${e}` : `{\\1a&HFF&\\t(${r},${r + 1},\\1a&H00&)}${e}`;
       }).join('')).join('\\N');
     } else body = o.lines.map((x) => assEsc(String(x))).join('\\N');
-    out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${QUOTE_FONT}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}\\q2\\1c&H${bgrOf(o.rgb)}&${fade}\\fscx${z0}\\fscy${z0}\\t(0,${rel(b)},\\fscx${z1}\\fscy${z1})}${body}`);
+    out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${fontName}\\fs${o.fs}\\b${boldOf(o)}\\i0\\bord0\\shad0\\fsp${o.sp || 0}\\q2\\1c&H${bgrOf(rgbOf(o))}&${fade}\\fscx${z0}\\fscy${z0}\\t(0,${rel(b)},\\fscx${z1}\\fscy${z1})}${body}`);
   }
   return out;
 }
@@ -665,7 +670,8 @@ function kenBurnsFilter(kb, frames, off = 0, total = 0, clamp = false) {
   const f = kb.from, to = kb.to || kb.from;
   const n = Math.max(1, (total > 0 ? total : frames) - 1);
   let prog = off !== 0 ? `(on+${off})/${n}` : `on/${n}`;
-  if (clamp) prog = `min(1,max(0,${prog}))`;   // 🌫 디졸브 창 — 자기 구간 밖(앞 그림의 끝 너머 · 뒤 그림의 시작 앞)은 끝·처음 크롭에 고정
+  if (clamp || kb.ease) prog = `min(1,max(0,${prog}))`;   // 🌫 디졸브 창 — 자기 구간 밖(앞 그림의 끝 너머 · 뒤 그림의 시작 앞)은 끝·처음 크롭에 고정
+  if (kb.ease) prog = `(${prog})*(${prog})*(3-2*(${prog}))`;   // 🎞 샷(⑱ · 2.0 주문 shots 만) — 천천히 붙고 천천히 멎는다(smoothstep) · ease 가 없는 .vrew 트랙은 예전 선형 그대로
   const num = (v, d) => (v == null || !isFinite(+v) ? d : +v);
   const lerp = (a, b) => `(${a}+(${b}-${a})*${prog})`;
   const sc = lerp(Math.min(1, num(f.scale, 1)), Math.min(1, num(to.scale, num(f.scale, 1))));
@@ -853,7 +859,7 @@ function planDissolves(chunks, dissolveSec, perTrack) {
     const p = res.length ? res[res.length - 1] : null, q = out[i];
     const per = hasPer && q.track && perTrack[q.track.trackId] || null;   // 이 그림으로 바뀌는 자리의 그룹별 전환(채널 디졸브보다 우선)
     const Dq = per ? Math.max(0, Math.min(10, +per.sec || 0)) : D;
-    if (Dq > 0 && p && p.type !== 'dissolve' && p.segIdx !== q.segIdx && p.f1 === q.f0 && single(p) && single(q) && p.file !== q.file) {
+    if (Dq > 0 && p && p.type !== 'dissolve' && p.segIdx !== q.segIdx && p.f1 === q.f0 && single(p) && single(q) && (p.file !== q.file || q.shotCut)) {   // 🎞 shotCut = 같은 그림 안의 샷 경계(2.0 주문 shots 만)
       const half = Math.round((Dq * FPS) / 2);
       const cap = (c) => Math.floor((c.f1 - c.f0) * 0.45);
       const h = Math.min(half, cap(p), cap(q), Math.floor(0.45 * Math.min(segLen.get(p.segIdx) || 0, segLen.get(q.segIdx) || 0)));
@@ -1244,6 +1250,20 @@ async function renderVrewToMp4(opts = {}) {
     // 🎬 그룹별 화면 전환(효과 ⑥) — 빌더가 .vrew 옆에 둔 <이름>.vrew.fx.json(trackId → {type, sec}). 없거나 못 읽으면 전환 없음(컷)
     let perTrans = null, userPauseWins = null, dualFx = null;
     try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object' && Object.keys(j.trans).length) perTrans = j.trans; if (j && Array.isArray(j.pauseWins)) userPauseWins = j.pauseWins.filter((w) => Array.isArray(w) && w[1] > w[0]); if (j && j.dualSub && j.dualSub.srt) dualFx = j.dualSub; } } catch (_) {}   // 🕳 pauseWins = 빈 클립 쉼 창(자막을 뺀다)
+    // 🎞 ⑱ 샷 나누기(2.0 주문 shots 만 · core/shot-plan) — 한 그림이 maxSec 보다 오래 보이면 같은 그림 안에서 다른 움직임 · 틀로 나눈다 · 없으면 구간 그대로
+    let shotPlan = null;
+    if (opts.shots) {
+      const SP = require('./shot-plan');
+      const eligible = (sg) => {
+        if (sg.type !== 'image' || !sg.file || !isStandardBox(sg.track)) return false;
+        const L = (sg.layers || []).filter((l) => l.file);
+        return L.length === 1 && L[0].t0 >= sg.start - 1e-3 && L[0].t0 + (L[0].tAll || 0) <= sg.end + 1e-3;   // 아래층으로 이어진 그림 · 다른 구간에도 걸친 그림은 그대로
+      };
+      shotPlan = SP.planShots(tl.segments, opts.shots, eligible);
+      tl.segments = shotPlan.segments;
+      const nSplit = new Set(shotPlan.shots.filter((x) => x.split).map((x) => x.seg)).size;
+      log(`   🎞 샷 — 그림 ${new Set(shotPlan.shots.map((x) => x.seg)).size}장 → 샷 ${shotPlan.shots.length}개(나눈 그림 ${nSplit}장 · 샷 최장 ${opts.shots.maxSec}초 · 확대 ≤ ${opts.shots.zoomPerSec}배/초 · 이동 ≤ ${opts.shots.panPerSec * 100}%/초)${shotPlan.still.length ? ` · ⚠ 8초 넘는 정지 ${shotPlan.still.length}곳` : ''}`);
+    }
     const maxTr = perTrans ? Math.max(0, ...Object.values(perTrans).map((x) => +x.sec || 0)) : 0;
     const tailSec = Math.max(dSec, maxTr);
     let chunks = planChunks(tl.segments, opts.chunkSec || DEFAULT_CHUNK_SEC, tailSec > 0 ? { minTailFrames: Math.round(tailSec * FPS) } : {});
@@ -1317,6 +1337,8 @@ async function renderVrewToMp4(opts = {}) {
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
       if (opts.cards.some((c) => c.lang === 'ja')) { try { fs.copyFileSync(path.join(fdir, '..', CARD_FONT_JA_FILE), path.join(fontsDir, CARD_FONT_JA_FILE)); } catch (_) { miss.push(CARD_FONT_JA_FILE); } }
       if (opts.cards.some((c) => c.kind === 'quote')) { try { fs.copyFileSync(path.join(fdir, '..', QUOTE_FONT_FILE), path.join(fontsDir, 'quote-' + QUOTE_FONT_FILE)); } catch (_) { miss.push(QUOTE_FONT_FILE); } }   // 💬 대사 카드 글꼴
+      { const qf = [...new Set(opts.cards.filter((c) => c.kind === 'quote' && c.qs && c.qs.fontFile).map((c) => c.qs.fontFile))];   // 💬 덧붙임5 53 — 주문이 고른 글꼴 파일(ASCII 이름으로 복사)
+        qf.forEach((f, i) => { try { fs.copyFileSync(f, path.join(fontsDir, `quote-u${i}` + path.extname(f).toLowerCase())); } catch (_) { miss.push(path.basename(f)); } }); }
       log(`   📜 화면 카드 ${opts.cards.length}장${opts.cards.some((c) => c.hideCaptions) ? '(자막 숨김 ' + opts.cards.filter((c) => c.hideCaptions).length + ')' : ''} — ${opts.cards.map((c) => (c.label || (c.kind === 'interlude' ? '막간' : c.kind === 'quote' ? '대사' : '병기')) + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
     }
     // 🌫 오버레이 모션 — 구간표가 있고 어느 구간이든 켜져 있으면 질감을 한 번만 만든다(JS 로 수백 ms)
@@ -1388,7 +1410,8 @@ async function renderVrewToMp4(opts = {}) {
     const durationSec = totalFrames / FPS;
     Object.assign(st, { phase: 'done', endedAt: Date.now(), speed: durationSec / renderSec }); emit();
     return { ok: true, output: opts.outPath, durationSec, renderSec, timings, speed: durationSec / renderSec, encoder: enc,
-      size: { width: ctx.OW || W, height: ctx.OH || H, fps: FPS, bitrate }, transitions: chunks.dissolves || 0, upscale: upReport };
+      size: { width: ctx.OW || W, height: ctx.OH || H, fps: FPS, bitrate }, transitions: chunks.dissolves || 0, upscale: upReport,
+      ...(shotPlan ? { shots: shotPlan.shots.map((x) => ({ ...x, start: Math.round(x.start * FPS) / FPS, end: Math.round(x.end * FPS) / FPS })), still: shotPlan.still } : {}) };   // 🎞 ⑱ 샷 계획(주문 shots 만)
   } catch (e) {
     if (isAborted()) return { ok: false, cancelled: true, error: '중단됨' };
     return { ok: false, error: e && e.message ? e.message : String(e) };

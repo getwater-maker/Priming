@@ -90,6 +90,10 @@ function readOrder(orderPath) {
     codex: null,       // 🎨 ㉞~㊶ { scope:'all'|'intro', concurrency 1~6(기본 4), capPercent(기본 60), timeoutSec } — imageEngine 이 코덱스일 때만
     characters: [],    // 👤 ㊳ [{ name, prompt, redraw }] — 캐릭터 셋(표정 9칸 + 전신 · 코덱스) · 장면은 `> 👤 인물: 이름, 이름`
     thumbPrompts: [],  // 🖼 ㊲① 썸네일 배경 여러 안(최대 3) — 코덱스면 코덱스로, 아니면 로컬 Qwen 으로 한 장씩
+    shots: null,       // 🎞 덧붙임5 52(⑱ ㉕) — { maxSec, transSec, zoomPerSec, panPerSec } 같은 그림 안 샷 나누기 · 속도 상한 · 겹침 전환(없으면 null = 지금과 같음)
+    quoteCard: null,   // 💬 덧붙임5 53 — { bg, text, accent, fontFile, fontName, weight } (없으면 null = 지금 고정 값 #211A13 · Pretendard Bold)
+    styleDrop: [],     // 🙅 덧붙임5 51 — 그림체 글에서 뺄 마디(적힌 그대로 · 예 "Korean manhwa inspired") · 그림체에 없는 마디면 거절
+    beauty: true,      // 🙅 덧붙임5 51 — false 면 그림체 문구에서 사람을 부르는 마디(미남미녀 등)를 모든 그림 지시문에서 뺀다(없으면 true = 지금과 같음)
     upload: {
       enabled: up.enabled !== false,
       title: _str(up.title),
@@ -117,6 +121,22 @@ function readOrder(orderPath) {
   if (raw.review != null) {
     if (typeof raw.review !== 'boolean') errors.push(`검수 판(review)은 true/false 여야 합니다 — ${JSON.stringify(raw.review)}`);
     else order.review = raw.review;
+  }
+  if (raw.beauty != null) {
+    if (typeof raw.beauty !== 'boolean') errors.push(`그림체 사람 마디(beauty)는 true/false 여야 합니다 — ${JSON.stringify(raw.beauty)}`);
+    else order.beauty = raw.beauty;
+  }
+  if (raw.styleDrop != null) {
+    if (!Array.isArray(raw.styleDrop) || raw.styleDrop.some((x) => !_str(x) || /,/.test(String(x)))) errors.push(`그림체에서 뺄 마디(styleDrop)는 글 목록이어야 합니다(한 칸 = 쉼표 없는 마디 하나) — ${JSON.stringify(raw.styleDrop)}`);
+    else order.styleDrop = raw.styleDrop.map(_str);
+  }
+  if (raw.shots != null) {
+    const sp = require('./shot-plan').parseShots(raw.shots);
+    if (sp.error) errors.push(sp.error); else order.shots = sp.shots;
+  }
+  if (raw.quoteCard != null) {
+    const qc = parseQuoteCard(raw.quoteCard, dir);
+    if (qc.error) errors.push(qc.error); else order.quoteCard = qc.quoteCard;
   }
   if (raw.redo != null) {
     const rr = parseRedo(raw.redo);
@@ -163,6 +183,45 @@ function readOrder(orderPath) {
     if (!order.upload.app) errors.push('업로드 앱(upload.app)이 비었습니다 — 어느 OAuth 앱으로 올릴지 주문이 정합니다');
   }
   return { ok: !errors.length, order, errors };
+}
+
+/**
+ * 💬 덧붙임5 53 — 대사 카드 모양 { bg, font, accent, text? }(채널마다 다른 카드 · 묶음 표지 피하기).
+ *   색 = "#RRGGBB"(또는 RRGGBB) · bg = 판 · accent = 말한 사람(강조) · text = 대사 글자(없으면 지금 값).
+ *   font = "Pretendard"(동봉 · 지금 값) 또는 글꼴 파일(.ttf/.otf · 주문서 폴더 기준 상대 경로도 됨) — 한글이 있어야 한다.
+ *   모르는 칸 · 빈 객체 = 거절(조용히 무시하지 않음). 빈 칸은 지금 값으로(칸마다 따로).
+ *   돌려줌 { quoteCard: { bg, text, accent: 'RRGGBB'|null, fontFile, fontName, weight }, error }
+ */
+const QUOTE_KEYS = ['bg', 'font', 'accent', 'text'];
+function parseQuoteCard(v, dir = '') {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return { quoteCard: null, error: `대사 카드 모양(quoteCard)은 { bg, font, accent } 객체여야 합니다 — ${JSON.stringify(v)}` };
+  const extra = Object.keys(v).filter((k) => !QUOTE_KEYS.includes(k));
+  if (extra.length) return { quoteCard: null, error: `대사 카드 모양(quoteCard)에 모르는 칸 — ${extra.join(', ')}(쓸 수 있는 칸: ${QUOTE_KEYS.join(', ')})` };
+  if (!QUOTE_KEYS.some((k) => v[k] != null && v[k] !== '')) return { quoteCard: null, error: '대사 카드 모양(quoteCard)이 비었습니다 — 칸을 하나 이상 적거나 quoteCard 를 빼세요' };
+  const out = { bg: null, text: null, accent: null, fontFile: null, fontName: null, weight: null };
+  for (const k of ['bg', 'accent', 'text']) {
+    if (v[k] == null || v[k] === '') continue;
+    const m = /^#?([0-9a-fA-F]{6})$/.exec(String(v[k]).trim());
+    if (!m) return { quoteCard: null, error: `quoteCard.${k} 는 #RRGGBB 색이어야 합니다 — ${JSON.stringify(v[k])}` };
+    out[k] = m[1].toUpperCase();
+  }
+  if (v.font != null && v.font !== '') {
+    const f = String(v.font).trim();
+    if (!/^pretendard$/i.test(f)) {
+      const file = path.isAbsolute(f) ? f : path.join(dir, f);
+      if (!/\.(ttf|otf)$/i.test(file)) return { quoteCard: null, error: `quoteCard.font 는 "Pretendard" 또는 .ttf/.otf 글꼴 파일입니다 — ${JSON.stringify(v.font)}` };
+      if (!fs.existsSync(file)) return { quoteCard: null, error: `quoteCard.font 글꼴 파일이 없습니다 — ${file}` };
+      try {
+        const FS = require('./font-store');
+        const t = FS.readTables(fs.readFileSync(file));
+        const id = FS.fontIdentity(t.tables);
+        if (!id.family) throw new Error('글꼴 이름을 읽지 못했습니다');
+        if (!FS.hasCodepoint(t.tables.cmap, 0xAC00)) return { quoteCard: null, error: `quoteCard.font 글꼴에 한글이 없습니다 — ${file}` };
+        Object.assign(out, { fontFile: file, fontName: id.family, weight: id.weight });
+      } catch (e) { return { quoteCard: null, error: `quoteCard.font 글꼴을 읽지 못했습니다 — ${file} · ${e.message}` }; }
+    }
+  }
+  return { quoteCard: out, error: '' };
 }
 
 /**
@@ -364,7 +423,7 @@ function blankResult(order, info = {}) {
   };
 }
 
-module.exports = {
+module.exports = { parseQuoteCard,
   VERSION, DEFAULT_ROOT, DEFAULT_OUT, VOICE_ENGINES, IMAGE_ENGINES, CODEX_ENGINE, STATUS, STAGES, MOTION_NAMES,
   configFile, loadConfig, kst, orderName, mmddOf, readOrder, checkKnown, emptyPromptGroups, readOps,
   nextResultPath, writeResultOnce, receiptPath, beatPath, stopPaths, stopRequested, writeReceipt, writeBeat,

@@ -172,10 +172,10 @@ console.log('[7] 📺 덧붙임2 ⑯ 출력 규격 · ⑰ 그림 확대 · ㉔ �
   ok(/_orderRender = \{ output: order\.output, upscale: order\.upscale, upscaleDir: path\.join\(it\.outRoot, '_업스케일'\)/.test(blk) && /finally \{\n    _orderStageHook = null;\n    _orderRender = null;/.test(blk), '렌더 규격은 runOrderHeadless 만 켜고 끝나면 지운다');
   ok((m.match(/_orderRender = \{/g) || []).length === 1, '규격을 켜는 곳은 한 곳');
   const ru = m.slice(m.indexOf('async function renderUploadMp4'), m.indexOf('// ── ⬆ 유튜브 비공개 업로드'));
-  ok(/const orderOpts = OR \?/.test(ru) && /VR\.renderVrewToMp4\(\{ \.\.\.orderOpts, vrewPath/.test(ru), 'renderUploadMp4 — 주문일 때만 output·bitrate·upscale 를 넘긴다(아니면 빈 객체)');
+  ok(/const orderOpts = OR \?/.test(ru) && /VR\.renderVrewToMp4\(\{ vrewPath, outPath, log, onProgress, isAborted: \(\) => !!S\.abort, dissolveSec: 0, \.\.\.orderOpts, fx: null/.test(ru), 'renderUploadMp4 — 주문일 때만 output·bitrate·upscale·shots(겹침 전환)를 넘긴다(아니면 빈 객체 · 디졸브 0)');
   ok(/\.\.\.\(_orderRender \? \{ orderRender: _orderRenderKey\(_orderRender\) \} : \{\}\)/.test(m) && /if \(!_orderRender && await askMp4Exists/.test(m), '규격이 지문에 들어가 바뀌면 다시 굽는다 · 주문은 같은 이름 MP4 를 묻지 않고 다시 굽는다(회원 지문·질문은 그대로)');
   ok(/if \(!_orderRender && await BF\.adoptIfFresh\(/.test(m), '주문은 기록 없는 기존 MP4 를 채택하지 않는다(어느 규격인지 모른다)');
-  const lg = m.slice(m.indexOf('async function _orderMakeLog'), m.indexOf('async function runOrderHeadless'));
+  const lg = m.slice(m.indexOf('function _orderShotLog'), m.indexOf('async function runOrderHeadless'));
   const keys = ['outWidth', 'outHeight', 'outFps', 'videoKbps', 'fileBytes', 'uploadSec', 'upscaleModel', 'images', 'shots', 'shotAvgSec', 'shotMaxSec', 'imageMaxSec', 'transitions', 'cards', 'maps', 'timelines', 'depthImages', 'fxLayers', 'videoClips', 'videoEngine', 'srt', 'externalFiles'];
   const miss = keys.filter((k) => !new RegExp('\\b' + k + ':').test(lg));
   ok(!miss.length, `㉔ 결과서 log 칸 ${keys.length}개${miss.length ? ' — 빠짐: ' + miss.join(',') : ''}`);

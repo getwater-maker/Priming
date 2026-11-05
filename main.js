@@ -3216,10 +3216,11 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
     if (!_pTimer) _pTimer = setTimeout(send, Math.max(0, 250 - (Date.now() - _pt)));
   };
   const OR = _orderRender;   // 📺 2.0 주문만 — 출력 크기·비트레이트·그림 확대(없으면 예전 그대로: 1920×1080 · 950k · 확대 없음)
-  const orderOpts = OR ? { ...(OR.output ? { output: { width: OR.output.width, height: OR.output.height }, fps: OR.output.fps, bitrate: OR.output.bitrate } : {}), ...(OR.upscale ? { upscale: { dir: OR.upscaleDir, beforeEach: () => _yieldGpuToRemote(log) } } : {}) } : {};
-  const cardsO = cardsOptsFor(pr, preset), infoO = infoOptsFor(pr, preset, ctx && ctx.scriptPath);
+  const orderOpts = OR ? { ...(OR.output ? { output: { width: OR.output.width, height: OR.output.height }, fps: OR.output.fps, bitrate: OR.output.bitrate } : {}), ...(OR.upscale ? { upscale: { dir: OR.upscaleDir, beforeEach: () => _yieldGpuToRemote(log) } } : {}), ...(OR.shots ? { shots: OR.shots, dissolveSec: OR.shots.transSec } : {}) } : {};   // 🎞 ⑱ 샷 · 겹침 전환(주문 shots 만)
+  let cardsO = cardsOptsFor(pr, preset); const infoO = infoOptsFor(pr, preset, ctx && ctx.scriptPath);
+  if (OR && OR.quoteCard && Array.isArray(cardsO)) cardsO = cardsO.map((c) => (c.kind === 'quote' ? { ...c, qs: OR.quoteCard } : c));   // 💬 덧붙임5 53 — 2.0 주문의 대사 카드 모양(없으면 지금 고정 값)
   if (OR) OR.cards = { screen: (cardsO || []).length, info: (infoO || []).length, quote: (cardsO || []).filter((c) => c.kind === 'quote').length };   // 📺 ㉔ 카드 수(이번 렌더에 구운 판)
-  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ ...orderOpts, vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsO, info: infoO, infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
+  const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, ...orderOpts, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsO, info: infoO, infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (OR) OR.result = r;
   if (!r.ok) {   // 실패·중단도 패널이 알 수 있게(닫기 버튼으로 바뀐다)
@@ -9192,7 +9193,29 @@ async function _orderLayerPlates(it, order, redoNums, L, cx = null) {
 }
 /** 📺 주문 렌더 규격 → 빌드 지문 조각(⑯ 크기·프레임·비트레이트 · ⑰ 확대 모델) — 바뀌면 같은 대본이라도 MP4 를 다시 굽는다 */
 function _orderRenderKey(OR) {
-  return { output: OR.output ? [OR.output.width, OR.output.height, OR.output.fps, OR.output.kbps] : null, upscale: OR.upscale ? require('./core/vrew-render').UPSCALE_MODEL : null };
+  const qc = OR.quoteCard;   // 💬 53 — 칸이 있을 때만 열쇠에 넣는다(없는 주문의 지문은 예전과 같다)
+  return { output: OR.output ? [OR.output.width, OR.output.height, OR.output.fps, OR.output.kbps] : null, upscale: OR.upscale ? require('./core/vrew-render').UPSCALE_MODEL : null,
+    ...(qc ? { quoteCard: [qc.bg, qc.text, qc.accent, qc.fontName, qc.weight, qc.fontFile || null] } : {}),
+    ...(OR.shots ? { shots: [OR.shots.maxSec, OR.shots.transSec, OR.shots.zoomPerSec, OR.shots.panPerSec, 'v1'] } : {}) };   // 🎞 52 — 칸이 있을 때만
+}
+/** 🎞 ⑱ ㉕ 샷 칸(덧붙임5 52) — 렌더러가 돌려준 샷 계획을 장면(G번호)에 붙여 적는다. 칸이 없거나 이번에 굽지 않았으면 null */
+function _orderShotLog(order, R, pr, it, preset, mp4Sec) {
+  const empty = { shots: null, shotAvgSec: null, shotMaxSec: null, shotList: null, stillPlanned: null, stillMaxSec: null };
+  if (!order.shots) return empty;
+  if (!R || !Array.isArray(R.shots)) return { ...empty, shotsNote: '이번 실행에서 MP4 를 다시 굽지 않아 샷 계획이 없습니다(같은 입력 · 같은 규격)' };
+  const SPl = require('./core/shot-plan');
+  const RS = require('./core/review-sheet');
+  const spans = RS.sceneSpans(pr, P.pausePlanOf(pr, preset).map, mp4Sec);
+  const gOf = (t) => { const s = spans.find((x) => t >= x.t0 - 1e-3 && t < x.t1 - 1e-3); return s ? s.num : null; };
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const list = R.shots.map((x) => ({ g: gOf((x.start + x.end) / 2), k: x.k + 1, n: x.n, at: RS.mmss(x.start), sec: r1(x.end - x.start), motion: SPl.KIND_NAME[x.kind] || x.kind, frame: x.frame ? SPl.FRAME_NAME[x.frame] : '그림 그대로', speedCut: x.cap < 1 ? Math.round((1 - x.cap) * 100) + '%' : null }));
+  const secs = list.map((x) => x.sec);
+  const still = (R.still || []).map((x) => ({ at: RS.mmss(x.start), sec: r1(x.sec), what: x.what, g: gOf((x.start + x.end) / 2) }));
+  return {
+    shots: list.length, shotAvgSec: secs.length ? r1(secs.reduce((a, b) => a + b, 0) / secs.length) : null, shotMaxSec: secs.length ? Math.max(...secs) : null,
+    shotList: list, shotsOrdered: order.shots,
+    stillPlanned: still, stillMaxSec: still.length ? Math.max(...still.map((x) => x.sec)) : 0,   // ㉕ 렌더 계획에서 센 8초 넘는 정지(움직임 없음 · 겹친 그림 · 검은 화면) — 카드 · 판은 검수 판의 정지구간.tsv(프레임 차이)
+  };
 }
 /** ⑥ ⑨ 제작 기록 — 재서 적기만(판정 없음). 값을 모르면 null + why */
 async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt, layerRes }) {
@@ -9238,7 +9261,7 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt, layerR
     upscaleModel: order.upscale ? VRm.UPSCALE_MODEL : null,
     upscale: up ? { images: up.images, upscaled: up.upscaled, reused: up.reused, enough: up.enough, failed: up.failed, scales: up.scales, sec: up.sec, dir: up.dir } : null,
     images: pr.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath)).length,
-    shots: null, shotAvgSec: null, shotMaxSec: null,   // ⑱ 샷 나누기 전 — 지금은 한 그림 = 한 움직임(장면 값이 곧 그림 값)
+    ..._orderShotLog(order, R, pr, it, preset, mp4Sec),   // 🎞 ⑱ ㉕ 샷 · 정지(주문 shots 만 — 없으면 shots null 그대로)
     imageMaxSec: st.sceneMaxSec,
     transitions: R ? (R.transitions > 0 ? `겹침 전환 ${R.transitions}곳` : '컷') : null,
     cards: cardN ? cardN.screen + cardN.info : null, cardsScreen: cardN ? cardN.screen : null, cardsInfo: cardN ? cardN.info : null,
@@ -9319,6 +9342,20 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     const order = r0.order;
     if (order) Object.assign(res, { order: order.name, orderId: order.orderId, channelId: order.channelId });
     if (!r0.ok) return finish(OC.STATUS.reject, r0.errors.join(' / '));
+    // 🙅 덧붙임5 51 — beauty:false 면 이 실행 동안 그림체 문구에서 사람 마디를 뺀다(style-store.getPrompt 한 곳 · finally 에서 끈다)
+    // 🙅 덧붙임5 51 — beauty:false · styleDrop 이면 이 실행 동안 그림체 글에서 그 마디를 뺀다(style-store.getPrompt 한 곳 · finally 에서 끈다)
+    let styleTrim = null;
+    if (order.beauty === false || order.styleDrop.length) {
+      const SSb = require('./core/style-store');
+      const st0 = (SSb.getById(order.style) || {}).prompt;
+      if (st0 != null) {   // 없는 그림체는 아래 checkKnown 이 거절한다
+        const so = { noPeople: order.beauty === false, drop: order.styleDrop };
+        styleTrim = SSb.trimStyle(st0, so);
+        if (styleTrim.missing.length) return finish(OC.STATUS.reject, `그림체 「${order.style}」 에 없는 마디를 빼라고 했습니다(styleDrop) — ${styleTrim.missing.join(' · ')}`);
+        SSb.setOrderStyle(so);
+        L(`🙅 그림체 마디 뺌 — ${styleTrim.dropped.length ? styleTrim.dropped.map((x) => '「' + x + '」').join(' · ') : '뺄 마디 없음'}`);
+      }
+    }
     const ops = OC.readOps(cfg.opsFile);
     if (!ops.run) return finish(OC.STATUS.reject, ops.why);
     const known = await _orderKnownNames();
@@ -9396,7 +9433,8 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
       if (hasLayer()) { stage = '판 따로'; beat(); try { layerRes = await _orderLayerPlates(it, order, [], L, null); } catch (e2) { if (stopping || S.abort || (e2 && e2.code === 'MAKE_ABORTED')) return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: hasPieces() }); layerRes = layerFail(e2); } }
     }
     // 📺 ⑯ ⑰ 렌더 규격 — 이 주문의 MP4 에만(renderUploadMp4 가 읽는다 · 확대 사본은 그 편 폴더의 _업스케일 — 원본 그림은 media-1 그대로)
-    _orderRender = { output: order.output, upscale: order.upscale, upscaleDir: path.join(it.outRoot, '_업스케일'), result: null };
+    _orderRender = { output: order.output, upscale: order.upscale, upscaleDir: path.join(it.outRoot, '_업스케일'), result: null, ...(order.quoteCard ? { quoteCard: order.quoteCard } : {}), ...(order.shots ? { shots: order.shots } : {}) };
+    if (order.quoteCard) { const q = order.quoteCard; L(`💬 대사 카드 모양 — 판 ${q.bg ? '#' + q.bg : '기본'} · 글자 ${q.text ? '#' + q.text : '기본'} · 강조 ${q.accent ? '#' + q.accent : '기본'} · 글꼴 ${q.fontName || 'Pretendard(기본)'}`); }
     if (order.output || order.upscale) L(`📺 렌더 규격 — ${order.output ? `${order.output.width}×${order.output.height} · ${order.output.fps}fps · ${order.output.bitrate}` : '기본(1920×1080 · 30fps · 950k)'} · 그림 확대 ${order.upscale ? '켬' : '끔'}`);
     // ① 제작 — 화면의 ⚡ 만들기와 같은 길(제작 칸 · 이어받기 · 게이트 그대로)
     GS.resetYield();
@@ -9456,6 +9494,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     } else res.thumbNote = '썸네일 배경 지시문이 비어 만들지 않았습니다';
     res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt: res.files.srt, layerRes });
     res.log.redoScenes = order.redo.length ? redoNums : null;
+    res.log.styleTrim = styleTrim ? { beauty: order.beauty, styleDrop: order.styleDrop, dropped: styleTrim.dropped, stylePrompt: require('./core/style-store').getPrompt(order.style) } : null;   // 🙅 51 — 칸이 없으면 null
     res.log.codex = _codexLogOf(cx);   // 🎨 ㊶ 코덱스 칸(코덱스 주문이 아니면 null)
     if (cx) res.log.imageEngineUsed = res.log.codex.engine;   // 🔁 ㊾ 이번에 다시 그린 장면(G번호) — 다시 주문이 아니면 null
     // 🔍 ㊽ 검수 판 — 주문이 켠 때만(review: true) · 구운 MP4 에서 장면마다 대표 프레임 → 4×4 판 + 정지 구간 표 · 판정 없음
@@ -9467,7 +9506,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         const pmap = P.pausePlanOf(pr, preset).map;
         const cards = Array.isArray(pr.screenCards) && pr.screenCards.length ? SCr.plan(pr, pr.screenCards, { pauseSec: preset.interludePauseSec }).cards : [];
         const summaryOf = (g) => [g && g.layerOk ? '판 따로(층)' : OC.motionName(KB.patternIndexOf(g)), g && g.layered && !g.layerOk ? '판 따로→한 장' : ''].filter(Boolean).join(' · ');
-        const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0 });
+        const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0, shots: (_orderRender && _orderRender.result && _orderRender.result.shots) || null });
         if (rv.ok) {
           res.files.review = rv.sheets; res.files.stillTsv = rv.stillTsv;
           res.log.reviewSheets = rv.sheets.length;
@@ -9508,6 +9547,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
   } finally {
     _orderStageHook = null;
     _orderRender = null;
+    try { require('./core/style-store').setOrderStyle(null); } catch (_) {}
     if (beatT) clearInterval(beatT);
     if (stopT) clearInterval(stopT);
     if (!checkOnly) { try { fs.rmSync(OC.beatPath(resultsDir, name), { force: true }); } catch (_) {} try { for (const f of OC.stopPaths(resultsDir, name)) if (stopping) fs.rmSync(f, { force: true }); } catch (_) {} }

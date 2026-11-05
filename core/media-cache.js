@@ -29,7 +29,9 @@ function _fileHash(p) {
 }
 
 function imageKey(prompt, style, aspect, engine) {
-  return _sha(JSON.stringify({ k: 'img', p: String(prompt || ''), s: style || '', a: aspect || '', e: engine || '' }));
+  // 🙅 2.0 주문 beauty:false(덧붙임5 51) 동안은 그림체 글이 달라진다 → 열쇠에 표시(꺼져 있으면 열쇠는 예전과 한 글자도 같다 — 미남미녀 그림이 캐시로 되살아나던 첫 시험)
+  let os = ''; try { os = require('./style-store').orderStyleKey(); } catch (_) {}
+  return _sha(JSON.stringify({ k: 'img', p: String(prompt || ''), s: style || '', a: aspect || '', e: engine || '', ...(os ? { os } : {}) }));
 }
 function videoKey(prompt, srcImagePath, aspect, engine) {
   return _sha(JSON.stringify({ k: 'vid', p: String(prompt || ''), img: _fileHash(srcImagePath), a: aspect || '', e: engine || '' }));

@@ -51,7 +51,7 @@ function sceneSpans(project, pauseMap, mp4Sec) {
  *   summaryOf(g) = 칸 글 줄의 요약(지시 줄 요약 — 판 · 움직임 · 인물 등 · 없으면 빈 글)
  * @returns [{ kind:'scene'|'quote', num, t, label }]
  */
-function cellsOf(project, spans, cards, summaryOf) {
+function cellsOf(project, spans, cards, summaryOf, shots) {
   const SC = require('./screen-cards'); const Q = SC.QUOTE;
   const cells = [];
   const byNum = new Map((project.groups || []).map((g) => [g.num, g]));
@@ -60,8 +60,16 @@ function cellsOf(project, spans, cards, summaryOf) {
     const sum = summaryOf ? String(summaryOf(g) || '') : '';
     const qs = (cards || []).filter((c) => c.kind === 'quote' && c.t0 >= sp.t0 - 0.05 && c.t0 < sp.t1 + 0.05);
     const end = qs.length ? Math.min(...qs.map((c) => c.t0)) : sp.t1;   // 장면 그림이 보이는 끝(대사 카드 전까지)
+    // 🎞 ⑱ 샷 칸(덧붙임5 52 · 주문 shots 만) — 샷마다 한 칸(대사 카드에 가린 몫은 뺀 가운데) · 이 장면에 샷이 없으면 예전처럼 장면 한 칸
+    const mine = Array.isArray(shots) ? shots.filter((x) => (x.start + x.end) / 2 >= sp.t0 - 1e-3 && (x.start + x.end) / 2 < sp.t1 - 1e-3) : [];
+    const shown = mine.map((x) => ({ x, a: Math.max(x.start, sp.t0), b: Math.min(x.end, end) })).filter((y) => y.b - y.a > 0.2);
+    if (shown.length) {
+      const KN = require('./shot-plan').KIND_NAME, FN = require('./shot-plan').FRAME_NAME;
+      for (const { x, a, b } of shown) cells.push({ kind: 'shot', num: sp.num, t: a + (b - a) / 2, label: `G${sp.num} 샷${x.k + 1}/${x.n} · ${mmss(x.start)} · ${KN[x.kind] || x.kind}${x.frame ? ' · ' + FN[x.frame] : ''}` });
+    } else {
     const t = sp.t0 + Math.max(0, end - sp.t0) / 2;
     cells.push({ kind: 'scene', num: sp.num, t, label: `G${sp.num} · ${mmss(sp.t0)}${sum ? ' · ' + sum : ''}` });
+    }
     for (const c of qs) {
       const tq = Math.min(c.t1 - 0.1, c.t0 + Q.lead + Math.min(Q.type, (c.t1 - c.t0) * 0.5) + 0.3);
       cells.push({ kind: 'quote', num: sp.num, t: tq, label: `G${sp.num} 대사카드 ·${mmss(c.t0)} · ${c.speaker || '대사'}` });
@@ -88,14 +96,14 @@ async function stillSpans(mp4, minSec = STILL_MIN_SEC) {
 
 /**
  * 검수 판 만들기.
- * @param {object} a { mp4, outDir, project, pauseMap, cards, summaryOf, mp4Sec, fontFile }
+ * @param {object} a { mp4, outDir, project, pauseMap, cards, summaryOf, mp4Sec, fontFile, shots(🎞 ⑱ 렌더러의 샷 계획 — 있으면 샷마다 한 칸) }
  * @returns {Promise<{ ok, sheets: string[], cells: number, stillTsv: string|null, still: Array, error? }>}
  */
 async function makeReviewSheets(a) {
   const { mp4, outDir } = a;
   if (!mp4 || !fs.existsSync(mp4)) return { ok: false, sheets: [], cells: 0, stillTsv: null, still: [], error: 'MP4 가 없습니다' };
   const spans = sceneSpans(a.project, a.pauseMap, a.mp4Sec);
-  const cells = cellsOf(a.project, spans, a.cards, a.summaryOf);
+  const cells = cellsOf(a.project, spans, a.cards, a.summaryOf, a.shots);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-'));
   try {
     fs.mkdirSync(outDir, { recursive: true });
