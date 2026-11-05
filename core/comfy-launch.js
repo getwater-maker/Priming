@@ -140,7 +140,13 @@ let _pending = null;   // single-flight — 동시에 여러 생성이 들어와
 async function ensureLocalComfy(opts = {}) {
   // spawnFn 은 테스트에서 갈아끼운다 — 진짜 앱을 띄우지 않고 기다림·단일실행·타임아웃을 검증하기 위해.
   const { baseUrl, log = () => {}, timeoutSec = 150, exePath = null, pollMs = 2000, spawnFn = spawn } = opts;
-  if (!isLocalUrl(baseUrl)) return { ok: true, skipped: 'remote' };
+  // 🖥 원격(아내 PC 가 메인 PC ComfyUI 를 빌려 쓸 때) = 메인 PC 음성 서버에 켜 달라고 한다(v1.0.39 · core/comfy-remote)
+  //   remoteWake:false = 예전처럼 손대지 않음(시험용)
+  if (!isLocalUrl(baseUrl)) {
+    if (opts.remoteWake === false || /comfy\.org/i.test(String(baseUrl || ''))) return { ok: true, skipped: 'remote' };   // 클라우드는 켤 대상이 아니다
+    const wakeFn = opts.remoteWake || require('./comfy-remote').wake;
+    return wakeFn({ baseUrl, log, timeoutSec, pollMs });
+  }
   if (await ping(baseUrl)) return { ok: true, already: true };
   if (_pending) return _pending;                       // 이미 누가 띄우는 중 — 그 결과를 함께 쓴다
 

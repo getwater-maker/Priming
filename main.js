@@ -442,6 +442,10 @@ function _mimeOf(p) {
 app.whenReady().then(() => {
   // 🎞 길이 맞춘 영상 캐시(video-fit) — 14일 넘은 것 정리(배경에서, 막지 않는다)
   setTimeout(() => { try { require('./core/video-fit').pruneCache(14); } catch (_) {} }, 6000);
+  // 🖥 메인 PC(음성 서버 + ComfyUI) — 아내 PC 가 음성 서버를 거쳐 ComfyUI 를 켤 예약 작업을 등록(v1.0.39 · core/comfy-remote)
+  if (!process.env.PM_UI_SMOKE && !HEADLESS) setTimeout(() => {
+    try { if (require('./core/ref-voice').isServerHost()) require('./core/comfy-remote').ensureWakeTask({ log }).then((r) => { if (r.ok) log('🖥 예약 작업 「Priming_ComfyUI」 등록 — 아내 PC 가 이 PC 의 ComfyUI 를 켤 수 있습니다'); }).catch(() => {}); } catch (_) {}
+  }, 7000);
   // media://<encoded-abs-path> → 로컬 파일. Range 직접 처리(비디오 스트리밍 — net.fetch(file://)는 Range에서 ERR_UNEXPECTED).
   protocol.handle('media', (request) => {
     // 쿼리/프래그먼트 제거 — 미리보기 캐시버스터(?t=…)가 파일 경로를 오염시키지 않게.
@@ -4287,14 +4291,27 @@ async function _stopLocalQwenComfy(logger) {
   if (!HEADLESS && orderRunnerActive()) { (logger || log)('  ⓘ ComfyUI 서버는 끄지 않습니다 — 무인 제작(2.0 주문)이 쓰는 중입니다'); return; }
   try {
     const cfg = _forceLocalComfy(require('./core/comfy-image').loadConfig());
-    await require('./core/comfy-launch').stopLocalComfy({ baseUrl: cfg.baseUrl, log: logger || log });
+    const CL = require('./core/comfy-launch'), CR = require('./core/comfy-remote');
+    // 🖥 두 PC 가 한 ComfyUI 를 쓴다(v1.0.39) — 끄기 전에 메인 PC 음성 서버에 다른 PC 사용을 묻는다 · 쓰는 중이면 3분 뒤 다시
+    let r;
+    if (CL.isLocalUrl(cfg.baseUrl)) {
+      const others = await CR.othersRecent();
+      if (Object.keys(others).length) { (logger || log)('  🖥 ComfyUI 서버는 끄지 않습니다 — 다른 PC 가 쓰는 중입니다(3분 뒤 다시 봅니다)'); r = { skipped: 'other-client' }; }
+      else r = await CL.stopLocalComfy({ baseUrl: cfg.baseUrl, log: logger || log });
+    } else r = await CR.stopRemote({ log: logger || log });   // 원격 = 메인 PC 서버가 판단
+    if (r && (r.skipped === 'other-client' || r.reason === 'other-client') && !_localQwenStopTimer) {
+      _localQwenStopTimer = setTimeout(() => { _localQwenStopTimer = null; _stopLocalQwenComfy(log); }, LOCAL_QWEN_IDLE_STOP_MS);
+    }
   } catch (e) { (logger || log)('  ⚠ ComfyUI 서버 끄기 오류 — ' + e.message); }
 }
+let _localQwenTouchStop = null;
 async function _withLocalQwenStop(onlyNums, logger, fn) {
   if (_localQwenStopTimer) { clearTimeout(_localQwenStopTimer); _localQwenStopTimer = null; }
+  if (!_localQwenActive) { try { _localQwenTouchStop = require('./core/comfy-remote').startTouch(); } catch (_) {} }   // 🖥 「쓰는 중」을 메인 PC 음성 서버에 1분마다
   _localQwenActive++;
   try { return await fn(); } finally {
     _localQwenActive--;
+    if (!_localQwenActive && _localQwenTouchStop) { try { _localQwenTouchStop(); } catch (_) {} _localQwenTouchStop = null; }
     if (!_localQwenActive) {
       if (onlyNums && onlyNums.length) _localQwenStopTimer = setTimeout(() => { _localQwenStopTimer = null; _stopLocalQwenComfy(log); }, LOCAL_QWEN_IDLE_STOP_MS);
       else await _stopLocalQwenComfy(logger);

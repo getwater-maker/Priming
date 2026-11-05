@@ -2,13 +2,19 @@
 
 const fs = require('fs');
 
+const CONN_RE = /연결 실패|연결할 수 없|켜지 못했|꺼져 있|ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed/i;
+function isConnectionError(msg) { return CONN_RE.test(String(msg || '')); }
+
 async function recoverImages({ project, groups, generate, log, aborted = () => false, claude = require('./claude-api') }) {
   const unresolved = [];
   for (const group of groups) {
     if (aborted()) break;
     const original = String(group.imagePrompt || '');
     let recovered = false;
-    for (let attempt = 1; attempt <= 2 && !aborted(); attempt++) {
+    // 🔌 서버에 닿지 못한 실패는 프롬프트를 고쳐도 낫지 않는다 — Claude 로 넘기지 않고 원래 까닭을 그대로 남긴다
+    //   (v1.0.39 · 아내 PC 「ComfyUI 연결 실패」가 「Claude API 키가 없어」로 덮여 원인이 가려졌다)
+    const noConn = isConnectionError(group.imageError);
+    for (let attempt = 1; attempt <= 2 && !aborted() && !noConn; attempt++) {
       if (!claude.available()) { group.imageError = 'Claude API 키가 없어 자동 복구할 수 없습니다'; break; }
       const at = project.groups.indexOf(group);
       const textOf = (g) => g ? (project.getSentencesOfGroup(g) || []).map((s) => s.text).join(' ').slice(0, 1800) : '';
@@ -50,4 +56,4 @@ async function recoverImages({ project, groups, generate, log, aborted = () => f
   return unresolved;
 }
 
-module.exports = { recoverImages };
+module.exports = { recoverImages, isConnectionError };

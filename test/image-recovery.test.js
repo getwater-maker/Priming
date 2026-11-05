@@ -30,6 +30,15 @@ const { recoverImages } = require('../core/image-recovery');
     await run(noKey, { ...claude, available: () => false }, async () => { throw new Error('호출 금지'); });
     assert.equal(calls, 0); assert.match(noKey.imageError, /API 키/);
 
+    // 🔌 서버 연결 실패는 Claude 로 넘기지 않고 원래 까닭을 남긴다(v1.0.39 · 아내 PC 사고)
+    calls = 0;
+    const noConn = { ...group(), imageError: 'ComfyUI 연결 실패 (http://100.1.2.3:8188)' };
+    assert.deepEqual(await run(noConn, claude, async () => { throw new Error('호출 금지'); }), [13]);
+    assert.equal(calls, 0); assert.match(noConn.imageError, /복구 필요 — ComfyUI 연결 실패/); assert.doesNotMatch(noConn.imageError, /API 키/);
+    const noConnNoKey = { ...group(), imageError: 'ComfyUI 연결 실패 (x)' };
+    await run(noConnNoKey, { ...claude, available: () => false }, async () => {});
+    assert.doesNotMatch(noConnNoKey.imageError, /API 키/);
+
     const unchanged = group();
     let generated = 0;
     await run(unchanged, { ...claude, ask: async () => ({ ok: true, text: JSON.stringify({ prompt: unchanged.imagePrompt }) }) }, async () => { generated++; });
