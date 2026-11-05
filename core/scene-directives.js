@@ -2,7 +2,10 @@
 /**
  * scene-directives.js — 🎞 장면 지시 줄(2.0 덧붙임4 ㊷ · v1.0.31) — 제작본 장면(`###`) 아래 인용 줄로 그 장면의 화면을 정한다.
  *     > 🎞 움직임: 줌인          (그 장면 그림의 움직임 — 이름은 MOTION_WORDS)
- *     > 🎞 판: 따로              (㊸ 인물판 · 배경판을 따로 — 다음 묶음에서 그린다 · 지금은 읽고 세기만)
+ *     > 🎞 판: 따로              (㊸ 인물판 · 배경판을 따로 그려 층으로 — v1.0.33 · 그리기는 main _orderLayerPlates + core/layer-plates)
+ *     > 🖼️ 배경: <지시문>        (㊸ 판 따로 장면의 배경판 — 사람 없는 장면)
+ *     > 🖼️ 인물: <지시문>        (㊸ 판 따로 장면의 인물판 — 단색 바탕으로 그려 색을 빼 투명 PNG)
+ *     > 👤 인물: 이름, 이름       (㊳ 이 장면에 나오는 인물 — 코덱스 캐릭터 셋을 참조 그림으로 · v1.0.33)
  *     > 💬 대사카드: 말한 사람 | 대사   (㊹ — core/screen-cards 가 읽는다)
  *   🔒 줄이 없으면 아무것도 바꾸지 않는다(test:nodirective). 장면 → 그룹은 **그 장면 첫 낭독 문장**이 든 그룹(도입부처럼 여러 `###` 이 한 그룹이면 앞 장면이 이긴다 + 경고).
  *   🔑 「같은 움직임 연달아 금지」(덧붙임2 ⑱ 의 한 줄 · 덧붙임4 ㊷ ②) — 지정 움직임이 바로 앞 그룹의 움직임과 같으면 반대 방향으로 바꾸고 기록한다(motionChanged).
@@ -11,6 +14,8 @@
  */
 const HEAD_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const DIR_RE = /^[ \t]*>[ \t]*🎞[ \t]*([^:：]+?)[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const PLATE_RE = /^[ \t]*>[ \t]*🖼️?[ \t]*(배경|인물)[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;   // ㊸ 판 지시문(「이미지:」 와 다른 낱말이라 그림 지시문으로 잡히지 않는다)
+const CAST_RE = /^[ \t]*>[ \t]*👤[ \t]*인물[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;   // ㊳ 이 장면에 나오는 인물(캐릭터 셋 이름) — `> 👤 인물: 과부, 예수`
 // 움직임 이름 → core/ken-burns 의 look.motion 값(① 칸 「움직임」 메뉴와 같은 여섯 + 없음)
 const MOTION_WORDS = {
   in: ['줌인', '다가가기', '천천히다가가기', '밀어들어가기', 'zoomin', 'in'],
@@ -45,6 +50,10 @@ function parse(rawText) {
     if (/^\s*```/.test(ln)) { fence = !fence; return; }
     if (fence) return;
     const h = HEAD_RE.exec(ln); if (h) { heading = h[2]; headLine = i; return; }
+    const pm = PLATE_RE.exec(ln);
+    if (pm) { const d = { line: i + 1, heading, headLine, raw: ln.trim(), kind: 'plate', part: pm[1] === '배경' ? 'bg' : 'fig', value: pm[2] }; if (!pm[2]) d.error = `${pm[1]} 지시문이 비었습니다`; out.push(d); return; }
+    const cm = CAST_RE.exec(ln);
+    if (cm) { const names = cm[1].split(/[,，·、]/).map((x) => x.trim()).filter(Boolean); const d = { line: i + 1, heading, headLine, raw: ln.trim(), kind: 'cast', value: names }; if (!names.length) d.error = '인물 이름이 비었습니다'; out.push(d); return; }
     const m = DIR_RE.exec(ln); if (!m) return;
     const key = m[1].replace(/\s+/g, ''), val = m[2];
     const d = { line: i + 1, heading, headLine, raw: ln.trim() };
@@ -99,6 +108,17 @@ function apply(project, rawText) {
     taken.set(key, d.headLine);
     if (d.kind === 'motion') { g.look = { ...(g.look || {}), motion: d.value }; res.motionOrdered++; res.list.push({ g: g.num, kind: 'motion', value: d.value }); }
     else if (d.kind === 'layer') { if (d.value) { g.layered = true; res.layerScenes++; } else delete g.layered; res.list.push({ g: g.num, kind: 'layer', value: d.value }); }
+    else if (d.kind === 'plate') {
+      // 인물판 자리 — `> 🖼️ 인물: 오른쪽 | 지시문`(왼쪽 · 가운데 · 오른쪽 · 없으면 가운데)
+      const pm2 = d.part === 'fig' ? /^(왼쪽|가운데|오른쪽)\s*[|｜]\s*(.+)$/.exec(d.value) : null;
+      g.layerPrompts = { ...(g.layerPrompts || {}), [d.part]: pm2 ? pm2[2] : d.value, ...(pm2 && pm2[1] !== '가운데' ? { figPos: pm2[1] === '왼쪽' ? 'left' : 'right' } : {}) };
+    }
+    else if (d.kind === 'cast') { g.cast = [...new Set([...(g.cast || []), ...d.value])]; res.list.push({ g: g.num, kind: 'cast', value: g.cast }); }
+  }
+  // ㊸ 판 지시문은 「판: 따로」 장면에서만 쓴다 — 아니면 지우고 알린다(조용히 무시하지 않음)
+  for (const g of (project.groups || [])) {
+    if (g.layerPrompts && !g.layered) { res.warnings.push(`🖼️ G${g.num} — 「🎞 판: 따로」 없이 배경·인물 지시문만 있습니다 → 쓰지 않습니다`); delete g.layerPrompts; }
+    if (g.layered && list.some((d) => d.kind === 'motion' && !d.error && groupOf(project, d) === g)) res.warnings.push(`🎞 G${g.num} — 판 따로 장면은 층 움직임이 이깁니다(움직임 지시는 한 장으로 되돌릴 때만 씁니다)`);
   }
   // 같은 움직임 연달아 금지 — 지정한 그룹만 고친다(지정 없는 그룹은 예전 규칙 그대로)
   const gs = project.groups || [];

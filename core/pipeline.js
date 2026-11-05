@@ -1240,6 +1240,6 @@ module.exports = { setRoyHook, setPauseHook, speakerVoiceMap, nudgePromptForRetr
   parseScript, parseScriptText, toDTO, getPreset, setPresetOverride, listPresets,
   makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, userPauseWins, sanitize,
   generateImagesGenspark, generateHookVideosGrok, writeSrt,
-  buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST,
+  buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST, PERSON_RE,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,
 };

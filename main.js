@@ -8785,12 +8785,358 @@ async function _orderThumbBg(prompt, styleId, outPath) {
     return outPath;
   });
 }
+// ── 🎨 코덱스 그림 엔진(2.0 덧붙임3 ㉞~㊶ · v1.0.33) — 무인 주문 전용 · 그림 단계 전에 미리 그려 그룹에 얹는다(그 뒤 제작 길은 그대로) ──
+//   ⛔ API 키 · 크레딧 0(core/codex-image.preflight) · 코덱스 폴더는 복사만 · 막히면 편 통째로 로컬 Qwen(섞지 않음) · 동시 4줄(상한 6) · 재시도 한 번
+const CODEX_DIR = '_코덱스';
+class CodexFail extends Error { constructor(m) { super(m); this.codexFail = true; } }
+function _codexInScope(cx, g) { return cx.scope === 'all' || !!g.isIntro; }
+/** 이 장면의 캐릭터 셋 참조 그림(표정 9칸 · 전신) — `> 👤 인물:` 의 이름 중 셋이 있는 것만 */
+function _codexRefs(cx, g) {
+  const out = [];
+  for (const n of (g.cast || [])) { const c = cx.charset && cx.charset[n]; if (c) out.push(c.expr, c.body); else if (cx.warnings && !cx.warnings.includes('cast:' + n)) { cx.warnings.push('cast:' + n); cx.notes.push(`👤 「${n}」 은 주문 인물 목록에 없어 참조 없이 그립니다`); } }
+  return out.filter((f) => f && fs.existsSync(f));
+}
+/** 코덱스 한 장(실패하면 한 번 더 · 그래도 안 되면 CodexFail) → 원본 경로(<편>/_코덱스/원본/…) · 기록은 cx.images */
+async function _codexDraw(cx, { kind, g = null, name = null, label, prompt, refs = null, transparent = false }) {
+  const CX = require('./core/codex-image');
+  if (cx.failed) throw new CodexFail(cx.failed);
+  let last = '';
+  for (let t = 1; t <= 2; t++) {
+    if (S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    const raw = path.join(cx.dir, '원본', `${label}${t > 1 ? '_재시도' : ''}.png`);
+    const r = await CX.generate({ exe: cx.exe, prompt, refs, transparent, outPath: raw, workDir: cx.workDir, timeoutMs: cx.timeoutMs, abortSignal: () => S.abort || !!cx.failed, ...(cx.prefixArgs ? { prefixArgs: cx.prefixArgs } : {}) });
+    if (r.aborted && S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    if (r.usage) cx.usageEnd = r.usage;
+    const rec = { kind, g, name, label, ok: !!r.ok, try: t, sec: r.sec, toolSec: (r.toolSec && r.toolSec.length) ? r.toolSec.reduce((a, b) => a + b, 0) : null, usedAfter: r.usage ? r.usage.usedPercent : null, refs: (refs || []).map((f) => path.basename(f)), transparent: !!transparent, thread: r.threadId || null, error: r.ok ? null : r.error };
+    cx.images.push(rec);
+    if (r.ok) {
+      if (r.usage && r.usage.hasCredits) { cx.failed = '코덱스 계정에 크레딧이 생겼습니다(한도를 넘으면 돈이 나갈 수 있음) — 코덱스를 멈춥니다'; throw new CodexFail(cx.failed); }
+      if (r.usage && r.usage.usedPercent != null && r.usage.usedPercent >= cx.cap && !cx.capCrossed) { cx.capCrossed = true; cx.notes.push(`주간 사용량 ${r.usage.usedPercent}% 가 상한 ${cx.cap}% 를 넘었습니다 — 이 편은 코덱스로 마치고 다음 편부터 Qwen`); }
+      try { const led = cx.ledger; led.files[raw] = { kind, g, name, at: require('./core/order-contract').kst() }; fs.writeFileSync(path.join(cx.dir, '기록.json'), JSON.stringify(led, null, 1)); } catch (_) {}
+      return raw;
+    }
+    last = r.error || '그림 없음';
+    log(`🎨 ⚠ 코덱스 ${label} ${t}번째 실패 — ${last}`);
+  }
+  cx.failed = `코덱스 ${label} 두 번 실패 — ${last}`;
+  throw new CodexFail(cx.failed);
+}
+/** 실행 전 — 실행 파일 · 확인 셋 · 주간 상한 · 섞임(이미 Qwen 그림이 있는 편) → cx(active 면 코덱스) */
+async function _orderCodexPrep(it, order, L) {
+  const CX = require('./core/codex-image');
+  const c = order.codex || {};
+  const cx = { active: false, why: '', scope: c.scope || 'all', conc: CX.concOf(c.concurrency), cap: CX.capOf(c.capPercent), timeoutMs: c.timeoutSec ? c.timeoutSec * 1000 : undefined,
+    cli: null, preflight: null, usageStart: null, usageEnd: null, images: [], notes: [], warnings: [], charset: {}, reverted: null, capCrossed: false, failed: null,
+    dir: path.join(it.outRoot, CODEX_DIR), workDir: path.join(os.tmpdir(), 'priming-codex-work'), ledger: { files: {} }, phaseSec: {} };
+  try { cx.ledger = JSON.parse(fs.readFileSync(path.join(cx.dir, '기록.json'), 'utf8')); if (!cx.ledger.files) cx.ledger.files = {}; } catch (_) {}
+  const found = await CX.findCodex();
+  cx.cli = { exe: found.exe, version: found.version, tried: found.tried.map((t) => ({ dir: t.dir, version: t.version || null, why: t.why || null })) };
+  if (!found.exe) { cx.why = '코덱스 실행 파일을 찾지 못했습니다(bin\\*\\codex.exe 중 --version 이 답하는 것이 없음)'; return cx; }
+  cx.exe = found.exe; if (found.prefixArgs) cx.prefixArgs = found.prefixArgs;
+  cx.usageStart = CX.latestUsage();
+  cx.preflight = await CX.preflight({ usageNow: cx.usageStart });
+  if (!cx.preflight.ok) { cx.why = '실행 전 확인 어긋남 — ' + cx.preflight.why; return cx; }
+  if (cx.usageStart && cx.usageStart.planType && cx.usageStart.planType !== 'team') cx.notes.push(`⚠ plan_type 이 「${cx.usageStart.planType}」 입니다(지금 값 team 과 다름 — 한도 셈이 달라질 수 있음)`);
+  if (cx.usageStart && cx.usageStart.usedPercent != null && cx.usageStart.usedPercent >= cx.cap) { cx.why = `주간 사용량 ${cx.usageStart.usedPercent}% ≥ 상한 ${cx.cap}% — 이 편은 통째로 로컬 Qwen`; return cx; }
+  // 섞임 막기 — 범위 안 장면에 코덱스가 그리지 않은 그림이 이미 있으면(지난 실행이 Qwen 으로 그림) 이 편은 Qwen 으로 마저 그린다
+  const pr = it.parsed.projects[0];
+  const foreign = pr.groups.filter((g) => _codexInScope(cx, g) && !g.layered && g.imagePath && fs.existsSync(g.imagePath) && !Object.values(cx.ledger.files).some((x) => x.fit === g.imagePath));
+  if (foreign.length) { cx.why = `이 편에 이미 코덱스가 아닌 그림이 ${foreign.length}장 있습니다(G${foreign.slice(0, 6).map((g) => g.num).join(', G')}) — 섞지 않고 로컬 Qwen 으로 마저 그립니다`; return cx; }
+  fs.mkdirSync(cx.workDir, { recursive: true });
+  cx.active = true;
+  L(`🎨 코덱스 — ${found.version} · 확인 셋 통과 · 주간 사용 ${cx.usageStart ? cx.usageStart.usedPercent + '%' : '?(기록 없음)'} / 상한 ${cx.cap}% · 동시 ${cx.conc}줄 · 범위 ${cx.scope === 'all' ? '편 전체' : '도입부'}`);
+  return cx;
+}
+/** 같은 실패 규칙으로 일을 n 줄 동시에 — 하나가 CodexFail 이면 남은 일은 시작하지 않고 돌던 일을 기다린 뒤 던진다 */
+async function _codexPool(cx, jobs) {
+  let i = 0, err = null;
+  const worker = async () => { while (!err && i < jobs.length) { const j = jobs[i++]; try { await j(); } catch (e) { if (!err) err = e; } } };
+  await Promise.all(Array.from({ length: Math.min(cx.conc, jobs.length) }, worker));
+  if (err) throw err;
+}
+/** ㊳ 캐릭터 셋 — 인물마다 표정 9칸 + 전신(코덱스) · <무인 출력>\_캐릭터셋\<채널 ID>\ 에 두고 다시 쓴다 · 편의 characters\ 로 복사(㊺ 화면) */
+async function _orderCodexChars(cx, it, order, L, outDir) {
+  if (!order.characters.length) return;
+  const CX = require('./core/codex-image'), LP = require('./core/layer-plates');
+  const stylePrompt = order.style ? (require('./core/style-store').getPrompt(order.style) || '') : '';
+  const lib = path.join(outDir, '_캐릭터셋', _safeFolder(order.channelId));
+  fs.mkdirSync(lib, { recursive: true });
+  const st = LP.styleFor(stylePrompt, 'fig');
+  const KINDS = {
+    expr: (p) => `${st ? st + ', ' : ''}Character expression sheet of ${p}: a 3 by 3 grid of nine head-and-shoulders portraits of the same person with nine different expressions (calm, smiling, laughing, sad, crying, angry, surprised, worried, determined), the same face, hairstyle and clothing in every cell, plain light gray background.`,
+    body: (p) => `${st ? st + ', ' : ''}Full-body character reference of ${p}, standing in a neutral front view, the whole body visible from head to feet, plain light gray background.`,
+  };
+  const jobs = [];
+  for (const c of order.characters) {
+    const base = path.join(lib, _safeFolder(c.name));
+    const meta = (() => { try { return JSON.parse(fs.readFileSync(base + '.json', 'utf8')); } catch (_) { return null; } })();
+    const have = fs.existsSync(base + '.expr.png') && fs.existsSync(base + '.body.png');
+    cx.charset[c.name] = { expr: base + '.expr.png', body: base + '.body.png', reused: have && !c.redraw };
+    if (have && !c.redraw) { if (meta && meta.prompt !== c.prompt) cx.notes.push(`👤 「${c.name}」 생김새 지시문이 지난 셋과 다릅니다 — 다시 그리지 않고 지난 셋을 씁니다(다시 그리려면 redraw: true)`); continue; }
+    for (const kind of ['expr', 'body']) jobs.push(async () => {
+      const raw = await _codexDraw(cx, { kind: 'char', name: c.name, label: `셋_${_safeFolder(c.name)}.${kind}`, prompt: CX.withTail(KINDS[kind](c.prompt)) });
+      fs.copyFileSync(raw, base + `.${kind}.png`);
+    });
+    jobs.push(async () => { fs.writeFileSync(base + '.json', JSON.stringify({ name: c.name, prompt: c.prompt, engine: '코덱스', at: require('./core/order-contract').kst() }, null, 1)); });
+  }
+  const t0 = Date.now();
+  L(`👤 캐릭터 셋 — ${order.characters.filter((c) => !cx.charset[c.name].reused).length}명 그림(표정 9칸 + 전신 · 코덱스) · ${order.characters.filter((c) => cx.charset[c.name].reused).length}명은 지난 셋`);
+  if (jobs.length) await _codexPool(cx, jobs);
+  cx.phaseSec.chars = Math.round((Date.now() - t0) / 100) / 10;
+  // ㊺ 캐릭터셋 보기 화면이 읽는 자리(<편>\characters\<이름>.<종류>.png + .json engine)로 복사
+  const dst = path.join(it.outRoot, 'characters'); fs.mkdirSync(dst, { recursive: true });
+  for (const c of order.characters) for (const kind of ['expr', 'body']) {
+    const src = cx.charset[c.name][kind]; if (!fs.existsSync(src)) continue;
+    fs.copyFileSync(src, path.join(dst, `${c.name}.${kind}.png`));
+    fs.writeFileSync(path.join(dst, `${c.name}.${kind}.json`), JSON.stringify({ engine: '코덱스' }));
+  }
+}
+/** 장면 그림 — 범위 안 · 그림이 없는 · 판 따로가 아닌 그룹 → 코덱스(참조 = 장면 인물의 셋) → 원본은 _코덱스\원본 · 확대본(㊴ CPU)을 media-1 에 */
+async function _orderCodexScenes(cx, it, order, L) {
+  const CX = require('./core/codex-image');
+  const pr = it.parsed.projects[0];
+  const stylePrompt = order.style ? (require('./core/style-store').getPrompt(order.style) || '') : '';
+  const media = shortsDirs(it.outRoot, pr.shortsNum).media; fs.mkdirSync(media, { recursive: true });
+  // ㊴ 확대 크기 — 렌더 출력(기본 1920×1080) · 그림 확대(⑰)를 켠 주문이면 켄번스 여유(1.22배)까지 CPU 로(GPU 업스케일 0)
+  const OW = order.output ? order.output.width : 1920, OH = order.output ? order.output.height : 1080;
+  const k = order.upscale ? 1.22 : 1;
+  cx.fit = { w: Math.ceil(OW * k / 2) * 2, h: Math.ceil(OH * k / 2) * 2, how: `CPU Lanczos — 덮어 맞춘 뒤 가운데 자르기(원본은 _코덱스\\원본)${order.upscale ? ' · 그림 확대 주문이라 켄번스 여유 1.22배까지 CPU 로(GPU 업스케일 0)' : ''}` };
+  const targets = pr.groups.filter((g) => _codexInScope(cx, g) && !g.layerOk && g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)));
+  if (!targets.length) { L('🎨 코덱스 장면 그림 — 그릴 장면이 없습니다(이미 있음)'); return; }
+  L(`🎨 코덱스 장면 그림 ${targets.length}장 — 동시 ${cx.conc}줄${targets.some((g) => (g.cast || []).length) ? ' · 인물 참조 있음' : ''}`);
+  const t0 = Date.now();
+  await _codexPool(cx, targets.map((g) => async () => {
+    const nn = 'G' + String(g.num).padStart(2, '0');
+    const raw = await _codexDraw(cx, { kind: 'scene', g: g.num, label: nn, prompt: CX.withTail(P.buildImagePrompt(stylePrompt, g.imagePrompt)), refs: _codexRefs(cx, g) });
+    const dst = P.claimPath(path.join(media, String(g.num).padStart(2, '0') + '.png'), g.imagePath, P.IMG_EXTS);   // 🔒 이웃 그룹 파일 위에 쓰지 않는다
+    await CX.fitTo(raw, dst, cx.fit.w, cx.fit.h);
+    if (await looksBadImage(dst)) { try { fs.rmSync(dst, { force: true }); } catch (_) {} cx.failed = `코덱스 ${nn} 이 검정·노이즈 그림`; throw new CodexFail(cx.failed); }
+    g.imagePath = dst; g.imageStatus = 'done'; g.imageError = null; g.imageCleared = false; g.imageStale = false; g.imageEngine = 'codex';
+    cx.ledger.files[raw] = { ...(cx.ledger.files[raw] || {}), fit: dst };
+    try { fs.writeFileSync(path.join(cx.dir, '기록.json'), JSON.stringify(cx.ledger, null, 1)); } catch (_) {}
+    L(`  ✓ ${nn} 코덱스 → ${path.basename(dst)}${(g.cast || []).length ? ` · 참조 ${_codexRefs(cx, g).length}장` : ''}`);
+  }));
+  cx.phaseSec.scenes = Math.round((Date.now() - t0) / 100) / 10;
+  cx.sceneCount = targets.length;
+  try { syncSnapshotNow(); } catch (_) {}
+}
+/** 편 통째 되돌림 — 이번 편에서 코덱스가 그린 장면·판을 영상에서 빼고(파일은 _코덱스\원본 에 남는다) 로컬 Qwen 으로 */
+function _orderCodexRevert(cx, it, L, why) {
+  const pr = it.parsed.projects[0];
+  const fits = new Set(Object.values(cx.ledger.files).map((x) => x.fit).filter(Boolean));
+  const LP = require('./core/layer-plates');
+  let n = 0;
+  for (const g of pr.groups) {
+    if (g.imagePath && (fits.has(g.imagePath) || g.imageEngine === 'codex')) {
+      const bak = path.join(cx.dir, '되돌림'); fs.mkdirSync(bak, { recursive: true });
+      try { fs.renameSync(g.imagePath, path.join(bak, path.basename(g.imagePath))); } catch (_) {}
+      g.imagePath = null; g.imageStatus = 'idle'; g.imageEngine = null; n++;
+    }
+    if (g.layerOk) {   // 코덱스 판 — 판 기록을 지우지 않고 엔진이 달라 다음 그리기가 Qwen 으로 새로 그린다
+      delete g.layerOk;
+      pr.overlays = (pr.overlays || []).filter((o) => !(o.kb === 'layerFig' && String(o.file || '').includes(path.sep + LP.DIR + path.sep)));
+      if (g.imagePath && String(g.imagePath).includes(path.sep + LP.DIR + path.sep)) { g.imagePath = null; g.imageStatus = 'idle'; }
+    }
+  }
+  cx.reverted = { why, atImage: cx.images.filter((x) => x.ok).length + 1, scenesCleared: n };
+  cx.active = false;
+  L(`🎨 ↩ 코덱스 되돌림 — ${why} · ${cx.reverted.atImage}장째에서 · 이 편의 코덱스 그림 ${n}장을 빼고(파일은 남김) 로컬 Qwen 으로 다시 그립니다`);
+  try { syncSnapshotNow(); } catch (_) {}
+}
+/** ㊲① 썸네일 배경 여러 안 — 코덱스면 코덱스(1280×720 으로 맞춤) · 아니면(또는 실패) 로컬 Qwen 한 장씩 */
+async function _orderThumbs(cx, order, outBase, L) {
+  const out = [];
+  for (let i = 0; i < order.thumbPrompts.length; i++) {
+    const dst = `${outBase}_썸네일배경_${i + 1}.png`;
+    if (fs.existsSync(dst)) { out.push({ file: dst, engine: '지난 실행' }); continue; }
+    if (cx && cx.active && !cx.failed) {
+      try {
+        const stylePrompt = order.style ? (require('./core/style-store').getPrompt(order.style) || '') : '';
+        const raw = await _codexDraw(cx, { kind: 'thumb', label: `썸네일_${i + 1}`, prompt: require('./core/codex-image').withTail(P.buildImagePrompt(stylePrompt, `${order.thumbPrompts[i]}. Background artwork only, clean surfaces, leave open space for a title.`)) });
+        await require('./core/codex-image').fitTo(raw, dst, 1280, 720);
+        out.push({ file: dst, engine: '코덱스' }); continue;
+      } catch (e) { if (e && e.code === 'MAKE_ABORTED') throw e; cx.failed = null; L(`🖼 ⚠ 썸네일 ${i + 1} 코덱스 실패 — 로컬 Qwen 으로 · ${(e && e.message) || e}`); }
+    }
+    await _orderThumbBg(order.thumbPrompts[i], order.style, dst);
+    out.push({ file: dst, engine: '로컬 Qwen' });
+  }
+  return out;
+}
+/** ㊶ 결과서 칸 — 재서 적기만 */
+function _codexLogOf(cx) {
+  if (!cx) return null;
+  const ok = cx.images.filter((x) => x.ok);
+  const med = (a) => { const s = a.filter((x) => x != null).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+  const by = (k) => ok.filter((x) => x.kind === k).length;
+  return {
+    engine: cx.reverted ? '되돌림 — 로컬 Qwen' : (!cx.images.length && cx.why ? '로컬 Qwen(코덱스 쓰지 않음)' : (cx.scope === 'intro' ? '도입부만 코덱스 + 로컬 Qwen' : '코덱스')),
+    notUsedWhy: cx.why || null, scope: cx.scope, concurrency: cx.conc, capPercent: cx.cap,
+    cli: cx.cli, preflight: cx.preflight ? cx.preflight.checks : null, preflightOk: cx.preflight ? cx.preflight.ok : null,
+    usedPercentStart: cx.usageStart ? cx.usageStart.usedPercent : null, usedPercentEnd: cx.usageEnd ? cx.usageEnd.usedPercent : (cx.usageStart ? cx.usageStart.usedPercent : null),
+    resetsAt: (cx.usageEnd || cx.usageStart || {}).resetsAt || null, windowMinutes: (cx.usageEnd || cx.usageStart || {}).windowMinutes || null,
+    planType: (cx.usageEnd || cx.usageStart || {}).planType || null, hasCredits: (cx.usageEnd || cx.usageStart) ? !!(cx.usageEnd || cx.usageStart).hasCredits : null,
+    capCrossed: cx.capCrossed, reverted: cx.reverted,
+    counts: { scenes: by('scene'), plates: by('bg') + by('fig'), characterSheets: by('char'), thumbs: by('thumb'), failedTries: cx.images.filter((x) => !x.ok).length },
+    secMedian: med(ok.filter((x) => !x.refs.length).map((x) => x.sec)), secMedianWithRefs: med(ok.filter((x) => x.refs.length).map((x) => x.sec)),
+    secEffectiveScenes: cx.phaseSec.scenes && cx.sceneCount ? Math.round(cx.phaseSec.scenes / cx.sceneCount * 10) / 10 : null,
+    phaseSec: cx.phaseSec, fit: cx.fit || null, tail: require('./core/codex-image').TAIL,
+    images: cx.images.map((x) => ({ kind: x.kind, g: x.g, name: x.name, ok: x.ok, try: x.try, sec: x.sec, toolSec: x.toolSec, usedAfter: x.usedAfter, refs: x.refs, transparent: x.transparent, error: x.error })),
+    notes: cx.notes,
+    rights: 'ChatGPT Business = OpenAI Services Agreement §4.1 「Customer … (b) owns all Output」(Effective 2026-01-01 · 2.0 11-05 열람) — 같은 지시문이면 남도 비슷한 그림을 받을 수 있음(배타권 없음)',
+  };
+}
+/**
+ * 🎞 ㊸ 판 따로(2.0 덧붙임4 ⓒ · v1.0.33) — `> 🎞 판: 따로` 장면마다 배경판(16:9) · 인물판(세로 · 단색 바탕)을 그리고
+ *   인물판의 바탕색을 빼서(core/layer-plates — 분리 모델 없음) 그룹 그림 = 배경판 · 삽입 그림(kb 'layerFig') = 투명 인물판 + 발밑 그림자.
+ *   어긋나면(지시문 없음 · 엔진 · 바탕 · 잘림 · 가장자리 · 빛) 그 장면만 한 장으로 되돌리고 까닭을 남긴다(아래 제작이 보통 그림 한 장을 그린다).
+ *   ⛔ 지시 줄이 없으면 아무 일도 하지 않는다(test:nodirective) · 원본 그림은 지우지 않는다(다시 주문 = _판/_다시주문 으로 옮김)
+ *   기록 <편>/_판/Gnn.json(지시문이 같으면 다음 실행에서 다시 그리지 않고 그 결과를 쓴다 — 되돌린 장면도 그대로)
+ *   → { scenes:[{ g, ok, why, bgSec, figSec, tries, checks, files }] } | null(판 따로 장면 없음)
+ */
+async function _orderLayerPlates(it, order, redoNums, L, cx = null) {
+  const LP = require('./core/layer-plates');
+  const pr = it.parsed.projects[0];
+  const gs = pr.groups.filter((g) => g.layered);
+  if (!gs.length) return null;
+  const OL = require('./core/overlay-layers');
+  const out = [];
+  const isAuto = (o) => o && o.kb === 'layerFig' && String(o.file || '').includes(path.sep + LP.DIR + path.sep);
+  const revert = (g, why) => {
+    delete g.layerOk;
+    pr.overlays = (pr.overlays || []).filter((o) => !(isAuto(o) && path.basename(o.file).startsWith('G' + String(g.num).padStart(2, '0') + '_')));
+    if (g.imagePath && String(g.imagePath).includes(path.sep + LP.DIR + path.sep)) { g.imagePath = null; g.imageStatus = 'idle'; g.imageCleared = false; }   // 배경판이 그룹 그림으로 남아 있으면 비운다 → 아래 제작이 한 장을 그린다
+    out.push({ g: g.num, ok: false, why });
+    L(`🎞 G${g.num} 판 따로 → 한 장으로 되돌림 — ${why}`);
+  };
+  const use = (g, F, rec) => {
+    g.layerOk = true;
+    g.imagePath = F.bg; g.imageStatus = 'done'; g.imageError = null; g.imageCleared = false; g.imageStale = false;
+    const ids = OL.idsFromGroups(pr, g.num, g.num);
+    const list = pr.overlays || (pr.overlays = []);
+    let ov = list.find((o) => o.file === F.fig);
+    if (!ov) { ov = { id: 'lay' + g.num + '_' + Date.now().toString(36), file: F.fig, name: path.basename(F.fig), kind: 'image' }; list.push(ov); }
+    Object.assign(ov, { box: rec.box, kb: 'layerFig', dim: rec.dim }); OL.applyIds(ov, ids);
+    out.push({ g: g.num, ok: true, why: '', bgSec: rec.bgSec, figSec: rec.figSec, tries: rec.tries, checks: rec.checks, files: { bg: F.bg, fig: F.fig, figRaw: F.figRaw } });
+  };
+  // 다시 주문(㊾) 장면 — 옛 판을 옮겨 두고 새로 그린다(지우지 않음)
+  for (const n of (redoNums || [])) {
+    const F = LP.pathsOf(it.outRoot, n);
+    const mv = [F.bg, F.figRaw, F.fig, F.json].filter((f) => fs.existsSync(f));
+    if (!mv.length) continue;
+    const bak = path.join(F.dir, '_다시주문', require('./core/order-contract').kst().slice(0, 19).replace(/[-: ]/g, ''));
+    fs.mkdirSync(bak, { recursive: true });
+    for (const f of mv) fs.renameSync(f, path.join(bak, path.basename(f)));
+  }
+  const todo = [];
+  for (const g of gs) {
+    const p = g.layerPrompts || {};
+    if (!p.bg || !p.fig) { revert(g, `배경·인물 지시문이 없습니다(${!p.bg ? '「> 🖼️ 배경:」' : ''}${!p.bg && !p.fig ? ' · ' : ''}${!p.fig ? '「> 🖼️ 인물:」' : ''})`); continue; }
+    const useCx = !!(cx && cx.active && _codexInScope(cx, g));   // 🎨 코덱스 편이면 판도 코덱스(배경판 + 투명 배경 인물판 ㊳) · 되돌린 편은 로컬 Qwen
+    const engName = useCx ? 'codex:imagegen' : 'local:qwen-2-1';
+    const F = LP.pathsOf(it.outRoot, g.num);
+    let rec = null; try { rec = JSON.parse(fs.readFileSync(F.json, 'utf8')); } catch (_) {}
+    if (rec && rec.v === LP.RECIPE && rec.engine === engName && rec.prompts && rec.prompts.bg === p.bg && rec.prompts.fig === p.fig && (rec.prompts.figPos || null) === (p.figPos || null) && rec.style === order.style && JSON.stringify(rec.cast || []) === JSON.stringify(g.cast || [])) {
+      if (rec.ok && fs.existsSync(F.bg) && fs.existsSync(F.fig)) { use(g, F, rec); L(`🎞 G${g.num} 판 따로 — 지난 판을 그대로 씁니다`); continue; }
+      if (!rec.ok) { revert(g, rec.why + '(지난 실행 결과 · 지시문이 같아 다시 그리지 않음)'); continue; }
+    }
+    todo.push({ g, F, p, useCx });
+  }
+  if (!todo.length) return { scenes: out };
+  const stylePrompt0 = order.style ? (require('./core/style-store').getPrompt(order.style) || '') : '';
+  // 🎨 코덱스 판(㊳ transparent_background) — 색 빼기 없이 알파 그대로 · 같은 점검 · 실패하면 CodexFail 로 편 통째 되돌림(위에서 받는다)
+  for (const { g, F, p } of todo.filter((x) => x.useCx)) {
+    const CX = require('./core/codex-image');
+    fs.mkdirSync(F.dir, { recursive: true });
+    const nn = 'G' + String(g.num).padStart(2, '0');
+    const rec = { v: LP.RECIPE, g: g.num, prompts: { bg: p.bg, fig: p.fig, figPos: p.figPos || null }, style: order.style, cast: g.cast || [], engine: 'codex:imagegen', at: require('./core/order-contract').kst(), ok: false, why: '', tries: 0, checks: {} };
+    const save = () => { try { fs.writeFileSync(F.json, JSON.stringify(rec, null, 2)); } catch (_) {} };
+    rec.fullPrompts = { bg: CX.withTail(LP.bgFull(stylePrompt0, p.bg, P.PERSON_RE, p.figPos)), fig: CX.withTail(P.buildImagePrompt(LP.styleFor(stylePrompt0, 'fig'), LP.figPromptT(p.fig))) };
+    const refs = _codexRefs(cx, g);
+    const t0 = Date.now();
+    const rawBg = await _codexDraw(cx, { kind: 'bg', g: g.num, label: nn + '_배경', prompt: rec.fullPrompts.bg });
+    await require('./core/codex-image').fitTo(rawBg, F.bg, 1920, 1080);
+    rec.bgSec = Math.round((Date.now() - t0) / 100) / 10;
+    const bgImg = await LP.decodeRgba(F.bg);
+    let keyed = null; const t1 = Date.now();
+    for (let t = 1; t <= 2 && !(keyed && keyed.ok); t++) {
+      rec.tries = t;
+      const rawF = await _codexDraw(cx, { kind: 'fig', g: g.num, label: nn + '_인물' + (t > 1 ? '_' + t : ''), prompt: rec.fullPrompts.fig, refs, transparent: true });
+      fs.copyFileSync(rawF, F.figRaw);
+      keyed = LP.alphaFigure(await LP.decodeRgba(F.figRaw));
+      if (keyed.ok) { const lc = LP.lightCheck(keyed.img, bgImg); keyed.stats.light = { fig: lc.fig, bg: lc.bg }; if (!lc.ok) keyed = { ...keyed, ok: false, why: lc.why }; }
+      if (!keyed.ok) L(`  ⚠ G${g.num} 인물판(코덱스) ${t}번째 — ${keyed.why}`);
+    }
+    rec.figSec = Math.round((Date.now() - t1) / 100) / 10; rec.checks = keyed.stats; rec.refs = refs.map((f) => path.basename(f));
+    if (!keyed.ok) { rec.why = keyed.why; save(); revert(g, keyed.why); continue; }
+    const plate = LP.composeFigure(keyed, keyed.bbox);
+    await LP.encodePng(plate, F.fig);
+    rec.box = LP.boxFor(plate, 1920, 1080, p.figPos); rec.dim = { w: plate.w, h: plate.h }; rec.ok = true;
+    save(); use(g, F, rec);
+    L(`  ✓ G${g.num} 판 따로(코덱스) — 배경판 ${rec.bgSec}초 · 인물판 ${rec.figSec}초(${rec.tries}번 · 참조 ${refs.length}장) · 불투명 ${Math.round(keyed.stats.opaqueFrac * 100)}%`);
+  }
+  const qTodo = todo.filter((x) => !x.useCx);
+  if (!qTodo.length) { try { syncSnapshotNow(); } catch (_) {} return { scenes: out }; }
+  const CI = require('./core/comfy-image');
+  const cfg = _forceLocalComfy(CI.loadConfig());
+  cfg.workflowPath = _localQwenWfPath(cfg);
+  const eng = new CI.ComfyImage(cfg, log);
+  const stylePrompt = order.style ? (require('./core/style-store').getPrompt(order.style) || '') : '';
+  const draw = async (full, dims, file, chroma = false) => {
+    await _yieldGpuToRemote(log);
+    if (S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    const t0 = Date.now();
+    const tmp = file.replace(/\.png$/i, '') + '.tmp.png';
+    const r = await eng.textToImage({ prompt: full, dims, outputPath: tmp, abortSignal: () => S.abort });
+    if (S.abort) throw Object.assign(new Error('제작 중단됨'), { code: 'MAKE_ABORTED' });
+    if (!r.success) throw new Error(r.error || '그림 실패');
+    // 인물판(초록 바탕)은 「형광 색깨짐」 검사에 늘 걸린다(실물 11-05 G1) — 색 빼기 점검(keyFigure)이 대신한다
+    if (!chroma && await looksBadImage(r.imagePath || tmp)) { try { fs.rmSync(r.imagePath || tmp, { force: true }); } catch (_) {} throw new Error('검정·노이즈 그림'); }
+    fs.renameSync(r.imagePath || tmp, file);
+    return Math.round((Date.now() - t0) / 100) / 10;
+  };
+  await _withLocalQwenStop(qTodo.map((x) => x.g.num), log, async () => {
+    const r0 = await require('./core/comfy-launch').ensureLocalComfy({ baseUrl: eng.baseUrl, log });
+    if (!r0.ok) throw new Error(r0.message || '로컬 ComfyUI 에 연결할 수 없습니다');
+    await awaitForeignTtsIdle('판 따로 그리기', log, { untilDone: true });
+    L(`🎞 판 따로 — ${qTodo.length}장면(배경판 + 인물판 · 로컬 Qwen · 인물판은 초록 바탕을 빼서 투명으로)`);
+    for (const { g, F, p } of qTodo) {
+      fs.mkdirSync(F.dir, { recursive: true });
+      const rec = { v: LP.RECIPE, g: g.num, prompts: { bg: p.bg, fig: p.fig, figPos: p.figPos || null }, style: order.style, engine: 'local:qwen-2-1', at: require('./core/order-contract').kst(), ok: false, why: '', tries: 0, checks: {} };
+      const save = () => { try { fs.writeFileSync(F.json, JSON.stringify(rec, null, 2)); } catch (_) {} };
+      try {
+        rec.fullPrompts = { bg: LP.bgFull(stylePrompt, p.bg, P.PERSON_RE, p.figPos), fig: P.buildImagePrompt(LP.styleFor(stylePrompt, 'fig'), LP.figPrompt(p.fig)) };   // 결과서에서 실제로 보낸 글을 볼 수 있게
+        rec.bgSec = await draw(rec.fullPrompts.bg.replace(/\.?$/, '.'), { w: 1344, h: 768 }, F.bg);
+        const bgImg = await LP.decodeRgba(F.bg);
+        let keyed = null, figSec = 0;
+        for (let t = 1; t <= 2 && !(keyed && keyed.ok); t++) {   // 인물판은 한 번 더 그려 볼 수 있다(로컬 = 비용 0) — 그래도 어긋나면 되돌림
+          rec.tries = t;
+          figSec += await draw(rec.fullPrompts.fig, { w: 768, h: 1344 }, F.figRaw, true);
+          keyed = LP.keyFigure(await LP.decodeRgba(F.figRaw));
+          if (keyed.ok) { const lc = LP.lightCheck(keyed.img, bgImg); keyed.stats.light = { fig: lc.fig, bg: lc.bg }; if (!lc.ok) keyed = { ...keyed, ok: false, why: lc.why }; }
+          if (!keyed.ok) L(`  ⚠ G${g.num} 인물판 ${t}번째 — ${keyed.why}`);
+        }
+        rec.figSec = figSec; rec.checks = keyed.stats;
+        if (!keyed.ok) { rec.why = keyed.why; save(); revert(g, keyed.why); continue; }
+        const plate = LP.composeFigure(keyed, keyed.bbox);
+        await LP.encodePng(plate, F.fig);
+        rec.box = LP.boxFor(plate, 1920, 1080, p.figPos); rec.dim = { w: plate.w, h: plate.h }; rec.ok = true;
+        save(); use(g, F, rec);
+        L(`  ✓ G${g.num} 판 따로 — 배경판 ${rec.bgSec}초 · 인물판 ${figSec}초(${rec.tries}번) · 불투명 ${Math.round(keyed.stats.opaqueFrac * 100)}% · 가장자리 ${Math.round((keyed.stats.edgeFrac || 0) * 100)}%`);
+      } catch (e) {
+        if (e && e.code === 'MAKE_ABORTED') throw e;
+        rec.why = `판 그리기 실패 — ${(e && e.message) || e}`; save(); revert(g, rec.why);
+      }
+    }
+  });
+  try { syncSnapshotNow(); } catch (_) {}
+  return { scenes: out };
+}
 /** 📺 주문 렌더 규격 → 빌드 지문 조각(⑯ 크기·프레임·비트레이트 · ⑰ 확대 모델) — 바뀌면 같은 대본이라도 MP4 를 다시 굽는다 */
 function _orderRenderKey(OR) {
   return { output: OR.output ? [OR.output.width, OR.output.height, OR.output.fps, OR.output.kbps] : null, upscale: OR.upscale ? require('./core/vrew-render').UPSCALE_MODEL : null };
 }
 /** ⑥ ⑨ 제작 기록 — 재서 적기만(판정 없음). 값을 모르면 null + why */
-async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
+async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt, layerRes }) {
   const OC = require('./core/order-contract');
   const KB = require('./core/ken-burns');
   const GS = require('./core/gpu-share');
@@ -8802,7 +9148,7 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
   const pmap = P.pausePlanOf(pr, preset).map;
   const raw = pr.groups.map((g) => {
     const ss = pr.getSentencesOfGroup(g);
-    return { num: g.num, sec: ss.reduce((a, s) => a + (Number(s.ttsDurationSec) || 0) + (pmap.get(s.id) || 0), 0), motion: OC.motionName(KB.patternIndexOf(g)) };
+    return { num: g.num, sec: ss.reduce((a, s) => a + (Number(s.ttsDurationSec) || 0) + (pmap.get(s.id) || 0), 0), motion: g.layerOk ? '판 따로(층)' : OC.motionName(KB.patternIndexOf(g)) };
   });
   // 장면 길이 = 문장 음성 + 쉼, 합계를 MP4 실제 길이에 맞춰 비례로 고친다(도입·끝 여백이 장면에 고루 들어가게)
   const rawTotal = raw.reduce((a, x) => a + x.sec, 0);
@@ -8837,12 +9183,14 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
     imageMaxSec: st.sceneMaxSec,
     transitions: R ? (R.transitions > 0 ? `겹침 전환 ${R.transitions}곳` : '컷') : null,
     cards: cardN ? cardN.screen + cardN.info : null, cardsScreen: cardN ? cardN.screen : null, cardsInfo: cardN ? cardN.info : null,
-    // 🎞 ㊼ 장면 지시 줄(덧붙임4 ㊷) — 지시 줄이 없으면 0/빈 목록 · 판 따로는 아직 한 장 + 평면 움직임으로 되돌린다(㊸ 그리기 진행 중)
+    // 🎞 ㊼ 장면 지시 줄(덧붙임4 ㊷) — 지시 줄이 없으면 0/빈 목록 · 🎞 ㊸ 판 따로 = 배경판 + 투명 인물판 층(되돌린 장면은 한 장 + 평면 움직임)
     motionOrdered: pr.sceneDirectives ? pr.sceneDirectives.motionOrdered : 0,
     motionChanged: pr.sceneDirectives ? pr.sceneDirectives.motionChanged : [],
     layerScenes: pr.sceneDirectives ? pr.sceneDirectives.layerScenes : 0,
-    layerReverted: pr.sceneDirectives ? pr.sceneDirectives.layerScenes : 0,
-    layerRevertReasons: pr.sceneDirectives && pr.sceneDirectives.layerScenes ? pr.groups.filter((g) => g.layered).map((g) => ({ g: g.num, why: '인물판·배경판 따로 그리기가 아직 없음 — 한 장 + 평면 움직임' })) : [],
+    layerReverted: pr.groups.filter((g) => g.layered && !g.layerOk).length,
+    layerRevertReasons: pr.groups.filter((g) => g.layered && !g.layerOk).map((g) => { const x = layerRes && layerRes.scenes.find((y) => y.g === g.num); return { g: g.num, why: (x && x.why) || '판 따로 그리기를 하지 않았습니다' }; }),
+    layerPlates: layerRes ? layerRes.scenes.filter((x) => x.ok).map((x) => ({ g: x.g, bgSec: x.bgSec, figSec: x.figSec, tries: x.tries, opaque: x.checks && x.checks.opaqueFrac, edge: x.checks && x.checks.edgeFrac, keyLeft: x.checks && x.checks.keyLeftFrac, light: x.checks && x.checks.light, files: x.files })) : null,   // 층으로 만든 장면 — 장당 초 · 색 빼기 점검 값 · 파일
+    layerMethod: layerRes ? 'ⓒ 처음부터 두 장(로컬 Qwen · 인물판 초록 바탕 색 빼기 · 분리 모델 없음) · 층 움직임 = 배경 1.04→1.07 · 인물 1.00→1.07(발 고정) + 발밑 그림자' : null,
     directiveWarnings: pr.sceneDirectives ? pr.sceneDirectives.warnings : [],
     quoteCards: cardN ? (cardN.quote || 0) : null,   // ㊼ 💬 대사 카드 수(이번 렌더에 구운 것 · cardsScreen 에 들어 있다)
     maps: null, timelines: null, depthImages: null, fxLayers: null,   // ⑲ 지도·연표 · ㉑ 깊이 움직임 · ㉒ 효과 층 — 아직 없는 장치
@@ -8931,7 +9279,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     const scriptBase = _safeFolder(path.basename(order.script).replace(/\.md$/i, ''));
     const preset = {
       ...base, voice: 'clone', voiceCloneRefAudio: 'srv:' + order.voice, voiceEngine: { id: 'omnivoice' }, speakers: [],
-      styleId: order.style, styleLong: order.style, imgEngine: order.imageEngine, videoEngine: 'none',
+      styleId: order.style, styleLong: order.style, imgEngine: order.imageEngine === OC.CODEX_ENGINE ? 'local:qwen-2-1' : order.imageEngine, videoEngine: 'none',   // 🎨 코덱스 편 = 코덱스가 미리 그리고, 남은 장면·되돌림은 로컬 Qwen
       outLong: cfg.outDir, outputFolder: cfg.outDir, outUpload: path.join(cfg.outDir, scriptBase), ytAuto: false, ytSchedule: { ...(base.ytSchedule || {}), on: false },
     };
     if (order.speed != null) preset.speedLong = order.speed;
@@ -8968,6 +9316,26 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     }
     if (checkOnly) return finish(OC.STATUS.ok, '', { note: `확인만 — 만들지 않았습니다(장면 ${it.parsed.projects[0].groups.length}개 · 문장 ${it.parsed.projects[0].sentences.length}개)` });
 
+    // 🎨 코덱스(덧붙임3 ㉞~㊶) · 👤 캐릭터 셋(㊳) · 🎞 판 따로(덧붙임4 ㊸) — 주문 칸·지시 줄이 있을 때만(없으면 아무 일 없음)
+    let layerRes = null, cx = null;
+    const hasLayer = () => it.parsed.projects[0].groups.some((g) => g.layered);
+    const layerFail = (e) => { L(`⚠ 판 따로 그리기를 하지 못했습니다 — ${(e && e.message) || e} → 판 따로 장면은 모두 한 장으로`); return { scenes: it.parsed.projects[0].groups.filter((g) => g.layered).map((g) => { delete g.layerOk; return { g: g.num, ok: false, why: `판 그리기 실패 — ${(e && e.message) || e}` }; }) }; };
+    if (order.imageEngine === OC.CODEX_ENGINE) {
+      stage = '코덱스 확인'; beat();
+      cx = await _orderCodexPrep(it, order, L);
+      if (!cx.active) L(`🎨 코덱스를 쓰지 않습니다 — ${cx.why} → 이 편은 로컬 Qwen`);
+    }
+    try {
+      if (cx && cx.active) { stage = '캐릭터 셋'; beat(); await _orderCodexChars(cx, it, order, L, cfg.outDir); }
+      if (hasLayer()) { stage = '판 따로'; beat(); try { layerRes = await _orderLayerPlates(it, order, redoNums, L, cx); } catch (e) { if ((e && e.codexFail) || (e && e.code === 'MAKE_ABORTED')) throw e; layerRes = layerFail(e); } }
+      if (cx && cx.active) { stage = '그림(코덱스)'; beat(); await _orderCodexScenes(cx, it, order, L); }
+    } catch (e) {
+      if (stopping || S.abort || (e && e.code === 'MAKE_ABORTED')) return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: hasPieces() });
+      if (!(e && e.codexFail)) return finish(OC.STATUS.fail, e, { resumable: hasPieces() });
+      // ㊱ 편 도중 코덱스 실패 → 이 편의 코덱스 몫 통째로 로컬 Qwen(섞지 않음)
+      _orderCodexRevert(cx, it, L, e.message);
+      if (hasLayer()) { stage = '판 따로'; beat(); try { layerRes = await _orderLayerPlates(it, order, [], L, null); } catch (e2) { if (stopping || S.abort || (e2 && e2.code === 'MAKE_ABORTED')) return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: hasPieces() }); layerRes = layerFail(e2); } }
+    }
     // 📺 ⑯ ⑰ 렌더 규격 — 이 주문의 MP4 에만(renderUploadMp4 가 읽는다 · 확대 사본은 그 편 폴더의 _업스케일 — 원본 그림은 media-1 그대로)
     _orderRender = { output: order.output, upscale: order.upscale, upscaleDir: path.join(it.outRoot, '_업스케일'), result: null };
     if (order.output || order.upscale) L(`📺 렌더 규격 — ${order.output ? `${order.output.width}×${order.output.height} · ${order.output.fps}fps · ${order.output.bitrate}` : '기본(1920×1080 · 30fps · 950k)'} · 그림 확대 ${order.upscale ? '켬' : '끔'}`);
@@ -8978,7 +9346,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     const speed = order.speed != null ? order.speed : (preset.speedLong != null ? preset.speedLong : null);
     try {
       await makeRun(it, () => runMakeAllCore({
-        engine: order.imageEngine, presetName: base.name, speed, styleId: order.style, videoEngine: 'none', vidSel: '',
+        engine: order.imageEngine === OC.CODEX_ENGINE ? 'local:qwen-2-1' : order.imageEngine, presetName: base.name, speed, styleId: order.style, videoEngine: 'none', vidSel: '',
         captionStyle: ov.captionStyle || null, captionMaxChars: ov.captionMaxChars || 7, aiNotice: true,
         outMode: 'full', outTarget: 'mp4', openVrew: false, uploadAfter: 'off', _fromQueue: true,
       }));
@@ -9017,9 +9385,20 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         }
         res.files.thumbBgUp = fs.existsSync(upPath) ? upPath : null;
       }
+    } else if (order.thumbPrompts.length) {   // 🖼 ㊲① 여러 안(코덱스면 코덱스 · 아니면 로컬 Qwen)
+      stage = '썸네일 배경'; beat();
+      const t0 = Date.now();
+      try { const th = await _orderThumbs(cx, order, path.join(it.outRoot, baseName), L); res.files.thumbBgs = th.map((x) => x.file); res.thumbEngines = th.map((x) => x.engine); res.files.thumbBg = th[0] ? th[0].file : null; }
+      catch (e) {
+        if (stopping || S.abort || (e && e.code === 'MAKE_ABORTED')) return finish(OC.STATUS.abort, '중단 요청으로 멈췄습니다', { resumable: true });
+        return finish(OC.STATUS.fail, e, { resumable: true });
+      }
+      thumbSec = (Date.now() - t0) / 1000;
     } else res.thumbNote = '썸네일 배경 지시문이 비어 만들지 않았습니다';
-    res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt: res.files.srt });
-    res.log.redoScenes = order.redo.length ? redoNums : null;   // 🔁 ㊾ 이번에 다시 그린 장면(G번호) — 다시 주문이 아니면 null
+    res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt: res.files.srt, layerRes });
+    res.log.redoScenes = order.redo.length ? redoNums : null;
+    res.log.codex = _codexLogOf(cx);   // 🎨 ㊶ 코덱스 칸(코덱스 주문이 아니면 null)
+    if (cx) res.log.imageEngineUsed = res.log.codex.engine;   // 🔁 ㊾ 이번에 다시 그린 장면(G번호) — 다시 주문이 아니면 null
     // 🔍 ㊽ 검수 판 — 주문이 켠 때만(review: true) · 구운 MP4 에서 장면마다 대표 프레임 → 4×4 판 + 정지 구간 표 · 판정 없음
     res.log.reviewSheets = null; res.log.stillSpans = null;
     if (order.review) {
@@ -9028,7 +9407,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         const SCr = require('./core/screen-cards'), KB = require('./core/ken-burns');
         const pmap = P.pausePlanOf(pr, preset).map;
         const cards = Array.isArray(pr.screenCards) && pr.screenCards.length ? SCr.plan(pr, pr.screenCards, { pauseSec: preset.interludePauseSec }).cards : [];
-        const summaryOf = (g) => [OC.motionName(KB.patternIndexOf(g)), g && g.layered ? '판 따로→한 장' : ''].filter(Boolean).join(' · ');
+        const summaryOf = (g) => [g && g.layerOk ? '판 따로(층)' : OC.motionName(KB.patternIndexOf(g)), g && g.layered && !g.layerOk ? '판 따로→한 장' : ''].filter(Boolean).join(' · ');
         const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0 });
         if (rv.ok) {
           res.files.review = rv.sheets; res.files.stillTsv = rv.stillTsv;

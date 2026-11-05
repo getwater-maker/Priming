@@ -597,7 +597,7 @@ async function addOverlayTracks(pj, overlays, mediaZip, canvas, log) {
     { const op = VL.normOpacity(ov.opacity); if (op < 100) editInfo.opacity = op / 100; }
     if (ov.flipH || ov.flipV) editInfo.flip = { vertical: !!ov.flipV, horizontal: !!ov.flipH };
     const ovMo = VL.normOvMotion(ov.motion);
-    const ovKb = (ovMo && !isVid) ? _kenBurnsForLook({ look: { motion: ovMo } }) : null;
+    const ovKb = isVid ? null : (ov.kb === 'layerFig' ? require('../core/ken-burns').layerKb('fig') : (ovMo ? _kenBurnsForLook({ look: { motion: ovMo } }) : null));   // 🎞 ㊸ 인물판 = 층 움직임
     const ext = isVid ? 'mp4' : ((path.extname(ov.file).toLowerCase().replace('.jpeg', '.jpg').replace('.', '')) || 'png');
     const fn = `${mid}.${ext}`;
     const fileSize = fs.statSync(ov.file).size;

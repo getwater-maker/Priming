@@ -30,7 +30,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   const mo = pr.groups.map((g) => (g.look && g.look.motion) || '-').join(',');
   ok(mo === 'in,lr,rl,-,-', '도입부 두 장면 = 한 그룹(앞 장면 줌인이 이김) · 가 = 좌→우 · 나 = 좌→우 지정이지만 앞과 같아 우→좌 · 다(모르는 이름)·라 = 그대로 ' + mo);
   ok(sd.motionChanged.length === 1 && sd.motionChanged[0].g === 3 && /연달아/.test(sd.motionChanged[0].why), '바꾼 것은 결과서에(motionChanged)');
-  ok(sd.warnings.length === 2 && sd.warnings.some((w) => /앞 장면 지시를 이미/.test(w)) && sd.warnings.some((w) => /회전/.test(w)), '경고 2(도입부 겹침 · 모르는 이름)');
+  ok(sd.warnings.length === 3 && sd.warnings.some((w) => /앞 장면 지시를 이미/.test(w)) && sd.warnings.some((w) => /회전/.test(w)) && sd.warnings.some((w) => /G2 — 판 따로 장면은 층 움직임이 이깁니다/.test(w)), '경고 3(도입부 겹침 · 모르는 이름 · 판 따로 + 움직임 = 층 움직임이 이김 v1.0.32)');
   ok(pr.groups[1].layered === true && !pr.groups[0].layered, '판 따로 = 그 그룹에 표시(layered)');
   ok(KB.patternIndexOf(pr.groups[0]) === 0 && KB.patternIndexOf(pr.groups[2]) === 3, '켄번스 패턴 = 지정 움직임(줌인 0 · 우→좌 3)');
 

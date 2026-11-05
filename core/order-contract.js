@@ -17,7 +17,10 @@ const DEFAULT_ROOT = 'D:\\## 아도나이로이 2.0';
 const DEFAULT_OUT = 'D:\\Priming_무인제작';
 // 2.0 주문이 쓸 수 있는 엔진 — 로컬만(로이 결정 11-03 「2.0 주문의 기본은 로컬 엔진만 · 유료 호출 0」)
 const VOICE_ENGINES = ['omnivoice'];
-const IMAGE_ENGINES = ['local:qwen-2-1'];
+//   🎨 codex:imagegen(덧붙임3 ㉞ · v1.0.33) = 코덱스 구독 로그인 + 내장 그림 도구 — API 키 · 크레딧 없음(실행 전 확인 셋이 막는다) · 막히면 편 통째로 로컬 Qwen
+const IMAGE_ENGINES = ['local:qwen-2-1', 'codex:imagegen'];
+const CODEX_ENGINE = 'codex:imagegen';
+const CHAR_NAME_OK = /^[가-힣A-Za-z0-9 ぀-ヿ㐀-鿿々]{1,20}$/;
 const STATUS = { ok: '성공', fail: '실패', abort: '중단됨', reject: '거절' };
 const STAGES = ['주문 읽기', '음성', '그림', '렌더', '썸네일 배경', '업로드', '끝'];
 // 켄번스 패턴 번호(core/ken-burns KEN_BURNS_PATTERNS 순서) → 사람이 읽는 이름
@@ -84,6 +87,9 @@ function readOrder(orderPath) {
     upscale: false,    // 🖼 ⑰ 그림 확대 켬/끔 — 없으면 끔(지금과 같음)
     review: false,     // 🔍 ㊽ 검수 판 — true 면 렌더 뒤 결과제작<주문>검수판 에 판_NN.jpg + 정지구간.tsv (없으면 만들지 않음 = 지금과 같음)
     redo: [],          // 🔁 ㊾ 장면 다시 주문 — [G번호…] 그 장면 그림만 다시 그리고 다시 굽는다(나머지·음성은 이어 하기) · 업로드한 주문은 거절
+    codex: null,       // 🎨 ㉞~㊶ { scope:'all'|'intro', concurrency 1~6(기본 4), capPercent(기본 60), timeoutSec } — imageEngine 이 코덱스일 때만
+    characters: [],    // 👤 ㊳ [{ name, prompt, redraw }] — 캐릭터 셋(표정 9칸 + 전신 · 코덱스) · 장면은 `> 👤 인물: 이름, 이름`
+    thumbPrompts: [],  // 🖼 ㊲① 썸네일 배경 여러 안(최대 3) — 코덱스면 코덱스로, 아니면 로컬 Qwen 으로 한 장씩
     upload: {
       enabled: up.enabled !== false,
       title: _str(up.title),
@@ -115,6 +121,42 @@ function readOrder(orderPath) {
   if (raw.redo != null) {
     const rr = parseRedo(raw.redo);
     if (rr.error) errors.push(rr.error); else order.redo = rr.redo;
+  }
+  // 🎨 코덱스 칸(덧붙임3) — 엔진이 코덱스가 아니면 받지 않는다(조용히 무시하지 않음)
+  if (raw.codex != null) {
+    const c = raw.codex;
+    if (order.imageEngine !== CODEX_ENGINE) errors.push('codex 칸은 imageEngine 이 codex:imagegen 일 때만 받습니다');
+    else if (!c || typeof c !== 'object') errors.push(`codex 칸은 객체여야 합니다 — ${JSON.stringify(c)}`);
+    else {
+      const scope = c.scope == null ? 'all' : String(c.scope);
+      if (!['all', 'intro'].includes(scope)) errors.push(`codex.scope 는 all(편 전체) 또는 intro(도입부만)입니다 — ${JSON.stringify(c.scope)}`);
+      const conc = c.concurrency == null ? 4 : Number(c.concurrency);
+      if (!(Number.isInteger(conc) && conc >= 1 && conc <= 6)) errors.push(`codex.concurrency 는 1~6 입니다(6 위는 열지 않음) — ${JSON.stringify(c.concurrency)}`);
+      const cap = c.capPercent == null ? 60 : Number(c.capPercent);
+      if (!(cap > 0 && cap <= 100)) errors.push(`codex.capPercent 는 0 초과 100 이하입니다 — ${JSON.stringify(c.capPercent)}`);
+      const to = c.timeoutSec == null ? null : Number(c.timeoutSec);
+      if (to != null && !(to >= 5 && to <= 3600)) errors.push(`codex.timeoutSec 는 5~3600 입니다 — ${JSON.stringify(c.timeoutSec)}`);
+      order.codex = { scope, concurrency: conc, capPercent: cap, timeoutSec: to };
+    }
+  } else if (order.imageEngine === CODEX_ENGINE) order.codex = { scope: 'all', concurrency: 4, capPercent: 60, timeoutSec: null };
+  if (raw.characters != null) {
+    if (!Array.isArray(raw.characters)) errors.push('characters 는 [{ name, prompt }] 목록이어야 합니다');
+    else if (order.imageEngine !== CODEX_ENGINE) errors.push('characters(캐릭터 셋)는 imageEngine 이 codex:imagegen 일 때만 받습니다');
+    else {
+      const seen = new Set();
+      for (const x of raw.characters) {
+        const name = _str(x && x.name), prompt = _str(x && x.prompt);
+        if (!CHAR_NAME_OK.test(name)) { errors.push(`인물 이름이 이상합니다 — ${JSON.stringify(x && x.name)}(한글·영문·숫자·빈칸 20자 안)`); continue; }
+        if (!prompt) { errors.push(`인물 「${name}」 의 생김새 지시문(prompt)이 비었습니다`); continue; }
+        if (seen.has(name)) { errors.push(`인물 「${name}」 이 두 번 있습니다`); continue; }
+        seen.add(name); order.characters.push({ name, prompt, redraw: x.redraw === true });
+      }
+    }
+  }
+  if (raw.thumbPrompts != null) {
+    if (!Array.isArray(raw.thumbPrompts) || !raw.thumbPrompts.length || raw.thumbPrompts.length > 3 || raw.thumbPrompts.some((t) => !_str(t))) errors.push('thumbPrompts 는 지시문 1~3개 목록이어야 합니다(빈 칸 없이)');
+    else if (_str(raw.thumbPrompt)) errors.push('thumbPrompt 와 thumbPrompts 를 함께 쓰지 않습니다 — 하나만');
+    else order.thumbPrompts = raw.thumbPrompts.map(_str);
   }
   if (order.upload.enabled) {
     if (!order.upload.title) errors.push('업로드 임시 제목(upload.title)이 비었습니다');
@@ -323,7 +365,7 @@ function blankResult(order, info = {}) {
 }
 
 module.exports = {
-  VERSION, DEFAULT_ROOT, DEFAULT_OUT, VOICE_ENGINES, IMAGE_ENGINES, STATUS, STAGES, MOTION_NAMES,
+  VERSION, DEFAULT_ROOT, DEFAULT_OUT, VOICE_ENGINES, IMAGE_ENGINES, CODEX_ENGINE, STATUS, STAGES, MOTION_NAMES,
   configFile, loadConfig, kst, orderName, mmddOf, readOrder, checkKnown, emptyPromptGroups, readOps,
   nextResultPath, writeResultOnce, receiptPath, beatPath, stopPaths, stopRequested, writeReceipt, writeBeat,
   parseOutput, parseRedo, sameVoiceInBatch, sceneStats, motionName, charsPerMin, reasonLine, blankResult,

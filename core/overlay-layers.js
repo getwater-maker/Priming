@@ -85,6 +85,7 @@ function lookFields(o) {
   const op = VL.normOpacity(o.opacity); if (op < 100) out.opacity = op;
   const cr = VL.normCrop(o.crop); if (cr) out.crop = cr;
   const d = o.dim; if (d && d.w > 0 && d.h > 0) out.dim = { w: Math.round(d.w), h: Math.round(d.h) };
+  if (o.kb === 'layerFig') out.kb = 'layerFig';   // 🎞 ㊸ 인물판 층 움직임(core/ken-burns LAYER_KB.fig) — 판 따로 장면이 넣은 삽입만
   return out;
 }
 /** DTO — 화면용(그룹 번호 · 편 문장 번호 1부터) */

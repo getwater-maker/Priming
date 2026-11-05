@@ -84,6 +84,7 @@ function kbSegCount(want, dur, nSent) {
 }
 // 🖼 그룹 「움직임」(core/visual-look MOTIONS) → 켄번스. auto = 그룹 번호로 돌아가며 · none = 멈춘 그림(필드를 안 쓴다)
 function _kenBurnsForLook(g) {
+  if (g && g.layerOk) return layerKb('bg');   // 🎞 ㊸ 판 따로(배경판) — 층 움직임이 이긴다(움직임 지시·번호 공식보다)
   const m = (g && g.look && g.look.motion) || 'auto';
   if (m === 'none') return null;
   const idx = { in: 0, out: 1, lr: 2, rl: 3, bt: 4, tb: 5 }[m];
@@ -91,6 +92,14 @@ function _kenBurnsForLook(g) {
   const kb = KEN_BURNS_PATTERNS[idx];
   return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
 }
+// 🎞 ㊸ 판 따로(인물판·배경판 층 · 2.0 덧붙임4 · v1.0.33) — 기준 = 2.0 시연 render_demo.py seg3.
+//   배경판(그룹 그림) = 느리게 1.04→1.07 확대 + 오른쪽으로 조금 · 인물판(삽입 그림 · 투명 PNG + 발밑 그림자) = 1.00→1.07 확대(발밑 고정) + 왼쪽으로 조금 더 — 서로 다른 속도 = 깊이.
+//   인물판의 프레임은 그 삽입 박스 안 비율(Vrew 좌표 그대로) — cy = 1 − s/2 = 아래 끝(발) 고정. 🔒 g.layerOk · overlay kb='layerFig' 가 없으면 쓰지 않는다(지시 줄 없음 = 예전 그대로).
+const LAYER_KB = {
+  bg: { from: { scale: 0.962, centerX: 0.5, centerY: 0.5 }, to: { scale: 0.935, centerX: 0.524, centerY: 0.5 } },
+  fig: { from: { scale: 1, centerX: 0.5, centerY: 0.5 }, to: { scale: 0.935, centerX: 0.53, centerY: 0.5325 } },
+};
+function layerKb(kind) { const k = LAYER_KB[kind]; return k ? { from: _clampKbFrame(k.from), to: _clampKbFrame(k.to) } : null; }
 function _kenBurnsFor(groupIdx) {
   const kb = KEN_BURNS_PATTERNS[_pickKenBurnsIndex(groupIdx)];
   return { from: _clampKbFrame(kb.from), to: _clampKbFrame(kb.to) };
@@ -139,4 +148,4 @@ function patternIndexOf(g) {
   return idx == null ? _pickKenBurnsIndex(g && g.num) : idx;
 }
 
-module.exports = { KEN_BURNS_PATTERNS, KB_SEG_AUTO_SEC, KB_SEG_MIN_SEC, KB_SEG_MAX, _pickKenBurnsIndex, _clampKbFrame, kbWaypoints, kbSegCount, _kenBurnsForLook, _kenBurnsFor, planSegments, cssTransform, cssKeyframes, patternCss, forLook, patternIndexOf };
+module.exports = { LAYER_KB, layerKb, KEN_BURNS_PATTERNS, KB_SEG_AUTO_SEC, KB_SEG_MIN_SEC, KB_SEG_MAX, _pickKenBurnsIndex, _clampKbFrame, kbWaypoints, kbSegCount, _kenBurnsForLook, _kenBurnsFor, planSegments, cssTransform, cssKeyframes, patternCss, forLook, patternIndexOf };
