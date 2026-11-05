@@ -24,7 +24,7 @@ execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '
 const memberFiles = Object.keys(JSON.parse(fs.readFileSync(manOut, 'utf8')).files);
 cfg.files = [...memberFiles, 'node_modules/**/*'];
 delete cfg.asarUnpack;   // asar 꺼짐(설정 그대로) — 판매판에 없는 tts/omnivoice-backend 를 가리키지 않게
-delete cfg.publish;
+// publish 설정은 남긴다(--publish never 라 올리지는 않는다) — 지우면 작업트리(.git 이 파일)에서 저장소를 못 찾아 latest.yml 단계가 「reading 'channel'」 로 실패했다(첫 승격 v1.0.28)
 const ed = PREVIEW ? { edition: 'member', dataHome: 'PrimingMember' } : { edition: 'member' };
 if (PREVIEW) {
   cfg.appId = 'com.user.priming.memberpreview';
