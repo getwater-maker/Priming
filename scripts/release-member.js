@@ -4,8 +4,8 @@
  *   ⛔ 로이가 「판매판 올려」라고 한 때만 Claude 가 `npm run release:member -- --confirm [--installer]` 로 실행한다. --confirm 없으면 계획만 보여 준다.
  *
  * 순서(로이판 D:\Priming 에서 실행):
- *   ① 로이판 작업 트리 깨끗 · main ② test:edition(로이판 쪽 판정 · E2E 없이)
- *   ③ 로이판 발행물이 HEAD 에 있는가(update:publish → 바뀐 것 없음 — 판매판은 이미 푸시된 로이판 커밋에서만 나간다)
+ *   ① 로이판 main · HEAD 푸시됨 ② test:edition(로이판 쪽 판정 · E2E 없이)
+ *   ③ 판매판에 들어갈 파일(+ vite build 결과)이 커밋 그대로인가 — 판매판은 이미 푸시된 로이판 커밋에서만 나간다(판매판 밖 문서의 미커밋 변경은 무시)
  *   ④ export-member → 판매판 폴더(D:\Priming-Member)를 판매판 파일과 똑같이 맞춘다(+ 판매판 update-manifest.json)
  *   ⑤ test:edition --dir <판매판 폴더>(금지 파일·문자열 0 · 매니페스트와 폴더 일치 · 그 폴더 파일만으로 켜기·롱폼 무음 만들기)
  *   ⑥ 판매판 저장소 커밋 · 태그 member-v<ver> · 푸시(origin = getwater-maker/Priming-Member · 비공개)
@@ -25,19 +25,26 @@ const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { cwd: o.cwd || ROOT, 
 const gm = (...a) => sh('git', ['-C', TO, ...a]);
 const ver = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const steps = [
-  '로이판 작업 트리 깨끗 · main', 'npm run test:edition -- --no-e2e', 'npm run update:publish → 바뀐 것 없어야 함',
+  '로이판 main · HEAD 푸시됨', 'npm run test:edition -- --no-e2e', 'vite build → 판매판 파일·renderer/dist 가 커밋 그대로',
   `export-member → ${TO}`, `test:edition --dir ${TO}`, `판매판 저장소 커밋 · 태그 member-v${ver} · 푸시(${MEMBER_REPO})`,
   INSTALLER ? `판매판 설치본 → ${MEMBER_REPO} Release member-v${ver}` : '(설치본은 --installer 때만)',
 ];
 if (!CONFIRM) { console.log(`🛒 판매판 올리기 계획(v${ver}) — 실행하려면 --confirm (로이 「판매판 올려」 때만)\n` + steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')); process.exit(0); }
 
-// ① ~ ③ 로이판
-const dirty = () => sh('git', ['status', '--porcelain', '--untracked-files=no']).trim();
+// ① ~ ③ 로이판 — 지키는 것: **판매판에 들어갈 파일이 푸시된 로이판 커밋 그대로인가**
+//   (v1.0.38: 같은 폴더의 다른 세션이 고치다 만 문서(판매판에 안 들어감) 때문에 막히지 않게 — 판매판 파일만 본다)
+const dirtyList = (...p) => sh('git', ['-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=no', ...p]).split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, ''));
 if (sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']).trim() !== 'main') throw new Error('main 브랜치에서만');
-if (dirty()) throw new Error('커밋 안 된 변경이 있습니다 — 먼저 로이판으로 발행하세요');
+sh('git', ['fetch', '-q', 'origin', 'main']);
+if (sh('git', ['rev-parse', 'HEAD']).trim() !== sh('git', ['rev-parse', 'origin/main']).trim()) throw new Error('로이판 HEAD 가 푸시되지 않았습니다 — 로이판 발행(커밋·푸시)부터');
 sh('npm', ['run', 'test:edition', '--', '--no-e2e'], { inherit: true });
-sh('npm', ['run', 'update:publish'], { inherit: true });
-if (dirty()) throw new Error('빌드·매니페스트가 HEAD 와 다릅니다 — 로이판 발행(커밋·푸시)부터');
+sh('npm', ['run', 'build:renderer'], { inherit: true });
+const memberFiles = new Set(Object.keys(exportMember({ to: TO, dry: true, log: () => {} }).manifest.files));
+const untracked = sh('git', ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
+const bad = [...dirtyList(), ...untracked].filter((f) => memberFiles.has(f) || f.startsWith('renderer/dist/'));
+if (bad.length) throw new Error('판매판 파일이 커밋된 것과 다릅니다(빌드 포함) — 로이판 발행부터: ' + bad.slice(0, 5).join(', '));
+const others = dirtyList();
+if (others.length) console.log('ⓘ 판매판에 안 들어가는 커밋 안 된 변경(다른 세션 것일 수 있음 · 무시): ' + others.slice(0, 5).join(', '));
 // 판매판 저장소가 준비돼 있는가(처음 한 번: 로이 확인 뒤 `gh repo create getwater-maker/Priming-Member --private` + 이 폴더를 git init · origin 연결)
 if (!fs.existsSync(path.join(TO, '.git'))) throw new Error(`판매판 폴더가 git 저장소가 아닙니다: ${TO} — 처음 한 번 저장소를 만들고 연결하세요(docs/판나누기-설계.md ②)`);
 const origin = (() => { try { return gm('remote', 'get-url', 'origin').trim(); } catch (_) { return ''; } })();
