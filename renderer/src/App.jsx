@@ -890,7 +890,7 @@ export default function App() {
   const refreshYtLogin = useCallback(async () => { try { setYtLogin(await api.ytLoginStatus()); } catch (_) { setYtLogin(null); } }, []);
   useEffect(() => { refreshYtLogin(); let off; try { off = api.onYtLoginChanged && api.onYtLoginChanged(refreshYtLogin); } catch (_) {} return () => { try { off && off(); } catch (_) {} }; }, [refreshYtLogin]);
   async function ytLoginOpen() {
-    setYtLoginMsg('로그인 창이 열렸습니다 — 전용 구글 계정으로 로그인하세요');
+    setYtLoginMsg('크롬(없으면 엣지) 새 창이 열립니다 — 전용 구글 계정으로 로그인하세요');
     try { const r = await api.ytLoginOpen(); setYtLoginMsg(r && r.ok ? '✓ 로그인이 저장됐습니다' : (r && r.canceled ? '' : '로그인 실패 — ' + ((r && r.error) || '알 수 없음'))); }
     catch (e) { setYtLoginMsg('로그인 실패 — ' + e.message); }
     refreshYtLogin();

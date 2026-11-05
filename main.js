@@ -9013,9 +9013,9 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
 ipcMain.handle('dl-abort', () => { _dlAbort = true; log('⏹ 받기·전사 중단 요청 — 현재 단계 마치는 대로 멈춥니다'); return true; });
 
 // 🔑 유튜브 로그인(v1.0.23 · 로이 2026-11-04 · 관리자 전용) — 로그인 없이 받으면 유튜브가 「로봇 확인」으로 막는다(4K Video Downloader+ 는
-//   구글 로그인 쿠키로 받는다). 앱 안 창에서 **전용 구글 계정**으로 한 번 로그인 → 쿠키를 `core/yt-cookies` 에 OS 암호화로 저장 →
-//   yt-dlp 가 `--cookies` 로 쓴다(`MD.setCookieProvider`). ⛔ 비밀번호는 이 앱이 보지 않는다(구글 화면에 사람이 입력) · ⛔ 쿠키 값을 렌더러·로그로 보내지 않는다 ·
-//   ⛔ 채널·애드센스와 관계있는 계정 금지. 로그인 창의 저장 공간은 쿠키를 뽑은 뒤 비운다(브라우저가 쿠키를 돌려 쓰면 유튜브가 무효화한다).
+//   구글 로그인 쿠키로 받는다). **진짜 크롬/엣지**(새 임시 프로필)에서 **전용 구글 계정**으로 한 번 로그인 → 쿠키를 `core/yt-cookies` 에 OS 암호화로 저장 →
+//   yt-dlp 가 `--cookies` 로 쓴다(`MD.setCookieProvider`). v1.0.24: 앱 안(Electron) 로그인 창은 구글이 「안전하지 않은 브라우저」로 막아(실물 확인) 진짜 브라우저 + CDP 로 바꿨다(`core/yt-login`).
+//   ⛔ UA 를 꾸며 구글의 차단을 피하려 하지 않는다 · ⛔ 비밀번호는 이 앱이 보지 않는다(구글 화면에 사람이 입력) · ⛔ 쿠키 값을 렌더러·로그로 보내지 않는다 · ⛔ 채널·애드센스와 관계있는 계정 금지.
 const _ytCk = require('./core/yt-cookies');
 const _ytEnc = () => {
   try { const { safeStorage } = require('electron'); if (safeStorage && safeStorage.isEncryptionAvailable()) return (t) => safeStorage.encryptString(String(t)).toString('base64'); } catch (_) {}
@@ -9026,62 +9026,33 @@ const _ytDec = () => {
   return null;
 };
 require('./core/media-download').setCookieProvider(() => (isOwner() ? _ytCk.acquire(_ytEnc(), _ytDec()) : null));
-let _ytLoginWin = null;
 ipcMain.handle('yt-login-status', () => {
   if (!isOwner()) return { allowed: false, connected: false };
   return { allowed: true, canEncrypt: !!_ytEnc(), ..._ytCk.status(_ytDec()) };
 });
 ipcMain.handle('yt-login-clear', () => { if (!isOwner()) return { ok: false }; _ytCk.clear(); log('🔑 유튜브 로그인 해제 — 저장된 쿠키를 지웠습니다'); return { ok: true }; });
+let _ytLoginBusy = false;
 ipcMain.handle('yt-login-open', async () => {
   if (!isOwner()) return { ok: false, error: '관리자 전용 기능입니다' };
   if (!_ytEnc()) return { ok: false, error: '이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 로그인 정보를 저장하지 않습니다' };
-  if (_ytLoginWin && !_ytLoginWin.isDestroyed()) { _ytLoginWin.focus(); return { ok: false, error: '로그인 창이 이미 열려 있습니다' }; }
-  const { session } = require('electron');
-  const part = 'yt-dl-login-' + Date.now();           // 매번 새 임시 저장 공간(메모리) — 남은 브라우저 세션이 쿠키를 돌리지 않게
-  const ses = session.fromPartition(part);
-  // 구글은 「Electron」이 든 UA 로는 로그인을 막는다 → 일반 크롬 UA
-  ses.setUserAgent(ses.getUserAgent().replace(/\s?Electron\/\S+/i, '').replace(/\s?priming\S*\/\S+/i, ''));
-  const w = new BrowserWindow({ width: 520, height: 720, parent: win || undefined, title: '유튜브 로그인 (전용 계정)', autoHideMenuBar: true,
-    webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  _ytLoginWin = w;
-  log('🔑 유튜브 로그인 창을 엽니다 — 전용 구글 계정으로 로그인하세요(비밀번호는 앱이 보지 않습니다)');
-  return await new Promise((resolve) => {
-    let finished = false, poll = null, timer = null;
-    const done = async (res) => {
-      if (finished) return; finished = true;
-      clearInterval(poll); clearTimeout(timer);
-      try { await ses.clearStorageData(); } catch (_) {}
-      try { if (!w.isDestroyed()) w.destroy(); } catch (_) {}
-      _ytLoginWin = null;
-      try { win.webContents.send('yt-login-changed'); } catch (_) {}
-      resolve(res);
-    };
-    const grab = async () => {
-      try {
-        const all = await ses.cookies.get({});
-        return _ytCk.filterCookies(all);
-      } catch (_) { return []; }
-    };
-    let stage = 0;      // 0 = 로그인 대기 · 1 = 유튜브 쿠키 채우는 중
-    poll = setInterval(async () => {
-      if (finished || w.isDestroyed()) return;
-      const cks = await grab();
-      if (stage === 0 && _ytCk.isLoggedIn(cks)) {
-        stage = 1;
-        // 로그인 쿠키가 생겼다 → 유튜브 도메인 쿠키(LOGIN_INFO · VISITOR_INFO1_LIVE …)를 채우려 유튜브를 한 번 연다
-        try { await w.loadURL('https://www.youtube.com/'); } catch (_) {}
-        setTimeout(async () => {
-          const fin = await grab();
-          const r = _ytCk.save(fin, _ytEnc());
-          if (r.ok) { log(`🔑 유튜브 로그인 저장 완료 — 쿠키 ${r.count}개(OS 암호화)`); await done({ ok: true }); }
-          else { log('🔑 유튜브 로그인 저장 실패 — ' + r.error); await done({ ok: false, error: r.error }); }
-        }, 3500);
-      }
-    }, 1500);
-    timer = setTimeout(() => { log('🔑 유튜브 로그인 — 10분이 지나 창을 닫았습니다'); done({ ok: false, error: '시간 초과(10분)' }); }, 10 * 60 * 1000);
-    w.on('closed', () => { if (!finished) { log('🔑 유튜브 로그인 — 창을 닫았습니다(저장 안 함)'); done({ ok: false, canceled: true }); } });
-    w.loadURL('https://accounts.google.com/ServiceLogin?service=youtube&hl=ko&continue=' + encodeURIComponent('https://www.youtube.com/')).catch(() => {});
-  });
+  if (_ytLoginBusy) return { ok: false, error: '로그인 창이 이미 열려 있습니다' };
+  const YL = require('./core/yt-login');
+  const br = YL.pickBrowser(LinkOpener.detect());
+  if (!br) return { ok: false, error: '크롬 또는 엣지가 설치돼 있지 않습니다 — 구글은 앱 안 창 로그인을 막아 진짜 브라우저가 필요합니다' };
+  _ytLoginBusy = true;
+  log('🔑 유튜브 로그인 — ' + br.label + ' 새 창을 엽니다(평소 프로필은 쓰지 않습니다)');
+  try {
+    const r = await YL.login({ exe: br.exe, spawn: require('child_process').spawn, chromium: require('playwright').chromium, tmpRoot: os.tmpdir(),
+      fsApi: fs, log });
+    if (!r.ok) { log('🔑 유튜브 로그인 — ' + (r.canceled ? '창을 닫았습니다(저장 안 함)' : r.error)); return r; }
+    const s = _ytCk.save(r.cookies, _ytEnc());
+    if (!s.ok) { log('🔑 유튜브 로그인 저장 실패 — ' + s.error); return { ok: false, error: s.error }; }
+    log('🔑 유튜브 로그인 저장 완료 — 쿠키 ' + s.count + '개(OS 암호화)');
+    return { ok: true };
+  } finally {
+    _ytLoginBusy = false;
+    try { win.webContents.send('yt-login-changed'); } catch (_) {}
+  }
 });
 ipcMain.handle('abort', () => {
   workAbortEpoch++;
