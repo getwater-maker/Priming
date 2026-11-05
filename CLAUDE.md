@@ -60,6 +60,7 @@
 - 실행: `npm start`(= vite build + electron). 엔트리 `bootstrap.js` → `light-updater.applyUpdates()` → `main.js`.
 - **발행 = 수정 → 테스트 → `npm run update:publish`(vite build + 매니페스트) → git add(소스·테스트·`renderer/dist`·`update-manifest.json`·package.json·CLAUDE.md·작업노트) → commit → push.** 각 PC 는 앱 재시작 때 바뀐 파일만 받는다(asar 비활성, raw.githubusercontent, 저장소 `getwater-maker/Priming`, CDN 캐시 ~5분).
   - 🔴 **빌드가 커밋보다 먼저** — `renderer/dist` 와 매니페스트가 함께 올라가야 다른 PC 가 받는다.
+  - 🏠🛒 **판이 둘이다(설계 확정 2026-11-05 · 구현 전 · [`docs/판나누기-설계.md`](docs/판나누기-설계.md))**: 로이판(관리자 · 커밋마다) / 판매판(회원 · **롱폼만** · 로이가 「판매판 올려」 한 커밋만 `release:member`) — ⛔ 저장소·브랜치를 둘로 나누지 않는다 · 로이 전용 기능은 `core/edition` 의 `FEATURES` 에 등록해 판매판에서 **파일째 뺀다** · 판정은 서버(Worker)가 이긴다(`docs/요청서_wise-priming-판별업데이트.md`).
   - 🔴 **`package.json` dependencies 가 바뀌면 라이트 업데이트가 막힌다**(매니페스트 `deps` 해시) → 설치본 재배포(`npm run dist`) 필요. ⛔ **npm 의존성을 쉽게 늘리지 않는다**(아내 PC 재설치가 따라온다). 형태소 분석기 등도 같은 이유로 안 쓴다.
   - 🔴 **버전은 앞으로만** — 고치기 전에 `package.json` 을 먼저 읽는다(다른 세션이 낡은 값으로 0.3.25→0.2.99 역행시킨 사고). `gen-manifest` 가 역행을 막는다(`ALLOW_VERSION_DOWNGRADE=1` 로만 우회).
   - 매니페스트 제외: 폴더 **이름**이 `scripts`·`.venv`·`qwen-design` 등인 곳 전체, `assets/fonts/book/`, **git 무시 파일**(`git check-ignore`). 🔴 배포할 파이썬은 `scripts/` 라는 이름 폴더에 두지 말 것(조용히 빠진다). 해시는 LF 정규화 기준.
