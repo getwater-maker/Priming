@@ -86,3 +86,32 @@
 
 ### 답으로 받고 싶은 것 (덧붙임)
 - 다운로드 페이지 주소 · 받기에 로그인이 필요한지 · Worker 배포 예정일(= 회원 업데이트가 멈추기 시작하는 날).
+
+---
+
+## 회신 — wise-priming (2026-11-05)
+
+**상태: 코드·시험 끝, 커밋 완료(wise-priming `9495422`, 푸시 안 함). Worker 는 아직 배포 안 했다 — 로이 확인 대기.**
+
+### 배포
+- Worker 배포 = `npx wrangler@4 deploy --keep-vars`(`workers/priming-updates`). **배포 예정일 미정** — 로이 확인을 받고, Priming 세션이 첫 판매판 올리기를 시작하기 직전에 한다. 배포 순간부터 회원 업데이트가 멈춘다(`no_member_release`).
+- 사이트(다운로드 카드)는 Worker 배포 **뒤에** 푸시한다(먼저 올리면 카드가 「정보를 불러오지 못했습니다」로 보인다 — Worker 의 CORS 가 아직 없어서).
+
+### 다운로드 페이지
+- 주소: **`https://www.primingwave.com/member/devices`** (「내 기기 · Priming 앱」 맨 위 「Priming 앱 내려받기」 카드). 앱의 「재설치 필요」 안내가 가리킬 주소로 이걸 쓰면 된다.
+- 카드에 `v1.0.x · 183MB · 날짜 올림` 표시(`/installer/info`). 버튼 = Worker `/installer/link` 로 짧게 사는 서명 주소를 받아 이동 → GitHub 직접 링크 아님, 저장소 비공개 뒤에도 받아진다.
+- **로그인 필요: 예.** 로그인한 유효 회원(`member`) 또는 관리자만 카드가 보인다(지금 사이트 규칙 — 회원 영역은 로그인 필수). 회원 → `Priming-Setup-` 최신 · 관리자 → `Priming-Studio-Setup-` 최신(없으면 옛 `Priming-Setup-`)을 자동으로 받는다(별도 단추 없이 판정으로).
+
+### 응답 코드 최종본(Worker)
+- 공통 인증: 토큰 없음 401 `no_token` · 무효 401 `invalid_token` · 비회원/만료 403 `not_member`/`expired` · 인증 서버 장애 502 `auth_unavailable`.
+- `/manifest`: 관리자 = main `update-manifest.json`(없으면 404 `not_found`) · 회원 = `update-manifest.member.json` 그대로, **없거나 `ref` 가 40자 sha 가 아니면 404 `{"error":"no_member_release"}`**(로이판으로 안 떨어짐).
+- `/file/<경로>`: 관리자 = 지금처럼 main · 회원 = 판매판 매니페스트 `files` 에 있는 경로만 **`ref` 커밋에서**, 없으면 404 `not_in_manifest`(`remove` 대상·`update-manifest.json` 포함), 판매판 매니페스트가 없으면 404 `no_member_release`.
+- `/installer`·`/installer/info`·`/installer/link`: 404 `no_release`(릴리스 없음) · 404 `no_installer`(해당 판 자산 없음) · 502 `upstream`. `/installer/info` = `{tag, version, name, size, published_at}`. `?name=` 은 없앴다(회원이 Studio·미리보기를 고르지 못하게). `Priming-Member-Preview-Setup-` 은 이름 규칙에 안 걸려 누구에게도 안 나간다. 초안·사전 릴리스는 건너뜀. 버전은 숫자 비교(1.0.10 > 1.0.9).
+- 모든 응답(인증 통과 후)에 `X-Priming-Edition: studio|member`.
+
+### 확인 사항
+- **판매판 매니페스트 기억 시간**: `/manifest` 는 요청마다 새로 읽는다(ref 가 바뀌면 바로 따라감). `/file` 은 그 매니페스트를 60초 기억하고, 목록에 없는 경로를 물으면 한 번 새로 읽어 다시 확인한다. 토큰 판정 기억도 60초.
+- **관리자 판정 기준**: `priming_status` RPC 의 `admin` 값(= `admins` 테이블) **하나뿐**. 다른 기준 없음. 앱이 보내는 `?edition=` 은 로그만 남기고 무시한다(로그에 `asked …` 로 남음).
+- 시험(`node workers/priming-updates/test.mjs`, 34개 통과): 회원+매니페스트 없음 404 · 회원+있음(files·ref 커밋·remove 404·ref 교체 즉시 추종) · 관리자(`?edition=member` 를 보내도 main) · installer 고르기(회원/관리자/폴백/미리보기 제외/버전 비교) · CORS.
+- ⚠ 첫 판매판 설치본이 Release 에 올라가기 전에는 회원이 받는 `Priming-Setup-` 최신이 **옛 로이판 빌드**다(요청서가 짚은 대로) — 깔면 Worker 가 판매판 매니페스트를 준 뒤 업데이트로 판매판이 된다.
+- ⚠ 이 Worker 는 아직 `GITHUB_TOKEN` 없이도 공개 저장소로 동작한다. 저장소를 비공개로 바꾸기 전에 대시보드 비밀값 `GITHUB_TOKEN`(Contents·Releases 읽기)을 넣어야 한다 — 이미 설계 §0 순서에 있음.

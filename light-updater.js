@@ -173,7 +173,7 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
           type: 'info', buttons: ['확인'], defaultId: 0,
           title: '업데이트 — 재설치 필요',
           message: `새 버전(${manifest.version})은 구성요소가 변경되어 설치파일 재설치가 필요합니다.`,
-          detail: 'primingwave.com 에서 최신 설치파일을 받아 설치해 주세요.\n(이번 실행은 현재 버전으로 계속됩니다.)',   // 🔐 저장소 비공개 뒤엔 회원이 GitHub 에 갈 수 없다(v0.9.27)
+          detail: 'primingwave.com → 「내 기기 · Priming 앱」(www.primingwave.com/member/devices)의 「Priming 앱 내려받기」에서 최신 설치파일을 받아 설치해 주세요.\n(이번 실행은 현재 버전으로 계속됩니다.)',   // v1.0.28 — wise-priming 회신 2026-11-05(로그인 필요 · 판에 맞는 설치본을 Worker 가 고른다)   // 🔐 저장소 비공개 뒤엔 회원이 GitHub 에 갈 수 없다(v0.9.27)
         });
       } catch (_) {}
     });
