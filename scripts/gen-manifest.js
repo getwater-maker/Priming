@@ -16,13 +16,16 @@ const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 // 🏠🛒 판(v1.0.26 · docs/판나누기-설계.md) — 기본 = 로이판(update-manifest.json · 지금 그대로).
-//   `--edition member` = 판매판(update-manifest.member.json): core/edition 의 로이 전용 파일 + 내부 문서(docs·CLAUDE.md·AGENTS.md·tools)를 뺀다
-//   (「📘 대본 작성 기준」은 앱이 쓰므로 보낸다) · `edition`·`ref`(파일을 꺼낼 커밋 · 기본 HEAD · `--ref <sha>`)·`remove`(예전 로이판 기능 파일 — 업데이터가 지운다)를 싣는다.
+//   `--edition member --out <파일>` = 판매판 매니페스트: core/edition 의 로이 전용 파일 + 내부 문서(docs·CLAUDE.md·AGENTS.md·tools)를 뺀다
+//   (「📘 대본 작성 기준」은 앱이 쓰므로 보낸다) · `edition`·`source`(이 로이판 커밋 — 기록용)·`remove`(예전 로이판 기능 파일 — 업데이터가 지운다)를 싣는다.
+//   v1.0.38(저장소 분리 · 로이 2026-11-05): 판매판 매니페스트는 **판매판 저장소의 update-manifest.json** 이 된다(scripts/export-member.js 가 옮긴다)
+//   → ref 고정 없음(저장소 자체가 승격본) · ⛔ 로이판 저장소에 update-manifest.member.json 을 새로 쓰지 않는다(그래서 --out 이 필수).
 const _argv = process.argv.slice(2);
 const _argOf = (k) => { const i = _argv.indexOf(k); if (i >= 0) return _argv[i + 1]; const e = _argv.find((a) => a.startsWith(k + '=')); return e ? e.slice(k.length + 1) : null; };
 const EDITION = (_argOf('--edition') || 'studio').toLowerCase();
 if (!['studio', 'member'].includes(EDITION)) { console.error('❌ --edition 은 studio 또는 member'); process.exit(1); }
-const OUT = _argOf('--out') ? path.resolve(_argOf('--out')) : path.join(ROOT, EDITION === 'member' ? 'update-manifest.member.json' : 'update-manifest.json');   // --out = 시험용(임시 폴더)
+if (EDITION === 'member' && !_argOf('--out')) { console.error('❌ 판매판 매니페스트는 --out <파일> 로만 만든다(판매판 저장소로 옮기는 일은 scripts/export-member.js)'); process.exit(1); }
+const OUT = _argOf('--out') ? path.resolve(_argOf('--out')) : path.join(ROOT, 'update-manifest.json');   // --out = 판매판·시험용(임시 폴더)
 
 // 폴더 단위 제외 (이름 일치) — 주의: 'dist' 는 여기 넣지 않는다(renderer/dist 는 포함해야 함).
 // ⚠ '__pycache__' — 파이썬이 만드는 .pyc 는 인터프리터 버전마다 달라 매번 해시가 바뀐다(배포할 것이 아니다).
@@ -138,11 +141,10 @@ if (EDITION === 'member') {
   for (const [r, h] of Object.entries(files)) { if (ED.inEditionFile(r, 'member')) kept[r] = h; else removed.push(r); }
   // remove = 로이 전용 **기능 파일**만(문서는 지우지 않는다 — 예전 판이 받아 둔 문서는 앱이 읽지 않는다)
   const remove = removed.filter((r) => ED.fileFeature(r)).sort();
-  let ref = _argOf('--ref');
-  if (!ref) { try { ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch (_) { ref = ''; } }
-  if (!/^[0-9a-f]{40}$/.test(ref || '')) { console.error('❌ ref(커밋 sha 40자)를 정하지 못했습니다 — --ref <sha>'); process.exit(1); }
-  manifest = { version: pkg.version, deps: depsHash, edition: 'member', ref, remove, files: kept };
-  console.log(`🛒 판매판: 로이판 ${Object.keys(files).length}개 중 ${removed.length}개 뺌(기능 파일 ${remove.length}) · ref ${ref.slice(0, 8)}`);
+  let source = '';
+  try { source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch (_) {}
+  manifest = { version: pkg.version, deps: depsHash, edition: 'member', source, remove, files: kept };
+  console.log(`🛒 판매판: 로이판 ${Object.keys(files).length}개 중 ${removed.length}개 뺌(기능 파일 ${remove.length}) · 로이판 ${source.slice(0, 8)}`);
 }
 fs.writeFileSync(OUT, JSON.stringify(manifest, null, 2));
 console.log(`${path.basename(OUT)} 생성: v${pkg.version} · ${Object.keys(manifest.files).length}개 파일 · deps ${depsHash.slice(0, 8)}`);

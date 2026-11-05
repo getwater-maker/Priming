@@ -6,7 +6,8 @@
  *                   `dist/member-preview/Priming-Member-Preview-Setup-<ver>.exe` · 다른 appId·설치 폴더·이름(「Priming 판매판」)
  *                   · edition.json 에 dataHome = 설정·채널·키·로그인을 「홈\PrimingMember」 아래로(로이판과 섞이지 않는다 · bootstrap)
  *   edition.json 은 저장소 폴더에 쓰지 않는다 — 임시 파일을 extraResources 로 설치폴더(app/)에만 넣는다(그 사이 로이판 개발 실행이 판매판이 되지 않게).
- *   ⛔ 게시(--publish)하지 않는다 — 판매판 올리기는 로이 「판매판 올려」 때만(release:member).
+ *   ⛔ 게시(--publish)하지 않는다 — 판매판 올리기는 로이 「판매판 올려」 때만(release:member --installer 가 판매판 저장소 Release 에 올린다).
+ *   v1.0.38: 담는 파일 = 판매판 폴더(D:\Priming-Member)와 같은 목록(같은 gen-manifest --edition member) — 로이판 HEAD 에서 만든다.
  */
 const fs = require('fs'), path = require('path'), os = require('os');
 const { execFileSync } = require('child_process');
@@ -19,8 +20,7 @@ const cfg = JSON.parse(JSON.stringify(pkg.build));
 //   저장소 폴더의 작업 파일(lora-dataset-clean 2.2GB · video · 샘플.vrew …)이 섞여 2.7GB → NSIS 가 못 묶었다. 라이트 업데이트가 받는 파일과 설치본이 같아진다.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-dist-member-'));
 const manOut = path.join(tmp, 'member-manifest.json');
-const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member', '--ref', ref, '--out', manOut], { cwd: ROOT, stdio: 'inherit' });
+execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member', '--out', manOut], { cwd: ROOT, stdio: 'inherit' });
 const memberFiles = Object.keys(JSON.parse(fs.readFileSync(manOut, 'utf8')).files);
 cfg.files = [...memberFiles, 'node_modules/**/*'];
 delete cfg.asarUnpack;   // asar 꺼짐(설정 그대로) — 판매판에 없는 tts/omnivoice-backend 를 가리키지 않게
@@ -34,6 +34,8 @@ if (PREVIEW) {
   cfg.directories = { ...(cfg.directories || {}), output: 'dist/member-preview' };
 } else {
   cfg.artifactName = 'Priming-Setup-${version}.${ext}';
+  // 🛒 v1.0.38 저장소 분리 — 판매판 설치본은 판매판 저장소(비공개 · getwater-maker/Priming-Member)의 Release 로만 나간다(release:member --installer)
+  cfg.publish = [{ provider: 'github', owner: 'getwater-maker', repo: 'Priming-Member', releaseType: 'release' }];
   cfg.directories = { ...(cfg.directories || {}), output: 'dist/member' };
 }
 const edFile = path.join(tmp, 'edition.json');

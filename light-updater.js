@@ -80,15 +80,16 @@ async function fetchWithTimeout(url, ms, asText, headers, meta) {
 //   safeStorage 는 app ready 뒤에만 쓸 수 있다 — bootstrap 이 이 await 를 기다리는 동안 어차피 ready 가 된다(main.js 는 whenReady 로 받는다).
 //   🛒 v1.0.35(로이 「판매판 올려」 · Worker 66483e8): **판매판 설치본은 로그인 전에도** Worker 에 토큰 없이 묻는다(Worker 가 토큰 없음 = 판매판을 준다)
 //   · 🏠 로이판은 토큰이 없으면 Worker 를 건너뛴다(로그아웃한 로이판이 판매판을 받지 않게 · raw 경로는 예전 그대로).
+//   🏠🛒 v1.0.38(저장소 분리): 판(edition)은 license 의 주소 만들기 한 곳이 매니페스트·파일 주소 모두에 싣는다 — Worker 가 판으로 저장소를 고른다.
 //   돌려주는 authed = 토큰으로 물었는가(서버가 계정으로 판을 정했다 — 로이판→판매판 전환은 이때만 허용).
 async function workerSource(localEdition = 'studio') {
   if (process.env.PM_NO_WORKER_UPDATE) return null;
   try {
     await app.whenReady();
     const L = require('./core/license').forApp();
-    const s = await L.updateSource();
+    const s = await L.updateSource(localEdition);
     if (s) return { ...s, authed: true };
-    if (localEdition === 'member' && typeof L.anonUpdateSource === 'function') return { ...L.anonUpdateSource(), authed: false };
+    if (localEdition === 'member' && typeof L.anonUpdateSource === 'function') return { ...L.anonUpdateSource(localEdition), authed: false };
     return null;
   }
   catch (e) { log('회원 업데이트 경로 준비 실패 — 옛 경로로: ' + (e && e.message)); return null; }
@@ -143,14 +144,14 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   // 🧪 Priming Lab(복제본) — 원본 저장소의 파일로 Lab 코드를 덮어쓰지 않는다(설치본이어도).
   if (process.env.PM_LAB) { log('Lab — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'lab' }; }
   const appDir = app.getAppPath(); // asar:false → resources/app
-  // 🏠🛒 이 설치본의 판(v1.0.26 · edition.json · 없으면 studio) — Worker 에 알려 준다(판정은 서버가 이긴다)
+  // 🏠🛒 이 설치본의 판(v1.0.26 · edition.json · 없으면 studio) — Worker 에 알려 준다(v1.0.38: member 는 판매판 저장소 · studio 는 관리자만 로이판 — 관리자 아님은 판매판)
   let localEdition = 'studio';
   try { localEdition = require('./core/edition').readEdition(appDir); } catch (_) {}
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
   let manifest, RAW_BASE = null, lastErr = '', W = await workerSource(localEdition), headerEdition = null;
   if (W) {
-    try { const meta = {}; manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()) + '&edition=' + localEdition, manifestTimeoutMs, true, W.headers, meta)); headerEdition = meta.edition || null; RAW_BASE = 'worker'; log(W.authed ? '회원 경로로 업데이트 확인' : '판매판 — 로그인 전 업데이트 확인'); }
+    try { const meta = {}; manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), manifestTimeoutMs, true, W.headers, meta)); headerEdition = meta.edition || null; RAW_BASE = 'worker'; log(W.authed ? '회원 경로로 업데이트 확인' : '판매판 — 로그인 전 업데이트 확인'); }
     catch (e) {
       // 🛒 판매판이 아직 없다(Worker 404 no_member_release) — 로이판(raw main)으로 떨어지지 않고 지금 판으로 켠다
       if (e.status === 404 && /no_member_release/.test(e.body || '')) { log('판매판이 아직 발행되지 않았습니다 — 지금 버전으로 실행'); return { updated: 0, failed: 0, reason: 'no_member_release' }; }

@@ -8,7 +8,8 @@
  *   [5] 판별력 — 금지 파일·금지 문자열을 넣으면 실제로 실패한다
  *   [6] 정적 — 판매판 파일이 빠진 파일을 맨 위에서 require 하지 않는다
  *   [7] 판매판 파일만 임시 폴더에 복사 → 앱이 켜지고(출판·리모션 탭 없음 · 빠진 IPC = 「이 판에는 없는 기능」) · 2.0 무인 입구 거절 · 롱폼 무음 만들기(test:makeall 그대로)
- *   `--member-manifest <파일>` = 주어진 판매판 매니페스트만 검사([3]~[5] · release:member 가 부른다)
+ *   [8] 한 방향 복사(v1.0.38 저장소 분리) — export-member 가 판매판 폴더를 판매판 파일과 똑같이 맞춘다(엉뚱한 파일 지움 · 고유 파일만 남김)
+ *   `--dir <판매판 폴더>` = 그 폴더(D:\Priming-Member)를 검사 — update-manifest.json · 금지 파일·문자열 0 · 매니페스트와 폴더 일치 · [6] · [7] 을 그 폴더 파일로(release:member 가 부른다)
  *   `--no-e2e` = [7] 건너뜀
  */
 const fs = require('fs'), path = require('path'), os = require('os');
@@ -26,7 +27,7 @@ const BINARY = /\.(png|jpe?g|webp|gif|ico|ttf|otf|bin|vbin|mp3|wav)$/i;
 function checkMember(m, readFile) {
   const probs = [];
   if (!m || m.edition !== 'member') probs.push('edition 이 member 가 아님');
-  if (!/^[0-9a-f]{40}$/.test((m && m.ref) || '')) probs.push('ref(커밋 sha 40자) 없음');
+  if (m && m.ref) probs.push('ref 칸이 있다(v1.0.38 — 판매판 저장소 자체가 승격본 · ref 고정 없음)');
   for (const rel of Object.keys((m && m.files) || {})) {
     const id = ED.fileFeature(rel);
     if (id && !ED.has(id, 'member')) probs.push('로이 전용 파일: ' + rel + ' (' + id + ')');
@@ -38,10 +39,29 @@ function checkMember(m, readFile) {
   }
   return probs;
 }
-const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(path.sep)), 'utf8');
+const DIR = argOf('--dir') ? path.resolve(argOf('--dir')) : null;
+const SRC = DIR || ROOT;   // 판매판 파일을 읽을 곳 — --dir 이면 판매판 폴더
+const readRoot = (rel) => fs.readFileSync(path.join(SRC, rel.split('/').join(path.sep)), 'utf8');
+const EX = require('../scripts/export-member');
+/** 판매판 폴더 검사 — 매니페스트와 폴더가 똑같은가(빠진 파일·다른 해시·엉뚱한 파일 0) · 고유 파일 · 문제 목록 */
+function checkDir(dir, m) {
+  const probs = [];
+  const crypto = require('crypto');
+  const BIN = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
+  const h = (abs) => { let b = fs.readFileSync(abs); if (!BIN.has(path.extname(abs).toLowerCase())) b = Buffer.from(b.toString('latin1').replace(/\r\n/g, '\n'), 'latin1'); return crypto.createHash('sha1').update(b).digest('hex'); };
+  for (const [rel, want] of Object.entries(m.files || {})) {
+    const f = path.join(dir, rel.split('/').join(path.sep));
+    if (!fs.existsSync(f)) probs.push('빠진 파일: ' + rel); else if (h(f) !== want) probs.push('해시 다름: ' + rel);
+  }
+  const walk = (d, rel, out) => { for (const n of fs.readdirSync(d)) { const r = rel ? rel + '/' + n : n; const a = path.join(d, n); const st = fs.lstatSync(a); if (st.isDirectory() || st.isSymbolicLink()) { if (!rel && EX.KEEP_DIRS.has(n)) continue; if (st.isDirectory()) walk(a, r, out); } else out.push(r); } return out; };
+  for (const r of walk(dir, '', [])) if (!(m.files || {})[r] && !EX.OWN_FILES.includes(r)) probs.push('매니페스트에 없는 파일: ' + r);
+  try { if (JSON.parse(fs.readFileSync(path.join(dir, 'edition.json'), 'utf8')).edition !== 'member') probs.push('edition.json 이 member 가 아님'); } catch (_) { probs.push('edition.json 없음'); }
+  try { if (fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8') !== fs.readFileSync(path.join(ROOT, 'docs', '판매판-폴더-CLAUDE.md'), 'utf8')) probs.push('CLAUDE.md 가 원본(docs/판매판-폴더-CLAUDE.md)과 다름'); } catch (_) { probs.push('CLAUDE.md 없음'); }
+  return probs;
+}
 
 (async () => {
-  const given = argOf('--member-manifest');
+  const given = DIR;
   if (!given) {
     console.log('[1] core/edition 판정');
     const OWN = ['charSheets', 'ytCookie', 'localQwen', 'gpuTemp', 'lecture'];   // 예전에 isOwner() 로 막던 것 + 새 관리자 전용(🎓 강의 ㊿ · v1.0.34)
@@ -96,15 +116,23 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
     ok(/localEdition === 'member' && typeof L\.anonUpdateSource === 'function'/.test(LU) && /function editionGate\(/.test(LU) && (LU.match(/editionGate\(/g) || []).length >= 3, 'light-updater — 토큰 없는 경로는 판매판만 · 판정은 editionGate 한 곳(적용·확인 둘 다)');
     const gate = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'LicenseGate.jsx'), 'utf8');
     ok(/const recheck = [^\n]*loadPlans\(\)/.test(gate), 'LicenseGate 「다시 확인」이 요금 목록(licensePlans)도 다시 읽는다');
+    // v1.0.38 저장소 분리 — 판(edition)이 매니페스트·파일 주소 **둘 다**에 실린다(Worker 가 판으로 저장소를 고른다)
+    const sm = lic.anonUpdateSource('member');
+    ok(/\/manifest\?t=1&edition=member$/.test(sm.manifestUrl(1)) && /\/file\/core\/pipeline\.js\?edition=member$/.test(sm.fileUrl('core/pipeline.js', 0)) && /\?t=5&edition=member$/.test(sm.fileUrl('a.js', 5)), '업데이트 주소 = 매니페스트·파일 둘 다 edition=member');
+    ok(!/edition=/.test(anon.manifestUrl(1) + anon.fileUrl('a.js', 0)), '판을 안 주면 예전 주소 그대로(판정력 짝)');
+    ok(/L\.updateSource\(localEdition\)/.test(LU) && /L\.anonUpdateSource\(localEdition\)/.test(LU) && !/'&edition=' \+ localEdition/.test(LU), 'light-updater 는 판을 주소 만들기 한 곳(license)에 넘긴다');
+    const rm = fs.readFileSync(path.join(ROOT, 'scripts', 'release-member.js'), 'utf8');
+    ok(!/update-manifest\.member\.json/.test(rm) && /exportMember/.test(rm) && /Priming-Member/.test(rm) && /'--dir', TO/.test(rm), 'release:member = 판매판 폴더로 복사 → 그 폴더 시험 → 판매판 저장소(로이판에 판매판 매니페스트를 쓰지 않는다)');
+    const gmOut = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member'], { cwd: ROOT, encoding: 'utf8' });
+    ok(gmOut.status === 1 && /--out/.test(gmOut.stderr || ''), 'gen-manifest --edition member 는 --out 없이 로이판 저장소에 쓰지 않는다');
   }
 
   console.log('[3] 판매판 매니페스트');
   let m, tmpOut = null;
-  if (given) m = JSON.parse(fs.readFileSync(path.resolve(given), 'utf8'));
+  if (given) m = JSON.parse(fs.readFileSync(path.join(DIR, 'update-manifest.json'), 'utf8'));
   else {
     tmpOut = path.join(os.tmpdir(), 'priming-member-manifest-' + process.pid + '.json');
-    const ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member', '--ref', ref, '--out', tmpOut], { cwd: ROOT, stdio: 'pipe' });
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen-manifest.js'), '--edition', 'member', '--out', tmpOut], { cwd: ROOT, stdio: 'pipe' });
     m = JSON.parse(fs.readFileSync(tmpOut, 'utf8'));
     fs.unlinkSync(tmpOut);
   }
@@ -114,8 +142,14 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
   ok(files.includes('docs/대본-작성-가이드.md') && files.filter((f) => f.startsWith('docs/')).length === 1, 'docs 는 「📘 대본 작성 기준」 하나만');
   ok(!files.some((f) => /^(CLAUDE\.md|AGENTS\.md)$|^tools\/|^test\/|^scripts\//.test(f)), 'CLAUDE.md·AGENTS.md·tools·test·scripts 없음');
   ok(Array.isArray(m.remove) && m.remove.includes('tools/order.js') && m.remove.includes('core/roy-bank.js') && !m.remove.some((r) => files.includes(r)), 'remove = 판매판에서 지울 로이 전용 기능 파일(판매판 파일과 겹치지 않음)');
+  ok(/^[0-9a-f]{40}$/.test(m.source || '') && !m.ref, 'source = 로이판 커밋(기록용) · ref 고정 없음');
   const probs = checkMember(m, readRoot);
   ok(probs.length === 0, '[3][4] 로이 전용 파일·내부 문서·금지 문자열 0' + (probs.length ? ' — ' + probs.slice(0, 5).join(' | ') : ''));
+  if (DIR) {
+    const dp = checkDir(DIR, m);
+    ok(dp.length === 0, '판매판 폴더 = 매니페스트와 똑같다(빠진·다른·엉뚱한 파일 0) · edition.json · CLAUDE.md' + (dp.length ? ' — ' + dp.slice(0, 5).join(' | ') : ''));
+    ok(!fs.existsSync(path.join(DIR, 'core', 'book')) && !fs.existsSync(path.join(DIR, 'core', 'roy-bank.js')) && !fs.existsSync(path.join(DIR, 'tools')) && !fs.existsSync(path.join(DIR, 'test')), '판매판 폴더에 로이 전용 파일·tools·test 없음');
+  }
 
   console.log('[5] 판별력');
   const m2 = JSON.parse(JSON.stringify(m)); m2.files['core/roy-bank.js'] = 'x'; m2.files['docs/회원제-설계.md'] = 'x';
@@ -123,9 +157,32 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
   ok(p2.some((p) => /roy-bank/.test(p)) && p2.some((p) => /회원제-설계/.test(p)), '금지 파일을 넣으면 실패한다');
   const p3 = checkMember(m, (rel) => (rel === 'core/pipeline.js' ? "const X = 'D:\\\\TTS_Model\\\\ref-audio'; // 로이은행" : readRoot(rel)));
   ok(p3.filter((p) => /pipeline/.test(p)).length === 2, '금지 문자열을 넣으면 실패한다 — ' + p3.length);
-  ok(checkMember({ ...m, ref: 'HEAD' }, readRoot).some((p) => /ref/.test(p)), 'ref 가 sha 가 아니면 실패한다');
+  ok(checkMember({ ...m, edition: 'studio' }, readRoot).some((p) => /edition/.test(p)), 'edition 이 member 가 아니면 실패한다');
 
-  if (given) return;
+  if (!given) {
+    console.log('[8] 한 방향 복사(export-member)');
+    const X = fs.mkdtempSync(path.join(os.tmpdir(), 'priming-export-'));
+    try {
+      fs.mkdirSync(path.join(X, 'core'), { recursive: true }); fs.mkdirSync(path.join(X, 'node_modules', 'x'), { recursive: true });
+      fs.writeFileSync(path.join(X, 'core', 'roy-bank.js'), '// 옛 로이 전용'); fs.writeFileSync(path.join(X, '판매판에서_고친.txt'), 'x');
+      fs.writeFileSync(path.join(X, 'CLAUDE.md'), '손으로 고친 것'); fs.writeFileSync(path.join(X, 'node_modules', 'x', 'k.js'), 'keep');
+      fs.writeFileSync(path.join(X, 'main.js'), '// 판매판 폴더에서 고친 코드');
+      const r = EX.exportMember({ to: X, log: () => {} });
+      ok(r.deleted.includes('core/roy-bank.js') && r.deleted.includes('판매판에서_고친.txt') && r.changed.includes('main.js'), '목록에 없는 파일은 지우고 고친 파일은 덮는다(한 방향)');
+      ok(fs.existsSync(path.join(X, 'node_modules', 'x', 'k.js')), 'node_modules 는 건드리지 않는다');
+      const m3 = JSON.parse(fs.readFileSync(path.join(X, 'update-manifest.json'), 'utf8'));
+      const dp = checkDir(X, m3);
+      ok(dp.length === 0, '복사 뒤 판매판 폴더 = 매니페스트와 똑같다 · CLAUDE.md = 원본' + (dp.length ? ' — ' + dp.slice(0, 5).join(' | ') : ''));
+      ok(m3.edition === 'member' && Object.keys(m3.files).length === files.length, '판매판 저장소의 update-manifest.json = 판매판 매니페스트(파일 ' + Object.keys(m3.files).length + ')');
+      fs.writeFileSync(path.join(X, 'core', 'roy-bank.js'), 'x'); fs.appendFileSync(path.join(X, 'core', 'pipeline.js'), '\n// 고침');
+      const dp2 = checkDir(X, m3);
+      ok(dp2.some((p) => /roy-bank/.test(p)) && dp2.some((p) => /해시 다름: core\/pipeline\.js/.test(p)), '판별력 — 엉뚱한 파일·고친 파일을 잡는다');
+      const again = EX.exportMember({ to: X, dry: true, log: () => {} });
+      ok(again.deleted.length === 1 && again.changed.length === 1 && fs.existsSync(path.join(X, 'core', 'roy-bank.js')), '--dry 는 쓰지 않는다');
+      let thrown = null; try { EX.exportMember({ to: path.join(ROOT, 'core'), dry: true, log: () => {} }); } catch (e) { thrown = e; }
+      ok(thrown && /로이판 저장소 안/.test(thrown.message), '로이판 저장소 안으로는 복사하지 않는다');
+    } finally { try { fs.rmSync(X, { recursive: true, force: true }); } catch (_) {} }
+  }
 
   console.log('[6] 정적 — 맨 위 require');
   const removed = new Set(m.remove || []);
@@ -153,7 +210,7 @@ const readRoot = (rel) => fs.readFileSync(path.join(ROOT, rel.split('/').join(pa
   const stampOf = (p) => { try { const s = fs.statSync(p); return s.size + ':' + s.mtimeMs; } catch (_) { return 'none'; } };
   let realStamp = null;
   try {
-    for (const rel of files) { const src = path.join(ROOT, rel.split('/').join(path.sep)), dst = path.join(M, rel.split('/').join(path.sep)); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); }
+    for (const rel of files) { const src = path.join(SRC, rel.split('/').join(path.sep)), dst = path.join(M, rel.split('/').join(path.sep)); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); }
     fs.symlinkSync(path.join(ROOT, 'node_modules'), NM, 'junction');   // ⚠ 정리 때 링크만 먼저 끊는다(rmdir) — 원본을 지우지 않게
     // 🏠🛒 로이 PC 의 판매판 미리보기처럼 dataHome 을 준다(v1.0.27) — 앱 데이터가 「홈<DH>」 로 가고 로이판 채널·설정 파일은 그대로여야 한다
     fs.writeFileSync(path.join(M, 'edition.json'), JSON.stringify({ edition: 'member', dataHome: DH }));

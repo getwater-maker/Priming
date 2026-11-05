@@ -278,21 +278,25 @@ function createLicense(opts = {}) {
   }
 
   // 업데이트 받을 곳 — 로그인돼 있으면 회원 확인 Worker, 아니면 null(부르는 쪽이 옛 경로)
-  function sourceWith(headers) {
+  //   🏠🛒 edition(v1.0.38 · 저장소 분리) = 이 설치본의 판 — 매니페스트·파일 주소 **둘 다**에 싣는다(Worker 가 판으로 저장소를 고른다:
+  //   member → Priming-Member · studio → Priming). 파일 주소에 빠지면 관리자로 로그인한 판매판이 매니페스트는 판매판, 파일은 로이판을 받는다.
+  function sourceWith(headers, edition) {
     const base = updateBase();
+    const ed = edition ? `edition=${encodeURIComponent(edition)}` : '';
+    const q = (...p) => { const s = p.filter(Boolean).join('&'); return s ? '?' + s : ''; };
     return {
       headers,
-      manifestUrl: (t) => `${base}/manifest?t=${t}`,
-      fileUrl: (rel, t) => `${base}/file/${String(rel).split('/').map(encodeURIComponent).join('/')}${t ? `?t=${t}` : ''}`,
+      manifestUrl: (t) => `${base}/manifest${q(`t=${t}`, ed)}`,
+      fileUrl: (rel, t) => `${base}/file/${String(rel).split('/').map(encodeURIComponent).join('/')}${q(t ? `t=${t}` : '', ed)}`,
     };
   }
-  async function updateSource() {
+  async function updateSource(edition) {
     const tok = await accessToken();
     if (!tok) return null;
-    return sourceWith({ Authorization: `Bearer ${tok}` });
+    return sourceWith({ Authorization: `Bearer ${tok}` }, edition);
   }
-  // 🛒 토큰 없이 묻는 Worker 경로(v1.0.35) — Worker 는 토큰 없음 = 판매판을 준다 · 판매판 설치본의 로그인 전 업데이트만 쓴다(light-updater)
-  function anonUpdateSource() { return sourceWith({}); }
+  // 🛒 토큰 없이 묻는 Worker 경로(v1.0.35) — 판매판(edition=member)은 로그인 전에도 받는다 · 판매판 설치본의 로그인 전 업데이트만 쓴다(light-updater)
+  function anonUpdateSource(edition) { return sourceWith({}, edition); }
 
   return { deviceId, login, signup, redeem, plans, apply, applicationMine, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, anonUpdateSource, readState, writeState, loadSession, dir };
 }

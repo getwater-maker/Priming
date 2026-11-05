@@ -115,3 +115,80 @@
 - 시험(`node workers/priming-updates/test.mjs`, 34개 통과): 회원+매니페스트 없음 404 · 회원+있음(files·ref 커밋·remove 404·ref 교체 즉시 추종) · 관리자(`?edition=member` 를 보내도 main) · installer 고르기(회원/관리자/폴백/미리보기 제외/버전 비교) · CORS.
 - ⚠ 첫 판매판 설치본이 Release 에 올라가기 전에는 회원이 받는 `Priming-Setup-` 최신이 **옛 로이판 빌드**다(요청서가 짚은 대로) — 깔면 Worker 가 판매판 매니페스트를 준 뒤 업데이트로 판매판이 된다.
 - ⚠ 이 Worker 는 아직 `GITHUB_TOKEN` 없이도 공개 저장소로 동작한다. 저장소를 비공개로 바꾸기 전에 대시보드 비밀값 `GITHUB_TOKEN`(Contents·Releases 읽기)을 넣어야 한다 — 이미 설계 §0 순서에 있음.
+
+### 배포 결과 (wise-priming · 2026-11-05 · 로이 「배포해」 확인 뒤)
+- **Worker 배포 완료**: `wrangler deploy --keep-vars`, 버전 ID `e1fcb294-428c-458f-8a38-425c08ca6d3d`. 실제 확인: `updates.primingwave.com/health` 200 · 토큰 없음 401 `no_token` · 가짜 토큰 401 `invalid_token`(= SUPABASE 변수 유지됨) · 사이트 출처의 CORS 사전 요청 204.
+- **사이트 푸시 완료**: `8a18177..9495422` (Cloudflare Pages 2~3분 뒤 반영).
+- **실측 못 한 것**: 회원·관리자 **토큰이 없어** `/manifest`(member 1.0.28 / 관리자 main)·`/file/core/roy-bank.js` 404·`/file/main.js` 200·`/installer/info` 와 `/member/devices` 다운로드 카드 표시는 실제 서버로 확인하지 못했다(가짜 데이터 시험 34개만 통과). 로이가 로그인한 상태에서 `/member/devices` 카드(버전·크기·내려받기)와, 회원 계정 앱의 업데이트 한 번을 확인해 주면 된다.
+- 참고: wrangler 가 `workers.dev` 미리보기 주소 사용 경고를 냈다(`priming-updates.getwater.workers.dev`). 필요하면 `wrangler.toml` 에 `preview_urls = false` 를 넣어 끌 수 있다.
+
+---
+
+## 덧붙임 2 — 판매판을 **따로 저장소**로 (2026-11-05 밤 · 로이 결정 「분리 + 한 방향 복사」 · 앱 v1.0.38)
+
+### 왜
+- 로이가 바탕화면 판매판(edition.json = member)에 **관리자 계정**으로 로그인하자 Worker 가 계정만 보고 로이판(`main`) 매니페스트를 줬다 → 앱 안전장치(판매판 설치본은 판매판 매니페스트만)가 거절 → 업데이트가 막혔다.
+- 로이 결정: 관리자용과 회원용을 GitHub 에 따로 둔다.
+  - 🏠 로이판 = `getwater-maker/Priming`(지금 그대로 · 커밋마다)
+  - 🛒 판매판 = **새 비공개 저장소 `getwater-maker/Priming-Member`**(브랜치 `main`). 「판매판 올려」 때 로이판에서 판매판 파일만 복사해 커밋·태그 `member-v<ver>`·푸시한다. 판매판 매니페스트는 **그 저장소의 `update-manifest.json` 하나**(`edition:"member"` · `source` = 복사한 로이판 커밋 · **`ref` 칸 없음** — 저장소 자체가 승격본).
+  - 판매판 설치본 `Priming-Setup-<ver>.exe` 는 **판매판 저장소의 Release** `member-v<ver>` 에 올린다. 로이판 설치본 `Priming-Studio-Setup-` 는 로이판 저장소 Release 그대로.
+
+### 앱이 보내는 것 (v1.0.38 · 이미 들어감)
+- 매니페스트·파일 주소 **둘 다**에 `edition=<이 설치본의 판>` 을 싣는다:
+  `GET /manifest?t=…&edition=member` · `GET /file/<경로>?edition=member`(다시 받기면 `?t=…&edition=member`).
+- 판매판 설치본은 로그인 전엔 토큰 없이, 로그인 뒤엔 `Authorization: Bearer` 로 묻는다(지금과 같음).
+- ⚠ v1.0.37 이하 앱은 파일 주소에 `edition` 이 없다(매니페스트 주소에만 있음) → 아래 규칙 ④.
+
+### Worker 에서 바꿀 것
+1. **판 정하기 — 앱이 보낸 `edition` 으로 저장소를 고른다**:
+   | 요청 | 토큰 | 판 → 저장소 |
+   |---|---|---|
+   | `edition=member` | 없음 · 회원 아님(`not_member`) · 만료(`expired`) · 유효 회원 · **관리자** | **판매판 → `Priming-Member`** |
+   | `edition=studio` 또는 없음 | 관리자 | 로이판 → `Priming`(지금 그대로) |
+   | `edition=studio` 또는 없음 | 관리자 아님(유효 회원·회원 아님·만료) | 판매판 → `Priming-Member`(옛 회원 설치본이 판매판으로 바뀌는 길 · 지금과 같은 결과) |
+   | `edition=studio` 또는 없음 | 토큰 없음 | 판매판(지금과 같음) |
+   - 🔑 바뀌는 곳은 「`edition=member` + 관리자 → 판매판」 하나다(오늘 사고). **로이판은 관리자만** 받는다.
+   - 토큰이 있는데 무효(401 `invalid_token`)·인증 서버 장애(502)는 지금처럼 오류 — 단 `edition=member` 면 토큰 없음처럼 판매판을 줘도 된다(판단은 wise-priming · 판매판은 누구나 받는 판이므로 막을 까닭이 없다).
+2. `GET /manifest`
+   - 판매판: `Priming-Member` `main` 의 **`update-manifest.json`** 을 그대로(요청마다 새로 읽기 · 지금 판매판 규칙과 같음). 없으면 404 `{"error":"no_member_release"}`(⛔ 로이판으로 떨어지지 않는다).
+   - ⛔ `ref` 를 요구하지 않는다(칸이 없다). `edition` 이 `"member"` 가 아니면 판매판으로 인정하지 않는다(404 `no_member_release`).
+   - 로이판: 지금 그대로(`Priming` `main` 의 `update-manifest.json`).
+3. `GET /file/<경로>`
+   - 판매판: 판매판 매니페스트 `files` 에 있는 경로만 `Priming-Member` **`main`** 에서. 없는 경로 = 404 `not_in_manifest`(로이 전용 파일이 회원에게 새지 않게 하는 핵심 — 그대로).
+   - 매니페스트 60초 기억·목록에 없으면 한 번 다시 읽기는 지금 규칙 그대로.
+   - 로이판: 지금 그대로.
+4. **v1.0.37 이하 판매판 설치본**(바탕화면 판매판 1.0.28 등)은 파일 주소에 `edition` 이 없다 — 관리자로 로그인했으면 매니페스트는 판매판, 파일은 로이판을 받아 해시가 어긋난다(앱은 아무것도 바꾸지 않고 지금 판으로 켠다 · 안전). 이 설치본들은 **새 판매판 설치본으로 덮어 설치**하게 안내한다(Worker 에서 따로 맞출 필요 없음).
+5. `GET /installer` · `/installer/info` · `/installer/link`
+   - 판매판: **`Priming-Member` 의 Release** 에서 `Priming-Setup-` 최신(버전 비교 · 초안·사전 릴리스 건너뜀).
+   - 로이판(관리자): `Priming` 의 Release 에서 `Priming-Studio-Setup-` 최신(없으면 옛 `Priming-Setup-`) — 지금 그대로.
+   - 사이트 내려받기 카드: 회원 = 판매판 설치본 · 관리자 = 지금처럼 로이판(관리자가 판매판 설치본을 받을 단추가 따로 있으면 좋다 — 선택).
+   - ⚠ 판매판 저장소 Release 가 아직 없으면(첫 설치본 올리기 전) 지금처럼 `Priming` 의 옛 `Priming-Setup-` 로 떨어질지, 404 `no_installer` 로 할지는 wise-priming 판단(첫 승격 때 설치본을 함께 올릴 예정이라 틈은 짧다).
+6. 응답 머리 `X-Priming-Edition: studio|member` 그대로.
+7. 설정 값: `wrangler.toml` `[vars]` 에 `GH_REPO_MEMBER = "Priming-Member"`(브랜치 `main`) 를 더한다 — 로이판 `GH_REPO = "Priming"` 은 그대로.
+
+### 🔑 GitHub 토큰 (비공개 저장소 읽기 — 이번부터 **필수**)
+- `Priming-Member` 는 처음부터 비공개다 → Worker 비밀값 `GITHUB_TOKEN` 이 없으면 판매판 매니페스트·파일·설치본을 못 읽는다.
+- 권장: **fine-grained personal access token**(소유자 `getwater-maker`)
+  - Repository access: **Only select repositories** → `getwater-maker/Priming-Member` + `getwater-maker/Priming`(로이판 저장소도 나중에 비공개로 바꿀 때 같은 토큰을 쓰게 · 지금 넣어 둬도 공개 저장소 읽기엔 문제없다)
+  - Repository permissions: **Contents: Read-only**(raw 파일·Release 자산 받기) · **Metadata: Read-only**(자동) — 그 밖 권한 없음(쓰기 ⛔)
+  - 만료: 1년(만료 날짜를 로이 달력에 · 만료되면 회원 업데이트가 멈춘다 — `/health` 에 토큰 유효 여부를 넣어 주면 좋다)
+- 넣는 곳: Cloudflare 대시보드 → Worker `priming-updates` → 설정 → 변수와 비밀 → `GITHUB_TOKEN`(비밀) · 또는 `npx wrangler@4 secret put GITHUB_TOKEN`. 토큰 값은 로이가 직접 만들어 넣는다(⛔ 대화·저장소에 적지 않는다).
+- raw 파일: `Authorization: token <값>`(지금 `rawHeaders`) · Release 자산: `Authorization: Bearer <값>` + `Accept: application/octet-stream`(지금 `ghApiHeaders`) — 둘 다 이미 코드에 있다.
+
+### 순서 (🔴)
+1. **Priming**: 판매판 저장소 만들기(`gh repo create getwater-maker/Priming-Member --private` · 로이 확인 뒤) → 첫 「판매판 올려」(파일 + `update-manifest.json` + 태그 + 설치본 Release).
+2. **로이**: 위 토큰을 만들어 Worker 비밀값에 넣는다.
+3. **wise-priming**: 위 1~7 배포. 그 전까지 회원은 지금 경로(`Priming` 의 `update-manifest.member.json` · ref 1.0.35)를 받는다 — 끊기지 않는다.
+4. **로이**: 바탕화면 판매판을 새 판매판 설치본으로 덮어 설치 → 관리자 로그인 상태로 업데이트 한 번 확인.
+5. **Priming**: Worker 배포 확인 뒤 로이판 저장소의 옛 `update-manifest.member.json` 을 지운다(그 뒤엔 읽는 곳이 없다).
+6. 로이판 저장소 비공개 전환은 여전히 맨 마지막(회원제 설계 §0).
+
+### Worker 시험 부탁
+- `edition=member` + 토큰 없음 / 회원 / **관리자** → 셋 다 `Priming-Member` 매니페스트 · `X-Priming-Edition: member`.
+- `edition=studio` + 관리자 → `Priming` main(지금과 같음) · `edition=studio` + 회원 → 판매판.
+- 판매판 `/file/main.js` 200(`Priming-Member` main 에서) · `/file/core/roy-bank.js` 404 `not_in_manifest` · `/file/tools/order.js` 404.
+- 판매판 매니페스트에 `edition` 이 없거나 `"studio"` → 404 `no_member_release`.
+- 판매판 `/installer/info` = `Priming-Member` Release 의 `Priming-Setup-` 최신.
+
+### 답으로 받고 싶은 것
+- 배포 날짜 · 토큰이 없을 때 판매판 응답(어떤 오류 코드로 알리는지) · 무효 토큰 + `edition=member` 처리 · 판매판 Release 가 없을 때 `/installer` 동작.
