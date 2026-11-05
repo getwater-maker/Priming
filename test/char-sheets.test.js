@@ -57,7 +57,7 @@ ok(!/\b(writeFile|mkdir|rmSync|unlink|rename|copyFile)\w*\(/.test(src), '[4] cor
 // [5] main IPC 는 관리자만
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const blk = main.slice(main.indexOf("ipcMain.handle('list-char-sheets'"), main.indexOf("ipcMain.handle('list-char-sheets'") + 400);
-ok(/if \(!isOwner\(\)\) return/.test(blk), '[5] list-char-sheets 는 isOwner() 뒤에만');
+ok(/if \(!feat\('charSheets'\)\) return/.test(blk), "[5] list-char-sheets 는 feat('charSheets')(관리자 계정 · 로이판 · v1.0.26) 뒤에만");
 
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`\n${bad ? '❌' : '✅'} char-sheets ${n - bad}/${n}`);

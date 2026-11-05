@@ -77,8 +77,8 @@ console.log('\n[5] media-download 연결 — 유일한 문(_spawnYt)에서만');
   ok(/finally \{ if \(ck && ck\.release\)/.test(src), '실패해도 release(임시 파일 삭제)');
   ok(typeof MD.setCookieProvider === 'function', '내보냄');
   const m = read('main.js');
-  ok(/setCookieProvider\(\(\) => \(isOwner\(\)/.test(m), 'main: 관리자일 때만 쿠키를 준다');
-  ok(/ipcMain\.handle\('yt-login-open', async \(\) => \{\s*if \(!isOwner\(\)\)/.test(m), 'main: 로그인 창은 관리자 전용');
+  ok(/setCookieProvider\(\(\) => \(feat\('ytCookie'\)/.test(m), 'main: 관리자일 때만 쿠키를 준다(feat — v1.0.26)');
+  ok(/ipcMain\.handle\('yt-login-open', async \(\) => \{\s*if \(!feat\('ytCookie'\)\)/.test(m), 'main: 로그인 창은 관리자 전용');
   ok(!/yt-cookies[\s\S]{0,200}webContents\.send\([^)]*cookie/i.test(m), '쿠키 값을 렌더러로 보내지 않는다');
 }
 

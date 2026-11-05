@@ -54,8 +54,10 @@ function cutRange(buf, lang) {
 // 🗂 참조음성 폴더 — **OmniVoice 서버가 있는 PC(메인 PC)는 서버 라이브러리 폴더 하나**(2026-10-07 로이 「폴더가 둘이라 아내가 만든 것·내가 만든 것을 한눈에 볼 수 없다」).
 //   그 밖의 PC(아내 PC)는 예전처럼 ~/.flow-app/ref-audio(→ 서버로 올림). 서버 판별 = 서버 폴더 + 서버 실행 파일(api.py)이 이 PC 에 있는가.
 //   PRIMING_REF_DIR 은 시험용(실제 라이브러리를 건드리지 않게).
-const SERVER_REF_DIR = 'D:/TTS_Model/ref-audio';
-function isServerHost() { try { return fs.existsSync(SERVER_REF_DIR) && fs.existsSync(path.join('D:/TTS_Model', 'omnivoice', 'api.py')); } catch { return false; } }
+//   🛒 서버 경로는 로이판 전용 파일(core/studio-env)에만 있다(v1.0.26) — 판매판엔 그 파일이 없어 늘 「서버 PC 아님」.
+const _SE = (() => { try { return require('./studio-env'); } catch (_) { return null; } })();
+const SERVER_REF_DIR = _SE ? _SE.SERVER_REF_DIR : null;
+function isServerHost() { try { return !!SERVER_REF_DIR && fs.existsSync(SERVER_REF_DIR) && fs.existsSync(path.join(_SE.OMNI_HOME, 'omnivoice', 'api.py')); } catch { return false; } }
 const REF_DIR = () => process.env.PRIMING_REF_DIR || (isServerHost() ? SERVER_REF_DIR : path.join(os.homedir(), '.flow-app', 'ref-audio'));
 /** 이 PC 참조음성 폴더에 저장(같은 이름이 있으면 _2·_3 …) → { base, wavPath } */
 function saveLocal(name, wavBuffer, refText) {

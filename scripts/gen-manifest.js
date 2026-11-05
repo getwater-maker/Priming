@@ -15,7 +15,14 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const OUT = path.join(ROOT, 'update-manifest.json');
+// 🏠🛒 판(v1.0.26 · docs/판나누기-설계.md) — 기본 = 로이판(update-manifest.json · 지금 그대로).
+//   `--edition member` = 판매판(update-manifest.member.json): core/edition 의 로이 전용 파일 + 내부 문서(docs·CLAUDE.md·AGENTS.md·tools)를 뺀다
+//   (「📘 대본 작성 기준」은 앱이 쓰므로 보낸다) · `edition`·`ref`(파일을 꺼낼 커밋 · 기본 HEAD · `--ref <sha>`)·`remove`(예전 로이판 기능 파일 — 업데이터가 지운다)를 싣는다.
+const _argv = process.argv.slice(2);
+const _argOf = (k) => { const i = _argv.indexOf(k); if (i >= 0) return _argv[i + 1]; const e = _argv.find((a) => a.startsWith(k + '=')); return e ? e.slice(k.length + 1) : null; };
+const EDITION = (_argOf('--edition') || 'studio').toLowerCase();
+if (!['studio', 'member'].includes(EDITION)) { console.error('❌ --edition 은 studio 또는 member'); process.exit(1); }
+const OUT = _argOf('--out') ? path.resolve(_argOf('--out')) : path.join(ROOT, EDITION === 'member' ? 'update-manifest.member.json' : 'update-manifest.json');   // --out = 시험용(임시 폴더)
 
 // 폴더 단위 제외 (이름 일치) — 주의: 'dist' 는 여기 넣지 않는다(renderer/dist 는 포함해야 함).
 // ⚠ '__pycache__' — 파이썬이 만드는 .pyc 는 인터프리터 버전마다 달라 매번 해시가 바뀐다(배포할 것이 아니다).
@@ -44,7 +51,7 @@ const EXCLUDE_REL = [
 // 파일명/경로 제외 (_ 로 시작하는 스크래치/노트 파일 전부 제외)
 //   📦 설치·압축 파일도 싣지 않는다 — 작업 폴더에 받아 둔 DadoendayunAuto-Setup-2.3.30.exe(커밋 안 됨)가 섞여 서버 404
 //      → 모든 PC 의 업데이트가 「파일 1개를 받지 못했습니다」로 막혔다(2026-10-06, v0.7.19).
-const EXCLUDE_FILE = [/\.(exe|msi|zip|7z|rar|dmg|iso)$/i, /\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/];
+const EXCLUDE_FILE = [/\.(exe|msi|zip|7z|rar|dmg|iso)$/i, /\.map$/, /^_/, /\.vrew$/, /\.debug\.json$/, /^\./, /^update-manifest\.json$/, /^update-manifest\.member\.json$/];
 
 // 바이너리 확장자 (.gitattributes 의 binary 선언과 일치) — EOL 정규화 안 함, 원본 바이트로 해시.
 const BINARY_EXT = new Set(['.vbin', '.bin', '.mp3', '.wav', '.ttf', '.otf', '.ico', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
@@ -124,6 +131,18 @@ try {
   if (!(e && e.status === 1)) console.warn('⚠ git check-ignore 실패 — 무시 파일 필터 없이 진행:', e && e.message);
 }
 const depsHash = sha1(Buffer.from(JSON.stringify(pkg.dependencies || {})));
-const manifest = { version: pkg.version, deps: depsHash, files };
+let manifest = { version: pkg.version, deps: depsHash, files };
+if (EDITION === 'member') {
+  const ED = require('../core/edition');
+  const kept = {}, removed = [];
+  for (const [r, h] of Object.entries(files)) { if (ED.inEditionFile(r, 'member')) kept[r] = h; else removed.push(r); }
+  // remove = 로이 전용 **기능 파일**만(문서는 지우지 않는다 — 예전 판이 받아 둔 문서는 앱이 읽지 않는다)
+  const remove = removed.filter((r) => ED.fileFeature(r)).sort();
+  let ref = _argOf('--ref');
+  if (!ref) { try { ref = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch (_) { ref = ''; } }
+  if (!/^[0-9a-f]{40}$/.test(ref || '')) { console.error('❌ ref(커밋 sha 40자)를 정하지 못했습니다 — --ref <sha>'); process.exit(1); }
+  manifest = { version: pkg.version, deps: depsHash, edition: 'member', ref, remove, files: kept };
+  console.log(`🛒 판매판: 로이판 ${Object.keys(files).length}개 중 ${removed.length}개 뺌(기능 파일 ${remove.length}) · ref ${ref.slice(0, 8)}`);
+}
 fs.writeFileSync(OUT, JSON.stringify(manifest, null, 2));
-console.log(`update-manifest.json 생성: v${pkg.version} · ${Object.keys(files).length}개 파일 · deps ${depsHash.slice(0, 8)}`);
+console.log(`${path.basename(OUT)} 생성: v${pkg.version} · ${Object.keys(manifest.files).length}개 파일 · deps ${depsHash.slice(0, 8)}`);

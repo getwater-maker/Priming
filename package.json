@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -174,7 +174,10 @@
     "test:lang": "node test/lang-support.test.js && node test/backcheck-ja-kana.test.js && node test/ja-ruby.test.js && node test/voice-design-vi.smoke.js",
     "test:charrefs": "node test/char-refs.test.js",
     "test:charsheets": "node test/char-sheets.test.js && node test/char-sheets.smoke.js",
-    "test:jaquote": "node test/ja-quote-split.test.js"
+    "test:jaquote": "node test/ja-quote-split.test.js",
+    "test:edition": "node test/edition.test.js",
+    "dist:member": "vite build && node scripts/dist-member.js",
+    "release:member": "node scripts/release-member.js"
   },
   "dependencies": {
     "@vivliostyle/cli": "^11.0.4",
@@ -197,7 +200,7 @@
   "build": {
     "appId": "com.user.priming",
     "productName": "Priming",
-    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "artifactName": "Priming-Studio-Setup-${version}.${ext}",
     "asar": false,
     "files": [
       "**/*",

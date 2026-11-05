@@ -69,7 +69,7 @@ async function fetchWithTimeout(url, ms, asText, headers) {
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
     const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store', ...(headers ? { headers } : {}) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) { const e = new Error(`HTTP ${r.status}`); e.status = r.status; try { e.body = String(await r.text()).slice(0, 300); } catch (_) {} throw e; }
     return asText ? await r.text() : Buffer.from(await r.arrayBuffer());
   } finally { clearTimeout(t); }
 }
@@ -90,6 +90,7 @@ async function fetchManifest(timeoutMs = 6000) {
     try { const m = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), timeoutMs, true, W.headers)); if (m && m.files && typeof m.files === 'object') return m; }
     catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); }
   }
+  try { if (require('./core/edition').readEdition(app.getAppPath()) !== 'studio') return null; } catch (_) {}   // 🛒 판매판은 옛 경로(로이판)를 보지 않는다
   for (const repo of REPOS) {
     try {
       const txt = await fetchWithTimeout(rawBase(repo) + 'update-manifest.json?t=' + Date.now(), timeoutMs, true);
@@ -112,13 +113,22 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
   // 🧪 Priming Lab(복제본) — 원본 저장소의 파일로 Lab 코드를 덮어쓰지 않는다(설치본이어도).
   if (process.env.PM_LAB) { log('Lab — 업데이트 건너뜀'); return { updated: 0, failed: 0, reason: 'lab' }; }
   const appDir = app.getAppPath(); // asar:false → resources/app
+  // 🏠🛒 이 설치본의 판(v1.0.26 · edition.json · 없으면 studio) — Worker 에 알려 준다(판정은 서버가 이긴다)
+  let localEdition = 'studio';
+  try { localEdition = require('./core/edition').readEdition(appDir); } catch (_) {}
 
   // 저장소 이름 후보를 순서대로 시도 — 성공한 base 로 이후 파일도 받는다(이름 전환기에도 안 끊김).
   let manifest, RAW_BASE = null, lastErr = '', W = await workerSource();
   if (W) {
-    try { manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()), manifestTimeoutMs, true, W.headers)); RAW_BASE = 'worker'; log('회원 경로로 업데이트 확인'); }
-    catch (e) { log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); W = null; manifest = undefined; }
+    try { manifest = JSON.parse(await fetchWithTimeout(W.manifestUrl(Date.now()) + '&edition=' + localEdition, manifestTimeoutMs, true, W.headers)); RAW_BASE = 'worker'; log('회원 경로로 업데이트 확인'); }
+    catch (e) {
+      // 🛒 판매판이 아직 없다(Worker 404 no_member_release) — 로이판(raw main)으로 떨어지지 않고 지금 판으로 켠다
+      if (e.status === 404 && /no_member_release/.test(e.body || '')) { log('판매판이 아직 발행되지 않았습니다 — 지금 버전으로 실행'); return { updated: 0, failed: 0, reason: 'no_member_release' }; }
+      log('회원 경로 매니페스트 실패 — 옛 경로로: ' + e.message); W = null; manifest = undefined;
+    }
   }
+  // 🛒 판매판 설치본은 옛 경로(raw main = 로이판)로 받지 않는다 — 로이 전용 파일이 다시 들어온다
+  if (!RAW_BASE && localEdition !== 'studio') { log('판매판 — 회원 경로가 안 돼 지금 버전으로 실행'); return { updated: 0, failed: 0, reason: 'offline' }; }
   for (const repo of (RAW_BASE ? [] : REPOS)) {
     try {
       const base = rawBase(repo);
@@ -199,6 +209,12 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
     log(`⚠ 업데이트 보류 — 새 파일을 전부 받지 못했습니다(발행 직후 서버가 아직 옛 파일을 보여 줄 수 있음 · 5분쯤 뒤 다시 켜면 됩니다). 지금 버전(${localPkg.version || '?'})은 그대로 온전합니다.`);
     return { updated: 0, failed, reason: 'failed', from: localPkg.version, to: manifest.version };
   }
+  // 🛒 판매판 매니페스트를 받았다(Worker 가 회원으로 판정) → 이 설치본을 판매판으로 표시한다(core/edition 이 읽는다) · 로이판 매니페스트(edition 없음)는 건드리지 않는다
+  const toMember = manifest.edition === 'member';
+  if (toMember && localEdition !== 'member') {
+    try { fs.writeFileSync(path.join(appDir, 'edition.json'), JSON.stringify({ edition: 'member' }) + '\n'); log('🛒 판매판으로 표시(edition.json)'); }
+    catch (e) { log('edition.json 쓰기 실패: ' + e.message); }
+  }
   const lastOf = (rel) => (rel === 'package.json' ? 2 : rel === 'renderer/dist/index.html' ? 1 : 0);
   let updated = 0;
   for (const c of changed.slice().sort((x, y) => lastOf(x.rel) - lastOf(y.rel))) {
@@ -221,6 +237,17 @@ async function applyUpdates({ manifestTimeoutMs = 4000, fileTimeoutMs = 15000 } 
         }
       }
     } catch (_) {}
+  }
+
+  // 🛒 판매판에서 빠진 로이 전용 기능 파일(manifest.remove)을 지운다 — 교체가 다 끝난 뒤에만 · 판매판 파일 목록에 있는 것·설치폴더 밖은 건드리지 않는다
+  if (!failed && toMember && Array.isArray(manifest.remove)) {
+    let n = 0;
+    for (const rel of manifest.remove) {
+      const r = String(rel || '');
+      if (!r || r.includes('..') || path.isAbsolute(r) || manifest.files[r]) continue;
+      try { const f = path.join(appDir, r.split('/').join(path.sep)); if (fs.existsSync(f)) { fs.unlinkSync(f); n++; } } catch (_) {}
+    }
+    if (n) log(`🛒 판매판에 없는 파일 ${n}개를 지웠습니다`);
   }
 
   if (updated === 0 && failed === 0) { log(`최신 상태 (${localPkg.version || '?'})`); return { updated: 0, failed: 0, reason: 'same', from: localPkg.version, to: manifest.version }; }

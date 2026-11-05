@@ -180,6 +180,14 @@ function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); retu
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
 // 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
 function isOwner() { return !LIC.enforce || !!(LIC.state && LIC.state.ok && LIC.state.admin); }
+// 🏠🛒 판 나누기(v1.0.26 · docs/판나누기-설계.md) — 기능 표는 core/edition 한 곳. 로이 전용 기능 판정은 feat('…') 로만(isOwner 는 관리자 계정 판정만 — 충전·관리자 페이지).
+const ED = require('./core/edition');
+function feat(id) { return ED.feat(id, isOwner); }
+// 판매판이면 빠진 기능의 IPC 는 「이 판에는 없는 기능」만 돌려준다(그 모듈 파일이 아예 없다) · 로이판은 아무것도 감싸지 않는다(동작 불변)
+if (ED.EDITION !== 'studio') {
+  const orig = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (ch, fn) => { const id = ED.channelFeature(ch); return orig(ch, id && !ED.has(id) ? () => ED.missingReply(id) : fn); };
+}
 {
   const orig = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (ch, fn) => orig(ch, (e, ...a) => {
@@ -507,7 +515,7 @@ app.whenReady().then(() => {
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
       //   로이가 잊어도 앱이 먼저 말한다(2026-08-22 요청: "몇 주 데이터가 쌓이면 나에게도 알려줘").
       try {
-        if (!isOwner()) throw 0;   // 👑 로이 전용(회원 PC 에선 기록·팝업 없음)
+        if (!feat('gpuTemp')) throw 0;   // 👑 로이 전용(회원 PC 에선 기록·팝업 없음)
         const GT = require('./core/gpu-temp');
         GT.cleanupOld();
         await GT.maybeReport({
@@ -655,7 +663,7 @@ function awakeAcquire(label = '') {
     catch (e) { _awake.id = null; }
   }
   // 🌡 작업이 도는 동안만 GPU 온도를 기록(60초 간격, 비동기 nvidia-smi) — 장시간 큐의 열 데이터 축적(2026-08-22).
-  if (_awake.n === 1 && isOwner()) { try { require('./core/gpu-temp').startSampling(log); } catch {} }   // 👑 로이 전용
+  if (_awake.n === 1 && feat('gpuTemp')) { try { require('./core/gpu-temp').startSampling(log); } catch {} }   // 👑 로이 전용
 }
 function awakeRelease() {
   _awake.n = Math.max(0, _awake.n - 1);
@@ -664,7 +672,7 @@ function awakeRelease() {
     _awake.id = null;
     log('🔌 절전 차단 해제 (화면 끄기 정상 복귀)');
   }
-  if (_awake.n === 0) { try { require('./core/gpu-temp').stopSampling(); } catch {} }
+  if (_awake.n === 0 && ED.has('gpuTemp')) { try { require('./core/gpu-temp').stopSampling(); } catch {} }
 }
 // ── 🌙 모니터 끄기 (2026-09-26, v0.5.80) ──────────────────────────────────────
 //   로이: 「작업을 진행할 때 PC 의 모니터를 끄는 기능」 — 자는 동안 큐를 돌릴 때.
@@ -747,6 +755,7 @@ ipcMain.handle('monitor-off', () => monitorOff());
 //   monitorOff 가 0.8초 뒤에 끈다(위 설명). 등록 실패는 로그로만 알린다(다른 프로그램이 이미 쓰는 키).
 const MONITOR_HOTKEYS = ['Scrolllock'];   // ⚠ 'Pause' 는 Electron 이 받지 않는 이름(실측: 변환 오류)
 function registerMonitorHotkeys() {
+  if (!ED.has('monitorOff')) return [];   // 🛒 판매판엔 없는 기능(v1.0.26)
   try {
     const { globalShortcut } = require('electron');
     const got = [];
@@ -1783,14 +1792,14 @@ ipcMain.handle('list-ref-audio', async () => {
 // `srv:<이름>`(서버 공용 목소리) → 이 PC 에 실제 파일이 있으면 그 경로, 없으면 null.
 //   메인 PC 는 라이브러리 폴더가 로컬에 있으므로 미리듣기·폴더열기가 그대로 된다.
 //   아내 PC 처럼 파일이 없는 곳에서는 null → 미리듣기만 안 되고 합성은 정상(서버가 갖고 있으므로).
-const SERVER_VOICE_DIR = 'D:\\TTS_Model\\ref-audio';
+const SERVER_VOICE_DIR = require('./core/ref-voice').SERVER_REF_DIR;   // 로이판 전용(core/studio-env) · 판매판 = null
 function resolveRefPath(p) {
   const s = String(p || '');
   if (!s) return null;
   if (!s.startsWith('srv:')) return s;
   const name = s.slice(4);
   // 메인 PC: 라이브러리 폴더가 로컬에 있음 → 그 파일. 아니면 이 PC 의 ref-audio 에 같은 이름이 있으면 그것.
-  for (const f of [path.join(SERVER_VOICE_DIR, name + '.wav'), path.join(REF_DIR(), name + '.wav')]) {
+  for (const f of [...(SERVER_VOICE_DIR ? [path.join(SERVER_VOICE_DIR, name + '.wav')] : []), path.join(REF_DIR(), name + '.wav')]) {
     try { if (fs.existsSync(f)) return f; } catch {}
   }
   return null;   // 파일이 없는 PC 는 미리듣기만 안 되고 합성은 정상(서버가 갖고 있음)
@@ -1809,7 +1818,7 @@ ipcMain.handle('open-ref-folder', (_e, p0) => {
 // ── Qwen3-TTS 보이스디자인 (온디맨드 서버 9893) ───────────────────────────────
 //   모달 열 때 start(서버 기동+모델 로딩) → generate(설명→wav, ref-audio 폴더 저장) → 모달 닫을 때 stop.
 //   start 되면 S.voiceDesignActive=true → 그동안 음성변환(OmniVoice)을 막아 VRAM 동시 사용(OOM) 차단.
-const QD = require('./core/qwen-design');
+const QD = ED.optional('qwenDesign', () => require('./core/qwen-design'));   // 판매판엔 파일이 없다(IPC 는 ED 가 막는다)
 ipcMain.handle('qwen-design-status', async () => {
   try { return await QD.status(); } catch (e) { return { installed: false, error: String((e && e.message) || e) }; }
 });
@@ -2085,8 +2094,8 @@ function computeOutRoot(scriptPath, preset, mode) {
 }
 // 📁 완성 파일 이름 앞에 종이책/전자책 표기(로이 2026-10-02 「완성파일의 파일명 앞에 [종이책], [전자책] 표기를 반드시」) — 뒤쪽(_내지.pdf·_표지.pdf·.epub)으로 찾는 곳(점검·등록)은 옛 이름 파일도 그대로 찾는다.
 const BOOK_PREFIX = { print: '[종이책] ', ebook: '[전자책] ' };
-const WF = require('./core/book/work-folder');
-const OL = require('./core/book/out-layout');   // 📁 완성/{종이책,전자책}/{01_완성본,02_표지,03_내지,04_epub} (로이 2026-10-14)
+const WF = ED.optional('book', () => require('./core/book/work-folder'));
+const OL = ED.optional('book', () => require('./core/book/out-layout'));   // 📁 완성/{종이책,전자책}/{01_완성본,02_표지,03_내지,04_epub} (로이 2026-10-14)
 // 완성 파일 이름 바탕 — 원고가 `<작품>\원고\<이름>.md` 면 「<작품>_<이름>」, 아니면 책 제목(R25)
 function bookFileBase() {
   const fb = WF.fileBaseFor(S.scriptPath);
@@ -2336,8 +2345,8 @@ ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환'
 // ── 🎬 리모션 모드 — TSV 를 열어 그 파일명 그대로 mp3 를 만든다 ──
 //   영상은 리모션이 만들고 이 앱은 **음성만** 담당한다(자막·이미지·비디오·.vrew 없음).
 //   목소리·배속·시드는 **채널(프리셋)** 이 정한다 — 한 번 정하면 바꾸지 말 것(캐시 키라 전량 재합성).
-const TSV = require('./core/tsv-tts');
-const TSVIMG = require('./core/tsv-images');
+const TSV = ED.optional('remotion', () => require('./core/tsv-tts'));
+const TSVIMG = ED.optional('remotion', () => require('./core/tsv-images'));
 // ── 🎬 리모션 작업 큐 — **강 여러 개를 한 번에** ─────────────────────────
 //   로이(2026-08-27): "tsv 불러와 작업하는것이 1개만 할수 있네, 여러개도 할수 있도록" +
 //   "대본TSV파일을 불러오면 그와 관련된 이미지 파일도 같이 불러와서 순차적으로 한번에".
@@ -3170,7 +3179,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
 
 // ── ⬆ 유튜브 비공개 업로드 (2026-09-24, v0.5.31) ─────────────────────────────
 //   로이: 비공개로 영상·제목·설명·AI 표시까지 → 나머지(공개·예약·썸네일·재생목록)는 Studio 에서 직접.
-//   업로드 전용 구글 프로젝트 「Priming Upload」(분석용 AdonaiRoy 와 분리). 엔진 = core/youtube-upload.js.
+//   업로드 전용 구글 프로젝트 「Priming Upload」(분석용 프로젝트와 분리). 엔진 = core/youtube-upload.js.
 //   🔑 제목·설명·태그의 정본은 아도나이로이 **패키징 파일**(core/yt-packaging.js). 설명 끝에 ⏱ 챕터를 붙인다.
 //   🔑 한 번에 하나씩(직렬) · 렌더와 병렬(네트워크만 쓴다) · 같은 파일은 두 번 올리지 않는다(youtube-uploads.json).
 let ytChain = Promise.resolve();
@@ -4842,7 +4851,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force);
   // 👑 🖥 로컬 Qwen-Image 2.1 — 관리자만(회원이면 AI 이미지로 · 값이 회원 PC 에 들어와도 로컬 GPU 를 찾지 않게)
   if (require('./core/engine-migrate').isLocalQwen(startEngine)) {
-    if (isOwner()) {
+    if (feat('localQwen')) {
       const CI = require('./core/comfy-image');
       if (!fs.existsSync(_localQwenWfPath(CI.loadConfig()))) { logger('⚠ 🖥 로컬 Qwen-Image 2.1 워크플로를 찾지 못했습니다'); return; }
       return _withLocalQwenStop(onlyNums, logger, () => runComfyImages(project, imagesDir, logger, styleId, onlyNums, _localQwenWfPath(CI.loadConfig()), retryLevel, force, true));
@@ -6157,7 +6166,7 @@ ipcMain.handle('list-thumbs', async () => {
 });
 // 👤 캐릭터셋 보기(2.0 덧붙임4 ㊺ · v1.0.25) — 로그 상자 👤 탭 + ① 칸 아래 얼굴 띠. **읽기만**(core/char-sheets) · 관리자만
 ipcMain.handle('list-char-sheets', async () => {
-  if (!isOwner()) return { ok: false, cards: [], byGroup: {}, msg: '' };
+  if (!feat('charSheets')) return { ok: false, cards: [], byGroup: {}, msg: '' };
   const sp = S.scriptPath;
   if (!sp || !S.parsed) return { ok: false, cards: [], byGroup: {}, msg: '대본을 열면 인물 시트가 보입니다' };
   let md = '';
@@ -9026,7 +9035,7 @@ ipcMain.handle('dl-abort', () => { _dlAbort = true; log('⏹ 받기·전사 중�
 //   구글 로그인 쿠키로 받는다). **진짜 크롬/엣지**(새 임시 프로필)에서 **전용 구글 계정**으로 한 번 로그인 → 쿠키를 `core/yt-cookies` 에 OS 암호화로 저장 →
 //   yt-dlp 가 `--cookies` 로 쓴다(`MD.setCookieProvider`). v1.0.24: 앱 안(Electron) 로그인 창은 구글이 「안전하지 않은 브라우저」로 막아(실물 확인) 진짜 브라우저 + CDP 로 바꿨다(`core/yt-login`).
 //   ⛔ UA 를 꾸며 구글의 차단을 피하려 하지 않는다 · ⛔ 비밀번호는 이 앱이 보지 않는다(구글 화면에 사람이 입력) · ⛔ 쿠키 값을 렌더러·로그로 보내지 않는다 · ⛔ 채널·애드센스와 관계있는 계정 금지.
-const _ytCk = require('./core/yt-cookies');
+const _ytCk = ED.optional('ytCookie', () => require('./core/yt-cookies'));   // 판매판엔 파일이 없다
 const _ytEnc = () => {
   try { const { safeStorage } = require('electron'); if (safeStorage && safeStorage.isEncryptionAvailable()) return (t) => safeStorage.encryptString(String(t)).toString('base64'); } catch (_) {}
   return null;
@@ -9035,15 +9044,15 @@ const _ytDec = () => {
   try { const { safeStorage } = require('electron'); if (safeStorage && safeStorage.isEncryptionAvailable()) return (b) => safeStorage.decryptString(Buffer.from(String(b), 'base64')); } catch (_) {}
   return null;
 };
-require('./core/media-download').setCookieProvider(() => (isOwner() ? _ytCk.acquire(_ytEnc(), _ytDec()) : null));
+require('./core/media-download').setCookieProvider(() => (feat('ytCookie') ? _ytCk.acquire(_ytEnc(), _ytDec()) : null));
 ipcMain.handle('yt-login-status', () => {
-  if (!isOwner()) return { allowed: false, connected: false };
+  if (!feat('ytCookie')) return { allowed: false, connected: false };
   return { allowed: true, canEncrypt: !!_ytEnc(), ..._ytCk.status(_ytDec()) };
 });
-ipcMain.handle('yt-login-clear', () => { if (!isOwner()) return { ok: false }; _ytCk.clear(); log('🔑 유튜브 로그인 해제 — 저장된 쿠키를 지웠습니다'); return { ok: true }; });
+ipcMain.handle('yt-login-clear', () => { if (!feat('ytCookie')) return { ok: false }; _ytCk.clear(); log('🔑 유튜브 로그인 해제 — 저장된 쿠키를 지웠습니다'); return { ok: true }; });
 let _ytLoginBusy = false;
 ipcMain.handle('yt-login-open', async () => {
-  if (!isOwner()) return { ok: false, error: '관리자 전용 기능입니다' };
+  if (!feat('ytCookie')) return { ok: false, error: '관리자 전용 기능입니다' };
   if (!_ytEnc()) return { ok: false, error: '이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 로그인 정보를 저장하지 않습니다' };
   if (_ytLoginBusy) return { ok: false, error: '로그인 창이 이미 열려 있습니다' };
   const YL = require('./core/yt-login');
@@ -9442,7 +9451,7 @@ function _runOnLanes(lanes, label, fn) {
 }
 // 이미지 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI 이면서 클라우드가 아닐 때만 참.
 function _imgUsesLocalGpu(engine) {
-  if (require('./core/engine-migrate').isLocalQwen(engine)) return isOwner();   // 👑 로컬 Qwen = 늘 이 PC GPU(회원은 AI 이미지로 돈다)
+  if (require('./core/engine-migrate').isLocalQwen(engine)) return feat('localQwen');   // 👑 로컬 Qwen = 늘 이 PC GPU(회원은 AI 이미지로 돈다)
   if (!isComfyVal(engine)) return false;
   try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
 }
@@ -10086,7 +10095,7 @@ async function _editSentences(args = {}) {
 
   // 🟥·🟨 표시된 문장을 고쳤다 — 🟥 는 자동 「확인」(표시 줄 고침) · 「Claude 원문 → 로이 수정」 한 줄을 은행에(core/roy-bank)
   let royBank = [];
-  if (_royTouched.size) { try { royBank = _royAfterEdit(pr, _royTouched, { noBank: !!args.royNoBank }); } catch (e) { log('⚠ 로이은행 기록 실패: ' + e.message); } }
+  if (_royTouched.size && ED.has('royBank')) { try { royBank = _royAfterEdit(pr, _royTouched, { noBank: !!args.royNoBank }); } catch (e) { log('⚠ 경험은행 기록 실패: ' + e.message); } }
 
   // 🔑 **새 대본 해시를 심는다** — 안 하면 다음에 열 때 '대본 수정 감지 → 새로 파싱'이 되어
   //   사용자가 만든 그룹 분할(✂) 같은 구조가 초기화된다. 위 검증 재파싱으로 .md == 파싱본임을 확인했으므로 정당하다.
@@ -10133,12 +10142,12 @@ ipcMain.handle('delete-words', async (_e, args = {}) => {
   return { ...r, removed, removedSec: cut.removedSec };
 });
 
-// ── 🟥 경험 · 🟨 해석 표시 + 로이은행 (v0.7.3 · 채널사업부 요청 2026-10-06 「화자는 실제 로이」) ─────────────────
+// ── 🟥 경험 · 🟨 해석 표시 + 경험은행 (v0.7.3 · 채널사업부 요청 2026-10-06 「화자는 실제 로이」) ─────────────────
 //   표시 문법·문장 맞추기 = core/roy-marks(순수) · 은행 쓰기·원문 기억 = core/roy-bank. 여기는 .md 를 읽고 쓰는 접착만.
 //   🔑 표시는 파싱본에 저장하지 않는다 — pr._roy(열거 안 됨 · 작업본에 안 실림)에 (.md 수정 시각 + 문장 id) 열쇠로 캐시하고
 //     DTO 를 만들 때마다(P.setRoyHook) 열쇠가 바뀌었으면 .md 를 다시 읽는다. .md 가 정본이라 밖에서 고쳐도 저절로 따라간다.
 const RoyMarks = require('./core/roy-marks');
-const RoyBank = require('./core/roy-bank');
+const RoyBank = ED.optional('royBank', () => require('./core/roy-bank'));   // 판매판엔 파일이 없다 — 🟥·🟨 표시 읽기(RoyMarks)는 남는다
 function _royScriptOf(parsed) {
   if (!parsed || parsed.kind === 'book') return null;
   if (parsed === S.parsed && S.scriptPath) return S.scriptPath;
@@ -10162,7 +10171,7 @@ function ensureRoyMarks(parsed, force = false) {
     const lost = r.marks.filter((m) => !m.found).length;
     if (lost && !(pr._roy && pr._roy.lost === lost)) log(`⚠ 🟥·🟨 표시 ${lost}곳이 가리키는 문단을 찾지 못했습니다 — 표시 줄 바로 아래에 본문 문단이 있는지 대본(.md)에서 확인하세요`);
     try { Object.defineProperty(pr, '_roy', { value: { key, lost, ...r }, enumerable: false, writable: true, configurable: true }); } catch (_) { pr._roy = { key, lost, ...r }; }
-    if (r.marks.length) RoyBank.rememberOriginals(_royBase(sp), r.marks);
+    if (r.marks.length && ED.has('royBank')) RoyBank.rememberOriginals(_royBase(sp), r.marks);
   }
 }
 P.setRoyHook((parsed) => ensureRoyMarks(parsed));
@@ -13328,7 +13337,8 @@ function licPublic(s) {
   return { enforced: LIC.enforce, ok: licOk(), member: !!s.ok, admin: !!s.admin, email: s.email || '', expiresAt: s.expiresAt || null,
     points: s.points || null, kie: s.kie == null ? null : s.kie, reason: s.reason || null, offline: !!s.offline, graceUntil: s.graceUntil || null, deviceLimit: s.deviceLimit == null ? null : s.deviceLimit,
     devices: (s.devices || []).map((d) => ({ name: d.name || '', lastSeen: d.last_seen || null, me: d.device_id === (LIC.L ? LIC.L.deviceId() : '') })),
-    autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, owner: isOwner(), site: require('./core/license').SITE_DEVICES };
+    autoLog: LIC.L ? LIC.L.readState().autoLog !== false : true, owner: isOwner(), site: require('./core/license').SITE_DEVICES,
+    edition: ED.EDITION, features: ED.features(isOwner) };   // 🏠🛒 화면은 owner 대신 features 로 로이 전용 기능을 가른다(v1.0.26)
 }
 async function licCheck(why, quiet) {
   const prevOk = !!(LIC.state && LIC.state.ok);
@@ -13432,10 +13442,10 @@ ipcMain.handle('license-report', async (_e, a = {}) => {   // 🐞 문제 보고
   return { ok: !!(r && r.ok), reason: r && r.reason };
 });
 // 💳 크레딧 칸을 누르면 충전 페이지로 — 판매자(관리자) = kie 결제 페이지 · 회원 = primingwave.com 크레딧 충전 페이지(고정 주소 두 개뿐 · 렌더러가 주소를 정하지 않는다)
-const KIE_BILLING_URL = 'https://kie.ai/billing';
+const KIE_BILLING_URL = (() => { try { return require('./core/studio-env').KIE_BILLING_URL; } catch (_) { return null; } })();   // 로이판 전용 파일 · 판매판엔 관리자가 없다
 ipcMain.handle('open-charge-page', () => {
   try {
-    if (isOwner()) { openLink(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
+    if (isOwner() && KIE_BILLING_URL) { openLink(KIE_BILLING_URL); return { ok: true, kind: 'kie' }; }
     openLink(require('./core/license').SITE_CHARGE); return { ok: true, kind: 'site' };
   } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -13785,8 +13795,8 @@ ipcMain.handle('book-reveal-file', (_e, p) => {
   if (!root || !path.resolve(s).startsWith(path.resolve(root))) return false;
   shell.showItemInFolder(s); return true;
 });
-// 출판 메일: 별도 OAuth·OS 암호화 저장. 메일 내용은 명령으로 실행하지 않는다.
-require('./core/book/resubmit-ipc').install({
+// 출판 메일: 별도 OAuth·OS 암호화 저장. 메일 내용은 명령으로 실행하지 않는다. 🛒 판매판엔 출판 파일이 없다(설치하지 않음 · v1.0.26)
+if (ED.has('book')) require('./core/book/resubmit-ipc').install({
   ipcMain, dialog, shell: { openExternal: (u) => openLink(u), showItemInFolder: (p) => shell.showItemInFolder(p) }, win: () => win,
   client: require('./core/book/gmail-client').createClient({ openExternal: u => openLink(u) }),
   context: () => {

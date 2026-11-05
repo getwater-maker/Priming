@@ -765,7 +765,10 @@ export default function App() {
   const [settingsMsg, setSettingsMsg] = useState('');      // 연결테스트 결과 — 로그창이 아니라 팝업 안에서 바로 보이게
   // 👑 로이(관리자) PC 인가(v0.9.27) — 로이 전용 안내(아도나이로이 대시보드 등)는 회원 화면에 보이지 않게 · 개발 실행·E2E 는 로이 PC
   const [owner, setOwner] = useState(true);
-  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // 🏠🛒 판별 기능(v1.0.26 · main core/edition) — 로이 전용 기능은 owner 가 아니라 이것으로 가른다 · 읽기 전엔 전부 열림(예전 owner 기본값 true 와 같다)
+  const [features, setFeatures] = useState(null);
+  const feat = (id) => (features ? !!features[id] : true);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setFeatures(s && s.features ? s.features : null); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // 🪙 회원 포인트(지급 · 남음) — 5분마다 다시 읽는다(v0.9.72). 서버가 값을 안 주는 회원(원장이 비어 있음)·서버가 아직 준비 전이어도
   //   설치본(회원 확인을 켠 앱)에서는 칸이 보인다(v0.9.78 — 「포인트 0」) · 개발 실행·E2E(확인 끔)는 숨김
   const [points, setPoints] = useState(null);
@@ -1316,11 +1319,11 @@ export default function App() {
   const [thumbEd, setThumbEd] = useState(null);   // 🖼 썸네일 편집기 {data} — 로그 상자 🖼 탭의 ✏ 수정
   async function openThumbEditor() { try { const r = await api.thumbEditOpen(); if (!r || !r.ok) { uiAlert((r && r.msg) || '썸네일 편집기를 열 수 없습니다'); return; } setThumbEd(r); } catch (e) { uiAlert('썸네일 편집기: ' + e.message); } }
   async function loadThumbs() { try { setThumbs((await api.listThumbs()) || { ok: false, msg: '', files: [] }); } catch (e) { setThumbs({ ok: false, msg: '썸네일 읽기 실패: ' + e.message, files: [] }); } }
-  useEffect(() => { if (logTab === 'thumb') loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
+  useEffect(() => { if (logTab === 'thumb' && feat('thumbEdit')) loadThumbs(); }, [logTab, dto && dto.fileTitle]);   // 대본이 바뀌면 다시 찾는다
   // 👤 캐릭터셋 보기(2.0 덧붙임4 ㊺ · v1.0.25 · 관리자만) — 로그 상자 👤 탭 + ① 칸 아래 얼굴 띠. 읽기만(main list-char-sheets)
   const [charSheets, setCharSheets] = useState({ cards: [], byGroup: {}, msg: '' });
   async function loadCharSheets() { try { const r = await api.listCharSheets(); setCharSheets(r && r.cards ? r : { cards: [], byGroup: {}, msg: (r && r.msg) || '' }); } catch (_) { setCharSheets({ cards: [], byGroup: {}, msg: '' }); } }
-  useEffect(() => { if (owner) loadCharSheets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [owner, dto && dto.fileTitle]);
+  useEffect(() => { if (feat('charSheets')) loadCharSheets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [owner, dto && dto.fileTitle]);
   useEffect(() => { if (logTab === 'chars') loadCharSheets(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [logTab]);
   function pickLogTab(t) { setLogTab(t); if (t === 'log') { setLogUnseen(false); setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 0); } }
 
@@ -6252,7 +6255,7 @@ export default function App() {
   </>);
   // 🧭 클립 정보 상자(① 아래) — 커서 줄의 그룹 · 그림/영상 · 자주 쓰는 그룹 단추
   // 👤 얼굴 띠 — 지금 장면(그룹)에 나오는 인물의 시트를 작게(얼굴 시트 → 표정 9칸 → 인물 시트 순으로 하나) · 클릭 = 크게
-  const showChars = owner && !isBk && charSheets.cards.length > 0;
+  const showChars = feat('charSheets') && !isBk && charSheets.cards.length > 0;
   function charFace(card) { const fs_ = card.files || []; return fs_.find((f) => f.kind === 'face') || fs_.find((f) => f.kind === 'expr') || fs_[0] || null; }
   function charStrip(shortsNum, groupNum) {
     if (!showChars) return null;
@@ -6288,7 +6291,8 @@ export default function App() {
   })();
   // 📜 로그 상자 — 클립 보기에선 ① 칸 아래(docked), 카드 보기·출판·리모션에선 예전의 떠 있는 창(.docked 를 떼면 그 모양).
   const logDocked = (!noProduction && view === 'clips') || isBk;   // 출판 모드 = 왼쪽 패널 하단에 붙인다
-  const lt = isBk ? (logTab === 'ask' ? 'ask' : 'log') : (logTab === 'chars' && !showChars ? 'thumb' : logTab);   // 👤 탭은 인물 카드가 있을 때만(관리자)   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그 · 💬 질문
+  const thumbOn = feat('thumbEdit');   // 🛒 판매판엔 썸네일 탭이 없다 → 로그
+  const lt = isBk ? (logTab === 'ask' ? 'ask' : 'log') : (logTab === 'chars' && !showChars ? (thumbOn ? 'thumb' : 'log') : (logTab === 'thumb' && !thumbOn ? 'log' : logTab));   // 👤 탭은 인물 카드가 있을 때만(관리자)   // 🖼 썸네일 탭은 롱폼 대본용 — 출판 화면은 로그 · 💬 질문
   const selectedStyle = styles.find((s) => s.id === styleId);
   const selectedSample = styleSamples[styleId];
   const selectedStyleName = selectedStyle?.name || (styleId === SCRIPT_STYLE_ID ? '대본스타일' : '스타일 없음');
@@ -6299,7 +6303,7 @@ export default function App() {
                 <button data-testid="logtab-log" className={lt === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
                 <button data-testid="logtab-ask" className={lt === 'ask' ? 'on' : ''} title="지금 상황(로그)을 보고 프로그램이 답해 줍니다" onClick={() => pickLogTab('ask')}>💬 질문</button>
               </span> : <span className="logtabs">
-                <button data-testid="logtab-thumb" className={lt === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>
+                {thumbOn && <button data-testid="logtab-thumb" className={lt === 'thumb' ? 'on' : ''} onClick={() => pickLogTab('thumb')}>🖼 썸네일</button>}
                 {showChars && <button data-testid="logtab-chars" className={lt === 'chars' ? 'on' : ''} title="이 대본 인물 카드의 시트(얼굴 · 표정 · 전신) — 장면 그림과 같은 얼굴인지 눈으로 견주는 곳(읽기만)" onClick={() => pickLogTab('chars')}>👤 캐릭터셋</button>}
                 <button data-testid="logtab-log" className={logTab === 'log' ? 'on' : ''} onClick={() => pickLogTab('log')}>📜 로그{logUnseen ? <span className="logdot">●</span> : null}</button>
                 <button data-testid="logtab-ask" className={logTab === 'ask' ? 'on' : ''} title="지금 상황(로그·큐)을 보고 프로그램이 답해 줍니다 — 예: 왜 1028 은 진행을 안 했어?" onClick={() => pickLogTab('ask')}>💬 질문</button>
@@ -6401,7 +6405,7 @@ export default function App() {
   // 🧭 메뉴 줄(Vrew 12탭 · Lab) — 옛 리본 블록을 조각으로 잘라 새 탭에 다시 끼운 것. 기능·testid 는 그대로(대조표 docs/VrewLab/리본_선택자_대조표.md)
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
-            {!compact && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
             {!compact && ribReaderBtn}
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
@@ -6452,7 +6456,7 @@ export default function App() {
             <select data-testid="img-engine" title="이미지 도구 — ☁ AI 이미지 모델"
               value={comfySelectValue(imgEngine, comfyCfg)}
               onChange={(e) => onPickImgEngine(e.target.value)}>
-              <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
+              <EngineOptions kind="image" owner={feat('localQwen')} cfg={comfyCfg} value={comfySelectValue(imgEngine, comfyCfg)} />
             </select>
             <button className="ghost" disabled={!loaded || impBusy} title="프롬프트가 빈 그룹의 이미지·영상 프롬프트를 Claude API 로 채웁니다(이미 있는 것은 그대로)" onClick={runMakePrompts}><span className="rb-ic">{impBusy ? '⏳' : '✍'}</span> <span className="rb-t">{impBusy ? '작성중…' : '프롬프트'}</span></button>
             <button className="ghost" data-testid="rewrite-img-prompts" disabled={!loaded || impBusy} title="🔁 이미지 프롬프트를 Claude API 로 새로 씁니다 — ☑ 체크박스로 고른 그룹이 있으면 그 그룹만, 없으면 모든 그룹 (덮어씀 · Ctrl+Z · 그림은 그대로)" onClick={() => runRewritePrompts('image')}><span className="rb-ic">🔁</span> <span className="rb-t">이미지 프롬프트</span></button>
@@ -6528,7 +6532,7 @@ export default function App() {
             <span className="glabel">④ 완성</span>
             <select title="완성물 종류 — .vrew(Vrew 에서 마무리) 또는 ✏ 화이트보드 MP4(손그림 애니메이션 · 이미지가 종이 위에 그려지듯 드러남). 화이트보드는 음성·자막까지 얹혀 그대로 올릴 수 있습니다." value={outTarget} onChange={(e) => setOutTarget(e.target.value)}>
               <option value="vrew">.vrew (Vrew)</option>
-              <option value="whiteboard">✏ 화이트보드 MP4</option>
+              {feat('whiteboard') && <option value="whiteboard">✏ 화이트보드 MP4</option>}
               <option value="mp4">🎬 유튜브 MP4</option>
             </select>
             {/* 📂 완성 후 열기(v0.5.79) — 헤더(⚡ 만들기 옆)에 두면 1366px 에서 ■ 중단이 둘째 줄로 밀린다(v0.5.81 실측) → 완성 종류 옆으로 */}
@@ -6617,7 +6621,7 @@ export default function App() {
   const selOk = clipSelOk();
 
   // 🧭 메뉴 줄 2단계 — 옛 상시 묶음(rb-reader)의 단추를 탭으로: 대본 보기 → 자막 · 다운로드 → 제작 · 모니터 끄기·작성 기준·크레딧 → 도움말
-  const ribMonitor = (<button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>);
+  const ribMonitor = !feat('monitorOff') ? null : (<button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업(음성·이미지·MP4·업로드)은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다. 자기 전에 ⚡ 만들기를 누른 뒤 누르세요." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}><span className="rb-ic">🌙</span> <span className="rb-t">모니터 끄기</span></button>);
   const ribDl = (<button className="ghost" data-testid="urldl-open" disabled={urlBusy} title="📥 다운로드 · STT — 🔗 링크(유튜브·틱톡·비메오 …)에서 오디오·영상을 최고 화질로 받고(선택: STT 전사) · 📂 내 파일에서 mp3 추출·STT 전사" onClick={() => openUrlDl('link')}><span className="rb-ic">📥</span> <span className="rb-t">다운로드</span></button>);
   const ribReaderBtn = (<button className="ghost" data-testid="reader-open" disabled={!loaded} title="대본 내용만 깔끔하게 읽기 — 문장을 눌러 바로 고치고, A4 PDF(한 장에 1·2·4·6·9쪽)로 뽑습니다" onClick={() => setReaderOpen(true)}><span className="rb-ic">📄</span> <span className="rb-t">대본 보기</span></button>);
   const ribGuide = (<button className="ghost" data-testid="guide-open-btn" title="프라이밍 기능을 빠짐없이 쓰는 대본(.md) 형식 — 내용과 파일 위치를 보여 줍니다(다른 사람·AI 에게 이 파일을 건네세요)" onClick={() => setGuideOpen(true)}><span className="rb-ic">📘</span> <span className="rb-t">작성 기준</span></button>);
@@ -7094,7 +7098,7 @@ export default function App() {
             {isBk && <button data-testid="open-book" onClick={openBook}>📖 원고 열기</button>}
             {/* 🌙 모니터 끄기 — 롱폼은 리본 오른쪽 끝에 있고(rb-reader), 리본이 없는 리모션·출판은 메뉴 줄에 둔다(로이 2026-10-01). 같은 동작 */}
             {noProduction && pointsEl}
-            {noProduction && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
+            {noProduction && feat('monitorOff') && <button className="ghost" data-testid="monitor-off" title="지금 바로 모니터만 끕니다 — PC 와 작업은 계속 돕니다. 키보드의 ScrollLock 키로도 됩니다(앱이 뒤에 있어도). 마우스·키보드를 건드리면 다시 켜집니다." onClick={async () => { const r = await api.monitorOff(); if (r && !r.ok) logline('✗ 모니터 끄기 실패 — ' + (r.error || '')); }}>🌙 모니터 끄기</button>}
           {isBk && bkState && bkState.loaded && (
             <nav className="menus" data-testid="bk-nav" onClickCapture={() => setAcctPage(false)}>
               {BOOK_TABS.map(([id, ic, name]) => (
@@ -7167,8 +7171,8 @@ export default function App() {
             {/* 🔀 모드 전환(롱폼·리모션·출판) — Vrew 의 오른쪽 위 도구 자리(Lab 메뉴 줄 1단계) */}
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
-              <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>
-              <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
+              {feat('remotion') && <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>}
+              {feat('book') && <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>}
             </span>
             <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
               style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙<span className="lbl"> 설정</span></button>
@@ -7996,8 +8000,8 @@ export default function App() {
                     <select value={(ch.startMode === 'book' || ch.startMode === 'remotion') ? ch.startMode : 'longform'}
                       onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
                       <option value="longform">롱폼 (16:9)</option>
-                      <option value="remotion">🎬 리모션 (음성만)</option>
-                      <option value="book">📖 출판</option>
+                      {feat('remotion') && <option value="remotion">🎬 리모션 (음성만)</option>}
+                      {feat('book') && <option value="book">📖 출판</option>}
                     </select></div>
                     <Hint>{ch.startMode === 'remotion'
                       ? 'TSV(파일명＋문장)를 불러와 그 이름 그대로 mp3 를 만듭니다. 자막·이미지·영상은 리모션이 담당합니다'
@@ -8112,7 +8116,7 @@ export default function App() {
                       {/* 헤더와 같은 구조 — 로컬/클라우드 × 모델을 여기서 바로 고른다(2026-08-14) */}
                       <select value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)}
                         onChange={(e) => { const c = parseComfyVal(e.target.value); setCh({ ...ch, imgEngine: c ? (c.path ? `comfy::${c.path}` : 'comfy') : e.target.value }); }}>
-                        <EngineOptions kind="image" owner={owner} cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
+                        <EngineOptions kind="image" owner={feat('localQwen')} cfg={comfyCfg} value={comfySelectValue(normImgEngine(ch.imgEngine), comfyCfg)} />
                       </select></div>
                   </div>
                   <div className="col">
@@ -8127,7 +8131,7 @@ export default function App() {
                       <select value={normOutTargetUi(ch.outTarget)}
                         onChange={(e) => setCh({ ...ch, outTarget: e.target.value })}>
                         <option value="vrew">.vrew (Vrew)</option>
-                        <option value="whiteboard">✏ 화이트보드 MP4</option>
+                        {feat('whiteboard') && <option value="whiteboard">✏ 화이트보드 MP4</option>}
                         <option value="mp4">🎬 유튜브 MP4</option>
                       </select></div>
                   </div>

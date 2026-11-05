@@ -76,7 +76,7 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').repla
     const m = read('main.js');
     ok(/require\('\.\/core\/yt-login'\)/.test(m) && /YL\.login\(/.test(m), 'main 이 core/yt-login 으로 로그인');
     ok(!/session\.fromPartition\(part\)/.test(m) && !/ses\.setUserAgent/.test(m), '앱 안(Electron) 로그인 창·UA 꾸미기는 없다');
-    ok(/ipcMain\.handle\('yt-login-open', async \(\) => \{\s*if \(!isOwner\(\)\)/.test(m), '관리자 전용');
+    ok(/ipcMain\.handle\('yt-login-open', async \(\) => \{\s*if \(!feat\('ytCookie'\)\)/.test(m), '관리자 전용');
   }
 
   console.log(`\n결과: 통과 ${pass} · 실패 ${fail}`);

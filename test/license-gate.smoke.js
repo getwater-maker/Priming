@@ -97,7 +97,9 @@ async function launch() {
     // 👑 로이 전용(v0.9.27) — 일반 회원은 owner=false · 관리자는 true · GPU 온도 기록·팝업은 isOwner() 뒤에서만
     ok(st.owner === false, '👑 일반 회원 = owner false(로이 전용 기능·안내 숨김)');
     { const M = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-      ok(/_awake\.n === 1 && isOwner\(\)\) \{ try \{ require\('\.\/core\/gpu-temp'\)\.startSampling/.test(M) && /if \(!isOwner\(\)\) throw 0;[^\n]*\n\s*const GT = require\('\.\/core\/gpu-temp'\)/.test(M), '👑 GPU 온도 기록·요약 팝업은 로이 PC 에서만(소스)');
+      // v1.0.26 — 기능 판정은 feat('gpuTemp')(core/edition · owner 기능 = 관리자 계정만) — 일반 회원이면 features.gpuTemp 가 거짓
+      ok(/_awake\.n === 1 && feat\('gpuTemp'\)\) \{ try \{ require\('\.\/core\/gpu-temp'\)\.startSampling/.test(M) && /if \(!feat\('gpuTemp'\)\) throw 0;[^\n]*\n\s*const GT = require\('\.\/core\/gpu-temp'\)/.test(M), '👑 GPU 온도 기록·요약 팝업은 로이 PC 에서만(소스)');
+      ok(st.features && st.features.gpuTemp === false && st.features.ytCookie === false && st.features.book === true, '👑 일반 회원(로이판) = 관리자 전용 기능만 꺼짐 · 나머지는 예전처럼 열림: ' + JSON.stringify(st.features && { gpuTemp: st.features.gpuTemp, book: st.features.book }));
       const APP = fs.readFileSync(path.join(ROOT, 'renderer', 'src', 'App.jsx'), 'utf8');
       ok(!/100\.112\.\d+\.\d+|192\.168\.219\.\d+/.test(APP) && /\{owner && <Hint>☁ 이 채널의 화풍은/.test(APP), '👑 화면에 로이 PC 주소가 없고 아도나이로이 안내는 owner 일 때만(소스)'); }
 

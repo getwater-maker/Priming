@@ -11,6 +11,17 @@ const { app, protocol } = require('electron');
 const HEADLESS_FLAGS = ['--order', '--order-check', '--register', '--list-names', '--yt-connect'];
 if (process.argv.some((a) => HEADLESS_FLAGS.some((f) => a === f || String(a).startsWith(f + '=')))) process.env.PM_HEADLESS = '1';
 const HEADLESS = process.env.PM_HEADLESS === '1';
+// 🛒 판매판엔 2.0 무인 제작이 없다(v1.0.26 · core/edition FEATURES.order) — 무인 입구는 창을 띄우지 않고 거절하고 끝낸다.
+if (HEADLESS) {
+  let ed = 'studio';
+  try { ed = require('./core/edition').EDITION; } catch (_) {}
+  if (ed !== 'studio') {
+    process.stderr.write('[priming] 이 판에는 없는 기능입니다(2.0 무인 제작 · --order/--register/--list-names/--yt-connect)\n');
+    process.exitCode = 3;
+    app.exit(3);
+    return;
+  }
+}
 if (HEADLESS) { try { app.disableHardwareAcceleration(); } catch (_) {} }
 
 // media:// 커스텀 프로토콜 권한 등록 — 반드시 app 'ready' 이전에 호출해야 한다.
