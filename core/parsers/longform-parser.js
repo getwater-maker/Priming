@@ -83,6 +83,7 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.scriptStyle = scriptStyleOf(raw);
   // 📜 `> 📜 화면카드: …` 줄(R4 · v0.7.98) — 문장·그룹은 그대로, MP4 렌더가 마커로 카드를 얹는다(없으면 필드도 없다 = 예전과 같다)
   { const mk = require('../screen-cards').markersOf(raw); if (mk.length) proj.screenCards = mk; }
+  { const sd = require('../scene-directives').apply(proj, raw); if (sd) proj.sceneDirectives = sd; }   // 🎞 장면 지시 줄(2.0 ㊷ · 움직임 · 판) — 줄이 없으면 아무것도 안 바꾼다
   // 📇 정보 카드 표시 줄(🔤 📊 ✅) 서명(v0.8.2) — 빌드 지문용(마커가 없으면 필드도 없다). 위치·글자는 렌더 때 .md 에서 다시 읽는다
   { const IC = require('../info-cards'); const sig = IC.signatureOf(IC.fromItems(_split)); if (sig.length) proj.infoMarks = sig; }
   // 📄 대본 읽기 문단 — 대본(.md)의 빈 줄로 나뉜 문단 번호(문장 순서대로 [글, 문단]) · 읽기 화면·A4 가 그룹이 아니라 이 문단으로 줄을 바꾼다(v0.8.9)

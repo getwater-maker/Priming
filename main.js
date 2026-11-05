@@ -7500,8 +7500,8 @@ function projectsFromSnapshot(snap) {
   const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
   const h2map = h2MapFromScript(snap.scriptPath); // 옛 스냅샷의 h2Title 보충용
   // 📝 대본 읽기 메모(`> 📝 …` · 낭독 제외)는 작업본에 없다 — 이어받기(재파싱 없음)에서도 보이게 .md 에서 다시 읽는다(v0.5.66)
-  let readerNotes = [], scriptStyle = null, screenCards = null, infoMarks = null, readerParas = null;
-  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); try { readerParas = _LP.readerParasOf(_raw); } catch (_) {} scriptStyle = _LP.scriptStyleOf(_raw); { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } { const _IC = require('./core/info-cards'); const _sg = _IC.signatureOf(_IC.fromRaw(_raw)); if (_sg.length) infoMarks = _sg; } } } catch (_) {}
+  let readerNotes = [], scriptStyle = null, screenCards = null, infoMarks = null, readerParas = null, sceneRaw = null;
+  try { if (snap.scriptPath && fs.existsSync(snap.scriptPath)) { const _LP = require('./core/parsers/longform-parser'); const _raw = fs.readFileSync(snap.scriptPath, 'utf8'); readerNotes = _LP.readerNotesOf(_raw); try { readerParas = _LP.readerParasOf(_raw); } catch (_) {} scriptStyle = _LP.scriptStyleOf(_raw); sceneRaw = _raw; { const _mk = require('./core/screen-cards').markersOf(_raw); if (_mk.length) screenCards = _mk; } { const _IC = require('./core/info-cards'); const _sg = _IC.signatureOf(_IC.fromRaw(_raw)); if (_sg.length) infoMarks = _sg; } } } catch (_) {}
   return (snap.projects || []).map((ps) => {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
@@ -7548,6 +7548,7 @@ function projectsFromSnapshot(snap) {
     if (readerNotes.length) proj.readerNotes = readerNotes;
     if (readerParas) proj.readerParas = readerParas;   // 📄 대본 읽기 문단(빈 줄 기준 · v0.8.9)
     if (screenCards) proj.screenCards = screenCards;   // 📜 화면 카드 마커(R4) — .md 가 정본
+    if (sceneRaw) { const _sd = require('./core/scene-directives').apply(proj, sceneRaw); if (_sd) proj.sceneDirectives = _sd; }   // 🎞 장면 지시 줄(2.0 ㊷) — .md 가 정본(이어받기에서도 다시 얹는다)
     if (infoMarks) proj.infoMarks = infoMarks;   // 📇 정보 카드 표시 줄 서명(v0.8.2) — .md 가 정본
     // 🎨 대본 화풍 — .md 가 정본(작업본에 적힌 값은 .md 를 못 읽을 때만)
     proj.scriptStyle = scriptStyle || (ps && ps.scriptStyle) || null;
@@ -8836,6 +8837,13 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
     imageMaxSec: st.sceneMaxSec,
     transitions: R ? (R.transitions > 0 ? `겹침 전환 ${R.transitions}곳` : '컷') : null,
     cards: cardN ? cardN.screen + cardN.info : null, cardsScreen: cardN ? cardN.screen : null, cardsInfo: cardN ? cardN.info : null,
+    // 🎞 ㊼ 장면 지시 줄(덧붙임4 ㊷) — 지시 줄이 없으면 0/빈 목록 · 판 따로는 아직 한 장 + 평면 움직임으로 되돌린다(㊸ 그리기 진행 중)
+    motionOrdered: pr.sceneDirectives ? pr.sceneDirectives.motionOrdered : 0,
+    motionChanged: pr.sceneDirectives ? pr.sceneDirectives.motionChanged : [],
+    layerScenes: pr.sceneDirectives ? pr.sceneDirectives.layerScenes : 0,
+    layerReverted: pr.sceneDirectives ? pr.sceneDirectives.layerScenes : 0,
+    layerRevertReasons: pr.sceneDirectives && pr.sceneDirectives.layerScenes ? pr.groups.filter((g) => g.layered).map((g) => ({ g: g.num, why: '인물판·배경판 따로 그리기가 아직 없음 — 한 장 + 평면 움직임' })) : [],
+    directiveWarnings: pr.sceneDirectives ? pr.sceneDirectives.warnings : [],
     quoteCards: cardN ? (cardN.quote || 0) : null,   // ㊼ 💬 대사 카드 수(이번 렌더에 구운 것 · cardsScreen 에 들어 있다)
     maps: null, timelines: null, depthImages: null, fxLayers: null,   // ⑲ 지도·연표 · ㉑ 깊이 움직임 · ㉒ 효과 층 — 아직 없는 장치
     videoClips: pr.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath)).length, videoEngine: null,   // 2.0 주문은 영상 「없음」
@@ -9020,7 +9028,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
         const SCr = require('./core/screen-cards'), KB = require('./core/ken-burns');
         const pmap = P.pausePlanOf(pr, preset).map;
         const cards = Array.isArray(pr.screenCards) && pr.screenCards.length ? SCr.plan(pr, pr.screenCards, { pauseSec: preset.interludePauseSec }).cards : [];
-        const summaryOf = (g) => [OC.motionName(KB.patternIndexOf(g))].filter(Boolean).join(' · ');
+        const summaryOf = (g) => [OC.motionName(KB.patternIndexOf(g)), g && g.layered ? '판 따로→한 장' : ''].filter(Boolean).join(' · ');
         const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0 });
         if (rv.ok) {
           res.files.review = rv.sheets; res.files.stillTsv = rv.stillTsv;
