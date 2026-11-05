@@ -331,6 +331,37 @@ const SCRIPT = [
       ok(px.length === 480 * 270 && dark > px.length * 0.9 && bright > 100, '불투명한 어두운 판(' + Math.round(dark / px.length * 100) + '% 어둠) + 밝은 글자 화소 ' + bright);
     } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   }
+  console.log('\n[9] 💬 대사 카드(2.0 덧붙임4 ㊹ · v1.0.29)');
+  {
+    const md = '# t\n## 장\n### 가\n\n> 💬 대사카드: 예수 | 이 가난한 과부가 // 누구보다 많이 넣었다\n\n첫 문장입니다.\n장면 끝 문장입니다.\n\n### 나\n\n다음 장면 문장입니다.\n장면 끝 문장입니다.\n';
+    const mk = SC.markersOf(md);
+    ok(mk.length === 1 && mk[0].kind === 'quote' && mk[0].f['사람'].raw === '예수' && /과부가 \/\/ 누구보다/.test(mk[0].f['대사'].raw), '자리 순서 꼴(말한 사람 | 대사) 을 읽는다');
+    ok(mk[0].sceneEnd && mk[0].sceneEnd.text === '장면 끝 문장입니다.' && mk[0].sceneEnd.ord === 1, '그 장면 마지막 낭독 문장 + 순번(같은 글이 뒤 장면에도 있다)');
+    const pr = P.parseScriptText(md, 'longform', {}).projects[0];
+    pr.sentences.forEach((s) => { s.ttsAudioPath = 'x.mp3'; s.ttsDurationSec = 2; });
+    const pl = SC.plan(pr, mk, {});
+    const endId = pr.sentences[1].id;
+    ok(pl.cards.length === 1 && pl.pauses.map.get(endId) === SC.QUOTE.def && pl.pauses.map.size === 1, '같은 글이 둘이면 순번이 가까운 쪽(첫 장면 끝) 뒤에 무음 ' + SC.QUOTE.def + '초');
+    ok(Math.abs(pl.cards[0].t0 - 4) < 1e-6 && Math.abs(pl.cards[0].t1 - 8) < 1e-6 && pl.cards[0].hideCaptions === true, '카드 = 4~8초(무음 동안) · 자막 가림');
+    const kv = SC.markersOf('### 가\n> 💬 대사카드: 대사=한마디 // 둘째 | 사람=뱀 | 쉼=20\n장면 끝 문장입니다.\n');
+    const pr2 = P.parseScriptText('# t\n## 장\n### 가\n장면 끝 문장입니다.\n', 'longform', {}).projects[0]; pr2.sentences.forEach((s) => { s.ttsAudioPath = 'x.mp3'; s.ttsDurationSec = 2; });
+    ok(kv[0].f['사람'].raw === '뱀' && SC.plan(pr2, kv, {}).pauses.map.values().next().value === SC.QUOTE.max, '이름 꼴(사람= · 대사=) · 쉼= 은 최대 ' + SC.QUOTE.max + '초로 자른다(정지 8초)');
+    const when = SC.markersOf('### 가\n> 💬 대사카드: 뱀 | 한마디 | 때=장면 끝 문장\n장면 끝 문장입니다.\n');
+    const pw = SC.plan(pr2, when, {});
+    ok(pw.cards.length === 1 && pw.pauses.map.size === 0 && Math.abs(pw.cards[0].t0) < 1e-6 && Math.abs(pw.cards[0].t1 - 2) < 1e-6, '때= 꼴 = 무음 없이 그 문장이 읽히는 동안');
+    const empty = SC.markersOf('### 가\n> 💬 대사카드: 뱀\n장면 끝 문장입니다.\n');
+    ok(SC.plan(pr2, empty, {}).cards.length === 0 && /대사가 비어/.test(SC.plan(pr2, empty, {}).warnings.join()), '대사가 없으면 경고하고 그 카드만 건너뛴다');
+    const noSc = SC.markersOf('### 가\n> 💬 대사카드: 뱀 | 한마디\n');
+    ok(SC.plan(pr2, noSc, {}).cards.length === 0 && SC.plan(pr2, noSc, {}).warnings.length === 1, '장면에 낭독 문장이 없으면 경고 1');
+    const L = SC.layoutOf(pl.cards[0]);
+    ok(L.plate.max === 1 && L.plate.rgb === SC.QUOTE_RGB.plate && L.rows[0].role === 'speaker' && L.rows[1].role === 'quote' && L.rows[1].fs >= 66 && L.rows[1].lines.length === 2, '단색 불투명 판 · 말한 사람(위) · 대사 66px 이상 두 줄');
+    const ev = R.cardEvents(pl.cards, 0, 10).join('\n');
+    ok((ev.match(/\\1a&HFF&\\t\(/g) || []).length === Array.from('이 가난한 과부가누구보다 많이 넣었다').length && /\\fade\(/.test(ev) && /\\fscx103\.00/.test(ev), 'ASS: 글자마다 차례로 · 판과 함께 사라짐(\\fade) · 아주 느린 확대(103%)');
+    const evB = R.cardEvents(pl.cards, 7, 10).join('\n');
+    ok(!/\\1a&HFF&\\t/.test(evB) && /\\fscx102\.25/.test(evB), '조각 창이 카드 중간(7초)에서 시작하면 글자는 다 찬 채로 · 확대는 그 시각 크기에서 이어 간다');
+    const pv = SC.previewCards(pr, mk).cards[0];
+    ok(pv && pv.kind === 'quote' && JSON.stringify(pv.layout) === JSON.stringify(SC.layoutOf({ ...pl.cards[0], t0: undefined })), '① 미리보기 = MP4 와 같은 배치(layoutOf)');
+  }
   console.log(`\n${fail ? '❌' : '✅'} screen-cards ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 오류:', e); process.exit(1); });

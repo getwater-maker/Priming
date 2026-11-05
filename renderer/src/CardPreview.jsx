@@ -5,8 +5,8 @@
 import React, { useEffect, useState } from 'react';
 
 const W = 1920, H = 1080;
-const FAMILY = { han: 'PrimingCardHan', ko: 'PrimingCardKo', ja: 'PrimingCardJa' };
-const FALLBACK = { han: '"Noto Serif CJK KR", "Batang", serif', ko: '"Noto Serif KR", "Batang", serif', ja: '"Noto Serif JP", "Yu Mincho", serif' };
+const FAMILY = { han: 'PrimingCardHan', ko: 'PrimingCardKo', ja: 'PrimingCardJa', sans: 'PrimingCardSans' };
+const FALLBACK = { han: '"Noto Serif CJK KR", "Batang", serif', ko: '"Noto Serif KR", "Batang", serif', ja: '"Noto Serif JP", "Yu Mincho", serif', sans: '"Pretendard", "Malgun Gothic", sans-serif' };   // sans = 💬 대사 카드(MP4 와 같은 Pretendard Bold)
 const _fonts = {};   // key → Promise<boolean>
 const _ok = {};
 function loadCardFont(key) {
@@ -43,14 +43,14 @@ export default function CardPreview({ cards }) {
         const P = L.plate;
         return (
           <div key={ci} data-testid={L.side ? 'card-side' : 'card-full'} data-label={c.label} data-place={c.place || ''} style={{ position: 'absolute', inset: 0 }}>
-            <div data-testid="card-plate" style={{ position: 'absolute', left: (P.x / (W / 100)) + '%', top: (P.y / (H / 100)) + '%', width: (P.w / (W / 100)) + '%', height: (P.h / (H / 100)) + '%', background: rgba(RGB.plate, P.max) }} />
+            <div data-testid="card-plate" style={{ position: 'absolute', left: (P.x / (W / 100)) + '%', top: (P.y / (H / 100)) + '%', width: (P.w / (W / 100)) + '%', height: (P.h / (H / 100)) + '%', background: rgba(P.rgb || RGB.plate, P.max) }} />
             {(L.rules || []).map((r, i) => (
               <div key={'r' + i} style={{ position: 'absolute', left: (r.x / (W / 100)) + '%', top: (r.y / (H / 100)) + '%', width: (r.w / (W / 100)) + '%', height: (2 / (H / 100)) + '%', background: rgba(RGB.rule, r.max) }} />
             ))}
             {(L.rows || []).map((o, i) => (
               <div key={'t' + i} data-testid="card-text" style={{ position: 'absolute', left: (o.cx / (W / 100)) + '%', top: (o.cy / (H / 100)) + '%', transform: 'translate(-50%,-50%)', textAlign: 'center', whiteSpace: o.nowrap ? 'pre' : 'pre-wrap', ...(o.nowrap ? {} : { width: (((W - 2 * (o.ml || 0)) / (W / 100))) + '%' }),   // 전체 화면 카드는 ASS 처럼 양쪽 여백 안에서 자동 줄바꿈
                
-                fontFamily: familyOf(o.font), fontWeight: o.b ? 700 : 400, fontSize: px(o.fs), lineHeight: 1.3, letterSpacing: o.sp ? px(o.sp) : undefined, color: rgba(RGB.text, 1) }}>
+                fontFamily: familyOf(o.font), fontWeight: o.b ? 700 : 400, fontSize: px(o.fs), lineHeight: 1.3, letterSpacing: o.sp ? px(o.sp) : undefined, color: rgba(o.rgb || RGB.text, 1) }}>
                 {o.lines.join('\n')}
               </div>
             ))}

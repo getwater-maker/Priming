@@ -28,11 +28,16 @@
  * main·렌더 전용이 아니다 — 순수 함수라 테스트가 그대로 부른다(core/*.js 는 렌더러 번들에 들어갈 수 있으니 fs·require.main 을 쓰지 않는다).
  */
 // 🇯🇵 해설·낱말(v0.9.7 · 일본 채널 요청 7) = 그리는 모양은 막간·병기와 같고 이름만 다르다 — 채널 게이트가 종류를 이름으로 가른다.
-const KINDS = { '병기': 'pair', '막간': 'interlude', '해설': 'interlude', '낱말': 'pair' };
+const KINDS = { '병기': 'pair', '막간': 'interlude', '해설': 'interlude', '낱말': 'pair', '대사': 'quote' };
 // 🇯🇵 카드가 가리킨 낭독 문장에 가나가 있으면 일본어 카드 — 렌더가 일본어 글꼴(Noto Sans JP)로 그린다(한국 명조·한자 부분집합엔 県·沢·가나가 없다).
 const JA_RE = /[぀-ヿ]/;
 const langOf = (rows) => (rows.some((x) => JA_RE.test(x.text)) ? 'ja' : undefined);
 const MARK_RE = /^[ \t]*>[ \t]*📜[ \t]*화면카드[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+// 💬 대사 카드(v1.0.29 · 2.0 덧붙임4 ㊹) — 장면(`###`) 아래 `> 💬 대사카드: 말한 사람 | 대사`.
+//   기본 = 그 장면 **마지막 낭독 문장 뒤** 무음(QUOTE.def 초 · `쉼=` 1~8) 동안 단색 바탕 + 큰 글자가 차례로(정지 8초 ㉕ 안).
+//   `때=<낭독 문장 앞부분>` 을 쓰면 무음 없이 그 문장이 읽히는 동안 뜬다(낭독이 그 대사를 읽을 때). 줄이 없으면 아무것도 안 바뀐다.
+const QUOTE_RE = /^[ \t]*>[ \t]*💬[ \t]*대사[ \t]*카드[ \t]*[:：][ \t]*(.*?)[ \t]*$/u;
+const QUOTE = { def: 4, min: 1, max: 8, type: 2.2, lead: 0.2, fade: 0.3, zoom: 1.03 };
 const HEAD_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const MIN_KEY = 4;           // 앞부분 최소 글자(공백·문장부호 뺀 글자 수)
 const MIN_SPAN = 1.0;        // 카드가 뜨는 최소 길이(초) — 이보다 짧으면 건너뛴다
@@ -59,6 +64,17 @@ function markersOf(rawText) {
     if (fence) return;
     const h = HEAD_RE.exec(ln);
     if (h) { heading = h[2]; return; }
+    const q = QUOTE_RE.exec(ln);
+    if (q) {   // 💬 대사 카드 — 꼴: 「말한 사람 | 대사」(자리 순서) 또는 「사람= | 대사=」 + 쉼= · 때=
+      const f = {}; let pos = 0;
+      for (const p of q[1].split('|').map((x) => x.trim()).filter(Boolean)) {
+        const kv = /^([^=＝\s]+)\s*[=＝]\s*(.*)$/u.exec(p);
+        if (kv && ['사람', '대사', '쉼', '때'].includes(kv[1])) f[kv[1]] = anchorOf(kv[2]);
+        else { const k = pos++ === 0 ? '사람' : '대사'; if (!f[k]) f[k] = { text: p, extra: 0, raw: p }; }
+      }
+      out.push({ line: i + 1, raw: ln.trim(), heading, kindName: '대사', kind: 'quote', f, quoteLine: i });
+      return;
+    }
     const m = MARK_RE.exec(ln); if (!m) return;
     const parts = m[1].split('|').map((x) => x.trim()).filter((x, k) => k === 0 || x);
     const kindName = parts[0] || '';
@@ -69,6 +85,18 @@ function markersOf(rawText) {
     }
     out.push({ line: i + 1, raw: ln.trim(), heading, kindName, kind: KINDS[kindName] || null, f });
   });
+  // 💬 대사 카드의 자리 = 그 장면의 마지막 낭독 문장 — 다음 제목 줄까지 자른 글을 앱과 같은 문장 나누기로 세어 둔다(글 + 순번)
+  const qs = out.filter((m) => m.kind === 'quote' && m.quoteLine != null);
+  if (qs.length) {
+    const lines = text.split('\n'); const SS = require('./sentence-splitter');
+    for (const m of qs) {
+      let end = lines.length; for (let k = m.quoteLine + 1; k < lines.length; k++) if (HEAD_RE.test(lines[k])) { end = k; break; }
+      let items = []; try { items = SS.splitHybrid(lines.slice(0, end).join('\n')).items || []; } catch (_) {}
+      const last = items[items.length - 1];
+      m.sceneEnd = last ? { text: String(last.text || ''), ord: items.length - 1 } : null;
+      delete m.quoteLine;
+    }
+  }
   return out;
 }
 /** 지문·작업본용 — 마커 줄 글만(바뀌면 MP4 를 다시 굽는다) */
@@ -136,6 +164,16 @@ function takeIn(sents, i, extra, label) {
 /** 마커 하나 → 가리킨 문장 번호(sents 의 index) · 칸별 묶음. 소리 검사는 하지 않는다(대본 보기도 쓴다). */
 function resolveMarker(sents, m) {
   if (!m.kind) return { err: `종류 「${m.kindName}」 를 모릅니다(${Object.keys(KINDS).join(' · ')})` };
+  if (m.kind === 'quote') {
+    if (!m.f['대사'] || !String(m.f['대사'].raw).trim()) return { err: '대사가 비어 있습니다(`> 💬 대사카드: 말한 사람 | 대사`)' };
+    if (m.f['때']) { const r = findIn(sents, m, m.f['때'], '때'); if (r.err) return r; const tk = takeIn(sents, r.i, m.f['때'].extra, '때'); if (tk.err) return tk; return { idx: tk.idx, by: { '때': tk.idx }, literal: true }; }
+    const e = m.sceneEnd; if (!e || !e.text) return { err: '이 대사 카드의 장면에 낭독 문장이 없습니다' };
+    const k = norm(e.text);
+    const hit = sents.map((x, i) => (x.key === k ? i : -1)).filter((i) => i >= 0);
+    if (!hit.length) return { err: `장면 끝 문장을 찾지 못했습니다 — 「${e.text.slice(0, 20)}」(작업본에서 문장을 고쳤으면 대본을 다시 여세요)` };
+    const i = hit.reduce((a, b) => (Math.abs(b - e.ord) < Math.abs(a - e.ord) ? b : a));   // 같은 문장이 여럿이면 대본 순번이 가까운 것
+    return { idx: [i], by: { '끝': [i] }, after: true };
+  }
   if (m.f['때']) {
     const r = findIn(sents, m, m.f['때'], '때'); if (r.err) return r;
     const tk = takeIn(sents, r.i, m.f['때'].extra, '때'); if (tk.err) return tk;
@@ -157,6 +195,13 @@ function resolveMarker(sents, m) {
 const lastOf = (idx) => Math.max(...idx);
 /** 그 카드의 쉼(초) — 칸 `쉼=` 이 이기고, 없으면 막간만 채널 값. → { sec, err? } */
 function pauseFor(m, defSec) {
+  if (m.kind === 'quote') {   // 💬 대사 카드 — 장면 뒤에 뜨면 기본 QUOTE.def 초(쉼= 1~8) · 때= 꼴은 쉼 없음(쉼= 이 있으면 그 값)
+    if (!m.f['쉼']) return { sec: m.f['때'] ? 0 : QUOTE.def };
+    const v = Number(String(m.f['쉼'].raw).replace(/\s*초$/, ''));
+    if (!(String(m.f['쉼'].raw).trim() !== '' && isFinite(v) && v >= 0)) return { sec: m.f['때'] ? 0 : QUOTE.def, err: `쉼= 값은 숫자(초)만 쓸 수 있습니다(「${m.f['쉼'].raw}」) → 기본값` };
+    if (m.f['때']) return { sec: Math.min(QUOTE.max, v), explicit: true };
+    return { sec: Math.max(QUOTE.min, Math.min(QUOTE.max, v)), explicit: true };
+  }
   if (m.f['쉼']) {
     const raw = String(m.f['쉼'].raw).replace(/\s*초$/, '');
     const v = Number(raw);
@@ -220,6 +265,13 @@ function plan(project, markers, opts = {}) {
     if (clipEligible(m) && clipGroupOf(sents, r.idx)) continue;   // 🖼 전용 클립이 된 해설 카드 — 그 그룹의 그림이 카드다(따로 그리지 않는다)
     const rows = r.idx.map((i) => sents[i]);
     let card;
+    if (m.kind === 'quote') {   // 💬 대사 카드 — 장면 뒤 무음(기본) 또는 때= 문장이 읽히는 동안
+      if (rows.some((x) => !x.sound)) { bad('가리킨 문장에 음성이 없습니다(TTS 를 먼저)'); continue; }
+      const t0 = r.after ? rows[0].t0 + rows[0].d : rows[0].t0, t1 = rows[rows.length - 1].t1;
+      if (!(t1 - t0 >= MIN_SPAN)) { bad(`카드가 뜨는 시간이 너무 짧습니다(${(t1 - t0).toFixed(1)}초)`); continue; }
+      if (t1 - t0 > QUOTE.max + 1e-6) warnings.push(`${tag} — 대사 카드가 ${(t1 - t0).toFixed(1)}초 뜹니다(정지 8초 넘음)`);
+      card = { kind: 'quote', t0, t1, orig: [], trans: String(m.f['대사'].raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean), speaker: m.f['사람'] ? String(m.f['사람'].raw).trim() : '', line: m.line, hideCaptions: true };
+    } else
     // 🅱 `때=` 꼴 — 글자는 적은 그대로 · 낭독 문장은 시간만
     if (r.literal) {
       const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
@@ -273,8 +325,9 @@ function marksBySentence(project, markers) {
     if (r.err) { bad.push(`📜 화면카드 ${m.line}줄 — ${r.err}`); continue; }
     const p = m.f['쉼'] ? pauseFor(m, 0) : null;
     const tipLines = [`📜 ${m.kindName} · 대본 ${m.line}줄`];
-    for (const k of ['제목', '원문', '번역']) if (m.f[k]) tipLines.push(`${k}: ${String(m.f[k].raw).split(/\s+\/\/\s+/).join(' / ')}`);
-    if (!r.literal || !(m.f['제목'] || m.f['번역'])) tipLines.push('글: 가리킨 문장 그대로');
+    for (const k of ['사람', '대사', '제목', '원문', '번역']) if (m.f[k]) tipLines.push(`${k}: ${String(m.f[k].raw).split(/\s+\/\/\s+/).join(' / ')}`);
+    if (m.kind === 'quote') tipLines.push(r.after ? '💬 이 문장 뒤 무음 동안 · 글자가 차례로' : '💬 이 문장이 읽히는 동안');
+    else if (!r.literal || !(m.f['제목'] || m.f['번역'])) tipLines.push('글: 가리킨 문장 그대로');
     if (m.f['자막'] && /^(숨김|숨기기|끔|off)$/i.test(m.f['자막'].raw)) tipLines.push('🙈 뜨는 동안 자막 숨김');
     if (m.f['자리'] && PLACES[m.f['자리'].raw]) tipLines.push('📍 한쪽 카드 · ' + m.f['자리'].raw);
     const order = [...new Set(r.idx)].sort((a, b) => a - b), last = lastOf(r.idx);
@@ -292,7 +345,9 @@ function marksBySentence(project, markers) {
 // ── 📍 카드 배치(v1.0.7) — MP4(ASS)와 ① 미리보기가 같은 좌표를 쓴다 · 1920x1080 기준 ──────────────────────────────
 const W = 1920, H = 1080;
 const PLACES = { '왼쪽위': 'tl', '오른쪽위': 'tr', '왼쪽아래': 'bl', '오른쪽아래': 'br', '왼쪽': 'l', '오른쪽': 'r', '위': 't', '아래': 'b' };
-const CARD_RGB = { text: 'EAE0D0', plate: '0B0B0E', rule: '8C8C8C' };   // RGB(ASS 는 BGR 로 바꿔 쓴다)
+const CARD_RGB = { text: 'EAE0D0', plate: '0B0B0E', rule: '8C8C8C' };
+const QUOTE_RGB = { plate: '211A13', text: 'FAF0DC', speaker: 'D6B478' };   // 💬 대사 카드 — 2.0 시연 ④(어두운 갈색 단색 · 밝은 글자 · 금빛 말한 사람)
+const QUOTE_L = { fs: 96, lh: 1.45, sFs: 44, gap: 70, maxW: 1440 };   // RGB(ASS 는 BGR 로 바꿔 쓴다)
 const PLATE_MAX = 0.84, SIDE_PLATE_MAX = 0.8;
 const SIDE = { margin: 60, pad: 36, wSide: 640, wBand: 1280, fsKo: 40, fsOrig: 44, lh: 1.35, gap: 20 };
 const isWideCh = (ch) => /[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch);
@@ -315,6 +370,16 @@ function wrapEst(text, fs, maxW) {
 function layoutOf(c) {
   const ja = c.lang === 'ja';
   const hasOrig = !!(c.orig && c.orig.length);
+  if (c.kind === 'quote') {   // 💬 단색 판(불투명) + 말한 사람(작게 · 위) + 대사(큼) — 줄은 여기서 나눈다(ASS 자동 줄바꿈 끔 · 미리보기와 같은 줄)
+    const Q = QUOTE_L;
+    const lines = (c.trans || []).flatMap((l) => wrapEst(l, Q.fs, Q.maxW));
+    const sh = c.speaker ? Math.round(Q.sFs * 1.35) + Q.gap : 0, th = lines.length * Math.round(Q.fs * Q.lh);
+    const y0 = Math.round((H - sh - th) / 2);
+    const rows = [];
+    if (c.speaker) rows.push({ lines: ['— ' + c.speaker + ' —'], cx: W / 2, cy: y0 + Math.round(Q.sFs * 1.35 / 2), fs: Q.sFs, sp: 2, b: false, font: 'sans', ml: 0, nowrap: true, rgb: QUOTE_RGB.speaker, role: 'speaker' });
+    rows.push({ lines, cx: W / 2, cy: y0 + sh + Math.round(th / 2), fs: Q.fs, sp: 0, b: true, font: 'sans', ml: 0, nowrap: true, rgb: QUOTE_RGB.text, role: 'quote' });
+    return { side: false, plate: { x: 0, y: 0, w: W, h: H, max: 1, rgb: QUOTE_RGB.plate }, rows, rules: [] };
+  }
   if (!c.place || !PLACES[c.place]) {
     const rows = [], rules = [];
     if (c.kind === 'interlude') {
@@ -357,7 +422,8 @@ function previewCards(project, markers) {
     const rows = r.idx.map((i) => sents[i]);
     const lines = (a) => String(a.raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean);
     let card;
-    if (r.literal) {
+    if (m.kind === 'quote') card = { kind: 'quote', orig: [], trans: String(m.f['대사'].raw).split(/\s+\/\/\s+/).map((x) => x.trim()).filter(Boolean), speaker: m.f['사람'] ? String(m.f['사람'].raw).trim() : '' };
+    else if (r.literal) {
       const own = rows.map((x) => x.text);
       if (m.kind === 'pair') card = { kind: 'pair', orig: m.f['원문'] ? lines(m.f['원문']) : [], trans: m.f['번역'] ? lines(m.f['번역']) : own };
       else card = { kind: 'interlude', orig: [], trans: m.f['제목'] ? lines(m.f['제목']) : own };
@@ -380,7 +446,7 @@ function previewCards(project, markers) {
 }
 
 /** 카드의 보임 정도 0~1 (시각 t · 초) — 서서히 나타남 · 유지 · 서서히 사라짐 */
-function fadeOf(c) { return Math.max(0.3, Math.min(MAX_FADE, (c.t1 - c.t0) / 4)); }
+function fadeOf(c) { if (c.kind === 'quote') return Math.min(QUOTE.fade, (c.t1 - c.t0) / 4); return Math.max(0.3, Math.min(MAX_FADE, (c.t1 - c.t0) / 4)); }
 function opacityAt(c, t) {
   const f = fadeOf(c);
   if (t <= c.t0) return 0; if (t >= c.t1) return 0;
@@ -389,4 +455,4 @@ function opacityAt(c, t) {
   return 1;
 }
 
-module.exports = { CLIP_KIND, CARD_DIR, clipGroupOf, clipEligible, sentsOf, resolveMarker, PLACES, CARD_RGB, layoutOf, previewCards, PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };
+module.exports = { QUOTE, QUOTE_RGB, CLIP_KIND, CARD_DIR, clipGroupOf, clipEligible, sentsOf, resolveMarker, PLACES, CARD_RGB, layoutOf, previewCards, PAD, normPad, padOf, KINDS, MIN_KEY, PAUSE_MAX, norm, anchorOf, markersOf, signatureOf, plan, pausesOf, withPauses, marksBySentence, fadeOf, opacityAt };

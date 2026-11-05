@@ -549,6 +549,7 @@ function cardEvents(cards, w0, w1) {
       return tag;
     };
     const st = fmtAss(a - w0), en = fmtAss(b - w0);
+    if (c.kind === 'quote') { out.push(...quoteEvents(c, a, b, st, en, ramp, rel)); continue; }   // 💬 대사 카드(㊹) — 단색 판 + 글자 차례 등장
     // 📍 모양·자리는 screen-cards.layoutOf 한 곳(① 미리보기와 같은 좌표) — 전체 화면 카드는 예전과 같은 값, 한쪽 카드는 c.place 가 정한 자리
     const L = SC.layoutOf(c);
     const bgrOf = (rgb) => rgb.slice(4, 6) + rgb.slice(2, 4) + rgb.slice(0, 2);
@@ -561,6 +562,43 @@ function cardEvents(cards, w0, w1) {
       out.push(`Dialogue: 8,${st},${en},N,,${o.ml},${o.ml},0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${fontOf(o.font)}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}${o.nowrap ? '\\q2' : ''}\\1c&H${bgrOf(SC.CARD_RGB.text)}&${ramp(1)}}${body}`);
     }
     for (const r of L.rules) out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an7\\pos(${r.x},${r.y})\\bord0\\shad0\\1c&H${bgrOf(SC.CARD_RGB.rule)}&${ramp(r.max)}\\p1}m 0 0 l ${r.w} 0 ${r.w} 2 0 2{\\p0}`);
+  }
+  return out;
+}
+
+// 💬 대사 카드(v1.0.29 · 2.0 덧붙임4 ㊹ · 기준 = 2.0 시연_네단계 ④) — 단색 갈색 판(불투명) + 말한 사람 + 큰 대사.
+//   · 글자는 카드 시작 QUOTE.lead 초 뒤부터 QUOTE.type 초(카드 길이의 절반 안) 동안 한 글자씩 — 글자마다 \1a 를 FF → 00 으로(\t 1ms).
+//   · 판·글 모두 짧게(QUOTE.fade) 나타나고 사라진다 — 글은 \fade(창 기준 7인자)로 곱한다(글자 알파와 겹치지 않게).
+//   · 정지를 피하려고 글 전체가 카드 동안 아주 느리게 커진다(QUOTE.zoom · 직선) — 조각 창에 걸치면 창 시작의 크기에서 이어 간다.
+const QUOTE_FONT = 'Pretendard', QUOTE_FONT_FILE = 'Pretendard-Bold.ttf';
+function quoteEvents(c, a, b, st, en, ramp, rel) {
+  const SC = require('./screen-cards'); const Q = SC.QUOTE;
+  const L = SC.layoutOf(c);
+  const bgrOf = (rgb) => rgb.slice(4, 6) + rgb.slice(2, 4) + rgb.slice(0, 2);
+  const out = [];
+  const P0 = L.plate;
+  out.push(`Dialogue: 0,${st},${en},N,,0,0,0,,{\\an7\\pos(${P0.x},${P0.y})\\bord0\\shad0\\1c&H${bgrOf(P0.rgb)}&${ramp(P0.max)}\\p1}m 0 0 l ${P0.w} 0 ${P0.w} ${P0.h} 0 ${P0.h}{\\p0}`);
+  const f = SC.fadeOf(c);
+  const al = (op) => Math.round(255 * (1 - Math.max(0, Math.min(1, op))));
+  const cl = (x) => Math.max(a, Math.min(b, x));
+  const p1 = cl(c.t0 + f), p2 = cl(c.t1 - f);
+  const fade = `\\fade(${al(SC.opacityAt(c, a + 0.001))},${al(SC.opacityAt(c, p1 === a ? a + 0.001 : p1))},${al(SC.opacityAt(c, b - 0.001))},0,${rel(p1)},${rel(p2)},${rel(b)})`;
+  const zAt = (t) => 100 * (1 + (Q.zoom - 1) * Math.max(0, Math.min(1, (t - c.t0) / Math.max(0.001, c.t1 - c.t0))));
+  const z0 = zAt(a).toFixed(2), z1 = zAt(b).toFixed(2);
+  const quoteRow = L.rows.find((o) => o.role === 'quote');
+  const total = quoteRow ? quoteRow.lines.reduce((n, l) => n + Array.from(l).length, 0) : 0;
+  const typeSec = Math.min(Q.type, Math.max(0.3, (c.t1 - c.t0) * 0.5));
+  let k = 0;
+  for (const o of L.rows) {
+    let body;
+    if (o.role === 'quote') {
+      body = o.lines.map((ln) => Array.from(ln).map((ch) => {
+        const tc = c.t0 + Q.lead + typeSec * (++k) / Math.max(1, total);   // 이 글자가 보이기 시작하는 시각(절대)
+        const r = rel(tc), e = assEsc(ch);
+        return r <= 0 ? `{\\1a&H00&}${e}` : `{\\1a&HFF&\\t(${r},${r + 1},\\1a&H00&)}${e}`;
+      }).join('')).join('\\N');
+    } else body = o.lines.map((x) => assEsc(String(x))).join('\\N');
+    out.push(`Dialogue: 8,${st},${en},N,,0,0,0,,{\\an5\\pos(${o.cx},${o.cy})\\fn${QUOTE_FONT}\\fs${o.fs}\\b${o.b ? 1 : 0}\\i0\\bord0\\shad0\\fsp${o.sp || 0}\\q2\\1c&H${bgrOf(o.rgb)}&${fade}\\fscx${z0}\\fscy${z0}\\t(0,${rel(b)},\\fscx${z1}\\fscy${z1})}${body}`);
   }
   return out;
 }
@@ -1278,7 +1316,8 @@ async function renderVrewToMp4(opts = {}) {
       const fdir = path.join(__dirname, '..', 'assets', 'fonts', 'book'); const miss = [];
       for (const f of CARD_FONT_FILES) { try { fs.copyFileSync(path.join(fdir, f), path.join(fontsDir, f)); } catch (_) { miss.push(f); } }
       if (opts.cards.some((c) => c.lang === 'ja')) { try { fs.copyFileSync(path.join(fdir, '..', CARD_FONT_JA_FILE), path.join(fontsDir, CARD_FONT_JA_FILE)); } catch (_) { miss.push(CARD_FONT_JA_FILE); } }
-      log(`   📜 화면 카드 ${opts.cards.length}장${opts.cards.some((c) => c.hideCaptions) ? '(자막 숨김 ' + opts.cards.filter((c) => c.hideCaptions).length + ')' : ''} — ${opts.cards.map((c) => (c.label || (c.kind === 'interlude' ? '막간' : '병기')) + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
+      if (opts.cards.some((c) => c.kind === 'quote')) { try { fs.copyFileSync(path.join(fdir, '..', QUOTE_FONT_FILE), path.join(fontsDir, 'quote-' + QUOTE_FONT_FILE)); } catch (_) { miss.push(QUOTE_FONT_FILE); } }   // 💬 대사 카드 글꼴
+      log(`   📜 화면 카드 ${opts.cards.length}장${opts.cards.some((c) => c.hideCaptions) ? '(자막 숨김 ' + opts.cards.filter((c) => c.hideCaptions).length + ')' : ''} — ${opts.cards.map((c) => (c.label || (c.kind === 'interlude' ? '막간' : c.kind === 'quote' ? '대사' : '병기')) + ' ' + Math.round(c.t0) + '~' + Math.round(c.t1) + '초').slice(0, 6).join(' · ')}${opts.cards.length > 6 ? ' …' : ''}${miss.length ? ' · ⚠ 글꼴 없음: ' + miss.join(',') : ''}`);
     }
     // 🌫 오버레이 모션 — 구간표가 있고 어느 구간이든 켜져 있으면 질감을 한 번만 만든다(JS 로 수백 ms)
     if (opts.fx && Array.isArray(opts.fx.ranges) && opts.fx.ranges.length) {
@@ -1364,7 +1403,7 @@ module.exports = {
   placeFilters, isStandardBox,
   renderVrewToMp4,
   // 테스트·도구용
-  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, renderCardStill, narrowCuesForPanels,
+  buildTimeline, buildAss, captionAssStyle, layoutFor, cueLayouts, bgmMixArgs, mixArgs, webOverlay, kenBurnsFilter, planChunks, planDissolves, fmtAss, assColor, encArgs, cardEvents, quoteEvents, renderCardStill, narrowCuesForPanels,
   FONT_FILE, FPS, W, H,
   checkOutput, upscaleNeed, kbZoomMax, coverPlan, outScale, prepareUpscale, UPSCALE_MODEL,   // 📺 2.0 주문 ⑯ ⑰
 };

@@ -3048,7 +3048,7 @@ function cardsOptsFor(pr, preset) {
     if (!pr || !Array.isArray(pr.screenCards) || !pr.screenCards.length) return null;
     const r = require('./core/screen-cards').plan(pr, pr.screenCards, { pauseSec: preset && preset.interludePauseSec });   // ⏸ 막간 쉼 — .vrew 빌드(P.pausePlanOf)와 같은 계획
     for (const w of r.warnings) log('⚠ ' + w);
-    if (r.cards.length) log(`📜 화면 카드 ${r.cards.length}장(병기 ${r.cards.filter((c) => c.kind === 'pair').length} · 막간 ${r.cards.filter((c) => c.kind === 'interlude').length}) · 마커 ${pr.screenCards.length}줄${r.warnings.length ? ' · 건너뜀 ' + r.warnings.length : ''}${r.pauses.list.length ? ` · ⏸ 막간 쉼 ${r.pauses.list.length}곳 · ${Math.round(r.pauses.total * 10) / 10}초` : ''}`);
+    if (r.cards.length) log(`📜 화면 카드 ${r.cards.length}장(병기 ${r.cards.filter((c) => c.kind === 'pair').length} · 막간 ${r.cards.filter((c) => c.kind === 'interlude').length}${r.cards.some((c) => c.kind === 'quote') ? ' · 대사 ' + r.cards.filter((c) => c.kind === 'quote').length : ''}) · 마커 ${pr.screenCards.length}줄${r.warnings.length ? ' · 건너뜀 ' + r.warnings.length : ''}${r.pauses.list.length ? ` · ⏸ 막간 쉼 ${r.pauses.list.length}곳 · ${Math.round(r.pauses.total * 10) / 10}초` : ''}`);
     return r.cards.length ? r.cards : null;
   } catch (e) { log('⚠ 화면 카드 계획을 만들지 못했습니다(카드 없이 굽습니다): ' + ((e && e.message) || e)); return null; }
 }
@@ -3139,7 +3139,7 @@ ipcMain.handle('screen-card-preview', (_e, args = {}) => {
 ipcMain.handle('card-font', async (_e, key) => {
   try {
     const A = path.join(__dirname, 'assets', 'fonts');
-    const file = { han: path.join(A, 'book', 'HanjaSerif-Light.ttf'), ko: path.join(A, 'book', 'NotoSerifKR-Light.ttf'), ja: fs.existsSync(path.join(A, 'NotoSerifJP-Medium.otf')) ? path.join(A, 'NotoSerifJP-Medium.otf') : path.join(A, 'NotoSansJP-Bold.otf') }[String(key)];
+    const file = { han: path.join(A, 'book', 'HanjaSerif-Light.ttf'), ko: path.join(A, 'book', 'NotoSerifKR-Light.ttf'), ja: fs.existsSync(path.join(A, 'NotoSerifJP-Medium.otf')) ? path.join(A, 'NotoSerifJP-Medium.otf') : path.join(A, 'NotoSansJP-Bold.otf'), sans: path.join(A, 'Pretendard-Bold.ttf') }[String(key)];   // sans = 💬 대사 카드
     if (!file) return { ok: false, error: '모르는 글꼴' };
     return { ok: true, data: (await fs.promises.readFile(file)).toString('base64') };
   } catch (e) { return { ok: false, error: e.message }; }
@@ -3159,7 +3159,7 @@ async function renderUploadMp4(vrewPath, baseName, preset, pr = null, ctx = null
   const OR = _orderRender;   // 📺 2.0 주문만 — 출력 크기·비트레이트·그림 확대(없으면 예전 그대로: 1920×1080 · 950k · 확대 없음)
   const orderOpts = OR ? { ...(OR.output ? { output: { width: OR.output.width, height: OR.output.height }, fps: OR.output.fps, bitrate: OR.output.bitrate } : {}), ...(OR.upscale ? { upscale: { dir: OR.upscaleDir, beforeEach: () => _yieldGpuToRemote(log) } } : {}) } : {};
   const cardsO = cardsOptsFor(pr, preset), infoO = infoOptsFor(pr, preset, ctx && ctx.scriptPath);
-  if (OR) OR.cards = { screen: (cardsO || []).length, info: (infoO || []).length };   // 📺 ㉔ 카드 수(이번 렌더에 구운 판)
+  if (OR) OR.cards = { screen: (cardsO || []).length, info: (infoO || []).length, quote: (cardsO || []).filter((c) => c.kind === 'quote').length };   // 📺 ㉔ 카드 수(이번 렌더에 구운 판)
   const r = await withAwake('유튜브 MP4', () => VR.renderVrewToMp4({ ...orderOpts, vrewPath, outPath, log, onProgress, isAborted: () => !!S.abort, dissolveSec: 0, fx: null /* 🎞 채널 디졸브·오버레이 모션은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값을 읽지 않는다 */, cards: cardsO, info: infoO, infoSeed: (ctx && ctx.scriptPath ? path.basename(ctx.scriptPath).replace(/\.[^.]+$/, '') : baseName) }));   // 🌫 채널 디졸브(0 = 컷) · 🌫 오버레이 모션(구간표) · 📜 화면 카드
   if (_pTimer) { clearTimeout(_pTimer); _pTimer = null; }
   if (OR) OR.result = r;
@@ -8836,6 +8836,7 @@ async function _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt }) {
     imageMaxSec: st.sceneMaxSec,
     transitions: R ? (R.transitions > 0 ? `겹침 전환 ${R.transitions}곳` : '컷') : null,
     cards: cardN ? cardN.screen + cardN.info : null, cardsScreen: cardN ? cardN.screen : null, cardsInfo: cardN ? cardN.info : null,
+    quoteCards: cardN ? (cardN.quote || 0) : null,   // ㊼ 💬 대사 카드 수(이번 렌더에 구운 것 · cardsScreen 에 들어 있다)
     maps: null, timelines: null, depthImages: null, fxLayers: null,   // ⑲ 지도·연표 · ㉑ 깊이 움직임 · ㉒ 효과 층 — 아직 없는 장치
     videoClips: pr.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath)).length, videoEngine: null,   // 2.0 주문은 영상 「없음」
     srt: srt || null,   // ⑳ 자막 파일(올리는 것은 2.0)
