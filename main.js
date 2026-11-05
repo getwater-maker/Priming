@@ -8913,6 +8913,7 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     if (res.sameVoice.length) L(`⚠ 같은 날 묶음에서 같은 목소리 「${order.voice}」 를 쓰는 다른 채널 — ${res.sameVoice.map((x) => x.channelId).join(', ')}`);
     // ④ 이미 올린 주문 — 만들지도 올리지도 않는다
     const done = order.upload.enabled ? OC.ledgerGet(order.orderId) : null;
+    if (done && order.redo.length) return finish(OC.STATUS.reject, `이미 올린 주문입니다(${done.at} · 영상 ${done.videoId}) — 장면 다시 주문(redo)은 업로드 전에만 받습니다(같은 영상 덮어쓰기 없음)`);   // 🔁 ㊾
     if (done) {
       L(`⏭ 이미 올린 주문입니다 — ${done.at} · 영상 ${done.videoId}`);
       return finish(OC.STATUS.ok, '', { uploaded: '이미 올라감', videoId: done.videoId, files: { ...res.files, mp4: done.mp4 || null, thumbBg: done.thumbBg || null }, note: `${done.at} 에 이미 올렸습니다 — 다시 만들지도 올리지도 않았습니다` });
@@ -8935,6 +8936,28 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
     if (empty.length) return finish(OC.STATUS.reject, `그림 지시문이 빈 장면 ${empty.length}개 (G${empty.slice(0, 12).join(', G')}${empty.length > 12 ? ' …' : ''}) — 비면 유료 호출로 채우게 되므로 만들지 않습니다`);
     const roy = royOpenInfo(it.parsed);
     if (roy.open) return finish(OC.STATUS.reject, `🟥 미확인 경험 ${roy.open}곳 — 확인된 경험만 쓸 수 있습니다`);
+    // 🔁 ㊾ 장면 다시 주문 — 그 장면 그림만 비우고(파일은 _다시주문<시각> 으로 옮겨 둔다 · 지우지 않음) 캐시로 되살아나지 않게 표시 → 아래 제작이 그 장면만 새로 그리고 .vrew·MP4 를 다시 굽는다
+    const redoNums = [];
+    if (order.redo.length) {
+      const gs = it.parsed.projects[0].groups;
+      const miss = order.redo.filter((n) => !gs.some((g) => g.num === n));
+      if (miss.length) return finish(OC.STATUS.reject, `다시 주문할 장면이 제작본에 없습니다 — G${miss.join(', G')}(장면은 G1~G${gs.length})`);
+      if (!checkOnly) {
+        const bak = path.join(it.outRoot, '_다시주문', OC.kst().slice(0, 19).replace(/[-: ]/g, '').replace(/^(\d{8})(\d{6})$/, '$1-$2'));   // 20261105-131357(KST)
+        for (const n of order.redo) {
+          const g = gs.find((x) => x.num === n);
+          if (g.imagePath && fs.existsSync(g.imagePath)) {
+            try { fs.mkdirSync(bak, { recursive: true }); fs.renameSync(g.imagePath, path.join(bak, `G${String(n).padStart(2, '0')}_${path.basename(g.imagePath)}`)); }
+            catch (e) { return finish(OC.STATUS.fail, `G${n} 그림을 옮기지 못했습니다 — ${e.message}`, { resumable: true }); }
+          }
+          try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch (_) {}
+          g.imagePath = null; g.imageStatus = 'idle'; g.imageCleared = true; g.imageError = null;
+          redoNums.push(n);
+        }
+        try { syncSnapshotNow(); } catch (_) {}
+        L(`🔁 장면 다시 주문 — G${redoNums.join(', G')} 그림을 비웠습니다(옛 그림은 ${bak}) · 나머지 장면·음성은 이어 합니다`);
+      }
+    }
     if (checkOnly) return finish(OC.STATUS.ok, '', { note: `확인만 — 만들지 않았습니다(장면 ${it.parsed.projects[0].groups.length}개 · 문장 ${it.parsed.projects[0].sentences.length}개)` });
 
     // 📺 ⑯ ⑰ 렌더 규격 — 이 주문의 MP4 에만(renderUploadMp4 가 읽는다 · 확대 사본은 그 편 폴더의 _업스케일 — 원본 그림은 media-1 그대로)
@@ -8988,6 +9011,25 @@ async function runOrderHeadless(orderPath, { checkOnly = false } = {}) {
       }
     } else res.thumbNote = '썸네일 배경 지시문이 비어 만들지 않았습니다';
     res.log = await _orderMakeLog({ order, it, preset, mp4, T0, thumbSec, srt: res.files.srt });
+    res.log.redoScenes = order.redo.length ? redoNums : null;   // 🔁 ㊾ 이번에 다시 그린 장면(G번호) — 다시 주문이 아니면 null
+    // 🔍 ㊽ 검수 판 — 주문이 켠 때만(review: true) · 구운 MP4 에서 장면마다 대표 프레임 → 4×4 판 + 정지 구간 표 · 판정 없음
+    res.log.reviewSheets = null; res.log.stillSpans = null;
+    if (order.review) {
+      stage = '검수 판'; beat();
+      try {
+        const SCr = require('./core/screen-cards'), KB = require('./core/ken-burns');
+        const pmap = P.pausePlanOf(pr, preset).map;
+        const cards = Array.isArray(pr.screenCards) && pr.screenCards.length ? SCr.plan(pr, pr.screenCards, { pauseSec: preset.interludePauseSec }).cards : [];
+        const summaryOf = (g) => [OC.motionName(KB.patternIndexOf(g))].filter(Boolean).join(' · ');
+        const rv = await require('./core/review-sheet').makeReviewSheets({ mp4, outDir: path.join(resultsDir, name, '검수판'), project: pr, pauseMap: pmap, cards, summaryOf, mp4Sec: res.log.durationSec || 0 });
+        if (rv.ok) {
+          res.files.review = rv.sheets; res.files.stillTsv = rv.stillTsv;
+          res.log.reviewSheets = rv.sheets.length;
+          res.log.stillSpans = rv.still.map((x) => ({ at: require('./core/review-sheet').mmss(x.t0), sec: x.sec }));
+          L(`🔍 검수 판 ${rv.sheets.length}장(칸 ${rv.cells}개) · 정지 구간 ${rv.still.length}곳 — ${path.join(resultsDir, name, '검수판')}`);
+        } else L(`⚠ 검수 판을 만들지 못했습니다 — ${rv.error}(영상은 그대로)`);
+      } catch (e) { L(`⚠ 검수 판을 만들지 못했습니다 — ${(e && e.message) || e}(영상은 그대로)`); }
+    }
     // ④ ⑤ 업로드 — 비공개 · 임시 제목 · AI 사용 예(runYtUpload 고정) · 예약·썸네일·재생목록·설명·고정댓글 없음 · 그 주문의 OAuth 앱
     if (!order.upload.enabled) return finish(OC.STATUS.ok, '', { note: '업로드하지 않는 주문입니다(upload.enabled = false)' });
     stage = '업로드'; beat();

@@ -82,6 +82,8 @@ function readOrder(orderPath) {
     noPaid: raw.noPaid !== false,
     output: null,      // 📺 ⑯ { width, height, fps, bitrate:'8000k', kbps } — 없으면 렌더 기본(1920×1080 · 30 · 950k)
     upscale: false,    // 🖼 ⑰ 그림 확대 켬/끔 — 없으면 끔(지금과 같음)
+    review: false,     // 🔍 ㊽ 검수 판 — true 면 렌더 뒤 결과제작<주문>검수판 에 판_NN.jpg + 정지구간.tsv (없으면 만들지 않음 = 지금과 같음)
+    redo: [],          // 🔁 ㊾ 장면 다시 주문 — [G번호…] 그 장면 그림만 다시 그리고 다시 굽는다(나머지·음성은 이어 하기) · 업로드한 주문은 거절
     upload: {
       enabled: up.enabled !== false,
       title: _str(up.title),
@@ -106,11 +108,38 @@ function readOrder(orderPath) {
     if (typeof u !== 'boolean') errors.push(`그림 확대(upscale)는 true/false 여야 합니다 — ${JSON.stringify(raw.upscale)}`);
     else order.upscale = u;
   }
+  if (raw.review != null) {
+    if (typeof raw.review !== 'boolean') errors.push(`검수 판(review)은 true/false 여야 합니다 — ${JSON.stringify(raw.review)}`);
+    else order.review = raw.review;
+  }
+  if (raw.redo != null) {
+    const rr = parseRedo(raw.redo);
+    if (rr.error) errors.push(rr.error); else order.redo = rr.redo;
+  }
   if (order.upload.enabled) {
     if (!order.upload.title) errors.push('업로드 임시 제목(upload.title)이 비었습니다');
     if (!order.upload.app) errors.push('업로드 앱(upload.app)이 비었습니다 — 어느 OAuth 앱으로 올릴지 주문이 정합니다');
   }
   return { ok: !errors.length, order, errors };
+}
+
+/**
+ * 🔁 ㊾ 다시 주문할 장면 — [3, 5] 또는 [{ scene: 3 }] (장면 = 검수 판 · 결과서 prompts 의 G번호).
+ *   ⛔ 장면의 지시 줄·그림 지시문은 **제작본 .md 를 고쳐** 같은 이름으로 다시 넣는다 — 주문서에 지시 줄을 따로 싣지 않는다(`lines` 가 오면 거절 · 조용히 무시하지 않음).
+ *   돌려줌 { redo: number[] (오름차순 · 중복 없음), error }
+ */
+function parseRedo(v) {
+  if (!Array.isArray(v)) return { redo: [], error: `다시 주문(redo)은 장면 번호 목록이어야 합니다 — ${JSON.stringify(v)}` };
+  const out = new Set(), bad = [];
+  for (const x of v) {
+    const o = (x && typeof x === 'object') ? x : { scene: x };
+    if (o && typeof o === 'object' && Object.keys(o).some((k) => k !== 'scene')) { bad.push(`${JSON.stringify(x)}(scene 말고 다른 칸 — 지시 줄은 제작본 .md 를 고쳐 다시 넣습니다)`); continue; }
+    const n = Number(o.scene);
+    if (!Number.isInteger(n) || n < 1) { bad.push(JSON.stringify(x)); continue; }
+    out.add(n);
+  }
+  if (bad.length) return { redo: [], error: `다시 주문(redo) 항목을 읽을 수 없습니다 — ${bad.join(', ')}` };
+  return { redo: [...out].sort((a, b) => a - b), error: '' };
 }
 
 /**
@@ -297,6 +326,6 @@ module.exports = {
   VERSION, DEFAULT_ROOT, DEFAULT_OUT, VOICE_ENGINES, IMAGE_ENGINES, STATUS, STAGES, MOTION_NAMES,
   configFile, loadConfig, kst, orderName, mmddOf, readOrder, checkKnown, emptyPromptGroups, readOps,
   nextResultPath, writeResultOnce, receiptPath, beatPath, stopPaths, stopRequested, writeReceipt, writeBeat,
-  parseOutput, sameVoiceInBatch, sceneStats, motionName, charsPerMin, reasonLine, blankResult,
+  parseOutput, parseRedo, sameVoiceInBatch, sceneStats, motionName, charsPerMin, reasonLine, blankResult,
   ledgerFile, ledgerGet, ledgerSet, workflowModels,
 };
